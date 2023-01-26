@@ -1,11 +1,8 @@
 #[macro_use]
 extern crate rocket;
 
-
-use clokwerk::{AsyncScheduler, TimeUnits};
-use rocket::tokio;
+use rust_tutorial::internal::free_dns;
 use rust_tutorial::{config, logging};
-use std::time::Duration;
 
 #[get("/")]
 fn index() -> &'static str {
@@ -14,7 +11,6 @@ fn index() -> &'static str {
 
 #[launch]
 fn rocket() -> _ {
-
     init();
     rocket::build().mount("/", routes![index])
 }
@@ -23,39 +19,13 @@ fn init() {
     dotenv::dotenv().ok();
 
     for _ in 0..10 {
+        // let d = format!("DEFAULT {:?}", config::DEFAULT.afraid);
+        let s = format!("SETTINGS {:?}", config::SETTINGS.afraid);
         logging::info_file_async(format!("DEFAULT {:?}", config::DEFAULT.afraid));
-        logging::info_file_async(format!("SETTINGS {:?}", config::SETTINGS.afraid));
+        logging::info_file_async(s);
     }
 
-
-    let mut scheduler = AsyncScheduler::new();
-    scheduler.every(60.seconds()).run(|| async {
-        let url = format!(
-            "https://freedns.afraid.org/dynamic/update.php?{}",
-            config::DEFAULT.afraid.token
-        );
-
-        match reqwest::get(url).await {
-            Ok(res) => match res.text().await {
-                Ok(t) => {
-                    logging::info_file_async(t);
-                }
-                Err(why) => {
-                    logging::error_file_async(format!("{:?}", why));
-                }
-            },
-            Err(why) => {
-                logging::error_file_async(format!("{:?}", why));
-            }
-        }
-    });
-
-    tokio::spawn(async move {
-        loop {
-            scheduler.run_pending().await;
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    });
+    free_dns::update();
 }
 /*
 cargo +nightly udeps --all-targets

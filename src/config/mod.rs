@@ -21,6 +21,10 @@ pub struct App {
 pub struct Afraid {
     #[serde(default)]
     pub token: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub path: String,
 }
 
 //第一種 lazy 的作法
@@ -73,6 +77,8 @@ impl App {
         App {
             afraid: Afraid {
                 token: env::var(AFRAID_TOKEN).expect(AFRAID_TOKEN),
+                url: "".to_string(),
+                path: "".to_string(),
             },
         }
     }

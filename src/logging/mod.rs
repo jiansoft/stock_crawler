@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use slog::*;
 use slog_atomic::*;
 use std::{fs, fs::OpenOptions, thread};
+
 pub static LOGGER: Lazy<Logger> = Lazy::new(Default::default);
 
 pub struct Logger {
@@ -11,7 +12,7 @@ pub struct Logger {
 }
 
 impl Logger {
-    fn get() -> Self {
+    fn new() -> Self {
         let (tx, rx) = flume::unbounded::<LogMessage>();
         //寫入檔案的操作使用另一個線程處理
         thread::spawn(move || {
@@ -27,37 +28,18 @@ impl Logger {
                 together.push_str("\n");
                 for message in messages.iter() {
                     let msg = concat_string!(
-                        message
-                            .created_at
-                            .format("%Y-%m-%d %H:%M:%S.%3f")
-                            .to_string(),
+                        message.created_at.format("%F %X%.6f").to_string(),
                         " ",
                         message.level.to_string(),
                         " ",
                         message.msg,
-                        "\n"
+                        "\r\n"
                     );
                     together.push_str(msg.as_str());
                 }
+
                 info!(slog, "{}", together);
                 messages.clear();
-                /* match received.level {
-                    log::Level::Error => {
-                        error!(slog, "{}", received.msg);
-                    }
-                    log::Level::Warn => {
-                        warn!(slog, "{}", received.msg);
-                    }
-                    log::Level::Info => {
-                        info!(slog, "{}", received.msg);
-                    }
-                    log::Level::Debug => {
-                        debug!(slog, "{}", received.msg);
-                    }
-                    log::Level::Trace => {
-                        trace!(slog, "{}", received.msg);
-                    }
-                }*/
             }
         });
 
@@ -81,7 +63,7 @@ impl Logger {
 
 impl Default for Logger {
     fn default() -> Self {
-        Logger::get()
+        Logger::new()
     }
 }
 

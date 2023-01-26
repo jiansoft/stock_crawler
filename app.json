@@ -1,6 +1,8 @@
 
 {
     "afraid":{
-            "token" : "afraid_token"
-        }
+      "url": "https://freedns.afraid.org",
+      "path": "/dynamic/update.php",
+      "token" : "afraid_token"
+    }
 }
