@@ -24,7 +24,7 @@ impl Logger {
                     continue;
                 }
 
-                let mut together = String::with_capacity(1024);
+                let mut together = String::with_capacity(2048);
                 together.push_str("\n");
                 for message in messages.iter() {
                     let msg = concat_string!(

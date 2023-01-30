@@ -1,0 +1,1 @@
+pub mod taiwan_capitalization_weighted_stock_index;

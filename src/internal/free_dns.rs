@@ -1,37 +1,35 @@
+use crate::internal::request_get;
 use crate::{config, logging};
-use clokwerk::{AsyncScheduler, TimeUnits};
-use std::time::Duration;
+use concat_string::concat_string;
 
 /// 向ddns服務更新目前的IP
-pub fn update() {
-    let mut scheduler = AsyncScheduler::new();
-    scheduler.every(60.seconds()).run(|| async {
-        let url = format!(
-            "{}{}?{}",
-            config::SETTINGS.afraid.url,
-            config::SETTINGS.afraid.path,
-            config::DEFAULT.afraid.token
-        );
+pub async fn update() {
+    let url = concat_string!(
+        config::SETTINGS.afraid.url,
+        config::SETTINGS.afraid.path,
+        "?",
+        config::DEFAULT.afraid.token
+    );
 
-        match reqwest::get(url).await {
-            Ok(res) => match res.text().await {
-                Ok(t) => {
-                    logging::info_file_async(t);
-                }
-                Err(why) => {
-                    logging::error_file_async(format!("{:?}", why));
-                }
-            },
-            Err(why) => {
-                logging::error_file_async(format!("{:?}", why));
-            }
-        }
-    });
+    if let Some(t) = request_get(url).await {
+        logging::info_file_async(t);
+    }
+}
 
-    tokio::spawn(async move {
-        loop {
-            scheduler.run_pending().await;
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    });
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_test;
+
+    macro_rules! aw {
+        ($e:expr) => {
+            tokio_test::block_on($e)
+        };
+    }
+
+    #[test]
+    fn test_update() {
+        dotenv::dotenv().ok();
+        aw!(update());
+    }
 }

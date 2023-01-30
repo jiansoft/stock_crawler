@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 clokwerk = "0.4.0"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json","blocking"] }
 tokio = { version = "1", features = ["full"] }
 log = { version = "^0.4.17", features = ["std"] }
 rocket = "0.5.0-rc.2"
@@ -25,3 +25,5 @@ serde_derive = "1.0"
 config = "0.13.3"
 dotenv = "0.15.0"
 concat-string = "1.0.1"
+futures ="0.3"
+tokio-test = "0.4.2"
