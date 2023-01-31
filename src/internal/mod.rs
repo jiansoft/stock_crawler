@@ -2,8 +2,9 @@ use crate::logging;
 use once_cell::sync::Lazy;
 use reqwest::{Client, IntoUrl};
 
-pub mod crawler;
-pub mod free_dns;
+mod crawler;
+pub mod database;
+mod free_dns;
 pub mod scheduler;
 
 static CLIENT: Lazy<Client> = Lazy::new(Default::default);

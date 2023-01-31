@@ -1,7 +1,4 @@
-use crate::{
-    internal::crawler::taiwan_capitalization_weighted_stock_index,
-    internal::free_dns
-};
+use crate::{internal::crawler::taiwan_capitalization_weighted_stock_index, internal::free_dns};
 use clokwerk::{AsyncScheduler, Job, TimeUnits};
 use std::time::Duration;
 

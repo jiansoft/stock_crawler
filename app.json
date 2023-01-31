@@ -1,8 +1,15 @@
 
 {
-    "afraid":{
-      "url": "https://freedns.afraid.org",
-      "path": "/dynamic/update.php",
-      "token" : "afraid_token"
-    }
+  "afraid": {
+    "url": "https://freedns.afraid.org",
+    "path": "/dynamic/update.php",
+    "token": "afraid_token"
+  },
+  "postgresql": {
+    "host": "host",
+    "port": 5432,
+    "user": "user",
+    "password": "password",
+    "db": "db"
+  }
 }

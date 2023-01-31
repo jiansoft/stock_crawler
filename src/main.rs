@@ -1,10 +1,7 @@
 #[macro_use]
 extern crate rocket;
 
-use rust_tutorial::{
-    config, internal::crawler::taiwan_capitalization_weighted_stock_index, internal::scheduler,
-    logging,
-};
+use rust_tutorial::{config, internal::scheduler, logging};
 
 #[get("/")]
 fn index() -> &'static str {
@@ -20,12 +17,19 @@ async fn init() {
     dotenv::dotenv().ok();
     for _ in 0..10 {
         // let d = format!("DEFAULT {:?}", config::DEFAULT.afraid);
-        let s = format!("SETTINGS {:?}", config::SETTINGS.afraid);
-        logging::info_file_async(format!("DEFAULT {:?}", config::DEFAULT.afraid));
+        let s = format!("SETTINGS.afraid {:?}", config::SETTINGS.afraid);
+        logging::info_file_async(format!("DEFAULT.afraid {:?}", config::DEFAULT.afraid));
+        logging::info_file_async(format!(
+            "DEFAULT.postgresql {:?}",
+            config::DEFAULT.postgresql
+        ));
         logging::info_file_async(s);
+        logging::info_file_async(format!(
+            "SETTINGS.postgresql {:?}",
+            config::SETTINGS.postgresql
+        ));
     }
 
-    taiwan_capitalization_weighted_stock_index::visit().await;
     scheduler::start().await;
 }
 

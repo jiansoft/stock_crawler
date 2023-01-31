@@ -6,17 +6,19 @@ use config::{Config as config_config, File as config_file};
 use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::{env, fs, io, path::PathBuf};
 
 const CONFIG_PATH: &str = "app.json";
-const AFRAID_TOKEN: &str = "AFRAID_TOKEN";
 
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct App {
     #[serde(default)]
     pub afraid: Afraid,
+    pub postgresql: PostgreSQL,
 }
 
+const AFRAID_TOKEN: &str = "AFRAID_TOKEN";
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Afraid {
     #[serde(default)]
@@ -25,6 +27,25 @@ pub struct Afraid {
     pub url: String,
     #[serde(default)]
     pub path: String,
+}
+
+const POSTGRESQL_HOST: &str = "POSTGRESQL_HOST";
+const POSTGRESQL_PORT: &str = "POSTGRESQL_PORT";
+const POSTGRESQL_USER: &str = "POSTGRESQL_USER";
+const POSTGRESQL_PASSWORD: &str = "POSTGRESQL_PASSWORD";
+const POSTGRESQL_DB: &str = "POSTGRESQL_DB";
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct PostgreSQL {
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub port: i32,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub db: String,
 }
 
 //第一種 lazy 的作法
@@ -80,6 +101,14 @@ impl App {
                 url: "".to_string(),
                 path: "".to_string(),
             },
+            postgresql: PostgreSQL {
+                host: env::var(POSTGRESQL_HOST).expect(POSTGRESQL_HOST),
+                port: i32::from_str(&*env::var(POSTGRESQL_PORT).unwrap_or("5432".to_string()))
+                    .unwrap_or(5432),
+                user: env::var(POSTGRESQL_USER).expect(POSTGRESQL_USER),
+                password: env::var(POSTGRESQL_PASSWORD).expect(POSTGRESQL_PASSWORD),
+                db: env::var(POSTGRESQL_DB).expect(POSTGRESQL_DB),
+            },
         }
     }
 
@@ -87,6 +116,26 @@ impl App {
     fn override_with_env(mut self) -> Self {
         if let Ok(token) = env::var(AFRAID_TOKEN) {
             self.afraid.token = token;
+        }
+
+        if let Ok(host) = env::var(POSTGRESQL_HOST) {
+            self.postgresql.host = host;
+        }
+
+        if let Ok(port) = env::var(POSTGRESQL_PORT) {
+            self.postgresql.port = i32::from_str(&*port).unwrap_or(5432);
+        }
+
+        if let Ok(user) = env::var(POSTGRESQL_USER) {
+            self.postgresql.user = user;
+        }
+
+        if let Ok(password) = env::var(POSTGRESQL_PASSWORD) {
+            self.postgresql.password = password;
+        }
+
+        if let Ok(db) = env::var(POSTGRESQL_DB) {
+            self.postgresql.db = db;
         }
 
         self

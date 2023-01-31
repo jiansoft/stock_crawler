@@ -1,9 +1,11 @@
-use crate::internal::request_get;
+use crate::internal::{database, request_get};
 use crate::logging;
-use chrono::Local;
+use chrono::{Local, NaiveDate};
 use concat_string::concat_string;
 use serde_derive::{Deserialize, Serialize};
-use std::{num::ParseFloatError, str::FromStr};
+use sqlx::postgres::PgQueryResult;
+use sqlx::Error;
+use std::str::FromStr;
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 //#[serde(rename_all = "camelCase")]
@@ -19,7 +21,7 @@ pub struct TaiwanExchangeIndexResponse {
 //#[serde(rename_all = "camelCase")]
 struct Index<'a> {
     pub category: &'a str,
-    pub date: &'a str,
+    pub date: NaiveDate,
     pub index: f64,
     /// 漲跌點數
     pub change: f64,
@@ -29,33 +31,44 @@ struct Index<'a> {
     pub transaction: f64,
     /// 成交股數
     pub trading_volume: f64,
+    pub create_time: chrono::DateTime<Local>,
+    pub update_time: chrono::DateTime<Local>,
 }
 
 impl<'a> Index<'a> {
     pub fn new() -> Self {
         Index {
             category: "",
-            date: "",
+            date: Default::default(),
             index: 0.0,
             change: 0.0,
             trade_value: 0.0,
             transaction: 0.0,
             trading_volume: 0.0,
+            create_time: Local::now(),
+            update_time: Local::now(),
         }
     }
 
-    pub fn fill(&mut self, item: Vec<String>) -> Result<bool, ParseFloatError> {
-        self.trading_volume = item[1].replace(",", "").parse::<f64>()?;
-
-        self.trade_value = item[2].replace(",", "").parse::<f64>()?;
-
-        self.transaction = item[3].replace(",", "").parse::<f64>()?;
-
-        self.index = f64::from_str(&*item[4].replace(",", ""))?;
-
-        self.change = f64::from_str(&*item[5].replace(",", ""))?;
-
-        Ok(true)
+    pub async fn upsert(&self) -> Result<PgQueryResult, Error> {
+        let sql = r#"
+insert into index (
+    category, "date", trading_volume, "transaction", trade_value, change, index, update_time
+) values (
+    $1,$2,$3,$4,$5,$6,$7,$8
+) ON CONFLICT ("date",category) DO UPDATE SET update_time = excluded.update_time;;
+        "#;
+        sqlx::query(sql)
+            .bind(self.category)
+            .bind(self.date)
+            .bind(self.trading_volume)
+            .bind(self.transaction)
+            .bind(self.trade_value)
+            .bind(self.change)
+            .bind(self.index)
+            .bind(self.update_time)
+            .execute(&database::DB.db)
+            .await
     }
 }
 
@@ -110,16 +123,47 @@ pub async fn visit() {
 
             let mut index = Index::new();
             index.category = "TAIEX";
-            let date = format!("{}-{}-{}", year + 1911, split_date[1], split_date[2]);
-            index.date = date.as_str();
-            let result = index.fill(item);
+            let date = concat_string!(
+                (year + 1911).to_string(),
+                "-",
+                split_date[1],
+                "-",
+                split_date[2]
+            );
 
-            match result {
+            index.date = NaiveDate::from_str(date.as_str()).unwrap();
+
+            index.trading_volume = match item[1].replace(",", "").parse::<f64>() {
+                Ok(_trading_volume) => _trading_volume,
+                Err(_) => continue,
+            };
+
+            index.trade_value = match item[2].replace(",", "").parse::<f64>() {
+                Ok(_trade_value) => _trade_value,
+                Err(_) => continue,
+            };
+
+            index.transaction = match item[3].replace(",", "").parse::<f64>() {
+                Ok(_transaction) => _transaction,
+                Err(_) => continue,
+            };
+
+            index.index = match f64::from_str(&*item[4].replace(",", "")) {
+                Ok(_index) => _index,
+                Err(_) => continue,
+            };
+
+            index.change = match f64::from_str(&*item[5].replace(",", "")) {
+                Ok(_change) => _change,
+                Err(_) => continue,
+            };
+
+            match index.upsert().await {
                 Ok(_) => {
                     logging::info_file_async(format!("{:?}", index));
                 }
                 Err(why) => {
-                    logging::error_file_async(format!("{:?}", why));
+                    logging::error_file_async(format!("because {:?}", why));
                 }
             }
         }
@@ -128,18 +172,28 @@ pub async fn visit() {
 
 #[cfg(test)]
 mod tests {
-    use tokio_test;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
-    macro_rules! aw {
-        ($e:expr) => {
-            tokio_test::block_on($e)
-        };
+    #[tokio::test]
+    async fn test_visit() {
+        visit().await;
     }
 
-    #[test]
-    fn test_visit() {
-        aw!(visit());
+    #[tokio::test]
+    async fn test_index_upsert() {
+        dotenv::dotenv().ok();
+        let mut index = Index::new();
+        index.category = "TAIEX";
+        index.date = NaiveDate::from_ymd_opt(2023, 01, 31).unwrap();
+
+        match index.upsert().await {
+            Ok(_) => {
+                logging::info_file_async("結束".to_string());
+            }
+            Err(why) => {
+                logging::error_file_async(format!("because {:?}", why));
+            }
+        };
     }
 }
