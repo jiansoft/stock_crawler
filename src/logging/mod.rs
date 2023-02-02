@@ -5,7 +5,7 @@ use slog::*;
 use slog_atomic::*;
 use std::{fs, fs::OpenOptions, thread};
 
-pub static LOGGER: Lazy<Logger> = Lazy::new(Default::default);
+static LOGGER: Lazy<Logger> = Lazy::new(Default::default);
 
 pub struct Logger {
     writer: flume::Sender<LogMessage>,
@@ -17,9 +17,11 @@ impl Logger {
         //寫入檔案的操作使用另一個線程處理
         thread::spawn(move || {
             let slog = create_slog("async");
-            let mut messages: Vec<LogMessage> = Vec::with_capacity(20);
+            /*let mut messages: Vec<LogMessage> = Vec::with_capacity(20);
             for received in rx.iter() {
                 messages.push(received);
+
+                //info!(slog, "rx.len()={} messages.len()={}",rx.len(),messages.len());
                 if rx.len() != 0 && messages.len() < 20 {
                     continue;
                 }
@@ -40,6 +42,31 @@ impl Logger {
 
                 info!(slog, "{}", together);
                 messages.clear();
+            }
+*/
+            let mut together = String::with_capacity(2048);
+            together.push_str("\r\n");
+
+            for received in rx.iter() {
+                together.push_str(
+                    concat_string!(
+                        received.created_at.format("%F %X%.6f").to_string(),
+                        " ",
+                        received.level.to_string(),
+                        " ",
+                        received.msg,
+                        "\r\n"
+                    )
+                    .as_str(),
+                );
+
+                if rx.len() != 0 && together.len() < 2048 {
+                    continue;
+                }
+
+                info!(slog, "{}", together);
+                together.clear();
+                together.push_str("\r\n");
             }
         });
 

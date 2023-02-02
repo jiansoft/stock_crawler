@@ -6,6 +6,7 @@ mod crawler;
 pub mod database;
 mod free_dns;
 pub mod scheduler;
+pub mod cache_share;
 
 static CLIENT: Lazy<Client> = Lazy::new(Default::default);
 

@@ -1,4 +1,5 @@
-use crate::internal::{database, request_get};
+use crate::internal::database::model;
+use crate::internal::{cache_share, database, request_get};
 use crate::logging;
 use chrono::{Local, NaiveDate};
 use concat_string::concat_string;
@@ -19,7 +20,7 @@ pub struct TaiwanExchangeIndexResponse {
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 //#[serde(rename_all = "camelCase")]
-struct Index<'a> {
+pub struct Index<'a> {
     pub category: &'a str,
     pub date: NaiveDate,
     pub index: f64,
@@ -132,6 +133,17 @@ pub async fn visit() {
             );
 
             index.date = NaiveDate::from_str(date.as_str()).unwrap();
+            let key = index.date.to_string() + "_" + index.category;
+            logging::info_file_async(format!("visit_key:{}", key));
+            if cache_share::CACHE_SHARE
+                .indices
+                .read()
+                .unwrap()
+                .contains_key(key.as_str())
+            {
+                logging::info_file_async(format!("指數已存在 {:?}", key));
+                continue;
+            }
 
             index.trading_volume = match item[1].replace(",", "").parse::<f64>() {
                 Ok(_trading_volume) => _trading_volume,
@@ -160,6 +172,11 @@ pub async fn visit() {
 
             match index.upsert().await {
                 Ok(_) => {
+                    cache_share::CACHE_SHARE
+                        .indices
+                        .write()
+                        .unwrap()
+                        .insert(key, model::index::Entity::from_index_response(index.clone()));
                     logging::info_file_async(format!("{:?}", index));
                 }
                 Err(why) => {
@@ -177,6 +194,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_visit() {
+        dotenv::dotenv().ok();
+        //cache_share::CACHE_SHARE.init().await;
         visit().await;
     }
 
@@ -195,5 +214,16 @@ mod tests {
                 logging::error_file_async(format!("because {:?}", why));
             }
         };
+    }
+    macro_rules! aw {
+        ($e:expr) => {
+            tokio_test::block_on($e)
+        };
+    }
+
+    #[test]
+    fn test_update() {
+        dotenv::dotenv().ok();
+        aw!(visit());
     }
 }

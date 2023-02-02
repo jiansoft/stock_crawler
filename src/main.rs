@@ -1,7 +1,8 @@
 #[macro_use]
 extern crate rocket;
 
-use rust_tutorial::{config, internal::scheduler, logging};
+use rust_tutorial::internal::cache_share;
+use rust_tutorial::{internal::scheduler, logging};
 
 #[get("/")]
 fn index() -> &'static str {
@@ -15,7 +16,7 @@ fn world() -> &'static str {
 
 async fn init() {
     dotenv::dotenv().ok();
-    for _ in 0..10 {
+    /*for _ in 0..10 {
         // let d = format!("DEFAULT {:?}", config::DEFAULT.afraid);
         let s = format!("SETTINGS.afraid {:?}", config::SETTINGS.afraid);
         logging::info_file_async(format!("DEFAULT.afraid {:?}", config::DEFAULT.afraid));
@@ -28,6 +29,18 @@ async fn init() {
             "SETTINGS.postgresql {:?}",
             config::SETTINGS.postgresql
         ));
+    }*/
+    //let pi = Decimal::from_f64(3141.3694).unwrap();
+    //logging::info_file_async(pi.to_string());
+
+    if cache_share::CACHE_SHARE.indices.read().unwrap().contains_key("2023-02-01_TAIEX") {
+        logging::info_file_async(format!("key 存在"));
+        for e in cache_share::CACHE_SHARE.indices.read().unwrap().iter() {
+            logging::info_file_async(format!(
+                "main.indices e.date {:?} e.index {:?}",
+                e.1.date, e.1.index
+            ));
+        }
     }
 
     scheduler::start().await;
