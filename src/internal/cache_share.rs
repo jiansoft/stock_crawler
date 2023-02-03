@@ -1,20 +1,9 @@
-use crate::{
-    internal::database::model::index,
-    logging
-};
-
-use futures::executor::block_on;
+use crate::{internal::database::model::index, logging};
+//use futures::executor::block_on;
 use once_cell::sync::Lazy;
-use std::{
-    collections::HashMap,
-    sync::RwLock
-};
+use std::{collections::HashMap, sync::RwLock};
 
-
-pub static CACHE_SHARE: Lazy<CacheShare> = Lazy::new(|| {
-    let o = block_on(CacheShare::new());
-    o
-});
+pub static CACHE_SHARE: Lazy<CacheShare> = Lazy::new(CacheShare::new);
 
 pub struct CacheShare {
     /// 存放台股歷年指數
@@ -22,12 +11,25 @@ pub struct CacheShare {
 }
 
 impl CacheShare {
-    pub async fn new() -> Self {
-        let r = index::fetch().await;
-        logging::info_file_async(format!("CacheShare.indices 初始化"));
+    pub fn new() -> Self {
         CacheShare {
-            indices: RwLock::new(r),
+            indices: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub async fn load(&self) -> Option<()> {
+        let indices = index::fetch().await;
+        match self.indices.write() {
+            Ok(mut i) => {
+                i.extend(indices.iter().map(|(k, v)| (k.clone(), v.clone())));
+                logging::info_file_async(format!("CacheShare.indices 初始化 {}", i.len()));
+            }
+            Err(why) => {
+                logging::error_file_async(format!("because {:?}", why));
+            }
+        }
+
+        Some(())
     }
 }
 
@@ -50,9 +52,11 @@ mod tests {
     }
 
     #[test]
-    fn test_update() {
+    fn test_load() {
         dotenv::dotenv().ok();
-        aw!(CacheShare::new());
+
+        aw!(CACHE_SHARE.load());
+        //aw!(CacheShare::new());
         /*aw!(async{
              for e in CACHE_SHARE.indices.read().unwrap().iter() {
                 logging::info_file_async(format!(
@@ -61,7 +65,5 @@ mod tests {
                 ));
             }
         });*/
-
-
     }
 }

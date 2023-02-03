@@ -32,17 +32,13 @@ async fn init() {
     }*/
     //let pi = Decimal::from_f64(3141.3694).unwrap();
     //logging::info_file_async(pi.to_string());
-
-    if cache_share::CACHE_SHARE.indices.read().unwrap().contains_key("2023-02-01_TAIEX") {
-        logging::info_file_async(format!("key 存在"));
-        for e in cache_share::CACHE_SHARE.indices.read().unwrap().iter() {
-            logging::info_file_async(format!(
-                "main.indices e.date {:?} e.index {:?}",
-                e.1.date, e.1.index
-            ));
-        }
+    cache_share::CACHE_SHARE.load().await;
+    for e in cache_share::CACHE_SHARE.indices.read().unwrap().iter() {
+        logging::info_file_async(format!(
+            "init indices e.date {:?} e.index {:?}",
+            e.1.date, e.1.index
+        ));
     }
-
     scheduler::start().await;
 }
 

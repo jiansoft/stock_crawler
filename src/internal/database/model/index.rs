@@ -1,9 +1,7 @@
-use crate::internal::crawler;
-use crate::{internal::database::model, internal::database::DB, logging};
+use crate::{internal::crawler, internal::database::DB};
 use chrono::Local;
 use futures::StreamExt;
-use rust_decimal::prelude::FromPrimitive;
-use rust_decimal::Decimal;
+use rust_decimal::{prelude::FromPrimitive, Decimal};
 use sqlx::{self, FromRow};
 use std::collections::HashMap;
 
@@ -52,6 +50,7 @@ impl Entity {
         }
     }
 }
+
 impl Clone for Entity {
     fn clone(&self) -> Self {
         Entity {
@@ -77,31 +76,21 @@ limit 30;
         "#;
     let mut stream = sqlx::query_as::<_, Entity>(&stmt).fetch(&DB.db);
 
-    let mut indices: HashMap<String, model::index::Entity> = HashMap::new();
+    let mut indices: HashMap<String, Entity> = HashMap::new();
 
     while let Some(row_result) = stream.next().await {
         if let Ok(row) = row_result {
             let key = row.date.to_string() + "_" + row.category.as_str();
-            logging::info_file_async(format!("index.fetch key:{}", key));
             indices.insert(key, row);
         };
     }
 
     indices
-
-    /*while let Some(row_result) = stream.next().await {
-            if let Ok(row) = row_result {
-                logging::info_file_async(format!("row.date {:?} row.index {:?}", row.date, row.index));
-                //indices.insert(row.date.to_string(),row);
-            };
-        }
-    */
-    //logging::info_file_async(format!("indices.len {:?}", indices.len()));
 }
 
 #[cfg(test)]
 mod tests {
-
+    use crate::logging;
     use super::*;
 
     #[tokio::test]

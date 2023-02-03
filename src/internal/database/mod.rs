@@ -1,9 +1,8 @@
 pub mod model;
 
-use crate::{config};
+use crate::config;
 use once_cell::sync::Lazy;
-use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
+use sqlx::{postgres::PgPoolOptions, PgPool};
 
 pub struct PostgreSQL {
     pub db: PgPool,
