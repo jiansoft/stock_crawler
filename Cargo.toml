@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 clokwerk = "0.4.0"
-reqwest = { version = "0.11", features = ["json","blocking"] }
+reqwest = { path ="../../opensource/reqwest", features = ["json","blocking"] }
 tokio = { version = "1", features = ["full"] }
 log = { version = "^0.4.17", features = ["std"] }
 rocket = "0.5.0-rc.2"
@@ -31,3 +31,5 @@ sqlx = { version = "0.6", features = [ "runtime-tokio-native-tls" , "postgres","
 schemars = "0.8.3"
 rust_decimal = "1.28.0"
 rust_decimal_macros = "1.28.0"
+encoding = "0.2"
+scraper = "0.14.0"

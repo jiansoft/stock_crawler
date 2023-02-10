@@ -18,32 +18,32 @@ impl Logger {
         thread::spawn(move || {
             let slog = create_slog("async");
             /*let mut messages: Vec<LogMessage> = Vec::with_capacity(20);
-            for received in rx.iter() {
-                messages.push(received);
+                        for received in rx.iter() {
+                            messages.push(received);
 
-                //info!(slog, "rx.len()={} messages.len()={}",rx.len(),messages.len());
-                if rx.len() != 0 && messages.len() < 20 {
-                    continue;
-                }
+                            //info!(slog, "rx.len()={} messages.len()={}",rx.len(),messages.len());
+                            if rx.len() != 0 && messages.len() < 20 {
+                                continue;
+                            }
 
-                let mut together = String::with_capacity(2048);
-                together.push_str("\n");
-                for message in messages.iter() {
-                    let msg = concat_string!(
-                        message.created_at.format("%F %X%.6f").to_string(),
-                        " ",
-                        message.level.to_string(),
-                        " ",
-                        message.msg,
-                        "\r\n"
-                    );
-                    together.push_str(msg.as_str());
-                }
+                            let mut together = String::with_capacity(2048);
+                            together.push_str("\n");
+                            for message in messages.iter() {
+                                let msg = concat_string!(
+                                    message.created_at.format("%F %X%.6f").to_string(),
+                                    " ",
+                                    message.level.to_string(),
+                                    " ",
+                                    message.msg,
+                                    "\r\n"
+                                );
+                                together.push_str(msg.as_str());
+                            }
 
-                info!(slog, "{}", together);
-                messages.clear();
-            }
-*/
+                            info!(slog, "{}", together);
+                            messages.clear();
+                        }
+            */
             let mut together = String::with_capacity(2048);
             together.push_str("\r\n");
 
@@ -60,7 +60,7 @@ impl Logger {
                     .as_str(),
                 );
 
-                if rx.len() != 0 && together.len() < 2048 {
+                if !rx.is_empty() && together.len() < 2048 {
                     continue;
                 }
 
@@ -145,7 +145,7 @@ pub fn error_file_async(log: String) {
 pub fn info_console(log: String) {
     println!(
         "{} Info {}",
-        Local::now().format("%Y-%m-%d %H:%M:%S.%3f").to_string(),
+        Local::now().format("%Y-%m-%d %H:%M:%S.%3f"),
         log
     );
 }

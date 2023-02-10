@@ -103,7 +103,7 @@ impl App {
             },
             postgresql: PostgreSQL {
                 host: env::var(POSTGRESQL_HOST).expect(POSTGRESQL_HOST),
-                port: i32::from_str(&*env::var(POSTGRESQL_PORT).unwrap_or("5432".to_string()))
+                port: i32::from_str(&env::var(POSTGRESQL_PORT).unwrap_or_else(|_| "5432".to_string()))
                     .unwrap_or(5432),
                 user: env::var(POSTGRESQL_USER).expect(POSTGRESQL_USER),
                 password: env::var(POSTGRESQL_PASSWORD).expect(POSTGRESQL_PASSWORD),
@@ -123,7 +123,7 @@ impl App {
         }
 
         if let Ok(port) = env::var(POSTGRESQL_PORT) {
-            self.postgresql.port = i32::from_str(&*port).unwrap_or(5432);
+            self.postgresql.port = i32::from_str(&port).unwrap_or(5432);
         }
 
         if let Ok(user) = env::var(POSTGRESQL_USER) {

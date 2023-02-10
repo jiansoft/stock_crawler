@@ -12,7 +12,7 @@ pub async fn update() {
     );
 
     if let Some(t) = request_get(url).await {
-        if let Some(_) = t.find("Updated") {
+        if t.contains("Updated") {
             logging::info_file_async(t);
         }
     }

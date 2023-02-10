@@ -6,7 +6,6 @@ use sqlx::{self, FromRow};
 use std::collections::HashMap;
 
 #[derive(sqlx::Type, FromRow, Debug)]
-#[sqlx(type_name = "index")]
 pub struct Entity {
     pub category: String,
     pub date: chrono::NaiveDate,
@@ -34,8 +33,9 @@ impl Entity {
         }
     }
 
+    /// 建立一個 Entity 數據來源為 taiwan_capitalization_weighted_stock_index::Stock
     pub fn from_index_response(
-        model: crawler::taiwan_capitalization_weighted_stock_index::Index,
+        model: &crawler::taiwan_capitalization_weighted_stock_index::Index,
     ) -> Self {
         Entity {
             category: model.category.to_string(),
@@ -54,8 +54,8 @@ impl Entity {
 impl Clone for Entity {
     fn clone(&self) -> Self {
         Entity {
-            category: self.category.to_string(),
-            date: self.date.clone(),
+            category: self.category.clone(),
+            date: self.date,
             trade_value: self.trade_value,
             trading_volume: self.trading_volume,
             transaction: self.transaction,
@@ -67,6 +67,12 @@ impl Clone for Entity {
     }
 }
 
+impl Default for Entity {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub async fn fetch() -> HashMap<String, Entity> {
     let stmt = r#"
 select category, "date", trading_volume, "transaction", trade_value, change, index,create_time, update_time
@@ -74,7 +80,7 @@ from index
 order by "date" desc
 limit 30;
         "#;
-    let mut stream = sqlx::query_as::<_, Entity>(&stmt).fetch(&DB.db);
+    let mut stream = sqlx::query_as::<_, Entity>(stmt).fetch(&DB.pool);
 
     let mut indices: HashMap<String, Entity> = HashMap::new();
 
@@ -90,17 +96,19 @@ limit 30;
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
     use super::*;
+    use crate::logging;
+    use std::{thread, time};
 
     #[tokio::test]
-    async fn test_fetch() {
+    async fn test_index_fetch() {
         dotenv::dotenv().ok();
         let r = fetch().await;
         for e in r.iter() {
             logging::info_file_async(format!("e.date {:?} e.index {:?}", e.1.date, e.1.index));
         }
-        //logging::info_file_async(format!("結束"));
+        logging::info_file_async("結束".to_string());
+        thread::sleep(time::Duration::from_secs(1));
         /* while let Some(result) = fetch().await.next().await {
             if let Ok(ref row_result) = result {
                 logging::info_file_async(format!(

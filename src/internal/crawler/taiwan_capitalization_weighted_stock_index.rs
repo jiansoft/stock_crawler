@@ -8,6 +8,7 @@ use sqlx::postgres::PgQueryResult;
 use sqlx::Error;
 use std::str::FromStr;
 
+/// 調用台股指數 twse API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 //#[serde(rename_all = "camelCase")]
 pub struct TaiwanExchangeIndexResponse {
@@ -18,6 +19,7 @@ pub struct TaiwanExchangeIndexResponse {
     pub data: Vec<Vec<String>>,
 }
 
+/// 台股指數存於資籿庫內的數據
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 //#[serde(rename_all = "camelCase")]
 pub struct Index<'a> {
@@ -51,13 +53,14 @@ impl<'a> Index<'a> {
         }
     }
 
+    /// date與 category 為組合鍵 unique
     pub async fn upsert(&self) -> Result<PgQueryResult, Error> {
         let sql = r#"
 insert into index (
-    category, "date", trading_volume, "transaction", trade_value, change, index, update_time
+    category, "date", trading_volume, "transaction", trade_value, change, index, create_time, update_time
 ) values (
     $1,$2,$3,$4,$5,$6,$7,$8
-) ON CONFLICT ("date",category) DO UPDATE SET update_time = excluded.update_time;;
+) ON CONFLICT ("date",category) DO UPDATE SET update_time = excluded.update_time;
         "#;
         sqlx::query(sql)
             .bind(self.category)
@@ -67,13 +70,14 @@ insert into index (
             .bind(self.trade_value)
             .bind(self.change)
             .bind(self.index)
+            .bind(self.create_time)
             .bind(self.update_time)
-            .execute(&database::DB.db)
+            .execute(&database::DB.pool)
             .await
     }
 }
 
-/// 抓台股加權指數
+/// 調用  twse API 取得台股加權指數
 pub async fn visit() {
     let url = concat_string!(
         "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=",
@@ -108,7 +112,7 @@ pub async fn visit() {
                 continue;
             }
 
-            let split_date: Vec<&str> = item[0].split("/").collect();
+            let split_date: Vec<&str> = item[0].split('/').collect();
             if split_date.len() != 3 {
                 logging::error_file_async("日期欄位不等於3".to_string());
                 continue;
@@ -145,39 +149,38 @@ pub async fn visit() {
                 continue;
             }
 
-            index.trading_volume = match item[1].replace(",", "").parse::<f64>() {
+            index.trading_volume = match item[1].replace(',', "").parse::<f64>() {
                 Ok(_trading_volume) => _trading_volume,
                 Err(_) => continue,
             };
 
-            index.trade_value = match item[2].replace(",", "").parse::<f64>() {
+            index.trade_value = match item[2].replace(',', "").parse::<f64>() {
                 Ok(_trade_value) => _trade_value,
                 Err(_) => continue,
             };
 
-            index.transaction = match item[3].replace(",", "").parse::<f64>() {
+            index.transaction = match item[3].replace(',', "").parse::<f64>() {
                 Ok(_transaction) => _transaction,
                 Err(_) => continue,
             };
 
-            index.index = match f64::from_str(&*item[4].replace(",", "")) {
+            index.index = match f64::from_str(&item[4].replace(',', "")) {
                 Ok(_index) => _index,
                 Err(_) => continue,
             };
 
-            index.change = match f64::from_str(&*item[5].replace(",", "")) {
+            index.change = match f64::from_str(&item[5].replace(',', "")) {
                 Ok(_change) => _change,
                 Err(_) => continue,
             };
 
             match index.upsert().await {
                 Ok(_) => {
-                    cache_share::CACHE_SHARE
-                        .indices
-                        .write()
-                        .unwrap()
-                        .insert(key, model::index::Entity::from_index_response(index.clone()));
-                    logging::info_file_async(format!("{:?}", index));
+                    cache_share::CACHE_SHARE.indices.write().unwrap().insert(
+                        key,
+                        model::index::Entity::from_index_response(&index),
+                    );
+                    logging::info_file_async(format!("index add {:?}", index));
                 }
                 Err(why) => {
                     logging::error_file_async(format!("because {:?}", why));

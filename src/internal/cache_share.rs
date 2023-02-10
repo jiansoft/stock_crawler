@@ -1,19 +1,91 @@
-use crate::{internal::database::model::index, logging};
+use crate::{internal::{database::model::index, database::model::stock},  logging};
 //use futures::executor::block_on;
+
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::RwLock};
 
-pub static CACHE_SHARE: Lazy<CacheShare> = Lazy::new(CacheShare::new);
+pub static CACHE_SHARE: Lazy<CacheShare> = Lazy::new(Default::default);
 
+/// CacheShare 各類快取共享集中處
 pub struct CacheShare {
     /// 存放台股歷年指數
     pub indices: RwLock<HashMap<String, index::Entity>>,
+    /// 存放台股股票代碼
+    pub stocks: RwLock<HashMap<String, stock::Entity>>,
+    /// 上市股票分類
+    pub listed_stock_exchange_market_category: HashMap<&'static str, i32>,
+    /// 上櫃股票分類
+    pub listed_over_the_counter_market_category: HashMap<&'static str, i32>,
 }
 
 impl CacheShare {
     pub fn new() -> Self {
         CacheShare {
             indices: RwLock::new(HashMap::new()),
+            stocks: RwLock::new(HashMap::new()),
+            listed_stock_exchange_market_category: HashMap::from([
+                ("水泥工業", 1),
+                ("食品工業", 2),
+                ("塑膠工業", 3),
+                ("紡織纖維", 4),
+                ("電機機械", 6),
+                ("電器電纜", 7),
+                ("玻璃陶瓷", 9),
+                ("造紙工業", 10),
+                ("鋼鐵工業", 11),
+                ("橡膠工業", 12),
+                ("汽車工業", 13),
+                ("建材營造業", 19),
+                ("航運業", 20),
+                ("觀光事業", 21),
+                ("金融保險業", 22),
+                ("貿易百貨業", 24),
+                ("存託憑證", 25),
+                ("ETF", 26),
+                ("受益證券", 29),
+                ("其他業", 30),
+                ("化學工業", 37),
+                ("生技醫療業", 38),
+                ("油電燃氣業", 39),
+                ("半導體業", 40),
+                ("電腦及週邊設備業", 41),
+                ("光電業", 42),
+                ("通信網路業", 43),
+                ("電子零組件業", 44),
+                ("電子通路業", 45),
+                ("資訊服務業", 46),
+                ("其他電子業", 47),
+            ]),
+            listed_over_the_counter_market_category: HashMap::from([
+                ("生技醫療業", 121),
+                ("食品工業", 122),
+                ("塑膠工業", 123),
+                ("紡織纖維", 124),
+                ("電機機械", 125),
+                ("電器電纜", 126),
+                ("鋼鐵工業", 130),
+                ("橡膠工業", 131),
+                ("建材營造業", 138),
+                ("航運業", 139),
+                ("觀光事業", 140),
+                ("金融保險業", 141),
+                ("貿易百貨業", 142),
+                ("其他業", 145),
+                ("化學工業", 151),
+                ("半導體業", 153),
+                ("電腦及週邊設備業", 154),
+                ("光電業", 155),
+                ("通信網路業", 156),
+                ("電子零組件業", 157),
+                ("電子通路業", 158),
+                ("資訊服務業", 159),
+                ("其他電子業", 160),
+                ("油電燃氣業", 161),
+                ("文化創意業", 169),
+                ("農業科技業", 170),
+                ("電子商務", 171),
+                ("ETF", 172),
+            ]),
         }
     }
 
@@ -29,7 +101,28 @@ impl CacheShare {
             }
         }
 
+        let stocks = stock::fetch().await;
+        match self.stocks.write() {
+            Ok(mut s) => {
+                if let Ok(result) = stocks {
+                    for e in result {
+                        s.insert(e.security_code.to_string(), e);
+                    }
+                    logging::info_file_async(format!("CacheShare.stocks 初始化 {}", s.len()));
+                }
+            }
+            Err(why) => {
+                logging::error_file_async(format!("because {:?}", why));
+            }
+        }
+
         Some(())
+    }
+}
+
+impl Default for CacheShare {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -55,15 +148,35 @@ mod tests {
     fn test_load() {
         dotenv::dotenv().ok();
 
-        aw!(CACHE_SHARE.load());
-        //aw!(CacheShare::new());
-        /*aw!(async{
-             for e in CACHE_SHARE.indices.read().unwrap().iter() {
+        aw!(async {
+            CACHE_SHARE.load().await;
+            let mut loop_count = 10;
+            for e in CACHE_SHARE.indices.read().unwrap().iter() {
+                if loop_count < 0 {
+                    break;
+                }
+
                 logging::info_file_async(format!(
-                    "test_update indices e.date {:?} e.index {:?}",
+                    "indices e.date {:?} e.index {:?}",
                     e.1.date, e.1.index
                 ));
+
+                loop_count -= 1;
             }
-        });*/
+
+            loop_count = 10;
+            for (k, v) in CACHE_SHARE.stocks.read().unwrap().iter() {
+                if loop_count < 0 {
+                    break;
+                }
+
+                logging::info_file_async(format!("stock {} name {}", k, v.name));
+                loop_count -= 1;
+            }
+
+            for (k, v) in CACHE_SHARE.listed_stock_exchange_market_category.iter() {
+                logging::info_file_async(format!("name {}  category {}", k, v));
+            }
+        });
     }
 }

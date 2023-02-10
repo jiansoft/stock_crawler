@@ -1,8 +1,10 @@
 #[macro_use]
 extern crate rocket;
 
-use rust_tutorial::internal::cache_share;
-use rust_tutorial::{internal::scheduler, logging};
+use rust_tutorial::{
+    internal::cache_share,
+    internal::scheduler
+};
 
 #[get("/")]
 fn index() -> &'static str {
@@ -33,12 +35,12 @@ async fn init() {
     //let pi = Decimal::from_f64(3141.3694).unwrap();
     //logging::info_file_async(pi.to_string());
     cache_share::CACHE_SHARE.load().await;
-    for e in cache_share::CACHE_SHARE.indices.read().unwrap().iter() {
+   /* for e in cache_share::CACHE_SHARE.indices.read().unwrap().iter() {
         logging::info_file_async(format!(
             "init indices e.date {:?} e.index {:?}",
             e.1.date, e.1.index
         ));
-    }
+    }*/
     scheduler::start().await;
 }
 
