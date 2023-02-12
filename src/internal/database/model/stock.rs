@@ -1,14 +1,18 @@
-use crate::{internal::database::DB};
+use crate::internal::database::DB;
 use chrono::{DateTime, Local};
-use sqlx::{postgres::PgRow, Error, Row};
-use sqlx::postgres::PgQueryResult;
-
+use sqlx::{
+    postgres::PgQueryResult,
+    postgres::PgRow,
+    Error,
+    Row
+};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Entity {
     pub category: i32,
     pub security_code: String,
     pub name: String,
+    pub suspend_listing: bool,
     pub create_time: DateTime<Local>,
 }
 
@@ -18,21 +22,27 @@ impl Entity {
             category: Default::default(),
             security_code: Default::default(),
             name: Default::default(),
+            suspend_listing: false,
             create_time: Local::now(),
         }
     }
 
-    /*/// 建立一個 Entity 數據來源為 international_securities_identification_number::Stock
-    pub fn from_isin_response(
-        model: &crawler::international_securities_identification_number::Stock,
-    ) -> Self {
-        Entity {
-            category: model.category,
-            security_code: model.security_code.to_string(),
-            name: model.name.to_string(),
-            create_time: model.create_time,
-        }
-    }*/
+    pub async fn update_suspend_listing(&self) -> Result<PgQueryResult, Error> {
+        let sql = r#"
+update
+    "Company"
+set
+    "SuspendListing" = $2
+where
+    "SecurityCode" = $1;
+"#;
+
+        sqlx::query(sql)
+            .bind(self.security_code.as_str())
+            .bind(self.suspend_listing)
+            .execute(&DB.pool)
+            .await
+    }
 
     pub async fn upsert(&self) -> Result<PgQueryResult, Error> {
         let sql = r#"
@@ -41,7 +51,7 @@ insert into "Company" (
 ) values (
     $1,$2,$3,$4,false
 ) on conflict ("SecurityCode") do nothing;
-        "#;
+"#;
         sqlx::query(sql)
             .bind(self.security_code.as_str())
             .bind(self.name.as_str())
@@ -58,6 +68,7 @@ impl Clone for Entity {
             category: self.category,
             security_code: self.security_code.clone(),
             name: self.name.clone(),
+            suspend_listing: self.suspend_listing,
             create_time: self.create_time,
         }
     }
@@ -110,7 +121,7 @@ FROM "Company"
 pub async fn fetch() -> Result<Vec<Entity>, Error> {
     let answers = sqlx::query(
         r#"
-        select "CategoryId","SecurityCode","Name","CreateTime"
+        select "CategoryId","SecurityCode","Name", "SuspendListing", "CreateTime"
         from "Company"
         order by "CategoryId"
         "#,
@@ -119,11 +130,13 @@ pub async fn fetch() -> Result<Vec<Entity>, Error> {
         let category = row.try_get("CategoryId")?;
         let security_code = row.try_get("SecurityCode")?;
         let name = row.try_get("Name")?;
+        let suspend_listing = row.try_get("SuspendListing")?;
         let create_time = row.try_get("CreateTime")?;
         Ok(Entity {
             category,
             security_code,
             name,
+            suspend_listing,
             create_time,
         })
     })
@@ -138,23 +151,6 @@ mod tests {
     use super::*;
     use crate::logging;
 
-
-    /*    #[tokio::test]
-    async fn test_fetch() {
-        dotenv::dotenv().ok();
-        logging::info_file_async(format!("開始 Company"));
-        let r = fetch().await;
-        logging::info_file_async(format!("len:{}", r.len()));
-        for e in r.iter() {
-            logging::info_file_async(format!(
-                "e.security_code {:?} e.name {:?}",
-                e.1.security_code, e.1.name
-            ));
-        }
-        logging::info_file_async(format!("結束"));
-        //thread::sleep(time::Duration::from_secs(1));
-    }*/
-
     #[tokio::test]
     async fn test_fetch() {
         dotenv::dotenv().ok();
@@ -162,10 +158,7 @@ mod tests {
         let r = fetch().await;
         if let Ok(result) = r {
             for e in result {
-                logging::info_file_async(format!(
-                    "e.security_code {:?} e.name {:?}",
-                    e.security_code, e.name
-                ));
+                logging::info_file_async(format!("{:#?} ", e));
             }
         }
     }

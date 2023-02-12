@@ -1,82 +1,15 @@
-
 use crate::{
-    internal, internal::cache_share::CACHE_SHARE, internal::request_get_big5,
+    internal::{
+        request_get_big5,
+        cache_share::CACHE_SHARE,
+        self,
+        crawler::StockMarket
+    },
     logging,
 };
-use chrono::Local;
 use concat_string::concat_string;
 use scraper::{Html, Selector};
 
-
-/// 台股國際證券識別碼存於資籿庫內的數據
-#[derive(Default, Debug, PartialEq)]
-//#[serde(rename_all = "camelCase")]
-pub struct Stock {
-    pub category: i32,
-    pub security_code: String,
-    pub name: String,
-    pub create_time: chrono::DateTime<Local>,
-}
-
-/*impl Copy for Stock {
-
-}*/
-impl Clone for Stock {
-    fn clone(&self) -> Self {
-        Stock {
-            category: self.category,
-            security_code: self.security_code.clone(),
-            name: self.name.clone(),
-            create_time: self.create_time,
-        }
-    }
-}
-
-/// 市場別
-pub enum StockMarket {
-    /// 上市
-    StockExchange,
-    /// 上櫃
-    OverTheCounter,
-}
-
-impl StockMarket {
-    pub fn serial_number(&self) -> i32 {
-        match self {
-            StockMarket::StockExchange => 2,
-            StockMarket::OverTheCounter => 4,
-        }
-    }
-}
-/*
-impl Stock {
-   pub fn new() -> Self {
-       Stock {
-           category: 0,
-           security_code: "".to_string(),
-           name: "".to_string(),
-           create_time: Local::now(),
-       }
-   }
-
-   pub async fn upsert(&self) -> Result<PgQueryResult, Error> {
-           let sql = r#"
-   insert into "Company" (
-       "SecurityCode", "Name", "CategoryId", "CreateTime", "SuspendListing"
-   ) values (
-       $1,$2,$3,$4,false
-   ) on conflict ("SecurityCode") do nothing;
-           "#;
-           sqlx::query(sql)
-               .bind(self.security_code.as_str())
-               .bind(self.name.as_str())
-               .bind(self.category)
-               .bind(self.create_time)
-               .execute(&database::DB.pool)
-               .await
-       }
-}
-*/
 /// 調用  twse API 取得台股國際證券識別碼
 /// 上市:2 上櫃︰4 興櫃︰5
 pub async fn visit(mode: StockMarket) {
@@ -121,35 +54,24 @@ pub async fn visit(mode: StockMarket) {
                         &CACHE_SHARE.listed_over_the_counter_market_category
                     }
                 };
+
                 if let Some(industry) = industries.get(tds[4]) {
                     stock.category = *industry;
                 }
 
-                /* match mode {
-                    StockMarket::StockExchange => {
-                        if let Some(industry) = CACHE_SHARE
-                            .listed_stock_exchange_market_category
-                            .get(tds[4])
-                        {
-                            stock.category = *industry;
-                        }
+                match CACHE_SHARE.stocks.read() {
+                    Ok(stocks) if !stocks.contains_key(stock.security_code.as_str()) => {
+                        new_stocks.push(stock);
                     }
-                    StockMarket::OverTheCounter => {
-                        if let Some(industry) = CACHE_SHARE
-                            .listed_over_the_counter_market_category
-                            .get(tds[4])
-                        {
-                            stock.category = *industry;
-                        }
+                    Err(why) => {
+                        logging::error_file_async(format!("because {:?}", why));
                     }
-                }*/
-
-                if let Ok(stocks) = CACHE_SHARE.stocks.read() {
-                    if stocks.contains_key(stock.security_code.as_str()) {
-                        println!("已存在 {} {:?}", stock.security_code, stock);
-                        continue;
+                    _ => {
+                        logging::info_file_async(format!(
+                            "已存在 {} {:?}",
+                            stock.security_code, stock
+                        ));
                     }
-                    new_stocks.push(stock);
                 }
             }
         }
@@ -161,7 +83,7 @@ pub async fn visit(mode: StockMarket) {
                 if let Ok(mut stocks) = CACHE_SHARE.stocks.write() {
                     stocks.insert(
                         stock.security_code.to_string(),
-                        stock.clone(), //model::stock::Entity::from_isin_response(&stock),
+                        stock.clone(),
                     );
                     logging::info_file_async(format!("stock add {:?}", stock));
                 }
@@ -172,21 +94,6 @@ pub async fn visit(mode: StockMarket) {
         }
     }
 }
-
-/*fn get_encoding(opt: Option<String>) -> &'static Encoding {
-    match opt {
-        None => UTF_8,
-        Some(label) => {
-            match Encoding::for_label((&label).as_bytes()) {
-                None => {
-                    print!("{} is not a known encoding label; exiting.", label);
-                    std::process::exit(-2);
-                }
-                Some(encoding) => encoding,
-            }
-        }
-    }
-}*/
 
 #[cfg(test)]
 mod tests {

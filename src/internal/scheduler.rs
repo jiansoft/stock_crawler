@@ -1,10 +1,12 @@
 use crate::{
     internal::crawler::international_securities_identification_number,
-    internal::crawler::international_securities_identification_number::StockMarket,
-    internal::crawler::taiwan_capitalization_weighted_stock_index, internal::free_dns,
+    internal::crawler::taiwan_capitalization_weighted_stock_index,
+    internal::free_dns,
+    internal::crawler::StockMarket
 };
 use clokwerk::{AsyncScheduler, Job, TimeUnits};
 use std::time::Duration;
+use crate::internal::crawler::suspend_listing;
 
 /// 啟動排程
 pub async fn start() {
@@ -17,6 +19,7 @@ pub async fn start() {
     //每日五點更新台股台股國際證券識別碼
     scheduler.every(1.day()).at("5:00:00").run(|| async {
         international_securities_identification_number::visit(StockMarket::StockExchange).await;
+        suspend_listing::visit().await;
         international_securities_identification_number::visit(StockMarket::OverTheCounter).await;
     });
 

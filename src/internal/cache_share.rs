@@ -1,4 +1,7 @@
-use crate::{internal::{database::model::index, database::model::stock},  logging};
+use crate::{
+    internal::{database::model::index, database::model::stock},
+    logging,
+};
 //use futures::executor::block_on;
 
 use once_cell::sync::Lazy;
@@ -94,7 +97,6 @@ impl CacheShare {
         match self.indices.write() {
             Ok(mut i) => {
                 i.extend(indices.iter().map(|(k, v)| (k.clone(), v.clone())));
-                logging::info_file_async(format!("CacheShare.indices 初始化 {}", i.len()));
             }
             Err(why) => {
                 logging::error_file_async(format!("because {:?}", why));
@@ -108,13 +110,21 @@ impl CacheShare {
                     for e in result {
                         s.insert(e.security_code.to_string(), e);
                     }
-                    logging::info_file_async(format!("CacheShare.stocks 初始化 {}", s.len()));
                 }
             }
             Err(why) => {
                 logging::error_file_async(format!("because {:?}", why));
             }
         }
+
+        logging::info_file_async(format!(
+            "CacheShare.indices 初始化 {}",
+            self.indices.read().unwrap().len()
+        ));
+        logging::info_file_async(format!(
+            "CacheShare.stocks 初始化 {}",
+            self.stocks.read().unwrap().len()
+        ));
 
         Some(())
     }

@@ -101,9 +101,9 @@ mod tests {
     use super::*;
 
     #[test]
-     fn test_big5_to_utf8() {
+    fn test_big5_to_utf8() {
         //let wording = "¹A·~¬ì§Þ·~";
-        let wording ="¦³»ùÃÒ¨é¥N¸¹¤Î¦WºÙ";
+        let wording = "¦³»ùÃÒ¨é¥N¸¹¤Î¦WºÙ";
         let utf8_wording = big5_to_utf8(wording).unwrap();
         println!("big5 :{} {:?}", wording, wording.as_bytes());
         println!("utf8 :{} {:?}", utf8_wording, utf8_wording.as_bytes());
