@@ -1,11 +1,6 @@
 use crate::{
-    internal::{
-        request_get_big5,
-        cache_share::CACHE_SHARE,
-        self,
-        crawler::StockMarket
-    },
-    logging,
+    internal, internal::cache_share::CACHE_SHARE, internal::crawler::StockMarket,
+    internal::request_get_big5, logging,
 };
 use concat_string::concat_string;
 use scraper::{Html, Selector};
@@ -17,6 +12,8 @@ pub async fn visit(mode: StockMarket) {
         "https://isin.twse.com.tw/isin/C_public.jsp?strMode=",
         mode.serial_number().to_string()
     );
+
+    logging::info_file_async(format!("visit url:{}", url));
 
     let mut new_stocks = Vec::new();
     if let Some(t) = request_get_big5(url).await {
@@ -60,17 +57,13 @@ pub async fn visit(mode: StockMarket) {
                 }
 
                 match CACHE_SHARE.stocks.read() {
-                    Ok(stocks) if !stocks.contains_key(stock.security_code.as_str()) => {
-                        new_stocks.push(stock);
+                    Ok(stocks) => {
+                        if !stocks.contains_key(stock.security_code.as_str()) {
+                            new_stocks.push(stock);
+                        }
                     }
                     Err(why) => {
                         logging::error_file_async(format!("because {:?}", why));
-                    }
-                    _ => {
-                        logging::info_file_async(format!(
-                            "已存在 {} {:?}",
-                            stock.security_code, stock
-                        ));
                     }
                 }
             }
@@ -81,10 +74,7 @@ pub async fn visit(mode: StockMarket) {
         match stock.upsert().await {
             Ok(_) => {
                 if let Ok(mut stocks) = CACHE_SHARE.stocks.write() {
-                    stocks.insert(
-                        stock.security_code.to_string(),
-                        stock.clone(),
-                    );
+                    stocks.insert(stock.security_code.to_string(), stock.clone());
                     logging::info_file_async(format!("stock add {:?}", stock));
                 }
             }

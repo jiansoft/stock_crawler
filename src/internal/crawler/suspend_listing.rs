@@ -1,8 +1,4 @@
-use crate::{
-    internal::cache_share::CACHE_SHARE,
-    internal::request_get,
-    logging
-};
+use crate::{internal::cache_share::CACHE_SHARE, internal::request_get, logging};
 use serde::Deserialize;
 
 /// 調用 twse suspendListingCsvAndHtml API 後其回應的數據
@@ -18,6 +14,7 @@ pub struct SuspendListing {
 
 pub async fn visit() {
     let url = "https://openapi.twse.com.tw/v1/company/suspendListingCsvAndHtml";
+    logging::info_file_async(format!("visit url:{}", url));
 
     if let Some(t) = request_get(url).await {
         let mut need_to_update_items = Vec::new();
@@ -27,7 +24,7 @@ pub async fn visit() {
                     match CACHE_SHARE.stocks.read() {
                         Ok(stocks) => {
                             if let Some(stock) = stocks.get(item.security_code.as_str()) {
-                                 if stock.suspend_listing {
+                                if stock.suspend_listing {
                                     continue;
                                 }
 
@@ -41,7 +38,6 @@ pub async fn visit() {
                                         continue;
                                     }
                                 };
-
 
                                 if year < 110 {
                                     continue;

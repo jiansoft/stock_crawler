@@ -1,5 +1,5 @@
 use crate::{
-    internal::{database::model::index, database::model::stock},
+    internal::{database::model::index, database::model::revenue, database::model::stock},
     logging,
 };
 //use futures::executor::block_on;
@@ -19,6 +19,8 @@ pub struct CacheShare {
     pub listed_stock_exchange_market_category: HashMap<&'static str, i32>,
     /// 上櫃股票分類
     pub listed_over_the_counter_market_category: HashMap<&'static str, i32>,
+    /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
+    pub last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Entity>>>,
 }
 
 impl CacheShare {
@@ -89,6 +91,7 @@ impl CacheShare {
                 ("電子商務", 171),
                 ("ETF", 172),
             ]),
+            last_revenues: RwLock::new(HashMap::new()),
         }
     }
 
@@ -117,14 +120,42 @@ impl CacheShare {
             }
         }
 
+        let revenues_from_db = revenue::fetch_last_two_month().await;
+        match self.last_revenues.write() {
+            Ok(mut last_revenue) => {
+                if let Ok(result) = revenues_from_db {
+                    for e in result {
+                        last_revenue.entry(e.date).or_insert_with(HashMap::new);
+                        if let Some(last_revenue_date) = last_revenue.get_mut(&e.date) {
+                            last_revenue_date.insert(e.security_code.to_string(), e);
+                        }
+                    }
+                }
+            }
+            Err(why) => {
+                logging::error_file_async(format!("because {:?}", why));
+            }
+        }
+
         logging::info_file_async(format!(
             "CacheShare.indices 初始化 {}",
             self.indices.read().unwrap().len()
         ));
+
         logging::info_file_async(format!(
             "CacheShare.stocks 初始化 {}",
             self.stocks.read().unwrap().len()
         ));
+
+        if let Ok(revenues) = self.last_revenues.read() {
+            for revenue in revenues.iter() {
+                logging::info_file_async(format!(
+                    "CacheShare.last_revenues 初始化 {}:{}",
+                    revenue.0,
+                    revenue.1.keys().len()
+                ));
+            }
+        }
 
         Some(())
     }

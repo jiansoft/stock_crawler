@@ -59,7 +59,7 @@ impl<'a> Index<'a> {
 insert into index (
     category, "date", trading_volume, "transaction", trade_value, change, index, create_time, update_time
 ) values (
-    $1,$2,$3,$4,$5,$6,$7,$8
+    $1,$2,$3,$4,$5,$6,$7,$8,$9
 ) ON CONFLICT ("date",category) DO UPDATE SET update_time = excluded.update_time;
         "#;
         sqlx::query(sql)
@@ -85,6 +85,8 @@ pub async fn visit() {
         "&_=",
         Local::now().timestamp_millis().to_string()
     );
+
+    logging::info_file_async(format!("visit url:{}", url,));
 
     if let Some(t) = request_get(url).await {
         //轉成 台股加權 物件
@@ -176,10 +178,11 @@ pub async fn visit() {
 
             match index.upsert().await {
                 Ok(_) => {
-                    cache_share::CACHE_SHARE.indices.write().unwrap().insert(
-                        key,
-                        model::index::Entity::from_index_response(&index),
-                    );
+                    cache_share::CACHE_SHARE
+                        .indices
+                        .write()
+                        .unwrap()
+                        .insert(key, model::index::Entity::from_index_response(&index));
                     logging::info_file_async(format!("index add {:?}", index));
                 }
                 Err(why) => {

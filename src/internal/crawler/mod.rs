@@ -1,10 +1,11 @@
 /// 國際證券識別碼
 pub mod international_securities_identification_number;
-/// 台股指數
-pub mod taiwan_capitalization_weighted_stock_index;
+/// 每月營收
+pub mod revenue;
 /// 已下市股票
 pub mod suspend_listing;
-
+/// 台股指數
+pub mod taiwan_capitalization_weighted_stock_index;
 
 /// 市場別
 pub enum StockMarket {

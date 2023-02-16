@@ -1,11 +1,7 @@
 use crate::internal::database::DB;
 use chrono::{DateTime, Local};
-use sqlx::{
-    postgres::PgQueryResult,
-    postgres::PgRow,
-    Error,
-    Row
-};
+use rust_decimal::Decimal;
+use sqlx::{postgres::PgQueryResult, postgres::PgRow, Error, Row};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Entity {
@@ -60,6 +56,59 @@ insert into "Company" (
             .execute(&DB.pool)
             .await
     }
+
+    /*async fn create_company_index(&self) {
+        //32,市認售 33,指數類 31,市認購
+        //166,櫃認售 165,櫃認購
+        //51,市牛證 52,市熊證
+        if self.category == 31
+            || self.category == 32
+            || self.category == 33
+            || self.category == 51
+            || self.category == 52
+            || self.category == 165
+            || self.category == 166
+        {
+            return;
+        }
+
+        let word = self.name.replace('*', "");
+        let word = word.replace('=', "");
+    }*/
+
+    /// 依照指定的年月取得該股票其月份的最低、平均、最高價
+    pub async fn lowest_avg_highest_price_by_year_and_month(
+        &self,
+        year: i32,
+        month: i32,
+    ) -> Result<(Decimal, Decimal, Decimal), Error> {
+        let answers = sqlx::query(
+            r#"
+select
+    min("LowestPrice") as lowest_price,
+    avg("ClosingPrice") as avg_price,
+    max("HighestPrice") as highest_price
+from "DailyQuotes"
+where
+    "SecurityCode" = $1 and year = $2 and month = $3
+group by "SecurityCode", year, month
+
+        "#,
+        )
+        .bind(self.security_code.as_str())
+        .bind(year)
+        .bind(month)
+        .try_map(|row: PgRow| {
+            let lowest_price: Decimal = row.try_get("lowest_price")?;
+            let avg_price: Decimal = row.try_get("avg_price")?;
+            let highest_price: Decimal = row.try_get("highest_price")?;
+            Ok((lowest_price, avg_price, highest_price))
+        })
+        .fetch_one(&DB.pool)
+        .await;
+
+        answers
+    }
 }
 
 impl Clone for Entity {
@@ -79,44 +128,6 @@ impl Default for Entity {
         Self::new()
     }
 }
-
-/*pub async fn fetch() -> HashMap<String, Entity> {
-    let stmt = r#"
-select "CategoryId","SecurityCode","Name","CreateTime"
-FROM "Company"
-;
-        "#;
-
-    let mut stocks: HashMap<String, Entity> = HashMap::new();
-
-    let mut stream = sqlx::query(stmt).fetch(&DB.pool);
-    while let Some(row_result) = stream.next().await {
-        if let Ok(row) = row_result {
-            // let q:Result<String> =row.try_get("SecurityCode");
-            // let create_time = ;
-            let mut stock = Entity::new();
-            stock.create_time = match row.try_get::<DateTime<Local>, &str>("CreateTime") {
-                Ok(time) => time,
-                Err(why) => {
-                    println!("why {:#?} ", why);
-                    Default::default()
-                }
-            };
-
-            stock.security_code = match row.try_get::<&str, &str>("SecurityCode") {
-                Ok(s) => s.to_string(),
-                Err(why) => {
-                    logging::error_file_async(format!("why {:#?} ", why));
-                    "".to_string()
-                }
-            };
-            stock.name = row.try_get("Name").unwrap_or("".to_string());
-            stock.category = row.try_get("CategoryId").unwrap_or(0);
-            //logging::info_file_async(format!("stock {:#?} ", stock));
-        }
-    }
-    stocks
-}*/
 
 pub async fn fetch() -> Result<Vec<Entity>, Error> {
     let answers = sqlx::query(
@@ -154,12 +165,29 @@ mod tests {
     #[tokio::test]
     async fn test_fetch() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 fetch".to_string());
+        //logging::info_file_async("開始 fetch".to_string());
         let r = fetch().await;
         if let Ok(result) = r {
             for e in result {
                 logging::info_file_async(format!("{:#?} ", e));
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_avg_lowest_highest_price() {
+        dotenv::dotenv().ok();
+        //logging::info_file_async("開始 fetch".to_string());
+        let mut e = Entity::new();
+        e.security_code = String::from("1101");
+        let r = e.lowest_avg_highest_price_by_year_and_month(2023, 1).await;
+        if let Ok((lowest_price, avg_price, highest_price)) = r {
+            //for e in result {
+            logging::info_file_async(format!(
+                "lowest_price:{} avg_price:{} highest_price:{}",
+                lowest_price, avg_price, highest_price
+            ));
+            // }
         }
     }
 }

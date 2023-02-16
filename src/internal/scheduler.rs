@@ -1,12 +1,12 @@
 use crate::{
-    internal::crawler::international_securities_identification_number,
-    internal::crawler::taiwan_capitalization_weighted_stock_index,
+    internal::crawler::international_securities_identification_number, internal::crawler::revenue,
+    internal::crawler::suspend_listing,
+    internal::crawler::taiwan_capitalization_weighted_stock_index, internal::crawler::StockMarket,
     internal::free_dns,
-    internal::crawler::StockMarket
 };
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use clokwerk::{AsyncScheduler, Job, TimeUnits};
 use std::time::Duration;
-use crate::internal::crawler::suspend_listing;
 
 /// 啟動排程
 pub async fn start() {
@@ -21,6 +21,16 @@ pub async fn start() {
         international_securities_identification_number::visit(StockMarket::StockExchange).await;
         suspend_listing::visit().await;
         international_securities_identification_number::visit(StockMarket::OverTheCounter).await;
+
+        let now = Local::now();
+        let naive_datetime = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let last_month = naive_datetime - chrono::Duration::minutes(1);
+        let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
+        let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, timezone);
+        revenue::visit(last_month_timezone).await;
     });
 
     scheduler.every(60.seconds()).run(|| async {

@@ -103,8 +103,10 @@ impl App {
             },
             postgresql: PostgreSQL {
                 host: env::var(POSTGRESQL_HOST).expect(POSTGRESQL_HOST),
-                port: i32::from_str(&env::var(POSTGRESQL_PORT).unwrap_or_else(|_| "5432".to_string()))
-                    .unwrap_or(5432),
+                port: i32::from_str(
+                    &env::var(POSTGRESQL_PORT).unwrap_or_else(|_| "5432".to_string()),
+                )
+                .unwrap_or(5432),
                 user: env::var(POSTGRESQL_USER).expect(POSTGRESQL_USER),
                 password: env::var(POSTGRESQL_PASSWORD).expect(POSTGRESQL_PASSWORD),
                 db: env::var(POSTGRESQL_DB).expect(POSTGRESQL_DB),
