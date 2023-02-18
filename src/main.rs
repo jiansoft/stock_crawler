@@ -1,7 +1,11 @@
 #[macro_use]
 extern crate rocket;
 
-use rust_tutorial::{internal::cache_share, internal::scheduler};
+pub mod config;
+pub mod internal;
+pub mod logging;
+
+use crate::internal::{cache_share, scheduler};
 
 #[get("/")]
 fn index() -> &'static str {

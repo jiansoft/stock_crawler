@@ -1,13 +1,9 @@
-extern crate serde;
-extern crate serde_json;
-
 use crate::logging;
 use config::{Config as config_config, File as config_file};
 use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
-use std::{env, fs, io, path::PathBuf};
+use std::{env, fs, io, path::PathBuf, str::FromStr};
 
 const CONFIG_PATH: &str = "app.json";
 
@@ -34,6 +30,7 @@ const POSTGRESQL_PORT: &str = "POSTGRESQL_PORT";
 const POSTGRESQL_USER: &str = "POSTGRESQL_USER";
 const POSTGRESQL_PASSWORD: &str = "POSTGRESQL_PASSWORD";
 const POSTGRESQL_DB: &str = "POSTGRESQL_DB";
+
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct PostgreSQL {
     #[serde(default)]

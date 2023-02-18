@@ -52,7 +52,7 @@ function build() {
 }
 
 function help() {
-  echo "$0 start|stop|restart|build"
+  echo "$0 start|stop|restart|update"
 }
 
 if [ "$1" == "start" ]; then

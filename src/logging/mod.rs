@@ -64,7 +64,7 @@ impl Logger {
                     continue;
                 }
 
-                info!(slog, "{}", together);
+                self::info!(slog, "{}", together);
                 together.clear();
                 together.push_str("\r\n");
             }

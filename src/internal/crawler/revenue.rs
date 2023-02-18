@@ -1,4 +1,7 @@
-use crate::{internal::cache_share::CACHE_SHARE, internal::database::model, internal::*, logging};
+use crate::{
+    internal::cache_share::CACHE_SHARE, internal::database::model,
+    internal::database::model::revenue, internal::*, logging,
+};
 use chrono::{Datelike, FixedOffset, Local};
 use concat_string::concat_string;
 use rust_decimal::Decimal;
@@ -10,6 +13,7 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) {
     let year = date_time.year();
     let republic_of_china_era = year - 1911;
     let month = date_time.month();
+    let mut count: usize = 0;
     for market in ["sii", "otc"] {
         for i in 0..2 {
             let url = concat_string!(
@@ -24,13 +28,17 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) {
                 ".html"
             );
 
-            download(url, year, month).await;
+            count += download(url, year, month).await;
         }
+    }
+
+    if count > 0 {
+        revenue::rebuild_revenue_last_date().await;
     }
 }
 
 /// 下載月營收
-async fn download(url: String, year: i32, month: u32) {
+async fn download(url: String, year: i32, month: u32) -> usize {
     logging::info_file_async(format!("visit url:{}", url));
 
     let mut new_entity = Vec::new();
@@ -44,7 +52,7 @@ async fn download(url: String, year: i32, month: u32) {
                     continue;
                 }
 
-                let mut e = model::revenue::Entity::new();
+                let mut e = revenue::Entity::new();
                 e.date = date;
                 e.security_code = tds[0].to_string();
 
@@ -77,6 +85,7 @@ async fn download(url: String, year: i32, month: u32) {
         }
     }
 
+    let size = new_entity.len();
     for mut e in new_entity {
         let mut stock = model::stock::Entity::new();
         stock.security_code = e.security_code.to_string();
@@ -130,6 +139,8 @@ async fn download(url: String, year: i32, month: u32) {
             }
         }
     }
+
+    size
 }
 
 #[cfg(test)]
@@ -139,32 +150,6 @@ mod tests {
     use chrono::{Duration, Local};
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
-
-    /*#[tokio::test]
-    async fn test_visit_stock_exchange_month() {
-        dotenv::dotenv().ok();
-        CACHE_SHARE.load().await;
-        /*
-        t1 := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.Local)
-        lastMonth := t1.Add(-time.Minute)
-        */
-        let now = Local::now();
-
-        println!("now:{:?}", now);
-        let naive_datetime = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
-            .unwrap()
-            .and_hms_opt(0, 0, 0)
-            .unwrap();
-        println!("naive_datetime:{:?}", naive_datetime);
-
-        let last_month = naive_datetime - Duration::minutes(1);
-        println!("lastMonth:{:?}", last_month);
-        let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-        let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, timezone);
-
-        println!("datetime_west:{:?}", last_month_timezone);
-        visit_stock_exchange_month(last_month_timezone).await;
-    }*/
 
     #[tokio::test]
     async fn test_visit() {

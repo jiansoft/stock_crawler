@@ -140,14 +140,14 @@ pub async fn visit() {
 
             index.date = NaiveDate::from_str(date.as_str()).unwrap();
             let key = index.date.to_string() + "_" + index.category;
-            logging::info_file_async(format!("visit_key:{}", key));
+           // logging::info_file_async(format!("visit_key:{}", key));
             if cache_share::CACHE_SHARE
                 .indices
                 .read()
                 .unwrap()
                 .contains_key(key.as_str())
             {
-                logging::info_file_async(format!("指數已存在 {:?}", key));
+                //logging::info_file_async(format!("指數已存在 {:?}", key));
                 continue;
             }
 

@@ -44,7 +44,7 @@ pub async fn request_get_big5<T: IntoUrl>(url: T) -> Option<String> {
             }
         }
         Err(why) => {
-            logging::error_file_async(format!("{:?}", why));
+            logging::error_file_async(format!("{}", why.to_string()));
             None
         }
     }

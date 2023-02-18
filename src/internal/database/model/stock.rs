@@ -1,4 +1,8 @@
-use crate::internal::database::DB;
+use crate::{
+    internal::database::model::stock_index, internal::database::model::stock_word,
+    internal::database::DB, logging,
+};
+use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Error, Row};
@@ -40,7 +44,7 @@ where
             .await
     }
 
-    pub async fn upsert(&self) -> Result<PgQueryResult, Error> {
+    pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
 insert into "Company" (
     "SecurityCode", "Name", "CategoryId", "CreateTime", "SuspendListing"
@@ -48,16 +52,18 @@ insert into "Company" (
     $1,$2,$3,$4,false
 ) on conflict ("SecurityCode") do nothing;
 "#;
-        sqlx::query(sql)
+        let result = sqlx::query(sql)
             .bind(self.security_code.as_str())
             .bind(self.name.as_str())
             .bind(self.category)
             .bind(self.create_time)
             .execute(&DB.pool)
-            .await
+            .await?;
+        self.create_index().await;
+        Ok(result)
     }
 
-    /*async fn create_company_index(&self) {
+    async fn create_index(&self) {
         //32,市認售 33,指數類 31,市認購
         //166,櫃認售 165,櫃認購
         //51,市牛證 52,市熊證
@@ -72,16 +78,47 @@ insert into "Company" (
             return;
         }
 
-        let word = self.name.replace('*', "");
-        let word = word.replace('=', "");
-    }*/
+        let mut words = stock_word::split(self.name.as_str());
+        words.push(self.security_code.to_string());
+        let word_in_db = stock_word::fetch_by_word(&words).await;
+
+        for word in words {
+            let mut stock_index_e = stock_index::Entity::new(self.security_code.to_string());
+
+            match word_in_db.get(&word) {
+                Some(w) => {
+                    //word 已存在資料庫了
+                    stock_index_e.word_id = w.word_id;
+                }
+                None => {
+                    let mut stock_word_e = stock_word::Entity::new(word);
+                    match stock_word_e.insert().await {
+                        Ok(word_id) => {
+                            stock_index_e.word_id = word_id;
+                        }
+                        Err(why) => {
+                            logging::error_file_async(format!("because:{:#?}", why));
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            match stock_index_e.insert().await {
+                Ok(()) => {}
+                Err(why) => {
+                    logging::error_file_async(format!("because:{:#?}", why));
+                }
+            }
+        }
+    }
 
     /// 依照指定的年月取得該股票其月份的最低、平均、最高價
     pub async fn lowest_avg_highest_price_by_year_and_month(
         &self,
         year: i32,
         month: i32,
-    ) -> Result<(Decimal, Decimal, Decimal), Error> {
+    ) -> Result<(Decimal, Decimal, Decimal)> {
         let answers = sqlx::query(
             r#"
 select
@@ -105,9 +142,9 @@ group by "SecurityCode", year, month
             Ok((lowest_price, avg_price, highest_price))
         })
         .fetch_one(&DB.pool)
-        .await;
+        .await?;
 
-        answers
+        Ok(answers)
     }
 }
 
@@ -182,12 +219,18 @@ mod tests {
         e.security_code = String::from("1101");
         let r = e.lowest_avg_highest_price_by_year_and_month(2023, 1).await;
         if let Ok((lowest_price, avg_price, highest_price)) = r {
-            //for e in result {
             logging::info_file_async(format!(
                 "lowest_price:{} avg_price:{} highest_price:{}",
                 lowest_price, avg_price, highest_price
             ));
-            // }
         }
+    }
+    #[tokio::test]
+    async fn test_create_index() {
+        dotenv::dotenv().ok();
+        let mut e = Entity::new();
+        e.security_code = "2330".to_string();
+        e.name = "台積電".to_string();
+        e.create_index().await;
     }
 }
