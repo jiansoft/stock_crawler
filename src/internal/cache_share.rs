@@ -125,10 +125,10 @@ impl CacheShare {
             Ok(mut last_revenue) => {
                 if let Ok(result) = revenues_from_db {
                     for e in result {
-                        last_revenue.entry(e.date).or_insert_with(HashMap::new);
-                        if let Some(last_revenue_date) = last_revenue.get_mut(&e.date) {
-                            last_revenue_date.insert(e.security_code.to_string(), e);
-                        }
+                        last_revenue
+                            .entry(e.date)
+                            .or_insert_with(HashMap::new)
+                            .insert(e.security_code.to_string(), e);
                     }
                 }
             }
@@ -176,7 +176,6 @@ mod tests {
     async fn test_init() {
         dotenv::dotenv().ok();
         let _ = CACHE_SHARE.indices.read().is_ok();
-        // CACHE_SHARE.init().await;
     }
 
     macro_rules! aw {

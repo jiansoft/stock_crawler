@@ -18,6 +18,11 @@ pub async fn visit(mode: StockMarket) {
     let mut new_stocks = Vec::new();
     if let Some(t) = request_get_big5(url).await {
         let document = Html::parse_document(t.as_str());
+        let industries = match mode {
+            StockMarket::StockExchange => &CACHE_SHARE.listed_stock_exchange_market_category,
+            StockMarket::OverTheCounter => &CACHE_SHARE.listed_over_the_counter_market_category,
+        };
+
         if let Ok(selector) = Selector::parse("body > table.h4 > tbody > tr") {
             for (tr_count, node) in document.select(&selector).enumerate() {
                 if tr_count == 0 {
@@ -42,15 +47,6 @@ pub async fn visit(mode: StockMarket) {
                 let mut stock = internal::database::model::stock::Entity::new();
                 stock.security_code = split[0].trim().to_owned();
                 stock.name = split[1].to_owned();
-
-                let industries = match mode {
-                    StockMarket::StockExchange => {
-                        &CACHE_SHARE.listed_stock_exchange_market_category
-                    }
-                    StockMarket::OverTheCounter => {
-                        &CACHE_SHARE.listed_over_the_counter_market_category
-                    }
-                };
 
                 if let Some(industry) = industries.get(tds[4]) {
                     stock.category = *industry;

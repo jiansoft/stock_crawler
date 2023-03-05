@@ -11,9 +11,14 @@ pub async fn update() {
         config::DEFAULT.afraid.token
     );
 
-    if let Some(t) = request_get(url).await {
-        if t.contains("Updated") {
-            logging::info_file_async(t);
+    match request_get(url).await {
+        Ok(t) => {
+            if t.contains("Updated") {
+                logging::info_file_async(t);
+            }
+        }
+        Err(why) => {
+            logging::error_file_async(format!("Failed to request_get because {:?}", why));
         }
     }
 }

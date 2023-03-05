@@ -67,7 +67,11 @@ insert into "Company" (
         //32,市認售 33,指數類 31,市認購
         //166,櫃認售 165,櫃認購
         //51,市牛證 52,市熊證
-        if self.category == 31
+        match self.category {
+            31 | 32 | 33 | 51 | 52 | 165 | 166 => return,
+            _ => {}
+        }
+        /*if self.category == 31
             || self.category == 32
             || self.category == 33
             || self.category == 51
@@ -76,16 +80,17 @@ insert into "Company" (
             || self.category == 166
         {
             return;
-        }
+        }*/
 
-        let mut words = stock_word::split(self.name.as_str());
+        let mut words = stock_word::split(&self.name);
         words.push(self.security_code.to_string());
-        let word_in_db = stock_word::fetch_by_word(&words).await;
+        let words_in_db = stock_word::Entity::list_by_word(&words).await;
+        let exist_words = stock_word::vec_to_hashmap_key_using_word(words_in_db);
 
         for word in words {
             let mut stock_index_e = stock_index::Entity::new(self.security_code.to_string());
 
-            match word_in_db.get(&word) {
+            match exist_words.get(&word) {
                 Some(w) => {
                     //word 已存在資料庫了
                     stock_index_e.word_id = w.word_id;
@@ -97,18 +102,15 @@ insert into "Company" (
                             stock_index_e.word_id = word_id;
                         }
                         Err(why) => {
-                            logging::error_file_async(format!("because:{:#?}", why));
+                            logging::error_file_async(format!("Failed to insert stock word because:{:#?}", why));
                             continue;
                         }
                     }
                 }
             }
 
-            match stock_index_e.insert().await {
-                Ok(()) => {}
-                Err(why) => {
-                    logging::error_file_async(format!("because:{:#?}", why));
-                }
+            if let Err(why) = stock_index_e.insert().await {
+                logging::error_file_async(format!("Failed to insert stock index because:{:#?}", why));
             }
         }
     }
@@ -132,7 +134,7 @@ group by "SecurityCode", year, month
 
         "#,
         )
-        .bind(self.security_code.as_str())
+        .bind(&self.security_code)
         .bind(year)
         .bind(month)
         .try_map(|row: PgRow| {
@@ -175,17 +177,12 @@ pub async fn fetch() -> Result<Vec<Entity>, Error> {
         "#,
     )
     .try_map(|row: PgRow| {
-        let category = row.try_get("CategoryId")?;
-        let security_code = row.try_get("SecurityCode")?;
-        let name = row.try_get("Name")?;
-        let suspend_listing = row.try_get("SuspendListing")?;
-        let create_time = row.try_get("CreateTime")?;
         Ok(Entity {
-            category,
-            security_code,
-            name,
-            suspend_listing,
-            create_time,
+            security_code: row.try_get("SecurityCode")?,
+            name: row.try_get("Name")?,
+            category: row.try_get("CategoryId")?,
+            suspend_listing: row.try_get("SuspendListing")?,
+            create_time: row.try_get("CreateTime")?,
         })
     })
     .fetch_all(&DB.pool)

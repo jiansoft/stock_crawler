@@ -1,4 +1,4 @@
-use crate::{internal::crawler, internal::database::DB};
+use crate::{internal::crawler, internal::database::DB, logging};
 use chrono::Local;
 use futures::StreamExt;
 use rust_decimal::{prelude::FromPrimitive, Decimal};
@@ -74,20 +74,37 @@ impl Default for Entity {
 }
 
 pub async fn fetch() -> HashMap<String, Entity> {
-    let stmt = r#"
-select category, "date", trading_volume, "transaction", trade_value, change, index,create_time, update_time
-from index
-order by "date" desc
-limit 30;
-        "#;
-    let mut stream = sqlx::query_as::<_, Entity>(stmt).fetch(&DB.pool);
+    const STMT: &str = r#"
+        SELECT
+            category,
+            "date",
+            trading_volume,
+            "transaction",
+            trade_value,
+            change,
+            index,
+            create_time,
+            update_time
+        FROM
+            index
+        ORDER BY
+            "date" DESC
+        LIMIT 30;
+    "#;
 
-    let mut indices: HashMap<String, Entity> = HashMap::new();
+    let mut stream = sqlx::query_as::<_, Entity>(STMT).fetch(&DB.pool);
+
+    let mut indices = HashMap::with_capacity(30);
 
     while let Some(row_result) = stream.next().await {
-        if let Ok(row) = row_result {
-            let key = row.date.to_string() + "_" + row.category.as_str();
-            indices.insert(key, row);
+        match row_result {
+            Ok(row) => {
+                let key = format!("{}_{}", row.date, row.category);
+                indices.insert(key, row);
+            }
+            Err(why) => {
+                logging::error_file_async(format!("Failed to fetch index because {:?}", why));
+            }
         };
     }
 

@@ -235,10 +235,60 @@ ON CONFLICT (security_code) DO UPDATE SET serial = excluded.serial, created_time
 mod tests {
     //use crate::internal::database::model::revenue;
 
+    use chrono::{Datelike, DateTime, Duration, FixedOffset, Local, NaiveDate};
+    //use chrono::{Datelike, Local, NaiveDate};
     use crate::internal::database::model::revenue::{
         fetch_last_two_month, rebuild_revenue_last_date,
     };
     use crate::logging;
+
+    #[tokio::test]
+    async fn test_date(){
+        // 取得本月的第一天
+        let now = Local::now();
+        let first_day_of_month =  NaiveDate::from_ymd_opt(now.year(), now.month(), 1);
+
+// 取得上個月的第一天
+        let last_month = if now.month() == 1 {
+            NaiveDate::from_ymd_opt(now.year() - 1, 12, 1)
+        } else {
+            NaiveDate::from_ymd_opt(now.year(), now.month() - 1, 1)
+        };
+
+// 取得二個月前的第一天
+        let two_month_ago = if now.month() <= 2 {
+            NaiveDate::from_ymd_opt(now.year() - 1, now.month() + 10, 1)
+        } else {
+            NaiveDate::from_ymd_opt(now.year(), now.month() - 2, 1)
+        };
+
+        println!("This month's first day: {:?}", first_day_of_month);
+        println!("Last month's first day: {:?}", last_month);
+        println!("Two months ago first day: {:?}", two_month_ago);
+
+
+        let now_first_day = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+
+        let last_month = now_first_day - Duration::minutes(1);
+        let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, *now.offset());
+        let two_month_ago_first_day = NaiveDate::from_ymd_opt(last_month.year(), last_month.month(), 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let two_month_ago = two_month_ago_first_day - Duration::minutes(1);
+        let two_month_ago_timezone = DateTime::<FixedOffset>::from_local(two_month_ago, *now.offset());
+        println!("This month's first day: {:?}", now_first_day);
+        println!("Last month's first day: {:?}", last_month_timezone);
+        println!("Two months ago first day: {:?}", two_month_ago_timezone);
+
+
+
+
+    }
+
 
     #[tokio::test]
     async fn test_fetch() {

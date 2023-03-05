@@ -1,11 +1,12 @@
-use crate::internal::database::model;
-use crate::internal::{cache_share, database, request_get};
-use crate::logging;
+use crate::{
+    internal::database::model,
+    internal::{cache_share, database, request_get},
+    logging,
+};
 use chrono::{Local, NaiveDate};
 use concat_string::concat_string;
 use serde_derive::{Deserialize, Serialize};
-use sqlx::postgres::PgQueryResult;
-use sqlx::Error;
+use sqlx::{postgres::PgQueryResult, Error};
 use std::str::FromStr;
 
 /// 調用台股指數 twse API 後其回應的數據
@@ -88,120 +89,135 @@ pub async fn visit() {
 
     logging::info_file_async(format!("visit url:{}", url,));
 
-    if let Some(t) = request_get(url).await {
-        //轉成 台股加權 物件
-        let taiex = match serde_json::from_str::<TaiwanExchangeIndexResponse>(t.as_str()) {
-            Ok(obj) => obj,
-            Err(why) => {
-                logging::error_file_async(format!(
-                    "I can't deserialize an instance of type T from a string of JSON text. because {:?}",
-                    why
-                ));
+    match request_get(url).await {
+        Ok(t) => {
+            //轉成 台股加權 物件
+            let taiex = match serde_json::from_slice::<TaiwanExchangeIndexResponse>(t.as_bytes()) {
+                Ok(obj) => obj,
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "I can't deserialize an instance of type T from a string of JSON text. because {:?}",
+                        why
+                    ));
+                    return;
+                }
+            };
+
+            logging::info_file_async(format!("taiex:{:?}", taiex));
+
+            if taiex.stat.to_uppercase() != "OK" {
+                logging::error_file_async(
+                    "抓取加權股價指數 Finish taiex.Stat is not ok".to_string(),
+                );
                 return;
             }
-        };
 
-        logging::info_file_async(format!("taiex:{:?}", taiex));
-
-        if taiex.stat.to_uppercase() != "OK" {
-            logging::error_file_async("抓取加權股價指數 Finish taiex.Stat is not ok".to_string());
-            return;
-        }
-
-        for item in taiex.data {
-            if item.len() != 6 {
-                logging::error_file_async("資料欄位不等於6".to_string());
-                continue;
-            }
-
-            let split_date: Vec<&str> = item[0].split('/').collect();
-            if split_date.len() != 3 {
-                logging::error_file_async("日期欄位不等於3".to_string());
-                continue;
-            }
-
-            let year = match split_date[0].parse::<i64>() {
-                Ok(_year) => _year,
-                Err(why) => {
-                    logging::error_file_async(format!("轉換資料日期發生錯誤. because {:?}", why));
+            for item in taiex.data {
+                if item.len() != 6 {
+                    logging::error_file_async("資料欄位不等於6".to_string());
                     continue;
                 }
-            };
 
-            let mut index = Index::new();
-            index.category = "TAIEX";
-            let date = concat_string!(
-                (year + 1911).to_string(),
-                "-",
-                split_date[1],
-                "-",
-                split_date[2]
-            );
-
-            index.date = NaiveDate::from_str(date.as_str()).unwrap();
-            let key = index.date.to_string() + "_" + index.category;
-           // logging::info_file_async(format!("visit_key:{}", key));
-            if cache_share::CACHE_SHARE
-                .indices
-                .read()
-                .unwrap()
-                .contains_key(key.as_str())
-            {
-                //logging::info_file_async(format!("指數已存在 {:?}", key));
-                continue;
-            }
-
-            index.trading_volume = match item[1].replace(',', "").parse::<f64>() {
-                Ok(_trading_volume) => _trading_volume,
-                Err(_) => continue,
-            };
-
-            index.trade_value = match item[2].replace(',', "").parse::<f64>() {
-                Ok(_trade_value) => _trade_value,
-                Err(_) => continue,
-            };
-
-            index.transaction = match item[3].replace(',', "").parse::<f64>() {
-                Ok(_transaction) => _transaction,
-                Err(_) => continue,
-            };
-
-            index.index = match f64::from_str(&item[4].replace(',', "")) {
-                Ok(_index) => _index,
-                Err(_) => continue,
-            };
-
-            index.change = match f64::from_str(&item[5].replace(',', "")) {
-                Ok(_change) => _change,
-                Err(_) => continue,
-            };
-
-            match index.upsert().await {
-                Ok(_) => {
-                    cache_share::CACHE_SHARE
-                        .indices
-                        .write()
-                        .unwrap()
-                        .insert(key, model::index::Entity::from_index_response(&index));
-                    logging::info_file_async(format!("index add {:?}", index));
+                let split_date: Vec<&str> = item[0].split('/').collect();
+                if split_date.len() != 3 {
+                    logging::error_file_async("日期欄位不等於3".to_string());
+                    continue;
                 }
-                Err(why) => {
-                    logging::error_file_async(format!("because {:?}", why));
+
+                let year = match split_date[0].parse::<i64>() {
+                    Ok(_year) => _year,
+                    Err(why) => {
+                        logging::error_file_async(format!(
+                            "轉換資料日期發生錯誤. because {:?}",
+                            why
+                        ));
+                        continue;
+                    }
+                };
+
+                let mut index = Index::new();
+                index.category = "TAIEX";
+                let date = concat_string!(
+                    (year + 1911).to_string(),
+                    "-",
+                    split_date[1],
+                    "-",
+                    split_date[2]
+                );
+
+                index.date = NaiveDate::from_str(date.as_str()).unwrap();
+                let key = index.date.to_string() + "_" + index.category;
+                // logging::info_file_async(format!("visit_key:{}", key));
+                if cache_share::CACHE_SHARE
+                    .indices
+                    .read()
+                    .unwrap()
+                    .contains_key(key.as_str())
+                {
+                    //logging::info_file_async(format!("指數已存在 {:?}", key));
+                    continue;
+                }
+
+                index.trading_volume = match item[1].replace(',', "").parse::<f64>() {
+                    Ok(_trading_volume) => _trading_volume,
+                    Err(_) => continue,
+                };
+
+                index.trade_value = match item[2].replace(',', "").parse::<f64>() {
+                    Ok(_trade_value) => _trade_value,
+                    Err(_) => continue,
+                };
+
+                index.transaction = match item[3].replace(',', "").parse::<f64>() {
+                    Ok(_transaction) => _transaction,
+                    Err(_) => continue,
+                };
+
+                index.index = match f64::from_str(&item[4].replace(',', "")) {
+                    Ok(_index) => _index,
+                    Err(_) => continue,
+                };
+
+                index.change = match f64::from_str(&item[5].replace(',', "")) {
+                    Ok(_change) => _change,
+                    Err(_) => continue,
+                };
+
+                match index.upsert().await {
+                    Ok(_) => {
+                        logging::info_file_async(format!("index add {:?}", index));
+                        match cache_share::CACHE_SHARE.indices.write() {
+                            Ok(mut indices) => {
+                                indices
+                                    .insert(key, model::index::Entity::from_index_response(&index));
+                            }
+                            Err(why) => {
+                                logging::error_file_async(format!("because {:?}", why));
+                            }
+                        }
+                    }
+                    Err(why) => {
+                        logging::error_file_async(format!("because {:?}", why));
+                    }
                 }
             }
+        }
+        Err(why) => {
+            logging::error_file_async(format!("Failed to request_get because {:?}", why));
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::internal::cache_share::CACHE_SHARE;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
     #[tokio::test]
     async fn test_visit() {
         dotenv::dotenv().ok();
-        //cache_share::CACHE_SHARE.init().await;
+        CACHE_SHARE.load().await;
         visit().await;
     }
 
@@ -210,7 +226,7 @@ mod tests {
         dotenv::dotenv().ok();
         let mut index = Index::new();
         index.category = "TAIEX";
-        index.date = NaiveDate::from_ymd_opt(2023, 01, 31).unwrap();
+        index.date = NaiveDate::from_ymd_opt(2023, 1, 31).unwrap();
 
         match index.upsert().await {
             Ok(_) => {
@@ -230,6 +246,7 @@ mod tests {
     #[test]
     fn test_update() {
         dotenv::dotenv().ok();
+
         aw!(visit());
     }
 }

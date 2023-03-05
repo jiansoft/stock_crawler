@@ -9,10 +9,10 @@ pub struct PostgreSQL {
 }
 
 impl PostgreSQL {
-    pub fn new(database_url: String) -> PostgreSQL {
+    pub fn new(database_url: &str) -> PostgreSQL {
         let db = PgPoolOptions::new()
             .max_connections(32)
-            .connect_lazy(&database_url)
+            .connect_lazy(database_url)
             .unwrap_or_else(|_| panic!("wrong database URL {}", database_url));
 
         Self { pool: db }
@@ -28,5 +28,5 @@ pub static DB: Lazy<PostgreSQL> = Lazy::new(|| {
         config::SETTINGS.postgresql.port,
         config::SETTINGS.postgresql.db
     );
-    PostgreSQL::new(db_url)
+    PostgreSQL::new(&db_url)
 });

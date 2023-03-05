@@ -48,7 +48,8 @@ async fn download(url: String, year: i32, month: u32) -> usize {
             let date = ((year * 100) + month as i32) as i64;
             for (_tr_count, node) in document.select(&selector).enumerate() {
                 let tds: Vec<&str> = node.text().clone().enumerate().map(|(_i, v)| v).collect();
-                if tds.len() != 11 {
+                //println!("tds({}):{:?}",tds.len(),tds);
+                if tds.len() != 11 && tds.len() != 10 {
                     continue;
                 }
 
@@ -60,7 +61,7 @@ async fn download(url: String, year: i32, month: u32) -> usize {
                 if let Ok(last_revenues) = CACHE_SHARE.last_revenues.read() {
                     if let Some(last_revenue_date) = last_revenues.get(&date) {
                         if last_revenue_date.contains_key(&e.security_code.to_string()) {
-                            //println!("已收:{} {}-{}",&e.security_code,year,month);
+                            println!("已收:{} {}-{}",&e.security_code,year,month);
                             continue
                         }
                     }
@@ -155,9 +156,9 @@ mod tests {
     async fn test_visit() {
         dotenv::dotenv().ok();
         CACHE_SHARE.load().await;
-        let now = Local::now();
+        let _now = Local::now();
 
-        let naive_datetime = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+        let naive_datetime = NaiveDate::from_ymd_opt(2012, 1, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
             .unwrap();

@@ -26,9 +26,9 @@ impl Entity {
         }
 
         let mut transaction = DB.pool.begin().await?;
-        match sqlx::query("insert into company_index (word_id, security_code, created_time, updated_time) VALUES ($1,$2,$3,$4);")
+        match sqlx::query("insert into company_index (word_id, security_code, created_time, updated_time) VALUES ($1,$2,$3,$4) on conflict (word_id, security_code) do nothing;")
             .bind(self.word_id)
-            .bind(self.security_code.as_str())
+            .bind(&self.security_code)
             .bind(self.created_time)
             .bind(self.updated_time)
             .execute(&mut transaction)

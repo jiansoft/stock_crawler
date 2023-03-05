@@ -3,7 +3,9 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row};
 use std::collections::HashMap;
+use rocket::form::validate::Len;
 
+#[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Entity {
     pub word_id: i64,
@@ -31,16 +33,23 @@ impl Entity {
         }
     }
 
+    /// 新增數據到資料庫後回傳新增的 word_id
     pub async fn insert(&mut self) -> Result<i64> {
         let mut transaction = DB.pool.begin().await?;
-        match sqlx::query_as::<Postgres, (i64, )>("insert into company_word (word, created_time, updated_time) VALUES ($1,$2,$3) RETURNING word_id;")
-            .bind(self.word.as_str())
+        let query = "insert into company_word (word, created_time, updated_time) values ($1,$2,$3)
+            on conflict (word) do update set
+            word = excluded.word,
+            updated_time = excluded.updated_time
+            returning word_id;";
+
+        match sqlx::query_as::<Postgres, (i64,)>(query)
+            .bind(&self.word)
             .bind(self.created_time)
             .bind(self.updated_time)
             .fetch_one(&mut transaction)
             .await
         {
-            Ok((last_insert_id, )) => {
+            Ok((last_insert_id,)) => {
                 transaction.commit().await?;
                 self.word_id = last_insert_id;
                 Ok(last_insert_id)
@@ -48,6 +57,42 @@ impl Entity {
             Err(why) => {
                 transaction.rollback().await?;
                 Err(anyhow!("{:?}", why))
+            }
+        }
+    }
+
+    /// 從資料表中取得公司代碼、名字拆字後的數據
+    pub async fn list_by_word(words: &Vec<String>) -> Option<Vec<Entity>> {
+        let mut query_builder =
+            QueryBuilder::new("select word_id,word,created_time,updated_time from company_word");
+
+        if !words.is_empty() {
+            query_builder.push(" where word = any(");
+            query_builder.push_bind(words);
+            query_builder.push(")");
+        }
+
+        match query_builder
+            .build()
+            .try_map(|row: PgRow| {
+                let created_time = row.try_get("created_time")?;
+                let updated_time = row.try_get("updated_time")?;
+                let word_id = row.try_get("word_id")?;
+                let word = row.try_get("word")?;
+                Ok(Entity {
+                    word_id,
+                    word,
+                    created_time,
+                    updated_time,
+                })
+            })
+            .fetch_all(&DB.pool)
+            .await
+        {
+            Ok(result) => Some(result),
+            Err(why) => {
+                logging::error_file_async(format!("because:{:#?}", why));
+                None
             }
         }
     }
@@ -65,92 +110,19 @@ impl Default for Entity {
     }
 }
 
-/// 從資料表中取得公司代碼、名字拆字後的數據
-pub async fn fetch_by_word(words: &Vec<String>) -> HashMap<String, Entity> {
-    let mut stock_words: HashMap<String, Entity> = HashMap::new();
-    if words.is_empty() {
-        return stock_words;
-    }
-
-    let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "
-select
-    word_id,word,created_time,updated_time
-from
-    company_word
-where
-    word IN (",
-    );
-    let mut separated = query_builder.separated(", ");
-
-    for value_type in words.iter() {
-        separated.push_bind(value_type);
-    }
-    separated.push_unseparated(")");
-
-    //builder.push(" AND channel_id=").push_bind(channel);
-
-    let query = query_builder.build();
-
-    match query
-        .try_map(|row: PgRow| {
-            let word_id = row.try_get("word_id")?;
-            let word = row.try_get("word")?;
-            let created_time = row.try_get("created_time")?;
-            let updated_time = row.try_get("updated_time")?;
-            Ok(Entity {
-                word_id,
-                word,
-                created_time,
-                updated_time,
-            })
-        })
-        .fetch_all(&DB.pool)
-        .await
-    {
-        Ok(result) => {
-            for e in result {
-                stock_words.insert(e.word.to_string(), e);
-            }
-        }
-        Err(why) => {
-            logging::error_file_async(format!("because:{:#?}", why));
-        }
-    }
-
-    stock_words
-}
-
 /// 將中文字拆分 例︰台積電 => ["台", "台積", "台積電", "積", "積電", "電"]
 pub fn split(w: &str) -> Vec<String> {
-    let word = w.replace('*', "");
-    let word = word.replace('=', "");
+    let word = w.replace(['*', '-'], "");
+    let text_rune = word.chars().collect::<Vec<char>>();
+    let text_len = text_rune.len();
     let mut words = Vec::new();
-    let words_chars: Vec<char> = word.chars().collect();
-    let words_len = words_chars.len();
 
-    for i in 0..(words_len) {
-        let mut s = String::from("");
-        let first_word = words_chars[i].to_string();
-        s += first_word.as_str();
-
-        if !words.contains(&first_word) {
-            words.push(first_word);
-        }
-
-        for (index, c) in words_chars.iter().enumerate() {
-            if index <= i {
+    for i in 0..text_len {
+        for ii in (i + 1)..=text_len {
+            let w = text_rune[i..ii].iter().collect::<String>();
+            if words.iter().any(|x| *x == w) {
                 continue;
             }
-
-            s += c.to_string().as_str();
-            if !words.contains(&s) {
-                words.push(s.to_string());
-            }
-        }
-
-        let w = s.to_string();
-        if !words.contains(&w) {
             words.push(w);
         }
     }
@@ -158,10 +130,69 @@ pub fn split(w: &str) -> Vec<String> {
     words
 }
 
+/// 將 vec 轉成 hashmap
+pub fn vec_to_hashmap_key_using_word(entities: Option<Vec<Entity>>) -> HashMap<String, Entity> {
+    let mut stock_words = HashMap::with_capacity(entities.len());
+    if let Some(list) = entities {
+        for e in list {
+            stock_words.insert(e.word.to_string(), e);
+        }
+    }
+
+    stock_words
+}
+
+/// 將 vec 轉成 hashmap
+fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
+    v.unwrap_or_default()
+        .iter()
+        .fold(HashMap::new(), |mut acc, e| {
+            acc.insert(e.word.to_string(), e.clone());
+            acc
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::logging;
+    use std::time::Instant;
+
+    #[tokio::test]
+    async fn test_vec_to_hashmap() {
+        dotenv::dotenv().ok();
+        let mut entities: Vec<Entity> = Vec::new();
+        for i in 0..1000000 {
+            entities.push(Entity {
+                word_id: 0,
+                word: format!("word_{}", i),
+                created_time: Default::default(),
+                updated_time: Default::default(),
+            });
+        }
+
+        let start1 = Instant::now();
+        let hm1 = vec_to_hashmap_key_using_word(Some(entities.clone()));
+        let elapsed1 = start1.elapsed().as_millis();
+
+        let start2 = Instant::now();
+        let hm2 = vec_to_hashmap(Some(entities.clone()));
+        let elapsed2 = start2.elapsed().as_millis();
+
+        println!("Method 1 elapsed time: {}", elapsed1);
+        println!("Method 2 elapsed time: {}", elapsed2);
+        println!("HashMap length: {} {}", hm1.len(), hm2.len());
+    }
+
+    #[tokio::test]
+    async fn test_split_1() {
+        dotenv::dotenv().ok();
+        let chinese_word = "台積電";
+        let start = Instant::now();
+        let result = split(chinese_word);
+        let end = start.elapsed();
+        println!("split: {:?}, elapsed time: {:?}", result, end);
+    }
 
     #[tokio::test]
     async fn test_split() {
@@ -189,9 +220,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_stock_word() {
+    async fn test_list_by_word() {
         dotenv::dotenv().ok();
         let word = split("台積電");
-        logging::info_file_async(format!("word:{:#?}", fetch_by_word(&word).await));
+        let entities = Entity::list_by_word(&word).await;
+        logging::info_file_async(format!("entities:{:#?}", entities));
+        logging::info_file_async(format!(
+            "word:{:#?}",
+            vec_to_hashmap_key_using_word(entities)
+        ));
     }
 }
