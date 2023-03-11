@@ -4,6 +4,7 @@ use futures::StreamExt;
 use rust_decimal::{prelude::FromPrimitive, Decimal};
 use sqlx::{self, FromRow};
 use std::collections::HashMap;
+use anyhow;
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Entity {
@@ -73,7 +74,7 @@ impl Default for Entity {
     }
 }
 
-pub async fn fetch() -> HashMap<String, Entity> {
+pub async fn fetch() -> anyhow::Result<HashMap<String, Entity>> {
     const STMT: &str = r#"
         SELECT
             category,
@@ -103,12 +104,12 @@ pub async fn fetch() -> HashMap<String, Entity> {
                 indices.insert(key, row);
             }
             Err(why) => {
-                logging::error_file_async(format!("Failed to fetch index because {:?}", why));
+                logging::error_file_async(format!("Failed to stream.next() because {:?}", why));
             }
         };
     }
 
-    indices
+    Ok(indices)
 }
 
 #[cfg(test)]
@@ -120,7 +121,7 @@ mod tests {
     #[tokio::test]
     async fn test_index_fetch() {
         dotenv::dotenv().ok();
-        let r = fetch().await;
+        let r = fetch().await.unwrap();
         for e in r.iter() {
             logging::info_file_async(format!("e.date {:?} e.index {:?}", e.1.date, e.1.index));
         }

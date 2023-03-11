@@ -17,16 +17,12 @@ fn world() -> &'static str {
     "Hello, world!"
 }
 
-async fn setup() {
-    dotenv::dotenv().ok();
-
-    cache_share::CACHE_SHARE.load().await;
-    scheduler::start().await;
-}
-
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
-    setup().await;
+    dotenv::dotenv().ok();
+    cache_share::CACHE_SHARE.load().await;
+    scheduler::start().await;
+
     let _rocket = rocket::build()
         .mount("/hello", routes![world])
         .mount("/", routes![index])

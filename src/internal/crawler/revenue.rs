@@ -41,48 +41,55 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) {
 async fn download(url: String, year: i32, month: u32) -> usize {
     logging::info_file_async(format!("visit url:{}", url));
 
-    let mut new_entity = Vec::new();
-    if let Some(t) = request_get_big5(url).await {
+    let t = match request_get_big5(url).await {
+        None => {
+            return 0;
+        }
+        Some(t) => t,
+    };
+
+    let mut new_entity = Vec::with_capacity(1024);
+
+    if let Ok(selector) = Selector::parse("body > center > center > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr") {
+        let date = ((year * 100) + month as i32) as i64;
         let document = Html::parse_document(t.as_str());
-        if let Ok(selector) = Selector::parse("body > center > center > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr") {
-            let date = ((year * 100) + month as i32) as i64;
-            for (_tr_count, node) in document.select(&selector).enumerate() {
-                let tds: Vec<&str> = node.text().clone().enumerate().map(|(_i, v)| v).collect();
-                //println!("tds({}):{:?}",tds.len(),tds);
-                if tds.len() != 11 && tds.len() != 10 {
-                    continue;
-                }
+        for (_tr_count, node) in document.select(&selector).enumerate() {
+            let tds: Vec<&str> = node.text().clone().enumerate().map(|(_i, v)| v).collect();
 
-                let mut e = revenue::Entity::new();
-                e.date = date;
-                e.security_code = tds[0].to_string();
+            if tds.len() != 11 {
+                continue;
+            }
 
-                // 檢查是否收錄過
-                if let Ok(last_revenues) = CACHE_SHARE.last_revenues.read() {
-                    if let Some(last_revenue_date) = last_revenues.get(&date) {
-                        if last_revenue_date.contains_key(&e.security_code.to_string()) {
-                            println!("已收:{} {}-{}",&e.security_code,year,month);
-                            continue
-                        }
+            //println!("tds({}):{:?}",tds.len(),tds);
+            let mut e = revenue::Entity::new();
+            e.date = date;
+            e.security_code = tds[0].to_string();
+
+            // 檢查是否收錄過
+            if let Ok(last_revenues) = CACHE_SHARE.last_revenues.read() {
+                if let Some(last_revenue_date) = last_revenues.get(&date) {
+                    if last_revenue_date.contains_key(&e.security_code.to_string()) {
+                        println!("已收:{} {}-{}", &e.security_code, year, month);
+                        continue
                     }
                 }
+            }
 
-                /*
+            /*
 0公司代號	1公司名稱	2當月營收	3上月營收	4去年當月營收	5上月比較增減(%)
 6去年同月增減(%)	7當月累計營收	8去年累計營收	9前期比較增減(%)
 */
 
-                e.monthly = Decimal::from_str(tds[2].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
-                e.last_month = Decimal::from_str(tds[3].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
-                e.last_year_this_month = Decimal::from_str(tds[4].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
-                e.monthly_accumulated = Decimal::from_str(tds[7].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
-                e.last_year_monthly_accumulated = Decimal::from_str(tds[8].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
-                e.compared_with_last_month = Decimal::from_str(tds[5].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
-                e.compared_with_last_year_same_month = Decimal::from_str(tds[6].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
-                e.accumulated_compared_with_last_year = Decimal::from_str(tds[9].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
-                e.create_time = Local::now();
-                new_entity.push(e);
-            }
+            e.monthly = Decimal::from_str(tds[2].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
+            e.last_month = Decimal::from_str(tds[3].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
+            e.last_year_this_month = Decimal::from_str(tds[4].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
+            e.monthly_accumulated = Decimal::from_str(tds[7].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
+            e.last_year_monthly_accumulated = Decimal::from_str(tds[8].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
+            e.compared_with_last_month = Decimal::from_str(tds[5].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
+            e.compared_with_last_year_same_month = Decimal::from_str(tds[6].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
+            e.accumulated_compared_with_last_year = Decimal::from_str(tds[9].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
+            e.create_time = Local::now();
+            new_entity.push(e);
         }
     }
 
@@ -158,7 +165,7 @@ mod tests {
         CACHE_SHARE.load().await;
         let _now = Local::now();
 
-        let naive_datetime = NaiveDate::from_ymd_opt(2012, 1, 1)
+        let naive_datetime = NaiveDate::from_ymd_opt(2023, 3, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
             .unwrap();

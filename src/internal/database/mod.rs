@@ -28,5 +28,7 @@ pub static DB: Lazy<PostgreSQL> = Lazy::new(|| {
         config::SETTINGS.postgresql.port,
         config::SETTINGS.postgresql.db
     );
+
+    //let db_url = dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set");
     PostgreSQL::new(&db_url)
 });

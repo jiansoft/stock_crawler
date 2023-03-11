@@ -99,7 +99,9 @@ impl CacheShare {
         let indices = index::fetch().await;
         match self.indices.write() {
             Ok(mut i) => {
-                i.extend(indices.iter().map(|(k, v)| (k.clone(), v.clone())));
+                if let Ok(indices) = indices {
+                    i.extend(indices);
+                }
             }
             Err(why) => {
                 logging::error_file_async(format!("because {:?}", why));
@@ -169,13 +171,14 @@ impl Default for CacheShare {
 
 #[cfg(test)]
 mod tests {
-
+    use std::{thread, time};
     use super::*;
 
     #[tokio::test]
     async fn test_init() {
         dotenv::dotenv().ok();
         let _ = CACHE_SHARE.indices.read().is_ok();
+        thread::sleep(time::Duration::from_secs(1));
     }
 
     macro_rules! aw {

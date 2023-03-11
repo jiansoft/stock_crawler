@@ -1,8 +1,8 @@
 use crate::{internal::database::DB, logging};
-use anyhow::{anyhow, Result};
+use anyhow::{Result};
 use chrono::{DateTime, Local};
-use sqlx::{postgres::PgRow, Postgres, QueryBuilder, Row};
-use std::collections::HashMap;
+use sqlx::{postgres::PgRow, QueryBuilder, Row};
+use std::collections::{HashMap};
 use rocket::form::validate::Len;
 
 #[rustfmt::skip]
@@ -35,7 +35,7 @@ impl Entity {
 
     /// 新增數據到資料庫後回傳新增的 word_id
     pub async fn insert(&mut self) -> Result<i64> {
-        let mut transaction = DB.pool.begin().await?;
+        /*let mut transaction = DB.pool.begin().await?;
         let query = "insert into company_word (word, created_time, updated_time) values ($1,$2,$3)
             on conflict (word) do update set
             word = excluded.word,
@@ -58,7 +58,25 @@ impl Entity {
                 transaction.rollback().await?;
                 Err(anyhow!("{:?}", why))
             }
-        }
+        }*/
+
+        let query = "INSERT INTO company_word (word, created_time, updated_time)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (word) DO UPDATE SET
+                    word = EXCLUDED.word,
+                    updated_time = EXCLUDED.updated_time
+                 RETURNING word_id";
+
+        let row = sqlx::query(query)
+            .bind(&self.word)
+            .bind(self.created_time)
+            .bind(self.updated_time)
+            .fetch_one(&DB.pool)
+            .await?;
+
+        let word_id: i64 = row.try_get("word_id")?;
+        self.word_id = word_id;
+        Ok(word_id)
     }
 
     /// 從資料表中取得公司代碼、名字拆字後的數據
@@ -113,9 +131,9 @@ impl Default for Entity {
 /// 將中文字拆分 例︰台積電 => ["台", "台積", "台積電", "積", "積電", "電"]
 pub fn split(w: &str) -> Vec<String> {
     let word = w.replace(['*', '-'], "");
-    let text_rune = word.chars().collect::<Vec<char>>();
+    let text_rune = word.chars().collect::<Vec<_>>();
     let text_len = text_rune.len();
-    let mut words = Vec::new();
+    let mut words = Vec::with_capacity(text_len * 3);
 
     for i in 0..text_len {
         for ii in (i + 1)..=text_len {
@@ -184,8 +202,18 @@ mod tests {
         println!("HashMap length: {} {}", hm1.len(), hm2.len());
     }
 
-    #[tokio::test]
+/*    #[tokio::test]
     async fn test_split_1() {
+        dotenv::dotenv().ok();
+        let chinese_word = "台積電";
+        let start = Instant::now();
+        let result = split_v1(chinese_word);
+        let end = start.elapsed();
+        println!("split: {:?}, elapsed time: {:?}", result, end);
+    }
+*/
+    #[tokio::test]
+    async fn test_split() {
         dotenv::dotenv().ok();
         let chinese_word = "台積電";
         let start = Instant::now();
@@ -194,12 +222,23 @@ mod tests {
         println!("split: {:?}, elapsed time: {:?}", result, end);
     }
 
-    #[tokio::test]
-    async fn test_split() {
+/*    #[tokio::test]
+    async fn test_split_all() {
         dotenv::dotenv().ok();
-        let r = split("台積電");
-        println!("{:?}", r)
-    }
+        let _result = split_v1("2330台積電2330");
+        let _result = split("2330台積電2330");
+
+
+        let start = Instant::now();
+        let result = split("台積電");
+        let duration = start.elapsed();
+        println!("split() result: {:?}, duration: {:?}", result, duration);
+
+        let start = Instant::now();
+        let result = split_v1("台積電");
+        let duration = start.elapsed();
+        println!("split_v1() result: {:?}, duration: {:?}", result, duration);
+    }*/
 
     #[tokio::test]
     async fn test_insert() {
@@ -230,4 +269,5 @@ mod tests {
             vec_to_hashmap_key_using_word(entities)
         ));
     }
+
 }

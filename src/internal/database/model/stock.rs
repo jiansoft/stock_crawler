@@ -5,7 +5,7 @@ use crate::{
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, postgres::PgRow, Error, Row};
+use sqlx::{postgres::PgRow, Row};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Entity {
@@ -27,7 +27,7 @@ impl Entity {
         }
     }
 
-    pub async fn update_suspend_listing(&self) -> Result<PgQueryResult, Error> {
+    pub async fn update_suspend_listing(&self) -> Result<()> {
         let sql = r#"
 update
     "Company"
@@ -38,29 +38,28 @@ where
 "#;
 
         sqlx::query(sql)
-            .bind(self.security_code.as_str())
+            .bind(&self.security_code)
             .bind(self.suspend_listing)
             .execute(&DB.pool)
-            .await
+            .await?;
+        Ok(())
     }
 
-    pub async fn upsert(&self) -> Result<PgQueryResult> {
+    pub async fn upsert(&self) -> Result<()> {
         let sql = r#"
-insert into "Company" (
-    "SecurityCode", "Name", "CategoryId", "CreateTime", "SuspendListing"
-) values (
-    $1,$2,$3,$4,false
-) on conflict ("SecurityCode") do nothing;
-"#;
-        let result = sqlx::query(sql)
-            .bind(self.security_code.as_str())
-            .bind(self.name.as_str())
+        INSERT INTO "Company" ("SecurityCode", "Name", "CategoryId", "CreateTime", "SuspendListing")
+        VALUES ($1, $2, $3, $4, false)
+        ON CONFLICT ("SecurityCode") DO NOTHING;
+    "#;
+        sqlx::query(sql)
+            .bind(&self.security_code)
+            .bind(&self.name)
             .bind(self.category)
             .bind(self.create_time)
             .execute(&DB.pool)
             .await?;
         self.create_index().await;
-        Ok(result)
+        Ok(())
     }
 
     async fn create_index(&self) {
@@ -71,19 +70,12 @@ insert into "Company" (
             31 | 32 | 33 | 51 | 52 | 165 | 166 => return,
             _ => {}
         }
-        /*if self.category == 31
-            || self.category == 32
-            || self.category == 33
-            || self.category == 51
-            || self.category == 52
-            || self.category == 165
-            || self.category == 166
-        {
-            return;
-        }*/
 
+        // 拆解股票名稱為單詞並加入股票代碼
         let mut words = stock_word::split(&self.name);
         words.push(self.security_code.to_string());
+
+        // 查詢已存在的單詞，轉成 hashmap 方便查詢
         let words_in_db = stock_word::Entity::list_by_word(&words).await;
         let exist_words = stock_word::vec_to_hashmap_key_using_word(words_in_db);
 
@@ -102,7 +94,10 @@ insert into "Company" (
                             stock_index_e.word_id = word_id;
                         }
                         Err(why) => {
-                            logging::error_file_async(format!("Failed to insert stock word because:{:#?}", why));
+                            logging::error_file_async(format!(
+                                "Failed to insert stock word because:{:#?}",
+                                why
+                            ));
                             continue;
                         }
                     }
@@ -110,7 +105,10 @@ insert into "Company" (
             }
 
             if let Err(why) = stock_index_e.insert().await {
-                logging::error_file_async(format!("Failed to insert stock index because:{:#?}", why));
+                logging::error_file_async(format!(
+                    "Failed to insert stock index because:{:#?}",
+                    why
+                ));
             }
         }
     }
@@ -123,15 +121,13 @@ insert into "Company" (
     ) -> Result<(Decimal, Decimal, Decimal)> {
         let answers = sqlx::query(
             r#"
-select
-    min("LowestPrice") as lowest_price,
-    avg("ClosingPrice") as avg_price,
-    max("HighestPrice") as highest_price
-from "DailyQuotes"
-where
-    "SecurityCode" = $1 and year = $2 and month = $3
-group by "SecurityCode", year, month
-
+            SELECT
+                MIN("LowestPrice") AS lowest_price,
+                AVG("ClosingPrice") AS avg_price,
+                MAX("HighestPrice") AS highest_price
+            FROM "DailyQuotes"
+            WHERE "SecurityCode" = $security_code AND year = $year AND month = $month
+            GROUP BY "SecurityCode", year, month
         "#,
         )
         .bind(&self.security_code)
@@ -168,8 +164,8 @@ impl Default for Entity {
     }
 }
 
-pub async fn fetch() -> Result<Vec<Entity>, Error> {
-    let answers = sqlx::query(
+pub async fn fetch() -> Result<Vec<Entity>> {
+  let answers = sqlx::query(
         r#"
         select "CategoryId","SecurityCode","Name", "SuspendListing", "CreateTime"
         from "Company"
@@ -186,9 +182,9 @@ pub async fn fetch() -> Result<Vec<Entity>, Error> {
         })
     })
     .fetch_all(&DB.pool)
-    .await;
+    .await?;
 
-    answers
+   Ok(answers)
 }
 
 #[cfg(test)]
@@ -206,6 +202,7 @@ mod tests {
                 logging::info_file_async(format!("{:#?} ", e));
             }
         }
+        //logging::info_file_async("結束 fetch".to_string());
     }
 
     #[tokio::test]
