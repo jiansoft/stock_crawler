@@ -10,16 +10,19 @@ pub mod taiwan_capitalization_weighted_stock_index;
 /// 市場別
 pub enum StockMarket {
     /// 上市
-    StockExchange,
+    Listed,
     /// 上櫃
     OverTheCounter,
+    /// 興櫃
+    Emerging,
 }
 
 impl StockMarket {
     pub fn serial_number(&self) -> i32 {
         match self {
-            StockMarket::StockExchange => 2,
+            StockMarket::Listed => 2,
             StockMarket::OverTheCounter => 4,
+            StockMarket::Emerging => 5,
         }
     }
 }

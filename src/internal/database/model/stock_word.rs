@@ -109,7 +109,7 @@ impl Entity {
         {
             Ok(result) => Some(result),
             Err(why) => {
-                logging::error_file_async(format!("because:{:#?}", why));
+                logging::error_file_async(format!("Failed to fetch entities from the database: {:?}", why));
                 None
             }
         }

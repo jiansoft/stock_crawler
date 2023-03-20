@@ -24,11 +24,12 @@ pub async fn start() {
         .every(Interval::Days(1))
         .at("5:00:00")
         .run(|| async {
-            international_securities_identification_number::visit(StockMarket::StockExchange).await;
+            international_securities_identification_number::visit(StockMarket::Listed).await;
             suspend_listing::visit().await;
             international_securities_identification_number::visit(StockMarket::OverTheCounter)
                 .await;
-
+            international_securities_identification_number::visit(StockMarket::Emerging)
+                .await;
             let now = Local::now();
             let naive_datetime = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
                 .unwrap()

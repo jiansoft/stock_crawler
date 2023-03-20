@@ -19,8 +19,9 @@ pub async fn visit(mode: StockMarket) {
     if let Some(t) = request_get_big5(url).await {
         let document = Html::parse_document(t.as_str());
         let industries = match mode {
-            StockMarket::StockExchange => &CACHE_SHARE.listed_stock_exchange_market_category,
-            StockMarket::OverTheCounter => &CACHE_SHARE.listed_over_the_counter_market_category,
+            StockMarket::Listed => &CACHE_SHARE.listed_market_category,
+            StockMarket::OverTheCounter => &CACHE_SHARE.over_the_counter_market_category,
+            StockMarket::Emerging => &CACHE_SHARE.emerging_market_category,
         };
 
         if let Ok(selector) = Selector::parse("body > table.h4 > tbody > tr") {
@@ -47,14 +48,20 @@ pub async fn visit(mode: StockMarket) {
                 let mut stock = internal::database::model::stock::Entity::new();
                 stock.security_code = split[0].trim().to_owned();
                 stock.name = split[1].to_owned();
-
+                stock.suspend_listing = false;
                 if let Some(industry) = industries.get(tds[4]) {
                     stock.category = *industry;
                 }
 
                 match CACHE_SHARE.stocks.read() {
                     Ok(stocks) => {
-                        if !stocks.contains_key(stock.security_code.as_str()) {
+                        if let Some(stock_in_db) = stocks.get(&stock.security_code) {
+                            if stock_in_db.category != stock.category
+                                || stock_in_db.name != stock.name
+                            {
+                                new_stocks.push(stock);
+                            }
+                        } else {
                             new_stocks.push(stock);
                         }
                     }
@@ -91,7 +98,7 @@ mod tests {
     async fn test_visit() {
         dotenv::dotenv().ok();
         CACHE_SHARE.load().await;
-        visit(StockMarket::StockExchange).await;
+        visit(StockMarket::Listed).await;
     }
 
     macro_rules! aw {

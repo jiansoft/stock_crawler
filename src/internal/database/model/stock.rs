@@ -48,14 +48,18 @@ where
     pub async fn upsert(&self) -> Result<()> {
         let sql = r#"
         INSERT INTO "Company" ("SecurityCode", "Name", "CategoryId", "CreateTime", "SuspendListing")
-        VALUES ($1, $2, $3, $4, false)
-        ON CONFLICT ("SecurityCode") DO NOTHING;
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT ("SecurityCode") DO UPDATE SET
+        "Name" = EXCLUDED."Name",
+        "CategoryId" = EXCLUDED."CategoryId",
+        "SuspendListing" = EXCLUDED."SuspendListing";
     "#;
         sqlx::query(sql)
             .bind(&self.security_code)
             .bind(&self.name)
             .bind(self.category)
             .bind(self.create_time)
+            .bind(self.suspend_listing)
             .execute(&DB.pool)
             .await?;
         self.create_index().await;

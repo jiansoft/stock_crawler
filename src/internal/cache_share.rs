@@ -16,9 +16,11 @@ pub struct CacheShare {
     /// 存放台股股票代碼
     pub stocks: RwLock<HashMap<String, stock::Entity>>,
     /// 上市股票分類
-    pub listed_stock_exchange_market_category: HashMap<&'static str, i32>,
+    pub listed_market_category: HashMap<&'static str, i32>,
     /// 上櫃股票分類
-    pub listed_over_the_counter_market_category: HashMap<&'static str, i32>,
+    pub over_the_counter_market_category: HashMap<&'static str, i32>,
+    /// 興櫃股票分類
+    pub emerging_market_category: HashMap<&'static str, i32>,
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
     pub last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Entity>>>,
 }
@@ -28,7 +30,7 @@ impl CacheShare {
         CacheShare {
             indices: RwLock::new(HashMap::new()),
             stocks: RwLock::new(HashMap::new()),
-            listed_stock_exchange_market_category: HashMap::from([
+            listed_market_category: HashMap::from([
                 ("水泥工業", 1),
                 ("食品工業", 2),
                 ("塑膠工業", 3),
@@ -61,7 +63,7 @@ impl CacheShare {
                 ("資訊服務業", 46),
                 ("其他電子業", 47),
             ]),
-            listed_over_the_counter_market_category: HashMap::from([
+            over_the_counter_market_category: HashMap::from([
                 ("生技醫療業", 121),
                 ("食品工業", 122),
                 ("塑膠工業", 123),
@@ -90,6 +92,35 @@ impl CacheShare {
                 ("農業科技業", 170),
                 ("電子商務", 171),
                 ("ETF", 172),
+            ]),
+            emerging_market_category: HashMap::from([
+                ("生技醫療業", 1121),
+                ("食品工業", 1122),
+                ("塑膠工業", 1123),
+                ("紡織纖維", 1124),
+                ("電機機械", 1125),
+                ("電器電纜", 1126),
+                ("鋼鐵工業", 1130),
+                ("橡膠工業", 1131),
+                ("建材營造業", 1138),
+                ("航運業", 1139),
+                ("觀光事業", 1140),
+                ("金融保險業", 1141),
+                ("貿易百貨業", 1142),
+                ("其他業", 1145),
+                ("化學工業", 1151),
+                ("半導體業", 1153),
+                ("電腦及週邊設備業", 1154),
+                ("光電業", 1155),
+                ("通信網路業", 1156),
+                ("電子零組件業", 1157),
+                ("電子通路業", 1158),
+                ("資訊服務業", 1159),
+                ("其他電子業", 1160),
+                ("油電燃氣業", 1161),
+                ("文化創意業", 1169),
+                ("農業科技業", 1170),
+                ("電子商務", 1171),
             ]),
             last_revenues: RwLock::new(HashMap::new()),
         }
@@ -217,7 +248,7 @@ mod tests {
                 loop_count -= 1;
             }
 
-            for (k, v) in CACHE_SHARE.listed_stock_exchange_market_category.iter() {
+            for (k, v) in CACHE_SHARE.listed_market_category.iter() {
                 logging::info_file_async(format!("name {}  category {}", k, v));
             }
         });

@@ -35,7 +35,7 @@ impl Entity {
             .execute(&mut transaction)
             .await {
             transaction.rollback().await?;
-            return Err(anyhow!("{:?}", why));
+            return Err(anyhow!("Failed to insert into company_index because: {:?}", why));
         }
 
         transaction.commit().await?;
