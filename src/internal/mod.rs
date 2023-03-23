@@ -14,6 +14,7 @@ mod crawler;
 pub mod database;
 mod free_dns;
 pub mod scheduler;
+mod calculation;
 
 static CLIENT: Lazy<Arc<Mutex<Client>>> = Lazy::new(|| {
     Arc::new(Mutex::new(
@@ -36,7 +37,7 @@ pub async fn request_get_big5<T: IntoUrl>(url: T) -> Option<String> {
     let res = CLIENT.lock().await.get(url).send().await;
     match res {
         Ok(res) => {
-            return match res.text_with_charset("Big5").await {
+            match res.text_with_charset("Big5").await {
                 Ok(t) => Some(t),
                 Err(why) => {
                     logging::error_file_async(format!("{:?}", why));

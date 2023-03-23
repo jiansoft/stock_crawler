@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 use sqlx::{postgres::PgRow, Row};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
+/// 原表名 Company
 pub struct Entity {
     pub category: i32,
     pub security_code: String,

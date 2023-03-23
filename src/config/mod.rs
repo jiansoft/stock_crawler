@@ -66,7 +66,7 @@ impl App {
 
         //轉成Config 物件
         let from_json = serde_json::from_str::<App>(text_content.as_str());
-        return match from_json {
+        match from_json {
             Err(why) => {
                 logging::error_file_async(format!(
                     "I can't read the config context because {:?}",
@@ -75,7 +75,7 @@ impl App {
                 Default::default()
             }
             Ok(_config) => _config.override_with_env(),
-        };
+        }
     }
 
     fn get() -> Result<Self, config::ConfigError> {

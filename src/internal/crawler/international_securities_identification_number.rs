@@ -16,8 +16,8 @@ pub async fn visit(mode: StockMarket) {
     logging::info_file_async(format!("visit url:{}", url));
 
     let mut new_stocks = Vec::new();
-    if let Some(t) = request_get_big5(url).await {
-        let document = Html::parse_document(t.as_str());
+    if let Some(response) = request_get_big5(url).await {
+        let document = Html::parse_document(&response);
         let industries = match mode {
             StockMarket::Listed => &CACHE_SHARE.listed_market_category,
             StockMarket::OverTheCounter => &CACHE_SHARE.over_the_counter_market_category,
@@ -25,18 +25,10 @@ pub async fn visit(mode: StockMarket) {
         };
 
         if let Ok(selector) = Selector::parse("body > table.h4 > tbody > tr") {
-            for (tr_count, node) in document.select(&selector).enumerate() {
-                if tr_count == 0 {
-                    continue;
-                }
+            for node in document.select(&selector).skip(1)  {
 
-                let tds: Vec<&str> = node.text().clone().enumerate().map(|(_i, v)| v).collect();
-
-                if tds.len() != 6 {
-                    continue;
-                }
-
-                if tds[0] == "有價證券代號及名稱" {
+                let tds: Vec<&str> = node.text().map(str::trim).collect();
+                if tds.len() != 6 || tds[0] == "有價證券代號及名稱" {
                     continue;
                 }
 
@@ -55,15 +47,20 @@ pub async fn visit(mode: StockMarket) {
 
                 match CACHE_SHARE.stocks.read() {
                     Ok(stocks) => {
-                        if let Some(stock_in_db) = stocks.get(&stock.security_code) {
-                            if stock_in_db.category != stock.category
-                                || stock_in_db.name != stock.name
+                        match stocks.get(&stock.security_code) {
+                            Some(stock_in_db)
+                                if stock_in_db.category != stock.category
+                                    || stock_in_db.name != stock.name =>
                             {
                                 new_stocks.push(stock);
                             }
-                        } else {
-                            new_stocks.push(stock);
-                        }
+                            None => {
+                                new_stocks.push(stock);
+                            }
+                            _ => {
+                                continue;
+                            }
+                        };
                     }
                     Err(why) => {
                         logging::error_file_async(format!("because {:?}", why));
