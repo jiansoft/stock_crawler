@@ -192,7 +192,10 @@ pub async fn visit() {
                                     .insert(key, model::index::Entity::from_index_response(&index));
                             }
                             Err(why) => {
-                                logging::error_file_async(format!("Failed to write stocks cache because {:?}", why));
+                                logging::error_file_async(format!(
+                                    "Failed to write stocks cache because {:?}",
+                                    why
+                                ));
                             }
                         }
                     }

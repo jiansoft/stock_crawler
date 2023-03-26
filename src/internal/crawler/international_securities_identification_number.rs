@@ -1,6 +1,6 @@
 use crate::{
-    internal, internal::cache_share::CACHE_SHARE, internal::crawler::StockMarket,
-    internal::request_get_big5, logging,
+    internal::cache_share::CACHE_SHARE, internal::crawler::StockMarket,
+    internal::database::model::stock, internal::request_get_big5, logging,
 };
 use concat_string::concat_string;
 use scraper::{Html, Selector};
@@ -25,8 +25,7 @@ pub async fn visit(mode: StockMarket) {
         };
 
         if let Ok(selector) = Selector::parse("body > table.h4 > tbody > tr") {
-            for node in document.select(&selector).skip(1)  {
-
+            for node in document.select(&selector).skip(1) {
                 let tds: Vec<&str> = node.text().map(str::trim).collect();
                 if tds.len() != 6 || tds[0] == "有價證券代號及名稱" {
                     continue;
@@ -37,7 +36,7 @@ pub async fn visit(mode: StockMarket) {
                     continue;
                 }
 
-                let mut stock = internal::database::model::stock::Entity::new();
+                let mut stock = stock::Entity::new();
                 stock.security_code = split[0].trim().to_owned();
                 stock.name = split[1].to_owned();
                 stock.suspend_listing = false;

@@ -1,9 +1,9 @@
+use crate::internal::database::DB;
+use anyhow::Result;
 use chrono::{DateTime, FixedOffset, Local};
 use rust_decimal::Decimal;
-use anyhow::Result;
 use sqlx::postgres::PgRow;
 use sqlx::Row;
-use crate::internal::database::DB;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 股息發放日程表 原表名 dividend
@@ -35,7 +35,6 @@ pub struct Entity {
     pub create_time: DateTime<Local>,
     pub update_time: DateTime<Local>,
 }
-
 
 impl Entity {
     pub fn new() -> Self {
@@ -85,46 +84,47 @@ impl Clone for Entity {
     }
 }
 
-
 /// 取得庫存股票的數據
-pub async fn fetch_stock_inventory(security_code:&str,date_time: DateTime<FixedOffset>) -> Result<Vec<Entity>> {
+pub async fn fetch_stock_inventory(
+    security_code: &str,
+    date_time: DateTime<FixedOffset>,
+) -> Result<Vec<Entity>> {
     let answers = sqlx::query(
         r#"
-select "Id",
-       "MemberId",
-       "SecurityCode",
-       "NumberOfSharesHeld",
-       "AverageCost",
-       "CreateTime",
-       "AmountPerShare",
-       "IsSold"
-from "Favorite"
-where "IsSold" = false
+select serial,
+       member_id,
+       security_code,
+       share_quantity,
+       holding_cost,
+       created_time,
+       share_price_average,
+       is_sold
+from stock_ownership_details
+where is_sold = false
         "#,
     )
-        .bind(security_code)
-        .bind(date_time)
-        .try_map(|row: PgRow| {
-            Ok(Entity {
-                serial: row.try_get("Id")?,
-                year: row.try_get("year")?,
-                year_of_dividend: 0,
-                quarter: "".to_string(),
-                security_code: row.try_get("SecurityCode")?,
-
-                cash: Default::default(),
-                stock: Default::default(),
-                sum: Default::default(),
-                ex_dividend_date1: "".to_string(),
-                ex_dividend_date2: "".to_string(),
-                payable_date1: "".to_string(),
-                payable_date2: "".to_string(),
-                create_time: Default::default(),
-                update_time: Default::default(),
-            })
+    .bind(security_code)
+    .bind(date_time)
+    .try_map(|row: PgRow| {
+        Ok(Entity {
+            serial: row.try_get("Id")?,
+            year: row.try_get("year")?,
+            year_of_dividend: 0,
+            quarter: "".to_string(),
+            security_code: row.try_get("SecurityCode")?,
+            cash: Default::default(),
+            stock: Default::default(),
+            sum: Default::default(),
+            ex_dividend_date1: "".to_string(),
+            ex_dividend_date2: "".to_string(),
+            payable_date1: "".to_string(),
+            payable_date2: "".to_string(),
+            create_time: Default::default(),
+            update_time: Default::default(),
         })
-        .fetch_all(&DB.pool)
-        .await?;
+    })
+    .fetch_all(&DB.pool)
+    .await?;
 
     Ok(answers)
 }

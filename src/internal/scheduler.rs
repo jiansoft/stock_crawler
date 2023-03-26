@@ -1,13 +1,12 @@
 use crate::{
-    internal::crawler::international_securities_identification_number, internal::crawler::revenue,
-    internal::crawler::suspend_listing,
+    internal::calculation, internal::crawler::international_securities_identification_number,
+    internal::crawler::revenue, internal::crawler::suspend_listing,
     internal::crawler::taiwan_capitalization_weighted_stock_index, internal::crawler::StockMarket,
     internal::free_dns,
 };
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use clokwerk::{AsyncScheduler, Interval, Job, TimeUnits};
 use std::time::Duration;
-use crate::internal::calculation;
 
 /// 啟動排程
 pub async fn start() {

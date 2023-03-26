@@ -170,7 +170,7 @@ impl Default for Entity {
 }
 
 pub async fn fetch() -> Result<Vec<Entity>> {
-  let answers = sqlx::query(
+    let answers = sqlx::query(
         r#"
         select "CategoryId","SecurityCode","Name", "SuspendListing", "CreateTime"
         from "Company"
@@ -189,7 +189,7 @@ pub async fn fetch() -> Result<Vec<Entity>> {
     .fetch_all(&DB.pool)
     .await?;
 
-   Ok(answers)
+    Ok(answers)
 }
 
 #[cfg(test)]

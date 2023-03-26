@@ -1,9 +1,9 @@
 use crate::{internal::database::DB, logging};
-use anyhow::{Result};
+use anyhow::Result;
 use chrono::{DateTime, Local};
-use sqlx::{postgres::PgRow, QueryBuilder, Row};
-use std::collections::{HashMap};
 use rocket::form::validate::Len;
+use sqlx::{postgres::PgRow, QueryBuilder, Row};
+use std::collections::HashMap;
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
@@ -109,7 +109,10 @@ impl Entity {
         {
             Ok(result) => Some(result),
             Err(why) => {
-                logging::error_file_async(format!("Failed to fetch entities from the database: {:?}", why));
+                logging::error_file_async(format!(
+                    "Failed to fetch entities from the database: {:?}",
+                    why
+                ));
                 None
             }
         }
@@ -202,16 +205,16 @@ mod tests {
         println!("HashMap length: {} {}", hm1.len(), hm2.len());
     }
 
-/*    #[tokio::test]
-    async fn test_split_1() {
-        dotenv::dotenv().ok();
-        let chinese_word = "台積電";
-        let start = Instant::now();
-        let result = split_v1(chinese_word);
-        let end = start.elapsed();
-        println!("split: {:?}, elapsed time: {:?}", result, end);
-    }
-*/
+    /*    #[tokio::test]
+        async fn test_split_1() {
+            dotenv::dotenv().ok();
+            let chinese_word = "台積電";
+            let start = Instant::now();
+            let result = split_v1(chinese_word);
+            let end = start.elapsed();
+            println!("split: {:?}, elapsed time: {:?}", result, end);
+        }
+    */
     #[tokio::test]
     async fn test_split() {
         dotenv::dotenv().ok();
@@ -222,7 +225,7 @@ mod tests {
         println!("split: {:?}, elapsed time: {:?}", result, end);
     }
 
-/*    #[tokio::test]
+    /*    #[tokio::test]
     async fn test_split_all() {
         dotenv::dotenv().ok();
         let _result = split_v1("2330台積電2330");
@@ -269,5 +272,4 @@ mod tests {
             vec_to_hashmap_key_using_word(entities)
         ));
     }
-
 }

@@ -86,7 +86,9 @@ pub async fn visit() {
                 }
             }*/
 
-            let to_stocks = updated_stocks.into_iter().map(|stock| (stock.security_code.clone(), stock));
+            let to_stocks = updated_stocks
+                .into_iter()
+                .map(|stock| (stock.security_code.clone(), stock));
             if let Ok(mut stocks) = CACHE_SHARE.stocks.write() {
                 stocks.extend(to_stocks);
             }

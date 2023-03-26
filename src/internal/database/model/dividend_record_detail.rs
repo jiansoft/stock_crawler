@@ -1,7 +1,8 @@
+use crate::internal::database::DB;
+use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use anyhow::Result;
-use crate::internal::database::DB;
+use sqlx::{postgres::PgRow, Row};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 持股股息發放記錄表 原表名 dividend_record_detail
@@ -66,6 +67,34 @@ impl Entity {
             .await?;
 
         Ok(())
+    }
+
+    /// 計算指定股票其累積的領取股利
+    pub async fn calculate_cumulate_dividend(
+        &self,
+    ) -> Result<(Decimal, Decimal, Decimal, Decimal)> {
+        let dividend = sqlx::query(
+            r#"
+select COALESCE(sum(cash), 0)        as cash,
+       COALESCE(sum(stock_money), 0) as stock_money,
+       COALESCE(sum(stock), 0)       as stock,
+       COALESCE(sum(total), 0)       as total
+from dividend_record_detail
+where favorite_id = $1;
+        "#,
+        )
+        .bind(self.favorite_id)
+        .try_map(|row: PgRow| {
+            let cash: Decimal = row.try_get("cash")?;
+            let stock_money: Decimal = row.try_get("stock_money")?;
+            let stock: Decimal = row.try_get("stock")?;
+            let total: Decimal = row.try_get("total")?;
+            Ok((cash, stock_money, stock, total))
+        })
+        .fetch_one(&DB.pool)
+        .await?;
+
+        Ok(dividend)
     }
 }
 

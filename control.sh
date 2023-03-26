@@ -9,7 +9,7 @@ function start() {
   # echo "$binaryName pid  = $pid"
 
   if [ "$pid" == "" ]; then
-    cd $appPath
+    cd $appPath || exit
     ./$binaryName > nohup.out 2>&1 &
     echo ./$binaryName " start"
   else
@@ -33,9 +33,9 @@ function stop() {
 }
 
 function update() {
-  stop
-  sleep 1
   build
+  sleep 1
+  stop
   sleep 1
   start
 }

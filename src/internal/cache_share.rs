@@ -202,8 +202,8 @@ impl Default for CacheShare {
 
 #[cfg(test)]
 mod tests {
-    use std::{thread, time};
     use super::*;
+    use std::{thread, time};
 
     #[tokio::test]
     async fn test_init() {

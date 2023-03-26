@@ -1,10 +1,10 @@
 use crate::{internal::crawler, internal::database::DB, logging};
+use anyhow;
 use chrono::Local;
 use futures::StreamExt;
 use rust_decimal::{prelude::FromPrimitive, Decimal};
 use sqlx::{self, FromRow};
 use std::collections::HashMap;
-use anyhow;
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Entity {

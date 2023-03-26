@@ -7,4 +7,5 @@ SET OPENSSL_STATIC = 'Yes'
 SET OPENSSL_NO_VENDOR=1
 
  REM cargo  build --target aarch64-unknown-linux-gnu
-  cargo  build REM --debug
+ cargo  build
+  REM --debug
