@@ -18,10 +18,10 @@ pub async fn calculate(year: i32) {
                 })?;
 
                 let (cash, stock_money, stock, total) = cumulate_dividend;
-                item.cumulate_cash = cash;
-                item.cumulate_stock_money = stock_money;
-                item.cumulate_stock = stock;
-                item.cumulate_total = total;
+                item.cumulate_dividends_cash = cash;
+                item.cumulate_dividends_stock_money = stock_money;
+                item.cumulate_dividends_stock = stock;
+                item.cumulate_dividends_total = total;
                 item.update_cumulate_dividends()
                     .await
                     .map_err(|e| format!("Failed to update_cumulate_dividends because {:?}", e))

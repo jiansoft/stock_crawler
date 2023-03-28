@@ -3,6 +3,7 @@ use concat_string::concat_string;
 use once_cell::sync::Lazy;
 use slog::*;
 use slog_atomic::*;
+use std::path::{Path, PathBuf};
 use std::{fs, fs::OpenOptions, thread};
 
 static LOGGER: Lazy<Logger> = Lazy::new(Default::default);
@@ -12,39 +13,16 @@ pub struct Logger {
 }
 
 impl Logger {
-    fn new() -> Self {
+    fn new(log_name: &str) -> Self {
         let (tx, rx) = flume::unbounded::<LogMessage>();
-        //寫入檔案的操作使用另一個線程處理
+        let log_path = Self::get_log_path(log_name).unwrap_or_else(|| {
+            panic!("Failed to create log directory.");
+        });
+
         thread::spawn(move || {
-            let slog = create_slog("async");
-            /*let mut messages: Vec<LogMessage> = Vec::with_capacity(20);
-                        for received in rx.iter() {
-                            messages.push(received);
+            let slog = create_slog(log_path.as_path());
 
-                            //info!(slog, "rx.len()={} messages.len()={}",rx.len(),messages.len());
-                            if rx.len() != 0 && messages.len() < 20 {
-                                continue;
-                            }
-
-                            let mut together = String::with_capacity(2048);
-                            together.push_str("\n");
-                            for message in messages.iter() {
-                                let msg = concat_string!(
-                                    message.created_at.format("%F %X%.6f").to_string(),
-                                    " ",
-                                    message.level.to_string(),
-                                    " ",
-                                    message.msg,
-                                    "\r\n"
-                                );
-                                together.push_str(msg.as_str());
-                            }
-
-                            info!(slog, "{}", together);
-                            messages.clear();
-                        }
-            */
-            let mut together = String::with_capacity(2048);
+            let mut together = String::with_capacity(4096);
             together.push_str("\r\n");
 
             for received in rx.iter() {
@@ -60,13 +38,11 @@ impl Logger {
                     .as_str(),
                 );
 
-                if !rx.is_empty() && together.len() < 2048 {
-                    continue;
+                if rx.is_empty() || together.len() >= 4096 {
+                    slog::info!(slog, "{}", together);
+                    together.clear();
+                    together.push_str("\r\n");
                 }
-
-                self::info!(slog, "{}", together);
-                together.clear();
-                together.push_str("\r\n");
             }
         });
 
@@ -86,11 +62,24 @@ impl Logger {
             error_console(why.to_string());
         }
     }
+
+    fn get_log_path(name: &str) -> Option<PathBuf> {
+        let path = Path::new("log");
+
+        if !path.exists() {
+            fs::create_dir_all(path).ok()?;
+        }
+
+        let mut log_path = PathBuf::from(path);
+        log_path.push(format!("{}_{}.log", name, Local::now().format("%Y-%m-%d")));
+
+        Some(log_path)
+    }
 }
 
 impl Default for Logger {
     fn default() -> Self {
-        Logger::new()
+        Logger::new("default")
     }
 }
 
@@ -110,25 +99,19 @@ impl LogMessage {
     }
 }
 
-fn create_slog(name: &str) -> slog::Logger {
-    fs::create_dir_all("log").unwrap();
-
-    let today = Local::now().format("%Y-%m-%d");
-    //-{:0>2}-{:0>2}
-    let log_path = format!("log/{}_{}.log", name, today);
-
+fn create_slog(log_path: &Path) -> slog::Logger {
     let file = OpenOptions::new()
         .create(true)
         .append(true)
         .truncate(false)
         .open(log_path)
-        .unwrap();
+        .unwrap_or_else(|e| {
+            panic!("Failed to open log file: {}", e);
+        });
 
     let decorator = slog_term::PlainDecorator::new(file);
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).chan_size(512).build().fuse();
-    // `AtomicSwitch` is a drain that wraps other drain and allows to change
-    // it atomically in runtime.
     let drain = AtomicSwitch::new(drain);
 
     slog::Logger::root(drain, o!())

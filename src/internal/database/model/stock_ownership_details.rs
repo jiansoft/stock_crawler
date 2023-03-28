@@ -1,10 +1,8 @@
-use crate::internal::database::model::dividend_record_detail;
-use crate::internal::database::DB;
+use crate::{internal::database::model::dividend_record_detail, internal::database::DB};
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::postgres::PgRow;
-use sqlx::Row;
+use sqlx::{postgres::PgRow, Row};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 股票庫存 原表名 stock_ownership_details
@@ -24,13 +22,13 @@ pub struct Entity {
     /// 是否賣出
     pub is_sold: bool,
     /// 累積現金股利(元)
-    pub cumulate_cash: Decimal,
+    pub cumulate_dividends_cash: Decimal,
     /// 累積股票股利(股)
-    pub cumulate_stock: Decimal,
+    pub cumulate_dividends_stock: Decimal,
     /// 累積股票股利(元)
-    pub cumulate_stock_money: Decimal,
+    pub cumulate_dividends_stock_money: Decimal,
     /// 總計累積股利(元)
-    pub cumulate_total: Decimal,
+    pub cumulate_dividends_total: Decimal,
     pub created_time: DateTime<Local>,
 }
 
@@ -44,10 +42,10 @@ impl Entity {
             share_price_average: Default::default(),
             holding_cost: Default::default(),
             is_sold: false,
-            cumulate_cash: Default::default(),
-            cumulate_stock: Default::default(),
-            cumulate_stock_money: Default::default(),
-            cumulate_total: Default::default(),
+            cumulate_dividends_cash: Default::default(),
+            cumulate_dividends_stock: Default::default(),
+            cumulate_dividends_stock_money: Default::default(),
+            cumulate_dividends_total: Default::default(),
             created_time: Default::default(),
         }
     }
@@ -63,15 +61,15 @@ set
     cumulate_dividends_stock_money= $4,
     cumulate_dividends_total= $5
 where
-    "Id" = $1;
+    serial = $1;
 "#;
 
         sqlx::query(sql)
             .bind(self.serial)
-            .bind(self.cumulate_cash)
-            .bind(self.cumulate_stock)
-            .bind(self.cumulate_stock_money)
-            .bind(self.cumulate_total)
+            .bind(self.cumulate_dividends_cash)
+            .bind(self.cumulate_dividends_stock)
+            .bind(self.cumulate_dividends_stock_money)
+            .bind(self.cumulate_dividends_total)
             .execute(&DB.pool)
             .await?;
         Ok(())
@@ -153,10 +151,10 @@ impl Clone for Entity {
             share_price_average: self.share_price_average,
             holding_cost: self.holding_cost,
             is_sold: self.is_sold,
-            cumulate_cash: self.cumulate_cash,
-            cumulate_stock: self.cumulate_stock,
-            cumulate_stock_money: self.cumulate_stock_money,
-            cumulate_total: self.cumulate_total,
+            cumulate_dividends_cash: self.cumulate_dividends_cash,
+            cumulate_dividends_stock: self.cumulate_dividends_stock,
+            cumulate_dividends_stock_money: self.cumulate_dividends_stock_money,
+            cumulate_dividends_total: self.cumulate_dividends_total,
             created_time: self.created_time,
         }
     }
@@ -164,44 +162,27 @@ impl Clone for Entity {
 
 /// 取得庫存股票的數據
 pub async fn fetch() -> Result<Vec<Entity>> {
-    let answers = sqlx::query(
-        r#"
+    let rows = sqlx::query_as::<_, Entity>(
+        "
 select serial,
-       member_id,
-       security_code,
-       share_quantity,
-       holding_cost,
-       created_time,
-       share_price_average,
-       is_sold,
-       cumulate_dividends_cash,
-       cumulate_dividends_stock,
-       cumulate_dividends_stock_money,
-       cumulate_dividends_total
+   member_id,
+   security_code,
+   share_quantity,
+   holding_cost,
+   created_time,
+   share_price_average,
+   is_sold,
+   cumulate_dividends_cash,
+   cumulate_dividends_stock,
+   cumulate_dividends_stock_money,
+   cumulate_dividends_total
 from stock_ownership_details
-where is_sold = false
-        "#,
+where is_sold = false",
     )
-    .try_map(|row: PgRow| {
-        Ok(Entity {
-            serial: row.try_get("serial")?,
-            security_code: row.try_get("security_code")?,
-            member_id: row.try_get("member_id")?,
-            share_quantity: row.try_get("share_quantity")?,
-            share_price_average: row.try_get("share_price_average")?,
-            holding_cost: row.try_get("holding_cost")?,
-            created_time: row.try_get("created_time")?,
-            is_sold: false,
-            cumulate_cash: row.try_get("cumulate_dividends_cash")?,
-            cumulate_stock: row.try_get("cumulate_dividends_stock")?,
-            cumulate_stock_money: row.try_get("cumulate_dividends_stock_money")?,
-            cumulate_total: row.try_get("cumulate_dividends_total")?,
-        })
-    })
     .fetch_all(&DB.pool)
     .await?;
 
-    Ok(answers)
+    Ok(rows)
 }
 
 #[cfg(test)]
@@ -216,7 +197,7 @@ mod tests {
         let r = fetch().await;
         if let Ok(result) = r {
             for e in result {
-                logging::info_file_async(format!("{:#?} ", e));
+                logging::info_file_async(format!("{:?} ", e));
             }
         } else if let Err(err) = r {
             logging::error_file_async(format!("{:#?} ", err));

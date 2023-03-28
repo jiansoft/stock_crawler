@@ -8,7 +8,7 @@ use sqlx::{postgres::PgRow, Row};
 /// 持股股息發放記錄表 原表名 dividend_record_detail
 pub struct Entity {
     /// 庫存編號
-    pub favorite_id: i64,
+    pub stock_ownership_details_serial: i64,
     /// 領取年度
     pub year: i32,
     /// 現金股利(元)
@@ -25,7 +25,7 @@ pub struct Entity {
 
 impl Entity {
     pub fn new(
-        favorite_id: i64,
+        serial: i64,
         year: i32,
         cash: Decimal,
         stock: Decimal,
@@ -33,7 +33,7 @@ impl Entity {
         total: Decimal,
     ) -> Self {
         Entity {
-            favorite_id,
+            stock_ownership_details_serial: serial,
             year,
             cash,
             stock,
@@ -47,9 +47,9 @@ impl Entity {
     /// 更新持股股息發放記錄
     pub async fn upsert(&self) -> Result<()> {
         let sql = r#"
-        insert into dividend_record_detail (favorite_id, "year", cash, stock_money, stock, total)
+        insert into dividend_record_detail (stock_ownership_details_serial, "year", cash, stock_money, stock, total)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (favorite_id, "year") DO UPDATE SET
+        ON CONFLICT (stock_ownership_details_serial, "year") DO UPDATE SET
         total = EXCLUDED.total,
         cash = EXCLUDED.cash,
         stock_money = EXCLUDED.stock_money,
@@ -57,7 +57,7 @@ impl Entity {
         updated_time = now();
     "#;
         sqlx::query(sql)
-            .bind(self.favorite_id)
+            .bind(self.stock_ownership_details_serial)
             .bind(self.year)
             .bind(self.cash)
             .bind(self.stock_money)
@@ -80,10 +80,10 @@ select COALESCE(sum(cash), 0)        as cash,
        COALESCE(sum(stock), 0)       as stock,
        COALESCE(sum(total), 0)       as total
 from dividend_record_detail
-where favorite_id = $1;
+where stock_ownership_details_serial = $1;
         "#,
         )
-        .bind(self.favorite_id)
+        .bind(self.stock_ownership_details_serial)
         .try_map(|row: PgRow| {
             let cash: Decimal = row.try_get("cash")?;
             let stock_money: Decimal = row.try_get("stock_money")?;
@@ -114,7 +114,7 @@ impl Default for Entity {
 impl Clone for Entity {
     fn clone(&self) -> Self {
         Entity {
-            favorite_id: self.favorite_id,
+            stock_ownership_details_serial: self.stock_ownership_details_serial,
             year: self.year,
             cash: self.cash,
             stock: self.stock,
