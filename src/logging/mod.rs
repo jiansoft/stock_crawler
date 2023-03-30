@@ -1,31 +1,32 @@
 use chrono::{format::DelayedFormat, DateTime, Local};
 use concat_string::concat_string;
+use crossbeam_channel::{unbounded, Sender};
 use once_cell::sync::Lazy;
 use slog::*;
 use slog_atomic::*;
 use std::path::{Path, PathBuf};
 use std::{fs, fs::OpenOptions, thread};
 
-static LOGGER: Lazy<Logger> = Lazy::new(Default::default);
+static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new("default"));
 
 pub struct Logger {
-    writer: flume::Sender<LogMessage>,
+    writer: Sender<LogMessage>,
 }
 
 impl Logger {
     fn new(log_name: &str) -> Self {
-        let (tx, rx) = flume::unbounded::<LogMessage>();
+        let (tx, rx) = unbounded::<LogMessage>();
         let log_path = Self::get_log_path(log_name).unwrap_or_else(|| {
             panic!("Failed to create log directory.");
         });
 
+        //寫入檔案的操作使用另一個線程處理
         thread::spawn(move || {
             let slog = create_slog(log_path.as_path());
-
             let mut together = String::with_capacity(4096);
             together.push_str("\r\n");
 
-            for received in rx.iter() {
+            while let Ok(received) = rx.recv() {
                 together.push_str(
                     concat_string!(
                         received.created_at.format("%F %X%.6f").to_string(),
@@ -74,12 +75,6 @@ impl Logger {
         log_path.push(format!("{}_{}.log", name, Local::now().format("%Y-%m-%d")));
 
         Some(log_path)
-    }
-}
-
-impl Default for Logger {
-    fn default() -> Self {
-        Logger::new("default")
     }
 }
 

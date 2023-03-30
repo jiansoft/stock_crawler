@@ -96,7 +96,7 @@ async fn download(url: String, year: i32, month: u32) -> usize {
     let size = new_entity.len();
     for mut e in new_entity {
         let mut stock = model::stock::Entity::new();
-        stock.security_code = e.security_code.to_string();
+        stock.stock_symbol = e.security_code.to_string();
         if let Ok((lowest_price, avg_price, highest_price)) = stock
             .lowest_avg_highest_price_by_year_and_month(year, month as i32)
             .await

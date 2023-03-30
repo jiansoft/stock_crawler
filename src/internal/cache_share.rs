@@ -144,7 +144,7 @@ impl CacheShare {
             Ok(mut s) => {
                 if let Ok(result) = stocks {
                     for e in result {
-                        s.insert(e.security_code.to_string(), e);
+                        s.insert(e.stock_symbol.to_string(), e);
                     }
                 }
             }

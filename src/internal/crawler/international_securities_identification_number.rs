@@ -37,7 +37,7 @@ pub async fn visit(mode: StockMarket) {
                 }
 
                 let mut stock = stock::Entity::new();
-                stock.security_code = split[0].trim().to_owned();
+                stock.stock_symbol = split[0].trim().to_owned();
                 stock.name = split[1].to_owned();
                 stock.suspend_listing = false;
                 if let Some(industry) = industries.get(tds[4]) {
@@ -46,7 +46,7 @@ pub async fn visit(mode: StockMarket) {
 
                 match CACHE_SHARE.stocks.read() {
                     Ok(stocks) => {
-                        match stocks.get(&stock.security_code) {
+                        match stocks.get(&stock.stock_symbol) {
                             Some(stock_in_db)
                                 if stock_in_db.category != stock.category
                                     || stock_in_db.name != stock.name =>
@@ -73,7 +73,7 @@ pub async fn visit(mode: StockMarket) {
         match stock.upsert().await {
             Ok(_) => {
                 if let Ok(mut stocks) = CACHE_SHARE.stocks.write() {
-                    stocks.insert(stock.security_code.to_string(), stock.clone());
+                    stocks.insert(stock.stock_symbol.to_string(), stock.clone());
                     logging::info_file_async(format!("stock add {:?}", stock));
                 }
             }

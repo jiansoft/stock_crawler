@@ -9,7 +9,7 @@ pub struct SuspendListing {
     #[serde(rename(deserialize = "Company"))]
     pub name: String,
     #[serde(rename(deserialize = "Code"))]
-    pub security_code: String,
+    pub stock_symbol: String,
 }
 
 pub async fn visit() {
@@ -23,7 +23,7 @@ pub async fn visit() {
                 Ok(delisting) => match CACHE_SHARE.stocks.read() {
                     Ok(stocks) => {
                         for item in delisting {
-                            if let Some(stock) = stocks.get(item.security_code.as_str()) {
+                            if let Some(stock) = stocks.get(item.stock_symbol.as_str()) {
                                 if stock.suspend_listing {
                                     continue;
                                 }
@@ -88,7 +88,7 @@ pub async fn visit() {
 
             let to_stocks = updated_stocks
                 .into_iter()
-                .map(|stock| (stock.security_code.clone(), stock));
+                .map(|stock| (stock.stock_symbol.clone(), stock));
             if let Ok(mut stocks) = CACHE_SHARE.stocks.write() {
                 stocks.extend(to_stocks);
             }

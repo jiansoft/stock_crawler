@@ -8,10 +8,10 @@ use rust_decimal::Decimal;
 use sqlx::{postgres::PgRow, Row};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
-/// 原表名 Company
+/// 原表名 stocks
 pub struct Entity {
     pub category: i32,
-    pub security_code: String,
+    pub stock_symbol: String,
     pub name: String,
     pub suspend_listing: bool,
     pub create_time: DateTime<Local>,
@@ -21,7 +21,7 @@ impl Entity {
     pub fn new() -> Self {
         Entity {
             category: Default::default(),
-            security_code: Default::default(),
+            stock_symbol: Default::default(),
             name: Default::default(),
             suspend_listing: false,
             create_time: Local::now(),
@@ -31,15 +31,15 @@ impl Entity {
     pub async fn update_suspend_listing(&self) -> Result<()> {
         let sql = r#"
 update
-    "Company"
+    stocks
 set
     "SuspendListing" = $2
 where
-    "SecurityCode" = $1;
+    stock_symbol = $1;
 "#;
 
         sqlx::query(sql)
-            .bind(&self.security_code)
+            .bind(&self.stock_symbol)
             .bind(self.suspend_listing)
             .execute(&DB.pool)
             .await?;
@@ -48,15 +48,15 @@ where
 
     pub async fn upsert(&self) -> Result<()> {
         let sql = r#"
-        INSERT INTO "Company" ("SecurityCode", "Name", "CategoryId", "CreateTime", "SuspendListing")
+        INSERT INTO stocks (stock_symbol, "Name", "CategoryId", "CreateTime", "SuspendListing")
         VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT ("SecurityCode") DO UPDATE SET
+        ON CONFLICT (stock_symbol) DO UPDATE SET
         "Name" = EXCLUDED."Name",
         "CategoryId" = EXCLUDED."CategoryId",
         "SuspendListing" = EXCLUDED."SuspendListing";
     "#;
         sqlx::query(sql)
-            .bind(&self.security_code)
+            .bind(&self.stock_symbol)
             .bind(&self.name)
             .bind(self.category)
             .bind(self.create_time)
@@ -78,14 +78,14 @@ where
 
         // 拆解股票名稱為單詞並加入股票代碼
         let mut words = stock_word::split(&self.name);
-        words.push(self.security_code.to_string());
+        words.push(self.stock_symbol.to_string());
 
         // 查詢已存在的單詞，轉成 hashmap 方便查詢
         let words_in_db = stock_word::Entity::list_by_word(&words).await;
         let exist_words = stock_word::vec_to_hashmap_key_using_word(words_in_db);
 
         for word in words {
-            let mut stock_index_e = stock_index::Entity::new(self.security_code.to_string());
+            let mut stock_index_e = stock_index::Entity::new(self.stock_symbol.to_string());
 
             match exist_words.get(&word) {
                 Some(w) => {
@@ -135,7 +135,7 @@ where
             GROUP BY "SecurityCode", year, month
         "#,
         )
-        .bind(&self.security_code)
+        .bind(&self.stock_symbol)
         .bind(year)
         .bind(month)
         .try_map(|row: PgRow| {
@@ -155,7 +155,7 @@ impl Clone for Entity {
     fn clone(&self) -> Self {
         Entity {
             category: self.category,
-            security_code: self.security_code.clone(),
+            stock_symbol: self.stock_symbol.clone(),
             name: self.name.clone(),
             suspend_listing: self.suspend_listing,
             create_time: self.create_time,
@@ -172,14 +172,14 @@ impl Default for Entity {
 pub async fn fetch() -> Result<Vec<Entity>> {
     let answers = sqlx::query(
         r#"
-        select "CategoryId","SecurityCode","Name", "SuspendListing", "CreateTime"
-        from "Company"
+        select "CategoryId",stock_symbol,"Name", "SuspendListing", "CreateTime"
+        from stocks
         order by "CategoryId"
         "#,
     )
     .try_map(|row: PgRow| {
         Ok(Entity {
-            security_code: row.try_get("SecurityCode")?,
+            stock_symbol: row.try_get("stock_symbol")?,
             name: row.try_get("Name")?,
             category: row.try_get("CategoryId")?,
             suspend_listing: row.try_get("SuspendListing")?,
@@ -215,7 +215,7 @@ mod tests {
         dotenv::dotenv().ok();
         //logging::info_file_async("開始 fetch".to_string());
         let mut e = Entity::new();
-        e.security_code = String::from("1101");
+        e.stock_symbol = String::from("1101");
         let r = e.lowest_avg_highest_price_by_year_and_month(2023, 1).await;
         if let Ok((lowest_price, avg_price, highest_price)) = r {
             logging::info_file_async(format!(
@@ -228,7 +228,7 @@ mod tests {
     async fn test_create_index() {
         dotenv::dotenv().ok();
         let mut e = Entity::new();
-        e.security_code = "2330".to_string();
+        e.stock_symbol = "2330".to_string();
         e.name = "台積電".to_string();
         e.create_index().await;
     }
