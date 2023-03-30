@@ -163,7 +163,7 @@ pub fn vec_to_hashmap_key_using_word(entities: Option<Vec<Entity>>) -> HashMap<S
     stock_words
 }
 
-/// 將 vec 轉成 hashmap
+/*/// 將 vec 轉成 hashmap
 fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
     v.unwrap_or_default()
         .iter()
@@ -171,7 +171,7 @@ fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
             acc.insert(e.word.to_string(), e.clone());
             acc
         })
-}
+}*/
 
 #[cfg(test)]
 mod tests {

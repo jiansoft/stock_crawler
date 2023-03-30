@@ -4,8 +4,12 @@ use crossbeam_channel::{unbounded, Sender};
 use once_cell::sync::Lazy;
 use slog::*;
 use slog_atomic::*;
-use std::path::{Path, PathBuf};
-use std::{fs, fs::OpenOptions, thread};
+use std::{
+    fs,
+    fs::OpenOptions,
+    path::{Path, PathBuf},
+    thread,
+};
 
 static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new("default"));
 
