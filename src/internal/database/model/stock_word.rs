@@ -193,16 +193,16 @@ mod tests {
         }
 
         let start1 = Instant::now();
-        let hm1 = vec_to_hashmap_key_using_word(Some(entities.clone()));
+        let _hm1 = vec_to_hashmap_key_using_word(Some(entities.clone()));
         let elapsed1 = start1.elapsed().as_millis();
 
-        let start2 = Instant::now();
+        /*let start2 = Instant::now();
         let hm2 = vec_to_hashmap(Some(entities.clone()));
-        let elapsed2 = start2.elapsed().as_millis();
+        let elapsed2 = start2.elapsed().as_millis();*/
 
         println!("Method 1 elapsed time: {}", elapsed1);
-        println!("Method 2 elapsed time: {}", elapsed2);
-        println!("HashMap length: {} {}", hm1.len(), hm2.len());
+        //println!("Method 2 elapsed time: {}", elapsed2);
+        //println!("HashMap length: {} {}", hm1.len(), hm2.len());
     }
 
     /*    #[tokio::test]

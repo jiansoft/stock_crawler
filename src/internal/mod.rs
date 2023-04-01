@@ -4,7 +4,7 @@ use encoding::{DecoderTrap, Encoding};
 use once_cell::sync::Lazy;
 use reqwest::{Client, IntoUrl};
 use std::{sync::Arc, time::Duration};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 pub mod cache_share;
 mod calculation;
@@ -12,6 +12,7 @@ mod crawler;
 pub mod database;
 mod free_dns;
 pub mod scheduler;
+pub mod util;
 
 static CLIENT: Lazy<Arc<Mutex<Client>>> = Lazy::new(|| {
     Arc::new(Mutex::new(
@@ -22,7 +23,10 @@ static CLIENT: Lazy<Arc<Mutex<Client>>> = Lazy::new(|| {
     ))
 });
 
+static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(10));
+
 pub async fn request_get<T: IntoUrl>(url: T) -> Result<String> {
+    let _permit = SEMAPHORE.acquire().await;
     let res = CLIENT.lock().await.get(url).send().await?;
 
     let text = res.text().await?;
@@ -33,7 +37,7 @@ pub async fn request_get<T: IntoUrl>(url: T) -> Result<String> {
 pub async fn request_get_big5<T: IntoUrl>(url: T) -> Option<String> {
     let res = CLIENT.lock().await.get(url).send().await;
     match res {
-        Ok(res) => match res.text_with_charset("Big5").await {
+        Ok(res) => match res.text_force_charset("Big5").await {
             Ok(t) => Some(t),
             Err(why) => {
                 logging::error_file_async(format!("{:?}", why));
@@ -48,15 +52,12 @@ pub async fn request_get_big5<T: IntoUrl>(url: T) -> Option<String> {
 }
 
 pub fn big5_to_utf8(text: &str) -> Option<String> {
-    //println!("text {:?}", text.as_bytes());
     let text_to_char = text.chars();
     let mut vec = Vec::new();
     for c in text_to_char {
-        //print!(" {:?}",c as u32);
-        let rune = c as u8;
-        vec.push(rune);
+        vec.push(c as u8);
     }
-    //println!("vec {:?}", vec.by_ref());
+
     return match encoding::all::BIG5_2003.decode(&vec, DecoderTrap::Ignore) {
         Ok(big5) => {
             return match encoding::all::UTF_8.decode(big5.as_bytes(), DecoderTrap::Ignore) {
@@ -106,7 +107,9 @@ mod tests {
         //let wording = "¹A·~¬ì§Þ·~";
         let wording = "¦³»ùÃÒ¨é¥N¸¹¤Î¦WºÙ";
         let utf8_wording = big5_to_utf8(wording).unwrap();
+
         println!("big5 :{} {:?}", wording, wording.as_bytes());
+
         println!("utf8 :{} {:?}", utf8_wording, utf8_wording.as_bytes());
     }
 

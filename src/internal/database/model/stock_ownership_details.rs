@@ -202,6 +202,6 @@ mod tests {
         } else if let Err(err) = r {
             logging::error_file_async(format!("{:#?} ", err));
         }
-        //logging::info_file_async("結束 fetch".to_string());
+        logging::info_file_async("結束 fetch_stock_inventory".to_string());
     }
 }

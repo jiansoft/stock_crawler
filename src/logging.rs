@@ -1,12 +1,10 @@
 use chrono::{format::DelayedFormat, DateTime, Local};
-use concat_string::concat_string;
 use crossbeam_channel::{unbounded, Sender};
 use once_cell::sync::Lazy;
-use slog::*;
-use slog_atomic::*;
 use std::{
-    fs,
-    fs::OpenOptions,
+    fmt::Write as _,
+    fs::{self, OpenOptions},
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
     thread,
 };
@@ -19,34 +17,51 @@ pub struct Logger {
 
 impl Logger {
     fn new(log_name: &str) -> Self {
-        let (tx, rx) = unbounded::<LogMessage>();
         let log_path = Self::get_log_path(log_name).unwrap_or_else(|| {
             panic!("Failed to create log directory.");
         });
+        let (tx, rx) = unbounded::<LogMessage>();
 
-        //寫入檔案的操作使用另一個線程處理
+        // 寫入檔案的操作使用另一個線程處理
         thread::spawn(move || {
-            let slog = create_slog(log_path.as_path());
-            let mut together = String::with_capacity(4096);
-            together.push_str("\r\n");
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .truncate(false)
+                .open(log_path)
+                .unwrap_or_else(|e| {
+                    panic!("Failed to open log file: {}", e);
+                });
+
+            let mut writer = BufWriter::new(file);
+            let mut line = String::with_capacity(4096);
 
             while let Ok(received) = rx.recv() {
-                together.push_str(
-                    concat_string!(
-                        received.created_at.format("%F %X%.6f").to_string(),
-                        " ",
-                        received.level.to_string(),
-                        " ",
-                        received.msg,
-                        "\r\n"
-                    )
-                    .as_str(),
-                );
+                writeln!(
+                    &mut line,
+                    "{} {} {}",
+                    received.created_at.format("%F %X%.6f"),
+                    received.level,
+                    received.msg
+                )
+                .expect("Failed to format log line.");
 
-                if rx.is_empty() || together.len() >= 4096 {
-                    slog::info!(slog, "{}", together);
-                    together.clear();
-                    together.push_str("\r\n");
+                if rx.is_empty() || line.len() >= 4096 {
+                    match writeln!(&mut line) {
+                        Ok(_) => {
+                            writer
+                                .write_all(line.as_bytes())
+                                .expect("Failed to write to log file.");
+                            writer.flush().expect("Failed to flush log file.");
+                        }
+                        Err(why) => {
+                            info_console(format!("Failed to format log line. because:{:#?}", why));
+                            info_console(line.clone())
+                        }
+                    }
+                    //writeln!(&mut line).expect("Failed to format log line.");
+
+                    line.clear();
                 }
             }
         });
@@ -96,24 +111,6 @@ impl LogMessage {
             created_at: Local::now(),
         }
     }
-}
-
-fn create_slog(log_path: &Path) -> slog::Logger {
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .truncate(false)
-        .open(log_path)
-        .unwrap_or_else(|e| {
-            panic!("Failed to open log file: {}", e);
-        });
-
-    let decorator = slog_term::PlainDecorator::new(file);
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).chan_size(512).build().fuse();
-    let drain = AtomicSwitch::new(drain);
-
-    slog::Logger::root(drain, o!())
 }
 
 pub fn info_file_async(log: String) {

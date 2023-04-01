@@ -39,7 +39,6 @@ pub async fn calculate(year: i32) {
     logging::info_file_async("計算指定年份領取的股利結束".to_string());
 }
 
-
 /*/// 計算指定年份領取的股利
 pub async fn calculate(year: i32) {
     logging::info_file_async("計算指定年份領取的股利開始".to_string());

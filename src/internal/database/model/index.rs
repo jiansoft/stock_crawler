@@ -1,8 +1,8 @@
-use crate::{internal::crawler, internal::database::DB, logging};
+use crate::{internal::database::DB, logging};
 use anyhow;
 use chrono::Local;
 use futures::StreamExt;
-use rust_decimal::{prelude::FromPrimitive, Decimal};
+use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 use std::collections::HashMap;
 
@@ -10,11 +10,15 @@ use std::collections::HashMap;
 pub struct Entity {
     pub category: String,
     pub date: chrono::NaiveDate,
-    pub trade_value: Decimal,
-    pub trading_volume: Decimal,
-    pub transaction: Decimal,
-    pub change: Decimal,
     pub index: Decimal,
+    /// 漲跌點數
+    pub change: Decimal,
+    /// 成交金額
+    pub trade_value: Decimal,
+    /// 成交筆數
+    pub transaction: Decimal,
+    /// 成交股數
+    pub trading_volume: Decimal,
     pub create_time: chrono::DateTime<Local>,
     pub update_time: chrono::DateTime<Local>,
 }
@@ -34,21 +38,28 @@ impl Entity {
         }
     }
 
-    /// 建立一個 Entity 數據來源為 taiwan_capitalization_weighted_stock_index::Stock
-    pub fn from_index_response(
-        model: &crawler::taiwan_capitalization_weighted_stock_index::Index,
-    ) -> Self {
-        Entity {
-            category: model.category.to_string(),
-            date: model.date,
-            index: Decimal::from_f64(model.index).unwrap_or(Decimal::ZERO),
-            change: Decimal::from_f64(model.change).unwrap_or(Decimal::ZERO),
-            trade_value: Decimal::from_f64(model.trade_value).unwrap_or(Decimal::ZERO),
-            transaction: Decimal::from_f64(model.transaction).unwrap_or(Decimal::ZERO),
-            trading_volume: Decimal::from_f64(model.trading_volume).unwrap_or(Decimal::ZERO),
-            create_time: model.create_time,
-            update_time: model.update_time,
-        }
+    /// date與 category 為組合鍵 unique
+    pub async fn upsert(&self) -> anyhow::Result<()> {
+        let sql = r#"
+insert into index (
+    category, "date", trading_volume, "transaction", trade_value, change, index, create_time, update_time
+) values (
+    $1,$2,$3,$4,$5,$6,$7,$8,$9
+) ON CONFLICT ("date",category) DO UPDATE SET update_time = excluded.update_time;
+        "#;
+        sqlx::query(sql)
+            .bind(&self.category)
+            .bind(self.date)
+            .bind(self.trading_volume)
+            .bind(self.transaction)
+            .bind(self.trade_value)
+            .bind(self.change)
+            .bind(self.index)
+            .bind(self.create_time)
+            .bind(self.update_time)
+            .execute(&DB.pool)
+            .await?;
+        Ok(())
     }
 }
 

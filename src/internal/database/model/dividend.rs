@@ -79,4 +79,3 @@ impl Clone for Entity {
         }
     }
 }
-
