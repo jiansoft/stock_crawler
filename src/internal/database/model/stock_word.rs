@@ -3,7 +3,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use rocket::form::validate::Len;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
@@ -148,7 +148,26 @@ pub fn split(w: &str) -> Vec<String> {
         }
     }
 
+    words.sort();
     words
+}
+
+pub fn split_v1(word: &str) -> Vec<String> {
+    let word = word.replace(&['*', '-'][..], "");
+    let mut words = HashSet::new();
+
+    for i in 0..word.chars().count() {
+        let text = word.chars().skip(i);
+
+        for j in 1..=text.clone().count() {
+            let w = text.clone().take(j).collect::<String>();
+            words.insert(w);
+        }
+    }
+
+    let mut sorted_words: Vec<String> = words.into_iter().collect();
+    sorted_words.sort();
+    sorted_words
 }
 
 /// 將 vec 轉成 hashmap
@@ -225,7 +244,7 @@ mod tests {
         println!("split: {:?}, elapsed time: {:?}", result, end);
     }
 
-    /*    #[tokio::test]
+        #[tokio::test]
     async fn test_split_all() {
         dotenv::dotenv().ok();
         let _result = split_v1("2330台積電2330");
@@ -233,15 +252,15 @@ mod tests {
 
 
         let start = Instant::now();
-        let result = split("台積電");
+        let result = split("2330台積電");
         let duration = start.elapsed();
-        println!("split() result: {:?}, duration: {:?}", result, duration);
+        println!("split   () result: {:?}, duration: {:?}", result, duration);
 
         let start = Instant::now();
-        let result = split_v1("台積電");
+        let result = split_v1("2330台積電");
         let duration = start.elapsed();
         println!("split_v1() result: {:?}, duration: {:?}", result, duration);
-    }*/
+    }
 
     #[tokio::test]
     async fn test_insert() {

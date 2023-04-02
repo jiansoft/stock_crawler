@@ -2,7 +2,7 @@ use crate::{
     internal::database::model::stock_index, internal::database::model::stock_word,
     internal::database::DB, logging,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgRow, Row};
@@ -42,7 +42,8 @@ where
             .bind(&self.stock_symbol)
             .bind(self.suspend_listing)
             .execute(&DB.pool)
-            .await?;
+            .await
+            .map_err(|err| anyhow!("Failed to update suspend listing: {:?}", err))?;
         Ok(())
     }
 
@@ -62,7 +63,8 @@ where
             .bind(self.create_time)
             .bind(self.suspend_listing)
             .execute(&DB.pool)
-            .await?;
+            .await
+            .map_err(|err| anyhow!("Failed to stock upsert: {:?}", err))?;
         self.create_index().await;
         Ok(())
     }
@@ -124,30 +126,49 @@ where
         year: i32,
         month: i32,
     ) -> Result<(Decimal, Decimal, Decimal)> {
-        let answers = sqlx::query(
-            r#"
-            SELECT
-                MIN("LowestPrice") AS lowest_price,
-                AVG("ClosingPrice") AS avg_price,
-                MAX("HighestPrice") AS highest_price
-            FROM "DailyQuotes"
-            WHERE "SecurityCode" = $security_code AND year = $year AND month = $month
-            GROUP BY "SecurityCode", year, month
+        /*let answers = sqlx::query(
+        r#"
+        SELECT
+            MIN("LowestPrice") AS lowest_price,
+            AVG("ClosingPrice") AS avg_price,
+            MAX("HighestPrice") AS highest_price
+        FROM "DailyQuotes"
+        WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
+        GROUP BY "SecurityCode", year, month
         "#,
-        )
-        .bind(&self.stock_symbol)
-        .bind(year)
-        .bind(month)
-        .try_map(|row: PgRow| {
-            let lowest_price: Decimal = row.try_get("lowest_price")?;
-            let avg_price: Decimal = row.try_get("avg_price")?;
-            let highest_price: Decimal = row.try_get("highest_price")?;
-            Ok((lowest_price, avg_price, highest_price))
-        })
-        .fetch_one(&DB.pool)
-        .await?;
+                )
+                .bind(&self.stock_symbol)
+                .bind(year)
+                .bind(month)
+                .try_map(|row: PgRow| {
+                    let lowest_price: Decimal = row.try_get("lowest_price")?;
+                    let avg_price: Decimal = row.try_get("avg_price")?;
+                    let highest_price: Decimal = row.try_get("highest_price")?;
+                    Ok((lowest_price, avg_price, highest_price))
+                })
+                .fetch_one(&DB.pool)
+                .await?;
 
-        Ok(answers)
+                Ok(answers)*/
+        let (lowest_price, avg_price, highest_price) =
+            sqlx::query_as::<_, (Decimal, Decimal, Decimal)>(
+                r#"
+                SELECT
+                    MIN("LowestPrice"),
+                    AVG("ClosingPrice"),
+                    MAX("HighestPrice")
+                FROM "DailyQuotes"
+                WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
+                GROUP BY "SecurityCode", year, month;
+                "#,
+            )
+            .bind(&self.stock_symbol)
+            .bind(year)
+            .bind(month)
+            .fetch_one(&DB.pool)
+            .await?;
+
+        Ok((lowest_price, avg_price, highest_price))
     }
 }
 
@@ -215,14 +236,25 @@ mod tests {
         dotenv::dotenv().ok();
         //logging::info_file_async("開始 fetch".to_string());
         let mut e = Entity::new();
-        e.stock_symbol = String::from("1101");
-        let r = e.lowest_avg_highest_price_by_year_and_month(2023, 1).await;
+        e.stock_symbol = String::from("2402");
+        match e.lowest_avg_highest_price_by_year_and_month(2023, 3).await {
+            Ok((lowest_price, avg_price, highest_price)) => {
+                logging::info_file_async(format!(
+                    "stock_symbol:{} lowest_price:{} avg_price:{} highest_price:{}",
+                    e.stock_symbol, lowest_price, avg_price, highest_price
+                ));
+            }
+            Err(why) => {
+                logging::error_file_async(format!("{:#?}", why));
+            }
+        }
+        /*let r = e.lowest_avg_highest_price_by_year_and_month(2023, 3).await;
         if let Ok((lowest_price, avg_price, highest_price)) = r {
             logging::info_file_async(format!(
                 "lowest_price:{} avg_price:{} highest_price:{}",
                 lowest_price, avg_price, highest_price
             ));
-        }
+        }*/
     }
     #[tokio::test]
     async fn test_create_index() {
