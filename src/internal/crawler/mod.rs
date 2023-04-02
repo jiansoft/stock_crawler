@@ -6,6 +6,8 @@ pub mod revenue;
 pub mod suspend_listing;
 /// 台股指數
 pub mod taiwan_capitalization_weighted_stock_index;
+/// dds
+pub mod free_dns;
 
 /// 市場別
 pub enum StockMarket {

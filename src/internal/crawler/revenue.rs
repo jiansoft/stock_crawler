@@ -28,7 +28,7 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) {
                 ".html"
             );
 
-            count += download(url, year, month).await;
+            count += download_revenue(url, year, month).await;
         }
     }
 
@@ -38,14 +38,14 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) {
 }
 
 /// 下載月營收
-async fn download(url: String, year: i32, month: u32) -> usize {
+async fn download_revenue(url: String, year: i32, month: u32) -> usize {
     logging::info_file_async(format!("visit url:{}", url));
 
-    let t = match request_get_big5(url).await {
-        None => {
+    let t = match util::http::request_get_use_big5(url).await {
+        Err(_) => {
             return 0;
         }
-        Some(t) => t,
+        Ok(t) => t,
     };
 
     let mut new_entity = Vec::with_capacity(1024);
@@ -76,9 +76,9 @@ async fn download(url: String, year: i32, month: u32) -> usize {
             }
 
             /*
-0公司代號	1公司名稱	2當月營收	3上月營收	4去年當月營收	5上月比較增減(%)
-6去年同月增減(%)	7當月累計營收	8去年累計營收	9前期比較增減(%)
-*/
+            0公司代號	1公司名稱	2當月營收	3上月營收	4去年當月營收	5上月比較增減(%)
+            6去年同月增減(%)	7當月累計營收	8去年累計營收	9前期比較增減(%)
+            */
 
             e.monthly = Decimal::from_str(tds[2].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);
             e.last_month = Decimal::from_str(tds[3].replace([',', ' '], "").as_str()).unwrap_or(Decimal::ZERO);

@@ -1,4 +1,4 @@
-use crate::internal::request_get;
+use crate::internal::{util};
 use crate::{config, logging};
 use concat_string::concat_string;
 
@@ -11,7 +11,7 @@ pub async fn update() {
         config::DEFAULT.afraid.token
     );
 
-    match request_get(url).await {
+    match util::http::request_get(url).await {
         Ok(t) => {
             if t.contains("Updated") {
                 logging::info_file_async(t);

@@ -1,6 +1,9 @@
 use crate::{
-    internal::cache_share::CACHE_SHARE, internal::crawler::StockMarket,
-    internal::database::model::stock, internal::request_get_big5, logging,
+    internal::cache_share::CACHE_SHARE,
+    internal::crawler::StockMarket,
+    internal::database::model::stock,
+    logging,
+    internal::util
 };
 use concat_string::concat_string;
 use scraper::{Html, Selector};
@@ -16,7 +19,7 @@ pub async fn visit(mode: StockMarket) {
     logging::info_file_async(format!("visit url:{}", url));
 
     let mut new_stocks = Vec::new();
-    if let Some(response) = request_get_big5(url).await {
+    if let Ok(response) = util::http::request_get_use_big5(url).await {
         let document = Html::parse_document(&response);
         let industries = match mode {
             StockMarket::Listed => &CACHE_SHARE.listed_market_category,
