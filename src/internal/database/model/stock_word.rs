@@ -152,22 +152,25 @@ pub fn split(w: &str) -> Vec<String> {
     words
 }
 
-pub fn split_v1(word: &str) -> Vec<String> {
-    let word = word.replace(&['*', '-'][..], "");
-    let mut words = HashSet::new();
+pub fn split_v1(w: &str) -> Vec<String> {
+    let word = w.replace(['*', '-'], "");
+    let text_rune = word.chars().collect::<Vec<_>>();
+    let text_len = text_rune.len();
+    // let mut words = Vec::with_capacity(text_len * 3);
+    let mut set = HashSet::with_capacity(text_len * 3);
 
-    for i in 0..word.chars().count() {
-        let text = word.chars().skip(i);
-
-        for j in 1..=text.clone().count() {
-            let w = text.clone().take(j).collect::<String>();
-            words.insert(w);
+    for i in 0..text_len {
+        for ii in (i + 1)..=text_len {
+            let w = text_rune[i..ii].iter().collect::<String>();
+            if !set.contains(&w) {
+                set.insert(w.clone());
+                // words.push(w);
+            }
         }
     }
-
-    let mut sorted_words: Vec<String> = words.into_iter().collect();
-    sorted_words.sort();
-    sorted_words
+    let mut words: Vec<String> = set.into_iter().collect();
+    words.sort();
+    words
 }
 
 /// 將 vec 轉成 hashmap
@@ -244,22 +247,21 @@ mod tests {
         println!("split: {:?}, elapsed time: {:?}", result, end);
     }
 
-        #[tokio::test]
+    #[tokio::test]
     async fn test_split_all() {
         dotenv::dotenv().ok();
         let _result = split_v1("2330台積電2330");
         let _result = split("2330台積電2330");
 
+        let start = Instant::now();
+        let result = split_v1("2330台積電");
+        let duration = start.elapsed();
+        println!("split_v1() result: {:?}, duration: {:?}", result, duration);
 
         let start = Instant::now();
         let result = split("2330台積電");
         let duration = start.elapsed();
         println!("split   () result: {:?}, duration: {:?}", result, duration);
-
-        let start = Instant::now();
-        let result = split_v1("2330台積電");
-        let duration = start.elapsed();
-        println!("split_v1() result: {:?}, duration: {:?}", result, duration);
     }
 
     #[tokio::test]

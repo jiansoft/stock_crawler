@@ -10,6 +10,7 @@ use crate::{
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use clokwerk::{AsyncScheduler, Interval, Job, TimeUnits};
 use std::time::Duration;
+use crate::internal::reminder;
 
 /// 啟動排程
 pub async fn start() {
@@ -39,6 +40,16 @@ pub async fn start() {
             let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, timezone);
             //取得台股上月的營收
             revenue::visit(last_month_timezone).await;
+        });
+
+    //每日上午八點
+    scheduler
+        .every(Interval::Days(1))
+        .at("08:00:00")
+        .run(|| async {
+            let today: NaiveDate = Local::now().date_naive();
+            //提醒本日除權息的股票
+            reminder::ex_dividend::execute(today).await;
         });
 
     //每日下午三點
