@@ -3,7 +3,7 @@ use config::{Config as config_config, File as config_file};
 use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{env, fs, io, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, env, fs, io, path::PathBuf, str::FromStr};
 
 const CONFIG_PATH: &str = "app.json";
 
@@ -12,6 +12,7 @@ pub struct App {
     #[serde(default)]
     pub afraid: Afraid,
     pub postgresql: PostgreSQL,
+    pub bot: Bot,
 }
 
 const AFRAID_TOKEN: &str = "AFRAID_TOKEN";
@@ -43,6 +44,20 @@ pub struct PostgreSQL {
     pub password: String,
     #[serde(default)]
     pub db: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Bot {
+    pub telegram: Telegram,
+}
+
+const TELEGRAM_TOKEN: &str = "TELEGRAM_TOKEN";
+const TELEGRAM_ALLOWED: &str = "TELEGRAM_ALLOWED";
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Telegram {
+    pub allowed: HashMap<i64, String>,
+    pub token: String,
 }
 
 //第一種 lazy 的作法
@@ -92,6 +107,14 @@ impl App {
 
     /// 從 env 中讀取設定值
     fn from_env() -> Self {
+        let tg_allowed = env::var(TELEGRAM_ALLOWED).expect(TELEGRAM_ALLOWED);
+        let mut allowed_list: HashMap<i64, String> = Default::default();
+        if !tg_allowed.is_empty() {
+            if let Ok(allowed) = serde_json::from_str::<HashMap<i64, String>>(&tg_allowed) {
+                allowed_list = allowed;
+            }
+        }
+
         App {
             afraid: Afraid {
                 token: env::var(AFRAID_TOKEN).expect(AFRAID_TOKEN),
@@ -107,6 +130,12 @@ impl App {
                 user: env::var(POSTGRESQL_USER).expect(POSTGRESQL_USER),
                 password: env::var(POSTGRESQL_PASSWORD).expect(POSTGRESQL_PASSWORD),
                 db: env::var(POSTGRESQL_DB).expect(POSTGRESQL_DB),
+            },
+            bot: Bot {
+                telegram: Telegram {
+                    allowed: allowed_list,
+                    token: env::var(TELEGRAM_TOKEN).expect(TELEGRAM_TOKEN),
+                },
             },
         }
     }
@@ -137,6 +166,24 @@ impl App {
             self.postgresql.db = db;
         }
 
+        if let Ok(tg_allowed) = env::var(TELEGRAM_ALLOWED) {
+            match serde_json::from_str::<HashMap<i64, String>>(&tg_allowed) {
+                Ok(allowed) => {
+                    self.bot.telegram.allowed = allowed;
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to serde_json because: {:?} \r\n {}",
+                        why, &tg_allowed
+                    ));
+                }
+            }
+        }
+
+        if let Ok(token) = env::var(TELEGRAM_TOKEN) {
+            self.bot.telegram.token = token
+        }
+
         self
     }
 }
@@ -155,4 +202,37 @@ fn read_config_file() -> Result<String, io::Error> {
 /// 回傳指定路徑的文字檔的內容
 pub(crate) fn read_text_file(path: PathBuf) -> Result<String, io::Error> {
     fs::read_to_string(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{thread, time};
+
+    #[tokio::test]
+    async fn test_init() {
+        dotenv::dotenv().ok();
+        logging::info_file_async(format!(
+            "SETTINGS.postgresql: {:#?}\r\nSETTINGS.secret: {:#?}\r\n",
+            SETTINGS.postgresql, SETTINGS.bot
+        ));
+        let mut map: HashMap<i64, String> = HashMap::new();
+        map.insert(123, "QQ".to_string());
+        map.insert(456, "QQ".to_string());
+        let json_str = serde_json::to_string(&map).expect("TODO: panic message");
+
+        logging::info_file_async(format!("serde_json: {}\r\n", &json_str));
+        match serde_json::from_str::<HashMap<i64, String>>(&json_str) {
+            Ok(json) => {
+                logging::info_file_async(format!("json: {:?}\r\n", json));
+            }
+            Err(why) => {
+                logging::error_file_async(format!(
+                    "Failed to serde_json because: {:?} \r\n {}",
+                    why, &json_str
+                ));
+            }
+        }
+        thread::sleep(time::Duration::from_secs(1));
+    }
 }

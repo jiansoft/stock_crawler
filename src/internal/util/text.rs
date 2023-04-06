@@ -1,6 +1,8 @@
 use crate::logging;
 use encoding::{DecoderTrap, Encoding};
+use std::collections::HashSet;
 
+#[allow(dead_code)]
 pub fn big5_to_utf8(text: &str) -> Option<String> {
     let text_to_char = text.chars();
     let mut vec = Vec::with_capacity(text.len());
@@ -25,8 +27,52 @@ pub fn big5_to_utf8(text: &str) -> Option<String> {
     };
 }
 
+/// 將中文字拆分 例︰台積電 => ["台", "台積", "台積電", "積", "積電", "電"]
+pub fn split(w: &str) -> Vec<String> {
+    let word = w.replace(['*', '-'], "");
+    let text_rune = word.chars().collect::<Vec<_>>();
+    let text_len = text_rune.len();
+    let mut words = Vec::with_capacity(text_len * 3);
+
+    for i in 0..text_len {
+        for ii in (i + 1)..=text_len {
+            let w = text_rune[i..ii].iter().collect::<String>();
+            if words.iter().any(|x| *x == w) {
+                continue;
+            }
+            words.push(w);
+        }
+    }
+
+    words.sort();
+    words
+}
+
+#[allow(dead_code)]
+pub fn split_v1(w: &str) -> Vec<String> {
+    let word = w.replace(['*', '-'], "");
+    let text_rune = word.chars().collect::<Vec<_>>();
+    let text_len = text_rune.len();
+    // let mut words = Vec::with_capacity(text_len * 3);
+    let mut set = HashSet::with_capacity(text_len * 3);
+
+    for i in 0..text_len {
+        for ii in (i + 1)..=text_len {
+            let w = text_rune[i..ii].iter().collect::<String>();
+            if !set.contains(&w) {
+                set.insert(w.clone());
+                // words.push(w);
+            }
+        }
+    }
+    let mut words: Vec<String> = set.into_iter().collect();
+    words.sort();
+    words
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
@@ -39,6 +85,33 @@ mod tests {
         println!("big5 :{} {:?}", wording, wording.as_bytes());
 
         println!("utf8 :{} {:?}", utf8_wording, utf8_wording.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn test_split() {
+        dotenv::dotenv().ok();
+        let chinese_word = "台積電";
+        let start = Instant::now();
+        let result = split(chinese_word);
+        let end = start.elapsed();
+        println!("split: {:?}, elapsed time: {:?}", result, end);
+    }
+
+    #[tokio::test]
+    async fn test_split_all() {
+        dotenv::dotenv().ok();
+        let _result = split_v1("2330台積電2330");
+        let _result = split("2330台積電2330");
+
+        let start = Instant::now();
+        let result = split_v1("2330台積電2330");
+        let duration = start.elapsed();
+        println!("split_v1() result: {:?}, duration: {:?}", result, duration);
+
+        let start = Instant::now();
+        let result = split("2330台積電2330");
+        let duration = start.elapsed();
+        println!("split   () result: {:?}, duration: {:?}", result, duration);
     }
 
     /*    #[tokio::test]

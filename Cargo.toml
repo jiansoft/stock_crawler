@@ -11,7 +11,7 @@ clokwerk = "0.4.0"
 reqwest = { path ="../reqwest", features = ["json","blocking"] }
 tokio = { version = "1", features = ["full"] }
 log = { version = "^0.4.17", features = ["std"] }
-rocket = "0.5.0-rc.2"
+rocket = "0.5.0-rc.3"
 slog = { version = "2.7", features = ["max_level_trace", "release_max_level_debug"] }
 slog-async = "2.7"
 slog-term = "2.9"
@@ -29,10 +29,10 @@ futures ="0.3"
 tokio-test = "0.4.2"
 sqlx = { version = "0.6", features = [ "runtime-tokio-native-tls" , "postgres","time", "chrono" ,"decimal","macros"] }
 schemars = "0.8.3"
-rust_decimal = "1.28.0"
-rust_decimal_macros = "1.28.0"
+rust_decimal = "1.29"
+rust_decimal_macros = "1.29"
 encoding = "0.2"
-scraper = "0.15.0"
+scraper = "0.16"
 anyhow = "1.0"
 crossbeam-channel = "0.5.7"
 num_cpus = "1.15.0"

@@ -1,45 +1,64 @@
+use crate::{config::SETTINGS, internal::bot, internal::database::DB, logging};
 use chrono::NaiveDate;
-use sqlx::{
-    postgres::PgRow,
-    Row
-};
+use sqlx::FromRow;
+use std::fmt::Write;
 
-
-use crate::internal::database::{DB, model};
-
-
-use crate::logging;
+#[derive(FromRow, Debug)]
+struct StockEntity {
+    stock_symbol: String,
+    name: String,
+}
 
 /// 提醒本日為除權息的股票有那些
 pub async fn execute(date: NaiveDate) {
-    match  sqlx::query(
-        r#"
-select s.stock_symbol,s."Name"
+    let date_str = date.format("%Y-%m-%d").to_string();
+    logging::info_file_async(format!("ex_dividend date:{}", date_str));
+
+    let sql = r#"
+select s.stock_symbol,s."Name" as name
 from dividend as d
 inner join stocks as s on s.stock_symbol = d.security_code
 where "ex-dividend_date1" = $1 or "ex-dividend_date2" = $2
-        "#,
-    )
-        .bind(date.format("%Y-%m-%d").to_string())
-        .bind(date.format("%Y-%m-%d").to_string())
-        .try_map(|row: PgRow| {
-            Ok(model::stock::Entity {
-                category: 0,
-                stock_symbol: row.try_get("stock_symbol")?,
-                name: row.try_get("Name")?,
-                suspend_listing: false,
-                create_time: Default::default(),
-            })
-        })
-        .fetch_all(&DB.pool).await{
+        "#;
+
+    match sqlx::query_as::<_, StockEntity>(sql)
+        .bind(&date_str)
+        .bind(&date_str)
+        .fetch_all(&DB.pool)
+        .await
+    {
         Ok(stocks) => {
-            logging::info_file_async(format!("date:{:?} rows:{:#?}", date,stocks));
+            let mut msg = String::with_capacity(1024);
+            if writeln!(&mut msg, "{} 進行除權息的股票如下︰", date_str).is_ok() {
+                for stock in stocks {
+                    if writeln!(
+                        &mut msg,
+                        "    {} {} https://tw.stock.yahoo.com/quote/{}",
+                        stock.name, stock.stock_symbol, stock.stock_symbol
+                    )
+                    .is_err()
+                    {
+                        continue;
+                    }
+                }
+            }
+
+            for id in SETTINGS.bot.telegram.allowed.keys() {
+                let payload = bot::telegram::SendMessageRequest {
+                    chat_id: *id,
+                    text: &msg,
+                };
+
+                if let Err(why) = bot::telegram::send_message(payload).await {
+                    logging::error_file_async(format!(
+                        "Failed to telegram::send_message() because: {:?}",
+                        why
+                    ));
+                }
+            }
         }
         Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to fetch entities (model::stock) because: {:?}",
-                why
-            ));
+            logging::error_file_async(format!("Failed to fetch StockEntity because: {:?}", why));
         }
     }
 }

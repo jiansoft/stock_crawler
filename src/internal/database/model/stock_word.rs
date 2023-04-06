@@ -3,7 +3,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use rocket::form::validate::Len;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
@@ -131,48 +131,6 @@ impl Default for Entity {
     }
 }
 
-/// 將中文字拆分 例︰台積電 => ["台", "台積", "台積電", "積", "積電", "電"]
-pub fn split(w: &str) -> Vec<String> {
-    let word = w.replace(['*', '-'], "");
-    let text_rune = word.chars().collect::<Vec<_>>();
-    let text_len = text_rune.len();
-    let mut words = Vec::with_capacity(text_len * 3);
-
-    for i in 0..text_len {
-        for ii in (i + 1)..=text_len {
-            let w = text_rune[i..ii].iter().collect::<String>();
-            if words.iter().any(|x| *x == w) {
-                continue;
-            }
-            words.push(w);
-        }
-    }
-
-    words.sort();
-    words
-}
-
-pub fn split_v1(w: &str) -> Vec<String> {
-    let word = w.replace(['*', '-'], "");
-    let text_rune = word.chars().collect::<Vec<_>>();
-    let text_len = text_rune.len();
-    // let mut words = Vec::with_capacity(text_len * 3);
-    let mut set = HashSet::with_capacity(text_len * 3);
-
-    for i in 0..text_len {
-        for ii in (i + 1)..=text_len {
-            let w = text_rune[i..ii].iter().collect::<String>();
-            if !set.contains(&w) {
-                set.insert(w.clone());
-                // words.push(w);
-            }
-        }
-    }
-    let mut words: Vec<String> = set.into_iter().collect();
-    words.sort();
-    words
-}
-
 /// 將 vec 轉成 hashmap
 pub fn vec_to_hashmap_key_using_word(entities: Option<Vec<Entity>>) -> HashMap<String, Entity> {
     let mut stock_words = HashMap::with_capacity(entities.len());
@@ -200,6 +158,7 @@ mod tests {
     use super::*;
     use crate::logging;
     use std::time::Instant;
+    use crate::internal::util;
 
     #[tokio::test]
     async fn test_vec_to_hashmap() {
@@ -237,32 +196,7 @@ mod tests {
             println!("split: {:?}, elapsed time: {:?}", result, end);
         }
     */
-    #[tokio::test]
-    async fn test_split() {
-        dotenv::dotenv().ok();
-        let chinese_word = "台積電";
-        let start = Instant::now();
-        let result = split(chinese_word);
-        let end = start.elapsed();
-        println!("split: {:?}, elapsed time: {:?}", result, end);
-    }
 
-    #[tokio::test]
-    async fn test_split_all() {
-        dotenv::dotenv().ok();
-        let _result = split_v1("2330台積電2330");
-        let _result = split("2330台積電2330");
-
-        let start = Instant::now();
-        let result = split_v1("2330台積電");
-        let duration = start.elapsed();
-        println!("split_v1() result: {:?}, duration: {:?}", result, duration);
-
-        let start = Instant::now();
-        let result = split("2330台積電");
-        let duration = start.elapsed();
-        println!("split   () result: {:?}, duration: {:?}", result, duration);
-    }
 
     #[tokio::test]
     async fn test_insert() {
@@ -285,7 +219,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_by_word() {
         dotenv::dotenv().ok();
-        let word = split("台積電");
+        let word = util::text::split("台積電");
         let entities = Entity::list_by_word(&word).await;
         logging::info_file_async(format!("entities:{:#?}", entities));
         logging::info_file_async(format!(

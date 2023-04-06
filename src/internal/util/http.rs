@@ -1,11 +1,9 @@
 use anyhow::*;
 use once_cell::sync::Lazy;
 use reqwest::{Client, IntoUrl};
-use serde::de::DeserializeOwned;
-use std::{sync::Arc, time::Duration};
+use serde::{de::DeserializeOwned, Serialize};
+use std::{result::Result::Ok, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, Semaphore};
-
-use std::result::Result::Ok;
 
 static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
     let cpus = num_cpus::get();
@@ -52,6 +50,19 @@ pub async fn request_get_use_big5<T: IntoUrl>(url: T) -> Result<String> {
     Ok(res.text_force_charset("Big5").await?)
 }
 
+/// 封裝 reqwest 的操作 Serialize
+pub async fn do_request_post_use_json<REQ: Serialize, RES: DeserializeOwned>(
+    url: &str,
+    json: &REQ,
+) -> Result<RES> {
+    let _permit = SEMAPHORE.acquire().await?;
+    let res: reqwest::Response;
+    {
+        res = CLIENT.lock().await.post(url).json(json).send().await?;
+    }
+
+    Ok(res.json::<RES>().await?)
+}
 
 #[cfg(test)]
 mod tests {

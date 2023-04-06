@@ -11,5 +11,11 @@
     "user": "user",
     "password": "password",
     "db": "db"
+  },
+  "bot": {
+    "telegram": {
+      "allowed": {},
+      "token": ""
+    }
   }
 }

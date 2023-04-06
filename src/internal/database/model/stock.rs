@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgRow, Row};
+use crate::internal::util;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 stocks
@@ -79,7 +80,7 @@ where
         }
 
         // 拆解股票名稱為單詞並加入股票代碼
-        let mut words = stock_word::split(&self.name);
+        let mut words = util::text::split(&self.name);
         words.push(self.stock_symbol.to_string());
 
         // 查詢已存在的單詞，轉成 hashmap 方便查詢

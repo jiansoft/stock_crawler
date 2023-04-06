@@ -37,17 +37,20 @@ impl Logger {
             let mut line = String::with_capacity(4096);
 
             while let Ok(received) = rx.recv() {
-                writeln!(
+                if writeln!(
                     &mut line,
                     "{} {} {}",
                     received.created_at.format("%F %X%.6f"),
                     received.level,
                     received.msg
                 )
-                .expect("Failed to format log line.");
+                .is_err()
+                {
+                    continue;
+                }
 
                 if rx.is_empty() || line.len() >= 4096 {
-                    match writeln!(&mut line) {
+                    /* match writeln!(&mut line) {
                         Ok(_) => {
                             writer
                                 .write_all(line.as_bytes())
@@ -58,6 +61,15 @@ impl Logger {
                             info_console(format!("Failed to format log line. because:{:#?}", why));
                             info_console(line.clone())
                         }
+                    }*/
+                    if writer.write_all(line.as_bytes()).is_err() {
+                        //.expect("Failed to write to log file.");
+                        info_console(line.clone())
+                    }
+
+                    if writer.flush().is_err() {
+                        //.expect("Failed to flush log file.");
+                        info_console(line.clone())
                     }
                     //writeln!(&mut line).expect("Failed to format log line.");
 
