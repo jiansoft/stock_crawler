@@ -1,9 +1,7 @@
+use crate::internal::bot;
 use crate::{
-    internal::cache_share::CACHE_SHARE,
-    internal::crawler::StockMarket,
-    internal::database::model::stock,
-    logging,
-    internal::util
+    internal::cache_share::CACHE_SHARE, internal::crawler::StockMarket,
+    internal::database::model::stock, internal::util, logging,
 };
 use concat_string::concat_string;
 use scraper::{Html, Selector};
@@ -19,7 +17,7 @@ pub async fn visit(mode: StockMarket) {
     logging::info_file_async(format!("visit url:{}", url));
 
     let mut new_stocks = Vec::new();
-    if let Ok(response) = util::http::request_get_use_big5(url).await {
+    if let Ok(response) = util::http::request_get_use_big5(&url).await {
         let document = Html::parse_document(&response);
         let industries = match mode {
             StockMarket::Listed => &CACHE_SHARE.listed_market_category,
@@ -75,10 +73,17 @@ pub async fn visit(mode: StockMarket) {
     for stock in new_stocks {
         match stock.upsert().await {
             Ok(_) => {
+                let msg = format!("stock add {:?}", stock);
                 if let Ok(mut stocks) = CACHE_SHARE.stocks.write() {
                     stocks.insert(stock.stock_symbol.to_string(), stock.clone());
-                    logging::info_file_async(format!("stock add {:?}", stock));
                 }
+
+                //todo 需要通知另一個服務已新增加一個股票代號
+                if let Err(why) = bot::telegram::send_to_allowed(&msg).await {
+                    logging::error_file_async(format!("Failed to send_to_allowed because {:?}", why));
+                }
+
+                logging::info_file_async(msg);
             }
             Err(why) => {
                 logging::error_file_async(format!("because {:?}", why));

@@ -50,28 +50,20 @@ impl Logger {
                 }
 
                 if rx.is_empty() || line.len() >= 4096 {
-                    /* match writeln!(&mut line) {
-                        Ok(_) => {
-                            writer
-                                .write_all(line.as_bytes())
-                                .expect("Failed to write to log file.");
-                            writer.flush().expect("Failed to flush log file.");
-                        }
-                        Err(why) => {
-                            info_console(format!("Failed to format log line. because:{:#?}", why));
-                            info_console(line.clone())
-                        }
-                    }*/
-                    if writer.write_all(line.as_bytes()).is_err() {
-                        //.expect("Failed to write to log file.");
-                        info_console(line.clone())
+                    if let Err(why) = writeln!(&mut line) {
+                        info_console(format!("Failed to writeln a line. because:{:#?}", why));
                     }
 
-                    if writer.flush().is_err() {
-                        //.expect("Failed to flush log file.");
-                        info_console(line.clone())
+                    if let Err(why) = writer.write_all(line.as_bytes()) {
+                        info_console(format!(
+                            "Failed to write to log file. because:{:#?}\r\nmsg:{}",
+                            why, line
+                        ));
                     }
-                    //writeln!(&mut line).expect("Failed to format log line.");
+
+                    if let Err(why) = writer.flush() {
+                        info_console(format!("Failed to flush log file. because:{:#?}", why));
+                    }
 
                     line.clear();
                 }

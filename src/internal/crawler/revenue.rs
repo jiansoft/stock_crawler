@@ -41,7 +41,7 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) {
 async fn download_revenue(url: String, year: i32, month: u32) -> usize {
     logging::info_file_async(format!("visit url:{}", url));
 
-    let t = match util::http::request_get_use_big5(url).await {
+    let t = match util::http::request_get_use_big5(&url).await {
         Err(_) => {
             return 0;
         }

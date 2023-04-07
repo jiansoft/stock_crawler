@@ -1,4 +1,3 @@
-
 use crate::{internal::cache_share::CACHE_SHARE, internal::util, logging};
 use serde::Deserialize;
 
@@ -19,7 +18,7 @@ pub async fn visit() {
 
     let mut items_to_update = Vec::new();
 
-    match util::http::do_request_get::<Vec<SuspendListing>>(url).await {
+    match util::http::request_get_use_json::<Vec<SuspendListing>>(url).await {
         Ok(delisting) => match CACHE_SHARE.stocks.read() {
             Ok(stocks) => {
                 for item in delisting {

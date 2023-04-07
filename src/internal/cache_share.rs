@@ -1,9 +1,9 @@
 use crate::{
     internal::{database::model::index, database::model::revenue, database::model::stock},
     logging,
+    internal::database::model::last_daily_quotes
 };
 //use futures::executor::block_on;
-
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::RwLock};
 
@@ -23,6 +23,8 @@ pub struct CacheShare {
     pub emerging_market_category: HashMap<&'static str, i32>,
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
     pub last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Entity>>>,
+    /// 存放最後交易日股票報價數據
+    pub last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::Entity>>,
 }
 
 impl CacheShare {
@@ -123,6 +125,7 @@ impl CacheShare {
                 ("電子商務", 1171),
             ]),
             last_revenues: RwLock::new(HashMap::new()),
+            last_trading_day_quotes: RwLock::new(HashMap::new()),
         }
     }
 
@@ -170,6 +173,22 @@ impl CacheShare {
             }
         }
 
+        let last_daily_quotes_from_db = last_daily_quotes::fetch().await;
+        match self.last_trading_day_quotes.write() {
+            Ok(mut last_daily_quotes) => {
+                if let Ok(result) = last_daily_quotes_from_db {
+                    for e in result {
+                        last_daily_quotes
+                            .entry(e.security_code.to_string())
+                            .or_insert(e.clone());
+                    }
+                }
+            }
+            Err(why) => {
+                logging::error_file_async(format!("because {:?}", why));
+            }
+        }
+
         logging::info_file_async(format!(
             "CacheShare.indices 初始化 {}",
             self.indices.read().unwrap().len()
@@ -178,6 +197,11 @@ impl CacheShare {
         logging::info_file_async(format!(
             "CacheShare.stocks 初始化 {}",
             self.stocks.read().unwrap().len()
+        ));
+
+        logging::info_file_async(format!(
+            "CacheShare.last_trading_day_quotes 初始化 {}",
+            self.last_trading_day_quotes.read().unwrap().len()
         ));
 
         if let Ok(revenues) = self.last_revenues.read() {

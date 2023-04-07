@@ -1,4 +1,4 @@
-use crate::{config::SETTINGS, internal::bot, internal::database::DB, logging};
+use crate::{internal::bot, internal::database::DB, logging};
 use chrono::NaiveDate;
 use sqlx::FromRow;
 use std::fmt::Write;
@@ -43,18 +43,11 @@ where "ex-dividend_date1" = $1 or "ex-dividend_date2" = $2
                 }
             }
 
-            for id in SETTINGS.bot.telegram.allowed.keys() {
-                let payload = bot::telegram::SendMessageRequest {
-                    chat_id: *id,
-                    text: &msg,
-                };
-
-                if let Err(why) = bot::telegram::send_message(payload).await {
-                    logging::error_file_async(format!(
-                        "Failed to telegram::send_message() because: {:?}",
-                        why
-                    ));
-                }
+            if let Err(why) = bot::telegram::send_to_allowed(&msg).await {
+                logging::error_file_async(format!(
+                    "Failed to telegram::send_to_allowed() because: {:?}",
+                    why
+                ));
             }
         }
         Err(why) => {

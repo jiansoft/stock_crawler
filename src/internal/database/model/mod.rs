@@ -8,3 +8,5 @@ mod stock_index;
 /// 持股名細 原表名 stock_ownership_details
 pub mod stock_ownership_details;
 mod stock_word;
+pub mod daily_quote;
+pub mod last_daily_quotes;

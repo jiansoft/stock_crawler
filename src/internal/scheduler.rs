@@ -1,16 +1,13 @@
+use crate::internal::reminder;
 use crate::{
-    internal::calculation,
-    internal::crawler::international_securities_identification_number,
-    internal::crawler::revenue,
+    internal::calculation, internal::crawler,
+    internal::crawler::international_securities_identification_number, internal::crawler::revenue,
     internal::crawler::suspend_listing,
-    internal::crawler::taiwan_capitalization_weighted_stock_index,
-    internal::crawler::StockMarket,
-    internal::crawler
+    internal::crawler::taiwan_capitalization_weighted_stock_index, internal::crawler::StockMarket,
 };
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use clokwerk::{AsyncScheduler, Interval, Job, TimeUnits};
 use std::time::Duration;
-use crate::internal::reminder;
 
 /// 啟動排程
 pub async fn start() {
@@ -71,7 +68,7 @@ pub async fn start() {
         });
 
     scheduler.every(60.seconds()).run(|| async {
-       crawler:: free_dns::update().await;
+        crawler::free_dns::update().await;
     });
 
     tokio::spawn(async move {

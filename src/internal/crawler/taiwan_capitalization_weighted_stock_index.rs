@@ -27,7 +27,7 @@ pub async fn visit() {
 
     logging::info_file_async(format!("visit url:{}", url,));
 
-    match util::http::do_request_get::<TaiwanExchangeIndexResponse>(&url).await {
+    match util::http::request_get_use_json::<TaiwanExchangeIndexResponse>(&url).await {
         Ok(tai_ex) => {
             logging::info_file_async(format!("tai_ex:{:?}", tai_ex));
             if tai_ex.stat.to_uppercase() != "OK" {
@@ -73,13 +73,10 @@ pub async fn visit() {
 
                     index.date = NaiveDate::from_str(date.as_str()).unwrap();
                     let key = index.date.to_string() + "_" + &index.category;
-                    if cache_share::CACHE_SHARE
-                        .indices
-                        .read()
-                        .unwrap()
-                        .contains_key(key.as_str())
-                    {
-                        continue;
+                    if let Ok(indices) = cache_share::CACHE_SHARE.indices.read() {
+                        if indices.contains_key(key.as_str()) {
+                            continue;
+                        }
                     }
 
                     index.trading_volume = match Decimal::from_str(&item[1].replace(',', "")) {
@@ -161,7 +158,7 @@ mod tests {
             "&_=",
             Local::now().timestamp_millis().to_string()
         );
-        match util::http::do_request_get::<TaiwanExchangeIndexResponse>(&url).await {
+        match util::http::request_get_use_json::<TaiwanExchangeIndexResponse>(&url).await {
             Ok(tai) => {
                 logging::info_file_async(format!("tai{:#?}", tai));
             }

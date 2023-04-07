@@ -1,9 +1,9 @@
 use crate::logging;
+use anyhow::*;
 use config::{Config as config_config, File as config_file};
-use lazy_static::lazy_static;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, env, fs, io, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, env, fs, io, path::PathBuf, result::Result::Ok, str::FromStr};
 
 const CONFIG_PATH: &str = "app.json";
 
@@ -60,12 +60,6 @@ pub struct Telegram {
     pub token: String,
 }
 
-//第一種 lazy 的作法
-lazy_static! {
-    pub static ref DEFAULT: App = App::new();
-}
-
-//第二種 lazy 的作法
 pub static SETTINGS: Lazy<App> = Lazy::new(|| App::get().expect("Config error"));
 
 impl App {
@@ -93,7 +87,7 @@ impl App {
         }
     }
 
-    fn get() -> Result<Self, config::ConfigError> {
+    fn get() -> Result<Self> {
         let config_path = config_path();
         if config_path.exists() {
             let config: App = config_config::builder()
@@ -102,6 +96,7 @@ impl App {
                 .try_deserialize()?;
             return Ok(config.override_with_env());
         }
+
         Ok(App::from_env())
     }
 

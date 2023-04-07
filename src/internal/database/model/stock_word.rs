@@ -3,7 +3,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use rocket::form::validate::Len;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
@@ -156,9 +156,9 @@ fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::internal::util;
     use crate::logging;
     use std::time::Instant;
-    use crate::internal::util;
 
     #[tokio::test]
     async fn test_vec_to_hashmap() {
@@ -196,7 +196,6 @@ mod tests {
             println!("split: {:?}, elapsed time: {:?}", result, end);
         }
     */
-
 
     #[tokio::test]
     async fn test_insert() {

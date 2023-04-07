@@ -1,12 +1,11 @@
 use crate::{
     internal::database::model::stock_index, internal::database::model::stock_word,
-    internal::database::DB, logging,
+    internal::database::DB, internal::util, logging,
 };
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgRow, Row};
-use crate::internal::util;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 stocks
@@ -15,18 +14,21 @@ pub struct Entity {
     pub stock_symbol: String,
     pub name: String,
     pub suspend_listing: bool,
+    pub net_asset_value_per_share: Decimal,
     pub create_time: DateTime<Local>,
 }
 
 impl Entity {
     pub fn new() -> Self {
         Entity {
-            category: Default::default(),
-            stock_symbol: Default::default(),
-            name: Default::default(),
-            suspend_listing: false,
             create_time: Local::now(),
+            ..Default::default()
         }
+    }
+
+    /// 檢查股票是否為特別股
+    pub fn is_preference_shares(&self) ->  bool{
+        self.stock_symbol.chars().any(|c| c.is_ascii_uppercase())
     }
 
     pub async fn update_suspend_listing(&self) -> Result<()> {
@@ -180,9 +182,12 @@ impl Clone for Entity {
             stock_symbol: self.stock_symbol.clone(),
             name: self.name.clone(),
             suspend_listing: self.suspend_listing,
+            net_asset_value_per_share: self.net_asset_value_per_share,
             create_time: self.create_time,
         }
     }
+
+    //todo 抓完季報後需要更新 stocks.net_asset_value_per_share 的數據
 }
 
 impl Default for Entity {
@@ -194,14 +199,19 @@ impl Default for Entity {
 pub async fn fetch() -> Result<Vec<Entity>> {
     let answers = sqlx::query(
         r#"
-        select "CategoryId",stock_symbol,"Name", "SuspendListing", "CreateTime"
-        from stocks
-        order by "CategoryId"
-        "#,
+select
+    "CategoryId", stock_symbol, "Name", "SuspendListing", "CreateTime",
+    net_asset_value_per_share
+from
+    stocks
+order by
+    "CategoryId"
+"#,
     )
     .try_map(|row: PgRow| {
         Ok(Entity {
             stock_symbol: row.try_get("stock_symbol")?,
+            net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
             name: row.try_get("Name")?,
             category: row.try_get("CategoryId")?,
             suspend_listing: row.try_get("SuspendListing")?,
@@ -212,6 +222,31 @@ pub async fn fetch() -> Result<Vec<Entity>> {
     .await?;
 
     Ok(answers)
+}
+
+pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<Entity>> {
+    let rows = sqlx::query_as::<_, Entity>(
+        r#"
+select
+    s."CategoryId" as category, s.stock_symbol, s."Name" as name,
+    s."SuspendListing" as suspend_listing, s."CreateTime" as create_time,
+    s.net_asset_value_per_share
+from market_category as mc
+inner join category c on mc.market_category_id = c.market_category_id
+inner join stocks as s on c.category_id = s."CategoryId"
+where mc.market_category_id in (2,4)
+    and  c.category_id IN (
+        1, 2, 3, 4, 6, 7, 9, 10, 11, 12, 13, 19, 20, 21, 22, 24,
+        30, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 121, 122,
+        123, 124, 125, 126, 130, 131, 138, 139, 140, 141, 142, 145,
+        151, 153, 154, 155, 156, 157, 158, 159, 160, 161, 169, 170, 171)
+    and s."SuspendListing" = false and net_asset_value_per_share = 0
+"#,
+    )
+    .fetch_all(&DB.pool)
+    .await?;
+
+    Ok(rows)
 }
 
 #[cfg(test)]
@@ -257,6 +292,28 @@ mod tests {
             ));
         }*/
     }
+
+    #[tokio::test]
+    async fn test_fetch_net_asset_value_per_share_is_zero() {
+        dotenv::dotenv().ok();
+        logging::info_file_async("開始 fetch_net_asset_value_per_share_is_zero".to_string());
+        match fetch_net_asset_value_per_share_is_zero().await {
+            Ok(stocks) => {
+                for e in stocks {
+                    logging::info_file_async(format!("{} {:?} ",e.is_preference_shares(), e));
+                }
+            }
+            Err(why) => {
+                logging::error_file_async(format!(
+                    "Failed to fetch_net_asset_value_per_share_is_zero because: {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::info_file_async("結束 fetch_net_asset_value_per_share_is_zero".to_string());
+    }
+
     #[tokio::test]
     async fn test_create_index() {
         dotenv::dotenv().ok();

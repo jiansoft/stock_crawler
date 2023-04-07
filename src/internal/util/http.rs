@@ -1,67 +1,79 @@
 use anyhow::*;
-use once_cell::sync::Lazy;
-use reqwest::{Client, IntoUrl};
-use serde::{de::DeserializeOwned, Serialize};
-use std::{result::Result::Ok, sync::Arc, time::Duration};
-use tokio::sync::{Mutex, Semaphore};
+use once_cell::{sync::Lazy, sync::OnceCell};
+use reqwest::{header, Client, Method};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{result::Result::Ok, time::Duration};
+use tokio::sync::Semaphore;
 
-static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
+pub(crate) static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
     let cpus = num_cpus::get();
-    Semaphore::new(cpus)
+    Semaphore::new(cpus * 4)
 });
 
-static CLIENT: Lazy<Arc<Mutex<Client>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(
+pub(crate) static CLIENT: OnceCell<Client> = OnceCell::new();
+
+#[derive(Serialize, Deserialize)]
+/// for Request or Response
+pub struct Empty {}
+
+fn get_client() -> &'static Client {
+    CLIENT.get_or_init(|| {
         Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .tcp_keepalive(Duration::from_secs(30))
+            .pool_max_idle_per_host(10)
+            .no_proxy()
             .pool_idle_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(60))
             .build()
-            .unwrap(),
-    ))
-});
-
-/// 封裝 reqwest 的操作
-pub async fn do_request_get<T: DeserializeOwned>(url: &str) -> Result<T> {
-    let _permit = SEMAPHORE.acquire().await?;
-    let res: reqwest::Response;
-    {
-        res = CLIENT.lock().await.get(url).send().await?;
-    }
-
-    Ok(res.json::<T>().await?)
+            .expect("Failed to create reqwest client")
+    })
 }
 
-pub async fn request_get<T: IntoUrl>(url: T) -> Result<String> {
-    let _permit = SEMAPHORE.acquire().await?;
-    let res: reqwest::Response;
-    {
-        res = CLIENT.lock().await.get(url).send().await?;
-    }
-
-    Ok(res.text().await?)
+/// Perform a GET request and deserialize the JSON response
+pub async fn request_get_use_json<T: DeserializeOwned>(url: &str) -> Result<T> {
+    let rb = get_client().request(Method::GET, url);
+    let res = request_send(rb).await?;
+    res.json::<T>().await.map_err(From::from)
 }
 
-pub async fn request_get_use_big5<T: IntoUrl>(url: T) -> Result<String> {
-    let _permit = SEMAPHORE.acquire().await?;
-    let res: reqwest::Response;
-    {
-        res = CLIENT.lock().await.get(url).send().await?;
-    }
-
-    Ok(res.text_force_charset("Big5").await?)
+/// Perform a GET request and return the response as text
+pub async fn request_get(url: &str) -> Result<String> {
+    let rb = get_client().request(Method::GET, url);
+    let res = request_send(rb).await?;
+    res.text().await.map_err(From::from)
 }
 
-/// 封裝 reqwest 的操作 Serialize
-pub async fn do_request_post_use_json<REQ: Serialize, RES: DeserializeOwned>(
+/// Perform a GET request and return the response as Big5 encoded text
+pub async fn request_get_use_big5(url: &str) -> Result<String> {
+    let rb = get_client().request(Method::GET, url);
+    let res = request_send(rb).await?;
+    res.text_force_charset("Big5").await.map_err(From::from)
+}
+
+/// Perform a POST request with JSON request and response, with specified headers
+pub async fn request_post<REQ: Serialize, RES: DeserializeOwned>(
     url: &str,
-    json: &REQ,
+    headers: Option<header::HeaderMap>,
+    req: Option<&REQ>,
 ) -> Result<RES> {
-    let _permit = SEMAPHORE.acquire().await?;
-    let res: reqwest::Response;
-    {
-        res = CLIENT.lock().await.post(url).json(json).send().await?;
+    let mut rb = get_client().request(Method::POST, url);
+
+    if let Some(h) = headers {
+        rb = rb.headers(h);
     }
 
-    Ok(res.json::<RES>().await?)
+    if let Some(r) = req {
+        rb = rb.json(r);
+    }
+
+    let res = request_send(rb).await?;
+    res.json::<RES>().await.map_err(From::from)
+}
+
+async fn request_send(request_builder: reqwest::RequestBuilder) -> Result<reqwest::Response> {
+    let _permit = SEMAPHORE.acquire().await?;
+    Ok(request_builder.send().await?)
 }
 
 #[cfg(test)]
@@ -83,7 +95,7 @@ mod tests {
         );
 
         logging::info_file_async(format!("visit url:{}", url,));
-        logging::info_file_async(format!("request_get:{:?}", request_get(url).await));
+        logging::info_file_async(format!("request_get:{:?}", request_get(&url).await));
 
         let bytes = reqwest::get("http://httpbin.org/ip")
             .await

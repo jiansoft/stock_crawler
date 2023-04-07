@@ -20,13 +20,32 @@ pub struct SendMessageRequest<'a> {
     pub text: &'a str,
 }
 
-pub async fn send_message<'a>(payload : SendMessageRequest<'_>) -> Result<()> {
+pub async fn send_to_allowed(msg: &str) -> Result<()> {
+    for id in SETTINGS.bot.telegram.allowed.keys() {
+        let payload = SendMessageRequest {
+            chat_id: *id,
+            text: msg,
+        };
+
+        send_message(payload).await?
+    }
+
+    Ok(())
+}
+
+pub async fn send_message<'a>(payload: SendMessageRequest<'_>) -> Result<()> {
     let api_url = format!(
         "https://api.telegram.org/bot{}/sendMessage",
         SETTINGS.bot.telegram.token
     );
 
-    match http::do_request_post_use_json::<SendMessageRequest, SendMessageResponse>(&api_url, &payload).await {
+    match http::request_post::<SendMessageRequest, SendMessageResponse>(
+        &api_url,
+        None,
+        Some(&payload),
+    )
+    .await
+    {
         Ok(_response) => {}
         Err(why) => {
             logging::error_file_async(format!(
