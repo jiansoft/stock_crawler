@@ -41,6 +41,7 @@ impl Entity {
 
     /// 更新個股的每股淨值
     pub async fn update_net_asset_value_per_share(&self) -> Result<PgQueryResult> {
+
         let sql = r#"
 update
     stocks
@@ -193,7 +194,7 @@ impl Clone for Entity {
 
 impl Default for Entity {
     fn default() -> Self {
-        Self::new()
+        Entity::new()
     }
 }
 
@@ -243,6 +244,7 @@ where mc.market_category_id in (2, 4)
         171)
     and s."SuspendListing" = false
     and s.net_asset_value_per_share = 0
+    and length(s.stock_symbol) = 4
 "#;
 
     Ok(sqlx::query_as::<_, Entity>(sql).fetch_all(&DB.pool).await?)

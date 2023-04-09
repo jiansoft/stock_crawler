@@ -29,12 +29,12 @@ pub async fn start() {
             match backfill::net_asset_value_per_share::execute().await {
                 Ok(_) => {
                     logging::info_file_async(
-                        "financial_statement::yahoo::net_asset_value_per_share::visit executed successfully.".to_string(),
+                        "backfill::net_asset_value_per_share::execute executed successfully.".to_string(),
                     );
                 }
                 Err(why) => {
                     logging::error_file_async(format!(
-                        "Failed to financial_statement::yahoo::net_asset_value_per_share::visit because {:?}",
+                        "Failed to backfill::net_asset_value_per_share::execute because {:?}",
                         why
                     ));
                 }

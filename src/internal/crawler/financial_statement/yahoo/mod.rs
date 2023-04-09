@@ -1,2 +1,2 @@
-/// 從 yahoo 取回每股淨值
-pub mod net_asset_value_per_share;
+/// 從 yahoo 取回股票的基本數據
+pub mod profile;
