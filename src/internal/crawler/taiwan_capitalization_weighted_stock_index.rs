@@ -1,6 +1,8 @@
 use crate::{internal::cache_share, internal::database::model, internal::util, logging};
+use anyhow::*;
 use chrono::{Local, NaiveDate};
 use concat_string::concat_string;
+use core::result::Result::Ok;
 use rust_decimal::Decimal;
 use serde_derive::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -17,7 +19,7 @@ pub struct TaiwanExchangeIndexResponse {
 }
 
 /// 調用  twse API 取得台股加權指數
-pub async fn visit() {
+pub async fn visit() -> Result<()> {
     let url = concat_string!(
         "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=",
         Local::now().format("%Y%m%d").to_string(),
@@ -26,113 +28,101 @@ pub async fn visit() {
     );
 
     logging::info_file_async(format!("visit url:{}", url,));
+    let tai_ex = util::http::request_get_use_json::<TaiwanExchangeIndexResponse>(&url).await?;
 
-    match util::http::request_get_use_json::<TaiwanExchangeIndexResponse>(&url).await {
-        Ok(tai_ex) => {
-            logging::info_file_async(format!("tai_ex:{:?}", tai_ex));
-            if tai_ex.stat.to_uppercase() != "OK" {
-                logging::info_file_async(
-                    "抓取加權股價指數 Finish taiex.Stat is not ok".to_string(),
-                );
-                return;
+    //logging::info_file_async(format!("tai_ex:{:?}", tai_ex));
+    if tai_ex.stat.to_uppercase() != "OK" {
+        logging::info_file_async("抓取加權股價指數 Finish taiex.Stat is not ok".to_string());
+        return Ok(());
+    }
+
+    if let Some(data) = tai_ex.data {
+        for item in data {
+            if item.len() != 6 {
+                logging::error_file_async("資料欄位不等於6".to_string());
+                continue;
             }
 
-            if let Some(data) = tai_ex.data {
-                for item in data {
-                    if item.len() != 6 {
-                        logging::error_file_async("資料欄位不等於6".to_string());
-                        continue;
-                    }
+            let split_date: Vec<&str> = item[0].split('/').collect();
+            if split_date.len() != 3 {
+                logging::error_file_async("日期欄位不等於3".to_string());
+                continue;
+            }
 
-                    let split_date: Vec<&str> = item[0].split('/').collect();
-                    if split_date.len() != 3 {
-                        logging::error_file_async("日期欄位不等於3".to_string());
-                        continue;
-                    }
+            let year = match split_date[0].parse::<i64>() {
+                Ok(_year) => _year,
+                Err(why) => {
+                    logging::error_file_async(format!("轉換資料日期發生錯誤. because {:?}", why));
+                    continue;
+                }
+            };
 
-                    let year = match split_date[0].parse::<i64>() {
-                        Ok(_year) => _year,
-                        Err(why) => {
-                            logging::error_file_async(format!(
-                                "轉換資料日期發生錯誤. because {:?}",
-                                why
-                            ));
-                            continue;
-                        }
-                    };
+            let mut index = model::index::Entity::new();
+            index.category = String::from("TAIEX");
+            let date = concat_string!(
+                (year + 1911).to_string(),
+                "-",
+                split_date[1],
+                "-",
+                split_date[2]
+            );
 
-                    let mut index = model::index::Entity::new();
-                    index.category = String::from("TAIEX");
-                    let date = concat_string!(
-                        (year + 1911).to_string(),
-                        "-",
-                        split_date[1],
-                        "-",
-                        split_date[2]
-                    );
+            index.date = NaiveDate::from_str(date.as_str()).unwrap();
+            let key = index.date.to_string() + "_" + &index.category;
+            if let Ok(indices) = cache_share::CACHE_SHARE.indices.read() {
+                if indices.contains_key(key.as_str()) {
+                    continue;
+                }
+            }
 
-                    index.date = NaiveDate::from_str(date.as_str()).unwrap();
-                    let key = index.date.to_string() + "_" + &index.category;
-                    if let Ok(indices) = cache_share::CACHE_SHARE.indices.read() {
-                        if indices.contains_key(key.as_str()) {
-                            continue;
-                        }
-                    }
+            index.trading_volume = match Decimal::from_str(&item[1].replace(',', "")) {
+                Ok(_trading_volume) => _trading_volume,
+                Err(_) => continue,
+            };
 
-                    index.trading_volume = match Decimal::from_str(&item[1].replace(',', "")) {
-                        Ok(_trading_volume) => _trading_volume,
-                        Err(_) => continue,
-                    };
+            index.trade_value = match Decimal::from_str(&item[2].replace(',', "")) {
+                Ok(_trade_value) => _trade_value,
+                Err(_) => continue,
+            };
 
-                    index.trade_value = match Decimal::from_str(&item[2].replace(',', "")) {
-                        Ok(_trade_value) => _trade_value,
-                        Err(_) => continue,
-                    };
+            index.transaction = match Decimal::from_str(&item[3].replace(',', "")) {
+                Ok(_transaction) => _transaction,
+                Err(_) => continue,
+            };
 
-                    index.transaction = match Decimal::from_str(&item[3].replace(',', "")) {
-                        Ok(_transaction) => _transaction,
-                        Err(_) => continue,
-                    };
+            index.index = match Decimal::from_str(&item[4].replace(',', "")) {
+                Ok(_index) => _index,
+                Err(_) => continue,
+            };
 
-                    index.index = match Decimal::from_str(&item[4].replace(',', "")) {
-                        Ok(_index) => _index,
-                        Err(_) => continue,
-                    };
+            index.change = match Decimal::from_str(&item[5].replace(',', "")) {
+                Ok(_change) => _change,
+                Err(_) => continue,
+            };
 
-                    index.change = match Decimal::from_str(&item[5].replace(',', "")) {
-                        Ok(_change) => _change,
-                        Err(_) => continue,
-                    };
-
-                    match index.upsert().await {
-                        Ok(_) => {
-                            logging::info_file_async(format!("index add {:?}", index));
-                            match cache_share::CACHE_SHARE.indices.write() {
-                                Ok(mut indices) => {
-                                    indices.insert(key, index);
-                                }
-                                Err(why) => {
-                                    logging::error_file_async(format!(
-                                        "Failed to write stocks cache because {:?}",
-                                        why
-                                    ));
-                                }
-                            }
+            match index.upsert().await {
+                Ok(_) => {
+                    logging::info_file_async(format!("index add {:?}", index));
+                    match cache_share::CACHE_SHARE.indices.write() {
+                        Ok(mut indices) => {
+                            indices.insert(key, index);
                         }
                         Err(why) => {
                             logging::error_file_async(format!(
-                                "Failed to upsert because {:?}",
+                                "Failed to write stocks cache because {:?}",
                                 why
                             ));
                         }
                     }
                 }
+                Err(why) => {
+                    logging::error_file_async(format!("Failed to upsert because {:?}", why));
+                }
             }
         }
-        Err(why) => {
-            logging::error_file_async(format!("Failed to request_get because {:?}", why));
-        }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -146,7 +136,14 @@ mod tests {
     async fn test_visit() {
         dotenv::dotenv().ok();
         CACHE_SHARE.load().await;
-        visit().await;
+        match visit().await {
+            Ok(_) => {
+                logging::info_file_async("visit executed successfully.".to_string());
+            }
+            Err(why) => {
+                logging::error_file_async(format!("Failed to visit because {:?}", why));
+            }
+        };
     }
 
     #[tokio::test]
@@ -184,17 +181,4 @@ mod tests {
             }
         };
     }*/
-
-    macro_rules! aw {
-        ($e:expr) => {
-            tokio_test::block_on($e)
-        };
-    }
-
-    #[test]
-    fn test_update() {
-        dotenv::dotenv().ok();
-
-        aw!(visit());
-    }
 }

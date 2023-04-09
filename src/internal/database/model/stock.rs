@@ -2,10 +2,14 @@ use crate::{
     internal::database::model::stock_index, internal::database::model::stock_word,
     internal::database::DB, internal::util, logging,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgRow, Row};
+use sqlx::{
+    postgres::PgQueryResult,
+    postgres::PgRow,
+    Row
+};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 stocks
@@ -21,14 +25,36 @@ pub struct Entity {
 impl Entity {
     pub fn new() -> Self {
         Entity {
+            category: 0,
+            stock_symbol: "".to_string(),
+            name: "".to_string(),
+            suspend_listing: false,
+            net_asset_value_per_share: Default::default(),
             create_time: Local::now(),
-            ..Default::default()
         }
     }
 
-    /// 檢查股票是否為特別股
-    pub fn is_preference_shares(&self) ->  bool{
+    /// 是否為特別股
+    pub fn is_preference_shares(&self) -> bool {
         self.stock_symbol.chars().any(|c| c.is_ascii_uppercase())
+    }
+
+    /// 更新個股的每股淨值
+    pub async fn update_net_asset_value_per_share(&self) -> Result<PgQueryResult> {
+        let sql = r#"
+update
+    stocks
+set
+    net_asset_value_per_share = $2
+where
+    stock_symbol = $1;
+"#;
+        sqlx::query(sql)
+            .bind(&self.stock_symbol)
+            .bind(self.net_asset_value_per_share)
+            .execute(&DB.pool)
+            .await
+            .context("Failed to update net_asset_value_per_share")
     }
 
     pub async fn update_suspend_listing(&self) -> Result<()> {
@@ -52,13 +78,13 @@ where
 
     pub async fn upsert(&self) -> Result<()> {
         let sql = r#"
-        INSERT INTO stocks (stock_symbol, "Name", "CategoryId", "CreateTime", "SuspendListing")
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (stock_symbol) DO UPDATE SET
-        "Name" = EXCLUDED."Name",
-        "CategoryId" = EXCLUDED."CategoryId",
-        "SuspendListing" = EXCLUDED."SuspendListing";
-    "#;
+INSERT INTO stocks (stock_symbol, "Name", "CategoryId", "CreateTime", "SuspendListing")
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (stock_symbol) DO UPDATE SET
+    "Name" = EXCLUDED."Name",
+    "CategoryId" = EXCLUDED."CategoryId",
+    "SuspendListing" = EXCLUDED."SuspendListing";
+"#;
         sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(&self.name)
@@ -129,47 +155,22 @@ where
         year: i32,
         month: i32,
     ) -> Result<(Decimal, Decimal, Decimal)> {
-        /*let answers = sqlx::query(
-        r#"
-        SELECT
-            MIN("LowestPrice") AS lowest_price,
-            AVG("ClosingPrice") AS avg_price,
-            MAX("HighestPrice") AS highest_price
-        FROM "DailyQuotes"
-        WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
-        GROUP BY "SecurityCode", year, month
-        "#,
-                )
+        let sql = r#"
+SELECT
+    MIN("LowestPrice"),
+    AVG("ClosingPrice"),
+    MAX("HighestPrice")
+FROM "DailyQuotes"
+WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
+GROUP BY "SecurityCode", year, month;
+"#;
+        let (lowest_price, avg_price, highest_price) =
+            sqlx::query_as::<_, (Decimal, Decimal, Decimal)>(sql)
                 .bind(&self.stock_symbol)
                 .bind(year)
                 .bind(month)
-                .try_map(|row: PgRow| {
-                    let lowest_price: Decimal = row.try_get("lowest_price")?;
-                    let avg_price: Decimal = row.try_get("avg_price")?;
-                    let highest_price: Decimal = row.try_get("highest_price")?;
-                    Ok((lowest_price, avg_price, highest_price))
-                })
                 .fetch_one(&DB.pool)
                 .await?;
-
-                Ok(answers)*/
-        let (lowest_price, avg_price, highest_price) =
-            sqlx::query_as::<_, (Decimal, Decimal, Decimal)>(
-                r#"
-                SELECT
-                    MIN("LowestPrice"),
-                    AVG("ClosingPrice"),
-                    MAX("HighestPrice")
-                FROM "DailyQuotes"
-                WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
-                GROUP BY "SecurityCode", year, month;
-                "#,
-            )
-            .bind(&self.stock_symbol)
-            .bind(year)
-            .bind(month)
-            .fetch_one(&DB.pool)
-            .await?;
 
         Ok((lowest_price, avg_price, highest_price))
     }
@@ -197,36 +198,35 @@ impl Default for Entity {
 }
 
 pub async fn fetch() -> Result<Vec<Entity>> {
-    let answers = sqlx::query(
-        r#"
+    let sql = r#"
 select
     "CategoryId", stock_symbol, "Name", "SuspendListing", "CreateTime",
     net_asset_value_per_share
 from
     stocks
 order by
-    "CategoryId"
-"#,
-    )
-    .try_map(|row: PgRow| {
-        Ok(Entity {
-            stock_symbol: row.try_get("stock_symbol")?,
-            net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
-            name: row.try_get("Name")?,
-            category: row.try_get("CategoryId")?,
-            suspend_listing: row.try_get("SuspendListing")?,
-            create_time: row.try_get("CreateTime")?,
+    "CategoryId";
+"#;
+    let answers = sqlx::query(sql)
+        .try_map(|row: PgRow| {
+            Ok(Entity {
+                stock_symbol: row.try_get("stock_symbol")?,
+                net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
+                name: row.try_get("Name")?,
+                category: row.try_get("CategoryId")?,
+                suspend_listing: row.try_get("SuspendListing")?,
+                create_time: row.try_get("CreateTime")?,
+            })
         })
-    })
-    .fetch_all(&DB.pool)
-    .await?;
+        .fetch_all(&DB.pool)
+        .await?;
 
     Ok(answers)
 }
 
+/// 取得未下市每股淨值為零的股票
 pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<Entity>> {
-    let rows = sqlx::query_as::<_, Entity>(
-        r#"
+    let sql = r#"
 select
     s."CategoryId" as category, s.stock_symbol, s."Name" as name,
     s."SuspendListing" as suspend_listing, s."CreateTime" as create_time,
@@ -234,19 +234,18 @@ select
 from market_category as mc
 inner join category c on mc.market_category_id = c.market_category_id
 inner join stocks as s on c.category_id = s."CategoryId"
-where mc.market_category_id in (2,4)
-    and  c.category_id IN (
+where mc.market_category_id in (2, 4)
+    and c.category_id IN (
         1, 2, 3, 4, 6, 7, 9, 10, 11, 12, 13, 19, 20, 21, 22, 24,
         30, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 121, 122,
         123, 124, 125, 126, 130, 131, 138, 139, 140, 141, 142, 145,
-        151, 153, 154, 155, 156, 157, 158, 159, 160, 161, 169, 170, 171)
-    and s."SuspendListing" = false and net_asset_value_per_share = 0
-"#,
-    )
-    .fetch_all(&DB.pool)
-    .await?;
+        151, 153, 154, 155, 156, 157, 158, 159, 160, 161, 169, 170,
+        171)
+    and s."SuspendListing" = false
+    and s.net_asset_value_per_share = 0
+"#;
 
-    Ok(rows)
+    Ok(sqlx::query_as::<_, Entity>(sql).fetch_all(&DB.pool).await?)
 }
 
 #[cfg(test)]
@@ -300,7 +299,7 @@ mod tests {
         match fetch_net_asset_value_per_share_is_zero().await {
             Ok(stocks) => {
                 for e in stocks {
-                    logging::info_file_async(format!("{} {:?} ",e.is_preference_shares(), e));
+                    logging::info_file_async(format!("{} {:?} ", e.is_preference_shares(), e));
                 }
             }
             Err(why) => {

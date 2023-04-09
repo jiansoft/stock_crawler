@@ -75,8 +75,11 @@ where
         Ok(())
     }
 
-    /// 計算指定年份與股票其領取的股利
-    pub async fn calculate_dividend(&self, year: i32) -> Result<dividend_record_detail::Entity> {
+    /// 計算指定年份與股票其領取的股利，如果股利並非零時將數據更新到 dividend_record_detail 表
+    pub async fn calculate_dividend_and_upsert(
+        &self,
+        year: i32,
+    ) -> Result<dividend_record_detail::Entity> {
         //計算股票於該年度可以領取的股利
         let dividend = sqlx::query(
             r#"
@@ -88,7 +91,7 @@ from dividend
 where security_code = $1
     and year = $2
     and ("ex-dividend_date1" >= $3 or "ex-dividend_date2" >= $4)
-    and ("ex-dividend_date1" <= $5 );
+    and ("ex-dividend_date1" <= $5);
         "#,
         )
         .bind(&self.security_code)
@@ -161,10 +164,9 @@ impl Clone for Entity {
 }
 
 /// 取得庫存股票的數據
-pub async fn fetch() -> Result<Vec<Entity>> {
-    let rows = sqlx::query_as::<_, Entity>(
-        "
-select serial,
+pub async fn fetch(security_codes: Option<Vec<String>>) -> Result<Vec<Entity>> {
+    let base_sql = "
+SELECT serial,
    member_id,
    security_code,
    share_quantity,
@@ -176,17 +178,80 @@ select serial,
    cumulate_dividends_stock,
    cumulate_dividends_stock_money,
    cumulate_dividends_total
-from stock_ownership_details
-where is_sold = false",
-    )
-    .fetch_all(&DB.pool)
-    .await?;
+FROM stock_ownership_details
+WHERE is_sold = false";
+    let (sql, bind_params) = security_codes
+        .map(|scs| {
+            let params = scs
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("${}", i + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                format!("{} AND security_code IN ({})", base_sql, params),
+                scs,
+            )
+        })
+        .unwrap_or((base_sql.to_string(), vec![]));
+
+    let query = sqlx::query_as::<_, Entity>(&sql);
+    let query = bind_params
+        .into_iter()
+        .fold(query, |q, param| q.bind(param));
+    let rows = query.fetch_all(&DB.pool).await?;
 
     Ok(rows)
+
+    /*
+         let mut sql = "
+    select serial,
+       member_id,
+       security_code,
+       share_quantity,
+       holding_cost,
+       created_time,
+       share_price_average,
+       is_sold,
+       cumulate_dividends_cash,
+       cumulate_dividends_stock,
+       cumulate_dividends_stock_money,
+       cumulate_dividends_total
+    from stock_ownership_details
+    where is_sold = false "
+            .to_string();
+        if let Some(scs) = security_codes {
+            let params = scs
+                .iter()
+                .enumerate()
+                .map(|(i, _id)| format!("${}", i + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            sql = format!("{} AND security_code IN ({})", sql, params)
+                .as_str()
+                .parse()?;
+
+            let mut query = sqlx::query_as::<_, Entity>(&sql);
+            for i in scs {
+                query = query.bind(i);
+            }
+
+            let rows = query.fetch_all(&DB.pool).await?;
+            return Ok(rows);
+        }
+
+        let rows = sqlx::query_as::<_, Entity>(&sql)
+            .fetch_all(&DB.pool)
+            .await?;
+
+        Ok(rows)
+    */
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::logging;
 
@@ -194,7 +259,7 @@ mod tests {
     async fn test_fetch_stock_inventory() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 fetch_stock_inventory".to_string());
-        let r = fetch().await;
+        let r = fetch(Some(vec!["2330".to_string()])).await;
         if let Ok(result) = r {
             for e in result {
                 logging::info_file_async(format!("{:?} ", e));

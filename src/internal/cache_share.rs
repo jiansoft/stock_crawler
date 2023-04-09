@@ -1,7 +1,7 @@
 use crate::{
+    internal::database::model::last_daily_quotes,
     internal::{database::model::index, database::model::revenue, database::model::stock},
     logging,
-    internal::database::model::last_daily_quotes
 };
 //use futures::executor::block_on;
 use once_cell::sync::Lazy;
@@ -156,37 +156,32 @@ impl CacheShare {
             }
         }
 
-        let revenues_from_db = revenue::fetch_last_two_month().await;
-        match self.last_revenues.write() {
-            Ok(mut last_revenue) => {
-                if let Ok(result) = revenues_from_db {
-                    for e in result {
-                        last_revenue
-                            .entry(e.date)
-                            .or_insert_with(HashMap::new)
-                            .insert(e.security_code.to_string(), e);
-                    }
-                }
-            }
-            Err(why) => {
-                logging::error_file_async(format!("because {:?}", why));
-            }
+        if let (Ok(result), Ok(mut last_revenue)) = (
+            revenue::fetch_last_two_month().await,
+            self.last_revenues.write(),
+        ) {
+            result.iter().for_each(|e| {
+                last_revenue
+                    .entry(e.date)
+                    .or_insert_with(HashMap::new)
+                    .insert(e.security_code.to_string(), e.clone());
+            });
+        } else {
+            logging::error_file_async("Failed to update last_revenues".to_string());
         }
 
-        let last_daily_quotes_from_db = last_daily_quotes::fetch().await;
-        match self.last_trading_day_quotes.write() {
-            Ok(mut last_daily_quotes) => {
-                if let Ok(result) = last_daily_quotes_from_db {
-                    for e in result {
-                        last_daily_quotes
-                            .entry(e.security_code.to_string())
-                            .or_insert(e.clone());
-                    }
-                }
+        let last_daily_quotes = last_daily_quotes::fetch().await;
+        if let (Ok(result), Ok(mut ldq)) =
+            (&last_daily_quotes, self.last_trading_day_quotes.write())
+        {
+            for e in result {
+                ldq.insert(e.security_code.to_string(), e.clone());
             }
-            Err(why) => {
-                logging::error_file_async(format!("because {:?}", why));
-            }
+        } else {
+            logging::error_file_async(format!(
+                "Failed to update last_trading_day_quotes: {:?}",
+                last_daily_quotes.err()
+            ));
         }
 
         logging::info_file_async(format!(
@@ -269,6 +264,19 @@ mod tests {
                 }
 
                 logging::info_file_async(format!("stock {} name {}", k, v.name));
+                loop_count -= 1;
+            }
+
+            loop_count = 10;
+            for (k, v) in CACHE_SHARE.last_trading_day_quotes.read().unwrap().iter() {
+                if loop_count < 0 {
+                    break;
+                }
+
+                logging::info_file_async(format!(
+                    "security_code {} closing_price {}",
+                    k, v.closing_price
+                ));
                 loop_count -= 1;
             }
 

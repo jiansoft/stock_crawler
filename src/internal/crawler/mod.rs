@@ -10,6 +10,8 @@ pub mod suspend_listing;
 pub mod taiwan_capitalization_weighted_stock_index;
 /// 台股每日收盤後股票的報價
 pub mod quotes;
+/// 台股財務報表
+pub mod financial_statement;
 
 /// 市場別
 pub enum StockMarket {

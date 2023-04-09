@@ -1,5 +1,6 @@
+use crate::internal::calculation;
 use crate::{internal::bot, internal::database::DB, logging};
-use chrono::NaiveDate;
+use chrono::{Datelike, Local, NaiveDate};
 use sqlx::FromRow;
 use std::fmt::Write;
 
@@ -28,18 +29,20 @@ where "ex-dividend_date1" = $1 or "ex-dividend_date2" = $2
         .await
     {
         Ok(stocks) => {
-            let mut msg = String::with_capacity(1024);
+            if stocks.is_empty() {
+                return;
+            }
+            let mut stock_symbols: Vec<String> = Vec::with_capacity(stocks.len());
+
+            let mut msg = String::with_capacity(2048);
             if writeln!(&mut msg, "{} 進行除權息的股票如下︰", date_str).is_ok() {
                 for stock in stocks {
-                    if writeln!(
+                    stock_symbols.push(stock.stock_symbol.to_string());
+                    let _ = writeln!(
                         &mut msg,
                         "    {} {} https://tw.stock.yahoo.com/quote/{}",
                         stock.name, stock.stock_symbol, stock.stock_symbol
-                    )
-                    .is_err()
-                    {
-                        continue;
-                    }
+                    );
                 }
             }
 
@@ -49,6 +52,9 @@ where "ex-dividend_date1" = $1 or "ex-dividend_date2" = $2
                     why
                 ));
             }
+
+            //計算股利
+            calculation::dividend_record::calculate(Local::now().year(), Some(stock_symbols)).await;
         }
         Err(why) => {
             logging::error_file_async(format!("Failed to fetch StockEntity because: {:?}", why));

@@ -2,7 +2,7 @@ use anyhow::*;
 use once_cell::{sync::Lazy, sync::OnceCell};
 use reqwest::{header, Client, Method};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{result::Result::Ok, time::Duration};
+use std::time::Duration;
 use tokio::sync::Semaphore;
 
 pub(crate) static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
@@ -16,8 +16,8 @@ pub(crate) static CLIENT: OnceCell<Client> = OnceCell::new();
 /// for Request or Response
 pub struct Empty {}
 
-fn get_client() -> &'static Client {
-    CLIENT.get_or_init(|| {
+fn get_client() -> Result<&'static Client> {
+    CLIENT.get_or_try_init(|| {
         Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .tcp_keepalive(Duration::from_secs(30))
@@ -26,64 +26,83 @@ fn get_client() -> &'static Client {
             .pool_idle_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
             .build()
-            .expect("Failed to create reqwest client")
+            .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
     })
 }
 
 /// Perform a GET request and deserialize the JSON response
-pub async fn request_get_use_json<T: DeserializeOwned>(url: &str) -> Result<T> {
-    let rb = get_client().request(Method::GET, url);
+pub async fn request_get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
+    let client = get_client()?;
+    let rb = client.request(Method::GET, url);
     let res = request_send(rb).await?;
-    res.json::<T>().await.map_err(From::from)
+    response_with_json(res).await
 }
 
 /// Perform a GET request and return the response as text
 pub async fn request_get(url: &str) -> Result<String> {
-    let rb = get_client().request(Method::GET, url);
+    let client = get_client()?;
+    let rb = client.request(Method::GET, url);
     let res = request_send(rb).await?;
-    res.text().await.map_err(From::from)
+    res.text()
+        .await
+        .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
 }
 
 /// Perform a GET request and return the response as Big5 encoded text
 pub async fn request_get_use_big5(url: &str) -> Result<String> {
-    let rb = get_client().request(Method::GET, url);
+    let client = get_client()?;
+    let rb = client.request(Method::GET, url);
     let res = request_send(rb).await?;
-    res.text_force_charset("Big5").await.map_err(From::from)
+    res.text_force_charset("Big5")
+        .await
+        .map_err(|e| anyhow!("Error parsing response text use BIG5: {:?}", e))
 }
 
 /// Perform a POST request with JSON request and response, with specified headers
-pub async fn request_post<REQ: Serialize, RES: DeserializeOwned>(
+pub async fn request_post<REQ, RES>(
     url: &str,
     headers: Option<header::HeaderMap>,
     req: Option<&REQ>,
-) -> Result<RES> {
-    let mut rb = get_client().request(Method::POST, url);
-
+) -> Result<RES>
+where
+    REQ: Serialize,
+    RES: DeserializeOwned,
+{
+    let client = get_client()?;
+    let mut rb = client.request(Method::POST, url);
     if let Some(h) = headers {
         rb = rb.headers(h);
     }
-
     if let Some(r) = req {
         rb = rb.json(r);
     }
 
     let res = request_send(rb).await?;
-    res.json::<RES>().await.map_err(From::from)
+    response_with_json(res).await
 }
 
+/// 發送HTTP請求
 async fn request_send(request_builder: reqwest::RequestBuilder) -> Result<reqwest::Response> {
     let _permit = SEMAPHORE.acquire().await?;
-    Ok(request_builder.send().await?)
+    request_builder
+        .send()
+        .await
+        .map_err(|e| anyhow!("Error sending request: {:?}", e))
+}
+
+/// 回應的數據使用json反序列成指定的 RES 類型物件
+async fn response_with_json<RES: DeserializeOwned>(res: reqwest::Response) -> Result<RES> {
+    res.json::<RES>()
+        .await
+        .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::logging;
     use chrono::Local;
     use concat_string::concat_string;
-
-    // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
-    use super::*;
 
     #[tokio::test]
     async fn test_request() {
@@ -97,7 +116,7 @@ mod tests {
         logging::info_file_async(format!("visit url:{}", url,));
         logging::info_file_async(format!("request_get:{:?}", request_get(&url).await));
 
-        let bytes = reqwest::get("http://httpbin.org/ip")
+        let bytes = reqwest::get("https://httpbin.org/ip")
             .await
             .unwrap()
             .bytes()

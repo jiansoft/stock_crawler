@@ -1,8 +1,8 @@
 use crate::internal::database::DB;
+use anyhow::Result;
 use chrono::NaiveDate;
 use core::result::Result::Ok;
 use rust_decimal::Decimal;
-use anyhow::Result;
 
 #[derive(sqlx::FromRow, Debug)]
 /// 最後交易日股票報價數據
@@ -16,7 +16,9 @@ pub struct Entity {
 impl Entity {
     pub fn new() -> Self {
         Entity {
-            ..Default::default()
+            date: Default::default(),
+            security_code: "".to_string(),
+            closing_price: Default::default(),
         }
     }
     pub fn clone(&self) -> Self {
@@ -57,14 +59,11 @@ mod tests {
     async fn test_calculate() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 fetch".to_string());
-
+        let _ = Entity::new();
         match fetch().await {
             Ok(stocks) => logging::info_file_async(format!("{:#?}", stocks)),
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to fetch because {:?}",
-                    why
-                ));
+                logging::error_file_async(format!("Failed to fetch because {:?}", why));
             }
         }
 

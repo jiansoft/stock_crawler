@@ -1,9 +1,18 @@
-use crate::internal::reminder;
+
 use crate::{
-    internal::calculation, internal::crawler,
-    internal::crawler::international_securities_identification_number, internal::crawler::revenue,
-    internal::crawler::suspend_listing,
-    internal::crawler::taiwan_capitalization_weighted_stock_index, internal::crawler::StockMarket,
+    internal::{
+        bot,
+        backfill,
+        reminder,
+        crawler::quotes,
+        crawler,
+        crawler::international_securities_identification_number,
+        crawler::revenue,
+        crawler::suspend_listing,
+        crawler::taiwan_capitalization_weighted_stock_index,
+        crawler::StockMarket
+    },
+    logging,
 };
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use clokwerk::{AsyncScheduler, Interval, Job, TimeUnits};
@@ -12,6 +21,25 @@ use std::time::Duration;
 /// 啟動排程
 pub async fn start() {
     let mut scheduler = AsyncScheduler::new();
+    scheduler
+        .every(Interval::Days(1))
+        .at("03:00:00")
+        .run(|| async {
+            //從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據
+            match backfill::net_asset_value_per_share::execute().await {
+                Ok(_) => {
+                    logging::info_file_async(
+                        "financial_statement::yahoo::net_asset_value_per_share::visit executed successfully.".to_string(),
+                    );
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to financial_statement::yahoo::net_asset_value_per_share::visit because {:?}",
+                        why
+                    ));
+                }
+            }
+        });
 
     //每日五點更新台股台股國際證券識別碼
     scheduler
@@ -55,17 +83,45 @@ pub async fn start() {
         .at("15:00:00")
         .run(|| async {
             //更新台股收盤指數
-            taiwan_capitalization_weighted_stock_index::visit().await;
+            match taiwan_capitalization_weighted_stock_index::visit().await {
+                Ok(_) => {
+                    logging::info_file_async(
+                        "taiwan_capitalization_weighted_stock_index::visit executed successfully."
+                            .to_string(),
+                    );
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to taiwan_capitalization_weighted_stock_index::visit because {:?}",
+                        why
+                    ));
+                }
+            }
+
+            //取得上市收盤最終報價數據
+            match quotes::listed::visit(Local::now()).await {
+                Ok(_) => {
+                    logging::info_file_async(
+                        "quotes::listed::visit executed successfully.".to_string(),
+                    );
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to quotes::listed::visit because {:?}",
+                        why
+                    ));
+                }
+            }
         });
 
-    scheduler
+   /* scheduler
         .every(Interval::Days(1))
         .at("15:00:00")
         .run(|| async {
             let now = Local::now();
             //計算股利領取
             calculation::dividend_record::calculate(now.year()).await;
-        });
+        });*/
 
     scheduler.every(60.seconds()).run(|| async {
         crawler::free_dns::update().await;
@@ -77,4 +133,6 @@ pub async fn start() {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     });
+
+    let _ = bot::telegram::send_to_allowed("StockCrawler-Rust 已啟動").await;
 }

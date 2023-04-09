@@ -23,6 +23,7 @@ async fn main() -> Result<(), rocket::Error> {
     cache_share::CACHE_SHARE.load().await;
     scheduler::start().await;
 
+
     let _rocket = rocket::build()
         .mount("/hello", routes![world])
         .mount("/", routes![index])

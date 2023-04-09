@@ -1,10 +1,7 @@
-use crate::{
-    logging,
-    internal::util::http,
-    internal::cache_share,
-    internal::database::model
-};
-use chrono::{Datelike, DateTime, Local};
+use crate::{internal::cache_share, internal::database::model, internal::util::http, logging};
+use anyhow::*;
+use chrono::{DateTime, Datelike, Local};
+use core::result::Result::Ok;
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -16,8 +13,22 @@ struct ListedResponse {
     pub data9: Option<Vec<Vec<String>>>,
 }
 
+async fn build_headers() -> HeaderMap {
+    let mut h = HeaderMap::with_capacity(4);
+    h.insert("Host", "www.twse.com.tw".parse().unwrap());
+    h.insert(
+        "Referer",
+        "https://www.twse.com.tw/zh/page/trading/exchange/MI_INDEX.html"
+            .parse()
+            .unwrap(),
+    );
+    h.insert("X-Requested-With", "XMLHttpRequest".parse().unwrap());
+    h.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.5615.50 Safari/537.36".parse().unwrap());
+    h
+}
+
 /// 抓取上市公司每日收盤資訊
-pub async fn retrieve(date: DateTime<Local>) {
+pub async fn visit(date: DateTime<Local>) -> Result<()> {
     let date_str = date.format("%Y%m%d").to_string();
     let url = format!(
         "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date={}&type=ALLBUT0999&_={}",
@@ -27,36 +38,15 @@ pub async fn retrieve(date: DateTime<Local>) {
 
     logging::info_file_async(format!("visit url:{}", url,));
 
-    let mut headers = HeaderMap::new();
-    headers.insert("Host", "www.twse.com.tw".parse().unwrap());
-    headers.insert(
-        "Referer",
-        "https://www.twse.com.tw/zh/page/trading/exchange/MI_INDEX.html"
-            .parse()
-            .unwrap(),
-    );
-    headers.insert("X-Requested-With", "XMLHttpRequest".parse().unwrap());
-    headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.5615.50 Safari/537.36".parse().unwrap());
+    let headers = build_headers().await;
+    let data = http::request_post::<http::Empty, ListedResponse>(&url, Some(headers), None).await?;
+    //logging::info_file_async(format!("data: {:?}", data));
+    let mut dqs = Vec::with_capacity(2048);
 
-    let data =
-        match http::request_post::<http::Empty, ListedResponse>(&url, Some(headers), None).await {
-            Ok(response) => {
-                // logging::info_file_async(format!("_response: {:?}", response));
-                response
-            }
-            Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to do_request_post_with_json because: {:?}",
-                    why
-                ));
-                return;
-            }
-        };
-
-    if let Some(dqs) = &data.data9 {
-        for val in dqs {
+    if let Some(twse_dqs) = &data.data9 {
+        for val in twse_dqs {
             let mut dq = parse_and_create_daily_quote(val).await;
-           // logging::info_file_async(format!("dq: {:?}", dq));
+
             if dq.closing_price == Decimal::ZERO
                 && dq.highest_price == Decimal::ZERO
                 && dq.lowest_price == Decimal::ZERO
@@ -88,16 +78,28 @@ pub async fn retrieve(date: DateTime<Local>) {
             dq.day = date.day();
             dq.record_time = date;
             dq.create_time = Local::now();
+            dqs.push(dq);
+        }
+
+        for dq in dqs {
             match dq.upsert().await {
-                Ok(_) => {}
+                Ok(_) => {
+                    logging::info_file_async(format!("dq: {:?}", dq));
+                }
                 Err(why) => {
-                    logging::error_file_async(format!("Failed to daily_quote.upsert() because {:?}", why));
+                    logging::error_file_async(format!(
+                        "Failed to daily_quote.upsert() because {:?}",
+                        why
+                    ));
                 }
             }
         }
     }
+
+    Ok(())
 }
 
+/// 將twse的數據轉為 model::daily_quote::Entity 物件
 async fn parse_and_create_daily_quote(val: &[String]) -> model::daily_quote::Entity {
     let mut dq = model::daily_quote::Entity::new(val[0].to_string());
     let decimal_fields = [
@@ -142,14 +144,21 @@ mod tests {
     use chrono::{Duration, Timelike};
 
     #[tokio::test]
-    async fn test_visit() {
+    async fn test_retrieve() {
         dotenv::dotenv().ok();
         CACHE_SHARE.load().await;
         let mut now = Local::now();
         if now.hour() < 15 {
             now -= Duration::days(1);
         }
-
-        retrieve(now).await;
+        now -= Duration::days(1);
+        match visit(now).await {
+            Ok(_ok) => {
+                logging::info_file_async("visit executed successfully.".to_string());
+            }
+            Err(why) => {
+                logging::error_file_async(format!("Failed to visit because {:?}", why));
+            }
+        }
     }
 }

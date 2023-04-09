@@ -1,18 +1,22 @@
 use crate::{internal::database::model, logging};
 
 /// 計算指定年份領取的股利
-pub async fn calculate(year: i32) {
+pub async fn calculate(year: i32, security_codes: Option<Vec<String>>) {
     logging::info_file_async("計算指定年份領取的股利開始".to_string());
 
-    if let Ok(inventories) = model::stock_ownership_details::fetch().await {
+    if let Ok(inventories) = model::stock_ownership_details::fetch(security_codes).await {
         let tasks = inventories
             .into_iter()
             .map(|mut item| async move {
+                //計算今年領取的股利，如果股利並非零時將數據更新到 dividend_record_detail 表
                 let drd = item
-                    .calculate_dividend(year)
+                    .calculate_dividend_and_upsert(year)
                     .await
-                    .map_err(|e| format!("Failed to calculate_dividend because {:?}", e))?;
+                    .map_err(|e| {
+                        format!("Failed to calculate_dividend_and_upsert because {:?}", e)
+                    })?;
 
+                // 計算指定股票其累積的領取股利
                 let cumulate_dividend = drd.calculate_cumulate_dividend().await.map_err(|e| {
                     format!("Failed to calculate_cumulate_dividend because {:?}", e)
                 })?;
@@ -95,7 +99,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 calculate".to_string());
         for i in 2014..2024 {
-            calculate(i).await;
+            calculate(i, None).await;
         }
         logging::info_file_async("結束 calculate".to_string());
     }
