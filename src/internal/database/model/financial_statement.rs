@@ -1,7 +1,10 @@
+use crate::internal::crawler::yahoo;
+use crate::internal::database::DB;
+use anyhow::*;
 use chrono::{DateTime, Local};
+use core::result::Result::Ok;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use crate::internal::crawler::financial_statement::yahoo;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Entity {
@@ -45,7 +48,7 @@ impl Entity {
             gross_profit: Default::default(),
             operating_profit_margin: Default::default(),
             pre_tax_income: Default::default(),
-            net_income:Default::default(),
+            net_income: Default::default(),
             net_asset_value_per_share: Default::default(),
             sales_per_share: Default::default(),
             earnings_per_share: Default::default(),
@@ -55,6 +58,50 @@ impl Entity {
             serial: 0,
             year: 0,
         }
+    }
+
+    pub async fn upsert(&self) -> Result<()> {
+        let sql = r#"
+INSERT INTO financial_statement (
+    security_code, "year", quarter, gross_profit, operating_profit_margin,
+    "pre-tax_income", net_income, net_asset_value_per_share, sales_per_share,
+    earnings_per_share, profit_before_tax, return_on_equity, return_on_assets,
+    created_time, updated_time)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
+    gross_profit = EXCLUDED.gross_profit,
+    operating_profit_margin = EXCLUDED.operating_profit_margin,
+    "pre-tax_income" = EXCLUDED."pre-tax_income",
+    net_income = EXCLUDED.net_income,
+    net_asset_value_per_share = EXCLUDED.net_asset_value_per_share,
+    sales_per_share = EXCLUDED.sales_per_share,
+    earnings_per_share = EXCLUDED.earnings_per_share,
+    profit_before_tax = EXCLUDED.profit_before_tax,
+    return_on_equity = EXCLUDED.return_on_equity,
+    return_on_assets = EXCLUDED.return_on_assets,
+    updated_time = EXCLUDED.updated_time;
+"#;
+        sqlx::query(sql)
+            .bind(&self.security_code)
+            .bind(self.year)
+            .bind(&self.quarter)
+            .bind(self.gross_profit)
+            .bind(self.operating_profit_margin)
+            .bind(self.pre_tax_income)
+            .bind(self.net_income)
+            .bind(self.net_asset_value_per_share)
+            .bind(self.sales_per_share)
+            .bind(self.earnings_per_share)
+            .bind(self.profit_before_tax)
+            .bind(self.return_on_equity)
+            .bind(self.return_on_assets)
+            .bind(self.created_time)
+            .bind(self.updated_time)
+            .execute(&DB.pool)
+            .await
+            .map_err(|err| anyhow!("Failed to financial_statement upsert: {:?}", err))?;
+
+        Ok(())
     }
 }
 

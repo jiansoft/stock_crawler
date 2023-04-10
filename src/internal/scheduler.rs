@@ -21,6 +21,28 @@ use std::time::Duration;
 /// 啟動排程
 pub async fn start() {
     let mut scheduler = AsyncScheduler::new();
+
+    scheduler
+        .every(Interval::Days(1))
+        .at("01:00:00")
+        .run(|| async {
+            //從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據
+            match backfill::financial_statement::execute().await {
+                Ok(_) => {
+                    logging::info_file_async(
+                        "backfill::financial_statement::execute executed successfully.".to_string(),
+                    );
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to backfill::financial_statement::execute because {:?}",
+                        why
+                    ));
+                }
+            }
+        });
+
+
     scheduler
         .every(Interval::Days(1))
         .at("03:00:00")

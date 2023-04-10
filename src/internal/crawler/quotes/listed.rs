@@ -84,7 +84,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<()> {
         for dq in dqs {
             match dq.upsert().await {
                 Ok(_) => {
-                    logging::info_file_async(format!("dq: {:?}", dq));
+                    //logging::info_file_async(format!("dq: {:?}", dq));
                 }
                 Err(why) => {
                     logging::error_file_async(format!(

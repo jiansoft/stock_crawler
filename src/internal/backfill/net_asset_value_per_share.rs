@@ -1,6 +1,6 @@
 use crate::internal::cache_share::CACHE_SHARE;
 use crate::{
-    internal::crawler::financial_statement::yahoo::profile, internal::database::model, logging,
+    internal::crawler::yahoo::profile, internal::database::model, logging,
 };
 use anyhow::*;
 use core::result::Result::Ok;
@@ -54,7 +54,7 @@ pub async fn execute() -> Result<()> {
             }
             Err(why) => {
                 logging::error_file_async(format!(
-                    "Failed to net_asset_value_per_share::visit because {:?}",
+                    "Failed to profile::visit because {:?}",
                     why
                 ));
             }

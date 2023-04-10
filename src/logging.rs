@@ -1,4 +1,4 @@
-use chrono::{format::DelayedFormat, DateTime, Local};
+use chrono::{format::DelayedFormat, Local};
 use crossbeam_channel::{unbounded, Sender};
 use once_cell::sync::Lazy;
 use std::{
@@ -12,15 +12,47 @@ use std::{
 static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new("default"));
 
 pub struct Logger {
-    writer: Sender<LogMessage>,
+    info_writer: Sender<String>,
+    warn_writer: Sender<String>,
+    error_writer: Sender<String>,
 }
 
 impl Logger {
     fn new(log_name: &str) -> Self {
+        let info_writer = Self::create_writer(&format!("{}_info", log_name));
+        let warn_writer = Self::create_writer(&format!("{}_warn", log_name));
+        let error_writer = Self::create_writer(&format!("{}_error", log_name));
+
+        Logger {
+            info_writer,
+            warn_writer,
+            error_writer,
+        }
+    }
+
+    fn info(&self, log: String) {
+        self.send(log, &self.info_writer);
+    }
+
+    fn warn(&self, log: String) {
+        self.send(log, &self.warn_writer);
+    }
+
+    fn error(&self, log: String) {
+        self.send(log, &self.error_writer);
+    }
+
+    fn send(&self, msg: String, writer: &Sender<String>) {
+        if let Err(why) = writer.send(msg) {
+            error_console(why.to_string());
+        }
+    }
+
+    fn create_writer(log_name: &str) -> Sender<String> {
         let log_path = Self::get_log_path(log_name).unwrap_or_else(|| {
             panic!("Failed to create log directory.");
         });
-        let (tx, rx) = unbounded::<LogMessage>();
+        let (tx, rx) = unbounded::<String>();
 
         // 寫入檔案的操作使用另一個線程處理
         thread::spawn(move || {
@@ -34,35 +66,34 @@ impl Logger {
                 });
 
             let mut writer = BufWriter::new(file);
-            let mut line = String::with_capacity(4096);
+            let mut line = String::with_capacity(2048);
 
-            while let Ok(received) = rx.recv() {
+            for received in &rx {
                 if writeln!(
                     &mut line,
-                    "{} {} {}",
-                    received.created_at.format("%F %X%.6f"),
-                    received.level,
-                    received.msg
+                    "{} {}",
+                    Local::now().format("%F %X%.6f"),
+                    received
                 )
                 .is_err()
                 {
                     continue;
                 }
 
-                if rx.is_empty() || line.len() >= 4096 {
+                if rx.is_empty() || line.len() >= 2048 {
                     if let Err(why) = writeln!(&mut line) {
-                        info_console(format!("Failed to writeln a line. because:{:#?}", why));
+                        error_console(format!("Failed to writeln a line. because:{:#?}", why));
                     }
 
                     if let Err(why) = writer.write_all(line.as_bytes()) {
-                        info_console(format!(
+                        error_console(format!(
                             "Failed to write to log file. because:{:#?}\r\nmsg:{}",
                             why, line
                         ));
                     }
 
                     if let Err(why) = writer.flush() {
-                        info_console(format!("Failed to flush log file. because:{:#?}", why));
+                        error_console(format!("Failed to flush log file. because:{:#?}", why));
                     }
 
                     line.clear();
@@ -70,21 +101,7 @@ impl Logger {
             }
         });
 
-        Logger { writer: tx }
-    }
-
-    fn info(&self, log: String) {
-        self.send(log::Level::Info, log);
-    }
-
-    fn error(&self, log: String) {
-        self.send(log::Level::Error, log);
-    }
-
-    fn send(&self, level: log::Level, msg: String) {
-        if let Err(why) = self.writer.send(LogMessage::new(level, msg)) {
-            error_console(why.to_string());
-        }
+        tx
     }
 
     fn get_log_path(name: &str) -> Option<PathBuf> {
@@ -101,24 +118,12 @@ impl Logger {
     }
 }
 
-pub struct LogMessage {
-    pub level: log::Level,
-    pub msg: String,
-    pub created_at: DateTime<Local>,
-}
-
-impl LogMessage {
-    pub fn new(level: log::Level, msg: String) -> Self {
-        LogMessage {
-            level,
-            msg,
-            created_at: Local::now(),
-        }
-    }
-}
-
 pub fn info_file_async(log: String) {
     LOGGER.info(log);
+}
+
+pub fn warn_file_async(log: String) {
+    LOGGER.warn(log);
 }
 
 pub fn error_file_async(log: String) {

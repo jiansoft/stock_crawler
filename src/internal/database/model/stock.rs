@@ -5,11 +5,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{
-    postgres::PgQueryResult,
-    postgres::PgRow,
-    Row
-};
+use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 stocks
@@ -41,7 +37,6 @@ impl Entity {
 
     /// 更新個股的每股淨值
     pub async fn update_net_asset_value_per_share(&self) -> Result<PgQueryResult> {
-
         let sql = r#"
 update
     stocks
@@ -228,26 +223,62 @@ order by
 /// 取得未下市每股淨值為零的股票
 pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<Entity>> {
     let sql = r#"
-select
-    s."CategoryId" as category, s.stock_symbol, s."Name" as name,
-    s."SuspendListing" as suspend_listing, s."CreateTime" as create_time,
+SELECT
+    s."CategoryId" AS category, s.stock_symbol, s."Name" AS name,
+    s."SuspendListing" AS suspend_listing, s."CreateTime" AS create_time,
     s.net_asset_value_per_share
-from market_category as mc
-inner join category c on mc.market_category_id = c.market_category_id
-inner join stocks as s on c.category_id = s."CategoryId"
-where mc.market_category_id in (2, 4)
-    and c.category_id IN (
+FROM market_category AS mc
+JOIN category AS c ON mc.market_category_id = c.market_category_id
+JOIN stocks AS s ON c.category_id = s."CategoryId"
+WHERE mc.market_category_id IN (2, 4)
+    AND c.category_id IN (
         1, 2, 3, 4, 6, 7, 9, 10, 11, 12, 13, 19, 20, 21, 22, 24,
         30, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 121, 122,
         123, 124, 125, 126, 130, 131, 138, 139, 140, 141, 142, 145,
         151, 153, 154, 155, 156, 157, 158, 159, 160, 161, 169, 170,
         171)
-    and s."SuspendListing" = false
-    and s.net_asset_value_per_share = 0
-    and length(s.stock_symbol) = 4
+    AND s."SuspendListing" = false
+    AND s.net_asset_value_per_share = 0
+    AND LENGTH(s.stock_symbol) = 4
 "#;
 
     Ok(sqlx::query_as::<_, Entity>(sql).fetch_all(&DB.pool).await?)
+}
+
+/// 取得尚未有指定年度的季報的股票
+pub async fn fetch_stocks_without_financial_statement(
+    year: i32,
+    quarter: &str,
+) -> Result<Vec<Entity>> {
+    let sql = r#"
+SELECT
+    s."CategoryId" AS category, s.stock_symbol, s."Name" AS name,
+    s."SuspendListing" AS suspend_listing, s."CreateTime" AS create_time,
+    s.net_asset_value_per_share
+FROM market_category AS mc
+JOIN category AS c ON mc.market_category_id = c.market_category_id
+JOIN stocks AS s ON c.category_id = s."CategoryId"
+WHERE mc.market_category_id IN (2, 4)
+    AND c.category_id IN (
+        1, 2, 3, 4, 6, 7, 9, 10, 11, 12, 13, 19, 20, 21, 22, 24,
+        30, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 121, 122,
+        123, 124, 125, 126, 130, 131, 138, 139, 140, 141, 142, 145,
+        151, 153, 154, 155, 156, 157, 158, 159, 160, 161, 169, 170,
+        171)
+    AND s."SuspendListing" = false
+    AND LENGTH(s.stock_symbol) = 4
+    AND NOT EXISTS (
+        SELECT 1
+        FROM financial_statement f
+        WHERE f.security_code = s.stock_symbol AND f.year = $1 AND f.quarter = $2
+    )
+"#;
+
+    Ok(sqlx::query_as::<_, Entity>(sql)
+        .bind(year)
+        .bind(quarter)
+        .fetch_all(&DB.pool)
+        .await?)
 }
 
 #[cfg(test)]
@@ -313,6 +344,27 @@ mod tests {
         }
 
         logging::info_file_async("結束 fetch_net_asset_value_per_share_is_zero".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_stocks_without_financial_statement() {
+        dotenv::dotenv().ok();
+        logging::info_file_async("開始 fetch_stocks_without_financial_statement".to_string());
+        match fetch_stocks_without_financial_statement(2022, "Q4").await {
+            Ok(stocks) => {
+                for e in stocks {
+                    logging::info_file_async(format!("{} {:?} ", e.is_preference_shares(), e));
+                }
+            }
+            Err(why) => {
+                logging::error_file_async(format!(
+                    "Failed to fetch_stocks_without_financial_statement because: {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::info_file_async("結束 fetch_stocks_without_financial_statement".to_string());
     }
 
     #[tokio::test]

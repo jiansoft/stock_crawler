@@ -69,7 +69,7 @@ async fn download_revenue(url: String, year: i32, month: u32) -> usize {
             if let Ok(last_revenues) = CACHE_SHARE.last_revenues.read() {
                 if let Some(last_revenue_date) = last_revenues.get(&date) {
                     if last_revenue_date.contains_key(&e.security_code.to_string()) {
-                        println!("已收:{} {}-{}", &e.security_code, year, month);
+                        //println!("已收:{} {}-{}", &e.security_code, year, month);
                         continue
                     }
                 }
