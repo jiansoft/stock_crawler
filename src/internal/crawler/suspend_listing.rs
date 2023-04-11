@@ -1,4 +1,7 @@
-use crate::{internal::cache_share::CACHE_SHARE, internal::util, logging};
+use crate::{
+    internal::cache_share::CACHE_SHARE, internal::util, internal::util::datetime::Weekend, logging,
+};
+use chrono::Local;
 use serde::Deserialize;
 
 /// 調用 twse suspendListingCsvAndHtml API 後其回應的數據
@@ -13,6 +16,10 @@ pub struct SuspendListing {
 }
 
 pub async fn visit() {
+    if Local::now().is_weekend() {
+        return;
+    }
+
     let url = "https://openapi.twse.com.tw/v1/company/suspendListingCsvAndHtml";
     logging::info_file_async(format!("visit url:{}", url));
 

@@ -1,7 +1,5 @@
 use crate::internal::cache_share::CACHE_SHARE;
-use crate::{
-    internal::crawler::yahoo::profile, internal::database::model, logging,
-};
+use crate::{internal::crawler::yahoo::profile, internal::database::model, logging};
 use anyhow::*;
 use core::result::Result::Ok;
 use rust_decimal::Decimal;
@@ -53,10 +51,7 @@ pub async fn execute() -> Result<()> {
                 }
             }
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to profile::visit because {:?}",
-                    why
-                ));
+                logging::error_file_async(format!("Failed to profile::visit because {:?}", why));
             }
         };
     }

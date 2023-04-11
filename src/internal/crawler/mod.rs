@@ -2,18 +2,19 @@
 pub mod free_dns;
 /// 國際證券識別碼
 pub mod international_securities_identification_number;
+/// 台股每日收盤後股票的報價
+pub mod quotes;
 /// 每月營收
 pub mod revenue;
 /// 已下市股票
 pub mod suspend_listing;
 /// 台股指數
 pub mod taiwan_capitalization_weighted_stock_index;
-/// 台股每日收盤後股票的報價
-pub mod quotes;
 /// 雅虎財經
 pub mod yahoo;
 
 /// 市場別
+#[derive(Debug, Copy, Clone)]
 pub enum StockMarket {
     /// 上市
     Listed,
@@ -30,5 +31,10 @@ impl StockMarket {
             StockMarket::OverTheCounter => 4,
             StockMarket::Emerging => 5,
         }
+    }
+    pub fn iterator() -> impl Iterator<Item = Self> {
+        [Self::Listed, Self::OverTheCounter, Self::Emerging]
+            .iter()
+            .copied()
     }
 }

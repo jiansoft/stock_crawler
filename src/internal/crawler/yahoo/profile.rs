@@ -5,10 +5,10 @@ use regex::Regex;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
+use crate::logging;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use crate::logging;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FinancialStatement {

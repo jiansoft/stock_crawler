@@ -1,16 +1,8 @@
-
 use crate::{
     internal::{
-        bot,
-        backfill,
-        reminder,
-        crawler::quotes,
-        crawler,
-        crawler::international_securities_identification_number,
-        crawler::revenue,
-        crawler::suspend_listing,
-        crawler::taiwan_capitalization_weighted_stock_index,
-        crawler::StockMarket
+        backfill, bot, crawler, crawler::international_securities_identification_number,
+        crawler::quotes, crawler::revenue, crawler::suspend_listing,
+        crawler::taiwan_capitalization_weighted_stock_index, reminder,
     },
     logging,
 };
@@ -42,7 +34,6 @@ pub async fn start() {
             }
         });
 
-
     scheduler
         .every(Interval::Days(1))
         .at("03:00:00")
@@ -51,7 +42,8 @@ pub async fn start() {
             match backfill::net_asset_value_per_share::execute().await {
                 Ok(_) => {
                     logging::info_file_async(
-                        "backfill::net_asset_value_per_share::execute executed successfully.".to_string(),
+                        "backfill::net_asset_value_per_share::execute executed successfully."
+                            .to_string(),
                     );
                 }
                 Err(why) => {
@@ -68,15 +60,25 @@ pub async fn start() {
         .every(Interval::Days(1))
         .at("5:00:00")
         .run(|| async {
-            //取得台股國際證券識別碼-上市
-            international_securities_identification_number::visit(StockMarket::Listed).await;
+            //取得台股國際證券識別碼
+            match international_securities_identification_number::visit().await {
+                Ok(_) => {
+                    logging::info_file_async(
+                        "international_securities_identification_number::visit executed successfully."
+                            .to_string(),
+                    );
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to international_securities_identification_number::visit because {:?}",
+                        why
+                    ));
+                }
+            }
+
             //取得下市的股票
             suspend_listing::visit().await;
-            //取得台股國際證券識別碼-上櫃
-            international_securities_identification_number::visit(StockMarket::OverTheCounter)
-                .await;
-            //取得台股國際證券識別碼-興
-            international_securities_identification_number::visit(StockMarket::Emerging).await;
+
             let now = Local::now();
             let naive_datetime = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
                 .unwrap()
@@ -136,14 +138,14 @@ pub async fn start() {
             }
         });
 
-   /* scheduler
-        .every(Interval::Days(1))
-        .at("15:00:00")
-        .run(|| async {
-            let now = Local::now();
-            //計算股利領取
-            calculation::dividend_record::calculate(now.year()).await;
-        });*/
+    /* scheduler
+    .every(Interval::Days(1))
+    .at("15:00:00")
+    .run(|| async {
+        let now = Local::now();
+        //計算股利領取
+        calculation::dividend_record::calculate(now.year()).await;
+    });*/
 
     scheduler.every(60.seconds()).run(|| async {
         crawler::free_dns::update().await;

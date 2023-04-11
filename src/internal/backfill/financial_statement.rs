@@ -1,4 +1,5 @@
-use crate::{internal::crawler::yahoo, internal::database::model, internal::util, logging};
+use crate::internal::util::datetime;
+use crate::{internal::crawler::yahoo, internal::database::model, logging};
 use anyhow::*;
 use chrono::{Datelike, Duration, Local};
 use core::result::Result::Ok;
@@ -7,7 +8,7 @@ use core::result::Result::Ok;
 pub async fn execute() -> Result<()> {
     let previous_quarter = Local::now() - Duration::days(120);
     let year = previous_quarter.year();
-    let quarter = util::month_to_quarter(previous_quarter.month());
+    let quarter = datetime::month_to_quarter(previous_quarter.month());
     let stocks = model::stock::fetch_stocks_without_financial_statement(year, quarter).await?;
     for stock in stocks {
         if stock.is_preference_shares() {

@@ -1,3 +1,5 @@
+/// 數據回補
+pub mod backfill;
 /// 聊天機器人
 pub mod bot;
 /// 數據快取
@@ -14,6 +16,3 @@ mod reminder;
 pub mod scheduler;
 /// 工具類
 pub mod util;
-/// 數據回補
-pub mod backfill;
-

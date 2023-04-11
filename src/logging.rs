@@ -15,6 +15,7 @@ pub struct Logger {
     info_writer: Sender<String>,
     warn_writer: Sender<String>,
     error_writer: Sender<String>,
+    debug_writer: Sender<String>,
 }
 
 impl Logger {
@@ -22,11 +23,12 @@ impl Logger {
         let info_writer = Self::create_writer(&format!("{}_info", log_name));
         let warn_writer = Self::create_writer(&format!("{}_warn", log_name));
         let error_writer = Self::create_writer(&format!("{}_error", log_name));
-
+        let debug_writer = Self::create_writer(&format!("{}_debug", log_name));
         Logger {
             info_writer,
             warn_writer,
             error_writer,
+            debug_writer,
         }
     }
 
@@ -40,6 +42,10 @@ impl Logger {
 
     fn error(&self, log: String) {
         self.send(log, &self.error_writer);
+    }
+
+    fn debug(&self, log: String) {
+        self.send(log, &self.debug_writer);
     }
 
     fn send(&self, msg: String, writer: &Sender<String>) {
@@ -128,6 +134,10 @@ pub fn warn_file_async(log: String) {
 
 pub fn error_file_async(log: String) {
     LOGGER.error(log);
+}
+
+pub fn debug_file_async(log: String) {
+    LOGGER.debug(log);
 }
 
 pub fn info_console(log: String) {

@@ -62,7 +62,6 @@ impl Entity {
         }
     }
 
-
     pub async fn upsert(&self) -> anyhow::Result<()> {
         Ok(())
     }
