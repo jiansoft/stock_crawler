@@ -1,8 +1,14 @@
 use crate::{
     internal::{
-        backfill, bot, crawler, crawler::international_securities_identification_number,
-        crawler::quotes, crawler::revenue, crawler::suspend_listing,
-        crawler::taiwan_capitalization_weighted_stock_index, reminder,
+        backfill,
+        bot,
+        crawler,
+        crawler::international_securities_identification_number,
+        crawler::quotes,
+        crawler::revenue,
+        crawler::taiwan_capitalization_weighted_stock_index,
+        reminder,
+        backfill::delisted_company
     },
     logging,
 };
@@ -76,8 +82,21 @@ pub async fn start() {
                 }
             }
 
-            //取得下市的股票
-            suspend_listing::visit().await;
+            //更新下市的股票
+            match delisted_company::execute().await {
+                Ok(_) => {
+                    logging::info_file_async(
+                        "delisted_company::visit executed successfully."
+                            .to_string(),
+                    );
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to delisted_company::visit because {:?}",
+                        why
+                    ));
+                }
+            }
 
             let now = Local::now();
             let naive_datetime = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)

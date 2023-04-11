@@ -6,12 +6,12 @@ pub mod international_securities_identification_number;
 pub mod quotes;
 /// 每月營收
 pub mod revenue;
-/// 已下市股票
-pub mod suspend_listing;
 /// 台股指數
 pub mod taiwan_capitalization_weighted_stock_index;
 /// 雅虎財經
 pub mod yahoo;
+/// 台灣證卷交易所
+pub mod twse;
 
 /// 市場別
 #[derive(Debug, Copy, Clone)]
