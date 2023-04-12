@@ -1,15 +1,16 @@
-use crate::{internal::database::DB, logging};
-use anyhow;
-use chrono::Local;
+use crate::{internal::database::DB, internal::util, logging};
+use anyhow::{anyhow, Result};
+use chrono::{Datelike, Local, NaiveDate};
+use concat_string::concat_string;
 use futures::StreamExt;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Entity {
     pub category: String,
-    pub date: chrono::NaiveDate,
+    pub date: NaiveDate,
     pub index: Decimal,
     /// 漲跌點數
     pub change: Decimal,
@@ -38,8 +39,42 @@ impl Entity {
         }
     }
 
+    /// 將twse取回來的原始資料轉成 Entity
+    pub fn from_strings(item: &Vec<String>) -> Result<Self> {
+        let split_date: Vec<&str> = item[0].split('/').collect();
+        if split_date.len() != 3 {
+            return Err(anyhow!("日期欄位不等於3"));
+        }
+
+        let year = split_date[0]
+            .parse::<i64>()
+            .map_err(|why| anyhow!(format!("轉換資料日期發生錯誤. because {:?}", why)))?;
+
+        let mut index = Entity::new();
+
+        let date = concat_string!(
+            (year + 1911).to_string(),
+            "-",
+            split_date[1],
+            "-",
+            split_date[2]
+        );
+
+        index.date = NaiveDate::from_str(date.as_str())
+            .map_err(|why| anyhow!(format!("Failed to parse date because {:?}", why)))?;
+
+        index.trading_volume = util::text::parse_decimal(&item[1])?;
+        index.trade_value = util::text::parse_decimal(&item[2])?;
+        index.transaction = util::text::parse_decimal(&item[3])?;
+        index.index = util::text::parse_decimal(&item[4])?;
+        index.change = util::text::parse_decimal(&item[5])?;
+        index.category = String::from("TAIEX");
+
+        Ok(index)
+    }
+
     /// date與 category 為組合鍵 unique
-    pub async fn upsert(&self) -> anyhow::Result<()> {
+    pub async fn upsert(&self) -> Result<()> {
         let sql = r#"
 insert into index (
     category, "date", trading_volume, "transaction", trade_value, change, index, create_time, update_time
@@ -82,6 +117,72 @@ impl Clone for Entity {
 impl Default for Entity {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl From<Vec<String>> for Entity {
+    fn from(item: Vec<String>) -> Self {
+        let now = Local::now();
+        let dy = (now.year() - 1911).to_string();
+        let dm = now.month().to_string();
+        let dd = now.day().to_string();
+        let mut split_date: Vec<&str> = item[0].split('/').collect();
+        if split_date.len() != 3 {
+            logging::error_file_async("日期欄位不等於3".to_string());
+            split_date = vec![&dy, &dm, &dd]
+        }
+
+        let year = match split_date[0].parse::<i64>() {
+            Ok(_year) => _year,
+            Err(why) => {
+                logging::error_file_async(format!("轉換資料日期發生錯誤. because {:?}", why));
+                (Local::now().year() - 1911) as i64
+            }
+        };
+
+        let mut index = Entity::new();
+        index.category = String::from("TAIEX");
+        let date = concat_string!(
+            (year + 1911).to_string(),
+            "-",
+            split_date[1],
+            "-",
+            split_date[2]
+        );
+
+        index.date = NaiveDate::from_str(date.as_str()).unwrap();
+        /* let key = index.date.to_string() + "_" + &index.category;
+        if let Ok(indices) = CACHE_SHARE.indices.read() {
+            if indices.contains_key(key.as_str()) {
+                continue;
+            }
+        }*/
+
+        index.trading_volume = match Decimal::from_str(&item[1].replace(',', "")) {
+            Ok(_trading_volume) => _trading_volume,
+            Err(_) => Decimal::ZERO,
+        };
+
+        index.trade_value = match Decimal::from_str(&item[2].replace(',', "")) {
+            Ok(_trade_value) => _trade_value,
+            Err(_) => Decimal::ZERO,
+        };
+
+        index.transaction = match Decimal::from_str(&item[3].replace(',', "")) {
+            Ok(_transaction) => _transaction,
+            Err(_) => Decimal::ZERO,
+        };
+
+        index.index = match Decimal::from_str(&item[4].replace(',', "")) {
+            Ok(_index) => _index,
+            Err(_) => Decimal::ZERO,
+        };
+
+        index.change = match Decimal::from_str(&item[5].replace(',', "")) {
+            Ok(_change) => _change,
+            Err(_) => Decimal::ZERO,
+        };
+        index
     }
 }
 

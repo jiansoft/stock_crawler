@@ -1,7 +1,7 @@
 use crate::{
     internal::{
-        backfill, backfill::delisted_company, bot, crawler, crawler::quotes, crawler::revenue,
-        crawler::taiwan_capitalization_weighted_stock_index, reminder,
+        backfill, backfill::delisted_company, backfill::taiwan_capitalization_weighted_stock_index,
+        bot, crawler, crawler::quotes, crawler::revenue, reminder,
     },
     logging,
 };
@@ -119,22 +119,22 @@ pub async fn start() {
         .at("15:00:00")
         .run(|| async {
             //更新台股收盤指數
-            match taiwan_capitalization_weighted_stock_index::visit().await {
+            match taiwan_capitalization_weighted_stock_index::execute().await {
                 Ok(_) => {
                     logging::info_file_async(
-                        "taiwan_capitalization_weighted_stock_index::visit executed successfully."
+                        "taiwan_capitalization_weighted_stock_index::execute executed successfully."
                             .to_string(),
                     );
                 }
                 Err(why) => {
                     logging::error_file_async(format!(
-                        "Failed to taiwan_capitalization_weighted_stock_index::visit because {:?}",
+                        "Failed to taiwan_capitalization_weighted_stock_index::execute because {:?}",
                         why
                     ));
                 }
             }
 
-            //取得上市收盤最終報價數據
+            //取得上市收盤報價數據
             match quotes::listed::visit(Local::now()).await {
                 Ok(_) => {
                     logging::info_file_async(

@@ -44,7 +44,7 @@ mod tests {
     async fn test_visit() {
         dotenv::dotenv().ok();
         CACHE_SHARE.load().await;
-        logging::info_file_async("開始 visit".to_string());
+        logging::debug_file_async("開始 visit".to_string());
 
         match visit().await {
             None => { logging::error_file_async("Failed to visit because response is no data".to_string()); }
@@ -53,6 +53,6 @@ mod tests {
             }
         }
 
-        logging::info_file_async("結束 visit".to_string());
+        logging::debug_file_async("結束 visit".to_string());
     }
 }

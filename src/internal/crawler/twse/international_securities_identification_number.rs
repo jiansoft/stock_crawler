@@ -143,12 +143,12 @@ mod tests {
     async fn test_visit() {
         dotenv::dotenv().ok();
         CACHE_SHARE.load().await;
-        logging::info_file_async("開始 visit".to_string());
+        logging::debug_file_async("開始 visit".to_string());
         // let mut unique_industry_categories: HashSet<String> = HashSet::new();
         for mode in StockExchangeMarket::iterator() {
             match visit(mode).await {
                 None => {
-                    logging::error_file_async(
+                    logging::debug_file_async(
                         "Failed to visit because response is no data".to_string(),
                     );
                 }
@@ -172,6 +172,6 @@ mod tests {
             logging::debug_file_async(format!("{}", unique_industry_category));
         }*/
 
-        logging::info_file_async("結束 visit".to_string());
+        logging::debug_file_async("結束 visit".to_string());
     }
 }

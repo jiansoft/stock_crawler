@@ -1,6 +1,11 @@
 use crate::logging;
+use anyhow::*;
+use core::result::Result::Ok;
+use core::result::Result::*;
 use encoding::{DecoderTrap, Encoding};
+use rust_decimal::Decimal;
 use std::collections::HashSet;
+use std::str::FromStr;
 
 #[allow(dead_code)]
 pub fn big5_to_utf8(text: &str) -> Option<String> {
@@ -68,6 +73,12 @@ pub fn split_v1(w: &str) -> Vec<String> {
     let mut words: Vec<String> = set.into_iter().collect();
     words.sort();
     words
+}
+
+/// 將字串轉成 Decimal
+pub fn parse_decimal(s: &str) -> Result<Decimal> {
+    Decimal::from_str(&s.replace(',', ""))
+        .map_err(|why| anyhow!(format!("Failed to Decimal::from_str because {:?}", why)))
 }
 
 #[cfg(test)]
