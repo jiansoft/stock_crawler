@@ -47,6 +47,7 @@ function restart() {
 }
 
 function build() {
+  cargo update
   cargo build --release
   echo "success building"
 }

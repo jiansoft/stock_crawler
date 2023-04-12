@@ -1,14 +1,7 @@
 use crate::{
     internal::{
-        backfill,
-        bot,
-        crawler,
-        crawler::international_securities_identification_number,
-        crawler::quotes,
-        crawler::revenue,
-        crawler::taiwan_capitalization_weighted_stock_index,
-        reminder,
-        backfill::delisted_company
+        backfill, backfill::delisted_company, bot, crawler, crawler::quotes, crawler::revenue,
+        crawler::taiwan_capitalization_weighted_stock_index, reminder,
     },
     logging,
 };
@@ -67,16 +60,16 @@ pub async fn start() {
         .at("5:00:00")
         .run(|| async {
             //取得台股國際證券識別碼
-            match international_securities_identification_number::visit().await {
+            match backfill::international_securities_identification_number::execute().await {
                 Ok(_) => {
                     logging::info_file_async(
-                        "international_securities_identification_number::visit executed successfully."
+                        "international_securities_identification_number::execute executed successfully."
                             .to_string(),
                     );
                 }
                 Err(why) => {
                     logging::error_file_async(format!(
-                        "Failed to international_securities_identification_number::visit because {:?}",
+                        "Failed to international_securities_identification_number::execute because {:?}",
                         why
                     ));
                 }

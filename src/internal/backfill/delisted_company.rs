@@ -87,7 +87,7 @@ mod tests {
                 logging::debug_file_async("execute executed successfully.".to_string());
             }
             Err(why) => {
-                logging::error_file_async(format!("Failed to execute because {:?}", why));
+                logging::debug_file_async(format!("Failed to execute because {:?}", why));
             }
         }
 

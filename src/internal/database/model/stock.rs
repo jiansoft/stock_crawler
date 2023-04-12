@@ -1,3 +1,4 @@
+use crate::internal::crawler::twse;
 use crate::{
     internal::database::model::stock_index, internal::database::model::stock_word,
     internal::database::DB, internal::util, logging,
@@ -16,6 +17,10 @@ pub struct Entity {
     pub suspend_listing: bool,
     pub net_asset_value_per_share: Decimal,
     pub create_time: DateTime<Local>,
+    /// 交易所的市場編號參考 stock_exchange_market
+    pub stock_exchange_market_id: i32,
+    /// 股票的產業分類編號 stock_industry
+    pub stock_industry_id: i32,
 }
 
 impl Entity {
@@ -27,6 +32,8 @@ impl Entity {
             suspend_listing: false,
             net_asset_value_per_share: Default::default(),
             create_time: Local::now(),
+            stock_exchange_market_id: 0,
+            stock_industry_id: 0,
         }
     }
 
@@ -72,21 +79,26 @@ where
         Ok(())
     }
 
+    /// 衝突時更新 "Name" "SuspendListing" stock_exchange_market_id stock_industry_id
     pub async fn upsert(&self) -> Result<()> {
         let sql = r#"
-INSERT INTO stocks (stock_symbol, "Name", "CategoryId", "CreateTime", "SuspendListing")
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO stocks (
+    stock_symbol, "Name", "CreateTime",
+    "SuspendListing", stock_exchange_market_id, stock_industry_id)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (stock_symbol) DO UPDATE SET
     "Name" = EXCLUDED."Name",
-    "CategoryId" = EXCLUDED."CategoryId",
-    "SuspendListing" = EXCLUDED."SuspendListing";
+    "SuspendListing" = EXCLUDED."SuspendListing",
+    stock_exchange_market_id = EXCLUDED.stock_exchange_market_id,
+    stock_industry_id = EXCLUDED.stock_industry_id;
 "#;
         sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(&self.name)
-            .bind(self.category)
             .bind(self.create_time)
             .bind(self.suspend_listing)
+            .bind(self.stock_exchange_market_id)
+            .bind(self.stock_industry_id)
             .execute(&DB.pool)
             .await
             .map_err(|err| anyhow!("Failed to stock upsert: {:?}", err))?;
@@ -181,10 +193,10 @@ impl Clone for Entity {
             suspend_listing: self.suspend_listing,
             net_asset_value_per_share: self.net_asset_value_per_share,
             create_time: self.create_time,
+            stock_exchange_market_id: self.stock_exchange_market_id,
+            stock_industry_id: self.stock_industry_id,
         }
     }
-
-    //todo 抓完季報後需要更新 stocks.net_asset_value_per_share 的數據
 }
 
 impl Default for Entity {
@@ -193,11 +205,27 @@ impl Default for Entity {
     }
 }
 
+//let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
+impl From<twse::international_securities_identification_number::Entity> for Entity {
+    fn from(isin: twse::international_securities_identification_number::Entity) -> Self {
+        Entity {
+            category: 0,
+            stock_symbol: isin.stock_symbol,
+            name: isin.name,
+            suspend_listing: false,
+            net_asset_value_per_share: Default::default(),
+            create_time: Local::now(),
+            stock_exchange_market_id: isin.exchange_market.stock_exchange_market_id,
+            stock_industry_id: isin.industry_id,
+        }
+    }
+}
+
 pub async fn fetch() -> Result<Vec<Entity>> {
     let sql = r#"
 select
     "CategoryId", stock_symbol, "Name", "SuspendListing", "CreateTime",
-    net_asset_value_per_share
+    net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
 from
     stocks
 order by
@@ -212,6 +240,8 @@ order by
                 category: row.try_get("CategoryId")?,
                 suspend_listing: row.try_get("SuspendListing")?,
                 create_time: row.try_get("CreateTime")?,
+                stock_exchange_market_id: row.try_get("stock_exchange_market_id")?,
+                stock_industry_id: row.try_get("stock_industry_id")?,
             })
         })
         .fetch_all(&DB.pool)
@@ -226,7 +256,7 @@ pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<Entity>> {
 SELECT
     s."CategoryId" AS category, s.stock_symbol, s."Name" AS name,
     s."SuspendListing" AS suspend_listing, s."CreateTime" AS create_time,
-    s.net_asset_value_per_share
+    s.net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
 FROM market_category AS mc
 JOIN category AS c ON mc.market_category_id = c.market_category_id
 JOIN stocks AS s ON c.category_id = s."CategoryId"
@@ -254,7 +284,7 @@ pub async fn fetch_stocks_without_financial_statement(
 SELECT
     s."CategoryId" AS category, s.stock_symbol, s."Name" AS name,
     s."SuspendListing" AS suspend_listing, s."CreateTime" AS create_time,
-    s.net_asset_value_per_share
+    s.net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
 FROM market_category AS mc
 JOIN category AS c ON mc.market_category_id = c.market_category_id
 JOIN stocks AS s ON c.category_id = s."CategoryId"
@@ -328,43 +358,43 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_net_asset_value_per_share_is_zero() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 fetch_net_asset_value_per_share_is_zero".to_string());
+        logging::debug_file_async("開始 fetch_net_asset_value_per_share_is_zero".to_string());
         match fetch_net_asset_value_per_share_is_zero().await {
             Ok(stocks) => {
                 for e in stocks {
-                    logging::info_file_async(format!("{} {:?} ", e.is_preference_shares(), e));
+                    logging::debug_file_async(format!("{} {:?} ", e.is_preference_shares(), e));
                 }
             }
             Err(why) => {
-                logging::error_file_async(format!(
+                logging::debug_file_async(format!(
                     "Failed to fetch_net_asset_value_per_share_is_zero because: {:?}",
                     why
                 ));
             }
         }
 
-        logging::info_file_async("結束 fetch_net_asset_value_per_share_is_zero".to_string());
+        logging::debug_file_async("結束 fetch_net_asset_value_per_share_is_zero".to_string());
     }
 
     #[tokio::test]
     async fn test_fetch_stocks_without_financial_statement() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 fetch_stocks_without_financial_statement".to_string());
+        logging::debug_file_async("開始 fetch_stocks_without_financial_statement".to_string());
         match fetch_stocks_without_financial_statement(2022, "Q4").await {
             Ok(stocks) => {
                 for e in stocks {
-                    logging::info_file_async(format!("{} {:?} ", e.is_preference_shares(), e));
+                    logging::debug_file_async(format!("{} {:?} ", e.is_preference_shares(), e));
                 }
             }
             Err(why) => {
-                logging::error_file_async(format!(
+                logging::debug_file_async(format!(
                     "Failed to fetch_stocks_without_financial_statement because: {:?}",
                     why
                 ));
             }
         }
 
-        logging::info_file_async("結束 fetch_stocks_without_financial_statement".to_string());
+        logging::debug_file_async("結束 fetch_stocks_without_financial_statement".to_string());
     }
 
     #[tokio::test]

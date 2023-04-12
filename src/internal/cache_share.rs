@@ -4,6 +4,7 @@ use crate::{
     logging,
 };
 //use futures::executor::block_on;
+use crate::internal::database::model;
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::RwLock};
 
@@ -25,6 +26,10 @@ pub struct CacheShare {
     pub last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Entity>>>,
     /// 存放最後交易日股票報價數據
     pub last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::Entity>>,
+    /// 股票產業分類
+    pub industries: HashMap<&'static str, i32>,
+    /// 股票產業分類(2, 'TAI', '上市', 1),(4, 'TWO', '上櫃', 2), (5, 'TWE', '興櫃', 2);
+    pub exchange_markets: HashMap<i32, model::stock_exchange_market::Entity>,
 }
 
 impl CacheShare {
@@ -32,6 +37,75 @@ impl CacheShare {
         CacheShare {
             indices: RwLock::new(HashMap::new()),
             stocks: RwLock::new(HashMap::new()),
+            exchange_markets: HashMap::from([
+                (
+                    2,
+                    model::stock_exchange_market::Entity {
+                        stock_exchange_market_id: 2,
+                        stock_exchange_id: 1,
+                        code: "TAI".to_string(),
+                        name: "上市".to_string(),
+                    },
+                ),
+                (
+                    4,
+                    model::stock_exchange_market::Entity {
+                        stock_exchange_market_id: 4,
+                        stock_exchange_id: 2,
+                        code: "TWO".to_string(),
+                        name: "上櫃".to_string(),
+                    },
+                ),
+                (
+                    5,
+                    model::stock_exchange_market::Entity {
+                        stock_exchange_market_id: 5,
+                        stock_exchange_id: 2,
+                        code: "TWE".to_string(),
+                        name: "興櫃".to_string(),
+                    },
+                ),
+            ]),
+            industries: HashMap::from([
+                ("水泥工業", 1),
+                ("食品工業", 2),
+                ("塑膠工業", 3),
+                ("紡織纖維", 4),
+                ("電機機械", 5),
+                ("電器電纜", 6),
+                ("化學工業", 7),
+                ("生技醫療業", 8),
+                ("玻璃陶瓷", 9),
+                ("造紙工業", 10),
+                ("鋼鐵工業", 11),
+                ("橡膠工業", 12),
+                ("汽車工業", 13),
+                ("半導體業", 14),
+                ("電腦及週邊設備業", 15),
+                ("光電業", 16),
+                ("通信網路業", 17),
+                ("電子零組件業", 18),
+                ("電子通路業", 19),
+                ("資訊服務業", 20),
+                ("其他電子業", 21),
+                ("建材營造業", 22),
+                ("航運業", 23),
+                ("觀光事業", 24),
+                ("金融保險業", 25),
+                ("貿易百貨", 26),
+                ("油電燃氣業", 27),
+                ("綜合", 28),
+                ("綠能環保", 29),
+                ("數位雲端", 30),
+                ("運動休閒", 31),
+                ("居家生活", 32),
+                ("其他", 33),
+                ("文化創意業", 34),
+                ("農業科技", 35),
+                ("電子商務", 36),
+                ("觀光餐旅", 37),
+                ("未分類", 99),
+            ]),
             listed_market_category: HashMap::from([
                 ("水泥工業", 1),
                 ("食品工業", 2),

@@ -103,15 +103,15 @@ mod tests {
     #[tokio::test]
     async fn test_execute() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 execute".to_string());
+        logging::debug_file_async("開始 execute".to_string());
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::error_file_async(format!("Failed to execute because {:?}", why));
+                logging::debug_file_async(format!("Failed to execute because {:?}", why));
             }
         }
 
-        logging::info_file_async("結束 execute".to_string());
+        logging::debug_file_async("結束 execute".to_string());
     }
 }

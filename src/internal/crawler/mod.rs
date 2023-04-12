@@ -1,7 +1,5 @@
 /// dds
 pub mod free_dns;
-/// 國際證券識別碼
-pub mod international_securities_identification_number;
 /// 台股每日收盤後股票的報價
 pub mod quotes;
 /// 每月營收
