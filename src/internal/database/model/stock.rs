@@ -11,7 +11,6 @@ use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 stocks
 pub struct Entity {
-    pub category: i32,
     pub stock_symbol: String,
     pub name: String,
     pub suspend_listing: bool,
@@ -26,7 +25,6 @@ pub struct Entity {
 impl Entity {
     pub fn new() -> Self {
         Entity {
-            category: 0,
             stock_symbol: "".to_string(),
             name: "".to_string(),
             suspend_listing: false,
@@ -107,14 +105,6 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
     }
 
     async fn create_index(&self) {
-        //32,市認售 33,指數類 31,市認購
-        //166,櫃認售 165,櫃認購
-        //51,市牛證 52,市熊證
-        match self.category {
-            31 | 32 | 33 | 51 | 52 | 165 | 166 => return,
-            _ => {}
-        }
-
         // 拆解股票名稱為單詞並加入股票代碼
         let mut words = util::text::split(&self.name);
         words.push(self.stock_symbol.to_string());
@@ -187,7 +177,6 @@ GROUP BY "SecurityCode", year, month;
 impl Clone for Entity {
     fn clone(&self) -> Self {
         Entity {
-            category: self.category,
             stock_symbol: self.stock_symbol.clone(),
             name: self.name.clone(),
             suspend_listing: self.suspend_listing,
@@ -209,7 +198,6 @@ impl Default for Entity {
 impl From<twse::international_securities_identification_number::Entity> for Entity {
     fn from(isin: twse::international_securities_identification_number::Entity) -> Self {
         Entity {
-            category: 0,
             stock_symbol: isin.stock_symbol,
             name: isin.name,
             suspend_listing: false,
@@ -224,7 +212,7 @@ impl From<twse::international_securities_identification_number::Entity> for Enti
 pub async fn fetch() -> Result<Vec<Entity>> {
     let sql = r#"
 select
-    "CategoryId", stock_symbol, "Name", "SuspendListing", "CreateTime",
+    stock_symbol, "Name", "SuspendListing", "CreateTime",
     net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
 from
     stocks
@@ -237,7 +225,6 @@ order by
                 stock_symbol: row.try_get("stock_symbol")?,
                 net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
                 name: row.try_get("Name")?,
-                category: row.try_get("CategoryId")?,
                 suspend_listing: row.try_get("SuspendListing")?,
                 create_time: row.try_get("CreateTime")?,
                 stock_exchange_market_id: row.try_get("stock_exchange_market_id")?,
@@ -254,20 +241,15 @@ order by
 pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<Entity>> {
     let sql = r#"
 SELECT
-    s."CategoryId" AS category, s.stock_symbol, s."Name" AS name,
-    s."SuspendListing" AS suspend_listing, s."CreateTime" AS create_time,
-    s.net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
-FROM market_category AS mc
-JOIN category AS c ON mc.market_category_id = c.market_category_id
-JOIN stocks AS s ON c.category_id = s."CategoryId"
-WHERE mc.market_category_id IN (2, 4)
-    AND c.category_id IN (
-        1, 2, 3, 4, 6, 7, 9, 10, 11, 12, 13, 19, 20, 21, 22, 24,
-        30, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 121, 122,
-        123, 124, 125, 126, 130, 131, 138, 139, 140, 141, 142, 145,
-        151, 153, 154, 155, 156, 157, 158, 159, 160, 161, 169, 170,
-        171)
-    AND s."SuspendListing" = false
+    s.stock_symbol,
+    s."Name" AS name,
+    s."SuspendListing" AS suspend_listing,
+    s."CreateTime" AS create_time,
+    s.net_asset_value_per_share,
+    s.stock_exchange_market_id,
+    s.stock_industry_id
+FROM stocks AS s
+WHERE s."SuspendListing" = false
     AND s.net_asset_value_per_share = 0
     AND LENGTH(s.stock_symbol) = 4
 "#;
@@ -282,7 +264,7 @@ pub async fn fetch_stocks_without_financial_statement(
 ) -> Result<Vec<Entity>> {
     let sql = r#"
 SELECT
-    s."CategoryId" AS category, s.stock_symbol, s."Name" AS name,
+    s.stock_symbol, s."Name" AS name,
     s."SuspendListing" AS suspend_listing, s."CreateTime" AS create_time,
     s.net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
 FROM market_category AS mc

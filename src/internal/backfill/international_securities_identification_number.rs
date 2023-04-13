@@ -9,6 +9,7 @@ use crate::{
 use anyhow::*;
 use chrono::Local;
 use core::result::Result::Ok;
+use std::fmt::Write;
 
 /// 更新資料庫新上市股票的或更新其交易所的市場編號、股票的產業分類、名稱等欄位
 pub async fn execute() -> Result<()> {
@@ -35,6 +36,7 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
         Some(result) => result,
     };
 
+    let mut to_bot_msg = String::with_capacity(1024);
     for insi in result {
         let new_stock = match CACHE_SHARE.stocks.read() {
             Ok(stocks_cache) => match stocks_cache.get(&insi.stock_symbol) {
@@ -62,13 +64,16 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
             if let Ok(mut stocks) = CACHE_SHARE.stocks.write() {
                 stocks.insert(stock.stock_symbol.to_string(), stock.clone());
             }
-
-            // todo 需要通知另一個服務已新增加一個股票代號
-            if let Err(why) = bot::telegram::send_to_allowed(&msg).await {
-                logging::error_file_async(format!("Failed to send_to_allowed because {:?}", why));
-            }
+            let _ = writeln!(&mut to_bot_msg, "{}\r\n", msg);
 
             logging::info_file_async(msg);
+        }
+    }
+
+    // todo 需要通知另一個服務已新增加一個股票代號
+    if !to_bot_msg.is_empty() {
+        if let Err(why) = bot::telegram::send_to_allowed(&to_bot_msg).await {
+            logging::error_file_async(format!("Failed to send_to_allowed because {:?}", why));
         }
     }
 

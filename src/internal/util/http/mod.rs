@@ -2,7 +2,7 @@ pub mod parse;
 
 use anyhow::*;
 use once_cell::{sync::Lazy, sync::OnceCell};
-use reqwest::{header, Client, Method};
+use reqwest::{header, Client, Method, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::time::Duration;
 use tokio::sync::Semaphore;
@@ -34,28 +34,24 @@ fn get_client() -> Result<&'static Client> {
 
 /// Perform a GET request and deserialize the JSON response
 pub async fn request_get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
-    let client = get_client()?;
-    let rb = client.request(Method::GET, url);
-    let res = request_send(rb).await?;
+    let res = request_get_common(url).await?;
     response_with_json(res).await
 }
 
 /// Perform a GET request and return the response as text
 pub async fn request_get(url: &str) -> Result<String> {
-    let client = get_client()?;
-    let rb = client.request(Method::GET, url);
-    let res = request_send(rb).await?;
-    res.text()
+    request_get_common(url)
+        .await?
+        .text()
         .await
         .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
 }
 
 /// Perform a GET request and return the response as Big5 encoded text
 pub async fn request_get_use_big5(url: &str) -> Result<String> {
-    let client = get_client()?;
-    let rb = client.request(Method::GET, url);
-    let res = request_send(rb).await?;
-    res.text_force_charset("Big5")
+    request_get_common(url)
+        .await?
+        .text_force_charset("Big5")
         .await
         .map_err(|e| anyhow!("Error parsing response text use BIG5: {:?}", e))
 }
@@ -84,7 +80,7 @@ where
 }
 
 /// 發送HTTP請求
-async fn request_send(request_builder: reqwest::RequestBuilder) -> Result<reqwest::Response> {
+async fn request_send(request_builder: reqwest::RequestBuilder) -> Result<Response> {
     let _permit = SEMAPHORE.acquire().await?;
     request_builder
         .send()
@@ -93,10 +89,16 @@ async fn request_send(request_builder: reqwest::RequestBuilder) -> Result<reqwes
 }
 
 /// 回應的數據使用json反序列成指定的 RES 類型物件
-async fn response_with_json<RES: DeserializeOwned>(res: reqwest::Response) -> Result<RES> {
+async fn response_with_json<RES: DeserializeOwned>(res: Response) -> Result<RES> {
     res.json::<RES>()
         .await
         .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
+}
+
+async fn request_get_common(url: &str) -> Result<Response> {
+    let client = get_client()?;
+    let rb = client.request(Method::GET, url);
+    Ok(request_send(rb).await?)
 }
 
 #[cfg(test)]
@@ -115,8 +117,8 @@ mod tests {
             Local::now().timestamp_millis().to_string()
         );
 
-        logging::info_file_async(format!("visit url:{}", url,));
-        logging::info_file_async(format!("request_get:{:?}", request_get(&url).await));
+        logging::debug_file_async(format!("visit url:{}", url,));
+        logging::debug_file_async(format!("request_get:{:?}", request_get(&url).await));
 
         let bytes = reqwest::get("https://httpbin.org/ip")
             .await

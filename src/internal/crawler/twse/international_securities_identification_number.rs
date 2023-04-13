@@ -9,7 +9,7 @@ use chrono::Local;
 use core::result::Result::Ok;
 use scraper::{Html, Selector};
 
-const REQUIRED_CATEGORIES: [&str; 3] = ["股票", "特別股", "普通股"];
+const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺灣存託憑證(TDR)"];
 
 /// twse 國際證券識別碼
 #[derive(Debug)]

@@ -47,7 +47,7 @@ mod tests {
         logging::debug_file_async("開始 visit".to_string());
 
         match visit().await {
-            None => { logging::error_file_async("Failed to visit because response is no data".to_string()); }
+            None => { logging::debug_file_async("Failed to visit because response is no data".to_string()); }
             Some(list) => {
                 logging::debug_file_async(format!("data:{:#?}", list))
             }
