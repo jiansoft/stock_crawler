@@ -39,7 +39,7 @@ pub async fn send_message<'a>(payload: SendMessageRequest<'_>) -> Result<()> {
         SETTINGS.bot.telegram.token
     );
 
-    match http::request_post::<SendMessageRequest, SendMessageResponse>(
+    match http::request_post_use_json::<SendMessageRequest, SendMessageResponse>(
         &api_url,
         None,
         Some(&payload),

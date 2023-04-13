@@ -17,7 +17,8 @@ pub async fn start() {
         .every(Interval::Days(1))
         .at("01:00:00")
         .run(|| async {
-            //從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據
+
+            //將未有上季度財報的股票，到雅虎財經下載後回寫到 financial_statement 表
             match backfill::financial_statement::execute().await {
                 Ok(_) => {
                     logging::info_file_async(
@@ -31,6 +32,22 @@ pub async fn start() {
                     ));
                 }
             }
+
+            //更新興櫃股票的每股淨值
+            match backfill::net_asset_value_per_share::emerging::execute().await {
+                Ok(_) => {
+                    logging::info_file_async(
+                        "backfill::net_asset_value_per_share::emerging::execute executed successfully."
+                            .to_string(),
+                    );
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to backfill::net_asset_value_per_share::emerging::execute because {:?}",
+                        why
+                    ));
+                }
+            }
         });
 
     scheduler
@@ -38,16 +55,16 @@ pub async fn start() {
         .at("03:00:00")
         .run(|| async {
             //從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據
-            match backfill::net_asset_value_per_share::execute().await {
+            match backfill::net_asset_value_per_share::zero_value::execute().await {
                 Ok(_) => {
                     logging::info_file_async(
-                        "backfill::net_asset_value_per_share::execute executed successfully."
+                        "backfill::net_asset_value_per_share::zero_value::execute executed successfully."
                             .to_string(),
                     );
                 }
                 Err(why) => {
                     logging::error_file_async(format!(
-                        "Failed to backfill::net_asset_value_per_share::execute because {:?}",
+                        "Failed to backfill::net_asset_value_per_share::zero_value::execute because {:?}",
                         why
                     ));
                 }

@@ -1,5 +1,9 @@
-use crate::internal::cache_share::CACHE_SHARE;
-use crate::{internal::crawler::yahoo::profile, internal::database::model, logging};
+use crate::{
+    internal::cache_share::CACHE_SHARE,
+    internal::crawler::yahoo::profile,
+    internal::database::model,
+    logging
+};
 use anyhow::*;
 use core::result::Result::Ok;
 use rust_decimal::Decimal;
@@ -8,7 +12,7 @@ use rust_decimal::Decimal;
 pub async fn execute() -> Result<()> {
     let stocks = model::stock::fetch_net_asset_value_per_share_is_zero().await?;
     for mut stock in stocks {
-        if stock.is_preference_shares() {
+        if stock.is_preference_shares() || stock.is_tdr() {
             continue;
         }
 

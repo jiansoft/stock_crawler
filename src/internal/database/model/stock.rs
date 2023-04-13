@@ -1,4 +1,4 @@
-use crate::internal::crawler::twse;
+use crate::internal::crawler::{tpex, twse};
 use crate::{
     internal::database::model::stock_index, internal::database::model::stock_word,
     internal::database::DB, internal::util, logging,
@@ -39,6 +39,12 @@ impl Entity {
     pub fn is_preference_shares(&self) -> bool {
         self.stock_symbol.chars().any(|c| c.is_ascii_uppercase())
     }
+
+    /// 是否為臺灣存託憑證
+    pub fn is_tdr(&self) -> bool {
+        self.name.contains("-DR")
+    }
+
 
     /// 更新個股的每股淨值
     pub async fn update_net_asset_value_per_share(&self) -> Result<PgQueryResult> {
@@ -172,6 +178,35 @@ GROUP BY "SecurityCode", year, month;
 
         Ok((lowest_price, avg_price, highest_price))
     }
+
+    /// 取得所有股票
+    pub async fn fetch() -> Result<Vec<Entity>> {
+        let sql = r#"
+select
+    stock_symbol, "Name", "SuspendListing", "CreateTime",
+    net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
+from
+    stocks
+order by
+     stock_exchange_market_id, stock_industry_id;
+"#;
+        let answers = sqlx::query(sql)
+            .try_map(|row: PgRow| {
+                Ok(Entity {
+                    stock_symbol: row.try_get("stock_symbol")?,
+                    net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
+                    name: row.try_get("Name")?,
+                    suspend_listing: row.try_get("SuspendListing")?,
+                    create_time: row.try_get("CreateTime")?,
+                    stock_exchange_market_id: row.try_get("stock_exchange_market_id")?,
+                    stock_industry_id: row.try_get("stock_industry_id")?,
+                })
+            })
+            .fetch_all(&DB.pool)
+            .await?;
+
+        Ok(answers)
+    }
 }
 
 impl Clone for Entity {
@@ -209,32 +244,19 @@ impl From<twse::international_securities_identification_number::Entity> for Enti
     }
 }
 
-pub async fn fetch() -> Result<Vec<Entity>> {
-    let sql = r#"
-select
-    stock_symbol, "Name", "SuspendListing", "CreateTime",
-    net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
-from
-    stocks
-order by
-    "CategoryId";
-"#;
-    let answers = sqlx::query(sql)
-        .try_map(|row: PgRow| {
-            Ok(Entity {
-                stock_symbol: row.try_get("stock_symbol")?,
-                net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
-                name: row.try_get("Name")?,
-                suspend_listing: row.try_get("SuspendListing")?,
-                create_time: row.try_get("CreateTime")?,
-                stock_exchange_market_id: row.try_get("stock_exchange_market_id")?,
-                stock_industry_id: row.try_get("stock_industry_id")?,
-            })
-        })
-        .fetch_all(&DB.pool)
-        .await?;
-
-    Ok(answers)
+//let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
+impl From<tpex::net_asset_value_per_share::Entity> for Entity {
+    fn from(tpex: tpex::net_asset_value_per_share::Entity) -> Self {
+        Entity {
+            stock_symbol: tpex.stock_symbol,
+            name: "".to_string(),
+            suspend_listing: false,
+            net_asset_value_per_share: tpex.net_asset_value_per_share,
+            create_time: Local::now(),
+            stock_exchange_market_id: Default::default(),
+            stock_industry_id: Default::default(),
+        }
+    }
 }
 
 /// 取得未下市每股淨值為零的股票
@@ -264,20 +286,15 @@ pub async fn fetch_stocks_without_financial_statement(
 ) -> Result<Vec<Entity>> {
     let sql = r#"
 SELECT
-    s.stock_symbol, s."Name" AS name,
-    s."SuspendListing" AS suspend_listing, s."CreateTime" AS create_time,
-    s.net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
-FROM market_category AS mc
-JOIN category AS c ON mc.market_category_id = c.market_category_id
-JOIN stocks AS s ON c.category_id = s."CategoryId"
-WHERE mc.market_category_id IN (2, 4)
-    AND c.category_id IN (
-        1, 2, 3, 4, 6, 7, 9, 10, 11, 12, 13, 19, 20, 21, 22, 24,
-        30, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 121, 122,
-        123, 124, 125, 126, 130, 131, 138, 139, 140, 141, 142, 145,
-        151, 153, 154, 155, 156, 157, 158, 159, 160, 161, 169, 170,
-        171)
-    AND s."SuspendListing" = false
+    s.stock_symbol,
+    s."Name" AS name,
+    s."SuspendListing" AS suspend_listing,
+    s."CreateTime" AS create_time,
+    s.net_asset_value_per_share,
+    stock_exchange_market_id,
+    stock_industry_id
+FROM stocks AS s
+WHERE s."SuspendListing" = false
     AND LENGTH(s.stock_symbol) = 4
     AND NOT EXISTS (
         SELECT 1
@@ -302,7 +319,7 @@ mod tests {
     async fn test_fetch() {
         dotenv::dotenv().ok();
         //logging::info_file_async("開始 fetch".to_string());
-        let r = fetch().await;
+        let r = Entity::fetch().await;
         if let Ok(result) = r {
             for e in result {
                 logging::info_file_async(format!("{:#?} ", e));

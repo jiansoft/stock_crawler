@@ -6,5 +6,7 @@ pub mod quotes;
 pub mod revenue;
 /// 雅虎財經
 pub mod yahoo;
-/// 台灣證卷交易所
+/// 台灣證券交易所
 pub mod twse;
+/// 台灣證券櫃檯買賣中心
+pub mod tpex;

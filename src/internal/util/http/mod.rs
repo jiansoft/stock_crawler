@@ -4,6 +4,7 @@ use anyhow::*;
 use once_cell::{sync::Lazy, sync::OnceCell};
 use reqwest::{header, Client, Method, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
@@ -57,7 +58,7 @@ pub async fn request_get_use_big5(url: &str) -> Result<String> {
 }
 
 /// Perform a POST request with JSON request and response, with specified headers
-pub async fn request_post<REQ, RES>(
+pub async fn request_post_use_json<REQ, RES>(
     url: &str,
     headers: Option<header::HeaderMap>,
     req: Option<&REQ>,
@@ -68,9 +69,11 @@ where
 {
     let client = get_client()?;
     let mut rb = client.request(Method::POST, url);
+
     if let Some(h) = headers {
         rb = rb.headers(h);
     }
+
     if let Some(r) = req {
         rb = rb.json(r);
     }
@@ -79,6 +82,29 @@ where
     response_with_json(res).await
 }
 
+/// Perform a POST request with form data and a specified set of headers, and receive a response.
+pub async fn request_post(
+    url: &str,
+    headers: Option<header::HeaderMap>,
+    params: Option<HashMap<&str, &str>>,
+) -> Result<String> {
+    let client = get_client()?;
+    let mut rb = client.request(Method::POST, url);
+
+    if let Some(h) = headers {
+        rb = rb.headers(h);
+    }
+
+    if let Some(p) = params {
+        rb = rb.form(&p);
+    }
+
+    request_send(rb)
+        .await?
+        .text()
+        .await
+        .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
+}
 /// 發送HTTP請求
 async fn request_send(request_builder: reqwest::RequestBuilder) -> Result<Response> {
     let _permit = SEMAPHORE.acquire().await?;

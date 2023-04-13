@@ -1,10 +1,14 @@
+//use futures::executor::block_on;
 use crate::{
-    internal::database::model::last_daily_quotes,
-    internal::{database::model::index, database::model::revenue, database::model::stock},
+    internal::{
+        database::model::index,
+        database::model::revenue,
+        database::model::stock,
+        database::model::last_daily_quotes,
+        database::model
+    },
     logging,
 };
-//use futures::executor::block_on;
-use crate::internal::database::model;
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::RwLock};
 
@@ -121,7 +125,7 @@ impl CacheShare {
             }
         }
 
-        let stocks = stock::fetch().await;
+        let stocks = stock::Entity::fetch().await;
         match self.stocks.write() {
             Ok(mut s) => {
                 if let Ok(result) = stocks {
