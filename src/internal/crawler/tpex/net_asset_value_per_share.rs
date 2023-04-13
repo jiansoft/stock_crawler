@@ -82,7 +82,7 @@ mod tests {
                 );
             }
             Some(list) => {
-                logging::debug_file_async(format!("data({}):{:#?}",list.len(), list));
+                logging::debug_file_async(format!("data({}):{:#?}", list.len(), list));
             }
         }
 

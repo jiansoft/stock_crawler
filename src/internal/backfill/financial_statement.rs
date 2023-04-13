@@ -53,8 +53,8 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache_share::CACHE_SHARE;
     use super::*;
+    use crate::internal::cache_share::CACHE_SHARE;
     use crate::logging;
 
     #[tokio::test]

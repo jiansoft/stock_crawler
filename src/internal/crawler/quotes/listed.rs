@@ -39,7 +39,9 @@ pub async fn visit(date: DateTime<Local>) -> Result<()> {
     logging::info_file_async(format!("visit url:{}", url,));
 
     let headers = build_headers().await;
-    let data = http::request_post_use_json::<http::Empty, ListedResponse>(&url, Some(headers), None).await?;
+    let data =
+        http::request_post_use_json::<http::Empty, ListedResponse>(&url, Some(headers), None)
+            .await?;
     //logging::info_file_async(format!("data: {:?}", data));
     let mut dqs = Vec::with_capacity(2048);
 

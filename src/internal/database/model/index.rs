@@ -40,7 +40,7 @@ impl Entity {
     }
 
     /// 將twse取回來的原始資料轉成 Entity
-    pub fn from_strings(item: &Vec<String>) -> Result<Self> {
+    pub fn from_strings(item: &[String]) -> Result<Self> {
         let split_date: Vec<&str> = item[0].split('/').collect();
         if split_date.len() != 3 {
             return Err(anyhow!("日期欄位不等於3"));

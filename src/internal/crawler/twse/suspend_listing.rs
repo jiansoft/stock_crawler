@@ -1,7 +1,4 @@
-use crate::{
-    logging,
-    internal::util
-};
+use crate::{internal::util, logging};
 use serde::Deserialize;
 
 /// 調用 twse suspendListingCsvAndHtml API 後其回應的數據
@@ -31,9 +28,6 @@ pub async fn visit() -> Option<Vec<SuspendListing>> {
         .ok()
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
     use crate::internal::cache_share::CACHE_SHARE;
@@ -47,10 +41,12 @@ mod tests {
         logging::debug_file_async("開始 visit".to_string());
 
         match visit().await {
-            None => { logging::debug_file_async("Failed to visit because response is no data".to_string()); }
-            Some(list) => {
-                logging::debug_file_async(format!("data:{:#?}", list))
+            None => {
+                logging::debug_file_async(
+                    "Failed to visit because response is no data".to_string(),
+                );
             }
+            Some(list) => logging::debug_file_async(format!("data:{:#?}", list)),
         }
 
         logging::debug_file_async("結束 visit".to_string());

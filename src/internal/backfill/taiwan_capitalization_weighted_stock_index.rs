@@ -1,9 +1,6 @@
 use crate::{
-    internal::bot,
-    internal::cache_share::CACHE_SHARE,
-    internal::crawler::twse,
-    internal::database::model,
-    logging
+    internal::bot, internal::cache_share::CACHE_SHARE, internal::crawler::twse,
+    internal::database::model, logging,
 };
 use anyhow::*;
 use chrono::Local;

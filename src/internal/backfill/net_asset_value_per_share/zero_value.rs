@@ -1,8 +1,6 @@
 use crate::{
-    internal::cache_share::CACHE_SHARE,
-    internal::crawler::yahoo::profile,
-    internal::database::model,
-    logging
+    internal::backfill::net_asset_value_per_share::update, internal::crawler::yahoo::profile,
+    internal::database::model, logging,
 };
 use anyhow::*;
 use core::result::Result::Ok;
@@ -29,22 +27,12 @@ pub async fn execute() -> Result<()> {
 
                 stock.net_asset_value_per_share = stock_profile.net_asset_value_per_share;
 
-                match stock.update_net_asset_value_per_share().await {
+                match update(&stock).await {
                     Ok(_) => {
                         logging::info_file_async(format!(
                             "update_net_asset_value_per_share executed successfully. \r\n{:#?}",
                             stock
                         ));
-
-                        if let Ok(mut stocks_cache) = CACHE_SHARE.stocks.write() {
-                            if let Some(stock_in_cache) = stocks_cache.get_mut(&stock.stock_symbol)
-                            {
-                                stock_in_cache.net_asset_value_per_share =
-                                    stock.net_asset_value_per_share;
-                            } else {
-                                stocks_cache.insert(stock.stock_symbol.to_string(), stock);
-                            }
-                        }
                     }
                     Err(why) => {
                         logging::error_file_async(format!(

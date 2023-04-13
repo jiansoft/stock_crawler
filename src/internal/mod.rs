@@ -17,7 +17,6 @@ pub mod scheduler;
 /// 工具類
 pub mod util;
 
-
 /// 交易所
 #[derive(Debug, Copy, Clone)]
 pub enum StockExchange {
@@ -36,12 +35,9 @@ impl StockExchange {
     }
 
     pub fn iterator() -> impl Iterator<Item = Self> {
-        [Self::TWSE, Self::TPEx]
-            .iter()
-            .copied()
+        [Self::TWSE, Self::TPEx].iter().copied()
     }
 }
-
 
 /// 市場別
 #[derive(Debug, Copy, Clone)]

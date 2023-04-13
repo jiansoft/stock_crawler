@@ -1,11 +1,8 @@
 //use futures::executor::block_on;
 use crate::{
     internal::{
-        database::model::index,
-        database::model::revenue,
-        database::model::stock,
-        database::model::last_daily_quotes,
-        database::model
+        database::model, database::model::index, database::model::last_daily_quotes,
+        database::model::revenue, database::model::stock,
     },
     logging,
 };
@@ -105,7 +102,8 @@ impl CacheShare {
                 ("農業科技業", 35),
                 ("電子商務", 36),
                 ("觀光餐旅", 37),
-                ("未分類", 0),
+                ("存託憑證", 38),
+                ("未分類", 99),
             ]),
             last_revenues: RwLock::new(HashMap::new()),
             last_trading_day_quotes: RwLock::new(HashMap::new()),
@@ -121,7 +119,7 @@ impl CacheShare {
                 }
             }
             Err(why) => {
-                logging::error_file_async(format!("because {:?}", why));
+                logging::error_file_async(format!("Failed to indices.write because {:?}", why));
             }
         }
 
@@ -135,7 +133,7 @@ impl CacheShare {
                 }
             }
             Err(why) => {
-                logging::error_file_async(format!("because {:?}", why));
+                logging::error_file_async(format!("Failed to stocks.write because {:?}", why));
             }
         }
 

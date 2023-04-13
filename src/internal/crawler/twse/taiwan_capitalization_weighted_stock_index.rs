@@ -35,8 +35,8 @@ pub async fn visit(date: DateTime<Local>) -> Option<Entity> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache_share::CACHE_SHARE;
     use super::*;
+    use crate::internal::cache_share::CACHE_SHARE;
 
     #[tokio::test]
     async fn test_visit() {

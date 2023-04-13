@@ -3,7 +3,7 @@ use crate::{
     internal::database::model,
     internal::util::datetime::Weekend,
     internal::{util, StockExchangeMarket},
-    logging
+    logging,
 };
 use chrono::Local;
 use core::result::Result::Ok;
@@ -110,7 +110,7 @@ pub async fn visit(mode: StockExchangeMarket) -> Option<Vec<Entity>> {
                     Some(em) => em.clone(),
                 };
             let industry_id = match CACHE_SHARE.industries.get(industry.as_str()) {
-                None => 0,
+                None => 99,
                 Some(industry) => *industry,
             };
 

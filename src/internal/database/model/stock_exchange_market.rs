@@ -8,10 +8,7 @@ pub struct Entity {
 }
 
 impl Entity {
-    pub fn new(
-        stock_exchange_market_id: i32,
-        stock_exchange_id: i32,
-    ) -> Self {
+    pub fn new(stock_exchange_market_id: i32, stock_exchange_id: i32) -> Self {
         Entity {
             stock_exchange_market_id,
             stock_exchange_id,

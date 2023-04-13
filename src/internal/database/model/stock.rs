@@ -45,7 +45,6 @@ impl Entity {
         self.name.contains("-DR")
     }
 
-
     /// 更新個股的每股淨值
     pub async fn update_net_asset_value_per_share(&self) -> Result<PgQueryResult> {
         let sql = r#"
@@ -271,9 +270,9 @@ SELECT
     s.stock_exchange_market_id,
     s.stock_industry_id
 FROM stocks AS s
-WHERE s."SuspendListing" = false
+WHERE stock_exchange_market_id in(2, 4)
+    AND s."SuspendListing" = false
     AND s.net_asset_value_per_share = 0
-    AND LENGTH(s.stock_symbol) = 4
 "#;
 
     Ok(sqlx::query_as::<_, Entity>(sql).fetch_all(&DB.pool).await?)
@@ -294,8 +293,8 @@ SELECT
     stock_exchange_market_id,
     stock_industry_id
 FROM stocks AS s
-WHERE s."SuspendListing" = false
-    AND LENGTH(s.stock_symbol) = 4
+WHERE stock_exchange_market_id in(2, 4)
+    AND s."SuspendListing" = false
     AND NOT EXISTS (
         SELECT 1
         FROM financial_statement f

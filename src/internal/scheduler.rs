@@ -7,6 +7,7 @@ use crate::{
 };
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use clokwerk::{AsyncScheduler, Interval, Job, TimeUnits};
+use std::env;
 use std::time::Duration;
 
 /// 啟動排程
@@ -187,5 +188,11 @@ pub async fn start() {
         }
     });
 
-    let _ = bot::telegram::send_to_allowed("StockCrawler-Rust 已啟動").await;
+    let msg = format!(
+        "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
+        env::consts::OS,
+        env::consts::ARCH
+    );
+
+    let _ = bot::telegram::send_to_allowed(&msg).await;
 }
