@@ -39,48 +39,53 @@ async fn main() -> Result<(), rocket::Error> {
 }
 */
 
+#[cfg(unix)]
+use tokio::signal::unix::{signal as unix_signal, SignalKind};
+
+#[cfg(unix)]
+async fn unix_signal_handler(received_signal: Arc<AtomicBool>) -> Result<(), Box<dyn Error>> {
+    let mut sigint = unix_signal(SignalKind::interrupt())?;
+    let mut sigterm = unix_signal(SignalKind::terminate())?;
+
+    tokio::select! {
+        _ = sigint.recv() => {}
+        _ = sigterm.recv() => {}
+    }
+
+    received_signal.store(true, Ordering::SeqCst);
+
+    Ok(())
+}
+
+async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
+    if let Err(e) = signal::ctrl_c().await {
+        eprintln!("Failed to listen for Ctrl+C signal: {}", e);
+    }
+    received_signal.store(true, Ordering::SeqCst);
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // 創建 AtomicBool 以跟蹤是否收到信號
     let received_signal = Arc::new(AtomicBool::new(false));
-    let received_signal_clone = Arc::clone(&received_signal);
 
-    // 捕獲 Ctrl+C 信號
-    tokio::spawn(async move {
-        signal::ctrl_c()
-            .await
-            .expect("Failed to listen for Ctrl+C signal");
-        received_signal_clone.store(true, Ordering::SeqCst);
-    });
+    tokio::spawn(shutdown_signal_handler(received_signal.clone()));
 
-    // 捕獲 SIGINT 和 SIGTERM 信號（僅適用於 Unix）
     #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-
-        let received_signal_clone = Arc::clone(&received_signal);
-        tokio::spawn(async move {
-            let mut sigint =
-                signal(SignalKind::interrupt()).expect("Failed to register SIGINT signal");
-            let mut sigterm =
-                signal(SignalKind::terminate()).expect("Failed to register SIGTERM signal");
-
-            tokio::select! {
-                _ = sigint.recv() => {}
-                _ = sigterm.recv() => {}
+    tokio::spawn({
+        let received_signal = Arc::clone(&received_signal);
+        async move {
+            if let Err(e) = unix_signal_handler(received_signal).await {
+                eprintln!("Error handling unix signals: {}", e);
             }
-
-            received_signal_clone.store(true, Ordering::SeqCst);
-        });
-    }
+        }
+    });
 
     dotenv::dotenv().ok();
     cache_share::CACHE_SHARE.load().await;
     scheduler::start().await;
 
-    // 等待收到信號
     while !received_signal.load(Ordering::SeqCst) {
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
     println!("Server stopped: {:?}", received_signal);

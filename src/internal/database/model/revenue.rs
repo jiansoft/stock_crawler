@@ -1,6 +1,8 @@
 use crate::internal::database::DB;
-use crate::logging;
+
+use anyhow::*;
 use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
+use core::result::Result::Ok;
 use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
 use sqlx::{postgres::PgRow, Error, Row};
@@ -51,7 +53,7 @@ impl Entity {
             lowest_price: Default::default(),
             highest_price: Default::default(),
             date: 0,
-            create_time: Default::default(),
+            create_time: Local::now(),
         }
     }
 
@@ -207,26 +209,33 @@ order by "Serial" desc
     .await
 }
 
-pub async fn rebuild_revenue_last_date() {
+pub async fn rebuild_revenue_last_date() -> Result<PgQueryResult> {
     let sql = r#"
---SET TIMEZONE='Asia/Taipei';
-with r as (select "SecurityCode", max("Date") as date
-           from "Revenue"
-           group by "SecurityCode")
-insert into revenue_last_date
-select "Revenue"."SecurityCode", "Revenue"."Serial"
-from "Revenue"
-inner join r on r."SecurityCode" = "Revenue"."SecurityCode" and r.date = "Revenue"."Date"
-ON CONFLICT (security_code) DO UPDATE SET serial = excluded.serial, created_time = now();
+--SET TIMEZONE = 'Asia/Taipei';
+
+WITH r AS (
+    SELECT
+        "SecurityCode",
+        MAX("Date") AS date
+    FROM
+        "Revenue"
+    GROUP BY
+        "SecurityCode"
+)
+INSERT INTO revenue_last_date
+SELECT
+    "Revenue"."SecurityCode",
+    "Revenue"."Serial"
+FROM
+    "Revenue"
+    INNER JOIN r ON r."SecurityCode" = "Revenue"."SecurityCode"
+    AND r.date = "Revenue"."Date"
+ON CONFLICT (security_code)
+DO UPDATE SET
+    serial = excluded.serial,
+    created_time = now();
 "#;
-    match sqlx::query(sql).execute(&DB.pool).await {
-        Ok(t) => {
-            logging::info_file_async(format!("rebuild_revenue_last_date:{}", t.rows_affected()));
-        }
-        Err(why) => {
-            logging::error_file_async(format!("because {}", why));
-        }
-    }
+    Ok(sqlx::query(sql).execute(&DB.pool).await?)
 }
 
 #[cfg(test)]
@@ -310,7 +319,13 @@ mod tests {
     async fn test_rebuild_revenue_last_date() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 test_rebuild_revenue_last_date".to_string());
-
-        rebuild_revenue_last_date().await;
+        match rebuild_revenue_last_date().await {
+            Ok(result) => {
+                logging::info_file_async(format!("rebuild_revenue_last_date:{:?} ", result.rows_affected()));
+            }
+            Err(why) => {
+                logging::error_file_async(format!("Failed to rebuild_revenue_last_date because {:?}", why));
+            }
+        }
     }
 }

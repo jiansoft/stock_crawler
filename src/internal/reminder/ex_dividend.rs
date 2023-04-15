@@ -11,8 +11,9 @@ struct StockEntity {
 }
 
 /// 提醒本日為除權息的股票有那些
-pub async fn execute(date: NaiveDate) {
-    let date_str = date.format("%Y-%m-%d").to_string();
+pub async fn execute() {
+    let today: NaiveDate = Local::now().date_naive();
+    let date_str = today.format("%Y-%m-%d").to_string();
     logging::info_file_async(format!("ex_dividend date:{}", date_str));
 
     let sql = r#"
@@ -71,9 +72,9 @@ mod tests {
     async fn test_calculate() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 execute".to_string());
-        let date = NaiveDate::from_ymd_opt(2023, 6, 15);
+        //let date = NaiveDate::from_ymd_opt(2023, 6, 15);
         //let today: NaiveDate = Local::today().naive_local();
-        execute(date.unwrap()).await;
+        execute().await;
 
         logging::info_file_async("結束 execute".to_string());
     }

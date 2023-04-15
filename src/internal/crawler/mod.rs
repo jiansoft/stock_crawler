@@ -2,8 +2,6 @@
 pub mod free_dns;
 /// 台股每日收盤後股票的報價
 pub mod quotes;
-/// 每月營收
-pub mod revenue;
 /// 台灣證券櫃檯買賣中心
 pub mod tpex;
 /// 台灣證券交易所
