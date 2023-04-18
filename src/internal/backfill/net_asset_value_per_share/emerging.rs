@@ -1,5 +1,5 @@
 use crate::{
-    internal::backfill::net_asset_value_per_share::update, internal::cache_share::CACHE_SHARE,
+    internal::backfill::net_asset_value_per_share::update, internal::cache::SHARE,
     internal::crawler::tpex, internal::database::model, internal::util::datetime::Weekend, logging,
 };
 use anyhow::*;
@@ -17,7 +17,7 @@ pub async fn execute() -> Result<()> {
         .ok_or_else(|| anyhow!("Failed to visit because response is no data".to_string()))?;
 
     for item in result {
-        let stock = match CACHE_SHARE.stocks.read() {
+        let stock = match SHARE.stocks.read() {
             Ok(stocks_cache) => {
                 if let Some(stock_db) = stocks_cache.get(item.stock_symbol.as_str()) {
                     if stock_db.net_asset_value_per_share == item.net_asset_value_per_share {

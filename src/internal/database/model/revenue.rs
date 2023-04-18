@@ -6,6 +6,7 @@ use core::result::Result::Ok;
 use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
 use sqlx::{postgres::PgRow, Error, Row};
+use std::str::FromStr;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Entity {
@@ -124,6 +125,69 @@ impl Clone for Entity {
             date: self.date,
             create_time: self.create_time,
         }
+    }
+}
+
+//let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
+impl From<Vec<String>> for Entity {
+    fn from(item: Vec<String>) -> Self {
+        let mut e = Entity::new();
+
+        e.security_code = item[0].to_string();
+        /*
+        0公司代號	1公司名稱	2當月營收	3上月營收	4去年當月營收	5上月比較增減(%) 6去年同月增減(%) 7當月累計營收 8去年累計營收 9前期比較增減(%)
+        */
+        e.monthly =
+            Decimal::from_str(item[2].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
+                eprintln!("Failed to parse 'monthly' field: {}", err);
+                Default::default()
+            });
+        e.last_month =
+            Decimal::from_str(item[3].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
+                eprintln!("Failed to parse 'last_month' field: {}", err);
+                Default::default()
+            });
+        e.last_year_this_month = Decimal::from_str(item[4].replace([',', ' '], "").as_str())
+            .unwrap_or_else(|err| {
+                eprintln!("Failed to parse 'last_year_this_month' field: {}", err);
+                Default::default()
+            });
+        e.monthly_accumulated = Decimal::from_str(item[7].replace([',', ' '], "").as_str())
+            .unwrap_or_else(|err| {
+                eprintln!("Failed to parse 'monthly_accumulated' field: {}", err);
+                Default::default()
+            });
+        e.last_year_monthly_accumulated =
+            Decimal::from_str(item[8].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
+                eprintln!(
+                    "Failed to parse 'last_year_monthly_accumulated' field: {}",
+                    err
+                );
+                Default::default()
+            });
+        e.compared_with_last_month = Decimal::from_str(item[5].replace([',', ' '], "").as_str())
+            .unwrap_or_else(|err| {
+                eprintln!("Failed to parse 'compared_with_last_month' field: {}", err);
+                Default::default()
+            });
+        e.compared_with_last_year_same_month =
+            Decimal::from_str(item[6].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
+                eprintln!(
+                    "Failed to parse 'compared_with_last_year_same_month' field: {}",
+                    err
+                );
+                Default::default()
+            });
+        e.accumulated_compared_with_last_year =
+            Decimal::from_str(item[9].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
+                eprintln!(
+                    "Failed to parse 'accumulated_compared_with_last_year' field: {}",
+                    err
+                );
+                Default::default()
+            });
+
+        e
     }
 }
 
@@ -321,10 +385,16 @@ mod tests {
         logging::info_file_async("開始 test_rebuild_revenue_last_date".to_string());
         match rebuild_revenue_last_date().await {
             Ok(result) => {
-                logging::info_file_async(format!("rebuild_revenue_last_date:{:?} ", result.rows_affected()));
+                logging::info_file_async(format!(
+                    "rebuild_revenue_last_date:{:?} ",
+                    result.rows_affected()
+                ));
             }
             Err(why) => {
-                logging::error_file_async(format!("Failed to rebuild_revenue_last_date because {:?}", why));
+                logging::error_file_async(format!(
+                    "Failed to rebuild_revenue_last_date because {:?}",
+                    why
+                ));
             }
         }
     }

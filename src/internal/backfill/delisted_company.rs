@@ -1,5 +1,5 @@
 use crate::{
-    internal::cache_share::CACHE_SHARE, internal::crawler::twse, internal::util::datetime::Weekend,
+    internal::cache::SHARE, internal::crawler::twse, internal::util::datetime::Weekend,
     logging,
 };
 
@@ -18,7 +18,7 @@ pub async fn execute() -> Result<()> {
     if let Some(delisted) = delisted_list {
         let mut items_to_update = Vec::new();
 
-        match CACHE_SHARE.stocks.read() {
+        match SHARE.stocks.read() {
             Ok(stocks) => {
                 for company in delisted {
                     if let Some(stock) = stocks.get(company.stock_symbol.as_str()) {
@@ -59,7 +59,7 @@ pub async fn execute() -> Result<()> {
                     "Failed to update_suspend_listing because {:?}",
                     why
                 ));
-            } else if let Ok(mut stocks_cache) = CACHE_SHARE.stocks.write() {
+            } else if let Ok(mut stocks_cache) = SHARE.stocks.write() {
                 if let Some(stock) = stocks_cache.get_mut(&item.stock_symbol) {
                     stock.suspend_listing = true;
                 }
@@ -72,14 +72,14 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache_share::CACHE_SHARE;
+    use crate::internal::cache::SHARE;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
     #[tokio::test]
     async fn test_execute() {
         dotenv::dotenv().ok();
-        CACHE_SHARE.load().await;
+        SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
 
         match execute().await {

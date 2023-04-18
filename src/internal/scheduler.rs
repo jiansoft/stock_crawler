@@ -1,8 +1,7 @@
 use crate::{
-    internal::{backfill, bot, crawler, crawler::quotes, reminder},
+    internal::{backfill, bot, crawler, reminder},
     logging,
 };
-use chrono::Local;
 use clokwerk::{AsyncScheduler, Interval, Job, TimeUnits};
 use std::{env, time::Duration};
 
@@ -34,7 +33,7 @@ pub async fn start() {
     const BACKFILL_REVENUE: &str = "backfill::revenue::execute";
     const BACKFILL_TAIWAN_CAPITALIZATION_WEIGHTED_STOCK_INDEX: &str =
         "backfill::taiwan_capitalization_weighted_stock_index::execute";
-    const QUOTES_LISTED: &str = "quotes::listed::execute";
+    const BACKFILL_QUOTES: &str = "backfill::quotes::execute";
 
     scheduler
         .every(Interval::Days(1))
@@ -107,12 +106,15 @@ pub async fn start() {
                 backfill::taiwan_capitalization_weighted_stock_index::execute().await,
             )
             .await;
-
-            //取得上市收盤報價數據
-            log_result(QUOTES_LISTED, quotes::listed::visit(Local::now()).await).await;
         });
-
-
+    //每日下午三點
+    scheduler
+        .every(Interval::Days(1))
+        .at("15:01:00")
+        .run(|| async {
+            //取得收盤報價數據
+            log_result(BACKFILL_QUOTES, backfill::quote::execute().await).await;
+        });
     scheduler.every(60.seconds()).run(|| async {
         crawler::free_dns::update().await;
     });

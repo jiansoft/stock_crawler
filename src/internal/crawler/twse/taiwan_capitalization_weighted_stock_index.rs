@@ -28,7 +28,10 @@ pub async fn visit(date: DateTime<Local>) -> Option<Entity> {
     util::http::request_get_use_json::<Entity>(&url)
         .await
         .map_err(|why| {
-            logging::error_file_async(format!("Failed to request_get_use_json because {:?}", why));
+            logging::error_file_async(format!(
+                "Failed to request_get_use_json({}) because {:?}",
+                url, why
+            ));
         })
         .ok()
 }
@@ -36,12 +39,12 @@ pub async fn visit(date: DateTime<Local>) -> Option<Entity> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::cache_share::CACHE_SHARE;
+    use crate::internal::cache::SHARE;
 
     #[tokio::test]
     async fn test_visit() {
         dotenv::dotenv().ok();
-        CACHE_SHARE.load().await;
+        SHARE.load().await;
         logging::debug_file_async("開始 visit".to_string());
 
         match visit(Local::now()).await {

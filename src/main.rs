@@ -5,7 +5,7 @@ pub mod config;
 pub mod internal;
 pub mod logging;
 
-use crate::internal::{cache_share, scheduler};
+use crate::internal::{cache, scheduler};
 use std::{
     error::Error,
     sync::atomic::{AtomicBool, Ordering},
@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     dotenv::dotenv().ok();
-    cache_share::CACHE_SHARE.load().await;
+    cache::SHARE.load().await;
     scheduler::start().await;
 
     while !received_signal.load(Ordering::SeqCst) {

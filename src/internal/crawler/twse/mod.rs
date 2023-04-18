@@ -6,3 +6,5 @@ pub mod revenue;
 pub mod suspend_listing;
 /// 台股加權指數
 pub mod taiwan_capitalization_weighted_stock_index;
+/// 台股收盤報價-上市
+pub mod quote;

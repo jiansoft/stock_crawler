@@ -10,3 +10,5 @@ pub mod net_asset_value_per_share;
 pub mod revenue;
 /// 調用 twse API 取得台股加權指數
 pub mod taiwan_capitalization_weighted_stock_index;
+/// 調用 twse、tpex API 取得台股收盤報價
+pub mod quote;

@@ -1,5 +1,5 @@
 use crate::{
-    internal::cache_share::CACHE_SHARE,
+    internal::cache::SHARE,
     internal::database::model,
     internal::util::datetime::Weekend,
     internal::{util, StockExchangeMarket},
@@ -102,14 +102,14 @@ pub async fn visit(mode: StockExchangeMarket) -> Option<Vec<Entity>> {
             };
 
             let exchange_market: model::stock_exchange_market::Entity =
-                match CACHE_SHARE.exchange_markets.get(&mode.serial_number()) {
+                match SHARE.exchange_markets.get(&mode.serial_number()) {
                     None => model::stock_exchange_market::Entity::new(
                         mode.serial_number(),
                         mode.exchange().serial_number(),
                     ),
                     Some(em) => em.clone(),
                 };
-            let industry_id = match CACHE_SHARE.industries.get(industry.as_str()) {
+            let industry_id = match SHARE.industries.get(industry.as_str()) {
                 None => 99,
                 Some(industry) => *industry,
             };
@@ -134,7 +134,7 @@ pub async fn visit(mode: StockExchangeMarket) -> Option<Vec<Entity>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache_share::CACHE_SHARE;
+    use crate::internal::cache::SHARE;
     //use std::collections::HashSet;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
@@ -142,7 +142,7 @@ mod tests {
     #[tokio::test]
     async fn test_visit() {
         dotenv::dotenv().ok();
-        CACHE_SHARE.load().await;
+        SHARE.load().await;
         logging::debug_file_async("開始 visit".to_string());
         // let mut unique_industry_categories: HashSet<String> = HashSet::new();
         for mode in StockExchangeMarket::iterator() {

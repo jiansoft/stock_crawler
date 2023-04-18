@@ -1,5 +1,5 @@
 use crate::{
-    internal::cache_share::CACHE_SHARE, internal::crawler::twse, internal::database::model, logging,
+    internal::cache::SHARE, internal::crawler::twse, internal::database::model, logging,
 };
 use anyhow::*;
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
@@ -44,7 +44,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        if let Ok(mut last_revenues) = CACHE_SHARE.last_revenues.write() {
+        if let Ok(mut last_revenues) = SHARE.last_revenues.write() {
             if let Some(last_revenue_date) = last_revenues.get_mut(&item.date) {
                 last_revenue_date
                     .entry(item.security_code.to_string())
@@ -52,7 +52,7 @@ pub async fn execute() -> Result<()> {
             }
         }
 
-        let name = CACHE_SHARE
+        let name = SHARE
             .stocks
             .read()
             .map(|stocks| {
@@ -91,7 +91,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute() {
         dotenv::dotenv().ok();
-        CACHE_SHARE.load().await;
+        SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
 
         match execute().await {

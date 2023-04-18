@@ -1,5 +1,5 @@
 use crate::{
-    internal::cache_share::CACHE_SHARE,
+    internal::cache::SHARE,
     internal::crawler::twse,
     internal::database::model,
     internal::util::datetime::Weekend,
@@ -38,7 +38,7 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
 
     let mut to_bot_msg = String::with_capacity(1024);
     for insi in result {
-        let new_stock = match CACHE_SHARE.stocks.read() {
+        let new_stock = match SHARE.stocks.read() {
             Ok(stocks_cache) => match stocks_cache.get(&insi.stock_symbol) {
                 Some(stock_db)
                     if stock_db.stock_industry_id != insi.industry_id
@@ -61,7 +61,7 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
             let stock = model::stock::Entity::from(isni.clone());
             stock.upsert().await?;
             let msg = format!("stock add or update {:?}", stock);
-            if let Ok(mut stocks) = CACHE_SHARE.stocks.write() {
+            if let Ok(mut stocks) = SHARE.stocks.write() {
                 stocks.insert(stock.stock_symbol.to_string(), stock.clone());
             }
             let _ = writeln!(&mut to_bot_msg, "{}\r\n", msg);
@@ -88,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute() {
         dotenv::dotenv().ok();
-        CACHE_SHARE.load().await;
+        SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
 
         match execute().await {

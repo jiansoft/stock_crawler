@@ -1,5 +1,5 @@
 use crate::{
-    internal::bot, internal::cache_share::CACHE_SHARE, internal::crawler::twse,
+    internal::bot, internal::cache::SHARE, internal::crawler::twse,
     internal::database::model, logging,
 };
 use anyhow::*;
@@ -41,7 +41,7 @@ pub async fn execute() -> Result<()> {
             };
             logging::debug_file_async(format!("index:{:?}", index));
             let key = index.date.to_string() + "_" + &index.category;
-            if let Ok(indices) = CACHE_SHARE.indices.read() {
+            if let Ok(indices) = SHARE.indices.read() {
                 if indices.contains_key(key.as_str()) {
                     continue;
                 }
@@ -60,7 +60,7 @@ pub async fn execute() -> Result<()> {
                             why
                         ));
                     }
-                    match CACHE_SHARE.indices.write() {
+                    match SHARE.indices.write() {
                         Ok(mut indices) => {
                             indices.insert(key, index);
                         }
@@ -90,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute() {
         dotenv::dotenv().ok();
-        CACHE_SHARE.load().await;
+        SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
 
         match execute().await {

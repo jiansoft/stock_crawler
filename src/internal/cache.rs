@@ -9,10 +9,10 @@ use crate::{
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::RwLock};
 
-pub static CACHE_SHARE: Lazy<CacheShare> = Lazy::new(Default::default);
+pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
 
-/// CacheShare 各類快取共享集中處
-pub struct CacheShare {
+/// Share 各類快取共享集中處
+pub struct Share {
     /// 存放台股歷年指數
     pub indices: RwLock<HashMap<String, index::Entity>>,
     /// 存放台股股票代碼
@@ -27,9 +27,9 @@ pub struct CacheShare {
     pub exchange_markets: HashMap<i32, model::stock_exchange_market::Entity>,
 }
 
-impl CacheShare {
+impl Share {
     pub fn new() -> Self {
-        CacheShare {
+        Share {
             indices: RwLock::new(HashMap::new()),
             stocks: RwLock::new(HashMap::new()),
             exchange_markets: HashMap::from([
@@ -110,7 +110,7 @@ impl CacheShare {
         }
     }
 
-    pub async fn load(&self) -> Option<()> {
+    pub async fn load(&self) {
         let indices = index::fetch().await;
         match self.indices.write() {
             Ok(mut i) => {
@@ -189,12 +189,70 @@ impl CacheShare {
                 ));
             }
         }
-
-        Some(())
     }
 }
 
-impl Default for CacheShare {
+impl Default for Share {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 時效性的快取
+pub static TTL: Lazy<Ttl> = Lazy::new(Default::default);
+
+pub struct Ttl {
+    /// 每日收盤數據
+    daily_quote: RwLock<ttl_cache::TtlCache<String, String>>,
+}
+
+//
+pub trait TtlCacheInner {
+    fn daily_quote_contains_key(&self, key: &str) -> bool;
+    fn daily_quote_get(&self, key: &str) -> Option<String>;
+    fn daily_quote_set(
+        &self,
+        key: String,
+        val: String,
+        duration: std::time::Duration,
+    ) -> Option<String>;
+}
+
+impl TtlCacheInner for Ttl {
+    fn daily_quote_contains_key(&self, key: &str) -> bool {
+        match TTL.daily_quote.read() {
+            Ok(ttl) => ttl.contains_key(key),
+            Err(_) => false,
+        }
+    }
+
+    fn daily_quote_get(&self, key: &str) -> Option<String> {
+        match TTL.daily_quote.read() {
+            Ok(ttl) => ttl.get(key).map(|value| value.to_string()),
+            Err(_) => None,
+        }
+    }
+
+    fn daily_quote_set(&self, key: String, val: String, duration: std::time::Duration)-> Option<String> {
+        match TTL.daily_quote.write() {
+            Ok(mut ttl) => {
+                ttl.insert(key, val, duration)
+            }
+
+            Err(_) => {None}
+        }
+    }
+}
+
+impl Ttl {
+    pub fn new() -> Self {
+        Ttl {
+            daily_quote: RwLock::new(ttl_cache::TtlCache::new(2048)),
+        }
+    }
+}
+
+impl Default for Ttl {
     fn default() -> Self {
         Self::new()
     }
@@ -203,13 +261,29 @@ impl Default for CacheShare {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{thread, time};
+    use std::thread;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn test_init() {
         dotenv::dotenv().ok();
-        let _ = CACHE_SHARE.indices.read().is_ok();
-        thread::sleep(time::Duration::from_secs(1));
+        let _ = SHARE.indices.read().is_ok();
+
+        let duration = Duration::from_millis(500);
+        TTL.daily_quote
+            .write()
+            .unwrap()
+            .insert("1".to_string(), "10".to_string(), duration);
+
+        match TTL.daily_quote_get("1") {
+            Some(value) => println!("找到緩存項：{}", value),
+            None => println!("緩存項不存在"),
+        }
+
+        assert_eq!(TTL.daily_quote_get("1"), Some("10".to_string()));
+        thread::sleep(Duration::from_secs(1));
+
+        assert_eq!(TTL.daily_quote_get("1"), None);
     }
 
     macro_rules! aw {
@@ -223,9 +297,9 @@ mod tests {
         dotenv::dotenv().ok();
 
         aw!(async {
-            CACHE_SHARE.load().await;
+            SHARE.load().await;
             let mut loop_count = 10;
-            for e in CACHE_SHARE.indices.read().unwrap().iter() {
+            for e in SHARE.indices.read().unwrap().iter() {
                 if loop_count < 0 {
                     break;
                 }
@@ -239,7 +313,7 @@ mod tests {
             }
 
             loop_count = 10;
-            for (k, v) in CACHE_SHARE.stocks.read().unwrap().iter() {
+            for (k, v) in SHARE.stocks.read().unwrap().iter() {
                 if loop_count < 0 {
                     break;
                 }
@@ -249,7 +323,7 @@ mod tests {
             }
 
             loop_count = 10;
-            for (k, v) in CACHE_SHARE.last_trading_day_quotes.read().unwrap().iter() {
+            for (k, v) in SHARE.last_trading_day_quotes.read().unwrap().iter() {
                 if loop_count < 0 {
                     break;
                 }
@@ -261,7 +335,7 @@ mod tests {
                 loop_count -= 1;
             }
 
-            for (k, v) in CACHE_SHARE.industries.iter() {
+            for (k, v) in SHARE.industries.iter() {
                 logging::info_file_async(format!("name {}  category {}", k, v));
             }
         });

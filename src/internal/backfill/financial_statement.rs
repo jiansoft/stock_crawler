@@ -54,13 +54,13 @@ pub async fn execute() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::cache_share::CACHE_SHARE;
+    use crate::internal::cache::SHARE;
     use crate::logging;
 
     #[tokio::test]
     async fn test_execute() {
         dotenv::dotenv().ok();
-        CACHE_SHARE.load().await;
+        SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
 
         match execute().await {

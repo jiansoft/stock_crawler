@@ -30,14 +30,14 @@ pub async fn visit() -> Option<Vec<SuspendListing>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache_share::CACHE_SHARE;
+    use crate::internal::cache::SHARE;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
     #[tokio::test]
     async fn test_visit() {
         dotenv::dotenv().ok();
-        CACHE_SHARE.load().await;
+        SHARE.load().await;
         logging::debug_file_async("開始 visit".to_string());
 
         match visit().await {

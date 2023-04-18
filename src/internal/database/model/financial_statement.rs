@@ -99,7 +99,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .bind(self.updated_time)
             .execute(&DB.pool)
             .await
-            .map_err(|err| anyhow!("Failed to financial_statement upsert: {:?}", err))?;
+            .map_err(|err| anyhow!("Failed to financial_statement upsert because: {:?}", err))?;
 
         Ok(())
     }
@@ -108,23 +108,22 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
 impl From<yahoo::profile::FinancialStatement> for Entity {
     fn from(fs: yahoo::profile::FinancialStatement) -> Self {
-        Entity {
-            updated_time: Local::now(),
-            created_time: Local::now(),
-            quarter: fs.quarter,
-            security_code: fs.security_code,
-            gross_profit: fs.gross_profit,
-            operating_profit_margin: fs.operating_profit_margin,
-            pre_tax_income: fs.pre_tax_income,
-            net_income: fs.net_income,
-            net_asset_value_per_share: fs.net_asset_value_per_share,
-            sales_per_share: fs.sales_per_share,
-            earnings_per_share: fs.earnings_per_share,
-            profit_before_tax: fs.profit_before_tax,
-            return_on_equity: fs.return_on_equity,
-            return_on_assets: fs.return_on_assets,
-            serial: fs.serial,
-            year: fs.year,
-        }
+        let mut e = Entity::new(fs.security_code);
+        e.updated_time = Local::now();
+        e.created_time = Local::now();
+        e.quarter = fs.quarter;
+        e.gross_profit = fs.gross_profit;
+        e.operating_profit_margin = fs.operating_profit_margin;
+        e.pre_tax_income = fs.pre_tax_income;
+        e.net_income = fs.net_income;
+        e.net_asset_value_per_share = fs.net_asset_value_per_share;
+        e.sales_per_share = fs.sales_per_share;
+        e.earnings_per_share = fs.earnings_per_share;
+        e.profit_before_tax = fs.profit_before_tax;
+        e.return_on_equity = fs.return_on_equity;
+        e.return_on_assets = fs.return_on_assets;
+        e.serial = fs.serial;
+        e.year = fs.year;
+        e
     }
 }
