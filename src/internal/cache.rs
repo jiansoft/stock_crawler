@@ -220,26 +220,28 @@ pub trait TtlCacheInner {
 
 impl TtlCacheInner for Ttl {
     fn daily_quote_contains_key(&self, key: &str) -> bool {
-        match TTL.daily_quote.read() {
+        match self.daily_quote.read() {
             Ok(ttl) => ttl.contains_key(key),
             Err(_) => false,
         }
     }
 
     fn daily_quote_get(&self, key: &str) -> Option<String> {
-        match TTL.daily_quote.read() {
+        match self.daily_quote.read() {
             Ok(ttl) => ttl.get(key).map(|value| value.to_string()),
             Err(_) => None,
         }
     }
 
-    fn daily_quote_set(&self, key: String, val: String, duration: std::time::Duration)-> Option<String> {
-        match TTL.daily_quote.write() {
-            Ok(mut ttl) => {
-                ttl.insert(key, val, duration)
-            }
-
-            Err(_) => {None}
+    fn daily_quote_set(
+        &self,
+        key: String,
+        val: String,
+        duration: std::time::Duration,
+    ) -> Option<String> {
+        match self.daily_quote.write() {
+            Ok(mut ttl) => ttl.insert(key, val, duration),
+            Err(_) => None,
         }
     }
 }

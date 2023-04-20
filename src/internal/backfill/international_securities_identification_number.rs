@@ -37,18 +37,18 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
     };
 
     let mut to_bot_msg = String::with_capacity(1024);
-    for insi in result {
+    for item in result {
         let new_stock = match SHARE.stocks.read() {
-            Ok(stocks_cache) => match stocks_cache.get(&insi.stock_symbol) {
+            Ok(stocks_cache) => match stocks_cache.get(&item.stock_symbol) {
                 Some(stock_db)
-                    if stock_db.stock_industry_id != insi.industry_id
+                    if stock_db.stock_industry_id != item.industry_id
                         || stock_db.stock_exchange_market_id
-                            != insi.exchange_market.stock_exchange_market_id
-                        || stock_db.name != insi.name =>
+                            != item.exchange_market.stock_exchange_market_id
+                        || stock_db.name != item.name =>
                 {
-                    Some(&insi)
+                    Some(&item)
                 }
-                None => Some(&insi),
+                None => Some(&item),
                 _ => None,
             },
             Err(why) => {
@@ -59,7 +59,11 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
 
         if let Some(isni) = new_stock {
             let stock = model::stock::Entity::from(isni.clone());
-            stock.upsert().await?;
+            if let Err(why) = stock.upsert().await {
+                logging::error_file_async(format!("Failed to stock.upsert() because {:?}", why));
+                continue;
+            }
+
             let msg = format!("stock add or update {:?}", stock);
             if let Ok(mut stocks) = SHARE.stocks.write() {
                 stocks.insert(stock.stock_symbol.to_string(), stock.clone());

@@ -8,8 +8,8 @@ use crate::{
 use chrono::{DateTime, Datelike, Local};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use std::collections::HashMap;
 use serde::Deserialize;
+use std::collections::HashMap;
 
 // QuoteResponse 上櫃公司每日收盤資訊
 #[derive(Debug, Deserialize)]
@@ -92,7 +92,7 @@ pub async fn visit(date: DateTime<Local>) -> Option<Vec<daily_quote::Entity>> {
 
     for item in quote_response.aa_data {
         let mut dq = daily_quote::Entity::from_with_exchange(StockExchange::TPEx, &item);
-        logging::debug_file_async(format!("item:{:?}", item));
+        //logging::debug_file_async(format!("item:{:?}", item));
 
         if dq.closing_price.is_zero()
             && dq.highest_price.is_zero()

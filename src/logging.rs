@@ -118,7 +118,7 @@ impl Logger {
         }
 
         let mut log_path = PathBuf::from(path);
-        log_path.push(format!("{}_{}.log", name, Local::now().format("%Y-%m-%d")));
+        log_path.push(format!("{}_{}.log", Local::now().format("%Y-%m-%d"), name));
 
         Some(log_path)
     }

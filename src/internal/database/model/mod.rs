@@ -14,3 +14,5 @@ pub mod stock_ownership_details;
 mod stock_word;
 // 股票交易所的市場
 pub mod stock_exchange_market;
+
+pub mod config;

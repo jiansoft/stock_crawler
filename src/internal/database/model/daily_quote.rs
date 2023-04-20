@@ -1,8 +1,7 @@
+use crate::{internal::database::DB, internal::util::datetime, internal::StockExchange};
+use anyhow::*;
 use chrono::{DateTime, Local, NaiveDate};
-
-use crate::internal::database::DB;
-use crate::internal::util::datetime;
-use crate::internal::StockExchange;
+use core::result::Result::Ok;
 use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
 
@@ -66,8 +65,7 @@ impl Entity {
         }
     }
 
-    pub async fn upsert(&self) -> anyhow::Result<PgQueryResult> {
-
+    pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
        INSERT INTO "DailyQuotes" (
             maximum_price_in_year_date_on,
@@ -107,7 +105,7 @@ impl Entity {
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
         ON CONFLICT ("SecurityCode", "Date")
         DO UPDATE SET
-            "RecordTime" = excluded."RecordTime",
+            "RecordTime" = now(),
             "ClosingPrice" = excluded."ClosingPrice",
             "ChangeRange" = excluded."ChangeRange",
             "Change" = excluded. "Change",
@@ -122,7 +120,7 @@ impl Entity {
             "TradeValue" = excluded."TradeValue",
             "Transaction" = excluded."Transaction"
     "#;
-      let result =  sqlx::query(sql)
+        let result = sqlx::query(sql)
             .bind(self.maximum_price_in_year_date_on)
             .bind(self.minimum_price_in_year_date_on)
             .bind(self.date)
@@ -162,6 +160,7 @@ impl Entity {
         Ok(result)
     }
 }
+
 pub trait FromWithExchange<T, U> {
     fn from_with_exchange(exchange: T, item: &U) -> Self;
 }
@@ -232,13 +231,114 @@ impl FromWithExchange<StockExchange, Vec<String>> for Entity {
     }
 }
 
+/// 補上當日缺少的每日收盤數據
+pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQueryResult> {
+    let date_str = date.format("%Y-%m-%d").to_string();
+    let prev_date = (date - chrono::Duration::days(30))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let sql = format!(
+        r#"
+INSERT INTO "DailyQuotes" (
+    "Date", "SecurityCode", "TradingVolume", "Transaction",
+    "TradeValue", "OpeningPrice", "HighestPrice", "LowestPrice",
+    "ClosingPrice", "ChangeRange", "Change", "LastBestBidPrice",
+    "LastBestBidVolume", "LastBestAskPrice", "LastBestAskVolume",
+    "PriceEarningRatio", "RecordTime", "CreateTime", "MovingAverage5",
+    "MovingAverage10", "MovingAverage20", "MovingAverage60",
+    "MovingAverage120", "MovingAverage240", maximum_price_in_year,
+    minimum_price_in_year, average_price_in_year,
+    maximum_price_in_year_date_on, minimum_price_in_year_date_on,
+    "price-to-book_ratio"
+)
+SELECT '{0}' as "Date",
+    "SecurityCode",
+    0 as "TradingVolume",
+    0 as "Transaction",
+    0 as "TradeValue",
+    "OpeningPrice",
+    "HighestPrice",
+    "LowestPrice",
+    "ClosingPrice",
+    0 as "ChangeRange",
+    0 as "Change",
+    0 as "LastBestBidPrice",
+    0 as "LastBestBidVolume",
+    0 as "LastBestAskPrice",
+    0 as "LastBestAskVolume",
+    0 as "PriceEarningRatio",
+    "RecordTime",
+    "CreateTime",
+    "MovingAverage5",
+    "MovingAverage10",
+    "MovingAverage20",
+    "MovingAverage60",
+    "MovingAverage120",
+    "MovingAverage240",
+    maximum_price_in_year,
+    minimum_price_in_year,
+    average_price_in_year,
+    maximum_price_in_year_date_on,
+    minimum_price_in_year_date_on,
+    "price-to-book_ratio"
+FROM "DailyQuotes"
+WHERE "Serial" IN
+(
+    SELECT MAX("Serial")
+    FROM "DailyQuotes"
+    WHERE "SecurityCode" IN
+    (
+        SELECT c.stock_symbol
+        FROM stocks AS c
+        WHERE stock_symbol NOT IN
+        (
+            SELECT "DailyQuotes"."SecurityCode"
+            FROM "DailyQuotes"
+            WHERE "Date" = '{0}'
+        )
+        AND c."SuspendListing" = false
+    )
+    AND "Date" < '{0}'
+    AND "Date" > '{1}'
+    GROUP BY "SecurityCode"
+)"#,
+        date_str, prev_date
+    );
+
+    Ok(sqlx::query(&sql).execute(&DB.pool).await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::internal::cache::SHARE;
+    use crate::logging;
     use chrono::Datelike;
 
-    use crate::logging;
+    #[tokio::test]
+    async fn test_makeup_for_the_lack_daily_quotes() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+
+        let now = Local::now().date_naive();
+
+        logging::debug_file_async("開始 makeup_for_the_lack_daily_quotes".to_string());
+
+        match makeup_for_the_lack_daily_quotes(now).await {
+            Ok(result) => {
+                logging::debug_file_async(format!("result:{:#?}", result));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to makeup_for_the_lack_daily_quotes because:{:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 makeup_for_the_lack_daily_quotes".to_string());
+    }
 
     #[tokio::test]
     async fn test_upsert() {
