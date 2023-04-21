@@ -46,7 +46,7 @@ impl Entity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_insert() {

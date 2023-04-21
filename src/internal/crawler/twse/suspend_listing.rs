@@ -1,4 +1,4 @@
-use crate::{internal::util, logging};
+use crate::internal::{logging, util};
 use serde::Deserialize;
 
 /// 調用 twse suspendListingCsvAndHtml API 後其回應的數據

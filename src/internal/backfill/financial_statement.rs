@@ -1,5 +1,9 @@
-use crate::internal::util::datetime;
-use crate::{internal::crawler::yahoo, internal::database::model, logging};
+use crate::{
+    internal::util::datetime,
+    internal::crawler::yahoo,
+    internal::database::model,
+    internal::logging
+};
 use anyhow::*;
 use chrono::{Datelike, Duration, Local};
 use core::result::Result::Ok;
@@ -55,7 +59,7 @@ pub async fn execute() -> Result<()> {
 mod tests {
     use super::*;
     use crate::internal::cache::SHARE;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_execute() {

@@ -1,4 +1,7 @@
-use crate::{config, internal::util, logging};
+use crate::{config, internal::{
+    util,
+    logging
+}};
 use concat_string::concat_string;
 
 /// 向ddns服務更新目前的IP

@@ -1,10 +1,10 @@
-use crate::internal::database::model;
 use crate::{
     internal::cache::{TtlCacheInner, SHARE, TTL},
     internal::crawler::tpex,
     internal::crawler::twse,
+    internal::database::model,
     internal::database::model::daily_quote,
-    logging,
+    internal::logging,
 };
 use anyhow::*;
 use chrono::{Local, NaiveDate};
@@ -106,7 +106,7 @@ mod tests {
     //use std::time;
 
     use crate::internal::database::model::stock;
-    use crate::logging;
+    use crate::internal::logging;
     //use crossbeam::thread;
     use rayon::prelude::*;
     use tokio::time::sleep;

@@ -130,7 +130,7 @@ async fn request_get_common(url: &str) -> Result<Response> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
     use chrono::Local;
     use concat_string::concat_string;
 

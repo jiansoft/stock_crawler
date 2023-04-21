@@ -1,6 +1,6 @@
 use crate::{
     internal::backfill::net_asset_value_per_share::update, internal::crawler::yahoo::profile,
-    internal::database::model, logging,
+    internal::database::model, internal::logging,
 };
 use anyhow::*;
 use core::result::Result::Ok;
@@ -90,7 +90,7 @@ pub async fn execute() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_execute() {

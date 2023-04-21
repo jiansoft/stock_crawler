@@ -1,5 +1,11 @@
-use crate::internal::calculation;
-use crate::{internal::bot, internal::database::DB, logging};
+use crate::{
+    internal::{
+        calculation,
+        bot,
+        database::DB,
+        logging
+    }
+};
 use chrono::{Datelike, Local, NaiveDate};
 use sqlx::FromRow;
 use std::fmt::Write;
@@ -66,7 +72,7 @@ where "ex-dividend_date1" = $1 or "ex-dividend_date2" = $2
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_calculate() {

@@ -311,7 +311,7 @@ mod tests {
     use crate::internal::database::model::revenue::{
         fetch_last_two_month, rebuild_revenue_last_date,
     };
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_date() {

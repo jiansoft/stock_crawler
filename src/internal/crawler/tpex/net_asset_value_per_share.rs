@@ -1,6 +1,10 @@
-use crate::internal::crawler::tpex;
-use crate::internal::util;
-use crate::logging;
+use crate::{
+    internal::{
+        util,
+        crawler::tpex,
+        logging
+    }
+};
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use std::collections::HashMap;

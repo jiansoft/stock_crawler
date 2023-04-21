@@ -1,9 +1,12 @@
 use crate::{
-    internal::cache::SHARE,
-    internal::database::model,
-    internal::util::datetime::Weekend,
-    internal::{util, StockExchangeMarket},
-    logging,
+    internal::{
+        util,
+        StockExchangeMarket,
+        util::datetime::Weekend,
+        database::model,
+        cache::SHARE,
+        logging
+    }
 };
 use chrono::Local;
 use core::result::Result::Ok;

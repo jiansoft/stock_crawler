@@ -313,7 +313,7 @@ WHERE "Serial" IN
 mod tests {
     use super::*;
     use crate::internal::cache::SHARE;
-    use crate::logging;
+    use crate::internal::logging;
     use chrono::Datelike;
 
     #[tokio::test]

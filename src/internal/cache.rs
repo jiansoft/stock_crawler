@@ -1,10 +1,7 @@
 //use futures::executor::block_on;
-use crate::{
-    internal::{
-        database::model, database::model::index, database::model::last_daily_quotes,
-        database::model::revenue, database::model::stock,
-    },
-    logging,
+use crate::internal::{
+    database::model, database::model::index, database::model::last_daily_quotes,
+    database::model::revenue, database::model::stock, logging,
 };
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::RwLock};

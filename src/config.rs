@@ -1,4 +1,4 @@
-use crate::logging;
+use crate::internal::logging;
 use anyhow::*;
 use config::{Config as config_config, File as config_file};
 use once_cell::sync::Lazy;

@@ -53,7 +53,7 @@ impl Entity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
     use chrono::{Local, NaiveDate};
 
     #[tokio::test]

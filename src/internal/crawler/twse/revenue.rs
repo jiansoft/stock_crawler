@@ -1,5 +1,10 @@
 use crate::{
-    internal::cache::SHARE, internal::database::model::revenue, internal::*, logging,
+    internal::{
+        database::model::revenue,
+        cache::SHARE,
+        logging,
+        util
+    }
 };
 use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};

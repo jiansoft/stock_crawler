@@ -1,4 +1,7 @@
-use crate::{internal::util, logging};
+use crate::{internal::{
+    util,
+    logging
+}};
 use chrono::{DateTime, Local};
 use concat_string::concat_string;
 use serde_derive::{Deserialize, Serialize};

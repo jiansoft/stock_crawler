@@ -1,11 +1,9 @@
-use crate::logging;
+use crate::internal::logging;
 use anyhow::*;
-use core::result::Result::Ok;
-use core::result::Result::*;
+use core::{result::Result::Ok, result::Result::*};
 use encoding::{DecoderTrap, Encoding};
 use rust_decimal::Decimal;
-use std::collections::HashSet;
-use std::str::FromStr;
+use std::{collections::HashSet, str::FromStr};
 
 #[allow(dead_code)]
 pub fn big5_to_utf8(text: &str) -> Option<String> {

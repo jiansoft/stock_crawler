@@ -1,11 +1,14 @@
-use crate::internal::util;
+use crate::{
+    internal::{
+        util,
+        logging
+    }
+};
 use anyhow::*;
 use core::result::Result::Ok;
 use regex::Regex;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-
-use crate::logging;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -131,7 +134,7 @@ fn element_value_to_decimal(element: &scraper::ElementRef, css_selector: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_visit() {

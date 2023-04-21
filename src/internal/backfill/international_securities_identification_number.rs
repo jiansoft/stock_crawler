@@ -2,9 +2,9 @@ use crate::{
     internal::cache::SHARE,
     internal::crawler::twse,
     internal::database::model,
+    internal::logging,
     internal::util::datetime::Weekend,
     internal::{bot, StockExchangeMarket},
-    logging,
 };
 use anyhow::*;
 use chrono::Local;
@@ -87,7 +87,7 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_execute() {

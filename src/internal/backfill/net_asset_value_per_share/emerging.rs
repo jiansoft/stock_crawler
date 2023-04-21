@@ -1,6 +1,7 @@
 use crate::{
     internal::backfill::net_asset_value_per_share::update, internal::cache::SHARE,
-    internal::crawler::tpex, internal::database::model, internal::util::datetime::Weekend, logging,
+    internal::crawler::tpex, internal::database::model, internal::logging,
+    internal::util::datetime::Weekend,
 };
 use anyhow::*;
 use chrono::Local;
@@ -51,7 +52,7 @@ pub async fn execute() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_execute() {

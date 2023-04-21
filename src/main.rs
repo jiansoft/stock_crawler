@@ -3,7 +3,6 @@ extern crate rocket;*/
 
 pub mod config;
 pub mod internal;
-pub mod logging;
 
 use crate::internal::{cache, scheduler};
 use std::{

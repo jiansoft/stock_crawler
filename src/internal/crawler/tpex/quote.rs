@@ -1,9 +1,8 @@
-use crate::{
-    internal::cache::{TtlCacheInner, TTL},
-    internal::database::model::daily_quote,
-    internal::database::model::daily_quote::FromWithExchange,
-    internal::{cache, util, StockExchange},
-    logging,
+use crate::internal::{
+    cache,
+    cache::{TtlCacheInner, TTL},
+    database::{model::daily_quote, model::daily_quote::FromWithExchange},
+    logging, util, StockExchange,
 };
 use chrono::{DateTime, Datelike, Local};
 use rust_decimal::Decimal;

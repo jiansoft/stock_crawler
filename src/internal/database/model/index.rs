@@ -1,4 +1,8 @@
-use crate::{internal::database::DB, internal::util, logging};
+use crate::{internal::{
+    database::DB,
+    util,
+    logging
+}};
 use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use concat_string::concat_string;
@@ -227,7 +231,7 @@ pub async fn fetch() -> anyhow::Result<HashMap<String, Entity>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
     use std::{thread, time};
 
     #[tokio::test]

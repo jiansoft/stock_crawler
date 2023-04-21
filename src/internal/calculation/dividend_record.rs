@@ -1,4 +1,7 @@
-use crate::{internal::database::model, logging};
+use crate::{internal::{
+    database::model,
+    logging
+}};
 
 /// 計算指定年份領取的股利
 pub async fn calculate(year: i32, security_codes: Option<Vec<String>>) {
@@ -92,7 +95,7 @@ pub async fn calculate(year: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_calculate() {

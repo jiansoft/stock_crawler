@@ -1,4 +1,4 @@
-use crate::logging;
+use crate::internal::logging;
 use chrono::{DateTime, Datelike, Local, Weekday};
 
 // 自定義的 Weekend trait

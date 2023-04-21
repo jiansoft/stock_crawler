@@ -1,7 +1,16 @@
-use crate::internal::crawler::{tpex, twse};
 use crate::{
-    internal::database::model::stock_index, internal::database::model::stock_word,
-    internal::database::DB, internal::util, logging,
+    internal::{
+        crawler::{tpex, twse},
+        database::{
+            model::{
+                stock_index,
+                stock_word
+            },
+            DB
+        },
+        util,
+        logging
+    }
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local};
@@ -312,7 +321,7 @@ WHERE stock_exchange_market_id in(2, 4)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_fetch() {

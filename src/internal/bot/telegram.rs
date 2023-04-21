@@ -1,4 +1,4 @@
-use crate::{config::SETTINGS, internal::util::http, logging};
+use crate::{config::SETTINGS, internal::logging, internal::util::http};
 use anyhow::*;
 use serde::{Deserialize, Serialize};
 use std::result::Result::Ok;

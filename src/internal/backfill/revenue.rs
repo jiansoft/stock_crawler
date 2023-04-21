@@ -1,4 +1,6 @@
-use crate::{internal::cache::SHARE, internal::crawler::twse, internal::database::model, logging};
+use crate::{
+    internal::cache::SHARE, internal::crawler::twse, internal::database::model, internal::logging,
+};
 use anyhow::*;
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use core::result::Result::Ok;
@@ -85,7 +87,7 @@ pub async fn execute() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_execute() {

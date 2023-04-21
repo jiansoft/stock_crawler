@@ -1,4 +1,7 @@
-use crate::{internal::database::DB, logging};
+use crate::{internal::{
+    database::DB,
+    logging
+}};
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rocket::form::validate::Len;
@@ -157,7 +160,7 @@ fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
 mod tests {
     use super::*;
     use crate::internal::util;
-    use crate::logging;
+    use crate::internal::logging;
     use std::time::Instant;
 
     #[tokio::test]

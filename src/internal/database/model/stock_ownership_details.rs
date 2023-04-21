@@ -253,7 +253,7 @@ WHERE is_sold = false";
 mod tests {
 
     use super::*;
-    use crate::logging;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_fetch_stock_inventory() {
