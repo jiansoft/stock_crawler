@@ -1,6 +1,4 @@
-use crate::{
-    internal::cache::SHARE, internal::crawler::twse, internal::database::model, logging,
-};
+use crate::{internal::cache::SHARE, internal::crawler::twse, internal::database::model, logging};
 use anyhow::*;
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use core::result::Result::Ok;
@@ -15,14 +13,15 @@ pub async fn execute() -> Result<()> {
     let last_month = naive_datetime - chrono::Duration::minutes(1);
     let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
     let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, timezone);
-
-    let results = twse::revenue::visit(last_month_timezone)
-        .await
-        .ok_or_else(|| anyhow!("Failed to visit because response is no data"))?;
-
-    if results.is_empty() {
-        return Ok(());
-    }
+    let results = match twse::revenue::visit(last_month_timezone).await {
+        None => return Ok(()),
+        Some(results) => {
+            if results.is_empty() {
+                return Ok(());
+            }
+            results
+        }
+    };
 
     let year = last_month_timezone.year();
     let month = last_month_timezone.month();
