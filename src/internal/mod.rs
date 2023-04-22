@@ -16,7 +16,9 @@ mod reminder;
 pub mod scheduler;
 /// 工具類
 pub mod util;
+/// 日誌
 pub mod logging;
+
 /// 交易所
 #[derive(Debug, Copy, Clone)]
 pub enum StockExchange {

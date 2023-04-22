@@ -1,10 +1,13 @@
+pub mod rotate;
+
+use crate::internal::logging::rotate::Rotate;
 use chrono::{format::DelayedFormat, Local};
 use crossbeam_channel::{unbounded, Sender};
 use once_cell::sync::Lazy;
 use std::{
     fmt::Write as _,
-    fs::{self, OpenOptions},
-    io::{BufWriter, Write},
+    fs::{self},
+    io::Write,
     path::{Path, PathBuf},
     thread,
 };
@@ -59,51 +62,48 @@ impl Logger {
             panic!("Failed to create log directory.");
         });
         let (tx, rx) = unbounded::<String>();
-
         // 寫入檔案的操作使用另一個線程處理
         thread::spawn(move || {
-            let file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .truncate(false)
-                .open(log_path)
-                .unwrap_or_else(|e| {
-                    panic!("Failed to open log file: {}", e);
-                });
-
-            let mut writer = BufWriter::new(file);
             let mut line = String::with_capacity(2048);
-
+            let mut rotate = Rotate::new(log_path.display().to_string());
             for received in &rx {
-                if writeln!(
-                    &mut line,
-                    "{} {}",
-                    Local::now().format("%F %X%.6f"),
-                    received
-                )
-                .is_err()
-                {
+                let now = Local::now();
+                if writeln!(&mut line, "{} {}", now.format("%F %X%.6f"), received).is_err() {
                     continue;
                 }
 
-                if rx.is_empty() || line.len() >= 2048 {
-                    if let Err(why) = writeln!(&mut line) {
-                        error_console(format!("Failed to writeln a line. because:{:#?}", why));
-                    }
-
-                    if let Err(why) = writer.write_all(line.as_bytes()) {
-                        error_console(format!(
-                            "Failed to write to log file. because:{:#?}\r\nmsg:{}",
-                            why, line
-                        ));
-                    }
-
-                    if let Err(why) = writer.flush() {
-                        error_console(format!("Failed to flush log file. because:{:#?}", why));
-                    }
-
-                    line.clear();
+                if !rx.is_empty() && line.len() < 2048 {
+                    continue;
                 }
+
+                if let Err(why) = writeln!(&mut line) {
+                    error_console(format!("Failed to writeln a line. because:{:#?}", why));
+                }
+
+                if let Some(writer) = rotate.get_writer(now) {
+                    match writer.write() {
+                        Ok(mut w) => {
+                            if let Err(why) = w.write_all(line.as_bytes()) {
+                                error_console(format!(
+                                    "Failed to write msg:{}\r\nbecause:{:#?}",
+                                    line, why
+                                ));
+                            }
+
+                            if let Err(why) = w.flush() {
+                                error_console(format!(
+                                    "Failed to flush log file. because:{:#?}",
+                                    why
+                                ));
+                            }
+                        }
+                        Err(why) => {
+                            error_console(format!("Failed to writer.write because {:?}", why));
+                        }
+                    }
+                }
+
+                line.clear();
             }
         });
 
