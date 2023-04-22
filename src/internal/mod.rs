@@ -18,6 +18,8 @@ pub mod scheduler;
 pub mod util;
 /// 日誌
 pub mod logging;
+/// 設定檔
+pub mod config;
 
 /// 交易所
 #[derive(Debug, Copy, Clone)]

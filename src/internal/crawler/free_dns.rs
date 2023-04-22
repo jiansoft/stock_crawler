@@ -1,4 +1,5 @@
-use crate::{config, internal::{
+use crate::{internal::{
+    config,
     util,
     logging
 }};
