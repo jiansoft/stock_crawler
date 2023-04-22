@@ -15,12 +15,13 @@ use std::{
 
 pub struct Rotate {
     /// log/%Y-%m-%d-name.log
-    pub fn_pattern: String,
-    pub cur_fn: String,
-    pub cur_base_fn: String,
-    pub out_fh: Option<Arc<RwLock<BufWriter<File>>>>,
-    pub generation: i64,
-    pub max_age: chrono::Duration,
+    fn_pattern: String,
+    cur_fn: String,
+    cur_fn_lock: RwLock<String>,
+    cur_base_fn: String,
+    out_fh: Option<Arc<RwLock<BufWriter<File>>>>,
+    generation: i64,
+    max_age: chrono::Duration,
 }
 
 impl Rotate {
@@ -29,6 +30,7 @@ impl Rotate {
             fn_pattern,
             generation: 0,
             cur_fn: "".to_string(),
+            cur_fn_lock: Default::default(),
             cur_base_fn: "".to_string(),
             out_fh: None,
             max_age: chrono::Duration::days(7),
@@ -37,43 +39,51 @@ impl Rotate {
 
     pub fn get_writer(&mut self, now: DateTime<Local>) -> Option<Arc<RwLock<BufWriter<File>>>> {
         let mut generation = self.generation;
-
         let base_fn = self.generate_fn(now);
-        let filename = base_fn.clone();
-
         if base_fn == self.cur_base_fn {
-            let arc = self.out_fh.clone();
-            return arc;
+            return self.out_fh.clone();
         }
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .truncate(false)
-            .open(&filename)
-            .unwrap_or_else(|e| {
-                panic!("Failed to open log file: {}", e);
-            });
+        let filename = base_fn.clone();
 
-        generation = 0;
+        match self.cur_fn_lock.write() {
+            Ok(mut cur_fn) => {
+                let file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .truncate(false)
+                    .open(&filename)
+                    .unwrap_or_else(|e| {
+                        panic!("Failed to open log file: {}", e);
+                    });
 
-        self.out_fh = Some(Arc::new(RwLock::new(BufWriter::new(file))));
-        self.cur_base_fn = base_fn;
-        self.cur_fn = filename;
-        self.generation = generation;
+                generation = 0;
 
-        self.rotate(now);
+                self.out_fh = Some(Arc::new(RwLock::new(BufWriter::new(file))));
+                self.cur_base_fn = base_fn;
+                self.cur_fn = filename.to_string();
+                self.generation = generation;
+                self.rotate(now);
+
+                *cur_fn = filename;
+            }
+            Err(why) => {
+                logging::error_console(format!("Failed to cur_fn_lock.write because:{:?}", why));
+                return None;
+            }
+        }
 
         self.out_fh.clone()
     }
 
     /// 產生檔案名稱
-    pub fn generate_fn(&self, now: DateTime<Local>) -> String {
+    fn generate_fn(&self, now: DateTime<Local>) -> String {
         now.format(&self.fn_pattern).to_string()
     }
 
-    pub fn rotate(&self, now: DateTime<Local>) {
+    fn rotate(&self, now: DateTime<Local>) {
         //logging::debug_file_async(format!("self.cur_fn:{}", &self.cur_fn));
+        //logging::debug_file_async(format!("self.cur_base_fn:{}", &self.cur_base_fn));
         match Self::list_files_in_directory(&self.cur_fn) {
             Ok(files) => {
                 let cut_off = (now - self.max_age).timestamp() as u64;
@@ -153,6 +163,7 @@ impl Rotate {
             let file_path = entry.path();
             files.push(file_path);
         }
+
         Ok(files)
     }
 
@@ -184,8 +195,10 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 execute".to_string());
         let mut now = Local::now();
+        logging::debug_file_async("第一次test_write_all".to_string());
         test_write_all(now);
         now += chrono::Duration::days(1);
+        logging::debug_file_async("第二次test_write_all".to_string());
         test_write_all(now);
 
         logging::debug_file_async("結束 execute".to_string());
@@ -193,10 +206,6 @@ mod tests {
 
     fn test_write_all(now: DateTime<Local>) {
         let mut r = Rotate::new("log/%Y-%m-%d-test.log".to_string());
-        let base_fn = r.generate_fn(now);
-        println!("base_fn:{}", base_fn);
-        r.rotate(now);
-
         if let Some(writer) = r.get_writer(now) {
             match writer.write() {
                 Ok(mut w) => {
@@ -220,9 +229,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 test_rotate".to_string());
         let mut r = Rotate::new("log/%Y-%m-%d-test.log".to_string());
-        if let Some(_) = r.get_writer(Local::now()) {
-            r.rotate(Local::now());
-        }
+        if r.get_writer(Local::now()).is_some() {}
 
         logging::debug_file_async("結束 test_rotate".to_string());
     }
