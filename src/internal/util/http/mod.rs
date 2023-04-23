@@ -4,16 +4,15 @@ use anyhow::*;
 use once_cell::{sync::Lazy, sync::OnceCell};
 use reqwest::{header, Client, Method, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 use tokio::sync::Semaphore;
 
-pub(crate) static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
+static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
     let cpus = num_cpus::get();
     Semaphore::new(cpus * 4)
 });
 
-pub(crate) static CLIENT: OnceCell<Client> = OnceCell::new();
+static CLIENT: OnceCell<Client> = OnceCell::new();
 
 #[derive(Serialize, Deserialize)]
 /// for Request or Response

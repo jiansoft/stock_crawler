@@ -68,7 +68,8 @@ impl Logger {
             let mut rotate = Rotate::new(log_path.display().to_string());
             for received in &rx {
                 let now = Local::now();
-                if writeln!(&mut line, "{} {}", now.format("%F %X%.6f"), received).is_err() {
+                if let Err(why) = writeln!(&mut line, "{} {}", now.format("%F %X%.6f"), received) {
+                    error_console(format!("Failed to writeln a message. because:{:#?}", why));
                     continue;
                 }
 
@@ -78,6 +79,7 @@ impl Logger {
 
                 if let Err(why) = writeln!(&mut line) {
                     error_console(format!("Failed to writeln a line. because:{:#?}", why));
+                    continue;
                 }
 
                 if let Some(writer) = rotate.get_writer(now) {
@@ -98,7 +100,7 @@ impl Logger {
                             }
                         }
                         Err(why) => {
-                            error_console(format!("Failed to writer.write because {:?}", why));
+                            error_console(format!("Failed to writer.write because {:#?}", why));
                         }
                     }
                 }

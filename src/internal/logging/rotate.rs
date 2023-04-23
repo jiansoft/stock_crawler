@@ -38,14 +38,13 @@ impl Rotate {
     }
 
     pub fn get_writer(&mut self, now: DateTime<Local>) -> Option<Arc<RwLock<BufWriter<File>>>> {
-        let mut generation = self.generation;
         let base_fn = self.generate_fn(now);
         if base_fn == self.cur_base_fn {
             return self.out_fh.clone();
         }
 
         let filename = base_fn.clone();
-
+        let mut generation = self.generation;
         match self.cur_fn_lock.write() {
             Ok(mut cur_fn) => {
                 let file = OpenOptions::new()
@@ -59,7 +58,7 @@ impl Rotate {
 
                 generation = 0;
 
-                self.out_fh = Some(Arc::new(RwLock::new(BufWriter::new(file))));
+                self.out_fh = Some(Arc::new(RwLock::new(BufWriter::with_capacity(2048, file))));
                 self.cur_base_fn = base_fn;
                 self.cur_fn = filename.to_string();
                 self.generation = generation;
