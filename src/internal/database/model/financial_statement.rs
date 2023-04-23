@@ -1,5 +1,9 @@
-use crate::internal::crawler::yahoo;
-use crate::internal::database::DB;
+use crate::{
+    internal::{
+        crawler::yahoo,
+        database::DB
+    }
+};
 use anyhow::*;
 use chrono::{DateTime, Local};
 use core::result::Result::Ok;
@@ -122,7 +126,6 @@ impl From<yahoo::profile::FinancialStatement> for Entity {
         e.profit_before_tax = fs.profit_before_tax;
         e.return_on_equity = fs.return_on_equity;
         e.return_on_assets = fs.return_on_assets;
-        e.serial = fs.serial;
         e.year = fs.year;
         e
     }

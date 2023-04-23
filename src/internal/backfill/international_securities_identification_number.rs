@@ -1,10 +1,6 @@
-use crate::{
-    internal::cache::SHARE,
-    internal::crawler::twse,
-    internal::database::model,
-    internal::logging,
-    internal::util::datetime::Weekend,
-    internal::{bot, StockExchangeMarket},
+use crate::internal::{
+    bot, cache::SHARE, crawler::twse, database::model, logging, util::datetime::Weekend,
+    StockExchangeMarket,
 };
 use anyhow::*;
 use chrono::Local;

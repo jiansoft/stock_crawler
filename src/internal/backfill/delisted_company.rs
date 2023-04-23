@@ -1,6 +1,10 @@
 use crate::{
-    internal::cache::SHARE, internal::crawler::twse, internal::logging,
-    internal::util::datetime::Weekend,
+    internal::{
+        cache::SHARE,
+        crawler::twse,
+        logging,
+        util::datetime::Weekend
+    }
 };
 
 use anyhow::*;

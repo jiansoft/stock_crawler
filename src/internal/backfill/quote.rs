@@ -1,10 +1,8 @@
-use crate::{
-    internal::cache::{TtlCacheInner, SHARE, TTL},
-    internal::crawler::tpex,
-    internal::crawler::twse,
-    internal::database::model,
-    internal::database::model::daily_quote,
-    internal::logging,
+use crate::internal::{
+    cache::{TtlCacheInner, SHARE, TTL},
+    crawler::{tpex, twse},
+    database::{model, model::daily_quote},
+    logging,
 };
 use anyhow::*;
 use chrono::{Local, NaiveDate};

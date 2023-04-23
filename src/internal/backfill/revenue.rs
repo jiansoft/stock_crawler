@@ -1,5 +1,10 @@
 use crate::{
-    internal::cache::SHARE, internal::crawler::twse, internal::database::model, internal::logging,
+    internal::{
+        cache::SHARE,
+        crawler::twse,
+        database::model,
+        logging
+    }
 };
 use anyhow::*;
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};

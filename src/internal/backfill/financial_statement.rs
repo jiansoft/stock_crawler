@@ -1,8 +1,10 @@
 use crate::{
-    internal::util::datetime,
-    internal::crawler::yahoo,
-    internal::database::model,
-    internal::logging
+    internal::{
+        crawler::yahoo,
+        util::datetime,
+        database::model,
+        logging
+    }
 };
 use anyhow::*;
 use chrono::{Datelike, Duration, Local};

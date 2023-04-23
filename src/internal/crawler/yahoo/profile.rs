@@ -38,7 +38,6 @@ pub struct FinancialStatement {
     pub return_on_equity: Decimal,
     /// 資產報酬率
     pub return_on_assets: Decimal,
-    pub serial: i64,
     /// 年度
     pub year: i32,
 }
@@ -58,7 +57,6 @@ impl FinancialStatement {
             profit_before_tax: Default::default(),
             return_on_equity: Default::default(),
             return_on_assets: Default::default(),
-            serial: 0,
             year: 0,
         }
     }

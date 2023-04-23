@@ -1,20 +1,54 @@
 use crate::internal::logging;
 use chrono::{DateTime, Datelike, Local, Weekday};
 
-// 自定義的 Weekend trait
+/// A trait representing the weekend concept.
 pub trait Weekend {
+    /// Determines if a given date is a weekend.
+    ///
+    /// Returns `true` if the date is on a Saturday or Sunday, and `false` otherwise.
     fn is_weekend(&self) -> bool;
 }
 
-// 為 chrono::Date<Local> 實現 Weekend trait
+// Implement the `Weekend` trait for `chrono::DateTime<Local>`.
 impl Weekend for DateTime<Local> {
-    /// 星期六、星期日視為假日
+    /// Treats Saturday and Sunday as weekends.
+    ///
+    /// This method checks if the given date falls on a Saturday or Sunday.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chrono::{Local, DateTime};
+    /// use your_crate::Weekend;
+    ///
+    /// let date: DateTime<Local> = "2023-03-25T12:00:00".parse().unwrap();
+    /// assert_eq!(date.is_weekend(), true);
+    /// ```
     fn is_weekend(&self) -> bool {
         matches!(self.weekday(), Weekday::Sat | Weekday::Sun)
     }
 }
 
-/// 月份轉季度
+/// Convert a month to its corresponding quarter.
+///
+/// The function accepts a `month` value, which is a `u32`, and returns
+/// a static string slice representing the corresponding quarter. For example,
+/// if the input month is 4, the function returns "Q2".
+///
+/// # Arguments
+///
+/// * `month` - A 32-bit unsigned integer representing a month (1-12)
+///
+/// # Examples
+///
+/// ```
+/// let quarter = month_to_quarter(5);
+/// assert_eq!(quarter, "Q2");
+/// ```
+///
+/// # Panics
+///
+/// The function will not panic but returns "Invalid month" for any value outside of the valid range (1-12).
 pub fn month_to_quarter(month: u32) -> &'static str {
     match month {
         1..=3 => "Q1",
