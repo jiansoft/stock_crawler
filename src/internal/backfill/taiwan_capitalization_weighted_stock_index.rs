@@ -59,7 +59,7 @@ pub async fn execute() -> Result<()> {
                         "{} 大盤指數︰{} 漲跌︰{}",
                         index.date, index.index, index.change
                     );
-                    if let Err(why) = bot::telegram::send_to_allowed(&msg).await {
+                    if let Err(why) = bot::telegram::send(&msg).await {
                         logging::error_file_async(format!(
                             "Failed to telegram::send_to_allowed() because: {:?}",
                             why

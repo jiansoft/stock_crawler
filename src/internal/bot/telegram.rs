@@ -1,6 +1,6 @@
 use crate::internal::{config::SETTINGS, logging, util::http};
 use anyhow::*;
-use once_cell::{sync::Lazy, sync::OnceCell};
+use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
 use std::{result::Result::Ok, sync::Arc};
 
@@ -82,7 +82,7 @@ pub struct SendMessageRequest<'a> {
     pub text: &'a str,
 }
 
-pub async fn send_to_allowed(msg: &str) -> Result<()> {
+pub async fn send(msg: &str) -> Result<()> {
     get_client()?.send(msg).await
 }
 

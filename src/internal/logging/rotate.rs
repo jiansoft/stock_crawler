@@ -3,6 +3,7 @@ use anyhow::*;
 use chrono::{DateTime, Local};
 use core::result::Result::Ok;
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     fs,
     fs::{File, OpenOptions},
@@ -22,6 +23,7 @@ pub struct Rotate {
     out_fh: Option<Arc<RwLock<BufWriter<File>>>>,
     generation: i64,
     max_age: chrono::Duration,
+    on_rotate: AtomicBool,
 }
 
 impl Rotate {
@@ -34,6 +36,7 @@ impl Rotate {
             cur_base_fn: "".to_string(),
             out_fh: None,
             max_age: chrono::Duration::days(7),
+            on_rotate: Default::default(),
         }
     }
 
@@ -81,27 +84,15 @@ impl Rotate {
     }
 
     fn rotate(&self, now: DateTime<Local>) {
-        //logging::debug_file_async(format!("self.cur_fn:{}", &self.cur_fn));
-        //logging::debug_file_async(format!("self.cur_base_fn:{}", &self.cur_base_fn));
+        if self.on_rotate.load(Ordering::Relaxed) {
+            return;
+        }
+
+        self.on_rotate.store(true, Ordering::Relaxed);
+
         match Self::list_files_in_directory(&self.cur_fn) {
             Ok(files) => {
                 let cut_off = (now - self.max_age).timestamp() as u64;
-                //logging::debug_file_async(format!("cut_off:{}", cut_off));
-                /*
-                let mut to_unlink: Vec<PathBuf> = Vec::with_capacity(files.len());
-                for file in files {
-                    if let Ok(metadata) = fs::metadata(&file) {
-                        if let Ok(system_time) = metadata.modified() {
-                            if let Ok(file_duration) = system_time.duration_since(UNIX_EPOCH) {
-                                if file_duration.as_secs() <= cut_off {
-                                    to_unlink.push(file)
-                                }
-                            }
-                        }
-                    }
-                }
-                */
-
                 let to_unlink: Vec<PathBuf> = files
                     .into_iter()
                     .filter_map(|file| {
@@ -117,28 +108,26 @@ impl Rotate {
                     })
                     .collect();
 
-                if to_unlink.is_empty() {
-                    return;
+                if !to_unlink.is_empty() {
+                    to_unlink
+                        .par_iter()
+                        .with_min_len(num_cpus::get())
+                        .for_each(|unlink| match fs::remove_file(unlink) {
+                            Err(why) => {
+                                logging::error_console(format!(
+                                    "couldn't remove the file({}). because {:?}",
+                                    &unlink.display().to_string(),
+                                    why
+                                ));
+                            }
+                            Ok(_) => {
+                                logging::info_file_async(format!(
+                                    "the file has been deleted:{}",
+                                    &unlink.display().to_string()
+                                ));
+                            }
+                        });
                 }
-
-                to_unlink
-                    .par_iter()
-                    .with_min_len(num_cpus::get())
-                    .for_each(|unlink| match fs::remove_file(unlink) {
-                        Err(why) => {
-                            logging::error_console(format!(
-                                "couldn't remove the file({}). because {:?}",
-                                &unlink.display().to_string(),
-                                why
-                            ));
-                        }
-                        Ok(_) => {
-                            logging::info_file_async(format!(
-                                "the file has been deleted:{}",
-                                &unlink.display().to_string()
-                            ));
-                        }
-                    });
             }
             Err(why) => {
                 logging::error_console(format!(
@@ -147,6 +136,8 @@ impl Rotate {
                 ));
             }
         }
+
+        self.on_rotate.store(false, Ordering::Relaxed);
     }
 
     fn list_files_in_directory<P: AsRef<Path>>(file_path: P) -> Result<Vec<PathBuf>, io::Error> {

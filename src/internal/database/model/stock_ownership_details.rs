@@ -1,6 +1,8 @@
 use crate::{internal::{
-    database::model::dividend_record_detail,
-    database::DB
+    database::{
+        model::dividend_record_detail,
+        DB
+    }
 }};
 use anyhow::Result;
 use chrono::{DateTime, Local};

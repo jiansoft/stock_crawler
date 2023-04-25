@@ -1,7 +1,13 @@
 //use futures::executor::block_on;
 use crate::internal::{
-    database::model, database::model::index, database::model::last_daily_quotes,
-    database::model::revenue, database::model::stock, logging,
+    database::{
+        model,
+        model::index,
+        model::last_daily_quotes,
+        model::revenue,
+        model::stock
+    },
+    logging,
 };
 use once_cell::sync::Lazy;
 use std::{collections::HashMap, sync::RwLock};
@@ -108,7 +114,7 @@ impl Share {
     }
 
     pub async fn load(&self) {
-        let indices = index::fetch().await;
+        let indices = index::Entity::fetch().await;
         match self.indices.write() {
             Ok(mut i) => {
                 if let Ok(indices) = indices {
@@ -148,7 +154,7 @@ impl Share {
             logging::error_file_async("Failed to update last_revenues".to_string());
         }
 
-        let last_daily_quotes = last_daily_quotes::fetch().await;
+        let last_daily_quotes = last_daily_quotes::Entity::fetch().await;
         if let (Ok(result), Ok(mut ldq)) =
             (&last_daily_quotes, self.last_trading_day_quotes.write())
         {

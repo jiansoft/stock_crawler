@@ -137,5 +137,5 @@ pub async fn start() {
         env::consts::ARCH
     );
 
-    let _ = bot::telegram::send_to_allowed(&msg).await;
+    let _ = bot::telegram::send(&msg).await;
 }

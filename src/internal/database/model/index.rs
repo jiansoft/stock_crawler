@@ -43,6 +43,45 @@ impl Entity {
         }
     }
 
+    pub async fn fetch() -> anyhow::Result<HashMap<String, Entity>> {
+        const STMT: &str = r#"
+        SELECT
+            category,
+            "date",
+            trading_volume,
+            "transaction",
+            trade_value,
+            change,
+            index,
+            create_time,
+            update_time
+        FROM
+            index
+        ORDER BY
+            "date" DESC
+        LIMIT 30;
+    "#;
+
+        let mut stream = sqlx::query_as::<_, Entity>(STMT).fetch(&DB.pool);
+
+        let mut indices = HashMap::with_capacity(30);
+
+        while let Some(row_result) = stream.next().await {
+            match row_result {
+                Ok(row) => {
+                    let key = format!("{}_{}", row.date, row.category);
+                    indices.insert(key, row);
+                }
+                Err(why) => {
+                    logging::error_file_async(format!("Failed to stream.next() because {:?}", why));
+                }
+            };
+        }
+
+        Ok(indices)
+    }
+
+
     /// 將twse取回來的原始資料轉成 Entity
     pub fn from_strings(item: &[String]) -> Result<Self> {
         let split_date: Vec<&str> = item[0].split('/').collect();
@@ -190,43 +229,6 @@ impl From<Vec<String>> for Entity {
     }
 }
 
-pub async fn fetch() -> anyhow::Result<HashMap<String, Entity>> {
-    const STMT: &str = r#"
-        SELECT
-            category,
-            "date",
-            trading_volume,
-            "transaction",
-            trade_value,
-            change,
-            index,
-            create_time,
-            update_time
-        FROM
-            index
-        ORDER BY
-            "date" DESC
-        LIMIT 30;
-    "#;
-
-    let mut stream = sqlx::query_as::<_, Entity>(STMT).fetch(&DB.pool);
-
-    let mut indices = HashMap::with_capacity(30);
-
-    while let Some(row_result) = stream.next().await {
-        match row_result {
-            Ok(row) => {
-                let key = format!("{}_{}", row.date, row.category);
-                indices.insert(key, row);
-            }
-            Err(why) => {
-                logging::error_file_async(format!("Failed to stream.next() because {:?}", why));
-            }
-        };
-    }
-
-    Ok(indices)
-}
 
 #[cfg(test)]
 mod tests {

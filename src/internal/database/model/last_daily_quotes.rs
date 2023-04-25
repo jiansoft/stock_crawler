@@ -21,6 +21,21 @@ impl Entity {
             closing_price: Default::default(),
         }
     }
+
+    /// 取得最後交易日股票報價數據
+    pub async fn fetch() -> Result<Vec<Entity>> {
+        Ok(sqlx::query_as::<_, Entity>(
+            r#"
+select
+    date, security_code, closing_price
+from
+    last_daily_quotes
+"#,
+        )
+            .fetch_all(&DB.pool)
+            .await?)
+    }
+
     pub fn clone(&self) -> Self {
         Entity {
             date: self.date,
@@ -36,19 +51,7 @@ impl Default for Entity {
     }
 }
 
-/// 取得最後交易日股票報價數據
-pub async fn fetch() -> Result<Vec<Entity>> {
-    Ok(sqlx::query_as::<_, Entity>(
-        r#"
-select
-    date, security_code, closing_price
-from
-    last_daily_quotes
-"#,
-    )
-    .fetch_all(&DB.pool)
-    .await?)
-}
+
 
 #[cfg(test)]
 mod tests {

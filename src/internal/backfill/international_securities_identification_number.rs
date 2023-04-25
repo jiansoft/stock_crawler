@@ -72,7 +72,7 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
 
     // todo 需要通知另一個服務已新增加一個股票代號
     if !to_bot_msg.is_empty() {
-        if let Err(why) = bot::telegram::send_to_allowed(&to_bot_msg).await {
+        if let Err(why) = bot::telegram::send(&to_bot_msg).await {
             logging::error_file_async(format!("Failed to send_to_allowed because {:?}", why));
         }
     }

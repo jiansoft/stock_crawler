@@ -1,11 +1,14 @@
 use crate::internal::database::DB;
-
 use anyhow::*;
 use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
 use core::result::Result::Ok;
 use rust_decimal::Decimal;
-use sqlx::postgres::PgQueryResult;
-use sqlx::{postgres::PgRow, Error, Row};
+use sqlx::{
+    postgres::PgQueryResult,
+    postgres::PgRow,
+    Error,
+    Row
+};
 use std::str::FromStr;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]

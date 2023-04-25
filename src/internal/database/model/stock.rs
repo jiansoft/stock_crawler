@@ -191,7 +191,7 @@ GROUP BY "SecurityCode", year, month;
     pub async fn fetch() -> Result<Vec<Entity>> {
         let sql = r#"
 select
-    stock_symbol, "Name", "SuspendListing", "CreateTime",
+    stock_symbol, "Name" as name, "SuspendListing" as suspend_listing, "CreateTime" AS create_time,
     net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
 from
     stocks
@@ -203,9 +203,9 @@ order by
                 Ok(Entity {
                     stock_symbol: row.try_get("stock_symbol")?,
                     net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
-                    name: row.try_get("Name")?,
-                    suspend_listing: row.try_get("SuspendListing")?,
-                    create_time: row.try_get("CreateTime")?,
+                    name: row.try_get("name")?,
+                    suspend_listing: row.try_get("suspend_listing")?,
+                    create_time: row.try_get("create_time")?,
                     stock_exchange_market_id: row.try_get("stock_exchange_market_id")?,
                     stock_industry_id: row.try_get("stock_industry_id")?,
                 })
@@ -279,7 +279,7 @@ SELECT
     s.stock_exchange_market_id,
     s.stock_industry_id
 FROM stocks AS s
-WHERE stock_exchange_market_id in(2, 4)
+WHERE stock_exchange_market_id in (2, 4)
     AND s."SuspendListing" = false
     AND s.net_asset_value_per_share = 0
 "#;

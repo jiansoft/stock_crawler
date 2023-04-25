@@ -4,9 +4,9 @@ use crate::{internal::{
 }};
 use anyhow::Result;
 use chrono::{DateTime, Local};
-use rocket::form::validate::Len;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
 use std::collections::HashMap;
+
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
@@ -136,7 +136,7 @@ impl Default for Entity {
 
 /// 將 vec 轉成 hashmap
 pub fn vec_to_hashmap_key_using_word(entities: Option<Vec<Entity>>) -> HashMap<String, Entity> {
-    let mut stock_words = HashMap::with_capacity(entities.len());
+    let mut stock_words = HashMap::new();
     if let Some(list) = entities {
         for e in list {
             stock_words.insert(e.word.to_string(), e);
