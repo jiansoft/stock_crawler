@@ -63,7 +63,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 fetch".to_string());
         let _ = Entity::new();
-        match fetch().await {
+        match Entity::fetch().await {
             Ok(stocks) => logging::info_file_async(format!("{:#?}", stocks)),
             Err(why) => {
                 logging::error_file_async(format!("Failed to fetch because {:?}", why));

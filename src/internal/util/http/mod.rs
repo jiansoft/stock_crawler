@@ -121,18 +121,14 @@ where
     REQ: Serialize,
     RES: DeserializeOwned,
 {
-    let client = get_client()?;
-    let mut rb = client.request(Method::POST, url);
-
-    if let Some(h) = headers {
-        rb = rb.headers(h);
-    }
-
-    if let Some(r) = req {
-        rb = rb.json(r);
-    }
-
-    let res = request_send(rb).await?;
+    let res = request_post_common(url, headers, |rb| {
+        if let Some(r) = req {
+            rb.json(r)
+        } else {
+            rb
+        }
+    })
+    .await?;
     response_with_json(res).await
 }
 
@@ -153,20 +149,15 @@ pub async fn request_post(
     headers: Option<header::HeaderMap>,
     params: Option<HashMap<&str, &str>>,
 ) -> Result<String> {
-    let client = get_client()?;
-    let mut rb = client.request(Method::POST, url);
-
-    if let Some(h) = headers {
-        rb = rb.headers(h);
-    }
-
-    if let Some(p) = params {
-        rb = rb.form(&p);
-    }
-
-    request_send(rb)
-        .await?
-        .text()
+    let res = request_post_common(url, headers, |rb| {
+        if let Some(p) = params {
+            rb.form(&p)
+        } else {
+            rb
+        }
+    })
+        .await?;
+    res.text()
         .await
         .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
 }
@@ -181,7 +172,7 @@ pub async fn request_post(
 ///
 /// * Result<Response>: The HTTP response, or an error if the request fails.
 async fn request_send(request_builder: reqwest::RequestBuilder) -> Result<Response> {
-    let _permit = SEMAPHORE.acquire().await?;
+    let _permit = SEMAPHORE.acquire().await;
     request_builder
         .send()
         .await
@@ -219,7 +210,35 @@ async fn response_with_json<RES: DeserializeOwned>(res: Response) -> Result<RES>
 async fn request_get_common(url: &str) -> Result<Response> {
     let client = get_client()?;
     let rb = client.request(Method::GET, url);
-    Ok(request_send(rb).await?)
+    request_send(rb).await
+}
+
+/// A common function for sending HTTP POST requests with the specified headers and request body.
+///
+/// # Arguments
+///
+/// * `url`: The URL to send the POST request to.
+/// * `headers`: An optional set of headers to include with the request.
+/// * `body`: A function that takes a `reqwest::RequestBuilder` and modifies it with the request body (JSON, form data, etc.).
+///
+/// # Returns
+///
+/// * `Result<Response>`: The HTTP response, or an error if the request fails.
+async fn request_post_common(
+    url: &str,
+    headers: Option<header::HeaderMap>,
+    body: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
+) -> Result<Response> {
+    let client = get_client()?;
+    let mut rb = client.request(Method::POST, url);
+
+    if let Some(h) = headers {
+        rb = rb.headers(h);
+    }
+
+    rb = body(rb);
+
+    request_send(rb).await
 }
 
 #[cfg(test)]

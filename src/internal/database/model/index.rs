@@ -43,7 +43,7 @@ impl Entity {
         }
     }
 
-    pub async fn fetch() -> anyhow::Result<HashMap<String, Entity>> {
+    pub async fn fetch() -> Result<HashMap<String, Entity>> {
         const STMT: &str = r#"
         SELECT
             category,
@@ -236,10 +236,11 @@ mod tests {
     use crate::internal::logging;
     use std::{thread, time};
 
+
     #[tokio::test]
     async fn test_index_fetch() {
         dotenv::dotenv().ok();
-        let r = fetch().await.unwrap();
+        let r = Entity::fetch().await.unwrap();
         for e in r.iter() {
             logging::info_file_async(format!("e.date {:?} e.index {:?}", e.1.date, e.1.index));
         }

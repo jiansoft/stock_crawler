@@ -104,7 +104,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 test_send_message".to_string());
         let msg = format!(
-            "Bot 已啟動\r\nRust OS/Arch: {}/{}\r\n",
+            "test_send_message \r\nRust OS/Arch: {}/{}\r\n",
             env::consts::OS,
             env::consts::ARCH
         );
