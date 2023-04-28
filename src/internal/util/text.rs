@@ -1,33 +1,50 @@
-use crate::internal::logging;
 use anyhow::*;
-use core::{result::Result::Ok, result::Result::*};
+use core::{result::{
+    Result::Ok,
+    Result::*
+}};
 use encoding::{DecoderTrap, Encoding};
 use rust_decimal::Decimal;
 use std::{collections::HashSet, str::FromStr};
 
 #[allow(dead_code)]
-pub fn big5_to_utf8(text: &str) -> Option<String> {
+pub fn big5_to_utf8(text: &str) -> Result<String> {
     let text_to_char = text.chars();
     let mut vec = Vec::with_capacity(text.len());
     for c in text_to_char {
         vec.push(c as u8);
     }
 
-    return match encoding::all::BIG5_2003.decode(&vec, DecoderTrap::Ignore) {
+    big5_2_utf8(vec)
+}
+
+/// Converts a Big5 encoded `Vec<u8>` to a UTF-8 `String`.
+///
+/// This function tries to decode the input `Vec<u8>` using the BIG5_2003 encoding
+/// and then re-encodes the decoded string using the UTF-8 encoding.
+/// If any of the decoding steps fail, it logs the error and returns None.
+///
+/// # Arguments
+///
+/// * `data: Vec<u8>`: The input vector of bytes containing Big5 encoded text.
+///
+/// # Returns
+///
+/// * `Option<String>`: A UTF-8 encoded string if the conversion is successful, or None if an error occurs.
+pub fn big5_2_utf8(data: Vec<u8>) -> Result<String> {
+    match encoding::all::BIG5_2003.decode(&data, DecoderTrap::Ignore) {
         Ok(big5) => {
-            return match encoding::all::UTF_8.decode(big5.as_bytes(), DecoderTrap::Ignore) {
-                Ok(utf8) => Some(utf8),
+            match encoding::all::UTF_8.decode(big5.as_bytes(), DecoderTrap::Ignore) {
+                Ok(utf8) => Ok(utf8),
                 Err(why) => {
-                    logging::error_file_async(format!("err:{:?}", why));
-                    None
+                    Err(anyhow!("Failed to UTF_8.decode because: {:?}", why))
                 }
-            };
+            }
         }
         Err(why) => {
-            logging::error_file_async(format!("err:{:?}", why));
-            None
+            Err(anyhow!("Failed to BIG5_2003.decode because: {:?}", why))
         }
-    };
+    }
 }
 
 /// 將中文字拆分 例︰台積電 => ["台", "台積", "台積電", "積", "積電", "電"]
