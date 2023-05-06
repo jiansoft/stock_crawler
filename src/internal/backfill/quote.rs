@@ -28,14 +28,16 @@ pub async fn execute() -> Result<()> {
         results.extend(twse);
     }
 
-    if results.is_empty() {
-        return Ok(());
-    }
+    let results_is_empty = results.is_empty();
 
     let tasks: Vec<_> = results.into_iter().map(process_item).collect();
     futures::future::join_all(tasks).await;
 
     logging::info_file_async("取得台股收盤報價結束".to_string());
+
+    if results_is_empty {
+        return Ok(());
+    }
 
     let date_naive = now.date_naive();
     match daily_quote::makeup_for_the_lack_daily_quotes(date_naive).await {

@@ -3,7 +3,7 @@ use anyhow::*;
 use config::{Config as config_config, File as config_file};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, env, fs, io, path::PathBuf, result::Result::Ok, str::FromStr};
+use std::{collections::HashMap, env, fs, io, path::PathBuf, result::Result::Ok, str::FromStr, u8};
 
 const CONFIG_PATH: &str = "app.json";
 
@@ -13,6 +13,7 @@ pub struct App {
     pub afraid: Afraid,
     pub postgresql: PostgreSQL,
     pub bot: Bot,
+    pub nosql: NoSQL,
 }
 
 const AFRAID_TOKEN: &str = "AFRAID_TOKEN";
@@ -58,6 +59,23 @@ const TELEGRAM_ALLOWED: &str = "TELEGRAM_ALLOWED";
 pub struct Telegram {
     pub allowed: HashMap<i64, String>,
     pub token: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct NoSQL {
+    pub redis: Redis,
+}
+
+const REDIS_ADDR: &str = "REDIS_ADDR";
+const REDIS_ACCOUNT: &str = "REDIS_ACCOUNT";
+const REDIS_PASSWORD: &str = "REDIS_PASSWORD";
+const REDIS_DB: &str = "REDIS_DB";
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Redis {
+    pub addr: String,
+    pub account: String,
+    pub password: String,
+    pub db: i32,
 }
 
 pub static SETTINGS: Lazy<App> = Lazy::new(|| App::get().expect("Config error"));
@@ -132,6 +150,16 @@ impl App {
                     token: env::var(TELEGRAM_TOKEN).expect(TELEGRAM_TOKEN),
                 },
             },
+
+            nosql: NoSQL {
+                redis: Redis {
+                    addr: env::var(REDIS_ADDR).expect(REDIS_ADDR),
+                    account: env::var(REDIS_ACCOUNT).expect(REDIS_ACCOUNT),
+                    password: env::var(REDIS_PASSWORD).expect(REDIS_PASSWORD),
+                    db: i32::from_str(&env::var(REDIS_DB).unwrap_or_else(|_| "6379".to_string()))
+                        .unwrap_or(6379),
+                },
+            },
         }
     }
 
@@ -179,6 +207,19 @@ impl App {
             self.bot.telegram.token = token
         }
 
+        if let Ok(addr) = env::var(REDIS_ADDR) {
+            self.nosql.redis.addr = addr
+        }
+        if let Ok(db) = env::var(REDIS_DB) {
+            self.nosql.redis.db = i32::from_str(db.as_str()).unwrap_or(6379)
+        }
+        if let Ok(account) = env::var(REDIS_ACCOUNT) {
+            self.nosql.redis.account = account
+        }
+        if let Ok(password) = env::var(REDIS_PASSWORD) {
+            self.nosql.redis.password = password
+        }
+
         self
     }
 }
@@ -207,22 +248,28 @@ mod tests {
     #[tokio::test]
     async fn test_init() {
         dotenv::dotenv().ok();
-        logging::info_file_async(format!(
+        logging::debug_file_async(format!(
             "SETTINGS.postgresql: {:#?}\r\nSETTINGS.secret: {:#?}\r\n",
             SETTINGS.postgresql, SETTINGS.bot
         ));
+
+        logging::debug_file_async(format!(
+            "SETTINGS.nosql.redis: {:#?}\r\n",
+            SETTINGS.nosql.redis
+        ));
+
         let mut map: HashMap<i64, String> = HashMap::new();
         map.insert(123, "QQ".to_string());
         map.insert(456, "QQ".to_string());
         let json_str = serde_json::to_string(&map).expect("TODO: panic message");
 
-        logging::info_file_async(format!("serde_json: {}\r\n", &json_str));
+        logging::debug_file_async(format!("serde_json: {}\r\n", &json_str));
         match serde_json::from_str::<HashMap<i64, String>>(&json_str) {
             Ok(json) => {
-                logging::info_file_async(format!("json: {:?}\r\n", json));
+                logging::debug_file_async(format!("json: {:?}\r\n", json));
             }
             Err(why) => {
-                logging::error_file_async(format!(
+                logging::debug_file_async(format!(
                     "Failed to serde_json because: {:?} \r\n {}",
                     why, &json_str
                 ));

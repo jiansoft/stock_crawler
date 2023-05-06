@@ -17,5 +17,13 @@
       "allowed": {},
       "token": ""
     }
+  },
+  "nosql": {
+    "redis": {
+      "addr": "addr",
+      "account": "account",
+      "password": "password",
+      "db": 0
+    }
   }
 }

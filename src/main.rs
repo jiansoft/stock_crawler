@@ -4,12 +4,13 @@ extern crate rocket;*/
 
 pub mod internal;
 
-use crate::internal::{cache, scheduler};
+use crate::internal::{cache, nosql, scheduler};
 use std::{
     error::Error,
     sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
 };
+
 use tokio::signal;
 
 /*#[get("/")]
@@ -82,6 +83,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
     cache::SHARE.load().await;
     scheduler::start().await;
+    let pong = nosql::redis::CLIENT.ping().await;
+    if let Ok(pong) = pong {
+        println!("pong: {}", pong);
+    }
 
     while !received_signal.load(Ordering::SeqCst) {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;

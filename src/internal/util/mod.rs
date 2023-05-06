@@ -1,3 +1,35 @@
 pub mod datetime;
 pub mod http;
 pub mod text;
+
+
+/*
+分錢算式有小數位
+fn distribute_amount(amount: f64, parts: usize) -> Vec<f64> {
+    let mut result = vec![0.0; parts];
+    let mut remaining = amount;
+
+    for i in 0..parts {
+        let share = remaining / (parts - i) as f64;
+        result[i] = (share * 1e4).round() / 1e4; // Round to 4 decimal places
+        remaining -= result[i];
+    }
+
+    result
+}
+分錢算式無小數位
+fn distribute_amount(amount: i32, parts: usize) -> Vec<i32> {
+    let mut result = vec![0; parts];
+    let mut remaining = amount;
+
+    for i in 0..parts {
+        let share = remaining as f64 / (parts - i) as f64;
+        let rounded_share = share.round() as i32;
+        result[i] = rounded_share;
+        remaining -= rounded_share;
+    }
+
+    result
+}
+
+*/

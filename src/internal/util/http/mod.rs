@@ -83,8 +83,12 @@ fn get_client() -> Result<&'static Client> {
 ///
 /// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
 pub async fn request_get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
-    let res = request_get_common(url).await?;
-    response_with_json(res).await
+    request_get_common(url)
+        .await?
+        .json::<RES>()
+        .await
+        .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
+    // response_with_json(res).await
 }
 
 /// Performs an HTTP GET request and returns the response as text.
@@ -147,15 +151,18 @@ where
     REQ: Serialize,
     RES: DeserializeOwned,
 {
-    let res = request_post_common(url, headers, |rb| {
+    request_post_common(url, headers, |rb| {
         if let Some(r) = req {
             rb.json(r)
         } else {
             rb
         }
     })
-    .await?;
-    response_with_json(res).await
+    .await?
+    .json::<RES>()
+    .await
+    .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
+    // response_with_json(res).await
 }
 
 /// Performs an HTTP POST request with form data and specified headers, and returns the response as text.
@@ -175,17 +182,17 @@ pub async fn request_post(
     headers: Option<header::HeaderMap>,
     params: Option<HashMap<&str, &str>>,
 ) -> Result<String> {
-    let res = request_post_common(url, headers, |rb| {
+    request_post_common(url, headers, |rb| {
         if let Some(p) = params {
             rb.form(&p)
         } else {
             rb
         }
     })
-    .await?;
-    res.text()
-        .await
-        .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
+    .await?
+    .text()
+    .await
+    .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
 }
 
 /// Sends an HTTP request using a given request builder.
@@ -203,25 +210,6 @@ async fn request_send(request_builder: reqwest::RequestBuilder) -> Result<Respon
         .send()
         .await
         .map_err(|e| anyhow!("Error sending request: {:?}", e))
-}
-
-/// Deserializes the JSON response into the specified type.
-///
-/// # Type Parameters
-///
-/// * RES: The type to deserialize the JSON response into. It must implement DeserializeOwned.
-///
-/// # Arguments
-///
-/// * res: The HTTP response to deserialize from JSON.
-///
-/// # Returns
-///
-/// * Result<RES>: The deserialized response, or an error if the response cannot be deserialized.
-async fn response_with_json<RES: DeserializeOwned>(res: Response) -> Result<RES> {
-    res.json::<RES>()
-        .await
-        .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
 }
 
 /// Common functionality for sending an HTTP GET request.
