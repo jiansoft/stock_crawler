@@ -1,11 +1,4 @@
-use crate::{
-    internal::{
-        calculation,
-        bot,
-        database::DB,
-        logging
-    }
-};
+use crate::internal::{bot, calculation, database::DB, logging};
 use chrono::{Datelike, Local, NaiveDate};
 use sqlx::FromRow;
 use std::fmt::Write;

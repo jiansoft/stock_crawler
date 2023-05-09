@@ -4,7 +4,7 @@ use crate::internal::util;
 use anyhow::*;
 use async_trait::async_trait;
 use once_cell::{sync::Lazy, sync::OnceCell};
-use reqwest::{header, Client, Method, Response};
+use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
 use tokio::sync::Semaphore;
@@ -83,12 +83,11 @@ fn get_client() -> Result<&'static Client> {
 ///
 /// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
 pub async fn request_get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
-    request_get_common(url)
+    request_send(Method::GET, url, None, None::<fn(_) -> _>)
         .await?
         .json::<RES>()
         .await
         .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
-    // response_with_json(res).await
 }
 
 /// Performs an HTTP GET request and returns the response as text.
@@ -100,8 +99,8 @@ pub async fn request_get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RE
 /// # Returns
 ///
 /// * `Result<String>`: The response text, or an error if the request fails or the response cannot be parsed.
-pub async fn request_get(url: &str) -> Result<String> {
-    request_get_common(url)
+pub async fn request_get(url: &str, headers: Option<header::HeaderMap>) -> Result<String> {
+    request_send(Method::GET, url, headers, None::<fn(_) -> _>)
         .await?
         .text()
         .await
@@ -118,7 +117,7 @@ pub async fn request_get(url: &str) -> Result<String> {
 ///
 /// * `Result<String>`: The Big5 encoded response text, or an error if the request fails or the response cannot be parsed.
 pub async fn request_get_use_big5(url: &str) -> Result<String> {
-    request_get_common(url)
+    request_send(Method::GET, url, None, None::<fn(_) -> _>)
         .await?
         .text_force_big5()
         .await
@@ -141,7 +140,6 @@ pub async fn request_get_use_big5(url: &str) -> Result<String> {
 /// # Returns
 ///
 /// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
-
 pub async fn request_post_use_json<REQ, RES>(
     url: &str,
     headers: Option<header::HeaderMap>,
@@ -151,18 +149,24 @@ where
     REQ: Serialize,
     RES: DeserializeOwned,
 {
-    request_post_common(url, headers, |rb| {
-        if let Some(r) = req {
-            rb.json(r)
-        } else {
-            rb
-        }
-    })
+    request_send(
+        Method::POST,
+        url,
+        headers,
+        Some(
+            |rb: RequestBuilder| {
+                if let Some(r) = req {
+                    rb.json(r)
+                } else {
+                    rb
+                }
+            },
+        ),
+    )
     .await?
     .json::<RES>()
     .await
     .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
-    // response_with_json(res).await
 }
 
 /// Performs an HTTP POST request with form data and specified headers, and returns the response as text.
@@ -182,77 +186,58 @@ pub async fn request_post(
     headers: Option<header::HeaderMap>,
     params: Option<HashMap<&str, &str>>,
 ) -> Result<String> {
-    request_post_common(url, headers, |rb| {
-        if let Some(p) = params {
-            rb.form(&p)
-        } else {
-            rb
-        }
-    })
+    request_send(
+        Method::POST,
+        url,
+        headers,
+        Some(|rb: RequestBuilder| {
+            if let Some(p) = params {
+                rb.form(&p)
+            } else {
+                rb
+            }
+        }),
+    )
     .await?
     .text()
     .await
     .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
 }
 
-/// Sends an HTTP request using a given request builder.
+/// Sends an HTTP request using the specified method, URL, headers, and body.
 ///
 /// # Arguments
 ///
-/// * request_builder: The request builder to use for sending the request.
-///
-/// # Returns
-///
-/// * Result<Response>: The HTTP response, or an error if the request fails.
-async fn request_send(request_builder: reqwest::RequestBuilder) -> Result<Response> {
-    let _permit = SEMAPHORE.acquire().await;
-    request_builder
-        .send()
-        .await
-        .map_err(|e| anyhow!("Error sending request: {:?}", e))
-}
-
-/// Common functionality for sending an HTTP GET request.
-///
-/// # Arguments
-///
-/// * url: The URL to send the GET request to.
-///
-/// # Returns
-///
-/// * Result<Response>: The HTTP response, or an error if the request fails.
-async fn request_get_common(url: &str) -> Result<Response> {
-    let client = get_client()?;
-    let rb = client.request(Method::GET, url);
-    request_send(rb).await
-}
-
-/// A common function for sending HTTP POST requests with the specified headers and request body.
-///
-/// # Arguments
-///
-/// * `url`: The URL to send the POST request to.
+/// * `method`: The HTTP method to use for the request (GET, POST, PUT, DELETE, etc.).
+/// * `url`: The URL to send the request to.
 /// * `headers`: An optional set of headers to include with the request.
-/// * `body`: A function that takes a `reqwest::RequestBuilder` and modifies it with the request body (JSON, form data, etc.).
+/// * `body`: An optional function that takes a `reqwest::RequestBuilder` and modifies it with the request body (JSON, form data, etc.).
 ///
 /// # Returns
 ///
 /// * `Result<Response>`: The HTTP response, or an error if the request fails.
-async fn request_post_common(
+async fn request_send(
+    method: Method,
     url: &str,
     headers: Option<header::HeaderMap>,
-    body: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
+    body: Option<impl FnOnce(RequestBuilder) -> RequestBuilder>,
 ) -> Result<Response> {
     let client = get_client()?;
-    let mut rb = client.request(Method::POST, url);
+    let mut rb = client.request(method, url);
 
     if let Some(h) = headers {
         rb = rb.headers(h);
     }
 
-    rb = body(rb);
+    if let Some(body_fn) = body {
+        rb = body_fn(rb);
+    }
 
-    request_send(rb).await
+    let _permit = SEMAPHORE.acquire().await;
+
+    rb.send()
+        .await
+        .map_err(|e| anyhow!("Error sending request: {:?}", e))
 }
 
 #[cfg(test)]
@@ -272,7 +257,7 @@ mod tests {
         );
 
         logging::debug_file_async(format!("visit url:{}", url,));
-        logging::debug_file_async(format!("request_get:{:?}", request_get(&url).await));
+        logging::debug_file_async(format!("request_get:{:?}", request_get(&url, None).await));
 
         let bytes = reqwest::get("https://httpbin.org/ip")
             .await

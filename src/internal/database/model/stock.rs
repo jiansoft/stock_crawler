@@ -1,16 +1,10 @@
-use crate::{
-    internal::{
-        crawler::{tpex, twse},
-        database::{
-            model::{
-                stock_index,
-                stock_word
-            },
-            DB
-        },
-        util,
-        logging
-    }
+use crate::internal::{
+    crawler::{tpex, twse},
+    database::{
+        model::{stock_index, stock_word},
+        DB,
+    },
+    logging, util,
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local};
@@ -46,7 +40,7 @@ impl Entity {
 
     /// 是否為特別股
     pub fn is_preference_shares(&self) -> bool {
-        self.stock_symbol.chars().any(|c| c.is_ascii_uppercase())
+        is_preference_shares(&self.stock_symbol)
     }
 
     /// 是否為臺灣存託憑證
@@ -316,6 +310,13 @@ WHERE stock_exchange_market_id in(2, 4)
         .bind(quarter)
         .fetch_all(&DB.pool)
         .await?)
+}
+
+/// 是否為特別股
+pub fn is_preference_shares(stock_symbol: &str) -> bool {
+    stock_symbol
+        .chars()
+        .any(|c| c.is_ascii_uppercase() || c.is_ascii_lowercase())
 }
 
 #[cfg(test)]

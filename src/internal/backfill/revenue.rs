@@ -1,11 +1,4 @@
-use crate::{
-    internal::{
-        cache::SHARE,
-        crawler::twse,
-        database::model,
-        logging
-    }
-};
+use crate::internal::{cache::SHARE, crawler::twse, database::model, logging};
 use anyhow::*;
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use core::result::Result::Ok;

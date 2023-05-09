@@ -1,3 +1,4 @@
+use crate::internal::crawler::tpex;
 use crate::internal::{
     cache,
     cache::{TtlCacheInner, TTL},
@@ -9,7 +10,6 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
 use std::collections::HashMap;
-use crate::internal::crawler::tpex;
 
 // QuoteResponse 上櫃公司每日收盤資訊
 #[derive(Debug, Deserialize)]

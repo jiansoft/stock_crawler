@@ -1,6 +1,6 @@
 use crate::{
     internal::nosql,
-    internal::{crawler::yahoo, database::model, logging, util::datetime}
+    internal::{crawler::yahoo, database::model, logging, util::datetime},
 };
 use anyhow::*;
 use chrono::{Datelike, Duration, Local};
@@ -8,15 +8,6 @@ use core::result::Result::Ok;
 
 /// 將未有上季度財報的股票，到雅虎財經下載後回寫到 financial_statement 表
 pub async fn execute() -> Result<()> {
-    /*
-
-    cacheKey := fmt.Sprintf("profit:%d", profitType)
-    if isJump, _ := nosql.Redis.Bool(cacheKey); isJump {
-        return
-    }
-    ttl := time.Hour * 24 * 7
-    _ = nosql.Redis.Set(cacheKey, true, ttl)
-    */
     let cache_key = "financial_statement::yahoo";
     let is_jump = nosql::redis::CLIENT.get_bool(cache_key).await?;
     if is_jump {
@@ -71,6 +62,7 @@ pub async fn execute() -> Result<()> {
     {
         logging::error_file_async(format!("Failed to redis set because {:?}", why));
     }
+
     Ok(())
 }
 

@@ -2,7 +2,6 @@ pub mod datetime;
 pub mod http;
 pub mod text;
 
-
 /*
 分錢算式有小數位
 fn distribute_amount(amount: f64, parts: usize) -> Vec<f64> {

@@ -1,15 +1,10 @@
-use crate::{
-    internal::{
-        database::{
-            model::daily_quote::FromWithExchange,
-            model::daily_quote
-        },
-        cache::{TtlCacheInner, TTL},
-        StockExchange,
-        cache,
-        util::http,
-        logging
-    }
+use crate::internal::{
+    cache,
+    cache::{TtlCacheInner, TTL},
+    database::model::daily_quote::{self, FromWithExchange},
+    logging,
+    util::http,
+    StockExchange,
 };
 use chrono::{DateTime, Datelike, Local};
 use core::result::Result::Ok;

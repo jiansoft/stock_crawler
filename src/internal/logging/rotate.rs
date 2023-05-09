@@ -3,14 +3,14 @@ use anyhow::*;
 use chrono::{DateTime, Local};
 use core::result::Result::Ok;
 use rayon::prelude::*;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
-    fs,
-    fs::{File, OpenOptions},
-    io,
-    io::BufWriter,
+    fs::{self, File, OpenOptions},
+    io::{self, BufWriter},
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
     time::UNIX_EPOCH,
 };
 
@@ -84,13 +84,13 @@ impl Rotate {
     }
 
     fn rotate(&self, now: DateTime<Local>) {
-        if self.on_rotate.load(Ordering::Relaxed) {
+        if self.on_rotate.swap(true, Ordering::Relaxed) {
             return;
         }
 
-        self.on_rotate.store(true, Ordering::Relaxed);
+        //self.on_rotate.store(true, Ordering::Relaxed);
 
-        match Self::list_files_in_directory(&self.cur_fn) {
+        match Self::files_in_directory(&self.cur_fn) {
             Ok(files) => {
                 let cut_off = (now - self.max_age).timestamp() as u64;
                 let to_unlink: Vec<PathBuf> = files
@@ -140,7 +140,7 @@ impl Rotate {
         self.on_rotate.store(false, Ordering::Relaxed);
     }
 
-    fn list_files_in_directory<P: AsRef<Path>>(file_path: P) -> Result<Vec<PathBuf>, io::Error> {
+    fn files_in_directory<P: AsRef<Path>>(file_path: P) -> Result<Vec<PathBuf>, io::Error> {
         let path = file_path.as_ref();
         let parent_dir = path.parent().ok_or(io::Error::new(
             io::ErrorKind::NotFound,

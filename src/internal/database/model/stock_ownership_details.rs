@@ -1,9 +1,4 @@
-use crate::{internal::{
-    database::{
-        model::dividend_record_detail,
-        DB
-    }
-}};
+use crate::internal::database::{model::dividend_record_detail, DB};
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;

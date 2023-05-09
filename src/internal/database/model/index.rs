@@ -1,8 +1,4 @@
-use crate::{internal::{
-    database::DB,
-    util,
-    logging
-}};
+use crate::internal::{database::DB, logging, util};
 use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use concat_string::concat_string;
@@ -81,7 +77,6 @@ impl Entity {
         Ok(indices)
     }
 
-
     /// 將twse取回來的原始資料轉成 Entity
     pub fn from_strings(item: &[String]) -> Result<Self> {
         let split_date: Vec<&str> = item[0].split('/').collect();
@@ -106,11 +101,11 @@ impl Entity {
         index.date = NaiveDate::from_str(date.as_str())
             .map_err(|why| anyhow!(format!("Failed to parse date because {:?}", why)))?;
 
-        index.trading_volume = util::text::parse_decimal(&item[1])?;
-        index.trade_value = util::text::parse_decimal(&item[2])?;
-        index.transaction = util::text::parse_decimal(&item[3])?;
-        index.index = util::text::parse_decimal(&item[4])?;
-        index.change = util::text::parse_decimal(&item[5])?;
+        index.trading_volume = util::text::parse_decimal(&item[1], None)?;
+        index.trade_value = util::text::parse_decimal(&item[2], None)?;
+        index.transaction = util::text::parse_decimal(&item[3], None)?;
+        index.index = util::text::parse_decimal(&item[4], None)?;
+        index.change = util::text::parse_decimal(&item[5], None)?;
         index.category = String::from("TAIEX");
 
         Ok(index)
@@ -229,13 +224,11 @@ impl From<Vec<String>> for Entity {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::internal::logging;
     use std::{thread, time};
-
 
     #[tokio::test]
     async fn test_index_fetch() {

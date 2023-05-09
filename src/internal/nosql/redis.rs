@@ -268,8 +268,7 @@ mod tests {
                 assert_eq!(val1, "中文".to_string());
                 println!("string_val:{}", val1);
             }
-            Err(_) => (),                        // 如果兩者都是 Err，則不執行任何操作
-            _ => panic!("Results do not match"), // 如果一個是 Ok，另一個是 Err，則 panic
+            Err(_) => (), // 如果兩者都是 Err，則不執行任何操作
         }
         let get_all_keys = CLIENT
             .get_keys(vec![

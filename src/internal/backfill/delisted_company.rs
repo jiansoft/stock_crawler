@@ -1,11 +1,4 @@
-use crate::{
-    internal::{
-        cache::SHARE,
-        crawler::twse,
-        logging,
-        util::datetime::Weekend
-    }
-};
+use crate::internal::{cache::SHARE, crawler::twse, logging, util::datetime::Weekend};
 
 use anyhow::*;
 use chrono::Local;

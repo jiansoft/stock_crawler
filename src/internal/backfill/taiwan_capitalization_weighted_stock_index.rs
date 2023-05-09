@@ -1,12 +1,4 @@
-use crate::{
-    internal::{
-        bot,
-        cache::SHARE,
-        crawler::twse,
-        database::model,
-        logging
-    }
-};
+use crate::internal::{bot, cache::SHARE, crawler::twse, database::model, logging};
 use anyhow::*;
 use chrono::Local;
 use core::result::Result::Ok;

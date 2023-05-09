@@ -1,4 +1,5 @@
 pub mod daily_quote;
+/// 年度股利發放明細與總計
 pub mod dividend;
 /// 持股股息發放記錄表
 pub mod dividend_record_detail;

@@ -1,8 +1,5 @@
 use anyhow::*;
-use core::{result::{
-    Result::Ok,
-    Result::*
-}};
+use core::result::Result::{Ok, *};
 use encoding::{DecoderTrap, Encoding};
 use rust_decimal::Decimal;
 use std::{collections::HashSet, str::FromStr};
@@ -33,17 +30,11 @@ pub fn big5_to_utf8(text: &str) -> Result<String> {
 /// * `Option<String>`: A UTF-8 encoded string if the conversion is successful, or None if an error occurs.
 pub fn big5_2_utf8(data: Vec<u8>) -> Result<String> {
     match encoding::all::BIG5_2003.decode(&data, DecoderTrap::Ignore) {
-        Ok(big5) => {
-            match encoding::all::UTF_8.decode(big5.as_bytes(), DecoderTrap::Ignore) {
-                Ok(utf8) => Ok(utf8),
-                Err(why) => {
-                    Err(anyhow!("Failed to UTF_8.decode because: {:?}", why))
-                }
-            }
-        }
-        Err(why) => {
-            Err(anyhow!("Failed to BIG5_2003.decode because: {:?}", why))
-        }
+        Ok(big5) => match encoding::all::UTF_8.decode(big5.as_bytes(), DecoderTrap::Ignore) {
+            Ok(utf8) => Ok(utf8),
+            Err(why) => Err(anyhow!("Failed to UTF_8.decode because: {:?}", why)),
+        },
+        Err(why) => Err(anyhow!("Failed to BIG5_2003.decode because: {:?}", why)),
     }
 }
 
@@ -90,10 +81,46 @@ pub fn split_v1(w: &str) -> Vec<String> {
     words
 }
 
-/// 將字串轉成 Decimal
-pub fn parse_decimal(s: &str) -> Result<Decimal> {
-    Decimal::from_str(&s.replace(',', ""))
+/// Parses a decimal value from a given string.
+///
+/// This function accepts a string representation of a decimal number,
+/// potentially containing commas as thousands separators, and attempts to
+/// convert it into a `Decimal`. If the conversion fails, an error is returned.
+///
+/// # Arguments
+///
+/// * `s`: A string slice containing the representation of a decimal number
+///         that may include commas as thousands separators.
+///
+/// # Returns
+///
+/// * `Result<Decimal>`: The parsed `Decimal` value if successful, or an error
+///                      if the conversion fails.
+///
+/// # Example
+///
+/// ```
+/// let s = "1,234.56";
+/// let decimal_value = parse_decimal(s).unwrap();
+/// ```
+pub fn parse_decimal(s: &str, escape_char: Option<Vec<char>>) -> Result<Decimal> {
+    let t = match escape_char {
+        None => s.to_string(),
+        Some(ec) => s.replace(&ec[..], ""),
+    };
+
+    Decimal::from_str(&t)
         .map_err(|why| anyhow!(format!("Failed to Decimal::from_str because {:?}", why)))
+}
+
+pub fn parse_i32(s: &str, escape_chars: Option<&[char]>) -> Result<i32> {
+    let cleaned = match escape_chars {
+        None => s.to_string(),
+        Some(chars) => s.chars().filter(|c| !chars.contains(c)).collect(),
+    };
+
+    i32::from_str(&cleaned)
+        .map_err(|why| anyhow!("Failed to parse '{}' as i32 due to: {:?}", cleaned, why))
 }
 
 #[cfg(test)]

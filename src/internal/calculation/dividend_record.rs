@@ -1,7 +1,4 @@
-use crate::{internal::{
-    database::model,
-    logging
-}};
+use crate::internal::{database::model, logging};
 
 /// 計算指定年份領取的股利
 pub async fn calculate(year: i32, security_codes: Option<Vec<String>>) {

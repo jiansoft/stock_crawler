@@ -6,3 +6,5 @@ pub mod tpex;
 pub mod twse;
 /// 雅虎財經
 pub mod yahoo;
+
+pub mod goodinfo;

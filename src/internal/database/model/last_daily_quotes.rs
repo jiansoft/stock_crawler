@@ -32,8 +32,8 @@ from
     last_daily_quotes
 "#,
         )
-            .fetch_all(&DB.pool)
-            .await?)
+        .fetch_all(&DB.pool)
+        .await?)
     }
 
     pub fn clone(&self) -> Self {
@@ -50,8 +50,6 @@ impl Default for Entity {
         Self::new()
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

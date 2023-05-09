@@ -14,14 +14,14 @@ mod crawler;
 mod database;
 /// 日誌
 pub mod logging;
+/// nosql
+pub mod nosql;
 /// 提醒類
 mod reminder;
 /// 工作排程
 pub mod scheduler;
 /// 工具類
 pub mod util;
-/// nosql
-pub mod nosql;
 
 /// 交易所
 #[derive(Debug, Copy, Clone)]

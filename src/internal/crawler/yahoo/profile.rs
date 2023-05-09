@@ -1,17 +1,11 @@
-use crate::{
-    internal::{
-        util,
-        logging
-    }
-};
+use crate::internal::crawler::yahoo::HOST;
+use crate::internal::{logging, util};
 use anyhow::*;
 use core::result::Result::Ok;
 use regex::Regex;
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FinancialStatement {
@@ -64,11 +58,11 @@ impl FinancialStatement {
 
 /// 將未下市每股淨值為零的股票試著到yahoo 抓取數據後更新回 stocks表
 pub async fn visit(stock_symbol: &str) -> Result<FinancialStatement> {
-    let url = format!("https://tw.stock.yahoo.com/quote/{}/profile", stock_symbol);
+    let url = format!("https://{}/quote/{}/profile", HOST, stock_symbol);
 
     logging::info_file_async(format!("visit url:{}", url,));
 
-    let text = util::http::request_get(&url).await?;
+    let text = util::http::request_get(&url, None).await?;
     let document = Html::parse_document(text.as_str());
     let selector = match Selector::parse("#main-2-QuoteProfile-Proxy > div > section:nth-child(3)")
     {
@@ -104,12 +98,17 @@ pub async fn visit(stock_symbol: &str) -> Result<FinancialStatement> {
         ];
 
         for (css_index, field) in fields {
-            *field = element_value_to_decimal(&element, &css_selector(css_base, css_index));
+            *field = util::http::parse::element_value_to_decimal(
+                &element,
+                &css_selector(css_base, css_index),
+            );
         }
 
         // 每股稅後淨利
-        e.earnings_per_share =
-            element_value_to_decimal(&element, "div:nth-child(4) > div:nth-child(3) > div > div");
+        e.earnings_per_share = util::http::parse::element_value_to_decimal(
+            &element,
+            "div:nth-child(4) > div:nth-child(3) > div > div",
+        );
     }
 
     Ok(e)
@@ -117,16 +116,6 @@ pub async fn visit(stock_symbol: &str) -> Result<FinancialStatement> {
 
 fn css_selector(base: &str, child: u32) -> String {
     format!("{}({}) > div > div", base, child)
-}
-
-/// 解析完元素的值後將其轉成 decimal
-fn element_value_to_decimal(element: &scraper::ElementRef, css_selector: &str) -> Decimal {
-    util::http::parse::element_value(element, css_selector)
-        .and_then(|v| {
-            let value = v.replace(&['元', '%', ' '][..], "");
-            Decimal::from_str(&value).ok()
-        })
-        .unwrap_or(dec!(0))
 }
 
 #[cfg(test)]
@@ -137,17 +126,17 @@ mod tests {
     #[tokio::test]
     async fn test_visit() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 visit".to_string());
+        logging::debug_file_async("開始 visit".to_string());
 
         match visit("2330").await {
             Ok(e) => {
                 println!("{:#?}", e);
             }
             Err(why) => {
-                logging::error_file_async(format!("Failed to visit because {:?}", why));
+                logging::debug_file_async(format!("Failed to visit because {:?}", why));
             }
         }
 
-        logging::info_file_async("結束 visit".to_string());
+        logging::debug_file_async("結束 visit".to_string());
     }
 }

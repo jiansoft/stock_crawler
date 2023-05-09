@@ -1,8 +1,4 @@
-use crate::{internal::{
-    database::DB,
-    util::datetime,
-    StockExchange
-}};
+use crate::internal::{database::DB, util::datetime, StockExchange};
 use anyhow::*;
 use chrono::{DateTime, Local, NaiveDate};
 use core::result::Result::Ok;

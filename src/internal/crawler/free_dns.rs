@@ -10,7 +10,7 @@ pub async fn update() {
         config::SETTINGS.afraid.token
     );
 
-    match util::http::request_get(&url).await {
+    match util::http::request_get(&url, None).await {
         Ok(t) => {
             if t.contains("Updated") {
                 logging::info_file_async(t);

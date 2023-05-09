@@ -1,4 +1,7 @@
+use crate::internal::util::text;
 use core::result::Result::Ok;
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use scraper::Selector;
 
 /// Extracts the text value of an element selected by a given CSS selector.
@@ -34,4 +37,40 @@ pub fn element_value(element: &scraper::ElementRef, css_selector: &str) -> Optio
             .map(|v| v.text().collect::<String>()),
         Err(_) => None,
     }
+}
+
+/// Extracts the value of the specified CSS selector from an HTML element and converts it to a `Decimal`.
+///
+/// This function is particularly useful for extracting numerical values from web pages.
+///
+/// # Arguments
+///
+/// * `element`: A reference to an `scraper::ElementRef` containing the HTML element to extract the value from.
+/// * `css_selector`: A string representing the CSS selector to use for extracting the value from the HTML element.
+///
+/// # Returns
+///
+/// * `Decimal`: The extracted value as a `Decimal`. If the value cannot be parsed as a `Decimal`, or if the CSS selector is not found, it returns 0.
+///
+/// # Example
+///
+/// ```
+/// use scraper::{Html, Selector};
+/// use rust_decimal::Decimal;
+///
+/// let html = r#"
+/// <div class="price">100.50元</div>
+/// "#;
+///
+/// let fragment = Html::parse_fragment(html);
+/// let price_selector = Selector::parse(".price").unwrap();
+/// let element = fragment.select(&price_selector).next().unwrap();
+///
+/// let price = element_value_to_decimal(&element, ".price");
+/// assert_eq!(price, Decimal::from_str("100.50").unwrap());
+/// ```
+pub fn element_value_to_decimal(element: &scraper::ElementRef, css_selector: &str) -> Decimal {
+    element_value(element, css_selector)
+        .and_then(|v| text::parse_decimal(&v, Some(vec!['元', '%', ' ', ','])).ok())
+        .unwrap_or(dec!(0))
 }

@@ -1,7 +1,6 @@
 /*#[macro_use]
 extern crate rocket;*/
 
-
 pub mod internal;
 
 use crate::internal::{cache, nosql, scheduler};

@@ -1,12 +1,6 @@
 //use futures::executor::block_on;
 use crate::internal::{
-    database::{
-        model,
-        model::index,
-        model::last_daily_quotes,
-        model::revenue,
-        model::stock
-    },
+    database::model::{self, index, last_daily_quotes, revenue, stock},
     logging,
 };
 use once_cell::sync::Lazy;

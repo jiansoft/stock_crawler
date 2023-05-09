@@ -1,10 +1,7 @@
 use crate::internal::{
     cache::{TtlCacheInner, SHARE, TTL},
     crawler::{tpex, twse},
-    database::{model::{
-        self,
-        daily_quote
-    }},
+    database::model::{self, daily_quote},
     logging,
 };
 use anyhow::*;
@@ -14,7 +11,6 @@ use std::time::Duration;
 
 /// 調用  twse API 取得台股收盤報價
 pub async fn execute() -> Result<()> {
-    logging::info_file_async("取得台股收盤報價開始".to_string());
     let now = Local::now();
     let mut results: Vec<daily_quote::Entity> = Vec::with_capacity(2048);
 
@@ -32,8 +28,6 @@ pub async fn execute() -> Result<()> {
 
     let tasks: Vec<_> = results.into_iter().map(process_item).collect();
     futures::future::join_all(tasks).await;
-
-    logging::info_file_async("取得台股收盤報價結束".to_string());
 
     if results_is_empty {
         return Ok(());

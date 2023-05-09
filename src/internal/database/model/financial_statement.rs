@@ -1,9 +1,4 @@
-use crate::{
-    internal::{
-        crawler::yahoo,
-        database::DB
-    }
-};
+use crate::internal::{crawler::yahoo, database::DB};
 use anyhow::*;
 use chrono::{DateTime, Local};
 use core::result::Result::Ok;
