@@ -1,6 +1,5 @@
-use crate::internal::crawler::yahoo;
 use crate::internal::{
-    crawler::goodinfo,
+    crawler::{goodinfo, yahoo},
     database::model::{self, dividend},
     logging,
 };
@@ -15,9 +14,35 @@ pub async fn execute() -> Result<()> {
     //尚未有股利或多次配息
     let now = Local::now();
     let year = now.year();
-    let without_or_multiple = process_without_or_multiple(year);
-    let yahoo = process_yahoo(year);
-    tokio::try_join!(without_or_multiple, yahoo)?;
+    let without_or_multiple = processing_without_or_multiple(year);
+    let yahoo = processing_with_unannounced_ex_dividend_dates(year);
+    let (res_without_or_multiple, res_yahoo) = tokio::join!(without_or_multiple, yahoo);
+
+    match res_without_or_multiple {
+        Ok(_) => {
+            logging::info_file_async(
+                "processing_without_or_multiple executed successfully.".to_string(),
+            );
+        }
+        Err(why) => {
+            logging::debug_file_async(format!(
+                "Failed to process_without_or_multiple because {:?}",
+                why
+            ));
+        }
+    }
+
+    match res_yahoo {
+        Ok(_) => {
+            logging::info_file_async(
+                "processing_with_unannounced_ex_dividend_dates executed successfully.".to_string(),
+            );
+        }
+        Err(why) => {
+            logging::debug_file_async(format!("Failed to process_yahoo because {:?}", why));
+        }
+    }
+
     Ok(())
 }
 
@@ -43,7 +68,7 @@ pub async fn execute() -> Result<()> {
 /// - It fails to fetch the list of stock symbols.
 /// - It fails to visit the dividend information of a stock symbol.
 /// - It fails to upsert a dividend entity.
-async fn process_without_or_multiple(year: i32) -> Result<()> {
+async fn processing_without_or_multiple(year: i32) -> Result<()> {
     //尚未有股利或多次配息
     let stock_symbols = dividend::fetch_without_or_multiple(year).await?;
     for stock_symbol in stock_symbols {
@@ -73,7 +98,7 @@ async fn process_without_or_multiple(year: i32) -> Result<()> {
     Ok(())
 }
 
-async fn process_yahoo(year: i32) -> Result<()> {
+async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     //除息日 尚未公布
     let dividends = dividend::fetch_unannounced_date(year).await?;
     for mut dividend in dividends {
@@ -158,7 +183,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
 
-        match process_yahoo(2023).await {
+        match processing_with_unannounced_ex_dividend_dates(2023).await {
             Ok(_) => {
                 logging::debug_file_async("execute executed successfully.".to_string());
             }

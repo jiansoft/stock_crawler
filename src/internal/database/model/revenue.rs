@@ -137,49 +137,59 @@ impl From<Vec<String>> for Entity {
         */
         e.monthly =
             Decimal::from_str(item[2].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
-                eprintln!("Failed to parse 'monthly' field: {}", err);
+                eprintln!("Failed to parse 'monthly'({}) field: {}", item[2], err);
                 Default::default()
             });
         e.last_month =
             Decimal::from_str(item[3].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
-                eprintln!("Failed to parse 'last_month' field: {}", err);
+                eprintln!("Failed to parse 'last_month'({}) field: {}", item[3], err);
                 Default::default()
             });
         e.last_year_this_month = Decimal::from_str(item[4].replace([',', ' '], "").as_str())
             .unwrap_or_else(|err| {
-                eprintln!("Failed to parse 'last_year_this_month' field: {}", err);
+                eprintln!(
+                    "Failed to parse 'last_year_this_month'({}) field: {}",
+                    item[4], err
+                );
                 Default::default()
             });
         e.monthly_accumulated = Decimal::from_str(item[7].replace([',', ' '], "").as_str())
             .unwrap_or_else(|err| {
-                eprintln!("Failed to parse 'monthly_accumulated' field: {}", err);
+                eprintln!(
+                    "Failed to parse 'monthly_accumulated'({}) field: {}",
+                    item[7], err
+                );
                 Default::default()
             });
         e.last_year_monthly_accumulated =
             Decimal::from_str(item[8].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
                 eprintln!(
-                    "Failed to parse 'last_year_monthly_accumulated' field: {}",
-                    err
+                    "Failed to parse 'last_year_monthly_accumulated'({}) field: {}",
+                    item[8], err
                 );
                 Default::default()
             });
         e.compared_with_last_month = Decimal::from_str(item[5].replace([',', ' '], "").as_str())
             .unwrap_or_else(|err| {
-                eprintln!("Failed to parse 'compared_with_last_month' field: {}", err);
+                eprintln!(
+                    "Failed to parse 'compared_with_last_month'({}) field: {}",
+                    item[5], err
+                );
                 Default::default()
             });
         e.compared_with_last_year_same_month =
             Decimal::from_str(item[6].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
                 eprintln!(
-                    "Failed to parse 'compared_with_last_year_same_month' field: {}",
-                    err
+                    "Failed to parse 'compared_with_last_year_same_month'({}) field: {}",
+                    item[6], err
                 );
                 Default::default()
             });
         e.accumulated_compared_with_last_year =
             Decimal::from_str(item[9].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
                 eprintln!(
-                    "Failed to parse 'accumulated_compared_with_last_year' field: {}",
+                    "Failed to parse 'accumulated_compared_with_last_year'({}) field: {}",
+                    item[9],
                     err
                 );
                 Default::default()
@@ -305,6 +315,8 @@ mod tests {
     //use crate::internal::database::model::revenue;
 
     use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
     //use chrono::{Datelike, Local, NaiveDate};
     use crate::internal::database::model::revenue::{
         fetch_last_two_month, rebuild_revenue_last_date,
@@ -360,6 +372,11 @@ mod tests {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 fetch_last_two_month".to_string());
 
+        let m = Decimal::from_str("0.00".replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
+            eprintln!("Failed to parse 'compared_with_last_month' field: {}", err);
+            Default::default()
+        });
+        println!("m={}", m);
         match fetch_last_two_month().await {
             Ok(result) => {
                 for e in result {

@@ -4,6 +4,8 @@ use encoding::{DecoderTrap, Encoding};
 use rust_decimal::Decimal;
 use std::{collections::HashSet, str::FromStr};
 
+const DECIMAL_ESCAPE_CHAR: &[char] = &['%', ' ', ','];
+
 #[allow(dead_code)]
 pub fn big5_to_utf8(text: &str) -> Result<String> {
     let text_to_char = text.chars();
@@ -105,7 +107,7 @@ pub fn split_v1(w: &str) -> Vec<String> {
 /// ```
 pub fn parse_decimal(s: &str, escape_char: Option<Vec<char>>) -> Result<Decimal> {
     let t = match escape_char {
-        None => s.to_string(),
+        None => s.replace(DECIMAL_ESCAPE_CHAR, ""),
         Some(ec) => s.replace(&ec[..], ""),
     };
 
