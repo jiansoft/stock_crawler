@@ -67,11 +67,6 @@ pub async fn start() {
             )
             .await;
             logging::info_file_async("更新台股每股淨值結束".to_string());
-
-            //資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
-            logging::info_file_async("更新台股年度股利開始".to_string());
-            log_result(BACKFILL_DIVIDEND, backfill::dividend::execute().await).await;
-            logging::info_file_async("更新台股年度股利結束".to_string());
         });
 
     //每日五點更新台股台股國際證券識別碼
@@ -137,6 +132,16 @@ pub async fn start() {
     scheduler.every(60.seconds()).run(|| async {
         crawler::free_dns::update().await;
     });
+
+    scheduler
+        .every(Interval::Days(1))
+        .at("21:00:00")
+        .run(|| async {
+            //資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
+            logging::info_file_async("更新台股年度股利開始".to_string());
+            log_result(BACKFILL_DIVIDEND, backfill::dividend::execute().await).await;
+            logging::info_file_async("更新台股年度股利結束".to_string());
+        });
 
     tokio::spawn(async move {
         loop {

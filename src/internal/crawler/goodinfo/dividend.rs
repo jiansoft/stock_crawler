@@ -1,4 +1,8 @@
-use crate::internal::{crawler::goodinfo::HOST, logging, util::http, util::text};
+use crate::internal::{
+    crawler::goodinfo::HOST,
+    logging,
+    util::{http, text},
+};
 use anyhow::*;
 use core::result::Result::Ok;
 use regex::Regex;
@@ -6,6 +10,9 @@ use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+const UNSET_DATE: &str = "-";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Dividend {
@@ -39,6 +46,15 @@ pub struct Dividend {
     pub quarter: String,
     /// 發放年度 (Year)
     pub year: i32,
+
+    /// 除息日
+    pub ex_dividend_date1: String,
+    /// 除權日
+    pub ex_dividend_date2: String,
+    /// 現金股利發放日
+    pub payable_date1: String,
+    /// 股票股利發放日
+    pub payable_date2: String,
 }
 
 impl Dividend {
@@ -52,6 +68,10 @@ impl Dividend {
             earnings_stock_dividend: Default::default(),
             capital_reserve_stock_dividend: Default::default(),
             year: 0,
+            ex_dividend_date1: "尚未公布".to_string(),
+            ex_dividend_date2: "尚未公布".to_string(),
+            payable_date1: "尚未公布".to_string(),
+            payable_date2: "尚未公布".to_string(),
             sum: Default::default(),
             earnings_per_share: Default::default(),
             payout_ratio_cash: Default::default(),
@@ -64,19 +84,18 @@ impl Dividend {
 }
 
 /// 抓取年度股利資料
-pub async fn visit(stock_symbol: &str) -> Result<Vec<Dividend>> {
+pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<Dividend>>> {
     let url = format!(
         "https://{}/tw/StockDividendPolicy.asp?STOCK_ID={}",
         HOST, stock_symbol
     );
 
-    logging::info_file_async(format!("visit url:{}", url,));
-
+    let ua = http::user_agent::gen_random_ua();
+    logging::info_file_async(format!("visit url:{} {}", url, ua));
     let mut headers = HeaderMap::new();
     headers.insert("Host", HOST.parse()?);
     headers.insert("Referer", url.parse()?);
-    headers.insert("X-Requested-With", "XMLHttpRequest".parse()?);
-    headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.5615.50 Safari/537.36".parse()?);
+    headers.insert("User-Agent", ua.parse()?);
 
     let text = http::request_get(&url, Some(headers)).await?;
     if text.contains("您的瀏覽量異常") {
@@ -148,9 +167,42 @@ pub async fn visit(stock_symbol: &str) -> Result<Vec<Dividend>> {
                 http::parse::element_value_to_decimal(&element, "td:nth-child(23)");
             e.payout_ratio = http::parse::element_value_to_decimal(&element, "td:nth-child(24)");
 
+            if e.cash_dividend.is_zero() && e.stock_dividend.is_zero() && e.sum.is_zero() {
+                return None;
+            }
+
             Some(Ok(e))
         })
         .collect();
+
+    let result: Result<HashMap<i32, Vec<Dividend>>, _> = result.map(|dividends| {
+        let mut hashmap = HashMap::new();
+        for dividend in dividends {
+            hashmap
+                .entry(dividend.year)
+                .or_insert_with(Vec::new)
+                .push(dividend);
+        }
+
+        for dividends in hashmap.values_mut() {
+            if dividends.len() == 1 {
+                continue;
+            }
+
+            for dividend in dividends {
+                if !dividend.quarter.is_empty() {
+                    continue;
+                }
+
+                dividend.ex_dividend_date1 = UNSET_DATE.to_string();
+                dividend.ex_dividend_date2 = UNSET_DATE.to_string();
+                dividend.payable_date1 = UNSET_DATE.to_string();
+                dividend.payable_date2 = UNSET_DATE.to_string();
+            }
+        }
+
+        hashmap
+    });
 
     result
 }
@@ -165,7 +217,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("6613").await {
+        match visit("2330").await {
             Ok(e) => {
                 logging::debug_file_async(format!("dividend : {:#?}", e));
             }

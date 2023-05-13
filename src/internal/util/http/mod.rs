@@ -1,4 +1,5 @@
 pub mod parse;
+pub mod user_agent;
 
 use crate::internal::util;
 use anyhow::*;

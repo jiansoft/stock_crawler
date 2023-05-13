@@ -29,7 +29,10 @@ async fn build_headers() -> HeaderMap {
             .unwrap(),
     );
     h.insert("X-Requested-With", "XMLHttpRequest".parse().unwrap());
-    h.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.5615.50 Safari/537.36".parse().unwrap());
+    h.insert(
+        "User-Agent",
+        http::user_agent::gen_random_ua().parse().unwrap(),
+    );
     h
 }
 

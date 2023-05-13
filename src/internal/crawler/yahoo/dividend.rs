@@ -1,6 +1,11 @@
-use crate::internal::crawler::yahoo::HOST;
-use crate::internal::util::http;
-use crate::internal::{logging, util};
+use crate::{
+    internal::{
+        crawler::yahoo::HOST,
+        util::http,
+        logging,
+        util
+    }
+};
 use anyhow::*;
 use core::result::Result::Ok;
 use regex::Regex;
@@ -9,7 +14,9 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Dividend {
+    /// 股票代碼。
     pub stock_symbol: String,
+    /// 股利詳情的對應表，鍵為年份，值為該年份的股利詳情列表。
     pub dividend: HashMap<i32, Vec<Detail>>,
 }
 
@@ -62,7 +69,21 @@ impl Dividend {
     }
 }
 
-/// 從 yahoo 抓取股利的除息日 除權日 現金股利發放日 股票股利發放日 等數據
+/// 從 Yahoo 網站抓取指定股票代碼的股利除息日、除權日、現金股利發放日、股票股利發放日等資訊。
+///
+/// # 參數
+///
+/// * `stock_symbol`: 股票代碼
+///
+/// # 回傳
+///
+/// 返回一個結果，該結果為 `Result<Dividend>` 型態，當抓取成功時返回 `Ok(Dividend)`，
+/// `Dividend` 結構體包含了股票代碼與該股票的所有股利資訊。
+/// 若在抓取過程中發生錯誤，則返回 `Err`。
+///
+/// # 錯誤
+///
+/// 此函數可能因為網路請求失敗、網頁解析失敗或正規表示式解析失敗等原因導致錯誤。
 pub async fn visit(stock_symbol: &str) -> Result<Dividend> {
     let url = format!("https://{}/quote/{}/dividend", HOST, stock_symbol);
 
@@ -79,7 +100,7 @@ pub async fn visit(stock_symbol: &str) -> Result<Dividend> {
         }
     };
 
-    let re = Regex::new(r"(\d+)(Q|H\d)?")?;
+    let re = Regex::new(r"(\d+)(Q\d|H\d)?")?;
     let mut e = Dividend::new(stock_symbol.to_string());
 
     for element in document.select(&selector) {
@@ -131,6 +152,7 @@ pub async fn visit(stock_symbol: &str) -> Result<Dividend> {
     Ok(e)
 }
 
+/// 解析日期，並將年份設定到參數 year 中。
 fn parse_date(date: &Option<String>, year: &mut i32) -> String {
     match date {
         Some(date_str) if !date_str.is_empty() && !date_str.contains('-') => {
@@ -148,6 +170,7 @@ fn parse_date(date: &Option<String>, year: &mut i32) -> String {
     }
 }
 
+/// 解析股利期間，返回股利所屬的年份和季度。
 fn parse_period(period: &Option<String>, re: &Regex) -> Result<(i32, String)> {
     let mut year_of_dividend = 0;
     let mut quarter = String::from("");
@@ -175,9 +198,9 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("5287").await {
+        match visit("2330").await {
             Ok(e) => {
-                println!("{:#?}", e);
+                logging::debug_file_async(format!("e:{:#?}", e));
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because {:?}", why));

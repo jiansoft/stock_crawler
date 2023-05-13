@@ -207,13 +207,13 @@ impl Clone for Entity {
 */
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<goodinfo::dividend::Dividend> for Entity {
-    fn from(d: goodinfo::dividend::Dividend) -> Self {
+impl From<&goodinfo::dividend::Dividend> for Entity {
+    fn from(d: &goodinfo::dividend::Dividend) -> Self {
         let mut e = Entity::new();
-        e.quarter = d.quarter;
+        e.quarter = d.quarter.clone();
         e.year = d.year;
         e.year_of_dividend = d.year_of_dividend;
-        e.security_code = d.stock_symbol;
+        e.security_code = d.stock_symbol.clone();
         e.earnings_cash_dividend = d.earnings_cash_dividend;
         e.capital_reserve_cash_dividend = d.capital_reserve_cash_dividend;
         e.cash_dividend = d.cash_dividend;
@@ -224,10 +224,10 @@ impl From<goodinfo::dividend::Dividend> for Entity {
         e.payout_ratio_cash = d.payout_ratio_cash;
         e.payout_ratio_stock = d.payout_ratio_stock;
         e.payout_ratio = d.payout_ratio;
-        e.ex_dividend_date1 = "尚未公布".to_string();
-        e.ex_dividend_date2 = "尚未公布".to_string();
-        e.payable_date1 = "尚未公布".to_string();
-        e.payable_date2 = "尚未公布".to_string();
+        e.ex_dividend_date1 = d.ex_dividend_date1.clone();
+        e.ex_dividend_date2 = d.ex_dividend_date2.clone();
+        e.payable_date1 = d.payable_date1.clone();
+        e.payable_date2 = d.payable_date2.clone();
         e.created_time = Local::now();
         e.updated_time = Local::now();
         e

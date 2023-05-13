@@ -2,6 +2,7 @@ use crate::internal::{
     crawler::{goodinfo, yahoo},
     database::model::{self, dividend},
     logging,
+    util::datetime::Weekend,
 };
 use anyhow::*;
 use chrono::{Datelike, Local};
@@ -69,11 +70,22 @@ pub async fn execute() -> Result<()> {
 /// - It fails to visit the dividend information of a stock symbol.
 /// - It fails to upsert a dividend entity.
 async fn processing_without_or_multiple(year: i32) -> Result<()> {
+    if Local::now().is_weekend() {
+        return Ok(());
+    }
+
     //尚未有股利或多次配息
     let stock_symbols = dividend::fetch_without_or_multiple(year).await?;
+    logging::info_file_async(format!("殖利率本次需採集 {} 家", stock_symbols.len()));
     for stock_symbol in stock_symbols {
         let dividends = goodinfo::dividend::visit(&stock_symbol).await?;
-        for dividend in dividends {
+        // 取成今年度的股利數據
+        let dividend_details = match dividends.get(&year) {
+            Some(details) => details,
+            None => continue,
+        };
+
+        for dividend in dividend_details {
             if dividend.year != year {
                 continue;
             }
@@ -92,7 +104,7 @@ async fn processing_without_or_multiple(year: i32) -> Result<()> {
             }
         }
 
-        thread::sleep(Duration::from_secs(6));
+        thread::sleep(Duration::from_secs(90));
     }
 
     Ok(())
@@ -101,8 +113,9 @@ async fn processing_without_or_multiple(year: i32) -> Result<()> {
 async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     //除息日 尚未公布
     let dividends = dividend::fetch_unannounced_date(year).await?;
+    logging::info_file_async(format!("除息日本次需採集 {} 家", dividends.len()));
     for mut dividend in dividends {
-        let yahoo_dividend = match yahoo::dividend::visit(&dividend.security_code).await {
+        let yahoo = match yahoo::dividend::visit(&dividend.security_code).await {
             Ok(yahoo_dividend) => yahoo_dividend,
             Err(why) => {
                 logging::error_file_async(format!(
@@ -113,61 +126,39 @@ async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> 
             }
         };
 
-        if let Some(yahoo_dividend_details) = yahoo_dividend.dividend.get(&year) {
-            let yahoo_dividend_detail = yahoo_dividend_details.iter().find(|detail| {
-                detail.year_of_dividend == dividend.year_of_dividend
-                    && detail.quarter == dividend.quarter
-                    && (detail.ex_dividend_date1 != dividend.ex_dividend_date1
-                        || detail.ex_dividend_date2 != dividend.ex_dividend_date2)
-            });
+        // 取成今年度的股利數據
+        let yahoo_dividend_details = match yahoo.dividend.get(&year) {
+            Some(details) => details,
+            None => continue,
+        };
 
-            if let Some(yahoo_dividend_detail) = yahoo_dividend_detail {
-                dividend.ex_dividend_date1 = yahoo_dividend_detail.ex_dividend_date1.to_string();
-                dividend.ex_dividend_date2 = yahoo_dividend_detail.ex_dividend_date2.to_string();
-                dividend.payable_date1 = yahoo_dividend_detail.payable_date1.to_string();
-                dividend.payable_date2 = yahoo_dividend_detail.payable_date2.to_string();
+        let yahoo_dividend_detail = yahoo_dividend_details.iter().find(|detail| {
+            detail.year_of_dividend == dividend.year_of_dividend
+                && detail.quarter == dividend.quarter
+                && (detail.ex_dividend_date1 != dividend.ex_dividend_date1
+                    || detail.ex_dividend_date2 != dividend.ex_dividend_date2)
+        });
 
-                if let Err(why) = dividend.update_dividend_date().await {
-                    logging::error_file_async(format!(
-                        "Failed to update_dividend_date because {:?} ",
-                        why
-                    ));
-                } else {
-                    logging::info_file_async(format!(
-                        "dividend update_dividend_date executed successfully. \r\n{:#?}",
-                        dividend
-                    ));
-                }
+        if let Some(yahoo_dividend_detail) = yahoo_dividend_detail {
+            dividend.ex_dividend_date1 = yahoo_dividend_detail.ex_dividend_date1.to_string();
+            dividend.ex_dividend_date2 = yahoo_dividend_detail.ex_dividend_date2.to_string();
+            dividend.payable_date1 = yahoo_dividend_detail.payable_date1.to_string();
+            dividend.payable_date2 = yahoo_dividend_detail.payable_date2.to_string();
+
+            if let Err(why) = dividend.update_dividend_date().await {
+                logging::error_file_async(format!(
+                    "Failed to update_dividend_date because {:?} ",
+                    why
+                ));
+            } else {
+                logging::info_file_async(format!(
+                    "dividend update_dividend_date executed successfully. \r\n{:#?}",
+                    dividend
+                ));
             }
         }
-        /*if let Some(yahoo_dividend_details) = yahoo_dividend.dividend.get(&year) {
-            for yahoo_dividend_detail in yahoo_dividend_details {
-                if yahoo_dividend_detail.year_of_dividend != dividend.year_of_dividend
-                    || yahoo_dividend_detail.quarter != dividend.quarter
-                {
-                    continue;
-                }
-                dividend.ex_dividend_date1 = yahoo_dividend_detail.ex_dividend_date1.to_string();
-                dividend.ex_dividend_date2 = yahoo_dividend_detail.ex_dividend_date2.to_string();
-                dividend.payable_date1 = yahoo_dividend_detail.payable_date1.to_string();
-                dividend.payable_date2 = yahoo_dividend_detail.payable_date2.to_string();
-                match dividend.update_dividend_date().await {
-                    Ok(_) => {
-                        logging::info_file_async(format!(
-                            "dividend update_dividend_date executed successfully. \r\n{:#?}",
-                            dividend
-                        ));
-                    }
-                    Err(why) => {
-                        logging::error_file_async(format!(
-                            "Failed to update_dividend_date because {:?} ",
-                            why
-                        ));
-                    }
-                }
-            }
-        }*/
     }
+
     Ok(())
 }
 
@@ -178,20 +169,49 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_execute() {
+    async fn test_processing_with_unannounced_ex_dividend_dates() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        logging::debug_file_async("開始 processing_with_unannounced_ex_dividend_dates".to_string());
 
         match processing_with_unannounced_ex_dividend_dates(2023).await {
             Ok(_) => {
-                logging::debug_file_async("execute executed successfully.".to_string());
+                logging::debug_file_async(
+                    "processing_with_unannounced_ex_dividend_dates executed successfully."
+                        .to_string(),
+                );
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                logging::debug_file_async(format!(
+                    "Failed to processing_with_unannounced_ex_dividend_dates because {:?}",
+                    why
+                ));
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        logging::debug_file_async("結束 processing_with_unannounced_ex_dividend_dates".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_processing_without_or_multiple() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+        logging::debug_file_async("開始 processing_without_or_multiple".to_string());
+
+        match processing_without_or_multiple(2023).await {
+            Ok(_) => {
+                logging::debug_file_async(
+                    "processing_without_or_multiple executed successfully.".to_string(),
+                );
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to processing_without_or_multiple because {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 processing_without_or_multiple".to_string());
     }
 }
