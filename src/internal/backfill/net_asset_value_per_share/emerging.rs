@@ -1,7 +1,6 @@
-use crate::{
-    internal::backfill::net_asset_value_per_share::update, internal::cache::SHARE,
-    internal::crawler::tpex, internal::database::model, internal::logging,
-    internal::util::datetime::Weekend,
+use crate::internal::{
+    backfill::net_asset_value_per_share::update, cache::SHARE, crawler::tpex, database::model,
+    logging, util::datetime::Weekend,
 };
 use anyhow::*;
 use chrono::Local;

@@ -207,18 +207,18 @@ impl Clone for Entity {
 */
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<&goodinfo::dividend::Dividend> for Entity {
-    fn from(d: &goodinfo::dividend::Dividend) -> Self {
+impl From<&goodinfo::dividend::GoodInfoDividend> for Entity {
+    fn from(d: &goodinfo::dividend::GoodInfoDividend) -> Self {
         let mut e = Entity::new();
         e.quarter = d.quarter.clone();
         e.year = d.year;
         e.year_of_dividend = d.year_of_dividend;
         e.security_code = d.stock_symbol.clone();
-        e.earnings_cash_dividend = d.earnings_cash_dividend;
-        e.capital_reserve_cash_dividend = d.capital_reserve_cash_dividend;
+        e.earnings_cash_dividend = d.earnings_cash;
+        e.capital_reserve_cash_dividend = d.capital_reserve_cash;
         e.cash_dividend = d.cash_dividend;
-        e.earnings_stock_dividend = d.earnings_stock_dividend;
-        e.capital_reserve_stock_dividend = d.capital_reserve_stock_dividend;
+        e.earnings_stock_dividend = d.earnings_stock;
+        e.capital_reserve_stock_dividend = d.capital_reserve_stock;
         e.stock_dividend = d.stock_dividend;
         e.sum = d.sum;
         e.payout_ratio_cash = d.payout_ratio_cash;

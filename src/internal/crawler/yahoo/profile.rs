@@ -1,5 +1,11 @@
-use crate::internal::crawler::yahoo::HOST;
-use crate::internal::{logging, util};
+use crate::{
+    internal::{
+        crawler::yahoo::HOST,
+        util::http::element,
+        logging,
+        util
+    }
+};
 use anyhow::*;
 use core::result::Result::Ok;
 use regex::Regex;
@@ -8,7 +14,7 @@ use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct FinancialStatement {
+pub struct Profile {
     /// 季度 Q4 Q3 Q2 Q1
     pub quarter: String,
     pub security_code: String,
@@ -36,9 +42,9 @@ pub struct FinancialStatement {
     pub year: i32,
 }
 
-impl FinancialStatement {
+impl Profile {
     pub fn new(security_code: String) -> Self {
-        FinancialStatement {
+        Profile {
             quarter: "".to_string(),
             security_code,
             gross_profit: Default::default(),
@@ -57,7 +63,7 @@ impl FinancialStatement {
 }
 
 /// 將未下市每股淨值為零的股票試著到yahoo 抓取數據後更新回 stocks表
-pub async fn visit(stock_symbol: &str) -> Result<FinancialStatement> {
+pub async fn visit(stock_symbol: &str) -> Result<Profile> {
     let url = format!("https://{}/quote/{}/profile", HOST, stock_symbol);
 
     logging::info_file_async(format!("visit url:{}", url,));
@@ -71,12 +77,11 @@ pub async fn visit(stock_symbol: &str) -> Result<FinancialStatement> {
             return Err(anyhow!("Failed to Selector::parse because: {:?}", why));
         }
     };
-    let mut e = FinancialStatement::new(stock_symbol.to_string());
+    let mut e = Profile::new(stock_symbol.to_string());
     let css_base = "div.table-grid.Mb\\(20px\\).row-fit-half > div:nth-child";
 
     for element in document.select(&selector) {
-        let year_and_quarter =
-            util::http::parse::element_value(&element, "div:nth-child(2).D\\(f\\)");
+        let year_and_quarter = element::parse_value(&element, "div:nth-child(2).D\\(f\\)");
         if let Some(year_and_quarter_text) = year_and_quarter {
             let reg_quarter = Regex::new(r"(?i)q\d")?;
             if let Some(quarter_match) = reg_quarter.find(year_and_quarter_text.as_str()) {
@@ -98,17 +103,12 @@ pub async fn visit(stock_symbol: &str) -> Result<FinancialStatement> {
         ];
 
         for (css_index, field) in fields {
-            *field = util::http::parse::element_value_to_decimal(
-                &element,
-                &css_selector(css_base, css_index),
-            );
+            *field = element::parse_to_decimal(&element, &css_selector(css_base, css_index));
         }
 
         // 每股稅後淨利
-        e.earnings_per_share = util::http::parse::element_value_to_decimal(
-            &element,
-            "div:nth-child(4) > div:nth-child(3) > div > div",
-        );
+        e.earnings_per_share =
+            element::parse_to_decimal(&element, "div:nth-child(4) > div:nth-child(3) > div > div");
     }
 
     Ok(e)
@@ -130,7 +130,7 @@ mod tests {
 
         match visit("2330").await {
             Ok(e) => {
-                println!("{:#?}", e);
+                logging::debug_file_async(format!("{:#?}",  e));
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because {:?}", why));

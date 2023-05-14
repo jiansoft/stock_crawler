@@ -7,7 +7,7 @@ use crate::internal::{
     logging, util,
 };
 use anyhow::{anyhow, Context, Result};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Datelike, Duration, Local};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
@@ -46,6 +46,44 @@ impl Entity {
     /// 是否為臺灣存託憑證
     pub fn is_tdr(&self) -> bool {
         self.name.contains("-DR")
+    }
+
+    /// 更新個股最新一季與近四季的EPS
+    pub async fn update_last_eps() -> Result<PgQueryResult> {
+        let sql = r#"
+with eps_data as (
+	select row_number() OVER (PARTITION BY security_code order by year desc,quarter desc) AS row_number, serial
+	from financial_statement
+	where year in ($1,$2) and quarter in ('Q1', 'Q2', 'Q3', 'Q4')
+),
+eps_row as (
+	select row_number, fs.security_code, fs.earnings_per_share
+	from financial_statement fs
+	inner join eps_data on fs.serial = eps_data.serial
+),
+last_one_eps as (select security_code, earnings_per_share from eps_row where row_number = 1),
+last_four_eps as (
+	select eps_row.security_code, sum(eps_row.earnings_per_share) as eps
+	from eps_row
+	where eps_row.row_number in (1, 2, 3, 4)
+	group by eps_row.security_code
+),
+eps as (
+	select last_four_eps.security_code, eps as last_four_eps, last_one_eps.earnings_per_share as last_one_eps
+	from last_four_eps
+	inner join last_one_eps on last_four_eps.security_code = last_one_eps.security_code
+)
+update stocks Set last_four_eps = eps.last_four_eps,last_one_eps = eps.last_one_eps
+FROM eps
+where eps.security_code = stocks.stock_symbol;
+"#;
+        let now = Local::now();
+        let one_year_ago = now - Duration::days(365);
+        Ok(sqlx::query(sql)
+            .bind(now.year())
+            .bind(one_year_ago.year())
+            .execute(&DB.pool)
+            .await?)
     }
 
     /// 更新個股的每股淨值
@@ -281,7 +319,7 @@ WHERE stock_exchange_market_id in (2, 4)
     Ok(sqlx::query_as::<_, Entity>(sql).fetch_all(&DB.pool).await?)
 }
 
-/// 取得尚未有指定年度的季報的股票
+/// 取得尚未有指定年度的季報的股票或者財報的每股淨值為零的股票
 pub async fn fetch_stocks_without_financial_statement(
     year: i32,
     quarter: &str,
@@ -298,11 +336,19 @@ SELECT
 FROM stocks AS s
 WHERE stock_exchange_market_id in(2, 4)
     AND s."SuspendListing" = false
-    AND NOT EXISTS (
+    AND
+(
+    NOT EXISTS (
         SELECT 1
         FROM financial_statement f
         WHERE f.security_code = s.stock_symbol AND f.year = $1 AND f.quarter = $2
     )
+    OR EXISTS (
+        SELECT 1
+        FROM financial_statement f
+        WHERE f.security_code = s.stock_symbol AND f.year = $1 AND f.quarter = $2 and f.net_asset_value_per_share = 0
+    )
+)
 "#;
 
     Ok(sqlx::query_as::<_, Entity>(sql)

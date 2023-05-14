@@ -189,8 +189,7 @@ impl From<Vec<String>> for Entity {
             Decimal::from_str(item[9].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
                 eprintln!(
                     "Failed to parse 'accumulated_compared_with_last_year'({}) field: {}",
-                    item[9],
-                    err
+                    item[9], err
                 );
                 Default::default()
             });

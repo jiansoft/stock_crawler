@@ -105,8 +105,8 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<yahoo::profile::FinancialStatement> for Entity {
-    fn from(fs: yahoo::profile::FinancialStatement) -> Self {
+impl From<yahoo::profile::Profile> for Entity {
+    fn from(fs: yahoo::profile::Profile) -> Self {
         let mut e = Entity::new(fs.security_code);
         e.updated_time = Local::now();
         e.created_time = Local::now();

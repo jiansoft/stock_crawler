@@ -26,7 +26,7 @@ pub async fn execute() -> Result<()> {
             );
         }
         Err(why) => {
-            logging::debug_file_async(format!(
+            logging::error_file_async(format!(
                 "Failed to process_without_or_multiple because {:?}",
                 why
             ));
@@ -40,7 +40,7 @@ pub async fn execute() -> Result<()> {
             );
         }
         Err(why) => {
-            logging::debug_file_async(format!("Failed to process_yahoo because {:?}", why));
+            logging::error_file_async(format!("Failed to process_yahoo because {:?}", why));
         }
     }
 
@@ -114,8 +114,8 @@ async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> 
     //除息日 尚未公布
     let dividends = dividend::fetch_unannounced_date(year).await?;
     logging::info_file_async(format!("除息日本次需採集 {} 家", dividends.len()));
-    for mut dividend in dividends {
-        let yahoo = match yahoo::dividend::visit(&dividend.security_code).await {
+    for mut entity in dividends {
+        let yahoo = match yahoo::dividend::visit(&entity.security_code).await {
             Ok(yahoo_dividend) => yahoo_dividend,
             Err(why) => {
                 logging::error_file_async(format!(
@@ -133,19 +133,19 @@ async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> 
         };
 
         let yahoo_dividend_detail = yahoo_dividend_details.iter().find(|detail| {
-            detail.year_of_dividend == dividend.year_of_dividend
-                && detail.quarter == dividend.quarter
-                && (detail.ex_dividend_date1 != dividend.ex_dividend_date1
-                    || detail.ex_dividend_date2 != dividend.ex_dividend_date2)
+            detail.year_of_dividend == entity.year_of_dividend
+                && detail.quarter == entity.quarter
+                && (detail.ex_dividend_date1 != entity.ex_dividend_date1
+                    || detail.ex_dividend_date2 != entity.ex_dividend_date2)
         });
 
         if let Some(yahoo_dividend_detail) = yahoo_dividend_detail {
-            dividend.ex_dividend_date1 = yahoo_dividend_detail.ex_dividend_date1.to_string();
-            dividend.ex_dividend_date2 = yahoo_dividend_detail.ex_dividend_date2.to_string();
-            dividend.payable_date1 = yahoo_dividend_detail.payable_date1.to_string();
-            dividend.payable_date2 = yahoo_dividend_detail.payable_date2.to_string();
+            entity.ex_dividend_date1 = yahoo_dividend_detail.ex_dividend_date1.to_string();
+            entity.ex_dividend_date2 = yahoo_dividend_detail.ex_dividend_date2.to_string();
+            entity.payable_date1 = yahoo_dividend_detail.payable_date1.to_string();
+            entity.payable_date2 = yahoo_dividend_detail.payable_date2.to_string();
 
-            if let Err(why) = dividend.update_dividend_date().await {
+            if let Err(why) = entity.update_dividend_date().await {
                 logging::error_file_async(format!(
                     "Failed to update_dividend_date because {:?} ",
                     why
@@ -153,7 +153,7 @@ async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> 
             } else {
                 logging::info_file_async(format!(
                     "dividend update_dividend_date executed successfully. \r\n{:#?}",
-                    dividend
+                    entity
                 ));
             }
         }

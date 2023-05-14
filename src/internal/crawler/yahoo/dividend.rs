@@ -1,11 +1,4 @@
-use crate::{
-    internal::{
-        crawler::yahoo::HOST,
-        util::http,
-        logging,
-        util
-    }
-};
+use crate::internal::{crawler::yahoo::HOST, logging, util::http};
 use anyhow::*;
 use core::result::Result::Ok;
 use regex::Regex;
@@ -13,15 +6,15 @@ use scraper::{Html, Selector};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
-pub struct Dividend {
+pub struct YahooDividend {
     /// 股票代碼。
     pub stock_symbol: String,
     /// 股利詳情的對應表，鍵為年份，值為該年份的股利詳情列表。
-    pub dividend: HashMap<i32, Vec<Detail>>,
+    pub dividend: HashMap<i32, Vec<YahooDividendDetail>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Detail {
+pub struct YahooDividendDetail {
     /// 發放年度
     pub year: i32,
     /// 股利所屬年度
@@ -38,7 +31,7 @@ pub struct Detail {
     pub payable_date2: String,
 }
 
-impl Detail {
+impl YahooDividendDetail {
     pub fn new(
         year: i32,
         year_of_dividend: i32,
@@ -48,7 +41,7 @@ impl Detail {
         payable_date1: String,
         payable_date2: String,
     ) -> Self {
-        Detail {
+        YahooDividendDetail {
             year,
             year_of_dividend,
             quarter,
@@ -60,9 +53,9 @@ impl Detail {
     }
 }
 
-impl Dividend {
+impl YahooDividend {
     pub fn new(stock_symbol: String) -> Self {
-        Dividend {
+        YahooDividend {
             stock_symbol,
             dividend: Default::default(),
         }
@@ -84,12 +77,12 @@ impl Dividend {
 /// # 錯誤
 ///
 /// 此函數可能因為網路請求失敗、網頁解析失敗或正規表示式解析失敗等原因導致錯誤。
-pub async fn visit(stock_symbol: &str) -> Result<Dividend> {
+pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     let url = format!("https://{}/quote/{}/dividend", HOST, stock_symbol);
 
     logging::info_file_async(format!("visit url:{}", url,));
 
-    let text = util::http::request_get(&url, None).await?;
+    let text = http::request_get(&url, None).await?;
     let document = Html::parse_document(text.as_str());
     let selector = match Selector::parse(
         "#main-2-QuoteDividend-Proxy > div > section > div > div > div > div > ul > li",
@@ -101,16 +94,16 @@ pub async fn visit(stock_symbol: &str) -> Result<Dividend> {
     };
 
     let re = Regex::new(r"(\d+)(Q\d|H\d)?")?;
-    let mut e = Dividend::new(stock_symbol.to_string());
+    let mut e = YahooDividend::new(stock_symbol.to_string());
 
     for element in document.select(&selector) {
-        let dividend_period = http::parse::element_value(&element, "div > div > div");
+        let dividend_period = http::element::parse_value(&element, "div > div > div");
         if dividend_period.is_none() {
             continue;
         }
 
-        let dividend_date1 = http::parse::element_value(&element, "div > div:nth-child(5)");
-        let dividend_date2 = http::parse::element_value(&element, "div > div:nth-child(6)");
+        let dividend_date1 = http::element::parse_value(&element, "div > div:nth-child(5)");
+        let dividend_date2 = http::element::parse_value(&element, "div > div:nth-child(6)");
         if dividend_date1.is_none() && dividend_date2.is_none() {
             continue;
         }
@@ -129,16 +122,16 @@ pub async fn visit(stock_symbol: &str) -> Result<Dividend> {
         //股利所屬期間
         let (year_of_dividend, quarter) = parse_period(&dividend_period, &re)?;
 
-        let payout_date1 = http::parse::element_value(&element, "div > div:nth-child(7)")
+        let payout_date1 = http::element::parse_value(&element, "div > div:nth-child(7)")
             .unwrap_or_default()
             .replace('/', "-");
-        let payout_date2 = http::parse::element_value(&element, "div > div:nth-child(8)")
+        let payout_date2 = http::element::parse_value(&element, "div > div:nth-child(8)")
             .unwrap_or_default()
             .replace('/', "-");
         e.dividend
             .entry(year)
             .or_insert_with(Vec::new)
-            .push(Detail::new(
+            .push(YahooDividendDetail::new(
                 year,
                 year_of_dividend,
                 quarter,

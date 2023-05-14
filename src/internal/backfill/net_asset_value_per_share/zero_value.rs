@@ -1,6 +1,10 @@
 use crate::{
-    internal::backfill::net_asset_value_per_share::update, internal::crawler::yahoo::profile,
-    internal::database::model, internal::logging,
+    internal::{
+        backfill::net_asset_value_per_share::update,
+        crawler::yahoo::profile,
+        database::model,
+        logging
+    }
 };
 use anyhow::*;
 use core::result::Result::Ok;

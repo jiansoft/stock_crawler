@@ -1,7 +1,7 @@
 use crate::internal::{
     crawler::goodinfo::HOST,
     logging,
-    util::{http, text},
+    util::{http, http::element, text},
 };
 use anyhow::*;
 use core::result::Result::Ok;
@@ -15,19 +15,19 @@ use std::collections::HashMap;
 const UNSET_DATE: &str = "-";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Dividend {
+pub struct GoodInfoDividend {
     /// Security code
     pub stock_symbol: String,
     /// 盈餘現金股利 (Cash Dividend)
-    pub earnings_cash_dividend: Decimal,
+    pub earnings_cash: Decimal,
     /// 公積現金股利 (Capital Reserve)
-    pub capital_reserve_cash_dividend: Decimal,
+    pub capital_reserve_cash: Decimal,
     /// 現金股利合計
     pub cash_dividend: Decimal,
     /// 盈餘股票股利 (Stock Dividend)
-    pub earnings_stock_dividend: Decimal,
+    pub earnings_stock: Decimal,
     /// 公積股票股利 (Capital Reserve)
-    pub capital_reserve_stock_dividend: Decimal,
+    pub capital_reserve_stock: Decimal,
     /// 股票股利合計
     pub stock_dividend: Decimal,
     /// 股利合計 (Total Dividends)
@@ -57,16 +57,16 @@ pub struct Dividend {
     pub payable_date2: String,
 }
 
-impl Dividend {
+impl GoodInfoDividend {
     pub fn new(stock_symbol: String) -> Self {
-        Dividend {
+        GoodInfoDividend {
             quarter: "".to_string(),
             stock_symbol,
-            earnings_cash_dividend: Default::default(),
-            capital_reserve_cash_dividend: Default::default(),
+            earnings_cash: Default::default(),
+            capital_reserve_cash: Default::default(),
             cash_dividend: Default::default(),
-            earnings_stock_dividend: Default::default(),
-            capital_reserve_stock_dividend: Default::default(),
+            earnings_stock: Default::default(),
+            capital_reserve_stock: Default::default(),
             year: 0,
             ex_dividend_date1: "尚未公布".to_string(),
             ex_dividend_date2: "尚未公布".to_string(),
@@ -84,7 +84,7 @@ impl Dividend {
 }
 
 /// 抓取年度股利資料
-pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<Dividend>>> {
+pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDividend>>> {
     let url = format!(
         "https://{}/tw/StockDividendPolicy.asp?STOCK_ID={}",
         HOST, stock_symbol
@@ -106,13 +106,13 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<Dividend>>> {
     let selector = Selector::parse("#tblDetail > tbody > tr")
         .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
     let mut year_index: i32 = 0;
-    let result: Result<Vec<Dividend>, _> = document
+    let result: Result<Vec<GoodInfoDividend>, _> = document
         .select(&selector)
         .filter_map(|element| {
             //let tds: Vec<&str> = element.text().map(str::trim).collect();
             //logging::debug_file_async(format!("tds:{:#?}", tds));
-            let mut e = Dividend::new(stock_symbol.to_string());
-            let year_str = http::parse::element_value(&element, "td:nth-child(1)")?;
+            let mut e = GoodInfoDividend::new(stock_symbol.to_string());
+            let year_str = element::parse_value(&element, "td:nth-child(1)")?;
             e.year = match year_str.parse::<i32>() {
                 Ok(y) => {
                     year_index = y;
@@ -120,7 +120,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<Dividend>>> {
                     y
                 }
                 Err(_) => {
-                    let quarter = http::parse::element_value(&element, "td:nth-child(20)")?;
+                    let quarter = element::parse_value(&element, "td:nth-child(20)")?;
 
                     match Regex::new(r"(\d+)([A-Z]\d)") {
                         Ok(re) => match re.captures(&quarter.to_uppercase()) {
@@ -148,24 +148,17 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<Dividend>>> {
                 }
             };
 
-            e.earnings_cash_dividend =
-                http::parse::element_value_to_decimal(&element, "td:nth-child(2)");
-            e.capital_reserve_cash_dividend =
-                http::parse::element_value_to_decimal(&element, "td:nth-child(3)");
-            e.cash_dividend = http::parse::element_value_to_decimal(&element, "td:nth-child(4)");
-            e.earnings_stock_dividend =
-                http::parse::element_value_to_decimal(&element, "td:nth-child(5)");
-            e.capital_reserve_stock_dividend =
-                http::parse::element_value_to_decimal(&element, "td:nth-child(6)");
-            e.stock_dividend = http::parse::element_value_to_decimal(&element, "td:nth-child(7)");
-            e.sum = http::parse::element_value_to_decimal(&element, "td:nth-child(8)");
-            e.earnings_per_share =
-                http::parse::element_value_to_decimal(&element, "td:nth-child(21)");
-            e.payout_ratio_cash =
-                http::parse::element_value_to_decimal(&element, "td:nth-child(22)");
-            e.payout_ratio_stock =
-                http::parse::element_value_to_decimal(&element, "td:nth-child(23)");
-            e.payout_ratio = http::parse::element_value_to_decimal(&element, "td:nth-child(24)");
+            e.earnings_cash = element::parse_to_decimal(&element, "td:nth-child(2)");
+            e.capital_reserve_cash = element::parse_to_decimal(&element, "td:nth-child(3)");
+            e.cash_dividend = element::parse_to_decimal(&element, "td:nth-child(4)");
+            e.earnings_stock = element::parse_to_decimal(&element, "td:nth-child(5)");
+            e.capital_reserve_stock = element::parse_to_decimal(&element, "td:nth-child(6)");
+            e.stock_dividend = element::parse_to_decimal(&element, "td:nth-child(7)");
+            e.sum = element::parse_to_decimal(&element, "td:nth-child(8)");
+            e.earnings_per_share = element::parse_to_decimal(&element, "td:nth-child(21)");
+            e.payout_ratio_cash = element::parse_to_decimal(&element, "td:nth-child(22)");
+            e.payout_ratio_stock = element::parse_to_decimal(&element, "td:nth-child(23)");
+            e.payout_ratio = element::parse_to_decimal(&element, "td:nth-child(24)");
 
             if e.cash_dividend.is_zero() && e.stock_dividend.is_zero() && e.sum.is_zero() {
                 return None;
@@ -175,7 +168,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<Dividend>>> {
         })
         .collect();
 
-    let result: Result<HashMap<i32, Vec<Dividend>>, _> = result.map(|dividends| {
+    let result: Result<HashMap<i32, Vec<GoodInfoDividend>>, _> = result.map(|dividends| {
         let mut hashmap = HashMap::new();
         for dividend in dividends {
             hashmap
