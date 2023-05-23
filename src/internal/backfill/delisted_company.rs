@@ -1,5 +1,4 @@
 use crate::internal::{cache::SHARE, crawler::twse, logging, util::datetime::Weekend};
-
 use anyhow::*;
 use chrono::Local;
 use core::result::Result::Ok;
@@ -10,56 +9,53 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    let delisted_list = twse::suspend_listing::visit().await;
+    let delisted = twse::suspend_listing::visit().await?;
+    let mut items_to_update = Vec::new();
 
-    if let Some(delisted) = delisted_list {
-        let mut items_to_update = Vec::new();
-
-        match SHARE.stocks.read() {
-            Ok(stocks) => {
-                for company in delisted {
-                    if let Some(stock) = stocks.get(company.stock_symbol.as_str()) {
-                        if stock.suspend_listing {
-                            //println!("已下市{:?}",stock);
-                            continue;
-                        }
-
-                        let year = match company.delisting_date[..3].parse::<i32>() {
-                            Ok(_year) => _year,
-                            Err(why) => {
-                                logging::error_file_async(format!(
-                                    "轉換資料日期發生錯誤. because {:?}",
-                                    why
-                                ));
-                                continue;
-                            }
-                        };
-
-                        if year < 110 {
-                            continue;
-                        }
-
-                        let mut another = stock.clone();
-                        another.suspend_listing = true;
-                        items_to_update.push(another);
+    match SHARE.stocks.read() {
+        Ok(stocks) => {
+            for company in delisted {
+                if let Some(stock) = stocks.get(company.stock_symbol.as_str()) {
+                    if stock.suspend_listing {
+                        //println!("已下市{:?}",stock);
+                        continue;
                     }
+
+                    let year = match company.delisting_date[..3].parse::<i32>() {
+                        Ok(_year) => _year,
+                        Err(why) => {
+                            logging::error_file_async(format!(
+                                "轉換資料日期發生錯誤. because {:?}",
+                                why
+                            ));
+                            continue;
+                        }
+                    };
+
+                    if year < 110 {
+                        continue;
+                    }
+
+                    let mut another = stock.clone();
+                    another.suspend_listing = true;
+                    items_to_update.push(another);
                 }
-            }
-            Err(why) => {
-                logging::error_file_async(format!("Failed to read stocks cache because {:?}", why));
             }
         }
+        Err(why) => {
+            logging::error_file_async(format!("Failed to read stocks cache because {:?}", why));
+        }
+    }
 
-        for item in items_to_update {
-            if let Err(why) = item.update_suspend_listing().await {
-                logging::error_file_async(format!(
-                    "Failed to update_suspend_listing because {:?}",
-                    why
-                ));
-            } else if let Ok(mut stocks_cache) = SHARE.stocks.write() {
-                if let Some(stock) = stocks_cache.get_mut(&item.stock_symbol) {
-                    stock.suspend_listing = true;
-                }
+    for item in items_to_update {
+        if let Err(why) = item.update_suspend_listing().await {
+            logging::error_file_async(format!(
+                "Failed to update_suspend_listing because {:?}",
+                why
+            ));
+        } else if let Ok(mut stocks_cache) = SHARE.stocks.write() {
+            if let Some(stock) = stocks_cache.get_mut(&item.stock_symbol) {
+                stock.suspend_listing = true;
             }
         }
     }

@@ -285,8 +285,8 @@ impl From<twse::international_securities_identification_number::Entity> for Enti
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<tpex::net_asset_value_per_share::Entity> for Entity {
-    fn from(tpex: tpex::net_asset_value_per_share::Entity) -> Self {
+impl From<tpex::net_asset_value_per_share::Emerging> for Entity {
+    fn from(tpex: tpex::net_asset_value_per_share::Emerging) -> Self {
         Entity {
             stock_symbol: tpex.stock_symbol,
             name: "".to_string(),

@@ -12,9 +12,7 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    let result = tpex::net_asset_value_per_share::visit()
-        .await
-        .ok_or_else(|| anyhow!("Failed to visit because response is no data".to_string()))?;
+    let result = tpex::net_asset_value_per_share::visit().await?;
 
     for item in result {
         let stock = match SHARE.stocks.read() {

@@ -34,20 +34,17 @@ impl Telegram {
     }
 
     async fn send_message<'a>(&self, payload: SendMessageRequest<'_>) -> Result<()> {
-        match http::request_post_use_json::<SendMessageRequest, SendMessageResponse>(
+        if let Err(why) = http::request_post_use_json::<SendMessageRequest, SendMessageResponse>(
             &self.send_message_url,
             None,
             Some(&payload),
         )
         .await
         {
-            Ok(_response) => {}
-            Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to http::request_post_use_json because: {:?}",
-                    why
-                ));
-            }
+            logging::error_file_async(format!(
+                "Failed to http::request_post_use_json because: {:?}",
+                why
+            ));
         }
 
         Ok(())
@@ -62,7 +59,6 @@ impl Default for Telegram {
 
 fn get_client() -> Result<&'static Telegram> {
     Ok(TELEGRAM.get_or_init(Telegram::new))
-    // CLIENT.get_or_try_init(|| Ok(TELEGRAM::new()))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -85,12 +81,6 @@ pub struct SendMessageRequest<'a> {
 pub async fn send(msg: &str) -> Result<()> {
     get_client()?.send(msg).await
 }
-
-/*
-pub async fn send_message<'a>(payload: SendMessageRequest<'_>) -> Result<()> {
-    get_client()?.send_message(payload).await
-}
-*/
 
 #[cfg(test)]
 mod tests {

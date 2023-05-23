@@ -12,6 +12,7 @@ struct StockEntity {
 /// 提醒本日為除權息的股票有那些
 pub async fn execute() {
     let today: NaiveDate = Local::now().date_naive();
+    let year = today.year();
     let date_str = today.format("%Y-%m-%d").to_string();
     logging::info_file_async(format!("ex_dividend date:{}", date_str));
 
@@ -19,11 +20,11 @@ pub async fn execute() {
 select s.stock_symbol,s."Name" as name
 from dividend as d
 inner join stocks as s on s.stock_symbol = d.security_code
-where "ex-dividend_date1" = $1 or "ex-dividend_date2" = $2
+where "year" = $1 and ("ex-dividend_date1" = $2 or "ex-dividend_date2" = $2)
         "#;
 
     match sqlx::query_as::<_, StockEntity>(sql)
-        .bind(&date_str)
+        .bind(year)
         .bind(&date_str)
         .fetch_all(&DB.pool)
         .await
@@ -54,7 +55,7 @@ where "ex-dividend_date1" = $1 or "ex-dividend_date2" = $2
             }
 
             //計算股利
-            calculation::dividend_record::calculate(Local::now().year(), Some(stock_symbols)).await;
+            calculation::dividend_record::calculate(year, Some(stock_symbols)).await;
         }
         Err(why) => {
             logging::error_file_async(format!("Failed to fetch StockEntity because: {:?}", why));

@@ -1,28 +1,32 @@
-use crate::internal::{crawler::tpex, logging, util};
+use crate::internal::{crawler::tpex, util};
+use anyhow::*;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
-use std::collections::HashMap;
-use std::str::FromStr;
+use std::{
+    result::Result::Ok,
+    collections::HashMap,
+    str::FromStr
+};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 //#[serde(rename_all = "camelCase")]
-pub struct Entity {
+pub struct Emerging {
     pub stock_symbol: String,
     pub net_asset_value_per_share: Decimal,
 }
 
-impl Entity {
+impl Emerging {
     pub fn new(stock_symbol: String, net_asset_value_per_share: Decimal) -> Self {
-        Entity {
+        Emerging {
             stock_symbol,
             net_asset_value_per_share,
         }
     }
 }
 
-pub async fn visit() -> Option<Vec<Entity>> {
+pub async fn visit() -> Result<Vec<Emerging>> {
     let url = format!(
-        "{}/web/regular_emerging/corporateInfo/emerging/emerging_stock.php?l=zh-tw",
+        "https://{}/web/regular_emerging/corporateInfo/emerging/emerging_stock.php?l=zh-tw",
         tpex::HOST
     );
 
@@ -32,15 +36,8 @@ pub async fn visit() -> Option<Vec<Entity>> {
     params.insert("stk_market", "ALL");
     params.insert("stk_category", "02");
 
-    let response = match util::http::request_post(&url, None, Some(params)).await {
-        Ok(r) => r,
-        Err(why) => {
-            logging::error_file_async(format!("Failed to request_post because {:?}", why));
-            return None;
-        }
-    };
-
-    let mut result: Vec<Entity> = Vec::with_capacity(512);
+    let response = util::http::request_post(&url, None, Some(params)).await?;
+    let mut result: Vec<Emerging> = Vec::with_capacity(512);
     let document = Html::parse_document(&response);
     //#company_list > tbody > tr:nth-child(1)
     if let Ok(selector) = Selector::parse("#company_list > tbody > tr") {
@@ -50,7 +47,7 @@ pub async fn visit() -> Option<Vec<Entity>> {
                 continue;
             }
 
-            let e = Entity::new(
+            let e = Emerging::new(
                 tds[1].to_string(),
                 Decimal::from_str(tds[5]).unwrap_or_default(),
             );
@@ -58,12 +55,15 @@ pub async fn visit() -> Option<Vec<Entity>> {
         }
     }
 
-    Some(result)
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
+    use crate::{
+        internal::cache::SHARE,
+        internal::logging
+    };
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
@@ -74,12 +74,10 @@ mod tests {
         logging::debug_file_async("開始 visit".to_string());
 
         match visit().await {
-            None => {
-                logging::debug_file_async(
-                    "Failed to visit because response is no data".to_string(),
-                );
+            Err(why) => {
+                logging::error_file_async(format!("Failed to visit because {:?}", why));
             }
-            Some(list) => {
+            Ok(list) => {
                 logging::debug_file_async(format!("data({}):{:#?}", list.len(), list));
             }
         }

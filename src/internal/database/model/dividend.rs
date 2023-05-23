@@ -1,5 +1,9 @@
-use crate::internal::crawler::goodinfo;
-use crate::internal::database::DB;
+use crate::{
+    internal::{
+        crawler::goodinfo,
+        database::DB
+    }
+};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
@@ -145,7 +149,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
         Ok(result)
     }
 
-    /// 更新股息配息日發放日
+    /// 更新股息的配息日、發放日
     pub async fn update_dividend_date(&self) -> Result<PgQueryResult> {
         let sql = r#"
 update
@@ -253,7 +257,7 @@ WHERE "SuspendListing" = false
         OR stock_symbol IN (
             SELECT security_code
             FROM dividend
-            WHERE year = $1 AND quarter IN ('Q1', 'H1')
+            WHERE year = $1 AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2')
         )
     );
 "#;
@@ -269,7 +273,7 @@ WHERE "SuspendListing" = false
     Ok(stock_symbols)
 }
 
-/// 取得指定年度尚未有配息日的配息數據
+/// 取得指定年度尚未有配息日的配息數據(有排除配息金額為 0)
 pub async fn fetch_unannounced_date(year: i32) -> Result<Vec<Entity>> {
     let sql = r#"
 SELECT
@@ -297,7 +301,7 @@ SELECT
 FROM
     dividend
 WHERE
-    year = $1 and ("ex-dividend_date1" = '尚未公布' or "ex-dividend_date2" = '尚未公布');
+    year = $1 and "sum" <> 0 and ("ex-dividend_date1" = '尚未公布' or "ex-dividend_date2" = '尚未公布');
 "#;
 
     let entities = sqlx::query(sql)

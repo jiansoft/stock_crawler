@@ -62,7 +62,7 @@ impl Profile {
     }
 }
 
-/// 將未下市每股淨值為零的股票試著到yahoo 抓取數據後更新回 stocks表
+/// 從雅虎抓取指定股票的 profile
 pub async fn visit(stock_symbol: &str) -> Result<Profile> {
     let url = format!("https://{}/quote/{}/profile", HOST, stock_symbol);
 

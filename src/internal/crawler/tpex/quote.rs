@@ -69,7 +69,7 @@ pub async fn visit(date: DateTime<Local>) -> Option<Vec<daily_quote::Entity>> {
     let republic_date = date.year() - 1911;
     //https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&_=1681801169006
     let quote_url = format!(
-        "{}/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&d={}{}&se=EW&_={}",
+        "https://{}/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&d={}{}&se=EW&_={}",
         tpex::HOST,
         republic_date,
         date.format("/%m/%d"),

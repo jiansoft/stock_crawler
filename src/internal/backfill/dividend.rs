@@ -2,7 +2,6 @@ use crate::internal::{
     crawler::{goodinfo, yahoo},
     database::model::{self, dividend},
     logging,
-    util::datetime::Weekend,
 };
 use anyhow::*;
 use chrono::{Datelike, Local};
@@ -70,15 +69,12 @@ pub async fn execute() -> Result<()> {
 /// - It fails to visit the dividend information of a stock symbol.
 /// - It fails to upsert a dividend entity.
 async fn processing_without_or_multiple(year: i32) -> Result<()> {
-    if Local::now().is_weekend() {
-        return Ok(());
-    }
-
     //尚未有股利或多次配息
     let stock_symbols = dividend::fetch_without_or_multiple(year).await?;
-    logging::info_file_async(format!("殖利率本次需採集 {} 家", stock_symbols.len()));
+    logging::info_file_async(format!("本次殖利率的採集需收集 {} 家", stock_symbols.len()));
     for stock_symbol in stock_symbols {
         let dividends = goodinfo::dividend::visit(&stock_symbol).await?;
+        thread::sleep(Duration::from_secs(90));
         // 取成今年度的股利數據
         let dividend_details = match dividends.get(&year) {
             Some(details) => details,
@@ -103,8 +99,6 @@ async fn processing_without_or_multiple(year: i32) -> Result<()> {
                 }
             }
         }
-
-        thread::sleep(Duration::from_secs(90));
     }
 
     Ok(())
@@ -113,7 +107,7 @@ async fn processing_without_or_multiple(year: i32) -> Result<()> {
 async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     //除息日 尚未公布
     let dividends = dividend::fetch_unannounced_date(year).await?;
-    logging::info_file_async(format!("除息日本次需採集 {} 家", dividends.len()));
+    logging::info_file_async(format!("本次除息日的採集需收集 {} 家", dividends.len()));
     for mut entity in dividends {
         let yahoo = match yahoo::dividend::visit(&entity.security_code).await {
             Ok(yahoo_dividend) => yahoo_dividend,
