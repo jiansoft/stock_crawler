@@ -1,9 +1,4 @@
-use crate::{
-    internal::{
-        crawler::goodinfo,
-        database::DB
-    }
-};
+use crate::internal::{crawler::goodinfo, database::DB};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
@@ -12,7 +7,7 @@ use sqlx::Row;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone)]
 /// 股息發放日程表 原表名 dividend
-pub struct Entity {
+pub struct Dividend {
     /// 序號
     pub serial: i64,
     /// 發放年度
@@ -55,9 +50,9 @@ pub struct Entity {
     pub updated_time: DateTime<Local>,
 }
 
-impl Entity {
+impl Dividend {
     pub fn new() -> Self {
-        Entity {
+        Dividend {
             serial: 0,
             year: 0,
             year_of_dividend: 0,
@@ -173,9 +168,147 @@ where
             .await
             .context("Failed to update update_dividend_date")
     }
+
+    /// 按照年份和除權息日取得股利總和的數據
+    pub async fn fetch_yearly_dividends_sum_by_date(
+        &self,
+        stock_purchase_date: DateTime<Local>,
+    ) -> Result<(Decimal, Decimal, Decimal)> {
+        let entities = Self::fetch_dividends_summary_by_date(
+            &self.security_code,
+            self.year,
+            stock_purchase_date,
+        )
+        .await?;
+        let (cash, stock, sum) = entities.into_iter().fold(
+            (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO),
+            |(acc_cash, acc_stock, acc_sum), entity| {
+                (
+                    acc_cash + entity.cash_dividend,
+                    acc_stock + entity.stock_dividend,
+                    acc_sum + entity.sum,
+                )
+            },
+        );
+
+        Ok((cash, stock, sum))
+    }
+
+    /// 按照年份和除權息日取得數據
+    pub async fn fetch_dividends_summary_by_date(
+        security_code: &str,
+        year: i32,
+        stock_purchase_date: DateTime<Local>,
+    ) -> Result<Vec<Dividend>> {
+        let sql = r#"
+select
+    serial,
+    security_code,
+    year,
+    year_of_dividend,
+    quarter,
+    cash_dividend,
+    stock_dividend,
+    sum,
+    "ex-dividend_date1",
+    "ex-dividend_date2",
+    payable_date1,
+    payable_date2,
+    created_time,
+    updated_time,
+    capital_reserve_cash_dividend,
+    earnings_cash_dividend,
+    capital_reserve_stock_dividend,
+    earnings_stock_dividend,
+    payout_ratio_cash,
+    payout_ratio_stock,
+    payout_ratio
+from dividend
+where security_code = $1
+    and year = $2
+    and ("ex-dividend_date1" <= $3)
+    and ("ex-dividend_date1" >= $4 or "ex-dividend_date2" >= $4);
+"#;
+        let entities = sqlx::query(sql)
+            .bind(&security_code)
+            .bind(year)
+            .bind(Local::now().format("%Y-%m-%d %H:%M:%S").to_string())
+            .bind(stock_purchase_date.format("%Y-%m-%d %H:%M:%S").to_string())
+            .try_map(Self::row_to_entity)
+            .fetch_all(&DB.pool)
+            .await?;
+
+        Ok(entities)
+    }
+
+    /// 取得指定年度尚未有配息日的配息數據(有排除配息金額為 0)
+    pub async fn fetch_unannounced_date(year: i32) -> Result<Vec<Dividend>> {
+        let sql = r#"
+SELECT
+    serial,
+    security_code,
+    year,
+    year_of_dividend,
+    quarter,
+    cash_dividend,
+    stock_dividend,
+    sum,
+    "ex-dividend_date1",
+    "ex-dividend_date2",
+    payable_date1,
+    payable_date2,
+    created_time,
+    updated_time,
+    capital_reserve_cash_dividend,
+    earnings_cash_dividend,
+    capital_reserve_stock_dividend,
+    earnings_stock_dividend,
+    payout_ratio_cash,
+    payout_ratio_stock,
+    payout_ratio
+FROM
+    dividend
+WHERE
+    year = $1 and "sum" <> 0 and ("ex-dividend_date1" = '尚未公布' or "ex-dividend_date2" = '尚未公布');
+"#;
+
+        let entities = sqlx::query(sql)
+            .bind(year)
+            .try_map(Self::row_to_entity)
+            .fetch_all(&DB.pool)
+            .await?;
+
+        Ok(entities)
+    }
+
+    fn row_to_entity(row: PgRow) -> Result<Dividend, sqlx::Error> {
+        Ok(Dividend {
+            serial: row.try_get("serial")?,
+            security_code: row.try_get("security_code")?,
+            year: row.try_get("year")?,
+            year_of_dividend: row.try_get("year_of_dividend")?,
+            quarter: row.try_get("quarter")?,
+            cash_dividend: row.try_get("cash_dividend")?,
+            stock_dividend: row.try_get("stock_dividend")?,
+            sum: row.try_get("sum")?,
+            ex_dividend_date1: row.try_get("ex-dividend_date1")?,
+            ex_dividend_date2: row.try_get("ex-dividend_date2")?,
+            payable_date1: row.try_get("payable_date1")?,
+            payable_date2: row.try_get("payable_date2")?,
+            created_time: row.try_get("created_time")?,
+            updated_time: row.try_get("updated_time")?,
+            capital_reserve_cash_dividend: row.try_get("capital_reserve_cash_dividend")?,
+            earnings_cash_dividend: row.try_get("earnings_cash_dividend")?,
+            capital_reserve_stock_dividend: row.try_get("capital_reserve_stock_dividend")?,
+            earnings_stock_dividend: row.try_get("earnings_stock_dividend")?,
+            payout_ratio_cash: row.try_get("payout_ratio_cash")?,
+            payout_ratio_stock: row.try_get("payout_ratio_stock")?,
+            payout_ratio: row.try_get("payout_ratio")?,
+        })
+    }
 }
 
-impl Default for Entity {
+impl Default for Dividend {
     fn default() -> Self {
         Self::new()
     }
@@ -211,9 +344,9 @@ impl Clone for Entity {
 */
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<&goodinfo::dividend::GoodInfoDividend> for Entity {
+impl From<&goodinfo::dividend::GoodInfoDividend> for Dividend {
     fn from(d: &goodinfo::dividend::GoodInfoDividend) -> Self {
-        let mut e = Entity::new();
+        let mut e = Dividend::new();
         e.quarter = d.quarter.clone();
         e.year = d.year;
         e.year_of_dividend = d.year_of_dividend;
@@ -273,74 +406,11 @@ WHERE "SuspendListing" = false
     Ok(stock_symbols)
 }
 
-/// 取得指定年度尚未有配息日的配息數據(有排除配息金額為 0)
-pub async fn fetch_unannounced_date(year: i32) -> Result<Vec<Entity>> {
-    let sql = r#"
-SELECT
-    serial,
-    security_code,
-    year,
-    year_of_dividend,
-    quarter,
-    cash_dividend,
-    stock_dividend,
-    sum,
-    "ex-dividend_date1",
-    "ex-dividend_date2",
-    payable_date1,
-    payable_date2,
-    created_time,
-    updated_time,
-    capital_reserve_cash_dividend,
-    earnings_cash_dividend,
-    capital_reserve_stock_dividend,
-    earnings_stock_dividend,
-    payout_ratio_cash,
-    payout_ratio_stock,
-    payout_ratio
-FROM
-    dividend
-WHERE
-    year = $1 and "sum" <> 0 and ("ex-dividend_date1" = '尚未公布' or "ex-dividend_date2" = '尚未公布');
-"#;
-
-    let entities = sqlx::query(sql)
-        .bind(year)
-        .try_map(|row: PgRow| {
-            Ok(Entity {
-                serial: row.try_get("serial")?,
-                security_code: row.try_get("security_code")?,
-                year: row.try_get("year")?,
-                year_of_dividend: row.try_get("year_of_dividend")?,
-                quarter: row.try_get("quarter")?,
-                cash_dividend: row.try_get("cash_dividend")?,
-                stock_dividend: row.try_get("stock_dividend")?,
-                sum: row.try_get("sum")?,
-                ex_dividend_date1: row.try_get("ex-dividend_date1")?,
-                ex_dividend_date2: row.try_get("ex-dividend_date2")?,
-                payable_date1: row.try_get("payable_date1")?,
-                payable_date2: row.try_get("payable_date2")?,
-                created_time: row.try_get("created_time")?,
-                updated_time: row.try_get("updated_time")?,
-                capital_reserve_cash_dividend: row.try_get("capital_reserve_cash_dividend")?,
-                earnings_cash_dividend: row.try_get("earnings_cash_dividend")?,
-                capital_reserve_stock_dividend: row.try_get("capital_reserve_stock_dividend")?,
-                earnings_stock_dividend: row.try_get("earnings_stock_dividend")?,
-                payout_ratio_cash: row.try_get("payout_ratio_cash")?,
-                payout_ratio_stock: row.try_get("payout_ratio_stock")?,
-                payout_ratio: row.try_get("payout_ratio")?,
-            })
-        })
-        .fetch_all(&DB.pool)
-        .await?;
-
-    Ok(entities)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::internal::logging;
+    use chrono::TimeZone;
     use rust_decimal_macros::dec;
 
     #[tokio::test]
@@ -359,10 +429,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_dividend_unannounced_date() {
+    async fn test_fetch_unannounced_date() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_dividend_unannounced_date".to_string());
-        let r = fetch_unannounced_date(2023).await;
+        let r = Dividend::fetch_unannounced_date(2023).await;
         if let Ok(result) = r {
             for e in result {
                 logging::debug_file_async(format!("{:?} ", e));
@@ -374,10 +444,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_fetch_dividends_summary_by_date() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_dividends_summary_by_date".to_string());
+
+        let datetime = Local.with_ymd_and_hms(2022, 3, 9, 0, 0, 0).unwrap();
+
+        let r = Dividend::fetch_dividends_summary_by_date("2330", 2022, datetime).await;
+        if let Ok(result) = r {
+            for e in result {
+                logging::debug_file_async(format!("{:?} ", e));
+            }
+        } else if let Err(err) = r {
+            logging::debug_file_async(format!("{:#?} ", err));
+        }
+        logging::debug_file_async("結束 fetch_dividends_summary_by_date".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_yearly_dividends_sum_by_date() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_yearly_dividends_sum_by_date".to_string());
+        let mut e = Dividend::new();
+        e.security_code = "2887".to_string();
+        e.year = 2022;
+        let datetime = Local.with_ymd_and_hms(2022, 3, 9, 0, 0, 0).unwrap();
+
+        let r = e.fetch_yearly_dividends_sum_by_date(datetime).await;
+        if let Ok(result) = r {
+            logging::debug_file_async(format!("{:?} {:?}", e, result));
+        } else if let Err(err) = r {
+            logging::debug_file_async(format!("{:#?} ", err));
+        }
+        logging::debug_file_async("結束 fetch_yearly_dividends_sum_by_date".to_string());
+    }
+
+    #[tokio::test]
     async fn test_upsert() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 upsert".to_string());
-        let mut e = Entity::new();
+        let mut e = Dividend::new();
         e.security_code = String::from("79979");
         e.year = 2023;
         e.year_of_dividend = 2023;

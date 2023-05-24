@@ -1,8 +1,11 @@
+/// 每日股票報價數據
 pub mod daily_quote;
 /// 年度股利發放明細與總計
 pub mod dividend;
-/// 持股股息發放記錄表
+/// 持股股息發放記錄表(總計)
 pub mod dividend_record_detail;
+/// 持股股息發放明細記錄表
+pub mod dividend_record_detail_more;
 /// 公司每季獲利能力
 pub mod financial_statement;
 pub mod index;

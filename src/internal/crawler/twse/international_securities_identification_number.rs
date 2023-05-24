@@ -1,9 +1,13 @@
 use crate::internal::{
-    cache::SHARE, database::model, logging, util, util::datetime::Weekend, StockExchangeMarket,
+    cache::SHARE,
+    database::model,
+    util::{self, datetime::Weekend},
+    StockExchangeMarket,
 };
+use anyhow::*;
 use chrono::Local;
-use core::result::Result::Ok;
 use scraper::{Html, Selector};
+use std::result::Result::Ok;
 
 const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺灣存託憑證(TDR)"];
 
@@ -39,9 +43,9 @@ impl Clone for Entity {
 
 /// 調用  twse API 取得台股國際證券識別碼
 /// 上市:2 上櫃︰4 興櫃︰5
-pub async fn visit(mode: StockExchangeMarket) -> Option<Vec<Entity>> {
+pub async fn visit(mode: StockExchangeMarket) -> Result<Vec<Entity>> {
     if Local::now().is_weekend() {
-        return None;
+        return Ok(Vec::new());
     }
 
     let url = format!(
@@ -49,14 +53,7 @@ pub async fn visit(mode: StockExchangeMarket) -> Option<Vec<Entity>> {
         mode.serial_number()
     );
 
-    let response = match util::http::request_get_use_big5(&url).await {
-        Ok(r) => r,
-        Err(why) => {
-            logging::error_file_async(format!("Failed to request_get_use_big5 because {:?}", why));
-            return None;
-        }
-    };
-
+    let response = util::http::request_get_use_big5(&url).await?;
     let mut result: Vec<Entity> = Vec::with_capacity(4096);
     let document = Html::parse_document(&response);
 
@@ -125,12 +122,13 @@ pub async fn visit(mode: StockExchangeMarket) -> Option<Vec<Entity>> {
         }
     }
 
-    Some(result)
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::internal::cache::SHARE;
+    use crate::internal::logging;
     //use std::collections::HashSet;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
@@ -143,12 +141,10 @@ mod tests {
         // let mut unique_industry_categories: HashSet<String> = HashSet::new();
         for mode in StockExchangeMarket::iterator() {
             match visit(mode).await {
-                None => {
-                    logging::debug_file_async(
-                        "Failed to visit because response is no data".to_string(),
-                    );
+                Err(why) => {
+                    logging::error_file_async(format!("Failed to visit because {:?}", why));
                 }
-                Some(result) => {
+                Ok(result) => {
                     for item in result.iter() {
                         //unique_industry_categories.insert(item.industry_category.clone());
                         /* if !CACHE_SHARE.industries.contains_key(item.industry.as_str()) {

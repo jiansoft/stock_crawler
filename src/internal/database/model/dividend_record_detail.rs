@@ -2,11 +2,12 @@ use crate::internal::database::DB;
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgRow, Row};
+use sqlx::{postgres::PgRow, Postgres, Row, Transaction};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 持股股息發放記錄表 原表名 dividend_record_detail
-pub struct Entity {
+pub struct DividendRecordDetail {
+    pub serial: i64,
     /// 庫存編號
     pub stock_ownership_details_serial: i64,
     /// 領取年度
@@ -23,17 +24,18 @@ pub struct Entity {
     pub update_time: DateTime<Local>,
 }
 
-impl Entity {
+impl DividendRecordDetail {
     pub fn new(
-        serial: i64,
+        stock_ownership_details_serial: i64,
         year: i32,
         cash: Decimal,
         stock: Decimal,
         stock_money: Decimal,
         total: Decimal,
     ) -> Self {
-        Entity {
-            stock_ownership_details_serial: serial,
+        DividendRecordDetail {
+            serial: 0,
+            stock_ownership_details_serial,
             year,
             cash,
             stock,
@@ -45,7 +47,7 @@ impl Entity {
     }
 
     /// 更新持股股息發放記錄
-    pub async fn upsert(&self) -> Result<()> {
+    pub async fn upsert(&mut self, tx: Option<Transaction<'_, Postgres>>) -> Result<i64> {
         let sql = r#"
         insert into dividend_record_detail (stock_ownership_details_serial, "year", cash, stock_money, stock, total)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -54,19 +56,24 @@ impl Entity {
         cash = EXCLUDED.cash,
         stock_money = EXCLUDED.stock_money,
         stock = EXCLUDED.stock,
-        updated_time = now();
+        updated_time = now()
+        RETURNING serial;
     "#;
-        sqlx::query(sql)
+        let query = sqlx::query_as(sql)
             .bind(self.stock_ownership_details_serial)
             .bind(self.year)
             .bind(self.cash)
             .bind(self.stock_money)
             .bind(self.stock)
-            .bind(self.total)
-            .execute(&DB.pool)
-            .await?;
+            .bind(self.total);
+        let row: (i64,) = match tx {
+            None => query.fetch_one(&DB.pool).await?,
+            Some(mut t) => query.fetch_one(&mut t).await?,
+        };
 
-        Ok(())
+        self.serial = row.0;
+
+        Ok(self.serial)
     }
 
     /// 計算指定股票其累積的領取股利
@@ -98,7 +105,7 @@ where stock_ownership_details_serial = $1;
     }
 }
 
-impl Default for Entity {
+impl Default for DividendRecordDetail {
     fn default() -> Self {
         Self::new(
             0,
@@ -111,9 +118,10 @@ impl Default for Entity {
     }
 }
 
-impl Clone for Entity {
+impl Clone for DividendRecordDetail {
     fn clone(&self) -> Self {
-        Entity {
+        DividendRecordDetail {
+            serial: self.serial,
             stock_ownership_details_serial: self.stock_ownership_details_serial,
             year: self.year,
             cash: self.cash,

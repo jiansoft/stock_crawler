@@ -1,46 +1,155 @@
-use crate::internal::{database::model, logging};
+use crate::internal::{
+    database::{
+        model::{
+            dividend, dividend_record_detail, dividend_record_detail_more, stock_ownership_details,
+        },
+        DB,
+    },
+    logging,
+};
+use anyhow::*;
+use rust_decimal::Decimal;
+use sqlx::{Postgres, Transaction};
+use std::result::Result::Ok;
 
 /// 計算指定年份領取的股利
-pub async fn calculate(year: i32, security_codes: Option<Vec<String>>) {
+pub async fn execute(year: i32, security_codes: Option<Vec<String>>) {
     logging::info_file_async("計算指定年份領取的股利開始".to_string());
 
-    if let Ok(inventories) = model::stock_ownership_details::fetch(security_codes).await {
-        let tasks = inventories
-            .into_iter()
-            .map(|mut item| async move {
-                //計算今年領取的股利，如果股利並非零時將數據更新到 dividend_record_detail 表
-                let drd = item
-                    .calculate_dividend_and_upsert(year)
-                    .await
-                    .map_err(|e| {
-                        format!("Failed to calculate_dividend_and_upsert because {:?}", e)
-                    })?;
-
-                // 計算指定股票其累積的領取股利
-                let cumulate_dividend = drd.calculate_cumulate_dividend().await.map_err(|e| {
-                    format!("Failed to calculate_cumulate_dividend because {:?}", e)
-                })?;
-
-                let (cash, stock_money, stock, total) = cumulate_dividend;
-                item.cumulate_dividends_cash = cash;
-                item.cumulate_dividends_stock_money = stock_money;
-                item.cumulate_dividends_stock = stock;
-                item.cumulate_dividends_total = total;
-                item.update_cumulate_dividends()
-                    .await
-                    .map_err(|e| format!("Failed to update_cumulate_dividends because {:?}", e))
-            })
-            .collect::<Vec<_>>();
-        let results = futures::future::join_all(tasks).await;
-        results
-            .into_iter()
-            .filter_map(|r| r.err())
-            .for_each(logging::error_file_async);
-    } else {
-        logging::error_file_async("Failed to inventory::fetch".to_string());
+    match stock_ownership_details::StockOwnershipDetail::fetch(security_codes).await {
+        Ok(inventories) => {
+            if !inventories.is_empty() {
+                let tasks = inventories
+                    .into_iter()
+                    .map(|sod| calculate_dividend(sod, year))
+                    .collect::<Vec<_>>();
+                let results = futures::future::join_all(tasks).await;
+                results
+                    .into_iter()
+                    .filter_map(|r| r.err())
+                    .for_each(|e| logging::error_file_async(format!("{:?}", e)));
+            }
+        }
+        Err(why) => {
+            logging::error_file_async(format!(
+                "Failed to execute StockOwnershipDetail::fetch because {:?}",
+                why
+            ));
+        }
     }
 
     logging::info_file_async("計算指定年份領取的股利結束".to_string());
+}
+
+async fn calculate_dividend(
+    mut sod: stock_ownership_details::StockOwnershipDetail,
+    year: i32,
+) -> Result<()> {
+    //計算股票於該年度可以領取的股利
+    let mut d = dividend::Dividend::new();
+    d.security_code = sod.security_code.to_string();
+    d.year = year;
+    let dividend_sum = d
+        .fetch_yearly_dividends_sum_by_date(sod.created_time)
+        .await?;
+
+    let number_of_shares_held = Decimal::new(sod.share_quantity, 0);
+    let dividend_cash = dividend_sum.0 * number_of_shares_held;
+    let dividend_stock = dividend_sum.1 * number_of_shares_held / Decimal::new(10, 0);
+    let dividend_stock_money = dividend_sum.1 * number_of_shares_held;
+    let dividend_total = dividend_sum.2 * number_of_shares_held;
+    let mut drd = dividend_record_detail::DividendRecordDetail::new(
+        sod.serial,
+        year,
+        dividend_cash,
+        dividend_stock,
+        dividend_stock_money,
+        dividend_total,
+    );
+
+    let mut tx_option: Option<Transaction<Postgres>> = Some(DB.pool.begin().await?);
+    //更新股利領取記錄
+    let dividend_record_detail_serial = match drd.upsert(tx_option.take()).await {
+        Ok(serial) => serial,
+        Err(why) => {
+            if let Some(tx) = tx_option {
+                tx.rollback().await?;
+            }
+            return Err(anyhow!(
+                "Failed to execute upsert query for dividend_record_detail because {:?}",
+                why
+            ));
+        }
+    };
+
+    let dividends = dividend::Dividend::fetch_dividends_summary_by_date(
+        &d.security_code,
+        d.year,
+        sod.created_time,
+    )
+    .await?;
+    for dividend in dividends {
+        //寫入領取細節表
+        let dividend_cash = dividend.cash_dividend * number_of_shares_held;
+        let dividend_stock = dividend.stock_dividend * number_of_shares_held / Decimal::new(10, 0);
+        let dividend_stock_money = dividend.stock_dividend * number_of_shares_held;
+        let dividend_total = dividend.sum * number_of_shares_held;
+
+        let mut rdrm = dividend_record_detail_more::DividendRecordDetailMore::new(
+            sod.serial,
+            dividend_record_detail_serial,
+            dividend.serial,
+            dividend_cash,
+            dividend_stock,
+            dividend_stock_money,
+            dividend_total,
+        );
+
+        if let Err(why) = rdrm.upsert(tx_option.take()).await {
+            if let Some(tx) = tx_option {
+                tx.rollback().await?;
+            }
+            return Err(anyhow!(
+                "Failed to execute upsert query for dividend_record_detail_more because {:?}",
+                why
+            ));
+        }
+
+        // 計算指定股票其累積的領取股利
+        let cumulate_dividend = match drd.calculate_cumulate_dividend().await {
+            Ok(r) => r,
+            Err(why) => {
+                if let Some(tx) = tx_option {
+                    tx.rollback().await?;
+                }
+                return Err(anyhow!(
+                    "Failed to execute calculate_cumulate_dividend because {:?}",
+                    why
+                ));
+            }
+        };
+
+        let (cash, stock_money, stock, total) = cumulate_dividend;
+        sod.cumulate_dividends_cash = cash;
+        sod.cumulate_dividends_stock_money = stock_money;
+        sod.cumulate_dividends_stock = stock;
+        sod.cumulate_dividends_total = total;
+        if let Err(why) = sod.update_cumulate_dividends(tx_option.take()).await {
+            if let Some(tx) = tx_option {
+                tx.rollback().await?;
+            }
+            return Err(anyhow!(
+                "Failed to execute update_cumulate_dividends because {:?}",
+                why
+            ));
+        }
+    }
+
+    if let Some(tx) = tx_option {
+        tx.commit().await?;
+    }
+
+    Ok(())
 }
 
 /*/// 計算指定年份領取的股利
@@ -92,15 +201,41 @@ pub async fn calculate(year: i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::internal::cache::SHARE;
     use crate::internal::logging;
+    use chrono::{Local, TimeZone};
 
     #[tokio::test]
     async fn test_calculate() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 calculate".to_string());
+        logging::debug_file_async("開始 calculate".to_string());
         for i in 2014..2024 {
-            calculate(i, None).await;
+            execute(i, None).await;
+            logging::debug_file_async(format!("calculate({}) 完成" ,i));
         }
-        logging::info_file_async("結束 calculate".to_string());
+        logging::debug_file_async("結束 calculate".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_calculate_dividend() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+        logging::debug_file_async("開始 calculate_dividend".to_string());
+        let mut sod = stock_ownership_details::StockOwnershipDetail::new();
+        sod.serial = 27;
+        sod.security_code = "2330".to_string();
+        sod.member_id = 2;
+        sod.share_quantity = 100;
+        sod.created_time = Local.with_ymd_and_hms(2022, 3, 9, 0, 0, 0).unwrap();
+        match calculate_dividend(sod, 2022).await {
+            Ok(_) => {}
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to calculate_dividend because {:?}",
+                    why
+                ));
+            }
+        }
+        logging::debug_file_async("結束 calculate_dividend".to_string());
     }
 }

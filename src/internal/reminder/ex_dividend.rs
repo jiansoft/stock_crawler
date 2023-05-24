@@ -55,7 +55,7 @@ where "year" = $1 and ("ex-dividend_date1" = $2 or "ex-dividend_date2" = $2)
             }
 
             //計算股利
-            calculation::dividend_record::calculate(year, Some(stock_symbols)).await;
+            calculation::dividend_record::execute(year, Some(stock_symbols)).await;
         }
         Err(why) => {
             logging::error_file_async(format!("Failed to fetch StockEntity because: {:?}", why));
