@@ -1,11 +1,4 @@
-use crate::{
-    internal::{
-        crawler::yahoo::HOST,
-        util::http::element,
-        logging,
-        util
-    }
-};
+use crate::internal::{crawler::yahoo::HOST, logging, util, util::http::element};
 use anyhow::*;
 use core::result::Result::Ok;
 use regex::Regex;
@@ -68,7 +61,7 @@ pub async fn visit(stock_symbol: &str) -> Result<Profile> {
 
     logging::info_file_async(format!("visit url:{}", url,));
 
-    let text = util::http::request_get(&url, None).await?;
+    let text = util::http::get(&url, None).await?;
     let document = Html::parse_document(text.as_str());
     let selector = match Selector::parse("#main-2-QuoteProfile-Proxy > div > section:nth-child(3)")
     {
@@ -130,7 +123,7 @@ mod tests {
 
         match visit("2330").await {
             Ok(e) => {
-                logging::debug_file_async(format!("{:#?}",  e));
+                logging::debug_file_async(format!("{:#?}", e));
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because {:?}", why));

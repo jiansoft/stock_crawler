@@ -7,13 +7,15 @@ use crate::internal::{
     },
 };
 use anyhow::*;
-use core::result::Result::Ok;
+use std::{
+    result::Result::Ok,
+    collections::HashMap
+};
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use urlencoding::encode;
 
 const UNSET_DATE: &str = "-";
@@ -105,7 +107,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
     headers.insert("content-length", "0".parse()?);
     headers.insert("content-type", "application/x-www-form-urlencoded".parse()?);
 
-    let text = http::request_post(&url, Some(headers), None).await?;
+    let text = http::post(&url, Some(headers), None).await?;
     if text.contains("您的瀏覽量異常") {
         return Err(anyhow!("{} 瀏覽量異常", url));
     }

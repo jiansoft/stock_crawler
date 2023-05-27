@@ -1,4 +1,10 @@
-use crate::internal::{database::DB, util::datetime, StockExchange};
+pub(crate) mod extension;
+
+use crate::internal::{
+    database::{model::daily_quote::extension::MonthlyStockPriceSummary, DB},
+    util::datetime,
+    StockExchange,
+};
 use anyhow::*;
 use chrono::{DateTime, Local, NaiveDate};
 use core::result::Result::Ok;
@@ -7,7 +13,7 @@ use sqlx::postgres::PgQueryResult;
 
 #[derive(Default, Debug)]
 /// 每日股票報價數據
-pub struct Entity {
+pub struct DailyQuote {
     pub maximum_price_in_year_date_on: DateTime<Local>,
     pub minimum_price_in_year_date_on: DateTime<Local>,
     pub date: NaiveDate,
@@ -57,9 +63,9 @@ pub struct Entity {
     pub day: u32,
 }
 
-impl Entity {
+impl DailyQuote {
     pub fn new(security_code: String) -> Self {
-        Entity {
+        DailyQuote {
             security_code,
             ..Default::default()
         }
@@ -166,9 +172,9 @@ pub trait FromWithExchange<T, U> {
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl FromWithExchange<StockExchange, Vec<String>> for Entity {
+impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
     fn from_with_exchange(exchange: StockExchange, item: &Vec<String>) -> Self {
-        let mut e = Entity::new(item[0].to_string());
+        let mut e = DailyQuote::new(item[0].to_string());
 
         match exchange {
             StockExchange::TWSE => {
@@ -309,6 +315,29 @@ WHERE "Serial" IN
     Ok(sqlx::query(&sql).execute(&DB.pool).await?)
 }
 
+/// 依照指定的年月取得該股票其月份的最低、平均、最高價
+pub async fn fetch_monthly_stock_price_summary(
+    stock_symbol: &str,
+    year: i32,
+    month: i32,
+) -> Result<MonthlyStockPriceSummary> {
+    let sql = r#"
+SELECT
+    MIN("LowestPrice") as lowest_price,
+    AVG("ClosingPrice") as avg_price,
+    MAX("HighestPrice") as highest_price
+FROM "DailyQuotes"
+WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
+GROUP BY "SecurityCode", year, month;
+"#;
+    Ok(sqlx::query_as::<_, MonthlyStockPriceSummary>(sql)
+        .bind(stock_symbol)
+        .bind(year)
+        .bind(month)
+        .fetch_one(&DB.pool)
+        .await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,6 +370,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_fetch_lowest_avg_highest_price() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_lowest_avg_highest_price".to_string());
+
+        match fetch_monthly_stock_price_summary("2330", 2023, 4).await {
+            Ok(cd) => {
+                logging::debug_file_async(format!("stock: {:?}", cd));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 fetch_lowest_avg_highest_price".to_string());
+    }
+
+    #[tokio::test]
     async fn test_upsert() {
         dotenv::dotenv().ok();
         SHARE.load().await;
@@ -365,7 +411,7 @@ mod tests {
             "51.28".to_string(),
         ];
 
-        let mut e = Entity::from_with_exchange(StockExchange::TWSE, &data);
+        let mut e = DailyQuote::from_with_exchange(StockExchange::TWSE, &data);
         e.date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
         e.year = e.date.year();
         e.month = e.date.month();
@@ -406,7 +452,7 @@ mod tests {
             "41.90".to_string(),
         ];
 
-        let mut e = Entity::from_with_exchange(StockExchange::TPEx, &otc);
+        let mut e = DailyQuote::from_with_exchange(StockExchange::TPEx, &otc);
         e.date = NaiveDate::from_ymd_opt(2000, 1, 2).unwrap();
         e.year = e.date.year();
         e.month = e.date.month();

@@ -1,18 +1,15 @@
 use crate::internal::database::DB;
 use anyhow::*;
 use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
-use std::{
-    result::Result::Ok,
-    str::FromStr
-};
 use rust_decimal::Decimal;
-use sqlx::{postgres::{
-    PgQueryResult,
-    PgRow
-}, Error, Row};
+use sqlx::{
+    postgres::{PgQueryResult, PgRow},
+    Error, Row,
+};
+use std::{result::Result::Ok, str::FromStr};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
-pub struct Entity {
+pub struct Revenue {
     pub security_code: String,
     /// 當月營收
     pub monthly: Decimal,
@@ -41,9 +38,9 @@ pub struct Entity {
     pub create_time: DateTime<Local>,
 }
 
-impl Entity {
+impl Revenue {
     pub fn new() -> Self {
-        Entity {
+        Revenue {
             security_code: Default::default(),
             monthly: Default::default(),
             last_month: Default::default(),
@@ -104,15 +101,15 @@ on conflict ("SecurityCode", "Date") do update set
     }
 }
 
-impl Default for Entity {
+impl Default for Revenue {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Clone for Entity {
+impl Clone for Revenue {
     fn clone(&self) -> Self {
-        Entity {
+        Revenue {
             security_code: self.security_code.to_string(),
             monthly: self.monthly,
             last_month: self.last_month,
@@ -132,9 +129,9 @@ impl Clone for Entity {
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<Vec<String>> for Entity {
+impl From<Vec<String>> for Revenue {
     fn from(item: Vec<String>) -> Self {
-        let mut e = Entity::new();
+        let mut e = Revenue::new();
 
         e.security_code = item[0].to_string();
         /*
@@ -203,7 +200,7 @@ impl From<Vec<String>> for Entity {
     }
 }
 
-pub async fn fetch_last_two_month() -> Result<Vec<Entity>, Error> {
+pub async fn fetch_last_two_month() -> Result<Vec<Revenue>, Error> {
     let now = Local::now();
     //now.offset()
     //let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
@@ -264,7 +261,7 @@ order by "Serial" desc
         let lowest_price = row.try_get("lowest_price")?;
         let highest_price = row.try_get("highest_price")?;
         let create_time = row.try_get("CreateTime")?;
-        Ok(Entity {
+        Ok(Revenue {
             date,
             security_code,
             monthly,

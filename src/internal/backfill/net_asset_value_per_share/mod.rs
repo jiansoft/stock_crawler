@@ -7,7 +7,7 @@ use crate::{internal::cache::SHARE, internal::database::model};
 use anyhow::*;
 use core::result::Result::Ok;
 
-pub async fn update(stock: &model::stock::Entity) -> Result<()> {
+pub async fn update(stock: &model::stock::Stock) -> Result<()> {
     let c = stock.update_net_asset_value_per_share().await?;
 
     if c.rows_affected() > 0 {

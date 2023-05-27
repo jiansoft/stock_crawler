@@ -1,15 +1,15 @@
-use crate::internal::crawler::tpex;
 use crate::internal::{
-    cache,
-    cache::{TtlCacheInner, TTL},
-    database::{model::daily_quote, model::daily_quote::FromWithExchange},
+    cache::{self, TtlCacheInner, TTL},
+    crawler::tpex,
+    database::model::daily_quote::{self, FromWithExchange},
     logging, util, StockExchange,
 };
+use anyhow::*;
 use chrono::{DateTime, Datelike, Local};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::{collections::HashMap, result::Result::Ok};
 
 // QuoteResponse 上櫃公司每日收盤資訊
 #[derive(Debug, Deserialize)]
@@ -38,27 +38,15 @@ struct PeRatioAnalysisResponse {
 }
 
 /// 抓取上櫃公司每日收盤資訊
-pub async fn visit(date: DateTime<Local>) -> Option<Vec<daily_quote::Entity>> {
+pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>> {
     let date_str = date.format("%Y%m%d").to_string();
     let pe_ratio_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis";
 
     logging::info_file_async(format!("visit url:{}", pe_ratio_url));
 
     // 本益比
-    let pe_ratio_response = match util::http::request_get_use_json::<Vec<PeRatioAnalysisResponse>>(
-        pe_ratio_url,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to request_get_use_json({}) because {:?}",
-                pe_ratio_url, why
-            ));
-            return None;
-        }
-    };
+    let pe_ratio_response =
+        util::http::get_use_json::<Vec<PeRatioAnalysisResponse>>(pe_ratio_url).await?;
 
     let mut pe_ratio_analysis: HashMap<String, PeRatioAnalysisResponse> =
         HashMap::with_capacity(pe_ratio_response.len());
@@ -78,21 +66,12 @@ pub async fn visit(date: DateTime<Local>) -> Option<Vec<daily_quote::Entity>> {
 
     logging::info_file_async(format!("visit url:{}", quote_url));
 
-    let quote_response = match util::http::request_get_use_json::<QuoteResponse>(&quote_url).await {
-        Ok(r) => r,
-        Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to request_get_use_json({}) because {:?}",
-                quote_url, why
-            ));
-            return None;
-        }
-    };
+    let quote_response = util::http::get_use_json::<QuoteResponse>(&quote_url).await?;
 
-    let mut dqs: Vec<daily_quote::Entity> = Vec::with_capacity(2048);
+    let mut dqs: Vec<daily_quote::DailyQuote> = Vec::with_capacity(2048);
 
     for item in quote_response.aa_data {
-        let mut dq = daily_quote::Entity::from_with_exchange(StockExchange::TPEx, &item);
+        let mut dq = daily_quote::DailyQuote::from_with_exchange(StockExchange::TPEx, &item);
         //logging::debug_file_async(format!("item:{:?}", item));
 
         if dq.closing_price.is_zero()
@@ -139,7 +118,7 @@ pub async fn visit(date: DateTime<Local>) -> Option<Vec<daily_quote::Entity>> {
         dqs.push(dq);
     }
 
-    Some(dqs)
+    Ok(dqs)
 }
 
 #[cfg(test)]
@@ -162,12 +141,12 @@ mod tests {
         logging::debug_file_async("開始 visit".to_string());
 
         match visit(now).await {
-            None => {
-                logging::debug_file_async(
-                    "Failed to visit because response is no data".to_string(),
-                );
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
             }
-            Some(list) => logging::debug_file_async(format!("data({}):{:#?}", list.len(), list)),
+            Ok(list) => {
+                logging::debug_file_async(format!("data:{:#?}", list));
+            }
         }
 
         logging::debug_file_async("結束 visit".to_string());

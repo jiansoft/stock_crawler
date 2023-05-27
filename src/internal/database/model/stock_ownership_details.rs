@@ -2,11 +2,7 @@ use crate::internal::database::DB;
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{
-    postgres::PgQueryResult,
-    Postgres,
-    Transaction
-};
+use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 股票庫存 原表名 stock_ownership_details

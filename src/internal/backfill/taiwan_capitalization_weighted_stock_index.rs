@@ -5,15 +5,7 @@ use core::result::Result::Ok;
 
 /// 調用  twse API 取得台股加權指數
 pub async fn execute() -> Result<()> {
-    let tai_ex = match twse::taiwan_capitalization_weighted_stock_index::visit(Local::now()).await {
-        None => {
-            return Err(anyhow!(
-                "Failed to visit because response is no data".to_string()
-            ))
-        }
-        Some(result) => result,
-    };
-
+    let tai_ex = twse::taiwan_capitalization_weighted_stock_index::visit(Local::now()).await?;
     if tai_ex.stat.to_uppercase() != "OK" {
         logging::warn_file_async("抓取加權股價指數 Finish taiex.Stat is not ok".to_string());
         return Ok(());
@@ -36,6 +28,7 @@ pub async fn execute() -> Result<()> {
                     continue;
                 }
             };
+
             logging::debug_file_async(format!("index:{:?}", index));
             let key = index.date.to_string() + "_" + &index.category;
             if let Ok(indices) = SHARE.indices.read() {
@@ -70,7 +63,7 @@ pub async fn execute() -> Result<()> {
                     }
                 }
                 Err(why) => {
-                    logging::error_file_async(format!("Failed to upsert because {:?}", why));
+                    logging::error_file_async(format!("Failed to index.upsert because {:?}", why));
                 }
             }
         }

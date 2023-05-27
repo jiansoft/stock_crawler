@@ -22,7 +22,7 @@ pub async fn execute() -> Result<()> {
                         continue;
                     }
                 }
-                model::stock::Entity::from(item)
+                model::stock::Stock::from(item)
             }
             Err(_) => continue,
         };

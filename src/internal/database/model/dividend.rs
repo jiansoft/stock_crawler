@@ -4,7 +4,7 @@ use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
-    Row
+    Row,
 };
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone)]
@@ -118,7 +118,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     payout_ratio_cash = EXCLUDED.payout_ratio_cash,
     payout_ratio_stock = EXCLUDED.payout_ratio_stock,
     payout_ratio = EXCLUDED.payout_ratio;
-        "#;
+"#;
         let result = sqlx::query(sql)
             .bind(&self.security_code)
             .bind(self.year)

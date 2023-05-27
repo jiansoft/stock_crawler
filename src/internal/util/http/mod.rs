@@ -83,7 +83,7 @@ fn get_client() -> Result<&'static Client> {
 /// # Returns
 ///
 /// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
-pub async fn request_get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
+pub async fn get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
     request_send(Method::GET, url, None, None::<fn(_) -> _>)
         .await?
         .json::<RES>()
@@ -100,7 +100,7 @@ pub async fn request_get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RE
 /// # Returns
 ///
 /// * `Result<String>`: The response text, or an error if the request fails or the response cannot be parsed.
-pub async fn request_get(url: &str, headers: Option<header::HeaderMap>) -> Result<String> {
+pub async fn get(url: &str, headers: Option<header::HeaderMap>) -> Result<String> {
     request_send(Method::GET, url, headers, None::<fn(_) -> _>)
         .await?
         .text()
@@ -117,7 +117,7 @@ pub async fn request_get(url: &str, headers: Option<header::HeaderMap>) -> Resul
 /// # Returns
 ///
 /// * `Result<String>`: The Big5 encoded response text, or an error if the request fails or the response cannot be parsed.
-pub async fn request_get_use_big5(url: &str) -> Result<String> {
+pub async fn get_use_big5(url: &str) -> Result<String> {
     request_send(Method::GET, url, None, None::<fn(_) -> _>)
         .await?
         .text_force_big5()
@@ -141,7 +141,7 @@ pub async fn request_get_use_big5(url: &str) -> Result<String> {
 /// # Returns
 ///
 /// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
-pub async fn request_post_use_json<REQ, RES>(
+pub async fn post_use_json<REQ, RES>(
     url: &str,
     headers: Option<header::HeaderMap>,
     req: Option<&REQ>,
@@ -182,7 +182,7 @@ where
 ///
 /// * `Result<String>`: The response text, or an error if the request
 /// fails or the response cannot be parsed.
-pub async fn request_post(
+pub async fn post(
     url: &str,
     headers: Option<header::HeaderMap>,
     params: Option<HashMap<&str, &str>>,
@@ -258,7 +258,7 @@ mod tests {
         );
 
         logging::debug_file_async(format!("visit url:{}", url,));
-        logging::debug_file_async(format!("request_get:{:?}", request_get(&url, None).await));
+        logging::debug_file_async(format!("request_get:{:?}", get(&url, None).await));
 
         let bytes = reqwest::get("https://httpbin.org/ip")
             .await

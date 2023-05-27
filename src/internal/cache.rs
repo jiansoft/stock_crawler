@@ -13,9 +13,9 @@ pub struct Share {
     /// 存放台股歷年指數
     pub indices: RwLock<HashMap<String, index::Entity>>,
     /// 存放台股股票代碼
-    pub stocks: RwLock<HashMap<String, stock::Entity>>,
+    pub stocks: RwLock<HashMap<String, stock::Stock>>,
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
-    pub last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Entity>>>,
+    pub last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Revenue>>>,
     /// 存放最後交易日股票報價數據
     pub last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::Entity>>,
     /// 股票產業分類
@@ -120,7 +120,7 @@ impl Share {
             }
         }
 
-        let stocks = stock::Entity::fetch().await;
+        let stocks = stock::Stock::fetch().await;
         match self.stocks.write() {
             Ok(mut s) => {
                 if let Ok(result) = stocks {

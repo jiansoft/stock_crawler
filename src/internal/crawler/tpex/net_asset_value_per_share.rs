@@ -2,11 +2,7 @@ use crate::internal::{crawler::tpex, util};
 use anyhow::*;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
-use std::{
-    result::Result::Ok,
-    collections::HashMap,
-    str::FromStr
-};
+use std::{collections::HashMap, result::Result::Ok, str::FromStr};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 //#[serde(rename_all = "camelCase")]
@@ -36,7 +32,7 @@ pub async fn visit() -> Result<Vec<Emerging>> {
     params.insert("stk_market", "ALL");
     params.insert("stk_category", "02");
 
-    let response = util::http::request_post(&url, None, Some(params)).await?;
+    let response = util::http::post(&url, None, Some(params)).await?;
     let mut result: Vec<Emerging> = Vec::with_capacity(512);
     let document = Html::parse_document(&response);
     //#company_list > tbody > tr:nth-child(1)
@@ -60,10 +56,7 @@ pub async fn visit() -> Result<Vec<Emerging>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        internal::cache::SHARE,
-        internal::logging
-    };
+    use crate::{internal::cache::SHARE, internal::logging};
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 

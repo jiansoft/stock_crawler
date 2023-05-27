@@ -1,11 +1,11 @@
 use crate::internal::{
-    cache,
-    cache::{TtlCacheInner, TTL},
+    cache::{self, TtlCacheInner, TTL},
     database::model::daily_quote::{self, FromWithExchange},
     logging,
     util::http,
     StockExchange,
 };
+use anyhow::*;
 use chrono::{DateTime, Datelike, Local};
 use core::result::Result::Ok;
 use reqwest::header::HeaderMap;
@@ -37,7 +37,7 @@ async fn build_headers() -> HeaderMap {
 }
 
 /// 抓取上市公司每日收盤資訊
-pub async fn visit(date: DateTime<Local>) -> Option<Vec<daily_quote::Entity>> {
+pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>> {
     let date_str = date.format("%Y%m%d").to_string();
     let url = format!(
         "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date={}&type=ALLBUT0999&_={}",
@@ -49,22 +49,13 @@ pub async fn visit(date: DateTime<Local>) -> Option<Vec<daily_quote::Entity>> {
 
     let headers = build_headers().await;
     let data =
-        match http::request_post_use_json::<http::Empty, ListedResponse>(&url, Some(headers), None)
-            .await
-        {
-            Ok(data) => data,
-            Err(e) => {
-                logging::error_file_async(format!("Failed to fetch data from {}: {:?}", url, e));
-                return None;
-            }
-        };
-
+        http::post_use_json::<http::Empty, ListedResponse>(&url, Some(headers), None).await?;
     let mut dqs = Vec::with_capacity(2048);
 
     if let Some(twse_dqs) = &data.data9 {
         for item in twse_dqs {
             //logging::debug_file_async(format!("item:{:?}", item));
-            let mut dq = daily_quote::Entity::from_with_exchange(StockExchange::TWSE, item);
+            let mut dq = daily_quote::DailyQuote::from_with_exchange(StockExchange::TWSE, item);
 
             if dq.closing_price.is_zero()
                 && dq.highest_price.is_zero()
@@ -105,7 +96,7 @@ pub async fn visit(date: DateTime<Local>) -> Option<Vec<daily_quote::Entity>> {
         }
     }
 
-    Some(dqs)
+    Ok(dqs)
 }
 
 #[cfg(test)]
@@ -128,12 +119,12 @@ mod tests {
         logging::debug_file_async("開始 visit".to_string());
 
         match visit(now).await {
-            None => {
-                logging::debug_file_async(
-                    "Failed to visit because response is no data".to_string(),
-                );
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
             }
-            Some(list) => logging::debug_file_async(format!("data({}):{:#?}", list.len(), list)),
+            Ok(list) => {
+                logging::debug_file_async(format!("data:{:#?}", list));
+            }
         }
 
         logging::debug_file_async("結束 visit".to_string());

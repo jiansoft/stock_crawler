@@ -13,41 +13,32 @@ pub async fn execute() -> Result<()> {
     let last_month = naive_datetime - chrono::Duration::minutes(1);
     let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
     let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, timezone);
-    let results = match twse::revenue::visit(last_month_timezone).await {
-        None => return Ok(()),
-        Some(results) => {
-            if results.is_empty() {
-                return Ok(());
-            }
-            results
-        }
-    };
-
     let year = last_month_timezone.year();
     let month = last_month_timezone.month();
-
-    for mut item in results {
-        let mut stock = model::stock::Entity::new();
-        stock.stock_symbol = item.security_code.to_string();
-        if let Ok((lowest_price, avg_price, highest_price)) = stock
-            .lowest_avg_highest_price_by_year_and_month(year, month as i32)
-            .await
+    let revenues = twse::revenue::visit(last_month_timezone).await?;
+    for mut revenue in revenues {
+        if let Ok(dq) = model::daily_quote::fetch_monthly_stock_price_summary(
+            &revenue.security_code,
+            year,
+            month as i32,
+        )
+        .await
         {
-            item.lowest_price = lowest_price;
-            item.avg_price = avg_price;
-            item.highest_price = highest_price;
+            revenue.lowest_price = dq.lowest_price;
+            revenue.avg_price = dq.avg_price;
+            revenue.highest_price = dq.highest_price;
         }
 
-        if let Err(why) = item.upsert().await {
-            logging::error_file_async(format!("Failed to item.upsert because {:?}", why));
+        if let Err(why) = revenue.upsert().await {
+            logging::error_file_async(format!("Failed to revenue.upsert because {:?}", why));
             continue;
         }
 
         if let Ok(mut last_revenues) = SHARE.last_revenues.write() {
-            if let Some(last_revenue_date) = last_revenues.get_mut(&item.date) {
+            if let Some(last_revenue_date) = last_revenues.get_mut(&revenue.date) {
                 last_revenue_date
-                    .entry(item.security_code.to_string())
-                    .or_insert(item.clone());
+                    .entry(revenue.security_code.to_string())
+                    .or_insert(revenue.clone());
             }
         }
 
@@ -56,7 +47,7 @@ pub async fn execute() -> Result<()> {
             .read()
             .map(|stocks| {
                 stocks
-                    .get(item.security_code.as_str())
+                    .get(revenue.security_code.as_str())
                     .map_or("no name".to_string(), |stock| stock.name.to_string())
             })
             .unwrap_or_else(|why| {
@@ -67,14 +58,14 @@ pub async fn execute() -> Result<()> {
         logging::info_file_async(
             format!(
                 "公司代號:{}  公司名稱:{} 當月營收:{} 上月營收:{} 去年當月營收:{} 月均價:{} 最低價:{} 最高價:{}",
-                item.security_code,
+                revenue.security_code,
                 name,
-                item.monthly,
-                item.last_month,
-                item.last_year_this_month,
-                item.avg_price,
-                item.lowest_price,
-                item.highest_price))
+                revenue.monthly,
+                revenue.last_month,
+                revenue.last_year_this_month,
+                revenue.avg_price,
+                revenue.lowest_price,
+                revenue.highest_price))
     }
 
     model::revenue::rebuild_revenue_last_date().await?;

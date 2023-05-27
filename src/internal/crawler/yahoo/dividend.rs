@@ -82,7 +82,7 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
 
     logging::info_file_async(format!("visit url:{}", url,));
 
-    let text = http::request_get(&url, None).await?;
+    let text = http::get(&url, None).await?;
     let document = Html::parse_document(text.as_str());
     let selector = match Selector::parse(
         "#main-2-QuoteDividend-Proxy > div > section > div > div > div > div > ul > li",

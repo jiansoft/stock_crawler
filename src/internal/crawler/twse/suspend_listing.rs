@@ -17,8 +17,7 @@ pub struct SuspendListing {
 pub async fn visit() -> Result<Vec<SuspendListing>> {
     let url = "https://openapi.twse.com.tw/v1/company/suspendListingCsvAndHtml";
     logging::info_file_async(format!("visit url:{}", url));
-
-    util::http::request_get_use_json::<Vec<SuspendListing>>(url).await
+    util::http::get_use_json::<Vec<SuspendListing>>(url).await
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺
 
 /// twse 國際證券識別碼
 #[derive(Debug)]
-pub struct Entity {
+pub struct InternationalSecuritiesIdentificationNumber {
     //pub exchange: StockExchangeMarket,
     pub stock_symbol: String,
     pub name: String,
@@ -26,9 +26,9 @@ pub struct Entity {
     pub industry_id: i32,
 }
 
-impl Clone for Entity {
+impl Clone for InternationalSecuritiesIdentificationNumber {
     fn clone(&self) -> Self {
-        Entity {
+        InternationalSecuritiesIdentificationNumber {
             stock_symbol: self.stock_symbol.to_string(),
             name: self.name.to_string(),
             isin_code: self.isin_code.to_string(),
@@ -43,7 +43,9 @@ impl Clone for Entity {
 
 /// 調用  twse API 取得台股國際證券識別碼
 /// 上市:2 上櫃︰4 興櫃︰5
-pub async fn visit(mode: StockExchangeMarket) -> Result<Vec<Entity>> {
+pub async fn visit(
+    mode: StockExchangeMarket,
+) -> Result<Vec<InternationalSecuritiesIdentificationNumber>> {
     if Local::now().is_weekend() {
         return Ok(Vec::new());
     }
@@ -53,8 +55,8 @@ pub async fn visit(mode: StockExchangeMarket) -> Result<Vec<Entity>> {
         mode.serial_number()
     );
 
-    let response = util::http::request_get_use_big5(&url).await?;
-    let mut result: Vec<Entity> = Vec::with_capacity(4096);
+    let response = util::http::get_use_big5(&url).await?;
+    let mut result: Vec<InternationalSecuritiesIdentificationNumber> = Vec::with_capacity(4096);
     let document = Html::parse_document(&response);
 
     if let Ok(selector) = Selector::parse("body > table.h4 > tbody > tr") {
@@ -107,7 +109,7 @@ pub async fn visit(mode: StockExchangeMarket) -> Result<Vec<Entity>> {
                 Some(industry) => *industry,
             };
 
-            let isin = Entity {
+            let isin = InternationalSecuritiesIdentificationNumber {
                 stock_symbol: split[0].trim().to_owned(),
                 name: split[1].to_owned(),
                 isin_code: tds[1].to_owned(),

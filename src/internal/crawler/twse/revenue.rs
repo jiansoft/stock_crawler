@@ -1,13 +1,15 @@
 use crate::internal::{cache::SHARE, database::model::revenue, logging, util};
+use anyhow::*;
 use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
+use std::result::Result::Ok;
 
 /// 下載月營收
-pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Option<Vec<revenue::Entity>> {
+pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<revenue::Revenue>> {
     let year = date_time.year();
     let republic_of_china_era = year - 1911;
     let month = date_time.month();
-    let mut new_entity = Vec::with_capacity(1024);
+    let mut revenues = Vec::with_capacity(1024);
 
     for market in ["sii", "otc"].iter() {
         for i in 0..2 {
@@ -16,26 +18,22 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Option<Vec<reven
                 market, republic_of_china_era, month, i
             );
 
-            if let Some(r) = download_revenue(url, year, month).await {
-                new_entity.extend(r);
+            if let Ok(r) = download_revenue(url, year, month).await {
+                revenues.extend(r);
             }
         }
     }
 
-    if new_entity.is_empty() {
-        None
-    } else {
-        Some(new_entity)
-    }
+    Ok(revenues)
 }
 
 /// 下載月營收
-async fn download_revenue(url: String, year: i32, month: u32) -> Option<Vec<revenue::Entity>> {
+async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<revenue::Revenue>> {
     logging::info_file_async(format!("visit url:{}", url));
 
-    let text = util::http::request_get_use_big5(&url).await.ok()?;
-    let mut new_entity = Vec::with_capacity(1024);
-    let selector = Selector::parse("body > center > center > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr").ok()?;
+    let text = util::http::get_use_big5(&url).await?;
+    let mut revenues = Vec::with_capacity(1024);
+    let selector = Selector::parse("body > center > center > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr").map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
     let date = ((year * 100) + month as i32) as i64;
     let document = Html::parse_document(text.as_str());
     for node in document.select(&selector) {
@@ -55,12 +53,12 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Option<Vec<reve
             }
         }
 
-        let mut entity = revenue::Entity::from(tds);
+        let mut entity = revenue::Revenue::from(tds);
         entity.date = date;
-        new_entity.push(entity);
+        revenues.push(entity);
     }
 
-    Some(new_entity)
+    Ok(revenues)
 }
 
 #[cfg(test)]
@@ -87,6 +85,13 @@ mod tests {
         let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
         let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, timezone);
         println!("last_month_timezone:{:?}", last_month_timezone);
-        visit(last_month_timezone).await;
+        match visit(last_month_timezone).await {
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+            }
+            Ok(list) => {
+                logging::debug_file_async(format!("data:{:#?}", list));
+            }
+        }
     }
 }

@@ -12,15 +12,15 @@ use std::time::Duration;
 /// 調用  twse API 取得台股收盤報價
 pub async fn execute() -> Result<()> {
     let now = Local::now();
-    let mut results: Vec<daily_quote::Entity> = Vec::with_capacity(2048);
+    let mut results: Vec<daily_quote::DailyQuote> = Vec::with_capacity(2048);
 
     //上市報價
-    if let Some(twse) = twse::quote::visit(now).await {
+    if let Ok(twse) = twse::quote::visit(now).await {
         results.extend(twse);
     }
 
     //上櫃報價
-    if let Some(twse) = tpex::quote::visit(now).await {
+    if let Ok(twse) = tpex::quote::visit(now).await {
         results.extend(twse);
     }
 
@@ -63,7 +63,7 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-async fn process_item(item: daily_quote::Entity) {
+async fn process_item(item: daily_quote::DailyQuote) {
     match item.upsert().await {
         Ok(_) => {
             //logging::debug_file_async(format!("item:{:#?}", item));
@@ -130,7 +130,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
 
-        let stocks = stock::Entity::fetch().await.unwrap();
+        let stocks = stock::Stock::fetch().await.unwrap();
         let worker_count = num_cpus::get() * 100;
         //let dqs_arc = Arc::new(stocks);
         let counter = Arc::new(AtomicUsize::new(0));
@@ -158,7 +158,7 @@ mod tests {
         sleep(Duration::from_secs(1)).await;
     }
 
-    fn calculate_day_quotes_moving_average_worker(i: usize, dq: &stock::Entity) {
+    fn calculate_day_quotes_moving_average_worker(i: usize, dq: &stock::Stock) {
         logging::debug_file_async(format!("dq[{}]:{:?}", i, dq));
     }
 }

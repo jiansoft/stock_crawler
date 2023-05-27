@@ -77,7 +77,7 @@ pub async fn execute() -> Result<()> {
     }
 
     if success_update_count > 0 {
-        model::stock::Entity::update_last_eps().await?;
+        model::stock::Stock::update_last_eps().await?;
     }
 
     nosql::redis::CLIENT

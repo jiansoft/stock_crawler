@@ -64,10 +64,10 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
 }
 
 async fn update_stock_info(
-    stock: &twse::international_securities_identification_number::Entity,
+    stock: &twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber,
     msg: &mut String,
 ) -> Result<()> {
-    let stock = model::stock::Entity::from(stock.clone());
+    let stock = model::stock::Stock::from(stock.clone());
     stock.upsert().await.map_err(|e| {
         logging::error_file_async(format!("Failed to stock.upsert() because {:?}", e));
         anyhow!(e)

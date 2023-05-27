@@ -1,19 +1,21 @@
+pub(crate) mod extension;
+
 use crate::internal::{
     crawler::{tpex, twse},
     database::{
-        model::{stock_index, stock_word},
+        model::{stock::extension::StockJustWithSymbolAndName, stock_index, stock_word},
         DB,
     },
     logging, util,
 };
 use anyhow::{anyhow, Context, Result};
-use chrono::{DateTime, Datelike, Duration, Local};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 stocks
-pub struct Entity {
+pub struct Stock {
     pub stock_symbol: String,
     pub name: String,
     pub suspend_listing: bool,
@@ -25,9 +27,9 @@ pub struct Entity {
     pub stock_industry_id: i32,
 }
 
-impl Entity {
+impl Stock {
     pub fn new() -> Self {
-        Entity {
+        Stock {
             stock_symbol: "".to_string(),
             name: "".to_string(),
             suspend_listing: false,
@@ -193,34 +195,34 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
         }
     }
 
-    /// 依照指定的年月取得該股票其月份的最低、平均、最高價
-    pub async fn lowest_avg_highest_price_by_year_and_month(
-        &self,
-        year: i32,
-        month: i32,
-    ) -> Result<(Decimal, Decimal, Decimal)> {
-        let sql = r#"
-SELECT
-    MIN("LowestPrice"),
-    AVG("ClosingPrice"),
-    MAX("HighestPrice")
-FROM "DailyQuotes"
-WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
-GROUP BY "SecurityCode", year, month;
-"#;
-        let (lowest_price, avg_price, highest_price) =
-            sqlx::query_as::<_, (Decimal, Decimal, Decimal)>(sql)
-                .bind(&self.stock_symbol)
-                .bind(year)
-                .bind(month)
-                .fetch_one(&DB.pool)
-                .await?;
+    /*    /// 依照指定的年月取得該股票其月份的最低、平均、最高價
+        pub async fn lowest_avg_highest_price_by_year_and_month(
+            &self,
+            year: i32,
+            month: i32,
+        ) -> Result<(Decimal, Decimal, Decimal)> {
+            let sql = r#"
+    SELECT
+        MIN("LowestPrice"),
+        AVG("ClosingPrice"),
+        MAX("HighestPrice")
+    FROM "DailyQuotes"
+    WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
+    GROUP BY "SecurityCode", year, month;
+    "#;
+            let (lowest_price, avg_price, highest_price) =
+                sqlx::query_as::<_, (Decimal, Decimal, Decimal)>(sql)
+                    .bind(&self.stock_symbol)
+                    .bind(year)
+                    .bind(month)
+                    .fetch_one(&DB.pool)
+                    .await?;
 
-        Ok((lowest_price, avg_price, highest_price))
-    }
+            Ok((lowest_price, avg_price, highest_price))
+        }*/
 
     /// 取得所有股票
-    pub async fn fetch() -> Result<Vec<Entity>> {
+    pub async fn fetch() -> Result<Vec<Stock>> {
         let sql = r#"
 select
     stock_symbol, "Name" as name, "SuspendListing" as suspend_listing, "CreateTime" AS create_time,
@@ -232,7 +234,7 @@ order by
 "#;
         let answers = sqlx::query(sql)
             .try_map(|row: PgRow| {
-                Ok(Entity {
+                Ok(Stock {
                     stock_symbol: row.try_get("stock_symbol")?,
                     net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
                     name: row.try_get("name")?,
@@ -249,9 +251,9 @@ order by
     }
 }
 
-impl Clone for Entity {
+impl Clone for Stock {
     fn clone(&self) -> Self {
-        Entity {
+        Stock {
             stock_symbol: self.stock_symbol.clone(),
             name: self.name.clone(),
             suspend_listing: self.suspend_listing,
@@ -263,16 +265,16 @@ impl Clone for Entity {
     }
 }
 
-impl Default for Entity {
+impl Default for Stock {
     fn default() -> Self {
-        Entity::new()
+        Stock::new()
     }
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<twse::international_securities_identification_number::Entity> for Entity {
-    fn from(isin: twse::international_securities_identification_number::Entity) -> Self {
-        Entity {
+impl From<twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber> for Stock {
+    fn from(isin: twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber) -> Self {
+        Stock {
             stock_symbol: isin.stock_symbol,
             name: isin.name,
             suspend_listing: false,
@@ -285,9 +287,9 @@ impl From<twse::international_securities_identification_number::Entity> for Enti
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<tpex::net_asset_value_per_share::Emerging> for Entity {
+impl From<tpex::net_asset_value_per_share::Emerging> for Stock {
     fn from(tpex: tpex::net_asset_value_per_share::Emerging) -> Self {
-        Entity {
+        Stock {
             stock_symbol: tpex.stock_symbol,
             name: "".to_string(),
             suspend_listing: false,
@@ -300,7 +302,7 @@ impl From<tpex::net_asset_value_per_share::Emerging> for Entity {
 }
 
 /// 取得未下市每股淨值為零的股票
-pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<Entity>> {
+pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<Stock>> {
     let sql = r#"
 SELECT
     s.stock_symbol,
@@ -311,19 +313,19 @@ SELECT
     s.stock_exchange_market_id,
     s.stock_industry_id
 FROM stocks AS s
-WHERE stock_exchange_market_id in (2, 4)
+WHERE s.stock_exchange_market_id in (2, 4)
     AND s."SuspendListing" = false
     AND s.net_asset_value_per_share = 0
 "#;
 
-    Ok(sqlx::query_as::<_, Entity>(sql).fetch_all(&DB.pool).await?)
+    Ok(sqlx::query_as::<_, Stock>(sql).fetch_all(&DB.pool).await?)
 }
 
 /// 取得尚未有指定年度的季報的股票或者財報的每股淨值為零的股票
 pub async fn fetch_stocks_without_financial_statement(
     year: i32,
     quarter: &str,
-) -> Result<Vec<Entity>> {
+) -> Result<Vec<Stock>> {
     let sql = r#"
 SELECT
     s.stock_symbol,
@@ -334,7 +336,7 @@ SELECT
     stock_exchange_market_id,
     stock_industry_id
 FROM stocks AS s
-WHERE stock_exchange_market_id in(2, 4)
+WHERE s.stock_exchange_market_id in(2, 4)
     AND s."SuspendListing" = false
     AND
 (
@@ -351,9 +353,30 @@ WHERE stock_exchange_market_id in(2, 4)
 )
 "#;
 
-    Ok(sqlx::query_as::<_, Entity>(sql)
+    Ok(sqlx::query_as::<_, Stock>(sql)
         .bind(year)
         .bind(quarter)
+        .fetch_all(&DB.pool)
+        .await?)
+}
+
+/// 取得指定日期為除息權日的股票
+pub async fn fetch_stocks_with_dividends_on_date(
+    date: NaiveDate,
+) -> Result<Vec<StockJustWithSymbolAndName>> {
+    let sql = r#"
+SELECT s.stock_symbol, s."Name" as name
+FROM dividend as d
+INNER JOIN stocks as s ON s.stock_symbol = d.security_code
+WHERE d."year" = $1 AND (d."ex-dividend_date1" = $2 OR d."ex-dividend_date2" = $2);
+"#;
+
+    let year = date.year();
+    let date_str = date.format("%Y-%m-%d").to_string();
+
+    Ok(sqlx::query_as::<_, StockJustWithSymbolAndName>(sql)
+        .bind(year)
+        .bind(&date_str)
         .fetch_all(&DB.pool)
         .await?)
 }
@@ -369,12 +392,13 @@ pub fn is_preference_shares(stock_symbol: &str) -> bool {
 mod tests {
     use super::*;
     use crate::internal::logging;
+    use chrono::TimeZone;
 
     #[tokio::test]
     async fn test_fetch() {
         dotenv::dotenv().ok();
         //logging::info_file_async("開始 fetch".to_string());
-        let r = Entity::fetch().await;
+        let r = Stock::fetch().await;
         if let Ok(result) = r {
             for e in result {
                 logging::info_file_async(format!("{:#?} ", e));
@@ -383,11 +407,11 @@ mod tests {
         //logging::info_file_async("結束 fetch".to_string());
     }
 
-    #[tokio::test]
+    /*    #[tokio::test]
     async fn test_fetch_avg_lowest_highest_price() {
         dotenv::dotenv().ok();
         //logging::info_file_async("開始 fetch".to_string());
-        let mut e = Entity::new();
+        let mut e = Stock::new();
         e.stock_symbol = String::from("2402");
         match e.lowest_avg_highest_price_by_year_and_month(2023, 3).await {
             Ok((lowest_price, avg_price, highest_price)) => {
@@ -400,14 +424,8 @@ mod tests {
                 logging::error_file_async(format!("{:#?}", why));
             }
         }
-        /*let r = e.lowest_avg_highest_price_by_year_and_month(2023, 3).await;
-        if let Ok((lowest_price, avg_price, highest_price)) = r {
-            logging::info_file_async(format!(
-                "lowest_price:{} avg_price:{} highest_price:{}",
-                lowest_price, avg_price, highest_price
-            ));
-        }*/
-    }
+
+    }*/
 
     #[tokio::test]
     async fn test_fetch_net_asset_value_per_share_is_zero() {
@@ -452,9 +470,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_fetch_stocks_with_specified_ex_dividend_date() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_stocks_with_specified_ex_dividend_date".to_string());
+
+        let ex_date = Local.with_ymd_and_hms(2023, 4, 20, 0, 0, 0).unwrap();
+        let d = ex_date.date_naive();
+        match fetch_stocks_with_dividends_on_date(d).await {
+            Ok(cd) => {
+                logging::debug_file_async(format!("stock: {:?}", cd));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 fetch_stocks_with_specified_ex_dividend_date".to_string());
+    }
+
+    #[tokio::test]
     async fn test_create_index() {
         dotenv::dotenv().ok();
-        let mut e = Entity::new();
+        let mut e = Stock::new();
         e.stock_symbol = "2330".to_string();
         e.name = "台積電".to_string();
         e.create_index().await;
