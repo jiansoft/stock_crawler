@@ -1,8 +1,10 @@
-use crate::internal::database::DB;
+pub(crate) mod extension;
+
+use crate::internal::database::{model::dividend_record_detail::extension::CumulateDividend, DB};
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgRow, Postgres, Row, Transaction};
+use sqlx::{Postgres, Transaction};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 持股股息發放記錄表 原表名 dividend_record_detail
@@ -20,8 +22,8 @@ pub struct DividendRecordDetail {
     pub stock_money: Decimal,
     /// 合計股利(元)
     pub total: Decimal,
-    pub create_time: DateTime<Local>,
-    pub update_time: DateTime<Local>,
+    pub created_time: DateTime<Local>,
+    pub updated_time: DateTime<Local>,
 }
 
 impl DividendRecordDetail {
@@ -41,8 +43,8 @@ impl DividendRecordDetail {
             stock,
             stock_money,
             total,
-            create_time: Local::now(),
-            update_time: Local::now(),
+            created_time: Local::now(),
+            updated_time: Local::now(),
         }
     }
 
@@ -77,31 +79,11 @@ impl DividendRecordDetail {
     }
 
     /// 計算指定股票其累積的領取股利
-    pub async fn calculate_cumulate_dividend(
+    pub async fn fetch_cumulate_dividend(
         &self,
-    ) -> Result<(Decimal, Decimal, Decimal, Decimal)> {
-        let dividend = sqlx::query(
-            r#"
-select COALESCE(sum(cash), 0)        as cash,
-       COALESCE(sum(stock_money), 0) as stock_money,
-       COALESCE(sum(stock), 0)       as stock,
-       COALESCE(sum(total), 0)       as total
-from dividend_record_detail
-where stock_ownership_details_serial = $1;
-        "#,
-        )
-        .bind(self.stock_ownership_details_serial)
-        .try_map(|row: PgRow| {
-            let cash: Decimal = row.try_get("cash")?;
-            let stock_money: Decimal = row.try_get("stock_money")?;
-            let stock: Decimal = row.try_get("stock")?;
-            let total: Decimal = row.try_get("total")?;
-            Ok((cash, stock_money, stock, total))
-        })
-        .fetch_one(&DB.pool)
-        .await?;
-
-        Ok(dividend)
+        tx: Option<Transaction<'_, Postgres>>,
+    ) -> Result<CumulateDividend> {
+        CumulateDividend::fetch_cumulate_dividend(self.stock_ownership_details_serial, tx).await
     }
 }
 
@@ -128,8 +110,43 @@ impl Clone for DividendRecordDetail {
             stock: self.stock,
             stock_money: self.stock_money,
             total: self.total,
-            create_time: self.create_time,
-            update_time: self.update_time,
+            created_time: self.created_time,
+            updated_time: self.updated_time,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::internal::logging;
+
+    #[tokio::test]
+    async fn test_calculate_cumulate_dividend() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 calculate_cumulate_dividend".to_string());
+        let drd = DividendRecordDetail::new(
+            27,
+            2022,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        );
+        let mut tx_option: Option<Transaction<Postgres>> = Some(DB.pool.begin().await.unwrap());
+        match drd.fetch_cumulate_dividend(tx_option.take()).await {
+            Ok(cd) => {
+                logging::debug_file_async(format!("cd: {:?}", cd));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+            }
+        }
+
+        if let Some(tx) = tx_option {
+            tx.commit().await.unwrap();
+        }
+
+        logging::debug_file_async("結束 calculate_cumulate_dividend".to_string());
     }
 }

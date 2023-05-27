@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
-/// 持股股息發放記錄表 原表名 dividend_record_detail
+/// 持股股息發放記錄表 原表名 dividend_record_detail_more
 pub struct DividendRecordDetailMore {
     pub serial: i64,
     /// 持股名細表的編號

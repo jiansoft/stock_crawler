@@ -57,18 +57,19 @@ impl StockOwnershipDetail {
     /// 取得庫存股票的數據
     pub async fn fetch(security_codes: Option<Vec<String>>) -> Result<Vec<StockOwnershipDetail>> {
         let base_sql = "
-SELECT serial,
-   member_id,
-   security_code,
-   share_quantity,
-   holding_cost,
-   created_time,
-   share_price_average,
-   is_sold,
-   cumulate_dividends_cash,
-   cumulate_dividends_stock,
-   cumulate_dividends_stock_money,
-   cumulate_dividends_total
+SELECT
+    serial,
+    member_id,
+    security_code,
+    share_quantity,
+    holding_cost,
+    created_time,
+    share_price_average,
+    is_sold,
+    cumulate_dividends_cash,
+    cumulate_dividends_stock,
+    cumulate_dividends_stock_money,
+    cumulate_dividends_total
 FROM stock_ownership_details
 WHERE is_sold = false";
         let (sql, bind_params) = security_codes

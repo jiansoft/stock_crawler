@@ -1,10 +1,15 @@
 use crate::internal::database::DB;
 use anyhow::*;
 use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
-use core::result::Result::Ok;
+use std::{
+    result::Result::Ok,
+    str::FromStr
+};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, postgres::PgRow, Error, Row};
-use std::str::FromStr;
+use sqlx::{postgres::{
+    PgQueryResult,
+    PgRow
+}, Error, Row};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Entity {

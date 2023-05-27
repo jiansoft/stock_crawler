@@ -8,6 +8,7 @@ use crate::internal::{
     logging,
 };
 use anyhow::*;
+use dividend_record_detail::DividendRecordDetail;
 use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction};
 use std::result::Result::Ok;
@@ -41,6 +42,7 @@ pub async fn execute(year: i32, security_codes: Option<Vec<String>>) {
     logging::info_file_async("計算指定年份領取的股利結束".to_string());
 }
 
+/// 計算股票於該年度可以領取的股利
 async fn calculate_dividend(
     mut sod: stock_ownership_details::StockOwnershipDetail,
     year: i32,
@@ -58,7 +60,7 @@ async fn calculate_dividend(
     let dividend_stock = dividend_sum.1 * number_of_shares_held / Decimal::new(10, 0);
     let dividend_stock_money = dividend_sum.1 * number_of_shares_held;
     let dividend_total = dividend_sum.2 * number_of_shares_held;
-    let mut drd = dividend_record_detail::DividendRecordDetail::new(
+    let mut drd = DividendRecordDetail::new(
         sod.serial,
         year,
         dividend_cash,
@@ -116,8 +118,8 @@ async fn calculate_dividend(
         }
 
         // 計算指定股票其累積的領取股利
-        let cumulate_dividend = match drd.calculate_cumulate_dividend().await {
-            Ok(r) => r,
+        let cumulate_dividend = match drd.fetch_cumulate_dividend(tx_option.take()).await {
+            Ok(cd) => cd,
             Err(why) => {
                 if let Some(tx) = tx_option {
                     tx.rollback().await?;
@@ -129,11 +131,11 @@ async fn calculate_dividend(
             }
         };
 
-        let (cash, stock_money, stock, total) = cumulate_dividend;
-        sod.cumulate_dividends_cash = cash;
-        sod.cumulate_dividends_stock_money = stock_money;
-        sod.cumulate_dividends_stock = stock;
-        sod.cumulate_dividends_total = total;
+        sod.cumulate_dividends_cash = cumulate_dividend.cash;
+        sod.cumulate_dividends_stock_money = cumulate_dividend.stock_money;
+        sod.cumulate_dividends_stock = cumulate_dividend.stock;
+        sod.cumulate_dividends_total = cumulate_dividend.total;
+
         if let Err(why) = sod.update_cumulate_dividends(tx_option.take()).await {
             if let Some(tx) = tx_option {
                 tx.rollback().await?;
@@ -211,7 +213,7 @@ mod tests {
         logging::debug_file_async("開始 calculate".to_string());
         for i in 2014..2024 {
             execute(i, None).await;
-            logging::debug_file_async(format!("calculate({}) 完成" ,i));
+            logging::debug_file_async(format!("calculate({}) 完成", i));
         }
         logging::debug_file_async("結束 calculate".to_string());
     }

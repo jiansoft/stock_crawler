@@ -2,8 +2,10 @@ use crate::internal::{crawler::goodinfo, database::DB};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::postgres::{PgQueryResult, PgRow};
-use sqlx::Row;
+use sqlx::{
+    postgres::{PgQueryResult, PgRow},
+    Row
+};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone)]
 /// 股息發放日程表 原表名 dividend
