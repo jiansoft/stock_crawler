@@ -232,7 +232,7 @@ where security_code = $1
     and ("ex-dividend_date1" >= $4 or "ex-dividend_date2" >= $4);
 "#;
         let entities = sqlx::query(sql)
-            .bind(&security_code)
+            .bind(security_code)
             .bind(year)
             .bind(Local::now().format("%Y-%m-%d %H:%M:%S").to_string())
             .bind(stock_purchase_date.format("%Y-%m-%d %H:%M:%S").to_string())
@@ -244,7 +244,7 @@ where security_code = $1
     }
 
     /// 取得指定年度尚未有配息日的配息數據(有排除配息金額為 0)
-    pub async fn fetch_unannounced_date(year: i32) -> Result<Vec<Dividend>> {
+    pub async fn fetch_unpublished_dividends_for_year(year: i32) -> Result<Vec<Dividend>> {
         let sql = r#"
 SELECT
     serial,
@@ -434,7 +434,7 @@ mod tests {
     async fn test_fetch_unannounced_date() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_dividend_unannounced_date".to_string());
-        let r = Dividend::fetch_unannounced_date(2023).await;
+        let r = Dividend::fetch_unpublished_dividends_for_year(2023).await;
         if let Ok(result) = r {
             for e in result {
                 logging::debug_file_async(format!("{:?} ", e));

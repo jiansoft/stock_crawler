@@ -44,7 +44,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        let fs = model::financial_statement::Entity::from(profile);
+        let fs = model::financial_statement::FinancialStatement::from(profile);
 
         if let Err(why) = fs.upsert().await {
             logging::error_file_async(format!("Failed to upsert because {:?}", why));

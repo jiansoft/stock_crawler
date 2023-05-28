@@ -41,21 +41,21 @@ impl Entity {
 
     pub async fn fetch() -> Result<HashMap<String, Entity>> {
         const STMT: &str = r#"
-        SELECT
-            category,
-            "date",
-            trading_volume,
-            "transaction",
-            trade_value,
-            change,
-            index,
-            create_time,
-            update_time
-        FROM
-            index
-        ORDER BY
-            "date" DESC
-        LIMIT 30;
+SELECT
+    category,
+    "date",
+    trading_volume,
+    "transaction",
+    trade_value,
+    change,
+    index,
+    create_time,
+    update_time
+FROM
+    index
+ORDER BY
+    "date" DESC
+LIMIT 30;
     "#;
 
         let mut stream = sqlx::query_as::<_, Entity>(STMT).fetch(&DB.pool);

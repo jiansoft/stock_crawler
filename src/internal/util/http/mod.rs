@@ -45,8 +45,7 @@ pub trait TextForceBig5 {
 #[async_trait]
 impl TextForceBig5 for Response {
     async fn text_force_big5(mut self) -> Result<String> {
-        let data = self.bytes().await?.to_vec();
-        util::text::big5_2_utf8(data)
+        util::text::big5_2_utf8(self.bytes().await?.as_ref())
     }
 }
 
@@ -84,7 +83,7 @@ fn get_client() -> Result<&'static Client> {
 ///
 /// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
 pub async fn get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
-    request_send(Method::GET, url, None, None::<fn(_) -> _>)
+    send(Method::GET, url, None, None::<fn(_) -> _>)
         .await?
         .json::<RES>()
         .await
@@ -101,7 +100,7 @@ pub async fn get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
 ///
 /// * `Result<String>`: The response text, or an error if the request fails or the response cannot be parsed.
 pub async fn get(url: &str, headers: Option<header::HeaderMap>) -> Result<String> {
-    request_send(Method::GET, url, headers, None::<fn(_) -> _>)
+    send(Method::GET, url, headers, None::<fn(_) -> _>)
         .await?
         .text()
         .await
@@ -118,7 +117,7 @@ pub async fn get(url: &str, headers: Option<header::HeaderMap>) -> Result<String
 ///
 /// * `Result<String>`: The Big5 encoded response text, or an error if the request fails or the response cannot be parsed.
 pub async fn get_use_big5(url: &str) -> Result<String> {
-    request_send(Method::GET, url, None, None::<fn(_) -> _>)
+    send(Method::GET, url, None, None::<fn(_) -> _>)
         .await?
         .text_force_big5()
         .await
@@ -150,7 +149,7 @@ where
     REQ: Serialize,
     RES: DeserializeOwned,
 {
-    request_send(
+    send(
         Method::POST,
         url,
         headers,
@@ -187,7 +186,7 @@ pub async fn post(
     headers: Option<header::HeaderMap>,
     params: Option<HashMap<&str, &str>>,
 ) -> Result<String> {
-    request_send(
+    send(
         Method::POST,
         url,
         headers,
@@ -217,14 +216,14 @@ pub async fn post(
 /// # Returns
 ///
 /// * `Result<Response>`: The HTTP response, or an error if the request fails.
-async fn request_send(
+async fn send(
     method: Method,
     url: &str,
     headers: Option<header::HeaderMap>,
     body: Option<impl FnOnce(RequestBuilder) -> RequestBuilder>,
 ) -> Result<Response> {
-    let client = get_client()?;
-    let mut rb = client.request(method, url);
+    let _permit = SEMAPHORE.acquire().await;
+    let mut rb = get_client()?.request(method, url);
 
     if let Some(h) = headers {
         rb = rb.headers(h);
@@ -233,8 +232,6 @@ async fn request_send(
     if let Some(body_fn) = body {
         rb = body_fn(rb);
     }
-
-    let _permit = SEMAPHORE.acquire().await;
 
     rb.send()
         .await

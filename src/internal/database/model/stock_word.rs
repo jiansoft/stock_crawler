@@ -33,49 +33,23 @@ impl Entity {
     }
 
     /// 新增數據到資料庫後回傳新增的 word_id
-    pub async fn insert(&mut self) -> Result<i64> {
-        /*let mut transaction = DB.pool.begin().await?;
-        let query = "insert into company_word (word, created_time, updated_time) values ($1,$2,$3)
-            on conflict (word) do update set
-            word = excluded.word,
-            updated_time = excluded.updated_time
-            returning word_id;";
-
-        match sqlx::query_as::<Postgres, (i64,)>(query)
-            .bind(&self.word)
-            .bind(self.created_time)
-            .bind(self.updated_time)
-            .fetch_one(&mut transaction)
-            .await
-        {
-            Ok((last_insert_id,)) => {
-                transaction.commit().await?;
-                self.word_id = last_insert_id;
-                Ok(last_insert_id)
-            }
-            Err(why) => {
-                transaction.rollback().await?;
-                Err(anyhow!("{:?}", why))
-            }
-        }*/
-
-        let query = "INSERT INTO company_word (word, created_time, updated_time)
+    pub async fn upsert(&mut self) -> Result<i64> {
+        let sql = "INSERT INTO company_word (word, created_time, updated_time)
                  VALUES ($1, $2, $3)
                  ON CONFLICT (word) DO UPDATE SET
-                    word = EXCLUDED.word,
                     updated_time = EXCLUDED.updated_time
                  RETURNING word_id";
 
-        let row = sqlx::query(query)
+        let row = sqlx::query(sql)
             .bind(&self.word)
             .bind(self.created_time)
             .bind(self.updated_time)
             .fetch_one(&DB.pool)
             .await?;
 
-        let word_id: i64 = row.try_get("word_id")?;
-        self.word_id = word_id;
-        Ok(word_id)
+        self.word_id = row.try_get("word_id")?;
+
+        Ok(self.word_id)
     }
 
     /// 從資料表中取得公司代碼、名字拆字後的數據
@@ -200,7 +174,7 @@ mod tests {
     async fn test_insert() {
         dotenv::dotenv().ok();
         let mut e = Entity::new("小一".to_string());
-        match e.insert().await {
+        match e.upsert().await {
             Ok(word_id) => {
                 logging::info_file_async(format!("word_id:{} e:{:#?}", word_id, &e));
                 let _ = sqlx::query("delete from company_word where word_id = $1;")

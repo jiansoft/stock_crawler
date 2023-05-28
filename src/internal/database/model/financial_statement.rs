@@ -6,7 +6,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Entity {
+/// 財務報表
+pub struct FinancialStatement {
     updated_time: DateTime<Local>,
     created_time: DateTime<Local>,
     /// 季度 Q4 Q3 Q2 Q1
@@ -37,9 +38,9 @@ pub struct Entity {
     pub year: i32,
 }
 
-impl Entity {
+impl FinancialStatement {
     pub fn new(security_code: String) -> Self {
-        Entity {
+        FinancialStatement {
             updated_time: Default::default(),
             created_time: Default::default(),
             quarter: "".to_string(),
@@ -105,9 +106,9 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<yahoo::profile::Profile> for Entity {
+impl From<yahoo::profile::Profile> for FinancialStatement {
     fn from(fs: yahoo::profile::Profile) -> Self {
-        let mut e = Entity::new(fs.security_code);
+        let mut e = FinancialStatement::new(fs.security_code);
         e.updated_time = Local::now();
         e.created_time = Local::now();
         e.quarter = fs.quarter;

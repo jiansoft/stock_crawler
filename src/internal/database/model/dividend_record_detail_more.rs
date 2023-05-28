@@ -54,9 +54,12 @@ impl DividendRecordDetailMore {
     pub async fn upsert(&mut self, tx: Option<Transaction<'_, Postgres>>) -> Result<i64> {
         let sql = r#"
 INSERT INTO dividend_record_detail_more (
-    stock_ownership_details_serial, dividend_record_detail_serial, dividend_serial, cash, stock_money, stock, total,created_time, updated_time)
+    stock_ownership_details_serial,
+    dividend_record_detail_serial,
+    dividend_serial, cash, stock_money,
+    stock, total, created_time, updated_time)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-ON CONFLICT (stock_ownership_details_serial,dividend_record_detail_serial, dividend_serial)
+ON CONFLICT (stock_ownership_details_serial, dividend_record_detail_serial, dividend_serial)
 DO UPDATE SET
     total = EXCLUDED.total,
     cash = EXCLUDED.cash,

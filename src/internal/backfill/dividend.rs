@@ -106,7 +106,7 @@ async fn processing_without_or_multiple(year: i32) -> Result<()> {
 
 async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     //除息日 尚未公布
-    let dividends = dividend::Dividend::fetch_unannounced_date(year).await?;
+    let dividends = dividend::Dividend::fetch_unpublished_dividends_for_year(year).await?;
     logging::info_file_async(format!("本次除息日的採集需收集 {} 家", dividends.len()));
     for mut entity in dividends {
         let yahoo = match yahoo::dividend::visit(&entity.security_code).await {

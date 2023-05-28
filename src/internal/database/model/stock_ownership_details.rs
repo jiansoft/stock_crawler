@@ -143,15 +143,14 @@ WHERE is_sold = false";
         tx: Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
-update
-    stock_ownership_details
-set
+UPDATE stock_ownership_details
+SET
     cumulate_dividends_cash = $2,
-    cumulate_dividends_stock= $3,
-    cumulate_dividends_stock_money= $4,
-    cumulate_dividends_total= $5
-where
-    serial = $1;
+    cumulate_dividends_stock = $3,
+    cumulate_dividends_stock_money = $4,
+    cumulate_dividends_total = $5
+WHERE
+    serial = $1
 "#;
         let query = sqlx::query(sql)
             .bind(self.serial)
@@ -166,109 +165,6 @@ where
 
         Ok(result)
     }
-
-    /*/// 計算指定年份與股票其領取的股利，如果股利並非零時將數據更新到 dividend_record_detail 表
-        pub async fn calculate_dividend_and_upsert(
-            &self,
-            year: i32,
-        ) -> Result<dividend_record_detail::DividendRecordDetail> {
-            //計算股票於該年度可以領取的股利
-            let dividend = sqlx::query(
-                r#"
-    select
-        COALESCE(sum(cash_dividend),0) as cash,
-        COALESCE(sum(stock_dividend),0) as stock,
-        COALESCE(sum(sum),0) as sum
-    from dividend
-    where security_code = $1
-        and year = $2
-        and ("ex-dividend_date1" >= $3 or "ex-dividend_date2" >= $3)
-        and ("ex-dividend_date1" <= $4);
-            "#,
-            )
-            .bind(&self.security_code)
-            .bind(year)
-            .bind(self.created_time.format("%Y-%m-%d 00:00:00").to_string())
-            .bind(Local::now().format("%Y-%m-%d 00:00:00").to_string())
-            .try_map(|row: PgRow| {
-                let cash: Decimal = row.try_get("cash")?;
-                let stock: Decimal = row.try_get("stock")?;
-                let sum: Decimal = row.try_get("sum")?;
-                Ok((cash, stock, sum))
-            })
-            .fetch_one(&DB.pool)
-            .await?;
-
-            /*
-            某公司股價100元配現金0.7元、配股3.6元(以一張為例)
-            現金股利＝1張ｘ1000股x股利0.7元=700元
-            股票股利＝1張x1000股x股利0.36=360股 (股票股利須除以發行面額10元)
-            20048 *(0.5/10)
-            */
-
-            let number_of_shares_held = Decimal::new(self.share_quantity, 0);
-            let dividend_cash = dividend.0 * number_of_shares_held;
-            let dividend_stock = dividend.1 * number_of_shares_held / Decimal::new(10, 0);
-            let dividend_stock_money = dividend.1 * number_of_shares_held;
-            let dividend_total = dividend.2 * number_of_shares_held;
-            let mut drd = dividend_record_detail::DividendRecordDetail::new(
-                self.serial,
-                year,
-                dividend_cash,
-                dividend_stock,
-                dividend_stock_money,
-                dividend_total,
-            );
-
-            let mut tx_option: Option<Transaction<Postgres>> = Some(DB.pool.begin().await?);
-
-            let dividend_record_detail_serial = match drd.upsert(tx_option.take()).await {
-                Ok(serial) => serial,
-                Err(why) => {
-                    if let Some(tx) = tx_option {
-                        tx.rollback().await?;
-                    }
-                    return Err(anyhow!(
-                        "Failed to execute upsert query for dividend_record_detail because {:?}",
-                        why
-                    ));
-                }
-            };
-
-            let mut e = model::dividend::Dividend::new();
-            e.security_code = self.security_code.to_string();
-            e.year = year;
-            let dividends = model::dividend::Dividend::fetch_dividends_summary_by_date(
-                &self.security_code,
-                e.year,
-                self.created_time,
-            )
-            .await?;
-            for dividend in dividends {
-                //寫入領取細節
-                let dividend_cash = dividend.cash_dividend * number_of_shares_held;
-                let dividend_stock =
-                    dividend.stock_dividend * number_of_shares_held / Decimal::new(10, 0);
-                let dividend_stock_money = dividend.stock_dividend * number_of_shares_held;
-                let dividend_total = dividend.sum * number_of_shares_held;
-
-                let mut e = dividend_record_detail_more::DividendRecordDetailMore::new(
-                    dividend_record_detail_serial,
-                    dividend.serial,
-                    dividend_cash,
-                    dividend_stock,
-                    dividend_stock_money,
-                    dividend_total,
-                );
-                e.upsert(tx_option.take()).await?;
-            }
-
-            if let Some(tx) = tx_option {
-                tx.commit().await?;
-            }
-
-            Ok(drd)
-        }*/
 }
 
 impl Default for StockOwnershipDetail {

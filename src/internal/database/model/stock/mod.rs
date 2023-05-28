@@ -171,7 +171,7 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
                 }
                 None => {
                     let mut stock_word_e = stock_word::Entity::new(word);
-                    match stock_word_e.insert().await {
+                    match stock_word_e.upsert().await {
                         Ok(word_id) => {
                             stock_index_e.word_id = word_id;
                         }

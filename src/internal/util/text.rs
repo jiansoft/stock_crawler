@@ -1,8 +1,10 @@
 use anyhow::*;
-use core::result::Result::{Ok, *};
 use encoding::{DecoderTrap, Encoding};
 use rust_decimal::Decimal;
-use std::{collections::HashSet, str::FromStr};
+use std::{
+    collections::HashSet,
+    str::FromStr,
+};
 
 const DECIMAL_ESCAPE_CHAR: &[char] = &['%', ' ', ','];
 
@@ -14,30 +16,30 @@ pub fn big5_to_utf8(text: &str) -> Result<String> {
         vec.push(c as u8);
     }
 
-    big5_2_utf8(vec)
+    big5_2_utf8(vec.as_ref())
 }
 
 /// Converts a Big5 encoded `Vec<u8>` to a UTF-8 `String`.
 ///
 /// This function tries to decode the input `Vec<u8>` using the BIG5_2003 encoding
 /// and then re-encodes the decoded string using the UTF-8 encoding.
-/// If any of the decoding steps fail, it logs the error and returns None.
+/// If any of the decoding steps fail, it generates an error and returns it wrapped in `Result`.
 ///
 /// # Arguments
 ///
-/// * `data: Vec<u8>`: The input vector of bytes containing Big5 encoded text.
+/// * `data: &[u8]`: The input vector of bytes containing Big5 encoded text.
 ///
 /// # Returns
 ///
-/// * `Option<String>`: A UTF-8 encoded string if the conversion is successful, or None if an error occurs.
-pub fn big5_2_utf8(data: Vec<u8>) -> Result<String> {
-    match encoding::all::BIG5_2003.decode(&data, DecoderTrap::Ignore) {
-        Ok(big5) => match encoding::all::UTF_8.decode(big5.as_bytes(), DecoderTrap::Ignore) {
-            Ok(utf8) => Ok(utf8),
-            Err(why) => Err(anyhow!("Failed to UTF_8.decode because: {:?}", why)),
-        },
-        Err(why) => Err(anyhow!("Failed to BIG5_2003.decode because: {:?}", why)),
-    }
+/// * `Result<String>`: A UTF-8 encoded string if the conversion is successful, or an error if the conversion fails.
+pub fn big5_2_utf8(data: &[u8]) -> Result<String> {
+    let big5 = encoding::all::BIG5_2003
+        .decode(data, DecoderTrap::Ignore)
+        .map_err(|why| anyhow!(format!("Failed to BIG5_2003.decode because {:?}", why)))?;
+
+    encoding::all::UTF_8
+        .decode(big5.as_bytes(), DecoderTrap::Ignore)
+        .map_err(|why| anyhow!(format!("Failed to UTF_8.decode because {:?}", why)))
 }
 
 /// 將中文字拆分 例︰台積電 => ["台", "台積", "台積電", "積", "積電", "電"]
