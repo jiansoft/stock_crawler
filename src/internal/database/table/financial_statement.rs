@@ -1,9 +1,10 @@
-use crate::internal::{crawler::yahoo, database::DB};
+use crate::internal::{crawler::yahoo, database};
 use anyhow::*;
 use chrono::{DateTime, Local};
 use core::result::Result::Ok;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sqlx::postgres::PgQueryResult;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 /// 財務報表
@@ -60,7 +61,7 @@ impl FinancialStatement {
         }
     }
 
-    pub async fn upsert(&self) -> Result<()> {
+    pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO financial_statement (
     security_code, "year", quarter, gross_profit, operating_profit_margin,
@@ -81,7 +82,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     return_on_assets = EXCLUDED.return_on_assets,
     updated_time = EXCLUDED.updated_time;
 "#;
-        sqlx::query(sql)
+        let result = sqlx::query(sql)
             .bind(&self.security_code)
             .bind(self.year)
             .bind(&self.quarter)
@@ -97,11 +98,11 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .bind(self.return_on_assets)
             .bind(self.created_time)
             .bind(self.updated_time)
-            .execute(&DB.pool)
+            .execute(database::get_pool()?)
             .await
             .map_err(|err| anyhow!("Failed to financial_statement upsert because: {:?}", err))?;
 
-        Ok(())
+        Ok(result)
     }
 }
 

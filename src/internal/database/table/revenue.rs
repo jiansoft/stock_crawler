@@ -1,10 +1,10 @@
-use crate::internal::database::DB;
+use crate::internal::database;
 use anyhow::*;
 use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
-    Error, Row,
+    Row,
 };
 use std::{result::Result::Ok, str::FromStr};
 
@@ -58,7 +58,7 @@ impl Revenue {
         }
     }
 
-    pub async fn upsert(&self) -> Result<PgQueryResult, Error> {
+    pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
 insert into "Revenue" (
     "SecurityCode","Date","Monthly", "LastMonth", "LastYearThisMonth", "MonthlyAccumulated",
@@ -82,7 +82,7 @@ on conflict ("SecurityCode", "Date") do update set
     "lowest_price" = excluded."lowest_price",
     "highest_price" = excluded."highest_price";
 "#;
-        sqlx::query(sql)
+        Ok(sqlx::query(sql)
             .bind(self.security_code.as_str())
             .bind(self.date)
             .bind(self.monthly)
@@ -96,8 +96,8 @@ on conflict ("SecurityCode", "Date") do update set
             .bind(self.avg_price)
             .bind(self.lowest_price)
             .bind(self.highest_price)
-            .execute(&DB.pool)
-            .await
+            .execute(database::get_pool()?)
+            .await?)
     }
 }
 
@@ -200,7 +200,7 @@ impl From<Vec<String>> for Revenue {
     }
 }
 
-pub async fn fetch_last_two_month() -> Result<Vec<Revenue>, Error> {
+pub async fn fetch_last_two_month() -> Result<Vec<Revenue>> {
     let now = Local::now();
     //now.offset()
     //let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
@@ -221,7 +221,7 @@ pub async fn fetch_last_two_month() -> Result<Vec<Revenue>, Error> {
     let last_month_int = (last_month_timezone.year() * 100) + last_month_timezone.month() as i32;
     let two_month_ago_int =
         (two_month_ago_timezone.year() * 100) + two_month_ago_timezone.month() as i32;
-    sqlx::query(
+    let revenue = sqlx::query(
         r#"
 select
     "SecurityCode",
@@ -278,8 +278,10 @@ order by "Serial" desc
             create_time,
         })
     })
-    .fetch_all(&DB.pool)
-    .await
+    .fetch_all(database::get_pool()?)
+    .await?;
+
+    Ok(revenue)
 }
 
 pub async fn rebuild_revenue_last_date() -> Result<PgQueryResult> {
@@ -308,7 +310,7 @@ DO UPDATE SET
     serial = excluded.serial,
     created_time = now();
 "#;
-    Ok(sqlx::query(sql).execute(&DB.pool).await?)
+    Ok(sqlx::query(sql).execute(database::get_pool()?).await?)
 }
 
 #[cfg(test)]

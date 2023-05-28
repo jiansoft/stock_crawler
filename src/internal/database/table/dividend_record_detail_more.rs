@@ -1,4 +1,4 @@
-use crate::internal::database::DB;
+use crate::internal::database;
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
@@ -80,7 +80,7 @@ RETURNING serial;
             .bind(self.updated_time);
 
         let row: (i64,) = match tx {
-            None => query.fetch_one(&DB.pool).await?,
+            None => query.fetch_one(database::get_pool()?).await?,
             Some(mut t) => query.fetch_one(&mut t).await?,
         };
 
@@ -109,7 +109,7 @@ mod tests {
             Decimal::ZERO,
             Decimal::ZERO,
         );
-        let mut tx_option: Option<Transaction<Postgres>> = Some(DB.pool.begin().await.unwrap());
+        let mut tx_option: Option<Transaction<Postgres>> = Some(database::get_pool().unwrap().begin().await.unwrap());
         match e.upsert(tx_option.take()).await {
             Ok(word_id) => {
                 logging::debug_file_async(format!("serial:{} e:{:#?}", word_id, &e));

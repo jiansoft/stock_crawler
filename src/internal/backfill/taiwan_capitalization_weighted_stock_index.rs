@@ -18,7 +18,7 @@ pub async fn execute() -> Result<()> {
                 continue;
             }
 
-            let index = match table::index::Entity::from_strings(&item) {
+            let index = match table::index::Index::from_strings(&item) {
                 Ok(i) => i,
                 Err(why) => {
                     logging::error_file_async(format!(

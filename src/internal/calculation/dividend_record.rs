@@ -1,9 +1,9 @@
 use crate::internal::{
     database::{
+        self,
         table::{
             dividend, dividend_record_detail, dividend_record_detail_more, stock_ownership_details,
         },
-        DB,
     },
     logging,
 };
@@ -69,7 +69,7 @@ async fn calculate_dividend(
         dividend_total,
     );
 
-    let mut tx_option: Option<Transaction<Postgres>> = Some(DB.pool.begin().await?);
+    let mut tx_option: Option<Transaction<Postgres>> = Some(database::get_pool()?.begin().await?);
     //更新股利領取記錄
     let dividend_record_detail_serial = match drd.upsert(tx_option.take()).await {
         Ok(serial) => serial,

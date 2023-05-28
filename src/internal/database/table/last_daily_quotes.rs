@@ -1,4 +1,4 @@
-use crate::internal::database::DB;
+use crate::internal::database;
 use anyhow::Result;
 use chrono::NaiveDate;
 use core::result::Result::Ok;
@@ -32,7 +32,7 @@ from
     last_daily_quotes
 "#,
         )
-        .fetch_all(&DB.pool)
+        .fetch_all(database::get_pool()?)
         .await?)
     }
 

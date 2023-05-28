@@ -3,12 +3,12 @@ pub(crate) mod extension;
 use crate::internal::{
     crawler::{tpex, twse},
     database::{
+        self,
         table::{stock::extension::StockJustWithSymbolAndName, stock_index, stock_word},
-        DB,
     },
     logging, util,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
@@ -84,7 +84,7 @@ where eps.security_code = stocks.stock_symbol;
         Ok(sqlx::query(sql)
             .bind(now.year())
             .bind(one_year_ago.year())
-            .execute(&DB.pool)
+            .execute(database::get_pool()?)
             .await?)
     }
 
@@ -101,12 +101,12 @@ where
         sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(self.net_asset_value_per_share)
-            .execute(&DB.pool)
+            .execute(database::get_pool()?)
             .await
             .context("Failed to update net_asset_value_per_share")
     }
 
-    pub async fn update_suspend_listing(&self) -> Result<()> {
+    pub async fn update_suspend_listing(&self) -> Result<PgQueryResult> {
         let sql = r#"
 update
     stocks
@@ -115,18 +115,15 @@ set
 where
     stock_symbol = $1;
 "#;
-
-        sqlx::query(sql)
+        Ok(sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(self.suspend_listing)
-            .execute(&DB.pool)
-            .await
-            .map_err(|err| anyhow!("Failed to update suspend listing: {:?}", err))?;
-        Ok(())
+            .execute(database::get_pool()?)
+            .await?)
     }
 
     /// 衝突時更新 "Name" "SuspendListing" stock_exchange_market_id stock_industry_id
-    pub async fn upsert(&self) -> Result<()> {
+    pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO stocks (
     stock_symbol, "Name", "CreateTime",
@@ -138,18 +135,17 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
     stock_exchange_market_id = EXCLUDED.stock_exchange_market_id,
     stock_industry_id = EXCLUDED.stock_industry_id;
 "#;
-        sqlx::query(sql)
+        let result = sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(&self.name)
             .bind(self.create_time)
             .bind(self.suspend_listing)
             .bind(self.stock_exchange_market_id)
             .bind(self.stock_industry_id)
-            .execute(&DB.pool)
-            .await
-            .map_err(|err| anyhow!("Failed to stock upsert: {:?}", err))?;
+            .execute(database::get_pool()?)
+            .await?;
         self.create_index().await;
-        Ok(())
+        Ok(result)
     }
 
     async fn create_index(&self) {
@@ -158,11 +154,11 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
         words.push(self.stock_symbol.to_string());
 
         // 查詢已存在的單詞，轉成 hashmap 方便查詢
-        let words_in_db = stock_word::Entity::list_by_word(&words).await;
-        let exist_words = stock_word::vec_to_hashmap_key_using_word(words_in_db);
+        let words_in_db = stock_word::StockWord::list_by_word(&words).await;
+        let exist_words = stock_word::vec_to_hashmap_key_using_word(words_in_db.ok());
 
         for word in words {
-            let mut stock_index_e = stock_index::Entity::new(self.stock_symbol.to_string());
+            let mut stock_index_e = stock_index::StockIndex::new(self.stock_symbol.to_string());
 
             match exist_words.get(&word) {
                 Some(w) => {
@@ -170,7 +166,7 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
                     stock_index_e.word_id = w.word_id;
                 }
                 None => {
-                    let mut stock_word_e = stock_word::Entity::new(word);
+                    let mut stock_word_e = stock_word::StockWord::new(word);
                     match stock_word_e.upsert().await {
                         Ok(word_id) => {
                             stock_index_e.word_id = word_id;
@@ -224,13 +220,19 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
     /// 取得所有股票
     pub async fn fetch() -> Result<Vec<Stock>> {
         let sql = r#"
-select
-    stock_symbol, "Name" as name, "SuspendListing" as suspend_listing, "CreateTime" AS create_time,
-    net_asset_value_per_share, stock_exchange_market_id, stock_industry_id
-from
+SELECT
+    stock_symbol,
+    "Name" AS name,
+    "SuspendListing" AS suspend_listing,
+    "CreateTime" AS create_time,
+    net_asset_value_per_share,
+    stock_exchange_market_id,
+    stock_industry_id
+FROM
     stocks
-order by
-     stock_exchange_market_id, stock_industry_id;
+ORDER BY
+    stock_exchange_market_id,
+    stock_industry_id;
 "#;
         let answers = sqlx::query(sql)
             .try_map(|row: PgRow| {
@@ -244,7 +246,7 @@ order by
                     stock_industry_id: row.try_get("stock_industry_id")?,
                 })
             })
-            .fetch_all(&DB.pool)
+            .fetch_all(database::get_pool()?)
             .await?;
 
         Ok(answers)
@@ -318,7 +320,9 @@ WHERE s.stock_exchange_market_id in (2, 4)
     AND s.net_asset_value_per_share = 0
 "#;
 
-    Ok(sqlx::query_as::<_, Stock>(sql).fetch_all(&DB.pool).await?)
+    Ok(sqlx::query_as::<_, Stock>(sql)
+        .fetch_all(database::get_pool()?)
+        .await?)
 }
 
 /// 取得尚未有指定年度的季報的股票或者財報的每股淨值為零的股票
@@ -356,7 +360,7 @@ WHERE s.stock_exchange_market_id in(2, 4)
     Ok(sqlx::query_as::<_, Stock>(sql)
         .bind(year)
         .bind(quarter)
-        .fetch_all(&DB.pool)
+        .fetch_all(database::get_pool()?)
         .await?)
 }
 
@@ -365,10 +369,16 @@ pub async fn fetch_stocks_with_dividends_on_date(
     date: NaiveDate,
 ) -> Result<Vec<StockJustWithSymbolAndName>> {
     let sql = r#"
-SELECT s.stock_symbol, s."Name" as name
-FROM dividend as d
-INNER JOIN stocks as s ON s.stock_symbol = d.security_code
-WHERE d."year" = $1 AND (d."ex-dividend_date1" = $2 OR d."ex-dividend_date2" = $2);
+SELECT
+    s.stock_symbol,
+    s."Name" AS name
+FROM
+    dividend AS d
+INNER JOIN
+    stocks AS s ON s.stock_symbol = d.security_code
+WHERE
+    d."year" = $1
+    AND (d."ex-dividend_date1" = $2 OR d."ex-dividend_date2" = $2);
 "#;
 
     let year = date.year();
@@ -377,7 +387,7 @@ WHERE d."year" = $1 AND (d."ex-dividend_date1" = $2 OR d."ex-dividend_date2" = $
     Ok(sqlx::query_as::<_, StockJustWithSymbolAndName>(sql)
         .bind(year)
         .bind(&date_str)
-        .fetch_all(&DB.pool)
+        .fetch_all(database::get_pool()?)
         .await?)
 }
 

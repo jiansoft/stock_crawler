@@ -1,4 +1,4 @@
-use crate::internal::{database::DB, logging, util};
+use crate::internal::{database, logging, util};
 use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use concat_string::concat_string;
@@ -8,7 +8,7 @@ use sqlx::{self, FromRow};
 use std::{collections::HashMap, str::FromStr};
 
 #[derive(sqlx::Type, FromRow, Debug)]
-pub struct Entity {
+pub struct Index {
     pub category: String,
     pub date: NaiveDate,
     pub index: Decimal,
@@ -24,9 +24,9 @@ pub struct Entity {
     pub update_time: chrono::DateTime<Local>,
 }
 
-impl Entity {
+impl Index {
     pub fn new() -> Self {
-        Entity {
+        Index {
             category: Default::default(),
             date: Default::default(),
             index: Default::default(),
@@ -39,7 +39,7 @@ impl Entity {
         }
     }
 
-    pub async fn fetch() -> Result<HashMap<String, Entity>> {
+    pub async fn fetch() -> Result<HashMap<String, Index>> {
         const STMT: &str = r#"
 SELECT
     category,
@@ -58,7 +58,7 @@ ORDER BY
 LIMIT 30;
     "#;
 
-        let mut stream = sqlx::query_as::<_, Entity>(STMT).fetch(&DB.pool);
+        let mut stream = sqlx::query_as::<_, Index>(STMT).fetch(database::get_pool()?);
 
         let mut indices = HashMap::with_capacity(30);
 
@@ -88,7 +88,7 @@ LIMIT 30;
             .parse::<i64>()
             .map_err(|why| anyhow!(format!("轉換資料日期發生錯誤. because {:?}", why)))?;
 
-        let mut index = Entity::new();
+        let mut index = Index::new();
 
         let date = concat_string!(
             (year + 1911).to_string(),
@@ -130,15 +130,15 @@ insert into index (
             .bind(self.index)
             .bind(self.create_time)
             .bind(self.update_time)
-            .execute(&DB.pool)
+            .execute(database::get_pool()?)
             .await?;
         Ok(())
     }
 }
 
-impl Clone for Entity {
+impl Clone for Index {
     fn clone(&self) -> Self {
-        Entity {
+        Index {
             category: self.category.clone(),
             date: self.date,
             trade_value: self.trade_value,
@@ -152,13 +152,13 @@ impl Clone for Entity {
     }
 }
 
-impl Default for Entity {
+impl Default for Index {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl From<Vec<String>> for Entity {
+impl From<Vec<String>> for Index {
     fn from(item: Vec<String>) -> Self {
         let now = Local::now();
         let dy = (now.year() - 1911).to_string();
@@ -178,7 +178,7 @@ impl From<Vec<String>> for Entity {
             }
         };
 
-        let mut index = Entity::new();
+        let mut index = Index::new();
         index.category = String::from("TAIEX");
         let date = concat_string!(
             (year + 1911).to_string(),
@@ -233,7 +233,7 @@ mod tests {
     #[tokio::test]
     async fn test_index_fetch() {
         dotenv::dotenv().ok();
-        let r = Entity::fetch().await.unwrap();
+        let r = Index::fetch().await.unwrap();
         for e in r.iter() {
             logging::info_file_async(format!("e.date {:?} e.index {:?}", e.1.date, e.1.index));
         }

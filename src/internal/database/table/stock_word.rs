@@ -1,21 +1,21 @@
-use crate::internal::{database::DB, logging};
-use anyhow::Result;
+use crate::internal::database;
+use anyhow::*;
 use chrono::{DateTime, Local};
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
-use std::collections::HashMap;
+use std::{collections::HashMap, result::Result::Ok};
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
-pub struct Entity {
+pub struct StockWord {
     pub word_id: i64,
     pub word: String,
     pub created_time: DateTime<Local>,
     pub updated_time: DateTime<Local>,
 }
 
-impl Entity {
+impl StockWord {
     pub fn new(word: String) -> Self {
-        Entity {
+        StockWord {
             word_id: Default::default(),
             word,
             created_time: Local::now(),
@@ -24,7 +24,7 @@ impl Entity {
     }
 
     pub fn clone(&self) -> Self {
-        Entity {
+        StockWord {
             word_id: self.word_id,
             word: self.word.to_string(),
             created_time: self.created_time,
@@ -34,17 +34,18 @@ impl Entity {
 
     /// 新增數據到資料庫後回傳新增的 word_id
     pub async fn upsert(&mut self) -> Result<i64> {
-        let sql = "INSERT INTO company_word (word, created_time, updated_time)
-                 VALUES ($1, $2, $3)
-                 ON CONFLICT (word) DO UPDATE SET
-                    updated_time = EXCLUDED.updated_time
-                 RETURNING word_id";
+        let sql = "
+INSERT INTO company_word (word, created_time, updated_time)
+VALUES ($1, $2, $3)
+ON CONFLICT (word) DO UPDATE SET
+    updated_time = EXCLUDED.updated_time
+RETURNING word_id";
 
         let row = sqlx::query(sql)
             .bind(&self.word)
             .bind(self.created_time)
             .bind(self.updated_time)
-            .fetch_one(&DB.pool)
+            .fetch_one(database::get_pool()?)
             .await?;
 
         self.word_id = row.try_get("word_id")?;
@@ -53,7 +54,7 @@ impl Entity {
     }
 
     /// 從資料表中取得公司代碼、名字拆字後的數據
-    pub async fn list_by_word(words: &Vec<String>) -> Option<Vec<Entity>> {
+    pub async fn list_by_word(words: &Vec<String>) -> Result<Vec<StockWord>> {
         let mut query_builder =
             QueryBuilder::new("select word_id,word,created_time,updated_time from company_word");
 
@@ -63,49 +64,41 @@ impl Entity {
             query_builder.push(")");
         }
 
-        match query_builder
+        Ok(query_builder
             .build()
             .try_map(|row: PgRow| {
                 let created_time = row.try_get("created_time")?;
                 let updated_time = row.try_get("updated_time")?;
                 let word_id = row.try_get("word_id")?;
                 let word = row.try_get("word")?;
-                Ok(Entity {
+                Ok(StockWord {
                     word_id,
                     word,
                     created_time,
                     updated_time,
                 })
             })
-            .fetch_all(&DB.pool)
-            .await
-        {
-            Ok(result) => Some(result),
-            Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to fetch entities from the database: {:?}",
-                    why
-                ));
-                None
-            }
-        }
+            .fetch_all(database::get_pool()?)
+            .await?)
     }
 }
 
-impl Clone for Entity {
+impl Clone for StockWord {
     fn clone(&self) -> Self {
         self.clone()
     }
 }
 
-impl Default for Entity {
+impl Default for StockWord {
     fn default() -> Self {
         Self::new("".to_string())
     }
 }
 
 /// 將 vec 轉成 hashmap
-pub fn vec_to_hashmap_key_using_word(entities: Option<Vec<Entity>>) -> HashMap<String, Entity> {
+pub fn vec_to_hashmap_key_using_word(
+    entities: Option<Vec<StockWord>>,
+) -> HashMap<String, StockWord> {
     let mut stock_words = HashMap::new();
     if let Some(list) = entities {
         for e in list {
@@ -136,9 +129,9 @@ mod tests {
     #[tokio::test]
     async fn test_vec_to_hashmap() {
         dotenv::dotenv().ok();
-        let mut entities: Vec<Entity> = Vec::new();
+        let mut entities: Vec<StockWord> = Vec::new();
         for i in 0..1000000 {
-            entities.push(Entity {
+            entities.push(StockWord {
                 word_id: 0,
                 word: format!("word_{}", i),
                 created_time: Default::default(),
@@ -173,17 +166,17 @@ mod tests {
     #[tokio::test]
     async fn test_insert() {
         dotenv::dotenv().ok();
-        let mut e = Entity::new("小一".to_string());
+        let mut e = StockWord::new("小一".to_string());
         match e.upsert().await {
             Ok(word_id) => {
-                logging::info_file_async(format!("word_id:{} e:{:#?}", word_id, &e));
+                logging::debug_file_async(format!("word_id:{} e:{:#?}", word_id, &e));
                 let _ = sqlx::query("delete from company_word where word_id = $1;")
                     .bind(word_id)
-                    .execute(&DB.pool)
+                    .execute(database::get_pool().unwrap())
                     .await;
             }
             Err(why) => {
-                logging::error_file_async(format!("because:{:?}", why));
+                logging::debug_file_async(format!("because:{:?}", why));
             }
         }
     }
@@ -192,11 +185,11 @@ mod tests {
     async fn test_list_by_word() {
         dotenv::dotenv().ok();
         let word = util::text::split("台積電");
-        let entities = Entity::list_by_word(&word).await;
-        logging::info_file_async(format!("entities:{:#?}", entities));
-        logging::info_file_async(format!(
+        let entities = StockWord::list_by_word(&word).await;
+        logging::debug_file_async(format!("entities:{:#?}", entities));
+        logging::debug_file_async(format!(
             "word:{:#?}",
-            vec_to_hashmap_key_using_word(entities)
+            vec_to_hashmap_key_using_word(entities.ok())
         ));
     }
 }

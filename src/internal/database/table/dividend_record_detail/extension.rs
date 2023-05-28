@@ -1,4 +1,4 @@
-use crate::internal::database::DB;
+use crate::internal::database;
 use anyhow::*;
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgRow, Postgres, Row, Transaction};
@@ -64,7 +64,7 @@ where stock_ownership_details_serial = $1;
         });
 
         let cd = match tx {
-            None => query.fetch_one(&DB.pool).await?,
+            None => query.fetch_one(database::get_pool()?).await?,
             Some(mut t) => query.fetch_one(&mut t).await?,
         };
 

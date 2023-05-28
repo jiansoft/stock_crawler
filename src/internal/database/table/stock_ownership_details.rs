@@ -1,11 +1,11 @@
-use crate::internal::database::DB;
+use crate::internal::database;
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
-/// 股票庫存 原表名 stock_ownership_details
+/// 股票庫存(持股名細) 原表名 stock_ownership_details
 pub struct StockOwnershipDetail {
     /// 序號 原 Id
     pub serial: i64,
@@ -87,7 +87,7 @@ WHERE is_sold = false";
         let query = bind_params
             .into_iter()
             .fold(query, |q, param| q.bind(param));
-        let rows = query.fetch_all(&DB.pool).await?;
+        let rows = query.fetch_all(database::get_pool()?).await?;
 
         Ok(rows)
 
@@ -159,7 +159,7 @@ WHERE
             .bind(self.cumulate_dividends_stock_money)
             .bind(self.cumulate_dividends_total);
         let result = match tx {
-            None => query.execute(&DB.pool).await?,
+            None => query.execute(database::get_pool()?).await?,
             Some(mut t) => query.execute(&mut t).await?,
         };
 

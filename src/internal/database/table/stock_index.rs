@@ -1,18 +1,18 @@
-use crate::internal::database::DB;
+use crate::internal::database;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
-pub struct Entity {
+pub struct StockIndex {
     pub word_id: i64,
     pub security_code: String,
     pub created_time: DateTime<Local>,
     pub updated_time: DateTime<Local>,
 }
 
-impl Entity {
+impl StockIndex {
     pub fn new(security_code: String) -> Self {
-        Entity {
+        StockIndex {
             word_id: Default::default(),
             security_code,
             created_time: Local::now(),
@@ -25,7 +25,7 @@ impl Entity {
             return Err(anyhow!("word_id is less than or equal to 0"));
         }
 
-        let mut transaction = DB.pool.begin().await?;
+        let mut transaction = database::get_pool()?.begin().await?;
 
         if let Err(why) = sqlx::query("insert into company_index (word_id, security_code, created_time, updated_time) VALUES ($1,$2,$3,$4) on conflict (word_id, security_code) do nothing;")
             .bind(self.word_id)
@@ -51,14 +51,14 @@ mod tests {
     #[tokio::test]
     async fn test_insert() {
         dotenv::dotenv().ok();
-        let mut e = Entity::new("79979".to_string());
+        let mut e = StockIndex::new("79979".to_string());
         e.word_id = 79979;
         match e.insert().await {
             Ok(_) => {
                 match sqlx::query_as::<sqlx::Postgres, (i64, )>("select count(*) as row_count from company_index where word_id = $1 and security_code = $2;")
                     .bind(e.word_id)
                     .bind(e.security_code.as_str())
-                    .fetch_one(&DB.pool)
+                    .fetch_one(database::get_pool().unwrap())
                     .await
                 {
                     Ok((row_count, )) => {
@@ -68,7 +68,7 @@ mod tests {
                         )
                             .bind(e.word_id)
                             .bind(e.security_code.as_str())
-                            .execute(&DB.pool)
+                            .execute(database::get_pool().unwrap())
                             .await;
                     }
                     Err(why) => {

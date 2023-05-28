@@ -11,7 +11,7 @@ pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
 /// Share 各類快取共享集中處
 pub struct Share {
     /// 存放台股歷年指數
-    pub indices: RwLock<HashMap<String, index::Entity>>,
+    pub indices: RwLock<HashMap<String, index::Index>>,
     /// 存放台股股票代碼
     pub stocks: RwLock<HashMap<String, stock::Stock>>,
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
@@ -108,7 +108,7 @@ impl Share {
     }
 
     pub async fn load(&self) {
-        let indices = index::Entity::fetch().await;
+        let indices = index::Index::fetch().await;
         match self.indices.write() {
             Ok(mut i) => {
                 if let Ok(indices) = indices {

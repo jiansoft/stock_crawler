@@ -1,35 +1,43 @@
 pub mod table;
 
 use crate::internal::config;
-use once_cell::sync::Lazy;
+use anyhow::*;
+use once_cell::sync::{Lazy, OnceCell};
 use sqlx::{postgres::PgPoolOptions, PgPool};
+use std::sync::Arc;
 
-pub struct PostgreSQL {
+static POSTGRES: Lazy<Arc<OnceCell<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceCell::new()));
+
+pub struct PostgresSQL {
     pub pool: PgPool,
 }
 
-impl PostgreSQL {
-    pub fn new(database_url: &str) -> PostgreSQL {
+impl PostgresSQL {
+    pub fn new() -> PostgresSQL {
+        let database_url = format!(
+            "postgres://{}:{}@{}:{}/{}",
+            config::SETTINGS.postgresql.user,
+            config::SETTINGS.postgresql.password,
+            config::SETTINGS.postgresql.host,
+            config::SETTINGS.postgresql.port,
+            config::SETTINGS.postgresql.db
+        );
         let db = PgPoolOptions::new()
             .max_lifetime(None)
             .max_connections(32)
-            .connect_lazy(database_url)
+            .connect_lazy(&database_url)
             .unwrap_or_else(|_| panic!("wrong database URL {}", database_url));
 
         Self { pool: db }
     }
 }
 
-pub static DB: Lazy<PostgreSQL> = Lazy::new(|| {
-    let db_url = format!(
-        "postgres://{}:{}@{}:{}/{}",
-        config::SETTINGS.postgresql.user,
-        config::SETTINGS.postgresql.password,
-        config::SETTINGS.postgresql.host,
-        config::SETTINGS.postgresql.port,
-        config::SETTINGS.postgresql.db
-    );
+impl Default for PostgresSQL {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-    //let db_url = dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    PostgreSQL::new(&db_url)
-});
+pub fn get_pool() -> Result<&'static PgPool> {
+    Ok(&POSTGRES.get_or_init(PostgresSQL::new).pool)
+}

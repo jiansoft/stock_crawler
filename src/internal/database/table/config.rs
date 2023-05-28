@@ -1,4 +1,4 @@
-use crate::internal::database::DB;
+use crate::internal::database;
 use anyhow::*;
 use core::result::Result::Ok;
 use sqlx::postgres::PgQueryResult;
@@ -28,7 +28,7 @@ impl Entity {
 
         let entity = sqlx::query_as::<_, Entity>(sql)
             .bind(key)
-            .fetch_one(&DB.pool)
+            .fetch_one(database::get_pool()?)
             .await?;
 
         Ok(entity)
@@ -43,7 +43,7 @@ impl Entity {
         let result = sqlx::query(sql)
             .bind(&self.key)
             .bind(&self.val)
-            .execute(&DB.pool)
+            .execute(database::get_pool()?)
             .await?;
 
         Ok(result)

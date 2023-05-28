@@ -1,8 +1,7 @@
 pub(crate) mod extension;
 
 use crate::internal::{
-    database::{table::daily_quote::extension::MonthlyStockPriceSummary, DB},
-    util::datetime,
+    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, util::datetime,
     StockExchange,
 };
 use anyhow::*;
@@ -160,7 +159,7 @@ impl DailyQuote {
             .bind(self.year)
             .bind(self.month as i32)
             .bind(self.day as i32)
-            .execute(&DB.pool)
+            .execute(database::get_pool()?)
             .await?;
 
         Ok(result)
@@ -312,7 +311,7 @@ WHERE "Serial" IN
         date_str, prev_date
     );
 
-    Ok(sqlx::query(&sql).execute(&DB.pool).await?)
+    Ok(sqlx::query(&sql).execute(database::get_pool()?).await?)
 }
 
 /// 依照指定的年月取得該股票其月份的最低、平均、最高價
@@ -327,14 +326,14 @@ SELECT
     AVG("ClosingPrice") as avg_price,
     MAX("HighestPrice") as highest_price
 FROM "DailyQuotes"
-WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
-GROUP BY "SecurityCode", year, month;
+WHERE "SecurityCode" = $1 AND "year" = $2 AND "month" = $3
+GROUP BY "SecurityCode", "year", "month";
 "#;
     Ok(sqlx::query_as::<_, MonthlyStockPriceSummary>(sql)
         .bind(stock_symbol)
         .bind(year)
         .bind(month)
-        .fetch_one(&DB.pool)
+        .fetch_one(database::get_pool()?)
         .await?)
 }
 
