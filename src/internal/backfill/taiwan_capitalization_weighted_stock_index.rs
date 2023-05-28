@@ -1,4 +1,4 @@
-use crate::internal::{bot, cache::SHARE, crawler::twse, database::model, logging};
+use crate::internal::{bot, cache::SHARE, crawler::twse, database::table, logging};
 use anyhow::*;
 use chrono::Local;
 use core::result::Result::Ok;
@@ -18,7 +18,7 @@ pub async fn execute() -> Result<()> {
                 continue;
             }
 
-            let index = match model::index::Entity::from_strings(&item) {
+            let index = match table::index::Entity::from_strings(&item) {
                 Ok(i) => i,
                 Err(why) => {
                     logging::error_file_async(format!(

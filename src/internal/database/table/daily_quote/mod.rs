@@ -1,7 +1,7 @@
 pub(crate) mod extension;
 
 use crate::internal::{
-    database::{model::daily_quote::extension::MonthlyStockPriceSummary, DB},
+    database::{table::daily_quote::extension::MonthlyStockPriceSummary, DB},
     util::datetime,
     StockExchange,
 };

@@ -1,4 +1,4 @@
-use crate::internal::{bot, calculation, database::model::stock, logging};
+use crate::internal::{bot, calculation, database::table::stock, logging};
 use chrono::{Datelike, Local, NaiveDate};
 use std::fmt::Write;
 

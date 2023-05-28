@@ -1,6 +1,6 @@
 use crate::internal::{
     cache::SHARE,
-    database::model,
+    database::table,
     util::{self, datetime::Weekend},
     StockExchangeMarket,
 };
@@ -22,7 +22,7 @@ pub struct InternationalSecuritiesIdentificationNumber {
     //pub market_category: String,
     pub industry: String,
     pub cfi_code: String,
-    pub exchange_market: model::stock_exchange_market::Entity,
+    pub exchange_market: table::stock_exchange_market::Entity,
     pub industry_id: i32,
 }
 
@@ -96,9 +96,9 @@ pub async fn visit(
                 }
             };
 
-            let exchange_market: model::stock_exchange_market::Entity =
+            let exchange_market: table::stock_exchange_market::Entity =
                 match SHARE.exchange_markets.get(&mode.serial_number()) {
-                    None => model::stock_exchange_market::Entity::new(
+                    None => table::stock_exchange_market::Entity::new(
                         mode.serial_number(),
                         mode.exchange().serial_number(),
                     ),

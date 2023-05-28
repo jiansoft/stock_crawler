@@ -313,13 +313,13 @@ DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    //use crate::internal::database::model::revenue;
+    //use crate::internal::database::table::revenue;
 
     use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
     use rust_decimal::Decimal;
     use std::str::FromStr;
     //use chrono::{Datelike, Local, NaiveDate};
-    use crate::internal::database::model::revenue::{
+    use crate::internal::database::table::revenue::{
         fetch_last_two_month, rebuild_revenue_last_date,
     };
     use crate::internal::logging;

@@ -1,5 +1,5 @@
 use crate::internal::{
-    backfill::net_asset_value_per_share::update, cache::SHARE, crawler::tpex, database::model,
+    backfill::net_asset_value_per_share::update, cache::SHARE, crawler::tpex, database::table,
     logging, util::datetime::Weekend,
 };
 use anyhow::*;
@@ -22,7 +22,7 @@ pub async fn execute() -> Result<()> {
                         continue;
                     }
                 }
-                model::stock::Stock::from(item)
+                table::stock::Stock::from(item)
             }
             Err(_) => continue,
         };

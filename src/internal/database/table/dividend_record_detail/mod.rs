@@ -1,6 +1,6 @@
 pub(crate) mod extension;
 
-use crate::internal::database::{model::dividend_record_detail::extension::CumulateDividend, DB};
+use crate::internal::database::{table::dividend_record_detail::extension::CumulateDividend, DB};
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;

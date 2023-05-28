@@ -1,4 +1,4 @@
-use crate::internal::{cache::SHARE, crawler::twse, database::model, logging};
+use crate::internal::{cache::SHARE, crawler::twse, database::table, logging};
 use anyhow::*;
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use core::result::Result::Ok;
@@ -17,7 +17,7 @@ pub async fn execute() -> Result<()> {
     let month = last_month_timezone.month();
     let revenues = twse::revenue::visit(last_month_timezone).await?;
     for mut revenue in revenues {
-        if let Ok(dq) = model::daily_quote::fetch_monthly_stock_price_summary(
+        if let Ok(dq) = table::daily_quote::fetch_monthly_stock_price_summary(
             &revenue.security_code,
             year,
             month as i32,
@@ -68,7 +68,7 @@ pub async fn execute() -> Result<()> {
                 revenue.highest_price))
     }
 
-    model::revenue::rebuild_revenue_last_date().await?;
+    table::revenue::rebuild_revenue_last_date().await?;
 
     Ok(())
 }

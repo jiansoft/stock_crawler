@@ -1,5 +1,5 @@
 use crate::internal::{
-    backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::model, logging,
+    backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, logging,
 };
 use anyhow::*;
 use core::result::Result::Ok;
@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
 pub async fn execute() -> Result<()> {
-    let stocks = model::stock::fetch_net_asset_value_per_share_is_zero().await?;
+    let stocks = table::stock::fetch_net_asset_value_per_share_is_zero().await?;
     for mut stock in stocks {
         if stock.is_preference_shares() || stock.is_tdr() {
             continue;
@@ -50,7 +50,7 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-/*async fn process_stock(stock: &model::stock::Entity) -> Result<()> {
+/*async fn process_stock(stock: &table::stock::Entity) -> Result<()> {
     let stock_profile = profile::visit(&stock.stock_symbol).await.map_err(|why| {
         logging::error_file_async(format!(
             "Failed to net_asset_value_per_share::visit because {:?}",
@@ -59,7 +59,7 @@ pub async fn execute() -> Result<()> {
         why
     })?;
 
-    let mut e = model::stock::Entity::new();
+    let mut e = table::stock::Entity::new();
     e.stock_symbol = stock_profile.security_code;
     e.net_asset_value_per_share = stock_profile.net_asset_value_per_share;
 
@@ -73,7 +73,7 @@ pub async fn execute() -> Result<()> {
 }
 
 pub async fn execute() -> Result<()> {
-    let stocks = model::stock::fetch_net_asset_value_per_share_is_zero().await?;
+    let stocks = table::stock::fetch_net_asset_value_per_share_is_zero().await?;
     let futures = stocks.iter().map(process_stock);
     let results = futures::future::join_all(futures).await;
 

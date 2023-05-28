@@ -1,5 +1,5 @@
 use crate::internal::{
-    bot, cache::SHARE, crawler::twse, database::model, logging, util::datetime::Weekend,
+    bot, cache::SHARE, crawler::twse, database::table, logging, util::datetime::Weekend,
     StockExchangeMarket,
 };
 use anyhow::*;
@@ -67,7 +67,7 @@ async fn update_stock_info(
     stock: &twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber,
     msg: &mut String,
 ) -> Result<()> {
-    let stock = model::stock::Stock::from(stock.clone());
+    let stock = table::stock::Stock::from(stock.clone());
     stock.upsert().await.map_err(|e| {
         logging::error_file_async(format!("Failed to stock.upsert() because {:?}", e));
         anyhow!(e)

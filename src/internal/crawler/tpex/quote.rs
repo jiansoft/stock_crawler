@@ -1,7 +1,7 @@
 use crate::internal::{
     cache::{self, TtlCacheInner, TTL},
     crawler::tpex,
-    database::model::daily_quote::{self, FromWithExchange},
+    database::table::daily_quote::{self, FromWithExchange},
     logging, util, StockExchange,
 };
 use anyhow::*;

@@ -1,7 +1,7 @@
 use crate::internal::{
     cache::{TtlCacheInner, SHARE, TTL},
     crawler::{tpex, twse},
-    database::model::{self, daily_quote},
+    database::table::{self, daily_quote},
     logging,
 };
 use anyhow::*;
@@ -46,10 +46,10 @@ pub async fn execute() -> Result<()> {
         }
     };
 
-    if let Ok(c) = model::config::Entity::first("last-closing-day").await {
+    if let Ok(c) = table::config::Entity::first("last-closing-day").await {
         let date = NaiveDate::parse_from_str(&c.val, "%Y-%m-%d")?;
         if date_naive > date {
-            let mut new_c = model::config::Entity::new(c.key);
+            let mut new_c = table::config::Entity::new(c.key);
             new_c.val = date_naive.format("%Y-%m-%d").to_string();
             match new_c.upsert().await {
                 Ok(_) => {}
@@ -102,7 +102,7 @@ mod tests {
     use std::sync::Arc;
     //use std::time;
 
-    use crate::internal::database::model::stock;
+    use crate::internal::database::table::stock;
     use crate::internal::logging;
     //use crossbeam::thread;
     use rayon::prelude::*;

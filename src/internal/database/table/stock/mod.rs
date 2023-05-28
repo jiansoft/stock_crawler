@@ -3,7 +3,7 @@ pub(crate) mod extension;
 use crate::internal::{
     crawler::{tpex, twse},
     database::{
-        model::{stock::extension::StockJustWithSymbolAndName, stock_index, stock_word},
+        table::{stock::extension::StockJustWithSymbolAndName, stock_index, stock_word},
         DB,
     },
     logging, util,

@@ -1,6 +1,6 @@
 use crate::internal::{
     crawler::{goodinfo, yahoo},
-    database::model::{self, dividend},
+    database::table::{self, dividend},
     logging,
 };
 use anyhow::*;
@@ -51,7 +51,7 @@ pub async fn execute() -> Result<()> {
 /// This function fetches a list of stock symbols that either have no dividends or have issued multiple dividends
 /// in the current year. It then visits the dividend information of each stock symbol using the `goodinfo::dividend::visit`
 /// function. For each dividend found, if the dividend's year is not the current year, it skips to the next dividend.
-/// Otherwise, it converts the dividend into a `model::dividend::Entity` and tries to upsert it.
+/// Otherwise, it converts the dividend into a `table::dividend::Entity` and tries to upsert it.
 ///
 /// If the upsert operation is successful, it logs the success and the entity that was upserted.
 /// If the upsert operation fails, it logs the error.
@@ -86,7 +86,7 @@ async fn processing_without_or_multiple(year: i32) -> Result<()> {
                 continue;
             }
 
-            let entity = model::dividend::Dividend::from(dividend);
+            let entity = table::dividend::Dividend::from(dividend);
             match entity.upsert().await {
                 Ok(_) => {
                     logging::info_file_async(format!(

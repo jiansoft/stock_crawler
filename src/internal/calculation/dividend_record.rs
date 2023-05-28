@@ -1,6 +1,6 @@
 use crate::internal::{
     database::{
-        model::{
+        table::{
             dividend, dividend_record_detail, dividend_record_detail_more, stock_ownership_details,
         },
         DB,
@@ -158,7 +158,7 @@ async fn calculate_dividend(
 pub async fn calculate(year: i32) {
     logging::info_file_async("計算指定年份領取的股利開始".to_string());
     // 先取得庫存股票
-    match model::inventory::fetch().await {
+    match table::inventory::fetch().await {
         Ok(mut inventories) => {
             for item in inventories.iter_mut() {
                 match item.calculate_dividend(year).await {

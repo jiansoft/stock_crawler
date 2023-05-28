@@ -1,5 +1,5 @@
 use crate::internal::{
-    backfill::net_asset_value_per_share, crawler::yahoo, database::model, logging, nosql,
+    backfill::net_asset_value_per_share, crawler::yahoo, database::table, logging, nosql,
     util::datetime,
 };
 use anyhow::*;
@@ -18,7 +18,7 @@ pub async fn execute() -> Result<()> {
     let previous_quarter = Local::now() - Duration::days(125);
     let year = previous_quarter.year();
     let quarter = datetime::month_to_quarter(previous_quarter.month());
-    let stocks = model::stock::fetch_stocks_without_financial_statement(year, quarter).await?;
+    let stocks = table::stock::fetch_stocks_without_financial_statement(year, quarter).await?;
     let mut success_update_count = 0;
     for mut stock in stocks {
         if stock.is_preference_shares() {
@@ -44,7 +44,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        let fs = model::financial_statement::FinancialStatement::from(profile);
+        let fs = table::financial_statement::FinancialStatement::from(profile);
 
         if let Err(why) = fs.upsert().await {
             logging::error_file_async(format!("Failed to upsert because {:?}", why));
@@ -77,7 +77,7 @@ pub async fn execute() -> Result<()> {
     }
 
     if success_update_count > 0 {
-        model::stock::Stock::update_last_eps().await?;
+        table::stock::Stock::update_last_eps().await?;
     }
 
     nosql::redis::CLIENT

@@ -1,6 +1,6 @@
 //use futures::executor::block_on;
 use crate::internal::{
-    database::model::{self, index, last_daily_quotes, revenue, stock},
+    database::table::{index, last_daily_quotes, revenue, stock, stock_exchange_market},
     logging,
 };
 use once_cell::sync::Lazy;
@@ -21,7 +21,7 @@ pub struct Share {
     /// 股票產業分類
     pub industries: HashMap<&'static str, i32>,
     /// 股票產業分類(2, 'TAI', '上市', 1),(4, 'TWO', '上櫃', 2), (5, 'TWE', '興櫃', 2);
-    pub exchange_markets: HashMap<i32, model::stock_exchange_market::Entity>,
+    pub exchange_markets: HashMap<i32, stock_exchange_market::Entity>,
 }
 
 impl Share {
@@ -32,7 +32,7 @@ impl Share {
             exchange_markets: HashMap::from([
                 (
                     2,
-                    model::stock_exchange_market::Entity {
+                    stock_exchange_market::Entity {
                         stock_exchange_market_id: 2,
                         stock_exchange_id: 1,
                         code: "TAI".to_string(),
@@ -41,7 +41,7 @@ impl Share {
                 ),
                 (
                     4,
-                    model::stock_exchange_market::Entity {
+                    stock_exchange_market::Entity {
                         stock_exchange_market_id: 4,
                         stock_exchange_id: 2,
                         code: "TWO".to_string(),
@@ -50,7 +50,7 @@ impl Share {
                 ),
                 (
                     5,
-                    model::stock_exchange_market::Entity {
+                    stock_exchange_market::Entity {
                         stock_exchange_market_id: 5,
                         stock_exchange_id: 2,
                         code: "TWE".to_string(),

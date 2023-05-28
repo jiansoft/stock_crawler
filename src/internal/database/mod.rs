@@ -1,4 +1,4 @@
-pub mod model;
+pub mod table;
 
 use crate::internal::config;
 use once_cell::sync::Lazy;

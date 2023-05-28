@@ -1,6 +1,6 @@
 use crate::internal::{
     cache::{self, TtlCacheInner, TTL},
-    database::model::daily_quote::{self, FromWithExchange},
+    database::table::daily_quote::{self, FromWithExchange},
     logging,
     util::http,
     StockExchange,

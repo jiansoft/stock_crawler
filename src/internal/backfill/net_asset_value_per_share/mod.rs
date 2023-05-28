@@ -3,11 +3,11 @@ pub mod emerging;
 /// 將每股淨值為零的股票嚐試從yahoo取得數據後更新
 pub mod zero_value;
 
-use crate::{internal::cache::SHARE, internal::database::model};
+use crate::{internal::cache::SHARE, internal::database::table};
 use anyhow::*;
 use core::result::Result::Ok;
 
-pub async fn update(stock: &model::stock::Stock) -> Result<()> {
+pub async fn update(stock: &table::stock::Stock) -> Result<()> {
     let c = stock.update_net_asset_value_per_share().await?;
 
     if c.rows_affected() > 0 {

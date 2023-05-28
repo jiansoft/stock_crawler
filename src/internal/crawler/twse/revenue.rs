@@ -1,4 +1,4 @@
-use crate::internal::{cache::SHARE, database::model::revenue, logging, util};
+use crate::internal::{cache::SHARE, database::table::revenue, logging, util};
 use anyhow::*;
 use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
