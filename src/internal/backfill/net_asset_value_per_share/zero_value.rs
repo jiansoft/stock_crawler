@@ -1,90 +1,58 @@
 use crate::internal::{
     backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, logging,
+    util::datetime::Weekend,
 };
 use anyhow::*;
+use chrono::Local;
 use core::result::Result::Ok;
 use rust_decimal::Decimal;
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
 pub async fn execute() -> Result<()> {
+    if Local::now().is_weekend() {
+        return Ok(());
+    }
+
     let stocks = table::stock::fetch_net_asset_value_per_share_is_zero().await?;
     for mut stock in stocks {
         if stock.is_preference_shares() || stock.is_tdr() {
             continue;
         }
 
-        match profile::visit(&stock.stock_symbol).await {
-            Ok(stock_profile) => {
-                if stock_profile.net_asset_value_per_share == Decimal::ZERO {
-                    logging::info_file_async(format!(
-                        "the stock's net_asset_value_per_share is zero still. \r\n{:#?}",
-                        stock_profile
-                    ));
-
-                    continue;
-                }
-
-                stock.net_asset_value_per_share = stock_profile.net_asset_value_per_share;
-
-                match update(&stock).await {
-                    Ok(_) => {
-                        logging::info_file_async(format!(
-                            "update_net_asset_value_per_share executed successfully. \r\n{:#?}",
-                            stock
-                        ));
-                    }
-                    Err(why) => {
-                        logging::error_file_async(format!(
-                            "Failed to update_net_asset_value_per_share because {:?}",
-                            why
-                        ));
-                    }
-                }
-            }
+        let yahoo_profile = match profile::visit(&stock.stock_symbol).await {
+            Ok(stock_profile) => stock_profile,
             Err(why) => {
                 logging::error_file_async(format!("Failed to profile::visit because {:?}", why));
+                continue;
             }
         };
-    }
 
-    Ok(())
-}
+        if yahoo_profile.net_asset_value_per_share == Decimal::ZERO {
+            logging::info_file_async(format!(
+                "the stock's net_asset_value_per_share is zero still. \r\n{:#?}",
+                yahoo_profile
+            ));
+            continue;
+        }
 
-/*async fn process_stock(stock: &table::stock::Entity) -> Result<()> {
-    let stock_profile = profile::visit(&stock.stock_symbol).await.map_err(|why| {
-        logging::error_file_async(format!(
-            "Failed to net_asset_value_per_share::visit because {:?}",
-            why
+        stock.net_asset_value_per_share = yahoo_profile.net_asset_value_per_share;
+
+        if let Err(why) = update(&stock).await {
+            logging::error_file_async(format!(
+                "Failed to update_net_asset_value_per_share because {:?}",
+                why
+            ));
+            continue;
+        }
+
+        logging::info_file_async(format!(
+            "update_net_asset_value_per_share executed successfully. \r\n{:#?}",
+            stock
         ));
-        why
-    })?;
-
-    let mut e = table::stock::Entity::new();
-    e.stock_symbol = stock_profile.security_code;
-    e.net_asset_value_per_share = stock_profile.net_asset_value_per_share;
-
-    match e.update_net_asset_value_per_share().await {
-        Ok(_) => Ok(()),
-        Err(why) => Err(anyhow!(
-            "Failed to net_asset_value_per_share::visit because {:?}",
-            why
-        )),
-    }
-}
-
-pub async fn execute() -> Result<()> {
-    let stocks = table::stock::fetch_net_asset_value_per_share_is_zero().await?;
-    let futures = stocks.iter().map(process_stock);
-    let results = futures::future::join_all(futures).await;
-
-    // Log any errors that occurred during processing.
-    for error in results.into_iter().filter_map(Result::err) {
-        logging::error_file_async(format!("Failed to process stock because {:?}", error));
     }
 
     Ok(())
 }
-*/
 
 #[cfg(test)]
 mod tests {

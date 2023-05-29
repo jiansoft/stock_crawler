@@ -17,8 +17,8 @@ pub async fn execute() -> Result<()> {
     for item in result {
         let stock = match SHARE.stocks.read() {
             Ok(stocks_cache) => {
-                if let Some(stock_db) = stocks_cache.get(item.stock_symbol.as_str()) {
-                    if stock_db.net_asset_value_per_share == item.net_asset_value_per_share {
+                if let Some(stock_cache) = stocks_cache.get(item.stock_symbol.as_str()) {
+                    if stock_cache.net_asset_value_per_share == item.net_asset_value_per_share {
                         continue;
                     }
                 }

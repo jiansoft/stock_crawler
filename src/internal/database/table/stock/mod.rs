@@ -303,7 +303,7 @@ impl From<tpex::net_asset_value_per_share::Emerging> for Stock {
     }
 }
 
-/// 取得未下市每股淨值為零的股票
+/// 取得未下市上市櫃每股淨值為零的股票
 pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<Stock>> {
     let sql = r#"
 SELECT
@@ -342,19 +342,11 @@ SELECT
 FROM stocks AS s
 WHERE s.stock_exchange_market_id in(2, 4)
     AND s."SuspendListing" = false
-    AND
-(
-    NOT EXISTS (
+    AND NOT EXISTS (
         SELECT 1
         FROM financial_statement f
         WHERE f.security_code = s.stock_symbol AND f.year = $1 AND f.quarter = $2
     )
-    OR EXISTS (
-        SELECT 1
-        FROM financial_statement f
-        WHERE f.security_code = s.stock_symbol AND f.year = $1 AND f.quarter = $2 and f.net_asset_value_per_share = 0
-    )
-)
 "#;
 
     Ok(sqlx::query_as::<_, Stock>(sql)

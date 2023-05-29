@@ -6,5 +6,7 @@ pub mod tpex;
 pub mod twse;
 /// 雅虎財經
 pub mod yahoo;
-
+/// 股市資訊網
 pub mod goodinfo;
+/// 零股塔
+pub mod wespai;

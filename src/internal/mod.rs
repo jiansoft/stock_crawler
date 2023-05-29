@@ -46,30 +46,42 @@ impl StockExchange {
 }
 
 /// 市場別
-#[derive(Debug, Copy, Clone)]
+#[derive(PartialEq, Debug, Copy, Clone)]
+#[repr(i32)]
+#[non_exhaustive]
 pub enum StockExchangeMarket {
     /// 上市 2
-    Listed,
+    Listed = 2,
     /// 上櫃 4
-    OverTheCounter,
+    OverTheCounter = 4,
     /// 興櫃 5
-    Emerging,
+    Emerging = 5,
 }
 
 impl StockExchangeMarket {
     pub fn serial_number(&self) -> i32 {
-        match self {
-            StockExchangeMarket::Listed => 2,
-            StockExchangeMarket::OverTheCounter => 4,
-            StockExchangeMarket::Emerging => 5,
+        *self as i32
+    }
+
+    pub fn from_serial_number(serial: i32) -> Option<StockExchangeMarket> {
+        match serial {
+            _ if serial == StockExchangeMarket::Listed as i32 => Some(StockExchangeMarket::Listed),
+            _ if serial == StockExchangeMarket::OverTheCounter as i32 => {
+                Some(StockExchangeMarket::OverTheCounter)
+            }
+            _ if serial == StockExchangeMarket::Emerging as i32 => {
+                Some(StockExchangeMarket::Emerging)
+            }
+            _ => None,
         }
     }
 
     pub fn exchange(&self) -> StockExchange {
         match self {
             StockExchangeMarket::Listed => StockExchange::TWSE,
-            StockExchangeMarket::OverTheCounter => StockExchange::TPEx,
-            StockExchangeMarket::Emerging => StockExchange::TPEx,
+            StockExchangeMarket::OverTheCounter | StockExchangeMarket::Emerging => {
+                StockExchange::TPEx
+            }
         }
     }
 

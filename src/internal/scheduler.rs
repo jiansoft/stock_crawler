@@ -4,7 +4,9 @@ use std::{env, future::Future, result::Result::Ok, time::Duration};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 // Constants for logging messages
-const BACKFILL_FINANCIAL_STATEMENT: &str = "backfill::financial_statement::execute";
+const BACKFILL_FINANCIAL_STATEMENT_ANNUAL: &str = "backfill::financial_statement::annual::execute";
+const BACKFILL_FINANCIAL_STATEMENT_QUARTER: &str =
+    "backfill::financial_statement::quarter::execute";
 const BACKFILL_NET_ASSET_VALUE_EMERGING: &str =
     "backfill::net_asset_value_per_share::emerging::execute";
 const BACKFILL_NET_ASSET_VALUE_ZERO_VALUE: &str =
@@ -63,10 +65,11 @@ pub async fn run_cron() -> Result<()> {
         Box::pin(async {
             //更新台股季度財報
             run_and_log_task(
-                BACKFILL_FINANCIAL_STATEMENT,
-                backfill::financial_statement::execute,
+                BACKFILL_FINANCIAL_STATEMENT_QUARTER,
+                backfill::financial_statement::quarter::execute,
             )
             .await;
+
             //更新興櫃股票的每股淨值
             run_and_log_task(
                 BACKFILL_NET_ASSET_VALUE_EMERGING,
@@ -84,6 +87,13 @@ pub async fn run_cron() -> Result<()> {
             run_and_log_task(
                 BACKFILL_NET_ASSET_VALUE_ZERO_VALUE,
                 backfill::net_asset_value_per_share::zero_value::execute,
+            )
+            .await;
+
+            //更新台股年度財報
+            run_and_log_task(
+                BACKFILL_FINANCIAL_STATEMENT_ANNUAL,
+                backfill::financial_statement::annual::execute,
             )
             .await;
         })

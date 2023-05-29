@@ -1,12 +1,18 @@
-use crate::internal::{crawler::yahoo, database};
+use crate::internal::{
+    crawler::{wespai, yahoo},
+    database,
+};
 use anyhow::*;
 use chrono::{DateTime, Local};
-use core::result::Result::Ok;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sqlx::postgres::PgQueryResult;
+use sqlx::{
+    postgres::{PgQueryResult, PgRow},
+    Row,
+};
+use std::{collections::HashMap, result::Result::Ok};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]
 /// 財務報表
 pub struct FinancialStatement {
     updated_time: DateTime<Local>,
@@ -36,7 +42,7 @@ pub struct FinancialStatement {
     pub return_on_assets: Decimal,
     serial: i64,
     /// 年度
-    pub year: i32,
+    pub year: i64,
 }
 
 impl FinancialStatement {
@@ -61,7 +67,7 @@ impl FinancialStatement {
         }
     }
 
-    pub async fn upsert(&self) -> Result<PgQueryResult> {
+    pub async fn upsert(self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO financial_statement (
     security_code, "year", quarter, gross_profit, operating_profit_margin,
@@ -99,11 +105,69 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .bind(self.created_time)
             .bind(self.updated_time)
             .execute(database::get_pool()?)
-            .await
-            .map_err(|err| anyhow!("Failed to financial_statement upsert because: {:?}", err))?;
+            .await?;
 
         Ok(result)
     }
+}
+
+/// 取得年度財報
+pub async fn fetch_annual(year: i32) -> Result<Vec<FinancialStatement>> {
+    let sql = r#"
+SELECT
+    serial,
+       security_code,
+       year,
+       quarter,
+       gross_profit,
+       operating_profit_margin,
+       "pre-tax_income",
+       net_income,
+       net_asset_value_per_share,
+       sales_per_share,
+       earnings_per_share,
+       profit_before_tax,
+       return_on_equity,
+       return_on_assets,
+       created_time,
+       updated_time
+FROM financial_statement
+WHERE "year" = $1 AND quarter= ''
+"#;
+    let result = sqlx::query(sql)
+        .bind(year)
+        .try_map(|row: PgRow| {
+            Ok(FinancialStatement {
+                updated_time: row.try_get("updated_time")?,
+                created_time: row.try_get("created_time")?,
+                quarter: row.try_get("quarter")?,
+                security_code: row.try_get("security_code")?,
+                gross_profit: row.try_get("gross_profit")?,
+                operating_profit_margin: row.try_get("operating_profit_margin")?,
+                pre_tax_income: row.try_get("pre-tax_income")?,
+                net_income: row.try_get("net_income")?,
+                net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
+                sales_per_share: row.try_get("sales_per_share")?,
+                earnings_per_share: row.try_get("earnings_per_share")?,
+                profit_before_tax: row.try_get("profit_before_tax")?,
+                return_on_equity: row.try_get("return_on_equity")?,
+                return_on_assets: row.try_get("return_on_assets")?,
+                serial: row.try_get("serial")?,
+                year: row.try_get("year")?,
+            })
+        })
+        .fetch_all(database::get_pool()?)
+        .await?;
+
+    Ok(result)
+}
+
+pub fn vec_to_hashmap(entities: Vec<FinancialStatement>) -> HashMap<String, FinancialStatement> {
+    let mut map = HashMap::new();
+    for e in entities {
+        map.insert(e.security_code.to_string(), e);
+    }
+    map
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
@@ -123,7 +187,49 @@ impl From<yahoo::profile::Profile> for FinancialStatement {
         e.profit_before_tax = fs.profit_before_tax;
         e.return_on_equity = fs.return_on_equity;
         e.return_on_assets = fs.return_on_assets;
-        e.year = fs.year;
+        e.year = fs.year as i64;
         e
+    }
+}
+
+//let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
+impl From<wespai::profit::Profit> for FinancialStatement {
+    fn from(fs: wespai::profit::Profit) -> Self {
+        let mut e = FinancialStatement::new(fs.security_code);
+        e.updated_time = Local::now();
+        e.created_time = Local::now();
+        e.quarter = fs.quarter;
+        e.gross_profit = fs.gross_profit;
+        e.operating_profit_margin = fs.operating_profit_margin;
+        e.pre_tax_income = fs.pre_tax_income;
+        e.net_income = fs.net_income;
+        e.net_asset_value_per_share = fs.net_asset_value_per_share;
+        e.sales_per_share = fs.sales_per_share;
+        e.earnings_per_share = fs.earnings_per_share;
+        e.profit_before_tax = fs.profit_before_tax;
+        e.return_on_equity = fs.return_on_equity;
+        e.return_on_assets = fs.return_on_assets;
+        e.year = fs.year as i64;
+        e
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::internal::logging;
+
+    #[tokio::test]
+    async fn test_fetch_annual() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_annual".to_string());
+
+        let r = fetch_annual(2022).await;
+        if let Ok(result) = r {
+            logging::debug_file_async(format!("{:?}", result));
+        } else if let Err(err) = r {
+            logging::debug_file_async(format!("{:#?} ", err));
+        }
+        logging::debug_file_async("結束 fetch_annual".to_string());
     }
 }
