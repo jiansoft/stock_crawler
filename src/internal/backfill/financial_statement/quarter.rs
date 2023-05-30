@@ -9,7 +9,7 @@ use core::result::Result::Ok;
 
 /// 將未有上季度財報的股票，到雅虎財經下載後回寫到 financial_statement 表
 pub async fn execute() -> Result<()> {
-    let cache_key = "financial_statement::yahoo";
+    let cache_key = "financial_statement::quarter";
     let is_jump = nosql::redis::CLIENT.get_bool(cache_key).await?;
     if is_jump {
         return Ok(());
@@ -55,23 +55,6 @@ pub async fn execute() -> Result<()> {
             fs
         ));
 
-        /*//若原股票的每股淨值為零時，順便更新一下
-        if stock.net_asset_value_per_share == Decimal::ZERO
-            && fs.net_asset_value_per_share != Decimal::ZERO
-        {
-            stock.net_asset_value_per_share = fs.net_asset_value_per_share;
-            if let Err(why) = net_asset_value_per_share::update(&stock).await {
-                logging::error_file_async(format!(
-                    "Failed to update_net_asset_value_per_share because {:?}",
-                    why
-                ));
-            } else {
-                logging::info_file_async(format!(
-                    "update_net_asset_value_per_share executed successfully. \r\n{:#?}",
-                    stock
-                ));
-            }
-        }*/
         success_update_count += success_update_count;
     }
 

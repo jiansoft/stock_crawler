@@ -1,7 +1,7 @@
 use crate::internal::{
     crawler::wespai,
-    database::table::{self, stock},
-    logging,
+    database::table::{financial_statement, stock},
+    logging, nosql,
     util::datetime::Weekend,
 };
 use anyhow::*;
@@ -15,20 +15,26 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
+    let cache_key = "financial_statement::annual";
+    let is_jump = nosql::redis::CLIENT.get_bool(cache_key).await?;
+    if is_jump {
+        return Ok(());
+    }
+
     let profits = wespai::profit::visit().await?;
     if profits.is_empty() {
         logging::warn_file_async("profits from wespai is empty".to_string());
         return Ok(());
     }
 
-    let annual = table::financial_statement::fetch_annual(profits[0].year).await?;
-    let exist_fs = table::financial_statement::vec_to_hashmap(annual);
+    let annual = financial_statement::fetch_annual(profits[0].year).await?;
+    let exist_fs = financial_statement::vec_to_hashmap(annual);
     let upsert_futures: Vec<_> = profits
         .into_iter()
         .filter(|profit| !stock::is_preference_shares(&profit.security_code))
         .filter(|profit| !exist_fs.contains_key(&profit.security_code))
         .map(|profit| {
-            let fs = table::financial_statement::FinancialStatement::from(profit);
+            let fs = financial_statement::FinancialStatement::from(profit);
             fs.upsert()
         })
         .collect();
@@ -41,6 +47,10 @@ pub async fn execute() -> Result<()> {
             ));
         }
     }
+
+    nosql::redis::CLIENT
+        .set(cache_key, true, 60 * 60 * 24 * 7)
+        .await?;
 
     Ok(())
 }
