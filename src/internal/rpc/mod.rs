@@ -9,7 +9,10 @@ use crate::internal::{
 use anyhow::*;
 use once_cell::sync::Lazy;
 use std::{result::Result::Ok, sync::Arc};
-use tokio::sync::OnceCell as TokioOnceCell;
+use tokio::{
+    fs,
+    sync::OnceCell as TokioOnceCell
+};
 use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig},
     Request, Response,
@@ -18,12 +21,12 @@ use tonic::{
 static GRPC: Lazy<Arc<TokioOnceCell<Grpc>>> = Lazy::new(|| Arc::new(TokioOnceCell::new()));
 
 struct Grpc {
-    stock: Channel,
+    stock: StockClient<Channel>,
 }
 
 impl Grpc {
     pub async fn new() -> Result<Self> {
-        let pem = std::fs::read_to_string(&SETTINGS.rpc.go_service.tls_cert_file)?;
+        let pem = fs::read_to_string(&SETTINGS.rpc.go_service.tls_cert_file).await?;
         let ca = Certificate::from_pem(pem);
         let tls = ClientTlsConfig::new()
             .ca_certificate(ca)
@@ -32,14 +35,17 @@ impl Grpc {
             .tls_config(tls)?
             .connect()
             .await?;
-        Ok(Grpc { stock: channel })
+        let client = StockClient::new(channel);
+        Ok(Grpc { stock: client })
     }
 
+    /// 將 stock info 通知 go service
     pub async fn update_stock_info(
         &self,
-        request: Request<StockInfoRequest>,
+        request: StockInfoRequest,
     ) -> Result<Response<StockInfoReply>> {
-        Ok(StockClient::new(self.stock.clone()).update_stock_info(request).await?)
+        let mut client = self.stock.clone();
+        Ok(client.update_stock_info(Request::new(request)).await?)
     }
 }
 
@@ -52,32 +58,15 @@ pub async fn push_stock_info_to_go_service(
 ) -> Result<Response<StockInfoReply>> {
     get_client()
         .await?
-        .update_stock_info(Request::new(request))
+        .update_stock_info(request)
         .await
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::internal::cache::SHARE;
     use crate::internal::logging;
-
-    /* #[tokio::test]
-    async fn test_execute() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 execute".to_string());
-        //let date = NaiveDate::from_ymd_opt(2023, 6, 15);
-        //let today: NaiveDate = Local::today().naive_local();
-        match execute().await {
-            Ok(_) => {}
-            Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because:{:?}", why));
-            }
-        }
-
-        logging::debug_file_async("結束 execute".to_string());
-    }*/
 
     #[tokio::test]
     async fn test_push_stock_info_to_go_service() {

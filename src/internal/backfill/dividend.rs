@@ -5,8 +5,11 @@ use crate::internal::{
 };
 use anyhow::*;
 use chrono::{Datelike, Local};
-use core::result::Result::Ok;
-use std::{thread, time::Duration};
+use std::{
+    result::Result::Ok,
+    thread,
+    time::Duration
+};
 
 /// 更新股利發送數據
 /// 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
@@ -70,7 +73,7 @@ pub async fn execute() -> Result<()> {
 /// - It fails to upsert a dividend entity.
 async fn processing_without_or_multiple(year: i32) -> Result<()> {
     //尚未有股利或多次配息
-    let stock_symbols = dividend::fetch_without_or_multiple(year).await?;
+    let stock_symbols = dividend::fetch_no_or_multiple(year).await?;
     logging::info_file_async(format!("本次殖利率的採集需收集 {} 家", stock_symbols.len()));
     for stock_symbol in stock_symbols {
         let dividends = goodinfo::dividend::visit(&stock_symbol).await?;

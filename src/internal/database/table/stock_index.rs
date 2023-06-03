@@ -27,7 +27,25 @@ impl StockIndex {
 
         let mut transaction = database::get_pool()?.begin().await?;
 
-        if let Err(why) = sqlx::query("insert into company_index (word_id, security_code, created_time, updated_time) VALUES ($1,$2,$3,$4) on conflict (word_id, security_code) do nothing;")
+        if let Err(why) = sqlx::query("
+INSERT INTO
+    company_index (
+        word_id,
+        security_code,
+        created_time,
+        updated_time
+    )
+VALUES
+    (
+        $1,
+        $2,
+        $3,
+        $4
+    )
+ON CONFLICT
+    (word_id, security_code)
+DO NOTHING;
+")
             .bind(self.word_id)
             .bind(&self.security_code)
             .bind(self.created_time)

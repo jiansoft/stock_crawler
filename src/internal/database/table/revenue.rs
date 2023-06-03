@@ -60,27 +60,41 @@ impl Revenue {
 
     pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
-insert into "Revenue" (
-    "SecurityCode","Date","Monthly", "LastMonth", "LastYearThisMonth", "MonthlyAccumulated",
-    "ComparedWithLastMonth", "ComparedWithLastYearSameMonth", "LastYearMonthlyAccumulated",
-    "AccumulatedComparedWithLastYear", "avg_price", "lowest_price", "highest_price"
-
-)
-values (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
-)
-on conflict ("SecurityCode", "Date") do update set
-    "Monthly" = excluded."Monthly",
-    "LastMonth" = excluded."LastMonth",
-    "LastYearThisMonth" = excluded."LastYearThisMonth",
-    "MonthlyAccumulated" = excluded."MonthlyAccumulated",
-    "ComparedWithLastMonth" = excluded."ComparedWithLastMonth",
-    "ComparedWithLastYearSameMonth" = excluded."ComparedWithLastYearSameMonth",
-    "LastYearMonthlyAccumulated" = excluded."LastYearMonthlyAccumulated",
-    "AccumulatedComparedWithLastYear" = excluded."AccumulatedComparedWithLastYear",
-    "avg_price" = excluded."avg_price",
-    "lowest_price" = excluded."lowest_price",
-    "highest_price" = excluded."highest_price";
+INSERT INTO
+    "Revenue" (
+        "SecurityCode",
+        "Date",
+        "Monthly",
+        "LastMonth",
+        "LastYearThisMonth",
+        "MonthlyAccumulated",
+        "ComparedWithLastMonth",
+        "ComparedWithLastYearSameMonth",
+        "LastYearMonthlyAccumulated",
+        "AccumulatedComparedWithLastYear",
+        "avg_price",
+        "lowest_price",
+        "highest_price"
+    )
+VALUES
+    (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    )
+ON CONFLICT
+    ("SecurityCode", "Date")
+DO UPDATE
+SET
+    "Monthly" = EXCLUDED."Monthly",
+    "LastMonth" = EXCLUDED."LastMonth",
+    "LastYearThisMonth" = EXCLUDED."LastYearThisMonth",
+    "MonthlyAccumulated" = EXCLUDED."MonthlyAccumulated",
+    "ComparedWithLastMonth" = EXCLUDED."ComparedWithLastMonth",
+    "ComparedWithLastYearSameMonth" = EXCLUDED."ComparedWithLastYearSameMonth",
+    "LastYearMonthlyAccumulated" = EXCLUDED."LastYearMonthlyAccumulated",
+    "AccumulatedComparedWithLastYear" = EXCLUDED."AccumulatedComparedWithLastYear",
+    "avg_price" = EXCLUDED."avg_price",
+    "lowest_price" = EXCLUDED."lowest_price",
+    "highest_price" = EXCLUDED."highest_price";
 "#;
         Ok(sqlx::query(sql)
             .bind(self.security_code.as_str())

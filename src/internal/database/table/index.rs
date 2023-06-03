@@ -114,11 +114,28 @@ LIMIT 30;
     /// date與 category 為組合鍵 unique
     pub async fn upsert(&self) -> Result<()> {
         let sql = r#"
-insert into index (
-    category, "date", trading_volume, "transaction", trade_value, change, index, create_time, update_time
-) values (
-    $1,$2,$3,$4,$5,$6,$7,$8,$9
-) ON CONFLICT ("date",category) DO UPDATE SET update_time = excluded.update_time;
+INSERT INTO index
+(
+    category,
+    "date",
+    trading_volume,
+    "transaction",
+    trade_value,
+    change,
+    index,
+    create_time,
+    update_time
+)
+VALUES
+(
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
+)
+ON CONFLICT
+(
+    date", category
+)
+DO UPDATE
+    SET update_time = EXCLUDED.update_time;
         "#;
         sqlx::query(sql)
             .bind(&self.category)

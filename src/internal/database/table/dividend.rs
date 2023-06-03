@@ -149,15 +149,15 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     /// 更新股息的配息日、發放日
     pub async fn update_dividend_date(&self) -> Result<PgQueryResult> {
         let sql = r#"
-update
+UPDATE
     dividend
-set
+SET
     "ex-dividend_date1" = $2,
     "ex-dividend_date2" = $3,
     payable_date1 = $4,
     payable_date2 = $5,
-    updated_time = now()
-where
+    updated_time = NOW()
+WHERE
     serial = $1;
 "#;
         sqlx::query(sql)
@@ -271,7 +271,7 @@ SELECT
 FROM
     dividend
 WHERE
-    year = $1 and "sum" <> 0 and ("ex-dividend_date1" = '尚未公布' or "ex-dividend_date2" = '尚未公布');
+    year = $1 and ("ex-dividend_date1" = '尚未公布' or "ex-dividend_date2" = '尚未公布') and "sum" <> 0;
 "#;
 
         let entities = sqlx::query(sql)
@@ -374,7 +374,7 @@ impl From<&goodinfo::dividend::GoodInfoDividend> for Dividend {
 }
 
 /// 取得尚未有指定年度配息或多次配息的股票代號
-pub async fn fetch_without_or_multiple(year: i32) -> Result<Vec<String>> {
+pub async fn fetch_no_or_multiple(year: i32) -> Result<Vec<String>> {
     let sql = r#"
 SELECT
     stock_symbol
@@ -416,10 +416,10 @@ mod tests {
     use rust_decimal_macros::dec;
 
     #[tokio::test]
-    async fn test_fetch_without_or_multiple() {
+    async fn test_fetch_no_or_multiple() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_without_or_multiple".to_string());
-        let r = fetch_without_or_multiple(2023).await;
+        logging::debug_file_async("開始 fetch_no_or_multiple".to_string());
+        let r = fetch_no_or_multiple(2023).await;
         if let Ok(result) = r {
             for e in result {
                 logging::debug_file_async(format!("{:?} ", e));
@@ -427,7 +427,7 @@ mod tests {
         } else if let Err(err) = r {
             logging::debug_file_async(format!("{:#?} ", err));
         }
-        logging::debug_file_async("結束 fetch_without_or_multiple".to_string());
+        logging::debug_file_async("結束 fetch_no_or_multiple".to_string());
     }
 
     #[tokio::test]

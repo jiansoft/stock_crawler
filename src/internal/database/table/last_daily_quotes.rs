@@ -26,9 +26,9 @@ impl Entity {
     pub async fn fetch() -> Result<Vec<Entity>> {
         Ok(sqlx::query_as::<_, Entity>(
             r#"
-select
+SELECT
     date, security_code, closing_price
-from
+FROM
     last_daily_quotes
 "#,
         )

@@ -116,21 +116,21 @@ pub async fn fetch_annual(year: i32) -> Result<Vec<FinancialStatement>> {
     let sql = r#"
 SELECT
     serial,
-       security_code,
-       year,
-       quarter,
-       gross_profit,
-       operating_profit_margin,
-       "pre-tax_income",
-       net_income,
-       net_asset_value_per_share,
-       sales_per_share,
-       earnings_per_share,
-       profit_before_tax,
-       return_on_equity,
-       return_on_assets,
-       created_time,
-       updated_time
+    security_code,
+    year,
+    quarter,
+    gross_profit,
+    operating_profit_margin,
+    "pre-tax_income",
+    net_income,
+    net_asset_value_per_share,
+    sales_per_share,
+    earnings_per_share,
+    profit_before_tax,
+    return_on_equity,
+    return_on_assets,
+    created_time,
+    updated_time
 FROM financial_statement
 WHERE "year" = $1 AND quarter= ''
 "#;
