@@ -103,6 +103,9 @@ pub async fn run_cron() -> Result<()> {
     // 05:00
     let five_am_job = Job::new_async("0 0 21 * * *", |_uuid, _l| {
         Box::pin(async {
+            //取得台股的營收
+            run_and_log_task(BACKFILL_REVENUE, backfill::revenue::execute).await;
+
             //取得台股國際證券識別碼
             run_and_log_task(
                 BACKFILL_INTERNATIONAL_SECURITIES_IDENTIFICATION_NUMBER,
@@ -116,9 +119,6 @@ pub async fn run_cron() -> Result<()> {
                 backfill::delisted_company::execute,
             )
             .await;
-
-            //取得台股的營收
-            run_and_log_task(BACKFILL_REVENUE, backfill::revenue::execute).await;
         })
     })?;
     sched.add(five_am_job).await?;

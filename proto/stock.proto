@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package stock;
+
+//option go_package = "../stock";
+
+service Stock {
+  rpc UpdateStockInfo (StockInfoRequest) returns (StockInfoReply) {}
+}
+
+message StockInfoRequest {
+  string stock_symbol = 1;
+  string name = 2;
+  int32 stock_exchange_market_id = 3;
+  int32 stock_industry_id = 4;
+  double net_asset_value_per_share = 5;
+  //google.protobuf.Timestamp create_time = 6;
+  bool suspend_listing = 6;
+}
+
+message StockInfoReply {
+  string message = 1;
+}
+
+// protoc --go_out=. --go-grpc_out=. stock.proto
+//protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative stock.proto

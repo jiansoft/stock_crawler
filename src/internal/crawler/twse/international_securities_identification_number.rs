@@ -1,9 +1,4 @@
-use crate::internal::{
-    cache::SHARE,
-    database::table,
-    util::{self, datetime::Weekend},
-    StockExchangeMarket,
-};
+use crate::internal::{cache::SHARE, database::table, util::{self, datetime::Weekend}, StockExchangeMarket, logging};
 use anyhow::*;
 use chrono::Local;
 use scraper::{Html, Selector};
@@ -54,7 +49,7 @@ pub async fn visit(
         "https://isin.twse.com.tw/isin/C_public.jsp?strMode={}",
         mode.serial_number()
     );
-
+    logging::info_file_async(format!("visit url:{}", url,));
     let response = util::http::get_use_big5(&url).await?;
     let mut result: Vec<InternationalSecuritiesIdentificationNumber> = Vec::with_capacity(4096);
     let document = Html::parse_document(&response);

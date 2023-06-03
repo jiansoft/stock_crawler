@@ -9,11 +9,29 @@ const CONFIG_PATH: &str = "app.json";
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct App {
-    #[serde(default)]
     pub afraid: Afraid,
-    pub postgresql: PostgreSQL,
     pub bot: Bot,
+    pub postgresql: PostgreSQL,
+    pub rpc: Rpc,
     pub nosql: NoSQL,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Rpc {
+    pub go_service: Grpc,
+}
+
+const GO_GRPC_TARGET: &str = "GO_GRPC_TARGET";
+const GO_GRPC_TLS_CERT_FILE: &str = "GO_GRPC_TLS_CERT_FILE";
+const GO_GRPC_TLS_KEY_FILE: &str = "GO_GRPC_TLS_KEY_FILE";
+const GO_GRPC_DOMAIN_NAME: &str = "GO_GRPC_DOMAIN_NAME";
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Grpc {
+    pub target: String,
+    pub tls_cert_file: String,
+    pub tls_key_file: String,
+    pub domain_name: String,
 }
 
 const AFRAID_TOKEN: &str = "AFRAID_TOKEN";
@@ -160,6 +178,15 @@ impl App {
                         .unwrap_or(6379),
                 },
             },
+
+            rpc: Rpc {
+                go_service: Grpc {
+                    target: env::var(GO_GRPC_TARGET).expect(GO_GRPC_TARGET),
+                    tls_cert_file: env::var(GO_GRPC_TLS_CERT_FILE).expect(GO_GRPC_TLS_CERT_FILE),
+                    tls_key_file: env::var(GO_GRPC_TLS_KEY_FILE).expect(GO_GRPC_TLS_KEY_FILE),
+                    domain_name: env::var(GO_GRPC_DOMAIN_NAME).expect(GO_GRPC_DOMAIN_NAME),
+                },
+            },
         }
     }
 
@@ -167,6 +194,22 @@ impl App {
     fn override_with_env(mut self) -> Self {
         if let Ok(token) = env::var(AFRAID_TOKEN) {
             self.afraid.token = token;
+        }
+
+        if let Ok(target) = env::var(GO_GRPC_TARGET) {
+            self.rpc.go_service.target = target
+        }
+
+        if let Ok(cert) = env::var(GO_GRPC_TLS_CERT_FILE) {
+            self.rpc.go_service.tls_cert_file = cert
+        }
+
+        if let Ok(key) = env::var(GO_GRPC_TLS_KEY_FILE) {
+            self.rpc.go_service.tls_key_file = key
+        }
+
+        if let Ok(domain_name) = env::var(GO_GRPC_DOMAIN_NAME) {
+            self.rpc.go_service.domain_name = domain_name
         }
 
         if let Ok(host) = env::var(POSTGRESQL_HOST) {
@@ -257,6 +300,8 @@ mod tests {
             "SETTINGS.nosql.redis: {:#?}\r\n",
             SETTINGS.nosql.redis
         ));
+
+        logging::debug_file_async(format!("SETTINGS.rpc: {:#?}\r\n", SETTINGS.rpc));
 
         let mut map: HashMap<i64, String> = HashMap::new();
         map.insert(123, "QQ".to_string());

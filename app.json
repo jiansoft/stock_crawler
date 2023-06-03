@@ -25,5 +25,13 @@
       "password": "password",
       "db": 0
     }
+  },
+  "rpc": {
+    "go_service": {
+      "target": "target",
+      "tls_cert_file": "cert_file",
+      "tls_key_file": "key_file",
+      "domain_name": "domain_name"
+    }
   }
 }

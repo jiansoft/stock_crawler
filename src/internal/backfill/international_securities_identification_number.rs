@@ -1,9 +1,11 @@
+use crate::internal::rpc::pb;
 use crate::internal::{
-    bot, cache::SHARE, crawler::twse, database::table, logging, util::datetime::Weekend,
+    bot, cache::SHARE, crawler::twse, database::table, logging, rpc, util::datetime::Weekend,
     StockExchangeMarket,
 };
 use anyhow::*;
 use chrono::Local;
+use rust_decimal::prelude::ToPrimitive;
 use std::{fmt::Write, result::Result::Ok};
 
 /// 更新資料庫新上市股票的或更新其交易所的市場編號、股票的產業分類、名稱等欄位
@@ -45,10 +47,10 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
         };
 
         if new_stock {
-            if let Err(e) = update_stock_info(&item, &mut to_bot_msg).await {
+            if let Err(why) = update_stock_info(&item, &mut to_bot_msg).await {
                 logging::error_file_async(format!(
                     "Failed to update stock info for {} because {:?}",
-                    item.stock_symbol, e
+                    item.stock_symbol, why
                 ));
             }
         }
@@ -68,10 +70,10 @@ async fn update_stock_info(
     msg: &mut String,
 ) -> Result<()> {
     let stock = table::stock::Stock::from(stock.clone());
-    stock.upsert().await.map_err(|e| {
-        logging::error_file_async(format!("Failed to stock.upsert() because {:?}", e));
-        anyhow!(e)
-    })?;
+    stock
+        .upsert()
+        .await
+        .map_err(|why| anyhow!("Failed to stock.upsert() because {:?}", why))?;
 
     if let Ok(mut stocks) = SHARE.stocks.write() {
         stocks.insert(stock.stock_symbol.to_string(), stock.clone());
@@ -80,6 +82,23 @@ async fn update_stock_info(
     let log_msg = format!("stock add or update {:?}", stock);
     writeln!(msg, "{}\r\n", log_msg).ok(); // We don't care if this write fails, so use `.ok()`.
     logging::info_file_async(log_msg);
+
+    //通知 go service
+    let request = pb::StockInfoRequest {
+        stock_symbol: stock.stock_symbol.to_string(),
+        name: stock.name.to_string(),
+        stock_exchange_market_id: stock.stock_exchange_market_id,
+        stock_industry_id: stock.stock_industry_id,
+        net_asset_value_per_share: stock.net_asset_value_per_share.to_f64().unwrap_or(0.0),
+        suspend_listing: false,
+    };
+
+    if let Err(why) = rpc::push_stock_info_to_go_service(request).await {
+        logging::error_file_async(format!(
+            "Failed to push_stock_info_to_go_service for {} because {:?}",
+            stock.stock_symbol, why
+        ));
+    }
 
     Ok(())
 }

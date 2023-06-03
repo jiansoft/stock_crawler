@@ -8,7 +8,7 @@ use crate::internal::{
     },
     logging, util,
 };
-use anyhow::{Context, Result};
+use anyhow::{Result};
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
@@ -98,12 +98,11 @@ set
 where
     stock_symbol = $1;
 "#;
-        sqlx::query(sql)
+        Ok(sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(self.net_asset_value_per_share)
             .execute(database::get_pool()?)
-            .await
-            .context("Failed to update net_asset_value_per_share")
+            .await?)
     }
 
     pub async fn update_suspend_listing(&self) -> Result<PgQueryResult> {

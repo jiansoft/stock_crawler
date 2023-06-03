@@ -4,7 +4,7 @@ pub mod user_agent;
 use crate::internal::util;
 use anyhow::*;
 use async_trait::async_trait;
-use once_cell::{sync::Lazy, sync::OnceCell};
+use once_cell::sync::{Lazy, OnceCell};
 use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
