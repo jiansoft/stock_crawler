@@ -6,6 +6,7 @@ use crate::internal::{
 use anyhow::*;
 use chrono::{Datelike, Local};
 use std::{
+    collections::{HashMap, HashSet},
     result::Result::Ok,
     thread,
     time::Duration
@@ -72,24 +73,51 @@ pub async fn execute() -> Result<()> {
 /// - It fails to visit the dividend information of a stock symbol.
 /// - It fails to upsert a dividend entity.
 async fn processing_without_or_multiple(year: i32) -> Result<()> {
-    //尚未有股利或多次配息
-    let stock_symbols = dividend::fetch_no_or_multiple(year).await?;
+    //年度內尚未有股利配息資料
+    let mut stock_symbols: HashSet<String> = dividend::Dividend::fetch_no_dividends_for_year(year)
+        .await?
+        .into_iter()
+        .collect();
+    //年度內有多次配息資料
+    let multiple_dividends = dividend::Dividend::fetch_multiple_dividends_for_year(year).await?;
+    let mut multiple_dividend_cache = HashSet::new();
+    for dividend in multiple_dividends {
+        let key = format!(
+            "{}-{}-{}",
+            dividend.security_code, dividend.year, dividend.quarter
+        );
+        multiple_dividend_cache.insert(key);
+        stock_symbols.insert(dividend.security_code.to_string());
+    }
+
     logging::info_file_async(format!("本次殖利率的採集需收集 {} 家", stock_symbols.len()));
     for stock_symbol in stock_symbols {
-        let dividends = goodinfo::dividend::visit(&stock_symbol).await?;
+        let dividends_from_goodinfo = goodinfo::dividend::visit(&stock_symbol).await?;
         thread::sleep(Duration::from_secs(90));
         // 取成今年度的股利數據
-        let dividend_details = match dividends.get(&year) {
+        let dividend_details_from_goodinfo = match dividends_from_goodinfo.get(&year) {
             Some(details) => details,
             None => continue,
         };
 
-        for dividend in dividend_details {
-            if dividend.year != year {
+        for dividend_from_goodinfo in dividend_details_from_goodinfo {
+            if dividend_from_goodinfo.year != year {
                 continue;
             }
 
-            let entity = table::dividend::Dividend::from(dividend);
+            //檢查是否為多次配息，並且已經收錄該筆股利
+            let key = format!(
+                "{}-{}-{}",
+                dividend_from_goodinfo.stock_symbol,
+                dividend_from_goodinfo.year,
+                dividend_from_goodinfo.quarter
+            );
+
+            if multiple_dividend_cache.contains(&key) {
+                continue;
+            }
+
+            let entity = table::dividend::Dividend::from(dividend_from_goodinfo);
             match entity.upsert().await {
                 Ok(_) => {
                     logging::info_file_async(format!(
@@ -157,6 +185,15 @@ async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> 
     }
 
     Ok(())
+}
+
+pub fn vec_to_hashmap(entities: Vec<dividend::Dividend>) -> HashMap<String, dividend::Dividend> {
+    let mut map = HashMap::new();
+    for e in entities {
+        let key = format!("{}-{}-{}", e.security_code, e.year, e.quarter);
+        map.insert(key, e);
+    }
+    map
 }
 
 #[cfg(test)]

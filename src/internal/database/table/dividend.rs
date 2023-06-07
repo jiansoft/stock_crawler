@@ -52,6 +52,29 @@ pub struct Dividend {
     pub updated_time: DateTime<Local>,
 }
 
+const TABLE_COLUMNS: &str = r#"
+    serial,
+    security_code,
+    year,
+    year_of_dividend,
+    quarter,
+    cash_dividend,
+    stock_dividend,
+    sum,
+    "ex-dividend_date1",
+    "ex-dividend_date2",
+    payable_date1,
+    payable_date2,
+    created_time,
+    updated_time,
+    capital_reserve_cash_dividend,
+    earnings_cash_dividend,
+    capital_reserve_stock_dividend,
+    earnings_stock_dividend,
+    payout_ratio_cash,
+    payout_ratio_stock,
+    payout_ratio"#;
+
 impl Dividend {
     pub fn new() -> Self {
         Dividend {
@@ -202,36 +225,18 @@ WHERE
         year: i32,
         stock_purchase_date: DateTime<Local>,
     ) -> Result<Vec<Dividend>> {
-        let sql = r#"
-select
-    serial,
-    security_code,
-    year,
-    year_of_dividend,
-    quarter,
-    cash_dividend,
-    stock_dividend,
-    sum,
-    "ex-dividend_date1",
-    "ex-dividend_date2",
-    payable_date1,
-    payable_date2,
-    created_time,
-    updated_time,
-    capital_reserve_cash_dividend,
-    earnings_cash_dividend,
-    capital_reserve_stock_dividend,
-    earnings_stock_dividend,
-    payout_ratio_cash,
-    payout_ratio_stock,
-    payout_ratio
+        let sql = format!(
+            r#"
+select {}
 from dividend
 where security_code = $1
     and year = $2
     and ("ex-dividend_date1" <= $3)
     and ("ex-dividend_date1" >= $4 or "ex-dividend_date2" >= $4);
-"#;
-        let entities = sqlx::query(sql)
+"#,
+            TABLE_COLUMNS
+        );
+        let entities = sqlx::query(&sql)
             .bind(security_code)
             .bind(year)
             .bind(Local::now().format("%Y-%m-%d %H:%M:%S").to_string())
@@ -245,42 +250,69 @@ where security_code = $1
 
     /// 取得指定年度尚未有配息日的配息數據(有排除配息金額為 0)
     pub async fn fetch_unpublished_dividends_for_year(year: i32) -> Result<Vec<Dividend>> {
-        let sql = r#"
-SELECT
-    serial,
-    security_code,
-    year,
-    year_of_dividend,
-    quarter,
-    cash_dividend,
-    stock_dividend,
-    sum,
-    "ex-dividend_date1",
-    "ex-dividend_date2",
-    payable_date1,
-    payable_date2,
-    created_time,
-    updated_time,
-    capital_reserve_cash_dividend,
-    earnings_cash_dividend,
-    capital_reserve_stock_dividend,
-    earnings_stock_dividend,
-    payout_ratio_cash,
-    payout_ratio_stock,
-    payout_ratio
+        let sql = format!(
+            r#"
+SELECT {}
 FROM
     dividend
 WHERE
     year = $1 and ("ex-dividend_date1" = '尚未公布' or "ex-dividend_date2" = '尚未公布') and "sum" <> 0;
-"#;
+"#,
+            TABLE_COLUMNS
+        );
 
-        let entities = sqlx::query(sql)
+        let entities = sqlx::query(&sql)
             .bind(year)
             .try_map(Self::row_to_entity)
             .fetch_all(database::get_pool()?)
             .await?;
 
         Ok(entities)
+    }
+
+    /// 取得指定年度內有多次配息的配息資料
+    pub async fn fetch_multiple_dividends_for_year(year: i32) -> Result<Vec<Dividend>> {
+        let sql = format!(
+            r#"
+SELECT {}
+FROM dividend
+WHERE year = $1 AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2');
+"#,
+            TABLE_COLUMNS
+        );
+
+        let entities: Vec<Dividend> = sqlx::query(&sql)
+            .bind(year)
+            .try_map(Self::row_to_entity)
+            .fetch_all(database::get_pool()?)
+            .await?;
+
+        Ok(entities)
+    }
+
+    /// 取得尚未有指定年度配息的股票代號
+    pub async fn fetch_no_dividends_for_year(year: i32) -> Result<Vec<String>> {
+        let sql = r#"
+SELECT
+    stock_symbol
+FROM stocks
+WHERE "SuspendListing" = false
+    AND stock_exchange_market_id IN (2, 4)
+    AND stock_symbol NOT IN (
+            SELECT security_code
+            FROM dividend
+            WHERE year = $1 AND quarter = ''
+    );
+"#;
+        let stock_symbols: Vec<String> = sqlx::query(sql)
+            .bind(year)
+            .fetch_all(database::get_pool()?)
+            .await?
+            .into_iter()
+            .map(|row| row.get("stock_symbol"))
+            .collect();
+
+        Ok(stock_symbols)
     }
 
     fn row_to_entity(row: PgRow) -> Result<Dividend, sqlx::Error> {
@@ -373,41 +405,6 @@ impl From<&goodinfo::dividend::GoodInfoDividend> for Dividend {
     }
 }
 
-/// 取得尚未有指定年度配息或多次配息的股票代號
-pub async fn fetch_no_or_multiple(year: i32) -> Result<Vec<String>> {
-    let sql = r#"
-SELECT
-    stock_symbol
-FROM stocks
-WHERE "SuspendListing" = false
-    AND stock_exchange_market_id IN (2, 4)
-    AND (
-        --年度內還未有股利數據
-        stock_symbol NOT IN (
-            SELECT security_code
-            FROM dividend
-            WHERE year = $1 AND quarter = ''
-        )
-        --年度內多次發放股利
-        OR stock_symbol IN (
-            SELECT security_code
-            FROM dividend
-            WHERE year = $1 AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2')
-        )
-    );
-"#;
-
-    let stock_symbols: Vec<String> = sqlx::query(sql)
-        .bind(year)
-        .fetch_all(database::get_pool()?)
-        .await?
-        .into_iter()
-        .map(|row| row.get("stock_symbol"))
-        .collect();
-
-    Ok(stock_symbols)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,10 +413,10 @@ mod tests {
     use rust_decimal_macros::dec;
 
     #[tokio::test]
-    async fn test_fetch_no_or_multiple() {
+    async fn test_fetch_no_dividends_for_year() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_no_or_multiple".to_string());
-        let r = fetch_no_or_multiple(2023).await;
+        logging::debug_file_async("開始 fetch_no_dividends_for_year".to_string());
+        let r = Dividend::fetch_no_dividends_for_year(2023).await;
         if let Ok(result) = r {
             for e in result {
                 logging::debug_file_async(format!("{:?} ", e));
@@ -427,7 +424,7 @@ mod tests {
         } else if let Err(err) = r {
             logging::debug_file_async(format!("{:#?} ", err));
         }
-        logging::debug_file_async("結束 fetch_no_or_multiple".to_string());
+        logging::debug_file_async("結束 fetch_no_dividends_for_year".to_string());
     }
 
     #[tokio::test]
@@ -443,6 +440,21 @@ mod tests {
             logging::debug_file_async(format!("{:#?} ", err));
         }
         logging::debug_file_async("結束 fetch_dividend_unannounced_date".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_multiple_dividends_for_year() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_multiple_dividends_for_year".to_string());
+        let r = Dividend::fetch_multiple_dividends_for_year(2023).await;
+        if let Ok(result) = r {
+            for e in result {
+                logging::debug_file_async(format!("{:?} ", e));
+            }
+        } else if let Err(err) = r {
+            logging::debug_file_async(format!("{:#?} ", err));
+        }
+        logging::debug_file_async("結束 fetch_multiple_dividends_for_year".to_string());
     }
 
     #[tokio::test]
