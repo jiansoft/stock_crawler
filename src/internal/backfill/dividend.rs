@@ -18,11 +18,11 @@ pub async fn execute() -> Result<()> {
     //尚未有股利或多次配息
     let now = Local::now();
     let year = now.year();
-    let without_or_multiple = processing_without_or_multiple(year);
-    let yahoo = processing_with_unannounced_ex_dividend_dates(year);
-    let (res_without_or_multiple, res_yahoo) = tokio::join!(without_or_multiple, yahoo);
+    let without_or_multiple = processing_no_or_multiple(year);
+    let yahoo = processing_unannounced_ex_dividend_dates(year);
+    let (res_no_or_multiple, res_yahoo) = tokio::join!(without_or_multiple, yahoo);
 
-    match res_without_or_multiple {
+    match res_no_or_multiple {
         Ok(_) => {
             logging::info_file_async(
                 "processing_without_or_multiple executed successfully.".to_string(),
@@ -72,7 +72,7 @@ pub async fn execute() -> Result<()> {
 /// - It fails to fetch the list of stock symbols.
 /// - It fails to visit the dividend information of a stock symbol.
 /// - It fails to upsert a dividend entity.
-async fn processing_without_or_multiple(year: i32) -> Result<()> {
+async fn processing_no_or_multiple(year: i32) -> Result<()> {
     //年度內尚未有股利配息資料
     let mut stock_symbols: HashSet<String> = dividend::Dividend::fetch_no_dividends_for_year(year)
         .await?
@@ -135,7 +135,7 @@ async fn processing_without_or_multiple(year: i32) -> Result<()> {
     Ok(())
 }
 
-async fn processing_with_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
+async fn processing_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     //除息日 尚未公布
     let dividends = dividend::Dividend::fetch_unpublished_dividends_for_year(year).await?;
     logging::info_file_async(format!("本次除息日的採集需收集 {} 家", dividends.len()));
@@ -208,7 +208,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 processing_with_unannounced_ex_dividend_dates".to_string());
 
-        match processing_with_unannounced_ex_dividend_dates(2023).await {
+        match processing_unannounced_ex_dividend_dates(2023).await {
             Ok(_) => {
                 logging::debug_file_async(
                     "processing_with_unannounced_ex_dividend_dates executed successfully."
@@ -232,7 +232,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 processing_without_or_multiple".to_string());
 
-        match processing_without_or_multiple(2023).await {
+        match processing_no_or_multiple(2023).await {
             Ok(_) => {
                 logging::debug_file_async(
                     "processing_without_or_multiple executed successfully.".to_string(),

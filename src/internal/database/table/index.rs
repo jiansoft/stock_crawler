@@ -132,11 +132,11 @@ VALUES
 )
 ON CONFLICT
 (
-    date", category
+    "date", category
 )
 DO UPDATE
     SET update_time = EXCLUDED.update_time;
-        "#;
+"#;
         sqlx::query(sql)
             .bind(&self.category)
             .bind(self.date)
