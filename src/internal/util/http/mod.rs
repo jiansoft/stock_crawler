@@ -1,14 +1,16 @@
 pub mod element;
 pub mod user_agent;
 
-use crate::internal::util;
+use crate::internal::{logging, util};
 use anyhow::*;
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::result::Result::Ok;
 use std::{collections::HashMap, time::Duration};
 use tokio::sync::Semaphore;
+use tokio::time::sleep;
 
 /// A semaphore for limiting concurrent requests.
 ///
@@ -204,18 +206,37 @@ pub async fn post(
     .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
 }
 
-/// Sends an HTTP request using the specified method, URL, headers, and body.
+const MAX_RETRIES: usize = 5;
+
+/// Sends an HTTP request using the specified method, URL, headers, and body with retries on failure.
 ///
 /// # Arguments
 ///
 /// * `method`: The HTTP method to use for the request (GET, POST, PUT, DELETE, etc.).
 /// * `url`: The URL to send the request to.
 /// * `headers`: An optional set of headers to include with the request.
-/// * `body`: An optional function that takes a `reqwest::RequestBuilder` and modifies it with the request body (JSON, form data, etc.).
+/// * `body`: An optional function that takes a `reqwest::RequestBuilder` and returns a new `RequestBuilder` with the request body added (JSON, form data, etc.).
+///
+/// This function will attempt to send the request up to MAX_RETRIES times. If a request attempt fails, it logs the error and retries the request after a delay. The delay increases with each attempt.
 ///
 /// # Returns
 ///
-/// * `Result<Response>`: The HTTP response, or an error if the request fails.
+/// * `Result<Response>`: The HTTP response, or an error if all attempts to send the request fail. If all attempts fail, it returns an error indicating that the request failed after MAX_RETRIES attempts.
+///
+/// # Errors
+///
+/// This function will return an `Err` if the request fails to send after MAX_RETRIES attempts.
+///
+/// # Example
+///
+/// ```
+/// let method = Method::GET;
+/// let url = "http://tw.yahoo.com";
+/// let headers = Some(HeaderMap::new());
+/// let body = Some(|rb: RequestBuilder| rb.json(&data));
+///
+/// let response = send(method, url, headers, body).await?;
+/// ```
 async fn send(
     method: Method,
     url: &str,
@@ -233,10 +254,32 @@ async fn send(
         rb = body_fn(rb);
     }
 
-    rb.send()
-        .await
-        .map_err(|e| anyhow!("Error sending request: {:?}", e))
+    for attempt in 1..=MAX_RETRIES {
+        match rb.try_clone() {
+            None => continue,
+            Some(rb) => match rb.send().await {
+                Ok(response) => return Ok(response),
+                Err(e) if attempt < MAX_RETRIES => {
+                    logging::error_file_async(format!(
+                        "Failed to send({}) because {:?}, retrying...",
+                        attempt, e
+                    ));
+                    sleep(Duration::from_secs(attempt as u64)).await;  // add delay before retry
+                    continue;
+                }
+                Err(e) => bail!(
+                    "Failed to send({}) because {:?}, giving up after {} attempts.",
+                    attempt,
+                    e,
+                    MAX_RETRIES
+                ),
+            },
+        }
+    }
+
+    Err(anyhow!("Failed to send request after {} attempts", MAX_RETRIES))
 }
+
 
 #[cfg(test)]
 mod tests {

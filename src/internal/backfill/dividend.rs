@@ -9,7 +9,11 @@ use std::{
     collections::{HashMap, HashSet},
     result::Result::Ok,
     thread,
-    time::Duration
+    time::Duration,
+};
+use tokio_retry::{
+    strategy::{jitter, ExponentialBackoff},
+    Retry,
 };
 
 /// 更新股利發送數據
@@ -18,9 +22,9 @@ pub async fn execute() -> Result<()> {
     //尚未有股利或多次配息
     let now = Local::now();
     let year = now.year();
-    let without_or_multiple = processing_no_or_multiple(year);
+    let no_or_multiple_dividend = processing_no_or_multiple(year);
     let yahoo = processing_unannounced_ex_dividend_dates(year);
-    let (res_no_or_multiple, res_yahoo) = tokio::join!(without_or_multiple, yahoo);
+    let (res_no_or_multiple, res_yahoo) = tokio::join!(no_or_multiple_dividend, yahoo);
 
     match res_no_or_multiple {
         Ok(_) => {
@@ -140,12 +144,40 @@ async fn processing_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     let dividends = dividend::Dividend::fetch_unpublished_dividends_for_year(year).await?;
     logging::info_file_async(format!("本次除息日的採集需收集 {} 家", dividends.len()));
     for mut entity in dividends {
-        let yahoo = match yahoo::dividend::visit(&entity.security_code).await {
+        //最多重試 5 次
+        /*let retry_limit: i32 = 5;
+        let mut yahoo: Option<yahoo::dividend::YahooDividend> = None;
+        for i in 0..retry_limit {
+            match yahoo::dividend::visit(&entity.security_code).await {
+                Ok(yahoo_dividend) => {
+                    yahoo = Some(yahoo_dividend);
+                    break;
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to yahoo::dividend::visit({}) because {:?} ",
+                        i, why
+                    ));
+                }
+            };
+        }
+        let yahoo = match yahoo {
+            Some(y) => y,
+            None => continue,
+        };
+        */
+
+        let strategy = ExponentialBackoff::from_millis(100)
+            .map(jitter) // add jitter to delays
+            .take(5); // limit to 5 retries
+
+        let retry_future = Retry::spawn(strategy, || yahoo::dividend::visit(&entity.security_code));
+        let yahoo = match retry_future.await {
             Ok(yahoo_dividend) => yahoo_dividend,
-            Err(why) => {
+            Err(err) => {
                 logging::error_file_async(format!(
-                    "Failed to yahoo::dividend::visit because {:?} ",
-                    why
+                    "Failed to yahoo::dividend::visit after 5 retries because {:?} ",
+                    err
                 ));
                 continue;
             }
