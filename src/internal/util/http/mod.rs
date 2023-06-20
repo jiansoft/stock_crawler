@@ -7,10 +7,15 @@ use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::result::Result::Ok;
-use std::{collections::HashMap, time::Duration};
-use tokio::sync::Semaphore;
-use tokio::time::sleep;
+use std::{
+    result::Result::Ok,
+    collections::HashMap,
+    time::Duration
+};
+use tokio::{
+    sync::Semaphore,
+    time::sleep
+};
 
 /// A semaphore for limiting concurrent requests.
 ///

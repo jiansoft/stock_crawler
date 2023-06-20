@@ -21,6 +21,10 @@ pub async fn execute() -> Result<()> {
                         continue;
                     }
 
+                    if company.delisting_date.len() < 3 {
+                        continue;
+                    }
+
                     let year = match company.delisting_date[..3].parse::<i32>() {
                         Ok(_year) => _year,
                         Err(why) => {
