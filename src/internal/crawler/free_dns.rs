@@ -6,14 +6,15 @@ pub async fn update() {
     let url = concat_string!(
         config::SETTINGS.afraid.url,
         config::SETTINGS.afraid.path,
-        "?",
-        config::SETTINGS.afraid.token
+        "/",
+        config::SETTINGS.afraid.token,
+        "/"
     );
-
+    logging::info_file_async(format!("visit url:{}", url,));
     match util::http::get(&url, None).await {
         Ok(t) => {
             if t.contains("Updated") {
-                logging::info_file_async(t);
+                logging::debug_file_async(t);
             }
         }
         Err(why) => {

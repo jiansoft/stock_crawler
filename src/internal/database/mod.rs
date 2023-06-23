@@ -2,11 +2,11 @@ pub mod table;
 
 use crate::internal::config;
 use anyhow::*;
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::Lazy;
 use sqlx::{postgres::PgPoolOptions, PgPool};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-static POSTGRES: Lazy<Arc<OnceCell<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceCell::new()));
+static POSTGRES: Lazy<Arc<OnceLock<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 
 pub struct PostgresSQL {
     pub pool: PgPool,

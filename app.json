@@ -1,8 +1,8 @@
 
 {
   "afraid": {
-    "url": "https://freedns.afraid.org",
-    "path": "/dynamic/update.php",
+    "url": "https://sync.afraid.org",
+    "path": "/u",
     "token": "afraid_token"
   },
   "postgresql": {

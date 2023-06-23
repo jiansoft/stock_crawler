@@ -1,10 +1,16 @@
 use crate::internal::{config::SETTINGS, logging, util::http};
 use anyhow::*;
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{result::Result::Ok, sync::Arc};
+use std::{
+    sync::{
+        OnceLock,
+        Arc
+    },
+    result::Result::Ok,
+};
 
-static TELEGRAM: Lazy<Arc<OnceCell<Telegram>>> = Lazy::new(|| Arc::new(OnceCell::new()));
+static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 
 struct Telegram {
     send_message_url: String,

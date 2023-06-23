@@ -65,6 +65,9 @@ impl TextForceBig5 for Response {
 fn get_client() -> Result<&'static Client> {
     CLIENT.get_or_try_init(|| {
         Client::builder()
+            .brotli(true)
+            .deflate(true)
+            .gzip(true)
             .connect_timeout(Duration::from_secs(10))
             .tcp_keepalive(Duration::from_secs(30))
             .pool_max_idle_per_host(10)
