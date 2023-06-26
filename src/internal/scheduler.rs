@@ -1,6 +1,6 @@
 use crate::internal::{backfill, bot, crawler, logging, reminder};
 use anyhow::*;
-use std::{env, future::Future, result::Result::Ok, time::Duration};
+use std::{env, future::Future, result::Result::Ok};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 // Constants for logging messages
@@ -163,12 +163,12 @@ pub async fn run_cron() -> Result<()> {
     })?;
     sched.add(nine_pm_job).await?;
 
-    let every_sixty = Job::new_repeated_async(Duration::from_secs(60), |_uuid, _l| {
+    let every_minute = Job::new_async("0 * * * * *", |_uuid, _l| {
         Box::pin(async {
             crawler::free_dns::update().await;
         })
     })?;
-    sched.add(every_sixty).await?;
+    sched.add(every_minute).await?;
 
     sched.start().await?;
 
