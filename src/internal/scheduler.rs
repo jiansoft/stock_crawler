@@ -174,3 +174,39 @@ pub async fn run_cron() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
+    use super::*;
+    use tokio::time::{sleep, Duration};
+
+    async fn run() -> Result<()> {
+        let sched = JobScheduler::new().await?;
+        let every_minute = Job::new_async("* * * * * *", |_uuid, _l| {
+            Box::pin(async move {
+                println!("_uuid {:?} now: {:?}", _uuid, chrono::Local::now());
+                dbg!("_uuid {:?} now: {:?}", _uuid, chrono::Local::now());
+                logging::debug_file_async(format!(
+                    "_uuid {:?} now: {:?}",
+                    _uuid,
+                    chrono::Local::now()
+                ));
+            })
+        })?;
+        sched.add(every_minute).await?;
+
+        sched.start().await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_split() {
+        dotenv::dotenv().ok();
+        run().await.expect("TODO: panic message");
+        sleep(Duration::from_secs(240)).await;
+        //loop {}
+        //println!("split: {:?}, elapsed time: {:?}", result, end);
+    }
+}

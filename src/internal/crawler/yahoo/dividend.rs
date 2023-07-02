@@ -3,7 +3,7 @@ use anyhow::*;
 use core::result::Result::Ok;
 use regex::Regex;
 use scraper::{Html, Selector};
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct YahooDividend {

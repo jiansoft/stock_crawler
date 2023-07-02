@@ -7,15 +7,13 @@ use crate::internal::{
     },
 };
 use anyhow::*;
-use std::{
-    result::Result::Ok,
-    collections::HashMap
-};
+use hashbrown::HashMap;
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
+use std::result::Result::Ok;
 use urlencoding::encode;
 
 const UNSET_DATE: &str = "-";

@@ -3,8 +3,9 @@ use crate::internal::{
     database::table::{index, last_daily_quotes, revenue, stock, stock_exchange_market},
     logging,
 };
+use hashbrown::HashMap;
 use once_cell::sync::Lazy;
-use std::{collections::HashMap, sync::RwLock};
+use std::sync::RwLock;
 
 pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
 

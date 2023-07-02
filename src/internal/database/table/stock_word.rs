@@ -1,8 +1,9 @@
 use crate::internal::database;
 use anyhow::*;
 use chrono::{DateTime, Local};
+use hashbrown::HashMap;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
-use std::{collections::HashMap, result::Result::Ok};
+use std::result::Result::Ok;
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]

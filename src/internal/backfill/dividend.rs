@@ -5,12 +5,8 @@ use crate::internal::{
 };
 use anyhow::*;
 use chrono::{Datelike, Local};
-use std::{
-    collections::{HashMap, HashSet},
-    result::Result::Ok,
-    thread,
-    time::Duration,
-};
+use hashbrown::HashMap;
+use std::{collections::HashSet, result::Result::Ok, thread, time::Duration};
 use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,

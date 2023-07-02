@@ -3,9 +3,10 @@ use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use concat_string::concat_string;
 use futures::StreamExt;
+use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Index {

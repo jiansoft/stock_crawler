@@ -6,10 +6,11 @@ use crate::internal::{
 };
 use anyhow::*;
 use chrono::{DateTime, Datelike, Local};
+use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
-use std::{collections::HashMap, result::Result::Ok};
+use std::result::Result::Ok;
 
 // QuoteResponse 上櫃公司每日收盤資訊
 #[derive(Debug, Deserialize)]

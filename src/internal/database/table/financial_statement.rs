@@ -4,13 +4,14 @@ use crate::internal::{
 };
 use anyhow::*;
 use chrono::{DateTime, Local};
+use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
     Row,
 };
-use std::{collections::HashMap, result::Result::Ok};
+use std::result::Result::Ok;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]
 /// 財務報表
@@ -162,7 +163,9 @@ WHERE "year" = $1 AND quarter= ''
     Ok(result)
 }
 
-pub fn vec_to_hashmap(entities: Vec<FinancialStatement>) -> HashMap<String, FinancialStatement> {
+pub fn vec_to_hashmap(
+    entities: Vec<FinancialStatement>,
+) -> HashMap<String, FinancialStatement> {
     let mut map = HashMap::new();
     for e in entities {
         map.insert(e.security_code.to_string(), e);
