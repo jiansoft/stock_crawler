@@ -20,13 +20,13 @@ pub async fn execute() -> Result<()> {
     }
 
     //上櫃報價
-    if let Ok(twse) = tpex::quote::visit(now).await {
-        results.extend(twse);
+    if let Ok(tpex) = tpex::quote::visit(now).await {
+        results.extend(tpex);
     }
 
     let results_is_empty = results.is_empty();
 
-    let tasks: Vec<_> = results.into_iter().map(process_item).collect();
+    let tasks: Vec<_> = results.into_iter().map(process_daily_quote).collect();
     futures::future::join_all(tasks).await;
 
     if results_is_empty {
@@ -63,22 +63,22 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-async fn process_item(item: daily_quote::DailyQuote) {
-    match item.upsert().await {
+async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
+    match daily_quote.upsert().await {
         Ok(_) => {
             //logging::debug_file_async(format!("item:{:#?}", item));
 
             if let Ok(mut last_trading_day_quotes) = SHARE.last_trading_day_quotes.write() {
-                if let Some(quote) = last_trading_day_quotes.get_mut(&item.security_code) {
-                    quote.date = item.date;
-                    quote.closing_price = item.closing_price;
+                if let Some(quote) = last_trading_day_quotes.get_mut(&daily_quote.security_code) {
+                    quote.date = daily_quote.date;
+                    quote.closing_price = daily_quote.closing_price;
                 }
             }
 
             let daily_quote_memory_key = format!(
                 "DailyQuote:{}-{}",
-                item.date.format("%Y%m%d"),
-                item.security_code
+                daily_quote.date.format("%Y%m%d"),
+                daily_quote.security_code
             );
 
             //更新最後交易日的收盤價

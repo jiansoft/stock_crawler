@@ -6,7 +6,7 @@ use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction};
 
-#[derive(sqlx::Type, sqlx::FromRow, Debug)]
+#[derive(sqlx::Type, sqlx::FromRow, Debug, Copy)]
 /// 持股股息發放記錄表 原表名 dividend_record_detail
 pub struct DividendRecordDetail {
     pub serial: i64,
@@ -49,7 +49,8 @@ impl DividendRecordDetail {
     }
 
     /// 更新持股股息發放記錄
-    pub async fn upsert(&mut self, tx: Option<Transaction<'_, Postgres>>) -> Result<i64> {
+    pub async fn upsert(&mut self, tx: &mut Option<Transaction<'_,Postgres>>) -> Result<i64> {
+
         let sql = r#"
         insert into dividend_record_detail (stock_ownership_details_serial, "year", cash, stock_money, stock, total)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -70,10 +71,12 @@ impl DividendRecordDetail {
             .bind(self.total);
         let row: (i64,) = match tx {
             None => query.fetch_one(database::get_pool()?).await?,
-            Some(mut t) => query.fetch_one(&mut t).await?,
+            Some(ref mut t) => query.fetch_one(t).await?,
         };
-
+        //dbg!(row);
         self.serial = row.0;
+
+        //dbg!(*self);
 
         Ok(self.serial)
     }
@@ -81,7 +84,7 @@ impl DividendRecordDetail {
     /// 計算指定股票其累積的領取股利
     pub async fn fetch_cumulate_dividend(
         &self,
-        tx: Option<Transaction<'_, Postgres>>,
+        tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<CumulateDividend> {
         CumulateDividend::fetch_cumulate_dividend(self.stock_ownership_details_serial, tx).await
     }
@@ -134,7 +137,7 @@ mod tests {
             Decimal::ZERO,
         );
         let mut tx_option: Option<Transaction<Postgres>> = Some(database::get_pool().unwrap().begin().await.unwrap());
-        match drd.fetch_cumulate_dividend(tx_option.take()).await {
+        match drd.fetch_cumulate_dividend(&mut tx_option).await {
             Ok(cd) => {
                 logging::debug_file_async(format!("cd: {:?}", cd));
             }

@@ -140,7 +140,7 @@ WHERE is_sold = false";
     /// 更新指定股票累積的股利
     pub async fn update_cumulate_dividends(
         &self,
-        tx: Option<Transaction<'_, Postgres>>,
+        tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
 UPDATE stock_ownership_details
@@ -160,7 +160,7 @@ WHERE
             .bind(self.cumulate_dividends_total);
         let result = match tx {
             None => query.execute(database::get_pool()?).await?,
-            Some(mut t) => query.execute(&mut t).await?,
+            Some(ref mut t) => query.execute(t).await?,
         };
 
         Ok(result)

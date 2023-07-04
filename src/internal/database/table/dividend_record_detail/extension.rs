@@ -38,7 +38,7 @@ impl CumulateDividend {
     /// 計算指定股票其累積的領取股利
     pub async fn fetch_cumulate_dividend(
         stock_ownership_details_serial: i64,
-        tx: Option<Transaction<'_, Postgres>>,
+        tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<CumulateDividend> {
         let query = sqlx::query(
             r#"
@@ -65,7 +65,7 @@ where stock_ownership_details_serial = $1;
 
         let cd = match tx {
             None => query.fetch_one(database::get_pool()?).await?,
-            Some(mut t) => query.fetch_one(&mut t).await?,
+            Some(ref mut t) => query.fetch_one( t).await?,
         };
 
         Ok(cd)

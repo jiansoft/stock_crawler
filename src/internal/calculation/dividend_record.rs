@@ -71,7 +71,7 @@ async fn calculate_dividend(
 
     let mut tx_option: Option<Transaction<Postgres>> = Some(database::get_pool()?.begin().await?);
     //更新股利領取記錄
-    let dividend_record_detail_serial = match drd.upsert(tx_option.take()).await {
+    let dividend_record_detail_serial = match drd.upsert(&mut tx_option).await {
         Ok(serial) => serial,
         Err(why) => {
             if let Some(tx) = tx_option {
@@ -90,6 +90,7 @@ async fn calculate_dividend(
         sod.created_time,
     )
     .await?;
+
     for dividend in dividends {
         //寫入領取細節表
         let dividend_cash = dividend.cash_dividend * number_of_shares_held;
@@ -107,7 +108,7 @@ async fn calculate_dividend(
             dividend_total,
         );
 
-        if let Err(why) = rdrm.upsert(tx_option.take()).await {
+        if let Err(why) = rdrm.upsert(&mut tx_option).await {
             if let Some(tx) = tx_option {
                 tx.rollback().await?;
             }
@@ -118,7 +119,7 @@ async fn calculate_dividend(
         }
 
         // 計算指定股票其累積的領取股利
-        let cumulate_dividend = match drd.fetch_cumulate_dividend(tx_option.take()).await {
+        let cumulate_dividend = match drd.fetch_cumulate_dividend(&mut tx_option).await {
             Ok(cd) => cd,
             Err(why) => {
                 if let Some(tx) = tx_option {
@@ -136,7 +137,7 @@ async fn calculate_dividend(
         sod.cumulate_dividends_stock = cumulate_dividend.stock;
         sod.cumulate_dividends_total = cumulate_dividend.total;
 
-        if let Err(why) = sod.update_cumulate_dividends(tx_option.take()).await {
+        if let Err(why) = sod.update_cumulate_dividends(&mut tx_option).await {
             if let Some(tx) = tx_option {
                 tx.rollback().await?;
             }
@@ -147,7 +148,9 @@ async fn calculate_dividend(
         }
     }
 
+
     if let Some(tx) = tx_option {
+        logging::info_file_async("tx_option commit".to_string());
         tx.commit().await?;
     }
 
@@ -211,7 +214,7 @@ mod tests {
     async fn test_calculate() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 calculate".to_string());
-        for i in 2014..2024 {
+        for i in 2023..2024 {
             execute(i, None).await;
             logging::debug_file_async(format!("calculate({}) 完成", i));
         }
@@ -224,12 +227,12 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 calculate_dividend".to_string());
         let mut sod = stock_ownership_details::StockOwnershipDetail::new();
-        sod.serial = 27;
-        sod.security_code = "2330".to_string();
+        sod.serial = 101;
+        sod.security_code = "2317".to_string();
         sod.member_id = 2;
         sod.share_quantity = 100;
-        sod.created_time = Local.with_ymd_and_hms(2022, 3, 9, 0, 0, 0).unwrap();
-        match calculate_dividend(sod, 2022).await {
+        sod.created_time = Local.with_ymd_and_hms(2022, 3, 27, 0, 0, 0).unwrap();
+        match calculate_dividend(sod, 2023).await {
             Ok(_) => {}
             Err(why) => {
                 logging::debug_file_async(format!(
