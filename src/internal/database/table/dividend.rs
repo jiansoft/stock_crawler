@@ -299,9 +299,9 @@ FROM stocks
 WHERE "SuspendListing" = false
     AND stock_exchange_market_id IN (2, 4)
     AND stock_symbol NOT IN (
-            SELECT security_code
-            FROM dividend
-            WHERE year = $1 AND quarter = ''
+        SELECT security_code
+        FROM dividend
+        WHERE year = $1 AND quarter = ''
     );
 "#;
         let stock_symbols: Vec<String> = sqlx::query(sql)

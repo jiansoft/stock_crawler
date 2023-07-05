@@ -3,7 +3,7 @@ pub mod table;
 use crate::internal::config;
 use anyhow::*;
 use once_cell::sync::Lazy;
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{postgres::PgPoolOptions, Acquire, PgPool, Postgres, Transaction};
 use std::sync::{Arc, OnceLock};
 
 static POSTGRES: Lazy<Arc<OnceLock<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceLock::new()));
@@ -40,4 +40,8 @@ impl Default for PostgresSQL {
 
 pub fn get_pool() -> Result<&'static PgPool> {
     Ok(&POSTGRES.get_or_init(PostgresSQL::new).pool)
+}
+
+pub async fn get_tx() -> Result<Transaction<'static, Postgres>> {
+    Ok(get_pool()?.begin().await?)
 }

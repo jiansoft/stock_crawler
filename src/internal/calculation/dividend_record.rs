@@ -2,15 +2,14 @@ use crate::internal::{
     database::{
         self,
         table::{
-            dividend, dividend_record_detail, dividend_record_detail_more, stock_ownership_details,
+            dividend, dividend_record_detail::DividendRecordDetail, dividend_record_detail_more,
+            stock_ownership_details,
         },
     },
     logging,
 };
 use anyhow::*;
-use dividend_record_detail::DividendRecordDetail;
 use rust_decimal::Decimal;
-use sqlx::{Postgres, Transaction};
 use std::result::Result::Ok;
 
 /// 計算指定年份領取的股利
@@ -69,7 +68,7 @@ async fn calculate_dividend(
         dividend_total,
     );
 
-    let mut tx_option: Option<Transaction<Postgres>> = Some(database::get_pool()?.begin().await?);
+    let mut tx_option = Some(database::get_tx().await?);
     //更新股利領取記錄
     let dividend_record_detail_serial = match drd.upsert(&mut tx_option).await {
         Ok(serial) => serial,
@@ -148,9 +147,7 @@ async fn calculate_dividend(
         }
     }
 
-
     if let Some(tx) = tx_option {
-        logging::info_file_async("tx_option commit".to_string());
         tx.commit().await?;
     }
 
