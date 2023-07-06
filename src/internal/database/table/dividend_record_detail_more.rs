@@ -51,7 +51,7 @@ impl DividendRecordDetailMore {
     }
 
     /// 更新持股股息發放明細記錄
-    pub async fn upsert(&mut self, tx: &mut Option<Transaction<'_,Postgres>>) -> Result<i64> {
+    pub async fn upsert(&mut self, tx: &mut Option<Transaction<'_, Postgres>>) -> Result<i64> {
         let sql = r#"
 INSERT INTO dividend_record_detail_more (
     stock_ownership_details_serial,
@@ -81,7 +81,7 @@ RETURNING serial;
 
         let row: (i64,) = match tx {
             None => query.fetch_one(database::get_pool()?).await?,
-            Some(ref mut t) => query.fetch_one( t).await?,
+            Some(t) => query.fetch_one(&mut **t).await?,
         };
 
         self.serial = row.0;
@@ -109,7 +109,7 @@ mod tests {
             Decimal::ZERO,
             Decimal::ZERO,
         );
-        let mut tx_option: Option<Transaction<Postgres>> = Some(database::get_pool().unwrap().begin().await.unwrap());
+        let mut tx_option: Option<Transaction<Postgres>> = Some(database::get_tx().await.unwrap());
         match e.upsert(&mut tx_option).await {
             Ok(word_id) => {
                 logging::debug_file_async(format!("serial:{} e:{:#?}", word_id, &e));
@@ -118,7 +118,7 @@ mod tests {
                     let _ =
                         sqlx::query("delete from dividend_record_detail_more where serial = $1;")
                             .bind(word_id)
-                            .execute(&mut tx)
+                            .execute(&mut *tx)
                             .await;
                 }
             }

@@ -160,7 +160,7 @@ WHERE
             .bind(self.cumulate_dividends_total);
         let result = match tx {
             None => query.execute(database::get_pool()?).await?,
-            Some(ref mut t) => query.execute(t).await?,
+            Some( t) => query.execute(&mut **t).await?,
         };
 
         Ok(result)

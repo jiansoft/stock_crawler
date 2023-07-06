@@ -1,10 +1,7 @@
 use anyhow::*;
 use encoding::{DecoderTrap, Encoding};
 use rust_decimal::Decimal;
-use std::{
-    collections::HashSet,
-    str::FromStr,
-};
+use std::{collections::HashSet, str::FromStr};
 
 const DECIMAL_ESCAPE_CHAR: &[char] = &['%', ' ', ','];
 

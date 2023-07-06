@@ -8,7 +8,7 @@ use crate::internal::{
     },
     logging, util,
 };
-use anyhow::{Result};
+use anyhow::Result;
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};

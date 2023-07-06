@@ -1,9 +1,9 @@
 use crate::internal::{crawler::yahoo::HOST, logging, util::http};
 use anyhow::*;
 use core::result::Result::Ok;
+use hashbrown::HashMap;
 use regex::Regex;
 use scraper::{Html, Selector};
-use hashbrown::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct YahooDividend {

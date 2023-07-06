@@ -3,7 +3,7 @@ pub mod table;
 use crate::internal::config;
 use anyhow::*;
 use once_cell::sync::Lazy;
-use sqlx::{postgres::PgPoolOptions, Acquire, PgPool, Postgres, Transaction};
+use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
 use std::sync::{Arc, OnceLock};
 
 static POSTGRES: Lazy<Arc<OnceLock<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceLock::new()));

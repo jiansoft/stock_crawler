@@ -3,11 +3,8 @@ use anyhow::*;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{
-    sync::{
-        OnceLock,
-        Arc
-    },
     result::Result::Ok,
+    sync::{Arc, OnceLock},
 };
 
 static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));

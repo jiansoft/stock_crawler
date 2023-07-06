@@ -1,12 +1,7 @@
-use crate::{
-    internal::{
-        util::{
-            http,
-            http::element
-        },
-        crawler::wespai::HOST,
-        logging
-    }
+use crate::internal::{
+    crawler::wespai::HOST,
+    logging,
+    util::{http, http::element},
 };
 use anyhow::*;
 use regex::Regex;

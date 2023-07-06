@@ -1,11 +1,7 @@
-use crate::internal::{
-    crawler::yahoo, database::table, logging, nosql,
-    util::datetime,
-};
+use crate::internal::{crawler::yahoo, database::table, logging, nosql, util::datetime};
 use anyhow::*;
 use chrono::{Datelike, Duration, Local};
 use core::result::Result::Ok;
-
 
 /// 將未有上季度財報的股票，到雅虎財經下載後回寫到 financial_statement 表
 pub async fn execute() -> Result<()> {
@@ -46,7 +42,10 @@ pub async fn execute() -> Result<()> {
 
         let fs = table::financial_statement::FinancialStatement::from(profile);
         if let Err(why) = fs.clone().upsert().await {
-            logging::error_file_async(format!("Failed to FinancialStatement.upsert because {:?}", why));
+            logging::error_file_async(format!(
+                "Failed to FinancialStatement.upsert because {:?}",
+                why
+            ));
             continue;
         }
 

@@ -163,9 +163,7 @@ WHERE "year" = $1 AND quarter= ''
     Ok(result)
 }
 
-pub fn vec_to_hashmap(
-    entities: Vec<FinancialStatement>,
-) -> HashMap<String, FinancialStatement> {
+pub fn vec_to_hashmap(entities: Vec<FinancialStatement>) -> HashMap<String, FinancialStatement> {
     let mut map = HashMap::new();
     for e in entities {
         map.insert(e.security_code.to_string(), e);

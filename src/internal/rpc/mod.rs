@@ -9,10 +9,7 @@ use crate::internal::{
 use anyhow::*;
 use once_cell::sync::Lazy;
 use std::{result::Result::Ok, sync::Arc};
-use tokio::{
-    fs,
-    sync::OnceCell as TokioOnceCell
-};
+use tokio::{fs, sync::OnceCell as TokioOnceCell};
 use tonic::{
     transport::{Certificate, Channel, ClientTlsConfig},
     Request, Response,
@@ -56,10 +53,7 @@ async fn get_client() -> Result<&'static Grpc> {
 pub async fn push_stock_info_to_go_service(
     request: StockInfoRequest,
 ) -> Result<Response<StockInfoReply>> {
-    get_client()
-        .await?
-        .update_stock_info(request)
-        .await
+    get_client().await?.update_stock_info(request).await
 }
 
 #[cfg(test)]

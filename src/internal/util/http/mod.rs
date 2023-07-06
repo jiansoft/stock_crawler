@@ -7,15 +7,8 @@ use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{
-    result::Result::Ok,
-    collections::HashMap,
-    time::Duration
-};
-use tokio::{
-    sync::Semaphore,
-    time::sleep
-};
+use std::{collections::HashMap, result::Result::Ok, time::Duration};
+use tokio::{sync::Semaphore, time::sleep};
 
 /// A semaphore for limiting concurrent requests.
 ///
@@ -272,7 +265,7 @@ async fn send(
                         "Failed to send({}) because {:?}, retrying...",
                         attempt, e
                     ));
-                    sleep(Duration::from_secs(attempt as u64)).await;  // add delay before retry
+                    sleep(Duration::from_secs(attempt as u64)).await; // add delay before retry
                     continue;
                 }
                 Err(e) => bail!(
@@ -285,9 +278,11 @@ async fn send(
         }
     }
 
-    Err(anyhow!("Failed to send request after {} attempts", MAX_RETRIES))
+    Err(anyhow!(
+        "Failed to send request after {} attempts",
+        MAX_RETRIES
+    ))
 }
-
 
 #[cfg(test)]
 mod tests {

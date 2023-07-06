@@ -17,9 +17,9 @@ pub async fn update() {
     logging::debug_file_async(format!("visit url:{}", url.as_str(),));
     match util::http::get(url, None).await {
         Ok(t) => {
-           // if t.contains("Updated") {
-                logging::debug_file_async(t);
-           // }
+            // if t.contains("Updated") {
+            logging::debug_file_async(t);
+            // }
         }
         Err(why) => {
             logging::error_file_async(format!("Failed to request_get because {:?}", why));

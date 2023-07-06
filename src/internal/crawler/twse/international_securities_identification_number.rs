@@ -1,4 +1,10 @@
-use crate::internal::{cache::SHARE, database::table, util::{self, datetime::Weekend}, StockExchangeMarket, logging};
+use crate::internal::{
+    cache::SHARE,
+    database::table,
+    logging,
+    util::{self, datetime::Weekend},
+    StockExchangeMarket,
+};
 use anyhow::*;
 use chrono::Local;
 use scraper::{Html, Selector};

@@ -1,6 +1,8 @@
 use crate::internal::database;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
+use sqlx::Postgres;
+use sqlx::Transaction;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct StockIndex {
@@ -24,10 +26,11 @@ impl StockIndex {
         if self.word_id <= 0 {
             return Err(anyhow!("word_id is less than or equal to 0"));
         }
+        //let mut transaction = database::get_pool()?.begin().await?;
+        let mut transaction: Transaction<Postgres> = database::get_tx().await?;
 
-        let mut transaction = database::get_pool()?.begin().await?;
-
-        if let Err(why) = sqlx::query("
+        if let Err(why) = sqlx::query(
+            "
 INSERT INTO
     company_index (
         word_id,
@@ -45,15 +48,20 @@ VALUES
 ON CONFLICT
     (word_id, security_code)
 DO NOTHING;
-")
-            .bind(self.word_id)
-            .bind(&self.security_code)
-            .bind(self.created_time)
-            .bind(self.updated_time)
-            .execute(&mut transaction)
-            .await {
+",
+        )
+        .bind(self.word_id)
+        .bind(&self.security_code)
+        .bind(self.created_time)
+        .bind(self.updated_time)
+        .execute(&mut *transaction)
+        .await
+        {
             transaction.rollback().await?;
-            return Err(anyhow!("Failed to insert into company_index because: {:?}", why));
+            return Err(anyhow!(
+                "Failed to insert into company_index because: {:?}",
+                why
+            ));
         }
 
         transaction.commit().await?;

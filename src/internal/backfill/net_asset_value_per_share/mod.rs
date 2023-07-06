@@ -3,10 +3,7 @@ pub mod emerging;
 /// 將每股淨值為零的股票嚐試從yahoo取得數據後更新
 pub mod zero_value;
 
-use crate::{internal::{
-    cache::SHARE,
-    database::table
-}};
+use crate::internal::{cache::SHARE, database::table};
 use anyhow::*;
 use core::result::Result::Ok;
 use sqlx::postgres::PgQueryResult;
