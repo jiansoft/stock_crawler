@@ -163,7 +163,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .bind(self.payout_ratio_cash)
             .bind(self.payout_ratio_stock)
             .bind(self.payout_ratio)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?;
 
         Ok(result)
@@ -189,7 +189,7 @@ WHERE
             .bind(&self.ex_dividend_date2)
             .bind(&self.payable_date1)
             .bind(&self.payable_date2)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await
             .context("Failed to update update_dividend_date")
     }
@@ -242,7 +242,7 @@ where security_code = $1
             .bind(Local::now().format("%Y-%m-%d %H:%M:%S").to_string())
             .bind(stock_purchase_date.format("%Y-%m-%d %H:%M:%S").to_string())
             .try_map(Self::row_to_entity)
-            .fetch_all(database::get_pool()?)
+            .fetch_all(database::get_connection())
             .await?;
 
         Ok(entities)
@@ -264,7 +264,7 @@ WHERE
         let entities = sqlx::query(&sql)
             .bind(year)
             .try_map(Self::row_to_entity)
-            .fetch_all(database::get_pool()?)
+            .fetch_all(database::get_connection())
             .await?;
 
         Ok(entities)
@@ -284,7 +284,7 @@ WHERE year = $1 AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2');
         let entities: Vec<Dividend> = sqlx::query(&sql)
             .bind(year)
             .try_map(Self::row_to_entity)
-            .fetch_all(database::get_pool()?)
+            .fetch_all(database::get_connection())
             .await?;
 
         Ok(entities)
@@ -306,7 +306,7 @@ WHERE "SuspendListing" = false
 "#;
         let stock_symbols: Vec<String> = sqlx::query(sql)
             .bind(year)
-            .fetch_all(database::get_pool()?)
+            .fetch_all(database::get_connection())
             .await?
             .into_iter()
             .map(|row| row.get("stock_symbol"))

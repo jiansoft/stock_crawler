@@ -30,6 +30,14 @@ impl PostgresSQL {
 
         Self { pool: db }
     }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    pub async fn tx(&self) -> Result<Transaction<'_, Postgres>> {
+        Ok(self.pool().begin().await?)
+    }
 }
 
 impl Default for PostgresSQL {
@@ -38,10 +46,14 @@ impl Default for PostgresSQL {
     }
 }
 
-pub fn get_pool() -> Result<&'static PgPool> {
-    Ok(&POSTGRES.get_or_init(PostgresSQL::new).pool)
+fn get_postgresql() -> &'static PostgresSQL {
+    POSTGRES.get_or_init(PostgresSQL::new)
+}
+
+pub fn get_connection() -> &'static PgPool {
+    get_postgresql().pool()
 }
 
 pub async fn get_tx() -> Result<Transaction<'static, Postgres>> {
-    Ok(get_pool()?.begin().await?)
+    get_postgresql().tx().await
 }

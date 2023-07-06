@@ -110,7 +110,7 @@ SET
             .bind(self.avg_price)
             .bind(self.lowest_price)
             .bind(self.highest_price)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?)
     }
 }
@@ -292,7 +292,7 @@ order by "Serial" desc
             create_time,
         })
     })
-    .fetch_all(database::get_pool()?)
+    .fetch_all(database::get_connection())
     .await?;
 
     Ok(revenue)
@@ -324,7 +324,7 @@ DO UPDATE SET
     serial = excluded.serial,
     created_time = now();
 "#;
-    Ok(sqlx::query(sql).execute(database::get_pool()?).await?)
+    Ok(sqlx::query(sql).execute(database::get_connection()).await?)
 }
 
 #[cfg(test)]

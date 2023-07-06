@@ -69,7 +69,7 @@ impl DividendRecordDetail {
             .bind(self.stock)
             .bind(self.total);
         let row: (i64,) = match tx {
-            None => query.fetch_one(database::get_pool()?).await?,
+            None => query.fetch_one(database::get_connection()).await?,
             Some(t) => query.fetch_one(&mut **t).await?,
         };
         //dbg!(row);
@@ -136,7 +136,7 @@ mod tests {
             Decimal::ZERO,
         );
         let mut tx_option: Option<Transaction<Postgres>> =
-            Some(database::get_pool().unwrap().begin().await.unwrap());
+            Some(database::get_connection().begin().await.unwrap());
         match drd.fetch_cumulate_dividend(&mut tx_option).await {
             Ok(cd) => {
                 logging::debug_file_async(format!("cd: {:?}", cd));

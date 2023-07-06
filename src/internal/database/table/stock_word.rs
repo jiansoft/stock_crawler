@@ -46,7 +46,7 @@ RETURNING word_id";
             .bind(&self.word)
             .bind(self.created_time)
             .bind(self.updated_time)
-            .fetch_one(database::get_pool()?)
+            .fetch_one(database::get_connection())
             .await?;
 
         self.word_id = row.try_get("word_id")?;
@@ -79,7 +79,7 @@ RETURNING word_id";
                     updated_time,
                 })
             })
-            .fetch_all(database::get_pool()?)
+            .fetch_all(database::get_connection())
             .await?)
     }
 }
@@ -173,7 +173,7 @@ mod tests {
                 logging::debug_file_async(format!("word_id:{} e:{:#?}", word_id, &e));
                 let _ = sqlx::query("delete from company_word where word_id = $1;")
                     .bind(word_id)
-                    .execute(database::get_pool().unwrap())
+                    .execute(database::get_connection())
                     .await;
             }
             Err(why) => {

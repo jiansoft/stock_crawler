@@ -64,7 +64,7 @@ where stock_ownership_details_serial = $1;
         });
 
         let cd = match tx {
-            None => query.fetch_one(database::get_pool()?).await?,
+            None => query.fetch_one(database::get_connection()).await?,
             Some( t) => query.fetch_one(&mut **t).await?,
         };
 

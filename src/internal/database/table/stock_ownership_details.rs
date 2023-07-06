@@ -87,7 +87,7 @@ WHERE is_sold = false";
         let query = bind_params
             .into_iter()
             .fold(query, |q, param| q.bind(param));
-        let rows = query.fetch_all(database::get_pool()?).await?;
+        let rows = query.fetch_all(database::get_connection()).await?;
 
         Ok(rows)
 
@@ -159,7 +159,7 @@ WHERE
             .bind(self.cumulate_dividends_stock_money)
             .bind(self.cumulate_dividends_total);
         let result = match tx {
-            None => query.execute(database::get_pool()?).await?,
+            None => query.execute(database::get_connection()).await?,
             Some( t) => query.execute(&mut **t).await?,
         };
 

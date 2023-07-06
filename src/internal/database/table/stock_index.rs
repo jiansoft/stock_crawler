@@ -84,7 +84,7 @@ mod tests {
                 match sqlx::query_as::<sqlx::Postgres, (i64, )>("select count(*) as row_count from company_index where word_id = $1 and security_code = $2;")
                     .bind(e.word_id)
                     .bind(e.security_code.as_str())
-                    .fetch_one(database::get_pool().unwrap())
+                    .fetch_one(database::get_connection())
                     .await
                 {
                     Ok((row_count, )) => {
@@ -94,7 +94,7 @@ mod tests {
                         )
                             .bind(e.word_id)
                             .bind(e.security_code.as_str())
-                            .execute(database::get_pool().unwrap())
+                            .execute(database::get_connection())
                             .await;
                     }
                     Err(why) => {

@@ -28,7 +28,7 @@ impl Entity {
 
         let entity = sqlx::query_as::<_, Entity>(sql)
             .bind(key)
-            .fetch_one(database::get_pool()?)
+            .fetch_one(database::get_connection())
             .await?;
 
         Ok(entity)
@@ -43,7 +43,7 @@ impl Entity {
         let result = sqlx::query(sql)
             .bind(&self.key)
             .bind(&self.val)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?;
 
         Ok(result)

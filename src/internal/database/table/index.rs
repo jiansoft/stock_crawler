@@ -59,7 +59,7 @@ ORDER BY
 LIMIT 30;
     "#;
 
-        let mut stream = sqlx::query_as::<_, Index>(STMT).fetch(database::get_pool()?);
+        let mut stream = sqlx::query_as::<_, Index>(STMT).fetch(database::get_connection());
 
         let mut indices = HashMap::with_capacity(30);
 
@@ -148,7 +148,7 @@ DO UPDATE
             .bind(self.index)
             .bind(self.create_time)
             .bind(self.update_time)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?;
         Ok(())
     }

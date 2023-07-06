@@ -80,7 +80,7 @@ RETURNING serial;
             .bind(self.updated_time);
 
         let row: (i64,) = match tx {
-            None => query.fetch_one(database::get_pool()?).await?,
+            None => query.fetch_one(database::get_connection()).await?,
             Some(t) => query.fetch_one(&mut **t).await?,
         };
 

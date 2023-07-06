@@ -32,7 +32,7 @@ FROM
     last_daily_quotes
 "#,
         )
-        .fetch_all(database::get_pool()?)
+        .fetch_all(database::get_connection())
         .await?)
     }
 

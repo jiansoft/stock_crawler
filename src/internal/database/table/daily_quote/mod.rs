@@ -159,7 +159,7 @@ impl DailyQuote {
             .bind(self.year)
             .bind(self.month as i32)
             .bind(self.day as i32)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?;
 
         Ok(result)
@@ -311,7 +311,7 @@ WHERE "Serial" IN
         date_str, prev_date
     );
 
-    Ok(sqlx::query(&sql).execute(database::get_pool()?).await?)
+    Ok(sqlx::query(&sql).execute(database::get_connection()).await?)
 }
 
 /// 依照指定的年月取得該股票其月份的最低、平均、最高價
@@ -333,7 +333,7 @@ GROUP BY "SecurityCode", "year", "month";
         .bind(stock_symbol)
         .bind(year)
         .bind(month)
-        .fetch_one(database::get_pool()?)
+        .fetch_one(database::get_connection())
         .await?)
 }
 

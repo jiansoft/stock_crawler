@@ -105,7 +105,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .bind(self.return_on_assets)
             .bind(self.created_time)
             .bind(self.updated_time)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?;
 
         Ok(result)
@@ -157,7 +157,7 @@ WHERE "year" = $1 AND quarter= ''
                 year: row.try_get("year")?,
             })
         })
-        .fetch_all(database::get_pool()?)
+        .fetch_all(database::get_connection())
         .await?;
 
     Ok(result)

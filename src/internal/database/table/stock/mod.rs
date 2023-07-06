@@ -84,7 +84,7 @@ where eps.security_code = stocks.stock_symbol;
         Ok(sqlx::query(sql)
             .bind(now.year())
             .bind(one_year_ago.year())
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?)
     }
 
@@ -101,7 +101,7 @@ where
         Ok(sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(self.net_asset_value_per_share)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?)
     }
 
@@ -117,7 +117,7 @@ where
         Ok(sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(self.suspend_listing)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?)
     }
 
@@ -141,7 +141,7 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
             .bind(self.suspend_listing)
             .bind(self.stock_exchange_market_id)
             .bind(self.stock_industry_id)
-            .execute(database::get_pool()?)
+            .execute(database::get_connection())
             .await?;
         self.create_index().await;
         Ok(result)
@@ -245,7 +245,7 @@ ORDER BY
                     stock_industry_id: row.try_get("stock_industry_id")?,
                 })
             })
-            .fetch_all(database::get_pool()?)
+            .fetch_all(database::get_connection())
             .await?;
 
         Ok(answers)
@@ -320,7 +320,7 @@ WHERE s.stock_exchange_market_id in (2, 4)
 "#;
 
     Ok(sqlx::query_as::<_, Stock>(sql)
-        .fetch_all(database::get_pool()?)
+        .fetch_all(database::get_connection())
         .await?)
 }
 
@@ -351,7 +351,7 @@ WHERE s.stock_exchange_market_id in(2, 4)
     Ok(sqlx::query_as::<_, Stock>(sql)
         .bind(year)
         .bind(quarter)
-        .fetch_all(database::get_pool()?)
+        .fetch_all(database::get_connection())
         .await?)
 }
 
@@ -378,7 +378,7 @@ WHERE
     Ok(sqlx::query_as::<_, StockJustWithSymbolAndName>(sql)
         .bind(year)
         .bind(&date_str)
-        .fetch_all(database::get_pool()?)
+        .fetch_all(database::get_connection())
         .await?)
 }
 
