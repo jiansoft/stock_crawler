@@ -109,7 +109,7 @@ mod tests {
             Decimal::ZERO,
             Decimal::ZERO,
         );
-        let mut tx_option: Option<Transaction<Postgres>> = Some(database::get_tx().await.unwrap());
+        let mut tx_option: Option<Transaction<Postgres>> = database::get_tx().await.ok();
         match e.upsert(&mut tx_option).await {
             Ok(word_id) => {
                 logging::debug_file_async(format!("serial:{} e:{:#?}", word_id, &e));

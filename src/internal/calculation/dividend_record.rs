@@ -68,7 +68,7 @@ async fn calculate_dividend(
         dividend_total,
     );
 
-    let mut tx_option = Some(database::get_tx().await?);
+    let mut tx_option = database::get_tx().await.ok();
     //更新股利領取記錄
     let dividend_record_detail_serial = match drd.upsert(&mut tx_option).await {
         Ok(serial) => serial,
