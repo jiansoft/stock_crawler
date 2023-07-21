@@ -3,13 +3,19 @@ use chrono::{Datelike, DateTime, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
-use crate::internal::{
-    crawler::{tpex, twse},
-    database::{
-        self,
-        table::{stock::extension::StockJustWithSymbolAndName, stock_index, stock_word},
-    },
-    logging, util,
+use crate::{
+    internal::{
+        crawler::{
+            tpex,
+            twse
+        },
+        database::{
+            self,
+            table::{stock::extension::SymbolAndName, stock_index, stock_word},
+        },
+        logging,
+        util
+    }
 };
 
 pub(crate) mod extension;
@@ -21,6 +27,8 @@ pub struct Stock {
     pub name: String,
     pub suspend_listing: bool,
     pub net_asset_value_per_share: Decimal,
+    //權植佔比
+    pub weight: Decimal,
     pub create_time: DateTime<Local>,
     /// 交易所的市場編號參考 stock_exchange_market
     pub stock_exchange_market_id: i32,
@@ -35,6 +43,7 @@ impl Stock {
             name: "".to_string(),
             suspend_listing: false,
             net_asset_value_per_share: Default::default(),
+            weight: Default::default(),
             create_time: Local::now(),
             stock_exchange_market_id: 0,
             stock_industry_id: 0,
@@ -85,39 +94,6 @@ where eps.security_code = stocks.stock_symbol;
         Ok(sqlx::query(sql)
             .bind(now.year())
             .bind(one_year_ago.year())
-            .execute(database::get_connection())
-            .await?)
-    }
-
-    /// 更新個股的每股淨值
-    pub async fn update_net_asset_value_per_share(&self) -> Result<PgQueryResult> {
-        let sql = r#"
-update
-    stocks
-set
-    net_asset_value_per_share = $2
-where
-    stock_symbol = $1;
-"#;
-        Ok(sqlx::query(sql)
-            .bind(&self.stock_symbol)
-            .bind(self.net_asset_value_per_share)
-            .execute(database::get_connection())
-            .await?)
-    }
-
-    pub async fn update_suspend_listing(&self) -> Result<PgQueryResult> {
-        let sql = r#"
-update
-    stocks
-set
-    "SuspendListing" = $2
-where
-    stock_symbol = $1;
-"#;
-        Ok(sqlx::query(sql)
-            .bind(&self.stock_symbol)
-            .bind(self.suspend_listing)
             .execute(database::get_connection())
             .await?)
     }
@@ -226,6 +202,7 @@ SELECT
     "SuspendListing" AS suspend_listing,
     "CreateTime" AS create_time,
     net_asset_value_per_share,
+    weight,
     stock_exchange_market_id,
     stock_industry_id
 FROM
@@ -239,6 +216,7 @@ ORDER BY
                 Ok(Stock {
                     stock_symbol: row.try_get("stock_symbol")?,
                     net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
+                    weight: row.try_get("weight")?,
                     name: row.try_get("name")?,
                     suspend_listing: row.try_get("suspend_listing")?,
                     create_time: row.try_get("create_time")?,
@@ -260,6 +238,7 @@ impl Clone for Stock {
             name: self.name.clone(),
             suspend_listing: self.suspend_listing,
             net_asset_value_per_share: self.net_asset_value_per_share,
+            weight: self.weight,
             create_time: self.create_time,
             stock_exchange_market_id: self.stock_exchange_market_id,
             stock_industry_id: self.stock_industry_id,
@@ -281,6 +260,7 @@ impl From<twse::international_securities_identification_number::InternationalSec
             name: isin.name,
             suspend_listing: false,
             net_asset_value_per_share: Default::default(),
+            weight: Default::default(),
             create_time: Local::now(),
             stock_exchange_market_id: isin.exchange_market.stock_exchange_market_id,
             stock_industry_id: isin.industry_id,
@@ -296,6 +276,7 @@ impl From<tpex::net_asset_value_per_share::Emerging> for Stock {
             name: "".to_string(),
             suspend_listing: false,
             net_asset_value_per_share: tpex.net_asset_value_per_share,
+            weight: Default::default(),
             create_time: Local::now(),
             stock_exchange_market_id: Default::default(),
             stock_industry_id: Default::default(),
@@ -359,7 +340,7 @@ WHERE s.stock_exchange_market_id in(2, 4)
 /// 取得指定日期為除息權日的股票
 pub async fn fetch_stocks_with_dividends_on_date(
     date: NaiveDate,
-) -> Result<Vec<StockJustWithSymbolAndName>> {
+) -> Result<Vec<SymbolAndName>> {
     let sql = r#"
 SELECT
     s.stock_symbol,
@@ -376,7 +357,7 @@ WHERE
     let year = date.year();
     let date_str = date.format("%Y-%m-%d").to_string();
 
-    Ok(sqlx::query_as::<_, StockJustWithSymbolAndName>(sql)
+    Ok(sqlx::query_as::<_, SymbolAndName>(sql)
         .bind(year)
         .bind(&date_str)
         .fetch_all(database::get_connection())

@@ -24,10 +24,8 @@ pub struct StockInfoReply {
 /// Generated client implementations.
 pub mod stock_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-
     #[derive(Debug, Clone)]
     pub struct StockClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -135,9 +133,7 @@ pub mod stock_client {
 /// Generated server implementations.
 pub mod stock_server {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-
     use tonic::codegen::*;
-
     /// Generated trait containing gRPC methods that should be implemented for use with StockServer.
     #[async_trait]
     pub trait Stock: Send + Sync + 'static {

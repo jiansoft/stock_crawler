@@ -4,6 +4,7 @@ use anyhow::*;
 use chrono::Local;
 
 use crate::internal::{cache::SHARE, crawler::twse, logging, util::datetime::Weekend};
+use crate::internal::database::table::stock;
 
 /// 更新資料庫中終止上市的公司
 pub async fn execute() -> Result<()> {
@@ -53,8 +54,9 @@ pub async fn execute() -> Result<()> {
         }
     }
 
-    for item in items_to_update {
-        if let Err(why) = item.update_suspend_listing().await {
+    for stock in items_to_update {
+        let item = stock::extension::suspend_listing::SymbolAndSuspendListing::from(&stock);
+        if let Err(why) = item.update().await {
             logging::error_file_async(format!(
                 "Failed to update_suspend_listing because {:?}",
                 why
