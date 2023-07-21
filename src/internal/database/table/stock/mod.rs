@@ -1,4 +1,7 @@
-pub(crate) mod extension;
+use anyhow::Result;
+use chrono::{Datelike, DateTime, Duration, Local, NaiveDate};
+use rust_decimal::Decimal;
+use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
 use crate::internal::{
     crawler::{tpex, twse},
@@ -8,10 +11,8 @@ use crate::internal::{
     },
     logging, util,
 };
-use anyhow::Result;
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
-use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
+
+pub(crate) mod extension;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 stocks
@@ -391,9 +392,11 @@ pub fn is_preference_shares(stock_symbol: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::logging;
     use chrono::TimeZone;
+
+    use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_fetch() {

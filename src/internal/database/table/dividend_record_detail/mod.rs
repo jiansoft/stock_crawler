@@ -1,10 +1,11 @@
-pub(crate) mod extension;
-
-use crate::internal::database::{self, table::dividend_record_detail::extension::CumulateDividend};
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction};
+
+use crate::internal::database::{self, table::dividend_record_detail::extension::CumulateDividend};
+
+pub(crate) mod extension;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Copy)]
 /// 持股股息發放記錄表 原表名 dividend_record_detail
@@ -120,8 +121,9 @@ impl Clone for DividendRecordDetail {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_calculate_cumulate_dividend() {

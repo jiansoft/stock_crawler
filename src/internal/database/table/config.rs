@@ -1,7 +1,9 @@
-use crate::internal::database;
-use anyhow::*;
 use core::result::Result::Ok;
+
+use anyhow::*;
 use sqlx::postgres::PgQueryResult;
+
+use crate::internal::database;
 
 #[derive(sqlx::FromRow, Default, Debug)]
 /// 設定檔
@@ -52,9 +54,11 @@ impl Entity {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::logging;
     use chrono::{Local, NaiveDate};
+
+    use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_first() {

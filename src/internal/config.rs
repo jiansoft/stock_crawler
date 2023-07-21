@@ -1,9 +1,11 @@
-use crate::internal::logging;
+use std::{collections::HashMap, env, fs, io, path::PathBuf, result::Result::Ok, str::FromStr, u8};
+
 use anyhow::*;
 use config::{Config as config_config, File as config_file};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, env, fs, io, path::PathBuf, result::Result::Ok, str::FromStr, u8};
+
+use crate::internal::logging;
 
 const CONFIG_PATH: &str = "app.json";
 
@@ -285,8 +287,9 @@ pub(crate) fn read_text_file(path: PathBuf) -> Result<String, io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::{thread, time};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_init() {

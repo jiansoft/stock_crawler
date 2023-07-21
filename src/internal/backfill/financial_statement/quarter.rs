@@ -1,7 +1,9 @@
-use crate::internal::{crawler::yahoo, database::table, logging, nosql, util::datetime};
+use core::result::Result::Ok;
+
 use anyhow::*;
 use chrono::{Datelike, Duration, Local};
-use core::result::Result::Ok;
+
+use crate::internal::{crawler::yahoo, database::table, logging, nosql, util::datetime};
 
 /// 將未有上季度財報的股票，到雅虎財經下載後回寫到 financial_statement 表
 pub async fn execute() -> Result<()> {
@@ -70,9 +72,10 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::cache::SHARE;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_execute() {

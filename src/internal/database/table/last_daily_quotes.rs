@@ -1,8 +1,10 @@
-use crate::internal::database;
+use core::result::Result::Ok;
+
 use anyhow::Result;
 use chrono::NaiveDate;
-use core::result::Result::Ok;
 use rust_decimal::Decimal;
+
+use crate::internal::database;
 
 #[derive(sqlx::FromRow, Debug)]
 /// 最後交易日股票報價數據
@@ -53,8 +55,9 @@ impl Default for Entity {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_calculate() {

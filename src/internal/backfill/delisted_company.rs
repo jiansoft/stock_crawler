@@ -1,7 +1,9 @@
-use crate::internal::{cache::SHARE, crawler::twse, logging, util::datetime::Weekend};
+use core::result::Result::Ok;
+
 use anyhow::*;
 use chrono::Local;
-use core::result::Result::Ok;
+
+use crate::internal::{cache::SHARE, crawler::twse, logging, util::datetime::Weekend};
 
 /// 更新資料庫中終止上市的公司
 pub async fn execute() -> Result<()> {
@@ -70,6 +72,7 @@ pub async fn execute() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use crate::internal::cache::SHARE;
+
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 

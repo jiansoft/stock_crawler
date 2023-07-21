@@ -1,7 +1,8 @@
-use crate::internal::util::text;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use scraper::Selector;
+
+use crate::internal::util::text;
 
 /// Extracts the text value of an element selected by a given CSS selector.
 ///
@@ -70,6 +71,18 @@ pub fn parse_value(element: &scraper::ElementRef, css_selector: &str) -> Option<
 /// ```
 pub fn parse_to_decimal(element: &scraper::ElementRef, css_selector: &str) -> Decimal {
     parse_value(element, css_selector)
-        .and_then(|v| text::parse_decimal(&v, Some(vec!['元', '%', ' ', ','])).ok())
+        .and_then(|v| text::parse_decimal(v.trim(), None).ok())
         .unwrap_or(dec!(0))
+}
+
+pub fn parse_to_i32(element: &scraper::ElementRef, css_selector: &str) -> i32 {
+    parse_value(element, css_selector)
+        .and_then(|v| text::parse_i32(v.trim(), None).ok())
+        .unwrap_or(0)
+}
+
+pub fn parse_to_string(element: &scraper::ElementRef, css_selector: &str) -> String {
+    parse_value(element, css_selector)
+        .and_then(|v| Option::from(v.trim().to_string()))
+        .unwrap_or("".to_string())
 }

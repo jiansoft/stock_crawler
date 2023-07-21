@@ -1,10 +1,12 @@
+use core::result::Result::Ok;
+
+use anyhow::*;
+use chrono::Local;
+
 use crate::internal::{
     backfill::net_asset_value_per_share::update, cache::SHARE, crawler::tpex, database::table,
     logging, util::datetime::Weekend,
 };
-use anyhow::*;
-use chrono::Local;
-use core::result::Result::Ok;
 
 /// 更新興櫃股票的每股淨值
 pub async fn execute() -> Result<()> {
@@ -48,8 +50,9 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_execute() {

@@ -1,7 +1,9 @@
-use crate::internal::{backfill, bot, crawler, logging, reminder};
-use anyhow::*;
 use std::{env, future::Future, result::Result::Ok};
+
+use anyhow::*;
 use tokio_cron_scheduler::{Job, JobScheduler};
+
+use crate::internal::{backfill, bot, crawler, logging, reminder};
 
 // Constants for logging messages
 const BACKFILL_FINANCIAL_STATEMENT_ANNUAL: &str = "backfill::financial_statement::annual::execute";
@@ -177,9 +179,10 @@ pub async fn run_cron() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use tokio::time::{Duration, sleep};
+
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
-    use super::*;
-    use tokio::time::{sleep, Duration};
+        use super::*;
 
     async fn run() -> Result<()> {
         let sched = JobScheduler::new().await?;

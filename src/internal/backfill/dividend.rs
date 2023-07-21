@@ -1,15 +1,17 @@
+use std::{collections::HashSet, result::Result::Ok, thread, time::Duration};
+
+use anyhow::*;
+use chrono::{Datelike, Local};
+use hashbrown::HashMap;
+use tokio_retry::{
+    Retry,
+    strategy::{ExponentialBackoff, jitter},
+};
+
 use crate::internal::{
     crawler::{goodinfo, yahoo},
     database::table::{self, dividend},
     logging,
-};
-use anyhow::*;
-use chrono::{Datelike, Local};
-use hashbrown::HashMap;
-use std::{collections::HashSet, result::Result::Ok, thread, time::Duration};
-use tokio_retry::{
-    strategy::{jitter, ExponentialBackoff},
-    Retry,
 };
 
 /// 更新股利發送數據
@@ -227,6 +229,7 @@ pub fn vec_to_hashmap(entities: Vec<dividend::Dividend>) -> HashMap<String, divi
 #[cfg(test)]
 mod tests {
     use crate::internal::cache::SHARE;
+
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 

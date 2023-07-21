@@ -1,7 +1,9 @@
-use crate::internal::{cache::SHARE, crawler::twse, database::table, logging};
-use anyhow::*;
-use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use core::result::Result::Ok;
+
+use anyhow::*;
+use chrono::{Datelike, DateTime, FixedOffset, Local, NaiveDate};
+
+use crate::internal::{cache::SHARE, crawler::twse, database::table, logging};
 
 /// 調用  twse API 取得台股月營收
 pub async fn execute() -> Result<()> {
@@ -75,8 +77,9 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_execute() {

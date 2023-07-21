@@ -1,8 +1,10 @@
-use crate::internal::database;
+use std::result::Result::Ok;
+
 use anyhow::*;
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgRow, Postgres, Row, Transaction};
-use std::result::Result::Ok;
+use sqlx::{Postgres, postgres::PgRow, Row, Transaction};
+
+use crate::internal::database;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 持股中積累領取的股利

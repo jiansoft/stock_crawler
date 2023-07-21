@@ -1,3 +1,8 @@
+use std::result::Result::Ok;
+
+use anyhow::*;
+use rust_decimal::Decimal;
+
 use crate::internal::{
     database::{
         self,
@@ -8,9 +13,6 @@ use crate::internal::{
     },
     logging,
 };
-use anyhow::*;
-use rust_decimal::Decimal;
-use std::result::Result::Ok;
 
 /// 計算指定年份領取的股利
 pub async fn execute(year: i32, security_codes: Option<Vec<String>>) {
@@ -202,10 +204,12 @@ pub async fn calculate(year: i32) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use chrono::{Local, TimeZone};
+
     use crate::internal::cache::SHARE;
     use crate::internal::logging;
-    use chrono::{Local, TimeZone};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_calculate() {

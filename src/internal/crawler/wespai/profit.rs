@@ -1,15 +1,17 @@
-use crate::internal::{
-    crawler::wespai::HOST,
-    logging,
-    util::{http, http::element},
-};
+use std::result::Result::Ok;
+
 use anyhow::*;
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use std::result::Result::Ok;
+
+use crate::internal::{
+    crawler::wespai::HOST,
+    logging,
+    util::{http, http::element},
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Profit {
@@ -150,8 +152,9 @@ pub async fn visit() -> Result<Vec<Profit>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_visit() {

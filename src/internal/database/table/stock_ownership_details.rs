@@ -1,8 +1,9 @@
-use crate::internal::database;
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
+use sqlx::{Postgres, postgres::PgQueryResult, Transaction};
+
+use crate::internal::database;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 股票庫存(持股名細) 原表名 stock_ownership_details
@@ -194,9 +195,9 @@ impl Clone for StockOwnershipDetail {
 
 #[cfg(test)]
 mod tests {
+    use crate::internal::logging;
 
     use super::*;
-    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_fetch_stock_inventory() {

@@ -1,12 +1,14 @@
-use crate::internal::database;
+use std::{result::Result::Ok, str::FromStr};
+
 use anyhow::*;
-use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
+use chrono::{Datelike, DateTime, Duration, FixedOffset, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
     Row,
 };
-use std::{result::Result::Ok, str::FromStr};
+
+use crate::internal::database;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Revenue {
@@ -331,9 +333,11 @@ DO UPDATE SET
 mod tests {
     //use crate::internal::database::table::revenue;
 
-    use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
-    use rust_decimal::Decimal;
     use std::str::FromStr;
+
+    use chrono::{Datelike, DateTime, Duration, FixedOffset, Local, NaiveDate};
+    use rust_decimal::Decimal;
+
     //use chrono::{Datelike, Local, NaiveDate};
     use crate::internal::database::table::revenue::{
         fetch_last_two_month, rebuild_revenue_last_date,

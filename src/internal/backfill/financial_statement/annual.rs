@@ -1,13 +1,15 @@
+use std::result::Result::Ok;
+
+use anyhow::*;
+use chrono::Local;
+use futures::future;
+
 use crate::internal::{
     crawler::wespai,
     database::table::{financial_statement, stock},
     logging, nosql,
     util::datetime::Weekend,
 };
-use anyhow::*;
-use chrono::Local;
-use futures::future;
-use std::result::Result::Ok;
 
 /// 更新台股年報
 pub async fn execute() -> Result<()> {
@@ -57,9 +59,10 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::cache::SHARE;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_execute() {

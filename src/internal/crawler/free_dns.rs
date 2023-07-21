@@ -1,5 +1,6 @@
-use crate::internal::{config, logging, util};
 use std::sync::OnceLock;
+
+use crate::internal::{config, logging, util};
 
 static DDNS_URL: OnceLock<String> = OnceLock::new();
 
@@ -28,8 +29,9 @@ pub async fn update() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio_test;
+
+    use super::*;
 
     macro_rules! aw {
         ($e:expr) => {

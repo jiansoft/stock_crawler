@@ -1,10 +1,12 @@
-pub mod table;
+use std::sync::{Arc, OnceLock};
 
-use crate::internal::config;
 use anyhow::*;
 use once_cell::sync::Lazy;
-use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
-use std::sync::{Arc, OnceLock};
+use sqlx::{PgPool, Postgres, postgres::PgPoolOptions, Transaction};
+
+use crate::internal::config;
+
+pub mod table;
 
 static POSTGRES: Lazy<Arc<OnceLock<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 

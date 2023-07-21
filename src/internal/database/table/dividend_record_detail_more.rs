@@ -1,8 +1,9 @@
-use crate::internal::database;
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{Postgres, Transaction};
+
+use crate::internal::database;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 持股股息發放記錄表 原表名 dividend_record_detail_more
@@ -92,8 +93,9 @@ RETURNING serial;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_upsert() {

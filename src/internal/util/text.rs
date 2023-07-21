@@ -1,9 +1,10 @@
+use std::{collections::HashSet, str::FromStr};
+
 use anyhow::*;
 use encoding::{DecoderTrap, Encoding};
 use rust_decimal::Decimal;
-use std::{collections::HashSet, str::FromStr};
 
-const DECIMAL_ESCAPE_CHAR: &[char] = &['%', ' ', ','];
+const NUMBER_ESCAPE_CHAR: &[char] = &['元', '%', ',', ' '];
 
 #[allow(dead_code)]
 pub fn big5_to_utf8(text: &str) -> Result<String> {
@@ -104,29 +105,83 @@ pub fn split_v1(w: &str) -> Vec<String> {
 /// let s = "1,234.56";
 /// let decimal_value = parse_decimal(s).unwrap();
 /// ```
-pub fn parse_decimal(s: &str, escape_char: Option<Vec<char>>) -> Result<Decimal> {
-    let t = match escape_char {
-        None => s.replace(DECIMAL_ESCAPE_CHAR, ""),
-        Some(ec) => s.replace(&ec[..], ""),
-    };
-
-    Decimal::from_str(&t)
-        .map_err(|why| anyhow!(format!("Failed to Decimal::from_str because {:?}", why)))
+pub fn parse_decimal(s: &str, escape_chars: Option<Vec<char>>) -> Result<Decimal> {
+    let cleaned = clean_string_escape_chars(s, escape_chars);
+    Decimal::from_str(&cleaned)
+        .map_err(|why| anyhow!("Failed to parse '{}' as Decimal because {:?}", cleaned, why))
 }
 
-pub fn parse_i32(s: &str, escape_chars: Option<&[char]>) -> Result<i32> {
-    let cleaned = match escape_chars {
-        None => s.to_string(),
-        Some(chars) => s.chars().filter(|c| !chars.contains(c)).collect(),
-    };
-
+/// Parses an `i32` value from a given string.
+///
+/// This function accepts a string representation of an `i32` number,
+/// potentially containing commas as thousands separators, and attempts to
+/// convert it into an `i32`. If the conversion fails, an error is returned.
+///
+/// # Arguments
+///
+/// * `s`: A string slice containing the representation of an `i32` number
+///         that may include commas as thousands separators.
+///
+/// * `escape_chars`: A list of additional characters to be removed from the
+///                   string before parsing.
+///
+/// # Returns
+///
+/// * `Result<i32>`: The parsed `i32` value if successful, or an error
+///                  if the conversion fails.
+///
+/// # Example
+///
+/// ```
+/// let s = "1,234";
+/// let i32_value = parse_i32(s, None).unwrap();
+/// ```
+pub fn parse_i32(s: &str, escape_chars: Option<Vec<char>>) -> Result<i32> {
+    let cleaned = clean_string_escape_chars(s, escape_chars);
     i32::from_str(&cleaned)
-        .map_err(|why| anyhow!("Failed to parse '{}' as i32 due to: {:?}", cleaned, why))
+        .map_err(|why| anyhow!("Failed to parse '{}' as i32 because: {:?}", cleaned, why))
+}
+
+/// Removes a set of escape characters from a given string.
+///
+/// This function accepts a string and a list of escape characters and
+/// produces a new string that doesn't contain any occurrences of these
+/// characters.
+///
+/// # Arguments
+///
+/// * `s`: The original string from which escape characters will be removed.
+///
+/// * `escape_chars`: Optional characters that will be removed from the
+///                   string if found.
+///
+/// # Returns
+///
+/// * `String`: The cleaned string without any of the specified escape
+///             characters.
+///
+/// # Example
+///
+/// ```
+/// let s = "Hello$Wor^ld!@#";
+/// let escape_chars = Some(vec!['$', '^', '@', '#']);
+/// let clean_s = clean_string_escape_chars(s, escape_chars);
+/// assert_eq!(clean_s, "HelloWorld!");
+/// ```
+fn clean_string_escape_chars(s: &str, escape_chars: Option<Vec<char>>) -> String {
+    let mut combined: Vec<char> = NUMBER_ESCAPE_CHAR.to_vec();
+    if let Some(ec) = escape_chars {
+        combined.extend(ec);
+    }
+
+    let filters = combined.iter().collect::<HashSet<_>>();
+    s.chars().filter(|c| !filters.contains(c)).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
+
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
@@ -175,4 +230,17 @@ mod tests {
         println!("big5 :{} {:?}", wording, wording.as_bytes());
         println!("utf8 :{} {:?}", utf8_wording, utf8_wording.as_bytes());
     }*/
+
+    #[tokio::test]
+    async fn test_clean_string_escape_chars() {
+        dotenv::dotenv().ok();
+        let chinese_word = "台積電% 元 ,";
+        let start = Instant::now();
+        let result = clean_string_escape_chars(chinese_word, Some(vec!['元', '%', '%', ',']));
+        let end = start.elapsed();
+        println!(
+            "clean_string_escape_chars: {:?}, elapsed time: {:?}",
+            result, end
+        );
+    }
 }

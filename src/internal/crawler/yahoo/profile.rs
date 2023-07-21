@@ -1,10 +1,12 @@
-use crate::internal::{crawler::yahoo::HOST, logging, util, util::http::element};
-use anyhow::*;
 use core::result::Result::Ok;
+
+use anyhow::*;
 use regex::Regex;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
+
+use crate::internal::{crawler::yahoo::HOST, logging, util, util::http::element};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Profile {
@@ -113,8 +115,9 @@ fn css_selector(base: &str, child: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_visit() {

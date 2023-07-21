@@ -1,4 +1,3 @@
-use crate::internal::{crawler::goodinfo, database};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
@@ -6,6 +5,8 @@ use sqlx::{
     postgres::{PgQueryResult, PgRow},
     Row,
 };
+
+use crate::internal::{crawler::goodinfo, database};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone)]
 /// 股息發放日程表 原表名 dividend
@@ -407,10 +408,12 @@ impl From<&goodinfo::dividend::GoodInfoDividend> for Dividend {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::logging;
     use chrono::TimeZone;
     use rust_decimal_macros::dec;
+
+    use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_fetch_no_dividends_for_year() {

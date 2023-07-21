@@ -1,14 +1,16 @@
+use std::result::Result::Ok;
+
+use anyhow::*;
+use chrono::Local;
+use scraper::{Html, Selector};
+
 use crate::internal::{
     cache::SHARE,
     database::table,
     logging,
-    util::{self, datetime::Weekend},
     StockExchangeMarket,
+    util::{self, datetime::Weekend},
 };
-use anyhow::*;
-use chrono::Local;
-use scraper::{Html, Selector};
-use std::result::Result::Ok;
 
 const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺灣存託憑證(TDR)"];
 
@@ -132,6 +134,7 @@ pub async fn visit(
 mod tests {
     use crate::internal::cache::SHARE;
     use crate::internal::logging;
+
     //use std::collections::HashSet;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

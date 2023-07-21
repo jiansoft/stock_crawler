@@ -1,13 +1,15 @@
+use core::result::Result::Ok;
+use std::time::Duration;
+
+use anyhow::*;
+use chrono::{Local, NaiveDate};
+
 use crate::internal::{
-    cache::{TtlCacheInner, SHARE, TTL},
+    cache::{SHARE, TTL, TtlCacheInner},
     crawler::{tpex, twse},
     database::table::{self, daily_quote},
     logging,
 };
-use anyhow::*;
-use chrono::{Local, NaiveDate};
-use core::result::Result::Ok;
-use std::time::Duration;
 
 /// 調用  twse API 取得台股收盤報價
 pub async fn execute() -> Result<()> {
@@ -96,17 +98,20 @@ async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::cache::SHARE;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    //use std::time;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::internal::database::table::stock;
-    use crate::internal::logging;
     //use crossbeam::thread;
     use rayon::prelude::*;
     use tokio::time::sleep;
+
+    use crate::internal::cache::SHARE;
+    use crate::internal::database::table::stock;
+    use crate::internal::logging;
+
+    use super::*;
+
+//use std::time;
 
     #[tokio::test]
     async fn test_execute() {

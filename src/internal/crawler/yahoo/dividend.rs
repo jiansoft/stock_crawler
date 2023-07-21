@@ -1,9 +1,11 @@
-use crate::internal::{crawler::yahoo::HOST, logging, util::http};
-use anyhow::*;
 use core::result::Result::Ok;
+
+use anyhow::*;
 use hashbrown::HashMap;
 use regex::Regex;
 use scraper::{Html, Selector};
+
+use crate::internal::{crawler::yahoo::HOST, logging, util::http};
 
 #[derive(Debug, Clone)]
 pub struct YahooDividend {
@@ -183,8 +185,9 @@ fn parse_period(period: &Option<String>, re: &Regex) -> Result<(i32, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_visit() {

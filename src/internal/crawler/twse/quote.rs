@@ -1,17 +1,19 @@
-use crate::internal::{
-    cache::{self, TtlCacheInner, TTL},
-    database::table::daily_quote::{self, FromWithExchange},
-    logging,
-    util::http,
-    StockExchange,
-};
-use anyhow::*;
-use chrono::{DateTime, Datelike, Local};
 use core::result::Result::Ok;
+
+use anyhow::*;
+use chrono::{Datelike, DateTime, Local};
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
+
+use crate::internal::{
+    cache::{self, TTL, TtlCacheInner},
+    database::table::daily_quote::{self, FromWithExchange},
+    logging,
+    StockExchange,
+    util::http,
+};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ListedResponse {
@@ -101,9 +103,11 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::cache::SHARE;
     use chrono::{Duration, Timelike};
+
+    use crate::internal::cache::SHARE;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_visit() {

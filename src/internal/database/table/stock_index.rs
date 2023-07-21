@@ -1,8 +1,9 @@
-use crate::internal::database;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 use sqlx::Postgres;
 use sqlx::Transaction;
+
+use crate::internal::database;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct StockIndex {
@@ -71,8 +72,9 @@ DO NOTHING;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_insert() {

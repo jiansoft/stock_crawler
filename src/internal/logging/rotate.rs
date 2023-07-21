@@ -1,18 +1,20 @@
-use crate::internal::logging;
-use anyhow::*;
-use chrono::{DateTime, Local};
 use core::result::Result::Ok;
-use rayon::prelude::*;
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, BufWriter},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
+        Arc,
+        atomic::{AtomicBool, Ordering}, RwLock,
     },
     time::UNIX_EPOCH,
 };
+
+use anyhow::*;
+use chrono::{DateTime, Local};
+use rayon::prelude::*;
+
+use crate::internal::logging;
 
 pub struct Rotate {
     /// log/%Y-%m-%d-name.log
@@ -176,9 +178,11 @@ impl Rotate {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::logging;
     use std::io::Write;
+
+    use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_init() {

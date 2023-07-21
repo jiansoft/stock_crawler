@@ -1,9 +1,11 @@
-use crate::internal::database;
+use std::result::Result::Ok;
+
 use anyhow::*;
 use chrono::{DateTime, Local};
 use hashbrown::HashMap;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
-use std::result::Result::Ok;
+
+use crate::internal::database;
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
@@ -122,10 +124,12 @@ fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Instant;
+
     use crate::internal::logging;
     use crate::internal::util;
-    use std::time::Instant;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_vec_to_hashmap() {

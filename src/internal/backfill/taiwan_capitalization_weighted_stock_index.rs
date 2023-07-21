@@ -1,7 +1,9 @@
-use crate::internal::{bot, cache::SHARE, crawler::twse, database::table, logging};
+use core::result::Result::Ok;
+
 use anyhow::*;
 use chrono::Local;
-use core::result::Result::Ok;
+
+use crate::internal::{bot, cache::SHARE, crawler::twse, database::table, logging};
 
 /// 調用  twse API 取得台股加權指數
 pub async fn execute() -> Result<()> {
@@ -74,8 +76,9 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_execute() {

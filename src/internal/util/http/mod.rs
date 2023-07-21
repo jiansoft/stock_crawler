@@ -1,14 +1,16 @@
-pub mod element;
-pub mod user_agent;
+use std::{collections::HashMap, result::Result::Ok, time::Duration};
 
-use crate::internal::{logging, util};
 use anyhow::*;
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
-use reqwest::{header, Client, Method, RequestBuilder, Response};
+use reqwest::{Client, header, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{collections::HashMap, result::Result::Ok, time::Duration};
 use tokio::{sync::Semaphore, time::sleep};
+
+use crate::internal::{logging, util};
+
+pub mod element;
+pub mod user_agent;
 
 /// A semaphore for limiting concurrent requests.
 ///
@@ -286,10 +288,12 @@ async fn send(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::logging;
     use chrono::Local;
     use concat_string::concat_string;
+
+    use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_request() {

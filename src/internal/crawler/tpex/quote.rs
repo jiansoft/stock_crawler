@@ -1,16 +1,18 @@
-use crate::internal::{
-    cache::{self, TtlCacheInner, TTL},
-    crawler::tpex,
-    database::table::daily_quote::{self, FromWithExchange},
-    logging, util, StockExchange,
-};
+use std::result::Result::Ok;
+
 use anyhow::*;
-use chrono::{DateTime, Datelike, Local};
+use chrono::{Datelike, DateTime, Local};
 use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
-use std::result::Result::Ok;
+
+use crate::internal::{
+    cache::{self, TTL, TtlCacheInner},
+    crawler::tpex,
+    database::table::daily_quote::{self, FromWithExchange},
+    logging, StockExchange, util,
+};
 
 // QuoteResponse 上櫃公司每日收盤資訊
 #[derive(Debug, Deserialize)]
@@ -124,9 +126,11 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::cache::SHARE;
     use chrono::{Duration, Timelike};
+
+    use crate::internal::cache::SHARE;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_visit() {

@@ -1,9 +1,3 @@
-pub mod rotate;
-
-use crate::internal::logging::rotate::Rotate;
-use chrono::{format::DelayedFormat, Local};
-use crossbeam_channel::{unbounded, Sender};
-use once_cell::sync::Lazy;
 use std::{
     fmt::Write as _,
     fs::{self},
@@ -11,6 +5,14 @@ use std::{
     path::{Path, PathBuf},
     thread,
 };
+
+use chrono::{format::DelayedFormat, Local};
+use crossbeam_channel::{Sender, unbounded};
+use once_cell::sync::Lazy;
+
+use crate::internal::logging::rotate::Rotate;
+
+pub mod rotate;
 
 static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new("default"));
 

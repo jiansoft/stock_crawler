@@ -1,16 +1,19 @@
 /*#[macro_use]
 extern crate rocket;*/
 
-pub mod internal;
-
-use crate::internal::{cache, nosql, scheduler};
 use std::{
     error::Error,
-    sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use tokio::signal;
+#[cfg(unix)]
+use tokio::signal::unix::{signal as unix_signal, SignalKind};
+
+use crate::internal::{cache, nosql, scheduler};
+
+pub mod internal;
 
 /*#[get("/")]
 fn index() -> &'static str {
@@ -37,9 +40,6 @@ async fn main() -> Result<(), rocket::Error> {
     Ok(())
 }
 */
-
-#[cfg(unix)]
-use tokio::signal::unix::{signal as unix_signal, SignalKind};
 
 #[cfg(unix)]
 async fn unix_signal_handler(received_signal: Arc<AtomicBool>) -> Result<(), Box<dyn Error>> {

@@ -1,4 +1,5 @@
-use crate::internal::{database, logging, util};
+use std::str::FromStr;
+
 use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use concat_string::concat_string;
@@ -6,7 +7,8 @@ use futures::StreamExt;
 use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
-use std::str::FromStr;
+
+use crate::internal::{database, logging, util};
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Index {
@@ -244,9 +246,11 @@ impl From<Vec<String>> for Index {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::logging;
     use std::{thread, time};
+
+    use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_index_fetch() {

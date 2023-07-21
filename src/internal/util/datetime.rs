@@ -1,5 +1,6 @@
-use crate::internal::logging;
 use chrono::{DateTime, Datelike, Local, Weekday};
+
+use crate::internal::logging;
 
 /// A trait representing the weekend concept.
 pub trait Weekend {

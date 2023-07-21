@@ -1,10 +1,12 @@
-use crate::internal::config::SETTINGS;
+use std::{result::Result::Ok, sync::Arc};
+
 use anyhow::*;
-use deadpool_redis::{redis::cmd, Config, Connection, Pool, Runtime};
+use deadpool_redis::{Config, Connection, Pool, redis::cmd, Runtime};
 use futures::{stream::FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
 use redis::{AsyncCommands, RedisError, RedisResult, ToRedisArgs, Value};
-use std::{result::Result::Ok, sync::Arc};
+
+use crate::internal::config::SETTINGS;
 
 pub static CLIENT: Lazy<Arc<Redis>> = Lazy::new(|| Arc::new(Redis::new()));
 
@@ -210,8 +212,9 @@ impl Default for Redis {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{internal::cache::SHARE, internal::logging};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_redis() {

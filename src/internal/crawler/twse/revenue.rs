@@ -1,8 +1,10 @@
-use crate::internal::{cache::SHARE, database::table::revenue, logging, util};
+use std::result::Result::Ok;
+
 use anyhow::*;
 use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
-use std::result::Result::Ok;
+
+use crate::internal::{cache::SHARE, database::table::revenue, logging, util};
 
 /// 下載月營收
 pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<revenue::Revenue>> {
@@ -63,9 +65,9 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
 
 #[cfg(test)]
 mod tests {
-
-    use chrono::prelude::*;
     use chrono::{Duration, Local};
+    use chrono::prelude::*;
+
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 

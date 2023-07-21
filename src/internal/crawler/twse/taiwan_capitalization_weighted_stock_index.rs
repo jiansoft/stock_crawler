@@ -1,8 +1,10 @@
-use crate::internal::{logging, util};
 use anyhow::*;
 use chrono::{DateTime, Local};
 use concat_string::concat_string;
 use serde_derive::{Deserialize, Serialize};
+
+use crate::internal::{logging, util};
+
 /// 調用台股指數 twse API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 //#[serde(rename_all = "camelCase")]
@@ -28,9 +30,12 @@ pub async fn visit(date: DateTime<Local>) -> Result<Index> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::internal::cache::SHARE;
     use std::result::Result::Ok;
+
+    use crate::internal::cache::SHARE;
+
+    use super::*;
+
     #[tokio::test]
     async fn test_visit() {
         dotenv::dotenv().ok();

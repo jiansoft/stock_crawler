@@ -1,6 +1,8 @@
-use crate::internal::{bot, calculation, database::table::stock, logging};
-use chrono::{Datelike, Local, NaiveDate};
 use std::fmt::Write;
+
+use chrono::{Datelike, Local, NaiveDate};
+
+use crate::internal::{bot, calculation, database::table::stock, logging};
 
 /// 提醒本日為除權息的股票有那些
 pub async fn execute() {
@@ -45,8 +47,9 @@ pub async fn execute() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_calculate() {

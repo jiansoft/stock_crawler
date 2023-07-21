@@ -1,7 +1,5 @@
-use crate::internal::{
-    crawler::{wespai, yahoo},
-    database,
-};
+use std::result::Result::Ok;
+
 use anyhow::*;
 use chrono::{DateTime, Local};
 use hashbrown::HashMap;
@@ -11,7 +9,11 @@ use sqlx::{
     postgres::{PgQueryResult, PgRow},
     Row,
 };
-use std::result::Result::Ok;
+
+use crate::internal::{
+    crawler::{wespai, yahoo},
+    database,
+};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]
 /// 財務報表
@@ -217,8 +219,9 @@ impl From<wespai::profit::Profit> for FinancialStatement {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_fetch_annual() {

@@ -1,3 +1,14 @@
+use std::result::Result::Ok;
+
+use anyhow::*;
+use hashbrown::HashMap;
+use regex::Regex;
+use reqwest::header::HeaderMap;
+use rust_decimal::Decimal;
+use scraper::{Html, Selector};
+use serde::{Deserialize, Serialize};
+use urlencoding::encode;
+
 use crate::internal::{
     crawler::goodinfo::HOST,
     logging,
@@ -6,15 +17,6 @@ use crate::internal::{
         text,
     },
 };
-use anyhow::*;
-use hashbrown::HashMap;
-use regex::Regex;
-use reqwest::header::HeaderMap;
-use rust_decimal::Decimal;
-use scraper::{Html, Selector};
-use serde::{Deserialize, Serialize};
-use std::result::Result::Ok;
-use urlencoding::encode;
 
 const UNSET_DATE: &str = "-";
 
@@ -205,8 +207,9 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_visit() {

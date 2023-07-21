@@ -1,19 +1,21 @@
-pub mod pb {
-    include!("stock.rs");
-}
+use std::{result::Result::Ok, sync::Arc};
+
+use anyhow::*;
+use once_cell::sync::Lazy;
+use tokio::{fs, sync::OnceCell as TokioOnceCell};
+use tonic::{
+    Request,
+    Response, transport::{Certificate, Channel, ClientTlsConfig},
+};
 
 use crate::internal::{
     config::SETTINGS,
     rpc::pb::{stock_client::StockClient, StockInfoReply, StockInfoRequest},
 };
-use anyhow::*;
-use once_cell::sync::Lazy;
-use std::{result::Result::Ok, sync::Arc};
-use tokio::{fs, sync::OnceCell as TokioOnceCell};
-use tonic::{
-    transport::{Certificate, Channel, ClientTlsConfig},
-    Request, Response,
-};
+
+pub mod pb {
+    include!("stock.rs");
+}
 
 static GRPC: Lazy<Arc<TokioOnceCell<Grpc>>> = Lazy::new(|| Arc::new(TokioOnceCell::new()));
 
@@ -58,9 +60,10 @@ pub async fn push_stock_info_to_go_service(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::internal::cache::SHARE;
     use crate::internal::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_push_stock_info_to_go_service() {

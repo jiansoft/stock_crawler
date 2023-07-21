@@ -1,11 +1,13 @@
+use std::sync::RwLock;
+
+use hashbrown::HashMap;
+use once_cell::sync::Lazy;
+
 //use futures::executor::block_on;
 use crate::internal::{
     database::table::{index, last_daily_quotes, revenue, stock, stock_exchange_market},
     logging,
 };
-use hashbrown::HashMap;
-use once_cell::sync::Lazy;
-use std::sync::RwLock;
 
 pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
 
@@ -260,9 +262,10 @@ impl Default for Ttl {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::thread;
     use std::time::Duration;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_init() {

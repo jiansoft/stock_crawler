@@ -1,14 +1,16 @@
-pub(crate) mod extension;
+use core::result::Result::Ok;
 
-use crate::internal::{
-    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, util::datetime,
-    StockExchange,
-};
 use anyhow::*;
 use chrono::{DateTime, Local, NaiveDate};
-use core::result::Result::Ok;
 use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
+
+use crate::internal::{
+    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, StockExchange,
+    util::datetime,
+};
+
+pub(crate) mod extension;
 
 #[derive(Default, Debug)]
 /// 每日股票報價數據
@@ -339,10 +341,12 @@ GROUP BY "SecurityCode", "year", "month";
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use chrono::Datelike;
+
     use crate::internal::cache::SHARE;
     use crate::internal::logging;
-    use chrono::Datelike;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_makeup_for_the_lack_daily_quotes() {
