@@ -8,8 +8,8 @@ use crate::internal::{
     cache::SHARE,
     database::table,
     logging,
-    StockExchangeMarket,
     util::{self, datetime::Weekend},
+    StockExchangeMarket,
 };
 
 const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺灣存託憑證(TDR)"];

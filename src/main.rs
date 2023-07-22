@@ -3,8 +3,10 @@ extern crate rocket;*/
 
 use std::{
     error::Error,
-    sync::Arc,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc
+    }
 };
 
 use tokio::signal;

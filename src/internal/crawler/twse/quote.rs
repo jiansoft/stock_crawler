@@ -1,18 +1,18 @@
 use core::result::Result::Ok;
 
 use anyhow::*;
-use chrono::{Datelike, DateTime, Local};
+use chrono::{DateTime, Datelike, Local};
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use crate::internal::{
-    cache::{self, TTL, TtlCacheInner},
+    cache::{self, TtlCacheInner, TTL},
     database::table::daily_quote::{self, FromWithExchange},
     logging,
-    StockExchange,
     util::http,
+    StockExchange,
 };
 
 #[derive(Serialize, Deserialize, Debug)]

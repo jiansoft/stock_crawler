@@ -2,14 +2,7 @@ use anyhow::*;
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, FromRow};
 
-use crate::{
-    internal::{
-        database::{
-            self,
-            table::stock
-        }
-    }
-};
+use crate::internal::database::{self, table::stock};
 
 /// 更新股票的每股淨值
 #[derive(FromRow, Debug)]
@@ -22,7 +15,10 @@ pub struct SymbolAndNetAssetValuePerShare {
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
 impl From<&stock::Stock> for SymbolAndNetAssetValuePerShare {
     fn from(stock: &stock::Stock) -> Self {
-        SymbolAndNetAssetValuePerShare::new(stock.stock_symbol.clone(), stock.net_asset_value_per_share)
+        SymbolAndNetAssetValuePerShare::new(
+            stock.stock_symbol.clone(),
+            stock.net_asset_value_per_share,
+        )
     }
 }
 

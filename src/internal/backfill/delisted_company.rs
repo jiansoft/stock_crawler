@@ -3,8 +3,8 @@ use core::result::Result::Ok;
 use anyhow::*;
 use chrono::Local;
 
-use crate::internal::{cache::SHARE, crawler::twse, logging, util::datetime::Weekend};
 use crate::internal::database::table::stock;
+use crate::internal::{cache::SHARE, crawler::twse, logging, util::datetime::Weekend};
 
 /// 更新資料庫中終止上市的公司
 pub async fn execute() -> Result<()> {

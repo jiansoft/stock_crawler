@@ -2,7 +2,10 @@ use anyhow::*;
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, FromRow};
 
-use crate::internal::{crawler::taifex, database};
+use crate::internal::{
+    crawler::{taifex, taifex::stock_weight::StockWeight},
+    database,
+};
 
 /// 更新股票的權重
 #[derive(FromRow, Debug)]
@@ -13,10 +16,15 @@ pub struct SymbolAndWeight {
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<taifex::stock_weight::StockWeight> for SymbolAndWeight {
-    fn from(stock_weight: taifex::stock_weight::StockWeight) -> Self {
+impl From<StockWeight> for SymbolAndWeight {
+    fn from(stock_weight: StockWeight) -> Self {
         SymbolAndWeight::new(stock_weight.stock_symbol, stock_weight.weight)
     }
+}
+
+// 新增一個方法來將 StockWeight 轉換成 SymbolAndWeight
+pub fn from(weights: Vec<StockWeight>) -> Vec<SymbolAndWeight> {
+    weights.into_iter().map(SymbolAndWeight::from).collect()
 }
 
 impl SymbolAndWeight {
@@ -26,6 +34,7 @@ impl SymbolAndWeight {
             weight,
         }
     }
+
     /// 更新個股的權值佔比
     pub async fn update(&self) -> Result<PgQueryResult> {
         let sql = r#"
@@ -46,11 +55,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use core::result::Result::Ok;
+
+    use rust_decimal_macros::dec;
+
     use crate::internal::database::table::stock::Stock;
     use crate::internal::logging;
-    use core::result::Result::Ok;
-    use rust_decimal_macros::dec;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_update() {
@@ -87,10 +99,7 @@ WHERE stock_symbol = $1;
                     Ok(s) => {
                         assert_eq!(s.weight, e.weight);
 
-                        logging::debug_file_async(format!(
-                            "stock:{:?}",
-                            s
-                        ));
+                        logging::debug_file_async(format!("stock:{:?}", s));
                         dbg!(s);
                     }
                     Err(why) => {

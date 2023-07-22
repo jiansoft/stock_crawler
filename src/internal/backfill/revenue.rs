@@ -1,7 +1,7 @@
 use core::result::Result::Ok;
 
 use anyhow::*;
-use chrono::{Datelike, DateTime, FixedOffset, Local, NaiveDate};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 
 use crate::internal::{cache::SHARE, crawler::twse, database::table, logging};
 

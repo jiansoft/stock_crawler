@@ -37,6 +37,7 @@ pub struct Grpc {
 }
 
 const AFRAID_TOKEN: &str = "AFRAID_TOKEN";
+
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Afraid {
     #[serde(default)]
@@ -90,6 +91,7 @@ const REDIS_ADDR: &str = "REDIS_ADDR";
 const REDIS_ACCOUNT: &str = "REDIS_ACCOUNT";
 const REDIS_PASSWORD: &str = "REDIS_PASSWORD";
 const REDIS_DB: &str = "REDIS_DB";
+
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Redis {
     pub addr: String,

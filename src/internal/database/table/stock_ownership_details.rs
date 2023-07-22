@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{Postgres, postgres::PgQueryResult, Transaction};
+use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 use crate::internal::database;
 
@@ -161,7 +161,7 @@ WHERE
             .bind(self.cumulate_dividends_total);
         let result = match tx {
             None => query.execute(database::get_connection()).await?,
-            Some( t) => query.execute(&mut **t).await?,
+            Some(t) => query.execute(&mut **t).await?,
         };
 
         Ok(result)

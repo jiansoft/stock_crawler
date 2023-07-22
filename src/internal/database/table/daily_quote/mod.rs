@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
 
 use crate::internal::{
-    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, StockExchange,
-    util::datetime,
+    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, util::datetime,
+    StockExchange,
 };
 
 pub(crate) mod extension;
@@ -313,7 +313,9 @@ WHERE "Serial" IN
         date_str, prev_date
     );
 
-    Ok(sqlx::query(&sql).execute(database::get_connection()).await?)
+    Ok(sqlx::query(&sql)
+        .execute(database::get_connection())
+        .await?)
 }
 
 /// 依照指定的年月取得該股票其月份的最低、平均、最高價

@@ -21,6 +21,7 @@ const BACKFILL_TAIWAN_CAPITALIZATION_WEIGHTED_STOCK_INDEX: &str =
     "backfill::taiwan_capitalization_weighted_stock_index::execute";
 const BACKFILL_QUOTES: &str = "backfill::quotes::execute";
 const BACKFILL_DIVIDEND: &str = "backfill::dividend::execute";
+const BACKFILL_STOCK_WEIGHT: &str = "backfill::stock_weight::execute";
 
 /// 啟動排程
 pub async fn start() {
@@ -121,6 +122,9 @@ pub async fn run_cron() -> Result<()> {
                 backfill::delisted_company::execute,
             )
             .await;
+
+            //更新股票權值佔比
+            run_and_log_task(BACKFILL_STOCK_WEIGHT, backfill::stock_weight::execute).await;
         })
     })?;
     sched.add(five_am_job).await?;
@@ -179,10 +183,10 @@ pub async fn run_cron() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use tokio::time::{Duration, sleep};
+    use tokio::time::{sleep, Duration};
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
-        use super::*;
+    use super::*;
 
     async fn run() -> Result<()> {
         let sched = JobScheduler::new().await?;

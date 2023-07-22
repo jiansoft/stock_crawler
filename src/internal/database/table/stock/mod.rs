@@ -1,21 +1,15 @@
 use anyhow::Result;
-use chrono::{Datelike, DateTime, Duration, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
-use crate::{
-    internal::{
-        crawler::{
-            tpex,
-            twse
-        },
-        database::{
-            self,
-            table::{stock::extension::SymbolAndName, stock_index, stock_word},
-        },
-        logging,
-        util
-    }
+use crate::internal::{
+    crawler::{tpex, twse},
+    database::{
+        self,
+        table::{stock::extension::SymbolAndName, stock_index, stock_word},
+    },
+    logging, util,
 };
 
 pub(crate) mod extension;
@@ -338,9 +332,7 @@ WHERE s.stock_exchange_market_id in(2, 4)
 }
 
 /// 取得指定日期為除息權日的股票
-pub async fn fetch_stocks_with_dividends_on_date(
-    date: NaiveDate,
-) -> Result<Vec<SymbolAndName>> {
+pub async fn fetch_stocks_with_dividends_on_date(date: NaiveDate) -> Result<Vec<SymbolAndName>> {
     let sql = r#"
 SELECT
     s.stock_symbol,

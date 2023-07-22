@@ -3,14 +3,9 @@ use core::result::Result::Ok;
 use anyhow::*;
 use sqlx::postgres::PgQueryResult;
 
-use crate::{
-    internal::{
-        cache::SHARE,
-        database::{
-            table,
-            table::stock::extension
-        }
-    }
+use crate::internal::{
+    cache::SHARE,
+    database::{table, table::stock::extension},
 };
 
 /// 更新興櫃股票的每股淨值
@@ -20,7 +15,7 @@ pub mod zero_value;
 
 /// 更新興櫃股票的每股淨值，資料庫更新後會更新 SHARE.stocks
 pub async fn update(stock: &table::stock::Stock) -> Result<PgQueryResult> {
-    let item =  extension::net_asset_value_per_share::SymbolAndNetAssetValuePerShare::from(stock);
+    let item = extension::net_asset_value_per_share::SymbolAndNetAssetValuePerShare::from(stock);
     let result = item.update().await?;
 
     if result.rows_affected() > 0 {

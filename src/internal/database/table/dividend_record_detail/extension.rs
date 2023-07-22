@@ -2,7 +2,7 @@ use std::result::Result::Ok;
 
 use anyhow::*;
 use rust_decimal::Decimal;
-use sqlx::{Postgres, postgres::PgRow, Row, Transaction};
+use sqlx::{postgres::PgRow, Postgres, Row, Transaction};
 
 use crate::internal::database;
 
@@ -67,7 +67,7 @@ where stock_ownership_details_serial = $1;
 
         let cd = match tx {
             None => query.fetch_one(database::get_connection()).await?,
-            Some( t) => query.fetch_one(&mut **t).await?,
+            Some(t) => query.fetch_one(&mut **t).await?,
         };
 
         Ok(cd)
