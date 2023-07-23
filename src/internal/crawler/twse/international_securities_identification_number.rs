@@ -6,6 +6,7 @@ use scraper::{Html, Selector};
 
 use crate::internal::{
     cache::SHARE,
+    crawler::twse,
     database::table,
     logging,
     util::{self, datetime::Weekend},
@@ -54,7 +55,8 @@ pub async fn visit(
     }
 
     let url = format!(
-        "https://isin.twse.com.tw/isin/C_public.jsp?strMode={}",
+        "https://isin.{}/isin/C_public.jsp?strMode={}",
+        twse::HOST,
         mode.serial_number()
     );
     logging::info_file_async(format!("visit url:{}", url,));

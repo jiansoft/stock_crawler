@@ -4,7 +4,7 @@ use anyhow::*;
 use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
 
-use crate::internal::{cache::SHARE, database::table::revenue, logging, util};
+use crate::internal::{cache::SHARE, crawler::twse, database::table::revenue, logging, util};
 
 /// 下載月營收
 pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<revenue::Revenue>> {
@@ -16,8 +16,12 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<reven
     for market in ["sii", "otc"].iter() {
         for i in 0..2 {
             let url = format!(
-                "https://mops.twse.com.tw/nas/t21/{}/t21sc03_{}_{}_{}.html",
-                market, republic_of_china_era, month, i
+                "https://mops.{}/nas/t21/{}/t21sc03_{}_{}_{}.html",
+                twse::HOST,
+                market,
+                republic_of_china_era,
+                month,
+                i
             );
 
             if let Ok(r) = download_revenue(url, year, month).await {

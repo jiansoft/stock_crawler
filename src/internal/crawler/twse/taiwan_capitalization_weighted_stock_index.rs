@@ -1,9 +1,14 @@
 use anyhow::*;
 use chrono::{DateTime, Local};
-use concat_string::concat_string;
 use serde_derive::{Deserialize, Serialize};
 
-use crate::internal::{logging, util};
+use crate::{
+    internal::{
+        crawler::twse,
+        logging,
+        util
+    }
+};
 
 /// 調用台股指數 twse API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -18,12 +23,13 @@ pub struct Index {
 
 /// 取得台股指數
 pub async fn visit(date: DateTime<Local>) -> Result<Index> {
-    let url = concat_string!(
-        "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=",
-        date.format("%Y%m%d").to_string(),
-        "&_=",
-        date.timestamp_millis().to_string()
+    let url = format!(
+        "https://www.{}/exchangeReport/FMTQIK?response=json&date={}&_={}",
+        twse::HOST,
+        date.format("%Y%m%d"),
+        date.timestamp_millis()
     );
+
     logging::info_file_async(format!("visit url:{}", url,));
     util::http::get_use_json::<Index>(&url).await
 }

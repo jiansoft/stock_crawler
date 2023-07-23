@@ -1,7 +1,13 @@
 use anyhow::*;
 use serde::Deserialize;
 
-use crate::internal::{logging, util};
+use crate::{
+    internal::{
+        crawler::twse,
+        logging,
+        util
+    }
+};
 
 /// 調用 twse suspendListingCsvAndHtml API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Deserialize)]
@@ -16,9 +22,13 @@ pub struct SuspendListing {
 
 /// 取得終止上市公司名單
 pub async fn visit() -> Result<Vec<SuspendListing>> {
-    let url = "https://openapi.twse.com.tw/v1/company/suspendListingCsvAndHtml";
-    logging::info_file_async(format!("visit url:{}", url));
-    util::http::get_use_json::<Vec<SuspendListing>>(url).await
+    let url = format!(
+        "https://openapi.{}/v1/company/suspendListingCsvAndHtml",
+        twse::HOST,
+    );
+
+    logging::info_file_async(format!("visit url:{}", &url));
+    util::http::get_use_json::<Vec<SuspendListing>>(&url).await
 }
 
 #[cfg(test)]

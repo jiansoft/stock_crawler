@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     dotenv::dotenv().ok();
     cache::SHARE.load().await;
-    scheduler::start().await;
+    scheduler::start().await?;
     let pong = nosql::redis::CLIENT.ping().await;
     if let Ok(pong) = pong {
         println!("pong: {}", pong);

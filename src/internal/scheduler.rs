@@ -6,10 +6,11 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use crate::internal::{backfill, bot, crawler, logging, reminder};
 
 /// 啟動排程
-pub async fn start() {
-    if let Err(why) = run_cron().await {
+pub async fn start() -> Result<()> {
+    run_cron().await.map_err(|why| {
         logging::error_file_async(format!("Failed to run_cron because {:?}", why));
-    }
+        why
+    })?;
 
     let msg = format!(
         "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
@@ -17,19 +18,10 @@ pub async fn start() {
         env::consts::ARCH
     );
 
-    if let Err(err) = bot::telegram::send(&msg).await {
+    bot::telegram::send(&msg).await.map_err(|err| {
         logging::error_file_async(format!("Failed to send telegram message because {:?}", err));
-    }
-}
-
-async fn run_task<F, Fut>(task: F)
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<(), Error>>,
-{
-    if let Err(why) = task().await {
-        logging::error_file_async(format!("Failed because {:?}", why));
-    }
+        err
+    })
 }
 
 pub async fn run_cron() -> Result<()> {
@@ -75,6 +67,7 @@ pub async fn run_cron() -> Result<()> {
         create_job("0 1 7 * * *", backfill::quote::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 13 * * *", backfill::dividend::execute),
+        // 每分鐘更新一次ddns的ip
         create_job("0 * * * * *", crawler::free_dns::execute),
     ];
 
@@ -94,7 +87,9 @@ where
     Ok(Job::new_async(cron_expr, move |_uuid, _l| {
         let task = task.clone();
         Box::pin(async move {
-            run_task(task).await;
+            if let Err(why) = task().await {
+                logging::error_file_async(format!("Failed to execute task because {:?}", why));
+            }
         })
     })?)
 }

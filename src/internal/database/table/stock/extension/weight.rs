@@ -1,6 +1,6 @@
 use anyhow::*;
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, FromRow};
+use sqlx::{FromRow, postgres::PgQueryResult};
 
 use crate::internal::{crawler::taifex::stock_weight::StockWeight, database};
 
@@ -56,8 +56,13 @@ mod tests {
 
     use rust_decimal_macros::dec;
 
-    use crate::internal::database::table::stock::Stock;
-    use crate::internal::logging;
+    use crate::{
+        internal::{
+            crawler::taifex,
+            database::table::stock::Stock,
+            logging
+        }
+    };
 
     use super::*;
 

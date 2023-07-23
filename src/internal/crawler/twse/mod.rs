@@ -8,3 +8,5 @@ pub mod revenue;
 pub mod suspend_listing;
 /// 台股加權指數
 pub mod taiwan_capitalization_weighted_stock_index;
+
+const HOST: &str = "twse.com.tw";

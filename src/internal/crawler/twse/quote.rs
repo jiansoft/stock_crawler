@@ -7,12 +7,15 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
-use crate::internal::{
-    cache::{self, TtlCacheInner, TTL},
-    database::table::daily_quote::{self, FromWithExchange},
-    logging,
-    util::http,
-    StockExchange,
+use crate::{
+    internal::{
+        crawler::twse,
+        cache::{self, TtlCacheInner, TTL},
+        database::table::daily_quote::{self, FromWithExchange},
+        logging,
+        util::http,
+        StockExchange
+    }
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -42,7 +45,8 @@ async fn build_headers() -> HeaderMap {
 pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>> {
     let date_str = date.format("%Y%m%d").to_string();
     let url = format!(
-        "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date={}&type=ALLBUT0999&_={}",
+        "https://www.{}/exchangeReport/MI_INDEX?response=json&date={}&type=ALLBUT0999&_={}",
+        twse::HOST,
         date_str,
         date.to_rfc3339()
     );
