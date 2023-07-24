@@ -4,7 +4,7 @@ use anyhow::*;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
-use crate::internal::{crawler::taifex, logging, util, util::http::element};
+use crate::internal::{crawler::taifex, logging, StockExchange, util, util::http::element};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct StockWeight {
@@ -14,8 +14,16 @@ pub struct StockWeight {
 }
 
 /// 台股各股權重
-pub async fn visit() -> Result<Vec<StockWeight>> {
-    let url = format!("https://{}/cht/9/futuresQADetail", taifex::HOST);
+pub async fn visit(exchange: StockExchange) -> Result<Vec<StockWeight>> {
+    let url = match exchange {
+        StockExchange::TWSE => {
+            format!("https://{}/cht/9/futuresQADetail", taifex::HOST)
+        }
+        StockExchange::TPEx => {
+            format!("https://{}/cht/2/tPEXPropertion", taifex::HOST)
+        }
+    };
+
     logging::info_file_async(format!("visit url:{}", url,));
 
     let mut result: Vec<StockWeight> = Vec::with_capacity(1024);
@@ -34,24 +42,26 @@ pub async fn visit() -> Result<Vec<StockWeight>> {
     };
 
     for element in document.select(&selector) {
-        let odd_e = StockWeight {
-            rank: element::parse_to_i32(&element, "td:nth-child(1)"),
-            stock_symbol: element::parse_to_string(&element, "td:nth-child(2)"),
-            weight: element::parse_to_decimal(&element, "td:nth-child(4)"),
-        };
+        let stock_symbol = element::parse_to_string(&element, "td:nth-child(2)");
+        if !stock_symbol.is_empty() {
+            let sw = StockWeight {
+                rank: element::parse_to_i32(&element, "td:nth-child(1)"),
+                stock_symbol,
+                weight: element::parse_to_decimal(&element, "td:nth-child(4)"),
+            };
 
-        if !odd_e.stock_symbol.is_empty() {
-            result.push(odd_e);
+            result.push(sw);
         }
 
-        let even_e = StockWeight {
-            rank: element::parse_to_i32(&element, "td:nth-child(5)"),
-            stock_symbol: element::parse_to_string(&element, "td:nth-child(6)"),
-            weight: element::parse_to_decimal(&element, "td:nth-child(8)"),
-        };
+        let stock_symbol = element::parse_to_string(&element, "td:nth-child(6)");
+        if !stock_symbol.is_empty() {
+            let sw = StockWeight {
+                rank: element::parse_to_i32(&element, "td:nth-child(5)"),
+                stock_symbol,
+                weight: element::parse_to_decimal(&element, "td:nth-child(8)"),
+            };
 
-        if !even_e.stock_symbol.is_empty() {
-            result.push(even_e);
+            result.push(sw);
         }
     }
 
@@ -69,9 +79,11 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit().await {
+        match visit(StockExchange::TPEx).await {
             Ok(e) => {
+                dbg!(&e);
                 logging::debug_file_async(format!("len:{}\r\n {:#?}", e.len(), e));
+
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because {:?}", why));

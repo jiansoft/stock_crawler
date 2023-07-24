@@ -32,7 +32,7 @@ pub async fn execute() -> Result<()> {
         match update(&stock).await {
             Ok(_) => {
                 logging::info_file_async(format!(
-                    "update_net_asset_value_per_share executed successfully. \r\n{:#?}",
+                    "emerging update_net_asset_value_per_share executed successfully. \r\n{:#?}",
                     stock
                 ));
             }

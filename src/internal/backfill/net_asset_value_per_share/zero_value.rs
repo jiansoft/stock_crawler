@@ -2,7 +2,6 @@ use core::result::Result::Ok;
 
 use anyhow::*;
 use chrono::Local;
-use rust_decimal::Decimal;
 
 use crate::internal::{
     backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, logging,
@@ -29,7 +28,7 @@ pub async fn execute() -> Result<()> {
             }
         };
 
-        if yahoo_profile.net_asset_value_per_share == Decimal::ZERO {
+        if yahoo_profile.net_asset_value_per_share.is_zero() {
             logging::info_file_async(format!(
                 "the stock's net_asset_value_per_share is zero still. \r\n{:#?}",
                 yahoo_profile
@@ -48,7 +47,7 @@ pub async fn execute() -> Result<()> {
         }
 
         logging::info_file_async(format!(
-            "update_net_asset_value_per_share executed successfully. \r\n{:#?}",
+            "zero update_net_asset_value_per_share executed successfully. \r\n{:#?}",
             stock
         ));
     }

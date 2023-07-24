@@ -1,6 +1,6 @@
 use anyhow::*;
 use rust_decimal::Decimal;
-use sqlx::{FromRow, postgres::PgQueryResult};
+use sqlx::{postgres::PgQueryResult, FromRow};
 
 use crate::internal::{crawler::taifex::stock_weight::StockWeight, database};
 
@@ -56,13 +56,7 @@ mod tests {
 
     use rust_decimal_macros::dec;
 
-    use crate::{
-        internal::{
-            crawler::taifex,
-            database::table::stock::Stock,
-            logging
-        }
-    };
+    use crate::internal::{database::table::stock::Stock, logging};
 
     use super::*;
 
@@ -70,7 +64,7 @@ mod tests {
     async fn test_update() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 update".to_string());
-        let stock_weight = taifex::stock_weight::StockWeight {
+        let stock_weight = StockWeight {
             rank: 0,
             stock_symbol: "2330".to_string(),
             weight: dec!(28.123),
