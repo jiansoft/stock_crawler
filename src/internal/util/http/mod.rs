@@ -258,25 +258,24 @@ async fn send(
     }
 
     for attempt in 1..=MAX_RETRIES {
-        match rb.try_clone() {
-            None => continue,
-            Some(rb) => match rb.send().await {
-                Ok(response) => return Ok(response),
-                Err(e) if attempt < MAX_RETRIES => {
-                    logging::error_file_async(format!(
-                        "Failed to send({}) because {:?}, retrying...",
-                        attempt, e
-                    ));
-                    sleep(Duration::from_secs(attempt as u64)).await; // add delay before retry
-                    continue;
-                }
-                Err(e) => bail!(
-                    "Failed to send({}) because {:?}, giving up after {} attempts.",
-                    attempt,
-                    e,
-                    MAX_RETRIES
-                ),
-            },
+        let rb_clone = match rb.try_clone() {
+            Some(rb_clone) => rb_clone,
+            None => bail!("Failed to rb.try_clone {} attempts.", attempt),
+        };
+
+        match rb_clone.send().await {
+            Ok(response) => return Ok(response),
+            Err(_) if attempt <= MAX_RETRIES => {
+                let delay = Duration::from_secs(2u64.pow((attempt - 1) as u32)); // Exponential backoff
+                sleep(delay).await; // add delay before retry
+                continue;
+            }
+            Err(e) => bail!(
+                "Failed to send({}) because {:?}, giving up after {} attempts.",
+                attempt,
+                e,
+                MAX_RETRIES
+            ),
         }
     }
 
