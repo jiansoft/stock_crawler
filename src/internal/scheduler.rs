@@ -74,6 +74,7 @@ pub async fn run_cron() -> Result<()> {
     for job in jobs.into_iter().flatten() {
         sched.add(job).await?;
     }
+
     sched.start().await?;
 
     Ok(())

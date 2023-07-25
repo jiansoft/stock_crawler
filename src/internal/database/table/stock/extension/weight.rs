@@ -1,3 +1,5 @@
+use core::result::Result::Ok;
+
 use anyhow::*;
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, FromRow};
@@ -35,11 +37,11 @@ impl SymbolAndWeight {
     /// 更新個股的權值佔比
     pub async fn update(&self) -> Result<PgQueryResult> {
         let sql = r#"
-update
+UPDATE
     stocks
-set
+SET
     weight = $2
-where
+WHERE
     stock_symbol = $1;
 "#;
         Ok(sqlx::query(sql)
@@ -47,6 +49,23 @@ where
             .bind(self.weight)
             .execute(database::get_connection())
             .await?)
+    }
+
+    /// 個股的權值佔比歸零
+    pub async fn zeroed_out() -> Result<PgQueryResult> {
+        let sql = "UPDATE stocks SET weight = 0";
+        let mut tx = database::get_tx().await?;
+        let result = match sqlx::query(sql).execute(&mut *tx).await {
+            Ok(result) => result,
+            Err(why) => {
+                tx.rollback().await?;
+                return Err(anyhow!("Failed to zeroed_out because {:?}", why));
+            }
+        };
+
+        tx.commit().await?;
+
+        Ok(result)
     }
 }
 
@@ -67,11 +86,11 @@ mod tests {
         let stock_weight = StockWeight {
             rank: 0,
             stock_symbol: "2330".to_string(),
-            weight: dec!(28.123),
+            weight: dec!(28.3278),
         };
 
-        let e = SymbolAndWeight::from(stock_weight);
-        match e.update().await {
+        let sw = SymbolAndWeight::from(stock_weight);
+        match sw.update().await {
             Ok(_qr) => {
                 let sql = r#"
 SELECT
@@ -88,12 +107,12 @@ WHERE stock_symbol = $1;
     "#;
 
                 let stock = sqlx::query_as::<_, Stock>(sql)
-                    .bind(&e.stock_symbol)
+                    .bind(&sw.stock_symbol)
                     .fetch_one(database::get_connection())
                     .await;
                 match stock {
                     Ok(s) => {
-                        assert_eq!(s.weight, e.weight);
+                        assert_eq!(s.weight, sw.weight);
 
                         logging::debug_file_async(format!("stock:{:?}", s));
                         dbg!(s);
@@ -115,5 +134,24 @@ WHERE stock_symbol = $1;
         }
 
         logging::debug_file_async("結束 update".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_zeroed_out() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 zeroed_out".to_string());
+
+        match SymbolAndWeight::zeroed_out().await {
+            Ok(_qr) => {
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to stock weight zeroed_out because: {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 zeroed_out".to_string());
     }
 }

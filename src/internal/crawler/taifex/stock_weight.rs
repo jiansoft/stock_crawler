@@ -2,9 +2,9 @@ use core::result::Result::Ok;
 
 use anyhow::*;
 use rust_decimal::Decimal;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 
-use crate::internal::{crawler::taifex, logging, StockExchange, util, util::http::element};
+use crate::internal::{crawler::taifex, logging, util, util::http::element, StockExchange};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct StockWeight {
@@ -42,30 +42,42 @@ pub async fn visit(exchange: StockExchange) -> Result<Vec<StockWeight>> {
     };
 
     for element in document.select(&selector) {
-        let stock_symbol = element::parse_to_string(&element, "td:nth-child(2)");
-        if !stock_symbol.is_empty() {
-            let sw = StockWeight {
-                rank: element::parse_to_i32(&element, "td:nth-child(1)"),
-                stock_symbol,
-                weight: element::parse_to_decimal(&element, "td:nth-child(4)"),
-            };
-
+        if let Some(sw) = get_stock_weight(
+            &element,
+            "td:nth-child(1)",
+            "td:nth-child(2)",
+            "td:nth-child(4)",
+        ) {
             result.push(sw);
         }
-
-        let stock_symbol = element::parse_to_string(&element, "td:nth-child(6)");
-        if !stock_symbol.is_empty() {
-            let sw = StockWeight {
-                rank: element::parse_to_i32(&element, "td:nth-child(5)"),
-                stock_symbol,
-                weight: element::parse_to_decimal(&element, "td:nth-child(8)"),
-            };
-
+        if let Some(sw) = get_stock_weight(
+            &element,
+            "td:nth-child(5)",
+            "td:nth-child(6)",
+            "td:nth-child(8)",
+        ) {
             result.push(sw);
         }
     }
 
     Ok(result)
+}
+
+fn get_stock_weight(element: &ElementRef, ra: &str, sy: &str, w: &str) -> Option<StockWeight> {
+    let stock_symbol = element::parse_to_string(element, sy);
+    let weight = element::parse_to_decimal(element, w);
+
+    if !stock_symbol.is_empty() && !weight.is_zero() {
+        let sw = StockWeight {
+            rank: element::parse_to_i32(element, ra),
+            stock_symbol,
+            weight,
+        };
+
+        return Some(sw);
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -83,7 +95,6 @@ mod tests {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("len:{}\r\n {:#?}", e.len(), e));
-
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because {:?}", why));
