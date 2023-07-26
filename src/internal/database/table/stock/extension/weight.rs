@@ -2,7 +2,7 @@ use core::result::Result::Ok;
 
 use anyhow::*;
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, FromRow};
+use sqlx::{FromRow, postgres::PgQueryResult};
 
 use crate::internal::{crawler::taifex::stock_weight::StockWeight, database};
 
@@ -44,11 +44,12 @@ SET
 WHERE
     stock_symbol = $1;
 "#;
-        Ok(sqlx::query(sql)
+        sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(self.weight)
             .execute(database::get_connection())
-            .await?)
+            .await
+            .context("Failed to update weight from database")
     }
 
     /// 個股的權值佔比歸零
@@ -142,8 +143,7 @@ WHERE stock_symbol = $1;
         logging::debug_file_async("開始 zeroed_out".to_string());
 
         match SymbolAndWeight::zeroed_out().await {
-            Ok(_qr) => {
-            }
+            Ok(_qr) => {}
             Err(why) => {
                 logging::debug_file_async(format!(
                     "Failed to stock weight zeroed_out because: {:?}",

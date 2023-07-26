@@ -1,6 +1,6 @@
 use anyhow::*;
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, FromRow};
+use sqlx::{FromRow, postgres::PgQueryResult};
 
 use crate::internal::database::{self, table::stock};
 
@@ -41,10 +41,11 @@ set
 where
     stock_symbol = $1;
 "#;
-        Ok(sqlx::query(sql)
+        sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(self.net_asset_value_per_share)
             .execute(database::get_connection())
-            .await?)
+            .await
+            .context("Failed to update net_asset_value_per_share from database")
     }
 }

@@ -1,7 +1,7 @@
 use std::{result::Result::Ok, str::FromStr};
 
 use anyhow::*;
-use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
+use chrono::{Datelike, DateTime, Duration, FixedOffset, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
@@ -335,7 +335,7 @@ mod tests {
 
     use std::str::FromStr;
 
-    use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
+    use chrono::{Datelike, DateTime, Duration, FixedOffset, Local, NaiveDate};
     use rust_decimal::Decimal;
 
     //use chrono::{Datelike, Local, NaiveDate};

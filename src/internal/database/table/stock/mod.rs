@@ -1,5 +1,5 @@
-use anyhow::Result;
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
+use anyhow::{Context, Result};
+use chrono::{Datelike, DateTime, Duration, Local};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
@@ -7,7 +7,7 @@ use crate::internal::{
     crawler::{tpex, twse},
     database::{
         self,
-        table::{stock::extension::SymbolAndName, stock_index, stock_word},
+        table::{stock_index, stock_word},
     },
     logging, util,
 };
@@ -85,11 +85,13 @@ where eps.security_code = stocks.stock_symbol;
 "#;
         let now = Local::now();
         let one_year_ago = now - Duration::days(365);
-        Ok(sqlx::query(sql)
+
+        sqlx::query(sql)
             .bind(now.year())
             .bind(one_year_ago.year())
             .execute(database::get_connection())
-            .await?)
+            .await
+            .context("Failed to update_last_eps from database")
     }
 
     /// 衝突時更新 "Name" "SuspendListing" stock_exchange_market_id stock_industry_id
@@ -97,8 +99,8 @@ where eps.security_code = stocks.stock_symbol;
         let sql = r#"
 INSERT INTO stocks (
     stock_symbol, "Name", "CreateTime",
-    "SuspendListing", stock_exchange_market_id, stock_industry_id)
-VALUES ($1, $2, $3, $4, $5, $6)
+    "SuspendListing", stock_exchange_market_id, stock_industry_id,weight)
+VALUES ($1, $2, $3, $4, $5, $6,0)
 ON CONFLICT (stock_symbol) DO UPDATE SET
     "Name" = EXCLUDED."Name",
     "SuspendListing" = EXCLUDED."SuspendListing",
@@ -113,9 +115,11 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
             .bind(self.stock_exchange_market_id)
             .bind(self.stock_industry_id)
             .execute(database::get_connection())
-            .await?;
+            .await
+            .context("Failed to stock.upsert from database");
         self.create_index().await;
-        Ok(result)
+
+        result
     }
 
     async fn create_index(&self) {
@@ -205,7 +209,7 @@ ORDER BY
     stock_exchange_market_id,
     stock_industry_id;
 "#;
-        let answers = sqlx::query(sql)
+        sqlx::query(sql)
             .try_map(|row: PgRow| {
                 Ok(Stock {
                     stock_symbol: row.try_get("stock_symbol")?,
@@ -219,9 +223,8 @@ ORDER BY
                 })
             })
             .fetch_all(database::get_connection())
-            .await?;
-
-        Ok(answers)
+            .await
+            .context("Failed to stock.fetch from database")
     }
 }
 
@@ -288,16 +291,18 @@ SELECT
     s."CreateTime" AS create_time,
     s.net_asset_value_per_share,
     s.stock_exchange_market_id,
-    s.stock_industry_id
+    s.stock_industry_id,
+    s.weight
 FROM stocks AS s
 WHERE s.stock_exchange_market_id in (2, 4)
     AND s."SuspendListing" = false
     AND s.net_asset_value_per_share = 0
 "#;
 
-    Ok(sqlx::query_as::<_, Stock>(sql)
+    sqlx::query_as::<_, Stock>(sql)
         .fetch_all(database::get_connection())
-        .await?)
+        .await
+        .context("Failed to fetch_net_asset_value_per_share_is_zero from database")
 }
 
 /// 取得尚未有指定年度的季報的股票或者財報的每股淨值為零的股票
@@ -312,8 +317,9 @@ SELECT
     s."SuspendListing" AS suspend_listing,
     s."CreateTime" AS create_time,
     s.net_asset_value_per_share,
-    stock_exchange_market_id,
-    stock_industry_id
+    s.stock_exchange_market_id,
+    s.stock_industry_id,
+    s.weight
 FROM stocks AS s
 WHERE s.stock_exchange_market_id in(2, 4)
     AND s."SuspendListing" = false
@@ -324,36 +330,12 @@ WHERE s.stock_exchange_market_id in(2, 4)
     )
 "#;
 
-    Ok(sqlx::query_as::<_, Stock>(sql)
+    sqlx::query_as::<_, Stock>(sql)
         .bind(year)
         .bind(quarter)
         .fetch_all(database::get_connection())
-        .await?)
-}
-
-/// 取得指定日期為除息權日的股票
-pub async fn fetch_stocks_with_dividends_on_date(date: NaiveDate) -> Result<Vec<SymbolAndName>> {
-    let sql = r#"
-SELECT
-    s.stock_symbol,
-    s."Name" AS name
-FROM
-    dividend AS d
-INNER JOIN
-    stocks AS s ON s.stock_symbol = d.security_code
-WHERE
-    d."year" = $1
-    AND (d."ex-dividend_date1" = $2 OR d."ex-dividend_date2" = $2);
-"#;
-
-    let year = date.year();
-    let date_str = date.format("%Y-%m-%d").to_string();
-
-    Ok(sqlx::query_as::<_, SymbolAndName>(sql)
-        .bind(year)
-        .bind(&date_str)
-        .fetch_all(database::get_connection())
-        .await?)
+        .await
+        .context("Failed to fetch_stocks_without_financial_statement from database")
 }
 
 /// 是否為特別股
@@ -365,8 +347,6 @@ pub fn is_preference_shares(stock_symbol: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
-
     use crate::internal::logging;
 
     use super::*;
@@ -444,25 +424,6 @@ mod tests {
         }
 
         logging::debug_file_async("結束 fetch_stocks_without_financial_statement".to_string());
-    }
-
-    #[tokio::test]
-    async fn test_fetch_stocks_with_specified_ex_dividend_date() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_stocks_with_specified_ex_dividend_date".to_string());
-
-        let ex_date = Local.with_ymd_and_hms(2023, 4, 20, 0, 0, 0).unwrap();
-        let d = ex_date.date_naive();
-        match fetch_stocks_with_dividends_on_date(d).await {
-            Ok(cd) => {
-                logging::debug_file_async(format!("stock: {:?}", cd));
-            }
-            Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
-            }
-        }
-
-        logging::debug_file_async("結束 fetch_stocks_with_specified_ex_dividend_date".to_string());
     }
 
     #[tokio::test]

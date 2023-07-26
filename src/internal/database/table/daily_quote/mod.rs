@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
 
 use crate::internal::{
-    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, util::datetime,
-    StockExchange,
+    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, StockExchange,
+    util::datetime,
 };
 
 pub(crate) mod extension;

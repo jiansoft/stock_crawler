@@ -4,8 +4,8 @@ use anyhow::*;
 use once_cell::sync::Lazy;
 use tokio::{fs, sync::OnceCell as TokioOnceCell};
 use tonic::{
-    transport::{Certificate, Channel, ClientTlsConfig},
-    Request, Response,
+    Request,
+    Response, transport::{Certificate, Channel, ClientTlsConfig},
 };
 
 use crate::internal::{

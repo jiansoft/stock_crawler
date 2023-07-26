@@ -41,12 +41,12 @@ pub async fn run_cron() -> Result<()> {
             "0 0 17 * * *",
             backfill::net_asset_value_per_share::emerging::execute,
         ),
-        // 03:00 更新台股年度財報
+        // 05:00 更新台股年度財報
         create_job(
             "0 0 21 * * *",
             backfill::financial_statement::annual::execute,
         ),
-        // 03:00 從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據
+        // 05:00 從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據
         create_job(
             "0 0 21 * * *",
             backfill::net_asset_value_per_share::zero_value::execute,
@@ -97,7 +97,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

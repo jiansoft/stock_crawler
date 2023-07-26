@@ -1,7 +1,7 @@
 use core::result::Result::Ok;
 
 use anyhow::*;
-use chrono::{DateTime, Datelike, Local};
+use chrono::{Datelike, DateTime, Local};
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -9,12 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     internal::{
+        cache::{self, TTL, TtlCacheInner},
         crawler::twse,
-        cache::{self, TtlCacheInner, TTL},
         database::table::daily_quote::{self, FromWithExchange},
         logging,
-        util::http,
-        StockExchange
+        StockExchange,
+        util::http
     }
 };
 

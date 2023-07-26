@@ -4,8 +4,8 @@ extern crate rocket;*/
 use std::{
     error::Error,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc
+        Arc,
+        atomic::{AtomicBool, Ordering}
     }
 };
 

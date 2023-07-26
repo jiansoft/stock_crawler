@@ -8,7 +8,7 @@ use crate::internal::{bot, calculation, database::table::stock};
 /// 提醒本日為除權息的股票有那些
 pub async fn execute() -> Result<()> {
     let today: NaiveDate = Local::now().date_naive();
-    let stocks = stock::fetch_stocks_with_dividends_on_date(today).await?;
+    let stocks = stock::extension::name::fetch_stocks_with_dividends_on_date(today).await?;
     if stocks.is_empty() {
         return Ok(());
     }

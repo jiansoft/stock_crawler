@@ -1,5 +1,5 @@
 use anyhow::*;
-use sqlx::{postgres::PgQueryResult, FromRow};
+use sqlx::{FromRow, postgres::PgQueryResult};
 
 use crate::internal::database::{self, table::stock};
 
@@ -36,10 +36,11 @@ set
 where
     stock_symbol = $1;
 "#;
-        Ok(sqlx::query(sql)
+        sqlx::query(sql)
             .bind(&self.stock_symbol)
             .bind(self.suspend_listing)
             .execute(database::get_connection())
-            .await?)
+            .await
+            .context("Failed to update SuspendListing from database")
     }
 }

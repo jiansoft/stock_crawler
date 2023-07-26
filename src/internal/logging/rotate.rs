@@ -4,8 +4,8 @@ use std::{
     io::{self, BufWriter},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
+        Arc,
+        atomic::{AtomicBool, Ordering}, RwLock,
     },
     time::UNIX_EPOCH,
 };
