@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::internal::{config, logging, util};
 
@@ -17,10 +17,17 @@ pub async fn execute() -> Result<()> {
         )
     });
 
-    let t = util::http::get(url, None).await?;
-    if t.contains("Updated") {
-        logging::info_file_async(t);
+    match util::http::get(url, None).await {
+        Ok(t) => {
+            if t.contains("Updated") {
+                logging::info_file_async(t);
+            }
+        }
+        Err(why) => {
+            return Err(anyhow!("Failed to free_dns.execute because {:?}", why));
+        }
     }
+
     Ok(())
 }
 

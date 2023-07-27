@@ -14,21 +14,25 @@ use crate::internal::{
 /// 調用  twse API 取得台股收盤報價
 pub async fn execute() -> Result<()> {
     let now = Local::now();
-    let mut results: Vec<daily_quote::DailyQuote> = Vec::with_capacity(2048);
+    let mut quotes: Vec<daily_quote::DailyQuote> = Vec::with_capacity(2048);
 
     //上市報價
-    if let Ok(twse) = twse::quote::visit(now).await {
-        results.extend(twse);
-    }
-
+    let twse = twse::quote::visit(now);
     //上櫃報價
-    if let Ok(tpex) = tpex::quote::visit(now).await {
-        results.extend(tpex);
+    let tpex = tpex::quote::visit(now);
+    let (res_twse, res_tpex) = tokio::join!(twse, tpex);
+
+    if let Ok(quote) = res_twse {
+        quotes.extend(quote);
     }
 
-    let results_is_empty = results.is_empty();
+    if let Ok(quote) = res_tpex {
+        quotes.extend(quote);
+    }
 
-    let tasks: Vec<_> = results.into_iter().map(process_daily_quote).collect();
+    let results_is_empty = quotes.is_empty();
+
+    let tasks: Vec<_> = quotes.into_iter().map(process_daily_quote).collect();
     futures::future::join_all(tasks).await;
 
     if results_is_empty {

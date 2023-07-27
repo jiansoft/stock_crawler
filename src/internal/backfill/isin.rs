@@ -6,7 +6,7 @@ use rust_decimal::prelude::ToPrimitive;
 
 use crate::internal::{
     bot, cache::SHARE, crawler::twse, database::table, logging, rpc, rpc::pb,
-    StockExchangeMarket, util::datetime::Weekend,
+    util::datetime::Weekend, StockExchangeMarket,
 };
 
 /// 更新資料庫新上市股票的或更新其交易所的市場編號、股票的產業分類、名稱等欄位
@@ -15,8 +15,13 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    for market in StockExchangeMarket::iterator() {
-        if let Err(why) = process_market(market).await {
+    let tasks: Vec<_> = StockExchangeMarket::iterator()
+        .map(process_market)
+        .collect();
+
+    let results = futures::future::join_all(tasks).await;
+    for result in results {
+        if let Err(why) = result {
             logging::error_file_async(format!("Failed to process_market because {:?}", why));
         }
     }
@@ -117,7 +122,9 @@ mod tests {
         logging::debug_file_async("開始 execute".to_string());
 
         match execute().await {
-            Ok(_) => {}
+            Ok(_) => {
+                logging::debug_file_async("完成 execute".to_string());
+            }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to execute because {:?}", why));
             }

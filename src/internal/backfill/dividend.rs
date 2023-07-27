@@ -142,29 +142,6 @@ async fn processing_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     let dividends = dividend::Dividend::fetch_unpublished_dividends_for_year(year).await?;
     logging::info_file_async(format!("本次除息日的採集需收集 {} 家", dividends.len()));
     for mut entity in dividends {
-        //最多重試 5 次
-        /*let retry_limit: i32 = 5;
-        let mut yahoo: Option<yahoo::dividend::YahooDividend> = None;
-        for i in 0..retry_limit {
-            match yahoo::dividend::visit(&entity.security_code).await {
-                Ok(yahoo_dividend) => {
-                    yahoo = Some(yahoo_dividend);
-                    break;
-                }
-                Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to yahoo::dividend::visit({}) because {:?} ",
-                        i, why
-                    ));
-                }
-            };
-        }
-        let yahoo = match yahoo {
-            Some(y) => y,
-            None => continue,
-        };
-        */
-
         let strategy = ExponentialBackoff::from_millis(100)
             .map(jitter) // add jitter to delays
             .take(5); // limit to 5 retries
