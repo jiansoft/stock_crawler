@@ -1,7 +1,7 @@
 use std::{result::Result::Ok, str::FromStr};
 
 use anyhow::*;
-use chrono::{Datelike, DateTime, Duration, FixedOffset, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
@@ -98,7 +98,7 @@ SET
     "lowest_price" = EXCLUDED."lowest_price",
     "highest_price" = EXCLUDED."highest_price";
 "#;
-        Ok(sqlx::query(sql)
+        sqlx::query(sql)
             .bind(self.security_code.as_str())
             .bind(self.date)
             .bind(self.monthly)
@@ -113,7 +113,8 @@ SET
             .bind(self.lowest_price)
             .bind(self.highest_price)
             .execute(database::get_connection())
-            .await?)
+            .await
+            .context(format!("Failed to upsert({:#?}) from database", self))
     }
 }
 
@@ -302,7 +303,7 @@ order by "Serial" desc
 
 pub async fn rebuild_revenue_last_date() -> Result<PgQueryResult> {
     let sql = r#"
---SET TIMEZONE = 'Asia/Taipei';
+-- SET TIMEZONE = 'Asia/Taipei';
 
 WITH r AS (
     SELECT
@@ -335,7 +336,7 @@ mod tests {
 
     use std::str::FromStr;
 
-    use chrono::{Datelike, DateTime, Duration, FixedOffset, Local, NaiveDate};
+    use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
     use rust_decimal::Decimal;
 
     //use chrono::{Datelike, Local, NaiveDate};

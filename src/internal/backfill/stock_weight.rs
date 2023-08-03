@@ -1,14 +1,9 @@
 use core::result::Result::Ok;
-use std::cmp::max;
 
 use anyhow::*;
 use futures::{stream, StreamExt};
 
-use crate::internal::{
-    crawler::taifex,
-    database::table::stock::{self, extension::weight::SymbolAndWeight},
-    logging, StockExchange,
-};
+use crate::internal::{crawler::taifex, database::table::stock::{self, extension::weight::SymbolAndWeight}, logging, StockExchange, util};
 
 /// 查詢 taifex 個股權值比重
 pub async fn execute() -> Result<()> {
@@ -42,7 +37,7 @@ pub async fn execute() -> Result<()> {
     }
 
     stream::iter(stock_weights)
-        .for_each_concurrent(Some(max(8, num_cpus::get() * 4)), |sw| async move {
+        .for_each_concurrent(util::concurrent_limit_16(), |sw| async move {
             if let Err(why) = sw.update().await {
                 logging::error_file_async(format!(
                     "Failed to stock_weight.update because {:#?}",

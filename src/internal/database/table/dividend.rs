@@ -192,7 +192,7 @@ WHERE
             .bind(&self.payable_date2)
             .execute(database::get_connection())
             .await
-            .context("Failed to update update_dividend_date")
+            .context("Failed to update_dividend_date from database")
     }
 
     /// 按照年份和除權息日取得股利總和的數據

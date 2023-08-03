@@ -5,7 +5,9 @@ use once_cell::sync::Lazy;
 
 //use futures::executor::block_on;
 use crate::internal::{
-    database::table::{index, last_daily_quotes, revenue, stock, stock_exchange_market},
+    database::table::{
+        index, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
+    },
     logging,
 };
 
@@ -21,6 +23,9 @@ pub struct Share {
     pub last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Revenue>>>,
     /// 存放最後交易日股票報價數據
     pub last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::Entity>>,
+    // quote_history_records 股票歷史、淨值比等最高、最低的數據,resource.Init() 從資料庫內讀取出，若抓到新的數據時則會同時更新資料庫與此數據
+    pub quote_history_records: RwLock<HashMap<String, quote_history_record::QuoteHistoryRecord>>,
+
     /// 股票產業分類
     pub industries: HashMap<&'static str, i32>,
     /// 股票產業分類(2, 'TAI', '上市', 1),(4, 'TWO', '上櫃', 2), (5, 'TWE', '興櫃', 2);
@@ -107,6 +112,7 @@ impl Share {
             ]),
             last_revenues: RwLock::new(HashMap::new()),
             last_trading_day_quotes: RwLock::new(HashMap::new()),
+            quote_history_records: RwLock::new(HashMap::new()),
         }
     }
 
@@ -165,6 +171,23 @@ impl Share {
             ));
         }
 
+        let quote_history_records = quote_history_record::QuoteHistoryRecord::fetch().await;
+        match self.quote_history_records.write() {
+            Ok(mut s) => {
+                if let Ok(result) = quote_history_records {
+                    for e in result {
+                        s.insert(e.security_code.to_string(), e);
+                    }
+                }
+            }
+            Err(why) => {
+                logging::error_file_async(format!(
+                    "Failed to quote_history_records.write because {:?}",
+                    why
+                ));
+            }
+        }
+
         logging::info_file_async(format!(
             "CacheShare.indices 初始化 {}",
             self.indices.read().unwrap().len()
@@ -178,6 +201,10 @@ impl Share {
         logging::info_file_async(format!(
             "CacheShare.last_trading_day_quotes 初始化 {}",
             self.last_trading_day_quotes.read().unwrap().len()
+        ));
+        logging::info_file_async(format!(
+            "CacheShare.quote_history_records 初始化 {}",
+            self.quote_history_records.read().unwrap().len()
         ));
 
         if let Ok(revenues) = self.last_revenues.read() {
@@ -262,6 +289,7 @@ impl Default for Ttl {
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal::Decimal;
     use std::thread;
     use std::time::Duration;
 
@@ -340,6 +368,26 @@ mod tests {
 
             for (k, v) in SHARE.industries.iter() {
                 logging::info_file_async(format!("name {}  category {}", k, v));
+            }
+
+            match SHARE.quote_history_records.write() {
+                Ok(mut quote_history_records_guard) => {
+                    match quote_history_records_guard.get_mut("2330") {
+                        None => {}
+                        Some(qhr) => {
+                            qhr.minimum_price = Decimal::from(1);
+                            qhr.maximum_price = Decimal::from(2);
+                        }
+                    }
+                },
+               Err(_) => todo!()
+            }
+
+            for (k, v) in SHARE.quote_history_records.read().unwrap().iter() {
+                if k == "2330" {
+                    dbg!(v);
+                   // logging::debug_file_async(format!("name {}  category {:?}", k, v));
+                }
             }
         });
     }

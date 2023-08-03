@@ -20,3 +20,5 @@ mod stock_word;
 pub mod stock_exchange_market;
 
 pub mod config;
+/// 股票歷史最高、最低等數據
+pub mod quote_history_record;

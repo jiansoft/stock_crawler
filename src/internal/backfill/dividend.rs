@@ -4,8 +4,8 @@ use anyhow::*;
 use chrono::{Datelike, Local};
 use hashbrown::HashMap;
 use tokio_retry::{
+    strategy::{jitter, ExponentialBackoff},
     Retry,
-    strategy::{ExponentialBackoff, jitter},
 };
 
 use crate::internal::{
@@ -141,29 +141,39 @@ async fn processing_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     //除息日 尚未公布
     let dividends = dividend::Dividend::fetch_unpublished_dividends_for_year(year).await?;
     logging::info_file_async(format!("本次除息日的採集需收集 {} 家", dividends.len()));
-    for mut entity in dividends {
-        let strategy = ExponentialBackoff::from_millis(100)
-            .map(jitter) // add jitter to delays
-            .take(5); // limit to 5 retries
 
-        let retry_future = Retry::spawn(strategy, || yahoo::dividend::visit(&entity.security_code));
-        let yahoo = match retry_future.await {
-            Ok(yahoo_dividend) => yahoo_dividend,
-            Err(err) => {
-                logging::error_file_async(format!(
-                    "Failed to yahoo::dividend::visit after 5 retries because {:?} ",
-                    err
-                ));
-                continue;
-            }
-        };
+    let tasks: Vec<_> = dividends
+        .into_iter()
+        .map(|d| fetch_dividend_from_yahoo(d, year))
+        .collect();
+    let results = futures::future::join_all(tasks).await;
 
-        // 取成今年度的股利數據
-        let yahoo_dividend_details = match yahoo.dividend.get(&year) {
-            Some(details) => details,
-            None => continue,
-        };
+    for result in results {
+        if let Err(why) = result {
+            logging::error_file_async(format!(
+                "Failed to fetch_dividend_from_yahoo because {:?}",
+                why
+            ));
+        }
+    }
+    Ok(())
+}
 
+async fn fetch_dividend_from_yahoo(mut entity: dividend::Dividend, year: i32) -> Result<()> {
+    let strategy = ExponentialBackoff::from_millis(100)
+        .map(jitter) // add jitter to delays
+        .take(5); // limit to 5 retries
+
+    let retry_future = Retry::spawn(strategy, || yahoo::dividend::visit(&entity.security_code));
+    let yahoo = match retry_future.await {
+        Ok(yahoo_dividend) => yahoo_dividend,
+        Err(why) => {
+            return Err(anyhow!("{}", why));
+        }
+    };
+
+    // 取成今年度的股利數據
+    if let Some(yahoo_dividend_details) = yahoo.dividend.get(&year) {
         let yahoo_dividend_detail = yahoo_dividend_details.iter().find(|detail| {
             detail.year_of_dividend == entity.year_of_dividend
                 && detail.quarter == entity.quarter
@@ -178,16 +188,13 @@ async fn processing_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
             entity.payable_date2 = yahoo_dividend_detail.payable_date2.to_string();
 
             if let Err(why) = entity.update_dividend_date().await {
-                logging::error_file_async(format!(
-                    "Failed to update_dividend_date because {:?} ",
-                    why
-                ));
-            } else {
-                logging::info_file_async(format!(
-                    "dividend update_dividend_date executed successfully. \r\n{:#?}",
-                    entity
-                ));
+                return Err(anyhow!("{}", why));
             }
+
+            logging::info_file_async(format!(
+                "dividend update_dividend_date executed successfully. \r\n{:?}",
+                entity
+            ));
         }
     }
 

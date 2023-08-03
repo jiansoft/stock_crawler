@@ -1,9 +1,11 @@
 use std::{env, future::Future, result::Result::Ok};
 
 use anyhow::*;
+use chrono::{Local, NaiveDate};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
-use crate::internal::{backfill, bot, crawler, logging, reminder};
+use crate::internal::{backfill, bot, calculation, crawler, database::table::daily_quote, logging, reminder};
+
 
 /// 啟動排程
 pub async fn start() -> Result<()> {
@@ -64,7 +66,26 @@ pub async fn run_cron() -> Result<()> {
         // 15:00 更新台股收盤指數
         create_job("0 0 7 * * *", backfill::taiwan_stock_index::execute),
         // 15:01 取得收盤報價數據
-        create_job("0 1 7 * * *", backfill::quote::execute),
+        create_job("0 1 7 * * *", || async {
+            let current_date: NaiveDate = Local::now().date_naive();
+            //抓取上市櫃公司每日收盤資訊
+            backfill::quote::execute().await?;
+            let daily_quote_count = daily_quote::fetch_count_by_date(current_date).await?;
+            if daily_quote_count == 0 {
+                return Ok(());
+            }
+
+            // 補上當日缺少的每日收盤數據
+            let lack_daily_quotes_count =
+                daily_quote::makeup_for_the_lack_daily_quotes(current_date).await?;
+            logging::info_file_async(format!(
+                "補上當日缺少的每日收盤數據結束:{:#?}",
+                lack_daily_quotes_count
+            ));
+            // 計算均線
+            calculation::daily_quotes::calculate_moving_average(current_date).await?;
+            Ok(())
+        }),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 13 * * *", backfill::dividend::execute),
         // 每分鐘更新一次ddns的ip
@@ -97,7 +118,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use tokio::time::{Duration, sleep};
+    use tokio::time::{sleep, Duration};
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

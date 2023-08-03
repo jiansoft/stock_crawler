@@ -1,3 +1,5 @@
+use std::cmp::max;
+
 pub mod datetime;
 pub mod http;
 pub mod text;
@@ -32,3 +34,11 @@ fn distribute_amount(amount: i32, parts: usize) -> Vec<i32> {
 }
 
 */
+
+pub fn concurrent_limit_16() -> Option<usize> {
+    Some(max(16, num_cpus::get() * 4))
+}
+
+pub fn concurrent_limit_32() -> Option<usize> {
+    Some(max(32, num_cpus::get() * 4))
+}

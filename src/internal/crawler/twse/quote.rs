@@ -1,21 +1,19 @@
 use core::result::Result::Ok;
 
 use anyhow::*;
-use chrono::{Datelike, DateTime, Local};
+use chrono::{DateTime, Datelike, Local};
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    internal::{
-        cache::{self, TTL, TtlCacheInner},
-        crawler::twse,
-        database::table::daily_quote::{self, FromWithExchange},
-        logging,
-        StockExchange,
-        util::http
-    }
+use crate::internal::{
+    cache::{self, TtlCacheInner, TTL},
+    crawler::twse,
+    database::table::daily_quote::{self, FromWithExchange},
+    logging,
+    util::http,
+    StockExchange,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -94,8 +92,8 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>
 
             dq.date = date.date_naive();
             dq.year = date.year();
-            dq.month = date.month();
-            dq.day = date.day();
+            dq.month = date.month() as i32;
+            dq.day = date.day() as i32;
             dq.record_time = date;
             dq.create_time = Local::now();
             dqs.push(dq);

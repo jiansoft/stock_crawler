@@ -3,7 +3,7 @@ use std::{collections::HashMap, result::Result::Ok, time::Duration};
 use anyhow::*;
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
-use reqwest::{Client, header, Method, RequestBuilder, Response};
+use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Semaphore, time::sleep};
 
@@ -260,7 +260,11 @@ async fn send(
     for attempt in 1..=MAX_RETRIES {
         let rb_clone = match rb.try_clone() {
             Some(rb_clone) => rb_clone,
-            None => bail!("Failed to rb.try_clone {} attempts.", attempt),
+            None => bail!(
+                "Failed to rb.try_clone {} attempts to send request to {}.",
+                attempt,
+                url,
+            ),
         };
 
         match rb_clone.send().await {
@@ -270,17 +274,19 @@ async fn send(
                 sleep(delay).await; // add delay before retry
                 continue;
             }
-            Err(e) => bail!(
-                "Failed to send({}) because {:?}, giving up after {} attempts.",
+            Err(why) => bail!(
+                "Failed to send({}) request to {} because {:?}, giving up after {} attempts.",
                 attempt,
-                e,
+                url,
+                why,
                 MAX_RETRIES
             ),
         }
     }
 
     Err(anyhow!(
-        "Failed to send request after {} attempts",
+        "Failed to send request to {} after {} attempts",
+        url,
         MAX_RETRIES
     ))
 }

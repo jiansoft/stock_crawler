@@ -3,15 +3,16 @@ use std::time::Duration;
 
 use anyhow::*;
 use chrono::{Local, NaiveDate};
+use futures::{stream, StreamExt};
 
 use crate::internal::{
-    cache::{SHARE, TTL, TtlCacheInner},
+    cache::{TtlCacheInner, SHARE, TTL},
     crawler::{tpex, twse},
     database::table::{self, daily_quote},
-    logging,
+    logging, util,
 };
 
-/// 調用  twse API 取得台股收盤報價
+/// 調用  twse、tpex API 取得台股收盤報價
 pub async fn execute() -> Result<()> {
     let now = Local::now();
     let mut quotes: Vec<daily_quote::DailyQuote> = Vec::with_capacity(2048);
@@ -32,15 +33,21 @@ pub async fn execute() -> Result<()> {
 
     let results_is_empty = quotes.is_empty();
 
-    let tasks: Vec<_> = quotes.into_iter().map(process_daily_quote).collect();
-    futures::future::join_all(tasks).await;
-
     if results_is_empty {
         return Ok(());
     }
 
+    stream::iter(quotes)
+        .for_each_concurrent(util::concurrent_limit_16(), |sw| async move {
+            process_daily_quote(sw).await;
+        })
+        .await;
+
+    /* let tasks: Vec<_> = quotes.into_iter().map(process_daily_quote).collect();
+    futures::future::join_all(tasks).await;*/
+
     let date_naive = now.date_naive();
-    match daily_quote::makeup_for_the_lack_daily_quotes(date_naive).await {
+    /*match daily_quote::makeup_for_the_lack_daily_quotes(date_naive).await {
         Ok(result) => {
             logging::info_file_async(format!("補上當日缺少的每日收盤數據結束:{:#?}", result));
         }
@@ -50,7 +57,7 @@ pub async fn execute() -> Result<()> {
                 why
             ));
         }
-    };
+    };*/
 
     if let Ok(c) = table::config::Entity::first("last-closing-day").await {
         let date = NaiveDate::parse_from_str(&c.val, "%Y-%m-%d")?;
@@ -102,8 +109,8 @@ async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     //use crossbeam::thread;
     use rayon::prelude::*;
@@ -115,7 +122,7 @@ mod tests {
 
     use super::*;
 
-//use std::time;
+    //use std::time;
 
     #[tokio::test]
     async fn test_execute() {
