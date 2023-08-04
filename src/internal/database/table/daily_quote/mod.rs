@@ -169,7 +169,7 @@ impl DailyQuote {
     }
 
     /// 依指定日期取得收盤資料的均線
-    pub async fn fetch_moving_average(&mut self) -> Result<()> {
+    pub async fn fill_moving_average(&mut self) -> Result<()> {
         let year_ago = self.date - Duration::days(400);
         let sql = r#"
 WITH
@@ -518,7 +518,7 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
     sqlx::query(sql)
         .bind(date)
         .try_map(|row: sqlx::postgres::PgRow| {
-            Ok(DailyQuote {
+            let dq = DailyQuote {
                 maximum_price_in_year_date_on: row.get("maximum_price_in_year_date_on"),
                 minimum_price_in_year_date_on: row.get("minimum_price_in_year_date_on"),
                 date: row.get("Date"),
@@ -553,7 +553,9 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
                 year: row.get("year"),
                 month: row.get("month"),
                 day: row.get("day"),
-            })
+            };
+
+            Ok(dq)
         })
         .fetch_all(database::get_connection())
         .await
@@ -575,7 +577,7 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2023, 8, 1);
         let mut dq = DailyQuote::new("2330".to_string());
         dq.date = date.unwrap();
-        match dq.fetch_moving_average().await {
+        match dq.fill_moving_average().await {
             Ok(_) => {
                 dbg!(&dq);
                 logging::debug_file_async(format!("fetch_moving_average: {:#?}", dq));

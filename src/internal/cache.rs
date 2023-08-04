@@ -22,7 +22,7 @@ pub struct Share {
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
     pub last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Revenue>>>,
     /// 存放最後交易日股票報價數據
-    pub last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::Entity>>,
+    pub last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::LastDailyQuotes>>,
     // quote_history_records 股票歷史、淨值比等最高、最低的數據,resource.Init() 從資料庫內讀取出，若抓到新的數據時則會同時更新資料庫與此數據
     pub quote_history_records: RwLock<HashMap<String, quote_history_record::QuoteHistoryRecord>>,
 
@@ -157,7 +157,7 @@ impl Share {
             logging::error_file_async("Failed to update last_revenues".to_string());
         }
 
-        let last_daily_quotes = last_daily_quotes::Entity::fetch().await;
+        let last_daily_quotes = last_daily_quotes::LastDailyQuotes::fetch().await;
         if let (Ok(result), Ok(mut ldq)) =
             (&last_daily_quotes, self.last_trading_day_quotes.write())
         {

@@ -5,7 +5,7 @@ use sqlx::postgres::PgQueryResult;
 
 use crate::internal::database;
 
-#[derive(sqlx::Type, sqlx::FromRow, Debug, Default)]
+#[derive(sqlx::Type, sqlx::FromRow, Debug, Default, Clone)]
 pub struct QuoteHistoryRecord {
     // 歷史最高價出現在哪一天
     pub maximum_price_date_on: NaiveDate,
@@ -90,7 +90,7 @@ SET
     "minimum_price-to-book_ratio_date_on" = EXCLUDED."minimum_price-to-book_ratio_date_on"
 "#;
         sqlx::query(sql)
-            .bind(self.security_code.as_str())
+            .bind(&self.security_code)
             .bind(self.maximum_price)
             .bind(self.maximum_price_date_on)
             .bind(self.minimum_price)

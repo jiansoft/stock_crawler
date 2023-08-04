@@ -4,8 +4,10 @@ use anyhow::*;
 use chrono::{Local, NaiveDate};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
-use crate::internal::{backfill, bot, calculation, crawler, database::table::daily_quote, logging, reminder};
-
+use crate::internal::{
+    backfill, bot, calculation, crawler, database::table::daily_quote, logging, reminder,
+};
+use crate::internal::database::table::last_daily_quotes;
 
 /// 啟動排程
 pub async fn start() -> Result<()> {
@@ -82,8 +84,18 @@ pub async fn run_cron() -> Result<()> {
                 "補上當日缺少的每日收盤數據結束:{:#?}",
                 lack_daily_quotes_count
             ));
+
             // 計算均線
             calculation::daily_quotes::calculate_moving_average(current_date).await?;
+            logging::info_file_async("計算均線結束".to_string());
+
+            // 重建 last_daily_quotes 表內的數據
+            last_daily_quotes:: LastDailyQuotes::rebuild().await?;
+            logging::info_file_async("重建 last_daily_quotes 表內的數據結束".to_string());
+
+            // 計算便宜、合理、昂貴價的估算
+
+
             Ok(())
         }),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫

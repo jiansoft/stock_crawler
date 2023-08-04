@@ -22,3 +22,5 @@ pub mod stock_exchange_market;
 pub mod config;
 /// 股票歷史最高、最低等數據
 pub mod quote_history_record;
+/// 股票便宜、合理、昂貴價的估算
+pub mod estimate;
