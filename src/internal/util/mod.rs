@@ -42,3 +42,7 @@ pub fn concurrent_limit_16() -> Option<usize> {
 pub fn concurrent_limit_32() -> Option<usize> {
     Some(max(32, num_cpus::get() * 4))
 }
+
+pub fn concurrent_limit_64() -> Option<usize> {
+    Some(max(64, num_cpus::get() * 4))
+}

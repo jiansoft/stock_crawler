@@ -4,10 +4,13 @@ use anyhow::*;
 use chrono::{Local, NaiveDate};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
+use crate::internal::database::table::estimate::Estimate;
+use crate::internal::database::table::last_daily_quotes;
 use crate::internal::{
     backfill, bot, calculation, crawler, database::table::daily_quote, logging, reminder,
 };
-use crate::internal::database::table::last_daily_quotes;
+use crate::internal::cache::{TTL, TtlCacheInner};
+use crate::internal::database::table::yield_rank::YieldRank;
 
 /// 啟動排程
 pub async fn start() -> Result<()> {
@@ -68,7 +71,7 @@ pub async fn run_cron() -> Result<()> {
         // 15:00 更新台股收盤指數
         create_job("0 0 7 * * *", backfill::taiwan_stock_index::execute),
         // 15:01 取得收盤報價數據
-        create_job("0 1 7 * * *", || async {
+        create_job("0 0 7 * * *", || async {
             let current_date: NaiveDate = Local::now().date_naive();
             //抓取上市櫃公司每日收盤資訊
             backfill::quote::execute().await?;
@@ -90,11 +93,23 @@ pub async fn run_cron() -> Result<()> {
             logging::info_file_async("計算均線結束".to_string());
 
             // 重建 last_daily_quotes 表內的數據
-            last_daily_quotes:: LastDailyQuotes::rebuild().await?;
+            last_daily_quotes::LastDailyQuotes::rebuild().await?;
             logging::info_file_async("重建 last_daily_quotes 表內的數據結束".to_string());
 
             // 計算便宜、合理、昂貴價的估算
+            Estimate::insert(current_date).await?;
+            logging::info_file_async("計算便宜、合理、昂貴價的估算結束".to_string());
 
+            // 重建指定日期的 yield_rank 表內的數據
+            YieldRank::upsert(current_date).await?;
+            logging::info_file_async("重建 yield_rank 表內的數據結束".to_string());
+
+            // 計算帳戶內市值
+            calculation::money_history::calculate_money_history(current_date).await?;
+            logging::info_file_async("計算帳戶內市值結束".to_string());
+
+            //清除記憶與Redis內所有的快取
+            TTL.clear();
 
             Ok(())
         }),

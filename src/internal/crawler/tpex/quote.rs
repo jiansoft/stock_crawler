@@ -1,17 +1,22 @@
-use std::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::{Result};
 use chrono::{DateTime, Datelike, Local};
 use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
 
-use crate::internal::{
-    cache::{self, TtlCacheInner, TTL},
-    crawler::tpex,
-    database::table::daily_quote::{self, FromWithExchange},
-    logging, util, StockExchange,
+use crate::{
+    internal::{
+        cache::{self, TtlCacheInner, TTL},
+        crawler::tpex,
+        logging,
+        util,
+        StockExchange,
+        database::{
+            table,
+            table::daily_quote::FromWithExchange
+        }
+    }
 };
 
 // QuoteResponse 上櫃公司每日收盤資訊
@@ -41,7 +46,7 @@ struct PeRatioAnalysisResponse {
 }
 
 /// 抓取上櫃公司每日收盤資訊
-pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>> {
+pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::DailyQuote>> {
     let date_str = date.format("%Y%m%d").to_string();
     let pe_ratio_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis";
 
@@ -71,10 +76,10 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>
 
     let quote_response = util::http::get_use_json::<QuoteResponse>(&quote_url).await?;
 
-    let mut dqs: Vec<daily_quote::DailyQuote> = Vec::with_capacity(2048);
+    let mut dqs: Vec<table::daily_quote::DailyQuote> = Vec::with_capacity(2048);
 
     for item in quote_response.aa_data {
-        let mut dq = daily_quote::DailyQuote::from_with_exchange(StockExchange::TPEx, &item);
+        let mut dq = table::daily_quote::DailyQuote::from_with_exchange(StockExchange::TPEx, &item);
         //logging::debug_file_async(format!("item:{:?}", item));
 
         if dq.closing_price.is_zero()

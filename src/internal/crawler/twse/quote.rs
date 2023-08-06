@@ -1,6 +1,4 @@
-use core::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::{Result};
 use chrono::{DateTime, Datelike, Local};
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
@@ -10,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::internal::{
     cache::{self, TtlCacheInner, TTL},
     crawler::twse,
-    database::table::daily_quote::{self, FromWithExchange},
+    database::table::{self, daily_quote::FromWithExchange},
     logging,
     util::http,
     StockExchange,
@@ -40,7 +38,7 @@ async fn build_headers() -> HeaderMap {
 }
 
 /// 抓取上市公司每日收盤資訊
-pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>> {
+pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::DailyQuote>> {
     let date_str = date.format("%Y%m%d").to_string();
     let url = format!(
         "https://www.{}/exchangeReport/MI_INDEX?response=json&date={}&type=ALLBUT0999&_={}",
@@ -59,7 +57,8 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<daily_quote::DailyQuote>
     if let Some(twse_dqs) = &data.data9 {
         for item in twse_dqs {
             //logging::debug_file_async(format!("item:{:?}", item));
-            let mut dq = daily_quote::DailyQuote::from_with_exchange(StockExchange::TWSE, item);
+            let mut dq =
+                table::daily_quote::DailyQuote::from_with_exchange(StockExchange::TWSE, item);
 
             if dq.closing_price.is_zero()
                 && dq.highest_price.is_zero()

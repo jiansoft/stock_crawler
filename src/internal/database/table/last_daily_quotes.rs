@@ -4,7 +4,6 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
-use sqlx::Error;
 
 use crate::internal::database;
 

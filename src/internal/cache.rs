@@ -235,6 +235,7 @@ pub struct Ttl {
 
 //
 pub trait TtlCacheInner {
+    fn clear(&self);
     fn daily_quote_contains_key(&self, key: &str) -> bool;
     fn daily_quote_get(&self, key: &str) -> Option<String>;
     fn daily_quote_set(
@@ -246,6 +247,12 @@ pub trait TtlCacheInner {
 }
 
 impl TtlCacheInner for Ttl {
+    fn clear(&self) {
+        if let Ok(mut ttl) = self.daily_quote.write() {
+            ttl.clear()
+        }
+    }
+
     fn daily_quote_contains_key(&self, key: &str) -> bool {
         match self.daily_quote.read() {
             Ok(ttl) => ttl.contains_key(key),
@@ -379,14 +386,14 @@ mod tests {
                             qhr.maximum_price = Decimal::from(2);
                         }
                     }
-                },
-               Err(_) => todo!()
+                }
+                Err(_) => todo!(),
             }
 
             for (k, v) in SHARE.quote_history_records.read().unwrap().iter() {
                 if k == "2330" {
                     dbg!(v);
-                   // logging::debug_file_async(format!("name {}  category {:?}", k, v));
+                    // logging::debug_file_async(format!("name {}  category {:?}", k, v));
                 }
             }
         });
