@@ -1,17 +1,17 @@
 use core::result::Result::Ok;
 
 use anyhow::*;
-use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
+use chrono::{Datelike, DateTime, FixedOffset, Local, NaiveDate};
 use futures::{stream, StreamExt};
 
 use crate::{
     internal::{
-        database::{
-            table::revenue,
-            table
-        },
         cache::SHARE,
         crawler::twse,
+        database::{
+            table,
+            table::revenue
+        },
         logging,
         util
     }

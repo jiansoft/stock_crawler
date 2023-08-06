@@ -1,5 +1,5 @@
-use anyhow::{Result};
-use chrono::{DateTime, Datelike, Local};
+use anyhow::Result;
+use chrono::{Datelike, DateTime, Local};
 use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -7,15 +7,15 @@ use serde::Deserialize;
 
 use crate::{
     internal::{
-        cache::{self, TtlCacheInner, TTL},
+        cache::{self, TTL, TtlCacheInner},
         crawler::tpex,
-        logging,
-        util,
-        StockExchange,
         database::{
             table,
             table::daily_quote::FromWithExchange
-        }
+        },
+        logging,
+        StockExchange,
+        util
     }
 };
 

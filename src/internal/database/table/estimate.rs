@@ -107,6 +107,7 @@ ON CONFLICT (date,security_code) DO NOTHING;
 #[cfg(test)]
 mod tests {
     use chrono::Local;
+
     use crate::internal::logging;
 
     use super::*;

@@ -4,12 +4,12 @@ use anyhow::*;
 use chrono::{Local, NaiveDate};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
-use crate::internal::database::table::estimate::Estimate;
-use crate::internal::database::table::last_daily_quotes;
 use crate::internal::{
     backfill, bot, calculation, crawler, database::table::daily_quote, logging, reminder,
 };
 use crate::internal::cache::{TTL, TtlCacheInner};
+use crate::internal::database::table::estimate::Estimate;
+use crate::internal::database::table::last_daily_quotes;
 use crate::internal::database::table::yield_rank::YieldRank;
 
 /// 啟動排程
@@ -145,7 +145,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

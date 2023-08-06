@@ -296,9 +296,10 @@ impl Default for Ttl {
 
 #[cfg(test)]
 mod tests {
-    use rust_decimal::Decimal;
     use std::thread;
     use std::time::Duration;
+
+    use rust_decimal::Decimal;
 
     use super::*;
 

@@ -98,8 +98,9 @@ ON CONFLICT (date, security_code) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
     use chrono::Local;
+
+    use crate::internal::logging;
 
     use super::*;
 

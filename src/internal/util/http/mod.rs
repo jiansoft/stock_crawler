@@ -3,7 +3,7 @@ use std::{collections::HashMap, result::Result::Ok, time::Duration};
 use anyhow::*;
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
-use reqwest::{header, Client, Method, RequestBuilder, Response};
+use reqwest::{Client, header, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Semaphore, time::sleep};
 
