@@ -79,8 +79,6 @@ pub async fn execute() -> Result<()> {
 async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
     match daily_quote.upsert().await {
         Ok(_) => {
-            //logging::debug_file_async(format!("item:{:#?}", item));
-
             if let Ok(mut last_trading_day_quotes) = SHARE.last_trading_day_quotes.write() {
                 if let Some(quote) = last_trading_day_quotes.get_mut(&daily_quote.security_code) {
                     quote.date = daily_quote.date;
@@ -102,10 +100,11 @@ async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
             );
         }
         Err(why) => {
-            logging::error_file_async(format!("Failed to quote.upsert because {:?}", why));
+            logging::error_file_async(format!("Failed to quote.upsert({:#?}) because {:?}", daily_quote, why));
         }
     }
 }
+
 
 #[cfg(test)]
 mod tests {

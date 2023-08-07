@@ -128,16 +128,9 @@ pub(crate) async fn process_daily_quote_moving_average(mut dq: DailyQuote) -> Re
         }
     };
 
-    match qhr.upsert().await {
-        Ok(_) => {
-            logging::debug_file_async(format!("dq:{:#?}", &dq));
-            logging::debug_file_async(format!("qhr:{:#?}", qhr));
-        }
-        Err(why) => {
-            logging::debug_file_async(format!("{:?}", why));
-        }
-    };
-    // dbg!(qhr);
+    if let Err(why) = qhr.upsert().await  {
+        logging::debug_file_async(format!("Failed to quote_history_records::upsert() because:{:?}", why));
+    }
 
     Ok(())
 }

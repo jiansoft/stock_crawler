@@ -26,6 +26,8 @@ pub mod util;
 ///
 pub mod rpc;
 
+pub mod event;
+
 /// 交易所
 #[derive(Debug, Copy, Clone)]
 pub enum StockExchange {

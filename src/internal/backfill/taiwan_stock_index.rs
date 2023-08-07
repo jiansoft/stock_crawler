@@ -1,6 +1,4 @@
-use core::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::Result;
 use chrono::Local;
 
 use crate::internal::{bot, cache::SHARE, crawler::twse, database::table, logging};
@@ -24,14 +22,14 @@ pub async fn execute() -> Result<()> {
                 Ok(i) => i,
                 Err(why) => {
                     logging::error_file_async(format!(
-                        "Failed to index::Entity::from_strings because {:?}\r\n item:{:?}",
-                        why, item
+                        "Failed to index::Index::from_strings({:?}) because {:?}",
+                        item, why
                     ));
                     continue;
                 }
             };
 
-            logging::debug_file_async(format!("index:{:?}", index));
+            //logging::debug_file_async(format!("index:{:?}", index));
             let key = index.date.to_string() + "_" + &index.category;
             if let Ok(indices) = SHARE.indices.read() {
                 if indices.contains_key(key.as_str()) {
@@ -46,12 +44,14 @@ pub async fn execute() -> Result<()> {
                         "{} 大盤指數︰{} 漲跌︰{}",
                         index.date, index.index, index.change
                     );
+
                     if let Err(why) = bot::telegram::send(&msg).await {
                         logging::error_file_async(format!(
                             "Failed to telegram::send_to_allowed() because: {:?}",
                             why
                         ));
                     }
+
                     match SHARE.indices.write() {
                         Ok(mut indices) => {
                             indices.insert(key, index);
@@ -65,7 +65,10 @@ pub async fn execute() -> Result<()> {
                     }
                 }
                 Err(why) => {
-                    logging::error_file_async(format!("Failed to index.upsert because {:?}", why));
+                    logging::error_file_async(format!(
+                        "Failed to index.upsert({:#?}) because {:?}",
+                        index, why
+                    ));
                 }
             }
         }

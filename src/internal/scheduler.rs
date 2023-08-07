@@ -1,16 +1,9 @@
-use std::{env, future::Future, result::Result::Ok};
+use std::{env, future::Future};
 
-use anyhow::*;
-use chrono::{Local, NaiveDate};
+use anyhow::{Error, Result};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
-use crate::internal::{
-    backfill, bot, calculation, crawler, database::table::daily_quote, logging, reminder,
-};
-use crate::internal::cache::{TTL, TtlCacheInner};
-use crate::internal::database::table::estimate::Estimate;
-use crate::internal::database::table::last_daily_quotes;
-use crate::internal::database::table::yield_rank::YieldRank;
+use crate::internal::{backfill, bot, crawler, event, logging, reminder};
 
 /// 啟動排程
 pub async fn start() -> Result<()> {
@@ -71,48 +64,7 @@ pub async fn run_cron() -> Result<()> {
         // 15:00 更新台股收盤指數
         create_job("0 0 7 * * *", backfill::taiwan_stock_index::execute),
         // 15:01 取得收盤報價數據
-        create_job("0 0 7 * * *", || async {
-            let current_date: NaiveDate = Local::now().date_naive();
-            //抓取上市櫃公司每日收盤資訊
-            backfill::quote::execute().await?;
-            let daily_quote_count = daily_quote::fetch_count_by_date(current_date).await?;
-            if daily_quote_count == 0 {
-                return Ok(());
-            }
-
-            // 補上當日缺少的每日收盤數據
-            let lack_daily_quotes_count =
-                daily_quote::makeup_for_the_lack_daily_quotes(current_date).await?;
-            logging::info_file_async(format!(
-                "補上當日缺少的每日收盤數據結束:{:#?}",
-                lack_daily_quotes_count
-            ));
-
-            // 計算均線
-            calculation::daily_quotes::calculate_moving_average(current_date).await?;
-            logging::info_file_async("計算均線結束".to_string());
-
-            // 重建 last_daily_quotes 表內的數據
-            last_daily_quotes::LastDailyQuotes::rebuild().await?;
-            logging::info_file_async("重建 last_daily_quotes 表內的數據結束".to_string());
-
-            // 計算便宜、合理、昂貴價的估算
-            Estimate::insert(current_date).await?;
-            logging::info_file_async("計算便宜、合理、昂貴價的估算結束".to_string());
-
-            // 重建指定日期的 yield_rank 表內的數據
-            YieldRank::upsert(current_date).await?;
-            logging::info_file_async("重建 yield_rank 表內的數據結束".to_string());
-
-            // 計算帳戶內市值
-            calculation::money_history::calculate_money_history(current_date).await?;
-            logging::info_file_async("計算帳戶內市值結束".to_string());
-
-            //清除記憶與Redis內所有的快取
-            TTL.clear();
-
-            Ok(())
-        }),
+        create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 13 * * *", backfill::dividend::execute),
         // 每分鐘更新一次ddns的ip
@@ -137,7 +89,10 @@ where
         let task = task.clone();
         Box::pin(async move {
             if let Err(why) = task().await {
-                logging::error_file_async(format!("Failed to execute task because {:?}", why));
+                logging::error_file_async(format!(
+                    "Failed to execute task({}) because {:?}",
+                    cron_expr, why
+                ));
             }
         })
     })?)
@@ -145,7 +100,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use tokio::time::{Duration, sleep};
+    use tokio::time::{sleep, Duration};
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
