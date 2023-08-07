@@ -3,19 +3,35 @@ use chrono::{Local, NaiveDate};
 
 use crate::internal::{
     backfill,
-    cache::{TTL, TtlCacheInner},
+    cache::{TtlCacheInner, TTL},
     calculation,
     database::table::{daily_quote, estimate::Estimate, last_daily_quotes, yield_rank::YieldRank},
     logging,
 };
 
+/// 台股收盤事件發生時要進行的事情
 pub async fn execute() -> Result<()> {
     let current_date: NaiveDate = Local::now().date_naive();
-    run(current_date).await
+    let aggregate = aggregate(current_date);
+    let index = backfill::taiwan_stock_index::execute();
+    let (res_aggregation, res_index) = tokio::join!(aggregate, index);
+
+    if let Err(why) = res_index {
+        logging::error_file_async(format!(
+            "Failed to taiwan_stock_index::execute() because {:#?}",
+            why
+        ));
+    }
+
+    if let Err(why) = res_aggregation {
+        logging::error_file_async(format!("Failed to closing::aggregate() because {:#?}", why));
+    }
+
+    Ok(())
 }
 
 /// 股票收盤數據匯總
-async fn run(date: NaiveDate) -> Result<()> {
+async fn aggregate(date: NaiveDate) -> Result<()> {
     //抓取上市櫃公司每日收盤資訊
     backfill::quote::execute().await?;
     let daily_quote_count = daily_quote::fetch_count_by_date(date).await?;
@@ -52,7 +68,7 @@ async fn run(date: NaiveDate) -> Result<()> {
     calculation::money_history::calculate_money_history(date).await?;
     logging::info_file_async("計算帳戶內市值結束".to_string());
 
-    //清除記憶與Redis內所有的快取
+    // 清除記憶與Redis內所有的快取
     TTL.clear();
 
     Ok(())
@@ -70,22 +86,24 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
 
-        logging::debug_file_async("開始 event::taiwan_stock::closing::run".to_string());
+        logging::debug_file_async("開始 event::taiwan_stock::closing::aggregate".to_string());
 
         let current_date = NaiveDate::parse_from_str("2023-08-07", "%Y-%m-%d").unwrap();
 
-        match run(current_date).await {
+        match aggregate(current_date).await {
             Ok(_) => {
-                logging::debug_file_async("event::taiwan_stock::closing::run 完成".to_string());
+                logging::debug_file_async(
+                    "event::taiwan_stock::closing::aggregate 完成".to_string(),
+                );
             }
             Err(why) => {
                 logging::debug_file_async(format!(
-                    "Failed to event::taiwan_stock::closing::run because {:?}",
+                    "Failed to event::taiwan_stock::closing::aggregate because {:?}",
                     why
                 ));
             }
         }
 
-        logging::debug_file_async("結束 event::taiwan_stock::closing::run".to_string());
+        logging::debug_file_async("結束 event::taiwan_stock::closing::aggregate".to_string());
     }
 }

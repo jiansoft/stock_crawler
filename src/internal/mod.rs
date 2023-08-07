@@ -16,8 +16,6 @@ mod database;
 pub mod logging;
 /// nosql
 pub mod nosql;
-/// 提醒類
-mod reminder;
 /// 工作排程
 pub mod scheduler;
 /// 工具類
@@ -25,7 +23,7 @@ pub mod util;
 
 ///
 pub mod rpc;
-
+/// 事件
 pub mod event;
 
 /// 交易所
