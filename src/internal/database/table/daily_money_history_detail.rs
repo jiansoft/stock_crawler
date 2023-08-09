@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Local, NaiveDate};
-use sqlx::{Postgres, postgres::PgQueryResult, Transaction};
+use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 use crate::internal::database;
 
@@ -268,7 +268,10 @@ mod tests {
                     .expect("tx.unwrap().commit() is failed");
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to DailyMoneyHistoryDetail::delete_and_upsert because {:?}", why));
+                logging::debug_file_async(format!(
+                    "Failed to DailyMoneyHistoryDetail::delete_and_upsert because {:?}",
+                    why
+                ));
                 tx.unwrap()
                     .rollback()
                     .await

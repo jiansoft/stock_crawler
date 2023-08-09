@@ -1,20 +1,14 @@
 use core::result::Result::Ok;
 
 use anyhow::*;
-use chrono::{Datelike, DateTime, FixedOffset, Local, NaiveDate};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use futures::{stream, StreamExt};
 
-use crate::{
-    internal::{
-        cache::SHARE,
-        crawler::twse,
-        database::{
-            table,
-            table::revenue
-        },
-        logging,
-        util
-    }
+use crate::internal::{
+    cache::SHARE,
+    crawler::twse,
+    database::{table, table::revenue},
+    logging, util,
 };
 
 /// 調用  twse API 取得台股月營收
@@ -33,11 +27,8 @@ pub async fn execute() -> Result<()> {
 
     stream::iter(revenues)
         .for_each_concurrent(util::concurrent_limit_16(), |r| async move {
-            if let Err(why) = process_revenue(r,year,month as i32).await {
-                logging::error_file_async(format!(
-                    "Failed to process_revenue because {:?}",
-                    why
-                ));
+            if let Err(why) = process_revenue(r, year, month as i32).await {
+                logging::error_file_async(format!("Failed to process_revenue because {:?}", why));
             }
         })
         .await;

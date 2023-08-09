@@ -20,15 +20,15 @@ mod stock_word;
 pub mod stock_exchange_market;
 
 pub mod config;
-/// 股票歷史最高、最低等數據
-pub mod quote_history_record;
-/// 股票便宜、合理、昂貴價的估算
-pub mod estimate;
-/// 殖利率排行
-pub mod yield_rank ;
 /// 每日市值記錄各
 pub mod daily_money_history;
 /// 每日市值記錄各檔股票的統計值
 pub mod daily_money_history_detail;
 /// 每日市值記錄各檔股票的股數明細
 pub mod daily_money_history_detail_more;
+/// 股票便宜、合理、昂貴價的估算
+pub mod estimate;
+/// 股票歷史最高、最低等數據
+pub mod quote_history_record;
+/// 殖利率排行
+pub mod yield_rank;

@@ -1,17 +1,13 @@
 use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
 
-use crate::{
-    internal::{
-        database::{
-            self,
-            table::{
-                daily_money_history::DailyMoneyHistory,
-                daily_money_history_detail::DailyMoneyHistoryDetail,
-                daily_money_history_detail_more::DailyMoneyHistoryDetailMore
-            }
-        }
-    }
+use crate::internal::database::{
+    self,
+    table::{
+        daily_money_history::DailyMoneyHistory,
+        daily_money_history_detail::DailyMoneyHistoryDetail,
+        daily_money_history_detail_more::DailyMoneyHistoryDetailMore,
+    },
 };
 
 /// 計算指定日期帳戶內的市值

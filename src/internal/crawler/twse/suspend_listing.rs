@@ -1,13 +1,7 @@
 use anyhow::*;
 use serde::Deserialize;
 
-use crate::{
-    internal::{
-        crawler::twse,
-        logging,
-        util
-    }
-};
+use crate::internal::{crawler::twse, logging, util};
 
 /// 調用 twse suspendListingCsvAndHtml API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Deserialize)]

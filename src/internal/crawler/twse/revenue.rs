@@ -69,8 +69,8 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, Local};
     use chrono::prelude::*;
+    use chrono::{Duration, Local};
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

@@ -3,7 +3,7 @@ use std::{env, future::Future};
 use anyhow::{Error, Result};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
-use crate::internal::{backfill, bot, crawler, event, logging, reminder};
+use crate::internal::{backfill, bot, crawler, event, logging};
 
 /// 啟動排程
 pub async fn start() -> Result<()> {

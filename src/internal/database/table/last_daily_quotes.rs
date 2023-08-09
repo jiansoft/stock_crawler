@@ -131,7 +131,8 @@ DO UPDATE SET
             .bind(year_ago)
             .execute(&mut *tx)
             .await
-            .context("Failed to rebuild from database") {
+            .context("Failed to rebuild from database")
+        {
             Ok(pg) => {
                 tx.commit().await?;
                 Ok(pg)

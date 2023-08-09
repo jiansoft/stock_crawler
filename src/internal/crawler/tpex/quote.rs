@@ -1,22 +1,15 @@
 use anyhow::Result;
-use chrono::{Datelike, DateTime, Local};
+use chrono::{DateTime, Datelike, Local};
 use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
 
-use crate::{
-    internal::{
-        cache::{self, TTL, TtlCacheInner},
-        crawler::tpex,
-        database::{
-            table,
-            table::daily_quote::FromWithExchange
-        },
-        logging,
-        StockExchange,
-        util
-    }
+use crate::internal::{
+    cache::{self, TtlCacheInner, TTL},
+    crawler::tpex,
+    database::{table, table::daily_quote::FromWithExchange},
+    logging, util, StockExchange,
 };
 
 // QuoteResponse 上櫃公司每日收盤資訊

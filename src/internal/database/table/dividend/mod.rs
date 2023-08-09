@@ -8,6 +8,8 @@ use sqlx::{
 
 use crate::internal::{crawler::goodinfo, database};
 
+pub(crate) mod extension;
+
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone)]
 /// 股息發放日程表 原表名 dividend
 pub struct Dividend {

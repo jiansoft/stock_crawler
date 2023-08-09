@@ -21,10 +21,10 @@ pub mod scheduler;
 /// 工具類
 pub mod util;
 
-///
-pub mod rpc;
 /// 事件
 pub mod event;
+///
+pub mod rpc;
 
 /// 交易所
 #[derive(Debug, Copy, Clone)]

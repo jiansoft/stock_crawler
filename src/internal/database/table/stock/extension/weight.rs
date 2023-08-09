@@ -2,7 +2,7 @@ use core::result::Result::Ok;
 
 use anyhow::*;
 use rust_decimal::Decimal;
-use sqlx::{FromRow, postgres::PgQueryResult};
+use sqlx::{postgres::PgQueryResult, FromRow};
 
 use crate::internal::{crawler::taifex::stock_weight::StockWeight, database};
 

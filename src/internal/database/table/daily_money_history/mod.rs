@@ -1,8 +1,11 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Duration, Local, NaiveDate};
-use sqlx::{Postgres, postgres::PgQueryResult, Transaction};
+use rust_decimal::Decimal;
+use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 use crate::internal::database;
+
+pub(crate) mod extension;
 
 /// 每日市值變化歷史記錄
 #[derive(sqlx::FromRow, Debug)]
@@ -10,12 +13,25 @@ pub struct DailyMoneyHistory {
     pub date: NaiveDate,
     pub created_at: DateTime<Local>,
     pub updated_at: DateTime<Local>,
-    pub unice: f64,
-    pub eddie: f64,
-    pub sum: f64,
+    pub unice: Decimal,
+    pub eddie: Decimal,
+    pub sum: Decimal,
 }
 
 impl DailyMoneyHistory {
+    /* pub async fn fetch(date :NaiveDate) -> Result<> {
+            let sql = format!("");
+            sqlx::query_as::<_, DailyMoneyHistory>(&sql)
+                .bind(date.year())
+                .bind(date.format("%Y-%m-%d").to_string())
+                .fetch_all(database::get_connection())
+                .await
+                .context(format!(
+                    "Failed to fetch_stocks_with_dividends_on_date({}) from database",
+                    date
+                ))
+        }
+    */
     pub async fn upsert(
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,

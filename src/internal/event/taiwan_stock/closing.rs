@@ -1,12 +1,24 @@
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
+use rust_decimal_macros::dec;
 
-use crate::internal::{
-    backfill,
-    cache::{TtlCacheInner, TTL},
-    calculation,
-    database::table::{daily_quote, estimate::Estimate, last_daily_quotes, yield_rank::YieldRank},
-    logging,
+use crate::{
+    internal::{
+        backfill,
+        bot,
+        cache::{TtlCacheInner, TTL},
+        calculation,
+        database::{
+            table::{
+                daily_quote,
+                estimate::Estimate,
+                last_daily_quotes,
+                yield_rank::YieldRank,
+                daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory
+            }
+        },
+        logging,
+    }
 };
 
 /// 台股收盤事件發生時要進行的事情
@@ -23,8 +35,11 @@ pub async fn execute() -> Result<()> {
         ));
     }
 
-    if let Err(why) = res_aggregation {
-        logging::error_file_async(format!("Failed to closing::aggregate() because {:#?}", why));
+    match res_aggregation {
+        Ok(_) => {}
+        Err(why) => {
+            logging::error_file_async(format!("Failed to closing::aggregate() because {:#?}", why));
+        }
     }
 
     Ok(())
@@ -71,7 +86,35 @@ async fn aggregate(date: NaiveDate) -> Result<()> {
     // 清除記憶與Redis內所有的快取
     TTL.clear();
 
-    Ok(())
+    //發送通知本日與前一個交易日的市值變化
+    notify_money_change(date).await
+}
+
+async fn notify_money_change(date: NaiveDate) -> Result<()> {
+    let mh = DailyMoneyHistoryWithPreviousTradingDayMoneyHistory::fetch(date).await?;
+
+    // Percentage = ((a-b)/b)*100
+    let hundred = dec!(100);
+    let sum_diff = mh.sum - mh.previous_sum;
+    let sum_percentage = (sum_diff / mh.previous_sum) * hundred;
+    let eddie_diff = mh.eddie - mh.previous_eddie;
+    let eddie_percentage = (eddie_diff / mh.previous_eddie) * hundred;
+    let unice_diff = mh.unice - mh.previous_unice;
+    let unice_percentage = (unice_diff / mh.previous_unice) * hundred;
+    let msg = format!(
+        "合計:{} {} ({}%)\nEddie:{} {} ({}%)\nUnice:{} {} ({}%)",
+        mh.sum.round_dp(2),
+        sum_diff.round_dp(2),
+        sum_percentage.round_dp(2),
+        mh.eddie.round_dp(2),
+        eddie_diff.round_dp(2),
+        eddie_percentage.round_dp(2),
+        mh.unice.round_dp(2),
+        unice_diff.round_dp(2),
+        unice_percentage.round_dp(2),
+    );
+
+    bot::telegram::send(&msg).await
 }
 
 #[cfg(test)]
@@ -105,5 +148,30 @@ mod tests {
         }
 
         logging::debug_file_async("結束 event::taiwan_stock::closing::aggregate".to_string());
+    }
+    #[tokio::test]
+    async fn test_notify_money_change() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+
+        logging::debug_file_async("開始 event::taiwan_stock::closing::notify_money_change".to_string());
+
+        let current_date = Local::now().date_naive();
+
+        match notify_money_change(current_date).await {
+            Ok(_) => {
+                logging::debug_file_async(
+                    "event::taiwan_stock::closing::notify_money_change 完成".to_string(),
+                );
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to event::taiwan_stock::closing::notify_money_change because {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 event::taiwan_stock::closing::notify_money_change".to_string());
     }
 }

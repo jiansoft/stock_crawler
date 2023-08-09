@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
-use sqlx::{Postgres, postgres::PgQueryResult, Transaction};
+use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 use crate::internal::database;
 
@@ -161,7 +161,10 @@ mod tests {
                     .expect("tx.unwrap().commit() is failed");
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to DailyMoneyHistoryDetailMore::delete_and_upsert because {:?}", why));
+                logging::debug_file_async(format!(
+                    "Failed to DailyMoneyHistoryDetailMore::delete_and_upsert because {:?}",
+                    why
+                ));
                 tx.unwrap()
                     .rollback()
                     .await
@@ -169,6 +172,8 @@ mod tests {
             }
         }
 
-        logging::debug_file_async("結束 DailyMoneyHistoryDetailMore::delete_and_upsert".to_string());
+        logging::debug_file_async(
+            "結束 DailyMoneyHistoryDetailMore::delete_and_upsert".to_string(),
+        );
     }
 }
