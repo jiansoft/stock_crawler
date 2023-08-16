@@ -26,7 +26,7 @@ impl PostgresSQL {
         );
         let db = PgPoolOptions::new()
             .max_lifetime(None)
-            .max_connections(32)
+            .max_connections(1024)
             .connect_lazy(&database_url)
             .unwrap_or_else(|_| panic!("wrong database URL {}", database_url));
 

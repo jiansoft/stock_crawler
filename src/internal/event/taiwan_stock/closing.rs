@@ -102,7 +102,8 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
     let unice_diff = mh.unice - mh.previous_unice;
     let unice_percentage = (unice_diff / mh.previous_unice) * hundred;
     let msg = format!(
-        "合計:{} {} ({}%)\nEddie:{} {} ({}%)\nUnice:{} {} ({}%)",
+        "{} 市值變化\n合計:{} {} ({}%)\nEddie:{} {} ({}%)\nUnice:{} {} ({}%)",
+        date,
         mh.sum.round_dp(2),
         sum_diff.round_dp(2),
         sum_percentage.round_dp(2),
@@ -125,7 +126,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_run() {
+    async fn test_aggregate() {
         dotenv::dotenv().ok();
         SHARE.load().await;
 

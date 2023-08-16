@@ -61,8 +61,8 @@ pub async fn run_cron() -> Result<()> {
         create_job("0 0 21 * * *", backfill::stock_weight::execute),
         // 08:00 提醒本日除權息的股票
         create_job("0 0 0 * * *", event::taiwan_stock::ex_dividend::execute),
-        // 15:00 更新台股收盤指數
-        //create_job("0 0 7 * * *", backfill::taiwan_stock_index::execute),
+        // 08:00 提醒本日發放股利的股票(只通知自已有的股票)
+        create_job("0 0 0 * * *", event::taiwan_stock::payable_date::execute),
         // 15:00 取得收盤報價數據
         create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫

@@ -22,8 +22,8 @@ pub async fn execute() -> Result<()> {
             stock_symbols.push(stock.stock_symbol.to_string());
             let _ = writeln!(
                 &mut msg,
-                "    {0} {1} 現金︰{2}元 股票 {3}元 合計︰{4}元 https://tw.stock.yahoo.com/quote/{1}",
-                stock.stock_symbol, stock.name, stock.cash_dividend, stock.stock_dividend, stock.sum
+                "    {0} {1} 現金︰{2}元 股票 {3}元 合計︰{4}元 https://tw.stock.yahoo.com/quote/{0}",
+                stock.stock_symbol, stock.name, stock.cash_dividend.normalize(), stock.stock_dividend.normalize(), stock.sum.normalize()
             );
         }
     }

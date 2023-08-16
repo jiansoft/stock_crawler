@@ -38,7 +38,7 @@ pub async fn execute() -> Result<()> {
     }
 
     stream::iter(quotes)
-        .for_each_concurrent(util::concurrent_limit_64(), |sw| async move {
+        .for_each_concurrent(util::concurrent_limit_32(), |sw| async move {
             process_daily_quote(sw).await;
         })
         .await;

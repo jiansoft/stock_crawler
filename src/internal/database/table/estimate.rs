@@ -43,22 +43,21 @@ WITH stocks AS (
   )
 ),
 price as (
-	select stock_symbol as "SecurityCode",
-		count(*)         as year_count,
-		min("low"."min") as price_cheap,
-		avg("low"."avg") as price_fair,
-		max("low"."max") as price_expensive
-	from (
-		select stocks.stock_symbol, "year", min("ClosingPrice"), avg("ClosingPrice"), max("ClosingPrice")
-		from stocks
-		inner join "DailyQuotes" on stocks.stock_symbol = "DailyQuotes"."SecurityCode"
-		where "year" in ({1})
-		  and "month" in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
-		  and "day" in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)
-		  and "ClosingPrice" > 0
-		group by stocks.stock_symbol, "year"
-	) as "low"
-	group by "SecurityCode"
+	SELECT
+        s.stock_symbol AS "SecurityCode",
+        COUNT(DISTINCT dq."year") AS year_count,
+        MIN(dq."ClosingPrice") AS price_cheap,
+        AVG(dq."ClosingPrice") AS price_fair,
+        MAX(dq."ClosingPrice") AS price_expensive
+    FROM
+        stocks s
+    INNER JOIN
+        "DailyQuotes" dq ON s.stock_symbol = dq."SecurityCode"
+    WHERE
+        dq."year" in ({1})
+        AND dq."ClosingPrice" > 0
+    GROUP BY
+        s.stock_symbol
 ),
 dividend as (
 	select security_code,
