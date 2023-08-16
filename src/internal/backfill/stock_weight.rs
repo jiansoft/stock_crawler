@@ -6,7 +6,7 @@ use futures::{stream, StreamExt};
 use crate::internal::{
     crawler::taifex,
     database::table::stock::{self, extension::weight::SymbolAndWeight},
-    logging, util, StockExchange,
+    logging, StockExchange, util,
 };
 
 /// 查詢 taifex 個股權值比重

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{NaiveDate};
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use sqlx::FromRow;
 

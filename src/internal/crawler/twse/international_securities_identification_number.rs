@@ -1,4 +1,4 @@
-use anyhow::{Result};
+use anyhow::Result;
 use chrono::Local;
 use scraper::{Html, Selector};
 
@@ -7,8 +7,8 @@ use crate::internal::{
     crawler::twse,
     database::table,
     logging,
-    util::{self, datetime::Weekend},
     StockExchangeMarket,
+    util::{self, datetime::Weekend},
 };
 
 const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺灣存託憑證(TDR)"];

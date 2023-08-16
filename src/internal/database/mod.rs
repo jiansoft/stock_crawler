@@ -2,7 +2,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::*;
 use once_cell::sync::Lazy;
-use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
+use sqlx::{PgPool, Postgres, postgres::PgPoolOptions, Transaction};
 
 use crate::internal::config;
 

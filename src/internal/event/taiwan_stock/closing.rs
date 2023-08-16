@@ -6,15 +6,15 @@ use crate::{
     internal::{
         backfill,
         bot,
-        cache::{TtlCacheInner, TTL},
+        cache::{TTL, TtlCacheInner},
         calculation,
         database::{
             table::{
+                daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
                 daily_quote,
                 estimate::Estimate,
                 last_daily_quotes,
-                yield_rank::YieldRank,
-                daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory
+                yield_rank::YieldRank
             }
         },
         logging,

@@ -1,7 +1,7 @@
 use std::{result::Result::Ok, sync::Arc};
 
 use anyhow::*;
-use deadpool_redis::{redis::cmd, Config, Connection, Pool, Runtime};
+use deadpool_redis::{Config, Connection, Pool, redis::cmd, Runtime};
 use futures::{stream::FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
 use redis::{AsyncCommands, RedisError, RedisResult, ToRedisArgs, Value};

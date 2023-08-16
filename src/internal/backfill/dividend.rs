@@ -4,8 +4,8 @@ use anyhow::*;
 use chrono::{Datelike, Local};
 use hashbrown::HashMap;
 use tokio_retry::{
-    strategy::{jitter, ExponentialBackoff},
     Retry,
+    strategy::{ExponentialBackoff, jitter},
 };
 
 use crate::internal::{

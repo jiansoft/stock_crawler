@@ -1,10 +1,14 @@
 use std::fmt::Write;
 
-use crate::internal::bot;
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
 
-use crate::internal::database::table::dividend;
+use crate::{
+    internal::{
+        bot,
+        database::table::dividend
+    }
+};
 
 /// 提提醒本日發放股利的股票(只通知自已有的股票)
 pub async fn execute() -> Result<()> {

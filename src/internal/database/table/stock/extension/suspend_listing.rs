@@ -1,5 +1,5 @@
 use anyhow::*;
-use sqlx::{postgres::PgQueryResult, FromRow};
+use sqlx::{FromRow, postgres::PgQueryResult};
 
 use crate::internal::database::{self, table::stock};
 

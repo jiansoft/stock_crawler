@@ -1,6 +1,6 @@
 use anyhow::*;
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, FromRow};
+use sqlx::{FromRow, postgres::PgQueryResult};
 
 use crate::internal::database::{self, table::stock};
 

@@ -6,7 +6,7 @@ use chrono::{Local, NaiveDate};
 use futures::{stream, StreamExt};
 
 use crate::internal::{
-    cache::{TtlCacheInner, SHARE, TTL},
+    cache::{SHARE, TTL, TtlCacheInner},
     crawler::{tpex, twse},
     database::table::{self, daily_quote},
     logging, util,
@@ -110,8 +110,8 @@ async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     //use crossbeam::thread;
     use rayon::prelude::*;
@@ -123,7 +123,7 @@ mod tests {
 
     use super::*;
 
-    //use std::time;
+//use std::time;
 
     #[tokio::test]
     async fn test_execute() {
