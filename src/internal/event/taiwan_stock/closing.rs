@@ -2,23 +2,15 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use rust_decimal_macros::dec;
 
-use crate::{
-    internal::{
-        backfill,
-        bot,
-        cache::{TTL, TtlCacheInner},
-        calculation,
-        database::{
-            table::{
-                daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
-                daily_quote,
-                estimate::Estimate,
-                last_daily_quotes,
-                yield_rank::YieldRank
-            }
-        },
-        logging,
-    }
+use crate::internal::{
+    backfill, bot,
+    cache::{TtlCacheInner, TTL},
+    calculation,
+    database::table::{
+        daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
+        daily_quote, last_daily_quotes, yield_rank::YieldRank,
+    },
+    logging,
 };
 
 /// 台股收盤事件發生時要進行的事情
@@ -49,8 +41,9 @@ pub async fn execute() -> Result<()> {
 async fn aggregate(date: NaiveDate) -> Result<()> {
     //抓取上市櫃公司每日收盤資訊
     backfill::quote::execute().await?;
-    let daily_quote_count = daily_quote::fetch_count_by_date(date).await?;
     logging::info_file_async("抓取上市櫃收盤數據結束".to_string());
+    let daily_quote_count = daily_quote::fetch_count_by_date(date).await?;
+    logging::info_file_async(format!("daily_quote_count:{}", daily_quote_count));
 
     if daily_quote_count == 0 {
         return Ok(());
@@ -72,7 +65,8 @@ async fn aggregate(date: NaiveDate) -> Result<()> {
     logging::info_file_async("重建 last_daily_quotes 表內的數據結束".to_string());
 
     // 計算便宜、合理、昂貴價的估算
-    Estimate::insert(date).await?;
+    // Estimate::insert(date).await?;
+    calculation::estimated_price::calculate_estimated_price(date).await?;
     logging::info_file_async("計算便宜、合理、昂貴價的估算結束".to_string());
 
     // 重建指定日期的 yield_rank 表內的數據
@@ -155,7 +149,9 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
 
-        logging::debug_file_async("開始 event::taiwan_stock::closing::notify_money_change".to_string());
+        logging::debug_file_async(
+            "開始 event::taiwan_stock::closing::notify_money_change".to_string(),
+        );
 
         let current_date = Local::now().date_naive();
 
@@ -173,6 +169,8 @@ mod tests {
             }
         }
 
-        logging::debug_file_async("結束 event::taiwan_stock::closing::notify_money_change".to_string());
+        logging::debug_file_async(
+            "結束 event::taiwan_stock::closing::notify_money_change".to_string(),
+        );
     }
 }

@@ -17,7 +17,7 @@ pub struct PostgresSQL {
 impl PostgresSQL {
     pub fn new() -> PostgresSQL {
         let database_url = format!(
-            "postgres://{}:{}@{}:{}/{}",
+            "postgres://{}:{}@{}:{}/{}?application_name=stock_crawler_rust",
             config::SETTINGS.postgresql.user,
             config::SETTINGS.postgresql.password,
             config::SETTINGS.postgresql.host,

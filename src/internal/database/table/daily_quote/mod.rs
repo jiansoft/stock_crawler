@@ -6,13 +6,13 @@ use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Row};
 
 use crate::internal::{
-    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, StockExchange,
-    util::datetime,
+    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, util::datetime,
+    StockExchange,
 };
 
 pub(crate) mod extension;
 
-#[derive(sqlx::Type, sqlx::FromRow, Default, Debug)]
+#[derive(sqlx::Type, sqlx::FromRow, Default, Debug, Clone)]
 /// 每日股票報價數據
 pub struct DailyQuote {
     pub maximum_price_in_year_date_on: NaiveDate,
