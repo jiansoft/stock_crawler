@@ -16,7 +16,23 @@ pub struct App {
     pub postgresql: PostgreSQL,
     pub rpc: Rpc,
     pub nosql: NoSQL,
+    pub system: System,
 }
+
+const SYSTEM_GRPC_USE_PORT: &str = "SYSTEM_GRPC_USE_PORT";
+const SYSTEM_SSL_CERT_FILE: &str = "SYSTEM_SSL_CERT_FILE";
+const SYSTEM_SSL_KEY_FILE: &str = "SYSTEM_SSL_KEY_FILE";
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct System {
+    pub grpc_use_port: i32,
+    pub ssl_cert_file: String,
+    pub ssl_key_file: String,
+}
+
+/*
+grpcPort: 9000
+certFile: '/opt/nginx/ssl/jiansoft.ddns.net/fullchain.pem'
+keyFile: '/opt/nginx/ssl/jiansoft.ddns.net/privkey.pem'*/
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Rpc {
@@ -191,6 +207,14 @@ impl App {
                     domain_name: env::var(GO_GRPC_DOMAIN_NAME).expect(GO_GRPC_DOMAIN_NAME),
                 },
             },
+            system: System{
+                grpc_use_port: env::var(SYSTEM_GRPC_USE_PORT)
+                    .unwrap_or_else(|_| "0".to_string())
+                    .parse::<i32>()
+                    .unwrap_or(0),
+                ssl_cert_file: env::var(SYSTEM_SSL_CERT_FILE).expect(SYSTEM_SSL_CERT_FILE),
+                ssl_key_file: env::var(SYSTEM_SSL_KEY_FILE).expect(SYSTEM_SSL_KEY_FILE),
+            }
         }
     }
 
@@ -200,20 +224,27 @@ impl App {
             self.afraid.token = token;
         }
 
+        if let Ok(cert_file) = env::var(SYSTEM_SSL_CERT_FILE) {
+            self.system.ssl_cert_file = cert_file;
+        }
+        if let Ok(key_file) = env::var(SYSTEM_SSL_KEY_FILE) {
+            self.system.ssl_key_file = key_file;
+        }
+
         if let Ok(target) = env::var(GO_GRPC_TARGET) {
-            self.rpc.go_service.target = target
+            self.rpc.go_service.target = target;
         }
 
         if let Ok(cert) = env::var(GO_GRPC_TLS_CERT_FILE) {
-            self.rpc.go_service.tls_cert_file = cert
+            self.rpc.go_service.tls_cert_file = cert;
         }
 
         if let Ok(key) = env::var(GO_GRPC_TLS_KEY_FILE) {
-            self.rpc.go_service.tls_key_file = key
+            self.rpc.go_service.tls_key_file = key;
         }
 
         if let Ok(domain_name) = env::var(GO_GRPC_DOMAIN_NAME) {
-            self.rpc.go_service.domain_name = domain_name
+            self.rpc.go_service.domain_name = domain_name;
         }
 
         if let Ok(host) = env::var(POSTGRESQL_HOST) {
@@ -296,6 +327,7 @@ mod tests {
     #[tokio::test]
     async fn test_init() {
         dotenv::dotenv().ok();
+        logging::debug_file_async(format!("SETTINGS.system: {:#?}\r\n", SETTINGS.system));
         logging::debug_file_async(format!(
             "SETTINGS.postgresql: {:#?}\r\nSETTINGS.secret: {:#?}\r\n",
             SETTINGS.postgresql, SETTINGS.bot

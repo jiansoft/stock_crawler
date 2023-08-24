@@ -1,36 +1,24 @@
+/// string name = 1;
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StockInfoRequest {
-    #[prost(string, tag = "1")]
-    pub stock_symbol: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(int32, tag = "3")]
-    pub stock_exchange_market_id: i32,
-    #[prost(int32, tag = "4")]
-    pub stock_industry_id: i32,
-    #[prost(double, tag = "5")]
-    pub net_asset_value_per_share: f64,
-    /// google.protobuf.Timestamp create_time = 6;
-    #[prost(bool, tag = "6")]
-    pub suspend_listing: bool,
-}
+pub struct ControlRequest {}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StockInfoReply {
-    #[prost(string, tag = "1")]
-    pub message: ::prost::alloc::string::String,
+pub struct ControlResponse {
+    /// string data = 1;
+    #[prost(message, optional, tag = "1")]
+    pub message: ::core::option::Option<super::basic::BaseResponse>,
 }
 /// Generated client implementations.
-pub mod stock_client {
+pub mod control_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
     #[derive(Debug, Clone)]
-    pub struct StockClient<T> {
+    pub struct ControlClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl StockClient<tonic::transport::Channel> {
+    impl ControlClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -41,7 +29,7 @@ pub mod stock_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> StockClient<T>
+    impl<T> ControlClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::BoxBody>,
         T::Error: Into<StdError>,
@@ -59,7 +47,7 @@ pub mod stock_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> StockClient<InterceptedService<T, F>>
+        ) -> ControlClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -73,7 +61,7 @@ pub mod stock_client {
                 http::Request<tonic::body::BoxBody>,
             >>::Error: Into<StdError> + Send + Sync,
         {
-            StockClient::new(InterceptedService::new(inner, interceptor))
+            ControlClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -106,10 +94,13 @@ pub mod stock_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        pub async fn update_stock_info(
+        pub async fn control(
             &mut self,
-            request: impl tonic::IntoRequest<super::StockInfoRequest>,
-        ) -> std::result::Result<tonic::Response<super::StockInfoReply>, tonic::Status> {
+            request: impl tonic::IntoRequest<super::ControlRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ControlResponse>,
+            tonic::Status,
+        > {
             self.inner
                 .ready()
                 .await
@@ -120,30 +111,27 @@ pub mod stock_client {
                     )
                 })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/stock.Stock/UpdateStockInfo",
-            );
+            let path = http::uri::PathAndQuery::from_static("/control.Control/Control");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("stock.Stock", "UpdateStockInfo"));
+            req.extensions_mut().insert(GrpcMethod::new("control.Control", "Control"));
             self.inner.unary(req, path, codec).await
         }
     }
 }
 /// Generated server implementations.
-pub mod stock_server {
+pub mod control_server {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with StockServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with ControlServer.
     #[async_trait]
-    pub trait Stock: Send + Sync + 'static {
-        async fn update_stock_info(
+    pub trait Control: Send + Sync + 'static {
+        async fn control(
             &self,
-            request: tonic::Request<super::StockInfoRequest>,
-        ) -> std::result::Result<tonic::Response<super::StockInfoReply>, tonic::Status>;
+            request: tonic::Request<super::ControlRequest>,
+        ) -> std::result::Result<tonic::Response<super::ControlResponse>, tonic::Status>;
     }
     #[derive(Debug)]
-    pub struct StockServer<T: Stock> {
+    pub struct ControlServer<T: Control> {
         inner: _Inner<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
@@ -151,7 +139,7 @@ pub mod stock_server {
         max_encoding_message_size: Option<usize>,
     }
     struct _Inner<T>(Arc<T>);
-    impl<T: Stock> StockServer<T> {
+    impl<T: Control> ControlServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -203,9 +191,9 @@ pub mod stock_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>> for StockServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for ControlServer<T>
     where
-        T: Stock,
+        T: Control,
         B: Body + Send + 'static,
         B::Error: Into<StdError> + Send + 'static,
     {
@@ -221,24 +209,22 @@ pub mod stock_server {
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
-                "/stock.Stock/UpdateStockInfo" => {
+                "/control.Control/Control" => {
                     #[allow(non_camel_case_types)]
-                    struct UpdateStockInfoSvc<T: Stock>(pub Arc<T>);
-                    impl<T: Stock> tonic::server::UnaryService<super::StockInfoRequest>
-                    for UpdateStockInfoSvc<T> {
-                        type Response = super::StockInfoReply;
+                    struct ControlSvc<T: Control>(pub Arc<T>);
+                    impl<T: Control> tonic::server::UnaryService<super::ControlRequest>
+                    for ControlSvc<T> {
+                        type Response = super::ControlResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::StockInfoRequest>,
+                            request: tonic::Request<super::ControlRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                (*inner).update_stock_info(request).await
-                            };
+                            let fut = async move { (*inner).control(request).await };
                             Box::pin(fut)
                         }
                     }
@@ -249,7 +235,7 @@ pub mod stock_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = UpdateStockInfoSvc(inner);
+                        let method = ControlSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -280,7 +266,7 @@ pub mod stock_server {
             }
         }
     }
-    impl<T: Stock> Clone for StockServer<T> {
+    impl<T: Control> Clone for ControlServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -292,7 +278,7 @@ pub mod stock_server {
             }
         }
     }
-    impl<T: Stock> Clone for _Inner<T> {
+    impl<T: Control> Clone for _Inner<T> {
         fn clone(&self) -> Self {
             Self(Arc::clone(&self.0))
         }
@@ -302,7 +288,7 @@ pub mod stock_server {
             write!(f, "{:?}", self.0)
         }
     }
-    impl<T: Stock> tonic::server::NamedService for StockServer<T> {
-        const NAME: &'static str = "stock.Stock";
+    impl<T: Control> tonic::server::NamedService for ControlServer<T> {
+        const NAME: &'static str = "control.Control";
     }
 }

@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package basic;
+
+message BaseResponse {
+  int32 code = 1;
+  string message = 2;
+
+}

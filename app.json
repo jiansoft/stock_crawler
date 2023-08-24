@@ -1,5 +1,10 @@
 
 {
+  "system": {
+    "grpc_use_port": 9001,
+    "ssl_cert_file": "fullchain.pem",
+    "ssl_key_file": "privkey.pem"
+  },
   "afraid": {
     "url": "https://sync.afraid.org",
     "path": "/u",

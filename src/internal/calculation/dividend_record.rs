@@ -228,11 +228,11 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 calculate_dividend".to_string());
         let mut sod = stock_ownership_details::StockOwnershipDetail::new();
-        sod.serial = 9;
-        sod.security_code = "2353".to_string();
+        sod.serial = 102;
+        sod.security_code = "2882".to_string();
         sod.member_id = 2;
-        sod.share_quantity = 2000;
-        sod.created_time = Local.with_ymd_and_hms(2015, 2, 11, 0, 0, 0).unwrap();
+        sod.share_quantity = 300;
+        sod.created_time = Local.with_ymd_and_hms(2023, 4, 9, 0, 0, 0).unwrap();
         match calculate_dividend(sod, 2023).await {
             Ok(_) => {}
             Err(why) => {

@@ -154,7 +154,7 @@ money_history_detail AS (
         od.average_cost,
         od.total_share * tdq."ClosingPrice" + od.average_cost AS reference_profit_and_loss,
         od.total_share * tdq."ClosingPrice" * 0.003 AS transfer_tax,
-        od.average_cost / od.total_share AS average_price
+        -od.average_cost / od.total_share AS average_price
     FROM
         ownership_details AS od
         INNER JOIN stocks AS c ON od.security_code = c.stock_symbol

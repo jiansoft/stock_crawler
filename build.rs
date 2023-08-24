@@ -13,7 +13,10 @@ use std::fs;
 static OUT_DIR: &str = "src/internal/rpc";
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let protos = ["proto/stock.proto"];
+    let protos = [
+        "proto/basic.proto",
+        "proto/control.proto",
+        "proto/stock.proto"];
 
     fs::create_dir_all(OUT_DIR).unwrap();
     tonic_build::configure()

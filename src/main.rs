@@ -13,7 +13,7 @@ use tokio::signal;
 #[cfg(unix)]
 use tokio::signal::unix::{signal as unix_signal, SignalKind};
 
-use crate::internal::{cache, nosql, scheduler};
+use crate::internal::{cache, nosql, rpc, scheduler};
 
 pub mod internal;
 
@@ -84,6 +84,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
     cache::SHARE.load().await;
     scheduler::start().await?;
+    rpc::server::start().await?;
+
     let pong = nosql::redis::CLIENT.ping().await;
     if let Ok(pong) = pong {
         println!("pong: {}", pong);
@@ -97,3 +99,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+/*
+要計算價格下降的百分比，可以使用以下的公式：
+百分比變動=(新值−舊值) / 舊值 × 100%
+*/

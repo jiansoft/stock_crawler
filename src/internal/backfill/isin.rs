@@ -5,7 +5,7 @@ use chrono::Local;
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::internal::{
-    bot, cache::SHARE, crawler::twse, database::table, logging, rpc, rpc::pb,
+    bot, cache::SHARE, crawler::twse, database::table, logging, rpc, rpc::stock,
     StockExchangeMarket, util::datetime::Weekend,
 };
 
@@ -90,7 +90,7 @@ async fn update_stock_info(
     logging::info_file_async(log_msg);
 
     //通知 go service
-    let request = pb::StockInfoRequest {
+    let request = stock::StockInfoRequest {
         stock_symbol: stock.stock_symbol.to_string(),
         name: stock.name.to_string(),
         stock_exchange_market_id: stock.stock_exchange_market_id,
@@ -99,7 +99,7 @@ async fn update_stock_info(
         suspend_listing: false,
     };
 
-    if let Err(why) = rpc::push_stock_info_to_go_service(request).await {
+    if let Err(why) = rpc::client::stock_service::push_stock_info_to_go_service(request).await {
         logging::error_file_async(format!(
             "Failed to push_stock_info_to_go_service for {} because {:?}",
             stock.stock_symbol, why

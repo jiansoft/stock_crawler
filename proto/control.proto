@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+import "basic.proto";
+
+package control;
+
+service Control {
+  rpc Control(ControlRequest) returns (ControlResponse) {}
+}
+
+message ControlRequest {
+  //string name = 1;
+}
+
+message ControlResponse {
+  //string data = 1;
+  basic.BaseResponse message = 1;
+}
