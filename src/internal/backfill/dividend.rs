@@ -4,8 +4,8 @@ use anyhow::*;
 use chrono::{Datelike, Local};
 use hashbrown::HashMap;
 use tokio_retry::{
+    strategy::{jitter, ExponentialBackoff},
     Retry,
-    strategy::{ExponentialBackoff, jitter},
 };
 
 use crate::internal::{
@@ -139,8 +139,15 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
 
 async fn processing_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     //除息日 尚未公布
-    let dividends = dividend::Dividend::fetch_unpublished_dividends_for_year(year).await?;
-    logging::info_file_async(format!("本次除息日的採集需收集 {} 家", dividends.len()));
+    let dividends =
+        dividend::Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
+            year,
+        )
+        .await?;
+    logging::info_file_async(format!(
+        "本次除息日與發放日的採集需收集 {} 家",
+        dividends.len()
+    ));
 
     let tasks: Vec<_> = dividends
         .into_iter()

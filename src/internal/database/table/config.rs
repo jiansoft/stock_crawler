@@ -7,33 +7,29 @@ use crate::internal::database;
 
 #[derive(sqlx::FromRow, Default, Debug)]
 /// 設定檔
-pub struct Entity {
+pub struct Config {
     pub key: String,
     pub val: String,
 }
 
-impl Entity {
-    pub fn new(key: String) -> Self {
-        Entity {
-            key,
-            ..Default::default()
-        }
+impl Config {
+    pub fn new(key: String, val: String) -> Self {
+        Config { key, val }
     }
 
     /// 取得一筆指定 key 的 Entity
-    pub async fn first(key: &str) -> Result<Entity> {
+    pub async fn first(key: &str) -> Result<Config> {
         let sql = r#"
         SELECT key, val
         FROM config
         WHERE key = $1;
     "#;
 
-        let entity = sqlx::query_as::<_, Entity>(sql)
+        sqlx::query_as::<_, Config>(sql)
             .bind(key)
             .fetch_one(database::get_connection())
-            .await?;
-
-        Ok(entity)
+            .await
+            .context(format!("Failed to Config::first({:?}) from database", key))
     }
 
     pub async fn upsert(&self) -> Result<PgQueryResult> {
@@ -42,13 +38,15 @@ impl Entity {
         VALUES ($1, $2)
         ON CONFLICT (key)
         DO UPDATE SET val = excluded.val;"#;
-        let result = sqlx::query(sql)
+        sqlx::query(sql)
             .bind(&self.key)
             .bind(&self.val)
             .execute(database::get_connection())
-            .await?;
-
-        Ok(result)
+            .await
+            .context(format!(
+                "Failed to Config::upsert({:#?}) from database",
+                self
+            ))
     }
 }
 
@@ -67,15 +65,14 @@ mod tests {
         let now = Local::now();
         let date_naive = now.date_naive();
 
-        if let Ok(c) = Entity::first("last-closing-day").await {
+        if let Ok(c) = Config::first("last-closing-day").await {
             logging::debug_file_async(format!("last-closing-day:{:?}", c));
             let date = NaiveDate::parse_from_str(&c.val, "%Y-%m-%d").unwrap();
 
             logging::debug_file_async(format!("today:{:?}", date));
             logging::debug_file_async(format!("date_naive > date:{}", date_naive > date));
             if date_naive > date {
-                let mut new_c = Entity::new(c.key);
-                new_c.val = date_naive.format("%Y-%m-%d").to_string();
+                let new_c = Config::new(c.key, date_naive.format("%Y-%m-%d").to_string());
                 match new_c.upsert().await {
                     Ok(result) => {
                         logging::debug_file_async(format!("upsert:{:#?}", result));

@@ -6,7 +6,7 @@ use chrono::{Local, NaiveDate};
 use futures::{stream, StreamExt};
 
 use crate::internal::{
-    cache::{SHARE, TTL, TtlCacheInner},
+    cache::{TtlCacheInner, SHARE, TTL},
     crawler::{tpex, twse},
     database::table::{self, daily_quote},
     logging, util,
@@ -25,15 +25,15 @@ pub async fn execute() -> Result<()> {
 
     if let Ok(quote) = res_twse {
         quotes.extend(quote);
+        logging::info_file_async("取完上市收盤數據".to_string());
     }
 
     if let Ok(quote) = res_tpex {
         quotes.extend(quote);
+        logging::info_file_async("取完上櫃收盤數據".to_string());
     }
 
-    let results_is_empty = quotes.is_empty();
-
-    if results_is_empty {
+    if quotes.is_empty() {
         return Ok(());
     }
 
@@ -43,29 +43,21 @@ pub async fn execute() -> Result<()> {
         })
         .await;
 
+    logging::info_file_async("上櫃收盤數據更新到資料庫完成".to_string());
     /* let tasks: Vec<_> = quotes.into_iter().map(process_daily_quote).collect();
     futures::future::join_all(tasks).await;*/
 
     let date_naive = now.date_naive();
-    /*match daily_quote::makeup_for_the_lack_daily_quotes(date_naive).await {
-        Ok(result) => {
-            logging::info_file_async(format!("補上當日缺少的每日收盤數據結束:{:#?}", result));
-        }
-        Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to makeup_for_the_lack_daily_quotes because:{:?}",
-                why
-            ));
-        }
-    };*/
 
-    if let Ok(c) = table::config::Entity::first("last-closing-day").await {
+    if let Ok(c) = table::config::Config::first("last-closing-day").await {
         let date = NaiveDate::parse_from_str(&c.val, "%Y-%m-%d")?;
         if date_naive > date {
-            let mut new_c = table::config::Entity::new(c.key);
-            new_c.val = date_naive.format("%Y-%m-%d").to_string();
+            let new_c =
+                table::config::Config::new(c.key, date_naive.format("%Y-%m-%d").to_string());
             match new_c.upsert().await {
-                Ok(_) => {}
+                Ok(_) => {
+                    logging::info_file_async("最後收盤日設定更新到資料庫完成".to_string());
+                }
                 Err(why) => {
                     logging::error_file_async(format!("Failed to config.upsert because:{:?}", why));
                 }
@@ -110,8 +102,8 @@ async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     //use crossbeam::thread;
     use rayon::prelude::*;
@@ -123,7 +115,7 @@ mod tests {
 
     use super::*;
 
-//use std::time;
+    //use std::time;
 
     #[tokio::test]
     async fn test_execute() {

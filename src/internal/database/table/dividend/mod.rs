@@ -145,7 +145,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     payout_ratio_stock = EXCLUDED.payout_ratio_stock,
     payout_ratio = EXCLUDED.payout_ratio;
 "#;
-        let result = sqlx::query(sql)
+        sqlx::query(sql)
             .bind(&self.security_code)
             .bind(self.year)
             .bind(self.year_of_dividend)
@@ -167,9 +167,8 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .bind(self.payout_ratio_stock)
             .bind(self.payout_ratio)
             .execute(database::get_connection())
-            .await?;
-
-        Ok(result)
+            .await
+            .context(format!("Failed to upsert({:#?}) from database", self))
     }
 
     /// 更新股息的配息日、發放日
@@ -194,7 +193,10 @@ WHERE
             .bind(&self.payable_date2)
             .execute(database::get_connection())
             .await
-            .context("Failed to update_dividend_date from database")
+            .context(format!(
+                "Failed to update_dividend_date({:#?}) from database",
+                self
+            ))
     }
 
     /// 按照年份和除權息日取得股利總和的數據
@@ -239,38 +241,49 @@ where security_code = $1
 "#,
             TABLE_COLUMNS
         );
-        let entities = sqlx::query(&sql)
+
+        sqlx::query(&sql)
             .bind(security_code)
             .bind(year)
             .bind(Local::now().format("%Y-%m-%d %H:%M:%S").to_string())
             .bind(stock_purchase_date.format("%Y-%m-%d %H:%M:%S").to_string())
             .try_map(Self::row_to_entity)
             .fetch_all(database::get_connection())
-            .await?;
-
-        Ok(entities)
+            .await
+            .context(format!(
+                "Failed to fetch_dividends_summary_by_date({},{}) from database",
+                year, stock_purchase_date
+            ))
     }
 
-    /// 取得指定年度尚未有配息日的配息數據(有排除配息金額為 0)
-    pub async fn fetch_unpublished_dividends_for_year(year: i32) -> Result<Vec<Dividend>> {
+    /// 取得指定年度尚未有配息日或發放日的股息數據(有排除配息金額為 0)
+    pub async fn fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
+        year: i32,
+    ) -> Result<Vec<Dividend>> {
         let sql = format!(
             r#"
 SELECT {}
 FROM
     dividend
 WHERE
-    year = $1 and ("ex-dividend_date1" = '尚未公布' or "ex-dividend_date2" = '尚未公布') and "sum" <> 0;
+    year = $1
+    AND (
+        ('尚未公布' in ("ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2))
+        AND (sum > 0)
+    );
 "#,
             TABLE_COLUMNS
         );
 
-        let entities = sqlx::query(&sql)
+        sqlx::query(&sql)
             .bind(year)
             .try_map(Self::row_to_entity)
             .fetch_all(database::get_connection())
-            .await?;
-
-        Ok(entities)
+            .await
+            .context(format!(
+                "Failed to fetch_unpublished_dividend_date_or_payable_date_for_specified_year({}) from database",
+                year
+            ))
     }
 
     /// 取得指定年度內有多次配息的配息資料
@@ -284,13 +297,15 @@ WHERE year = $1 AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2');
             TABLE_COLUMNS
         );
 
-        let entities: Vec<Dividend> = sqlx::query(&sql)
+        sqlx::query(&sql)
             .bind(year)
             .try_map(Self::row_to_entity)
             .fetch_all(database::get_connection())
-            .await?;
-
-        Ok(entities)
+            .await
+            .context(format!(
+                "Failed to fetch_multiple_dividends_for_year({}) from database",
+                year
+            ))
     }
 
     /// 取得尚未有指定年度配息的股票代號
@@ -436,7 +451,8 @@ mod tests {
     async fn test_fetch_unannounced_date() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_dividend_unannounced_date".to_string());
-        let r = Dividend::fetch_unpublished_dividends_for_year(2023).await;
+        let r = Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(2023)
+            .await;
         if let Ok(result) = r {
             for e in result {
                 logging::debug_file_async(format!("{:?} ", e));
