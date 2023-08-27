@@ -2,14 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate};
 use rust_decimal::Decimal;
 
-use crate::{
-    internal::{
-        database::{
-            self,
-            table::daily_money_history::DailyMoneyHistory
-        }
-    }
-};
+use crate::internal::database::{self, table::daily_money_history::DailyMoneyHistory};
 
 #[derive(sqlx::Type, sqlx::FromRow, Default, Debug)]
 pub struct DailyMoneyHistoryWithPreviousTradingDayMoneyHistory {
@@ -41,10 +34,7 @@ limit 2;"
             .bind(date)
             .fetch_all(database::get_connection())
             .await
-            .context(format!(
-                "Failed to fetch({}) from database",
-                date
-            ))?;
+            .context(format!("Failed to fetch({}) from database", date))?;
 
         let mut dmhwptdmh = DailyMoneyHistoryWithPreviousTradingDayMoneyHistory {
             date,
@@ -77,7 +67,6 @@ limit 2;"
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use core::result::Result::Ok;
@@ -106,4 +95,3 @@ mod tests {
         logging::debug_file_async("結束 fetch".to_string());
     }
 }
-

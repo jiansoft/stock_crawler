@@ -18,9 +18,7 @@ pub struct StockDividendPayableDateInfo {
 }
 
 /// 取得指定日期為股利發放日的股票
-pub async fn fetch(
-    date: NaiveDate,
-) -> Result<Vec<StockDividendPayableDateInfo>> {
+pub async fn fetch(date: NaiveDate) -> Result<Vec<StockDividendPayableDateInfo>> {
     let sql = r#"
 SELECT
     s.stock_symbol,

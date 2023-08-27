@@ -267,9 +267,17 @@ FROM
     dividend
 WHERE
     year = $1
-    AND (
-        ('尚未公布' in ("ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2))
-        AND (sum > 0)
+    AND
+    (
+        (
+            ("ex-dividend_date1" IN ('尚未公布', '-') OR payable_date1 IN ('尚未公布', '-'))
+            AND cash_dividend > 0
+        )
+        OR
+        (
+            ("ex-dividend_date2" IN ('尚未公布', '-') OR payable_date2 IN ('尚未公布', '-'))
+            AND stock_dividend > 0
+        )
     );
 "#,
             TABLE_COLUMNS
@@ -448,9 +456,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_unannounced_date() {
+    async fn test_fetch_unpublished_dividend_date_or_payable_date_for_specified_year() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_dividend_unannounced_date".to_string());
+        logging::debug_file_async(
+            "開始 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),
+        );
         let r = Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(2023)
             .await;
         if let Ok(result) = r {
@@ -460,7 +470,9 @@ mod tests {
         } else if let Err(err) = r {
             logging::debug_file_async(format!("{:#?} ", err));
         }
-        logging::debug_file_async("結束 fetch_dividend_unannounced_date".to_string());
+        logging::debug_file_async(
+            "結束 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),
+        );
     }
 
     #[tokio::test]

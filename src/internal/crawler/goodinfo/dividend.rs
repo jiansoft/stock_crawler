@@ -123,6 +123,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
             if tds.len() != 50 {
                 return None;
             }
+
             //logging::debug_file_async(format!("tds({}):{:#?}",tds.len(), tds));
             let mut e = GoodInfoDividend::new(stock_symbol.to_string());
             //#tblDetail > tbody > tr:nth-child(5) > td:nth-child(2) > nobr > b
@@ -131,6 +132,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
                 return None;
             }
 
+            //股利發放年度
             e.year = match year_str.parse::<i32>() {
                 Ok(y) => y,
                 Err(why) => {
@@ -141,6 +143,8 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
                     return None;
                 }
             };
+
+            //股利所屬期間
             let quarter = element::parse_value(&element, "td:nth-child(21)")?;
             match Regex::new(r"(\d+)([A-Z]\d)") {
                 Ok(re) => match re.captures(&quarter.to_uppercase()) {
@@ -161,6 +165,11 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
                     return None;
                 }
             }
+            e.sum = element::parse_to_decimal(&element, "td:nth-child(9)");
+
+            if e.sum == Decimal::ZERO {
+                return None;
+            }
 
             e.earnings_cash = element::parse_to_decimal(&element, "td:nth-child(3)");
             e.capital_reserve_cash = element::parse_to_decimal(&element, "td:nth-child(4)");
@@ -168,7 +177,6 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
             e.earnings_stock = element::parse_to_decimal(&element, "td:nth-child(6)");
             e.capital_reserve_stock = element::parse_to_decimal(&element, "td:nth-child(7)");
             e.stock_dividend = element::parse_to_decimal(&element, "td:nth-child(8)");
-            e.sum = element::parse_to_decimal(&element, "td:nth-child(9)");
             e.earnings_per_share = element::parse_to_decimal(&element, "td:nth-child(22)");
             e.payout_ratio_cash = element::parse_to_decimal(&element, "td:nth-child(23)");
             e.payout_ratio_stock = element::parse_to_decimal(&element, "td:nth-child(24)");
@@ -218,6 +226,7 @@ mod tests {
 
         match visit("2330").await {
             Ok(e) => {
+                dbg!(&e);
                 logging::debug_file_async(format!("dividend : {:#?}", e));
             }
             Err(why) => {

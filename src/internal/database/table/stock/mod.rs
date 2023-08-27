@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{Datelike, DateTime, Duration, Local};
+use chrono::{DateTime, Datelike, Duration, Local};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 

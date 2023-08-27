@@ -6,7 +6,8 @@ use crate::internal::database;
 
 #[derive(sqlx::FromRow, Debug, Default)]
 pub struct Estimate {
-    pub date: NaiveDate, // 使用 chrono 庫來處理日期和時間
+    pub date: NaiveDate,
+    // 使用 chrono 庫來處理日期和時間
     pub last_daily_quote_date: String,
     pub security_code: String,
     pub name: String,
@@ -222,9 +223,9 @@ ON CONFLICT (date,security_code) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
     use chrono::Local;
 
+    use crate::internal::cache::SHARE;
     use crate::internal::logging;
 
     use super::*;

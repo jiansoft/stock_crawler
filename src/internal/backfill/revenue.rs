@@ -1,7 +1,7 @@
 use core::result::Result::Ok;
 
 use anyhow::*;
-use chrono::{Datelike, DateTime, FixedOffset, Local, NaiveDate};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
 use futures::{stream, StreamExt};
 
 use crate::internal::{
@@ -141,6 +141,7 @@ pub(crate) async fn process_revenue(
 
     Ok(())
 }
+
 #[cfg(test)]
 mod tests {
     use crate::internal::logging;

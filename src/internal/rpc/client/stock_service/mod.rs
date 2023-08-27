@@ -3,11 +3,11 @@ use std::result::Result::Ok;
 use anyhow::*;
 use tonic::{Request, Response};
 
+use crate::internal::rpc::client::get_client;
 use crate::internal::rpc::{
     client::Grpc,
     stock::{StockInfoReply, StockInfoRequest},
 };
-use crate::internal::rpc::client::get_client;
 
 impl Grpc {
     /// 將 stock info 通知 go service

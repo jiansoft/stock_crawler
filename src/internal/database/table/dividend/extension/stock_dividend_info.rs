@@ -46,7 +46,6 @@ WHERE
         ))
 }
 
-
 #[cfg(test)]
 mod tests {
     use core::result::Result::Ok;

@@ -22,6 +22,7 @@ pub struct App {
 const SYSTEM_GRPC_USE_PORT: &str = "SYSTEM_GRPC_USE_PORT";
 const SYSTEM_SSL_CERT_FILE: &str = "SYSTEM_SSL_CERT_FILE";
 const SYSTEM_SSL_KEY_FILE: &str = "SYSTEM_SSL_KEY_FILE";
+
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct System {
     pub grpc_use_port: i32,
@@ -207,14 +208,14 @@ impl App {
                     domain_name: env::var(GO_GRPC_DOMAIN_NAME).expect(GO_GRPC_DOMAIN_NAME),
                 },
             },
-            system: System{
+            system: System {
                 grpc_use_port: env::var(SYSTEM_GRPC_USE_PORT)
                     .unwrap_or_else(|_| "0".to_string())
                     .parse::<i32>()
                     .unwrap_or(0),
                 ssl_cert_file: env::var(SYSTEM_SSL_CERT_FILE).expect(SYSTEM_SSL_CERT_FILE),
                 ssl_key_file: env::var(SYSTEM_SSL_KEY_FILE).expect(SYSTEM_SSL_KEY_FILE),
-            }
+            },
         }
     }
 

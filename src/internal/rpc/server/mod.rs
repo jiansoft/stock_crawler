@@ -1,12 +1,10 @@
 use anyhow::Result;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
-use crate::{
-    internal::{
-        config::SETTINGS,
-        logging,
-        rpc::{control::control_server::ControlServer, server::control_service::ControlService}
-    }
+use crate::internal::{
+    config::SETTINGS,
+    logging,
+    rpc::{control::control_server::ControlServer, server::control_service::ControlService},
 };
 
 pub mod control_service;
@@ -37,8 +35,7 @@ pub async fn start() -> Result<()> {
 
     let addr = format!("0.0.0.0:{}", SETTINGS.system.grpc_use_port).parse()?;
 
-
-   /* let builder = Server::builder();
+    /* let builder = Server::builder();
     let mut server =
         if !SETTINGS.system.ssl_cert_file.is_empty() && !SETTINGS.system.ssl_key_file.is_empty() {
             let cert_content = std::fs::read_to_string(&SETTINGS.system.ssl_cert_file)?;
@@ -56,15 +53,20 @@ pub async fn start() -> Result<()> {
     // 使用 tokio::spawn 啟動一個新的異步任務
     tokio::spawn(async move {
         let builder = Server::builder();
-        let mut server =
-            if !SETTINGS.system.ssl_cert_file.is_empty() && !SETTINGS.system.ssl_key_file.is_empty() {
-                let cert_content = std::fs::read_to_string(&SETTINGS.system.ssl_cert_file).expect("Failed to read ssl_cert_file");
-                let key_content = std::fs::read_to_string(&SETTINGS.system.ssl_key_file).expect("Failed to read ssl_key_file");
-                let identity = Identity::from_pem(cert_content, key_content);
-                builder.tls_config(ServerTlsConfig::new().identity(identity)).expect("Failed to set tls_config")
-            } else {
-                builder
-            };
+        let mut server = if !SETTINGS.system.ssl_cert_file.is_empty()
+            && !SETTINGS.system.ssl_key_file.is_empty()
+        {
+            let cert_content = std::fs::read_to_string(&SETTINGS.system.ssl_cert_file)
+                .expect("Failed to read ssl_cert_file");
+            let key_content = std::fs::read_to_string(&SETTINGS.system.ssl_key_file)
+                .expect("Failed to read ssl_key_file");
+            let identity = Identity::from_pem(cert_content, key_content);
+            builder
+                .tls_config(ServerTlsConfig::new().identity(identity))
+                .expect("Failed to set tls_config")
+        } else {
+            builder
+        };
 
         server
             .add_service(ControlServer::new(ControlService::default()))
@@ -81,7 +83,8 @@ pub async fn start() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use std::thread;
-    use tokio::time::{ Duration};
+
+    use tokio::time::Duration;
 
     use super::*;
 

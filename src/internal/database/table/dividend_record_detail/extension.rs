@@ -2,7 +2,7 @@ use std::result::Result::Ok;
 
 use anyhow::*;
 use rust_decimal::Decimal;
-use sqlx::{Postgres, postgres::PgRow, Row, Transaction};
+use sqlx::{postgres::PgRow, Postgres, Row, Transaction};
 
 use crate::internal::database;
 

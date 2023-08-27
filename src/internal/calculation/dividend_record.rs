@@ -2,6 +2,7 @@ use std::result::Result::Ok;
 
 use anyhow::*;
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 
 use crate::internal::{
     database::{
@@ -58,7 +59,7 @@ async fn calculate_dividend(
 
     let number_of_shares_held = Decimal::new(sod.share_quantity, 0);
     let dividend_cash = dividend_sum.0 * number_of_shares_held;
-    let dividend_stock = dividend_sum.1 * number_of_shares_held / Decimal::new(10, 0);
+    let dividend_stock = dividend_sum.1 * number_of_shares_held / dec!(10);
     let dividend_stock_money = dividend_sum.1 * number_of_shares_held;
     let dividend_total = dividend_sum.2 * number_of_shares_held;
     let mut drd = DividendRecordDetail::new(

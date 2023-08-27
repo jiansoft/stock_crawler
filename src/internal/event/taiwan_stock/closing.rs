@@ -144,6 +144,7 @@ mod tests {
 
         logging::debug_file_async("結束 event::taiwan_stock::closing::aggregate".to_string());
     }
+
     #[tokio::test]
     async fn test_notify_money_change() {
         dotenv::dotenv().ok();
