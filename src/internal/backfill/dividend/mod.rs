@@ -14,6 +14,8 @@ use crate::internal::{
     logging,
 };
 
+pub mod payout_ratio;
+
 /// 更新股利發送數據
 /// 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
 pub async fn execute() -> Result<()> {

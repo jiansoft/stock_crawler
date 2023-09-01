@@ -62,7 +62,7 @@ WITH total_ownership_details AS (
         stock_ownership_details
     WHERE
         is_sold = FALSE
-        AND created_time <= '{0} 15:00:00'
+        AND date <= '{0}'
 ),
 ownership_details AS (
     SELECT
@@ -236,7 +236,7 @@ ON CONFLICT (date, security_code, member_id) DO UPDATE SET
         };
 
         result.context(format!(
-            "Failed to upsert({}) daily_money_history_detail from database",
+            "Failed to daily_money_history_detail::upsert({})  from database",
             date
         ))
     }

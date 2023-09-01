@@ -128,7 +128,7 @@ impl DailyQuote {
             "TradeValue" = excluded."TradeValue",
             "Transaction" = excluded."Transaction"
     "#;
-        let result = sqlx::query(sql)
+        sqlx::query(sql)
             .bind(self.maximum_price_in_year_date_on)
             .bind(self.minimum_price_in_year_date_on)
             .bind(self.date)
@@ -163,9 +163,10 @@ impl DailyQuote {
             .bind(self.month)
             .bind(self.day)
             .execute(database::get_connection())
-            .await?;
-
-        Ok(result)
+            .await.context(format!(
+            "Failed to DailyQuote::upsert({:#?}) from database",
+            self
+        ))
     }
 
     /// 依指定日期取得收盤資料的均線

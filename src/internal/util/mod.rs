@@ -3,7 +3,7 @@ use std::cmp::max;
 pub mod datetime;
 pub mod http;
 pub mod text;
-
+pub mod map;
 /*
 分錢算式有小數位
 fn distribute_amount(amount: f64, parts: usize) -> Vec<f64> {

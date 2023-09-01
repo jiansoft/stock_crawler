@@ -96,7 +96,8 @@ with stock AS (
         INNER JOIN daily_money_history_detail dmhd ON dmhd.security_code = sod.security_code
             AND dmhd.date = '{0}'
             AND sod.member_id = dmhd.member_id
-    WHERE sod.is_sold = FALSE)
+    WHERE sod.is_sold = FALSE
+)
 INSERT INTO daily_money_history_detail_more (member_id, "date", transaction_date, security_code, closing_price, number_of_shares_held, unit_price_per_share,
     cost, market_value, profit_and_loss, profit_and_loss_percentage)
 SELECT
@@ -128,7 +129,7 @@ ORDER BY
         };
 
         result.context(format!(
-            "Failed to upsert({}) daily_money_history_detail_more from database",
+            "Failed to daily_money_history_detail_more::upsert({}) from database",
             &date
         ))
     }

@@ -199,6 +199,7 @@ WHERE
             ))
     }
 
+
     /// 按照年份和除權息日取得股利總和的數據
     pub async fn fetch_yearly_dividends_sum_by_date(
         &self,
@@ -341,6 +342,26 @@ WHERE "SuspendListing" = false
         Ok(stock_symbols)
     }
 
+/*    /// 取得尚未有指定年度配息的股票代號
+    pub async fn fetch_stock_symbol_that_without_payout_ratio() -> Result<Vec<String>> {
+        let sql = r#"
+SELECT
+    security_code
+FROM dividend
+WHERE payout_ratio = 0
+GROUP BY security_code
+ORDER BY random();
+"#;
+        let stock_symbols: Vec<String> = sqlx::query(sql)
+            .fetch_all(database::get_connection())
+            .await?
+            .into_iter()
+            .map(|row| row.get("security_code"))
+            .collect();
+
+        Ok(stock_symbols)
+    }*/
+
     fn row_to_entity(row: PgRow) -> Result<Dividend, sqlx::Error> {
         Ok(Dividend {
             serial: row.try_get("serial")?,
@@ -439,6 +460,19 @@ mod tests {
     use crate::internal::logging;
 
     use super::*;
+
+/*    #[tokio::test]
+    async fn test_fetch_stock_symbol_that_without_payout_ratio() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_stock_symbol_that_without_payout_ratio".to_string());
+        let r = Dividend::fetch_stock_symbol_that_without_payout_ratio().await;
+        if let Ok(result) = r {
+            logging::debug_file_async(format!("{:?} ", result));
+        } else if let Err(err) = r {
+            logging::debug_file_async(format!("{:#?} ", err));
+        }
+        logging::debug_file_async("結束 fetch_stock_symbol_that_without_payout_ratio".to_string());
+    }*/
 
     #[tokio::test]
     async fn test_fetch_no_dividends_for_year() {

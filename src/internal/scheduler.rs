@@ -41,6 +41,8 @@ pub async fn run_cron() -> Result<()> {
             "0 0 17 * * *",
             backfill::net_asset_value_per_share::emerging::execute,
         ),
+        // 02:30 更新興櫃股票的每股淨值
+        create_job("0 30 18 * * *", backfill::dividend::payout_ratio::execute),
         // 05:00 更新台股年度財報
         create_job(
             "0 0 21 * * *",

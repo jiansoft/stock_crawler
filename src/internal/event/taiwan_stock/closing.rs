@@ -65,7 +65,6 @@ async fn aggregate(date: NaiveDate) -> Result<()> {
     logging::info_file_async("重建 last_daily_quotes 表內的數據結束".to_string());
 
     // 計算便宜、合理、昂貴價的估算
-    // Estimate::insert(date).await?;
     calculation::estimated_price::calculate_estimated_price(date).await?;
     logging::info_file_async("計算便宜、合理、昂貴價的估算結束".to_string());
 

@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Duration, Local, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
@@ -36,23 +36,17 @@ impl DailyMoneyHistory {
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
-        let one_month_ago = date - Duration::days(30);
         let sql = format!(
             r#"
-WITH daily_quotes AS (
-	SELECT "SecurityCode", "ClosingPrice"
-	FROM "DailyQuotes"
-	WHERE "Serial" IN (
-		SELECT MAX("Serial") AS serial
-		FROM "DailyQuotes"
-		WHERE "Date" > $1 AND "Date" <= $2
-		GROUP BY "SecurityCode"
-	)
-),
-ownership_details AS (
+WITH ownership_details AS (
 	SELECT security_code, share_quantity, member_id
 	FROM stock_ownership_details
-	WHERE is_sold = false
+	WHERE is_sold = false and date <= $1
+),
+ daily_quotes AS (
+	SELECT "SecurityCode", "ClosingPrice"
+	FROM "DailyQuotes"
+	WHERE "Date" = $1 AND "SecurityCode" in (select security_code FROM ownership_details)
 ),
 total AS (
 	SELECT '{0}' AS "date", SUM(od.share_quantity * dq."ClosingPrice") AS "sum"
@@ -82,7 +76,7 @@ ON CONFLICT (date) DO UPDATE SET
             date
         );
 
-        let query = sqlx::query(&sql).bind(one_month_ago).bind(date);
+        let query = sqlx::query(&sql).bind(date);
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
@@ -106,10 +100,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_insert() {
+    async fn test_upsert() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 DailyMoneyHistory::upsert".to_string());
-        let current_date = NaiveDate::parse_from_str("2023-08-04", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2023-08-30", "%Y-%m-%d").unwrap();
         let mut tx = database::get_tx().await.ok();
         match DailyMoneyHistory::upsert(current_date, &mut tx).await {
             Ok(r) => {

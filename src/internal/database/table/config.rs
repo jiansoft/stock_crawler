@@ -1,5 +1,3 @@
-use core::result::Result::Ok;
-
 use anyhow::*;
 use sqlx::postgres::PgQueryResult;
 

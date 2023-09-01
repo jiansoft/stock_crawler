@@ -17,6 +17,7 @@ use crate::internal::{
         text,
     },
 };
+use crate::internal::util::map::Keyable;
 
 const UNSET_DATE: &str = "-";
 
@@ -86,6 +87,12 @@ impl GoodInfoDividend {
             stock_dividend: Default::default(),
             year_of_dividend: 0,
         }
+    }
+}
+
+impl Keyable for GoodInfoDividend {
+    fn key(&self) -> String {
+        format!("{}-{}-{}", self.stock_symbol, self.year, self.quarter)
     }
 }
 
@@ -224,7 +231,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("2330").await {
+        match visit("2838").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("dividend : {:#?}", e));

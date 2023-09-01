@@ -43,7 +43,7 @@ pub async fn execute() -> Result<()> {
         })
         .await;
 
-    logging::info_file_async("上櫃收盤數據更新到資料庫完成".to_string());
+    logging::info_file_async("上市櫃收盤數據更新到資料庫完成".to_string());
     /* let tasks: Vec<_> = quotes.into_iter().map(process_daily_quote).collect();
     futures::future::join_all(tasks).await;*/
 

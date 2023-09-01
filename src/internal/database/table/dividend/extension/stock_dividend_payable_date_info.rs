@@ -41,7 +41,7 @@ WHERE security_code in (select security_code from stock_ownership_details where 
         .fetch_all(database::get_connection())
         .await
         .context(format!(
-            "Failed to fetch_stocks_with_payable_on_date({}) from database",
+            "Failed to StockDividendPayableDateInfo::fetch({}) from database",
             date
         ))
 }
