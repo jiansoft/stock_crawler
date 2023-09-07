@@ -3,17 +3,18 @@ use core::result::Result::Ok;
 use anyhow::*;
 use chrono::{Datelike, Duration, Local};
 
-use crate::internal::{crawler::yahoo, database::table, logging, nosql, util::datetime};
+use crate::internal::{calculation, crawler::yahoo, database::table, logging, nosql, util::datetime};
 
 /// 將未有上季度財報的股票，到雅虎財經下載後回寫到 financial_statement 表
 pub async fn execute() -> Result<()> {
-    let cache_key = "financial_statement::quarter";
+    let cache_key = "financial_statement:quarter";
     let is_jump = nosql::redis::CLIENT.get_bool(cache_key).await?;
     if is_jump {
         return Ok(());
     }
 
-    let previous_quarter = Local::now() - Duration::days(125);
+    let now = Local::now();
+    let previous_quarter =  now - Duration::days(130);
     let year = previous_quarter.year();
     let quarter = datetime::month_to_quarter(previous_quarter.month());
     let stocks = table::stock::fetch_stocks_without_financial_statement(year, quarter).await?;
@@ -44,10 +45,7 @@ pub async fn execute() -> Result<()> {
 
         let fs = table::financial_statement::FinancialStatement::from(profile);
         if let Err(why) = fs.clone().upsert().await {
-            logging::error_file_async(format!(
-                "Failed to FinancialStatement.upsert because {:?}",
-                why
-            ));
+            logging::error_file_async(format!("{:?}", why));
             continue;
         }
 
@@ -56,11 +54,15 @@ pub async fn execute() -> Result<()> {
             fs
         ));
 
-        success_update_count += success_update_count;
+        success_update_count += 1;
     }
 
     if success_update_count > 0 {
         table::stock::Stock::update_last_eps().await?;
+        let yesterday = now - Duration::days(1);
+        // 計算便宜、合理、昂貴價的估算
+        calculation::estimated_price::calculate_estimated_price(yesterday.date_naive()).await?;
+        logging::info_file_async("季度財報更新重新計算便宜、合理、昂貴價的估算結束".to_string());
     }
 
     nosql::redis::CLIENT

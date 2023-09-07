@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{Datelike, NaiveDate};
+use chrono::NaiveDate;
 use sqlx::postgres::PgQueryResult;
 
 use crate::internal::database;
@@ -49,63 +49,92 @@ impl Estimate {
         }
     }
 
-
     pub async fn upsert(&self, years: String) -> Result<PgQueryResult> {
         let sql = format!(
             r#"
-WITH price as (
-	SELECT
-        "SecurityCode",
+WITH params AS (
+    SELECT
+        array[{0}]::int[] AS year_filter,
+        '{1}' AS security_code_filter,
+        '{2}'::date AS date_filter
+),
+price as (
+    SELECT
+        "SecurityCode" AS security_code,
         COUNT(DISTINCT "year") AS year_count,
-        min("ClosingPrice") AS price_cheap,
-        AVG("ClosingPrice") AS price_fair,
-        max("ClosingPrice") AS price_expensive
-    FROM
-        "DailyQuotes"
-    WHERE
-        "SecurityCode" = $1 and
-        "year" in ({0})
-        AND "ClosingPrice" > 0
-    GROUP BY
-        "SecurityCode"
+        PERCENTILE_CONT(0.2) WITHIN GROUP (ORDER BY "LowestPrice") AS price_cheap,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "ClosingPrice") AS price_fair,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "HighestPrice") AS price_expensive
+    FROM params AS p
+    INNER JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode"
+                                   AND "Date" <= p.date_filter
+                                   AND "year" = ANY(p.year_filter)
+                                   AND "ClosingPrice" > 0
+    GROUP BY "SecurityCode"
 ),
 dividend as (
 	SELECT
-        security_code,
-        AVG("sum") * 15 AS dividend_cheap,
-        AVG("sum") * 20 AS dividend_fair,
-        AVG("sum") * 30 AS dividend_expensive
-    FROM
-        dividend
-    WHERE
-        security_code = $1
-        AND "year" IN ({0})
-    GROUP BY
-        security_code
+        d.security_code,
+        AVG(d."sum") * 15 AS dividend_cheap,
+        AVG(d."sum") * 20 AS dividend_fair,
+        AVG(d."sum") * 25 AS dividend_expensive
+    FROM params AS p
+    JOIN dividend d ON p.security_code_filter = d.security_code AND d."year" = ANY(p.year_filter)
+    GROUP BY d.security_code
+),
+dividend_payout_ratio as (
+	SELECT
+        d.security_code,
+        COALESCE(PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY d.payout_ratio), 70) AS payout_ratio
+    FROM params AS p
+    LEFT JOIN public.dividend d ON p.security_code_filter = d.security_code
+                                AND d."year" = ANY(p.year_filter)
+                                AND d.payout_ratio > 0
+                                AND d.payout_ratio <= 100
+    GROUP BY d.security_code
+),
+eps as (
+    SELECT
+        s.stock_symbol,
+        s.last_four_eps * (dpr.payout_ratio / 100) * 15 as eps_cheap,
+        s.last_four_eps * (dpr.payout_ratio / 100) * 20 as eps_fair,
+        s.last_four_eps * (dpr.payout_ratio / 100) * 25 as eps_expensive
+    FROM params AS p
+    JOIN stocks s ON p.security_code_filter = s.stock_symbol
+    JOIN dividend_payout_ratio dpr ON p.security_code_filter = dpr.security_code
+
 )
-insert into estimate (
-	security_code, "date", percentage, closing_price, cheap, fair, expensive, price_cheap,
-	price_fair, price_expensive, dividend_cheap, dividend_fair, dividend_expensive, year_count
+INSERT INTO estimate (
+    security_code, "date", percentage, closing_price, cheap, fair, expensive, price_cheap,
+    price_fair, price_expensive, dividend_cheap, dividend_fair, dividend_expensive, year_count,
+    eps_cheap, eps_fair, eps_expensive, update_time
 )
-select dq."SecurityCode",
-	dq."Date",
-	(((dq."ClosingPrice" / ((price_cheap + dividend_cheap) / 2))) * 100) as percentage,
-	dq."ClosingPrice",
-	(price_cheap + dividend_cheap) / 2                                   as cheap,
-	(price_fair + dividend_fair) / 2                                     as fair,
-	(price_expensive + dividend_expensive) / 2                           as expensive,
-	price_cheap,
-	price_fair,
-	price_expensive,
-	dividend_cheap,
-	dividend_fair,
-	dividend_expensive,
-	year_count
-from stocks AS c
-inner join "DailyQuotes" as dq on "c".stock_symbol = dq."SecurityCode" and dq."Date" = $2
-inner join price on dq."SecurityCode" = price."SecurityCode"
-inner join dividend on dq."SecurityCode" = dividend.security_code
-ON CONFLICT (date,security_code) DO UPDATE SET
+SELECT
+    dq."SecurityCode",
+    dq."Date",
+    (((dq."ClosingPrice" / ((price_cheap + dividend_cheap + eps.eps_cheap) / 3))) * 100) as percentage,
+    dq."ClosingPrice",
+    (price_cheap + dividend_cheap + eps.eps_cheap) / 3             as cheap,
+    (price_fair + dividend_fair + eps.eps_fair) / 3                as fair,
+    (price_expensive + dividend_expensive + eps.eps_expensive) / 3 as expensive,
+    price_cheap,
+    price_fair,
+    price_expensive,
+    dividend_cheap,
+    dividend_fair,
+    dividend_expensive,
+    year_count,
+    eps_cheap,
+    eps_fair,
+    eps_expensive,
+    NOW()
+FROM params AS p
+INNER JOIN stocks AS s ON p.security_code_filter = s.stock_symbol
+INNER JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode" and dq."Date" = p.date_filter
+INNER JOIN price ON p.security_code_filter = price.security_code
+INNER JOIN dividend ON p.security_code_filter = dividend.security_code
+INNER JOIN eps ON p.security_code_filter = eps.stock_symbol
+ON CONFLICT (date, security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,
     closing_price = EXCLUDED.closing_price,
     cheap = EXCLUDED.cheap,
@@ -117,29 +146,30 @@ ON CONFLICT (date,security_code) DO UPDATE SET
     dividend_cheap = EXCLUDED.dividend_cheap,
     dividend_fair = EXCLUDED.dividend_fair,
     dividend_expensive = EXCLUDED.dividend_expensive,
-    year_count = EXCLUDED.year_count;
+    eps_cheap = EXCLUDED.eps_cheap,
+    eps_fair = EXCLUDED.eps_fair,
+    eps_expensive = EXCLUDED.eps_expensive,
+    year_count = EXCLUDED.year_count,
+    update_time = NOW();
 "#,
-            years
+            years, &self.security_code, self.date
         );
 
         sqlx::query(&sql)
-            .bind(&self.security_code)
-            .bind(self.date)
             .execute(database::get_connection())
             .await
             .context(format!(
-                "Failed to upsert estimate({:#?}) from database",
-                self
+                "Failed to upsert estimate({:#?}) from database\nsql:{}",
+                self, sql
             ))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::Local;
-
     use crate::internal::cache::SHARE;
     use crate::internal::logging;
+    use chrono::Datelike;
 
     use super::*;
 

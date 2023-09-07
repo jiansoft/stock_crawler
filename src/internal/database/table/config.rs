@@ -50,9 +50,9 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Local, NaiveDate};
-
     use crate::internal::logging;
+    use chrono::{Local, NaiveDate};
+    use std::result::Result::Ok;
 
     use super::*;
 

@@ -55,14 +55,15 @@ select serial,
        payout_ratio_stock,
        payout_ratio
 from dividend
-where payout_ratio = 0 -- and security_code='2330'
--- order by security_code
+where "sum" > 0 AND payout_ratio = 0 -- and security_code='2330'
+    --and security_code in (select stock_symbol from stocks where stock_industry_id = 25)
+    --order by random()
 "#;
 
     sqlx::query_as::<_, PayoutRatioInfo>(sql)
         .fetch_all(database::get_connection())
         .await
-        .context("Failed to StockDividendPayoutRatioInfo::fetch() from database".to_string())
+        .context("Failed to fetch_without_payout_ratio() from database".to_string())
 }
 
 /*pub fn vec_to_hashmap(
@@ -101,11 +102,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_fetch() {
+    async fn test_fetch_without_payout_ratio() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 StockDividendPayoutRatioInfo::fetch".to_string());
 
-        match fetch().await {
+        match fetch_without_payout_ratio().await {
             Ok(cd) => {
                 //dbg!(&cd);
                 let h = vec_to_hashmap(cd);

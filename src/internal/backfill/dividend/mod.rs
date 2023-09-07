@@ -23,7 +23,7 @@ pub async fn execute() -> Result<()> {
     let now = Local::now();
     let year = now.year();
     let no_or_multiple_dividend = processing_no_or_multiple(year);
-    let yahoo = processing_unannounced_ex_dividend_dates(year);
+    let yahoo = processing_unannounced_ex_dividend_date(year);
     let (res_no_or_multiple, res_yahoo) = tokio::join!(no_or_multiple_dividend, yahoo);
 
     match res_no_or_multiple {
@@ -139,7 +139,7 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
     Ok(())
 }
 
-async fn processing_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
+async fn processing_unannounced_ex_dividend_date(year: i32) -> Result<()> {
     //除息日 尚未公布
     let dividends =
         dividend::Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
@@ -153,7 +153,7 @@ async fn processing_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
 
     let tasks: Vec<_> = dividends
         .into_iter()
-        .map(|d| fetch_dividend_from_yahoo(d, year))
+        .map(|d| processing_unannounced_ex_dividend_date_from_yahoo(d, year))
         .collect();
     let results = futures::future::join_all(tasks).await;
 
@@ -168,11 +168,13 @@ async fn processing_unannounced_ex_dividend_dates(year: i32) -> Result<()> {
     Ok(())
 }
 
-async fn fetch_dividend_from_yahoo(mut entity: dividend::Dividend, year: i32) -> Result<()> {
+async fn processing_unannounced_ex_dividend_date_from_yahoo(
+    mut entity: dividend::Dividend,
+    year: i32,
+) -> Result<()> {
     let strategy = ExponentialBackoff::from_millis(100)
         .map(jitter) // add jitter to delays
         .take(5); // limit to 5 retries
-
     let retry_future = Retry::spawn(strategy, || yahoo::dividend::visit(&entity.security_code));
     let yahoo = match retry_future.await {
         Ok(yahoo_dividend) => yahoo_dividend,
@@ -187,7 +189,9 @@ async fn fetch_dividend_from_yahoo(mut entity: dividend::Dividend, year: i32) ->
             detail.year_of_dividend == entity.year_of_dividend
                 && detail.quarter == entity.quarter
                 && (detail.ex_dividend_date1 != entity.ex_dividend_date1
-                    || detail.ex_dividend_date2 != entity.ex_dividend_date2)
+                    || detail.ex_dividend_date2 != entity.ex_dividend_date2
+                    || detail.payable_date1 != entity.payable_date1
+                    || detail.payable_date2 != entity.payable_date2)
         });
 
         if let Some(yahoo_dividend_detail) = yahoo_dividend_detail {
@@ -232,7 +236,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 processing_with_unannounced_ex_dividend_dates".to_string());
 
-        match processing_unannounced_ex_dividend_dates(2023).await {
+        match processing_unannounced_ex_dividend_date(2023).await {
             Ok(_) => {
                 logging::debug_file_async(
                     "processing_with_unannounced_ex_dividend_dates executed successfully."
@@ -256,7 +260,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 processing_without_or_multiple".to_string());
 
-        match processing_no_or_multiple(2023).await {
+        match processing_no_or_multiple(2838).await {
             Ok(_) => {
                 logging::debug_file_async(
                     "processing_without_or_multiple executed successfully.".to_string(),

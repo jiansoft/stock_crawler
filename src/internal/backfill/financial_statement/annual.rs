@@ -1,6 +1,4 @@
-use std::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::{Result};
 use chrono::Local;
 use futures::future;
 
@@ -17,7 +15,7 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    let cache_key = "financial_statement::annual";
+    let cache_key = "financial_statement:annual";
     let is_jump = nosql::redis::CLIENT.get_bool(cache_key).await?;
     if is_jump {
         return Ok(());

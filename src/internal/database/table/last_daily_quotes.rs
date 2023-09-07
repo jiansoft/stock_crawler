@@ -94,8 +94,8 @@ WHERE "Serial" IN
 	where "Date" >= $1
 	group by "SecurityCode"
 )
-ORDER BY "SecurityCode","Date"
-ON CONFLICT (security_code,date)
+ORDER BY "SecurityCode"
+ON CONFLICT (security_code)
 DO UPDATE SET
 	trading_volume = excluded.trading_volume,
 	transaction = excluded.transaction,
@@ -131,7 +131,7 @@ DO UPDATE SET
             .bind(year_ago)
             .execute(&mut *tx)
             .await
-            .context("Failed to rebuild from database")
+            .context("Failed to LastDailyQuotes::rebuild from database")
         {
             Ok(pg) => {
                 tx.commit().await?;

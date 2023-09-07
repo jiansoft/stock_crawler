@@ -352,6 +352,26 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn test_update_last_eps() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 update_last_eps".to_string());
+        match Stock::update_last_eps().await {
+            Ok(_) => {
+
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to update_last_eps because: {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 update_last_eps".to_string());
+    }
+
+
+    #[tokio::test]
     async fn test_fetch() {
         dotenv::dotenv().ok();
         //logging::info_file_async("開始 fetch".to_string());

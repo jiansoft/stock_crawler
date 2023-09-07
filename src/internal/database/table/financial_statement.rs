@@ -91,7 +91,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     return_on_assets = EXCLUDED.return_on_assets,
     updated_time = EXCLUDED.updated_time;
 "#;
-        let result = sqlx::query(sql)
+        sqlx::query(sql)
             .bind(&self.security_code)
             .bind(self.year)
             .bind(&self.quarter)
@@ -108,9 +108,11 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .bind(self.created_time)
             .bind(self.updated_time)
             .execute(database::get_connection())
-            .await?;
-
-        Ok(result)
+            .await
+            .context(format!(
+                "Failed to upsert({:#?}) from database\nsql:{}",
+                self, &sql
+            ))
     }
 }
 
