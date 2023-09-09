@@ -89,7 +89,7 @@ mod tests {
         let last_month = naive_datetime - Duration::minutes(1);
 
         let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-        let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, timezone);
+        let last_month_timezone = timezone.from_local_datetime(&last_month).unwrap();
         println!("last_month_timezone:{:?}", last_month_timezone);
         match visit(last_month_timezone).await {
             Err(why) => {

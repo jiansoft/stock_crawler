@@ -1,7 +1,7 @@
 use std::{result::Result::Ok, str::FromStr};
 
 use anyhow::*;
-use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate, TimeZone};
 use rust_decimal::Decimal;
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
@@ -219,22 +219,20 @@ impl From<Vec<String>> for Revenue {
 
 pub async fn fetch_last_two_month() -> Result<Vec<Revenue>> {
     let now = Local::now();
-    //now.offset()
-    //let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-
     let now_first_day = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap();
-
     let last_month = now_first_day - Duration::minutes(1);
-    let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, *now.offset());
+    let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
+    let last_month_timezone = timezone.from_local_datetime(&last_month).unwrap();
     let two_month_ago_first_day = NaiveDate::from_ymd_opt(last_month.year(), last_month.month(), 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap();
     let two_month_ago = two_month_ago_first_day - Duration::minutes(1);
-    let two_month_ago_timezone = DateTime::<FixedOffset>::from_local(two_month_ago, *now.offset());
+    let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
+    let two_month_ago_timezone = timezone.from_local_datetime(&two_month_ago).unwrap();
     let last_month_int = (last_month_timezone.year() * 100) + last_month_timezone.month() as i32;
     let two_month_ago_int =
         (two_month_ago_timezone.year() * 100) + two_month_ago_timezone.month() as i32;
@@ -336,7 +334,7 @@ mod tests {
 
     use std::str::FromStr;
 
-    use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, NaiveDate};
+    use chrono::{ Datelike, Duration, FixedOffset, Local, NaiveDate, TimeZone};
     use rust_decimal::Decimal;
 
     //use chrono::{Datelike, Local, NaiveDate};
@@ -375,18 +373,20 @@ mod tests {
             .unwrap();
 
         let last_month = now_first_day - Duration::minutes(1);
-        let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, *now.offset());
+        let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
+        let last_month_timezone = timezone.from_local_datetime(&last_month).unwrap();
         let two_month_ago_first_day =
             NaiveDate::from_ymd_opt(last_month.year(), last_month.month(), 1)
                 .unwrap()
                 .and_hms_opt(0, 0, 0)
                 .unwrap();
         let two_month_ago = two_month_ago_first_day - Duration::minutes(1);
-        let two_month_ago_timezone =
-            DateTime::<FixedOffset>::from_local(two_month_ago, *now.offset());
+        let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
+        let two_month_ago_timezone = timezone.from_local_datetime(&two_month_ago).unwrap();
+
         println!("This month's first day: {:?}", now_first_day);
-        println!("Last month's first day: {:?}", last_month_timezone);
-        println!("Two months ago first day: {:?}", two_month_ago_timezone);
+        println!("Last month's last day: {:?}", last_month_timezone);
+        println!("Two months ago last day: {:?}", two_month_ago_timezone);
     }
 
     #[tokio::test]

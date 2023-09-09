@@ -25,7 +25,7 @@ pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
     let stock_symbols: Vec<String> = stocks.keys().cloned().collect();
 
     stream::iter(stock_symbols)
-        .for_each_concurrent(util::concurrent_limit_16(), |stock_symbol| {
+        .for_each_concurrent(util::concurrent_limit_32(), |stock_symbol| {
             let years = years_str.clone();
             async move {
                 let estimate = Estimate::new(stock_symbol, date);

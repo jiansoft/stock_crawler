@@ -1,7 +1,5 @@
-use core::result::Result::Ok;
-
-use anyhow::*;
-use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate};
+use anyhow::{Result};
+use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeZone};
 use futures::{stream, StreamExt};
 
 use crate::internal::{
@@ -20,7 +18,7 @@ pub async fn execute() -> Result<()> {
         .unwrap();
     let last_month = naive_datetime - chrono::Duration::minutes(1);
     let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
-    let last_month_timezone = DateTime::<FixedOffset>::from_local(last_month, timezone);
+    let last_month_timezone = timezone.from_local_datetime(&last_month).unwrap();
     let year = last_month_timezone.year();
     let month = last_month_timezone.month();
     let revenues = twse::revenue::visit(last_month_timezone).await?;

@@ -21,8 +21,10 @@ pub struct Stock {
     pub name: String,
     pub suspend_listing: bool,
     pub net_asset_value_per_share: Decimal,
-    //權植佔比
+    // 權植佔比
     pub weight: Decimal,
+    // 股東權益報酬率
+    pub return_on_equity: Decimal,
     pub create_time: DateTime<Local>,
     /// 交易所的市場編號參考 stock_exchange_market
     pub stock_exchange_market_id: i32,
@@ -38,6 +40,7 @@ impl Stock {
             suspend_listing: false,
             net_asset_value_per_share: Default::default(),
             weight: Default::default(),
+            return_on_equity: Default::default(),
             create_time: Local::now(),
             stock_exchange_market_id: 0,
             stock_industry_id: 0,
@@ -57,31 +60,58 @@ impl Stock {
     /// 更新個股最新一季與近四季的EPS
     pub async fn update_last_eps() -> Result<PgQueryResult> {
         let sql = r#"
-with eps_data as (
-	select row_number() OVER (PARTITION BY security_code order by year desc,quarter desc) AS row_number, serial
-	from financial_statement
-	where year in ($1,$2) and quarter in ('Q1', 'Q2', 'Q3', 'Q4')
+WITH fs_data AS (
+    SELECT
+        row_number() OVER (
+            PARTITION BY security_code
+            ORDER BY year DESC, quarter DESC
+        ) AS row_number,
+        serial
+    FROM
+        financial_statement
+    WHERE
+        year IN ($1, $2)
+        AND quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
 ),
-eps_row as (
-	select row_number, fs.security_code, fs.earnings_per_share
-	from financial_statement fs
-	inner join eps_data on fs.serial = eps_data.serial
+
+relevant_fs_rows AS (
+    SELECT
+        fs_data.row_number,
+        fs.security_code,
+        fs.earnings_per_share,
+        fs.net_asset_value_per_share,
+        fs.return_on_equity
+    FROM
+        financial_statement fs
+    JOIN
+        fs_data ON fs_data.serial = fs.serial
 ),
-last_one_eps as (select security_code, earnings_per_share from eps_row where row_number = 1),
-last_four_eps as (
-	select eps_row.security_code, sum(eps_row.earnings_per_share) as eps
-	from eps_row
-	where eps_row.row_number in (1, 2, 3, 4)
-	group by eps_row.security_code
-),
-eps as (
-	select last_four_eps.security_code, eps as last_four_eps, last_one_eps.earnings_per_share as last_one_eps
-	from last_four_eps
-	inner join last_one_eps on last_four_eps.security_code = last_one_eps.security_code
+
+aggregated_eps AS (
+    SELECT
+        security_code,
+        SUM(earnings_per_share) AS last_four_eps
+    FROM
+        relevant_fs_rows
+    WHERE
+        row_number <= 4
+    GROUP BY
+        security_code
 )
-update stocks Set last_four_eps = eps.last_four_eps,last_one_eps = eps.last_one_eps
-FROM eps
-where eps.security_code = stocks.stock_symbol;
+
+UPDATE
+    stocks
+SET
+    last_four_eps = agg.last_four_eps,
+    last_one_eps = current_row.earnings_per_share,
+    net_asset_value_per_share = current_row.net_asset_value_per_share,
+    return_on_equity = current_row.return_on_equity
+FROM
+    relevant_fs_rows AS current_row
+JOIN
+    aggregated_eps AS agg ON current_row.security_code = agg.security_code
+WHERE
+    current_row.security_code = stocks.stock_symbol;
 "#;
         let now = Local::now();
         let one_year_ago = now - Duration::days(365);
@@ -200,6 +230,7 @@ SELECT
     "SuspendListing" AS suspend_listing,
     "CreateTime" AS create_time,
     net_asset_value_per_share,
+    return_on_equity,
     weight,
     stock_exchange_market_id,
     stock_industry_id
@@ -220,6 +251,7 @@ ORDER BY
                     create_time: row.try_get("create_time")?,
                     stock_exchange_market_id: row.try_get("stock_exchange_market_id")?,
                     stock_industry_id: row.try_get("stock_industry_id")?,
+                    return_on_equity: row.try_get("return_on_equity")?,
                 })
             })
             .fetch_all(database::get_connection())
@@ -236,6 +268,7 @@ impl Clone for Stock {
             suspend_listing: self.suspend_listing,
             net_asset_value_per_share: self.net_asset_value_per_share,
             weight: self.weight,
+            return_on_equity: self.return_on_equity,
             create_time: self.create_time,
             stock_exchange_market_id: self.stock_exchange_market_id,
             stock_industry_id: self.stock_industry_id,
@@ -258,6 +291,7 @@ impl From<twse::international_securities_identification_number::InternationalSec
             suspend_listing: false,
             net_asset_value_per_share: Default::default(),
             weight: Default::default(),
+            return_on_equity: Default::default(),
             create_time: Local::now(),
             stock_exchange_market_id: isin.exchange_market.stock_exchange_market_id,
             stock_industry_id: isin.industry_id,
@@ -274,6 +308,7 @@ impl From<tpex::net_asset_value_per_share::Emerging> for Stock {
             suspend_listing: false,
             net_asset_value_per_share: tpex.net_asset_value_per_share,
             weight: Default::default(),
+            return_on_equity: Default::default(),
             create_time: Local::now(),
             stock_exchange_market_id: Default::default(),
             stock_industry_id: Default::default(),
@@ -290,6 +325,7 @@ SELECT
     s."SuspendListing" AS suspend_listing,
     s."CreateTime" AS create_time,
     s.net_asset_value_per_share,
+    s.return_on_equity,
     s.stock_exchange_market_id,
     s.stock_industry_id,
     s.weight
@@ -317,6 +353,7 @@ SELECT
     s."SuspendListing" AS suspend_listing,
     s."CreateTime" AS create_time,
     s.net_asset_value_per_share,
+    s.return_on_equity,
     s.stock_exchange_market_id,
     s.stock_industry_id,
     s.weight
