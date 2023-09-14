@@ -2,7 +2,7 @@ use core::result::Result::Ok;
 use std::time::Duration;
 
 use anyhow::*;
-use chrono::{Local, NaiveDate};
+use chrono::Local;
 use futures::{stream, StreamExt};
 
 use crate::internal::{
@@ -13,10 +13,9 @@ use crate::internal::{
 };
 
 /// 調用  twse、tpex API 取得台股收盤報價
-pub async fn execute() -> Result<()> {
+pub async fn execute() -> Result<usize> {
     let now = Local::now();
     let mut quotes: Vec<daily_quote::DailyQuote> = Vec::with_capacity(2048);
-
     //上市報價
     let twse = twse::quote::visit(now);
     //上櫃報價
@@ -33,39 +32,27 @@ pub async fn execute() -> Result<()> {
         logging::info_file_async("取完上櫃收盤數據".to_string());
     }
 
-    if quotes.is_empty() {
-        return Ok(());
+    let quotes_len = quotes.len();
+
+    if quotes_len > 0 {
+        stream::iter(quotes)
+            .for_each_concurrent(util::concurrent_limit_32(), |dq| async move {
+                process_daily_quote(dq).await;
+            })
+            .await;
+
+        logging::info_file_async("上市櫃收盤數據更新到資料庫完成".to_string());
+
+        let last_closing_day_config = table::config::Config::new(
+            "last-closing-day".to_string(),
+            now.date_naive().format("%Y-%m-%d").to_string(),
+        );
+
+        last_closing_day_config.set_date_val().await?;
+        logging::info_file_async("最後收盤日設定更新到資料庫完成".to_string());
     }
 
-    stream::iter(quotes)
-        .for_each_concurrent(util::concurrent_limit_32(), |dq| async move {
-            process_daily_quote(dq).await;
-        })
-        .await;
-
-    logging::info_file_async("上市櫃收盤數據更新到資料庫完成".to_string());
-    /* let tasks: Vec<_> = quotes.into_iter().map(process_daily_quote).collect();
-    futures::future::join_all(tasks).await;*/
-
-    let date_naive = now.date_naive();
-
-    if let Ok(c) = table::config::Config::first("last-closing-day").await {
-        let date = NaiveDate::parse_from_str(&c.val, "%Y-%m-%d")?;
-        if date_naive > date {
-            let new_c =
-                table::config::Config::new(c.key, date_naive.format("%Y-%m-%d").to_string());
-            match new_c.upsert().await {
-                Ok(_) => {
-                    logging::info_file_async("最後收盤日設定更新到資料庫完成".to_string());
-                }
-                Err(why) => {
-                    logging::error_file_async(format!("Failed to config.upsert because:{:?}", why));
-                }
-            }
-        }
-    }
-
-    Ok(())
+    Ok(quotes_len)
 }
 
 async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
@@ -92,10 +79,7 @@ async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
             );
         }
         Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to quote.upsert({:#?}) because {:?}",
-                daily_quote, why
-            ));
+            logging::error_file_async(format!("({:#?}", why));
         }
     }
 }

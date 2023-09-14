@@ -1,4 +1,5 @@
-use anyhow::*;
+use anyhow::{Context, Result};
+use chrono::NaiveDate;
 use sqlx::postgres::PgQueryResult;
 
 use crate::internal::database;
@@ -32,10 +33,12 @@ impl Config {
 
     pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
-        INSERT INTO config (key, val)
-        VALUES ($1, $2)
-        ON CONFLICT (key)
-        DO UPDATE SET val = excluded.val;"#;
+INSERT INTO config
+    (key, val)
+VALUES
+    ($1, $2)
+ON CONFLICT (key)
+DO UPDATE SET val = excluded.val;"#;
         sqlx::query(sql)
             .bind(&self.key)
             .bind(&self.val)
@@ -45,6 +48,18 @@ impl Config {
                 "Failed to Config::upsert({:#?}) from database",
                 self
             ))
+    }
+
+    pub async fn set_date_val(&self) -> Result<PgQueryResult> {
+        let new_date = NaiveDate::parse_from_str(&self.val, "%Y-%m-%d")?;
+        if let Ok(c) = Config::first(&self.key).await {
+            let current_date = NaiveDate::parse_from_str(&c.val, "%Y-%m-%d")?;
+            if new_date <= current_date {
+                return Ok(PgQueryResult::default());
+            }
+        }
+
+        self.upsert().await
     }
 }
 

@@ -1,19 +1,13 @@
 use core::result::Result::Ok;
 
 use anyhow::*;
-use chrono::Local;
 
 use crate::internal::{
     backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, logging,
-    util::datetime::Weekend,
 };
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
 pub async fn execute() -> Result<()> {
-    if Local::now().is_weekend() {
-        return Ok(());
-    }
-
     let stocks = table::stock::fetch_net_asset_value_per_share_is_zero().await?;
     for mut stock in stocks {
         if stock.is_preference_shares() || stock.is_tdr() {

@@ -22,6 +22,12 @@ pub struct Estimate {
     pub dividend_cheap: f64,
     pub dividend_fair: f64,
     pub dividend_expensive: f64,
+    pub eps_cheap: f64,
+    pub eps_fair: f64,
+    pub eps_expensive: f64,
+    pub pbr_cheap: f64,
+    pub pbr_fair: f64,
+    pub pbr_expensive: f64,
     pub year_count: i32,
     pub index: i32,
 }
@@ -44,9 +50,182 @@ impl Estimate {
             dividend_cheap: 0.0,
             dividend_fair: 0.0,
             dividend_expensive: 0.0,
+            eps_cheap: 0.0,
+            eps_fair: 0.0,
+            eps_expensive: 0.0,
+            pbr_cheap: 0.0,
+            pbr_fair: 0.0,
+            pbr_expensive: 0.0,
             year_count: 0,
             index: 0,
         }
+    }
+    pub async fn upsert_all(date: NaiveDate, years: String) -> Result<PgQueryResult> {
+        let sql = format!(
+            r#"
+WITH stocks AS (
+    SELECT
+        stock_symbol,
+        last_four_eps,
+		net_asset_value_per_share
+    FROM
+        stocks AS s
+    WHERE
+        s."SuspendListing" = false
+),
+price AS (
+    SELECT
+        "SecurityCode",
+        -- COUNT(DISTINCT "year") AS year_count,
+        0 AS year_count,
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "LowestPrice") AS cheap,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "ClosingPrice") AS fair,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "HighestPrice") AS expensive
+    FROM
+        "DailyQuotes"
+    WHERE
+        "Date" <= '{1}'
+        AND "year" IN ({0})
+        AND "ClosingPrice" > 0
+    GROUP BY
+        "SecurityCode"
+),
+dividend AS (
+    SELECT
+        security_code,
+        dividend_base * 15 AS cheap,
+        dividend_base * 20 AS fair,
+        dividend_base * 25 AS expensive
+    FROM
+    (
+        SELECT
+            security_code, AVG("sum") AS dividend_base
+        FROM
+            dividend
+        WHERE
+            "year" IN ({0})
+        GROUP BY
+            security_code
+    ) AS calc
+),
+dividend_payout_ratio AS (
+    SELECT
+        security_code,
+        COALESCE(PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY d.payout_ratio), 70) AS payout_ratio
+    FROM
+        public.dividend AS d
+    WHERE
+        d."year" IN ({0})
+        AND d.payout_ratio > 0
+		AND d.payout_ratio <= 100
+    GROUP BY
+        security_code
+),
+eps AS (
+    SELECT
+        stock_symbol,
+        eps_base * 15 AS cheap,
+        eps_base * 20 AS fair,
+        eps_base * 25 AS expensive
+    FROM
+    (
+        SELECT
+            s.stock_symbol,
+            CASE
+                WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100)
+                ELSE 0
+            END AS eps_base
+        FROM
+            stocks AS s
+        INNER JOIN
+            dividend_payout_ratio AS dpr ON s.stock_symbol = dpr.security_code
+    ) AS calc
+),
+pbr AS (
+    SELECT
+        calc.security_code,
+        cheap * s.net_asset_value_per_share AS cheap,
+        fair * s.net_asset_value_per_share AS fair,
+        expensive * s.net_asset_value_per_share AS expensive
+    FROM
+    (
+        SELECT
+            dq."SecurityCode" as security_code ,
+            COALESCE(PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS cheap,
+            COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS fair,
+            COALESCE(PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS expensive
+        FROM "DailyQuotes" AS dq
+        WHERE
+            "Date" <= '{1}'
+            AND "year" IN ({0})
+            AND "price-to-book_ratio" > 0
+        GROUP BY dq."SecurityCode"
+    ) AS calc
+    INNER JOIN stocks as s on calc.security_code = s.stock_symbol
+)
+INSERT INTO estimate (
+    security_code, "date", percentage, closing_price, cheap, fair, expensive, price_cheap,
+    price_fair, price_expensive, dividend_cheap, dividend_fair, dividend_expensive, year_count,
+    eps_cheap, eps_fair, eps_expensive, pbr_cheap, pbr_fair, pbr_expensive, update_time
+)
+SELECT
+    dq."SecurityCode",
+    dq."Date",
+    (dq."ClosingPrice" / ((price.cheap * 0.2 ) + (dividend.cheap * 0.3)+ (eps.cheap * 0.3)+ (pbr.cheap * 0.2))) * 100 AS percentage,
+    dq."ClosingPrice",
+    ((price.cheap * 0.2 ) + (dividend.cheap * 0.3)+ (eps.cheap * 0.3)+ (pbr.cheap * 0.2)) as cheap,
+    ((price.fair * 0.2 ) + (dividend.fair * 0.3)+ (eps.fair * 0.3)+ (pbr.fair * 0.2)) as fair,
+    ((price.expensive * 0.2 ) + (dividend.expensive * 0.3)+ (eps.expensive * 0.3)+ (pbr.expensive * 0.2)) as expensive,
+    price.cheap,
+    price.fair,
+    price.expensive,
+    dividend.cheap,
+    dividend.fair,
+    dividend.expensive,
+    year_count,
+    eps.cheap,
+    eps.fair,
+    eps.expensive,
+	pbr.cheap,
+    pbr.fair,
+    pbr.expensive,
+    NOW()
+FROM stocks AS s
+INNER JOIN "DailyQuotes" AS dq ON dq."SecurityCode" = s.stock_symbol AND dq."Date" = '{1}'
+INNER JOIN price ON price."SecurityCode" = s.stock_symbol
+INNER JOIN dividend ON dividend.security_code = s.stock_symbol
+INNER JOIN eps ON eps.stock_symbol = s.stock_symbol
+INNER JOIN pbr ON pbr.security_code = s.stock_symbol
+ON CONFLICT (date,security_code) DO UPDATE SET
+    percentage = EXCLUDED.percentage,
+    closing_price = EXCLUDED.closing_price,
+    cheap = EXCLUDED.cheap,
+    fair = EXCLUDED.fair,
+    expensive = EXCLUDED.expensive,
+    price_cheap = EXCLUDED.price_cheap,
+    price_fair = EXCLUDED.price_fair,
+    price_expensive = EXCLUDED.price_expensive,
+    dividend_cheap = EXCLUDED.dividend_cheap,
+    dividend_fair = EXCLUDED.dividend_fair,
+    dividend_expensive = EXCLUDED.dividend_expensive,
+    eps_cheap = EXCLUDED.eps_cheap,
+    eps_fair = EXCLUDED.eps_fair,
+    eps_expensive = EXCLUDED.eps_expensive,
+    year_count = EXCLUDED.year_count,
+	pbr_cheap = EXCLUDED.pbr_cheap,
+    pbr_fair = EXCLUDED.pbr_fair,
+    pbr_expensive = EXCLUDED.pbr_expensive,
+    update_time = NOW();
+"#,
+            years, date
+        );
+        sqlx::query(&sql)
+            .execute(database::get_connection())
+            .await
+            .context(format!(
+                "Failed to upsert_all() from database\nsql:{}",
+                sql
+            ))
     }
 
     pub async fn upsert(&self, years: String) -> Result<PgQueryResult> {
@@ -103,20 +282,40 @@ eps as (
     JOIN stocks s ON p.security_code_filter = s.stock_symbol
     JOIN dividend_payout_ratio dpr ON p.security_code_filter = dpr.security_code
 
+),
+pbr as (
+    SELECT security_code,
+           pbr_cheap * net_asset_value_per_share as pbr_cheap,
+           pbr_fair * net_asset_value_per_share as pbr_fair,
+           pbr_expensive * net_asset_value_per_share as pbr_expensive
+    FROM (
+        SELECT
+            p.security_code_filter AS security_code,
+            COALESCE(PERCENTILE_CONT(0.2) WITHIN GROUP (ORDER BY "price-to-book_ratio") ,1) AS pbr_cheap,
+            COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "price-to-book_ratio"),1) AS pbr_fair,
+            COALESCE(PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "price-to-book_ratio"),1 )AS pbr_expensive
+        FROM params AS p
+        LEFT JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode"
+                                       AND "Date" <= p.date_filter
+                                       AND "year" = ANY(p.year_filter)
+                                       AND "price-to-book_ratio" > 0
+        GROUP BY p.security_code_filter
+    ) AS inner_pbr
+    INNER JOIN stocks as s on inner_pbr.security_code = s.stock_symbol
 )
 INSERT INTO estimate (
     security_code, "date", percentage, closing_price, cheap, fair, expensive, price_cheap,
     price_fair, price_expensive, dividend_cheap, dividend_fair, dividend_expensive, year_count,
-    eps_cheap, eps_fair, eps_expensive, update_time
+    eps_cheap, eps_fair, eps_expensive, pbr_cheap, pbr_fair, pbr_expensive, update_time
 )
 SELECT
     dq."SecurityCode",
     dq."Date",
-    (((dq."ClosingPrice" / ((price_cheap + dividend_cheap + eps.eps_cheap) / 3))) * 100) as percentage,
+    (dq."ClosingPrice" / ((price_cheap * 0.2 ) + (dividend_cheap * 0.3)+ (eps_cheap * 0.3)+ (pbr_cheap * 0.2))) * 100 AS percentage,
     dq."ClosingPrice",
-    (price_cheap + dividend_cheap + eps.eps_cheap) / 3             as cheap,
-    (price_fair + dividend_fair + eps.eps_fair) / 3                as fair,
-    (price_expensive + dividend_expensive + eps.eps_expensive) / 3 as expensive,
+    ((price_cheap * 0.2 ) + (dividend_cheap * 0.3)+ (eps_cheap * 0.3)+ (pbr_cheap * 0.2)) as cheap,
+    ((price_fair * 0.2 ) + (dividend_fair * 0.3)+ (eps_fair * 0.3)+ (pbr_fair * 0.2)) as fair,
+    ((price_expensive * 0.2 ) + (dividend_expensive * 0.3)+ (eps_expensive * 0.3)+ (pbr_expensive * 0.2)) as expensive,
     price_cheap,
     price_fair,
     price_expensive,
@@ -127,6 +326,9 @@ SELECT
     eps_cheap,
     eps_fair,
     eps_expensive,
+    pbr_cheap,
+    pbr_fair,
+    pbr_expensive,
     NOW()
 FROM params AS p
 INNER JOIN stocks AS s ON p.security_code_filter = s.stock_symbol
@@ -134,6 +336,7 @@ INNER JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode" and
 INNER JOIN price ON p.security_code_filter = price.security_code
 INNER JOIN dividend ON p.security_code_filter = dividend.security_code
 INNER JOIN eps ON p.security_code_filter = eps.stock_symbol
+INNER JOIN pbr ON p.security_code_filter = pbr.security_code
 ON CONFLICT (date, security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,
     closing_price = EXCLUDED.closing_price,
@@ -149,6 +352,9 @@ ON CONFLICT (date, security_code) DO UPDATE SET
     eps_cheap = EXCLUDED.eps_cheap,
     eps_fair = EXCLUDED.eps_fair,
     eps_expensive = EXCLUDED.eps_expensive,
+    pbr_cheap = EXCLUDED.pbr_cheap,
+    pbr_fair = EXCLUDED.pbr_fair,
+    pbr_expensive = EXCLUDED.pbr_expensive,
     year_count = EXCLUDED.year_count,
     update_time = NOW();
 "#,
@@ -193,5 +399,25 @@ mod tests {
         }
 
         logging::debug_file_async("結束 Estimate::upsert".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_upsert_all() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+        logging::debug_file_async("開始 Estimate::upsert_all".to_string());
+
+        let current_date = NaiveDate::parse_from_str("2023-09-12", "%Y-%m-%d").unwrap();
+        let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
+        let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
+        let years_str = years_vec.join(",");
+        match Estimate::upsert_all(current_date,years_str).await {
+            Ok(r) => logging::debug_file_async(format!("Estimate::upsert_all:{:#?}", r)),
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to Estimate::upsert_all because {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 Estimate::upsert_all".to_string());
     }
 }
