@@ -69,6 +69,8 @@ pub async fn run_cron() -> Result<()> {
         create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 13 * * *", backfill::dividend::execute),
+        // 22:00 外資持股狀態
+        create_job("0 0 14 * * *", backfill::qualified_foreign_institutional_investor::execute),
         // 每分鐘更新一次ddns的ip
         create_job("0 * * * * *", crawler::free_dns::execute),
     ];

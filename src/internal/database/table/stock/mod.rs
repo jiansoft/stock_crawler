@@ -30,6 +30,12 @@ pub struct Stock {
     pub stock_exchange_market_id: i32,
     /// 股票的產業分類編號 stock_industry
     pub stock_industry_id: i32,
+    /// 已發行股數
+    pub issued_share: i64,
+    /// 全體外資及陸資持有股數
+    pub qfii_shares_held: i64,
+    /// 全體外資及陸資持股比率
+    pub qfii_share_holding_percentage: Decimal,
 }
 
 impl Stock {
@@ -44,6 +50,9 @@ impl Stock {
             create_time: Local::now(),
             stock_exchange_market_id: 0,
             stock_industry_id: 0,
+            issued_share: 0,
+            qfii_shares_held: 0,
+            qfii_share_holding_percentage: Default::default(),
         }
     }
 
@@ -195,32 +204,6 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
         }
     }
 
-    /*    /// 依照指定的年月取得該股票其月份的最低、平均、最高價
-        pub async fn lowest_avg_highest_price_by_year_and_month(
-            &self,
-            year: i32,
-            month: i32,
-        ) -> Result<(Decimal, Decimal, Decimal)> {
-            let sql = r#"
-    SELECT
-        MIN("LowestPrice"),
-        AVG("ClosingPrice"),
-        MAX("HighestPrice")
-    FROM "DailyQuotes"
-    WHERE "SecurityCode" = $1 AND year = $2 AND month = $3
-    GROUP BY "SecurityCode", year, month;
-    "#;
-            let (lowest_price, avg_price, highest_price) =
-                sqlx::query_as::<_, (Decimal, Decimal, Decimal)>(sql)
-                    .bind(&self.stock_symbol)
-                    .bind(year)
-                    .bind(month)
-                    .fetch_one(&DB.pool)
-                    .await?;
-
-            Ok((lowest_price, avg_price, highest_price))
-        }*/
-
     /// 取得所有股票
     pub async fn fetch() -> Result<Vec<Stock>> {
         let sql = r#"
@@ -233,7 +216,10 @@ SELECT
     return_on_equity,
     weight,
     stock_exchange_market_id,
-    stock_industry_id
+    stock_industry_id,
+    issued_share,
+    qfii_shares_held,
+    qfii_share_holding_percentage
 FROM
     stocks
 ORDER BY
@@ -251,12 +237,15 @@ ORDER BY
                     create_time: row.try_get("create_time")?,
                     stock_exchange_market_id: row.try_get("stock_exchange_market_id")?,
                     stock_industry_id: row.try_get("stock_industry_id")?,
+                    issued_share: row.try_get("issued_share")?,
+                    qfii_shares_held: row.try_get("qfii_shares_held")?,
                     return_on_equity: row.try_get("return_on_equity")?,
+                    qfii_share_holding_percentage: row.try_get("qfii_share_holding_percentage")?,
                 })
             })
             .fetch_all(database::get_connection())
             .await
-            .context("Failed to stock.fetch from database")
+            .context("Failed to Stock::fetch from database")
     }
 }
 
@@ -272,6 +261,9 @@ impl Clone for Stock {
             create_time: self.create_time,
             stock_exchange_market_id: self.stock_exchange_market_id,
             stock_industry_id: self.stock_industry_id,
+            issued_share: self.issued_share,
+            qfii_shares_held: self.qfii_shares_held,
+            qfii_share_holding_percentage: self.qfii_share_holding_percentage,
         }
     }
 }
@@ -295,6 +287,9 @@ impl From<twse::international_securities_identification_number::InternationalSec
             create_time: Local::now(),
             stock_exchange_market_id: isin.exchange_market.stock_exchange_market_id,
             stock_industry_id: isin.industry_id,
+            issued_share: 0,
+            qfii_shares_held: 0,
+            qfii_share_holding_percentage: Default::default(),
         }
     }
 }
@@ -312,6 +307,9 @@ impl From<tpex::net_asset_value_per_share::Emerging> for Stock {
             create_time: Local::now(),
             stock_exchange_market_id: Default::default(),
             stock_industry_id: Default::default(),
+            issued_share: 0,
+            qfii_shares_held: 0,
+            qfii_share_holding_percentage: Default::default(),
         }
     }
 }
@@ -328,7 +326,10 @@ SELECT
     s.return_on_equity,
     s.stock_exchange_market_id,
     s.stock_industry_id,
-    s.weight
+    s.weight,
+    s.issued_share,
+    s.qfii_shares_held,
+    s.qfii_share_holding_percentage
 FROM stocks AS s
 WHERE s.stock_exchange_market_id in (2, 4)
     AND s."SuspendListing" = false
@@ -356,7 +357,10 @@ SELECT
     s.return_on_equity,
     s.stock_exchange_market_id,
     s.stock_industry_id,
-    s.weight
+    s.weight,
+    s.issued_share,
+    s.qfii_shares_held,
+    s.qfii_share_holding_percentage
 FROM stocks AS s
 WHERE s.stock_exchange_market_id in(2, 4)
     AND s."SuspendListing" = false
@@ -393,53 +397,29 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 update_last_eps".to_string());
         match Stock::update_last_eps().await {
-            Ok(_) => {
-
-            }
+            Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to update_last_eps because: {:?}",
-                    why
-                ));
+                logging::debug_file_async(format!("Failed to update_last_eps because: {:?}", why));
             }
         }
 
         logging::debug_file_async("結束 update_last_eps".to_string());
     }
 
-
     #[tokio::test]
     async fn test_fetch() {
         dotenv::dotenv().ok();
-        //logging::info_file_async("開始 fetch".to_string());
-        let r = Stock::fetch().await;
-        if let Ok(result) = r {
-            for e in result {
-                logging::info_file_async(format!("{:#?} ", e));
-            }
-        }
-        //logging::info_file_async("結束 fetch".to_string());
-    }
-
-    /*    #[tokio::test]
-    async fn test_fetch_avg_lowest_highest_price() {
-        dotenv::dotenv().ok();
-        //logging::info_file_async("開始 fetch".to_string());
-        let mut e = Stock::new();
-        e.stock_symbol = String::from("2402");
-        match e.lowest_avg_highest_price_by_year_and_month(2023, 3).await {
-            Ok((lowest_price, avg_price, highest_price)) => {
-                logging::info_file_async(format!(
-                    "stock_symbol:{} lowest_price:{} avg_price:{} highest_price:{}",
-                    e.stock_symbol, lowest_price, avg_price, highest_price
-                ));
+        logging::debug_file_async("開始 Stock::fetch".to_string());
+        match Stock::fetch().await {
+            Ok(stocks) => {
+                logging::debug_file_async(format!("stocks:{:#?}", stocks));
             }
             Err(why) => {
-                logging::error_file_async(format!("{:#?}", why));
+                logging::debug_file_async(format!("{:?}", why));
             }
         }
-
-    }*/
+        logging::debug_file_async("結束 Stock::fetch".to_string());
+    }
 
     #[tokio::test]
     async fn test_fetch_net_asset_value_per_share_is_zero() {

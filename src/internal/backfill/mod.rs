@@ -16,3 +16,5 @@ pub mod revenue;
 pub mod stock_weight;
 /// 調用 twse API 取得並更新台股加權指數
 pub mod taiwan_stock_index;
+/// 外資及陸資投資持股統計
+pub mod qualified_foreign_institutional_investor;

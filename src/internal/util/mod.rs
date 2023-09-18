@@ -4,6 +4,9 @@ pub mod datetime;
 pub mod http;
 pub mod text;
 pub mod map;
+
+/// 文數字間的轉換
+pub mod convert;
 /*
 分錢算式有小數位
 fn distribute_amount(amount: f64, parts: usize) -> Vec<f64> {

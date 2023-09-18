@@ -1,6 +1,5 @@
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Local};
-use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
@@ -13,28 +12,12 @@ use crate::internal::{
     util::http,
     StockExchange,
 };
+use crate::internal::crawler::twse::build_headers;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ListedResponse {
     pub stat: Option<String>,
     pub data9: Option<Vec<Vec<String>>>,
-}
-
-async fn build_headers() -> HeaderMap {
-    let mut h = HeaderMap::with_capacity(4);
-    h.insert("Host", "www.twse.com.tw".parse().unwrap());
-    h.insert(
-        "Referer",
-        "https://www.twse.com.tw/zh/page/trading/exchange/MI_INDEX.html"
-            .parse()
-            .unwrap(),
-    );
-    h.insert("X-Requested-With", "XMLHttpRequest".parse().unwrap());
-    h.insert(
-        "User-Agent",
-        http::user_agent::gen_random_ua().parse().unwrap(),
-    );
-    h
 }
 
 /// 抓取上市公司每日收盤資訊
