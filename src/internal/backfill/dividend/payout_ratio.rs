@@ -1,18 +1,12 @@
-use std::{collections::HashSet, thread, time::Duration};
+use std::{collections::HashSet, time::Duration};
 
 use anyhow::Result;
 
-use crate::{
-    internal::{
-        database::{
-            table::stock,
-            table
-        },
-        crawler::goodinfo,
-        logging,
-        nosql,
-        util::map::{vec_to_hashmap, Keyable}
-    }
+use crate::internal::{
+    crawler::goodinfo,
+    database::{table, table::stock},
+    logging, nosql,
+    util::map::{vec_to_hashmap, Keyable},
 };
 
 /// 將股息中盈餘分配率為零的數據向第三方取得數據後更新更新
@@ -57,7 +51,7 @@ pub async fn execute() -> Result<()> {
         nosql::redis::CLIENT
             .set(cache_key, true, 60 * 60 * 24 * 7)
             .await?;
-        thread::sleep(Duration::from_secs(90));
+        tokio::time::sleep(Duration::from_secs(90)).await;
     }
 
     Ok(())

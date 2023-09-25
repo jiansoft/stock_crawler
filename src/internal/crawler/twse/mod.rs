@@ -16,7 +16,6 @@ pub mod qualified_foreign_institutional_investor;
 
 const HOST: &str = "twse.com.tw";
 
-
 pub(crate) async fn build_headers() -> HeaderMap {
     let mut h = HeaderMap::with_capacity(4);
     h.insert("Host", "www.twse.com.tw".parse().unwrap());

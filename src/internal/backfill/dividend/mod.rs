@@ -1,4 +1,4 @@
-use std::{collections::HashSet, result::Result::Ok, thread, time::Duration};
+use std::{collections::HashSet, result::Result::Ok, time::Duration};
 
 use anyhow::*;
 use chrono::{Datelike, Local};
@@ -11,7 +11,7 @@ use tokio_retry::{
 use crate::internal::{
     crawler::{goodinfo, yahoo},
     database::table::{self, dividend},
-    logging,
+    logging, nosql,
 };
 
 pub mod payout_ratio;
@@ -96,8 +96,18 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
 
     logging::info_file_async(format!("本次殖利率的採集需收集 {} 家", stock_symbols.len()));
     for stock_symbol in stock_symbols {
+        let cache_key = format!("goodinfo:dividend:{}", stock_symbol);
+        let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
+        if is_jump {
+            continue;
+        }
+
+        nosql::redis::CLIENT
+            .set(cache_key, true, 60 * 60 * 24 * 7)
+            .await?;
+
         let dividends_from_goodinfo = goodinfo::dividend::visit(&stock_symbol).await?;
-        thread::sleep(Duration::from_secs(90));
+        tokio::time::sleep(Duration::from_secs(90)).await;
         // 取成今年度的股利數據
         let dividend_details_from_goodinfo = match dividends_from_goodinfo.get(&year) {
             Some(details) => details,

@@ -60,6 +60,7 @@ impl Estimate {
             index: 0,
         }
     }
+
     pub async fn upsert_all(date: NaiveDate, years: String) -> Result<PgQueryResult> {
         let sql = format!(
             r#"
@@ -75,7 +76,7 @@ WITH stocks AS (
 ),
 price AS (
     SELECT
-        "SecurityCode",
+        "SecurityCode" AS stock_symbol,
         -- COUNT(DISTINCT "year") AS year_count,
         0 AS year_count,
         PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "LowestPrice") AS cheap,
@@ -92,14 +93,14 @@ price AS (
 ),
 dividend AS (
     SELECT
-        security_code,
+        stock_symbol,
         dividend_base * 15 AS cheap,
         dividend_base * 20 AS fair,
         dividend_base * 25 AS expensive
     FROM
     (
         SELECT
-            security_code, AVG("sum") AS dividend_base
+            security_code AS stock_symbol, AVG("sum") AS dividend_base
         FROM
             dividend
         WHERE
@@ -110,8 +111,8 @@ dividend AS (
 ),
 dividend_payout_ratio AS (
     SELECT
-        security_code,
-        COALESCE(PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY d.payout_ratio), 70) AS payout_ratio
+        security_code as stock_symbol,
+        PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY d.payout_ratio) AS payout_ratio
     FROM
         public.dividend AS d
     WHERE
@@ -138,22 +139,22 @@ eps AS (
         FROM
             stocks AS s
         INNER JOIN
-            dividend_payout_ratio AS dpr ON s.stock_symbol = dpr.security_code
+            dividend_payout_ratio AS dpr ON s.stock_symbol = dpr.stock_symbol
     ) AS calc
 ),
 pbr AS (
     SELECT
-        calc.security_code,
+        calc.stock_symbol,
         cheap * s.net_asset_value_per_share AS cheap,
         fair * s.net_asset_value_per_share AS fair,
         expensive * s.net_asset_value_per_share AS expensive
     FROM
     (
         SELECT
-            dq."SecurityCode" as security_code ,
-            COALESCE(PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS cheap,
-            COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS fair,
-            COALESCE(PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS expensive
+            dq."SecurityCode" as stock_symbol,
+            PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "price-to-book_ratio") AS cheap,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "price-to-book_ratio") AS fair,
+            PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "price-to-book_ratio") AS expensive
         FROM "DailyQuotes" AS dq
         WHERE
             "Date" <= '{1}'
@@ -161,21 +162,67 @@ pbr AS (
             AND "price-to-book_ratio" > 0
         GROUP BY dq."SecurityCode"
     ) AS calc
-    INNER JOIN stocks as s on calc.security_code = s.stock_symbol
+    INNER JOIN stocks as s on calc.stock_symbol = s.stock_symbol
+),
+per AS(
+    SELECT
+        calc.stock_symbol,
+        dq.pe_high * calc.eps_avg as expensive,
+        dq.pe_mid * calc.eps_avg as fair,
+        dq.pe_low * calc.eps_avg as cheap
+    FROM
+    (
+        SELECT
+            inn_calc.stock_symbol,
+            CASE
+                WHEN AVG(eps) > 0 THEN AVG(eps)
+                ELSE 0
+            END AS eps_avg
+            FROM
+            (
+                SELECT
+                    fs.security_code AS stock_symbol,
+                    fs.year,
+                    SUM(fs.earnings_per_share) AS eps
+                FROM financial_statement AS fs
+                WHERE
+                    "year" IN ({0})
+                    AND quarter IN ('Q1','Q2','Q3','Q4')
+                GROUP BY fs.security_code,fs.year
+            ) AS inn_calc
+        GROUP BY inn_calc.stock_symbol
+    ) AS calc
+    INNER JOIN
+    (
+        SELECT
+            "SecurityCode" AS stock_symbol,
+            PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "PriceEarningRatio") AS pe_low,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "PriceEarningRatio") AS pe_mid,
+            PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "PriceEarningRatio") AS pe_high
+        FROM
+            "DailyQuotes"
+        WHERE
+            "Date" <= '{1}'
+            AND "year" IN ({0})
+            AND "PriceEarningRatio" > 0
+        GROUP BY
+            "SecurityCode"
+    ) AS dq on dq.stock_symbol = calc.stock_symbol
 )
 INSERT INTO estimate (
     security_code, "date", percentage, closing_price, cheap, fair, expensive, price_cheap,
     price_fair, price_expensive, dividend_cheap, dividend_fair, dividend_expensive, year_count,
-    eps_cheap, eps_fair, eps_expensive, pbr_cheap, pbr_fair, pbr_expensive, update_time
+    eps_cheap, eps_fair, eps_expensive, pbr_cheap, pbr_fair, pbr_expensive,
+    per_cheap, per_fair, per_expensive, update_time
 )
 SELECT
-    dq."SecurityCode",
+    s.stock_symbol,
     dq."Date",
-    (dq."ClosingPrice" / ((price.cheap * 0.2 ) + (dividend.cheap * 0.3) + (eps.cheap * 0.3)+ (pbr.cheap * 0.2))) * 100 AS percentage,
+    (dq."ClosingPrice" / ((price.cheap * 0.2) + (dividend.cheap * 0.29) + (eps.cheap * 0.3) + (pbr.cheap * 0.2) + (per.cheap * 0.01))) * 100 AS percentage,
     dq."ClosingPrice",
-    ((price.cheap * 0.2 ) + (dividend.cheap * 0.3) + (eps.cheap * 0.3) + (pbr.cheap * 0.2)) as cheap,
-    ((price.fair * 0.2 ) + (dividend.fair * 0.3) + (eps.fair * 0.3) + (pbr.fair * 0.2)) as fair,
-    ((price.expensive * 0.2 ) + (dividend.expensive * 0.3) + (eps.expensive * 0.3)+ (pbr.expensive * 0.2)) as expensive,
+    ((price.cheap * 0.2 ) + (dividend.cheap * 0.29) + (eps.cheap * 0.3) + (pbr.cheap * 0.2) + (per.cheap * 0.01)) AS cheap,
+    ((price.fair * 0.2 ) + (dividend.fair * 0.29) + (eps.fair * 0.3) + (pbr.fair * 0.2) + (per.fair * 0.01)) AS fair,
+    ((price.expensive * 0.2 ) + (dividend.expensive * 0.29) + (eps.expensive * 0.3) + (pbr.expensive * 0.2) + (per.expensive * 0.01)) AS expensive,
     price.cheap,
     price.fair,
     price.expensive,
@@ -189,13 +236,17 @@ SELECT
 	pbr.cheap,
     pbr.fair,
     pbr.expensive,
+    per.cheap,
+    per.fair,
+    per.expensive,
     NOW()
 FROM stocks AS s
 INNER JOIN "DailyQuotes" AS dq ON dq."SecurityCode" = s.stock_symbol AND dq."Date" = '{1}'
-INNER JOIN price ON price."SecurityCode" = s.stock_symbol
-INNER JOIN dividend ON dividend.security_code = s.stock_symbol
+INNER JOIN price ON price.stock_symbol = s.stock_symbol
+INNER JOIN dividend ON dividend.stock_symbol = s.stock_symbol
 INNER JOIN eps ON eps.stock_symbol = s.stock_symbol
-INNER JOIN pbr ON pbr.security_code = s.stock_symbol
+INNER JOIN pbr ON pbr.stock_symbol = s.stock_symbol
+INNER JOIN per ON per.stock_symbol = s.stock_symbol
 ON CONFLICT (date,security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,
     closing_price = EXCLUDED.closing_price,
@@ -215,6 +266,9 @@ ON CONFLICT (date,security_code) DO UPDATE SET
 	pbr_cheap = EXCLUDED.pbr_cheap,
     pbr_fair = EXCLUDED.pbr_fair,
     pbr_expensive = EXCLUDED.pbr_expensive,
+    per_cheap = EXCLUDED.per_cheap,
+    per_fair = EXCLUDED.per_fair,
+    per_expensive = EXCLUDED.per_expensive,
     update_time = NOW();
 "#,
             years, date
@@ -241,7 +295,7 @@ price as (
     SELECT
         "SecurityCode" AS security_code,
         COUNT(DISTINCT "year") AS year_count,
-        PERCENTILE_CONT(0.2) WITHIN GROUP (ORDER BY "LowestPrice") AS price_cheap,
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "LowestPrice") AS price_cheap,
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "ClosingPrice") AS price_fair,
         PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "HighestPrice") AS price_expensive
     FROM params AS p
@@ -291,9 +345,9 @@ pbr as (
     FROM (
         SELECT
             p.security_code_filter AS security_code,
-            COALESCE(PERCENTILE_CONT(0.2) WITHIN GROUP (ORDER BY "price-to-book_ratio") ,1) AS pbr_cheap,
-            COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "price-to-book_ratio"),1) AS pbr_fair,
-            COALESCE(PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "price-to-book_ratio"),1 )AS pbr_expensive
+            COALESCE(PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS pbr_cheap,
+            COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS pbr_fair,
+            COALESCE(PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS pbr_expensive
         FROM params AS p
         LEFT JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode"
                                        AND "Date" <= p.date_filter
@@ -302,33 +356,83 @@ pbr as (
         GROUP BY p.security_code_filter
     ) AS inner_pbr
     INNER JOIN stocks as s on inner_pbr.security_code = s.stock_symbol
+),
+per AS(
+    SELECT
+        calc.stock_symbol,
+        dq.pe_high * calc.eps_avg as per_expensive,
+        dq.pe_mid * calc.eps_avg as per_fair,
+        dq.pe_low * calc.eps_avg as per_cheap
+    FROM
+    (
+        SELECT
+            inn_calc.stock_symbol,
+            CASE
+                WHEN AVG(eps) > 0 THEN AVG(eps)
+                ELSE 0
+            END AS eps_avg
+            FROM
+            (
+                SELECT
+                    fs.security_code AS stock_symbol,
+                    fs.year,
+                    SUM(fs.earnings_per_share) AS eps
+                FROM params AS p
+                INNER JOIN financial_statement AS fs ON p.security_code_filter = fs.security_code
+                WHERE
+                    "year" = ANY(p.year_filter)
+                    AND quarter IN ('Q1','Q2','Q3','Q4')
+                GROUP BY fs.security_code,fs.year
+            ) AS inn_calc
+        GROUP BY inn_calc.stock_symbol
+    ) AS calc
+    INNER JOIN (
+        SELECT
+            p.security_code_filter AS stock_symbol,
+            COALESCE(PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "PriceEarningRatio"), 0) AS pe_low,
+            COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "PriceEarningRatio"), 0) AS pe_mid,
+            COALESCE(PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "PriceEarningRatio"), 0) AS pe_high
+        FROM params AS p
+        LEFT JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode"
+                                       AND "Date" <= p.date_filter
+                                       AND "year" = ANY(p.year_filter)
+                                       AND "PriceEarningRatio" > 0
+        GROUP BY p.security_code_filter
+    ) as dq on dq.security_code = calc.stock_symbol
 )
 INSERT INTO estimate (
-    security_code, "date", percentage, closing_price, cheap, fair, expensive, price_cheap,
-    price_fair, price_expensive, dividend_cheap, dividend_fair, dividend_expensive, year_count,
-    eps_cheap, eps_fair, eps_expensive, pbr_cheap, pbr_fair, pbr_expensive, update_time
+    security_code, "date", percentage, closing_price, cheap, fair, expensive,
+    price_cheap, price_fair, price_expensive,
+    dividend_cheap, dividend_fair, dividend_expensive,
+    eps_cheap, eps_fair, eps_expensive,
+    pbr_cheap, pbr_fair, pbr_expensive,
+    per_cheap, per_fair, per_expensive,
+    year_count, update_time
 )
 SELECT
-    dq."SecurityCode",
+    p.security_code_filter,
     dq."Date",
-    (dq."ClosingPrice" / ((price_cheap * 0.2 ) + (dividend_cheap * 0.3)+ (eps_cheap * 0.3)+ (pbr_cheap * 0.2))) * 100 AS percentage,
+    (dq."ClosingPrice" / ((price_cheap * 0.2 ) + (dividend_cheap * 0.29) + (eps_cheap * 0.3) + (pbr_cheap * 0.2) + (per_cheap * 0.01))) * 100 AS percentage,
     dq."ClosingPrice",
-    ((price_cheap * 0.2 ) + (dividend_cheap * 0.3)+ (eps_cheap * 0.3)+ (pbr_cheap * 0.2)) as cheap,
-    ((price_fair * 0.2 ) + (dividend_fair * 0.3)+ (eps_fair * 0.3)+ (pbr_fair * 0.2)) as fair,
-    ((price_expensive * 0.2 ) + (dividend_expensive * 0.3)+ (eps_expensive * 0.3)+ (pbr_expensive * 0.2)) as expensive,
+    ((price_cheap * 0.2 ) + (dividend_cheap * 0.29) + (eps_cheap * 0.3) + (pbr_cheap * 0.2) + (per_cheap * 0.01)) AS cheap,
+    ((price_fair * 0.2 ) + (dividend_fair * 0.29) + (eps_fair * 0.3) + (pbr_fair * 0.2) + (per_fair * 0.01)) as fair,
+    ((price_expensive * 0.2 ) + (dividend_expensive * 0.29)+ (eps_expensive * 0.3) + (pbr_expensive * 0.2) + (per_expensive * 0.01)) AS expensive,
     price_cheap,
     price_fair,
     price_expensive,
     dividend_cheap,
     dividend_fair,
     dividend_expensive,
-    year_count,
     eps_cheap,
     eps_fair,
     eps_expensive,
     pbr_cheap,
     pbr_fair,
     pbr_expensive,
+    per_cheap,
+    per_fair,
+    per_expensive,
+    year_count,
     NOW()
 FROM params AS p
 INNER JOIN stocks AS s ON p.security_code_filter = s.stock_symbol
@@ -337,6 +441,7 @@ INNER JOIN price ON p.security_code_filter = price.security_code
 INNER JOIN dividend ON p.security_code_filter = dividend.security_code
 INNER JOIN eps ON p.security_code_filter = eps.stock_symbol
 INNER JOIN pbr ON p.security_code_filter = pbr.security_code
+INNER JOIN per ON p.security_code_filter = per.stock_symbol
 ON CONFLICT (date, security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,
     closing_price = EXCLUDED.closing_price,
@@ -355,6 +460,9 @@ ON CONFLICT (date, security_code) DO UPDATE SET
     pbr_cheap = EXCLUDED.pbr_cheap,
     pbr_fair = EXCLUDED.pbr_fair,
     pbr_expensive = EXCLUDED.pbr_expensive,
+    per_cheap = EXCLUDED.per_cheap,
+    per_fair = EXCLUDED.per_fair,
+    per_expensive = EXCLUDED.per_expensive,
     year_count = EXCLUDED.year_count,
     update_time = NOW();
 "#,
@@ -385,11 +493,11 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 Estimate::upsert".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2023-08-18", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2023-09-15", "%Y-%m-%d").unwrap();
         let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
         let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
         let years_str = years_vec.join(",");
-        let estimate = Estimate::new("2330".to_string(), current_date);
+        let estimate = Estimate::new("9921".to_string(), current_date);
 
         match estimate.upsert(years_str).await {
             Ok(r) => logging::debug_file_async(format!("Estimate::upsert:{:#?}", r)),
@@ -407,7 +515,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 Estimate::upsert_all".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2023-09-12", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2023-09-22", "%Y-%m-%d").unwrap();
         let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
         let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
         let years_str = years_vec.join(",");

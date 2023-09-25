@@ -48,7 +48,7 @@ pub async fn execute() -> Result<usize> {
             now.date_naive().format("%Y-%m-%d").to_string(),
         );
 
-        last_closing_day_config.set_date_val().await?;
+        last_closing_day_config.set_val_as_naive_date().await?;
         logging::info_file_async("最後收盤日設定更新到資料庫完成".to_string());
     }
 

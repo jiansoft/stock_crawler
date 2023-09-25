@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDate;
 use sqlx::postgres::PgQueryResult;
 
@@ -50,7 +50,7 @@ DO UPDATE SET val = excluded.val;"#;
             ))
     }
 
-    pub async fn set_date_val(&self) -> Result<PgQueryResult> {
+    pub async fn set_val_as_naive_date(&self) -> Result<PgQueryResult> {
         let new_date = NaiveDate::parse_from_str(&self.val, "%Y-%m-%d")?;
         if let Ok(c) = Config::first(&self.key).await {
             let current_date = NaiveDate::parse_from_str(&c.val, "%Y-%m-%d")?;
@@ -60,6 +60,14 @@ DO UPDATE SET val = excluded.val;"#;
         }
 
         self.upsert().await
+    }
+
+    pub async fn get_val_naive_date(&self) -> Result<NaiveDate> {
+        if let Ok(c) = Config::first(&self.key).await {
+            return Ok(NaiveDate::parse_from_str(&c.val, "%Y-%m-%d")?);
+        }
+
+        Err(anyhow!("can't use key({}) fine the value", self.key))
     }
 }
 

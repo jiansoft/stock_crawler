@@ -41,7 +41,7 @@ pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
         date.format("%Y-%m-%d").to_string(),
     );
 
-    estimate_date_config.set_date_val().await?;
+    estimate_date_config.set_val_as_naive_date().await?;
     logging::info_file_async("價格估值日期更新到資料庫完成".to_string());
 
     Ok(())

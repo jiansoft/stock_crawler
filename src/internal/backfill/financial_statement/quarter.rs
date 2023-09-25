@@ -59,9 +59,14 @@ pub async fn execute() -> Result<()> {
 
     if success_update_count > 0 {
         table::stock::Stock::update_last_eps().await?;
-        let yesterday = now - Duration::days(1);
+        let estimate_date_config = table::config::Config::new(
+            "estimate-date".to_string(),
+           "".to_string(),
+        );
+
+        let date = estimate_date_config.get_val_naive_date().await?;
         // 計算便宜、合理、昂貴價的估算
-        calculation::estimated_price::calculate_estimated_price(yesterday.date_naive()).await?;
+        calculation::estimated_price::calculate_estimated_price(date).await?;
         logging::info_file_async("季度財報更新重新計算便宜、合理、昂貴價的估算結束".to_string());
     }
 
