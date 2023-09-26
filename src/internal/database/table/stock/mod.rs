@@ -94,8 +94,8 @@ relevant_fs_rows AS (
         financial_statement fs
     JOIN
         fs_data ON fs_data.serial = fs.serial
+    ORDER BY year DESC, quarter DESC
 ),
-
 aggregated_eps AS (
     SELECT
         security_code,
@@ -107,7 +107,6 @@ aggregated_eps AS (
     GROUP BY
         security_code
 )
-
 UPDATE
     stocks
 SET
