@@ -2,13 +2,10 @@ use anyhow::Result;
 use chrono::{DateTime, FixedOffset};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{
-    internal::{
-        crawler::twse,
-        logging,
-        util::http,
-        database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor
-    }
+use crate::internal::{
+    crawler::twse,
+    database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
+    logging, util::http,
 };
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -25,7 +22,9 @@ pub struct QFIIResponse {
 }
 
 /// 取得上市股票外資及陸資投資持股統計
-pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QualifiedForeignInstitutionalInvestor>> {
+pub async fn visit(
+    date_time: DateTime<FixedOffset>,
+) -> Result<Vec<QualifiedForeignInstitutionalInvestor>> {
     let url = format!(
         "https://www.{}/rwd/zh/fund/MI_QFIIS?date={}&selectType=ALLBUT0999&response=json&_={}",
         twse::HOST,
@@ -70,8 +69,6 @@ pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QualifiedFore
 mod tests {
     use std::result::Result::Ok;
 
-    use chrono::{Local, TimeZone};
-
     use crate::internal::cache::SHARE;
 
     use super::*;
@@ -82,11 +79,15 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 visit".to_string());
         //let date =  DateTime::parse_from_str("2023-09-14 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
-        let datetime_local: DateTime<Local> = Local
-            .datetime_from_str("2023-09-15 12:00:00", "%Y-%m-%d %H:%M:%S")
-            .unwrap();
-
-        match visit(datetime_local.fixed_offset()).await {
+        let datetime_local: DateTime<FixedOffset> =
+            match DateTime::parse_from_str("2023-09-15 12:00:00 +0800", "%Y-%m-%d %H:%M:%S %z") {
+                Ok(dt) => dt,
+                Err(why) => {
+                    logging::debug_file_async(format!("error:{:#?}", why));
+                    return;
+                }
+            };
+        match visit(datetime_local).await {
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because: {:?}", why));
             }

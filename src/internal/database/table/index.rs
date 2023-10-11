@@ -159,7 +159,7 @@ DO UPDATE
 impl Clone for Index {
     fn clone(&self) -> Self {
         Index {
-            category: self.category.clone(),
+            category: self.category.to_string(),
             date: self.date,
             trade_value: self.trade_value,
             trading_volume: self.trading_volume,

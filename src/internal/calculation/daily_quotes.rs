@@ -88,8 +88,7 @@ pub(crate) async fn process_daily_quote_moving_average(mut dq: DailyQuote) -> Re
                         price_to_book_ratio <= maximum_price_to_book_ratio &&
                         //目前淨值比大於歷史最低淨值比
                         price_to_book_ratio >= minimum_price_to_book_ratio)
-                        || (price_to_book_ratio == Decimal::ZERO
-                            && minimum_price_to_book_ratio == Decimal::ZERO)
+                        || (price_to_book_ratio == Decimal::ZERO)
                     {
                         return Ok(());
                     }

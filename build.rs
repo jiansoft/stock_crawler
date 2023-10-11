@@ -7,8 +7,10 @@
 }
 */
 
-use std::error::Error;
-use std::fs;
+use std::{
+    error::Error,
+    fs
+};
 
 static OUT_DIR: &str = "src/internal/rpc";
 

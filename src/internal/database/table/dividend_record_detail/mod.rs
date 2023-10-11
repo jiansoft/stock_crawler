@@ -104,19 +104,7 @@ impl Default for DividendRecordDetail {
 }
 
 impl Clone for DividendRecordDetail {
-    fn clone(&self) -> Self {
-        DividendRecordDetail {
-            serial: self.serial,
-            stock_ownership_details_serial: self.stock_ownership_details_serial,
-            year: self.year,
-            cash: self.cash,
-            stock: self.stock,
-            stock_money: self.stock_money,
-            total: self.total,
-            created_time: self.created_time,
-            updated_time: self.updated_time,
-        }
-    }
+    fn clone(&self) -> Self { *self }
 }
 
 #[cfg(test)]

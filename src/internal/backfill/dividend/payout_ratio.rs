@@ -26,11 +26,15 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        let cache_key = format!("payout_ratio:{}", security_code);
+        let cache_key = format!("goodinfo:payout_ratio:{}", security_code);
         let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
         if is_jump {
             continue;
         }
+
+        nosql::redis::CLIENT
+            .set(cache_key, true, 60 * 60 * 24 * 7)
+            .await?;
 
         let dividends_from_goodinfo = goodinfo::dividend::visit(&security_code).await?;
         for gds in dividends_from_goodinfo.values() {
@@ -48,16 +52,13 @@ pub async fn execute() -> Result<()> {
             }
         }
 
-        nosql::redis::CLIENT
-            .set(cache_key, true, 60 * 60 * 24 * 7)
-            .await?;
         tokio::time::sleep(Duration::from_secs(90)).await;
     }
 
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(test)] 
 mod tests {
     use crate::internal::cache::SHARE;
     use crate::internal::logging;
