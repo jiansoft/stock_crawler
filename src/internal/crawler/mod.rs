@@ -12,3 +12,7 @@ pub mod twse;
 pub mod wespai;
 /// 雅虎財經
 pub mod yahoo;
+/// 玩股網
+pub mod cnyes;
+/// PCHOME
+pub mod megatime;

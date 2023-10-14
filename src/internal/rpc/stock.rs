@@ -237,7 +237,7 @@ pub mod stock_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                (*inner).update_stock_info(request).await
+                                <T as Stock>::update_stock_info(&inner, request).await
                             };
                             Box::pin(fut)
                         }

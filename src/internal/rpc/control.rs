@@ -224,7 +224,9 @@ pub mod control_server {
                             request: tonic::Request<super::ControlRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move { (*inner).control(request).await };
+                            let fut = async move {
+                                <T as Control>::control(&inner, request).await
+                            };
                             Box::pin(fut)
                         }
                     }

@@ -1,6 +1,9 @@
-use std::sync::RwLock;
+use std::{
+    collections::HashMap,
+    sync::RwLock,
+    time::Duration
+};
 
-use hashbrown::HashMap;
 use once_cell::sync::Lazy;
 
 //use futures::executor::block_on;
@@ -25,7 +28,6 @@ pub struct Share {
     pub last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::LastDailyQuotes>>,
     // quote_history_records 股票歷史、淨值比等最高、最低的數據,resource.Init() 從資料庫內讀取出，若抓到新的數據時則會同時更新資料庫與此數據
     pub quote_history_records: RwLock<HashMap<String, quote_history_record::QuoteHistoryRecord>>,
-
     /// 股票產業分類
     pub industries: HashMap<&'static str, i32>,
     /// 股票產業分類(2, 'TAI', '上市', 1),(4, 'TWO', '上櫃', 2), (5, 'TWE', '興櫃', 2);
@@ -217,6 +219,14 @@ impl Share {
             }
         }
     }
+
+    /// 從快取中取得股票的資料
+    pub async fn get_stock(&self,symbol: &str) -> Option<stock::Stock> {
+        match self.stocks.read() {
+            Ok(cache) => cache.get(symbol).cloned(),
+            Err(_) => None,
+        }
+    }
 }
 
 impl Default for Share {
@@ -231,6 +241,7 @@ pub static TTL: Lazy<Ttl> = Lazy::new(Default::default);
 pub struct Ttl {
     /// 每日收盤數據
     daily_quote: RwLock<ttl_cache::TtlCache<String, String>>,
+    trace_quote_notify: RwLock<ttl_cache::TtlCache<String, bool>>,
 }
 
 //
@@ -244,6 +255,13 @@ pub trait TtlCacheInner {
         val: String,
         duration: std::time::Duration,
     ) -> Option<String>;
+    fn trace_quote_contains_key(&self, key: &str) -> bool;
+    fn trace_quote_set(
+        &self,
+        key: String,
+        val: bool,
+        duration: std::time::Duration,
+    ) -> Option<bool>;
 }
 
 impl TtlCacheInner for Ttl {
@@ -278,12 +296,27 @@ impl TtlCacheInner for Ttl {
             Err(_) => None,
         }
     }
+
+    fn trace_quote_contains_key(&self, key: &str) -> bool {
+        match self.trace_quote_notify.read() {
+            Ok(ttl) => ttl.contains_key(key),
+            Err(_) => false,
+        }
+    }
+
+    fn trace_quote_set(&self, key: String, val: bool, duration: Duration) -> Option<bool> {
+        match self.trace_quote_notify.write() {
+            Ok(mut ttl) => ttl.insert(key, val, duration),
+            Err(_) => None,
+        }
+    }
 }
 
 impl Ttl {
     pub fn new() -> Self {
         Ttl {
             daily_quote: RwLock::new(ttl_cache::TtlCache::new(2048)),
+            trace_quote_notify: RwLock::new(ttl_cache::TtlCache::new(128)),
         }
     }
 }

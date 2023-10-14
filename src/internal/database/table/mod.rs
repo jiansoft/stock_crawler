@@ -32,3 +32,5 @@ pub mod estimate;
 pub mod quote_history_record;
 /// 殖利率排行
 pub mod yield_rank;
+/// 追踪即時股價，當超過或低於設定的數值時發送TG訊息
+pub mod trace;

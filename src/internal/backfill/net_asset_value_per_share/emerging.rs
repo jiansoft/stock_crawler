@@ -1,6 +1,4 @@
-use core::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::Result;
 use chrono::Local;
 
 use crate::internal::{
@@ -17,6 +15,18 @@ pub async fn execute() -> Result<()> {
     let result = tpex::net_asset_value_per_share::visit().await?;
 
     for item in result {
+        let stock_cache = SHARE.get_stock(&item.stock_symbol).await;
+        let stock = match stock_cache {
+            None => continue,
+            Some(stock_cache) => {
+                if stock_cache.net_asset_value_per_share == item.net_asset_value_per_share {
+                    continue;
+                }
+                table::stock::Stock::from(item)
+            }
+        };
+
+        /*
         let stock = match SHARE.stocks.read() {
             Ok(stocks_cache) => {
                 if let Some(stock_cache) = stocks_cache.get(item.stock_symbol.as_str()) {
@@ -27,7 +37,7 @@ pub async fn execute() -> Result<()> {
                 table::stock::Stock::from(item)
             }
             Err(_) => continue,
-        };
+        };*/
 
         match update(&stock).await {
             Ok(_) => {
@@ -37,10 +47,7 @@ pub async fn execute() -> Result<()> {
                 ));
             }
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to update_net_asset_value_per_share because {:?}",
-                    why
-                ));
+                logging::error_file_async(format!("{:?}", why));
             }
         }
     }

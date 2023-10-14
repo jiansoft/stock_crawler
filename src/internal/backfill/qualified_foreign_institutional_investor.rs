@@ -33,23 +33,18 @@ async fn otc() -> Result<()> {
 async fn update(qfiis: Vec<QualifiedForeignInstitutionalInvestor>) -> Result<()> {
     for qfii in qfiis {
         // 嘗試讀取stocks_cache
-        match SHARE.stocks.read() {
-            Ok(stocks_cache) => match stocks_cache.get(&qfii.stock_symbol) {
-                Some(stock_cache) => {
-                    if stock_cache.issued_share == qfii.issued_share
-                        && stock_cache.qfii_shares_held == qfii.qfii_shares_held
-                        && stock_cache.qfii_share_holding_percentage
-                            == qfii.qfii_share_holding_percentage
-                    {
-                        continue;
-                    }
-                }
-                None => {
+        let stock_cache = SHARE.get_stock(&qfii.stock_symbol).await;
+        match stock_cache {
+            None => {
+                continue;
+            }
+            Some(stock) => {
+                if stock.issued_share == qfii.issued_share
+                    && stock.qfii_shares_held == qfii.qfii_shares_held
+                    && stock.qfii_share_holding_percentage == qfii.qfii_share_holding_percentage
+                {
                     continue;
                 }
-            },
-            Err(_) => {
-                continue;
             }
         }
 

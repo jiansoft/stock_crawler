@@ -30,25 +30,40 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
 pub(crate) async fn process_daily_quote_moving_average(mut dq: DailyQuote) -> Result<()> {
     dq.fill_moving_average().await?;
     //計算本日的股價淨值比 = 每股股價 ÷ 每股淨值
-    match SHARE.stocks.read() {
-        Ok(stocks_cache) => match stocks_cache.get(&dq.security_code) {
-            Some(stock) => {
-                let net_asset_value_per_share = stock.net_asset_value_per_share;
-                if net_asset_value_per_share > Decimal::ZERO && dq.closing_price > Decimal::ZERO {
-                    dq.price_to_book_ratio = dq.closing_price / net_asset_value_per_share;
-                } else {
-                    dq.price_to_book_ratio = Decimal::ZERO;
-                }
-            }
-            None => {
+    let stock = SHARE.get_stock(&dq.security_code).await;
+    match stock {
+        None => {
+            dq.price_to_book_ratio = Decimal::ZERO;
+        }
+        Some(stock) => {
+            let net_asset_value_per_share = stock.net_asset_value_per_share;
+            if net_asset_value_per_share > Decimal::ZERO && dq.closing_price > Decimal::ZERO {
+                dq.price_to_book_ratio = dq.closing_price / net_asset_value_per_share;
+            } else {
                 dq.price_to_book_ratio = Decimal::ZERO;
             }
-        },
-        Err(why) => {
-            return Err(anyhow!("Failed to read stocks cache because {:?}", why));
         }
-    };
-
+    }
+    /*
+        match SHARE.stocks.read() {
+            Ok(stocks_cache) => match stocks_cache.get(&dq.security_code) {
+                Some(stock) => {
+                    let net_asset_value_per_share = stock.net_asset_value_per_share;
+                    if net_asset_value_per_share > Decimal::ZERO && dq.closing_price > Decimal::ZERO {
+                        dq.price_to_book_ratio = dq.closing_price / net_asset_value_per_share;
+                    } else {
+                        dq.price_to_book_ratio = Decimal::ZERO;
+                    }
+                }
+                None => {
+                    dq.price_to_book_ratio = Decimal::ZERO;
+                }
+            },
+            Err(why) => {
+                return Err(anyhow!("Failed to read stocks cache because {:?}", why));
+            }
+        };
+    */
     /*  if dq.security_code == "2330" {
         dbg!(&dq);
     }*/

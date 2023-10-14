@@ -1,16 +1,22 @@
 use std::{env, future::Future};
 
 use anyhow::{Error, Result};
-use tokio_cron_scheduler::{Job, JobScheduler};
+use chrono::{Local, Timelike};
+use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
 use crate::internal::{backfill, bot, crawler, event, logging};
 
 /// 啟動排程
 pub async fn start() -> Result<()> {
-    run_cron().await.map_err(|why| {
-        logging::error_file_async(format!("Failed to run_cron because {:?}", why));
-        why
-    })?;
+    run_cron().await?;
+
+    let now = Local::now();
+    // 開盤時間內重新啟動時需要手動啟動一次股價追踪
+    if now.hour() >= 9 && (now.hour() <= 13 && now.minute() < 30) {
+        if let Err(why) = event::trace::stock_price::execute().await {
+            logging::error_file_async(format!("{:?}", why));
+        }
+    }
 
     let msg = format!(
         "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
@@ -18,13 +24,10 @@ pub async fn start() -> Result<()> {
         env::consts::ARCH
     );
 
-    bot::telegram::send(&msg).await.map_err(|err| {
-        logging::error_file_async(format!("Failed to send telegram message because {:?}", err));
-        err
-    })
+    bot::telegram::send(&msg).await
 }
 
-pub async fn run_cron() -> Result<()> {
+pub async fn run_cron() -> std::result::Result<(), JobSchedulerError> {
     let sched = JobScheduler::new().await?;
     //                 sec  min   hour   day of month   month   day of week   year
     //let expression = "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2";
@@ -65,12 +68,17 @@ pub async fn run_cron() -> Result<()> {
         create_job("0 0 0 * * *", event::taiwan_stock::ex_dividend::execute),
         // 08:00 提醒本日發放股利的股票(只通知自已有的股票)
         create_job("0 0 0 * * *", event::taiwan_stock::payable_date::execute),
+        // 09:00 提醒本日已達高低標的股票有那些
+        create_job("0 0 1 * * *", event::trace::stock_price::execute),
         // 15:00 取得收盤報價數據
         create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 13 * * *", backfill::dividend::execute),
         // 22:00 外資持股狀態
-        create_job("0 0 14 * * *", backfill::qualified_foreign_institutional_investor::execute),
+        create_job(
+            "0 0 14 * * *",
+            backfill::qualified_foreign_institutional_investor::execute,
+        ),
         // 每分鐘更新一次ddns的ip
         create_job("0 * * * * *", crawler::free_dns::execute),
     ];
@@ -79,9 +87,7 @@ pub async fn run_cron() -> Result<()> {
         sched.add(job).await?;
     }
 
-    sched.start().await?;
-
-    Ok(())
+    sched.start().await
 }
 
 fn create_job<F, Fut>(cron_expr: &'static str, task: F) -> Result<Job>

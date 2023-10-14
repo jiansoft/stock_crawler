@@ -91,51 +91,6 @@ WHERE is_sold = false";
         let rows = query.fetch_all(database::get_connection()).await?;
 
         Ok(rows)
-
-        /*
-             let mut sql = "
-        select serial,
-           member_id,
-           security_code,
-           share_quantity,
-           holding_cost,
-           created_time,
-           share_price_average,
-           is_sold,
-           cumulate_dividends_cash,
-           cumulate_dividends_stock,
-           cumulate_dividends_stock_money,
-           cumulate_dividends_total
-        from stock_ownership_details
-        where is_sold = false "
-                .to_string();
-            if let Some(scs) = security_codes {
-                let params = scs
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _id)| format!("${}", i + 1))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                sql = format!("{} AND security_code IN ({})", sql, params)
-                    .as_str()
-                    .parse()?;
-
-                let mut query = sqlx::query_as::<_, Entity>(&sql);
-                for i in scs {
-                    query = query.bind(i);
-                }
-
-                let rows = query.fetch_all(&DB.pool).await?;
-                return Ok(rows);
-            }
-
-            let rows = sqlx::query_as::<_, Entity>(&sql)
-                .fetch_all(&DB.pool)
-                .await?;
-
-            Ok(rows)
-        */
     }
 
     /// 更新指定股票累積的股利

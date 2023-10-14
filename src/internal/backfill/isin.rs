@@ -64,7 +64,7 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
 
     if !to_bot_msg.is_empty() {
         if let Err(why) = bot::telegram::send(&to_bot_msg).await {
-            logging::error_file_async(format!("Failed to send_to_allowed because {:?}", why));
+            logging::error_file_async(format!("Failed to send because {:?}", why));
         }
     }
 
