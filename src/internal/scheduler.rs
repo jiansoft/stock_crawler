@@ -1,7 +1,8 @@
 use std::{env, future::Future};
 
 use anyhow::{Error, Result};
-use chrono::{Local, Timelike};
+use chrono::{Timelike};
+use tokio::task;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
 use crate::internal::{backfill, bot, crawler, event, logging};
@@ -10,13 +11,11 @@ use crate::internal::{backfill, bot, crawler, event, logging};
 pub async fn start() -> Result<()> {
     run_cron().await?;
 
-    let now = Local::now();
-    // 開盤時間內重新啟動時需要手動啟動一次股價追踪
-    if now.hour() >= 9 && (now.hour() <= 13 && now.minute() < 30) {
+    task::spawn(async {
         if let Err(why) = event::trace::stock_price::execute().await {
             logging::error_file_async(format!("{:?}", why));
         }
-    }
+    });
 
     let msg = format!(
         "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
