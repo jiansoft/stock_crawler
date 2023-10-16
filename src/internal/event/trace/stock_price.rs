@@ -1,6 +1,6 @@
 use std::{fmt::Write, time::Duration};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::{Local, Timelike};
 use rust_decimal::Decimal;
 use tokio::{time, time::Instant};
@@ -28,16 +28,16 @@ pub async fn execute() -> Result<()> {
         let now = Local::now();
         // 檢查當前時間是否還未到九點與是否超過13:30 關盤時間
         if now.hour() < 9 || (now.hour() > 13 || (now.hour() == 13 && now.minute() >= 30)) {
+            logging::debug_file_async("已達關盤時間".to_string());
             break;
         }
 
         task_interval.tick().await;
-
+        logging::debug_file_async("開始追踪股價".to_string());
         if let Err(why) = trace_price().await {
-            logging::error_file_async(format!(
-                "{:?}", why
-            ));
+            logging::error_file_async(format!("{:?}", why));
         }
+        logging::debug_file_async("結束追踪股價".to_string());
     }
 
     Ok(())
@@ -57,8 +57,10 @@ async fn trace_price() -> Result<()> {
                 }
 
                 match alert_on_price_boundary(target, current_price).await {
-                    Ok(_) => {
-                        TTL.trace_quote_set(target_key, true, Duration::from_secs(60 * 60 * 4));
+                    Ok(is_alerted) => {
+                        if is_alerted {
+                            TTL.trace_quote_set(target_key, true, Duration::from_secs(60 * 60 * 4));
+                        }
                     }
                     Err(why) => logging::error_file_async(format!("{:?}", why)),
                 }
@@ -70,7 +72,7 @@ async fn trace_price() -> Result<()> {
     Ok(())
 }
 
-async fn alert_on_price_boundary(target: Trace, price: Decimal) -> Result<()> {
+async fn alert_on_price_boundary(target: Trace, price: Decimal) -> Result<bool> {
     if (price < target.floor && target.floor > Decimal::ZERO)
         || (price > target.ceiling && target.ceiling > Decimal::ZERO)
     {
@@ -91,6 +93,7 @@ async fn alert_on_price_boundary(target: Trace, price: Decimal) -> Result<()> {
         } else {
             target.ceiling
         };
+
         let _ = writeln!(&mut to_bot_msg, "{stock_name} {boundary}:{limit}，目前報價:{price} https://tw.stock.yahoo.com/quote/{stock_symbol}",
                          boundary = boundary, limit = limit, price = price, stock_symbol = target.stock_symbol, stock_name = stock_name);
 
@@ -98,16 +101,16 @@ async fn alert_on_price_boundary(target: Trace, price: Decimal) -> Result<()> {
             if let Err(why) = bot::telegram::send(&to_bot_msg).await {
                 logging::error_file_async(format!("Failed to send because {:?}", why));
             }
+            return Ok(true);
         }
     }
 
-    Ok(())
+    Ok(false)
 }
 
 async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
     let price = yahoo::price::get(stock_symbol).await;
     if price.is_ok() {
-        dbg!(&price);
         return price;
     }
 
@@ -116,7 +119,12 @@ async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decima
         return price;
     }
 
-    cnyes::price::get(stock_symbol).await
+    let price = cnyes::price::get(stock_symbol).await;
+    if price.is_ok() {
+        return price;
+    }
+
+    Err(anyhow!("Failed to fetch stock price from all sites"))
 }
 
 #[cfg(test)]
