@@ -10,6 +10,7 @@ use crate::internal::{
     util::{self, http::element},
 };
 
+//#stock_info_data_a > span.data_close
 const SELECTOR: &str = r"#stock_info_data_a";
 
 pub async fn get(stock_symbol: &str) -> Result<Decimal> {
@@ -23,8 +24,9 @@ pub async fn get(stock_symbol: &str) -> Result<Decimal> {
         .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
 
     if let Some(element) = document.select(&selector).next() {
-        let price = element::parse_to_decimal(&element, "span.data_close.s-up");
+        let price = element::parse_to_decimal(&element, "span.data_close");
         if price > Decimal::ZERO {
+            logging::debug_file_async(format!("price : {:#?} from pchome", price));
             return Ok(price);
         }
     }

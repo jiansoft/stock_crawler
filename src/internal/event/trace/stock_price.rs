@@ -19,8 +19,8 @@ pub async fn execute() -> Result<()> {
     if Local::now().is_weekend() {
         return Ok(());
     }
-
-    let start = Instant::now();
+    //加十秒後再執行，確保已有交易資料
+    let start = Instant::now() + Duration::from_secs(10);
     let interval = Duration::from_secs(60);
     let mut task_interval = time::interval_at(start, interval);
 

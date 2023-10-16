@@ -22,6 +22,7 @@ pub async fn get(stock_symbol: &str) -> Result<Decimal> {
     if let Some(element) = document.select(&selector).next() {
         let price = element::parse_to_decimal(&element, "h3");
         if price > Decimal::ZERO {
+            logging::debug_file_async(format!("price : {:#?} from cnyes", price));
             return Ok(price);
         }
     }
@@ -38,10 +39,10 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match get("2838").await {
+        match get("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("dividend : {:#?}", e));
+                logging::debug_file_async(format!("price : {:#?}", e));
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because {:?}", why));

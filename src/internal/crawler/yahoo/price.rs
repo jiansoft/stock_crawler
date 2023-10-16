@@ -21,6 +21,7 @@ pub async fn get(stock_symbol: &str) -> Result<Decimal> {
     if let Some(element) = document.select(&selector).next() {
         let price = element::parse_to_decimal(&element, "span");
         if price > Decimal::ZERO {
+            logging::debug_file_async(format!("price : {:#?} from yahoo", price));
             return Ok(price);
         }
     }
@@ -37,7 +38,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match get("2812").await {
+        match get("2330").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("dividend : {:#?}", e));
