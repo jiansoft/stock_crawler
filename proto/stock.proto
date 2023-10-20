@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-import "google/protobuf/timestamp.proto";
+//import "google/protobuf/timestamp.proto";
 
 package stock;
 
@@ -8,6 +8,8 @@ option go_package = "../stock";
 
 service Stock {
   rpc UpdateStockInfo (StockInfoRequest) returns (StockInfoReply) {}
+  // 取得目前的股價
+  rpc FetchCurrentStockPrice (StockPriceRequest) returns (StockPriceReply) {}
 }
 
 message StockInfoRequest {
@@ -22,6 +24,19 @@ message StockInfoRequest {
 
 message StockInfoReply {
   string message = 1;
+}
+
+message StockPrice {
+  string stock_symbol = 1;
+  double price = 2;
+}
+
+message StockPriceRequest {
+  repeated string stock_symbols = 1;
+}
+
+message StockPriceReply {
+  repeated StockPrice stock_prices = 1;
 }
 
 // protoc --go_out=. --go-grpc_out=. stock.proto

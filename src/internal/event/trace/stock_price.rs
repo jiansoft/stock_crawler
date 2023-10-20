@@ -116,7 +116,7 @@ async fn alert_on_price_boundary(target: Trace, price: Decimal) -> Result<bool> 
     Ok(false)
 }
 
-async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
+pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
     let price = yahoo::price::get(stock_symbol).await;
     if price.is_ok() {
         return price;
