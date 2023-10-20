@@ -25,6 +25,8 @@ pub async fn execute() -> Result<()> {
     let mut task_interval = time::interval_at(start, interval);
 
     loop {
+        task_interval.tick().await;
+
         let now = Local::now();
         // 檢查當前時間是否還未到九點與是否超過13:30 關盤時間
         if now.hour() < 9 || (now.hour() > 13 || (now.hour() == 13 && now.minute() >= 30)) {
@@ -32,7 +34,6 @@ pub async fn execute() -> Result<()> {
             break;
         }
 
-        task_interval.tick().await;
         logging::debug_file_async("開始追踪股價".to_string());
         if let Err(why) = trace_price().await {
             logging::error_file_async(format!("{:?}", why));
@@ -44,32 +45,38 @@ pub async fn execute() -> Result<()> {
 }
 
 async fn trace_price() -> Result<()> {
-    for target in Trace::fetch().await? {
-        let target_key = format!("trace_quote:{}", target.key());
-        if TTL.trace_quote_contains_key(&target_key) {
-            continue;
-        }
-
-        match fetch_stock_price_from_remote_site(&target.stock_symbol).await {
-            Ok(current_price) => {
-                if current_price == Decimal::ZERO {
-                    continue;
-                }
-
-                match alert_on_price_boundary(target, current_price).await {
-                    Ok(is_alerted) => {
-                        if is_alerted {
-                            TTL.trace_quote_set(target_key, true, Duration::from_secs(60 * 60 * 4));
-                        }
-                    }
-                    Err(why) => logging::error_file_async(format!("{:?}", why)),
-                }
-            }
-            Err(why) => logging::error_file_async(format!("{:?}", why)),
-        }
-    }
+    let futures = Trace::fetch()
+        .await?
+        .into_iter()
+        .map(process_target)
+        .collect::<Vec<_>>();
+    futures::future::join_all(futures).await;
 
     Ok(())
+}
+
+async fn process_target(target: Trace) {
+    let target_key = format!("trace_quote:{}", target.key());
+    if TTL.trace_quote_contains_key(&target_key) {
+        return;
+    }
+
+    match fetch_stock_price_from_remote_site(&target.stock_symbol).await {
+        Ok(current_price) if current_price != Decimal::ZERO => {
+            match alert_on_price_boundary(target, current_price).await {
+                Ok(is_alert) => {
+                    if is_alert {
+                        TTL.trace_quote_set(target_key, true, Duration::from_secs(60 * 60 * 5));
+                    }
+                }
+                Err(why) => {
+                    logging::error_file_async(format!("{:?}", why));
+                }
+            }
+        }
+        Ok(_) => {}
+        Err(why) => logging::error_file_async(format!("{:?}", why)),
+    }
 }
 
 async fn alert_on_price_boundary(target: Trace, price: Decimal) -> Result<bool> {
@@ -101,6 +108,7 @@ async fn alert_on_price_boundary(target: Trace, price: Decimal) -> Result<bool> 
             if let Err(why) = bot::telegram::send(&to_bot_msg).await {
                 logging::error_file_async(format!("Failed to send because {:?}", why));
             }
+
             return Ok(true);
         }
     }

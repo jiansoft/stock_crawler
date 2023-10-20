@@ -12,7 +12,11 @@ use crate::internal::{
 const SELECTOR: &str = "div.jsx-162737614.container > div";
 
 pub async fn get(stock_symbol: &str) -> Result<Decimal> {
-    let url = format!("https:/{host}/twstock/{symbol}", host = HOST, symbol = stock_symbol);
+    let url = format!(
+        "https:/{host}/twstock/{symbol}",
+        host = HOST,
+        symbol = stock_symbol
+    );
     logging::info_file_async(format!("visit url:{}", url));
     let text = util::http::get(&url, None).await?;
     let document = Html::parse_document(&text);
@@ -22,7 +26,7 @@ pub async fn get(stock_symbol: &str) -> Result<Decimal> {
     if let Some(element) = document.select(&selector).next() {
         let price = element::parse_to_decimal(&element, "h3");
         if price > Decimal::ZERO {
-            logging::debug_file_async(format!("price : {:#?} from cnyes", price));
+            logging::debug_file_async(format!("{} price : {:#?} from cnyes", stock_symbol, price));
             return Ok(price);
         }
     }

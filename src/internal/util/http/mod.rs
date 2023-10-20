@@ -178,7 +178,7 @@ where
     .await?
     .json::<RES>()
     .await
-    .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
+    .map_err(|why| anyhow!("Error parsing response JSON: {:?}", why))
 }
 
 /// Performs an HTTP POST request with form data and specified headers, and returns the response as text.
@@ -213,7 +213,7 @@ pub async fn post(
     .await?
     .text()
     .await
-    .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
+    .map_err(|why| anyhow!("Error parsing response text: {:?}", why))
 }
 
 const MAX_RETRIES: usize = 5;

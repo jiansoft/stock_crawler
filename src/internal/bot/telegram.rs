@@ -38,7 +38,7 @@ impl Telegram {
         Ok(())
     }
 
-    async fn send_message<'a>(&self, payload: SendMessageRequest<'_>) -> Result<()> {
+    async fn send_message(&self, payload: SendMessageRequest<'_>) -> Result<()> {
         if let Err(why) = http::post_use_json::<SendMessageRequest, SendMessageResponse>(
             &self.send_message_url,
             None,
@@ -47,7 +47,7 @@ impl Telegram {
         .await
         {
             logging::error_file_async(format!(
-                "Failed to http::request_post_use_json because: {:?}",
+                "Failed to send_message because: {:?}",
                 why
             ));
         }

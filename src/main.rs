@@ -4,14 +4,15 @@ extern crate rocket;*/
 use std::{
     error::Error,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
 use tokio::signal;
 #[cfg(unix)]
 use tokio::signal::unix::{signal as unix_signal, SignalKind};
+use tokio_cron_scheduler::JobScheduler;
 
 use crate::internal::{cache, nosql, rpc, scheduler};
 
@@ -83,7 +84,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     dotenv::dotenv().ok();
     cache::SHARE.load().await;
-    scheduler::start().await?;
+
+    let sched = JobScheduler::new().await?;
+    scheduler::start(sched).await?;
     rpc::server::start().await?;
 
     let pong = nosql::redis::CLIENT.ping().await;

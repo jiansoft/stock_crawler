@@ -21,7 +21,7 @@ pub async fn get(stock_symbol: &str) -> Result<Decimal> {
     if let Some(element) = document.select(&selector).next() {
         let price = element::parse_to_decimal(&element, "span");
         if price > Decimal::ZERO {
-            logging::debug_file_async(format!("price : {:#?} from yahoo", price));
+            logging::debug_file_async(format!("{} price : {:#?} from yahoo", stock_symbol, price));
             return Ok(price);
         }
     }

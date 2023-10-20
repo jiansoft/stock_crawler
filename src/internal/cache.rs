@@ -289,7 +289,7 @@ impl TtlCacheInner for Ttl {
         &self,
         key: String,
         val: String,
-        duration: std::time::Duration,
+        duration: Duration,
     ) -> Option<String> {
         match self.daily_quote.write() {
             Ok(mut ttl) => ttl.insert(key, val, duration),

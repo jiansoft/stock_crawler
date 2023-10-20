@@ -1,21 +1,29 @@
 use std::{env, future::Future};
 
 use anyhow::{Error, Result};
-use chrono::{Timelike};
 use tokio::task;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
 use crate::internal::{backfill, bot, crawler, event, logging};
 
 /// 啟動排程
-pub async fn start() -> Result<()> {
-    run_cron().await?;
-
-    task::spawn(async {
+pub async fn start(sched: JobScheduler) -> Result<()> {
+    let s = sched.clone();
+    task::spawn(async move {
         if let Err(why) = event::trace::stock_price::execute().await {
             logging::error_file_async(format!("{:?}", why));
         }
+
+        // 09:00 提醒本日已達高低標的股票有那些
+        let job = create_job("0 0 1 * * *", event::trace::stock_price::execute);
+        if let Ok(j) = job {
+            if let Err(why) = s.add(j).await {
+                logging::error_file_async(format!("{:?}", why));
+            }
+        }
     });
+
+    run_cron(sched.clone()).await?;
 
     let msg = format!(
         "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
@@ -26,8 +34,8 @@ pub async fn start() -> Result<()> {
     bot::telegram::send(&msg).await
 }
 
-pub async fn run_cron() -> std::result::Result<(), JobSchedulerError> {
-    let sched = JobScheduler::new().await?;
+async fn run_cron(sched: JobScheduler) -> std::result::Result<(), JobSchedulerError> {
+    //let sched = JobScheduler::new().await?;
     //                 sec  min   hour   day of month   month   day of week   year
     //let expression = "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2";
     // UTC 時間
@@ -68,7 +76,7 @@ pub async fn run_cron() -> std::result::Result<(), JobSchedulerError> {
         // 08:00 提醒本日發放股利的股票(只通知自已有的股票)
         create_job("0 0 0 * * *", event::taiwan_stock::payable_date::execute),
         // 09:00 提醒本日已達高低標的股票有那些
-        create_job("0 0 1 * * *", event::trace::stock_price::execute),
+        //create_job("0 0 1 * * *", event::trace::stock_price::execute),
         // 15:00 取得收盤報價數據
         create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
