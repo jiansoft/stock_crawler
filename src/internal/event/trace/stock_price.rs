@@ -5,7 +5,7 @@ use chrono::{Local, Timelike};
 use rust_decimal::Decimal;
 use tokio::{time, time::Instant};
 
-use crate::internal::crawler::histock;
+use crate::internal::crawler::{cmoney, histock};
 use crate::internal::{
     bot,
     cache::{TtlCacheInner, SHARE, TTL},
@@ -134,6 +134,11 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
     }
 
     let price = histock::price::get(stock_symbol).await;
+    if price.is_ok() {
+        return price;
+    }
+
+    let price = cmoney::price::get(stock_symbol).await;
     if price.is_ok() {
         return price;
     }

@@ -16,4 +16,7 @@ pub mod yahoo;
 pub mod cnyes;
 /// PCHOME
 pub mod megatime;
+/// 嗨投資
 pub mod histock;
+/// 股市爆料同學會
+pub mod cmoney;
