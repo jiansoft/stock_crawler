@@ -3,17 +3,17 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
 use crate::internal::{
-    crawler::cnyes::HOST,
+    crawler::histock::HOST,
     logging,
     util::{self, http::element},
 };
 
 //#anue-ga-wrapper > div > div:nth-child(2) > div > div > div > div > div > div.jsx-162737614.container > div
-const SELECTOR: &str = "div.jsx-162737614.container > div";
+const SELECTOR: &str = "#Price1_lbTPrice";
 
 pub async fn get(stock_symbol: &str) -> Result<Decimal> {
     let url = format!(
-        "https://{host}/twstock/{symbol}",
+        "https://{host}/stock/{symbol}",
         host = HOST,
         symbol = stock_symbol
     );
@@ -24,14 +24,14 @@ pub async fn get(stock_symbol: &str) -> Result<Decimal> {
         .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
 
     if let Some(element) = document.select(&selector).next() {
-        let price = element::parse_to_decimal(&element, "h3");
+        let price = element::parse_to_decimal(&element, "span");
         if price > Decimal::ZERO {
-            logging::debug_file_async(format!("{} price : {:#?} from cnyes", stock_symbol, price));
+            logging::debug_file_async(format!("{} price : {:#?} from histock", stock_symbol, price));
             return Ok(price);
         }
     }
 
-    Err(anyhow!("Price element not found from cnyes"))
+    Err(anyhow!("Price element not found from histock"))
 }
 
 #[cfg(test)]
@@ -43,7 +43,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match get("2330").await {
+        match get("3008").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("price : {:#?}", e));

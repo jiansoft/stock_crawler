@@ -16,3 +16,4 @@ pub mod yahoo;
 pub mod cnyes;
 /// PCHOME
 pub mod megatime;
+pub mod histock;
