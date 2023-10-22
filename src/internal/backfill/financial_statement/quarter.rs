@@ -3,7 +3,9 @@ use core::result::Result::Ok;
 use anyhow::*;
 use chrono::{Datelike, Duration, Local};
 
-use crate::internal::{calculation, crawler::yahoo, database::table, logging, nosql, util::datetime};
+use crate::internal::{
+    calculation, crawler::yahoo, database::table, logging, nosql, util::datetime,
+};
 
 /// 將未有上季度財報的股票，到雅虎財經下載後回寫到 financial_statement 表
 pub async fn execute() -> Result<()> {
@@ -14,7 +16,7 @@ pub async fn execute() -> Result<()> {
     }
 
     let now = Local::now();
-    let previous_quarter =  now - Duration::days(130);
+    let previous_quarter = now - Duration::days(130);
     let year = previous_quarter.year();
     let quarter = datetime::month_to_quarter(previous_quarter.month());
     let stocks = table::stock::fetch_stocks_without_financial_statement(year, quarter).await?;
@@ -59,10 +61,8 @@ pub async fn execute() -> Result<()> {
 
     if success_update_count > 0 {
         table::stock::Stock::update_last_eps().await?;
-        let estimate_date_config = table::config::Config::new(
-            "estimate-date".to_string(),
-           "".to_string(),
-        );
+        let estimate_date_config =
+            table::config::Config::new("estimate-date".to_string(), "".to_string());
 
         let date = estimate_date_config.get_val_naive_date().await?;
         // 計算便宜、合理、昂貴價的估算

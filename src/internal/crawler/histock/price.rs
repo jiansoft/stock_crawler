@@ -1,42 +1,27 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use rust_decimal::Decimal;
-use scraper::{Html, Selector};
 
-use crate::internal::{
-    crawler::histock::HOST,
-    logging,
-    util::{self, http::element},
-};
-
-//#anue-ga-wrapper > div > div:nth-child(2) > div > div > div > div > div > div.jsx-162737614.container > div
-const SELECTOR: &str = "#Price1_lbTPrice";
+use crate::internal::{crawler::histock::HOST, util};
 
 pub async fn get(stock_symbol: &str) -> Result<Decimal> {
-    let url = format!(
-        "https://{host}/stock/{symbol}",
-        host = HOST,
-        symbol = stock_symbol
-    );
-    logging::info_file_async(format!("visit url:{}", url));
-    let text = util::http::get(&url, None).await?;
-    let document = Html::parse_document(&text);
-    let selector = Selector::parse(SELECTOR)
-        .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
+    let target = util::http::element::GetOneElementText {
+        stock_symbol,
+        url: &format!(
+            "https://{host}/stock/{symbol}",
+            host = HOST,
+            symbol = stock_symbol
+        ),
+        selector: "#Price1_lbTPrice",
+        element: "span",
+    };
 
-    if let Some(element) = document.select(&selector).next() {
-        let price = element::parse_to_decimal(&element, "span");
-        if price > Decimal::ZERO {
-            logging::debug_file_async(format!("{} price : {:#?} from histock", stock_symbol, price));
-            return Ok(price);
-        }
-    }
-
-    Err(anyhow!("Price element not found from histock"))
+    util::http::element::get_one_element_as_decimal(target).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_visit() {

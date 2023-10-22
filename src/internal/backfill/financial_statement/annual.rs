@@ -1,4 +1,4 @@
-use anyhow::{Result};
+use anyhow::Result;
 use chrono::Local;
 use futures::future;
 

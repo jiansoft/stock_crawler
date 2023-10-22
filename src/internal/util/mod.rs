@@ -2,8 +2,8 @@ use std::cmp::max;
 
 pub mod datetime;
 pub mod http;
-pub mod text;
 pub mod map;
+pub mod text;
 
 /// 文數字間的轉換
 pub mod convert;

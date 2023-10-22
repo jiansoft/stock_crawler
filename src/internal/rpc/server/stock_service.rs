@@ -19,7 +19,9 @@ impl Stock for StockService {
         &self,
         _req: Request<StockInfoRequest>,
     ) -> Result<Response<StockInfoReply>, Status> {
-        Err(Status::unimplemented("update_stock_info is not implemented"))
+        Err(Status::unimplemented(
+            "update_stock_info is not implemented",
+        ))
     }
 
     async fn fetch_current_stock_price(

@@ -104,7 +104,9 @@ impl Default for DividendRecordDetail {
 }
 
 impl Clone for DividendRecordDetail {
-    fn clone(&self) -> Self { *self }
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 #[cfg(test)]

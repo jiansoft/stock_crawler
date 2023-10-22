@@ -112,10 +112,7 @@ pub async fn get(url: &str, headers: Option<header::HeaderMap>) -> Result<String
         .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
 }
 
-pub async fn get_response(
-    url: &str,
-    headers: Option<header::HeaderMap>,
-) -> Result<Response> {
+pub async fn get_response(url: &str, headers: Option<header::HeaderMap>) -> Result<Response> {
     send(Method::GET, url, headers, None::<fn(_) -> _>).await
 }
 

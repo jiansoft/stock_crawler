@@ -1,8 +1,9 @@
+use anyhow::{anyhow, Result};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use scraper::Selector;
+use scraper::{Html, Selector};
 
-use crate::internal::util::text;
+use crate::internal::{logging, util, util::text};
 
 /// Extracts the text value of an element selected by a given CSS selector.
 ///
@@ -84,5 +85,51 @@ pub fn parse_to_i32(element: &scraper::ElementRef, css_selector: &str) -> i32 {
 pub fn parse_to_string(element: &scraper::ElementRef, css_selector: &str) -> String {
     parse_value(element, css_selector)
         .and_then(|v| Option::from(v.trim().to_string()))
-        .unwrap_or("".to_string())
+        .unwrap_or(String::from(""))
+}
+
+/// A structure that represents the information needed to extract text from a particular HTML element.
+#[derive(Debug, Clone)]
+pub struct GetOneElementText<'a> {
+    /// Stock symbol, often used for identifying stocks uniquely.
+    pub stock_symbol: &'a str,
+    /// The URL from where the HTML content will be fetched.
+    pub url: &'a str,
+    /// The CSS selector string that is used to identify and locate the desired HTML element.
+    pub selector: &'a str,
+    /// The desired HTML element's name (like "div", "span", etc.) that we want to extract text from.
+    pub element: &'a str,
+}
+
+/// Asynchronously fetches and extracts text from a specific HTML element in the provided URL.
+///
+/// This function first makes an HTTP request to fetch the content of the specified URL.
+/// It then parses the fetched content as HTML. Using the provided CSS selector, it locates
+/// the desired HTML element and then extracts its text. If the element is not found,
+/// an error is returned.
+///
+/// # Arguments
+///
+/// * `target` - A structure containing details about the desired HTML element and the URL to fetch from.
+///
+/// # Returns
+///
+/// * `Result<String>` - On success, returns the extracted text from the specified HTML element.
+///   On failure, returns an error indicating the reason for failure (like element not found, selector parse failure, etc.).
+pub async fn get_one_element(target: GetOneElementText<'_>) -> Result<String> {
+    logging::info_file_async(format!("visit url:{}", target.url));
+
+    let text = util::http::get(target.url, None).await?;
+    let document = Html::parse_document(&text);
+    let selector = Selector::parse(target.selector)
+        .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
+    document
+        .select(&selector)
+        .next()
+        .and_then(|element| parse_value(&element, target.element))
+        .ok_or_else(|| anyhow!("The element not found from {}", target.url))
+}
+
+pub async fn get_one_element_as_decimal(target: GetOneElementText<'_>) -> Result<Decimal> {
+    text::parse_decimal(&get_one_element(target).await?, None)
 }

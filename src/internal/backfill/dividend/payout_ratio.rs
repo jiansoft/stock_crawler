@@ -58,7 +58,7 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)] 
+#[cfg(test)]
 mod tests {
     use crate::internal::cache::SHARE;
     use crate::internal::logging;

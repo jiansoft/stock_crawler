@@ -46,10 +46,7 @@ impl Telegram {
         )
         .await
         {
-            logging::error_file_async(format!(
-                "Failed to send_message because: {:?}",
-                why
-            ));
+            logging::error_file_async(format!("Failed to send_message because: {:?}", why));
         }
 
         Ok(())

@@ -4,7 +4,7 @@ use anyhow::*;
 use encoding::{DecoderTrap, Encoding};
 use rust_decimal::Decimal;
 
-const NUMBER_ESCAPE_CHAR: &[char] = &['元', '%', ',', ' ', '"'];
+const NUMBER_ESCAPE_CHAR: &[char] = &['元', '%', ',', ' ', '"', '\n'];
 
 #[allow(dead_code)]
 pub fn big5_to_utf8(text: &str) -> Result<String> {

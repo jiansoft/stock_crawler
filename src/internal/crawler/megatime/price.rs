@@ -14,7 +14,11 @@ use crate::internal::{
 const SELECTOR: &str = r"#stock_info_data_a";
 
 pub async fn get(stock_symbol: &str) -> Result<Decimal> {
-    let url =  format!("https://{host}/stock/sid{symbol}.html", host = HOST, symbol = stock_symbol);
+    let url = format!(
+        "https://{host}/stock/sid{symbol}.html",
+        host = HOST,
+        symbol = stock_symbol
+    );
     logging::info_file_async(format!("visit url:{}", url));
     let mut params = HashMap::new();
     params.insert("is_check", "1");

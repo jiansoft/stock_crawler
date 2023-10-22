@@ -276,10 +276,7 @@ ON CONFLICT (date,security_code) DO UPDATE SET
         sqlx::query(&sql)
             .execute(database::get_connection())
             .await
-            .context(format!(
-                "Failed to upsert_all() from database\nsql:{}",
-                sql
-            ))
+            .context(format!("Failed to upsert_all() from database\nsql:{}", sql))
     }
 
     pub async fn upsert(&self, years: String) -> Result<PgQueryResult> {
@@ -519,10 +516,13 @@ mod tests {
         let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
         let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
         let years_str = years_vec.join(",");
-        match Estimate::upsert_all(current_date,years_str).await {
+        match Estimate::upsert_all(current_date, years_str).await {
             Ok(r) => logging::debug_file_async(format!("Estimate::upsert_all:{:#?}", r)),
             Err(why) => {
-                logging::debug_file_async(format!("Failed to Estimate::upsert_all because {:?}", why));
+                logging::debug_file_async(format!(
+                    "Failed to Estimate::upsert_all because {:?}",
+                    why
+                ));
             }
         }
 

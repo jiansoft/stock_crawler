@@ -8,6 +8,8 @@ pub mod financial_statement;
 pub mod isin;
 /// 回補每股淨值為零的股票更新其數據
 pub mod net_asset_value_per_share;
+/// 外資及陸資投資持股統計
+pub mod qualified_foreign_institutional_investor;
 /// 調用 twse、tpex API 取得並更新台股收盤報價
 pub mod quote;
 /// 調用 twse API 取得並更新每月營收
@@ -16,5 +18,3 @@ pub mod revenue;
 pub mod stock_weight;
 /// 調用 twse API 取得並更新台股加權指數
 pub mod taiwan_stock_index;
-/// 外資及陸資投資持股統計
-pub mod qualified_foreign_institutional_investor;

@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::RwLock,
-    time::Duration
-};
+use std::{collections::HashMap, sync::RwLock, time::Duration};
 
 use once_cell::sync::Lazy;
 
@@ -221,7 +217,7 @@ impl Share {
     }
 
     /// 從快取中取得股票的資料
-    pub async fn get_stock(&self,symbol: &str) -> Option<stock::Stock> {
+    pub async fn get_stock(&self, symbol: &str) -> Option<stock::Stock> {
         match self.stocks.read() {
             Ok(cache) => cache.get(symbol).cloned(),
             Err(_) => None,
@@ -285,12 +281,7 @@ impl TtlCacheInner for Ttl {
         }
     }
 
-    fn daily_quote_set(
-        &self,
-        key: String,
-        val: String,
-        duration: Duration,
-    ) -> Option<String> {
+    fn daily_quote_set(&self, key: String, val: String, duration: Duration) -> Option<String> {
         match self.daily_quote.write() {
             Ok(mut ttl) => ttl.insert(key, val, duration),
             Err(_) => None,

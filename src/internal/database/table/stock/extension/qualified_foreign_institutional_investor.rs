@@ -1,13 +1,8 @@
 use anyhow::{Context, Result};
 use rust_decimal::Decimal;
-use sqlx::{FromRow, postgres::PgQueryResult};
+use sqlx::{postgres::PgQueryResult, FromRow};
 
-use crate::{
-    internal::{
-        database,
-        util::convert::FromValue
-    }
-};
+use crate::internal::{database, util::convert::FromValue};
 
 ///
 #[derive(FromRow, Debug)]
@@ -82,7 +77,7 @@ impl From<Vec<serde_json::Value>> for QualifiedForeignInstitutionalInvestor {
         let stock_symbol = item[0].get_string(None);
         let issued_share = item[3].get_i64(None);
         let qfii_shares_held = item[5].get_i64(None);
-        let qfii_share_holding_percentage= item[7].get_decimal(None);
+        let qfii_share_holding_percentage = item[7].get_decimal(None);
 
         QualifiedForeignInstitutionalInvestor::new(
             stock_symbol,

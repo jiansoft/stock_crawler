@@ -3,16 +3,9 @@ use std::result::Result::Ok;
 use anyhow::*;
 use tonic::{Request, Response};
 
-use crate::{
-    internal::{
-        rpc::{
-            client::{
-                get_client,
-                Grpc
-            },
-            stock::{StockInfoReply, StockInfoRequest}
-        }
-    }
+use crate::internal::rpc::{
+    client::{get_client, Grpc},
+    stock::{StockInfoReply, StockInfoRequest},
 };
 
 impl Grpc {

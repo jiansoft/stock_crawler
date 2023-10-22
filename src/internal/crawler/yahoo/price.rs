@@ -1,37 +1,27 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use rust_decimal::Decimal;
-use scraper::{Html, Selector};
 
-use crate::internal::{
-    crawler::yahoo::HOST,
-    logging,
-    util::{self, http::element},
-};
-
-const SELECTOR: &str = r"#main-0-QuoteHeader-Proxy > div > div > div > div";
+use crate::{internal::crawler::yahoo::HOST, internal::util};
 
 pub async fn get(stock_symbol: &str) -> Result<Decimal> {
-    let url = format!("https://{}/quote/{}", HOST, stock_symbol);
-    logging::info_file_async(format!("visit url:{}", url));
-    let text = util::http::get(&url, None).await?;
-    let document = Html::parse_document(&text);
-    let selector = Selector::parse(SELECTOR)
-        .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
+    let target = util::http::element::GetOneElementText {
+        stock_symbol,
+        url: &format!(
+            "https://{host}/quote/{symbol}",
+            host = HOST,
+            symbol = stock_symbol
+        ),
+        selector: "#main-0-QuoteHeader-Proxy > div > div > div > div",
+        element: "span",
+    };
 
-    if let Some(element) = document.select(&selector).next() {
-        let price = element::parse_to_decimal(&element, "span");
-        if price > Decimal::ZERO {
-            logging::debug_file_async(format!("{} price : {:#?} from yahoo", stock_symbol, price));
-            return Ok(price);
-        }
-    }
-
-    Err(anyhow!("Price element not found from yahoo"))
+    util::http::element::get_one_element_as_decimal(target).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::internal::logging;
 
     #[tokio::test]
     async fn test_visit() {

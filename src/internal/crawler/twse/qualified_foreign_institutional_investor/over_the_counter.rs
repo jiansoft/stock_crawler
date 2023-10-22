@@ -55,7 +55,6 @@ mod tests {
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because: {:?}", why));
             }
-
         }
         logging::debug_file_async("結束 visit".to_string());
     }

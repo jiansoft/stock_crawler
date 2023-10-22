@@ -163,10 +163,11 @@ impl DailyQuote {
             .bind(self.month)
             .bind(self.day)
             .execute(database::get_connection())
-            .await.context(format!(
-            "Failed to DailyQuote::upsert({:#?}) from database",
-            self
-        ))
+            .await
+            .context(format!(
+                "Failed to DailyQuote::upsert({:#?}) from database",
+                self
+            ))
     }
 
     /// 依指定日期取得收盤資料的均線

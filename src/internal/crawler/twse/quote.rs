@@ -4,6 +4,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
+use crate::internal::crawler::twse::build_headers;
 use crate::internal::{
     cache::{self, TtlCacheInner, TTL},
     crawler::twse,
@@ -12,7 +13,6 @@ use crate::internal::{
     util::http,
     StockExchange,
 };
-use crate::internal::crawler::twse::build_headers;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ListedResponse {

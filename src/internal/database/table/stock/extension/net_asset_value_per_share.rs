@@ -46,6 +46,6 @@ where
             .bind(self.net_asset_value_per_share)
             .execute(database::get_connection())
             .await
-            .context(format!("Failed to update({:#?}) from database",self))
+            .context(format!("Failed to update({:#?}) from database", self))
     }
 }

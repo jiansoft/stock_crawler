@@ -334,7 +334,7 @@ mod tests {
 
     use std::str::FromStr;
 
-    use chrono::{ Datelike, Duration, FixedOffset, Local, NaiveDate, TimeZone};
+    use chrono::{Datelike, Duration, FixedOffset, Local, NaiveDate, TimeZone};
     use rust_decimal::Decimal;
 
     //use chrono::{Datelike, Local, NaiveDate};
