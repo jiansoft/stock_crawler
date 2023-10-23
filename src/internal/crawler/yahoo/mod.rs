@@ -6,3 +6,7 @@ pub mod price;
 pub mod profile;
 
 const HOST: &str = "tw.stock.yahoo.com";
+
+pub struct Yahoo{
+
+}

@@ -1,15 +1,14 @@
 use std::{fmt::Write, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use chrono::{Local, Timelike};
 use rust_decimal::Decimal;
 use tokio::{time, time::Instant};
 
-use crate::internal::crawler::{cmoney, histock};
 use crate::internal::{
     bot,
     cache::{TtlCacheInner, SHARE, TTL},
-    crawler::{cnyes, megatime, yahoo},
+    crawler::{self},
     database::table::trace::Trace,
     logging,
     util::datetime::Weekend,
@@ -62,7 +61,7 @@ async fn process_target(target: Trace) {
         return;
     }
 
-    match fetch_stock_price_from_remote_site(&target.stock_symbol).await {
+    match crawler::fetch_stock_price_from_remote_site(&target.stock_symbol).await {
         Ok(current_price) if current_price != Decimal::ZERO => {
             match alert_on_price_boundary(target, current_price).await {
                 Ok(is_alert) => {
@@ -117,35 +116,6 @@ async fn alert_on_price_boundary(target: Trace, price: Decimal) -> Result<bool> 
     Ok(false)
 }
 
-pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
-    let price = yahoo::price::get(stock_symbol).await;
-    if price.is_ok() {
-        return price;
-    }
-
-    let price = megatime::price::get(stock_symbol).await;
-    if price.is_ok() {
-        return price;
-    }
-
-    let price = cnyes::price::get(stock_symbol).await;
-    if price.is_ok() {
-        return price;
-    }
-
-    let price = histock::price::get(stock_symbol).await;
-    if price.is_ok() {
-        return price;
-    }
-
-    let price = cmoney::price::get(stock_symbol).await;
-    if price.is_ok() {
-        return price;
-    }
-
-    Err(anyhow!("Failed to fetch stock price from all sites"))
-}
-
 #[cfg(test)]
 mod tests {
     use rust_decimal_macros::dec;
@@ -168,35 +138,18 @@ mod tests {
         match alert_on_price_boundary(trace, dec!(560)).await {
             Ok(_) => {
                 logging::debug_file_async(
-                    "event::trace::stock_price::handle_price 完成".to_string(),
+                    "event::trace::stock_price::alert_on_price_boundary 完成".to_string(),
                 );
             }
             Err(why) => {
                 logging::debug_file_async(format!(
-                    "Failed to event::taiwan_stock::closing::aggregate because {:?}",
+                    "Failed to event::trace::stock_price::alert_on_price_boundary because {:?}",
                     why
                 ));
             }
         }
 
-        logging::debug_file_async("結束 event::trace::stock_price::handle_price".to_string());
-    }
-
-    #[tokio::test]
-    async fn test_fetch_price() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_price".to_string());
-
-        match fetch_stock_price_from_remote_site("2330").await {
-            Ok(e) => {
-                dbg!(e);
-            }
-            Err(why) => {
-                logging::debug_file_async(format!("Failed to fetch_price because {:?}", why));
-            }
-        }
-
-        logging::debug_file_async("結束 fetch_price".to_string());
+        logging::debug_file_async("結束 event::trace::stock_price::alert_on_price_boundary".to_string());
     }
 
     #[tokio::test]
