@@ -27,11 +27,8 @@ pub async fn execute() -> Result<()> {
         ));
     }
 
-    match res_aggregation {
-        Ok(_) => {}
-        Err(why) => {
-            logging::error_file_async(format!("Failed to closing::aggregate() because {:#?}", why));
-        }
+    if let Err(why) = res_aggregation {
+        logging::error_file_async(format!("Failed to closing::aggregate() because {:#?}", why));
     }
 
     Ok(())

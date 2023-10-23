@@ -99,14 +99,18 @@ dividend AS (
         dividend_base * 25 AS expensive
     FROM
     (
-        SELECT
-            security_code AS stock_symbol, AVG("sum") AS dividend_base
-        FROM
-            dividend
-        WHERE
-            "year" IN ({0})
-        GROUP BY
-            security_code
+        SELECT  stock_symbol, avg("sum") AS dividend_base
+        FROM (
+            SELECT
+                security_code AS stock_symbol, sum("sum") AS sum
+            FROM
+                dividend
+            WHERE
+                "year" IN ({0}) and ("ex-dividend_date1" != '-' OR "ex-dividend_date2" != '-')
+            GROUP BY
+                security_code ,"year"
+        ) AS inner_dividend
+        GROUP BY stock_symbol
     ) AS calc
 ),
 dividend_payout_ratio AS (
@@ -512,7 +516,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 Estimate::upsert_all".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2023-09-22", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2023-10-20", "%Y-%m-%d").unwrap();
         let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
         let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
         let years_str = years_vec.join(",");
