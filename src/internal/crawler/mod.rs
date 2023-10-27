@@ -37,8 +37,8 @@ pub trait StockInfo {
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
     let sites = vec![
         Yahoo::get_stock_price,
-        PcHome::get_stock_price,
         CnYes::get_stock_price,
+        PcHome::get_stock_price,
         CMoney::get_stock_price,
         HiStock::get_stock_price,
     ];

@@ -4,3 +4,5 @@ pub mod closing;
 pub mod ex_dividend;
 /// 股利發放日的事件
 pub mod payable_date;
+/// 公開申購公告-
+pub mod public;

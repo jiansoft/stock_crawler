@@ -44,10 +44,10 @@ pub async fn visit(
             );
             return Ok(result);
         }
-        Some(stat) => stat,
+        Some(stat) => stat.to_uppercase(),
     };
 
-    if stat.to_uppercase() != "OK" {
+    if stat != "OK" {
         logging::warn_file_async(
             "取得外資及陸資投資持股統計 Finish taiex.Stat is not ok".to_string(),
         );

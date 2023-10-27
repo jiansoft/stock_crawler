@@ -41,7 +41,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_calculate() {
+    async fn test_execute() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 execute".to_string());
         //let date = NaiveDate::from_ymd_opt(2023, 6, 15);

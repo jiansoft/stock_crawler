@@ -1,5 +1,5 @@
-use chrono::{DateTime, Datelike, Local, Weekday};
 
+use chrono::{DateTime, Datelike, Local, NaiveDate, Weekday};
 use crate::internal::logging;
 
 /// A trait representing the weekend concept.
@@ -84,3 +84,29 @@ pub fn parse_date(date_str: &str) -> DateTime<Local> {
         }
     }
 }
+
+/// Convert ROC year to Gregorian year.
+pub fn to_gregorian_year(year: i32) -> i32 {
+    year + 1911
+}
+
+/// Parse a date string in the format of ROC calendar
+/// and return it as a NaiveDate in the Gregorian calendar.
+pub fn parse_taiwan_date(date_str: &str) -> Option<NaiveDate> {
+    let split_date: Vec<&str> = date_str.split(['/', '-']).collect();
+    if split_date.len() != 3 {
+        return None;
+    }
+
+    let year = to_gregorian_year(parse_date_part::<i32>(split_date[0])?);
+    let month = parse_date_part::<u32>(split_date[1])?;
+    let day = parse_date_part::<u32>(split_date[2])?;
+
+    NaiveDate::from_ymd_opt(year, month, day)
+}
+
+/// Try to parse a string as a date part and return it as an Option.
+fn parse_date_part<T: std::str::FromStr>(date_part_str: &str) -> Option<T> {
+    date_part_str.parse::<T>().ok()
+}
+

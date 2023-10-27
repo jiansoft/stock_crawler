@@ -34,11 +34,11 @@ pub async fn execute() -> Result<()> {
             break;
         }
 
-        logging::debug_file_async("開始追踪股價".to_string());
+        //logging::debug_file_async("開始追踪股價".to_string());
         if let Err(why) = trace_price().await {
             logging::error_file_async(format!("{:?}", why));
         }
-        logging::debug_file_async("結束追踪股價".to_string());
+        //logging::debug_file_async("結束追踪股價".to_string());
     }
 
     Ok(())
@@ -149,7 +149,9 @@ mod tests {
             }
         }
 
-        logging::debug_file_async("結束 event::trace::stock_price::alert_on_price_boundary".to_string());
+        logging::debug_file_async(
+            "結束 event::trace::stock_price::alert_on_price_boundary".to_string(),
+        );
     }
 
     #[tokio::test]

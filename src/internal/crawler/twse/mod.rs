@@ -13,10 +13,12 @@ pub mod revenue;
 pub mod suspend_listing;
 /// 台股加權指數
 pub mod taiwan_capitalization_weighted_stock_index;
+/// 公開申購公告-抽籤日程表
+pub mod public;
 
 const HOST: &str = "twse.com.tw";
 
-pub(crate) async fn build_headers() -> HeaderMap {
+pub(super) async fn build_headers() -> HeaderMap {
     let mut h = HeaderMap::with_capacity(4);
     h.insert("Host", "www.twse.com.tw".parse().unwrap());
     h.insert(

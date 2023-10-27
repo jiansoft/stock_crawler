@@ -4,7 +4,13 @@ use anyhow::{Error, Result};
 use tokio::task;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
-use crate::internal::{backfill, bot, crawler, event, logging};
+use crate::internal::{
+    backfill::{
+        delisted_company, dividend, financial_statement, isin, net_asset_value_per_share,
+        qualified_foreign_institutional_investor, revenue, stock_weight,
+    },
+    bot, crawler, event, logging,
+};
 
 /// 啟動排程
 pub async fn start(sched: JobScheduler) -> Result<()> {
@@ -42,49 +48,43 @@ async fn run_cron(sched: JobScheduler) -> std::result::Result<(), JobSchedulerEr
 
     let jobs = vec![
         // 01:00 更新台股季度財報
-        create_job(
-            "0 0 17 * * *",
-            backfill::financial_statement::quarter::execute,
-        ),
+        create_job("0 0 17 * * *", financial_statement::quarter::execute),
         // 01:00 更新興櫃股票的每股淨值
-        create_job(
-            "0 0 17 * * *",
-            backfill::net_asset_value_per_share::emerging::execute,
-        ),
+        create_job("0 0 17 * * *", net_asset_value_per_share::emerging::execute),
         // 02:30 更新盈餘分配率
-        create_job("0 30 18 * * *", backfill::dividend::payout_ratio::execute),
+        create_job("0 30 18 * * *", dividend::payout_ratio::execute),
         // 05:00 更新台股年度財報
-        create_job(
-            "0 0 21 * * *",
-            backfill::financial_statement::annual::execute,
-        ),
+        create_job("0 0 21 * * *", financial_statement::annual::execute),
         // 05:00 從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據
         create_job(
             "0 0 21 * * *",
-            backfill::net_asset_value_per_share::zero_value::execute,
+            net_asset_value_per_share::zero_value::execute,
         ),
         // 05:00 取得台股的營收
-        create_job("0 0 21 * * *", backfill::revenue::execute),
+        create_job("0 0 21 * * *", revenue::execute),
         // 05:00 更新台股國際證券識別碼
-        create_job("0 0 21 * * *", backfill::isin::execute),
+        create_job("0 0 21 * * *", isin::execute),
         // 05:00 更新下市的股票
-        create_job("0 0 21 * * *", backfill::delisted_company::execute),
+        create_job("0 0 21 * * *", delisted_company::execute),
         // 05:00 更新股票權值佔比
-        create_job("0 0 21 * * *", backfill::stock_weight::execute),
+        create_job("0 0 21 * * *", stock_weight::execute),
         // 08:00 提醒本日除權息的股票
         create_job("0 0 0 * * *", event::taiwan_stock::ex_dividend::execute),
         // 08:00 提醒本日發放股利的股票(只通知自已有的股票)
         create_job("0 0 0 * * *", event::taiwan_stock::payable_date::execute),
-        // 09:00 提醒本日已達高低標的股票有那些
-        //create_job("0 0 1 * * *", event::trace::stock_price::execute),
+        // 08:00 提醒本日開始公開申購的股票
+        create_job("0 0 0 * * *", || async {
+            event::taiwan_stock::public::execute().await?;
+            Ok(())
+        }),
         // 15:00 取得收盤報價數據
         create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
-        create_job("0 0 13 * * *", backfill::dividend::execute),
+        create_job("0 0 13 * * *", dividend::execute),
         // 22:00 外資持股狀態
         create_job(
             "0 0 14 * * *",
-            backfill::qualified_foreign_institutional_investor::execute,
+            qualified_foreign_institutional_investor::execute,
         ),
         // 每分鐘更新一次ddns的ip
         create_job("0 * * * * *", crawler::free_dns::execute),

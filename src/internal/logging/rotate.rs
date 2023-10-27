@@ -57,19 +57,17 @@ impl Rotate {
                     .append(true)
                     .truncate(false)
                     .open(&filename)
-                    .unwrap_or_else(|e| {
-                        panic!("Failed to open log file: {}", e);
-                    });
+                    .expect("Failed to open log file");
 
                 generation = 0;
 
                 self.out_fh = Some(Arc::new(RwLock::new(BufWriter::with_capacity(2048, file))));
                 self.cur_base_fn = base_fn;
-                self.cur_fn = filename.to_string();
+                self.cur_fn = filename;
                 self.generation = generation;
                 self.rotate(now);
 
-                *cur_fn = filename;
+                *cur_fn = self.cur_fn.clone();
             }
             Err(why) => {
                 logging::error_console(format!("Failed to cur_fn_lock.write because:{:?}", why));
