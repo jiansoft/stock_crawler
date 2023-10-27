@@ -24,7 +24,6 @@ pub async fn visit(date: DateTime<Local>) -> Result<Index> {
         date.timestamp_millis()
     );
 
-    logging::info_file_async(format!("visit url:{}", url,));
     util::http::get_use_json::<Index>(&url).await
 }
 

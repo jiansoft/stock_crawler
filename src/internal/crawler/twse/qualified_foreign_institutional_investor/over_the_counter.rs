@@ -13,9 +13,6 @@ pub async fn visit() -> Result<Vec<QualifiedForeignInstitutionalInvestor>> {
         "https://mops.{}/server-java/t13sa150_otc?&step=wh",
         twse::HOST,
     );
-
-    logging::info_file_async(format!("visit url:{}", url));
-
     let text = util::http::get_use_big5(&url).await?;
     let selector = Selector::parse("body > center > table:nth-child(1) > tbody > tr")
         .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;

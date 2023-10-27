@@ -42,15 +42,12 @@ struct PeRatioAnalysisResponse {
 pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::DailyQuote>> {
     let date_str = date.format("%Y%m%d").to_string();
     let pe_ratio_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis";
-
-    logging::info_file_async(format!("visit url:{}", pe_ratio_url));
-
     // 本益比
     let pe_ratio_response =
         util::http::get_use_json::<Vec<PeRatioAnalysisResponse>>(pe_ratio_url).await?;
-
     let mut pe_ratio_analysis: HashMap<String, PeRatioAnalysisResponse> =
         HashMap::with_capacity(pe_ratio_response.len());
+
     for item in pe_ratio_response {
         pe_ratio_analysis.insert(item.security_code.to_string(), item);
     }
@@ -65,10 +62,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
         date.timestamp_millis()
     );
 
-    logging::info_file_async(format!("visit url:{}", quote_url));
-
     let quote_response = util::http::get_use_json::<QuoteResponse>(&quote_url).await?;
-
     let mut dqs: Vec<table::daily_quote::DailyQuote> = Vec::with_capacity(2048);
 
     for item in quote_response.aa_data {

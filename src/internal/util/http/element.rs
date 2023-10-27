@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use scraper::{Html, Selector};
 
-use crate::internal::{logging, util, util::text};
+use crate::internal::{util, util::text};
 
 /// Extracts the text value of an element selected by a given CSS selector.
 ///
@@ -117,8 +117,6 @@ pub struct GetOneElementText<'a> {
 /// * `Result<String>` - On success, returns the extracted text from the specified HTML element.
 ///   On failure, returns an error indicating the reason for failure (like element not found, selector parse failure, etc.).
 pub async fn get_one_element(target: GetOneElementText<'_>) -> Result<String> {
-    logging::info_file_async(format!("visit url:{}", target.url));
-
     let text = util::http::get(target.url, None).await?;
     let document = Html::parse_document(&text);
     let selector = Selector::parse(target.selector)

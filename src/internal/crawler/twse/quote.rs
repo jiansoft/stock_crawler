@@ -30,8 +30,6 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
         date.to_rfc3339()
     );
 
-    logging::info_file_async(format!("visit url:{}", url,));
-
     let headers = build_headers().await;
     let data =
         http::post_use_json::<http::Empty, ListedResponse>(&url, Some(headers), None).await?;

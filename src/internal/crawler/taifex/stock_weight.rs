@@ -4,7 +4,7 @@ use anyhow::*;
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
-use crate::internal::{crawler::taifex, logging, util, util::http::element, StockExchange};
+use crate::internal::{crawler::taifex, util, util::http::element, StockExchange};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct StockWeight {
@@ -23,8 +23,6 @@ pub async fn visit(exchange: StockExchange) -> Result<Vec<StockWeight>> {
             format!("https://{}/cht/2/tPEXPropertion", taifex::HOST)
         }
     };
-
-    logging::info_file_async(format!("visit url:{}", url,));
 
     let mut result: Vec<StockWeight> = Vec::with_capacity(1024);
     let text = util::http::get(&url, None).await?;

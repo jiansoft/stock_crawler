@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     cache::SHARE.load().await;
 
     let sched = JobScheduler::new().await?;
-    scheduler::start(sched).await?;
+    scheduler::start(&sched).await?;
     rpc::server::start().await?;
 
     let pong = nosql::redis::CLIENT.ping().await;

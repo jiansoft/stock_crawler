@@ -25,7 +25,6 @@ impl StockInfo for PcHome {
             host = HOST,
             symbol = stock_symbol
         );
-        logging::info_file_async(format!("visit url:{}", url));
         let mut params = HashMap::new();
         params.insert("is_check", "1");
         let text = util::http::post(&url, None, Some(params)).await?;

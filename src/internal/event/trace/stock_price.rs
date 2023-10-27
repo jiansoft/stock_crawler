@@ -1,4 +1,4 @@
-use std::{fmt::Write, time::Duration};
+use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{Local, Timelike};
@@ -11,7 +11,7 @@ use crate::internal::{
     crawler::{self},
     database::table::trace::Trace,
     logging,
-    util::datetime::Weekend,
+    util::{datetime::Weekend, map::Keyable},
 };
 
 /// 提醒本日已達高低標的股票有那些
@@ -19,10 +19,8 @@ pub async fn execute() -> Result<()> {
     if Local::now().is_weekend() {
         return Ok(());
     }
-    //加十秒後再執行，確保已有交易資料
-    let start = Instant::now() + Duration::from_secs(10);
-    let interval = Duration::from_secs(60);
-    let mut task_interval = time::interval_at(start, interval);
+
+    let mut task_interval = time::interval_at(Instant::now(), Duration::from_secs(60));
 
     loop {
         task_interval.tick().await;
@@ -34,44 +32,30 @@ pub async fn execute() -> Result<()> {
             break;
         }
 
-        //logging::debug_file_async("開始追踪股價".to_string());
-        if let Err(why) = trace_price().await {
+        if let Err(why) = trace_target_price().await {
             logging::error_file_async(format!("{:?}", why));
         }
-        //logging::debug_file_async("結束追踪股價".to_string());
     }
 
     Ok(())
 }
 
-async fn trace_price() -> Result<()> {
+async fn trace_target_price() -> Result<()> {
     let futures = Trace::fetch()
         .await?
         .into_iter()
-        .map(process_target)
+        .map(process_target_price)
         .collect::<Vec<_>>();
     futures::future::join_all(futures).await;
 
     Ok(())
 }
 
-async fn process_target(target: Trace) {
-    let target_key = format!("trace_quote:{}", target.key());
-    if TTL.trace_quote_contains_key(&target_key) {
-        return;
-    }
-
+async fn process_target_price(target: Trace) {
     match crawler::fetch_stock_price_from_remote_site(&target.stock_symbol).await {
         Ok(current_price) if current_price != Decimal::ZERO => {
-            match alert_on_price_boundary(target, current_price).await {
-                Ok(is_alert) => {
-                    if is_alert {
-                        TTL.trace_quote_set(target_key, true, Duration::from_secs(60 * 60 * 5));
-                    }
-                }
-                Err(why) => {
-                    logging::error_file_async(format!("{:?}", why));
-                }
+            if let Err(why) = alert_on_price_boundary(target, current_price).await {
+                logging::error_file_async(format!("{:?}", why));
             }
         }
         Ok(_) => {}
@@ -79,41 +63,49 @@ async fn process_target(target: Trace) {
     }
 }
 
-async fn alert_on_price_boundary(target: Trace, price: Decimal) -> Result<bool> {
-    if (price < target.floor && target.floor > Decimal::ZERO)
-        || (price > target.ceiling && target.ceiling > Decimal::ZERO)
+async fn alert_on_price_boundary(target: Trace, current_price: Decimal) -> Result<bool> {
+    if (current_price < target.floor && target.floor > Decimal::ZERO)
+        || (current_price > target.ceiling && target.ceiling > Decimal::ZERO)
     {
-        let mut to_bot_msg = String::with_capacity(64);
-        let stock_cache = SHARE.get_stock(&target.stock_symbol).await;
-        let stock_name = match stock_cache {
-            None => String::from(""),
-            Some(stock) => stock.name,
-        };
+        let target_key = format!("{}-{}", target.key(), current_price);
+        if TTL.trace_quote_contains_key(&target_key) {
+            return Ok(false);
+        }
 
-        let boundary = if price < target.floor {
-            "低於最低價"
-        } else {
-            "超過最高價"
-        };
-        let limit = if price < target.floor {
-            target.floor
-        } else {
-            target.ceiling
-        };
-
-        let _ = writeln!(&mut to_bot_msg, "{stock_name} {boundary}:{limit}，目前報價:{price} https://tw.stock.yahoo.com/quote/{stock_symbol}",
-                         boundary = boundary, limit = limit, price = price, stock_symbol = target.stock_symbol, stock_name = stock_name);
+        let to_bot_msg = format_alert_message(&target, current_price).await;
 
         if !to_bot_msg.is_empty() {
-            if let Err(why) = bot::telegram::send(&to_bot_msg).await {
-                logging::error_file_async(format!("Failed to send because {:?}", why));
-            }
-
+            bot::telegram::send(&to_bot_msg)
+                .await
+                .unwrap_or_else(|why| {
+                    logging::error_file_async(format!("Failed to send message: {:?}", why));
+                });
+            TTL.trace_quote_set(target_key, true, Duration::from_secs(60 * 60 * 5));
             return Ok(true);
         }
     }
 
     Ok(false)
+}
+
+async fn format_alert_message(target: &Trace, current_price: Decimal) -> String {
+    let stock_name = SHARE
+        .get_stock(&target.stock_symbol)
+        .await
+        .map_or_else(String::new, |stock| stock.name);
+    let boundary = if current_price < target.floor {
+        "低於最低價"
+    } else {
+        "超過最高價"
+    };
+    let limit = if current_price < target.floor {
+        target.floor
+    } else {
+        target.ceiling
+    };
+
+    format!("{stock_name} {boundary}:{limit}，目前報價:{price} https://tw.stock.yahoo.com/quote/{stock_symbol}",
+            boundary = boundary, limit = limit, price = current_price, stock_symbol = target.stock_symbol, stock_name = stock_name)
 }
 
 #[cfg(test)]
@@ -160,7 +152,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 trace_stock_price".to_string());
 
-        let _ = trace_price().await;
+        let _ = trace_target_price().await;
 
         logging::debug_file_async("結束 trace_stock_price".to_string());
     }

@@ -2,7 +2,12 @@ use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
 
-use crate::internal::database;
+use crate::{
+    internal::{
+        database,
+        util::map::Keyable
+    }
+};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Trace {
@@ -18,18 +23,6 @@ impl Trace {
             floor,
             ceiling,
         }
-    }
-
-    pub fn clone(&self) -> Self {
-        Trace {
-            stock_symbol: self.stock_symbol.to_string(),
-            floor: self.floor,
-            ceiling: self.ceiling,
-        }
-    }
-
-    pub fn key(&self) -> String {
-        format!("{}-{}-{}", &self.stock_symbol, self.floor, self.ceiling)
     }
 
     /// 從資料表中取得進行追踪的股票
@@ -48,9 +41,22 @@ impl Trace {
     }
 }
 
+impl Keyable for Trace {
+    fn key(&self) -> String {
+        format!(
+            "Trace:{}-{}-{}",
+            &self.stock_symbol, self.floor, self.ceiling
+        )
+    }
+}
+
 impl Clone for Trace {
     fn clone(&self) -> Self {
-        self.clone()
+        Self {
+            stock_symbol: self.stock_symbol.clone(),
+            floor: self.floor,
+            ceiling: self.ceiling,
+        }
     }
 }
 

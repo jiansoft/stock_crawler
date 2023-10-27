@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 use regex::Regex;
 use scraper::{Html, Selector};
 
-use crate::internal::{crawler::yahoo::HOST, logging, util::http};
+use crate::internal::{crawler::yahoo::HOST, util::http};
 
 #[derive(Debug, Clone)]
 pub struct YahooDividend {
@@ -81,9 +81,6 @@ impl YahooDividend {
 /// 此函數可能因為網路請求失敗、網頁解析失敗或正規表示式解析失敗等原因導致錯誤。
 pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     let url = format!("https://{}/quote/{}/dividend", HOST, stock_symbol);
-
-    logging::info_file_async(format!("visit url:{}", url,));
-
     let text = http::get(&url, None).await?;
     let document = Html::parse_document(text.as_str());
     let selector = match Selector::parse(

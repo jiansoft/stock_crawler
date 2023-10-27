@@ -35,8 +35,6 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<reven
 
 /// 下載月營收
 async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<revenue::Revenue>> {
-    logging::info_file_async(format!("visit url:{}", url));
-
     let text = util::http::get_use_big5(&url).await?;
     let mut revenues = Vec::with_capacity(1024);
     let selector = Selector::parse("body > center > center > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr").map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;

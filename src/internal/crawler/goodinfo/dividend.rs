@@ -106,8 +106,8 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
     );
 
     let ua = http::user_agent::gen_random_ua();
-    logging::info_file_async(format!("visit url:{} {}", url, ua));
     let mut headers = HeaderMap::new();
+
     headers.insert("Host", HOST.parse()?);
     headers.insert("Referer", url.parse()?);
     headers.insert("User-Agent", ua.parse()?);
@@ -115,6 +115,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
     headers.insert("content-type", "application/x-www-form-urlencoded".parse()?);
 
     let text = http::post(&url, Some(headers), None).await?;
+
     if text.contains("您的瀏覽量異常") {
         return Err(anyhow!("{} 瀏覽量異常", url));
     }

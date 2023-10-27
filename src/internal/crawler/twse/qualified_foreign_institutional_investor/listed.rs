@@ -32,11 +32,8 @@ pub async fn visit(
         date_time.timestamp_millis()
     );
 
-    logging::info_file_async(format!("visit url:{}", url));
-
     let listed = http::get_use_json::<QFIIResponse>(&url).await?;
     let mut result = Vec::with_capacity(1024);
-
     let stat = match listed.stat {
         None => {
             logging::warn_file_async(

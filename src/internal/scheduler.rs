@@ -13,23 +13,23 @@ use crate::internal::{
 };
 
 /// 啟動排程
-pub async fn start(sched: JobScheduler) -> Result<()> {
+pub async fn start(sched: &JobScheduler) -> Result<()> {
+    run_cron(sched).await?;
+
     let s = sched.clone();
+
     task::spawn(async move {
         if let Err(why) = event::trace::stock_price::execute().await {
             logging::error_file_async(format!("{:?}", why));
         }
 
         // 09:00 提醒本日已達高低標的股票有那些
-        let job = create_job("0 0 1 * * *", event::trace::stock_price::execute);
-        if let Ok(j) = job {
+        if let Ok(j) = create_job("0 0 1 * * *", event::trace::stock_price::execute) {
             if let Err(why) = s.add(j).await {
                 logging::error_file_async(format!("{:?}", why));
             }
         }
     });
-
-    run_cron(sched.clone()).await?;
 
     let msg = format!(
         "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
@@ -40,7 +40,7 @@ pub async fn start(sched: JobScheduler) -> Result<()> {
     bot::telegram::send(&msg).await
 }
 
-async fn run_cron(sched: JobScheduler) -> std::result::Result<(), JobSchedulerError> {
+async fn run_cron(sched: &JobScheduler) -> std::result::Result<(), JobSchedulerError> {
     //let sched = JobScheduler::new().await?;
     //                 sec  min   hour   day of month   month   day of week   year
     //let expression = "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2";
@@ -95,6 +95,10 @@ async fn run_cron(sched: JobScheduler) -> std::result::Result<(), JobSchedulerEr
     }
 
     sched.start().await
+}
+
+pub trait Scheduler {
+    fn is_weekend(&self) -> bool;
 }
 
 fn create_job<F, Fut>(cron_expr: &'static str, task: F) -> Result<Job>

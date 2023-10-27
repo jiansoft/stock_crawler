@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::internal::{
     crawler::wespai::HOST,
-    logging,
     util::{http, http::element},
 };
 
@@ -66,12 +65,12 @@ impl Profit {
 pub async fn visit() -> Result<Vec<Profit>> {
     let url = format!("https://stock.{}/profit", HOST);
     let ua = http::user_agent::gen_random_ua();
-    logging::info_file_async(format!("visit url:{} {}", url, ua));
-
     let mut headers = HeaderMap::new();
+
     headers.insert("Referer", url.parse()?);
     headers.insert("User-Agent", ua.parse()?);
     headers.insert("content-length", "0".parse()?);
+
     let text = http::get(&url, Some(headers)).await?;
     let document = Html::parse_document(text.as_str());
     let selector = match Selector::parse("body > h1 > a") {
@@ -92,7 +91,6 @@ pub async fn visit() -> Result<Vec<Profit>> {
         }
         Some(year) => year,
     };
-
     let re = Regex::new(r"\d{4}")?;
     let mut profit_year = 0;
     if let Some(caps) = re.captures(year) {
@@ -111,7 +109,6 @@ pub async fn visit() -> Result<Vec<Profit>> {
             return Err(anyhow!("Failed to Selector::parse because: {:?}", why));
         }
     };
-
     let mut profits = Vec::with_capacity(2048);
 
     for element in document.select(&selector) {

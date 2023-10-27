@@ -6,7 +6,10 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::internal::{crawler::yahoo::HOST, logging, util, util::http::element};
+use crate::internal::{crawler::yahoo::HOST, util::{
+    self,
+    http::element
+}};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Profile {
@@ -60,9 +63,6 @@ impl Profile {
 /// 從雅虎抓取指定股票的 profile
 pub async fn visit(stock_symbol: &str) -> Result<Profile> {
     let url = format!("https://{}/quote/{}/profile", HOST, stock_symbol);
-
-    logging::info_file_async(format!("visit url:{}", url,));
-
     let text = util::http::get(&url, None).await?;
     let document = Html::parse_document(text.as_str());
     let selector = match Selector::parse("#main-2-QuoteProfile-Proxy > div > section:nth-child(3)")

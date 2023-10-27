@@ -6,7 +6,6 @@ use crate::internal::{
     cache::SHARE,
     crawler::twse,
     database::table,
-    logging,
     util::{self, datetime::Weekend},
     StockExchangeMarket,
 };
@@ -57,7 +56,7 @@ pub async fn visit(
         twse::HOST,
         mode.serial_number()
     );
-    logging::info_file_async(format!("visit url:{}", url,));
+
     let response = util::http::get_use_big5(&url).await?;
     let mut result: Vec<InternationalSecuritiesIdentificationNumber> = Vec::with_capacity(4096);
     let document = Html::parse_document(&response);

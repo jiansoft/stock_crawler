@@ -4,10 +4,11 @@ use std::{
 };
 
 use anyhow::*;
+use futures::future::join_all;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-use crate::internal::{config::SETTINGS, logging, util::http};
+use crate::internal::{config::SETTINGS, util::http};
 
 static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 
@@ -17,7 +18,7 @@ struct Telegram {
 
 impl Telegram {
     pub fn new() -> Self {
-        Telegram {
+        Self {
             send_message_url: format!(
                 "https://api.telegram.org/bot{}/sendMessage",
                 SETTINGS.bot.telegram.token
@@ -25,29 +26,30 @@ impl Telegram {
         }
     }
 
-    pub async fn send(&self, msg: &str) -> Result<()> {
-        for id in SETTINGS.bot.telegram.allowed.keys() {
-            let payload = SendMessageRequest {
-                chat_id: *id,
-                text: msg,
-            };
+    pub async fn send(&self, message: &str) -> Result<()> {
+        let futures: Vec<_> = SETTINGS
+            .bot
+            .telegram
+            .allowed
+            .keys()
+            .map(|id| self.send_message(SendMessageRequest::new(*id, message)))
+            .collect();
 
-            self.send_message(payload).await?
-        }
-
-        Ok(())
+        join_all(futures)
+            .await
+            .into_iter()
+            .find(|res| res.is_err())
+            .unwrap_or_else(|| Ok(()))
     }
 
     async fn send_message(&self, payload: SendMessageRequest<'_>) -> Result<()> {
-        if let Err(why) = http::post_use_json::<SendMessageRequest, SendMessageResponse>(
+        http::post_use_json::<SendMessageRequest, SendMessageResponse>(
             &self.send_message_url,
             None,
             Some(&payload),
         )
         .await
-        {
-            logging::error_file_async(format!("Failed to send_message because: {:?}", why));
-        }
+        .map_err(|err| anyhow!("Failed to send message because: {:?}", err))?;
 
         Ok(())
     }
@@ -80,6 +82,12 @@ pub struct SendMessageRequest<'a> {
     pub text: &'a str,
 }
 
+impl<'a> SendMessageRequest<'a> {
+    pub fn new(chat_id: i64, text: &'a str) -> SendMessageRequest<'_> {
+        SendMessageRequest { chat_id, text }
+    }
+}
+
 pub async fn send(msg: &str) -> Result<()> {
     get_client()?.send(msg).await
 }
@@ -89,6 +97,7 @@ mod tests {
     use std::env;
 
     use crate::internal::cache::SHARE;
+    use crate::internal::logging;
 
     use super::*;
 

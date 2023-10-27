@@ -7,7 +7,7 @@ use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Semaphore, time::sleep};
 
-use crate::internal::util;
+use crate::internal::{logging, util};
 
 pub mod element;
 pub mod user_agent;
@@ -261,6 +261,8 @@ async fn send(
         rb = body_fn(rb);
     }
 
+    logging::info_file_async(format!("visit url:{url}"));
+
     for attempt in 1..=MAX_RETRIES {
         let rb_clone = match rb.try_clone() {
             Some(rb_clone) => rb_clone,
@@ -313,7 +315,6 @@ mod tests {
             Local::now().timestamp_millis().to_string()
         );
 
-        logging::debug_file_async(format!("visit url:{}", url,));
         logging::debug_file_async(format!("request_get:{:?}", get(&url, None).await));
 
         let bytes = reqwest::get("https://httpbin.org/ip")
