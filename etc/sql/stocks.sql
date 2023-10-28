@@ -31,5 +31,8 @@ COMMENT ON COLUMN stocks.issued_share IS '發行股數';
 COMMENT ON COLUMN stocks.qfii_shares_held IS '全體外資及陸資持有股數';
 COMMENT ON COLUMN stocks.qfii_share_holding_percentage IS '全體外資及陸資持股比率';
 
+--DROP INDEX "stocks-stock_exchange_market_id-stock_industry_id-idx";
 CREATE INDEX "stocks-stock_exchange_market_id-stock_industry_id-idx" ON stocks USING BTREE (stock_exchange_market_id, stock_industry_id);
+
+--DROP INDEX "stocks-stock_industry_id-idx";
 CREATE INDEX "stocks-stock_industry_id-idx" ON stocks USING BTREE (stock_industry_id);

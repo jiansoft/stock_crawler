@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS "public"."market_category";
+-- DROP TABLE IF EXISTS "public"."market_category";
 CREATE TABLE "public"."market_category"
 (
     "market_category_id" int4                                      NOT NULL DEFAULT 0,

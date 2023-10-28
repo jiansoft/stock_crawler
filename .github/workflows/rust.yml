@@ -37,6 +37,7 @@ jobs:
         psql -h localhost -U user -d db -a -f etc/sql/market_category.sql
         psql -h localhost -U user -d db -a -f etc/sql/stocks.sql
         psql -h localhost -U user -d db -a -f etc/sql/daily_quote.sql
+        psql -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
 
     - name: Install protoc
       run: |

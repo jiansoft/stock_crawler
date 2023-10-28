@@ -73,10 +73,10 @@ COMMENT ON COLUMN "DailyQuotes"."price-to-book_ratio" IS '股價淨值比';
 
 CREATE UNIQUE INDEX ON "DailyQuotes" ("Date" DESC, "SecurityCode" ASC);
 
-DROP INDEX "DailyQuotes_SecurityCode_Date_uidx";
+--DROP INDEX "DailyQuotes_SecurityCode_Date_uidx";
 CREATE UNIQUE INDEX "DailyQuotes_SecurityCode_Date_uidx"
     ON "DailyQuotes" ("SecurityCode", "Date" DESC) INCLUDE ("year", "HighestPrice", "LowestPrice", "ClosingPrice");
 
-DROP INDEX "DailyQuotes_Date_idx";
+--DROP INDEX "DailyQuotes_Date_idx";
 CREATE INDEX "DailyQuotes_Date_idx"
     ON "DailyQuotes" ("Date" DESC) INCLUDE ("Serial", "SecurityCode");
