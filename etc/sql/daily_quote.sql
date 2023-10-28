@@ -1,82 +1,80 @@
 -- DROP TABLE IF EXISTS "public"."DailyQuotes";
-CREATE TABLE "DailyQuotes"
+create table public."DailyQuotes"
 (
-    "Serial"                        BIGSERIAL                                     NOT NULL
-        CONSTRAINT "DailyQuotes_pkey" PRIMARY KEY,
-    "Date"                          DATE                     DEFAULT CURRENT_DATE NOT NULL,
-    "year"                          INTEGER                  DEFAULT 0            NOT NULL,
-    "month"                         INTEGER                  DEFAULT 0            NOT NULL,
-    "day"                           INTEGER                  DEFAULT 0            NOT NULL,
-    "SecurityCode"                  VARCHAR(24)              DEFAULT ''           NOT NULL,
-    "TradingVolume"                 NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "Transaction"                   NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "TradeValue"                    NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "OpeningPrice"                  NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "HighestPrice"                  NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "LowestPrice"                   NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "ClosingPrice"                  NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "ChangeRange"                   NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "Change"                        NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "LastBestBidPrice"              NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "LastBestBidVolume"             NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "LastBestAskPrice"              NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "LastBestAskVolume"             NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "PriceEarningRatio"             NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "MovingAverage5"                NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "MovingAverage10"               NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "MovingAverage20"               NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "MovingAverage60"               NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "MovingAverage120"              NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "MovingAverage240"              NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "maximum_price_in_year"         NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "minimum_price_in_year"         NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "average_price_in_year"         NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "price-to-book_ratio"           NUMERIC(18, 4)           DEFAULT 0            NOT NULL,
-    "maximum_price_in_year_date_on" DATE                     DEFAULT '1970-01-01' NOT NULL,
-    "minimum_price_in_year_date_on" DATE                     DEFAULT '1970-01-01' NOT NULL,
-    "RecordTime"                    TIMESTAMP WITH TIME ZONE DEFAULT NOW()        NOT NULL,
-    "CreateTime"                    TIMESTAMP WITH TIME ZONE DEFAULT NOW()        NOT NULL
+    "Serial"                      bigserial
+        primary key,
+    "Date"                        date                     default CURRENT_DATE                            not null,
+    "SecurityCode"                varchar(24)              default ''::character varying                   not null,
+    "TradingVolume"               numeric(18, 4)           default 0                                       not null,
+    "Transaction"                 numeric(18, 4)           default 0                                       not null,
+    "TradeValue"                  numeric(18, 4)           default 0                                       not null,
+    "OpeningPrice"                numeric(18, 4)           default 0                                       not null,
+    "HighestPrice"                numeric(18, 4)           default 0                                       not null,
+    "LowestPrice"                 numeric(18, 4)           default 0                                       not null,
+    "ClosingPrice"                numeric(18, 4)           default 0                                       not null,
+    "ChangeRange"                 numeric(18, 4)           default 0                                       not null,
+    "Change"                      numeric(18, 4)           default 0                                       not null,
+    "LastBestBidPrice"            numeric(18, 4)           default 0                                       not null,
+    "LastBestBidVolume"           numeric(18, 4)           default 0                                       not null,
+    "LastBestAskPrice"            numeric(18, 4)           default 0                                       not null,
+    "LastBestAskVolume"           numeric(18, 4)           default 0                                       not null,
+    "PriceEarningRatio"           numeric(18, 4)           default 0                                       not null,
+    "RecordTime"                  timestamp with time zone default ('now'::text)::timestamp with time zone not null,
+    "CreateTime"                  timestamp with time zone default ('now'::text)::timestamp with time zone not null,
+    "MovingAverage5"              numeric(18, 4)           default 0                                       not null,
+    "MovingAverage10"             numeric(18, 4)           default 0                                       not null,
+    "MovingAverage20"             numeric(18, 4)           default 0                                       not null,
+    "MovingAverage60"             numeric(18, 4)           default 0                                       not null,
+    "MovingAverage120"            numeric(18, 4)           default 0                                       not null,
+    "MovingAverage240"            numeric(18, 4)           default 0                                       not null,
+    maximum_price_in_year         numeric(18, 4)           default 0                                       not null,
+    minimum_price_in_year         numeric(18, 4)           default 0                                       not null,
+    average_price_in_year         numeric(18, 4)           default 0                                       not null,
+    maximum_price_in_year_date_on date                     default '1970-01-01'::date                      not null,
+    minimum_price_in_year_date_on date                     default '1970-01-01'::date                      not null,
+    "price-to-book_ratio"         numeric(18, 4)           default 0                                       not null,
+    year                          integer                  default 0                                       not null,
+    month                         integer                  default 0                                       not null,
+    day                           integer                  default 0                                       not null
 );
 
-COMMENT ON COLUMN "DailyQuotes"."Date" IS '資料屬於那一天(收盤日)';
-COMMENT ON COLUMN "DailyQuotes"."SecurityCode" IS '股票代碼';
-COMMENT ON COLUMN "DailyQuotes"."TradingVolume" IS '成交股數';
-COMMENT ON COLUMN "DailyQuotes"."Transaction" IS '成交筆數';
-COMMENT ON COLUMN "DailyQuotes"."TradeValue" IS '成交金額';
-COMMENT ON COLUMN "DailyQuotes"."OpeningPrice" IS '開盤價';
-COMMENT ON COLUMN "DailyQuotes"."HighestPrice" IS '最高價';
-COMMENT ON COLUMN "DailyQuotes"."LowestPrice" IS '最低價';
-COMMENT ON COLUMN "DailyQuotes"."ClosingPrice" IS '收盤價';
-COMMENT ON COLUMN "DailyQuotes"."ChangeRange" IS '漲幅';
-COMMENT ON COLUMN "DailyQuotes"."Change" IS '漲跌價差';
-COMMENT ON COLUMN "DailyQuotes"."LastBestBidPrice" IS '最後揭示買價';
-COMMENT ON COLUMN "DailyQuotes"."LastBestBidVolume" IS '最後揭示買量';
-COMMENT ON COLUMN "DailyQuotes"."LastBestAskPrice" IS '最後揭示賣價';
-COMMENT ON COLUMN "DailyQuotes"."LastBestAskVolume" IS '最後揭示賣量';
-COMMENT ON COLUMN "DailyQuotes"."PriceEarningRatio" IS '本益比';
-COMMENT ON COLUMN "DailyQuotes"."RecordTime" IS '資料日期';
-COMMENT ON COLUMN "DailyQuotes".year IS '資料屬於那年度';
-COMMENT ON COLUMN "DailyQuotes".month IS '資料屬於那月份';
-COMMENT ON COLUMN "DailyQuotes".day IS '資料屬於那日';
-COMMENT ON COLUMN "DailyQuotes"."MovingAverage5" IS '5日週線';
-COMMENT ON COLUMN "DailyQuotes"."MovingAverage10" IS '10日雙週線';
-COMMENT ON COLUMN "DailyQuotes"."MovingAverage20" IS '20日月線';
-COMMENT ON COLUMN "DailyQuotes"."MovingAverage60" IS '60日季線';
-COMMENT ON COLUMN "DailyQuotes"."MovingAverage120" IS '120日半年線';
-COMMENT ON COLUMN "DailyQuotes"."MovingAverage240" IS '240日年線';
-COMMENT ON COLUMN "DailyQuotes"."maximum_price_in_year" IS '一年內最高價(收盤日為起點)';
-COMMENT ON COLUMN "DailyQuotes"."minimum_price_in_year" IS '一年內最低價(收盤日為起點)';
-COMMENT ON COLUMN "DailyQuotes"."average_price_in_year" IS '一年內平均價(收盤日為起點)';
-COMMENT ON COLUMN "DailyQuotes"."maximum_price_in_year_date_on" IS '一年內最高價在哪一天(收盤日為起點)';
-COMMENT ON COLUMN "DailyQuotes"."minimum_price_in_year_date_on" IS '一年內最低價在哪一天(收盤日為起點)';
-COMMENT ON COLUMN "DailyQuotes"."price-to-book_ratio" IS '股價淨值比';
+comment on column public."DailyQuotes"."Date" is '資料屬於那一天(收盤日)';
+comment on column public."DailyQuotes"."SecurityCode" is '股票代碼';
+comment on column public."DailyQuotes"."TradingVolume" is '成交股數';
+comment on column public."DailyQuotes"."Transaction" is '成交筆數';
+comment on column public."DailyQuotes"."TradeValue" is '成交金額';
+comment on column public."DailyQuotes"."OpeningPrice" is '開盤價';
+comment on column public."DailyQuotes"."HighestPrice" is '最高價';
+comment on column public."DailyQuotes"."LowestPrice" is '最低價';
+comment on column public."DailyQuotes"."ClosingPrice" is '收盤價';
+comment on column public."DailyQuotes"."ChangeRange" is '漲幅';
+comment on column public."DailyQuotes"."Change" is '漲跌價差';
+comment on column public."DailyQuotes"."LastBestBidPrice" is '最後揭示買價';
+comment on column public."DailyQuotes"."LastBestBidVolume" is '最後揭示買量';
+comment on column public."DailyQuotes"."LastBestAskPrice" is '最後揭示賣價';
+comment on column public."DailyQuotes"."LastBestAskVolume" is '最後揭示賣量';
+comment on column public."DailyQuotes"."PriceEarningRatio" is '本益比';
+comment on column public."DailyQuotes"."RecordTime" is '資料日期';
+comment on column public."DailyQuotes"."MovingAverage5" is '5日週線';
+comment on column public."DailyQuotes"."MovingAverage10" is '10日雙週線';
+comment on column public."DailyQuotes"."MovingAverage20" is '20日月線';
+comment on column public."DailyQuotes"."MovingAverage60" is '60日季線';
+comment on column public."DailyQuotes"."MovingAverage120" is '120日半年線';
+comment on column public."DailyQuotes"."MovingAverage240" is '240日年線';
+comment on column public."DailyQuotes".maximum_price_in_year is '一年內最高價(收盤日為起點)';
+comment on column public."DailyQuotes".minimum_price_in_year is '一年內最低價(收盤日為起點)';
+comment on column public."DailyQuotes".average_price_in_year is '一年內平均價(收盤日為起點)';
+comment on column public."DailyQuotes".maximum_price_in_year_date_on is '一年內最高價在哪一天(收盤日為起點)';
+comment on column public."DailyQuotes".minimum_price_in_year_date_on is '一年內最低價在哪一天(收盤日為起點)';
+comment on column public."DailyQuotes"."price-to-book_ratio" is '股價淨值比';
+comment on column public."DailyQuotes".year is '資料屬於那一年度';
+comment on column public."DailyQuotes".month is '資料屬於那月份';
+comment on column public."DailyQuotes".day is '資料屬於那日';
 
-CREATE UNIQUE INDEX ON "DailyQuotes" ("Date" DESC, "SecurityCode" ASC);
+create index "DailyQuotes_Date_idx"
+    on public."DailyQuotes" ("Date" desc) include ("Serial", "SecurityCode");
 
---DROP INDEX "DailyQuotes_SecurityCode_Date_uidx";
-CREATE UNIQUE INDEX "DailyQuotes_SecurityCode_Date_uidx"
-    ON "DailyQuotes" ("SecurityCode", "Date" DESC) INCLUDE ("year", "HighestPrice", "LowestPrice", "ClosingPrice");
+create unique index "DailyQuotes_SecurityCode_Date_uidx"
+    on public."DailyQuotes" ("SecurityCode" asc, "Date" desc) include (year, "HighestPrice", "LowestPrice", "ClosingPrice", "price-to-book_ratio", "PriceEarningRatio");
 
---DROP INDEX "DailyQuotes_Date_idx";
-CREATE INDEX "DailyQuotes_Date_idx"
-    ON "DailyQuotes" ("Date" DESC) INCLUDE ("Serial", "SecurityCode");
+

@@ -1,18 +1,17 @@
 -- DROP TABLE IF EXISTS "public"."market_category";
-CREATE TABLE "public"."market_category"
+create table public.market_category
 (
-    "market_category_id" int4                                      NOT NULL DEFAULT 0,
-    "exchange"           VARCHAR(32) DEFAULT ''::CHARACTER VARYING NOT NULL,
-    "name"               VARCHAR(32) DEFAULT ''::CHARACTER VARYING NOT NULL,
-    CONSTRAINT "market_category_pkey" PRIMARY KEY (market_category_id)
-
+    market_category_id integer     default 0                     not null
+        primary key,
+    exchange           varchar(32) default ''::character varying not null,
+    name               varchar(32) default ''::character varying not null
 );
 
-COMMENT ON COLUMN "public"."market_category"."exchange" IS '市場別 TAI:上市 TWO:上櫃 TWE:興櫃';
-COMMENT ON COLUMN "public"."market_category"."market_category_id" IS '市場分類編號';
-COMMENT ON COLUMN "public"."market_category"."name" IS '市場名稱';
+comment on column public.market_category.market_category_id is '市場分類編號';
+comment on column public.market_category.exchange is '市場別 TAI:上市 TWO:上櫃 TWE:興櫃';
+comment on column public.market_category.name is '市場名稱';
 
-INSERT INTO public.market_category (exchange, market_category_id, name)
-VALUES ('TAI', 2, '上市'),
+insert into public.market_category (exchange, market_category_id, name)
+values ('TAI', 2, '上市'),
        ('TWO', 4, '上櫃'),
        ('TWE', 5, '興櫃');

@@ -39,6 +39,7 @@ jobs:
         psql -h localhost -U user -d db -a -f etc/sql/daily_quote.sql
         psql -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
         psql -h localhost -U user -d db -a -f etc/sql/dividend.sql
+        psql -h localhost -U user -d db -a -f etc/sql/dividend_record_detail.sql
 
     - name: Install protoc
       run: |
