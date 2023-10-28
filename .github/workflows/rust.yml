@@ -50,6 +50,7 @@ jobs:
         psql -h localhost -U user -d db -a -f etc/sql/quote_history_record.sql
         psql -h localhost -U user -d db -a -f etc/sql/revenue.sql
         psql -h localhost -U user -d db -a -f etc/sql/revenue_last_date.sql
+        psql -h localhost -U user -d db -a -f etc/sql/stock_exchange_market.sql
         psql -h localhost -U user -d db -a -f etc/sql/stocks.sql
         psql -h localhost -U user -d db -a -f etc/sql/stock_word.sql
         psql -h localhost -U user -d db -a -f etc/sql/stock_index.sql
