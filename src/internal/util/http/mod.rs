@@ -251,6 +251,9 @@ async fn send(
     body: Option<impl FnOnce(RequestBuilder) -> RequestBuilder>,
 ) -> Result<Response> {
     let _permit = SEMAPHORE.acquire().await;
+
+    logging::info_file_async(format!("visit {}:{url}", method.as_str()));
+
     let mut rb = get_client()?.request(method, url);
 
     if let Some(h) = headers {
@@ -260,8 +263,6 @@ async fn send(
     if let Some(body_fn) = body {
         rb = body_fn(rb);
     }
-
-    logging::info_file_async(format!("visit url:{url}"));
 
     for attempt in 1..=MAX_RETRIES {
         let rb_clone = match rb.try_clone() {

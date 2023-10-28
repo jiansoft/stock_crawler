@@ -13,9 +13,9 @@ static OUT_DIR: &str = "src/internal/rpc";
 
 fn main() -> Result<(), Box<dyn Error>> {
     let protos = [
-        "proto/basic.proto",
-        "proto/control.proto",
-        "proto/stock.proto",
+        "./etc/proto/basic.proto",
+        "./etc/proto/control.proto",
+        "./etc/proto/stock.proto",
     ];
 
     fs::create_dir_all(OUT_DIR).unwrap();

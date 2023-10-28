@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-import "basic.proto";
+import "etc/proto/basic.proto";
 
 package control;
 
