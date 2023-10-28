@@ -11,7 +11,7 @@
     "token": "afraid_token"
   },
   "postgresql": {
-    "host": "host",
+    "host": "localhost",
     "port": 5432,
     "user": "user",
     "password": "password",
