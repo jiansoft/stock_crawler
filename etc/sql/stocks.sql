@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS stocks
     issued_share                  INT8                     DEFAULT 0                                       NOT NULL,
     qfii_shares_held              INT8                     DEFAULT 0                                       NOT NULL,
     qfii_share_holding_percentage NUMERIC(18, 4)           DEFAULT 0                                       NOT NULL
-    );
+);
 
 
 COMMENT ON COLUMN stocks.last_four_eps IS '近四季EPS';
