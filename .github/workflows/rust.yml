@@ -56,6 +56,7 @@ jobs:
         psql -h localhost -U user -d db -a -f etc/sql/stocks.sql
         psql -h localhost -U user -d db -a -f etc/sql/stock_word.sql
         psql -h localhost -U user -d db -a -f etc/sql/stock_index.sql
+        psql -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
 
     - name: Install protoc
       run: |
