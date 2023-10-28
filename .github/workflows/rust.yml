@@ -31,9 +31,10 @@ jobs:
     - name: Install PostgreSQL client
       run: sudo apt-get -yqq install postgresql-client
 
-    - name: Run SQL script
-      run: psql -h localhost -U user -d db -a -f etc/sql/init.sql
-
+    - name: Run SQL file
+      run: |
+        export PGPASSWORD=password
+        psql -h localhost -U user -d db -a -f etc/sql/init.sql
 
     - name: Install protoc
       run: |
