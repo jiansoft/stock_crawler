@@ -1,7 +1,6 @@
-use core::result::Result::Ok;
 use std::time::Duration;
 
-use anyhow::*;
+use anyhow::Result;
 use chrono::Local;
 use futures::{stream, StreamExt};
 
@@ -10,9 +9,8 @@ use crate::{
         cache::{TtlCacheInner, SHARE, TTL},
         crawler::{tpex, twse},
         database::table::{self, daily_quote},
-        logging,
     },
-    util
+    logging, util,
 };
 
 /// 調用  twse、tpex API 取得台股收盤報價
@@ -96,9 +94,13 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::internal::cache::SHARE;
-    use crate::internal::database::table::stock;
-    use crate::internal::logging;
+    use crate::{
+        internal::{
+            cache::SHARE,
+            database::table::stock
+        },
+        logging
+    };
 
     use super::*;
 

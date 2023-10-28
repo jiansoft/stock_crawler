@@ -6,9 +6,9 @@ use crate::{
     internal::{
         crawler::twse,
         database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-        logging,
     },
-    util::http
+    logging,
+    util::http,
 };
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

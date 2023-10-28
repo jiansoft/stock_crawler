@@ -182,7 +182,7 @@ fn parse_period(period: &Option<String>, re: &Regex) -> Result<(i32, String)> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

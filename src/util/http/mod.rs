@@ -1,16 +1,13 @@
-use std::{collections::HashMap, result::Result::Ok, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
-use anyhow::*;
+use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Semaphore, time::sleep};
 
-use crate::{
-    internal::{logging},
-    util
-};
+use crate::{logging, util};
 
 pub mod element;
 pub mod user_agent;
@@ -306,7 +303,7 @@ mod tests {
     use chrono::Local;
     use concat_string::concat_string;
 
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 
@@ -328,5 +325,15 @@ mod tests {
             .await;
 
         println!("bytes: {:#?}", bytes);
+    }
+
+    #[tokio::test]
+    async fn test_get() {
+        match get("https://jiansoft.mooo.com/stock/revenues", None).await {
+            Ok(_) => {}
+            Err(why) => {
+                logging::error_file_async(format!("Failed to get because {:?}", why));
+            }
+        }
     }
 }

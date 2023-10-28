@@ -52,7 +52,7 @@ mod tests {
 
     use chrono::{Local, TimeZone};
 
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

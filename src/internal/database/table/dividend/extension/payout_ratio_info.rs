@@ -100,7 +100,7 @@ mod tests {
     use core::result::Result::Ok;
 
     use crate::{
-        internal::logging,
+        logging,
         util::map::vec_to_hashmap
     };
 

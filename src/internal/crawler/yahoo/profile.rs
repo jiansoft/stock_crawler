@@ -110,7 +110,7 @@ fn css_selector(base: &str, child: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

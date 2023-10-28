@@ -1,6 +1,6 @@
-use std::{collections::HashSet, result::Result::Ok, time::Duration};
+use std::{collections::HashSet, time::Duration};
 
-use anyhow::*;
+use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local};
 use hashbrown::HashMap;
 use tokio_retry::{
@@ -8,10 +8,13 @@ use tokio_retry::{
     Retry,
 };
 
-use crate::internal::{
-    crawler::{goodinfo, yahoo},
-    database::table::{self, dividend},
-    logging, nosql,
+use crate::{
+    internal::{
+        crawler::{goodinfo, yahoo},
+        database::table::{self, dividend},
+        nosql,
+    },
+    logging,
 };
 
 pub mod payout_ratio;

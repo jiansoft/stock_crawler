@@ -100,7 +100,7 @@ ON CONFLICT (date, security_code) DO UPDATE SET
 mod tests {
     use chrono::Local;
 
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

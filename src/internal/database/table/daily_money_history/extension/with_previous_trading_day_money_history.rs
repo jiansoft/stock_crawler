@@ -73,7 +73,7 @@ mod tests {
 
     use chrono::Local;
 
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

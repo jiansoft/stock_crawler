@@ -1,9 +1,10 @@
-use core::result::Result::Ok;
+use anyhow::Result;
 
-use anyhow::*;
-
-use crate::internal::{
-    backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, logging,
+use crate::{
+    internal::{
+        backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table,
+    },
+    logging,
 };
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
@@ -51,7 +52,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

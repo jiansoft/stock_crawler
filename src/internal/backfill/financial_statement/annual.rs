@@ -6,9 +6,10 @@ use crate::{
     internal::{
         crawler::wespai,
         database::table::{financial_statement, stock},
-        logging, nosql,
+        nosql,
     },
-    util::datetime::Weekend
+    logging,
+    util::datetime::Weekend,
 };
 
 /// 更新台股年報
@@ -59,8 +60,10 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
-    use crate::internal::logging;
+    use crate::{
+        internal::cache::SHARE,
+        logging
+    };
 
     use super::*;
 

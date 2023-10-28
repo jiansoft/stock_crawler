@@ -1,15 +1,15 @@
-use std::{fmt::Write, result::Result::Ok};
+use std::fmt::Write;
 
-use anyhow::*;
+use anyhow::{anyhow, Result};
 use chrono::Local;
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::{
     internal::{
-        bot, cache::SHARE, crawler::twse, database::table, logging, rpc, rpc::stock,
-        StockExchangeMarket,
+        bot, cache::SHARE, crawler::twse, database::table, rpc, rpc::stock, StockExchangeMarket,
     },
-    util::datetime::Weekend
+    logging,
+    util::datetime::Weekend,
 };
 
 /// 更新資料庫新上市股票的或更新其交易所的市場編號、股票的產業分類、名稱等欄位
@@ -114,7 +114,7 @@ async fn update_stock_info(
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

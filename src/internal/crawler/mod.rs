@@ -55,7 +55,7 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::logging;
+    use crate::logging;
 
     #[tokio::test]
     async fn test_fetch_stock_price_from_remote_site() {

@@ -1,4 +1,3 @@
-use core::result::Result::Ok;
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, BufWriter},
@@ -10,11 +9,11 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-use anyhow::*;
+use anyhow::Result;
 use chrono::{DateTime, Local};
 use rayon::prelude::*;
 
-use crate::internal::logging;
+use crate::logging;
 
 pub struct Rotate {
     /// log/%Y-%m-%d-name.log
@@ -178,7 +177,7 @@ impl Rotate {
 mod tests {
     use std::io::Write;
 
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

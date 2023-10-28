@@ -4,8 +4,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    internal::{bot, crawler::twse, logging},
-    util,
+    internal::{bot, crawler::twse},
+    logging, util,
     util::map::Keyable,
 };
 
@@ -105,7 +105,7 @@ pub async fn visit() -> Result<Vec<Public>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::{cache::SHARE, logging};
+    use crate::internal::{cache::SHARE};
 
     use super::*;
 

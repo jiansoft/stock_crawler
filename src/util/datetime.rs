@@ -1,6 +1,5 @@
-
+use crate::logging;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Weekday};
-use crate::internal::logging;
 
 /// A trait representing the weekend concept.
 pub trait Weekend {
@@ -109,4 +108,3 @@ pub fn parse_taiwan_date(date_str: &str) -> Option<NaiveDate> {
 fn parse_date_part<T: std::str::FromStr>(date_part_str: &str) -> Option<T> {
     date_part_str.parse::<T>().ok()
 }
-

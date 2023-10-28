@@ -10,7 +10,7 @@ use chrono::{format::DelayedFormat, Local};
 use crossbeam_channel::{unbounded, Sender};
 use once_cell::sync::Lazy;
 
-use crate::internal::logging::rotate::Rotate;
+use crate::logging::rotate::Rotate;
 
 pub mod rotate;
 

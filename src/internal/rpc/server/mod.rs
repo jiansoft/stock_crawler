@@ -2,13 +2,15 @@ use anyhow::Result;
 use std::net::SocketAddr;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
-use crate::internal::{
-    config::SETTINGS,
-    logging,
-    rpc::{
-        control::control_server::ControlServer, server::control_service::ControlService,
-        server::stock_service::StockService, stock::stock_server::StockServer,
+use crate::{
+    internal::{
+        config::SETTINGS,
+        rpc::{
+            control::control_server::ControlServer, server::control_service::ControlService,
+            server::stock_service::StockService, stock::stock_server::StockServer,
+        },
     },
+    logging,
 };
 
 pub mod control_service;

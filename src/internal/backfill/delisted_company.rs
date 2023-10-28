@@ -4,10 +4,9 @@ use anyhow::*;
 use chrono::Local;
 
 use crate::{
-    internal::{
-        cache::SHARE, crawler::twse, database::table::stock, logging,
-    },
-    util::datetime::Weekend
+    internal::{cache::SHARE, crawler::twse, database::table::stock},
+    logging,
+    util::datetime::Weekend,
 };
 
 /// 更新資料庫中終止上市的公司

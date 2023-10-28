@@ -10,9 +10,8 @@ use crate::{
             self,
             table::{stock_index, stock_word},
         },
-        logging,
     },
-    util
+    logging, util,
 };
 
 pub(crate) mod extension;
@@ -247,7 +246,13 @@ ORDER BY
             })
             .fetch_all(database::get_connection())
             .await
-            .map_err(|why| anyhow!("Failed to Stock::fetch from database because:{:?}", why))
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to Stock::fetch from database({:#?}) because:{:?}",
+                    crate::internal::config::SETTINGS.postgresql,
+                    why
+                )
+            })
     }
 }
 
@@ -390,7 +395,7 @@ pub fn is_preference_shares(stock_symbol: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

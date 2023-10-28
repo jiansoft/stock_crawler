@@ -97,7 +97,7 @@ mod tests {
     use std::env;
 
     use crate::internal::cache::SHARE;
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

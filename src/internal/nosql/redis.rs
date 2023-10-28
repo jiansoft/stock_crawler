@@ -212,7 +212,7 @@ impl Default for Redis {
 
 #[cfg(test)]
 mod tests {
-    use crate::{internal::cache::SHARE, internal::logging};
+    use crate::{internal::cache::SHARE, logging};
 
     use super::*;
 

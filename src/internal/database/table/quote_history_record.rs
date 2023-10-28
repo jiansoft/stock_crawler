@@ -111,7 +111,7 @@ mod tests {
 
     use rust_decimal_macros::dec;
 
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

@@ -221,7 +221,7 @@ impl From<wespai::profit::Profit> for FinancialStatement {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

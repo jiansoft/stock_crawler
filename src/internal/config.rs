@@ -1,11 +1,11 @@
-use std::{collections::HashMap, env, fs, io, path::PathBuf, result::Result::Ok, str::FromStr, u8};
+use std::{collections::HashMap, env, fs, io, path::PathBuf, str::FromStr, u8};
 
-use anyhow::*;
+use anyhow::Result;
 use config::{Config as config_config, File as config_file};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-use crate::internal::logging;
+use crate::logging;
 
 const CONFIG_PATH: &str = "app.json";
 

@@ -146,7 +146,7 @@ pub async fn visit() -> Result<Vec<Profit>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

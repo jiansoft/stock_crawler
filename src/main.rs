@@ -17,6 +17,8 @@ use tokio_cron_scheduler::JobScheduler;
 use crate::internal::{cache, nosql, rpc, scheduler};
 
 pub mod internal;
+/// 日誌
+pub mod logging;
 /// 工具類
 pub mod util;
 

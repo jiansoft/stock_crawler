@@ -3,11 +3,13 @@ use std::{collections::HashMap, sync::RwLock, time::Duration};
 use once_cell::sync::Lazy;
 
 //use futures::executor::block_on;
-use crate::internal::{
-    database::table::{
-        index, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
+use crate::{
+    internal::{
+        database::table::{
+            index, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
+        },
     },
-    logging,
+    logging
 };
 
 pub static SHARE: Lazy<Share> = Lazy::new(Default::default);

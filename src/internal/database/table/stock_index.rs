@@ -72,7 +72,7 @@ DO NOTHING;
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

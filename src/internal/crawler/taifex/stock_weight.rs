@@ -86,7 +86,7 @@ fn get_stock_weight(element: &ElementRef, ra: &str, sy: &str, w: &str) -> Option
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

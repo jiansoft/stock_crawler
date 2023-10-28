@@ -7,9 +7,8 @@ use crate::{
         cache::SHARE,
         crawler::twse,
         database::{table, table::revenue},
-        logging,
     },
-    util
+    logging, util,
 };
 
 /// 調用  twse API 取得台股月營收
@@ -145,7 +144,7 @@ pub(crate) async fn process_revenue(
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

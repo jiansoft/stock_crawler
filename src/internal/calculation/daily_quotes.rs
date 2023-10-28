@@ -9,9 +9,8 @@ use crate::{
         database::table::{
             daily_quote, daily_quote::DailyQuote, quote_history_record::QuoteHistoryRecord,
         },
-        logging,
     },
-    util
+    logging, util,
 };
 
 /// 計算每家公司指定日期的均線值
@@ -157,7 +156,7 @@ pub(crate) async fn process_daily_quote_moving_average(mut dq: DailyQuote) -> Re
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

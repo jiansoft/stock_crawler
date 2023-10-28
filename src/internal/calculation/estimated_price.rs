@@ -1,8 +1,8 @@
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 
-use crate::internal::{
-    database::{table, table::estimate::Estimate},
+use crate::{
+    internal::database::{table, table::estimate::Estimate},
     logging,
 };
 
@@ -49,7 +49,7 @@ pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::{cache::SHARE, logging};
+    use crate::internal::{cache::SHARE};
 
     use super::*;
 

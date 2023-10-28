@@ -61,7 +61,7 @@ pub async fn visit() -> Result<Vec<Emerging>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{internal::cache::SHARE, internal::logging};
+    use crate::{internal::cache::SHARE, logging};
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

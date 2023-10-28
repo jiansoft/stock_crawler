@@ -88,8 +88,10 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
 mod tests {
     use chrono::{Duration, Timelike};
 
-    use crate::internal::cache::SHARE;
-    use crate::internal::logging;
+    use crate::{
+        internal::cache::SHARE,
+        logging
+    };
 
     use super::*;
 

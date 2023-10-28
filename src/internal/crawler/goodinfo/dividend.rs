@@ -1,6 +1,4 @@
-use std::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::{anyhow, Result};
 use hashbrown::HashMap;
 use regex::Regex;
 use reqwest::header::HeaderMap;
@@ -10,15 +8,13 @@ use serde::{Deserialize, Serialize};
 use urlencoding::encode;
 
 use crate::{
+    internal::crawler::goodinfo::HOST,
+    logging,
     util::{
-        map::Keyable,
         http::{self, element},
-        text
+        map::Keyable,
+        text,
     },
-    internal::{
-        crawler::goodinfo::HOST,
-        logging,
-    }
 };
 
 const UNSET_DATE: &str = "-";
@@ -225,7 +221,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

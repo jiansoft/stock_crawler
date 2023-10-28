@@ -5,9 +5,9 @@ use crate::{
     internal::{
         cache::SHARE, crawler::twse,
         database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-        logging,
     },
-    util::datetime::Weekend
+    logging,
+    util::datetime::Weekend,
 };
 
 pub async fn execute() -> Result<()> {
@@ -75,8 +75,10 @@ async fn update(qfiis: Vec<QualifiedForeignInstitutionalInvestor>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
-    use crate::internal::logging;
+    use crate::{
+        internal::cache::SHARE,
+        logging
+    };
 
     use super::*;
 

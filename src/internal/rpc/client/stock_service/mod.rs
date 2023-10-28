@@ -27,8 +27,10 @@ pub async fn push_stock_info_to_go_service(
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
-    use crate::internal::logging;
+    use crate::{
+        internal::cache::SHARE,
+        logging
+    };
 
     use super::*;
 

@@ -133,8 +133,10 @@ pub async fn visit(
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
-    use crate::internal::logging;
+    use crate::{
+        internal::cache::SHARE,
+        logging
+    };
 
     //use std::collections::HashSet;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。

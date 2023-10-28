@@ -1,11 +1,9 @@
-use std::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::{anyhow, Result};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use crate::internal::{
-    database::{
+use crate::{
+    internal::database::{
         self,
         table::{
             dividend, dividend_record_detail::DividendRecordDetail, dividend_record_detail_more,
@@ -208,7 +206,7 @@ mod tests {
     use chrono::{Local, TimeZone};
 
     use crate::internal::cache::SHARE;
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

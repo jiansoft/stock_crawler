@@ -8,10 +8,7 @@ use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 
-use crate::{
-    internal::{database, logging},
-    util
-};
+use crate::{internal::database, logging, util};
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Index {
@@ -251,7 +248,7 @@ impl From<Vec<String>> for Index {
 mod tests {
     use std::{thread, time};
 
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

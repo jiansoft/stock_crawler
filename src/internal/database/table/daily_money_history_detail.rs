@@ -244,7 +244,7 @@ ON CONFLICT (date, security_code, member_id) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::logging;
+    use crate::logging;
 
     use super::*;
 

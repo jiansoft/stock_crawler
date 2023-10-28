@@ -33,7 +33,7 @@ impl StockInfo for CnYes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internal::logging;
+    use crate::logging;
 
     #[tokio::test]
     async fn test_visit() {

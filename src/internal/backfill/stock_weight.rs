@@ -1,15 +1,13 @@
-use core::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::Result;
 use futures::{stream, StreamExt};
 
 use crate::{
     internal::{
         crawler::taifex,
         database::table::stock::{self, extension::weight::SymbolAndWeight},
-        logging, StockExchange,
+        StockExchange,
     },
-    util
+    logging, util,
 };
 
 /// 查詢 taifex 個股權值比重
@@ -66,8 +64,10 @@ async fn fetch_stock_weights(stock_exchange: StockExchange) -> Result<Vec<Symbol
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
-    use crate::internal::logging;
+    use crate::{
+        internal::cache::SHARE,
+        logging
+    };
 
     use super::*;
 

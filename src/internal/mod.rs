@@ -14,8 +14,6 @@ mod crawler;
 mod database;
 /// 事件
 pub mod event;
-/// 日誌
-pub mod logging;
 /// nosql
 pub mod nosql;
 ///
