@@ -4,7 +4,10 @@ use anyhow::*;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
-use crate::internal::{crawler::tpex, util};
+use crate::{
+    internal::{crawler::tpex, },
+    util
+};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 //#[serde(rename_all = "camelCase")]

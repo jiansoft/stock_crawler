@@ -2,11 +2,14 @@ use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeZone};
 use futures::{stream, StreamExt};
 
-use crate::internal::{
-    cache::SHARE,
-    crawler::twse,
-    database::{table, table::revenue},
-    logging, util,
+use crate::{
+    internal::{
+        cache::SHARE,
+        crawler::twse,
+        database::{table, table::revenue},
+        logging,
+    },
+    util
 };
 
 /// 調用  twse API 取得台股月營收

@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use scraper::{Html, Selector};
 
-use crate::internal::{util, util::text};
+use crate::{util, util::text};
 
 /// Extracts the text value of an element selected by a given CSS selector.
 ///

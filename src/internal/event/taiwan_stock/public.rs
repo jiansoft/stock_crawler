@@ -3,7 +3,10 @@ use std::fmt::Write;
 use anyhow::Result;
 use chrono::Local;
 
-use crate::internal::{bot, crawler, nosql, util::map::Keyable};
+use crate::{
+    internal::{bot, crawler, nosql},
+    util::map::Keyable
+};
 
 pub async fn execute() -> Result<()> {
     let ps = crawler::twse::public::visit().await?;

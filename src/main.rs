@@ -17,6 +17,8 @@ use tokio_cron_scheduler::JobScheduler;
 use crate::internal::{cache, nosql, rpc, scheduler};
 
 pub mod internal;
+/// 工具類
+pub mod util;
 
 /*#[get("/")]
 fn index() -> &'static str {

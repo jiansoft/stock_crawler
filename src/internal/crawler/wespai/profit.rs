@@ -7,10 +7,7 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::internal::{
-    crawler::wespai::HOST,
-    util::{http, http::element},
-};
+use crate::{internal::crawler::wespai::HOST, util::http, util::http::element};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Profit {

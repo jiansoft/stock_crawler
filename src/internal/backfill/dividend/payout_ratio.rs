@@ -2,11 +2,13 @@ use std::{collections::HashSet, time::Duration};
 
 use anyhow::Result;
 
-use crate::internal::{
-    crawler::goodinfo,
-    database::{table, table::stock},
-    logging, nosql,
-    util::map::{vec_to_hashmap, Keyable},
+use crate::{
+    internal::{
+        crawler::goodinfo,
+        database::{table, table::stock},
+        logging, nosql,
+    },
+    util::map::{vec_to_hashmap, Keyable}
 };
 
 /// 將股息中盈餘分配率為零的數據向第三方取得數據後更新更新

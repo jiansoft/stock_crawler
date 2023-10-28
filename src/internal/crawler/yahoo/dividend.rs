@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 use regex::Regex;
 use scraper::{Html, Selector};
 
-use crate::internal::{crawler::yahoo::HOST, util::http};
+use crate::{internal::crawler::yahoo::HOST, util::http};
 
 #[derive(Debug, Clone)]
 pub struct YahooDividend {

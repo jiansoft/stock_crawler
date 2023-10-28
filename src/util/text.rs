@@ -200,7 +200,7 @@ pub fn parse_i64(s: &str, escape_chars: Option<Vec<char>>) -> Result<i64> {
 /// let clean_s = clean_string_escape_chars(s, escape_chars);
 /// assert_eq!(clean_s, "HelloWorld!");
 /// ```
-pub(super) fn clean_escape_chars(s: &str, escape_chars: Option<Vec<char>>) -> String {
+pub(crate) fn clean_escape_chars(s: &str, escape_chars: Option<Vec<char>>) -> String {
     let mut combined: Vec<char> = NUMBER_ESCAPE_CHAR.to_vec();
     if let Some(ec) = escape_chars {
         combined.extend(ec);

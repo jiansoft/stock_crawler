@@ -8,7 +8,7 @@ use futures::future::join_all;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-use crate::internal::{config::SETTINGS, util::http};
+use crate::{internal::config::SETTINGS, util::http};
 
 static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 

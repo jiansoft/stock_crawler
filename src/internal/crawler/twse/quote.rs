@@ -4,14 +4,15 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
-use crate::internal::crawler::twse::build_headers;
-use crate::internal::{
-    cache::{self, TtlCacheInner, TTL},
-    crawler::twse,
-    database::table::{self, daily_quote::FromWithExchange},
-    logging,
-    util::http,
-    StockExchange,
+use crate::{
+    internal::{
+        cache::{self, TtlCacheInner, TTL},
+        crawler::twse,
+        database::table::{self, daily_quote::FromWithExchange},
+        StockExchange,
+        crawler::twse::build_headers
+    },
+    util::http
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -88,6 +89,7 @@ mod tests {
     use chrono::{Duration, Timelike};
 
     use crate::internal::cache::SHARE;
+    use crate::internal::logging;
 
     use super::*;
 

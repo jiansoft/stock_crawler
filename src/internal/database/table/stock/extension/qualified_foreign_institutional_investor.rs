@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, FromRow};
 
-use crate::internal::{database, util::convert::FromValue};
+use crate::internal::{database};
+use crate::util::convert::FromValue;
 
 ///
 #[derive(FromRow, Debug)]

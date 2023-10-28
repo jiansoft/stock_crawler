@@ -5,13 +5,18 @@ use chrono::{Local, Timelike};
 use rust_decimal::Decimal;
 use tokio::{time, time::Instant};
 
-use crate::internal::{
-    bot,
-    cache::{TtlCacheInner, SHARE, TTL},
-    crawler::{self},
-    database::table::trace::Trace,
-    logging,
-    util::{datetime::Weekend, map::Keyable},
+use crate::{
+    internal::{
+        bot,
+        cache::{TtlCacheInner, SHARE, TTL},
+        crawler::{self},
+        database::table::trace::Trace,
+        logging,
+    },
+    util::{
+        datetime::Weekend,
+        map::Keyable
+    }
 };
 
 /// 提醒本日已達高低標的股票有那些

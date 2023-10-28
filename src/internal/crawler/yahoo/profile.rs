@@ -1,15 +1,10 @@
-use core::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::{anyhow, Result};
 use regex::Regex;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::internal::{crawler::yahoo::HOST, util::{
-    self,
-    http::element
-}};
+use crate::{internal::crawler::yahoo::HOST, util, util::http::element};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Profile {

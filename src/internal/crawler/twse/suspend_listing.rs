@@ -1,7 +1,7 @@
 use anyhow::*;
 use serde::Deserialize;
 
-use crate::internal::{crawler::twse, logging, util};
+use crate::{internal::crawler::twse, util};
 
 /// 調用 twse suspendListingCsvAndHtml API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Deserialize)]
@@ -29,6 +29,7 @@ mod tests {
     use std::result::Result::Ok;
 
     use crate::internal::cache::SHARE;
+    use crate::internal::logging;
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

@@ -126,8 +126,10 @@ fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
 mod tests {
     use std::time::Instant;
 
-    use crate::internal::logging;
-    use crate::internal::util;
+    use crate::{
+        internal::logging,
+        util
+    };
 
     use super::*;
 

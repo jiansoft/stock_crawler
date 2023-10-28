@@ -1,15 +1,18 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Datelike, Duration, Local};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
-use crate::internal::{
-    crawler::{tpex, twse},
-    database::{
-        self,
-        table::{stock_index, stock_word},
+use crate::{
+    internal::{
+        crawler::{tpex, twse},
+        database::{
+            self,
+            table::{stock_index, stock_word},
+        },
+        logging,
     },
-    logging, util,
+    util
 };
 
 pub(crate) mod extension;
@@ -244,7 +247,7 @@ ORDER BY
             })
             .fetch_all(database::get_connection())
             .await
-            .context("Failed to Stock::fetch from database")
+            .map_err(|why| anyhow!("Failed to Stock::fetch from database because:{:?}", why))
     }
 }
 

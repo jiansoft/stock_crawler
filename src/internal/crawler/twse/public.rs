@@ -4,13 +4,9 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    internal::{
-        util::map::Keyable,
-        bot,
-        crawler::twse,
-        logging,
-        util
-    }
+    internal::{bot, crawler::twse, logging},
+    util,
+    util::map::Keyable,
 };
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]

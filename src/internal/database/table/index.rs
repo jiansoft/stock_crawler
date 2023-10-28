@@ -8,7 +8,10 @@ use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 
-use crate::internal::{database, logging, util};
+use crate::{
+    internal::{database, logging},
+    util
+};
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Index {

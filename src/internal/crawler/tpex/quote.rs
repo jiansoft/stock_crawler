@@ -5,11 +5,14 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
 
-use crate::internal::{
-    cache::{self, TtlCacheInner, TTL},
-    crawler::tpex,
-    database::{table, table::daily_quote::FromWithExchange},
-    logging, util, StockExchange,
+use crate::{
+    internal::{
+        cache::{self, TtlCacheInner, TTL},
+        crawler::tpex,
+        database::{table, table::daily_quote::FromWithExchange},
+        StockExchange,
+    },
+    util,
 };
 
 // QuoteResponse 上櫃公司每日收盤資訊
@@ -120,7 +123,12 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
 mod tests {
     use chrono::{Duration, Timelike};
 
-    use crate::internal::cache::SHARE;
+    use crate::{
+        internal::{
+            cache::SHARE,
+            logging
+        }
+    };
 
     use super::*;
 

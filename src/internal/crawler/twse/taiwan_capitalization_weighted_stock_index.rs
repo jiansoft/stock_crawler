@@ -2,7 +2,7 @@ use anyhow::*;
 use chrono::{DateTime, Local};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::internal::{crawler::twse, logging, util};
+use crate::{internal::crawler::twse, util};
 
 /// 調用台股指數 twse API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,6 +32,7 @@ mod tests {
     use std::result::Result::Ok;
 
     use crate::internal::cache::SHARE;
+    use crate::internal::logging;
 
     use super::*;
 

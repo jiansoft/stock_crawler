@@ -3,8 +3,11 @@ use core::result::Result::Ok;
 use anyhow::*;
 use chrono::{Datelike, Duration, Local};
 
-use crate::internal::{
-    calculation, crawler::yahoo, database::table, logging, nosql, util::datetime,
+use crate::{
+    internal::{
+        calculation, crawler::yahoo, database::table, logging, nosql,
+    },
+    util::datetime
 };
 
 /// 將未有上季度財報的股票，到雅虎財經下載後回寫到 financial_statement 表

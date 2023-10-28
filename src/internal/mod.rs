@@ -22,8 +22,6 @@ pub mod nosql;
 pub mod rpc;
 /// 工作排程
 pub mod scheduler;
-/// 工具類
-pub mod util;
 
 /// 交易所
 #[derive(Debug, Copy, Clone)]

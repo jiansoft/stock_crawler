@@ -1,13 +1,13 @@
-use core::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Row};
 
-use crate::internal::{
-    database, database::table::daily_quote::extension::MonthlyStockPriceSummary, util::datetime,
-    StockExchange,
+use crate::{
+    internal::{
+        database, database::table::daily_quote::extension::MonthlyStockPriceSummary, StockExchange,
+    },
+    util::datetime,
 };
 
 pub(crate) mod extension;

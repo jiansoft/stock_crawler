@@ -1,6 +1,6 @@
 use rust_decimal::Decimal;
 
-use crate::internal::{logging, util::text};
+use crate::{internal::logging, util::text};
 
 // Define trait that provides necessary methods
 pub trait FromValue {

@@ -2,12 +2,7 @@ use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
 
-use crate::{
-    internal::{
-        database,
-        util::map::Keyable
-    }
-};
+use crate::{internal::database, util::map::Keyable};
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Trace {

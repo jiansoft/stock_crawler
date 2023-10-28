@@ -7,7 +7,10 @@ use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Semaphore, time::sleep};
 
-use crate::internal::{logging, util};
+use crate::{
+    internal::{logging},
+    util
+};
 
 pub mod element;
 pub mod user_agent;

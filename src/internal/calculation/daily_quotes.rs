@@ -3,12 +3,15 @@ use chrono::NaiveDate;
 use futures::{stream, StreamExt};
 use rust_decimal::Decimal;
 
-use crate::internal::{
-    cache::SHARE,
-    database::table::{
-        daily_quote, daily_quote::DailyQuote, quote_history_record::QuoteHistoryRecord,
+use crate::{
+    internal::{
+        cache::SHARE,
+        database::table::{
+            daily_quote, daily_quote::DailyQuote, quote_history_record::QuoteHistoryRecord,
+        },
+        logging,
     },
-    logging, util,
+    util
 };
 
 /// 計算每家公司指定日期的均線值

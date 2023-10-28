@@ -1,10 +1,12 @@
 use anyhow::{anyhow, Result};
 use scraper::{Html, Selector};
 
-use crate::internal::{
-    crawler::twse,
-    database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    logging, util,
+use crate::{
+    internal::{
+        crawler::twse,
+        database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
+    },
+    util
 };
 
 /// 取得上櫃股票外資及陸資投資持股統計
@@ -36,6 +38,7 @@ mod tests {
     use std::result::Result::Ok;
 
     use crate::internal::cache::SHARE;
+    use crate::internal::logging;
 
     use super::*;
 

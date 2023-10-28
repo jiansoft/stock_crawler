@@ -4,7 +4,13 @@ use anyhow::*;
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
-use crate::internal::{crawler::taifex, util, util::http::element, StockExchange};
+use crate::{
+    internal::{crawler::taifex, StockExchange},
+    util::{
+        self,
+        http::element
+    }
+};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct StockWeight {

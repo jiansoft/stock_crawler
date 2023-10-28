@@ -5,11 +5,14 @@ use anyhow::*;
 use chrono::Local;
 use futures::{stream, StreamExt};
 
-use crate::internal::{
-    cache::{TtlCacheInner, SHARE, TTL},
-    crawler::{tpex, twse},
-    database::table::{self, daily_quote},
-    logging, util,
+use crate::{
+    internal::{
+        cache::{TtlCacheInner, SHARE, TTL},
+        crawler::{tpex, twse},
+        database::table::{self, daily_quote},
+        logging,
+    },
+    util
 };
 
 /// 調用  twse、tpex API 取得台股收盤報價

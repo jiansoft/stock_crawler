@@ -1,10 +1,13 @@
 use anyhow::Result;
 use chrono::{DateTime, FixedOffset, Local};
 
-use crate::internal::{
-    cache::SHARE, crawler::twse,
-    database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    logging, util::datetime::Weekend,
+use crate::{
+    internal::{
+        cache::SHARE, crawler::twse,
+        database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
+        logging,
+    },
+    util::datetime::Weekend
 };
 
 pub async fn execute() -> Result<()> {

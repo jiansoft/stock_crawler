@@ -3,10 +3,13 @@ use core::result::Result::Ok;
 use anyhow::*;
 use futures::{stream, StreamExt};
 
-use crate::internal::{
-    crawler::taifex,
-    database::table::stock::{self, extension::weight::SymbolAndWeight},
-    logging, util, StockExchange,
+use crate::{
+    internal::{
+        crawler::taifex,
+        database::table::stock::{self, extension::weight::SymbolAndWeight},
+        logging, StockExchange,
+    },
+    util
 };
 
 /// 查詢 taifex 個股權值比重

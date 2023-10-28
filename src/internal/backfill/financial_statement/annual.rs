@@ -2,11 +2,13 @@ use anyhow::Result;
 use chrono::Local;
 use futures::future;
 
-use crate::internal::{
-    crawler::wespai,
-    database::table::{financial_statement, stock},
-    logging, nosql,
-    util::datetime::Weekend,
+use crate::{
+    internal::{
+        crawler::wespai,
+        database::table::{financial_statement, stock},
+        logging, nosql,
+    },
+    util::datetime::Weekend
 };
 
 /// 更新台股年報

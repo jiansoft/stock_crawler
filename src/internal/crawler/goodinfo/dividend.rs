@@ -9,14 +9,16 @@ use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use urlencoding::encode;
 
-use crate::internal::util::map::Keyable;
-use crate::internal::{
-    crawler::goodinfo::HOST,
-    logging,
+use crate::{
     util::{
+        map::Keyable,
         http::{self, element},
-        text,
+        text
     },
+    internal::{
+        crawler::goodinfo::HOST,
+        logging,
+    }
 };
 
 const UNSET_DATE: &str = "-";
