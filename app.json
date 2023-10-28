@@ -25,9 +25,9 @@
   },
   "nosql": {
     "redis": {
-      "addr": "addr",
-      "account": "account",
-      "password": "password",
+      "addr": "localhost:6379",
+      "account": "",
+      "password": "",
       "db": 0
     }
   },

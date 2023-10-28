@@ -124,8 +124,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use tokio::time::{sleep, Duration};
-
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
@@ -153,7 +151,7 @@ mod tests {
     async fn test_split() {
         dotenv::dotenv().ok();
         run().await.expect("TODO: panic message");
-        sleep(Duration::from_secs(240)).await;
+        //sleep(Duration::from_secs(240)).await;
         //loop {}
         //println!("split: {:?}, elapsed time: {:?}", result, end);
     }
