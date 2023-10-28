@@ -35,6 +35,7 @@ jobs:
       run: |
         export PGPASSWORD=password
         psql -h localhost -U user -d db -a -f etc/sql/config.sql
+        psql -h localhost -U user -d db -a -f etc/sql/estimate.sql
         psql -h localhost -U user -d db -a -f etc/sql/daily_quote.sql
         psql -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
         psql -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail.sql
