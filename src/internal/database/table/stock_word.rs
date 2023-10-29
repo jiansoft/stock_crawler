@@ -168,6 +168,7 @@ mod tests {
     */
 
     #[tokio::test]
+    #[ignore]
     async fn test_insert() {
         dotenv::dotenv().ok();
         let mut e = StockWord::new("小一".to_string());

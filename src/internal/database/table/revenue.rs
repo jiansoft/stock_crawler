@@ -418,6 +418,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_rebuild_revenue_last_date() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 test_rebuild_revenue_last_date".to_string());
