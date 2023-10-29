@@ -151,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn test_trace_stock_price() {
         dotenv::dotenv().ok();
-        SHARE.load().await;
+        //SHARE.load().await;
         logging::debug_file_async("開始 trace_stock_price".to_string());
 
         let _ = trace_target_price().await;

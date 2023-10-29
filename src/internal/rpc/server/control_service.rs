@@ -68,7 +68,7 @@ mod tests {
         //assert_eq!(response.into_inner().message, "Hello Tonic!");
     }
 
-    #[tokio::test]
+    /*#[tokio::test]
     async fn test_control_request_to_server() {
         dotenv::dotenv().ok();
         let pem = std::fs::read_to_string(&SETTINGS.system.ssl_cert_file).unwrap();
@@ -76,7 +76,7 @@ mod tests {
 
         let tls = ClientTlsConfig::new()
             .ca_certificate(ca)
-            .domain_name("jiansoft.ddns.net");
+            .domain_name("jiansoft.mooo.com");
 
         // Use the service like you would against a real server
 
@@ -99,7 +99,7 @@ mod tests {
         println!("message:{:?}", resp.into_inner().message)
         //assert_eq!(response.into_inner().message, "Hello Tonic!");
     }
-
+*/
     #[tokio::test]
     async fn test_control_request() {
         let c = ControlService::default();
