@@ -81,3 +81,5 @@ jobs:
 
     - name: Run tests
       run: cargo test --verbose
+      env:
+        RUST_BACKTRACE: 1
