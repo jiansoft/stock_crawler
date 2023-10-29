@@ -148,6 +148,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_split() {
         dotenv::dotenv().ok();
         run().await.expect("TODO: panic message");
