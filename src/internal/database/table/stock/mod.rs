@@ -28,7 +28,7 @@ pub struct Stock {
     // 股東權益報酬率
     pub return_on_equity: Decimal,
     pub create_time: DateTime<Local>,
-    /// 交易所的市場編號參考 stock_exchange_market
+    /// 交易所的市場編號參考 StockExchangeMarket
     pub stock_exchange_market_id: i32,
     /// 股票的產業分類編號 stock_industry
     pub stock_industry_id: i32,

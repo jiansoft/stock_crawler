@@ -391,7 +391,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn test_fetch() {
+    async fn test_fetch_last_two_month() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 fetch_last_two_month".to_string());
 

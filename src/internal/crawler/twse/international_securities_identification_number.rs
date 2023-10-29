@@ -25,7 +25,7 @@ pub struct InternationalSecuritiesIdentificationNumber {
     //pub market_category: String,
     pub industry: String,
     pub cfi_code: String,
-    pub exchange_market: table::stock_exchange_market::Entity,
+    pub exchange_market: table::stock_exchange_market::StockExchangeMarket,
     pub industry_id: i32,
 }
 
@@ -100,9 +100,9 @@ pub async fn visit(
                 }
             };
 
-            let exchange_market: table::stock_exchange_market::Entity =
+            let exchange_market: table::stock_exchange_market::StockExchangeMarket =
                 match SHARE.exchange_markets.get(&mode.serial_number()) {
-                    None => table::stock_exchange_market::Entity::new(
+                    None => table::stock_exchange_market::StockExchangeMarket::new(
                         mode.serial_number(),
                         mode.exchange().serial_number(),
                     ),
