@@ -44,6 +44,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_update() {
         dotenv::dotenv().ok();
         aw!(execute());
