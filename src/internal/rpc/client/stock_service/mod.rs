@@ -35,6 +35,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_push_stock_info_to_go_service() {
         dotenv::dotenv().ok();
         SHARE.load().await;

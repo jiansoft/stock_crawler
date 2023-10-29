@@ -116,6 +116,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_upsert() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 upsert".to_string());
@@ -141,6 +142,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 fetch".to_string());

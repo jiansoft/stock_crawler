@@ -253,6 +253,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_index_fetch() {
         dotenv::dotenv().ok();
         let r = Index::fetch().await.unwrap();

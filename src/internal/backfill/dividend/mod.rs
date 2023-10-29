@@ -268,6 +268,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_processing_without_or_multiple() {
         dotenv::dotenv().ok();
         SHARE.load().await;

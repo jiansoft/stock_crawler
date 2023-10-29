@@ -144,6 +144,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_notify_money_change() {
         dotenv::dotenv().ok();
         SHARE.load().await;

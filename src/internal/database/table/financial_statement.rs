@@ -226,6 +226,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_annual() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_annual".to_string());

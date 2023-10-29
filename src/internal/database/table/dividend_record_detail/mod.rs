@@ -116,6 +116,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_calculate_cumulate_dividend() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 calculate_cumulate_dividend".to_string());

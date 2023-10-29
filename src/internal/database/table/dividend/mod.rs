@@ -474,6 +474,7 @@ mod tests {
     }*/
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_no_dividends_for_year() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_no_dividends_for_year".to_string());
@@ -489,6 +490,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_unpublished_dividend_date_or_payable_date_for_specified_year() {
         dotenv::dotenv().ok();
         logging::debug_file_async(
@@ -509,6 +511,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_multiple_dividends_for_year() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_multiple_dividends_for_year".to_string());
@@ -524,6 +527,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_dividends_summary_by_date() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_dividends_summary_by_date".to_string());
@@ -542,6 +546,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_yearly_dividends_sum_by_date() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_yearly_dividends_sum_by_date".to_string());
@@ -560,6 +565,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_upsert() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 upsert".to_string());

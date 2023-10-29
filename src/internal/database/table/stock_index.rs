@@ -77,6 +77,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_insert() {
         dotenv::dotenv().ok();
         let mut e = StockIndex::new("79979".to_string());

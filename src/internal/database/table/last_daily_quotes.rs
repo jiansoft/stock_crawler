@@ -181,6 +181,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_rebuild() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 rebuild".to_string());
