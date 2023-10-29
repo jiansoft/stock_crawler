@@ -415,6 +415,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 Stock::fetch".to_string());

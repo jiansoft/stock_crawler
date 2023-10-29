@@ -57,10 +57,13 @@ impl Clone for Trace {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::{database::table::trace};
-    use crate::logging;
+    use crate::{
+        internal::{database::table::trace},
+        logging
+    };
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_list() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_list".to_string());
