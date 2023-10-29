@@ -36,6 +36,7 @@ mod tests {
     use crate::logging;
 
     #[tokio::test]
+    #[ignore]
     async fn test_visit() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());

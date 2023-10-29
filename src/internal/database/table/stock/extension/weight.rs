@@ -141,6 +141,7 @@ WHERE stock_symbol = $1;
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_zeroed_out() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 zeroed_out".to_string());

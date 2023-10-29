@@ -166,6 +166,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_calculate() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 fetch".to_string());

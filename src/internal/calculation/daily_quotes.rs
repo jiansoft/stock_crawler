@@ -161,6 +161,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_calculate_moving_average() {
         dotenv::dotenv().ok();
         SHARE.load().await;

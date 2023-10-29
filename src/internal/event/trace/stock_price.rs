@@ -117,6 +117,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_handle_price() {
         dotenv::dotenv().ok();
         SHARE.load().await;

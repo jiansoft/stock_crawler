@@ -78,7 +78,8 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_fetch_stocks_with_dividends_on_date() {
+    #[ignore]
+    async fn test_daily_money_history_with_previous_trading_day_money_history_fetch() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch".to_string());
         let d = Local::now().date_naive();

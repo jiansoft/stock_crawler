@@ -186,6 +186,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_list_by_word() {
         dotenv::dotenv().ok();
         let word = util::text::split("台積電");

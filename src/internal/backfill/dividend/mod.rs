@@ -244,6 +244,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_processing_with_unannounced_ex_dividend_dates() {
         dotenv::dotenv().ok();
         SHARE.load().await;

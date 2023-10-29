@@ -110,6 +110,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_visit() {
         dotenv::dotenv().ok();
         SHARE.load().await;

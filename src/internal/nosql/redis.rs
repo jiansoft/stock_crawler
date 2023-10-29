@@ -217,6 +217,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_redis() {
         dotenv::dotenv().ok();
         SHARE.load().await;

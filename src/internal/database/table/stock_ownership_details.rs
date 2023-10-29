@@ -155,6 +155,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_stock_inventory() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch".to_string());

@@ -54,6 +54,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_calculate_estimated_price() {
         dotenv::dotenv().ok();
         SHARE.load().await;

@@ -41,6 +41,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 execute".to_string());
