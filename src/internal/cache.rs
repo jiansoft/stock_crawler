@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::RwLock, time::Duration};
 
 use once_cell::sync::Lazy;
+use rust_decimal::Decimal;
 
 //use futures::executor::block_on;
 use crate::{
@@ -239,7 +240,7 @@ pub static TTL: Lazy<Ttl> = Lazy::new(Default::default);
 pub struct Ttl {
     /// 每日收盤數據
     daily_quote: RwLock<ttl_cache::TtlCache<String, String>>,
-    trace_quote_notify: RwLock<ttl_cache::TtlCache<String, bool>>,
+    trace_quote_notify: RwLock<ttl_cache::TtlCache<String, Decimal>>,
 }
 
 //
@@ -254,12 +255,13 @@ pub trait TtlCacheInner {
         duration: std::time::Duration,
     ) -> Option<String>;
     fn trace_quote_contains_key(&self, key: &str) -> bool;
+    fn trace_quote_get(&self, key: &str) -> Option<Decimal>;
     fn trace_quote_set(
         &self,
         key: String,
-        val: bool,
-        duration: std::time::Duration,
-    ) -> Option<bool>;
+        val: Decimal,
+        duration: Duration,
+    ) -> Option<Decimal>;
 }
 
 impl TtlCacheInner for Ttl {
@@ -297,7 +299,13 @@ impl TtlCacheInner for Ttl {
         }
     }
 
-    fn trace_quote_set(&self, key: String, val: bool, duration: Duration) -> Option<bool> {
+    fn trace_quote_get(&self, key: &str) -> Option<Decimal> {
+        match self.trace_quote_notify.read() {
+            Ok(ttl) => ttl.get(key).map(|value| value).copied(),
+            Err(_) => None,
+        }
+    }
+    fn trace_quote_set(&self, key: String, val: Decimal, duration: Duration) -> Option<Decimal> {
         match self.trace_quote_notify.write() {
             Ok(mut ttl) => ttl.insert(key, val, duration),
             Err(_) => None,
