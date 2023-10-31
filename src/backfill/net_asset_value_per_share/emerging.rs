@@ -2,8 +2,8 @@ use anyhow::Result;
 use chrono::Local;
 
 use crate::{
-    cache::SHARE, crawler::tpex, database::table,
-    internal::backfill::net_asset_value_per_share::update, logging, util::datetime::Weekend,
+    backfill::net_asset_value_per_share::update, cache::SHARE, crawler::tpex, database::table,
+    logging, util::datetime::Weekend,
 };
 
 /// 更新興櫃股票的每股淨值

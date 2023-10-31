@@ -3,14 +3,13 @@ use chrono::{Local, NaiveDate};
 use rust_decimal_macros::dec;
 
 use crate::{
-    bot,
+    backfill, bot,
     cache::{TtlCacheInner, TTL},
     calculation,
     database::table::{
         daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
         daily_quote, last_daily_quotes, yield_rank::YieldRank,
     },
-    internal::backfill,
     logging,
 };
 

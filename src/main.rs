@@ -39,6 +39,8 @@ pub mod util;
 pub mod crawler;
 /// 計算類
 pub mod calculation;
+/// 數據回補
+pub mod backfill;
 
 /*#[get("/")]
 fn index() -> &'static str {
