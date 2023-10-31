@@ -1,7 +1,5 @@
 /// 數據回補
 pub mod backfill;
-/// 計算類
-pub mod calculation;
 
 /// 交易所
 #[derive(Debug, Copy, Clone)]

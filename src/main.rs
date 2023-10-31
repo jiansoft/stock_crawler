@@ -37,6 +37,8 @@ pub mod scheduler;
 pub mod util;
 /// 抓取數據類
 pub mod crawler;
+/// 計算類
+pub mod calculation;
 
 /*#[get("/")]
 fn index() -> &'static str {
