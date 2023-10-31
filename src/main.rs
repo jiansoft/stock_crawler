@@ -24,7 +24,6 @@ pub mod config;
 pub mod database;
 /// 事件
 pub mod event;
-pub mod internal;
 /// 日誌
 pub mod logging;
 /// nosql
@@ -41,6 +40,8 @@ pub mod crawler;
 pub mod calculation;
 /// 數據回補
 pub mod backfill;
+
+pub mod declare;
 
 /*#[get("/")]
 fn index() -> &'static str {

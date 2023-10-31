@@ -5,7 +5,7 @@ use sqlx::{postgres::PgQueryResult, Row};
 
 use crate::{
     database::{self, table::daily_quote::extension::MonthlyStockPriceSummary},
-    internal::StockExchange,
+    declare::StockExchange,
     util::datetime,
 };
 

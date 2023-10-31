@@ -6,7 +6,7 @@ use crate::{
     cache::SHARE,
     crawler::twse,
     database::table,
-    internal::StockExchangeMarket,
+    declare::StockExchangeMarket,
     util::{self, datetime::Weekend},
 };
 

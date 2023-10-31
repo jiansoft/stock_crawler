@@ -8,8 +8,8 @@ use serde::Deserialize;
 use crate::{
     cache::{self, TtlCacheInner, TTL},
     crawler::tpex,
-    database::{table, table::daily_quote::FromWithExchange},
-    internal::StockExchange,
+    database::table::{self, daily_quote::FromWithExchange},
+    declare::StockExchange,
     util,
 };
 

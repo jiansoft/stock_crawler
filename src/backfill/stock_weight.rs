@@ -4,7 +4,7 @@ use futures::{stream, StreamExt};
 use crate::{
     crawler::taifex,
     database::table::stock::{self, extension::weight::SymbolAndWeight},
-    internal::StockExchange,
+    declare::StockExchange,
     logging, util,
 };
 

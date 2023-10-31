@@ -8,7 +8,7 @@ use crate::{
     cache::{self, TtlCacheInner, TTL},
     crawler::{twse, twse::build_headers},
     database::table::{self, daily_quote::FromWithExchange},
-    internal::StockExchange,
+    declare::StockExchange,
     util::http,
 };
 

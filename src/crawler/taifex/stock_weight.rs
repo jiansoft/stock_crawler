@@ -6,7 +6,7 @@ use scraper::{ElementRef, Html, Selector};
 
 use crate::{
     crawler::taifex,
-    internal::StockExchange,
+    declare::StockExchange,
     util::{self, http::element},
 };
 
