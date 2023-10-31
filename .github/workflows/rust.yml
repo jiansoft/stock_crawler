@@ -75,11 +75,11 @@ jobs:
       run: cargo build --verbose
 
     - name: Run tests
-      run: cargo test
+      run: cargo test --verbose
       env:
         RUST_BACKTRACE: 1
         DATABASE_URL: postgres://user:password@localhost:5432/db
-        POSTGRESQL_HOST: 127.0.0.1
+        POSTGRESQL_HOST: localhost
         POSTGRESQL_PORT: 5432
         POSTGRESQL_USER: user
         POSTGRESQL_PASSWORD: password
