@@ -101,7 +101,7 @@ pub async fn visit() -> Result<Vec<Public>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
+    use crate::cache::SHARE;
 
     use super::*;
 
