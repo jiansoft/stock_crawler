@@ -33,12 +33,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        override: true
-
     - name: Install PostgresSQL client
       run: sudo apt-get -yqq install postgresql-client
 
