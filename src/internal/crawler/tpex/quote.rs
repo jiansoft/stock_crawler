@@ -6,8 +6,8 @@ use rust_decimal_macros::dec;
 use serde::Deserialize;
 
 use crate::{
+    cache::{self, TtlCacheInner, TTL},
     internal::{
-        cache::{self, TtlCacheInner, TTL},
         crawler::tpex,
         database::{table, table::daily_quote::FromWithExchange},
         StockExchange,
@@ -123,7 +123,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
 mod tests {
     use chrono::{Duration, Timelike};
 
-    use crate::{internal::cache::SHARE, logging};
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 

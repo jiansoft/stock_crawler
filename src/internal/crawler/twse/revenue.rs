@@ -1,11 +1,10 @@
-use std::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::{anyhow, Result};
 use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
 
 use crate::{
-    internal::{cache::SHARE, crawler::twse, database::table::revenue},
+    cache::SHARE,
+    internal::{crawler::twse, database::table::revenue},
     util,
 };
 

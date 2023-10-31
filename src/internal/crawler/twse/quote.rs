@@ -5,14 +5,14 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    cache::{self, TtlCacheInner, TTL},
     internal::{
-        cache::{self, TtlCacheInner, TTL},
         crawler::twse,
+        crawler::twse::build_headers,
         database::table::{self, daily_quote::FromWithExchange},
         StockExchange,
-        crawler::twse::build_headers
     },
-    util::http
+    util::http,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -88,10 +88,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
 mod tests {
     use chrono::{Duration, Timelike};
 
-    use crate::{
-        internal::cache::SHARE,
-        logging
-    };
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 

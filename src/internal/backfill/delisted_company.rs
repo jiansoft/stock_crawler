@@ -1,10 +1,9 @@
-use core::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::{anyhow, Result};
 use chrono::Local;
 
 use crate::{
-    internal::{cache::SHARE, crawler::twse, database::table::stock},
+    cache::SHARE,
+    internal::{crawler::twse, database::table::stock},
     logging,
     util::datetime::Weekend,
 };
@@ -73,7 +72,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
+    use crate::cache::SHARE;
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

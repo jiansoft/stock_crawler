@@ -2,8 +2,9 @@ use anyhow::Result;
 use chrono::{DateTime, FixedOffset, Local};
 
 use crate::{
+    cache::SHARE,
     internal::{
-        cache::SHARE, crawler::twse,
+        crawler::twse,
         database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
     },
     logging,
@@ -75,10 +76,7 @@ async fn update(qfiis: Vec<QualifiedForeignInstitutionalInvestor>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        internal::cache::SHARE,
-        logging
-    };
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 

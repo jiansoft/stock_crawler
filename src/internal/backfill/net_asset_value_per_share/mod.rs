@@ -1,11 +1,9 @@
-use core::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::Result;
 use sqlx::postgres::PgQueryResult;
 
-use crate::internal::{
+use crate::{
     cache::SHARE,
-    database::{table, table::stock::extension},
+    internal::database::{table, table::stock::extension},
 };
 
 /// 更新興櫃股票的每股淨值

@@ -5,8 +5,8 @@ use chrono::Local;
 use futures::{stream, StreamExt};
 
 use crate::{
+    cache::{TtlCacheInner, SHARE, TTL},
     internal::{
-        cache::{TtlCacheInner, SHARE, TTL},
         crawler::{tpex, twse},
         database::table::{self, daily_quote},
     },
@@ -95,11 +95,9 @@ mod tests {
     use tokio::time::sleep;
 
     use crate::{
-        internal::{
-            cache::SHARE,
-            database::table::stock
-        },
-        logging
+        cache::SHARE,
+        internal::{ database::table::stock},
+        logging,
     };
 
     use super::*;

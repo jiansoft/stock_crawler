@@ -3,8 +3,8 @@ use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeZone};
 use futures::{stream, StreamExt};
 
 use crate::{
+    cache::SHARE,
     internal::{
-        cache::SHARE,
         crawler::twse,
         database::{table, table::revenue},
     },

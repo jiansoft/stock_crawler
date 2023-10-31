@@ -14,10 +14,12 @@ use tokio::signal;
 use tokio::signal::unix::{signal as unix_signal, SignalKind};
 use tokio_cron_scheduler::JobScheduler;
 
-use crate::internal::{cache, scheduler};
+use crate::internal::scheduler;
 
 /// 聊天機器人
 pub mod bot;
+/// 數據快取
+pub mod cache;
 pub mod internal;
 /// 日誌
 pub mod logging;

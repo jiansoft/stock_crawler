@@ -3,13 +3,9 @@ use chrono::Local;
 use scraper::{Html, Selector};
 
 use crate::{
-    internal::{
-        cache::SHARE,
-        crawler::twse,
-        database::table,
-        StockExchangeMarket,
-    },
-    util::{self, datetime::Weekend}
+    cache::SHARE,
+    internal::{crawler::twse, database::table, StockExchangeMarket},
+    util::{self, datetime::Weekend},
 };
 
 const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺灣存託憑證(TDR)"];
@@ -133,10 +129,7 @@ pub async fn visit(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        internal::cache::SHARE,
-        logging
-    };
+    use crate::{cache::SHARE, logging};
 
     //use std::collections::HashSet;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。

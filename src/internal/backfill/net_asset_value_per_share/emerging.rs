@@ -2,9 +2,8 @@ use anyhow::Result;
 use chrono::Local;
 
 use crate::{
-    internal::{
-        backfill::net_asset_value_per_share::update, cache::SHARE, crawler::tpex, database::table,
-    },
+    cache::SHARE,
+    internal::{backfill::net_asset_value_per_share::update, crawler::tpex, database::table},
     logging,
     util::datetime::Weekend,
 };

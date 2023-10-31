@@ -3,7 +3,8 @@ use chrono::Local;
 
 use crate::{
     bot,
-    internal::{cache::SHARE, crawler::twse, database::table},
+    cache::SHARE,
+    internal::{crawler::twse, database::table},
     logging,
 };
 

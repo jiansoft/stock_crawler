@@ -1,7 +1,5 @@
 /// 數據回補
 pub mod backfill;
-/// 數據快取
-pub mod cache;
 /// 計算類
 pub mod calculation;
 /// 設定檔
@@ -9,7 +7,7 @@ pub mod config;
 /// 抓取數據類
 pub mod crawler;
 /// 資料庫操作
-mod database;
+pub mod database;
 /// 事件
 pub mod event;
 /// 工作排程

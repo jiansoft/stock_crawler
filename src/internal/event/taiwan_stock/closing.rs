@@ -4,10 +4,9 @@ use rust_decimal_macros::dec;
 
 use crate::{
     bot,
+    cache::{TtlCacheInner, TTL},
     internal::{
-        backfill,
-        cache::{TtlCacheInner, TTL},
-        calculation,
+        backfill, calculation,
         database::table::{
             daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
             daily_quote, last_daily_quotes, yield_rank::YieldRank,
@@ -113,7 +112,7 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{internal::cache::SHARE, logging};
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 
