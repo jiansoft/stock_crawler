@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use tokio::{time, time::Instant};
 
 use crate::{
+    bot,
     internal::{
-        bot,
         cache::{TtlCacheInner, SHARE, TTL},
         crawler::{self},
         database::table::trace::Trace,

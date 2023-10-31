@@ -2,16 +2,19 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use rust_decimal_macros::dec;
 
-use crate::internal::{
-    backfill, bot,
-    cache::{TtlCacheInner, TTL},
-    calculation,
-    database::table::{
-        daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
-        daily_quote, last_daily_quotes, yield_rank::YieldRank,
+use crate::{
+    bot,
+    internal::{
+        backfill,
+        cache::{TtlCacheInner, TTL},
+        calculation,
+        database::table::{
+            daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
+            daily_quote, last_daily_quotes, yield_rank::YieldRank,
+        },
     },
+    logging,
 };
-use crate::logging;
 
 /// 台股收盤事件發生時要進行的事情
 pub async fn execute() -> Result<()> {
@@ -110,10 +113,7 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        internal::cache::SHARE,
-        logging
-    };
+    use crate::{internal::cache::SHARE, logging};
 
     use super::*;
 

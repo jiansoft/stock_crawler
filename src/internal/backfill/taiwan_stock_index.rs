@@ -2,7 +2,8 @@ use anyhow::Result;
 use chrono::Local;
 
 use crate::{
-    internal::{bot, cache::SHARE, crawler::twse, database::table},
+    bot,
+    internal::{cache::SHARE, crawler::twse, database::table},
     logging,
 };
 

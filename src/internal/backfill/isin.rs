@@ -5,8 +5,9 @@ use chrono::Local;
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::{
+    bot,
     internal::{
-        bot, cache::SHARE, crawler::twse, database::table, rpc, rpc::stock, StockExchangeMarket,
+        cache::SHARE, crawler::twse, database::table, rpc, rpc::stock, StockExchangeMarket,
     },
     logging,
     util::datetime::Weekend,

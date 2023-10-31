@@ -1,7 +1,5 @@
 /// 數據回補
 pub mod backfill;
-/// 聊天機器人
-pub mod bot;
 /// 數據快取
 pub mod cache;
 /// 計算類

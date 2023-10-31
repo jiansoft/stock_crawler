@@ -23,6 +23,8 @@ pub mod logging;
 pub mod nosql;
 /// 工具類
 pub mod util;
+/// 聊天機器人
+pub mod bot;
 
 /*#[get("/")]
 fn index() -> &'static str {
