@@ -1,9 +1,7 @@
-use std::result::Result::Ok;
-
-use anyhow::*;
+use anyhow::Result;
 use tonic::{Request, Response};
 
-use crate::internal::rpc::{
+use crate::rpc::{
     client::{get_client, Grpc},
     stock::{StockInfoReply, StockInfoRequest},
 };
@@ -27,10 +25,7 @@ pub async fn push_stock_info_to_go_service(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        internal::cache::SHARE,
-        logging
-    };
+    use crate::{internal::cache::SHARE, logging};
 
     use super::*;
 

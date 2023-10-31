@@ -1,7 +1,7 @@
 use anyhow::Result;
 use tonic::{Request, Response, Status};
 
-use crate::internal::rpc::{
+use crate::rpc::{
     basic::BaseResponse,
     control::{control_server::Control, ControlRequest, ControlResponse},
 };
@@ -36,9 +36,9 @@ mod tests {
     use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
     use crate::internal::config::SETTINGS;
-    use crate::internal::rpc::control;
-    use crate::internal::rpc::control::control_client::ControlClient;
-    use crate::internal::rpc::control::control_server::ControlServer;
+    use crate::rpc::control;
+    use crate::rpc::control::control_client::ControlClient;
+    use crate::rpc::control::control_server::ControlServer;
 
     use super::*;
 

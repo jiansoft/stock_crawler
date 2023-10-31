@@ -3,14 +3,12 @@ use std::net::SocketAddr;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use crate::{
-    internal::{
-        config::SETTINGS,
-        rpc::{
-            control::control_server::ControlServer, server::control_service::ControlService,
-            server::stock_service::StockService, stock::stock_server::StockServer,
-        },
-    },
+    internal::config::SETTINGS,
     logging,
+    rpc::{
+        control::control_server::ControlServer, server::control_service::ControlService,
+        server::stock_service::StockService, stock::stock_server::StockServer,
+    },
 };
 
 pub mod control_service;

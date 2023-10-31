@@ -7,13 +7,11 @@ pub mod calculation;
 /// 設定檔
 pub mod config;
 /// 抓取數據類
-mod crawler;
+pub mod crawler;
 /// 資料庫操作
 mod database;
 /// 事件
 pub mod event;
-///
-pub mod rpc;
 /// 工作排程
 pub mod scheduler;
 

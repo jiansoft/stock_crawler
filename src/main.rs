@@ -14,17 +14,19 @@ use tokio::signal;
 use tokio::signal::unix::{signal as unix_signal, SignalKind};
 use tokio_cron_scheduler::JobScheduler;
 
-use crate::internal::{cache, rpc, scheduler};
+use crate::internal::{cache, scheduler};
 
+/// 聊天機器人
+pub mod bot;
 pub mod internal;
 /// 日誌
 pub mod logging;
 /// nosql
 pub mod nosql;
+///
+pub mod rpc;
 /// 工具類
 pub mod util;
-/// 聊天機器人
-pub mod bot;
 
 /*#[get("/")]
 fn index() -> &'static str {

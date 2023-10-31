@@ -2,10 +2,13 @@ use futures::future::join_all;
 use rust_decimal::prelude::ToPrimitive;
 use tonic::{Request, Response, Status};
 
-use crate::internal::{crawler, rpc::stock::{
-    stock_server::Stock, StockInfoReply, StockInfoRequest, StockPrice, StockPriceReply,
-    StockPriceRequest,
-}};
+use crate::{
+    internal::crawler,
+    rpc::stock::{
+        stock_server::Stock, StockInfoReply, StockInfoRequest, StockPrice, StockPriceReply,
+        StockPriceRequest,
+    },
+};
 
 #[derive(Default)]
 pub struct StockService {}
@@ -38,9 +41,7 @@ impl Stock for StockService {
 }
 
 async fn fetch_current_price_for_symbol(stock_symbol: &str) -> StockPrice {
-    if let Ok(remote_price) =
-        crawler::fetch_stock_price_from_remote_site(stock_symbol).await
-    {
+    if let Ok(remote_price) = crawler::fetch_stock_price_from_remote_site(stock_symbol).await {
         return StockPrice {
             stock_symbol: stock_symbol.to_string(),
             price: remote_price.to_f64().unwrap_or_default(),
@@ -55,7 +56,7 @@ async fn fetch_current_price_for_symbol(stock_symbol: &str) -> StockPrice {
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::rpc::{stock, stock::stock_server::StockServer};
+    use crate::rpc::{stock, stock::stock_server::StockServer};
 
     use super::*;
 
