@@ -2,8 +2,6 @@
 pub mod backfill;
 /// 計算類
 pub mod calculation;
-/// 抓取數據類
-pub mod crawler;
 
 /// 交易所
 #[derive(Debug, Copy, Clone)]

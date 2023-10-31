@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::Local;
 
 use crate::{
-    cache::SHARE, database::table::stock, internal::crawler::twse, logging, util::datetime::Weekend,
+    cache::SHARE, crawler::twse, database::table::stock, logging, util::datetime::Weekend,
 };
 
 /// 更新資料庫中終止上市的公司

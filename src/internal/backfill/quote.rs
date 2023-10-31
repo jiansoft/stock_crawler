@@ -6,8 +6,8 @@ use futures::{stream, StreamExt};
 
 use crate::{
     cache::{TtlCacheInner, SHARE, TTL},
+    crawler::{tpex, twse},
     database::table::{self, daily_quote},
-    internal::crawler::{tpex, twse},
     logging, util,
 };
 

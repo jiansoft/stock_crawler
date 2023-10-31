@@ -8,8 +8,8 @@ use tokio::{time, time::Instant};
 use crate::{
     bot,
     cache::{TtlCacheInner, SHARE, TTL},
+    crawler::{self},
     database::table::trace::Trace,
-    internal::crawler::{self},
     logging,
     util::{datetime::Weekend, map::Keyable},
 };

@@ -9,8 +9,8 @@ use sqlx::{
 };
 
 use crate::{
+    crawler::{wespai, yahoo},
     database,
-    internal::crawler::{wespai, yahoo},
 };
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]

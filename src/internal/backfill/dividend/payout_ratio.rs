@@ -3,8 +3,8 @@ use std::{collections::HashSet, time::Duration};
 use anyhow::Result;
 
 use crate::{
+    crawler::goodinfo,
     database::{table, table::stock},
-    internal::crawler::goodinfo,
     logging, nosql,
     util::map::{vec_to_hashmap, Keyable},
 };

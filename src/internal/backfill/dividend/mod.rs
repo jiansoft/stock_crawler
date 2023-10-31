@@ -9,8 +9,8 @@ use tokio_retry::{
 };
 
 use crate::{
+    crawler::{goodinfo, yahoo},
     database::table::{self, dividend},
-    internal::crawler::{goodinfo, yahoo},
     logging, nosql,
 };
 

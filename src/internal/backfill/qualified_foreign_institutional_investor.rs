@@ -2,9 +2,9 @@ use anyhow::Result;
 use chrono::{DateTime, FixedOffset, Local};
 
 use crate::{
-    cache::SHARE,
+    cache::SHARE, crawler::twse,
     database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    internal::crawler::twse, logging, util::datetime::Weekend,
+    logging, util::datetime::Weekend,
 };
 
 pub async fn execute() -> Result<()> {

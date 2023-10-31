@@ -3,7 +3,7 @@ use rust_decimal::prelude::ToPrimitive;
 use tonic::{Request, Response, Status};
 
 use crate::{
-    internal::crawler,
+    crawler,
     rpc::stock::{
         stock_server::Stock, StockInfoReply, StockInfoRequest, StockPrice, StockPriceReply,
         StockPriceRequest,

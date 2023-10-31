@@ -5,13 +5,8 @@ use chrono::Local;
 use rust_decimal::prelude::ToPrimitive;
 
 use crate::{
-    bot,
-    cache::SHARE,
-    database::table,
-    internal::{crawler::twse, StockExchangeMarket},
-    logging, rpc,
-    rpc::stock,
-    util::datetime::Weekend,
+    bot, cache::SHARE, crawler::twse, database::table, internal::StockExchangeMarket, logging, rpc,
+    rpc::stock, util::datetime::Weekend,
 };
 
 /// 更新資料庫新上市股票的或更新其交易所的市場編號、股票的產業分類、名稱等欄位

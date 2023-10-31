@@ -6,7 +6,7 @@ use sqlx::{
     Row,
 };
 
-use crate::{database, internal::crawler::goodinfo};
+use crate::{crawler::goodinfo, database};
 
 pub(crate) mod extension;
 

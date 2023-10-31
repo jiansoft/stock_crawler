@@ -4,11 +4,11 @@ use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
 use crate::{
+    crawler::{tpex, twse},
     database::{
         self,
         table::{stock_index, stock_word},
     },
-    internal::crawler::{tpex, twse},
     logging, util,
 };
 

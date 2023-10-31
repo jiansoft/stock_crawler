@@ -5,13 +5,10 @@ use tokio::task;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
 use crate::{
-    bot, event,
-    internal::{
-        backfill::{
-            delisted_company, dividend, financial_statement, isin, net_asset_value_per_share,
-            qualified_foreign_institutional_investor, revenue, stock_weight,
-        },
-        crawler,
+    bot, crawler, event,
+    internal::backfill::{
+        delisted_company, dividend, financial_statement, isin, net_asset_value_per_share,
+        qualified_foreign_institutional_investor, revenue, stock_weight,
     },
     logging,
 };

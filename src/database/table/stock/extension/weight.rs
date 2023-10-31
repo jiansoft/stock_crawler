@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, FromRow};
 
-use crate::{database, internal::crawler::taifex::stock_weight::StockWeight};
+use crate::{crawler::taifex::stock_weight::StockWeight, database};
 
 /// 更新股票的權重
 #[derive(FromRow, Debug)]

@@ -35,6 +35,8 @@ pub mod rpc;
 pub mod scheduler;
 /// 工具類
 pub mod util;
+/// 抓取數據類
+pub mod crawler;
 
 /*#[get("/")]
 fn index() -> &'static str {

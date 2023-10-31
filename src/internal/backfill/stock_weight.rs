@@ -2,8 +2,9 @@ use anyhow::Result;
 use futures::{stream, StreamExt};
 
 use crate::{
+    crawler::taifex,
     database::table::stock::{self, extension::weight::SymbolAndWeight},
-    internal::{crawler::taifex, StockExchange},
+    internal::StockExchange,
     logging, util,
 };
 

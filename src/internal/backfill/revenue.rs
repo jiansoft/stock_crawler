@@ -4,8 +4,8 @@ use futures::{stream, StreamExt};
 
 use crate::{
     cache::SHARE,
+    crawler::twse,
     database::{table, table::revenue},
-    internal::crawler::twse,
     logging, util,
 };
 

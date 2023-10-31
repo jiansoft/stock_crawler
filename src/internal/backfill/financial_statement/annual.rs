@@ -3,8 +3,8 @@ use chrono::Local;
 use futures::future;
 
 use crate::{
+    crawler::wespai,
     database::table::{financial_statement, stock},
-    internal::crawler::wespai,
     logging, nosql,
     util::datetime::Weekend,
 };
