@@ -4,8 +4,8 @@ extern crate rocket;*/
 use std::{
     error::Error,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
 };
 
@@ -18,6 +18,12 @@ use tokio_cron_scheduler::JobScheduler;
 pub mod bot;
 /// 數據快取
 pub mod cache;
+/// 設定檔
+pub mod config;
+/// 資料庫操作
+pub mod database;
+/// 事件
+pub mod event;
 pub mod internal;
 /// 日誌
 pub mod logging;
@@ -25,14 +31,10 @@ pub mod logging;
 pub mod nosql;
 ///
 pub mod rpc;
-/// 工具類
-pub mod util;
 /// 工作排程
 pub mod scheduler;
-/// 設定檔
-pub mod config;
-/// 事件
-pub mod event;
+/// 工具類
+pub mod util;
 
 /*#[get("/")]
 fn index() -> &'static str {

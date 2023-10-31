@@ -3,10 +3,8 @@ use chrono::Local;
 use futures::future;
 
 use crate::{
-    internal::{
-        crawler::wespai,
-        database::table::{financial_statement, stock},
-    },
+    database::table::{financial_statement, stock},
+    internal::crawler::wespai,
     logging, nosql,
     util::datetime::Weekend,
 };
@@ -59,7 +57,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{internal::cache::SHARE, logging};
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 

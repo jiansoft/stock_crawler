@@ -3,10 +3,7 @@ use std::fmt::Write;
 use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate};
 
-use crate::{
-    bot,
-    internal::{calculation, database::table::dividend},
-};
+use crate::{bot, database::table::dividend, internal::calculation};
 
 /// 提醒本日為除權息的股票有那些
 pub async fn execute() -> Result<()> {

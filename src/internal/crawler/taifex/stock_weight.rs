@@ -6,10 +6,7 @@ use scraper::{ElementRef, Html, Selector};
 
 use crate::{
     internal::{crawler::taifex, StockExchange},
-    util::{
-        self,
-        http::element
-    }
+    util::{self, http::element},
 };
 
 #[derive(Default, Debug, Clone, PartialEq)]

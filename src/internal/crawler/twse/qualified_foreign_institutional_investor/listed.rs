@@ -3,12 +3,8 @@ use chrono::{DateTime, FixedOffset};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::{
-    internal::{
-        crawler::twse,
-        database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    },
-    logging,
-    util::http,
+    database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
+    internal::crawler::twse, logging, util::http,
 };
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -69,7 +65,7 @@ pub async fn visit(
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::internal::cache::SHARE;
+    use crate::cache::SHARE;
 
     use super::*;
 

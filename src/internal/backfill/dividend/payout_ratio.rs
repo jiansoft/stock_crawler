@@ -3,10 +3,8 @@ use std::{collections::HashSet, time::Duration};
 use anyhow::Result;
 
 use crate::{
-    internal::{
-        crawler::goodinfo,
-        database::{table, table::stock},
-    },
+    database::{table, table::stock},
+    internal::crawler::goodinfo,
     logging, nosql,
     util::map::{vec_to_hashmap, Keyable},
 };
@@ -62,7 +60,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{internal::cache::SHARE, logging};
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 

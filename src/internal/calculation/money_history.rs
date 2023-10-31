@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
 
-use crate::internal::database::{
+use crate::database::{
     self,
     table::{
         daily_money_history::DailyMoneyHistory,

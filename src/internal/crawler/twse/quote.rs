@@ -6,12 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cache::{self, TtlCacheInner, TTL},
-    internal::{
-        crawler::twse,
-        crawler::twse::build_headers,
-        database::table::{self, daily_quote::FromWithExchange},
-        StockExchange,
-    },
+    database::table::{self, daily_quote::FromWithExchange},
+    internal::{crawler::twse, crawler::twse::build_headers, StockExchange},
     util::http,
 };
 

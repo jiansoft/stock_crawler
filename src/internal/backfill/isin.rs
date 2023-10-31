@@ -7,7 +7,8 @@ use rust_decimal::prelude::ToPrimitive;
 use crate::{
     bot,
     cache::SHARE,
-    internal::{crawler::twse, database::table, StockExchangeMarket},
+    database::table,
+    internal::{crawler::twse, StockExchangeMarket},
     logging, rpc,
     rpc::stock,
     util::datetime::Weekend,

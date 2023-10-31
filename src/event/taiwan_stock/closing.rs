@@ -5,13 +5,11 @@ use rust_decimal_macros::dec;
 use crate::{
     bot,
     cache::{TtlCacheInner, TTL},
-    internal::{
-        backfill, calculation,
-        database::table::{
-            daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
-            daily_quote, last_daily_quotes, yield_rank::YieldRank,
-        },
+    database::table::{
+        daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
+        daily_quote, last_daily_quotes, yield_rank::YieldRank,
     },
+    internal::{backfill, calculation},
     logging,
 };
 

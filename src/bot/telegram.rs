@@ -93,10 +93,7 @@ pub async fn send(msg: &str) -> Result<()> {
 mod tests {
     use std::env;
 
-    use crate::{
-        cache::SHARE,
-        logging
-    };
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 

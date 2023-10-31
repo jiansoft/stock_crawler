@@ -6,10 +6,8 @@ use futures::{stream, StreamExt};
 
 use crate::{
     cache::{TtlCacheInner, SHARE, TTL},
-    internal::{
-        crawler::{tpex, twse},
-        database::table::{self, daily_quote},
-    },
+    database::table::{self, daily_quote},
+    internal::crawler::{tpex, twse},
     logging, util,
 };
 
@@ -94,11 +92,7 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{
-        cache::SHARE,
-        internal::{ database::table::stock},
-        logging,
-    };
+    use crate::{cache::SHARE, database::table::stock, logging};
 
     use super::*;
 

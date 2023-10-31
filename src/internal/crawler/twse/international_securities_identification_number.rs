@@ -4,7 +4,8 @@ use scraper::{Html, Selector};
 
 use crate::{
     cache::SHARE,
-    internal::{crawler::twse, database::table, StockExchangeMarket},
+    database::table,
+    internal::{crawler::twse, StockExchangeMarket},
     util::{self, datetime::Weekend},
 };
 

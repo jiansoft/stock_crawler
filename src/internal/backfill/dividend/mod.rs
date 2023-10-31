@@ -9,10 +9,8 @@ use tokio_retry::{
 };
 
 use crate::{
-    internal::{
-        crawler::{goodinfo, yahoo},
-        database::table::{self, dividend},
-    },
+    database::table::{self, dividend},
+    internal::crawler::{goodinfo, yahoo},
     logging, nosql,
 };
 
@@ -237,7 +235,7 @@ pub fn vec_to_hashmap(entities: Vec<dividend::Dividend>) -> HashMap<String, divi
 
 #[cfg(test)]
 mod tests {
-    use crate::internal::cache::SHARE;
+    use crate::cache::SHARE;
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

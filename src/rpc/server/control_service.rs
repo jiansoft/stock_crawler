@@ -36,12 +36,10 @@ mod tests {
     use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
     use crate::{
-        internal::config::SETTINGS,
+        config::SETTINGS,
         rpc::{
-            control::control_client::ControlClient,
-            control,
-            control::control_server::ControlServer
-        }
+            control, control::control_client::ControlClient, control::control_server::ControlServer,
+        },
     };
 
     use super::*;

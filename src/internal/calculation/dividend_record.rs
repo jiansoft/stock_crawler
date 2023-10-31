@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use crate::{
-    internal::database::{
+    database::{
         self,
         table::{
             dividend, dividend_record_detail::DividendRecordDetail, dividend_record_detail_more,
@@ -205,8 +205,10 @@ pub async fn calculate(year: i32) {
 mod tests {
     use chrono::{Local, TimeZone};
 
-    use crate::internal::cache::SHARE;
-    use crate::logging;
+    use crate::{
+        cache::SHARE,
+        logging
+    };
 
     use super::*;
 

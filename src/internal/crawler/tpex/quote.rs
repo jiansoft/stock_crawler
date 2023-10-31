@@ -7,11 +7,8 @@ use serde::Deserialize;
 
 use crate::{
     cache::{self, TtlCacheInner, TTL},
-    internal::{
-        crawler::tpex,
-        database::{table, table::daily_quote::FromWithExchange},
-        StockExchange,
-    },
+    database::{table, table::daily_quote::FromWithExchange},
+    internal::{crawler::tpex, StockExchange},
     util,
 };
 

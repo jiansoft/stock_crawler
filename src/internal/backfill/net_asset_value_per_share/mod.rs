@@ -3,7 +3,7 @@ use sqlx::postgres::PgQueryResult;
 
 use crate::{
     cache::SHARE,
-    internal::database::{table, table::stock::extension},
+    database::{table, table::stock::extension},
 };
 
 /// 更新興櫃股票的每股淨值

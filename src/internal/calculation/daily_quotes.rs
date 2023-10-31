@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 
 use crate::{
     cache::SHARE,
-    internal::database::table::{
+    database::table::{
         daily_quote, daily_quote::DailyQuote, quote_history_record::QuoteHistoryRecord,
     },
     logging, util,

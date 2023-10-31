@@ -2,7 +2,8 @@ use anyhow::Result;
 use chrono::{Datelike, Duration, Local};
 
 use crate::{
-    internal::{calculation, crawler::yahoo, database::table},
+    database::table,
+    internal::{calculation, crawler::yahoo},
     logging, nosql,
     util::datetime,
 };
@@ -79,7 +80,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{internal::cache::SHARE, logging};
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 

@@ -3,12 +3,8 @@ use chrono::{DateTime, FixedOffset, Local};
 
 use crate::{
     cache::SHARE,
-    internal::{
-        crawler::twse,
-        database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    },
-    logging,
-    util::datetime::Weekend,
+    database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
+    internal::crawler::twse, logging, util::datetime::Weekend,
 };
 
 pub async fn execute() -> Result<()> {

@@ -2,11 +2,8 @@ use anyhow::Result;
 use futures::{stream, StreamExt};
 
 use crate::{
-    internal::{
-        crawler::taifex,
-        database::table::stock::{self, extension::weight::SymbolAndWeight},
-        StockExchange,
-    },
+    database::table::stock::{self, extension::weight::SymbolAndWeight},
+    internal::{crawler::taifex, StockExchange},
     logging, util,
 };
 
@@ -64,10 +61,7 @@ async fn fetch_stock_weights(stock_exchange: StockExchange) -> Result<Vec<Symbol
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        internal::cache::SHARE,
-        logging
-    };
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 

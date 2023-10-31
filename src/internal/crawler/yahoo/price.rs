@@ -3,13 +3,11 @@ use async_trait::async_trait;
 use rust_decimal::Decimal;
 
 use crate::{
-    internal::{
-        crawler::{
-            yahoo::{Yahoo, HOST},
-            StockInfo,
-        },
+    internal::crawler::{
+        yahoo::{Yahoo, HOST},
+        StockInfo,
     },
-    util
+    util,
 };
 
 #[async_trait]

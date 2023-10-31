@@ -5,12 +5,10 @@ use rust_decimal::Decimal;
 
 //use futures::executor::block_on;
 use crate::{
-    internal::{
-        database::table::{
-            index, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
-        },
+    database::table::{
+        index, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
     },
-    logging
+    logging,
 };
 
 pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
@@ -256,12 +254,7 @@ pub trait TtlCacheInner {
     ) -> Option<String>;
     fn trace_quote_contains_key(&self, key: &str) -> bool;
     fn trace_quote_get(&self, key: &str) -> Option<Decimal>;
-    fn trace_quote_set(
-        &self,
-        key: String,
-        val: Decimal,
-        duration: Duration,
-    ) -> Option<Decimal>;
+    fn trace_quote_set(&self, key: String, val: Decimal, duration: Duration) -> Option<Decimal>;
 }
 
 impl TtlCacheInner for Ttl {

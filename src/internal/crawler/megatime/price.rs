@@ -6,13 +6,11 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
 use crate::{
-    internal::{
-        crawler::{
-            megatime::{PcHome, HOST},
-            StockInfo,
-        },
+    internal::crawler::{
+        megatime::{PcHome, HOST},
+        StockInfo,
     },
-    util::{self, http::element}
+    util::{self, http::element},
 };
 
 //#stock_info_data_a > span.data_close
@@ -46,8 +44,8 @@ impl StockInfo for PcHome {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
     use super::*;
+    use crate::logging;
 
     #[tokio::test]
     #[ignore]

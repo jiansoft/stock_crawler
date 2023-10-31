@@ -3,13 +3,11 @@ use async_trait::async_trait;
 use rust_decimal::Decimal;
 
 use crate::{
-    internal::{
-        crawler::{
-            cnyes::{CnYes, HOST},
-            StockInfo,
-        },
+    internal::crawler::{
+        cnyes::{CnYes, HOST},
+        StockInfo,
     },
-    util
+    util,
 };
 
 #[async_trait]

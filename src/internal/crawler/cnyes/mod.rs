@@ -3,6 +3,4 @@ pub mod price;
 
 const HOST: &str = "www.cnyes.com";
 
-pub struct CnYes {
-
-}
+pub struct CnYes {}

@@ -3,7 +3,8 @@ use chrono::Local;
 
 use crate::{
     cache::SHARE,
-    internal::{backfill::net_asset_value_per_share::update, crawler::tpex, database::table},
+    database::table,
+    internal::{backfill::net_asset_value_per_share::update, crawler::tpex},
     logging,
     util::datetime::Weekend,
 };

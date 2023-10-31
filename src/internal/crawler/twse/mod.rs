@@ -4,6 +4,8 @@ use crate::util::http;
 
 /// 國際證券辨識
 pub mod international_securities_identification_number;
+/// 公開申購公告-抽籤日程表
+pub mod public;
 /// 外資及陸資投資持股
 pub mod qualified_foreign_institutional_investor;
 /// 台股收盤報價-上市
@@ -14,8 +16,6 @@ pub mod revenue;
 pub mod suspend_listing;
 /// 台股加權指數
 pub mod taiwan_capitalization_weighted_stock_index;
-/// 公開申購公告-抽籤日程表
-pub mod public;
 
 const HOST: &str = "twse.com.tw";
 

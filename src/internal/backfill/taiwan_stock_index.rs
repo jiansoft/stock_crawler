@@ -1,12 +1,7 @@
 use anyhow::Result;
 use chrono::Local;
 
-use crate::{
-    bot,
-    cache::SHARE,
-    internal::{crawler::twse, database::table},
-    logging,
-};
+use crate::{bot, cache::SHARE, database::table, internal::crawler::twse, logging};
 
 /// 調用  twse API 取得台股加權指數
 pub async fn execute() -> Result<()> {
