@@ -31,6 +31,8 @@ pub mod util;
 pub mod scheduler;
 /// 設定檔
 pub mod config;
+/// 事件
+pub mod event;
 
 /*#[get("/")]
 fn index() -> &'static str {

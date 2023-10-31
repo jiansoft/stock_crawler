@@ -6,8 +6,6 @@ pub mod calculation;
 pub mod crawler;
 /// 資料庫操作
 pub mod database;
-/// 事件
-pub mod event;
 
 /// 交易所
 #[derive(Debug, Copy, Clone)]
