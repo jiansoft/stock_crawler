@@ -6,9 +6,8 @@ use crate::{
     internal::{
         crawler::goodinfo,
         database::{table, table::stock},
-        nosql,
     },
-    logging,
+    logging, nosql,
     util::map::{vec_to_hashmap, Keyable},
 };
 
@@ -63,10 +62,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        internal::cache::SHARE,
-        logging
-    };
+    use crate::{internal::cache::SHARE, logging};
 
     use super::*;
 

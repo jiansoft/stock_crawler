@@ -12,9 +12,8 @@ use crate::{
     internal::{
         crawler::{goodinfo, yahoo},
         database::table::{self, dividend},
-        nosql,
     },
-    logging,
+    logging, nosql,
 };
 
 pub mod payout_ratio;

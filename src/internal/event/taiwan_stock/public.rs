@@ -4,8 +4,9 @@ use anyhow::Result;
 use chrono::Local;
 
 use crate::{
-    internal::{bot, crawler, nosql},
-    util::map::Keyable
+    internal::{bot, crawler},
+    nosql,
+    util::map::Keyable,
 };
 
 pub async fn execute() -> Result<()> {

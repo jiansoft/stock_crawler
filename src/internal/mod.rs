@@ -14,8 +14,6 @@ mod crawler;
 mod database;
 /// 事件
 pub mod event;
-/// nosql
-pub mod nosql;
 ///
 pub mod rpc;
 /// 工作排程

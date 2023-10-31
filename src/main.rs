@@ -14,11 +14,13 @@ use tokio::signal;
 use tokio::signal::unix::{signal as unix_signal, SignalKind};
 use tokio_cron_scheduler::JobScheduler;
 
-use crate::internal::{cache, nosql, rpc, scheduler};
+use crate::internal::{cache, rpc, scheduler};
 
 pub mod internal;
 /// 日誌
 pub mod logging;
+/// nosql
+pub mod nosql;
 /// 工具類
 pub mod util;
 

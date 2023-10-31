@@ -3,7 +3,6 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::{Local, Timelike};
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use tokio::{time, time::Instant};
 
 use crate::{
@@ -109,7 +108,6 @@ async fn format_alert_message(target: &Trace, current_price: Decimal) -> String 
     format!("{stock_name} {boundary}:{limit}，目前報價:{price} https://tw.stock.yahoo.com/quote/{stock_symbol}",
             boundary = boundary, limit = limit, price = current_price, stock_symbol = target.stock_symbol, stock_name = stock_name)
 }
-
 
 /// Checks whether the current price is within a specified boundary.
 /// 判斷當前價格是否在預定範圍內
