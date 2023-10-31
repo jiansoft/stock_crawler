@@ -75,7 +75,7 @@ jobs:
       run: cargo build --verbose
 
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --release --verbose
       env:
         RUST_BACKTRACE: 1
         DATABASE_URL: postgres://user:password@localhost:5432/db
