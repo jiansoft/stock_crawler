@@ -67,6 +67,8 @@ mod tests {
     async fn test_fetch() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 StockExchangeMarket::fetch".to_string());
+        println!("開始 StockExchangeMarket::fetch");
+
         match StockExchangeMarket::fetch().await {
             Ok(markets) => {
                 println!("markets:{:#?}", &markets);
