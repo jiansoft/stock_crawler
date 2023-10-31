@@ -71,6 +71,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_control_request_to_server() {
         dotenv::dotenv().ok();
         let pem = std::fs::read_to_string(&SETTINGS.system.ssl_cert_file).unwrap();

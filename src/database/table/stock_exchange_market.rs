@@ -70,11 +70,10 @@ mod tests {
         logging::debug_file_async("開始 StockExchangeMarket::fetch".to_string());
         match StockExchangeMarket::fetch().await {
             Ok(markets) => {
-                dbg!(&markets);
+                println!("{:#?}", &markets);
                 logging::debug_file_async(format!("markets:{:#?}", markets));
             }
             Err(why) => {
-                dbg!(&why);
                 logging::debug_file_async(format!("{:?}", why));
             }
         }
