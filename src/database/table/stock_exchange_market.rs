@@ -28,7 +28,6 @@ impl StockExchangeMarket {
 SELECT
     stock_exchange_market_id,
     stock_exchange_id,
-    maximum_price_date_on,
     code,
     name
 FROM
