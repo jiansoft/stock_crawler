@@ -9,7 +9,7 @@
 
 use std::{error::Error, fs};
 
-static OUT_DIR: &str = "src/internal/rpc";
+static OUT_DIR: &str = "src/rpc";
 
 fn main() -> Result<(), Box<dyn Error>> {
     let protos = [

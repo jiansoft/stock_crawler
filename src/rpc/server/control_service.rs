@@ -35,10 +35,14 @@ impl Control for ControlService {
 mod tests {
     use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
-    use crate::internal::config::SETTINGS;
-    use crate::rpc::control;
-    use crate::rpc::control::control_client::ControlClient;
-    use crate::rpc::control::control_server::ControlServer;
+    use crate::{
+        internal::config::SETTINGS,
+        rpc::{
+            control::control_client::ControlClient,
+            control,
+            control::control_server::ControlServer
+        }
+    };
 
     use super::*;
 
