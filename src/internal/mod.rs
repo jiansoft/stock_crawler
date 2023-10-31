@@ -10,8 +10,6 @@ pub mod crawler;
 pub mod database;
 /// 事件
 pub mod event;
-/// 工作排程
-pub mod scheduler;
 
 /// 交易所
 #[derive(Debug, Copy, Clone)]

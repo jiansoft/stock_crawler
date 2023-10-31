@@ -4,8 +4,8 @@ extern crate rocket;*/
 use std::{
     error::Error,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -13,8 +13,6 @@ use tokio::signal;
 #[cfg(unix)]
 use tokio::signal::unix::{signal as unix_signal, SignalKind};
 use tokio_cron_scheduler::JobScheduler;
-
-use crate::internal::scheduler;
 
 /// 聊天機器人
 pub mod bot;
@@ -29,6 +27,8 @@ pub mod nosql;
 pub mod rpc;
 /// 工具類
 pub mod util;
+/// 工作排程
+pub mod scheduler;
 
 /*#[get("/")]
 fn index() -> &'static str {
