@@ -1,14 +1,11 @@
-use std::{
-    result::Result::Ok,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
-use anyhow::*;
+use anyhow::{anyhow, Result};
 use futures::future::join_all;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-use crate::{internal::config::SETTINGS, util::http};
+use crate::{config::SETTINGS, util::http};
 
 static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 
@@ -96,8 +93,10 @@ pub async fn send(msg: &str) -> Result<()> {
 mod tests {
     use std::env;
 
-    use crate::internal::cache::SHARE;
-    use crate::logging;
+    use crate::{
+        cache::SHARE,
+        logging
+    };
 
     use super::*;
 

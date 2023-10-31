@@ -29,6 +29,8 @@ pub mod rpc;
 pub mod util;
 /// 工作排程
 pub mod scheduler;
+/// 設定檔
+pub mod config;
 
 /*#[get("/")]
 fn index() -> &'static str {

@@ -2,8 +2,6 @@
 pub mod backfill;
 /// 計算類
 pub mod calculation;
-/// 設定檔
-pub mod config;
 /// 抓取數據類
 pub mod crawler;
 /// 資料庫操作

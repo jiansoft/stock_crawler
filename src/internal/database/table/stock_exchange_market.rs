@@ -40,7 +40,7 @@ FROM
         .map_err(|why| {
             anyhow!(
                 "Failed to StockExchangeMarket::fetch from database({:#?}) because:{:?}",
-                crate::internal::config::SETTINGS.postgresql,
+                crate::config::SETTINGS.postgresql,
                 why
             )
         })

@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
 
-use crate::{internal::config, logging, util};
+use crate::{config, logging, util};
 
 static DDNS_URL: OnceLock<String> = OnceLock::new();
 

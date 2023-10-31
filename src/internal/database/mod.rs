@@ -1,10 +1,10 @@
 use std::sync::{Arc, OnceLock};
 
-use anyhow::*;
+use anyhow::Result;
 use once_cell::sync::Lazy;
 use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
 
-use crate::internal::config;
+use crate::config;
 
 pub mod table;
 

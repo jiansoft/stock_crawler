@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use crate::{
-    internal::config::SETTINGS,
+    config::SETTINGS,
     logging,
     rpc::{
         control::control_server::ControlServer, server::control_service::ControlService,
