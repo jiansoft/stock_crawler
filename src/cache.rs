@@ -9,7 +9,7 @@ use crate::{
     database::table::{
         index, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
     },
-    logging,
+    declare, logging,
 };
 
 pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
@@ -27,9 +27,9 @@ pub struct Share {
     // quote_history_records 股票歷史、淨值比等最高、最低的數據,resource.Init() 從資料庫內讀取出，若抓到新的數據時則會同時更新資料庫與此數據
     pub quote_history_records: RwLock<HashMap<String, quote_history_record::QuoteHistoryRecord>>,
     /// 股票產業分類
-    pub industries: HashMap<&'static str, i32>,
+    industries: HashMap<&'static str, i32>,
     /// 股票產業分類(2, 'TAI', '上市', 1),(4, 'TWO', '上櫃', 2), (5, 'TWE', '興櫃', 2);
-    pub exchange_markets: HashMap<i32, stock_exchange_market::StockExchangeMarket>,
+    exchange_markets: HashMap<i32, stock_exchange_market::StockExchangeMarket>,
 }
 
 impl Share {
@@ -44,7 +44,7 @@ impl Share {
                         stock_exchange_market_id: 2,
                         stock_exchange_id: 1,
                         code: "TAI".to_string(),
-                        name: "上市".to_string(),
+                        name: declare::StockExchangeMarket::Listed.name().to_string(),
                     },
                 ),
                 (
@@ -53,7 +53,9 @@ impl Share {
                         stock_exchange_market_id: 4,
                         stock_exchange_id: 2,
                         code: "TWO".to_string(),
-                        name: "上櫃".to_string(),
+                        name: declare::StockExchangeMarket::OverTheCounter
+                            .name()
+                            .to_string(),
                     },
                 ),
                 (
@@ -62,7 +64,7 @@ impl Share {
                         stock_exchange_market_id: 5,
                         stock_exchange_id: 2,
                         code: "TWE".to_string(),
-                        name: "興櫃".to_string(),
+                        name: declare::StockExchangeMarket::Emerging.name().to_string(),
                     },
                 ),
             ]),
@@ -218,6 +220,30 @@ impl Share {
         }
     }
 
+    pub fn get_exchange_market(
+        &self,
+        id: i32,
+    ) -> Option<stock_exchange_market::StockExchangeMarket> {
+        SHARE.exchange_markets.get(&id).cloned()
+    }
+
+    /// 透過股票產業分類名稱取得對應的代碼
+    pub fn get_industry_id(&self, name: &str) -> Option<i32> {
+        // 如果找到了行業，則返回相應的ID。如果沒有找到，則返回99。
+        match SHARE.industries.get(name) {
+            None => Some(99),
+            Some(industry) => Some(*industry),
+        }
+    }
+
+    /// 透過股票產業分類代碼取得對應的名稱
+    pub fn get_industry_name(&self, id: i32) -> Option<&'static str> {
+        self.industries
+            .iter()
+            .find_map(|(key, &value)| if value == id { Some(key) } else { None })
+            .copied()
+    }
+
     /// 從快取中取得股票的資料
     pub async fn get_stock(&self, symbol: &str) -> Option<stock::Stock> {
         match self.stocks.read() {
@@ -316,7 +342,7 @@ impl TtlCacheInner for Ttl {
 
     fn trace_quote_get(&self, key: &str) -> Option<Decimal> {
         match self.trace_quote_notify.read() {
-            Ok(ttl) => ttl.get(key).map(|value| value).copied(),
+            Ok(ttl) => ttl.get(key).copied(),
             Err(_) => None,
         }
     }
@@ -351,6 +377,13 @@ mod tests {
     use rust_decimal::Decimal;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_get_industry_name() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+        println!("36 => {:?}", SHARE.get_industry_name(36));
+    }
 
     #[tokio::test]
     async fn test_init() {

@@ -30,12 +30,12 @@ pub struct InternationalSecuritiesIdentificationNumber {
 impl Clone for InternationalSecuritiesIdentificationNumber {
     fn clone(&self) -> Self {
         InternationalSecuritiesIdentificationNumber {
-            stock_symbol: self.stock_symbol.to_string(),
-            name: self.name.to_string(),
-            isin_code: self.isin_code.to_string(),
-            listing_date: self.listing_date.to_string(),
-            industry: self.industry.to_string(),
-            cfi_code: self.cfi_code.to_string(),
+            stock_symbol: self.stock_symbol.clone(),
+            name: self.name.clone(),
+            isin_code: self.isin_code.clone(),
+            listing_date: self.listing_date.clone(),
+            industry: self.industry.clone(),
+            cfi_code: self.cfi_code.clone(),
             exchange_market: self.exchange_market.clone(),
             industry_id: self.industry_id,
         }
@@ -54,7 +54,7 @@ pub async fn visit(
     let url = format!(
         "https://isin.{}/isin/C_public.jsp?strMode={}",
         twse::HOST,
-        mode.serial_number()
+        mode.serial()
     );
 
     let response = util::http::get_use_big5(&url).await?;
@@ -99,18 +99,14 @@ pub async fn visit(
             };
 
             let exchange_market: table::stock_exchange_market::StockExchangeMarket =
-                match SHARE.exchange_markets.get(&mode.serial_number()) {
+                match SHARE.get_exchange_market(mode.serial()) {
                     None => table::stock_exchange_market::StockExchangeMarket::new(
-                        mode.serial_number(),
+                        mode.serial(),
                         mode.exchange().serial_number(),
                     ),
-                    Some(em) => em.clone(),
+                    Some(em) => em,
                 };
-            let industry_id = match SHARE.industries.get(industry.as_str()) {
-                None => 99,
-                Some(industry) => *industry,
-            };
-
+            let industry_id = SHARE.get_industry_id(&industry).unwrap_or(99);
             let isin = InternationalSecuritiesIdentificationNumber {
                 stock_symbol: split[0].trim().to_owned(),
                 name: split[1].to_owned(),

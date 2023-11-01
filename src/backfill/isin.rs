@@ -85,7 +85,23 @@ async fn update_stock_info(
         stocks.insert(stock.stock_symbol.to_string(), stock.clone());
     }
 
-    let log_msg = format!("stock add or update {:?}", stock);
+    let market = StockExchangeMarket::from(stock.stock_exchange_market_id);
+    let market_name = match market {
+        None => " - ",
+        Some(sem) => sem.name(),
+    };
+    let industry_name = match SHARE.get_industry_name(stock.stock_industry_id) {
+        None => " - ",
+        Some(n) => n,
+    };
+    let log_msg = format!(
+        "新增股票︰ {stock_symbol} {stock_name} {market_name} {industry_name}",
+        stock_symbol = stock.stock_symbol,
+        stock_name = stock.name,
+        market_name = market_name,
+        industry_name = industry_name
+    );
+
     writeln!(msg, "{}\r\n", log_msg).ok(); // We don't care if this write fails, so use `.ok()`.
     logging::info_file_async(log_msg);
 

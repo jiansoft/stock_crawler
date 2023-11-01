@@ -7,7 +7,7 @@ use sqlx::postgres::PgQueryResult;
 
 use crate::database;
 
-#[derive(sqlx::FromRow, Debug, Clone)]
+#[derive(sqlx::FromRow, Debug)]
 /// 最後交易日股票報價數據
 pub struct LastDailyQuotes {
     pub date: NaiveDate,
@@ -143,8 +143,10 @@ DO UPDATE SET
             }
         }
     }
+}
 
-    pub fn clone(&self) -> Self {
+impl Clone for LastDailyQuotes {
+    fn clone(&self) -> Self {
         LastDailyQuotes {
             date: self.date,
             security_code: self.security_code.clone(),
