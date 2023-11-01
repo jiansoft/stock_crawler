@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::Local;
 
+use crate::util::map::Keyable;
 use crate::{bot, cache::SHARE, crawler::twse, database::table, logging};
 
 /// 調用  twse API 取得台股加權指數
@@ -30,11 +31,9 @@ pub async fn execute() -> Result<()> {
             };
 
             //logging::debug_file_async(format!("index:{:?}", index));
-            let key = index.date.to_string() + "_" + &index.category;
-            if let Ok(indices) = SHARE.indices.read() {
-                if indices.contains_key(key.as_str()) {
-                    continue;
-                }
+            let key = index.key();
+            if SHARE.get_stock_index(&key).is_some() {
+                continue;
             }
 
             match index.upsert().await {
@@ -47,22 +46,12 @@ pub async fn execute() -> Result<()> {
 
                     if let Err(why) = bot::telegram::send(&msg).await {
                         logging::error_file_async(format!(
-                            "Failed to telegram::send_to_allowed() because: {:?}",
+                            "Failed to telegram::send() because: {:?}",
                             why
                         ));
                     }
 
-                    match SHARE.indices.write() {
-                        Ok(mut indices) => {
-                            indices.insert(key, index);
-                        }
-                        Err(why) => {
-                            logging::error_file_async(format!(
-                                "Failed to write stocks cache because {:?}",
-                                why
-                            ));
-                        }
-                    }
+                    SHARE.set_stock_index(key, index).await;
                 }
                 Err(why) => {
                     logging::error_file_async(format!(
@@ -84,7 +73,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;

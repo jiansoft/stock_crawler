@@ -33,23 +33,17 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
     let result = twse::international_securities_identification_number::visit(mode).await?;
     let mut to_bot_msg = String::with_capacity(1024);
     for item in result {
-        let new_stock = match SHARE.stocks.read() {
-            Ok(stocks_cache) => match stocks_cache.get(&item.stock_symbol) {
-                Some(stock_db)
-                    if stock_db.stock_industry_id != item.industry_id
-                        || stock_db.stock_exchange_market_id
-                            != item.exchange_market.stock_exchange_market_id
-                        || stock_db.name != item.name =>
-                {
-                    true
-                }
-                None => true,
-                _ => false,
-            },
-            Err(why) => {
-                logging::error_file_async(format!("Failed to stocks.read because {:?}", why));
-                continue;
+        let new_stock = match SHARE.get_stock(&item.stock_symbol).await {
+            Some(stock_db)
+                if stock_db.stock_industry_id != item.industry_id
+                    || stock_db.stock_exchange_market_id
+                        != item.exchange_market.stock_exchange_market_id
+                    || stock_db.name != item.name =>
+            {
+                true
             }
+            None => true,
+            _ => false,
         };
 
         if new_stock {
@@ -132,7 +126,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;

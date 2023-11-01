@@ -19,7 +19,7 @@ pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
 /// Share 各類快取共享集中處
 pub struct Share {
     /// 存放台股歷年指數
-    pub indices: RwLock<HashMap<String, index::Index>>,
+    indices: RwLock<HashMap<String, index::Index>>,
     /// 存放台股股票代碼
     pub stocks: RwLock<HashMap<String, stock::Stock>>,
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
@@ -321,6 +321,22 @@ impl Share {
                     revenue.1.keys().len()
                 ));
             }
+        }
+    }
+
+    /// 更新快取內股票最後的報價
+    pub async fn set_stock_index(&self, key: String, index: index::Index) -> Option<index::Index> {
+        match self.indices.write() {
+            Ok(mut indices) => indices.insert(key, index),
+            Err(_) => Some(index),
+        }
+    }
+
+    /// 取得台股指數
+    pub fn get_stock_index(&self, key: &str) -> Option<index::Index> {
+        match self.indices.read() {
+            Ok(cache) => cache.get(key).cloned(),
+            Err(_) => None,
         }
     }
 

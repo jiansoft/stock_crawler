@@ -9,6 +9,7 @@ use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 
 use crate::{database, logging, util};
+use crate::util::map::Keyable;
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Index {
@@ -241,6 +242,12 @@ impl From<Vec<String>> for Index {
             Err(_) => Decimal::ZERO,
         };
         index
+    }
+}
+
+impl Keyable for Index {
+    fn key(&self) -> String {
+        format!("Index:{}-{}", self.date, self.category)
     }
 }
 

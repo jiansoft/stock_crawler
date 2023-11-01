@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeZone};
 use futures::{stream, StreamExt};
 
+
 use crate::{
     cache::SHARE,
     crawler::twse,
@@ -112,18 +113,10 @@ pub(crate) async fn process_revenue(
         }
     }
 
-    let name = SHARE
-        .stocks
-        .read()
-        .map(|stocks| {
-            stocks
-                .get(revenue.security_code.as_str())
-                .map_or("no name".to_string(), |stock| stock.name.to_string())
-        })
-        .unwrap_or_else(|why| {
-            logging::error_file_async(format!("Failed to stocks.read because {:?}", why));
-            "no name".to_string()
-        });
+    let name = match SHARE.get_stock(&revenue.security_code).await {
+        None => String::from("-"),
+        Some(s) => s.name.clone(),
+    };
 
     logging::info_file_async(
         format!(
@@ -147,7 +140,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;

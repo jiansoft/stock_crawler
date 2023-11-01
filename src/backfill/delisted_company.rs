@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use chrono::Local;
 
 use crate::{
@@ -14,15 +14,8 @@ pub async fn execute() -> Result<()> {
     let delisted = twse::suspend_listing::visit().await?;
     let mut items_to_update = Vec::new();
 
-    let stocks = match SHARE.stocks.read() {
-        Ok(stocks) => stocks.clone(),
-        Err(why) => {
-            return Err(anyhow!("Failed to read stocks cache because {:?}", why));
-        }
-    };
-
     for company in delisted {
-        if let Some(stock) = stocks.get(company.stock_symbol.as_str()) {
+        if let Some(stock) = SHARE.get_stock(&company.stock_symbol).await {
             if stock.suspend_listing {
                 //println!("已下市{:?}",stock);
                 continue;
@@ -75,7 +68,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;
