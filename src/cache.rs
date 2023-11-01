@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
 //use futures::executor::block_on;
+use crate::database::table::daily_quote;
 use crate::{
     database::table::{
         index, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
@@ -222,6 +223,27 @@ impl Share {
         match self.stocks.read() {
             Ok(cache) => cache.get(symbol).cloned(),
             Err(_) => None,
+        }
+    }
+
+    /// 從快取中取得股票最後的報價
+    pub async fn get_stock_last_price(
+        &self,
+        symbol: &str,
+    ) -> Option<last_daily_quotes::LastDailyQuotes> {
+        match self.last_trading_day_quotes.read() {
+            Ok(cache) => cache.get(symbol).cloned(),
+            Err(_) => None,
+        }
+    }
+
+    /// 更新快取內股票最後的報價
+    pub async fn set_stock_last_price(&self, daily_quote: &daily_quote::DailyQuote) {
+        if let Ok(mut last_trading_day_quotes) = self.last_trading_day_quotes.write() {
+            if let Some(quote) = last_trading_day_quotes.get_mut(&daily_quote.security_code) {
+                quote.date = daily_quote.date;
+                quote.closing_price = daily_quote.closing_price;
+            }
         }
     }
 }

@@ -57,12 +57,7 @@ pub async fn execute() -> Result<usize> {
 async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
     match daily_quote.upsert().await {
         Ok(_) => {
-            if let Ok(mut last_trading_day_quotes) = SHARE.last_trading_day_quotes.write() {
-                if let Some(quote) = last_trading_day_quotes.get_mut(&daily_quote.security_code) {
-                    quote.date = daily_quote.date;
-                    quote.closing_price = daily_quote.closing_price;
-                }
-            }
+            SHARE.set_stock_last_price(&daily_quote).await;
 
             let daily_quote_memory_key = format!(
                 "DailyQuote:{}-{}",

@@ -2,8 +2,9 @@ use std::fmt::Write;
 
 use anyhow::Result;
 use chrono::Local;
+use rust_decimal::prelude::ToPrimitive;
 
-use crate::{bot, crawler, nosql, util::map::Keyable};
+use crate::{bot, cache::SHARE, crawler, nosql, util::map::Keyable};
 
 pub async fn execute() -> Result<()> {
     let ps = crawler::twse::public::visit().await?;
@@ -23,14 +24,23 @@ pub async fn execute() -> Result<()> {
                     continue;
                 }
 
+                let stock_last_price = SHARE.get_stock_last_price(&stock.stock_symbol).await;
+                let last_price = match stock_last_price {
+                    None => String::from(" - "),
+                    Some(last_quote) => match last_quote.closing_price.to_f64() {
+                        None => String::from(" - "),
+                        Some(price) => price.to_string(),
+                    },
+                };
                 let _ = writeln!(
-                    &mut msg, "{stock_symbol} {stock_name} 起迄日︰{start}~{end} 承銷價︰{price} 發行市場:{market}",
+                    &mut msg, "{stock_symbol} {stock_name} 起迄日︰{start}~{end} 承銷價︰{price} 參考價︰{last_price} 發行市場:{market}",
                     market = stock.market,
                     stock_symbol = stock.stock_symbol,
                     stock_name = stock.stock_name,
                     start = start,
                     end = end,
-                    price = price
+                    price = price,
+                    last_price = last_price
                 );
 
                 let mut duration = (end - now).num_seconds() as usize;
@@ -59,9 +69,9 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
+        SHARE.load().await;
         logging::info_file_async("開始 execute".to_string());
         //let date = NaiveDate::from_ymd_opt(2023, 6, 15);
         //let today: NaiveDate = Local::today().naive_local();
