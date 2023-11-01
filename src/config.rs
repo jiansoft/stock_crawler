@@ -358,6 +358,6 @@ mod tests {
                 ));
             }
         }
-        thread::sleep(time::Duration::from_secs(1));
+        tokio::time::sleep(time::Duration::from_secs(1)).await;
     }
 }

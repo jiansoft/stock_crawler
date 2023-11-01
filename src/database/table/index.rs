@@ -261,7 +261,7 @@ mod tests {
             logging::info_file_async(format!("e.date {:?} e.index {:?}", e.1.date, e.1.index));
         }
         logging::info_file_async("結束".to_string());
-        thread::sleep(time::Duration::from_secs(1));
+        tokio::time::sleep(time::Duration::from_secs(1)).await;
         /* while let Some(result) = fetch().await.next().await {
             if let Ok(ref row_result) = result {
                 logging::info_file_async(format!(
