@@ -73,7 +73,7 @@ impl StockExchangeMarket {
     }
 }
 
-///產業分類
+/// 產業分類
 #[derive(PartialEq, Debug, Copy, Clone)]
 #[repr(i32)]
 pub enum Industry {
@@ -161,6 +161,56 @@ pub enum Industry {
     DepositaryReceipts = 38,
     /// 未分類 99
     Uncategorized = 99,
+}
+
+impl Industry {
+    pub fn serial(&self) -> i32 {
+        *self as i32
+    }
+
+    pub fn name(&self) -> &'static str {
+        match *self {
+            Industry::CementIndustry => "水泥工業",
+            Industry::FoodIndustry => "食品工業",
+            Industry::PlasticIndustry => "塑膠工業",
+            Industry::TextileFiber => "紡織纖維",
+            Industry::ElectricalMachinery => "電機機械",
+            Industry::ElectricalCable => "電器電纜",
+            Industry::ChemicalIndustry => "化學工業",
+            Industry::BiotechMedical => "生技醫療業",
+            Industry::GlassCeramics => "玻璃陶瓷",
+            Industry::PaperIndustry => "造紙工業",
+            Industry::SteelIndustry => "鋼鐵工業",
+            Industry::RubberIndustry => "橡膠工業",
+            Industry::AutomotiveIndustry => "汽車工業",
+            Industry::Semiconductor => "半導體業",
+            Industry::ComputerPeripheral => "電腦及週邊設備業",
+            Industry::Optoelectronic => "光電業",
+            Industry::CommunicationNetwork => "通訊網路業",
+            Industry::ElectronicComponents => "電子零組件業",
+            Industry::ElectronicPathway => "電子通路業",
+            Industry::InformationService => "資訊服務業",
+            Industry::OtherElectronics => "其他電子業",
+            Industry::ConstructionMaterial => "建材營造業",
+            Industry::Shipping => "航運業",
+            Industry::Tourism => "觀光事業",
+            Industry::FinanceInsurance => "金融保險業",
+            Industry::TradingDepartmentStores => "貿易百貨",
+            Industry::OilElectricGas => "油電燃氣業",
+            Industry::Comprehensive => "綜合",
+            Industry::GreenEnergyEnvironmentalProtection => "綠能環保",
+            Industry::DigitalCloud => "數位雲端",
+            Industry::SportsRecreation => "運動休閒",
+            Industry::HomeLife => "居家生活",
+            Industry::Other => "其他",
+            Industry::CulturalCreative => "文化創意業",
+            Industry::AgriculturalTechnology => "農業科技",
+            Industry::ECommerce => "電子商務",
+            Industry::TourismCatering => "觀光餐旅",
+            Industry::DepositaryReceipts => "存託憑證",
+            Industry::Uncategorized => "未分類",
+        }
+    }
 }
 
 #[cfg(test)]

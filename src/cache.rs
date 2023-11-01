@@ -4,12 +4,14 @@ use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
 //use futures::executor::block_on;
-use crate::database::table::daily_quote;
 use crate::{
     database::table::{
-        index, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
+        daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,
+        stock_exchange_market,
     },
-    declare, logging,
+    declare,
+    declare::Industry,
+    logging,
 };
 
 pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
@@ -69,48 +71,150 @@ impl Share {
                 ),
             ]),
             industries: HashMap::from([
-                ("水泥工業", 1),
-                ("食品工業", 2),
-                ("塑膠工業", 3),
-                ("紡織纖維", 4),
-                ("電機機械", 5),
-                ("電器電纜", 6),
-                ("化學工業", 7),
-                ("生技醫療業", 8),
-                ("玻璃陶瓷", 9),
-                ("造紙工業", 10),
-                ("鋼鐵工業", 11),
-                ("橡膠工業", 12),
-                ("汽車工業", 13),
-                ("半導體業", 14),
-                ("電腦及週邊設備業", 15),
-                ("光電業", 16),
-                ("通信網路業", 17),
-                ("電子零組件業", 18),
-                ("電子通路業", 19),
-                ("資訊服務業", 20),
-                ("其他電子業", 21),
-                ("建材營造業", 22),
-                ("航運業", 23),
-                ("觀光事業", 24),
-                ("金融保險業", 25),
-                ("貿易百貨", 26),
+                (
+                    Industry::CementIndustry.name(),
+                    Industry::CementIndustry.serial(),
+                ),
+                (
+                    Industry::FoodIndustry.name(),
+                    Industry::FoodIndustry.serial(),
+                ),
+                (
+                    Industry::PlasticIndustry.name(),
+                    Industry::PlasticIndustry.serial(),
+                ),
+                (
+                    Industry::TextileFiber.name(),
+                    Industry::TextileFiber.serial(),
+                ),
+                (
+                    Industry::ElectricalMachinery.name(),
+                    Industry::ElectricalMachinery.serial(),
+                ),
+                (
+                    Industry::ElectricalCable.name(),
+                    Industry::ElectricalCable.serial(),
+                ),
+                (
+                    Industry::ChemicalIndustry.name(),
+                    Industry::ChemicalIndustry.serial(),
+                ),
+                (
+                    Industry::BiotechMedical.name(),
+                    Industry::BiotechMedical.serial(),
+                ),
+                (
+                    Industry::GlassCeramics.name(),
+                    Industry::GlassCeramics.serial(),
+                ),
+                (
+                    Industry::PaperIndustry.name(),
+                    Industry::PaperIndustry.serial(),
+                ),
+                (
+                    Industry::SteelIndustry.name(),
+                    Industry::SteelIndustry.serial(),
+                ),
+                (
+                    Industry::RubberIndustry.name(),
+                    Industry::RubberIndustry.serial(),
+                ),
+                (
+                    Industry::AutomotiveIndustry.name(),
+                    Industry::AutomotiveIndustry.serial(),
+                ),
+                (
+                    Industry::Semiconductor.name(),
+                    Industry::Semiconductor.serial(),
+                ),
+                (
+                    Industry::ComputerPeripheral.name(),
+                    Industry::ComputerPeripheral.serial(),
+                ),
+                (
+                    Industry::Optoelectronic.name(),
+                    Industry::Optoelectronic.serial(),
+                ),
+                (
+                    Industry::CommunicationNetwork.name(),
+                    Industry::CommunicationNetwork.serial(),
+                ),
+                (
+                    Industry::ElectronicComponents.name(),
+                    Industry::ElectronicComponents.serial(),
+                ),
+                (
+                    Industry::ElectronicPathway.name(),
+                    Industry::ElectronicPathway.serial(),
+                ),
+                (
+                    Industry::InformationService.name(),
+                    Industry::InformationService.serial(),
+                ),
+                (
+                    Industry::OtherElectronics.name(),
+                    Industry::OtherElectronics.serial(),
+                ),
+                (
+                    Industry::ConstructionMaterial.name(),
+                    Industry::ConstructionMaterial.serial(),
+                ),
+                (Industry::Shipping.name(), Industry::Shipping.serial()),
+                (Industry::Tourism.name(), Industry::Tourism.serial()),
+                (
+                    Industry::FinanceInsurance.name(),
+                    Industry::FinanceInsurance.serial(),
+                ),
+                (
+                    Industry::TradingDepartmentStores.name(),
+                    Industry::TradingDepartmentStores.serial(),
+                ),
+                (
+                    Industry::OilElectricGas.name(),
+                    Industry::OilElectricGas.serial(),
+                ),
+                (
+                    Industry::Comprehensive.name(),
+                    Industry::Comprehensive.serial(),
+                ),
+                (
+                    Industry::GreenEnergyEnvironmentalProtection.name(),
+                    Industry::GreenEnergyEnvironmentalProtection.serial(),
+                ),
+                (
+                    Industry::DigitalCloud.name(),
+                    Industry::DigitalCloud.serial(),
+                ),
+                (
+                    Industry::SportsRecreation.name(),
+                    Industry::SportsRecreation.serial(),
+                ),
+                (Industry::HomeLife.name(), Industry::HomeLife.serial()),
+                (Industry::Other.name(), Industry::Other.serial()),
+                (
+                    Industry::CulturalCreative.name(),
+                    Industry::CulturalCreative.serial(),
+                ),
+                (
+                    Industry::AgriculturalTechnology.name(),
+                    Industry::AgriculturalTechnology.serial(),
+                ),
+                (Industry::ECommerce.name(), Industry::ECommerce.serial()),
+                (
+                    Industry::TourismCatering.name(),
+                    Industry::TourismCatering.serial(),
+                ),
+                (
+                    Industry::DepositaryReceipts.name(),
+                    Industry::DepositaryReceipts.serial(),
+                ),
+                (
+                    Industry::Uncategorized.name(),
+                    Industry::Uncategorized.serial(),
+                ),
                 ("貿易百貨業", 26),
-                ("油電燃氣業", 27),
-                ("綜合", 28),
-                ("綠能環保", 29),
-                ("數位雲端", 30),
-                ("運動休閒", 31),
-                ("居家生活", 32),
-                ("其他", 33),
                 ("其他業", 33),
-                ("文化創意業", 34),
-                ("農業科技", 35),
                 ("農業科技業", 35),
-                ("電子商務", 36),
-                ("觀光餐旅", 37),
-                ("存託憑證", 38),
-                ("未分類", 99),
             ]),
             last_revenues: RwLock::new(HashMap::new()),
             last_trading_day_quotes: RwLock::new(HashMap::new()),
@@ -220,6 +324,7 @@ impl Share {
         }
     }
 
+    /// 使用交易市場代碼取得交易市場的數據
     pub fn get_exchange_market(
         &self,
         id: i32,
@@ -371,7 +476,6 @@ impl Default for Ttl {
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
     use std::time::Duration;
 
     use rust_decimal::Decimal;
@@ -402,7 +506,7 @@ mod tests {
         }
 
         assert_eq!(TTL.daily_quote_get("1"), Some("10".to_string()));
-        thread::sleep(Duration::from_secs(1));
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         assert_eq!(TTL.daily_quote_get("1"), None);
     }

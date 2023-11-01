@@ -246,7 +246,7 @@ impl From<Vec<String>> for Index {
 
 #[cfg(test)]
 mod tests {
-    use std::{thread, time};
+    use std::{time};
 
     use crate::logging;
 
