@@ -1,13 +1,14 @@
 use futures::future::join_all;
-use rust_decimal::prelude::ToPrimitive;
 use tonic::{Request, Response, Status};
 
 use crate::{
     crawler,
-    rpc::stock::{
-        stock_server::Stock, StockInfoReply, StockInfoRequest, StockPrice, StockPriceReply,
-        StockPriceRequest,
-    },
+    rpc::{
+        stock::{
+            stock_server::Stock, StockInfoReply, StockInfoRequest, StockQuotes, StockQuotesReply,
+        },
+        stock::StockQuotesRequest
+    }
 };
 
 #[derive(Default)]
@@ -24,33 +25,37 @@ impl Stock for StockService {
         ))
     }
 
-    async fn fetch_current_stock_price(
+    async fn fetch_current_stock_quotes(
         &self,
-        req: Request<StockPriceRequest>,
-    ) -> Result<Response<StockPriceReply>, Status> {
+        req: Request<StockQuotesRequest>,
+    ) -> Result<Response<StockQuotesReply>, Status> {
         let request = req.into_inner();
         let futures: Vec<_> = request
             .stock_symbols
             .iter()
-            .map(|stock_symbol| fetch_current_price_for_symbol(stock_symbol))
+            .map(|stock_symbol| fetch_current_quotes_for_symbol(stock_symbol))
             .collect();
         let stock_prices = join_all(futures).await;
 
-        Ok(Response::new(StockPriceReply { stock_prices }))
+        Ok(Response::new(StockQuotesReply { stock_prices }))
     }
 }
 
-async fn fetch_current_price_for_symbol(stock_symbol: &str) -> StockPrice {
-    if let Ok(remote_price) = crawler::fetch_stock_price_from_remote_site(stock_symbol).await {
-        return StockPrice {
+async fn fetch_current_quotes_for_symbol(stock_symbol: &str) -> StockQuotes {
+    if let Ok(sq) = crawler::fetch_stock_quotes_from_remote_site(stock_symbol).await {
+        return StockQuotes {
             stock_symbol: stock_symbol.to_string(),
-            price: remote_price.to_f64().unwrap_or_default(),
+            price: sq.price,
+            change: sq.change,
+            change_range: sq.change_range,
         };
     }
 
-    StockPrice {
+    StockQuotes {
         stock_symbol: stock_symbol.to_string(),
         price: 0.0,
+        change: 0.0,
+        change_range: 0.0,
     }
 }
 
@@ -79,12 +84,12 @@ mod tests {
             .await
             .expect("Failed to connect");
 
-        let request = Request::new(StockPriceRequest {
+        let request = Request::new(StockQuotesRequest {
             stock_symbols: vec!["2330".to_string(), "2888".to_string(), "3008".to_string()],
         });
 
         let resp = client
-            .fetch_current_stock_price(request)
+            .fetch_current_stock_quotes(request)
             .await
             .expect("RPC Failed!");
         println!("message:{:#?}", resp.into_inner().stock_prices)

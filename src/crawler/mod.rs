@@ -5,6 +5,7 @@ use rust_decimal::Decimal;
 use crate::crawler::{
     cmoney::CMoney, cnyes::CnYes, histock::HiStock, megatime::PcHome, yahoo::Yahoo,
 };
+use crate::declare;
 
 /// 股市爆料同學會
 pub mod cmoney;
@@ -32,8 +33,10 @@ pub mod yahoo;
 #[async_trait]
 pub trait StockInfo {
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal>;
+    async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes>;
 }
 
+/// 取得股票的目前的報價
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
     let sites = vec![
         Yahoo::get_stock_price,
@@ -46,6 +49,25 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
     for fetch_func in sites {
         if let Ok(price) = fetch_func(stock_symbol).await {
             return Ok(price);
+        }
+    }
+
+    Err(anyhow!("Failed to fetch stock price from all sites"))
+}
+
+/// 取得股票目前的報價含漲跌、漲幅
+pub async fn fetch_stock_quotes_from_remote_site(stock_symbol: &str) -> Result<declare::StockQuotes> {
+    let sites = vec![
+        Yahoo::get_stock_quotes,
+        CnYes::get_stock_quotes,
+        PcHome::get_stock_quotes,
+        CMoney::get_stock_quotes,
+        HiStock::get_stock_quotes,
+    ];
+
+    for fetch_func in sites {
+        if let Ok(sq) = fetch_func(stock_symbol).await {
+            return Ok(sq);
         }
     }
 

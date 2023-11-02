@@ -40,7 +40,7 @@ pub mod crawler;
 pub mod calculation;
 /// 數據回補
 pub mod backfill;
-
+/// 定義結構、enum等
 pub mod declare;
 
 /*#[get("/")]

@@ -9,7 +9,7 @@ option go_package = "../stock";
 service Stock {
   rpc UpdateStockInfo (StockInfoRequest) returns (StockInfoReply) {}
   // 取得目前的股價
-  rpc FetchCurrentStockPrice (StockPriceRequest) returns (StockPriceReply) {}
+  rpc FetchCurrentStockQuotes (StockQuotesRequest) returns (StockQuotesReply) {}
 }
 
 message StockInfoRequest {
@@ -26,17 +26,19 @@ message StockInfoReply {
   string message = 1;
 }
 
-message StockPrice {
+message StockQuotes {
   string stock_symbol = 1;
   double price = 2;
+  double change = 3;
+  double change_range = 4;
 }
 
-message StockPriceRequest {
+message StockQuotesRequest {
   repeated string stock_symbols = 1;
 }
 
-message StockPriceReply {
-  repeated StockPrice stock_prices = 1;
+message StockQuotesReply {
+  repeated StockQuotes stock_prices = 1;
 }
 
 // protoc --go_out=. --go-grpc_out=. stock.proto

@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use scraper::{Html, Selector};
 
-use crate::{util, util::text};
+use crate::{util::text};
 
 /// Extracts the text value of an element selected by a given CSS selector.
 ///
@@ -99,6 +99,7 @@ pub struct GetOneElementText<'a> {
     pub selector: &'a str,
     /// The desired HTML element's name (like "div", "span", etc.) that we want to extract text from.
     pub element: &'a str,
+    pub document: Html,
 }
 
 /// Asynchronously fetches and extracts text from a specific HTML element in the provided URL.
@@ -116,18 +117,18 @@ pub struct GetOneElementText<'a> {
 ///
 /// * `Result<String>` - On success, returns the extracted text from the specified HTML element.
 ///   On failure, returns an error indicating the reason for failure (like element not found, selector parse failure, etc.).
-pub async fn get_one_element(target: GetOneElementText<'_>) -> Result<String> {
-    let text = util::http::get(target.url, None).await?;
-    let document = Html::parse_document(&text);
+pub  fn get_one_element(target: GetOneElementText<'_>) -> Result<String> {
+    //let text = util::http::get(target.url, None).await?;
+   // let document = Html::parse_document(&text);
     let selector = Selector::parse(target.selector)
         .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
-    document
+    target.document
         .select(&selector)
         .next()
         .and_then(|element| parse_value(&element, target.element))
         .ok_or_else(|| anyhow!("The element not found from {}", target.url))
 }
 
-pub async fn get_one_element_as_decimal(target: GetOneElementText<'_>) -> Result<Decimal> {
-    text::parse_decimal(&get_one_element(target).await?, None)
+pub  fn get_one_element_as_decimal(target: GetOneElementText<'_>) -> Result<Decimal> {
+    text::parse_decimal(&get_one_element(target)?, None)
 }

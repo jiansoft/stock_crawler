@@ -4,7 +4,7 @@ use anyhow::*;
 use encoding::{DecoderTrap, Encoding};
 use rust_decimal::Decimal;
 
-const NUMBER_ESCAPE_CHAR: &[char] = &['元', '%', ',', ' ', '"', '\n'];
+const NUMBER_ESCAPE_CHAR: &[char] = &['元', '%', ',', ' ', '"', '\n', '+'];
 
 #[allow(dead_code)]
 pub fn big5_to_utf8(text: &str) -> Result<String> {
@@ -110,6 +110,12 @@ pub fn parse_decimal(s: &str, escape_chars: Option<Vec<char>>) -> Result<Decimal
     let cleaned = clean_escape_chars(s, escape_chars);
     Decimal::from_str(&cleaned)
         .map_err(|why| anyhow!("Failed to parse '{}' as Decimal because {:?}", cleaned, why))
+}
+
+pub fn parse_f64(s: &str, escape_chars: Option<Vec<char>>) -> Result<f64> {
+    let cleaned = clean_escape_chars(s, escape_chars);
+    f64::from_str(&cleaned)
+        .map_err(|why| anyhow!("Failed to parse '{}' as f64 because {:?}", cleaned, why))
 }
 
 /// Parses an `i32` value from a given string.

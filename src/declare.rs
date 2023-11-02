@@ -253,5 +253,16 @@ impl Industry {
     }
 }
 
+/// 股票報價
+#[derive(Debug)]
+pub struct StockQuotes {
+    pub stock_symbol: String,
+    pub price: f64,
+    /// 漲跌
+    pub change: f64,
+    /// 漲跌百分比
+    pub change_range: f64,
+}
+
 #[cfg(test)]
 mod tests {}

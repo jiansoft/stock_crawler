@@ -23,23 +23,27 @@ pub struct StockInfoReply {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StockPrice {
+pub struct StockQuotes {
     #[prost(string, tag = "1")]
     pub stock_symbol: ::prost::alloc::string::String,
     #[prost(double, tag = "2")]
     pub price: f64,
+    #[prost(double, tag = "3")]
+    pub change: f64,
+    #[prost(double, tag = "4")]
+    pub change_range: f64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StockPriceRequest {
+pub struct StockQuotesRequest {
     #[prost(string, repeated, tag = "1")]
     pub stock_symbols: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StockPriceReply {
+pub struct StockQuotesReply {
     #[prost(message, repeated, tag = "1")]
-    pub stock_prices: ::prost::alloc::vec::Vec<StockPrice>,
+    pub stock_prices: ::prost::alloc::vec::Vec<StockQuotes>,
 }
 /// Generated client implementations.
 pub mod stock_client {
@@ -149,11 +153,11 @@ pub mod stock_client {
             self.inner.unary(req, path, codec).await
         }
         /// 取得目前的股價
-        pub async fn fetch_current_stock_price(
+        pub async fn fetch_current_stock_quotes(
             &mut self,
-            request: impl tonic::IntoRequest<super::StockPriceRequest>,
+            request: impl tonic::IntoRequest<super::StockQuotesRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::StockPriceReply>,
+            tonic::Response<super::StockQuotesReply>,
             tonic::Status,
         > {
             self.inner
@@ -167,11 +171,11 @@ pub mod stock_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/stock.Stock/FetchCurrentStockPrice",
+                "/stock.Stock/FetchCurrentStockQuotes",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("stock.Stock", "FetchCurrentStockPrice"));
+                .insert(GrpcMethod::new("stock.Stock", "FetchCurrentStockQuotes"));
             self.inner.unary(req, path, codec).await
         }
     }
@@ -188,10 +192,13 @@ pub mod stock_server {
             request: tonic::Request<super::StockInfoRequest>,
         ) -> std::result::Result<tonic::Response<super::StockInfoReply>, tonic::Status>;
         /// 取得目前的股價
-        async fn fetch_current_stock_price(
+        async fn fetch_current_stock_quotes(
             &self,
-            request: tonic::Request<super::StockPriceRequest>,
-        ) -> std::result::Result<tonic::Response<super::StockPriceReply>, tonic::Status>;
+            request: tonic::Request<super::StockQuotesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::StockQuotesReply>,
+            tonic::Status,
+        >;
     }
     #[derive(Debug)]
     pub struct StockServer<T: Stock> {
@@ -316,23 +323,23 @@ pub mod stock_server {
                     };
                     Box::pin(fut)
                 }
-                "/stock.Stock/FetchCurrentStockPrice" => {
+                "/stock.Stock/FetchCurrentStockQuotes" => {
                     #[allow(non_camel_case_types)]
-                    struct FetchCurrentStockPriceSvc<T: Stock>(pub Arc<T>);
-                    impl<T: Stock> tonic::server::UnaryService<super::StockPriceRequest>
-                    for FetchCurrentStockPriceSvc<T> {
-                        type Response = super::StockPriceReply;
+                    struct FetchCurrentStockQuotesSvc<T: Stock>(pub Arc<T>);
+                    impl<T: Stock> tonic::server::UnaryService<super::StockQuotesRequest>
+                    for FetchCurrentStockQuotesSvc<T> {
+                        type Response = super::StockQuotesReply;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::StockPriceRequest>,
+                            request: tonic::Request<super::StockQuotesRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Stock>::fetch_current_stock_price(&inner, request)
+                                <T as Stock>::fetch_current_stock_quotes(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -345,7 +352,7 @@ pub mod stock_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = FetchCurrentStockPriceSvc(inner);
+                        let method = FetchCurrentStockQuotesSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
