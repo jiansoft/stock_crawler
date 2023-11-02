@@ -71,18 +71,9 @@ impl Share {
                 ),
             ]),
             industries: HashMap::from([
-                (
-                    Industry::CementIndustry.name(),
-                    Industry::CementIndustry.serial(),
-                ),
-                (
-                    Industry::FoodIndustry.name(),
-                    Industry::FoodIndustry.serial(),
-                ),
-                (
-                    Industry::PlasticIndustry.name(),
-                    Industry::PlasticIndustry.serial(),
-                ),
+                (Industry::Cement.name(), Industry::Cement.serial()),
+                (Industry::Food.name(), Industry::Food.serial()),
+                (Industry::Plastic.name(), Industry::Plastic.serial()),
                 (
                     Industry::TextileFiber.name(),
                     Industry::TextileFiber.serial(),
@@ -95,10 +86,7 @@ impl Share {
                     Industry::ElectricalCable.name(),
                     Industry::ElectricalCable.serial(),
                 ),
-                (
-                    Industry::ChemicalIndustry.name(),
-                    Industry::ChemicalIndustry.serial(),
-                ),
+                (Industry::Chemical.name(), Industry::Chemical.serial()),
                 (
                     Industry::BiotechMedical.name(),
                     Industry::BiotechMedical.serial(),
@@ -107,22 +95,10 @@ impl Share {
                     Industry::GlassCeramics.name(),
                     Industry::GlassCeramics.serial(),
                 ),
-                (
-                    Industry::PaperIndustry.name(),
-                    Industry::PaperIndustry.serial(),
-                ),
-                (
-                    Industry::SteelIndustry.name(),
-                    Industry::SteelIndustry.serial(),
-                ),
-                (
-                    Industry::RubberIndustry.name(),
-                    Industry::RubberIndustry.serial(),
-                ),
-                (
-                    Industry::AutomotiveIndustry.name(),
-                    Industry::AutomotiveIndustry.serial(),
-                ),
+                (Industry::Paper.name(), Industry::Paper.serial()),
+                (Industry::Steel.name(), Industry::Steel.serial()),
+                (Industry::Rubber.name(), Industry::Rubber.serial()),
+                (Industry::Automotive.name(), Industry::Automotive.serial()),
                 (
                     Industry::Semiconductor.name(),
                     Industry::Semiconductor.serial(),
@@ -324,7 +300,7 @@ impl Share {
         }
     }
 
-    /// 更新快取內股票最後的報價
+    /// 更新快取台股指數
     pub async fn set_stock_index(&self, key: String, index: index::Index) -> Option<index::Index> {
         match self.indices.write() {
             Ok(mut indices) => indices.insert(key, index),

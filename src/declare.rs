@@ -78,11 +78,11 @@ impl StockExchangeMarket {
 #[repr(i32)]
 pub enum Industry {
     /// 水泥工業 1
-    CementIndustry = 1,
+    Cement = 1,
     /// 食品工業 2
-    FoodIndustry = 2,
+    Food = 2,
     /// 塑膠工業 3
-    PlasticIndustry = 3,
+    Plastic = 3,
     /// 紡織纖維 4
     TextileFiber = 4,
     /// 電機機械 5
@@ -90,19 +90,19 @@ pub enum Industry {
     /// 電器電纜 6
     ElectricalCable = 6,
     /// 化學工業 7
-    ChemicalIndustry = 7,
+    Chemical = 7,
     /// 生技醫療業 8
     BiotechMedical = 8,
     /// 玻璃陶瓷 9
     GlassCeramics = 9,
     /// 造紙工業 10
-    PaperIndustry = 10,
+    Paper = 10,
     /// 鋼鐵工業 11
-    SteelIndustry = 11,
+    Steel = 11,
     /// 橡膠工業 12
-    RubberIndustry = 12,
+    Rubber = 12,
     /// 汽車工業 13
-    AutomotiveIndustry = 13,
+    Automotive = 13,
     /// 半導體業 14
     Semiconductor = 14,
     /// 電腦及週邊設備業 15
@@ -129,8 +129,6 @@ pub enum Industry {
     FinanceInsurance = 25,
     /// 貿易百貨 26
     TradingDepartmentStores = 26,
-    /// 貿易百貨業 26
-    //TradingDepartmentStoresIndustry = 26,
     /// 油電燃氣業 27
     OilElectricGas = 27,
     /// 綜合 28
@@ -145,14 +143,10 @@ pub enum Industry {
     HomeLife = 32,
     /// 其他 33
     Other = 33,
-    /// 其他業 33
-    //OtherIndustry = 33,
     /// 文化創意業 34
     CulturalCreative = 34,
     /// 農業科技 35
     AgriculturalTechnology = 35,
-    /// 農業科技業 35
-    //AgriculturalTechnologyIndustry = 35,
     /// 電子商務 36
     ECommerce = 36,
     /// 觀光餐旅 37
@@ -170,19 +164,19 @@ impl Industry {
 
     pub fn name(&self) -> &'static str {
         match *self {
-            Industry::CementIndustry => "水泥工業",
-            Industry::FoodIndustry => "食品工業",
-            Industry::PlasticIndustry => "塑膠工業",
+            Industry::Cement => "水泥工業",
+            Industry::Food => "食品工業",
+            Industry::Plastic => "塑膠工業",
             Industry::TextileFiber => "紡織纖維",
             Industry::ElectricalMachinery => "電機機械",
             Industry::ElectricalCable => "電器電纜",
-            Industry::ChemicalIndustry => "化學工業",
+            Industry::Chemical => "化學工業",
             Industry::BiotechMedical => "生技醫療業",
             Industry::GlassCeramics => "玻璃陶瓷",
-            Industry::PaperIndustry => "造紙工業",
-            Industry::SteelIndustry => "鋼鐵工業",
-            Industry::RubberIndustry => "橡膠工業",
-            Industry::AutomotiveIndustry => "汽車工業",
+            Industry::Paper => "造紙工業",
+            Industry::Steel => "鋼鐵工業",
+            Industry::Rubber => "橡膠工業",
+            Industry::Automotive => "汽車工業",
             Industry::Semiconductor => "半導體業",
             Industry::ComputerPeripheral => "電腦及週邊設備業",
             Industry::Optoelectronic => "光電業",
@@ -210,6 +204,52 @@ impl Industry {
             Industry::DepositaryReceipts => "存託憑證",
             Industry::Uncategorized => "未分類",
         }
+    }
+
+    pub fn iterator() -> impl Iterator<Item = Self> {
+        [
+            Self::Cement,
+            Self::Food,
+            Self::Plastic,
+            Self::TextileFiber,
+            Self::ElectricalMachinery,
+            Self::ElectricalCable,
+            Self::Chemical,
+            Self::BiotechMedical,
+            Self::GlassCeramics,
+            Self::Paper,
+            Self::Steel,
+            Self::Rubber,
+            Self::Automotive,
+            Self::Semiconductor,
+            Self::ComputerPeripheral,
+            Self::Optoelectronic,
+            Self::CommunicationNetwork,
+            Self::ElectronicComponents,
+            Self::ElectronicPathway,
+            Self::InformationService,
+            Self::OtherElectronics,
+            Self::ConstructionMaterial,
+            Self::Shipping,
+            Self::Tourism,
+            Self::FinanceInsurance,
+            Self::TradingDepartmentStores,
+            Self::OilElectricGas,
+            Self::Comprehensive,
+            Self::GreenEnergyEnvironmentalProtection,
+            Self::DigitalCloud,
+            Self::SportsRecreation,
+            Self::HomeLife,
+            Self::Other,
+            Self::CulturalCreative,
+            Self::AgriculturalTechnology,
+            Self::ECommerce,
+            Self::TourismCatering,
+            Self::DepositaryReceipts,
+            Self::Uncategorized,
+        ]
+        .iter()
+        .copied()
     }
 }
 

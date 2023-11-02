@@ -46,7 +46,7 @@ impl Telegram {
             Some(&payload),
         )
         .await
-        .map_err(|err| anyhow!("Failed to send message because: {:?}", err))?;
+        .map_err(|err| anyhow!("Failed to send_message because: {:?}", err))?;
 
         Ok(())
     }
