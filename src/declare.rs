@@ -109,7 +109,7 @@ pub enum Industry {
     ComputerPeripheral = 15,
     /// 光電業 16
     Optoelectronic = 16,
-    /// 通訊網路業 17
+    /// 通信網路業 17
     CommunicationNetwork = 17,
     /// 電子零組件業 18
     ElectronicComponents = 18,
@@ -180,7 +180,7 @@ impl Industry {
             Industry::Semiconductor => "半導體業",
             Industry::ComputerPeripheral => "電腦及週邊設備業",
             Industry::Optoelectronic => "光電業",
-            Industry::CommunicationNetwork => "通訊網路業",
+            Industry::CommunicationNetwork => "通信網路業",
             Industry::ElectronicComponents => "電子零組件業",
             Industry::ElectronicPathway => "電子通路業",
             Industry::InformationService => "資訊服務業",
