@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
 //use futures::executor::block_on;
+use crate::util::map::Keyable;
 use crate::{
     database::table::{
         daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,
@@ -203,7 +204,9 @@ impl Share {
         match self.indices.write() {
             Ok(mut i) => {
                 if let Ok(indices) = indices {
-                    i.extend(indices);
+                    for index in indices {
+                        i.insert(index.key(), index);
+                    }
                 }
             }
             Err(why) => {

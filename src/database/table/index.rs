@@ -1,15 +1,13 @@
 use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use concat_string::concat_string;
-use futures::StreamExt;
-use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 
-use crate::{database, logging, util};
 use crate::util::map::Keyable;
+use crate::{database, logging, util};
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Index {
@@ -43,8 +41,8 @@ impl Index {
         }
     }
 
-    pub async fn fetch() -> Result<HashMap<String, Index>> {
-        const STMT: &str = r#"
+    pub async fn fetch() -> Result<Vec<Index>> {
+        let sql: &str = r#"
 SELECT
     category,
     "date",
@@ -62,23 +60,10 @@ ORDER BY
 LIMIT 30;
     "#;
 
-        let mut stream = sqlx::query_as::<_, Index>(STMT).fetch(database::get_connection());
-
-        let mut indices = HashMap::with_capacity(30);
-
-        while let Some(row_result) = stream.next().await {
-            match row_result {
-                Ok(row) => {
-                    let key = format!("{}_{}", row.date, row.category);
-                    indices.insert(key, row);
-                }
-                Err(why) => {
-                    logging::error_file_async(format!("Failed to stream.next() because {:?}", why));
-                }
-            };
-        }
-
-        Ok(indices)
+        sqlx::query_as::<_, Index>(sql)
+            .fetch_all(database::get_connection())
+            .await
+            .context(format!("Failed to Index::fetch() from database",))
     }
 
     /// 將twse取回來的原始資料轉成 Entity
@@ -253,7 +238,7 @@ impl Keyable for Index {
 
 #[cfg(test)]
 mod tests {
-    use std::{time};
+    use std::time;
 
     use crate::logging;
 
@@ -265,7 +250,7 @@ mod tests {
         dotenv::dotenv().ok();
         let r = Index::fetch().await.unwrap();
         for e in r.iter() {
-            logging::info_file_async(format!("e.date {:?} e.index {:?}", e.1.date, e.1.index));
+            logging::info_file_async(format!("e.date {:?} e.index {:?}", e.date, e.index));
         }
         logging::info_file_async("結束".to_string());
         tokio::time::sleep(time::Duration::from_secs(1)).await;
