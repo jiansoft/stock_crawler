@@ -24,6 +24,10 @@ pub async fn execute() -> Result<()> {
                     continue;
                 }
 
+                if stock.stock_name == "中央登錄公債" {
+                    continue;
+                }
+
                 let stock_last_price = SHARE.get_stock_last_price(&stock.stock_symbol).await;
                 let last_price = match stock_last_price {
                     None => String::from(" - "),
