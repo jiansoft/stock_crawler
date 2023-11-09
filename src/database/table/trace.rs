@@ -38,10 +38,11 @@ impl Trace {
 
 impl Keyable for Trace {
     fn key(&self) -> String {
-        format!(
-            "Trace:{}-{}-{}",
-            &self.stock_symbol, self.floor, self.ceiling
-        )
+        format!("{}-{}-{}", &self.stock_symbol, self.floor, self.ceiling)
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!("Trace:{}", &self.key())
     }
 }
 

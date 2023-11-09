@@ -47,12 +47,14 @@ async fn run_cron(sched: &JobScheduler) -> std::result::Result<(), JobSchedulerE
     // UTC 時間
 
     let jobs = vec![
-        // 01:00 更新台股季度財報
-        create_job("0 0 17 * * *", financial_statement::quarter::execute),
         // 01:00 更新興櫃股票的每股淨值
         create_job("0 0 17 * * *", net_asset_value_per_share::emerging::execute),
         // 02:30 更新盈餘分配率
         create_job("0 30 18 * * *", dividend::payout_ratio::execute),
+        // 03:00 更新台股季度財報
+        create_job("0 0 19 * * *", event::taiwan_stock::quarter_eps::execute),
+        // 04:00 更新台股季度財報
+        create_job("0 0 20 * * *", financial_statement::quarter::execute),
         // 05:00 更新台股年度財報
         create_job("0 0 21 * * *", financial_statement::annual::execute),
         // 05:00 從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據

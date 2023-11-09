@@ -2,6 +2,8 @@ use reqwest::header::HeaderMap;
 
 use crate::util::http;
 
+/// 台股財報
+pub mod eps;
 /// 國際證券辨識
 pub mod international_securities_identification_number;
 /// 公開申購公告-抽籤日程表

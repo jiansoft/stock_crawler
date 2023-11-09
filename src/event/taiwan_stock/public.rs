@@ -17,7 +17,7 @@ pub async fn execute() -> Result<()> {
             stock.offering_price,
         ) {
             if now >= start && now <= end {
-                let cache_key = stock.key();
+                let cache_key = stock.key_with_prefix();
                 let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
 
                 if is_jump {

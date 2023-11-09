@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::NaiveDate;
+use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +36,11 @@ pub struct Public {
 
 impl Keyable for Public {
     fn key(&self) -> String {
-        format!("Public:{stock_symbol}", stock_symbol = self.stock_symbol)
+        self.stock_symbol.clone()
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!("Public:{}", self.key())
     }
 }
 
@@ -57,8 +61,9 @@ impl Public {
 
 pub async fn visit() -> Result<Vec<Public>> {
     let url = format!(
-        "https://www.{host}/rwd/zh/announcement/publicForm?response=json&_=1698377892525",
+        "https://www.{host}/rwd/zh/announcement/publicForm?response=json&_={time}",
         host = twse::HOST,
+        time = Local::now().timestamp_millis()
     );
 
     let res = util::http::get_use_json::<PublicFormResponse>(&url).await?;

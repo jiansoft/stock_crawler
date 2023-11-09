@@ -9,8 +9,13 @@ use sqlx::{
 };
 
 use crate::{
-    crawler::{wespai, yahoo},
+    crawler::{
+        wespai,
+        yahoo,
+        twse
+    },
     database,
+    util::map::Keyable
 };
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]
@@ -44,6 +49,16 @@ pub struct FinancialStatement {
     serial: i64,
     /// 年度
     pub year: i64,
+}
+
+impl Keyable for FinancialStatement{
+    fn key(&self) -> String {
+        format!("{}-{}-{}", &self.security_code, self.year, self.quarter)
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!("FinancialStatement:{}", &self.key())
+    }
 }
 
 impl FinancialStatement {
@@ -109,6 +124,28 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .await
             .context(format!(
                 "Failed to upsert({:#?}) from database\nsql:{}",
+                self, &sql
+            ))
+    }
+
+    pub async fn upsert_earnings_per_share(&self) -> Result<PgQueryResult> {
+        let sql = r#"
+INSERT INTO financial_statement (
+    security_code, "year", quarter, earnings_per_share, created_time, updated_time)
+VALUES ($1, $2, $3, $4,$6, $7)
+ON CONFLICT (security_code,"year",quarter) DO NOTHING;
+"#;
+        sqlx::query(sql)
+            .bind(&self.security_code)
+            .bind(self.year)
+            .bind(&self.quarter)
+            .bind(self.earnings_per_share)
+            .bind(self.created_time)
+            .bind(self.updated_time)
+            .execute(database::get_connection())
+            .await
+            .context(format!(
+                "Failed to upsert_earnings_per_share({:#?}) from database\nsql:{}",
                 self, &sql
             ))
     }
@@ -212,6 +249,27 @@ impl From<wespai::profit::Profit> for FinancialStatement {
         e.profit_before_tax = fs.profit_before_tax;
         e.return_on_equity = fs.return_on_equity;
         e.return_on_assets = fs.return_on_assets;
+        e.year = fs.year as i64;
+        e
+    }
+}
+
+impl From<twse::eps::Eps> for FinancialStatement {
+    fn from(fs: twse::eps::Eps) -> Self {
+        let mut e = FinancialStatement::new(fs.stock_symbol);
+        e.updated_time = Local::now();
+        e.created_time = Local::now();
+        e.quarter = fs.quarter.to_string();
+        e.gross_profit = Default::default();
+        e.operating_profit_margin = Default::default();
+        e.pre_tax_income = Default::default();
+        e.net_income = Default::default();
+        e.net_asset_value_per_share = Default::default();
+        e.sales_per_share = Default::default();
+        e.earnings_per_share = fs.earnings_per_share;
+        e.profit_before_tax = Default::default();
+        e.return_on_equity = Default::default();
+        e.return_on_assets = Default::default();
         e.year = fs.year as i64;
         e
     }

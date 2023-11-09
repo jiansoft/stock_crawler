@@ -6,8 +6,12 @@ use concat_string::concat_string;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 
-use crate::util::map::Keyable;
-use crate::{database, logging, util};
+use crate::{
+    util::map::Keyable,
+    database,
+    logging,
+    util
+};
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Index {
@@ -63,7 +67,7 @@ LIMIT 30;
         sqlx::query_as::<_, Index>(sql)
             .fetch_all(database::get_connection())
             .await
-            .context(format!("Failed to Index::fetch() from database",))
+            .context(String::from("Failed to Index::fetch() from database"))
     }
 
     /// 將twse取回來的原始資料轉成 Entity
@@ -74,13 +78,13 @@ LIMIT 30;
         }
 
         let year = split_date[0]
-            .parse::<i64>()
+            .parse::<i32>()
             .map_err(|why| anyhow!(format!("轉換資料日期發生錯誤. because {:?}", why)))?;
 
         let mut index = Index::new();
 
         let date = concat_string!(
-            (year + 1911).to_string(),
+            util::datetime::roc_year_to_gregorian_year(year).to_string(),
             "-",
             split_date[1],
             "-",
@@ -167,7 +171,7 @@ impl Default for Index {
 impl From<Vec<String>> for Index {
     fn from(item: Vec<String>) -> Self {
         let now = Local::now();
-        let dy = (now.year() - 1911).to_string();
+        let dy = util::datetime::gregorian_year_to_roc_year(now.year()).to_string();
         let dm = now.month().to_string();
         let dd = now.day().to_string();
         let mut split_date: Vec<&str> = item[0].split('/').collect();
@@ -176,18 +180,18 @@ impl From<Vec<String>> for Index {
             split_date = vec![&dy, &dm, &dd]
         }
 
-        let year = match split_date[0].parse::<i64>() {
+        let year = match split_date[0].parse::<i32>() {
             Ok(_year) => _year,
             Err(why) => {
                 logging::error_file_async(format!("轉換資料日期發生錯誤. because {:?}", why));
-                (Local::now().year() - 1911) as i64
+                util::datetime::gregorian_year_to_roc_year(Local::now().year())
             }
         };
 
         let mut index = Index::new();
         index.category = String::from("TAIEX");
         let date = concat_string!(
-            (year + 1911).to_string(),
+            util::datetime::roc_year_to_gregorian_year(year).to_string(),
             "-",
             split_date[1],
             "-",
@@ -232,7 +236,11 @@ impl From<Vec<String>> for Index {
 
 impl Keyable for Index {
     fn key(&self) -> String {
-        format!("Index:{}-{}", self.date, self.category)
+        format!("{}-{}", self.date, self.category)
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!("Index:{}", self.key())
     }
 }
 

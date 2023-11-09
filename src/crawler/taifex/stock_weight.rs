@@ -19,6 +19,7 @@ pub struct StockWeight {
 
 /// 台股各股權重
 pub async fn visit(exchange: StockExchange) -> Result<Vec<StockWeight>> {
+    let mut result: Vec<StockWeight> = Vec::with_capacity(1024);
     let url = match exchange {
         StockExchange::TWSE => {
             format!("https://{}/cht/9/futuresQADetail", taifex::HOST)
@@ -26,9 +27,9 @@ pub async fn visit(exchange: StockExchange) -> Result<Vec<StockWeight>> {
         StockExchange::TPEx => {
             format!("https://{}/cht/2/tPEXPropertion", taifex::HOST)
         }
+        _ => return Ok(result),
     };
 
-    let mut result: Vec<StockWeight> = Vec::with_capacity(1024);
     let text = util::http::get(&url, None).await?;
     if text.is_empty() {
         return Ok(result);

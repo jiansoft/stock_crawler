@@ -9,7 +9,8 @@ use crate::{
         self,
         table::{stock_index, stock_word},
     },
-    logging, util,
+    logging,
+    util::{self, map::Keyable},
 };
 
 pub(crate) mod extension;
@@ -251,6 +252,16 @@ ORDER BY
                     why
                 )
             })
+    }
+}
+
+impl Keyable for Stock {
+    fn key(&self) -> String {
+        self.stock_symbol.clone()
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!("Stock:{}", self.key())
     }
 }
 

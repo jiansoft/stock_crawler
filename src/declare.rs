@@ -1,6 +1,57 @@
+use strum_macros::{Display, EnumString};
+
+#[derive(Display, Debug, Copy, Clone, EnumString)]
+pub enum Quarter {
+    #[strum(serialize = "Q1")]
+    Q1 = 1,
+    #[strum(serialize = "Q2")]
+    Q2 = 2,
+    #[strum(serialize = "Q3")]
+    Q3 = 3,
+    #[strum(serialize = "Q4")]
+    Q4 = 4,
+}
+
+impl Quarter {
+    pub fn serial(&self) -> i32 {
+        *self as i32
+    }
+
+    pub fn previous(&self) -> Quarter {
+        match self {
+            Quarter::Q1 => Quarter::Q4,
+            Quarter::Q2 => Quarter::Q1,
+            Quarter::Q3 => Quarter::Q1,
+            Quarter::Q4 => Quarter::Q3,
+        }
+    }
+
+    pub fn from_month(month: u32) -> Option<Quarter> {
+        match month {
+            1..=3 => Some(Quarter::Q1),
+            4..=6 => Some(Quarter::Q2),
+            7..=9 => Some(Quarter::Q3),
+            10..=12 => Some(Quarter::Q4),
+            _ => None,
+        }
+    }
+
+    pub fn from_serial(val: u32) -> Option<Quarter> {
+        match val {
+            1 => Some(Quarter::Q1),
+            2 => Some(Quarter::Q2),
+            3 => Some(Quarter::Q3),
+            4 => Some(Quarter::Q4),
+            _ => None,
+        }
+    }
+}
+
 /// 交易所
 #[derive(Debug, Copy, Clone)]
 pub enum StockExchange {
+    /// 未有交易所
+    None,
     /// 臺灣證券交易所 1
     TWSE,
     /// 證券櫃檯買賣市場 2
@@ -10,6 +61,7 @@ pub enum StockExchange {
 impl StockExchange {
     pub fn serial_number(&self) -> i32 {
         match self {
+            StockExchange::None => 0,
             StockExchange::TWSE => 1,
             StockExchange::TPEx => 2,
         }
@@ -25,6 +77,8 @@ impl StockExchange {
 #[repr(i32)]
 #[non_exhaustive]
 pub enum StockExchangeMarket {
+    /// 公開發行
+    Public = 1,
     /// 上市 2
     Listed = 2,
     /// 上櫃 4
@@ -51,6 +105,7 @@ impl StockExchangeMarket {
 
     pub fn name(&self) -> &'static str {
         match *self {
+            StockExchangeMarket::Public => "公開發行",
             StockExchangeMarket::Listed => "上市",
             StockExchangeMarket::OverTheCounter => "上櫃",
             StockExchangeMarket::Emerging => "興櫃",
@@ -63,13 +118,19 @@ impl StockExchangeMarket {
             StockExchangeMarket::OverTheCounter | StockExchangeMarket::Emerging => {
                 StockExchange::TPEx
             }
+            StockExchangeMarket::Public => StockExchange::None,
         }
     }
 
     pub fn iterator() -> impl Iterator<Item = Self> {
-        [Self::Listed, Self::OverTheCounter, Self::Emerging]
-            .iter()
-            .copied()
+        [
+            Self::Public,
+            Self::Listed,
+            Self::OverTheCounter,
+            Self::Emerging,
+        ]
+        .iter()
+        .copied()
     }
 }
 

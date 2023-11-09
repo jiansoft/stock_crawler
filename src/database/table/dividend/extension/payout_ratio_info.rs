@@ -82,6 +82,10 @@ impl Keyable for PayoutRatioInfo {
     fn key(&self) -> String {
         format!("{}-{}-{}", self.security_code, self.year, self.quarter)
     }
+
+    fn key_with_prefix(&self) -> String {
+        format!("PayoutRatioInfo:{}-{}-{}", self.security_code, self.year, self.quarter)
+    }
 }
 
 /*pub fn vec_2_hashmap<T: Keyable>(entities: Vec<T>) -> HashMap<String, T> {

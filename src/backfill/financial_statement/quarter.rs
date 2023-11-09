@@ -49,7 +49,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        logging::info_file_async(format!(
+        logging::debug_file_async(format!(
             "financial_statement upsert executed successfully. \r\n{:#?}",
             fs
         ));

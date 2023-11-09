@@ -5,7 +5,7 @@ use futures::future;
 use crate::{
     crawler::wespai,
     database::table::{financial_statement, stock},
-    logging, nosql,
+    logging, nosql, util,
     util::datetime::Weekend,
 };
 
@@ -28,11 +28,17 @@ pub async fn execute() -> Result<()> {
     }
 
     let annual = financial_statement::fetch_annual(profits[0].year).await?;
-    let exist_fs = financial_statement::vec_to_hashmap(annual);
+    let exist_fs = util::map::vec_to_hashmap(annual);
     let upsert_futures: Vec<_> = profits
         .into_iter()
         .filter(|profit| !stock::is_preference_shares(&profit.security_code))
-        .filter(|profit| !exist_fs.contains_key(&profit.security_code))
+        .filter(|profit| {
+            let key = format!(
+                "{}-{}-{}",
+                profit.security_code, profit.year, profit.quarter
+            );
+            !exist_fs.contains_key(&key)
+        })
         .map(|profit| {
             let fs = financial_statement::FinancialStatement::from(profit);
             fs.upsert()

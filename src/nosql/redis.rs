@@ -5,8 +5,12 @@ use deadpool_redis::{redis::cmd, Config, Connection, Pool, Runtime};
 use futures::{stream::FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
 use redis::{AsyncCommands, RedisError, RedisResult, ToRedisArgs, Value};
+use rust_decimal::Decimal;
 
-use crate::config::SETTINGS;
+use crate::{
+    config::SETTINGS,
+    util::text
+};
 
 pub static CLIENT: Lazy<Arc<Redis>> = Lazy::new(|| Arc::new(Redis::new()));
 
@@ -100,6 +104,30 @@ impl Redis {
         let mut conn = self.pool.get().await?;
         let value: String = redis::cmd("GET").arg(key).query_async(&mut conn).await?;
         Ok(value)
+    }
+
+    /// Retrieves a decimal value from a data source for the given key.
+    ///
+    /// This method first fetches a string representation of a decimal value associated with the provided key
+    /// using an asynchronous call to `get_string`. It then attempts to parse the string into a `Decimal` type.
+    ///
+    /// # Arguments
+    ///
+    /// * `key`: The key for which to fetch the decimal value.
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Decimal>`: The fetched and parsed decimal value if successful, or an error if either the
+    ///   fetch operation fails or the string cannot be parsed into a decimal.
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error in the following situations:
+    /// - If the `get_string` method call fails, the error from `get_string` will be propagated.
+    /// - If the string fetched from `get_string` cannot be parsed into a `Decimal`, an error will be returned.
+    pub async fn get_decimal(&self, key: &str) -> Result<Decimal> {
+        let val = self.get_string(key).await?;
+        text::parse_decimal(&val, None)
     }
 
     /// Retrieves a boolean value from the Redis server for the given key.
@@ -213,8 +241,20 @@ impl Default for Redis {
 #[cfg(test)]
 mod tests {
     use crate::{cache::SHARE, logging};
+    use rust_decimal_macros::dec;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_redis_decimal() {
+        dotenv::dotenv().ok();
+        CLIENT
+            .set("no key", dec!(10).to_string(), 60)
+            .await
+            .expect("TODO: panic message");
+        let is_no_key_val = CLIENT.get_decimal("no key").await;
+        println!("no_key_val_is:{:?}", is_no_key_val);
+    }
 
     #[tokio::test]
     #[ignore]

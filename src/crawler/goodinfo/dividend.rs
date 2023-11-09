@@ -92,6 +92,10 @@ impl Keyable for GoodInfoDividend {
     fn key(&self) -> String {
         format!("{}-{}-{}", self.stock_symbol, self.year, self.quarter)
     }
+
+    fn key_with_prefix(&self) -> String {
+        format!("GoodInfoDividend:{}", self.key())
+    }
 }
 
 /// 抓取年度股利資料

@@ -7,10 +7,10 @@ use tokio::{time, time::Instant};
 
 use crate::{
     bot,
-    cache::{TtlCacheInner, SHARE, TTL},
+    cache::SHARE,
     crawler::{self},
     database::table::trace::Trace,
-    logging,
+    logging, nosql,
     util::{datetime::Weekend, map::Keyable},
 };
 
@@ -69,20 +69,36 @@ async fn alert_on_price_boundary(target: Trace, current_price: Decimal) -> Resul
         return Ok(false);
     }
 
-    let target_key = target.key().to_string();
+    let target_key = target.key_with_prefix();
+    let last_price_in_cache = match nosql::redis::CLIENT.get_decimal(&target_key).await {
+        Ok(p) => p,
+        Err(_) => {
+            if target.floor > Decimal::ZERO && target.ceiling > Decimal::ZERO {
+                current_price
+            } else if target.floor > Decimal::ZERO {
+                target.floor
+            } else {
+                target.ceiling
+            }
+        }
+    };
 
     // 與快取中的價格比較，判斷是否需要傳送警告
-    if let Some(last_price_in_cache) = TTL.trace_quote_get(&target_key) {
-        if no_need_to_alert(&target, current_price, last_price_in_cache) {
-            return Ok(false);
-        }
+    if no_need_to_alert(&target, current_price, last_price_in_cache) {
+        return Ok(false);
     }
 
     let to_bot_msg = format_alert_message(&target, current_price).await;
+    println!(
+        "target_key:{} current_price:{} last_price_in_cache:{}",
+        &target_key, current_price, last_price_in_cache
+    );
+
+    nosql::redis::CLIENT
+        .set(target_key, current_price.to_string(), 60 * 60 * 5)
+        .await?;
 
     bot::telegram::send(&to_bot_msg).await?;
-
-    TTL.trace_quote_set(target_key, current_price, Duration::from_secs(60 * 60 * 5));
 
     Ok(true)
 }
@@ -147,8 +163,20 @@ fn within_boundary(target: &Trace, current_price: Decimal) -> bool {
 /// # 返回
 /// - 返回一個布林值，如果為 true，表示不需要傳送警告；否則，表示需要傳送警告。
 fn no_need_to_alert(target: &Trace, current_price: Decimal, last_price_in_cache: Decimal) -> bool {
-    (current_price >= last_price_in_cache && target.floor > Decimal::ZERO)
-        || (current_price <= last_price_in_cache && Decimal::ZERO > target.ceiling)
+    println!(
+        "target:{:#?} current_price:{} last_price_in_cache:{}",
+        &target, current_price, last_price_in_cache
+    );
+
+    if target.floor > Decimal::ZERO && current_price < last_price_in_cache {
+        return false;
+    }
+
+    if target.ceiling > Decimal::ZERO {
+        return current_price <= last_price_in_cache;
+    }
+
+    true
 }
 
 #[cfg(test)]

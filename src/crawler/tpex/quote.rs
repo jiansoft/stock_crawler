@@ -53,7 +53,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
         pe_ratio_analysis.insert(item.security_code.to_string(), item);
     }
 
-    let republic_date = date.year() - 1911;
+    let republic_date = util::datetime::gregorian_year_to_roc_year(date.year());
     //https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&_=1681801169006
     let quote_url = format!(
         "https://{}/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php?l=zh-tw&d={}{}&se=EW&_={}",

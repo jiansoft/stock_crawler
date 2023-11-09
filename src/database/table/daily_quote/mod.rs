@@ -322,6 +322,7 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
                     *field = d.parse::<Decimal>().unwrap_or_default();
                 }
             }
+            _ => {}
         }
 
         e.create_time = Local::now();

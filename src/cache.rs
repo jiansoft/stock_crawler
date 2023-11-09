@@ -4,15 +4,14 @@ use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
 //use futures::executor::block_on;
-use crate::util::map::Keyable;
 use crate::{
     database::table::{
         daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,
         stock_exchange_market,
     },
-    declare,
-    declare::Industry,
+    declare::{self, Industry},
     logging,
+    util::map::Keyable,
 };
 
 pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
@@ -349,6 +348,13 @@ impl Share {
         match self.stocks.read() {
             Ok(cache) => cache.get(symbol).cloned(),
             Err(_) => None,
+        }
+    }
+
+    pub fn stock_contains_key(&self, symbol: &str) -> bool {
+        match self.stocks.read() {
+            Ok(cache) => cache.contains_key(symbol),
+            Err(_) => false,
         }
     }
 

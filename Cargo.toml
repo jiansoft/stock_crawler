@@ -25,7 +25,7 @@ tokio-test = "0.4"
 rust_decimal = "1.32"
 rust_decimal_macros = "1.32"
 encoding = "0.2"
-scraper = "0.17"
+scraper = "0.18"
 anyhow = "1.0"
 crossbeam-channel = "0.5"
 num_cpus = "1.16"
@@ -43,6 +43,7 @@ prost = "0.12"
 tokio-retry = "0.3"
 hashbrown = "0.14"
 sqlx = { version = "0.7", features = [ "runtime-tokio", "postgres", "time", "chrono", "bigdecimal", "macros", "rust_decimal"] }
-
+strum = { version = "0.25", features = ["derive"]}
+strum_macros = "0.25"
 [build-dependencies]
 tonic-build = "0.10"

@@ -47,6 +47,7 @@ mod tests {
 
         match visit().await {
             Ok(qfiis) => {
+                dbg!(&qfiis);
                 logging::debug_file_async(format!("qfiis:{:#?}", qfiis));
             }
             Err(why) => {

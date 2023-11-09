@@ -7,7 +7,7 @@ use crate::{cache::SHARE, crawler::twse, database::table::revenue, util};
 /// 下載月營收
 pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<revenue::Revenue>> {
     let year = date_time.year();
-    let republic_of_china_era = year - 1911;
+    let republic_of_china_era = util::datetime::gregorian_year_to_roc_year(year);
     let month = date_time.month();
     let mut revenues = Vec::with_capacity(1024);
 
