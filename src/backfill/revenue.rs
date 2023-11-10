@@ -32,58 +32,6 @@ pub async fn execute() -> Result<()> {
         })
         .await;
 
-    /*for mut revenue in revenues {
-        if let Ok(dq) = table::daily_quote::fetch_monthly_stock_price_summary(
-            &revenue.security_code,
-            year,
-            month as i32,
-        )
-        .await
-        {
-            revenue.lowest_price = dq.lowest_price;
-            revenue.avg_price = dq.avg_price;
-            revenue.highest_price = dq.highest_price;
-        }
-
-        if let Err(why) = revenue.upsert().await {
-            logging::error_file_async(format!("Failed to revenue.upsert because {:?}", why));
-            continue;
-        }
-
-        if let Ok(mut last_revenues) = SHARE.last_revenues.write() {
-            if let Some(last_revenue_date) = last_revenues.get_mut(&revenue.date) {
-                last_revenue_date
-                    .entry(revenue.security_code.to_string())
-                    .or_insert(revenue.clone());
-            }
-        }
-
-        let name = SHARE
-            .stocks
-            .read()
-            .map(|stocks| {
-                stocks
-                    .get(revenue.security_code.as_str())
-                    .map_or("no name".to_string(), |stock| stock.name.to_string())
-            })
-            .unwrap_or_else(|why| {
-                logging::error_file_async(format!("Failed to stocks.read because {:?}", why));
-                "no name".to_string()
-            });
-
-        logging::info_file_async(
-            format!(
-                "公司代號:{}  公司名稱:{} 當月營收:{} 上月營收:{} 去年當月營收:{} 月均價:{} 最低價:{} 最高價:{}",
-                revenue.security_code,
-                name,
-                revenue.monthly,
-                revenue.last_month,
-                revenue.last_year_this_month,
-                revenue.avg_price,
-                revenue.lowest_price,
-                revenue.highest_price))
-    }*/
-
     revenue::rebuild_revenue_last_date().await?;
 
     Ok(())
@@ -105,13 +53,7 @@ pub(crate) async fn process_revenue(
 
     revenue.upsert().await?;
 
-    if let Ok(mut last_revenues) = SHARE.last_revenues.write() {
-        if let Some(last_revenue_date) = last_revenues.get_mut(&revenue.date) {
-            last_revenue_date
-                .entry(revenue.security_code.to_string())
-                .or_insert(revenue.clone());
-        }
-    }
+    SHARE.set_last_revenues(revenue.clone());
 
     let name = match SHARE.get_stock(&revenue.security_code).await {
         None => String::from("-"),

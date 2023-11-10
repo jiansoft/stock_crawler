@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
 //use futures::executor::block_on;
+
 use crate::{
     database::table::{
         daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,
@@ -23,9 +24,9 @@ pub struct Share {
     /// 存放台股股票代碼
     pub stocks: RwLock<HashMap<String, stock::Stock>>,
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
-    pub last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Revenue>>>,
+    last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Revenue>>>,
     /// 存放最後交易日股票報價數據
-    pub last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::LastDailyQuotes>>,
+    last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::LastDailyQuotes>>,
     // quote_history_records 股票歷史、淨值比等最高、最低的數據,resource.Init() 從資料庫內讀取出，若抓到新的數據時則會同時更新資料庫與此數據
     pub quote_history_records: RwLock<HashMap<String, quote_history_record::QuoteHistoryRecord>>,
     /// 股票產業分類
@@ -369,6 +370,27 @@ impl Share {
         }
     }
 
+    pub fn set_last_revenues(&self, revenue: revenue::Revenue) {
+        if let Ok(mut last_revenues) = SHARE.last_revenues.write() {
+            if let Some(last_revenue_date) = last_revenues.get_mut(&revenue.date) {
+                last_revenue_date
+                    .entry(revenue.security_code.to_string())
+                    .or_insert(revenue.clone());
+            }
+        }
+    }
+
+    pub fn last_revenues_contains_key(&self, key1: i64, key2: &str) -> bool {
+        self.last_revenues
+            .read()
+            .map(|cache| {
+                cache
+                    .get(&key1)
+                    .map_or(false, |last_revenue| last_revenue.contains_key(key2))
+            })
+            .unwrap_or(false)
+    }
+
     /// 更新快取內股票最後的報價
     pub async fn set_stock_last_price(&self, daily_quote: &daily_quote::DailyQuote) {
         if let Ok(mut last_trading_day_quotes) = self.last_trading_day_quotes.write() {
@@ -376,6 +398,17 @@ impl Share {
                 quote.date = daily_quote.date;
                 quote.closing_price = daily_quote.closing_price;
             }
+        }
+    }
+
+    /// 從快取中取得股票最後的報價的資料
+    pub async fn get_last_trading_day_quotes(
+        &self,
+        symbol: &str,
+    ) -> Option<last_daily_quotes::LastDailyQuotes> {
+        match self.last_trading_day_quotes.read() {
+            Ok(cache) => cache.get(symbol).cloned(),
+            Err(_) => None,
         }
     }
 }

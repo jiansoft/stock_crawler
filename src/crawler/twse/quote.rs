@@ -54,16 +54,16 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
             }
 
             if !dq.change.is_zero() {
-                if let Ok(ltdq) = cache::SHARE.last_trading_day_quotes.read() {
-                    if let Some(ldg) = ltdq.get(&dq.security_code) {
-                        if ldg.closing_price > Decimal::ZERO {
-                            // 漲幅 = (现价-上一个交易日收盘价）/ 上一个交易日收盘价*100%
-                            dq.change_range = (dq.closing_price - ldg.closing_price)
-                                / ldg.closing_price
-                                * dec!(100);
-                        } else {
-                            dq.change_range = dq.change / dq.opening_price * dec!(100);
-                        }
+                if let Some(ldg) = cache::SHARE
+                    .get_last_trading_day_quotes(&dq.security_code)
+                    .await
+                {
+                    if ldg.closing_price > Decimal::ZERO {
+                        // 漲幅 = (现价-上一个交易日收盘价）/ 上一个交易日收盘价*100%
+                        dq.change_range =
+                            (dq.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
+                    } else {
+                        dq.change_range = dq.change / dq.opening_price * dec!(100);
                     }
                 }
             }

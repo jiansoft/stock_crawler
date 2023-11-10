@@ -46,13 +46,8 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
         }
 
         // 檢查是否收錄過
-        if let Ok(last_revenues) = SHARE.last_revenues.read() {
-            if let Some(last_revenue_date) = last_revenues.get(&date) {
-                if last_revenue_date.contains_key(&tds[0]) {
-                    //println!("已收:{} {}-{}", &e.security_code, year, month);
-                    continue;
-                }
-            }
+        if SHARE.last_revenues_contains_key(date, &tds[0]) {
+            continue;
         }
 
         let mut entity = revenue::Revenue::from(tds);
