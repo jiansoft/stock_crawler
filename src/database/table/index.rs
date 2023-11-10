@@ -1,17 +1,12 @@
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use concat_string::concat_string;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 
-use crate::{
-    util::map::Keyable,
-    database,
-    logging,
-    util
-};
+use crate::{database, logging, util, util::map::Keyable};
 
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Index {
@@ -67,7 +62,13 @@ LIMIT 30;
         sqlx::query_as::<_, Index>(sql)
             .fetch_all(database::get_connection())
             .await
-            .context(String::from("Failed to Index::fetch() from database"))
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to Index::fetch() from database\nsql:{}\n {:?}",
+                    &sql,
+                    why
+                )
+            })
     }
 
     /// 將twse取回來的原始資料轉成 Entity

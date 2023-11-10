@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 use hashbrown::HashMap;
 use rust_decimal::Decimal;
@@ -9,13 +9,9 @@ use sqlx::{
 };
 
 use crate::{
-    crawler::{
-        wespai,
-        yahoo,
-        twse
-    },
+    crawler::{twse, wespai, yahoo},
     database,
-    util::map::Keyable
+    util::map::Keyable,
 };
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]
@@ -51,7 +47,7 @@ pub struct FinancialStatement {
     pub year: i64,
 }
 
-impl Keyable for FinancialStatement{
+impl Keyable for FinancialStatement {
     fn key(&self) -> String {
         format!("{}-{}-{}", &self.security_code, self.year, self.quarter)
     }
@@ -122,17 +118,21 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .bind(self.updated_time)
             .execute(database::get_connection())
             .await
-            .context(format!(
-                "Failed to upsert({:#?}) from database\nsql:{}",
-                self, &sql
-            ))
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to upsert({:#?}) from database\nsql:{}\n {:?}",
+                    self,
+                    &sql,
+                    why
+                )
+            })
     }
 
     pub async fn upsert_earnings_per_share(&self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO financial_statement (
     security_code, "year", quarter, earnings_per_share, created_time, updated_time)
-VALUES ($1, $2, $3, $4,$6, $7)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (security_code,"year",quarter) DO NOTHING;
 "#;
         sqlx::query(sql)
@@ -144,10 +144,14 @@ ON CONFLICT (security_code,"year",quarter) DO NOTHING;
             .bind(self.updated_time)
             .execute(database::get_connection())
             .await
-            .context(format!(
-                "Failed to upsert_earnings_per_share({:#?}) from database\nsql:{}",
-                self, &sql
-            ))
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to upsert_earnings_per_share({:#?}) from database\nsql:{}\n {:?}",
+                    self,
+                    &sql,
+                    why
+                )
+            })
     }
 }
 
