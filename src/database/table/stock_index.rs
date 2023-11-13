@@ -1,7 +1,10 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
-use sqlx::Postgres;
-use sqlx::Transaction;
+use sqlx::{
+    Transaction,
+    postgres::PgQueryResult,
+    Postgres
+};
 
 use crate::database;
 
@@ -23,11 +26,32 @@ impl StockIndex {
         }
     }
 
+    pub async fn delete_by_stock_symbol(stock_symbol: &str) -> Result<PgQueryResult> {
+        let mut transaction: Transaction<Postgres> = database::get_tx().await?;
+        match sqlx::query("DELETE FROM company_index WHERE security_code = $1;")
+            .bind(stock_symbol)
+            .execute(&mut *transaction)
+            .await
+        {
+            Ok(r) => {
+                transaction.commit().await?;
+                Ok(r)
+            }
+            Err(why) => {
+                transaction.rollback().await?;
+                Err(anyhow!(
+                    "Failed to delete_by_stock_symbol because: {:?}",
+                    why
+                ))
+            }
+        }
+    }
+
     pub async fn insert(&self) -> Result<()> {
         if self.word_id <= 0 {
             return Err(anyhow!("word_id is less than or equal to 0"));
         }
-        //let mut transaction = database::get_pool()?.begin().await?;
+
         let mut transaction: Transaction<Postgres> = database::get_tx().await?;
 
         if let Err(why) = sqlx::query(
@@ -77,7 +101,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_insert() {
         dotenv::dotenv().ok();
         let mut e = StockIndex::new("79979".to_string());

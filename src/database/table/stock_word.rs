@@ -1,9 +1,11 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
-use hashbrown::HashMap;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
 
-use crate::database;
+use crate::{
+    database,
+    util::map::Keyable
+};
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
@@ -96,7 +98,17 @@ impl Default for StockWord {
     }
 }
 
-/// 將 vec 轉成 hashmap
+impl Keyable for StockWord {
+    fn key(&self) -> String {
+        self.word.clone()
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!("StockWord:{}", self.key())
+    }
+}
+
+/*/// 將 vec 轉成 hashmap
 pub fn vec_to_hashmap_key_using_word(
     entities: Option<Vec<StockWord>>,
 ) -> HashMap<String, StockWord> {
@@ -108,7 +120,7 @@ pub fn vec_to_hashmap_key_using_word(
     }
 
     stock_words
-}
+}*/
 
 /*/// 將 vec 轉成 hashmap
 fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
@@ -122,13 +134,11 @@ fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use crate::{logging, util};
 
     use super::*;
 
-    #[tokio::test]
+/*    #[tokio::test]
     async fn test_vec_to_hashmap() {
         dotenv::dotenv().ok();
         let mut entities: Vec<StockWord> = Vec::new();
@@ -153,7 +163,7 @@ mod tests {
         //println!("Method 2 elapsed time: {}", elapsed2);
         //println!("HashMap length: {} {}", hm1.len(), hm2.len());
     }
-
+*/
     /*    #[tokio::test]
         async fn test_split_1() {
             dotenv::dotenv().ok();
@@ -166,7 +176,6 @@ mod tests {
     */
 
     #[tokio::test]
-    #[ignore]
     async fn test_insert() {
         dotenv::dotenv().ok();
         let mut e = StockWord::new("小一".to_string());
@@ -185,15 +194,14 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_list_by_word() {
         dotenv::dotenv().ok();
-        let word = util::text::split("台積電");
+        let word = util::text::split("隆銘綠能");
         let entities = StockWord::list_by_word(&word).await;
         logging::debug_file_async(format!("entities:{:#?}", entities));
         logging::debug_file_async(format!(
             "word:{:#?}",
-            vec_to_hashmap_key_using_word(entities.ok())
+            util::map::vec_to_hashmap(entities.unwrap())
         ));
     }
 }

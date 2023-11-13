@@ -162,13 +162,25 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
     }
 
     async fn create_index(&self) {
+        // 先刪除舊的數據
+        if let Err(why) = stock_index::StockIndex::delete_by_stock_symbol(&self.stock_symbol).await
+        {
+            logging::error_file_async(format!("{:#?}", why));
+        }
+
         // 拆解股票名稱為單詞並加入股票代碼
         let mut words = util::text::split(&self.name);
         words.push(self.stock_symbol.to_string());
 
         // 查詢已存在的單詞，轉成 hashmap 方便查詢
         let words_in_db = stock_word::StockWord::list_by_word(&words).await;
-        let exist_words = stock_word::vec_to_hashmap_key_using_word(words_in_db.ok());
+        let exist_words = match words_in_db {
+            Ok(sw) => util::map::vec_to_hashmap(sw),
+            Err(why) => {
+                logging::error_file_async(format!("Failed to list_by_word because:{:#?}", why));
+                return;
+            }
+        };
 
         for word in words {
             let mut stock_index_e = stock_index::StockIndex::new(self.stock_symbol.to_string());
