@@ -67,8 +67,8 @@ impl Stock {
         self.name.contains("-DR")
     }
 
-    /// 更新個股最新一季與近四季的EPS
-    pub async fn update_last_eps() -> Result<PgQueryResult> {
+    /// 更新個股最新一季、近四季的EPS、ROE
+    pub async fn update_eps_and_roe() -> Result<PgQueryResult> {
         let sql = r#"
 WITH fs_data AS (
     SELECT
@@ -83,7 +83,6 @@ WITH fs_data AS (
         year IN ($1, $2)
         AND quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
 ),
-
 relevant_fs_rows AS (
     SELECT
         fs_data.row_number,
@@ -425,7 +424,7 @@ mod tests {
     async fn test_update_last_eps() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 update_last_eps".to_string());
-        match Stock::update_last_eps().await {
+        match Stock::update_eps_and_roe().await {
             Ok(_) => {}
             Err(why) => {
                 logging::debug_file_async(format!("Failed to update_last_eps because: {:?}", why));

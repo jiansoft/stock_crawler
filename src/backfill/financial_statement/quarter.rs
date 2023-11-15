@@ -2,29 +2,29 @@ use anyhow::Result;
 use chrono::{Datelike, Duration, Local};
 
 use crate::{
-    crawler::yahoo, database::table, calculation, logging, nosql, util::datetime,
+    calculation, crawler::yahoo, database::table, declare::Quarter, logging, nosql,
+    util::map::Keyable,
 };
 
-/// 將未有上季度財報的股票，到雅虎財經下載後回寫到 financial_statement 表
+/// 將季度財報 ROE為零的數據，到雅虎財經下載後回寫到 financial_statement 表
 pub async fn execute() -> Result<()> {
-    let cache_key = "financial_statement:quarter";
-    let is_jump = nosql::redis::CLIENT.get_bool(cache_key).await?;
-    if is_jump {
-        return Ok(());
-    }
-
     let now = Local::now();
     let previous_quarter = now - Duration::days(130);
     let year = previous_quarter.year();
-    let quarter = datetime::month_to_quarter(previous_quarter.month());
-    let stocks = table::stock::fetch_stocks_without_financial_statement(year, quarter).await?;
-    let mut success_update_count = 0;
-    for stock in stocks {
-        if stock.is_preference_shares() {
+    let previous_quarter = Quarter::from_month(now.month()).unwrap().previous();
+    let quarter = previous_quarter.to_string();
+    let fss = table::financial_statement::fetch_roe_is_zero(year, previous_quarter).await?;
+    let mut success_count = 0;
+
+    for fs in fss {
+        let cache_key = fs.key_with_prefix();
+        let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
+
+        if is_jump {
             continue;
         }
 
-        let profile = match yahoo::profile::visit(&stock.stock_symbol).await {
+        let profile = match yahoo::profile::visit(&fs.security_code).await {
             Ok(profile) => profile,
             Err(why) => {
                 logging::error_file_async(format!(
@@ -44,6 +44,7 @@ pub async fn execute() -> Result<()> {
         }
 
         let fs = table::financial_statement::FinancialStatement::from(profile);
+
         if let Err(why) = fs.clone().upsert().await {
             logging::error_file_async(format!("{:?}", why));
             continue;
@@ -54,23 +55,22 @@ pub async fn execute() -> Result<()> {
             fs
         ));
 
-        success_update_count += 1;
+        nosql::redis::CLIENT
+            .set(cache_key, true, 60 * 60 * 24 * 7)
+            .await?;
+
+        success_count += 1;
     }
 
-    if success_update_count > 0 {
-        table::stock::Stock::update_last_eps().await?;
+    if success_count > 0 {
+        table::stock::Stock::update_eps_and_roe().await?;
         let estimate_date_config =
             table::config::Config::new("estimate-date".to_string(), "".to_string());
-
         let date = estimate_date_config.get_val_naive_date().await?;
         // 計算便宜、合理、昂貴價的估算
         calculation::estimated_price::calculate_estimated_price(date).await?;
         logging::info_file_async("季度財報更新重新計算便宜、合理、昂貴價的估算結束".to_string());
     }
-
-    nosql::redis::CLIENT
-        .set(cache_key, true, 60 * 60 * 24 * 7)
-        .await?;
 
     Ok(())
 }
@@ -82,7 +82,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;

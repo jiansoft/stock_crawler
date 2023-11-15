@@ -3,19 +3,24 @@ use std::collections::HashMap;
 use anyhow::Result;
 use chrono::{Datelike, Local};
 
-use crate::{calculation, crawler::twse, database::table::{self, stock::Stock}, declare::{Quarter, StockExchangeMarket}, logging, util};
+use crate::{
+    backfill::financial_statement,
+    crawler::twse,
+    database::table::{self, stock::Stock},
+    declare::{Quarter, StockExchangeMarket},
+    logging, util,
+};
 
 pub async fn execute() -> Result<()> {
     let now = Local::now();
     let current_quarter = Quarter::from_month(now.month()).unwrap();
     let previous_quarter = current_quarter.previous();
-    let without_financial_stocks = table::stock::fetch_stocks_without_financial_statement(
+    let without_fs_stocks = table::stock::fetch_stocks_without_financial_statement(
         now.year(),
         previous_quarter.to_string().as_str(),
     )
     .await?;
-    let without_financial_stocks = util::map::vec_to_hashmap(without_financial_stocks);
-    let mut success_update_count = 0;
+    let without_financial_stocks = util::map::vec_to_hashmap(without_fs_stocks);
 
     for market in StockExchangeMarket::iterator() {
         if let Err(why) = process_eps(
@@ -32,19 +37,9 @@ pub async fn execute() -> Result<()> {
             ));
             continue;
         }
-        success_update_count += 1;
     }
 
-    if success_update_count > 0 {
-        Stock::update_last_eps().await?;
-        let estimate_date_config =
-            table::config::Config::new("estimate-date".to_string(), "".to_string());
-
-        let date = estimate_date_config.get_val_naive_date().await?;
-        // 計算便宜、合理、昂貴價的估算
-        calculation::estimated_price::calculate_estimated_price(date).await?;
-        logging::info_file_async("季度財報更新重新計算便宜、合理、昂貴價的估算結束".to_string());
-    }
+    financial_statement::quarter::execute().await?;
 
     Ok(())
 }

@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
-use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{
@@ -11,6 +10,7 @@ use sqlx::{
 use crate::{
     crawler::{twse, wespai, yahoo},
     database,
+    declare::Quarter,
     util::map::Keyable,
 };
 
@@ -206,12 +206,64 @@ WHERE "year" = $1 AND quarter= ''
     Ok(result)
 }
 
-pub fn vec_to_hashmap(entities: Vec<FinancialStatement>) -> HashMap<String, FinancialStatement> {
-    let mut map = HashMap::new();
-    for e in entities {
-        map.insert(e.security_code.to_string(), e);
-    }
-    map
+/// 取得季度財報 ROE為零的數據
+pub async fn fetch_roe_is_zero(year: i32, quarter: Quarter) -> Result<Vec<FinancialStatement>> {
+    let sql = r#"
+SELECT
+    serial,
+    security_code,
+    year,
+    quarter,
+    gross_profit,
+    operating_profit_margin,
+    "pre-tax_income",
+    net_income,
+    net_asset_value_per_share,
+    sales_per_share,
+    earnings_per_share,
+    profit_before_tax,
+    return_on_equity,
+    return_on_assets,
+    created_time,
+    updated_time
+FROM financial_statement
+WHERE "year" = $1 AND quarter= $2 AND return_on_equity = 0
+"#;
+    println!("year:{} quarter:{}", year, quarter);
+    sqlx::query(sql)
+        .bind(year)
+        .bind(quarter.to_string())
+        .try_map(|row: PgRow| {
+            Ok(FinancialStatement {
+                updated_time: row.try_get("updated_time")?,
+                created_time: row.try_get("created_time")?,
+                quarter: row.try_get("quarter")?,
+                security_code: row.try_get("security_code")?,
+                gross_profit: row.try_get("gross_profit")?,
+                operating_profit_margin: row.try_get("operating_profit_margin")?,
+                pre_tax_income: row.try_get("pre-tax_income")?,
+                net_income: row.try_get("net_income")?,
+                net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
+                sales_per_share: row.try_get("sales_per_share")?,
+                earnings_per_share: row.try_get("earnings_per_share")?,
+                profit_before_tax: row.try_get("profit_before_tax")?,
+                return_on_equity: row.try_get("return_on_equity")?,
+                return_on_assets: row.try_get("return_on_assets")?,
+                serial: row.try_get("serial")?,
+                year: row.try_get("year")?,
+            })
+        })
+        .fetch_all(database::get_connection())
+        .await
+        .map_err(|why| {
+            anyhow!(
+                "Failed to fetch_roe_is_zero({},{}) from database\nsql:{}\n {:?}",
+                year,
+                quarter,
+                &sql,
+                why
+            )
+        })
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
@@ -286,7 +338,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_annual() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_annual".to_string());
@@ -298,5 +349,20 @@ mod tests {
             logging::debug_file_async(format!("{:#?} ", err));
         }
         logging::debug_file_async("結束 fetch_annual".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_roe_is_zero() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_roe_is_zero".to_string());
+
+        let r = fetch_roe_is_zero(2023, Quarter::Q3).await;
+        if let Ok(result) = r {
+            dbg!(&result);
+            logging::debug_file_async(format!("{:?}", result));
+        } else if let Err(err) = r {
+            logging::debug_file_async(format!("{:#?}", err));
+        }
+        logging::debug_file_async("結束 fetch_roe_is_zero".to_string());
     }
 }
