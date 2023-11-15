@@ -30,11 +30,6 @@ pub struct System {
     pub ssl_key_file: String,
 }
 
-/*
-grpcPort: 9000
-certFile: '/opt/nginx/ssl/jiansoft.ddns.net/fullchain.pem'
-keyFile: '/opt/nginx/ssl/jiansoft.ddns.net/privkey.pem'*/
-
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Rpc {
     pub go_service: Grpc,

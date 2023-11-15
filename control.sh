@@ -2,7 +2,7 @@
 
 export built_path=./target/release
 export app_path=./bin
-export binary_name=rust_tutorial
+export binary_name=stock_crawler
 
 function start() {
   # pid=$(pgrep $binary_name)
@@ -68,8 +68,30 @@ function move() {
   fi
 }
 
+function docker_build() {
+  build
+  sleep 1
+  docker build -t stock-rust-image -f Dockerfile_live .
+}
+
+function docker_stop() {
+  docker stop stock-rust-container && docker rm -f stock-rust-container
+  docker ps
+}
+
+function docker_start() {
+  docker run --name stock-rust-container -v=/opt/stock_crawler/log:/app/log:rw -v=/opt/nginx/ssl/jiansoft.mooo.com:/opt/nginx/ssl/jiansoft.mooo.com -p 9001:9001 -t -d stock-rust-image
+  docker ps
+}
+
+function docker_restart() {
+  docker_stop
+  sleep 1
+  docker_start
+}
+
 function help() {
-  echo "$0 start|stop|restart|update|move"
+  echo "$0 start|stop|restart|update|move|docker_build|docker_stop|docker_start|docker_restart"
 }
 
 if [ "$1" == "start" ]; then
@@ -82,6 +104,14 @@ elif [ "$1" == "update" ]; then
   update
 elif [ "$1" == "move" ]; then
   move
+elif [ "$1" == "docker_build" ]; then
+  docker_build
+elif [ "$1" == "docker_stop" ]; then
+  docker_stop
+elif [ "$1" == "docker_start" ]; then
+  docker_start
+elif [ "$1" == "docker_restart" ]; then
+  docker_restart
 else
   help
 fi

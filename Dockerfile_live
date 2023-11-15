@@ -1,0 +1,23 @@
+FROM ubuntu:20.04
+
+# 在 alpine 中設置時區
+ENV TZ=Asia/Taipei
+
+# ubuntu 設定時區
+RUN apt-get update && apt-get install -y tzdata ca-certificates
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 設定工作目錄
+WORKDIR /app
+
+# 暴露連接埠
+EXPOSE 9001
+
+ADD ./target/release/stock_crawler .
+ADD ./bin/.env .
+ADD ./bin/app.json .
+
+VOLUME ["/app/log", "/opt/nginx/ssl/jiansoft.mooo.com"]
+
+# 運行應用程序
+CMD ["/app/stock_crawler"]
