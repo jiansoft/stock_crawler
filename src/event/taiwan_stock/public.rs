@@ -24,7 +24,7 @@ pub async fn execute() -> Result<()> {
                     continue;
                 }
 
-                if stock.stock_name == "中央登錄公債" {
+                if stock.market == "中央登錄公債" {
                     continue;
                 }
 
