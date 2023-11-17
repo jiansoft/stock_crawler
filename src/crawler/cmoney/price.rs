@@ -59,7 +59,7 @@ impl StockInfo for CMoney {
                 element: r"div.stockData__info > div.stockData__value > div.stockData__quotePrice",
                 document: document.clone(),
             })?;
-        let  change = text::parse_f64(&change, None)?;
+        let change = text::parse_f64(&change, None)?;
 
         let change_range =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
