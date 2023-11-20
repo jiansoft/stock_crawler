@@ -7,10 +7,7 @@ use once_cell::sync::Lazy;
 use redis::{AsyncCommands, RedisError, RedisResult, ToRedisArgs, Value};
 use rust_decimal::Decimal;
 
-use crate::{
-    config::SETTINGS,
-    util::text
-};
+use crate::{config::SETTINGS, util::text};
 
 pub static CLIENT: Lazy<Arc<Redis>> = Lazy::new(|| Arc::new(Redis::new()));
 

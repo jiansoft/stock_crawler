@@ -14,8 +14,8 @@ WORKDIR /app
 EXPOSE 9001
 
 ADD ./target/release/stock_crawler .
-ADD ./bin/.env .
-ADD ./bin/app.json .
+ADD ./.env .
+ADD ./app.json .
 
 VOLUME ["/app/log", "/opt/nginx/ssl/jiansoft.mooo.com"]
 

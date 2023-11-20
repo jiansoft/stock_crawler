@@ -2,8 +2,9 @@ use anyhow::{anyhow, Result};
 use scraper::{Html, Selector};
 
 use crate::{
+    crawler::twse,
     database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    crawler::twse, util,
+    util,
 };
 
 /// 取得上櫃股票外資及陸資投資持股統計

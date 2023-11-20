@@ -4,11 +4,11 @@ use tonic::{Request, Response, Status};
 use crate::{
     crawler,
     rpc::{
+        stock::StockQuotesRequest,
         stock::{
             stock_server::Stock, StockInfoReply, StockInfoRequest, StockQuotes, StockQuotesReply,
         },
-        stock::StockQuotesRequest
-    }
+    },
 };
 
 #[derive(Default)]

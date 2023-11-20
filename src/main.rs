@@ -14,14 +14,22 @@ use tokio::signal;
 use tokio::signal::unix::{signal as unix_signal, SignalKind};
 use tokio_cron_scheduler::JobScheduler;
 
+/// 數據回補
+pub mod backfill;
 /// 聊天機器人
 pub mod bot;
 /// 數據快取
 pub mod cache;
+/// 計算類
+pub mod calculation;
 /// 設定檔
 pub mod config;
+/// 抓取數據類
+pub mod crawler;
 /// 資料庫操作
 pub mod database;
+/// 定義結構、enum等
+pub mod declare;
 /// 事件
 pub mod event;
 /// 日誌
@@ -34,14 +42,6 @@ pub mod rpc;
 pub mod scheduler;
 /// 工具類
 pub mod util;
-/// 抓取數據類
-pub mod crawler;
-/// 計算類
-pub mod calculation;
-/// 數據回補
-pub mod backfill;
-/// 定義結構、enum等
-pub mod declare;
 
 /*#[get("/")]
 fn index() -> &'static str {

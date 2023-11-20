@@ -2,7 +2,6 @@ use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeZone};
 use futures::{stream, StreamExt};
 
-
 use crate::{
     cache::SHARE,
     crawler::twse,

@@ -122,7 +122,7 @@ dividend_payout_ratio AS (
     WHERE
         d."year" IN ({0})
         AND d.payout_ratio > 0
-		AND d.payout_ratio <= 100
+		AND d.payout_ratio <= 200
     GROUP BY
         security_code
 ),
@@ -482,10 +482,7 @@ ON CONFLICT (date, security_code) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        cache::SHARE,
-        logging
-    };
+    use crate::{cache::SHARE, logging};
     use chrono::Datelike;
 
     use super::*;

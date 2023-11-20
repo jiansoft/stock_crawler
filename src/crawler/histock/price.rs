@@ -60,7 +60,7 @@ impl StockInfo for HiStock {
                 document: document.clone(),
             })?;
         let is_negative = change.contains('▼');
-        let mut change = text::parse_f64(&change, Some(['▼','▲'].to_vec()))?;
+        let mut change = text::parse_f64(&change, Some(['▼', '▲'].to_vec()))?;
 
         let change_range =
             util::http::element::get_one_element(util::http::element::GetOneElementText {

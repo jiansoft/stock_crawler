@@ -316,7 +316,7 @@ pub(crate) fn read_text_file(path: PathBuf) -> Result<String, io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::{time};
+    use std::time;
 
     use super::*;
 

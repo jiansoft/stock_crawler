@@ -338,9 +338,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     //use chrono::{Datelike, Local, NaiveDate};
-    use crate::database::table::revenue::{
-        fetch_last_two_month, rebuild_revenue_last_date,
-    };
+    use crate::database::table::revenue::{fetch_last_two_month, rebuild_revenue_last_date};
     use crate::logging;
 
     #[tokio::test]

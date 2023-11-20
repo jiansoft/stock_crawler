@@ -2,10 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
 
-use crate::{
-    database,
-    util::map::Keyable
-};
+use crate::{database, util::map::Keyable};
 
 #[rustfmt::skip]
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
@@ -138,32 +135,32 @@ mod tests {
 
     use super::*;
 
-/*    #[tokio::test]
-    async fn test_vec_to_hashmap() {
-        dotenv::dotenv().ok();
-        let mut entities: Vec<StockWord> = Vec::new();
-        for i in 0..1000000 {
-            entities.push(StockWord {
-                word_id: 0,
-                word: format!("word_{}", i),
-                created_time: Default::default(),
-                updated_time: Default::default(),
-            });
+    /*    #[tokio::test]
+        async fn test_vec_to_hashmap() {
+            dotenv::dotenv().ok();
+            let mut entities: Vec<StockWord> = Vec::new();
+            for i in 0..1000000 {
+                entities.push(StockWord {
+                    word_id: 0,
+                    word: format!("word_{}", i),
+                    created_time: Default::default(),
+                    updated_time: Default::default(),
+                });
+            }
+
+            let start1 = Instant::now();
+            let _hm1 = vec_to_hashmap_key_using_word(Some(entities.clone()));
+            let elapsed1 = start1.elapsed().as_millis();
+
+            /*let start2 = Instant::now();
+            let hm2 = vec_to_hashmap(Some(entities.clone()));
+            let elapsed2 = start2.elapsed().as_millis();*/
+
+            println!("Method 1 elapsed time: {}", elapsed1);
+            //println!("Method 2 elapsed time: {}", elapsed2);
+            //println!("HashMap length: {} {}", hm1.len(), hm2.len());
         }
-
-        let start1 = Instant::now();
-        let _hm1 = vec_to_hashmap_key_using_word(Some(entities.clone()));
-        let elapsed1 = start1.elapsed().as_millis();
-
-        /*let start2 = Instant::now();
-        let hm2 = vec_to_hashmap(Some(entities.clone()));
-        let elapsed2 = start2.elapsed().as_millis();*/
-
-        println!("Method 1 elapsed time: {}", elapsed1);
-        //println!("Method 2 elapsed time: {}", elapsed2);
-        //println!("HashMap length: {} {}", hm1.len(), hm2.len());
-    }
-*/
+    */
     /*    #[tokio::test]
         async fn test_split_1() {
             dotenv::dotenv().ok();
@@ -199,9 +196,9 @@ mod tests {
         let word = util::text::split("隆銘綠能");
         let entities = StockWord::list_by_word(&word).await;
         logging::debug_file_async(format!("entities:{:#?}", entities));
-        logging::debug_file_async(format!(
+        /*logging::debug_file_async(format!(
             "word:{:#?}",
             util::map::vec_to_hashmap(entities.unwrap())
-        ));
+        ));*/
     }
 }

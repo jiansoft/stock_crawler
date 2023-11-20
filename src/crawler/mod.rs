@@ -7,11 +7,13 @@ use crate::crawler::{
 };
 use crate::declare;
 
-/// 股市爆料同學會
+/// 理財寶-股市爆料同學會
 pub mod cmoney;
-/// 玩股網
+/// 鉅亨網
 pub mod cnyes;
-/// dds
+/// 富邦證券
+pub mod fbs;
+/// ddns
 pub mod free_dns;
 /// 股市資訊網
 pub mod goodinfo;
@@ -19,16 +21,22 @@ pub mod goodinfo;
 pub mod histock;
 /// PCHOME
 pub mod megatime;
+/// 嘉實資訊-理財網
+pub mod moneydj;
+/// 共用 元大證券、嘉實資訊-理財網、富邦證券
+pub(super) mod share;
 /// 台灣期貨交易所
 pub mod taifex;
 /// 台灣證券櫃檯買賣中心
 pub mod tpex;
 /// 台灣證券交易所
 pub mod twse;
-/// 零股塔
+/// 撿股讚
 pub mod wespai;
 /// 雅虎財經
 pub mod yahoo;
+/// 元大證券
+pub mod yuanta;
 
 #[async_trait]
 pub trait StockInfo {
@@ -52,11 +60,16 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
         }
     }
 
-    Err(anyhow!("Failed to fetch stock price from all sites"))
+    Err(anyhow!(
+        "Failed to fetch stock price({}) from all sites",
+        stock_symbol
+    ))
 }
 
 /// 取得股票目前的報價含漲跌、漲幅
-pub async fn fetch_stock_quotes_from_remote_site(stock_symbol: &str) -> Result<declare::StockQuotes> {
+pub async fn fetch_stock_quotes_from_remote_site(
+    stock_symbol: &str,
+) -> Result<declare::StockQuotes> {
     let sites = vec![
         Yahoo::get_stock_quotes,
         CnYes::get_stock_quotes,
@@ -71,7 +84,10 @@ pub async fn fetch_stock_quotes_from_remote_site(stock_symbol: &str) -> Result<d
         }
     }
 
-    Err(anyhow!("Failed to fetch stock price from all sites"))
+    Err(anyhow!(
+        "Failed to fetch stock quotes({}) from all sites",
+        stock_symbol
+    ))
 }
 
 #[cfg(test)]

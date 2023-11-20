@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Datelike, Local, NaiveDate};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{
@@ -8,6 +8,7 @@ use sqlx::{
 };
 
 use crate::{
+    crawler,
     crawler::{twse, wespai, yahoo},
     database,
     declare::Quarter,
@@ -153,6 +154,34 @@ ON CONFLICT (security_code,"year",quarter) DO NOTHING;
                 )
             })
     }
+
+    pub async fn upsert_annual_eps(&self) -> Result<PgQueryResult> {
+        let sql = r#"
+INSERT INTO financial_statement (
+    security_code, "year", quarter, earnings_per_share, profit_before_tax, sales_per_share, created_time, updated_time)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (security_code,"year",quarter) DO NOTHING;
+"#;
+        sqlx::query(sql)
+            .bind(&self.security_code)
+            .bind(self.year)
+            .bind(&self.quarter)
+            .bind(self.earnings_per_share)
+            .bind(self.profit_before_tax)
+            .bind(self.sales_per_share)
+            .bind(self.created_time)
+            .bind(self.updated_time)
+            .execute(database::get_connection())
+            .await
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to upsert_annual_eps({:#?}) from database\nsql:{}\n {:?}",
+                    self,
+                    &sql,
+                    why
+                )
+            })
+    }
 }
 
 /// 取得年度財報
@@ -229,7 +258,6 @@ SELECT
 FROM financial_statement
 WHERE "year" = $1 AND quarter= $2 AND return_on_equity = 0
 "#;
-    println!("year:{} quarter:{}", year, quarter);
     sqlx::query(sql)
         .bind(year)
         .bind(quarter.to_string())
@@ -260,6 +288,69 @@ WHERE "year" = $1 AND quarter= $2 AND return_on_equity = 0
                 "Failed to fetch_roe_is_zero({},{}) from database\nsql:{}\n {:?}",
                 year,
                 quarter,
+                &sql,
+                why
+            )
+        })
+}
+
+/// 取得沒年報的股票有哪些
+pub async fn fetch_without_annual(year: i32) -> Result<Vec<FinancialStatement>> {
+    let years: Vec<i32> = (0..10).map(|i| year - i).collect();
+    let years_str = years
+        .iter()
+        .map(|&year| year.to_string())
+        .collect::<Vec<String>>()
+        .join(",");
+
+    let sql = format!(
+        r#"
+SELECT DISTINCT
+    f1.year,
+    f1.security_code
+FROM
+    financial_statement f1
+LEFT JOIN
+    financial_statement f2
+    ON f1.year = f2.year
+    AND f1.security_code = f2.security_code
+    AND f2.quarter = ''
+WHERE
+    f1.year IN ({0}) AND f2.year IS NULL
+ORDER BY
+    f1.security_code,
+    f1.year;
+"#,
+        years_str
+    );
+
+    sqlx::query(&sql)
+        .try_map(|row: PgRow| {
+            Ok(FinancialStatement {
+                updated_time: Default::default(),
+                created_time: Default::default(),
+                quarter: Default::default(),
+                security_code: row.try_get("security_code")?,
+                gross_profit: Default::default(),
+                operating_profit_margin: Default::default(),
+                pre_tax_income: Default::default(),
+                net_income: Default::default(),
+                net_asset_value_per_share: Default::default(),
+                sales_per_share: Default::default(),
+                earnings_per_share: Default::default(),
+                profit_before_tax: Default::default(),
+                return_on_equity: Default::default(),
+                return_on_assets: Default::default(),
+                serial: Default::default(),
+                year: row.try_get("year")?,
+            })
+        })
+        .fetch_all(database::get_connection())
+        .await
+        .map_err(|why| {
+            anyhow!(
+                "Failed to fetch_without_annual({}) from database\nsql:{}\n {:?}",
+                year,
                 &sql,
                 why
             )
@@ -331,6 +422,27 @@ impl From<twse::eps::Eps> for FinancialStatement {
     }
 }
 
+impl From<crawler::share::AnnualProfit> for FinancialStatement {
+    fn from(fs: crawler::share::AnnualProfit) -> Self {
+        let mut e = FinancialStatement::new(fs.stock_symbol);
+        e.updated_time = Local::now();
+        e.created_time = Local::now();
+        e.quarter = String::from("");
+        e.gross_profit = Default::default();
+        e.operating_profit_margin = Default::default();
+        e.pre_tax_income = Default::default();
+        e.net_income = Default::default();
+        e.net_asset_value_per_share = Default::default();
+        e.sales_per_share = fs.sales_per_share;
+        e.earnings_per_share = fs.earnings_per_share;
+        e.profit_before_tax = fs.profit_before_tax;
+        e.return_on_equity = Default::default();
+        e.return_on_assets = Default::default();
+        e.year = fs.year as i64;
+        e
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::logging;
@@ -364,5 +476,24 @@ mod tests {
             logging::debug_file_async(format!("{:#?}", err));
         }
         logging::debug_file_async("結束 fetch_roe_is_zero".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_without_annual() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_without_annual".to_string());
+
+        let current_date = NaiveDate::parse_from_str("2023-09-15", "%Y-%m-%d").unwrap();
+        let r = fetch_without_annual(current_date.year()).await;
+        match r {
+            Ok(result) => {
+                //dbg!(&result);
+                logging::debug_file_async(format!("{:#?}", result));
+            }
+            Err(err) => {
+                logging::debug_file_async(format!("{:#?}", err));
+            }
+        }
+        logging::debug_file_async("結束 fetch_without_annual".to_string());
     }
 }

@@ -80,11 +80,9 @@ async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc
-        }
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
     };
 
     //use crossbeam::thread;

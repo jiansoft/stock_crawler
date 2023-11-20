@@ -84,7 +84,10 @@ impl Keyable for PayoutRatioInfo {
     }
 
     fn key_with_prefix(&self) -> String {
-        format!("PayoutRatioInfo:{}-{}-{}", self.security_code, self.year, self.quarter)
+        format!(
+            "PayoutRatioInfo:{}-{}-{}",
+            self.security_code, self.year, self.quarter
+        )
     }
 }
 

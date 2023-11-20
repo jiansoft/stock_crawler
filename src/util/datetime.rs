@@ -1,4 +1,4 @@
-use chrono::{Datelike, DateTime, Local, NaiveDate, Weekday};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Weekday};
 
 use crate::logging;
 
