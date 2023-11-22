@@ -10,9 +10,10 @@ https://jiansoft.mooo.com/stock/revenues
 5. 嗨投資 https://histock.tw
 6. PCHOME(大時科技) https://pchome.megatime.com.tw
 7. 嘉實資訊-理財網 https://www.moneydj.com
-8. 台灣期貨交易所 https://www.taifex.com.tw
-9. 台灣證券櫃檯買賣中心 https://www.tpex.org.tw
-10. 台灣證券交易所 https://www.twse.com.tw
-11. 撿股讚 https://stock.wespai.com
-12. 雅虎股市 https://tw.stock.yahoo.com
-13. 元大證券 https://www.yuanta.com.tw
+8. 恩投資 https://www.nstock.tw
+9. 台灣期貨交易所 https://www.taifex.com.tw
+10. 台灣證券櫃檯買賣中心 https://www.tpex.org.tw
+11. 台灣證券交易所 https://www.twse.com.tw
+12. 撿股讚 https://stock.wespai.com
+13. 雅虎股市 https://tw.stock.yahoo.com
+14. 元大證券 https://www.yuanta.com.tw

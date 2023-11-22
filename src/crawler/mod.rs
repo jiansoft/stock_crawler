@@ -2,10 +2,13 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 
-use crate::crawler::{
-    cmoney::CMoney, cnyes::CnYes, histock::HiStock, megatime::PcHome, yahoo::Yahoo,
+use crate::{
+    crawler::{
+        cmoney::CMoney, cnyes::CnYes, histock::HiStock, megatime::PcHome, nstock::NStock,
+        yahoo::Yahoo,
+    },
+    declare,
 };
-use crate::declare;
 
 /// 理財寶-股市爆料同學會
 pub mod cmoney;
@@ -23,6 +26,8 @@ pub mod histock;
 pub mod megatime;
 /// 嘉實資訊-理財網
 pub mod moneydj;
+/// 恩投資
+pub mod nstock;
 /// 共用 元大證券、嘉實資訊-理財網、富邦證券
 pub(super) mod share;
 /// 台灣期貨交易所
@@ -48,6 +53,7 @@ pub trait StockInfo {
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
     let sites = vec![
         Yahoo::get_stock_price,
+        NStock::get_stock_price,
         CnYes::get_stock_price,
         PcHome::get_stock_price,
         CMoney::get_stock_price,
@@ -72,6 +78,7 @@ pub async fn fetch_stock_quotes_from_remote_site(
 ) -> Result<declare::StockQuotes> {
     let sites = vec![
         Yahoo::get_stock_quotes,
+        NStock::get_stock_quotes,
         CnYes::get_stock_quotes,
         PcHome::get_stock_quotes,
         CMoney::get_stock_quotes,
