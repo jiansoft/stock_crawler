@@ -45,5 +45,6 @@ hashbrown = "0.14"
 sqlx = { version = "0.7", features = [ "runtime-tokio", "postgres", "time", "chrono", "bigdecimal", "macros", "rust_decimal"] }
 strum = { version = "0.25", features = ["derive"]}
 strum_macros = "0.25"
+
 [build-dependencies]
 tonic-build = "0.10"

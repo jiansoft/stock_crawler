@@ -17,7 +17,7 @@ pub mod user_agent;
 /// The initial number of permits is set to four times the number of available CPU cores.
 static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
     let cpus = num_cpus::get();
-    Semaphore::new(cpus * 4)
+    Semaphore::new(cpus * 8)
 });
 
 /// A singleton instance of the reqwest client.

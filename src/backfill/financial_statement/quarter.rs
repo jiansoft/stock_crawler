@@ -2,8 +2,8 @@ use anyhow::Result;
 use chrono::{Datelike, Duration, Local};
 
 use crate::{
-    calculation, crawler::yahoo, database::table, declare::Quarter, logging, nosql,
-    util::map::Keyable,
+    backfill::financial_statement::update_roe_and_roa_for_zero_values, calculation, crawler::yahoo,
+    database::table, declare::Quarter, logging, nosql, util::map::Keyable,
 };
 
 /// 將季度財報 ROE為零的數據，到雅虎財經下載後回寫到 financial_statement 表
@@ -13,7 +13,11 @@ pub async fn execute() -> Result<()> {
     let year = previous_quarter.year();
     let previous_quarter = Quarter::from_month(now.month()).unwrap().previous();
     let quarter = previous_quarter.to_string();
-    let fss = table::financial_statement::fetch_roe_is_zero(year, previous_quarter).await?;
+    let fss = table::financial_statement::fetch_roe_or_roa_equal_to_zero(
+        Some(year),
+        Some(previous_quarter),
+    )
+    .await?;
     let mut success_count = 0;
 
     for fs in fss {
@@ -60,6 +64,10 @@ pub async fn execute() -> Result<()> {
             .await?;
 
         success_count += 1;
+    }
+
+    if let Err(why) = update_roe_and_roa_for_zero_values(Some(previous_quarter)).await {
+        logging::error_file_async(format!("{:#?}", why));
     }
 
     if success_count > 0 {

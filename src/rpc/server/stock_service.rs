@@ -36,27 +36,25 @@ impl Stock for StockService {
             .map(|stock_symbol| fetch_current_quotes_for_symbol(stock_symbol))
             .collect();
         let stock_prices = join_all(futures).await;
+        let filtered: Vec<StockQuotes> = stock_prices.into_iter().flatten().collect();
 
-        Ok(Response::new(StockQuotesReply { stock_prices }))
+        Ok(Response::new(StockQuotesReply {
+            stock_prices: filtered,
+        }))
     }
 }
 
-async fn fetch_current_quotes_for_symbol(stock_symbol: &str) -> StockQuotes {
+async fn fetch_current_quotes_for_symbol(stock_symbol: &str) -> Option<StockQuotes> {
     if let Ok(sq) = crawler::fetch_stock_quotes_from_remote_site(stock_symbol).await {
-        return StockQuotes {
+        return Some(StockQuotes {
             stock_symbol: stock_symbol.to_string(),
             price: sq.price,
             change: sq.change,
             change_range: sq.change_range,
-        };
+        });
     }
 
-    StockQuotes {
-        stock_symbol: stock_symbol.to_string(),
-        price: 0.0,
-        change: 0.0,
-        change_range: 0.0,
-    }
+    None
 }
 
 #[cfg(test)]

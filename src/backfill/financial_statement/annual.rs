@@ -3,10 +3,11 @@ use chrono::Local;
 use futures::future;
 
 use crate::{
+    backfill::financial_statement::update_roe_and_roa_for_zero_values,
     crawler::wespai,
     database::table::{financial_statement, stock},
-    logging, nosql, util,
-    util::datetime::Weekend,
+    logging, nosql,
+    util::{self, datetime::Weekend},
 };
 
 /// 更新台股年報
@@ -53,6 +54,8 @@ pub async fn execute() -> Result<()> {
             ));
         }
     }
+
+    update_roe_and_roa_for_zero_values(None).await?;
 
     nosql::redis::CLIENT
         .set(cache_key, true, 60 * 60 * 24 * 7)

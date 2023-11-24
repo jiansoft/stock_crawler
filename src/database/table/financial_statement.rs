@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Datelike, Local, NaiveDate};
+use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{
@@ -8,8 +8,7 @@ use sqlx::{
 };
 
 use crate::{
-    crawler,
-    crawler::{twse, wespai, yahoo},
+    crawler::{self, twse, wespai, yahoo},
     database,
     declare::Quarter,
     util::map::Keyable,
@@ -182,6 +181,34 @@ ON CONFLICT (security_code,"year",quarter) DO NOTHING;
                 )
             })
     }
+
+    pub async fn update_roe_roa(&self) -> Result<PgQueryResult> {
+        let sql = r#"
+UPDATE
+    financial_statement
+SET
+    return_on_equity = $4, return_on_assets = $5, updated_time = $6
+WHERE
+    security_code = $1 AND "year" = $2 AND quarter = $3
+"#;
+        sqlx::query(sql)
+            .bind(&self.security_code)
+            .bind(self.year)
+            .bind(&self.quarter)
+            .bind(self.return_on_equity)
+            .bind(self.return_on_assets)
+            .bind(self.updated_time)
+            .execute(database::get_connection())
+            .await
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to update_roe_roa({:#?}) from database\nsql:{}\n {:?}",
+                    self,
+                    &sql,
+                    why
+                )
+            })
+    }
 }
 
 /// 取得年度財報
@@ -235,9 +262,13 @@ WHERE "year" = $1 AND quarter= ''
     Ok(result)
 }
 
-/// 取得季度財報 ROE為零的數據
-pub async fn fetch_roe_is_zero(year: i32, quarter: Quarter) -> Result<Vec<FinancialStatement>> {
-    let sql = r#"
+/// 取得季度財報 ROE、ROA為零的數據
+pub async fn fetch_roe_or_roa_equal_to_zero(
+    year: Option<i32>,
+    quarter: Option<Quarter>,
+) -> Result<Vec<FinancialStatement>> {
+    let mut sql = String::from(
+        r#"
 SELECT
     serial,
     security_code,
@@ -256,11 +287,21 @@ SELECT
     created_time,
     updated_time
 FROM financial_statement
-WHERE "year" = $1 AND quarter= $2 AND return_on_equity = 0
-"#;
-    sqlx::query(sql)
-        .bind(year)
-        .bind(quarter.to_string())
+WHERE quarter = $1 AND (return_on_equity = 0 OR return_on_assets = 0)
+"#,
+    );
+
+    if let Some(year) = year {
+        sql.push_str(&format!("year = {}", year))
+    }
+
+    let q = match quarter {
+        None => String::from(""),
+        Some(q) => q.to_string(),
+    };
+
+    sqlx::query(&sql)
+        .bind(q)
         .try_map(|row: PgRow| {
             Ok(FinancialStatement {
                 updated_time: row.try_get("updated_time")?,
@@ -285,7 +326,7 @@ WHERE "year" = $1 AND quarter= $2 AND return_on_equity = 0
         .await
         .map_err(|why| {
             anyhow!(
-                "Failed to fetch_roe_is_zero({},{}) from database\nsql:{}\n {:?}",
+                "Failed to fetch_roe_is_zero({:?},{:?}) from database\nsql:{}\n {:?}",
                 year,
                 quarter,
                 &sql,
@@ -446,6 +487,7 @@ impl From<crawler::share::AnnualProfit> for FinancialStatement {
 #[cfg(test)]
 mod tests {
     use crate::logging;
+    use chrono::{Datelike, NaiveDate};
 
     use super::*;
 
@@ -468,7 +510,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_roe_is_zero".to_string());
 
-        let r = fetch_roe_is_zero(2023, Quarter::Q3).await;
+        let r = fetch_roe_or_roa_equal_to_zero(Some(2023), Some(Quarter::Q3)).await;
         if let Ok(result) = r {
             dbg!(&result);
             logging::debug_file_async(format!("{:?}", result));

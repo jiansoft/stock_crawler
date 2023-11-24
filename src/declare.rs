@@ -1,6 +1,7 @@
+use serde_derive::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 
-#[derive(Display, Debug, Copy, Clone, EnumString)]
+#[derive(Serialize, Deserialize, Display, Debug, Copy, Clone, EnumString)]
 pub enum Quarter {
     #[strum(serialize = "Q1")]
     Q1 = 1,
