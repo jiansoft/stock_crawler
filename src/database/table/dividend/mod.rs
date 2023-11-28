@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{
@@ -6,7 +6,11 @@ use sqlx::{
     Row,
 };
 
-use crate::{crawler::goodinfo, database};
+use crate::{
+    util::map::Keyable,
+    crawler::goodinfo,
+    database
+};
 
 pub(crate) mod extension;
 
@@ -53,6 +57,19 @@ pub struct Dividend {
     pub payable_date2: String,
     pub created_time: DateTime<Local>,
     pub updated_time: DateTime<Local>,
+}
+
+impl Keyable for Dividend {
+    fn key(&self) -> String {
+        format!(
+            "{}-{}-{}",
+            self.security_code, self.year_of_dividend, self.quarter
+        )
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!("Dividend:{}", self.key())
+    }
 }
 
 const TABLE_COLUMNS: &str = r#"
@@ -168,7 +185,14 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .bind(self.payout_ratio)
             .execute(database::get_connection())
             .await
-            .context(format!("Failed to upsert({:#?}) from database", self))
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to upsert({:#?}) from database\nsql:{}\n{:?}",
+                    self,
+                    sql,
+                    why,
+                )
+            })
     }
 
     /// 更新股息的配息日、發放日

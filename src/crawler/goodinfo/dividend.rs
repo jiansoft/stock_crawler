@@ -90,7 +90,10 @@ impl GoodInfoDividend {
 
 impl Keyable for GoodInfoDividend {
     fn key(&self) -> String {
-        format!("{}-{}-{}", self.stock_symbol, self.year, self.quarter)
+        format!(
+            "{}-{}-{}",
+            self.stock_symbol, self.year_of_dividend, self.quarter
+        )
     }
 
     fn key_with_prefix(&self) -> String {
@@ -121,7 +124,6 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
     if text.contains("您的瀏覽量異常") {
         return Err(anyhow!("{} 瀏覽量異常", url));
     }
-    //logging::info_file_async(format!("text:{}", text));
 
     let document = Html::parse_document(text.as_str());
     let selector = Selector::parse("#tblDetail > tbody > tr")
@@ -200,7 +202,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
         let mut hashmap = HashMap::new();
         for dividend in dividends {
             hashmap
-                .entry(dividend.year)
+                .entry(dividend.year_of_dividend)
                 .or_insert_with(Vec::new)
                 .push(dividend);
         }
@@ -235,7 +237,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("2838").await {
+        match visit("2330").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("dividend : {:#?}", e));

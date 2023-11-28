@@ -2,7 +2,6 @@ use std::{collections::HashSet, time::Duration};
 
 use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local};
-use hashbrown::HashMap;
 use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,
@@ -12,6 +11,7 @@ use crate::{
     crawler::{goodinfo, yahoo},
     database::table::{self, dividend},
     logging, nosql,
+    util::map::Keyable,
 };
 
 pub mod payout_ratio;
@@ -86,10 +86,7 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
     let multiple_dividends = dividend::Dividend::fetch_multiple_dividends_for_year(year).await?;
     let mut multiple_dividend_cache = HashSet::new();
     for dividend in multiple_dividends {
-        let key = format!(
-            "{}-{}-{}",
-            dividend.security_code, dividend.year, dividend.quarter
-        );
+        let key = dividend.key();
         multiple_dividend_cache.insert(key);
         stock_symbols.insert(dividend.security_code.to_string());
     }
@@ -98,6 +95,7 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
     for stock_symbol in stock_symbols {
         let cache_key = format!("goodinfo:dividend:{}", stock_symbol);
         let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
+
         if is_jump {
             continue;
         }
@@ -106,42 +104,52 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
             .set(cache_key, true, 60 * 60 * 24 * 7)
             .await?;
 
-        let dividends_from_goodinfo = goodinfo::dividend::visit(&stock_symbol).await?;
+        if let Err(why) =
+            process_stock_dividends(year, &stock_symbol, &multiple_dividend_cache).await
+        {
+            logging::error_file_async(format!("{:?} ", why));
+        }
+
         tokio::time::sleep(Duration::from_secs(90)).await;
-        // 取成今年度的股利數據
-        let dividend_details_from_goodinfo = match dividends_from_goodinfo.get(&year) {
-            Some(details) => details,
-            None => continue,
-        };
+    }
 
-        for dividend_from_goodinfo in dividend_details_from_goodinfo {
-            if dividend_from_goodinfo.year != year {
-                continue;
+    Ok(())
+}
+
+async fn process_stock_dividends(
+    year: i32,
+    stock_symbol: &str,
+    multiple_dividend_cache: &HashSet<String>,
+) -> Result<()> {
+    let dividends_from_goodinfo = goodinfo::dividend::visit(&stock_symbol).await?;
+    // 取成今年度所屬股利數據
+    let dividend_details_from_goodinfo = match dividends_from_goodinfo.get(&year) {
+        Some(details) => details,
+        None => return Ok(()),
+    };
+
+    for dividend_from_goodinfo in dividend_details_from_goodinfo {
+        if dividend_from_goodinfo.year_of_dividend != year {
+            continue;
+        }
+
+        //檢查是否為多次配息，並且已經收錄該筆股利
+        let key = dividend_from_goodinfo.key();
+
+        if multiple_dividend_cache.contains(&key) {
+            continue;
+        }
+
+        let entity = table::dividend::Dividend::from(dividend_from_goodinfo);
+        match entity.upsert().await {
+            Ok(_) => {
+                logging::info_file_async(format!(
+                    "dividend upsert executed successfully. \r\n{:#?}",
+                    entity
+                ));
             }
-
-            //檢查是否為多次配息，並且已經收錄該筆股利
-            let key = format!(
-                "{}-{}-{}",
-                dividend_from_goodinfo.stock_symbol,
-                dividend_from_goodinfo.year,
-                dividend_from_goodinfo.quarter
-            );
-
-            if multiple_dividend_cache.contains(&key) {
-                continue;
-            }
-
-            let entity = table::dividend::Dividend::from(dividend_from_goodinfo);
-            match entity.upsert().await {
-                Ok(_) => {
-                    logging::info_file_async(format!(
-                        "dividend upsert executed successfully. \r\n{:#?}",
-                        entity
-                    ));
-                }
-                Err(why) => {
-                    logging::error_file_async(format!("Failed to upsert because {:?} ", why));
-                }
+            Err(why) => {
+                logging::error_file_async(format!("{:?} ", why));
             }
         }
     }
@@ -156,6 +164,7 @@ async fn processing_unannounced_ex_dividend_date(year: i32) -> Result<()> {
             year,
         )
         .await?;
+
     logging::info_file_async(format!(
         "本次除息日與發放日的採集需收集 {} 家",
         dividends.len()
@@ -224,15 +233,6 @@ async fn processing_unannounced_ex_dividend_date_from_yahoo(
     Ok(())
 }
 
-pub fn vec_to_hashmap(entities: Vec<dividend::Dividend>) -> HashMap<String, dividend::Dividend> {
-    let mut map = HashMap::new();
-    for e in entities {
-        let key = format!("{}-{}-{}", e.security_code, e.year, e.quarter);
-        map.insert(key, e);
-    }
-    map
-}
-
 #[cfg(test)]
 mod tests {
     use crate::cache::SHARE;
@@ -270,8 +270,6 @@ mod tests {
     async fn test_processing_without_or_multiple() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 processing_without_or_multiple".to_string());
-
         match processing_no_or_multiple(2838).await {
             Ok(_) => {
                 logging::debug_file_async(
@@ -287,5 +285,38 @@ mod tests {
         }
 
         logging::debug_file_async("結束 processing_without_or_multiple".to_string());
+    }
+
+    #[tokio::test]
+
+    async fn test_process_stock_dividends() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+        logging::debug_file_async("開始 process_stock_dividends".to_string());
+        let year = 2023;
+        let multiple_dividends = dividend::Dividend::fetch_multiple_dividends_for_year(year)
+            .await
+            .unwrap();
+        let mut multiple_dividend_cache = HashSet::new();
+        for dividend in multiple_dividends {
+            let key = dividend.key();
+            multiple_dividend_cache.insert(key);
+        }
+
+        match process_stock_dividends(year, "2330", &multiple_dividend_cache).await {
+            Ok(_) => {
+                logging::debug_file_async(
+                    "process_stock_dividends executed successfully.".to_string(),
+                );
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to process_stock_dividends because {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 process_stock_dividends".to_string());
     }
 }

@@ -292,7 +292,7 @@ WHERE quarter = $1 AND (return_on_equity = 0 OR return_on_assets = 0)
     );
 
     if let Some(year) = year {
-        sql.push_str(&format!("year = {}", year))
+        sql.push_str(&format!("AND year = {}", year))
     }
 
     let q = match quarter {

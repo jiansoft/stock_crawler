@@ -17,6 +17,7 @@ impl FromValue for serde_json::Value {
             Some(v) => text::clean_escape_chars(v, escape_chars),
         }
     }
+
     fn get_i64(&self, escape_chars: Option<Vec<char>>) -> i64 {
         match self.as_str() {
             None => Default::default(),
