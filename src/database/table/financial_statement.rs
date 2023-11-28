@@ -351,6 +351,8 @@ SELECT DISTINCT
     f1.security_code
 FROM
     financial_statement f1
+INNER JOIN
+    stocks as s on s.stock_symbol = f1.security_code and s."SuspendListing" = false
 LEFT JOIN
     financial_statement f2
     ON f1.year = f2.year
