@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -5,10 +6,11 @@ use chrono::Local;
 use futures::{stream, StreamExt};
 
 use crate::{
-    cache::{TtlCacheInner, SHARE, TTL},
+    cache::{SHARE, TTL, TtlCacheInner},
     crawler::{tpex, twse},
-    database::table::{self, daily_quote},
+    database::table::{self, daily_quote, daily_quote::DailyQuote},
     logging, util,
+    util::map::Keyable,
 };
 
 /// 調用  twse、tpex API 取得台股收盤報價
@@ -19,29 +21,14 @@ pub async fn execute() -> Result<usize> {
     let twse = twse::quote::visit(now);
     //上櫃報價
     let tpex = tpex::quote::visit(now);
-    let (res_twse, res_tpex) = tokio::join!(twse, tpex);
 
-    if let Ok(quote) = res_twse {
-        quotes.extend(quote);
-        logging::info_file_async("取完上市收盤數據".to_string());
-    }
-
-    if let Ok(quote) = res_tpex {
-        quotes.extend(quote);
-        logging::info_file_async("取完上櫃收盤數據".to_string());
-    }
+    get_quotes_from_source(twse, "上市", &mut quotes).await;
+    get_quotes_from_source(tpex, "上櫃", &mut quotes).await;
 
     let quotes_len = quotes.len();
 
     if quotes_len > 0 {
-        stream::iter(quotes)
-            .for_each_concurrent(util::concurrent_limit_32(), |dq| async move {
-                process_daily_quote(dq).await;
-            })
-            .await;
-
-        logging::info_file_async("上市櫃收盤數據更新到資料庫完成".to_string());
-
+        process_quotes(quotes).await;
         let last_closing_day_config = table::config::Config::new(
             "last-closing-day".to_string(),
             now.date_naive().format("%Y-%m-%d").to_string(),
@@ -54,46 +41,57 @@ pub async fn execute() -> Result<usize> {
     Ok(quotes_len)
 }
 
-async fn process_daily_quote(daily_quote: daily_quote::DailyQuote) {
-    match daily_quote.upsert().await {
-        Ok(_) => {
-            SHARE.set_stock_last_price(&daily_quote).await;
-
-            let daily_quote_memory_key = format!(
-                "DailyQuote:{}-{}",
-                daily_quote.date.format("%Y%m%d"),
-                daily_quote.security_code
-            );
-
-            //更新最後交易日的收盤價
-            TTL.daily_quote_set(
-                daily_quote_memory_key,
-                "".to_string(),
-                Duration::from_secs(60 * 60 * 24),
-            );
-        }
-        Err(why) => {
-            logging::error_file_async(format!("({:#?}", why));
-        }
+pub async fn get_quotes_from_source(
+    source: impl Future<Output = Result<Vec<DailyQuote>>>,
+    source_name: &str,
+    quotes: &mut Vec<DailyQuote>,
+) {
+    if let Ok(quote) = source.await {
+        quotes.extend(quote);
+        logging::info_file_async(format!("取完{}收盤數據", source_name));
     }
+}
+
+pub async fn process_quotes(quotes: Vec<DailyQuote>) {
+    let result_count = DailyQuote::copy_in_raw(&quotes).await.unwrap_or_default();
+    stream::iter(quotes)
+        .for_each_concurrent(util::concurrent_limit_32(), |dq| async move {
+            process_daily_quote(dq).await;
+        })
+        .await;
+    logging::info_file_async(format!("上市櫃收盤數據更新到資料庫完成: {}", result_count));
+
+}
+
+async fn process_daily_quote(daily_quote: DailyQuote) {
+    SHARE.set_stock_last_price(&daily_quote).await;
+
+    let daily_quote_memory_key = daily_quote.key_with_prefix();
+
+    //更新最後交易日的收盤價
+    TTL.daily_quote_set(
+        daily_quote_memory_key,
+        "".to_string(),
+        Duration::from_secs(60 * 60 * 24),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     };
 
     //use crossbeam::thread;
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{cache::SHARE, database::table::stock, logging};
+    use crate::{cache::SHARE, database, database::table::stock, logging};
 
     use super::*;
 
-    //use std::time;
+//use std::time;
 
     #[tokio::test]
     #[ignore]
@@ -101,6 +99,11 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
+        let date = Local::now().date_naive();
+        let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
+            .bind(date)
+            .execute(database::get_connection())
+            .await;
 
         match execute().await {
             Ok(_) => {}

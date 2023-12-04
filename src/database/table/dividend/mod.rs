@@ -290,23 +290,22 @@ SELECT {}
 FROM
     dividend
 WHERE
-    year = $1
+    (year = $1 OR year_of_dividend = $1)
     AND
     (
         (
-            ("ex-dividend_date1" IN ('尚未公布', '-') OR payable_date1 IN ('尚未公布', '-'))
+            ("ex-dividend_date1" = '尚未公布' OR payable_date1 = '尚未公布')
             AND cash_dividend > 0
         )
         OR
         (
-            ("ex-dividend_date2" IN ('尚未公布', '-') OR payable_date2 IN ('尚未公布', '-'))
+            ("ex-dividend_date2" = '尚未公布' OR payable_date2 = '尚未公布')
             AND stock_dividend > 0
         )
     );
 "#,
             TABLE_COLUMNS
         );
-
         sqlx::query(&sql)
             .bind(year)
             .try_map(Self::row_to_entity)
@@ -514,7 +513,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
+
     async fn test_fetch_unpublished_dividend_date_or_payable_date_for_specified_year() {
         dotenv::dotenv().ok();
         logging::debug_file_async(
@@ -523,9 +522,7 @@ mod tests {
         let r = Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(2023)
             .await;
         if let Ok(result) = r {
-            for e in result {
-                logging::debug_file_async(format!("{:?} ", e));
-            }
+            logging::debug_file_async(format!("{:#?} ", result));
         } else if let Err(err) = r {
             logging::debug_file_async(format!("{:#?} ", err));
         }

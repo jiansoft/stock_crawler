@@ -1,12 +1,17 @@
+use std::fmt::Write;
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Row};
 
 use crate::{
+    util::{
+        map::Keyable,
+        datetime
+    },
     database::{self, table::daily_quote::extension::MonthlyStockPriceSummary},
     declare::StockExchange,
-    util::datetime,
 };
 
 pub(crate) mod extension;
@@ -64,12 +69,99 @@ pub struct DailyQuote {
     pub day: i32,
 }
 
+const COPY_IN_QUERY: &str = r#"COPY "DailyQuotes"(
+            maximum_price_in_year_date_on,
+            minimum_price_in_year_date_on,
+            "Date",
+            "CreateTime",
+            "RecordTime",
+            "PriceEarningRatio",
+            "MovingAverage60",
+            "ClosingPrice",
+            "ChangeRange",
+            "Change",
+            "LastBestBidPrice",
+            "LastBestBidVolume",
+            "LastBestAskPrice",
+            "LastBestAskVolume",
+            "MovingAverage5",
+            "MovingAverage10",
+            "MovingAverage20",
+            "LowestPrice",
+            "MovingAverage120",
+            "MovingAverage240",
+            maximum_price_in_year,
+            minimum_price_in_year,
+            average_price_in_year,
+            "HighestPrice",
+            "OpeningPrice",
+            "TradingVolume",
+            "TradeValue",
+            "Transaction",
+            "price-to-book_ratio",
+            "SecurityCode",
+            year,
+            month,
+            day) FROM STDIN WITH (FORMAT CSV)"#;
+
+impl Keyable for DailyQuote {
+    fn key(&self) -> String {
+        format!("{}-{}", self.date.format("%Y%m%d"), self.security_code)
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!("DailyQuote:{}", self.key())
+    }
+}
+
 impl DailyQuote {
     pub fn new(security_code: String) -> Self {
         DailyQuote {
             security_code,
             ..Default::default()
         }
+    }
+
+    pub fn to_csv(&self) -> String {
+        let mut csv_string = String::new();
+
+        let _ = writeln!(csv_string, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                       self.maximum_price_in_year_date_on,
+                       self.minimum_price_in_year_date_on,
+                       self.date,
+                       self.create_time,
+                       self.record_time,
+                       self.price_earning_ratio,
+                       self.moving_average_60,
+                       self.closing_price,
+                       self.change_range,
+                       self.change,
+                       self.last_best_bid_price,
+                       self.last_best_bid_volume,
+                       self.last_best_ask_price,
+                       self.last_best_ask_volume,
+                       self.moving_average_5,
+                       self.moving_average_10,
+                       self.moving_average_20,
+                       self.lowest_price,
+                       self.moving_average_120,
+                       self.moving_average_240,
+                       self.maximum_price_in_year,
+                       self.minimum_price_in_year,
+                       self.average_price_in_year,
+                       self.highest_price,
+                       self.opening_price,
+                       self.trading_volume,
+                       self.trade_value,
+                       self.transaction,
+                       self.price_to_book_ratio,
+                       self.security_code,
+                       self.year,
+                       self.month,
+                       self.day,
+        );
+
+        csv_string
     }
 
     pub async fn upsert(&self) -> Result<PgQueryResult> {
@@ -260,6 +352,16 @@ WHERE "Serial" = $1
                 "Failed to update_moving_average({:#?}) from database",
                 self
             ))
+    }
+
+    pub async fn copy_in_raw(quotes: &[Self]) -> Result<u64> {
+        let data: String = quotes.iter().map(|quote| quote.to_csv()).collect();
+        let mut conn = database::get_connection().acquire().await?;
+        let mut writer = conn.copy_in_raw(COPY_IN_QUERY).await?;
+
+        writer.send(data.as_bytes()).await?;
+
+        Ok(writer.finish().await?)
     }
 }
 
@@ -568,6 +670,7 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
 mod tests {
     use chrono::Datelike;
 
+    use crate::crawler::twse;
     use crate::{cache::SHARE, logging};
 
     use super::*;
@@ -769,5 +872,36 @@ mod tests {
             }
         }
         logging::debug_file_async("結束 upsert".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_copy_in_raw() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 copy_in_raw".to_string());
+        let now = Local::now();
+        let mut twse = twse::quote::visit(now).await.unwrap();
+        let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        for dq in &mut twse {
+            dq.year = date.year();
+            dq.month = date.month() as i32;
+            dq.day = date.day() as i32;
+            dq.date = date;
+        }
+
+        let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
+            .bind(date)
+            .execute(database::get_connection())
+            .await;
+
+        match DailyQuote::copy_in_raw(&twse).await {
+            Ok(cd) => {
+                logging::debug_file_async(format!("copy_in_raw: {:?}", cd));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to copy_in_raw because {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 copy_in_raw".to_string());
     }
 }
