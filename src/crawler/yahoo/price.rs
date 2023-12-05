@@ -56,7 +56,6 @@ impl StockInfo for Yahoo {
                 url,
             },
         ).is_ok();
-
         let price = util::http::element::get_one_element(util::http::element::GetOneElementText {
             stock_symbol,
             document: document.clone(),
@@ -65,7 +64,6 @@ impl StockInfo for Yahoo {
             url,
         })?;
         let price = text::parse_f64(&price, None)?;
-
         let change =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
                 stock_symbol,
@@ -76,7 +74,6 @@ impl StockInfo for Yahoo {
             })?;
 
         let mut change = text::parse_f64(&change, None)?;
-
         let change_range =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
                 stock_symbol,

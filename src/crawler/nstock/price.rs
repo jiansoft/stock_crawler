@@ -37,6 +37,24 @@ struct Response {
     pub data: Vec<RealTimeQuotesResponse>,
 }
 
+async fn fetch_data(stock_symbol: &str) -> Result<RealTimeQuotesResponse> {
+    let url = format!(
+        "https://{host}/api/v2/real-time-quotes/data?stock_id={symbol}",
+        host = HOST,
+        symbol = stock_symbol
+    );
+    let res = util::http::get_use_json::<Response>(&url).await?;
+
+    if res.data.is_empty() {
+        return Err(anyhow!(
+            "Failed to fetch_data from {} because data is empty",
+            url
+        ));
+    }
+
+    Ok(res.data[0].clone())
+}
+
 #[async_trait]
 impl StockInfo for NStock {
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal> {
@@ -57,24 +75,6 @@ impl StockInfo for NStock {
             change_range,
         })
     }
-}
-
-async fn fetch_data(stock_symbol: &str) -> Result<RealTimeQuotesResponse> {
-    let url = format!(
-        "https://{host}/api/v2/real-time-quotes/data?stock_id={symbol}",
-        host = HOST,
-        symbol = stock_symbol
-    );
-    let res = util::http::get_use_json::<Response>(&url).await?;
-
-    if res.data.is_empty() {
-        return Err(anyhow!(
-            "Failed to fetch_data from {} because data is empty",
-            url
-        ));
-    }
-
-    Ok(res.data[0].clone())
 }
 
 #[cfg(test)]

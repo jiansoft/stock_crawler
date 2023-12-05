@@ -1,6 +1,6 @@
 /// 即時報價
 pub mod price;
 
-const HOST: &str = "www.cnyes.com";
+const HOST: &str = "cnyes.com";
 
 pub struct CnYes {}

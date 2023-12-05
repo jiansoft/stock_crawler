@@ -1,90 +1,78 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
-use scraper::Html;
+use serde_derive::{Deserialize, Serialize};
 
 use crate::{
     crawler::{
         cnyes::{CnYes, HOST},
         StockInfo,
     },
-    declare,
-    util::{self, text},
+    declare::{self, StockQuotes},
+    util::{self},
 };
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct QuotesResponse {
+    #[serde(rename = "6")]
+    pub current_price: f64,
+    #[serde(rename = "11")]
+    pub change: f64,
+    #[serde(rename = "56")]
+    pub change_range: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Response {
+    #[serde(rename = "statusCode")]
+    pub status_code: i64,
+    pub message: String,
+    pub data: Vec<QuotesResponse>,
+}
+
+async fn fetch_data(stock_symbol: &str) -> Result<QuotesResponse> {
+    let url = format!(
+        "https://ws.api.{host}/ws/api/v1/quote/quotes/TWS:{symbol}:STOCK?column=K,E,KEY,M,AI",
+        host = HOST,
+        symbol = stock_symbol
+    );
+    let res = util::http::get_use_json::<Response>(&url).await?;
+
+    if res.data.is_empty() {
+        return Err(anyhow!(
+            "Failed to fetch_data from {} because data is empty",
+            url
+        ));
+    }
+
+    Ok(res.data[0].clone())
+}
 
 #[async_trait]
 impl StockInfo for CnYes {
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal> {
-        let url = format!(
-            "https://{host}/twstock/{symbol}",
-            host = HOST,
-            symbol = stock_symbol
-        );
-        let text = util::http::get(&url, None).await?;
-        let document = Html::parse_document(&text);
-        let target = util::http::element::GetOneElementText {
-            stock_symbol,
-            url: &url,
-            selector: "div.jsx-162737614.container > div",
-            element: "h3",
-            document,
-        };
+        let r = fetch_data(stock_symbol).await?;
 
-        util::http::element::get_one_element_as_decimal(target)
+        Ok(Decimal::try_from(r.current_price)?)
     }
 
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes> {
-        let url = &format!(
-            "https://{host}/twstock/{symbol}",
-            host = HOST,
-            symbol = stock_symbol
-        );
-        let text = util::http::get(&url, None).await?;
-        let document = Html::parse_document(&text);
+        let r = fetch_data(stock_symbol).await?;
 
-        let price = util::http::element::get_one_element(util::http::element::GetOneElementText {
-            stock_symbol,
-            url,
-            selector: "div.jsx-162737614.container > div",
-            element: "h3",
-            document: document.clone(),
-        })?;
-        let price = text::parse_f64(&price, None)?;
-
-        let change =
-            util::http::element::get_one_element(util::http::element::GetOneElementText {
-                stock_symbol,
-                url,
-                selector: r"div.jsx-162737614.container > div > div > div.jsx-162737614.first-row",
-                element: r"span:nth-child(1)",
-                document: document.clone(),
-            })?;
-
-        let change = text::parse_f64(&change, None)?;
-
-        let change_range =
-            util::http::element::get_one_element(util::http::element::GetOneElementText {
-                stock_symbol,
-                url,
-                selector: r"div.jsx-162737614.container > div > div > div.jsx-162737614.first-row",
-                element: r"span:nth-child(2)",
-                document: document.clone(),
-            })?;
-        let change_range = text::parse_f64(&change_range, None)?;
-
-        Ok(declare::StockQuotes {
+        Ok(StockQuotes {
             stock_symbol: stock_symbol.to_string(),
-            price,
-            change,
-            change_range,
+            price: r.current_price,
+            change: r.change,
+            change_range: r.change_range,
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_get_stock_price() {
@@ -92,7 +80,7 @@ mod tests {
         logging::debug_file_async("開始 get_stock_price".to_string());
 
         // match get("2330").await {
-        match CnYes::get_stock_price("1726").await {
+        match CnYes::get_stock_price("2330").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("price : {:#?}", e));
@@ -121,5 +109,24 @@ mod tests {
         }
 
         logging::debug_file_async("結束 get_stock_quotes".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_data() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_data".to_string());
+
+        // match get("2330").await {
+        match fetch_data("2330").await {
+            Ok(e) => {
+                dbg!(&e);
+                logging::debug_file_async(format!("price : {:#?}", e));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to fetch_data because {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 fetch_data".to_string());
     }
 }
