@@ -95,40 +95,10 @@ WHERE "Serial" IN
 	group by "SecurityCode"
 )
 ORDER BY "SecurityCode"
-ON CONFLICT (security_code)
-DO UPDATE SET
-	trading_volume = excluded.trading_volume,
-	transaction = excluded.transaction,
-	trade_value = excluded.trade_value,
-	opening_price = excluded.opening_price,
-	highest_price = excluded.highest_price,
-	lowest_price = excluded.lowest_price,
-	closing_price = excluded.closing_price,
-	change_range = excluded.change_range,
-	change = excluded.change,
-	last_best_bid_price = excluded.last_best_bid_price,
-	last_best_bid_volume = excluded.last_best_bid_volume,
-	last_best_ask_price = excluded.last_best_ask_price,
-	last_best_ask_volume = excluded.last_best_ask_volume,
-	price_earning_ratio = excluded.price_earning_ratio,
-	moving_average_5 = excluded.moving_average_5,
-	moving_average_10 = excluded.moving_average_10,
-	moving_average_20 = excluded.moving_average_20,
-	moving_average_60 = excluded.moving_average_60,
-	moving_average_120 = excluded.moving_average_120,
-	moving_average_240 = excluded.moving_average_240,
-	maximum_price_in_year = excluded.maximum_price_in_year,
-	minimum_price_in_year = excluded.minimum_price_in_year,
-	average_price_in_year = excluded.average_price_in_year,
-	maximum_price_in_year_date_on = excluded.maximum_price_in_year_date_on,
-	minimum_price_in_year_date_on = excluded.minimum_price_in_year_date_on,
-	"price-to-book_ratio" = excluded."price-to-book_ratio",
-	record_time = excluded.record_time,
-	updated_time  = excluded.updated_time;
 "#;
-        let year_ago = Local::now() - Duration::days(365);
+        let month_ago = Local::now() - Duration::days(30);
         match sqlx::query(sql)
-            .bind(year_ago)
+            .bind(month_ago)
             .execute(&mut *tx)
             .await
             .context("Failed to LastDailyQuotes::rebuild from database")
@@ -188,7 +158,6 @@ mod tests {
     async fn test_rebuild() {
         dotenv::dotenv().ok();
         logging::info_file_async("開始 rebuild".to_string());
-        let _ = LastDailyQuotes::new();
         match LastDailyQuotes::rebuild().await {
             Ok(r) => logging::info_file_async(format!("{:#?}", r)),
             Err(why) => {

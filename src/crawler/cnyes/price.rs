@@ -32,7 +32,7 @@ struct Response {
 
 async fn fetch_data(stock_symbol: &str) -> Result<QuotesResponse> {
     let url = format!(
-        "https://ws.api.{host}/ws/api/v1/quote/quotes/TWS:{symbol}:STOCK?column=K,E,KEY,M,AI",
+        "https://ws.api.{host}/ws/api/v1/quote/quotes/TWS:{symbol}:STOCK",
         host = HOST,
         symbol = stock_symbol
     );
