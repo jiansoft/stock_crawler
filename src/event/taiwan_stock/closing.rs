@@ -37,7 +37,7 @@ pub async fn execute() -> Result<()> {
 /// 股票收盤數據匯總
 async fn aggregate(date: NaiveDate) -> Result<()> {
     //抓取上市櫃公司每日收盤資訊
-    let daily_quote_count = backfill::quote::execute().await?;
+    let daily_quote_count = backfill::quote::execute(date).await?;
     //logging::info_file_async("抓取上市櫃收盤數據結束".to_string());
     //let daily_quote_count = daily_quote::fetch_count_by_date(date).await?;
     logging::info_file_async(format!("抓取上市櫃收盤數據結束:{}", daily_quote_count));

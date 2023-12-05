@@ -5,13 +5,15 @@ use chrono::{DateTime, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Row};
 
+
 use crate::{
-    util::{
-        map::Keyable,
-        datetime
+    database::{
+        CopyIn,
+        self,
+        table::daily_quote::extension::MonthlyStockPriceSummary
     },
-    database::{self, table::daily_quote::extension::MonthlyStockPriceSummary},
     declare::StockExchange,
+    util::{datetime, map::Keyable}
 };
 
 pub(crate) mod extension;
@@ -69,7 +71,7 @@ pub struct DailyQuote {
     pub day: i32,
 }
 
-const COPY_IN_QUERY: &str = r#"COPY "DailyQuotes"(
+pub const COPY_IN_QUERY: &str = r#"COPY "DailyQuotes"(
             maximum_price_in_year_date_on,
             minimum_price_in_year_date_on,
             "Date",
@@ -103,6 +105,12 @@ const COPY_IN_QUERY: &str = r#"COPY "DailyQuotes"(
             year,
             month,
             day) FROM STDIN WITH (FORMAT CSV)"#;
+
+impl CopyIn for DailyQuote {
+    fn to_csv(&self) -> String {
+        self.to_csv()
+    }
+}
 
 impl Keyable for DailyQuote {
     fn key(&self) -> String {
@@ -355,13 +363,7 @@ WHERE "Serial" = $1
     }
 
     pub async fn copy_in_raw(quotes: &[Self]) -> Result<u64> {
-        let data: String = quotes.iter().map(|quote| quote.to_csv()).collect();
-        let mut conn = database::get_connection().acquire().await?;
-        let mut writer = conn.copy_in_raw(COPY_IN_QUERY).await?;
-
-        writer.send(data.as_bytes()).await?;
-
-        Ok(writer.finish().await?)
+        database::copy_in_raw(COPY_IN_QUERY, quotes).await
     }
 }
 
@@ -878,8 +880,9 @@ mod tests {
     async fn test_copy_in_raw() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 copy_in_raw".to_string());
-        let now = Local::now();
-        let mut twse = twse::quote::visit(now).await.unwrap();
+
+        let date = NaiveDate::from_ymd_opt(2023, 12, 4).unwrap();
+        let mut twse = twse::quote::visit(date).await.unwrap();
         let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
         for dq in &mut twse {
             dq.year = date.year();

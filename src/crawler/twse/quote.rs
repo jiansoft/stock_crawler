@@ -1,15 +1,19 @@
 use anyhow::Result;
-use chrono::{DateTime, Datelike, Local};
+use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    util::{
+        map::Keyable,
+        http
+    },
     cache::{self, TtlCacheInner, TTL},
     crawler::{twse, twse::build_headers},
     database::table::{self, daily_quote::FromWithExchange},
     declare::StockExchange,
-    util::http,
+    logging,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -19,13 +23,13 @@ struct ListedResponse {
 }
 
 /// 抓取上市公司每日收盤資訊
-pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::DailyQuote>> {
+pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote>> {
     let date_str = date.format("%Y%m%d").to_string();
     let url = format!(
         "https://www.{}/exchangeReport/MI_INDEX?response=json&date={}&type=ALLBUT0999&_={}",
         twse::HOST,
         date_str,
-        date.to_rfc3339()
+        date
     );
 
     let headers = build_headers().await;
@@ -47,7 +51,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
                 continue;
             }
 
-            let daily_quote_memory_key = format!("DailyQuote:{}-{}", date_str, dq.security_code);
+            let daily_quote_memory_key = dq.key();
 
             if TTL.daily_quote_contains_key(&daily_quote_memory_key) {
                 continue;
@@ -68,11 +72,20 @@ pub async fn visit(date: DateTime<Local>) -> Result<Vec<table::daily_quote::Dail
                 }
             }
 
-            dq.date = date.date_naive();
+            dq.date = date;
             dq.year = date.year();
             dq.month = date.month() as i32;
             dq.day = date.day() as i32;
-            dq.record_time = date;
+
+            let record_time = date
+                .and_hms_opt(15, 0, 0)
+                .and_then(|naive| Local.from_local_datetime(&naive).single())
+                .unwrap_or_else(|| {
+                    logging::warn_file_async("Failed to create DateTime<Local> from NaiveDateTime, using current time as default.".to_string());
+                    Local::now()
+                });
+
+            dq.record_time = record_time;
             dq.create_time = Local::now();
             dqs.push(dq);
         }
@@ -103,7 +116,7 @@ mod tests {
 
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit(now).await {
+        match visit(now.date_naive()).await {
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because: {:?}", why));
             }

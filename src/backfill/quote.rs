@@ -1,37 +1,46 @@
-use std::future::Future;
-use std::time::Duration;
+use std::{
+    future::{Future},
+    time::Duration
+};
 
 use anyhow::Result;
-use chrono::Local;
+use chrono::{NaiveDate};
 use futures::{stream, StreamExt};
 
 use crate::{
     cache::{SHARE, TTL, TtlCacheInner},
     crawler::{tpex, twse},
-    database::table::{self, daily_quote, daily_quote::DailyQuote},
+    database::table::{self, daily_quote::DailyQuote},
     logging, util,
     util::map::Keyable,
 };
 
 /// 調用  twse、tpex API 取得台股收盤報價
-pub async fn execute() -> Result<usize> {
-    let now = Local::now();
-    let mut quotes: Vec<daily_quote::DailyQuote> = Vec::with_capacity(2048);
+pub async fn execute(date: NaiveDate) -> Result<usize> {
     //上市報價
-    let twse = twse::quote::visit(now);
+    let twse = twse::quote::visit(date);
     //上櫃報價
-    let tpex = tpex::quote::visit(now);
+    let tpex = tpex::quote::visit(date);
+    let mut quotes_twse: Vec<DailyQuote> = Vec::with_capacity(1024);
+    let mut quotes_tpex: Vec<DailyQuote> = Vec::with_capacity(1024);
+    let get_twse =  get_quotes_from_source(twse, "上市", &mut quotes_twse);
+    let get_tpex = get_quotes_from_source(tpex, "上櫃", &mut quotes_tpex);
+    let (result_twse, result_tpex) = tokio::join!(get_twse, get_tpex);
 
-    get_quotes_from_source(twse, "上市", &mut quotes).await;
-    get_quotes_from_source(tpex, "上櫃", &mut quotes).await;
+    result_twse?;
+    result_tpex?;
 
-    let quotes_len = quotes.len();
+    let quotes_len = quotes_twse.len() +quotes_tpex.len();
+    let mut quotes = Vec::with_capacity(quotes_len);
+
+    quotes.append(&mut quotes_twse);
+    quotes.append(&mut quotes_tpex);
 
     if quotes_len > 0 {
         process_quotes(quotes).await;
         let last_closing_day_config = table::config::Config::new(
             "last-closing-day".to_string(),
-            now.date_naive().format("%Y-%m-%d").to_string(),
+            date.format("%Y-%m-%d").to_string(),
         );
 
         last_closing_day_config.set_val_as_naive_date().await?;
@@ -45,11 +54,12 @@ pub async fn get_quotes_from_source(
     source: impl Future<Output = Result<Vec<DailyQuote>>>,
     source_name: &str,
     quotes: &mut Vec<DailyQuote>,
-) {
+) -> Result<()> {
     if let Ok(quote) = source.await {
         quotes.extend(quote);
         logging::info_file_async(format!("取完{}收盤數據", source_name));
     }
+    Ok(())
 }
 
 pub async fn process_quotes(quotes: Vec<DailyQuote>) {
@@ -82,6 +92,7 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use chrono::NaiveDate;
 
     //use crossbeam::thread;
     use rayon::prelude::*;
@@ -99,13 +110,14 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
-        let date = Local::now().date_naive();
+        //let date = Local::now().date_naive();
+        let date = NaiveDate::from_ymd_opt(2023, 12, 4).unwrap();
         let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
             .bind(date)
             .execute(database::get_connection())
             .await;
 
-        match execute().await {
+        match execute(date).await {
             Ok(_) => {}
             Err(why) => {
                 logging::debug_file_async(format!("Failed to execute because {:?}", why));
