@@ -7,7 +7,7 @@ use crate::{config, logging, util};
 static DDNS_URL: OnceLock<String> = OnceLock::new();
 
 /// 向ddns服務更新目前的IP
-pub async fn execute() -> Result<()> {
+pub async fn visit() -> Result<()> {
     let url = DDNS_URL.get_or_init(|| {
         format!(
             "{}{}/{}/",
@@ -24,7 +24,7 @@ pub async fn execute() -> Result<()> {
             }
         }
         Err(why) => {
-            return Err(anyhow!("Failed to free_dns.execute because {:?}", why));
+            return Err(anyhow!("Failed to afraid.visit because {:?}", why));
         }
     }
 
@@ -45,8 +45,8 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_update() {
+    fn test_visit() {
         dotenv::dotenv().ok();
-        aw!(execute());
+        aw!(visit());
     }
 }

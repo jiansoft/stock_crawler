@@ -4,7 +4,7 @@ use anyhow::Result;
 use chrono::Local;
 use rust_decimal::prelude::ToPrimitive;
 
-use crate::{bot, cache::SHARE, crawler, nosql, util::map::Keyable};
+use crate::{bot, cache::SHARE, crawler, declare, nosql, util::map::Keyable};
 
 pub async fn execute() -> Result<()> {
     let ps = crawler::twse::public::visit().await?;
@@ -50,7 +50,7 @@ pub async fn execute() -> Result<()> {
                 let mut duration = (end - now).num_seconds() as usize;
 
                 if duration == 0 {
-                    duration = 60 * 60 * 24;
+                    duration = declare::ONE_DAYS_IN_SECONDS;
                 }
 
                 nosql::redis::CLIENT.set(cache_key, true, duration).await?;

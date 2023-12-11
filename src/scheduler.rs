@@ -4,12 +4,13 @@ use anyhow::{Error, Result};
 use tokio::task;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
+use crate::event::ddns;
 use crate::{
     backfill::{
         delisted_company, dividend, financial_statement, isin, net_asset_value_per_share,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
-    bot, crawler, event, logging,
+    bot, event, logging,
 };
 
 /// 啟動排程
@@ -92,7 +93,7 @@ async fn run_cron(sched: &JobScheduler) -> std::result::Result<(), JobSchedulerE
             qualified_foreign_institutional_investor::execute,
         ),
         // 每分鐘更新一次ddns的ip
-        create_job("0 * * * * *", crawler::free_dns::execute),
+        create_job("0 * * * * *", ddns::refresh),
     ];
 
     for job in jobs.into_iter().flatten() {

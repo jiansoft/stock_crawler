@@ -326,5 +326,10 @@ pub struct StockQuotes {
     pub change_range: f64,
 }
 
+/// 三天的秒數
+pub const THREE_DAYS_IN_SECONDS:usize = 60 * 60 * 24 * 3;
+/// 一天的秒數
+pub const ONE_DAYS_IN_SECONDS:usize = 60 * 60 * 24 ;
+
 #[cfg(test)]
 mod tests {}

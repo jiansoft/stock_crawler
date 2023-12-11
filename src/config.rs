@@ -12,6 +12,7 @@ const CONFIG_PATH: &str = "app.json";
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct App {
     pub afraid: Afraid,
+    pub dyny: Dynu,
     pub bot: Bot,
     pub postgresql: PostgreSQL,
     pub rpc: Rpc,
@@ -58,6 +59,17 @@ pub struct Afraid {
     pub url: String,
     #[serde(default)]
     pub path: String,
+}
+
+const DYNU_USERNAME: &str = "DYNU_USERNAME";
+const DYNU_PASSWORD: &str = "DYNU_PASSWORD";
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Dynu {
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
 }
 
 const POSTGRESQL_HOST: &str = "POSTGRESQL_HOST";
@@ -211,6 +223,10 @@ impl App {
                 ssl_cert_file: env::var(SYSTEM_SSL_CERT_FILE).expect(SYSTEM_SSL_CERT_FILE),
                 ssl_key_file: env::var(SYSTEM_SSL_KEY_FILE).expect(SYSTEM_SSL_KEY_FILE),
             },
+            dyny: Dynu {
+                username: env::var(DYNU_USERNAME).expect(DYNU_USERNAME),
+                password: env::var(DYNU_PASSWORD).expect(DYNU_PASSWORD),
+            },
         }
     }
 
@@ -218,6 +234,14 @@ impl App {
     fn override_with_env(mut self) -> Self {
         if let Ok(token) = env::var(AFRAID_TOKEN) {
             self.afraid.token = token;
+        }
+
+        if let Ok(username) = env::var(DYNU_USERNAME) {
+            self.dyny.username = username;
+        }
+
+        if let Ok(pw) = env::var(DYNU_PASSWORD) {
+            self.dyny.password = pw;
         }
 
         if let Ok(cert_file) = env::var(SYSTEM_SSL_CERT_FILE) {

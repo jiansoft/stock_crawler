@@ -251,7 +251,7 @@ INNER JOIN dividend ON dividend.stock_symbol = s.stock_symbol
 INNER JOIN eps ON eps.stock_symbol = s.stock_symbol
 INNER JOIN pbr ON pbr.stock_symbol = s.stock_symbol
 INNER JOIN per ON per.stock_symbol = s.stock_symbol
-ON CONFLICT (date,security_code) DO UPDATE SET
+/*ON CONFLICT (date,security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,
     closing_price = EXCLUDED.closing_price,
     cheap = EXCLUDED.cheap,
@@ -273,7 +273,7 @@ ON CONFLICT (date,security_code) DO UPDATE SET
     per_cheap = EXCLUDED.per_cheap,
     per_fair = EXCLUDED.per_fair,
     per_expensive = EXCLUDED.per_expensive,
-    update_time = NOW();
+    update_time = NOW();*/
 "#,
             years, date
         );

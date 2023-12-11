@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use deadpool_redis::{redis::cmd, Config, Connection, Pool, Runtime};
 use futures::{stream::FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
@@ -184,7 +184,8 @@ impl Redis {
 
         let mut tasks = FuturesUnordered::new();
         for pattern in patterns {
-            tasks.push(self.get_key(pattern));
+            let key = self.get_key(pattern);
+            tasks.push(key);
         }
 
         while let Some(task_result) = tasks.next().await {
@@ -204,7 +205,7 @@ impl Redis {
     /// # Returns
     ///
     /// * Result<Vec<String>, Error>: A vector of strings containing the matched keys, or an error if the operation fails.
-    async fn get_key(&self, pattern: String) -> Result<Vec<String>, Error> {
+    async fn get_key(&self, pattern: String) -> Result<Vec<String>> {
         let pool = self.pool.clone();
         let mut conn = pool.get().await?;
         let mut pattern_results = Vec::new();
@@ -227,6 +228,11 @@ impl Redis {
 
         Ok(pattern_results)
     }
+
+    pub async fn contains_key(&self, pattern: &str) -> Result<bool> {
+        let keys = self.get_key(pattern.to_string()).await?;
+        Ok(!keys.is_empty())
+    }
 }
 
 impl Default for Redis {
@@ -241,6 +247,16 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_redis_contains_key() {
+        dotenv::dotenv().ok();
+
+        let is_no_key_val = CLIENT.contains_key("no key").await;
+        println!("no key:{:?}", is_no_key_val);
+        let is_my_public_ip_val = CLIENT.contains_key("MyPublicIP").await;
+        println!("MyPublicIP:{:?}", is_my_public_ip_val);
+    }
 
     #[tokio::test]
     async fn test_redis_decimal() {

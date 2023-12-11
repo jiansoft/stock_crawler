@@ -1,8 +1,8 @@
 
 Taiwan stock crawler
 
-UI︰https://jiansoft.mooo.com/stock/revenues  
-API︰https://jiansoft.freeddns.org/swagger 
+UI Demo︰https://jiansoft.mooo.com/stock/revenues  
+API︰https://github.com/jiansoft/stock_api 
 
 ### 資料來源
 1. 理財寶-股市爆料同學會 https://www.cmoney.tw/forum/popular

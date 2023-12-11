@@ -10,6 +10,10 @@
     "path": "/u",
     "token": "afraid_token"
   },
+  "dyny": {
+    "username": "username",
+    "password": "password"
+  },
   "postgresql": {
     "host": "localhost",
     "port": 5432,

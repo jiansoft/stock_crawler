@@ -10,18 +10,19 @@ use crate::{
     declare,
 };
 
+pub mod afraid;
 /// 理財寶-股市爆料同學會
 pub mod cmoney;
 /// 鉅亨網
 pub mod cnyes;
+pub mod dynu;
 /// 富邦證券
 pub mod fbs;
-/// ddns
-pub mod free_dns;
 /// 股市資訊網
 pub mod goodinfo;
 /// 嗨投資
 pub mod histock;
+pub mod ipify;
 /// PCHOME
 pub mod megatime;
 /// 嘉實資訊-理財網
