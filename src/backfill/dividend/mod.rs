@@ -147,6 +147,13 @@ async fn process_stock_dividends(
                     "dividend upsert executed successfully. \r\n{:#?}",
                     entity
                 ));
+
+                if !entity.quarter.is_empty() {
+                    //更新股利年度的數據
+                    if let Err(why) = entity.upsert_annual_total_dividend().await{
+                        logging::error_file_async(format!("{:?} ", why));
+                    }
+                }
             }
             Err(why) => {
                 logging::error_file_async(format!("{:?} ", why));

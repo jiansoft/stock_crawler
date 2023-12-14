@@ -6,11 +6,7 @@ use sqlx::{
     Row,
 };
 
-use crate::{
-    util::map::Keyable,
-    crawler::goodinfo,
-    database
-};
+use crate::{crawler::goodinfo, database, util::map::Keyable};
 
 pub(crate) mod extension;
 
@@ -188,6 +184,78 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             .map_err(|why| {
                 anyhow!(
                     "Failed to upsert({:#?}) from database\nsql:{}\n{:?}",
+                    self,
+                    sql,
+                    why,
+                )
+            })
+    }
+
+    /// 更新年度內有多次配息記錄時將其合併計算成年度股利
+    pub async fn upsert_annual_total_dividend(&self) -> Result<PgQueryResult> {
+        let sql = format!(
+            r#"
+INSERT INTO dividend(security_code,
+       year,
+       year_of_dividend,
+       quarter,
+       cash_dividend,
+       stock_dividend,
+       sum,
+       "ex-dividend_date1",
+       "ex-dividend_date2",
+       payable_date1,
+       payable_date2,
+       created_time,
+       updated_time,
+       capital_reserve_cash_dividend,
+       earnings_cash_dividend,
+       capital_reserve_stock_dividend,
+       earnings_stock_dividend,
+       payout_ratio_cash,
+       payout_ratio_stock,
+       payout_ratio)
+SELECT security_code,
+       {year},
+       {year_of_dividend},
+       '',
+       sum(cash_dividend) as cash_dividend,
+       sum(stock_dividend) as stock_dividend,
+       sum(sum) as sum,
+       '-',
+       '-',
+       '-',
+       '-',
+       now(),
+       now(),
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+       from dividend
+where security_code = $1 year = $2 and quarter != ''
+group by security_code
+order by security_code
+ON CONFLICT (security_code,year,quarter) DO UPDATE SET
+    cash_dividend = EXCLUDED.cash_dividend,
+    stock_dividend = EXCLUDED.stock_dividend,
+    sum = EXCLUDED.sum;;
+"#,
+            year = self.year,
+            year_of_dividend = self.year - 1
+        );
+
+        sqlx::query(&sql)
+            .bind(&self.security_code)
+            .bind(&self.year)
+            .execute(database::get_connection())
+            .await
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to update_annual_total_dividend({:#?}) from database\nsql:{}\n{:?}",
                     self,
                     sql,
                     why,
