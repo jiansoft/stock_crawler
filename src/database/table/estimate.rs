@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
 use sqlx::postgres::PgQueryResult;
 

@@ -236,7 +236,7 @@ SELECT security_code,
        0,
        0
        from dividend
-where security_code = $1 year = $2 and quarter != ''
+where security_code = $1 and year = $2 and quarter != ''
 group by security_code
 order by security_code
 ON CONFLICT (security_code,year,quarter) DO UPDATE SET

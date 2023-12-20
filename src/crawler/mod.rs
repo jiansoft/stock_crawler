@@ -27,6 +27,7 @@ pub mod ipify;
 pub mod megatime;
 /// 嘉實資訊-理財網
 pub mod moneydj;
+pub mod noip;
 /// 恩投資
 pub mod nstock;
 /// 共用 元大證券、嘉實資訊-理財網、富邦證券

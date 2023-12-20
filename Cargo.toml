@@ -34,8 +34,8 @@ ttl_cache = "0.5"
 rayon = "1.8"
 crossbeam = "0.8"
 async-trait = "0.1"
-redis = { version = "0.23", features = ["tokio-comp"]  }
-deadpool-redis = "0.13"
+redis = { version = "0.24", features = ["tokio-comp"]  }
+deadpool-redis = "0.14"
 rand ="0.8"
 urlencoding = "2.1"
 tonic ={ version = "0.10", features = ["transport", "tls", "channel", "gzip"] }

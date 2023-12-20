@@ -21,18 +21,23 @@ pub async fn refresh() -> Result<()> {
 
     let afraid = crawler::afraid::visit();
     let dynu = crawler::dynu::visit(&ip_now);
-    let (res_dynu, res_afraid) = tokio::join!(dynu, afraid);
+    let noip = crawler::noip::visit(&ip_now);
+    let (res_dynu, res_afraid,res_noip) = tokio::join!(dynu, afraid,noip);
 
     if let Err(why) = res_dynu {
-        logging::error_file_async(format!("Failed to dynu::execute() because {:#?}", why));
+        logging::error_file_async(format!("Failed to dynu::visit() because {:#?}", why));
     }
 
     if let Err(why) = res_afraid {
-        logging::error_file_async(format!("Failed to afraid::execute() because {:#?}", why));
+        logging::error_file_async(format!("Failed to afraid::visit() because {:#?}", why));
+    }
+
+    if let Err(why) = res_noip {
+        logging::error_file_async(format!("Failed to noip::visit() because {:#?}", why));
     }
 
     nosql::redis::CLIENT
-        .set(ddns_key, ip_now, declare::THREE_DAYS_IN_SECONDS)
+        .set(ddns_key, ip_now, declare::ONE_DAYS_IN_SECONDS)
         .await?;
 
     Ok(())

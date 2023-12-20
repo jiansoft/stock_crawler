@@ -13,6 +13,7 @@ const CONFIG_PATH: &str = "app.json";
 pub struct App {
     pub afraid: Afraid,
     pub dyny: Dynu,
+    pub noip: NoIp,
     pub bot: Bot,
     pub postgresql: PostgreSQL,
     pub rpc: Rpc,
@@ -70,6 +71,19 @@ pub struct Dynu {
     pub username: String,
     #[serde(default)]
     pub password: String,
+}
+
+const NOIP_USERNAME: &str = "NOIP_USERNAME";
+const NOIP_PASSWORD: &str = "NOIP_PASSWORD";
+const NOIP_HOSTNAMES: &str = "NOIP_HOSTNAMES";
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct NoIp {
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub hostnames: Vec<String>,
 }
 
 const POSTGRESQL_HOST: &str = "POSTGRESQL_HOST";
@@ -173,6 +187,20 @@ impl App {
                 allowed_list = allowed;
             }
         }
+        let noip_hostnames = env::var(NOIP_HOSTNAMES).expect(NOIP_HOSTNAMES);
+        let mut noip_hostnames_list: Vec<String> = Default::default();
+
+        match serde_json::from_str::<Vec<String>>(&noip_hostnames) {
+            Ok(result) => {
+                noip_hostnames_list = result;
+            }
+            Err(why) => {
+                logging::error_file_async(format!(
+                    "Failed to serde_json because: {:?} \r\n {}",
+                    why, &noip_hostnames
+                ));
+            }
+        }
 
         App {
             afraid: Afraid {
@@ -227,6 +255,11 @@ impl App {
                 username: env::var(DYNU_USERNAME).expect(DYNU_USERNAME),
                 password: env::var(DYNU_PASSWORD).expect(DYNU_PASSWORD),
             },
+            noip: NoIp {
+                username: env::var(NOIP_USERNAME).expect(NOIP_USERNAME),
+                password: env::var(NOIP_USERNAME).expect(NOIP_USERNAME),
+                hostnames: noip_hostnames_list,
+            },
         }
     }
 
@@ -242,6 +275,28 @@ impl App {
 
         if let Ok(pw) = env::var(DYNU_PASSWORD) {
             self.dyny.password = pw;
+        }
+
+        if let Ok(username) = env::var(NOIP_USERNAME) {
+            self.noip.username = username;
+        }
+
+        if let Ok(pw) = env::var(NOIP_PASSWORD) {
+            self.noip.password = pw;
+        }
+
+        if let Ok(hostnames) = env::var(NOIP_HOSTNAMES) {
+            match serde_json::from_str::<Vec<String>>(&hostnames) {
+                Ok(result) => {
+                    self.noip.hostnames = result;
+                }
+                Err(why) => {
+                    logging::error_file_async(format!(
+                        "Failed to serde_json because: {:?} \r\n {}",
+                        why, &hostnames
+                    ));
+                }
+            }
         }
 
         if let Ok(cert_file) = env::var(SYSTEM_SSL_CERT_FILE) {
@@ -308,12 +363,15 @@ impl App {
         if let Ok(addr) = env::var(REDIS_ADDR) {
             self.nosql.redis.addr = addr
         }
+
         if let Ok(db) = env::var(REDIS_DB) {
             self.nosql.redis.db = i32::from_str(db.as_str()).unwrap_or(6379)
         }
+
         if let Ok(account) = env::var(REDIS_ACCOUNT) {
             self.nosql.redis.account = account
         }
+
         if let Ok(password) = env::var(REDIS_PASSWORD) {
             self.nosql.redis.password = password
         }
