@@ -1,5 +1,5 @@
+use std::collections::HashMap;
 use anyhow::{anyhow, Result};
-use hashbrown::HashMap;
 use regex::Regex;
 use scraper::{Html, Selector};
 
@@ -80,7 +80,7 @@ impl YahooDividend {
 pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     let url = format!("https://{}/quote/{}/dividend", HOST, stock_symbol);
     let text = http::get(&url, None).await?;
-    let document = Html::parse_document(text.as_str());
+    let document = Html::parse_document(&text);
     let selector = match Selector::parse(
         "#main-2-QuoteDividend-Proxy > div > section > div > div > div > div > ul > li",
     ) {
@@ -94,13 +94,14 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     let mut e = YahooDividend::new(stock_symbol.to_string());
 
     for element in document.select(&selector) {
-        let dividend_period = http::element::parse_value(&element, "div > div > div");
+        let dividend_period = http::element::parse_value(&element, "div > div.Fxg\\(1\\).Fxs\\(1\\).Fxb\\(0\\%\\).Ta\\(end\\).Mend\\(0\\)\\:lc.Mend\\(12px\\).W\\(88px\\).Miw\\(88px\\)");
+
         if dividend_period.is_none() {
             continue;
         }
 
-        let dividend_date1 = http::element::parse_value(&element, "div > div:nth-child(5)");
-        let dividend_date2 = http::element::parse_value(&element, "div > div:nth-child(6)");
+        let dividend_date1 = http::element::parse_value(&element, "div > div:nth-child(7)");
+        let dividend_date2 = http::element::parse_value(&element, "div > div:nth-child(8)");
         if dividend_date1.is_none() && dividend_date2.is_none() {
             continue;
         }
@@ -119,15 +120,15 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
         //股利所屬期間
         let (year_of_dividend, quarter) = parse_period(&dividend_period, &re)?;
 
-        let payout_date1 = http::element::parse_value(&element, "div > div:nth-child(7)")
+        let payout_date1 = http::element::parse_value(&element, "div > div:nth-child(9)")
             .unwrap_or_default()
             .replace('/', "-");
-        let payout_date2 = http::element::parse_value(&element, "div > div:nth-child(8)")
+        let payout_date2 = http::element::parse_value(&element, "div > div:nth-child(10)")
             .unwrap_or_default()
             .replace('/', "-");
         e.dividend
             .entry(year)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(YahooDividendDetail::new(
                 year,
                 year_of_dividend,
@@ -165,6 +166,7 @@ fn parse_period(period: &Option<String>, re: &Regex) -> Result<(i32, String)> {
     let mut year_of_dividend = 0;
     let mut quarter = String::from("");
     if let Some(period) = period {
+
         if let Some(caps) = re.captures(period) {
             if let Some(q) = caps.get(1) {
                 year_of_dividend = q.as_str().parse::<i32>()?

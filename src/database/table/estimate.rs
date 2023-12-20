@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::NaiveDate;
 use sqlx::postgres::PgQueryResult;
 
@@ -251,7 +251,7 @@ INNER JOIN dividend ON dividend.stock_symbol = s.stock_symbol
 INNER JOIN eps ON eps.stock_symbol = s.stock_symbol
 INNER JOIN pbr ON pbr.stock_symbol = s.stock_symbol
 INNER JOIN per ON per.stock_symbol = s.stock_symbol
-/*ON CONFLICT (date,security_code) DO UPDATE SET
+ON CONFLICT (date,security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,
     closing_price = EXCLUDED.closing_price,
     cheap = EXCLUDED.cheap,
@@ -273,14 +273,20 @@ INNER JOIN per ON per.stock_symbol = s.stock_symbol
     per_cheap = EXCLUDED.per_cheap,
     per_fair = EXCLUDED.per_fair,
     per_expensive = EXCLUDED.per_expensive,
-    update_time = NOW();*/
+    update_time = NOW();
 "#,
             years, date
         );
         sqlx::query(&sql)
             .execute(database::get_connection())
             .await
-            .context(format!("Failed to upsert_all() from database\nsql:{}", sql))
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to upsert_all() from database\nsql:{}\n{:?}",
+                    sql,
+                    why,
+                )
+            })
     }
 
     pub async fn upsert(&self, years: String) -> Result<PgQueryResult> {
@@ -473,10 +479,14 @@ ON CONFLICT (date, security_code) DO UPDATE SET
         sqlx::query(&sql)
             .execute(database::get_connection())
             .await
-            .context(format!(
-                "Failed to upsert estimate({:#?}) from database\nsql:{}",
-                self, sql
-            ))
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to upsert({:#?}) from database\nsql:{}\n{:?}",
+                    self,
+                    sql,
+                    why,
+                )
+            })
     }
 }
 
