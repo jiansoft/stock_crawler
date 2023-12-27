@@ -20,7 +20,6 @@ pub async fn visit(ip :&str) -> Result<()> {
 
         match util::http::get(url, None).await {
             Ok(t) => {
-                dbg!(&t);
                 if t.contains("good") {
                     logging::info_file_async(t);
                 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, fs, io, path::PathBuf, str::FromStr, u8};
+use std::{collections::HashMap, env, path::PathBuf, str::FromStr, u8};
 
 use anyhow::Result;
 use config::{Config as config_config, File as config_file};
@@ -141,7 +141,7 @@ pub struct Redis {
 pub static SETTINGS: Lazy<App> = Lazy::new(|| App::get().expect("Config error"));
 
 impl App {
-    pub fn new() -> Self {
+    /*pub fn new() -> Self {
         //讀取設定檔
         let config_txt = read_config_file();
         //取得文字檔的內容
@@ -163,7 +163,7 @@ impl App {
             }
             Ok(_config) => _config.override_with_env(),
         }
-    }
+    }*/
 
     fn get() -> Result<Self> {
         let config_path = config_path();
@@ -385,7 +385,7 @@ fn config_path() -> PathBuf {
     PathBuf::from(CONFIG_PATH)
 }
 
-/// 讀取預設的設定檔
+/*/// 讀取預設的設定檔
 fn read_config_file() -> Result<String, io::Error> {
     let p = config_path();
     read_text_file(p)
@@ -395,6 +395,7 @@ fn read_config_file() -> Result<String, io::Error> {
 pub(crate) fn read_text_file(path: PathBuf) -> Result<String, io::Error> {
     fs::read_to_string(path)
 }
+*/
 
 #[cfg(test)]
 mod tests {

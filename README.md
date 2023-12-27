@@ -16,13 +16,14 @@ API︰https://github.com/jiansoft/stock_api
   + 更新台股國際證券識別碼
   + 更新下市的股票
   + 更新股票權值佔比
++ 08:00
   + 提醒本日除權息的股票(需自行架設本服務)
   + 提醒本日自持股票發放股利(需自行架設本服務)
   + 提醒本日開始公開申購的股票(需自行架設本服務)
 + 15:00 取得台股收盤報價數據計算預估價格
-+ 21:00 更新尚無年度配息資資料的股票
++ 21:00 更新尚無年度配息資料的股票
 + 22:00 更新外資持股狀態
-+ 每分鐘更新一次ddns的IP(需自行架設本服務 [[afraid](https://freedns.afraid.org/)、[dynu](https://www.dynu.com/)])
++ 每分鐘更新一次ddns的IP(需自行架設本服務 [afraid](https://freedns.afraid.org/)、[dynu](https://www.dynu.com/)、[noip](https://www.noip.com/))
 
 ### 資料來源
 1. 理財寶-股市爆料同學會 https://www.cmoney.tw/forum/popular

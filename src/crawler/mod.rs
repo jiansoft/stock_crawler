@@ -30,6 +30,7 @@ pub mod moneydj;
 pub mod noip;
 /// 恩投資
 pub mod nstock;
+pub mod seeip;
 /// 共用 元大證券、嘉實資訊-理財網、富邦證券
 pub(super) mod share;
 /// 台灣期貨交易所
