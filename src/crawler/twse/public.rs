@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{Local, NaiveDate};
+use chrono::{Datelike, Duration, Local, NaiveDate};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,7 @@ use crate::{bot, crawler::twse, logging, util, util::map::Keyable};
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 struct PublicFormResponse {
     pub stat: Option<String>,
-    pub date: i64,
+    pub date: String,
     pub title: String,
     pub fields: Vec<String>,
     pub data: Vec<Vec<String>>,
@@ -60,12 +60,14 @@ impl Public {
 }
 
 pub async fn visit() -> Result<Vec<Public>> {
+    let now = Local::now();
+    let date = now + Duration::days(5);
     let url = format!(
-        "https://www.{host}/rwd/zh/announcement/publicForm?response=json&_={time}",
+            "https://www.{host}/rwd/zh/announcement/publicForm?date={year}&response=json&_={time}",
         host = twse::HOST,
+        year = date.year(),
         time = Local::now().timestamp_millis()
     );
-
     let res = util::http::get_use_json::<PublicFormResponse>(&url).await?;
     let mut result: Vec<Public> = Vec::with_capacity(2048);
     let stat = match res.stat {

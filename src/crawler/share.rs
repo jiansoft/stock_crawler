@@ -81,7 +81,7 @@ fn parse_annual_profit(node: ElementRef, stock_symbol: &str) -> Option<AnnualPro
         .map(util::datetime::roc_year_to_gregorian_year)?;
     let earnings_per_share = text::parse_decimal(tds.get(7)?, None).ok()?;
     let profit_before_tax = text::parse_decimal(tds.get(6)?, None).unwrap_or(Decimal::ZERO);
-    let sales_per_share = text::parse_decimal(tds.get(5)?, None).unwrap_or_else(Decimal::ZERO);
+    let sales_per_share = text::parse_decimal(tds.get(5)?, None).unwrap_or(Decimal::ZERO);
 
     Some(AnnualProfit {
         stock_symbol: stock_symbol.to_string(),
