@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use regex::Regex;
 use scraper::{Html, Selector};

@@ -1,7 +1,8 @@
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
-use std::collections::HashMap;
 
 use crate::{
     cache::SHARE,
@@ -98,9 +99,10 @@ pub async fn visit(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::cache::SHARE;
     use crate::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_visit() {

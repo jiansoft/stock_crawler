@@ -2,10 +2,13 @@ use anyhow::{anyhow, Result};
 use rust_decimal::Decimal;
 use serde_derive::{Deserialize, Serialize};
 
-use crate::util::map::Keyable;
 use crate::{
+    util::{
+        map::Keyable,
+        self,
+        text
+    },
     declare::Quarter,
-    util::{self, text},
 };
 
 #[derive(Serialize, Deserialize, Debug)]

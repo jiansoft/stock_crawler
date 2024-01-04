@@ -3,13 +3,13 @@ use async_trait::async_trait;
 use rust_decimal::Decimal;
 use scraper::Html;
 
-use crate::util::text;
 use crate::{
     crawler::{
         histock::{HiStock, HOST},
         StockInfo,
     },
-    declare, util,
+    declare,
+    util::{self, text},
 };
 
 #[async_trait]
@@ -41,7 +41,6 @@ impl StockInfo for HiStock {
         );
         let text = util::http::get(url, None).await?;
         let document = Html::parse_document(&text);
-
         let price = util::http::element::get_one_element(util::http::element::GetOneElementText {
             stock_symbol,
             url,
@@ -50,7 +49,6 @@ impl StockInfo for HiStock {
             document: document.clone(),
         })?;
         let price = text::parse_f64(&price, None)?;
-
         let change =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
                 stock_symbol,
@@ -61,7 +59,6 @@ impl StockInfo for HiStock {
             })?;
         let is_negative = change.contains('▼');
         let mut change = text::parse_f64(&change, Some(['▼', '▲'].to_vec()))?;
-
         let change_range =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
                 stock_symbol,
