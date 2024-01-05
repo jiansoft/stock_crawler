@@ -14,6 +14,7 @@ use crate::{
     util::map::Keyable,
 };
 
+
 pub mod payout_ratio;
 
 /// 更新股利發送數據
@@ -121,15 +122,17 @@ async fn process_stock_dividends(
     stock_symbol: &str,
     multiple_dividend_cache: &HashSet<String>,
 ) -> Result<()> {
-    let dividends_from_goodinfo = goodinfo::dividend::visit(&stock_symbol).await?;
-    // 取成今年度所屬股利數據
-    let dividend_details_from_goodinfo = match dividends_from_goodinfo.get(&year) {
-        Some(details) => details,
-        None => return Ok(()),
-    };
+    let dividends_from_goodinfo = goodinfo::dividend::visit(stock_symbol).await?;
+    let last_year = year - 1;
+    let relevant_years = [year, last_year];
+
+    // 合併今年度和去年的股利數據
+    let dividend_details_from_goodinfo = relevant_years.iter().filter_map(|&yr| {
+        dividends_from_goodinfo.get(&yr).map(|details| details.iter().cloned())
+    }).flatten().collect::<Vec<_>>();
 
     for dividend_from_goodinfo in dividend_details_from_goodinfo {
-        if dividend_from_goodinfo.year_of_dividend != year {
+        if dividend_from_goodinfo.year_of_dividend != year &&  dividend_from_goodinfo.year_of_dividend != last_year {
             continue;
         }
 
@@ -300,7 +303,7 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
         logging::debug_file_async("開始 process_stock_dividends".to_string());
-        let year = 2023;
+        let year = 2024;
         let multiple_dividends = dividend::Dividend::fetch_multiple_dividends_for_year(year)
             .await
             .unwrap();
@@ -310,7 +313,7 @@ mod tests {
             multiple_dividend_cache.insert(key);
         }
 
-        match process_stock_dividends(year, "2330", &multiple_dividend_cache).await {
+        match process_stock_dividends(year, "2454", &multiple_dividend_cache).await {
             Ok(_) => {
                 logging::debug_file_async(
                     "process_stock_dividends executed successfully.".to_string(),

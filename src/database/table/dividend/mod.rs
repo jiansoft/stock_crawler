@@ -250,7 +250,7 @@ ON CONFLICT (security_code,year,quarter) DO UPDATE SET
 
         sqlx::query(&sql)
             .bind(&self.security_code)
-            .bind(&self.year)
+            .bind(self.year)
             .execute(database::get_connection())
             .await
             .map_err(|why| {
@@ -515,8 +515,8 @@ impl Clone for Entity {
 */
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<&goodinfo::dividend::GoodInfoDividend> for Dividend {
-    fn from(d: &goodinfo::dividend::GoodInfoDividend) -> Self {
+impl From<goodinfo::dividend::GoodInfoDividend> for Dividend {
+    fn from(d: goodinfo::dividend::GoodInfoDividend) -> Self {
         let mut e = Dividend::new();
         e.quarter = d.quarter.clone();
         e.year = d.year;
