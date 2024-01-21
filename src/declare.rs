@@ -151,70 +151,70 @@ pub enum Industry {
     ElectricalMachinery = 5,
     /// 電器電纜 6
     ElectricalCable = 6,
-    /// 化學工業 7
-    Chemical = 7,
-    /// 生技醫療業 8
-    BiotechMedical = 8,
-    /// 玻璃陶瓷 9
-    GlassCeramics = 9,
-    /// 造紙工業 10
-    Paper = 10,
-    /// 鋼鐵工業 11
-    Steel = 11,
-    /// 橡膠工業 12
-    Rubber = 12,
-    /// 汽車工業 13
-    Automotive = 13,
-    /// 半導體業 14
-    Semiconductor = 14,
-    /// 電腦及週邊設備業 15
-    ComputerPeripheral = 15,
-    /// 光電業 16
-    Optoelectronic = 16,
-    /// 通信網路業 17
-    CommunicationNetwork = 17,
-    /// 電子零組件業 18
-    ElectronicComponents = 18,
-    /// 電子通路業 19
-    ElectronicPathway = 19,
-    /// 資訊服務業 20
-    InformationService = 20,
-    /// 其他電子業 21
-    OtherElectronics = 21,
-    /// 建材營造業 22
-    ConstructionMaterial = 22,
-    /// 航運業 23
-    Shipping = 23,
-    /// 觀光事業 24
-    Tourism = 24,
-    /// 金融保險業 25
-    FinanceInsurance = 25,
-    /// 貿易百貨 26
-    TradingDepartmentStores = 26,
-    /// 油電燃氣業 27
-    OilElectricGas = 27,
-    /// 綜合 28
-    Comprehensive = 28,
-    /// 綠能環保 29
-    GreenEnergyEnvironmentalProtection = 29,
-    /// 數位雲端 30
-    DigitalCloud = 30,
-    /// 運動休閒 31
-    SportsRecreation = 31,
-    /// 居家生活 32
-    HomeLife = 32,
-    /// 其他 33
-    Other = 33,
-    /// 文化創意業 34
-    CulturalCreative = 34,
-    /// 農業科技 35
-    AgriculturalTechnology = 35,
-    /// 電子商務 36
-    ECommerce = 36,
-    /// 觀光餐旅 37
-    TourismCatering = 37,
-    /// 存託憑證 38
-    DepositaryReceipts = 38,
+    /// 玻璃陶瓷 8
+    GlassCeramics = 8,
+    /// 造紙工業 9
+    Paper = 9,
+    /// 鋼鐵工業 10
+    Steel = 10,
+    /// 橡膠工業 11
+    Rubber = 11,
+    /// 汽車工業 12
+    Automotive = 12,
+    /// 電子工業 13
+    Electronic = 13,
+    /// 建材營造業 14
+    ConstructionMaterial = 14,
+    /// 航運業 15
+    Shipping = 15,
+    /// 觀光餐旅 16
+    TourismCatering = 16,
+    /// 金融保險業 17
+    FinanceInsurance = 17,
+    /// 貿易百貨業 18
+    TradingDepartmentStores = 18,
+    /// 綜合 19
+    Comprehensive = 19,
+    /// 其他業 20
+    Other = 20,
+    /// 化學工業 21
+    Chemical = 21,
+    /// 生技醫療業 22
+    BiotechMedical = 22,
+    /// 油電燃氣業 23
+    OilElectricGas = 23,
+    /// 半導體業 24
+    Semiconductor = 24,
+    /// 電腦及週邊設備業 25
+    ComputerPeripheral = 25,
+    /// 光電業 26
+    Optoelectronic = 26,
+    /// 通信網路業 27
+    CommunicationNetwork = 27,
+    /// 電子零組件業 28
+    ElectronicComponents = 28,
+    /// 電子通路業 29
+    ElectronicPathway = 29,
+    /// 資訊服務業 30
+    InformationService = 30,
+    /// 其他電子業 31
+    OtherElectronics = 31,
+    /// 文化創意業 32
+    CulturalCreative = 32,
+    /// 農業科技 33
+    AgriculturalTechnology = 33,
+    /// 電子商務 34
+    ECommerce = 34,
+    /// 綠能環保 35
+    GreenEnergyEnvironmentalProtection = 35,
+    /// 數位雲端 36
+    DigitalCloud = 36,
+    /// 運動休閒 37
+    SportsRecreation = 37,
+    /// 居家生活 38
+    HomeLife = 38,
+    /// 存託憑證 39
+    DepositaryReceipts = 39,
     /// 未分類 99
     Uncategorized = 99,
 }
@@ -249,7 +249,6 @@ impl Industry {
             Industry::OtherElectronics => "其他電子業",
             Industry::ConstructionMaterial => "建材營造業",
             Industry::Shipping => "航運業",
-            Industry::Tourism => "觀光事業",
             Industry::FinanceInsurance => "金融保險業",
             Industry::TradingDepartmentStores => "貿易百貨",
             Industry::OilElectricGas => "油電燃氣業",
@@ -265,6 +264,7 @@ impl Industry {
             Industry::TourismCatering => "觀光餐旅",
             Industry::DepositaryReceipts => "存託憑證",
             Industry::Uncategorized => "未分類",
+            Industry::Electronic => "電子工業"
         }
     }
 
@@ -293,7 +293,6 @@ impl Industry {
             Self::OtherElectronics,
             Self::ConstructionMaterial,
             Self::Shipping,
-            Self::Tourism,
             Self::FinanceInsurance,
             Self::TradingDepartmentStores,
             Self::OilElectricGas,
