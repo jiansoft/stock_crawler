@@ -137,7 +137,6 @@ impl Share {
                     Industry::ConstructionMaterial.serial(),
                 ),
                 (Industry::Shipping.name(), Industry::Shipping.serial()),
-                (Industry::Tourism.name(), Industry::Tourism.serial()),
                 (
                     Industry::FinanceInsurance.name(),
                     Industry::FinanceInsurance.serial(),
