@@ -143,14 +143,12 @@ async fn format_alert_message(target: &Trace, current_price: Decimal) -> String 
 fn within_boundary(target: &Trace, current_price: Decimal) -> bool {
     let floor = target.floor;
     let ceiling = target.ceiling;
-    let zero = Decimal::ZERO;
 
-    if floor > zero && ceiling > zero {
-        current_price >= floor && current_price <= ceiling
-    } else if floor > zero {
-        current_price >= floor
-    } else {
-        current_price <= ceiling
+    match (floor > Decimal::ZERO, ceiling > Decimal::ZERO) {
+        (true, true) => current_price >= floor && current_price <= ceiling,
+        (true, false) => current_price >= floor,
+        (false, true) => current_price <= ceiling,
+        _ => false,
     }
 }
 
@@ -196,9 +194,9 @@ mod tests {
         logging::debug_file_async("開始 event::trace::stock_price::handle_price".to_string());
 
         let trace = Trace {
-            stock_symbol: "2330".to_string(),
-            floor: dec!(520),
-            ceiling: dec!(550),
+            stock_symbol: "1303".to_string(),
+            floor: dec!(70),
+            ceiling: dec!(60),
         };
 
         match alert_on_price_boundary(trace, dec!(560)).await {
@@ -227,8 +225,43 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 trace_stock_price".to_string());
 
-        let _ = trace_target_price().await;
+        match trace_target_price().await {
+            Ok(_) => {
+                logging::debug_file_async(
+                    "test_trace_stock_price 完成".to_string(),
+                );
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to test_trace_stock_price because {:?}",
+                    why
+                ));
+            }
+        }
+
 
         logging::debug_file_async("結束 trace_stock_price".to_string());
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_process_target_price() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+
+        logging::debug_file_async("開始 event::trace::stock_price::process_target_price".to_string());
+
+        let trace = Trace {
+            stock_symbol: "1303".to_string(),
+            floor: dec!(62),
+            ceiling: dec!(70),
+        };
+
+        process_target_price(trace).await;
+
+        logging::debug_file_async(
+            "結束 event::trace::stock_price::process_target_price".to_string(),
+        );
+    }
+
 }

@@ -83,7 +83,7 @@ pub async fn visit(
             let industry: String;
             let cfi_code: String;
 
-            match { tds.len() } {
+            match tds.len() {
                 5 => {
                     industry = "未分類".to_string();
                     cfi_code = tds[4].to_owned()

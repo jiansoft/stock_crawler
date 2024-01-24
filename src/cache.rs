@@ -37,6 +37,8 @@ pub struct Share {
 
 impl Share {
     pub fn new() -> Self {
+       // let other : &'static str = format!("{}業", Industry::Other.name());
+       //// &'static str
         Share {
             indices: RwLock::new(HashMap::new()),
             stocks: RwLock::new(HashMap::new()),
@@ -188,9 +190,9 @@ impl Share {
                     Industry::Uncategorized.name(),
                     Industry::Uncategorized.serial(),
                 ),
-                ("貿易百貨業", 26),
-                ("其他業", 33),
-                ("農業科技業", 35),
+                ("貿易百貨業", Industry::TradingDepartmentStores.serial()),
+                ("其他業", Industry::Other.serial()),
+                ("農業科技業", Industry::AgriculturalTechnology.serial()),
             ]),
             last_revenues: RwLock::new(HashMap::new()),
             last_trading_day_quotes: RwLock::new(HashMap::new()),
@@ -275,6 +277,11 @@ impl Share {
         logging::info_file_async(format!(
             "CacheShare.indices 初始化 {}",
             self.indices.read().unwrap().len()
+        ));
+
+        logging::info_file_async(format!(
+            "CacheShare.industries 初始化 {:?}",
+            self.industries
         ));
 
         logging::info_file_async(format!(
