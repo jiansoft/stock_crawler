@@ -66,7 +66,7 @@ pub async fn visit() -> Result<Vec<Public>> {
             "https://www.{host}/rwd/zh/announcement/publicForm?date={year}&response=json&_={time}",
         host = twse::HOST,
         year = date.year(),
-        time = Local::now().timestamp_millis()
+        time = now.timestamp_millis()
     );
     let res = util::http::get_use_json::<PublicFormResponse>(&url).await?;
     let mut result: Vec<Public> = Vec::with_capacity(2048);

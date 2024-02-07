@@ -14,10 +14,27 @@ use crate::{
     logging, nosql,
     util::{datetime::Weekend, map::Keyable},
 };
+use crate::crawler::twse;
 
 /// 提醒本日已達高低標的股票有那些
 pub async fn execute() -> Result<()> {
-    if Local::now().is_weekend() {
+    let now = Local::now();
+
+    if now.is_weekend() {
+        return Ok(());
+    }
+
+    let holiday = match twse::holiday_schedule::visit().await {
+        Ok(h) => {h}
+        Err(why) => {
+            logging::error_file_async(format!("Failed to visit twse::holiday_schedule because {:?}", why));
+            return Ok(())
+        }
+    };
+
+    if holiday.contains(&now.date_naive()) {
+        logging::info_file_async("Today is a holiday, and the market is closed.".to_string());
+
         return Ok(());
     }
 
@@ -182,7 +199,6 @@ fn no_need_to_alert(target: &Trace, current_price: Decimal, last_price_in_cache:
 #[cfg(test)]
 mod tests {
     use rust_decimal_macros::dec;
-
     use super::*;
 
     #[tokio::test]
@@ -262,6 +278,26 @@ mod tests {
         logging::debug_file_async(
             "結束 event::trace::stock_price::process_target_price".to_string(),
         );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_execute() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+        logging::debug_file_async("開始 execute".to_string());
+
+        match execute().await {
+            Ok(_) => {
+                //dbg!(&list);
+                //logging::debug_file_async(format!("list:{:#?}", list));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to execute because: {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 execute".to_string());
     }
 
 }
