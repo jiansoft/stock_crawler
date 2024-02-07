@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::{Local, Timelike};
+use chrono::{Datelike, Local, Timelike};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tokio::{time, time::Instant};
@@ -24,7 +24,7 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    let holiday = match twse::holiday_schedule::visit().await {
+    let holiday = match twse::holiday_schedule::visit(now.year()).await {
         Ok(h) => {h}
         Err(why) => {
             logging::error_file_async(format!("Failed to visit twse::holiday_schedule because {:?}", why));

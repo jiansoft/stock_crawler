@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
-use chrono::{Datelike, Local, NaiveDate};
+use anyhow::{Result};
+use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 use crate::{bot, crawler::twse, logging, util};
@@ -14,19 +14,15 @@ struct HolidayScheduleResponse {
     pub total: i64,
 }
 
-pub async fn visit() -> Result<Vec<NaiveDate>> {
+pub async fn visit(year: i32) -> Result<Vec<NaiveDate>> {
     let now = Local::now();
-    //let date = now + Duration::days(5);
     let url = format!(
         "https://www.{host}/rwd/zh/holidaySchedule/holidaySchedule?date={year}&response=json&_={time}",
         host = twse::HOST,
-        year = now.year(),
+        year = year,
         time = now.timestamp_millis()
     );
-
-    let res = util::http::get_use_json::<HolidayScheduleResponse>(&url)
-        .await
-        .context("Failed to get holiday schedule response")?;
+    let res = util::http::get_use_json::<HolidayScheduleResponse>(&url).await?;
     let mut result: Vec<NaiveDate> = Vec::with_capacity(32);
     let stat = match res.stat {
         None => {
@@ -41,7 +37,11 @@ pub async fn visit() -> Result<Vec<NaiveDate>> {
         return Ok(result);
     }
 
-    for date_info in res.data.iter().filter(|d| d.len() >= 3 && !d[2].contains("開始交易")) {
+    for date_info in res
+        .data
+        .iter()
+        .filter(|d| d.len() >= 3 && !d[2].contains("開始交易"))
+    {
         if let Ok(d) = NaiveDate::parse_from_str(&date_info[0], "%Y-%m-%d") {
             result.push(d);
         }
@@ -60,7 +60,7 @@ async fn report_error(message: &str) {
 mod tests {
     use crate::cache::SHARE;
     use crate::logging;
-
+    use chrono::Datelike;
     use super::*;
 
     #[tokio::test]
@@ -69,8 +69,8 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
         logging::debug_file_async("開始 visit".to_string());
-
-        match visit().await {
+        let now = Local::now();
+        match visit(now.date_naive().year()).await {
             Ok(list) => {
                 dbg!(&list);
                 logging::debug_file_async(format!("list:{:#?}", list));

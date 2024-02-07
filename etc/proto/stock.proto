@@ -10,6 +10,8 @@ service Stock {
   rpc UpdateStockInfo (StockInfoRequest) returns (StockInfoReply) {}
   // 取得目前的股價
   rpc FetchCurrentStockQuotes (StockQuotesRequest) returns (StockQuotesReply) {}
+  // 取得股市休市日
+  rpc FetchHolidaySchedule (HolidayScheduleRequest) returns (HolidayScheduleReply) {}
 }
 
 message StockInfoRequest {
@@ -40,6 +42,15 @@ message StockQuotesRequest {
 message StockQuotesReply {
   repeated StockQuotes stock_prices = 1;
 }
+
+message HolidayScheduleRequest {
+  int32 year = 1;
+}
+
+message HolidayScheduleReply {
+  repeated string holiday = 1;
+}
+
 
 // protoc --go_out=. --go-grpc_out=. stock.proto
 //protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative stock.proto

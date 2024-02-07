@@ -45,6 +45,18 @@ pub struct StockQuotesReply {
     #[prost(message, repeated, tag = "1")]
     pub stock_prices: ::prost::alloc::vec::Vec<StockQuotes>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HolidayScheduleRequest {
+    #[prost(int32, tag = "1")]
+    pub year: i32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HolidayScheduleReply {
+    #[prost(string, repeated, tag = "1")]
+    pub holiday: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
 /// Generated client implementations.
 pub mod stock_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
@@ -178,6 +190,32 @@ pub mod stock_client {
                 .insert(GrpcMethod::new("stock.Stock", "FetchCurrentStockQuotes"));
             self.inner.unary(req, path, codec).await
         }
+        /// 取得股市休市日
+        pub async fn fetch_holiday_schedule(
+            &mut self,
+            request: impl tonic::IntoRequest<super::HolidayScheduleRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::HolidayScheduleReply>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/stock.Stock/FetchHolidaySchedule",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("stock.Stock", "FetchHolidaySchedule"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -197,6 +235,14 @@ pub mod stock_server {
             request: tonic::Request<super::StockQuotesRequest>,
         ) -> std::result::Result<
             tonic::Response<super::StockQuotesReply>,
+            tonic::Status,
+        >;
+        /// 取得股市休市日
+        async fn fetch_holiday_schedule(
+            &self,
+            request: tonic::Request<super::HolidayScheduleRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::HolidayScheduleReply>,
             tonic::Status,
         >;
     }
@@ -353,6 +399,52 @@ pub mod stock_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = FetchCurrentStockQuotesSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/stock.Stock/FetchHolidaySchedule" => {
+                    #[allow(non_camel_case_types)]
+                    struct FetchHolidayScheduleSvc<T: Stock>(pub Arc<T>);
+                    impl<
+                        T: Stock,
+                    > tonic::server::UnaryService<super::HolidayScheduleRequest>
+                    for FetchHolidayScheduleSvc<T> {
+                        type Response = super::HolidayScheduleReply;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::HolidayScheduleRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as Stock>::fetch_holiday_schedule(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = FetchHolidayScheduleSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
