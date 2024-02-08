@@ -53,9 +53,17 @@ pub struct HolidayScheduleRequest {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HolidaySchedule {
+    #[prost(string, tag = "1")]
+    pub date: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub why: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HolidayScheduleReply {
-    #[prost(string, repeated, tag = "1")]
-    pub holiday: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(message, repeated, tag = "1")]
+    pub holiday: ::prost::alloc::vec::Vec<HolidaySchedule>,
 }
 /// Generated client implementations.
 pub mod stock_client {

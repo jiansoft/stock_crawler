@@ -13,7 +13,8 @@ use crate::{
             StockQuotes,
             StockQuotesReply,
             HolidayScheduleReply,
-            HolidayScheduleRequest
+            HolidayScheduleRequest,
+            HolidaySchedule
         }
     },
     crawler::twse,
@@ -54,9 +55,14 @@ impl Stock for StockService {
     //
     async fn fetch_holiday_schedule(&self, req: Request<HolidayScheduleRequest>) -> Result<Response<HolidayScheduleReply>, Status> {
         let request = req.into_inner();
-        let formatted_dates = match twse::holiday_schedule::visit(request.year).await {
-            Ok(holiday) => holiday.iter()
-                .map(|date| date.format("%Y-%m-%d").to_string())
+        let holiday_schedules = match twse::holiday_schedule::visit(request.year).await {
+            Ok(holidays) => holidays.iter()
+                .map(|holiday| {
+                    HolidaySchedule {
+                        date: holiday.date.format("%Y-%m-%d").to_string(),
+                        why: holiday.why.to_string(),
+                    }
+                })
                 .collect(),
             Err(why) => {
                 logging::error_file_async(format!("Failed to visit twse::holiday_schedule because {:?}", why));
@@ -65,7 +71,7 @@ impl Stock for StockService {
         };
 
         Ok(Response::new(HolidayScheduleReply {
-            holiday: formatted_dates,
+            holiday: holiday_schedules,
         }))
     }
 }

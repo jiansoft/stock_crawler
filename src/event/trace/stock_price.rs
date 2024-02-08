@@ -24,18 +24,21 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    let holiday = match twse::holiday_schedule::visit(now.year()).await {
-        Ok(h) => {h}
+    let holidays = match twse::holiday_schedule::visit(now.year()).await {
+        Ok(h) => { h }
         Err(why) => {
             logging::error_file_async(format!("Failed to visit twse::holiday_schedule because {:?}", why));
             return Ok(())
         }
     };
+    let today= now.date_naive();
+    
+    for holiday in holidays {
+        if holiday.date == today {
+            logging::info_file_async("Today is a holiday, and the market is closed.".to_string());
 
-    if holiday.contains(&now.date_naive()) {
-        logging::info_file_async("Today is a holiday, and the market is closed.".to_string());
-
-        return Ok(());
+            return Ok(());
+        }
     }
 
     let mut task_interval = time::interval_at(Instant::now(), Duration::from_secs(60));

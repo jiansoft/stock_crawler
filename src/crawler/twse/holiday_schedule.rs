@@ -1,4 +1,4 @@
-use anyhow::{Result};
+use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,13 @@ struct HolidayScheduleResponse {
     pub total: i64,
 }
 
-pub async fn visit(year: i32) -> Result<Vec<NaiveDate>> {
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+pub struct HolidaySchedule {
+    pub date: NaiveDate,
+    pub why: String,
+}
+
+pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
     let now = Local::now();
     let url = format!(
         "https://www.{host}/rwd/zh/holidaySchedule/holidaySchedule?date={year}&response=json&_={time}",
@@ -23,7 +29,7 @@ pub async fn visit(year: i32) -> Result<Vec<NaiveDate>> {
         time = now.timestamp_millis()
     );
     let res = util::http::get_use_json::<HolidayScheduleResponse>(&url).await?;
-    let mut result: Vec<NaiveDate> = Vec::with_capacity(32);
+    let mut result: Vec<HolidaySchedule> = Vec::with_capacity(32);
     let stat = match res.stat {
         None => {
             report_error("HolidaySchedule.res.Stat is None").await;
@@ -43,7 +49,10 @@ pub async fn visit(year: i32) -> Result<Vec<NaiveDate>> {
         .filter(|d| d.len() >= 3 && !d[2].contains("開始交易"))
     {
         if let Ok(d) = NaiveDate::parse_from_str(&date_info[0], "%Y-%m-%d") {
-            result.push(d);
+            result.push(HolidaySchedule {
+                date: d,
+                why: date_info[1].to_string()
+            });
         }
     }
 
@@ -58,10 +67,10 @@ async fn report_error(message: &str) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::cache::SHARE;
     use crate::logging;
     use chrono::Datelike;
-    use super::*;
 
     #[tokio::test]
     #[ignore]
