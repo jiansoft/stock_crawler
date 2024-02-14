@@ -38,7 +38,7 @@ redis = { version = "0.24", features = ["tokio-comp"]  }
 deadpool-redis = "0.14"
 rand ="0.8"
 urlencoding = "2.1"
-tonic ={ version = "0.10", features = ["transport", "tls", "channel", "gzip"] }
+tonic ={ version = "0.11", features = ["transport", "tls", "channel", "gzip"] }
 prost = "0.12"
 tokio-retry = "0.3"
 hashbrown = "0.14"
@@ -50,4 +50,4 @@ digest = "0.10"
 hex = "0.4"
 
 [build-dependencies]
-tonic-build = "0.10"
+tonic-build = "0.11"

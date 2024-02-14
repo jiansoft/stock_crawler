@@ -35,7 +35,8 @@ pub async fn execute() -> Result<()> {
     
     for holiday in holidays {
         if holiday.date == today {
-            logging::info_file_async("Today is a holiday, and the market is closed.".to_string());
+            logging::info_file_async(
+                format!("Today is a holiday({why}), and the market is closed.", why = holiday.why));
 
             return Ok(());
         }
