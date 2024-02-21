@@ -1,5 +1,6 @@
-use anyhow::Result;
 use std::net::SocketAddr;
+
+use anyhow::Result;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use crate::{
@@ -69,7 +70,6 @@ fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Re
 
 #[cfg(test)]
 mod tests {
-
     use tokio::time::Duration;
 
     use super::*;
