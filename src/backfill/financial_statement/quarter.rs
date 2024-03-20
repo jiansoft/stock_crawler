@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{Datelike, Duration, Local};
+use chrono::{Datelike, Local, TimeDelta};
 
 use crate::{
     backfill::financial_statement::update_roe_and_roa_for_zero_values, calculation, crawler::yahoo,
@@ -9,7 +9,7 @@ use crate::{
 /// 將季度財報 ROE為零的數據，到雅虎財經下載後回寫到 financial_statement 表
 pub async fn execute() -> Result<()> {
     let now = Local::now();
-    let previous_quarter = now - Duration::days(130);
+    let previous_quarter = now - TimeDelta::try_days(130).unwrap();
     let year = previous_quarter.year();
     let previous_quarter = Quarter::from_month(now.month()).unwrap().previous();
     let quarter = previous_quarter.to_string();

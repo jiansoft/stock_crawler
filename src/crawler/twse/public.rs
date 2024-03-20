@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{Datelike, Duration, Local, NaiveDate};
+use chrono::{Datelike, Local, NaiveDate, TimeDelta};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -61,7 +61,7 @@ impl Public {
 
 pub async fn visit() -> Result<Vec<Public>> {
     let now = Local::now();
-    let date = now + Duration::days(5);
+    let date = now + TimeDelta::try_days(5).unwrap();
     let url = format!(
             "https://www.{host}/rwd/zh/announcement/publicForm?date={year}&response=json&_={time}",
         host = twse::HOST,

@@ -10,7 +10,7 @@ use std::{
 };
 
 use anyhow::Result;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, TimeDelta};
 use rayon::prelude::*;
 
 use crate::logging;
@@ -36,7 +36,7 @@ impl Rotate {
             cur_fn_lock: Default::default(),
             cur_base_fn: "".to_string(),
             out_fh: None,
-            max_age: chrono::Duration::days(7),
+            max_age: TimeDelta::try_days(7).unwrap(),
             on_rotate: Default::default(),
         }
     }
@@ -176,6 +176,7 @@ impl Rotate {
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+    use chrono::TimeDelta;
 
     use crate::logging;
 
@@ -188,7 +189,7 @@ mod tests {
         let mut now = Local::now();
         logging::debug_file_async("第一次test_write_all".to_string());
         test_write_all(now);
-        now += chrono::Duration::days(1);
+        now += TimeDelta::try_days(1).unwrap();
         logging::debug_file_async("第二次test_write_all".to_string());
         test_write_all(now);
 

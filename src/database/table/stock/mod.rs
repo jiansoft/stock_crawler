@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use chrono::{DateTime, Datelike, Duration, Local};
+use chrono::{Datelike, DateTime, Local, TimeDelta};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
@@ -122,7 +122,7 @@ WHERE
     current_row.security_code = stocks.stock_symbol;
 "#;
         let now = Local::now();
-        let one_year_ago = now - Duration::days(365);
+        let one_year_ago = now - TimeDelta::try_days(365).unwrap();
 
         sqlx::query(sql)
             .bind(now.year())

@@ -3,9 +3,10 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::{Datelike, Local, Timelike};
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
+
 use tokio::{time, time::Instant};
 
+use crate::crawler::twse;
 use crate::{
     bot,
     cache::SHARE,
@@ -14,7 +15,6 @@ use crate::{
     logging, nosql,
     util::{datetime::Weekend, map::Keyable},
 };
-use crate::crawler::twse;
 
 /// 提醒本日已達高低標的股票有那些
 pub async fn execute() -> Result<()> {
@@ -25,18 +25,23 @@ pub async fn execute() -> Result<()> {
     }
 
     let holidays = match twse::holiday_schedule::visit(now.year()).await {
-        Ok(h) => { h }
+        Ok(h) => h,
         Err(why) => {
-            logging::error_file_async(format!("Failed to visit twse::holiday_schedule because {:?}", why));
-            return Ok(())
+            logging::error_file_async(format!(
+                "Failed to visit twse::holiday_schedule because {:?}",
+                why
+            ));
+            return Ok(());
         }
     };
-    let today= now.date_naive();
-    
+    let today = now.date_naive();
+
     for holiday in holidays {
         if holiday.date == today {
-            logging::info_file_async(
-                format!("Today is a holiday({why}), and the market is closed.", why = holiday.why));
+            logging::info_file_async(format!(
+                "Today is a holiday({why}), and the market is closed.",
+                why = holiday.why
+            ));
 
             return Ok(());
         }
@@ -91,25 +96,18 @@ async fn alert_on_price_boundary(target: Trace, current_price: Decimal) -> Resul
         return Ok(false);
     }
 
-    let target_key = target.key_with_prefix();
-    let last_price_in_cache = match nosql::redis::CLIENT.get_decimal(&target_key).await {
-        Ok(p) => p,
-        Err(_) => {
-            if target.floor > Decimal::ZERO && target.ceiling > Decimal::ZERO {
-                dec!(0)
-            } else if target.floor > Decimal::ZERO {
-                target.floor
-            } else {
-                target.ceiling
-            }
-        }
-    };
-
     // 與快取中的價格比較，判斷是否需要傳送警告
-    if no_need_to_alert(&target, current_price, last_price_in_cache) {
+    if no_need_to_alert(&target, current_price) {
         return Ok(false);
     }
 
+    let target_key = format!("{}={}", target.key_with_prefix(), current_price);
+    if let Ok(exist) = nosql::redis::CLIENT.contains_key(&target_key).await {
+        if exist {
+            return Ok(false);
+        }
+    }
+    
     let to_bot_msg = format_alert_message(&target, current_price).await;
 
     nosql::redis::CLIENT
@@ -173,37 +171,26 @@ fn within_boundary(target: &Trace, current_price: Decimal) -> bool {
     }
 }
 
-/// 判斷是否不需要傳送警告
-///
-/// 這個函數會根據提供的目標值、當前價格和快取中的最後價格，來決定是否需要傳送警告。
-/// 當滿足以下任一條件時，該函數將返回 true，表示不需要傳送警告：
-/// - 如果當前價格大於或等於快取中的最後價格，並且目標的 floor 大於零。
-/// - 如果當前價格小於或等於快取中的最後價格，並且目標的 ceiling 大於零。
-///
-/// # 參數
-/// - `target`: 一個 `Trace` 引用，包含 floor 和 ceiling 的資訊。
-/// - `current_price`: 一個 `Decimal` 類型，表示當前的價格。
-/// - `last_price_in_cache`: 一個 `Decimal` 類型，表示快取中的最後價格。
-///
-/// # 返回
-/// - 返回一個布林值，如果為 true，表示不需要傳送警告；否則，表示需要傳送警告。
-fn no_need_to_alert(target: &Trace, current_price: Decimal, last_price_in_cache: Decimal) -> bool {
+fn no_need_to_alert(target: &Trace, current_price: Decimal) -> bool {
     if target.floor > Decimal::ZERO && target.ceiling > Decimal::ZERO {
-        if last_price_in_cache > Decimal::ZERO {
-            return current_price <= last_price_in_cache;
-        }
-
         return current_price >= target.floor && current_price <= target.ceiling;
     }
 
-    (target.floor > Decimal::ZERO && current_price < last_price_in_cache)
-        || (target.ceiling > Decimal::ZERO && current_price > last_price_in_cache)
+    if target.floor > Decimal::ZERO {
+        return current_price > target.floor;
+    }
+
+    if target.ceiling > Decimal::ZERO {
+        return current_price < target.ceiling;
+    }
+
+    true
 }
 
 #[cfg(test)]
 mod tests {
-    use rust_decimal_macros::dec;
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[tokio::test]
     #[ignore]
@@ -247,9 +234,7 @@ mod tests {
 
         match trace_target_price().await {
             Ok(_) => {
-                logging::debug_file_async(
-                    "test_trace_stock_price 完成".to_string(),
-                );
+                logging::debug_file_async("test_trace_stock_price 完成".to_string());
             }
             Err(why) => {
                 logging::debug_file_async(format!(
@@ -258,7 +243,6 @@ mod tests {
                 ));
             }
         }
-
 
         logging::debug_file_async("結束 trace_stock_price".to_string());
     }
@@ -269,12 +253,14 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
 
-        logging::debug_file_async("開始 event::trace::stock_price::process_target_price".to_string());
+        logging::debug_file_async(
+            "開始 event::trace::stock_price::process_target_price".to_string(),
+        );
 
         let trace = Trace {
-            stock_symbol: "1303".to_string(),
-            floor: dec!(62),
-            ceiling: dec!(70),
+            stock_symbol: "1558".to_string(),
+            floor: dec!(100),
+            ceiling: dec!(0),
         };
 
         process_target_price(trace).await;
@@ -303,5 +289,4 @@ mod tests {
 
         logging::debug_file_async("結束 execute".to_string());
     }
-
 }

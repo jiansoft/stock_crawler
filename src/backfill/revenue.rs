@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeZone};
+use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
 use futures::{stream, StreamExt};
 
 use crate::{
@@ -16,7 +16,7 @@ pub async fn execute() -> Result<()> {
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap();
-    let last_month = naive_datetime - chrono::Duration::minutes(1);
+    let last_month = naive_datetime - TimeDelta::try_minutes(1).unwrap();
     let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
     let last_month_timezone = timezone.from_local_datetime(&last_month).unwrap();
     let year = last_month_timezone.year();

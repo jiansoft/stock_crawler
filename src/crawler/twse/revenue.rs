@@ -60,9 +60,10 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use chrono::{Local, TimeDelta};
     use chrono::prelude::*;
-    use chrono::{Duration, Local};
+
+    use crate::logging;
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
@@ -79,7 +80,7 @@ mod tests {
             .and_hms_opt(0, 0, 0)
             .unwrap();
 
-        let last_month = naive_datetime - Duration::minutes(1);
+        let last_month = naive_datetime - TimeDelta::try_minutes(1).unwrap();
 
         let timezone = FixedOffset::east_opt(8 * 60 * 60).unwrap();
         let last_month_timezone = timezone.from_local_datetime(&last_month).unwrap();

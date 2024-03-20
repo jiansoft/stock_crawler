@@ -5,15 +5,15 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    util::{
-        map::Keyable,
-        http
-    },
-    cache::{self, TtlCacheInner, TTL},
+    cache::{self, TTL, TtlCacheInner},
     crawler::{twse, twse::build_headers},
     database::table::{self, daily_quote::FromWithExchange},
     declare::StockExchange,
     logging,
+    util::{
+        http,
+        map::Keyable
+    },
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -96,7 +96,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, Timelike};
+    use chrono::{TimeDelta, Timelike};
 
     use crate::{cache::SHARE, logging};
 
@@ -110,7 +110,7 @@ mod tests {
 
         let mut now = Local::now();
         if now.hour() < 15 {
-            now -= Duration::days(1);
+            now -= TimeDelta::try_days(1).unwrap();
         }
         //now -= Duration::days(3);
 

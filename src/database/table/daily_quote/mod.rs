@@ -1,15 +1,14 @@
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration, Local, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Row};
 
-
 use crate::{
     database::{
-        CopyIn,
         self,
+        CopyIn,
         table::daily_quote::extension::MonthlyStockPriceSummary
     },
     declare::StockExchange,
@@ -271,7 +270,7 @@ impl DailyQuote {
 
     /// 依指定日期取得收盤資料的均線
     pub async fn fill_moving_average(&mut self) -> Result<()> {
-        let year_ago = self.date - Duration::days(400);
+        let year_ago = self.date - TimeDelta::try_days(400).unwrap();
         let sql = r#"
 WITH
 cte AS (
@@ -441,7 +440,7 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
 /// 補上當日缺少的每日收盤數據
 pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQueryResult> {
     let date_str = date.format("%Y-%m-%d").to_string();
-    let prev_date = (date - Duration::days(30)).format("%Y-%m-%d").to_string();
+    let prev_date = (date - TimeDelta::try_days(30).unwrap()).format("%Y-%m-%d").to_string();
 
     let sql = format!(
         r#"
@@ -672,8 +671,8 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
 mod tests {
     use chrono::Datelike;
 
-    use crate::crawler::twse;
     use crate::{cache::SHARE, logging};
+    use crate::crawler::twse;
 
     use super::*;
 

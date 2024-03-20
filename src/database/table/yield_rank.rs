@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use chrono::{Datelike, Duration, NaiveDate};
+use chrono::{Datelike, NaiveDate, TimeDelta};
 use sqlx::postgres::PgQueryResult;
 
 use crate::database;
@@ -19,7 +19,7 @@ impl YieldRank {
             .await
             .context("Failed to get_tx in yield_rank")?;
 
-        let month_ago = date - Duration::days(30);
+        let month_ago = date - TimeDelta::try_days(30).unwrap();
         let sql = format!(
             r#"
 WITH dividend_max_year AS (

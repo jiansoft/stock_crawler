@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use chrono::{Duration, Local, NaiveDate};
+use chrono::{Local, NaiveDate, TimeDelta};
 use rust_decimal::Decimal;
 use sqlx::postgres::PgQueryResult;
 
@@ -94,7 +94,7 @@ WHERE "Serial" IN
 )
 ORDER BY "SecurityCode"
 "#;
-        let month_ago = Local::now() - Duration::days(30);
+        let month_ago = Local::now() - TimeDelta::try_days(30).unwrap();
         match sqlx::query(sql)
             .bind(month_ago)
             .execute(&mut *tx)

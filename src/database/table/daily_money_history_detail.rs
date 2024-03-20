@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration, Local, NaiveDate};
-use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta};
+use sqlx::{Postgres, postgres::PgQueryResult, Transaction};
 
 use crate::database;
 
@@ -48,7 +48,7 @@ impl DailyMoneyHistoryDetail {
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
-        let one_month_ago = date - Duration::days(30);
+        let one_month_ago = date - TimeDelta::try_days(30).unwrap();
         let sql = format!(
             r#"
 WITH total_ownership_details AS (
