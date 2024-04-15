@@ -14,7 +14,7 @@ concat-string = "1.0.1"
 config = "0.14"
 crossbeam = "0.8"
 crossbeam-channel = "0.5"
-deadpool-redis = "0.14"
+deadpool-redis = "0.15.0"
 digest = "0.10"
 dotenv = "0.15"
 encoding = "0.2"
@@ -26,12 +26,12 @@ log = { version = "^0.4", features = ["std"] }
 num_cpus = "1.16"
 once_cell = "1.19"
 prost = "0.12"
-rand ="0.8"
-rayon = "1.9"
-redis = { version = "0.24", features = ["tokio-comp"]  }
+rand = "0.8"
+rayon = "1.10"
+redis = { version = "0.25", features = ["tokio-comp"]  }
 regex = "1"
-reqwest = { version = "0.11", features = ["json", "blocking", "brotli", "deflate", "gzip", "cookies"] }
-rust_decimal = "1.34"
+reqwest = { version = "0.12", features = ["json", "blocking", "brotli", "deflate", "gzip", "cookies"] }
+rust_decimal = "1.35"
 rust_decimal_macros = "1.34"
 scraper = "0.19"
 serde = { version = "1.0", features = ["derive"] }
@@ -45,7 +45,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-cron-scheduler = "0.10"
 tokio-retry = "0.3"
 tokio-test = "0.4"
-tonic ={ version = "0.11", features = ["transport", "tls", "channel", "gzip"] }
+tonic = { version = "0.11", features = ["transport", "tls", "channel", "gzip"] }
 ttl_cache = "0.5"
 urlencoding = "2.1"
 
