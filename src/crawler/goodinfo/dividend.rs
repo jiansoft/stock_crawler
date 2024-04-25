@@ -104,7 +104,7 @@ impl Keyable for GoodInfoDividend {
 /// 抓取年度股利資料
 pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDividend>>> {
     let url = format!(
-        "https://{}/tw/StockDividendPolicy.asp?STOCK_ID={}&SHEET={}",
+        "https://{}/tw/StockDividendPolicy.asp?STOCK_ID={}&STEP=DATA&SHEET={}",
         HOST,
         stock_symbol,
         encode("股利所屬年度")
@@ -128,10 +128,12 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
     let document = Html::parse_document(text.as_str());
     let selector = Selector::parse("#tblDetail > tbody > tr")
         .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
+    let mut last_year: i32 = 0;
     let result: Result<Vec<GoodInfoDividend>, _> = document
         .select(&selector)
         .filter_map(|element| {
             let tds: Vec<&str> = element.text().collect();
+
             if tds.len() != 50 {
                 return None;
             }
@@ -139,20 +141,28 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
             //logging::debug_file_async(format!("tds({}):{:#?}",tds.len(), tds));
             let mut e = GoodInfoDividend::new(stock_symbol.to_string());
             //#tblDetail > tbody > tr:nth-child(5) > td:nth-child(2) > nobr > b
-            let year_str = element::parse_value(&element, "td:nth-child(2) > nobr > b")?;
+            let year_str = element::parse_value(&element, "td:nth-child(2) > nobr > b")?; //tds[1];
             if year_str.is_empty() {
                 return None;
             }
 
             //股利發放年度
             e.year = match year_str.parse::<i32>() {
-                Ok(y) => y,
+                Ok(y) => {
+                    last_year = y;
+                    y
+                }
                 Err(why) => {
                     logging::error_file_async(format!(
                         "Failed to i32::parse because(year:{}) {:#?}",
                         year_str, why
                     ));
-                    return None;
+
+                    if last_year == 0 {
+                        return None;
+                    }
+
+                    last_year
                 }
             };
 
@@ -209,7 +219,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
 
         for dividends in hashmap.values_mut() {
             dividends.iter_mut().for_each(|dividend| {
-                // 如何是全年度配息(季配或半年配的總計，無需有配息日)或者配息金額為 0 時直接給 - 表示不用再抓取除息日
+                // 如果是全年度配息(季配或半年配的總計，無需有配息日)或者配息金額為 0 時直接給 - 表示不用再抓取除息日
                 if dividend.quarter.is_empty() || dividend.sum == Decimal::ZERO {
                     dividend.ex_dividend_date1 = UNSET_DATE.to_string();
                     dividend.ex_dividend_date2 = UNSET_DATE.to_string();
@@ -236,7 +246,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("2330").await {
+        match visit("3008").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("dividend : {:#?}", e));
