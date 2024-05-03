@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use chrono::{Datelike, Local};
+use chrono::{Datelike, Local, TimeDelta};
 
 use crate::{
-    backfill::financial_statement,
     crawler::twse,
     database::table::{self, stock::Stock},
     declare::{Quarter, StockExchangeMarket},
@@ -13,11 +12,13 @@ use crate::{
 
 pub async fn execute() -> Result<()> {
     let now = Local::now();
-    let current_quarter = Quarter::from_month(now.month()).unwrap();
-    let previous_quarter = current_quarter.previous();
+    let previous_quarter = now - TimeDelta::try_days(130).unwrap();
+    let year = previous_quarter.year();
+    let previous_quarter = Quarter::from_month(now.month()).unwrap().previous();
+    let quarter = previous_quarter.to_string();
     let without_fs_stocks = table::stock::fetch_stocks_without_financial_statement(
-        now.year(),
-        previous_quarter.to_string().as_str(),
+        year,
+        quarter.to_string().as_str(),
     )
     .await?;
     let without_financial_stocks = util::map::vec_to_hashmap(without_fs_stocks);
@@ -38,9 +39,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
     }
-
-    financial_statement::quarter::execute().await?;
-
+    
     Ok(())
 }
 
@@ -86,8 +85,8 @@ mod tests {
         logging::info_file_async("開始 process_eps".to_string());
         //let now = Local::now();
         let without_financial_stocks = table::stock::fetch_stocks_without_financial_statement(
-            2018,
-            Quarter::Q2.to_string().as_str(),
+            2024,
+            Quarter::Q1.to_string().as_str(),
         )
         .await
         .unwrap();

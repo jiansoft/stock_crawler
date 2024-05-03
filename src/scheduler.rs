@@ -55,8 +55,7 @@ async fn run_cron(sched: &JobScheduler) -> std::result::Result<(), JobSchedulerE
         // 03:00 更新台股季度財報
         create_job("0 0 19 * * *", event::taiwan_stock::quarter_eps::execute),
         // 04:00 更新台股季度財報
-        // 2023-11-15 03:00 更新台股季度財報執行結束時再調用
-        //create_job("0 0 20 * * *", financial_statement::quarter::execute),
+        create_job("0 0 20 * * *", financial_statement::quarter::execute),
         // 05:00 更新台股年度財報(僅有eps 等少數欄位的資料)
         create_job("0 0 21 * * *", event::taiwan_stock::annual_eps::execute),
         // 05:00 更新台股年度財報
