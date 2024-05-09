@@ -69,8 +69,8 @@ function move() {
 }
 
 function docker_build() {
-  build
-  sleep 1
+#  build
+#  sleep 1
   docker build -t stock-rust-image -f Dockerfile_live .
 }
 

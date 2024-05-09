@@ -24,7 +24,7 @@ pub struct Logger {
 }
 
 impl Logger {
-    fn new(log_name: &str) -> Self {
+    pub fn new(log_name: &str) -> Self {
         let info_writer = Self::create_writer(&format!("{}_info", log_name));
         let warn_writer = Self::create_writer(&format!("{}_warn", log_name));
         let error_writer = Self::create_writer(&format!("{}_error", log_name));
@@ -37,23 +37,23 @@ impl Logger {
         }
     }
 
-    fn info(&self, log: String) {
+    pub fn info(&self, log: String) {
         self.send(log, &self.info_writer);
     }
 
-    fn warn(&self, log: String) {
+    pub fn warn(&self, log: String) {
         self.send(log, &self.warn_writer);
     }
 
-    fn error(&self, log: String) {
+    pub fn error(&self, log: String) {
         self.send(log, &self.error_writer);
     }
 
-    fn debug(&self, log: String) {
+    pub fn debug(&self, log: String) {
         self.send(log, &self.debug_writer);
     }
 
-    fn send(&self, msg: String, writer: &Sender<String>) {
+    pub fn send(&self, msg: String, writer: &Sender<String>) {
         if let Err(why) = writer.send(msg) {
             error_console(why.to_string());
         }

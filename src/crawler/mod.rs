@@ -11,6 +11,8 @@ use crate::{
 };
 
 pub mod afraid;
+/// 臺灣銀行
+pub mod bank_of_taiwan;
 /// 理財寶-股市爆料同學會
 pub mod cmoney;
 /// 鉅亨網

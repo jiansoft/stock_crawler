@@ -1,11 +1,25 @@
-FROM ubuntu:20.04
+# 使用 Rust 官方的 bookworm 版本作為建構階段的基礎映像
+FROM rust:bookworm as builder
 
-# 在 alpine 中設置時區
+WORKDIR /app
+
+COPY . .
+
+RUN apt update && apt install -y protobuf-compiler openssl pkg-config libssl-dev libprotobuf-dev && rm -rf /var/lib/apt/lists/*
+
+RUN cargo build --release
+
+FROM debian:bookworm
+
+# 設定環境變量，將時區設為 UTC+8
 ENV TZ=Asia/Taipei
 
-# ubuntu 設定時區
-RUN apt-get update && apt-get install -y tzdata ca-certificates
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+# 安裝 tzdata，並根據 TZ 環境變量自動設定時區
+RUN apt-get update && apt-get install -y tzdata ca-certificates && \
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # 設定工作目錄
 WORKDIR /app
@@ -13,7 +27,9 @@ WORKDIR /app
 # 暴露連接埠
 EXPOSE 9001
 
-ADD ./target/release/stock_crawler .
+# 從建構階段複製二進制檔案
+COPY --from=builder /app/target/release/stock_crawler .
+
 ADD ./.env .
 ADD ./app.json .
 
