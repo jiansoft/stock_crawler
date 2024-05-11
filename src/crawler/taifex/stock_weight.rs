@@ -44,12 +44,12 @@ impl ExchangeConfig {
         match exchange {
             StockExchange::TWSE => Self {
                 url: format!("https://{}/cht/9/futuresQADetail", taifex::HOST),
-                selector: "#printhere > div > div > table > tbody > tr:not(:first-child)"
+                selector: "#printhere > div > div > table > tbody > tr"
                     .to_string(),
             },
             StockExchange::TPEx => Self {
                 url: format!("https://{}/cht/2/tPEXPropertion", taifex::HOST),
-                selector: "#printhere > div > table > tbody > tr:not(:first-child)".to_string(),
+                selector: "#printhere > div > table > tbody > tr".to_string(),
             },
             _ => panic!("Unsupported exchange"),
         }
@@ -139,7 +139,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit(StockExchange::TWSE).await {
+        match visit(StockExchange::TPEx).await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("len:{}\r\n {:#?}", e.len(), e));

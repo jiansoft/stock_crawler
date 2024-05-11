@@ -5,7 +5,7 @@ use sqlx::{postgres::PgQueryResult, FromRow};
 use crate::{crawler::taifex::stock_weight::StockWeight, database};
 
 /// 更新股票的權重
-#[derive(FromRow, Debug)]
+#[derive(FromRow, Debug, Clone)]
 pub struct SymbolAndWeight {
     pub stock_symbol: String,
     //權植佔比

@@ -4,13 +4,14 @@ use anyhow::{Error, Result};
 use tokio::task;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 
-use crate::event::ddns;
 use crate::{
     backfill::{
         delisted_company, dividend, financial_statement, isin, net_asset_value_per_share,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
-    bot, event, logging,
+    bot, event,
+    event::ddns,
+    logging,
 };
 
 /// 啟動排程
@@ -71,8 +72,8 @@ async fn run_cron(sched: &JobScheduler) -> std::result::Result<(), JobSchedulerE
         create_job("0 0 21 * * *", isin::execute),
         // 05:00 更新下市的股票
         create_job("0 0 21 * * *", delisted_company::execute),
-        // 05:00 更新股票權值佔比
-        create_job("0 0 21 * * *", stock_weight::execute),
+        // 06:00 更新股票權值佔比
+        create_job("0 0 22 * * *", stock_weight::execute),
         // 08:00 提醒本日除權息的股票
         create_job("0 0 0 * * *", event::taiwan_stock::ex_dividend::execute),
         // 08:00 提醒本日發放股利的股票(只通知自已有的股票)

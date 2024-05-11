@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use futures::{stream, StreamExt};
+use tokio::sync::Mutex;
 
 use crate::{
     crawler::taifex,
@@ -10,46 +13,66 @@ use crate::{
 
 /// 查詢 taifex 個股權值比重
 pub async fn execute() -> Result<()> {
-    let tpex = fetch_stock_weights(StockExchange::TPEx);
-    let twse = fetch_stock_weights(StockExchange::TWSE);
-    let (res_tpex, res_twse, _) = tokio::join!(tpex, twse, SymbolAndWeight::zeroed_out());
-    let mut stock_weights: Vec<SymbolAndWeight> = Vec::with_capacity(2000);
+    let stock_weights = Arc::new(Mutex::new(Vec::with_capacity(2000)));
+    let error_occurred = Arc::new(Mutex::new(false));
+    let tpex_task = handle_stock_exchange(
+        StockExchange::TPEx,
+        stock_weights.clone(),
+        error_occurred.clone(),
+    );
+    let twse_task = handle_stock_exchange(
+        StockExchange::TWSE,
+        stock_weights.clone(),
+        error_occurred.clone(),
+    );
+    // Handle the results of the joined tasks
+    let (tpex_result, twse_result) = tokio::join!(tpex_task, twse_task);
 
-    match res_tpex {
-        Ok(tpex_weights) => {
-            stock_weights.extend(tpex_weights);
+    // Check and handle errors from each task
+    tpex_result?;
+    twse_result?;
+
+    let weights = stock_weights.lock().await;
+    let error = error_occurred.lock().await;
+
+    if !*error && !weights.is_empty() {
+        SymbolAndWeight::zeroed_out().await?;
+        stream::iter(weights.clone())
+            .for_each_concurrent(util::concurrent_limit_16(), |sw| async move {
+                if let Err(why) = sw.update().await {
+                    logging::error_file_async(format!(
+                        "Failed to stock_weight.update because {:#?}",
+                        why
+                    ));
+                }
+            })
+            .await;
+    }
+
+    Ok(())
+}
+
+async fn handle_stock_exchange(
+    exchange: StockExchange,
+    stock_weights: Arc<Mutex<Vec<SymbolAndWeight>>>,
+    error_occurred: Arc<Mutex<bool>>,
+) -> Result<()> {
+    let result = fetch_stock_weights(exchange).await;
+    let mut weights = stock_weights.lock().await;
+
+    match result {
+        Ok(new_weights) => {
+            weights.extend(new_weights);
         }
         Err(why) => {
+            let mut error = error_occurred.lock().await;
+            *error = true;
             logging::error_file_async(format!(
-                "Failed to fetch_stock_weights tpex because {:#?}",
-                why
+                "Failed to fetch_stock_weights {:?} because {:#?}",
+                exchange, why
             ));
         }
     }
-
-    match res_twse {
-        Ok(twse_weights) => {
-            stock_weights.extend(twse_weights);
-        }
-        Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to fetch_stock_weights twse because {:#?}",
-                why
-            ));
-        }
-    }
-
-    stream::iter(stock_weights)
-        .for_each_concurrent(util::concurrent_limit_16(), |sw| async move {
-            if let Err(why) = sw.update().await {
-                logging::error_file_async(format!(
-                    "Failed to stock_weight.update because {:#?}",
-                    why
-                ));
-            }
-        })
-        .await;
-
     Ok(())
 }
 
