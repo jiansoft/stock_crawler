@@ -1,8 +1,8 @@
 use std::{env, future::Future};
 
-use anyhow::{Error, Result};
+use anyhow::{Context, Error, Result};
 use tokio::task;
-use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
+use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
     backfill::{
@@ -16,7 +16,7 @@ use crate::{
 
 /// 啟動排程
 pub async fn start(sched: &JobScheduler) -> Result<()> {
-    run_cron(sched).await?;
+    run_cron(sched).await.context("Failed to run cron jobs")?;
 
     let s = sched.clone();
 
@@ -39,10 +39,10 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
         env::consts::ARCH
     );
 
-    bot::telegram::send(&msg).await
+    bot::telegram::send(&msg).await.context("Failed to send startup message") 
 }
 
-async fn run_cron(sched: &JobScheduler) -> std::result::Result<(), JobSchedulerError> {
+async fn run_cron(sched: &JobScheduler) -> Result<()>  {
     //let sched = JobScheduler::new().await?;
     //                 sec  min   hour   day of month   month   day of week   year
     //let expression = "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2";
@@ -72,8 +72,6 @@ async fn run_cron(sched: &JobScheduler) -> std::result::Result<(), JobSchedulerE
         create_job("0 0 21 * * *", isin::execute),
         // 05:00 更新下市的股票
         create_job("0 0 21 * * *", delisted_company::execute),
-        // 06:00 更新股票權值佔比
-        create_job("0 0 22 * * *", stock_weight::execute),
         // 08:00 提醒本日除權息的股票
         create_job("0 0 0 * * *", event::taiwan_stock::ex_dividend::execute),
         // 08:00 提醒本日發放股利的股票(只通知自已有的股票)
@@ -83,6 +81,8 @@ async fn run_cron(sched: &JobScheduler) -> std::result::Result<(), JobSchedulerE
             event::taiwan_stock::public::execute().await
             //Ok(())
         }),
+        // 10:00 更新股票權值佔比
+        create_job("0 0 2 * * *", stock_weight::execute),
         // 15:00 取得收盤報價數據
         create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
@@ -97,10 +97,10 @@ async fn run_cron(sched: &JobScheduler) -> std::result::Result<(), JobSchedulerE
     ];
 
     for job in jobs.into_iter().flatten() {
-        sched.add(job).await?;
+        sched.add(job).await.context("Failed to add job to scheduler")?;
     }
 
-    sched.start().await
+    sched.start().await.context("Failed to start scheduler")
 }
 
 pub trait Scheduler {

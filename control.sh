@@ -72,6 +72,7 @@ function docker_build() {
 #  build
 #  sleep 1
   docker build -t stock-rust-image -f Dockerfile_live .
+  docker system prune -f
 }
 
 function docker_stop() {
