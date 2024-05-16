@@ -25,6 +25,7 @@ lazy_static = "1.4"
 log = { version = "^0.4", features = ["std"] }
 num_cpus = "1.16"
 once_cell = "1.19"
+openssl = { version = "0.10", features = ["vendored"] }
 prost = "0.12"
 rand = "0.8"
 rayon = "1.10"
@@ -48,7 +49,6 @@ tokio-test = "0.4"
 tonic = { version = "0.11", features = ["transport", "tls", "channel", "gzip"] }
 ttl_cache = "0.5"
 urlencoding = "2.1"
-openssl = { version = "0.10", features = ["vendored"] }
 
 [build-dependencies]
 tonic-build = "0.11"
