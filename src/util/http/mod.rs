@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::Duration};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::{header, Client, Method, RequestBuilder, Response};
@@ -250,11 +250,9 @@ async fn send(
     headers: Option<header::HeaderMap>,
     body: Option<impl FnOnce(RequestBuilder) -> RequestBuilder>,
 ) -> Result<Response> {
-    let _permit = SEMAPHORE.acquire().await;
-
-    logging::info_file_async(format!("visit {}:{url}", method.as_str()));
-
-    let mut rb = get_client()?.request(method, url);
+    let visit_log = format!("{}:{url}", method.as_str());
+    let client = get_client()?;
+    let mut rb = client.request(method, url);
 
     if let Some(h) = headers {
         rb = rb.headers(h);
@@ -265,29 +263,31 @@ async fn send(
     }
 
     for attempt in 1..=MAX_RETRIES {
-        let rb_clone = match rb.try_clone() {
-            Some(rb_clone) => rb_clone,
-            None => bail!(
-                "Failed to rb.try_clone {} attempts to send request to {}.",
-                attempt,
-                url,
-            ),
-        };
+        if let Some(rb_clone) = rb.try_clone() {
+            let _permit = SEMAPHORE.acquire().await;
 
-        match rb_clone.send().await {
-            Ok(response) => return Ok(response),
-            Err(_) if attempt <= MAX_RETRIES => {
-                let delay = Duration::from_secs(2u64.pow((attempt - 1) as u32)); // Exponential backoff
-                sleep(delay).await; // add delay before retry
-                continue;
+            logging::info_file_async(format!("Attempt {} to send {}", attempt, visit_log));
+
+            match rb_clone.send().await {
+                Ok(response) => return Ok(response),
+                Err(why) => {
+                    if attempt < MAX_RETRIES {
+                        logging::info_file_async(format!(
+                            "Failed to send attempt {} to {}: {}. Retrying...",
+                            attempt, url, why
+                        ));
+                        let delay = Duration::from_secs(2u64.pow((attempt - 1) as u32));
+                        sleep(delay).await;
+                    } else {
+                        return Err(anyhow!(
+                            "Failed to send request to {} after {} attempts: {}",
+                            url,
+                            attempt,
+                            why
+                        ));
+                    }
+                }
             }
-            Err(why) => bail!(
-                "Failed to send({}) request to {} because {:?}, giving up after {} attempts.",
-                attempt,
-                url,
-                why,
-                MAX_RETRIES
-            ),
         }
     }
 
