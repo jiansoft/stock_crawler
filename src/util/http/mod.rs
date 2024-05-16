@@ -14,7 +14,7 @@ pub mod user_agent;
 
 /// A semaphore for limiting concurrent requests.
 ///
-/// The initial number of permits is set to four times the number of available CPU cores.
+/// The initial number of permits is set to eight times the number of available CPU cores.
 static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
     let cpus = num_cpus::get();
     Semaphore::new(cpus * 8)
