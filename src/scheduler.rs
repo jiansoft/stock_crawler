@@ -81,8 +81,8 @@ async fn run_cron(sched: &JobScheduler) -> Result<()>  {
             event::taiwan_stock::public::execute().await
             //Ok(())
         }),
-        // 10:00 更新股票權值佔比
-        create_job("0 0 2 * * *", stock_weight::execute),
+        // 11:00 更新股票權值佔比
+        create_job("0 0 3 * * *", stock_weight::execute),
         // 15:00 取得收盤報價數據
         create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
