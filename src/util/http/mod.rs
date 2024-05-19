@@ -3,6 +3,7 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
+use reqwest::header::SET_COOKIE;
 use reqwest::{header, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Semaphore, time::sleep};
@@ -64,6 +65,7 @@ fn get_client() -> Result<&'static Client> {
             .deflate(true)
             .gzip(true)
             .connect_timeout(Duration::from_secs(10))
+            .cookie_store(true)
             .tcp_keepalive(Duration::from_secs(30))
             .pool_max_idle_per_host(10)
             .no_proxy()
@@ -95,6 +97,10 @@ pub async fn get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
         .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
 }
 
+pub async fn get_response(url: &str, headers: Option<header::HeaderMap>) -> Result<Response> {
+    send(Method::GET, url, headers, None::<fn(_) -> _>).await
+}
+
 /// Performs an HTTP GET request and returns the response as text.
 ///
 /// # Arguments
@@ -105,15 +111,22 @@ pub async fn get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
 ///
 /// * `Result<String>`: The response text, or an error if the request fails or the response cannot be parsed.
 pub async fn get(url: &str, headers: Option<header::HeaderMap>) -> Result<String> {
-    send(Method::GET, url, headers, None::<fn(_) -> _>)
+    get_response(url, headers)
         .await?
         .text()
         .await
         .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
 }
 
-pub async fn get_response(url: &str, headers: Option<header::HeaderMap>) -> Result<Response> {
-    send(Method::GET, url, headers, None::<fn(_) -> _>).await
+pub fn extract_cookies(response: &Response) -> Option<String> {
+    response
+        .headers()
+        .get_all(SET_COOKIE)
+        .iter()
+        .map(|val| val.to_str().unwrap().to_string())
+        .collect::<Vec<_>>()
+        .join("; ")
+        .into()
 }
 
 /// Performs an HTTP GET request and returns the response as Big5 encoded text.
@@ -272,7 +285,7 @@ async fn send(
                 Ok(response) => return Ok(response),
                 Err(why) => {
                     if attempt < MAX_RETRIES {
-                        logging::info_file_async(format!(
+                        logging::error_file_async(format!(
                             "Failed to send attempt {} to {}: {}. Retrying...",
                             attempt, url, why
                         ));

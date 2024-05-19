@@ -13,3 +13,22 @@ pub async fn visit() -> Result<String> {
     let url = DDNS_URL.get_or_init(|| format!("https://{host}", host = HOST,));
     util::http::get(url, None).await
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::logging;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_visit() {
+        match visit().await {
+            Ok(ip) => {
+                dbg!(ip);
+            }
+            Err(why) => {
+                logging::error_file_async(format!("Failed to get because {:?}", why));
+            }
+        }
+    }
+}

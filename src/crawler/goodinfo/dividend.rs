@@ -1,12 +1,13 @@
 use anyhow::{anyhow, Result};
 use hashbrown::HashMap;
 use regex::Regex;
-use reqwest::header::HeaderMap;
+use reqwest::header::{HeaderMap, COOKIE};
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use urlencoding::encode;
 
+use crate::cache::SHARE;
 use crate::{
     crawler::goodinfo::HOST,
     logging,
@@ -104,7 +105,7 @@ impl Keyable for GoodInfoDividend {
 /// 抓取年度股利資料
 pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDividend>>> {
     let url = format!(
-        "https://{}/tw/StockDividendPolicy.asp?STOCK_ID={}&STEP=DATA&SHEET={}",
+        "https://{}/tw/StockDividendPolicy.asp?STOCK_ID={}&STEP=DATA&SHEET={}&INITIALIZED=T",
         HOST,
         stock_symbol,
         encode("股利所屬年度")
@@ -113,16 +114,42 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
     let ua = http::user_agent::gen_random_ua();
     let mut headers = HeaderMap::new();
 
+    /*headers.insert("Host", HOST.parse()?);
+    headers.insert("Referer", url.parse()?);
+    headers.insert("User-Agent", ua.parse()?);
+    headers.insert(COOKIE,"CLIENT%5FID=20240517225034945%5F1%2E171%2E137%2E180".parse()?);
+    //StockDividendPolicy.asp?STOCK_ID=2880
+    //Lib.js/Initial.asp
+    //Lib.js/Utility.asp
+    //Lib.js/Cookie.asp
+    let cookie_url = format!("https://{}/tw/StockDividendPolicy.asp?STOCK_ID=2880", HOST);
+    let res = http::get_response(&cookie_url, Some(headers)).await?;
+    let cookie =http::extract_cookies(&res);
+    dbg!(&res);
+    let t = &res.text().await?;
+    dbg!(t);
+    dbg!(cookie);
+
+    headers = HeaderMap::new();*/
+
     headers.insert("Host", HOST.parse()?);
     headers.insert("Referer", url.parse()?);
     headers.insert("User-Agent", ua.parse()?);
     headers.insert("content-length", "0".parse()?);
     headers.insert("content-type", "application/x-www-form-urlencoded".parse()?);
+    let cookie_val = format!("CLIENT%5FID=1st%5F{}; SL_G_WPT_TO=zh-TW; TW_STOCK_BROWSE_LIST={}; SL_GWPT_Show_Hide_tmp=1; SL_wptGlobTipTmp=1; IS_TOUCH_DEVICE=F; SCREEN_SIZE=WIDTH=2560&HEIGHT=1440",
+                              encode(SHARE.get_current_ip().unwrap().as_str()),
+                             stock_symbol);
+    headers.insert(COOKIE, cookie_val.parse()?);
 
     let text = http::post(&url, Some(headers), None).await?;
 
     if text.contains("您的瀏覽量異常") {
         return Err(anyhow!("{} 瀏覽量異常", url));
+    }
+
+    if text.contains("初始化中") {
+        return Err(anyhow!("{} 初始化中", url));
     }
 
     let document = Html::parse_document(text.as_str());
@@ -246,7 +273,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("3008").await {
+        match visit("2330").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("dividend : {:#?}", e));

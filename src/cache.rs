@@ -5,6 +5,7 @@ use rust_decimal::Decimal;
 
 //use futures::executor::block_on;
 
+use crate::crawler::share;
 use crate::{
     database::table::{
         daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,
@@ -33,12 +34,14 @@ pub struct Share {
     industries: HashMap<&'static str, i32>,
     /// 股票產業分類(2, 'TAI', '上市', 1),(4, 'TWO', '上櫃', 2), (5, 'TWE', '興櫃', 2);
     exchange_markets: HashMap<i32, stock_exchange_market::StockExchangeMarket>,
+    /// 目前的 IP
+    current_ip: RwLock<String>,
 }
 
 impl Share {
     pub fn new() -> Self {
-       // let other : &'static str = format!("{}業", Industry::Other.name());
-       //// &'static str
+        // let other : &'static str = format!("{}業", Industry::Other.name());
+        //// &'static str
         Share {
             indices: RwLock::new(HashMap::new()),
             stocks: RwLock::new(HashMap::new()),
@@ -197,9 +200,11 @@ impl Share {
             last_revenues: RwLock::new(HashMap::new()),
             last_trading_day_quotes: RwLock::new(HashMap::new()),
             quote_history_records: RwLock::new(HashMap::new()),
+            current_ip: RwLock::new(String::new()),
         }
     }
 
+    /// 載入快取
     pub async fn load(&self) {
         let indices = index::Index::fetch().await;
         match self.indices.write() {
@@ -274,6 +279,15 @@ impl Share {
             }
         }
 
+        if let Ok(ip) = share::get_public_ip().await {
+            self.set_current_ip(ip);
+        }
+
+        logging::info_file_async(format!(
+            "current_ip  {}",
+            self.current_ip.read().unwrap()
+        ));
+
         logging::info_file_async(format!(
             "CacheShare.indices 初始化 {}",
             self.indices.read().unwrap().len()
@@ -306,6 +320,21 @@ impl Share {
                     revenue.1.keys().len()
                 ));
             }
+        }
+    }
+
+    /// 將目前的IP放入快取資料內
+    pub fn set_current_ip(&self, ip: String) {
+        if let Ok(mut current_ip) = self.current_ip.write() {
+            *current_ip = ip;
+        }
+    }
+
+    /// 從快取資料內取得目前的IP
+    pub fn get_current_ip(&self)-> Option<String> {
+        match self.current_ip.read() {
+            Ok(ip) => Some(ip.clone()),
+            Err(_) => None,
         }
     }
 

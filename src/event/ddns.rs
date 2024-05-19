@@ -2,7 +2,10 @@ use anyhow::{anyhow, Result};
 
 use crate::{
     crawler::{self, share},
-    declare, logging, nosql,
+    declare,
+    logging,
+    nosql,
+    cache::SHARE
 };
 
 pub async fn refresh() -> Result<()> {
@@ -21,9 +24,11 @@ pub async fn refresh() -> Result<()> {
             return Ok(());
         }
     }
-
+    
+    SHARE.set_current_ip(ip_now.clone());
+    
     update_ddns_services(&ip_now).await;
-
+    
     nosql::redis::CLIENT
         .set(ddns_key, ip_now, declare::ONE_DAYS_IN_SECONDS)
         .await?;

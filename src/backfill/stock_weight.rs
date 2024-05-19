@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use futures::{stream, StreamExt};
@@ -15,22 +16,17 @@ use crate::{
 pub async fn execute() -> Result<()> {
     let stock_weights = Arc::new(Mutex::new(Vec::with_capacity(2000)));
     let error_occurred = Arc::new(Mutex::new(false));
-    let tpex_task = handle_stock_exchange(
-        StockExchange::TPEx,
-        stock_weights.clone(),
-        error_occurred.clone(),
-    );
-    let twse_task = handle_stock_exchange(
-        StockExchange::TWSE,
-        stock_weights.clone(),
-        error_occurred.clone(),
-    );
-    // Handle the results of the joined tasks
-    let (tpex_result, twse_result) = tokio::join!(tpex_task, twse_task);
+    let exchanges = vec![StockExchange::TPEx, StockExchange::TWSE];
 
-    // Check and handle errors from each task
-    tpex_result?;
-    twse_result?;
+    for exchange in exchanges {
+        handle_stock_exchange(
+            exchange,
+            stock_weights.clone(),
+            error_occurred.clone(),
+        ).await?;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+
 
     let weights = stock_weights.lock().await;
     let error = error_occurred.lock().await;
@@ -57,11 +53,9 @@ async fn handle_stock_exchange(
     stock_weights: Arc<Mutex<Vec<SymbolAndWeight>>>,
     error_occurred: Arc<Mutex<bool>>,
 ) -> Result<()> {
-    let result = fetch_stock_weights(exchange).await;
-    let mut weights = stock_weights.lock().await;
-
-    match result {
+    match fetch_stock_weights(exchange).await {
         Ok(new_weights) => {
+            let mut weights = stock_weights.lock().await;
             weights.extend(new_weights);
         }
         Err(why) => {
@@ -79,7 +73,6 @@ async fn handle_stock_exchange(
 async fn fetch_stock_weights(stock_exchange: StockExchange) -> Result<Vec<SymbolAndWeight>> {
     let res = taifex::stock_weight::visit(stock_exchange).await?;
     let weights = stock::extension::weight::from(res);
-
     Ok(weights)
 }
 

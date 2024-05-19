@@ -102,7 +102,7 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
         }
 
         nosql::redis::CLIENT
-            .set(cache_key, true, 60 * 60 * 24 * 7)
+            .set(cache_key, true, 60 * 60 * 24 * 3)
             .await?;
 
         if let Err(why) =
@@ -111,7 +111,7 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
             logging::error_file_async(format!("{:?} ", why));
         }
 
-        tokio::time::sleep(Duration::from_secs(90)).await;
+        tokio::time::sleep(Duration::from_secs(120)).await;
     }
 
     Ok(())
@@ -146,7 +146,7 @@ async fn process_stock_dividends(
         let entity = table::dividend::Dividend::from(dividend_from_goodinfo);
         match entity.upsert().await {
             Ok(_) => {
-                logging::info_file_async(format!(
+                logging::debug_file_async(format!(
                     "dividend upsert executed successfully. \r\n{:#?}",
                     entity
                 ));
@@ -280,7 +280,7 @@ mod tests {
     async fn test_processing_without_or_multiple() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        match processing_no_or_multiple(2838).await {
+        match processing_no_or_multiple(2024).await {
             Ok(_) => {
                 logging::debug_file_async(
                     "processing_without_or_multiple executed successfully.".to_string(),
