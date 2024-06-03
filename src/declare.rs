@@ -1,3 +1,4 @@
+use chrono::{Local, NaiveTime};
 use serde_derive::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 
@@ -66,6 +67,17 @@ impl StockExchange {
             StockExchange::TWSE => 1,
             StockExchange::TPEx => 2,
         }
+    }
+
+    /// 目前的時間是否為開盤時間
+    pub fn is_open(&self) -> bool {
+        // 獲取當前時間
+        let now = Local::now().time();
+        let start_time = NaiveTime::from_hms_opt(9, 0, 0).expect("Invalid start time");
+        let end_time = NaiveTime::from_hms_opt(13, 30, 0).expect("Invalid end time");
+
+        // 判斷當前時間是否在範圍內
+        now >= start_time && now <= end_time
     }
 
     pub fn iterator() -> impl Iterator<Item = Self> {
@@ -264,7 +276,7 @@ impl Industry {
             Industry::TourismCatering => "觀光餐旅",
             Industry::DepositaryReceipts => "存託憑證",
             Industry::Uncategorized => "未分類",
-            Industry::Electronic => "電子工業"
+            Industry::Electronic => "電子工業",
         }
     }
 
@@ -326,9 +338,9 @@ pub struct StockQuotes {
 }
 
 /// 三天的秒數
-pub const THREE_DAYS_IN_SECONDS:usize = 60 * 60 * 24 * 3;
+pub const THREE_DAYS_IN_SECONDS: usize = 60 * 60 * 24 * 3;
 /// 一天的秒數
-pub const ONE_DAYS_IN_SECONDS:usize = 60 * 60 * 24 ;
+pub const ONE_DAYS_IN_SECONDS: usize = 60 * 60 * 24;
 
 #[cfg(test)]
 mod tests {}

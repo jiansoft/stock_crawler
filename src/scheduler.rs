@@ -1,7 +1,6 @@
 use std::{env, future::Future};
 
 use anyhow::{Context, Error, Result};
-use tokio::task;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
@@ -9,7 +8,7 @@ use crate::{
         delisted_company, dividend, financial_statement, isin, net_asset_value_per_share,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
-    bot, event,
+    bot, declare, event,
     event::ddns,
     logging,
 };
@@ -18,31 +17,25 @@ use crate::{
 pub async fn start(sched: &JobScheduler) -> Result<()> {
     run_cron(sched).await.context("Failed to run cron jobs")?;
 
-    let s = sched.clone();
-
-    task::spawn(async move {
+    //若在開盤埘間重啟服務定時任務會無法觸發，所以在啟動時要先執行股價追踪的任務，執行完後再設定一次定時任務
+    if declare::StockExchange::TWSE.is_open() {
         if let Err(why) = event::trace::stock_price::execute().await {
             logging::error_file_async(format!("{:?}", why));
         }
-
-        // 09:00 提醒本日已達高低標的股票有那些
-        if let Ok(j) = create_job("0 0 1 * * *", event::trace::stock_price::execute) {
-            if let Err(why) = s.add(j).await {
-                logging::error_file_async(format!("{:?}", why));
-            }
-        }
-    });
-
+    }
+    
     let msg = format!(
         "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
         env::consts::OS,
         env::consts::ARCH
     );
 
-    bot::telegram::send(&msg).await.context("Failed to send startup message") 
+    bot::telegram::send(&msg)
+        .await
+        .context("Failed to send startup message")
 }
 
-async fn run_cron(sched: &JobScheduler) -> Result<()>  {
+async fn run_cron(sched: &JobScheduler) -> Result<()> {
     //let sched = JobScheduler::new().await?;
     //                 sec  min   hour   day of month   month   day of week   year
     //let expression = "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2";
@@ -83,6 +76,8 @@ async fn run_cron(sched: &JobScheduler) -> Result<()>  {
         }),
         // 09:00 更新股票權值佔比
         create_job("0 0 1 * * *", stock_weight::execute),
+        // 09:00 提醒本日已達高低標的股票有那些
+        create_job("0 0 1 * * *", event::trace::stock_price::execute),
         // 15:00 取得收盤報價數據
         create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
@@ -97,7 +92,10 @@ async fn run_cron(sched: &JobScheduler) -> Result<()>  {
     ];
 
     for job in jobs.into_iter().flatten() {
-        sched.add(job).await.context("Failed to add job to scheduler")?;
+        sched
+            .add(job)
+            .await
+            .context("Failed to add job to scheduler")?;
     }
 
     sched.start().await.context("Failed to start scheduler")

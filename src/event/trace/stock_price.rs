@@ -1,20 +1,19 @@
 use std::time::Duration;
 
-use anyhow::Result;
-use chrono::{Datelike, Local, Timelike};
+use anyhow::{Context, Result};
+use chrono::{Datelike, Local, NaiveDate};
 use rust_decimal::Decimal;
+use tokio::{task, time, time::Instant};
 
-use tokio::{time, time::Instant};
-
-use crate::crawler::twse;
 use crate::{
     bot,
     cache::SHARE,
     crawler::{self},
     database::table::trace::Trace,
-    logging, nosql,
+    declare, logging, nosql,
     util::{datetime::Weekend, map::Keyable},
 };
+use crate::crawler::twse;
 
 /// 提醒本日已達高低標的股票有那些
 pub async fn execute() -> Result<()> {
@@ -24,48 +23,49 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    let holidays = match twse::holiday_schedule::visit(now.year()).await {
-        Ok(h) => h,
-        Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to visit twse::holiday_schedule because {:?}",
-                why
-            ));
-            return Ok(());
+    // 檢查是否為國定假日休市
+    if is_holiday(now.date_naive()).await? {
+        return Ok(());
+    }
+
+    task::spawn(async {
+        let mut task_interval = time::interval_at(Instant::now(), Duration::from_secs(60));
+        loop {
+            task_interval.tick().await;
+            // 檢查是否在開盤時間內
+            if !declare::StockExchange::TWSE.is_open() {
+                logging::debug_file_async("已達關盤時間".to_string());
+                break;
+            }
+
+            if let Err(why) = trace_target_price().await {
+                logging::error_file_async(format!("Failed to trace target price: {:?}", why));
+            }
         }
-    };
-    let today = now.date_naive();
+    });
+
+    Ok(())
+}
+
+/// 檢查給定日期是否為假日
+async fn is_holiday(today: NaiveDate) -> Result<bool> {
+    let holidays = twse::holiday_schedule::visit(today.year())
+        .await
+        .context("Failed to visit TWSE holiday schedule")?;
 
     for holiday in holidays {
         if holiday.date == today {
             logging::info_file_async(format!(
-                "Today is a holiday({why}), and the market is closed.",
-                why = holiday.why
+                "Today is a holiday ({}), and the market is closed.",
+                holiday.why
             ));
-
-            return Ok(());
+            return Ok(true);
         }
     }
 
-    let mut task_interval = time::interval_at(Instant::now(), Duration::from_secs(60));
-
-    loop {
-        task_interval.tick().await;
-
-        let now = Local::now();
-        // 檢查當前時間是否還未到九點與是否超過13:30 關盤時間
-        if now.hour() < 9 || (now.hour() > 13 || (now.hour() == 13 && now.minute() >= 30)) {
-            logging::debug_file_async("已達關盤時間".to_string());
-            break;
-        }
-
-        if let Err(why) = trace_target_price().await {
-            logging::error_file_async(format!("{:?}", why));
-        }
-    }
-
-    Ok(())
+    Ok(false)
 }
+
 
 async fn trace_target_price() -> Result<()> {
     let futures = Trace::fetch()
@@ -107,7 +107,7 @@ async fn alert_on_price_boundary(target: Trace, current_price: Decimal) -> Resul
             return Ok(false);
         }
     }
-    
+
     let to_bot_msg = format_alert_message(&target, current_price).await;
 
     nosql::redis::CLIENT
@@ -189,8 +189,9 @@ fn no_need_to_alert(target: &Trace, current_price: Decimal) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use rust_decimal_macros::dec;
+
+    use super::*;
 
     #[tokio::test]
     #[ignore]
