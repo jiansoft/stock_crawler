@@ -82,6 +82,7 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     let url = format!("https://{}/quote/{}/dividend", HOST, stock_symbol);
     let text = http::get(&url, None).await?;
     let document = Html::parse_document(&text);
+    //#main-2-QuoteDividend-Proxy > div > section.Mb\(\$m-module\).Mb\(\$mobile-m-module\)--mobile > div.Pos\(r\).Ov\(h\) > div.table-body.Pos\(r\).Bxz\(bb\).W\(100\%\).Ovx\(s\).Ovy\(h\) > div > div > ul > li:nth-child(1) > div
     let selector = match Selector::parse(
         "#main-2-QuoteDividend-Proxy > div > section > div > div > div > div > ul > li",
     ) {
@@ -193,8 +194,9 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("2330").await {
+        match visit("5904").await {
             Ok(e) => {
+                dbg!(&e);
                 logging::debug_file_async(format!("e:{:#?}", e));
             }
             Err(why) => {

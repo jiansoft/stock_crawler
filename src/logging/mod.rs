@@ -3,14 +3,12 @@ use std::{
     fs::{self},
     io::Write,
     path::{Path, PathBuf},
+    thread,
 };
 
 use chrono::{format::DelayedFormat, Local};
+use crossbeam_channel::{unbounded, Sender};
 use once_cell::sync::Lazy;
-use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedSender},
-    task,
-};
 
 use crate::logging::rotate::Rotate;
 
@@ -19,10 +17,10 @@ pub mod rotate;
 static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new("default"));
 
 pub struct Logger {
-    info_writer: UnboundedSender<String>,
-    warn_writer: UnboundedSender<String>,
-    error_writer: UnboundedSender<String>,
-    debug_writer: UnboundedSender<String>,
+    info_writer: Sender<String>,
+    warn_writer: Sender<String>,
+    error_writer: Sender<String>,
+    debug_writer: Sender<String>,
 }
 
 impl Logger {
@@ -55,25 +53,25 @@ impl Logger {
         self.send(log, &self.debug_writer);
     }
 
-    pub fn send(&self, msg: String, writer: &UnboundedSender<String>) {
+    pub fn send(&self, msg: String, writer: &Sender<String>) {
         if let Err(why) = writer.send(msg) {
             error_console(why.to_string());
         }
     }
 
-    fn create_writer(log_name: &str) -> UnboundedSender<String> {
+    fn create_writer(log_name: &str) -> Sender<String> {
         let log_path = Self::get_log_path(log_name).unwrap_or_else(|| {
             panic!("Failed to create log directory.");
         });
-        let (tx, mut rx) = unbounded_channel::<String>();
+        let (tx, rx) = unbounded::<String>();
 
-        task::spawn(async move {
+        thread::spawn(move || {
             let mut line = String::with_capacity(2048);
             let mut rotate = Rotate::new(log_path.display().to_string());
 
-            while let Some(received_message) = rx.recv().await {
+            for received_message in &rx {
                 let now = Local::now();
-                
+
                 if let Err(why) = writeln!(
                     &mut line,
                     "{} {}",

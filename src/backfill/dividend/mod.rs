@@ -14,7 +14,6 @@ use crate::{
     util::map::Keyable,
 };
 
-
 pub mod payout_ratio;
 
 /// 更新股利發送數據
@@ -126,12 +125,20 @@ async fn process_stock_dividends(
     let last_year = year - 1;
     let relevant_years = [year, last_year];
     // 合併今年度和去年的股利數據
-    let dividend_details_from_goodinfo = relevant_years.iter().filter_map(|&yr| {
-        dividends_from_goodinfo.get(&yr).map(|details| details.iter().cloned())
-    }).flatten().collect::<Vec<_>>();
+    let dividend_details_from_goodinfo = relevant_years
+        .iter()
+        .filter_map(|&yr| {
+            dividends_from_goodinfo
+                .get(&yr)
+                .map(|details| details.iter().cloned())
+        })
+        .flatten()
+        .collect::<Vec<_>>();
 
     for dividend_from_goodinfo in dividend_details_from_goodinfo {
-        if dividend_from_goodinfo.year_of_dividend != year &&  dividend_from_goodinfo.year_of_dividend != last_year {
+        if dividend_from_goodinfo.year_of_dividend != year
+            && dividend_from_goodinfo.year_of_dividend != last_year
+        {
             continue;
         }
 
@@ -152,7 +159,7 @@ async fn process_stock_dividends(
 
                 if !entity.quarter.is_empty() {
                     //更新股利年度的數據
-                    if let Err(why) = entity.upsert_annual_total_dividend().await{
+                    if let Err(why) = entity.upsert_annual_total_dividend().await {
                         logging::error_file_async(format!("{:?} ", why));
                     }
                 }
@@ -180,7 +187,15 @@ async fn processing_unannounced_ex_dividend_date(year: i32) -> Result<()> {
         dividends.len()
     ));
 
-    let tasks: Vec<_> = dividends
+    for dividend in dividends {
+        if let Err(why) = processing_unannounced_ex_dividend_date_from_yahoo(dividend, year).await {
+            logging::error_file_async(format!(
+                "Failed to fetch_dividend_from_yahoo because {:?}",
+                why
+            ));
+        }
+    }
+    /*let tasks: Vec<_> = dividends
         .into_iter()
         .map(|d| processing_unannounced_ex_dividend_date_from_yahoo(d, year))
         .collect();
@@ -193,7 +208,8 @@ async fn processing_unannounced_ex_dividend_date(year: i32) -> Result<()> {
                 why
             ));
         }
-    }
+    }*/
+
     Ok(())
 }
 
@@ -258,7 +274,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 processing_with_unannounced_ex_dividend_dates".to_string());
 
-        match processing_unannounced_ex_dividend_date(2023).await {
+        match processing_unannounced_ex_dividend_date(2024).await {
             Ok(_) => {
                 logging::debug_file_async(
                     "processing_with_unannounced_ex_dividend_dates executed successfully."

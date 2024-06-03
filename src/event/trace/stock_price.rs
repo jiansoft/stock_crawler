@@ -280,8 +280,10 @@ mod tests {
 
         match execute().await {
             Ok(_) => {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 //dbg!(&list);
                 //logging::debug_file_async(format!("list:{:#?}", list));
+               
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to execute because: {:?}", why));

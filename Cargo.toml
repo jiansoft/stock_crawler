@@ -13,7 +13,7 @@ chrono = { version = "0.4", features = ["serde"] }
 concat-string = "1.0.1"
 config = "0.14"
 #crossbeam = "0.8"
-#crossbeam-channel = "0.5"
+crossbeam-channel = "0.5"
 deadpool-redis = "0.15.0"
 digest = "0.10"
 dotenv = "0.15"
