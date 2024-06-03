@@ -66,7 +66,7 @@ impl Rotate {
                 self.generation = generation;
                 self.rotate(now);
 
-                *cur_fn = self.cur_fn.clone();
+                cur_fn.clone_from(&self.cur_fn);
             }
             Err(why) => {
                 logging::error_console(format!("Failed to cur_fn_lock.write because:{:?}", why));
