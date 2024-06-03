@@ -1,7 +1,6 @@
 use std::sync::Arc;
-use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::{stream, StreamExt};
 use tokio::sync::Mutex;
 
@@ -15,29 +14,25 @@ use crate::{
 /// 查詢 taifex 個股權值比重
 pub async fn execute() -> Result<()> {
     let stock_weights = Arc::new(Mutex::new(Vec::with_capacity(2000)));
-    let error_occurred = Arc::new(Mutex::new(false));
     let exchanges = vec![StockExchange::TPEx, StockExchange::TWSE];
+    // Process each exchange concurrently
+    let tasks: Vec<_> = exchanges.into_iter()
+        .map(|exchange| handle_stock_exchange(exchange, Arc::clone(&stock_weights)))
+        .collect();
 
-    for exchange in exchanges {
-        handle_stock_exchange(
-            exchange,
-            stock_weights.clone(),
-            error_occurred.clone(),
-        ).await?;
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
+    // Await all tasks
+    futures::future::try_join_all(tasks).await.context("Failed to handle stock weight tasks")?;
 
-
+    // Acquire the lock to update weights
     let weights = stock_weights.lock().await;
-    let error = error_occurred.lock().await;
 
-    if !*error && !weights.is_empty() {
-        SymbolAndWeight::zeroed_out().await?;
+    if !weights.is_empty() {
+        SymbolAndWeight::zeroed_out().await.context("Failed to zero out SymbolAndWeight")?;
         stream::iter(weights.clone())
             .for_each_concurrent(util::concurrent_limit_16(), |sw| async move {
                 if let Err(why) = sw.update().await {
                     logging::error_file_async(format!(
-                        "Failed to stock_weight.update because {:#?}",
+                        "Failed to update stock weight: {:#?}",
                         why
                     ));
                 }
@@ -47,33 +42,20 @@ pub async fn execute() -> Result<()> {
 
     Ok(())
 }
-
+/// Handle the processing of stock weights for a given exchange
 async fn handle_stock_exchange(
     exchange: StockExchange,
     stock_weights: Arc<Mutex<Vec<SymbolAndWeight>>>,
-    error_occurred: Arc<Mutex<bool>>,
 ) -> Result<()> {
-    match fetch_stock_weights(exchange).await {
-        Ok(new_weights) => {
-            let mut weights = stock_weights.lock().await;
-            weights.extend(new_weights);
-        }
-        Err(why) => {
-            let mut error = error_occurred.lock().await;
-            *error = true;
-            logging::error_file_async(format!(
-                "Failed to fetch_stock_weights {:?} because {:#?}",
-                exchange, why
-            ));
-        }
-    }
-    Ok(())
-}
+    let res = taifex::stock_weight::visit(exchange)
+        .await
+        .with_context(|| format!("Failed to visit taifex for exchange {:?}", exchange))?;
+    let new_weights = stock::extension::weight::from(res);
+    let mut weights = stock_weights.lock().await;
 
-async fn fetch_stock_weights(stock_exchange: StockExchange) -> Result<Vec<SymbolAndWeight>> {
-    let res = taifex::stock_weight::visit(stock_exchange).await?;
-    let weights = stock::extension::weight::from(res);
-    Ok(weights)
+    weights.extend(new_weights);
+
+    Ok(())
 }
 
 #[cfg(test)]

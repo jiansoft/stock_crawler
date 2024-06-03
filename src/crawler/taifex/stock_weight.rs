@@ -1,11 +1,15 @@
 use core::result::Result::Ok;
 
 use anyhow::{anyhow, Result};
+use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::{
-    crawler::taifex,
+    crawler::{
+        taifex,
+        taifex::HOST
+    },
     declare::StockExchange,
     util::{self, http::element},
 };
@@ -60,7 +64,15 @@ impl ExchangeConfig {
 pub async fn visit(exchange: StockExchange) -> Result<Vec<StockWeight>> {
     let mut result: Vec<StockWeight> = Vec::with_capacity(1024);
     let exchange_market = ExchangeConfig::new(exchange);
-    let text = util::http::get(&exchange_market.url, None).await?;
+    let url = &exchange_market.url;
+    let ua = util::http::user_agent::gen_random_ua();
+    let mut headers = HeaderMap::new();
+
+    headers.insert("Host", HOST.parse()?);
+    headers.insert("Referer",url.parse()?);
+    headers.insert("User-Agent", ua.parse()?);
+
+    let text = util::http::get(url, Some(headers)).await?;
 
     if text.is_empty() {
         return Ok(result);
@@ -139,7 +151,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit(StockExchange::TPEx).await {
+        match visit(StockExchange::TWSE).await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("len:{}\r\n {:#?}", e.len(), e));
