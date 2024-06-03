@@ -125,7 +125,6 @@ async fn process_stock_dividends(
     let dividends_from_goodinfo = goodinfo::dividend::visit(stock_symbol).await?;
     let last_year = year - 1;
     let relevant_years = [year, last_year];
-
     // 合併今年度和去年的股利數據
     let dividend_details_from_goodinfo = relevant_years.iter().filter_map(|&yr| {
         dividends_from_goodinfo.get(&yr).map(|details| details.iter().cloned())
@@ -167,6 +166,7 @@ async fn process_stock_dividends(
     Ok(())
 }
 
+/// 處理除息日為尚未公布的股票
 async fn processing_unannounced_ex_dividend_date(year: i32) -> Result<()> {
     //除息日 尚未公布
     let dividends =
@@ -197,6 +197,7 @@ async fn processing_unannounced_ex_dividend_date(year: i32) -> Result<()> {
     Ok(())
 }
 
+/// 從雅虎取得除息日的資料
 async fn processing_unannounced_ex_dividend_date_from_yahoo(
     mut entity: dividend::Dividend,
     year: i32,
@@ -212,7 +213,7 @@ async fn processing_unannounced_ex_dividend_date_from_yahoo(
         }
     };
 
-    // 取成今年度的股利數據
+    // 取得今年度的股利數據
     if let Some(yahoo_dividend_details) = yahoo.dividend.get(&year) {
         let yahoo_dividend_detail = yahoo_dividend_details.iter().find(|detail| {
             detail.year_of_dividend == entity.year_of_dividend
