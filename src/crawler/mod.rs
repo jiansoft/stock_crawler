@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
@@ -54,9 +56,12 @@ pub trait StockInfo {
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes>;
 }
 
+/// 標記採集站點的遊標，每採集一次遊標就會+1，分別對應6個站點，每個站點都輪過一次時就會歸零從頭開始
+static INDEX: AtomicUsize = AtomicUsize::new(0);
+
 /// 取得股票的目前的報價
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
-    let sites = vec![
+    let sites = [
         Yahoo::get_stock_price,
         NStock::get_stock_price,
         CnYes::get_stock_price,
@@ -64,10 +69,15 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
         CMoney::get_stock_price,
         HiStock::get_stock_price,
     ];
+    let site_len = sites.len();
 
-    for fetch_func in sites {
-        if let Ok(price) = fetch_func(stock_symbol).await {
-            return Ok(price);
+    for _ in 0..site_len {
+        let index = INDEX.fetch_add(1, Ordering::SeqCst) % site_len;
+        let current_site = index % site_len;
+        let r = sites[current_site](stock_symbol).await;
+
+        if r.is_ok() {
+            return r;
         }
     }
 
@@ -81,18 +91,23 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 pub async fn fetch_stock_quotes_from_remote_site(
     stock_symbol: &str,
 ) -> Result<declare::StockQuotes> {
-    let sites = vec![
-        Yahoo::get_stock_quotes,
+    let sites = [
         NStock::get_stock_quotes,
+        Yahoo::get_stock_quotes,
         CnYes::get_stock_quotes,
         PcHome::get_stock_quotes,
         CMoney::get_stock_quotes,
         HiStock::get_stock_quotes,
     ];
+    let site_len = sites.len();
 
-    for fetch_func in sites {
-        if let Ok(sq) = fetch_func(stock_symbol).await {
-            return Ok(sq);
+    for _ in 0..site_len {
+        let index = INDEX.fetch_add(1, Ordering::SeqCst) % site_len;
+        let current_site = index % site_len;
+        let r = sites[current_site](stock_symbol).await;
+
+        if r.is_ok() {
+            return r;
         }
     }
 
@@ -104,23 +119,55 @@ pub async fn fetch_stock_quotes_from_remote_site(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::logging;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_fetch_stock_price_from_remote_site() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_price".to_string());
 
-        match fetch_stock_price_from_remote_site("2330").await {
-            Ok(e) => {
-                dbg!(e);
-            }
-            Err(why) => {
-                logging::debug_file_async(format!("Failed to fetch_price because {:?}", why));
+        let sites = [
+            "2330", "1101", "1232", "1303", "1326", "3008", "9941", "2912",
+        ];
+
+        for site in sites {
+            match fetch_stock_price_from_remote_site(site).await {
+                Ok(e) => {
+                    //dbg!(e);
+                    println!("{}:{}", site, e);
+                }
+                Err(why) => {
+                    logging::debug_file_async(format!("Failed to fetch_price because {:?}", why));
+                }
             }
         }
 
         logging::debug_file_async("結束 fetch_price".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_stock_quotes_from_remote_site() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_stock_quotes_from_remote_site".to_string());
+
+        let sites = [
+            "2330", "1101", "1232", "1303", "1326", "3008", "9941", "2912",
+        ];
+
+        for site in sites {
+            match fetch_stock_quotes_from_remote_site(site).await {
+                Ok(e) => {
+                    //dbg!(e);
+                    println!("{}:{:?}", site, e);
+                }
+                Err(why) => {
+                    logging::debug_file_async(format!("Failed to fetch_price because {:?}", why));
+                }
+            }
+        }
+
+        logging::debug_file_async("結束 fetch_stock_quotes_from_remote_site".to_string());
     }
 }

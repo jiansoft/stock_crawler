@@ -3,12 +3,17 @@ use std::{
     fs::{self},
     io::Write,
     path::{Path, PathBuf},
-    thread,
 };
 
 use chrono::{format::DelayedFormat, Local};
-use crossbeam_channel::{unbounded, Sender};
 use once_cell::sync::Lazy;
+use tokio::{
+    sync::{
+        mpsc::UnboundedReceiver,
+        mpsc::{self, UnboundedSender}
+    },
+    task
+};
 
 use crate::logging::rotate::Rotate;
 
@@ -17,10 +22,10 @@ pub mod rotate;
 static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new("default"));
 
 pub struct Logger {
-    info_writer: Sender<String>,
-    warn_writer: Sender<String>,
-    error_writer: Sender<String>,
-    debug_writer: Sender<String>,
+    info_writer: UnboundedSender<String>,
+    warn_writer: UnboundedSender<String>,
+    error_writer: UnboundedSender<String>,
+    debug_writer: UnboundedSender<String>,
 }
 
 impl Logger {
@@ -53,72 +58,62 @@ impl Logger {
         self.send(log, &self.debug_writer);
     }
 
-    pub fn send(&self, msg: String, writer: &Sender<String>) {
+    pub fn send(&self, msg: String, writer: &UnboundedSender<String>) {
         if let Err(why) = writer.send(msg) {
             error_console(why.to_string());
         }
     }
 
-    fn create_writer(log_name: &str) -> Sender<String> {
+    fn create_writer(log_name: &str) -> UnboundedSender<String> {
         let log_path = Self::get_log_path(log_name).unwrap_or_else(|| {
             panic!("Failed to create log directory.");
         });
-        let (tx, rx) = unbounded::<String>();
 
-        thread::spawn(move || {
-            let mut line = String::with_capacity(2048);
-            let mut rotate = Rotate::new(log_path.display().to_string());
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
 
-            for received_message in &rx {
-                let now = Local::now();
+        task::spawn(Self::process_messages(rx, log_path.display().to_string()));
+        
+        tx
+    }
 
-                if let Err(why) = writeln!(
-                    &mut line,
-                    "{} {}",
-                    now.format("%F %X%.6f"),
-                    received_message
-                ) {
-                    error_console(format!("Failed to writeln a message. because:{:#?}", why));
-                    continue;
-                }
+    async fn process_messages(mut rx: UnboundedReceiver<String>, log_path: String) {
+        let mut line = String::with_capacity(2048);
+        let mut rotate = Rotate::new(log_path);
 
-                if !rx.is_empty() && line.len() < 2048 {
-                    continue;
-                }
+        while let Some(message) = rx.recv().await {
+            let now = Local::now();
 
-                if let Err(why) = writeln!(&mut line) {
-                    error_console(format!("Failed to writeln a line. because:{:#?}", why));
-                    continue;
-                }
+            if let Err(why) = writeln!(&mut line, "{} {}", now.format("%F %X%.6f"), message) {
+                error_console(format!("Failed to writeln a message. because:{:#?}", why));
+                continue;
+            }
 
-                if let Some(writer) = rotate.get_writer(now) {
-                    match writer.write() {
-                        Ok(mut w) => {
-                            if let Err(why) = w.write_all(line.as_bytes()) {
-                                error_console(format!(
-                                    "Failed to write msg:{}\r\nbecause:{:#?}",
-                                    line, why
-                                ));
-                            }
+            if !rx.is_empty() && line.len() < 2048 {
+                continue;
+            }
 
-                            if let Err(why) = w.flush() {
-                                error_console(format!(
-                                    "Failed to flush log file. because:{:#?}",
-                                    why
-                                ));
-                            }
-                        }
-                        Err(why) => {
-                            error_console(format!("Failed to writer.write because {:#?}", why));
-                        }
+            if let Err(why) = writeln!(&mut line) {
+                error_console(format!("Failed to writeln a line. because:{:#?}", why));
+                continue;
+            }
+
+            if let Some(writer) = rotate.get_writer(now) {
+                if let Ok(mut w) = writer.write() {
+                    if let Err(why) = w.write_all(line.as_bytes()) {
+                        error_console(format!(
+                            "Failed to write msg:{}\r\nbecause:{:#?}",
+                            line, why
+                        ));
+                    }
+
+                    if let Err(why) = w.flush() {
+                        error_console(format!("Failed to flush log file. because:{:#?}", why));
                     }
                 }
-
-                line.clear();
             }
-        });
 
-        tx
+            line.clear();
+        }
     }
 
     fn get_log_path(name: &str) -> Option<PathBuf> {
