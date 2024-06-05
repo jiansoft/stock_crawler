@@ -6,11 +6,12 @@ use rust_decimal::Decimal;
 
 use crate::{
     crawler::{
-        cmoney::CMoney, cnyes::CnYes, histock::HiStock, megatime::PcHome, nstock::NStock,
+        cmoney::CMoney, histock::HiStock, megatime::PcHome, nstock::NStock,
         yahoo::Yahoo,
     },
     declare,
 };
+use crate::crawler::cnyes::CnYes;
 
 pub mod afraid;
 /// 臺灣銀行
@@ -59,6 +60,21 @@ pub trait StockInfo {
 /// 標記採集站點的遊標，每採集一次遊標就會+1，分別對應6個站點，每個站點都輪過一次時就會歸零從頭開始
 static INDEX: AtomicUsize = AtomicUsize::new(0);
 
+fn get_and_increment_index(max: usize) -> usize {
+   /* let old_val = INDEX.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+        if val >= max - 1 {
+            Some(0)
+        } else {
+            Some(val + 1)
+        }
+    });
+
+    old_val.unwrap_or(0)*/
+    INDEX.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+        Some((val + 1) % max)
+    }).unwrap_or(0)
+}
+
 /// 取得股票的目前的報價
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
     let sites = [
@@ -72,8 +88,10 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
     let site_len = sites.len();
 
     for _ in 0..site_len {
-        let index = INDEX.fetch_add(1, Ordering::SeqCst) % site_len;
-        let current_site = index % site_len;
+        //let current = get_and_increment_index(site_len);
+        // let index = current % site_len;
+        let current_site = get_and_increment_index(site_len);
+        //println!("current:{} current_site:{}", current, current_site);
         let r = sites[current_site](stock_symbol).await;
 
         if r.is_ok() {
@@ -102,8 +120,8 @@ pub async fn fetch_stock_quotes_from_remote_site(
     let site_len = sites.len();
 
     for _ in 0..site_len {
-        let index = INDEX.fetch_add(1, Ordering::SeqCst) % site_len;
-        let current_site = index % site_len;
+        //let index = INDEX.fetch_add(1, Ordering::SeqCst) % site_len;
+        let current_site = get_and_increment_index(site_len);
         let r = sites[current_site](stock_symbol).await;
 
         if r.is_ok() {

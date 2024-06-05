@@ -2,18 +2,18 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::{Datelike, Local, NaiveDate};
+use futures::future;
 use rust_decimal::Decimal;
 use tokio::{task, time, time::Instant};
 
 use crate::{
     bot,
     cache::SHARE,
-    crawler::{self},
+    crawler::{self, twse},
     database::table::trace::Trace,
     declare, logging, nosql,
     util::{datetime::Weekend, map::Keyable},
 };
-use crate::crawler::twse;
 
 /// 提醒本日已達高低標的股票有那些
 pub async fn execute() -> Result<()> {
@@ -66,14 +66,14 @@ async fn is_holiday(today: NaiveDate) -> Result<bool> {
     Ok(false)
 }
 
-
 async fn trace_target_price() -> Result<()> {
     let futures = Trace::fetch()
         .await?
         .into_iter()
-        .map(process_target_price)
+        .map(|target| task::spawn(process_target_price(target)))
         .collect::<Vec<_>>();
-    futures::future::join_all(futures).await;
+
+    future::join_all(futures).await;
 
     Ok(())
 }
@@ -283,7 +283,6 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 //dbg!(&list);
                 //logging::debug_file_async(format!("list:{:#?}", list));
-               
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to execute because: {:?}", why));

@@ -30,15 +30,11 @@ pub struct Logger {
 
 impl Logger {
     pub fn new(log_name: &str) -> Self {
-        let info_writer = Self::create_writer(&format!("{}_info", log_name));
-        let warn_writer = Self::create_writer(&format!("{}_warn", log_name));
-        let error_writer = Self::create_writer(&format!("{}_error", log_name));
-        let debug_writer = Self::create_writer(&format!("{}_debug", log_name));
         Logger {
-            info_writer,
-            warn_writer,
-            error_writer,
-            debug_writer,
+            info_writer: Self::create_writer(&format!("{}_info", log_name)),
+            warn_writer: Self::create_writer(&format!("{}_warn", log_name)),
+            error_writer: Self::create_writer(&format!("{}_error", log_name)),
+            debug_writer: Self::create_writer(&format!("{}_debug", log_name)),
         }
     }
 
@@ -72,47 +68,45 @@ impl Logger {
         let (tx, rx) = mpsc::unbounded_channel::<String>();
 
         task::spawn(Self::process_messages(rx, log_path.display().to_string()));
-        
+
         tx
     }
 
     async fn process_messages(mut rx: UnboundedReceiver<String>, log_path: String) {
-        let mut line = String::with_capacity(2048);
+        let mut msg = String::with_capacity(2048);
         let mut rotate = Rotate::new(log_path);
 
         while let Some(message) = rx.recv().await {
             let now = Local::now();
 
-            if let Err(why) = writeln!(&mut line, "{} {}", now.format("%F %X%.6f"), message) {
+            if let Err(why) = writeln!(&mut msg, "{} {}", now.format("%F %X%.6f"), message) {
                 error_console(format!("Failed to writeln a message. because:{:#?}", why));
                 continue;
             }
 
-            if !rx.is_empty() && line.len() < 2048 {
+            if !rx.is_empty() && msg.len() < 2048 {
                 continue;
             }
 
-            if let Err(why) = writeln!(&mut line) {
-                error_console(format!("Failed to writeln a line. because:{:#?}", why));
-                continue;
-            }
+            msg.push('\n');
 
             if let Some(writer) = rotate.get_writer(now) {
                 if let Ok(mut w) = writer.write() {
-                    if let Err(why) = w.write_all(line.as_bytes()) {
+                    let to_write = msg.as_bytes();
+                    if let Err(why) = w.write_all(to_write) {
                         error_console(format!(
                             "Failed to write msg:{}\r\nbecause:{:#?}",
-                            line, why
+                            msg, why
                         ));
                     }
 
                     if let Err(why) = w.flush() {
                         error_console(format!("Failed to flush log file. because:{:#?}", why));
                     }
+
+                    msg.clear();
                 }
             }
-
-            line.clear();
         }
     }
 

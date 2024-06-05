@@ -1,3 +1,4 @@
+use std::time::Instant;
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, Result};
@@ -70,7 +71,7 @@ fn get_client() -> Result<&'static Client> {
             .pool_max_idle_per_host(10)
             .no_proxy()
             .pool_idle_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
     })
@@ -278,16 +279,26 @@ async fn send(
     for attempt in 1..=MAX_RETRIES {
         if let Some(rb_clone) = rb.try_clone() {
             let _permit = SEMAPHORE.acquire().await;
-
-            logging::info_file_async(format!("Attempt {} to send {}", attempt, visit_log));
+            let msg = format!("Attempt {} to send {}", attempt, visit_log);
+            //logging::info_file_async(format!("Attempt {} to send {}", attempt, visit_log));
+            let start = Instant::now();
 
             match rb_clone.send().await {
-                Ok(response) => return Ok(response),
+                Ok(response) => {
+                    logging::info_file_async(format!(
+                        "{} {} ms",
+                        msg,
+                        start.elapsed().as_millis()
+                    ));
+                    return Ok(response);
+                }
                 Err(why) => {
                     if attempt < MAX_RETRIES {
                         logging::error_file_async(format!(
-                            "Failed to send attempt {} to {}: {}. Retrying...",
-                            attempt, url, why
+                            "{} failed because {}. {} ms",
+                            msg,
+                            why,
+                            start.elapsed().as_millis()
                         ));
                         let delay = Duration::from_secs(2u64.pow((attempt - 1) as u32));
                         sleep(delay).await;
