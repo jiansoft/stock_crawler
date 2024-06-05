@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use chrono::{Datelike, Local, NaiveDate};
 use futures::future;
 use rust_decimal::Decimal;
-use tokio::{task, time, time::Instant};
+use tokio::{task, time};
 
 use crate::{
     bot,
@@ -28,23 +28,27 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    task::spawn(async {
-        let mut task_interval = time::interval_at(Instant::now(), Duration::from_secs(60));
-        loop {
-            task_interval.tick().await;
-            // 檢查是否在開盤時間內
-            if !declare::StockExchange::TWSE.is_open() {
-                logging::debug_file_async("已達關盤時間".to_string());
-                break;
-            }
-
-            if let Err(why) = trace_target_price().await {
-                logging::error_file_async(format!("Failed to trace target price: {:?}", why));
-            }
-        }
-    });
+    task::spawn(trace_price_run());
 
     Ok(())
+}
+
+async fn trace_price_run() {
+    let mut ticker = time::interval(Duration::from_secs(60));
+
+    loop {
+        // 檢查是否在開盤時間內
+        if !declare::StockExchange::TWSE.is_open() {
+            logging::debug_file_async("已達關盤時間".to_string());
+            break;
+        }
+
+        if let Err(why) = trace_target_price().await {
+            logging::error_file_async(format!("Failed to trace target price: {:?}", why));
+        }
+
+        ticker.tick().await;
+    }
 }
 
 /// 檢查給定日期是否為假日

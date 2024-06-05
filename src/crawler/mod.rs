@@ -80,10 +80,10 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
     let sites = [
         Yahoo::get_stock_price,
         NStock::get_stock_price,
-        CnYes::get_stock_price,
         PcHome::get_stock_price,
         CMoney::get_stock_price,
         HiStock::get_stock_price,
+        CnYes::get_stock_price,
     ];
     let site_len = sites.len();
 
@@ -110,12 +110,12 @@ pub async fn fetch_stock_quotes_from_remote_site(
     stock_symbol: &str,
 ) -> Result<declare::StockQuotes> {
     let sites = [
-        NStock::get_stock_quotes,
         Yahoo::get_stock_quotes,
-        CnYes::get_stock_quotes,
+        NStock::get_stock_quotes,
         PcHome::get_stock_quotes,
         CMoney::get_stock_quotes,
         HiStock::get_stock_quotes,
+        CnYes::get_stock_quotes,
     ];
     let site_len = sites.len();
 

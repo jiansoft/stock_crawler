@@ -4,12 +4,11 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
-use reqwest::header::SET_COOKIE;
-use reqwest::{header, Client, Method, RequestBuilder, Response};
+use reqwest::{header, header::SET_COOKIE, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Semaphore, time::sleep};
 
-use crate::{logging, util};
+use crate::{logging::Logger, util};
 
 pub mod element;
 pub mod user_agent;
@@ -24,6 +23,8 @@ static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
 
 /// A singleton instance of the reqwest client.
 static CLIENT: OnceCell<Client> = OnceCell::new();
+
+static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new("http"));
 
 #[derive(Serialize, Deserialize)]
 /// An empty struct to represent an empty request or response.
@@ -285,16 +286,12 @@ async fn send(
 
             match rb_clone.send().await {
                 Ok(response) => {
-                    logging::info_file_async(format!(
-                        "{} {} ms",
-                        msg,
-                        start.elapsed().as_millis()
-                    ));
+                    LOGGER.info(format!("{} {} ms", msg, start.elapsed().as_millis()));
                     return Ok(response);
                 }
                 Err(why) => {
                     if attempt < MAX_RETRIES {
-                        logging::error_file_async(format!(
+                        LOGGER.error(format!(
                             "{} failed because {}. {} ms",
                             msg,
                             why,
