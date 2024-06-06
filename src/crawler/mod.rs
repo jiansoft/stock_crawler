@@ -28,6 +28,7 @@ pub mod goodinfo;
 /// 嗨投資
 pub mod histock;
 pub mod ipify;
+pub mod ipinfo;
 /// PCHOME
 pub mod megatime;
 /// 嘉實資訊-理財網

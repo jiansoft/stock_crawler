@@ -1,10 +1,13 @@
+use std::{future::Future, pin::Pin};
+
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::{
-    crawler::{ipify, seeip},
+    crawler::{ipify, ipinfo, seeip},
     util::{self, map::Keyable, text},
 };
 
@@ -92,13 +95,27 @@ fn parse_annual_profit(node: ElementRef, stock_symbol: &str) -> Option<AnnualPro
     })
 }
 
+type IpFetchFn = dyn Fn() -> Pin<Box<dyn Future<Output = Result<String>> + Send>> + Sync;
+
 /// 取得對外的 IP
 pub async fn get_public_ip() -> Result<String> {
-    if let Ok(ip) = ipify::visit().await {
-        if !ip.is_empty() {
-            return Ok(ip);
+    let mut sites: [&IpFetchFn; 3] = [
+        &|| Box::pin(ipify::visit()),
+        &|| Box::pin(ipinfo::visit()),
+        &|| Box::pin(seeip::visit()),
+    ];
+
+    // 打亂陣列的順序
+    let mut rng = StdRng::from_entropy();
+    sites.shuffle(&mut rng);
+
+    for site in sites {
+        if let Ok(ip) = site().await {
+            if !ip.is_empty() {
+                return Ok(ip);
+            }
         }
     }
 
-    seeip::visit().await
+    Ok(String::from(""))
 }

@@ -1,12 +1,14 @@
-use std::time::Instant;
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::{header, header::SET_COOKIE, Client, Method, RequestBuilder, Response};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tokio::{sync::Semaphore, time::sleep};
+use tokio::sync::Semaphore;
 
 use crate::{logging::Logger, util};
 
@@ -66,13 +68,13 @@ fn get_client() -> Result<&'static Client> {
             .brotli(true)
             .deflate(true)
             .gzip(true)
-            .connect_timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(3))
             .cookie_store(true)
-            .tcp_keepalive(Duration::from_secs(30))
-            .pool_max_idle_per_host(10)
+            .tcp_keepalive(Duration::from_secs(60))
+            .pool_max_idle_per_host(32)
             .no_proxy()
-            .pool_idle_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(10))
+            .pool_idle_timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(5))
             .build()
             .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
     })
@@ -265,7 +267,7 @@ async fn send(
     headers: Option<header::HeaderMap>,
     body: Option<impl FnOnce(RequestBuilder) -> RequestBuilder>,
 ) -> Result<Response> {
-    let visit_log = format!("{}:{url}", method.as_str());
+    let visit_log = format!("{method}:{url}");
     let client = get_client()?;
     let mut rb = client.request(method, url);
 
@@ -278,35 +280,29 @@ async fn send(
     }
 
     for attempt in 1..=MAX_RETRIES {
-        if let Some(rb_clone) = rb.try_clone() {
-            let _permit = SEMAPHORE.acquire().await;
-            let msg = format!("Attempt {} to send {}", attempt, visit_log);
-            //logging::info_file_async(format!("Attempt {} to send {}", attempt, visit_log));
-            let start = Instant::now();
+        let msg = format!("Attempt {} to send {}", attempt, visit_log);
+        let rb_clone = rb
+            .try_clone()
+            .ok_or_else(|| anyhow!("Failed to clone RequestBuilder"))?;
+        let permit = SEMAPHORE.acquire().await;
+        let start = Instant::now();
+        let res = rb_clone.send().await;
+        let elapsed = start.elapsed().as_millis();
 
-            match rb_clone.send().await {
-                Ok(response) => {
-                    LOGGER.info(format!("{} {} ms", msg, start.elapsed().as_millis()));
-                    return Ok(response);
-                }
-                Err(why) => {
-                    if attempt < MAX_RETRIES {
-                        LOGGER.error(format!(
-                            "{} failed because {}. {} ms",
-                            msg,
-                            why,
-                            start.elapsed().as_millis()
-                        ));
-                        let delay = Duration::from_secs(2u64.pow((attempt - 1) as u32));
-                        sleep(delay).await;
-                    } else {
-                        return Err(anyhow!(
-                            "Failed to send request to {} after {} attempts: {}",
-                            url,
-                            attempt,
-                            why
-                        ));
-                    }
+        drop(permit);
+
+        match res {
+            Ok(response) => {
+                LOGGER.info(format!("{} {} ms", msg, elapsed));
+
+                return Ok(response);
+            }
+            Err(why) => {
+                LOGGER.error(format!("{} failed because {}. {} ms", msg, why, elapsed));
+                if attempt < MAX_RETRIES {
+                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32))).await;
+
+                    continue;
                 }
             }
         }

@@ -30,7 +30,10 @@ impl StockInfo for Yahoo {
             url,
         })?;
 
-        text::parse_decimal(&price, None)
+        match text::parse_decimal(&price, None) {
+            Ok(p) => Ok(p.normalize()),
+            Err(_) => Ok(Decimal::ZERO),
+        }
     }
 
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes> {
