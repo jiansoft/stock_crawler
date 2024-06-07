@@ -6,6 +6,7 @@ use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
+use crate::crawler::{bigdatacloud, myip};
 use crate::{
     crawler::{ipify, ipinfo, seeip},
     util::{self, map::Keyable, text},
@@ -99,10 +100,12 @@ type IpFetchFn = dyn Fn() -> Pin<Box<dyn Future<Output = Result<String>> + Send>
 
 /// 取得對外的 IP
 pub async fn get_public_ip() -> Result<String> {
-    let mut sites: [&IpFetchFn; 3] = [
+    let mut sites: [&IpFetchFn; 5] = [
         &|| Box::pin(ipify::visit()),
         &|| Box::pin(ipinfo::visit()),
         &|| Box::pin(seeip::visit()),
+        &|| Box::pin(myip::visit()),
+        &|| Box::pin(bigdatacloud::visit()),
     ];
 
     // 打亂陣列的順序

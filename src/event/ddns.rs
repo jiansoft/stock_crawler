@@ -1,11 +1,9 @@
 use anyhow::{anyhow, Result};
 
 use crate::{
+    cache::SHARE,
     crawler::{self, share},
-    declare,
-    logging,
-    nosql,
-    cache::SHARE
+    declare, logging, nosql,
 };
 
 pub async fn refresh() -> Result<()> {
@@ -13,7 +11,7 @@ pub async fn refresh() -> Result<()> {
 
     if ip_now.is_empty() {
         return Err(anyhow!(
-            "The IP addresses of ipify and seeip responses are empty."
+            "The IP addresses responses are empty."
         ));
     }
 
@@ -24,11 +22,11 @@ pub async fn refresh() -> Result<()> {
             return Ok(());
         }
     }
-    
+
     SHARE.set_current_ip(ip_now.clone());
-    
+
     update_ddns_services(&ip_now).await;
-    
+
     nosql::redis::CLIENT
         .set(ddns_key, ip_now, declare::ONE_DAYS_IN_SECONDS)
         .await?;

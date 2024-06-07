@@ -36,7 +36,7 @@ async fn fetch_data(stock_symbol: &str) -> Result<QuotesResponse> {
         host = HOST,
         symbol = stock_symbol
     );
-    let res = util::http::get_use_json::<Response>(&url).await?;
+    let res = util::http::get_json::<Response>(&url).await?;
 
     if res.data.is_empty() {
         return Err(anyhow!(

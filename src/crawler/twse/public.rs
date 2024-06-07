@@ -68,7 +68,7 @@ pub async fn visit() -> Result<Vec<Public>> {
         year = date.year(),
         time = now.timestamp_millis()
     );
-    let res = util::http::get_use_json::<PublicFormResponse>(&url).await?;
+    let res = util::http::get_json::<PublicFormResponse>(&url).await?;
     let mut result: Vec<Public> = Vec::with_capacity(2048);
     let stat = match res.stat {
         None => {

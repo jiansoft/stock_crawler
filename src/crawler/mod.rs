@@ -16,6 +16,7 @@ use crate::crawler::cnyes::CnYes;
 pub mod afraid;
 /// 臺灣銀行
 pub mod bank_of_taiwan;
+pub mod bigdatacloud;
 /// 理財寶-股市爆料同學會
 pub mod cmoney;
 /// 鉅亨網
@@ -33,6 +34,7 @@ pub mod ipinfo;
 pub mod megatime;
 /// 嘉實資訊-理財網
 pub mod moneydj;
+pub mod myip;
 pub mod noip;
 /// 恩投資
 pub mod nstock;

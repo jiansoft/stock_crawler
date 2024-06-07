@@ -28,7 +28,7 @@ pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
         year = year,
         time = now.timestamp_millis()
     );
-    let res = util::http::get_use_json::<HolidayScheduleResponse>(&url).await?;
+    let res = util::http::get_json::<HolidayScheduleResponse>(&url).await?;
     let mut result: Vec<HolidaySchedule> = Vec::with_capacity(32);
     let stat = match res.stat {
         None => {

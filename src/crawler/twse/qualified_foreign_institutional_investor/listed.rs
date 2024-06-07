@@ -32,7 +32,7 @@ pub async fn visit(
         date_time.timestamp_millis()
     );
 
-    let listed = http::get_use_json::<QFIIResponse>(&url).await?;
+    let listed = http::get_json::<QFIIResponse>(&url).await?;
     let mut result = Vec::with_capacity(1024);
     let stat = match listed.stat {
         None => {

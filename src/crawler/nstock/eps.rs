@@ -110,7 +110,7 @@ pub async fn visit(stock_symbol: &str) -> Result<Eps> {
         "https://www.nstock.tw/api/v2/eps/data?stock_id={stock_symbol}",
         stock_symbol = stock_symbol
     );
-    let res = util::http::get_use_json::<EpsResponse>(&url).await?;
+    let res = util::http::get_json::<EpsResponse>(&url).await?;
     let years = res
         .data
         .iter()

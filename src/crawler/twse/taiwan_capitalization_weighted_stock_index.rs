@@ -24,7 +24,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<Index> {
         date.timestamp_millis()
     );
 
-    util::http::get_use_json::<Index>(&url).await
+    util::http::get_json::<Index>(&url).await
 }
 
 #[cfg(test)]

@@ -48,7 +48,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
     let pe_ratio_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis";
     // 本益比
     let pe_ratio_response =
-        util::http::get_use_json::<Vec<PeRatioAnalysisResponse>>(pe_ratio_url).await?;
+        util::http::get_json::<Vec<PeRatioAnalysisResponse>>(pe_ratio_url).await?;
     let mut pe_ratio_analysis: HashMap<String, PeRatioAnalysisResponse> =
         HashMap::with_capacity(pe_ratio_response.len());
 
@@ -66,7 +66,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
         date
     );
 
-    let quote_response = util::http::get_use_json::<QuoteResponse>(&quote_url).await?;
+    let quote_response = util::http::get_json::<QuoteResponse>(&quote_url).await?;
     let mut dqs: Vec<table::daily_quote::DailyQuote> = Vec::with_capacity(2048);
 
     for item in quote_response.aa_data {

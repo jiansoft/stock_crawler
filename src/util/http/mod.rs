@@ -93,8 +93,9 @@ fn get_client() -> Result<&'static Client> {
 /// # Returns
 ///
 /// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
-pub async fn get_use_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
-    send(Method::GET, url, None, None::<fn(_) -> _>)
+pub async fn get_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
+    //send(Method::GET, url, None, None::<fn(_) -> _>)
+    get_response(url, None)
         .await?
         .json::<RES>()
         .await

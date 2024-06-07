@@ -21,7 +21,7 @@ pub async fn visit() -> Result<Vec<SuspendListing>> {
         twse::HOST,
     );
 
-    util::http::get_use_json::<Vec<SuspendListing>>(&url).await
+    util::http::get_json::<Vec<SuspendListing>>(&url).await
 }
 
 #[cfg(test)]
