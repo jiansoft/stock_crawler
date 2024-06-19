@@ -95,11 +95,9 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
         // let index = current % site_len;
         let current_site = get_and_increment_index(site_len);
         //println!("current:{} current_site:{}", current, current_site);
-        let r = sites[current_site](stock_symbol).await;
-
-        if r.is_ok() {
-            return r;
-        }
+        if let Ok(price) = sites[current_site](stock_symbol).await {
+            return Ok(price.normalize())
+        };
     }
 
     Err(anyhow!(
