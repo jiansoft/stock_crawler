@@ -73,9 +73,7 @@ pub async fn visit() -> Result<Vec<Public>> {
     let stat = match res.stat {
         None => {
             let to_bot_msg = "Public.res.Stat is None";
-            if let Err(why) = bot::telegram::send(to_bot_msg).await {
-                logging::error_file_async(format!("Failed to send because {:?}", why));
-            }
+            bot::telegram::send(to_bot_msg).await;
             return Ok(result);
         }
         Some(stat) => stat.to_uppercase(),
@@ -83,9 +81,7 @@ pub async fn visit() -> Result<Vec<Public>> {
 
     if stat != "OK" {
         let to_bot_msg = "Public.res.Stat is not ok";
-        if let Err(why) = bot::telegram::send(to_bot_msg).await {
-            logging::error_file_async(format!("Failed to send because {:?}", why));
-        }
+        bot::telegram::send(to_bot_msg).await;
         return Ok(result);
     }
 

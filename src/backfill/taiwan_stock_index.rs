@@ -44,12 +44,7 @@ pub async fn execute() -> Result<()> {
                         index.date, index.index, index.change
                     );
 
-                    if let Err(why) = bot::telegram::send(&msg).await {
-                        logging::error_file_async(format!(
-                            "Failed to telegram::send() because: {:?}",
-                            why
-                        ));
-                    }
+                    bot::telegram::send(&msg).await;
 
                     SHARE.set_stock_index(key, index).await;
                 }

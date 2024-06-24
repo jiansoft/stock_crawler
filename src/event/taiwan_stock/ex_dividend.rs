@@ -22,8 +22,15 @@ pub async fn execute() -> Result<()> {
             stock_symbols.push(stock.stock_symbol.to_string());
             let _ = writeln!(
                 &mut msg,
-                "    {0} {1} 現金︰{2}元 股票 {3}元 合計︰{4}元 https://tw.stock.yahoo.com/quote/{0}",
-                stock.stock_symbol, stock.name, stock.cash_dividend.normalize(), stock.stock_dividend.normalize(), stock.sum.normalize()
+                "    [{0}](https://tw.stock.yahoo.com/quote/{0}) {1} 現金︰{2}元({6}%) 股票 {3}元 合計︰{4}元({7}%) 昨收價:{5} 現金殖利率:{6}% 殖利率:{7}%",
+                stock.stock_symbol,
+                stock.name,
+                stock.cash_dividend.normalize(),
+                stock.stock_dividend.normalize(),
+                stock.sum.normalize(),
+                stock.closing_price.normalize(),
+                stock.cash_dividend_yield.normalize(),
+                stock.dividend_yield.normalize()
             );
         }
     }
@@ -31,11 +38,16 @@ pub async fn execute() -> Result<()> {
     //計算股利
     calculation::dividend_record::execute(today.year(), Some(stock_symbols)).await;
     //群內通知
-    bot::telegram::send(&msg).await
+    bot::telegram::send(&msg).await;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use tokio::time;
+
     use crate::logging;
 
     use super::*;
@@ -50,5 +62,6 @@ mod tests {
         let _ = execute().await;
 
         logging::info_file_async("結束 execute".to_string());
+        time::sleep(Duration::from_secs(1)).await;
     }
 }

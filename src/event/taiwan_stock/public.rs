@@ -79,7 +79,8 @@ pub async fn execute() -> Result<()> {
 
     if !msg.is_empty() {
         let to_bot_msg = format!("{} 可以申購的股票如下︰\n{}", now, msg);
-        return bot::telegram::send(&to_bot_msg).await;
+        let _ = bot::telegram::send(&to_bot_msg).await;
+        return Ok(());
     }
 
     Ok(())

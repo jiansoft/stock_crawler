@@ -105,7 +105,9 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
         unice_percentage.round_dp(2),
     );
 
-    bot::telegram::send(&msg).await
+    bot::telegram::send(&msg).await;
+        
+    Ok(())
 }
 
 #[cfg(test)]

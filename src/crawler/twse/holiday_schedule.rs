@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-use crate::{bot, crawler::twse, logging, util};
+use crate::{bot, crawler::twse, util};
 
 #[derive(Serialize, Deserialize)]
 struct HolidayScheduleResponse {
@@ -60,9 +60,7 @@ pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
 }
 
 async fn report_error(message: &str) {
-    if let Err(why) = bot::telegram::send(message).await {
-        logging::error_file_async(format!("Failed to send because {:?}", why));
-    }
+    bot::telegram::send(message).await;
 }
 
 #[cfg(test)]

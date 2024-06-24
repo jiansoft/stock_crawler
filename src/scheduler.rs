@@ -23,16 +23,16 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
             logging::error_file_async(format!("{:?}", why));
         }
     }
-    
+
     let msg = format!(
         "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
         env::consts::OS,
         env::consts::ARCH
     );
 
-    bot::telegram::send(&msg)
-        .await
-        .context("Failed to send startup message")
+    bot::telegram::send(&msg).await;
+
+    Ok(())
 }
 
 async fn run_cron(sched: &JobScheduler) -> Result<()> {

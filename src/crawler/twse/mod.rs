@@ -1,4 +1,4 @@
-use reqwest::header::HeaderMap;
+use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::util::http;
 
@@ -25,17 +25,9 @@ const HOST: &str = "twse.com.tw";
 
 pub(crate) async fn build_headers() -> HeaderMap {
     let mut h = HeaderMap::with_capacity(4);
-    h.insert("Host", "www.twse.com.tw".parse().unwrap());
-    h.insert(
-        "Referer",
-        "https://www.twse.com.tw/zh/page/trading/exchange/MI_INDEX.html"
-            .parse()
-            .unwrap(),
-    );
-    h.insert("X-Requested-With", "XMLHttpRequest".parse().unwrap());
-    h.insert(
-        "User-Agent",
-        http::user_agent::gen_random_ua().parse().unwrap(),
-    );
+    h.insert("Host", HeaderValue::from_static("www.twse.com.tw"));
+    h.insert("Referer", HeaderValue::from_static("https://www.twse.com.tw/zh/page/trading/exchange/MI_INDEX.html"));
+    h.insert("X-Requested-With",  HeaderValue::from_static("XMLHttpRequest"));
+    h.insert("User-Agent", http::user_agent::gen_random_ua().parse().unwrap());
     h
 }

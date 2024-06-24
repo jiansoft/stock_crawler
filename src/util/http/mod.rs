@@ -295,7 +295,8 @@ async fn send(
         match res {
             Ok(response) => {
                 LOGGER.info(format!("{} {} ms", msg, elapsed));
-
+                //let text = response.text().await?; // Here we take ownership of response
+                //LOGGER.info(format!("Response text: {}", text));
                 return Ok(response);
             }
             Err(why) => {

@@ -118,7 +118,7 @@ async fn alert_on_price_boundary(target: Trace, current_price: Decimal) -> Resul
         .set(target_key, current_price.to_string(), 60 * 60 * 5)
         .await?;
 
-    bot::telegram::send(&to_bot_msg).await?;
+    bot::telegram::send(&to_bot_msg).await;
 
     Ok(true)
 }
