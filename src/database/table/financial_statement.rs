@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
@@ -133,7 +134,10 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
 INSERT INTO financial_statement (
     security_code, "year", quarter, earnings_per_share, created_time, updated_time)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (security_code,"year",quarter) DO NOTHING;
+ON CONFLICT (security_code,"year",quarter)
+DO UPDATE SET 
+    earnings_per_share = excluded.earnings_per_share,
+    updated_time = EXCLUDED.updated_time;
 "#;
         sqlx::query(sql)
             .bind(&self.security_code)
@@ -400,6 +404,31 @@ ORDER BY
         })
 }
 
+pub async fn fetch_cumulative_eps(security_code:&str, year: i32, quarters: Vec<Quarter>) -> Result<Decimal> {
+    let sql = r#"
+        SELECT SUM(earnings_per_share) AS cumulative_eps
+        FROM financial_statement
+        WHERE year = $1
+        AND quarter = ANY($2)
+        AND security_code = $3
+    "#;
+
+    let quarter_values: Vec<String> = quarters.into_iter().map(|q| q.to_string()).collect();
+    // 将 quarters 转换为字符串向量
+    //let quarter_strs: Vec<String> = quarters.iter().map(|q| q.to_string()).collect();
+
+    // 執行查詢
+    let result: (Option<Decimal>,) = sqlx::query_as(&sql)
+        .bind(year)
+        .bind(&quarter_values)
+        .bind(security_code)
+        .fetch_one(database::get_connection())
+        .await?;
+
+    // 返回查詢結果，如果結果為空則返回 0
+    Ok(result.0.unwrap_or_else(|| dec!(0)))
+}
+
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
 impl From<yahoo::profile::Profile> for FinancialStatement {
     fn from(fs: yahoo::profile::Profile) -> Self {
@@ -488,6 +517,7 @@ impl From<crawler::share::AnnualProfit> for FinancialStatement {
 
 #[cfg(test)]
 mod tests {
+    use std::time;
     use crate::logging;
     use chrono::{Datelike, NaiveDate};
 
@@ -539,5 +569,30 @@ mod tests {
             }
         }
         logging::debug_file_async("結束 fetch_without_annual".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_cumulative_eps() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_cumulative_eps".to_string());
+
+        let security_code = "2480";
+        let year = 2023;
+        let quarters = vec![Quarter::Q1, Quarter::Q2, Quarter::Q3];
+        let eps = fetch_cumulative_eps(security_code, year, quarters).await;
+
+        match eps {
+            Ok(result) => {
+                dbg!(&result);
+                logging::debug_file_async(format!("{:#?}", result));
+                // 斷言結果
+                assert_eq!(result, dec!(5.51));
+            }
+            Err(err) => {
+                logging::debug_file_async(format!("{:#?}", err));
+            }
+        }
+        logging::debug_file_async("結束 fetch_cumulative_eps".to_string());
+        tokio::time::sleep(time::Duration::from_secs(1)).await;
     }
 }

@@ -5,9 +5,16 @@ use chrono::{Datelike, Local, TimeDelta};
 
 use crate::{
     crawler::twse,
-    database::table::{self, stock::Stock},
+    database::{
+        table::{
+            self,
+            stock::Stock,
+            financial_statement
+        }
+    },
     declare::{Quarter, StockExchangeMarket},
-    logging, util,
+    logging,
+    util,
 };
 
 pub async fn execute() -> Result<()> {
@@ -51,10 +58,17 @@ async fn process_eps(
 ) -> Result<()> {
     let eps = twse::eps::visit(market, year, quarter).await?;
 
-    for e in eps {
+    for mut e in eps {
         if !without_financial_stocks.contains_key(&e.stock_symbol) {
             //不在清單內代表已收錄數據
             continue;
+        }
+
+        if e.quarter != Quarter::Q1 {
+            //如果不是第一季的EPS要減掉今年其他的EPS，例如Q2要減 Q1，Q3要減Q2、Q1
+            let smaller_quarters = quarter.smaller_quarters();
+            let before_eps = financial_statement::fetch_cumulative_eps(&e.stock_symbol, year, smaller_quarters).await?;
+            e.earnings_per_share -= before_eps;
         }
 
         let fs = table::financial_statement::FinancialStatement::from(e);
@@ -74,6 +88,7 @@ async fn process_eps(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use crate::cache::SHARE;
 
     use super::*;
@@ -93,9 +108,9 @@ mod tests {
         let without_financial_stocks = util::map::vec_to_hashmap(without_financial_stocks);
         //dbg!(without_financial_stocks);
         match process_eps(
-            StockExchangeMarket::OverTheCounter,
-            2018,
-            Quarter::Q2,
+            StockExchangeMarket::Listed,
+            2023,
+            Quarter::Q4,
             &without_financial_stocks,
         )
         .await
@@ -107,5 +122,6 @@ mod tests {
         }
 
         logging::info_file_async("結束 process_eps".to_string());
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

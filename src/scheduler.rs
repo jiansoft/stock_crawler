@@ -48,7 +48,7 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
         create_job("0 30 18 * * *", dividend::payout_ratio::execute),
         // 03:00 更新台股季度財報
         create_job("0 0 19 * * *", event::taiwan_stock::quarter_eps::execute),
-        // 04:00 更新台股季度財報
+        // 04:00 更新台股季度財報(ROE、ROA為零的數據)
         create_job("0 0 20 * * *", financial_statement::quarter::execute),
         // 05:00 更新台股年度財報(僅有eps 等少數欄位的資料)
         create_job("0 0 21 * * *", event::taiwan_stock::annual_eps::execute),

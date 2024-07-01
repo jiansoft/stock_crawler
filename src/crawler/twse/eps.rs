@@ -82,7 +82,7 @@ pub async fn visit(
             if !SHARE.stock_contains_key(stock_symbol) {
                 continue;
             }
-
+            
             let eps = Eps::new(
                 stock_symbol.to_string(),
                 year,
@@ -93,7 +93,7 @@ pub async fn visit(
             result.push(eps);
         }
     }
-
+    
     Ok(result)
 }
 
@@ -110,7 +110,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit(StockExchangeMarket::Listed, 2023, Quarter::Q2).await {
+        match visit(StockExchangeMarket::Listed, 2023, Quarter::Q4).await {
             Ok(list) => {
                 dbg!(&list);
                 logging::debug_file_async(format!("list:{:#?}", list));

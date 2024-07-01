@@ -2,7 +2,19 @@ use chrono::{Local, NaiveTime};
 use serde_derive::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 
-#[derive(Serialize, Deserialize, Display, Debug, Copy, Clone, EnumString)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Display,
+    Debug,
+    Copy,
+    Clone,
+    EnumString,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
 pub enum Quarter {
     #[strum(serialize = "Q1")]
     Q1 = 1,
@@ -15,19 +27,22 @@ pub enum Quarter {
 }
 
 impl Quarter {
+    /// Returns the serial number of the quarter as i32.
     pub fn serial(&self) -> i32 {
         *self as i32
     }
 
+    /// Returns the previous quarter.
     pub fn previous(&self) -> Quarter {
         match self {
             Quarter::Q1 => Quarter::Q4,
             Quarter::Q2 => Quarter::Q1,
-            Quarter::Q3 => Quarter::Q1,
+            Quarter::Q3 => Quarter::Q2,
             Quarter::Q4 => Quarter::Q3,
         }
     }
 
+    /// Returns the quarter corresponding to a given month.
     pub fn from_month(month: u32) -> Option<Quarter> {
         match month {
             1..=3 => Some(Quarter::Q1),
@@ -38,6 +53,7 @@ impl Quarter {
         }
     }
 
+    /// Returns the quarter corresponding to a given serial number.
     pub fn from_serial(val: u32) -> Option<Quarter> {
         match val {
             1 => Some(Quarter::Q1),
@@ -46,6 +62,24 @@ impl Quarter {
             4 => Some(Quarter::Q4),
             _ => None,
         }
+    }
+
+    /// Returns an iterator over the quarters.
+    pub fn iterator() -> impl Iterator<Item = Self> {
+        [Quarter::Q1, Quarter::Q2, Quarter::Q3, Quarter::Q4].iter().copied()
+    }
+
+    /// Returns a vector of `Quarter` values that are smaller than the current quarter.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let q4 = Quarter::Q4;
+    /// let smaller_quarters = q4.smaller_quarters();
+    /// assert_eq!(smaller_quarters, vec![Quarter::Q1, Quarter::Q2, Quarter::Q3]);
+    /// ```
+    pub fn smaller_quarters(&self) -> Vec<Quarter> {
+        Self::iterator().take_while(|&q| q < *self).collect()
     }
 }
 
@@ -343,4 +377,49 @@ pub const THREE_DAYS_IN_SECONDS: usize = 60 * 60 * 24 * 3;
 pub const ONE_DAYS_IN_SECONDS: usize = 60 * 60 * 24;
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use crate::declare::Quarter;
+
+    #[test]
+    fn test_serial() {
+        assert_eq!(Quarter::Q1.serial(), 1);
+        assert_eq!(Quarter::Q2.serial(), 2);
+        assert_eq!(Quarter::Q3.serial(), 3);
+        assert_eq!(Quarter::Q4.serial(), 4);
+    }
+
+    #[test]
+    fn test_previous() {
+        assert_eq!(Quarter::Q1.previous(), Quarter::Q4);
+        assert_eq!(Quarter::Q2.previous(), Quarter::Q1);
+        assert_eq!(Quarter::Q3.previous(), Quarter::Q2);
+        assert_eq!(Quarter::Q4.previous(), Quarter::Q3);
+    }
+
+    #[test]
+    fn test_from_month() {
+        assert_eq!(Quarter::from_month(1), Some(Quarter::Q1));
+        assert_eq!(Quarter::from_month(4), Some(Quarter::Q2));
+        assert_eq!(Quarter::from_month(7), Some(Quarter::Q3));
+        assert_eq!(Quarter::from_month(10), Some(Quarter::Q4));
+        assert_eq!(Quarter::from_month(13), None);
+    }
+
+    #[test]
+    fn test_from_serial() {
+        assert_eq!(Quarter::from_serial(1), Some(Quarter::Q1));
+        assert_eq!(Quarter::from_serial(2), Some(Quarter::Q2));
+        assert_eq!(Quarter::from_serial(3), Some(Quarter::Q3));
+        assert_eq!(Quarter::from_serial(4), Some(Quarter::Q4));
+        assert_eq!(Quarter::from_serial(5), None);
+    }
+
+
+    #[test]
+    fn test_smaller_quarters() {
+        assert_eq!(Quarter::Q4.smaller_quarters(), vec![Quarter::Q1, Quarter::Q2, Quarter::Q3]);
+        assert_eq!(Quarter::Q3.smaller_quarters(), vec![Quarter::Q1, Quarter::Q2]);
+        assert_eq!(Quarter::Q2.smaller_quarters(), vec![Quarter::Q1]);
+        assert_eq!(Quarter::Q1.smaller_quarters(), vec![]);
+    }
+}

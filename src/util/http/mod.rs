@@ -68,13 +68,13 @@ fn get_client() -> Result<&'static Client> {
             .brotli(true)
             .deflate(true)
             .gzip(true)
-            .connect_timeout(Duration::from_secs(3))
+            .connect_timeout(Duration::from_secs(2))
             .cookie_store(true)
             .tcp_keepalive(Duration::from_secs(60))
             .pool_max_idle_per_host(32)
             .no_proxy()
             .pool_idle_timeout(Duration::from_secs(60))
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(3))
             .build()
             .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
     })
@@ -231,7 +231,7 @@ pub async fn post(
     .map_err(|why| anyhow!("Error parsing response text: {:?}", why))
 }
 
-const MAX_RETRIES: usize = 5;
+const MAX_RETRIES: usize = 2;
 
 /// Sends an HTTP request using the specified method, URL, headers, and body with retries on failure.
 ///
