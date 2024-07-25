@@ -78,9 +78,9 @@ async fn update_stock_info(
     let market = StockExchangeMarket::from(stock.stock_exchange_market_id);
     let market_name = match market {
         None => " - ",
-        Some(sem) => sem.name(),
+        Some(sem) => &sem.name(),
     };
-    let industry_name = SHARE.get_industry_name(stock.stock_industry_id).unwrap_or(" - ");
+    let industry_name = SHARE.get_industry_name(stock.stock_industry_id).unwrap_or(" - ".to_string());
     let log_msg = format!(
         "新增股票︰ {stock_symbol} {stock_name} {market_name} {industry_name}",
         stock_symbol = stock.stock_symbol,

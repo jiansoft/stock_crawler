@@ -31,7 +31,7 @@ pub struct Share {
     // quote_history_records 股票歷史、淨值比等最高、最低的數據,resource.Init() 從資料庫內讀取出，若抓到新的數據時則會同時更新資料庫與此數據
     pub quote_history_records: RwLock<HashMap<String, quote_history_record::QuoteHistoryRecord>>,
     /// 股票產業分類
-    industries: HashMap<&'static str, i32>,
+    industries: HashMap<String, i32>,
     /// 股票產業分類(2, 'TAI', '上市', 1),(4, 'TWO', '上櫃', 2), (5, 'TWE', '興櫃', 2);
     exchange_markets: HashMap<i32, stock_exchange_market::StockExchangeMarket>,
     /// 目前的 IP
@@ -52,7 +52,7 @@ impl Share {
                         stock_exchange_market_id: 2,
                         stock_exchange_id: 1,
                         code: "TAI".to_string(),
-                        name: declare::StockExchangeMarket::Listed.name().to_string(),
+                        name: declare::StockExchangeMarket::Listed.name(),
                     },
                 ),
                 (
@@ -61,9 +61,7 @@ impl Share {
                         stock_exchange_market_id: 4,
                         stock_exchange_id: 2,
                         code: "TWO".to_string(),
-                        name: declare::StockExchangeMarket::OverTheCounter
-                            .name()
-                            .to_string(),
+                        name: declare::StockExchangeMarket::OverTheCounter.name(),
                     },
                 ),
                 (
@@ -72,7 +70,7 @@ impl Share {
                         stock_exchange_market_id: 5,
                         stock_exchange_id: 2,
                         code: "TWE".to_string(),
-                        name: declare::StockExchangeMarket::Emerging.name().to_string(),
+                        name: declare::StockExchangeMarket::Emerging.name(),
                     },
                 ),
             ]),
@@ -193,9 +191,9 @@ impl Share {
                     Industry::Uncategorized.name(),
                     Industry::Uncategorized.serial(),
                 ),
-                ("貿易百貨業", Industry::TradingDepartmentStores.serial()),
-                ("其他業", Industry::Other.serial()),
-                ("農業科技業", Industry::AgriculturalTechnology.serial()),
+                ("貿易百貨業".to_string(), Industry::TradingDepartmentStores.serial()),
+                ("其他業".to_string(), Industry::Other.serial()),
+                ("農業科技業".to_string(), Industry::AgriculturalTechnology.serial()),
             ]),
             last_revenues: RwLock::new(HashMap::new()),
             last_trading_day_quotes: RwLock::new(HashMap::new()),
@@ -372,11 +370,11 @@ impl Share {
     }
 
     /// 透過股票產業分類代碼取得對應的名稱
-    pub fn get_industry_name(&self, id: i32) -> Option<&'static str> {
-        self.industries
+    pub fn get_industry_name(&self, id: i32) -> Option<String> {
+        let result = self.industries
             .iter()
-            .find_map(|(key, &value)| if value == id { Some(key) } else { None })
-            .copied()
+            .find_map(|(key, &value)| if value == id { Some(key.to_string()) } else { None });
+        result
     }
 
     /// 從快取中取得股票的資料
@@ -555,6 +553,12 @@ mod tests {
     async fn test_get_industry_name() {
         dotenv::dotenv().ok();
         SHARE.load().await;
+
+        assert_eq!(SHARE.get_industry_name(1), Some("水泥工業".to_string()));
+        assert_eq!(SHARE.get_industry_name(2), Some("食品工業".to_string()));
+        assert_eq!(SHARE.get_industry_name(99), Some("未分類".to_string()));
+        assert_eq!(SHARE.get_industry_name(100), None);
+        
         println!("36 => {:?}", SHARE.get_industry_name(36));
     }
 
