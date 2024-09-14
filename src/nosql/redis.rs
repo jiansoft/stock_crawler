@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use deadpool_redis::{redis::cmd, Config, Connection, Pool, Runtime};
+use deadpool_redis::{
+    redis::{cmd, AsyncCommands, ErrorKind, RedisError, RedisResult, ToRedisArgs, Value},
+    Config, Connection, Pool, Runtime,
+};
 use futures::{stream::FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
-use redis::{AsyncCommands, RedisError, RedisResult, ToRedisArgs, Value};
 use rust_decimal::Decimal;
 
 use crate::{config::SETTINGS, util::text};
@@ -36,7 +38,7 @@ impl Redis {
 
     pub async fn ping(&self) -> Result<String> {
         let mut conn: Connection = self.pool.get().await?;
-        let pong: String = redis::cmd("PING").query_async(&mut conn).await?;
+        let pong: String = cmd("PING").query_async(&mut conn).await?;
 
         Ok(pong)
     }
@@ -52,7 +54,10 @@ impl Redis {
     /// * Result<()>: An empty result indicating success or an error if the deletion fails.
     pub async fn delete(&self, key: &str) -> Result<()> {
         let mut conn = self.pool.get().await?;
-        conn.del(key).await?;
+        conn.del::<&str, i64>(key).await.map_err(|e| {
+            anyhow!("Failed to delete key({}) from Redis: {}", key, e)
+        })?;
+
         Ok(())
     }
 
@@ -84,7 +89,7 @@ impl Redis {
             .arg(key)
             .arg(ttl_in_seconds)
             .arg(value)
-            .query_async::<_, ()>(&mut conn)
+            .query_async::<_>(&mut conn)
             .await?)
     }
 
@@ -99,7 +104,7 @@ impl Redis {
     /// * Result<String>: The fetched string value, or an error if the GET operation fails.
     pub async fn get_string(&self, key: &str) -> Result<String> {
         let mut conn = self.pool.get().await?;
-        let value: String = redis::cmd("GET").arg(key).query_async(&mut conn).await?;
+        let value: String = cmd("GET").arg(key).query_async(&mut conn).await?;
         Ok(value)
     }
 
@@ -138,7 +143,7 @@ impl Redis {
     /// * Result<bool>: The fetched boolean value, or an error if the GET operation fails.
     pub async fn get_bool(&self, key: &str) -> Result<bool> {
         let mut conn = self.pool.get().await?;
-        let value: bool = redis::cmd("GET").arg(key).query_async(&mut conn).await?;
+        let value: bool = cmd("GET").arg(key).query_async(&mut conn).await?;
         Ok(value)
     }
 
@@ -154,7 +159,7 @@ impl Redis {
     pub async fn get_bytes(&self, key: &str) -> Result<Vec<u8>> {
         let mut conn = self.pool.get().await?;
         let value: RedisResult<Value> = conn.get(key).await;
-        if let Ok(Value::Data(data)) = value {
+        if let Ok(Value::BulkString(data)) = value {
             return Ok(data);
         }
 
@@ -164,7 +169,7 @@ impl Redis {
             ));
         }
 
-        Err(RedisError::from((redis::ErrorKind::TypeError, "Unexpected value type")).into())
+        Err(RedisError::from((ErrorKind::TypeError, "Unexpected value type")).into())
     }
 
     /// Retrieves keys from the Redis server that match any of the provided patterns.
@@ -211,7 +216,7 @@ impl Redis {
         let mut pattern_results = Vec::new();
         let mut cursor: isize = 0;
         loop {
-            let scan_result: (isize, Vec<String>) = redis::cmd("SCAN")
+            let scan_result: (isize, Vec<String>) = cmd("SCAN")
                 .arg(cursor)
                 .arg("MATCH")
                 .arg(format!("{}*", pattern))
@@ -320,12 +325,9 @@ mod tests {
         let _ = CLIENT.set(key, "中文", 100).await;
         let string_val = CLIENT.get_string(key).await;
 
-        match string_val {
-            Ok(val1) => {
-                assert_eq!(val1, "中文".to_string());
-                println!("string_val:{}", val1);
-            }
-            Err(_) => (), // 如果兩者都是 Err，則不執行任何操作
+        if let Ok(val1) = string_val {
+            assert_eq!(val1, "中文".to_string());
+            println!("string_val:{}", val1);
         }
         let get_all_keys = CLIENT
             .get_keys(vec![

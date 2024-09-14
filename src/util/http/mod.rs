@@ -176,7 +176,7 @@ where
     REQ: Serialize,
     RES: DeserializeOwned,
 {
-    send(
+   let res = send(
         Method::POST,
         url,
         headers,
@@ -190,10 +190,17 @@ where
             },
         ),
     )
-    .await?
-    .json::<RES>()
+    .await?;
+
+    /*res.json::<RES>()
     .await
-    .map_err(|why| anyhow!("Error parsing response JSON: {:?}", why))
+    .map_err(|why| anyhow!("Error parsing response JSON: {:?}", why))*/
+    let res_body = res.text().await.map_err(|e| anyhow!("Error reading response body: {}", e))?;
+
+    // Print the response body
+    println!("Response body: {}", res_body);
+
+    serde_json::from_str(&res_body).map_err(|e| anyhow!("Error parsing response JSON: {}", e))
 }
 
 /// Performs an HTTP POST request with form data and specified headers, and returns the response as text.

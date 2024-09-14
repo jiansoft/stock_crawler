@@ -54,6 +54,8 @@ pub mod yahoo;
 /// 元大證券
 pub mod yuanta;
 
+pub mod localhost;
+
 #[async_trait]
 pub trait StockInfo {
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal>;
