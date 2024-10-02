@@ -6,3 +6,5 @@ pub mod dividend_record;
 pub mod estimated_price;
 /// 計算每日市值
 pub mod money_history;
+/// 統計股價各項數據
+pub mod price_stats;

@@ -14,17 +14,17 @@ concat-string = "1.0.1"
 config = "0.14"
 #crossbeam = "0.8"
 crossbeam-channel = "0.5"
-deadpool-redis = "0.17"
+deadpool-redis = "0.18"
 digest = "0.10"
 dotenv = "0.15"
 encoding = "0.2"
 futures ="0.3"
-hashbrown = "0.14"
+hashbrown = "0.15"
 hex = "0.4"
 lazy_static = "1.4"
 log = { version = "^0.4", features = ["std"] }
 num_cpus = "1.16"
-once_cell = "1.20"
+once_cell = "1.19"
 openssl = { version = "0.10", features = ["vendored"] }
 prost = "0.13"
 rand = "0.8"
@@ -43,7 +43,7 @@ sqlx = { version = "0.8", features = [ "runtime-tokio", "postgres", "time", "chr
 strum = { version = "0.26", features = ["derive"]}
 strum_macros = "0.26"
 tokio = { version = "1.40", features = ["full"] }
-tokio-cron-scheduler = "0.11.0"
+tokio-cron-scheduler = "0.13"
 tokio-retry = "0.3"
 tokio-test = "0.4"
 tonic = { version = "0.12", features = ["transport", "tls", "channel", "gzip"] }

@@ -34,3 +34,5 @@ pub mod quote_history_record;
 pub mod trace;
 /// 殖利率排行
 pub mod yield_rank;
+/// 每日股票價格估值統計
+pub mod daily_stock_price_stats;
