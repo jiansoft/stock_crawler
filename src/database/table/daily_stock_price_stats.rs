@@ -1,9 +1,15 @@
-use crate::database;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate};
 use serde_derive::{Deserialize, Serialize};
-use sqlx::postgres::PgQueryResult;
-use sqlx::{FromRow, Type};
+use sqlx::{
+    postgres::PgQueryResult,
+    FromRow,
+    Postgres,
+    Transaction,
+    Type,
+};
+
+use crate::database;
 
 #[derive(Debug, Serialize, Deserialize, Type, FromRow)]
 pub struct DailyStockPriceStats {
@@ -31,7 +37,7 @@ pub struct DailyStockPriceStats {
 }
 
 impl DailyStockPriceStats {
-    pub async fn upsert(date: NaiveDate) -> Result<PgQueryResult> {
+    pub async fn upsert(date: NaiveDate, tx: &mut Option<Transaction<'_, Postgres>>) -> Result<PgQueryResult> {
         let sql = r#"
 WITH cte AS (
     SELECT e.security_code, e.date, e.closing_price,
@@ -175,11 +181,16 @@ ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
     updated_at = CURRENT_TIMESTAMP;
 "#;
 
-        sqlx::query(sql)
-            .bind(date)
-            .execute(database::get_connection())
-            .await
-            .map_err(|why| anyhow!("Failed to upsert() from database\nsql:{}\n{:?}", sql, why,))
+        let query = sqlx::query(&sql).bind(date);
+        let result = match tx {
+            None => query.execute(database::get_connection()).await,
+            Some(t) => query.execute(&mut **t).await,
+        };
+
+        result.context(format!(
+            "Failed to daily_stock_price_stats::upsert({}) from database",
+            &date
+        ))
     }
 }
 
@@ -207,7 +218,7 @@ mod tests {
         while current_date <= end_date {
             logging::debug_file_async(format!("處理日期: {}", current_date));
 
-            match DailyStockPriceStats::upsert(current_date).await {
+            match DailyStockPriceStats::upsert(current_date, &mut None).await {
                 Ok(r) => {
                     logging::debug_file_async(format!(
                         "DailyStockPriceStats::upsert({:?}) 成功: {:#?}",

@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .build_server(true)
         .out_dir(OUT_DIR)
-        .compile(&protos, &["./etc/proto"])?;
+        .compile_protos(&protos, &["./etc/proto"])?;
 
     rerun(&protos);
 
