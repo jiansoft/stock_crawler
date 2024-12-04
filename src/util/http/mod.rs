@@ -198,7 +198,7 @@ where
     let res_body = res.text().await.map_err(|e| anyhow!("Error reading response body: {}", e))?;
 
     // Print the response body
-    println!("Response body: {}", res_body);
+    //println!("Response body: {}", res_body);
 
     serde_json::from_str(&res_body).map_err(|e| anyhow!("Error parsing response JSON: {}", e))
 }

@@ -18,7 +18,7 @@ pub(super) trait CopyIn: Send {
     fn to_csv(&self) -> String;
 }
 
-pub(super) async fn copy_in_raw(copy_in_query: &str, items: &[impl CopyIn + Send]) -> Result<u64> {
+pub(super) async fn copy_in_raw(copy_in_query: &str, items: &[impl CopyIn]) -> Result<u64> {
     let data: String = items.iter().map(CopyIn::to_csv).collect();
     let data_as_bytes = data.as_bytes();
     let mut conn = get_connection().acquire().await?;

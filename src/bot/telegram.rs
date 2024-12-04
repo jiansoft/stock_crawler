@@ -115,7 +115,7 @@ pub struct SendMessageRequest<'a> {
 }
 
 impl<'a> SendMessageRequest<'a> {
-    pub fn new(chat_id: i64, text: &'a str) -> SendMessageRequest<'_> {
+    pub fn new(chat_id: i64, text: &'a str) -> SendMessageRequest<'a> {
         SendMessageRequest { chat_id, text, parse_mode: "Markdown"}
     }
 }
