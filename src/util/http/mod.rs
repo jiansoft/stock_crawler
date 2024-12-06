@@ -68,13 +68,13 @@ fn get_client() -> Result<&'static Client> {
             .brotli(true)
             .deflate(true)
             .gzip(true)
-            .connect_timeout(Duration::from_secs(2))
+            .connect_timeout(Duration::from_secs(3))
             .cookie_store(true)
             .tcp_keepalive(Duration::from_secs(60))
             .pool_max_idle_per_host(32)
             .no_proxy()
             .pool_idle_timeout(Duration::from_secs(60))
-            .timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(5))
             .build()
             .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
     })
@@ -307,7 +307,7 @@ async fn send(
                 return Ok(response);
             }
             Err(why) => {
-                LOGGER.error(format!("{} failed because {}. {} ms", msg, why, elapsed));
+                LOGGER.error(format!("{} failed because {:?}. {} ms", msg, why, elapsed));
                 if attempt < MAX_RETRIES {
                     tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32))).await;
 

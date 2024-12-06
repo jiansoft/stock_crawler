@@ -53,9 +53,12 @@ async fn trace_price_run() {
 
 /// 檢查給定日期是否為假日
 async fn is_holiday(today: NaiveDate) -> Result<bool> {
-    let holidays = twse::holiday_schedule::visit(today.year())
-        .await
-        .context("Failed to visit TWSE holiday schedule")?;
+    let holidays = match twse::holiday_schedule::visit(today.year()).await {
+        Ok(result) => result,
+        Err(err) => {
+            anyhow::bail!("Failed to visit TWSE holiday schedule: {:?}", err);
+        }
+    };
 
     for holiday in holidays {
         if holiday.date == today {

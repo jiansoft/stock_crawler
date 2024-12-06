@@ -60,6 +60,7 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use chrono::{Local, TimeDelta};
     use chrono::prelude::*;
 
@@ -75,7 +76,7 @@ mod tests {
         SHARE.load().await;
         let _now = Local::now();
 
-        let naive_datetime = NaiveDate::from_ymd_opt(2023, 3, 1)
+        let naive_datetime = NaiveDate::from_ymd_opt(2024, 12, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
             .unwrap();
@@ -93,5 +94,6 @@ mod tests {
                 logging::debug_file_async(format!("data:{:#?}", list));
             }
         }
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

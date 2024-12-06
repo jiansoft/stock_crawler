@@ -76,6 +76,7 @@ pub(crate) async fn process_revenue(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use crate::logging;
 
     use super::*;
@@ -94,5 +95,6 @@ mod tests {
         }
 
         logging::debug_file_async("結束 execute".to_string());
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
