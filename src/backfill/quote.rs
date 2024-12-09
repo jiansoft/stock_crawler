@@ -70,7 +70,6 @@ pub async fn process_quotes(quotes: Vec<DailyQuote>) {
         })
         .await;
     logging::info_file_async(format!("上市櫃收盤數據更新到資料庫完成: {}", result_count));
-
 }
 
 async fn process_daily_quote(daily_quote: DailyQuote) {
@@ -111,20 +110,23 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
         //let date = Local::now().date_naive();
-        let date = NaiveDate::from_ymd_opt(2023, 12, 4).unwrap();
+        let date = NaiveDate::from_ymd_opt(2024, 12, 6).unwrap();
         let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
             .bind(date)
             .execute(database::get_connection())
             .await;
 
         match execute(date).await {
-            Ok(_) => {}
+            Ok(_) => {
+
+            }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to execute because {:?}", why));
             }
         }
 
         logging::debug_file_async("結束 execute".to_string());
+        sleep(Duration::from_secs(1)).await;
     }
 
     #[tokio::test]

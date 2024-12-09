@@ -68,13 +68,14 @@ fn get_client() -> Result<&'static Client> {
             .brotli(true)
             .deflate(true)
             .gzip(true)
-            .connect_timeout(Duration::from_secs(3))
+            .zstd(true)
+            .connect_timeout(Duration::from_secs(1))
             .cookie_store(true)
             .tcp_keepalive(Duration::from_secs(60))
             .pool_max_idle_per_host(32)
             .no_proxy()
             .pool_idle_timeout(Duration::from_secs(60))
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(3))
             .build()
             .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
     })
@@ -200,7 +201,7 @@ where
     // Print the response body
     //println!("Response body: {}", res_body);
 
-    serde_json::from_str(&res_body).map_err(|e| anyhow!("Error parsing response JSON: {}", e))
+    serde_json::from_str(&res_body).map_err(|e| anyhow!("Error parsing response JSON({}): {:?}", &res_body, e))
 }
 
 /// Performs an HTTP POST request with form data and specified headers, and returns the response as text.

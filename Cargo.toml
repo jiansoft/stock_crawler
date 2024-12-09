@@ -31,7 +31,7 @@ rand = "0.8"
 rayon = "1.10"
 redis = { version = "0.27", features = ["tokio-comp"]  }
 regex = "1"
-reqwest = { version = "0.12", features = ["json", "blocking", "brotli", "deflate", "gzip", "cookies"] }
+reqwest = { version = "0.12", features = ["json", "blocking", "brotli", "deflate", "gzip", "cookies", "zstd"] }
 rust_decimal = "1.36"
 rust_decimal_macros = "1.36"
 scraper = "0.21"
@@ -42,7 +42,7 @@ sha2 = { version = "0.10", features = [] }
 sqlx = { version = "0.8", features = [ "runtime-tokio", "postgres", "time", "chrono", "bigdecimal", "macros", "rust_decimal"] }
 strum = { version = "0.26", features = ["derive"]}
 strum_macros = "0.26"
-tokio = { version = "1.41", features = ["full"] }
+tokio = { version = "1.42", features = ["full"] }
 tokio-cron-scheduler = "0.13"
 tokio-retry = "0.3"
 tokio-test = "0.4"

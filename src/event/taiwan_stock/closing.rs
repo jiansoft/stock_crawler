@@ -112,6 +112,7 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use crate::{cache::SHARE, logging};
 
     use super::*;
@@ -124,7 +125,7 @@ mod tests {
 
         logging::debug_file_async("開始 event::taiwan_stock::closing::aggregate".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2024-12-04", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2024-12-06", "%Y-%m-%d").unwrap();
 
         match aggregate(current_date).await {
             Ok(_) => {
@@ -141,6 +142,7 @@ mod tests {
         }
 
         logging::debug_file_async("結束 event::taiwan_stock::closing::aggregate".to_string());
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
     #[tokio::test]
@@ -172,5 +174,6 @@ mod tests {
         logging::debug_file_async(
             "結束 event::taiwan_stock::closing::notify_money_change".to_string(),
         );
+
     }
 }
