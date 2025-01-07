@@ -291,7 +291,7 @@ SELECT
     created_time,
     updated_time
 FROM financial_statement
-WHERE quarter = $1 AND (return_on_equity = 0 OR return_on_assets = 0)
+WHERE quarter = $1 AND (return_on_equity = 0 OR return_on_assets = 0 OR net_asset_value_per_share = 0)
 "#,
     );
 
@@ -418,7 +418,7 @@ pub async fn fetch_cumulative_eps(security_code:&str, year: i32, quarters: Vec<Q
     //let quarter_strs: Vec<String> = quarters.iter().map(|q| q.to_string()).collect();
 
     // 執行查詢
-    let result: (Option<Decimal>,) = sqlx::query_as(&sql)
+    let result: (Option<Decimal>,) = sqlx::query_as(sql)
         .bind(year)
         .bind(&quarter_values)
         .bind(security_code)

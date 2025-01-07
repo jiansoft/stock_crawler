@@ -5,8 +5,8 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cache::{self, TTL, TtlCacheInner},
-    crawler::{twse, twse::build_headers},
+    cache::{self, TtlCacheInner, TTL},
+    crawler::twse,
     database::table::{self, daily_quote::FromWithExchange},
     declare::StockExchange,
     logging,
@@ -55,8 +55,8 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
         date
     );
 
-    let headers = build_headers().await;
-    let data = http::post_use_json::<http::Empty, ListedResponse>(&url, Some(headers), None).await?;
+    //let headers = build_headers().await;
+    let data = http::get_json::<ListedResponse>(&url).await?;
     let mut dqs = Vec::with_capacity(2048);
     if data.tables.len() >= 9 {
         if let Some(twse_dqs) = &data.tables[8].data {
@@ -118,8 +118,8 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
     use chrono::{TimeDelta, Timelike};
+    use std::time::Duration;
 
     use crate::{cache::SHARE, logging};
 
