@@ -28,7 +28,6 @@
   },
   "bot": {
     "telegram": {
-      "allowed": {},
       "token": ""
     }
   },

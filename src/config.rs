@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env, path::PathBuf, str::FromStr, u8};
 
 use anyhow::Result;
-use config::{Config as config_config, File as config_file};
+use config::{Config as config_config, File as config_file, FileFormat};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
@@ -116,7 +116,9 @@ const TELEGRAM_ALLOWED: &str = "TELEGRAM_ALLOWED";
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Telegram {
+    #[serde(default)]
     pub allowed: HashMap<i64, String>,
+    #[serde(default)]
     pub token: String,
 }
 
@@ -167,12 +169,36 @@ impl App {
 
     fn get() -> Result<Self> {
         let config_path = config_path();
+       /* if config_path.exists() {
+            let config: Result<App, _> = config::Config::builder()
+                .add_source(config::File::from(config_path))
+                .build()
+                .and_then(|cfg| cfg.try_deserialize());
+
+            match config {
+                Ok(cfg) => return Ok(cfg.override_with_env()),
+                Err(e) => panic!("Failed to load config file: {:?}", e), // 增加詳細錯誤資訊
+            }
+        }*/
+
         if config_path.exists() {
-            let config: App = config_config::builder()
-                .add_source(config_file::from(config_path))
-                .build()?
-                .try_deserialize()?;
-            return Ok(config.override_with_env());
+            let config: Result<App, _> = config::Config::builder()
+                .add_source(config::File::from(config_path.clone()).format(FileFormat::Json))
+                .build()
+                .and_then(|cfg| cfg.try_deserialize());
+
+            match config {
+                Ok(cfg) => return Ok(cfg.override_with_env()),
+                Err(e) => {
+                    // 列印錯誤資訊和設定檔內容
+                    eprintln!(
+                        "Failed to load config file: {:?}, content: {}",
+                        e,
+                        std::fs::read_to_string(&config_path).unwrap_or_default()
+                    );
+                    panic!("Failed to load config file: {:?}", e);
+                }
+            }
         }
 
         Ok(App::from_env())
