@@ -109,7 +109,7 @@ pub async fn get_public_ip() -> Result<String> {
     ];
 
     // 打亂陣列的順序
-    let mut rng = StdRng::from_entropy();
+    let mut rng = StdRng::from_rng(&mut rand::rng());
     sites.shuffle(&mut rng);
 
     for site in sites {
