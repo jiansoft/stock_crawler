@@ -102,8 +102,9 @@ const OS_STRINGS: [&str; 42] = [
 ];
 
 fn gen_firefox_ua() -> String {
-    let version = FIREFOX_VERSIONS[rand::thread_rng().gen_range(0..FIREFOX_VERSIONS.len())];
-    let os = OS_STRINGS[rand::thread_rng().gen_range(0..OS_STRINGS.len())];
+    let mut rng = rand::rng();
+    let version = FIREFOX_VERSIONS[rng.random_range(..FIREFOX_VERSIONS.len())];
+    let os = OS_STRINGS[rng.random_range(..OS_STRINGS.len())];
     format!(
         "Mozilla/5.0 ({}; rv:{}) Gecko/20100101 Firefox/{}",
         os, version, version
@@ -111,8 +112,9 @@ fn gen_firefox_ua() -> String {
 }
 
 fn gen_chrome_ua() -> String {
-    let version = CHROME_VERSIONS[rand::thread_rng().gen_range(0..CHROME_VERSIONS.len())];
-    let os = OS_STRINGS[rand::thread_rng().gen_range(0..OS_STRINGS.len())];
+    let mut rng = rand::rng();
+    let version = CHROME_VERSIONS[rng.random_range(0..CHROME_VERSIONS.len())];
+    let os = OS_STRINGS[rng.random_range(0..OS_STRINGS.len())];
     format!(
         "Mozilla/5.0 ({}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{} Safari/537.36",
         os, version
@@ -120,13 +122,15 @@ fn gen_chrome_ua() -> String {
 }
 
 fn gen_opera_ua() -> String {
-    let version = OPERA_VERSIONS[rand::thread_rng().gen_range(0..OPERA_VERSIONS.len())];
-    let os = OS_STRINGS[rand::thread_rng().gen_range(0..OS_STRINGS.len())];
+    let mut rng = rand::rng();
+    let version = OPERA_VERSIONS[rng.random_range(0..OPERA_VERSIONS.len())];
+    let os = OS_STRINGS[rng.random_range(0..OS_STRINGS.len())];
     format!("Opera/9.80 ({}; U; en) Presto/{}", os, version)
 }
 
 pub fn gen_random_ua() -> String {
-    let choice = rand::thread_rng().gen_range(0..3);
+    let mut rng = rand::rng();
+    let choice =rng.random_range(0..3);
     match choice {
         0 => gen_firefox_ua(),
         1 => gen_chrome_ua(),
