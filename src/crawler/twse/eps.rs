@@ -39,7 +39,7 @@ pub async fn visit(
     year: i32,
     quarter: Quarter,
 ) -> Result<Vec<Eps>> {
-    let url = format!("https://mops.{host}/mops/web/t163sb19", host = twse::HOST,);
+    let url = format!("https://mopsov.{host}/mops/web/ajax_t163sb19", host = twse::HOST,);
     let roc_year = datetime::gregorian_year_to_roc_year(year).to_string();
     let season = format!("0{season}", season = quarter.serial());
     let typek = match stock_exchange_market {
@@ -62,18 +62,20 @@ pub async fn visit(
         .map_err(|err| anyhow!("HTTP request failed: {}", err))?;
     let document = Html::parse_document(&response);
     let mut result = Vec::with_capacity(1024);
-    let selector_table =
-        Selector::parse("table").map_err(|_| anyhow!("Failed to parse table selector"))?;
-    let selector_tr = Selector::parse("tr").map_err(|_| anyhow!("Failed to parse tr selector"))?;
-
+    let selector_table = Selector::parse("table").expect("Failed to parse table selector");
+    let selector_tr = Selector::parse("tr").expect("Failed to parse tr selector");
+    let td_selector = Selector::parse("td").expect("Failed to parse td selector");
     for table in document.select(&selector_table) {
         for tr in table.select(&selector_tr) {
-            let tds: Vec<&str> = tr.text().map(str::trim).collect();
-            if tds.len() != 19 {
+            let tds: Vec<_> = tr.select(&td_selector)
+                .map(|td| td.text().collect::<String>().trim().to_string())
+                .collect();
+
+            if tds.len() != 9 {
                 continue;
             }
 
-            let stock_symbol = tds[1];
+            let stock_symbol = &tds[0];
 
             if stock_symbol.is_empty() {
                 continue;
@@ -87,7 +89,7 @@ pub async fn visit(
                 stock_symbol.to_string(),
                 year,
                 quarter,
-                tds[7].to_string().get_decimal(None),
+                tds[3].to_string().get_decimal(None),
             );
 
             result.push(eps);
@@ -110,7 +112,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit(StockExchangeMarket::Listed, 2023, Quarter::Q4).await {
+        match visit(StockExchangeMarket::Listed, 2024, Quarter::Q4).await {
             Ok(list) => {
                 dbg!(&list);
                 logging::debug_file_async(format!("list:{:#?}", list));

@@ -9,9 +9,9 @@ use crate::{
 /// 將季度財報 ROE為零的數據，到雅虎財經下載後回寫到 financial_statement 表
 pub async fn execute() -> Result<()> {
     let now = Local::now();
-    let previous_quarter = now - TimeDelta::try_days(130).unwrap();
-    let year = previous_quarter.year();
-    let previous_quarter = Quarter::from_month(now.month()).unwrap().previous();
+    let previous_quarter_date = now - TimeDelta::try_days(130).unwrap();
+    let year = previous_quarter_date.year();
+    let previous_quarter = Quarter::from_month(previous_quarter_date.month()).unwrap();
     let quarter = previous_quarter.to_string();
     let fss = table::financial_statement::fetch_roe_or_roa_equal_to_zero(
         Some(year),
@@ -44,7 +44,7 @@ pub async fn execute() -> Result<()> {
                 "the year or quarter retrieved from Yahoo is inconsistent with the current one. current year:{} ,quarter:{} {:#?}",
                 year, quarter, profile
             ));
-            continue;
+            //continue;
         }
 
         let fs = table::financial_statement::FinancialStatement::from(profile);

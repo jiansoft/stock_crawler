@@ -14,7 +14,7 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<reven
     for market in ["sii", "otc"].iter() {
         for i in 0..2 {
             let url = format!(
-                "https://mops.{}/nas/t21/{}/t21sc03_{}_{}_{}.html",
+                "https://mopsov.{}/nas/t21/{}/t21sc03_{}_{}_{}.html",
                 twse::HOST,
                 market,
                 republic_of_china_era,

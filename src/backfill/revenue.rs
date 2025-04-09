@@ -12,7 +12,7 @@ use crate::{
 /// 調用  twse API 取得台股月營收
 pub async fn execute() -> Result<()> {
     let now = Local::now();
-    let naive_datetime = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+    let naive_datetime = NaiveDate::from_ymd_opt(now.year(), 3, 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
         .unwrap();
@@ -22,7 +22,7 @@ pub async fn execute() -> Result<()> {
     let year = last_month_timezone.year();
     let month = last_month_timezone.month();
     let revenues = twse::revenue::visit(last_month_timezone).await?;
-
+    dbg!(&revenues);
     stream::iter(revenues)
         .for_each_concurrent(util::concurrent_limit_16(), |r| async move {
             if let Err(why) = process_revenue(r, year, month as i32).await {

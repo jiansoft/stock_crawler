@@ -42,7 +42,6 @@ struct FundInfo {
 
 impl FundInfo {
     fn from_tds(tds: Vec<String>) -> anyhow::Result<Self> {
-        dbg!(&tds);
         if tds.len() < 9 {
             return Err(anyhow!("Insufficient data in tds array"));
         }

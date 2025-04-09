@@ -1,16 +1,16 @@
-FROM rust:alpine as builder
+FROM rust:alpine AS builder
 
 WORKDIR /app
 
 COPY . .
 
-RUN apk add --no-cache musl-dev openssl-dev protobuf perl make
+RUN apk add --no-cache libressl-dev build-base musl-dev libssl3 libcrypto3  protobuf perl make libgcc libstdc++
 
 RUN cargo build --release
 
 FROM alpine:latest
 
-RUN apk add --no-cache libgcc tzdata
+RUN apk add --no-cache libgcc libstdc++ tzdata
 # 設定環境變量，將時區設為 UTC+8
 ENV TZ=Asia/Taipei
 
@@ -25,10 +25,13 @@ EXPOSE 9001
 # 從建構階段複製二進制檔案
 COPY --from=builder /app/target/release/stock_crawler .
 
-ADD ./.env .
-ADD ./app.json .
+# ADD ./.env .
+# ADD ./app.json .
 
-VOLUME ["/app/log", "/opt/nginx/ssl/jiansoft.mooo.com"]
+COPY ./.env ./
+COPY ./app.json ./
+
+VOLUME ["/app/log","/opt/nginx/ssl/jiansoft.mooo.com"]
 
 # 運行應用程序
 CMD ["/app/stock_crawler"]

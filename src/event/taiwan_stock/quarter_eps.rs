@@ -19,9 +19,9 @@ use crate::{
 
 pub async fn execute() -> Result<()> {
     let now = Local::now();
-    let previous_quarter = now - TimeDelta::try_days(130).unwrap();
-    let year = previous_quarter.year();
-    let previous_quarter = Quarter::from_month(now.month()).unwrap().previous();
+    let previous_quarter_date = now - TimeDelta::try_days(130).unwrap();
+    let year = previous_quarter_date.year();
+    let previous_quarter = Quarter::from_month(previous_quarter_date.month()).unwrap();
     let quarter = previous_quarter.to_string();
     let without_fs_stocks = table::stock::fetch_stocks_without_financial_statement(
         year,
@@ -33,7 +33,7 @@ pub async fn execute() -> Result<()> {
     for market in StockExchangeMarket::iterator() {
         if let Err(why) = process_eps(
             market,
-            now.year(),
+            year,
             previous_quarter,
             &without_financial_stocks,
         )
@@ -92,6 +92,22 @@ mod tests {
     use crate::cache::SHARE;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_execute() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+        logging::debug_file_async("開始 execute".to_string());
+
+        match execute().await {
+            Ok(_) => {}
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 execute".to_string());
+    }
 
     #[tokio::test]
     async fn test_process_eps() {
