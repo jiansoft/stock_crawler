@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use anyhow::Result;
-
+use scopeguard::defer;
 use crate::{
     crawler::goodinfo,
     database::{table, table::stock},
@@ -11,6 +11,11 @@ use crate::{
 
 /// 將股息中盈餘分配率為零的數據向第三方取得數據後更新更新
 pub async fn execute() -> Result<()> {
+    logging::info_file_async("更新盈餘分配率開始");
+    defer! {
+       logging::info_file_async("更新盈餘分配率結束");
+    }
+
     let without_payout_ratio =
         table::dividend::extension::payout_ratio_info::fetch_without_payout_ratio().await?;
     let mut unique_security_code: HashSet<String> = HashSet::new();

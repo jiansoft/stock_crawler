@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, FixedOffset, Local};
-
+use scopeguard::defer;
 use crate::{
     cache::SHARE, crawler::twse,
     database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
@@ -13,7 +13,11 @@ pub async fn execute() -> Result<()> {
     if now.is_weekend() {
         return Ok(());
     }
-
+    logging::info_file_async("更新台股外資持股狀態開始");
+    defer! {
+       logging::info_file_async("更新台股外資持股狀態結束");
+    }
+    
     tokio::try_join!(listed(now.fixed_offset()), otc())?;
 
     Ok(())

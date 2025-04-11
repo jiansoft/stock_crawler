@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
 use futures::{stream, StreamExt};
-
+use scopeguard::defer;
 use crate::{
     cache::SHARE,
     crawler::twse,
@@ -11,6 +11,10 @@ use crate::{
 
 /// 調用  twse API 取得台股月營收
 pub async fn execute() -> Result<()> {
+    logging::info_file_async("更新台股月營收開始");
+    defer! {
+       logging::info_file_async("更新台股月營收結束");
+    }
     let now = Local::now();
     let naive_datetime = NaiveDate::from_ymd_opt(now.year(), 3, 1)
         .unwrap()
@@ -22,7 +26,7 @@ pub async fn execute() -> Result<()> {
     let year = last_month_timezone.year();
     let month = last_month_timezone.month();
     let revenues = twse::revenue::visit(last_month_timezone).await?;
-    dbg!(&revenues);
+
     stream::iter(revenues)
         .for_each_concurrent(util::concurrent_limit_16(), |r| async move {
             if let Err(why) = process_revenue(r, year, month as i32).await {

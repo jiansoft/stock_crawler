@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use chrono::{Datelike, Local, TimeDelta};
-
+use scopeguard::defer;
 use crate::{
     crawler::twse,
     database::{
@@ -18,6 +18,11 @@ use crate::{
 };
 
 pub async fn execute() -> Result<()> {
+    logging::info_file_async("更新台股季度財報開始");
+    defer! {
+       logging::info_file_async("更新台股季度財報結束");
+    }
+
     let now = Local::now();
     let previous_quarter_date = now - TimeDelta::try_days(130).unwrap();
     let year = previous_quarter_date.year();

@@ -3,7 +3,7 @@ use std::fmt::Write;
 use anyhow::{anyhow, Result};
 use chrono::Local;
 use rust_decimal::prelude::ToPrimitive;
-
+use scopeguard::defer;
 use crate::{
     bot, cache::SHARE, crawler::twse, database::table, declare::StockExchangeMarket, logging, rpc,
     rpc::stock, util::datetime::Weekend,
@@ -14,7 +14,10 @@ pub async fn execute() -> Result<()> {
     if Local::now().is_weekend() {
         return Ok(());
     }
-
+    logging::info_file_async("更新台股國際證券識別碼開始");
+    defer! {
+       logging::info_file_async("更新台股國際證券識別碼結束");
+    }
     let tasks: Vec<_> = StockExchangeMarket::iterator()
         .map(process_market)
         .collect();

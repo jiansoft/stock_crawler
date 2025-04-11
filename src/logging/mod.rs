@@ -38,20 +38,20 @@ impl Logger {
         }
     }
 
-    pub fn info(&self, log: String) {
-        self.send(log, &self.info_writer);
+    pub fn info<S: Into<String>>(&self, log: S) {
+        self.send(log.into(), &self.info_writer);
     }
 
-    pub fn warn(&self, log: String) {
-        self.send(log, &self.warn_writer);
+    pub fn warn<S: Into<String>>(&self, log: S) {
+        self.send(log.into(), &self.warn_writer);
     }
 
-    pub fn error(&self, log: String) {
-        self.send(log, &self.error_writer);
+    pub fn error<S: Into<String>>(&self, log: S) {
+        self.send(log.into(), &self.error_writer);
     }
 
-    pub fn debug(&self, log: String) {
-        self.send(log, &self.debug_writer);
+    pub fn debug<S: Into<String>>(&self, log: S) {
+        self.send(log.into(), &self.debug_writer);
     }
 
     pub fn send(&self, msg: String, writer: &UnboundedSender<String>) {
@@ -124,20 +124,21 @@ impl Logger {
     }
 }
 
-pub fn info_file_async(log: String) {
-    LOGGER.info(log);
+pub fn info_file_async<S: Into<String>>(log: S) {
+    LOGGER.info(log.into());
 }
 
-pub fn warn_file_async(log: String) {
-    LOGGER.warn(log);
+
+pub fn warn_file_async<S: Into<String>>(log: S) {
+    LOGGER.warn(log.into());
 }
 
-pub fn error_file_async(log: String) {
-    LOGGER.error(log);
+pub fn error_file_async<S: Into<String>>(log: S) {
+    LOGGER.error(log.into());
 }
 
-pub fn debug_file_async(log: String) {
-    LOGGER.debug(log);
+pub fn debug_file_async<S: Into<String>>(log: S) {
+    LOGGER.debug(log.into());
 }
 
 pub fn info_console(log: String) {

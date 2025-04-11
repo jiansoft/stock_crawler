@@ -83,11 +83,11 @@ pub async fn visit() -> anyhow::Result<()> {
     let document = Html::parse_document(&text);
     let selector = Selector::parse("#oMainTable > tbody > tr:nth-child(n+3)")
         .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
-    let td_selector = Selector::parse("td").expect("Failed to parse td selector");
+    let selector_td = Selector::parse("td").expect("Failed to parse td selector");
     let link_selector = Selector::parse("a").expect("Failed to parse a selector");
     for node in document.select(&selector) {
         let mut tds: Vec<String> = node
-            .select(&td_selector)
+            .select(&selector_td)
             .map(|td| td.text().collect::<String>().trim().to_string())
             .collect();
 

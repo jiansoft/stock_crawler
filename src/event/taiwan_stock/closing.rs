@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use rust_decimal_macros::dec;
-
+use scopeguard::defer;
 use crate::{
     backfill, bot,
     cache::{TtlCacheInner, TTL},
@@ -15,6 +15,11 @@ use crate::{
 
 /// 台股收盤事件發生時要進行的事情
 pub async fn execute() -> Result<()> {
+    logging::info_file_async("台股收盤事件開始");
+    defer! {
+       logging::info_file_async("台股收盤事件結束");
+    }
+
     let current_date: NaiveDate = Local::now().date_naive();
     let aggregate = aggregate(current_date);
     let index = backfill::taiwan_stock_index::execute();

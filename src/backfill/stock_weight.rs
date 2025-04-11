@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures::{stream, StreamExt};
+use scopeguard::defer;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -13,6 +14,10 @@ use crate::{
 
 /// 查詢 taifex 個股權值比重
 pub async fn execute() -> Result<()> {
+    logging::info_file_async("更新個股權值比重開始");
+    defer! {
+       logging::info_file_async("更新個股權值比重結束");
+    }
     let stock_weights = Arc::new(Mutex::new(Vec::with_capacity(2000)));
     let exchanges = vec![StockExchange::TPEx, StockExchange::TWSE];
     // Process each exchange concurrently

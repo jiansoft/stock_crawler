@@ -64,10 +64,10 @@ pub async fn visit(
     let mut result = Vec::with_capacity(1024);
     let selector_table = Selector::parse("table").expect("Failed to parse table selector");
     let selector_tr = Selector::parse("tr").expect("Failed to parse tr selector");
-    let td_selector = Selector::parse("td").expect("Failed to parse td selector");
+    let selector_td = Selector::parse("td").expect("Failed to parse td selector");
     for table in document.select(&selector_table) {
         for tr in table.select(&selector_tr) {
-            let tds: Vec<_> = tr.select(&td_selector)
+            let tds: Vec<_> = tr.select(&selector_td)
                 .map(|td| td.text().collect::<String>().trim().to_string())
                 .collect();
 

@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Result};
+use chrono::NaiveDate;
 use hashbrown::HashMap;
+use lazy_static::lazy_static;
 use regex::Regex;
 use reqwest::header::{HeaderMap, COOKIE};
 use rust_decimal::Decimal;
@@ -12,13 +14,17 @@ use crate::{
     crawler::goodinfo::HOST,
     logging,
     util::{
-        http::{self, element},
+        http::{self},
         map::Keyable,
         text,
     },
 };
 
 const UNSET_DATE: &str = "-";
+
+lazy_static! {
+    static ref PERIOD_RE: Regex = Regex::new(r"(\d+)([A-Z]\d)").unwrap();
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GoodInfoDividend {
@@ -105,10 +111,8 @@ impl Keyable for GoodInfoDividend {
 /// 抓取年度股利資料
 pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDividend>>> {
     let url = format!(
-        "https://{}/tw/StockDividendPolicy.asp?STOCK_ID={}&STEP=DATA&SHEET={}&INITIALIZED=T",
-        HOST,
-        stock_symbol,
-        encode("股利所屬年度")
+        "https://{}/tw/StockDividendSchedule.asp?STOCK_ID={}&STEP=DATA",
+        HOST, stock_symbol,
     );
 
     let ua = http::user_agent::gen_random_ua();
@@ -155,20 +159,25 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
     let document = Html::parse_document(text.as_str());
     let selector = Selector::parse("#tblDetail > tbody > tr")
         .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
+    let selector_td = Selector::parse("td").expect("Failed to parse td selector");
+
     let mut last_year: i32 = 0;
     let result: Result<Vec<GoodInfoDividend>, _> = document
         .select(&selector)
         .filter_map(|element| {
-            let tds: Vec<&str> = element.text().collect();
+            //let tds: Vec<&str> = element.text().collect();
+            let tds: Vec<_> = element
+                .select(&selector_td)
+                .map(|td| td.text().collect::<String>().trim().to_string())
+                .collect();
 
-            if tds.len() != 50 {
+            if tds.len() != 19 {
                 return None;
             }
 
-            //logging::debug_file_async(format!("tds({}):{:#?}",tds.len(), tds));
             let mut e = GoodInfoDividend::new(stock_symbol.to_string());
-            //#tblDetail > tbody > tr:nth-child(5) > td:nth-child(2) > nobr > b
-            let year_str = element::parse_value(&element, "td:nth-child(2) > nobr > b")?; //tds[1];
+
+            let year_str = tds[0].to_string();
             if year_str.is_empty() {
                 return None;
             }
@@ -194,42 +203,44 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
             };
 
             //股利所屬期間
-            let quarter = element::parse_value(&element, "td:nth-child(21)")?;
-            match Regex::new(r"(\d+)([A-Z]\d)") {
-                Ok(re) => match re.captures(&quarter.to_uppercase()) {
-                    None => {
-                        // 2023
-                        let year_of_dividend = text::parse_i32(&quarter, None).ok()?;
-                        e.year_of_dividend = year_of_dividend;
-                    }
-                    Some(caps) => {
-                        // 23Q1
-                        let year_of_dividend = text::parse_i32(&caps[1], None).ok()?;
-                        e.year_of_dividend = year_of_dividend + 2000;
-                        e.quarter = caps.get(2)?.as_str().to_string();
-                    }
-                },
-                Err(why) => {
-                    logging::error_file_async(format!("Failed to Regex::new because {:#?}", why));
-                    return None;
+            let quarter = tds[1].to_string();
+            match PERIOD_RE.captures(&quarter.to_uppercase()) {
+                Some(caps) => {
+                    e.year_of_dividend = parse_i32_safe(&caps[1], None)?;
+                    e.quarter = caps.get(2)?.as_str().to_string();
+                }
+                None => {
+                    e.year_of_dividend = parse_i32_safe(&quarter, Some(vec!['全', '年']))?;
                 }
             }
-            e.sum = element::parse_to_decimal(&element, "td:nth-child(9)");
+
+            e.sum = text::parse_decimal(&tds[18], None).unwrap_or(Decimal::ZERO);
 
             if e.sum == Decimal::ZERO {
                 return None;
             }
 
-            e.earnings_cash = element::parse_to_decimal(&element, "td:nth-child(3)");
-            e.capital_reserve_cash = element::parse_to_decimal(&element, "td:nth-child(4)");
-            e.cash_dividend = element::parse_to_decimal(&element, "td:nth-child(5)");
-            e.earnings_stock = element::parse_to_decimal(&element, "td:nth-child(6)");
-            e.capital_reserve_stock = element::parse_to_decimal(&element, "td:nth-child(7)");
-            e.stock_dividend = element::parse_to_decimal(&element, "td:nth-child(8)");
-            e.earnings_per_share = element::parse_to_decimal(&element, "td:nth-child(22)");
-            e.payout_ratio_cash = element::parse_to_decimal(&element, "td:nth-child(23)");
-            e.payout_ratio_stock = element::parse_to_decimal(&element, "td:nth-child(24)");
-            e.payout_ratio = element::parse_to_decimal(&element, "td:nth-child(25)");
+            e.earnings_cash = parse_decimal_safe(&tds[12]);
+            e.capital_reserve_cash = parse_decimal_safe(&tds[13]);
+            e.cash_dividend = parse_decimal_safe(&tds[14]);
+            e.earnings_stock = parse_decimal_safe(&tds[15]);
+            e.capital_reserve_stock = parse_decimal_safe(&tds[16]);
+            e.stock_dividend = parse_decimal_safe(&tds[17]);
+
+            if e.cash_dividend == Decimal::ZERO {
+                e.ex_dividend_date1 = UNSET_DATE.to_string();
+                e.payable_date1 = UNSET_DATE.to_string();
+            } else if !tds[3].is_empty()  {
+                e.ex_dividend_date1 = convert_date(&tds[3]).unwrap_or(UNSET_DATE.to_string());
+                e.payable_date1 = convert_date(&tds[7]).unwrap_or(UNSET_DATE.to_string());
+            }
+
+            if e.stock_dividend == Decimal::ZERO {
+                e.ex_dividend_date2 = UNSET_DATE.to_string();
+                e.payable_date2 = UNSET_DATE.to_string();
+            } else if !tds[8].is_empty() {
+                e.ex_dividend_date2 = convert_date(&tds[8]).unwrap_or(UNSET_DATE.to_string());
+            }
 
             Some(Ok(e))
         })
@@ -261,6 +272,37 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
 
     result
 }
+
+fn convert_date(s: &str) -> Option<String> {
+    // 去除開頭的 '
+    let trimmed = s.trim_start_matches('\'');
+
+    // 拆解成 [yy, mm, dd]
+    let parts: Vec<&str> = trimmed.split('/').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let yy: u32 = parts[0].parse().ok()?;
+    let mm: u32 = parts[1].parse().ok()?;
+    let dd: u32 = parts[2].parse().ok()?;
+
+    // 決定年份
+    let full_year = if yy < 50 { 2000 + yy } else { 1900 + yy };
+
+    // 建立日期
+    let date = NaiveDate::from_ymd_opt(full_year as i32, mm, dd)?;
+    Some(date.format("%Y-%m-%d").to_string())
+}
+
+fn parse_decimal_safe(s: &str) -> Decimal {
+    text::parse_decimal(s, None).unwrap_or(Decimal::ZERO)
+}
+
+fn parse_i32_safe(s: &str, strip: Option<Vec<char>>) -> Option<i32> {
+    text::parse_i32(s, strip).ok()
+}
+
 
 #[cfg(test)]
 mod tests {

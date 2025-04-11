@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::Local;
-
+use scopeguard::defer;
 use crate::{
     cache::SHARE, crawler::twse, database::table::stock, logging, util::datetime::Weekend,
 };
@@ -10,7 +10,10 @@ pub async fn execute() -> Result<()> {
     if Local::now().is_weekend() {
         return Ok(());
     }
-
+    logging::info_file_async("更新下市的股票開始");
+    defer! {
+       logging::info_file_async("更新下市的股票結束");
+    }
     let delisted = twse::suspend_listing::visit().await?;
     let mut items_to_update = Vec::new();
 

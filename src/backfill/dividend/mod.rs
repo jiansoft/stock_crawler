@@ -2,6 +2,7 @@ use std::{collections::HashSet, time::Duration};
 
 use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local};
+use scopeguard::defer;
 use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,
@@ -19,7 +20,11 @@ pub mod payout_ratio;
 /// 更新股利發送數據
 /// 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
 pub async fn execute() -> Result<()> {
-    //尚未有股利或多次配息
+    logging::info_file_async("更新台股股利發放數據開始");
+    defer! {
+       logging::info_file_async("更新台股股利發放數據結束");
+    }
+
     let now = Local::now();
     let year = now.year();
     let no_or_multiple_dividend = processing_no_or_multiple(year);
