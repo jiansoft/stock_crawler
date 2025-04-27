@@ -1,18 +1,22 @@
-use anyhow::{anyhow, Result};
-
 use crate::{
     cache::SHARE,
     crawler::{self, share},
     declare, logging, nosql,
 };
+use anyhow::{anyhow, Result};
+use chrono::Timelike;
 
 pub async fn refresh() -> Result<()> {
+    let now = chrono::Local::now();
+
+    if now.hour() == 2 && now.minute() < 5 {
+        return Ok(());
+    }
+
     let ip_now = share::get_public_ip().await?;
 
     if ip_now.is_empty() {
-        return Err(anyhow!(
-            "The IP addresses responses are empty."
-        ));
+        return Err(anyhow!("The IP addresses responses are empty."));
     }
 
     let ddns_key = format!("MyPublicIP:{ip}", ip = ip_now);
