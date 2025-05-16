@@ -76,7 +76,7 @@ mod tests {
         SHARE.load().await;
         let _now = Local::now();
 
-        let naive_datetime = NaiveDate::from_ymd_opt(2024, 12, 1)
+        let naive_datetime = NaiveDate::from_ymd_opt(2025, 4, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
             .unwrap();
