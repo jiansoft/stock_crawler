@@ -279,7 +279,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 processing_with_unannounced_ex_dividend_dates".to_string());
 
-        match processing_unannounced_ex_dividend_date(2024).await {
+        match processing_unannounced_ex_dividend_date(2025).await {
             Ok(_) => {
                 logging::debug_file_async(
                     "processing_with_unannounced_ex_dividend_dates executed successfully."

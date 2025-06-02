@@ -1,10 +1,10 @@
-FROM rust:alpine AS builder
+FROM rust:1.87-alpine3.20 AS builder
 
 WORKDIR /app
 
 COPY . .
 
-RUN apk add --no-cache libressl-dev build-base musl-dev libssl3 libcrypto3  protobuf perl make libgcc libstdc++
+RUN apk add --no-cache libressl-dev build-base musl-dev libssl3 libcrypto3 protobuf perl make libgcc libstdc++
 
 RUN cargo build --release
 

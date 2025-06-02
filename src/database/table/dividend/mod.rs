@@ -362,12 +362,12 @@ WHERE
     AND
     (
         (
-            ("ex-dividend_date1" = '尚未公布' OR payable_date1 = '尚未公布')
+            ("ex-dividend_date1" = '-' OR "ex-dividend_date1" = '尚未公布' OR payable_date1 = '尚未公布')
             AND cash_dividend > 0
         )
         OR
         (
-            ("ex-dividend_date2" = '尚未公布' OR payable_date2 = '尚未公布')
+            ("ex-dividend_date2" = '-' OR "ex-dividend_date2" = '尚未公布' OR payable_date2 = '尚未公布')
             AND stock_dividend > 0
         )
     );
