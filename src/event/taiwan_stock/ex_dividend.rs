@@ -8,13 +8,18 @@ use crate::{bot, calculation, database::table::dividend};
 /// 提醒本日為除權息的股票有那些
 pub async fn execute() -> Result<()> {
     let today: NaiveDate = Local::now().date_naive();
-    let stocks_dividend_info =
+    let mut stocks_dividend_info =
         dividend::extension::stock_dividend_info::fetch_stocks_with_dividends_on_date(today)
             .await?;
     if stocks_dividend_info.is_empty() {
         return Ok(());
     }
-
+    // 按 殖利率 降序排序
+    stocks_dividend_info.sort_by(|a, b| {
+        b.dividend_yield
+            .partial_cmp(&a.dividend_yield)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut stock_symbols: Vec<String> = Vec::with_capacity(stocks_dividend_info.len());
     let mut msg = String::with_capacity(2048);
     if writeln!(&mut msg, "{} 進行除權息的股票如下︰", today).is_ok() {

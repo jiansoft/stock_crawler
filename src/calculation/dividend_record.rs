@@ -214,7 +214,7 @@ mod tests {
     async fn test_calculate() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 calculate".to_string());
-        for i in 2023..2024 {
+        for i in 2025..2026 {
             execute(i, None).await;
             logging::debug_file_async(format!("calculate({}) 完成", i));
         }
