@@ -1,5 +1,3 @@
-
-
 const HOST: &str = "fund.bot.com.tw";
 
 /// 財務比率表

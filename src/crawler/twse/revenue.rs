@@ -60,9 +60,9 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-    use chrono::{Local, TimeDelta};
     use chrono::prelude::*;
+    use chrono::{Local, TimeDelta};
+    use std::time::Duration;
 
     use crate::logging;
 

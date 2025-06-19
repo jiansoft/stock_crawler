@@ -1,7 +1,3 @@
-use anyhow::Result;
-use chrono::Local;
-use futures::future;
-use scopeguard::defer;
 use crate::{
     backfill::financial_statement::update_roe_and_roa_for_zero_values,
     crawler::wespai,
@@ -9,6 +5,10 @@ use crate::{
     logging, nosql,
     util::{self, datetime::Weekend},
 };
+use anyhow::Result;
+use chrono::Local;
+use futures::future;
+use scopeguard::defer;
 
 /// 更新台股年報
 pub async fn execute() -> Result<()> {
@@ -20,7 +20,6 @@ pub async fn execute() -> Result<()> {
     defer! {
        logging::info_file_async("更新台股年度財報結束");
     }
-
 
     let cache_key = "financial_statement:annual";
     let is_jump = nosql::redis::CLIENT.get_bool(cache_key).await?;

@@ -42,8 +42,8 @@ pub async fn visit(ip: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::crawler::ipify;
     use super::*;
+    use crate::crawler::ipify;
 
     #[tokio::test]
     async fn test_execute() {

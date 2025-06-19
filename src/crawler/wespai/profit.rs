@@ -144,8 +144,8 @@ pub async fn visit() -> Result<Vec<Profit>> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
     use crate::logging;
+    use std::time::Duration;
 
     use super::*;
 
@@ -157,7 +157,6 @@ mod tests {
 
         match visit().await {
             Ok(e) => {
-
                 logging::debug_file_async(format!("{:#?}", e));
             }
             Err(why) => {
@@ -167,6 +166,5 @@ mod tests {
 
         logging::debug_file_async("結束 visit".to_string());
         tokio::time::sleep(Duration::from_secs(5)).await;
-
     }
 }

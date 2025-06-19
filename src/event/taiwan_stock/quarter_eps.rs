@@ -1,21 +1,14 @@
 use std::collections::HashMap;
 
+use crate::{
+    crawler::twse,
+    database::table::{self, financial_statement, stock::Stock},
+    declare::{Quarter, StockExchangeMarket},
+    logging, util,
+};
 use anyhow::Result;
 use chrono::{Datelike, Local, TimeDelta};
 use scopeguard::defer;
-use crate::{
-    crawler::twse,
-    database::{
-        table::{
-            self,
-            stock::Stock,
-            financial_statement
-        }
-    },
-    declare::{Quarter, StockExchangeMarket},
-    logging,
-    util,
-};
 
 pub async fn execute() -> Result<()> {
     logging::info_file_async("更新台股季度財報開始");
@@ -28,21 +21,14 @@ pub async fn execute() -> Result<()> {
     let year = previous_quarter_date.year();
     let previous_quarter = Quarter::from_month(previous_quarter_date.month()).unwrap();
     let quarter = previous_quarter.to_string();
-    let without_fs_stocks = table::stock::fetch_stocks_without_financial_statement(
-        year,
-        quarter.to_string().as_str(),
-    )
-    .await?;
+    let without_fs_stocks =
+        table::stock::fetch_stocks_without_financial_statement(year, quarter.to_string().as_str())
+            .await?;
     let without_financial_stocks = util::map::vec_to_hashmap(without_fs_stocks);
 
     for market in StockExchangeMarket::iterator() {
-        if let Err(why) = process_eps(
-            market,
-            year,
-            previous_quarter,
-            &without_financial_stocks,
-        )
-        .await
+        if let Err(why) =
+            process_eps(market, year, previous_quarter, &without_financial_stocks).await
         {
             logging::error_file_async(format!(
                 "Failed to update_suspend_listing because {:?}",
@@ -51,7 +37,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
     }
-    
+
     Ok(())
 }
 
@@ -72,7 +58,9 @@ async fn process_eps(
         if e.quarter != Quarter::Q1 {
             //如果不是第一季的EPS要減掉今年其他的EPS，例如Q2要減 Q1，Q3要減Q2、Q1
             let smaller_quarters = quarter.smaller_quarters();
-            let before_eps = financial_statement::fetch_cumulative_eps(&e.stock_symbol, year, smaller_quarters).await?;
+            let before_eps =
+                financial_statement::fetch_cumulative_eps(&e.stock_symbol, year, smaller_quarters)
+                    .await?;
             e.earnings_per_share -= before_eps;
         }
 
@@ -93,8 +81,8 @@ async fn process_eps(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
     use crate::cache::SHARE;
+    use std::time::Duration;
 
     use super::*;
 

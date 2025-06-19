@@ -63,7 +63,7 @@ pub async fn visit() -> Result<Vec<Public>> {
     let now = Local::now();
     let date = now + TimeDelta::try_days(5).unwrap();
     let url = format!(
-            "https://www.{host}/rwd/zh/announcement/publicForm?date={year}&response=json&_={time}",
+        "https://www.{host}/rwd/zh/announcement/publicForm?date={year}&response=json&_={time}",
         host = twse::HOST,
         year = date.year(),
         time = now.timestamp_millis()
@@ -104,9 +104,9 @@ pub async fn visit() -> Result<Vec<Public>> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::cache::SHARE;
     use crate::logging;
-    use super::*;
 
     #[tokio::test]
     #[ignore]

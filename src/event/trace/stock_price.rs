@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{Result};
+use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate};
 use futures::future;
 use rust_decimal::Decimal;

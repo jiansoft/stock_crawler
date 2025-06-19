@@ -230,7 +230,7 @@ pub async fn visit(stock_symbol: &str) -> Result<HashMap<i32, Vec<GoodInfoDivide
             if e.cash_dividend == Decimal::ZERO {
                 e.ex_dividend_date1 = UNSET_DATE.to_string();
                 e.payable_date1 = UNSET_DATE.to_string();
-            } else if !tds[3].is_empty()  {
+            } else if !tds[3].is_empty() {
                 e.ex_dividend_date1 = convert_date(&tds[3]).unwrap_or(UNSET_DATE.to_string());
                 e.payable_date1 = convert_date(&tds[7]).unwrap_or(UNSET_DATE.to_string());
             }
@@ -302,7 +302,6 @@ fn parse_decimal_safe(s: &str) -> Decimal {
 fn parse_i32_safe(s: &str, strip: Option<Vec<char>>) -> Option<i32> {
     text::parse_i32(s, strip).ok()
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -10,10 +10,7 @@ use crate::{
     database::table::{self, daily_quote::FromWithExchange},
     declare::StockExchange,
     logging,
-    util::{
-        http,
-        map::Keyable
-    },
+    util::{http, map::Keyable},
 };
 
 /*#[derive(Serialize, Deserialize, Debug)]
@@ -43,7 +40,6 @@ pub struct Table {
     #[serde(rename = "hints")]
     pub hints: Option<String>,
 }
-
 
 /// 抓取上市公司每日收盤資訊
 pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote>> {
@@ -86,8 +82,9 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
                     {
                         if ldg.closing_price > Decimal::ZERO {
                             // 漲幅 = (现价-上一个交易日收盘价）/ 上一个交易日收盘价*100%
-                            dq.change_range =
-                                (dq.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
+                            dq.change_range = (dq.closing_price - ldg.closing_price)
+                                / ldg.closing_price
+                                * dec!(100);
                         } else {
                             dq.change_range = dq.change / dq.opening_price * dec!(100);
                         }

@@ -1,7 +1,7 @@
 use crate::{
     crawler::bank_of_taiwan,
     util,
-    util::{http, text}
+    util::{http, text},
 };
 use anyhow::anyhow;
 use chrono::NaiveDate;

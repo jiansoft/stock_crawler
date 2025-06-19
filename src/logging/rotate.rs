@@ -175,8 +175,8 @@ impl Rotate {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
     use chrono::TimeDelta;
+    use std::io::Write;
 
     use crate::logging;
 

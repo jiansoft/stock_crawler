@@ -1,14 +1,11 @@
-use std::{
-    future::{Future},
-    time::Duration
-};
+use std::{future::Future, time::Duration};
 
 use anyhow::Result;
-use chrono::{NaiveDate};
+use chrono::NaiveDate;
 use futures::{stream, StreamExt};
 
 use crate::{
-    cache::{SHARE, TTL, TtlCacheInner},
+    cache::{TtlCacheInner, SHARE, TTL},
     crawler::{tpex, twse},
     database::table::{self, daily_quote::DailyQuote},
     logging, util,
@@ -23,14 +20,14 @@ pub async fn execute(date: NaiveDate) -> Result<usize> {
     let tpex = tpex::quote::visit(date);
     let mut quotes_twse: Vec<DailyQuote> = Vec::with_capacity(1024);
     let mut quotes_tpex: Vec<DailyQuote> = Vec::with_capacity(1024);
-    let get_twse =  get_quotes_from_source(twse, "上市", &mut quotes_twse);
+    let get_twse = get_quotes_from_source(twse, "上市", &mut quotes_twse);
     let get_tpex = get_quotes_from_source(tpex, "上櫃", &mut quotes_tpex);
     let (result_twse, result_tpex) = tokio::join!(get_twse, get_tpex);
 
     result_twse?;
     result_tpex?;
 
-    let quotes_len = quotes_twse.len() +quotes_tpex.len();
+    let quotes_len = quotes_twse.len() + quotes_tpex.len();
     let mut quotes = Vec::with_capacity(quotes_len);
 
     quotes.append(&mut quotes_twse);
@@ -87,11 +84,11 @@ async fn process_daily_quote(daily_quote: DailyQuote) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
     use chrono::NaiveDate;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     //use crossbeam::thread;
     use rayon::prelude::*;
@@ -101,7 +98,7 @@ mod tests {
 
     use super::*;
 
-//use std::time;
+    //use std::time;
 
     #[tokio::test]
     #[ignore]
@@ -117,9 +114,7 @@ mod tests {
             .await;
 
         match execute(date).await {
-            Ok(_) => {
-
-            }
+            Ok(_) => {}
             Err(why) => {
                 logging::debug_file_async(format!("Failed to execute because {:?}", why));
             }

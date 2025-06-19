@@ -3,12 +3,8 @@ use rust_decimal::Decimal;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::{
-    util::{
-        map::Keyable,
-        self,
-        text
-    },
     declare::Quarter,
+    util::{self, map::Keyable, text},
 };
 
 #[derive(Serialize, Deserialize, Debug)]

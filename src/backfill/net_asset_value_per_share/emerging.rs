@@ -1,10 +1,10 @@
-use anyhow::Result;
-use chrono::Local;
-use scopeguard::defer;
 use crate::{
     backfill::net_asset_value_per_share::update, cache::SHARE, crawler::tpex, database::table,
     logging, util::datetime::Weekend,
 };
+use anyhow::Result;
+use chrono::Local;
+use scopeguard::defer;
 
 /// 更新興櫃股票的每股淨值
 pub async fn execute() -> Result<()> {
@@ -16,7 +16,7 @@ pub async fn execute() -> Result<()> {
     defer! {
        logging::info_file_async("更新興櫃股票的每股淨值結束");
     }
-    
+
     let result = tpex::net_asset_value_per_share::visit().await?;
 
     for item in result {

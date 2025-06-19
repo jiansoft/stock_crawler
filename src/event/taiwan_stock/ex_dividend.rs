@@ -3,12 +3,7 @@ use std::fmt::Write;
 use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate};
 
-use crate::{
-    bot,
-    calculation,
-    database::table::dividend,
-    bot::telegram::Telegram
-};
+use crate::{bot, bot::telegram::Telegram, calculation, database::table::dividend};
 
 /// 提醒本日為除權息的股票有那些
 pub async fn execute() -> Result<()> {
@@ -16,7 +11,7 @@ pub async fn execute() -> Result<()> {
     let mut stocks_dividend_info =
         dividend::extension::stock_dividend_info::fetch_stocks_with_dividends_on_date(today)
             .await?;
-    
+
     if stocks_dividend_info.is_empty() {
         return Ok(());
     }
@@ -26,10 +21,16 @@ pub async fn execute() -> Result<()> {
             .partial_cmp(&a.dividend_yield)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    
+
     let mut stock_symbols: Vec<String> = Vec::with_capacity(stocks_dividend_info.len());
     let mut msg = String::with_capacity(2048);
-    if writeln!(&mut msg, "{} 進行除權息的股票如下︰", Telegram::escape_markdown_v2(&today.to_string())).is_ok() {
+    if writeln!(
+        &mut msg,
+        "{} 進行除權息的股票如下︰",
+        Telegram::escape_markdown_v2(today.to_string())
+    )
+    .is_ok()
+    {
         for stock in stocks_dividend_info {
             stock_symbols.push(stock.stock_symbol.to_string());
             let _ = writeln!(
@@ -37,12 +38,12 @@ pub async fn execute() -> Result<()> {
                 "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} 現金︰{2}元\\({6}%\\) 股票 {3}元 合計︰{4}元\\({7}%\\) 昨收價:{5} 現金殖利率:{6}% 殖利率:{7}%",
                 stock.stock_symbol,
                 Telegram::escape_markdown_v2(&stock.name),
-                Telegram::escape_markdown_v2(&stock.cash_dividend.normalize().to_string()),
-                Telegram::escape_markdown_v2(&stock.stock_dividend.normalize().to_string()),
-                Telegram::escape_markdown_v2(&stock.sum.normalize().to_string()),
-                Telegram::escape_markdown_v2(&stock.closing_price.normalize().to_string()),
-                Telegram::escape_markdown_v2(&stock.cash_dividend_yield.normalize().to_string()),
-                Telegram::escape_markdown_v2(&stock.dividend_yield.normalize().to_string())
+                Telegram::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
+                Telegram::escape_markdown_v2(stock.stock_dividend.normalize().to_string()),
+                Telegram::escape_markdown_v2(stock.sum.normalize().to_string()),
+                Telegram::escape_markdown_v2(stock.closing_price.normalize().to_string()),
+                Telegram::escape_markdown_v2(stock.cash_dividend_yield.normalize().to_string()),
+                Telegram::escape_markdown_v2(stock.dividend_yield.normalize().to_string())
             );
         }
     }

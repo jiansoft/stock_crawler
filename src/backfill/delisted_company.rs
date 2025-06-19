@@ -1,9 +1,9 @@
-use anyhow::Result;
-use chrono::Local;
-use scopeguard::defer;
 use crate::{
     cache::SHARE, crawler::twse, database::table::stock, logging, util::datetime::Weekend,
 };
+use anyhow::Result;
+use chrono::Local;
+use scopeguard::defer;
 
 /// 更新資料庫中終止上市的公司
 pub async fn execute() -> Result<()> {

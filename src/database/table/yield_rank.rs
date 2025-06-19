@@ -77,7 +77,7 @@ ON CONFLICT (date, security_code) DO UPDATE SET
         );
 
         match sqlx::query(&sql)
-            .bind(date.year()-1)
+            .bind(date.year() - 1)
             .bind(date)
             .bind(month_ago)
             .execute(&mut *tx)

@@ -6,16 +6,12 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
 use crate::{
-    util::{
-        text,
-        self,
-        http::element
-    },
     crawler::{
         megatime::{PcHome, HOST},
         StockInfo,
     },
     declare,
+    util::{self, http::element, text},
 };
 
 //#stock_info_data_a > span.data_close

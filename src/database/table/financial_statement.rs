@@ -404,7 +404,11 @@ ORDER BY
         })
 }
 
-pub async fn fetch_cumulative_eps(security_code:&str, year: i32, quarters: Vec<Quarter>) -> Result<Decimal> {
+pub async fn fetch_cumulative_eps(
+    security_code: &str,
+    year: i32,
+    quarters: Vec<Quarter>,
+) -> Result<Decimal> {
     let sql = r#"
         SELECT SUM(earnings_per_share) AS cumulative_eps
         FROM financial_statement
@@ -517,9 +521,9 @@ impl From<crawler::share::AnnualProfit> for FinancialStatement {
 
 #[cfg(test)]
 mod tests {
-    use std::time;
     use crate::logging;
     use chrono::{Datelike, NaiveDate};
+    use std::time;
 
     use super::*;
 

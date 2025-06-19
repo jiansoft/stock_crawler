@@ -6,10 +6,7 @@ use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::{
-    crawler::{
-        taifex,
-        taifex::HOST
-    },
+    crawler::{taifex, taifex::HOST},
     declare::StockExchange,
     util::{self, http::element},
 };
@@ -48,8 +45,7 @@ impl ExchangeConfig {
         match exchange {
             StockExchange::TWSE => Self {
                 url: format!("https://{}/cht/9/futuresQADetail", taifex::HOST),
-                selector: "#printhere > div > div > table > tbody > tr"
-                    .to_string(),
+                selector: "#printhere > div > div > table > tbody > tr".to_string(),
             },
             StockExchange::TPEx => Self {
                 url: format!("https://{}/cht/2/tPEXPropertion", taifex::HOST),
@@ -69,7 +65,7 @@ pub async fn visit(exchange: StockExchange) -> Result<Vec<StockWeight>> {
     let mut headers = HeaderMap::new();
 
     headers.insert("Host", HOST.parse()?);
-    headers.insert("Referer",url.parse()?);
+    headers.insert("Referer", url.parse()?);
     headers.insert("User-Agent", ua.parse()?);
 
     let text = util::http::get(url, Some(headers)).await?;

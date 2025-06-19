@@ -39,7 +39,10 @@ pub async fn visit(
     year: i32,
     quarter: Quarter,
 ) -> Result<Vec<Eps>> {
-    let url = format!("https://mopsov.{host}/mops/web/ajax_t163sb19", host = twse::HOST,);
+    let url = format!(
+        "https://mopsov.{host}/mops/web/ajax_t163sb19",
+        host = twse::HOST,
+    );
     let roc_year = datetime::gregorian_year_to_roc_year(year).to_string();
     let season = format!("0{season}", season = quarter.serial());
     let typek = match stock_exchange_market {
@@ -67,7 +70,8 @@ pub async fn visit(
     let selector_td = Selector::parse("td").expect("Failed to parse td selector");
     for table in document.select(&selector_table) {
         for tr in table.select(&selector_tr) {
-            let tds: Vec<_> = tr.select(&selector_td)
+            let tds: Vec<_> = tr
+                .select(&selector_td)
                 .map(|td| td.text().collect::<String>().trim().to_string())
                 .collect();
 
@@ -84,7 +88,7 @@ pub async fn visit(
             if !SHARE.stock_contains_key(stock_symbol) {
                 continue;
             }
-            
+
             let eps = Eps::new(
                 stock_symbol.to_string(),
                 year,
@@ -95,7 +99,7 @@ pub async fn visit(
             result.push(eps);
         }
     }
-    
+
     Ok(result)
 }
 

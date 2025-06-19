@@ -51,7 +51,7 @@ pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
         if let Ok(d) = NaiveDate::parse_from_str(&date_info[0], "%Y-%m-%d") {
             result.push(HolidaySchedule {
                 date: d,
-                why: date_info[1].to_string()
+                why: date_info[1].to_string(),
             });
         }
     }

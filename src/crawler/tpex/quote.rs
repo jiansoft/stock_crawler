@@ -1,3 +1,11 @@
+use crate::{
+    cache::{self, TtlCacheInner, TTL},
+    crawler::tpex,
+    database::table::{self, daily_quote::FromWithExchange},
+    declare::StockExchange,
+    logging,
+    util::{self, map::Keyable},
+};
 use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use hashbrown::HashMap;
@@ -5,17 +13,6 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::Deserialize;
 use serde_derive::Serialize;
-use crate::{
-    cache::{self, TTL, TtlCacheInner},
-    crawler::tpex,
-    database::table::{self, daily_quote::FromWithExchange},
-    declare::StockExchange,
-    logging,
-    util::{
-        self,
-        map::Keyable
-    },
-};
 
 // QuoteResponse 上櫃公司每日收盤資訊
 /*#[derive(Debug, Deserialize)]
@@ -84,8 +81,9 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
     if !quote_response.tables.is_empty() {
         if let Some(tpex_dqs) = &quote_response.tables[0].data {
             for item in tpex_dqs {
-                let mut dq = table::daily_quote::DailyQuote::from_with_exchange(StockExchange::TPEx, &item);
-                logging::debug_file_async(format!("item:{:?}", item));
+                let mut dq =
+                    table::daily_quote::DailyQuote::from_with_exchange(StockExchange::TPEx, &item);
+                //logging::debug_file_async(format!("item:{:?}", item));
 
                 if dq.closing_price.is_zero()
                     && dq.highest_price.is_zero()
@@ -108,8 +106,9 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
                     {
                         if ldg.closing_price > Decimal::ZERO {
                             // 漲幅 = (现价-上一个交易日收盘价）/ 上一个交易日收盘价*100%
-                            dq.change_range =
-                                (dq.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
+                            dq.change_range = (dq.closing_price - ldg.closing_price)
+                                / ldg.closing_price
+                                * dec!(100);
                         } else {
                             dq.change_range = dq.change / dq.opening_price * dec!(100);
                         }
@@ -149,8 +148,8 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
     use chrono::{TimeDelta, Timelike};
+    use std::time::Duration;
 
     use crate::{cache::SHARE, logging};
 

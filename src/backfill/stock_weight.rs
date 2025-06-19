@@ -21,25 +21,27 @@ pub async fn execute() -> Result<()> {
     let stock_weights = Arc::new(Mutex::new(Vec::with_capacity(2000)));
     let exchanges = vec![StockExchange::TPEx, StockExchange::TWSE];
     // Process each exchange concurrently
-    let tasks: Vec<_> = exchanges.into_iter()
+    let tasks: Vec<_> = exchanges
+        .into_iter()
         .map(|exchange| handle_stock_exchange(exchange, Arc::clone(&stock_weights)))
         .collect();
 
     // Await all tasks
-    futures::future::try_join_all(tasks).await.context("Failed to handle stock weight tasks")?;
+    futures::future::try_join_all(tasks)
+        .await
+        .context("Failed to handle stock weight tasks")?;
 
     // Acquire the lock to update weights
     let weights = stock_weights.lock().await;
 
     if !weights.is_empty() {
-        SymbolAndWeight::zeroed_out().await.context("Failed to zero out SymbolAndWeight")?;
+        SymbolAndWeight::zeroed_out()
+            .await
+            .context("Failed to zero out SymbolAndWeight")?;
         stream::iter(weights.clone())
             .for_each_concurrent(util::concurrent_limit_16(), |sw| async move {
                 if let Err(why) = sw.update().await {
-                    logging::error_file_async(format!(
-                        "Failed to update stock weight: {:#?}",
-                        why
-                    ));
+                    logging::error_file_async(format!("Failed to update stock weight: {:#?}", why));
                 }
             })
             .await;

@@ -114,7 +114,6 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 test_process_revenues".to_string());
 
-
         let naive_datetime = NaiveDate::from_ymd_opt(2025, 4, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
@@ -125,7 +124,10 @@ mod tests {
         match process_revenues(month_timezone).await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to test_process_revenues because {:?}", why));
+                logging::debug_file_async(format!(
+                    "Failed to test_process_revenues because {:?}",
+                    why
+                ));
             }
         }
 

@@ -191,9 +191,15 @@ impl Share {
                     Industry::Uncategorized.name(),
                     Industry::Uncategorized.serial(),
                 ),
-                ("貿易百貨業".to_string(), Industry::TradingDepartmentStores.serial()),
+                (
+                    "貿易百貨業".to_string(),
+                    Industry::TradingDepartmentStores.serial(),
+                ),
                 ("其他業".to_string(), Industry::Other.serial()),
-                ("農業科技業".to_string(), Industry::AgriculturalTechnology.serial()),
+                (
+                    "農業科技業".to_string(),
+                    Industry::AgriculturalTechnology.serial(),
+                ),
             ]),
             last_revenues: RwLock::new(HashMap::new()),
             last_trading_day_quotes: RwLock::new(HashMap::new()),
@@ -281,10 +287,7 @@ impl Share {
             self.set_current_ip(ip);
         }
 
-        logging::info_file_async(format!(
-            "current_ip  {}",
-            self.current_ip.read().unwrap()
-        ));
+        logging::info_file_async(format!("current_ip  {}", self.current_ip.read().unwrap()));
 
         logging::info_file_async(format!(
             "CacheShare.indices 初始化 {}",
@@ -329,7 +332,7 @@ impl Share {
     }
 
     /// 從快取資料內取得目前的IP
-    pub fn get_current_ip(&self)-> Option<String> {
+    pub fn get_current_ip(&self) -> Option<String> {
         match self.current_ip.read() {
             Ok(ip) => Some(ip.clone()),
             Err(_) => None,
@@ -371,9 +374,13 @@ impl Share {
 
     /// 透過股票產業分類代碼取得對應的名稱
     pub fn get_industry_name(&self, id: i32) -> Option<String> {
-        let result = self.industries
-            .iter()
-            .find_map(|(key, &value)| if value == id { Some(key.to_string()) } else { None });
+        let result = self.industries.iter().find_map(|(key, &value)| {
+            if value == id {
+                Some(key.to_string())
+            } else {
+                None
+            }
+        });
         result
     }
 
@@ -558,7 +565,7 @@ mod tests {
         assert_eq!(SHARE.get_industry_name(2), Some("食品工業".to_string()));
         assert_eq!(SHARE.get_industry_name(99), Some("未分類".to_string()));
         assert_eq!(SHARE.get_industry_name(100), None);
-        
+
         println!("36 => {:?}", SHARE.get_industry_name(36));
     }
 

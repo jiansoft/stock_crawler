@@ -10,9 +10,9 @@ use once_cell::sync::Lazy;
 use tokio::{
     sync::{
         mpsc::UnboundedReceiver,
-        mpsc::{self, UnboundedSender}
+        mpsc::{self, UnboundedSender},
     },
-    task
+    task,
 };
 
 use crate::logging::rotate::Rotate;
@@ -94,10 +94,7 @@ impl Logger {
                 if let Ok(mut w) = writer.write() {
                     let to_write = msg.as_bytes();
                     if let Err(why) = w.write_all(to_write) {
-                        error_console(format!(
-                            "Failed to write msg:{}\r\nbecause:{:#?}",
-                            msg, why
-                        ));
+                        error_console(format!("Failed to write msg:{}\r\nbecause:{:#?}", msg, why));
                     }
 
                     if let Err(why) = w.flush() {
@@ -127,7 +124,6 @@ impl Logger {
 pub fn info_file_async<S: Into<String>>(log: S) {
     LOGGER.info(log.into());
 }
-
 
 pub fn warn_file_async<S: Into<String>>(log: S) {
     LOGGER.warn(log.into());

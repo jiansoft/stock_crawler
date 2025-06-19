@@ -168,7 +168,6 @@ fn parse_period(period: &Option<String>, re: &Regex) -> Result<(i32, String)> {
     let mut year_of_dividend = 0;
     let mut quarter = String::from("");
     if let Some(period) = period {
-
         if let Some(caps) = re.captures(period) {
             if let Some(q) = caps.get(1) {
                 year_of_dividend = q.as_str().parse::<i32>()?

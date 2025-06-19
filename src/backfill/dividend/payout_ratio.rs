@@ -1,13 +1,13 @@
 use std::{collections::HashSet, time::Duration};
 
-use anyhow::Result;
-use scopeguard::defer;
 use crate::{
     crawler::goodinfo,
     database::{table, table::stock},
     logging, nosql,
     util::map::{vec_to_hashmap, Keyable},
 };
+use anyhow::Result;
+use scopeguard::defer;
 
 /// 將股息中盈餘分配率為零的數據向第三方取得數據後更新更新
 pub async fn execute() -> Result<()> {

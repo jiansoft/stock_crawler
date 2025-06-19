@@ -169,7 +169,7 @@ impl App {
 
     fn get() -> Result<Self> {
         let config_path = config_path();
-       /* if config_path.exists() {
+        /* if config_path.exists() {
             let config: Result<App, _> = config::Config::builder()
                 .add_source(config::File::from(config_path))
                 .build()

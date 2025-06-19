@@ -1,9 +1,6 @@
-use anyhow::Result;
-use chrono::{Local, NaiveDate};
-use rust_decimal_macros::dec;
-use scopeguard::defer;
 use crate::{
-    backfill, bot,
+    backfill,
+    bot::{self, telegram::Telegram},
     cache::{TtlCacheInner, TTL},
     calculation,
     database::table::{
@@ -12,6 +9,10 @@ use crate::{
     },
     logging,
 };
+use anyhow::Result;
+use chrono::{Local, NaiveDate};
+use rust_decimal_macros::dec;
+use scopeguard::defer;
 
 /// 台股收盤事件發生時要進行的事情
 pub async fn execute() -> Result<()> {
@@ -97,28 +98,28 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
     let unice_diff = mh.unice - mh.previous_unice;
     let unice_percentage = (unice_diff / mh.previous_unice) * hundred;
     let msg = format!(
-        "{} 市值變化\n合計:{} {} ({}%)\nEddie:{} {} ({}%)\nUnice:{} {} ({}%)",
-        date,
-        mh.sum.round_dp(2),
-        sum_diff.round_dp(2),
-        sum_percentage.round_dp(2),
-        mh.eddie.round_dp(2),
-        eddie_diff.round_dp(2),
-        eddie_percentage.round_dp(2),
-        mh.unice.round_dp(2),
-        unice_diff.round_dp(2),
-        unice_percentage.round_dp(2),
+        "{} 市值變化\n合計:{} {} \\({}%\\)\nEddie:{} {} \\({}%\\)\nUnice:{} {} \\({}%\\)",
+        Telegram::escape_markdown_v2(date.to_string()),
+        Telegram::escape_markdown_v2(mh.sum.round_dp(2).to_string()),
+        Telegram::escape_markdown_v2(sum_diff.round_dp(2).to_string()),
+        Telegram::escape_markdown_v2(sum_percentage.round_dp(2).to_string()),
+        Telegram::escape_markdown_v2(mh.eddie.round_dp(2).to_string()),
+        Telegram::escape_markdown_v2(eddie_diff.round_dp(2).to_string()),
+        Telegram::escape_markdown_v2(eddie_percentage.round_dp(2).to_string()),
+        Telegram::escape_markdown_v2(mh.unice.round_dp(2).to_string()),
+        Telegram::escape_markdown_v2(unice_diff.round_dp(2).to_string()),
+        Telegram::escape_markdown_v2(unice_percentage.round_dp(2).to_string()),
     );
 
     bot::telegram::send(&msg).await;
-        
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
     use crate::{cache::SHARE, logging};
+    use std::time::Duration;
 
     use super::*;
 
@@ -130,7 +131,7 @@ mod tests {
 
         logging::debug_file_async("開始 event::taiwan_stock::closing::aggregate".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2024-12-23", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2025-06-19", "%Y-%m-%d").unwrap();
 
         match aggregate(current_date).await {
             Ok(_) => {
@@ -179,6 +180,5 @@ mod tests {
         logging::debug_file_async(
             "結束 event::taiwan_stock::closing::notify_money_change".to_string(),
         );
-
     }
 }

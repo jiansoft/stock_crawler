@@ -54,9 +54,9 @@ impl Redis {
     /// * Result<()>: An empty result indicating success or an error if the deletion fails.
     pub async fn delete(&self, key: &str) -> Result<()> {
         let mut conn = self.pool.get().await?;
-        conn.del::<&str, i64>(key).await.map_err(|e| {
-            anyhow!("Failed to delete key({}) from Redis: {}", key, e)
-        })?;
+        conn.del::<&str, i64>(key)
+            .await
+            .map_err(|e| anyhow!("Failed to delete key({}) from Redis: {}", key, e))?;
 
         Ok(())
     }

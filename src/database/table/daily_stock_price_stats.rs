@@ -1,13 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate};
 use serde_derive::{Deserialize, Serialize};
-use sqlx::{
-    postgres::PgQueryResult,
-    FromRow,
-    Postgres,
-    Transaction,
-    Type,
-};
+use sqlx::{postgres::PgQueryResult, FromRow, Postgres, Transaction, Type};
 
 use crate::database;
 
@@ -37,7 +31,10 @@ pub struct DailyStockPriceStats {
 }
 
 impl DailyStockPriceStats {
-    pub async fn upsert(date: NaiveDate, tx: &mut Option<Transaction<'_, Postgres>>) -> Result<PgQueryResult> {
+    pub async fn upsert(
+        date: NaiveDate,
+        tx: &mut Option<Transaction<'_, Postgres>>,
+    ) -> Result<PgQueryResult> {
         let sql = r#"
 WITH cte AS (
     SELECT e.security_code, e.date, e.closing_price,

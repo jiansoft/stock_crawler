@@ -6,13 +6,9 @@ use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Row};
 
 use crate::{
-    database::{
-        self,
-        CopyIn,
-        table::daily_quote::extension::MonthlyStockPriceSummary
-    },
+    database::{self, table::daily_quote::extension::MonthlyStockPriceSummary, CopyIn},
     declare::StockExchange,
-    util::{datetime, map::Keyable}
+    util::{datetime, map::Keyable},
 };
 
 pub(crate) mod extension;
@@ -440,7 +436,9 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
 /// 補上當日缺少的每日收盤數據
 pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQueryResult> {
     let date_str = date.format("%Y-%m-%d").to_string();
-    let prev_date = (date - TimeDelta::try_days(30).unwrap()).format("%Y-%m-%d").to_string();
+    let prev_date = (date - TimeDelta::try_days(30).unwrap())
+        .format("%Y-%m-%d")
+        .to_string();
 
     let sql = format!(
         r#"
@@ -671,8 +669,8 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
 mod tests {
     use chrono::Datelike;
 
-    use crate::{cache::SHARE, logging};
     use crate::crawler::twse;
+    use crate::{cache::SHARE, logging};
 
     use super::*;
 

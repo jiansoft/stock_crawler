@@ -1,13 +1,13 @@
 use std::fmt::Write;
 
-use anyhow::{anyhow, Result};
-use chrono::Local;
-use rust_decimal::prelude::ToPrimitive;
-use scopeguard::defer;
 use crate::{
     bot, cache::SHARE, crawler::twse, database::table, declare::StockExchangeMarket, logging, rpc,
     rpc::stock, util::datetime::Weekend,
 };
+use anyhow::{anyhow, Result};
+use chrono::Local;
+use rust_decimal::prelude::ToPrimitive;
+use scopeguard::defer;
 
 /// 更新資料庫新上市股票的或更新其交易所的市場編號、股票的產業分類、名稱等欄位
 pub async fn execute() -> Result<()> {
@@ -38,13 +38,13 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
     for item in result {
         let new_stock = match SHARE.get_stock(&item.stock_symbol).await {
             Some(stock_db)
-            if stock_db.stock_industry_id != item.industry_id
-                || stock_db.stock_exchange_market_id
-                != item.exchange_market.stock_exchange_market_id
-                || stock_db.name != item.name =>
-                {
-                    true
-                }
+                if stock_db.stock_industry_id != item.industry_id
+                    || stock_db.stock_exchange_market_id
+                        != item.exchange_market.stock_exchange_market_id
+                    || stock_db.name != item.name =>
+            {
+                true
+            }
             None => true,
             _ => false,
         };
@@ -83,7 +83,9 @@ async fn update_stock_info(
         None => " - ",
         Some(sem) => &sem.name(),
     };
-    let industry_name = SHARE.get_industry_name(stock.stock_industry_id).unwrap_or(" - ".to_string());
+    let industry_name = SHARE
+        .get_industry_name(stock.stock_industry_id)
+        .unwrap_or(" - ".to_string());
     let log_msg = format!(
         "新增股票︰ {stock_symbol} {stock_name} {market_name} {industry_name}",
         stock_symbol = stock.stock_symbol,

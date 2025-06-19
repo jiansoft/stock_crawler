@@ -130,7 +130,7 @@ fn gen_opera_ua() -> String {
 
 pub fn gen_random_ua() -> String {
     let mut rng = rand::rng();
-    let choice =rng.random_range(0..3);
+    let choice = rng.random_range(0..3);
     match choice {
         0 => gen_firefox_ua(),
         1 => gen_chrome_ua(),

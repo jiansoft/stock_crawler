@@ -3,17 +3,7 @@ use serde_derive::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 
 #[derive(
-    Serialize,
-    Deserialize,
-    Display,
-    Debug,
-    Copy,
-    Clone,
-    EnumString,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
+    Serialize, Deserialize, Display, Debug, Copy, Clone, EnumString, PartialEq, Eq, PartialOrd, Ord,
 )]
 pub enum Quarter {
     #[strum(serialize = "Q1")]
@@ -66,7 +56,9 @@ impl Quarter {
 
     /// Returns an iterator over the quarters.
     pub fn iterator() -> impl Iterator<Item = Self> {
-        [Quarter::Q1, Quarter::Q2, Quarter::Q3, Quarter::Q4].iter().copied()
+        [Quarter::Q1, Quarter::Q2, Quarter::Q3, Quarter::Q4]
+            .iter()
+            .copied()
     }
 
     /// Returns a vector of `Quarter` values that are smaller than the current quarter.
@@ -313,7 +305,7 @@ impl Industry {
     pub fn name(&self) -> String {
         self.to_string()
     }
-    
+
     pub fn iterator() -> impl Iterator<Item = Self> {
         [
             Self::Cement,
@@ -379,7 +371,7 @@ pub const ONE_DAYS_IN_SECONDS: usize = 60 * 60 * 24;
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_industry_serial() {
         assert_eq!(Industry::Cement.serial(), 1);
@@ -458,7 +450,10 @@ mod tests {
         assert_eq!(Industry::CulturalCreative.name(), "文化創意業");
         assert_eq!(Industry::AgriculturalTechnology.name(), "農業科技");
         assert_eq!(Industry::ECommerce.name(), "電子商務");
-        assert_eq!(Industry::GreenEnergyEnvironmentalProtection.name(), "綠能環保");
+        assert_eq!(
+            Industry::GreenEnergyEnvironmentalProtection.name(),
+            "綠能環保"
+        );
         assert_eq!(Industry::DigitalCloud.name(), "數位雲端");
         assert_eq!(Industry::SportsRecreation.name(), "運動休閒");
         assert_eq!(Industry::HomeLife.name(), "居家生活");
@@ -483,10 +478,22 @@ mod tests {
 
     #[test]
     fn test_stock_exchange_market_from() {
-        assert_eq!(StockExchangeMarket::from(1), Some(StockExchangeMarket::Public));
-        assert_eq!(StockExchangeMarket::from(2), Some(StockExchangeMarket::Listed));
-        assert_eq!(StockExchangeMarket::from(4), Some(StockExchangeMarket::OverTheCounter));
-        assert_eq!(StockExchangeMarket::from(5), Some(StockExchangeMarket::Emerging));
+        assert_eq!(
+            StockExchangeMarket::from(1),
+            Some(StockExchangeMarket::Public)
+        );
+        assert_eq!(
+            StockExchangeMarket::from(2),
+            Some(StockExchangeMarket::Listed)
+        );
+        assert_eq!(
+            StockExchangeMarket::from(4),
+            Some(StockExchangeMarket::OverTheCounter)
+        );
+        assert_eq!(
+            StockExchangeMarket::from(5),
+            Some(StockExchangeMarket::Emerging)
+        );
         assert_eq!(StockExchangeMarket::from(3), None);
     }
 
@@ -532,11 +539,16 @@ mod tests {
         assert_eq!(Quarter::from_serial(5), None);
     }
 
-
     #[test]
     fn test_smaller_quarters() {
-        assert_eq!(Quarter::Q4.smaller_quarters(), vec![Quarter::Q1, Quarter::Q2, Quarter::Q3]);
-        assert_eq!(Quarter::Q3.smaller_quarters(), vec![Quarter::Q1, Quarter::Q2]);
+        assert_eq!(
+            Quarter::Q4.smaller_quarters(),
+            vec![Quarter::Q1, Quarter::Q2, Quarter::Q3]
+        );
+        assert_eq!(
+            Quarter::Q3.smaller_quarters(),
+            vec![Quarter::Q1, Quarter::Q2]
+        );
         assert_eq!(Quarter::Q2.smaller_quarters(), vec![Quarter::Q1]);
         assert_eq!(Quarter::Q1.smaller_quarters(), vec![]);
     }

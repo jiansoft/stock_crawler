@@ -14,8 +14,6 @@ pub async fn visit() -> Result<String> {
     util::http::get(url, None).await
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use crate::logging;

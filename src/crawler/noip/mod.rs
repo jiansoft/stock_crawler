@@ -1,4 +1,3 @@
-
 use anyhow::{anyhow, Result};
 
 use crate::{config, logging, util};
@@ -6,24 +5,22 @@ use crate::{config, logging, util};
 const HOST: &str = "dynupdate.no-ip.com";
 
 /// 向ddns服務更新目前的IP
-pub async fn visit(ip :&str) -> Result<()> {
+pub async fn visit(ip: &str) -> Result<()> {
     for hostname in &config::SETTINGS.noip.hostnames {
-        let url =
-            &format!(
-                "https://{acount}:{pw}@{host}/nic/update?hostname={hostname}&myip={ip}",
-                acount = config::SETTINGS.noip.username,
-                pw = config::SETTINGS.noip.password,
-                host = HOST,
-                ip = ip,
-                hostname = hostname
-            );
+        let url = &format!(
+            "https://{acount}:{pw}@{host}/nic/update?hostname={hostname}&myip={ip}",
+            acount = config::SETTINGS.noip.username,
+            pw = config::SETTINGS.noip.password,
+            host = HOST,
+            ip = ip,
+            hostname = hostname
+        );
 
         match util::http::get(url, None).await {
             Ok(t) => {
                 if t.contains("good") {
                     logging::info_file_async(t);
                 }
-
             }
             Err(why) => {
                 return Err(anyhow!("Failed to noip.visit because {:?}", why));
@@ -36,8 +33,8 @@ pub async fn visit(ip :&str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::crawler::ipify;
     use super::*;
+    use crate::crawler::ipify;
 
     #[tokio::test]
     async fn test_execute() {

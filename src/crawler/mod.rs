@@ -4,14 +4,11 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 
+use crate::crawler::cnyes::CnYes;
 use crate::{
-    crawler::{
-        cmoney::CMoney, megatime::PcHome, nstock::NStock,
-        yahoo::Yahoo,
-    },
+    crawler::{cmoney::CMoney, megatime::PcHome, nstock::NStock, yahoo::Yahoo},
     declare,
 };
-use crate::crawler::cnyes::CnYes;
 
 pub mod afraid;
 /// 臺灣銀行
@@ -66,7 +63,7 @@ pub trait StockInfo {
 static INDEX: AtomicUsize = AtomicUsize::new(0);
 
 fn get_and_increment_index(max: usize) -> usize {
-   /* let old_val = INDEX.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+    /* let old_val = INDEX.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
         if val >= max - 1 {
             Some(0)
         } else {
@@ -75,9 +72,11 @@ fn get_and_increment_index(max: usize) -> usize {
     });
 
     old_val.unwrap_or(0)*/
-    INDEX.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-        Some((val + 1) % max)
-    }).unwrap_or(0)
+    INDEX
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+            Some((val + 1) % max)
+        })
+        .unwrap_or(0)
 }
 
 /// 取得股票的目前的報價
@@ -98,7 +97,7 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
         let current_site = get_and_increment_index(site_len);
         //println!("current:{} current_site:{}", current, current_site);
         if let Ok(price) = sites[current_site](stock_symbol).await {
-            return Ok(price.normalize())
+            return Ok(price.normalize());
         };
     }
 

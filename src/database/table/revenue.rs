@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, DateTime, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
 use rust_decimal::Decimal;
 use sqlx::{
     postgres::{PgQueryResult, PgRow},

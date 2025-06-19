@@ -3,21 +3,12 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     crawler,
-    logging,
-    rpc::{
-        stock::{
-            StockQuotesRequest,
-            stock_server::Stock,
-            StockInfoReply,
-            StockInfoRequest,
-            StockQuotes,
-            StockQuotesReply,
-            HolidayScheduleReply,
-            HolidayScheduleRequest,
-            HolidaySchedule
-        }
-    },
     crawler::twse,
+    logging,
+    rpc::stock::{
+        stock_server::Stock, HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest,
+        StockInfoReply, StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest,
+    },
 };
 
 #[derive(Default)]
@@ -53,19 +44,24 @@ impl Stock for StockService {
     }
 
     //
-    async fn fetch_holiday_schedule(&self, req: Request<HolidayScheduleRequest>) -> Result<Response<HolidayScheduleReply>, Status> {
+    async fn fetch_holiday_schedule(
+        &self,
+        req: Request<HolidayScheduleRequest>,
+    ) -> Result<Response<HolidayScheduleReply>, Status> {
         let request = req.into_inner();
         let holiday_schedules = match twse::holiday_schedule::visit(request.year).await {
-            Ok(holidays) => holidays.iter()
-                .map(|holiday| {
-                    HolidaySchedule {
-                        date: holiday.date.format("%Y-%m-%d").to_string(),
-                        why: holiday.why.to_string(),
-                    }
+            Ok(holidays) => holidays
+                .iter()
+                .map(|holiday| HolidaySchedule {
+                    date: holiday.date.format("%Y-%m-%d").to_string(),
+                    why: holiday.why.to_string(),
                 })
                 .collect(),
             Err(why) => {
-                logging::error_file_async(format!("Failed to visit twse::holiday_schedule because {:?}", why));
+                logging::error_file_async(format!(
+                    "Failed to visit twse::holiday_schedule because {:?}",
+                    why
+                ));
                 vec![]
             }
         };
@@ -145,9 +141,7 @@ mod tests {
             .await
             .expect("Failed to connect");
 
-        let request = Request::new(HolidayScheduleRequest {
-           year:2024,
-        });
+        let request = Request::new(HolidayScheduleRequest { year: 2024 });
 
         let resp = client
             .fetch_holiday_schedule(request)

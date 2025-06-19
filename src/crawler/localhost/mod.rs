@@ -84,9 +84,13 @@ async fn transfer_fund() -> Result<Vec<TransferResponse>> {
 
         // Create an async task and push it into the tasks vector
         tasks.push(task::spawn(async move {
-            util::http::post_use_json::<TransferRequest,TransferResponse>(&url, Some(headers), Some(&transfer))
-                .await
-                .unwrap()
+            util::http::post_use_json::<TransferRequest, TransferResponse>(
+                &url,
+                Some(headers),
+                Some(&transfer),
+            )
+            .await
+            .unwrap()
         }));
     }
 
@@ -96,10 +100,10 @@ async fn transfer_fund() -> Result<Vec<TransferResponse>> {
     // Collect results into a vector
     let output: Vec<TransferResponse> = results.into_iter().map(|res| res.unwrap()).collect();
 
-     Ok(output)
+    Ok(output)
 }
 
- async fn on_site_message() -> Result<Vec<String>> {
+async fn on_site_message() -> Result<Vec<String>> {
     // Create a vector to hold the tasks
     let mut tasks = Vec::new();
 
@@ -112,7 +116,7 @@ async fn transfer_fund() -> Result<Vec<TransferResponse>> {
             headers
         };
 
-       /* let url = DDNS_URL.get_or_init(|| {
+        /* let url = DDNS_URL.get_or_init(|| {
             format!(
                 "https://{host}/api/app/personal-on-site-message/update-onsite-isclaim-by-Id?Id=799",
                 host = HOST,
@@ -136,7 +140,6 @@ async fn transfer_fund() -> Result<Vec<TransferResponse>> {
 
     Ok(output)
 }
-
 
 #[cfg(test)]
 mod tests {
