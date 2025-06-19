@@ -9,7 +9,7 @@ use crate::{config::SETTINGS, logging, util::http};
 
 static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 
-struct Telegram {
+pub struct Telegram {
     send_message_url: String,
 }
 
@@ -22,9 +22,9 @@ impl Telegram {
             ),
         }
     }
-
     pub async fn send(&self, message: &str) -> Result<SendMessageResponse> {
-        //let escape_text = self.escape_text("ModeMarkdown", message);
+        //let escape_text = Telegram::escape_markdown_v2( message);
+
         let futures: Vec<_> = SETTINGS
             .bot
             .telegram
@@ -32,12 +32,11 @@ impl Telegram {
             .keys()
             .map(|id| self.send_message(SendMessageRequest::new(*id, message)))
             .collect();
-
         /* join_all(futures)
-            .await
-            .into_iter()
-            .find(|res| res.is_err())
-            .unwrap_or_else(|res| Ok(()))*/
+        .await
+        .into_iter()
+        .find(|res| res.is_err())
+        .unwrap_or_else(|res| Ok(()))*/
         let results = join_all(futures).await;
 
         for result in results {
@@ -56,13 +55,24 @@ impl Telegram {
             None,
             Some(&payload),
         )
-            .await
-            .map_err(|err| anyhow!("Failed to send_message because: {:?}", err))?;
-        //logging::debug_file_async(format!("{}", res.description.unwrap()));
+        .await
+        .map_err(|err| anyhow!("Failed to send_message because: {:?}", err))?;
         Ok(res)
     }
 
-   /* fn escape_text(&self,parse_mode: &str, text: &str) -> String {
+    pub fn escape_markdown_v2(text: &str) -> String {
+        let specials = r"_*[]()~`>#+-=|{}.!";
+        let mut result = String::with_capacity(text.len());
+        for ch in text.chars() {
+            if specials.contains(ch) {
+                result.push('\\');
+            }
+            result.push(ch);
+        }
+        result
+    }
+
+    /* fn escape_text(&self,parse_mode: &str, text: &str) -> String {
         let replacements: HashMap<&str, &str> = match parse_mode {
             "ModeHTML" => vec![("<", "&lt;"), (">", "&gt;"), ("&", "&amp;")].into_iter().collect(),
             "ModeMarkdown" => vec![("_", "\\_"), ("*", "\\*"), ("`", "\\`"), ("[", "\\[")].into_iter().collect(),
@@ -93,15 +103,15 @@ fn get_client() -> Result<&'static Telegram> {
     Ok(TELEGRAM.get_or_init(Telegram::new))
 }
 
-#[derive(Serialize, Deserialize,Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct SendMessageResponse {
     pub ok: bool,
     pub result: Option<Message>,
     pub error_code: Option<i32>,
-    pub description: Option<String>
+    pub description: Option<String>,
 }
 
-#[derive(Serialize, Deserialize,Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Message {
     message_id: i64,
 }
@@ -111,12 +121,16 @@ pub struct SendMessageRequest<'a> {
     pub chat_id: i64,
     pub text: &'a str,
     #[serde(rename = "parse_mode")]
-    pub parse_mode: &'a str
+    pub parse_mode: &'a str,
 }
 
 impl<'a> SendMessageRequest<'a> {
     pub fn new(chat_id: i64, text: &'a str) -> SendMessageRequest<'a> {
-        SendMessageRequest { chat_id, text, parse_mode: "Markdown"}
+        SendMessageRequest {
+            chat_id,
+            text,
+            parse_mode: "MarkdownV2",
+        }
     }
 }
 
@@ -139,7 +153,10 @@ pub async fn send(msg: &str) {
             // Try to send the message using the client
             if let Err(error) = client.send(msg).await {
                 // Log an error if sending the message fails
-                logging::error_file_async(format!("Failed to send message to telegram because {:?}", error));
+                logging::error_file_async(format!(
+                    "Failed to send message to telegram because {:?}",
+                    error
+                ));
             }
         }
         Err(error) => {
@@ -148,7 +165,6 @@ pub async fn send(msg: &str) {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
