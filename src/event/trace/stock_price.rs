@@ -6,6 +6,7 @@ use futures::future;
 use rust_decimal::Decimal;
 use tokio::{task, time};
 
+use crate::bot::telegram::Telegram;
 use crate::{
     bot,
     cache::SHARE,
@@ -142,8 +143,12 @@ async fn format_alert_message(target: &Trace, current_price: Decimal) -> String 
         target.ceiling
     };
 
-    format!("{stock_name} {boundary}:{limit}，目前報價:{price} https://tw.stock.yahoo.com/quote/{stock_symbol}",
-            boundary = boundary, limit = limit, price = current_price, stock_symbol = target.stock_symbol, stock_name = stock_name)
+    format!("{stock_name} {boundary}:{limit}，目前報價:{price} https://tw\\.stock\\.yahoo\\.com/quote/{stock_symbol}",
+            boundary = Telegram::escape_markdown_v2(boundary.to_string()),
+            limit = Telegram::escape_markdown_v2(limit.to_string()),
+            price = Telegram::escape_markdown_v2(current_price.to_string()),
+            stock_symbol = target.stock_symbol,
+            stock_name = Telegram::escape_markdown_v2(stock_name))
 }
 
 /// Checks whether the current price is within a specified boundary.

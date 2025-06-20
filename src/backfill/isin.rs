@@ -1,5 +1,6 @@
 use std::fmt::Write;
 
+use crate::bot::telegram::Telegram;
 use crate::{
     bot, cache::SHARE, crawler::twse, database::table, declare::StockExchangeMarket, logging, rpc,
     rpc::stock, util::datetime::Weekend,
@@ -89,7 +90,7 @@ async fn update_stock_info(
     let log_msg = format!(
         "新增股票︰ {stock_symbol} {stock_name} {market_name} {industry_name}",
         stock_symbol = stock.stock_symbol,
-        stock_name = stock.name,
+        stock_name = Telegram::escape_markdown_v2(&stock.name),
         market_name = market_name,
         industry_name = industry_name
     );

@@ -32,14 +32,14 @@ pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
     let mut result: Vec<HolidaySchedule> = Vec::with_capacity(32);
     let stat = match res.stat {
         None => {
-            report_error("HolidaySchedule.res.Stat is None").await;
+            report_error("HolidaySchedule\\.res\\.Stat is None").await;
             return Ok(result);
         }
         Some(stat) => stat.to_uppercase(),
     };
 
     if stat != "OK" {
-        report_error("HolidaySchedule.res.Stat is not ok").await;
+        report_error("HolidaySchedule\\.res\\.Stat is not ok").await;
         return Ok(result);
     }
 

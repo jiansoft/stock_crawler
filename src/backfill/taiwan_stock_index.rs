@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::Local;
 
+use crate::bot::telegram::Telegram;
 use crate::util::map::Keyable;
 use crate::{bot, cache::SHARE, crawler::twse, database::table, logging};
 
@@ -41,7 +42,9 @@ pub async fn execute() -> Result<()> {
                     logging::info_file_async(format!("index add {:?}", index));
                     let msg = format!(
                         "{} 大盤指數︰{} 漲跌︰{}",
-                        index.date, index.index, index.change
+                        Telegram::escape_markdown_v2(index.date.to_string()),
+                        Telegram::escape_markdown_v2(index.index.to_string()),
+                        Telegram::escape_markdown_v2(index.change.to_string())
                     );
 
                     bot::telegram::send(&msg).await;

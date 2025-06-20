@@ -72,7 +72,7 @@ pub async fn visit() -> Result<Vec<Public>> {
     let mut result: Vec<Public> = Vec::with_capacity(2048);
     let stat = match res.stat {
         None => {
-            let to_bot_msg = "Public.res.Stat is None";
+            let to_bot_msg = "Public\\.res\\.Stat is None";
             bot::telegram::send(to_bot_msg).await;
             return Ok(result);
         }
@@ -80,7 +80,7 @@ pub async fn visit() -> Result<Vec<Public>> {
     };
 
     if stat != "OK" {
-        let to_bot_msg = "Public.res.Stat is not ok";
+        let to_bot_msg = "Public\\.res\\.Stat is not ok";
         bot::telegram::send(to_bot_msg).await;
         return Ok(result);
     }

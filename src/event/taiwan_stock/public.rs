@@ -5,6 +5,7 @@ use chrono::Local;
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use rust_decimal_macros::dec;
 
+use crate::bot::telegram::Telegram;
 use crate::{
     bot,
     cache::SHARE,
@@ -50,14 +51,13 @@ pub async fn execute() -> Result<()> {
                     &mut msg, "{stock_symbol} {stock_name} 起迄日︰{start}~{end} 承銷價︰{offering_price} 參考價︰{last_price} {price_change}發行市場:{market}",
                     market = stock.market,
                     stock_symbol = stock.stock_symbol,
-                    stock_name = stock.stock_name,
-                    start = start,
-                    end = end,
-                    offering_price = offering_price,
-                    last_price = last_price,
-                    price_change = price_change
+                    stock_name = Telegram::escape_markdown_v2(&stock.stock_name),
+                    start = Telegram::escape_markdown_v2(start.to_string()),
+                    end = Telegram::escape_markdown_v2(end.to_string()),
+                    offering_price = Telegram::escape_markdown_v2(offering_price.to_string()),
+                    last_price = Telegram::escape_markdown_v2(last_price.to_string()),
+                    price_change = Telegram::escape_markdown_v2(price_change.to_string()),
                 );
-
                 let mut duration = (end - now).num_seconds() as usize;
 
                 if duration == 0 {

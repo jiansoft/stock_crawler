@@ -3,7 +3,10 @@ use std::fmt::Write;
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
 
-use crate::{bot, database::table::dividend};
+use crate::{
+    bot::{self, telegram::Telegram},
+    database::table::dividend,
+};
 
 /// 提提醒本日發放股利的股票(只通知自已有的股票)
 pub async fn execute() -> Result<()> {
@@ -16,27 +19,50 @@ pub async fn execute() -> Result<()> {
 
     let mut stock_symbols: Vec<String> = Vec::with_capacity(stocks_payable_date_info.len());
     let mut msg = String::with_capacity(2048);
-    if writeln!(&mut msg, "{} 進行股利發放的股票如下︰", today).is_ok() {
+
+    if writeln!(
+        &mut msg,
+        "{} 進行股利發放的股票如下︰",
+        Telegram::escape_markdown_v2(today.to_string())
+    )
+    .is_ok()
+    {
         for stock in stocks_payable_date_info {
             stock_symbols.push(stock.stock_symbol.to_string());
-            let _ = write!(&mut msg, "    {0} {1} ", stock.stock_symbol, stock.name,);
+            let _ = write!(
+                &mut msg,
+                "    {0} {1} ",
+                stock.stock_symbol,
+                Telegram::escape_markdown_v2(stock.name),
+            );
 
             if stock.payable_date1 != "-" {
-                let _ = write!(&mut msg, "現金︰{0}元 ", stock.cash_dividend.normalize(),);
+                let _ = write!(
+                    &mut msg,
+                    "現金︰{0}元 ",
+                    Telegram::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
+                );
             }
 
             if stock.payable_date2 != "-" {
-                let _ = write!(&mut msg, "股票︰{0}元 ", stock.stock_dividend.normalize(),);
+                let _ = write!(
+                    &mut msg,
+                    "股票︰{0}元 ",
+                    Telegram::escape_markdown_v2(stock.stock_dividend.normalize().to_string()),
+                );
             }
 
-            let _ = write!(&mut msg, "合計︰{0}元 ", stock.sum.normalize(),);
-
-            let _ = writeln!(&mut msg);
+            let _ = writeln!(
+                &mut msg,
+                "合計︰{0}元 ",
+                Telegram::escape_markdown_v2(stock.sum.normalize().to_string()),
+            );
         }
     }
 
     //群內通知
     bot::telegram::send(&msg).await;
+
     Ok(())
 }
 
