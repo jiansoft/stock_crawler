@@ -23,11 +23,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        if let (Some(start), Some(end), Some(offering_price)) = (
-            stock.offering_start_date,
-            stock.offering_end_date,
-            stock.offering_price,
-        ) {
+        if let (Some(start), Some(end)) = (stock.offering_start_date, stock.offering_end_date) {
             if now >= start && now <= end {
                 let cache_key = stock.key_with_prefix();
                 let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
@@ -44,19 +40,19 @@ pub async fn execute() -> Result<()> {
                         Some(price) => price.to_string(),
                     },
                 };
-
                 let last_price_dec = last_price.get_decimal(None);
+                let offering_price = stock.offering_price.unwrap_or(Decimal::ZERO);
                 let price_change = calculate_price_change(offering_price, last_price_dec);
                 let _ = writeln!(
                     &mut msg, "{stock_symbol} {stock_name} 起迄日︰{start}~{end} 承銷價︰{offering_price} 參考價︰{last_price} {price_change}發行市場:{market}",
-                    market = stock.market,
+                    market = stock.market.clone(),
                     stock_symbol = stock.stock_symbol,
-                    stock_name = Telegram::escape_markdown_v2(&stock.stock_name),
-                    start = Telegram::escape_markdown_v2(start.to_string()),
-                    end = Telegram::escape_markdown_v2(end.to_string()),
-                    offering_price = Telegram::escape_markdown_v2(offering_price.to_string()),
-                    last_price = Telegram::escape_markdown_v2(last_price.to_string()),
-                    price_change = Telegram::escape_markdown_v2(price_change.to_string()),
+                    stock_name = &stock.stock_name,
+                    start = start,
+                    end = end,
+                    offering_price = offering_price,
+                    last_price = last_price,
+                    price_change = price_change,
                 );
                 let mut duration = (end - now).num_seconds() as usize;
 
@@ -70,7 +66,7 @@ pub async fn execute() -> Result<()> {
     }
 
     if !msg.is_empty() {
-        let to_bot_msg = format!("{} 可以申購的股票如下︰\n{}", now, msg);
+        let to_bot_msg = Telegram::escape_markdown_v2(format!("{now} 可以申購的股票如下︰\n{msg}"));
         let _ = bot::telegram::send(&to_bot_msg).await;
         return Ok(());
     }
@@ -109,7 +105,7 @@ mod tests {
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because: {:?}", why));
+                logging::debug_file_async(format!("Failed to execute because: {why:?}"));
             }
         }
 

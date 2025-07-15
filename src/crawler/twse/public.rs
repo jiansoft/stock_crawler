@@ -117,11 +117,11 @@ mod tests {
 
         match visit().await {
             Ok(list) => {
-                dbg!(&list);
-                logging::debug_file_async(format!("list:{:#?}", list));
+                //dbg!(&list);
+                logging::debug_file_async(format!("list:{list:#?}"));
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                logging::debug_file_async(format!("Failed to visit because: {why:?}"));
             }
         }
 

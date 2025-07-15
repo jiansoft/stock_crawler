@@ -31,6 +31,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn rerun(proto_files: &[&str]) {
     for proto_file in proto_files {
-        println!("cargo:rerun-if-changed={}", proto_file);
+        println!("cargo:rerun-if-changed={proto_file}");
     }
 }

@@ -113,11 +113,26 @@ fn get_client() -> &'static Telegram {
 /// * `msg` - 要發送的消息內容
 pub async fn send(msg: &str) {
     let client = get_client();
-    if let Err(error) = client.send(msg).await {
-        logging::error_file_async(format!(
-            "Failed to send message to telegram because {:?}",
-            error
-        ));
+    match client.send(msg).await {
+        Ok(rep) => {
+            if !rep.ok {
+                let error_code = rep.error_code
+                    .as_ref()
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let desc = rep.description
+                    .as_deref()
+                    .unwrap_or("No description");
+                logging::error_file_async(format!(
+                    "Telegram API responded with error code {error_code}: {desc}\n{msg}"
+                ));
+            }
+        },
+        Err(error) => {
+            logging::error_file_async(format!(
+                "Failed to send a message to telegram because {error:}"
+            ));
+        }
     }
 }
 

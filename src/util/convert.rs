@@ -22,7 +22,7 @@ impl FromValue for serde_json::Value {
         match self.as_str() {
             None => Default::default(),
             Some(v) => text::parse_i64(v, escape_chars).unwrap_or_else(|why| {
-                logging::warn_file_async(format!("{:?}", why));
+                logging::warn_file_async(format!("{why:?}"));
                 Default::default()
             }),
         }
@@ -30,7 +30,7 @@ impl FromValue for serde_json::Value {
 
     fn get_decimal(&self, escape_chars: Option<Vec<char>>) -> Decimal {
         text::parse_decimal(&self.to_string(), escape_chars).unwrap_or_else(|why| {
-            logging::warn_file_async(format!("{:?}", why));
+            logging::warn_file_async(format!("{why:?}"));
             Default::default()
         })
     }
@@ -44,14 +44,14 @@ impl FromValue for String {
 
     fn get_i64(&self, escape_chars: Option<Vec<char>>) -> i64 {
         text::parse_i64(self, escape_chars).unwrap_or_else(|why| {
-            logging::warn_file_async(format!("{:?}", why));
+            logging::warn_file_async(format!("{why:?}"));
             Default::default()
         })
     }
 
     fn get_decimal(&self, escape_chars: Option<Vec<char>>) -> Decimal {
         text::parse_decimal(self, escape_chars).unwrap_or_else(|why| {
-            logging::warn_file_async(format!("{:?}", why));
+            logging::warn_file_async(format!("{why:?}"));
             Default::default()
         })
     }
