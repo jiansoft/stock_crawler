@@ -1,42 +1,47 @@
-FROM rust:alpine AS builder
+# Build stage
+FROM golang:1.25.5-alpine3.23 AS builder
 
 WORKDIR /app
 
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
 COPY . .
 
-RUN apk add --no-cache musl-dev openssl-dev protobuf perl make
-#ENV PROTO_PATH="./etc/proto"
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux GOEXPERIMENT=jsonv2 go build \
+    -ldflags "-X CleanupDb/cmd.Version=1.0.0 -X CleanupDb/cmd.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" \
+    -o cleanupdb .
 
-
-RUN cargo build --release
-
-FROM alpine:latest
-
-RUN apk add --no-cache libgcc tzdata
-
-# 設定環境變量，將時區設為 UTC+8
-ENV TZ=Asia/Taipei
-
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-# 安裝 tzdata，並根據 TZ 環境變量自動設定時區
-#RUN apt-get update && apt-get install -y tzdata ca-certificates && \
-#    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
-#    echo $TZ > /etc/timezone && \
-#    apt-get clean && \
-#    rm -rf /var/lib/apt/lists/*
+# Runtime stage
+FROM alpine:3.23
 
 WORKDIR /app
 
-# 從建構階段複製二進制檔案
-COPY --from=builder /app/target/release/stock_crawler .
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
 
-VOLUME ["/app/log"]
+# Copy binary from builder
+COPY --from=builder /app/cleanupdb .
 
-ADD .env .
-ADD ./app.json .
-ADD ./etc/ssl ./etc/ssl
+# Copy default config (will be overridden by volume mount)
+COPY config.json .
 
-# 設定容器啟動時執行您的應用
-CMD ["/app/stock_crawler"]
+# Create logs directory and non-root user
+RUN mkdir -p /app/logs && \
+    adduser -D -u 1000 cleanupdb && \
+    chown -R cleanupdb:cleanupdb /app
 
+# Declare volume for logs
+VOLUME ["/app/logs"]
 
+USER cleanupdb
+
+# Default command: start the scheduler daemon
+ENTRYPOINT ["./cleanupdb"]
+CMD ["serve", "-c", "/app/config.json"]

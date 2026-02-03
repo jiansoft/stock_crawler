@@ -207,8 +207,8 @@ mod tests {
         logging::debug_file_async("開始 DailyStockPriceStats::upsert".to_string());
 
         // 開始日期與結束日期
-        let start_date = NaiveDate::parse_from_str("2021-08-25", "%Y-%m-%d").unwrap();
-        let end_date = NaiveDate::parse_from_str("2024-10-01", "%Y-%m-%d").unwrap();
+        let start_date = NaiveDate::parse_from_str("2026-02-03", "%Y-%m-%d").unwrap();
+        let end_date = NaiveDate::parse_from_str("2026-02-03", "%Y-%m-%d").unwrap();
 
         // 迴圈遍歷日期
         let mut current_date = start_date;

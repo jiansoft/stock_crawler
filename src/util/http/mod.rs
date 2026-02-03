@@ -65,17 +65,46 @@ impl TextForceBig5 for Response {
 fn get_client() -> Result<&'static Client> {
     CLIENT.get_or_try_init(|| {
         Client::builder()
+            // ===== 壓縮 =====
             .brotli(true)
             .deflate(true)
             .gzip(true)
             .zstd(true)
-            .connect_timeout(Duration::from_secs(1))
-            .cookie_store(true)
+
+            // ===== 超時設置 =====
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(10))
+
+            // ===== TCP 優化 =====
+            .tcp_nodelay(true)
             .tcp_keepalive(Duration::from_secs(60))
-            .pool_max_idle_per_host(32)
+
+            // ===== HTTP/2 優化 =====
+            // 注意：移除 http2_prior_knowledge() 和 http2_adaptive_window()
+            // 因為某些 API（如 Telegram）對 HTTP/2 幀大小有特殊要求
+            // 讓 reqwest 自動協商協議版本更安全
+            .http2_keep_alive_interval(Duration::from_secs(30))
+            .http2_keep_alive_timeout(Duration::from_secs(10))
+            .http2_keep_alive_while_idle(true)
+
+            // ===== 連接池 =====
+            .pool_max_idle_per_host(20)
+            .pool_idle_timeout(Duration::from_secs(90))
+
+            // ===== Cookie 和重定向 =====
+            .cookie_store(true)
+            .redirect(reqwest::redirect::Policy::limited(5))
+
+            // ===== Headers =====
+            .referer(true)
+            .user_agent(user_agent::gen_random_ua())
+
+            // ===== DNS 優化 =====
+            .hickory_dns(true)
+
+            // ===== 其他 =====
             .no_proxy()
-            .pool_idle_timeout(Duration::from_secs(60))
-            .timeout(Duration::from_secs(3))
+
             .build()
             .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
     })
@@ -125,14 +154,19 @@ pub async fn get(url: &str, headers: Option<header::HeaderMap>) -> Result<String
 }
 
 pub fn extract_cookies(response: &Response) -> Option<String> {
-    response
+    let cookies: Vec<String> = response
         .headers()
         .get_all(SET_COOKIE)
         .iter()
-        .map(|val| val.to_str().unwrap().to_string())
-        .collect::<Vec<_>>()
-        .join("; ")
-        .into()
+        .filter_map(|val| val.to_str().ok())  // ✅ 安全處理
+        .map(String::from)
+        .collect();
+
+    if cookies.is_empty() {
+        None
+    } else {
+        Some(cookies.join("; "))
+    }
 }
 
 /// Performs an HTTP GET request and returns the response as Big5 encoded text.
@@ -225,22 +259,24 @@ pub async fn post(
     headers: Option<header::HeaderMap>,
     params: Option<HashMap<&str, &str>>,
 ) -> Result<String> {
-    send(
-        Method::POST,
-        url,
-        headers,
-        Some(|rb: RequestBuilder| {
-            if let Some(p) = params {
-                rb.form(&p)
-            } else {
-                rb
-            }
-        }),
-    )
-    .await?
-    .text()
-    .await
-    .map_err(|why| anyhow!("Error parsing response text: {:?}", why))
+    let body_fn: Option<fn(RequestBuilder) -> RequestBuilder> = None;
+    let response = match params {
+        Some(p) => {
+            send(
+                Method::POST,
+                url,
+                headers,
+                Some(move |rb: RequestBuilder| rb.form(&p)),
+            )
+            .await?
+        }
+        None => send(Method::POST, url, headers, body_fn).await?,
+    };
+
+    response
+        .text()
+        .await
+        .map_err(|why| anyhow!("Error parsing response text: {:?}", why))
 }
 
 const MAX_RETRIES: usize = 2;

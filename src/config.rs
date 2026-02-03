@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env, path::PathBuf, str::FromStr, u8};
 
 use anyhow::Result;
-use config::{Config as config_config, File as config_file, FileFormat};
+use config::FileFormat;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 

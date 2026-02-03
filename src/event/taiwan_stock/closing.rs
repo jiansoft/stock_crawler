@@ -131,7 +131,7 @@ mod tests {
 
         logging::debug_file_async("開始 event::taiwan_stock::closing::aggregate".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2025-06-19", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2025-10-20", "%Y-%m-%d").unwrap();
 
         match aggregate(current_date).await {
             Ok(_) => {

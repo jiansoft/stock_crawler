@@ -15,7 +15,7 @@ pub struct StockInfoRequest {
     #[prost(bool, tag = "6")]
     pub suspend_listing: bool,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct StockInfoReply {
     #[prost(string, tag = "1")]
     pub message: ::prost::alloc::string::String,
@@ -31,7 +31,7 @@ pub struct StockQuotes {
     #[prost(double, tag = "4")]
     pub change_range: f64,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct StockQuotesRequest {
     #[prost(string, repeated, tag = "1")]
     pub stock_symbols: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
@@ -41,12 +41,12 @@ pub struct StockQuotesReply {
     #[prost(message, repeated, tag = "1")]
     pub stock_prices: ::prost::alloc::vec::Vec<StockQuotes>,
 }
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct HolidayScheduleRequest {
     #[prost(int32, tag = "1")]
     pub year: i32,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct HolidaySchedule {
     #[prost(string, tag = "1")]
     pub date: ::prost::alloc::string::String,
@@ -161,7 +161,7 @@ pub mod stock_client {
                         format!("Service was not ready: {}", e.into()),
                     )
                 })?;
-            let codec = tonic::codec::ProstCodec::default();
+            let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/stock.Stock/UpdateStockInfo",
             );
@@ -186,7 +186,7 @@ pub mod stock_client {
                         format!("Service was not ready: {}", e.into()),
                     )
                 })?;
-            let codec = tonic::codec::ProstCodec::default();
+            let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/stock.Stock/FetchCurrentStockQuotes",
             );
@@ -211,7 +211,7 @@ pub mod stock_client {
                         format!("Service was not ready: {}", e.into()),
                     )
                 })?;
-            let codec = tonic::codec::ProstCodec::default();
+            let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/stock.Stock/FetchHolidaySchedule",
             );
@@ -360,7 +360,7 @@ pub mod stock_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = UpdateStockInfoSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
+                        let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
                                 accept_compression_encodings,
@@ -404,7 +404,7 @@ pub mod stock_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = FetchCurrentStockQuotesSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
+                        let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
                                 accept_compression_encodings,
@@ -449,7 +449,7 @@ pub mod stock_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = FetchHolidayScheduleSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
+                        let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
                                 accept_compression_encodings,

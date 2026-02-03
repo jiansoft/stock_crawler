@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     ];
 
     fs::create_dir_all(OUT_DIR).unwrap();
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_server(true)
         .out_dir(OUT_DIR)
         .compile_protos(&protos, &["./etc/proto"])?;
