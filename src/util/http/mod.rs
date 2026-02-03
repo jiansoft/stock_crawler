@@ -17,11 +17,8 @@ pub mod user_agent;
 
 /// A semaphore for limiting concurrent requests.
 ///
-/// The initial number of permits is set to eight times the number of available CPU cores.
-static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| {
-    let cpus = num_cpus::get();
-    Semaphore::new(cpus * 8)
-});
+/// 限制最多 5 個並發請求，避免被目標網站封禁。
+static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(5));
 
 /// A singleton instance of the reqwest client.
 static CLIENT: OnceCell<Client> = OnceCell::new();
@@ -338,6 +335,8 @@ async fn send(
         let res = rb_clone.send().await;
         let elapsed = start.elapsed().as_millis();
 
+        // 請求延遲，避免被目標網站封禁
+        tokio::time::sleep(Duration::from_millis(300)).await;
         drop(permit);
 
         match res {

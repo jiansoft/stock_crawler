@@ -1,4 +1,5 @@
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use anyhow::Result;
 use once_cell::sync::Lazy;
@@ -40,8 +41,11 @@ impl PostgresSQL {
             config::SETTINGS.postgresql.db
         );
         let db = PgPoolOptions::new()
-            .max_lifetime(None)
-            .max_connections(1024)
+            .max_lifetime(Some(Duration::from_secs(1800))) // 30 分鐘
+            .max_connections(20) // 個人專案降低連接數
+            .min_connections(2)
+            .acquire_timeout(Duration::from_secs(5))
+            .idle_timeout(Some(Duration::from_secs(600))) // 10 分鐘
             .connect_lazy(&database_url)
             .unwrap_or_else(|_| panic!("wrong database URL {}", database_url));
 

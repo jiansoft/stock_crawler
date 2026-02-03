@@ -48,7 +48,6 @@ impl Rotate {
         }
 
         let filename = base_fn.clone();
-        let mut generation = self.generation;
         match self.cur_fn_lock.write() {
             Ok(mut cur_fn) => {
                 let file = OpenOptions::new()
@@ -58,12 +57,10 @@ impl Rotate {
                     .open(&filename)
                     .expect("Failed to open log file");
 
-                generation = 0;
-
                 self.out_fh = Some(Arc::new(RwLock::new(BufWriter::with_capacity(2048, file))));
                 self.cur_base_fn = base_fn;
                 self.cur_fn = filename;
-                self.generation = generation;
+                self.generation = 0;
                 self.rotate(now);
 
                 cur_fn.clone_from(&self.cur_fn);
