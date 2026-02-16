@@ -64,6 +64,7 @@ impl YahooDividend {
     /// - `Some(&Vec<YahooDividendDetail>)`：找到該年度資料
     /// - `None`：找不到該年度資料
     pub fn get_dividend_by_year(&self, year: i32) -> Option<&Vec<YahooDividendDetail>> {
+        // 這裡採線性搜尋是刻意的：年度筆數通常不大，換來固定排序後可直接給人閱讀/輸出。
         self.dividend
             .iter()
             .find(|(y, _)| *y == year)
@@ -110,6 +111,7 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     };
 
     let re = Regex::new(r"(\d+)(Q\d|H\d)?")?;
+    // 先用 HashMap 聚合同年度資料，最後再一次轉成 Vec 並排序，避免邊插入邊維護排序的成本。
     let mut dividend_by_year = HashMap::<i32, Vec<YahooDividendDetail>>::new();
 
     for element in document.select(&selector) {
@@ -119,6 +121,7 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
             continue;
         }
 
+        // Yahoo 股利表格欄位索引：7=除息日、8=除權日、9=現金發放日、10=股票發放日。
         let dividend_date1 = http::element::parse_value(&element, "div > div:nth-child(7)");
         let dividend_date2 = http::element::parse_value(&element, "div > div:nth-child(8)");
         if dividend_date1.is_none() && dividend_date2.is_none() {
@@ -138,6 +141,7 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
 
         //股利所屬期間
         let (year_of_dividend, quarter) = parse_period(&dividend_period, &re)?;
+        // Yahoo 股利表格欄位索引：3=現金股利、4=股票股利。
         let cash_dividend =
             parse_dividend_value(&http::element::parse_value(&element, "div > div:nth-child(3)"));
         let stock_dividend =
@@ -167,6 +171,7 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
 
     let mut e = YahooDividend::new(stock_symbol.to_string());
     e.dividend = dividend_by_year.into_iter().collect();
+    // 對外固定以「新年度在前」輸出，方便 log/debug 與人工檢視。
     e.dividend
         .sort_unstable_by(|(year_a, _), (year_b, _)| year_b.cmp(year_a));
 
@@ -178,6 +183,7 @@ fn parse_dividend_value(value: &Option<String>) -> Decimal {
     value
         .as_deref()
         .map(str::trim)
+        // Yahoo 以 '-' 或空字串表示無資料，統一轉 0 方便後續數值運算與入庫。
         .filter(|v| !v.is_empty() && *v != "-")
         .and_then(|v| text::parse_decimal(v, None).ok())
         .unwrap_or(Decimal::ZERO)

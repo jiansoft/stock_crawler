@@ -9,7 +9,7 @@ use tokio_retry::{
 };
 
 use crate::{
-    crawler::{goodinfo, yahoo},
+    crawler::yahoo,
     database::table::{self, dividend},
     logging, nosql,
     util::map::Keyable,
@@ -59,28 +59,26 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-/// Asynchronously processes the stocks that have no dividends or have issued multiple dividends.
+/// 非同步處理「今年尚未有股利資料」或「今年有多次配息」的股票。
 ///
-/// This function fetches a list of stock symbols that either have no dividends or have issued multiple dividends
-/// in the current year. It then visits the dividend information of each stock symbol using the `goodinfo::dividend::visit`
-/// function. For each dividend found, if the dividend's year is not the current year, it skips to the next dividend.
-/// Otherwise, it converts the dividend into a `table::dividend::Entity` and tries to upsert it.
+/// 此函式會先取得符合條件的股票代碼清單，接著透過 `yahoo::dividend::visit`
+/// 抓取各股票的股利資訊。對於每筆資料，若其股利所屬年度不是今年或去年則略過；
+/// 否則轉換為 `table::dividend::Dividend` 後執行 upsert。
 ///
-/// If the upsert operation is successful, it logs the success and the entity that was upserted.
-/// If the upsert operation fails, it logs the error.
+/// 當 upsert 成功時會記錄成功訊息與資料內容；失敗時則記錄錯誤訊息。
+/// 為避免短時間大量請求，處理每檔股票後會暫停一段時間再繼續下一檔。
 ///
-/// Between each stock symbol processing, the function sleeps for 6 seconds to prevent too many requests to the
-/// `goodinfo::dividend::visit` function.
+/// # 回傳
 ///
-/// Returns `Ok(())` if the function finishes processing all stock symbols. If any error occurs during the process,
-/// it returns `Err(e)`, where `e` is the error.
+/// - `Ok(())`：全部股票處理完成
+/// - `Err(e)`：處理過程中發生錯誤
 ///
-/// # Errors
+/// # 錯誤
 ///
-/// This function will return an error if:
-/// - It fails to fetch the list of stock symbols.
-/// - It fails to visit the dividend information of a stock symbol.
-/// - It fails to upsert a dividend entity.
+/// 此函式可能在以下情境回傳錯誤：
+/// - 取得股票清單失敗
+/// - 抓取個股股利資料失敗
+/// - upsert 股利資料失敗
 async fn processing_no_or_multiple(year: i32) -> Result<()> {
     //年度內尚未有股利配息資料
     let mut stock_symbols: HashSet<String> = dividend::Dividend::fetch_no_dividends_for_year(year)
@@ -98,7 +96,8 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
 
     logging::info_file_async(format!("本次殖利率的採集需收集 {} 家", stock_symbols.len()));
     for stock_symbol in stock_symbols {
-        let cache_key = format!("goodinfo:dividend:{}", stock_symbol);
+        // 與 goodinfo 分開快取命名空間，避免資料來源切換時誤用舊快取。
+        let cache_key = format!("yahoo:dividend:{}", stock_symbol);
         let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
 
         if is_jump {
@@ -121,40 +120,47 @@ async fn processing_no_or_multiple(year: i32) -> Result<()> {
     Ok(())
 }
 
+/// 處理單一股票的股利資料抓取與入庫流程。
+///
+/// 主要步驟：
+/// 1. 從 Yahoo 取得該股票的股利明細
+/// 2. 僅保留今年與去年股利所屬年度的資料
+/// 3. 依既有 key 規則排除已存在的多次配息紀錄
+/// 4. 轉為資料表實體後 upsert，必要時更新年度總和
 async fn process_stock_dividends(
     year: i32,
     stock_symbol: &str,
     multiple_dividend_cache: &HashSet<String>,
 ) -> Result<()> {
-    let dividends_from_goodinfo = goodinfo::dividend::visit(stock_symbol).await?;
+    // 以單一股票為處理單位，從 Yahoo 取得股利資料後寫回資料庫。
+    let dividends_from_yahoo = yahoo::dividend::visit(stock_symbol).await?;
     let last_year = year - 1;
-    let relevant_years = [year, last_year];
-    // 合併今年度和去年的股利數據
-    let dividend_details_from_goodinfo = relevant_years
+    // Yahoo 回傳依發放年度分組；這裡先展平成明細，再用股利所屬年度過濾目標資料。
+    let dividend_details_from_yahoo = dividends_from_yahoo
+        .dividend
         .iter()
-        .filter_map(|&yr| {
-            dividends_from_goodinfo
-                .get(&yr)
-                .map(|details| details.iter().cloned())
-        })
-        .flatten()
+        .flat_map(|(_, details)| details.iter().cloned())
         .collect::<Vec<_>>();
 
-    for dividend_from_goodinfo in dividend_details_from_goodinfo {
-        if dividend_from_goodinfo.year_of_dividend != year
-            && dividend_from_goodinfo.year_of_dividend != last_year
+    for dividend_from_yahoo in dividend_details_from_yahoo {
+        // 僅處理今年與去年的股利所屬年度，避免將過舊資料覆寫回資料庫。
+        if dividend_from_yahoo.year_of_dividend != year
+            && dividend_from_yahoo.year_of_dividend != last_year
         {
             continue;
         }
 
-        //檢查是否為多次配息，並且已經收錄該筆股利
-        let key = dividend_from_goodinfo.key();
+        // key 格式需與 `Dividend::key()` 一致，才能沿用既有多次配息去重邏輯。
+        let key = format!(
+            "{}-{}-{}",
+            stock_symbol, dividend_from_yahoo.year_of_dividend, dividend_from_yahoo.quarter
+        );
 
         if multiple_dividend_cache.contains(&key) {
             continue;
         }
 
-        let entity = table::dividend::Dividend::from(dividend_from_goodinfo);
+        let entity = yahoo_dividend_to_entity(stock_symbol, &dividend_from_yahoo);
         match entity.upsert().await {
             Ok(_) => {
                 logging::debug_file_async(format!(
@@ -163,7 +169,7 @@ async fn process_stock_dividends(
                 ));
 
                 if !entity.quarter.is_empty() {
-                    //更新股利年度的數據
+                    // 季配/半年配資料入庫後，順便更新該年度總和（quarter = ''）。
                     if let Err(why) = entity.upsert_annual_total_dividend().await {
                         logging::error_file_async(format!("{:?} ", why));
                     }
@@ -176,6 +182,29 @@ async fn process_stock_dividends(
     }
 
     Ok(())
+}
+
+fn yahoo_dividend_to_entity(
+    stock_symbol: &str,
+    d: &yahoo::dividend::YahooDividendDetail,
+) -> table::dividend::Dividend {
+    // Yahoo 來源目前只提供股利總額與日期欄位，其餘細項沿用預設值。
+    let mut e = table::dividend::Dividend::new();
+    e.security_code = stock_symbol.to_string();
+    e.year = d.year;
+    e.year_of_dividend = d.year_of_dividend;
+    e.quarter = d.quarter.clone();
+    e.cash_dividend = d.cash_dividend;
+    e.stock_dividend = d.stock_dividend;
+    // 資料表的 `sum` 為現金股利與股票股利總和。
+    e.sum = d.cash_dividend + d.stock_dividend;
+    e.ex_dividend_date1 = d.ex_dividend_date1.clone();
+    e.ex_dividend_date2 = d.ex_dividend_date2.clone();
+    e.payable_date1 = d.payable_date1.clone();
+    e.payable_date2 = d.payable_date2.clone();
+    e.created_time = Local::now();
+    e.updated_time = Local::now();
+    e
 }
 
 /// 處理除息日為尚未公布的股票
