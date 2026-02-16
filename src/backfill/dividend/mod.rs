@@ -235,7 +235,7 @@ async fn processing_unannounced_ex_dividend_date_from_yahoo(
     };
 
     // 取得今年度的股利數據
-    if let Some(yahoo_dividend_details) = yahoo.dividend.get(&year) {
+    if let Some(yahoo_dividend_details) = yahoo.get_dividend_by_year(year) {
         let yahoo_dividend_detail = yahoo_dividend_details.iter().find(|detail| {
             detail.year_of_dividend == entity.year_of_dividend
                 && detail.quarter == entity.quarter

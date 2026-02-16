@@ -2,16 +2,24 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use regex::Regex;
+use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
-use crate::{crawler::yahoo::HOST, util::http};
+use crate::{
+    crawler::yahoo::HOST,
+    util::{http, text},
+};
 
 #[derive(Debug, Clone)]
 pub struct YahooDividend {
     /// 股票代碼。
     pub stock_symbol: String,
-    /// 股利詳情的對應表，鍵為年份，值為該年份的股利詳情列表。
-    pub dividend: HashMap<i32, Vec<YahooDividendDetail>>,
+    /// 股利詳情列表，依「發放年度」由新到舊排序（desc）。
+    ///
+    /// 每個元素為 `(year, details)`：
+    /// - `year`：發放年度（使用除息日或除權日推得）
+    /// - `details`：該年度的股利明細
+    pub dividend: Vec<(i32, Vec<YahooDividendDetail>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +30,10 @@ pub struct YahooDividendDetail {
     pub year_of_dividend: i32,
     /// 季度 Q4 Q3 Q2 Q1 H2 H1
     pub quarter: String,
+    /// 現金股利
+    pub cash_dividend: Decimal,
+    /// 股票股利
+    pub stock_dividend: Decimal,
     /// 除息日
     pub ex_dividend_date1: String,
     /// 除權日
@@ -32,38 +44,43 @@ pub struct YahooDividendDetail {
     pub payable_date2: String,
 }
 
-impl YahooDividendDetail {
-    pub fn new(
-        year: i32,
-        year_of_dividend: i32,
-        quarter: String,
-        ex_dividend_date1: String,
-        ex_dividend_date2: String,
-        payable_date1: String,
-        payable_date2: String,
-    ) -> Self {
-        YahooDividendDetail {
-            year,
-            year_of_dividend,
-            quarter,
-            ex_dividend_date1,
-            ex_dividend_date2,
-            payable_date1,
-            payable_date2,
-        }
-    }
-}
-
 impl YahooDividend {
+    /// 建立 `YahooDividend` 物件。
     pub fn new(stock_symbol: String) -> Self {
         YahooDividend {
             stock_symbol,
-            dividend: Default::default(),
+            dividend: vec![],
         }
+    }
+
+    /// 依發放年度取得該年度的股利明細。
+    ///
+    /// # 參數
+    ///
+    /// - `year`：欲查詢的發放年度
+    ///
+    /// # 回傳
+    ///
+    /// - `Some(&Vec<YahooDividendDetail>)`：找到該年度資料
+    /// - `None`：找不到該年度資料
+    pub fn get_dividend_by_year(&self, year: i32) -> Option<&Vec<YahooDividendDetail>> {
+        self.dividend
+            .iter()
+            .find(|(y, _)| *y == year)
+            .map(|(_, details)| details)
     }
 }
 
-/// 從 Yahoo 網站抓取指定股票代碼的股利除息日、除權日、現金股利發放日、股票股利發放日等資訊。
+/// 從 Yahoo 台股頁面抓取指定股票的股利資料。
+///
+/// 目前會解析以下欄位：
+/// - 股利所屬期間（年 / 季，例如 `2024Q4`）
+/// - 現金股利
+/// - 股票股利
+/// - 除息日
+/// - 除權日
+/// - 現金股利發放日
+/// - 股票股利發放日
 ///
 /// # 參數
 ///
@@ -71,9 +88,9 @@ impl YahooDividend {
 ///
 /// # 回傳
 ///
-/// 返回一個結果，該結果為 `Result<Dividend>` 型態，當抓取成功時返回 `Ok(Dividend)`，
-/// `Dividend` 結構體包含了股票代碼與該股票的所有股利資訊。
-/// 若在抓取過程中發生錯誤，則返回 `Err`。
+/// 返回 `Result<YahooDividend>`：
+/// - `Ok(YahooDividend)`：抓取與解析成功，且 `dividend` 會依年度由新到舊排序
+/// - `Err`：抓取或解析過程發生錯誤
 ///
 /// # 錯誤
 ///
@@ -93,7 +110,7 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     };
 
     let re = Regex::new(r"(\d+)(Q\d|H\d)?")?;
-    let mut e = YahooDividend::new(stock_symbol.to_string());
+    let mut dividend_by_year = HashMap::<i32, Vec<YahooDividendDetail>>::new();
 
     for element in document.select(&selector) {
         let dividend_period = http::element::parse_value(&element, "div > div.Fxg\\(1\\).Fxs\\(1\\).Fxb\\(0\\%\\).Ta\\(end\\).Mend\\(0\\)\\:lc.Mend\\(12px\\).W\\(88px\\).Miw\\(88px\\)");
@@ -121,6 +138,10 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
 
         //股利所屬期間
         let (year_of_dividend, quarter) = parse_period(&dividend_period, &re)?;
+        let cash_dividend =
+            parse_dividend_value(&http::element::parse_value(&element, "div > div:nth-child(3)"));
+        let stock_dividend =
+            parse_dividend_value(&http::element::parse_value(&element, "div > div:nth-child(4)"));
 
         let payout_date1 = http::element::parse_value(&element, "div > div:nth-child(9)")
             .unwrap_or_default()
@@ -128,21 +149,38 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
         let payout_date2 = http::element::parse_value(&element, "div > div:nth-child(10)")
             .unwrap_or_default()
             .replace('/', "-");
-        e.dividend
+        dividend_by_year
             .entry(year)
             .or_default()
-            .push(YahooDividendDetail::new(
+            .push(YahooDividendDetail {
                 year,
                 year_of_dividend,
                 quarter,
-                dividend_date_1,
-                dividend_date_2,
-                payout_date1,
-                payout_date2,
-            ));
+                cash_dividend,
+                stock_dividend,
+                ex_dividend_date1: dividend_date_1,
+                ex_dividend_date2: dividend_date_2,
+                payable_date1: payout_date1,
+                payable_date2: payout_date2,
+            });
     }
 
+    let mut e = YahooDividend::new(stock_symbol.to_string());
+    e.dividend = dividend_by_year.into_iter().collect();
+    e.dividend
+        .sort_unstable_by(|(year_a, _), (year_b, _)| year_b.cmp(year_a));
+
     Ok(e)
+}
+
+/// 解析現金股利與股票股利，解析失敗時回傳 0。
+fn parse_dividend_value(value: &Option<String>) -> Decimal {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty() && *v != "-")
+        .and_then(|v| text::parse_decimal(v, None).ok())
+        .unwrap_or(Decimal::ZERO)
 }
 
 /// 解析日期，並將年份設定到參數 year 中。
@@ -193,7 +231,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("2912").await {
+        match visit("2330").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("e:{:#?}", e));
