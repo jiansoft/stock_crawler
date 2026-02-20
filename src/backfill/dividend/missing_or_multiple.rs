@@ -79,7 +79,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
         }
 
         // 主動節流，降低被來源站台限流或封鎖的風險。
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
     Ok(())
@@ -181,7 +181,7 @@ fn make_cache_key(stock_symbol: &str) -> String {
 fn yahoo_dividend_to_entity(
     stock_symbol: &str,
     d: &yahoo::dividend::YahooDividendDetail,
-) -> table::dividend::Dividend {
+) -> dividend::Dividend {
     // Yahoo 來源目前只提供股利總額與日期欄位，其餘細項沿用預設值。
     let mut e = table::dividend::Dividend::new();
     e.security_code = stock_symbol.to_string();
@@ -255,7 +255,9 @@ mod tests {
     async fn test_backfill_missing_or_multiple_dividends_live() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        let _ = backfill_missing_or_multiple_dividends(2024).await;
+        backfill_missing_or_multiple_dividends(2025)
+            .await
+            .expect("backfill_missing_or_multiple_dividends failed");
     }
 
     #[tokio::test]
