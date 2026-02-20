@@ -3,16 +3,17 @@ use std::{
     fs::{self},
     io::Write,
     path::{Path, PathBuf},
+    thread,
 };
 
 use chrono::{format::DelayedFormat, Local};
 use once_cell::sync::Lazy;
 use tokio::{
+    runtime::Builder,
     sync::{
         mpsc::UnboundedReceiver,
         mpsc::{self, UnboundedSender},
     },
-    task,
 };
 
 use crate::logging::rotate::Rotate;
@@ -55,9 +56,8 @@ impl Logger {
     }
 
     pub fn send(&self, msg: String, writer: &UnboundedSender<String>) {
-        if let Err(why) = writer.send(msg) {
-            error_console(why.to_string());
-        }
+        // Receiver may be unavailable during process shutdown; drop the message silently.
+        let _ = writer.send(msg);
     }
 
     fn create_writer(log_name: &str) -> UnboundedSender<String> {
@@ -67,7 +67,15 @@ impl Logger {
 
         let (tx, rx) = mpsc::unbounded_channel::<String>();
 
-        task::spawn(Self::process_messages(rx, log_path.display().to_string()));
+        // Use a dedicated thread + runtime so logger workers outlive per-test tokio runtimes.
+        let path = log_path.display().to_string();
+        thread::spawn(move || {
+            let rt = Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap_or_else(|e| panic!("Failed to build logger runtime: {e}"));
+            rt.block_on(Self::process_messages(rx, path));
+        });
 
         tx
     }
