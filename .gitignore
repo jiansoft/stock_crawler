@@ -1,6 +1,25 @@
-/target
-/log
-/.idea
-.env
+# Rust build artifacts
+/target/
+/debug/
+/release/
+
+# Rustfmt / rust-analyzer backups
+**/*.rs.bk
+
+# Cargo lockfile
+# Keep this ignored only if you intentionally do not version it.
 Cargo.lock
-/etc/ssl
+
+# Local runtime artifacts
+/log/
+/*.log
+
+# IDE
+/.idea/
+
+# Local configuration / secrets
+.env
+.env.*
+
+# Local SSL assets
+/etc/ssl/
