@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use deadpool_redis::{
-    redis::{cmd, AsyncCommands, ErrorKind, RedisError, RedisResult, ToRedisArgs, Value},
+    redis::{cmd, AsyncCommands, RedisResult, ToRedisArgs, Value},
     Config, Connection, Pool, Runtime,
 };
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -169,7 +169,7 @@ impl Redis {
             ));
         }
 
-        Err(RedisError::from((ErrorKind::TypeError, "Unexpected value type")).into())
+        Err(anyhow!("Unexpected value type"))
     }
 
     /// Retrieves keys from the Redis server that match any of the provided patterns.
