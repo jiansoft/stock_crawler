@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 
 const FIREFOX_VERSIONS: [&str; 80] = [
     "133.0", "132.0", "131.0", "130.0", "129.0", "128.0", "127.0", "126.0", "125.0", "124.0",
@@ -263,18 +263,10 @@ fn gen_firefox_ua() -> String {
     let version = FIREFOX_VERSIONS[rng.random_range(..FIREFOX_VERSIONS.len())];
     let os = OS_STRINGS[rng.random_range(..OS_STRINGS.len())];
 
-    // Handle mobile iOS specifically
-    if os.starts_with("iPhone") || os.starts_with("iPad") {
-        format!(
-            "Mozilla/5.0 ({}; rv:{}) Gecko/20100101 Firefox/{}",
-            os, version, version
-        )
-    } else {
-        format!(
-            "Mozilla/5.0 ({}; rv:{}) Gecko/20100101 Firefox/{}",
-            os, version, version
-        )
-    }
+    format!(
+        "Mozilla/5.0 ({}; rv:{}) Gecko/20100101 Firefox/{}",
+        os, version, version
+    )
 }
 
 fn gen_chrome_ua() -> String {
