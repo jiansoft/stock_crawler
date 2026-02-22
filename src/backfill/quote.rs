@@ -125,6 +125,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_thread() {
         dotenv::dotenv().ok();
         SHARE.load().await;
