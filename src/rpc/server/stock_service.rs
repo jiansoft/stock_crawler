@@ -87,26 +87,37 @@ async fn fetch_current_quotes_for_symbol(stock_symbol: &str) -> Option<StockQuot
 
 #[cfg(test)]
 mod tests {
+    use tokio::net::TcpListener;
+    use tokio_stream::wrappers::TcpListenerStream;
+
     use crate::rpc::{stock, stock::stock_server::StockServer};
 
     use super::*;
 
+    /// 啟動 gRPC 伺服器並回傳其位址
+    async fn start_test_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let addr_str = format!("http://{}", addr);
+
+        let mock_service = StockService::default();
+        let server = tonic::transport::Server::builder()
+            .add_service(StockServer::new(mock_service))
+            .serve_with_incoming(TcpListenerStream::new(listener));
+
+        tokio::spawn(server);
+
+        // 等待伺服器啟動
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        addr_str
+    }
+
     #[tokio::test]
     async fn test_fetch_current_stock_price() {
-        // Create the mock server
-        let mock_service = StockService::default();
-        let mock_server = tonic::transport::Server::builder()
-            .add_service(StockServer::new(mock_service))
-            .serve("127.0.0.1:50051".parse().unwrap());
-        //.await .expect("Server failed");
+        let addr = start_test_server().await;
 
-        tokio::spawn(mock_server);
-
-        // Wait a bit for server to be up. In real-world cases, you'd use a more robust mechanism.
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        // Use the service like you would against a real server
-        let mut client = stock::stock_client::StockClient::connect("http://127.0.0.1:50051")
+        let mut client = stock::stock_client::StockClient::connect(addr)
             .await
             .expect("Failed to connect");
 
@@ -119,25 +130,13 @@ mod tests {
             .await
             .expect("RPC Failed!");
         println!("message:{:#?}", resp.into_inner().stock_prices)
-        //assert_eq!(response.into_inner().message, "Hello Tonic!");
     }
 
     #[tokio::test]
     async fn test_fetch_holiday_schedule() {
-        // Create the mock server
-        let mock_service = StockService::default();
-        let mock_server = tonic::transport::Server::builder()
-            .add_service(StockServer::new(mock_service))
-            .serve("127.0.0.1:50051".parse().unwrap());
-        //.await .expect("Server failed");
+        let addr = start_test_server().await;
 
-        tokio::spawn(mock_server);
-
-        // Wait a bit for server to be up. In real-world cases, you'd use a more robust mechanism.
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        // Use the service like you would against a real server
-        let mut client = stock::stock_client::StockClient::connect("http://127.0.0.1:50051")
+        let mut client = stock::stock_client::StockClient::connect(addr)
             .await
             .expect("Failed to connect");
 
@@ -148,6 +147,5 @@ mod tests {
             .await
             .expect("RPC Failed!");
         println!("message:{:#?}", resp.into_inner().holiday)
-        //assert_eq!(response.into_inner().message, "Hello Tonic!");
     }
 }
