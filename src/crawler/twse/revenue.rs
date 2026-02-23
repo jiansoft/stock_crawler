@@ -35,13 +35,29 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<reven
 async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<revenue::Revenue>> {
     let text = util::http::get_use_big5(&url).await?;
     let mut revenues = Vec::with_capacity(1024);
-    let selector = Selector::parse("body > center > center > table > tbody > tr > td > table > tbody > tr > td > table > tbody > tr").map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
+    
+    // 改用更具彈性的選擇器：先抓取所有 tr
+    let tr_selector = Selector::parse("tr").map_err(|why| anyhow!("Failed to Selector::parse tr because: {:?}", why))?;
+    // 用於選取 tr 內部的 td
+    let td_selector = Selector::parse("td").map_err(|why| anyhow!("Failed to Selector::parse td because: {:?}", why))?;
+    
     let date = ((year * 100) + month as i32) as i64;
     let document = Html::parse_document(text.as_str());
-    for node in document.select(&selector) {
-        let tds: Vec<String> = node.text().map(|v| v.to_string()).collect();
+    
+    for node in document.select(&tr_selector) {
+        // 提取該行所有 td 的文字並清除前後空白
+        let tds: Vec<String> = node.select(&td_selector)
+            .map(|td| td.text().collect::<String>().trim().to_string())
+            .collect();
 
-        if tds.len() != 11 {
+        // 營收資料表格通常有 10-11 個欄位
+        if tds.len() < 10 {
+            continue;
+        }
+
+        // 關鍵過濾邏輯：第一欄必須是純數字的公司代號（如 2330）
+        // 這能自動過濾掉標題列、說明文字或合計列
+        if tds[0].is_empty() || !tds[0].chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
 
