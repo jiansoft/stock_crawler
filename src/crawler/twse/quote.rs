@@ -85,8 +85,10 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
                             dq.change_range = (dq.closing_price - ldg.closing_price)
                                 / ldg.closing_price
                                 * dec!(100);
-                        } else {
+                        } else if dq.opening_price > Decimal::ZERO {
                             dq.change_range = dq.change / dq.opening_price * dec!(100);
+                        } else {
+                            dq.change_range = Decimal::ZERO;
                         }
                     }
                 }
