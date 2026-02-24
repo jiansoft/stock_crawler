@@ -76,7 +76,7 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
 
         // 檢查是否收錄過
         if SHARE.last_revenues_contains_key(date, &tds[0]) {
-            continue;
+            //continue;
         }
 
         let mut entity = revenue::Revenue::from(tds);
@@ -105,7 +105,7 @@ mod tests {
         SHARE.load().await;
         let _now = Local::now();
 
-        let naive_datetime = NaiveDate::from_ymd_opt(2025, 4, 1)
+        let naive_datetime = NaiveDate::from_ymd_opt(2026, 2, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
             .unwrap();

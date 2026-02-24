@@ -161,64 +161,112 @@ impl From<Vec<String>> for Revenue {
         /*
         0公司代號	1公司名稱	2當月營收	3上月營收	4去年當月營收	5上月比較增減(%) 6去年同月增減(%) 7當月累計營收 8去年累計營收 9前期比較增減(%)
         */
-        e.monthly =
-            Decimal::from_str(item[2].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
-                eprintln!("Failed to parse 'monthly'({}) field: {}", item[2], err);
+        e.monthly = {
+            let s = item[2].replace([',', ' '], "");
+            if s.is_empty() {
                 Default::default()
-            });
-        e.last_month =
-            Decimal::from_str(item[3].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
-                eprintln!("Failed to parse 'last_month'({}) field: {}", item[3], err);
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!("Failed to parse 'monthly'({}) field: {}", item[2], err);
+                    Default::default()
+                })
+            }
+        };
+        e.last_month = {
+            let s = item[3].replace([',', ' '], "");
+            if s.is_empty() {
                 Default::default()
-            });
-        e.last_year_this_month = Decimal::from_str(item[4].replace([',', ' '], "").as_str())
-            .unwrap_or_else(|err| {
-                eprintln!(
-                    "Failed to parse 'last_year_this_month'({}) field: {}",
-                    item[4], err
-                );
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!("Failed to parse 'last_month'({}) field: {}", item[3], err);
+                    Default::default()
+                })
+            }
+        };
+        e.last_year_this_month = {
+            let s = item[4].replace([',', ' '], "");
+            if s.is_empty() {
                 Default::default()
-            });
-        e.monthly_accumulated = Decimal::from_str(item[7].replace([',', ' '], "").as_str())
-            .unwrap_or_else(|err| {
-                eprintln!(
-                    "Failed to parse 'monthly_accumulated'({}) field: {}",
-                    item[7], err
-                );
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'last_year_this_month'({}) field: {}",
+                        item[4], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        e.monthly_accumulated = {
+            let s = item[7].replace([',', ' '], "");
+            if s.is_empty() {
                 Default::default()
-            });
-        e.last_year_monthly_accumulated =
-            Decimal::from_str(item[8].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
-                eprintln!(
-                    "Failed to parse 'last_year_monthly_accumulated'({}) field: {}",
-                    item[8], err
-                );
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'monthly_accumulated'({}) field: {}",
+                        item[7], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        e.last_year_monthly_accumulated = {
+            let s = item[8].replace([',', ' '], "");
+            if s.is_empty() {
                 Default::default()
-            });
-        e.compared_with_last_month = Decimal::from_str(item[5].replace([',', ' '], "").as_str())
-            .unwrap_or_else(|err| {
-                eprintln!(
-                    "Failed to parse 'compared_with_last_month'({}) field: {}",
-                    item[5], err
-                );
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'last_year_monthly_accumulated'({}) field: {}",
+                        item[8], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        e.compared_with_last_month = {
+            let s = item[5].replace([',', ' '], "");
+            if s.is_empty() {
                 Default::default()
-            });
-        e.compared_with_last_year_same_month =
-            Decimal::from_str(item[6].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
-                eprintln!(
-                    "Failed to parse 'compared_with_last_year_same_month'({}) field: {}",
-                    item[6], err
-                );
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'compared_with_last_month'({}) field: {}",
+                        item[5], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        e.compared_with_last_year_same_month = {
+            let s = item[6].replace([',', ' '], "");
+            if s.is_empty() {
                 Default::default()
-            });
-        e.accumulated_compared_with_last_year =
-            Decimal::from_str(item[9].replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
-                eprintln!(
-                    "Failed to parse 'accumulated_compared_with_last_year'({}) field: {}",
-                    item[9], err
-                );
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'compared_with_last_year_same_month'({}) field: {}",
+                        item[6], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        e.accumulated_compared_with_last_year = {
+            let s = item[9].replace([',', ' '], "");
+            if s.is_empty() {
                 Default::default()
-            });
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'accumulated_compared_with_last_year'({}) field: {}",
+                        item[9], err
+                    );
+                    Default::default()
+                })
+            }
+        };
 
         e
     }

@@ -10,6 +10,7 @@ use scraper::{Html, Selector};
 
 /// 基金資訊結構體，包含基金的基本資料與相關數據
 #[derive(Debug)]
+#[allow(dead_code)]
 struct FundInfo {
     /// 基金名稱，例如："高盛邊境市場債券基金X股"
     pub fund_name: String,
@@ -40,6 +41,7 @@ struct FundInfo {
     pub fund_url: String,
 }
 
+#[allow(dead_code)]
 impl FundInfo {
     fn from_tds(tds: Vec<String>) -> anyhow::Result<Self> {
         if tds.len() < 9 {

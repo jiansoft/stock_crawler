@@ -33,7 +33,7 @@ async fn process_revenues(last_month_timezone: chrono::DateTime<FixedOffset>) ->
     let month = last_month_timezone.month();
 
     let revenues = twse::revenue::visit(last_month_timezone).await?;
-
+dbg!(&revenues);
     stream::iter(revenues)
         .for_each_concurrent(util::concurrent_limit_16(), |r| async move {
             if let Err(why) = process_revenue(r, year, month as i32).await {
@@ -93,6 +93,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;
@@ -109,6 +110,7 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
     #[tokio::test]
+    #[ignore]
     async fn test_process_revenues() {
         dotenv::dotenv().ok();
         SHARE.load().await;
