@@ -125,6 +125,52 @@ impl DailyQuote {
         }
     }
 
+    /// 從動態映射的欄位資料建立 DailyQuote
+    pub fn from_with_map(item: &[String], map: &std::collections::HashMap<&str, usize>) -> Self {
+        let code = map.get("證券代號").and_then(|&i| item.get(i)).cloned().unwrap_or_default();
+        let mut e = DailyQuote::new(code);
+
+        let parse_decimal = |key: &str| -> Decimal {
+            map.get(key)
+                .and_then(|&i| item.get(i))
+                .map(|s| s.replace(',', ""))
+                .and_then(|s| s.parse::<Decimal>().ok())
+                .unwrap_or_default()
+        };
+
+        e.trading_volume = parse_decimal("成交股數");
+        e.transaction = parse_decimal("成交筆數");
+        e.trade_value = parse_decimal("成交金額");
+        e.opening_price = parse_decimal("開盤價");
+        e.highest_price = parse_decimal("最高價");
+        e.lowest_price = parse_decimal("最低價");
+        e.closing_price = parse_decimal("收盤價");
+        e.change = parse_decimal("漲跌價差");
+        e.last_best_bid_price = parse_decimal("最後揭示買價");
+        e.last_best_bid_volume = parse_decimal("最後揭示買量");
+        e.last_best_ask_price = parse_decimal("最後揭示賣價");
+        e.last_best_ask_volume = parse_decimal("最後揭示賣量");
+        e.price_earning_ratio = parse_decimal("本益比");
+
+        // 處理漲跌符號
+        if let Some(&i) = map.get("漲跌(+/-)") {
+            if let Some(sign) = item.get(i) {
+                if sign.contains('-') || sign.contains('綠') {
+                    e.change = -e.change.abs();
+                } else if sign.contains('+') || sign.contains('紅') {
+                    e.change = e.change.abs();
+                }
+            }
+        }
+
+        e.create_time = Local::now();
+        let default_date = datetime::parse_date("1970-01-01T00:00:00Z");
+        e.maximum_price_in_year_date_on = default_date.date_naive();
+        e.minimum_price_in_year_date_on = default_date.date_naive();
+
+        e
+    }
+
     pub fn to_csv(&self) -> String {
         let mut csv_string = String::new();
 

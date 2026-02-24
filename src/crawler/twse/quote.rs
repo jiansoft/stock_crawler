@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     cache::{self, TtlCacheInner, TTL},
     crawler::twse,
-    database::table::{self, daily_quote::FromWithExchange},
-    declare::StockExchange,
+    database::table::{self},
     logging,
     util::{http, map::Keyable},
 };
@@ -62,16 +61,6 @@ fn is_twse_quote_table(table: &Table) -> bool {
     required.iter().all(|key| fields.iter().any(|f| f.contains(key)))
 }
 
-/// 從 `MI_INDEX` 回應中找出上市每日收盤行情的資料列。
-///
-/// 回傳值為對應表格的 `data` 欄位引用，若找不到則回傳 `None`。
-fn find_twse_quote_rows(data: &ListedResponse) -> Option<&Vec<Vec<String>>> {
-    data.tables
-        .iter()
-        .find(|table| is_twse_quote_table(table))
-        .and_then(|table| table.data.as_ref())
-}
-
 /// 抓取上市公司每日收盤資訊
 ///
 /// 資料來源：`/exchangeReport/MI_INDEX?type=ALLBUT0999`
@@ -84,21 +73,43 @@ fn find_twse_quote_rows(data: &ListedResponse) -> Option<&Vec<Vec<String>>> {
 /// 若 API 可連線但找不到目標表格，會記錄 warning 並回傳空陣列。
 pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote>> {
     let date_str = date.format("%Y%m%d").to_string();
+    let now_ts = Local::now().timestamp_millis();
     let url = format!(
         "https://www.{}/exchangeReport/MI_INDEX?response=json&date={}&type=ALLBUT0999&_={}",
         twse::HOST,
         date_str,
-        date
+        now_ts
     );
 
     //let headers = build_headers().await;
     let data = http::get_json::<ListedResponse>(&url).await?;
+
+    // 檢查 API 狀態
+    if let Some(stat) = &data.stat {
+        if stat == "很抱歉，查無資料" || stat.contains("查詢日期大於當前日期") {
+            return Ok(vec![]);
+        }
+        if stat != "OK" {
+            anyhow::bail!("TWSE MI_INDEX API Error: {}", stat);
+        }
+    }
+
     let mut dqs = Vec::with_capacity(2048);
-    if let Some(twse_dqs) = find_twse_quote_rows(&data) {
-        for item in twse_dqs {
-            //logging::debug_file_async(format!("item:{:?}", item));
-            let mut dq =
-                table::daily_quote::DailyQuote::from_with_exchange(StockExchange::TWSE, item);
+    // 尋找目標表格：使用特徵比對定位
+    let target_table = data.tables.iter().find(|t| is_twse_quote_table(t));
+
+    if let (Some(table), Some(rows)) = (target_table, target_table.and_then(|t| t.data.as_ref())) {
+        // 1. 建立欄位名稱與索引的映射表
+        let mut field_map = std::collections::HashMap::new();
+        if let Some(fields) = &table.fields {
+            for (i, field) in fields.iter().enumerate() {
+                field_map.insert(field.as_str(), i);
+            }
+        }
+
+        for item in rows {
+            // 2. 使用動態映射解析資料
+            let mut dq = table::daily_quote::DailyQuote::from_with_map(item, &field_map);
 
             if dq.closing_price.is_zero()
                 && dq.highest_price.is_zero()
@@ -121,8 +132,9 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
                 {
                     if ldg.closing_price > Decimal::ZERO {
                         // 漲幅 = (现价-上一个交易日收盘价）/ 上一个交易日收盘价*100%
-                        dq.change_range =
-                            (dq.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
+                        dq.change_range = (dq.closing_price - ldg.closing_price)
+                            / ldg.closing_price
+                            * dec!(100);
                     } else if dq.opening_price > Decimal::ZERO {
                         dq.change_range = dq.change / dq.opening_price * dec!(100);
                     } else {
@@ -136,15 +148,17 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
             dq.month = date.month() as i32;
             dq.day = date.day() as i32;
 
+            // 台北時區 (UTC+8)
+            let timezone = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
             let record_time = date
                 .and_hms_opt(15, 0, 0)
-                .and_then(|naive| Local.from_local_datetime(&naive).single())
+                .and_then(|naive| timezone.from_local_datetime(&naive).single())
                 .unwrap_or_else(|| {
-                    logging::warn_file_async("Failed to create DateTime<Local> from NaiveDateTime, using current time as default.".to_string());
-                    Local::now()
+                    logging::warn_file_async("Failed to create DateTime with Taipei timezone, using Local::now().".to_string());
+                    Local::now().with_timezone(&timezone)
                 });
 
-            dq.record_time = record_time;
+            dq.record_time = record_time.with_timezone(&Local);
             dq.create_time = Local::now();
             dqs.push(dq);
         }
@@ -216,7 +230,7 @@ mod tests {
                 logging::debug_file_async(format!("Failed to visit because: {:?}", why));
             }
             Ok(list) => {
-                logging::debug_file_async(format!("data:{:#?}", list));
+                logging::debug_file_async(format!("data count: {}, detail:{:#?}", list.len(), list));
             }
         }
 
