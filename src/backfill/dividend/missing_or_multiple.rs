@@ -69,8 +69,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
 
         // 單檔失敗只記錄錯誤不中斷整體，確保批次任務能持續推進。
         if let Err(why) =
-            backfill_recent_dividends_for_stock(year, &stock_symbol, &multiple_dividend_cache)
-                .await
+            backfill_recent_dividends_for_stock(year, &stock_symbol, &multiple_dividend_cache).await
         {
             logging::error_file_async(format!(
                 "backfill_missing_or_multiple_dividends failed: year={}, stock_symbol={}, stage=backfill_recent_dividends_for_stock, error={:#}",
@@ -275,7 +274,6 @@ mod tests {
             multiple_dividend_cache.insert(dividend.key());
         }
 
-        let _ =
-            backfill_recent_dividends_for_stock(year, "2454", &multiple_dividend_cache).await;
+        let _ = backfill_recent_dividends_for_stock(year, "2454", &multiple_dividend_cache).await;
     }
 }

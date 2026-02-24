@@ -67,15 +67,12 @@ fn get_client() -> Result<&'static Client> {
             .deflate(true)
             .gzip(true)
             .zstd(true)
-
             // ===== 超時設置 =====
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
-
             // ===== TCP 優化 =====
             .tcp_nodelay(true)
             .tcp_keepalive(Duration::from_secs(60))
-
             // ===== HTTP/2 優化 =====
             // 注意：移除 http2_prior_knowledge() 和 http2_adaptive_window()
             // 因為某些 API（如 Telegram）對 HTTP/2 幀大小有特殊要求
@@ -83,25 +80,19 @@ fn get_client() -> Result<&'static Client> {
             .http2_keep_alive_interval(Duration::from_secs(30))
             .http2_keep_alive_timeout(Duration::from_secs(10))
             .http2_keep_alive_while_idle(true)
-
             // ===== 連接池 =====
             .pool_max_idle_per_host(20)
             .pool_idle_timeout(Duration::from_secs(90))
-
             // ===== Cookie 和重定向 =====
             .cookie_store(true)
             .redirect(reqwest::redirect::Policy::limited(5))
-
             // ===== Headers =====
             .referer(true)
             .user_agent(user_agent::gen_random_ua())
-
             // ===== DNS 優化 =====
             .hickory_dns(true)
-
             // ===== 其他 =====
             .no_proxy()
-
             .build()
             .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
     })
@@ -155,7 +146,7 @@ pub fn extract_cookies(response: &Response) -> Option<String> {
         .headers()
         .get_all(SET_COOKIE)
         .iter()
-        .filter_map(|val| val.to_str().ok())  // ✅ 安全處理
+        .filter_map(|val| val.to_str().ok()) // ✅ 安全處理
         .map(String::from)
         .collect();
 

@@ -35,15 +35,17 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<reven
 async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<revenue::Revenue>> {
     let text = util::http::get_use_big5(&url).await?;
     let mut revenues = Vec::with_capacity(1024);
-    
+
     // 改用更具彈性的選擇器：先抓取所有 tr
-    let tr_selector = Selector::parse("tr").map_err(|why| anyhow!("Failed to Selector::parse tr because: {:?}", why))?;
+    let tr_selector = Selector::parse("tr")
+        .map_err(|why| anyhow!("Failed to Selector::parse tr because: {:?}", why))?;
     // 用於選取 tr 內部的 td
-    let td_selector = Selector::parse("td").map_err(|why| anyhow!("Failed to Selector::parse td because: {:?}", why))?;
-    
+    let td_selector = Selector::parse("td")
+        .map_err(|why| anyhow!("Failed to Selector::parse td because: {:?}", why))?;
+
     let date = ((year * 100) + month as i32) as i64;
     let document = Html::parse_document(text.as_str());
-    
+
     for node in document.select(&tr_selector) {
         // 1. 先取得儲存格迭代器
         let mut cell_nodes = node.select(&td_selector);
@@ -64,10 +66,8 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
         // 4. 只有符合條件的行，才去 collect 剩下的欄位
         let mut tds = Vec::with_capacity(11);
         tds.push(code.to_owned()); // 加入已處理好的第一欄
-        
-        tds.extend(cell_nodes.map(|td| {
-            td.text().collect::<String>().trim().to_owned()
-        }));
+
+        tds.extend(cell_nodes.map(|td| td.text().collect::<String>().trim().to_owned()));
 
         // 5. 營收資料表格通常有 10-11 個欄位
         if tds.len() < 10 {

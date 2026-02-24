@@ -14,7 +14,12 @@ use crate::{
 pub(crate) mod extension;
 
 #[derive(sqlx::Type, sqlx::FromRow, Default, Debug, Clone)]
-/// 每日股票報價數據
+/// 每日股票報價資料模型。
+///
+/// 對應資料表為 `DailyQuotes`，包含開高低收、成交量、
+/// 均線、年內統計等欄位。  
+/// 目前同時保留 `security_code` 與 `stock_symbol`，
+/// 以兼容舊資料欄位與新欄位。
 pub struct DailyQuote {
     pub maximum_price_in_year_date_on: NaiveDate,
     pub minimum_price_in_year_date_on: NaiveDate,
@@ -60,12 +65,15 @@ pub struct DailyQuote {
     /// 股價淨值比=每股股價 ÷ 每股淨值
     pub price_to_book_ratio: Decimal,
     pub security_code: String,
+    /// 股票代碼
+    pub stock_symbol: String,
     pub serial: i64,
     pub year: i32,
     pub month: i32,
     pub day: i32,
 }
 
+/// 批次匯入 `DailyQuotes` 的 PostgreSQL `COPY` 指令。
 pub const COPY_IN_QUERY: &str = r#"COPY "DailyQuotes"(
             maximum_price_in_year_date_on,
             minimum_price_in_year_date_on,
@@ -97,6 +105,7 @@ pub const COPY_IN_QUERY: &str = r#"COPY "DailyQuotes"(
             "Transaction",
             "price-to-book_ratio",
             "SecurityCode",
+            "stock_symbol",
             year,
             month,
             day) FROM STDIN WITH (FORMAT CSV)"#;
@@ -118,16 +127,27 @@ impl Keyable for DailyQuote {
 }
 
 impl DailyQuote {
-    pub fn new(security_code: String) -> Self {
+    /// 建立 `DailyQuote` 預設實例，並同步初始化股票代碼欄位。
+    ///
+    /// `security_code` 與 `stock_symbol` 會設定為同一值。
+    pub fn new<S: Into<String>>(security_code: S) -> Self {
+        let security_code = security_code.into();
         DailyQuote {
-            security_code,
+            security_code: security_code.clone(),
+            stock_symbol: security_code,
             ..Default::default()
         }
     }
 
-    /// 從動態映射的欄位資料建立 DailyQuote
+    /// 依欄位名稱映射，從單筆原始字串資料建立 `DailyQuote`。
+    ///
+    /// 適用於欄位順序可能變動的來源（例如 TWSE JSON `fields`）。
     pub fn from_with_map(item: &[String], map: &std::collections::HashMap<&str, usize>) -> Self {
-        let code = map.get("證券代號").and_then(|&i| item.get(i)).cloned().unwrap_or_default();
+        let code = map
+            .get("證券代號")
+            .and_then(|&i| item.get(i))
+            .cloned()
+            .unwrap_or_default();
         let mut e = DailyQuote::new(code);
 
         let parse_decimal = |key: &str| -> Decimal {
@@ -171,48 +191,53 @@ impl DailyQuote {
         e
     }
 
+    /// 轉換為單行 CSV 字串，供 `COPY` 批次寫入使用。
     pub fn to_csv(&self) -> String {
         let mut csv_string = String::new();
 
-        let _ = writeln!(csv_string, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-                       self.maximum_price_in_year_date_on,
-                       self.minimum_price_in_year_date_on,
-                       self.date,
-                       self.create_time,
-                       self.record_time,
-                       self.price_earning_ratio,
-                       self.moving_average_60,
-                       self.closing_price,
-                       self.change_range,
-                       self.change,
-                       self.last_best_bid_price,
-                       self.last_best_bid_volume,
-                       self.last_best_ask_price,
-                       self.last_best_ask_volume,
-                       self.moving_average_5,
-                       self.moving_average_10,
-                       self.moving_average_20,
-                       self.lowest_price,
-                       self.moving_average_120,
-                       self.moving_average_240,
-                       self.maximum_price_in_year,
-                       self.minimum_price_in_year,
-                       self.average_price_in_year,
-                       self.highest_price,
-                       self.opening_price,
-                       self.trading_volume,
-                       self.trade_value,
-                       self.transaction,
-                       self.price_to_book_ratio,
-                       self.security_code,
-                       self.year,
-                       self.month,
-                       self.day,
+        let _ = writeln!(csv_string, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                         self.maximum_price_in_year_date_on,
+                         self.minimum_price_in_year_date_on,
+                         self.date,
+                         self.create_time,
+                         self.record_time,
+                         self.price_earning_ratio,
+                         self.moving_average_60,
+                         self.closing_price,
+                         self.change_range,
+                         self.change,
+                         self.last_best_bid_price,
+                         self.last_best_bid_volume,
+                         self.last_best_ask_price,
+                         self.last_best_ask_volume,
+                         self.moving_average_5,
+                         self.moving_average_10,
+                         self.moving_average_20,
+                         self.lowest_price,
+                         self.moving_average_120,
+                         self.moving_average_240,
+                         self.maximum_price_in_year,
+                         self.minimum_price_in_year,
+                         self.average_price_in_year,
+                         self.highest_price,
+                         self.opening_price,
+                         self.trading_volume,
+                         self.trade_value,
+                         self.transaction,
+                         self.price_to_book_ratio,
+                         self.security_code,
+                         self.stock_symbol,
+                         self.year,
+                         self.month,
+                         self.day,
         );
 
         csv_string
     }
 
+    /// 將當前報價寫入資料庫，若主鍵衝突則更新既有資料。
+    ///
+    /// 目前衝突鍵為 `("stock_symbol", "Date")`。
     pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
        INSERT INTO "DailyQuotes" (
@@ -246,12 +271,13 @@ impl DailyQuote {
             "Transaction",
             "price-to-book_ratio",
             "SecurityCode",
+            "stock_symbol",
             year,
             month,
             day
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
-        ON CONFLICT ("SecurityCode", "Date")
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+        ON CONFLICT ("stock_symbol", "Date")
         DO UPDATE SET
             "RecordTime" = now(),
             "ClosingPrice" = excluded."ClosingPrice",
@@ -299,6 +325,7 @@ impl DailyQuote {
             .bind(self.transaction)
             .bind(self.price_to_book_ratio)
             .bind(&self.security_code)
+            .bind(&self.stock_symbol)
             .bind(self.year)
             .bind(self.month)
             .bind(self.day)
@@ -310,7 +337,11 @@ impl DailyQuote {
             ))
     }
 
-    /// 依指定日期取得收盤資料的均線
+    /// 依指定日期回填該股票的均線與年內高低點統計。
+    ///
+    /// 會查詢截至 `self.date` 的歷史資料，並更新：
+    /// - 5/10/20/60/120/240 日均線
+    /// - 年內最高價、最低價、均價與其日期
     pub async fn fill_moving_average(&mut self) -> Result<()> {
         let year_ago = self.date - TimeDelta::try_days(400).unwrap();
         let sql = r#"
@@ -318,7 +349,7 @@ WITH
 cte AS (
     SELECT "Date","HighestPrice","LowestPrice","ClosingPrice"
     FROM "DailyQuotes"
-    WHERE "SecurityCode" = $1 AND "Date" <= $2 AND "Date" >= $3
+    WHERE "stock_symbol" = $1 AND "Date" <= $2 AND "Date" >= $3
     ORDER BY "Date" DESC
 	LIMIT 240
 )
@@ -357,12 +388,12 @@ SELECT
             .fetch_one(database::get_connection())
             .await
             .context(format!(
-                "Failed to fetch_moving_average(security_code:{},date:{}) from database",
+                "Failed to fetch_moving_average(stock_symbol:{},date:{}) from database",
                 self.security_code, self.date
             ))
     }
 
-    //更新均線值
+    /// 將已計算完成的均線與年內統計欄位更新回資料庫。
     pub async fn update_moving_average(&self) -> Result<PgQueryResult> {
         let sql = r#"
 UPDATE "DailyQuotes"
@@ -403,12 +434,17 @@ WHERE "Serial" = $1
             ))
     }
 
+    /// 使用 `COPY` 批次寫入 `DailyQuotes`。
+    ///
+    /// 適合大量資料匯入，比逐筆 `upsert` 更有效率。
     pub async fn copy_in_raw(quotes: &[Self]) -> Result<u64> {
         database::copy_in_raw(COPY_IN_QUERY, quotes).await
     }
 }
 
+/// 不同交易所來源轉換為統一資料模型的介面。
 pub trait FromWithExchange<T, U> {
+    /// 依交易所與來源資料格式建立實例。
     fn from_with_exchange(exchange: T, item: &U) -> Self;
 }
 
@@ -479,7 +515,10 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
     }
 }
 
-/// 補上當日缺少的每日收盤數據
+/// 補齊指定日期缺漏的每日收盤資料。
+///
+/// 會從近 30 天內最後一筆資料複製缺漏股票至目標日期，
+/// 並將成交量、成交金額、漲跌等欄位歸零。
 pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQueryResult> {
     let date_str = date.format("%Y-%m-%d").to_string();
     let prev_date = (date - TimeDelta::try_days(30).unwrap())
@@ -489,7 +528,7 @@ pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQuery
     let sql = format!(
         r#"
 INSERT INTO "DailyQuotes" (
-    "Date", "SecurityCode", "TradingVolume", "Transaction",
+    "Date", "SecurityCode", "stock_symbol", "TradingVolume", "Transaction",
     "TradeValue", "OpeningPrice", "HighestPrice", "LowestPrice",
     "ClosingPrice", "ChangeRange", "Change", "LastBestBidPrice",
     "LastBestBidVolume", "LastBestAskPrice", "LastBestAskVolume",
@@ -502,6 +541,7 @@ INSERT INTO "DailyQuotes" (
 )
 SELECT '{0}' as "Date",
     "SecurityCode",
+    "stock_symbol",
     0 as "TradingVolume",
     0 as "Transaction",
     0 as "TradeValue",
@@ -535,13 +575,13 @@ WHERE "Serial" IN
 (
     SELECT MAX("Serial")
     FROM "DailyQuotes"
-    WHERE "SecurityCode" IN
+    WHERE "stock_symbol" IN
     (
         SELECT c.stock_symbol
         FROM stocks AS c
-        WHERE stock_symbol NOT IN
+        WHERE "stock_symbol" NOT IN
         (
-            SELECT "DailyQuotes"."SecurityCode"
+            SELECT "DailyQuotes"."stock_symbol"
             FROM "DailyQuotes"
             WHERE "Date" = '{0}'
         )
@@ -549,7 +589,7 @@ WHERE "Serial" IN
     )
     AND "Date" < '{0}'
     AND "Date" > '{1}'
-    GROUP BY "SecurityCode"
+    GROUP BY "stock_symbol"
 )"#,
         date_str, prev_date
     );
@@ -563,7 +603,7 @@ WHERE "Serial" IN
         ))
 }
 
-/// 依照指定的年月取得該股票其月份的最低、平均、最高價
+/// 取得指定股票在指定年月的最低、平均、最高收盤價統計。
 pub async fn fetch_monthly_stock_price_summary(
     stock_symbol: &str,
     year: i32,
@@ -575,8 +615,8 @@ SELECT
     AVG("ClosingPrice") as avg_price,
     MAX("HighestPrice") as highest_price
 FROM "DailyQuotes"
-WHERE "SecurityCode" = $1 AND "year" = $2 AND "month" = $3
-GROUP BY "SecurityCode", "year", "month";
+WHERE "stock_symbol" = $1 AND "year" = $2 AND "month" = $3
+GROUP BY "stock_symbol", "year", "month";
 "#;
     Ok(sqlx::query_as::<_, MonthlyStockPriceSummary>(sql)
         .bind(stock_symbol)
@@ -586,36 +626,7 @@ GROUP BY "SecurityCode", "year", "month";
         .await?)
 }
 
-/// # fetch_count_by_date
-///
-/// Fetches the count of daily quotes for the specified date.
-///
-/// # Arguments
-///
-/// * `date` - The date to fetch the count for in format: YYYY-MM-DD.
-///
-/// # Returns
-///
-/// Returns `Result<i64, sqlx::Error>`. This means the function returns a Result,
-/// which would be either an i64 integer (count of daily quotes for the given date),
-/// or an `sqlx::Error` error type when an error is encountered.
-///
-/// # Example
-///
-/// Below is an example of how this function can be used:
-///
-/// ```
-/// use chrono::NaiveDate;
-///
-/// #[tokio::main]
-/// async fn main() {
-///     let date = NaiveDate::from_ymd(2022, 2, 21);
-///     match fetch_count_by_date(date).await {
-///         Ok(count) => println!("Count of daily quotes: {}", count),
-///         Err(err) => println!("An error occurred: {:?}", err),
-///     }
-/// }
-/// ```
+/// 取得指定日期在 `DailyQuotes` 的資料筆數。
 pub async fn fetch_count_by_date(date: NaiveDate) -> Result<i64> {
     let sql = r#"SELECT count(*) FROM "DailyQuotes" WHERE "Date" = $1"#;
     let row: (i64,) = sqlx::query_as(sql)
@@ -625,12 +636,16 @@ pub async fn fetch_count_by_date(date: NaiveDate) -> Result<i64> {
     Ok(row.0)
 }
 
+/// 讀取指定日期的所有日報價資料。
+///
+/// 回傳結果已映射為 `Vec<DailyQuote>`。
 pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuote>> {
     let sql = r#"
     SELECT
         "Serial",
         "Date",
         "SecurityCode",
+        "stock_symbol",
         "TradingVolume",
         "Transaction",
         "TradeValue",
@@ -698,6 +713,7 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
                 transaction: row.get("Transaction"),
                 price_to_book_ratio: row.get("price-to-book_ratio"),
                 security_code: row.get("SecurityCode"),
+                stock_symbol: row.get("stock_symbol"),
                 serial: row.get("Serial"),
                 year: row.get("year"),
                 month: row.get("month"),

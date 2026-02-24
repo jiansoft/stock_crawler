@@ -58,7 +58,9 @@ fn is_twse_quote_table(table: &Table) -> bool {
     }
 
     let required = ["證券代號", "成交股數", "開盤價", "收盤價", "漲跌價差"];
-    required.iter().all(|key| fields.iter().any(|f| f.contains(key)))
+    required
+        .iter()
+        .all(|key| fields.iter().any(|f| f.contains(key)))
 }
 
 /// 抓取上市公司每日收盤資訊
@@ -132,9 +134,8 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
                 {
                     if ldg.closing_price > Decimal::ZERO {
                         // 漲幅 = (现价-上一个交易日收盘价）/ 上一个交易日收盘价*100%
-                        dq.change_range = (dq.closing_price - ldg.closing_price)
-                            / ldg.closing_price
-                            * dec!(100);
+                        dq.change_range =
+                            (dq.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
                     } else if dq.opening_price > Decimal::ZERO {
                         dq.change_range = dq.change / dq.opening_price * dec!(100);
                     } else {
@@ -154,7 +155,10 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
                 .and_hms_opt(15, 0, 0)
                 .and_then(|naive| timezone.from_local_datetime(&naive).single())
                 .unwrap_or_else(|| {
-                    logging::warn_file_async("Failed to create DateTime with Taipei timezone, using Local::now().".to_string());
+                    logging::warn_file_async(
+                        "Failed to create DateTime with Taipei timezone, using Local::now()."
+                            .to_string(),
+                    );
                     Local::now().with_timezone(&timezone)
                 });
 
@@ -230,7 +234,11 @@ mod tests {
                 logging::debug_file_async(format!("Failed to visit because: {:?}", why));
             }
             Ok(list) => {
-                logging::debug_file_async(format!("data count: {}, detail:{:#?}", list.len(), list));
+                logging::debug_file_async(format!(
+                    "data count: {}, detail:{:#?}",
+                    list.len(),
+                    list
+                ));
             }
         }
 

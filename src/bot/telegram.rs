@@ -116,18 +116,17 @@ pub async fn send(msg: &str) {
     match client.send(msg).await {
         Ok(rep) => {
             if !rep.ok {
-                let error_code = rep.error_code
+                let error_code = rep
+                    .error_code
                     .as_ref()
                     .map(|code| code.to_string())
                     .unwrap_or_else(|| "unknown".to_string());
-                let desc = rep.description
-                    .as_deref()
-                    .unwrap_or("No description");
+                let desc = rep.description.as_deref().unwrap_or("No description");
                 logging::error_file_async(format!(
                     "Telegram API responded with error code {error_code}: {desc}\n{msg}"
                 ));
             }
-        },
+        }
         Err(error) => {
             logging::error_file_async(format!(
                 "Failed to send a message to telegram because {error:}"

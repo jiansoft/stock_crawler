@@ -54,11 +54,10 @@ pub async fn execute() -> Result<()> {
     let backfill_unannounced_dividend_dates_task = backfill_unannounced_dividend_dates(year);
 
     // join! 會同時等待兩條流程完成；這裡選擇 best-effort，不因單一路徑失敗而取消另一條。
-    let (res_backfill_missing_or_multiple_dividends, res_backfill_unannounced_dividend_dates) =
-        tokio::join!(
-            backfill_missing_or_multiple_dividends_task,
-            backfill_unannounced_dividend_dates_task
-        );
+    let (res_backfill_missing_or_multiple_dividends, res_backfill_unannounced_dividend_dates) = tokio::join!(
+        backfill_missing_or_multiple_dividends_task,
+        backfill_unannounced_dividend_dates_task
+    );
 
     // 子流程結果各自記錄，避免只看到一個總錯誤而失去定位資訊。
     match res_backfill_missing_or_multiple_dividends {

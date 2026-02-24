@@ -137,14 +137,8 @@ impl Rotate {
         } else {
             let path = Path::new(base_fn);
             let parent = path.parent().unwrap_or(Path::new(""));
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("log");
-            let ext = path
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("log");
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("log");
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("log");
 
             parent
                 .join(format!("{}.{}.{}", stem, generation, ext))
@@ -270,9 +264,9 @@ impl Rotate {
 
     fn files_in_directory<P: AsRef<Path>>(file_path: P) -> Result<Vec<PathBuf>, io::Error> {
         let path = file_path.as_ref();
-        let parent_dir = path.parent().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "Parent directory not found")
-        })?;
+        let parent_dir = path
+            .parent()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Parent directory not found"))?;
 
         let mut files = Vec::new();
         for entry in fs::read_dir(parent_dir)? {
@@ -354,7 +348,12 @@ mod tests {
 
         // 寫入超過 1KB 的資料，觸發輪轉
         for i in 0..20 {
-            let msg = format!("{} Line {} - {}\r\n", now.format("%F %X%.6f"), i, "X".repeat(100));
+            let msg = format!(
+                "{} Line {} - {}\r\n",
+                now.format("%F %X%.6f"),
+                i,
+                "X".repeat(100)
+            );
             if let Err(why) = r.write_msg(now, msg.as_bytes()) {
                 logging::error_console(format!("Failed to write line {}: {:?}", i, why));
             }
@@ -417,7 +416,11 @@ mod tests {
         println!("最終 generation: {}", final_generation);
 
         // 驗證產生了多個檔案
-        assert!(final_generation >= 3, "應該至少輪轉 3 次，實際: {}", final_generation);
+        assert!(
+            final_generation >= 3,
+            "應該至少輪轉 3 次，實際: {}",
+            final_generation
+        );
 
         // 收集所有產生的檔案
         let mut files: HashSet<String> = HashSet::new();

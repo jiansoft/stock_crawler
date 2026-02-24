@@ -142,10 +142,14 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
         //股利所屬期間
         let (year_of_dividend, quarter) = parse_period(&dividend_period, &re)?;
         // Yahoo 股利表格欄位索引：3=現金股利、4=股票股利。
-        let cash_dividend =
-            parse_dividend_value(&http::element::parse_value(&element, "div > div:nth-child(3)"));
-        let stock_dividend =
-            parse_dividend_value(&http::element::parse_value(&element, "div > div:nth-child(4)"));
+        let cash_dividend = parse_dividend_value(&http::element::parse_value(
+            &element,
+            "div > div:nth-child(3)",
+        ));
+        let stock_dividend = parse_dividend_value(&http::element::parse_value(
+            &element,
+            "div > div:nth-child(4)",
+        ));
 
         let payout_date1 = http::element::parse_value(&element, "div > div:nth-child(9)")
             .unwrap_or_default()

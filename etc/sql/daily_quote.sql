@@ -35,7 +35,8 @@ create table public."DailyQuotes"
     "price-to-book_ratio"         numeric(18, 4)           default 0                                       not null,
     year                          integer                  default 0                                       not null,
     month                         integer                  default 0                                       not null,
-    day                           integer                  default 0                                       not null
+    day                           integer                  default 0                                       not null,
+    stock_symbol                  varchar(24)              default ''::character varying                   not null
 );
 
 comment on column public."DailyQuotes"."Date" is '資料屬於那一天(收盤日)';
@@ -70,6 +71,7 @@ comment on column public."DailyQuotes"."price-to-book_ratio" is '股價淨值比
 comment on column public."DailyQuotes".year is '資料屬於那一年度';
 comment on column public."DailyQuotes".month is '資料屬於那月份';
 comment on column public."DailyQuotes".day is '資料屬於那日';
+comment on column public."DailyQuotes"."stock_symbol" is '股票代碼';
 
 create index "DailyQuotes_Date_idx"
     on public."DailyQuotes" ("Date" desc) include ("Serial", "SecurityCode");
@@ -78,3 +80,7 @@ create unique index "DailyQuotes_SecurityCode_Date_uidx"
     on public."DailyQuotes" ("SecurityCode" asc, "Date" desc) include (year, "HighestPrice", "LowestPrice", "ClosingPrice", "price-to-book_ratio", "PriceEarningRatio");
 
 
+create index "DailyQuotes_Date_include_symbol_idx"
+    on public."DailyQuotes" ("Date" desc) include ("Serial", "stock_symbol");
+create unique index "DailyQuotes_stock_symbol_Date_uidx"
+    on public."DailyQuotes" ("stock_symbol" asc, "Date" desc) include (year, "HighestPrice", "LowestPrice", "ClosingPrice", "price-to-book_ratio", "PriceEarningRatio");
