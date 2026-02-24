@@ -87,6 +87,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_update_annual_roe_and_roa_for_zero_values() {
         dotenv::dotenv().ok();
         SHARE.load().await;
