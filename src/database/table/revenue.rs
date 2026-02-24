@@ -13,6 +13,7 @@ use crate::database;
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Revenue {
     pub security_code: String,
+    pub stock_symbol: String,
     /// 當月營收
     pub monthly: Decimal,
     /// 上月營收
@@ -44,6 +45,7 @@ impl Revenue {
     pub fn new() -> Self {
         Revenue {
             security_code: Default::default(),
+            stock_symbol: Default::default(),
             monthly: Default::default(),
             last_month: Default::default(),
             last_year_this_month: Default::default(),
@@ -65,6 +67,7 @@ impl Revenue {
 INSERT INTO
     "Revenue" (
         "SecurityCode",
+        "stock_symbol",
         "Date",
         "Monthly",
         "LastMonth",
@@ -80,10 +83,10 @@ INSERT INTO
     )
 VALUES
     (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
     )
 ON CONFLICT
-    ("SecurityCode", "Date")
+    ("stock_symbol", "Date")
 DO UPDATE
 SET
     "Monthly" = EXCLUDED."Monthly",
@@ -100,6 +103,7 @@ SET
 "#;
         sqlx::query(sql)
             .bind(self.security_code.as_str())
+            .bind(self.stock_symbol.as_str())
             .bind(self.date)
             .bind(self.monthly)
             .bind(self.last_month)
@@ -128,6 +132,7 @@ impl Clone for Revenue {
     fn clone(&self) -> Self {
         Revenue {
             security_code: self.security_code.to_string(),
+            stock_symbol: self.stock_symbol.to_string(),
             monthly: self.monthly,
             last_month: self.last_month,
             last_year_this_month: self.last_year_this_month,
@@ -151,6 +156,8 @@ impl From<Vec<String>> for Revenue {
         let mut e = Revenue::new();
 
         e.security_code = item[0].to_string();
+        e.stock_symbol = item[0].to_string();
+
         /*
         0公司代號	1公司名稱	2當月營收	3上月營收	4去年當月營收	5上月比較增減(%) 6去年同月增減(%) 7當月累計營收 8去年累計營收 9前期比較增減(%)
         */
@@ -240,6 +247,7 @@ pub async fn fetch_last_two_month() -> Result<Vec<Revenue>> {
         r#"
 select
     "SecurityCode",
+    "stock_symbol",
     "Date",
     "Monthly",
     "LastMonth",
@@ -264,6 +272,7 @@ order by "Serial" desc
     .try_map(|row: PgRow| {
         let date = row.try_get("Date")?;
         let security_code = row.try_get("SecurityCode")?;
+        let stock_symbol = row.try_get("stock_symbol")?;
         let monthly = row.try_get("Monthly")?;
         let last_month = row.try_get("LastMonth")?;
         let last_year_this_month = row.try_get("LastYearThisMonth")?;
@@ -279,6 +288,7 @@ order by "Serial" desc
         Ok(Revenue {
             date,
             security_code,
+            stock_symbol,
             monthly,
             last_month,
             last_year_this_month,
@@ -305,23 +315,25 @@ pub async fn rebuild_revenue_last_date() -> Result<PgQueryResult> {
 
 WITH r AS (
     SELECT
-        "SecurityCode",
+        "stock_symbol",
         MAX("Date") AS date
     FROM
         "Revenue"
     GROUP BY
-        "SecurityCode"
+        "stock_symbol"
 )
-INSERT INTO revenue_last_date
+INSERT INTO revenue_last_date (stock_symbol, security_code, serial)
 SELECT
+    "Revenue"."stock_symbol",
     "Revenue"."SecurityCode",
     "Revenue"."Serial"
 FROM
     "Revenue"
-    INNER JOIN r ON r."SecurityCode" = "Revenue"."SecurityCode"
+    INNER JOIN r ON r."stock_symbol" = "Revenue"."stock_symbol"
     AND r.date = "Revenue"."Date"
-ON CONFLICT (security_code)
+ON CONFLICT ("stock_symbol")
 DO UPDATE SET
+    security_code = excluded.security_code,
     serial = excluded.serial,
     created_time = now();
 "#;

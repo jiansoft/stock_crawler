@@ -15,7 +15,8 @@ create table public."Revenue"
     "CreateTime"                      timestamp with time zone default ('now'::text)::timestamp with time zone not null,
     avg_price                         numeric(18, 4)           default 0                                       not null,
     lowest_price                      numeric(18, 4)           default 0                                       not null,
-    highest_price                     numeric(18, 4)           default 0                                       not null
+    highest_price                     numeric(18, 4)           default 0                                       not null,
+    stock_symbol                      varchar(24)              default ''::character varying                   not null
 );
 
 comment on column public."Revenue"."Monthly" is '當月營收';
@@ -29,7 +30,12 @@ comment on column public."Revenue"."AccumulatedComparedWithLastYear" is '前期�
 comment on column public."Revenue".avg_price is '月均價';
 comment on column public."Revenue".lowest_price is '當月最低價';
 comment on column public."Revenue".highest_price is '當月最高價';
+comment on column public."Revenue"."stock_symbol" is '股票代碼';
 
 create unique index "Revenue_SecurityCode_Date-uidx"
     on public."Revenue" ("SecurityCode", "Date");
+
+
+create unique index "Revenue_stock_symbol_Date_uidx" on public."Revenue" ("stock_symbol" asc, "Date" desc)
+
 
