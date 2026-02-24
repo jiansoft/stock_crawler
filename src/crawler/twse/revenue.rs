@@ -45,19 +45,32 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
     let document = Html::parse_document(text.as_str());
     
     for node in document.select(&tr_selector) {
-        // 提取該行所有 td 的文字並清除前後空白
-        let tds: Vec<String> = node.select(&td_selector)
-            .map(|td| td.text().collect::<String>().trim().to_string())
-            .collect();
+        // 1. 先取得儲存格迭代器
+        let mut cell_nodes = node.select(&td_selector);
 
-        // 營收資料表格通常有 10-11 個欄位
-        if tds.len() < 10 {
+        // 2. 優先處理第一欄 (公司代號)
+        let first_cell_text = match cell_nodes.next() {
+            Some(td) => td.text().collect::<String>(),
+            None => continue,
+        };
+        let code = first_cell_text.trim();
+
+        // 3. 立即檢查：如果第一欄不是數字，直接跳過整行，不處理後續 td
+        // 這能有效過濾掉標題列、說明文字或合計列，減少記憶體分配
+        if code.is_empty() || !code.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
 
-        // 關鍵過濾邏輯：第一欄必須是純數字的公司代號（如 2330）
-        // 這能自動過濾掉標題列、說明文字或合計列
-        if tds[0].is_empty() || !tds[0].chars().all(|c| c.is_ascii_digit()) {
+        // 4. 只有符合條件的行，才去 collect 剩下的欄位
+        let mut tds = Vec::with_capacity(11);
+        tds.push(code.to_owned()); // 加入已處理好的第一欄
+        
+        tds.extend(cell_nodes.map(|td| {
+            td.text().collect::<String>().trim().to_owned()
+        }));
+
+        // 5. 營收資料表格通常有 10-11 個欄位
+        if tds.len() < 10 {
             continue;
         }
 
