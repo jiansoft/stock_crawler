@@ -91,7 +91,7 @@ ownership_details AS (
 daily_quotes AS (
     SELECT
         "Serial",
-        "SecurityCode",
+        "stock_symbol",
         "Date" AS date,
         "ClosingPrice"
     FROM
@@ -99,16 +99,16 @@ daily_quotes AS (
     WHERE
         "Date" >= '{1}'
         AND "Date" <= '{0}'
-        AND "SecurityCode" IN (
+        AND "stock_symbol" IN (
             SELECT
-                "SecurityCode"
+                security_code
             FROM
                 total_ownership_details
         )
 ),
 prev_daily_quotes AS (
     SELECT
-        "SecurityCode",
+        "stock_symbol",
         "ClosingPrice"
     FROM
         daily_quotes
@@ -121,12 +121,12 @@ prev_daily_quotes AS (
             WHERE
                 date < '{0}'
             GROUP BY
-                "SecurityCode"
+                "stock_symbol"
         )
 ),
 today_daily_quotes AS (
     SELECT
-        "SecurityCode",
+        "stock_symbol",
         "ClosingPrice"
     FROM
         daily_quotes
@@ -137,7 +137,7 @@ today_daily_quotes AS (
             FROM
                 daily_quotes
             GROUP BY
-                "SecurityCode"
+                "stock_symbol"
         )
 ),
 money_history_detail AS (
@@ -158,8 +158,8 @@ money_history_detail AS (
     FROM
         ownership_details AS od
         INNER JOIN stocks AS c ON od.security_code = c.stock_symbol
-        INNER JOIN today_daily_quotes AS tdq ON od.security_code = tdq."SecurityCode"
-        INNER JOIN prev_daily_quotes AS pdq ON od.security_code = pdq."SecurityCode"
+        INNER JOIN today_daily_quotes AS tdq ON od.security_code = tdq."stock_symbol"
+        INNER JOIN prev_daily_quotes AS pdq ON od.security_code = pdq."stock_symbol"
 ),
 market_value AS (
     SELECT

@@ -44,19 +44,19 @@ WITH ownership_details AS (
 	WHERE is_sold = false and date <= $1
 ),
  daily_quotes AS (
-	SELECT "SecurityCode", "ClosingPrice"
+	SELECT "stock_symbol", "ClosingPrice"
 	FROM "DailyQuotes"
-	WHERE "Date" = $1 AND "SecurityCode" in (select security_code FROM ownership_details)
+	WHERE "Date" = $1 AND "stock_symbol" in (select security_code FROM ownership_details)
 ),
 total AS (
 	SELECT '{0}' AS "date", SUM(od.share_quantity * dq."ClosingPrice") AS "sum"
 	FROM ownership_details od
-	INNER JOIN daily_quotes dq ON od.security_code = dq."SecurityCode"
+	INNER JOIN daily_quotes dq ON od.security_code = dq."stock_symbol"
 ),
 eddie AS (
 	SELECT '{0}' AS "date", SUM(od.share_quantity * dq."ClosingPrice") AS "sum"
 	FROM ownership_details od
-	INNER JOIN daily_quotes dq ON od.security_code = dq."SecurityCode"
+	INNER JOIN daily_quotes dq ON od.security_code = dq."stock_symbol"
 	WHERE od.member_id = 1
 )
 INSERT INTO daily_money_history (date, sum, eddie, unice)

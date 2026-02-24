@@ -76,7 +76,7 @@ WITH stocks AS (
 ),
 price AS (
     SELECT
-        "SecurityCode" AS stock_symbol,
+        "stock_symbol",
         -- COUNT(DISTINCT "year") AS year_count,
         0 AS year_count,
         PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "LowestPrice") AS cheap,
@@ -89,7 +89,7 @@ price AS (
         AND "year" IN ({0})
         AND "ClosingPrice" > 0
     GROUP BY
-        "SecurityCode"
+        "stock_symbol"
 ),
 dividend AS (
     SELECT
@@ -155,7 +155,7 @@ pbr AS (
     FROM
     (
         SELECT
-            dq."SecurityCode" as stock_symbol,
+            dq."stock_symbol",
             PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "price-to-book_ratio") AS cheap,
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "price-to-book_ratio") AS fair,
             PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "price-to-book_ratio") AS expensive
@@ -164,7 +164,7 @@ pbr AS (
             "Date" <= '{1}'
             AND "year" IN ({0})
             AND "price-to-book_ratio" > 0
-        GROUP BY dq."SecurityCode"
+        GROUP BY dq."stock_symbol"
     ) AS calc
     INNER JOIN stocks as s on calc.stock_symbol = s.stock_symbol
 ),
@@ -199,7 +199,7 @@ per AS(
     INNER JOIN
     (
         SELECT
-            "SecurityCode" AS stock_symbol,
+            "stock_symbol",
             PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "PriceEarningRatio") AS pe_low,
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "PriceEarningRatio") AS pe_mid,
             PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "PriceEarningRatio") AS pe_high
@@ -210,7 +210,7 @@ per AS(
             AND "year" IN ({0})
             AND "PriceEarningRatio" > 0
         GROUP BY
-            "SecurityCode"
+            "stock_symbol"
     ) AS dq on dq.stock_symbol = calc.stock_symbol
 )
 INSERT INTO estimate (
@@ -245,7 +245,7 @@ SELECT
     per.expensive,
     NOW()
 FROM stocks AS s
-INNER JOIN "DailyQuotes" AS dq ON dq."SecurityCode" = s.stock_symbol AND dq."Date" = '{1}'
+INNER JOIN "DailyQuotes" AS dq ON dq."stock_symbol" = s.stock_symbol AND dq."Date" = '{1}'
 INNER JOIN price ON price.stock_symbol = s.stock_symbol
 INNER JOIN dividend ON dividend.stock_symbol = s.stock_symbol
 INNER JOIN eps ON eps.stock_symbol = s.stock_symbol
@@ -300,17 +300,17 @@ WITH params AS (
 ),
 price as (
     SELECT
-        "SecurityCode" AS security_code,
+        "stock_symbol",
         COUNT(DISTINCT "year") AS year_count,
         PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY "LowestPrice") AS price_cheap,
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "ClosingPrice") AS price_fair,
         PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "HighestPrice") AS price_expensive
     FROM params AS p
-    INNER JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode"
+    INNER JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."stock_symbol"
                                    AND "Date" <= p.date_filter
                                    AND "year" = ANY(p.year_filter)
                                    AND "ClosingPrice" > 0
-    GROUP BY "SecurityCode"
+    GROUP BY "stock_symbol"
 ),
 dividend as (
 	SELECT
@@ -356,7 +356,7 @@ pbr as (
             COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS pbr_fair,
             COALESCE(PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "price-to-book_ratio"), 1) AS pbr_expensive
         FROM params AS p
-        LEFT JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode"
+        LEFT JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."stock_symbol"
                                        AND "Date" <= p.date_filter
                                        AND "year" = ANY(p.year_filter)
                                        AND "price-to-book_ratio" > 0
@@ -400,7 +400,7 @@ per AS(
             COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "PriceEarningRatio"), 0) AS pe_mid,
             COALESCE(PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY "PriceEarningRatio"), 0) AS pe_high
         FROM params AS p
-        LEFT JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode"
+        LEFT JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."stock_symbol"
                                        AND "Date" <= p.date_filter
                                        AND "year" = ANY(p.year_filter)
                                        AND "PriceEarningRatio" > 0
@@ -443,7 +443,7 @@ SELECT
     NOW()
 FROM params AS p
 INNER JOIN stocks AS s ON p.security_code_filter = s.stock_symbol
-INNER JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."SecurityCode" and dq."Date" = p.date_filter
+INNER JOIN "DailyQuotes" AS dq ON p.security_code_filter = dq."stock_symbol" and dq."Date" = p.date_filter
 INNER JOIN price ON p.security_code_filter = price.security_code
 INNER JOIN dividend ON p.security_code_filter = dividend.security_code
 INNER JOIN eps ON p.security_code_filter = eps.stock_symbol

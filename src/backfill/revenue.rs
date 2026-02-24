@@ -53,7 +53,7 @@ pub(crate) async fn process_revenue(
     month: i32,
 ) -> Result<()> {
     if let Ok(dq) =
-        table::daily_quote::fetch_monthly_stock_price_summary(&revenue.security_code, year, month)
+        table::daily_quote::fetch_monthly_stock_price_summary(&revenue.stock_symbol, year, month)
             .await
     {
         revenue.lowest_price = dq.lowest_price;
@@ -65,7 +65,7 @@ pub(crate) async fn process_revenue(
 
     SHARE.set_last_revenues(revenue.clone());
 
-    let name = match SHARE.get_stock(&revenue.security_code).await {
+    let name = match SHARE.get_stock(&revenue.stock_symbol).await {
         None => String::from("-"),
         Some(s) => s.name.clone(),
     };
@@ -73,7 +73,7 @@ pub(crate) async fn process_revenue(
     logging::info_file_async(
         format!(
             "公司代號:{}  公司名稱:{} 當月營收:{} 上月營收:{} 去年當月營收:{} 月均價:{} 最低價:{} 最高價:{}",
-            revenue.security_code,
+            revenue.stock_symbol,
             name,
             revenue.monthly,
             revenue.last_month,

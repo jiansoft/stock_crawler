@@ -12,6 +12,7 @@ pub struct LastDailyQuotes {
     pub security_code: String,
     /// 收盤價
     pub closing_price: Decimal,
+    pub stock_symbol: String,
 }
 
 impl LastDailyQuotes {
@@ -20,6 +21,7 @@ impl LastDailyQuotes {
             date: Default::default(),
             security_code: Default::default(),
             closing_price: Default::default(),
+            stock_symbol: Default::default(),
         }
     }
 
@@ -28,7 +30,7 @@ impl LastDailyQuotes {
         Ok(sqlx::query_as::<_, LastDailyQuotes>(
             r#"
 SELECT
-    date, security_code, closing_price
+    date, security_code, closing_price, stock_symbol
 FROM
     last_daily_quotes
 "#,
@@ -55,7 +57,7 @@ FROM
 INSERT INTO last_daily_quotes
 SELECT
 	"Date",
-	"SecurityCode",
+	"stock_symbol",
 	"TradingVolume",
 	"Transaction",
 	"TradeValue",
@@ -90,9 +92,9 @@ WHERE "Serial" IN
 	select max("Serial")
 	from "DailyQuotes"
 	where "Date" >= $1
-	group by "SecurityCode"
+	group by "stock_symbol"
 )
-ORDER BY "SecurityCode"
+ORDER BY "stock_symbol"
 "#;
         let month_ago = Local::now() - TimeDelta::try_days(30).unwrap();
         match sqlx::query(sql)
@@ -118,6 +120,7 @@ impl Clone for LastDailyQuotes {
         LastDailyQuotes {
             date: self.date,
             security_code: self.security_code.clone(),
+            stock_symbol: self.stock_symbol.clone(),
             closing_price: self.closing_price,
         }
     }

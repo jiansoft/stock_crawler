@@ -129,7 +129,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
 
             if !dq.change.is_zero() {
                 if let Some(ldg) = cache::SHARE
-                    .get_last_trading_day_quotes(&dq.security_code)
+                    .get_last_trading_day_quotes(&dq.stock_symbol)
                     .await
                 {
                     if ldg.closing_price > Decimal::ZERO {

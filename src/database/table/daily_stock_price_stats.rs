@@ -45,7 +45,7 @@ WITH cte AS (
            s.stock_exchange_market_id
     FROM stocks s
     INNER JOIN estimate e ON s."SuspendListing" = false AND s.stock_symbol = e.security_code
-    INNER JOIN "DailyQuotes" dq ON e.date = dq."Date" AND e.security_code = dq."SecurityCode"
+    INNER JOIN "DailyQuotes" dq ON e.date = dq."Date" AND e.security_code = dq."stock_symbol"
     WHERE e.date = $1
 ),
 stats AS (

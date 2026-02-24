@@ -101,7 +101,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
 
                 if !dq.change.is_zero() {
                     if let Some(ldg) = cache::SHARE
-                        .get_last_trading_day_quotes(&dq.security_code)
+                        .get_last_trading_day_quotes(&dq.stock_symbol)
                         .await
                     {
                         if ldg.closing_price > Decimal::ZERO {
@@ -115,7 +115,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
                     }
                 }
 
-                if let Some(pe_ratio_analysis_response) = pe_ratio_analysis.get(&dq.security_code) {
+                if let Some(pe_ratio_analysis_response) = pe_ratio_analysis.get(&dq.stock_symbol) {
                     dq.price_earning_ratio = pe_ratio_analysis_response
                         .price_earning_ratio
                         .parse::<Decimal>()

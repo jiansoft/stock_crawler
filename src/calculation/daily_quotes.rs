@@ -30,7 +30,7 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
 pub(crate) async fn process_daily_quote_moving_average(mut dq: DailyQuote) -> Result<()> {
     dq.fill_moving_average().await?;
     //計算本日的股價淨值比 = 每股股價 ÷ 每股淨值
-    let stock = SHARE.get_stock(&dq.security_code).await;
+    let stock = SHARE.get_stock(&dq.stock_symbol).await;
     match stock {
         None => {
             dq.price_to_book_ratio = Decimal::ZERO;
@@ -72,9 +72,9 @@ pub(crate) async fn process_daily_quote_moving_average(mut dq: DailyQuote) -> Re
 
     let qhr = match SHARE.quote_history_records.write() {
         Ok(mut quote_history_records_guard) => {
-            match quote_history_records_guard.get_mut(&dq.security_code) {
+            match quote_history_records_guard.get_mut(&dq.stock_symbol) {
                 None => {
-                    let mut qhr = QuoteHistoryRecord::new(dq.security_code.to_string());
+                    let mut qhr = QuoteHistoryRecord::new(dq.stock_symbol.to_string());
                     qhr.maximum_price_date_on = dq.date;
                     qhr.maximum_price_to_book_ratio_date_on = dq.date;
                     qhr.minimum_price_date_on = dq.date;

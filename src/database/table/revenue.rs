@@ -12,7 +12,6 @@ use crate::database;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Revenue {
-    pub security_code: String,
     pub stock_symbol: String,
     /// 當月營收
     pub monthly: Decimal,
@@ -44,7 +43,6 @@ pub struct Revenue {
 impl Revenue {
     pub fn new() -> Self {
         Revenue {
-            security_code: Default::default(),
             stock_symbol: Default::default(),
             monthly: Default::default(),
             last_month: Default::default(),
@@ -66,7 +64,6 @@ impl Revenue {
         let sql = r#"
 INSERT INTO
     "Revenue" (
-        "SecurityCode",
         "stock_symbol",
         "Date",
         "Monthly",
@@ -83,7 +80,7 @@ INSERT INTO
     )
 VALUES
     (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
     )
 ON CONFLICT
     ("stock_symbol", "Date")
@@ -102,7 +99,6 @@ SET
     "highest_price" = EXCLUDED."highest_price";
 "#;
         sqlx::query(sql)
-            .bind(self.security_code.as_str())
             .bind(self.stock_symbol.as_str())
             .bind(self.date)
             .bind(self.monthly)
@@ -131,7 +127,6 @@ impl Default for Revenue {
 impl Clone for Revenue {
     fn clone(&self) -> Self {
         Revenue {
-            security_code: self.security_code.to_string(),
             stock_symbol: self.stock_symbol.to_string(),
             monthly: self.monthly,
             last_month: self.last_month,
@@ -155,7 +150,7 @@ impl From<Vec<String>> for Revenue {
     fn from(item: Vec<String>) -> Self {
         let mut e = Revenue::new();
 
-        e.security_code = item[0].to_string();
+        e.stock_symbol = item[0].to_string();
         e.stock_symbol = item[0].to_string();
 
         /*
@@ -294,7 +289,6 @@ pub async fn fetch_last_two_month() -> Result<Vec<Revenue>> {
     let revenue = sqlx::query(
         r#"
 select
-    "SecurityCode",
     "stock_symbol",
     "Date",
     "Monthly",
@@ -319,7 +313,6 @@ order by "Serial" desc
     .bind(two_month_ago_int)
     .try_map(|row: PgRow| {
         let date = row.try_get("Date")?;
-        let security_code = row.try_get("SecurityCode")?;
         let stock_symbol = row.try_get("stock_symbol")?;
         let monthly = row.try_get("Monthly")?;
         let last_month = row.try_get("LastMonth")?;
@@ -335,7 +328,6 @@ order by "Serial" desc
         let create_time = row.try_get("CreateTime")?;
         Ok(Revenue {
             date,
-            security_code,
             stock_symbol,
             monthly,
             last_month,
@@ -373,7 +365,7 @@ WITH r AS (
 INSERT INTO revenue_last_date (stock_symbol, security_code, serial)
 SELECT
     "Revenue"."stock_symbol",
-    "Revenue"."SecurityCode",
+    "Revenue"."stock_symbol",
     "Revenue"."Serial"
 FROM
     "Revenue"

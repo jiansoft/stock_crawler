@@ -64,7 +64,6 @@ pub struct DailyQuote {
     pub transaction: Decimal,
     /// 股價淨值比=每股股價 ÷ 每股淨值
     pub price_to_book_ratio: Decimal,
-    pub security_code: String,
     /// 股票代碼
     pub stock_symbol: String,
     pub serial: i64,
@@ -104,7 +103,6 @@ pub const COPY_IN_QUERY: &str = r#"COPY "DailyQuotes"(
             "TradeValue",
             "Transaction",
             "price-to-book_ratio",
-            "SecurityCode",
             "stock_symbol",
             year,
             month,
@@ -118,7 +116,7 @@ impl CopyIn for DailyQuote {
 
 impl Keyable for DailyQuote {
     fn key(&self) -> String {
-        format!("{}-{}", self.date.format("%Y%m%d"), self.security_code)
+        format!("{}-{}", self.date.format("%Y%m%d"), self.stock_symbol)
     }
 
     fn key_with_prefix(&self) -> String {
@@ -133,7 +131,6 @@ impl DailyQuote {
     pub fn new<S: Into<String>>(security_code: S) -> Self {
         let security_code = security_code.into();
         DailyQuote {
-            security_code: security_code.clone(),
             stock_symbol: security_code,
             ..Default::default()
         }
@@ -195,7 +192,7 @@ impl DailyQuote {
     pub fn to_csv(&self) -> String {
         let mut csv_string = String::new();
 
-        let _ = writeln!(csv_string, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        let _ = writeln!(csv_string, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                          self.maximum_price_in_year_date_on,
                          self.minimum_price_in_year_date_on,
                          self.date,
@@ -225,7 +222,6 @@ impl DailyQuote {
                          self.trade_value,
                          self.transaction,
                          self.price_to_book_ratio,
-                         self.security_code,
                          self.stock_symbol,
                          self.year,
                          self.month,
@@ -270,13 +266,12 @@ impl DailyQuote {
             "TradeValue",
             "Transaction",
             "price-to-book_ratio",
-            "SecurityCode",
             "stock_symbol",
             year,
             month,
             day
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
         ON CONFLICT ("stock_symbol", "Date")
         DO UPDATE SET
             "RecordTime" = now(),
@@ -324,7 +319,6 @@ impl DailyQuote {
             .bind(self.trade_value)
             .bind(self.transaction)
             .bind(self.price_to_book_ratio)
-            .bind(&self.security_code)
             .bind(&self.stock_symbol)
             .bind(self.year)
             .bind(self.month)
@@ -367,7 +361,7 @@ SELECT
 (SELECT round(avg("ClosingPrice"),2) FROM cte) AS "average_price_in_year"
         "#;
         sqlx::query(sql)
-            .bind(&self.security_code)
+            .bind(&self.stock_symbol)
             .bind(self.date)
             .bind(year_ago)
             .try_map(|row: sqlx::postgres::PgRow| {
@@ -389,7 +383,7 @@ SELECT
             .await
             .context(format!(
                 "Failed to fetch_moving_average(stock_symbol:{},date:{}) from database",
-                self.security_code, self.date
+                self.stock_symbol, self.date
             ))
     }
 
@@ -528,7 +522,7 @@ pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQuery
     let sql = format!(
         r#"
 INSERT INTO "DailyQuotes" (
-    "Date", "SecurityCode", "stock_symbol", "TradingVolume", "Transaction",
+    "Date", "stock_symbol", "TradingVolume", "Transaction",
     "TradeValue", "OpeningPrice", "HighestPrice", "LowestPrice",
     "ClosingPrice", "ChangeRange", "Change", "LastBestBidPrice",
     "LastBestBidVolume", "LastBestAskPrice", "LastBestAskVolume",
@@ -540,7 +534,6 @@ INSERT INTO "DailyQuotes" (
     "price-to-book_ratio"
 )
 SELECT '{0}' as "Date",
-    "SecurityCode",
     "stock_symbol",
     0 as "TradingVolume",
     0 as "Transaction",
@@ -644,7 +637,6 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
     SELECT
         "Serial",
         "Date",
-        "SecurityCode",
         "stock_symbol",
         "TradingVolume",
         "Transaction",
@@ -712,7 +704,6 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
                 trade_value: row.get("TradeValue"),
                 transaction: row.get("Transaction"),
                 price_to_book_ratio: row.get("price-to-book_ratio"),
-                security_code: row.get("SecurityCode"),
                 stock_symbol: row.get("stock_symbol"),
                 serial: row.get("Serial"),
                 year: row.get("year"),

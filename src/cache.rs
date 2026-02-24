@@ -246,7 +246,7 @@ impl Share {
                 last_revenue
                     .entry(e.date)
                     .or_insert_with(HashMap::new)
-                    .insert(e.security_code.to_string(), e.clone());
+                    .insert(e.stock_symbol.to_string(), e.clone());
             });
         } else {
             logging::error_file_async("Failed to update last_revenues".to_string());
@@ -414,7 +414,7 @@ impl Share {
         if let Ok(mut last_revenues) = SHARE.last_revenues.write() {
             if let Some(last_revenue_date) = last_revenues.get_mut(&revenue.date) {
                 last_revenue_date
-                    .entry(revenue.security_code.to_string())
+                    .entry(revenue.stock_symbol.to_string())
                     .or_insert(revenue.clone());
             }
         }
@@ -434,7 +434,7 @@ impl Share {
     /// 更新快取內股票最後的報價
     pub async fn set_stock_last_price(&self, daily_quote: &daily_quote::DailyQuote) {
         if let Ok(mut last_trading_day_quotes) = self.last_trading_day_quotes.write() {
-            if let Some(quote) = last_trading_day_quotes.get_mut(&daily_quote.security_code) {
+            if let Some(quote) = last_trading_day_quotes.get_mut(&daily_quote.stock_symbol) {
                 quote.date = daily_quote.date;
                 quote.closing_price = daily_quote.closing_price;
             }

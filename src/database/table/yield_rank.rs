@@ -45,7 +45,7 @@ dividend_serial AS (
 ),
 daily_quotes_serial AS (
     SELECT
-        "SecurityCode",
+        "stock_symbol",
         MAX("Serial") AS serial
     FROM
         "DailyQuotes"
@@ -53,7 +53,7 @@ daily_quotes_serial AS (
         "Date" <= $2
         AND "Date" >= $3
     GROUP BY
-        "SecurityCode"
+        "stock_symbol"
 )
 INSERT INTO yield_rank (date, security_code, daily_quotes_serial, dividend_serial, yield)
 SELECT
@@ -65,7 +65,7 @@ SELECT
 FROM
     stocks AS s
     INNER JOIN dividend_serial AS d ON d.security_code = s.stock_symbol
-    INNER JOIN daily_quotes_serial AS dqs ON dqs."SecurityCode" = s.stock_symbol
+    INNER JOIN daily_quotes_serial AS dqs ON dqs."stock_symbol" = s.stock_symbol
     INNER JOIN "DailyQuotes" AS dq ON dq."Serial" = dqs.serial
 ON CONFLICT (date, security_code) DO UPDATE SET
     yield = EXCLUDED.yield,
