@@ -4,7 +4,6 @@ create table public."DailyQuotes"
     "Serial"                      bigserial
         primary key,
     "Date"                        date                     default CURRENT_DATE                            not null,
-    "SecurityCode"                varchar(24)              default ''::character varying                   not null,
     "TradingVolume"               numeric(18, 4)           default 0                                       not null,
     "Transaction"                 numeric(18, 4)           default 0                                       not null,
     "TradeValue"                  numeric(18, 4)           default 0                                       not null,
@@ -40,7 +39,6 @@ create table public."DailyQuotes"
 );
 
 comment on column public."DailyQuotes"."Date" is '資料屬於那一天(收盤日)';
-comment on column public."DailyQuotes"."SecurityCode" is '股票代碼';
 comment on column public."DailyQuotes"."TradingVolume" is '成交股數';
 comment on column public."DailyQuotes"."Transaction" is '成交筆數';
 comment on column public."DailyQuotes"."TradeValue" is '成交金額';
@@ -74,13 +72,7 @@ comment on column public."DailyQuotes".day is '資料屬於那日';
 comment on column public."DailyQuotes"."stock_symbol" is '股票代碼';
 
 create index "DailyQuotes_Date_idx"
-    on public."DailyQuotes" ("Date" desc) include ("Serial", "SecurityCode");
-
-create unique index "DailyQuotes_SecurityCode_Date_uidx"
-    on public."DailyQuotes" ("SecurityCode" asc, "Date" desc) include (year, "HighestPrice", "LowestPrice", "ClosingPrice", "price-to-book_ratio", "PriceEarningRatio");
-
-
-create index "DailyQuotes_Date_include_symbol_idx"
     on public."DailyQuotes" ("Date" desc) include ("Serial", "stock_symbol");
+
 create unique index "DailyQuotes_stock_symbol_Date_uidx"
     on public."DailyQuotes" ("stock_symbol" asc, "Date" desc) include (year, "HighestPrice", "LowestPrice", "ClosingPrice", "price-to-book_ratio", "PriceEarningRatio");

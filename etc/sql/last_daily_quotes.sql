@@ -30,7 +30,8 @@ create table public.last_daily_quotes
     minimum_price_in_year_date_on date                     default '1970-01-01'::date                      not null,
     "price-to-book_ratio"         numeric(18, 4)           default 0                                       not null,
     record_time                   timestamp with time zone default ('now'::text)::timestamp with time zone not null,
-    updated_time                  timestamp with time zone default ('now'::text)::timestamp with time zone not null
+    updated_time                  timestamp with time zone default ('now'::text)::timestamp with time zone not null,
+    stock_symbol                  varchar(24)              default ''::character varying                   not null
 );
 
 comment on column public.last_daily_quotes.date is '資料屬於那一天';
