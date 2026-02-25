@@ -104,6 +104,7 @@ pub const COPY_IN_QUERY: &str = r#"COPY "DailyQuotes"(
             "Transaction",
             "price-to-book_ratio",
             "stock_symbol",
+            "SecurityCode",
             year,
             month,
             day) FROM STDIN WITH (FORMAT CSV)"#;
@@ -192,7 +193,7 @@ impl DailyQuote {
     pub fn to_csv(&self) -> String {
         let mut csv_string = String::new();
 
-        let _ = writeln!(csv_string, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        let _ = writeln!(csv_string, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                          self.maximum_price_in_year_date_on,
                          self.minimum_price_in_year_date_on,
                          self.date,
@@ -222,6 +223,7 @@ impl DailyQuote {
                          self.trade_value,
                          self.transaction,
                          self.price_to_book_ratio,
+                         self.stock_symbol,
                          self.stock_symbol,
                          self.year,
                          self.month,
@@ -267,11 +269,12 @@ impl DailyQuote {
             "Transaction",
             "price-to-book_ratio",
             "stock_symbol",
+            "SecurityCode",
             year,
             month,
             day
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $30, $31, $32, $33)
         ON CONFLICT ("stock_symbol", "Date")
         DO UPDATE SET
             "RecordTime" = now(),
@@ -522,7 +525,7 @@ pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQuery
     let sql = format!(
         r#"
 INSERT INTO "DailyQuotes" (
-    "Date", "stock_symbol", "TradingVolume", "Transaction",
+    "Date", "stock_symbol", "SecurityCode", "TradingVolume", "Transaction",
     "TradeValue", "OpeningPrice", "HighestPrice", "LowestPrice",
     "ClosingPrice", "ChangeRange", "Change", "LastBestBidPrice",
     "LastBestBidVolume", "LastBestAskPrice", "LastBestAskVolume",
@@ -535,6 +538,7 @@ INSERT INTO "DailyQuotes" (
 )
 SELECT '{0}' as "Date",
     "stock_symbol",
+    "stock_symbol" as "SecurityCode",
     0 as "TradingVolume",
     0 as "Transaction",
     0 as "TradeValue",
