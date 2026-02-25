@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use reqwest::header::{self, HeaderValue};
 use rust_decimal::Decimal;
 use scraper::Html;
 
@@ -11,6 +12,35 @@ use crate::{
     declare,
     util::{self, text},
 };
+
+/// 建立 CMoney 個股頁面的請求標頭。
+///
+/// 透過補齊常見瀏覽器標頭（例如 `Accept`、`Accept-Language`、
+/// `Referer`），降低請求在連線層或防爬機制被拒絕的機率。
+fn build_stock_page_headers() -> header::HeaderMap {
+    let mut headers = header::HeaderMap::new();
+    headers.insert(
+        header::ACCEPT,
+        HeaderValue::from_static(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        ),
+    );
+    headers.insert(
+        header::ACCEPT_LANGUAGE,
+        HeaderValue::from_static("zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+    headers.insert(
+        header::REFERER,
+        HeaderValue::from_static("https://www.cmoney.tw/forum/stock"),
+    );
+    headers.insert(
+        header::UPGRADE_INSECURE_REQUESTS,
+        HeaderValue::from_static("1"),
+    );
+    headers
+}
 
 /// CMoney 即時報價抓取實作。
 ///
@@ -26,7 +56,7 @@ impl StockInfo for CMoney {
             host = HOST,
             symbol = stock_symbol
         );
-        let text = util::http::get(&url, None).await?;
+        let text = util::http::get(&url, Some(build_stock_page_headers())).await?;
         let document = Html::parse_document(&text);
         let target = util::http::element::GetOneElementText {
             stock_symbol,
@@ -48,7 +78,7 @@ impl StockInfo for CMoney {
             host = HOST,
             symbol = stock_symbol
         );
-        let text = util::http::get(url, None).await?;
+        let text = util::http::get(url, Some(build_stock_page_headers())).await?;
         let document = Html::parse_document(&text);
 
         let price = util::http::element::get_one_element(util::http::element::GetOneElementText {

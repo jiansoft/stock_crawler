@@ -68,8 +68,8 @@ fn get_client() -> Result<&'static Client> {
             .gzip(true)
             .zstd(true)
             // ===== 超時設置 =====
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(8))
+            .timeout(Duration::from_secs(15))
             // ===== TCP 優化 =====
             .tcp_nodelay(true)
             .tcp_keepalive(Duration::from_secs(60))
@@ -89,10 +89,6 @@ fn get_client() -> Result<&'static Client> {
             // ===== Headers =====
             .referer(true)
             .user_agent(user_agent::gen_random_ua())
-            // ===== DNS 優化 =====
-            .hickory_dns(true)
-            // ===== 其他 =====
-            .no_proxy()
             .build()
             .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
     })
@@ -267,6 +263,7 @@ pub async fn post(
         .map_err(|why| anyhow!("Error parsing response text: {:?}", why))
 }
 
+/// HTTP 請求失敗時的最大重試次數。
 const MAX_RETRIES: usize = 2;
 
 /// Sends an HTTP request using the specified method, URL, headers, and body with retries on failure.
@@ -282,7 +279,8 @@ const MAX_RETRIES: usize = 2;
 ///
 /// # Returns
 ///
-/// * `Result<Response>`: The HTTP response, or an error if all attempts to send the request fail. If all attempts fail, it returns an error indicating that the request failed after MAX_RETRIES attempts.
+/// * `Result<Response>`: The HTTP response, or an error if all attempts to send the request fail.
+///   If all attempts fail, the error message includes retry count and the last underlying request error.
 ///
 /// # Errors
 ///
@@ -307,6 +305,7 @@ async fn send(
     let visit_log = format!("{method}:{url}");
     let client = get_client()?;
     let mut rb = client.request(method, url);
+    let mut last_error = String::new();
 
     if let Some(h) = headers {
         rb = rb.headers(h);
@@ -338,6 +337,7 @@ async fn send(
                 return Ok(response);
             }
             Err(why) => {
+                last_error = format!("{:?}", why);
                 LOGGER.error(format!("{} failed because {:?}. {} ms", msg, why, elapsed));
                 if attempt < MAX_RETRIES {
                     tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32))).await;
@@ -349,9 +349,10 @@ async fn send(
     }
 
     Err(anyhow!(
-        "Failed to send request to {} after {} attempts",
+        "Failed to send request to {} after {} attempts; last error: {}",
         url,
-        MAX_RETRIES
+        MAX_RETRIES,
+        last_error
     ))
 }
 
