@@ -1,35 +1,50 @@
-#! /bin/bash
+#!/bin/bash
 
-export built_path=./target/release
-export app_path=./bin
-export binary_name=stock_crawler
+# ==============================================================================
+# Stock Crawler Control Script
+# 支援本機與 Docker 部署模式
+# ==============================================================================
+
+# 遇到錯誤立即停止執行
+set -e
+
+export built_path="./target/release"
+export app_path="./bin"
+export binary_name="stock_crawler"
+
+# 日誌函式
+log() {
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+}
 
 function start() {
-  # pid=$(pgrep $binary_name)
-  pid=$(pidof $binary_name)
-  # echo "$binary_name pid  = $pid"
+  # 使用 || true 避免 pidof 在找不到進程時導致 set -e 退出腳本
+  pid=$(pidof "$binary_name" || true)
 
-  if [ "$pid" == "" ]; then
-    cd $app_path || exit
-    ./$binary_name > nohup.out 2>&1 &
-    echo "$app_path/$binary_name start"
+  if [ -z "$pid" ]; then
+    mkdir -p "$app_path"
+    cd "$app_path"
+    nohup ./"$binary_name" > nohup.out 2>&1 &
+    log "$binary_name 啟動成功"
   else
-    echo "$app_path/$binary_name is running already"
+    log "$binary_name 已經在運行中 (PID: $pid)"
   fi
 }
 
 function stop() {
+  # 備份日誌
   if [ -f "$app_path/nohup.out" ]; then
-    mv "$app_path/nohup.out" $app_path/log_backup/nohup.out."$(date "+%Y%m%d-%H%M%S")"
+    mkdir -p "$app_path/log_backup"
+    mv "$app_path/nohup.out" "$app_path/log_backup/nohup.out.$(date "+%Y%m%d-%H%M%S")"
   fi
 
-  pid=$(pidof $binary_name)
+  pid=$(pidof "$binary_name" || true)
 
-  if [ "$pid" != "" ]; then
+  if [ -n "$pid" ]; then
     kill -SIGTERM "$pid"
-    echo "$app_path/$binary_name  stop"
+    log "$binary_name 已停止"
   else
-    echo "pid of $app_path/$binary_name is empty"
+    log "找不到運行中的 $binary_name"
   fi
 }
 
@@ -50,38 +65,54 @@ function restart() {
 }
 
 function build() {
+  log "開始編譯 Release 版本..."
   cargo update
   cargo build --release
-  echo "success building"
+  log "編譯成功"
 }
 
 function move() {
   if [ -f "$built_path/$binary_name" ]; then
+    mkdir -p "$app_path"
     backup_name="$binary_name.$(date "+%Y%m%d-%H%M%S")"
-    mv "$app_path/$binary_name" "$app_path/$backup_name"
+    
+    # 如果舊檔案存在則備份
+    if [ -f "$app_path/$binary_name" ]; then
+      mv "$app_path/$binary_name" "$app_path/$backup_name"
+      chmod -x "$app_path/$backup_name"
+    fi
+
     mv "$built_path/$binary_name" "$app_path/$binary_name"
-    chmod -x "$app_path/$backup_name"
     chmod +x "$app_path/$binary_name"
-    echo "moving the file from $built_path/$binary_name to $app_path/$binary_name is success"
+    log "檔案部署成功: $app_path/$binary_name"
   else
-    echo "file $built_path/$binary_name does not exists."
+    log "錯誤: 找不到編譯後的檔案 $built_path/$binary_name"
+    exit 1
   fi
 }
 
+# --- Docker 相關指令 ---
+
 function docker_build() {
-#  build
-#  sleep 1
+  log "開始建立 Docker 映像檔..."
   docker build -t stock-rust-image -f Dockerfile_live .
+  log "清理過期的 Docker 資源..."
   docker system prune -f
 }
 
 function docker_stop() {
-  docker stop stock-rust-container && docker rm -f stock-rust-container
-  docker ps
+  log "停止並移除 Docker 容器..."
+  # -f 會強制停止運行中的容器並移除，且不會因為容器不存在而報錯退出
+  docker rm -f stock-rust-container 2>/dev/null || true
+  docker ps -a | grep stock-rust-container || true
 }
 
 function docker_start() {
-  docker run --name stock-rust-container -v=/opt/stock_crawler/log:/app/log:rw -v=/opt/nginx/ssl/jiansoft.mooo.com:/opt/nginx/ssl/jiansoft.mooo.com -p 9001:9001 -t -d stock-rust-image
+  log "啟動 Docker 容器..."
+  docker run --name stock-rust-container \
+    -v=/opt/stock_crawler/log:/app/log:rw \
+    -v=/opt/nginx/ssl/jiansoft.mooo.com:/opt/nginx/ssl/jiansoft.mooo.com \
+    -p 9001:9001 -t -d stock-rust-image
   docker ps
 }
 
@@ -91,28 +122,42 @@ function docker_restart() {
   docker_start
 }
 
-function help() {
-  echo "$0 start|stop|restart|update|move|docker_build|docker_stop|docker_start|docker_restart"
+function docker_update() {
+  # 只有在 build 成功時才執行 restart
+  docker_build
+  docker_restart
 }
 
-if [ "$1" == "start" ]; then
-  start
-elif [ "$1" == "stop" ]; then
-  stop
-elif [ "$1" == "restart" ]; then
-  restart
-elif [ "$1" == "update" ]; then
-  update
-elif [ "$1" == "move" ]; then
-  move
-elif [ "$1" == "docker_build" ]; then
-  docker_build
-elif [ "$1" == "docker_stop" ]; then
-  docker_stop
-elif [ "$1" == "docker_start" ]; then
-  docker_start
-elif [ "$1" == "docker_restart" ]; then
-  docker_restart
-else
-  help
-fi
+function help() {
+  echo "使用方法: $0 {指令}"
+  echo "可用指令:"
+  echo "  [本機模式]"
+  echo "    start          - 啟動服務"
+  echo "    stop           - 停止服務"
+  echo "    restart        - 重啟服務"
+  echo "    build          - 編譯專案"
+  echo "    move           - 部署編譯後的檔案"
+  echo "    update         - 完整更新 (build + stop + move + start)"
+  echo ""
+  echo "  [Docker 模式]"
+  echo "    docker_start   - 啟動容器"
+  echo "    docker_stop    - 停止並移除容器"
+  echo "    docker_restart - 重啟容器"
+  echo "    docker_build   - 建立映像檔"
+  echo "    docker_update  - 完整更新映像檔並重啟容器"
+}
+
+# --- 參數解析 ---
+
+case "$1" in
+  start|stop|restart|update|move|build|docker_build|docker_stop|docker_start|docker_restart|docker_update)
+    "$1"
+    ;;
+  help|--help|-h)
+    help
+    ;;
+  *)
+    help
+    exit 1
+    ;;
+esac
