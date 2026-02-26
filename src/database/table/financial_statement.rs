@@ -436,7 +436,7 @@ pub async fn fetch_cumulative_eps(
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
 impl From<yahoo::profile::Profile> for FinancialStatement {
     fn from(fs: yahoo::profile::Profile) -> Self {
-        let mut e = FinancialStatement::new(fs.security_code);
+        let mut e = FinancialStatement::new(fs.stock_symbol);
         e.updated_time = Local::now();
         e.created_time = Local::now();
         e.quarter = fs.quarter;
