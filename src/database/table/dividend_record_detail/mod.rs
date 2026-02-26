@@ -10,6 +10,7 @@ pub(crate) mod extension;
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Copy)]
 /// 持股股息發放記錄表 原表名 dividend_record_detail
 pub struct DividendRecordDetail {
+    /// 主鍵序號。
     pub serial: i64,
     /// 庫存編號
     pub stock_ownership_details_serial: i64,
@@ -23,11 +24,14 @@ pub struct DividendRecordDetail {
     pub stock_money: Decimal,
     /// 合計股利(元)
     pub total: Decimal,
+    /// 建立時間。
     pub created_time: DateTime<Local>,
+    /// 最後更新時間。
     pub updated_time: DateTime<Local>,
 }
 
 impl DividendRecordDetail {
+    /// 建立一筆持股年度股利總計資料。
     pub fn new(
         stock_ownership_details_serial: i64,
         year: i32,

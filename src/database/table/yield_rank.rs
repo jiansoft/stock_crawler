@@ -4,16 +4,26 @@ use sqlx::postgres::PgQueryResult;
 
 use crate::database;
 
+/// 殖利率排行資料列。
 #[derive(sqlx::FromRow, Debug, Default)]
 pub struct YieldRank {
+    /// 股票代號。
     pub security_code: String,
+    /// 對應 `DailyQuotes.Serial`。
     pub daily_quotes_serial: i64,
+    /// 使用的年度股利總和。
     pub dividend: f64,
+    /// 計算殖利率時的收盤價。
     pub closing_price: f64,
+    /// 殖利率（百分比）。
     pub r#yield: f64,
 }
 
 impl YieldRank {
+    /// 依指定日期重建殖利率排行資料。
+    ///
+    /// # Errors
+    /// 當 transaction 或 SQL 執行失敗時回傳錯誤。
     pub async fn upsert(date: NaiveDate) -> Result<PgQueryResult> {
         let mut tx = database::get_tx()
             .await

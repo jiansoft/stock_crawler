@@ -10,11 +10,17 @@ pub(crate) mod extension;
 /// 每日市值變化歷史記錄
 #[derive(sqlx::FromRow, Debug)]
 pub struct DailyMoneyHistory {
+    /// 交易日期。
     pub date: NaiveDate,
+    /// 建立時間。
     pub created_at: DateTime<Local>,
+    /// 最後更新時間。
     pub updated_at: DateTime<Local>,
+    /// Unice 帳戶市值總額。
     pub unice: Decimal,
+    /// Eddie 帳戶市值總額。
     pub eddie: Decimal,
+    /// 全帳戶市值總額。
     pub sum: Decimal,
 }
 
@@ -32,6 +38,14 @@ impl DailyMoneyHistory {
                 ))
         }
     */
+    /// 依指定日期重算並寫入每日市值總覽。
+    ///
+    /// 會彙總 `stock_ownership_details` 與當日 `DailyQuotes` 的收盤價，
+    /// 寫入 `sum`、`eddie`（`member_id = 1`）與 `unice`（其餘 member）。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤；若呼叫端傳入 transaction，
+    /// 是否回滾由呼叫端決定。
     pub async fn upsert(
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,

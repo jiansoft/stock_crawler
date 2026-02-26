@@ -4,14 +4,19 @@ use sqlx::{postgres::PgRow, QueryBuilder, Row};
 
 use crate::{database, util::map::Keyable};
 
+/// 追蹤股票價格區間設定。
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Trace {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 追蹤下限價。
     pub floor: Decimal,
+    /// 追蹤上限價。
     pub ceiling: Decimal,
 }
 
 impl Trace {
+    /// 建立一筆追蹤區間設定。
     pub fn new(stock_symbol: String, floor: Decimal, ceiling: Decimal) -> Self {
         Trace {
             stock_symbol,

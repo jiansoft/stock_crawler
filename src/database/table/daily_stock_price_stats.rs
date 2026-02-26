@@ -5,32 +5,69 @@ use sqlx::{postgres::PgQueryResult, FromRow, Postgres, Transaction, Type};
 
 use crate::database;
 
+/// 每日全市場估值與技術面分布統計。
+///
+/// 同一天通常會有多筆資料：
+/// - `stock_exchange_market_id = 0`：全部市場合併統計
+/// - 其他 id：各市場分項統計（例如 TWSE、TPEx）
 #[derive(Debug, Serialize, Deserialize, Type, FromRow)]
 pub struct DailyStockPriceStats {
-    pub date: NaiveDate,                   // 統計日期
-    pub stock_exchange_market_id: i32,     // 市場類型 (TWSE: 2, TPEx: 4, ALL: 0)
-    pub undervalued: i32,                  // 股價 <= 便宜價的股票數量
-    pub fair_valued: i32,                  // 便宜價 < 股價 <= 合理價的股票數量
-    pub overvalued: i32,                   // 合理價 < 股價 <= 昂貴價的股票數量
-    pub highly_overvalued: i32,            // 股價 > 昂貴價的股票數量
-    pub below_5_day_moving_average: i32,   // 股價 < 月線的股票數量
-    pub above_5_day_moving_average: i32,   // 股價 >= 月線的股票數量
-    pub below_20_day_moving_average: i32,  // 股價 < 月線的股票數量
-    pub above_20_day_moving_average: i32,  // 股價 >= 月線的股票數量
-    pub below_60_day_moving_average: i32,  // 股價 < 季線的股票數量
-    pub above_60_day_moving_average: i32,  // 股價 >= 季線的股票數量
-    pub below_120_day_moving_average: i32, // 股價 < 半年線的股票數量
-    pub above_120_day_moving_average: i32, // 股價 >= 半年線的股票數量
-    pub below_240_day_moving_average: i32, // 股價 < 年線的股票數量
-    pub above_240_day_moving_average: i32, // 股價 >= 年線的股票數量
-    pub stocks_up: i32,                    // 上漲的股票數量
-    pub stocks_down: i32,                  // 下跌的股票數量
-    pub stocks_unchanged: i32,             // 持平的股票數量
-    pub created_at: DateTime<Local>,       // 記錄創建時間
-    pub updated_at: DateTime<Local>,       // 記錄最後更新時間
+    /// 統計日期。
+    pub date: NaiveDate,
+    /// 市場類型（TWSE: 2、TPEx: 4、全部市場: 0）。
+    pub stock_exchange_market_id: i32,
+    /// 股價 <= 便宜價的股票數量。
+    pub undervalued: i32,
+    /// 便宜價 < 股價 <= 合理價的股票數量。
+    pub fair_valued: i32,
+    /// 合理價 < 股價 <= 昂貴價的股票數量。
+    pub overvalued: i32,
+    /// 股價 > 昂貴價的股票數量。
+    pub highly_overvalued: i32,
+    /// 股價 <= 5 日均線的股票數量。
+    pub below_5_day_moving_average: i32,
+    /// 股價 > 5 日均線的股票數量。
+    pub above_5_day_moving_average: i32,
+    /// 股價 <= 20 日均線的股票數量。
+    pub below_20_day_moving_average: i32,
+    /// 股價 > 20 日均線的股票數量。
+    pub above_20_day_moving_average: i32,
+    /// 股價 <= 60 日均線的股票數量。
+    pub below_60_day_moving_average: i32,
+    /// 股價 > 60 日均線的股票數量。
+    pub above_60_day_moving_average: i32,
+    /// 股價 <= 120 日均線的股票數量。
+    pub below_120_day_moving_average: i32,
+    /// 股價 > 120 日均線的股票數量。
+    pub above_120_day_moving_average: i32,
+    /// 股價 <= 240 日均線的股票數量。
+    pub below_240_day_moving_average: i32,
+    /// 股價 > 240 日均線的股票數量。
+    pub above_240_day_moving_average: i32,
+    /// 當日上漲家數。
+    pub stocks_up: i32,
+    /// 當日下跌家數。
+    pub stocks_down: i32,
+    /// 當日平盤家數。
+    pub stocks_unchanged: i32,
+    /// 建立時間。
+    pub created_at: DateTime<Local>,
+    /// 最後更新時間。
+    pub updated_at: DateTime<Local>,
 }
 
 impl DailyStockPriceStats {
+    /// 產生或更新指定日期的股價統計資料。
+    ///
+    /// 此方法會從 `stocks`、`estimate`、`DailyQuotes` 彙整當日數據，
+    /// 計算估值分布（便宜/合理/昂貴/昂貴以上）、
+    /// 均線相對位置（5/20/60/120/240 日）與漲跌家數，
+    /// 並同時寫入「全部市場」與「分市場」兩種統計列
+    ///（透過 `GROUPING SETS` 產生 `stock_exchange_market_id = 0` 與各市場 id）。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
+    /// 是否回滾由呼叫端控制。
     pub async fn upsert(
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,

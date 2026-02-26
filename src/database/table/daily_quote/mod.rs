@@ -21,16 +21,23 @@ pub(crate) mod extension;
 /// 目前同時保留 `security_code` 與 `stock_symbol`，
 /// 以兼容舊資料欄位與新欄位。
 pub struct DailyQuote {
+    /// 年內最高價對應日期。
     pub maximum_price_in_year_date_on: NaiveDate,
+    /// 年內最低價對應日期。
     pub minimum_price_in_year_date_on: NaiveDate,
+    /// 交易日期。
     pub date: NaiveDate,
+    /// 建立時間。
     pub create_time: DateTime<Local>,
+    /// 最後更新時間（資料寫入時間）。
     pub record_time: DateTime<Local>,
     /// 本益比
     pub price_earning_ratio: Decimal,
+    /// 60 日均線。
     pub moving_average_60: Decimal,
     /// 收盤價
     pub closing_price: Decimal,
+    /// 漲跌幅（百分比）。
     pub change_range: Decimal,
     /// 漲跌價差
     pub change: Decimal,
@@ -42,15 +49,23 @@ pub struct DailyQuote {
     pub last_best_ask_price: Decimal,
     /// 最後揭示賣量
     pub last_best_ask_volume: Decimal,
+    /// 5 日均線。
     pub moving_average_5: Decimal,
+    /// 10 日均線。
     pub moving_average_10: Decimal,
+    /// 20 日均線。
     pub moving_average_20: Decimal,
     /// 最低價
     pub lowest_price: Decimal,
+    /// 120 日均線。
     pub moving_average_120: Decimal,
+    /// 240 日均線。
     pub moving_average_240: Decimal,
+    /// 年內最高價。
     pub maximum_price_in_year: Decimal,
+    /// 年內最低價。
     pub minimum_price_in_year: Decimal,
+    /// 年內平均收盤價。
     pub average_price_in_year: Decimal,
     /// 最高價
     pub highest_price: Decimal,
@@ -66,9 +81,13 @@ pub struct DailyQuote {
     pub price_to_book_ratio: Decimal,
     /// 股票代碼
     pub stock_symbol: String,
+    /// 主鍵序號。
     pub serial: i64,
+    /// 日期年份（冗餘欄位，利於查詢）。
     pub year: i32,
+    /// 日期月份（冗餘欄位，利於查詢）。
     pub month: i32,
+    /// 日期日（冗餘欄位，利於查詢）。
     pub day: i32,
 }
 

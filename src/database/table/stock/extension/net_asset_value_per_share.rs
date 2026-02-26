@@ -7,8 +7,9 @@ use crate::database::{self, table::stock};
 /// 更新股票的每股淨值
 #[derive(FromRow, Debug)]
 pub struct SymbolAndNetAssetValuePerShare {
+    /// 股票代號。
     pub stock_symbol: String,
-    //每股淨值
+    /// 每股淨值。
     pub net_asset_value_per_share: Decimal,
 }
 
@@ -24,6 +25,7 @@ impl From<&stock::Stock> for SymbolAndNetAssetValuePerShare {
 
 /// 股號和每股淨值
 impl SymbolAndNetAssetValuePerShare {
+    /// 建立「股票代號 + 每股淨值」資料。
     pub fn new(stock_symbol: String, net_asset_value_per_share: Decimal) -> Self {
         SymbolAndNetAssetValuePerShare {
             stock_symbol,

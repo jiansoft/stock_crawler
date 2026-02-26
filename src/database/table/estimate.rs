@@ -4,35 +4,62 @@ use sqlx::postgres::PgQueryResult;
 
 use crate::database;
 
+/// 個股估值資料。
+///
+/// 彙整價格區間、股利法、EPS 法、PBR 法與 PER 法等估值結果，
+/// 供排名與市場統計使用。
 #[derive(sqlx::FromRow, Debug, Default)]
 pub struct Estimate {
+    /// 估值日期。
     pub date: NaiveDate,
-    // 使用 chrono 庫來處理日期和時間
+    /// 參考的最後一筆日報價日期（字串格式）。
     pub last_daily_quote_date: String,
+    /// 股票代號。
     pub security_code: String,
+    /// 股票名稱。
     pub name: String,
+    /// 當日收盤價。
     pub closing_price: f64,
+    /// 估值百分比（收盤價相對便宜價）。
     pub percentage: f64,
+    /// 加權便宜價。
     pub cheap: f64,
+    /// 加權合理價。
     pub fair: f64,
+    /// 加權昂貴價。
     pub expensive: f64,
+    /// 價格法便宜價。
     pub price_cheap: f64,
+    /// 價格法合理價。
     pub price_fair: f64,
+    /// 價格法昂貴價。
     pub price_expensive: f64,
+    /// 股利法便宜價。
     pub dividend_cheap: f64,
+    /// 股利法合理價。
     pub dividend_fair: f64,
+    /// 股利法昂貴價。
     pub dividend_expensive: f64,
+    /// EPS 法便宜價。
     pub eps_cheap: f64,
+    /// EPS 法合理價。
     pub eps_fair: f64,
+    /// EPS 法昂貴價。
     pub eps_expensive: f64,
+    /// PBR 法便宜價。
     pub pbr_cheap: f64,
+    /// PBR 法合理價。
     pub pbr_fair: f64,
+    /// PBR 法昂貴價。
     pub pbr_expensive: f64,
+    /// 參與統計的年度數。
     pub year_count: i32,
+    /// 內部排序或索引欄位。
     pub index: i32,
 }
 
 impl Estimate {
+    /// 建立單一股票指定日期的估值模型預設值。
     pub fn new(security_code: String, date: NaiveDate) -> Self {
         Estimate {
             date,
@@ -61,6 +88,12 @@ impl Estimate {
         }
     }
 
+    /// 依指定日期與年份清單，批次重建所有股票估值資料。
+    ///
+    /// `years` 格式為逗號分隔字串，例如 `\"2026,2025,2024\"`。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert_all(date: NaiveDate, years: String) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO estimate (
@@ -208,6 +241,10 @@ ON CONFLICT (date, security_code) DO UPDATE SET
     }
 
 
+    /// 只重算單一股票的估值資料。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert(&self, years: String) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO estimate (

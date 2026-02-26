@@ -5,16 +5,19 @@ use sqlx::postgres::PgQueryResult;
 
 use crate::database;
 
-#[derive(sqlx::FromRow, Debug)]
 /// 最後交易日股票報價數據
+#[derive(sqlx::FromRow, Debug)]
 pub struct LastDailyQuotes {
+    /// 報價日期。
     pub date: NaiveDate,
     /// 收盤價
     pub closing_price: Decimal,
+    /// 股票代號。
     pub stock_symbol: String,
 }
 
 impl LastDailyQuotes {
+    /// 建立 `LastDailyQuotes` 預設值。
     pub fn new() -> Self {
         LastDailyQuotes {
             date: Default::default(),
@@ -37,6 +40,10 @@ FROM
         .await?)
     }
 
+    /// 以近 30 天內每檔股票最新一筆 `DailyQuotes` 重建 `last_daily_quotes`。
+    ///
+    /// # Errors
+    /// 當 transaction 或 SQL 執行失敗時回傳錯誤。
     pub async fn rebuild() -> Result<PgQueryResult> {
         let mut tx = database::get_tx()
             .await

@@ -8,13 +8,21 @@ use crate::database;
 /// 股票除息的資料
 #[derive(FromRow, Debug)]
 pub struct StockDividendInfo {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 股票名稱。
     pub name: String,
+    /// 現金股利（元）。
     pub cash_dividend: Decimal,
+    /// 股票股利（股）。
     pub stock_dividend: Decimal,
+    /// 股利合計（元）。
     pub sum: Decimal,
+    /// 參考收盤價。
     pub closing_price: Decimal,
+    /// 總殖利率（%）。
     pub dividend_yield: Decimal,
+    /// 現金殖利率（%）。
     pub cash_dividend_yield: Decimal,
 }
 
@@ -43,7 +51,7 @@ FROM
 INNER JOIN
       stocks AS s ON s.stock_symbol = d.security_code
 LEFT JOIN 
-last_daily_quotes AS ldq on d.security_code = ldq.security_code      
+last_daily_quotes AS ldq on s.stock_symbol = ldq.stock_symbol      
 WHERE
     d."year" = $1
     AND (d."ex-dividend_date1" = $2 OR d."ex-dividend_date2" = $2);

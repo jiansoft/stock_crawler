@@ -11,14 +11,26 @@ pub mod table;
 
 static POSTGRES: Lazy<Arc<OnceLock<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 
+/// PostgreSQL 連線池封裝。
+///
+/// 負責建立連線池並提供 transaction 入口，供 `database::table::*` 共享使用。
 pub struct PostgresSQL {
+    /// SQLx PostgreSQL 連線池實例。
     pub pool: PgPool,
 }
 
+/// 提供 `COPY ... FROM STDIN` 所需的 CSV 序列化能力。
 pub(super) trait CopyIn: Send {
+    /// 將資料列轉成 PostgreSQL `COPY` 可接受的單行 CSV。
     fn to_csv(&self) -> String;
 }
 
+/// 以 PostgreSQL `COPY FROM STDIN` 批次寫入資料。
+///
+/// `items` 會先透過 [`CopyIn::to_csv`] 串接成一段 CSV，再一次送到資料庫。
+///
+/// # Errors
+/// 當取得連線、建立 copy writer、傳送資料或結束 copy 流程失敗時回傳錯誤。
 pub(super) async fn copy_in_raw(copy_in_query: &str, items: &[impl CopyIn]) -> Result<u64> {
     let data: String = items.iter().map(CopyIn::to_csv).collect();
     let data_as_bytes = data.as_bytes();
@@ -31,6 +43,9 @@ pub(super) async fn copy_in_raw(copy_in_query: &str, items: &[impl CopyIn]) -> R
 }
 
 impl PostgresSQL {
+    /// 建立 PostgreSQL 連線池。
+    ///
+    /// 連線參數來自 `config::SETTINGS.postgresql`，並套用本專案的連線數與 timeout 設定。
     pub fn new() -> PostgresSQL {
         let database_url = format!(
             "postgres://{}:{}@{}:{}/{}?application_name=stock_crawler_rust",
@@ -52,10 +67,15 @@ impl PostgresSQL {
         Self { pool: db }
     }
 
+    /// 取得連線池參考。
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 
+    /// 從目前連線池建立一筆 transaction。
+    ///
+    /// # Errors
+    /// 當 `BEGIN` 失敗時回傳錯誤。
     pub async fn tx(&self) -> Result<Transaction<'_, Postgres>> {
         Ok(self.pool().begin().await?)
     }
@@ -71,10 +91,15 @@ fn get_postgresql() -> &'static PostgresSQL {
     POSTGRES.get_or_init(PostgresSQL::new)
 }
 
+/// 取得全域 PostgreSQL 連線池。
 pub fn get_connection() -> &'static PgPool {
     get_postgresql().pool()
 }
 
+/// 從全域 PostgreSQL 連線池建立 transaction。
+///
+/// # Errors
+/// 當無法成功建立 transaction 時回傳錯誤。
 pub async fn get_tx() -> Result<Transaction<'static, Postgres>> {
     get_postgresql().tx().await
 }

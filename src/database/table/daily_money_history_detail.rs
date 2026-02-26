@@ -4,29 +4,59 @@ use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 use crate::database;
 
+/// 每日市值明細（持股層級）資料列。
+///
+/// 一筆資料代表特定 `date`、`member_id`、`security_code` 的聚合結果，
+/// 包含持股數、成本、市值、損益與前一交易日比較欄位。
 #[derive(sqlx::FromRow, Default, Debug)]
 pub struct DailyMoneyHistoryDetail {
+    /// 交易日期。
     pub date: NaiveDate,
+    /// 建立時間。
     pub created_time: DateTime<Local>,
+    /// 最後更新時間。
     pub updated_time: DateTime<Local>,
+    /// 股票代號。
     pub security_code: String,
+    /// 持有股數（同股票同 member 聚合後）。
     pub total_shares: i64,
+    /// 主鍵序號。
     pub serial: i64,
+    /// 前一交易日市值。
     pub previous_day_market_value: f64,
+    /// 每股平均成本。
     pub average_unit_price_per_share: f64,
+    /// 佔該 member 當日總市值比例（百分比）。
     pub ratio: f64,
+    /// 與前一交易日相比的損益變化金額。
     pub previous_day_profit_and_loss: f64,
+    /// 當日市值。
     pub market_value: f64,
+    /// 累計成本（含符號約定）。
     pub cost: f64,
+    /// 估算交易稅（市值 * 0.003）。
     pub transfer_tax: f64,
+    /// 當日損益金額。
     pub profit_and_loss: f64,
+    /// 當日損益百分比。
     pub profit_and_loss_percentage: f64,
+    /// 相對前一交易日的損益百分比。
     pub previous_day_profit_and_loss_percentage: f64,
+    /// 當日收盤價。
     pub closing_price: f64,
+    /// 會員識別碼（0 代表全體聚合）。
     pub member_id: i32,
 }
 
 impl DailyMoneyHistoryDetail {
+    /// 刪除指定日期的 `daily_money_history_detail` 全部資料。
+    ///
+    /// 主要用於重建流程的前置清理步驟，通常會與同日期的 `upsert` 搭配使用，
+    /// 以避免舊資料殘留造成重複或不一致。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
+    /// 錯誤會由呼叫端決定是否回滾。
     pub async fn delete(
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,
@@ -44,6 +74,17 @@ impl DailyMoneyHistoryDetail {
         ))
     }
 
+    /// 重建指定日期的持股層級市值明細。
+    ///
+    /// 此流程會：
+    /// 1. 聚合未賣出庫存（個人與全局）  
+    /// 2. 取當日與前一日收盤價  
+    /// 3. 計算市值、成本、占比、損益與前日對照欄位  
+    /// 4. 以 `(date, security_code, member_id)` 做 upsert
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
+    /// 是否回滾由呼叫端控制。
     pub async fn upsert(
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,

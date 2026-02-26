@@ -7,8 +7,9 @@ use crate::{crawler::taifex::stock_weight::StockWeight, database};
 /// 更新股票的權重
 #[derive(FromRow, Debug, Clone)]
 pub struct SymbolAndWeight {
+    /// 股票代號。
     pub stock_symbol: String,
-    //權植佔比
+    /// 權值占比。
     pub weight: Decimal,
 }
 
@@ -20,11 +21,13 @@ impl From<StockWeight> for SymbolAndWeight {
 }
 
 // 新增一個方法來將 StockWeight 轉換成 SymbolAndWeight
+/// 批次將 `StockWeight` 轉為 `SymbolAndWeight`。
 pub fn from(weights: Vec<StockWeight>) -> Vec<SymbolAndWeight> {
     weights.into_iter().map(SymbolAndWeight::from).collect()
 }
 
 impl SymbolAndWeight {
+    /// 建立「股票代號 + 權重」資料。
     pub fn new(stock_symbol: String, weight: Decimal) -> Self {
         SymbolAndWeight {
             stock_symbol,

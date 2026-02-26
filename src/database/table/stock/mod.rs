@@ -18,14 +18,19 @@ pub(crate) mod extension;
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 stocks
 pub struct Stock {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 股票名稱。
     pub name: String,
+    /// 是否下市或停止交易。
     pub suspend_listing: bool,
+    /// 每股淨值。
     pub net_asset_value_per_share: Decimal,
-    // 權植佔比
+    /// 權值占比。
     pub weight: Decimal,
-    // 股東權益報酬率
+    /// 股東權益報酬率（ROE）。
     pub return_on_equity: Decimal,
+    /// 建立時間。
     pub create_time: DateTime<Local>,
     /// 交易所的市場編號參考 StockExchangeMarket
     pub stock_exchange_market_id: i32,
@@ -40,6 +45,7 @@ pub struct Stock {
 }
 
 impl Stock {
+    /// 建立 `Stock` 預設值。
     pub fn new() -> Self {
         Stock {
             stock_symbol: "".to_string(),

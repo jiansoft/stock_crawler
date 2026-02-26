@@ -5,25 +5,51 @@ use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 use crate::database;
 
+/// 每日市值明細（交易批次層級）資料列。
+///
+/// 與 [`crate::database::table::daily_money_history_detail::DailyMoneyHistoryDetail`] 不同，
+/// 這張表保留每筆持股來源（交易日期）維度，方便追蹤批次成本與損益。
 #[derive(Debug, sqlx::FromRow)]
 pub struct DailyMoneyHistoryDetailMore {
+    /// 主鍵序號。
     pub serial: i64,
+    /// 會員識別碼（0 代表全體聚合）。
     pub member_id: i64,
+    /// 統計日期。
     pub date: NaiveDate,
+    /// 原始買入/建立交易日期。
     pub transaction_date: NaiveDate,
+    /// 股票代號。
     pub security_code: String,
+    /// 當日收盤價。
     pub closing_price: Decimal,
+    /// 此批次持有股數。
     pub number_of_shares_held: i64,
+    /// 此批次每股成本。
     pub unit_price_per_share: Decimal,
+    /// 此批次總成本。
     pub cost: Decimal,
+    /// 此批次當日市值。
     pub market_value: Decimal,
+    /// 此批次當日損益金額。
     pub profit_and_loss: Decimal,
+    /// 此批次當日損益百分比。
     pub profit_and_loss_percentage: Decimal,
+    /// 建立時間。
     pub created_time: chrono::DateTime<chrono::Local>,
+    /// 最後更新時間。
     pub updated_time: chrono::DateTime<chrono::Local>,
 }
 
 impl DailyMoneyHistoryDetailMore {
+    /// 刪除指定日期的 `daily_money_history_detail_more` 全部資料。
+    ///
+    /// 此方法通常作為重建流程的前置步驟，先清除同日舊資料，
+    /// 再由 [`Self::upsert`] 重新寫入最新結果。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
+    /// 是否回滾由呼叫端控制。
     pub async fn delete(
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,
@@ -41,6 +67,15 @@ impl DailyMoneyHistoryDetailMore {
         ))
     }
 
+    /// 重建指定日期的 `daily_money_history_detail_more` 明細資料。
+    ///
+    /// 這個方法會以未賣出的 `stock_ownership_details` 為基礎，
+    /// 搭配當日 `daily_money_history_detail` 的收盤價計算每筆交易批次的
+    /// 市值、損益與損益百分比，並同時產生 member 與全局 (`member_id = 0`) 的資料列。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
+    /// 是否回滾由呼叫端控制。
     pub async fn upsert(
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,

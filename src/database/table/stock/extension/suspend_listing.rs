@@ -6,7 +6,9 @@ use crate::database::{self, table::stock};
 /// 更新股票的下市狀態
 #[derive(FromRow, Debug)]
 pub struct SymbolAndSuspendListing {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 是否下市。
     pub suspend_listing: bool,
 }
 
@@ -19,6 +21,7 @@ impl From<&stock::Stock> for SymbolAndSuspendListing {
 
 /// 股號和每股淨值
 impl SymbolAndSuspendListing {
+    /// 建立「股票代號 + 下市狀態」資料。
     pub fn new(stock_symbol: String, suspend_listing: bool) -> Self {
         SymbolAndSuspendListing {
             stock_symbol,

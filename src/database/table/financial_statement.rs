@@ -22,6 +22,7 @@ pub struct FinancialStatement {
     created_time: DateTime<Local>,
     /// 季度 Q4 Q3 Q2 Q1
     pub quarter: String,
+    /// 股票代號。
     pub security_code: String,
     /// 營業毛利率
     pub gross_profit: Decimal,
@@ -59,6 +60,7 @@ impl Keyable for FinancialStatement {
 }
 
 impl FinancialStatement {
+    /// 建立指定股票代號的財報模型預設值。
     pub fn new(security_code: String) -> Self {
         FinancialStatement {
             updated_time: Default::default(),
@@ -80,6 +82,10 @@ impl FinancialStatement {
         }
     }
 
+    /// 新增或更新單筆財報資料（以 `security_code + year + quarter` 為鍵）。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert(self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO financial_statement (
@@ -129,6 +135,12 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
             })
     }
 
+    /// 僅新增或更新每股盈餘欄位。
+    ///
+    /// 適合只抓到 EPS 的資料來源，避免覆寫其他欄位。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert_earnings_per_share(&self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO financial_statement (
@@ -158,6 +170,10 @@ DO UPDATE SET
             })
     }
 
+    /// 補寫年度匯總 EPS（`quarter = ''`）。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert_annual_eps(&self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO financial_statement (
@@ -186,6 +202,10 @@ ON CONFLICT (security_code,"year",quarter) DO NOTHING;
             })
     }
 
+    /// 更新既有財報列的 ROE 與 ROA。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn update_roe_roa(&self) -> Result<PgQueryResult> {
         let sql = r#"
 UPDATE
@@ -404,6 +424,10 @@ ORDER BY
         })
 }
 
+/// 取得指定年度、指定季別集合的 EPS 累計。
+///
+/// # Errors
+/// 當查詢失敗時回傳錯誤。
 pub async fn fetch_cumulative_eps(
     security_code: &str,
     year: i32,

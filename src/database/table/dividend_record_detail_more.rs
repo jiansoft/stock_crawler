@@ -8,6 +8,7 @@ use crate::database;
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 持股股息發放記錄表 原表名 dividend_record_detail_more
 pub struct DividendRecordDetailMore {
+    /// 主鍵序號。
     pub serial: i64,
     /// 持股名細表的編號
     pub stock_ownership_details_serial: i64,
@@ -23,11 +24,14 @@ pub struct DividendRecordDetailMore {
     pub stock_money: Decimal,
     /// 合計股利(元)
     pub total: Decimal,
+    /// 建立時間。
     pub created_time: DateTime<Local>,
+    /// 最後更新時間。
     pub updated_time: DateTime<Local>,
 }
 
 impl DividendRecordDetailMore {
+    /// 建立一筆股利發放明細資料。
     pub fn new(
         stock_ownership_details_serial: i64,
         dividend_record_detail_serial: i64,

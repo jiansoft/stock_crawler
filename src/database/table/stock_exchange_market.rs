@@ -2,16 +2,21 @@ use anyhow::{anyhow, Result};
 
 use crate::database;
 
-#[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 StockExchangeMarket
+#[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct StockExchangeMarket {
+    /// 市場識別碼。
     pub stock_exchange_market_id: i32,
+    /// 交易所識別碼。
     pub stock_exchange_id: i32,
+    /// 市場代碼。
     pub code: String,
+    /// 市場名稱。
     pub name: String,
 }
 
 impl StockExchangeMarket {
+    /// 建立市場資料預設值（`code/name` 會先給空字串）。
     pub fn new(stock_exchange_market_id: i32, stock_exchange_id: i32) -> Self {
         StockExchangeMarket {
             stock_exchange_market_id,
@@ -21,7 +26,7 @@ impl StockExchangeMarket {
         }
     }
 
-    /// 取得所有股票歷史最高、最低等數據
+    /// 取得所有市場對照資料。
     pub async fn fetch() -> Result<Vec<StockExchangeMarket>> {
         sqlx::query_as::<_, StockExchangeMarket>(
             r#"

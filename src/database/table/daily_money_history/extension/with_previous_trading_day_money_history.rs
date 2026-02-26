@@ -4,22 +4,42 @@ use rust_decimal::Decimal;
 
 use crate::database::{self, table::daily_money_history::DailyMoneyHistory};
 
+/// 當日與前一個交易日的市值對照資料。
+///
+/// 用於計算收盤通知中的「市值增減」與「報酬率變化」。
 #[derive(sqlx::Type, sqlx::FromRow, Default, Debug)]
 pub struct DailyMoneyHistoryWithPreviousTradingDayMoneyHistory {
+    /// 指定查詢日期。
     pub date: NaiveDate,
+    /// 當日資料建立時間。
     pub created_at: DateTime<Local>,
+    /// 當日資料更新時間。
     pub updated_at: DateTime<Local>,
+    /// 當日 Unice 市值。
     pub unice: Decimal,
+    /// 當日 Eddie 市值。
     pub eddie: Decimal,
+    /// 當日合計市值。
     pub sum: Decimal,
 
+    /// 前一個交易日日期。
     pub previous_date: NaiveDate,
+    /// 前一個交易日 Unice 市值。
     pub previous_unice: Decimal,
+    /// 前一個交易日 Eddie 市值。
     pub previous_eddie: Decimal,
+    /// 前一個交易日合計市值。
     pub previous_sum: Decimal,
 }
 
 impl DailyMoneyHistoryWithPreviousTradingDayMoneyHistory {
+    /// 取得指定日期與前一交易日的市值資料。
+    ///
+    /// 內部會先抓 `date <= 指定日期` 的最近兩筆資料，
+    /// 再拆成「當日」與「前一日」欄位回傳。
+    ///
+    /// # Errors
+    /// 當資料庫查詢失敗時回傳錯誤。
     pub async fn fetch(
         date: NaiveDate,
     ) -> Result<DailyMoneyHistoryWithPreviousTradingDayMoneyHistory> {

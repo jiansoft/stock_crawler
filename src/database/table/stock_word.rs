@@ -5,15 +5,21 @@ use sqlx::{postgres::PgRow, QueryBuilder, Row};
 use crate::{database, util::map::Keyable};
 
 #[rustfmt::skip]
+/// 股票搜尋關鍵字資料列（`company_word`）。
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct StockWord {
+    /// 關鍵字主鍵。
     pub word_id: i64,
+    /// 關鍵字內容。
     pub word: String,
+    /// 建立時間。
     pub created_time: DateTime<Local>,
+    /// 最後更新時間。
     pub updated_time: DateTime<Local>,
 }
 
 impl StockWord {
+    /// 建立單一關鍵字實例。
     pub fn new(word: String) -> Self {
         StockWord {
             word_id: Default::default(),
@@ -23,6 +29,7 @@ impl StockWord {
         }
     }
 
+    /// 複製目前實例內容。
     pub fn clone(&self) -> Self {
         StockWord {
             word_id: self.word_id,

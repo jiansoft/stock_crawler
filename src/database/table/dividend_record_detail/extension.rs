@@ -9,6 +9,7 @@ use crate::database;
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 持股中積累領取的股利
 pub struct CumulateDividend {
+    /// 持股明細序號（`stock_ownership_details.serial`）。
     pub stock_ownership_details_serial: i64,
     /// 累積現金股利(元)
     pub cash: Decimal,
@@ -21,6 +22,7 @@ pub struct CumulateDividend {
 }
 
 impl CumulateDividend {
+    /// 建立累積股利資料實例。
     pub fn new(
         stock_ownership_details_serial: i64,
         cash: Decimal,

@@ -4,14 +4,17 @@ use sqlx::postgres::PgQueryResult;
 
 use crate::database;
 
+/// 系統設定表 `config` 的資料列。
 #[derive(sqlx::FromRow, Default, Debug)]
-/// 設定檔
 pub struct Config {
+    /// 設定鍵值名稱。
     pub key: String,
+    /// 設定內容（以字串形式儲存）。
     pub val: String,
 }
 
 impl Config {
+    /// 建立一筆 `Config` 實例。
     pub fn new(key: String, val: String) -> Self {
         Config { key, val }
     }
@@ -31,6 +34,10 @@ impl Config {
             .context(format!("Failed to Config::first({:?}) from database", key))
     }
 
+    /// 新增或更新 `config` 的鍵值。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO config
@@ -50,6 +57,12 @@ DO UPDATE SET val = excluded.val;"#;
             ))
     }
 
+    /// 將 `val` 視為日期（`%Y-%m-%d`）並僅在新值較大時更新。
+    ///
+    /// 若資料庫已有同 `key` 設定且日期較新或相同，會回傳空的 `PgQueryResult` 表示略過更新。
+    ///
+    /// # Errors
+    /// 當日期解析或 SQL 執行失敗時回傳錯誤。
     pub async fn set_val_as_naive_date(&self) -> Result<PgQueryResult> {
         let new_date = NaiveDate::parse_from_str(&self.val, "%Y-%m-%d")?;
         if let Ok(c) = Config::first(&self.key).await {
@@ -62,6 +75,10 @@ DO UPDATE SET val = excluded.val;"#;
         self.upsert().await
     }
 
+    /// 讀取目前 `key` 對應的值並解析為 `NaiveDate`。
+    ///
+    /// # Errors
+    /// 當查無資料或日期格式不正確時回傳錯誤。
     pub async fn get_val_naive_date(&self) -> Result<NaiveDate> {
         if let Ok(c) = Config::first(&self.key).await {
             return Ok(NaiveDate::parse_from_str(&c.val, "%Y-%m-%d")?);

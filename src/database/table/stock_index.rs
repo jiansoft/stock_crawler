@@ -4,15 +4,21 @@ use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 use crate::database;
 
+/// 股票與關鍵字索引關聯表資料列（`company_index`）。
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct StockIndex {
+    /// 關鍵字表 `company_word.word_id`。
     pub word_id: i64,
+    /// 股票代號。
     pub security_code: String,
+    /// 建立時間。
     pub created_time: DateTime<Local>,
+    /// 最後更新時間。
     pub updated_time: DateTime<Local>,
 }
 
 impl StockIndex {
+    /// 建立指定股票代號的索引實例。
     pub fn new(security_code: String) -> Self {
         StockIndex {
             word_id: Default::default(),
@@ -22,6 +28,10 @@ impl StockIndex {
         }
     }
 
+    /// 刪除指定股票代號的所有關鍵字索引。
+    ///
+    /// # Errors
+    /// 當 transaction 或 SQL 執行失敗時回傳錯誤。
     pub async fn delete_by_stock_symbol(stock_symbol: &str) -> Result<PgQueryResult> {
         let mut transaction: Transaction<Postgres> = database::get_tx().await?;
         match sqlx::query("DELETE FROM company_index WHERE security_code = $1;")
@@ -43,6 +53,10 @@ impl StockIndex {
         }
     }
 
+    /// 寫入一筆股票關鍵字索引（衝突時忽略）。
+    ///
+    /// # Errors
+    /// 當 `word_id <= 0` 或 SQL 執行失敗時回傳錯誤。
     pub async fn insert(&self) -> Result<()> {
         if self.word_id <= 0 {
             return Err(anyhow!("word_id is less than or equal to 0"));

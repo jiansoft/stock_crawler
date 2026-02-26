@@ -8,10 +8,14 @@ use sqlx::{self, FromRow};
 
 use crate::{database, logging, util, util::map::Keyable};
 
+/// 台股指數資料列（目前以 `TAIEX` 為主）。
 #[derive(sqlx::Type, FromRow, Debug)]
 pub struct Index {
+    /// 指數分類代碼（例如 `TAIEX`）。
     pub category: String,
+    /// 指數日期。
     pub date: NaiveDate,
+    /// 收盤指數值。
     pub index: Decimal,
     /// 漲跌點數
     pub change: Decimal,
@@ -21,11 +25,14 @@ pub struct Index {
     pub transaction: Decimal,
     /// 成交股數
     pub trading_volume: Decimal,
+    /// 建立時間。
     pub create_time: chrono::DateTime<Local>,
+    /// 最後更新時間。
     pub update_time: chrono::DateTime<Local>,
 }
 
 impl Index {
+    /// 建立 `Index` 預設值。
     pub fn new() -> Self {
         Index {
             category: Default::default(),
@@ -40,6 +47,10 @@ impl Index {
         }
     }
 
+    /// 取得最近 30 筆指數資料。
+    ///
+    /// # Errors
+    /// 當 SQL 查詢失敗時回傳錯誤。
     pub async fn fetch() -> Result<Vec<Index>> {
         let sql: &str = r#"
 SELECT

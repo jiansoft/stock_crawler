@@ -10,8 +10,10 @@ use sqlx::{
 
 use crate::database;
 
+/// 月營收資料列（對應 `"Revenue"`）。
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 pub struct Revenue {
+    /// 股票代號。
     pub stock_symbol: String,
     /// 當月營收
     pub monthly: Decimal,
@@ -21,7 +23,7 @@ pub struct Revenue {
     pub last_year_this_month: Decimal,
     /// 當月累計營收
     pub monthly_accumulated: Decimal,
-    // 去年累計營收
+    /// 去年累計營收
     pub last_year_monthly_accumulated: Decimal,
     /// 上月比較增減(%)
     pub compared_with_last_month: Decimal,
@@ -37,10 +39,12 @@ pub struct Revenue {
     pub highest_price: Decimal,
     /// 那個月份的營收
     pub date: i64,
+    /// 建立時間。
     pub create_time: DateTime<Local>,
 }
 
 impl Revenue {
+    /// 建立 `Revenue` 預設值。
     pub fn new() -> Self {
         Revenue {
             stock_symbol: Default::default(),
@@ -60,6 +64,10 @@ impl Revenue {
         }
     }
 
+    /// 新增或更新單月營收資料。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO
@@ -268,6 +276,10 @@ impl From<Vec<String>> for Revenue {
     }
 }
 
+/// 讀取最近兩個月的營收資料。
+///
+/// # Errors
+/// 當查詢失敗時回傳錯誤。
 pub async fn fetch_last_two_month() -> Result<Vec<Revenue>> {
     let now = Local::now();
     let now_first_day = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
@@ -350,6 +362,10 @@ order by "Serial" desc
     Ok(revenue)
 }
 
+/// 重建 `revenue_last_date`，讓每檔股票只保留最新一筆營收序號。
+///
+/// # Errors
+/// 當 SQL 執行失敗時回傳錯誤。
 pub async fn rebuild_revenue_last_date() -> Result<PgQueryResult> {
     let sql = r#"
 -- SET TIMEZONE = 'Asia/Taipei';

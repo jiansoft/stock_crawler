@@ -8,12 +8,19 @@ use crate::database;
 /// 股票除息的資料
 #[derive(FromRow, Debug)]
 pub struct StockDividendPayableDateInfo {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 股票名稱。
     pub name: String,
+    /// 現金股利（元）。
     pub cash_dividend: Decimal,
+    /// 股票股利（股）。
     pub stock_dividend: Decimal,
+    /// 股利合計（元）。
     pub sum: Decimal,
+    /// 現金股利發放日。
     pub payable_date1: String,
+    /// 股票股利發放日。
     pub payable_date2: String,
 }
 

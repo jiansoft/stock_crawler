@@ -51,7 +51,9 @@ pub struct Dividend {
     pub payable_date1: String,
     /// 股票股利發放日
     pub payable_date2: String,
+    /// 建立時間。
     pub created_time: DateTime<Local>,
+    /// 最後更新時間。
     pub updated_time: DateTime<Local>,
 }
 
@@ -92,6 +94,7 @@ const TABLE_COLUMNS: &str = r#"
     payout_ratio"#;
 
 impl Dividend {
+    /// 建立股利資料預設值。
     pub fn new() -> Self {
         Dividend {
             serial: 0,

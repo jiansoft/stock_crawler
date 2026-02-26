@@ -30,10 +30,12 @@ pub struct StockOwnershipDetail {
     pub cumulate_dividends_stock_money: Decimal,
     /// 總計累積股利(元)
     pub cumulate_dividends_total: Decimal,
+    /// 建立時間（持股入帳時間）。
     pub created_time: DateTime<Local>,
 }
 
 impl StockOwnershipDetail {
+    /// 建立持股明細預設值。
     pub fn new() -> Self {
         StockOwnershipDetail {
             serial: 0,

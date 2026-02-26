@@ -7,6 +7,7 @@ use crate::{database, util::convert::FromValue};
 /// 合格境外機構投資者持股資料
 #[derive(FromRow, Debug)]
 pub struct QualifiedForeignInstitutionalInvestor {
+    /// 股票代號。
     pub stock_symbol: String,
     /// 已發行股數
     pub issued_share: i64,
@@ -17,6 +18,7 @@ pub struct QualifiedForeignInstitutionalInvestor {
 }
 
 impl QualifiedForeignInstitutionalInvestor {
+    /// 建立外資持股資料實例。
     pub fn new(
         stock_symbol: String,
         issued_share: i64,

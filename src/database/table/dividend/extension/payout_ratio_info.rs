@@ -7,12 +7,19 @@ use crate::{database, util::map::Keyable};
 /// 股票除息的資料
 #[derive(FromRow, Debug)]
 pub struct PayoutRatioInfo {
+    /// 股利資料序號（`dividend.serial`）。
     pub serial: i64,
+    /// 股利發放年度。
     pub year: i32,
+    /// 股利季度（Q1/Q2/Q3/Q4/H1/H2 或空字串）。
     pub quarter: String,
+    /// 股票代號。
     pub security_code: String,
+    /// 現金配發率。
     pub payout_ratio_cash: Decimal,
+    /// 股票配發率。
     pub payout_ratio_stock: Decimal,
+    /// 合計配發率。
     pub payout_ratio: Decimal,
 }
 

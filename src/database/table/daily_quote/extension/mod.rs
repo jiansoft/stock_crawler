@@ -1,5 +1,6 @@
 use rust_decimal::Decimal;
 
+/// 指定股票在單一月份的價格摘要（低/均/高）。
 #[derive(sqlx::Type, sqlx::FromRow, Default, Debug)]
 pub struct MonthlyStockPriceSummary {
     /// 最高價

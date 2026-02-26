@@ -5,29 +5,31 @@ use sqlx::postgres::PgQueryResult;
 
 use crate::database;
 
+/// 個股歷史價格與股價淨值比極值紀錄。
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Default, Clone)]
 pub struct QuoteHistoryRecord {
-    // 歷史最高價出現在哪一天
+    /// 歷史最高價發生日期。
     pub maximum_price_date_on: NaiveDate,
-    // 歷史最低價出現在哪一天
+    /// 歷史最低價發生日期。
     pub minimum_price_date_on: NaiveDate,
-    // 歷史最高股價淨值比出現在哪一天
+    /// 歷史最高股價淨值比發生日期。
     pub maximum_price_to_book_ratio_date_on: NaiveDate,
-    // 歷史最低股價淨值比出現在哪一天
+    /// 歷史最低股價淨值比發生日期。
     pub minimum_price_to_book_ratio_date_on: NaiveDate,
-    // 股票代號
+    /// 股票代號。
     pub security_code: String,
-    // 歷史最高價
+    /// 歷史最高價。
     pub maximum_price: Decimal,
-    // 歷史最低價
+    /// 歷史最低價。
     pub minimum_price: Decimal,
-    // 歷史最高股價淨值比
+    /// 歷史最高股價淨值比。
     pub maximum_price_to_book_ratio: Decimal,
-    // 歷史最低股價淨值比
+    /// 歷史最低股價淨值比。
     pub minimum_price_to_book_ratio: Decimal,
 }
 
 impl QuoteHistoryRecord {
+    /// 建立指定股票代號的歷史紀錄預設值。
     pub fn new(security_code: String) -> Self {
         QuoteHistoryRecord {
             security_code,
@@ -58,6 +60,10 @@ FROM
         .context("Failed to QuoteHistoryRecord.fetch from database")
     }
 
+    /// 新增或更新單一股票的歷史極值資料。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO
