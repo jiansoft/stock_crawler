@@ -9,7 +9,6 @@ use crate::database;
 /// 最後交易日股票報價數據
 pub struct LastDailyQuotes {
     pub date: NaiveDate,
-    pub security_code: String,
     /// 收盤價
     pub closing_price: Decimal,
     pub stock_symbol: String,
@@ -19,7 +18,6 @@ impl LastDailyQuotes {
     pub fn new() -> Self {
         LastDailyQuotes {
             date: Default::default(),
-            security_code: Default::default(),
             closing_price: Default::default(),
             stock_symbol: Default::default(),
         }
@@ -30,7 +28,7 @@ impl LastDailyQuotes {
         Ok(sqlx::query_as::<_, LastDailyQuotes>(
             r#"
 SELECT
-    date, security_code, closing_price, stock_symbol
+    date, stock_symbol, closing_price
 FROM
     last_daily_quotes
 "#,
@@ -119,7 +117,6 @@ impl Clone for LastDailyQuotes {
     fn clone(&self) -> Self {
         LastDailyQuotes {
             date: self.date,
-            security_code: self.security_code.clone(),
             stock_symbol: self.stock_symbol.clone(),
             closing_price: self.closing_price,
         }

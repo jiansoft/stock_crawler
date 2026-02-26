@@ -4,7 +4,7 @@ use sqlx::{postgres::PgQueryResult, FromRow};
 
 use crate::{database, util::convert::FromValue};
 
-///
+/// 合格境外機構投資者持股資料
 #[derive(FromRow, Debug)]
 pub struct QualifiedForeignInstitutionalInvestor {
     pub stock_symbol: String,

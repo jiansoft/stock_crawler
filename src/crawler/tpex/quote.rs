@@ -82,7 +82,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
         if let Some(tpex_dqs) = &quote_response.tables[0].data {
             for item in tpex_dqs {
                 let mut dq =
-                    table::daily_quote::DailyQuote::from_with_exchange(StockExchange::TPEx, &item);
+                    table::daily_quote::DailyQuote::from_with_exchange(StockExchange::TPEx, item);
                 //logging::debug_file_async(format!("item:{:?}", item));
 
                 if dq.closing_price.is_zero()

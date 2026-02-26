@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, path::PathBuf, str::FromStr, u8};
+use std::{collections::HashMap, env, path::PathBuf, str::FromStr};
 
 use anyhow::Result;
 use config::FileFormat;

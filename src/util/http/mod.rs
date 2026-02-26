@@ -57,8 +57,8 @@ impl TextForceBig5 for Response {
 ///
 /// # Returns
 ///
-/// * Result<&'static Client>: A reference to the reqwest client instance or an error if the client
-/// cannot be created.
+/// * Result<&'static Client>: A reference to the reqwest client instance,
+///   or an error if the client cannot be created.
 fn get_client() -> Result<&'static Client> {
     CLIENT.get_or_try_init(|| {
         Client::builder()
@@ -236,8 +236,8 @@ where
 ///
 /// # Returns
 ///
-/// * `Result<String>`: The response text, or an error if the request
-/// fails or the response cannot be parsed.
+/// * `Result<String>`: The response text, or an error if the request fails
+///   or the response cannot be parsed.
 pub async fn post(
     url: &str,
     headers: Option<header::HeaderMap>,

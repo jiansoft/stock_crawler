@@ -36,7 +36,7 @@ pub mod event;
 pub mod logging;
 /// nosql
 pub mod nosql;
-///
+/// RPC 模組
 pub mod rpc;
 /// 工作排程
 pub mod scheduler;

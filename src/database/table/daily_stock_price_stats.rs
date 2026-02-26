@@ -178,7 +178,7 @@ ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
     updated_at = CURRENT_TIMESTAMP;
 "#;
 
-        let query = sqlx::query(&sql).bind(date);
+        let query = sqlx::query(sql).bind(date);
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,

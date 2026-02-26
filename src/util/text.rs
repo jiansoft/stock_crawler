@@ -50,7 +50,7 @@ pub fn split(w: &str) -> Vec<String> {
     for i in 0..text_len {
         for ii in (i + 1)..=text_len {
             let w = text_rune[i..ii].iter().collect::<String>();
-            if words.iter().any(|x| *x == w) {
+            if words.contains(&w) {
                 continue;
             }
             words.push(w);
@@ -92,13 +92,13 @@ pub fn split_v1(w: &str) -> Vec<String> {
 /// # Arguments
 ///
 /// * `s`: A string slice containing the representation of a decimal number
-///         that may include commas as thousands separators and other escape characters.
+///   that may include commas as thousands separators and other escape characters.
 /// * `escape_chars`: Optional characters to be escaped from the input string.
 ///
 /// # Returns
 ///
-/// * `Result<Decimal>`: The parsed `Decimal` value if successful, or an error
-///                      if the conversion fails.
+/// * `Result<Decimal>`: The parsed `Decimal` value if successful,
+///   or an error if the conversion fails.
 ///
 /// # Example
 ///
@@ -127,15 +127,15 @@ pub fn parse_f64(s: &str, escape_chars: Option<Vec<char>>) -> Result<f64> {
 /// # Arguments
 ///
 /// * `s`: A string slice containing the representation of an `i32` number
-///         that may include commas as thousands separators.
+///   that may include commas as thousands separators.
 ///
 /// * `escape_chars`: A list of additional characters to be removed from the
-///                   string before parsing.
+///   string before parsing.
 ///
 /// # Returns
 ///
 /// * `Result<i32>`: The parsed `i32` value if successful, or an error
-///                  if the conversion fails.
+///   if the conversion fails.
 ///
 /// # Example
 ///
@@ -158,15 +158,15 @@ pub fn parse_i32(s: &str, escape_chars: Option<Vec<char>>) -> Result<i32> {
 /// # Arguments
 ///
 /// * `s`: A string slice containing the representation of an `i64` number
-///         that may include commas as thousands separators.
+///   that may include commas as thousands separators.
 ///
 /// * `escape_chars`: A list of additional characters to be removed from the
-///                   string before parsing.
+///   string before parsing.
 ///
 /// # Returns
 ///
 /// * `Result<i64>`: The parsed `i64` value if successful, or an error
-///                  if the conversion fails.
+///   if the conversion fails.
 ///
 /// # Example
 ///
@@ -191,12 +191,12 @@ pub fn parse_i64(s: &str, escape_chars: Option<Vec<char>>) -> Result<i64> {
 /// * `s`: The original string from which escape characters will be removed.
 ///
 /// * `escape_chars`: Optional characters that will be removed from the
-///                   string if found.
+///   string if found.
 ///
 /// # Returns
 ///
 /// * `String`: The cleaned string without any of the specified escape
-///             characters.
+///   characters.
 ///
 /// # Example
 ///

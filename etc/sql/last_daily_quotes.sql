@@ -1,7 +1,7 @@
 create table public.last_daily_quotes
 (
     date                          date                     default CURRENT_DATE                            not null,
-    security_code                 varchar(24)              default ''::character varying                   not null
+    stock_symbol                 varchar(24)              default ''::character varying                   not null
         primary key,
     trading_volume                numeric(18, 4)           default 0                                       not null,
     transaction                   numeric(18, 4)           default 0                                       not null,
@@ -30,12 +30,11 @@ create table public.last_daily_quotes
     minimum_price_in_year_date_on date                     default '1970-01-01'::date                      not null,
     "price-to-book_ratio"         numeric(18, 4)           default 0                                       not null,
     record_time                   timestamp with time zone default ('now'::text)::timestamp with time zone not null,
-    updated_time                  timestamp with time zone default ('now'::text)::timestamp with time zone not null,
-    stock_symbol                  varchar(24)              default ''::character varying                   not null
+    updated_time                  timestamp with time zone default ('now'::text)::timestamp with time zone not null
 );
 
 comment on column public.last_daily_quotes.date is '資料屬於那一天';
-comment on column public.last_daily_quotes.security_code is '股票代碼';
+comment on column public.last_daily_quotes.stock_symbol is '股票代碼';
 comment on column public.last_daily_quotes.trading_volume is '成交股數';
 comment on column public.last_daily_quotes.transaction is '成交筆數';
 comment on column public.last_daily_quotes.trade_value is '成交金額';

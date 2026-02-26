@@ -1,3 +1,15 @@
+//! # 股票價格追蹤與提醒模組
+//!
+//! 此模組負責監控使用者設定的追蹤股票（Trace），並在股價超過預設的高低標時發送通知。
+//!
+//! ## 主要流程
+//! 1. **檢查開盤狀態**：判斷當前是否為交易日（非週末且非假日）。
+//! 2. **定期掃描**：在開盤期間，每分鐘執行一次追蹤檢查。
+//! 3. **獲取即時報價**：從遠端來源（如 Yahoo 奇摩股市）獲取股票的最新價格。
+//! 4. **邊界檢查**：判斷最新價格是否低於設定的最低價（Floor）或超過最高價（Ceiling）。
+//! 5. **頻率限制**：利用 Redis 記錄已發送過的提醒，避免在短時間內重複發送相同的警報。
+//! 6. **發送通知**：透過 Telegram Bot 將警報訊息傳送給使用者。
+
 use std::time::Duration;
 
 use anyhow::Result;
@@ -16,10 +28,18 @@ use crate::{
     util::{datetime::Weekend, map::Keyable},
 };
 
-/// 提醒本日已達高低標的股票有那些
+/// 執行股票價格追蹤任務的入口點。
+///
+/// 此函式會先進行基本的檢查（是否為週末或假日），如果符合追蹤條件，
+/// 則會啟動一個非同步任務 `trace_price_run` 來持續監控股價。
+///
+/// # Errors
+///
+/// 如果在檢查假期時發生資料庫或網路錯誤，將會回傳 `Err`。
 pub async fn execute() -> Result<()> {
     let now = Local::now();
 
+    // 週末不處理
     if now.is_weekend() {
         return Ok(());
     }
@@ -29,11 +49,16 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
+    // 啟動背景監控任務
     task::spawn(trace_price_run());
 
     Ok(())
 }
 
+/// 核心追蹤迴圈。
+///
+/// 此任務會在開盤期間每 60 秒執行一次 `trace_target_price`。
+/// 當市場關閉（`is_open` 回傳 false）時，迴圈會終止。
 async fn trace_price_run() {
     let mut ticker = time::interval(Duration::from_secs(60));
 
@@ -44,15 +69,24 @@ async fn trace_price_run() {
             break;
         }
 
+        // 執行目標價格檢查
         if let Err(why) = trace_target_price().await {
             logging::error_file_async(format!("Failed to trace target price: {:?}", why));
         }
 
+        // 等待下一個間隔
         ticker.tick().await;
     }
 }
 
-/// 檢查給定日期是否為假日
+/// 判斷特定日期是否為台灣證券交易所（TWSE）公告的休假日。
+///
+/// # 參數
+/// * `today` - 要檢查的日期。
+///
+/// # 回傳
+/// * `Ok(true)` - 如果是休假日。
+/// * `Ok(false)` - 如果是交易日。
 async fn is_holiday(today: NaiveDate) -> Result<bool> {
     let holidays = match twse::holiday_schedule::visit(today.year()).await {
         Ok(result) => result,
@@ -74,6 +108,9 @@ async fn is_holiday(today: NaiveDate) -> Result<bool> {
     Ok(false)
 }
 
+/// 獲取所有需要追蹤的股票清單並併行處理。
+///
+/// 此函式會從資料庫中讀取所有 `Trace` 記錄，並為每一筆記錄建立一個新的任務進行處理。
 async fn trace_target_price() -> Result<()> {
     let futures = Trace::fetch()
         .await?
@@ -81,11 +118,16 @@ async fn trace_target_price() -> Result<()> {
         .map(|target| task::spawn(process_target_price(target)))
         .collect::<Vec<_>>();
 
+    // 等待所有處理任務完成
     future::join_all(futures).await;
 
     Ok(())
 }
 
+/// 處理單一追蹤目標的價格檢查。
+///
+/// 1. 從遠端獲取目前報價。
+/// 2. 若價格有效（非零），則檢查是否觸發警報條件。
 async fn process_target_price(target: Trace) {
     match crawler::fetch_stock_price_from_remote_site(&target.stock_symbol).await {
         Ok(current_price) if current_price != Decimal::ZERO => {
@@ -98,17 +140,32 @@ async fn process_target_price(target: Trace) {
     }
 }
 
+/// 判斷股價是否觸發警報，並在必要時發送通知。
+///
+/// 此函式結合了邊界檢查與 Redis 快取機制，確保：
+/// 1. 只有在價格超出範圍時才發送提醒。
+/// 2. 相同的價格點或短時間內不會重複發送提醒。
+///
+/// # 參數
+/// * `target` - 包含追蹤代碼、最低價與最高價設定的對象。
+/// * `current_price` - 目前獲取到的即時報價。
+///
+/// # 回傳
+/// * `Ok(true)` - 已發送提醒。
+/// * `Ok(false)` - 未發送提醒（價格在範圍內、或已在快取中）。
 async fn alert_on_price_boundary(target: Trace, current_price: Decimal) -> Result<bool> {
-    // 判斷當前價格是否在預定範圍內
+    // 判斷當前價格是否在預定範圍內（如果在範圍內則不需提醒）
     if within_boundary(&target, current_price) {
         return Ok(false);
     }
 
-    // 與快取中的價格比較，判斷是否需要傳送警告
+    // 進一步確認是否真的需要提醒（邏輯互補）
     if no_need_to_alert(&target, current_price) {
         return Ok(false);
     }
 
+    // 檢查 Redis 快取，避免重複通知
+    // Key 格式包含股票代號與當前價格，存活時間約 5 小時
     let target_key = format!("{}={}", target.key_with_prefix(), current_price);
     if let Ok(exist) = nosql::redis::CLIENT.contains_key(&target_key).await {
         if exist {
@@ -116,27 +173,35 @@ async fn alert_on_price_boundary(target: Trace, current_price: Decimal) -> Resul
         }
     }
 
+    // 格式化訊息並發送
     let to_bot_msg = format_alert_message(&target, current_price).await;
 
+    // 寫入快取
     nosql::redis::CLIENT
         .set(target_key, current_price.to_string(), 60 * 60 * 5)
         .await?;
 
+    // 發送 Telegram 訊息
     bot::telegram::send(&to_bot_msg).await;
 
     Ok(true)
 }
 
+/// 格式化警報訊息內容。
+///
+/// 訊息包含：股票名稱、警報類型（低於最低/超過最高）、設定限額、目前報價以及 Yahoo 股市連結。
 async fn format_alert_message(target: &Trace, current_price: Decimal) -> String {
     let stock_name = SHARE
         .get_stock(&target.stock_symbol)
         .await
         .map_or_else(String::new, |stock| stock.name);
+
     let boundary = if current_price < target.floor {
         "低於最低價"
     } else {
         "超過最高價"
     };
+
     let limit = if current_price < target.floor {
         target.floor
     } else {
@@ -151,26 +216,17 @@ async fn format_alert_message(target: &Trace, current_price: Decimal) -> String 
             stock_name = Telegram::escape_markdown_v2(stock_name))
 }
 
-/// Checks whether the current price is within a specified boundary.
-/// 判斷當前價格是否在預定範圍內
+/// 判斷當前價格是否在預定的 [floor, ceiling] 範圍內。
 ///
-/// This function determines if the `current_price` is within a certain boundary specified
-/// by the `target`. The boundary is defined by the `floor` and `ceiling` attributes of the
-/// `target`. The function will return true under either of the following conditions:
-/// - The `current_price` is greater than or equal to `target.floor`, and `target.floor` is
-///   greater than zero.
-/// - The `current_price` is less than or equal to `target.ceiling`, and `target.ceiling` is
-///   greater than zero.
+/// 如果設定值為 0，表示不限制該方向的邊界。
 ///
-/// # Parameters
-/// - `target`: A reference to a `Trace` object that contains the `floor` and `ceiling` values
-///   that define the boundary.
-/// - `current_price`: A `Decimal` value representing the current price to be checked against
-///   the boundary.
+/// # 參數
+/// - `target`: 包含 `floor` (最低價) 和 `ceiling` (最高價) 的 `Trace` 對象。
+/// - `current_price`: 當前股價。
 ///
-/// # Returns
-/// - Returns a boolean that is `true` if the `current_price` is within the boundary, and `false`
-///   otherwise.
+/// # 回傳
+/// - `true`: 價格在安全範圍內（不觸發警報）。
+/// - `false`: 價格已超出設定範圍。
 fn within_boundary(target: &Trace, current_price: Decimal) -> bool {
     let floor = target.floor;
     let ceiling = target.ceiling;
@@ -183,15 +239,22 @@ fn within_boundary(target: &Trace, current_price: Decimal) -> bool {
     }
 }
 
+/// 輔助判斷是否不需要發送提醒。
+///
+/// 此函式的邏輯與 `within_boundary` 相似但有細微差別，主要用於雙重確認。
+/// 如果任一條件不滿足（即價格超出設定值），則回傳 `false` 表示「需要提醒」。
 fn no_need_to_alert(target: &Trace, current_price: Decimal) -> bool {
+    // 同時設定了高低標
     if target.floor > Decimal::ZERO && target.ceiling > Decimal::ZERO {
         return current_price >= target.floor && current_price <= target.ceiling;
     }
 
+    // 只設定了低標
     if target.floor > Decimal::ZERO {
         return current_price > target.floor;
     }
 
+    // 只設定了高標
     if target.ceiling > Decimal::ZERO {
         return current_price < target.ceiling;
     }

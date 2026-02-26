@@ -69,11 +69,11 @@ pub async fn visit(stock_symbol: &str) -> Result<Profile> {
     };
     let mut e = Profile::new(stock_symbol.to_string());
     let css_base = "div.table-grid.Mb\\(20px\\).row-fit-half > div:nth-child";
+    let reg_quarter = Regex::new(r"(?i)q\d")?;
 
     for element in document.select(&selector) {
         let year_and_quarter = element::parse_value(&element, "div:nth-child(2).D\\(f\\)");
         if let Some(year_and_quarter_text) = year_and_quarter {
-            let reg_quarter = Regex::new(r"(?i)q\d")?;
             if let Some(quarter_match) = reg_quarter.find(year_and_quarter_text.as_str()) {
                 let year_and_quarter = quarter_match.as_str();
                 e.quarter = year_and_quarter.to_uppercase();
