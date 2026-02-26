@@ -36,61 +36,48 @@ impl DailyMoneyHistory {
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
-        let sql = format!(
-            r#"
-WITH ownership_details AS (
-	SELECT security_code, share_quantity, member_id
-	FROM stock_ownership_details
-	WHERE is_sold = false and date <= $1
-),
- daily_quotes AS (
-	SELECT "stock_symbol", "ClosingPrice"
-	FROM "DailyQuotes"
-	WHERE "Date" = $1 AND "stock_symbol" in (select security_code FROM ownership_details)
-),
-total AS (
-	SELECT '{0}' AS "date", SUM(od.share_quantity * dq."ClosingPrice") AS "sum"
-	FROM ownership_details od
-	INNER JOIN daily_quotes dq ON od.security_code = dq."stock_symbol"
-),
-eddie AS (
-	SELECT '{0}' AS "date", SUM(od.share_quantity * dq."ClosingPrice") AS "sum"
-	FROM ownership_details od
-	INNER JOIN daily_quotes dq ON od.security_code = dq."stock_symbol"
-	WHERE od.member_id = 1
-)
+        let sql = r#"
 INSERT INTO daily_money_history (date, sum, eddie, unice)
-SELECT
-	TO_DATE(total."date",'YYYY-MM-DD') AS "date",
-	"total"."sum" AS sum,
-	"eddie"."sum" AS eddie,
-	"total"."sum" - "eddie"."sum" AS unice
-FROM total
-INNER JOIN eddie ON total."date" = eddie."date"
+WITH base_calc AS (
+    -- 僅執行一次核心 Join，大幅減少 I/O 與 CPU 開銷
+    SELECT 
+        od.member_id,
+        (od.share_quantity * dq."ClosingPrice") AS market_value
+    FROM stock_ownership_details od
+    INNER JOIN "DailyQuotes" dq ON od.security_code = dq."stock_symbol"
+    WHERE od.is_sold = FALSE 
+      AND od.date <= $1
+      AND dq."Date" = $1
+)
+SELECT 
+    $1 AS date,
+    COALESCE(SUM(market_value), 0) AS sum,
+    -- 使用 PostgreSQL FILTER 語法進行條件式聚合
+    COALESCE(SUM(market_value) FILTER (WHERE member_id = 1), 0) AS eddie,
+    COALESCE(SUM(market_value) FILTER (WHERE member_id != 1), 0) AS unice
+FROM base_calc
 ON CONFLICT (date) DO UPDATE SET
-	sum = EXCLUDED.sum,
-	eddie = EXCLUDED.eddie,
-	unice = EXCLUDED.unice,
-	updated_time = now();
-"#,
-            date
-        );
+    sum = EXCLUDED.sum,
+    eddie = EXCLUDED.eddie,
+    unice = EXCLUDED.unice,
+    updated_time = NOW();
+"#;
 
-        let query = sqlx::query(&sql).bind(date);
+        let query = sqlx::query(sql).bind(date);
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
         };
 
-        match result {
-            Ok(r) => Ok(r),
-            Err(why) => Err(anyhow!(
+        result.map_err(|why| {
+            anyhow!(
                 "Failed to daily_money_history::upsert({}) from database because {:?}",
                 date,
                 why
-            )),
-        }
+            )
+        })
     }
+
 }
 
 #[cfg(test)]

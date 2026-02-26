@@ -49,171 +49,81 @@ impl DailyMoneyHistoryDetail {
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let one_month_ago = date - TimeDelta::try_days(30).unwrap();
-        let sql = format!(
-            r#"
-WITH total_ownership_details AS (
-    SELECT
+        let sql = r#"
+WITH ownership_data AS (
+    -- 一次性計算個人與全局(member_id=0)的持有股數與成本，避免多次掃描
+    SELECT 
         security_code,
         member_id,
-        share_quantity,
-        holding_cost,
-        share_price_average
-    FROM
-        stock_ownership_details
-    WHERE
-        is_sold = FALSE
-        AND date <= '{0}'
+        SUM(share_quantity) AS total_share,
+        SUM(holding_cost) AS total_cost
+    FROM stock_ownership_details
+    WHERE is_sold = FALSE AND date <= $1
+    GROUP BY GROUPING SETS ((security_code, member_id), (security_code))
 ),
-ownership_details AS (
-    SELECT
+normalized_ownership AS (
+    SELECT 
         security_code,
-        member_id,
-        sum(share_quantity) AS total_share,
-        sum(holding_cost) AS average_cost,
-        avg(share_price_average) AS average_unit_price
-    FROM
-        total_ownership_details
-    GROUP BY
-        security_code,
-        member_id
-    UNION
-    SELECT
-        security_code,
-        0 AS member_id,
-        sum(share_quantity) AS total_share,
-        sum(holding_cost) AS average_cost,
-        avg(share_price_average) AS average_unit_price
-    FROM
-        total_ownership_details
-    GROUP BY
-        security_code
+        COALESCE(member_id, 0) as member_id,
+        total_share,
+        total_cost
+    FROM ownership_data
 ),
-daily_quotes AS (
-    SELECT
-        "Serial",
-        "stock_symbol",
-        "Date" AS date,
-        "ClosingPrice"
-    FROM
-        "DailyQuotes"
-    WHERE
-        "Date" >= '{1}'
-        AND "Date" <= '{0}'
-        AND "stock_symbol" IN (
-            SELECT
-                security_code
-            FROM
-                total_ownership_details
-        )
+quote_data AS (
+    -- 使用視窗函數取得當日與前一日報價，rn=1 代表最新一筆
+    SELECT 
+        stock_symbol,
+        "ClosingPrice" as today_price,
+        LAG("ClosingPrice") OVER (PARTITION BY stock_symbol ORDER BY "Date") as yesterday_price,
+        ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "Date" DESC) as rn
+    FROM "DailyQuotes"
+    WHERE "Date" >= $2 AND "Date" <= $1
+    AND "stock_symbol" IN (SELECT DISTINCT security_code FROM normalized_ownership)
 ),
-prev_daily_quotes AS (
-    SELECT
-        "stock_symbol",
-        "ClosingPrice"
-    FROM
-        daily_quotes
-    WHERE
-        "Serial" IN (
-            SELECT
-                max("Serial") AS serial
-            FROM
-                daily_quotes
-            WHERE
-                date < '{0}'
-            GROUP BY
-                "stock_symbol"
-        )
+latest_quotes AS (
+    SELECT stock_symbol, today_price, COALESCE(yesterday_price, today_price) as yesterday_price
+    FROM quote_data WHERE rn = 1
 ),
-today_daily_quotes AS (
-    SELECT
-        "stock_symbol",
-        "ClosingPrice"
-    FROM
-        daily_quotes
-    WHERE
-        "Serial" IN (
-            SELECT
-                max("Serial") AS serial
-            FROM
-                daily_quotes
-            GROUP BY
-                "stock_symbol"
-        )
-),
-money_history_detail AS (
+calc_base AS (
     SELECT
         od.member_id,
-        TO_DATE('{0}', 'YYYY-MM-DD') AS date,
+        $1 as date,
         od.security_code,
-        c."Name" AS name,
         od.total_share,
-        tdq."ClosingPrice" AS closing_price,
-        od.total_share * tdq."ClosingPrice" AS market_value,
-        od.total_share * pdq."ClosingPrice" AS previous_day_market_value,
-        od.total_share * tdq."ClosingPrice" - od.total_share * pdq."ClosingPrice" AS previous_day_profit_and_loss,
-        od.average_cost,
-        od.total_share * tdq."ClosingPrice" + od.average_cost AS reference_profit_and_loss,
-        od.total_share * tdq."ClosingPrice" * 0.003 AS transfer_tax,
-        -od.average_cost / od.total_share AS average_price
-    FROM
-        ownership_details AS od
-        INNER JOIN stocks AS c ON od.security_code = c.stock_symbol
-        INNER JOIN today_daily_quotes AS tdq ON od.security_code = tdq."stock_symbol"
-        INNER JOIN prev_daily_quotes AS pdq ON od.security_code = pdq."stock_symbol"
+        lq.today_price as closing_price,
+        od.total_share * lq.today_price as market_value,
+        od.total_share * lq.yesterday_price as prev_market_value,
+        od.total_cost as cost
+    FROM normalized_ownership od
+    JOIN latest_quotes lq ON od.security_code = lq.stock_symbol
 ),
-market_value AS (
-    SELECT
-        member_id,
-        sum(market_value) AS member_market_value_sum
-    FROM
-        money_history_detail
-    GROUP BY
-        member_id
+member_totals AS (
+    SELECT member_id, SUM(market_value) as total_mkt_val
+    FROM calc_base GROUP BY member_id
 )
-INSERT INTO daily_money_history_detail(
-    member_id,
-    date,
-    security_code,
-    closing_price,
-    total_shares,
-    cost,
-    average_unit_price_per_share,
-    market_value,
-    ratio,
-    transfer_tax,
-    profit_and_loss,
-    profit_and_loss_percentage,
-    created_time,
-    updated_time,
-    previous_day_market_value,
-    previous_day_profit_and_loss,
-    previous_day_profit_and_loss_percentage
+INSERT INTO daily_money_history_detail (
+    member_id, date, security_code, closing_price, total_shares, cost,
+    average_unit_price_per_share, market_value, ratio, transfer_tax,
+    profit_and_loss, profit_and_loss_percentage, created_time, updated_time,
+    previous_day_market_value, previous_day_profit_and_loss, previous_day_profit_and_loss_percentage
 )
 SELECT
-    mhd.member_id,
-    date,
-    security_code,
-    closing_price,
-    total_share,
-    average_cost,
-    ROUND(average_price, 4) AS average_price,
-    market_value,
-    ROUND(market_value / member_market_value_sum * 100, 4) AS ratio,
-    transfer_tax,
-    reference_profit_and_loss,
-    CASE WHEN average_cost <> 0 THEN
-        ROUND((market_value - abs(average_cost)) / abs(average_cost) * 100, 4)
-    ELSE
-        100
-    END AS profit_and_loss_percentage,
-    now(),
-    now(),
-    previous_day_market_value,
-    previous_day_profit_and_loss,
-    ROUND(((market_value - abs(previous_day_market_value)) / abs(previous_day_market_value)) * 100, 4) AS previous_day_profit_and_loss_percentage
-FROM
-    money_history_detail AS mhd
-    INNER JOIN market_value AS mv ON mhd.member_id = mv.member_id
+    cb.member_id, cb.date, cb.security_code, cb.closing_price, cb.total_share, cb.cost,
+    ROUND(CAST(-cb.cost / cb.total_share AS numeric), 4),
+    cb.market_value,
+    ROUND(CAST(cb.market_value / NULLIF(mt.total_mkt_val, 0) * 100 AS numeric), 4),
+    cb.market_value * 0.003,
+    cb.market_value + cb.cost,
+    CASE 
+        WHEN cb.cost != 0 THEN ROUND(CAST((cb.market_value + cb.cost) / ABS(cb.cost) * 100 AS numeric), 4) 
+        ELSE 100 
+    END,
+    NOW(), NOW(),
+    cb.prev_market_value,
+    cb.market_value - cb.prev_market_value,
+    ROUND(CAST((cb.market_value - cb.prev_market_value) / NULLIF(cb.prev_market_value, 0) * 100 AS numeric), 4)
+FROM calc_base cb
+JOIN member_totals mt ON cb.member_id = mt.member_id
 ON CONFLICT (date, security_code, member_id) DO UPDATE SET
     closing_price = EXCLUDED.closing_price,
     total_shares = EXCLUDED.total_shares,
@@ -224,22 +134,22 @@ ON CONFLICT (date, security_code, member_id) DO UPDATE SET
     transfer_tax = EXCLUDED.transfer_tax,
     profit_and_loss = EXCLUDED.profit_and_loss,
     profit_and_loss_percentage = EXCLUDED.profit_and_loss_percentage,
-    previous_day_market_value = EXCLUDED.previous_day_market_value
-            "#,
-            date, one_month_ago
-        );
+    previous_day_market_value = EXCLUDED.previous_day_market_value,
+    updated_time = NOW();
+"#;
 
-        let query = sqlx::query(&sql).bind(date);
+        let query = sqlx::query(sql).bind(date).bind(one_month_ago);
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
         };
 
         result.context(format!(
-            "Failed to daily_money_history_detail::upsert({})  from database",
+            "Failed to daily_money_history_detail::upsert({}) from database",
             date
         ))
     }
+
 }
 
 #[cfg(test)]

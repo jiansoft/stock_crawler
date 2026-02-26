@@ -20,80 +20,64 @@ impl YieldRank {
             .context("Failed to get_tx in yield_rank")?;
 
         let month_ago = date - TimeDelta::try_days(30).unwrap();
-        let sql = format!(
-            r#"
-WITH dividend_max_year AS (
-    SELECT
-        d.security_code,
-        MAX(d."year") AS year
-    FROM
-        dividend AS d
-    WHERE
-        "year" >= $1
-        AND quarter IN ('')
-    GROUP BY
-        d.security_code
-),
-dividend_serial AS (
-    SELECT
-        d.security_code,
-        d."sum",
-        d.serial
-    FROM
-        dividend_max_year AS dmy
-        INNER JOIN dividend AS d ON d.security_code = dmy.security_code AND d."year" = dmy.year AND quarter IN ('')
-),
-daily_quotes_serial AS (
-    SELECT
-        "stock_symbol",
-        MAX("Serial") AS serial
-    FROM
-        "DailyQuotes"
-    WHERE
-        "Date" <= $2
-        AND "Date" >= $3
-    GROUP BY
-        "stock_symbol"
-)
+        let sql = r#"
 INSERT INTO yield_rank (date, security_code, daily_quotes_serial, dividend_serial, yield)
+WITH latest_dividend AS (
+    -- 取得每支股票最新年度的股利總和，rn=1 代表最新年度
+    SELECT 
+        security_code,
+        serial,
+        "sum",
+        ROW_NUMBER() OVER (PARTITION BY security_code ORDER BY "year" DESC) as rn
+    FROM dividend
+    WHERE "year" >= $1 AND quarter = ''
+),
+latest_quote AS (
+    -- 取得每支股票在指定日期範圍內最新的一筆報價
+    SELECT 
+        "stock_symbol",
+        "Serial",
+        "ClosingPrice",
+        ROW_NUMBER() OVER (PARTITION BY "stock_symbol" ORDER BY "Date" DESC, "Serial" DESC) as rn
+    FROM "DailyQuotes"
+    WHERE "Date" <= $2 AND "Date" >= $3
+)
 SELECT
-    '{0}' AS date,
+    $2 AS date,
     s.stock_symbol,
     dq."Serial" AS daily_quotes_serial,
     d.serial AS dividend_serial,
-    (d."sum" / dq."ClosingPrice") * 100 AS yield
-FROM
-    stocks AS s
-    INNER JOIN dividend_serial AS d ON d.security_code = s.stock_symbol
-    INNER JOIN daily_quotes_serial AS dqs ON dqs."stock_symbol" = s.stock_symbol
-    INNER JOIN "DailyQuotes" AS dq ON dq."Serial" = dqs.serial
+    -- 防止除以零並計算殖利率 (%)
+    (d."sum" / NULLIF(dq."ClosingPrice", 0)) * 100 AS yield
+FROM stocks AS s
+JOIN latest_dividend d ON d.security_code = s.stock_symbol AND d.rn = 1
+JOIN latest_quote dq ON dq."stock_symbol" = s.stock_symbol AND dq.rn = 1
 ON CONFLICT (date, security_code) DO UPDATE SET
     yield = EXCLUDED.yield,
     daily_quotes_serial = EXCLUDED.daily_quotes_serial,
     dividend_serial = EXCLUDED.dividend_serial,
-    updated_time = now();
-"#,
-            date
-        );
+    updated_time = NOW();
+"#;
 
-        match sqlx::query(&sql)
+        let result = sqlx::query(sql)
             .bind(date.year() - 1)
             .bind(date)
             .bind(month_ago)
             .execute(&mut *tx)
-            .await
-            .context("Failed to YieldRank::upsert from database")
-        {
+            .await;
+
+        match result {
             Ok(pg) => {
                 tx.commit().await?;
                 Ok(pg)
             }
             Err(why) => {
                 tx.rollback().await?;
-                Err(anyhow!("{:?}", why))
+                Err(anyhow!("Failed to YieldRank::upsert from database: {:?}", why))
             }
         }
     }
+
 }
 
 #[cfg(test)]

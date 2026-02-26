@@ -45,84 +45,59 @@ impl DailyMoneyHistoryDetailMore {
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
-        let sql = format!(
-            r#"
-with stock AS (
-    SELECT
-        dmhd.member_id,
-        sod.created_time AS create_time,
-        sod.security_code,
-        s."Name" AS name,
-        sod.share_quantity AS number_of_shares_held,
-        sod.holding_cost AS average_cost,
-        sod.share_price_average AS amount_per_share,
-        dmhd.closing_price,
-        dmhd.closing_price * sod.share_quantity AS market_value,
-        dmhd.closing_price * sod.share_quantity + sod.holding_cost AS profit_and_loss,
-        CASE WHEN sod.holding_cost != 0 THEN
-            round((dmhd.closing_price * sod.share_quantity + sod.holding_cost) / abs(sod.holding_cost) * 100, 4)
-        ELSE
-            100
-        END AS profit_and_loss_percentage,
-        dmhd.date
-    FROM
-        stocks AS s
-        INNER JOIN stock_ownership_details AS sod ON sod.security_code = s.stock_symbol
-        INNER JOIN daily_money_history_detail dmhd ON dmhd.security_code = sod.security_code
-            AND dmhd.date = '{0}'
-            AND sod.member_id = dmhd.member_id
-    WHERE sod.is_sold = FALSE
-    UNION ALL
-    SELECT
-        0 AS member_id,
-        sod.created_time AS create_time,
-        sod.security_code,
-        s."Name" AS name,
-        sod.share_quantity AS number_of_shares_held,
-        sod.holding_cost AS average_cost,
-        sod.share_price_average AS amount_per_share,
-        dmhd.closing_price,
-        dmhd.closing_price * sod.share_quantity AS market_value,
-        dmhd.closing_price * sod.share_quantity + sod.holding_cost AS profit_and_loss,
-        CASE WHEN sod.holding_cost != 0 THEN
-            round((dmhd.closing_price * sod.share_quantity + sod.holding_cost) / abs(sod.holding_cost) * 100, 4)
-        ELSE
-            100
-        END AS profit_and_loss_percentage,
-        dmhd.date
-    FROM
-        stocks AS s
-        INNER JOIN stock_ownership_details AS sod ON sod.security_code = s.stock_symbol
-        INNER JOIN daily_money_history_detail dmhd ON dmhd.security_code = sod.security_code
-            AND dmhd.date = '{0}'
-            AND sod.member_id = dmhd.member_id
-    WHERE sod.is_sold = FALSE
+        let sql = r#"
+INSERT INTO daily_money_history_detail_more (
+    member_id, "date", transaction_date, security_code, closing_price, 
+    number_of_shares_held, unit_price_per_share, cost, market_value, 
+    profit_and_loss, profit_and_loss_percentage
 )
-INSERT INTO daily_money_history_detail_more (member_id, "date", transaction_date, security_code, closing_price, number_of_shares_held, unit_price_per_share,
-    cost, market_value, profit_and_loss, profit_and_loss_percentage)
+WITH raw_data AS (
+    -- 一次性獲取基礎數據，移除對 stocks 表的多餘連結
+    SELECT
+        sod.member_id,
+        sod.created_time::date as transaction_date,
+        sod.security_code,
+        sod.share_quantity,
+        sod.holding_cost,
+        sod.share_price_average,
+        dmhd.closing_price,
+        dmhd.date
+    FROM stock_ownership_details sod
+    JOIN daily_money_history_detail dmhd 
+        ON sod.security_code = dmhd.security_code 
+        AND sod.member_id = dmhd.member_id
+    WHERE sod.is_sold = FALSE 
+      AND dmhd.date = $1
+),
+aggregated_data AS (
+    -- 透過 UNION ALL 快速映射個人與全局(member_id=0)數據
+    SELECT * FROM raw_data
+    UNION ALL
+    SELECT 0 as member_id, transaction_date, security_code, share_quantity, holding_cost, 
+           share_price_average, closing_price, date
+    FROM raw_data
+)
 SELECT
     member_id,
-	date,
-    create_time,
+    date,
+    transaction_date,
     security_code,
     closing_price,
-    number_of_shares_held,
-    amount_per_share,
-    average_cost,
-    market_value,
-    profit_and_loss,
-    profit_and_loss_percentage
-FROM
-    stock
-ORDER BY
-    security_code,
-    member_id,
-    create_time;
-"#,
-            date
-        );
+    share_quantity,
+    share_price_average,
+    holding_cost,
+    (closing_price * share_quantity) as market_value,
+    (closing_price * share_quantity + holding_cost) as profit_and_loss,
+    CASE 
+        WHEN holding_cost != 0 THEN 
+            ROUND(CAST((closing_price * share_quantity + holding_cost) / ABS(holding_cost) * 100 AS numeric), 4)
+        ELSE 100 
+    END as profit_and_loss_percentage
+FROM aggregated_data
+ORDER BY security_code, member_id, transaction_date;
+"#;
 
-        let query = sqlx::query(&sql).bind(date);
+        let query = sqlx::query(sql).bind(date);
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
@@ -133,6 +108,7 @@ ORDER BY
             &date
         ))
     }
+
 }
 
 #[cfg(test)]

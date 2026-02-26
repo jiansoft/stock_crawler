@@ -36,85 +36,6 @@ impl DailyStockPriceStats {
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
-WITH cte AS (
-    SELECT e.security_code, e.date, e.closing_price,
-           e.cheap, e.fair, e.expensive,
-           dq."ClosingPrice", dq."ChangeRange",
-           dq."MovingAverage5", dq."MovingAverage20", dq."MovingAverage60",
-           dq."MovingAverage120", dq."MovingAverage240",
-           s.stock_exchange_market_id
-    FROM stocks s
-    INNER JOIN estimate e ON s."SuspendListing" = false AND s.stock_symbol = e.security_code
-    INNER JOIN "DailyQuotes" dq ON e.date = dq."Date" AND e.security_code = dq."stock_symbol"
-    WHERE e.date = $1
-),
-stats AS (
-    SELECT
-        date,
-        CASE
-            WHEN closing_price <= cheap THEN 'undervalued'
-            WHEN closing_price > cheap AND closing_price <= fair THEN 'fair_valued'
-            WHEN closing_price > fair AND closing_price <= expensive THEN 'overvalued'
-            WHEN closing_price > expensive THEN  'highly_overvalued'
-        END AS valuation_category,
-        CASE
-            WHEN closing_price <= "MovingAverage5" THEN 'below_week_ma'
-            WHEN closing_price > "MovingAverage5" THEN 'above_week_ma'
-        END AS ma5_category,
-        CASE
-            WHEN closing_price <= "MovingAverage20" THEN 'below_month_ma'
-            WHEN closing_price > "MovingAverage20" THEN 'above_month_ma'
-        END AS ma20_category,
-        CASE
-            WHEN closing_price <= "MovingAverage60" THEN 'below_quarter_ma'
-            WHEN closing_price > "MovingAverage60" THEN 'above_quarter_ma'
-        END AS ma60_category,
-        CASE
-            WHEN closing_price <= "MovingAverage120" THEN 'below_half_year_ma'
-            WHEN closing_price > "MovingAverage120" THEN 'above_half_year_ma'
-        END AS ma120_category,
-        CASE
-            WHEN closing_price <= "MovingAverage240" THEN 'below_year_ma'
-            WHEN closing_price > "MovingAverage240" THEN 'above_year_ma'
-        END AS ma240_category,
-         CASE
-            WHEN "ChangeRange" > 0 THEN 'up'
-            WHEN "ChangeRange" < 0 THEN 'down'
-            WHEN "ChangeRange" = 0 THEN 'unchanged'
-        END AS change_category,
-        stock_exchange_market_id
-    FROM cte
-),
-final_stats AS (
-    SELECT
-        date,
-        market,
-        COUNT(*) FILTER (WHERE valuation_category = 'undervalued') AS undervalued_count,
-        COUNT(*) FILTER (WHERE valuation_category = 'fair_valued') AS fair_valued_count,
-        COUNT(*) FILTER (WHERE valuation_category = 'overvalued') AS overvalued_count,
-        COUNT(*) FILTER (WHERE valuation_category = 'highly_overvalued') AS highly_overvalued_count,
-        COUNT(*) FILTER (WHERE ma5_category = 'below_week_ma') AS below_week_ma_count,
-        COUNT(*) FILTER (WHERE ma5_category = 'above_week_ma') AS above_week_ma_count,
-        COUNT(*) FILTER (WHERE ma20_category = 'below_month_ma') AS below_month_ma_count,
-        COUNT(*) FILTER (WHERE ma20_category = 'above_month_ma') AS above_month_ma_count,
-        COUNT(*) FILTER (WHERE ma60_category = 'below_quarter_ma') AS below_quarter_ma_count,
-        COUNT(*) FILTER (WHERE ma60_category = 'above_quarter_ma') AS above_quarter_ma_count,
-        COUNT(*) FILTER (WHERE ma120_category = 'below_half_year_ma') AS below_half_year_ma_count,
-        COUNT(*) FILTER (WHERE ma120_category = 'above_half_year_ma') AS above_half_year_ma_count,
-        COUNT(*) FILTER (WHERE ma240_category = 'below_year_ma') AS below_year_ma_count,
-        COUNT(*) FILTER (WHERE ma240_category = 'above_year_ma') AS above_year_ma_count,
-        COUNT(*) FILTER (WHERE change_category = 'up') AS up_count,
-        COUNT(*) FILTER (WHERE change_category = 'down') AS down_count,
-        COUNT(*) FILTER (WHERE change_category = 'unchanged') AS unchanged_count
-    FROM (
-        SELECT 0 AS market, * FROM stats
-        UNION ALL
-        SELECT 2 AS market, * FROM stats WHERE stock_exchange_market_id = 2
-        UNION ALL
-        SELECT 4 AS market, * FROM stats WHERE stock_exchange_market_id = 4
-    ) subquery
-    GROUP BY date,market
-)
 INSERT INTO daily_stock_price_stats (
     date,
     stock_exchange_market_id,
@@ -136,27 +57,46 @@ INSERT INTO daily_stock_price_stats (
     stocks_down,
     stocks_unchanged
 )
+WITH raw_data AS (
+    -- 核心數據拉取：一次性獲取估值、報價與均線數據
+    SELECT 
+        s.stock_exchange_market_id as market_id,
+        dq."ClosingPrice" as actual_close, 
+        e.cheap, e.fair, e.expensive,
+        dq."ChangeRange",
+        dq."MovingAverage5", dq."MovingAverage20", dq."MovingAverage60",
+        dq."MovingAverage120", dq."MovingAverage240"
+    FROM stocks s
+    JOIN estimate e ON s."SuspendListing" = FALSE AND s.stock_symbol = e.security_code
+    JOIN "DailyQuotes" dq ON e.date = dq."Date" AND e.security_code = dq."stock_symbol"
+    WHERE e.date = $1
+)
 SELECT
-    date,
-    market,
-    undervalued_count,
-    fair_valued_count,
-    overvalued_count,
-    highly_overvalued_count,
-    below_week_ma_count,
-    above_week_ma_count,
-    below_month_ma_count,
-    above_month_ma_count,
-    below_quarter_ma_count,
-    above_quarter_ma_count,
-    below_half_year_ma_count,
-    above_half_year_ma_count,
-    below_year_ma_count,
-    above_year_ma_count,
-    up_count,
-    down_count,
-    unchanged_count
-FROM final_stats
+    $1 as date,
+    COALESCE(market_id, 0) as stock_exchange_market_id,
+    -- 估值分布統計
+    COUNT(*) FILTER (WHERE actual_close <= cheap) as undervalued,
+    COUNT(*) FILTER (WHERE actual_close > cheap AND actual_close <= fair) as fair_valued,
+    COUNT(*) FILTER (WHERE actual_close > fair AND actual_close <= expensive) as overvalued,
+    COUNT(*) FILTER (WHERE actual_close > expensive) as highly_overvalued,
+    -- 均線位置統計
+    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage5") as b_ma5,
+    COUNT(*) FILTER (WHERE actual_close > "MovingAverage5") as a_ma5,
+    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage20") as b_ma20,
+    COUNT(*) FILTER (WHERE actual_close > "MovingAverage20") as a_ma20,
+    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage60") as b_ma60,
+    COUNT(*) FILTER (WHERE actual_close > "MovingAverage60") as a_ma60,
+    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage120") as b_ma120,
+    COUNT(*) FILTER (WHERE actual_close > "MovingAverage120") as a_ma120,
+    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage240") as b_ma240,
+    COUNT(*) FILTER (WHERE actual_close > "MovingAverage240") as a_ma240,
+    -- 當日漲跌統計
+    COUNT(*) FILTER (WHERE "ChangeRange" > 0) as up,
+    COUNT(*) FILTER (WHERE "ChangeRange" < 0) as down,
+    COUNT(*) FILTER (WHERE "ChangeRange" = 0) as unchanged
+FROM raw_data
+-- 使用 GROUPING SETS 同時產生不分市場 (()) 與各市場分項 ((market_id)) 的統計結果
+GROUP BY GROUPING SETS ((), (market_id))
 ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
     undervalued = EXCLUDED.undervalued,
     fair_valued = EXCLUDED.fair_valued,
@@ -166,7 +106,7 @@ ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
     above_5_day_moving_average = EXCLUDED.above_5_day_moving_average,
     below_20_day_moving_average = EXCLUDED.below_20_day_moving_average,
     above_20_day_moving_average = EXCLUDED.above_20_day_moving_average,
-    below_60_day_moving_average = EXCLUDED.below_20_day_moving_average,
+    below_60_day_moving_average = EXCLUDED.below_60_day_moving_average,
     above_60_day_moving_average = EXCLUDED.above_60_day_moving_average,
     below_120_day_moving_average = EXCLUDED.below_120_day_moving_average,
     above_120_day_moving_average = EXCLUDED.above_120_day_moving_average,
