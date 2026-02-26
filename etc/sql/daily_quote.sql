@@ -71,8 +71,8 @@ comment on column public."DailyQuotes".month is '資料屬於那月份';
 comment on column public."DailyQuotes".day is '資料屬於那日';
 comment on column public."DailyQuotes"."stock_symbol" is '股票代碼';
 
-create index "DailyQuotes_Date_idx"
-    on public."DailyQuotes" ("Date" desc) include ("Serial", "stock_symbol");
+create index "DailyQuotes_Date_include_symbol_idx"
+    on public."DailyQuotes" ("Date" desc) include ("Serial", stock_symbol);
 
 create unique index "DailyQuotes_stock_symbol_Date_uidx"
-    on public."DailyQuotes" ("stock_symbol" asc, "Date" desc) include (year, "HighestPrice", "LowestPrice", "ClosingPrice", "price-to-book_ratio", "PriceEarningRatio");
+    on public."DailyQuotes" (stock_symbol asc, "Date" desc) include (year, "HighestPrice", "LowestPrice", "ClosingPrice", "price-to-book_ratio", "PriceEarningRatio");

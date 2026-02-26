@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Row};
@@ -387,46 +387,94 @@ SELECT
             ))
     }
 
-    /// 將已計算完成的均線與年內統計欄位更新回資料庫。
-    pub async fn update_moving_average(&self) -> Result<PgQueryResult> {
+    /// 批次更新均線與年內統計欄位。
+    ///
+    /// 使用 PostgreSQL 的 UNNEST 語法，將多筆資料在單次 SQL 請求中完成更新，
+    /// 效率遠高於逐筆執行 `update_moving_average`。
+    pub async fn batch_update_moving_average(quotes: &[Self]) -> Result<PgQueryResult> {
+        // 若輸入列表為空則直接回傳錯誤
+        if quotes.is_empty() {
+            return Err(anyhow!("Cannot batch update empty quotes"));
+        }
+
+        // 預先分配空間以提升效能，避免動態擴展
+        let mut serials = Vec::with_capacity(quotes.len());
+        let mut ma5 = Vec::with_capacity(quotes.len());
+        let mut ma10 = Vec::with_capacity(quotes.len());
+        let mut ma20 = Vec::with_capacity(quotes.len());
+        let mut ma60 = Vec::with_capacity(quotes.len());
+        let mut ma120 = Vec::with_capacity(quotes.len());
+        let mut ma240 = Vec::with_capacity(quotes.len());
+        let mut max_p = Vec::with_capacity(quotes.len());
+        let mut min_p = Vec::with_capacity(quotes.len());
+        let mut avg_p = Vec::with_capacity(quotes.len());
+        let mut max_d = Vec::with_capacity(quotes.len());
+        let mut min_d = Vec::with_capacity(quotes.len());
+        let mut pbr = Vec::with_capacity(quotes.len());
+
+        // 將結構體列表轉換為多個對應的「欄位數組 (Arrays)」
+        // 這是為了配合 PostgreSQL 的 UNNEST 語法，將資料一次性打包傳送
+        for q in quotes {
+            serials.push(q.serial);
+            ma5.push(q.moving_average_5);
+            ma10.push(q.moving_average_10);
+            ma20.push(q.moving_average_20);
+            ma60.push(q.moving_average_60);
+            ma120.push(q.moving_average_120);
+            ma240.push(q.moving_average_240);
+            max_p.push(q.maximum_price_in_year);
+            min_p.push(q.minimum_price_in_year);
+            avg_p.push(q.average_price_in_year);
+            max_d.push(q.maximum_price_in_year_date_on);
+            min_d.push(q.minimum_price_in_year_date_on);
+            pbr.push(q.price_to_book_ratio);
+        }
+
+        // SQL 優化核心：
+        // 1. 使用 UNNEST 將傳入的 $1~$13 數組「拆解」成一個虛擬資料表 (Alias 為 t)。
+        // 2. 透過 UPDATE ... FROM 語法將虛擬資料表 t 與實體資料表 dq 進行 Join。
+        // 3. 根據 Serial 主鍵匹配後，一次性更新所有欄位。
         let sql = r#"
-UPDATE "DailyQuotes"
-SET
-    "MovingAverage5" = $2,
-    "MovingAverage10" = $3,
-    "MovingAverage20" = $4,
-    "MovingAverage60" = $5,
-    "MovingAverage120" = $6,
-    "MovingAverage240" = $7,
-    maximum_price_in_year = $8,
-    minimum_price_in_year = $9,
-    average_price_in_year = $10,
-    maximum_price_in_year_date_on = $11,
-    minimum_price_in_year_date_on = $12,
-    "price-to-book_ratio" = $13
-WHERE "Serial" = $1
-"#;
+            UPDATE "DailyQuotes" AS dq
+            SET
+                "MovingAverage5" = t.ma5,
+                "MovingAverage10" = t.ma10,
+                "MovingAverage20" = t.ma20,
+                "MovingAverage60" = t.ma60,
+                "MovingAverage120" = t.ma120,
+                "MovingAverage240" = t.ma240,
+                maximum_price_in_year = t.max_p,
+                minimum_price_in_year = t.min_p,
+                average_price_in_year = t.avg_p,
+                maximum_price_in_year_date_on = t.max_d,
+                minimum_price_in_year_date_on = t.min_d,
+                "price-to-book_ratio" = t.pbr
+            FROM UNNEST($1::bigint[], $2::numeric[], $3::numeric[], $4::numeric[], $5::numeric[], $6::numeric[], $7::numeric[], 
+                        $8::numeric[], $9::numeric[], $10::numeric[], $11::date[], $12::date[], $13::numeric[]) 
+                 AS t(serial, ma5, ma10, ma20, ma60, ma120, ma240, max_p, min_p, avg_p, max_d, min_d, pbr)
+            WHERE dq."Serial" = t.serial
+        "#;
+
+        // 執行參數綁定與發送
         sqlx::query(sql)
-            .bind(self.serial)
-            .bind(self.moving_average_5)
-            .bind(self.moving_average_10)
-            .bind(self.moving_average_20)
-            .bind(self.moving_average_60)
-            .bind(self.moving_average_120)
-            .bind(self.moving_average_240)
-            .bind(self.maximum_price_in_year)
-            .bind(self.minimum_price_in_year)
-            .bind(self.average_price_in_year)
-            .bind(self.maximum_price_in_year_date_on)
-            .bind(self.minimum_price_in_year_date_on)
-            .bind(self.price_to_book_ratio)
+            .bind(&serials)
+            .bind(&ma5)
+            .bind(&ma10)
+            .bind(&ma20)
+            .bind(&ma60)
+            .bind(&ma120)
+            .bind(&ma240)
+            .bind(&max_p)
+            .bind(&min_p)
+            .bind(&avg_p)
+            .bind(&max_d)
+            .bind(&min_d)
+            .bind(&pbr)
             .execute(database::get_connection())
             .await
-            .context(format!(
-                "Failed to update_moving_average({:#?}) from database",
-                self
-            ))
+            .context("Failed to batch_update_moving_average in DailyQuotes")
     }
+
 
     /// 使用 `COPY` 批次寫入 `DailyQuotes`。
     ///
