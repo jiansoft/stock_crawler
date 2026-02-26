@@ -22,7 +22,7 @@ impl Trace {
 
     /// 從資料表中取得進行追踪的股票
     pub async fn fetch() -> Result<Vec<Trace>> {
-        QueryBuilder::new("select stock_symbol,floor,ceiling from trace")
+        QueryBuilder::new(r#"SELECT "stock_symbol", "floor", "ceiling" FROM "trace""#)
             .build()
             .try_map(|row: PgRow| {
                 let ceiling = row.try_get("ceiling")?;
