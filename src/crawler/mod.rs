@@ -24,12 +24,13 @@ use rust_decimal::Decimal;
 use crate::{
     crawler::{
         cnyes::CnYes,
-        histock::HiStock,
         cmoney::CMoney,
         fugle::Fugle,
+        histock::HiStock,
         megatime::PcHome,
         nstock::NStock,
-        yahoo::Yahoo
+        yahoo::Yahoo,
+        yuanta::Yuanta,
     },
     declare,
     logging,
@@ -234,7 +235,9 @@ pub fn flush_site_latency_stats() {
 /// # 傳回值
 /// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
-    let site_names = ["Yahoo", "Fugle", "NStock", "CMoney", "HiStock", "CnYes", "PcHome"];
+    let site_names = [
+        "Yahoo", "Fugle", "NStock", "CMoney", "HiStock", "CnYes", "Yuanta", "PcHome",
+    ];
     let sites = [
         Yahoo::get_stock_price,
         Fugle::get_stock_price,
@@ -242,6 +245,7 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
         CMoney::get_stock_price,
         HiStock::get_stock_price,
         CnYes::get_stock_price,
+        Yuanta::get_stock_price,
         PcHome::get_stock_price,
     ];
     let site_len = sites.len();
@@ -282,7 +286,9 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 pub async fn fetch_stock_quotes_from_remote_site(
     stock_symbol: &str,
 ) -> Result<declare::StockQuotes> {
-    let site_names = ["Yahoo", "Fugle", "NStock", "CMoney", "HiStock", "CnYes", "PcHome"];
+    let site_names = [
+        "Yahoo", "Fugle", "NStock", "CMoney", "HiStock", "CnYes", "Yuanta", "PcHome",
+    ];
     let sites = [
         Yahoo::get_stock_quotes,
         Fugle::get_stock_quotes,
@@ -290,6 +296,7 @@ pub async fn fetch_stock_quotes_from_remote_site(
         CMoney::get_stock_quotes,
         HiStock::get_stock_quotes,
         CnYes::get_stock_quotes,
+        Yuanta::get_stock_quotes,
         PcHome::get_stock_quotes,
     ];
     let site_len = sites.len();
