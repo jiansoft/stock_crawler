@@ -5,7 +5,7 @@
 //! ## 執行流程
 //!
 //! 1. 找出資料庫中上一年度尚未有年度資料的股票。
-//! 2. 逐一查詢外部來源（富邦、元大、MoneyDJ）。
+//! 2. 逐一查詢外部來源（富邦、MoneyDJ、MOPS）。
 //! 3. 取得資料後轉為 `FinancialStatement` 並寫回資料庫。
 //! 4. 將已處理的股票寫入 Redis，避免短時間內重複抓取。
 
@@ -18,6 +18,7 @@ use crate::{
     crawler::{
         fbs::annual_profit::Fbs,
         moneydj::annual_profit::MoneyDJ,
+        mops::annual_profit::Mops,
         share::{AnnualProfit, AnnualProfitFetcher},
     },
     database::table::{self, financial_statement::FinancialStatement},
@@ -76,6 +77,7 @@ pub async fn execute() -> Result<()> {
 /// 目前依序使用：
 /// 1. 富邦
 /// 2. MoneyDJ
+/// 3. MOPS
 ///
 /// 只要任一來源成功且回傳非空資料，即直接回傳結果。
 ///
@@ -86,7 +88,7 @@ pub async fn execute() -> Result<()> {
 /// * `Result<Vec<AnnualProfit>>` - 成功時回傳年度獲利資料集合；
 ///   若所有來源皆失敗或無資料，則回傳錯誤。
 async fn fetch_annual_profit(ss: &str) -> Result<Vec<AnnualProfit>> {
-    let sites = vec![Fbs::visit, MoneyDJ::visit];
+    let sites = vec![Fbs::visit, MoneyDJ::visit, Mops::visit];
 
     for fetch_func in sites {
         match fetch_func(ss).await {

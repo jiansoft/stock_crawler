@@ -118,7 +118,7 @@ pub async fn get_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
 }
 
 pub async fn get_response(url: &str, headers: Option<header::HeaderMap>) -> Result<Response> {
-    send(Method::GET, url, headers, None::<fn(_) -> _>).await
+    send(Method::GET, url, headers, None::<fn(_) -> _>, None).await
 }
 
 /// Performs an HTTP GET request and returns the response as text.
@@ -164,7 +164,7 @@ pub fn extract_cookies(response: &Response) -> Option<String> {
 ///
 /// * `Result<String>`: The Big5 encoded response text, or an error if the request fails or the response cannot be parsed.
 pub async fn get_use_big5(url: &str) -> Result<String> {
-    send(Method::GET, url, None, None::<fn(_) -> _>)
+    send(Method::GET, url, None, None::<fn(_) -> _>, None)
         .await?
         .text_force_big5()
         .await
@@ -209,6 +209,7 @@ where
                 }
             },
         ),
+        None,
     )
     .await?;
 
@@ -247,15 +248,17 @@ pub async fn post(
     let body_fn: Option<fn(RequestBuilder) -> RequestBuilder> = None;
     let response = match params {
         Some(p) => {
+            let request_detail = format_form_params_log(&p);
             send(
                 Method::POST,
                 url,
                 headers,
                 Some(move |rb: RequestBuilder| rb.form(&p)),
+                Some(request_detail),
             )
             .await?
         }
-        None => send(Method::POST, url, headers, body_fn).await?,
+        None => send(Method::POST, url, headers, body_fn, None).await?,
     };
 
     response
@@ -302,8 +305,13 @@ async fn send(
     url: &str,
     headers: Option<header::HeaderMap>,
     body: Option<impl FnOnce(RequestBuilder) -> RequestBuilder>,
+    request_detail: Option<String>,
 ) -> Result<Response> {
     let visit_log = format!("{method}:{url}");
+    let request_detail_suffix = request_detail
+        .as_deref()
+        .map(|detail| format!(" {}", detail))
+        .unwrap_or_default();
     let client = get_client()?;
     let mut rb = client.request(method, url);
     let mut last_error = String::new();
@@ -331,14 +339,17 @@ async fn send(
 
         match res {
             Ok(response) => {
-                LOGGER.info(format!("HTTP請求耗時 {} {} ms", msg, elapsed));
+                LOGGER.info(format!(
+                    "HTTP請求耗時 {} {} ms{}",
+                    msg, elapsed, request_detail_suffix
+                ));
                 return Ok(response);
             }
             Err(why) => {
                 last_error = format!("{:?}", why);
                 LOGGER.error(format!(
-                    "HTTP請求失敗 {} because {:?}. {} ms",
-                    msg, why, elapsed
+                    "HTTP請求失敗 {} because {:?}. {} ms{}",
+                    msg, why, elapsed, request_detail_suffix
                 ));
                 if attempt < MAX_RETRIES {
                     tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32))).await;
@@ -355,6 +366,16 @@ async fn send(
         MAX_RETRIES,
         last_error
     ))
+}
+
+fn format_form_params_log(params: &HashMap<&str, &str>) -> String {
+    let mut entries = params
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>();
+    entries.sort();
+
+    format!("params=[{}]", entries.join(", "))
 }
 
 #[cfg(test)]

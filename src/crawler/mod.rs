@@ -62,6 +62,8 @@ pub mod ipify;
 pub mod ipinfo;
 /// PCHOME 股市 (提供即時行情)
 pub mod megatime;
+/// 公開資訊觀測站（MOPS）/ 財務比較 E 點通
+pub mod mops;
 /// MoneyDJ 理財網 (嘉實資訊，提供詳盡的財務指標)
 pub mod moneydj;
 /// IP 檢測服務 (MyIP)
@@ -153,7 +155,7 @@ impl SiteLatencyStats {
         values.sort_unstable();
 
         let len = values.len();
-        let idx = ((len * 99).div_ceil(100)).saturating_sub(1);
+        let idx = (len * 99).div_ceil(100).saturating_sub(1);
         values[idx]
     }
 }
