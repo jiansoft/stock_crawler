@@ -93,6 +93,8 @@ async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let received_signal = Arc::new(AtomicBool::new(false));
 
     tokio::spawn(shutdown_signal_handler(received_signal.clone()));

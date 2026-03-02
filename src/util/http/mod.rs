@@ -64,7 +64,6 @@ fn get_client() -> Result<&'static Client> {
         Client::builder()
             // ===== 壓縮 =====
             .brotli(true)
-            .deflate(true)
             .gzip(true)
             .zstd(true)
             // ===== 超時設置 =====

@@ -8,7 +8,8 @@ use crate::{
         delisted_company, dividend, financial_statement, isin, net_asset_value_per_share,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
-    bot, declare, event,
+    bot::{self, telegram::Telegram},
+    declare, event,
     event::ddns,
     logging,
 };
@@ -26,8 +27,8 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
 
     let msg = format!(
         "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
-        env::consts::OS,
-        env::consts::ARCH
+        Telegram::escape_markdown_v2(env::consts::OS),
+        Telegram::escape_markdown_v2(env::consts::ARCH)
     );
 
     bot::telegram::send(&msg).await;
