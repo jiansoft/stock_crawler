@@ -10,7 +10,7 @@ RUN cargo build --release
 
 FROM alpine:latest
 
-RUN apk add --no-cache libgcc libstdc++ tzdata
+RUN apk add --no-cache libgcc libstdc++ tzdata openssl
 # 設定環境變量，將時區設為 UTC+8
 ENV TZ=Asia/Taipei
 
