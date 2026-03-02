@@ -158,17 +158,21 @@ valuation_base AS (
         s.stock_symbol,
         dq."Date" as q_date,
         dq."ClosingPrice" as q_close,
-        ds.p_cheap, ds.p_fair, ds.p_expensive,
-        (da.div_base * 15) as div_c, (da.div_base * 20) as div_f, (da.div_base * 25) as div_e,
+        COALESCE(ds.p_cheap, 0) as p_cheap, 
+        COALESCE(ds.p_fair, 0) as p_fair, 
+        COALESCE(ds.p_expensive, 0) as p_expensive,
+        COALESCE(da.div_base * 15, 0) as div_c, 
+        COALESCE(da.div_base * 20, 0) as div_f, 
+        COALESCE(da.div_base * 25, 0) as div_e,
         (s.last_four_eps * COALESCE(dpr.payout_ratio, 70) / 100 * 15) as eps_c,
         (s.last_four_eps * COALESCE(dpr.payout_ratio, 70) / 100 * 20) as eps_f,
         (s.last_four_eps * COALESCE(dpr.payout_ratio, 70) / 100 * 25) as eps_e,
-        (ds.pbr_low * s.net_asset_value_per_share) as pbr_c,
-        (ds.pbr_mid * s.net_asset_value_per_share) as pbr_f,
-        (ds.pbr_high * s.net_asset_value_per_share) as pbr_e,
-        (ds.pe_low * ep.eps_avg) as per_c,
-        (ds.pe_mid * ep.eps_avg) as per_f,
-        (ds.pe_high * ep.eps_avg) as per_e
+        COALESCE(ds.pbr_low * s.net_asset_value_per_share, 0) as pbr_c,
+        COALESCE(ds.pbr_mid * s.net_asset_value_per_share, 0) as pbr_f,
+        COALESCE(ds.pbr_high * s.net_asset_value_per_share, 0) as pbr_e,
+        COALESCE(ds.pe_low * ep.eps_avg, 0) as per_c,
+        COALESCE(ds.pe_mid * ep.eps_avg, 0) as per_f,
+        COALESCE(ds.pe_high * ep.eps_avg, 0) as per_e
     FROM stocks s
     JOIN "DailyQuotes" dq ON s.stock_symbol = dq."stock_symbol" AND dq."Date" = $1
     LEFT JOIN daily_stats ds ON s.stock_symbol = ds."stock_symbol"
@@ -197,9 +201,9 @@ FROM valuation_base vb
 CROSS JOIN LATERAL (
     -- 集中計算加權估值，提升性能與代碼可維護性
     SELECT 
-        (COALESCE(p_cheap,0)*0.2 + COALESCE(div_c,0)*0.29 + COALESCE(eps_c,0)*0.3 + COALESCE(pbr_c,0)*0.2 + COALESCE(per_c,0)*0.01) as weighted_cheap,
-        (COALESCE(p_fair,0)*0.2 + COALESCE(div_f,0)*0.29 + COALESCE(eps_f,0)*0.3 + COALESCE(pbr_f,0)*0.2 + COALESCE(per_f,0)*0.01) as weighted_fair,
-        (COALESCE(p_expensive,0)*0.2 + COALESCE(div_e,0)*0.29 + COALESCE(eps_e,0)*0.3 + COALESCE(pbr_e,0)*0.2 + COALESCE(per_e,0)*0.01) as weighted_expensive
+        (p_cheap*0.2 + div_c*0.29 + eps_c*0.3 + pbr_c*0.2 + per_c*0.01) as weighted_cheap,
+        (p_fair*0.2 + div_f*0.29 + eps_f*0.3 + pbr_f*0.2 + per_f*0.01) as weighted_fair,
+        (p_expensive*0.2 + div_e*0.29 + eps_e*0.3 + pbr_e*0.2 + per_e*0.01) as weighted_expensive
 ) calc
 ON CONFLICT (date, security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,

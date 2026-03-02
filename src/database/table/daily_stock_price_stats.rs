@@ -95,7 +95,7 @@ INSERT INTO daily_stock_price_stats (
     stocks_unchanged
 )
 WITH raw_data AS (
-    -- 核心數據拉取：一次性獲取估值、報價與均線數據
+    -- 核心數據拉取
     SELECT 
         s.stock_exchange_market_id as market_id,
         dq."ClosingPrice" as actual_close, 
@@ -107,33 +107,63 @@ WITH raw_data AS (
     JOIN estimate e ON s."SuspendListing" = FALSE AND s.stock_symbol = e.security_code
     JOIN "DailyQuotes" dq ON e.date = dq."Date" AND e.security_code = dq."stock_symbol"
     WHERE e.date = $1
+),
+market_metrics AS (
+    -- 先按市場 ID 聚合
+    SELECT
+        market_id,
+        COUNT(*) FILTER (WHERE actual_close <= cheap) as undervalued,
+        COUNT(*) FILTER (WHERE actual_close > cheap AND actual_close <= fair) as fair_valued,
+        COUNT(*) FILTER (WHERE actual_close > fair AND actual_close <= expensive) as overvalued,
+        COUNT(*) FILTER (WHERE actual_close > expensive) as highly_overvalued,
+        COUNT(*) FILTER (WHERE actual_close <= "MovingAverage5") as b_ma5,
+        COUNT(*) FILTER (WHERE actual_close > "MovingAverage5") as a_ma5,
+        COUNT(*) FILTER (WHERE actual_close <= "MovingAverage20") as b_ma20,
+        COUNT(*) FILTER (WHERE actual_close > "MovingAverage20") as a_ma20,
+        COUNT(*) FILTER (WHERE actual_close <= "MovingAverage60") as b_ma60,
+        COUNT(*) FILTER (WHERE actual_close > "MovingAverage60") as a_ma60,
+        COUNT(*) FILTER (WHERE actual_close <= "MovingAverage120") as b_ma120,
+        COUNT(*) FILTER (WHERE actual_close > "MovingAverage120") as a_ma120,
+        COUNT(*) FILTER (WHERE actual_close <= "MovingAverage240") as b_ma240,
+        COUNT(*) FILTER (WHERE actual_close > "MovingAverage240") as a_ma240,
+        COUNT(*) FILTER (WHERE "ChangeRange" > 0) as up,
+        COUNT(*) FILTER (WHERE "ChangeRange" < 0) as down,
+        COUNT(*) FILTER (WHERE "ChangeRange" = 0) as unchanged
+    FROM raw_data
+    GROUP BY market_id
+),
+final_set AS (
+    -- 1. 產生全市場總計 (ID = 0)
+    SELECT
+        0 as stock_exchange_market_id,
+        SUM(undervalued)::int as undervalued, SUM(fair_valued)::int as fair_valued, 
+        SUM(overvalued)::int as overvalued, SUM(highly_overvalued)::int as highly_overvalued,
+        SUM(b_ma5)::int as b_ma5, SUM(a_ma5)::int as a_ma5,
+        SUM(b_ma20)::int as b_ma20, SUM(a_ma20)::int as a_ma20,
+        SUM(b_ma60)::int as b_ma60, SUM(a_ma60)::int as a_ma60,
+        SUM(b_ma120)::int as b_ma120, SUM(a_ma120)::int as a_ma120,
+        SUM(b_ma240)::int as b_ma240, SUM(a_ma240)::int as a_ma240,
+        SUM(up)::int as up, SUM(down)::int as down, SUM(unchanged)::int as unchanged
+    FROM market_metrics
+    UNION ALL
+    -- 2. 產生各市場分類 (排除 ID 0 以免與總計衝突)
+    SELECT
+        market_id as stock_exchange_market_id,
+        undervalued, fair_valued, overvalued, highly_overvalued,
+        b_ma5, a_ma5, b_ma20, a_ma20, b_ma60, a_ma60,
+        b_ma120, a_ma120, b_ma240, a_ma240,
+        up, down, unchanged
+    FROM market_metrics
+    WHERE market_id != 0
 )
 SELECT
     $1 as date,
-    COALESCE(market_id, 0) as stock_exchange_market_id,
-    -- 估值分布統計
-    COUNT(*) FILTER (WHERE actual_close <= cheap) as undervalued,
-    COUNT(*) FILTER (WHERE actual_close > cheap AND actual_close <= fair) as fair_valued,
-    COUNT(*) FILTER (WHERE actual_close > fair AND actual_close <= expensive) as overvalued,
-    COUNT(*) FILTER (WHERE actual_close > expensive) as highly_overvalued,
-    -- 均線位置統計
-    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage5") as b_ma5,
-    COUNT(*) FILTER (WHERE actual_close > "MovingAverage5") as a_ma5,
-    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage20") as b_ma20,
-    COUNT(*) FILTER (WHERE actual_close > "MovingAverage20") as a_ma20,
-    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage60") as b_ma60,
-    COUNT(*) FILTER (WHERE actual_close > "MovingAverage60") as a_ma60,
-    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage120") as b_ma120,
-    COUNT(*) FILTER (WHERE actual_close > "MovingAverage120") as a_ma120,
-    COUNT(*) FILTER (WHERE actual_close <= "MovingAverage240") as b_ma240,
-    COUNT(*) FILTER (WHERE actual_close > "MovingAverage240") as a_ma240,
-    -- 當日漲跌統計
-    COUNT(*) FILTER (WHERE "ChangeRange" > 0) as up,
-    COUNT(*) FILTER (WHERE "ChangeRange" < 0) as down,
-    COUNT(*) FILTER (WHERE "ChangeRange" = 0) as unchanged
-FROM raw_data
--- 使用 GROUPING SETS 同時產生不分市場 (()) 與各市場分項 ((market_id)) 的統計結果
-GROUP BY GROUPING SETS ((), (market_id))
+    stock_exchange_market_id,
+    undervalued, fair_valued, overvalued, highly_overvalued,
+    b_ma5, a_ma5, b_ma20, a_ma20, b_ma60, a_ma60,
+    b_ma120, a_ma120, b_ma240, a_ma240,
+    up, down, unchanged
+FROM final_set
 ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
     undervalued = EXCLUDED.undervalued,
     fair_valued = EXCLUDED.fair_valued,
