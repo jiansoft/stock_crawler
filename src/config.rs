@@ -17,6 +17,7 @@ pub struct App {
     /// Afraid DNS 服務設定
     pub afraid: Afraid,
     /// Fugle 行情 API 設定
+    #[serde(default)]
     pub fugle: Fugle,
     /// Dynu DNS 服務設定
     pub dyny: Dynu,
