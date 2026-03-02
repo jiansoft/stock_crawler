@@ -93,8 +93,6 @@ async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-
     let received_signal = Arc::new(AtomicBool::new(false));
 
     tokio::spawn(shutdown_signal_handler(received_signal.clone()));
@@ -115,6 +113,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let sched = JobScheduler::new().await?;
     scheduler::start(&sched).await?;
     rpc::server::start().await?;
+
+    // 啟動後延遲測試 gRPC 連線
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        if let Err(why) = rpc::client::test_client::run_test().await {
+            logging::error_file_async(format!("gRPC 自我測試失敗: {}", why));
+        }
+    });
 
     let pong = nosql::redis::CLIENT.ping().await;
     if let Ok(pong) = pong {

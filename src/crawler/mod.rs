@@ -120,6 +120,7 @@ fn get_and_increment_index(max: usize) -> usize {
 /// # 傳回值
 /// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
+    let site_names = ["Yahoo", "CMoney", "NStock", "PcHome", "CnYes"];
     let sites = [
         Yahoo::get_stock_price,
         CMoney::get_stock_price,
@@ -129,17 +130,20 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
         CnYes::get_stock_price,
     ];
     let site_len = sites.len();
+    let mut errors = Vec::with_capacity(site_len);
 
     for _ in 0..site_len {
         let current_site = get_and_increment_index(site_len);
-        if let Ok(price) = sites[current_site](stock_symbol).await {
-            return Ok(price.normalize());
-        };
+        let site_name = site_names[current_site];
+        match sites[current_site](stock_symbol).await {
+            Ok(price) => return Ok(price.normalize()),
+            Err(why) => errors.push(format!("{site_name}: {why}")),
+        }
     }
 
     Err(anyhow!(
-        "Failed to fetch stock price({}) from all sites",
-        stock_symbol
+        "Failed to fetch stock price({stock_symbol}) from all sites: {}",
+        errors.join(" | ")
     ))
 }
 
@@ -156,6 +160,7 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 pub async fn fetch_stock_quotes_from_remote_site(
     stock_symbol: &str,
 ) -> Result<declare::StockQuotes> {
+    let site_names = ["Yahoo", "NStock", "PcHome", "CMoney", "CnYes"];
     let sites = [
         Yahoo::get_stock_quotes,
         NStock::get_stock_quotes,
@@ -165,19 +170,20 @@ pub async fn fetch_stock_quotes_from_remote_site(
         CnYes::get_stock_quotes,
     ];
     let site_len = sites.len();
+    let mut errors = Vec::with_capacity(site_len);
 
     for _ in 0..site_len {
         let current_site = get_and_increment_index(site_len);
-        let r = sites[current_site](stock_symbol).await;
-
-        if r.is_ok() {
-            return r;
+        let site_name = site_names[current_site];
+        match sites[current_site](stock_symbol).await {
+            Ok(quotes) => return Ok(quotes),
+            Err(why) => errors.push(format!("{site_name}: {why}")),
         }
     }
 
     Err(anyhow!(
-        "Failed to fetch stock quotes({}) from all sites",
-        stock_symbol
+        "Failed to fetch stock quotes({stock_symbol}) from all sites: {}",
+        errors.join(" | ")
     ))
 }
 

@@ -61,6 +61,8 @@ impl TextForceBig5 for Response {
 ///   or an error if the client cannot be created.
 fn get_client() -> Result<&'static Client> {
     CLIENT.get_or_try_init(|| {
+        util::ensure_rustls_crypto_provider();
+
         Client::builder()
             // ===== 壓縮 =====
             .brotli(true)

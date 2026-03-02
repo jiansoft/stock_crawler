@@ -10,6 +10,7 @@ use crate::{
         control::control_server::ControlServer, server::control_service::ControlService,
         server::stock_service::StockService, stock::stock_server::StockServer,
     },
+    util,
 };
 
 pub mod control_service;
@@ -78,6 +79,8 @@ fn get_tls_config() -> Option<(String, String)> {
 }
 
 fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Result<Server> {
+    util::ensure_rustls_crypto_provider();
+
     logging::info_file_async(format!("正在載入 SSL 憑證檔案: {}", cert_file));
     logging::info_file_async(format!("正在載入 SSL 金鑰檔案: {}", key_file));
 
@@ -90,24 +93,47 @@ fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Re
         why
     })?;
 
-    // 嘗試解析憑證中的 Domain 與 有效期資訊 (使用系統 openssl 指令)
-    let domain_info = match std::process::Command::new("openssl")
-        .args(["x509", "-noout", "-subject", "-enddate", "-in", &cert_file])
-        .output() {
-            Ok(out) if out.status.success() => {
-                String::from_utf8_lossy(&out.stdout).trim().replace('\n', ", ")
+    // 根據作業系統決定嘗試的指令
+    let domain_info = String::from("無法執行 OpenSSL");
+    let commands = if cfg!(windows) {
+        vec![
+            "openssl".to_string(),
+            "openssl.exe".to_string(),
+            "C:\\Program Files\\Git\\usr\\bin\\openssl.exe".to_string(),
+            "C:\\Program Files\\OpenSSL-Win64\\bin\\openssl.exe".to_string(),
+        ]
+    } else {
+        vec![
+            "openssl".to_string(),
+            "/usr/bin/openssl".to_string(),
+            "/usr/local/bin/openssl".to_string(),
+            "/bin/openssl".to_string(),
+        ]
+    };
+
+    let mut final_domain_info = domain_info;
+    for cmd in commands {
+        match std::process::Command::new(cmd)
+            .args(["x509", "-noout", "-subject", "-enddate", "-in", &cert_file])
+            .output() {
+                Ok(out) if out.status.success() => {
+                    final_domain_info = String::from_utf8_lossy(&out.stdout).trim().replace('\n', ", ");
+                    break;
+                }
+                Ok(out) => {
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    if !err.trim().is_empty() {
+                        final_domain_info = format!("OpenSSL 執行失敗: {}", err.trim());
+                    }
+                }
+                Err(_) => continue,
             }
-            Ok(out) => {
-                let err = String::from_utf8_lossy(&out.stderr);
-                format!("OpenSSL 執行失敗: {}", err.trim())
-            }
-            Err(e) => format!("無法執行 OpenSSL: {}", e),
-        };
+    }
 
     logging::info_file_async(format!(
         "SSL 載入成功 - 憑證: {} bytes, 資訊: [{}], 金鑰: {} bytes",
         cert_content.len(),
-        domain_info,
+        final_domain_info,
         key_content.len()
     ));
 

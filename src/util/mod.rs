@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::{cmp::max, sync::Once};
 
 pub mod datetime;
 pub mod http;
@@ -48,4 +48,13 @@ pub fn concurrent_limit_32() -> Option<usize> {
 
 pub fn concurrent_limit_64() -> Option<usize> {
     Some(max(64, num_cpus::get() * 4))
+}
+
+static RUSTLS_CRYPTO_PROVIDER: Once = Once::new();
+
+/// Ensure rustls has a process-wide crypto provider before any TLS client/server is built.
+pub fn ensure_rustls_crypto_provider() {
+    RUSTLS_CRYPTO_PROVIDER.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
 }
