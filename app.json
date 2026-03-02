@@ -10,6 +10,9 @@
     "path": "/u",
     "token": "afraid_token"
   },
+  "fugle": {
+    "api_key": ""
+  },
   "dyny": {
     "username": "username",
     "password": "password"

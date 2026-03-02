@@ -16,9 +16,16 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 
-use crate::crawler::cnyes::CnYes;
 use crate::{
-    crawler::{cmoney::CMoney, megatime::PcHome, nstock::NStock, yahoo::Yahoo},
+    crawler::{
+        cnyes::CnYes,
+        histock::HiStock,
+        cmoney::CMoney,
+        fugle::Fugle,
+        megatime::PcHome,
+        nstock::NStock,
+        yahoo::Yahoo
+    },
     declare,
 };
 
@@ -36,6 +43,8 @@ pub mod cnyes;
 pub mod dynu;
 /// 富邦證券
 pub mod fbs;
+/// Fugle 行情 API
+pub mod fugle;
 /// Goodinfo! 台灣股市資訊網 (提供股利與基本面資料)
 pub mod goodinfo;
 /// HiStock 嗨投資 (財經社群與數據站)
@@ -120,14 +129,15 @@ fn get_and_increment_index(max: usize) -> usize {
 /// # 傳回值
 /// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
-    let site_names = ["Yahoo", "CMoney", "NStock", "PcHome", "CnYes"];
+    let site_names = ["Yahoo", "Fugle", "NStock", "CMoney", "HiStock", "CnYes", "PcHome"];
     let sites = [
         Yahoo::get_stock_price,
-        CMoney::get_stock_price,
+        Fugle::get_stock_price,
         NStock::get_stock_price,
-        PcHome::get_stock_price,
-        //HiStock::get_stock_price,
+        CMoney::get_stock_price,
+        HiStock::get_stock_price,
         CnYes::get_stock_price,
+        PcHome::get_stock_price,
     ];
     let site_len = sites.len();
     let mut errors = Vec::with_capacity(site_len);
@@ -160,14 +170,15 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 pub async fn fetch_stock_quotes_from_remote_site(
     stock_symbol: &str,
 ) -> Result<declare::StockQuotes> {
-    let site_names = ["Yahoo", "NStock", "PcHome", "CMoney", "CnYes"];
+    let site_names = ["Yahoo", "Fugle", "NStock", "CMoney", "HiStock", "CnYes", "PcHome"];
     let sites = [
         Yahoo::get_stock_quotes,
+        Fugle::get_stock_quotes,
         NStock::get_stock_quotes,
-        PcHome::get_stock_quotes,
         CMoney::get_stock_quotes,
-        //HiStock::get_stock_quotes,
+        HiStock::get_stock_quotes,
         CnYes::get_stock_quotes,
+        PcHome::get_stock_quotes,
     ];
     let site_len = sites.len();
     let mut errors = Vec::with_capacity(site_len);
@@ -186,7 +197,6 @@ pub async fn fetch_stock_quotes_from_remote_site(
         errors.join(" | ")
     ))
 }
-
 
 #[cfg(test)]
 mod tests {

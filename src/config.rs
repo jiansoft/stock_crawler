@@ -16,6 +16,8 @@ const CONFIG_PATH: &str = "app.json";
 pub struct App {
     /// Afraid DNS 服務設定
     pub afraid: Afraid,
+    /// Fugle 行情 API 設定
+    pub fugle: Fugle,
     /// Dynu DNS 服務設定
     pub dyny: Dynu,
     /// No-IP DNS 服務設定
@@ -73,6 +75,7 @@ pub struct Grpc {
 }
 
 const AFRAID_TOKEN: &str = "AFRAID_TOKEN";
+const FUGLE_API_KEY: &str = "FUGLE_API_KEY";
 
 /// Afraid DNS 服務設定
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -86,6 +89,14 @@ pub struct Afraid {
     /// 請求路徑
     #[serde(default)]
     pub path: String,
+}
+
+/// Fugle 行情 API 設定
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Fugle {
+    /// Fugle API 金鑰
+    #[serde(default)]
+    pub api_key: String,
 }
 
 const DYNU_USERNAME: &str = "DYNU_USERNAME";
@@ -260,6 +271,9 @@ impl App {
                 url: "".to_string(),
                 path: "".to_string(),
             },
+            fugle: Fugle {
+                api_key: env::var(FUGLE_API_KEY).unwrap_or_default(),
+            },
             postgresql: PostgreSQL {
                 host: env::var(POSTGRESQL_HOST).expect(POSTGRESQL_HOST),
                 port: i32::from_str(
@@ -319,6 +333,10 @@ impl App {
     fn override_with_env(mut self) -> Self {
         if let Ok(token) = env::var(AFRAID_TOKEN) {
             self.afraid.token = token;
+        }
+
+        if let Ok(api_key) = env::var(FUGLE_API_KEY) {
+            self.fugle.api_key = api_key;
         }
 
         if let Ok(username) = env::var(DYNU_USERNAME) {

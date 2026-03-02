@@ -29,17 +29,34 @@ API︰https://github.com/jiansoft/stock_api
 1. 理財寶-股市爆料同學會 https://www.cmoney.tw/forum/popular
 2. 鉅亨網 https://www.cnyes.com
 3. 富邦證券 https://www.fbs.com.tw
-4. 台灣股市資訊網 https://goodinfo.tw/tw
-5. 嗨投資 https://histock.tw
-6. PCHOME(大時科技) https://pchome.megatime.com.tw
-7. 嘉實資訊-理財網 https://www.moneydj.com
-8. 恩投資 https://www.nstock.tw
-9. 台灣期貨交易所 https://www.taifex.com.tw
-10. 台灣證券櫃檯買賣中心 https://www.tpex.org.tw
-11. 台灣證券交易所 https://www.twse.com.tw
-12. 撿股讚 https://stock.wespai.com
-13. 雅虎股市 https://tw.stock.yahoo.com
-14. 元大證券 https://www.yuanta.com.tw
+4. Fugle 行情 API https://developer.fugle.tw/docs/data/http-api/getting-started/
+5. 台灣股市資訊網 https://goodinfo.tw/tw
+6. 嗨投資 https://histock.tw
+7. PCHOME(大時科技) https://pchome.megatime.com.tw
+8. 嘉實資訊-理財網 https://www.moneydj.com
+9. 恩投資 https://www.nstock.tw
+10. 台灣期貨交易所 https://www.taifex.com.tw
+11. 台灣證券櫃檯買賣中心 https://www.tpex.org.tw
+12. 台灣證券交易所 https://www.twse.com.tw
+13. 撿股讚 https://stock.wespai.com
+14. 雅虎股市 https://tw.stock.yahoo.com
+15. 元大證券 https://www.yuanta.com.tw
+
+### 主要設定
++ 所有設定可透過 `app.json` 提供，並可由 `.env` 或系統環境變數覆蓋。
++ 即時報價備援來源已加入 Fugle 官方日內行情 API。
++ 若未設定 `FUGLE_API_KEY`，系統會略過 Fugle，繼續使用其他即時報價來源。
+
+#### 常用環境變數
++ `FUGLE_API_KEY`：Fugle 日內行情 API 金鑰（即時報價備援）
++ `AFRAID_TOKEN`：Afraid DDNS 更新權杖
++ `DYNU_USERNAME`、`DYNU_PASSWORD`：Dynu DDNS 帳號密碼
++ `NOIP_USERNAME`、`NOIP_PASSWORD`、`NOIP_HOSTNAMES`：No-IP DDNS 設定
++ `TELEGRAM_TOKEN`、`TELEGRAM_ALLOWED`：Telegram Bot 與允許通知的 chat 設定
++ `REDIS_ADDR`、`REDIS_ACCOUNT`、`REDIS_PASSWORD`、`REDIS_DB`：Redis 連線設定
++ `POSTGRESQL_HOST`、`POSTGRESQL_PORT`、`POSTGRESQL_USER`、`POSTGRESQL_PASSWORD`、`POSTGRESQL_DB`：PostgreSQL 連線設定
++ `GO_GRPC_TARGET`、`GO_GRPC_TLS_CERT_FILE`、`GO_GRPC_TLS_KEY_FILE`、`GO_GRPC_DOMAIN_NAME`：對外 Go gRPC 服務連線設定
++ `SYSTEM_GRPC_USE_PORT`、`SYSTEM_SSL_CERT_FILE`、`SYSTEM_SSL_KEY_FILE`：本服務 gRPC 與 TLS 憑證設定
 
 
 ### 免責聲明
