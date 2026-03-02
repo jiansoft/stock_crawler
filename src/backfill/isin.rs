@@ -60,7 +60,9 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
         }
     }
 
-    bot::telegram::send(&to_bot_msg).await;
+    if !to_bot_msg.is_empty() {
+        bot::telegram::send(&to_bot_msg).await;
+    }
 
     Ok(())
 }

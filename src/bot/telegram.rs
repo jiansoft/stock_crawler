@@ -112,6 +112,9 @@ fn get_client() -> &'static Telegram {
 ///
 /// * `msg` - 要發送的消息內容
 pub async fn send(msg: &str) {
+    if msg.trim().is_empty() {
+        return;
+    }
     let client = get_client();
     match client.send(msg).await {
         Ok(rep) => {
