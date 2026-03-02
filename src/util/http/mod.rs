@@ -321,25 +321,25 @@ async fn send(
         let rb_clone = rb
             .try_clone()
             .ok_or_else(|| anyhow!("Failed to clone RequestBuilder"))?;
-        let permit = SEMAPHORE.acquire().await;
-        let start = Instant::now();
-        let res = rb_clone.send().await;
-        let elapsed = start.elapsed().as_millis();
-
-        // 請求延遲，避免被目標網站封禁
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        drop(permit);
+        let (res, elapsed) = {
+            let _permit = SEMAPHORE.acquire().await;
+            let start = Instant::now();
+            let res = rb_clone.send().await;
+            let elapsed = start.elapsed().as_millis();
+            (res, elapsed)
+        };
 
         match res {
             Ok(response) => {
-                LOGGER.info(format!("{} {} ms", msg, elapsed));
-                //let text = response.text().await?; // Here we take ownership of response
-                //LOGGER.info(format!("Response text: {}", text));
+                LOGGER.info(format!("HTTP請求耗時 {} {} ms", msg, elapsed));
                 return Ok(response);
             }
             Err(why) => {
                 last_error = format!("{:?}", why);
-                LOGGER.error(format!("{} failed because {:?}. {} ms", msg, why, elapsed));
+                LOGGER.error(format!(
+                    "HTTP請求失敗 {} because {:?}. {} ms",
+                    msg, why, elapsed
+                ));
                 if attempt < MAX_RETRIES {
                     tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32))).await;
 

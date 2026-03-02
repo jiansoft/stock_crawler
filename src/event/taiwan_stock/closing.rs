@@ -3,6 +3,7 @@ use crate::{
     bot::{self, telegram::Telegram},
     cache::{TtlCacheInner, TTL},
     calculation,
+    crawler,
     database::table::{
         daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
         daily_quote, last_daily_quotes, yield_rank::YieldRank,
@@ -36,6 +37,8 @@ pub async fn execute() -> Result<()> {
     if let Err(why) = res_aggregation {
         logging::error_file_async(format!("Failed to closing::aggregate() because {:#?}", why));
     }
+
+    crawler::flush_site_latency_stats();
 
     Ok(())
 }
