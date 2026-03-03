@@ -76,3 +76,16 @@ create index "DailyQuotes_Date_include_symbol_idx"
 
 create unique index "DailyQuotes_stock_symbol_Date_uidx"
     on public."DailyQuotes" (stock_symbol asc, "Date" desc) include (year, "HighestPrice", "LowestPrice", "ClosingPrice", "price-to-book_ratio", "PriceEarningRatio");
+
+CREATE INDEX DailyQuotes_year_date_price_idx
+    ON "DailyQuotes" ("year", "Date", "stock_symbol")
+    INCLUDE ("LowestPrice", "ClosingPrice", "HighestPrice",
+        "price-to-book_ratio", "PriceEarningRatio")
+    WHERE "ClosingPrice" > 0;
+
+CREATE INDEX CONCURRENTLY dailyquotes_stats_covering_idx
+    ON "DailyQuotes" (year, "Date", stock_symbol)
+    INCLUDE (
+        "LowestPrice", "ClosingPrice", "HighestPrice",
+        "price-to-book_ratio", "PriceEarningRatio"
+        );
