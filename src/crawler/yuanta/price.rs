@@ -140,7 +140,7 @@ mod tests {
         for stock_symbol in ["2330", "5306"] {
             match Yuanta::get_stock_quotes(stock_symbol).await {
                 Ok(quotes) => logging::debug_file_async(format!(
-                    "yuanta {stock_symbol} quotes: {:?}",
+                    "yuanta::get_stock_quotes {stock_symbol}: {:?}",
                     quotes
                 )),
                 Err(why) => logging::debug_file_async(format!(

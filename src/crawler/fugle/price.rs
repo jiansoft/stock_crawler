@@ -290,7 +290,7 @@ mod tests {
         for stock_symbol in ["2330", "5306"] {
             match Fugle::get_stock_quotes(stock_symbol).await {
                 Ok(quotes) => logging::debug_file_async(format!(
-                    "fugle {stock_symbol} quotes: {:?}",
+                    "fugle::get_stock_quotes {stock_symbol}: {:?}",
                     quotes
                 )),
                 Err(why) => logging::debug_file_async(format!(

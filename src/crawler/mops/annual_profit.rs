@@ -12,6 +12,28 @@
 //! - `profit_before_tax`：先抓稅前與稅後損益總額，再以 `稅後淨利 ÷ 稅後 EPS`
 //!   反推加權平均股數，換算每股稅前淨利；
 //!   若特定公司在該端點回空表，則以 `0` 作為保守 fallback
+//!
+//! ## 公式說明
+//!
+//! MOPS `compare/data` 與 `compare/report` 取得的多數金額單位為「仟元」，
+//! 因此在換算成每股數值時，需要注意單位是否可直接相消。
+//!
+//! ### 每股營收
+//! - `Revenue`：營業收入（仟元）
+//! - `CommonStock`：股本（仟元）
+//! - 以台股普通股面額 `10` 元估算股數
+//!
+//! 公式：
+//! `每股營收 = Revenue / (CommonStock / 10) = Revenue * 10 / CommonStock`
+//!
+//! ### 每股稅前淨利
+//! - `profit_before_tax_total`：稅前淨利總額（仟元）
+//! - `profit_for_eps_total`：與稅後 EPS 對應的淨利總額（仟元）
+//! - `earnings_per_share`：稅後每股盈餘（元）
+//!
+//! 先以 `profit_for_eps_total / earnings_per_share` 反推「加權平均股數（仟股）」，
+//! 再以 `profit_before_tax_total / weighted_average_shares`
+//! 得到每股稅前淨利（元）。
 
 use std::collections::HashMap;
 
@@ -51,6 +73,9 @@ struct GraphSeries {
 }
 
 /// MOPS 綜合損益表中本次需要的年度指標。
+///
+/// 這些欄位都直接來自 `compare/report` 的綜合損益表，
+/// 單位皆為「仟元」。
 struct IncomeStatementMetrics {
     /// 稅前淨利總額（仟元）。
     profit_before_tax_total: Decimal,
@@ -60,7 +85,14 @@ struct IncomeStatementMetrics {
 
 /// 取得指定股票的年度財報資料。
 ///
-/// 此函式目前不會自動接入正式流程，僅提供獨立抓取能力。
+/// 此函式會整合 MOPS 的趨勢資料與綜合損益表資料，
+/// 回填 `AnnualProfit` 需要的三個欄位：
+/// - `sales_per_share`
+/// - `earnings_per_share`
+/// - `profit_before_tax`
+///
+/// `profit_before_tax` 會先反推加權平均股數，再換算成每股值，
+/// 避免直接使用股本推估造成偏差。
 pub async fn visit(stock_symbol: &str) -> Result<Vec<share::AnnualProfit>> {
     let eps_by_year = fetch_compare_series(stock_symbol, "EPS", "元").await?;
     if eps_by_year.is_empty() {
@@ -107,6 +139,9 @@ pub async fn visit(stock_symbol: &str) -> Result<Vec<share::AnnualProfit>> {
     Ok(result)
 }
 
+/// 建立 MOPS `compare/data` 查詢所需的表單參數。
+///
+/// 目前固定查詢年度累計（`Q4`）資料，因此 `qnumber` 固定為 `4`。
 fn build_compare_data_params<'a>(
     stock_symbol: &'a str,
     compare_item: &'a str,
@@ -125,6 +160,12 @@ fn build_compare_data_params<'a>(
     params
 }
 
+/// 抓取 MOPS 趨勢圖資料並轉為「年度 -> 數值」對照表。
+///
+/// 此函式用於取得：
+/// - `EPS`
+/// - `Revenue`
+/// - `CommonStock`
 async fn fetch_compare_series(
     stock_symbol: &str,
     compare_item: &str,
@@ -182,6 +223,11 @@ async fn fetch_compare_series(
     Ok(result)
 }
 
+/// 抓取指定年度的綜合損益表關鍵指標。
+///
+/// 目前會回傳：
+/// - 稅前淨利總額
+/// - 與 EPS 對應的稅後淨利總額
 async fn fetch_income_statement_metrics(
     stock_symbol: &str,
     year: i32,
@@ -203,6 +249,10 @@ async fn fetch_income_statement_metrics(
     parse_income_statement_metrics_from_report(&html)
 }
 
+/// 從 MOPS X 軸標籤中解析年度。
+///
+/// 例如：
+/// - `2024Q4` -> `2024`
 fn parse_year_from_xaxis(xaxis: &str) -> Result<i32> {
     let year = xaxis
         .get(..4)
@@ -212,6 +262,14 @@ fn parse_year_from_xaxis(xaxis: &str) -> Result<i32> {
         .map_err(|why| anyhow!("Failed to parse xaxis year '{}' because {:?}", xaxis, why))
 }
 
+/// 以 MOPS 的 `Revenue` 與 `CommonStock` 推算每股營收。
+///
+/// # 單位
+/// - `revenue`：仟元
+/// - `common_stock`：仟元
+///
+/// # 公式
+/// `Revenue * 10 / CommonStock`
 fn calc_sales_per_share(revenue: Decimal, common_stock: Decimal) -> Decimal {
     if common_stock.is_zero() {
         return Decimal::ZERO;
@@ -221,6 +279,17 @@ fn calc_sales_per_share(revenue: Decimal, common_stock: Decimal) -> Decimal {
     revenue * Decimal::from(10) / common_stock
 }
 
+/// 由稅後淨利與稅後 EPS 反推加權平均股數。
+///
+/// # 單位
+/// - `net_profit_total`：仟元
+/// - `earnings_per_share`：元
+///
+/// # 回傳
+/// - 加權平均股數（仟股）
+///
+/// # 公式
+/// `weighted_average_shares = net_profit_total / earnings_per_share`
 fn calc_weighted_average_shares(net_profit_total: Decimal, earnings_per_share: Decimal) -> Decimal {
     if earnings_per_share.is_zero() {
         return Decimal::ZERO;
@@ -231,6 +300,17 @@ fn calc_weighted_average_shares(net_profit_total: Decimal, earnings_per_share: D
     net_profit_total / earnings_per_share
 }
 
+/// 將稅前淨利總額換算成每股稅前淨利。
+///
+/// # 單位
+/// - `total_profit_before_tax`：仟元
+/// - `weighted_average_shares`：仟股
+///
+/// # 回傳
+/// - 每股稅前淨利（元）
+///
+/// # 公式
+/// `profit_before_tax_per_share = total_profit_before_tax / weighted_average_shares`
 fn calc_profit_before_tax_per_share(
     total_profit_before_tax: Decimal,
     weighted_average_shares: Decimal,
@@ -244,6 +324,10 @@ fn calc_profit_before_tax_per_share(
     total_profit_before_tax / weighted_average_shares
 }
 
+/// 從 MOPS 綜合損益表 HTML 解析本次需要的年度指標。
+///
+/// 會同時支援一般產業與金融股的欄位名稱差異。
+/// 若找不到對應列，則該指標會以 `0` 回填。
 fn parse_income_statement_metrics_from_report(html: &str) -> Result<IncomeStatementMetrics> {
     const PROFIT_BEFORE_TAX_LABELS: [&str; 3] = [
         "稅前淨利（淨損）",

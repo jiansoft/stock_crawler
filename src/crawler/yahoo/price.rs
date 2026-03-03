@@ -144,18 +144,21 @@ mod tests {
     #[tokio::test]
     async fn test_get_stock_quotes() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 get_stock_quotes".to_string());
+        logging::debug_file_async("開始 yahoo::get_stock_quotes".to_string());
 
         match Yahoo::get_stock_quotes("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("get_stock_quotes : {:#?}", e));
+                logging::debug_file_async(format!("yahoo::get_stock_quotes : {:#?}", e));
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to get_stock_quotes because {:?}", why));
+                logging::debug_file_async(format!(
+                    "Failed to yahoo::get_stock_quotes because {:?}",
+                    why
+                ));
             }
         }
 
-        logging::debug_file_async("結束 get_stock_quotes".to_string());
+        logging::debug_file_async("結束 yahoo::get_stock_quotes".to_string());
     }
 }
