@@ -131,7 +131,7 @@ mod tests {
         match Yahoo::get_stock_price("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("dividend : {:#?}", e));
+                logging::debug_file_async(format!("yahoo::get_stock_price {:#?}", e));
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to visit because {:?}", why));
@@ -149,7 +149,7 @@ mod tests {
         match Yahoo::get_stock_quotes("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("yahoo::get_stock_quotes : {:#?}", e));
+                logging::debug_file_async(format!("yahoo::get_stock_quotes {:#?}", e));
             }
             Err(why) => {
                 logging::debug_file_async(format!(
