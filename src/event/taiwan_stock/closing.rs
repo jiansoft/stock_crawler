@@ -38,6 +38,9 @@ pub async fn execute() -> Result<()> {
         logging::error_file_async(format!("Failed to closing::aggregate() because {:#?}", why));
     }
 
+    // 停止 HiStock 10 秒定時快取
+    crawler::histock::price::stop_caching_task().await;
+
     crawler::flush_site_latency_stats();
 
     Ok(())

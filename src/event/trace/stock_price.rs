@@ -62,6 +62,9 @@ pub async fn execute() -> Result<()> {
 
     // 啟動背景監控任務
     task::spawn(async move {
+        // 啟動 HiStock 10 秒定時快取
+        crawler::histock::price::start_caching_task();
+        
         trace_price_run().await;
         IS_RUNNING.store(false, Ordering::SeqCst);
     });
