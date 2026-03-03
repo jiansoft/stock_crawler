@@ -10,7 +10,7 @@
 //! 4. 將已處理的股票寫入 Redis，避免短時間內重複抓取。
 
 use std::collections::HashSet;
-
+use std::time::Duration;
 use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local, NaiveDate};
 
@@ -67,6 +67,8 @@ pub async fn execute() -> Result<()> {
         nosql::redis::CLIENT
             .set(cache_key, true, 60 * 60 * 24 * 7)
             .await?;
+        // 主動節流，降低被來源站台限流或封鎖的風險。
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
     Ok(())
