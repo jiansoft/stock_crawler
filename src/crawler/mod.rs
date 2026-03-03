@@ -26,6 +26,7 @@ use crate::{
         cnyes::CnYes,
         cmoney::CMoney,
         fugle::Fugle,
+        histock::HiStock,
         megatime::PcHome,
         nstock::NStock,
         yahoo::Yahoo,
@@ -228,7 +229,7 @@ pub fn flush_site_latency_stats() {
 /// 從多個遠端站點中輪詢獲取股票的最新成交價。
 ///
 /// 此函數會嘗試預設的站點清單，如果某個站點失敗，會自動嘗試下一個，直到成功或所有站點都失敗為止。
-/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, Yuanta, PcHome。
+/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, Yuanta, PcHome, HiStock。
 ///
 /// # 參數
 /// * `stock_symbol` - 股票代碼 (例如: "2330")
@@ -236,7 +237,9 @@ pub fn flush_site_latency_stats() {
 /// # 傳回值
 /// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
-    let site_names = ["Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome"];
+    let site_names = [
+        "Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome", "HiStock",
+    ];
     let sites = [
         Yahoo::get_stock_price,
         Fugle::get_stock_price,
@@ -245,6 +248,7 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
         CnYes::get_stock_price,
         Yuanta::get_stock_price,
         PcHome::get_stock_price,
+        HiStock::get_stock_price,
     ];
     let site_len = sites.len();
     let mut errors = Vec::with_capacity(site_len);
@@ -284,7 +288,9 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 pub async fn fetch_stock_quotes_from_remote_site(
     stock_symbol: &str,
 ) -> Result<declare::StockQuotes> {
-    let site_names = ["Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome"];
+    let site_names = [
+        "Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome", "HiStock",
+    ];
     let sites = [
         Yahoo::get_stock_quotes,
         Fugle::get_stock_quotes,
@@ -293,6 +299,7 @@ pub async fn fetch_stock_quotes_from_remote_site(
         CnYes::get_stock_quotes,
         Yuanta::get_stock_quotes,
         PcHome::get_stock_quotes,
+        HiStock::get_stock_quotes,
     ];
     let site_len = sites.len();
     let mut errors = Vec::with_capacity(site_len);
