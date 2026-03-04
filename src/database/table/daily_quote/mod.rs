@@ -145,8 +145,6 @@ impl Keyable for DailyQuote {
 
 impl DailyQuote {
     /// 建立 `DailyQuote` 預設實例，並同步初始化股票代碼欄位。
-    ///
-    /// `security_code` 與 `stock_symbol` 會設定為同一值。
     pub fn new<S: Into<String>>(security_code: S) -> Self {
         let security_code = security_code.into();
         DailyQuote {
@@ -157,7 +155,7 @@ impl DailyQuote {
 
     /// 依欄位名稱映射，從單筆原始字串資料建立 `DailyQuote`。
     ///
-    /// 適用於欄位順序可能變動的來源（例如 TWSE JSON `fields`）。
+    /// 適用於欄位順序可能變動的來源（例如 TWSE MI_INDEX）。
     pub fn from_with_map(item: &[String], map: &std::collections::HashMap<&str, usize>) -> Self {
         let code = map
             .get("證券代號")
@@ -251,8 +249,6 @@ impl DailyQuote {
     }
 
     /// 將當前報價寫入資料庫，若主鍵衝突則更新既有資料。
-    ///
-    /// 目前衝突鍵為 `("stock_symbol", "Date")`。
     pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
        INSERT INTO "DailyQuotes" (
@@ -306,7 +302,9 @@ impl DailyQuote {
             "OpeningPrice" = excluded."OpeningPrice",
             "TradingVolume" = excluded."TradingVolume",
             "TradeValue" = excluded."TradeValue",
-            "Transaction" = excluded."Transaction"
+            "Transaction" = excluded."Transaction",
+            "price-to-book_ratio" = excluded."price-to-book_ratio",
+            "PriceEarningRatio" = excluded."PriceEarningRatio"
     "#;
         sqlx::query(sql)
             .bind(self.maximum_price_in_year_date_on)
@@ -351,10 +349,6 @@ impl DailyQuote {
     }
 
     /// 依指定日期回填該股票的均線與年內高低點統計。
-    ///
-    /// 會查詢截至 `self.date` 的歷史資料，並更新：
-    /// - 5/10/20/60/120/240 日均線
-    /// - 年內最高價、最低價、均價與其日期
     pub async fn fill_moving_average(&mut self) -> Result<()> {
         let year_ago = self.date - TimeDelta::try_days(400).unwrap();
         let sql = r#"
@@ -406,17 +400,12 @@ SELECT
             ))
     }
 
-    /// 批次更新均線與年內統計欄位。
-    ///
-    /// 使用 PostgreSQL 的 UNNEST 語法，將多筆資料在單次 SQL 請求中完成更新，
-    /// 效率遠高於逐筆執行 `update_moving_average`。
+    /// 批次更新均線、年內統計與 PBR。
     pub async fn batch_update_moving_average(quotes: &[Self]) -> Result<PgQueryResult> {
-        // 若輸入列表為空則直接回傳錯誤
         if quotes.is_empty() {
             return Err(anyhow!("Cannot batch update empty quotes"));
         }
 
-        // 預先分配空間以提升效能，避免動態擴展
         let mut serials = Vec::with_capacity(quotes.len());
         let mut ma5 = Vec::with_capacity(quotes.len());
         let mut ma10 = Vec::with_capacity(quotes.len());
@@ -431,8 +420,6 @@ SELECT
         let mut min_d = Vec::with_capacity(quotes.len());
         let mut pbr = Vec::with_capacity(quotes.len());
 
-        // 將結構體列表轉換為多個對應的「欄位數組 (Arrays)」
-        // 這是為了配合 PostgreSQL 的 UNNEST 語法，將資料一次性打包傳送
         for q in quotes {
             serials.push(q.serial);
             ma5.push(q.moving_average_5);
@@ -449,10 +436,6 @@ SELECT
             pbr.push(q.price_to_book_ratio);
         }
 
-        // SQL 優化核心：
-        // 1. 使用 UNNEST 將傳入的 $1~$13 數組「拆解」成一個虛擬資料表 (Alias 為 t)。
-        // 2. 透過 UPDATE ... FROM 語法將虛擬資料表 t 與實體資料表 dq 進行 Join。
-        // 3. 根據 Serial 主鍵匹配後，一次性更新所有欄位。
         let sql = r#"
             UPDATE "DailyQuotes" AS dq
             SET
@@ -474,7 +457,6 @@ SELECT
             WHERE dq."Serial" = t.serial
         "#;
 
-        // 執行參數綁定與發送
         sqlx::query(sql)
             .bind(&serials)
             .bind(&ma5)
@@ -496,8 +478,6 @@ SELECT
 
 
     /// 使用 `COPY` 批次寫入 `DailyQuotes`。
-    ///
-    /// 適合大量資料匯入，比逐筆 `upsert` 更有效率。
     pub async fn copy_in_raw(quotes: &[Self]) -> Result<u64> {
         database::copy_in_raw(COPY_IN_QUERY, quotes).await
     }
@@ -505,11 +485,9 @@ SELECT
 
 /// 不同交易所來源轉換為統一資料模型的介面。
 pub trait FromWithExchange<T, U> {
-    /// 依交易所與來源資料格式建立實例。
     fn from_with_exchange(exchange: T, item: &U) -> Self;
 }
 
-//let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
 impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
     fn from_with_exchange(exchange: StockExchange, item: &Vec<String>) -> Self {
         let mut e = DailyQuote::new(item[0].to_string());
@@ -577,9 +555,6 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
 }
 
 /// 補齊指定日期缺漏的每日收盤資料。
-///
-/// 會從近 30 天內最後一筆資料複製缺漏股票至目標日期，
-/// 並將成交量、成交金額、漲跌等欄位歸零。
 pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQueryResult> {
     let date_str = date.format("%Y-%m-%d").to_string();
     let prev_date = (date - TimeDelta::try_days(30).unwrap())
@@ -697,8 +672,6 @@ pub async fn fetch_count_by_date(date: NaiveDate) -> Result<i64> {
 }
 
 /// 讀取指定日期的所有日報價資料。
-///
-/// 回傳結果已映射為 `Vec<DailyQuote>`。
 pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuote>> {
     let sql = r#"
     SELECT
@@ -939,11 +912,6 @@ mod tests {
 
         match e.upsert().await {
             Ok(_) => {
-                /* logging::info_file_async(format!("word_id:{} e:{:#?}", word_id, &e));
-                let _ = sqlx::query("delete from company_word where word_id = $1;")
-                    .bind(word_id)
-                    .execute(&DB.pool)
-                    .await;*/
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to upsert because:{:?}", why));
@@ -980,11 +948,6 @@ mod tests {
 
         match e.upsert().await {
             Ok(_) => {
-                /* logging::info_file_async(format!("word_id:{} e:{:#?}", word_id, &e));
-                let _ = sqlx::query("delete from company_word where word_id = $1;")
-                    .bind(word_id)
-                    .execute(&DB.pool)
-                    .await;*/
             }
             Err(why) => {
                 logging::debug_file_async(format!("Failed to upsert because:{:?}", why));

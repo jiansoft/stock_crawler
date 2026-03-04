@@ -90,6 +90,36 @@ impl Estimate {
 
     /// 依指定日期與年份清單，批次重建所有股票估值資料。
     ///
+    /// ### 估值計算公式說明：
+    /// 本方法整合五種估值模型，並依特定權重計算加權後的「便宜價」、「合理價」與「昂貴價」。
+    ///
+    /// **1. 加權比例 (Weights)：**
+    /// *   價格法 (20%) + 股利法 (29%) + EPS 法 (30%) + PBR 法 (20%) + PER 法 (1%)
+    ///
+    /// **2. 各別估值法細節：**
+    /// *   **價格法 (Price-based)：**
+    ///     *   便宜價：指定年份內 `LowestPrice` 的 10% 分位數。
+    ///     *   合理價：指定年份內 `ClosingPrice` 的 50% 分位數。
+    ///     *   昂貴價：指定年份內 `HighestPrice` 的 80% 分位數。
+    /// *   **股利法 (Dividend-based)：**
+    ///     *   基準：指定年份內「年均股利」。
+    ///     *   便宜/合理/昂貴：基準 × 15 / 20 / 25。
+    /// *   **EPS 法 (Expected EPS)：**
+    ///     *   基準：`近四季 EPS` × `指定年份內第 70 百分位的盈餘分配率 (Payout Ratio)`。
+    ///     *   便宜/合理/昂貴：基準 × 15 / 20 / 25。
+    /// *   **PBR 法 (Price-to-Book Ratio)：**
+    ///     *   基準：`每股淨值`。
+    ///     *   倍數：指定年份內 `PBR` 的 10% / 50% / 80% 分位數。
+    ///     *   便宜/合理/昂貴：基準 × 倍數。
+    /// *   **PER 法 (Price-Earning Ratio)：**
+    ///     *   基準：指定年份內「年均 EPS」。
+    ///     *   倍數：指定年份內 `PER` 的 10% / 50% / 80% 分位數。
+    ///     *   便宜/合理/昂貴：基準 × 倍數。
+    ///
+    /// **3. 百分比 (Percentage) 計算：**
+    /// *   公式：`(當前收盤價 / 加權便宜價) * 100`。
+    /// *   數值越低代表股價相對越便宜。
+    ///
     /// `years` 格式為逗號分隔字串，例如 `\"2026,2025,2024\"`。
     ///
     /// # Errors
@@ -110,19 +140,27 @@ daily_stats AS (
     -- 一次性計算所有基於 DailyQuotes 的統計指標，大幅減少 I/O
     SELECT
         dq."stock_symbol",
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."LowestPrice") AS p_cheap,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."ClosingPrice") AS p_fair,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."HighestPrice") AS p_expensive,
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") AS pbr_low,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") AS pbr_mid,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") AS pbr_high,
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") AS pe_low,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") AS pe_mid,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") AS pe_high
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."LowestPrice")
+            FILTER (WHERE dq."ClosingPrice" > 0) AS p_cheap,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."ClosingPrice")
+            FILTER (WHERE dq."ClosingPrice" > 0) AS p_fair,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."HighestPrice")
+            FILTER (WHERE dq."ClosingPrice" > 0) AS p_expensive,
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."price-to-book_ratio")
+            FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_low,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."price-to-book_ratio")
+            FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_mid,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."price-to-book_ratio")
+            FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_high,
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."PriceEarningRatio")
+            FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_low,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."PriceEarningRatio")
+            FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_mid,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."PriceEarningRatio")
+            FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_high
     FROM "DailyQuotes" dq, filtered_years fy
     WHERE dq."Date" <= $1 
       AND dq."year" = ANY(fy.years)
-      AND dq."ClosingPrice" > 0
     GROUP BY dq."stock_symbol"
 ),
 dividend_agg AS (
@@ -143,7 +181,10 @@ eps_per_agg AS (
     -- EPS 與財報統計
     SELECT 
         security_code as stock_symbol,
-        AVG(annual_eps) as eps_avg
+        CASE
+            WHEN AVG(annual_eps) > 0 THEN AVG(annual_eps)
+            ELSE 0
+        END as eps_avg
     FROM (
         SELECT security_code, "year", SUM(earnings_per_share) as annual_eps
         FROM financial_statement, filtered_years fy
@@ -158,27 +199,39 @@ valuation_base AS (
         s.stock_symbol,
         dq."Date" as q_date,
         dq."ClosingPrice" as q_close,
-        COALESCE(ds.p_cheap, 0) as p_cheap, 
-        COALESCE(ds.p_fair, 0) as p_fair, 
-        COALESCE(ds.p_expensive, 0) as p_expensive,
-        COALESCE(da.div_base * 15, 0) as div_c, 
-        COALESCE(da.div_base * 20, 0) as div_f, 
-        COALESCE(da.div_base * 25, 0) as div_e,
-        (s.last_four_eps * COALESCE(dpr.payout_ratio, 70) / 100 * 15) as eps_c,
-        (s.last_four_eps * COALESCE(dpr.payout_ratio, 70) / 100 * 20) as eps_f,
-        (s.last_four_eps * COALESCE(dpr.payout_ratio, 70) / 100 * 25) as eps_e,
-        COALESCE(ds.pbr_low * s.net_asset_value_per_share, 0) as pbr_c,
-        COALESCE(ds.pbr_mid * s.net_asset_value_per_share, 0) as pbr_f,
-        COALESCE(ds.pbr_high * s.net_asset_value_per_share, 0) as pbr_e,
-        COALESCE(ds.pe_low * ep.eps_avg, 0) as per_c,
-        COALESCE(ds.pe_mid * ep.eps_avg, 0) as per_f,
-        COALESCE(ds.pe_high * ep.eps_avg, 0) as per_e
+        ds.p_cheap as p_cheap,
+        ds.p_fair as p_fair,
+        ds.p_expensive as p_expensive,
+        (da.div_base * 15) as div_c,
+        (da.div_base * 20) as div_f,
+        (da.div_base * 25) as div_e,
+        CASE
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 15
+            ELSE 0
+        END as eps_c,
+        CASE
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 20
+            ELSE 0
+        END as eps_f,
+        CASE
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 25
+            ELSE 0
+        END as eps_e,
+        (ds.pbr_low * s.net_asset_value_per_share) as pbr_c,
+        (ds.pbr_mid * s.net_asset_value_per_share) as pbr_f,
+        (ds.pbr_high * s.net_asset_value_per_share) as pbr_e,
+        (ds.pe_low * ep.eps_avg) as per_c,
+        (ds.pe_mid * ep.eps_avg) as per_f,
+        (ds.pe_high * ep.eps_avg) as per_e
     FROM stocks s
     JOIN "DailyQuotes" dq ON s.stock_symbol = dq."stock_symbol" AND dq."Date" = $1
-    LEFT JOIN daily_stats ds ON s.stock_symbol = ds."stock_symbol"
-    LEFT JOIN dividend_agg da ON s.stock_symbol = da.stock_symbol
-    LEFT JOIN eps_per_agg ep ON s.stock_symbol = ep.stock_symbol
-    LEFT JOIN (
+    JOIN daily_stats ds ON s.stock_symbol = ds."stock_symbol"
+        AND ds.p_cheap IS NOT NULL
+        AND ds.pbr_low IS NOT NULL
+        AND ds.pe_low IS NOT NULL
+    JOIN dividend_agg da ON s.stock_symbol = da.stock_symbol
+    JOIN eps_per_agg ep ON s.stock_symbol = ep.stock_symbol
+    JOIN (
         SELECT security_code, PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY payout_ratio) as payout_ratio
         FROM dividend, filtered_years fy WHERE "year" = ANY(fy.years) AND payout_ratio > 0 AND payout_ratio <= 200
         GROUP BY security_code
@@ -188,15 +241,28 @@ valuation_base AS (
 SELECT
     stock_symbol, q_date,
     -- 使用加權後的便宜價作為分母計算百分比
-    (q_close / NULLIF(calc.weighted_cheap, 0)) * 100,
-    q_close, calc.weighted_cheap, calc.weighted_fair, calc.weighted_expensive,
-    p_cheap, p_fair, p_expensive,
-    div_c, div_f, div_e,
+    ROUND(((q_close / NULLIF(calc.weighted_cheap, 0)) * 100)::numeric, 4) as percentage,
+    ROUND(q_close::numeric, 4) as q_close,
+    ROUND(calc.weighted_cheap::numeric, 4) as weighted_cheap,
+    ROUND(calc.weighted_fair::numeric, 4) as weighted_fair,
+    ROUND(calc.weighted_expensive::numeric, 4) as weighted_expensive,
+    ROUND(p_cheap::numeric, 4) as p_cheap,
+    ROUND(p_fair::numeric, 4) as p_fair,
+    ROUND(p_expensive::numeric, 4) as p_expensive,
+    ROUND(div_c::numeric, 4) as div_c,
+    ROUND(div_f::numeric, 4) as div_f,
+    ROUND(div_e::numeric, 4) as div_e,
     0 as year_count,
-    eps_c, eps_f, eps_e,
-    pbr_c, pbr_f, pbr_e,
-    per_c, per_f, per_e,
-    NOW()
+    ROUND(eps_c::numeric, 4) as eps_c,
+    ROUND(eps_f::numeric, 4) as eps_f,
+    ROUND(eps_e::numeric, 4) as eps_e,
+    ROUND(pbr_c::numeric, 4) as pbr_c,
+    ROUND(pbr_f::numeric, 4) as pbr_f,
+    ROUND(pbr_e::numeric, 4) as pbr_e,
+    ROUND(per_c::numeric, 4) as per_c,
+    ROUND(per_f::numeric, 4) as per_f,
+    ROUND(per_e::numeric, 4) as per_e,
+    NOW() as now
 FROM valuation_base vb
 CROSS JOIN LATERAL (
     -- 集中計算加權估值，提升性能與代碼可維護性
@@ -268,21 +334,30 @@ daily_stats AS (
     -- 統合單一股票的所有百分位數統計
     SELECT
         dq."stock_symbol",
-        COUNT(DISTINCT dq."year") AS y_count,
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."LowestPrice") AS p_cheap,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."ClosingPrice") AS p_fair,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."HighestPrice") AS p_expensive,
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") AS pbr_low,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") AS pbr_mid,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") AS pbr_high,
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") AS pe_low,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") AS pe_mid,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") AS pe_high
+        COUNT(DISTINCT dq."year")
+            FILTER (WHERE dq."ClosingPrice" > 0) AS y_count,
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."LowestPrice")
+            FILTER (WHERE dq."ClosingPrice" > 0) AS p_cheap,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."ClosingPrice")
+            FILTER (WHERE dq."ClosingPrice" > 0) AS p_fair,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."HighestPrice")
+            FILTER (WHERE dq."ClosingPrice" > 0) AS p_expensive,
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."price-to-book_ratio")
+            FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_low,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."price-to-book_ratio")
+            FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_mid,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."price-to-book_ratio")
+            FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_high,
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."PriceEarningRatio")
+            FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_low,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."PriceEarningRatio")
+            FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_mid,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."PriceEarningRatio")
+            FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_high
     FROM "DailyQuotes" dq, filtered_years fy
     WHERE dq."stock_symbol" = $3
       AND dq."Date" <= $1
       AND dq."year" = ANY(fy.years)
-      AND dq."ClosingPrice" > 0
     GROUP BY dq."stock_symbol"
 ),
 dividend_agg AS (
@@ -293,13 +368,17 @@ dividend_agg AS (
         SELECT security_code, "year", SUM("sum") as annual_sum
         FROM dividend, filtered_years fy
         WHERE security_code = $3 AND "year" = ANY(fy.years)
+          AND ("ex-dividend_date1" != '-' OR "ex-dividend_date2" != '-')
         GROUP BY security_code, "year"
     ) t GROUP BY security_code
 ),
 eps_agg AS (
     SELECT 
         security_code,
-        AVG(annual_eps) as eps_avg
+        CASE
+            WHEN AVG(annual_eps) > 0 THEN AVG(annual_eps)
+            ELSE 0
+        END as eps_avg
     FROM (
         SELECT security_code, "year", SUM(earnings_per_share) as annual_eps
         FROM financial_statement, filtered_years fy
@@ -314,9 +393,18 @@ valuation_base AS (
         dq."ClosingPrice" as q_close,
         ds.y_count, ds.p_cheap, ds.p_fair, ds.p_expensive,
         (da.div_base * 15) as div_c, (da.div_base * 20) as div_f, (da.div_base * 25) as div_e,
-        (s.last_four_eps * COALESCE(dpr.payout_ratio, 70) / 100 * 15) as eps_c,
-        (s.last_four_eps * COALESCE(dpr.payout_ratio, 70) / 100 * 20) as eps_f,
-        (s.last_four_eps * COALESCE(dpr.payout_ratio, 70) / 100 * 25) as eps_e,
+        CASE
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 15
+            ELSE 0
+        END as eps_c,
+        CASE
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 20
+            ELSE 0
+        END as eps_f,
+        CASE
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 25
+            ELSE 0
+        END as eps_e,
         (ds.pbr_low * s.net_asset_value_per_share) as pbr_c,
         (ds.pbr_mid * s.net_asset_value_per_share) as pbr_f,
         (ds.pbr_high * s.net_asset_value_per_share) as pbr_e,
@@ -325,11 +413,14 @@ valuation_base AS (
         (ds.pe_high * ea.eps_avg) as per_e
     FROM stocks s
     JOIN "DailyQuotes" dq ON s.stock_symbol = dq."stock_symbol" AND dq."Date" = $1
-    LEFT JOIN daily_stats ds ON s.stock_symbol = ds."stock_symbol"
-    LEFT JOIN dividend_agg da ON s.stock_symbol = da.security_code
-    LEFT JOIN eps_agg ea ON s.stock_symbol = ea.security_code
-    LEFT JOIN (
-        SELECT security_code, COALESCE(PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY payout_ratio), 70) as payout_ratio
+    JOIN daily_stats ds ON s.stock_symbol = ds."stock_symbol"
+        AND ds.y_count > 0
+        AND ds.pbr_low IS NOT NULL
+        AND ds.pe_low IS NOT NULL
+    JOIN dividend_agg da ON s.stock_symbol = da.security_code
+    JOIN eps_agg ea ON s.stock_symbol = ea.security_code
+    JOIN (
+        SELECT security_code, PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY payout_ratio) as payout_ratio
         FROM dividend, filtered_years fy WHERE security_code = $3 AND "year" = ANY(fy.years) AND payout_ratio > 0 AND payout_ratio <= 200
         GROUP BY security_code
     ) dpr ON s.stock_symbol = dpr.security_code
@@ -337,20 +428,33 @@ valuation_base AS (
 )
 SELECT
     stock_symbol, q_date,
-    (q_close / NULLIF(calc.weighted_cheap, 0)) * 100,
-    q_close, calc.weighted_cheap, calc.weighted_fair, calc.weighted_expensive,
-    p_cheap, p_fair, p_expensive,
-    div_c, div_f, div_e,
-    eps_c, eps_f, eps_e,
-    pbr_c, pbr_f, pbr_e,
-    per_c, per_f, per_e,
-    y_count, NOW()
+    ROUND(((q_close / NULLIF(calc.weighted_cheap, 0)) * 100)::numeric, 4) as percentage,
+    ROUND(q_close::numeric, 4) as q_close,
+    ROUND(calc.weighted_cheap::numeric, 4) as weighted_cheap,
+    ROUND(calc.weighted_fair::numeric, 4) as weighted_fair,
+    ROUND(calc.weighted_expensive::numeric, 4) as weighted_expensive,
+    ROUND(p_cheap::numeric, 4) as p_cheap,
+    ROUND(p_fair::numeric, 4) as p_fair,
+    ROUND(p_expensive::numeric, 4) as p_expensive,
+    ROUND(div_c::numeric, 4) as div_c,
+    ROUND(div_f::numeric, 4) as div_f,
+    ROUND(div_e::numeric, 4) as div_e,
+    ROUND(eps_c::numeric, 4) as eps_c,
+    ROUND(eps_f::numeric, 4) as eps_f,
+    ROUND(eps_e::numeric, 4) as eps_e,
+    ROUND(pbr_c::numeric, 4) as pbr_c,
+    ROUND(pbr_f::numeric, 4) as pbr_f,
+    ROUND(pbr_e::numeric, 4) as pbr_e,
+    ROUND(per_c::numeric, 4) as per_c,
+    ROUND(per_f::numeric, 4) as per_f,
+    ROUND(per_e::numeric, 4) as per_e,
+    y_count, NOW() as now
 FROM valuation_base vb
 CROSS JOIN LATERAL (
     SELECT 
-        (COALESCE(p_cheap,0)*0.2 + COALESCE(div_c,0)*0.29 + COALESCE(eps_c,0)*0.3 + COALESCE(pbr_c,0)*0.2 + COALESCE(per_c,0)*0.01) as weighted_cheap,
-        (COALESCE(p_fair,0)*0.2 + COALESCE(div_f,0)*0.29 + COALESCE(eps_f,0)*0.3 + COALESCE(pbr_f,0)*0.2 + COALESCE(per_f,0)*0.01) as weighted_fair,
-        (COALESCE(p_expensive,0)*0.2 + COALESCE(div_e,0)*0.29 + COALESCE(eps_e,0)*0.3 + COALESCE(pbr_e,0)*0.2 + COALESCE(per_e,0)*0.01) as weighted_expensive
+        (p_cheap*0.2 + div_c*0.29 + eps_c*0.3 + pbr_c*0.2 + per_c*0.01) as weighted_cheap,
+        (p_fair*0.2 + div_f*0.29 + eps_f*0.3 + pbr_f*0.2 + per_f*0.01) as weighted_fair,
+        (p_expensive*0.2 + div_e*0.29 + eps_e*0.3 + pbr_e*0.2 + per_e*0.01) as weighted_expensive
 ) calc
 ON CONFLICT (date, security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,
@@ -358,6 +462,22 @@ ON CONFLICT (date, security_code) DO UPDATE SET
     cheap = EXCLUDED.cheap,
     fair = EXCLUDED.fair,
     expensive = EXCLUDED.expensive,
+    price_cheap = EXCLUDED.price_cheap,
+    price_fair = EXCLUDED.price_fair,
+    price_expensive = EXCLUDED.price_expensive,
+    dividend_cheap = EXCLUDED.dividend_cheap,
+    dividend_fair = EXCLUDED.dividend_fair,
+    dividend_expensive = EXCLUDED.dividend_expensive,
+    eps_cheap = EXCLUDED.eps_cheap,
+    eps_fair = EXCLUDED.eps_fair,
+    eps_expensive = EXCLUDED.eps_expensive,
+    pbr_cheap = EXCLUDED.pbr_cheap,
+    pbr_fair = EXCLUDED.pbr_fair,
+    pbr_expensive = EXCLUDED.pbr_expensive,
+    per_cheap = EXCLUDED.per_cheap,
+    per_fair = EXCLUDED.per_fair,
+    per_expensive = EXCLUDED.per_expensive,
+    year_count = EXCLUDED.year_count,
     update_time = NOW();
 "#;
 
@@ -416,7 +536,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 Estimate::upsert_all".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2023-10-20", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2026-03-02", "%Y-%m-%d").unwrap();
         let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
         let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
         let years_str = years_vec.join(",");
