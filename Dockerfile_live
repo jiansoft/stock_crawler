@@ -17,6 +17,13 @@ RUN chmod +x /app/stock_crawler
 COPY ./.env /app/.env
 COPY ./app.json /app/app.json
 
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup && \
+    mkdir -p /app/log /opt/nginx/ssl/jiansoft.mooo.com && \
+    chown -R appuser:appgroup /app /opt/nginx/ssl/jiansoft.mooo.com
+
 VOLUME ["/app/log","/opt/nginx/ssl/jiansoft.mooo.com"]
+
+USER appuser
 
 CMD ["/app/stock_crawler"]
