@@ -136,8 +136,14 @@ WITH filtered_years AS (
     -- 將字串年份轉為數組，支援參數化綁定，防範 SQL 注入
     SELECT CAST(string_to_array($2, ',') AS int[]) as years
 ),
+stocks AS (
+    -- 1. 基礎資料 CTE，包含產業 ID 以供 Fallback 使用
+    SELECT 
+        stock_symbol, last_four_eps, net_asset_value_per_share, stock_industry_id
+    FROM public.stocks WHERE "SuspendListing" = false
+),
 daily_stats AS (
-    -- 一次性計算所有基於 DailyQuotes 的統計指標，大幅減少 I/O
+    -- 2. 一次性計算所有基於 DailyQuotes 的統計指標，大幅減少 I/O
     SELECT
         dq."stock_symbol",
         PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."LowestPrice")
@@ -163,85 +169,105 @@ daily_stats AS (
       AND dq."year" = ANY(fy.years)
     GROUP BY dq."stock_symbol"
 ),
-dividend_agg AS (
-    -- 股利聚合
-    SELECT 
-        security_code as stock_symbol,
-        AVG(annual_sum) as div_base
-    FROM (
-        SELECT security_code, "year", SUM("sum") as annual_sum
-        FROM dividend, filtered_years fy
-        WHERE "year" = ANY(fy.years)
-          AND ("ex-dividend_date1" != '-' OR "ex-dividend_date2" != '-')
-        GROUP BY security_code, "year"
-    ) t
-    GROUP BY security_code
+-- 3. 年度股利彙總 (含有效性檢查)
+annual_dividend AS (
+    SELECT security_code, "year", SUM("sum") as annual_sum
+    FROM dividend, filtered_years fy
+    WHERE "year" = ANY(fy.years)
+      AND ("ex-dividend_date1" != '-' OR "ex-dividend_date2" != '-')
+    GROUP BY security_code, "year"
 ),
-eps_per_agg AS (
-    -- EPS 與財報統計
+-- 4. 年度 EPS 彙總
+annual_eps AS (
+    SELECT security_code, "year", SUM(earnings_per_share) as annual_eps
+    FROM financial_statement, filtered_years fy
+    WHERE "year" = ANY(fy.years) AND quarter IN ('Q1','Q2','Q3','Q4')
+    GROUP BY security_code, "year"
+),
+-- 5. 計算歷史分配率 (Payout Ratio) 並進行三層 Fallback 準備
+payout_history AS (
     SELECT 
-        security_code as stock_symbol,
-        CASE
-            WHEN AVG(annual_eps) > 0 THEN AVG(annual_eps)
-            ELSE 0
-        END as eps_avg
-    FROM (
-        SELECT security_code, "year", SUM(earnings_per_share) as annual_eps
-        FROM financial_statement, filtered_years fy
-        WHERE "year" = ANY(fy.years) AND quarter IN ('Q1','Q2','Q3','Q4')
-        GROUP BY security_code, "year"
-    ) t
-    GROUP BY security_code
+        ad.security_code, s.stock_industry_id,
+        (ad.annual_sum::numeric / NULLIF(ae.annual_eps::numeric, 0)) * 100 as ratio
+    FROM annual_dividend ad
+    JOIN annual_eps ae ON ad.security_code = ae.security_code AND ad.year = ae.year
+    JOIN stocks s ON ad.security_code = s.stock_symbol
+    WHERE ae.annual_eps > 0 AND ad.annual_sum > 0 AND (ad.annual_sum / ae.annual_eps) <= 2.0
+),
+stock_payout_70th AS (
+    SELECT security_code, PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY ratio) as stock_payout
+    FROM payout_history GROUP BY security_code
+),
+industry_payout_70th AS (
+    SELECT stock_industry_id, PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY ratio) as industry_payout
+    FROM payout_history GROUP BY stock_industry_id
+),
+final_dpr AS (
+    -- 三層 Fallback: 個股歷史 -> 產業歷史 -> 固定常數 70.0
+    SELECT 
+        s.stock_symbol,
+        LEAST(
+            GREATEST(COALESCE(sp.stock_payout, ip.industry_payout, 70.0), 0.0),
+            200.0
+        ) as payout_ratio
+    FROM stocks s
+    LEFT JOIN stock_payout_70th sp ON s.stock_symbol = sp.security_code
+    LEFT JOIN industry_payout_70th ip ON s.stock_industry_id = ip.stock_industry_id
 ),
 valuation_base AS (
-    -- 統合所有估值方法所需的基礎指標
+    -- 6. 統合所有估值方法所需的基礎指標
     SELECT
         s.stock_symbol,
         dq."Date" as q_date,
         dq."ClosingPrice" as q_close,
-        ds.p_cheap as p_cheap,
-        ds.p_fair as p_fair,
-        ds.p_expensive as p_expensive,
-        (da.div_base * 15) as div_c,
-        (da.div_base * 20) as div_f,
-        (da.div_base * 25) as div_e,
+        ds.p_cheap, ds.p_fair, ds.p_expensive,
+        (COALESCE(ad_avg.avg_div, 0) * 15) as div_c,
+        (COALESCE(ad_avg.avg_div, 0) * 20) as div_f,
+        (COALESCE(ad_avg.avg_div, 0) * 25) as div_e,
         CASE
-            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 15
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 15
             ELSE 0
         END as eps_c,
         CASE
-            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 20
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 20
             ELSE 0
         END as eps_f,
         CASE
-            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 25
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 25
             ELSE 0
         END as eps_e,
         (ds.pbr_low * s.net_asset_value_per_share) as pbr_c,
         (ds.pbr_mid * s.net_asset_value_per_share) as pbr_f,
         (ds.pbr_high * s.net_asset_value_per_share) as pbr_e,
-        (ds.pe_low * ep.eps_avg) as per_c,
-        (ds.pe_mid * ep.eps_avg) as per_f,
-        (ds.pe_high * ep.eps_avg) as per_e
+        CASE
+            WHEN ae_avg.avg_eps > 0 THEN ds.pe_low * ae_avg.avg_eps
+            ELSE 0
+        END as per_c,
+        CASE
+            WHEN ae_avg.avg_eps > 0 THEN ds.pe_mid * ae_avg.avg_eps
+            ELSE 0
+        END as per_f,
+        CASE
+            WHEN ae_avg.avg_eps > 0 THEN ds.pe_high * ae_avg.avg_eps
+            ELSE 0
+        END as per_e
     FROM stocks s
     JOIN "DailyQuotes" dq ON s.stock_symbol = dq."stock_symbol" AND dq."Date" = $1
     JOIN daily_stats ds ON s.stock_symbol = ds."stock_symbol"
         AND ds.p_cheap IS NOT NULL
         AND ds.pbr_low IS NOT NULL
         AND ds.pe_low IS NOT NULL
-    JOIN dividend_agg da ON s.stock_symbol = da.stock_symbol
-    JOIN eps_per_agg ep ON s.stock_symbol = ep.stock_symbol
-    JOIN (
-        SELECT security_code, PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY payout_ratio) as payout_ratio
-        FROM dividend, filtered_years fy WHERE "year" = ANY(fy.years) AND payout_ratio > 0 AND payout_ratio <= 200
-        GROUP BY security_code
-    ) dpr ON s.stock_symbol = dpr.security_code
-    WHERE s."SuspendListing" = FALSE
+    JOIN final_dpr fd ON s.stock_symbol = fd.stock_symbol
+    LEFT JOIN (SELECT security_code, AVG(annual_sum) as avg_div FROM annual_dividend GROUP BY security_code) ad_avg ON s.stock_symbol = ad_avg.security_code
+    LEFT JOIN (SELECT security_code, AVG(annual_eps) as avg_eps FROM annual_eps GROUP BY security_code) ae_avg ON s.stock_symbol = ae_avg.security_code
 )
 SELECT
     stock_symbol, q_date,
     -- 使用加權後的便宜價作為分母計算百分比
-    ROUND(((q_close / NULLIF(calc.weighted_cheap, 0)) * 100)::numeric, 4) as percentage,
+    CASE
+        WHEN calc.weighted_cheap > 0 THEN ROUND(((q_close / calc.weighted_cheap) * 100)::numeric, 4)
+        ELSE NULL
+    END as percentage,
     ROUND(q_close::numeric, 4) as q_close,
     ROUND(calc.weighted_cheap::numeric, 4) as weighted_cheap,
     ROUND(calc.weighted_fair::numeric, 4) as weighted_fair,
@@ -267,9 +293,9 @@ FROM valuation_base vb
 CROSS JOIN LATERAL (
     -- 集中計算加權估值，提升性能與代碼可維護性
     SELECT 
-        (p_cheap*0.2 + div_c*0.29 + eps_c*0.3 + pbr_c*0.2 + per_c*0.01) as weighted_cheap,
-        (p_fair*0.2 + div_f*0.29 + eps_f*0.3 + pbr_f*0.2 + per_f*0.01) as weighted_fair,
-        (p_expensive*0.2 + div_e*0.29 + eps_e*0.3 + pbr_e*0.2 + per_e*0.01) as weighted_expensive
+        (COALESCE(p_cheap, 0)*0.2 + COALESCE(div_c, 0)*0.29 + COALESCE(eps_c, 0)*0.3 + COALESCE(pbr_c, 0)*0.2 + COALESCE(per_c, 0)*0.01) as weighted_cheap,
+        (COALESCE(p_fair, 0)*0.2 + COALESCE(div_f, 0)*0.29 + COALESCE(eps_f, 0)*0.3 + COALESCE(pbr_f, 0)*0.2 + COALESCE(per_f, 0)*0.01) as weighted_fair,
+        (COALESCE(p_expensive, 0)*0.2 + COALESCE(div_e, 0)*0.29 + COALESCE(eps_e, 0)*0.3 + COALESCE(pbr_e, 0)*0.2 + COALESCE(per_e, 0)*0.01) as weighted_expensive
 ) calc
 ON CONFLICT (date, security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,
@@ -330,8 +356,14 @@ WITH filtered_years AS (
     -- 參數化年份過濾
     SELECT CAST(string_to_array($2, ',') AS int[]) as years
 ),
+stocks AS (
+    -- 1. 基礎資料 CTE，包含產業 ID 以供 Fallback 使用
+    SELECT 
+        stock_symbol, last_four_eps, net_asset_value_per_share, stock_industry_id
+    FROM public.stocks WHERE stock_symbol = $3 AND "SuspendListing" = false
+),
 daily_stats AS (
-    -- 統合單一股票的所有百分位數統計
+    -- 2. 統合單一股票的所有百分位數統計
     SELECT
         dq."stock_symbol",
         COUNT(DISTINCT dq."year")
@@ -360,75 +392,126 @@ daily_stats AS (
       AND dq."year" = ANY(fy.years)
     GROUP BY dq."stock_symbol"
 ),
-dividend_agg AS (
-    SELECT 
-        security_code,
-        AVG(annual_sum) as div_base
-    FROM (
-        SELECT security_code, "year", SUM("sum") as annual_sum
-        FROM dividend, filtered_years fy
-        WHERE security_code = $3 AND "year" = ANY(fy.years)
-          AND ("ex-dividend_date1" != '-' OR "ex-dividend_date2" != '-')
-        GROUP BY security_code, "year"
-    ) t GROUP BY security_code
+-- 3. 年度股利彙總 (含有效性檢查)
+annual_dividend AS (
+    SELECT security_code, "year", SUM("sum") as annual_sum
+    FROM dividend, filtered_years fy
+    WHERE security_code = $3 AND "year" = ANY(fy.years)
+      AND ("ex-dividend_date1" != '-' OR "ex-dividend_date2" != '-')
+    GROUP BY security_code, "year"
 ),
-eps_agg AS (
+-- 4. 年度 EPS 彙總
+annual_eps AS (
+    SELECT security_code, "year", SUM(earnings_per_share) as annual_eps
+    FROM financial_statement, filtered_years fy
+    WHERE security_code = $3 AND "year" = ANY(fy.years) AND quarter IN ('Q1','Q2','Q3','Q4')
+    GROUP BY security_code, "year"
+),
+-- 5. 計算分配率並進行 Fallback (單筆仍維持與批次相同的回退邏輯)
+payout_history_all AS (
     SELECT 
-        security_code,
-        CASE
-            WHEN AVG(annual_eps) > 0 THEN AVG(annual_eps)
-            ELSE 0
-        END as eps_avg
-    FROM (
-        SELECT security_code, "year", SUM(earnings_per_share) as annual_eps
-        FROM financial_statement, filtered_years fy
-        WHERE security_code = $3 AND "year" = ANY(fy.years) AND quarter IN ('Q1','Q2','Q3','Q4')
-        GROUP BY security_code, "year"
-    ) t GROUP BY security_code
+        ad.security_code, s.stock_industry_id,
+        (ad.annual_sum::numeric / NULLIF(ae.annual_eps::numeric, 0)) * 100 as ratio
+    FROM annual_dividend ad
+    JOIN annual_eps ae ON ad.security_code = ae.security_code AND ad.year = ae.year
+    JOIN stocks s ON ad.security_code = s.stock_symbol
+    WHERE ae.annual_eps > 0 AND ad.annual_sum > 0 AND (ad.annual_sum / ae.annual_eps) <= 2.0
+),
+stock_payout_70th AS (
+    SELECT security_code, PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY ratio) as stock_payout
+    FROM payout_history_all GROUP BY security_code
+),
+industry_annual_dividend AS (
+    SELECT d.security_code, d."year", SUM(d."sum") as annual_sum, s.stock_industry_id
+    FROM dividend d
+    JOIN public.stocks s ON d.security_code = s.stock_symbol
+    WHERE s.stock_industry_id = (SELECT stock_industry_id FROM stocks)
+      AND d."year" = ANY((SELECT years FROM filtered_years))
+      AND (d."ex-dividend_date1" != '-' OR d."ex-dividend_date2" != '-')
+    GROUP BY d.security_code, d."year", s.stock_industry_id
+),
+industry_annual_eps AS (
+    SELECT fs.security_code, fs."year", SUM(fs.earnings_per_share) as annual_eps
+    FROM financial_statement fs
+    JOIN public.stocks s ON fs.security_code = s.stock_symbol
+    WHERE s.stock_industry_id = (SELECT stock_industry_id FROM stocks)
+      AND fs."year" = ANY((SELECT years FROM filtered_years))
+      AND fs.quarter IN ('Q1','Q2','Q3','Q4')
+    GROUP BY fs.security_code, fs."year"
+),
+industry_payout_history AS (
+    SELECT
+        iad.stock_industry_id,
+        (iad.annual_sum::numeric / NULLIF(iae.annual_eps::numeric, 0)) * 100 as ratio
+    FROM industry_annual_dividend iad
+    JOIN industry_annual_eps iae
+      ON iad.security_code = iae.security_code
+     AND iad."year" = iae."year"
+    WHERE iae.annual_eps > 0
+      AND iad.annual_sum > 0
+      AND (iad.annual_sum::numeric / iae.annual_eps::numeric) <= 2.0
+),
+industry_payout_70th AS (
+    SELECT stock_industry_id, PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY ratio) as industry_payout
+    FROM industry_payout_history
+    GROUP BY stock_industry_id
+),
+final_dpr AS (
+    SELECT 
+        s.stock_symbol,
+        LEAST(
+            GREATEST(COALESCE(sp.stock_payout, ip.industry_payout, 70.0), 0.0),
+            200.0
+        ) as payout_ratio
+    FROM stocks s
+    LEFT JOIN stock_payout_70th sp ON s.stock_symbol = sp.security_code
+    LEFT JOIN industry_payout_70th ip ON s.stock_industry_id = ip.stock_industry_id
 ),
 valuation_base AS (
     SELECT
-        s.stock_symbol,
-        dq."Date" as q_date,
-        dq."ClosingPrice" as q_close,
+        s.stock_symbol, dq."Date" as q_date, dq."ClosingPrice" as q_close,
         ds.y_count, ds.p_cheap, ds.p_fair, ds.p_expensive,
-        (da.div_base * 15) as div_c, (da.div_base * 20) as div_f, (da.div_base * 25) as div_e,
+        (COALESCE(ad_avg.avg_div, 0) * 15) as div_c, (COALESCE(ad_avg.avg_div, 0) * 20) as div_f, (COALESCE(ad_avg.avg_div, 0) * 25) as div_e,
         CASE
-            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 15
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 15
             ELSE 0
         END as eps_c,
         CASE
-            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 20
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 20
             ELSE 0
         END as eps_f,
         CASE
-            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (dpr.payout_ratio / 100) * 25
+            WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 25
             ELSE 0
         END as eps_e,
         (ds.pbr_low * s.net_asset_value_per_share) as pbr_c,
         (ds.pbr_mid * s.net_asset_value_per_share) as pbr_f,
         (ds.pbr_high * s.net_asset_value_per_share) as pbr_e,
-        (ds.pe_low * ea.eps_avg) as per_c,
-        (ds.pe_mid * ea.eps_avg) as per_f,
-        (ds.pe_high * ea.eps_avg) as per_e
+        CASE
+            WHEN ae_avg.avg_eps > 0 THEN ds.pe_low * ae_avg.avg_eps
+            ELSE 0
+        END as per_c,
+        CASE
+            WHEN ae_avg.avg_eps > 0 THEN ds.pe_mid * ae_avg.avg_eps
+            ELSE 0
+        END as per_f,
+        CASE
+            WHEN ae_avg.avg_eps > 0 THEN ds.pe_high * ae_avg.avg_eps
+            ELSE 0
+        END as per_e
     FROM stocks s
     JOIN "DailyQuotes" dq ON s.stock_symbol = dq."stock_symbol" AND dq."Date" = $1
     JOIN daily_stats ds ON s.stock_symbol = ds."stock_symbol"
-        AND ds.y_count > 0
-        AND ds.pbr_low IS NOT NULL
-        AND ds.pe_low IS NOT NULL
-    JOIN dividend_agg da ON s.stock_symbol = da.security_code
-    JOIN eps_agg ea ON s.stock_symbol = ea.security_code
-    JOIN (
-        SELECT security_code, PERCENTILE_CONT(0.7) WITHIN GROUP (ORDER BY payout_ratio) as payout_ratio
-        FROM dividend, filtered_years fy WHERE security_code = $3 AND "year" = ANY(fy.years) AND payout_ratio > 0 AND payout_ratio <= 200
-        GROUP BY security_code
-    ) dpr ON s.stock_symbol = dpr.security_code
-    WHERE s.stock_symbol = $3
+    JOIN final_dpr fd ON s.stock_symbol = fd.stock_symbol
+    LEFT JOIN (SELECT security_code, AVG(annual_sum) as avg_div FROM annual_dividend GROUP BY security_code) ad_avg ON s.stock_symbol = ad_avg.security_code
+    LEFT JOIN (SELECT security_code, AVG(annual_eps) as avg_eps FROM annual_eps GROUP BY security_code) ae_avg ON s.stock_symbol = ae_avg.security_code
 )
 SELECT
     stock_symbol, q_date,
-    ROUND(((q_close / NULLIF(calc.weighted_cheap, 0)) * 100)::numeric, 4) as percentage,
+    CASE
+        WHEN calc.weighted_cheap > 0 THEN ROUND(((q_close / calc.weighted_cheap) * 100)::numeric, 4)
+        ELSE NULL
+    END as percentage,
     ROUND(q_close::numeric, 4) as q_close,
     ROUND(calc.weighted_cheap::numeric, 4) as weighted_cheap,
     ROUND(calc.weighted_fair::numeric, 4) as weighted_fair,
@@ -452,9 +535,9 @@ SELECT
 FROM valuation_base vb
 CROSS JOIN LATERAL (
     SELECT 
-        (p_cheap*0.2 + div_c*0.29 + eps_c*0.3 + pbr_c*0.2 + per_c*0.01) as weighted_cheap,
-        (p_fair*0.2 + div_f*0.29 + eps_f*0.3 + pbr_f*0.2 + per_f*0.01) as weighted_fair,
-        (p_expensive*0.2 + div_e*0.29 + eps_e*0.3 + pbr_e*0.2 + per_e*0.01) as weighted_expensive
+        (COALESCE(p_cheap, 0)*0.2 + COALESCE(div_c, 0)*0.29 + COALESCE(eps_c, 0)*0.3 + COALESCE(pbr_c, 0)*0.2 + COALESCE(per_c, 0)*0.01) as weighted_cheap,
+        (COALESCE(p_fair, 0)*0.2 + COALESCE(div_f, 0)*0.29 + COALESCE(eps_f, 0)*0.3 + COALESCE(pbr_f, 0)*0.2 + COALESCE(per_f, 0)*0.01) as weighted_fair,
+        (COALESCE(p_expensive, 0)*0.2 + COALESCE(div_e, 0)*0.29 + COALESCE(eps_e, 0)*0.3 + COALESCE(pbr_e, 0)*0.2 + COALESCE(per_e, 0)*0.01) as weighted_expensive
 ) calc
 ON CONFLICT (date, security_code) DO UPDATE SET
     percentage = EXCLUDED.percentage,
@@ -536,7 +619,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 Estimate::upsert_all".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2026-03-02", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2026-03-03", "%Y-%m-%d").unwrap();
         let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
         let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
         let years_str = years_vec.join(",");
