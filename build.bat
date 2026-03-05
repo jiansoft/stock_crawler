@@ -6,7 +6,7 @@ set TARGET=aarch64-unknown-linux-musl
 set PROFILE=release
 set BIN_NAME=stock_crawler
 
-echo [1/7] Checking Zig...
+echo [1/9] Checking Zig...
 zig version >nul 2>&1
 if errorlevel 1 (
   echo Zig is not installed or not in PATH.
@@ -14,7 +14,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [2/7] Checking CMake...
+echo [2/9] Checking CMake...
 cmake --version >nul 2>&1
 if errorlevel 1 (
   echo CMake is not installed or not in PATH.
@@ -22,7 +22,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [3/7] Checking protoc...
+echo [3/9] Checking protoc...
 protoc --version >nul 2>&1
 if errorlevel 1 (
   echo protoc is not installed or not in PATH.
@@ -30,14 +30,19 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [4/7] Ensuring Rust target %TARGET%...
+echo [4/9] Tool versions:
+for /f "delims=" %%i in ('protoc --version') do echo   - %%i
+for /f "delims=" %%i in ('cmake --version ^| findstr /B /C:"cmake version"') do echo   - %%i
+for /f "delims=" %%i in ('zig version') do echo   - zig %%i
+
+echo [5/9] Ensuring Rust target %TARGET%...
 rustup target add %TARGET%
 if errorlevel 1 (
   echo Failed to add Rust target: %TARGET%
   exit /b 1
 )
 
-echo [5/7] Checking cargo-zigbuild...
+echo [6/9] Checking cargo-zigbuild...
 cargo zigbuild -h >nul 2>&1
 if errorlevel 1 (
   echo cargo-zigbuild not found, installing...
@@ -48,7 +53,14 @@ if errorlevel 1 (
   )
 )
 
-echo [6/7] Building %BIN_NAME% for Alpine ARM64...
+echo [7/9] Updating dependencies...
+cargo update
+if errorlevel 1 (
+  echo Failed to update dependencies.
+  exit /b 1
+)
+
+echo [8/9] Building %BIN_NAME% for Alpine ARM64...
 cargo zigbuild --target %TARGET% --%PROFILE%
 if errorlevel 1 (
   echo Build failed.
@@ -62,7 +74,7 @@ if errorlevel 1 (
 )
 
 set OUT_PATH=target\%TARGET%\%PROFILE%\%BIN_NAME%
-echo [7/7] Done.
+echo [9/9] Done.
 if exist "%OUT_PATH%" (
   echo Output binary: %OUT_PATH%
 ) else (
