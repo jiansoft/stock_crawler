@@ -34,7 +34,6 @@ use crate::{
 
 /// 預編譯所需的選擇器
 static TD_SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse("td").unwrap());
-static TR_SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse("tr").unwrap());
 static ROW_SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse("#CPHB1_gv tr").unwrap());
 
 /// 全域快取狀態
@@ -277,7 +276,8 @@ mod tests {
             <td>-3.18%</td><td>2.95%</td><td>9620</td><td>9715</td><td>9435</td><td>9445</td><td>44</td><td>4.156</td>
 		</tr></table>"#;
         let fragment = Html::parse_fragment(html);
-        let row = fragment.select(&TR_SELECTOR).next().unwrap();
+        let tr_selector = Selector::parse("tr").expect("Failed to parse tr selector");
+        let row = fragment.select(&tr_selector).next().unwrap();
         let (symbol, snapshot) = parse_row(row).unwrap().unwrap();
 
         assert_eq!(symbol, "5274");
@@ -290,7 +290,8 @@ mod tests {
     fn test_parse_no_change_row() {
         let html = r#"<table><tr><td>6584</td><td>南俊國際</td><td>425</td><td>--</td><td>--</td><td>...</td><td>...</td><td>423.5</td><td>435</td><td>423.5</td><td>425</td><td>148</td><td>0.629</td></tr></table>"#;
         let fragment = Html::parse_fragment(html);
-        let row = fragment.select(&TR_SELECTOR).next().unwrap();
+        let tr_selector = Selector::parse("tr").expect("Failed to parse tr selector");
+        let row = fragment.select(&tr_selector).next().unwrap();
         let (symbol, snapshot) = parse_row(row).unwrap().unwrap();
 
         assert_eq!(symbol, "6584");
