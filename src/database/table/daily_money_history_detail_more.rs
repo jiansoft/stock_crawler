@@ -143,7 +143,6 @@ ORDER BY security_code, member_id, transaction_date;
             &date
         ))
     }
-
 }
 
 #[cfg(test)]

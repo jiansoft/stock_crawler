@@ -336,7 +336,6 @@ ON CONFLICT (date, security_code) DO UPDATE SET
             })
     }
 
-
     /// 只重算單一股票的估值資料。
     ///
     /// # Errors
@@ -579,7 +578,6 @@ ON CONFLICT (date, security_code) DO UPDATE SET
                 )
             })
     }
-
 }
 
 #[cfg(test)]

@@ -83,11 +83,13 @@ ON CONFLICT (date, security_code) DO UPDATE SET
             }
             Err(why) => {
                 tx.rollback().await?;
-                Err(anyhow!("Failed to YieldRank::upsert from database: {:?}", why))
+                Err(anyhow!(
+                    "Failed to YieldRank::upsert from database: {:?}",
+                    why
+                ))
             }
         }
     }
-
 }
 
 #[cfg(test)]

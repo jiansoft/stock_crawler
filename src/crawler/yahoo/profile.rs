@@ -25,7 +25,8 @@ use serde::{Deserialize, Serialize};
 use crate::{crawler::yahoo::HOST, util, util::http::element};
 
 /// 用於解析季度（如 Q1, Q2）的正則表達式
-static REG_QUARTER: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)q\d").expect("Failed to compile quarter regex"));
+static REG_QUARTER: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)q\d").expect("Failed to compile quarter regex"));
 
 /// 個股基本資料區塊的主要選擇器
 static BASE_SELECTOR: Lazy<Selector> = Lazy::new(|| {
@@ -87,17 +88,20 @@ pub async fn visit(stock_symbol: &str) -> Result<Profile> {
     let document = Html::parse_document(&text);
 
     // 取得主要數據區塊
-    let section = document
-        .select(&BASE_SELECTOR)
-        .next()
-        .with_context(|| format!("Failed to find profile section for {} at {}", stock_symbol, url))?;
+    let section = document.select(&BASE_SELECTOR).next().with_context(|| {
+        format!(
+            "Failed to find profile section for {} at {}",
+            stock_symbol, url
+        )
+    })?;
 
     let mut profile = Profile::new(stock_symbol.to_string());
     // Yahoo 的數據以 CSS Grid 呈現，這裡定義基礎路徑
     let css_base = "div.table-grid.Mb\\(20px\\).row-fit-half > div:nth-child";
 
     // 解析年份與季度 (例如 "2025 Q3")
-    if let Some(year_and_quarter_text) = element::parse_value(&section, "div:nth-child(2).D\\(f\\)") {
+    if let Some(year_and_quarter_text) = element::parse_value(&section, "div:nth-child(2).D\\(f\\)")
+    {
         if let Some(quarter_match) = REG_QUARTER.find(&year_and_quarter_text) {
             profile.quarter = quarter_match.as_str().to_uppercase();
             if let Ok(year) = year_and_quarter_text[0..4].parse::<i32>() {
@@ -120,7 +124,10 @@ pub async fn visit(stock_symbol: &str) -> Result<Profile> {
 
     // 防禦性檢查：若年份為 0 且關鍵指標 EPS 也是 0，視為解析無效數據
     if profile.year == 0 && profile.earnings_per_share.is_zero() {
-        return Err(anyhow!("Parsed profile for {} contains no valid data. Site structure might have changed.", stock_symbol));
+        return Err(anyhow!(
+            "Parsed profile for {} contains no valid data. Site structure might have changed.",
+            stock_symbol
+        ));
     }
 
     Ok(profile)
@@ -132,11 +139,10 @@ fn parse_field(element: &scraper::ElementRef, base: &str, child_index: u32) -> D
     element::parse_to_decimal(element, &selector)
 }
 
-
 #[cfg(test)]
 mod tests {
-    use crate::logging;
     use super::*;
+    use crate::logging;
 
     #[tokio::test]
     #[ignore]
@@ -157,4 +163,3 @@ mod tests {
         logging::debug_file_async("結束 visit".to_string());
     }
 }
-

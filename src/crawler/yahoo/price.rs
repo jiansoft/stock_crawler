@@ -38,17 +38,22 @@ impl StockInfo for Yahoo {
     /// # 實作細節
     /// 解析頁面中的 `.Fz(32px)` 標籤並將其標準化為 `Decimal` 型態。
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal> {
-        let url = format!("https://{host}/quote/{symbol}", host = HOST, symbol = stock_symbol);
+        let url = format!(
+            "https://{host}/quote/{symbol}",
+            host = HOST,
+            symbol = stock_symbol
+        );
         let text = util::http::get(&url, None).await?;
         let document = Html::parse_document(&text);
 
-        let price_str = util::http::element::get_one_element(util::http::element::GetOneElementText {
-            stock_symbol,
-            document,
-            selector: "#main-0-QuoteHeader-Proxy",
-            element: "span.Fz\\(32px\\)",
-            url: &url,
-        })?;
+        let price_str =
+            util::http::element::get_one_element(util::http::element::GetOneElementText {
+                stock_symbol,
+                document,
+                selector: "#main-0-QuoteHeader-Proxy",
+                element: "span.Fz\\(32px\\)",
+                url: &url,
+            })?;
 
         Ok(text::parse_decimal(&price_str, None)?.normalize())
     }
@@ -63,50 +68,64 @@ impl StockInfo for Yahoo {
     /// 並透過檢查是否有 `.C($c-trend-down)` 顏色類別來判定趨勢是否為下跌，
     /// 藉此修正部分頁面未明確標註負號的情況。
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes> {
-        let url = format!("https://{host}/quote/{symbol}", host = HOST, symbol = stock_symbol);
+        let url = format!(
+            "https://{host}/quote/{symbol}",
+            host = HOST,
+            symbol = stock_symbol
+        );
         let text = util::http::get(&url, None).await?;
         let document = Html::parse_document(&text);
 
         // 檢查是否下跌：尋找帶有跌幅顏色特徵的趨勢 Class
         let is_negative = document
-            .select(&scraper::Selector::parse("#main-0-QuoteHeader-Proxy .C\\(\\$c-trend-down\\)").unwrap())
+            .select(
+                &scraper::Selector::parse("#main-0-QuoteHeader-Proxy .C\\(\\$c-trend-down\\)")
+                    .unwrap(),
+            )
             .next()
             .is_some();
 
         // 取得成交價 (Fz(32px))
-        let price_raw = util::http::element::get_one_element(util::http::element::GetOneElementText {
-            stock_symbol,
-            document: document.clone(),
-            selector: "#main-0-QuoteHeader-Proxy",
-            element: "span.Fz\\(32px\\)",
-            url: &url,
-        })?;
+        let price_raw =
+            util::http::element::get_one_element(util::http::element::GetOneElementText {
+                stock_symbol,
+                document: document.clone(),
+                selector: "#main-0-QuoteHeader-Proxy",
+                element: "span.Fz\\(32px\\)",
+                url: &url,
+            })?;
         let price = text::parse_f64(&price_raw, None)?;
 
         // 取得漲跌 (Fz(20px))
-        let change_raw = util::http::element::get_one_element(util::http::element::GetOneElementText {
-            stock_symbol,
-            document: document.clone(),
-            selector: "#main-0-QuoteHeader-Proxy",
-            element: "span.Fz\\(20px\\)",
-            url: &url,
-        })?;
+        let change_raw =
+            util::http::element::get_one_element(util::http::element::GetOneElementText {
+                stock_symbol,
+                document: document.clone(),
+                selector: "#main-0-QuoteHeader-Proxy",
+                element: "span.Fz\\(20px\\)",
+                url: &url,
+            })?;
         let mut change = text::parse_f64(&change_raw, None)?;
 
         // 取得漲幅百分比 (Jc(fe))
-        let range_raw = util::http::element::get_one_element(util::http::element::GetOneElementText {
-            stock_symbol,
-            document,
-            selector: "#main-0-QuoteHeader-Proxy",
-            element: "span.Jc\\(fe\\)",
-            url: &url,
-        })?;
+        let range_raw =
+            util::http::element::get_one_element(util::http::element::GetOneElementText {
+                stock_symbol,
+                document,
+                selector: "#main-0-QuoteHeader-Proxy",
+                element: "span.Jc\\(fe\\)",
+                url: &url,
+            })?;
         let mut change_range = text::parse_f64(&range_raw, Some(vec!['(', ')', '%']))?;
 
         // 防禦性修正：Yahoo 網頁上的數值有時不帶符號，根據顏色類別進行強制校正
         if is_negative {
-            if change > 0.0 { change = -change; }
-            if change_range > 0.0 { change_range = -change_range; }
+            if change > 0.0 {
+                change = -change;
+            }
+            if change_range > 0.0 {
+                change_range = -change_range;
+            }
         }
 
         Ok(declare::StockQuotes {

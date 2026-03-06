@@ -40,7 +40,7 @@ async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
     logging::info_file_async(format!("準備建立 gRPC 伺服器並監聽 {:?}", addr));
     let builder = Server::builder();
     let config = get_tls_config();
-    
+
     if config.is_some() {
         logging::info_file_async("gRPC 伺服器將使用 TLS 設定啟動");
     } else {
@@ -115,19 +115,22 @@ fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Re
     for cmd in commands {
         match std::process::Command::new(cmd)
             .args(["x509", "-noout", "-subject", "-enddate", "-in", &cert_file])
-            .output() {
-                Ok(out) if out.status.success() => {
-                    final_domain_info = String::from_utf8_lossy(&out.stdout).trim().replace('\n', ", ");
-                    break;
-                }
-                Ok(out) => {
-                    let err = String::from_utf8_lossy(&out.stderr);
-                    if !err.trim().is_empty() {
-                        final_domain_info = format!("OpenSSL 執行失敗: {}", err.trim());
-                    }
-                }
-                Err(_) => continue,
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                final_domain_info = String::from_utf8_lossy(&out.stdout)
+                    .trim()
+                    .replace('\n', ", ");
+                break;
             }
+            Ok(out) => {
+                let err = String::from_utf8_lossy(&out.stderr);
+                if !err.trim().is_empty() {
+                    final_domain_info = format!("OpenSSL 執行失敗: {}", err.trim());
+                }
+            }
+            Err(_) => continue,
+        }
     }
 
     logging::info_file_async(format!(

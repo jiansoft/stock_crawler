@@ -7,7 +7,7 @@
 //! 2. **外部驅動啟停**：
 //!    - 依賴外部事件 (如 `src/event/trace/stock_price.rs`) 在開盤期間啟動定時任務。
 //!    - 依賴收盤事件停止任務。停止後會清空快取以節省記憶體並確保下次啟動時資料新鮮。
-//! 3. **嚴格解析**：不容忍損壞或格式錯誤的報價，解析失敗會傳回錯誤而非默默變 0。
+//! 3. **嚴格解析**：不容忍損壞或格式錯誤ের報價，解析失敗會傳回錯誤而非默默變 0。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,10 +19,11 @@ use once_cell::sync::Lazy;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 use crate::{
+    cache::{RealtimeSnapshot, SHARE},
     crawler::{
         histock::{HiStock, HOST},
         StockInfo,
@@ -37,31 +38,15 @@ static TR_SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse("tr").unwrap()
 static ROW_SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse("#CPHB1_gv tr").unwrap());
 
 /// 全域快取狀態
-static CACHE_DATA: Lazy<RwLock<HashMap<String, RealtimeSnapshot>>> = Lazy::new(|| RwLock::new(HashMap::with_capacity(1200)));
 static IS_CACHING: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
 /// 用於解決 Single-flight (重複抓取) 的互斥鎖
 static FETCH_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-/// HiStock 即時報價快照。
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct RealtimeSnapshot {
-    pub symbol: String,
-    pub name: String,
-    pub price: Decimal,
-    pub change: Decimal,
-    pub change_range: Decimal,
-    pub open: Decimal,
-    pub high: Decimal,
-    pub low: Decimal,
-    pub last_close: Decimal,
-    pub volume: Decimal, // 單位：張
-}
-
 /// 解析單一表格列資料。
 fn parse_row(row: scraper::element_ref::ElementRef) -> Result<Option<(String, RealtimeSnapshot)>> {
     let mut tds = row.select(&TD_SELECTOR);
-    
+
     // 0: 股票代號
     let symbol_node = match tds.next() {
         Some(node) => node,
@@ -73,44 +58,63 @@ fn parse_row(row: scraper::element_ref::ElementRef) -> Result<Option<(String, Re
     }
 
     // 1: 股票名稱
-    let name = tds.next().context("Missing name")?.text().collect::<String>().trim().to_string();
-    
+    let name = tds
+        .next()
+        .context("Missing name")?
+        .text()
+        .collect::<String>()
+        .trim()
+        .to_string();
+
     // 輔助解析函式：嚴格處理數值解析，不再默默變 0
-    let parse_val = |node: Option<scraper::element_ref::ElementRef>, field_name: &str| -> Result<Decimal> {
-        let t = node.map(|n| n.text().collect::<String>()).unwrap_or_default();
-        let t = t.trim();
-        if t == "--" || t.is_empty() {
-            Ok(Decimal::ZERO)
-        } else {
-            text::parse_decimal(t, None).map_err(|e| anyhow!("Failed to parse {} for {}: {:?}", field_name, symbol, e))
-        }
-    };
+    let parse_val =
+        |node: Option<scraper::element_ref::ElementRef>, field_name: &str| -> Result<Decimal> {
+            let t = node
+                .map(|n| n.text().collect::<String>())
+                .unwrap_or_default();
+            let t = t.trim();
+            if t == "--" || t.is_empty() {
+                Ok(Decimal::ZERO)
+            } else {
+                text::parse_decimal(t, None)
+                    .map_err(|e| anyhow!("Failed to parse {} for {}: {:?}", field_name, symbol, e))
+            }
+        };
 
     let price = parse_val(tds.next(), "price")?;
-    
+
     // 漲跌與幅 (處理符號與趨勢)
     let change_node = tds.next();
-    let change_text = change_node.map(|n| n.text().collect::<String>()).unwrap_or_default();
+    let change_text = change_node
+        .map(|n| n.text().collect::<String>())
+        .unwrap_or_default();
     let mut change = Decimal::ZERO;
     let mut is_negative = false;
     if !change_text.contains("--") && !change_text.trim().is_empty() {
         is_negative = change_text.contains('▼');
         change = text::parse_decimal(&change_text, Some(vec!['▼', '▲', ' ', '+']))
             .map_err(|e| anyhow!("Failed to parse change for {}: {:?}", symbol, e))?;
-        if is_negative && change > Decimal::ZERO { change = -change; }
+        if is_negative && change > Decimal::ZERO {
+            change = -change;
+        }
     }
 
     let range_node = tds.next();
-    let range_text = range_node.map(|n| n.text().collect::<String>()).unwrap_or_default();
+    let range_text = range_node
+        .map(|n| n.text().collect::<String>())
+        .unwrap_or_default();
     let mut change_range = Decimal::ZERO;
     if !range_text.contains("--") && !range_text.trim().is_empty() {
         change_range = text::parse_decimal(&range_text, Some(vec!['%', ' ', '+', '▼', '▲']))
             .map_err(|e| anyhow!("Failed to parse change_range for {}: {:?}", symbol, e))?;
-        if is_negative && change_range > Decimal::ZERO { change_range = -change_range; }
+        if is_negative && change_range > Decimal::ZERO {
+            change_range = -change_range;
+        }
     }
 
     // 跳過 5: 周漲跌, 6: 振幅
-    tds.next(); tds.next(); 
+    tds.next();
+    tds.next();
 
     let open = parse_val(tds.next(), "open")?;
     let high = parse_val(tds.next(), "high")?;
@@ -118,9 +122,18 @@ fn parse_row(row: scraper::element_ref::ElementRef) -> Result<Option<(String, Re
     let last_close = parse_val(tds.next(), "last_close")?;
     let volume = parse_val(tds.next(), "volume")?;
 
-    Ok(Some((symbol.clone(), RealtimeSnapshot {
-        symbol, name, price, change, change_range, open, high, low, last_close, volume,
-    })))
+    // 使用 new 方法強制填入必要欄位，其餘欄位則個別設定
+    let mut snapshot = RealtimeSnapshot::new(symbol.clone(), price);
+    snapshot.name = name;
+    snapshot.change = change;
+    snapshot.change_range = change_range;
+    snapshot.open = open;
+    snapshot.high = high;
+    snapshot.low = low;
+    snapshot.last_close = last_close;
+    snapshot.volume = volume;
+
+    Ok(Some((symbol, snapshot)))
 }
 
 /// 啟動定時快取任務
@@ -132,10 +145,10 @@ pub fn start_caching_task() {
 
     tokio::spawn(async move {
         crate::logging::info_file_async("HiStock 全市場快取任務啟動".to_string());
-        
+
         while IS_CACHING.load(Ordering::SeqCst) {
             let start_time = std::time::Instant::now();
-            
+
             // 背景任務也受 FETCH_LOCK 控制，但優先讓外部請求先行
             let result = {
                 let _lock = FETCH_LOCK.lock().await;
@@ -145,19 +158,21 @@ pub fn start_caching_task() {
             match result {
                 Ok(new_data) => {
                     let count = new_data.len();
-                    let mut cache = CACHE_DATA.write().await;
-                    *cache = new_data;
+                    SHARE.set_stock_snapshots(new_data);
                     crate::logging::debug_file_async(format!(
-                        "HiStock 快取已更新，共 {} 檔股票，耗時 {:?}", 
-                        count, start_time.elapsed()
+                        "HiStock 快取已更新，共 {} 檔股票，耗時 {:?}",
+                        count,
+                        start_time.elapsed()
                     ));
                 }
                 Err(e) => {
                     crate::logging::error_file_async(format!("HiStock 快取更新失敗: {:?}", e));
                 }
             }
-            
-            if !IS_CACHING.load(Ordering::SeqCst) { break; }
+
+            if !IS_CACHING.load(Ordering::SeqCst) {
+                break;
+            }
             sleep(Duration::from_secs(5)).await;
         }
         crate::logging::info_file_async("HiStock 快取任務已停止".to_string());
@@ -167,8 +182,7 @@ pub fn start_caching_task() {
 /// 停止定時快取任務並清空快取 (統一實作與行為預期)
 pub async fn stop_caching_task() {
     IS_CACHING.store(false, Ordering::SeqCst);
-    let mut cache = CACHE_DATA.write().await;
-    cache.clear();
+    SHARE.clear_stock_snapshots();
 }
 
 /// 抓取全量資料
@@ -176,14 +190,14 @@ async fn fetch_all_from_rank() -> Result<HashMap<String, RealtimeSnapshot>> {
     let url = format!("https://{host}/stock/rank.aspx?p=all", host = HOST);
     let body = util::http::get(&url, None).await?;
     let document = Html::parse_document(&body);
-    
+
     let mut map = HashMap::with_capacity(1200);
     for row in document.select(&ROW_SELECTOR) {
         if let Some((symbol, snapshot)) = parse_row(row)? {
             map.insert(symbol, snapshot);
         }
     }
-    
+
     if map.is_empty() {
         return Err(anyhow!("Failed to parse HiStock rank page (empty map)"));
     }
@@ -192,37 +206,31 @@ async fn fetch_all_from_rank() -> Result<HashMap<String, RealtimeSnapshot>> {
 
 /// 取得指定股票的即時快照 (解決 Single-flight 問題)
 async fn get_snapshot(stock_symbol: &str) -> Result<RealtimeSnapshot> {
-    // 第一階段：讀取鎖嘗試取得快取
-    {
-        let cache = CACHE_DATA.read().await;
-        if let Some(s) = cache.get(stock_symbol) {
-            return Ok(s.clone());
-        }
+    // 第一階段：嘗試取得快取
+    if let Some(s) = SHARE.get_stock_snapshot(stock_symbol) {
+        return Ok(s);
     }
 
     // 第二階段：快取失效，使用互斥鎖防止重複抓取 (Single-flight)
     let _lock = FETCH_LOCK.lock().await;
 
     // 拿到鎖後再檢查一次快取，可能剛才有人抓過了
-    {
-        let cache = CACHE_DATA.read().await;
-        if let Some(s) = cache.get(stock_symbol) {
-            return Ok(s.clone());
-        }
+    if let Some(s) = SHARE.get_stock_snapshot(stock_symbol) {
+        return Ok(s);
     }
 
     crate::logging::info_file_async(format!("HiStock 快取失效 ({})，觸發全量抓取", stock_symbol));
     let new_data = fetch_all_from_rank().await?;
-    
+
     let snapshot = new_data.get(stock_symbol).cloned().ok_or_else(|| {
-        anyhow!("Stock symbol {} not found in HiStock rank page after refresh", stock_symbol)
+        anyhow!(
+            "Stock symbol {} not found in HiStock rank page after refresh",
+            stock_symbol
+        )
     })?;
 
     // 更新全量快取
-    {
-        let mut cache = CACHE_DATA.write().await;
-        *cache = new_data;
-    }
+    SHARE.set_stock_snapshots(new_data);
 
     Ok(snapshot)
 }
@@ -239,9 +247,18 @@ impl StockInfo for HiStock {
 
         Ok(declare::StockQuotes {
             stock_symbol: stock_symbol.to_string(),
-            price: snapshot.price.to_f64().context("Decimal to f64 conversion failed (price)")?,
-            change: snapshot.change.to_f64().context("Decimal to f64 conversion failed (change)")?,
-            change_range: snapshot.change_range.to_f64().context("Decimal to f64 conversion failed (range)")?,
+            price: snapshot
+                .price
+                .to_f64()
+                .context("Decimal to f64 conversion failed (price)")?,
+            change: snapshot
+                .change
+                .to_f64()
+                .context("Decimal to f64 conversion failed (change)")?,
+            change_range: snapshot
+                .change_range
+                .to_f64()
+                .context("Decimal to f64 conversion failed (range)")?,
         })
     }
 }
@@ -249,20 +266,20 @@ impl StockInfo for HiStock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_decimal_macros::dec;
     use crate::logging;
+    use rust_decimal_macros::dec;
 
     #[test]
     fn test_parse_full_row_from_user_sample() {
         let html = r#"<table><tr class="alt-row">
 			<td>5274</td><td>信驊</td><td><span class="price-down">9445</span></td>
             <td><span class="price-down">▼-55.00</span></td><td><span class="price-down">-0.58%</span></td>
-            <td>-3.18%</td><td>2.95%</td><td>9620</td><td>9715</td><td>9435</td><td>9500</td><td>44</td><td>4.156</td>
+            <td>-3.18%</td><td>2.95%</td><td>9620</td><td>9715</td><td>9435</td><td>9445</td><td>44</td><td>4.156</td>
 		</tr></table>"#;
         let fragment = Html::parse_fragment(html);
         let row = fragment.select(&TR_SELECTOR).next().unwrap();
         let (symbol, snapshot) = parse_row(row).unwrap().unwrap();
-        
+
         assert_eq!(symbol, "5274");
         assert_eq!(snapshot.name, "信驊");
         assert_eq!(snapshot.price, dec!(9445));
@@ -275,7 +292,7 @@ mod tests {
         let fragment = Html::parse_fragment(html);
         let row = fragment.select(&TR_SELECTOR).next().unwrap();
         let (symbol, snapshot) = parse_row(row).unwrap().unwrap();
-        
+
         assert_eq!(symbol, "6584");
         assert_eq!(snapshot.change, Decimal::ZERO);
         assert_eq!(snapshot.volume, dec!(148));
@@ -285,26 +302,25 @@ mod tests {
     async fn test_cache_mechanism() {
         stop_caching_task().await;
         {
-            let cache = CACHE_DATA.read().await;
-            assert!(cache.is_empty(), "Cache should be empty after stop_caching_task");
+            assert!(
+                SHARE.stock_snapshots.read().unwrap().is_empty(),
+                "Cache should be empty after stop_caching_task"
+            );
         }
 
         let mock_symbol = "MOCK99";
-        let mock_snapshot = RealtimeSnapshot {
-            symbol: mock_symbol.to_string(),
-            name: "測試股".to_string(),
-            price: dec!(100.5),
-            change: dec!(1.5),
-            change_range: dec!(1.51),
-            open: dec!(99.0),
-            high: dec!(101.0),
-            low: dec!(98.5),
-            last_close: dec!(99.0),
-            volume: dec!(500),
-        };
+        let mut mock_snapshot = RealtimeSnapshot::new(mock_symbol.to_string(), dec!(100.5));
+        mock_snapshot.name = "測試股".to_string();
+        mock_snapshot.change = dec!(1.5);
+        mock_snapshot.change_range = dec!(1.51);
+        mock_snapshot.open = dec!(99.0);
+        mock_snapshot.high = dec!(101.0);
+        mock_snapshot.low = dec!(98.5);
+        mock_snapshot.last_close = dec!(99.0);
+        mock_snapshot.volume = dec!(500);
 
         {
-            let mut cache = CACHE_DATA.write().await;
+            let mut cache = SHARE.stock_snapshots.write().unwrap();
             cache.insert(mock_symbol.to_string(), mock_snapshot.clone());
         }
 
@@ -313,8 +329,7 @@ mod tests {
 
         stop_caching_task().await;
         {
-            let cache = CACHE_DATA.read().await;
-            assert!(cache.is_empty());
+            assert!(SHARE.stock_snapshots.read().unwrap().is_empty());
         }
     }
 
@@ -323,19 +338,19 @@ mod tests {
     async fn test_start_caching_task_integration() {
         stop_caching_task().await;
         start_caching_task();
-        
+
         println!("Waiting for background fetch...");
         tokio::time::sleep(Duration::from_secs(6)).await;
-        
+
         {
-            let cache = CACHE_DATA.read().await;
+            let cache = SHARE.stock_snapshots.read().unwrap();
             assert!(!cache.is_empty());
             println!("Background cache populated with {} stocks", cache.len());
         }
-        
+
         let price = HiStock::get_stock_price("2330").await.unwrap();
         assert!(price > Decimal::ZERO);
-        
+
         stop_caching_task().await;
     }
 
@@ -383,10 +398,7 @@ mod tests {
 
         // 2. 抓取全量並填充快取
         let all_stocks = fetch_all_from_rank().await.unwrap();
-        {
-            let mut cache = CACHE_DATA.write().await;
-            *cache = all_stocks;
-        }
+        SHARE.set_stock_snapshots(all_stocks);
 
         // 3. 測試透過公用介面取得價格 (此時應從快取秒讀)
         let price = HiStock::get_stock_price("2330").await.unwrap();
@@ -402,10 +414,7 @@ mod tests {
 
         // 2. 抓取全量並填充快取
         let all_stocks = fetch_all_from_rank().await.unwrap();
-        {
-            let mut cache = CACHE_DATA.write().await;
-            *cache = all_stocks;
-        }
+        SHARE.set_stock_snapshots(all_stocks);
 
         // 3. 測試透過公用介面取得報價物件
         let quotes = HiStock::get_stock_quotes("2330").await.unwrap();

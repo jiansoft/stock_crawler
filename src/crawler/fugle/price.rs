@@ -12,11 +12,11 @@ use rust_decimal::Decimal;
 use serde_derive::Deserialize;
 
 use crate::{
+    config::SETTINGS,
     crawler::{
         fugle::{Fugle, HOST},
         StockInfo,
     },
-    config::SETTINGS,
     declare::StockQuotes,
     util,
 };
@@ -268,9 +268,9 @@ mod tests {
 
         for stock_symbol in ["2330", "5306"] {
             match Fugle::get_stock_price(stock_symbol).await {
-                Ok(price) => logging::debug_file_async(format!(
-                    "fugle {stock_symbol} price: {price}"
-                )),
+                Ok(price) => {
+                    logging::debug_file_async(format!("fugle {stock_symbol} price: {price}"))
+                }
                 Err(why) => logging::debug_file_async(format!(
                     "Failed to fugle::get_stock_price({stock_symbol}) because {:?}",
                     why

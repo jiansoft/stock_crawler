@@ -143,9 +143,15 @@ mod tests {
 
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].year, 2024);
-        assert_eq!(result[0].earnings_per_share, Decimal::from_str_exact("1.16").unwrap());
+        assert_eq!(
+            result[0].earnings_per_share,
+            Decimal::from_str_exact("1.16").unwrap()
+        );
         assert_eq!(result[1].year, 2023);
-        assert_eq!(result[1].earnings_per_share, Decimal::from_str_exact("3.25").unwrap());
+        assert_eq!(
+            result[1].earnings_per_share,
+            Decimal::from_str_exact("3.25").unwrap()
+        );
         assert_eq!(result[2].year, 2022);
         assert_eq!(result[2].earnings_per_share, Decimal::ZERO);
     }
@@ -160,7 +166,7 @@ mod tests {
             Ok(result) => {
                 dbg!(&result);
                 logging::debug_file_async(format!("histock : {:#?}", result));
-            },
+            }
             Err(why) => logging::debug_file_async(format!(
                 "Failed to histock::annual_profit::visit because {:?}",
                 why

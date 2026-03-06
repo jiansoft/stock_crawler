@@ -60,6 +60,52 @@ pub struct Share {
     exchange_markets: HashMap<i32, stock_exchange_market::StockExchangeMarket>,
     /// 目前的 IP
     current_ip: RwLock<String>,
+    /// 股票即時報價快照快取 (目前主要由 HiStock 驅動)
+    pub stock_snapshots: RwLock<HashMap<String, RealtimeSnapshot>>,
+}
+
+/// HiStock 即時報價快照。
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub struct RealtimeSnapshot {
+    /// 股票代號 (必要欄位)
+    pub symbol: String,
+    /// 股票名稱
+    pub name: String,
+    /// 成交價 (必要欄位)
+    pub price: Decimal,
+    /// 漲跌
+    pub change: Decimal,
+    /// 漲跌幅 (%)
+    pub change_range: Decimal,
+    /// 開盤價
+    pub open: Decimal,
+    /// 最高價
+    pub high: Decimal,
+    /// 最低價
+    pub low: Decimal,
+    /// 昨收價
+    pub last_close: Decimal,
+    /// 成交量 (單位：張)
+    pub volume: Decimal,
+}
+
+impl RealtimeSnapshot {
+    /// 建立新的報價快照，強制要求填入必要欄位。
+    pub fn new(symbol: String, price: Decimal) -> Self {
+        Self {
+            symbol,
+            price,
+            name: String::new(),
+            change: Decimal::ZERO,
+            change_range: Decimal::ZERO,
+            open: Decimal::ZERO,
+            high: Decimal::ZERO,
+            low: Decimal::ZERO,
+            last_close: Decimal::ZERO,
+            volume: Decimal::ZERO,
+        }
+    }
 }
 
 impl Share {
@@ -237,6 +283,7 @@ impl Share {
             last_trading_day_quotes: RwLock::new(HashMap::new()),
             quote_history_records: RwLock::new(HashMap::new()),
             current_ip: RwLock::new(String::new()),
+            stock_snapshots: RwLock::new(HashMap::new()),
         }
     }
 
@@ -603,6 +650,28 @@ impl Share {
         match self.last_trading_day_quotes.read() {
             Ok(cache) => cache.get(symbol).cloned(),
             Err(_) => None,
+        }
+    }
+
+    /// 將股票全市場報價快照寫入快取。
+    pub fn set_stock_snapshots(&self, snapshots: HashMap<String, RealtimeSnapshot>) {
+        if let Ok(mut cache) = self.stock_snapshots.write() {
+            *cache = snapshots;
+        }
+    }
+
+    /// 從快取取得股票報價快照。
+    pub fn get_stock_snapshot(&self, symbol: &str) -> Option<RealtimeSnapshot> {
+        self.stock_snapshots
+            .read()
+            .ok()
+            .and_then(|cache| cache.get(symbol).cloned())
+    }
+
+    /// 清空股票報價快照快取。
+    pub fn clear_stock_snapshots(&self) {
+        if let Ok(mut cache) = self.stock_snapshots.write() {
+            cache.clear();
         }
     }
 }

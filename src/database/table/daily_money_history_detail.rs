@@ -190,7 +190,6 @@ ON CONFLICT (date, security_code, member_id) DO UPDATE SET
             date
         ))
     }
-
 }
 
 #[cfg(test)]

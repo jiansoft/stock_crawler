@@ -476,7 +476,6 @@ SELECT
             .context("Failed to batch_update_moving_average in DailyQuotes")
     }
 
-
     /// 使用 `COPY` 批次寫入 `DailyQuotes`。
     pub async fn copy_in_raw(quotes: &[Self]) -> Result<u64> {
         database::copy_in_raw(COPY_IN_QUERY, quotes).await
@@ -911,8 +910,7 @@ mod tests {
         e.create_time = Local::now();
 
         match e.upsert().await {
-            Ok(_) => {
-            }
+            Ok(_) => {}
             Err(why) => {
                 logging::debug_file_async(format!("Failed to upsert because:{:?}", why));
             }
@@ -947,8 +945,7 @@ mod tests {
         e.create_time = Local::now();
 
         match e.upsert().await {
-            Ok(_) => {
-            }
+            Ok(_) => {}
             Err(why) => {
                 logging::debug_file_async(format!("Failed to upsert because:{:?}", why));
             }

@@ -55,7 +55,10 @@ pub async fn execute() -> Result<()> {
     }
 
     // 檢查是否已經在運行，避免重複啟動
-    if IS_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+    if IS_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         logging::debug_file_async("股票追蹤任務已在運行中，跳過重複啟動".to_string());
         return Ok(());
     }
@@ -64,7 +67,7 @@ pub async fn execute() -> Result<()> {
     task::spawn(async move {
         // 啟動 HiStock 10 秒定時快取
         crawler::histock::price::start_caching_task();
-        
+
         trace_price_run().await;
         IS_RUNNING.store(false, Ordering::SeqCst);
     });
@@ -163,7 +166,9 @@ async fn process_grouped_targets(symbol: String, targets: Vec<Trace>) {
         Ok(_) => {
             logging::debug_file_async(format!("Stock {} current price is zero, skipping", symbol));
         }
-        Err(why) => logging::error_file_async(format!("Failed to fetch price for {}: {:?}", symbol, why)),
+        Err(why) => {
+            logging::error_file_async(format!("Failed to fetch price for {}: {:?}", symbol, why))
+        }
     }
 }
 
@@ -201,9 +206,10 @@ async fn alert_on_price_boundary(target: Trace, current_price: Decimal) -> Resul
     // 寫入快取 (有效期限 1 小時)
     if let Err(why) = nosql::redis::CLIENT
         .set(&target_key, current_price.to_string(), 60 * 60)
-        .await {
-            logging::error_file_async(format!("Failed to set Redis key {}: {:?}", target_key, why));
-        }
+        .await
+    {
+        logging::error_file_async(format!("Failed to set Redis key {}: {:?}", target_key, why));
+    }
 
     // 發送 Telegram 訊息
     bot::telegram::send(&to_bot_msg).await;
@@ -349,4 +355,3 @@ mod tests {
         assert!(result.is_ok());
     }
 }
-

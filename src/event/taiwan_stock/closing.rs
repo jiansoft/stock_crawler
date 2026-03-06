@@ -2,8 +2,7 @@ use crate::{
     backfill,
     bot::{self, telegram::Telegram},
     cache::{TtlCacheInner, TTL},
-    calculation,
-    crawler,
+    calculation, crawler,
     database::table::{
         daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
         daily_quote, last_daily_quotes, yield_rank::YieldRank,

@@ -91,7 +91,6 @@ ON CONFLICT (date) DO UPDATE SET
             )
         })
     }
-
 }
 
 #[cfg(test)]

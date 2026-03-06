@@ -6,5 +6,3 @@ pub mod annual_profit;
 
 /// MOPS 財務比較 E 點通主機。
 pub const HOST: &str = "mopsfin.twse.com.tw";
-
-

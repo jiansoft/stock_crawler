@@ -28,8 +28,9 @@ use crate::{
 };
 
 /// 用於解析股利所屬期間（如 2024Q4）的正則表達式
-static REG_PERIOD: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(\d{4})(Q\d|H\d)?").expect("Failed to compile dividend period regex"));
+static REG_PERIOD: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(\d{4})(Q\d|H\d)?").expect("Failed to compile dividend period regex")
+});
 
 /// 股利列表明細行的選擇器
 static LIST_SELECTOR: Lazy<Selector> = Lazy::new(|| {
@@ -145,17 +146,20 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
         let pay_date1 = parse_dt(&element, 9, &mut 0);
         let pay_date2 = parse_dt(&element, 10, &mut 0);
 
-        dividend_by_year.entry(year).or_default().push(YahooDividendDetail {
-            year,
-            year_of_dividend,
-            quarter,
-            cash_dividend,
-            stock_dividend,
-            ex_dividend_date1: ex_div_date,
-            ex_dividend_date2: ex_rights_date,
-            payable_date1: pay_date1,
-            payable_date2: pay_date2,
-        });
+        dividend_by_year
+            .entry(year)
+            .or_default()
+            .push(YahooDividendDetail {
+                year,
+                year_of_dividend,
+                quarter,
+                cash_dividend,
+                stock_dividend,
+                ex_dividend_date1: ex_div_date,
+                ex_dividend_date2: ex_rights_date,
+                payable_date1: pay_date1,
+                payable_date2: pay_date2,
+            });
     }
 
     let mut result = YahooDividend::new(stock_symbol.to_string());
@@ -208,5 +212,3 @@ fn parse_period(period: &Option<String>) -> Result<(i32, String)> {
     }
     Ok((0, "".to_string()))
 }
-
-

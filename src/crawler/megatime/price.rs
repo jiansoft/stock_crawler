@@ -41,18 +41,25 @@ impl StockInfo for PcHome {
     /// * `Err` - 抓取失敗、解析錯誤或找不到該股票資料。
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal> {
         let (document, url) = Self::fetch_document(stock_symbol).await?;
-        
-        let root = document.select(&ROOT_SELECTOR).next()
-            .ok_or_else(|| {
-                let html_preview = document.html().chars().take(200).collect::<String>();
-                anyhow!("在 {} 找不到股票 {} 的資訊容器。頁面開頭：{}", url, stock_symbol, html_preview)
-            })?;
+
+        let root = document.select(&ROOT_SELECTOR).next().ok_or_else(|| {
+            let html_preview = document.html().chars().take(200).collect::<String>();
+            anyhow!(
+                "在 {} 找不到股票 {} 的資訊容器。頁面開頭：{}",
+                url,
+                stock_symbol,
+                html_preview
+            )
+        })?;
 
         let price = element::parse_to_decimal(&root, "span.data_close");
         if price > Decimal::ZERO {
             Ok(price.normalize())
         } else {
-            Err(anyhow!("從 PCHome 解析到的股票 {} 價格為 0 或無效", stock_symbol))
+            Err(anyhow!(
+                "從 PCHome 解析到的股票 {} 價格為 0 或無效",
+                stock_symbol
+            ))
         }
     }
 
@@ -67,12 +74,20 @@ impl StockInfo for PcHome {
         let (document, url) = Self::fetch_document(stock_symbol).await?;
 
         // 取得主要資訊容器
-        let root = document.select(&ROOT_SELECTOR).next()
-            .ok_or_else(|| {
-                let body = document.html();
-                let snippet = if body.len() > 500 { &body[0..500] } else { &body };
-                anyhow!("在 {} 找不到股票 {} 的資訊容器 (#stock_info_data_a)。HTML 內容：\n{}", url, stock_symbol, snippet)
-            })?;
+        let root = document.select(&ROOT_SELECTOR).next().ok_or_else(|| {
+            let body = document.html();
+            let snippet = if body.len() > 500 {
+                &body[0..500]
+            } else {
+                &body
+            };
+            anyhow!(
+                "在 {} 找不到股票 {} 的資訊容器 (#stock_info_data_a)。HTML 內容：\n{}",
+                url,
+                stock_symbol,
+                snippet
+            )
+        })?;
 
         // 解析成交價
         let price_decimal = element::parse_to_decimal(&root, "span.data_close");
@@ -102,7 +117,7 @@ impl StockInfo for PcHome {
 
 impl PcHome {
     /// 私有輔助函式：發送 POST 請求並獲取解析後的 HTML 文件。
-    /// 
+    ///
     /// 該請求需要帶入 `is_check=1` 參數以獲取正確的報價內容。
     async fn fetch_document(stock_symbol: &str) -> Result<(Html, String)> {
         let url = format!(
@@ -110,14 +125,19 @@ impl PcHome {
             host = HOST,
             symbol = stock_symbol
         );
-        
+
         let mut params = HashMap::new();
         params.insert("is_check", "1");
-        
+
         let text = util::http::post(&url, None, Some(params))
             .await
-            .with_context(|| format!("從 PCHome 獲取股票 {} 資料失敗 (URL: {})", stock_symbol, url))?;
-            
+            .with_context(|| {
+                format!(
+                    "從 PCHome 獲取股票 {} 資料失敗 (URL: {})",
+                    stock_symbol, url
+                )
+            })?;
+
         Ok((Html::parse_document(&text), url))
     }
 }

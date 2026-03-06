@@ -1,10 +1,10 @@
-use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 use crate::config::SETTINGS;
 use crate::logging;
 use crate::rpc::control::control_client::ControlClient;
 use crate::rpc::control::ControlRequest;
 use anyhow::Result;
 use std::fs;
+use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
 /// 測試 gRPC 伺服器是否正常運行的客戶端工具
 pub async fn run_test() -> Result<()> {
@@ -29,7 +29,7 @@ pub async fn run_test() -> Result<()> {
 
     let pem = fs::read_to_string(cert_file)?;
     let ca = Certificate::from_pem(pem);
-    
+
     let domain = "jiansoft.ddns.net";
 
     let tls = ClientTlsConfig::new()
@@ -45,7 +45,7 @@ pub async fn run_test() -> Result<()> {
     match tokio::time::timeout(std::time::Duration::from_secs(6), endpoint.connect()).await {
         Ok(Ok(channel)) => {
             logging::info_file_async("gRPC 通道建立成功，準備發送 Request...");
-            
+
             let mut client = ControlClient::new(channel);
             let request = tonic::Request::new(ControlRequest {});
 
@@ -62,7 +62,10 @@ pub async fn run_test() -> Result<()> {
             }
         }
         Ok(Err(e)) => {
-            logging::error_file_async(format!("連線至 gRPC 伺服器失敗 (可能是 TLS 握手錯誤或過期): {}", e));
+            logging::error_file_async(format!(
+                "連線至 gRPC 伺服器失敗 (可能是 TLS 握手錯誤或過期): {}",
+                e
+            ));
         }
         Err(_) => {
             logging::error_file_async("gRPC 連線測試超時 (超過 6 秒)");

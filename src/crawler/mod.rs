@@ -12,7 +12,10 @@
 
 use std::{
     collections::HashMap,
-    sync::{Mutex, atomic::{AtomicUsize, Ordering}},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    },
     time::Instant,
 };
 
@@ -23,17 +26,10 @@ use rust_decimal::Decimal;
 
 use crate::{
     crawler::{
-        cnyes::CnYes,
-        cmoney::CMoney,
-        fugle::Fugle,
-        histock::HiStock,
-        megatime::PcHome,
-        nstock::NStock,
-        yahoo::Yahoo,
-        yuanta::Yuanta,
+        cmoney::CMoney, cnyes::CnYes, fugle::Fugle, histock::HiStock, megatime::PcHome,
+        nstock::NStock, winvest::Winvest, yahoo::Yahoo, yuanta::Yuanta,
     },
-    declare,
-    logging,
+    declare, logging,
 };
 
 /// 動態 DNS 服務 (Afraid DNS)
@@ -62,10 +58,10 @@ pub mod ipify;
 pub mod ipinfo;
 /// PCHOME 股市 (提供即時行情)
 pub mod megatime;
-/// 公開資訊觀測站（MOPS）/ 財務比較 E 點通
-pub mod mops;
 /// MoneyDJ 理財網 (嘉實資訊，提供詳盡的財務指標)
 pub mod moneydj;
+/// 公開資訊觀測站（MOPS）/ 財務比較 E 點通
+pub mod mops;
 /// IP 檢測服務 (MyIP)
 pub mod myip;
 /// 動態 DNS 服務 (No-IP)
@@ -84,6 +80,8 @@ pub mod tpex;
 pub mod twse;
 /// 撿股讚 (提供股利與選股資料)
 pub mod wespai;
+/// Winvest (提供即時行情與多維度個股資料)
+pub mod winvest;
 /// Yahoo 財經 (國際與台灣股市即時行情)
 pub mod yahoo;
 /// 元大證券 (提供技術面與基本面資料)
@@ -229,7 +227,7 @@ pub fn flush_site_latency_stats() {
 /// 從多個遠端站點中輪詢獲取股票的最新成交價。
 ///
 /// 此函數會嘗試預設的站點清單，如果某個站點失敗，會自動嘗試下一個，直到成功或所有站點都失敗為止。
-/// 支援的站點包括：HiStock, Yahoo, Fugle, NStock, CMoney, CnYes, Yuanta, PcHome。
+/// 支援的站點包括：HiStock, Yahoo, Fugle, NStock, CMoney, CnYes, Yuanta, PcHome, Winvest。
 ///
 /// # 參數
 /// * `stock_symbol` - 股票代碼 (例如: "2330")
@@ -238,7 +236,7 @@ pub fn flush_site_latency_stats() {
 /// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
     let site_names = [
-        "HiStock", "Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome",
+        "HiStock", "Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome", "Winvest",
     ];
     let sites = [
         HiStock::get_stock_price,
@@ -249,6 +247,7 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
         CnYes::get_stock_price,
         Yuanta::get_stock_price,
         PcHome::get_stock_price,
+        Winvest::get_stock_price,
     ];
     let site_len = sites.len();
     let mut errors = Vec::with_capacity(site_len);
@@ -289,7 +288,7 @@ pub async fn fetch_stock_quotes_from_remote_site(
     stock_symbol: &str,
 ) -> Result<declare::StockQuotes> {
     let site_names = [
-        "HiStock", "Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome",
+        "HiStock", "Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome", "Winvest",
     ];
     let sites = [
         HiStock::get_stock_quotes,
@@ -300,6 +299,7 @@ pub async fn fetch_stock_quotes_from_remote_site(
         CnYes::get_stock_quotes,
         Yuanta::get_stock_quotes,
         PcHome::get_stock_quotes,
+        Winvest::get_stock_quotes,
     ];
     let site_len = sites.len();
     let mut errors = Vec::with_capacity(site_len);

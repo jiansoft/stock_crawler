@@ -18,7 +18,7 @@ use serde_derive::Deserialize;
 
 use crate::{
     crawler::{
-        yuanta::{HOST, Yuanta},
+        yuanta::{Yuanta, HOST},
         StockInfo,
     },
     declare::StockQuotes,
@@ -118,9 +118,9 @@ mod tests {
 
         for stock_symbol in ["2330", "5306"] {
             match Yuanta::get_stock_price(stock_symbol).await {
-                Ok(price) => logging::debug_file_async(format!(
-                    "yuanta {stock_symbol} price: {price}"
-                )),
+                Ok(price) => {
+                    logging::debug_file_async(format!("yuanta {stock_symbol} price: {price}"))
+                }
                 Err(why) => logging::debug_file_async(format!(
                     "Failed to yuanta::get_stock_price({stock_symbol}) because {:?}",
                     why
