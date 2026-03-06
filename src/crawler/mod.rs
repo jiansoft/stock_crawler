@@ -8,10 +8,13 @@
 //! - **多站點支援**：整合了 Yahoo 財經、鉅亨網、CMoney、PCHome 等多個來源。
 //! - **負載平衡與備援**：使用輪詢 (Round-robin) 機制切換不同站點，並在主站點失敗時自動嘗試備援站點。
 //! - **抽象化介面**：透過 `StockInfo` Trait 定義統一的資料獲取行為。
+//! - **站點池集中管理**：將站點名稱與抓取函式綁成模組層級清單，降低平行陣列對不齊的維護風險。
 //! - **DDNS 支援**：包含自動更新 DDNS (如 Afraid, Dynu, No-IP) 的相關模組。
 
 use std::{
     collections::HashMap,
+    future::Future,
+    pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
@@ -68,6 +71,8 @@ pub mod myip;
 pub mod noip;
 /// NStock 恩投資 (提供 EPS 與各類統計數據)
 pub mod nstock;
+/// 即時價格背景任務協調層
+pub mod price_tasks;
 /// IP 檢測服務 (SeeIP)
 pub mod seeip;
 /// 內部共享模組，包含多個來源共用的解析邏輯 (如元大、嘉實、富邦)
@@ -114,27 +119,306 @@ static INDEX: AtomicUsize = AtomicUsize::new(0);
 static SITE_LATENCY_STATS: Lazy<Mutex<HashMap<&'static str, SiteLatencyStats>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// 「最新成交價」非同步抓取函式的 boxed future 型別。
+///
+/// 這個型別別名用來收斂各站點 `async_trait` 產生出的回傳型別，
+/// 讓站點池可以用一致的函式指標簽名儲存不同來源。
+type StockPriceFuture<'a> = Pin<Box<dyn Future<Output = Result<Decimal>> + Send + 'a>>;
+/// 「完整報價」非同步抓取函式的 boxed future 型別。
+///
+/// 用途與 [`StockPriceFuture`] 相同，只是回傳內容改為 [`declare::StockQuotes`]。
+type StockQuotesFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<declare::StockQuotes>> + Send + 'a>>;
+/// 「最新成交價」站點 wrapper 函式的統一函式指標型別。
+type StockPriceFetcher = for<'a> fn(&'a str) -> StockPriceFuture<'a>;
+/// 「完整報價」站點 wrapper 函式的統一函式指標型別。
+type StockQuotesFetcher = for<'a> fn(&'a str) -> StockQuotesFuture<'a>;
+
+/// 單一「股價」站點的描述。
+///
+/// 將站點名稱與對應抓價函式綁在一起，避免名稱陣列與函式陣列分離後產生順序錯位。
+#[derive(Clone, Copy)]
+struct PriceSite {
+    name: &'static str,
+    fetch: StockPriceFetcher,
+}
+
+/// 單一「完整報價」站點的描述。
+///
+/// 結構與 [`PriceSite`] 相同，但抓取的是開高低收、漲跌幅等完整報價資料。
+#[derive(Clone, Copy)]
+struct QuoteSite {
+    name: &'static str,
+    fetch: StockQuotesFetcher,
+}
+
+/// 產生「最新成交價」wrapper 函式。
+///
+/// `async_trait` 產生的關聯函式型別，無法直接穩定地放進模組層級常數陣列；
+/// 因此透過此巨集產生一層薄 wrapper，讓站點池可以持有一致的函式指標型別。
+///
+/// # 使用方式
+/// ```ignore
+/// define_stock_price_fetcher!(
+///     "將 FooSite 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+///     fetch_foosite_price,
+///     FooSite
+/// );
+/// ```
+macro_rules! define_stock_price_fetcher {
+    ($doc:literal, $fn_name:ident, $site:ty) => {
+        #[doc = $doc]
+        fn $fn_name<'a>(stock_symbol: &'a str) -> StockPriceFuture<'a> {
+            <$site as StockInfo>::get_stock_price(stock_symbol)
+        }
+    };
+}
+
+/// 產生「完整報價」wrapper 函式。
+///
+/// 用途與 [`define_stock_price_fetcher`] 相同，只是包裝的是
+/// `StockInfo::get_stock_quotes`，供完整報價站點池重複使用。
+///
+/// # 使用方式
+/// ```ignore
+/// define_stock_quotes_fetcher!(
+///     "將 FooSite 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+///     fetch_foosite_quotes,
+///     FooSite
+/// );
+/// ```
+macro_rules! define_stock_quotes_fetcher {
+    ($doc:literal, $fn_name:ident, $site:ty) => {
+        #[doc = $doc]
+        fn $fn_name<'a>(stock_symbol: &'a str) -> StockQuotesFuture<'a> {
+            <$site as StockInfo>::get_stock_quotes(stock_symbol)
+        }
+    };
+}
+
+define_stock_price_fetcher!(
+    "將 Yahoo 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+    fetch_yahoo_price,
+    Yahoo
+);
+define_stock_price_fetcher!(
+    "將 Fugle 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+    fetch_fugle_price,
+    Fugle
+);
+define_stock_price_fetcher!(
+    "將 NStock 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+    fetch_nstock_price,
+    NStock
+);
+define_stock_price_fetcher!(
+    "將 CMoney 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+    fetch_cmoney_price,
+    CMoney
+);
+define_stock_price_fetcher!(
+    "將 CnYes 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+    fetch_cnyes_price,
+    CnYes
+);
+define_stock_price_fetcher!(
+    "將 Yuanta 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+    fetch_yuanta_price,
+    Yuanta
+);
+define_stock_price_fetcher!(
+    "將 PcHome 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+    fetch_pchome_price,
+    PcHome
+);
+define_stock_price_fetcher!(
+    "將 Winvest 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+    fetch_winvest_price,
+    Winvest
+);
+
+define_stock_quotes_fetcher!(
+    "將 HiStock 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_histock_quotes,
+    HiStock
+);
+define_stock_quotes_fetcher!(
+    "將 Yahoo 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_yahoo_quotes,
+    Yahoo
+);
+define_stock_quotes_fetcher!(
+    "將 Fugle 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_fugle_quotes,
+    Fugle
+);
+define_stock_quotes_fetcher!(
+    "將 NStock 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_nstock_quotes,
+    NStock
+);
+define_stock_quotes_fetcher!(
+    "將 CMoney 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_cmoney_quotes,
+    CMoney
+);
+define_stock_quotes_fetcher!(
+    "將 CnYes 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_cnyes_quotes,
+    CnYes
+);
+define_stock_quotes_fetcher!(
+    "將 Yuanta 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_yuanta_quotes,
+    Yuanta
+);
+define_stock_quotes_fetcher!(
+    "將 PcHome 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_pchome_quotes,
+    PcHome
+);
+define_stock_quotes_fetcher!(
+    "將 Winvest 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_winvest_quotes,
+    Winvest
+);
+
+/// 所有可用的「最新成交價」站點池。
+///
+/// 此順序同時代表 round-robin 的輪詢候選順序。
+/// `HiStock` 已從此站點池移除，因為目前即時股價採集改由它自己的背景排程負責。
+///
+/// 目前站點順序如下：
+/// - `Yahoo`
+/// - `Fugle`
+/// - `NStock`
+/// - `CMoney`
+/// - `CnYes`
+/// - `Yuanta`
+/// - `PcHome`
+/// - `Winvest`
+const ALL_PRICE_SITES: [PriceSite; 8] = [
+    PriceSite {
+        name: "Yahoo",
+        fetch: fetch_yahoo_price,
+    },
+    PriceSite {
+        name: "Fugle",
+        fetch: fetch_fugle_price,
+    },
+    PriceSite {
+        name: "NStock",
+        fetch: fetch_nstock_price,
+    },
+    PriceSite {
+        name: "CMoney",
+        fetch: fetch_cmoney_price,
+    },
+    PriceSite {
+        name: "CnYes",
+        fetch: fetch_cnyes_price,
+    },
+    PriceSite {
+        name: "Yuanta",
+        fetch: fetch_yuanta_price,
+    },
+    PriceSite {
+        name: "PcHome",
+        fetch: fetch_pchome_price,
+    },
+    PriceSite {
+        name: "Winvest",
+        fetch: fetch_winvest_price,
+    },
+];
+
+/// 所有可用的「完整報價」站點池。
+///
+/// 由於完整報價仍需要開高低收、漲跌與漲跌幅等欄位，
+/// 目前這條路徑仍保留 `HiStock` 作為候選來源之一。
+///
+/// 目前站點順序如下：
+/// - `HiStock`
+/// - `Yahoo`
+/// - `Fugle`
+/// - `NStock`
+/// - `CMoney`
+/// - `CnYes`
+/// - `Yuanta`
+/// - `PcHome`
+/// - `Winvest`
+const ALL_QUOTE_SITES: [QuoteSite; 9] = [
+    QuoteSite {
+        name: "HiStock",
+        fetch: fetch_histock_quotes,
+    },
+    QuoteSite {
+        name: "Yahoo",
+        fetch: fetch_yahoo_quotes,
+    },
+    QuoteSite {
+        name: "Fugle",
+        fetch: fetch_fugle_quotes,
+    },
+    QuoteSite {
+        name: "NStock",
+        fetch: fetch_nstock_quotes,
+    },
+    QuoteSite {
+        name: "CMoney",
+        fetch: fetch_cmoney_quotes,
+    },
+    QuoteSite {
+        name: "CnYes",
+        fetch: fetch_cnyes_quotes,
+    },
+    QuoteSite {
+        name: "Yuanta",
+        fetch: fetch_yuanta_quotes,
+    },
+    QuoteSite {
+        name: "PcHome",
+        fetch: fetch_pchome_quotes,
+    },
+    QuoteSite {
+        name: "Winvest",
+        fetch: fetch_winvest_quotes,
+    },
+];
+
+/// 單一站點在目前統計期間內累積的延遲樣本。
 #[derive(Default)]
 struct SiteLatencyStats {
+    /// 每次請求的耗時，單位為毫秒。
     durations_ms: Vec<u64>,
 }
 
+/// 單一站點延遲統計的彙總快照。
+///
+/// 此結構只在輸出 log 前短暫建立，用來承載排序後的摘要資訊。
 struct SiteLatencySnapshot {
+    /// 站點名稱。
     site_name: &'static str,
+    /// 取樣次數。
     count: usize,
+    /// 平均延遲，單位為毫秒。
     avg_ms: u64,
+    /// 第 99 百分位延遲，單位為毫秒。
     p99_ms: u64,
 }
 
 impl SiteLatencyStats {
+    /// 新增一筆站點延遲樣本。
     fn record(&mut self, elapsed_ms: u64) {
         self.durations_ms.push(elapsed_ms);
     }
 
+    /// 取得目前累積的樣本數。
     fn sample_count(&self) -> usize {
         self.durations_ms.len()
     }
 
+    /// 計算平均延遲，單位為毫秒。
     fn average_ms(&self) -> u64 {
         if self.durations_ms.is_empty() {
             return 0;
@@ -144,6 +428,10 @@ impl SiteLatencyStats {
         (sum / self.durations_ms.len() as u128) as u64
     }
 
+    /// 計算第 99 百分位延遲，單位為毫秒。
+    ///
+    /// 若樣本不足 100 筆，會回傳排序後靠近尾端的樣本值，
+    /// 作為保守的高延遲觀察指標。
     fn p99_ms(&self) -> u64 {
         if self.durations_ms.is_empty() {
             return 0;
@@ -165,11 +453,7 @@ impl SiteLatencyStats {
 /// # 參數
 /// * `max` - 站點總數，當遊標達到此值時會自動歸零。
 fn get_and_increment_index(max: usize) -> usize {
-    INDEX
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-            Some((val + 1) % max)
-        })
-        .unwrap_or(0)
+    INDEX.fetch_add(1, Ordering::SeqCst) % max
 }
 
 /// 記錄單一站點本次請求耗時。
@@ -178,6 +462,86 @@ fn record_site_latency(site_name: &'static str, started_at: Instant) {
     if let Ok(mut stats) = SITE_LATENCY_STATS.lock() {
         stats.entry(site_name).or_default().record(elapsed_ms);
     }
+}
+
+/// 依指定站點池輪詢抓取「最新成交價」。
+///
+/// # 參數
+/// - `stock_symbol`: 股票代號。
+/// - `sites`: 要參與輪詢的站點池。
+/// - `error_scope`: 錯誤訊息中使用的站點池描述字串。
+///
+/// # 行為
+/// - 依 [`get_and_increment_index`] 取得本輪起始站點，避免所有請求都從同一站開始。
+/// - 成功時立即回傳標準化後的股價。
+/// - 失敗時累積各站點錯誤，全部失敗後再整體回傳。
+async fn fetch_stock_price_from_site_pool(
+    stock_symbol: &str,
+    sites: &[PriceSite],
+    error_scope: &str,
+) -> Result<Decimal> {
+    let site_len = sites.len();
+    let mut errors = Vec::with_capacity(site_len);
+
+    for _ in 0..site_len {
+        let current_site = get_and_increment_index(site_len);
+        let site = sites[current_site];
+        let started_at = Instant::now();
+        match (site.fetch)(stock_symbol).await {
+            Ok(price) => {
+                record_site_latency(site.name, started_at);
+                return Ok(price.normalize());
+            }
+            Err(why) => {
+                record_site_latency(site.name, started_at);
+                errors.push(format!("{}: {why}", site.name));
+            }
+        }
+    }
+
+    Err(anyhow!(
+        "Failed to fetch stock price({stock_symbol}) from {error_scope}: {}",
+        errors.join(" | ")
+    ))
+}
+
+/// 依指定站點池輪詢抓取「完整報價」。
+///
+/// # 參數
+/// - `stock_symbol`: 股票代號。
+/// - `sites`: 要參與輪詢的站點池。
+/// - `error_scope`: 錯誤訊息中使用的站點池描述字串。
+///
+/// # 行為
+/// - 與 [`fetch_stock_price_from_site_pool`] 相同，差別只在回傳型別為完整報價。
+async fn fetch_stock_quotes_from_site_pool(
+    stock_symbol: &str,
+    sites: &[QuoteSite],
+    error_scope: &str,
+) -> Result<declare::StockQuotes> {
+    let site_len = sites.len();
+    let mut errors = Vec::with_capacity(site_len);
+
+    for _ in 0..site_len {
+        let current_site = get_and_increment_index(site_len);
+        let site = sites[current_site];
+        let started_at = Instant::now();
+        match (site.fetch)(stock_symbol).await {
+            Ok(quotes) => {
+                record_site_latency(site.name, started_at);
+                return Ok(quotes);
+            }
+            Err(why) => {
+                record_site_latency(site.name, started_at);
+                errors.push(format!("{}: {why}", site.name));
+            }
+        }
+    }
+
+    Err(anyhow!(
+        "Failed to fetch stock quotes({stock_symbol}) from {error_scope}: {}",
+        errors.join(" | ")
+    ))
 }
 
 /// 輸出站點耗時統計並清空當前累積資料。
@@ -201,7 +565,7 @@ pub fn flush_site_latency_stats() {
     let mut entries = stats
         .iter()
         .map(|(site_name, site_stats)| SiteLatencySnapshot {
-            site_name: *site_name,
+            site_name,
             count: site_stats.sample_count(),
             avg_ms: site_stats.average_ms(),
             p99_ms: site_stats.p99_ms(),
@@ -227,7 +591,9 @@ pub fn flush_site_latency_stats() {
 /// 從多個遠端站點中輪詢獲取股票的最新成交價。
 ///
 /// 此函數會嘗試預設的站點清單，如果某個站點失敗，會自動嘗試下一個，直到成功或所有站點都失敗為止。
-/// 支援的站點包括：HiStock, Yahoo, Fugle, NStock, CMoney, CnYes, Yuanta, PcHome, Winvest。
+/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, Yuanta, PcHome, Winvest。
+/// 實際站點定義集中在 [`ALL_PRICE_SITES`]。
+/// 此函式不再經過 `HiStock`。
 ///
 /// # 參數
 /// * `stock_symbol` - 股票代碼 (例如: "2330")
@@ -235,49 +601,32 @@ pub fn flush_site_latency_stats() {
 /// # 傳回值
 /// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
-    let site_names = [
-        "HiStock", "Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome", "Winvest",
-    ];
-    let sites = [
-        HiStock::get_stock_price,
-        Yahoo::get_stock_price,
-        Fugle::get_stock_price,
-        NStock::get_stock_price,
-        CMoney::get_stock_price,
-        CnYes::get_stock_price,
-        Yuanta::get_stock_price,
-        PcHome::get_stock_price,
-        Winvest::get_stock_price,
-    ];
-    let site_len = sites.len();
-    let mut errors = Vec::with_capacity(site_len);
+    fetch_stock_price_from_site_pool(stock_symbol, &ALL_PRICE_SITES, "all sites").await
+}
 
-    for _ in 0..site_len {
-        let current_site = get_and_increment_index(site_len);
-        let site_name = site_names[current_site];
-        let started_at = Instant::now();
-        match sites[current_site](stock_symbol).await {
-            Ok(price) => {
-                record_site_latency(site_name, started_at);
-                return Ok(price.normalize());
-            }
-            Err(why) => {
-                record_site_latency(site_name, started_at);
-                errors.push(format!("{site_name}: {why}"));
-            }
-        }
-    }
-
-    Err(anyhow!(
-        "Failed to fetch stock price({stock_symbol}) from all sites: {}",
-        errors.join(" | ")
-    ))
+/// 從多個遠端站點中輪詢獲取股票的最新成交價，但排除 HiStock。
+///
+/// 此函數主要用於 HiStock 已有獨立背景排程時的備援抓價情境，
+/// 避免同一支股票同時由兩套流程對 HiStock 重複請求。
+///
+/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, Yuanta, PcHome, Winvest。
+/// 實際站點定義直接重用 [`ALL_PRICE_SITES`]。
+/// 也就是說，最新成交價的一般抓價路徑與備援抓價路徑目前使用相同站點集合。
+///
+/// # 參數
+/// * `stock_symbol` - 股票代碼 (例如: "2330")
+///
+/// # 傳回值
+/// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
+pub async fn fetch_stock_price_from_backup_sites(stock_symbol: &str) -> Result<Decimal> {
+    fetch_stock_price_from_site_pool(stock_symbol, &ALL_PRICE_SITES, "backup sites").await
 }
 
 /// 從多個遠端站點中輪詢獲取股票的完整報價資訊。
 ///
 /// 此函數包含漲跌、漲幅、開盤、最高、最低等詳細資料。
 /// 實作機制與 `fetch_stock_price_from_remote_site` 相同，採用自動備援輪詢。
+/// 實際站點定義集中在 [`ALL_QUOTE_SITES`]。
 ///
 /// # 參數
 /// * `stock_symbol` - 股票代碼 (例如: "2330")
@@ -287,43 +636,7 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 pub async fn fetch_stock_quotes_from_remote_site(
     stock_symbol: &str,
 ) -> Result<declare::StockQuotes> {
-    let site_names = [
-        "HiStock", "Yahoo", "Fugle", "NStock", "CMoney", "CnYes", "Yuanta", "PcHome", "Winvest",
-    ];
-    let sites = [
-        HiStock::get_stock_quotes,
-        Yahoo::get_stock_quotes,
-        Fugle::get_stock_quotes,
-        NStock::get_stock_quotes,
-        CMoney::get_stock_quotes,
-        CnYes::get_stock_quotes,
-        Yuanta::get_stock_quotes,
-        PcHome::get_stock_quotes,
-        Winvest::get_stock_quotes,
-    ];
-    let site_len = sites.len();
-    let mut errors = Vec::with_capacity(site_len);
-
-    for _ in 0..site_len {
-        let current_site = get_and_increment_index(site_len);
-        let site_name = site_names[current_site];
-        let started_at = Instant::now();
-        match sites[current_site](stock_symbol).await {
-            Ok(quotes) => {
-                record_site_latency(site_name, started_at);
-                return Ok(quotes);
-            }
-            Err(why) => {
-                record_site_latency(site_name, started_at);
-                errors.push(format!("{site_name}: {why}"));
-            }
-        }
-    }
-
-    Err(anyhow!(
-        "Failed to fetch stock quotes({stock_symbol}) from all sites: {}",
-        errors.join(" | ")
-    ))
+    fetch_stock_quotes_from_site_pool(stock_symbol, &ALL_QUOTE_SITES, "all sites").await
 }
 
 #[cfg(test)]
@@ -332,6 +645,7 @@ mod tests {
 
     use super::*;
 
+    /// 驗證站點延遲統計可以正確計算平均值與 p99。
     #[test]
     fn test_site_latency_stats_average_and_p99() {
         let mut stats = SiteLatencyStats::default();
@@ -345,6 +659,7 @@ mod tests {
         assert_eq!(stats.p99_ms(), 50);
     }
 
+    /// 驗證站點延遲統計在單一樣本時仍能正確回傳平均值與 p99。
     #[test]
     fn test_site_latency_stats_p99_with_single_sample() {
         let mut stats = SiteLatencyStats::default();
@@ -355,6 +670,20 @@ mod tests {
         assert_eq!(stats.p99_ms(), 88);
     }
 
+    /// 驗證全域輪詢游標在不同站點池大小間切換時不會產生越界索引。
+    #[test]
+    fn test_get_and_increment_index_supports_different_pool_sizes() {
+        INDEX.store(0, Ordering::SeqCst);
+
+        assert_eq!(get_and_increment_index(9), 0);
+        assert_eq!(get_and_increment_index(8), 1);
+
+        INDEX.store(8, Ordering::SeqCst);
+        assert_eq!(get_and_increment_index(8), 0);
+        assert_eq!(get_and_increment_index(9), 0);
+    }
+
+    /// 驗證輸出延遲統計後，累積中的站點資料會被清空。
     #[test]
     fn test_flush_site_latency_stats_clears_data() {
         {
@@ -370,6 +699,9 @@ mod tests {
         assert!(all_stats.is_empty());
     }
 
+    /// 驗證完整站點池可以成功抓取多檔股票的最新成交價。
+    ///
+    /// 此測試會實際連線外部站點，主要用於手動驗證輪詢與備援流程。
     #[tokio::test]
     async fn test_fetch_stock_price_from_remote_site() {
         dotenv::dotenv().ok();
@@ -394,6 +726,9 @@ mod tests {
         logging::debug_file_async("結束 fetch_price".to_string());
     }
 
+    /// 驗證完整站點池可以成功抓取多檔股票的完整報價資訊。
+    ///
+    /// 此測試會實際連線外部站點，主要用於手動驗證完整報價輪詢流程。
     #[tokio::test]
     async fn test_fetch_stock_quotes_from_remote_site() {
         dotenv::dotenv().ok();

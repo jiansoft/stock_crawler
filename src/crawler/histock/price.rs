@@ -7,7 +7,9 @@
 //! 2. **外部驅動啟停**：
 //!    - 依賴外部事件 (如 `src/event/trace/stock_price.rs`) 在開盤期間啟動定時任務。
 //!    - 依賴收盤事件停止任務。停止後會清空快取以節省記憶體並確保下次啟動時資料新鮮。
-//! 3. **嚴格解析**：不容忍損壞或格式錯誤ের報價，解析失敗會傳回錯誤而非默默變 0。
+//! 3. **消費者共用**：背景任務更新後的資料會寫入 [`SHARE`](crate::cache::SHARE)
+//!    的 `stock_snapshots`，供追蹤任務與 `StockInfo` 介面共用。
+//! 4. **嚴格解析**：不容忍損壞或格式錯誤的報價，解析失敗會傳回錯誤而非默默變 0。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,6 +31,7 @@ use crate::{
         StockInfo,
     },
     declare,
+    event::trace::price_tasks as trace_price_tasks,
     util::{self, text},
 };
 
@@ -135,7 +138,45 @@ fn parse_row(row: scraper::element_ref::ElementRef) -> Result<Option<(String, Re
     Ok(Some((symbol, snapshot)))
 }
 
-/// 啟動定時快取任務
+/// 比對新舊快取，收集「價格實際有異動」的股票清單。
+///
+/// # 回傳
+/// - `Vec<(String, Decimal)>`：股票代號與最新成交價的配對。
+///
+/// # 行為
+/// - 若舊快取中不存在該股票，視為新價格事件。
+/// - 若舊快取中的 `price` 與新資料相同，則不產生事件。
+/// - 價格為 0 的資料不會發出事件，避免無效資料觸發追蹤判斷。
+fn collect_changed_price_updates(
+    new_data: &HashMap<String, RealtimeSnapshot>,
+) -> Vec<(String, Decimal)> {
+    let old_cache = SHARE.stock_snapshots.read().ok();
+    let mut updates = Vec::new();
+
+    for (symbol, snapshot) in new_data {
+        if snapshot.price == Decimal::ZERO {
+            continue;
+        }
+
+        let has_changed = old_cache
+            .as_ref()
+            .and_then(|cache| cache.get(symbol))
+            .is_none_or(|old_snapshot| old_snapshot.price != snapshot.price);
+
+        if has_changed {
+            updates.push((symbol.clone(), snapshot.price));
+        }
+    }
+
+    updates
+}
+
+/// 啟動定時快取任務。
+///
+/// 此任務會固定重新抓取 HiStock 全市場排行榜，並以全量覆蓋方式更新
+/// [`SHARE`](crate::cache::SHARE) 的即時報價快取。
+///
+/// 若任務已在執行中，重複呼叫不會再額外啟動第二個背景迴圈。
 pub fn start_caching_task() {
     if IS_CACHING.load(Ordering::SeqCst) {
         return;
@@ -157,7 +198,9 @@ pub fn start_caching_task() {
             match result {
                 Ok(new_data) => {
                     let count = new_data.len();
+                    let price_updates = collect_changed_price_updates(&new_data);
                     SHARE.set_stock_snapshots(new_data);
+                    trace_price_tasks::publish_price_updates(price_updates);
                     crate::logging::debug_file_async(format!(
                         "HiStock 快取已更新，共 {} 檔股票，耗時 {:?}",
                         count,
@@ -178,13 +221,20 @@ pub fn start_caching_task() {
     });
 }
 
-/// 停止定時快取任務並清空快取 (統一實作與行為預期)
+/// 停止定時快取任務並清空即時報價快取。
+///
+/// 清空快取的目的，是避免收盤後保留過時盤中資料，讓下次開盤重新暖機時
+/// 一定從新資料開始。
 pub async fn stop_caching_task() {
     IS_CACHING.store(false, Ordering::SeqCst);
     SHARE.clear_stock_snapshots();
 }
 
-/// 抓取全量資料
+/// 從 HiStock 排行榜抓取全市場即時報價資料。
+///
+/// # 回傳
+/// - `Ok(HashMap<String, RealtimeSnapshot>)`：以股票代號為 key 的完整即時快照。
+/// - `Err(_)`：HTTP 抓取失敗、HTML 結構異常，或解析後完全沒有有效資料。
 async fn fetch_all_from_rank() -> Result<HashMap<String, RealtimeSnapshot>> {
     let url = format!("https://{host}/stock/rank.aspx?p=all", host = HOST);
     let body = util::http::get(&url, None).await?;
@@ -203,7 +253,12 @@ async fn fetch_all_from_rank() -> Result<HashMap<String, RealtimeSnapshot>> {
     Ok(map)
 }
 
-/// 取得指定股票的即時快照 (解決 Single-flight 問題)
+/// 取得指定股票的即時快照。
+///
+/// 讀取策略如下：
+/// 1. 先直接查詢全市場快取。
+/// 2. 若快取未命中，使用 single-flight 鎖避免多個呼叫端同時觸發全量重抓。
+/// 3. 抓取成功後，以新資料覆蓋全市場快取，再回傳目標股票快照。
 async fn get_snapshot(stock_symbol: &str) -> Result<RealtimeSnapshot> {
     // 第一階段：嘗試取得快取
     if let Some(s) = SHARE.get_stock_snapshot(stock_symbol) {
@@ -229,7 +284,9 @@ async fn get_snapshot(stock_symbol: &str) -> Result<RealtimeSnapshot> {
     })?;
 
     // 更新全量快取
+    let price_updates = collect_changed_price_updates(&new_data);
     SHARE.set_stock_snapshots(new_data);
+    trace_price_tasks::publish_price_updates(price_updates);
 
     Ok(snapshot)
 }
@@ -267,6 +324,45 @@ mod tests {
     use super::*;
     use crate::logging;
     use rust_decimal_macros::dec;
+
+    /// 驗證全量快取更新前，只會針對價格實際異動的股票產生價格事件。
+    #[test]
+    fn test_collect_changed_price_updates() {
+        SHARE.clear_stock_snapshots();
+
+        let mut existing_snapshot = RealtimeSnapshot::new("2330".to_string(), dec!(998));
+        existing_snapshot.name = "台積電".to_string();
+        let mut cache = HashMap::new();
+        cache.insert("2330".to_string(), existing_snapshot);
+        SHARE.set_stock_snapshots(cache);
+
+        let mut new_data = HashMap::new();
+        new_data.insert(
+            "2330".to_string(),
+            RealtimeSnapshot::new("2330".to_string(), dec!(1000)),
+        );
+        new_data.insert(
+            "2317".to_string(),
+            RealtimeSnapshot::new("2317".to_string(), dec!(180)),
+        );
+        new_data.insert(
+            "2454".to_string(),
+            RealtimeSnapshot::new("2454".to_string(), Decimal::ZERO),
+        );
+
+        let mut updates = collect_changed_price_updates(&new_data);
+        updates.sort_by(|left, right| left.0.cmp(&right.0));
+
+        assert_eq!(
+            updates,
+            vec![
+                ("2317".to_string(), dec!(180)),
+                ("2330".to_string(), dec!(1000)),
+            ]
+        );
+
+        SHARE.clear_stock_snapshots();
+    }
 
     #[test]
     fn test_parse_full_row_from_user_sample() {

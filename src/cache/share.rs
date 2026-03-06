@@ -7,6 +7,7 @@
 use std::{collections::HashMap, sync::RwLock};
 
 use once_cell::sync::Lazy;
+use rust_decimal::Decimal;
 
 use super::{
     lookup::{default_exchange_markets, default_industries},
@@ -541,6 +542,27 @@ impl Share {
         }
     }
 
+    /// 寫入或更新單筆股票報價快照中的最新成交價。
+    ///
+    /// # 參數
+    /// - `symbol`: 股票代號。
+    /// - `price`: 最新成交價。
+    ///
+    /// # 行為
+    /// - 若快取內已存在該股票，僅更新 `price` 欄位，保留名稱、漲跌幅、
+    ///   開高低與成交量等其他欄位。
+    /// - 若快取內尚無該股票，會建立一筆只含必要欄位的最小快照。
+    /// - 適合用於「單檔備援更新」情境，避免用不完整資料覆蓋整筆快照。
+    pub fn set_stock_snapshot_price(&self, symbol: String, price: Decimal) {
+        if let Ok(mut cache) = self.stock_snapshots.write() {
+            if let Some(snapshot) = cache.get_mut(&symbol) {
+                snapshot.price = price;
+            } else {
+                cache.insert(symbol.clone(), RealtimeSnapshot::new(symbol, price));
+            }
+        }
+    }
+
     /// 從快取取得股票報價快照。
     ///
     /// # 參數
@@ -616,6 +638,25 @@ mod tests {
 
         assert!(share.get_stock_index("2025-02-01-TAIEX").is_some());
         assert!(share.get_stock_index("2025-01-01-TAIEX").is_none());
+    }
+
+    #[test]
+    fn test_set_stock_snapshot_price_preserves_existing_fields() {
+        let share = Share::new();
+        let mut snapshot = RealtimeSnapshot::new("2330".to_string(), Decimal::new(998, 0));
+        snapshot.name = "台積電".to_string();
+        snapshot.change = Decimal::new(5, 0);
+
+        let mut snapshots = HashMap::new();
+        snapshots.insert("2330".to_string(), snapshot);
+        share.set_stock_snapshots(snapshots);
+
+        share.set_stock_snapshot_price("2330".to_string(), Decimal::new(1000, 0));
+
+        let updated = share.get_stock_snapshot("2330").unwrap();
+        assert_eq!(updated.price, Decimal::new(1000, 0));
+        assert_eq!(updated.name, "台積電");
+        assert_eq!(updated.change, Decimal::new(5, 0));
     }
 
     #[test]
