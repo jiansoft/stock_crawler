@@ -403,6 +403,10 @@ struct SiteLatencySnapshot {
     count: usize,
     /// 平均延遲，單位為毫秒。
     avg_ms: u64,
+    /// 第 50 百分位延遲，單位為毫秒。
+    p50_ms: u64,
+    /// 第 70 百分位延遲，單位為毫秒。
+    p70_ms: u64,
     /// 第 99 百分位延遲，單位為毫秒。
     p99_ms: u64,
 }
@@ -428,11 +432,13 @@ impl SiteLatencyStats {
         (sum / self.durations_ms.len() as u128) as u64
     }
 
-    /// 計算第 99 百分位延遲，單位為毫秒。
+    /// 計算指定百分位延遲，單位為毫秒。
     ///
-    /// 若樣本不足 100 筆，會回傳排序後靠近尾端的樣本值，
-    /// 作為保守的高延遲觀察指標。
-    fn p99_ms(&self) -> u64 {
+    /// # 參數
+    /// - `percentile`: 百分位數，範圍應介於 `1..=100`。
+    ///
+    /// 若樣本不足對應百分位所需數量，會回傳排序後最接近該百分位的樣本值。
+    fn percentile_ms(&self, percentile: usize) -> u64 {
         if self.durations_ms.is_empty() {
             return 0;
         }
@@ -441,8 +447,27 @@ impl SiteLatencyStats {
         values.sort_unstable();
 
         let len = values.len();
-        let idx = (len * 99).div_ceil(100).saturating_sub(1);
+        let percentile = percentile.clamp(1, 100);
+        let idx = (len * percentile).div_ceil(100).saturating_sub(1);
         values[idx]
+    }
+
+    /// 計算第 50 百分位延遲，單位為毫秒。
+    fn p50_ms(&self) -> u64 {
+        self.percentile_ms(50)
+    }
+
+    /// 計算第 70 百分位延遲，單位為毫秒。
+    fn p70_ms(&self) -> u64 {
+        self.percentile_ms(70)
+    }
+
+    /// 計算第 99 百分位延遲，單位為毫秒。
+    ///
+    /// 若樣本不足 100 筆，會回傳排序後靠近尾端的樣本值，
+    /// 作為保守的高延遲觀察指標。
+    fn p99_ms(&self) -> u64 {
+        self.percentile_ms(99)
     }
 }
 
@@ -548,6 +573,7 @@ async fn fetch_stock_quotes_from_site_pool(
 ///
 /// 供收盤事件呼叫，將當日 `fetch_stock_price_from_remote_site` 與
 /// `fetch_stock_quotes_from_remote_site` 的站點耗時統一輸出。
+/// 摘要欄位包含取樣次數、平均耗時，以及 `p50`、`p70`、`p99` 百分位延遲。
 pub fn flush_site_latency_stats() {
     let mut stats = match SITE_LATENCY_STATS.lock() {
         Ok(guard) => guard,
@@ -568,6 +594,8 @@ pub fn flush_site_latency_stats() {
             site_name,
             count: site_stats.sample_count(),
             avg_ms: site_stats.average_ms(),
+            p50_ms: site_stats.p50_ms(),
+            p70_ms: site_stats.p70_ms(),
             p99_ms: site_stats.p99_ms(),
         })
         .collect::<Vec<_>>();
@@ -580,8 +608,8 @@ pub fn flush_site_latency_stats() {
 
     for entry in entries {
         logging::info_file_async(format!(
-            "站點整體耗時統計 {}: count={}, avg={}ms, p99={}ms",
-            entry.site_name, entry.count, entry.avg_ms, entry.p99_ms
+            "站點整體耗時統計 {}: count={}, avg={}ms, p50={}ms, p70={}ms, p99={}ms",
+            entry.site_name, entry.count, entry.avg_ms, entry.p50_ms, entry.p70_ms, entry.p99_ms
         ));
     }
 
@@ -645,9 +673,9 @@ mod tests {
 
     use super::*;
 
-    /// 驗證站點延遲統計可以正確計算平均值與 p99。
+    /// 驗證站點延遲統計可以正確計算平均值與各主要百分位。
     #[test]
-    fn test_site_latency_stats_average_and_p99() {
+    fn test_site_latency_stats_average_and_percentiles() {
         let mut stats = SiteLatencyStats::default();
 
         for elapsed_ms in [10, 20, 30, 40, 50] {
@@ -656,17 +684,21 @@ mod tests {
 
         assert_eq!(stats.sample_count(), 5);
         assert_eq!(stats.average_ms(), 30);
+        assert_eq!(stats.p50_ms(), 30);
+        assert_eq!(stats.p70_ms(), 40);
         assert_eq!(stats.p99_ms(), 50);
     }
 
-    /// 驗證站點延遲統計在單一樣本時仍能正確回傳平均值與 p99。
+    /// 驗證站點延遲統計在單一樣本時仍能正確回傳平均值與各主要百分位。
     #[test]
-    fn test_site_latency_stats_p99_with_single_sample() {
+    fn test_site_latency_stats_percentiles_with_single_sample() {
         let mut stats = SiteLatencyStats::default();
         stats.record(88);
 
         assert_eq!(stats.sample_count(), 1);
         assert_eq!(stats.average_ms(), 88);
+        assert_eq!(stats.p50_ms(), 88);
+        assert_eq!(stats.p70_ms(), 88);
         assert_eq!(stats.p99_ms(), 88);
     }
 
