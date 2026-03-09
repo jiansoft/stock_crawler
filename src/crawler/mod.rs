@@ -55,10 +55,10 @@ pub mod fugle;
 pub mod goodinfo;
 /// HiStock 嗨投資 (財經社群與數據站)
 pub mod histock;
-/// IP 檢測服務 (ipify)
-pub mod ipify;
 /// IP 檢測服務 (ipconfig.io)
 pub mod ipconfig;
+/// IP 檢測服務 (ipify)
+pub mod ipify;
 /// IP 資訊查詢 (ipinfo)
 pub mod ipinfo;
 /// PCHOME 股市 (提供即時行情)
