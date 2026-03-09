@@ -7,7 +7,7 @@
 //! 目前此模組會協調五種工作：
 //! 1. crawler 層的全市場即時報價背景任務（目前由 Yahoo 類股快取驅動）
 //! 2. 只針對 `Trace` 資料表內股票的備援採集任務
-//! 3. 價格更新事件 consumer，將指定股票的最新價格交給追蹤 evaluator
+//! 3. 價格更新事件 consumer，將指定股票代號交給追蹤 evaluator
 //! 4. 追蹤條件快取刷新任務，定期同步最新 `trace` 設定
 //! 5. 低頻 reconciliation 任務，補償事件遺漏或剛新增追蹤條件的情況
 
@@ -31,7 +31,6 @@ use crate::{cache::SHARE, crawler, declare, logging};
 #[derive(Debug, Clone)]
 struct PriceUpdateEvent {
     symbol: String,
-    price: Decimal,
 }
 
 /// 確保「被追蹤股票備援採集」只有一個背景任務在執行。
@@ -127,6 +126,9 @@ pub async fn stop_price_tasks() {
 
 /// 發佈單筆價格更新事件。
 ///
+/// 事件只代表「這支股票的共享快取已更新」。
+/// 實際追蹤比對時會重新從快取讀值，而不是直接使用這裡傳入的 `price`。
+///
 /// 若 trace 價格事件 consumer 尚未啟動或已停止，事件會直接被忽略。
 pub fn publish_price_update(symbol: String, price: Decimal) {
     if price == Decimal::ZERO {
@@ -136,7 +138,7 @@ pub fn publish_price_update(symbol: String, price: Decimal) {
     if let Ok(tx) = PRICE_UPDATE_TX.read() {
         if let Some(tx) = tx.as_ref() {
             trace_stats::record_published_price_event();
-            if tx.send(PriceUpdateEvent { symbol, price }).is_err() {
+            if tx.send(PriceUpdateEvent { symbol }).is_err() {
                 trace_stats::record_dropped_price_event();
             }
         } else {
@@ -180,7 +182,9 @@ fn start_price_update_consumer_task() {
 
         while let Some(event) = rx.recv().await {
             trace_stats::record_consumed_price_event();
-            if let Err(why) = stock_price::evaluate_price_update(event.symbol, event.price).await {
+            // consumer 只通知「哪支股票剛更新」，
+            // evaluator 會自行回頭讀共享快取來做高低標判斷。
+            if let Err(why) = stock_price::evaluate_price_update(event.symbol).await {
                 logging::error_file_async(format!(
                     "Failed to evaluate price update event because {:?}",
                     why
@@ -377,6 +381,8 @@ async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
                 return false;
             }
 
+            // 備援採集只負責把價格補進共享快取，
+            // 後續警報判斷統一由價格事件 consumer 再從快取讀值。
             SHARE.set_stock_snapshot_price(symbol.clone(), price);
             publish_price_update(symbol, price);
             true

@@ -58,6 +58,13 @@ impl YahooClassExchange {
 }
 
 /// Yahoo 類股分類定義。
+///
+/// 這份結構同時扮演兩個角色：
+/// 1. 提供 Yahoo 類股 `sectorId` 的靜態字典。
+/// 2. 宣告該類股是否要納入盤中的背景採集任務。
+///
+/// 因此某些分類即使 `collect_enabled = false`，仍然會保留在常數表中，
+/// 方便其他模組查 `sectorId`、顯示名稱或做後續人工比對。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct YahooClassCategory {
     /// 類股所屬交易所。
@@ -66,541 +73,169 @@ pub struct YahooClassCategory {
     pub sector_id: u32,
     /// 類股中文名稱。
     pub name: &'static str,
+    /// 是否納入盤中 Yahoo 類股採集任務。
+    ///
+    /// `false` 代表該分類只保留在靜態字典中，不會被
+    /// [`crate::crawler::yahoo::price::class_quote::all_class_categories`]
+    /// 納入背景輪詢清單。
+    pub collect_enabled: bool,
+}
+
+impl YahooClassCategory {
+    /// 建立會納入盤中採集的 Yahoo 類股分類。
+    ///
+    /// 適用於一般產業股或其他需要持續刷新共享快取的分類。
+    pub const fn enabled(exchange: YahooClassExchange, sector_id: u32, name: &'static str) -> Self {
+        Self {
+            exchange,
+            sector_id,
+            name,
+            collect_enabled: true,
+        }
+    }
+
+    /// 建立只保留在類股字典、但不納入盤中採集的 Yahoo 類股分類。
+    ///
+    /// 目前主要用在認購、認售、指數類等不希望進入盤中輪詢的分類。
+    pub const fn disabled(
+        exchange: YahooClassExchange,
+        sector_id: u32,
+        name: &'static str,
+    ) -> Self {
+        Self {
+            exchange,
+            sector_id,
+            name,
+            collect_enabled: false,
+        }
+    }
 }
 
 /// Yahoo 上市類股分類。
+///
+/// 這份清單會保留完整 Yahoo 字典，即使部分分類已標成不採集。
 pub const LISTED_CLASS_CATEGORIES: &[YahooClassCategory] = &[
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 1,
-        name: "水泥",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 2,
-        name: "食品",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 3,
-        name: "塑膠",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 4,
-        name: "紡織",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 6,
-        name: "電機機械",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 7,
-        name: "電器電纜",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 9,
-        name: "玻璃",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 10,
-        name: "造紙",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 11,
-        name: "鋼鐵",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 12,
-        name: "橡膠",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 13,
-        name: "汽車",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 19,
-        name: "營建",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 20,
-        name: "航運",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 21,
-        name: "觀光餐旅",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 22,
-        name: "金融業",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 24,
-        name: "貿易百貨",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 25,
-        name: "存託憑證",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 26,
-        name: "ETF",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 29,
-        name: "受益證券",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 30,
-        name: "其他",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 31,
-        name: "市認購",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 32,
-        name: "市認售",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 33,
-        name: "指數類",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 37,
-        name: "化學",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 38,
-        name: "生技",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 39,
-        name: "油電燃氣",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 40,
-        name: "半導體",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 41,
-        name: "電腦週邊",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 42,
-        name: "光電",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 43,
-        name: "通訊網路",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 44,
-        name: "電子零組件",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 45,
-        name: "電子通路",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 46,
-        name: "資訊服務",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 47,
-        name: "其他電子",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 48,
-        name: "ETN",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 49,
-        name: "創新板",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 51,
-        name: "市牛證",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 52,
-        name: "市熊證",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 93,
-        name: "綠能環保",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 94,
-        name: "數位雲端",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 95,
-        name: "運動休閒",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Listed,
-        sector_id: 96,
-        name: "居家生活",
-    },
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 1, "水泥"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 2, "食品"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 3, "塑膠"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 4, "紡織"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 6, "電機機械"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 7, "電器電纜"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 9, "玻璃"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 10, "造紙"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 11, "鋼鐵"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 12, "橡膠"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 13, "汽車"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 19, "營建"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 20, "航運"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 21, "觀光餐旅"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 22, "金融業"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 24, "貿易百貨"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 25, "存託憑證"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 26, "ETF"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 29, "受益證券"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 30, "其他"),
+    YahooClassCategory::disabled(YahooClassExchange::Listed, 31, "市認購"),
+    YahooClassCategory::disabled(YahooClassExchange::Listed, 32, "市認售"),
+    YahooClassCategory::disabled(YahooClassExchange::Listed, 33, "指數類"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 37, "化學"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 38, "生技"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 39, "油電燃氣"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 40, "半導體"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 41, "電腦週邊"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 42, "光電"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 43, "通訊網路"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 44, "電子零組件"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 45, "電子通路"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 46, "資訊服務"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 47, "其他電子"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 48, "ETN"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 49, "創新板"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 51, "市牛證"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 52, "市熊證"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 93, "綠能環保"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 94, "數位雲端"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 95, "運動休閒"),
+    YahooClassCategory::enabled(YahooClassExchange::Listed, 96, "居家生活"),
 ];
 
 /// Yahoo 上櫃類股分類。
+///
+/// 這份清單會保留完整 Yahoo 字典，即使部分分類已標成不採集。
 pub const OTC_CLASS_CATEGORIES: &[YahooClassCategory] = &[
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 121,
-        name: "生技",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 122,
-        name: "食品",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 123,
-        name: "塑膠",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 124,
-        name: "紡織",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 125,
-        name: "電機",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 126,
-        name: "電器電纜",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 130,
-        name: "鋼鐵",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 138,
-        name: "營建",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 139,
-        name: "航運",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 140,
-        name: "觀光餐旅",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 141,
-        name: "金融",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 142,
-        name: "居家生活",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 145,
-        name: "其他",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 151,
-        name: "化學",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 153,
-        name: "半導體",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 154,
-        name: "電腦週邊",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 155,
-        name: "光電",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 156,
-        name: "通訊網路",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 157,
-        name: "電子零組件",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 158,
-        name: "電子通路",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 159,
-        name: "資訊服務",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 160,
-        name: "其他電子",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 161,
-        name: "油電燃氣",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 163,
-        name: "公司債",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 165,
-        name: "認購",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 166,
-        name: "認售",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 167,
-        name: "牛證",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 169,
-        name: "文化創意",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 170,
-        name: "農業科技業",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 171,
-        name: "電子商務",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 172,
-        name: "ETF",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 173,
-        name: "ETN",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 97,
-        name: "綠能環保",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 98,
-        name: "運動休閒",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::OverTheCounter,
-        sector_id: 33,
-        name: "指數類",
-    },
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 121, "生技"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 122, "食品"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 123, "塑膠"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 124, "紡織"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 125, "電機"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 126, "電器電纜"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 130, "鋼鐵"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 138, "營建"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 139, "航運"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 140, "觀光餐旅"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 141, "金融"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 142, "居家生活"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 145, "其他"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 151, "化學"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 153, "半導體"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 154, "電腦週邊"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 155, "光電"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 156, "通訊網路"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 157, "電子零組件"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 158, "電子通路"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 159, "資訊服務"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 160, "其他電子"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 161, "油電燃氣"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 163, "公司債"),
+    YahooClassCategory::disabled(YahooClassExchange::OverTheCounter, 165, "認購"),
+    YahooClassCategory::disabled(YahooClassExchange::OverTheCounter, 166, "認售"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 167, "牛證"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 169, "文化創意"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 170, "農業科技業"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 171, "電子商務"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 172, "ETF"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 173, "ETN"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 97, "綠能環保"),
+    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 98, "運動休閒"),
+    YahooClassCategory::disabled(YahooClassExchange::OverTheCounter, 33, "指數類"),
 ];
 
 /// Yahoo 興櫃類股分類。
+///
+/// 這份清單會保留完整 Yahoo 字典，即使部分分類已標成不採集。
 pub const EMERGING_CLASS_CATEGORIES: &[YahooClassCategory] = &[
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99301,
-        name: "食品",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99303,
-        name: "紡織",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99304,
-        name: "電機",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99306,
-        name: "化學工業",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99307,
-        name: "生技",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99309,
-        name: "鋼鐵",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99311,
-        name: "半導體",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99312,
-        name: "電腦週邊",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99313,
-        name: "光電",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99314,
-        name: "通信網路",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99315,
-        name: "電子零組件",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99316,
-        name: "電子通路",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99317,
-        name: "資訊服務",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99318,
-        name: "其他電子",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99319,
-        name: "營建",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99320,
-        name: "航運",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99321,
-        name: "觀光餐旅",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99322,
-        name: "金融",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99323,
-        name: "居家生活",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99324,
-        name: "油電燃氣",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99325,
-        name: "其他",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99327,
-        name: "文化創意",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99328,
-        name: "基金黃金",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99329,
-        name: "農業科技業",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99330,
-        name: "數位雲端",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99331,
-        name: "綠能環保",
-    },
-    YahooClassCategory {
-        exchange: YahooClassExchange::Emerging,
-        sector_id: 99332,
-        name: "運動休閒",
-    },
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99301, "食品"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99303, "紡織"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99304, "電機"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99306, "化學工業"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99307, "生技"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99309, "鋼鐵"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99311, "半導體"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99312, "電腦週邊"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99313, "光電"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99314, "通信網路"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99315, "電子零組件"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99316, "電子通路"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99317, "資訊服務"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99318, "其他電子"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99319, "營建"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99320, "航運"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99321, "觀光餐旅"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99322, "金融"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99323, "居家生活"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99324, "油電燃氣"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99325, "其他"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99327, "文化創意"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99328, "基金黃金"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99329, "農業科技業"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99330, "數位雲端"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99331, "綠能環保"),
+    YahooClassCategory::enabled(YahooClassExchange::Emerging, 99332, "運動休閒"),
 ];
 
 /// 依交易所取得 Yahoo 類股分類。
+///
+/// 此函式回傳的是完整字典，不會主動過濾 `collect_enabled = false` 的項目。
 pub const fn class_categories(exchange: YahooClassExchange) -> &'static [YahooClassCategory] {
     match exchange {
         YahooClassExchange::Listed => LISTED_CLASS_CATEGORIES,
@@ -645,6 +280,26 @@ mod tests {
         assert_eq!(LISTED_CLASS_CATEGORIES.len(), 42);
         assert_eq!(OTC_CLASS_CATEGORIES.len(), 35);
         assert_eq!(EMERGING_CLASS_CATEGORIES.len(), 27);
+    }
+
+    /// 驗證認購 / 認售 / 指數類等分類會在常數表上直接標成不採集。
+    #[test]
+    fn test_collect_enabled_marks_disabled_categories() {
+        let listed_call = find_category(YahooClassExchange::Listed, 31).unwrap();
+        let listed_put = find_category(YahooClassExchange::Listed, 32).unwrap();
+        let listed_index = find_category(YahooClassExchange::Listed, 33).unwrap();
+        let otc_call = find_category(YahooClassExchange::OverTheCounter, 165).unwrap();
+        let otc_put = find_category(YahooClassExchange::OverTheCounter, 166).unwrap();
+        let otc_index = find_category(YahooClassExchange::OverTheCounter, 33).unwrap();
+        let listed_semiconductor = find_category(YahooClassExchange::Listed, 40).unwrap();
+
+        assert!(!listed_call.collect_enabled);
+        assert!(!listed_put.collect_enabled);
+        assert!(!listed_index.collect_enabled);
+        assert!(!otc_call.collect_enabled);
+        assert!(!otc_put.collect_enabled);
+        assert!(!otc_index.collect_enabled);
+        assert!(listed_semiconductor.collect_enabled);
     }
 
     /// 驗證幾個代表性 `sector_id` 仍對應到預期的類股名稱。

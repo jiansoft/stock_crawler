@@ -4,6 +4,8 @@
 UI Demo︰https://jiansoft.mooo.com/stock/revenues  
 API︰https://github.com/jiansoft/stock_api
 
+以下排程時間為台北時間（Asia/Taipei）。
+
 + 01:00 更新興櫃股票的每股淨值
 + 02:30 更新盈餘分配率
 + 03:00 更新台股季度財報
@@ -15,11 +17,13 @@ API︰https://github.com/jiansoft/stock_api
   + 更新各股的當月營收
   + 更新台股國際證券識別碼
   + 更新下市的股票
-  + 更新股票權值佔比
 + 08:00
   + 提醒本日除權息的股票(需自行架設本服務)
   + 提醒本日自持股票發放股利(需自行架設本服務)
   + 提醒本日開始公開申購的股票(需自行架設本服務)
++ 09:00
+  + 更新股票權值佔比
+  + 啟動股票追蹤高低標提醒任務
 + 15:00 取得台股收盤報價數據計算預估價格
 + 21:00 更新尚無年度配息資料的股票
 + 22:00 更新外資持股狀態
@@ -30,22 +34,34 @@ API︰https://github.com/jiansoft/stock_api
 2. 鉅亨網 https://www.cnyes.com
 3. 富邦證券 https://www.fbs.com.tw
 4. Fugle 行情 API https://developer.fugle.tw/docs/data/http-api/getting-started/
-5. 台灣股市資訊網 https://goodinfo.tw/tw
-6. 嗨投資 https://histock.tw
-7. PCHOME(大時科技) https://pchome.megatime.com.tw
-8. 嘉實資訊-理財網 https://www.moneydj.com
-9. 恩投資 https://www.nstock.tw
-10. 台灣期貨交易所 https://www.taifex.com.tw
-11. 台灣證券櫃檯買賣中心 https://www.tpex.org.tw
-12. 台灣證券交易所 https://www.twse.com.tw
-13. 撿股讚 https://stock.wespai.com
-14. 雅虎股市 https://tw.stock.yahoo.com
-15. 元大證券 https://www.yuanta.com.tw
+5. 臺灣銀行 https://fund.bot.com.tw
+6. 台灣股市資訊網 https://goodinfo.tw/tw
+7. 嗨投資 https://histock.tw
+8. PCHOME(大時科技) https://pchome.megatime.com.tw
+9. 嘉實資訊-理財網 https://www.moneydj.com
+10. 公開資訊觀測站 https://mopsfin.twse.com.tw
+11. 恩投資 https://www.nstock.tw
+12. 台灣期貨交易所 https://www.taifex.com.tw
+13. 台灣證券櫃檯買賣中心 https://www.tpex.org.tw
+14. 台灣證券交易所 https://www.twse.com.tw
+15. 撿股讚 https://stock.wespai.com
+16. Winvest https://winvest.tw
+17. 雅虎股市 https://tw.stock.yahoo.com
+18. 元大證券 https://www.yuanta.com.tw
 
 ### 主要設定
 + 所有設定可透過 `app.json` 提供，並可由 `.env` 或系統環境變數覆蓋。
 + 即時報價備援來源已加入 Fugle 官方日內行情 API。
 + 若未設定 `FUGLE_API_KEY`，系統會略過 Fugle，繼續使用其他即時報價來源。
+
+### 盤中即時報價與追蹤
++ 開盤期間會同時啟動 HiStock 與 Yahoo 類股背景採集，將即時報價寫入共享記憶體快取。
++ Yahoo 類股採集使用 `StockServices.getClassQuotes` JSON API，類股之間與同類股分頁之間都會節流 1 秒。
++ Yahoo 類股目前不採集認購、認售、指數類，避免將大量衍生性商品帶進盤中輪詢。
++ 股票追蹤高低標判斷統一從共享快取讀值；備援抓價只負責補快取並觸發重新判斷。
++ 若服務在開盤期間重啟，會在啟動時立即補啟動一次股票追蹤任務，避免錯過原本的 09:00 排程。
++ 單股最新成交價備援站點：Yahoo、Fugle、NStock、CMoney、CnYes、Yuanta、PcHome、Winvest。
++ 單股完整報價備援站點：Fugle、NStock、CMoney、CnYes、Yuanta、PcHome、Winvest。
 
 #### 常用環境變數
 + `FUGLE_API_KEY`：Fugle 日內行情 API 金鑰（即時報價備援）

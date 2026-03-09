@@ -7,12 +7,13 @@
 //! - 處理 `offset` 分頁，直到抓完整個類股。
 //! - 將 Yahoo 的原始 JSON 欄位轉成 [`RealtimeSnapshot`]。
 
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::Value;
+use tokio::time::sleep;
 
 use crate::{
     cache::RealtimeSnapshot,
@@ -29,6 +30,11 @@ const ALL_CLASS_EXCHANGES: [YahooClassExchange; 3] = [
     YahooClassExchange::OverTheCounter,
     YahooClassExchange::Emerging,
 ];
+/// 同一個類股在抓下一頁前的節流等待時間。
+///
+/// 類股之間的節流由 `cache.rs` 控制；
+/// 這裡只負責單一類股分頁很多時的頁間節流。
+const PAGE_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Yahoo `getClassQuotes` API 的單頁回應。
 ///
@@ -67,12 +73,18 @@ impl ClassQuotesPagination {
 }
 
 /// 列出所有需要由背景任務輪詢的 Yahoo 類股分類。
+///
+/// 此函式會先攤平三大市場的完整類股字典，再只保留
+/// [`YahooClassCategory::collect_enabled`] 為 `true` 的項目。
 pub fn all_class_categories() -> Vec<&'static YahooClassCategory> {
     // 先列出三大市場，再把各市場對應的類股清單攤平成單一 Vec，
     // 讓背景任務可以用固定順序逐類股輪詢。
+    // 類股字典本身仍保留完整資料，但這裡只會拿 `collect_enabled = true` 的類股，
+    // 避免把認購 / 認售 / 指數類這些不需要的分類帶進輪詢工作。
     ALL_CLASS_EXCHANGES
         .into_iter()
         .flat_map(yahoo::class_categories)
+        .filter(|category| category.collect_enabled)
         .collect()
 }
 
@@ -109,6 +121,8 @@ pub fn build_class_quotes_api_url(category: &YahooClassCategory, offset: usize) 
 ///
 /// 此函式會從 `offset = 0` 開始，根據 Yahoo API 回傳的 `nextOffset`
 /// 持續往後抓，直到整個類股的股票都被收集完成。
+/// 若該類股存在多頁資料，分頁與分頁之間會固定等待 1 秒，
+/// 避免對同一個 sector 連續請求過密。
 ///
 /// # Errors
 /// - 首頁即為空列表。
@@ -156,6 +170,9 @@ pub async fn fetch_category_snapshots(
         // 這可以避免來源異常回傳相同 offset 造成無窮迴圈。
         match response.pagination.next_offset()? {
             Some(next_offset) if next_offset > offset => {
+                // 同一個類股若有大量分頁，也要在頁與頁之間停一下，
+                // 避免單一 sector 連續請求過密而被 Yahoo 視為異常流量。
+                sleep(PAGE_REQUEST_INTERVAL).await;
                 offset = next_offset;
                 page += 1;
             }
@@ -358,11 +375,7 @@ mod tests {
     /// 驗證類股 API URL 會使用 Yahoo 實際可用的分號參數格式。
     #[test]
     fn test_build_class_quotes_api_url() {
-        let category = YahooClassCategory {
-            exchange: YahooClassExchange::Listed,
-            sector_id: 40,
-            name: "半導體",
-        };
+        let category = YahooClassCategory::enabled(YahooClassExchange::Listed, 40, "半導體");
 
         assert_eq!(
             build_class_quotes_api_url(&category, 30),
@@ -428,15 +441,29 @@ mod tests {
         assert_eq!(pagination.next_offset().unwrap(), Some(60));
     }
 
+    /// 驗證盤中輪詢清單會排除認購 / 認售 / 指數類，只保留實際需要採集的分類。
+    #[test]
+    fn test_all_class_categories_excludes_disabled_categories() {
+        let categories = all_class_categories();
+
+        assert_eq!(categories.len(), 98);
+        assert!(!categories.iter().any(|category| {
+            matches!(
+                (category.exchange, category.sector_id),
+                (YahooClassExchange::Listed, 31..=33)
+                    | (YahooClassExchange::OverTheCounter, 33 | 165 | 166)
+            )
+        }));
+        assert!(categories.iter().any(|category| {
+            category.exchange == YahooClassExchange::Listed && category.sector_id == 40
+        }));
+    }
+
     /// Live 測試：驗證單一類股能抓到完整分頁資料，而不只首頁前 30 筆。
     #[tokio::test]
     #[ignore]
     async fn test_fetch_category_snapshots_integration() {
-        let category = YahooClassCategory {
-            exchange: YahooClassExchange::Listed,
-            sector_id: 40,
-            name: "半導體",
-        };
+        let category = YahooClassCategory::enabled(YahooClassExchange::Listed, 40, "半導體");
 
         let snapshots = fetch_category_snapshots(&category).await.unwrap();
 
@@ -458,21 +485,9 @@ mod tests {
     #[ignore]
     async fn test_fetch_all_semiconductor_categories_integration() {
         let categories = [
-            YahooClassCategory {
-                exchange: YahooClassExchange::Listed,
-                sector_id: 40,
-                name: "半導體",
-            },
-            YahooClassCategory {
-                exchange: YahooClassExchange::OverTheCounter,
-                sector_id: 153,
-                name: "半導體",
-            },
-            YahooClassCategory {
-                exchange: YahooClassExchange::Emerging,
-                sector_id: 99311,
-                name: "半導體",
-            },
+            YahooClassCategory::enabled(YahooClassExchange::Listed, 40, "半導體"),
+            YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 153, "半導體"),
+            YahooClassCategory::enabled(YahooClassExchange::Emerging, 99311, "半導體"),
         ];
 
         for category in categories {

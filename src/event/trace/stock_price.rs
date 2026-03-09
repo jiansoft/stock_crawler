@@ -236,7 +236,6 @@ pub(super) async fn reconcile_target_prices() -> Result<usize> {
             task::spawn(process_cached_targets(
                 symbol,
                 targets,
-                None,
                 EvaluationSource::Reconciliation,
             ))
         })
@@ -248,22 +247,18 @@ pub(super) async fn reconcile_target_prices() -> Result<usize> {
 
 /// 以價格更新事件驅動指定股票的追蹤條件檢查。
 ///
+/// 此入口只把「哪支股票剛更新」交給 evaluator，
+/// 實際拿來比對高低標的價格會重新從共享快取讀取。
+///
 /// # 參數
 /// - `symbol`: 發生價格更新的股票代號。
-/// - `current_price`: 最新成交價。
-pub(super) async fn evaluate_price_update(symbol: String, current_price: Decimal) -> Result<()> {
+pub(super) async fn evaluate_price_update(symbol: String) -> Result<()> {
     let targets = get_targets_by_symbol(&symbol);
     if targets.is_empty() {
         return Ok(());
     }
 
-    process_cached_targets(
-        symbol,
-        targets,
-        Some(current_price),
-        EvaluationSource::PriceEvent,
-    )
-    .await;
+    process_cached_targets(symbol, targets, EvaluationSource::PriceEvent).await;
     Ok(())
 }
 
@@ -280,16 +275,13 @@ fn get_cached_current_price(symbol: &str) -> Option<Decimal> {
 
 /// 處理同一支股票的多個追蹤目標。
 ///
-/// 1. 若有事件帶入 `event_price`，優先使用該價格做判斷。
-/// 2. 否則從即時報價快取讀取目前價格，供 reconciliation 使用。
-/// 3. 若價格有效（非零），則檢查該股票的所有追蹤目標是否觸發警報。
-async fn process_cached_targets(
-    symbol: String,
-    targets: Vec<Trace>,
-    event_price: Option<Decimal>,
-    source: EvaluationSource,
-) {
-    let current_price = event_price.or_else(|| get_cached_current_price(&symbol));
+/// 1. 統一從即時報價快取讀取目前價格。
+/// 2. 若價格有效（非零），則檢查該股票的所有追蹤目標是否觸發警報。
+///
+/// 不論觸發來源是價格事件還是低頻 reconciliation，
+/// 這裡都統一從共享快取取值，避免不同路徑使用不同價格來源。
+async fn process_cached_targets(symbol: String, targets: Vec<Trace>, source: EvaluationSource) {
+    let current_price = get_cached_current_price(&symbol);
 
     match current_price {
         Some(current_price) if current_price != Decimal::ZERO => {

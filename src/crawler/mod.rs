@@ -29,8 +29,8 @@ use rust_decimal::Decimal;
 
 use crate::{
     crawler::{
-        cmoney::CMoney, cnyes::CnYes, fugle::Fugle, histock::HiStock, megatime::PcHome,
-        nstock::NStock, winvest::Winvest, yahoo::Yahoo, yuanta::Yuanta,
+        cmoney::CMoney, cnyes::CnYes, fugle::Fugle, megatime::PcHome, nstock::NStock,
+        winvest::Winvest, yahoo::Yahoo, yuanta::Yuanta,
     },
     declare, logging,
 };
@@ -238,16 +238,6 @@ define_stock_price_fetcher!(
 );
 
 define_stock_quotes_fetcher!(
-    "將 HiStock 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
-    fetch_histock_quotes,
-    HiStock
-);
-define_stock_quotes_fetcher!(
-    "將 Yahoo 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
-    fetch_yahoo_quotes,
-    Yahoo
-);
-define_stock_quotes_fetcher!(
     "將 Fugle 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
     fetch_fugle_quotes,
     Fugle
@@ -334,12 +324,10 @@ const ALL_PRICE_SITES: [PriceSite; 8] = [
 
 /// 所有可用的「完整報價」站點池。
 ///
-/// 由於完整報價仍需要開高低收、漲跌與漲跌幅等欄位，
-/// 目前這條路徑仍保留 `HiStock` 作為候選來源之一。
+/// 這條路徑只保留目前仍用於單股完整報價備援的站點，
+/// `HiStock` 也已改由它自己的背景排程負責，不再納入此站點池。
 ///
 /// 目前站點順序如下：
-/// - `HiStock`
-/// - `Yahoo`
 /// - `Fugle`
 /// - `NStock`
 /// - `CMoney`
@@ -347,15 +335,7 @@ const ALL_PRICE_SITES: [PriceSite; 8] = [
 /// - `Yuanta`
 /// - `PcHome`
 /// - `Winvest`
-const ALL_QUOTE_SITES: [QuoteSite; 9] = [
-    QuoteSite {
-        name: "HiStock",
-        fetch: fetch_histock_quotes,
-    },
-    QuoteSite {
-        name: "Yahoo",
-        fetch: fetch_yahoo_quotes,
-    },
+const ALL_QUOTE_SITES: [QuoteSite; 7] = [
     QuoteSite {
         name: "Fugle",
         fetch: fetch_fugle_quotes,
@@ -654,6 +634,7 @@ pub async fn fetch_stock_price_from_backup_sites(stock_symbol: &str) -> Result<D
 ///
 /// 此函數包含漲跌、漲幅、開盤、最高、最低等詳細資料。
 /// 實作機制與 `fetch_stock_price_from_remote_site` 相同，採用自動備援輪詢。
+/// 支援的站點包括：Fugle, NStock, CMoney, CnYes, Yuanta, PcHome, Winvest。
 /// 實際站點定義集中在 [`ALL_QUOTE_SITES`]。
 ///
 /// # 參數

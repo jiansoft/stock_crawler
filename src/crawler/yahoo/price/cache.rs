@@ -325,11 +325,11 @@ mod tests {
     fn test_apply_category_snapshots_replaces_removed_symbols_in_same_category() {
         SHARE.clear_stock_snapshots();
 
-        let category = YahooClassCategory {
-            exchange: crate::crawler::yahoo::YahooClassExchange::Listed,
-            sector_id: 40,
-            name: "半導體",
-        };
+        let category = YahooClassCategory::enabled(
+            crate::crawler::yahoo::YahooClassExchange::Listed,
+            40,
+            "半導體",
+        );
         let mut category_symbols = HashMap::new();
 
         let mut first = HashMap::new();
