@@ -6,6 +6,7 @@ use crate::rpc::{
     control::{control_server::Control, ControlRequest, ControlResponse},
 };
 
+/// Control gRPC 服務。
 #[derive(Default)]
 pub struct ControlService {}
 
@@ -44,6 +45,7 @@ mod tests {
 
     use super::*;
 
+    /// 驗證 mock server 控制介面。
     #[tokio::test]
     async fn test_say_hello() {
         // Create the mock server
@@ -70,6 +72,7 @@ mod tests {
         //assert_eq!(response.into_inner().message, "Hello Tonic!");
     }
 
+    /// 驗證對外部 gRPC server 發送 control request。
     #[tokio::test]
     #[ignore]
     async fn test_control_request_to_server() {
@@ -103,6 +106,7 @@ mod tests {
         //assert_eq!(response.into_inner().message, "Hello Tonic!");
     }
 
+    /// 驗證直接呼叫 service handler。
     #[tokio::test]
     async fn test_control_request() {
         let c = ControlService::default();

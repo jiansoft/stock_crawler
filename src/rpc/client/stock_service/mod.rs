@@ -29,6 +29,7 @@ mod tests {
 
     use super::*;
 
+    /// 驗證 stock info 可推送到 Go 服務。
     #[tokio::test]
     #[ignore]
     async fn test_push_stock_info_to_go_service() {

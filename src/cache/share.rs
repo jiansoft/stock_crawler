@@ -48,7 +48,9 @@ pub struct Share {
     last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Revenue>>>,
     /// 存放最後交易日股票報價數據
     last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::LastDailyQuotes>>,
-    // quote_history_records 股票歷史、淨值比等最高、最低的數據,resource.Init() 從資料庫內讀取出，若抓到新的數據時則會同時更新資料庫與此數據
+    /// 股票歷史、淨值比等最高與最低數據。
+    ///
+    /// 啟動時會先從資料庫載入；若後續抓到更新資料，應同步更新資料庫與這份快取。
     pub quote_history_records: RwLock<HashMap<String, quote_history_record::QuoteHistoryRecord>>,
     /// 股票產業分類
     industries: HashMap<String, i32>,
@@ -602,6 +604,7 @@ mod tests {
 
     use super::*;
 
+    /// 建立測試用營收資料。
     fn make_test_revenue(stock_symbol: &str, date: i64) -> revenue::Revenue {
         let mut revenue = revenue::Revenue::new();
         revenue.stock_symbol = stock_symbol.to_string();
@@ -609,6 +612,7 @@ mod tests {
         revenue
     }
 
+    /// 建立測試用指數資料。
     fn make_test_index(category: &str, date: NaiveDate) -> index::Index {
         let mut index = index::Index::new();
         index.category = category.to_string();
@@ -616,6 +620,7 @@ mod tests {
         index
     }
 
+    /// 驗證新增營收時會自動建立月份 bucket。
     #[test]
     fn test_set_last_revenues_creates_new_month_bucket() {
         let share = Share::new();
@@ -625,6 +630,7 @@ mod tests {
         assert!(share.last_revenues_contains_key(202501, "2330"));
     }
 
+    /// 驗證整批覆蓋指數快取會移除舊資料。
     #[test]
     fn test_replace_indices_cache_overwrites_old_entries() {
         let share = Share::new();
@@ -640,6 +646,7 @@ mod tests {
         assert!(share.get_stock_index("2025-01-01-TAIEX").is_none());
     }
 
+    /// 驗證單筆更新股價時會保留其他欄位。
     #[test]
     fn test_set_stock_snapshot_price_preserves_existing_fields() {
         let share = Share::new();
@@ -659,6 +666,7 @@ mod tests {
         assert_eq!(updated.change, Decimal::new(5, 0));
     }
 
+    /// 驗證整批覆蓋營收快取會淘汰舊月份資料。
     #[test]
     fn test_replace_last_revenues_cache_overwrites_old_months() {
         let share = Share::new();
@@ -677,6 +685,7 @@ mod tests {
         assert!(share.last_revenues_contains_key(202503, "2454"));
     }
 
+    /// 驗證產業代碼可反查名稱。
     #[tokio::test]
     async fn test_get_industry_name() {
         dotenv::dotenv().ok();
@@ -688,6 +697,7 @@ mod tests {
         assert_eq!(SHARE.get_industry_name(100), None);
     }
 
+    /// 驗證主快取載入流程。
     #[tokio::test]
     async fn test_load() {
         dotenv::dotenv().ok();

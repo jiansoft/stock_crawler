@@ -1,3 +1,5 @@
+//! 非同步檔案與主控台日誌工具。
+
 use std::{
     fmt::Write as _,
     fs::{self},
@@ -18,18 +20,26 @@ use tokio::{
 
 use crate::logging::rotate::Rotate;
 
+/// 日誌檔輪轉模組。
 pub mod rotate;
 
+/// 全域預設 logger。
 static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new("default"));
 
+/// 依等級分流的非同步 logger。
 pub struct Logger {
+    /// `info` 級別輸出通道。
     info_writer: UnboundedSender<String>,
+    /// `warn` 級別輸出通道。
     warn_writer: UnboundedSender<String>,
+    /// `error` 級別輸出通道。
     error_writer: UnboundedSender<String>,
+    /// `debug` 級別輸出通道。
     debug_writer: UnboundedSender<String>,
 }
 
 impl Logger {
+    /// 建立一組以 `log_name` 為前綴的 logger。
     pub fn new(log_name: &str) -> Self {
         Logger {
             info_writer: Self::create_writer(&format!("{}_info", log_name)),
@@ -39,22 +49,27 @@ impl Logger {
         }
     }
 
+    /// 非同步寫入 `info` 等級訊息。
     pub fn info<S: Into<String>>(&self, log: S) {
         self.send(log.into(), &self.info_writer);
     }
 
+    /// 非同步寫入 `warn` 等級訊息。
     pub fn warn<S: Into<String>>(&self, log: S) {
         self.send(log.into(), &self.warn_writer);
     }
 
+    /// 非同步寫入 `error` 等級訊息。
     pub fn error<S: Into<String>>(&self, log: S) {
         self.send(log.into(), &self.error_writer);
     }
 
+    /// 非同步寫入 `debug` 等級訊息。
     pub fn debug<S: Into<String>>(&self, log: S) {
         self.send(log.into(), &self.debug_writer);
     }
 
+    /// 將訊息送入指定 writer 佇列。
     pub fn send(&self, msg: String, writer: &UnboundedSender<String>) {
         // Receiver may be unavailable during process shutdown; drop the message silently.
         let _ = writer.send(msg);
@@ -129,22 +144,27 @@ impl Logger {
     }
 }
 
+/// 使用全域 logger 寫入 `info` 等級檔案日誌。
 pub fn info_file_async<S: Into<String>>(log: S) {
     LOGGER.info(log.into());
 }
 
+/// 使用全域 logger 寫入 `warn` 等級檔案日誌。
 pub fn warn_file_async<S: Into<String>>(log: S) {
     LOGGER.warn(log.into());
 }
 
+/// 使用全域 logger 寫入 `error` 等級檔案日誌。
 pub fn error_file_async<S: Into<String>>(log: S) {
     LOGGER.error(log.into());
 }
 
+/// 使用全域 logger 寫入 `debug` 等級檔案日誌。
 pub fn debug_file_async<S: Into<String>>(log: S) {
     LOGGER.debug(log.into());
 }
 
+/// 直接輸出 `info` 等級到標準輸出。
 pub fn info_console(log: String) {
     println!(
         "{} Info {}",
@@ -153,6 +173,7 @@ pub fn info_console(log: String) {
     );
 }
 
+/// 直接輸出 `error` 等級到標準輸出。
 pub fn error_console(log: String) {
     println!(
         "{} Error {}",

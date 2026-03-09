@@ -2,10 +2,13 @@ use rust_decimal::Decimal;
 
 use crate::{logging, util::text};
 
-// Define trait that provides necessary methods
+/// 從來源值取出常用型別的轉換介面。
 pub trait FromValue {
+    /// 取出字串並移除指定跳脫字元。
     fn get_string(&self, escape_chars: Option<Vec<char>>) -> String;
+    /// 取出 `i64`，若解析失敗回傳預設值 `0`。
     fn get_i64(&self, escape_chars: Option<Vec<char>>) -> i64;
+    /// 取出 `Decimal`，若解析失敗回傳 `Decimal::ZERO`。
     fn get_decimal(&self, escape_chars: Option<Vec<char>>) -> Decimal;
 }
 

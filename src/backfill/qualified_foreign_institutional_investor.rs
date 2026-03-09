@@ -7,6 +7,7 @@ use anyhow::Result;
 use chrono::{DateTime, FixedOffset, Local};
 use scopeguard::defer;
 
+/// 回補上市與上櫃外資持股狀況。
 pub async fn execute() -> Result<()> {
     let now = Local::now();
 
@@ -28,6 +29,7 @@ async fn listed(date_time: DateTime<FixedOffset>) -> Result<()> {
     update(listed).await
 }
 
+/// 回補上櫃外資持股資料。
 async fn otc() -> Result<()> {
     let toc = twse::qualified_foreign_institutional_investor::over_the_counter::visit().await?;
     update(toc).await
@@ -80,6 +82,7 @@ mod tests {
 
     use super::*;
 
+    /// 驗證外資持股回補流程。
     #[tokio::test]
     #[ignore]
     async fn test_execute() {

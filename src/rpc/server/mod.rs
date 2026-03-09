@@ -13,7 +13,9 @@ use crate::{
     util,
 };
 
+/// Control 服務實作。
 pub mod control_service;
+/// Stock 服務實作。
 pub mod stock_service;
 
 /// 啟動 GRPC Server
@@ -78,6 +80,7 @@ fn get_tls_config() -> Option<(String, String)> {
     }
 }
 
+/// 將 TLS 設定套用到 gRPC server builder。
 fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Result<Server> {
     util::ensure_rustls_crypto_provider();
 

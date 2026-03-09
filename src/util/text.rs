@@ -7,6 +7,7 @@ use rust_decimal::Decimal;
 const NUMBER_ESCAPE_CHAR: &[char] = &['元', '%', ',', ' ', '"', '\n', '+'];
 
 #[allow(dead_code)]
+/// 將疑似 Big5 編碼字串轉成 UTF-8。
 pub fn big5_to_utf8(text: &str) -> Result<String> {
     let text_to_char = text.chars();
     let mut vec = Vec::with_capacity(text.len());
@@ -62,6 +63,7 @@ pub fn split(w: &str) -> Vec<String> {
 }
 
 #[allow(dead_code)]
+/// 以 `HashSet` 去重的舊版拆字實作。
 pub fn split_v1(w: &str) -> Vec<String> {
     let word = w.replace(['*', '-'], "");
     let text_rune = word.chars().collect::<Vec<_>>();
@@ -112,6 +114,7 @@ pub fn parse_decimal(s: &str, escape_chars: Option<Vec<char>>) -> Result<Decimal
         .map_err(|why| anyhow!("Failed to parse '{}' as Decimal because {:?}", cleaned, why))
 }
 
+/// 將字串解析為 `f64`。
 pub fn parse_f64(s: &str, escape_chars: Option<Vec<char>>) -> Result<f64> {
     let cleaned = clean_escape_chars(s, escape_chars);
     f64::from_str(&cleaned)
@@ -223,6 +226,7 @@ mod tests {
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
+    /// 驗證 Big5 轉 UTF-8。
     #[test]
     fn test_big5_to_utf8() {
         //let wording = "¹A·~¬ì§Þ·~";
@@ -234,6 +238,7 @@ mod tests {
         println!("utf8 :{} {:?}", utf8_wording, utf8_wording.as_bytes());
     }
 
+    /// 驗證中文字拆字結果。
     #[tokio::test]
     async fn test_split() {
         dotenv::dotenv().ok();
@@ -244,6 +249,7 @@ mod tests {
         println!("split: {:?}, elapsed time: {:?}", result, end);
     }
 
+    /// 比較兩種拆字實作的結果與耗時。
     #[tokio::test]
     async fn test_split_all() {
         dotenv::dotenv().ok();
@@ -269,6 +275,7 @@ mod tests {
         println!("utf8 :{} {:?}", utf8_wording, utf8_wording.as_bytes());
     }*/
 
+    /// 驗證跳脫字元清理結果。
     #[tokio::test]
     async fn test_clean_string_escape_chars() {
         dotenv::dotenv().ok();

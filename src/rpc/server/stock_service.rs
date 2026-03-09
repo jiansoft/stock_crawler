@@ -11,6 +11,7 @@ use crate::{
     },
 };
 
+/// Stock gRPC 服務。
 #[derive(Default)]
 pub struct StockService {}
 
@@ -43,7 +44,7 @@ impl Stock for StockService {
         }))
     }
 
-    //
+    /// 取得指定年度的休市日清單。
     async fn fetch_holiday_schedule(
         &self,
         req: Request<HolidayScheduleRequest>,
@@ -72,6 +73,7 @@ impl Stock for StockService {
     }
 }
 
+/// 取得單一股票的即時報價，並轉成 gRPC 回傳型別。
 async fn fetch_current_quotes_for_symbol(stock_symbol: &str) -> Option<StockQuotes> {
     if let Ok(sq) = crawler::fetch_stock_quotes_from_remote_site(stock_symbol).await {
         return Some(StockQuotes {
@@ -113,6 +115,7 @@ mod tests {
         addr_str
     }
 
+    /// 驗證查詢即時報價 RPC。
     #[tokio::test]
     async fn test_fetch_current_stock_price() {
         let addr = start_test_server().await;

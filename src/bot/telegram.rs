@@ -9,32 +9,46 @@ use crate::{config::SETTINGS, logging, util::http};
 //static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 static TELEGRAM: OnceLock<Telegram> = OnceLock::new();
 
+/// Telegram Bot API 客戶端。
 pub struct Telegram {
+    /// `sendMessage` API 的完整 URL。
     send_message_url: String,
 }
 
+/// `sendMessage` API 回應內容。
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SendMessageResponse {
+    /// Telegram API 是否成功處理請求。
     pub ok: bool,
+    /// 成功時回傳的訊息內容。
     pub result: Option<Message>,
+    /// 失敗時的錯誤代碼。
     pub error_code: Option<i32>,
+    /// 失敗時的錯誤描述。
     pub description: Option<String>,
 }
 
+/// Telegram 訊息物件的最小欄位表示。
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message {
+    /// Telegram 訊息 ID。
     message_id: i64,
 }
 
+/// 發送 Telegram 訊息時使用的請求內容。
 #[derive(Serialize)]
 pub struct SendMessageRequest<'a> {
+    /// 目標聊天室 ID。
     pub chat_id: i64,
+    /// 訊息內容。
     pub text: &'a str,
+    /// Telegram 解析模式。
     #[serde(rename = "parse_mode")]
     pub parse_mode: &'a str,
 }
 
 impl Telegram {
+    /// 建立 Telegram API 客戶端。
     pub fn new() -> Self {
         Self {
             send_message_url: format!(
@@ -44,6 +58,7 @@ impl Telegram {
         }
     }
 
+    /// 將同一則訊息送給設定檔中的所有允許接收者。
     pub async fn send(&self, message: &str) -> Result<SendMessageResponse> {
         let allowed_ids = SETTINGS.bot.telegram.allowed.keys();
         let futures =
@@ -67,6 +82,7 @@ impl Telegram {
         .map_err(|err| anyhow!("Failed to send_message because: {:?}", err))
     }
 
+    /// 跳脫 Telegram `MarkdownV2` 保留字元。
     pub fn escape_markdown_v2(text: impl Into<String>) -> String {
         const SPECIALS: &[char] = &[
             '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.',
@@ -93,6 +109,7 @@ impl Default for Telegram {
 }
 
 impl<'a> SendMessageRequest<'a> {
+    /// 建立 `sendMessage` 請求，預設採用 `MarkdownV2`。
     pub fn new(chat_id: i64, text: &'a str) -> SendMessageRequest<'a> {
         SendMessageRequest {
             chat_id,
@@ -102,6 +119,7 @@ impl<'a> SendMessageRequest<'a> {
     }
 }
 
+/// 取得全域共用的 Telegram client。
 fn get_client() -> &'static Telegram {
     TELEGRAM.get_or_init(Telegram::new)
 }
@@ -149,6 +167,7 @@ mod tests {
 
     use super::*;
 
+    /// 驗證 Telegram API 實際送信流程。
     #[tokio::test]
     #[ignore]
     async fn test_send_message() {
@@ -167,6 +186,7 @@ mod tests {
         time::sleep(Duration::from_secs(1)).await;
     }
 
+    /// 驗證 MarkdownV2 跳脫規則。
     #[test]
     fn test_escape_markdown_v2() {
         let input = "Hello_World*Test[link](url)";

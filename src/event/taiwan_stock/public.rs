@@ -13,6 +13,7 @@ use crate::{
     util::{convert::FromValue, map::Keyable},
 };
 
+/// 提醒目前可公開申購的股票。
 pub async fn execute() -> Result<()> {
     let ps = crawler::twse::public::visit().await?;
     let mut msg = String::with_capacity(2048);
@@ -74,6 +75,7 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
+/// 計算參考價與承銷價之間的價差與報酬率。
 fn calculate_price_change(offering_price: Decimal, last_price: Decimal) -> String {
     if offering_price == Decimal::ZERO || last_price == Decimal::ZERO {
         return String::from(" - ");
@@ -95,6 +97,7 @@ mod tests {
 
     use super::*;
 
+    /// 驗證公開申購提醒流程可執行。
     #[tokio::test]
     async fn test_execute() {
         dotenv::dotenv().ok();

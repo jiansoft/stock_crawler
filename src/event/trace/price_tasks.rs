@@ -5,7 +5,7 @@
 //! 價格追蹤與警報邏輯。
 //!
 //! 目前此模組會協調五種工作：
-//! 1. crawler 層的全市場即時報價背景任務（目前由 HiStock 驅動）
+//! 1. crawler 層的全市場即時報價背景任務（目前由 Yahoo 類股快取驅動）
 //! 2. 只針對 `Trace` 資料表內股票的備援採集任務
 //! 3. 價格更新事件 consumer，將指定股票的最新價格交給追蹤 evaluator
 //! 4. 追蹤條件快取刷新任務，定期同步最新 `trace` 設定
@@ -345,7 +345,7 @@ fn stop_traced_stock_backup_caching_task() {
 ///
 /// 流程如下：
 /// 1. 從追蹤條件快取取得目前被追蹤的股票代號。
-/// 2. 透過排除 HiStock 的備援站點抓取價格。
+/// 2. 透過 crawler 的備援站點抓取價格，避免依賴全市場快取是否已輪到該股票。
 /// 3. 僅在價格實際異動時，以單筆價格更新方式寫回共用快取並發佈價格事件。
 async fn refresh_traced_stock_snapshot_cache() -> Result<()> {
     let symbols = stock_price::get_tracked_symbols();

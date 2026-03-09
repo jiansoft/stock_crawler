@@ -162,6 +162,7 @@ impl Default for Ttl {
 mod tests {
     use super::*;
 
+    /// 驗證 TTL 到期後資料會失效。
     #[tokio::test]
     async fn test_init() {
         dotenv::dotenv().ok();

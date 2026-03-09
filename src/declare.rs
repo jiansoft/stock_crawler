@@ -2,27 +2,32 @@ use chrono::{Local, NaiveTime};
 use serde_derive::{Deserialize, Serialize};
 use strum_macros::{Display, EnumString};
 
+/// 財報季度。
 #[derive(
     Serialize, Deserialize, Display, Debug, Copy, Clone, EnumString, PartialEq, Eq, PartialOrd, Ord,
 )]
 pub enum Quarter {
+    /// 第一季。
     #[strum(serialize = "Q1")]
     Q1 = 1,
+    /// 第二季。
     #[strum(serialize = "Q2")]
     Q2 = 2,
+    /// 第三季。
     #[strum(serialize = "Q3")]
     Q3 = 3,
+    /// 第四季。
     #[strum(serialize = "Q4")]
     Q4 = 4,
 }
 
 impl Quarter {
-    /// Returns the serial number of the quarter as i32.
+    /// 取得季度的序號。
     pub fn serial(&self) -> i32 {
         *self as i32
     }
 
-    /// Returns the previous quarter.
+    /// 取得前一個季度。
     pub fn previous(&self) -> Quarter {
         match self {
             Quarter::Q1 => Quarter::Q4,
@@ -32,7 +37,7 @@ impl Quarter {
         }
     }
 
-    /// Returns the quarter corresponding to a given month.
+    /// 依月份取得對應季度。
     pub fn from_month(month: u32) -> Option<Quarter> {
         match month {
             1..=3 => Some(Quarter::Q1),
@@ -43,7 +48,7 @@ impl Quarter {
         }
     }
 
-    /// Returns the quarter corresponding to a given serial number.
+    /// 依序號取得對應季度。
     pub fn from_serial(val: u32) -> Option<Quarter> {
         match val {
             1 => Some(Quarter::Q1),
@@ -54,18 +59,18 @@ impl Quarter {
         }
     }
 
-    /// Returns an iterator over the quarters.
+    /// 依序回傳所有季度。
     pub fn iterator() -> impl Iterator<Item = Self> {
         [Quarter::Q1, Quarter::Q2, Quarter::Q3, Quarter::Q4]
             .iter()
             .copied()
     }
 
-    /// Returns a vector of `Quarter` values that are smaller than the current quarter.
+    /// 回傳比目前季度更早的季度清單。
     ///
-    /// # Examples
+    /// # 範例
     ///
-    /// ```
+    /// ```ignore
     /// let q4 = Quarter::Q4;
     /// let smaller_quarters = q4.smaller_quarters();
     /// assert_eq!(smaller_quarters, vec![Quarter::Q1, Quarter::Q2, Quarter::Q3]);
@@ -105,6 +110,7 @@ impl StockExchange {
         now >= start_time && now <= end_time
     }
 
+    /// 依序回傳所有有交易時段概念的交易所。
     pub fn iterator() -> impl Iterator<Item = Self> {
         [Self::TWSE, Self::TPEx].iter().copied()
     }
@@ -298,14 +304,17 @@ pub enum Industry {
     Uncategorized = 99,
 }
 impl Industry {
+    /// 取得產業序號。
     pub fn serial(&self) -> i32 {
         *self as i32
     }
 
+    /// 取得產業名稱。
     pub fn name(&self) -> String {
         self.to_string()
     }
 
+    /// 依序回傳所有產業列舉值。
     pub fn iterator() -> impl Iterator<Item = Self> {
         [
             Self::Cement,
@@ -355,7 +364,9 @@ impl Industry {
 /// 股票報價
 #[derive(Debug)]
 pub struct StockQuotes {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 最新成交價。
     pub price: f64,
     /// 漲跌
     pub change: f64,
@@ -372,6 +383,7 @@ pub const ONE_DAYS_IN_SECONDS: usize = 60 * 60 * 24;
 mod tests {
     use super::*;
 
+    /// 驗證產業序號對照。
     #[test]
     fn test_industry_serial() {
         assert_eq!(Industry::Cement.serial(), 1);
@@ -415,6 +427,7 @@ mod tests {
         assert_eq!(Industry::Uncategorized.serial(), 99);
     }
 
+    /// 驗證產業名稱對照。
     #[test]
     fn test_industry_name() {
         assert_eq!(Industry::Cement.name(), "水泥工業");
@@ -461,6 +474,7 @@ mod tests {
         assert_eq!(Industry::Uncategorized.name(), "未分類");
     }
 
+    /// 驗證交易所序號。
     #[test]
     fn test_stock_exchange_serial_number() {
         assert_eq!(StockExchange::None.serial_number(), 0);
@@ -468,6 +482,7 @@ mod tests {
         assert_eq!(StockExchange::TPEx.serial_number(), 2);
     }
 
+    /// 驗證市場別序號。
     #[test]
     fn test_stock_exchange_market_serial() {
         assert_eq!(StockExchangeMarket::Public.serial(), 1);
@@ -476,6 +491,7 @@ mod tests {
         assert_eq!(StockExchangeMarket::Emerging.serial(), 5);
     }
 
+    /// 驗證市場別代碼反查。
     #[test]
     fn test_stock_exchange_market_from() {
         assert_eq!(
@@ -497,6 +513,7 @@ mod tests {
         assert_eq!(StockExchangeMarket::from(3), None);
     }
 
+    /// 驗證市場別中文名稱。
     #[test]
     fn test_stock_exchange_market_name() {
         assert_eq!(StockExchangeMarket::Public.name(), "公開發行");
@@ -505,6 +522,7 @@ mod tests {
         assert_eq!(StockExchangeMarket::Emerging.name(), "興櫃");
     }
 
+    /// 驗證季度序號。
     #[test]
     fn test_serial() {
         assert_eq!(Quarter::Q1.serial(), 1);
@@ -513,6 +531,7 @@ mod tests {
         assert_eq!(Quarter::Q4.serial(), 4);
     }
 
+    /// 驗證前一季度計算。
     #[test]
     fn test_previous() {
         assert_eq!(Quarter::Q1.previous(), Quarter::Q4);
@@ -521,6 +540,7 @@ mod tests {
         assert_eq!(Quarter::Q4.previous(), Quarter::Q3);
     }
 
+    /// 驗證月份轉季度。
     #[test]
     fn test_from_month() {
         assert_eq!(Quarter::from_month(1), Some(Quarter::Q1));
@@ -530,6 +550,7 @@ mod tests {
         assert_eq!(Quarter::from_month(13), None);
     }
 
+    /// 驗證序號轉季度。
     #[test]
     fn test_from_serial() {
         assert_eq!(Quarter::from_serial(1), Some(Quarter::Q1));
@@ -539,6 +560,7 @@ mod tests {
         assert_eq!(Quarter::from_serial(5), None);
     }
 
+    /// 驗證較早季度清單。
     #[test]
     fn test_smaller_quarters() {
         assert_eq!(

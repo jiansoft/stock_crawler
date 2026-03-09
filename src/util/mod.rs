@@ -1,8 +1,14 @@
+//! 通用工具模組。
+
 use std::{cmp::max, sync::Once};
 
+/// 日期時間相關工具。
 pub mod datetime;
+/// HTTP 請求與 HTML 解析輔助工具。
 pub mod http;
+/// 集合與 map 轉換工具。
 pub mod map;
+/// 文字與數值解析工具。
 pub mod text;
 
 /// 文數字間的轉換
@@ -37,15 +43,17 @@ fn distribute_amount(amount: i32, parts: usize) -> Vec<i32> {
 }
 
 */
-
+/// 取得建議的 16 級併發上限。
 pub fn concurrent_limit_16() -> Option<usize> {
     Some(max(16, num_cpus::get() * 4))
 }
 
+/// 取得建議的 32 級併發上限。
 pub fn concurrent_limit_32() -> Option<usize> {
     Some(max(32, num_cpus::get() * 4))
 }
 
+/// 取得建議的 64 級併發上限。
 pub fn concurrent_limit_64() -> Option<usize> {
     Some(max(64, num_cpus::get() * 4))
 }

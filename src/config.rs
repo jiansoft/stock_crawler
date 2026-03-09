@@ -158,6 +158,7 @@ pub struct PostgreSQL {
     pub db: String,
 }
 
+/// 機器人相關設定。
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Bot {
     /// Telegram 機器人設定
@@ -178,6 +179,7 @@ pub struct Telegram {
     pub token: String,
 }
 
+/// NoSQL 相關設定。
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct NoSQL {
     /// Redis 快取服務設定
@@ -330,7 +332,7 @@ impl App {
         }
     }
 
-    /// 將來至於 env 的設定值覆蓋掉 json 上的設定值
+    /// 以環境變數覆蓋設定檔中的值。
     fn override_with_env(mut self) -> Self {
         if let Ok(token) = env::var(AFRAID_TOKEN) {
             self.afraid.token = token;
@@ -474,6 +476,7 @@ mod tests {
 
     use super::*;
 
+    /// 驗證設定可由環境變數與 JSON 載入。
     #[tokio::test]
     async fn test_init() {
         dotenv::dotenv().ok();

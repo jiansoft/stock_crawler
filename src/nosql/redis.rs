@@ -11,13 +11,17 @@ use rust_decimal::Decimal;
 
 use crate::{config::SETTINGS, util::text};
 
+/// 全域共享的 Redis 客戶端。
 pub static CLIENT: Lazy<Arc<Redis>> = Lazy::new(|| Arc::new(Redis::new()));
 
+/// Redis 連線池包裝器。
 pub struct Redis {
+    /// `deadpool-redis` 連線池。
     pub pool: Pool,
 }
 
 impl Redis {
+    /// 依照目前設定建立 Redis 連線池。
     pub fn new() -> Self {
         //redis://mypassword@127.0.0.1:6379
         let connection_url = format!(
@@ -36,6 +40,7 @@ impl Redis {
         Redis { pool }
     }
 
+    /// 對 Redis 執行 `PING`，確認連線可用。
     pub async fn ping(&self) -> Result<String> {
         let mut conn: Connection = self.pool.get().await?;
         let pong: String = cmd("PING").query_async(&mut conn).await?;
@@ -234,6 +239,7 @@ impl Redis {
         Ok(pattern_results)
     }
 
+    /// 以指定前綴模式確認 Redis 內是否存在任一鍵值。
     pub async fn contains_key(&self, pattern: &str) -> Result<bool> {
         let keys = self.get_key(pattern.to_string()).await?;
         Ok(!keys.is_empty())
@@ -253,6 +259,7 @@ mod tests {
 
     use super::*;
 
+    /// 驗證 `contains_key` 的基本查詢流程。
     #[tokio::test]
     async fn test_redis_contains_key() {
         dotenv::dotenv().ok();
@@ -263,6 +270,7 @@ mod tests {
         println!("MyPublicIP:{:?}", is_my_public_ip_val);
     }
 
+    /// 驗證 decimal 存取流程。
     #[tokio::test]
     async fn test_redis_decimal() {
         dotenv::dotenv().ok();
@@ -274,6 +282,7 @@ mod tests {
         println!("no_key_val_is:{:?}", is_no_key_val);
     }
 
+    /// 驗證 Redis 常用操作。
     #[tokio::test]
     #[ignore]
     async fn test_redis() {

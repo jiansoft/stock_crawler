@@ -6,6 +6,7 @@ use crate::{
 use anyhow::{anyhow, Result};
 use chrono::Timelike;
 
+/// 檢查目前外部 IP 是否變動，必要時同步更新 DDNS 服務。
 pub async fn refresh() -> Result<()> {
     let now = chrono::Local::now();
 
@@ -38,6 +39,7 @@ pub async fn refresh() -> Result<()> {
     Ok(())
 }
 
+/// 同步更新所有已啟用的 DDNS 供應商。
 async fn update_ddns_services(ip: &str) {
     let afraid = crawler::afraid::visit();
     let dynu = crawler::dynu::visit(ip);
@@ -49,6 +51,7 @@ async fn update_ddns_services(ip: &str) {
     log_error("noip", res_noip).await;
 }
 
+/// 將 DDNS 更新失敗寫入 log。
 async fn log_error(service_name: &str, result: Result<()>) {
     if let Err(why) = result {
         logging::error_file_async(format!(
@@ -62,6 +65,7 @@ async fn log_error(service_name: &str, result: Result<()>) {
 mod tests {
     use super::*;
 
+    /// 驗證 DDNS 更新主流程可執行。
     #[tokio::test]
     async fn test_execute() {
         dotenv::dotenv().ok();

@@ -20,11 +20,13 @@ const DEFAULT_MAX_SIZE: u64 = 10 * 1024 * 1024;
 /// 預設保留天數：7 天
 const DEFAULT_MAX_AGE_DAYS: i64 = 7;
 
+/// 依日期與大小自動輪轉的檔案 writer。
 pub struct Rotate {
     /// 檔名模式，例如 "log/%Y-%m-%d-name.log"
     fn_pattern: String,
     /// 當前完整檔名（含 generation）
     cur_fn: String,
+    /// 當前完整檔名的同步保護鎖。
     cur_fn_lock: RwLock<String>,
     /// 當前基礎檔名（不含 generation，由日期決定）
     cur_base_fn: String,
@@ -262,6 +264,7 @@ impl Rotate {
         self.on_rotate.store(false, Ordering::Relaxed);
     }
 
+    /// 列出指定檔案所在目錄的所有檔案。
     fn files_in_directory<P: AsRef<Path>>(file_path: P) -> Result<Vec<PathBuf>, io::Error> {
         let path = file_path.as_ref();
         let parent_dir = path
@@ -292,6 +295,7 @@ mod tests {
 
     use super::*;
 
+    /// 驗證基本寫檔流程。
     #[tokio::test]
     #[ignore]
     async fn test_basic_write() {
@@ -310,6 +314,7 @@ mod tests {
         logging::debug_file_async("結束 test_basic_write".to_string());
     }
 
+    /// 驗證跨日期時會切換新檔案。
     #[tokio::test]
     #[ignore]
     async fn test_date_rotation() {
@@ -331,6 +336,7 @@ mod tests {
         logging::debug_file_async("結束 test_date_rotation".to_string());
     }
 
+    /// 驗證超過檔案大小限制時會輪轉。
     #[tokio::test]
     #[ignore]
     async fn test_size_rotation() {

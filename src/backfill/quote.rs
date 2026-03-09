@@ -47,6 +47,7 @@ pub async fn execute(date: NaiveDate) -> Result<usize> {
     Ok(quotes_len)
 }
 
+/// 從指定資料來源抓取收盤價並附加到輸出向量。
 pub async fn get_quotes_from_source(
     source: impl Future<Output = Result<Vec<DailyQuote>>>,
     source_name: &str,
@@ -59,6 +60,7 @@ pub async fn get_quotes_from_source(
     Ok(())
 }
 
+/// 將收盤價整批寫入資料庫並更新主快取。
 pub async fn process_quotes(quotes: Vec<DailyQuote>) {
     let result_count = DailyQuote::copy_in_raw(&quotes).await.unwrap_or_default();
     stream::iter(quotes)

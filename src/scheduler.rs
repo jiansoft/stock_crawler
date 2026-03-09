@@ -36,6 +36,7 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
     Ok(())
 }
 
+/// 註冊所有 cron 任務並啟動排程器。
 async fn run_cron(sched: &JobScheduler) -> Result<()> {
     //let sched = JobScheduler::new().await?;
     //                 sec  min   hour   day of month   month   day of week   year
@@ -102,10 +103,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
     sched.start().await.context("Failed to start scheduler")
 }
 
+/// 排程輔助介面。
 pub trait Scheduler {
+    /// 判斷目前時間是否為週末。
     fn is_weekend(&self) -> bool;
 }
 
+/// 將非同步工作包裝成 `tokio_cron_scheduler::Job`。
 fn create_job<F, Fut>(cron_expr: &'static str, task: F) -> Result<Job>
 where
     F: Fn() -> Fut + Clone + Send + Sync + 'static,
@@ -129,6 +133,7 @@ mod tests {
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
+    /// 建立測試用排程器並註冊每秒任務。
     async fn run() -> Result<()> {
         let sched = JobScheduler::new().await?;
         let every_minute = Job::new_async("* * * * * *", |_uuid, _l| {
@@ -149,6 +154,7 @@ mod tests {
         Ok(())
     }
 
+    /// 手動執行排程 smoke test。
     #[tokio::test]
     #[ignore]
     async fn test_split() {

@@ -1,25 +1,18 @@
-//! # Yahoo 股價採集器
+//! # Yahoo 個股 Quote 頁解析
 //!
-//! 此模組實作了 `StockInfo` Trait，負責從 Yahoo 財經抓取股票的最新成交價與詳細報價。
-//!
-//! ## 選擇器說明
-//!
-//! Yahoo 台灣站的 HTML 使用了 CSS Modules 或類似的混淆技術，因此選擇器依賴於特定的大字體 Class：
-//! - `span.Fz(32px)`：大號字體，通常代表最新成交價。
-//! - `span.Fz(20px)`：中號字體，通常代表漲跌價。
-//! - `span.Jc(fe)`：右對齊容器，包含漲跌幅百分比。
-//!
-//! ## 錯誤處理機制
-//!
-//! 如果頁面結構發生變化導致無法找到關鍵標籤，函數將回傳 `Err` 而非預設值。
-//! 這能觸發 `crawler/mod.rs` 中的自動重試機制，嘗試從其他站點（如 CMoney）獲取資料。
+//! 此模組保留原本以 Yahoo 個股頁 (`/quote/{symbol}`) 為基礎的解析邏輯，
+//! 並在查詢前優先讀取 crawler 層維護的共用即時快取。
+//! 這樣可以讓一般 `StockInfo` 呼叫端優先吃到 Yahoo 類股輪詢任務的成果，
+//! 只有在快取未命中時才退回單檔頁面抓取。
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use scraper::Html;
 
 use crate::{
+    cache::SHARE,
     crawler::{
         yahoo::{Yahoo, HOST},
         StockInfo,
@@ -28,24 +21,61 @@ use crate::{
     util::{self, text},
 };
 
+/// 將共用快取中的即時快照轉成 `StockQuotes` 回傳型別。
+fn snapshot_to_quotes(
+    snapshot: crate::cache::RealtimeSnapshot,
+    stock_symbol: &str,
+) -> Result<declare::StockQuotes> {
+    // 這裡刻意只做型別轉換，不摻雜任何抓取或快取邏輯，
+    // 讓「快取命中時的回傳格式轉換」可以被重複利用。
+    Ok(declare::StockQuotes {
+        // 回傳型別仍保留呼叫端傳入的股票代號，
+        // 避免未來快取鍵或來源代號格式調整時影響輸出。
+        stock_symbol: stock_symbol.to_string(),
+        // `declare::StockQuotes` 目前使用 `f64`，所以這裡把快取裡的 `Decimal`
+        // 明確轉成 `f64`，並在失敗時附上欄位名，方便定位是哪個欄位轉型失敗。
+        price: snapshot
+            .price
+            .to_f64()
+            .context("Decimal to f64 conversion failed (price)")?,
+        change: snapshot
+            .change
+            .to_f64()
+            .context("Decimal to f64 conversion failed (change)")?,
+        change_range: snapshot
+            .change_range
+            .to_f64()
+            .context("Decimal to f64 conversion failed (range)")?,
+    })
+}
+
 #[async_trait]
 impl StockInfo for Yahoo {
-    /// 獲取指定股票的最新成交價。
-    ///
-    /// # 參數
-    /// * `stock_symbol` - 股票代碼 (例如: "2330")
-    ///
-    /// # 實作細節
-    /// 解析頁面中的 `.Fz(32px)` 標籤並將其標準化為 `Decimal` 型態。
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal> {
+        // 先讀共用快取，因為開盤期間背景任務已經會持續刷新 Yahoo 類股資料。
+        // 這樣一般查價請求就不必每次都打單檔頁，速度更快，也比較不容易被限流。
+        if let Some(snapshot) = SHARE
+            .get_stock_snapshot(stock_symbol)
+            .filter(|snapshot| snapshot.price != Decimal::ZERO)
+        {
+            // 價格為 0 在這裡視為「缺值」而不是有效價格，
+            // 所以只有非 0 才直接採信。
+            return Ok(snapshot.price);
+        }
+
+        // 快取沒命中時才退回 Yahoo 單檔 quote 頁，
+        // 這條路徑是保底邏輯，確保背景任務尚未暖機時仍能查到資料。
         let url = format!(
             "https://{host}/quote/{symbol}",
             host = HOST,
             symbol = stock_symbol
         );
+        // 先抓原始 HTML，再交給 scraper 做結構化查找。
         let text = util::http::get(&url, None).await?;
         let document = Html::parse_document(&text);
 
+        // 這裡沿用既有 Yahoo quote 頁的 selector，
+        // 只抓主要報價區塊中的大字成交價。
         let price_str =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
                 stock_symbol,
@@ -55,19 +85,23 @@ impl StockInfo for Yahoo {
                 url: &url,
             })?;
 
+        // 解析完後 normalize，避免 `Decimal` 保留不必要的小數 scale，
+        // 讓後續比對與 log 看起來更乾淨。
         Ok(text::parse_decimal(&price_str, None)?.normalize())
     }
 
-    /// 獲取指定股票的完整報價資訊（包含漲跌、漲幅）。
-    ///
-    /// # 參數
-    /// * `stock_symbol` - 股票代碼 (例如: "2330")
-    ///
-    /// # 實作細節
-    /// 此函數會解析成交價、漲跌價與漲幅百分比。
-    /// 並透過檢查是否有 `.C($c-trend-down)` 顏色類別來判定趨勢是否為下跌，
-    /// 藉此修正部分頁面未明確標註負號的情況。
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes> {
+        // `get_stock_quotes` 比 `get_stock_price` 多了漲跌與漲跌幅，
+        // 但優先吃快取的策略相同，先減少對單檔頁的依賴。
+        if let Some(snapshot) = SHARE
+            .get_stock_snapshot(stock_symbol)
+            .filter(|snapshot| snapshot.price != Decimal::ZERO)
+        {
+            // 命中快取時直接轉成回傳型別，不走 HTML 解析。
+            return snapshot_to_quotes(snapshot, stock_symbol);
+        }
+
+        // 以下才是 fallback 路徑：真的需要時才打 Yahoo 單檔頁。
         let url = format!(
             "https://{host}/quote/{symbol}",
             host = HOST,
@@ -76,7 +110,8 @@ impl StockInfo for Yahoo {
         let text = util::http::get(&url, None).await?;
         let document = Html::parse_document(&text);
 
-        // 檢查是否下跌：尋找帶有跌幅顏色特徵的趨勢 Class
+        // Yahoo 的漲跌顏色有時比純文字更可靠，
+        // 所以先檢查是否存在「下跌」顏色 class，後面再用來校正正負號。
         let is_negative = document
             .select(
                 &scraper::Selector::parse("#main-0-QuoteHeader-Proxy .C\\(\\$c-trend-down\\)")
@@ -85,7 +120,8 @@ impl StockInfo for Yahoo {
             .next()
             .is_some();
 
-        // 取得成交價 (Fz(32px))
+        // 成交價、漲跌與漲跌幅分三次抓，雖然看起來重複，
+        // 但能讓錯誤訊息明確落在哪一個欄位 selector。
         let price_raw =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
                 stock_symbol,
@@ -96,7 +132,7 @@ impl StockInfo for Yahoo {
             })?;
         let price = text::parse_f64(&price_raw, None)?;
 
-        // 取得漲跌 (Fz(20px))
+        // 漲跌值使用較小字級的數字節點。
         let change_raw =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
                 stock_symbol,
@@ -107,7 +143,7 @@ impl StockInfo for Yahoo {
             })?;
         let mut change = text::parse_f64(&change_raw, None)?;
 
-        // 取得漲幅百分比 (Jc(fe))
+        // 漲跌幅通常包在括號與百分號中，所以 parse 時一併去掉。
         let range_raw =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
                 stock_symbol,
@@ -118,7 +154,8 @@ impl StockInfo for Yahoo {
             })?;
         let mut change_range = text::parse_f64(&range_raw, Some(vec!['(', ')', '%']))?;
 
-        // 防禦性修正：Yahoo 網頁上的數值有時不帶符號，根據顏色類別進行強制校正
+        // Yahoo 頁面上的數字有時是正數文字，但實際方向靠顏色表現，
+        // 所以這裡用 `is_negative` 再校正一次，避免 +/− 號判錯。
         if is_negative {
             if change > 0.0 {
                 change = -change;
@@ -128,6 +165,7 @@ impl StockInfo for Yahoo {
             }
         }
 
+        // 最後統一包回專案內通用的報價型別，讓外部呼叫端不需要知道 Yahoo 頁面結構。
         Ok(declare::StockQuotes {
             stock_symbol: stock_symbol.to_string(),
             price,
@@ -142,7 +180,9 @@ mod tests {
     use super::*;
     use crate::logging;
 
+    /// Live 測試：驗證單檔 Yahoo quote 頁仍可抓到指定股票的成交價。
     #[tokio::test]
+    #[ignore]
     async fn test_get_stock_price() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
@@ -160,7 +200,9 @@ mod tests {
         logging::debug_file_async("結束 visit".to_string());
     }
 
+    /// Live 測試：驗證單檔 Yahoo quote 頁仍可抓到成交價、漲跌與漲幅資訊。
     #[tokio::test]
+    #[ignore]
     async fn test_get_stock_quotes() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 yahoo::get_stock_quotes".to_string());

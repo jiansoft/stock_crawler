@@ -1,3 +1,11 @@
+//! `stock_crawler` 可執行程式入口。
+//!
+//! 主要職責：
+//! - 載入環境與主快取。
+//! - 啟動排程與 gRPC 服務。
+//! - 註冊結束訊號，讓行程可平順停止。
+//! - 啟動後做一次 gRPC 自我連線驗證。
+
 /*#[macro_use]
 extern crate rocket;*/
 
@@ -69,6 +77,7 @@ async fn main() -> Result<(), rocket::Error> {
 }
 */
 
+/// 在 Unix 平台監聽 `SIGINT` / `SIGTERM`，並通知主迴圈結束。
 #[cfg(unix)]
 async fn unix_signal_handler(received_signal: Arc<AtomicBool>) -> Result<(), Box<dyn Error>> {
     let mut sigint = unix_signal(SignalKind::interrupt())?;
@@ -84,6 +93,7 @@ async fn unix_signal_handler(received_signal: Arc<AtomicBool>) -> Result<(), Box
     Ok(())
 }
 
+/// 監聽跨平台 `Ctrl+C` 訊號，並通知主迴圈結束。
 async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
     if let Err(e) = signal::ctrl_c().await {
         eprintln!("Failed to listen for Ctrl+C signal: {}", e);
@@ -91,6 +101,7 @@ async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
     received_signal.store(true, Ordering::SeqCst);
 }
 
+/// 啟動 `stock_crawler` 主流程。
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let received_signal = Arc::new(AtomicBool::new(false));

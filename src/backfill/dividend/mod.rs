@@ -5,6 +5,7 @@ use scopeguard::defer;
 use crate::logging;
 
 mod missing_or_multiple;
+/// 更新歷史配息率。
 pub mod payout_ratio;
 mod unannounced_ex_dividend_date;
 
