@@ -1,14 +1,17 @@
-use std::{future::Future, pin::Pin};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::crawler::{bigdatacloud, myip};
 use crate::{
-    crawler::{ipify, ipinfo, seeip},
+    crawler::{ipconfig, ipify, ipinfo, seeip},
     util::{self, map::Keyable, text},
 };
 
@@ -98,21 +101,43 @@ fn parse_annual_profit(node: ElementRef, stock_symbol: &str) -> Option<AnnualPro
 
 type IpFetchFn = dyn Fn() -> Pin<Box<dyn Future<Output = Result<String>> + Send>> + Sync;
 
-/// 取得對外的 IP
+/// 全域 IP 查詢游標，用於順序輪詢不同的檢測服務。
+static IP_INDEX: AtomicUsize = AtomicUsize::new(0);
+
+/// 獲取系統對外的公網 IP 地址。
+///
+/// 此函式透過多個第三方 IP 檢測服務進行輪詢，以確保在單一服務失效時仍能取得 IP。
+/// 為了平衡負載並避免單一服務請求過於頻繁，採用順序輪詢 (Round-robin) 機制切換不同站點。
+///
+/// # 支援的服務站點
+/// - `ipify.org`
+/// - `ipconfig.io`
+/// - `ipinfo.io`
+/// - `seeip.org`
+/// - `myip.com`
+/// - `bigdatacloud.com`
+///
+/// # 回傳值
+/// - `Ok(String)`: 成功取得的公網 IP 字串。
+/// - `Ok("")`: 若所有站點都嘗試失敗，則回傳空字串（不拋出錯誤，由呼叫端決定後續行為）。
+/// - `Err`: 發生嚴重的系統層級錯誤。
 pub async fn get_public_ip() -> Result<String> {
-    let mut sites: [&IpFetchFn; 5] = [
+    let sites: [&IpFetchFn; 6] = [
         &|| Box::pin(ipify::visit()),
+        &|| Box::pin(ipconfig::visit()),
         &|| Box::pin(ipinfo::visit()),
         &|| Box::pin(seeip::visit()),
         &|| Box::pin(myip::visit()),
         &|| Box::pin(bigdatacloud::visit()),
     ];
 
-    // 打亂陣列的順序
-    let mut rng = StdRng::from_rng(&mut rand::rng());
-    sites.shuffle(&mut rng);
+    let site_len = sites.len();
 
-    for site in sites {
+    for _ in 0..site_len {
+        // 取得並遞增游標，實現跨呼叫的順序輪詢
+        let current_index = IP_INDEX.fetch_add(1, Ordering::SeqCst) % site_len;
+        let site = sites[current_index];
+
         if let Ok(ip) = site().await {
             if !ip.is_empty() {
                 return Ok(ip);
