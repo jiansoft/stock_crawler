@@ -265,7 +265,7 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
 
-        let year = 2024;
+        let year = 2026;
         let multiple_dividends = dividend::Dividend::fetch_multiple_dividends_for_year(year)
             .await
             .unwrap();
@@ -274,6 +274,6 @@ mod tests {
             multiple_dividend_cache.insert(dividend.key());
         }
 
-        let _ = backfill_recent_dividends_for_stock(year, "2454", &multiple_dividend_cache).await;
+        let _ = backfill_recent_dividends_for_stock(year, "6123", &multiple_dividend_cache).await;
     }
 }

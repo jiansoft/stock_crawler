@@ -103,8 +103,19 @@ impl YahooDividend {
 pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     let url = format!("https://{}/quote/{}/dividend", HOST, stock_symbol);
     let text = http::get(&url, None).await?;
-    let document = Html::parse_document(&text);
+    parse_dividend_html(stock_symbol, &url, &text)
+}
 
+fn parse_dividend_html(stock_symbol: &str, url: &str, text: &str) -> Result<YahooDividend> {
+    let document = Html::parse_document(text);
+    parse_dividend_document(stock_symbol, url, &document)
+}
+
+fn parse_dividend_document(
+    stock_symbol: &str,
+    url: &str,
+    document: &Html,
+) -> Result<YahooDividend> {
     let rows = document.select(&LIST_SELECTOR).collect::<Vec<_>>();
     if rows.is_empty() {
         return Err(anyhow!(
@@ -211,4 +222,148 @@ fn parse_period(period: &Option<String>) -> Result<(i32, String)> {
         }
     }
     Ok((0, "".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+    use crate::logging;
+    use super::*;
+
+    fn dividend_row(
+        period: &str,
+        cash_dividend: &str,
+        stock_dividend: &str,
+        ex_dividend_date: &str,
+        ex_rights_date: &str,
+        payable_date1: &str,
+        payable_date2: &str,
+    ) -> String {
+        format!(
+            r#"
+            <li>
+                <div>
+                    <div class="Fxg(1) Fxs(1) Fxb(0%) Ta(end)">{period}</div>
+                    <div>unused</div>
+                    <div>{cash_dividend}</div>
+                    <div>{stock_dividend}</div>
+                    <div>unused</div>
+                    <div>unused</div>
+                    <div>{ex_dividend_date}</div>
+                    <div>{ex_rights_date}</div>
+                    <div>{payable_date1}</div>
+                    <div>{payable_date2}</div>
+                </div>
+            </li>
+            "#
+        )
+    }
+
+    fn wrap_rows(rows: &[String]) -> String {
+        format!(
+            r#"<div id="main-2-QuoteDividend-Proxy"><ul>{}</ul></div>"#,
+            rows.join("")
+        )
+    }
+
+    #[test]
+    fn parse_dividend_html_groups_records_by_paid_year_and_sorts_desc() {
+        let html = wrap_rows(&[
+            dividend_row(
+                "2024Q4",
+                "1.5",
+                "0.5",
+                "2025/03/10",
+                "-",
+                "2025/04/11",
+                "2025/05/01",
+            ),
+            dividend_row("2024Q3", "-", "1.2", "-", "2025/01/15", "-", "2025/02/20"),
+            dividend_row("2023", "2.0", "-", "2024/07/01", "-", "2024/07/30", "-"),
+            dividend_row("2022Q2", "1.0", "0.0", "-", "-", "-", "-"),
+        ]);
+
+        let dividend =
+            parse_dividend_html("2330", "https://example.test/quote/2330/dividend", &html)
+                .expect("expected parser to extract dividend rows");
+
+        assert_eq!(dividend.stock_symbol, "2330");
+        assert_eq!(dividend.dividend.len(), 2);
+        assert_eq!(dividend.dividend[0].0, 2025);
+        assert_eq!(dividend.dividend[1].0, 2024);
+
+        let details_2025 = dividend
+            .get_dividend_by_year(2025)
+            .expect("expected grouped data for 2025");
+        assert_eq!(details_2025.len(), 2);
+
+        let q4 = &details_2025[0];
+        assert_eq!(q4.year, 2025);
+        assert_eq!(q4.year_of_dividend, 2024);
+        assert_eq!(q4.quarter, "Q4");
+        assert_eq!(q4.cash_dividend, dec!(1.5));
+        assert_eq!(q4.stock_dividend, dec!(0.5));
+        assert_eq!(q4.ex_dividend_date1, "2025-03-10");
+        assert_eq!(q4.ex_dividend_date2, "-");
+        assert_eq!(q4.payable_date1, "2025-04-11");
+        assert_eq!(q4.payable_date2, "2025-05-01");
+
+        let q3 = &details_2025[1];
+        assert_eq!(q3.year, 2025);
+        assert_eq!(q3.year_of_dividend, 2024);
+        assert_eq!(q3.quarter, "Q3");
+        assert_eq!(q3.cash_dividend, Decimal::ZERO);
+        assert_eq!(q3.stock_dividend, dec!(1.2));
+        assert_eq!(q3.ex_dividend_date1, "-");
+        assert_eq!(q3.ex_dividend_date2, "2025-01-15");
+        assert_eq!(q3.payable_date1, "-");
+        assert_eq!(q3.payable_date2, "2025-02-20");
+
+        let details_2024 = dividend
+            .get_dividend_by_year(2024)
+            .expect("expected grouped data for 2024");
+        assert_eq!(details_2024.len(), 1);
+        assert_eq!(details_2024[0].quarter, "");
+        assert_eq!(details_2024[0].year_of_dividend, 2023);
+        assert_eq!(details_2024[0].cash_dividend, dec!(2.0));
+        assert_eq!(details_2024[0].stock_dividend, Decimal::ZERO);
+        assert_eq!(details_2024[0].ex_dividend_date1, "2024-07-01");
+        assert_eq!(details_2024[0].payable_date1, "2024-07-30");
+
+        assert!(dividend.get_dividend_by_year(2022).is_none());
+    }
+
+    #[test]
+    fn parse_dividend_html_returns_error_when_dividend_list_is_missing() {
+        let err = parse_dividend_html(
+            "2330",
+            "https://example.test/quote/2330/dividend",
+            r#"<div id="main-2-QuoteDividend-Proxy"><ul></ul></div>"#,
+        )
+        .expect_err("expected parser to reject empty dividend list");
+
+        let message = err.to_string();
+        assert!(message.contains("2330"));
+        assert!(message.contains("https://example.test/quote/2330/dividend"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_visit() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 visit".to_string());
+
+        match visit("6123").await {
+            Ok(e) => {
+                dbg!(&e);
+                logging::debug_file_async(format!("{:#?}", e));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 visit".to_string());
+    }
 }
