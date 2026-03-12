@@ -8,6 +8,7 @@
 # 遇到錯誤立即停止執行
 set -e
 
+export script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export built_path="./target/release"
 export app_path="./bin"
 export binary_name="stock_crawler"
@@ -94,8 +95,25 @@ function move() {
 # --- Docker 相關指令 ---
 
 function docker_build() {
+  local docker_bin_path="${DOCKER_BIN_FILE:-$script_dir/stock_crawler}"
+  local docker_bin_fallback_path="$script_dir/target/aarch64-unknown-linux-musl/release/stock_crawler"
+
+  if [ ! -f "$docker_bin_path" ]; then
+    if [ -f "$docker_bin_fallback_path" ]; then
+      docker_bin_path="$docker_bin_fallback_path"
+    else
+      log "找不到 Docker 映像所需的 binary: $docker_bin_path"
+      log "也找不到 fallback 路徑: $docker_bin_fallback_path"
+      log "可設定 DOCKER_BIN_FILE，或先產出對應 binary。"
+      exit 1
+    fi
+  fi
+
   log "開始建立 Docker 映像檔..."
-  docker build -t stock-rust-image -f Dockerfile_live .
+  cd "$script_dir"
+  docker build \
+    --build-arg BIN_FILE="$docker_bin_path" \
+    -t stock-rust-image -f Dockerfile_live .
   log "清理過期的 Docker 資源..."
   docker system prune -f
 }
@@ -108,10 +126,15 @@ function docker_stop() {
 }
 
 function docker_start() {
+  local docker_log_dir="${DOCKER_LOG_DIR:-$script_dir/log}"
+  local docker_ssl_dir="${DOCKER_SSL_DIR:-/opt/nginx/ssl/jiansoft.mooo.com}"
+
+  mkdir -p "$docker_log_dir"
+
   log "啟動 Docker 容器..."
   docker run --name stock-rust-container \
-    -v=/opt/stock_crawler/log:/app/log:rw \
-    -v=/opt/nginx/ssl/jiansoft.mooo.com:/opt/nginx/ssl/jiansoft.mooo.com \
+    -v="$docker_log_dir:/app/log:rw" \
+    -v="$docker_ssl_dir:/opt/nginx/ssl/jiansoft.mooo.com" \
     -p 9001:9001 -t -d stock-rust-image
   docker ps
 }

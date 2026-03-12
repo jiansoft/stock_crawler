@@ -1,29 +1,29 @@
-FROM alpine:3.23
+ARG BIN_FILE=stock_crawler
 
-RUN apk add --no-cache ca-certificates tzdata openssl
+FROM debian:13-slim AS runtime-assets
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates tzdata && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM scratch AS binary
+ARG BIN_FILE
+COPY ${BIN_FILE} /stock_crawler
+
+FROM gcr.io/distroless/static-debian13:nonroot
 
 ENV TZ=Asia/Taipei
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 WORKDIR /app
+
+COPY --from=runtime-assets /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=runtime-assets /usr/share/zoneinfo/Asia/Taipei /usr/share/zoneinfo/Asia/Taipei
+COPY --from=binary --chown=65532:65532 --chmod=755 /stock_crawler /app/stock_crawler
+COPY --chown=65532:65532 ./.env /app/.env
+COPY --chown=65532:65532 ./app.json /app/app.json
 
 EXPOSE 9001
 
-# Built by build.bat:
-#   target/aarch64-unknown-linux-musl/release/stock_crawler
-COPY ./stock_crawler /app/stock_crawler
-RUN chmod +x /app/stock_crawler
+USER 65532:65532
 
-COPY ./.env /app/.env
-COPY ./app.json /app/app.json
-
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup && \
-    mkdir -p /app/log /opt/nginx/ssl/jiansoft.mooo.com && \
-    chown -R appuser:appgroup /app /opt/nginx/ssl/jiansoft.mooo.com
-
-VOLUME ["/app/log","/opt/nginx/ssl/jiansoft.mooo.com"]
-
-USER appuser
-
-CMD ["/app/stock_crawler"]
+ENTRYPOINT ["/app/stock_crawler"]

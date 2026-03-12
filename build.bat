@@ -60,7 +60,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [8/9] Building %BIN_NAME% for Alpine ARM64...
+echo [8/9] Building %BIN_NAME% for Linux ARM64 \(musl / distroless static\)...
 cargo zigbuild --target %TARGET% --%PROFILE%
 if errorlevel 1 (
   echo Build failed.
