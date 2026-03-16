@@ -1,4 +1,7 @@
-use std::net::SocketAddr;
+use std::{
+    io::{BufReader, Cursor},
+    net::SocketAddr,
+};
 
 use anyhow::Result;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
@@ -95,57 +98,39 @@ fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Re
         logging::error_file_async(format!("讀取金鑰檔案失敗 ({}): {}", key_file, why));
         why
     })?;
-
-    // 根據作業系統決定嘗試的指令
-    let domain_info = String::from("無法執行 OpenSSL");
-    let commands = if cfg!(windows) {
-        vec![
-            "openssl".to_string(),
-            "openssl.exe".to_string(),
-            "C:\\Program Files\\Git\\usr\\bin\\openssl.exe".to_string(),
-            "C:\\Program Files\\OpenSSL-Win64\\bin\\openssl.exe".to_string(),
-        ]
-    } else {
-        vec![
-            "openssl".to_string(),
-            "/usr/bin/openssl".to_string(),
-            "/usr/local/bin/openssl".to_string(),
-            "/bin/openssl".to_string(),
-        ]
-    };
-
-    let mut final_domain_info = domain_info;
-    for cmd in commands {
-        match std::process::Command::new(cmd)
-            .args(["x509", "-noout", "-subject", "-enddate", "-in", &cert_file])
-            .output()
-        {
-            Ok(out) if out.status.success() => {
-                final_domain_info = String::from_utf8_lossy(&out.stdout)
-                    .trim()
-                    .replace('\n', ", ");
-                break;
-            }
-            Ok(out) => {
-                let err = String::from_utf8_lossy(&out.stderr);
-                if !err.trim().is_empty() {
-                    final_domain_info = format!("OpenSSL 執行失敗: {}", err.trim());
-                }
-            }
-            Err(_) => continue,
-        }
-    }
+    let cert_info = describe_certificate(&cert_content);
 
     logging::info_file_async(format!(
         "SSL 載入成功 - 憑證: {} bytes, 資訊: [{}], 金鑰: {} bytes",
         cert_content.len(),
-        final_domain_info,
+        cert_info,
         key_content.len()
     ));
 
     let identity = Identity::from_pem(cert_content, key_content);
 
     Ok(builder.tls_config(ServerTlsConfig::new().identity(identity))?)
+}
+
+/// 使用純 Rust 解析 PEM/X.509 憑證資訊，避免依賴外部 openssl 指令。
+fn describe_certificate(cert_pem: &str) -> String {
+    let mut reader = BufReader::new(Cursor::new(cert_pem.as_bytes()));
+    let cert = match rustls_pemfile::certs(&mut reader).next().transpose() {
+        Ok(Some(cert)) => cert,
+        Ok(None) => return "PEM 中找不到 CERTIFICATE 區塊".to_string(),
+        Err(why) => return format!("憑證 PEM 解析失敗: {}", why),
+    };
+
+    let parsed = match x509_parser::parse_x509_certificate(cert.as_ref()) {
+        Ok((_, parsed)) => parsed,
+        Err(why) => return format!("X.509 憑證解析失敗: {}", why),
+    };
+
+    format!(
+        "subject={}, not_after={}",
+        parsed.subject(),
+        parsed.validity().not_after
+    )
 }
 
 #[cfg(test)]
