@@ -1,3 +1,7 @@
+//! gRPC 伺服器模組。
+//!
+//! 負責 gRPC 伺服器的啟動、設定、TLS 憑證管理以及服務註冊。
+
 use std::{
     io::{BufReader, Cursor},
     net::SocketAddr,
@@ -16,12 +20,19 @@ use crate::{
     util,
 };
 
-/// Control 服務實作。
+/// Control 服務實作模組。
 pub mod control_service;
-/// Stock 服務實作。
+/// Stock 服務實作模組。
 pub mod stock_service;
 
-/// 啟動 GRPC Server
+/// 啟動 gRPC 伺服器。
+///
+/// 根據設定檔中的埠號啟動伺服器。如果埠號為 0，則不啟動。
+/// 伺服器會在背景任務中執行，不會阻塞當前執行緒。
+///
+/// # Errors
+///
+/// 如果解析地址失敗或啟動過程中發生錯誤，將會回傳錯誤。
 pub async fn start() -> Result<()> {
     if SETTINGS.system.grpc_use_port == 0 {
         return Ok(());
@@ -41,6 +52,9 @@ pub async fn start() -> Result<()> {
     Ok(())
 }
 
+/// 運行 gRPC 伺服器實例。
+///
+/// 負責建立伺服器 Builder、套用 TLS 設定並註冊服務。
 async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
     logging::info_file_async(format!("準備建立 gRPC 伺服器並監聽 {:?}", addr));
     let builder = Server::builder();
@@ -72,6 +86,9 @@ async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
     Ok(result?)
 }
 
+/// 從設定檔中取得 TLS 憑證與金鑰路徑。
+///
+/// 如果設定檔中未設定憑證或金鑰路徑，則回傳 `None`。
 fn get_tls_config() -> Option<(String, String)> {
     if !SETTINGS.system.ssl_cert_file.is_empty() && !SETTINGS.system.ssl_key_file.is_empty() {
         Some((
@@ -83,7 +100,17 @@ fn get_tls_config() -> Option<(String, String)> {
     }
 }
 
-/// 將 TLS 設定套用到 gRPC server builder。
+/// 將 TLS 設定套用到 gRPC 伺服器 Builder。
+///
+/// # Arguments
+///
+/// * `builder` - tonic 伺服器 Builder。
+/// * `cert_file` - 憑證檔案路徑。
+/// * `key_file` - 金鑰檔案路徑。
+///
+/// # Errors
+///
+/// 如果讀取檔案失敗或 TLS 設定無效，則回傳錯誤。
 fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Result<Server> {
     util::ensure_rustls_crypto_provider();
 
@@ -112,7 +139,10 @@ fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Re
     Ok(builder.tls_config(ServerTlsConfig::new().identity(identity))?)
 }
 
-/// 使用純 Rust 解析 PEM/X.509 憑證資訊，避免依賴外部 openssl 指令。
+/// 解析 PEM/X.509 憑證資訊。
+///
+/// 用於日誌記錄，提供憑證的 Subject 與過期時間等資訊。
+/// 使用純 Rust 實作，不依賴外部 openssl 指令。
 fn describe_certificate(cert_pem: &str) -> String {
     let mut reader = BufReader::new(Cursor::new(cert_pem.as_bytes()));
     let cert = match rustls_pemfile::certs(&mut reader).next().transpose() {
@@ -139,19 +169,15 @@ mod tests {
 
     use super::*;
 
+    /// 測試 gRPC 伺服器啟動流程。
     #[tokio::test]
     async fn test_start() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 rpc::start()".to_string());
+        logging::debug_file_async("開始 rpc::server::test_start()".to_string());
 
         tokio::spawn(start());
         tokio::time::sleep(Duration::from_secs(10)).await;
-        /* match  start().await {
-            Ok(_) => {}
-            Err(why) => {
-                logging::debug_file_async(format!("Failed to rpc::start() because: {:?}", why));
-            }
-        }*/
-        logging::debug_file_async("結束 rpc::start()".to_string());
+
+        logging::debug_file_async("結束 rpc::server::test_start()".to_string());
     }
 }

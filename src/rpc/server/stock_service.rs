@@ -1,8 +1,13 @@
+//! Stock gRPC 服務實作。
+//!
+//! 提供股票相關的查詢服務，包括即時報價查詢與休市日清單查詢。
+
 use futures::future::join_all;
+use rust_decimal::prelude::ToPrimitive;
 use tonic::{Request, Response, Status};
 
 use crate::{
-    crawler,
+    cache::SHARE,
     crawler::twse,
     logging,
     rpc::stock::{
@@ -12,11 +17,16 @@ use crate::{
 };
 
 /// Stock gRPC 服務。
+///
+/// 實作了 `Stock` trait，提供股票資訊、報價及休市日相關的 RPC 介面。
 #[derive(Default)]
 pub struct StockService {}
 
 #[tonic::async_trait]
 impl Stock for StockService {
+    /// 更新股票資訊。
+    ///
+    /// 此方法目前尚未實作。
     async fn update_stock_info(
         &self,
         _req: Request<StockInfoRequest>,
@@ -26,6 +36,17 @@ impl Stock for StockService {
         ))
     }
 
+    /// 批次取得股票即時報價。
+    ///
+    /// 根據請求中的股票代碼列表，並行調用爬蟲取得最新報價。
+    ///
+    /// # Arguments
+    ///
+    /// * `req` - 包含 `StockQuotesRequest` (股票代碼列表) 的 gRPC 請求。
+    ///
+    /// # Returns
+    ///
+    /// 回傳 `StockQuotesReply`，包含所有成功取得的股票報價。
     async fn fetch_current_stock_quotes(
         &self,
         req: Request<StockQuotesRequest>,
@@ -45,6 +66,16 @@ impl Stock for StockService {
     }
 
     /// 取得指定年度的休市日清單。
+    ///
+    /// 呼叫 TWSE 爬蟲取得該年度的所有休市日期與原因。
+    ///
+    /// # Arguments
+    ///
+    /// * `req` - 包含 `HolidayScheduleRequest` (年份) 的 gRPC 請求。
+    ///
+    /// # Returns
+    ///
+    /// 回傳 `HolidayScheduleReply`，包含休市日列表。
     async fn fetch_holiday_schedule(
         &self,
         req: Request<HolidayScheduleRequest>,
@@ -74,13 +105,27 @@ impl Stock for StockService {
 }
 
 /// 取得單一股票的即時報價，並轉成 gRPC 回傳型別。
+///
+/// 內部輔助函數，從 `SHARE` 快取中取得資料。優先使用即時報價快照 (`stock_snapshots`)，
+/// 若無快照則嘗試取得最後交易日報價 (`last_trading_day_quotes`) 作為備援。
 async fn fetch_current_quotes_for_symbol(stock_symbol: &str) -> Option<StockQuotes> {
-    if let Ok(sq) = crawler::fetch_stock_quotes_from_remote_site(stock_symbol).await {
+    // 1. 優先從即時報價快照取得
+    if let Some(snapshot) = SHARE.get_stock_snapshot(stock_symbol) {
         return Some(StockQuotes {
             stock_symbol: stock_symbol.to_string(),
-            price: sq.price,
-            change: sq.change,
-            change_range: sq.change_range,
+            price: snapshot.price.to_f64().unwrap_or_default(),
+            change: snapshot.change.to_f64().unwrap_or_default(),
+            change_range: snapshot.change_range.to_f64().unwrap_or_default(),
+        });
+    }
+
+    // 2. 若無即時報價，則從最後交易日報價取得 (作為備援)
+    if let Some(last_quote) = SHARE.get_stock_last_price(stock_symbol).await {
+        return Some(StockQuotes {
+            stock_symbol: stock_symbol.to_string(),
+            price: last_quote.closing_price.to_f64().unwrap_or_default(),
+            change: 0.0,
+            change_range: 0.0,
         });
     }
 
@@ -96,7 +141,7 @@ mod tests {
 
     use super::*;
 
-    /// 啟動 gRPC 伺服器並回傳其位址
+    /// 啟動測試用 gRPC 伺服器並回傳其位址。
     async fn start_test_server() -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -135,6 +180,7 @@ mod tests {
         println!("message:{:#?}", resp.into_inner().stock_prices)
     }
 
+    /// 驗證查詢休市日清單 RPC。
     #[tokio::test]
     async fn test_fetch_holiday_schedule() {
         let addr = start_test_server().await;

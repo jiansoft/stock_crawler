@@ -1,3 +1,7 @@
+//! gRPC 測試客戶端。
+//!
+//! 提供一個簡單的測試工具，用於驗證本地或遠端 gRPC 伺服器的可用性與連線狀態。
+
 use crate::config::SETTINGS;
 use crate::logging;
 use crate::rpc::control::control_client::ControlClient;
@@ -6,7 +10,22 @@ use anyhow::Result;
 use std::fs;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
-/// 測試 gRPC 伺服器是否正常運行的客戶端工具
+/// 執行 gRPC 伺服器運行測試。
+///
+/// 此函數會嘗試連線至本地 gRPC 伺服器，發送一個 `ControlRequest` 請求，
+/// 並驗證是否能收到正確的回應。此工具主要用於自動化測試或系統啟動後的自我檢查。
+///
+/// # 流程說明：
+/// 1. 檢查設定檔中的 gRPC 埠號。
+/// 2. 建立連線目標位址 (127.0.0.1)。
+/// 3. 載入 SSL 憑證以進行 TLS 連線。
+/// 4. 建立連線並設定 5 秒超時。
+/// 5. 調用 `control` 方法。
+/// 6. 記錄測試結果至日誌系統。
+///
+/// # Errors
+///
+/// 如果連線過程發生不可預期的錯誤（如憑證讀取失敗），則回傳錯誤。
 pub async fn run_test() -> Result<()> {
     logging::info_file_async("開始 gRPC Server 運行測試...");
 
