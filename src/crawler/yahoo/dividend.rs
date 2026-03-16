@@ -226,10 +226,10 @@ fn parse_period(period: &Option<String>) -> Result<(i32, String)> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::logging;
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
-    use crate::logging;
-    use super::*;
 
     fn dividend_row(
         period: &str,
