@@ -26,9 +26,9 @@ use super::class_quote;
 static IS_CACHING: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
 /// 相鄰兩個類股請求之間的節流間隔。
-const CATEGORY_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
+const CATEGORY_REQUEST_INTERVAL: Duration = Duration::from_secs(2);
 /// 全部類股輪詢完一輪後的休息時間。
-const CYCLE_COOLDOWN: Duration = Duration::from_secs(3);
+const CYCLE_COOLDOWN: Duration = Duration::from_secs(5);
 
 /// 啟動 Yahoo 類股快取背景任務。
 ///

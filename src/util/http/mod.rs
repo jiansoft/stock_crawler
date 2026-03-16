@@ -109,12 +109,30 @@ fn get_client() -> Result<&'static Client> {
 ///
 /// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
 pub async fn get_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
-    //send(Method::GET, url, None, None::<fn(_) -> _>)
-    get_response(url, None)
-        .await?
-        .json::<RES>()
+    let res = get_response(url, None).await?;
+    let status = res.status();
+    let res_body = res
+        .text()
         .await
-        .map_err(|e| anyhow!("Error parsing response JSON: {:?}", e))
+        .map_err(|e| anyhow!("Error reading response body from {}: {}", url, e))?;
+
+    if !status.is_success() {
+        return Err(anyhow!(
+            "HTTP request failed with status {} for {}. Body: {}",
+            status,
+            url,
+            util::text::truncate(&res_body, 200)
+        ));
+    }
+
+    serde_json::from_str(&res_body).map_err(|e| {
+        anyhow!(
+            "Error parsing response JSON from {}: {:?}. Body: {}",
+            url,
+            e,
+            util::text::truncate(&res_body, 200)
+        )
+    })
 }
 
 pub async fn get_response(url: &str, headers: Option<header::HeaderMap>) -> Result<Response> {

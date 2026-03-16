@@ -7,6 +7,14 @@ use rust_decimal::Decimal;
 const NUMBER_ESCAPE_CHAR: &[char] = &['元', '%', ',', ' ', '"', '\n', '+'];
 
 #[allow(dead_code)]
+/// 截斷字串並確保不破壞 UTF-8 字元邊界。
+pub fn truncate(s: &str, max_chars: usize) -> String {
+    match s.char_indices().nth(max_chars) {
+        None => s.to_string(),
+        Some((idx, _)) => format!("{}...", &s[..idx]),
+    }
+}
+
 /// 將疑似 Big5 編碼字串轉成 UTF-8。
 pub fn big5_to_utf8(text: &str) -> Result<String> {
     let text_to_char = text.chars();

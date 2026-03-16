@@ -480,6 +480,20 @@ mod tests {
         assert!(snapshot.price > Decimal::ZERO);
     }
 
+    /// Live 測試：驗證上櫃半導體類股能抓到完整分頁資料。
+    #[tokio::test]
+    #[ignore]
+    async fn test_fetch_otc_category_snapshots_integration() {
+        let category = YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 153, "半導體");
+
+        let snapshots = fetch_category_snapshots(&category).await.unwrap();
+
+        assert!(
+            !snapshots.is_empty(),
+            "expected some snapshots for Yahoo OTC class quotes"
+        );
+    }
+
     /// Live 測試：列出上市、上櫃、興櫃三個半導體類股下的所有股票資訊。
     #[tokio::test]
     #[ignore]
