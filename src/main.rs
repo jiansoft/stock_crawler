@@ -15,6 +15,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Instant,
 };
 
 use tokio::signal;
@@ -104,6 +105,7 @@ async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
 /// 啟動 `stock_crawler` 主流程。
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let startup_timer = Instant::now();
     let received_signal = Arc::new(AtomicBool::new(false));
 
     tokio::spawn(shutdown_signal_handler(received_signal.clone()));
@@ -119,11 +121,41 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     dotenv::dotenv().ok();
+    logging::info_file_async("startup phase begin: cache::SHARE.load".to_string());
+    let cache_load_timer = Instant::now();
     cache::SHARE.load().await;
-
+    logging::info_file_async(format!(
+        "startup phase done: cache::SHARE.load elapsed={:?}",
+        cache_load_timer.elapsed()
+    ));
+    
+    logging::info_file_async("startup phase begin: JobScheduler::new".to_string());
+    let scheduler_new_timer = Instant::now();
     let sched = JobScheduler::new().await?;
+    logging::info_file_async(format!(
+        "startup phase done: JobScheduler::new elapsed={:?}",
+        scheduler_new_timer.elapsed()
+    ));
+
+    logging::info_file_async("startup phase begin: scheduler::start".to_string());
+    let scheduler_start_timer = Instant::now();
     scheduler::start(&sched).await?;
+    logging::info_file_async(format!(
+        "startup phase done: scheduler::start elapsed={:?}",
+        scheduler_start_timer.elapsed()
+    ));
+
+    logging::info_file_async("startup phase begin: rpc::server::start".to_string());
+    let rpc_start_timer = Instant::now();
     rpc::server::start().await?;
+    logging::info_file_async(format!(
+        "startup phase done: rpc::server::start elapsed={:?}",
+        rpc_start_timer.elapsed()
+    ));
+    logging::info_file_async(format!(
+        "startup phase done: main init total elapsed={:?}",
+        startup_timer.elapsed()
+    ));
 
     // 啟動後延遲測試 gRPC 連線
     tokio::spawn(async move {
