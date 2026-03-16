@@ -1,4 +1,4 @@
-use std::{env, future::Future};
+use std::{env, future::Future, time::Instant};
 
 use anyhow::{Context, Error, Result};
 use tokio_cron_scheduler::{Job, JobScheduler};
@@ -16,13 +16,26 @@ use crate::{
 
 /// 啟動排程
 pub async fn start(sched: &JobScheduler) -> Result<()> {
+    let timer = Instant::now();
+    logging::info_file_async("scheduler start begin: run_cron".to_string());
+    let run_cron_timer = Instant::now();
     run_cron(sched).await.context("Failed to run cron jobs")?;
+    logging::info_file_async(format!(
+        "scheduler start done: run_cron elapsed={:?}",
+        run_cron_timer.elapsed()
+    ));
 
     //若在開盤埘間重啟服務定時任務會無法觸發，所以在啟動時要先執行股價追踪的任務，執行完後再設定一次定時任務
     if declare::StockExchange::TWSE.is_open() {
+        logging::info_file_async("scheduler start begin: opening trace::stock_price".to_string());
+        let opening_trace_timer = Instant::now();
         if let Err(why) = event::trace::stock_price::execute().await {
             logging::error_file_async(format!("{:?}", why));
         }
+        logging::info_file_async(format!(
+            "scheduler start done: opening trace::stock_price elapsed={:?}",
+            opening_trace_timer.elapsed()
+        ));
     }
 
     let msg = format!(
@@ -31,13 +44,24 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
         Telegram::escape_markdown_v2(env::consts::ARCH)
     );
 
+    logging::info_file_async("scheduler start begin: telegram notify".to_string());
+    let telegram_timer = Instant::now();
     bot::telegram::send(&msg).await;
+    logging::info_file_async(format!(
+        "scheduler start done: telegram notify elapsed={:?}",
+        telegram_timer.elapsed()
+    ));
+    logging::info_file_async(format!(
+        "scheduler start done: total elapsed={:?}",
+        timer.elapsed()
+    ));
 
     Ok(())
 }
 
 /// 註冊所有 cron 任務並啟動排程器。
 async fn run_cron(sched: &JobScheduler) -> Result<()> {
+    let timer = Instant::now();
     //let sched = JobScheduler::new().await?;
     //                 sec  min   hour   day of month   month   day of week   year
     //let expression = "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2";
@@ -93,14 +117,23 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
         create_job("0 * * * * *", ddns::refresh),
     ];
 
+    let mut job_count = 0usize;
     for job in jobs.into_iter().flatten() {
         sched
             .add(job)
             .await
             .context("Failed to add job to scheduler")?;
+        job_count += 1;
     }
 
-    sched.start().await.context("Failed to start scheduler")
+    sched.start().await.context("Failed to start scheduler")?;
+    logging::info_file_async(format!(
+        "scheduler run_cron done: jobs={}, elapsed={:?}",
+        job_count,
+        timer.elapsed()
+    ));
+
+    Ok(())
 }
 
 /// 排程輔助介面。
