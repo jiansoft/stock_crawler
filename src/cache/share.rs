@@ -586,7 +586,7 @@ impl Share {
     /// 或需要強制失效目前全量快照時。
     pub fn clear_stock_snapshots(&self) {
         if let Ok(mut cache) = self.stock_snapshots.write() {
-            cache.clear();
+            *cache = HashMap::new();
         }
     }
 }

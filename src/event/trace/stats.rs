@@ -20,14 +20,14 @@ use crate::logging;
 
 /// 單次追蹤執行期間的統計快照。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct TraceRuntimeStatsSnapshot {
-    price_events_published: u64,
-    price_events_dropped: u64,
-    price_events_consumed: u64,
-    notifications_sent: u64,
-    reconciliation_runs: u64,
-    reconciliation_symbols_scanned: u64,
-    reconciliation_alert_hits: u64,
+pub(super) struct TraceRuntimeStatsSnapshot {
+    pub price_events_published: u64,
+    pub price_events_dropped: u64,
+    pub price_events_consumed: u64,
+    pub notifications_sent: u64,
+    pub reconciliation_runs: u64,
+    pub reconciliation_symbols_scanned: u64,
+    pub reconciliation_alert_hits: u64,
 }
 
 /// 追蹤流程使用的執行統計計數器集合。
@@ -78,6 +78,32 @@ fn take_runtime_stats_snapshot_and_reset() -> TraceRuntimeStatsSnapshot {
     }
 }
 
+fn current_runtime_stats_snapshot() -> TraceRuntimeStatsSnapshot {
+    TraceRuntimeStatsSnapshot {
+        price_events_published: TRACE_RUNTIME_STATS
+            .price_events_published
+            .load(Ordering::SeqCst),
+        price_events_dropped: TRACE_RUNTIME_STATS
+            .price_events_dropped
+            .load(Ordering::SeqCst),
+        price_events_consumed: TRACE_RUNTIME_STATS
+            .price_events_consumed
+            .load(Ordering::SeqCst),
+        notifications_sent: TRACE_RUNTIME_STATS
+            .notifications_sent
+            .load(Ordering::SeqCst),
+        reconciliation_runs: TRACE_RUNTIME_STATS
+            .reconciliation_runs
+            .load(Ordering::SeqCst),
+        reconciliation_symbols_scanned: TRACE_RUNTIME_STATS
+            .reconciliation_symbols_scanned
+            .load(Ordering::SeqCst),
+        reconciliation_alert_hits: TRACE_RUNTIME_STATS
+            .reconciliation_alert_hits
+            .load(Ordering::SeqCst),
+    }
+}
+
 fn has_any_runtime_activity(snapshot: TraceRuntimeStatsSnapshot) -> bool {
     snapshot.price_events_published > 0
         || snapshot.price_events_dropped > 0
@@ -120,6 +146,11 @@ fn format_runtime_stats_summary(snapshot: TraceRuntimeStatsSnapshot) -> String {
 /// 重設追蹤執行統計。
 pub(super) fn reset_runtime_stats() {
     let _ = take_runtime_stats_snapshot_and_reset();
+}
+
+/// 取得目前尚未清零的追蹤執行統計快照。
+pub(super) fn get_runtime_stats_snapshot() -> TraceRuntimeStatsSnapshot {
+    current_runtime_stats_snapshot()
 }
 
 /// 記錄一筆已發佈的價格更新事件。

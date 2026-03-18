@@ -42,6 +42,15 @@ static TRACE_TARGETS: Lazy<RwLock<HashMap<String, Vec<Trace>>>> =
 /// 標記追蹤條件快取是否至少成功載入過一次。
 static TRACE_TARGETS_LOADED: AtomicBool = AtomicBool::new(false);
 
+/// 追蹤條件快取的診斷快照。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct TraceTargetDiagnostics {
+    /// 目前被追蹤的股票代號數。
+    pub symbol_count: usize,
+    /// 追蹤條件總筆數。
+    pub target_count: usize,
+}
+
 /// 追蹤條件判斷的觸發來源。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EvaluationSource {
@@ -217,6 +226,33 @@ pub(super) fn get_tracked_symbols() -> Vec<String> {
         .unwrap_or_default();
     symbols.sort();
     symbols
+}
+
+/// 判斷指定股票是否目前存在追蹤條件。
+pub(super) fn has_targets_for_symbol(symbol: &str) -> bool {
+    TRACE_TARGETS
+        .read()
+        .map(|cache| cache.contains_key(symbol))
+        .unwrap_or(false)
+}
+
+/// 取得追蹤條件快取目前的規模資訊。
+pub(super) fn trace_target_diagnostics() -> TraceTargetDiagnostics {
+    TRACE_TARGETS
+        .read()
+        .map(|cache| TraceTargetDiagnostics {
+            symbol_count: cache.len(),
+            target_count: cache.values().map(Vec::len).sum(),
+        })
+        .unwrap_or_default()
+}
+
+/// 清空追蹤條件快取，供收盤後釋放記憶體使用。
+pub(super) fn clear_trace_targets_cache() {
+    if let Ok(mut cache) = TRACE_TARGETS.write() {
+        *cache = HashMap::new();
+    }
+    TRACE_TARGETS_LOADED.store(false, Ordering::SeqCst);
 }
 
 /// 低頻對帳掃描目前追蹤中的股票。

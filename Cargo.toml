@@ -38,7 +38,7 @@ rustls = { version = "0.23", features = ["ring"] }
 rustls-pemfile = "2"
 rust_decimal = "1.40"
 rust_decimal_macros = "1.40"
-scraper = "0.25"
+scraper = "0.26"
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
 serde_json = "1.0"
@@ -57,6 +57,9 @@ urlencoding = "2.1"
 lazy_static = "1.5"
 scopeguard = "1.2"
 x509-parser = "0.18"
+
+[target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
+mimalloc = "0.1"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

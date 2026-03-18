@@ -85,7 +85,8 @@ fn get_client() -> Result<&'static Client> {
             .pool_max_idle_per_host(20)
             .pool_idle_timeout(Duration::from_secs(90))
             // ===== Cookie 和重定向 =====
-            .cookie_store(true)
+            // 大部分 crawler 都是 stateless request；避免把各站點回傳的 cookie
+            // 長期保留在全域 client 內，造成盤中輪詢時記憶體工作集持續增長。
             .redirect(reqwest::redirect::Policy::limited(5))
             // ===== Headers =====
             .referer(true)
@@ -112,31 +113,44 @@ pub async fn get_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
     let res = get_response(url, None).await?;
     let status = res.status();
     let res_body = res
-        .text()
+        .bytes()
         .await
         .map_err(|e| anyhow!("Error reading response body from {}: {}", url, e))?;
+    let res_body_preview = String::from_utf8_lossy(res_body.as_ref());
 
     if !status.is_success() {
         return Err(anyhow!(
             "HTTP request failed with status {} for {}. Body: {}",
             status,
             url,
-            util::text::truncate(&res_body, 200)
+            util::text::truncate(&res_body_preview, 200)
         ));
     }
 
-    serde_json::from_str(&res_body).map_err(|e| {
+    serde_json::from_slice(res_body.as_ref()).map_err(|e| {
         anyhow!(
             "Error parsing response JSON from {}: {:?}. Body: {}",
             url,
             e,
-            util::text::truncate(&res_body, 200)
+            util::text::truncate(&res_body_preview, 200)
         )
     })
 }
 
 pub async fn get_response(url: &str, headers: Option<header::HeaderMap>) -> Result<Response> {
     send(Method::GET, url, headers, None::<fn(_) -> _>, None).await
+}
+
+/// 使用指定 client 執行 HTTP GET。
+///
+/// 這個 helper 讓來源模組可以套用專用 transport profile，
+/// 同時仍沿用共用的重試、semaphore 與 HTTP diagnostics。
+pub(crate) async fn get_response_with_client(
+    client: &Client,
+    url: &str,
+    headers: Option<header::HeaderMap>,
+) -> Result<Response> {
+    send_with_client(client, Method::GET, url, headers, None::<fn(_) -> _>, None).await
 }
 
 /// Performs an HTTP GET request and returns the response as text.
@@ -325,12 +339,23 @@ async fn send(
     body: Option<impl FnOnce(RequestBuilder) -> RequestBuilder>,
     request_detail: Option<String>,
 ) -> Result<Response> {
+    let client = get_client()?;
+    send_with_client(client, method, url, headers, body, request_detail).await
+}
+
+async fn send_with_client(
+    client: &Client,
+    method: Method,
+    url: &str,
+    headers: Option<header::HeaderMap>,
+    body: Option<impl FnOnce(RequestBuilder) -> RequestBuilder>,
+    request_detail: Option<String>,
+) -> Result<Response> {
     let visit_log = format!("{method}:{url}");
     let request_detail_suffix = request_detail
         .as_deref()
         .map(|detail| format!(" {}", detail))
         .unwrap_or_default();
-    let client = get_client()?;
     let mut rb = client.request(method, url);
     let mut last_error = String::new();
 
@@ -394,6 +419,11 @@ fn format_form_params_log(params: &HashMap<&str, &str>) -> String {
     entries.sort();
 
     format!("params=[{}]", entries.join(", "))
+}
+
+/// 取得 HTTP logger 的執行期摘要。
+pub(crate) fn diagnostics_snapshot() -> crate::logging::LoggerRuntimeStatus {
+    LOGGER.diagnostics_snapshot()
 }
 
 #[cfg(test)]

@@ -12,7 +12,7 @@
 //! 4. **嚴格解析**：不容忍損壞或格式錯誤的報價，解析失敗會傳回錯誤而非默默變 0。
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -22,6 +22,7 @@ use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::{
@@ -32,7 +33,13 @@ use crate::{
     },
     declare,
     event::trace::price_tasks as trace_price_tasks,
-    util::{self, text},
+    util::{
+        self,
+        diagnostics::{
+            read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
+        },
+        text,
+    },
 };
 
 /// 預編譯所需的選擇器
@@ -41,9 +48,58 @@ static ROW_SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse("#CPHB1_gv tr
 
 /// 全域快取狀態
 static IS_CACHING: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+/// 目前存活中的 HiStock 背景 task 數量。
+static ACTIVE_TASKS: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
+/// HiStock 背景 task 的世代編號。
+static LAST_TASK_GENERATION: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
+/// 目前執行中的 HiStock 背景 task handle。
+static CACHING_TASK: Lazy<std::sync::Mutex<Option<JoinHandle<()>>>> =
+    Lazy::new(|| std::sync::Mutex::new(None));
+/// HiStock 最近一次抓取的 HTTP body 大小。
+static LAST_BODY_BYTES: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
+/// HiStock 最近一次解析到的 HTML row 數量。
+static LAST_ROW_COUNT: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
+/// HiStock 最近一次落地的快照數。
+static LAST_SNAPSHOT_COUNT: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
+/// HiStock 最近一次產生的價格事件數。
+static LAST_CHANGED_EVENT_COUNT: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
+/// HiStock 最近一次抓取耗時毫秒數。
+static LAST_ELAPSED_MS: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
+/// HiStock 最近一次 RSS 差值（KiB）。
+static LAST_RSS_DELTA_KIB: Lazy<AtomicI64> = Lazy::new(|| AtomicI64::new(0));
+/// HiStock 完成抓取的累積輪數。
+static COMPLETED_CYCLES: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 
 /// 用於解決 Single-flight (重複抓取) 的互斥鎖
 static FETCH_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+/// HiStock 來源最近一輪抓取的執行摘要。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct HiStockRuntimeDiagnostics {
+    pub status: TaskRuntimeStatus,
+    pub last_body_bytes: usize,
+    pub last_row_count: usize,
+    pub last_snapshot_count: usize,
+    pub last_changed_event_count: usize,
+    pub last_elapsed_ms: u64,
+    pub last_rss_delta_kib: i64,
+    pub completed_cycles: u64,
+}
+
+struct HiStockFetchResult {
+    snapshots: HashMap<String, RealtimeSnapshot>,
+    body_bytes: usize,
+    row_count: usize,
+}
+
+fn decrement_active_tasks(counter: &AtomicUsize) -> usize {
+    counter
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+            Some(current.saturating_sub(1))
+        })
+        .map(|previous| previous.saturating_sub(1))
+        .unwrap_or_default()
+}
 
 /// 解析單一表格列資料。
 fn parse_row(row: scraper::element_ref::ElementRef) -> Result<Option<(String, RealtimeSnapshot)>> {
@@ -178,16 +234,28 @@ fn collect_changed_price_updates(
 ///
 /// 若任務已在執行中，重複呼叫不會再額外啟動第二個背景迴圈。
 pub fn start_caching_task() {
+    if let Ok(mut handle) = CACHING_TASK.lock() {
+        if handle.as_ref().is_some_and(|task| task.is_finished()) {
+            handle.take();
+        }
+    }
+
     if IS_CACHING.load(Ordering::SeqCst) {
         return;
     }
     IS_CACHING.store(true, Ordering::SeqCst);
+    let generation = LAST_TASK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
-    tokio::spawn(async move {
-        crate::logging::info_file_async("HiStock 全市場快取任務啟動".to_string());
+    let handle = tokio::spawn(async move {
+        let active_tasks = ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
+        crate::logging::info_file_async(format!(
+            "HiStock 全市場快取任務啟動 generation={} active_tasks={}",
+            generation, active_tasks
+        ));
 
         while IS_CACHING.load(Ordering::SeqCst) {
             let start_time = std::time::Instant::now();
+            let memory_before = read_process_memory_stats();
 
             // 背景任務也受 FETCH_LOCK 控制，但優先讓外部請求先行
             let result = {
@@ -196,15 +264,45 @@ pub fn start_caching_task() {
             };
 
             match result {
-                Ok(new_data) => {
-                    let count = new_data.len();
-                    let price_updates = collect_changed_price_updates(&new_data);
-                    SHARE.set_stock_snapshots(new_data);
+                Ok(fetch_result) => {
+                    let count = fetch_result.snapshots.len();
+                    let row_count = fetch_result.row_count;
+                    let body_bytes = fetch_result.body_bytes;
+                    let price_updates = collect_changed_price_updates(&fetch_result.snapshots);
+                    let changed_events = price_updates.len();
+                    SHARE.set_stock_snapshots(fetch_result.snapshots);
                     trace_price_tasks::publish_price_updates(price_updates);
+                    let elapsed_ms = start_time.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                    let rss_delta_before_trim_kib =
+                        rss_delta_kib(memory_before, read_process_memory_stats());
+                    let allocator_trimmed = trim_allocator_memory();
+                    let rss_delta_kib = rss_delta_kib(memory_before, read_process_memory_stats());
+                    LAST_BODY_BYTES.store(body_bytes, Ordering::SeqCst);
+                    LAST_ROW_COUNT.store(row_count, Ordering::SeqCst);
+                    LAST_SNAPSHOT_COUNT.store(count, Ordering::SeqCst);
+                    LAST_CHANGED_EVENT_COUNT.store(changed_events, Ordering::SeqCst);
+                    LAST_ELAPSED_MS.store(elapsed_ms, Ordering::SeqCst);
+                    LAST_RSS_DELTA_KIB.store(rss_delta_kib, Ordering::SeqCst);
+                    COMPLETED_CYCLES.fetch_add(1, Ordering::SeqCst);
                     crate::logging::debug_file_async(format!(
-                        "HiStock 快取已更新，共 {} 檔股票，耗時 {:?}",
+                        "HiStock 快取已更新，共 {} 檔股票，rows={} body={}KiB changed_events={} rss_delta={}KiB，耗時 {:?}",
                         count,
+                        row_count,
+                        body_bytes / 1024,
+                        changed_events,
+                        rss_delta_kib,
                         start_time.elapsed()
+                    ));
+                    crate::logging::info_file_async(format!(
+                        "HiStock cycle diagnostics | snapshots={} rows={} body={}KiB changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
+                        count,
+                        row_count,
+                        body_bytes / 1024,
+                        changed_events,
+                        rss_delta_kib,
+                        rss_delta_before_trim_kib,
+                        allocator_trimmed,
+                        elapsed_ms,
                     ));
                 }
                 Err(e) => {
@@ -217,8 +315,19 @@ pub fn start_caching_task() {
             }
             sleep(Duration::from_secs(5)).await;
         }
-        crate::logging::info_file_async("HiStock 快取任務已停止".to_string());
+        IS_CACHING.store(false, Ordering::SeqCst);
+        let active_tasks = decrement_active_tasks(&ACTIVE_TASKS);
+        crate::logging::info_file_async(format!(
+            "HiStock 快取任務已停止 generation={} active_tasks={}",
+            generation, active_tasks
+        ));
     });
+
+    if let Ok(mut task) = CACHING_TASK.lock() {
+        *task = Some(handle);
+    } else {
+        crate::logging::error_file_async("Failed to store HiStock caching task handle".to_string());
+    }
 }
 
 /// 停止定時快取任務並清空即時報價快取。
@@ -227,7 +336,47 @@ pub fn start_caching_task() {
 /// 一定從新資料開始。
 pub async fn stop_caching_task() {
     IS_CACHING.store(false, Ordering::SeqCst);
+    let handle = match CACHING_TASK.lock() {
+        Ok(mut task) => task.take(),
+        Err(why) => {
+            crate::logging::error_file_async(format!(
+                "Failed to lock HiStock caching task handle because {:?}",
+                why
+            ));
+            None
+        }
+    };
+
+    if let Some(handle) = handle {
+        if let Err(why) = handle.await {
+            crate::logging::error_file_async(format!("HiStock 快取任務停止等待失敗: {:?}", why));
+        }
+    }
+
     SHARE.clear_stock_snapshots();
+}
+
+/// 取得 HiStock 背景任務目前的執行狀態。
+pub(crate) fn diagnostics_snapshot() -> TaskRuntimeStatus {
+    TaskRuntimeStatus::new(
+        IS_CACHING.load(Ordering::SeqCst),
+        ACTIVE_TASKS.load(Ordering::SeqCst),
+        LAST_TASK_GENERATION.load(Ordering::SeqCst),
+    )
+}
+
+/// 取得 HiStock 最近一輪抓取的執行摘要。
+pub(crate) fn runtime_diagnostics_snapshot() -> HiStockRuntimeDiagnostics {
+    HiStockRuntimeDiagnostics {
+        status: diagnostics_snapshot(),
+        last_body_bytes: LAST_BODY_BYTES.load(Ordering::SeqCst),
+        last_row_count: LAST_ROW_COUNT.load(Ordering::SeqCst),
+        last_snapshot_count: LAST_SNAPSHOT_COUNT.load(Ordering::SeqCst),
+        last_changed_event_count: LAST_CHANGED_EVENT_COUNT.load(Ordering::SeqCst),
+        last_elapsed_ms: LAST_ELAPSED_MS.load(Ordering::SeqCst),
+        last_rss_delta_kib: LAST_RSS_DELTA_KIB.load(Ordering::SeqCst),
+        completed_cycles: COMPLETED_CYCLES.load(Ordering::SeqCst),
+    }
 }
 
 /// 從 HiStock 排行榜抓取全市場即時報價資料。
@@ -235,13 +384,16 @@ pub async fn stop_caching_task() {
 /// # 回傳
 /// - `Ok(HashMap<String, RealtimeSnapshot>)`：以股票代號為 key 的完整即時快照。
 /// - `Err(_)`：HTTP 抓取失敗、HTML 結構異常，或解析後完全沒有有效資料。
-async fn fetch_all_from_rank() -> Result<HashMap<String, RealtimeSnapshot>> {
+async fn fetch_all_from_rank() -> Result<HiStockFetchResult> {
     let url = format!("https://{host}/stock/rank.aspx?p=all", host = HOST);
     let body = util::http::get(&url, None).await?;
+    let body_bytes = body.len();
     let document = Html::parse_document(&body);
 
     let mut map = HashMap::with_capacity(1200);
+    let mut row_count = 0usize;
     for row in document.select(&ROW_SELECTOR) {
+        row_count += 1;
         if let Some((symbol, snapshot)) = parse_row(row)? {
             map.insert(symbol, snapshot);
         }
@@ -250,7 +402,11 @@ async fn fetch_all_from_rank() -> Result<HashMap<String, RealtimeSnapshot>> {
     if map.is_empty() {
         return Err(anyhow!("Failed to parse HiStock rank page (empty map)"));
     }
-    Ok(map)
+    Ok(HiStockFetchResult {
+        snapshots: map,
+        body_bytes,
+        row_count,
+    })
 }
 
 /// 取得指定股票的即時快照。
@@ -274,21 +430,32 @@ async fn get_snapshot(stock_symbol: &str) -> Result<RealtimeSnapshot> {
     }
 
     crate::logging::info_file_async(format!("HiStock 快取失效 ({})，觸發全量抓取", stock_symbol));
-    let new_data = fetch_all_from_rank().await?;
+    let fetch_result = fetch_all_from_rank().await?;
 
-    let snapshot = new_data.get(stock_symbol).cloned().ok_or_else(|| {
-        anyhow!(
-            "Stock symbol {} not found in HiStock rank page after refresh",
-            stock_symbol
-        )
-    })?;
+    let snapshot = fetch_result
+        .snapshots
+        .get(stock_symbol)
+        .cloned()
+        .ok_or_else(|| {
+            anyhow!(
+                "Stock symbol {} not found in HiStock rank page after refresh",
+                stock_symbol
+            )
+        })?;
 
     // 更新全量快取
-    let price_updates = collect_changed_price_updates(&new_data);
-    SHARE.set_stock_snapshots(new_data);
+    let price_updates = collect_changed_price_updates(&fetch_result.snapshots);
+    SHARE.set_stock_snapshots(fetch_result.snapshots);
     trace_price_tasks::publish_price_updates(price_updates);
 
     Ok(snapshot)
+}
+
+fn rss_delta_kib(before: Option<ProcessMemoryStats>, after: Option<ProcessMemoryStats>) -> i64 {
+    match (before, after) {
+        (Some(before), Some(after)) => after.vm_rss_kib as i64 - before.vm_rss_kib as i64,
+        _ => 0,
+    }
 }
 
 #[async_trait]
@@ -321,13 +488,20 @@ impl StockInfo for HiStock {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use once_cell::sync::Lazy;
+
     use super::*;
     use crate::logging;
     use rust_decimal_macros::dec;
 
+    static TEST_STATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
     /// 驗證全量快取更新前，只會針對價格實際異動的股票產生價格事件。
     #[test]
     fn test_collect_changed_price_updates() {
+        let _guard = TEST_STATE_LOCK.lock().unwrap();
         SHARE.clear_stock_snapshots();
 
         let mut existing_snapshot = RealtimeSnapshot::new("2330".to_string(), dec!(998));
@@ -397,6 +571,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_mechanism() {
+        let _guard = TEST_STATE_LOCK.lock().unwrap();
         stop_caching_task().await;
         {
             assert!(
@@ -433,6 +608,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_start_caching_task_integration() {
+        let _guard = TEST_STATE_LOCK.lock().unwrap();
         stop_caching_task().await;
         start_caching_task();
 
@@ -454,6 +630,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_price() {
+        let _guard = TEST_STATE_LOCK.lock().unwrap();
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 HiStock::get_stock_price".to_string());
 
@@ -471,6 +648,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_quotes() {
+        let _guard = TEST_STATE_LOCK.lock().unwrap();
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 HiStock::get_stock_quotes".to_string());
 
@@ -490,11 +668,12 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_price_with_cache_verification() {
+        let _guard = TEST_STATE_LOCK.lock().unwrap();
         // 1. 清空快取
         stop_caching_task().await;
 
         // 2. 抓取全量並填充快取
-        let all_stocks = fetch_all_from_rank().await.unwrap();
+        let all_stocks = fetch_all_from_rank().await.unwrap().snapshots;
         SHARE.set_stock_snapshots(all_stocks);
 
         // 3. 測試透過公用介面取得價格 (此時應從快取秒讀)
@@ -506,11 +685,12 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_quotes_with_cache_verification() {
+        let _guard = TEST_STATE_LOCK.lock().unwrap();
         // 1. 清空快取
         stop_caching_task().await;
 
         // 2. 抓取全量並填充快取
-        let all_stocks = fetch_all_from_rank().await.unwrap();
+        let all_stocks = fetch_all_from_rank().await.unwrap().snapshots;
         SHARE.set_stock_snapshots(all_stocks);
 
         // 3. 測試透過公用介面取得報價物件

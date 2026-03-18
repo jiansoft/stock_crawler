@@ -17,4 +17,5 @@ mod quote_page;
 /// 實際任務定義在 [`cache`] 子模組，這裡僅重新匯出給 crawler 協調層使用。
 // 對外只暴露啟停任務的入口，讓上層不需要知道內部子模組結構，
 // 之後若再拆檔也不會影響呼叫端。
+pub(crate) use cache::{diagnostics_snapshot, runtime_diagnostics_snapshot};
 pub use cache::{start_caching_task, stop_caching_task};
