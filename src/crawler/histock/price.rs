@@ -183,6 +183,7 @@ fn parse_row(row: scraper::element_ref::ElementRef) -> Result<Option<(String, Re
     // 使用 new 方法強制填入必要欄位，其餘欄位則個別設定
     let mut snapshot = RealtimeSnapshot::new(symbol.clone(), price);
     snapshot.name = name;
+    snapshot.source_site = "HiStock".to_string();
     snapshot.change = change;
     snapshot.change_range = change_range;
     snapshot.open = open;
@@ -552,6 +553,7 @@ mod tests {
 
         assert_eq!(symbol, "5274");
         assert_eq!(snapshot.name, "信驊");
+        assert_eq!(snapshot.source_site, "HiStock");
         assert_eq!(snapshot.price, dec!(9445));
         assert_eq!(snapshot.change, dec!(-55));
     }
@@ -565,6 +567,7 @@ mod tests {
         let (symbol, snapshot) = parse_row(row).unwrap().unwrap();
 
         assert_eq!(symbol, "6584");
+        assert_eq!(snapshot.source_site, "HiStock");
         assert_eq!(snapshot.change, Decimal::ZERO);
         assert_eq!(snapshot.volume, dec!(148));
     }

@@ -431,6 +431,7 @@ fn parse_class_quote_item(item: &ClassQuoteItem<'_>) -> Result<Option<(String, R
     );
     // 名稱如果缺失就退空字串，不因單一欄位缺值整筆報價失敗。
     snapshot.name = item.symbol_name.unwrap_or_default().trim().to_string();
+    snapshot.source_site = "Yahoo".to_string();
     // 其餘欄位都透過 `decimal_at` 走一致的缺值與型別轉換規則，
     // 避免每個欄位各自寫一套解析分支。
     snapshot.change = decimal_from_raw_field(item.change.as_ref(), &symbol, "change")?;
@@ -580,6 +581,7 @@ mod tests {
 
         assert_eq!(symbol, "2330");
         assert_eq!(snapshot.name, "台積電");
+        assert_eq!(snapshot.source_site, "Yahoo");
         assert_eq!(snapshot.price, dec!(998));
         assert_eq!(snapshot.change, dec!(-12));
         assert_eq!(snapshot.change_range, dec!(-1.19));
@@ -602,6 +604,7 @@ mod tests {
         let (symbol, snapshot) = parse_test_item(item).unwrap().unwrap();
 
         assert_eq!(symbol, "006208");
+        assert_eq!(snapshot.source_site, "Yahoo");
         assert_eq!(snapshot.price, dec!(88.4));
         assert_eq!(snapshot.volume, Decimal::ZERO);
     }

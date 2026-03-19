@@ -565,6 +565,37 @@ impl Share {
         }
     }
 
+    /// 寫入或更新單筆股票報價快照中的最新成交價與來源站點。
+    ///
+    /// # 參數
+    /// - `symbol`: 股票代號。
+    /// - `price`: 最新成交價。
+    /// - `source_site`: 本次價格採集來源站點。
+    ///
+    /// # 行為
+    /// - 若快取內已存在該股票，會同步更新 `price` 與 `source_site`，
+    ///   並保留名稱、漲跌幅、開高低與成交量等其他欄位。
+    /// - 若快取內尚無該股票，會建立一筆帶有來源站點的最小快照。
+    pub fn set_stock_snapshot_price_with_source(
+        &self,
+        symbol: String,
+        price: Decimal,
+        source_site: impl Into<String>,
+    ) {
+        let source_site = source_site.into();
+
+        if let Ok(mut cache) = self.stock_snapshots.write() {
+            if let Some(snapshot) = cache.get_mut(&symbol) {
+                snapshot.price = price;
+                snapshot.source_site = source_site;
+            } else {
+                let mut snapshot = RealtimeSnapshot::new(symbol.clone(), price);
+                snapshot.source_site = source_site;
+                cache.insert(symbol, snapshot);
+            }
+        }
+    }
+
     /// 從快取取得股票報價快照。
     ///
     /// # 參數
@@ -652,6 +683,7 @@ mod tests {
         let share = Share::new();
         let mut snapshot = RealtimeSnapshot::new("2330".to_string(), Decimal::new(998, 0));
         snapshot.name = "台積電".to_string();
+        snapshot.source_site = "HiStock".to_string();
         snapshot.change = Decimal::new(5, 0);
 
         let mut snapshots = HashMap::new();
@@ -663,7 +695,30 @@ mod tests {
         let updated = share.get_stock_snapshot("2330").unwrap();
         assert_eq!(updated.price, Decimal::new(1000, 0));
         assert_eq!(updated.name, "台積電");
+        assert_eq!(updated.source_site, "HiStock");
         assert_eq!(updated.change, Decimal::new(5, 0));
+    }
+
+    /// 驗證單筆更新股價與來源站點時，會同步覆寫 `source_site`。
+    #[test]
+    fn test_set_stock_snapshot_price_with_source_updates_source_site() {
+        let share = Share::new();
+        let mut snapshot = RealtimeSnapshot::new("2330".to_string(), Decimal::new(998, 0));
+        snapshot.source_site = "Yahoo".to_string();
+
+        let mut snapshots = HashMap::new();
+        snapshots.insert("2330".to_string(), snapshot);
+        share.set_stock_snapshots(snapshots);
+
+        share.set_stock_snapshot_price_with_source(
+            "2330".to_string(),
+            Decimal::new(1000, 0),
+            "Fugle",
+        );
+
+        let updated = share.get_stock_snapshot("2330").unwrap();
+        assert_eq!(updated.price, Decimal::new(1000, 0));
+        assert_eq!(updated.source_site, "Fugle");
     }
 
     /// 驗證整批覆蓋營收快取會淘汰舊月份資料。

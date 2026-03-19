@@ -13,6 +13,8 @@ pub struct RealtimeSnapshot {
     pub symbol: String,
     /// 股票名稱
     pub name: String,
+    /// 本次報價資料的採集站點
+    pub source_site: String,
     /// 成交價 (必要欄位)
     pub price: Decimal,
     /// 漲跌
@@ -46,6 +48,7 @@ impl RealtimeSnapshot {
             symbol,
             price,
             name: String::new(),
+            source_site: String::new(),
             change: Decimal::ZERO,
             change_range: Decimal::ZERO,
             open: Decimal::ZERO,

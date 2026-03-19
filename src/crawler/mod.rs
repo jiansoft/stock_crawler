@@ -154,6 +154,15 @@ struct QuoteSite {
     fetch: StockQuotesFetcher,
 }
 
+/// 單次「最新成交價」抓取的結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FetchedStockPrice {
+    /// 標準化後的最新成交價。
+    pub price: Decimal,
+    /// 實際成功回應的採集站點名稱。
+    pub site_name: &'static str,
+}
+
 /// 產生「最新成交價」wrapper 函式。
 ///
 /// `async_trait` 產生的關聯函式型別，無法直接穩定地放進模組層級常數陣列；
@@ -486,7 +495,7 @@ async fn fetch_stock_price_from_site_pool(
     stock_symbol: &str,
     sites: &[PriceSite],
     error_scope: &str,
-) -> Result<Decimal> {
+) -> Result<FetchedStockPrice> {
     let site_len = sites.len();
     let mut errors = Vec::with_capacity(site_len);
 
@@ -497,7 +506,10 @@ async fn fetch_stock_price_from_site_pool(
         match (site.fetch)(stock_symbol).await {
             Ok(price) => {
                 record_site_latency(site.name, started_at);
-                return Ok(price.normalize());
+                return Ok(FetchedStockPrice {
+                    price: price.normalize(),
+                    site_name: site.name,
+                });
             }
             Err(why) => {
                 record_site_latency(site.name, started_at);
@@ -611,7 +623,9 @@ pub fn flush_site_latency_stats() {
 /// # 傳回值
 /// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
 pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<Decimal> {
-    fetch_stock_price_from_site_pool(stock_symbol, &ALL_PRICE_SITES, "all sites").await
+    fetch_stock_price_from_site_pool(stock_symbol, &ALL_PRICE_SITES, "all sites")
+        .await
+        .map(|result| result.price)
 }
 
 /// 從多個遠端站點中輪詢獲取股票的最新成交價，但排除 HiStock。
@@ -629,6 +643,15 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 /// # 傳回值
 /// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
 pub async fn fetch_stock_price_from_backup_sites(stock_symbol: &str) -> Result<Decimal> {
+    fetch_stock_price_from_site_pool(stock_symbol, &ALL_PRICE_SITES, "backup sites")
+        .await
+        .map(|result| result.price)
+}
+
+/// 從多個備援站點中輪詢獲取股票的最新成交價，並回傳命中的站點名稱。
+pub async fn fetch_stock_price_from_backup_sites_with_source(
+    stock_symbol: &str,
+) -> Result<FetchedStockPrice> {
     fetch_stock_price_from_site_pool(stock_symbol, &ALL_PRICE_SITES, "backup sites").await
 }
 

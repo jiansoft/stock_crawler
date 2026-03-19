@@ -796,18 +796,30 @@ async fn refresh_traced_stock_snapshot_cache() -> Result<()> {
 
 /// 重新整理單一被追蹤股票的備援即時價格。
 async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
-    match crawler::fetch_stock_price_from_backup_sites(&symbol).await {
-        Ok(price) if price != Decimal::ZERO => {
-            let previous_price = SHARE
-                .get_stock_snapshot(&symbol)
-                .map(|snapshot| snapshot.price);
-            if previous_price == Some(price) {
+    match crawler::fetch_stock_price_from_backup_sites_with_source(&symbol).await {
+        Ok(result) if result.price != Decimal::ZERO => {
+            let price = result.price;
+            let source_site = result.site_name.to_string();
+            let previous_snapshot = SHARE.get_stock_snapshot(&symbol);
+            let price_changed = previous_snapshot
+                .as_ref()
+                .is_none_or(|snapshot| snapshot.price != price);
+            let source_changed = previous_snapshot
+                .as_ref()
+                .is_none_or(|snapshot| snapshot.source_site != source_site);
+
+            if !price_changed && !source_changed {
                 return false;
             }
 
             // 備援採集只負責把價格補進共享快取，
             // 後續警報判斷統一由價格事件 consumer 再從快取讀值。
-            SHARE.set_stock_snapshot_price(symbol.clone(), price);
+            SHARE.set_stock_snapshot_price_with_source(symbol.clone(), price, source_site);
+
+            if !price_changed {
+                return false;
+            }
+
             publish_price_update(symbol, price);
             true
         }

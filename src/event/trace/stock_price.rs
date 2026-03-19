@@ -27,6 +27,7 @@ use super::{price_tasks as trace_price_tasks, stats as trace_stats};
 use crate::bot::telegram::Telegram;
 use crate::{
     bot,
+    cache::RealtimeSnapshot,
     cache::SHARE,
     crawler::twse,
     database::table::trace::Trace,
@@ -301,12 +302,10 @@ pub(super) async fn evaluate_price_update(symbol: String) -> Result<()> {
 /// 從即時報價快取讀取指定股票的最新成交價。
 ///
 /// # 回傳
-/// - `Some(price)`：快取內已有該股票最新成交價。
+/// - `Some(snapshot)`：快取內已有該股票最新成交價與來源資訊。
 /// - `None`：快取尚未暖身完成，或該股票目前不存在於快取中。
-fn get_cached_current_price(symbol: &str) -> Option<Decimal> {
-    SHARE
-        .get_stock_snapshot(symbol)
-        .map(|snapshot| snapshot.price)
+fn get_cached_snapshot(symbol: &str) -> Option<RealtimeSnapshot> {
+    SHARE.get_stock_snapshot(symbol)
 }
 
 /// 處理同一支股票的多個追蹤目標。
@@ -317,12 +316,17 @@ fn get_cached_current_price(symbol: &str) -> Option<Decimal> {
 /// 不論觸發來源是價格事件還是低頻 reconciliation，
 /// 這裡都統一從共享快取取值，避免不同路徑使用不同價格來源。
 async fn process_cached_targets(symbol: String, targets: Vec<Trace>, source: EvaluationSource) {
-    let current_price = get_cached_current_price(&symbol);
+    let snapshot = get_cached_snapshot(&symbol);
 
-    match current_price {
-        Some(current_price) if current_price != Decimal::ZERO => {
+    match snapshot {
+        Some(snapshot) if snapshot.price != Decimal::ZERO => {
+            let current_price = snapshot.price;
+            let source_site =
+                (!snapshot.source_site.trim().is_empty()).then_some(snapshot.source_site.as_str());
             for target in targets {
-                if let Err(why) = alert_on_price_boundary(target, current_price, source).await {
+                if let Err(why) =
+                    alert_on_price_boundary(target, current_price, source, source_site).await
+                {
                     logging::error_file_async(format!("Error alerting for {}: {:?}", symbol, why));
                 }
             }
@@ -343,6 +347,7 @@ async fn alert_on_price_boundary(
     target: Trace,
     current_price: Decimal,
     source: EvaluationSource,
+    source_site: Option<&str>,
 ) -> Result<bool> {
     // 判斷當前價格是否在預定範圍內（如果在範圍內則不需提醒）
     if is_within_boundary(&target, current_price) {
@@ -369,7 +374,7 @@ async fn alert_on_price_boundary(
     }
 
     // 格式化訊息並發送
-    let to_bot_msg = format_alert_message(&target, current_price).await;
+    let to_bot_msg = format_alert_message(&target, current_price, source_site).await;
 
     // 寫入快取 (有效期限 1 小時)
     if let Err(why) = nosql::redis::CLIENT
@@ -390,7 +395,11 @@ async fn alert_on_price_boundary(
 }
 
 /// 格式化警報訊息內容。
-async fn format_alert_message(target: &Trace, current_price: Decimal) -> String {
+async fn format_alert_message(
+    target: &Trace,
+    current_price: Decimal,
+    source_site: Option<&str>,
+) -> String {
     let stock_name = SHARE
         .get_stock(&target.stock_symbol)
         .await
@@ -406,9 +415,16 @@ async fn format_alert_message(target: &Trace, current_price: Decimal) -> String 
     let escaped_boundary = Telegram::escape_markdown_v2(boundary.to_string());
     let escaped_limit = Telegram::escape_markdown_v2(limit.to_string());
     let escaped_price = Telegram::escape_markdown_v2(current_price.to_string());
+    let escaped_source_site = Telegram::escape_markdown_v2(
+        source_site
+            .filter(|site| !site.trim().is_empty())
+            .unwrap_or("未知"),
+    );
     let symbol = &target.stock_symbol;
 
-    format!("{escaped_name} {escaped_boundary}:{escaped_limit}，目前報價:{escaped_price} [Yahoo 股市](https://tw\\.stock\\.yahoo\\.com/quote/{symbol})")
+    format!(
+        "{escaped_name} {escaped_boundary}:{escaped_limit}，目前報價:{escaped_price}，採集站點:{escaped_source_site} [Yahoo 股市](https://tw\\.stock\\.yahoo\\.com/quote/{symbol})"
+    )
 }
 
 /// 判斷當前價格是否在預定的 [floor, ceiling] 範圍內。
@@ -487,18 +503,34 @@ mod tests {
 
     /// 驗證即時報價快取讀取可正確命中與 miss。
     #[test]
-    fn test_get_cached_current_price() {
+    fn test_get_cached_snapshot() {
         let mut snapshots = HashMap::new();
-        snapshots.insert(
-            "2330".to_string(),
-            RealtimeSnapshot::new("2330".to_string(), dec!(998)),
-        );
+        let mut snapshot = RealtimeSnapshot::new("2330".to_string(), dec!(998));
+        snapshot.source_site = "Yahoo".to_string();
+        snapshots.insert("2330".to_string(), snapshot);
         SHARE.set_stock_snapshots(snapshots);
 
-        assert_eq!(get_cached_current_price("2330"), Some(dec!(998)));
-        assert_eq!(get_cached_current_price("2317"), None);
+        let snapshot = get_cached_snapshot("2330").unwrap();
+        assert_eq!(snapshot.price, dec!(998));
+        assert_eq!(snapshot.source_site, "Yahoo");
+        assert!(get_cached_snapshot("2317").is_none());
 
         SHARE.clear_stock_snapshots();
+    }
+
+    #[tokio::test]
+    async fn test_format_alert_message_includes_source_site() {
+        let trace = Trace {
+            stock_symbol: "2330".to_string(),
+            floor: dec!(500),
+            ceiling: dec!(600),
+        };
+
+        let msg = format_alert_message(&trace, dec!(650), Some("Fugle")).await;
+
+        assert!(msg.contains("超過最高價"));
+        assert!(msg.contains("目前報價:650"));
+        assert!(msg.contains("採集站點:Fugle"));
     }
 
     #[tokio::test]
@@ -514,18 +546,20 @@ mod tests {
         };
 
         // 觸發高標
-        let msg = format_alert_message(&trace, dec!(650)).await;
+        let msg = format_alert_message(&trace, dec!(650), Some("HiStock")).await;
         assert!(msg.contains("超過最高價"));
         assert!(msg.contains("目前報價:650"));
+        assert!(msg.contains("採集站點:HiStock"));
 
         // 觸發低標
-        let msg = msg_low(&trace, dec!(450)).await;
+        let msg = msg_low(&trace, dec!(450), Some("Yahoo")).await;
         assert!(msg.contains("低於最低價"));
         assert!(msg.contains("目前報價:450"));
+        assert!(msg.contains("採集站點:Yahoo"));
     }
 
-    async fn msg_low(target: &Trace, price: Decimal) -> String {
-        format_alert_message(target, price).await
+    async fn msg_low(target: &Trace, price: Decimal, source_site: Option<&str>) -> String {
+        format_alert_message(target, price, source_site).await
     }
 
     #[tokio::test]
@@ -540,7 +574,13 @@ mod tests {
             ceiling: dec!(60),
         };
 
-        let result = alert_on_price_boundary(trace, dec!(560), EvaluationSource::PriceEvent).await;
+        let result = alert_on_price_boundary(
+            trace,
+            dec!(560),
+            EvaluationSource::PriceEvent,
+            Some("TestSite"),
+        )
+        .await;
         assert!(result.is_ok());
     }
 
