@@ -15,7 +15,9 @@
 //! - 採用顯式欄位賦值，便於在 Yahoo 網頁改版時快速調整對應的 Grid 索引。
 //! - 具備防禦性驗證，若解析出的年份與 EPS 同時為 0，則視為採集異常。
 
-use anyhow::{anyhow, Context, Result};
+use std::{error::Error as StdError, fmt};
+
+use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rust_decimal::Decimal;
@@ -75,6 +77,36 @@ impl Profile {
     }
 }
 
+/// 表示 Yahoo profile 頁面存在，但未提供目前 parser 所需的財務欄位。
+///
+/// 這類錯誤通常不是 HTTP 失敗，而是頁面中缺少年份、EPS 或相關財務 grid，
+/// 例如新掛牌股票尚未完整顯示基本面資料，或該頁面使用了不同模板。
+#[derive(Debug)]
+struct NoValidProfileDataError {
+    stock_symbol: String,
+    url: String,
+}
+
+impl fmt::Display for NoValidProfileDataError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Yahoo profile for {} at {} does not expose the year/EPS fields expected by the parser",
+            self.stock_symbol, self.url
+        )
+    }
+}
+
+impl StdError for NoValidProfileDataError {}
+
+/// 判斷錯誤是否屬於「Yahoo profile 頁面存在，但沒有可解析財務資料」。
+///
+/// 可用於 backfill 流程中，將這類情況視為暫時無法補抓並降低日誌等級，
+/// 避免每次重試都輸出整串 backtrace。
+pub fn is_no_valid_data_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<NoValidProfileDataError>().is_some()
+}
+
 /// 從雅虎抓取指定股票的 profile 資訊（包含財務比率、獲利能力等指標）。
 ///
 /// # 參數
@@ -124,10 +156,11 @@ pub async fn visit(stock_symbol: &str) -> Result<Profile> {
 
     // 防禦性檢查：若年份為 0 且關鍵指標 EPS 也是 0，視為解析無效數據
     if profile.year == 0 && profile.earnings_per_share.is_zero() {
-        return Err(anyhow!(
-            "Parsed profile for {} contains no valid data. Site structure might have changed.",
-            stock_symbol
-        ));
+        return Err(NoValidProfileDataError {
+            stock_symbol: stock_symbol.to_string(),
+            url,
+        }
+        .into());
     }
 
     Ok(profile)
@@ -143,6 +176,17 @@ fn parse_field(element: &scraper::ElementRef, base: &str, child_index: u32) -> D
 mod tests {
     use super::*;
     use crate::logging;
+
+    #[test]
+    fn test_is_no_valid_data_error() {
+        let err: anyhow::Error = NoValidProfileDataError {
+            stock_symbol: "7811".to_string(),
+            url: "https://tw.stock.yahoo.com/quote/7811.TWO/profile".to_string(),
+        }
+        .into();
+
+        assert!(is_no_valid_data_error(&err));
+    }
 
     #[tokio::test]
     #[ignore]

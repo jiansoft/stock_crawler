@@ -15,7 +15,17 @@ pub async fn execute() -> Result<()> {
         let yahoo_profile = match profile::visit(&stock.stock_symbol).await {
             Ok(stock_profile) => stock_profile,
             Err(why) => {
-                logging::error_file_async(format!("Failed to profile::visit because {:?}", why));
+                if profile::is_no_valid_data_error(&why) {
+                    logging::warn_file_async(format!(
+                        "Skip profile::visit for {} because {}",
+                        stock.stock_symbol, why
+                    ));
+                } else {
+                    logging::error_file_async(format!(
+                        "Failed to profile::visit for {} because {}",
+                        stock.stock_symbol, why
+                    ));
+                }
                 continue;
             }
         };

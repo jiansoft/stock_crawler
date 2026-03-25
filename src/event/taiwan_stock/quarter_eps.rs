@@ -1,12 +1,13 @@
 //! 台股季 EPS 更新事件。
 //!
-//! 此模組負責抓取「目前依法定申報期限，理論上應已完整公告」的最新一季 EPS，
-//! 並寫回 `financial_statement` 資料表。
+//! 此模組負責抓取「目前依法定申報期限，理論上應已完整公告」的正式季度 EPS，
+//! 並在下一季季報所屬季度結束後，額外預抓已提早公告的下一季 EPS，
+//! 再一併寫回 `financial_statement` 資料表。
 //!
 //! 這裡不再使用「目前時間減去固定天數」的猜測方式，而是改由
-//! [`crate::util::datetime::latest_published_quarter_for_listed_and_otc`] 根據
-//! 上市/上櫃公司的季報申報截止日推導目標季度，避免在截止日前過早切換到尚未
-//! 全數公告完成的季度。
+//! [`crate::util::datetime::eps_report_quarter_targets_for_listed_and_otc`] 根據
+//! 上市/上櫃公司的季報申報截止日與「季末隔天起即可預抓」規則推導目標季度清單，
+//! 避免在截止日前過早切換主季度，同時也能提早收錄已公告的下一季資料。
 
 use std::collections::HashMap;
 
@@ -14,7 +15,8 @@ use crate::{
     crawler::twse,
     database::table::{self, financial_statement, stock::Stock},
     declare::StockExchangeMarket,
-    logging, util,
+    logging,
+    util::{self, datetime::ReportQuarter},
 };
 use anyhow::Result;
 use chrono::Local;
@@ -24,8 +26,8 @@ use scopeguard::defer;
 ///
 /// 流程分為三個步驟：
 ///
-/// 1. 依上市/上櫃公司季報法定申報截止日計算目前應抓取的目標季別。
-/// 2. 查出該年度與季別下，資料庫中尚未寫入 `financial_statement` 的股票。
+/// 1. 依上市/上櫃公司季報法定申報截止日與季末時點，計算正式季度與可能的預抓季度清單。
+/// 2. 查出各季度下尚未寫入 `financial_statement` 的股票。
 /// 3. 分別向上市、上櫃市場抓取 EPS，必要時將累計 EPS 轉回單季 EPS 後回寫資料庫。
 pub async fn execute() -> Result<()> {
     logging::info_file_async("更新台股季度財報開始");
@@ -33,7 +35,21 @@ pub async fn execute() -> Result<()> {
        logging::info_file_async("更新台股季度財報結束");
     }
 
-    let target_report = util::datetime::latest_published_quarter_for_listed_and_otc(Local::now());
+    for target_report in util::datetime::eps_report_quarter_targets_for_listed_and_otc(Local::now())
+    {
+        if let Err(why) = process_target_report(target_report).await {
+            logging::error_file_async(format!(
+                "Failed to process quarterly EPS target {} {} because {:?}",
+                target_report.year, target_report.quarter, why
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// 處理單一目標季度的季 EPS 抓取流程。
+async fn process_target_report(target_report: ReportQuarter) -> Result<()> {
     let quarter = target_report.quarter.to_string();
     let without_fs_stocks =
         table::stock::fetch_stocks_without_financial_statement(target_report.year, &quarter)
@@ -53,8 +69,8 @@ pub async fn execute() -> Result<()> {
         .await
         {
             logging::error_file_async(format!(
-                "Failed to update_suspend_listing because {:?}",
-                why
+                "Failed to update quarterly EPS for {} {} {} because {:?}",
+                market, target_report.year, target_report.quarter, why
             ));
             continue;
         }

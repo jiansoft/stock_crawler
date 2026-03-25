@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Local, NaiveDate, Weekday};
+use chrono::{DateTime, Datelike, Local, NaiveDate, TimeDelta, Weekday};
 
 use crate::declare::Quarter;
 use crate::logging;
@@ -44,6 +44,31 @@ pub struct ReportQuarter {
     /// 季報所屬的季度。
     pub quarter: Quarter,
 }
+
+impl ReportQuarter {
+    /// 建立一個財報季度定位結果。
+    pub const fn new(year: i32, quarter: Quarter) -> Self {
+        Self { year, quarter }
+    }
+
+    /// 回傳下一個曆法季度。
+    ///
+    /// 若目前為 `Q4`，則會自動進位到下一個年度的 `Q1`。
+    pub const fn next(self) -> Self {
+        match self.quarter {
+            Quarter::Q1 => Self::new(self.year, Quarter::Q2),
+            Quarter::Q2 => Self::new(self.year, Quarter::Q3),
+            Quarter::Q3 => Self::new(self.year, Quarter::Q4),
+            Quarter::Q4 => Self::new(self.year + 1, Quarter::Q1),
+        }
+    }
+}
+
+/// Yahoo 補欄位流程提前預抓下一季財報的預設觀察視窗天數。
+///
+/// 例如 `Q4` 法定截止日為 `3/31`，當日期進入截止日前 30 天內時，
+/// 系統除了正式目標季度外，也會額外嘗試預抓下一季。
+const BACKFILL_PRELOAD_DAYS_BEFORE_REPORT_DEADLINE: i64 = 30;
 
 /// 依月份回傳對應的季度字串。
 ///
@@ -108,6 +133,33 @@ pub fn month_to_quarter(month: u32) -> &'static str {
 /// ```
 pub fn latest_published_quarter_for_listed_and_otc(now: DateTime<Local>) -> ReportQuarter {
     latest_published_quarter_for_listed_and_otc_by_date(now.date_naive())
+}
+
+/// 取得上市/上櫃季 EPS 流程目前應處理的季度清單。
+///
+/// 回傳結果至少會包含一個「正式目標季度」；若目前日期已進入下一季的
+/// 「季末隔天起」預抓視窗，則會再額外附上一個「預抓季度」。
+///
+/// 例如在 `2026-03-25`：
+///
+/// * 正式目標季度為 `2025 Q3`
+/// * 由於 `2025 Q4` 已經在 `2025-12-31` 結束，且目前日期已超過季末
+/// * 因此回傳會同時包含 `2025 Q3` 與 `2025 Q4`
+///
+/// 這樣可以在大多數公司提早上傳季報時，先行把已公告資料收進資料庫，
+/// 等正式截止日過後再自然切換主目標季度。
+pub fn eps_report_quarter_targets_for_listed_and_otc(now: DateTime<Local>) -> Vec<ReportQuarter> {
+    eps_report_quarter_targets_for_listed_and_otc_by_date(now.date_naive())
+}
+
+/// 取得上市/上櫃 Yahoo 補欄位流程目前應處理的季度清單。
+///
+/// 此函式沿用較保守的預抓策略，只有在法定截止日前一段時間內，
+/// 才會將下一季納入處理清單，避免 Yahoo 財務欄位來源過早查詢時雜訊過多。
+pub fn backfill_report_quarter_targets_for_listed_and_otc(
+    now: DateTime<Local>,
+) -> Vec<ReportQuarter> {
+    backfill_report_quarter_targets_for_listed_and_otc_by_date(now.date_naive())
 }
 
 /// 解析 RFC 3339 日期字串並轉成本地時區時間。
@@ -206,6 +258,94 @@ fn latest_published_quarter_for_listed_and_otc_by_date(current_date: NaiveDate) 
     }
 }
 
+/// 依目前日期回傳季 EPS 流程的正式季度與可能的預抓季度。
+fn eps_report_quarter_targets_for_listed_and_otc_by_date(
+    current_date: NaiveDate,
+) -> Vec<ReportQuarter> {
+    let published = latest_published_quarter_for_listed_and_otc_by_date(current_date);
+    let mut targets = vec![published];
+    let preload_quarter = published.next();
+
+    if should_preload_next_quarter_for_eps(current_date, preload_quarter) {
+        targets.push(preload_quarter);
+    }
+
+    targets
+}
+
+/// 依目前日期回傳 Yahoo 補欄位流程的正式季度與可能的預抓季度。
+fn backfill_report_quarter_targets_for_listed_and_otc_by_date(
+    current_date: NaiveDate,
+) -> Vec<ReportQuarter> {
+    let published = latest_published_quarter_for_listed_and_otc_by_date(current_date);
+    let mut targets = vec![published];
+    let preload_quarter = published.next();
+
+    if should_preload_next_quarter_for_backfill(current_date, preload_quarter) {
+        targets.push(preload_quarter);
+    }
+
+    targets
+}
+
+/// 判斷目前是否已進入季 EPS 流程的預抓視窗。
+///
+/// 規則是「只要季末已過，就開始預抓下一季」。
+fn should_preload_next_quarter_for_eps(
+    current_date: NaiveDate,
+    preload_quarter: ReportQuarter,
+) -> bool {
+    current_date >= report_period_end(preload_quarter) + TimeDelta::try_days(1).unwrap()
+}
+
+/// 判斷目前是否已進入 Yahoo 補欄位流程的預抓視窗。
+fn should_preload_next_quarter_for_backfill(
+    current_date: NaiveDate,
+    preload_quarter: ReportQuarter,
+) -> bool {
+    let deadline = report_deadline_for_listed_and_otc(preload_quarter);
+    let preload_start =
+        deadline - TimeDelta::try_days(BACKFILL_PRELOAD_DAYS_BEFORE_REPORT_DEADLINE).unwrap();
+
+    current_date >= preload_start && current_date <= deadline
+}
+
+/// 回傳指定季度的季度結束日。
+fn report_period_end(report_quarter: ReportQuarter) -> NaiveDate {
+    match report_quarter.quarter {
+        Quarter::Q1 => {
+            NaiveDate::from_ymd_opt(report_quarter.year, 3, 31).expect("invalid Q1 period end")
+        }
+        Quarter::Q2 => {
+            NaiveDate::from_ymd_opt(report_quarter.year, 6, 30).expect("invalid Q2 period end")
+        }
+        Quarter::Q3 => {
+            NaiveDate::from_ymd_opt(report_quarter.year, 9, 30).expect("invalid Q3 period end")
+        }
+        Quarter::Q4 => {
+            NaiveDate::from_ymd_opt(report_quarter.year, 12, 31).expect("invalid Q4 period end")
+        }
+    }
+}
+
+/// 回傳指定財報季度對應的法定申報截止日。
+fn report_deadline_for_listed_and_otc(report_quarter: ReportQuarter) -> NaiveDate {
+    match report_quarter.quarter {
+        Quarter::Q1 => {
+            NaiveDate::from_ymd_opt(report_quarter.year, 5, 15).expect("invalid Q1 deadline")
+        }
+        Quarter::Q2 => {
+            NaiveDate::from_ymd_opt(report_quarter.year, 8, 14).expect("invalid Q2 deadline")
+        }
+        Quarter::Q3 => {
+            NaiveDate::from_ymd_opt(report_quarter.year, 11, 14).expect("invalid Q3 deadline")
+        }
+        Quarter::Q4 => {
+            NaiveDate::from_ymd_opt(report_quarter.year + 1, 3, 31).expect("invalid Q4 deadline")
+        }
+    }
+}
+
 /// 嘗試解析日期片段。
 ///
 /// 這是 [`parse_taiwan_date`] 的內部輔助函式，若字串無法轉成指定型別則回傳 `None`。
@@ -224,55 +364,137 @@ mod tests {
             latest_published_quarter_for_listed_and_otc_by_date(
                 NaiveDate::from_ymd_opt(2026, 3, 31).unwrap()
             ),
-            ReportQuarter {
-                year: 2025,
-                quarter: Quarter::Q3,
-            }
+            ReportQuarter::new(2025, Quarter::Q3)
         );
         assert_eq!(
             latest_published_quarter_for_listed_and_otc_by_date(
                 NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()
             ),
-            ReportQuarter {
-                year: 2025,
-                quarter: Quarter::Q4,
-            }
+            ReportQuarter::new(2025, Quarter::Q4)
         );
         assert_eq!(
             latest_published_quarter_for_listed_and_otc_by_date(
                 NaiveDate::from_ymd_opt(2026, 5, 15).unwrap()
             ),
-            ReportQuarter {
-                year: 2025,
-                quarter: Quarter::Q4,
-            }
+            ReportQuarter::new(2025, Quarter::Q4)
         );
         assert_eq!(
             latest_published_quarter_for_listed_and_otc_by_date(
                 NaiveDate::from_ymd_opt(2026, 5, 16).unwrap()
             ),
-            ReportQuarter {
-                year: 2026,
-                quarter: Quarter::Q1,
-            }
+            ReportQuarter::new(2026, Quarter::Q1)
         );
         assert_eq!(
             latest_published_quarter_for_listed_and_otc_by_date(
                 NaiveDate::from_ymd_opt(2026, 8, 15).unwrap()
             ),
-            ReportQuarter {
-                year: 2026,
-                quarter: Quarter::Q2,
-            }
+            ReportQuarter::new(2026, Quarter::Q2)
         );
         assert_eq!(
             latest_published_quarter_for_listed_and_otc_by_date(
                 NaiveDate::from_ymd_opt(2026, 11, 15).unwrap()
             ),
-            ReportQuarter {
-                year: 2026,
-                quarter: Quarter::Q3,
-            }
+            ReportQuarter::new(2026, Quarter::Q3)
+        );
+    }
+
+    /// 驗證季 EPS 流程在季末後會開始預抓下一季。
+    #[test]
+    fn test_eps_report_quarter_targets_for_listed_and_otc_by_date() {
+        assert_eq!(
+            eps_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2025, 12, 31).unwrap()
+            ),
+            vec![ReportQuarter::new(2025, Quarter::Q3)]
+        );
+        assert_eq!(
+            eps_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()
+            ),
+            vec![
+                ReportQuarter::new(2025, Quarter::Q3),
+                ReportQuarter::new(2025, Quarter::Q4),
+            ]
+        );
+        assert_eq!(
+            eps_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 2, 28).unwrap()
+            ),
+            vec![
+                ReportQuarter::new(2025, Quarter::Q3),
+                ReportQuarter::new(2025, Quarter::Q4),
+            ]
+        );
+        assert_eq!(
+            eps_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()
+            ),
+            vec![
+                ReportQuarter::new(2025, Quarter::Q3),
+                ReportQuarter::new(2025, Quarter::Q4),
+            ]
+        );
+        assert_eq!(
+            eps_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 3, 25).unwrap()
+            ),
+            vec![
+                ReportQuarter::new(2025, Quarter::Q3),
+                ReportQuarter::new(2025, Quarter::Q4),
+            ]
+        );
+        assert_eq!(
+            eps_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()
+            ),
+            vec![
+                ReportQuarter::new(2025, Quarter::Q4),
+                ReportQuarter::new(2026, Quarter::Q1),
+            ]
+        );
+        assert_eq!(
+            eps_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 4, 15).unwrap()
+            ),
+            vec![
+                ReportQuarter::new(2025, Quarter::Q4),
+                ReportQuarter::new(2026, Quarter::Q1),
+            ]
+        );
+    }
+
+    /// 驗證 Yahoo 補欄位流程仍維持較保守的截止日前預抓視窗。
+    #[test]
+    fn test_backfill_report_quarter_targets_for_listed_and_otc_by_date() {
+        assert_eq!(
+            backfill_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 2, 28).unwrap()
+            ),
+            vec![ReportQuarter::new(2025, Quarter::Q3)]
+        );
+        assert_eq!(
+            backfill_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()
+            ),
+            vec![
+                ReportQuarter::new(2025, Quarter::Q3),
+                ReportQuarter::new(2025, Quarter::Q4),
+            ]
+        );
+        assert_eq!(
+            backfill_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()
+            ),
+            vec![ReportQuarter::new(2025, Quarter::Q4)]
+        );
+        assert_eq!(
+            backfill_report_quarter_targets_for_listed_and_otc_by_date(
+                NaiveDate::from_ymd_opt(2026, 4, 15).unwrap()
+            ),
+            vec![
+                ReportQuarter::new(2025, Quarter::Q4),
+                ReportQuarter::new(2026, Quarter::Q1),
+            ]
         );
     }
 }
