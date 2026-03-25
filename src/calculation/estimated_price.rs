@@ -8,19 +8,19 @@ use crate::{
 
 /// 計算便宜、合理、昂貴價的估算
 pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
+    let years: Vec<i32> = (0..6).map(|i| date.year() - i).collect();
+    let years_str = years
+        .iter()
+        .map(|&year| year.to_string())
+        .collect::<Vec<String>>()
+        .join(",");
+
     /*    let stocks = match SHARE.stocks.read() {
         Ok(stocks) => stocks.clone(),
         Err(why) => {
             return Err(anyhow!("Failed to read stocks cache because {:?}", why));
         }
     };*/
-
-    let years: Vec<i32> = (0..10).map(|i| date.year() - i).collect();
-    let years_str = years
-        .iter()
-        .map(|&year| year.to_string())
-        .collect::<Vec<String>>()
-        .join(",");
     /*let stock_symbols: Vec<String> = stocks.keys().cloned().collect();
      stream::iter(stock_symbols)
     .for_each_concurrent(util::concurrent_limit_32(), |stock_symbol| {

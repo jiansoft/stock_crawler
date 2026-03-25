@@ -1,3 +1,7 @@
+//! 臺灣銀行基金清單與配息資訊 crawler。
+//!
+//! 目前會抓取基金配息頁面，解析每檔基金的名稱、除息日、單位價格與配息率等資訊。
+
 use crate::{
     crawler::bank_of_taiwan,
     util,
@@ -76,6 +80,15 @@ fn extract_fund_name(full_name: &str) -> String {
         name_without_prefix // 如果沒有括號，則回傳完整名稱
     }
 }
+
+/// 抓取臺灣銀行基金配息清單。
+///
+/// 目前此函式會下載基金配息頁面，逐列解析基金資訊並輸出到標準輸出，
+/// 主要用於驗證頁面結構與解析流程。
+///
+/// # 錯誤
+///
+/// 當 HTTP 請求失敗、HTML selector 建立失敗或欄位解析失敗時回傳錯誤。
 pub async fn visit() -> anyhow::Result<()> {
     let url = format!(
         "https://{}/w/FundDivYieldorderby.djhtm",

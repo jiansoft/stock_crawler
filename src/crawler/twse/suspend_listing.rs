@@ -7,10 +7,13 @@ use crate::{crawler::twse, util};
 #[derive(Default, Debug, Clone, PartialEq, Deserialize)]
 pub struct SuspendListing {
     #[serde(rename(deserialize = "DelistingDate"))]
+    /// 下市日期。
     pub delisting_date: String,
     #[serde(rename(deserialize = "Company"))]
+    /// 公司名稱。
     pub name: String,
     #[serde(rename(deserialize = "Code"))]
+    /// 股票代號。
     pub stock_symbol: String,
 }
 

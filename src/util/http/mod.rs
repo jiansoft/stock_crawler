@@ -12,7 +12,9 @@ use tokio::sync::Semaphore;
 
 use crate::{logging::Logger, util};
 
+/// HTML 解析輔助工具。
 pub mod element;
+/// 隨機 User-Agent 產生器。
 pub mod user_agent;
 
 /// A semaphore for limiting concurrent requests.
@@ -137,6 +139,10 @@ pub async fn get_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
     })
 }
 
+/// 執行 HTTP GET 並回傳原始 `Response`。
+///
+/// 這個 helper 保留呼叫端自行處理 status code、header 與 body 的彈性，
+/// 適合需要讀取 cookie、串流或非文字內容的情境。
 pub async fn get_response(url: &str, headers: Option<header::HeaderMap>) -> Result<Response> {
     send(Method::GET, url, headers, None::<fn(_) -> _>, None).await
 }
@@ -170,6 +176,9 @@ pub async fn get(url: &str, headers: Option<header::HeaderMap>) -> Result<String
         .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
 }
 
+/// 從 HTTP 回應標頭萃取 `Set-Cookie` 並串成單一 cookie 字串。
+///
+/// 若回應中沒有任何 `Set-Cookie`，則回傳 `None`。
 pub fn extract_cookies(response: &Response) -> Option<String> {
     let cookies: Vec<String> = response
         .headers()

@@ -1,21 +1,32 @@
+//! 台股季度財報補欄位流程。
+//!
+//! 此模組負責找出指定季度中 `ROE`、`ROA` 或每股淨值為零的財報資料，
+//! 再到 Yahoo 財經補抓對應欄位並回寫資料庫。
+//!
+//! 目標季度必須與季 EPS 主流程一致，因此同樣使用
+//! [`crate::util::datetime::latest_published_quarter_for_listed_and_otc`]
+//! 依上市/上櫃公司季報法定申報截止日判定，不再使用固定天數回推。
+
 use anyhow::Result;
-use chrono::{Datelike, Local, TimeDelta};
+use chrono::Local;
 
 use crate::{
     backfill::financial_statement::update_roe_and_roa_for_zero_values, calculation, crawler::yahoo,
-    database::table, declare::Quarter, logging, nosql, util::map::Keyable,
+    database::table, logging, nosql, util::map::Keyable,
 };
 
-/// 將季度財報 ROE為零的數據，到雅虎財經下載後回寫到 financial_statement 表
+/// 補齊最新應已公告季度財報中缺漏的 ROE、ROA 與每股淨值欄位。
+///
+/// 本流程會先找出目標季度中數值為零的財報，再逐筆到 Yahoo 財經抓取對應資料，
+/// 回寫 `financial_statement` 後，重新同步 `stocks` 表上的最新一季/近四季數據，
+/// 並觸發估值重算。
 pub async fn execute() -> Result<()> {
-    let now = Local::now();
-    let previous_quarter_date = now - TimeDelta::try_days(130).unwrap();
-    let year = previous_quarter_date.year();
-    let previous_quarter = Quarter::from_month(previous_quarter_date.month()).unwrap();
-    let quarter = previous_quarter.to_string();
+    let target_report =
+        crate::util::datetime::latest_published_quarter_for_listed_and_otc(Local::now());
+    let quarter = target_report.quarter.to_string();
     let fss = table::financial_statement::fetch_roe_or_roa_equal_to_zero(
-        Some(year),
-        Some(previous_quarter),
+        Some(target_report.year),
+        Some(target_report.quarter),
     )
     .await?;
     let mut success_count = 0;
@@ -39,10 +50,10 @@ pub async fn execute() -> Result<()> {
             }
         };
 
-        if year != profile.year || quarter != profile.quarter {
+        if target_report.year != profile.year || quarter != profile.quarter {
             logging::warn_file_async(format!(
                 "the year or quarter retrieved from Yahoo is inconsistent with the current one. current year:{} ,quarter:{} {:#?}",
-                year, quarter, profile
+                target_report.year, quarter, profile
             ));
             //continue;
         }
@@ -66,7 +77,7 @@ pub async fn execute() -> Result<()> {
         success_count += 1;
     }
 
-    if let Err(why) = update_roe_and_roa_for_zero_values(Some(previous_quarter)).await {
+    if let Err(why) = update_roe_and_roa_for_zero_values(Some(target_report.quarter)).await {
         logging::error_file_async(format!("{:#?}", why));
     }
 

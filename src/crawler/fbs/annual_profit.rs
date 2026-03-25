@@ -3,6 +3,7 @@ use async_trait::async_trait;
 
 use crate::crawler::{fbs::HOST, share, share::AnnualProfitFetcher};
 
+/// 富邦證券年度獲利資料來源型別。
 pub struct Fbs {}
 
 /// 抓取年度股利資料

@@ -16,14 +16,22 @@ const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺
 #[derive(Debug)]
 pub struct InternationalSecuritiesIdentificationNumber {
     //pub exchange: StockExchangeMarket,
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 股票名稱。
     pub name: String,
+    /// 國際證券識別碼（ISIN）。
     pub isin_code: String,
+    /// 上市日期。
     pub listing_date: String,
     //pub market_category: String,
+    /// 產業分類名稱。
     pub industry: String,
+    /// CFI Code。
     pub cfi_code: String,
+    /// 交易市場資料。
     pub exchange_market: table::stock_exchange_market::StockExchangeMarket,
+    /// 產業分類 ID。
     pub industry_id: i32,
 }
 

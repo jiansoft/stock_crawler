@@ -8,12 +8,16 @@ use crate::{crawler::tpex, util};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 //#[serde(rename_all = "camelCase")]
+/// 興櫃公司每股淨值資料。
 pub struct Emerging {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 每股淨值。
     pub net_asset_value_per_share: Decimal,
 }
 
 impl Emerging {
+    /// 建立一筆興櫃公司每股淨值資料。
     pub fn new(stock_symbol: String, net_asset_value_per_share: Decimal) -> Self {
         Emerging {
             stock_symbol,
@@ -22,6 +26,11 @@ impl Emerging {
     }
 }
 
+/// 抓取興櫃公司每股淨值清單。
+///
+/// # 錯誤
+///
+/// 當 HTTP 請求失敗或頁面解析失敗時回傳錯誤。
 pub async fn visit() -> Result<Vec<Emerging>> {
     let url = format!(
         "https://{}/web/regular_emerging/corporateInfo/emerging/emerging_stock.php?l=zh-tw",

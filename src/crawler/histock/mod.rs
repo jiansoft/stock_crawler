@@ -5,4 +5,5 @@ pub mod price;
 
 const HOST: &str = "histock.tw";
 
+/// HiStock 來源命名空間標記型別。
 pub struct HiStock {}

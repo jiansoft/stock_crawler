@@ -632,6 +632,11 @@ fn gen_samsung_internet_ua() -> String {
     )
 }
 
+/// 產生一組隨機瀏覽器 User-Agent。
+///
+/// 目前會依預設權重從 Chrome、Firefox、Edge、Safari、Samsung Internet、
+/// Opera、Brave、Vivaldi 等常見瀏覽器樣板中隨機挑選，降低 crawler 被目標站
+/// 以固定 User-Agent 辨識的機率。
 pub fn gen_random_ua() -> String {
     let mut rng = rand::rng();
     let choice = rng.random_range(0..20);

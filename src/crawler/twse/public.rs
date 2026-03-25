@@ -17,8 +17,11 @@ struct PublicFormResponse {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+/// TWSE 公開申購頁面的單筆資料。
 pub struct Public {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 股票名稱。
     pub stock_name: String,
     /// 發行市場
     pub market: String,
@@ -45,6 +48,7 @@ impl Keyable for Public {
 }
 
 impl Public {
+    /// 建立一筆公開申購資料並套用預設值。
     pub fn new(stock_symbol: String, stock_name: String, market: String) -> Self {
         Self {
             stock_symbol,
@@ -59,6 +63,14 @@ impl Public {
     }
 }
 
+/// 抓取近期公開申購資料。
+///
+/// 來源為 TWSE `publicForm` JSON API。函式會將回應中的民國日期轉成西元日期，
+/// 並整理為 `Public` 結構清單。
+///
+/// # 錯誤
+///
+/// 當 HTTP 請求或 JSON 解析失敗時回傳錯誤。
 pub async fn visit() -> Result<Vec<Public>> {
     let now = Local::now();
     let date = now + TimeDelta::try_days(5).unwrap();

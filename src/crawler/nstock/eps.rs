@@ -1,3 +1,8 @@
+//! NStock EPS crawler。
+//!
+//! 此模組會呼叫 NStock 的公開 API，整理為年度與季度兩種 EPS 資料模型，
+//! 供後續補齊 ROE、ROA 與毛利率等財務欄位使用。
+
 use anyhow::{anyhow, Result};
 use rust_decimal::Decimal;
 use serde_derive::{Deserialize, Serialize};
@@ -53,13 +58,21 @@ struct EpsResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+/// NStock 回傳的單季 EPS 資料。
 pub struct EpsQuarter {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 財報年度。
     pub year: i32,
+    /// 財報季度。
     pub quarter: Quarter,
+    /// 單季 EPS。
     pub eps: Decimal,
+    /// 稅後股東權益報酬率。
     pub roe: Decimal,
+    /// 稅後資產報酬率。
     pub roa: Decimal,
+    /// 累計 EPS。
     pub cumulative_eps: Decimal,
 }
 
@@ -74,13 +87,21 @@ impl Keyable for EpsQuarter {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+/// NStock 回傳的年度 EPS 資料。
 pub struct EpsYear {
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 財報年度。
     pub year: i32,
+    /// 年度 EPS。
     pub eps: Decimal,
+    /// 稅後股東權益報酬率。
     pub roe: Decimal,
+    /// 稅後資產報酬率。
     pub roa: Decimal,
+    /// 年營業利益率。
     pub operating_profit_margin: Decimal,
+    /// 年毛利率。
     pub gross_profit: Decimal,
 }
 
@@ -95,12 +116,26 @@ impl Keyable for EpsYear {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+/// NStock EPS API 的整體回傳結果。
 pub struct Eps {
     /*  pub stock_symbol: String,*/
+    /// 季度 EPS 清單。
     pub quarters: Vec<EpsQuarter>,
+    /// 年度 EPS 清單。
     pub years: Vec<EpsYear>,
 }
 
+/// 向 NStock 取得指定股票的 EPS 資料。
+///
+/// 會同時整理年度與季度資料，並轉成專案內使用的數值型別。
+///
+/// # 參數
+///
+/// * `stock_symbol` - 股票代號
+///
+/// # 錯誤
+///
+/// 當 HTTP 請求失敗或回應 JSON 無法解析時回傳錯誤。
 pub async fn visit(stock_symbol: &str) -> Result<Eps> {
     let url = format!(
         "https://www.nstock.tw/api/v2/eps/data?stock_id={stock_symbol}",

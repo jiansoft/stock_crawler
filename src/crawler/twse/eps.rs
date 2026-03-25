@@ -1,3 +1,8 @@
+//! 公開資訊觀測站季 EPS 爬蟲。
+//!
+//! 此模組負責向公開資訊觀測站請求指定市場、年度與季度的季 EPS 清單，
+//! 並解析成 [`Eps`] 結構。
+
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
@@ -12,18 +17,20 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-/// 財務報表
+/// 單一股票於指定年度與季度的 EPS 資料。
 pub struct Eps {
     /// 年度
     pub year: i32,
     /// 季度 Q4 Q3 Q2 Q1
     pub quarter: Quarter,
+    /// 股票代號。
     pub stock_symbol: String,
     /// 每股稅後淨利
     pub earnings_per_share: Decimal,
 }
 
 impl Eps {
+    /// 建立一筆季 EPS 資料。
     pub fn new(stock_symbol: String, year: i32, quarter: Quarter, eps: Decimal) -> Self {
         Self {
             year,
@@ -34,6 +41,21 @@ impl Eps {
     }
 }
 
+/// 向公開資訊觀測站抓取指定市場與季度的 EPS 清單。
+///
+/// # 參數
+///
+/// * `stock_exchange_market` - 市場別，例如上市或上櫃
+/// * `year` - 目標財報年度（西元年）
+/// * `quarter` - 目標財報季度
+///
+/// # 回傳值
+///
+/// 成功時回傳符合條件的 [`Eps`] 清單；失敗時回傳錯誤。
+///
+/// # 錯誤
+///
+/// 當 HTTP 請求失敗、回應無法解析，或來源站結構異常時回傳錯誤。
 pub async fn visit(
     stock_exchange_market: StockExchangeMarket,
     year: i32,
@@ -116,7 +138,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit(StockExchangeMarket::Listed, 2024, Quarter::Q4).await {
+        match visit(StockExchangeMarket::Listed, 2025, Quarter::Q4).await {
             Ok(list) => {
                 dbg!(&list);
                 logging::debug_file_async(format!("list:{:#?}", list));

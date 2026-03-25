@@ -8,17 +8,22 @@ pub mod dividend_record_detail;
 pub mod dividend_record_detail_more;
 /// 公司每季獲利能力
 pub mod financial_statement;
+/// 指數數據表。
 pub mod index;
+/// 最新一日報價彙總表。
 pub mod last_daily_quotes;
+/// 月營收資料表。
 pub mod revenue;
+/// 股票主檔。
 pub mod stock;
+/// 股票交易所與市場別對照表。
+pub mod stock_exchange_market;
 mod stock_index;
 /// 持股名細
 pub mod stock_ownership_details;
 mod stock_word;
-// 股票交易所的市場
-pub mod stock_exchange_market;
 
+/// 系統設定資料表。
 pub mod config;
 /// 每日市值記錄各
 pub mod daily_money_history;

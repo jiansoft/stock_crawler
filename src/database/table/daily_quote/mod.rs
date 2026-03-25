@@ -484,6 +484,7 @@ SELECT
 
 /// 不同交易所來源轉換為統一資料模型的介面。
 pub trait FromWithExchange<T, U> {
+    /// 在給定交易所資訊的前提下，將來源資料轉成統一資料模型。
     fn from_with_exchange(exchange: T, item: &U) -> Self;
 }
 

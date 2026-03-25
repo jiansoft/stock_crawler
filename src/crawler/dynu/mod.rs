@@ -9,6 +9,17 @@ static DDNS_URL: OnceLock<String> = OnceLock::new();
 
 const HOST: &str = "api.dynu.com";
 
+/// 呼叫 Dynu DDNS API 更新目前對外 IP。
+///
+/// 會以設定檔中的帳號密碼組合更新 URL，並帶入 `ip` 作為 `myip` 參數。
+///
+/// # 參數
+///
+/// * `ip` - 要回報給 Dynu 的最新 IP 位址
+///
+/// # 錯誤
+///
+/// 當 HTTP 請求失敗或 Dynu 回應無法處理時回傳錯誤。
 pub async fn visit(ip: &str) -> Result<()> {
     let url = DDNS_URL.get_or_init(|| {
         let mut hasher = Sha256::new();

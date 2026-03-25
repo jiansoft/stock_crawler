@@ -8,10 +8,15 @@ use crate::{crawler::twse, util};
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 //#[serde(rename_all = "camelCase")]
 pub struct Index {
+    /// API 回應狀態。
     pub stat: String,
+    /// 查詢日期。
     pub date: Option<String>,
+    /// 回應標題。
     pub title: Option<String>,
+    /// 欄位名稱清單。
     pub fields: Option<Vec<String>>,
+    /// 原始指數資料列。
     pub data: Option<Vec<Vec<String>>>,
 }
 

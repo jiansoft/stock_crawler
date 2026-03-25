@@ -400,7 +400,10 @@ WHERE s.stock_exchange_market_id in(2, 4)
     AND NOT EXISTS (
         SELECT 1
         FROM financial_statement f
-        WHERE f.security_code = s.stock_symbol AND f.year = $1 AND f.quarter = $2
+        WHERE f.security_code = s.stock_symbol
+        AND f.year = $1
+        AND f.quarter = $2
+        AND earnings_per_share > 0
     )
 "#;
 

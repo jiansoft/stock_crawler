@@ -7,6 +7,7 @@ use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
 
 use crate::config;
 
+/// 關聯式資料庫資料表與查詢邏輯。
 pub mod table;
 
 static POSTGRES: Lazy<Arc<OnceLock<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceLock::new()));

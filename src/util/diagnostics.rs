@@ -1,7 +1,5 @@
 //! 執行期 diagnostics 輔助工具。
 
-use std::fs;
-
 /// 低成本的背景任務執行狀態快照。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TaskRuntimeStatus {
@@ -51,7 +49,7 @@ pub struct AllocatorTuningResult {
 pub fn read_process_memory_stats() -> Option<ProcessMemoryStats> {
     #[cfg(target_os = "linux")]
     {
-        let status = fs::read_to_string("/proc/self/status").ok()?;
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
         let mut stats = ProcessMemoryStats::default();
 
         for line in status.lines() {

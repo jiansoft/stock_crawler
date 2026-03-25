@@ -76,12 +76,18 @@ pub fn parse_to_decimal(element: &scraper::ElementRef, css_selector: &str) -> De
         .unwrap_or(dec!(0))
 }
 
+/// 依 CSS selector 取出元素文字並轉成 `i32`。
+///
+/// 若 selector 無法解析、元素不存在或文字無法轉成整數，則回傳 `0`。
 pub fn parse_to_i32(element: &scraper::ElementRef, css_selector: &str) -> i32 {
     parse_value(element, css_selector)
         .and_then(|v| text::parse_i32(v.trim(), None).ok())
         .unwrap_or(0)
 }
 
+/// 依 CSS selector 取出元素文字並轉成 `String`。
+///
+/// 若 selector 無法解析、元素不存在或文字為空，則回傳空字串。
 pub fn parse_to_string(element: &scraper::ElementRef, css_selector: &str) -> String {
     parse_value(element, css_selector)
         .and_then(|v| Option::from(v.trim().to_string()))
@@ -99,6 +105,7 @@ pub struct GetOneElementText<'a> {
     pub selector: &'a str,
     /// The desired HTML element's name (like "div", "span", etc.) that we want to extract text from.
     pub element: &'a str,
+    /// 已經解析完成的 HTML 文件。
     pub document: Html,
 }
 
@@ -130,6 +137,11 @@ pub fn get_one_element(target: GetOneElementText<'_>) -> Result<String> {
         .ok_or_else(|| anyhow!("The element not found from {}", target.url))
 }
 
+/// 取得單一元素文字並解析為 `Decimal`。
+///
+/// # 錯誤
+///
+/// 當元素不存在或文字無法解析為數值時回傳錯誤。
 pub fn get_one_element_as_decimal(target: GetOneElementText<'_>) -> Result<Decimal> {
     text::parse_decimal(&get_one_element(target)?, None)
 }

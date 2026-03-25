@@ -12,9 +12,13 @@ use crate::{
 };
 
 #[derive(Default, Debug, Clone, PartialEq)]
+/// 臺指期貨網站揭露的單檔權重資料。
 pub struct StockWeight {
+    /// 權重排名。
     pub rank: i32,
+    /// 股票代號。
     pub stock_symbol: String,
+    /// 權重百分比。
     pub weight: Decimal,
 }
 

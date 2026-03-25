@@ -8,9 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::{crawler::wespai::HOST, util::http, util::http::element};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+/// Wespai 財務指標頁面的單筆獲利資料。
 pub struct Profit {
     /// 季度 Q4 Q3 Q2 Q1
     pub quarter: String,
+    /// 股票代號。
     pub security_code: String,
     /// 營業毛利率
     pub gross_profit: Decimal,
@@ -37,6 +39,7 @@ pub struct Profit {
 }
 
 impl Profit {
+    /// 建立一筆指定年度與股票代號的 `Profit` 預設值。
     pub fn new(year: i32, security_code: String) -> Self {
         Profit {
             quarter: "".to_string(),

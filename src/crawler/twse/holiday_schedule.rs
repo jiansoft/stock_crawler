@@ -15,11 +15,23 @@ struct HolidayScheduleResponse {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
+/// 交易所休市日資料。
 pub struct HolidaySchedule {
+    /// 休市日期。
     pub date: NaiveDate,
+    /// 休市原因。
     pub why: String,
 }
 
+/// 取得指定年度的休市日清單。
+///
+/// # 參數
+///
+/// * `year` - 西元年
+///
+/// # 錯誤
+///
+/// 當 HTTP 請求或 JSON 解析失敗時回傳錯誤。
 pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
     let now = Local::now();
     let url = format!(

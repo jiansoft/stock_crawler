@@ -9,15 +9,24 @@ use crate::{
 };
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// TWSE 外資及陸資持股統計 API 回應。
 pub struct QFIIResponse {
+    /// 回應狀態字串。
     pub stat: Option<String>,
+    /// 查詢日期。
     pub date: Option<String>,
     #[serde(rename = "selectType")]
+    /// 查詢條件類型。
     pub select_type: String,
+    /// 回應標題。
     pub title: Option<String>,
+    /// 額外提示文字。
     pub hints: Option<String>,
+    /// 欄位名稱清單。
     pub fields: Vec<String>,
+    /// 原始資料列。
     pub data: Vec<Vec<serde_json::Value>>,
+    /// 總筆數。
     pub total: i32,
 }
 

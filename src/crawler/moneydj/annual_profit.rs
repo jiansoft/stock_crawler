@@ -3,6 +3,7 @@ use async_trait::async_trait;
 
 use crate::crawler::{moneydj::HOST, share, share::AnnualProfitFetcher};
 
+/// MoneyDJ 年度獲利資料來源型別。
 pub struct MoneyDJ {}
 /// 抓取年度股利資料
 pub async fn visit(stock_symbol: &str) -> Result<Vec<share::AnnualProfit>> {

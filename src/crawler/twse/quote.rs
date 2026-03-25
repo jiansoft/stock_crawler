@@ -23,8 +23,10 @@ struct ListedResponse {
 ///
 /// 這個 crawler 只使用 `tables` 中的「上市每日收盤行情」表格資料。
 pub struct ListedResponse {
+    /// API 回應狀態。
     pub stat: Option<String>,
     #[serde(rename = "tables")]
+    /// 回應中的資料表清單。
     pub tables: Vec<Table>,
 }
 
@@ -32,15 +34,19 @@ pub struct ListedResponse {
 /// TWSE `MI_INDEX` 回應中的單一表格區塊。
 pub struct Table {
     #[serde(rename = "title")]
+    /// 表格標題。
     pub title: Option<String>,
 
     #[serde(rename = "fields")]
+    /// 欄位名稱清單。
     pub fields: Option<Vec<String>>,
 
     #[serde(rename = "data")]
+    /// 表格資料列。
     pub data: Option<Vec<Vec<String>>>,
 
     #[serde(rename = "hints")]
+    /// TWSE 附帶提示訊息。
     pub hints: Option<String>,
 }
 

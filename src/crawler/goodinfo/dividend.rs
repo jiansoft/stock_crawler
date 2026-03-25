@@ -27,6 +27,10 @@ lazy_static! {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Goodinfo 股利政策頁面的單筆股利資料。
+///
+/// 一筆資料可能代表全年、半年度或單季股利，因此 `quarter` 可能為
+/// 空字串、`Q1~Q4` 或 `H1~H2`。
 pub struct GoodInfoDividend {
     /// Security code
     pub stock_symbol: String,
@@ -70,6 +74,10 @@ pub struct GoodInfoDividend {
 }
 
 impl GoodInfoDividend {
+    /// 建立一筆帶預設值的 `GoodInfoDividend`。
+    ///
+    /// 日期欄位會先以「尚未公布」初始化，數值欄位則以 `0` 初始化，
+    /// 再由解析流程逐欄覆寫。
     pub fn new(stock_symbol: String) -> Self {
         GoodInfoDividend {
             quarter: "".to_string(),
