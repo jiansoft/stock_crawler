@@ -6,10 +6,11 @@
 //!
 //! - `GET /prod/yesidmz/api/basic/currentstock?symbol={symbol}`
 //!
-//! ## 目前用途
+//! ## 目前狀態
 //!
-//! - 作為 `fetch_stock_price_from_remote_site` 的備援來源
-//! - 作為 `fetch_stock_quotes_from_remote_site` 的備援來源
+//! 此來源目前未納入即時股價追蹤與完整報價的站點池。
+//! 原因是近期觀察到 API 回傳的是前一交易日資料，不符合即時追蹤用途。
+//! 模組本身仍保留，供後續重新驗證來源品質後再決定是否恢復使用。
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;

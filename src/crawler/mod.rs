@@ -30,7 +30,7 @@ use rust_decimal::Decimal;
 use crate::{
     crawler::{
         cmoney::CMoney, cnyes::CnYes, fugle::Fugle, megatime::PcHome, nstock::NStock,
-        winvest::Winvest, yahoo::Yahoo, yuanta::Yuanta,
+        winvest::Winvest, yahoo::Yahoo,
     },
     declare, logging,
 };
@@ -233,11 +233,6 @@ define_stock_price_fetcher!(
     CnYes
 );
 define_stock_price_fetcher!(
-    "將 Yuanta 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
-    fetch_yuanta_price,
-    Yuanta
-);
-define_stock_price_fetcher!(
     "將 PcHome 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
     fetch_pchome_price,
     PcHome
@@ -269,11 +264,6 @@ define_stock_quotes_fetcher!(
     CnYes
 );
 define_stock_quotes_fetcher!(
-    "將 Yuanta 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
-    fetch_yuanta_quotes,
-    Yuanta
-);
-define_stock_quotes_fetcher!(
     "將 PcHome 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
     fetch_pchome_quotes,
     PcHome
@@ -295,10 +285,12 @@ define_stock_quotes_fetcher!(
 /// - `NStock`
 /// - `CMoney`
 /// - `CnYes`
-/// - `Yuanta`
 /// - `PcHome`
 /// - `Winvest`
-const ALL_PRICE_SITES: [PriceSite; 8] = [
+///
+/// `Yuanta` 已從此站點池移除，因為其資料目前觀察到為前一交易日資料，
+/// 不符合即時追蹤用途。
+const ALL_PRICE_SITES: [PriceSite; 7] = [
     PriceSite {
         name: "Yahoo",
         fetch: fetch_yahoo_price,
@@ -320,10 +312,6 @@ const ALL_PRICE_SITES: [PriceSite; 8] = [
         fetch: fetch_cnyes_price,
     },
     PriceSite {
-        name: "Yuanta",
-        fetch: fetch_yuanta_price,
-    },
-    PriceSite {
         name: "PcHome",
         fetch: fetch_pchome_price,
     },
@@ -343,10 +331,12 @@ const ALL_PRICE_SITES: [PriceSite; 8] = [
 /// - `NStock`
 /// - `CMoney`
 /// - `CnYes`
-/// - `Yuanta`
 /// - `PcHome`
 /// - `Winvest`
-const ALL_QUOTE_SITES: [QuoteSite; 7] = [
+///
+/// `Yuanta` 已從此站點池移除，因為其資料目前觀察到為前一交易日資料，
+/// 不適合用作即時完整報價來源。
+const ALL_QUOTE_SITES: [QuoteSite; 6] = [
     QuoteSite {
         name: "Fugle",
         fetch: fetch_fugle_quotes,
@@ -362,10 +352,6 @@ const ALL_QUOTE_SITES: [QuoteSite; 7] = [
     QuoteSite {
         name: "CnYes",
         fetch: fetch_cnyes_quotes,
-    },
-    QuoteSite {
-        name: "Yuanta",
-        fetch: fetch_yuanta_quotes,
     },
     QuoteSite {
         name: "PcHome",
@@ -613,7 +599,7 @@ pub fn flush_site_latency_stats() {
 /// 從多個遠端站點中輪詢獲取股票的最新成交價。
 ///
 /// 此函數會嘗試預設的站點清單，如果某個站點失敗，會自動嘗試下一個，直到成功或所有站點都失敗為止。
-/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, Yuanta, PcHome, Winvest。
+/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, PcHome, Winvest。
 /// 實際站點定義集中在 [`ALL_PRICE_SITES`]。
 /// 此函式不再經過 `HiStock`。
 ///
@@ -633,7 +619,7 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 /// 此函數主要用於 HiStock 已有獨立背景排程時的備援抓價情境，
 /// 避免同一支股票同時由兩套流程對 HiStock 重複請求。
 ///
-/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, Yuanta, PcHome, Winvest。
+/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, PcHome, Winvest。
 /// 實際站點定義直接重用 [`ALL_PRICE_SITES`]。
 /// 也就是說，最新成交價的一般抓價路徑與備援抓價路徑目前使用相同站點集合。
 ///
@@ -659,7 +645,7 @@ pub async fn fetch_stock_price_from_backup_sites_with_source(
 ///
 /// 此函數包含漲跌、漲幅、開盤、最高、最低等詳細資料。
 /// 實作機制與 `fetch_stock_price_from_remote_site` 相同，採用自動備援輪詢。
-/// 支援的站點包括：Fugle, NStock, CMoney, CnYes, Yuanta, PcHome, Winvest。
+/// 支援的站點包括：Fugle, NStock, CMoney, CnYes, PcHome, Winvest。
 /// 實際站點定義集中在 [`ALL_QUOTE_SITES`]。
 ///
 /// # 參數
