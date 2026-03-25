@@ -116,7 +116,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 yuanta::get_stock_price".to_string());
 
-        for stock_symbol in ["2330", "5306"] {
+        for stock_symbol in ["2330", "4536"] {
             match Yuanta::get_stock_price(stock_symbol).await {
                 Ok(price) => {
                     logging::debug_file_async(format!("yuanta {stock_symbol} price: {price}"))

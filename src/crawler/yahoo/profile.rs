@@ -36,6 +36,12 @@ static BASE_SELECTOR: Lazy<Selector> = Lazy::new(|| {
         .expect("Failed to parse base profile selector")
 });
 
+/// Yahoo profile 類型頁面在「無有效財務資料」時的暫時跳過快取秒數。
+///
+/// 這類頁面通常是新掛牌股票、暫時尚未補齊財務欄位的標的，短時間內重試
+/// 通常不會得到不同結果，因此以一天作為保守的重試間隔。
+pub const NO_VALID_DATA_CACHE_TTL_SECONDS: usize = 60 * 60 * 24;
+
 /// 股票基本面與財務比率結構體
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Profile {
@@ -105,6 +111,15 @@ impl StdError for NoValidProfileDataError {}
 /// 避免每次重試都輸出整串 backtrace。
 pub fn is_no_valid_data_error(err: &anyhow::Error) -> bool {
     err.downcast_ref::<NoValidProfileDataError>().is_some()
+}
+
+/// 回傳 Yahoo profile 無有效資料的短期跳過快取鍵。
+///
+/// 這個 key 以「股票代號」為粒度，而不是財報季度為粒度，讓同一支股票在
+/// 不同季度的 backfill 流程中共用同一個短期 skip 狀態，避免同一天重複對
+/// 明顯沒有資料的頁面發出請求。
+pub fn no_valid_data_cache_key(stock_symbol: &str) -> String {
+    format!("YahooProfileNoValidData:{}", stock_symbol)
 }
 
 /// 從雅虎抓取指定股票的 profile 資訊（包含財務比率、獲利能力等指標）。
@@ -186,6 +201,14 @@ mod tests {
         .into();
 
         assert!(is_no_valid_data_error(&err));
+    }
+
+    #[test]
+    fn test_no_valid_data_cache_key() {
+        assert_eq!(
+            no_valid_data_cache_key("7811"),
+            "YahooProfileNoValidData:7811"
+        );
     }
 
     #[tokio::test]

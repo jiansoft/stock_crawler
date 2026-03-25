@@ -62,9 +62,13 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
 
     for fs in fss {
         let cache_key = fs.key_with_prefix();
+        let profile_skip_cache_key = yahoo::profile::no_valid_data_cache_key(&fs.security_code);
         let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
+        let is_profile_skip = nosql::redis::CLIENT
+            .get_bool(&profile_skip_cache_key)
+            .await?;
 
-        if is_jump {
+        if is_jump || is_profile_skip {
             continue;
         }
 
@@ -72,6 +76,19 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
             Ok(profile) => profile,
             Err(why) => {
                 if yahoo::profile::is_no_valid_data_error(&why) {
+                    if let Err(cache_err) = nosql::redis::CLIENT
+                        .set(
+                            &profile_skip_cache_key,
+                            true,
+                            yahoo::profile::NO_VALID_DATA_CACHE_TTL_SECONDS,
+                        )
+                        .await
+                    {
+                        logging::error_file_async(format!(
+                            "Failed to cache yahoo::profile no-valid-data skip for {} because {:?}",
+                            fs.security_code, cache_err
+                        ));
+                    }
                     logging::warn_file_async(format!(
                         "Skip yahoo::profile::visit for {} because {}",
                         fs.security_code, why

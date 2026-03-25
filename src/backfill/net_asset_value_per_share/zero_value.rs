@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use crate::{
     backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, logging,
+    nosql,
 };
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
@@ -12,10 +13,31 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
+        let profile_skip_cache_key = profile::no_valid_data_cache_key(&stock.stock_symbol);
+        if nosql::redis::CLIENT
+            .get_bool(&profile_skip_cache_key)
+            .await?
+        {
+            continue;
+        }
+
         let yahoo_profile = match profile::visit(&stock.stock_symbol).await {
             Ok(stock_profile) => stock_profile,
             Err(why) => {
                 if profile::is_no_valid_data_error(&why) {
+                    if let Err(cache_err) = nosql::redis::CLIENT
+                        .set(
+                            &profile_skip_cache_key,
+                            true,
+                            profile::NO_VALID_DATA_CACHE_TTL_SECONDS,
+                        )
+                        .await
+                    {
+                        logging::error_file_async(format!(
+                            "Failed to cache profile::visit no-valid-data skip for {} because {:?}",
+                            stock.stock_symbol, cache_err
+                        ));
+                    }
                     logging::warn_file_async(format!(
                         "Skip profile::visit for {} because {}",
                         stock.stock_symbol, why
