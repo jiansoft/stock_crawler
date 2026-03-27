@@ -27,7 +27,7 @@ API︰https://github.com/jiansoft/stock_api
 + 15:00 取得台股收盤報價數據計算預估價格
 + 21:00 更新尚無年度配息資料的股票
 + 22:00 更新外資持股狀態
-+ 每分鐘更新一次ddns的IP(需自行架設本服務 [afraid](https://freedns.afraid.org/)、[dynu](https://www.dynu.com/)、[noip](https://www.noip.com/))
++ DDNS IP 自動更新功能已自本專案移除，相關功能請改用 https://github.com/jiansoft/dynip。
 
 ### 資料來源
 1. 理財寶-股市爆料同學會 https://www.cmoney.tw/forum/popular
@@ -65,9 +65,6 @@ API︰https://github.com/jiansoft/stock_api
 
 #### 常用環境變數
 + `FUGLE_API_KEY`：Fugle 日內行情 API 金鑰（即時報價備援）
-+ `AFRAID_TOKEN`：Afraid DDNS 更新權杖
-+ `DYNU_USERNAME`、`DYNU_PASSWORD`：Dynu DDNS 帳號密碼
-+ `NOIP_USERNAME`、`NOIP_PASSWORD`、`NOIP_HOSTNAMES`：No-IP DDNS 設定
 + `TELEGRAM_TOKEN`、`TELEGRAM_ALLOWED`：Telegram Bot 與允許通知的 chat 設定
 + `REDIS_ADDR`、`REDIS_ACCOUNT`、`REDIS_PASSWORD`、`REDIS_DB`：Redis 連線設定
 + `POSTGRESQL_HOST`、`POSTGRESQL_PORT`、`POSTGRESQL_USER`、`POSTGRESQL_PASSWORD`、`POSTGRESQL_DB`：PostgreSQL 連線設定

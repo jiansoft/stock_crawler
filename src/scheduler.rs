@@ -114,7 +114,7 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             qualified_foreign_institutional_investor::execute,
         ),
         // 每分鐘更新一次ddns的ip
-        create_job("0 * * * * *", ddns::refresh),
+        //create_job("0 * * * * *", ddns::refresh),
     ];
 
     let mut job_count = 0usize;
