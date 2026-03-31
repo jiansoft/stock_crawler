@@ -274,9 +274,10 @@ pub fn start_caching_task() {
                     SHARE.set_stock_snapshots(fetch_result.snapshots);
                     trace_price_tasks::publish_price_updates(price_updates);
                     let elapsed_ms = start_time.elapsed().as_millis().min(u64::MAX as u128) as u64;
-                    let rss_delta_before_trim_kib =
+                    let _rss_delta_before_trim_kib =
                         rss_delta_kib(memory_before, read_process_memory_stats());
-                    let allocator_trimmed = trim_allocator_memory();
+                    let _allocator_trimmed = trim_allocator_memory();
+
                     let rss_delta_kib = rss_delta_kib(memory_before, read_process_memory_stats());
                     LAST_BODY_BYTES.store(body_bytes, Ordering::SeqCst);
                     LAST_ROW_COUNT.store(row_count, Ordering::SeqCst);
@@ -294,6 +295,7 @@ pub fn start_caching_task() {
                         rss_delta_kib,
                         start_time.elapsed()
                     ));
+                    /*
                     crate::logging::info_file_async(format!(
                         "HiStock cycle diagnostics | snapshots={} rows={} body={}KiB changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
                         count,
@@ -305,6 +307,7 @@ pub fn start_caching_task() {
                         allocator_trimmed,
                         elapsed_ms,
                     ));
+                    */
                 }
                 Err(e) => {
                     crate::logging::error_file_async(format!("HiStock 快取更新失敗: {:?}", e));

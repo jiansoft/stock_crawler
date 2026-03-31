@@ -164,7 +164,7 @@ pub fn start_caching_task() {
                 }
 
                 // 單一類股的耗時獨立計算，方便從 log 看出是哪個類股變慢。
-                let started_at = Instant::now();
+                let _started_at = Instant::now();
                 let category_memory_before = read_process_memory_stats();
                 // 類股抓取本身可能要跨多頁，所以這裡把整個類股抓完整再回來。
                 let fetch_result = class_quote::fetch_category_snapshots(category).await;
@@ -180,8 +180,6 @@ pub fn start_caching_task() {
                         success_count += 1;
                         page_count += category_result.diagnostics.page_count;
                         raw_item_count += category_result.diagnostics.raw_item_count;
-                        // 先記下本類股股票數，後面 log 會拿來判讀資料完整度。
-                        let stock_count = category_result.diagnostics.snapshot_count;
                         // 這一步會把舊股票移除、把新股票寫進共享快取，
                         // 同時完成價格異動計數與事件發佈。
                         let apply_result = apply_category_snapshots(
@@ -191,12 +189,18 @@ pub fn start_caching_task() {
                         );
                         let changed_events = apply_result.changed_event_count;
                         candidate_event_count += changed_events;
-                        let total_count = apply_result.total_snapshot_count;
-                        let category_rss_delta_before_trim_kib =
+                        let total_count = SHARE
+                            .stock_snapshots
+                            .read()
+                            .map(|cache| cache.len())
+                            .unwrap_or_default();
+                        let _stock_count = category_result.diagnostics.snapshot_count;
+                        let _category_rss_delta_before_trim_kib =
                             rss_delta_kib(category_memory_before, read_process_memory_stats());
-                        let category_trimmed = trim_allocator_memory();
-                        let category_rss_delta_kib =
+                        let _category_trimmed = trim_allocator_memory();
+                        let _category_rss_delta_kib =
                             rss_delta_kib(category_memory_before, read_process_memory_stats());
+
                         let cycle_elapsed_ms =
                             cycle_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
                         let cycle_rss_delta_kib =
@@ -211,6 +215,7 @@ pub fn start_caching_task() {
                             cycle_elapsed_ms,
                             cycle_rss_delta_kib,
                         );
+                        /*
                         crate::logging::info_file_async(format!(
                             "Yahoo category diagnostics | {} {}({}) snaps={} total={} pages={} raw_items={} changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
                             category.exchange.label(),
@@ -226,6 +231,7 @@ pub fn start_caching_task() {
                             category_trimmed,
                             started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
                         ));
+                        */
                     }
                     Err(why) => {
                         failure_count += 1;
@@ -234,10 +240,10 @@ pub fn start_caching_task() {
                             .read()
                             .map(|cache| cache.len())
                             .unwrap_or_default();
-                        let category_rss_delta_before_trim_kib =
+                        let _category_rss_delta_before_trim_kib =
                             rss_delta_kib(category_memory_before, read_process_memory_stats());
-                        let category_trimmed = trim_allocator_memory();
-                        let category_rss_delta_kib =
+                        let _category_trimmed = trim_allocator_memory();
+                        let _category_rss_delta_kib =
                             rss_delta_kib(category_memory_before, read_process_memory_stats());
                         let cycle_elapsed_ms =
                             cycle_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
@@ -253,6 +259,7 @@ pub fn start_caching_task() {
                             cycle_elapsed_ms,
                             cycle_rss_delta_kib,
                         );
+                        /*
                         crate::logging::info_file_async(format!(
                             "Yahoo category diagnostics | {} {}({}) failed=true total={} pages=0 raw_items=0 changed_events=0 rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
                             category.exchange.label(),
@@ -264,6 +271,7 @@ pub fn start_caching_task() {
                             category_trimmed,
                             started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
                         ));
+                        */
                         // 類股失敗時只記錄錯誤，不中止整輪任務，
                         // 避免單一 sector 出問題就拖垮整個 Yahoo 報價快取。
                         crate::logging::error_file_async(format!(
@@ -319,9 +327,9 @@ pub fn start_caching_task() {
             ));
 
             let cycle_elapsed_ms = cycle_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-            let cycle_rss_delta_before_trim_kib =
+            let _cycle_rss_delta_before_trim_kib =
                 rss_delta_kib(cycle_memory_before, read_process_memory_stats());
-            let allocator_trimmed = trim_allocator_memory();
+            let _allocator_trimmed = trim_allocator_memory();
             let cycle_rss_delta_kib =
                 rss_delta_kib(cycle_memory_before, read_process_memory_stats());
             store_runtime_progress(
@@ -335,6 +343,7 @@ pub fn start_caching_task() {
                 cycle_rss_delta_kib,
             );
             COMPLETED_CYCLES.fetch_add(1, Ordering::SeqCst);
+            /*
             crate::logging::info_file_async(format!(
                 "Yahoo cycle diagnostics | total={} success={} failure={} pages={} raw_items={} candidate_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
                 total_count,
@@ -348,6 +357,7 @@ pub fn start_caching_task() {
                 allocator_trimmed,
                 cycle_elapsed_ms,
             ));
+            */
 
             // 一輪全部類股跑完後稍作休息，避免無間斷全市場輪詢造成壓力過大。
             sleep(CYCLE_COOLDOWN).await;

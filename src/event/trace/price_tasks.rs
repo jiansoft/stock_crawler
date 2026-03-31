@@ -511,6 +511,7 @@ fn stop_trace_diagnostics_task() {
     IS_DIAGNOSTICS_LOGGING.store(false, Ordering::SeqCst);
 }
 
+#[allow(unused_variables)]
 fn log_trace_diagnostics(
     previous_stats: &mut trace_stats::TraceRuntimeStatsSnapshot,
     previous_logged_at: &mut Instant,
@@ -593,6 +594,7 @@ fn log_trace_diagnostics(
         0.0
     };
 
+    /*
     logging::info_file_async(format!(
         "Trace diagnostics | {} | snapshots len={} cap={} strings={}KiB approx_reserved={:.1}MiB | targets symbols={} total={} | events pub={} cons={} drop={} backlog~={} pending={} delta_pub={} ({:.1}/s) delta_cons={} ({:.1}/s) delta_drop={} | tasks {} {} {} {} {} {} {} | logs default(q={}/{} drop={} proc={}) http(q={}/{} drop={} proc={})",
         memory_summary,
@@ -650,6 +652,7 @@ fn log_trace_diagnostics(
         yahoo_runtime.last_elapsed_ms,
         format_task_status("yahoo", yahoo_runtime.status),
     ));
+    */
 
     maybe_trim_allocator(
         previous_trimmed_at,
@@ -731,6 +734,7 @@ fn atomic_task_status(
     )
 }
 
+#[allow(dead_code)]
 fn format_task_status(name: &str, status: TaskRuntimeStatus) -> String {
     format!(
         "{}(en={} active={} gen={})",
@@ -742,6 +746,7 @@ fn kib_to_mib(kib: u64) -> f64 {
     kib as f64 / 1024.0
 }
 
+#[allow(dead_code)]
 fn format_signed_kib(delta_kib: i64) -> String {
     if delta_kib >= 0 {
         format!("+{}", delta_kib)
