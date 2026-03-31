@@ -59,7 +59,7 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
         logging::debug_file_async("開始 calculate_estimated_price".to_string());
-        let current_date = NaiveDate::parse_from_str("2023-09-15", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2026-03-31", "%Y-%m-%d").unwrap();
         match calculate_estimated_price(current_date).await {
             Ok(_) => {}
             Err(why) => {

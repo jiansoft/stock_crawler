@@ -10,7 +10,6 @@ use crate::{
     },
     bot::{self, telegram::Telegram},
     declare, event,
-    event::ddns,
     logging,
 };
 
