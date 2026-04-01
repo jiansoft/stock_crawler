@@ -18,6 +18,8 @@ pub struct StockOwnershipDetail {
     pub share_quantity: i64,
     /// 每股成本
     pub share_price_average: Decimal,
+    /// 目前每股成本
+    pub current_cost_per_share: Decimal,
     /// 買入成本
     pub holding_cost: Decimal,
     /// 是否賣出
@@ -43,6 +45,7 @@ impl StockOwnershipDetail {
             member_id: 0,
             share_quantity: Default::default(),
             share_price_average: Default::default(),
+            current_cost_per_share: Default::default(),
             holding_cost: Default::default(),
             is_sold: false,
             cumulate_dividends_cash: Default::default(),
@@ -64,6 +67,7 @@ SELECT
     holding_cost,
     created_time,
     share_price_average,
+    current_cost_per_share,
     is_sold,
     cumulate_dividends_cash,
     cumulate_dividends_stock,
@@ -139,6 +143,7 @@ impl Clone for StockOwnershipDetail {
             member_id: self.member_id,
             share_quantity: self.share_quantity,
             share_price_average: self.share_price_average,
+            current_cost_per_share: self.current_cost_per_share,
             holding_cost: self.holding_cost,
             is_sold: self.is_sold,
             cumulate_dividends_cash: self.cumulate_dividends_cash,

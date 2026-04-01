@@ -5,8 +5,12 @@ use sqlx::FromRow;
 
 use crate::database;
 
-/// 股票除息的資料
-#[derive(FromRow, Debug)]
+/// 指定日期有除權或除息事件的股票資料。
+///
+/// 此結構同時提供：
+/// 1. 第一則 Telegram 清單所需的展示欄位。
+/// 2. 第二則「持股預估股利」訊息所需的原始股利數值與事件旗標。
+#[derive(FromRow, Debug, Clone)]
 pub struct StockDividendInfo {
     /// 股票代號。
     pub stock_symbol: String,
@@ -24,9 +28,16 @@ pub struct StockDividendInfo {
     pub dividend_yield: Decimal,
     /// 現金殖利率（%）。
     pub cash_dividend_yield: Decimal,
+    /// 是否於指定日期進行除息。
+    pub is_cash_ex_dividend_today: bool,
+    /// 是否於指定日期進行除權。
+    pub is_stock_ex_dividend_today: bool,
 }
 
-/// 取得指定日期為除息權日的股票
+/// 取得指定日期為除權或除息日的股票。
+///
+/// 這裡保留 `cash_dividend` / `stock_dividend` / `sum` 的原始精度，
+/// 避免先在 SQL 四捨五入後又乘上持股股數，造成預估股利累積誤差。
 pub async fn fetch_stocks_with_dividends_on_date(
     date: NaiveDate,
 ) -> Result<Vec<StockDividendInfo>> {
@@ -34,9 +45,9 @@ pub async fn fetch_stocks_with_dividends_on_date(
 SELECT
        s.stock_symbol,
        s."Name"                                 AS name,
-       ROUND(d.cash_dividend, 2) as cash_dividend,
-       ROUND(d.stock_dividend, 2) as stock_dividend,
-       ROUND(d.sum, 2) as sum,
+       d.cash_dividend,
+       d.stock_dividend,
+       d.sum,
        COALESCE(ROUND(ldq.closing_price, 2), 0) as closing_price,
        CASE
            WHEN ldq.closing_price IS NULL THEN 0
@@ -45,7 +56,9 @@ SELECT
        CASE
            WHEN ldq.closing_price IS NULL THEN 0
            ELSE ROUND((d.cash_dividend / ldq.closing_price) * 100, 2)
-           END                                  AS cash_dividend_yield
+           END                                  AS cash_dividend_yield,
+       d."ex-dividend_date1" = $2               AS is_cash_ex_dividend_today,
+       d."ex-dividend_date2" = $2               AS is_stock_ex_dividend_today
 FROM
     dividend AS d
 INNER JOIN
