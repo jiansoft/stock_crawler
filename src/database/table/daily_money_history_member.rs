@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Local, NaiveDate};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
@@ -21,6 +21,21 @@ pub struct DailyMoneyHistoryMember {
     pub created_at: DateTime<Local>,
     /// 最後更新時間。
     pub updated_at: DateTime<Local>,
+}
+
+/// 當日與前一交易日的會員市值對照資料。
+#[derive(sqlx::FromRow, Debug)]
+pub struct DailyMoneyHistoryMemberWithPreviousTradingDay {
+    /// 當日資料日期。
+    pub date: NaiveDate,
+    /// 前一個交易日日期。
+    pub previous_date: Option<NaiveDate>,
+    /// 會員編號；0 代表全體總和。
+    pub member_id: i64,
+    /// 當日收盤市值總額。
+    pub market_value: Decimal,
+    /// 前一交易日收盤市值總額。
+    pub previous_market_value: Decimal,
 }
 
 impl DailyMoneyHistoryMember {
@@ -98,6 +113,65 @@ ON CONFLICT (date, member_id) DO UPDATE SET
                 why
             )
         })
+    }
+
+    /// 取得指定日期與前一交易日的會員市值對照資料。
+    ///
+    /// 會保留 `member_id = 0` 的合計列，並同時回傳所有會員，
+    /// 供通知訊息直接逐行組裝。
+    pub async fn fetch_with_previous_trading_day(
+        date: NaiveDate,
+    ) -> Result<Vec<DailyMoneyHistoryMemberWithPreviousTradingDay>> {
+        let sql = r#"
+WITH recent_dates AS (
+    SELECT dmh.date
+    FROM daily_money_history_member dmh
+    WHERE dmh.date <= $1
+    GROUP BY dmh.date
+    ORDER BY dmh.date DESC
+    LIMIT 2
+),
+ranked_dates AS (
+    SELECT
+        rd.date,
+        ROW_NUMBER() OVER (ORDER BY rd.date DESC) AS rn
+    FROM recent_dates rd
+),
+current_rows AS (
+    SELECT dmh.member_id, dmh.market_value
+    FROM daily_money_history_member dmh
+    WHERE dmh.date = (SELECT date FROM ranked_dates WHERE rn = 1)
+),
+previous_rows AS (
+    SELECT dmh.member_id, dmh.market_value
+    FROM daily_money_history_member dmh
+    WHERE dmh.date = (SELECT date FROM ranked_dates WHERE rn = 2)
+),
+member_scope AS (
+    SELECT member_id FROM current_rows
+    UNION
+    SELECT member_id FROM previous_rows
+)
+SELECT
+    COALESCE((SELECT date FROM ranked_dates WHERE rn = 1), $1) AS date,
+    (SELECT date FROM ranked_dates WHERE rn = 2) AS previous_date,
+    ms.member_id,
+    COALESCE(cr.market_value, 0) AS market_value,
+    COALESCE(pr.market_value, 0) AS previous_market_value
+FROM member_scope ms
+LEFT JOIN current_rows cr ON ms.member_id = cr.member_id
+LEFT JOIN previous_rows pr ON ms.member_id = pr.member_id
+ORDER BY ms.member_id;
+"#;
+
+        sqlx::query_as::<_, DailyMoneyHistoryMemberWithPreviousTradingDay>(sql)
+            .bind(date)
+            .fetch_all(database::get_connection())
+            .await
+            .context(format!(
+                "Failed to fetch_with_previous_trading_day({}) from database",
+                date
+            ))
     }
 }
 

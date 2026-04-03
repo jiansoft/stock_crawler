@@ -5,8 +5,6 @@ use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
 
 use crate::database;
 
-pub(crate) mod extension;
-
 /// 每日市值變化歷史記錄
 #[derive(sqlx::FromRow, Debug)]
 pub struct DailyMoneyHistory {

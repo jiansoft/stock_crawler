@@ -1,16 +1,22 @@
+use std::fmt::Write;
+
 use crate::{
     backfill,
     bot::{self, telegram::Telegram},
     cache::{TtlCacheInner, TTL},
     calculation, crawler,
     database::table::{
-        daily_money_history::extension::with_previous_trading_day_money_history::DailyMoneyHistoryWithPreviousTradingDayMoneyHistory,
-        daily_quote, last_daily_quotes, yield_rank::YieldRank,
+        daily_money_history_member::{
+            DailyMoneyHistoryMember, DailyMoneyHistoryMemberWithPreviousTradingDay,
+        },
+        daily_quote, last_daily_quotes,
+        yield_rank::YieldRank,
     },
     logging,
 };
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use scopeguard::defer;
 
@@ -91,32 +97,115 @@ async fn aggregate(date: NaiveDate) -> Result<()> {
     notify_money_change(date).await
 }
 
-async fn notify_money_change(date: NaiveDate) -> Result<()> {
-    let mh = DailyMoneyHistoryWithPreviousTradingDayMoneyHistory::fetch(date).await?;
+fn member_label(member_id: i64) -> String {
+    match member_id {
+        1 => "Eddie".to_string(),
+        2 => "Unice".to_string(),
+        3 => "Hugo".to_string(),
+        4 => "Aiden".to_string(),
+        _ => format!("Member {}", member_id),
+    }
+}
 
-    // Percentage = ((a-b)/b)*100
-    let hundred = dec!(100);
-    let sum_diff = mh.sum - mh.previous_sum;
-    let sum_percentage = (sum_diff / mh.previous_sum) * hundred;
-    let eddie_diff = mh.eddie - mh.previous_eddie;
-    let eddie_percentage = (eddie_diff / mh.previous_eddie) * hundred;
-    let unice_diff = mh.unice - mh.previous_unice;
-    let unice_percentage = (unice_diff / mh.previous_unice) * hundred;
-    let msg = format!(
-        "{} 市值變化\n合計:{} {} \\({}%\\)\nEddie:{} {} \\({}%\\)\nUnice:{} {} \\({}%\\)",
-        Telegram::escape_markdown_v2(date.to_string()),
-        Telegram::escape_markdown_v2(mh.sum.round_dp(2).to_string()),
-        Telegram::escape_markdown_v2(sum_diff.round_dp(2).to_string()),
-        Telegram::escape_markdown_v2(sum_percentage.round_dp(2).to_string()),
-        Telegram::escape_markdown_v2(mh.eddie.round_dp(2).to_string()),
-        Telegram::escape_markdown_v2(eddie_diff.round_dp(2).to_string()),
-        Telegram::escape_markdown_v2(eddie_percentage.round_dp(2).to_string()),
-        Telegram::escape_markdown_v2(mh.unice.round_dp(2).to_string()),
-        Telegram::escape_markdown_v2(unice_diff.round_dp(2).to_string()),
-        Telegram::escape_markdown_v2(unice_percentage.round_dp(2).to_string()),
+fn add_thousand_separators(raw: &str) -> String {
+    let (sign, digits) = if let Some(rest) = raw.strip_prefix('-') {
+        ("-", rest)
+    } else {
+        ("", raw)
+    };
+    let mut result = String::with_capacity(raw.len() + raw.len() / 3);
+
+    for (idx, ch) in digits.chars().rev().enumerate() {
+        if idx > 0 && idx % 3 == 0 {
+            result.push(',');
+        }
+        result.push(ch);
+    }
+
+    let formatted: String = result.chars().rev().collect();
+    format!("{sign}{formatted}")
+}
+
+fn format_decimal_with_commas(value: Decimal) -> String {
+    let rounded = value.round_dp(2).to_string();
+    let (integer_part, fractional_part) = rounded
+        .split_once('.')
+        .map_or((rounded.as_str(), ""), |(int_part, frac_part)| {
+            (int_part, frac_part)
+        });
+    let formatted_integer = add_thousand_separators(integer_part);
+
+    match fractional_part.len() {
+        0 => format!("{formatted_integer}.00"),
+        1 => format!("{formatted_integer}.{fractional_part}0"),
+        _ => format!("{formatted_integer}.{}", &fractional_part[..2]),
+    }
+}
+
+fn format_money_change_line(
+    label: &str,
+    market_value: Decimal,
+    previous_market_value: Decimal,
+) -> String {
+    let diff = market_value - previous_market_value;
+    let percentage = if previous_market_value.is_zero() {
+        "N/A".to_string()
+    } else {
+        format_decimal_with_commas((diff / previous_market_value) * dec!(100))
+    };
+
+    format!(
+        "{}:{} {} \\({}%\\)",
+        Telegram::escape_markdown_v2(label),
+        Telegram::escape_markdown_v2(format_decimal_with_commas(market_value)),
+        Telegram::escape_markdown_v2(format_decimal_with_commas(diff)),
+        Telegram::escape_markdown_v2(percentage),
+    )
+}
+
+fn build_money_change_message(
+    rows: &[DailyMoneyHistoryMemberWithPreviousTradingDay],
+) -> Option<String> {
+    let date = rows.first()?.date;
+    let mut msg = String::with_capacity(256);
+    let _ = writeln!(
+        &mut msg,
+        "{} 市值變化",
+        Telegram::escape_markdown_v2(date.to_string())
     );
 
-    bot::telegram::send(&msg).await;
+    if let Some(total_row) = rows.iter().find(|row| row.member_id == 0) {
+        let _ = writeln!(
+            &mut msg,
+            "{}",
+            format_money_change_line(
+                "合計",
+                total_row.market_value,
+                total_row.previous_market_value
+            )
+        );
+    }
+
+    for row in rows.iter().filter(|row| row.member_id > 0) {
+        let _ = writeln!(
+            &mut msg,
+            "{}",
+            format_money_change_line(
+                &member_label(row.member_id),
+                row.market_value,
+                row.previous_market_value,
+            )
+        );
+    }
+
+    Some(msg.trim_end().to_string())
+}
+
+async fn notify_money_change(date: NaiveDate) -> Result<()> {
+    let rows = DailyMoneyHistoryMember::fetch_with_previous_trading_day(date).await?;
+    if let Some(msg) = build_money_change_message(&rows) {
+        bot::telegram::send(&msg).await;
+    }
 
     Ok(())
 }
@@ -125,6 +214,8 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
 mod tests {
     use crate::{cache::SHARE, logging};
     use std::time::Duration;
+
+    use rust_decimal_macros::dec;
 
     use super::*;
 
@@ -136,7 +227,7 @@ mod tests {
 
         logging::debug_file_async("開始 event::taiwan_stock::closing::aggregate".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2026-03-31", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2026-04-02", "%Y-%m-%d").unwrap();
 
         match aggregate(current_date).await {
             Ok(_) => {
@@ -185,5 +276,59 @@ mod tests {
         logging::debug_file_async(
             "結束 event::taiwan_stock::closing::notify_money_change".to_string(),
         );
+    }
+
+    #[test]
+    fn test_build_money_change_message_includes_hugo() {
+        let date = NaiveDate::parse_from_str("2026-04-02", "%Y-%m-%d").unwrap();
+        let previous_date = NaiveDate::parse_from_str("2026-04-01", "%Y-%m-%d").unwrap();
+        let rows = vec![
+            DailyMoneyHistoryMemberWithPreviousTradingDay {
+                date,
+                previous_date: Some(previous_date),
+                member_id: 0,
+                market_value: dec!(4273187.20),
+                previous_market_value: dec!(4053774.55),
+            },
+            DailyMoneyHistoryMemberWithPreviousTradingDay {
+                date,
+                previous_date: Some(previous_date),
+                member_id: 1,
+                market_value: dec!(2195395.10),
+                previous_market_value: dec!(2207807.70),
+            },
+            DailyMoneyHistoryMemberWithPreviousTradingDay {
+                date,
+                previous_date: Some(previous_date),
+                member_id: 2,
+                market_value: dec!(1500000.00),
+                previous_market_value: dec!(1400000.00),
+            },
+            DailyMoneyHistoryMemberWithPreviousTradingDay {
+                date,
+                previous_date: Some(previous_date),
+                member_id: 3,
+                market_value: dec!(577792.10),
+                previous_market_value: dec!(445966.85),
+            },
+        ];
+
+        let msg = build_money_change_message(&rows).expect("message should be built");
+
+        assert!(msg.contains("合計"));
+        assert!(msg.contains("Eddie"));
+        assert!(msg.contains("Unice"));
+        assert!(msg.contains("Hugo"));
+        assert!(msg.contains("4,273,187\\.20"));
+        assert!(msg.contains("577,792\\.10"));
+        assert!(msg.contains("\\-12,412\\.60"));
+    }
+
+    #[test]
+    fn test_format_decimal_with_commas() {
+        assert_eq!(format_decimal_with_commas(dec!(4273187.20)), "4,273,187.20");
+        assert_eq!(format_decimal_with_commas(dec!(-12412.6)), "-12,412.60");
+        assert_eq!(format_decimal_with_commas(dec!(5.41)), "5.41");
+        assert_eq!(format_decimal_with_commas(dec!(0)), "0.00");
     }
 }
