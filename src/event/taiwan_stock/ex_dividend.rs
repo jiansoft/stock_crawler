@@ -81,8 +81,7 @@ fn build_holding_dividend_message(
         .map(|stock| (stock.stock_symbol.as_str(), stock))
         .collect::<std::collections::HashMap<_, _>>();
     // key = (股票代號, member_id)，value = (股票名稱, 持股股數合計, 持股成本合計, 現金股利合計, 股票股利合計)
-    let mut grouped =
-        BTreeMap::<(String, i64), (String, i64, Decimal, Decimal, Decimal)>::new();
+    let mut grouped = BTreeMap::<(String, i64), (String, i64, Decimal, Decimal, Decimal)>::new();
 
     for holding in holdings
         .iter()
@@ -146,17 +145,10 @@ fn build_holding_dividend_message(
         return None;
     }
 
-    for ((
-        stock_symbol,
-        member_id,
-    ), (
-        name,
-        share_quantity,
-        holding_cost,
-        cash_dividend,
-        stock_dividend,
-    )) in
-        grouped
+    for (
+        (stock_symbol, member_id),
+        (name, share_quantity, holding_cost, cash_dividend, stock_dividend),
+    ) in grouped
     {
         let cash_yield = if holding_cost.is_zero() {
             Decimal::ZERO

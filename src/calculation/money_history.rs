@@ -7,6 +7,7 @@ use crate::database::{
         daily_money_history::DailyMoneyHistory,
         daily_money_history_detail::DailyMoneyHistoryDetail,
         daily_money_history_detail_more::DailyMoneyHistoryDetailMore,
+        daily_money_history_member::DailyMoneyHistoryMember,
         daily_stock_price_stats::DailyStockPriceStats,
     },
 };
@@ -16,9 +17,10 @@ use crate::database::{
 /// 這個方法會在台股收盤匯總流程
 /// (`event::taiwan_stock::closing::aggregate`) 中被呼叫，並依序更新：
 /// 1. `daily_money_history`：當日市值總覽（總額、Eddie、Unice）
-/// 2. `daily_money_history_detail`：持股層級明細
-/// 3. `daily_money_history_detail_more`：交易批次層級明細
-/// 4. `daily_stock_price_stats`：當日全市場估值/均線統計
+/// 2. `daily_money_history_member`：會員垂直總覽（member_id 維度，可擴充）
+/// 3. `daily_money_history_detail`：持股層級明細
+/// 4. `daily_money_history_detail_more`：交易批次層級明細
+/// 5. `daily_stock_price_stats`：當日全市場估值/均線統計
 ///
 /// `daily_money_history_detail_more` 會依賴 `daily_money_history_detail`，
 /// 因此順序不可顛倒，且 detail 類資料採「先刪除再重建」以避免殘留舊資料。
@@ -38,7 +40,15 @@ pub async fn calculate_money_history(date: NaiveDate) -> Result<()> {
         return Err(anyhow!("{:?}", why));
     }
 
-    // 2) 先清掉當日舊明細，再重建持股層級資料，避免重複與髒資料。
+    // 2) 寫入會員垂直總覽，保留舊表相容性的同時支援未來新會員。
+    if let Err(why) = DailyMoneyHistoryMember::upsert(date, &mut tx_option).await {
+        if let Some(tx) = tx_option {
+            tx.rollback().await?;
+        }
+        return Err(anyhow!("{:?}", why));
+    }
+
+    // 3) 先清掉當日舊明細，再重建持股層級資料，避免重複與髒資料。
     if let Err(why) = DailyMoneyHistoryDetail::delete(date, &mut tx_option).await {
         if let Some(tx) = tx_option {
             tx.rollback().await?;
@@ -53,7 +63,7 @@ pub async fn calculate_money_history(date: NaiveDate) -> Result<()> {
         return Err(anyhow!("{:?}", why));
     }
 
-    // 3) 明細延伸表依賴 daily_money_history_detail，因此必須在其後重建。
+    // 4) 明細延伸表依賴 daily_money_history_detail，因此必須在其後重建。
     if let Err(why) = DailyMoneyHistoryDetailMore::delete(date, &mut tx_option).await {
         if let Some(tx) = tx_option {
             tx.rollback().await?;
@@ -68,7 +78,7 @@ pub async fn calculate_money_history(date: NaiveDate) -> Result<()> {
         return Err(anyhow!("{:?}", why));
     }
 
-    // 4) 最後更新當日市場統計，確保收盤流程可直接使用最新數據。
+    // 5) 最後更新當日市場統計，確保收盤流程可直接使用最新數據。
     if let Err(why) = DailyStockPriceStats::upsert(date, &mut tx_option).await {
         if let Some(tx) = tx_option {
             tx.rollback().await?;

@@ -9,8 +9,7 @@ use crate::{
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
     bot::{self, telegram::Telegram},
-    declare, event,
-    logging,
+    declare, event, logging,
 };
 
 /// 啟動排程

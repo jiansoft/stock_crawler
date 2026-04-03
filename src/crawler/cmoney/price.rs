@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use reqwest::header::{self, HeaderValue};
 use rust_decimal::Decimal;
@@ -45,6 +45,34 @@ fn build_stock_page_headers() -> header::HeaderMap {
 /// CMoney 即時報價抓取實作。
 ///
 /// 此實作會抓取 CMoney 個股頁面，解析當前股價與漲跌資訊。
+fn parse_required_decimal(raw: &str, stock_symbol: &str, field_name: &str) -> Result<Decimal> {
+    let value = raw.trim();
+    if value.is_empty() || value == "-" {
+        return Err(anyhow!(
+            "CMoney field `{}` is unavailable for stock {}: {:?}",
+            field_name,
+            stock_symbol,
+            raw
+        ));
+    }
+
+    text::parse_decimal(value, None)
+}
+
+fn parse_required_f64(raw: &str, stock_symbol: &str, field_name: &str) -> Result<f64> {
+    let value = raw.trim();
+    if value.is_empty() || value == "-" {
+        return Err(anyhow!(
+            "CMoney field `{}` is unavailable for stock {}: {:?}",
+            field_name,
+            stock_symbol,
+            raw
+        ));
+    }
+
+    text::parse_f64(value, None)
+}
+
 #[async_trait]
 impl StockInfo for CMoney {
     /// 取得單一股票的即時價格。
@@ -66,7 +94,8 @@ impl StockInfo for CMoney {
             document,
         };
 
-        util::http::element::get_one_element_as_decimal(target)
+        let price = util::http::element::get_one_element(target)?;
+        parse_required_decimal(&price, stock_symbol, "price")
     }
 
     /// 取得單一股票的即時報價資訊。
@@ -88,7 +117,7 @@ impl StockInfo for CMoney {
             element: "div.stockData__info > div",
             document: document.clone(),
         })?;
-        let price = text::parse_f64(&price, None)?;
+        let price = parse_required_f64(&price, stock_symbol, "price")?;
 
         let change =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
@@ -98,7 +127,7 @@ impl StockInfo for CMoney {
                 element: r"div.stockData__info > div.stockData__value > div.stockData__quotePrice",
                 document: document.clone(),
             })?;
-        let change = text::parse_f64(&change, None)?;
+        let change = parse_required_f64(&change, stock_symbol, "change")?;
 
         let change_range =
             util::http::element::get_one_element(util::http::element::GetOneElementText {
@@ -108,7 +137,16 @@ impl StockInfo for CMoney {
                 element: r"div.stockData__info > div.stockData__value > div.stockData__quote",
                 document: document.clone(),
             })?;
-        let change_range = text::parse_f64(&change_range, Some(['(', ')'].to_vec()))?;
+        let change_range_raw = change_range.trim();
+        let change_range = if change_range_raw.is_empty() || change_range_raw == "-" {
+            return Err(anyhow!(
+                "CMoney field `change_range` is unavailable for stock {}: {:?}",
+                stock_symbol,
+                change_range
+            ));
+        } else {
+            text::parse_f64(change_range_raw, Some(['(', ')'].to_vec()))?
+        };
 
         Ok(declare::StockQuotes {
             stock_symbol: stock_symbol.to_string(),
@@ -127,13 +165,29 @@ mod tests {
     use super::*;
     use crate::logging;
 
+    #[test]
+    fn test_parse_required_decimal_rejects_dash() {
+        let err = parse_required_decimal("-", "5306", "price")
+            .expect_err("dash should be treated as unavailable");
+        assert!(err.to_string().contains("field `price` is unavailable"));
+        assert!(err.to_string().contains("5306"));
+    }
+
+    #[test]
+    fn test_parse_required_f64_rejects_dash() {
+        let err =
+            parse_required_f64("-", "5306", "change").expect_err("dash should be unavailable");
+        assert!(err.to_string().contains("field `change` is unavailable"));
+        assert!(err.to_string().contains("5306"));
+    }
+
     #[tokio::test]
     /// 測試可取得指定股票即時價格。
     async fn test_get_stock_price() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 get_stock_price".to_string());
 
-        match CMoney::get_stock_price("3008").await {
+        match CMoney::get_stock_price("4438").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("price : {:#?}", e));
@@ -152,7 +206,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 cmoney::get_stock_quotes".to_string());
 
-        match CMoney::get_stock_quotes("6792").await {
+        match CMoney::get_stock_quotes("4438").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("cmoney::get_stock_quotes : {:#?}", e));

@@ -31,6 +31,8 @@ pub mod daily_money_history;
 pub mod daily_money_history_detail;
 /// 每日市值記錄各檔股票的股數明細
 pub mod daily_money_history_detail_more;
+/// 每日市值記錄各會員垂直總覽
+pub mod daily_money_history_member;
 /// 每日股票價格估值統計
 pub mod daily_stock_price_stats;
 /// 股票便宜、合理、昂貴價的估算
