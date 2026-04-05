@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
 use sqlx::postgres::PgQueryResult;
 
-use crate::database;
+use crate::{database, declare::Industry};
 
 /// 個股估值資料。
 ///
@@ -140,7 +140,7 @@ WITH filtered_years AS (
 stocks AS (
     -- 篩選出目前未停止上市的股票，獲取其代號、最新的近四季 EPS、每股淨值與所屬產業 ID
     SELECT stock_symbol, last_four_eps, net_asset_value_per_share, stock_industry_id
-    FROM public.stocks WHERE "SuspendListing" = false
+    FROM public.stocks WHERE "SuspendListing" = false AND stock_industry_id != $3
 ),
 daily_stats AS (
     -- 核心統計 CTE：計算指定年份區間內，每支股票的價格位階與估值倍數位階
@@ -285,6 +285,7 @@ ON CONFLICT (date, security_code) DO UPDATE SET
         sqlx::query(sql)
             .bind(date)
             .bind(&years)
+            .bind(Industry::ExchangeTradedFund.serial())
             .execute(database::get_connection())
             .await
             .map_err(|why| {
@@ -317,7 +318,7 @@ WITH filtered_years AS (
 ),
 stocks AS (
     SELECT stock_symbol, last_four_eps, net_asset_value_per_share, stock_industry_id
-    FROM public.stocks WHERE stock_symbol = $3 AND "SuspendListing" = false
+    FROM public.stocks WHERE stock_symbol = $3 AND "SuspendListing" = false AND stock_industry_id != $4
 ),
 daily_stats AS (
     SELECT
@@ -474,6 +475,7 @@ ON CONFLICT (date, security_code) DO UPDATE SET
             .bind(self.date)
             .bind(&years)
             .bind(&self.security_code)
+            .bind(Industry::ExchangeTradedFund.serial())
             .execute(database::get_connection())
             .await
             .map_err(|why| {

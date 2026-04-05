@@ -162,5 +162,17 @@ values (39, '存託憑證')
     on conflict (stock_industry_id) DO UPDATE SET name = excluded.name;
 
 insert into stock_industry (stock_industry_id, name)
+values (9001, 'ETF')
+    on conflict (stock_industry_id) DO UPDATE SET name = excluded.name;
+
+insert into stock_industry (stock_industry_id, name)
+values (9002, 'ETN')
+    on conflict (stock_industry_id) DO UPDATE SET name = excluded.name;
+
+insert into stock_industry (stock_industry_id, name)
+values (9003, '受益證券')
+    on conflict (stock_industry_id) DO UPDATE SET name = excluded.name;
+
+insert into stock_industry (stock_industry_id, name)
 values (99, '未分類')
     on conflict (stock_industry_id) DO UPDATE SET name = excluded.name;

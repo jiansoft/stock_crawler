@@ -299,6 +299,15 @@ pub enum Industry {
     /// 存託憑證 39
     #[strum(serialize = "存託憑證")]
     DepositaryReceipts = 39,
+    /// ETF 9001
+    #[strum(serialize = "ETF")]
+    ExchangeTradedFund = 9001,
+    /// ETN 9002
+    #[strum(serialize = "ETN")]
+    ExchangeTradedNote = 9002,
+    /// 受益證券 9003
+    #[strum(serialize = "受益證券")]
+    BeneficialSecurity = 9003,
     /// 未分類 99
     #[strum(serialize = "未分類")]
     Uncategorized = 99,
@@ -354,6 +363,9 @@ impl Industry {
             Self::ECommerce,
             Self::TourismCatering,
             Self::DepositaryReceipts,
+            Self::ExchangeTradedFund,
+            Self::ExchangeTradedNote,
+            Self::BeneficialSecurity,
             Self::Uncategorized,
         ]
         .iter()
@@ -424,6 +436,9 @@ mod tests {
         assert_eq!(Industry::SportsRecreation.serial(), 37);
         assert_eq!(Industry::HomeLife.serial(), 38);
         assert_eq!(Industry::DepositaryReceipts.serial(), 39);
+        assert_eq!(Industry::ExchangeTradedFund.serial(), 9001);
+        assert_eq!(Industry::ExchangeTradedNote.serial(), 9002);
+        assert_eq!(Industry::BeneficialSecurity.serial(), 9003);
         assert_eq!(Industry::Uncategorized.serial(), 99);
     }
 
@@ -471,6 +486,9 @@ mod tests {
         assert_eq!(Industry::SportsRecreation.name(), "運動休閒");
         assert_eq!(Industry::HomeLife.name(), "居家生活");
         assert_eq!(Industry::DepositaryReceipts.name(), "存託憑證");
+        assert_eq!(Industry::ExchangeTradedFund.name(), "ETF");
+        assert_eq!(Industry::ExchangeTradedNote.name(), "ETN");
+        assert_eq!(Industry::BeneficialSecurity.name(), "受益證券");
         assert_eq!(Industry::Uncategorized.name(), "未分類");
     }
 

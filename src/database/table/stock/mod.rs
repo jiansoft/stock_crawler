@@ -9,6 +9,7 @@ use crate::{
         self,
         table::{stock_index, stock_word},
     },
+    declare::Industry,
     logging,
     util::{self, map::Keyable},
 };
@@ -270,6 +271,17 @@ ORDER BY
                 )
             })
     }
+
+    /// 依現有 `stocks` 主檔重建搜尋索引。
+    ///
+    /// 用於直接執行 migration 匯入資料後，補建 `company_word` / `company_index`。
+    pub async fn rebuild_search_indices() -> Result<()> {
+        for stock in Self::fetch().await? {
+            stock.create_index().await;
+        }
+
+        Ok(())
+    }
 }
 
 impl Keyable for Stock {
@@ -366,10 +378,12 @@ SELECT
 FROM stocks AS s
 WHERE s.stock_exchange_market_id in (2, 4)
     AND s."SuspendListing" = false
+    AND s.stock_industry_id != $1
     AND s.net_asset_value_per_share = 0
 "#;
 
     sqlx::query_as::<_, Stock>(sql)
+        .bind(Industry::ExchangeTradedFund.serial())
         .fetch_all(database::get_connection())
         .await
         .context("Failed to fetch_net_asset_value_per_share_is_zero from database")
@@ -397,6 +411,7 @@ SELECT
 FROM stocks AS s
 WHERE s.stock_exchange_market_id in(2, 4)
     AND s."SuspendListing" = false
+    AND s.stock_industry_id != $3
     AND NOT EXISTS (
         SELECT 1
         FROM financial_statement f
@@ -410,6 +425,7 @@ WHERE s.stock_exchange_market_id in(2, 4)
     sqlx::query_as::<_, Stock>(sql)
         .bind(year)
         .bind(quarter)
+        .bind(Industry::ExchangeTradedFund.serial())
         .fetch_all(database::get_connection())
         .await
         .context("Failed to fetch_stocks_without_financial_statement from database")
@@ -511,5 +527,26 @@ mod tests {
         e.stock_symbol = "2330".to_string();
         e.name = "台積電".to_string();
         e.create_index().await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_rebuild_search_indices() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 rebuild_search_indices".to_string());
+
+        match Stock::rebuild_search_indices().await {
+            Ok(_) => {
+                logging::debug_file_async("完成 rebuild_search_indices".to_string());
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to rebuild_search_indices because: {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 rebuild_search_indices".to_string());
     }
 }

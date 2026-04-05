@@ -172,6 +172,18 @@ pub(crate) fn default_industries() -> HashMap<String, i32> {
             Industry::DepositaryReceipts.serial(),
         ),
         (
+            Industry::ExchangeTradedFund.name(),
+            Industry::ExchangeTradedFund.serial(),
+        ),
+        (
+            Industry::ExchangeTradedNote.name(),
+            Industry::ExchangeTradedNote.serial(),
+        ),
+        (
+            Industry::BeneficialSecurity.name(),
+            Industry::BeneficialSecurity.serial(),
+        ),
+        (
             Industry::Uncategorized.name(),
             Industry::Uncategorized.serial(),
         ),
