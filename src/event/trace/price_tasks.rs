@@ -786,7 +786,7 @@ async fn refresh_traced_stock_snapshot_cache() -> Result<()> {
         return Ok(());
     }
 
-    let results = future::join_all(
+    let _ = future::join_all(
         symbols
             .into_iter()
             .map(|symbol| async move { refresh_single_traced_stock_snapshot(symbol).await }),
