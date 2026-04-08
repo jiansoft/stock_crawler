@@ -793,8 +793,8 @@ async fn refresh_traced_stock_snapshot_cache() -> Result<()> {
     )
     .await;
 
-    let updated = results.into_iter().filter(|is_updated| *is_updated).count();
-    logging::debug_file_async(format!("追蹤股票備援快取已更新 {} 檔", updated));
+    //let updated = results.into_iter().filter(|is_updated| *is_updated).count();
+    // logging::debug_file_async(format!("追蹤股票備援快取已更新 {} 檔", updated));
 
     Ok(())
 }

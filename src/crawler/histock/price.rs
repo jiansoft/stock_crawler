@@ -286,6 +286,7 @@ pub fn start_caching_task() {
                     LAST_ELAPSED_MS.store(elapsed_ms, Ordering::SeqCst);
                     LAST_RSS_DELTA_KIB.store(rss_delta_kib, Ordering::SeqCst);
                     COMPLETED_CYCLES.fetch_add(1, Ordering::SeqCst);
+                    /*
                     crate::logging::debug_file_async(format!(
                         "HiStock 快取已更新，共 {} 檔股票，rows={} body={}KiB changed_events={} rss_delta={}KiB，耗時 {:?}",
                         count,
@@ -295,6 +296,7 @@ pub fn start_caching_task() {
                         rss_delta_kib,
                         start_time.elapsed()
                     ));
+                    */
                     /*
                     crate::logging::info_file_async(format!(
                         "HiStock cycle diagnostics | snapshots={} rows={} body={}KiB changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
