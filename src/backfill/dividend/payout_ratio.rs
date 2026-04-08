@@ -42,7 +42,7 @@ pub async fn execute() -> Result<()> {
             .await?;
 
         let dividends_from_goodinfo = goodinfo::dividend::visit(&security_code).await?;
-        for gds in dividends_from_goodinfo.values() {
+        for (_, gds) in dividends_from_goodinfo {
             for gd in gds {
                 let key = gd.key();
                 if let Some(pri) = dividend_without_payout_ratio.get_mut(&key) {

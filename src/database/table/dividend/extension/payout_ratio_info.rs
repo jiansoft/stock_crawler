@@ -9,7 +9,7 @@ use crate::{database, util::map::Keyable};
 pub struct PayoutRatioInfo {
     /// 股利資料序號（`dividend.serial`）。
     pub serial: i64,
-    /// 股利發放年度。
+    /// 股利所屬年度。
     pub year: i32,
     /// 股利季度（Q1/Q2/Q3/Q4/H1/H2 或空字串）。
     pub quarter: String,
@@ -56,7 +56,7 @@ pub async fn fetch_without_payout_ratio() -> Result<Vec<PayoutRatioInfo>> {
     let sql = r#"
 select serial,
        security_code,
-       year,
+       year_of_dividend as year,
        quarter,
        payout_ratio_cash,
        payout_ratio_stock,
