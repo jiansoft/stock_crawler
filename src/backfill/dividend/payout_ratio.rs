@@ -38,7 +38,7 @@ pub async fn execute() -> Result<()> {
         }
 
         nosql::redis::CLIENT
-            .set(cache_key, true, 60 * 60 * 24 * 7)
+            .set(cache_key, true, 60 * 60 * 24 * 2)
             .await?;
 
         let dividends_from_goodinfo = goodinfo::dividend::visit(&security_code).await?;
@@ -50,8 +50,21 @@ pub async fn execute() -> Result<()> {
                     pri.payout_ratio_stock = gd.payout_ratio_stock;
                     pri.payout_ratio_cash = gd.payout_ratio_cash;
 
-                    if let Err(why) = pri.update().await {
-                        logging::error_file_async(format!("{} {:?}", key, why));
+                    match pri.update().await {
+                        Ok(_) => {
+                            logging::info_file_async(format!(
+                                "更新盈餘分配率成功: security_code={}, year_of_dividend={}, quarter={}, payout_ratio_cash={}, payout_ratio_stock={}, payout_ratio={}",
+                                pri.security_code,
+                                pri.year,
+                                pri.quarter,
+                                pri.payout_ratio_cash,
+                                pri.payout_ratio_stock,
+                                pri.payout_ratio
+                            ));
+                        }
+                        Err(why) => {
+                            logging::error_file_async(format!("{} {:?}", key, why));
+                        }
                     }
                 }
             }
