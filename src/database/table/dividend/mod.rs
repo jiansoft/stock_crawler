@@ -152,6 +152,10 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     cash_dividend = EXCLUDED.cash_dividend,
     stock_dividend = EXCLUDED.stock_dividend,
     "sum" = EXCLUDED."sum",
+    "ex-dividend_date1" = EXCLUDED."ex-dividend_date1",
+    "ex-dividend_date2" = EXCLUDED."ex-dividend_date2",
+    payable_date1 = EXCLUDED.payable_date1,
+    payable_date2 = EXCLUDED.payable_date2,
     updated_time = EXCLUDED.updated_time,
     capital_reserve_cash_dividend = EXCLUDED.capital_reserve_cash_dividend,
     earnings_cash_dividend = EXCLUDED.earnings_cash_dividend,
@@ -365,13 +369,19 @@ WHERE
     AND
     (
         (
-            ("ex-dividend_date1" = '-' OR "ex-dividend_date1" = '尚未公布' OR payable_date1 = '尚未公布')
-            AND cash_dividend > 0
+            cash_dividend > 0
+            AND (
+                "ex-dividend_date1" IN ('-', '尚未公布')
+                OR payable_date1 IN ('-', '尚未公布')
+            )
         )
         OR
         (
-            ("ex-dividend_date2" = '-' OR "ex-dividend_date2" = '尚未公布' OR payable_date2 = '尚未公布')
-            AND stock_dividend > 0
+            stock_dividend > 0
+            AND (
+                "ex-dividend_date2" IN ('-', '尚未公布')
+                OR payable_date2 IN ('-', '尚未公布')
+            )
         )
     );
 "#,
@@ -549,6 +559,7 @@ impl From<goodinfo::dividend::GoodInfoDividend> for Dividend {
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
+    use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
     use crate::logging;
@@ -694,6 +705,82 @@ mod tests {
         }
 
         logging::debug_file_async("結束 upsert".to_string());
+    }
+
+    /// 驗證 `upsert` 在主鍵衝突時會同步更新除權息日與股利發放日。
+    ///
+    /// 此測試會實際寫入 `dividend` 表。先用測試股票代碼寫入 `尚未公布` 日期，再以同一主鍵
+    /// upsert 正式日期，最後查回確認四個日期欄位都已被覆蓋。測試結束會刪除測試股票代碼資料。
+    #[tokio::test]
+    #[ignore]
+    async fn test_upsert_updates_dividend_dates_on_conflict() {
+        dotenv::dotenv().ok();
+
+        let security_code = "__TEST_UPSERT_DATE__";
+        let year = 2099;
+        let cleanup_sql = "DELETE FROM dividend WHERE security_code = $1;";
+
+        sqlx::query(cleanup_sql)
+            .bind(security_code)
+            .execute(database::get_connection())
+            .await
+            .expect("cleanup dividend test rows before test");
+
+        let mut unpublished = Dividend::new();
+        unpublished.security_code = security_code.to_string();
+        unpublished.year = year;
+        unpublished.year_of_dividend = year - 1;
+        unpublished.cash_dividend = dec!(42);
+        unpublished.sum = dec!(42);
+        unpublished.ex_dividend_date1 = "尚未公布".to_string();
+        unpublished.ex_dividend_date2 = "-".to_string();
+        unpublished.payable_date1 = "尚未公布".to_string();
+        unpublished.payable_date2 = "-".to_string();
+        unpublished
+            .upsert()
+            .await
+            .expect("insert unpublished dividend row");
+
+        let mut published = unpublished.clone();
+        published.cash_dividend = dec!(43);
+        published.sum = dec!(43);
+        published.ex_dividend_date1 = "2099-06-26".to_string();
+        published.ex_dividend_date2 = "2099-06-27".to_string();
+        published.payable_date1 = "2099-07-17".to_string();
+        published.payable_date2 = "2099-07-18".to_string();
+        published
+            .upsert()
+            .await
+            .expect("update published dividend row");
+
+        let row = sqlx::query(
+            r#"
+SELECT cash_dividend,
+       "ex-dividend_date1",
+       "ex-dividend_date2",
+       payable_date1,
+       payable_date2
+FROM dividend
+WHERE security_code = $1 AND year = $2 AND quarter = '';
+"#,
+        )
+        .bind(security_code)
+        .bind(year)
+        .fetch_one(database::get_connection())
+        .await
+        .expect("fetch updated dividend row");
+
+        assert_eq!(row.get::<Decimal, _>("cash_dividend"), dec!(43));
+        assert_eq!(row.get::<String, _>("ex-dividend_date1"), "2099-06-26");
+        assert_eq!(row.get::<String, _>("ex-dividend_date2"), "2099-06-27");
+        assert_eq!(row.get::<String, _>("payable_date1"), "2099-07-17");
+        assert_eq!(row.get::<String, _>("payable_date2"), "2099-07-18");
+
+        sqlx::query(cleanup_sql)
+            .bind(security_code)
+            .execute(database::get_connection())
+            .await
+            .expect("cleanup dividend test rows after test");
     }
 
     #[tokio::test]

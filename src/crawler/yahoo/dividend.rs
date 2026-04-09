@@ -10,8 +10,10 @@
 //!
 //! ## 解析邏輯
 //!
-//! - **年度判定**：優先以「除息日」或「除權日」的年份作為發放年度。
-//! - **格式化**：自動將網頁上的日期斜線 (`/`) 轉換為標準橫線 (`-`)。
+//! - **年度判定**：優先以「除息日」或「除權日」的年份作為發放年度；若日期尚未公布，
+//!   則以 `股利所屬年度 + 1` 推估發放年度。
+//! - **格式化**：自動將網頁上的日期斜線 (`/`) 轉換為標準橫線 (`-`)，並保留 `尚未公布`
+//!   供後續日期回補流程辨識。
 //! - **效能**：使用 `Lazy` 靜態化正則與選擇器，並在內部使用 `HashMap` 進行年度聚合後再排序輸出。
 
 use std::collections::HashMap;
@@ -98,7 +100,8 @@ impl YahooDividend {
 /// * `stock_symbol` - 股票代碼 (例如: "2330")
 ///
 /// # 實作細節
-/// 遍歷股利列表表格，提取各項日期與金額。若該筆資料尚未公佈日期，則會被略過。
+/// 遍歷股利列表表格，提取各項日期與金額。若該筆資料尚未公布日期，會以
+/// `year_of_dividend + 1` 推估發放年度，讓擬定股利也能先被回補。
 /// 最終結果會依照年份降序（新年度在前）排列。
 pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     let url = format!("https://{}/quote/{}/dividend", HOST, stock_symbol);
@@ -160,9 +163,9 @@ fn parse_dividend_document(
             (ex_div_date, ex_rights_date, pay_date1, pay_date2)
         };
 
-        // 若無有效年份（代表日期皆尚未公佈），則略過此筆配息記錄
+        // 若日期皆尚未公布，Yahoo 仍可能先揭露擬定股利；此時先用股利所屬年度加一推估發放年度。
         if year == 0 {
-            continue;
+            year = estimate_paid_year(year_of_dividend);
         }
 
         // 股利數值 (3=現金股利, 4=股票股利)
@@ -207,11 +210,13 @@ fn parse_val(el: &scraper::ElementRef, child_idx: usize) -> Decimal {
 /// 內部輔助：解析日期字串並提取年度。
 ///
 /// 若傳入 `year_out` 為 0，會嘗試從日期 (YYYY/MM/DD) 提取年份填入。
-/// 同時將日期格式由 `YYYY/MM/DD` 轉換為 `YYYY-MM-DD`。
+/// 同時將日期格式由 `YYYY/MM/DD` 轉換為 `YYYY-MM-DD`。若 Yahoo 明確標示 `尚未公布`，
+/// 會保留原值，讓後續資料庫查詢能每日重新採集該筆股利的除息日或發放日。
 fn parse_dt(el: &scraper::ElementRef, child_idx: usize, year_out: &mut i32) -> String {
     let selector = format!("div > div:nth-child({})", child_idx);
     let raw = http::element::parse_value(el, &selector);
     match raw {
+        Some(s) if s.trim() == "尚未公布" => "尚未公布".to_string(),
         Some(s) if !s.is_empty() && s.contains('/') => {
             if *year_out == 0 {
                 if let Some(y) = s.split('/').next().and_then(|y| y.parse::<i32>().ok()) {
@@ -234,6 +239,15 @@ fn parse_period(period: &Option<String>) -> Result<(i32, String)> {
         }
     }
     Ok((0, "".to_string()))
+}
+
+/// 從股利所屬年度推估發放年度。
+///
+/// Yahoo 對尚未公布除權息日的擬定股利，發放期間可能顯示 `-`，但仍會提供股利所屬年度與股利金額。
+/// 在無法從日期判斷實際發放年度時，先以 `year_of_dividend + 1` 建立可入庫的暫定發放年度，
+/// 後續日期公布後再由回補流程更新成實際日期資料。
+fn estimate_paid_year(year_of_dividend: i32) -> i32 {
+    year_of_dividend + 1
 }
 
 #[cfg(test)]
@@ -282,6 +296,7 @@ mod tests {
     #[test]
     fn parse_dividend_html_groups_records_by_paid_year_and_sorts_desc() {
         let html = wrap_rows(&[
+            dividend_row("2025", "42.00", "-", "尚未公布", "-", "尚未公布", "-"),
             dividend_row(
                 "2024Q4",
                 "1.5",
@@ -301,9 +316,26 @@ mod tests {
                 .expect("expected parser to extract dividend rows");
 
         assert_eq!(dividend.stock_symbol, "2330");
-        assert_eq!(dividend.dividend.len(), 2);
-        assert_eq!(dividend.dividend[0].0, 2025);
-        assert_eq!(dividend.dividend[1].0, 2024);
+        assert_eq!(dividend.dividend.len(), 4);
+        assert_eq!(dividend.dividend[0].0, 2026);
+        assert_eq!(dividend.dividend[1].0, 2025);
+        assert_eq!(dividend.dividend[2].0, 2024);
+        assert_eq!(dividend.dividend[3].0, 2023);
+
+        let details_2026 = dividend
+            .get_dividend_by_year(2026)
+            .expect("expected estimated grouped data for 2026");
+        assert_eq!(details_2026.len(), 1);
+        let announced = &details_2026[0];
+        assert_eq!(announced.year, 2026);
+        assert_eq!(announced.year_of_dividend, 2025);
+        assert_eq!(announced.quarter, "");
+        assert_eq!(announced.cash_dividend, dec!(42.00));
+        assert_eq!(announced.stock_dividend, Decimal::ZERO);
+        assert_eq!(announced.ex_dividend_date1, "尚未公布");
+        assert_eq!(announced.ex_dividend_date2, "-");
+        assert_eq!(announced.payable_date1, "尚未公布");
+        assert_eq!(announced.payable_date2, "-");
 
         let details_2025 = dividend
             .get_dividend_by_year(2025)
@@ -343,6 +375,18 @@ mod tests {
         assert_eq!(details_2024[0].ex_dividend_date1, "2024-07-01");
         assert_eq!(details_2024[0].payable_date1, "2024-07-30");
 
+        let details_2023 = dividend
+            .get_dividend_by_year(2023)
+            .expect("expected estimated grouped data for 2023");
+        assert_eq!(details_2023.len(), 1);
+        assert_eq!(details_2023[0].year, 2023);
+        assert_eq!(details_2023[0].year_of_dividend, 2022);
+        assert_eq!(details_2023[0].quarter, "Q2");
+        assert_eq!(details_2023[0].cash_dividend, dec!(1.0));
+        assert_eq!(details_2023[0].stock_dividend, Decimal::ZERO);
+        assert_eq!(details_2023[0].ex_dividend_date1, "-");
+        assert_eq!(details_2023[0].payable_date1, "-");
+
         assert!(dividend.get_dividend_by_year(2022).is_none());
     }
 
@@ -366,13 +410,12 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("5306").await {
+        match visit("2357").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("{:#?}", e));
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+                dbg!(&why);
             }
         }
 
