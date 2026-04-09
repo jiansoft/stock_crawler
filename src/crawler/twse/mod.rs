@@ -1,5 +1,7 @@
 /// 台股財報
 pub mod eps;
+/// ETF 資訊
+pub mod etf;
 /// 台股休市日期
 pub mod holiday_schedule;
 /// 國際證券辨識
@@ -17,4 +19,4 @@ pub mod suspend_listing;
 /// 台股加權指數
 pub mod taiwan_capitalization_weighted_stock_index;
 
-const HOST: &str = "twse.com.tw";
+pub const HOST: &str = "twse.com.tw";

@@ -5,7 +5,7 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
     backfill::{
-        delisted_company, dividend, financial_statement, isin, net_asset_value_per_share,
+        delisted_company, dividend, etf, financial_statement, isin, net_asset_value_per_share,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
     bot::{self, telegram::Telegram},
@@ -89,6 +89,8 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
         create_job("0 0 21 * * *", isin::execute),
         // 05:00 更新下市的股票
         create_job("0 0 21 * * *", delisted_company::execute),
+        // 05:00 更新台股 ETF 資訊
+        create_job("0 0 21 * * *", etf::execute),
         // 08:00 提醒本日除權息的股票
         create_job("0 0 0 * * *", event::taiwan_stock::ex_dividend::execute),
         // 08:00 提醒本日發放股利的股票(只通知自已有的股票)

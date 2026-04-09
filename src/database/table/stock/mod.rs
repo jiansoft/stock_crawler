@@ -144,7 +144,7 @@ WHERE
         let sql = r#"
 INSERT INTO stocks (
     stock_symbol, "Name", "CreateTime",
-    "SuspendListing", stock_exchange_market_id, stock_industry_id,weight)
+    "SuspendListing", stock_exchange_market_id, stock_industry_id, weight)
 VALUES ($1, $2, $3, $4, $5, $6, 0)
 ON CONFLICT (stock_symbol) DO UPDATE SET
     "Name" = EXCLUDED."Name",

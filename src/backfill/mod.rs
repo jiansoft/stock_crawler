@@ -2,6 +2,8 @@
 pub mod delisted_company;
 /// 更新股利發送數據
 pub mod dividend;
+/// 調用 twse API 取得 ETF 並更新股票相關欄位
+pub mod etf;
 /// 回補財報
 pub mod financial_statement;
 /// 調用 twse API 取得數據後更新股票相關欄位

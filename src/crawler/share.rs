@@ -11,8 +11,28 @@ use scraper::{ElementRef, Html, Selector};
 use crate::crawler::{bigdatacloud, myip};
 use crate::{
     crawler::{ipconfig, ipify, ipinfo, seeip},
+    database::table,
     util::{self, map::Keyable, text},
 };
+
+/// 台灣 ETF 資訊載體。
+///
+/// 此結構用於存儲從 TWSE 或 TPEx 採集到的 ETF 基本資料。
+#[derive(Debug, Clone)]
+pub struct EtfInfo {
+    /// 股票代號（例如："0050"）。
+    pub stock_symbol: String,
+    /// 股票名稱（例如："元大台灣50"）。
+    pub name: String,
+    /// 上市日期（格式：YYYY-MM-DD）。
+    pub listing_date: String,
+    /// 產業分類名稱（ETF 固定為 "ETF"）。
+    pub industry: String,
+    /// 交易市場資料（包含市場 ID、交易所名稱等）。
+    pub exchange_market: table::stock_exchange_market::StockExchangeMarket,
+    /// 產業分類 ID（專案中 ETF 的固定 ID 是 9001）。
+    pub industry_id: i32,
+}
 
 /// 年度財報
 #[derive(Debug, Clone, PartialEq)]

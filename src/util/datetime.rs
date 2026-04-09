@@ -222,6 +222,44 @@ pub fn parse_taiwan_date(date_str: &str) -> Option<NaiveDate> {
     NaiveDate::from_ymd_opt(year, month, day)
 }
 
+/// 解析短格式民國日期字串（無分隔符號）並轉成西元曆的 [`NaiveDate`]。
+///
+/// 此函式專門處理台灣證券交易所（TWSE）OpenAPI 格式中常見的 `YYYMMDD` 字串。
+/// 例如：`1150409` 代表民國 115 年 4 月 9 日，會被轉換為 `2026-04-09`。
+///
+/// # 參數
+///
+/// * `date_str` - 7 位數的民國日期字串，格式必須為 `YYYMMDD`。
+///
+/// # 回傳值
+///
+/// * `Some(NaiveDate)` - 解析成功且日期合法。
+/// * `None` - 字串長度不符（非 7 位）、內容包含非數字，或日期邏輯不合法（如 2 月 30 日）。
+///
+/// # 範例
+///
+/// ```ignore
+/// use stock_crawler::util::datetime::parse_taiwan_date_short;
+///
+/// let date = parse_taiwan_date_short("1150409").unwrap();
+/// assert_eq!(date.to_string(), "2026-04-09");
+/// ```
+pub fn parse_taiwan_date_short(date_str: &str) -> Option<NaiveDate> {
+    if date_str.len() != 7 {
+        return None;
+    }
+
+    let year_str = &date_str[0..3];
+    let month_str = &date_str[3..5];
+    let day_str = &date_str[5..7];
+
+    let year = roc_year_to_gregorian_year(parse_date_part::<i32>(year_str)?);
+    let month = parse_date_part::<u32>(month_str)?;
+    let day = parse_date_part::<u32>(day_str)?;
+
+    NaiveDate::from_ymd_opt(year, month, day)
+}
+
 /// 依上市/上櫃公司季報法定申報截止日，計算指定日期對應的最新已公告季別。
 fn latest_published_quarter_for_listed_and_otc_by_date(current_date: NaiveDate) -> ReportQuarter {
     let year = current_date.year();
