@@ -34,10 +34,10 @@ pub async fn visit() -> Result<Vec<EtfInfo>> {
 
     // 組合 API 網址，使用 twse::HOST (twse.com.tw) 避免寫死網域
     let url = format!("https://openapi.{}/v1/opendata/t187ap47_L", twse::HOST);
-    
+
     // 使用工具函式 get_json 抓取資料並自動轉換為 Vec<TwseEtfRaw>
     let data = util::http::get_json::<Vec<TwseEtfRaw>>(&url).await?;
-    
+
     // 取得「上市」市場的定義物件
     let mode = StockExchangeMarket::Listed;
     let exchange_market = get_market(mode);
@@ -92,7 +92,7 @@ mod tests {
     async fn test_visit_twse_etf() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        
+
         match visit().await {
             Err(why) => println!("抓取上市 ETF 失敗: {:?}", why),
             Ok(result) => {

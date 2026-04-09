@@ -39,28 +39,40 @@ function Test-CommandExists {
     $null -ne (Get-Command $CommandName -ErrorAction SilentlyContinue)
 }
 
-Write-Host '[1/8] Checking Zig...'
+Write-Host '[1/9] Checking Zig...'
 if (-not (Test-CommandExists 'zig')) {
     Write-Host 'Zig is not installed or not in PATH.'
     Write-Host 'Please install Zig first: https://ziglang.org/download/'
     exit 1
 }
 
-Write-Host '[2/8] Checking CMake...'
+Write-Host '[2/9] Checking CMake...'
 if (-not (Test-CommandExists 'cmake')) {
     Write-Host 'CMake is not installed or not in PATH.'
     Write-Host 'Please install CMake first: https://cmake.org/download/'
     exit 1
 }
 
-Write-Host '[3/8] Checking protoc...'
+Write-Host '[3/9] Checking protoc...'
 if (-not (Test-CommandExists 'protoc')) {
     Write-Host 'protoc is not installed or not in PATH.'
     Write-Host 'Install protobuf compiler and ensure protoc is available.'
     exit 1
 }
 
-Write-Host '[4/8] Tool versions:'
+Write-Host '[4/9] Updating Rust toolchain...'
+if (-not (Test-CommandExists 'rustup')) {
+    Write-Host 'rustup is not installed or not in PATH.'
+    Write-Host 'Please install rustup first: https://rustup.rs/'
+    exit 1
+}
+& rustup update
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'Failed to update Rust toolchain.'
+    exit 1
+}
+
+Write-Host '[5/9] Tool versions:'
 Get-CommandOutput 'protoc' @('--version') | ForEach-Object { Write-Host "  - $_" }
 Get-CommandOutput 'cmake' @('--version') |
     Where-Object { $_ -like 'cmake version*' } |
@@ -79,7 +91,7 @@ if (Test-CommandExists 'rustup') {
     Write-Host '  - rustup not found'
 }
 
-Write-Host '[5/8] Ensuring Rust targets...'
+Write-Host '[6/9] Ensuring Rust targets...'
 foreach ($target in $Targets) {
     Write-Host "  - Adding target $target"
     & rustup target add $target
@@ -89,7 +101,7 @@ foreach ($target in $Targets) {
     }
 }
 
-Write-Host '[6/8] Checking cargo-zigbuild...'
+Write-Host '[7/9] Checking cargo-zigbuild...'
 & cargo zigbuild -h *> $null
 if ($LASTEXITCODE -ne 0) {
     Write-Host 'cargo-zigbuild not found, installing...'
@@ -100,7 +112,7 @@ if ($LASTEXITCODE -ne 0) {
     }
 }
 
-Write-Host "[7/8] Building $BinName..."
+Write-Host "[8/9] Building $BinName..."
 foreach ($target in $Targets) {
     $BuildCount += 1
     Write-Host ''
@@ -134,6 +146,6 @@ foreach ($target in $Targets) {
 }
 
 Write-Host ''
-Write-Host '[8/8] Done.'
+Write-Host '[9/9] Done.'
 Write-Host "Targets built: $BuildCount"
 Write-Host "Total build time: $(Format-Elapsed -Elapsed $TotalElapsed)"

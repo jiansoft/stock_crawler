@@ -139,10 +139,26 @@ fn parse_dividend_document(
 
         let (year_of_dividend, quarter) = parse_period(&period_raw)?;
 
-        // 使用除息日 (index 7) 或除權日 (index 8) 推算發放年度
+        // 判定發放年度 (year)
         let mut year = 0;
-        let ex_div_date = parse_dt(&element, 7, &mut year);
-        let ex_rights_date = parse_dt(&element, 8, &mut year);
+        let (ex_div_date, ex_rights_date, pay_date1, pay_date2) = if !quarter.is_empty() {
+            // 修正：季配或半年配，年度優先以發放日為準
+            let pay_date1 = parse_dt(&element, 9, &mut year);
+            let pay_date2 = parse_dt(&element, 10, &mut year);
+            let ex_div_date = parse_dt(&element, 7, &mut year);
+            let ex_rights_date = parse_dt(&element, 8, &mut year);
+
+            (ex_div_date, ex_rights_date, pay_date1, pay_date2)
+        } else {
+            // 年度配息：維持原邏輯，優先以除息/除權日為準
+            let ex_div_date = parse_dt(&element, 7, &mut year);
+            let ex_rights_date = parse_dt(&element, 8, &mut year);
+            let mut dummy = 0;
+            let pay_date1 = parse_dt(&element, 9, &mut dummy);
+            let pay_date2 = parse_dt(&element, 10, &mut dummy);
+
+            (ex_div_date, ex_rights_date, pay_date1, pay_date2)
+        };
 
         // 若無有效年份（代表日期皆尚未公佈），則略過此筆配息記錄
         if year == 0 {
@@ -152,10 +168,6 @@ fn parse_dividend_document(
         // 股利數值 (3=現金股利, 4=股票股利)
         let cash_dividend = parse_val(&element, 3);
         let stock_dividend = parse_val(&element, 4);
-
-        // 發放日 (9=現金發放日, 10=股票發放日)
-        let pay_date1 = parse_dt(&element, 9, &mut 0);
-        let pay_date2 = parse_dt(&element, 10, &mut 0);
 
         dividend_by_year
             .entry(year)
@@ -354,7 +366,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 visit".to_string());
 
-        match visit("5283").await {
+        match visit("5306").await {
             Ok(e) => {
                 dbg!(&e);
                 logging::debug_file_async(format!("{:#?}", e));

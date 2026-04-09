@@ -2,8 +2,14 @@ use std::fmt::Write;
 
 use crate::bot::telegram::Telegram;
 use crate::{
-    bot, cache::SHARE, crawler::{share::EtfInfo, tpex, twse}, database::table, declare::StockExchangeMarket, logging, rpc,
-    rpc::stock, util::datetime::Weekend,
+    bot,
+    cache::SHARE,
+    crawler::{share::EtfInfo, tpex, twse},
+    database::table,
+    declare::StockExchangeMarket,
+    logging, rpc,
+    rpc::stock,
+    util::datetime::Weekend,
 };
 use anyhow::{anyhow, Result};
 use chrono::Local;
@@ -20,7 +26,7 @@ pub async fn execute() -> Result<()> {
     defer! {
        logging::info_file_async("更新台股 ETF 資訊結束");
     }
-    
+
     // 1. 抓取上市 ETF 資料
     match twse::etf::visit().await {
         Ok(items) => update_stocks(items).await?,
@@ -37,7 +43,7 @@ pub async fn execute() -> Result<()> {
 }
 
 /// 批次更新股票資訊到資料庫。
-/// 
+///
 /// 此函式接收一個 ETF 資訊列表，並逐一檢查是否需要寫入資料庫。
 async fn update_stocks(items: Vec<EtfInfo>) -> Result<()> {
     // 預分配一個 1024 字元的字串，用來累積要發送給 Telegram 的變動訊息
@@ -86,10 +92,7 @@ async fn update_stocks(items: Vec<EtfInfo>) -> Result<()> {
 }
 
 /// 更新單一 ETF 的實體資訊至各個儲存層。
-async fn update_stock_info(
-    etf: &EtfInfo,
-    msg: &mut String,
-) -> Result<()> {
+async fn update_stock_info(etf: &EtfInfo, msg: &mut String) -> Result<()> {
     // 1. 準備資料庫對象：建立新的 Stock 資料列實例並填入採集到的欄位
     let mut stock = table::stock::Stock::new();
     stock.stock_symbol = etf.stock_symbol.clone();
@@ -111,11 +114,13 @@ async fn update_stock_info(
 
     // 4. 取得易讀的名稱（用於日誌與通知）
     let market = StockExchangeMarket::from(stock.stock_exchange_market_id);
-    let market_name = market.map(|m| m.name()).unwrap_or_else(|| "未知".to_string());
+    let market_name = market
+        .map(|m| m.name())
+        .unwrap_or_else(|| "未知".to_string());
     let industry_name = SHARE
         .get_industry_name(stock.stock_industry_id)
         .unwrap_or_else(|| "未知".to_string());
-    
+
     // 組合要顯示在通知與日誌上的訊息文字
     let log_msg = format!(
         "新增/更新 ETF︰ {} {} {} {}",
@@ -152,8 +157,8 @@ async fn update_stock_info(
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
     use super::*;
+    use crate::logging;
 
     #[tokio::test]
     #[ignore]

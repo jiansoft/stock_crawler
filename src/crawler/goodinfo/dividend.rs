@@ -342,6 +342,42 @@ fn parse_schedule_dividends(stock_symbol: &str, text: &str) -> Result<Vec<GoodIn
                 e.ex_dividend_date2 = convert_date(&tds[8]).unwrap_or(UNSET_DATE.to_string());
             }
 
+            // 修正：若為季配或半年配，year 應優先以發放日 (payable_date1) 為準，若無則以除息日為準
+            if !e.quarter.is_empty() {
+                let mut target_year = 0;
+
+                // 優先從發放日提取年份
+                if e.payable_date1 != "尚未公布" && e.payable_date1 != UNSET_DATE {
+                    if let Some(y) = e
+                        .payable_date1
+                        .split('-')
+                        .next()
+                        .and_then(|s| s.parse::<i32>().ok())
+                    {
+                        target_year = y;
+                    }
+                }
+
+                // 若無發放日，從除息日提取年份
+                if target_year == 0
+                    && e.ex_dividend_date1 != "尚未公布"
+                    && e.ex_dividend_date1 != UNSET_DATE
+                {
+                    if let Some(y) = e
+                        .ex_dividend_date1
+                        .split('-')
+                        .next()
+                        .and_then(|s| s.parse::<i32>().ok())
+                    {
+                        target_year = y;
+                    }
+                }
+
+                if target_year != 0 {
+                    e.year = target_year;
+                }
+            }
+
             Some(Ok(e))
         })
         .collect();

@@ -30,11 +30,14 @@ pub async fn visit() -> Result<Vec<EtfInfo>> {
     let mut result: Vec<EtfInfo> = Vec::with_capacity(256);
 
     // 組合 TPEx OpenAPI 網址 (上櫃股票收盤行情)
-    let url = format!("https://{}/openapi/v1/tpex_mainboard_daily_close_quotes", tpex::HOST);
-    
+    let url = format!(
+        "https://{}/openapi/v1/tpex_mainboard_daily_close_quotes",
+        tpex::HOST
+    );
+
     // 執行 HTTP 請求並解析 JSON
     let data = util::http::get_json::<Vec<TpexEtfRaw>>(&url).await?;
-    
+
     // 取得「上櫃」市場的定義物件
     let mode = StockExchangeMarket::OverTheCounter;
     let exchange_market = match SHARE.get_exchange_market(mode.serial()) {
@@ -50,7 +53,10 @@ pub async fn visit() -> Result<Vec<EtfInfo>> {
         let name = item.name.trim();
 
         // 過濾規則：代號 5 碼以上且 00 開頭，或名稱包含 "基金"/"ETF"
-        if (symbol.len() >= 5 && symbol.starts_with("00")) || name.contains("基金") || name.contains("ETF") {
+        if (symbol.len() >= 5 && symbol.starts_with("00"))
+            || name.contains("基金")
+            || name.contains("ETF")
+        {
             result.push(EtfInfo {
                 stock_symbol: symbol.to_string(),
                 name: name.to_string(),
@@ -74,7 +80,7 @@ mod tests {
     async fn test_visit_tpex_etf() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        
+
         match visit().await {
             Err(why) => println!("抓取上櫃 ETF 失敗: {:?}", why),
             Ok(result) => {

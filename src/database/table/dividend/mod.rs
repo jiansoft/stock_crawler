@@ -388,13 +388,17 @@ WHERE
             ))
     }
 
-    /// 取得指定年度內有多次配息的配息資料
+    /// 取得指定年度相關的多次配息資料。
+    ///
+    /// 跨年度配息時，`year` 代表實際發放年度，`year_of_dividend` 代表股利所屬年度。
+    /// 後續去重 key 使用 `security_code-year_of_dividend-quarter`，所以這裡兩種年度都要納入，
+    /// 避免剛跨年度時漏掉已存在的季配或半年配資料。
     pub async fn fetch_multiple_dividends_for_year(year: i32) -> Result<Vec<Dividend>> {
         let sql = format!(
             r#"
 SELECT {}
 FROM dividend
-WHERE year = $1 AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2');
+WHERE (year = $1 OR year_of_dividend = $1) AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2');
 "#,
             TABLE_COLUMNS
         );
@@ -690,5 +694,24 @@ mod tests {
         }
 
         logging::debug_file_async("結束 upsert".to_string());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_upsert_annual_total_dividend_operates_database() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 upsert_annual_total_dividend".to_string());
+
+        // 此函式 SQL 只使用股票代號與發放年度兩個參數；測試只補齊必要參數並確認 SQL 可執行。
+        let mut annual_total_seed = Dividend::new();
+        annual_total_seed.security_code = "5306".to_string();
+        annual_total_seed.year = 2026;
+
+        annual_total_seed
+            .upsert_annual_total_dividend()
+            .await
+            .expect("upsert annual total dividend");
+
+        logging::debug_file_async("結束 upsert_annual_total_dividend".to_string());
     }
 }
