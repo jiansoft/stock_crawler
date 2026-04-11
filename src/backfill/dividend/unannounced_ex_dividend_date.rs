@@ -33,6 +33,7 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
 }
 
 /// 從 Yahoo 取得日期欄位，並更新資料庫中的除息/發放日期。
+///
 async fn backfill_unannounced_dividend_dates_from_yahoo(
     mut entity: dividend::Dividend,
     year: i32,

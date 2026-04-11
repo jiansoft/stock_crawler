@@ -355,6 +355,36 @@ where security_code = $1
             ))
     }
 
+    /// 取得指定股票目前已有股利資料的發放年度清單。
+    ///
+    /// 回補持股已領股利時，呼叫端只提供股票代號即可；此查詢會從 `dividend`
+    /// 表找出該股票所有已入庫的發放年度，讓後續流程逐年重算持股總表與明細表。
+    ///
+    /// # 參數
+    ///
+    /// - `security_code`：要重算股利領取紀錄的股票代號。
+    ///
+    /// # 錯誤
+    ///
+    /// 資料庫查詢失敗時會回傳 `Err`，並附上股票代號方便定位。
+    pub async fn fetch_years_by_security_code(security_code: &str) -> Result<Vec<i32>> {
+        let sql = r#"
+SELECT DISTINCT year
+FROM dividend
+WHERE security_code = $1 AND year > 0
+ORDER BY year;
+"#;
+
+        sqlx::query_scalar::<_, i32>(sql)
+            .bind(security_code)
+            .fetch_all(database::get_connection())
+            .await
+            .context(format!(
+                "Failed to fetch_years_by_security_code({}) from database",
+                security_code
+            ))
+    }
+
     /// 取得指定年度尚未有配息日或發放日的股息數據(有排除配息金額為 0)
     pub async fn fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
         year: i32,

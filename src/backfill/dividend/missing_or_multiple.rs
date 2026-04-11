@@ -4,9 +4,7 @@ use anyhow::{Context, Result};
 use chrono::Local;
 
 use crate::{
-    crawler::yahoo,
-    database::table::{self, dividend},
-    logging, nosql,
+    calculation::dividend_record, crawler::yahoo, database::table::dividend, logging, nosql,
     util::map::Keyable,
 };
 
@@ -106,9 +104,12 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
 /// 此函式不套用年度篩選，也不使用 Redis 快取，適合手動修補某檔股票的歷史資料。
 /// Yahoo 回傳的每一筆股利明細都會轉成 `Dividend` 並以 `upsert` 寫入資料庫；
 /// 若明細是季配或半年配，最後會依涉及的發放年度重算年度彙總列。
+/// 股利資料全部寫入完成後，會接著依股票代號回補目前持股的已領股利總表與逐項明細，
+/// 避免事後補進的股利資料沒有同步反映到持股領取紀錄。
 ///
 /// 回傳值是本次成功 upsert 的股利明細筆數，不包含後續年度彙總列。若 Yahoo 抓取、
-/// 明細 upsert 或年度彙總 upsert 任一步驟失敗，會直接回傳錯誤，讓呼叫端知道該股票回補未完成。
+/// 明細 upsert、年度彙總 upsert 或持股已領股利回補任一步驟失敗，會直接回傳錯誤，
+/// 讓呼叫端知道該股票回補未完成。
 ///
 /// # 參數
 ///
@@ -116,7 +117,8 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
 ///
 /// # 錯誤
 ///
-/// Yahoo 頁面抓取或解析失敗、任一筆股利明細入庫失敗、年度彙總列入庫失敗時會回傳 `Err`。
+/// Yahoo 頁面抓取或解析失敗、任一筆股利明細入庫失敗、年度彙總列入庫失敗、
+/// 或持股已領股利紀錄回補失敗時會回傳 `Err`。
 #[cfg(test)]
 pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Result<usize> {
     // 歷年回補是針對單一股票的手動修補流程，因此直接打 Yahoo，不讀寫排程快取。
@@ -149,7 +151,7 @@ pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Resu
 
     for refresh_year in annual_total_refresh_years {
         // 年度彙總列由資料庫現有季配/半年配明細聚合產生，因此 seed 只需要股票代號與發放年度。
-        let mut annual_total_seed = table::dividend::Dividend::new();
+        let mut annual_total_seed = dividend::Dividend::new();
         annual_total_seed.security_code = stock_symbol.to_string();
         annual_total_seed.year = refresh_year;
         annual_total_seed
@@ -162,6 +164,15 @@ pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Resu
                 )
             })?;
     }
+
+    // 歷史股利回補完成後，立即同步目前持股的已領股利總表與逐項明細。
+    dividend_record::backfill_received_dividend_records_for_stock(stock_symbol)
+        .await
+        .with_context(|| {
+            format!(
+                "historical received dividend record backfill failed: stock_symbol={stock_symbol}"
+            )
+        })?;
 
     Ok(upserted_count)
 }
@@ -253,7 +264,6 @@ async fn backfill_recent_dividends_for_stock(
         })?;
     // 記錄需要重算年度彙總列的發放年度；用 HashSet 可避免同年度多個季度重複執行聚合 SQL。
     let mut annual_total_refresh_years: HashSet<i32> = HashSet::new();
-
     // Yahoo 回傳資料已依發放年度分組；這裡直接借用迭代，避免 clone 大量明細資料。
     for (paid_year, dividend_details_from_yahoo) in &dividends_from_yahoo.dividend {
         // 同一個 paid_year 底下可能有年度配息、季配或半年配，多筆都要逐一判斷。
@@ -302,7 +312,7 @@ async fn backfill_recent_dividends_for_stock(
 
     for refresh_year in annual_total_refresh_years {
         // 年度彙總 SQL 只需要股票代號與發放年度，其餘欄位由聚合查詢產生。
-        let mut annual_total_seed = table::dividend::Dividend::new();
+        let mut annual_total_seed = dividend::Dividend::new();
         annual_total_seed.security_code = stock_symbol.to_string();
         annual_total_seed.year = refresh_year;
 
@@ -352,7 +362,7 @@ fn yahoo_dividend_to_entity(
     d: &yahoo::dividend::YahooDividendDetail,
 ) -> dividend::Dividend {
     // 先建立預設實體，讓 Yahoo 沒提供的盈餘/公積拆分與分配率維持 0。
-    let mut e = table::dividend::Dividend::new();
+    let mut e = dividend::Dividend::new();
     // 股票代號由呼叫端傳入，避免依賴 Yahoo 明細內部是否重複保存代號。
     e.security_code = stock_symbol.to_string();
     // `year` 是實際發放年度，會用於除權息提醒與年度彙總聚合。
@@ -466,7 +476,7 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
 
-        let upserted_count = backfill_historical_dividends_for_stock("2357")
+        let upserted_count = backfill_historical_dividends_for_stock("2886")
             .await
             .expect("backfill historical dividends for stock failed");
 
