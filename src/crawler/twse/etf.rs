@@ -16,7 +16,7 @@ use crate::{
 struct TwseEtfRaw {
     #[serde(rename = "基金代號")] // 指定 JSON 中的中文欄位對應到 symbol 變數
     pub symbol: String,
-    #[serde(rename = "基金中文名稱")]
+    #[serde(rename = "基金簡稱")]
     pub name: String,
     #[serde(rename = "上市日期", default)] // default 表示若 JSON 沒這欄位就給空字串，避免程式崩潰
     pub listing_date: String,
