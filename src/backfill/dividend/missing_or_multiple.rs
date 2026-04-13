@@ -476,7 +476,7 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
 
-        let upserted_count = backfill_historical_dividends_for_stock("2886")
+        let upserted_count = backfill_historical_dividends_for_stock("2845")
             .await
             .expect("backfill historical dividends for stock failed");
 

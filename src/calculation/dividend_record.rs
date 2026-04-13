@@ -489,7 +489,7 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
 
-        let security_code = "2886";
+        let security_code = "2845";
         let summary = backfill_received_dividend_records_for_stock(security_code)
             .await
             .expect("backfill received dividend records by stock");
