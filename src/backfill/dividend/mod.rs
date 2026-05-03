@@ -12,6 +12,10 @@ mod unannounced_ex_dividend_date;
 use missing_or_multiple::backfill_missing_or_multiple_dividends;
 use unannounced_ex_dividend_date::backfill_unannounced_dividend_dates;
 
+/// 測試環境使用的單檔歷年股利手動回補入口。
+#[cfg(test)]
+pub(crate) use missing_or_multiple::backfill_historical_dividends_for_stock;
+
 /// 執行年度股利回補（backfill）主流程。
 ///
 /// 這個入口會以「今年」為處理範圍，並行執行兩條子流程：

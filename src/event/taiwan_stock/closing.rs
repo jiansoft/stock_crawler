@@ -51,8 +51,16 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-/// 股票收盤數據匯總
-async fn aggregate(date: NaiveDate) -> Result<()> {
+/// 股票收盤數據匯總。
+///
+/// 此函式會串起收盤資料回補、缺漏報價補齊、均線、最後交易日報價、
+/// 估價、殖利率排行、市值重算與市值變化通知。主要由 [`execute`] 呼叫，
+/// 測試環境也會透過手動回補測試檔指定日期執行。
+///
+/// # Errors
+///
+/// 任一步驟失敗時會回傳錯誤，呼叫端可依情境記錄或中止後續流程。
+pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
     //抓取上市櫃公司每日收盤資訊
     let daily_quote_count = backfill::quote::execute(date).await?;
     //logging::info_file_async("抓取上市櫃收盤數據結束".to_string());
@@ -219,6 +227,12 @@ mod tests {
 
     use super::*;
 
+    /// 每日收盤事件主要匯總流程的整合測試。
+    ///
+    /// 此測試用來手動驗證 [`aggregate`] 是否能完整串起每日收盤資料回補、缺漏補齊、
+    /// 均線、最後交易日報價、估價、殖利率排行、市值重算與市值通知前置資料。
+    /// 因為會呼叫外部資料來源並寫入資料庫，所以標記為 `#[ignore]`，
+    /// 需要時請用 `cargo test event::taiwan_stock::closing::tests::test_aggregate -- --ignored --nocapture` 執行。
     #[tokio::test]
     #[ignore]
     async fn test_aggregate() {
@@ -227,7 +241,7 @@ mod tests {
 
         logging::debug_file_async("開始 event::taiwan_stock::closing::aggregate".to_string());
 
-        let current_date = NaiveDate::parse_from_str("2026-04-02", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2026-04-30", "%Y-%m-%d").unwrap();
 
         match aggregate(current_date).await {
             Ok(_) => {

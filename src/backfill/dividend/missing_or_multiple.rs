@@ -465,24 +465,6 @@ mod tests {
         let _ = backfill_recent_dividends_for_stock(year, "6123", &multiple_dividend_cache).await;
     }
 
-    /// 驗證單一股票可透過 Yahoo 回補歷年股利明細。
-    ///
-    /// 此測試會實際連線 Yahoo 並把指定股票的歷年股利資料以 `upsert` 寫入 `dividend` 表，
-    /// 同時在有季配/半年配資料時重算年度彙總列。由於測試依賴外部網路與本機資料庫，
-    /// 因此標記為 `ignore`，只在需要手動驗證歷年回補流程時執行。
-    #[tokio::test]
-    #[ignore]
-    async fn test_backfill_historical_dividends_for_stock_from_yahoo_live() {
-        dotenv::dotenv().ok();
-        SHARE.load().await;
-
-        let upserted_count = backfill_historical_dividends_for_stock("2845")
-            .await
-            .expect("backfill historical dividends for stock failed");
-
-        dbg!(upserted_count);
-    }
-
     /// 以資料庫中指定年度所有已有季配/半年配的股票，驗證 Yahoo 歷年股利批次回補流程。
     ///
     /// 測試流程會先呼叫 `fetch_multiple_dividends_for_year` 找出目前年度已有多次配息資料的股票，

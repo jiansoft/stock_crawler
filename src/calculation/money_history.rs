@@ -106,7 +106,7 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
         logging::debug_file_async("開始 calculate_money_history".to_string());
-        let current_date = NaiveDate::parse_from_str("2026-04-02", "%Y-%m-%d").unwrap();
+        let current_date = NaiveDate::parse_from_str("2026-04-20", "%Y-%m-%d").unwrap();
         match calculate_money_history(current_date).await {
             Ok(_) => {}
             Err(why) => {

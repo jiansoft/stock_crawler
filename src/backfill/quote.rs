@@ -109,7 +109,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
         //let date = Local::now().date_naive();
-        let date = NaiveDate::from_ymd_opt(2024, 12, 6).unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
         let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
             .bind(date)
             .execute(database::get_connection())

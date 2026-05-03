@@ -103,6 +103,9 @@ pub mod declare;
 pub mod event;
 /// 日誌
 pub mod logging;
+/// 手動資料回補測試入口。
+#[cfg(test)]
+mod manual_backfill;
 /// nosql
 pub mod nosql;
 /// RPC 模組
