@@ -10,8 +10,8 @@ use tonic::{Request, Response, Status};
 use crate::{
     rpc::manual_backfill::{
         manual_backfill_server::ManualBackfill, BackfillJob, BackfillJobResponse,
-        ClosingAggregateRequest, GetJobRequest, ListJobsRequest, ListJobsResponse,
-        SecurityCodeRequest,
+        ClosingAggregateRequest, DailyQuotesRequest, GetJobRequest, ListJobsRequest,
+        ListJobsResponse, SecurityCodeRequest, YearRequest,
     },
     web,
 };
@@ -25,6 +25,23 @@ pub struct ManualBackfillService {}
 
 #[tonic::async_trait]
 impl ManualBackfill for ManualBackfillService {
+    /// 建立指定交易日的各股每日收盤報價回補 job。
+    async fn start_daily_quotes(
+        &self,
+        req: Request<DailyQuotesRequest>,
+    ) -> Result<Response<BackfillJobResponse>, Status> {
+        // gRPC 輸入仍使用字串，因此先解析並把格式錯誤轉成 INVALID_ARGUMENT。
+        let date = NaiveDate::parse_from_str(req.into_inner().date.trim(), "%Y-%m-%d")
+            .map_err(|why| Status::invalid_argument(format!("date must use YYYY-MM-DD: {why}")))?;
+
+        // 建立共用背景 job，讓 HTTP UI 也能查到這筆 gRPC 建立的工作。
+        let job = web::manual_backfill::start_daily_quotes_job(date).await;
+        // 轉成 proto response model 後回傳。
+        Ok(Response::new(BackfillJobResponse {
+            job: Some(to_grpc_job(job)),
+        }))
+    }
+
     /// 建立指定交易日的收盤彙總回補 job。
     async fn start_closing_aggregate(
         &self,
@@ -73,6 +90,27 @@ impl ManualBackfill for ManualBackfillService {
 
         // 建立背景 job，實際 Yahoo 抓取與 upsert 會在背景 task 中執行。
         let job = web::manual_backfill::start_historical_dividends_job(security_code).await;
+        Ok(Response::new(BackfillJobResponse {
+            job: Some(to_grpc_job(job)),
+        }))
+    }
+
+    /// 建立指定年度多次配息股票的歷年股利批次回補 job。
+    async fn start_multiple_dividend_historical_dividends(
+        &self,
+        req: Request<YearRequest>,
+    ) -> Result<Response<BackfillJobResponse>, Status> {
+        // 年度資料表查詢預期使用合理西元年，先擋掉明顯輸入錯誤。
+        let year = req.into_inner().year;
+        if !(1900..=3000).contains(&year) {
+            return Err(Status::invalid_argument(
+                "year must be between 1900 and 3000",
+            ));
+        }
+
+        // 建立共用背景 job，讓 HTTP UI 也能查到這筆 gRPC 建立的工作。
+        let job =
+            web::manual_backfill::start_multiple_dividend_historical_dividends_job(year).await;
         Ok(Response::new(BackfillJobResponse {
             job: Some(to_grpc_job(job)),
         }))

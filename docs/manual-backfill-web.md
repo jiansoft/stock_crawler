@@ -43,13 +43,15 @@ gRPC 使用既有設定 `SYSTEM_GRPC_USE_PORT`，預設依 `app.json` 是 `9001`
 http://127.0.0.1:9002/manual-backfill
 ```
 
-畫面提供三個操作：
+畫面提供五個操作：
 
 | 功能 | 輸入 | 說明 |
 | --- | --- | --- |
+| Daily Quotes | `YYYY-MM-DD` 交易日 | 刪除當日既有 `DailyQuotes` 後，重新抓取上市櫃各股每日收盤報價 |
 | Closing Aggregate | `YYYY-MM-DD` 交易日 | 重跑每日收盤事件匯總 |
 | Received Dividends | 股票代號 | 重算指定股票目前持股的已領股利紀錄 |
 | Historical Dividends | 股票代號 | 從 Yahoo 回補單檔股票歷年股利，並同步重算已領股利 |
+| Multi Dividend History | 西元年度 | 找出指定年度已有季配/半年配資料的股票，批次回補 Yahoo 歷年股利 |
 
 按下 `Start` 後會建立背景 job，畫面每 3 秒輪詢 job 狀態。
 
@@ -60,6 +62,20 @@ Base URL：
 ```text
 http://127.0.0.1:9002
 ```
+
+### 建立各股每日收盤報價回補
+
+```http
+POST /api/manual-backfill/daily-quotes
+Content-Type: application/json
+
+{
+  "date": "2026-04-30"
+}
+```
+
+此 API 會先刪除指定日期既有的 `DailyQuotes`，再呼叫 TWSE 與 TPEx 來源重新抓取
+上市櫃各股每日開高低收、成交量與本益比等資料。
 
 ### 建立收盤匯總回補
 
@@ -93,6 +109,20 @@ Content-Type: application/json
   "security_code": "2845"
 }
 ```
+
+### 建立多次配息股票歷年股利批次回補
+
+```http
+POST /api/manual-backfill/multiple-dividend-historical-dividends
+Content-Type: application/json
+
+{
+  "year": 2026
+}
+```
+
+此 API 會先從資料庫找出指定年度已有季配/半年配資料的股票，逐檔呼叫 Yahoo
+歷年股利回補流程，並同步重算目前持股的已領股利紀錄。
 
 ### 建立 job 的回應格式
 
@@ -168,9 +198,11 @@ Service：
 
 ```proto
 service ManualBackfill {
+  rpc StartDailyQuotes(DailyQuotesRequest) returns (BackfillJobResponse) {}
   rpc StartClosingAggregate(ClosingAggregateRequest) returns (BackfillJobResponse) {}
   rpc StartReceivedDividendRecords(SecurityCodeRequest) returns (BackfillJobResponse) {}
   rpc StartHistoricalDividends(SecurityCodeRequest) returns (BackfillJobResponse) {}
+  rpc StartMultipleDividendHistoricalDividends(YearRequest) returns (BackfillJobResponse) {}
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse) {}
   rpc GetJob(GetJobRequest) returns (BackfillJobResponse) {}
 }
@@ -180,9 +212,11 @@ service ManualBackfill {
 
 | Method | Request | 說明 |
 | --- | --- | --- |
+| `manual_backfill.ManualBackfill/StartDailyQuotes` | `{ "date": "2026-04-30" }` | 建立各股每日收盤報價回補 job |
 | `manual_backfill.ManualBackfill/StartClosingAggregate` | `{ "date": "2026-04-30" }` | 建立收盤匯總回補 job |
 | `manual_backfill.ManualBackfill/StartReceivedDividendRecords` | `{ "security_code": "0056" }` | 建立已領股利紀錄回補 job |
 | `manual_backfill.ManualBackfill/StartHistoricalDividends` | `{ "security_code": "2845" }` | 建立歷年股利回補 job |
+| `manual_backfill.ManualBackfill/StartMultipleDividendHistoricalDividends` | `{ "year": 2026 }` | 建立多次配息股票歷年股利批次回補 job |
 | `manual_backfill.ManualBackfill/ListJobs` | `{}` | 查詢所有 job |
 | `manual_backfill.ManualBackfill/GetJob` | `{ "id": "20260504103000-1" }` | 查詢單一 job |
 
@@ -194,9 +228,27 @@ service ManualBackfill {
 grpcurl -plaintext \
   -import-path etc/proto \
   -proto manual_backfill.proto \
+  -d '{"date":"2026-04-30"}' \
+  127.0.0.1:9001 \
+  manual_backfill.ManualBackfill/StartDailyQuotes
+```
+
+```bash
+grpcurl -plaintext \
+  -import-path etc/proto \
+  -proto manual_backfill.proto \
   -d '{"security_code":"2845"}' \
   127.0.0.1:9001 \
   manual_backfill.ManualBackfill/StartHistoricalDividends
+```
+
+```bash
+grpcurl -plaintext \
+  -import-path etc/proto \
+  -proto manual_backfill.proto \
+  -d '{"year":2026}' \
+  127.0.0.1:9001 \
+  manual_backfill.ManualBackfill/StartMultipleDividendHistoricalDividends
 ```
 
 查詢所有 job：
@@ -282,6 +334,7 @@ gRPC 串接：
 - `src/rpc/server/manual_backfill_service.rs`：gRPC service 實作。
 - `src/rpc/server/mod.rs`：註冊 `ManualBackfillServer`。
 - `src/main.rs`：主流程啟動 Web server；gRPC server 仍沿用既有 `rpc::server::start()`。
+- `src/backfill/quote.rs`：各股每日收盤報價回補流程。
 - `src/backfill/dividend/missing_or_multiple.rs`：將單檔歷年股利回補從 test-only 改為 binary 可呼叫。
 
 ## 注意事項
@@ -289,4 +342,6 @@ gRPC 串接：
 - 目前沒有登入驗證。Web / HTTP API 預設只綁定 `127.0.0.1`；不要直接暴露到公開網路。
 - gRPC 是否對外開放取決於既有 `SYSTEM_GRPC_USE_PORT` 與部署網路設定。
 - 回補任務會寫資料庫，也會呼叫外部資料來源；正式執行前請確認 `.env` / `app.json` 指向正確環境。
+- 各股每日收盤報價回補會先刪除指定日期既有 `DailyQuotes`，再重新寫入外部來源資料。
 - 歷年股利回補會直接打 Yahoo 並寫入 `dividend` 表，完成後會同步重算目前持股的已領股利紀錄。
+- 多次配息股票歷年股利批次回補會逐檔打 Yahoo，耗時與請求量會隨年度股票數增加。

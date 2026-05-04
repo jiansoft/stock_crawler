@@ -1,8 +1,8 @@
 //! Manual backfill web UI and API.
 //!
 //! 這個模組提供一個輕量的 Web UI 與 JSON API，讓維運人員可以手動觸發
-//! 收盤彙總、持股已領股利重算、歷年股利補抓等資料修補工作。所有工作都會
-//! 先登記成 job，再由背景 task 執行，呼叫端可用 job API 查詢執行狀態。
+//! 各股每日收盤報價、收盤彙總、持股已領股利重算、歷年股利補抓等資料修補工作。
+//! 所有工作都會先登記成 job，再由背景 task 執行，呼叫端可用 job API 查詢執行狀態。
 
 use std::{
     collections::HashMap,
@@ -25,7 +25,11 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use crate::{
-    backfill::dividend, calculation::dividend_record, event::taiwan_stock::closing, logging,
+    backfill::{dividend, quote},
+    calculation::dividend_record,
+    database,
+    event::taiwan_stock::closing,
+    logging,
 };
 
 /// Manual backfill Web API 共用狀態。
@@ -111,6 +115,20 @@ struct ClosingAggregateRequest {
     date: String,
 }
 
+/// 各股每日收盤報價手動回補的 HTTP request body。
+#[derive(Debug, Deserialize)]
+struct DailyQuotesRequest {
+    /// 交易日期，格式必須為 `YYYY-MM-DD`。
+    date: String,
+}
+
+/// 年度類手動回補的 HTTP request body。
+#[derive(Debug, Deserialize)]
+struct YearRequest {
+    /// 回補目標年度，例如 `2026`。
+    year: i32,
+}
+
 /// 證券代號類手動回補的 HTTP request body。
 #[derive(Debug, Deserialize)]
 struct SecurityCodeRequest {
@@ -146,6 +164,10 @@ pub fn router() -> Router {
         .route("/api/manual-backfill/jobs", get(list_jobs))
         .route("/api/manual-backfill/jobs/{id}", get(get_job))
         .route(
+            "/api/manual-backfill/daily-quotes",
+            post(start_daily_quotes),
+        )
+        .route(
             "/api/manual-backfill/closing-aggregate",
             post(start_closing_aggregate),
         )
@@ -156,6 +178,10 @@ pub fn router() -> Router {
         .route(
             "/api/manual-backfill/historical-dividends",
             post(start_historical_dividends),
+        )
+        .route(
+            "/api/manual-backfill/multiple-dividend-historical-dividends",
+            post(start_multiple_dividend_historical_dividends),
         )
         .with_state(BACKFILL_STATE.clone())
 }
@@ -203,6 +229,32 @@ pub(crate) async fn list_backfill_jobs() -> Vec<BackfillJob> {
 /// 依 job id 取得 manual backfill job。
 pub(crate) async fn get_backfill_job(id: &str) -> Option<BackfillJob> {
     BACKFILL_STATE.jobs.read().await.get(id).cloned()
+}
+
+/// 建立各股每日收盤報價回補 job 的 HTTP handler。
+async fn start_daily_quotes(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<DailyQuotesRequest>,
+) -> impl IntoResponse {
+    // 先驗證日期格式，避免背景 job 才因輸入錯誤失敗。
+    let date = match NaiveDate::parse_from_str(req.date.trim(), "%Y-%m-%d") {
+        Ok(date) => date,
+        Err(why) => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("date must use YYYY-MM-DD: {why}"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 輸入有效時建立背景 job，實際資料刪除與重抓會在 job 中執行。
+    Json(StartJobResponse {
+        job: start_daily_quotes_job(date).await,
+    })
+    .into_response()
 }
 
 /// 建立收盤彙總回補 job 的 HTTP handler。
@@ -279,6 +331,76 @@ async fn start_historical_dividends(
         job: start_historical_dividends_job(security_code).await,
     })
     .into_response()
+}
+
+/// 建立多次配息股票歷年股利批次回補 job 的 HTTP handler。
+async fn start_multiple_dividend_historical_dividends(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<YearRequest>,
+) -> impl IntoResponse {
+    // 年度資料表查詢預期使用合理西元年，先擋掉明顯輸入錯誤。
+    if !(1900..=3000).contains(&req.year) {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "year must be between 1900 and 3000".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    // 建立背景 job，實際批次 Yahoo 回補會在 job 中執行。
+    Json(StartJobResponse {
+        job: start_multiple_dividend_historical_dividends_job(req.year).await,
+    })
+    .into_response()
+}
+
+/// 建立各股每日收盤報價背景 job。
+///
+/// Job 會先刪除指定交易日既有的 `DailyQuotes`，再呼叫 TWSE 與 TPEx 來源重抓
+/// 上市櫃各股每日開高低收、成交量與本益比等資料。
+pub(crate) async fn start_daily_quotes_job(date: NaiveDate) -> BackfillJob {
+    start_job(
+        BACKFILL_STATE.clone(),
+        "daily_quotes",
+        date.to_string(),
+        move || async move {
+            // quote::execute 使用 COPY 寫入 DailyQuotes；先清掉同日資料可避免唯一索引衝突，
+            // 也讓手動回補確實以外部來源的最新內容重建當日各股收盤報價。
+            sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
+                .bind(date)
+                .execute(database::get_connection())
+                .await?;
+
+            let quote_count = quote::execute(date).await?;
+            Ok(format!(
+                "daily quotes backfill completed: quote_count={quote_count}"
+            ))
+        },
+    )
+    .await
+}
+
+/// 建立多次配息股票歷年股利批次回補背景 job。
+///
+/// Job 會找出指定年度已有季配/半年配資料的股票，逐檔重新抓取 Yahoo 歷年股利，
+/// 並把成功處理的股票數與明細 upsert 筆數寫入 job message。
+pub(crate) async fn start_multiple_dividend_historical_dividends_job(year: i32) -> BackfillJob {
+    start_job(
+        BACKFILL_STATE.clone(),
+        "multiple_dividend_historical_dividends",
+        year.to_string(),
+        move || async move {
+            let summary =
+                dividend::backfill_historical_dividends_for_multiple_dividend_stocks(year).await?;
+            Ok(format!(
+                "multiple dividend historical dividends backfill completed: stock_count={}, detail_count={}",
+                summary.stock_count, summary.detail_count
+            ))
+        },
+    )
+    .await
 }
 
 /// 建立收盤彙總背景 job。
@@ -594,6 +716,13 @@ const INDEX_HTML: &str = r##"<!doctype html>
   </header>
   <main class="wrap">
     <section class="grid" aria-label="Backfill forms">
+      <form class="panel" data-endpoint="/api/manual-backfill/daily-quotes">
+        <h2>Daily Quotes</h2>
+        <label for="daily-quotes-date">Trading date</label>
+        <input id="daily-quotes-date" name="date" type="date" required>
+        <button type="submit">Start</button>
+        <div class="toast"></div>
+      </form>
       <form class="panel" data-endpoint="/api/manual-backfill/closing-aggregate">
         <h2>Closing Aggregate</h2>
         <label for="closing-date">Trading date</label>
@@ -612,6 +741,13 @@ const INDEX_HTML: &str = r##"<!doctype html>
         <h2>Historical Dividends</h2>
         <label for="historical-code">Security code</label>
         <input id="historical-code" name="security_code" inputmode="latin" placeholder="2845" required>
+        <button type="submit">Start</button>
+        <div class="toast"></div>
+      </form>
+      <form class="panel" data-endpoint="/api/manual-backfill/multiple-dividend-historical-dividends">
+        <h2>Multi Dividend History</h2>
+        <label for="multiple-dividend-year">Dividend year</label>
+        <input id="multiple-dividend-year" name="year" type="number" min="1900" max="3000" step="1" placeholder="2026" required>
         <button type="submit">Start</button>
         <div class="toast"></div>
       </form>

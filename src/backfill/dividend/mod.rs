@@ -13,7 +13,10 @@ use missing_or_multiple::backfill_missing_or_multiple_dividends;
 use unannounced_ex_dividend_date::backfill_unannounced_dividend_dates;
 
 /// 單檔歷年股利手動回補入口。
-pub(crate) use missing_or_multiple::backfill_historical_dividends_for_stock;
+pub(crate) use missing_or_multiple::{
+    backfill_historical_dividends_for_multiple_dividend_stocks,
+    backfill_historical_dividends_for_stock,
+};
 
 /// 執行年度股利回補（backfill）主流程。
 ///

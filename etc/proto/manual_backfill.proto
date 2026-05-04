@@ -3,11 +3,17 @@ syntax = "proto3";
 package manual_backfill;
 
 service ManualBackfill {
+  rpc StartDailyQuotes(DailyQuotesRequest) returns (BackfillJobResponse) {}
   rpc StartClosingAggregate(ClosingAggregateRequest) returns (BackfillJobResponse) {}
   rpc StartReceivedDividendRecords(SecurityCodeRequest) returns (BackfillJobResponse) {}
   rpc StartHistoricalDividends(SecurityCodeRequest) returns (BackfillJobResponse) {}
+  rpc StartMultipleDividendHistoricalDividends(YearRequest) returns (BackfillJobResponse) {}
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse) {}
   rpc GetJob(GetJobRequest) returns (BackfillJobResponse) {}
+}
+
+message DailyQuotesRequest {
+  string date = 1;
 }
 
 message ClosingAggregateRequest {
@@ -16,6 +22,10 @@ message ClosingAggregateRequest {
 
 message SecurityCodeRequest {
   string security_code = 1;
+}
+
+message YearRequest {
+  int32 year = 1;
 }
 
 message ListJobsRequest {}
