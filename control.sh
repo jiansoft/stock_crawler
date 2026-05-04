@@ -135,7 +135,7 @@ function docker_start() {
   docker run --name stock-rust-container \
     -v="$docker_log_dir:/app/log:rw" \
     -v="$docker_ssl_dir:/opt/nginx/ssl/jiansoft.mooo.com" \
-    -p 9001:9001 -t -d stock-rust-image
+    -p 9001:9001 -p 9002:9002 -t -d stock-rust-image
   docker ps
 }
 
