@@ -12,7 +12,6 @@ use crate::{
 ///
 /// 此結構用於回報指定年度內有季配/半年配股票的批次回補結果，讓呼叫端可以知道本次實際處理了
 /// 幾檔股票，以及總共成功 upsert 多少筆 Yahoo 股利明細。
-#[cfg(test)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HistoricalDividendBackfillSummary {
     /// 本次已完成歷年股利回補的股票檔數。
@@ -119,7 +118,6 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
 ///
 /// Yahoo 頁面抓取或解析失敗、任一筆股利明細入庫失敗、年度彙總列入庫失敗、
 /// 或持股已領股利紀錄回補失敗時會回傳 `Err`。
-#[cfg(test)]
 pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Result<usize> {
     // 歷年回補是針對單一股票的手動修補流程，因此直接打 Yahoo，不讀寫排程快取。
     let dividends_from_yahoo = yahoo::dividend::visit(stock_symbol)
@@ -193,7 +191,6 @@ pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Resu
 ///
 /// 查詢資料庫失敗、任一檔股票 Yahoo 採集失敗、明細 upsert 失敗或年度彙總 upsert 失敗時，
 /// 會直接回傳 `Err`。這個函式用於手動批次修補，因此採 fail-fast，避免靜默漏補某檔股票。
-#[cfg(test)]
 pub async fn backfill_historical_dividends_for_multiple_dividend_stocks(
     year: i32,
 ) -> Result<HistoricalDividendBackfillSummary> {

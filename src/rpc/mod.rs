@@ -36,3 +36,11 @@ pub mod control {
     #![allow(missing_docs)]
     include!("control.rs");
 }
+
+/// Manual backfill 服務產生碼。
+///
+/// 包含手動資料回補的 gRPC 操作與 job 查詢介面。
+pub mod manual_backfill {
+    #![allow(missing_docs)]
+    include!("manual_backfill.rs");
+}

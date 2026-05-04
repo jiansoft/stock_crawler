@@ -14,7 +14,10 @@ use crate::{
     config::SETTINGS,
     logging,
     rpc::{
-        control::control_server::ControlServer, server::control_service::ControlService,
+        control::control_server::ControlServer,
+        manual_backfill::manual_backfill_server::ManualBackfillServer,
+        server::control_service::ControlService,
+        server::manual_backfill_service::ManualBackfillService,
         server::stock_service::StockService, stock::stock_server::StockServer,
     },
     util,
@@ -22,6 +25,8 @@ use crate::{
 
 /// Control 服務實作模組。
 pub mod control_service;
+/// Manual backfill 服務實作模組。
+pub mod manual_backfill_service;
 /// Stock 服務實作模組。
 pub mod stock_service;
 
@@ -74,6 +79,7 @@ async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
     logging::info_file_async(format!("gRPC 伺服器正在 {:?} 開始服務...", addr));
     let result = server
         .add_service(ControlServer::new(ControlService::default()))
+        .add_service(ManualBackfillServer::new(ManualBackfillService::default()))
         .add_service(StockServer::new(StockService::default()))
         .serve(addr)
         .await;

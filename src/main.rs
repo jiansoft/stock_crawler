@@ -114,6 +114,8 @@ pub mod rpc;
 pub mod scheduler;
 /// 工具類
 pub mod util;
+/// Web UI 與 HTTP API。
+pub mod web;
 
 /*#[get("/")]
 fn index() -> &'static str {
@@ -231,6 +233,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     logging::info_file_async(format!(
         "startup phase done: rpc::server::start elapsed={:?}",
         rpc_start_timer.elapsed()
+    ));
+
+    logging::info_file_async("startup phase begin: web::start".to_string());
+    let web_start_timer = Instant::now();
+    web::start().await?;
+    logging::info_file_async(format!(
+        "startup phase done: web::start elapsed={:?}",
+        web_start_timer.elapsed()
     ));
     logging::info_file_async(format!(
         "startup phase done: main init total elapsed={:?}",

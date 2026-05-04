@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let protos = [
         "./etc/proto/basic.proto",
         "./etc/proto/control.proto",
+        "./etc/proto/manual_backfill.proto",
         "./etc/proto/stock.proto",
     ];
 
