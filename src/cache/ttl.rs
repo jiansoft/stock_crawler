@@ -3,8 +3,9 @@
 //! 此模組負責保存「短時間內避免重複處理」的資料，
 //! 例如日行情去重與通知節流狀態。
 
-use std::{sync::RwLock, time::Duration};
+use std::time::{Duration, Instant};
 
+use moka::{sync::Cache, Expiry};
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
@@ -20,8 +21,37 @@ pub static TTL: Lazy<Ttl> = Lazy::new(Default::default);
 /// - `trace_quote_notify`：記錄通知相關狀態，避免短時間重複通知。
 pub struct Ttl {
     /// 每日收盤數據
-    daily_quote: RwLock<ttl_cache::TtlCache<String, String>>,
-    trace_quote_notify: RwLock<ttl_cache::TtlCache<String, Decimal>>,
+    daily_quote: Cache<String, TimedValue<String>>,
+    trace_quote_notify: Cache<String, TimedValue<Decimal>>,
+}
+
+#[derive(Clone)]
+struct TimedValue<T> {
+    value: T,
+    duration: Duration,
+}
+
+struct TimedExpiry;
+
+impl<K, T> Expiry<K, TimedValue<T>> for TimedExpiry {
+    fn expire_after_create(
+        &self,
+        _key: &K,
+        value: &TimedValue<T>,
+        _created_at: Instant,
+    ) -> Option<Duration> {
+        Some(value.duration)
+    }
+
+    fn expire_after_update(
+        &self,
+        _key: &K,
+        value: &TimedValue<T>,
+        _updated_at: Instant,
+        _duration_until_expiry: Option<Duration>,
+    ) -> Option<Duration> {
+        Some(value.duration)
+    }
 }
 
 /// 對 `Ttl` 的操作介面抽象。
@@ -87,51 +117,48 @@ pub trait TtlCacheInner {
 
 impl TtlCacheInner for Ttl {
     fn clear(&self) {
-        if let Ok(mut ttl) = self.daily_quote.write() {
-            ttl.clear()
-        }
+        self.daily_quote.invalidate_all();
+        self.daily_quote.run_pending_tasks();
     }
 
     fn daily_quote_contains_key(&self, key: &str) -> bool {
-        match self.daily_quote.read() {
-            Ok(ttl) => ttl.contains_key(key),
-            Err(_) => false,
-        }
+        self.daily_quote.contains_key(key)
     }
 
     fn daily_quote_get(&self, key: &str) -> Option<String> {
-        match self.daily_quote.read() {
-            Ok(ttl) => ttl.get(key).map(|value| value.to_string()),
-            Err(_) => None,
-        }
+        self.daily_quote.get(key).map(|timed| timed.value)
     }
 
     fn daily_quote_set(&self, key: String, val: String, duration: Duration) -> Option<String> {
-        match self.daily_quote.write() {
-            Ok(mut ttl) => ttl.insert(key, val, duration),
-            Err(_) => None,
-        }
+        let old_value = self.daily_quote.get(&key).map(|timed| timed.value);
+        self.daily_quote.insert(
+            key,
+            TimedValue {
+                value: val,
+                duration,
+            },
+        );
+        old_value
     }
 
     fn trace_quote_contains_key(&self, key: &str) -> bool {
-        match self.trace_quote_notify.read() {
-            Ok(ttl) => ttl.contains_key(key),
-            Err(_) => false,
-        }
+        self.trace_quote_notify.contains_key(key)
     }
 
     fn trace_quote_get(&self, key: &str) -> Option<Decimal> {
-        match self.trace_quote_notify.read() {
-            Ok(ttl) => ttl.get(key).copied(),
-            Err(_) => None,
-        }
+        self.trace_quote_notify.get(key).map(|timed| timed.value)
     }
 
     fn trace_quote_set(&self, key: String, val: Decimal, duration: Duration) -> Option<Decimal> {
-        match self.trace_quote_notify.write() {
-            Ok(mut ttl) => ttl.insert(key, val, duration),
-            Err(_) => None,
-        }
+        let old_value = self.trace_quote_notify.get(&key).map(|timed| timed.value);
+        self.trace_quote_notify.insert(
+            key,
+            TimedValue {
+                value: val,
+                duration,
+            },
+        );
+        old_value
     }
 }
 
@@ -146,8 +173,14 @@ impl Ttl {
     /// - `Ttl`：新的 TTL 快取容器。
     pub fn new() -> Self {
         Self {
-            daily_quote: RwLock::new(ttl_cache::TtlCache::new(2048)),
-            trace_quote_notify: RwLock::new(ttl_cache::TtlCache::new(128)),
+            daily_quote: Cache::builder()
+                .max_capacity(2048)
+                .expire_after(TimedExpiry)
+                .build(),
+            trace_quote_notify: Cache::builder()
+                .max_capacity(128)
+                .expire_after(TimedExpiry)
+                .build(),
         }
     }
 }
@@ -161,20 +194,61 @@ impl Default for Ttl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     /// 驗證 TTL 到期後資料會失效。
     #[tokio::test]
-    async fn test_init() {
-        dotenv::dotenv().ok();
-
+    async fn daily_quote_expires_after_ttl() {
+        let ttl = Ttl::new();
         let duration = Duration::from_millis(500);
-        TTL.daily_quote
-            .write()
-            .unwrap()
-            .insert("1".to_string(), "10".to_string(), duration);
 
-        assert_eq!(TTL.daily_quote_get("1"), Some("10".to_string()));
+        assert_eq!(
+            ttl.daily_quote_set("1".to_string(), "10".to_string(), duration),
+            None
+        );
+        assert_eq!(ttl.daily_quote_get("1"), Some("10".to_string()));
         tokio::time::sleep(Duration::from_secs(1)).await;
-        assert_eq!(TTL.daily_quote_get("1"), None);
+        assert_eq!(ttl.daily_quote_get("1"), None);
+        assert!(!ttl.daily_quote_contains_key("1"));
+    }
+
+    #[test]
+    fn set_returns_previous_unexpired_value() {
+        let ttl = Ttl::new();
+        let duration = Duration::from_secs(60);
+
+        assert_eq!(
+            ttl.daily_quote_set("1".to_string(), "10".to_string(), duration),
+            None
+        );
+        assert_eq!(
+            ttl.daily_quote_set("1".to_string(), "20".to_string(), duration),
+            Some("10".to_string())
+        );
+        assert_eq!(ttl.daily_quote_get("1"), Some("20".to_string()));
+
+        assert_eq!(
+            ttl.trace_quote_set("2".to_string(), dec!(1.23), duration),
+            None
+        );
+        assert_eq!(
+            ttl.trace_quote_set("2".to_string(), dec!(4.56), duration),
+            Some(dec!(1.23))
+        );
+        assert_eq!(ttl.trace_quote_get("2"), Some(dec!(4.56)));
+    }
+
+    #[test]
+    fn clear_only_invalidates_daily_quote() {
+        let ttl = Ttl::new();
+        let duration = Duration::from_secs(60);
+
+        ttl.daily_quote_set("daily".to_string(), "quote".to_string(), duration);
+        ttl.trace_quote_set("trace".to_string(), dec!(9.99), duration);
+
+        ttl.clear();
+
+        assert_eq!(ttl.daily_quote_get("daily"), None);
+        assert_eq!(ttl.trace_quote_get("trace"), Some(dec!(9.99)));
     }
 }
