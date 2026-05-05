@@ -1,7 +1,7 @@
 use std::{collections::HashSet, str::FromStr};
 
 use anyhow::*;
-use encoding::{DecoderTrap, Encoding};
+use encoding_rs::BIG5;
 use rust_decimal::Decimal;
 
 const NUMBER_ESCAPE_CHAR: &[char] = &['元', '%', ',', ' ', '"', '\n', '+'];
@@ -26,27 +26,22 @@ pub fn big5_to_utf8(text: &str) -> Result<String> {
     big5_2_utf8(vec.as_ref())
 }
 
-/// Converts a Big5 encoded `Vec<u8>` to a UTF-8 `String`.
+/// Converts Big5 encoded bytes to a UTF-8 `String`.
 ///
-/// This function tries to decode the input `Vec<u8>` using the BIG5_2003 encoding
-/// and then re-encodes the decoded string using the UTF-8 encoding.
-/// If any of the decoding steps fail, it generates an error and returns it wrapped in `Result`.
+/// This function decodes the input bytes with `encoding_rs::BIG5`. Decode errors are handled
+/// by `encoding_rs` with replacement characters, matching the previous best-effort conversion
+/// behavior that ignored malformed input instead of failing the whole response.
 ///
 /// # Arguments
 ///
-/// * `data: &[u8]`: The input vector of bytes containing Big5 encoded text.
+/// * `data`: The input bytes containing Big5 encoded text.
 ///
 /// # Returns
 ///
 /// * `Result<String>`: A UTF-8 encoded string if the conversion is successful, or an error if the conversion fails.
 pub fn big5_2_utf8(data: &[u8]) -> Result<String> {
-    let big5 = encoding::all::BIG5_2003
-        .decode(data, DecoderTrap::Ignore)
-        .map_err(|why| anyhow!(format!("Failed to BIG5_2003.decode because {:?}", why)))?;
-
-    encoding::all::UTF_8
-        .decode(big5.as_bytes(), DecoderTrap::Ignore)
-        .map_err(|why| anyhow!(format!("Failed to UTF_8.decode because {:?}", why)))
+    let (decoded, _, _) = BIG5.decode(data);
+    Ok(decoded.into_owned())
 }
 
 /// 將中文字拆分 例︰台積電 => ["台", "台積", "台積電", "積", "積電", "電"]
@@ -244,6 +239,19 @@ mod tests {
         println!("big5 :{} {:?}", wording, wording.as_bytes());
 
         println!("utf8 :{} {:?}", utf8_wording, utf8_wording.as_bytes());
+    }
+
+    /// 驗證 Big5 bytes 可正確轉成 UTF-8 中文字串。
+    #[test]
+    fn test_big5_2_utf8() {
+        let data = [
+            0xa6, 0xb3, 0xbb, 0xf9, 0xc3, 0xd2, 0xa8, 0xe9, 0xa5, 0x4e, 0xb8, 0xb9, 0xa4, 0xce,
+            0xa6, 0x57, 0xba, 0xd9,
+        ];
+
+        let actual = big5_2_utf8(&data).unwrap();
+
+        assert_eq!(actual, "有價證券代號及名稱");
     }
 
     /// 驗證中文字拆字結果。
