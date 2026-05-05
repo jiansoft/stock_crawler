@@ -19,6 +19,9 @@ static OUT_DIR: &str = "src/rpc";
 
 /// 編譯 protobuf 並輸出 Rust 原始碼。
 fn main() -> Result<(), Box<dyn Error>> {
+    let protoc = protoc_bin_vendored::protoc_bin_path()?;
+    std::env::set_var("PROTOC", protoc);
+
     let protos = [
         "./etc/proto/basic.proto",
         "./etc/proto/control.proto",
@@ -26,7 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "./etc/proto/stock.proto",
     ];
 
-    fs::create_dir_all(OUT_DIR).unwrap();
+    fs::create_dir_all(OUT_DIR)?;
     tonic_prost_build::configure()
         .build_server(true)
         .out_dir(OUT_DIR)

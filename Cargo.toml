@@ -63,4 +63,5 @@ x509-parser = "0.18"
 mimalloc = "0.1"
 
 [build-dependencies]
+protoc-bin-vendored = "3"
 tonic-prost-build = "0.14"
