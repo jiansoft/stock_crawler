@@ -5,6 +5,25 @@ use crate::bot::telegram::Telegram;
 use crate::util::map::Keyable;
 use crate::{bot, cache::SHARE, crawler::twse, database::table, logging};
 
+/// 解析單筆指數字串陣列。若格式錯誤或解析失敗，會記錄 error log 並回傳 `None`。
+fn parse_index_item(item: &[String]) -> Option<table::index::Index> {
+    if item.len() != 6 {
+        logging::error_file_async(format!("資料欄位不等於6 item:{:?}", item));
+        return None;
+    }
+
+    match table::index::Index::from_strings(item) {
+        Ok(i) => Some(i),
+        Err(why) => {
+            logging::error_file_async(format!(
+                "Failed to index::Index::from_strings({:?}) because {:?}",
+                item, why
+            ));
+            None
+        }
+    }
+}
+
 /// 調用  twse API 取得台股加權指數（使用目前日期）
 pub async fn execute() -> Result<()> {
     let tai_ex = twse::taiwan_capitalization_weighted_stock_index::visit(Local::now()).await?;
@@ -15,20 +34,9 @@ pub async fn execute() -> Result<()> {
 
     if let Some(data) = tai_ex.data {
         for item in data {
-            if item.len() != 6 {
-                logging::error_file_async(format!("資料欄位不等於6 item:{:?}", item));
-                continue;
-            }
-
-            let index = match table::index::Index::from_strings(&item) {
-                Ok(i) => i,
-                Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to index::Index::from_strings({:?}) because {:?}",
-                        item, why
-                    ));
-                    continue;
-                }
+            let index = match parse_index_item(&item) {
+                Some(i) => i,
+                None => continue,
             };
 
             //logging::debug_file_async(format!("index:{:?}", index));
@@ -94,20 +102,9 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
 
     if let Some(data) = tai_ex.data {
         for item in data {
-            if item.len() != 6 {
-                logging::error_file_async(format!("資料欄位不等於6 item:{:?}", item));
-                continue;
-            }
-
-            let index = match table::index::Index::from_strings(&item) {
-                Ok(i) => i,
-                Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to index::Index::from_strings({:?}) because {:?}",
-                        item, why
-                    ));
-                    continue;
-                }
+            let index = match parse_index_item(&item) {
+                Some(i) => i,
+                None => continue,
             };
 
             // TWSE 回傳整月資料，只處理與指定日期相符的那一筆。
