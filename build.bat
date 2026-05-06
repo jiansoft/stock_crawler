@@ -8,7 +8,7 @@ set BIN_NAME=stock_crawler
 set BUILD_COUNT=0
 set TOTAL_ELAPSED_CS=0
 
-echo [1/9] Checking Zig...
+echo [1/8] Checking Zig...
 zig version >nul 2>&1
 if errorlevel 1 (
   echo Zig is not installed or not in PATH.
@@ -16,7 +16,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [2/9] Checking CMake...
+echo [2/8] Checking CMake...
 cmake --version >nul 2>&1
 if errorlevel 1 (
   echo CMake is not installed or not in PATH.
@@ -24,15 +24,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [3/9] Checking protoc...
-protoc --version >nul 2>&1
-if errorlevel 1 (
-  echo protoc is not installed or not in PATH.
-  echo Install protobuf compiler and ensure protoc is available.
-  exit /b 1
-)
 
-echo [4/9] Updating Rust toolchain...
+
+echo [3/8] Updating Rust toolchain...
 rustup --version >nul 2>&1
 if errorlevel 1 (
   echo rustup is not installed or not in PATH.
@@ -45,8 +39,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [5/9] Tool versions:
-for /f "delims=" %%i in ('protoc --version') do echo   - %%i
+echo [4/8] Tool versions:
 for /f "delims=" %%i in ('cmake --version ^| findstr /B /C:"cmake version"') do echo   - %%i
 for /f "delims=" %%i in ('zig version') do echo   - zig %%i
 for /f "delims=" %%i in ('cargo --version') do echo   - %%i
@@ -58,7 +51,7 @@ if errorlevel 1 (
   for /f "delims=" %%i in ('rustup --version 2^>nul') do echo   - %%i
 )
 
-echo [6/9] Ensuring Rust targets...
+echo [5/8] Ensuring Rust targets...
 for %%T in (%TARGETS%) do (
   echo   - Adding target %%T
   rustup target add %%T
@@ -68,7 +61,7 @@ for %%T in (%TARGETS%) do (
   )
 )
 
-echo [7/9] Checking cargo-zigbuild...
+echo [6/8] Checking cargo-zigbuild...
 cargo zigbuild -h >nul 2>&1
 if errorlevel 1 (
   echo cargo-zigbuild not found, installing...
@@ -79,7 +72,7 @@ if errorlevel 1 (
   )
 )
 
-echo [8/9] Building %BIN_NAME%...
+echo [7/8] Building %BIN_NAME%...
 for %%T in (%TARGETS%) do (
   set /a BUILD_COUNT+=1
   echo.
@@ -90,7 +83,6 @@ for %%T in (%TARGETS%) do (
     echo Build failed for %%T.
     echo.
     echo Check these first:
-    echo   - protoc --version
     echo   - cmake --version
     echo   - zig version
     echo.
@@ -116,7 +108,7 @@ for %%T in (%TARGETS%) do (
 
 call :FormatElapsed %TOTAL_ELAPSED_CS% TOTAL_ELAPSED_TEXT
 echo.
-echo [9/9] Done.
+echo [8/8] Done.
 echo Targets built: %BUILD_COUNT%
 echo Total build time: %TOTAL_ELAPSED_TEXT%
 
