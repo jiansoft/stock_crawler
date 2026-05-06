@@ -5,7 +5,7 @@
 //! 再一併寫回 `financial_statement` 資料表。
 //!
 //! 這裡不再使用「目前時間減去固定天數」的猜測方式，而是改由
-//! [`crate::util::datetime::eps_report_quarter_targets_for_listed_and_otc`] 根據
+//! [`util::datetime::eps_report_quarter_targets_for_listed_and_otc`] 根據
 //! 上市/上櫃公司的季報申報截止日與「季末隔天起即可預抓」規則推導目標季度清單，
 //! 避免在截止日前過早切換主季度，同時也能提早收錄已公告的下一季資料。
 
@@ -113,7 +113,7 @@ async fn process_eps(
             e.earnings_per_share -= before_eps;
         }
 
-        let fs = table::financial_statement::FinancialStatement::from(e);
+        let fs = financial_statement::FinancialStatement::from(e);
 
         if let Err(why) = fs.upsert_earnings_per_share().await {
             logging::error_file_async(format!("{:?}", why));

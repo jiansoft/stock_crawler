@@ -22,6 +22,10 @@ pub struct StockDividendPayableDateInfo {
     pub payable_date1: String,
     /// 股票股利發放日。
     pub payable_date2: String,
+    /// 除息日。
+    pub ex_dividend_date1: String,
+    /// 除權日。
+    pub ex_dividend_date2: String,
 }
 
 /// 取得指定日期為股利發放日的股票
@@ -34,7 +38,9 @@ SELECT
     d.stock_dividend,
     d.sum,
     d."payable_date1",
-    d."payable_date2"
+    d."payable_date2",
+    d."ex-dividend_date1" as ex_dividend_date1,
+    d."ex-dividend_date2" as ex_dividend_date2
 FROM
     dividend AS d
 INNER JOIN
