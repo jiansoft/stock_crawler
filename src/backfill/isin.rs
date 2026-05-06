@@ -1,9 +1,8 @@
 use std::fmt::Write;
 
-use crate::bot::telegram::Telegram;
 use crate::{
-    backfill, bot, cache::SHARE, crawler::twse, database::table, declare::StockExchangeMarket,
-    logging, rpc, util::datetime::Weekend,
+    backfill, bot, bot::telegram::Telegram, cache::SHARE, crawler::twse, database::table,
+    declare::StockExchangeMarket, logging, rpc, util::datetime::Weekend,
 };
 use anyhow::{anyhow, Result};
 use chrono::Local;

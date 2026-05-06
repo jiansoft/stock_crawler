@@ -1,8 +1,8 @@
 use std::fmt::Write;
 
-use crate::bot::telegram::Telegram;
 use crate::{
     backfill, bot,
+    bot::telegram::Telegram,
     cache::SHARE,
     crawler::{share::EtfInfo, tpex, twse},
     database::table,
