@@ -9,7 +9,6 @@
 //! - **負載平衡與備援**：使用輪詢 (Round-robin) 機制切換不同站點，並在主站點失敗時自動嘗試備援站點。
 //! - **抽象化介面**：透過 `StockInfo` Trait 定義統一的資料獲取行為。
 //! - **站點池集中管理**：將站點名稱與抓取函式綁成模組層級清單，降低平行陣列對不齊的維護風險。
-//! - **DDNS 支援**：包含自動更新 DDNS (如 Afraid, Dynu, No-IP) 的相關模組。
 
 use std::{
     collections::HashMap,
@@ -35,8 +34,6 @@ use crate::{
     declare, logging, util,
 };
 
-/// 動態 DNS 服務 (Afraid DNS)
-pub mod afraid;
 /// 臺灣銀行 (提供匯率、財務報表等資料)
 pub mod bank_of_taiwan;
 /// IP 資訊服務 (BigDataCloud)
@@ -45,8 +42,6 @@ pub mod bigdatacloud;
 pub mod cmoney;
 /// 鉅亨網 (提供財經新聞與即時報價)
 pub mod cnyes;
-/// 動態 DNS 服務 (Dynu)
-pub mod dynu;
 /// 富邦證券
 pub mod fbs;
 /// Fugle 行情 API
@@ -69,8 +64,6 @@ pub mod moneydj;
 pub mod mops;
 /// IP 檢測服務 (MyIP)
 pub mod myip;
-/// 動態 DNS 服務 (No-IP)
-pub mod noip;
 /// NStock 恩投資 (提供 EPS 與各類統計數據)
 pub mod nstock;
 /// 即時價格背景任務協調層
