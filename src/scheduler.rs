@@ -1,6 +1,7 @@
 use std::{env, future::Future, time::Instant};
 
 use anyhow::{Context, Error, Result};
+use chrono::FixedOffset;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
@@ -67,50 +68,47 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
 
     let jobs = vec![
         // 01:00 更新興櫃股票的每股淨值
-        create_job("0 0 17 * * *", net_asset_value_per_share::emerging::execute),
+        create_job("0 0 1 * * *", net_asset_value_per_share::emerging::execute),
         // 02:30 更新盈餘分配率
-        create_job("0 30 18 * * *", dividend::payout_ratio::execute),
+        create_job("0 30 2 * * *", dividend::payout_ratio::execute),
         // 03:00 更新台股季度財報
-        create_job("0 0 19 * * *", event::taiwan_stock::quarter_eps::execute),
+        create_job("0 0 3 * * *", event::taiwan_stock::quarter_eps::execute),
         // 04:00 更新台股季度財報(ROE、ROA為零的數據)
-        create_job("0 0 20 * * *", financial_statement::quarter::execute),
+        create_job("0 0 4 * * *", financial_statement::quarter::execute),
         // 05:00 更新台股年度財報(僅有eps 等少數欄位的資料)
-        create_job("0 0 21 * * *", event::taiwan_stock::annual_eps::execute),
-        // 05:00 更新台股年度財報
-        create_job("0 0 21 * * *", financial_statement::annual::execute),
-        // 05:00 從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據
+        create_job("0 0 5 * * *", event::taiwan_stock::annual_eps::execute),
+        // 05:05 更新台股年度財報
+        create_job("0 5 5 * * *", financial_statement::annual::execute),
+        // 05:10 從yahoo取得每股淨值數據，將未下市但每股淨值為零的股票更新其數據
         create_job(
-            "0 0 21 * * *",
+            "0 10 5 * * *",
             net_asset_value_per_share::zero_value::execute,
         ),
-        // 05:00 取得台股的營收
-        create_job("0 0 21 * * *", revenue::execute),
-        // 05:00 更新台股國際證券識別碼
-        create_job("0 0 21 * * *", isin::execute),
-        // 05:00 更新下市的股票
-        create_job("0 0 21 * * *", delisted_company::execute),
-        // 05:00 更新台股 ETF 資訊
-        create_job("0 0 21 * * *", etf::execute),
+        // 05:15 取得台股的營收
+        create_job("0 15 5 * * *", revenue::execute),
+        // 05:20 更新台股國際證券識別碼
+        create_job("0 20 5 * * *", isin::execute),
+        // 05:25 更新下市的股票
+        create_job("0 25 5 * * *", delisted_company::execute),
+        // 05:30 更新台股 ETF 資訊
+        create_job("0 30 5 * * *", etf::execute),
         // 08:00 提醒本日除權息的股票
-        create_job("0 0 0 * * *", event::taiwan_stock::ex_dividend::execute),
-        // 08:00 提醒本日發放股利的股票(只通知自已有的股票)
-        create_job("0 0 0 * * *", event::taiwan_stock::payable_date::execute),
-        // 08:00 提醒本日開始公開申購的股票
-        create_job("0 0 0 * * *", || async {
-            event::taiwan_stock::public::execute().await
-            //Ok(())
-        }),
+        create_job("0 0 8 * * *", event::taiwan_stock::ex_dividend::execute),
+        // 08:02 提醒本日發放股利的股票(只通知自已有的股票)
+        create_job("0 2 8 * * *", event::taiwan_stock::payable_date::execute),
+        // 08:04 提醒本日開始公開申購的股票
+        create_job("0 4 8 * * *", event::taiwan_stock::public::execute),
         // 09:00 更新股票權值佔比
-        create_job("0 0 1 * * *", stock_weight::execute),
-        // 09:00 提醒本日已達高低標的股票有那些
-        create_job("0 0 1 * * *", event::trace::stock_price::execute),
+        create_job("0 0 9 * * *", stock_weight::execute),
+        // 09:02 提醒本日已達高低標的股票有那些
+        create_job("0 2 9 * * *", event::trace::stock_price::execute),
         // 15:00 取得收盤報價數據
-        create_job("0 0 7 * * *", event::taiwan_stock::closing::execute),
+        create_job("0 0 15 * * *", event::taiwan_stock::closing::execute),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
-        create_job("0 0 13 * * *", dividend::execute),
+        create_job("0 0 21 * * *", dividend::execute),
         // 22:00 外資持股狀態
         create_job(
-            "0 0 14 * * *",
+            "0 0 22 * * *",
             qualified_foreign_institutional_investor::execute,
         ),
         // 每分鐘更新一次ddns的ip
@@ -148,7 +146,8 @@ where
     F: Fn() -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<(), Error>> + Send,
 {
-    Ok(Job::new_async(cron_expr, move |_uuid, _l| {
+    let tz = FixedOffset::east_opt(8 * 3600).unwrap();
+    Ok(Job::new_async_tz(cron_expr, tz, move |_uuid, _l| {
         let task = task.clone();
         Box::pin(async move {
             if let Err(why) = task().await {
