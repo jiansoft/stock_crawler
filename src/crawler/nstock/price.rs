@@ -79,27 +79,14 @@ impl StockInfo for NStock {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::{crawler::log_stock_price_test, logging};
 
     use super::*;
 
     #[tokio::test]
     async fn test_get_stock_price() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 get_stock_price".to_string());
-
-        // match get("2330").await {
-        match NStock::get_stock_price("2330").await {
-            Ok(e) => {
-                dbg!(&e);
-                logging::debug_file_async(format!("price : {:#?}", e));
-            }
-            Err(why) => {
-                logging::debug_file_async(format!("Failed to get_stock_price because {:?}", why));
-            }
-        }
-
-        logging::debug_file_async("結束 get_stock_price".to_string());
+        log_stock_price_test::<NStock>("2330").await;
     }
 
     #[tokio::test]

@@ -145,24 +145,12 @@ impl PcHome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::{crawler::log_stock_price_test, logging};
 
     #[tokio::test]
     async fn test_get_stock_price() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 get_stock_price".to_string());
-
-        match PcHome::get_stock_price("2330").await {
-            Ok(e) => {
-                dbg!(&e);
-                logging::debug_file_async(format!("price : {:#?}", e));
-            }
-            Err(why) => {
-                logging::debug_file_async(format!("Failed to get_stock_price because {:?}", why));
-            }
-        }
-
-        logging::debug_file_async("結束 visit".to_string());
+        log_stock_price_test::<PcHome>("2330").await;
     }
 
     #[tokio::test]

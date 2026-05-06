@@ -8,7 +8,7 @@ use crate::{
         cnyes::{CnYes, HOST},
         StockInfo,
     },
-    declare::{self, StockQuotes},
+    declare::StockQuotes,
     util::{self},
 };
 
@@ -79,7 +79,7 @@ impl StockInfo for CnYes {
         Ok(Decimal::try_from(current_price)?)
     }
 
-    async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes> {
+    async fn get_stock_quotes(stock_symbol: &str) -> Result<StockQuotes> {
         let r = fetch_data(stock_symbol).await?;
         let current_price = r.required_current_price(stock_symbol)?;
 
@@ -94,7 +94,7 @@ impl StockInfo for CnYes {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::{crawler::log_stock_price_test, logging};
 
     use super::*;
 
@@ -122,20 +122,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_stock_price() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 get_stock_price".to_string());
-
-        // match get("2330").await {
-        match CnYes::get_stock_price("2330").await {
-            Ok(e) => {
-                dbg!(&e);
-                logging::debug_file_async(format!("price : {:#?}", e));
-            }
-            Err(why) => {
-                logging::debug_file_async(format!("Failed to get_stock_price because {:?}", why));
-            }
-        }
-
-        logging::debug_file_async("結束 get_stock_price".to_string());
+        log_stock_price_test::<CnYes>("2330").await;
     }
 
     #[tokio::test]

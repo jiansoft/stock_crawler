@@ -112,6 +112,26 @@ pub trait StockInfo {
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes>;
 }
 
+#[cfg(test)]
+pub(crate) async fn log_stock_price_test<S>(stock_symbol: &str)
+where
+    S: StockInfo,
+{
+    logging::debug_file_async("開始 get_stock_price".to_string());
+
+    match S::get_stock_price(stock_symbol).await {
+        Ok(price) => {
+            dbg!(&price);
+            logging::debug_file_async(format!("price : {:#?}", price));
+        }
+        Err(why) => {
+            logging::debug_file_async(format!("Failed to get_stock_price because {:?}", why));
+        }
+    }
+
+    logging::debug_file_async("結束 get_stock_price".to_string());
+}
+
 /// 標記採集站點的全局遊標。
 ///
 /// 為了避免單一站點請求過於頻繁導致被封鎖，系統使用此遊標進行輪詢 (Round-robin)。

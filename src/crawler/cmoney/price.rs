@@ -163,7 +163,7 @@ impl StockInfo for CMoney {
 /// 這些測試需連線外部網站，執行結果會受網路與來源頁面變動影響。
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::{crawler::log_stock_price_test, logging};
 
     #[test]
     fn test_parse_required_decimal_rejects_dash() {
@@ -185,19 +185,7 @@ mod tests {
     /// 測試可取得指定股票即時價格。
     async fn test_get_stock_price() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 get_stock_price".to_string());
-
-        match CMoney::get_stock_price("4438").await {
-            Ok(e) => {
-                dbg!(&e);
-                logging::debug_file_async(format!("price : {:#?}", e));
-            }
-            Err(why) => {
-                logging::debug_file_async(format!("Failed to get_stock_price because {:?}", why));
-            }
-        }
-
-        logging::debug_file_async("結束 get_stock_price".to_string());
+        log_stock_price_test::<CMoney>("4438").await;
     }
 
     #[tokio::test]
