@@ -20,6 +20,7 @@ use tokio::{
 };
 
 use crate::logging::rotate::Rotate;
+use crate::util::atomic::decrement_atomic_usize;
 
 /// 日誌檔輪轉模組。
 pub mod rotate;
@@ -253,15 +254,6 @@ fn flush_log_buffer(rotate: &mut Rotate, now: chrono::DateTime<Local>, msg: &mut
             msg.clear();
         }
     }
-}
-
-fn decrement_atomic_usize(counter: &AtomicUsize) -> usize {
-    counter
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            Some(current.saturating_sub(1))
-        })
-        .map(|previous| previous.saturating_sub(1))
-        .unwrap_or_default()
 }
 
 /// 使用全域 logger 寫入 `info` 等級檔案日誌。

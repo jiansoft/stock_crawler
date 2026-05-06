@@ -32,7 +32,10 @@ use tokio::{
 use super::{stats as trace_stats, stock_price};
 use crate::{
     cache::RealtimeSnapshot,
-    util::diagnostics::{read_process_memory_stats, trim_allocator_memory, TaskRuntimeStatus},
+    util::{
+        atomic::decrement_atomic_usize,
+        diagnostics::{read_process_memory_stats, trim_allocator_memory, TaskRuntimeStatus},
+    },
 };
 use crate::{cache::SHARE, crawler, declare, logging};
 
@@ -84,15 +87,6 @@ const TRACE_RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60 * 5);
 const TRACE_DIAGNOSTICS_LOG_INTERVAL: Duration = Duration::from_secs(30);
 const TRACE_ALLOCATOR_TRIM_INTERVAL: Duration = Duration::from_secs(60 * 5);
 const PRICE_UPDATE_CHANNEL_CAPACITY: usize = 4096;
-
-fn decrement_active_tasks(counter: &AtomicUsize) -> usize {
-    counter
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-            Some(current.saturating_sub(1))
-        })
-        .map(|previous| previous.saturating_sub(1))
-        .unwrap_or_default()
-}
 
 /// 啟動 trace 事件所需的即時報價背景任務。
 ///
@@ -274,7 +268,7 @@ fn start_price_update_consumer_task() {
         }
 
         clear_pending_price_symbols();
-        let active_tasks = decrement_active_tasks(&PRICE_CONSUMER_ACTIVE_TASKS);
+        let active_tasks = decrement_atomic_usize(&PRICE_CONSUMER_ACTIVE_TASKS);
         logging::info_file_async(format!(
             "股票追蹤價格事件 consumer 已停止 generation={} active_tasks={}",
             generation, active_tasks
@@ -331,7 +325,7 @@ fn start_trace_target_refresh_task() {
         }
 
         IS_TARGET_CACHE_REFRESHING.store(false, Ordering::SeqCst);
-        let active_tasks = decrement_active_tasks(&TARGET_REFRESH_ACTIVE_TASKS);
+        let active_tasks = decrement_atomic_usize(&TARGET_REFRESH_ACTIVE_TASKS);
         logging::info_file_async(format!(
             "追蹤條件快取刷新任務已停止 generation={} active_tasks={}",
             generation, active_tasks
@@ -388,7 +382,7 @@ fn start_trace_reconciliation_task() {
         }
 
         IS_RECONCILING.store(false, Ordering::SeqCst);
-        let active_tasks = decrement_active_tasks(&RECONCILIATION_ACTIVE_TASKS);
+        let active_tasks = decrement_atomic_usize(&RECONCILIATION_ACTIVE_TASKS);
         logging::info_file_async(format!(
             "追蹤股票低頻對帳任務已停止 generation={} active_tasks={}",
             generation, active_tasks
@@ -443,7 +437,7 @@ fn start_traced_stock_backup_caching_task() {
         }
 
         IS_BACKUP_CACHING.store(false, Ordering::SeqCst);
-        let active_tasks = decrement_active_tasks(&BACKUP_ACTIVE_TASKS);
+        let active_tasks = decrement_atomic_usize(&BACKUP_ACTIVE_TASKS);
         logging::info_file_async(format!(
             "追蹤股票備援採集任務已停止 generation={} active_tasks={}",
             generation, active_tasks
@@ -498,7 +492,7 @@ fn start_trace_diagnostics_task() {
         }
 
         IS_DIAGNOSTICS_LOGGING.store(false, Ordering::SeqCst);
-        let active_tasks = decrement_active_tasks(&DIAGNOSTICS_ACTIVE_TASKS);
+        let active_tasks = decrement_atomic_usize(&DIAGNOSTICS_ACTIVE_TASKS);
         logging::info_file_async(format!(
             "trace diagnostics 任務已停止 generation={} active_tasks={}",
             generation, active_tasks

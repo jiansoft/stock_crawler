@@ -19,8 +19,11 @@ use crate::{
     cache::{RealtimeSnapshot, SHARE},
     crawler::yahoo::YahooClassCategory,
     event::trace::price_tasks as trace_price_tasks,
-    util::diagnostics::{
-        read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
+    util::{
+        atomic::decrement_atomic_usize,
+        diagnostics::{
+            read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
+        },
     },
 };
 
@@ -72,15 +75,6 @@ pub(crate) struct YahooRuntimeDiagnostics {
     pub last_elapsed_ms: u64,
     pub last_rss_delta_kib: i64,
     pub completed_cycles: u64,
-}
-
-fn decrement_active_tasks(counter: &AtomicUsize) -> usize {
-    counter
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-            Some(current.saturating_sub(1))
-        })
-        .map(|previous| previous.saturating_sub(1))
-        .unwrap_or_default()
 }
 
 fn store_runtime_progress(
@@ -365,7 +359,7 @@ pub fn start_caching_task() {
 
         // 跳出 while 代表旗標已關閉，這裡補一筆停止 log 方便對照啟停時間。
         IS_CACHING.store(false, Ordering::SeqCst);
-        let active_tasks = decrement_active_tasks(&ACTIVE_TASKS);
+        let active_tasks = decrement_atomic_usize(&ACTIVE_TASKS);
         crate::logging::info_file_async(format!(
             "Yahoo 類股快取任務已停止 generation={} active_tasks={}",
             generation, active_tasks

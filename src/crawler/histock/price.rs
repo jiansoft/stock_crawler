@@ -35,6 +35,7 @@ use crate::{
     event::trace::price_tasks as trace_price_tasks,
     util::{
         self,
+        atomic::decrement_atomic_usize,
         diagnostics::{
             read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
         },
@@ -90,15 +91,6 @@ struct HiStockFetchResult {
     snapshots: HashMap<String, RealtimeSnapshot>,
     body_bytes: usize,
     row_count: usize,
-}
-
-fn decrement_active_tasks(counter: &AtomicUsize) -> usize {
-    counter
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-            Some(current.saturating_sub(1))
-        })
-        .map(|previous| previous.saturating_sub(1))
-        .unwrap_or_default()
 }
 
 /// 解析單一表格列資料。
@@ -322,7 +314,7 @@ pub fn start_caching_task() {
             sleep(Duration::from_secs(5)).await;
         }
         IS_CACHING.store(false, Ordering::SeqCst);
-        let active_tasks = decrement_active_tasks(&ACTIVE_TASKS);
+        let active_tasks = decrement_atomic_usize(&ACTIVE_TASKS);
         crate::logging::info_file_async(format!(
             "HiStock 快取任務已停止 generation={} active_tasks={}",
             generation, active_tasks

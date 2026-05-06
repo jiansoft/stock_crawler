@@ -4,6 +4,8 @@ use std::{cmp::max, sync::Once};
 
 /// 日期時間相關工具。
 pub mod datetime;
+/// 原子變數相關工具。
+pub mod atomic;
 /// 執行期 diagnostics 與程序狀態工具。
 pub mod diagnostics;
 /// HTTP 請求與 HTML 解析輔助工具。
