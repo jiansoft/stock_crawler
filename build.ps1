@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $Targets = @('aarch64-unknown-linux-musl')
-$Profile = 'release'
+$BuildProfile = 'release'
 $BinName = 'stock_crawler'
 $BuildCount = 0
 $TotalElapsed = [TimeSpan]::Zero
@@ -113,7 +113,7 @@ foreach ($target in $Targets) {
     Write-Host "===== Build $BuildCount`: $target ====="
 
     $start = Get-Date
-    & cargo zigbuild --target $target "--$Profile"
+    & cargo zigbuild --target $target "--$BuildProfile"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Build failed for $target."
         Write-Host ''
@@ -127,7 +127,7 @@ foreach ($target in $Targets) {
     $elapsed = (Get-Date) - $start
     $TotalElapsed = $TotalElapsed.Add($elapsed)
 
-    $outPath = Join-Path 'target' "$target\$Profile\$BinName"
+    $outPath = Join-Path 'target' "$target\$BuildProfile\$BinName"
     if (Test-Path -LiteralPath $outPath) {
         Write-Host "Output binary: $outPath"
     } else {
