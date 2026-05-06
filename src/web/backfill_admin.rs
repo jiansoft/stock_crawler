@@ -115,6 +115,15 @@ struct ClosingAggregateRequest {
     date: String,
 }
 
+/// 台股加權指數手動回補的 HTTP request body。
+#[derive(Debug, Deserialize)]
+struct TaiwanStockIndexRequest {
+    /// 回補目標日期，格式必須為 `YYYY-MM-DD`。
+    ///
+    /// TWSE API 會依此日期回傳該月份所有交易日的指數資料。
+    date: String,
+}
+
 /// 各股每日收盤報價手動回補的 HTTP request body。
 #[derive(Debug, Deserialize)]
 struct DailyQuotesRequest {
@@ -272,10 +281,19 @@ async fn start_closing_aggregate(
 }
 
 /// 建立台股加權指數回補 job 的 HTTP handler。
-async fn start_taiwan_stock_index(State(_state): State<BackfillWebState>) -> impl IntoResponse {
-    // 台股加權指數 crawler 以目前日期查詢 TWSE API，因此此操作不需要額外輸入。
+async fn start_taiwan_stock_index(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<TaiwanStockIndexRequest>,
+) -> impl IntoResponse {
+    // 先驗證日期格式，避免背景 job 才因輸入錯誤失敗。
+    let date = match parse_request_date(&req.date) {
+        Ok(date) => date,
+        Err(response) => return response,
+    };
+
+    // 輸入有效時建立背景 job，只會 upsert 指定日期的指數資料。
     Json(StartJobResponse {
-        job: start_taiwan_stock_index_job().await,
+        job: start_taiwan_stock_index_job(date).await,
     })
     .into_response()
 }
@@ -402,16 +420,18 @@ pub(crate) async fn start_closing_aggregate_job(date: NaiveDate) -> BackfillJob 
 
 /// 建立台股加權指數背景 job。
 ///
-/// Job 會呼叫 TWSE 加權股價指數來源抓取今日資料，並沿用既有 backfill 流程 upsert
-/// `Index` 資料與更新快取。
-pub(crate) async fn start_taiwan_stock_index_job() -> BackfillJob {
+/// Job 會依指定日期呼叫 TWSE 加權股價指數來源，從回傳的整月資料中篩選出
+/// 指定日期的那一筆，跳過快取檢查後 upsert `Index` 資料並更新快取。
+pub(crate) async fn start_taiwan_stock_index_job(date: NaiveDate) -> BackfillJob {
     start_job(
         BACKFILL_STATE.clone(),
         "taiwan_stock_index",
-        Local::now().date_naive().to_string(),
+        date.to_string(),
         move || async move {
-            taiwan_stock_index::execute().await?;
-            Ok("taiwan stock index backfill completed".to_string())
+            let upserted_count = taiwan_stock_index::execute_for_date(date).await?;
+            Ok(format!(
+                "taiwan stock index backfill completed: upserted_count={upserted_count}"
+            ))
         },
     )
     .await
@@ -756,6 +776,8 @@ const INDEX_HTML: &str = r##"<!doctype html>
       </form>
       <form class="panel" data-endpoint="/api/manual-backfill/taiwan-stock-index">
         <h2>Taiwan Stock Index</h2>
+        <label for="index-date">Trading date</label>
+        <input id="index-date" name="date" type="date" required>
         <button type="submit">Start</button>
         <div class="toast"></div>
       </form>

@@ -12,7 +12,8 @@
 //!   依 [`MANUAL_CLOSING_AGGREGATE_DATE`] 重跑每日收盤事件匯總，包含收盤報價回補、
 //!   缺漏補齊、均線、最後交易日報價、估價、殖利率排行與市值重算。
 //! - `test_backfill_taiwan_stock_index`：
-//!   抓取執行當下日期的台股加權指數，寫入 `Index` 並更新快取。
+//!   依 [`MANUAL_TAIWAN_STOCK_INDEX_DATE`] 回補指定日期的台股加權指數，
+//!   跳過快取檢查後 upsert 寫入 `Index` 並更新快取。
 //! - `test_backfill_received_dividend_records_for_stock`：
 //!   依 [`MANUAL_DIVIDEND_RECORD_SECURITY_CODE`] 重算指定股票目前持股的已領股利總表與明細。
 //! - `test_backfill_historical_dividends_for_stock`：
@@ -110,11 +111,17 @@ async fn test_backfill_closing_aggregate_for_date() {
     ));
 }
 
-/// 手動回補台股加權指數。
+/// 手動回補台股加權指數時使用的預設日期。
+///
+/// TWSE API 會依此日期回傳該月份所有交易日的指數資料。
+const MANUAL_TAIWAN_STOCK_INDEX_DATE: &str = "2026-04-15";
+
+/// 手動回補指定月份的台股加權指數。
 ///
 /// 此測試等同把原本的 `backfill::taiwan_stock_index::tests::test_execute`
-/// 集中到手動回補檔。它會使用執行當下日期呼叫 TWSE 加權股價指數來源，
-/// 將新資料 upsert 回 `Index`，並更新記憶體快取。
+/// 集中到手動回補檔。它會使用 [`MANUAL_TAIWAN_STOCK_INDEX_DATE`] 呼叫 TWSE
+/// 加權股價指數來源，將該月份所有交易日的指數 upsert 回 `Index`，並更新記憶體快取。
+/// 回補模式會跳過快取檢查，確保所有資料都寫入資料庫。
 ///
 /// 執行範例：
 /// `cargo test manual_backfill::test_backfill_taiwan_stock_index -- --ignored --nocapture`
@@ -124,13 +131,20 @@ async fn test_backfill_taiwan_stock_index() {
     dotenv::dotenv().ok();
     SHARE.load().await;
 
-    logging::debug_file_async("開始 manual_backfill::test_backfill_taiwan_stock_index".to_string());
+    let date = NaiveDate::parse_from_str(MANUAL_TAIWAN_STOCK_INDEX_DATE, "%Y-%m-%d")
+        .expect("manual taiwan stock index date should be valid");
 
-    taiwan_stock_index::execute()
+    logging::debug_file_async(format!(
+        "開始 manual_backfill::test_backfill_taiwan_stock_index date={date}"
+    ));
+
+    let upserted_count = taiwan_stock_index::execute_for_date(date)
         .await
         .expect("manual taiwan stock index backfill failed");
 
-    logging::debug_file_async("結束 manual_backfill::test_backfill_taiwan_stock_index".to_string());
+    logging::debug_file_async(format!(
+        "結束 manual_backfill::test_backfill_taiwan_stock_index date={date} upserted_count={upserted_count}"
+    ));
 }
 
 /// 手動回補指定股票目前持股的已領股利紀錄。

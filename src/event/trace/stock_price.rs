@@ -70,7 +70,7 @@ enum EvaluationSource {
 /// 3. 追蹤結束時停止所有 trace 相關背景任務。
 ///
 /// 追蹤任務本身不直接對外網站採集報價，而是由背景採集器寫入
-/// [`SHARE`](crate::cache::SHARE) 中的 `stock_snapshots` 快取，再由價格更新事件
+/// [`SHARE`](SHARE) 中的 `stock_snapshots` 快取，再由價格更新事件
 /// 驅動 [`evaluate_price_update`] 執行指定股票的邊界檢查。
 ///
 /// # Errors

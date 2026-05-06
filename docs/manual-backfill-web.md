@@ -49,7 +49,7 @@ http://127.0.0.1:9002/manual-backfill
 | --- | --- | --- |
 | Daily Quotes | `YYYY-MM-DD` 交易日 | 刪除當日既有 `DailyQuotes` 後，重新抓取上市櫃各股每日收盤報價 |
 | Closing Aggregate | `YYYY-MM-DD` 交易日 | 重跑每日收盤事件匯總 |
-| Taiwan Stock Index | 無 | 抓取今日台股加權指數，寫入 `Index` 並更新快取 |
+| Taiwan Stock Index | `YYYY-MM-DD` 交易日 | 依指定日期抓取該日台股加權指數，寫入 `Index` 並更新快取 |
 | Received Dividends | 股票代號 | 重算指定股票目前持股的已領股利紀錄 |
 | Historical Dividends | 股票代號 | 從 Yahoo 回補單檔股票歷年股利，並同步重算已領股利 |
 | Multi Dividend History | 西元年度 | 找出指定年度已有季配/半年配資料的股票，批次回補 Yahoo 歷年股利 |
@@ -95,11 +95,14 @@ Content-Type: application/json
 POST /api/manual-backfill/taiwan-stock-index
 Content-Type: application/json
 
-{}
+{
+  "date": "2026-04-15"
+}
 ```
 
-此 API 會呼叫 `src/backfill/taiwan_stock_index.rs` 的既有流程，使用目前日期抓取
-TWSE 台股加權指數資料，寫入 `Index`，並更新記憶體快取。
+此 API 會依指定日期呼叫 `src/backfill/taiwan_stock_index.rs` 的回補流程，
+TWSE 會回傳該月份資料，但只會 upsert 與指定日期相符的那一筆指數到
+`Index`，並更新記憶體快取。
 
 ### 建立已領股利紀錄回補
 
@@ -228,7 +231,7 @@ service ManualBackfill {
 | --- | --- | --- |
 | `manual_backfill.ManualBackfill/StartDailyQuotes` | `{ "date": "2026-04-30" }` | 建立各股每日收盤報價回補 job |
 | `manual_backfill.ManualBackfill/StartClosingAggregate` | `{ "date": "2026-04-30" }` | 建立收盤匯總回補 job |
-| `manual_backfill.ManualBackfill/StartTaiwanStockIndex` | `{}` | 建立今日台股加權指數回補 job |
+| `manual_backfill.ManualBackfill/StartTaiwanStockIndex` | `{ "date": "2026-04-15" }` | 建立指定日期台股加權指數回補 job |
 | `manual_backfill.ManualBackfill/StartReceivedDividendRecords` | `{ "security_code": "0056" }` | 建立已領股利紀錄回補 job |
 | `manual_backfill.ManualBackfill/StartHistoricalDividends` | `{ "security_code": "2845" }` | 建立歷年股利回補 job |
 | `manual_backfill.ManualBackfill/StartMultipleDividendHistoricalDividends` | `{ "year": 2026 }` | 建立多次配息股票歷年股利批次回補 job |
@@ -252,7 +255,7 @@ grpcurl -plaintext \
 grpcurl -plaintext \
   -import-path etc/proto \
   -proto manual_backfill.proto \
-  -d '{}' \
+  -d '{"date":"2026-04-15"}' \
   127.0.0.1:9001 \
   manual_backfill.ManualBackfill/StartTaiwanStockIndex
 ```
@@ -368,6 +371,6 @@ gRPC 串接：
 - gRPC 是否對外開放取決於既有 `SYSTEM_GRPC_USE_PORT` 與部署網路設定。
 - 回補任務會寫資料庫，也會呼叫外部資料來源；正式執行前請確認 `.env` / `app.json` 指向正確環境。
 - 各股每日收盤報價回補會先刪除指定日期既有 `DailyQuotes`，再重新寫入外部來源資料。
-- 台股加權指數回補目前使用執行當下日期查詢 TWSE API。
+- 台股加權指數回補會依指定日期查詢 TWSE API，TWSE 回傳整月資料但只會 upsert 指定日期的那一筆，回補時會跳過快取檢查以確保資料寫入資料庫。
 - 歷年股利回補會直接打 Yahoo 並寫入 `dividend` 表，完成後會同步重算目前持股的已領股利紀錄。
 - 多次配息股票歷年股利批次回補會逐檔打 Yahoo，耗時與請求量會隨年度股票數增加。

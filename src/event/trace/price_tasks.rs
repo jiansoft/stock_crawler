@@ -1,7 +1,7 @@
 //! # Trace 即時價格任務協調模組
 //!
 //! 此模組負責管理 trace 事件所需的即時報價背景任務，
-//! 讓 [`stock_price`](crate::event::trace::stock_price) 可以專注在
+//! 讓 [`stock_price`](stock_price) 可以專注在
 //! 價格追蹤與警報邏輯。
 //!
 //! 目前此模組會協調五種工作：

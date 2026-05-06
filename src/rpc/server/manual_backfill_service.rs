@@ -59,13 +59,16 @@ impl ManualBackfill for ManualBackfillService {
         }))
     }
 
-    /// 建立今日台股加權指數回補 job。
+    /// 建立指定日期的台股加權指數回補 job。
     async fn start_taiwan_stock_index(
         &self,
-        _req: Request<TaiwanStockIndexRequest>,
+        req: Request<TaiwanStockIndexRequest>,
     ) -> Result<Response<BackfillJobResponse>, Status> {
-        // 台股加權指數 backfill 不需要輸入參數，實際查詢日期由 crawler 使用目前日期決定。
-        let job = web::backfill_admin::start_taiwan_stock_index_job().await;
+        // gRPC 輸入仍使用字串，因此先解析並把格式錯誤轉成 INVALID_ARGUMENT。
+        let date = parse_grpc_date(&req.into_inner().date)?;
+
+        // 建立共用背景 job，只會 upsert 指定日期的指數資料。
+        let job = web::backfill_admin::start_taiwan_stock_index_job(date).await;
         Ok(Response::new(BackfillJobResponse {
             job: Some(to_grpc_job(job)),
         }))

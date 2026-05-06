@@ -9,8 +9,11 @@ pub struct ClosingAggregateRequest {
     #[prost(string, tag = "1")]
     pub date: ::prost::alloc::string::String,
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct TaiwanStockIndexRequest {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaiwanStockIndexRequest {
+    #[prost(string, tag = "1")]
+    pub date: ::prost::alloc::string::String,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SecurityCodeRequest {
     #[prost(string, tag = "1")]

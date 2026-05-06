@@ -21,7 +21,9 @@ message ClosingAggregateRequest {
   string date = 1;
 }
 
-message TaiwanStockIndexRequest {}
+message TaiwanStockIndexRequest {
+  string date = 1;
+}
 
 message SecurityCodeRequest {
   string security_code = 1;
