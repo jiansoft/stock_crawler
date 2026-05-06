@@ -82,6 +82,27 @@ impl FinancialStatement {
         }
     }
 
+    fn row_to_entity(row: PgRow) -> std::result::Result<FinancialStatement, sqlx::Error> {
+        Ok(FinancialStatement {
+            updated_time: row.try_get("updated_time")?,
+            created_time: row.try_get("created_time")?,
+            quarter: row.try_get("quarter")?,
+            security_code: row.try_get("security_code")?,
+            gross_profit: row.try_get("gross_profit")?,
+            operating_profit_margin: row.try_get("operating_profit_margin")?,
+            pre_tax_income: row.try_get("pre-tax_income")?,
+            net_income: row.try_get("net_income")?,
+            net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
+            sales_per_share: row.try_get("sales_per_share")?,
+            earnings_per_share: row.try_get("earnings_per_share")?,
+            profit_before_tax: row.try_get("profit_before_tax")?,
+            return_on_equity: row.try_get("return_on_equity")?,
+            return_on_assets: row.try_get("return_on_assets")?,
+            serial: row.try_get("serial")?,
+            year: row.try_get("year")?,
+        })
+    }
+
     /// 新增或更新單筆財報資料（以 `security_code + year + quarter` 為鍵）。
     ///
     /// # Errors
@@ -260,26 +281,7 @@ WHERE "year" = $1 AND quarter= ''
 "#;
     let result = sqlx::query(sql)
         .bind(year)
-        .try_map(|row: PgRow| {
-            Ok(FinancialStatement {
-                updated_time: row.try_get("updated_time")?,
-                created_time: row.try_get("created_time")?,
-                quarter: row.try_get("quarter")?,
-                security_code: row.try_get("security_code")?,
-                gross_profit: row.try_get("gross_profit")?,
-                operating_profit_margin: row.try_get("operating_profit_margin")?,
-                pre_tax_income: row.try_get("pre-tax_income")?,
-                net_income: row.try_get("net_income")?,
-                net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
-                sales_per_share: row.try_get("sales_per_share")?,
-                earnings_per_share: row.try_get("earnings_per_share")?,
-                profit_before_tax: row.try_get("profit_before_tax")?,
-                return_on_equity: row.try_get("return_on_equity")?,
-                return_on_assets: row.try_get("return_on_assets")?,
-                serial: row.try_get("serial")?,
-                year: row.try_get("year")?,
-            })
-        })
+        .try_map(FinancialStatement::row_to_entity)
         .fetch_all(database::get_connection())
         .await?;
 
@@ -326,26 +328,7 @@ WHERE quarter = $1 AND (return_on_equity = 0 OR return_on_assets = 0 OR net_asse
 
     sqlx::query(&sql)
         .bind(q)
-        .try_map(|row: PgRow| {
-            Ok(FinancialStatement {
-                updated_time: row.try_get("updated_time")?,
-                created_time: row.try_get("created_time")?,
-                quarter: row.try_get("quarter")?,
-                security_code: row.try_get("security_code")?,
-                gross_profit: row.try_get("gross_profit")?,
-                operating_profit_margin: row.try_get("operating_profit_margin")?,
-                pre_tax_income: row.try_get("pre-tax_income")?,
-                net_income: row.try_get("net_income")?,
-                net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
-                sales_per_share: row.try_get("sales_per_share")?,
-                earnings_per_share: row.try_get("earnings_per_share")?,
-                profit_before_tax: row.try_get("profit_before_tax")?,
-                return_on_equity: row.try_get("return_on_equity")?,
-                return_on_assets: row.try_get("return_on_assets")?,
-                serial: row.try_get("serial")?,
-                year: row.try_get("year")?,
-            })
-        })
+        .try_map(FinancialStatement::row_to_entity)
         .fetch_all(database::get_connection())
         .await
         .map_err(|why| {

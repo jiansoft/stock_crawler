@@ -192,13 +192,10 @@ impl From<Vec<String>> for Index {
             split_date = vec![&dy, &dm, &dd]
         }
 
-        let year = match split_date[0].parse::<i32>() {
-            Ok(_year) => _year,
-            Err(why) => {
-                logging::error_file_async(format!("轉換資料日期發生錯誤. because {:?}", why));
-                util::datetime::gregorian_year_to_roc_year(Local::now().year())
-            }
-        };
+        let year = split_date[0].parse::<i32>().unwrap_or_else(|why| {
+            logging::error_file_async(format!("轉換資料日期發生錯誤. because {:?}", why));
+            util::datetime::gregorian_year_to_roc_year(Local::now().year())
+        });
 
         let mut index = Index::new();
         index.category = String::from("TAIEX");
@@ -218,30 +215,20 @@ impl From<Vec<String>> for Index {
             }
         }*/
 
-        index.trading_volume = match Decimal::from_str(&item[1].replace(',', "")) {
-            Ok(_trading_volume) => _trading_volume,
-            Err(_) => Decimal::ZERO,
-        };
+        index.trading_volume =
+            Decimal::from_str(&item[1].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
 
-        index.trade_value = match Decimal::from_str(&item[2].replace(',', "")) {
-            Ok(_trade_value) => _trade_value,
-            Err(_) => Decimal::ZERO,
-        };
+        index.trade_value =
+            Decimal::from_str(&item[2].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
 
-        index.transaction = match Decimal::from_str(&item[3].replace(',', "")) {
-            Ok(_transaction) => _transaction,
-            Err(_) => Decimal::ZERO,
-        };
+        index.transaction =
+            Decimal::from_str(&item[3].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
 
-        index.index = match Decimal::from_str(&item[4].replace(',', "")) {
-            Ok(_index) => _index,
-            Err(_) => Decimal::ZERO,
-        };
+        index.index =
+            Decimal::from_str(&item[4].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
 
-        index.change = match Decimal::from_str(&item[5].replace(',', "")) {
-            Ok(_change) => _change,
-            Err(_) => Decimal::ZERO,
-        };
+        index.change =
+            Decimal::from_str(&item[5].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
         index
     }
 }
