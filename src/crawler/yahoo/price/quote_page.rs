@@ -5,9 +5,8 @@
 //! 這樣可以讓一般 `StockInfo` 呼叫端優先吃到 Yahoo 類股輪詢任務的成果，
 //! 只有在快取未命中時才退回單檔頁面抓取。
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use scraper::Html;
 
@@ -24,29 +23,8 @@ use crate::{
 /// 將共用快取中的即時快照轉成 `StockQuotes` 回傳型別。
 fn snapshot_to_quotes(
     snapshot: crate::cache::RealtimeSnapshot,
-    stock_symbol: &str,
 ) -> Result<declare::StockQuotes> {
-    // 這裡刻意只做型別轉換，不摻雜任何抓取或快取邏輯，
-    // 讓「快取命中時的回傳格式轉換」可以被重複利用。
-    Ok(declare::StockQuotes {
-        // 回傳型別仍保留呼叫端傳入的股票代號，
-        // 避免未來快取鍵或來源代號格式調整時影響輸出。
-        stock_symbol: stock_symbol.to_string(),
-        // `declare::StockQuotes` 目前使用 `f64`，所以這裡把快取裡的 `Decimal`
-        // 明確轉成 `f64`，並在失敗時附上欄位名，方便定位是哪個欄位轉型失敗。
-        price: snapshot
-            .price
-            .to_f64()
-            .context("Decimal to f64 conversion failed (price)")?,
-        change: snapshot
-            .change
-            .to_f64()
-            .context("Decimal to f64 conversion failed (change)")?,
-        change_range: snapshot
-            .change_range
-            .to_f64()
-            .context("Decimal to f64 conversion failed (range)")?,
-    })
+    snapshot.try_into_stock_quotes()
 }
 
 #[async_trait]
@@ -98,7 +76,7 @@ impl StockInfo for Yahoo {
             .filter(|snapshot| snapshot.price != Decimal::ZERO)
         {
             // 命中快取時直接轉成回傳型別，不走 HTML 解析。
-            return snapshot_to_quotes(snapshot, stock_symbol);
+            return snapshot_to_quotes(snapshot);
         }
 
         // 以下才是 fallback 路徑：真的需要時才打 Yahoo 單檔頁。

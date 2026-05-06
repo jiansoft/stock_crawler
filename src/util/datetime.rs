@@ -5,7 +5,7 @@ use crate::logging;
 
 /// 提供「是否為週末」判斷能力的 trait。
 ///
-/// 目前專門實作於 [`chrono::DateTime<Local>`]，用來統一專案內
+/// 目前專門實作於 [`DateTime<Local>`]，用來統一專案內
 /// 對六、日的判定方式。
 pub trait Weekend {
     /// 判斷日期是否落在週末。

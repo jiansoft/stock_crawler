@@ -18,7 +18,6 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use tokio::sync::Mutex;
@@ -466,21 +465,7 @@ impl StockInfo for HiStock {
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes> {
         let snapshot = get_snapshot(stock_symbol).await?;
 
-        Ok(declare::StockQuotes {
-            stock_symbol: stock_symbol.to_string(),
-            price: snapshot
-                .price
-                .to_f64()
-                .context("Decimal to f64 conversion failed (price)")?,
-            change: snapshot
-                .change
-                .to_f64()
-                .context("Decimal to f64 conversion failed (change)")?,
-            change_range: snapshot
-                .change_range
-                .to_f64()
-                .context("Decimal to f64 conversion failed (range)")?,
-        })
+        snapshot.try_into_stock_quotes()
     }
 }
 

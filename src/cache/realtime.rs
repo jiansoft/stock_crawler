@@ -3,7 +3,11 @@
 //! 此模組只負責描述「單一股票在某個時間點的即時報價狀態」，
 //! 不包含抓取、更新或快取生命週期控制邏輯。
 
+use anyhow::{Context, Result};
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+
+use crate::declare;
 
 /// 即時報價快照。
 #[non_exhaustive]
@@ -57,5 +61,27 @@ impl RealtimeSnapshot {
             last_close: Decimal::ZERO,
             volume: Decimal::ZERO,
         }
+    }
+
+    /// 將快照轉換為外部介面使用的報價型別 `declare::StockQuotes`。
+    ///
+    /// 由於外部介面使用 `f64`，這一步會進行型別轉換，
+    /// 若有無法轉換的值會傳回 `Err` 並標明失敗欄位。
+    pub fn try_into_stock_quotes(&self) -> Result<declare::StockQuotes> {
+        Ok(declare::StockQuotes {
+            stock_symbol: self.symbol.clone(),
+            price: self
+                .price
+                .to_f64()
+                .context("Decimal to f64 conversion failed (price)")?,
+            change: self
+                .change
+                .to_f64()
+                .context("Decimal to f64 conversion failed (change)")?,
+            change_range: self
+                .change_range
+                .to_f64()
+                .context("Decimal to f64 conversion failed (range)")?,
+        })
     }
 }
