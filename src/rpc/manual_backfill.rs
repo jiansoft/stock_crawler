@@ -9,6 +9,8 @@ pub struct ClosingAggregateRequest {
     #[prost(string, tag = "1")]
     pub date: ::prost::alloc::string::String,
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaiwanStockIndexRequest {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SecurityCodeRequest {
     #[prost(string, tag = "1")]
@@ -199,6 +201,35 @@ pub mod manual_backfill_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn start_taiwan_stock_index(
+            &mut self,
+            request: impl tonic::IntoRequest<super::TaiwanStockIndexRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BackfillJobResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/manual_backfill.ManualBackfill/StartTaiwanStockIndex",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "manual_backfill.ManualBackfill",
+                        "StartTaiwanStockIndex",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn start_received_dividend_records(
             &mut self,
             request: impl tonic::IntoRequest<super::SecurityCodeRequest>,
@@ -359,6 +390,13 @@ pub mod manual_backfill_server {
         async fn start_closing_aggregate(
             &self,
             request: tonic::Request<super::ClosingAggregateRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BackfillJobResponse>,
+            tonic::Status,
+        >;
+        async fn start_taiwan_stock_index(
+            &self,
+            request: tonic::Request<super::TaiwanStockIndexRequest>,
         ) -> std::result::Result<
             tonic::Response<super::BackfillJobResponse>,
             tonic::Status,
@@ -555,6 +593,55 @@ pub mod manual_backfill_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = StartClosingAggregateSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/manual_backfill.ManualBackfill/StartTaiwanStockIndex" => {
+                    #[allow(non_camel_case_types)]
+                    struct StartTaiwanStockIndexSvc<T: ManualBackfill>(pub Arc<T>);
+                    impl<
+                        T: ManualBackfill,
+                    > tonic::server::UnaryService<super::TaiwanStockIndexRequest>
+                    for StartTaiwanStockIndexSvc<T> {
+                        type Response = super::BackfillJobResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::TaiwanStockIndexRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ManualBackfill>::start_taiwan_stock_index(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = StartTaiwanStockIndexSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

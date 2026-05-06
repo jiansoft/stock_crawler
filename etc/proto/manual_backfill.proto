@@ -5,6 +5,7 @@ package manual_backfill;
 service ManualBackfill {
   rpc StartDailyQuotes(DailyQuotesRequest) returns (BackfillJobResponse) {}
   rpc StartClosingAggregate(ClosingAggregateRequest) returns (BackfillJobResponse) {}
+  rpc StartTaiwanStockIndex(TaiwanStockIndexRequest) returns (BackfillJobResponse) {}
   rpc StartReceivedDividendRecords(SecurityCodeRequest) returns (BackfillJobResponse) {}
   rpc StartHistoricalDividends(SecurityCodeRequest) returns (BackfillJobResponse) {}
   rpc StartMultipleDividendHistoricalDividends(YearRequest) returns (BackfillJobResponse) {}
@@ -19,6 +20,8 @@ message DailyQuotesRequest {
 message ClosingAggregateRequest {
   string date = 1;
 }
+
+message TaiwanStockIndexRequest {}
 
 message SecurityCodeRequest {
   string security_code = 1;

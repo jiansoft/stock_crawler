@@ -11,6 +11,8 @@
 //! - `test_backfill_closing_aggregate_for_date`：
 //!   依 [`MANUAL_CLOSING_AGGREGATE_DATE`] 重跑每日收盤事件匯總，包含收盤報價回補、
 //!   缺漏補齊、均線、最後交易日報價、估價、殖利率排行與市值重算。
+//! - `test_backfill_taiwan_stock_index`：
+//!   抓取執行當下日期的台股加權指數，寫入 `Index` 並更新快取。
 //! - `test_backfill_received_dividend_records_for_stock`：
 //!   依 [`MANUAL_DIVIDEND_RECORD_SECURITY_CODE`] 重算指定股票目前持股的已領股利總表與明細。
 //! - `test_backfill_historical_dividends_for_stock`：
@@ -20,7 +22,7 @@
 use chrono::NaiveDate;
 
 use crate::{
-    backfill::{dividend, quote},
+    backfill::{dividend, quote, taiwan_stock_index},
     cache::SHARE,
     calculation::dividend_record,
     database,
@@ -106,6 +108,29 @@ async fn test_backfill_closing_aggregate_for_date() {
     logging::debug_file_async(format!(
         "結束 manual_backfill::test_backfill_closing_aggregate_for_date date={date}"
     ));
+}
+
+/// 手動回補台股加權指數。
+///
+/// 此測試等同把原本的 `backfill::taiwan_stock_index::tests::test_execute`
+/// 集中到手動回補檔。它會使用執行當下日期呼叫 TWSE 加權股價指數來源，
+/// 將新資料 upsert 回 `Index`，並更新記憶體快取。
+///
+/// 執行範例：
+/// `cargo test manual_backfill::test_backfill_taiwan_stock_index -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_taiwan_stock_index() {
+    dotenv::dotenv().ok();
+    SHARE.load().await;
+
+    logging::debug_file_async("開始 manual_backfill::test_backfill_taiwan_stock_index".to_string());
+
+    taiwan_stock_index::execute()
+        .await
+        .expect("manual taiwan stock index backfill failed");
+
+    logging::debug_file_async("結束 manual_backfill::test_backfill_taiwan_stock_index".to_string());
 }
 
 /// 手動回補指定股票目前持股的已領股利紀錄。

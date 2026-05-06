@@ -10,8 +10,8 @@ use tokio::net::TcpListener;
 
 use crate::logging;
 
-/// Manual backfill 的 Web UI 與 HTTP API。
-pub mod manual_backfill;
+/// Backfill admin 的 Web UI 與 HTTP API。
+pub mod backfill_admin;
 
 /// 手動回補 Web 服務監聽位址的環境變數名稱。
 const MANUAL_BACKFILL_WEB_ADDR: &str = "MANUAL_BACKFILL_WEB_ADDR";
@@ -31,7 +31,7 @@ pub async fn start() -> Result<()> {
         .unwrap_or_else(|_| DEFAULT_MANUAL_BACKFILL_WEB_ADDR.to_string())
         .parse::<SocketAddr>()?;
     // 建立目前 Web 服務需要的所有路由。
-    let app = manual_backfill::router();
+    let app = backfill_admin::router();
 
     // Web server 是輔助入口，因此放到背景 task，不阻塞主程式後續排程。
     tokio::spawn(async move {

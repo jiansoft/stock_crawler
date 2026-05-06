@@ -1,7 +1,7 @@
-//! Manual backfill web UI and API.
+//! Backfill admin web UI and API.
 //!
 //! 這個模組提供一個輕量的 Web UI 與 JSON API，讓維運人員可以手動觸發
-//! 各股每日收盤報價、收盤彙總、持股已領股利重算、歷年股利補抓等資料修補工作。
+//! 各股每日收盤報價、收盤彙總、台股加權指數、持股已領股利重算、歷年股利補抓等資料修補工作。
 //! 所有工作都會先登記成 job，再由背景 task 執行，呼叫端可用 job API 查詢執行狀態。
 
 use std::{
@@ -25,14 +25,14 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use crate::{
-    backfill::{dividend, quote},
+    backfill::{dividend, quote, taiwan_stock_index},
     calculation::dividend_record,
     database,
     event::taiwan_stock::closing,
     logging,
 };
 
-/// Manual backfill Web API 共用狀態。
+/// Backfill admin Web API 共用狀態。
 ///
 /// 狀態目前保存在記憶體中，適合單一程序內的臨時手動維運用途。
 #[derive(Clone)]
@@ -43,7 +43,7 @@ struct BackfillWebState {
     next_id: Arc<AtomicU64>,
 }
 
-/// Manual backfill 的全域記憶體狀態。
+/// Backfill admin 的全域記憶體狀態。
 static BACKFILL_STATE: Lazy<BackfillWebState> = Lazy::new(BackfillWebState::new);
 
 impl BackfillWebState {
@@ -150,7 +150,7 @@ struct ErrorResponse {
     error: String,
 }
 
-/// 建立 manual backfill 的 Web UI 與 JSON API router。
+/// 建立 backfill admin 的 Web UI 與 JSON API router。
 ///
 /// 路由包含：
 /// - `GET /manual-backfill`：操作頁面。
@@ -170,6 +170,10 @@ pub fn router() -> Router {
         .route(
             "/api/manual-backfill/closing-aggregate",
             post(start_closing_aggregate),
+        )
+        .route(
+            "/api/manual-backfill/taiwan-stock-index",
+            post(start_taiwan_stock_index),
         )
         .route(
             "/api/manual-backfill/received-dividend-records",
@@ -237,17 +241,9 @@ async fn start_daily_quotes(
     Json(req): Json<DailyQuotesRequest>,
 ) -> impl IntoResponse {
     // 先驗證日期格式，避免背景 job 才因輸入錯誤失敗。
-    let date = match NaiveDate::parse_from_str(req.date.trim(), "%Y-%m-%d") {
+    let date = match parse_request_date(&req.date) {
         Ok(date) => date,
-        Err(why) => {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("date must use YYYY-MM-DD: {why}"),
-                }),
-            )
-                .into_response();
-        }
+        Err(response) => return response,
     };
 
     // 輸入有效時建立背景 job，實際資料刪除與重抓會在 job 中執行。
@@ -263,22 +259,23 @@ async fn start_closing_aggregate(
     Json(req): Json<ClosingAggregateRequest>,
 ) -> impl IntoResponse {
     // 先驗證日期格式，避免背景 job 才因輸入錯誤失敗。
-    let date = match NaiveDate::parse_from_str(req.date.trim(), "%Y-%m-%d") {
+    let date = match parse_request_date(&req.date) {
         Ok(date) => date,
-        Err(why) => {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("date must use YYYY-MM-DD: {why}"),
-                }),
-            )
-                .into_response();
-        }
+        Err(response) => return response,
     };
 
     // 輸入有效時建立背景 job，立即回傳 job 狀態給呼叫端輪詢。
     Json(StartJobResponse {
         job: start_closing_aggregate_job(date).await,
+    })
+    .into_response()
+}
+
+/// 建立台股加權指數回補 job 的 HTTP handler。
+async fn start_taiwan_stock_index(State(_state): State<BackfillWebState>) -> impl IntoResponse {
+    // 台股加權指數 crawler 以目前日期查詢 TWSE API，因此此操作不需要額外輸入。
+    Json(StartJobResponse {
+        job: start_taiwan_stock_index_job().await,
     })
     .into_response()
 }
@@ -289,17 +286,9 @@ async fn start_received_dividend_records(
     Json(req): Json<SecurityCodeRequest>,
 ) -> impl IntoResponse {
     // 正規化證券代號，確保後續 crawler/database 查詢拿到乾淨輸入。
-    let security_code = match normalize_security_code(req.security_code) {
+    let security_code = match parse_request_security_code(req.security_code) {
         Ok(security_code) => security_code,
-        Err(why) => {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: why.to_string(),
-                }),
-            )
-                .into_response();
-        }
+        Err(response) => return response,
     };
     // 建立背景 job，HTTP request 不等待實際回補流程完成。
     Json(StartJobResponse {
@@ -314,17 +303,9 @@ async fn start_historical_dividends(
     Json(req): Json<SecurityCodeRequest>,
 ) -> impl IntoResponse {
     // 歷年股利回補只接受簡單英數證券代號，避免把任意字串帶入外部查詢。
-    let security_code = match normalize_security_code(req.security_code) {
+    let security_code = match parse_request_security_code(req.security_code) {
         Ok(security_code) => security_code,
-        Err(why) => {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: why.to_string(),
-                }),
-            )
-                .into_response();
-        }
+        Err(response) => return response,
     };
     // 建立背景 job，回補結果會更新到 job message。
     Json(StartJobResponse {
@@ -414,6 +395,23 @@ pub(crate) async fn start_closing_aggregate_job(date: NaiveDate) -> BackfillJob 
         move || async move {
             closing::aggregate(date).await?;
             Ok("closing aggregate backfill completed".to_string())
+        },
+    )
+    .await
+}
+
+/// 建立台股加權指數背景 job。
+///
+/// Job 會呼叫 TWSE 加權股價指數來源抓取今日資料，並沿用既有 backfill 流程 upsert
+/// `Index` 資料與更新快取。
+pub(crate) async fn start_taiwan_stock_index_job() -> BackfillJob {
+    start_job(
+        BACKFILL_STATE.clone(),
+        "taiwan_stock_index",
+        Local::now().date_naive().to_string(),
+        move || async move {
+            taiwan_stock_index::execute().await?;
+            Ok("taiwan stock index backfill completed".to_string())
         },
     )
     .await
@@ -534,6 +532,32 @@ where
     });
 
     job
+}
+
+/// 解析 HTTP request 的日期欄位，格式錯誤時回傳一致的 400 response。
+fn parse_request_date(date: &str) -> Result<NaiveDate, axum::response::Response> {
+    NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").map_err(|why| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("date must use YYYY-MM-DD: {why}"),
+            }),
+        )
+            .into_response()
+    })
+}
+
+/// 解析 HTTP request 的證券代號欄位，格式錯誤時回傳一致的 400 response。
+fn parse_request_security_code(security_code: String) -> Result<String, axum::response::Response> {
+    normalize_security_code(security_code).map_err(|why| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: why.to_string(),
+            }),
+        )
+            .into_response()
+    })
 }
 
 /// 正規化並驗證證券代號。
@@ -727,6 +751,11 @@ const INDEX_HTML: &str = r##"<!doctype html>
         <h2>Closing Aggregate</h2>
         <label for="closing-date">Trading date</label>
         <input id="closing-date" name="date" type="date" required>
+        <button type="submit">Start</button>
+        <div class="toast"></div>
+      </form>
+      <form class="panel" data-endpoint="/api/manual-backfill/taiwan-stock-index">
+        <h2>Taiwan Stock Index</h2>
         <button type="submit">Start</button>
         <div class="toast"></div>
       </form>
