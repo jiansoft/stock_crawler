@@ -2,18 +2,16 @@ use std::fmt::Write;
 
 use crate::bot::telegram::Telegram;
 use crate::{
-    bot,
+    backfill, bot,
     cache::SHARE,
     crawler::{share::EtfInfo, tpex, twse},
     database::table,
     declare::StockExchangeMarket,
     logging, rpc,
-    rpc::stock,
     util::datetime::Weekend,
 };
 use anyhow::{anyhow, Result};
 use chrono::Local;
-use rust_decimal::prelude::ToPrimitive;
 use scopeguard::defer;
 
 /// 執行台股 ETF 資訊的同步與更新。
@@ -51,24 +49,14 @@ async fn update_stocks(items: Vec<EtfInfo>) -> Result<()> {
 
     // 遍歷所有傳入的 ETF 項目
     for item in items {
-        // 從系統快取 (SHARE) 中查詢該股票代號，比對現有資料
-        let is_new_or_changed = match SHARE.get_stock(&item.stock_symbol).await {
-            // 情況 A：資料庫已存在該股票 (Some)
-            Some(stock_db)
-                // 檢查關鍵欄位是否有變動：產業 ID、市場 ID 或名稱
-                if stock_db.stock_industry_id != item.industry_id
-                    || stock_db.stock_exchange_market_id
-                        != item.exchange_market.stock_exchange_market_id
-                    || stock_db.name != item.name =>
-            {
-                // 有任一欄位不同，標記為需要更新
-                true
-            }
-            // 情況 B：資料庫完全找不到這檔股票 (None)
-            None => true, // 視為新掛牌上市的 ETF，標記為需要新增
-            // 情況 C：資料完全一致
-            _ => false, // 內容相同，略過不處理
-        };
+        // 從系統快取 (SHARE) 中查詢該股票代號，比對現有資料。
+        let is_new_or_changed = backfill::is_stock_identity_new_or_changed(
+            &item.stock_symbol,
+            item.industry_id,
+            item.exchange_market.stock_exchange_market_id,
+            &item.name,
+        )
+        .await;
 
         // 如果確認是新資料或有變動
         if is_new_or_changed {
@@ -136,16 +124,10 @@ async fn update_stock_info(etf: &EtfInfo, msg: &mut String) -> Result<()> {
     logging::info_file_async(&log_msg);
 
     // 5. 跨服務通知：透過 gRPC 將最新的股票基本資料推送到其他微服務 (Go Service)
-    let request = stock::StockInfoRequest {
-        stock_symbol: stock.stock_symbol.to_string(),
-        name: stock.name.to_string(),
-        stock_exchange_market_id: stock.stock_exchange_market_id,
-        stock_industry_id: stock.stock_industry_id,
-        net_asset_value_per_share: stock.net_asset_value_per_share.to_f64().unwrap_or(0.0),
-        suspend_listing: false,
-    };
-
-    if let Err(why) = rpc::client::stock_service::push_stock_info_to_go_service(request).await {
+    if let Err(why) =
+        rpc::client::stock_service::push_stock_info_to_go_service(stock.to_stock_info_request())
+            .await
+    {
         logging::error_file_async(format!(
             "推送 ETF 資訊至 Go Service 失敗 ({}): {:?}",
             stock.stock_symbol, why

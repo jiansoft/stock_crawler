@@ -17,7 +17,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Mutex,
+        Mutex, OnceLock,
     },
     time::Instant,
 };
@@ -32,7 +32,7 @@ use crate::{
         cmoney::CMoney, cnyes::CnYes, fugle::Fugle, megatime::PcHome, nstock::NStock,
         winvest::Winvest, yahoo::Yahoo,
     },
-    declare, logging,
+    declare, logging, util,
 };
 
 /// 動態 DNS 服務 (Afraid DNS)
@@ -130,6 +130,39 @@ where
     }
 
     logging::debug_file_async("結束 get_stock_price".to_string());
+}
+
+#[cfg(test)]
+pub(crate) async fn log_public_ip_visit_test<F, Fut>(visit: F)
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<String>>,
+{
+    match visit().await {
+        Ok(ip) => {
+            dbg!(ip);
+        }
+        Err(why) => {
+            logging::error_file_async(format!("Failed to get because {:?}", why));
+        }
+    }
+}
+
+/// 讀取回傳純文字 IP 的 public IP endpoint。
+pub(crate) async fn get_public_ip_text(
+    url_cache: &OnceLock<String>,
+    host: &str,
+    path: &str,
+    trim: bool,
+) -> Result<String> {
+    let url = url_cache.get_or_init(|| format!("https://{host}{path}"));
+    let ip = util::http::get(url, None).await?;
+
+    if trim {
+        Ok(ip.trim().to_string())
+    } else {
+        Ok(ip)
+    }
 }
 
 /// 標記採集站點的全局遊標。

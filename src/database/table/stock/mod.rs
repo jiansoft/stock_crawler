@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Datelike, Local, TimeDelta};
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
@@ -72,6 +73,18 @@ impl Stock {
     /// 是否為臺灣存託憑證
     pub fn is_tdr(&self) -> bool {
         self.name.contains("-DR")
+    }
+
+    /// 轉成推送給 Go stock service 的股票資訊請求。
+    pub fn to_stock_info_request(&self) -> crate::rpc::stock::StockInfoRequest {
+        crate::rpc::stock::StockInfoRequest {
+            stock_symbol: self.stock_symbol.to_string(),
+            name: self.name.to_string(),
+            stock_exchange_market_id: self.stock_exchange_market_id,
+            stock_industry_id: self.stock_industry_id,
+            net_asset_value_per_share: self.net_asset_value_per_share.to_f64().unwrap_or(0.0),
+            suspend_listing: self.suspend_listing,
+        }
     }
 
     /// 更新個股最新一季、近四季的EPS、ROE

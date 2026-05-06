@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use anyhow::Result;
 
-use crate::util;
+use crate::crawler;
 
 static DDNS_URL: OnceLock<String> = OnceLock::new();
 
@@ -10,25 +10,17 @@ const HOST: &str = "api.ipify.org";
 
 /// 取得目前的IP
 pub async fn visit() -> Result<String> {
-    let url = DDNS_URL.get_or_init(|| format!("https://{host}", host = HOST,));
-    util::http::get(url, None).await
+    crawler::get_public_ip_text(&DDNS_URL, HOST, "", false).await
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::crawler::log_public_ip_visit_test;
 
     use super::*;
 
     #[tokio::test]
     async fn test_visit() {
-        match visit().await {
-            Ok(ip) => {
-                dbg!(ip);
-            }
-            Err(why) => {
-                logging::error_file_async(format!("Failed to get because {:?}", why));
-            }
-        }
+        log_public_ip_visit_test(visit).await;
     }
 }

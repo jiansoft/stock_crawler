@@ -2,12 +2,11 @@ use std::fmt::Write;
 
 use crate::bot::telegram::Telegram;
 use crate::{
-    bot, cache::SHARE, crawler::twse, database::table, declare::StockExchangeMarket, logging, rpc,
-    rpc::stock, util::datetime::Weekend,
+    backfill, bot, cache::SHARE, crawler::twse, database::table, declare::StockExchangeMarket,
+    logging, rpc, util::datetime::Weekend,
 };
 use anyhow::{anyhow, Result};
 use chrono::Local;
-use rust_decimal::prelude::ToPrimitive;
 use scopeguard::defer;
 
 /// 更新資料庫新上市股票的或更新其交易所的市場編號、股票的產業分類、名稱等欄位
@@ -37,18 +36,13 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
     let result = twse::international_securities_identification_number::visit(mode).await?;
     let mut to_bot_msg = String::with_capacity(1024);
     for item in result {
-        let new_stock = match SHARE.get_stock(&item.stock_symbol).await {
-            Some(stock_db)
-                if stock_db.stock_industry_id != item.industry_id
-                    || stock_db.stock_exchange_market_id
-                        != item.exchange_market.stock_exchange_market_id
-                    || stock_db.name != item.name =>
-            {
-                true
-            }
-            None => true,
-            _ => false,
-        };
+        let new_stock = backfill::is_stock_identity_new_or_changed(
+            &item.stock_symbol,
+            item.industry_id,
+            item.exchange_market.stock_exchange_market_id,
+            &item.name,
+        )
+        .await;
 
         if new_stock {
             if let Err(why) = update_stock_info(&item, &mut to_bot_msg).await {
@@ -101,16 +95,10 @@ async fn update_stock_info(
     logging::info_file_async(log_msg);
 
     //通知 go service
-    let request = stock::StockInfoRequest {
-        stock_symbol: stock.stock_symbol.to_string(),
-        name: stock.name.to_string(),
-        stock_exchange_market_id: stock.stock_exchange_market_id,
-        stock_industry_id: stock.stock_industry_id,
-        net_asset_value_per_share: stock.net_asset_value_per_share.to_f64().unwrap_or(0.0),
-        suspend_listing: false,
-    };
-
-    if let Err(why) = rpc::client::stock_service::push_stock_info_to_go_service(request).await {
+    if let Err(why) =
+        rpc::client::stock_service::push_stock_info_to_go_service(stock.to_stock_info_request())
+            .await
+    {
         logging::error_file_async(format!(
             "Failed to push_stock_info_to_go_service for {} because {:?}",
             stock.stock_symbol, why

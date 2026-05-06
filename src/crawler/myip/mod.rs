@@ -30,19 +30,12 @@ pub async fn visit() -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::crawler::log_public_ip_visit_test;
 
     use super::*;
 
     #[tokio::test]
     async fn test_visit() {
-        match visit().await {
-            Ok(ip) => {
-                dbg!(ip);
-            }
-            Err(why) => {
-                logging::error_file_async(format!("Failed to get because {:?}", why));
-            }
-        }
+        log_public_ip_visit_test(visit).await;
     }
 }
