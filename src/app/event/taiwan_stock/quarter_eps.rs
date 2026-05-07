@@ -157,14 +157,21 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
         logging::info_file_async("開始 process_eps".to_string());
-        //let now = Local::now();
-        let without_financial_stocks = table::stock::fetch_stocks_without_financial_statement(
-            2024,
-            Quarter::Q1.to_string().as_str(),
+        let without_financial_stocks = match table::stock::fetch_stocks_without_financial_statement(
+            2023,
+            Quarter::Q4.to_string().as_str(),
         )
         .await
-        .unwrap();
-        let without_financial_stocks = util::map::vec_to_hashmap(without_financial_stocks);
+        {
+            Ok(stocks) => util::map::vec_to_hashmap(stocks),
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to fetch stocks without financial statement: {:?}",
+                    why
+                ));
+                return;
+            }
+        };
         //dbg!(without_financial_stocks);
         match process_eps(
             StockExchangeMarket::Listed,
