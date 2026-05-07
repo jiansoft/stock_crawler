@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlx::postgres::PgQueryResult;
 
 use crate::{
-    cache::SHARE,
+    infra::cache::SHARE,
     database::{table, table::stock::extension},
 };
 

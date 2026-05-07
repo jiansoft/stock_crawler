@@ -24,7 +24,7 @@ use chrono::NaiveDate;
 
 use crate::{
     app::backfill::{dividend, quote, taiwan_stock_index},
-    cache::SHARE,
+    infra::cache::SHARE,
     app::calculation::dividend_record,
     database,
     app::event::taiwan_stock::closing,

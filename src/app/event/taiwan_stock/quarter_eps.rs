@@ -130,7 +130,7 @@ async fn process_eps(
 
 #[cfg(test)]
 mod tests {
-    use crate::cache::SHARE;
+    use crate::infra::cache::SHARE;
     use crate::core::declare::Quarter;
     use std::time::Duration;
 

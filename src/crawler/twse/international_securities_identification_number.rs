@@ -3,7 +3,7 @@ use chrono::Local;
 use scraper::{Html, Selector};
 
 use crate::{
-    cache::SHARE,
+    infra::cache::SHARE,
     crawler::twse,
     database::table,
     core::declare::StockExchangeMarket,
@@ -135,7 +135,7 @@ pub async fn visit(
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     //use std::collections::HashSet;
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。

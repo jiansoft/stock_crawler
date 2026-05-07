@@ -27,11 +27,11 @@ use super::{price_tasks as trace_price_tasks, stats as trace_stats};
 use crate::interfaces::bot::telegram::Telegram;
 use crate::{
     interfaces::bot,
-    cache::RealtimeSnapshot,
-    cache::SHARE,
+    infra::cache::RealtimeSnapshot,
+    infra::cache::SHARE,
     crawler::twse,
     database::table::trace::Trace,
-    core::declare, core::logging, nosql,
+    core::declare, core::logging,
     core::util::{datetime::Weekend, map::Keyable},
 };
 
@@ -367,7 +367,7 @@ async fn alert_on_price_boundary(
     // 檢查 Redis 快取，避免針對同一方向重複通知
     // Key 格式包含股票代號與邊界類型，存活時間設為 1 小時，避免頻繁轟炸
     let target_key = format!("{}:{}", target.key_with_prefix(), boundary_type);
-    if let Ok(exist) = nosql::redis::CLIENT.contains_key(&target_key).await {
+    if let Ok(exist) = crate::infra::nosql::redis::CLIENT.contains_key(&target_key).await {
         if exist {
             return Ok(false);
         }
@@ -377,7 +377,7 @@ async fn alert_on_price_boundary(
     let to_bot_msg = format_alert_message(&target, current_price, source_site).await;
 
     // 寫入快取 (有效期限 1 小時)
-    if let Err(why) = nosql::redis::CLIENT
+    if let Err(why) = crate::infra::nosql::redis::CLIENT
         .set(&target_key, current_price.to_string(), 60 * 60)
         .await
     {
@@ -448,7 +448,7 @@ mod tests {
 
     use rust_decimal_macros::dec;
 
-    use crate::cache::RealtimeSnapshot;
+    use crate::infra::cache::RealtimeSnapshot;
 
     use super::*;
 

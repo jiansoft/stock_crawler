@@ -1,7 +1,7 @@
 //! # Yahoo 類股快取背景任務
 //!
 //! 此模組負責在開盤期間依序輪詢 Yahoo 的三大市場類股，
-//! 並將解析後的報價快照整批寫回 [`SHARE`](crate::cache::SHARE)。
+//! 並將解析後的報價快照整批寫回 [`SHARE`](infra::cache::SHARE)。
 //! 它的設計目標與 `histock::price` 類似，但資料來源改成 Yahoo 類股 API。
 
 use std::{
@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::{
-    cache::{RealtimeSnapshot, SHARE},
+    infra::cache::{RealtimeSnapshot, SHARE},
     crawler::yahoo::YahooClassCategory,
     app::event::trace::price_tasks as trace_price_tasks,
     core::util::{

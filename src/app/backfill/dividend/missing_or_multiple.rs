@@ -3,7 +3,7 @@ use std::{collections::HashSet, time::Duration};
 use anyhow::{Context, Result};
 use chrono::Local;
 use crate::{
-    app::calculation::dividend_record, crawler::yahoo, database::table::dividend, core::logging, nosql,
+    app::calculation::dividend_record, crawler::yahoo, database::table::dividend, core::logging,
     core::util::map::Keyable,
 };
 
@@ -52,7 +52,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
     for stock_symbol in stock_symbols {
         // Yahoo 股利回補使用獨立快取命名空間，避免和 Goodinfo 盈餘分配率快取互相影響。
         let cache_key = make_cache_key(&stock_symbol);
-        let is_jump = nosql::redis::CLIENT
+        let is_jump = crate::infra::nosql::redis::CLIENT
             .get_bool(&cache_key)
             .await
             .with_context(|| {
@@ -68,7 +68,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
         }
 
         // 先寫入 3 天快取旗標；即使單檔處理失敗，也避免排程下一輪立刻重試同一來源。
-        nosql::redis::CLIENT
+        crate::infra::nosql::redis::CLIENT
             .set(cache_key, true, 60 * 60 * 24 * 3)
             .await
             .with_context(|| {
@@ -389,7 +389,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::cache::SHARE;
+    use crate::infra::cache::SHARE;
 
     #[test]
     fn test_should_process_dividend_year() {

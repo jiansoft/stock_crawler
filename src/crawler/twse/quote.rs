@@ -5,7 +5,7 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cache::{self, TtlCacheInner, TTL},
+    infra::cache::{TtlCacheInner, TTL},
     crawler::twse,
     database::table::{self},
     core::logging,
@@ -134,7 +134,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
             }
 
             if !dq.change.is_zero() {
-                if let Some(ldg) = cache::SHARE
+                if let Some(ldg) = crate::infra::cache::SHARE
                     .get_last_trading_day_quotes(&dq.stock_symbol)
                     .await
                 {
@@ -188,7 +188,7 @@ mod tests {
     use chrono::{TimeDelta, Timelike};
     use std::time::Duration;
 
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 

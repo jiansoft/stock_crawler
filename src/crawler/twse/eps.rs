@@ -10,7 +10,7 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
 use crate::{
-    cache::SHARE,
+    infra::cache::SHARE,
     crawler::twse,
     core::declare::{Quarter, StockExchangeMarket},
     core::util::{self, convert::FromValue, datetime},
@@ -127,7 +127,7 @@ pub async fn visit(
 
 #[cfg(test)]
 mod tests {
-    use crate::cache::SHARE;
+    use crate::infra::cache::SHARE;
     use crate::core::logging;
 
     use super::*;

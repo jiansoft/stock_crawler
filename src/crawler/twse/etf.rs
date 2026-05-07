@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 // 匯入專案內部模組：包含共用資訊載體、全域快取、交易所定義、資料表定義與工具函式
 use crate::{
-    cache::SHARE,
+    infra::cache::SHARE,
     crawler::{share::EtfInfo, twse},
     database::table,
     core::declare::StockExchangeMarket,

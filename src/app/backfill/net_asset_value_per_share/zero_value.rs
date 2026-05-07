@@ -1,7 +1,6 @@
 use anyhow::Result;
 use crate::{
     app::backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, core::logging,
-    nosql,
 };
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
@@ -13,7 +12,7 @@ pub async fn execute() -> Result<()> {
         }
 
         let profile_skip_cache_key = profile::no_valid_data_cache_key(&stock.stock_symbol);
-        if nosql::redis::CLIENT
+        if crate::infra::nosql::redis::CLIENT
             .get_bool(&profile_skip_cache_key)
             .await?
         {
@@ -24,7 +23,7 @@ pub async fn execute() -> Result<()> {
             Ok(stock_profile) => stock_profile,
             Err(why) => {
                 if profile::is_no_valid_data_error(&why) {
-                    if let Err(cache_err) = nosql::redis::CLIENT
+                    if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
                         .set(
                             &profile_skip_cache_key,
                             true,

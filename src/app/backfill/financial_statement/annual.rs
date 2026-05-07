@@ -2,7 +2,7 @@ use crate::{
     app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
     crawler::wespai,
     database::table::{financial_statement, stock},
-    core::logging, nosql,
+    core::logging,
     core::util::{self, datetime::Weekend},
 };
 use anyhow::Result;
@@ -22,7 +22,7 @@ pub async fn execute() -> Result<()> {
     }
 
     let cache_key = "financial_statement:annual";
-    let is_jump = nosql::redis::CLIENT.get_bool(cache_key).await?;
+    let is_jump = crate::infra::nosql::redis::CLIENT.get_bool(cache_key).await?;
     if is_jump {
         return Ok(());
     }
@@ -62,7 +62,7 @@ pub async fn execute() -> Result<()> {
 
     update_roe_and_roa_for_zero_values(None).await?;
 
-    nosql::redis::CLIENT
+    crate::infra::nosql::redis::CLIENT
         .set(cache_key, true, 60 * 60 * 24 * 7)
         .await?;
 
@@ -71,7 +71,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 

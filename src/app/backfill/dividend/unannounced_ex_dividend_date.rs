@@ -92,7 +92,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::cache::SHARE;
+    use crate::infra::cache::SHARE;
 
     fn sample_detail(
         year: i32,

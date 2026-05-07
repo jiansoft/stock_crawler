@@ -11,7 +11,7 @@ use rust_decimal::Decimal;
 use scraper::Html;
 
 use crate::{
-    cache::SHARE,
+    infra::cache::SHARE,
     crawler::{
         yahoo::{Yahoo, HOST},
         StockInfo,
@@ -22,7 +22,7 @@ use crate::{
 
 /// 將共用快取中的即時快照轉成 `StockQuotes` 回傳型別。
 fn snapshot_to_quotes(
-    snapshot: crate::cache::RealtimeSnapshot,
+    snapshot: crate::infra::cache::RealtimeSnapshot,
 ) -> Result<declare::StockQuotes> {
     snapshot.try_into_stock_quotes()
 }

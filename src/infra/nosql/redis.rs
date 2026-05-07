@@ -254,7 +254,7 @@ impl Default for Redis {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
     use rust_decimal_macros::dec;
 
     use super::*;

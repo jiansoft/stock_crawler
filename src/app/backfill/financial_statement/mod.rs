@@ -82,7 +82,7 @@ async fn update_roe_and_roa(fs: &mut FinancialStatement, roe: Decimal, roa: Deci
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 

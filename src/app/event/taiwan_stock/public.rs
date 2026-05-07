@@ -8,8 +8,8 @@ use rust_decimal_macros::dec;
 use crate::interfaces::bot::telegram::Telegram;
 use crate::{
     interfaces::bot,
-    cache::SHARE,
-    crawler, core::declare, nosql,
+    infra::cache::SHARE,
+    crawler, core::declare,
     core::util::{convert::FromValue, map::Keyable},
 };
 
@@ -27,7 +27,7 @@ pub async fn execute() -> Result<()> {
         if let (Some(start), Some(end)) = (stock.offering_start_date, stock.offering_end_date) {
             if now >= start && now <= end {
                 let cache_key = stock.key_with_prefix();
-                let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
+                let is_jump = crate::infra::nosql::redis::CLIENT.get_bool(&cache_key).await?;
 
                 if is_jump {
                     continue;
@@ -61,7 +61,7 @@ pub async fn execute() -> Result<()> {
                     duration = declare::ONE_DAYS_IN_SECONDS;
                 }
 
-                nosql::redis::CLIENT.set(cache_key, true, duration).await?;
+                crate::infra::nosql::redis::CLIENT.set(cache_key, true, duration).await?;
             }
         }
     }

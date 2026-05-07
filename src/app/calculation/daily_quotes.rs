@@ -4,7 +4,7 @@ use futures::{stream, StreamExt};
 use rust_decimal::Decimal;
 
 use crate::{
-    cache::SHARE,
+    infra::cache::SHARE,
     database::table::{daily_quote::DailyQuote, quote_history_record::QuoteHistoryRecord},
     core::logging, core::util,
 };

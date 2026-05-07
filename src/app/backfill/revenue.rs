@@ -1,5 +1,5 @@
 use crate::{
-    cache::SHARE,
+    infra::cache::SHARE,
     crawler::twse,
     database::{table, table::revenue},
     core::logging, core::util,

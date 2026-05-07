@@ -7,7 +7,7 @@ use rust_decimal::prelude::ToPrimitive;
 use tonic::{Request, Response, Status};
 
 use crate::{
-    cache::SHARE,
+    infra::cache::SHARE,
     crawler::twse,
     core::logging,
     interfaces::rpc::stock::{

@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 // 匯入專案內部模組
 use crate::{
-    cache::SHARE,
+    infra::cache::SHARE,
     crawler::{share::EtfInfo, tpex},
     database::table,
     core::declare::StockExchangeMarket,

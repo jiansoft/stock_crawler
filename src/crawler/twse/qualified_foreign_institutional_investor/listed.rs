@@ -75,7 +75,7 @@ pub async fn visit(
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::cache::SHARE;
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

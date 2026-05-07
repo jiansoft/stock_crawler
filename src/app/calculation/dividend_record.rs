@@ -417,7 +417,7 @@ pub async fn calculate(year: i32) {
 mod tests {
     use chrono::{Local, TimeZone};
 
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 

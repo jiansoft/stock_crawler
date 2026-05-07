@@ -17,7 +17,7 @@ use serde::Deserialize;
 use tokio::time::sleep;
 
 use crate::{
-    cache::RealtimeSnapshot,
+    infra::cache::RealtimeSnapshot,
     crawler::yahoo::{self, YahooClassCategory, YahooClassExchange},
     core::logging, core::util,
 };

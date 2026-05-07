@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
 
-use crate::{cache::SHARE, crawler::twse, database::table::revenue, core::util};
+use crate::{infra::cache::SHARE, crawler::twse, database::table::revenue, core::util};
 
 /// 下載月營收
 pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<revenue::Revenue>> {

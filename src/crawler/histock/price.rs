@@ -7,7 +7,7 @@
 //! 2. **外部驅動啟停**：
 //!    - 依賴外部事件 (如 `src/event/trace/stock_price.rs`) 在開盤期間啟動定時任務。
 //!    - 依賴收盤事件停止任務。停止後會清空快取以節省記憶體並確保下次啟動時資料新鮮。
-//! 3. **消費者共用**：背景任務更新後的資料會寫入 [`SHARE`](crate::cache::SHARE)
+//! 3. **消費者共用**：背景任務更新後的資料會寫入 [`SHARE`](infra::cache::SHARE)
 //!    的 `stock_snapshots`，供追蹤任務與 `StockInfo` 介面共用。
 //! 4. **嚴格解析**：不容忍損壞或格式錯誤的報價，解析失敗會傳回錯誤而非默默變 0。
 
@@ -25,7 +25,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::{
-    cache::{RealtimeSnapshot, SHARE},
+    infra::cache::{RealtimeSnapshot, SHARE},
     crawler::{
         histock::{HiStock, HOST},
         StockInfo,
@@ -222,7 +222,7 @@ fn collect_changed_price_updates(
 /// 啟動定時快取任務。
 ///
 /// 此任務會固定重新抓取 HiStock 全市場排行榜，並以全量覆蓋方式更新
-/// [`SHARE`](crate::cache::SHARE) 的即時報價快取。
+/// [`SHARE`](infra::cache::SHARE) 的即時報價快取。
 ///
 /// 若任務已在執行中，重複呼叫不會再額外啟動第二個背景迴圈。
 pub fn start_caching_task() {

@@ -84,17 +84,13 @@ unsafe extern "C" {
 }
 
 pub mod app;
-/// 數據快取
-pub mod cache;
 pub mod core;
 /// 抓取數據類
 pub mod crawler;
 /// 資料庫操作
 pub mod database;
+pub mod infra;
 pub mod interfaces;
-
-/// nosql
-pub mod nosql;
 
 /*#[get("/")]
 fn index() -> &'static str {
@@ -182,11 +178,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     dotenv::dotenv().ok();
-    core::logging::info_file_async("startup phase begin: cache::SHARE.load".to_string());
+    core::logging::info_file_async("startup phase begin: crate::infra::cache::SHARE.load".to_string());
     let cache_load_timer = Instant::now();
-    cache::SHARE.load().await;
+    infra::cache::SHARE.load().await;
     core::logging::info_file_async(format!(
-        "startup phase done: cache::SHARE.load elapsed={:?}",
+        "startup phase done: crate::infra::cache::SHARE.load elapsed={:?}",
         cache_load_timer.elapsed()
     ));
 
@@ -234,7 +230,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let pong = nosql::redis::CLIENT.ping().await;
+    let pong = crate::infra::nosql::redis::CLIENT.ping().await;
     if let Ok(pong) = pong {
         println!("pong: {}", pong);
     }

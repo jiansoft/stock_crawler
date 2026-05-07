@@ -117,7 +117,7 @@ pub async fn visit() -> Result<Vec<Public>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::SHARE;
+    use crate::infra::cache::SHARE;
     use crate::core::logging;
 
     #[tokio::test]

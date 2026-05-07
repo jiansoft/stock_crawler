@@ -1,5 +1,5 @@
 use crate::{
-    cache::SHARE, crawler::twse, database::table::stock, core::logging, core::util::datetime::Weekend,
+    infra::cache::SHARE, crawler::twse, database::table::stock, core::logging, core::util::datetime::Weekend,
 };
 use anyhow::Result;
 use chrono::Local;
@@ -65,7 +65,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cache::SHARE;
+    use crate::infra::cache::SHARE;
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

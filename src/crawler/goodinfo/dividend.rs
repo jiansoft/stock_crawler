@@ -9,7 +9,7 @@ use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use urlencoding::encode;
 
-use crate::cache::SHARE;
+use crate::infra::cache::SHARE;
 use crate::{
     crawler::goodinfo::HOST,
     core::logging,

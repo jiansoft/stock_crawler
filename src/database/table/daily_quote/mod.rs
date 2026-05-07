@@ -763,7 +763,7 @@ mod tests {
     use chrono::Datelike;
 
     use crate::crawler::twse;
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 

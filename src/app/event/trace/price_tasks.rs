@@ -31,13 +31,13 @@ use tokio::{
 
 use super::{stats as trace_stats, stock_price};
 use crate::{
-    cache::RealtimeSnapshot,
+    infra::cache::RealtimeSnapshot,
     core::util::{
         atomic::decrement_atomic_usize,
         diagnostics::{read_process_memory_stats, trim_allocator_memory, TaskRuntimeStatus},
     },
 };
-use crate::{cache::SHARE, crawler, core::declare, core::logging};
+use crate::{infra::cache::SHARE, crawler, core::declare, core::logging};
 
 /// 價格更新事件。
 #[derive(Debug, Clone)]
@@ -123,7 +123,7 @@ pub async fn start_price_tasks() -> Result<()> {
 ///
 /// 準備完成的判定條件如下：
 /// - 追蹤條件快取已至少成功載入過一次
-/// - [`SHARE`](crate::cache::SHARE) 內的 `stock_snapshots` 至少已有一筆資料
+/// - [`SHARE`](infra::cache::SHARE) 內的 `stock_snapshots` 至少已有一筆資料
 ///
 /// 若在限定時間內仍尚未滿足條件，追蹤流程仍會繼續，
 /// 只是開盤初期部分股票可能因快取未命中而暫時略過。

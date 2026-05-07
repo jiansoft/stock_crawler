@@ -3,7 +3,7 @@ use std::fmt::Write;
 use crate::{
     app::backfill, interfaces::bot,
     interfaces::bot::telegram::Telegram,
-    cache::SHARE,
+    infra::cache::SHARE,
     crawler::{share::EtfInfo, tpex, twse},
     database::table,
     core::declare::StockExchangeMarket,

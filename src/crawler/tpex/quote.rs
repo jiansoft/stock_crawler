@@ -1,5 +1,5 @@
 use crate::{
-    cache::{self, TtlCacheInner, TTL},
+    infra::cache::{TtlCacheInner, TTL},
     crawler::tpex,
     database::table::{self, daily_quote::FromWithExchange},
     core::declare::StockExchange,
@@ -100,7 +100,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
                 }
 
                 if !dq.change.is_zero() {
-                    if let Some(ldg) = cache::SHARE
+                    if let Some(ldg) = crate::infra::cache::SHARE
                         .get_last_trading_day_quotes(&dq.stock_symbol)
                         .await
                     {
@@ -151,7 +151,7 @@ mod tests {
     use chrono::{TimeDelta, Timelike};
     use std::time::Duration;
 
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 

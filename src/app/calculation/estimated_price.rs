@@ -49,7 +49,7 @@ pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cache::SHARE;
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
