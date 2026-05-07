@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     crawler::taifex,
-    database::table::stock::{self, extension::weight::SymbolAndWeight},
+    infra::database::table::stock::{self, extension::weight::SymbolAndWeight},
     core::declare::StockExchange,
     core::logging, core::util,
 };

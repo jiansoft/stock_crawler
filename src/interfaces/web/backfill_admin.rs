@@ -27,7 +27,7 @@ use tokio::sync::RwLock;
 use crate::{
     app::backfill::{dividend, quote, taiwan_stock_index},
     app::calculation::dividend_record,
-    database,
+    infra::database,
     app::event::taiwan_stock::closing,
     core::logging,
 };

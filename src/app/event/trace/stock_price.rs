@@ -30,7 +30,7 @@ use crate::{
     infra::cache::RealtimeSnapshot,
     infra::cache::SHARE,
     crawler::twse,
-    database::table::trace::Trace,
+    infra::database::table::trace::Trace,
     core::declare, core::logging,
     core::util::{datetime::Weekend, map::Keyable},
 };

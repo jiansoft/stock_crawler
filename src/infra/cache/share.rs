@@ -15,7 +15,7 @@ use super::{
 };
 use crate::crawler::share as crawler_share;
 use crate::{
-    database::table::{
+    infra::database::table::{
         daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,
         stock_exchange_market,
     },

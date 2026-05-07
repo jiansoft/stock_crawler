@@ -7,7 +7,7 @@ use futures::{stream, StreamExt};
 use crate::{
     infra::cache::{TtlCacheInner, SHARE, TTL},
     crawler::{tpex, twse},
-    database::table::{self, daily_quote::DailyQuote},
+    infra::database::table::{self, daily_quote::DailyQuote},
     core::logging, core::util,
     core::util::map::Keyable,
 };
@@ -96,7 +96,7 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{infra::cache::SHARE, database, database::table::stock, core::logging};
+    use crate::{infra::cache::SHARE, infra::database, infra::database::table::stock, core::logging};
 
     use super::*;
 

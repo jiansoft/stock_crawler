@@ -3,7 +3,7 @@ use chrono::{Local, NaiveDate, TimeZone};
 
 use crate::interfaces::bot::telegram::Telegram;
 use crate::core::util::map::Keyable;
-use crate::{interfaces::bot, infra::cache::SHARE, crawler::twse, database::table, core::logging};
+use crate::{interfaces::bot, infra::cache::SHARE, crawler::twse, infra::database::table, core::logging};
 
 /// 解析單筆指數字串陣列。若格式錯誤或解析失敗，會記錄 error log 並回傳 `None`。
 fn parse_index_item(item: &[String]) -> Option<table::index::Index> {

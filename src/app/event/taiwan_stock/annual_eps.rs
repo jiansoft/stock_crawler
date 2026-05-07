@@ -21,7 +21,7 @@ use crate::{
         mops::annual_profit::Mops,
         share::{AnnualProfit, AnnualProfitFetcher},
     },
-    database::table::{self, financial_statement::FinancialStatement},
+    infra::database::table::{self, financial_statement::FinancialStatement},
     core::logging,
 };
 

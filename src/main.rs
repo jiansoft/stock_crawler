@@ -87,8 +87,6 @@ pub mod app;
 pub mod core;
 /// 抓取數據類
 pub mod crawler;
-/// 資料庫操作
-pub mod database;
 pub mod infra;
 pub mod interfaces;
 

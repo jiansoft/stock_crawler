@@ -5,7 +5,7 @@ use crate::{
     interfaces::bot::{self, telegram::Telegram},
     infra::cache::{TtlCacheInner, TTL},
     app::calculation, crawler,
-    database::table::{
+    infra::database::table::{
         daily_money_history_member::{
             DailyMoneyHistoryMember, DailyMoneyHistoryMemberWithPreviousTradingDay,
         },

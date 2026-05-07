@@ -5,7 +5,7 @@ use scraper::{Html, Selector};
 use crate::{
     infra::cache::SHARE,
     crawler::twse,
-    database::table,
+    infra::database::table,
     core::declare::StockExchangeMarket,
     core::util::{self, datetime::Weekend},
 };

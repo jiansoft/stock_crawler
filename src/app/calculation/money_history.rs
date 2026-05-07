@@ -1,15 +1,12 @@
 use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
 
-use crate::database::{
-    self,
-    table::{
+use crate::infra::database::table::{
         daily_money_history::DailyMoneyHistory,
         daily_money_history_detail::DailyMoneyHistoryDetail,
         daily_money_history_detail_more::DailyMoneyHistoryDetailMore,
         daily_money_history_member::DailyMoneyHistoryMember,
         daily_stock_price_stats::DailyStockPriceStats,
-    },
 };
 
 /// 計算並重建指定交易日的帳戶市值相關資料。
@@ -30,7 +27,7 @@ use crate::database::{
 pub async fn calculate_money_history(date: NaiveDate) -> Result<()> {
     // 優先使用同一筆 transaction 保障跨表一致性；
     // 若無法建立 transaction，則退化為各 SQL 自行執行。
-    let mut tx_option = database::get_tx().await.ok();
+    let mut tx_option = crate::infra::database::get_tx().await.ok();
 
     // 1) 先寫入當日市值總覽，供後續明細與通知流程使用。
     if let Err(why) = DailyMoneyHistory::upsert(date, &mut tx_option).await {

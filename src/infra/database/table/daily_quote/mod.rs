@@ -1,0 +1,988 @@
+use std::fmt::Write;
+
+use anyhow::{anyhow, Context, Result};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta};
+use rust_decimal::Decimal;
+use sqlx::{postgres::PgQueryResult, Row};
+
+use crate::{
+    infra::database::{self, table::daily_quote::extension::MonthlyStockPriceSummary, CopyIn},
+    core::declare::StockExchange,
+    core::util::{datetime, map::Keyable},
+};
+
+pub(crate) mod extension;
+
+#[derive(sqlx::Type, sqlx::FromRow, Default, Debug, Clone)]
+/// 每日股票報價資料模型。
+///
+/// 對應資料表為 `DailyQuotes`，包含開高低收、成交量、
+/// 均線、年內統計等欄位。  
+/// 目前同時保留 `security_code` 與 `stock_symbol`，
+/// 以兼容舊資料欄位與新欄位。
+pub struct DailyQuote {
+    /// 年內最高價對應日期。
+    pub maximum_price_in_year_date_on: NaiveDate,
+    /// 年內最低價對應日期。
+    pub minimum_price_in_year_date_on: NaiveDate,
+    /// 交易日期。
+    pub date: NaiveDate,
+    /// 建立時間。
+    pub create_time: DateTime<Local>,
+    /// 最後更新時間（資料寫入時間）。
+    pub record_time: DateTime<Local>,
+    /// 本益比
+    pub price_earning_ratio: Decimal,
+    /// 60 日均線。
+    pub moving_average_60: Decimal,
+    /// 收盤價
+    pub closing_price: Decimal,
+    /// 漲跌幅（百分比）。
+    pub change_range: Decimal,
+    /// 漲跌價差
+    pub change: Decimal,
+    /// 最後揭示買價
+    pub last_best_bid_price: Decimal,
+    /// 最後揭示買量
+    pub last_best_bid_volume: Decimal,
+    /// 最後揭示賣價
+    pub last_best_ask_price: Decimal,
+    /// 最後揭示賣量
+    pub last_best_ask_volume: Decimal,
+    /// 5 日均線。
+    pub moving_average_5: Decimal,
+    /// 10 日均線。
+    pub moving_average_10: Decimal,
+    /// 20 日均線。
+    pub moving_average_20: Decimal,
+    /// 最低價
+    pub lowest_price: Decimal,
+    /// 120 日均線。
+    pub moving_average_120: Decimal,
+    /// 240 日均線。
+    pub moving_average_240: Decimal,
+    /// 年內最高價。
+    pub maximum_price_in_year: Decimal,
+    /// 年內最低價。
+    pub minimum_price_in_year: Decimal,
+    /// 年內平均收盤價。
+    pub average_price_in_year: Decimal,
+    /// 最高價
+    pub highest_price: Decimal,
+    /// 開盤價
+    pub opening_price: Decimal,
+    /// 成交股數
+    pub trading_volume: Decimal,
+    /// 成交金額
+    pub trade_value: Decimal,
+    ///  成交筆數
+    pub transaction: Decimal,
+    /// 股價淨值比=每股股價 ÷ 每股淨值
+    pub price_to_book_ratio: Decimal,
+    /// 股票代碼
+    pub stock_symbol: String,
+    /// 主鍵序號。
+    pub serial: i64,
+    /// 日期年份（冗餘欄位，利於查詢）。
+    pub year: i32,
+    /// 日期月份（冗餘欄位，利於查詢）。
+    pub month: i32,
+    /// 日期日（冗餘欄位，利於查詢）。
+    pub day: i32,
+}
+
+/// 批次匯入 `DailyQuotes` 的 PostgreSQL `COPY` 指令。
+pub const COPY_IN_QUERY: &str = r#"COPY "DailyQuotes"(
+            maximum_price_in_year_date_on,
+            minimum_price_in_year_date_on,
+            "Date",
+            "CreateTime",
+            "RecordTime",
+            "PriceEarningRatio",
+            "MovingAverage60",
+            "ClosingPrice",
+            "ChangeRange",
+            "Change",
+            "LastBestBidPrice",
+            "LastBestBidVolume",
+            "LastBestAskPrice",
+            "LastBestAskVolume",
+            "MovingAverage5",
+            "MovingAverage10",
+            "MovingAverage20",
+            "LowestPrice",
+            "MovingAverage120",
+            "MovingAverage240",
+            maximum_price_in_year,
+            minimum_price_in_year,
+            average_price_in_year,
+            "HighestPrice",
+            "OpeningPrice",
+            "TradingVolume",
+            "TradeValue",
+            "Transaction",
+            "price-to-book_ratio",
+            "stock_symbol",
+            year,
+            month,
+            day) FROM STDIN WITH (FORMAT CSV)"#;
+
+impl CopyIn for DailyQuote {
+    fn to_csv(&self) -> String {
+        self.to_csv()
+    }
+}
+
+impl Keyable for DailyQuote {
+    fn key(&self) -> String {
+        format!("{}-{}", self.date.format("%Y%m%d"), self.stock_symbol)
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!("DailyQuote:{}", self.key())
+    }
+}
+
+impl DailyQuote {
+    /// 建立 `DailyQuote` 預設實例，並同步初始化股票代碼欄位。
+    pub fn new<S: Into<String>>(security_code: S) -> Self {
+        let security_code = security_code.into();
+        DailyQuote {
+            stock_symbol: security_code,
+            ..Default::default()
+        }
+    }
+
+    /// 依欄位名稱映射，從單筆原始字串資料建立 `DailyQuote`。
+    ///
+    /// 適用於欄位順序可能變動的來源（例如 TWSE MI_INDEX）。
+    pub fn from_with_map(item: &[String], map: &std::collections::HashMap<&str, usize>) -> Self {
+        let code = map
+            .get("證券代號")
+            .and_then(|&i| item.get(i))
+            .cloned()
+            .unwrap_or_default();
+        let mut e = DailyQuote::new(code);
+
+        let parse_decimal = |key: &str| -> Decimal {
+            map.get(key)
+                .and_then(|&i| item.get(i))
+                .map(|s| s.replace(',', ""))
+                .and_then(|s| s.parse::<Decimal>().ok())
+                .unwrap_or_default()
+        };
+
+        e.trading_volume = parse_decimal("成交股數");
+        e.transaction = parse_decimal("成交筆數");
+        e.trade_value = parse_decimal("成交金額");
+        e.opening_price = parse_decimal("開盤價");
+        e.highest_price = parse_decimal("最高價");
+        e.lowest_price = parse_decimal("最低價");
+        e.closing_price = parse_decimal("收盤價");
+        e.change = parse_decimal("漲跌價差");
+        e.last_best_bid_price = parse_decimal("最後揭示買價");
+        e.last_best_bid_volume = parse_decimal("最後揭示買量");
+        e.last_best_ask_price = parse_decimal("最後揭示賣價");
+        e.last_best_ask_volume = parse_decimal("最後揭示賣量");
+        e.price_earning_ratio = parse_decimal("本益比");
+
+        // 處理漲跌符號
+        if let Some(&i) = map.get("漲跌(+/-)") {
+            if let Some(sign) = item.get(i) {
+                if sign.contains('-') || sign.contains('綠') {
+                    e.change = -e.change.abs();
+                } else if sign.contains('+') || sign.contains('紅') {
+                    e.change = e.change.abs();
+                }
+            }
+        }
+
+        e.create_time = Local::now();
+        let default_date = datetime::parse_date("1970-01-01T00:00:00Z");
+        e.maximum_price_in_year_date_on = default_date.date_naive();
+        e.minimum_price_in_year_date_on = default_date.date_naive();
+
+        e
+    }
+
+    /// 轉換為單行 CSV 字串，供 `COPY` 批次寫入使用。
+    pub fn to_csv(&self) -> String {
+        let mut csv_string = String::new();
+
+        let _ = writeln!(csv_string, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                         self.maximum_price_in_year_date_on,
+                         self.minimum_price_in_year_date_on,
+                         self.date,
+                         self.create_time,
+                         self.record_time,
+                         self.price_earning_ratio,
+                         self.moving_average_60,
+                         self.closing_price,
+                         self.change_range,
+                         self.change,
+                         self.last_best_bid_price,
+                         self.last_best_bid_volume,
+                         self.last_best_ask_price,
+                         self.last_best_ask_volume,
+                         self.moving_average_5,
+                         self.moving_average_10,
+                         self.moving_average_20,
+                         self.lowest_price,
+                         self.moving_average_120,
+                         self.moving_average_240,
+                         self.maximum_price_in_year,
+                         self.minimum_price_in_year,
+                         self.average_price_in_year,
+                         self.highest_price,
+                         self.opening_price,
+                         self.trading_volume,
+                         self.trade_value,
+                         self.transaction,
+                         self.price_to_book_ratio,
+                         self.stock_symbol,
+                         self.year,
+                         self.month,
+                         self.day,
+        );
+
+        csv_string
+    }
+
+    /// 將當前報價寫入資料庫，若主鍵衝突則更新既有資料。
+    pub async fn upsert(&self) -> Result<PgQueryResult> {
+        let sql = r#"
+       INSERT INTO "DailyQuotes" (
+            maximum_price_in_year_date_on,
+            minimum_price_in_year_date_on,
+            "Date",
+            "CreateTime",
+            "RecordTime",
+            "PriceEarningRatio",
+            "MovingAverage60",
+            "ClosingPrice",
+            "ChangeRange",
+            "Change",
+            "LastBestBidPrice",
+            "LastBestBidVolume",
+            "LastBestAskPrice",
+            "LastBestAskVolume",
+            "MovingAverage5",
+            "MovingAverage10",
+            "MovingAverage20",
+            "LowestPrice",
+            "MovingAverage120",
+            "MovingAverage240",
+            maximum_price_in_year,
+            minimum_price_in_year,
+            average_price_in_year,
+            "HighestPrice",
+            "OpeningPrice",
+            "TradingVolume",
+            "TradeValue",
+            "Transaction",
+            "price-to-book_ratio",
+            "stock_symbol",
+            year,
+            month,
+            day
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
+        ON CONFLICT ("stock_symbol", "Date")
+        DO UPDATE SET
+            "RecordTime" = now(),
+            "ClosingPrice" = excluded."ClosingPrice",
+            "ChangeRange" = excluded."ChangeRange",
+            "Change" = excluded. "Change",
+            "LastBestBidPrice" = excluded. "LastBestBidPrice",
+            "LastBestBidVolume" = excluded."LastBestBidVolume",
+            "LastBestAskPrice" = excluded."LastBestAskPrice",
+            "LastBestAskVolume" = excluded."LastBestAskVolume",
+            "LowestPrice" = excluded."LowestPrice",
+            "HighestPrice" = excluded."HighestPrice",
+            "OpeningPrice" = excluded."OpeningPrice",
+            "TradingVolume" = excluded."TradingVolume",
+            "TradeValue" = excluded."TradeValue",
+            "Transaction" = excluded."Transaction",
+            "price-to-book_ratio" = excluded."price-to-book_ratio",
+            "PriceEarningRatio" = excluded."PriceEarningRatio"
+    "#;
+        sqlx::query(sql)
+            .bind(self.maximum_price_in_year_date_on)
+            .bind(self.minimum_price_in_year_date_on)
+            .bind(self.date)
+            .bind(self.create_time)
+            .bind(self.record_time)
+            .bind(self.price_earning_ratio)
+            .bind(self.moving_average_60)
+            .bind(self.closing_price)
+            .bind(self.change_range)
+            .bind(self.change)
+            .bind(self.last_best_bid_price)
+            .bind(self.last_best_bid_volume)
+            .bind(self.last_best_ask_price)
+            .bind(self.last_best_ask_volume)
+            .bind(self.moving_average_5)
+            .bind(self.moving_average_10)
+            .bind(self.moving_average_20)
+            .bind(self.lowest_price)
+            .bind(self.moving_average_120)
+            .bind(self.moving_average_240)
+            .bind(self.maximum_price_in_year)
+            .bind(self.minimum_price_in_year)
+            .bind(self.average_price_in_year)
+            .bind(self.highest_price)
+            .bind(self.opening_price)
+            .bind(self.trading_volume)
+            .bind(self.trade_value)
+            .bind(self.transaction)
+            .bind(self.price_to_book_ratio)
+            .bind(&self.stock_symbol)
+            .bind(self.year)
+            .bind(self.month)
+            .bind(self.day)
+            .execute(database::get_connection())
+            .await
+            .context(format!(
+                "Failed to DailyQuote::upsert({:#?}) from database",
+                self
+            ))
+    }
+
+    /// 依指定日期回填該股票的均線與年內高低點統計。
+    pub async fn fill_moving_average(&mut self) -> Result<()> {
+        let year_ago = self.date - TimeDelta::try_days(400).unwrap();
+        let sql = r#"
+WITH
+cte AS (
+    SELECT "Date","HighestPrice","LowestPrice","ClosingPrice"
+    FROM "DailyQuotes"
+    WHERE "stock_symbol" = $1 AND "Date" <= $2 AND "Date" >= $3
+    ORDER BY "Date" DESC
+	LIMIT 240
+)
+SELECT
+(SELECT CASE WHEN COUNT(*) = 5   THEN round(COALESCE(AVG("ClosingPrice"),0),2) ELSE 0 END FROM (SELECT "ClosingPrice" FROM cte LIMIT 5)   AS a) AS "MovingAverage5",
+(SELECT CASE WHEN COUNT(*) = 10  THEN round(COALESCE(AVG("ClosingPrice"),0),2) ELSE 0 END FROM (SELECT "ClosingPrice" FROM cte LIMIT 10)  AS a) AS "MovingAverage10",
+(SELECT CASE WHEN COUNT(*) = 20  THEN round(COALESCE(AVG("ClosingPrice"),0),2) ELSE 0 END FROM (SELECT "ClosingPrice" FROM cte LIMIT 20)  AS a) AS "MovingAverage20",
+(SELECT CASE WHEN COUNT(*) = 60  THEN round(COALESCE(AVG("ClosingPrice"),0),2) ELSE 0 END FROM (SELECT "ClosingPrice" FROM cte LIMIT 60)  AS a) AS "MovingAverage60",
+(SELECT CASE WHEN COUNT(*) = 120 THEN round(COALESCE(AVG("ClosingPrice"),0),2) ELSE 0 END FROM (SELECT "ClosingPrice" FROM cte LIMIT 120) AS a) AS "MovingAverage120",
+(SELECT CASE WHEN COUNT(*) = 240 THEN round(COALESCE(AVG("ClosingPrice"),0),2) ELSE 0 END FROM (SELECT "ClosingPrice" FROM cte LIMIT 240) AS a) AS "MovingAverage240",
+(SELECT round(max("HighestPrice"),2) FROM cte) AS "maximum_price_in_year",
+(SELECT "Date" FROM cte order by "HighestPrice" desc limit 1) AS "maximum_price_in_year_date_on",
+(SELECT round(min("LowestPrice"),2) FROM cte) AS "minimum_price_in_year",
+(SELECT "Date" FROM cte order by "LowestPrice" limit 1) AS "minimum_price_in_year_date_on",
+(SELECT round(avg("ClosingPrice"),2) FROM cte) AS "average_price_in_year"
+        "#;
+        sqlx::query(sql)
+            .bind(&self.stock_symbol)
+            .bind(self.date)
+            .bind(year_ago)
+            .try_map(|row: sqlx::postgres::PgRow| {
+                self.moving_average_5 = row.get("MovingAverage5");
+                self.moving_average_10 = row.get("MovingAverage10");
+                self.moving_average_20 = row.get("MovingAverage20");
+                self.moving_average_60 = row.get("MovingAverage60");
+                self.moving_average_120 = row.get("MovingAverage120");
+                self.moving_average_240 = row.get("MovingAverage240");
+                self.maximum_price_in_year = row.get("maximum_price_in_year");
+                self.maximum_price_in_year_date_on = row.get("maximum_price_in_year_date_on");
+                self.minimum_price_in_year = row.get("minimum_price_in_year");
+                self.minimum_price_in_year_date_on = row.get("minimum_price_in_year_date_on");
+                self.average_price_in_year = row.get("average_price_in_year");
+
+                Ok(())
+            })
+            .fetch_one(database::get_connection())
+            .await
+            .context(format!(
+                "Failed to fetch_moving_average(stock_symbol:{},date:{}) from database",
+                self.stock_symbol, self.date
+            ))
+    }
+
+    /// 批次更新均線、年內統計與 PBR。
+    pub async fn batch_update_moving_average(quotes: &[Self]) -> Result<PgQueryResult> {
+        if quotes.is_empty() {
+            return Err(anyhow!("Cannot batch update empty quotes"));
+        }
+
+        let mut serials = Vec::with_capacity(quotes.len());
+        let mut ma5 = Vec::with_capacity(quotes.len());
+        let mut ma10 = Vec::with_capacity(quotes.len());
+        let mut ma20 = Vec::with_capacity(quotes.len());
+        let mut ma60 = Vec::with_capacity(quotes.len());
+        let mut ma120 = Vec::with_capacity(quotes.len());
+        let mut ma240 = Vec::with_capacity(quotes.len());
+        let mut max_p = Vec::with_capacity(quotes.len());
+        let mut min_p = Vec::with_capacity(quotes.len());
+        let mut avg_p = Vec::with_capacity(quotes.len());
+        let mut max_d = Vec::with_capacity(quotes.len());
+        let mut min_d = Vec::with_capacity(quotes.len());
+        let mut pbr = Vec::with_capacity(quotes.len());
+
+        for q in quotes {
+            serials.push(q.serial);
+            ma5.push(q.moving_average_5);
+            ma10.push(q.moving_average_10);
+            ma20.push(q.moving_average_20);
+            ma60.push(q.moving_average_60);
+            ma120.push(q.moving_average_120);
+            ma240.push(q.moving_average_240);
+            max_p.push(q.maximum_price_in_year);
+            min_p.push(q.minimum_price_in_year);
+            avg_p.push(q.average_price_in_year);
+            max_d.push(q.maximum_price_in_year_date_on);
+            min_d.push(q.minimum_price_in_year_date_on);
+            pbr.push(q.price_to_book_ratio);
+        }
+
+        let sql = r#"
+            UPDATE "DailyQuotes" AS dq
+            SET
+                "MovingAverage5" = t.ma5,
+                "MovingAverage10" = t.ma10,
+                "MovingAverage20" = t.ma20,
+                "MovingAverage60" = t.ma60,
+                "MovingAverage120" = t.ma120,
+                "MovingAverage240" = t.ma240,
+                maximum_price_in_year = t.max_p,
+                minimum_price_in_year = t.min_p,
+                average_price_in_year = t.avg_p,
+                maximum_price_in_year_date_on = t.max_d,
+                minimum_price_in_year_date_on = t.min_d,
+                "price-to-book_ratio" = t.pbr
+            FROM UNNEST($1::bigint[], $2::numeric[], $3::numeric[], $4::numeric[], $5::numeric[], $6::numeric[], $7::numeric[], 
+                        $8::numeric[], $9::numeric[], $10::numeric[], $11::date[], $12::date[], $13::numeric[]) 
+                 AS t(serial, ma5, ma10, ma20, ma60, ma120, ma240, max_p, min_p, avg_p, max_d, min_d, pbr)
+            WHERE dq."Serial" = t.serial
+        "#;
+
+        sqlx::query(sql)
+            .bind(&serials)
+            .bind(&ma5)
+            .bind(&ma10)
+            .bind(&ma20)
+            .bind(&ma60)
+            .bind(&ma120)
+            .bind(&ma240)
+            .bind(&max_p)
+            .bind(&min_p)
+            .bind(&avg_p)
+            .bind(&max_d)
+            .bind(&min_d)
+            .bind(&pbr)
+            .execute(database::get_connection())
+            .await
+            .context("Failed to batch_update_moving_average in DailyQuotes")
+    }
+
+    /// 使用 `COPY` 批次寫入 `DailyQuotes`。
+    pub async fn copy_in_raw(quotes: &[Self]) -> Result<u64> {
+        database::copy_in_raw(COPY_IN_QUERY, quotes).await
+    }
+}
+
+/// 不同交易所來源轉換為統一資料模型的介面。
+pub trait FromWithExchange<T, U> {
+    /// 在給定交易所資訊的前提下，將來源資料轉成統一資料模型。
+    fn from_with_exchange(exchange: T, item: &U) -> Self;
+}
+
+impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
+    fn from_with_exchange(exchange: StockExchange, item: &Vec<String>) -> Self {
+        let mut e = DailyQuote::new(item[0].to_string());
+
+        match exchange {
+            StockExchange::TWSE => {
+                let decimal_fields = [
+                    (2, &mut e.trading_volume),
+                    (3, &mut e.transaction),
+                    (4, &mut e.trade_value),
+                    (5, &mut e.opening_price),
+                    (6, &mut e.highest_price),
+                    (7, &mut e.lowest_price),
+                    (8, &mut e.closing_price),
+                    (10, &mut e.change),
+                    (11, &mut e.last_best_bid_price),
+                    (12, &mut e.last_best_bid_volume),
+                    (13, &mut e.last_best_ask_price),
+                    (14, &mut e.last_best_ask_volume),
+                    (15, &mut e.price_earning_ratio),
+                ];
+
+                for (index, field) in decimal_fields {
+                    let d = item.get(index).unwrap_or(&"".to_string()).replace(',', "");
+                    *field = d.parse::<Decimal>().unwrap_or_default();
+                }
+
+                if let Some(change_str) = item.get(9) {
+                    if change_str.contains('-') {
+                        e.change = -e.change;
+                    }
+                }
+            }
+            StockExchange::TPEx => {
+                let decimal_fields = [
+                    (7, &mut e.trading_volume),
+                    (9, &mut e.transaction),
+                    (8, &mut e.trade_value),
+                    (4, &mut e.opening_price),
+                    (5, &mut e.highest_price),
+                    (6, &mut e.lowest_price),
+                    (2, &mut e.closing_price),
+                    (3, &mut e.change),
+                    (10, &mut e.last_best_bid_price),
+                    (11, &mut e.last_best_bid_volume),
+                    (12, &mut e.last_best_ask_price),
+                    (13, &mut e.last_best_ask_volume),
+                ];
+
+                for (index, field) in decimal_fields {
+                    let d = item.get(index).unwrap_or(&"".to_string()).replace(',', "");
+                    *field = d.parse::<Decimal>().unwrap_or_default();
+                }
+            }
+            _ => {}
+        }
+
+        e.create_time = Local::now();
+        let default_date = datetime::parse_date("1970-01-01T00:00:00Z");
+        e.maximum_price_in_year_date_on = default_date.date_naive();
+        e.minimum_price_in_year_date_on = default_date.date_naive();
+
+        e
+    }
+}
+
+/// 補齊指定日期缺漏的每日收盤資料。
+pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQueryResult> {
+    let date_str = date.format("%Y-%m-%d").to_string();
+    let prev_date = (date - TimeDelta::try_days(30).unwrap())
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let sql = format!(
+        r#"
+INSERT INTO "DailyQuotes" (
+    "Date", "stock_symbol", "TradingVolume", "Transaction",
+    "TradeValue", "OpeningPrice", "HighestPrice", "LowestPrice",
+    "ClosingPrice", "ChangeRange", "Change", "LastBestBidPrice",
+    "LastBestBidVolume", "LastBestAskPrice", "LastBestAskVolume",
+    "PriceEarningRatio", "RecordTime", "CreateTime", "MovingAverage5",
+    "MovingAverage10", "MovingAverage20", "MovingAverage60",
+    "MovingAverage120", "MovingAverage240", maximum_price_in_year,
+    minimum_price_in_year, average_price_in_year,
+    maximum_price_in_year_date_on, minimum_price_in_year_date_on,
+    "price-to-book_ratio"
+)
+SELECT '{0}' as "Date",
+    "stock_symbol",
+    0 as "TradingVolume",
+    0 as "Transaction",
+    0 as "TradeValue",
+    "OpeningPrice",
+    "HighestPrice",
+    "LowestPrice",
+    "ClosingPrice",
+    0 as "ChangeRange",
+    0 as "Change",
+    0 as "LastBestBidPrice",
+    0 as "LastBestBidVolume",
+    0 as "LastBestAskPrice",
+    0 as "LastBestAskVolume",
+    0 as "PriceEarningRatio",
+    "RecordTime",
+    "CreateTime",
+    "MovingAverage5",
+    "MovingAverage10",
+    "MovingAverage20",
+    "MovingAverage60",
+    "MovingAverage120",
+    "MovingAverage240",
+    maximum_price_in_year,
+    minimum_price_in_year,
+    average_price_in_year,
+    maximum_price_in_year_date_on,
+    minimum_price_in_year_date_on,
+    "price-to-book_ratio"
+FROM "DailyQuotes"
+WHERE "Serial" IN
+(
+    SELECT MAX("Serial")
+    FROM "DailyQuotes"
+    WHERE "stock_symbol" IN
+    (
+        SELECT c.stock_symbol
+        FROM stocks AS c
+        WHERE "stock_symbol" NOT IN
+        (
+            SELECT "DailyQuotes"."stock_symbol"
+            FROM "DailyQuotes"
+            WHERE "Date" = '{0}'
+        )
+        AND c."SuspendListing" = false
+    )
+    AND "Date" < '{0}'
+    AND "Date" > '{1}'
+    GROUP BY "stock_symbol"
+)"#,
+        date_str, prev_date
+    );
+
+    sqlx::query(&sql)
+        .execute(database::get_connection())
+        .await
+        .context(format!(
+            "Failed to makeup_for_the_lack_daily_quotes from database\r\n{}",
+            &sql
+        ))
+}
+
+/// 取得指定股票在指定年月的最低、平均、最高收盤價統計。
+pub async fn fetch_monthly_stock_price_summary(
+    stock_symbol: &str,
+    year: i32,
+    month: i32,
+) -> Result<MonthlyStockPriceSummary> {
+    let sql = r#"
+SELECT
+    MIN("LowestPrice") as lowest_price,
+    AVG("ClosingPrice") as avg_price,
+    MAX("HighestPrice") as highest_price
+FROM "DailyQuotes"
+WHERE "stock_symbol" = $1 AND "year" = $2 AND "month" = $3
+GROUP BY "stock_symbol", "year", "month";
+"#;
+    Ok(sqlx::query_as::<_, MonthlyStockPriceSummary>(sql)
+        .bind(stock_symbol)
+        .bind(year)
+        .bind(month)
+        .fetch_one(database::get_connection())
+        .await?)
+}
+
+/// 取得指定日期在 `DailyQuotes` 的資料筆數。
+pub async fn fetch_count_by_date(date: NaiveDate) -> Result<i64> {
+    let sql = r#"SELECT count(*) FROM "DailyQuotes" WHERE "Date" = $1"#;
+    let row: (i64,) = sqlx::query_as(sql)
+        .bind(date)
+        .fetch_one(database::get_connection())
+        .await?;
+    Ok(row.0)
+}
+
+/// 讀取指定日期的所有日報價資料。
+pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuote>> {
+    let sql = r#"
+    SELECT
+        "Serial",
+        "Date",
+        "stock_symbol",
+        "TradingVolume",
+        "Transaction",
+        "TradeValue",
+        "OpeningPrice",
+        "HighestPrice",
+        "LowestPrice",
+        "ClosingPrice",
+        "ChangeRange",
+        "Change",
+        "LastBestBidPrice",
+        "LastBestBidVolume",
+        "LastBestAskPrice",
+        "LastBestAskVolume",
+        "PriceEarningRatio",
+        "RecordTime",
+        "CreateTime",
+        "MovingAverage5",
+        "MovingAverage10",
+        "MovingAverage20",
+        "MovingAverage60",
+        "MovingAverage120",
+        "MovingAverage240",
+        maximum_price_in_year,
+        minimum_price_in_year,
+        average_price_in_year,
+        maximum_price_in_year_date_on,
+        minimum_price_in_year_date_on,
+        "price-to-book_ratio",
+        year,
+        month,
+        day
+    FROM "DailyQuotes"
+    WHERE "Date" = $1"#;
+    sqlx::query(sql)
+        .bind(date)
+        .try_map(|row: sqlx::postgres::PgRow| {
+            let dq = DailyQuote {
+                maximum_price_in_year_date_on: row.get("maximum_price_in_year_date_on"),
+                minimum_price_in_year_date_on: row.get("minimum_price_in_year_date_on"),
+                date: row.get("Date"),
+                create_time: row.try_get("CreateTime")?,
+                record_time: row.try_get("RecordTime")?,
+                price_earning_ratio: row.get("PriceEarningRatio"),
+                moving_average_60: row.get("MovingAverage60"),
+                closing_price: row.get("ClosingPrice"),
+                change_range: row.get("ChangeRange"),
+                change: row.get("Change"),
+                last_best_bid_price: row.get("LastBestBidPrice"),
+                last_best_bid_volume: row.get("LastBestBidVolume"),
+                last_best_ask_price: row.get("LastBestAskPrice"),
+                last_best_ask_volume: row.get("LastBestAskVolume"),
+                moving_average_5: row.get("MovingAverage5"),
+                moving_average_10: row.get("MovingAverage10"),
+                moving_average_20: row.get("MovingAverage20"),
+                lowest_price: row.get("LowestPrice"),
+                moving_average_120: row.get("MovingAverage120"),
+                moving_average_240: row.get("MovingAverage240"),
+                maximum_price_in_year: row.get("maximum_price_in_year"),
+                minimum_price_in_year: row.get("minimum_price_in_year"),
+                average_price_in_year: row.get("average_price_in_year"),
+                highest_price: row.get("HighestPrice"),
+                opening_price: row.get("OpeningPrice"),
+                trading_volume: row.get("TradingVolume"),
+                trade_value: row.get("TradeValue"),
+                transaction: row.get("Transaction"),
+                price_to_book_ratio: row.get("price-to-book_ratio"),
+                stock_symbol: row.get("stock_symbol"),
+                serial: row.get("Serial"),
+                year: row.get("year"),
+                month: row.get("month"),
+                day: row.get("day"),
+            };
+
+            Ok(dq)
+        })
+        .fetch_all(database::get_connection())
+        .await
+        .context("Failed to fetch_daily_quotes_by_date from database")
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Datelike;
+
+    use crate::crawler::twse;
+    use crate::{infra::cache::SHARE, core::logging};
+
+    use super::*;
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_fetch_moving_average() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_moving_average".to_string());
+        let date = NaiveDate::from_ymd_opt(2023, 8, 1);
+        let mut dq = DailyQuote::new("2330".to_string());
+        dq.date = date.unwrap();
+        match dq.fill_moving_average().await {
+            Ok(_) => {
+                dbg!(&dq);
+                logging::debug_file_async(format!("fetch_moving_average: {:#?}", dq));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to fetch_moving_average because {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 fetch_moving_average".to_string());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_fetch_daily_quotes_by_date() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_daily_quotes_by_date".to_string());
+        let date = NaiveDate::from_ymd_opt(2023, 7, 31);
+        match fetch_daily_quotes_by_date(date.unwrap()).await {
+            Ok(dqs) => {
+                logging::debug_file_async(format!("fetch_daily_quotes_by_date: {:#?}", dqs));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to fetch_daily_quotes_by_date because {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 fetch_daily_quotes_by_date".to_string());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_fetch_count_by_date() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_count_by_date".to_string());
+        let date = NaiveDate::from_ymd_opt(2023, 7, 31);
+        match fetch_count_by_date(date.unwrap()).await {
+            Ok(count) => {
+                logging::debug_file_async(format!("count_by_date: {:?}", count));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to fetch_count_by_date because {:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 fetch_count_by_date".to_string());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_makeup_for_the_lack_daily_quotes() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+
+        let now = Local::now().date_naive();
+
+        logging::debug_file_async("開始 makeup_for_the_lack_daily_quotes".to_string());
+
+        match makeup_for_the_lack_daily_quotes(now).await {
+            Ok(result) => {
+                logging::debug_file_async(format!("result:{:#?}", result));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!(
+                    "Failed to makeup_for_the_lack_daily_quotes because:{:?}",
+                    why
+                ));
+            }
+        }
+
+        logging::debug_file_async("結束 makeup_for_the_lack_daily_quotes".to_string());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_fetch_lowest_avg_highest_price() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 fetch_lowest_avg_highest_price".to_string());
+
+        match fetch_monthly_stock_price_summary("2330", 2023, 4).await {
+            Ok(cd) => {
+                logging::debug_file_async(format!("stock: {:?}", cd));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 fetch_lowest_avg_highest_price".to_string());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_upsert() {
+        dotenv::dotenv().ok();
+        SHARE.load().await;
+        logging::debug_file_async("開始 upsert".to_string());
+
+        let data = vec![
+            "79979".to_string(),
+            "台泥".to_string(),
+            "28,131,977".to_string(),
+            "12,278".to_string(),
+            "1,070,452,844".to_string(),
+            "37.65".to_string(),
+            "38.30".to_string(),
+            "37.65".to_string(),
+            "37.95".to_string(),
+            "<p style= color:red>+</p>".to_string(),
+            "0.40".to_string(),
+            "37.95".to_string(),
+            "139".to_string(),
+            "38.00".to_string(),
+            "309".to_string(),
+            "51.28".to_string(),
+        ];
+
+        let mut e = DailyQuote::from_with_exchange(StockExchange::TWSE, &data);
+        e.date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        e.year = e.date.year();
+        e.month = e.date.month() as i32;
+        e.day = e.date.day() as i32;
+        e.record_time = Local::now();
+        e.create_time = Local::now();
+
+        match e.upsert().await {
+            Ok(_) => {}
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to upsert because:{:?}", why));
+            }
+        }
+
+        let otc = vec![
+            "79979".to_string(),
+            "茂生農經".to_string(),
+            "46.55".to_string(),
+            "+0.30".to_string(),
+            "46.25".to_string(),
+            "46.80".to_string(),
+            "46.25".to_string(),
+            "78,000".to_string(),
+            "3,632,550".to_string(),
+            "63".to_string(),
+            "46.30".to_string(),
+            "2".to_string(),
+            "46.60".to_string(),
+            "2".to_string(),
+            "38,598,194".to_string(),
+            "51.20".to_string(),
+            "41.90".to_string(),
+        ];
+
+        let mut e = DailyQuote::from_with_exchange(StockExchange::TPEx, &otc);
+        e.date = NaiveDate::from_ymd_opt(2000, 1, 2).unwrap();
+        e.year = e.date.year();
+        e.month = e.date.month() as i32;
+        e.day = e.date.day() as i32;
+        e.record_time = Local::now();
+        e.create_time = Local::now();
+
+        match e.upsert().await {
+            Ok(_) => {}
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to upsert because:{:?}", why));
+            }
+        }
+        logging::debug_file_async("結束 upsert".to_string());
+    }
+
+    #[tokio::test]
+    async fn test_copy_in_raw() {
+        dotenv::dotenv().ok();
+        logging::debug_file_async("開始 copy_in_raw".to_string());
+
+        let date = NaiveDate::from_ymd_opt(2023, 12, 4).unwrap();
+        let mut twse = twse::quote::visit(date).await.unwrap();
+        let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        for dq in &mut twse {
+            dq.year = date.year();
+            dq.month = date.month() as i32;
+            dq.day = date.day() as i32;
+            dq.date = date;
+        }
+
+        let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
+            .bind(date)
+            .execute(database::get_connection())
+            .await;
+
+        match DailyQuote::copy_in_raw(&twse).await {
+            Ok(cd) => {
+                logging::debug_file_async(format!("copy_in_raw: {:?}", cd));
+            }
+            Err(why) => {
+                logging::debug_file_async(format!("Failed to copy_in_raw because {:?}", why));
+            }
+        }
+
+        logging::debug_file_async("結束 copy_in_raw".to_string());
+    }
+}

@@ -3,7 +3,7 @@ use std::{collections::HashSet, time::Duration};
 use anyhow::{Context, Result};
 use chrono::Local;
 use crate::{
-    app::calculation::dividend_record, crawler::yahoo, database::table::dividend, core::logging,
+    app::calculation::dividend_record, crawler::yahoo, infra::database::table::dividend, core::logging,
     core::util::map::Keyable,
 };
 

@@ -5,7 +5,7 @@ use crate::{
     interfaces::bot::telegram::Telegram,
     infra::cache::SHARE,
     crawler::{share::EtfInfo, tpex, twse},
-    database::table,
+    infra::database::table,
     core::declare::StockExchangeMarket,
     core::logging, interfaces::rpc,
     core::util::datetime::Weekend,

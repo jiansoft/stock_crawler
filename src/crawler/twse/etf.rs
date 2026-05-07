@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::{
     infra::cache::SHARE,
     crawler::{share::EtfInfo, twse},
-    database::table,
+    infra::database::table,
     core::declare::StockExchangeMarket,
     core::util::{self, datetime::Weekend},
 };

@@ -1,7 +1,7 @@
 use crate::{
     infra::cache::{TtlCacheInner, TTL},
     crawler::tpex,
-    database::table::{self, daily_quote::FromWithExchange},
+    infra::database::table::{self, daily_quote::FromWithExchange},
     core::declare::StockExchange,
     core::logging,
     core::util::{self, map::Keyable},

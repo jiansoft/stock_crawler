@@ -1,7 +1,7 @@
 use crate::{
     infra::cache::SHARE,
     crawler::twse,
-    database::{table, table::revenue},
+    infra::database::{table, table::revenue},
     core::logging, core::util,
 };
 use anyhow::Result;

@@ -14,7 +14,7 @@ use crate::{
     app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
     app::calculation,
     crawler::yahoo,
-    database::table,
+    infra::database::table,
     core::logging,
     core::util::{datetime::ReportQuarter, map::Keyable},
 };

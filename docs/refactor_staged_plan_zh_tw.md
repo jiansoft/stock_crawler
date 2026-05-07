@@ -108,7 +108,7 @@ src/
 
 ---
 
-### Phase 2：抽出 interfaces（外部入口集中） ⏳ [PR 合併中]
+### Phase 2：抽出 interfaces（外部入口集中） ✅ [已完成]
 
 搬移範圍：
 
@@ -173,11 +173,11 @@ src/
 
 ---
 
-### Phase 4：抽出 infra（大體量高風險，拆為子步驟） ⏳ [4a 實作中]
+### Phase 4：抽出 infra（大體量高風險，拆為子步驟） ⏳ [4b 完成，準備 4c]
 
 此階段搬移量最大（4 個模組、合計超過 120 檔），為降低風險拆為三個子步驟，每個子步驟獨立跑 Gate。
 
-#### Phase 4a：cache + nosql → infra（低風險先行） ⏳ [Gate 完成，PR 準備中]
+#### Phase 4a：cache + nosql → infra（低風險先行） ✅ [已完成]
 
 搬移範圍：
 
@@ -193,7 +193,7 @@ src/
 
 通關條件（Gate）：`cargo check` + `cargo build`
 
-#### Phase 4b：database → infra
+#### Phase 4b：database → infra ✅ [已完成]
 
 搬移範圍：
 

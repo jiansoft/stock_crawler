@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    database::table::stock_exchange_market,
+    infra::database::table::stock_exchange_market,
     core::declare::{self, Industry},
 };
 

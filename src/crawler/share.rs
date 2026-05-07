@@ -11,7 +11,7 @@ use scraper::{ElementRef, Html, Selector};
 use crate::crawler::{bigdatacloud, myip};
 use crate::{
     crawler::{ipconfig, ipify, ipinfo, seeip},
-    database::table,
+    infra::database::table,
     core::util::{self, map::Keyable, text},
 };
 

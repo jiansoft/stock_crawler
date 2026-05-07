@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     infra::cache::{TtlCacheInner, TTL},
     crawler::twse,
-    database::table::{self},
+    infra::database::table::{self},
     core::logging,
     core::util::{http, map::Keyable},
 };

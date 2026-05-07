@@ -841,7 +841,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::database::table::trace::Trace;
+    use crate::infra::database::table::trace::Trace;
 
     /// 將追蹤設定整理成不重複的股票代號清單。
     fn collect_traced_symbols(targets: Vec<Trace>) -> Vec<String> {

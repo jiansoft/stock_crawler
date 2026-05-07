@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 
 use crate::{
-    database::{table, table::estimate::Estimate},
+    infra::database::{table, table::estimate::Estimate},
     core::logging,
 };
 

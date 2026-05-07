@@ -8,7 +8,7 @@ use crate::{
         self,
         eps::{EpsQuarter, EpsYear},
     },
-    database::table::financial_statement::{self, FinancialStatement},
+    infra::database::table::financial_statement::{self, FinancialStatement},
     core::declare::Quarter,
     core::logging,
     core::util::map::Keyable,
