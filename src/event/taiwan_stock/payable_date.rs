@@ -5,7 +5,7 @@ use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::{
-    bot::{self, telegram::Telegram},
+    interfaces::bot::{self, telegram::Telegram},
     database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
 };
 

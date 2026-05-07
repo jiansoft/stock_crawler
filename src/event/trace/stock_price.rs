@@ -24,9 +24,9 @@ use rust_decimal::Decimal;
 use tokio::{task, time};
 
 use super::{price_tasks as trace_price_tasks, stats as trace_stats};
-use crate::bot::telegram::Telegram;
+use crate::interfaces::bot::telegram::Telegram;
 use crate::{
-    bot,
+    interfaces::bot,
     cache::RealtimeSnapshot,
     cache::SHARE,
     crawler::twse,

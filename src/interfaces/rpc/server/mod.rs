@@ -13,7 +13,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 use crate::{
     core::config::SETTINGS,
     core::logging,
-    rpc::{
+    interfaces::rpc::{
         control::control_server::ControlServer,
         manual_backfill::manual_backfill_server::ManualBackfillServer,
         server::control_service::ControlService,

@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::{
     backfill,
-    bot::{self, telegram::Telegram},
+    interfaces::bot::{self, telegram::Telegram},
     cache::{TtlCacheInner, TTL},
     calculation, crawler,
     database::table::{

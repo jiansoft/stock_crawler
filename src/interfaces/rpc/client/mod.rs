@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 use tokio::{fs, sync::OnceCell as TokioOnceCell};
 use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
-use crate::{core::config::SETTINGS, rpc::stock::stock_client::StockClient};
+use crate::{core::config::SETTINGS, interfaces::rpc::stock::stock_client::StockClient};
 
 /// Stock 服務客戶端封裝。
 pub mod stock_service;

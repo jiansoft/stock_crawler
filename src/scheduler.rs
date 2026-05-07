@@ -9,7 +9,7 @@ use crate::{
         delisted_company, dividend, etf, financial_statement, isin, net_asset_value_per_share,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
-    bot::{self, telegram::Telegram},
+    interfaces::bot::{self, telegram::Telegram},
     core::declare, event, core::logging,
 };
 

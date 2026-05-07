@@ -76,8 +76,8 @@ impl Stock {
     }
 
     /// 轉成推送給 Go stock service 的股票資訊請求。
-    pub fn to_stock_info_request(&self) -> crate::rpc::stock::StockInfoRequest {
-        crate::rpc::stock::StockInfoRequest {
+    pub fn to_stock_info_request(&self) -> crate::interfaces::rpc::stock::StockInfoRequest {
+        crate::interfaces::rpc::stock::StockInfoRequest {
             stock_symbol: self.stock_symbol.to_string(),
             name: self.name.to_string(),
             stock_exchange_market_id: self.stock_exchange_market_id,

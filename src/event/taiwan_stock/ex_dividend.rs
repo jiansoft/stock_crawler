@@ -6,8 +6,8 @@ use chrono::{Datelike, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::{
-    bot,
-    bot::telegram::Telegram,
+    interfaces::bot,
+    interfaces::bot::telegram::Telegram,
     calculation,
     database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
 };

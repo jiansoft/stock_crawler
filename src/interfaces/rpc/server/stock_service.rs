@@ -10,7 +10,7 @@ use crate::{
     cache::SHARE,
     crawler::twse,
     core::logging,
-    rpc::stock::{
+    interfaces::rpc::stock::{
         stock_server::Stock, HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest,
         StockInfoReply, StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest,
     },
@@ -137,7 +137,7 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio_stream::wrappers::TcpListenerStream;
 
-    use crate::rpc::{stock, stock::stock_server::StockServer};
+    use crate::interfaces::rpc::{stock, stock::stock_server::StockServer};
 
     use super::*;
 

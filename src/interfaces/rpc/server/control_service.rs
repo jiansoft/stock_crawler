@@ -5,7 +5,7 @@
 use anyhow::Result;
 use tonic::{Request, Response, Status};
 
-use crate::rpc::{
+use crate::interfaces::rpc::{
     basic::BaseResponse,
     control::{control_server::Control, ControlRequest, ControlResponse},
 };
@@ -55,7 +55,7 @@ mod tests {
 
     use crate::{
         core::config::SETTINGS,
-        rpc::{
+        interfaces::rpc::{
             control, control::control_client::ControlClient, control::control_server::ControlServer,
         },
     };

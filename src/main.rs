@@ -85,8 +85,6 @@ unsafe extern "C" {
 
 /// 數據回補
 pub mod backfill;
-/// 聊天機器人
-pub mod bot;
 /// 數據快取
 pub mod cache;
 /// 計算類
@@ -96,22 +94,16 @@ pub mod core;
 pub mod crawler;
 /// 資料庫操作
 pub mod database;
-
-/// 事件
 pub mod event;
+pub mod interfaces;
 
 /// 手動資料回補測試入口。
 #[cfg(test)]
 mod manual_backfill;
 /// nosql
 pub mod nosql;
-/// RPC 模組
-pub mod rpc;
 /// 工作排程
 pub mod scheduler;
-
-/// Web UI 與 HTTP API。
-pub mod web;
 
 /*#[get("/")]
 fn index() -> &'static str {
@@ -225,7 +217,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     core::logging::info_file_async("startup phase begin: rpc::server::start".to_string());
     let rpc_start_timer = Instant::now();
-    rpc::server::start().await?;
+    interfaces::rpc::server::start().await?;
     core::logging::info_file_async(format!(
         "startup phase done: rpc::server::start elapsed={:?}",
         rpc_start_timer.elapsed()
@@ -233,7 +225,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     core::logging::info_file_async("startup phase begin: web::start".to_string());
     let web_start_timer = Instant::now();
-    web::start().await?;
+    interfaces::web::start().await?;
     core::logging::info_file_async(format!(
         "startup phase done: web::start elapsed={:?}",
         web_start_timer.elapsed()
@@ -246,7 +238,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 啟動後延遲測試 gRPC 連線
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        if let Err(why) = rpc::client::test_client::run_test().await {
+        if let Err(why) = interfaces::rpc::client::test_client::run_test().await {
             core::logging::error_file_async(format!("gRPC 自我測試失敗: {}", why));
         }
     });
