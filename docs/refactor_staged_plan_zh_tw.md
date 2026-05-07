@@ -43,7 +43,11 @@ src/
 2. 每次搬移先做「檔案移動 + mod 宣告 + use 路徑修正」，不先改商業邏輯。
 3. 階段結束必跑編譯關卡；任一關失敗即回修，不得進入下一階段。
 4. **編譯成功是唯一硬性要求**：`cargo check` 與 `cargo build` 必須通過。`cargo test` 中涉及 Redis、PostgreSQL、外部 API 等實際連線的測試，若因環境未就緒而失敗，屬於預期中的情況，可記錄後略過，不阻擋下一階段。
-5. 每階段都先開短分支（例如 `refactor/stage-1-core`），降低回滾成本。
+5. 每階段的開發流程規範：
+   - 必須基於最新的 `main` 建立新的短分支（例如 `refactor/stage-1-core`）。
+   - 該階段開發完成且本地編譯（`cargo check` 與 `cargo build`）通過後，必須 Push 到遠端並發起 PR。
+   - 確認 PR 沒問題並**合併 (Merge) 回 `main`** 後，才能進行下一階段。
+   - 下一階段的分支，必須先切換回 `main` 並拉取最新進度，再從乾淨的 `main` 建立新的分支。
 6. 優先使用 Rust-analyzer 的 Rename/Move 支援調整路徑，避免手動替換漏網。
 7. 若 Windows 或低記憶體環境出現 `Error: Not enough memory resources are available to complete this operation. (os error 14)`，Gate 指令改用低併發模式：`cargo check -j 1`、`cargo build -j 1`。此錯誤通常代表同時啟動過多編譯程序或 linker 壓力過高，不代表重構本身一定有語法錯誤。
 
