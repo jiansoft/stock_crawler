@@ -15,14 +15,14 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::{
-    crawler::{
+    infra::crawler::{
         fbs::annual_profit::Fbs,
         moneydj::annual_profit::MoneyDJ,
         mops::annual_profit::Mops,
         share::{AnnualProfit, AnnualProfitFetcher},
     },
-    database::table::{self, financial_statement::FinancialStatement},
-    core::logging, nosql,
+    infra::database::table::{self, financial_statement::FinancialStatement},
+    core::logging,
 };
 
 /// 執行台股年度 EPS 補齊流程。
@@ -44,7 +44,7 @@ pub async fn execute() -> Result<()> {
 
     for ss in stock_symbol {
         let cache_key = format!("financial_statement:annual:{}", ss);
-        let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
+        let is_jump = crate::infra::nosql::redis::CLIENT.get_bool(&cache_key).await?;
         if is_jump {
             continue;
         }
@@ -64,7 +64,7 @@ pub async fn execute() -> Result<()> {
             }
         }
 
-        nosql::redis::CLIENT
+        crate::infra::nosql::redis::CLIENT
             .set(cache_key, true, 60 * 60 * 24 * 7)
             .await?;
         // 主動節流，降低被來源站台限流或封鎖的風險。

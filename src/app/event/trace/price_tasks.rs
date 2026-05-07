@@ -31,13 +31,13 @@ use tokio::{
 
 use super::{stats as trace_stats, stock_price};
 use crate::{
-    cache::RealtimeSnapshot,
+    infra::cache::RealtimeSnapshot,
     core::util::{
         atomic::decrement_atomic_usize,
         diagnostics::{read_process_memory_stats, trim_allocator_memory, TaskRuntimeStatus},
     },
 };
-use crate::{cache::SHARE, crawler, core::declare, core::logging};
+use crate::{infra::cache::SHARE, infra::crawler, core::declare, core::logging};
 
 /// 價格更新事件。
 #[derive(Debug, Clone)]
@@ -123,7 +123,7 @@ pub async fn start_price_tasks() -> Result<()> {
 ///
 /// 準備完成的判定條件如下：
 /// - 追蹤條件快取已至少成功載入過一次
-/// - [`SHARE`](crate::cache::SHARE) 內的 `stock_snapshots` 至少已有一筆資料
+/// - [`SHARE`](infra::cache::SHARE) 內的 `stock_snapshots` 至少已有一筆資料
 ///
 /// 若在限定時間內仍尚未滿足條件，追蹤流程仍會繼續，
 /// 只是開盤初期部分股票可能因快取未命中而暫時略過。
@@ -537,10 +537,10 @@ fn log_trace_diagnostics(
         snapshot_cache_diagnostics();
     let target_diagnostics = stock_price::trace_target_diagnostics();
     let memory_stats = read_process_memory_stats();
-    let histock_status = crawler::histock::price::diagnostics_snapshot();
-    let histock_runtime = crawler::histock::price::runtime_diagnostics_snapshot();
-    let yahoo_status = crawler::yahoo::price::diagnostics_snapshot();
-    let yahoo_runtime = crawler::yahoo::price::runtime_diagnostics_snapshot();
+    let histock_status = crate::infra::crawler::histock::price::diagnostics_snapshot();
+    let histock_runtime = crate::infra::crawler::histock::price::runtime_diagnostics_snapshot();
+    let yahoo_status = crate::infra::crawler::yahoo::price::diagnostics_snapshot();
+    let yahoo_runtime = crate::infra::crawler::yahoo::price::runtime_diagnostics_snapshot();
     let consumer_status = price_consumer_status();
     let refresh_status = atomic_task_status(
         IS_TARGET_CACHE_REFRESHING.load(Ordering::SeqCst),
@@ -795,7 +795,7 @@ async fn refresh_traced_stock_snapshot_cache() -> Result<()> {
 
 /// 重新整理單一被追蹤股票的備援即時價格。
 async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
-    match crawler::fetch_stock_price_from_backup_sites_with_source(&symbol).await {
+    match crate::infra::crawler::fetch_stock_price_from_backup_sites_with_source(&symbol).await {
         Ok(result) if result.price != Decimal::ZERO => {
             let price = result.price;
             let source_site = result.site_name.to_string();
@@ -841,7 +841,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::database::table::trace::Trace;
+    use crate::infra::database::table::trace::Trace;
 
     /// 將追蹤設定整理成不重複的股票代號清單。
     fn collect_traced_symbols(targets: Vec<Trace>) -> Vec<String> {

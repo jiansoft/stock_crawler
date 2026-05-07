@@ -21,7 +21,7 @@ pub mod stock_weight;
 /// 調用 twse API 取得並更新台股加權指數
 pub mod taiwan_stock_index;
 
-use crate::cache::SHARE;
+use crate::infra::cache::SHARE;
 
 /// 判斷股票主檔是否為新資料，或關鍵欄位是否有變動。
 pub(crate) async fn is_stock_identity_new_or_changed(

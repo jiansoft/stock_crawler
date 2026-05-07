@@ -13,9 +13,9 @@ use chrono::Local;
 use crate::{
     app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
     app::calculation,
-    crawler::yahoo,
-    database::table,
-    core::logging, nosql,
+    infra::crawler::yahoo,
+    infra::database::table,
+    core::logging,
     core::util::{datetime::ReportQuarter, map::Keyable},
 };
 
@@ -63,8 +63,8 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
     for fs in fss {
         let cache_key = fs.key_with_prefix();
         let profile_skip_cache_key = yahoo::profile::no_valid_data_cache_key(&fs.security_code);
-        let is_jump = nosql::redis::CLIENT.get_bool(&cache_key).await?;
-        let is_profile_skip = nosql::redis::CLIENT
+        let is_jump = crate::infra::nosql::redis::CLIENT.get_bool(&cache_key).await?;
+        let is_profile_skip = crate::infra::nosql::redis::CLIENT
             .get_bool(&profile_skip_cache_key)
             .await?;
 
@@ -76,7 +76,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
             Ok(profile) => profile,
             Err(why) => {
                 if yahoo::profile::is_no_valid_data_error(&why) {
-                    if let Err(cache_err) = nosql::redis::CLIENT
+                    if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
                         .set(
                             &profile_skip_cache_key,
                             true,
@@ -123,7 +123,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
             fs
         ));
 
-        nosql::redis::CLIENT
+        crate::infra::nosql::redis::CLIENT
             .set(cache_key, true, 60 * 60 * 24 * 7)
             .await?;
 
@@ -135,7 +135,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 

@@ -4,11 +4,11 @@ use anyhow::Result;
 use rust_decimal::Decimal;
 
 use crate::{
-    crawler::nstock::{
+    infra::crawler::nstock::{
         self,
         eps::{EpsQuarter, EpsYear},
     },
-    database::table::financial_statement::{self, FinancialStatement},
+    infra::database::table::financial_statement::{self, FinancialStatement},
     core::declare::Quarter,
     core::logging,
     core::util::map::Keyable,
@@ -82,7 +82,7 @@ async fn update_roe_and_roa(fs: &mut FinancialStatement, roe: Decimal, roa: Deci
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 

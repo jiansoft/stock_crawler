@@ -4,8 +4,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use crate::{
-    database::{
-        self,
+    infra::database::{
         table::{
             dividend, dividend_record_detail::DividendRecordDetail, dividend_record_detail_more,
             stock_ownership_details,
@@ -196,7 +195,7 @@ async fn delete_dividend_record_for_year(
     stock_ownership_details_serial: i64,
     year: i32,
 ) -> Result<()> {
-    let mut tx = database::get_tx().await?;
+    let mut tx = crate::infra::database::get_tx().await?;
 
     // 先刪逐項明細，避免總表刪除後留下孤兒明細。
     sqlx::query(
@@ -286,7 +285,7 @@ async fn calculate_dividend(
         dividend_sum.total,
     );
 
-    let mut tx_option = database::get_tx().await.ok();
+    let mut tx_option = crate::infra::database::get_tx().await.ok();
     //更新股利領取記錄
     let dividend_record_detail_serial = match drd.upsert(&mut tx_option).await {
         Ok(serial) => serial,
@@ -417,7 +416,7 @@ pub async fn calculate(year: i32) {
 mod tests {
     use chrono::{Local, TimeZone};
 
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 

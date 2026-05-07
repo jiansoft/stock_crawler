@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    crawler::twse,
-    database::table::{self, financial_statement, stock::Stock},
+    infra::crawler::twse,
+    infra::database::table::{self, financial_statement, stock::Stock},
     core::declare::StockExchangeMarket,
     core::logging,
     core::util::{self, datetime::ReportQuarter},
@@ -130,7 +130,7 @@ async fn process_eps(
 
 #[cfg(test)]
 mod tests {
-    use crate::cache::SHARE;
+    use crate::infra::cache::SHARE;
     use crate::core::declare::Quarter;
     use std::time::Duration;
 

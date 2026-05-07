@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 
 use crate::{
     interfaces::bot::{self, telegram::Telegram},
-    database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
+    infra::database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
 };
 
 use super::{format_decimal_with_commas, format_share_quantity, member_label};

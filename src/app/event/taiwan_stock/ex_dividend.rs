@@ -9,7 +9,7 @@ use crate::{
     interfaces::bot,
     interfaces::bot::telegram::Telegram,
     app::calculation,
-    database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
+    infra::database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
 };
 
 use super::{format_decimal_with_commas, format_share_quantity, member_label};

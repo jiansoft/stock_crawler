@@ -2,8 +2,8 @@ use anyhow::Result;
 use sqlx::postgres::PgQueryResult;
 
 use crate::{
-    cache::SHARE,
-    database::{table, table::stock::extension},
+    infra::cache::SHARE,
+    infra::database::{table, table::stock::extension},
 };
 
 /// 更新興櫃股票的每股淨值

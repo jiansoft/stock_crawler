@@ -34,5 +34,5 @@
 
 ## E. 中斷交接資訊 (Resume)
 - Last Update Time: 2026-05-07
-- Stopped At: Phase 3 Completed
-- Next Action: Merge branch and start Phase 4.
+- Stopped At: Phase 3 Merged to main
+- Next Action: Start Phase 4a (cache + nosql -> infra).

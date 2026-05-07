@@ -6,8 +6,8 @@ use scopeguard::defer;
 use tokio::sync::Mutex;
 
 use crate::{
-    crawler::taifex,
-    database::table::stock::{self, extension::weight::SymbolAndWeight},
+    infra::crawler::taifex,
+    infra::database::table::stock::{self, extension::weight::SymbolAndWeight},
     core::declare::StockExchange,
     core::logging, core::util,
 };
@@ -67,7 +67,7 @@ async fn handle_stock_exchange(
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, core::logging};
+    use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;
 
