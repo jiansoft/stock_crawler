@@ -232,7 +232,7 @@ src/
 
 ---
 
-### Phase 5：infra/database 內部領域化分組
+### Phase 5：infra/database 內部領域化分組 ✅ [已完成]
 
 > `event/` 與 `calculation/` 已在 Phase 3 歸入 `app/`，本階段專注於 `infra/database/table/` 的內部優化。
 
@@ -251,8 +251,8 @@ src/
 
 Phase 5 建議拆成兩小步：
 
-- `Phase 5a`：只建立領域目錄與移動低風險檔案（`quote`、`money_flow`），每搬一組跑一次 `cargo check`。
-- `Phase 5b`：處理 `stock/dividend/financial` 與不明確歸屬檔案，必要時透過 `pub use` 暫時保留舊路徑相容。
+- `Phase 5a`：只建立領域目錄與移動低風險檔案（`quote`、`money_flow`），每搬一組跑一次 `cargo check`。✅ [已完成]
+- `Phase 5b`：處理 `stock/dividend/financial` 與不明確歸屬檔案，必要時透過 `pub use` 暫時保留舊路徑相容。✅ [已完成]
 
 通關條件（Gate）：
 
