@@ -29,7 +29,7 @@ use crate::{
     interfaces::bot,
     infra::cache::RealtimeSnapshot,
     infra::cache::SHARE,
-    crawler::twse,
+    infra::crawler::twse,
     infra::database::table::trace::Trace,
     core::declare, core::logging,
     core::util::{datetime::Weekend, map::Keyable},

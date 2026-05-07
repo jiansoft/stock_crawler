@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
 use crate::{
-    crawler::{tpex, twse},
+    infra::crawler::{tpex, twse},
     infra::database::{
         self,
         table::{stock_index, stock_word},

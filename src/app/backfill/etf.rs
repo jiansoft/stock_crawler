@@ -4,7 +4,7 @@ use crate::{
     app::backfill, interfaces::bot,
     interfaces::bot::telegram::Telegram,
     infra::cache::SHARE,
-    crawler::{share::EtfInfo, tpex, twse},
+    infra::crawler::{share::EtfInfo, tpex, twse},
     infra::database::table,
     core::declare::StockExchangeMarket,
     core::logging, interfaces::rpc,

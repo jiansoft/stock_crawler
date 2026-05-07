@@ -9,7 +9,7 @@ use sqlx::{
 };
 
 use crate::{
-    crawler::{self, twse, wespai, yahoo},
+    infra::crawler::{self, twse, wespai, yahoo},
     infra::database,
     core::declare::Quarter,
     core::util::map::Keyable,
@@ -506,7 +506,7 @@ impl From<twse::eps::Eps> for FinancialStatement {
 }
 
 impl From<crawler::share::AnnualProfit> for FinancialStatement {
-    fn from(fs: crawler::share::AnnualProfit) -> Self {
+    fn from(fs: crate::infra::crawler::share::AnnualProfit) -> Self {
         let mut e = FinancialStatement::new(fs.stock_symbol);
         e.updated_time = Local::now();
         e.created_time = Local::now();

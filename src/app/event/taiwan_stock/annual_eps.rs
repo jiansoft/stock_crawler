@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::{
-    crawler::{
+    infra::crawler::{
         fbs::annual_profit::Fbs,
         moneydj::annual_profit::MoneyDJ,
         mops::annual_profit::Mops,

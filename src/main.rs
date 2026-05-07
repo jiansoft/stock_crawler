@@ -85,8 +85,6 @@ unsafe extern "C" {
 
 pub mod app;
 pub mod core;
-/// 抓取數據類
-pub mod crawler;
 pub mod infra;
 pub mod interfaces;
 

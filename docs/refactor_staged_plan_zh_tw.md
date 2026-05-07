@@ -173,7 +173,7 @@ src/
 
 ---
 
-### Phase 4：抽出 infra（大體量高風險，拆為子步驟） ⏳ [4b 完成，準備 4c]
+### Phase 4：抽出 infra（大體量高風險，拆為子步驟） ⏳ [4a/4b/4c 完成，待進入 Phase 5]
 
 此階段搬移量最大（4 個模組、合計超過 120 檔），為降低風險拆為三個子步驟，每個子步驟獨立跑 Gate。
 
@@ -208,7 +208,7 @@ src/
 
 通關條件（Gate）：`cargo check` + `cargo build`
 
-#### Phase 4c：crawler → infra（最大量）
+#### Phase 4c：crawler → infra（最大量） ✅ [已完成]
 
 搬移範圍：
 

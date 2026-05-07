@@ -9,13 +9,13 @@ use crate::interfaces::bot::telegram::Telegram;
 use crate::{
     interfaces::bot,
     infra::cache::SHARE,
-    crawler, core::declare,
+    core::declare,
     core::util::{convert::FromValue, map::Keyable},
 };
 
 /// 提醒目前可公開申購的股票。
 pub async fn execute() -> Result<()> {
-    let ps = crawler::twse::public::visit().await?;
+    let ps = crate::infra::crawler::twse::public::visit().await?;
     let mut msg = String::with_capacity(2048);
     let now = Local::now().date_naive();
 

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crate::{
-    app::backfill::net_asset_value_per_share::update, crawler::yahoo::profile, infra::database::table, core::logging,
+    app::backfill::net_asset_value_per_share::update, infra::crawler::yahoo::profile, infra::database::table, core::logging,
 };
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表

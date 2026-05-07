@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use crate::{
-    crawler::goodinfo,
+    infra::crawler::goodinfo,
     infra::database::{table, table::stock},
     core::logging,
     core::util::map::{vec_to_hashmap, Keyable},

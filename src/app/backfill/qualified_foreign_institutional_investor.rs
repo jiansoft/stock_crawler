@@ -1,5 +1,5 @@
 use crate::{
-    infra::cache::SHARE, crawler::twse,
+    infra::cache::SHARE, infra::crawler::twse,
     infra::database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
     core::logging, core::util::datetime::Weekend,
 };

@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    crawler::twse,
+    infra::crawler::twse,
     infra::database::table::{self, financial_statement, stock::Stock},
     core::declare::StockExchangeMarket,
     core::logging,

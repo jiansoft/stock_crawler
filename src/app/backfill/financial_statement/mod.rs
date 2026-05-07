@@ -4,7 +4,7 @@ use anyhow::Result;
 use rust_decimal::Decimal;
 
 use crate::{
-    crawler::nstock::{
+    infra::crawler::nstock::{
         self,
         eps::{EpsQuarter, EpsYear},
     },

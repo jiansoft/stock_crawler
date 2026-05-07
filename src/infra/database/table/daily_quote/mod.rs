@@ -762,7 +762,7 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
 mod tests {
     use chrono::Datelike;
 
-    use crate::crawler::twse;
+    use crate::infra::crawler::twse;
     use crate::{infra::cache::SHARE, core::logging};
 
     use super::*;

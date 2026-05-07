@@ -8,7 +8,7 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     infra::cache::SHARE,
-    crawler::twse,
+    infra::crawler::twse,
     core::logging,
     interfaces::rpc::stock::{
         stock_server::Stock, HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest,

@@ -1,6 +1,6 @@
 use crate::{
     app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
-    crawler::wespai,
+    infra::crawler::wespai,
     infra::database::table::{financial_statement, stock},
     core::logging,
     core::util::{self, datetime::Weekend},

@@ -13,7 +13,7 @@ use super::{
     lookup::{default_exchange_markets, default_industries},
     realtime::RealtimeSnapshot,
 };
-use crate::crawler::share as crawler_share;
+use crate::infra::crawler::share as crawler_share;
 use crate::{
     infra::database::table::{
         daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,

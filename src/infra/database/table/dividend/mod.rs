@@ -6,7 +6,7 @@ use sqlx::{
     Row,
 };
 
-use crate::{crawler::goodinfo, infra::database, core::util::map::Keyable};
+use crate::{infra::crawler::goodinfo, infra::database, core::util::map::Keyable};
 
 pub(crate) mod extension;
 

@@ -4,7 +4,7 @@ use crate::{
     app::backfill,
     interfaces::bot::{self, telegram::Telegram},
     infra::cache::{TtlCacheInner, TTL},
-    app::calculation, crawler,
+    app::calculation, infra::crawler,
     infra::database::table::{
         daily_money_history_member::{
             DailyMoneyHistoryMember, DailyMoneyHistoryMemberWithPreviousTradingDay,

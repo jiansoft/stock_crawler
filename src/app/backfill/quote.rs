@@ -6,7 +6,7 @@ use futures::{stream, StreamExt};
 
 use crate::{
     infra::cache::{TtlCacheInner, SHARE, TTL},
-    crawler::{tpex, twse},
+    infra::crawler::{tpex, twse},
     infra::database::table::{self, daily_quote::DailyQuote},
     core::logging, core::util,
     core::util::map::Keyable,
