@@ -6,8 +6,8 @@ use crate::{
     cache::SHARE,
     crawler::twse,
     database::table,
-    declare::StockExchangeMarket,
-    util::{self, datetime::Weekend},
+    core::declare::StockExchangeMarket,
+    core::util::{self, datetime::Weekend},
 };
 
 const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺灣存託憑證(TDR)"];

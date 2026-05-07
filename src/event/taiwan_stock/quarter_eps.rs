@@ -14,9 +14,9 @@ use std::collections::HashMap;
 use crate::{
     crawler::twse,
     database::table::{self, financial_statement, stock::Stock},
-    declare::StockExchangeMarket,
-    logging,
-    util::{self, datetime::ReportQuarter},
+    core::declare::StockExchangeMarket,
+    core::logging,
+    core::util::{self, datetime::ReportQuarter},
 };
 use anyhow::Result;
 use chrono::Local;
@@ -93,7 +93,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<()> {
 async fn process_eps(
     market: StockExchangeMarket,
     year: i32,
-    quarter: crate::declare::Quarter,
+    quarter: crate::core::declare::Quarter,
     without_financial_stocks: &HashMap<String, Stock>,
 ) -> Result<()> {
     let eps = twse::eps::visit(market, year, quarter).await?;
@@ -104,7 +104,7 @@ async fn process_eps(
             continue;
         }
 
-        if e.quarter != crate::declare::Quarter::Q1 {
+        if e.quarter != crate::core::declare::Quarter::Q1 {
             // Q2~Q4 在來源站通常是累計 EPS，需扣掉前面季度後還原為單季值。
             let smaller_quarters = quarter.smaller_quarters();
             let before_eps =

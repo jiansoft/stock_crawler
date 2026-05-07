@@ -8,8 +8,8 @@ use crate::{
         cnyes::{CnYes, HOST},
         StockInfo,
     },
-    declare::StockQuotes,
-    util::{self},
+    core::declare::StockQuotes,
+    core::util::{self},
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

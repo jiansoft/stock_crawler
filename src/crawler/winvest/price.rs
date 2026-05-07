@@ -28,8 +28,8 @@ use crate::{
         winvest::{Winvest, HOST},
         StockInfo,
     },
-    declare,
-    util::{self, text},
+    core::declare,
+    core::util::{self, text},
 };
 
 #[derive(Deserialize, Debug, Clone)]
@@ -248,7 +248,7 @@ impl StockInfo for Winvest {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

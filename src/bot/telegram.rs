@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
-use crate::{config::SETTINGS, logging, util::http};
+use crate::{core::config::SETTINGS, core::logging, core::util::http};
 
 //static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 static TELEGRAM: OnceLock<Telegram> = OnceLock::new();

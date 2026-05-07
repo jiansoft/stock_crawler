@@ -2,8 +2,8 @@ use crate::{
     backfill::financial_statement::update_roe_and_roa_for_zero_values,
     crawler::wespai,
     database::table::{financial_statement, stock},
-    logging, nosql,
-    util::{self, datetime::Weekend},
+    core::logging, nosql,
+    core::util::{self, datetime::Weekend},
 };
 use anyhow::Result;
 use chrono::Local;

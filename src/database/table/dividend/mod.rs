@@ -6,7 +6,7 @@ use sqlx::{
     Row,
 };
 
-use crate::{crawler::goodinfo, database, util::map::Keyable};
+use crate::{crawler::goodinfo, database, core::util::map::Keyable};
 
 pub(crate) mod extension;
 
@@ -592,7 +592,7 @@ mod tests {
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

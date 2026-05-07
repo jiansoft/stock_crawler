@@ -22,8 +22,8 @@ use crate::{
         yuanta::{Yuanta, HOST},
         StockInfo,
     },
-    declare::StockQuotes,
-    util::{self},
+    core::declare::StockQuotes,
+    core::util::{self},
 };
 
 /// 元大即時報價 API 回應主體。
@@ -107,7 +107,7 @@ impl StockInfo for Yuanta {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

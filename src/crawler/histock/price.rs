@@ -30,9 +30,9 @@ use crate::{
         histock::{HiStock, HOST},
         StockInfo,
     },
-    declare,
+    core::declare,
     event::trace::price_tasks as trace_price_tasks,
-    util::{
+    core::util::{
         self,
         atomic::decrement_atomic_usize,
         diagnostics::{
@@ -240,7 +240,7 @@ pub fn start_caching_task() {
 
     let handle = tokio::spawn(async move {
         let active_tasks = ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        crate::logging::info_file_async(format!(
+        crate::core::logging::info_file_async(format!(
             "HiStock 全市場快取任務啟動 generation={} active_tasks={}",
             generation, active_tasks
         ));
@@ -303,7 +303,7 @@ pub fn start_caching_task() {
                     */
                 }
                 Err(e) => {
-                    crate::logging::error_file_async(format!("HiStock 快取更新失敗: {:?}", e));
+                    crate::core::logging::error_file_async(format!("HiStock 快取更新失敗: {:?}", e));
                 }
             }
 
@@ -314,7 +314,7 @@ pub fn start_caching_task() {
         }
         IS_CACHING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&ACTIVE_TASKS);
-        crate::logging::info_file_async(format!(
+        crate::core::logging::info_file_async(format!(
             "HiStock 快取任務已停止 generation={} active_tasks={}",
             generation, active_tasks
         ));
@@ -323,7 +323,7 @@ pub fn start_caching_task() {
     if let Ok(mut task) = CACHING_TASK.lock() {
         *task = Some(handle);
     } else {
-        crate::logging::error_file_async("Failed to store HiStock caching task handle".to_string());
+        crate::core::logging::error_file_async("Failed to store HiStock caching task handle".to_string());
     }
 }
 
@@ -336,7 +336,7 @@ pub async fn stop_caching_task() {
     let handle = match CACHING_TASK.lock() {
         Ok(mut task) => task.take(),
         Err(why) => {
-            crate::logging::error_file_async(format!(
+            crate::core::logging::error_file_async(format!(
                 "Failed to lock HiStock caching task handle because {:?}",
                 why
             ));
@@ -346,7 +346,7 @@ pub async fn stop_caching_task() {
 
     if let Some(handle) = handle {
         if let Err(why) = handle.await {
-            crate::logging::error_file_async(format!("HiStock 快取任務停止等待失敗: {:?}", why));
+            crate::core::logging::error_file_async(format!("HiStock 快取任務停止等待失敗: {:?}", why));
         }
     }
 
@@ -426,7 +426,7 @@ async fn get_snapshot(stock_symbol: &str) -> Result<RealtimeSnapshot> {
         return Ok(s);
     }
 
-    crate::logging::info_file_async(format!("HiStock 快取失效 ({})，觸發全量抓取", stock_symbol));
+    crate::core::logging::info_file_async(format!("HiStock 快取失效 ({})，觸發全量抓取", stock_symbol));
     let fetch_result = fetch_all_from_rank().await?;
 
     let snapshot = fetch_result
@@ -476,7 +476,7 @@ mod tests {
     use once_cell::sync::Lazy;
 
     use super::*;
-    use crate::logging;
+    use crate::core::logging;
     use rust_decimal_macros::dec;
 
     static TEST_STATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));

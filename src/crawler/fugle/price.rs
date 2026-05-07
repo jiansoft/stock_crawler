@@ -12,13 +12,13 @@ use rust_decimal::Decimal;
 use serde_derive::Deserialize;
 
 use crate::{
-    config::SETTINGS,
+    core::config::SETTINGS,
     crawler::{
         fugle::{Fugle, HOST},
         StockInfo,
     },
-    declare::StockQuotes,
-    util,
+    core::declare::StockQuotes,
+    core::util,
 };
 
 /// Fugle 官方限制為 60 次 / 分鐘，這裡保留安全餘量避免撞線。
@@ -256,7 +256,7 @@ impl StockInfo for Fugle {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

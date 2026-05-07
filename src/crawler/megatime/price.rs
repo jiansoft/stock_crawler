@@ -20,8 +20,8 @@ use crate::{
         megatime::{PcHome, HOST},
         StockInfo,
     },
-    declare,
-    util::{self, http::element, text},
+    core::declare,
+    core::util::{self, http::element, text},
 };
 
 /// 股票資訊容器的 CSS 選擇器（包含主 ID 與備援 Class）

@@ -10,7 +10,7 @@ use reqwest::{header, header::SET_COOKIE, Client, Method, RequestBuilder, Respon
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
-use crate::{logging::Logger, util};
+use crate::{core::logging::Logger, core::util};
 
 /// HTML 解析輔助工具。
 pub mod element;
@@ -431,7 +431,7 @@ fn format_form_params_log(params: &HashMap<&str, &str>) -> String {
 }
 
 /// 取得 HTTP logger 的執行期摘要。
-pub(crate) fn diagnostics_snapshot() -> crate::logging::LoggerRuntimeStatus {
+pub(crate) fn diagnostics_snapshot() -> crate::core::logging::LoggerRuntimeStatus {
     LOGGER.diagnostics_snapshot()
 }
 
@@ -440,7 +440,7 @@ mod tests {
     use chrono::Local;
     use concat_string::concat_string;
 
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

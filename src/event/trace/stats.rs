@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use once_cell::sync::Lazy;
 
-use crate::logging;
+use crate::core::logging;
 
 /// 單次追蹤執行期間的統計快照。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

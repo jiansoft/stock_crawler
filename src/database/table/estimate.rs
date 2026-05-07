@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
 use sqlx::postgres::PgQueryResult;
 
-use crate::{database, declare::Industry};
+use crate::{database, core::declare::Industry};
 
 /// 個股估值資料。
 ///

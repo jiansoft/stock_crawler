@@ -48,7 +48,7 @@ use crate::{
         mops::HOST,
         share::{self, AnnualProfitFetcher},
     },
-    util::text,
+    core::util::text,
 };
 
 /// MOPS 年度財報抓取器標記型別。
@@ -172,7 +172,7 @@ async fn fetch_compare_series(
     ylabel: &str,
 ) -> Result<HashMap<i32, Decimal>> {
     let url = format!("https://{}/compare/data", HOST);
-    let raw = crate::util::http::post(
+    let raw = crate::core::util::http::post(
         &url,
         None,
         Some(build_compare_data_params(
@@ -245,7 +245,7 @@ async fn fetch_income_statement_metrics(
     params.insert("qnumber", "");
     params.insert("companyId", stock_symbol);
 
-    let html = crate::util::http::post(&url, None, Some(params)).await?;
+    let html = crate::core::util::http::post(&url, None, Some(params)).await?;
     parse_income_statement_metrics_from_report(&html)
 }
 
@@ -409,7 +409,7 @@ impl AnnualProfitFetcher for Mops {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

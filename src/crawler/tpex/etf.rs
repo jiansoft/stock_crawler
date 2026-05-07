@@ -7,8 +7,8 @@ use crate::{
     cache::SHARE,
     crawler::{share::EtfInfo, tpex},
     database::table,
-    declare::StockExchangeMarket,
-    util::{self, datetime::Weekend},
+    core::declare::StockExchangeMarket,
+    core::util::{self, datetime::Weekend},
 };
 
 /// 櫃買中心 (TPEx) OpenAPI 的原始資料格式

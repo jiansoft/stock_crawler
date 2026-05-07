@@ -1,5 +1,5 @@
 use crate::{
-    cache::SHARE, crawler::twse, database::table::stock, logging, util::datetime::Weekend,
+    cache::SHARE, crawler::twse, database::table::stock, core::logging, core::util::datetime::Weekend,
 };
 use anyhow::Result;
 use chrono::Local;

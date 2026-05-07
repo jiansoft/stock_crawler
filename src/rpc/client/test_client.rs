@@ -2,8 +2,8 @@
 //!
 //! 提供一個簡單的測試工具，用於驗證本地或遠端 gRPC 伺服器的可用性與連線狀態。
 
-use crate::config::SETTINGS;
-use crate::logging;
+use crate::core::config::SETTINGS;
+use crate::core::logging;
 use crate::rpc::control::control_client::ControlClient;
 use crate::rpc::control::ControlRequest;
 use anyhow::Result;

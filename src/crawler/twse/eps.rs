@@ -12,8 +12,8 @@ use scraper::{Html, Selector};
 use crate::{
     cache::SHARE,
     crawler::twse,
-    declare::{Quarter, StockExchangeMarket},
-    util::{self, convert::FromValue, datetime},
+    core::declare::{Quarter, StockExchangeMarket},
+    core::util::{self, convert::FromValue, datetime},
 };
 
 #[derive(Debug, Clone)]
@@ -128,7 +128,7 @@ pub async fn visit(
 #[cfg(test)]
 mod tests {
     use crate::cache::SHARE;
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

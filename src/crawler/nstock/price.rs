@@ -8,8 +8,8 @@ use crate::{
         nstock::{NStock, HOST},
         StockInfo,
     },
-    declare::StockQuotes,
-    util::{self, text},
+    core::declare::StockQuotes,
+    core::util::{self, text},
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

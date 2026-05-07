@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
 
-use crate::{cache::SHARE, crawler::twse, database::table::revenue, util};
+use crate::{cache::SHARE, crawler::twse, database::table::revenue, core::util};
 
 /// 下載月營收
 pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<revenue::Revenue>> {
@@ -93,7 +93,7 @@ mod tests {
     use chrono::{Local, TimeDelta};
     use std::time::Duration;
 
-    use crate::logging;
+    use crate::core::logging;
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

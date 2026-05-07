@@ -89,7 +89,7 @@ mod tests {
     use chrono::{Local, TimeZone};
     use tokio::time;
 
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

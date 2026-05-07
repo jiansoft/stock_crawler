@@ -22,7 +22,7 @@ use crate::{
         share::{AnnualProfit, AnnualProfitFetcher},
     },
     database::table::{self, financial_statement::FinancialStatement},
-    logging, nosql,
+    core::logging, nosql,
 };
 
 /// 執行台股年度 EPS 補齊流程。

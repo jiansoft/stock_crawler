@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::{crawler::wespai::HOST, util::http, util::http::element};
+use crate::{crawler::wespai::HOST, core::util::http, core::util::http::element};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 /// Wespai 財務指標頁面的單筆獲利資料。
@@ -147,7 +147,7 @@ pub async fn visit() -> Result<Vec<Profit>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
     use std::time::Duration;
 
     use super::*;

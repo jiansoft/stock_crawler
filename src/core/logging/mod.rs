@@ -19,8 +19,8 @@ use tokio::{
     sync::mpsc::{self, error::TrySendError, Receiver, Sender},
 };
 
-use crate::logging::rotate::Rotate;
-use crate::util::atomic::decrement_atomic_usize;
+use crate::core::logging::rotate::Rotate;
+use crate::core::util::atomic::decrement_atomic_usize;
 
 /// 日誌檔輪轉模組。
 pub mod rotate;

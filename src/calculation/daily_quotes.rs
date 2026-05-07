@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use crate::{
     cache::SHARE,
     database::table::{daily_quote::DailyQuote, quote_history_record::QuoteHistoryRecord},
-    logging, util,
+    core::logging, core::util,
 };
 
 /// 計算所有上市櫃公司在指定日期的均線值與歷史高低點。
@@ -152,7 +152,7 @@ fn update_qhr_fields(qhr: &mut QuoteHistoryRecord, dq: &DailyQuote) {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

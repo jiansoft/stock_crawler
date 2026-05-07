@@ -16,8 +16,8 @@ use crate::{
         yahoo::{Yahoo, HOST},
         StockInfo,
     },
-    declare,
-    util::{self, text},
+    core::declare,
+    core::util::{self, text},
 };
 
 /// 將共用快取中的即時快照轉成 `StockQuotes` 回傳型別。
@@ -156,7 +156,7 @@ impl StockInfo for Yahoo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::core::logging;
 
     /// Live 測試：驗證單檔 Yahoo quote 頁仍可抓到指定股票的成交價。
     #[tokio::test]

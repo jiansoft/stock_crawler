@@ -1,7 +1,7 @@
 use crate::{
     cache::SHARE, crawler::twse,
     database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    logging, util::datetime::Weekend,
+    core::logging, core::util::datetime::Weekend,
 };
 use anyhow::Result;
 use chrono::{DateTime, FixedOffset, Local};

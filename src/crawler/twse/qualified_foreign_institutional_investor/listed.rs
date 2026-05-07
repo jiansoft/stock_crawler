@@ -5,7 +5,7 @@ use serde_derive::{Deserialize, Serialize};
 use crate::{
     crawler::twse,
     database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    logging, util::http,
+    core::logging, core::util::http,
 };
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

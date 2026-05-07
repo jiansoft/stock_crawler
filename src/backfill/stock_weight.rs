@@ -8,8 +8,8 @@ use tokio::sync::Mutex;
 use crate::{
     crawler::taifex,
     database::table::stock::{self, extension::weight::SymbolAndWeight},
-    declare::StockExchange,
-    logging, util,
+    core::declare::StockExchange,
+    core::logging, core::util,
 };
 
 /// 查詢 taifex 個股權值比重

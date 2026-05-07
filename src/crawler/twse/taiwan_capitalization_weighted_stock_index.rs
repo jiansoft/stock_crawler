@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{crawler::twse, util};
+use crate::{crawler::twse, core::util};
 
 /// 調用台股指數 twse API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

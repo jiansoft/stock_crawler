@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{Datelike, Local};
 use scopeguard::defer;
 
-use crate::logging;
+use crate::core::logging;
 
 mod missing_or_multiple;
 /// 更新歷史配息率。

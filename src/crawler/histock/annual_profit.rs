@@ -20,7 +20,7 @@ use crate::{
         histock::HOST,
         share::{self, AnnualProfitFetcher},
     },
-    util::{self, text},
+    core::util::{self, text},
 };
 
 /// HiStock 年度財報抓取器。
@@ -120,7 +120,7 @@ impl AnnualProfitFetcher for HiStockAnnualProfit {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

@@ -9,7 +9,7 @@ use tonic::{Request, Response, Status};
 use crate::{
     cache::SHARE,
     crawler::twse,
-    logging,
+    core::logging,
     rpc::stock::{
         stock_server::Stock, HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest,
         StockInfoReply, StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest,

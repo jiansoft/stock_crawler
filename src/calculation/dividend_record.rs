@@ -11,7 +11,7 @@ use crate::{
             stock_ownership_details,
         },
     },
-    logging,
+    core::logging,
 };
 
 /// 計算指定年份領取的股利。

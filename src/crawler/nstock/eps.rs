@@ -8,8 +8,8 @@ use rust_decimal::Decimal;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::{
-    declare::Quarter,
-    util::{self, map::Keyable, text},
+    core::declare::Quarter,
+    core::util::{self, map::Keyable, text},
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -199,7 +199,7 @@ fn parse_year_and_quarter(input: &str) -> Result<(i32, u32)> {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

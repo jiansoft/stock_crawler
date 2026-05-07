@@ -9,8 +9,8 @@ use crate::{
         cmoney::{CMoney, HOST},
         StockInfo,
     },
-    declare,
-    util::{self, text},
+    core::declare,
+    core::util::{self, text},
 };
 
 /// 建立 CMoney 個股頁面的請求標頭。

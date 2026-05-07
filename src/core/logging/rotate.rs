@@ -13,7 +13,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local, TimeDelta};
 use rayon::prelude::*;
 
-use crate::logging;
+use crate::core::logging;
 
 /// 預設單檔最大大小：10 MB
 const DEFAULT_MAX_SIZE: u64 = 10 * 1024 * 1024;
@@ -291,7 +291,7 @@ impl Drop for Rotate {
 mod tests {
     use chrono::TimeDelta;
 
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

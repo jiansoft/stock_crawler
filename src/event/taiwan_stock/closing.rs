@@ -12,7 +12,7 @@ use crate::{
         daily_quote, last_daily_quotes,
         yield_rank::YieldRank,
     },
-    logging,
+    core::logging,
 };
 use anyhow::Result;
 use chrono::{Local, NaiveDate};

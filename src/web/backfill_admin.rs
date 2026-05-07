@@ -29,7 +29,7 @@ use crate::{
     calculation::dividend_record,
     database,
     event::taiwan_stock::closing,
-    logging,
+    core::logging,
 };
 
 /// Backfill admin Web API 共用狀態。

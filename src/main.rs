@@ -91,18 +91,15 @@ pub mod bot;
 pub mod cache;
 /// 計算類
 pub mod calculation;
-/// 設定檔
-pub mod config;
+pub mod core;
 /// 抓取數據類
 pub mod crawler;
 /// 資料庫操作
 pub mod database;
-/// 定義結構、enum等
-pub mod declare;
+
 /// 事件
 pub mod event;
-/// 日誌
-pub mod logging;
+
 /// 手動資料回補測試入口。
 #[cfg(test)]
 mod manual_backfill;
@@ -112,8 +109,7 @@ pub mod nosql;
 pub mod rpc;
 /// 工作排程
 pub mod scheduler;
-/// 工具類
-pub mod util;
+
 /// Web UI 與 HTTP API。
 pub mod web;
 
@@ -172,7 +168,7 @@ async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
 async fn main() -> Result<(), Box<dyn Error>> {
     let startup_timer = Instant::now();
     let received_signal = Arc::new(AtomicBool::new(false));
-    let allocator_tuning = util::diagnostics::tune_allocator_for_long_running_process();
+    let allocator_tuning = core::util::diagnostics::tune_allocator_for_long_running_process();
 
     #[cfg(all(target_os = "linux", target_env = "musl"))]
     logging::info_file_async(
@@ -181,10 +177,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
 
     #[cfg(not(all(target_os = "linux", target_env = "musl")))]
-    logging::info_file_async("allocator profile: system allocator".to_string());
+    core::logging::info_file_async("allocator profile: system allocator".to_string());
 
     if allocator_tuning.applied {
-        logging::info_file_async(format!(
+        core::logging::info_file_async(format!(
             "allocator tuning applied arena_max={} trim_threshold={}",
             allocator_tuning.arena_max_applied, allocator_tuning.trim_threshold_applied,
         ));
@@ -203,46 +199,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     dotenv::dotenv().ok();
-    logging::info_file_async("startup phase begin: cache::SHARE.load".to_string());
+    core::logging::info_file_async("startup phase begin: cache::SHARE.load".to_string());
     let cache_load_timer = Instant::now();
     cache::SHARE.load().await;
-    logging::info_file_async(format!(
+    core::logging::info_file_async(format!(
         "startup phase done: cache::SHARE.load elapsed={:?}",
         cache_load_timer.elapsed()
     ));
 
-    logging::info_file_async("startup phase begin: JobScheduler::new".to_string());
+    core::logging::info_file_async("startup phase begin: JobScheduler::new".to_string());
     let scheduler_new_timer = Instant::now();
     let sched = JobScheduler::new().await?;
-    logging::info_file_async(format!(
+    core::logging::info_file_async(format!(
         "startup phase done: JobScheduler::new elapsed={:?}",
         scheduler_new_timer.elapsed()
     ));
 
-    logging::info_file_async("startup phase begin: scheduler::start".to_string());
+    core::logging::info_file_async("startup phase begin: scheduler::start".to_string());
     let scheduler_start_timer = Instant::now();
     scheduler::start(&sched).await?;
-    logging::info_file_async(format!(
+    core::logging::info_file_async(format!(
         "startup phase done: scheduler::start elapsed={:?}",
         scheduler_start_timer.elapsed()
     ));
 
-    logging::info_file_async("startup phase begin: rpc::server::start".to_string());
+    core::logging::info_file_async("startup phase begin: rpc::server::start".to_string());
     let rpc_start_timer = Instant::now();
     rpc::server::start().await?;
-    logging::info_file_async(format!(
+    core::logging::info_file_async(format!(
         "startup phase done: rpc::server::start elapsed={:?}",
         rpc_start_timer.elapsed()
     ));
 
-    logging::info_file_async("startup phase begin: web::start".to_string());
+    core::logging::info_file_async("startup phase begin: web::start".to_string());
     let web_start_timer = Instant::now();
     web::start().await?;
-    logging::info_file_async(format!(
+    core::logging::info_file_async(format!(
         "startup phase done: web::start elapsed={:?}",
         web_start_timer.elapsed()
     ));
-    logging::info_file_async(format!(
+    core::logging::info_file_async(format!(
         "startup phase done: main init total elapsed={:?}",
         startup_timer.elapsed()
     ));
@@ -251,7 +247,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         if let Err(why) = rpc::client::test_client::run_test().await {
-            logging::error_file_async(format!("gRPC 自我測試失敗: {}", why));
+            core::logging::error_file_async(format!("gRPC 自我測試失敗: {}", why));
         }
     });
 

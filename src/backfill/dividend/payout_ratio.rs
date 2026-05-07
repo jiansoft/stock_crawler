@@ -3,8 +3,8 @@ use std::{collections::HashSet, time::Duration};
 use crate::{
     crawler::goodinfo,
     database::{table, table::stock},
-    logging, nosql,
-    util::map::{vec_to_hashmap, Keyable},
+    core::logging, nosql,
+    core::util::map::{vec_to_hashmap, Keyable},
 };
 use anyhow::Result;
 use scopeguard::defer;

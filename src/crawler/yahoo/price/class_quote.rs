@@ -19,7 +19,7 @@ use tokio::time::sleep;
 use crate::{
     cache::RealtimeSnapshot,
     crawler::yahoo::{self, YahooClassCategory, YahooClassExchange},
-    logging, util,
+    core::logging, core::util,
 };
 
 /// Yahoo 類股行情 JSON API 的基底 URL。
@@ -528,7 +528,7 @@ fn parse_decimal_text(text: &str, symbol: &str, field_name: &str) -> Result<Deci
 
     // 真正的文字數字解析交給共用 text helper，
     // 並順手移掉逗號與百分號。
-    crate::util::text::parse_decimal(normalized, Some(vec![',', '%'])).with_context(|| {
+    crate::core::util::text::parse_decimal(normalized, Some(vec![',', '%'])).with_context(|| {
         format!(
             "Failed to parse Yahoo {} for {}: {}",
             field_name, symbol, text

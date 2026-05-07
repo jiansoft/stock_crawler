@@ -9,8 +9,8 @@ use crate::bot::telegram::Telegram;
 use crate::{
     bot,
     cache::SHARE,
-    crawler, declare, nosql,
-    util::{convert::FromValue, map::Keyable},
+    crawler, core::declare, nosql,
+    core::util::{convert::FromValue, map::Keyable},
 };
 
 /// 提醒目前可公開申購的股票。
@@ -93,7 +93,7 @@ fn calculate_price_change(offering_price: Decimal, last_price: Decimal) -> Strin
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 
