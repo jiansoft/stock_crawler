@@ -15,7 +15,7 @@
 use std::{error::Error, fs};
 
 /// 產生後的 gRPC Rust 程式碼輸出目錄。
-static OUT_DIR: &str = "src/rpc";
+static OUT_DIR: &str = "src/interfaces/rpc";
 
 /// 編譯 protobuf 並輸出 Rust 原始碼。
 fn main() -> Result<(), Box<dyn Error>> {

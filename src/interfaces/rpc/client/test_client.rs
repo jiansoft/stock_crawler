@@ -4,8 +4,8 @@
 
 use crate::core::config::SETTINGS;
 use crate::core::logging;
-use crate::rpc::control::control_client::ControlClient;
-use crate::rpc::control::ControlRequest;
+use crate::interfaces::rpc::control::control_client::ControlClient;
+use crate::interfaces::rpc::control::ControlRequest;
 use anyhow::Result;
 use std::fs;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig};

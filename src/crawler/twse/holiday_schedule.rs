@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-use crate::{bot, crawler::twse, core::util};
+use crate::{interfaces::bot, crawler::twse, core::util};
 
 #[derive(Serialize, Deserialize)]
 struct HolidayScheduleResponse {

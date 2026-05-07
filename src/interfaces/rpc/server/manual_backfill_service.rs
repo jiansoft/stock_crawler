@@ -8,12 +8,12 @@ use chrono::NaiveDate;
 use tonic::{Request, Response, Status};
 
 use crate::{
-    rpc::manual_backfill::{
+    interfaces::rpc::manual_backfill::{
         manual_backfill_server::ManualBackfill, BackfillJob, BackfillJobResponse,
         ClosingAggregateRequest, DailyQuotesRequest, GetJobRequest, ListJobsRequest,
         ListJobsResponse, SecurityCodeRequest, TaiwanStockIndexRequest, YearRequest,
     },
-    web,
+    interfaces::web,
 };
 
 /// Manual backfill gRPC service implementation.

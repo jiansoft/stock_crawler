@@ -3,7 +3,7 @@ use chrono::{Datelike, Local, NaiveDate, TimeDelta};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::{bot, crawler::twse, core::util, core::util::map::Keyable};
+use crate::{interfaces::bot, crawler::twse, core::util, core::util::map::Keyable};
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 struct PublicFormResponse {

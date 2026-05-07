@@ -5,9 +5,9 @@ use chrono::Local;
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use rust_decimal_macros::dec;
 
-use crate::bot::telegram::Telegram;
+use crate::interfaces::bot::telegram::Telegram;
 use crate::{
-    bot,
+    interfaces::bot,
     cache::SHARE,
     crawler, core::declare, nosql,
     core::util::{convert::FromValue, map::Keyable},

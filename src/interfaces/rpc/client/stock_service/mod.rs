@@ -5,7 +5,7 @@
 use anyhow::Result;
 use tonic::{Request, Response};
 
-use crate::rpc::{
+use crate::interfaces::rpc::{
     client::{get_client, Grpc},
     stock::{StockInfoReply, StockInfoRequest},
 };
