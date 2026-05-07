@@ -6,8 +6,10 @@ use sqlx::{
     Row,
 };
 
-use crate::{infra::crawler::goodinfo, infra::database, core::util::map::Keyable};
+use crate::{core::util::map::Keyable, infra::crawler::goodinfo, infra::database};
 
+pub mod dividend_record_detail;
+pub mod dividend_record_detail_more;
 pub(crate) mod extension;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone)]

@@ -5,17 +5,18 @@ use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
 use crate::{
-    infra::crawler::{tpex, twse},
-    infra::database::{
-        self,
-        table::{stock_index, stock_word},
-    },
     core::declare::Industry,
     core::logging,
     core::util::{self, map::Keyable},
+    infra::crawler::{tpex, twse},
+    infra::database,
 };
 
 pub(crate) mod extension;
+pub mod stock_exchange_market;
+pub(crate) mod stock_index;
+pub mod stock_ownership_details;
+pub(crate) mod stock_word;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
 /// 原表名 stocks
