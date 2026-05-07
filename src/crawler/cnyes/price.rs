@@ -94,7 +94,7 @@ impl StockInfo for CnYes {
 
 #[cfg(test)]
 mod tests {
-    use crate::{crawler::log_stock_price_test, logging};
+    use crate::{crawler::log_stock_price_test, core::logging};
 
     use super::*;
 

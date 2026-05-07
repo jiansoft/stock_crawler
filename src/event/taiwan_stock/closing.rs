@@ -177,7 +177,7 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
     use std::time::Duration;
 
     use rust_decimal_macros::dec;

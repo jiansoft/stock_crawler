@@ -96,7 +96,7 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{cache::SHARE, database, database::table::stock, logging};
+    use crate::{cache::SHARE, database, database::table::stock, core::logging};
 
     use super::*;
 

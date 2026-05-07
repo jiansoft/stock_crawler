@@ -35,7 +35,7 @@ pub async fn visit() -> Result<Vec<QualifiedForeignInstitutionalInvestor>> {
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     use super::*;
 

@@ -110,7 +110,7 @@ impl Keyable for PayoutRatioInfo {
 mod tests {
     use core::result::Result::Ok;
 
-    use crate::{logging, util::map::vec_to_hashmap};
+    use crate::{core::logging, core::util::map::vec_to_hashmap};
 
     use super::*;
 

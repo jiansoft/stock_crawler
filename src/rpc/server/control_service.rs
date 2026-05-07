@@ -54,7 +54,7 @@ mod tests {
     use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
     use crate::{
-        config::SETTINGS,
+        core::config::SETTINGS,
         rpc::{
             control, control::control_client::ControlClient, control::control_server::ControlServer,
         },
