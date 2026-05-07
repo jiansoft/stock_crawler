@@ -7,8 +7,8 @@ use scraper::{ElementRef, Html, Selector};
 
 use crate::{
     crawler::{taifex, taifex::HOST},
-    declare::StockExchange,
-    util::{self, http::element},
+    core::declare::StockExchange,
+    core::util::{self, http::element},
 };
 
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -141,7 +141,7 @@ fn get_stock_weight(
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

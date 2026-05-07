@@ -115,7 +115,7 @@ impl Clone for DividendRecordDetail {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

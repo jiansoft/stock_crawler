@@ -90,7 +90,7 @@ DO UPDATE SET val = excluded.val;"#;
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
     use chrono::{Local, NaiveDate};
     use std::result::Result::Ok;
 

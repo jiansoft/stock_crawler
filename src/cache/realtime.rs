@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
-use crate::declare;
+use crate::core::declare;
 
 /// 即時報價快照。
 #[non_exhaustive]

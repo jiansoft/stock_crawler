@@ -26,7 +26,7 @@ use scraper::{Html, Selector};
 
 use crate::{
     crawler::yahoo::HOST,
-    util::{http, text},
+    core::util::{http, text},
 };
 
 /// 用於解析股利所屬期間（如 2024Q4）的正則表達式
@@ -253,7 +253,7 @@ fn estimate_paid_year(year_of_dividend: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::core::logging;
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 

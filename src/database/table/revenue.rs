@@ -408,7 +408,7 @@ mod tests {
 
     //use chrono::{Datelike, Local, NaiveDate};
     use crate::database::table::revenue::{fetch_last_two_month, rebuild_revenue_last_date};
-    use crate::logging;
+    use crate::core::logging;
 
     #[tokio::test]
     async fn test_date() {

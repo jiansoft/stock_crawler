@@ -7,8 +7,8 @@ use crate::{
     cache::SHARE,
     crawler::{share::EtfInfo, twse},
     database::table,
-    declare::StockExchangeMarket,
-    util::{self, datetime::Weekend},
+    core::declare::StockExchangeMarket,
+    core::util::{self, datetime::Weekend},
 };
 
 /// 證交所 (TWSE) OpenAPI 的原始資料格式

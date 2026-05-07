@@ -4,7 +4,7 @@ use scraper::{Html, Selector};
 use crate::{
     crawler::twse,
     database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    util,
+    core::util,
 };
 
 /// 取得上櫃股票外資及陸資投資持股統計
@@ -35,7 +35,7 @@ pub async fn visit() -> Result<Vec<QualifiedForeignInstitutionalInvestor>> {
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     use super::*;
 

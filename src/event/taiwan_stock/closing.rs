@@ -12,7 +12,7 @@ use crate::{
         daily_quote, last_daily_quotes,
         yield_rank::YieldRank,
     },
-    logging,
+    core::logging,
 };
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
@@ -177,7 +177,7 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
     use std::time::Duration;
 
     use rust_decimal_macros::dec;

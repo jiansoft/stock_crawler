@@ -15,8 +15,8 @@ use crate::{
     calculation,
     crawler::yahoo,
     database::table,
-    logging, nosql,
-    util::{datetime::ReportQuarter, map::Keyable},
+    core::logging, nosql,
+    core::util::{datetime::ReportQuarter, map::Keyable},
 };
 
 /// 補齊最新應已公告季度財報中缺漏的 ROE、ROA 與每股淨值欄位。
@@ -28,7 +28,7 @@ pub async fn execute() -> Result<()> {
     let mut success_count = 0usize;
 
     for target_report in
-        crate::util::datetime::backfill_report_quarter_targets_for_listed_and_otc(Local::now())
+        crate::core::util::datetime::backfill_report_quarter_targets_for_listed_and_otc(Local::now())
     {
         success_count += process_target_report(target_report).await?;
 
@@ -135,7 +135,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     use super::*;
 

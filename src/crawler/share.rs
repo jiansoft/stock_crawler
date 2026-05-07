@@ -12,7 +12,7 @@ use crate::crawler::{bigdatacloud, myip};
 use crate::{
     crawler::{ipconfig, ipify, ipinfo, seeip},
     database::table,
-    util::{self, map::Keyable, text},
+    core::util::{self, map::Keyable, text},
 };
 
 /// 台灣 ETF 資訊載體。

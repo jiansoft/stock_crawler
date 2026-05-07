@@ -26,7 +26,7 @@ impl AnnualProfitFetcher for Fbs {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

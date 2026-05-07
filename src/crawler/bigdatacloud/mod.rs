@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use serde::Deserialize;
 use serde_derive::Serialize;
 
-use crate::util;
+use crate::core::util;
 
 static DDNS_URL: OnceLock<String> = OnceLock::new();
 

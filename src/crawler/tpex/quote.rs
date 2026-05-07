@@ -2,9 +2,9 @@ use crate::{
     cache::{self, TtlCacheInner, TTL},
     crawler::tpex,
     database::table::{self, daily_quote::FromWithExchange},
-    declare::StockExchange,
-    logging,
-    util::{self, map::Keyable},
+    core::declare::StockExchange,
+    core::logging,
+    core::util::{self, map::Keyable},
 };
 use anyhow::Result;
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
@@ -151,7 +151,7 @@ mod tests {
     use chrono::{TimeDelta, Timelike};
     use std::time::Duration;
 
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     use super::*;
 

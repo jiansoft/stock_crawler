@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, FromRow};
 
-use crate::{database, util::convert::FromValue};
+use crate::{database, core::util::convert::FromValue};
 
 /// 合格境外機構投資者持股資料
 #[derive(FromRow, Debug)]

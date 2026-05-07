@@ -8,8 +8,8 @@ use crate::{
         nstock::{NStock, HOST},
         StockInfo,
     },
-    declare::StockQuotes,
-    util::{self, text},
+    core::declare::StockQuotes,
+    core::util::{self, text},
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -79,7 +79,7 @@ impl StockInfo for NStock {
 
 #[cfg(test)]
 mod tests {
-    use crate::{crawler::log_stock_price_test, logging};
+    use crate::{crawler::log_stock_price_test, core::logging};
 
     use super::*;
 

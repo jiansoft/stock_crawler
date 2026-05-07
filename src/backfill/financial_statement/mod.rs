@@ -9,9 +9,9 @@ use crate::{
         eps::{EpsQuarter, EpsYear},
     },
     database::table::financial_statement::{self, FinancialStatement},
-    declare::Quarter,
-    logging,
-    util::map::Keyable,
+    core::declare::Quarter,
+    core::logging,
+    core::util::map::Keyable,
 };
 
 /// 更新台股年度財報
@@ -82,7 +82,7 @@ async fn update_roe_and_roa(fs: &mut FinancialStatement, roe: Decimal, roa: Deci
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     use super::*;
 

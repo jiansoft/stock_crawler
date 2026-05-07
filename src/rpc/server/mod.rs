@@ -11,8 +11,8 @@ use anyhow::Result;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use crate::{
-    config::SETTINGS,
-    logging,
+    core::config::SETTINGS,
+    core::logging,
     rpc::{
         control::control_server::ControlServer,
         manual_backfill::manual_backfill_server::ManualBackfillServer,
@@ -20,7 +20,7 @@ use crate::{
         server::manual_backfill_service::ManualBackfillService,
         server::stock_service::StockService, stock::stock_server::StockServer,
     },
-    util,
+    core::util,
 };
 
 /// Control 服務實作模組。

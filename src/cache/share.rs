@@ -19,8 +19,8 @@ use crate::{
         daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,
         stock_exchange_market,
     },
-    logging,
-    util::map::Keyable,
+    core::logging,
+    core::util::map::Keyable,
 };
 
 /// 全域共享資料快取實例。

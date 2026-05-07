@@ -32,12 +32,12 @@ use tokio::{
 use super::{stats as trace_stats, stock_price};
 use crate::{
     cache::RealtimeSnapshot,
-    util::{
+    core::util::{
         atomic::decrement_atomic_usize,
         diagnostics::{read_process_memory_stats, trim_allocator_memory, TaskRuntimeStatus},
     },
 };
-use crate::{cache::SHARE, crawler, declare, logging};
+use crate::{cache::SHARE, crawler, core::declare, core::logging};
 
 /// 價格更新事件。
 #[derive(Debug, Clone)]
@@ -563,7 +563,7 @@ fn log_trace_diagnostics(
         &DIAGNOSTICS_LAST_GENERATION,
     );
     let default_log_status = logging::diagnostics_snapshot();
-    let http_log_status = crate::util::http::diagnostics_snapshot();
+    let http_log_status = crate::core::util::http::diagnostics_snapshot();
 
     let memory_summary = memory_stats.map_or_else(
         || "rss=n/a vms=n/a".to_string(),

@@ -4,8 +4,8 @@
 
 use crate::{
     crawler::bank_of_taiwan,
-    util,
-    util::{http, text},
+    core::util,
+    core::util::{http, text},
 };
 use anyhow::anyhow;
 use chrono::NaiveDate;
@@ -124,7 +124,7 @@ pub async fn visit() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use crate::crawler::bank_of_taiwan;
-    use crate::logging;
+    use crate::core::logging;
 
     #[tokio::test]
     async fn test_visit() {

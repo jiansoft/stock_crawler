@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use anyhow::Result;
 
-use crate::util;
+use crate::core::util;
 
 static DDNS_URL: OnceLock<String> = OnceLock::new();
 
@@ -16,7 +16,7 @@ pub async fn visit() -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

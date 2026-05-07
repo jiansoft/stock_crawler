@@ -8,8 +8,8 @@ use crate::{
     cache::{TtlCacheInner, SHARE, TTL},
     crawler::{tpex, twse},
     database::table::{self, daily_quote::DailyQuote},
-    logging, util,
-    util::map::Keyable,
+    core::logging, core::util,
+    core::util::map::Keyable,
 };
 
 /// 調用  twse、tpex API 取得台股收盤報價
@@ -96,7 +96,7 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{cache::SHARE, database, database::table::stock, logging};
+    use crate::{cache::SHARE, database, database::table::stock, core::logging};
 
     use super::*;
 

@@ -12,8 +12,8 @@ use urlencoding::encode;
 use crate::cache::SHARE;
 use crate::{
     crawler::goodinfo::HOST,
-    logging,
-    util::{
+    core::logging,
+    core::util::{
         http::{self},
         map::Keyable,
         text,
@@ -554,7 +554,7 @@ fn normalize_goodinfo_year(year: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
     use rust_decimal_macros::dec;

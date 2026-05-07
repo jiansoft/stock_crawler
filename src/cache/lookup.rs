@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::{
     database::table::stock_exchange_market,
-    declare::{self, Industry},
+    core::declare::{self, Industry},
 };
 
 /// 建立預設的交易市場代碼對照表。

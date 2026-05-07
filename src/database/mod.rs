@@ -5,7 +5,7 @@ use anyhow::Result;
 use once_cell::sync::Lazy;
 use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
 
-use crate::config;
+use crate::core::config;
 
 /// 關聯式資料庫資料表與查詢邏輯。
 pub mod table;

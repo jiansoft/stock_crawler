@@ -157,7 +157,7 @@ impl Clone for StockOwnershipDetail {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

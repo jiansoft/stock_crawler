@@ -28,7 +28,7 @@ use crate::{
     calculation::dividend_record,
     database,
     event::taiwan_stock::closing,
-    logging,
+    core::logging,
 };
 
 /// 手動回補各股每日收盤報價時使用的預設交易日。

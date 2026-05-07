@@ -203,7 +203,7 @@ mod tests {
     use rust_decimal_macros::dec;
     use tokio::time;
 
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

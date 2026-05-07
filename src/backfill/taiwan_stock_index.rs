@@ -2,8 +2,8 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate, TimeZone};
 
 use crate::bot::telegram::Telegram;
-use crate::util::map::Keyable;
-use crate::{bot, cache::SHARE, crawler::twse, database::table, logging};
+use crate::core::util::map::Keyable;
+use crate::{bot, cache::SHARE, crawler::twse, database::table, core::logging};
 
 /// 解析單筆指數字串陣列。若格式錯誤或解析失敗，會記錄 error log 並回傳 `None`。
 fn parse_index_item(item: &[String]) -> Option<table::index::Index> {
@@ -134,7 +134,7 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

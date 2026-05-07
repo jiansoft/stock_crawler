@@ -10,9 +10,9 @@ use crate::{
         self,
         table::{stock_index, stock_word},
     },
-    declare::Industry,
-    logging,
-    util::{self, map::Keyable},
+    core::declare::Industry,
+    core::logging,
+    core::util::{self, map::Keyable},
 };
 
 pub(crate) mod extension;
@@ -279,7 +279,7 @@ ORDER BY
             .map_err(|why| {
                 anyhow!(
                     "Failed to Stock::fetch from database({:#?}) because:{:?}",
-                    crate::config::SETTINGS.postgresql,
+                    crate::core::config::SETTINGS.postgresql,
                     why
                 )
             })
@@ -453,7 +453,7 @@ pub fn is_preference_shares(stock_symbol: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

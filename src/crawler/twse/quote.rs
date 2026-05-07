@@ -8,8 +8,8 @@ use crate::{
     cache::{self, TtlCacheInner, TTL},
     crawler::twse,
     database::table::{self},
-    logging,
-    util::{http, map::Keyable},
+    core::logging,
+    core::util::{http, map::Keyable},
 };
 
 /*#[derive(Serialize, Deserialize, Debug)]
@@ -188,7 +188,7 @@ mod tests {
     use chrono::{TimeDelta, Timelike};
     use std::time::Duration;
 
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     use super::*;
 

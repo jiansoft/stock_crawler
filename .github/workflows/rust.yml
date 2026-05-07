@@ -33,6 +33,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: 1.95.0
+        components: rustfmt, clippy
     - name: Install PostgresSQL client
       run: sudo apt-get -yqq install postgresql-client
 
@@ -64,13 +69,7 @@ jobs:
         psql -h localhost -U user -d db -a -f etc/sql/trace.sql
         psql -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
 
-    - name: Install protoc
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
 
-    - name: Verify protoc installation
-      run: protoc --version
 
     - name: Build
       run: cargo build --verbose

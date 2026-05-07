@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, logging,
+    backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, core::logging,
     nosql,
 };
 
@@ -81,7 +81,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

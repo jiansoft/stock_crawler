@@ -20,8 +20,8 @@ use crate::{
         megatime::{PcHome, HOST},
         StockInfo,
     },
-    declare,
-    util::{self, http::element, text},
+    core::declare,
+    core::util::{self, http::element, text},
 };
 
 /// 股票資訊容器的 CSS 選擇器（包含主 ID 與備援 Class）
@@ -145,7 +145,7 @@ impl PcHome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{crawler::log_stock_price_test, logging};
+    use crate::{crawler::log_stock_price_test, core::logging};
 
     #[tokio::test]
     async fn test_get_stock_price() {

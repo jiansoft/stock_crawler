@@ -24,7 +24,7 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::{crawler::yahoo::HOST, util, util::http::element};
+use crate::{crawler::yahoo::HOST, core::util, core::util::http::element};
 
 /// 用於解析季度（如 Q1, Q2）的正則表達式
 static REG_QUARTER: Lazy<Regex> =
@@ -190,7 +190,7 @@ fn parse_field(element: &scraper::ElementRef, base: &str, child_index: u32) -> D
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::core::logging;
 
     #[test]
     fn test_is_no_valid_data_error() {

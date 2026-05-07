@@ -8,8 +8,8 @@ use tokio::sync::Mutex;
 use crate::{
     crawler::taifex,
     database::table::stock::{self, extension::weight::SymbolAndWeight},
-    declare::StockExchange,
-    logging, util,
+    core::declare::StockExchange,
+    core::logging, core::util,
 };
 
 /// 查詢 taifex 個股權值比重
@@ -67,7 +67,7 @@ async fn handle_stock_exchange(
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     use super::*;
 

@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::{
     backfill, bot, bot::telegram::Telegram, cache::SHARE, crawler::twse, database::table,
-    declare::StockExchangeMarket, logging, rpc, util::datetime::Weekend,
+    core::declare::StockExchangeMarket, core::logging, rpc, core::util::datetime::Weekend,
 };
 use anyhow::{anyhow, Result};
 use chrono::Local;
@@ -109,7 +109,7 @@ async fn update_stock_info(
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

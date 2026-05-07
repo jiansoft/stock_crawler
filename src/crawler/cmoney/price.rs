@@ -9,8 +9,8 @@ use crate::{
         cmoney::{CMoney, HOST},
         StockInfo,
     },
-    declare,
-    util::{self, text},
+    core::declare,
+    core::util::{self, text},
 };
 
 /// 建立 CMoney 個股頁面的請求標頭。
@@ -163,7 +163,7 @@ impl StockInfo for CMoney {
 /// 這些測試需連線外部網站，執行結果會受網路與來源頁面變動影響。
 mod tests {
     use super::*;
-    use crate::{crawler::log_stock_price_test, logging};
+    use crate::{crawler::log_stock_price_test, core::logging};
 
     #[test]
     fn test_parse_required_decimal_rejects_dash() {

@@ -31,8 +31,8 @@ use crate::{
     cache::SHARE,
     crawler::twse,
     database::table::trace::Trace,
-    declare, logging, nosql,
-    util::{datetime::Weekend, map::Keyable},
+    core::declare, core::logging, nosql,
+    core::util::{datetime::Weekend, map::Keyable},
 };
 
 /// 確保整個追蹤執行流程只有一個實例在執行。

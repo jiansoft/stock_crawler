@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use chrono::Local;
 
 use crate::{
-    calculation::dividend_record, crawler::yahoo, database::table::dividend, logging, nosql,
-    util::map::Keyable,
+    calculation::dividend_record, crawler::yahoo, database::table::dividend, core::logging, nosql,
+    core::util::map::Keyable,
 };
 
 /// 歷年股利批次回補的執行結果。

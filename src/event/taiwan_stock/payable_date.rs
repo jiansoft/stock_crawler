@@ -185,7 +185,7 @@ mod tests {
     use chrono::TimeZone;
     use rust_decimal_macros::dec;
 
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

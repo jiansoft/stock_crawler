@@ -11,7 +11,7 @@ use crate::{
             stock_ownership_details,
         },
     },
-    logging,
+    core::logging,
 };
 
 /// 計算指定年份領取的股利。
@@ -417,7 +417,7 @@ pub async fn calculate(year: i32) {
 mod tests {
     use chrono::{Local, TimeZone};
 
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     use super::*;
 

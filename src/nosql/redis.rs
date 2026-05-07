@@ -9,7 +9,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
-use crate::{config::SETTINGS, util::text};
+use crate::{core::config::SETTINGS, core::util::text};
 
 /// 全域共享的 Redis 客戶端。
 pub static CLIENT: Lazy<Arc<Redis>> = Lazy::new(|| Arc::new(Redis::new()));
@@ -254,7 +254,7 @@ impl Default for Redis {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
     use rust_decimal_macros::dec;
 
     use super::*;

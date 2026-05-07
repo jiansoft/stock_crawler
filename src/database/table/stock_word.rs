@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
 
-use crate::{database, util::map::Keyable};
+use crate::{database, core::util::map::Keyable};
 
 #[rustfmt::skip]
 /// 股票搜尋關鍵字資料列（`company_word`）。
@@ -138,7 +138,7 @@ fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{logging, util};
+    use crate::{core::logging, core::util};
 
     use super::*;
 

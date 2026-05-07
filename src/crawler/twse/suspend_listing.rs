@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::{crawler::twse, util};
+use crate::{crawler::twse, core::util};
 
 /// 調用 twse suspendListingCsvAndHtml API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Deserialize)]
@@ -31,7 +31,7 @@ pub async fn visit() -> Result<Vec<SuspendListing>> {
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

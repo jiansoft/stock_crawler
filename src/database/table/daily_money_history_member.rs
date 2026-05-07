@@ -177,7 +177,7 @@ ORDER BY ms.member_id;
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

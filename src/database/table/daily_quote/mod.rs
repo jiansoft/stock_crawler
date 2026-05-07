@@ -7,8 +7,8 @@ use sqlx::{postgres::PgQueryResult, Row};
 
 use crate::{
     database::{self, table::daily_quote::extension::MonthlyStockPriceSummary, CopyIn},
-    declare::StockExchange,
-    util::{datetime, map::Keyable},
+    core::declare::StockExchange,
+    core::util::{datetime, map::Keyable},
 };
 
 pub(crate) mod extension;
@@ -763,7 +763,7 @@ mod tests {
     use chrono::Datelike;
 
     use crate::crawler::twse;
-    use crate::{cache::SHARE, logging};
+    use crate::{cache::SHARE, core::logging};
 
     use super::*;
 

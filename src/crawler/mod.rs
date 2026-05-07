@@ -31,7 +31,7 @@ use crate::{
         cmoney::CMoney, cnyes::CnYes, fugle::Fugle, megatime::PcHome, nstock::NStock,
         winvest::Winvest, yahoo::Yahoo,
     },
-    declare, logging, util,
+    core::declare, core::logging, core::util,
 };
 
 /// 臺灣銀行 (提供匯率、財務報表等資料)
@@ -707,7 +707,7 @@ pub async fn fetch_stock_quotes_from_remote_site(
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

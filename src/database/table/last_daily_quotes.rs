@@ -138,7 +138,7 @@ impl Default for LastDailyQuotes {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

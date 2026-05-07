@@ -5,7 +5,7 @@ use config::FileFormat;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-use crate::logging;
+use crate::core::logging;
 
 const CONFIG_PATH: &str = "app.json";
 

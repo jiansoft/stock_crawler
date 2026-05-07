@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, FromRow};
 
-use crate::{database, util::map::Keyable};
+use crate::{database, core::util::map::Keyable};
 
 /// 股票除息的資料
 #[derive(FromRow, Debug)]
@@ -110,7 +110,7 @@ impl Keyable for PayoutRatioInfo {
 mod tests {
     use core::result::Result::Ok;
 
-    use crate::{logging, util::map::vec_to_hashmap};
+    use crate::{core::logging, core::util::map::vec_to_hashmap};
 
     use super::*;
 

@@ -44,7 +44,7 @@ FROM
         .map_err(|why| {
             anyhow!(
                 "Failed to StockExchangeMarket::fetch from database({:#?}) because:{:?}",
-                crate::config::SETTINGS.postgresql,
+                crate::core::config::SETTINGS.postgresql,
                 why
             )
         })
@@ -64,7 +64,7 @@ impl Clone for StockExchangeMarket {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

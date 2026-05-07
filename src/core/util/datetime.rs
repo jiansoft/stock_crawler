@@ -1,7 +1,7 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeDelta, Weekday};
 
-use crate::declare::Quarter;
-use crate::logging;
+use crate::core::declare::Quarter;
+use crate::core::logging;
 
 /// 提供「是否為週末」判斷能力的 trait。
 ///

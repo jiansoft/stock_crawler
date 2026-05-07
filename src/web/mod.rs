@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use anyhow::Result;
 use tokio::net::TcpListener;
 
-use crate::logging;
+use crate::core::logging;
 
 /// Backfill admin 的 Web UI 與 HTTP API。
 pub mod backfill_admin;

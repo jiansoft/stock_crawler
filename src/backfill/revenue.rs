@@ -2,7 +2,7 @@ use crate::{
     cache::SHARE,
     crawler::twse,
     database::{table, table::revenue},
-    logging, util,
+    core::logging, core::util,
 };
 use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
@@ -86,7 +86,7 @@ pub(crate) async fn process_revenue(
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
     use std::time::Duration;
 
     use super::*;

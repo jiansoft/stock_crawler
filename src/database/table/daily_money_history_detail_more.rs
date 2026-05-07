@@ -147,7 +147,7 @@ ORDER BY security_code, member_id, transaction_date;
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
 
     use super::*;
 

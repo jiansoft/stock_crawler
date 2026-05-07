@@ -11,8 +11,8 @@ use sqlx::{
 use crate::{
     crawler::{self, twse, wespai, yahoo},
     database,
-    declare::Quarter,
-    util::map::Keyable,
+    core::declare::Quarter,
+    core::util::map::Keyable,
 };
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]
@@ -528,7 +528,7 @@ impl From<crawler::share::AnnualProfit> for FinancialStatement {
 
 #[cfg(test)]
 mod tests {
-    use crate::logging;
+    use crate::core::logging;
     use chrono::{Datelike, NaiveDate};
     use std::time;
 

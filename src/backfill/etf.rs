@@ -6,9 +6,9 @@ use crate::{
     cache::SHARE,
     crawler::{share::EtfInfo, tpex, twse},
     database::table,
-    declare::StockExchangeMarket,
-    logging, rpc,
-    util::datetime::Weekend,
+    core::declare::StockExchangeMarket,
+    core::logging, rpc,
+    core::util::datetime::Weekend,
 };
 use anyhow::{anyhow, Result};
 use chrono::Local;
@@ -140,7 +140,7 @@ async fn update_stock_info(etf: &EtfInfo, msg: &mut String) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logging;
+    use crate::core::logging;
 
     #[tokio::test]
     #[ignore]
