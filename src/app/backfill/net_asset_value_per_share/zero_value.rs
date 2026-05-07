@@ -1,7 +1,6 @@
 use anyhow::Result;
-
 use crate::{
-    backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, core::logging,
+    app::backfill::net_asset_value_per_share::update, crawler::yahoo::profile, database::table, core::logging,
     nosql,
 };
 

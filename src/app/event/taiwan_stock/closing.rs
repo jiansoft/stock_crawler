@@ -1,10 +1,10 @@
 use std::fmt::Write;
 
 use crate::{
-    backfill,
+    app::backfill,
     interfaces::bot::{self, telegram::Telegram},
     cache::{TtlCacheInner, TTL},
-    calculation, crawler,
+    app::calculation, crawler,
     database::table::{
         daily_money_history_member::{
             DailyMoneyHistoryMember, DailyMoneyHistoryMemberWithPreviousTradingDay,
@@ -46,7 +46,7 @@ pub async fn execute() -> Result<()> {
     }
 
     // 停止 trace 事件所使用的即時報價背景任務
-    crate::event::trace::price_tasks::stop_price_tasks().await;
+    crate::app::event::trace::price_tasks::stop_price_tasks().await;
 
     crawler::flush_site_latency_stats();
 

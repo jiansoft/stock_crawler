@@ -1,5 +1,5 @@
 use crate::{
-    backfill::financial_statement::update_roe_and_roa_for_zero_values,
+    app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
     crawler::wespai,
     database::table::{financial_statement, stock},
     core::logging, nosql,

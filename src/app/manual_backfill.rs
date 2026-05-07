@@ -23,11 +23,11 @@
 use chrono::NaiveDate;
 
 use crate::{
-    backfill::{dividend, quote, taiwan_stock_index},
+    app::backfill::{dividend, quote, taiwan_stock_index},
     cache::SHARE,
-    calculation::dividend_record,
+    app::calculation::dividend_record,
     database,
-    event::taiwan_stock::closing,
+    app::event::taiwan_stock::closing,
     core::logging,
 };
 
@@ -50,7 +50,7 @@ const MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE: &str = "2887";
 /// 上市櫃各股開高低收、成交量與本益比等欄位，最後批次寫回資料庫並更新快取。
 ///
 /// 執行範例：
-/// `cargo test manual_backfill::test_backfill_daily_quotes_for_date -- --ignored --nocapture`
+/// `cargo test app::manual_backfill::test_backfill_daily_quotes_for_date -- --ignored --nocapture`
 #[tokio::test]
 #[ignore]
 async fn test_backfill_daily_quotes_for_date() {
@@ -61,7 +61,7 @@ async fn test_backfill_daily_quotes_for_date() {
         .expect("manual daily quote date should be valid");
 
     logging::debug_file_async(format!(
-        "開始 manual_backfill::test_backfill_daily_quotes_for_date date={date}"
+        "開始 app::manual_backfill::test_backfill_daily_quotes_for_date date={date}"
     ));
 
     // quote::execute 使用 COPY 寫入 DailyQuotes；先清掉同日資料可避免唯一索引衝突，
@@ -77,7 +77,7 @@ async fn test_backfill_daily_quotes_for_date() {
         .expect("manual daily quote backfill failed");
 
     logging::debug_file_async(format!(
-        "結束 manual_backfill::test_backfill_daily_quotes_for_date date={date} quote_count={quote_count}"
+        "結束 app::manual_backfill::test_backfill_daily_quotes_for_date date={date} quote_count={quote_count}"
     ));
 }
 
@@ -88,7 +88,7 @@ async fn test_backfill_daily_quotes_for_date() {
 /// last daily quote、估價、殖利率排行、市值重算與通知前置資料。
 ///
 /// 執行範例：
-/// `cargo test manual_backfill::test_backfill_closing_aggregate_for_date -- --ignored --nocapture`
+/// `cargo test app::manual_backfill::test_backfill_closing_aggregate_for_date -- --ignored --nocapture`
 #[tokio::test]
 #[ignore]
 async fn test_backfill_closing_aggregate_for_date() {
@@ -99,7 +99,7 @@ async fn test_backfill_closing_aggregate_for_date() {
         .expect("manual closing aggregate date should be valid");
 
     logging::debug_file_async(format!(
-        "開始 manual_backfill::test_backfill_closing_aggregate_for_date date={date}"
+        "開始 app::manual_backfill::test_backfill_closing_aggregate_for_date date={date}"
     ));
 
     closing::aggregate(date)
@@ -107,7 +107,7 @@ async fn test_backfill_closing_aggregate_for_date() {
         .expect("manual closing aggregate backfill failed");
 
     logging::debug_file_async(format!(
-        "結束 manual_backfill::test_backfill_closing_aggregate_for_date date={date}"
+        "結束 app::manual_backfill::test_backfill_closing_aggregate_for_date date={date}"
     ));
 }
 
@@ -124,7 +124,7 @@ const MANUAL_TAIWAN_STOCK_INDEX_DATE: &str = "2026-04-15";
 /// 回補模式會跳過快取檢查，確保所有資料都寫入資料庫。
 ///
 /// 執行範例：
-/// `cargo test manual_backfill::test_backfill_taiwan_stock_index -- --ignored --nocapture`
+/// `cargo test app::manual_backfill::test_backfill_taiwan_stock_index -- --ignored --nocapture`
 #[tokio::test]
 #[ignore]
 async fn test_backfill_taiwan_stock_index() {
@@ -135,7 +135,7 @@ async fn test_backfill_taiwan_stock_index() {
         .expect("manual taiwan stock index date should be valid");
 
     logging::debug_file_async(format!(
-        "開始 manual_backfill::test_backfill_taiwan_stock_index date={date}"
+        "開始 app::manual_backfill::test_backfill_taiwan_stock_index date={date}"
     ));
 
     let upserted_count = taiwan_stock_index::execute_for_date(date)
@@ -143,7 +143,7 @@ async fn test_backfill_taiwan_stock_index() {
         .expect("manual taiwan stock index backfill failed");
 
     logging::debug_file_async(format!(
-        "結束 manual_backfill::test_backfill_taiwan_stock_index date={date} upserted_count={upserted_count}"
+        "結束 app::manual_backfill::test_backfill_taiwan_stock_index date={date} upserted_count={upserted_count}"
     ));
 }
 
@@ -155,7 +155,7 @@ async fn test_backfill_taiwan_stock_index() {
 /// 並重算 `dividend_record_detail` 與 `dividend_record_detail_more`。
 ///
 /// 執行範例：
-/// `cargo test manual_backfill::test_backfill_received_dividend_records_for_stock -- --ignored --nocapture`
+/// `cargo test app::manual_backfill::test_backfill_received_dividend_records_for_stock -- --ignored --nocapture`
 #[tokio::test]
 #[ignore]
 async fn test_backfill_received_dividend_records_for_stock() {
@@ -164,7 +164,7 @@ async fn test_backfill_received_dividend_records_for_stock() {
 
     let security_code = MANUAL_DIVIDEND_RECORD_SECURITY_CODE;
     logging::debug_file_async(format!(
-        "開始 manual_backfill::test_backfill_received_dividend_records_for_stock security_code={security_code}"
+        "開始 app::manual_backfill::test_backfill_received_dividend_records_for_stock security_code={security_code}"
     ));
 
     let summary = dividend_record::backfill_received_dividend_records_for_stock(security_code)
@@ -172,7 +172,7 @@ async fn test_backfill_received_dividend_records_for_stock() {
         .expect("manual received dividend records backfill failed");
 
     logging::debug_file_async(format!(
-        "結束 manual_backfill::test_backfill_received_dividend_records_for_stock security_code={security_code} summary={summary:?}"
+        "結束 app::manual_backfill::test_backfill_received_dividend_records_for_stock security_code={security_code} summary={summary:?}"
     ));
 }
 
@@ -183,7 +183,7 @@ async fn test_backfill_received_dividend_records_for_stock() {
 /// 也會重算年度彙總列，最後同步回補目前持股的已領股利紀錄。
 ///
 /// 執行範例：
-/// `cargo test manual_backfill::test_backfill_historical_dividends_for_stock -- --ignored --nocapture`
+/// `cargo test app::manual_backfill::test_backfill_historical_dividends_for_stock -- --ignored --nocapture`
 #[tokio::test]
 #[ignore]
 async fn test_backfill_historical_dividends_for_stock() {
@@ -192,7 +192,7 @@ async fn test_backfill_historical_dividends_for_stock() {
 
     let security_code = MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE;
     logging::debug_file_async(format!(
-        "開始 manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code}"
+        "開始 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code}"
     ));
 
     let upserted_count = dividend::backfill_historical_dividends_for_stock(security_code)
@@ -200,6 +200,6 @@ async fn test_backfill_historical_dividends_for_stock() {
         .expect("manual historical dividends backfill failed");
 
     logging::debug_file_async(format!(
-        "結束 manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code} upserted_count={upserted_count}"
+        "結束 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code} upserted_count={upserted_count}"
     ));
 }

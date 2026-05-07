@@ -2,9 +2,8 @@ use std::{collections::HashSet, time::Duration};
 
 use anyhow::{Context, Result};
 use chrono::Local;
-
 use crate::{
-    calculation::dividend_record, crawler::yahoo, database::table::dividend, core::logging, nosql,
+    app::calculation::dividend_record, crawler::yahoo, database::table::dividend, core::logging, nosql,
     core::util::map::Keyable,
 };
 
