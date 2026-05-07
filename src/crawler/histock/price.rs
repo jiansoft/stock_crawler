@@ -31,7 +31,7 @@ use crate::{
         StockInfo,
     },
     core::declare,
-    event::trace::price_tasks as trace_price_tasks,
+    app::event::trace::price_tasks as trace_price_tasks,
     core::util::{
         self,
         atomic::decrement_atomic_usize,

@@ -83,27 +83,18 @@ unsafe extern "C" {
     fn setenv(name: *const c_char, value: *const c_char, overwrite: i32) -> i32;
 }
 
-/// 數據回補
-pub mod backfill;
+pub mod app;
 /// 數據快取
 pub mod cache;
-/// 計算類
-pub mod calculation;
 pub mod core;
 /// 抓取數據類
 pub mod crawler;
 /// 資料庫操作
 pub mod database;
-pub mod event;
 pub mod interfaces;
 
-/// 手動資料回補測試入口。
-#[cfg(test)]
-mod manual_backfill;
 /// nosql
 pub mod nosql;
-/// 工作排程
-pub mod scheduler;
 
 /*#[get("/")]
 fn index() -> &'static str {
@@ -209,7 +200,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     core::logging::info_file_async("startup phase begin: scheduler::start".to_string());
     let scheduler_start_timer = Instant::now();
-    scheduler::start(&sched).await?;
+    app::scheduler::start(&sched).await?;
     core::logging::info_file_async(format!(
         "startup phase done: scheduler::start elapsed={:?}",
         scheduler_start_timer.elapsed()

@@ -25,10 +25,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use crate::{
-    backfill::{dividend, quote, taiwan_stock_index},
-    calculation::dividend_record,
+    app::backfill::{dividend, quote, taiwan_stock_index},
+    app::calculation::dividend_record,
     database,
-    event::taiwan_stock::closing,
+    app::event::taiwan_stock::closing,
     core::logging,
 };
 

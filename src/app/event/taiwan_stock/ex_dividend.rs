@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 use crate::{
     interfaces::bot,
     interfaces::bot::telegram::Telegram,
-    calculation,
+    app::calculation,
     database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
 };
 

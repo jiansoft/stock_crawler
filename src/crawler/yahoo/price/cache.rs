@@ -18,7 +18,7 @@ use tokio::time::sleep;
 use crate::{
     cache::{RealtimeSnapshot, SHARE},
     crawler::yahoo::YahooClassCategory,
-    event::trace::price_tasks as trace_price_tasks,
+    app::event::trace::price_tasks as trace_price_tasks,
     core::util::{
         atomic::decrement_atomic_usize,
         diagnostics::{
