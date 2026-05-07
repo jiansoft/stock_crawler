@@ -63,7 +63,7 @@ impl Clone for Trace {
 
 #[cfg(test)]
 mod tests {
-    use crate::{database::table::trace, core::logging};
+    use crate::{infra::database::table::trace, core::logging};
 
     #[tokio::test]
     #[ignore]

@@ -26,7 +26,7 @@ use crate::{
     app::backfill::{dividend, quote, taiwan_stock_index},
     infra::cache::SHARE,
     app::calculation::dividend_record,
-    database,
+    infra::database,
     app::event::taiwan_stock::closing,
     core::logging,
 };
