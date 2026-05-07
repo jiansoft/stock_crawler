@@ -1,7 +1,7 @@
 //! gRPC / protobuf 產碼建置腳本。
 //!
 //! 此檔負責在編譯期間讀取 `etc/proto/` 內的 `.proto` 定義，
-//! 並產生對應的 Rust 程式碼到 `src/rpc/`。
+//! 並產生對應的 Rust 程式碼到 `src/interfaces/rpc/`。
 
 /*fn main() -> Result<(), Box<dyn std::error::Error>> {
     //src\internal\rpc\proto
