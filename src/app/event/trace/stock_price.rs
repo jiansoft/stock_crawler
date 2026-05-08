@@ -8,7 +8,7 @@
 //! 3. **價格更新事件驅動判斷**：當背景採集更新股價後，會主動觸發指定股票的追蹤條件檢查。
 //! 4. **低頻對帳掃描**：保留低頻 reconciliation 任務，補償事件遺漏、設定剛新增但價格尚未再次變動等情況。
 //! 5. **邊界檢查**：判斷最新價格是否低於設定的最低價（Floor）或超過最高價（Ceiling）。
-//! 6. **頻率限制**：利用 Redis 記錄已發送過的提醒，避免在短時間內重複發送相同的警報。
+//! 6. **頻率限制**：利用 Redis 記錄已發送過的價格，避免同一交易日重複發送相同警報。
 //! 7. **發送通知**：透過 Telegram Bot 將警報訊息傳送給使用者。
 
 use std::collections::HashMap;
@@ -343,7 +343,13 @@ async fn process_cached_targets(symbol: String, targets: Vec<Trace>, source: Eva
 
 /// 判斷股價是否觸發警報，並在必要時發送通知。
 ///
-/// 最佳化：快取 Key 改為 `symbol:boundary_type`，避免價位變動時每分鐘重複警報。
+/// 去重規則：
+/// - 同一交易日
+/// - 同一股票
+/// - 同一邊界方向
+/// - 同一價格
+///
+/// 只要曾經發送過，後續同一價格就不再重複通知。
 async fn alert_on_price_boundary(
     target: Trace,
     current_price: Decimal,
@@ -365,28 +371,31 @@ async fn alert_on_price_boundary(
         return Ok(false);
     };
 
-    // 檢查 Redis 快取，避免針對同一方向重複通知
-    // Key 格式包含股票代號與邊界類型，存活時間設為 1 小時，避免頻繁轟炸
-    let target_key = format!("{}:{}", target.key_with_prefix(), boundary_type);
-    if let Ok(exist) = crate::infra::nosql::redis::CLIENT
-        .contains_key(&target_key)
+    let target_key = build_trace_notification_key(
+        Local::now().date_naive(),
+        &target,
+        boundary_type,
+        current_price,
+    );
+
+    // 只有 key 還不存在時才寫入；若已存在，代表同一天同一價格已經通知過。
+    let should_send = match crate::infra::nosql::redis::CLIENT
+        .set_if_absent(&target_key, current_price.to_string(), 60 * 60 * 24 * 2)
         .await
     {
-        if exist {
-            return Ok(false);
+        Ok(result) => result,
+        Err(why) => {
+            logging::error_file_async(format!("Failed to set Redis key {}: {:?}", target_key, why));
+            true
         }
+    };
+
+    if !should_send {
+        return Ok(false);
     }
 
     // 格式化訊息並發送
     let to_bot_msg = format_alert_message(&target, current_price, source_site).await;
-
-    // 寫入快取 (有效期限 1 小時)
-    if let Err(why) = crate::infra::nosql::redis::CLIENT
-        .set(&target_key, current_price.to_string(), 60 * 60)
-        .await
-    {
-        logging::error_file_async(format!("Failed to set Redis key {}: {:?}", target_key, why));
-    }
 
     // 發送 Telegram 訊息
     bot::telegram::send(&to_bot_msg).await;
@@ -444,6 +453,24 @@ fn is_within_boundary(target: &Trace, current_price: Decimal) -> bool {
         (false, true) => current_price <= ceiling,
         _ => true, // 如果都沒設定，視為在範圍內
     }
+}
+
+/// 建立 trace 通知去重用的 Redis key。
+///
+/// Key 結構包含交易日、股票、邊界方向與價格，避免同一交易日同一價格重複提醒。
+fn build_trace_notification_key(
+    date: NaiveDate,
+    target: &Trace,
+    boundary_type: &str,
+    current_price: Decimal,
+) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        target.key_with_prefix(),
+        date.format("%Y%m%d"),
+        boundary_type,
+        current_price.round_dp(4)
+    )
 }
 
 #[cfg(test)]
@@ -520,6 +547,55 @@ mod tests {
         assert!(get_cached_snapshot("2317").is_none());
 
         SHARE.clear_stock_snapshots();
+    }
+
+    #[test]
+    fn test_build_trace_notification_key_includes_date_boundary_and_price() {
+        let trace = Trace {
+            stock_symbol: "2330".to_string(),
+            floor: dec!(25),
+            ceiling: dec!(30),
+        };
+
+        let key = build_trace_notification_key(
+            NaiveDate::from_ymd_opt(2026, 5, 8).unwrap(),
+            &trace,
+            "floor",
+            dec!(25.50001),
+        );
+
+        assert_eq!(key, "Trace:2330-25-30:20260508:floor:25.5000");
+    }
+
+    #[test]
+    fn test_build_trace_notification_key_distinguishes_price_and_day() {
+        let trace = Trace {
+            stock_symbol: "2330".to_string(),
+            floor: dec!(25),
+            ceiling: dec!(30),
+        };
+
+        let key_a = build_trace_notification_key(
+            NaiveDate::from_ymd_opt(2026, 5, 8).unwrap(),
+            &trace,
+            "floor",
+            dec!(25.5),
+        );
+        let key_b = build_trace_notification_key(
+            NaiveDate::from_ymd_opt(2026, 5, 8).unwrap(),
+            &trace,
+            "floor",
+            dec!(25.4),
+        );
+        let key_c = build_trace_notification_key(
+            NaiveDate::from_ymd_opt(2026, 5, 9).unwrap(),
+            &trace,
+            "floor",
+            dec!(25.5),
+        );
+
+        assert_ne!(key_a, key_b);
+        assert_ne!(key_a, key_c);
     }
 
     #[tokio::test]

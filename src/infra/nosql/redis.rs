@@ -98,6 +98,32 @@ impl Redis {
             .await?)
     }
 
+    /// 以 `NX + EX` 方式嘗試寫入鍵值。
+    ///
+    /// 只有在 key 尚不存在時才會寫入，適合用在通知去重這類需要原子判斷的情境。
+    ///
+    /// # 回傳
+    /// - `Ok(true)`：成功寫入。
+    /// - `Ok(false)`：key 已存在，未寫入。
+    pub async fn set_if_absent<K: ToRedisArgs, V: ToRedisArgs>(
+        &self,
+        key: K,
+        value: V,
+        ttl_in_seconds: usize,
+    ) -> Result<bool> {
+        let mut conn = self.pool.get().await?;
+        let result: Option<String> = cmd("SET")
+            .arg(key)
+            .arg(value)
+            .arg("NX")
+            .arg("EX")
+            .arg(ttl_in_seconds)
+            .query_async(&mut conn)
+            .await?;
+
+        Ok(result.is_some())
+    }
+
     /// Retrieves a string value from the Redis server for the given key.
     ///
     /// # Arguments
