@@ -51,9 +51,20 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: 1.95.0
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2
 
     - name: Build
       run: cargo build --verbose
+
+  audit:
+    name: Security & License Audit
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: EmbarkStudios/cargo-deny-action@v2
+      with:
+        command: check
 
   test:
     name: Test
@@ -84,10 +95,10 @@ jobs:
       with:
         toolchain: 1.95.0
         components: rustfmt, clippy
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2
     - name: Install PostgresSQL client
       run: sudo apt-get -yqq install postgresql-client
-
-
 
     - name: Run SQL file
       run: |
