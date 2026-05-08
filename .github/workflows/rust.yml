@@ -6,10 +6,25 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+    - uses: actions/checkout@v4
+    - name: Dependency review
+      uses: actions/dependency-review-action@v4
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
