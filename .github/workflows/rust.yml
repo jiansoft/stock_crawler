@@ -33,6 +33,8 @@ jobs:
       with:
         toolchain: 1.95.0
         components: clippy
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2
 
     - name: Cargo check
       run: cargo check --verbose
