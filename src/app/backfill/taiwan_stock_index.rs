@@ -91,7 +91,7 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
     let datetime = Local
         .from_local_datetime(&date.and_hms_opt(12, 0, 0).unwrap())
         .single()
-        .unwrap_or_else(|| Local::now());
+        .unwrap_or_else(Local::now);
 
     let tai_ex = twse::taiwan_capitalization_weighted_stock_index::visit(datetime).await?;
     if tai_ex.stat.to_uppercase() != "OK" {

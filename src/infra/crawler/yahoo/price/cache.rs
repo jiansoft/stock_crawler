@@ -77,6 +77,7 @@ pub(crate) struct YahooRuntimeDiagnostics {
     pub completed_cycles: u64,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn store_runtime_progress(
     success_count: usize,
     failure_count: usize,
