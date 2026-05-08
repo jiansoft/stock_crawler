@@ -16,6 +16,8 @@ allow = [
     "CC0-1.0",
     "Zlib",
     "Unlicense",
+    "MPL-2.0",
+    "Unicode-DFS-2016",
 ]
 confidence-threshold = 0.8
 
