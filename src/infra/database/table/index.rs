@@ -6,7 +6,7 @@ use concat_string::concat_string;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 
-use crate::{infra::database, core::logging, core::util, core::util::map::Keyable};
+use crate::{core::logging, core::util, core::util::map::Keyable, infra::database};
 
 /// 台股指數資料列（目前以 `TAIEX` 為主）。
 #[derive(sqlx::Type, FromRow, Debug)]
@@ -216,19 +216,15 @@ impl From<Vec<String>> for Index {
         }*/
 
         index.trading_volume =
-            Decimal::from_str(&item[1].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
+            Decimal::from_str(&item[1].replace(',', "")).unwrap_or(Decimal::ZERO);
 
-        index.trade_value =
-            Decimal::from_str(&item[2].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
+        index.trade_value = Decimal::from_str(&item[2].replace(',', "")).unwrap_or(Decimal::ZERO);
 
-        index.transaction =
-            Decimal::from_str(&item[3].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
+        index.transaction = Decimal::from_str(&item[3].replace(',', "")).unwrap_or(Decimal::ZERO);
 
-        index.index =
-            Decimal::from_str(&item[4].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
+        index.index = Decimal::from_str(&item[4].replace(',', "")).unwrap_or(Decimal::ZERO);
 
-        index.change =
-            Decimal::from_str(&item[5].replace(',', "")).unwrap_or_else(|_| Decimal::ZERO);
+        index.change = Decimal::from_str(&item[5].replace(',', "")).unwrap_or(Decimal::ZERO);
         index
     }
 }

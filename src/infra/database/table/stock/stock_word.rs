@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
 
-use crate::{infra::database, core::util::map::Keyable};
+use crate::{core::util::map::Keyable, infra::database};
 
 #[rustfmt::skip]
 /// 股票搜尋關鍵字資料列（`company_word`）。

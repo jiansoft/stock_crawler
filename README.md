@@ -4,6 +4,21 @@
 UI Demo︰https://jiansoft.mooo.com/stock/revenues  
 API︰https://github.com/jiansoft/stock_api
 
+## 架構總覽
+
+```text
+src/
+├─ main.rs           # 程式入口
+├─ core/             # 共用基礎（config / declare / util / logging）
+├─ app/              # 應用層（scheduler / backfill / event / calculation）
+├─ infra/            # 基礎設施（crawler / database / cache / nosql）
+└─ interfaces/       # 對外介面（rpc / web / bot）
+```
+
+> 詳細分層規則與新模組放置規範請參閱 [docs/architecture.md](docs/architecture.md)。
+
+## 排程時間
+
 以下排程時間為台北時間（Asia/Taipei）。
 
 + 01:00 更新興櫃股票的每股淨值
@@ -29,7 +44,7 @@ API︰https://github.com/jiansoft/stock_api
 + 22:00 更新外資持股狀態
 + DDNS IP 自動更新功能已自本專案移除，相關功能請改用 https://github.com/jiansoft/dynip。
 
-### 資料來源
+## 資料來源
 1. 理財寶-股市爆料同學會 https://www.cmoney.tw/forum/popular
 2. 鉅亨網 https://www.cnyes.com
 3. 富邦證券 https://www.fbs.com.tw
@@ -49,12 +64,12 @@ API︰https://github.com/jiansoft/stock_api
 17. 雅虎股市 https://tw.stock.yahoo.com
 18. 元大證券 https://www.yuanta.com.tw
 
-### 主要設定
+## 主要設定
 + 所有設定可透過 `app.json` 提供，並可由 `.env` 或系統環境變數覆蓋。
 + 即時報價備援來源已加入 Fugle 官方日內行情 API。
 + 若未設定 `FUGLE_API_KEY`，系統會略過 Fugle，繼續使用其他即時報價來源。
 
-### 盤中即時報價與追蹤
+## 盤中即時報價與追蹤
 + 開盤期間會同時啟動 HiStock 與 Yahoo 類股背景採集，將即時報價寫入共享記憶體快取。
 + Yahoo 類股採集使用 `StockServices.getClassQuotes` JSON API，類股之間與同類股分頁之間都會節流 1 秒。
 + Yahoo 類股目前不採集認購、認售、指數類，避免將大量衍生性商品帶進盤中輪詢。
@@ -63,7 +78,7 @@ API︰https://github.com/jiansoft/stock_api
 + 單股最新成交價備援站點：Yahoo、Fugle、NStock、CMoney、CnYes、Yuanta、PcHome、Winvest。
 + 單股完整報價備援站點：Fugle、NStock、CMoney、CnYes、Yuanta、PcHome、Winvest。
 
-#### 常用環境變數
+### 常用環境變數
 + `FUGLE_API_KEY`：Fugle 日內行情 API 金鑰（即時報價備援）
 + `TELEGRAM_TOKEN`、`TELEGRAM_ALLOWED`：Telegram Bot 與允許通知的 chat 設定
 + `REDIS_ADDR`、`REDIS_ACCOUNT`、`REDIS_PASSWORD`、`REDIS_DB`：Redis 連線設定

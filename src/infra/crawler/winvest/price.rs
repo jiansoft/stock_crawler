@@ -24,12 +24,12 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use crate::{
+    core::declare,
+    core::util::{self, text},
     infra::crawler::{
         winvest::{Winvest, HOST},
         StockInfo,
     },
-    core::declare,
-    core::util::{self, text},
 };
 
 #[derive(Deserialize, Debug, Clone)]

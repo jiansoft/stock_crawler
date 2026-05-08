@@ -1,8 +1,9 @@
 use crate::{
+    core::logging,
+    core::util,
     infra::cache::SHARE,
     infra::crawler::twse,
     infra::database::{table, table::revenue},
-    core::logging, core::util,
 };
 use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};

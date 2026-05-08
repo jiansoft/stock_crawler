@@ -6,10 +6,11 @@ use scopeguard::defer;
 use tokio::sync::Mutex;
 
 use crate::{
+    core::declare::StockExchange,
+    core::logging,
+    core::util,
     infra::crawler::taifex,
     infra::database::table::stock::{self, extension::weight::SymbolAndWeight},
-    core::declare::StockExchange,
-    core::logging, core::util,
 };
 
 /// 查詢 taifex 個股權值比重
@@ -67,7 +68,7 @@ async fn handle_stock_exchange(
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 

@@ -1,9 +1,12 @@
 use anyhow::Result;
 use chrono::{Local, NaiveDate, TimeZone};
 
-use crate::interfaces::bot::telegram::Telegram;
 use crate::core::util::map::Keyable;
-use crate::{interfaces::bot, infra::cache::SHARE, infra::crawler::twse, infra::database::table, core::logging};
+use crate::interfaces::bot::telegram::Telegram;
+use crate::{
+    core::logging, infra::cache::SHARE, infra::crawler::twse, infra::database::table,
+    interfaces::bot,
+};
 
 /// 解析單筆指數字串陣列。若格式錯誤或解析失敗，會記錄 error log 並回傳 `None`。
 fn parse_index_item(item: &[String]) -> Option<table::index::Index> {
@@ -88,7 +91,7 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
     let datetime = Local
         .from_local_datetime(&date.and_hms_opt(12, 0, 0).unwrap())
         .single()
-        .unwrap_or_else(|| Local::now());
+        .unwrap_or_else(Local::now);
 
     let tai_ex = twse::taiwan_capitalization_weighted_stock_index::visit(datetime).await?;
     if tai_ex.stat.to_uppercase() != "OK" {

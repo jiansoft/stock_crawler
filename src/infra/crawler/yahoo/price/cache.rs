@@ -16,8 +16,6 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::{
-    infra::cache::{RealtimeSnapshot, SHARE},
-    infra::crawler::yahoo::YahooClassCategory,
     app::event::trace::price_tasks as trace_price_tasks,
     core::util::{
         atomic::decrement_atomic_usize,
@@ -25,6 +23,8 @@ use crate::{
             read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
         },
     },
+    infra::cache::{RealtimeSnapshot, SHARE},
+    infra::crawler::yahoo::YahooClassCategory,
 };
 
 use super::class_quote;
@@ -77,6 +77,7 @@ pub(crate) struct YahooRuntimeDiagnostics {
     pub completed_cycles: u64,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn store_runtime_progress(
     success_count: usize,
     failure_count: usize,
@@ -369,7 +370,9 @@ pub fn start_caching_task() {
     if let Ok(mut task) = CACHING_TASK.lock() {
         *task = Some(handle);
     } else {
-        crate::core::logging::error_file_async("Failed to store Yahoo caching task handle".to_string());
+        crate::core::logging::error_file_async(
+            "Failed to store Yahoo caching task handle".to_string(),
+        );
     }
 }
 
@@ -394,7 +397,10 @@ pub async fn stop_caching_task() {
 
     if let Some(handle) = handle {
         if let Err(why) = handle.await {
-            crate::core::logging::error_file_async(format!("Yahoo 類股快取任務停止等待失敗: {:?}", why));
+            crate::core::logging::error_file_async(format!(
+                "Yahoo 類股快取任務停止等待失敗: {:?}",
+                why
+            ));
         }
     }
 

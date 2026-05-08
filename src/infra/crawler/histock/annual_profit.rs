@@ -16,11 +16,11 @@ use rust_decimal::Decimal;
 use scraper::Html;
 
 use crate::{
+    core::util::{self, text},
     infra::crawler::{
         histock::HOST,
         share::{self, AnnualProfitFetcher},
     },
-    core::util::{self, text},
 };
 
 /// HiStock 年度財報抓取器。

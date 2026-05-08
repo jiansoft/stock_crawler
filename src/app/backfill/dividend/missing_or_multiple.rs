@@ -1,11 +1,11 @@
 use std::{collections::HashSet, time::Duration};
 
+use crate::{
+    app::calculation::dividend_record, core::logging, core::util::map::Keyable,
+    infra::crawler::yahoo, infra::database::table::dividend,
+};
 use anyhow::{Context, Result};
 use chrono::Local;
-use crate::{
-    app::calculation::dividend_record, infra::crawler::yahoo, infra::database::table::dividend, core::logging,
-    core::util::map::Keyable,
-};
 
 /// 歷年股利批次回補的執行結果。
 ///

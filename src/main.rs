@@ -6,9 +6,6 @@
 //! - 註冊結束訊號，讓行程可平順停止。
 //! - 啟動後做一次 gRPC 自我連線驗證。
 
-/*#[macro_use]
-extern crate rocket;*/
-
 #[cfg(all(target_os = "linux", target_env = "musl"))]
 use mimalloc::MiMalloc;
 #[cfg(all(target_os = "linux", target_env = "musl"))]
@@ -88,32 +85,6 @@ pub mod core;
 pub mod infra;
 pub mod interfaces;
 
-/*#[get("/")]
-fn index() -> &'static str {
-    "Hello, world!"
-}
-
-#[get("/world")]
-fn world() -> &'static str {
-    "Hello, world!"
-}
-
-#[rocket::main]
-async fn main() -> Result<(), rocket::Error> {
-    dotenv::dotenv().ok();
-    cache_share::CACHE_SHARE.load().await;
-    scheduler::start().await;
-
-    let _rocket = rocket::build()
-        .mount("/hello", routes![world])
-        .mount("/", routes![index])
-        .launch()
-        .await?;
-
-    Ok(())
-}
-*/
-
 /// 在 Unix 平台監聽 `SIGINT` / `SIGTERM`，並通知主迴圈結束。
 #[cfg(unix)]
 async fn unix_signal_handler(received_signal: Arc<AtomicBool>) -> Result<(), Box<dyn Error>> {
@@ -174,7 +145,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     dotenv::dotenv().ok();
-    core::logging::info_file_async("startup phase begin: crate::infra::cache::SHARE.load".to_string());
+    core::logging::info_file_async(
+        "startup phase begin: crate::infra::cache::SHARE.load".to_string(),
+    );
     let cache_load_timer = Instant::now();
     infra::cache::SHARE.load().await;
     core::logging::info_file_async(format!(
@@ -239,8 +212,3 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
-
-/*
-要計算價格下降的百分比，可以使用以下的公式：
-百分比變動=(新值−舊值) / 舊值 × 100%
-*/

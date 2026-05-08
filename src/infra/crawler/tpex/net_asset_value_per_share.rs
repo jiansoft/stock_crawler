@@ -4,7 +4,7 @@ use anyhow::Result;
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
-use crate::{infra::crawler::tpex, core::util};
+use crate::{core::util, infra::crawler::tpex};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 //#[serde(rename_all = "camelCase")]
@@ -67,7 +67,7 @@ pub async fn visit() -> Result<Vec<Emerging>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;

@@ -63,7 +63,7 @@ pub fn read_process_memory_stats() -> Option<ProcessMemoryStats> {
             }
         }
 
-        return Some(stats);
+        Some(stats)
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -79,7 +79,7 @@ pub fn read_process_memory_stats() -> Option<ProcessMemoryStats> {
 pub fn trim_allocator_memory() -> bool {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     unsafe {
-        return malloc_trim(0) != 0;
+        malloc_trim(0) != 0
     }
 
     #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
@@ -99,11 +99,11 @@ pub fn tune_allocator_for_long_running_process() -> AllocatorTuningResult {
         let arena_max_applied = mallopt(M_ARENA_MAX, 2) != 0;
         let trim_threshold_applied = mallopt(M_TRIM_THRESHOLD, 128 * 1024) != 0;
 
-        return AllocatorTuningResult {
+        AllocatorTuningResult {
             applied: arena_max_applied || trim_threshold_applied,
             arena_max_applied,
             trim_threshold_applied,
-        };
+        }
     }
 
     #[cfg(not(all(target_os = "linux", target_env = "gnu")))]

@@ -17,9 +17,10 @@ use serde::Deserialize;
 use tokio::time::sleep;
 
 use crate::{
+    core::logging,
+    core::util,
     infra::cache::RealtimeSnapshot,
     infra::crawler::yahoo::{self, YahooClassCategory, YahooClassExchange},
-    core::logging, core::util,
 };
 
 /// Yahoo 類股行情 JSON API 的基底 URL。
@@ -142,7 +143,6 @@ impl ClassQuotesPagination<'_> {
     /// 將 Yahoo 原始字串格式的 `nextOffset` 轉成數值。
     fn next_offset(&self) -> Result<Option<usize>> {
         self.next_offset
-            .as_deref()
             .map(|offset| {
                 offset.parse::<usize>().with_context(|| {
                     format!("Failed to parse Yahoo class quote nextOffset: {offset}")

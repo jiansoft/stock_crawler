@@ -4,7 +4,7 @@ use tokio_retry::{
     Retry,
 };
 
-use crate::{infra::crawler::yahoo, infra::database::table::dividend, core::logging};
+use crate::{core::logging, infra::crawler::yahoo, infra::database::table::dividend};
 
 /// 回補除息/發放日期尚未公布的股利資料。
 pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()> {

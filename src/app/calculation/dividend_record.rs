@@ -4,13 +4,11 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use crate::{
-    infra::database::{
-        table::{
-            dividend, dividend_record_detail::DividendRecordDetail, dividend_record_detail_more,
-            stock_ownership_details,
-        },
-    },
     core::logging,
+    infra::database::table::{
+        dividend, dividend_record_detail::DividendRecordDetail, dividend_record_detail_more,
+        stock_ownership_details,
+    },
 };
 
 /// 計算指定年份領取的股利。
@@ -416,7 +414,7 @@ pub async fn calculate(year: i32) {
 mod tests {
     use chrono::{Local, TimeZone};
 
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 

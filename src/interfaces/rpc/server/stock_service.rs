@@ -7,9 +7,9 @@ use rust_decimal::prelude::ToPrimitive;
 use tonic::{Request, Response, Status};
 
 use crate::{
+    core::logging,
     infra::cache::SHARE,
     infra::crawler::twse,
-    core::logging,
     interfaces::rpc::stock::{
         stock_server::Stock, HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest,
         StockInfoReply, StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest,

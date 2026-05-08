@@ -9,10 +9,10 @@ use sqlx::{
 };
 
 use crate::{
-    infra::crawler::{self, twse, wespai, yahoo},
-    infra::database,
     core::declare::Quarter,
     core::util::map::Keyable,
+    infra::crawler::{self, twse, wespai, yahoo},
+    infra::database,
 };
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]

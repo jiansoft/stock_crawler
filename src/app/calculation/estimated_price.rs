@@ -2,8 +2,8 @@ use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 
 use crate::{
-    infra::database::{table, table::estimate::Estimate},
     core::logging,
+    infra::database::{table, table::estimate::Estimate},
 };
 
 /// 計算便宜、合理、昂貴價的估算

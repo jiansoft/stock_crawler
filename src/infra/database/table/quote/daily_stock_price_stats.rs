@@ -200,7 +200,7 @@ ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
     use std::time::Duration;
     use tokio::time::sleep;
 

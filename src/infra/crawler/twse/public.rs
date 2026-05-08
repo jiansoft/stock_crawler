@@ -3,7 +3,7 @@ use chrono::{Datelike, Local, NaiveDate, TimeDelta};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::{interfaces::bot, infra::crawler::twse, core::util, core::util::map::Keyable};
+use crate::{core::util, core::util::map::Keyable, infra::crawler::twse, interfaces::bot};
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 struct PublicFormResponse {
@@ -117,8 +117,8 @@ pub async fn visit() -> Result<Vec<Public>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::cache::SHARE;
     use crate::core::logging;
+    use crate::infra::cache::SHARE;
 
     #[tokio::test]
     #[ignore]

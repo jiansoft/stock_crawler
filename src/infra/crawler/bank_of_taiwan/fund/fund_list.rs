@@ -3,9 +3,9 @@
 //! 目前會抓取基金配息頁面，解析每檔基金的名稱、除息日、單位價格與配息率等資訊。
 
 use crate::{
-    infra::crawler::bank_of_taiwan,
     core::util,
     core::util::{http, text},
+    infra::crawler::bank_of_taiwan,
 };
 use anyhow::anyhow;
 use chrono::NaiveDate;
@@ -123,8 +123,8 @@ pub async fn visit() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::crawler::bank_of_taiwan;
     use crate::core::logging;
+    use crate::infra::crawler::bank_of_taiwan;
 
     #[tokio::test]
     async fn test_visit() {

@@ -10,9 +10,9 @@ use scraper::{ElementRef, Html, Selector};
 
 use crate::infra::crawler::{bigdatacloud, myip};
 use crate::{
+    core::util::{self, map::Keyable, text},
     infra::crawler::{ipconfig, ipify, ipinfo, seeip},
     infra::database::table,
-    core::util::{self, map::Keyable, text},
 };
 
 /// 台灣 ETF 資訊載體。

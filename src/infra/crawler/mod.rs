@@ -27,11 +27,13 @@ use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
 use crate::{
+    core::declare,
+    core::logging,
+    core::util,
     infra::crawler::{
         cmoney::CMoney, cnyes::CnYes, fugle::Fugle, megatime::PcHome, nstock::NStock,
         winvest::Winvest, yahoo::Yahoo,
     },
-    core::declare, core::logging, core::util,
 };
 
 /// 臺灣銀行 (提供匯率、財務報表等資料)

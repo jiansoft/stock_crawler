@@ -1,14 +1,16 @@
 use std::fmt::Write;
 
 use crate::{
-    app::backfill, interfaces::bot,
-    interfaces::bot::telegram::Telegram,
+    app::backfill,
+    core::declare::StockExchangeMarket,
+    core::logging,
+    core::util::datetime::Weekend,
     infra::cache::SHARE,
     infra::crawler::{share::EtfInfo, tpex, twse},
     infra::database::table,
-    core::declare::StockExchangeMarket,
-    core::logging, interfaces::rpc,
-    core::util::datetime::Weekend,
+    interfaces::bot,
+    interfaces::bot::telegram::Telegram,
+    interfaces::rpc,
 };
 use anyhow::{anyhow, Result};
 use chrono::Local;

@@ -9,8 +9,10 @@ use crate::{
         delisted_company, dividend, etf, financial_statement, isin, net_asset_value_per_share,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
+    app::event,
+    core::declare,
+    core::logging,
     interfaces::bot::{self, telegram::Telegram},
-    core::declare, app::event, core::logging,
 };
 
 /// 啟動排程

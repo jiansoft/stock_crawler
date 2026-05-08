@@ -11,13 +11,13 @@ use urlencoding::encode;
 
 use crate::infra::cache::SHARE;
 use crate::{
-    infra::crawler::goodinfo::HOST,
     core::logging,
     core::util::{
         http::{self},
         map::Keyable,
         text,
     },
+    infra::crawler::goodinfo::HOST,
 };
 
 const UNSET_DATE: &str = "-";

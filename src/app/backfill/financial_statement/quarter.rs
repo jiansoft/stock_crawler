@@ -13,10 +13,10 @@ use chrono::Local;
 use crate::{
     app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
     app::calculation,
-    infra::crawler::yahoo,
-    infra::database::table,
     core::logging,
     core::util::{datetime::ReportQuarter, map::Keyable},
+    infra::crawler::yahoo,
+    infra::database::table,
 };
 
 /// 補齊最新應已公告季度財報中缺漏的 ROE、ROA 與每股淨值欄位。
@@ -63,7 +63,9 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
     for fs in fss {
         let cache_key = fs.key_with_prefix();
         let profile_skip_cache_key = yahoo::profile::no_valid_data_cache_key(&fs.security_code);
-        let is_jump = crate::infra::nosql::redis::CLIENT.get_bool(&cache_key).await?;
+        let is_jump = crate::infra::nosql::redis::CLIENT
+            .get_bool(&cache_key)
+            .await?;
         let is_profile_skip = crate::infra::nosql::redis::CLIENT
             .get_bool(&profile_skip_cache_key)
             .await?;
@@ -135,7 +137,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 

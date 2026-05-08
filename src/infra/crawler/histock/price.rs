@@ -25,13 +25,8 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::{
-    infra::cache::{RealtimeSnapshot, SHARE},
-    infra::crawler::{
-        histock::{HiStock, HOST},
-        StockInfo,
-    },
-    core::declare,
     app::event::trace::price_tasks as trace_price_tasks,
+    core::declare,
     core::util::{
         self,
         atomic::decrement_atomic_usize,
@@ -39,6 +34,11 @@ use crate::{
             read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
         },
         text,
+    },
+    infra::cache::{RealtimeSnapshot, SHARE},
+    infra::crawler::{
+        histock::{HiStock, HOST},
+        StockInfo,
     },
 };
 
@@ -303,7 +303,10 @@ pub fn start_caching_task() {
                     */
                 }
                 Err(e) => {
-                    crate::core::logging::error_file_async(format!("HiStock 快取更新失敗: {:?}", e));
+                    crate::core::logging::error_file_async(format!(
+                        "HiStock 快取更新失敗: {:?}",
+                        e
+                    ));
                 }
             }
 
@@ -323,7 +326,9 @@ pub fn start_caching_task() {
     if let Ok(mut task) = CACHING_TASK.lock() {
         *task = Some(handle);
     } else {
-        crate::core::logging::error_file_async("Failed to store HiStock caching task handle".to_string());
+        crate::core::logging::error_file_async(
+            "Failed to store HiStock caching task handle".to_string(),
+        );
     }
 }
 
@@ -346,7 +351,10 @@ pub async fn stop_caching_task() {
 
     if let Some(handle) = handle {
         if let Err(why) = handle.await {
-            crate::core::logging::error_file_async(format!("HiStock 快取任務停止等待失敗: {:?}", why));
+            crate::core::logging::error_file_async(format!(
+                "HiStock 快取任務停止等待失敗: {:?}",
+                why
+            ));
         }
     }
 
@@ -426,7 +434,10 @@ async fn get_snapshot(stock_symbol: &str) -> Result<RealtimeSnapshot> {
         return Ok(s);
     }
 
-    crate::core::logging::info_file_async(format!("HiStock 快取失效 ({})，觸發全量抓取", stock_symbol));
+    crate::core::logging::info_file_async(format!(
+        "HiStock 快取失效 ({})，觸發全量抓取",
+        stock_symbol
+    ));
     let fetch_result = fetch_all_from_rank().await?;
 
     let snapshot = fetch_result

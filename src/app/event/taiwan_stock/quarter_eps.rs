@@ -12,11 +12,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    infra::crawler::twse,
-    infra::database::table::{self, financial_statement, stock::Stock},
     core::declare::StockExchangeMarket,
     core::logging,
     core::util::{self, datetime::ReportQuarter},
+    infra::crawler::twse,
+    infra::database::table::{self, financial_statement, stock::Stock},
 };
 use anyhow::Result;
 use chrono::Local;
@@ -130,8 +130,8 @@ async fn process_eps(
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::cache::SHARE;
     use crate::core::declare::Quarter;
+    use crate::infra::cache::SHARE;
     use std::time::Duration;
 
     use super::*;

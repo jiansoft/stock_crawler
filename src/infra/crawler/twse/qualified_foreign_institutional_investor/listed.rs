@@ -3,9 +3,8 @@ use chrono::{DateTime, FixedOffset};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::{
-    infra::crawler::twse,
+    core::logging, core::util::http, infra::crawler::twse,
     infra::database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
-    core::logging, core::util::http,
 };
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

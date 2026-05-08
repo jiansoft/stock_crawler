@@ -11,13 +11,13 @@ use rust_decimal::Decimal;
 use scraper::Html;
 
 use crate::{
+    core::declare,
+    core::util::{self, text},
     infra::cache::SHARE,
     infra::crawler::{
         yahoo::{Yahoo, HOST},
         StockInfo,
     },
-    core::declare,
-    core::util::{self, text},
 };
 
 /// 將共用快取中的即時快照轉成 `StockQuotes` 回傳型別。

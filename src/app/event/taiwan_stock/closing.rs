@@ -2,9 +2,10 @@ use std::fmt::Write;
 
 use crate::{
     app::backfill,
-    interfaces::bot::{self, telegram::Telegram},
+    app::calculation,
+    core::logging,
     infra::cache::{TtlCacheInner, TTL},
-    app::calculation, infra::crawler,
+    infra::crawler,
     infra::database::table::{
         daily_money_history_member::{
             DailyMoneyHistoryMember, DailyMoneyHistoryMemberWithPreviousTradingDay,
@@ -12,7 +13,7 @@ use crate::{
         daily_quote, last_daily_quotes,
         yield_rank::YieldRank,
     },
-    core::logging,
+    interfaces::bot::{self, telegram::Telegram},
 };
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
@@ -177,7 +178,7 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
     use std::time::Duration;
 
     use rust_decimal_macros::dec;

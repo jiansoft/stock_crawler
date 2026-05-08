@@ -44,11 +44,11 @@ use scraper::{Html, Selector};
 use serde::Deserialize;
 
 use crate::{
+    core::util::text,
     infra::crawler::{
         mops::HOST,
         share::{self, AnnualProfitFetcher},
     },
-    core::util::text,
 };
 
 /// MOPS 年度財報抓取器標記型別。

@@ -15,12 +15,12 @@ use super::{
 };
 use crate::infra::crawler::share as crawler_share;
 use crate::{
+    core::logging,
+    core::util::map::Keyable,
     infra::database::table::{
         daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,
         stock_exchange_market,
     },
-    core::logging,
-    core::util::map::Keyable,
 };
 
 /// 全域共享資料快取實例。

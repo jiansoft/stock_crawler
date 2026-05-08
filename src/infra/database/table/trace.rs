@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgRow, QueryBuilder, Row};
 
-use crate::{infra::database, core::util::map::Keyable};
+use crate::{core::util::map::Keyable, infra::database};
 
 /// 追蹤股票價格區間設定。
 #[derive(sqlx::Type, sqlx::FromRow, Debug)]
@@ -63,7 +63,7 @@ impl Clone for Trace {
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::database::table::trace, core::logging};
+    use crate::{core::logging, infra::database::table::trace};
 
     #[tokio::test]
     #[ignore]

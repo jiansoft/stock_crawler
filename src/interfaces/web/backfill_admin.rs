@@ -27,9 +27,9 @@ use tokio::sync::RwLock;
 use crate::{
     app::backfill::{dividend, quote, taiwan_stock_index},
     app::calculation::dividend_record,
-    infra::database,
     app::event::taiwan_stock::closing,
     core::logging,
+    infra::database,
 };
 
 /// Backfill admin Web API 共用狀態。
@@ -555,6 +555,7 @@ where
 }
 
 /// 解析 HTTP request 的日期欄位，格式錯誤時回傳一致的 400 response。
+#[allow(clippy::result_large_err)]
 fn parse_request_date(date: &str) -> Result<NaiveDate, axum::response::Response> {
     NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").map_err(|why| {
         (
@@ -568,6 +569,7 @@ fn parse_request_date(date: &str) -> Result<NaiveDate, axum::response::Response>
 }
 
 /// 解析 HTTP request 的證券代號欄位，格式錯誤時回傳一致的 400 response。
+#[allow(clippy::result_large_err)]
 fn parse_request_security_code(security_code: String) -> Result<String, axum::response::Response> {
     normalize_security_code(security_code).map_err(|why| {
         (

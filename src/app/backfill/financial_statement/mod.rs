@@ -4,14 +4,14 @@ use anyhow::Result;
 use rust_decimal::Decimal;
 
 use crate::{
+    core::declare::Quarter,
+    core::logging,
+    core::util::map::Keyable,
     infra::crawler::nstock::{
         self,
         eps::{EpsQuarter, EpsYear},
     },
     infra::database::table::financial_statement::{self, FinancialStatement},
-    core::declare::Quarter,
-    core::logging,
-    core::util::map::Keyable,
 };
 
 /// 更新台股年度財報
@@ -82,7 +82,7 @@ async fn update_roe_and_roa(fs: &mut FinancialStatement, roe: Decimal, roa: Deci
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 
