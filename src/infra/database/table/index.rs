@@ -218,17 +218,13 @@ impl From<Vec<String>> for Index {
         index.trading_volume =
             Decimal::from_str(&item[1].replace(',', "")).unwrap_or(Decimal::ZERO);
 
-        index.trade_value =
-            Decimal::from_str(&item[2].replace(',', "")).unwrap_or(Decimal::ZERO);
+        index.trade_value = Decimal::from_str(&item[2].replace(',', "")).unwrap_or(Decimal::ZERO);
 
-        index.transaction =
-            Decimal::from_str(&item[3].replace(',', "")).unwrap_or(Decimal::ZERO);
+        index.transaction = Decimal::from_str(&item[3].replace(',', "")).unwrap_or(Decimal::ZERO);
 
-        index.index =
-            Decimal::from_str(&item[4].replace(',', "")).unwrap_or(Decimal::ZERO);
+        index.index = Decimal::from_str(&item[4].replace(',', "")).unwrap_or(Decimal::ZERO);
 
-        index.change =
-            Decimal::from_str(&item[5].replace(',', "")).unwrap_or(Decimal::ZERO);
+        index.change = Decimal::from_str(&item[5].replace(',', "")).unwrap_or(Decimal::ZERO);
         index
     }
 }
