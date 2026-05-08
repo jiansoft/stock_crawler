@@ -17,14 +17,18 @@ allow = [
     "Zlib",
     "Unlicense",
     "MPL-2.0",
-    "Unicode-DFS-2016",
     "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+    "BSL-1.0",
 ]
 confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
 highlight = "all"
+skip = [
+    { name = "block-buffer", version = "*" },
+]
 
 [sources]
 unknown-registry = "deny"
