@@ -6,10 +6,25 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+    - uses: actions/checkout@v4
+    - name: Dependency review
+      uses: actions/dependency-review-action@v4
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
@@ -33,6 +48,8 @@ jobs:
       with:
         toolchain: 1.95.0
         components: clippy
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2
 
     - name: Cargo check
       run: cargo check --verbose
@@ -49,6 +66,8 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: 1.95.0
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2
 
     - name: Build
       run: cargo build --verbose
@@ -82,10 +101,10 @@ jobs:
       with:
         toolchain: 1.95.0
         components: rustfmt, clippy
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2
     - name: Install PostgresSQL client
       run: sudo apt-get -yqq install postgresql-client
-
-
 
     - name: Run SQL file
       run: |
