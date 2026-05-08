@@ -4,11 +4,11 @@ use serde::Deserialize;
 
 // 匯入專案內部模組
 use crate::{
+    core::declare::StockExchangeMarket,
+    core::util::{self, datetime::Weekend},
     infra::cache::SHARE,
     infra::crawler::{share::EtfInfo, tpex},
     infra::database::table,
-    core::declare::StockExchangeMarket,
-    core::util::{self, datetime::Weekend},
 };
 
 /// 櫃買中心 (TPEx) OpenAPI 的原始資料格式

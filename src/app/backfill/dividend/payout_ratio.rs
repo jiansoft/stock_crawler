@@ -1,10 +1,10 @@
 use std::{collections::HashSet, time::Duration};
 
 use crate::{
-    infra::crawler::goodinfo,
-    infra::database::{table, table::stock},
     core::logging,
     core::util::map::{vec_to_hashmap, Keyable},
+    infra::crawler::goodinfo,
+    infra::database::{table, table::stock},
 };
 use anyhow::Result;
 use scopeguard::defer;
@@ -32,7 +32,9 @@ pub async fn execute() -> Result<()> {
         }
 
         let cache_key = format!("goodinfo:payout_ratio:{}", security_code);
-        let is_jump = crate::infra::nosql::redis::CLIENT.get_bool(&cache_key).await?;
+        let is_jump = crate::infra::nosql::redis::CLIENT
+            .get_bool(&cache_key)
+            .await?;
         if is_jump {
             continue;
         }
@@ -78,7 +80,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 

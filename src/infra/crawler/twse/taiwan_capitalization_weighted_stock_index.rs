@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{infra::crawler::twse, core::util};
+use crate::{core::util, infra::crawler::twse};
 
 /// 調用台股指數 twse API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,7 +36,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<Index> {
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 

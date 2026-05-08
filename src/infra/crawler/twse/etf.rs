@@ -4,11 +4,11 @@ use serde::Deserialize;
 
 // 匯入專案內部模組：包含共用資訊載體、全域快取、交易所定義、資料表定義與工具函式
 use crate::{
+    core::declare::StockExchangeMarket,
+    core::util::{self, datetime::Weekend},
     infra::cache::SHARE,
     infra::crawler::{share::EtfInfo, twse},
     infra::database::table,
-    core::declare::StockExchangeMarket,
-    core::util::{self, datetime::Weekend},
 };
 
 /// 證交所 (TWSE) OpenAPI 的原始資料格式

@@ -6,9 +6,9 @@ use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, Row};
 
 use crate::{
-    infra::database::{self, table::daily_quote::extension::MonthlyStockPriceSummary, CopyIn},
     core::declare::StockExchange,
     core::util::{datetime, map::Keyable},
+    infra::database::{self, table::daily_quote::extension::MonthlyStockPriceSummary, CopyIn},
 };
 
 pub(crate) mod extension;
@@ -763,7 +763,7 @@ mod tests {
     use chrono::Datelike;
 
     use crate::infra::crawler::twse;
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 

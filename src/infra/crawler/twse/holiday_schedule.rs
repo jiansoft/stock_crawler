@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-use crate::{interfaces::bot, infra::crawler::twse, core::util};
+use crate::{core::util, infra::crawler::twse, interfaces::bot};
 
 #[derive(Serialize, Deserialize)]
 struct HolidayScheduleResponse {
@@ -78,8 +78,8 @@ async fn report_error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::cache::SHARE;
     use crate::core::logging;
+    use crate::infra::cache::SHARE;
     use chrono::Datelike;
 
     #[tokio::test]

@@ -163,7 +163,7 @@ mod tests {
 
     use tokio::time;
 
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 

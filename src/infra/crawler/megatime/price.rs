@@ -16,12 +16,12 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
 use crate::{
+    core::declare,
+    core::util::{self, http::element, text},
     infra::crawler::{
         megatime::{PcHome, HOST},
         StockInfo,
     },
-    core::declare,
-    core::util::{self, http::element, text},
 };
 
 /// 股票資訊容器的 CSS 選擇器（包含主 ID 與備援 Class）
@@ -145,7 +145,7 @@ impl PcHome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{infra::crawler::log_stock_price_test, core::logging};
+    use crate::{core::logging, infra::crawler::log_stock_price_test};
 
     #[tokio::test]
     async fn test_get_stock_price() {

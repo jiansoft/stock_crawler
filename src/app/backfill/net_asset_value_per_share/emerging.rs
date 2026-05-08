@@ -1,6 +1,6 @@
 use crate::{
-    app::backfill::net_asset_value_per_share::update, infra::cache::SHARE, infra::crawler::tpex, infra::database::table,
-    core::logging, core::util::datetime::Weekend,
+    app::backfill::net_asset_value_per_share::update, core::logging, core::util::datetime::Weekend,
+    infra::cache::SHARE, infra::crawler::tpex, infra::database::table,
 };
 use anyhow::Result;
 use chrono::Local;

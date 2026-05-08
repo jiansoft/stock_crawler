@@ -6,7 +6,7 @@ use concat_string::concat_string;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 
-use crate::{infra::database, core::logging, core::util, core::util::map::Keyable};
+use crate::{core::logging, core::util, core::util::map::Keyable, infra::database};
 
 /// 台股指數資料列（目前以 `TAIEX` 為主）。
 #[derive(sqlx::Type, FromRow, Debug)]

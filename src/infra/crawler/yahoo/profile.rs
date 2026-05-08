@@ -24,7 +24,7 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::{infra::crawler::yahoo::HOST, core::util, core::util::http::element};
+use crate::{core::util, core::util::http::element, infra::crawler::yahoo::HOST};
 
 /// 用於解析季度（如 Q1, Q2）的正則表達式
 static REG_QUARTER: Lazy<Regex> =

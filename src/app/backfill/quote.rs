@@ -5,11 +5,12 @@ use chrono::NaiveDate;
 use futures::{stream, StreamExt};
 
 use crate::{
+    core::logging,
+    core::util,
+    core::util::map::Keyable,
     infra::cache::{TtlCacheInner, SHARE, TTL},
     infra::crawler::{tpex, twse},
     infra::database::table::{self, daily_quote::DailyQuote},
-    core::logging, core::util,
-    core::util::map::Keyable,
 };
 
 /// 調用  twse、tpex API 取得台股收盤報價
@@ -96,7 +97,9 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{infra::cache::SHARE, infra::database, infra::database::table::stock, core::logging};
+    use crate::{
+        core::logging, infra::cache::SHARE, infra::database, infra::database::table::stock,
+    };
 
     use super::*;
 

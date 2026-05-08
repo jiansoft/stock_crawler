@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::{infra::crawler::wespai::HOST, core::util::http, core::util::http::element};
+use crate::{core::util::http, core::util::http::element, infra::crawler::wespai::HOST};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 /// Wespai 財務指標頁面的單筆獲利資料。

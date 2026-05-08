@@ -5,12 +5,12 @@ use rust_decimal::Decimal;
 use scraper::Html;
 
 use crate::{
+    core::declare,
+    core::util::{self, text},
     infra::crawler::{
         cmoney::{CMoney, HOST},
         StockInfo,
     },
-    core::declare,
-    core::util::{self, text},
 };
 
 /// 建立 CMoney 個股頁面的請求標頭。
@@ -163,7 +163,7 @@ impl StockInfo for CMoney {
 /// 這些測試需連線外部網站，執行結果會受網路與來源頁面變動影響。
 mod tests {
     use super::*;
-    use crate::{infra::crawler::log_stock_price_test, core::logging};
+    use crate::{core::logging, infra::crawler::log_stock_price_test};
 
     #[test]
     fn test_parse_required_decimal_rejects_dash() {

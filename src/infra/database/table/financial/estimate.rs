@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
 use sqlx::postgres::PgQueryResult;
 
-use crate::{infra::database, core::declare::Industry};
+use crate::{core::declare::Industry, infra::database};
 
 /// 個股估值資料。
 ///
@@ -491,7 +491,7 @@ ON CONFLICT (date, security_code) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
     use chrono::Datelike;
 
     use super::*;

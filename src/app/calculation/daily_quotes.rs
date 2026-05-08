@@ -4,16 +4,18 @@ use futures::{stream, StreamExt};
 use rust_decimal::Decimal;
 
 use crate::{
+    core::logging,
+    core::util,
     infra::cache::SHARE,
     infra::database::table::{daily_quote::DailyQuote, quote_history_record::QuoteHistoryRecord},
-    core::logging, core::util,
 };
 
 /// 計算所有上市櫃公司在指定日期的均線值與歷史高低點。
 ///
 /// 此函數會平行處理所有股票的計算，最後進行批次資料庫更新以極大化效能。
 pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
-    let quotes = crate::infra::database::table::daily_quote::fetch_daily_quotes_by_date(date).await?;
+    let quotes =
+        crate::infra::database::table::daily_quote::fetch_daily_quotes_by_date(date).await?;
 
     // 使用並行流處理計算，但不在此處執行資料庫寫入
     let results = stream::iter(quotes)

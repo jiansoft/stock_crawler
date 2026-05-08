@@ -5,11 +5,11 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    core::logging,
+    core::util::{http, map::Keyable},
     infra::cache::{TtlCacheInner, TTL},
     infra::crawler::twse,
     infra::database::table::{self},
-    core::logging,
-    core::util::{http, map::Keyable},
 };
 
 /*#[derive(Serialize, Deserialize, Debug)]
@@ -188,7 +188,7 @@ mod tests {
     use chrono::{TimeDelta, Timelike};
     use std::time::Duration;
 
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 

@@ -17,9 +17,10 @@ use serde::Deserialize;
 use tokio::time::sleep;
 
 use crate::{
+    core::logging,
+    core::util,
     infra::cache::RealtimeSnapshot,
     infra::crawler::yahoo::{self, YahooClassCategory, YahooClassExchange},
-    core::logging, core::util,
 };
 
 /// Yahoo 類股行情 JSON API 的基底 URL。

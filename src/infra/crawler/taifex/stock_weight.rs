@@ -6,9 +6,9 @@ use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::{
-    infra::crawler::{taifex, taifex::HOST},
     core::declare::StockExchange,
     core::util::{self, http::element},
+    infra::crawler::{taifex, taifex::HOST},
 };
 
 #[derive(Default, Debug, Clone, PartialEq)]

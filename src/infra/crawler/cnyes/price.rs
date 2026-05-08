@@ -4,12 +4,12 @@ use rust_decimal::Decimal;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::{
+    core::declare::StockQuotes,
+    core::util::{self},
     infra::crawler::{
         cnyes::{CnYes, HOST},
         StockInfo,
     },
-    core::declare::StockQuotes,
-    core::util::{self},
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -94,7 +94,7 @@ impl StockInfo for CnYes {
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::crawler::log_stock_price_test, core::logging};
+    use crate::{core::logging, infra::crawler::log_stock_price_test};
 
     use super::*;
 

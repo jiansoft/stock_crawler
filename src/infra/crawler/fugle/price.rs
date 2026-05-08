@@ -13,12 +13,12 @@ use serde_derive::Deserialize;
 
 use crate::{
     core::config::SETTINGS,
+    core::declare::StockQuotes,
+    core::util,
     infra::crawler::{
         fugle::{Fugle, HOST},
         StockInfo,
     },
-    core::declare::StockQuotes,
-    core::util,
 };
 
 /// Fugle 官方限制為 60 次 / 分鐘，這裡保留安全餘量避免撞線。

@@ -25,8 +25,8 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 
 use crate::{
-    infra::crawler::yahoo::HOST,
     core::util::{http, text},
+    infra::crawler::yahoo::HOST,
 };
 
 /// 用於解析股利所屬期間（如 2024Q4）的正則表達式

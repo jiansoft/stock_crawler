@@ -30,14 +30,14 @@ use tokio::{
 };
 
 use super::{stats as trace_stats, stock_price};
+use crate::{core::declare, core::logging, infra::cache::SHARE, infra::crawler};
 use crate::{
-    infra::cache::RealtimeSnapshot,
     core::util::{
         atomic::decrement_atomic_usize,
         diagnostics::{read_process_memory_stats, trim_allocator_memory, TaskRuntimeStatus},
     },
+    infra::cache::RealtimeSnapshot,
 };
-use crate::{infra::cache::SHARE, infra::crawler, core::declare, core::logging};
 
 /// 價格更新事件。
 #[derive(Debug, Clone)]

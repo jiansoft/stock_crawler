@@ -24,11 +24,11 @@ use chrono::NaiveDate;
 
 use crate::{
     app::backfill::{dividend, quote, taiwan_stock_index},
-    infra::cache::SHARE,
     app::calculation::dividend_record,
-    infra::database,
     app::event::taiwan_stock::closing,
     core::logging,
+    infra::cache::SHARE,
+    infra::database,
 };
 
 /// 手動回補各股每日收盤報價時使用的預設交易日。

@@ -26,13 +26,14 @@ use tokio::{task, time};
 use super::{price_tasks as trace_price_tasks, stats as trace_stats};
 use crate::interfaces::bot::telegram::Telegram;
 use crate::{
-    interfaces::bot,
+    core::declare,
+    core::logging,
+    core::util::{datetime::Weekend, map::Keyable},
     infra::cache::RealtimeSnapshot,
     infra::cache::SHARE,
     infra::crawler::twse,
     infra::database::table::trace::Trace,
-    core::declare, core::logging,
-    core::util::{datetime::Weekend, map::Keyable},
+    interfaces::bot,
 };
 
 /// 確保整個追蹤執行流程只有一個實例在執行。
@@ -367,7 +368,10 @@ async fn alert_on_price_boundary(
     // 檢查 Redis 快取，避免針對同一方向重複通知
     // Key 格式包含股票代號與邊界類型，存活時間設為 1 小時，避免頻繁轟炸
     let target_key = format!("{}:{}", target.key_with_prefix(), boundary_type);
-    if let Ok(exist) = crate::infra::nosql::redis::CLIENT.contains_key(&target_key).await {
+    if let Ok(exist) = crate::infra::nosql::redis::CLIENT
+        .contains_key(&target_key)
+        .await
+    {
         if exist {
             return Ok(false);
         }

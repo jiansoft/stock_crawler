@@ -18,12 +18,12 @@ use rust_decimal::Decimal;
 use serde_derive::Deserialize;
 
 use crate::{
+    core::declare::StockQuotes,
+    core::util::{self},
     infra::crawler::{
         yuanta::{Yuanta, HOST},
         StockInfo,
     },
-    core::declare::StockQuotes,
-    core::util::{self},
 };
 
 /// 元大即時報價 API 回應主體。

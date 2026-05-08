@@ -1,7 +1,8 @@
-use anyhow::Result;
 use crate::{
-    app::backfill::net_asset_value_per_share::update, infra::crawler::yahoo::profile, infra::database::table, core::logging,
+    app::backfill::net_asset_value_per_share::update, core::logging,
+    infra::crawler::yahoo::profile, infra::database::table,
 };
+use anyhow::Result;
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
 pub async fn execute() -> Result<()> {

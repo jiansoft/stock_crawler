@@ -2,11 +2,10 @@ use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
 
 use crate::infra::database::table::{
-        daily_money_history::DailyMoneyHistory,
-        daily_money_history_detail::DailyMoneyHistoryDetail,
-        daily_money_history_detail_more::DailyMoneyHistoryDetailMore,
-        daily_money_history_member::DailyMoneyHistoryMember,
-        daily_stock_price_stats::DailyStockPriceStats,
+    daily_money_history::DailyMoneyHistory, daily_money_history_detail::DailyMoneyHistoryDetail,
+    daily_money_history_detail_more::DailyMoneyHistoryDetailMore,
+    daily_money_history_member::DailyMoneyHistoryMember,
+    daily_stock_price_stats::DailyStockPriceStats,
 };
 
 /// 計算並重建指定交易日的帳戶市值相關資料。
@@ -93,7 +92,7 @@ pub async fn calculate_money_history(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE, core::logging};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 
