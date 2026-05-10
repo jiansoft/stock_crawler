@@ -117,7 +117,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let allocator_tuning = core::util::diagnostics::tune_allocator_for_long_running_process();
 
     #[cfg(all(target_os = "linux", target_env = "musl"))]
-    logging::info_file_async(
+    core::logging::info_file_async(
         "allocator profile: mimalloc (musl target), purge_delay=0, purge_decommits=1, thp=0, large_os_pages=0, arena_eager_commit=0"
             .to_string(),
     );
