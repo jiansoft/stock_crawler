@@ -73,6 +73,11 @@ Get-CommandOutput 'cmake' @('--version') |
     ForEach-Object { Write-Host "  - $_" }
 Get-CommandOutput 'zig' @('version') | ForEach-Object { Write-Host "  - zig $_" }
 Get-CommandOutput 'cargo' @('--version') | ForEach-Object { Write-Host "  - $_" }
+try {
+    Get-CommandOutput 'cargo-zigbuild' @('--version') | ForEach-Object { Write-Host "  - $_" }
+} catch {
+    Write-Host '  - cargo-zigbuild not found'
+}
 Get-CommandOutput 'rustc' @('--version') | ForEach-Object { Write-Host "  - $_" }
 if (Test-CommandExists 'rustup') {
     $rustupVersion = cmd /c "rustup --version 2>nul"
