@@ -283,8 +283,10 @@ async fn calculate_dividend(
         dividend_sum.total,
     );
 
-    let mut tx_option = crate::infra::database::get_tx().await.ok();
-    //更新股利領取記錄
+    // 股利總表、逐項明細與持股累積欄位必須一起成功或一起回滾；
+    // 因此 transaction 建立失敗時直接回傳錯誤，不退回非交易寫入。
+    let mut tx_option = Some(crate::infra::database::get_tx().await?);
+    // 更新股利領取記錄。
     let dividend_record_detail_serial = match drd.upsert(&mut tx_option).await {
         Ok(serial) => serial,
         Err(why) => {

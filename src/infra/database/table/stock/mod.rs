@@ -279,8 +279,8 @@ ORDER BY
             .await
             .map_err(|why| {
                 anyhow!(
-                    "Failed to Stock::fetch from database({:#?}) because:{:?}",
-                    crate::core::config::SETTINGS.postgresql,
+                    "Failed to Stock::fetch from database({}) because:{:?}",
+                    database::redacted_postgresql_summary(),
                     why
                 )
             })

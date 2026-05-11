@@ -33,9 +33,12 @@ impl Redis {
         );
 
         let cfg = Config::from_url(&connection_url);
-        let pool = cfg
-            .create_pool(Some(Runtime::Tokio1))
-            .unwrap_or_else(|_| panic!("wrong redis URL {}", connection_url));
+        let pool = cfg.create_pool(Some(Runtime::Tokio1)).unwrap_or_else(|_| {
+            panic!(
+                "wrong redis URL redis://{}:***@{}/{}",
+                SETTINGS.nosql.redis.account, SETTINGS.nosql.redis.addr, SETTINGS.nosql.redis.db
+            )
+        });
         pool.resize(1024);
         Redis { pool }
     }

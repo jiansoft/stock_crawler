@@ -228,12 +228,8 @@ impl App {
             match config {
                 Ok(cfg) => return Ok(cfg.override_with_env()),
                 Err(e) => {
-                    // 列印錯誤資訊和設定檔內容
-                    eprintln!(
-                        "Failed to load config file: {:?}, content: {}",
-                        e,
-                        std::fs::read_to_string(&config_path).unwrap_or_default()
-                    );
+                    // 設定檔可能包含 token、password 等敏感資訊，錯誤訊息只保留路徑與解析錯誤。
+                    eprintln!("Failed to load config file {:?}: {:?}", config_path, e);
                     panic!("Failed to load config file: {:?}", e);
                 }
             }
@@ -482,16 +478,22 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async(format!("SETTINGS.system: {:#?}\r\n", SETTINGS.system));
         logging::debug_file_async(format!(
-            "SETTINGS.postgresql: {:#?}\r\nSETTINGS.secret: {:#?}\r\n",
-            SETTINGS.postgresql, SETTINGS.bot
+            "SETTINGS.postgresql: host={} port={} db={} user={}\r\n",
+            SETTINGS.postgresql.host,
+            SETTINGS.postgresql.port,
+            SETTINGS.postgresql.db,
+            SETTINGS.postgresql.user
         ));
 
         logging::debug_file_async(format!(
-            "SETTINGS.nosql.redis: {:#?}\r\n",
-            SETTINGS.nosql.redis
+            "SETTINGS.nosql.redis: addr={} account={} db={}\r\n",
+            SETTINGS.nosql.redis.addr, SETTINGS.nosql.redis.account, SETTINGS.nosql.redis.db
         ));
 
-        logging::debug_file_async(format!("SETTINGS.rpc: {:#?}\r\n", SETTINGS.rpc));
+        logging::debug_file_async(format!(
+            "SETTINGS.rpc.go_service: target={} domain_name={}\r\n",
+            SETTINGS.rpc.go_service.target, SETTINGS.rpc.go_service.domain_name
+        ));
 
         let mut map: HashMap<i64, String> = HashMap::new();
         map.insert(123, "QQ".to_string());

@@ -954,7 +954,11 @@ mod tests {
         logging::debug_file_async("結束 upsert".to_string());
     }
 
+    /// 手動驗證 TWSE 報價抓取後可透過 COPY 寫入測試資料。
+    ///
+    /// 此測試同時依賴外部網路與本機資料庫，預設測試集不應執行。
     #[tokio::test]
+    #[ignore]
     async fn test_copy_in_raw() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 copy_in_raw".to_string());
