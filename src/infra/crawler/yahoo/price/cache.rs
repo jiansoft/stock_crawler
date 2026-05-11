@@ -514,13 +514,11 @@ fn rss_delta_kib(before: Option<ProcessMemoryStats>, after: Option<ProcessMemory
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::Mutex,
-        time::{Duration, Instant},
-    };
+    use std::time::{Duration, Instant};
 
     use once_cell::sync::Lazy;
     use rust_decimal_macros::dec;
+    use tokio::sync::Mutex;
     use tokio::time::sleep;
 
     use super::*;
@@ -530,7 +528,7 @@ mod tests {
     /// 驗證快取全量更新前，只會針對價格實際異動的股票產生事件。
     #[test]
     fn test_apply_category_snapshots_counts_changed_prices() {
-        let _lock = TEST_STATE_LOCK.lock().unwrap();
+        let _lock = TEST_STATE_LOCK.blocking_lock();
         SHARE.clear_stock_snapshots();
 
         let category = YahooClassCategory::enabled(
@@ -571,7 +569,7 @@ mod tests {
     /// 驗證同一個類股重新更新時，已不存在的股票會從共用快取中移除。
     #[test]
     fn test_apply_category_snapshots_replaces_removed_symbols_in_same_category() {
-        let _lock = TEST_STATE_LOCK.lock().unwrap();
+        let _lock = TEST_STATE_LOCK.blocking_lock();
         SHARE.clear_stock_snapshots();
 
         let category = YahooClassCategory::enabled(
@@ -608,7 +606,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_start_and_stop_caching_task_integration() {
-        let _lock = TEST_STATE_LOCK.lock().unwrap();
+        let _lock = TEST_STATE_LOCK.lock().await;
         const CACHE_WARMUP_TIMEOUT: Duration = Duration::from_secs(30);
         const CACHE_WARMUP_POLL_INTERVAL: Duration = Duration::from_millis(500);
 

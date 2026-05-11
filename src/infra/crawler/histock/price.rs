@@ -482,9 +482,8 @@ impl StockInfo for HiStock {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
     use once_cell::sync::Lazy;
+    use tokio::sync::Mutex;
 
     use super::*;
     use crate::core::logging;
@@ -495,7 +494,7 @@ mod tests {
     /// 驗證全量快取更新前，只會針對價格實際異動的股票產生價格事件。
     #[test]
     fn test_collect_changed_price_updates() {
-        let _guard = TEST_STATE_LOCK.lock().unwrap();
+        let _guard = TEST_STATE_LOCK.blocking_lock();
         SHARE.clear_stock_snapshots();
 
         let mut existing_snapshot = RealtimeSnapshot::new("2330".to_string(), dec!(998));
@@ -567,7 +566,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_mechanism() {
-        let _guard = TEST_STATE_LOCK.lock().unwrap();
+        let _guard = TEST_STATE_LOCK.lock().await;
         stop_caching_task().await;
         {
             assert!(
@@ -604,7 +603,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_start_caching_task_integration() {
-        let _guard = TEST_STATE_LOCK.lock().unwrap();
+        let _guard = TEST_STATE_LOCK.lock().await;
         stop_caching_task().await;
         start_caching_task();
 
@@ -626,7 +625,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_price() {
-        let _guard = TEST_STATE_LOCK.lock().unwrap();
+        let _guard = TEST_STATE_LOCK.lock().await;
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 HiStock::get_stock_price".to_string());
 
@@ -644,7 +643,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_quotes() {
-        let _guard = TEST_STATE_LOCK.lock().unwrap();
+        let _guard = TEST_STATE_LOCK.lock().await;
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 HiStock::get_stock_quotes".to_string());
 
@@ -664,7 +663,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_price_with_cache_verification() {
-        let _guard = TEST_STATE_LOCK.lock().unwrap();
+        let _guard = TEST_STATE_LOCK.lock().await;
         // 1. 清空快取
         stop_caching_task().await;
 
@@ -681,7 +680,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_quotes_with_cache_verification() {
-        let _guard = TEST_STATE_LOCK.lock().unwrap();
+        let _guard = TEST_STATE_LOCK.lock().await;
         // 1. 清空快取
         stop_caching_task().await;
 
