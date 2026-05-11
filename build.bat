@@ -43,6 +43,12 @@ echo [4/8] Tool versions:
 for /f "delims=" %%i in ('cmake --version ^| findstr /B /C:"cmake version"') do echo   - %%i
 for /f "delims=" %%i in ('zig version') do echo   - zig %%i
 for /f "delims=" %%i in ('cargo --version') do echo   - %%i
+cargo-zigbuild --version >nul 2>&1
+if errorlevel 1 (
+  echo   - cargo-zigbuild not found
+) else (
+  for /f "delims=" %%i in ('cargo-zigbuild --version') do echo   - %%i
+)
 for /f "delims=" %%i in ('rustc --version') do echo   - %%i
 rustup --version >nul 2>&1
 if errorlevel 1 (
