@@ -444,7 +444,12 @@ mod tests {
 
     use super::*;
 
+    /// 手動驗證外部 HTTP 來源是否可正常請求。
+    ///
+    /// 這個測試需要實際連線 TWSE 與 httpbin，預設測試集不應依賴外部網路，
+    /// 因此標記為 ignored，避免 CI 或離線環境因網路限制而失敗。
     #[tokio::test]
+    #[ignore]
     async fn test_request() {
         let url = concat_string!(
             "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json&date=",

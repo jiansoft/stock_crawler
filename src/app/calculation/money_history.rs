@@ -24,9 +24,9 @@ use crate::infra::database::table::{
 /// # Errors
 /// 任一步驟失敗都會回滾 transaction（若已建立），並回傳錯誤。
 pub async fn calculate_money_history(date: NaiveDate) -> Result<()> {
-    // 優先使用同一筆 transaction 保障跨表一致性；
-    // 若無法建立 transaction，則退化為各 SQL 自行執行。
-    let mut tx_option = crate::infra::database::get_tx().await.ok();
+    // 這個流程會一次更新多張互相依賴的資料表，必須先取得 transaction；
+    // 若無法 BEGIN 就直接回傳錯誤，避免退回非交易模式後留下部分更新。
+    let mut tx_option = Some(crate::infra::database::get_tx().await?);
 
     // 1) 先寫入當日市值總覽，供後續明細與通知流程使用。
     if let Err(why) = DailyMoneyHistory::upsert(date, &mut tx_option).await {

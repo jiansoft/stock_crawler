@@ -43,6 +43,20 @@ pub(super) async fn copy_in_raw(copy_in_query: &str, items: &[impl CopyIn]) -> R
     Ok(writer.finish().await?)
 }
 
+/// 回傳不含密碼的 PostgreSQL 連線摘要。
+///
+/// 錯誤訊息與測試輸出會使用這個摘要，避免把 `POSTGRESQL_PASSWORD`
+/// 或設定檔中的密碼寫入 console/log。
+pub(crate) fn redacted_postgresql_summary() -> String {
+    format!(
+        "PostgreSQL {{ host: {:?}, port: {}, user: {:?}, password: \"***\", db: {:?} }}",
+        config::SETTINGS.postgresql.host,
+        config::SETTINGS.postgresql.port,
+        config::SETTINGS.postgresql.user,
+        config::SETTINGS.postgresql.db
+    )
+}
+
 impl PostgresSQL {
     /// 建立 PostgreSQL 連線池。
     ///
@@ -63,7 +77,15 @@ impl PostgresSQL {
             .acquire_timeout(Duration::from_secs(5))
             .idle_timeout(Some(Duration::from_secs(600))) // 10 分鐘
             .connect_lazy(&database_url)
-            .unwrap_or_else(|_| panic!("wrong database URL {}", database_url));
+            .unwrap_or_else(|_| {
+                panic!(
+                    "wrong database URL postgres://{}:***@{}:{}/{}?application_name=stock_crawler_rust",
+                    config::SETTINGS.postgresql.user,
+                    config::SETTINGS.postgresql.host,
+                    config::SETTINGS.postgresql.port,
+                    config::SETTINGS.postgresql.db
+                )
+            });
 
         Self { pool: db }
     }

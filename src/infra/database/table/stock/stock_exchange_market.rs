@@ -43,8 +43,8 @@ FROM
         .await
         .map_err(|why| {
             anyhow!(
-                "Failed to StockExchangeMarket::fetch from database({:#?}) because:{:?}",
-                crate::core::config::SETTINGS.postgresql,
+                "Failed to StockExchangeMarket::fetch from database({}) because:{:?}",
+                database::redacted_postgresql_summary(),
                 why
             )
         })
