@@ -30,10 +30,10 @@ pub struct StockDividendInfo {
     pub dividend_yield: Decimal,
     /// 現金殖利率（%）。
     pub cash_dividend_yield: Decimal,
-    /// 是否於指定日期進行除息。
-    pub is_cash_ex_dividend_today: bool,
-    /// 是否於指定日期進行除權。
-    pub is_stock_ex_dividend_today: bool,
+    /// 是否於查詢日期進行除息。
+    pub is_cash_ex_dividend_on_date: bool,
+    /// 是否於查詢日期進行除權。
+    pub is_stock_ex_dividend_on_date: bool,
 }
 
 /// 取得指定日期為除權或除息日的股票。
@@ -60,8 +60,8 @@ SELECT
            WHEN ldq.closing_price IS NULL THEN 0
            ELSE ROUND((d.cash_dividend / ldq.closing_price) * 100, 2)
            END                                  AS cash_dividend_yield,
-       d."ex-dividend_date1" = $2               AS is_cash_ex_dividend_today,
-       d."ex-dividend_date2" = $2               AS is_stock_ex_dividend_today
+       d."ex-dividend_date1" = $2               AS is_cash_ex_dividend_on_date,
+       d."ex-dividend_date2" = $2               AS is_stock_ex_dividend_on_date
 FROM
     dividend AS d
 INNER JOIN
