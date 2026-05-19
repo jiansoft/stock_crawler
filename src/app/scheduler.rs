@@ -94,7 +94,7 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
         create_job("0 25 5 * * *", delisted_company::execute),
         // 05:30 更新台股 ETF 資訊
         create_job("0 30 5 * * *", etf::execute),
-        // 08:00 提醒本日除權息的股票
+        // 08:00 提醒本日除權息與明日預計除權息的股票
         create_job("0 0 8 * * *", event::taiwan_stock::ex_dividend::execute),
         // 08:02 提醒本日發放股利的股票(只通知自已有的股票)
         create_job("0 2 8 * * *", event::taiwan_stock::payable_date::execute),

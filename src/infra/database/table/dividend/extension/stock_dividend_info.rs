@@ -16,6 +16,8 @@ pub struct StockDividendInfo {
     pub stock_symbol: String,
     /// 股票名稱。
     pub name: String,
+    /// 股票產業分類編號。
+    pub stock_industry_id: i32,
     /// 現金股利（元）。
     pub cash_dividend: Decimal,
     /// 股票股利（股）。
@@ -28,10 +30,10 @@ pub struct StockDividendInfo {
     pub dividend_yield: Decimal,
     /// 現金殖利率（%）。
     pub cash_dividend_yield: Decimal,
-    /// 是否於指定日期進行除息。
-    pub is_cash_ex_dividend_today: bool,
-    /// 是否於指定日期進行除權。
-    pub is_stock_ex_dividend_today: bool,
+    /// 是否於查詢日期進行除息。
+    pub is_cash_ex_dividend_on_date: bool,
+    /// 是否於查詢日期進行除權。
+    pub is_stock_ex_dividend_on_date: bool,
 }
 
 /// 取得指定日期為除權或除息日的股票。
@@ -45,6 +47,7 @@ pub async fn fetch_stocks_with_dividends_on_date(
 SELECT
        s.stock_symbol,
        s."Name"                                 AS name,
+       s.stock_industry_id,
        d.cash_dividend,
        d.stock_dividend,
        d.sum,
@@ -57,8 +60,8 @@ SELECT
            WHEN ldq.closing_price IS NULL THEN 0
            ELSE ROUND((d.cash_dividend / ldq.closing_price) * 100, 2)
            END                                  AS cash_dividend_yield,
-       d."ex-dividend_date1" = $2               AS is_cash_ex_dividend_today,
-       d."ex-dividend_date2" = $2               AS is_stock_ex_dividend_today
+       d."ex-dividend_date1" = $2               AS is_cash_ex_dividend_on_date,
+       d."ex-dividend_date2" = $2               AS is_stock_ex_dividend_on_date
 FROM
     dividend AS d
 INNER JOIN
@@ -99,7 +102,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_stocks_with_dividends_on_date".to_string());
 
-        let ex_date = Local.with_ymd_and_hms(2024, 6, 21, 0, 0, 0).unwrap();
+        let ex_date = Local.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap();
         let d = ex_date.date_naive();
         match fetch_stocks_with_dividends_on_date(d).await {
             Ok(cd) => {

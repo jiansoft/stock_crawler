@@ -1,18 +1,104 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-use anyhow::Result;
-use chrono::{Datelike, Local, NaiveDate};
+use anyhow::{Context, Result};
+use chrono::{Datelike, Days, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::{
     app::calculation,
+    core::declare::Industry,
     infra::database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
     interfaces::bot,
     interfaces::bot::telegram::Telegram,
 };
 
 use super::{format_decimal_with_commas, format_share_quantity, member_label};
+
+/// 判斷一筆除權息資料是否屬於 ETF。
+fn is_etf(stock: &dividend::extension::stock_dividend_info::StockDividendInfo) -> bool {
+    stock.stock_industry_id == Industry::ExchangeTradedFund.serial()
+}
+
+/// 依殖利率由高到低比較兩筆除權息資料。
+fn compare_dividend_yield_desc(
+    a: &dividend::extension::stock_dividend_info::StockDividendInfo,
+    b: &dividend::extension::stock_dividend_info::StockDividendInfo,
+) -> std::cmp::Ordering {
+    b.dividend_yield
+        .partial_cmp(&a.dividend_yield)
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
+/// 將市場清單排序成「股票在前、ETF 在後」，各群組內再按殖利率降序。
+fn sort_market_dividend_info(
+    stocks_dividend_info: &mut [dividend::extension::stock_dividend_info::StockDividendInfo],
+) {
+    stocks_dividend_info.sort_by(|a, b| match (is_etf(a), is_etf(b)) {
+        (false, true) => std::cmp::Ordering::Less,
+        (true, false) => std::cmp::Ordering::Greater,
+        _ => compare_dividend_yield_desc(a, b),
+    });
+}
+
+/// 將同一類別的除權息清單行文字寫入 Telegram 訊息。
+fn write_market_dividend_rows<'a>(
+    msg: &mut String,
+    title: &str,
+    stocks: impl Iterator<Item = &'a dividend::extension::stock_dividend_info::StockDividendInfo>,
+) {
+    let mut has_rows = false;
+    for stock in stocks {
+        if !has_rows {
+            let _ = writeln!(msg, "{}︰", Telegram::escape_markdown_v2(title));
+            has_rows = true;
+        }
+
+        // 市場清單列出指定日期有除權或除息的股票與殖利率。
+        let _ = writeln!(
+            msg,
+            "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} 現金︰{2}元\\({6}%\\) 股票 {3}元 合計︰{4}元\\({7}%\\) 昨收價:{5} 現金殖利率:{6}% 殖利率:{7}%",
+            stock.stock_symbol,
+            Telegram::escape_markdown_v2(&stock.name),
+            Telegram::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
+            Telegram::escape_markdown_v2(stock.stock_dividend.normalize().to_string()),
+            Telegram::escape_markdown_v2(stock.sum.normalize().to_string()),
+            Telegram::escape_markdown_v2(stock.closing_price.normalize().to_string()),
+            Telegram::escape_markdown_v2(stock.cash_dividend_yield.normalize().to_string()),
+            Telegram::escape_markdown_v2(stock.dividend_yield.normalize().to_string())
+        );
+    }
+}
+
+/// 組出指定日期的市場除權息清單訊息。
+fn build_market_dividend_message(
+    date: NaiveDate,
+    title: &str,
+    stocks_dividend_info: &[dividend::extension::stock_dividend_info::StockDividendInfo],
+) -> String {
+    let mut msg = String::with_capacity(2048);
+    if writeln!(
+        &mut msg,
+        "{} {}",
+        Telegram::escape_markdown_v2(date.to_string()),
+        Telegram::escape_markdown_v2(title)
+    )
+    .is_ok()
+    {
+        write_market_dividend_rows(
+            &mut msg,
+            "股票",
+            stocks_dividend_info.iter().filter(|stock| !is_etf(stock)),
+        );
+        write_market_dividend_rows(
+            &mut msg,
+            "ETF",
+            stocks_dividend_info.iter().filter(|stock| is_etf(stock)),
+        );
+    }
+
+    msg
+}
 
 /// 依今日除權息事件與目前持股，組出第二則持股預估股利通知。
 ///
@@ -44,13 +130,13 @@ fn build_holding_dividend_message(
 
         let share_quantity = Decimal::from(holding.share_quantity);
         // 只有今天是除息日才計入現金股利；若今天只有除權，現金股利應為 0。
-        let estimated_cash_dividend = if stock.is_cash_ex_dividend_today {
+        let estimated_cash_dividend = if stock.is_cash_ex_dividend_on_date {
             stock.cash_dividend * share_quantity
         } else {
             Decimal::ZERO
         };
         // 只有今天是除權日才計入股票股利；若今天只有除息，股票股利應為 0。
-        let estimated_stock_dividend = if stock.is_stock_ex_dividend_today {
+        let estimated_stock_dividend = if stock.is_stock_ex_dividend_on_date {
             stock.stock_dividend * share_quantity
         } else {
             Decimal::ZERO
@@ -135,52 +221,67 @@ fn build_holding_dividend_message(
     Some(msg)
 }
 
-/// 發送今日除權息提醒，並在之後追加持股預估股利通知。
+/// 取得並排序指定日期的市場除權息資料。
+async fn fetch_sorted_market_dividend_info(
+    date: NaiveDate,
+) -> Result<Vec<dividend::extension::stock_dividend_info::StockDividendInfo>> {
+    let mut stocks_dividend_info =
+        dividend::extension::stock_dividend_info::fetch_stocks_with_dividends_on_date(date).await?;
+
+    // 先顯示股票，再顯示 ETF；兩組內部各自按殖利率降序排序。
+    sort_market_dividend_info(&mut stocks_dividend_info);
+
+    Ok(stocks_dividend_info)
+}
+
+/// 發送指定日期的市場除權息提醒。
+async fn send_market_dividend_message(
+    date: NaiveDate,
+    title: &str,
+    stocks_dividend_info: &[dividend::extension::stock_dividend_info::StockDividendInfo],
+) {
+    if stocks_dividend_info.is_empty() {
+        return;
+    }
+
+    let msg = build_market_dividend_message(date, title, stocks_dividend_info);
+
+    bot::telegram::send(&msg).await;
+}
+
+/// 發送今日除權息提醒，並追加持股預估股利與明日除權息預告通知。
 pub async fn execute() -> Result<()> {
     let today: NaiveDate = Local::now().date_naive();
-    let mut stocks_dividend_info =
-        dividend::extension::stock_dividend_info::fetch_stocks_with_dividends_on_date(today)
-            .await?;
+    let tomorrow = today
+        .checked_add_days(Days::new(1))
+        .context("Failed to calculate tomorrow for ex-dividend reminder")?;
 
-    if stocks_dividend_info.is_empty() {
+    let stocks_dividend_info = fetch_sorted_market_dividend_info(today).await?;
+
+    // 先發送今日市場清單，維持既有提醒順序。
+    send_market_dividend_message(
+        today,
+        "進行除權息的股票與 ETF 如下︰",
+        &stocks_dividend_info,
+    )
+    .await;
+
+    let stock_symbols: Vec<String> = stocks_dividend_info
+        .iter()
+        .map(|stock| stock.stock_symbol.to_string())
+        .collect();
+
+    if stock_symbols.is_empty() {
+        let tomorrow_stocks_dividend_info = fetch_sorted_market_dividend_info(tomorrow).await?;
+        send_market_dividend_message(
+            tomorrow,
+            "預計進行除權息的股票與 ETF 如下︰",
+            &tomorrow_stocks_dividend_info,
+        )
+        .await;
         return Ok(());
     }
-    // 按 殖利率 降序排序
-    stocks_dividend_info.sort_by(|a, b| {
-        b.dividend_yield
-            .partial_cmp(&a.dividend_yield)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
 
-    let mut stock_symbols: Vec<String> = Vec::with_capacity(stocks_dividend_info.len());
-    let mut msg = String::with_capacity(2048);
-    if writeln!(
-        &mut msg,
-        "{} 進行除權息的股票如下︰",
-        Telegram::escape_markdown_v2(today.to_string())
-    )
-    .is_ok()
-    {
-        for stock in &stocks_dividend_info {
-            // 第一則訊息是市場清單，列出今天有除權或除息的股票與殖利率。
-            stock_symbols.push(stock.stock_symbol.to_string());
-            let _ = writeln!(
-                &mut msg,
-                "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} 現金︰{2}元\\({6}%\\) 股票 {3}元 合計︰{4}元\\({7}%\\) 昨收價:{5} 現金殖利率:{6}% 殖利率:{7}%",
-                stock.stock_symbol,
-                Telegram::escape_markdown_v2(&stock.name),
-                Telegram::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.stock_dividend.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.sum.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.closing_price.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.cash_dividend_yield.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.dividend_yield.normalize().to_string())
-            );
-        }
-    }
-
-    // 先發送市場清單，維持既有提醒順序。
-    bot::telegram::send(&msg).await;
     // 再更新這批股票對應持股的股利記錄。
     calculation::dividend_record::execute(today.year(), Some(stock_symbols.clone())).await;
 
@@ -191,6 +292,14 @@ pub async fn execute() -> Result<()> {
     {
         bot::telegram::send(&holding_msg).await;
     }
+
+    let tomorrow_stocks_dividend_info = fetch_sorted_market_dividend_info(tomorrow).await?;
+    send_market_dividend_message(
+        tomorrow,
+        "預計進行除權息的股票與 ETF 如下︰",
+        &tomorrow_stocks_dividend_info,
+    )
+    .await;
 
     Ok(())
 }
@@ -227,26 +336,28 @@ mod tests {
             dividend::extension::stock_dividend_info::StockDividendInfo {
                 stock_symbol: "2330".to_string(),
                 name: "台積電".to_string(),
+                stock_industry_id: Industry::Semiconductor.serial(),
                 cash_dividend: dec!(3.5),
                 stock_dividend: dec!(0.2),
                 sum: dec!(3.7),
                 closing_price: dec!(950),
                 dividend_yield: dec!(0.39),
                 cash_dividend_yield: dec!(0.37),
-                is_cash_ex_dividend_today: true,
-                is_stock_ex_dividend_today: false,
+                is_cash_ex_dividend_on_date: true,
+                is_stock_ex_dividend_on_date: false,
             },
             dividend::extension::stock_dividend_info::StockDividendInfo {
                 stock_symbol: "2317".to_string(),
                 name: "鴻海".to_string(),
+                stock_industry_id: Industry::ElectronicComponents.serial(),
                 cash_dividend: dec!(5),
                 stock_dividend: dec!(0.3),
                 sum: dec!(5.3),
                 closing_price: dec!(150),
                 dividend_yield: dec!(3.53),
                 cash_dividend_yield: dec!(3.33),
-                is_cash_ex_dividend_today: true,
-                is_stock_ex_dividend_today: true,
+                is_cash_ex_dividend_on_date: true,
+                is_stock_ex_dividend_on_date: true,
             },
         ];
         let holdings = vec![
@@ -330,6 +441,82 @@ mod tests {
         assert!(msg.contains("現金殖利率:4\\.17%"));
         assert!(msg.contains("殖利率:4\\.42%"));
         assert!(!msg.contains("持股:3000股"));
+    }
+
+    #[test]
+    fn test_market_dividend_message_groups_stocks_before_etfs_and_sorts_each_group_by_yield() {
+        let today = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
+        let mut stocks = vec![
+            dividend::extension::stock_dividend_info::StockDividendInfo {
+                stock_symbol: "0050".to_string(),
+                name: "元大台灣50".to_string(),
+                stock_industry_id: Industry::ExchangeTradedFund.serial(),
+                cash_dividend: dec!(2),
+                stock_dividend: Decimal::ZERO,
+                sum: dec!(2),
+                closing_price: dec!(100),
+                dividend_yield: dec!(2),
+                cash_dividend_yield: dec!(2),
+                is_cash_ex_dividend_on_date: true,
+                is_stock_ex_dividend_on_date: false,
+            },
+            dividend::extension::stock_dividend_info::StockDividendInfo {
+                stock_symbol: "2317".to_string(),
+                name: "鴻海".to_string(),
+                stock_industry_id: Industry::ElectronicComponents.serial(),
+                cash_dividend: dec!(5),
+                stock_dividend: Decimal::ZERO,
+                sum: dec!(5),
+                closing_price: dec!(100),
+                dividend_yield: dec!(5),
+                cash_dividend_yield: dec!(5),
+                is_cash_ex_dividend_on_date: true,
+                is_stock_ex_dividend_on_date: false,
+            },
+            dividend::extension::stock_dividend_info::StockDividendInfo {
+                stock_symbol: "00878".to_string(),
+                name: "國泰永續高股息".to_string(),
+                stock_industry_id: Industry::ExchangeTradedFund.serial(),
+                cash_dividend: dec!(3),
+                stock_dividend: Decimal::ZERO,
+                sum: dec!(3),
+                closing_price: dec!(100),
+                dividend_yield: dec!(3),
+                cash_dividend_yield: dec!(3),
+                is_cash_ex_dividend_on_date: true,
+                is_stock_ex_dividend_on_date: false,
+            },
+            dividend::extension::stock_dividend_info::StockDividendInfo {
+                stock_symbol: "2330".to_string(),
+                name: "台積電".to_string(),
+                stock_industry_id: Industry::Semiconductor.serial(),
+                cash_dividend: dec!(1),
+                stock_dividend: Decimal::ZERO,
+                sum: dec!(1),
+                closing_price: dec!(100),
+                dividend_yield: dec!(1),
+                cash_dividend_yield: dec!(1),
+                is_cash_ex_dividend_on_date: true,
+                is_stock_ex_dividend_on_date: false,
+            },
+        ];
+
+        sort_market_dividend_info(&mut stocks);
+        let msg = build_market_dividend_message(today, "進行除權息的股票與 ETF 如下︰", &stocks);
+
+        let stock_section = msg.find("股票︰").unwrap();
+        let etf_section = msg.find("ETF︰").unwrap();
+        let hon_hai = msg.find("2317").unwrap();
+        let tsmc = msg.find("2330").unwrap();
+        let high_yield_etf = msg.find("00878").unwrap();
+        let low_yield_etf = msg.find("0050").unwrap();
+
+        assert!(msg.contains("2026\\-04\\-01 進行除權息的股票與 ETF 如下︰"));
+        assert!(stock_section < hon_hai);
+        assert!(hon_hai < tsmc);
+        assert!(tsmc < etf_section);
+        assert!(etf_section < high_yield_etf);
+        assert!(high_yield_etf < low_yield_etf);
     }
 
     #[test]
