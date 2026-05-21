@@ -153,7 +153,11 @@ WHERE
             .context("Failed to update_last_eps from database")
     }
 
-    /// 衝突時更新 "Name" "SuspendListing" stock_exchange_market_id stock_industry_id
+    /// 新增或更新股票基本資訊 (Upsert)
+    ///
+    /// 在股票代號 (`stock_symbol`) 衝突時，會更新股票名稱、下市狀態等欄位。
+    /// 為了防止部分爬蟲因未提供市場編號或產業分類（傳入 0）而將現有正確資料覆蓋為 0，
+    /// SQL 語句中使用 `CASE WHEN` 進行防禦，只有當 EXCLUDED 值大於 0 時才進行更新。
     pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO stocks (
@@ -163,8 +167,16 @@ VALUES ($1, $2, $3, $4, $5, $6, 0)
 ON CONFLICT (stock_symbol) DO UPDATE SET
     "Name" = EXCLUDED."Name",
     "SuspendListing" = EXCLUDED."SuspendListing",
-    stock_exchange_market_id = EXCLUDED.stock_exchange_market_id,
-    stock_industry_id = EXCLUDED.stock_industry_id;
+    -- 當傳入的市場編號大於 0 時才更新，否則保留原有的市場編號
+    stock_exchange_market_id = CASE 
+        WHEN EXCLUDED.stock_exchange_market_id > 0 THEN EXCLUDED.stock_exchange_market_id 
+        ELSE stocks.stock_exchange_market_id 
+    END,
+    -- 當傳入的產業編號大於 0 時才更新，否則保留原有的產業編號
+    stock_industry_id = CASE 
+        WHEN EXCLUDED.stock_industry_id > 0 THEN EXCLUDED.stock_industry_id 
+        ELSE stocks.stock_industry_id 
+    END;
 "#;
         let result = sqlx::query(sql)
             .bind(&self.stock_symbol)
@@ -457,6 +469,21 @@ mod tests {
     use crate::core::logging;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_upsert_industry() {
+        dotenv::dotenv().ok();
+        let rows = sqlx::query("SELECT stock_symbol, \"Name\", stock_industry_id FROM stocks WHERE stock_symbol IN ('1101', '8404', '2330')")
+            .fetch_all(crate::infra::database::get_connection())
+            .await
+            .unwrap();
+        for r in rows {
+            let symbol: String = r.try_get("stock_symbol").unwrap();
+            let name: String = r.try_get("Name").unwrap();
+            let ind: i32 = r.try_get("stock_industry_id").unwrap();
+            println!("Queried Stock - Symbol: {}, Name: {}, IndustryID: {}", symbol, name, ind);
+        }
+    }
 
     #[tokio::test]
     #[ignore]
