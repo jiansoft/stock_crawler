@@ -481,7 +481,10 @@ mod tests {
             let symbol: String = r.try_get("stock_symbol").unwrap();
             let name: String = r.try_get("Name").unwrap();
             let ind: i32 = r.try_get("stock_industry_id").unwrap();
-            println!("Queried Stock - Symbol: {}, Name: {}, IndustryID: {}", symbol, name, ind);
+            println!(
+                "Queried Stock - Symbol: {}, Name: {}, IndustryID: {}",
+                symbol, name, ind
+            );
         }
     }
 
