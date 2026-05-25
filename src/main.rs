@@ -145,6 +145,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     dotenv::dotenv().ok();
+
+    // 在進入快取載入與背景服務前，先對資料庫進行連線檢查（Fail Fast）
+    core::logging::info_file_async("startup database check: ping database".to_string());
+    if let Err(e) = infra::database::ping().await {
+        let err_msg = format!("Failed to connect to database: {:?}", e);
+        core::logging::error_file_async(&err_msg);
+        return Err(err_msg.into());
+    }
+    core::logging::info_file_async("startup database check: database is online".to_string());
+
     core::logging::info_file_async(
         "startup phase begin: crate::infra::cache::SHARE.load".to_string(),
     );

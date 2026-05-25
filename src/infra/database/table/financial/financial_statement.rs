@@ -5,7 +5,7 @@ use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
-    Row,
+    QueryBuilder, Row,
 };
 
 use crate::{
@@ -293,7 +293,7 @@ pub async fn fetch_roe_or_roa_equal_to_zero(
     year: Option<i32>,
     quarter: Option<Quarter>,
 ) -> Result<Vec<FinancialStatement>> {
-    let mut sql = String::from(
+    let mut query_builder = QueryBuilder::new(
         r#"
 SELECT
     serial,
@@ -313,46 +313,44 @@ SELECT
     created_time,
     updated_time
 FROM financial_statement
-WHERE quarter = $1 AND (return_on_equity = 0 OR return_on_assets = 0 OR net_asset_value_per_share = 0)
-"#,
+WHERE quarter = "#,
     );
-
-    if let Some(year) = year {
-        sql.push_str(&format!("AND year = {}", year))
-    }
 
     let q = match quarter {
         None => String::from(""),
         Some(q) => q.to_string(),
     };
+    query_builder.push_bind(q);
+    query_builder.push(" AND (return_on_equity = 0 OR return_on_assets = 0 OR net_asset_value_per_share = 0)");
 
-    sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
-        .bind(q)
+    if let Some(year) = year {
+        query_builder.push(" AND year = ");
+        query_builder.push_bind(year);
+    }
+
+    let query = query_builder.build();
+    let rows = query
         .try_map(FinancialStatement::row_to_entity)
         .fetch_all(database::get_connection())
         .await
         .map_err(|why| {
             anyhow!(
-                "Failed to fetch_roe_is_zero({:?},{:?}) from database\nsql:{}\n {:?}",
+                "Failed to fetch_roe_or_roa_equal_to_zero({:?},{:?}) from database: {:?}",
                 year,
                 quarter,
-                &sql,
                 why
             )
-        })
+        })?;
+
+    Ok(rows)
 }
 
 /// 取得沒年報的股票有哪些
 pub async fn fetch_without_annual(year: i32) -> Result<Vec<FinancialStatement>> {
     let years: Vec<i32> = (0..10).map(|i| year - i).collect();
-    let years_str = years
-        .iter()
-        .map(|&year| year.to_string())
-        .collect::<Vec<String>>()
-        .join(",");
 
-    let sql = format!(
-        r#"
+    // 使用 f1.year = ANY($1) 代替 f1.year IN ({})，以利用參數化查詢並移除 AssertSqlSafe
+    let sql = r#"
 SELECT DISTINCT
     f1.year,
     f1.security_code
@@ -366,15 +364,14 @@ LEFT JOIN
     AND f1.security_code = f2.security_code
     AND f2.quarter = ''
 WHERE
-    f1.year IN ({0}) AND f2.year IS NULL
+    f1.year = ANY($1) AND f2.year IS NULL
 ORDER BY
     f1.security_code,
     f1.year;
-"#,
-        years_str
-    );
+"#;
 
-    sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+    sqlx::query(sql)
+        .bind(&years)
         .try_map(|row: PgRow| {
             Ok(FinancialStatement {
                 updated_time: Default::default(),
@@ -401,7 +398,7 @@ ORDER BY
             anyhow!(
                 "Failed to fetch_without_annual({}) from database\nsql:{}\n {:?}",
                 year,
-                &sql,
+                sql,
                 why
             )
         })

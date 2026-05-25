@@ -556,13 +556,10 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
 
 /// 補齊指定日期缺漏的每日收盤資料。
 pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQueryResult> {
-    let date_str = date.format("%Y-%m-%d").to_string();
-    let prev_date = (date - TimeDelta::try_days(30).unwrap())
-        .format("%Y-%m-%d")
-        .to_string();
+    let prev_date = date - TimeDelta::try_days(30).unwrap();
 
-    let sql = format!(
-        r#"
+    // 使用參數化查詢代替字串格式化，將 $1 與 $2 分別綁定 date 與 prev_date，以移除 AssertSqlSafe
+    let sql = r#"
 INSERT INTO "DailyQuotes" (
     "Date", "stock_symbol", "TradingVolume", "Transaction",
     "TradeValue", "OpeningPrice", "HighestPrice", "LowestPrice",
@@ -575,7 +572,7 @@ INSERT INTO "DailyQuotes" (
     maximum_price_in_year_date_on, minimum_price_in_year_date_on,
     "price-to-book_ratio"
 )
-SELECT '{0}' as "Date",
+SELECT $1 as "Date",
     "stock_symbol",
     0 as "TradingVolume",
     0 as "Transaction",
@@ -618,23 +615,23 @@ WHERE "Serial" IN
         (
             SELECT "DailyQuotes"."stock_symbol"
             FROM "DailyQuotes"
-            WHERE "Date" = '{0}'
+            WHERE "Date" = $1
         )
         AND c."SuspendListing" = false
     )
-    AND "Date" < '{0}'
-    AND "Date" > '{1}'
+    AND "Date" < $1
+    AND "Date" > $2
     GROUP BY "stock_symbol"
-)"#,
-        date_str, prev_date
-    );
+)"#;
 
-    sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+    sqlx::query(sql)
+        .bind(date)
+        .bind(prev_date)
         .execute(database::get_connection())
         .await
         .context(format!(
-            "Failed to makeup_for_the_lack_daily_quotes from database\r\n{}",
-            &sql
+            "Failed to makeup_for_the_lack_daily_quotes from database for date: {:?}",
+            date
         ))
 }
 

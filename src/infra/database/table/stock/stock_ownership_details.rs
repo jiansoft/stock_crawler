@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
+use sqlx::{postgres::PgQueryResult, Postgres, QueryBuilder, Transaction};
 
 use crate::infra::database;
 
@@ -58,7 +58,8 @@ impl StockOwnershipDetail {
 
     /// 取得庫存股票的數據
     pub async fn fetch(security_codes: Option<Vec<String>>) -> Result<Vec<StockOwnershipDetail>> {
-        let base_sql = "
+        let mut query_builder = QueryBuilder::new(
+            r#"
 SELECT
     serial,
     member_id,
@@ -74,26 +75,18 @@ SELECT
     cumulate_dividends_stock_money,
     cumulate_dividends_total
 FROM stock_ownership_details
-WHERE is_sold = false";
-        let (sql, bind_params) = security_codes
-            .map(|scs| {
-                let params = scs
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| format!("${}", i + 1))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                (
-                    format!("{} AND security_code IN ({})", base_sql, params),
-                    scs,
-                )
-            })
-            .unwrap_or((base_sql.to_string(), vec![]));
+WHERE is_sold = false"#,
+        );
 
-        let query = sqlx::query_as::<_, StockOwnershipDetail>(sqlx::AssertSqlSafe(sql.as_str()));
-        let query = bind_params
-            .into_iter()
-            .fold(query, |q, param| q.bind(param));
+        if let Some(scs) = security_codes {
+            if !scs.is_empty() {
+                query_builder.push(" AND security_code = ANY(");
+                query_builder.push_bind(scs);
+                query_builder.push(")");
+            }
+        }
+
+        let query = query_builder.build_query_as::<StockOwnershipDetail>();
         let rows = query.fetch_all(database::get_connection()).await?;
 
         Ok(rows)

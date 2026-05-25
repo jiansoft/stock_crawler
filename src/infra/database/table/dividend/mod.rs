@@ -202,8 +202,8 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
 
     /// 更新年度內有多次配息記錄時將其合併計算成年度股利
     pub async fn upsert_annual_total_dividend(&self) -> Result<PgQueryResult> {
-        let sql = format!(
-            r#"
+        // 使用參數化查詢代替字串格式化，將 $1, $2, $3, $4 分別綁定相關欄位，以移除 AssertSqlSafe
+        let sql = r#"
 INSERT INTO dividend(security_code,
        year,
        year_of_dividend,
@@ -225,8 +225,8 @@ INSERT INTO dividend(security_code,
        payout_ratio_stock,
        payout_ratio)
 SELECT security_code,
-       {year},
-       {year_of_dividend},
+       $1,
+       $2,
        '',
        sum(cash_dividend) as cash_dividend,
        sum(stock_dividend) as stock_dividend,
@@ -245,19 +245,18 @@ SELECT security_code,
        0,
        0
        from dividend
-where security_code = $1 and year = $2 and quarter != ''
+where security_code = $3 and year = $4 and quarter != ''
 group by security_code
 order by security_code
 ON CONFLICT (security_code,year,quarter) DO UPDATE SET
     cash_dividend = EXCLUDED.cash_dividend,
     stock_dividend = EXCLUDED.stock_dividend,
     sum = EXCLUDED.sum;;
-"#,
-            year = self.year,
-            year_of_dividend = self.year - 1
-        );
+"#;
 
-        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+        sqlx::query(sql)
+            .bind(self.year)
+            .bind(self.year - 1)
             .bind(&self.security_code)
             .bind(self.year)
             .execute(database::get_connection())

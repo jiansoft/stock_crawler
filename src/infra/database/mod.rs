@@ -126,3 +126,16 @@ pub fn get_connection() -> &'static PgPool {
 pub async fn get_tx() -> Result<Transaction<'static, Postgres>> {
     get_postgresql().tx().await
 }
+
+/// 檢查資料庫連線是否健康（Ping）。
+///
+/// 藉由對資料庫執行一個簡單的 `SELECT 1` 查詢來驗證連線是否正常。
+///
+/// # 錯誤
+/// 若連線失敗、逾時或查詢執行失敗則回傳錯誤。
+pub async fn ping() -> Result<()> {
+    sqlx::query("SELECT 1")
+        .execute(get_connection())
+        .await?;
+    Ok(())
+}
