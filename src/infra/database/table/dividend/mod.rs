@@ -3,7 +3,7 @@ use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{
     postgres::{PgQueryResult, PgRow},
-    Row,
+    QueryBuilder, Row,
 };
 
 use crate::{core::util::map::Keyable, infra::crawler::goodinfo, infra::database};
@@ -196,6 +196,94 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
                     self,
                     sql,
                     why,
+                )
+            })
+    }
+
+    /// 批次新增或更新多筆股利資料（以 `security_code + year + quarter` 為鍵）。
+    ///
+    /// 此函式使用 SQLx 的 `QueryBuilder::push_values` 建立多值 `INSERT` 語句，
+    /// 並在主鍵衝突時執行對應的欄位更新。相較於單筆逐次寫入，批次寫入能顯著降低資料庫連線延遲。
+    ///
+    /// # 參數
+    /// * `dividends` - 要寫入的股利實體清單。
+    ///
+    /// # 錯誤
+    /// 當 SQL 執行失敗或傳入清單為空時回傳錯誤。
+    pub async fn batch_upsert(dividends: &[Self]) -> Result<PgQueryResult> {
+        // 檢查傳入的股利清單是否為空
+        if dividends.is_empty() {
+            return Err(anyhow!("Cannot batch_upsert empty dividends slice"));
+        }
+
+        // 1. 初始化 QueryBuilder 並定義基本 INSERT 欄位
+        let mut query_builder = QueryBuilder::new(
+            r#"
+INSERT INTO dividend (
+    security_code, "year", year_of_dividend, quarter,
+    cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2",
+    payable_date1, payable_date2, created_time, updated_time, capital_reserve_cash_dividend,
+    earnings_cash_dividend, capital_reserve_stock_dividend, earnings_stock_dividend,
+    payout_ratio_cash, payout_ratio_stock, payout_ratio)
+"#
+        );
+
+        // 2. 批次推入資料列與對應參數綁定
+        query_builder.push_values(dividends, |mut b, item| {
+            b.push_bind(&item.security_code)
+             .push_bind(item.year)
+             .push_bind(item.year_of_dividend)
+             .push_bind(&item.quarter)
+             .push_bind(item.cash_dividend)
+             .push_bind(item.stock_dividend)
+             .push_bind(item.sum)
+             .push_bind(&item.ex_dividend_date1)
+             .push_bind(&item.ex_dividend_date2)
+             .push_bind(&item.payable_date1)
+             .push_bind(&item.payable_date2)
+             .push_bind(item.created_time)
+             .push_bind(item.updated_time)
+             .push_bind(item.capital_reserve_cash_dividend)
+             .push_bind(item.earnings_cash_dividend)
+             .push_bind(item.capital_reserve_stock_dividend)
+             .push_bind(item.earnings_stock_dividend)
+             .push_bind(item.payout_ratio_cash)
+             .push_bind(item.payout_ratio_stock)
+             .push_bind(item.payout_ratio);
+        });
+
+        // 3. 串接衝突更新子句 (Conflict Resolution)
+        query_builder.push(
+            r#"
+ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
+    year_of_dividend = EXCLUDED.year_of_dividend,
+    cash_dividend = EXCLUDED.cash_dividend,
+    stock_dividend = EXCLUDED.stock_dividend,
+    "sum" = EXCLUDED."sum",
+    "ex-dividend_date1" = EXCLUDED."ex-dividend_date1",
+    "ex-dividend_date2" = EXCLUDED."ex-dividend_date2",
+    payable_date1 = EXCLUDED.payable_date1,
+    payable_date2 = EXCLUDED.payable_date2,
+    updated_time = EXCLUDED.updated_time,
+    capital_reserve_cash_dividend = EXCLUDED.capital_reserve_cash_dividend,
+    earnings_cash_dividend = EXCLUDED.earnings_cash_dividend,
+    capital_reserve_stock_dividend = EXCLUDED.capital_reserve_stock_dividend,
+    earnings_stock_dividend = EXCLUDED.earnings_stock_dividend,
+    payout_ratio_cash = EXCLUDED.payout_ratio_cash,
+    payout_ratio_stock = EXCLUDED.payout_ratio_stock,
+    payout_ratio = EXCLUDED.payout_ratio;
+"#
+        );
+
+        // 4. 建立並執行查詢
+        let query = query_builder.build();
+        query
+            .execute(database::get_connection())
+            .await
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to batch_upsert dividends from database: {:?}",
+                    why
                 )
             })
     }

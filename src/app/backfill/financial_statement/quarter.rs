@@ -9,6 +9,7 @@
 
 use anyhow::Result;
 use chrono::Local;
+use futures::StreamExt;
 
 use crate::{
     app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
@@ -51,85 +52,129 @@ pub async fn execute() -> Result<()> {
 }
 
 /// 補齊單一目標季度內缺漏的 Yahoo 財務欄位。
+///
+/// 使用 `futures::stream` 併發呼叫 Yahoo 財經爬取 Profile 資料，
+/// 爬取完成後再一次批量 Upsert 入庫，大幅減少資料庫連線延遲，並降低 Yahoo 連線之 sequential 阻塞。
 async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
     let quarter = target_report.quarter.to_string();
+    // 找出該季度中 ROE 或 ROA 為 0 的財報清單
     let fss = table::financial_statement::fetch_roe_or_roa_equal_to_zero(
         Some(target_report.year),
         Some(target_report.quarter),
     )
     .await?;
-    let mut success_count = 0usize;
 
-    for fs in fss {
-        let cache_key = fs.key_with_prefix();
-        let profile_skip_cache_key = yahoo::profile::no_valid_data_cache_key(&fs.security_code);
-        let is_jump = crate::infra::nosql::redis::CLIENT
-            .get_bool(&cache_key)
-            .await?;
-        let is_profile_skip = crate::infra::nosql::redis::CLIENT
-            .get_bool(&profile_skip_cache_key)
-            .await?;
-
-        if is_jump || is_profile_skip {
-            continue;
-        }
-
-        let profile = match yahoo::profile::visit(&fs.security_code).await {
-            Ok(profile) => profile,
-            Err(why) => {
-                if yahoo::profile::is_no_valid_data_error(&why) {
-                    if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
-                        .set(
-                            &profile_skip_cache_key,
-                            true,
-                            yahoo::profile::NO_VALID_DATA_CACHE_TTL_SECONDS,
-                        )
-                        .await
-                    {
-                        logging::error_file_async(format!(
-                            "Failed to cache yahoo::profile no-valid-data skip for {} because {:?}",
-                            fs.security_code, cache_err
-                        ));
+    // 建立併發爬取的 async stream，並限制併發數量上限為 5
+    let mut stream = futures::stream::iter(fss)
+        .map(|fs| {
+            let target_report: ReportQuarter = target_report;
+            let quarter = quarter.clone();
+            async move {
+                let cache_key = fs.key_with_prefix();
+                let profile_skip_cache_key = yahoo::profile::no_valid_data_cache_key(&fs.security_code);
+                
+                // 檢查 Redis 狀態，決定是否跳過（例如先前已處理過，或是已知無有效資料的股票）
+                let is_jump = match crate::infra::nosql::redis::CLIENT.get_bool(&cache_key).await {
+                    Ok(val) => val,
+                    Err(why) => {
+                        logging::error_file_async(format!("Redis error getting {}: {:?}", cache_key, why));
+                        false
                     }
+                };
+                let is_profile_skip = match crate::infra::nosql::redis::CLIENT.get_bool(&profile_skip_cache_key).await {
+                    Ok(val) => val,
+                    Err(why) => {
+                        logging::error_file_async(format!("Redis error getting {}: {:?}", profile_skip_cache_key, why));
+                        false
+                    }
+                };
+
+                if is_jump || is_profile_skip {
+                    return None;
+                }
+
+                // 呼叫 Yahoo API 抓取 Profile 資訊
+                let profile = match yahoo::profile::visit(&fs.security_code).await {
+                    Ok(profile) => profile,
+                    Err(why) => {
+                        // 若為查無有效資料的錯誤，寫入 Redis 排除快取以避免重複查詢
+                        if yahoo::profile::is_no_valid_data_error(&why) {
+                            if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
+                                .set(
+                                    &profile_skip_cache_key,
+                                    true,
+                                    yahoo::profile::NO_VALID_DATA_CACHE_TTL_SECONDS,
+                                )
+                                .await
+                            {
+                                logging::error_file_async(format!(
+                                    "Failed to cache yahoo::profile no-valid-data skip for {} because {:?}",
+                                    fs.security_code, cache_err
+                                ));
+                            }
+                            logging::warn_file_async(format!(
+                                "Skip yahoo::profile::visit for {} because {}",
+                                fs.security_code, why
+                            ));
+                        } else {
+                            logging::error_file_async(format!(
+                                "Failed to yahoo::profile::visit for {} because {}",
+                                fs.security_code, why
+                            ));
+                        }
+                        return None;
+                    }
+                };
+
+                // 比對資料年份與季度是否與目標相符，若不符則記錄警告但依原邏輯仍繼續處理
+                if target_report.year != profile.year || quarter != profile.quarter {
                     logging::warn_file_async(format!(
-                        "Skip yahoo::profile::visit for {} because {}",
-                        fs.security_code, why
-                    ));
-                } else {
-                    logging::error_file_async(format!(
-                        "Failed to yahoo::profile::visit for {} because {}",
-                        fs.security_code, why
+                        "the year or quarter retrieved from Yahoo is inconsistent with the current one. current year:{} ,quarter:{} {:#?}",
+                        target_report.year, quarter, profile
                     ));
                 }
-                continue;
+
+                // 建立新的財報結構體
+                let new_fs = table::financial_statement::FinancialStatement::from(profile);
+                Some((new_fs, cache_key))
             }
-        };
+        })
+        .buffer_unordered(5);
 
-        if target_report.year != profile.year || quarter != profile.quarter {
-            logging::warn_file_async(format!(
-                "the year or quarter retrieved from Yahoo is inconsistent with the current one. current year:{} ,quarter:{} {:#?}",
-                target_report.year, quarter, profile
-            ));
-            //continue;
+    let mut scraped_statements = Vec::new();
+    let mut keys_to_cache = Vec::new();
+
+    // 收集所有成功爬取的結果
+    while let Some(res) = stream.next().await {
+        if let Some((new_fs, cache_key)) = res {
+            scraped_statements.push(new_fs);
+            keys_to_cache.push(cache_key);
         }
+    }
 
-        let fs = table::financial_statement::FinancialStatement::from(profile);
+    let success_count = scraped_statements.len();
 
-        if let Err(why) = fs.clone().upsert().await {
-            logging::error_file_async(format!("{:?}", why));
-            continue;
-        }
-
+    // 如果有成功爬取的財報資料，執行批量 Upsert 寫入資料庫，並更新對應的 Redis 快取
+    if !scraped_statements.is_empty() {
+        // 批量寫入資料庫
+        table::financial_statement::FinancialStatement::batch_upsert(&scraped_statements).await?;
         logging::debug_file_async(format!(
-            "financial_statement upsert executed successfully. \r\n{:#?}",
-            fs
+            "financial_statement batch_upsert executed successfully for {} records.",
+            scraped_statements.len()
         ));
 
-        crate::infra::nosql::redis::CLIENT
-            .set(cache_key, true, 60 * 60 * 24 * 7)
-            .await?;
-
-        success_count += 1;
+        // 逐一更新 Redis 成功狀態快取
+        for cache_key in keys_to_cache {
+            if let Err(why) = crate::infra::nosql::redis::CLIENT
+                .set(&cache_key, true, 60 * 60 * 24 * 7)
+                .await
+            {
+                logging::error_file_async(format!(
+                    "Failed to set redis cache key {} because {:?}",
+                    cache_key, why
+                ));
+            }
+        }
     }
 
     Ok(success_count)

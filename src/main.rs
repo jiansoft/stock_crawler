@@ -151,6 +151,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Err(e) = infra::database::ping().await {
         let err_msg = format!("Failed to connect to database: {:?}", e);
         core::logging::error_file_async(&err_msg);
+        interfaces::bot::telegram::send_alert("資料庫連線失敗（主機啟動異常）", &err_msg).await;
         return Err(err_msg.into());
     }
     core::logging::info_file_async("startup database check: database is online".to_string());
@@ -183,7 +184,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     core::logging::info_file_async("startup phase begin: rpc::server::start".to_string());
     let rpc_start_timer = Instant::now();
-    interfaces::rpc::server::start().await?;
+    if let Err(why) = interfaces::rpc::server::start().await {
+        let err_msg = format!("gRPC server failed to start: {:?}", why);
+        core::logging::error_file_async(&err_msg);
+        interfaces::bot::telegram::send_alert("gRPC 伺服器啟動失敗", &err_msg).await;
+        return Err(why.into());
+    }
     core::logging::info_file_async(format!(
         "startup phase done: rpc::server::start elapsed={:?}",
         rpc_start_timer.elapsed()
@@ -191,7 +197,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     core::logging::info_file_async("startup phase begin: web::start".to_string());
     let web_start_timer = Instant::now();
-    interfaces::web::start().await?;
+    if let Err(why) = interfaces::web::start().await {
+        let err_msg = format!("Web server failed to start: {:?}", why);
+        core::logging::error_file_async(&err_msg);
+        interfaces::bot::telegram::send_alert("Web 伺服器啟動失敗", &err_msg).await;
+        return Err(why.into());
+    }
     core::logging::info_file_async(format!(
         "startup phase done: web::start elapsed={:?}",
         web_start_timer.elapsed()
@@ -205,13 +216,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         if let Err(why) = interfaces::rpc::client::test_client::run_test().await {
-            core::logging::error_file_async(format!("gRPC 自我測試失敗: {}", why));
+            let err_msg = format!("gRPC 自我測試失敗: {:?}", why);
+            core::logging::error_file_async(&err_msg);
+            interfaces::bot::telegram::send_alert("gRPC 自我測試失敗", &err_msg).await;
         }
     });
 
     let pong = crate::infra::nosql::redis::CLIENT.ping().await;
-    if let Ok(pong) = pong {
-        println!("pong: {}", pong);
+    match pong {
+        Ok(pong_val) => {
+            println!("pong: {}", pong_val);
+        }
+        Err(why) => {
+            let err_msg = format!("Redis ping failed at startup: {:?}", why);
+            core::logging::error_file_async(&err_msg);
+            interfaces::bot::telegram::send_alert("Redis 快取連線失敗", &err_msg).await;
+        }
     }
 
     while !received_signal.load(Ordering::SeqCst) {

@@ -395,6 +395,24 @@ async fn send_with_client(
                     "HTTP請求耗時 {} {} ms{}",
                     msg, elapsed, request_detail_suffix
                 ));
+
+                // 檢查是否遭遇 IP 阻擋或請求速率限制 (403 Forbidden 或 429 Too Many Requests)
+                // 必須排除向 Telegram API 發送的請求，否則會引發無限遞迴
+                let status = response.status();
+                if (status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::TOO_MANY_REQUESTS)
+                    && !url.contains("api.telegram.org")
+                {
+                    let alert_url = url.to_string();
+                    // 使用 tokio::spawn 進行非同步警報推送，防範阻礙目前請求的正常流程
+                    tokio::spawn(async move {
+                        crate::interfaces::bot::telegram::send_alert(
+                            "爬蟲遭遇阻擋或頻率限制",
+                            &format!("狀態碼: {}\n請求網址: {}", status, alert_url),
+                        )
+                        .await;
+                    });
+                }
+
                 return Ok(response);
             }
             Err(why) => {

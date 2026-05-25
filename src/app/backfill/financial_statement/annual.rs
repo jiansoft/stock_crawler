@@ -7,7 +7,6 @@ use crate::{
 };
 use anyhow::Result;
 use chrono::Local;
-use futures::future;
 use scopeguard::defer;
 
 /// 更新台股年報
@@ -37,7 +36,8 @@ pub async fn execute() -> Result<()> {
 
     let annual = financial_statement::fetch_annual(profits[0].year).await?;
     let exist_fs = util::map::vec_to_hashmap(annual);
-    let upsert_futures: Vec<_> = profits
+    // 將過濾後符合條件的財報資料轉換成實體 Vector，以便進行批量寫入
+    let statements: Vec<_> = profits
         .into_iter()
         .filter(|profit| !stock::is_preference_shares(&profit.security_code))
         .filter(|profit| {
@@ -47,16 +47,14 @@ pub async fn execute() -> Result<()> {
             );
             !exist_fs.contains_key(&key)
         })
-        .map(|profit| {
-            let fs = financial_statement::FinancialStatement::from(profit);
-            fs.upsert()
-        })
+        .map(financial_statement::FinancialStatement::from)
         .collect();
-    let results = future::join_all(upsert_futures).await;
-    for result in results {
-        if let Err(why) = result {
+
+    // 如果有需要新增或更新的財報，則呼叫 batch_upsert 批次寫入資料庫
+    if !statements.is_empty() {
+        if let Err(why) = financial_statement::FinancialStatement::batch_upsert(&statements).await {
             logging::error_file_async(format!(
-                "Failed to FinancialStatement.upsert because {:?}",
+                "Failed to FinancialStatement.batch_upsert because {:?}",
                 why
             ));
         }

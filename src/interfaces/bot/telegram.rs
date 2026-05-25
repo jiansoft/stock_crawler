@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
+use chrono::Local;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +17,7 @@ pub struct Telegram {
 }
 
 /// `sendMessage` API 回應內容。
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SendMessageResponse {
     /// Telegram API 是否成功處理請求。
     pub ok: bool,
@@ -29,7 +30,7 @@ pub struct SendMessageResponse {
 }
 
 /// Telegram 訊息物件的最小欄位表示。
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
     /// Telegram 訊息 ID。
     message_id: i64,
@@ -65,21 +66,48 @@ impl Telegram {
             allowed_ids.map(|id| self.send_message(SendMessageRequest::new(*id, message)));
         let results = join_all(futures).await;
 
-        // 返回第一個成功的結果
-        results
+        // 尋找是否有成功發送且 API 返回 ok = true 的結果
+        let first_ok = results.iter().find_map(|r| {
+            r.as_ref().ok().filter(|res| res.ok)
+        });
+
+        if let Some(resp) = first_ok {
+            return Ok(resp.clone());
+        }
+
+        // 如果發送失敗（可能因為 MarkdownV2 解析錯誤，例如 status code 400 Bad Request），
+        // 則執行降級重試機制：清除轉義用的反斜線，改用純文字模式發送。
+        logging::warn_file_async(
+            "Telegram message failed or returned error. Retrying with plain-text fallback..."
+                .to_string(),
+        );
+
+        // 移除所有 Markdown 轉義字元，以便於以純文字模式清晰顯示
+        let clean_msg = message.replace("\\", "");
+        let fallback_futures = SETTINGS.bot.telegram.allowed.keys().map(|id| {
+            let mut req = SendMessageRequest::new(*id, &clean_msg);
+            req.parse_mode = ""; // 設定 parse_mode 為空，使其以純文字模式發送，不解析任何 markdown 標記
+            self.send_message(req)
+        });
+        let fallback_results = join_all(fallback_futures).await;
+
+        // 返回第一個成功的降級發送結果
+        fallback_results
             .into_iter()
             .find_map(|result| result.ok())
-            .ok_or_else(|| anyhow!("Failed to send message to any recipient"))
+            .ok_or_else(|| anyhow!("Failed to send message to any recipient even after plain-text fallback"))
     }
 
-    async fn send_message(&self, payload: SendMessageRequest<'_>) -> Result<SendMessageResponse> {
-        http::post_use_json::<SendMessageRequest, SendMessageResponse>(
-            &self.send_message_url,
-            None,
-            Some(&payload),
-        )
-        .await
-        .map_err(|err| anyhow!("Failed to send_message because: {:?}", err))
+    fn send_message<'a>(&'a self, payload: SendMessageRequest<'a>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SendMessageResponse>> + Send + 'a>> {
+        Box::pin(async move {
+            http::post_use_json::<SendMessageRequest, SendMessageResponse>(
+                &self.send_message_url,
+                None,
+                Some(&payload),
+            )
+            .await
+            .map_err(|err| anyhow!("Failed to send_message because: {:?}", err))
+        })
     }
 
     /// 跳脫 Telegram `MarkdownV2` 保留字元。
@@ -154,6 +182,23 @@ pub async fn send(msg: &str) {
             ));
         }
     }
+}
+
+/// 發送關鍵警報訊息至 Telegram。
+///
+/// 此函數主要用於背景任務、資料庫異常或關鍵流程失敗時，向 Telegram 發送顯眼的警報。
+///
+/// # 參數
+/// * `alert_title` - 警報的標題
+/// * `details` - 警報的詳細內容或錯誤堆疊
+pub async fn send_alert(alert_title: &str, details: &str) {
+    let msg = format!(
+        "⚠️ *【系統關鍵警報】*\n*標題*︰{}\n*時間*︰{}\n*詳情*︰\n```\n{}\n```",
+        Telegram::escape_markdown_v2(alert_title),
+        Telegram::escape_markdown_v2(Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+        Telegram::escape_markdown_v2(details)
+    );
+    send(&msg).await;
 }
 
 #[cfg(test)]

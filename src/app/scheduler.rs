@@ -31,7 +31,9 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
         logging::info_file_async("scheduler start begin: opening trace::stock_price".to_string());
         let opening_trace_timer = Instant::now();
         if let Err(why) = event::trace::stock_price::execute().await {
-            logging::error_file_async(format!("{:?}", why));
+            let err_msg = format!("{:?}", why);
+            logging::error_file_async(&err_msg);
+            bot::telegram::send_alert("開盤股價追蹤初始化失敗", &err_msg).await;
         }
         logging::info_file_async(format!(
             "scheduler start done: opening trace::stock_price elapsed={:?}",
@@ -150,10 +152,12 @@ where
         let task = task.clone();
         Box::pin(async move {
             if let Err(why) = task().await {
-                logging::error_file_async(format!(
+                let err_msg = format!(
                     "Failed to execute task({}) because {:?}",
                     cron_expr, why
-                ));
+                );
+                logging::error_file_async(&err_msg);
+                bot::telegram::send_alert("排程任務執行失敗", &err_msg).await;
             }
         })
     })?)
