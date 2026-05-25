@@ -326,7 +326,7 @@ WHERE quarter = $1 AND (return_on_equity = 0 OR return_on_assets = 0 OR net_asse
         Some(q) => q.to_string(),
     };
 
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(q)
         .try_map(FinancialStatement::row_to_entity)
         .fetch_all(database::get_connection())
@@ -374,7 +374,7 @@ ORDER BY
         years_str
     );
 
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
         .try_map(|row: PgRow| {
             Ok(FinancialStatement {
                 updated_time: Default::default(),

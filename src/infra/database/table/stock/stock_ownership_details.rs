@@ -90,7 +90,7 @@ WHERE is_sold = false";
             })
             .unwrap_or((base_sql.to_string(), vec![]));
 
-        let query = sqlx::query_as::<_, StockOwnershipDetail>(&sql);
+        let query = sqlx::query_as::<_, StockOwnershipDetail>(sqlx::AssertSqlSafe(sql.as_str()));
         let query = bind_params
             .into_iter()
             .fold(query, |q, param| q.bind(param));
