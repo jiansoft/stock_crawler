@@ -629,7 +629,7 @@ WHERE "Serial" IN
         date_str, prev_date
     );
 
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
         .execute(database::get_connection())
         .await
         .context(format!(

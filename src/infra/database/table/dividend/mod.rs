@@ -257,7 +257,7 @@ ON CONFLICT (security_code,year,quarter) DO UPDATE SET
             year_of_dividend = self.year - 1
         );
 
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(&self.security_code)
             .bind(self.year)
             .execute(database::get_connection())
@@ -343,7 +343,7 @@ where security_code = $1
             TABLE_COLUMNS
         );
 
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(security_code)
             .bind(year)
             .bind(Local::now().format("%Y-%m-%d %H:%M:%S").to_string())
@@ -419,7 +419,7 @@ WHERE
 "#,
             TABLE_COLUMNS
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(year)
             .try_map(Self::row_to_entity)
             .fetch_all(database::get_connection())
@@ -445,7 +445,7 @@ WHERE (year = $1 OR year_of_dividend = $1) AND quarter IN ('Q1','Q2','Q3','Q4','
             TABLE_COLUMNS
         );
 
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(year)
             .try_map(Self::row_to_entity)
             .fetch_all(database::get_connection())
