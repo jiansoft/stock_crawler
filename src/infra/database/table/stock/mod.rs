@@ -469,25 +469,83 @@ mod tests {
     use crate::core::logging;
 
     use super::*;
-
-    // 此測試依賴實際資料庫與 stocks 資料表之特定資料，故於 CI / 自動測試時忽略。
+    // 此測試驗證防禦性 upsert 邏輯（當新傳入的市場或產業編號為 0 時，保留資料庫中原先正確的非零值）。
     #[tokio::test]
-    #[ignore]
     async fn test_upsert_industry() {
         dotenv::dotenv().ok();
-        let rows = sqlx::query("SELECT stock_symbol, \"Name\", stock_industry_id FROM stocks WHERE stock_symbol IN ('1101', '8404', '2330')")
-            .fetch_all(crate::infra::database::get_connection())
-            .await
-            .unwrap();
-        for r in rows {
-            let symbol: String = r.try_get("stock_symbol").unwrap();
-            let name: String = r.try_get("Name").unwrap();
-            let ind: i32 = r.try_get("stock_industry_id").unwrap();
-            println!(
-                "Queried Stock - Symbol: {}, Name: {}, IndustryID: {}",
-                symbol, name, ind
-            );
+
+        // 若目前測試環境無法連接資料庫，則自動跳過，避免在無資料庫之開發環境下執行單元測試失敗
+        if crate::infra::database::ping().await.is_err() {
+            println!("跳過 test_upsert_industry：資料庫未啟動或無法連線");
+            return;
         }
+
+        let test_symbol = "__TEST_UPSERT_IND_9999__";
+        let cleanup_sql = "DELETE FROM stocks WHERE stock_symbol = $1;";
+
+        // 1. 確保乾淨的測試起點，先清除可能存在的舊測試資料
+        sqlx::query(cleanup_sql)
+            .bind(test_symbol)
+            .execute(crate::infra::database::get_connection())
+            .await
+            .ok();
+
+        // 2. 寫入初始的測試股票資料，並給予非零之市場與產業編號
+        let mut seed = Stock::new();
+        seed.stock_symbol = test_symbol.to_string();
+        seed.name = "測試防禦更新股".to_string();
+        seed.stock_exchange_market_id = 4; // 初始市場 ID
+        seed.stock_industry_id = 15; // 初始產業 ID
+        seed.upsert().await.expect("Failed to insert seed stock");
+
+        // 3. 測試防禦邏輯：呼叫 upsert 時傳入 0 的市場與產業 ID
+        let mut update_zero = Stock::new();
+        update_zero.stock_symbol = test_symbol.to_string();
+        update_zero.name = "測試防禦更新股_已更新".to_string();
+        update_zero.stock_exchange_market_id = 0; // 傳入 0
+        update_zero.stock_industry_id = 0; // 傳入 0
+        update_zero
+            .upsert()
+            .await
+            .expect("Failed to upsert zero fields");
+
+        // 4. 驗證防禦更新：確認原先的非零值 (4 與 15) 被妥善保留，並未被 0 覆蓋
+        let row1 = sqlx::query("SELECT \"Name\", stock_exchange_market_id, stock_industry_id FROM stocks WHERE stock_symbol = $1")
+            .bind(test_symbol)
+            .fetch_one(crate::infra::database::get_connection())
+            .await
+            .expect("Failed to fetch updated stock");
+        assert_eq!(row1.get::<String, _>("Name"), "測試防禦更新股_已更新");
+        assert_eq!(row1.get::<i32, _>("stock_exchange_market_id"), 4);
+        assert_eq!(row1.get::<i32, _>("stock_industry_id"), 15);
+
+        // 5. 測試正常覆寫：呼叫 upsert 時傳入新的非零之市場與產業 ID
+        let mut update_new = Stock::new();
+        update_new.stock_symbol = test_symbol.to_string();
+        update_new.name = "測試防禦更新股_二次更新".to_string();
+        update_new.stock_exchange_market_id = 2; // 新市場 ID
+        update_new.stock_industry_id = 8; // 新產業 ID
+        update_new
+            .upsert()
+            .await
+            .expect("Failed to upsert new fields");
+
+        // 6. 驗證覆寫更新：確認市場與產業 ID 已經被正確更新為新的值 (2 與 8)
+        let row2 = sqlx::query("SELECT \"Name\", stock_exchange_market_id, stock_industry_id FROM stocks WHERE stock_symbol = $1")
+            .bind(test_symbol)
+            .fetch_one(crate::infra::database::get_connection())
+            .await
+            .expect("Failed to fetch second updated stock");
+        assert_eq!(row2.get::<String, _>("Name"), "測試防禦更新股_二次更新");
+        assert_eq!(row2.get::<i32, _>("stock_exchange_market_id"), 2);
+        assert_eq!(row2.get::<i32, _>("stock_industry_id"), 8);
+
+        // 7. 清理測試資料，還原資料庫狀態
+        sqlx::query(cleanup_sql)
+            .bind(test_symbol)
+            .execute(crate::infra::database::get_connection())
+            .await
+            .expect("Failed to cleanup test stock");
     }
 
     #[tokio::test]
