@@ -134,8 +134,6 @@ pub async fn get_tx() -> Result<Transaction<'static, Postgres>> {
 /// # 錯誤
 /// 若連線失敗、逾時或查詢執行失敗則回傳錯誤。
 pub async fn ping() -> Result<()> {
-    sqlx::query("SELECT 1")
-        .execute(get_connection())
-        .await?;
+    sqlx::query("SELECT 1").execute(get_connection()).await?;
     Ok(())
 }

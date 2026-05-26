@@ -67,9 +67,9 @@ impl Telegram {
         let results = join_all(futures).await;
 
         // 尋找是否有成功發送且 API 返回 ok = true 的結果
-        let first_ok = results.iter().find_map(|r| {
-            r.as_ref().ok().filter(|res| res.ok)
-        });
+        let first_ok = results
+            .iter()
+            .find_map(|r| r.as_ref().ok().filter(|res| res.ok));
 
         if let Some(resp) = first_ok {
             return Ok(resp.clone());
@@ -95,10 +95,16 @@ impl Telegram {
         fallback_results
             .into_iter()
             .find_map(|result| result.ok())
-            .ok_or_else(|| anyhow!("Failed to send message to any recipient even after plain-text fallback"))
+            .ok_or_else(|| {
+                anyhow!("Failed to send message to any recipient even after plain-text fallback")
+            })
     }
 
-    fn send_message<'a>(&'a self, payload: SendMessageRequest<'a>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SendMessageResponse>> + Send + 'a>> {
+    fn send_message<'a>(
+        &'a self,
+        payload: SendMessageRequest<'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SendMessageResponse>> + Send + 'a>>
+    {
         Box::pin(async move {
             http::post_use_json::<SendMessageRequest, SendMessageResponse>(
                 &self.send_message_url,

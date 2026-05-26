@@ -152,10 +152,7 @@ where
         let task = task.clone();
         Box::pin(async move {
             if let Err(why) = task().await {
-                let err_msg = format!(
-                    "Failed to execute task({}) because {:?}",
-                    cron_expr, why
-                );
+                let err_msg = format!("Failed to execute task({}) because {:?}", cron_expr, why);
                 logging::error_file_async(&err_msg);
                 bot::telegram::send_alert("排程任務執行失敗", &err_msg).await;
             }

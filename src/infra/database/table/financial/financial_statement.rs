@@ -179,26 +179,26 @@ INSERT INTO financial_statement (
     "pre-tax_income", net_income, net_asset_value_per_share, sales_per_share,
     earnings_per_share, profit_before_tax, return_on_equity, return_on_assets,
     created_time, updated_time)
-"#
+"#,
         );
 
         // 2. 批次推入資料列與對應參數綁定
         query_builder.push_values(statements, |mut b, item| {
             b.push_bind(&item.security_code)
-             .push_bind(item.year)
-             .push_bind(&item.quarter)
-             .push_bind(item.gross_profit)
-             .push_bind(item.operating_profit_margin)
-             .push_bind(item.pre_tax_income)
-             .push_bind(item.net_income)
-             .push_bind(item.net_asset_value_per_share)
-             .push_bind(item.sales_per_share)
-             .push_bind(item.earnings_per_share)
-             .push_bind(item.profit_before_tax)
-             .push_bind(item.return_on_equity)
-             .push_bind(item.return_on_assets)
-             .push_bind(item.created_time)
-             .push_bind(item.updated_time);
+                .push_bind(item.year)
+                .push_bind(&item.quarter)
+                .push_bind(item.gross_profit)
+                .push_bind(item.operating_profit_margin)
+                .push_bind(item.pre_tax_income)
+                .push_bind(item.net_income)
+                .push_bind(item.net_asset_value_per_share)
+                .push_bind(item.sales_per_share)
+                .push_bind(item.earnings_per_share)
+                .push_bind(item.profit_before_tax)
+                .push_bind(item.return_on_equity)
+                .push_bind(item.return_on_assets)
+                .push_bind(item.created_time)
+                .push_bind(item.updated_time);
         });
 
         // 3. 串接衝突更新子句 (Conflict Resolution)
@@ -216,7 +216,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     return_on_equity = EXCLUDED.return_on_equity,
     return_on_assets = EXCLUDED.return_on_assets,
     updated_time = EXCLUDED.updated_time;
-"#
+"#,
         );
 
         // 4. 建立並執行查詢
@@ -224,12 +224,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
         query
             .execute(database::get_connection())
             .await
-            .map_err(|why| {
-                anyhow!(
-                    "Failed to batch_upsert statements from database: {:?}",
-                    why
-                )
-            })
+            .map_err(|why| anyhow!("Failed to batch_upsert statements from database: {:?}", why))
     }
 
     /// 僅新增或更新每股盈餘欄位。
@@ -397,7 +392,9 @@ WHERE quarter = "#,
         Some(q) => q.to_string(),
     };
     query_builder.push_bind(q);
-    query_builder.push(" AND (return_on_equity = 0 OR return_on_assets = 0 OR net_asset_value_per_share = 0)");
+    query_builder.push(
+        " AND (return_on_equity = 0 OR return_on_assets = 0 OR net_asset_value_per_share = 0)",
+    );
 
     if let Some(year) = year {
         query_builder.push(" AND year = ");

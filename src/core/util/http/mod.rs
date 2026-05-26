@@ -399,7 +399,8 @@ async fn send_with_client(
                 // 檢查是否遭遇 IP 阻擋或請求速率限制 (403 Forbidden 或 429 Too Many Requests)
                 // 必須排除向 Telegram API 發送的請求，否則會引發無限遞迴
                 let status = response.status();
-                if (status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::TOO_MANY_REQUESTS)
+                if (status == reqwest::StatusCode::FORBIDDEN
+                    || status == reqwest::StatusCode::TOO_MANY_REQUESTS)
                     && !url.contains("api.telegram.org")
                 {
                     let alert_url = url.to_string();

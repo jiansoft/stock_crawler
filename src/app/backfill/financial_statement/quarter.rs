@@ -72,7 +72,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
             async move {
                 let cache_key = fs.key_with_prefix();
                 let profile_skip_cache_key = yahoo::profile::no_valid_data_cache_key(&fs.security_code);
-                
+
                 // 檢查 Redis 狀態，決定是否跳過（例如先前已處理過，或是已知無有效資料的股票）
                 let is_jump = match crate::infra::nosql::redis::CLIENT.get_bool(&cache_key).await {
                     Ok(val) => val,

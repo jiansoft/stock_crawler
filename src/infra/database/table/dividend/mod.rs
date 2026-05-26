@@ -225,31 +225,31 @@ INSERT INTO dividend (
     payable_date1, payable_date2, created_time, updated_time, capital_reserve_cash_dividend,
     earnings_cash_dividend, capital_reserve_stock_dividend, earnings_stock_dividend,
     payout_ratio_cash, payout_ratio_stock, payout_ratio)
-"#
+"#,
         );
 
         // 2. 批次推入資料列與對應參數綁定
         query_builder.push_values(dividends, |mut b, item| {
             b.push_bind(&item.security_code)
-             .push_bind(item.year)
-             .push_bind(item.year_of_dividend)
-             .push_bind(&item.quarter)
-             .push_bind(item.cash_dividend)
-             .push_bind(item.stock_dividend)
-             .push_bind(item.sum)
-             .push_bind(&item.ex_dividend_date1)
-             .push_bind(&item.ex_dividend_date2)
-             .push_bind(&item.payable_date1)
-             .push_bind(&item.payable_date2)
-             .push_bind(item.created_time)
-             .push_bind(item.updated_time)
-             .push_bind(item.capital_reserve_cash_dividend)
-             .push_bind(item.earnings_cash_dividend)
-             .push_bind(item.capital_reserve_stock_dividend)
-             .push_bind(item.earnings_stock_dividend)
-             .push_bind(item.payout_ratio_cash)
-             .push_bind(item.payout_ratio_stock)
-             .push_bind(item.payout_ratio);
+                .push_bind(item.year)
+                .push_bind(item.year_of_dividend)
+                .push_bind(&item.quarter)
+                .push_bind(item.cash_dividend)
+                .push_bind(item.stock_dividend)
+                .push_bind(item.sum)
+                .push_bind(&item.ex_dividend_date1)
+                .push_bind(&item.ex_dividend_date2)
+                .push_bind(&item.payable_date1)
+                .push_bind(&item.payable_date2)
+                .push_bind(item.created_time)
+                .push_bind(item.updated_time)
+                .push_bind(item.capital_reserve_cash_dividend)
+                .push_bind(item.earnings_cash_dividend)
+                .push_bind(item.capital_reserve_stock_dividend)
+                .push_bind(item.earnings_stock_dividend)
+                .push_bind(item.payout_ratio_cash)
+                .push_bind(item.payout_ratio_stock)
+                .push_bind(item.payout_ratio);
         });
 
         // 3. 串接衝突更新子句 (Conflict Resolution)
@@ -272,7 +272,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     payout_ratio_cash = EXCLUDED.payout_ratio_cash,
     payout_ratio_stock = EXCLUDED.payout_ratio_stock,
     payout_ratio = EXCLUDED.payout_ratio;
-"#
+"#,
         );
 
         // 4. 建立並執行查詢
@@ -280,12 +280,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
         query
             .execute(database::get_connection())
             .await
-            .map_err(|why| {
-                anyhow!(
-                    "Failed to batch_upsert dividends from database: {:?}",
-                    why
-                )
-            })
+            .map_err(|why| anyhow!("Failed to batch_upsert dividends from database: {:?}", why))
     }
 
     /// 更新年度內有多次配息記錄時將其合併計算成年度股利
