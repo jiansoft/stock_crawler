@@ -470,7 +470,9 @@ mod tests {
 
     use super::*;
 
+    // 此測試依賴實際資料庫與 stocks 資料表之特定資料，故於 CI / 自動測試時忽略。
     #[tokio::test]
+    #[ignore]
     async fn test_upsert_industry() {
         dotenv::dotenv().ok();
         let rows = sqlx::query("SELECT stock_symbol, \"Name\", stock_industry_id FROM stocks WHERE stock_symbol IN ('1101', '8404', '2330')")
