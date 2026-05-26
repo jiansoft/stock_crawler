@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# 從原始碼下載、解壓、設定並安裝 nginx 或 freenginx。
-# 預設會從官方下載頁抓取最新版；設定 LATEST=0 時才會使用下方固定版本。
+# 從原始碼下載、解壓、設定並安裝 F5 維護的官方 nginx 或 freenginx。
+# 預設使用 F5 官方 nginx 來源並抓取最新版；設定 LATEST=0 時才會使用下方固定版本。
 
 SOURCE_DIR="${SOURCE_DIR:-/opt/nginx/source}"
 INSTALL_ROOT="${INSTALL_ROOT:-/opt/nginx}"
 INSTALL_NAME="${INSTALL_NAME:-}"
-FLAVOR="${FLAVOR:-freenginx}"
+FLAVOR="${FLAVOR:-nginx}"
 CHANNEL="${CHANNEL:-mainline}"
 LATEST="${LATEST:-1}"
 WITH_BROTLI="${WITH_BROTLI:-1}"
@@ -17,6 +17,11 @@ BROTLI_DIR="${BROTLI_DIR:-/opt/nginx/source/ngx_brotli}"
 OPENSSL_PROVIDER="${OPENSSL_PROVIDER:-openssl}"
 DRY_RUN="${DRY_RUN:-0}"
 JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
+RESTART_AFTER_INSTALL="${RESTART_AFTER_INSTALL:-1}"
+CURRENT_LINK="${CURRENT_LINK:-${INSTALL_ROOT}/current}"
+MODULES_LINK="${MODULES_LINK:-${INSTALL_ROOT}/modules}"
+NGINX_PID_FILE="${NGINX_PID_FILE:-${INSTALL_ROOT}/run/nginx.pid}"
+STOP_TIMEOUT_SECONDS="${STOP_TIMEOUT_SECONDS:-30}"
 
 NGINX_VERSION="${NGINX_VERSION:-1.31.0}"
 FREENGINX_VERSION="${FREENGINX_VERSION:-1.31.0}"
@@ -208,6 +213,7 @@ build_server() {
 
   cd "$SOURCE_DIR/$SERVER_DIR"
   install_dir="${INSTALL_ROOT}/${INSTALL_NAME:-$SERVER_VERSION}"
+  SERVER_INSTALL_DIR="$install_dir"
 
   local configure_args=(
     "--prefix=${install_dir}"
@@ -237,11 +243,17 @@ build_server() {
     "--with-http_mp4_module"
     "--with-http_flv_module"
     "--with-http_gzip_static_module"
+    "--with-http_gunzip_module"
+    "--with-http_auth_request_module"
+    "--with-http_secure_link_module"
+    "--with-http_slice_module"
     "--with-stream"
     "--with-threads"
     "--with-stream_ssl_module"
     "--with-stream_ssl_preread_module"
     "--with-stream_realip_module"
+    "--with-cc-opt=-O3 -fstack-protector-strong -Wformat -Werror=format-security -D_FORTIFY_SOURCE=2 -fPIC"
+    "--with-ld-opt=-Wl,-z,relro -Wl,-z,now -Wl,-Bsymbolic-functions"
     "--build=${FLAVOR}-${SERVER_VERSION}-${OPENSSL_PROVIDER}"
   )
 
@@ -263,12 +275,114 @@ build_server() {
   run make install
 }
 
+wait_for_nginx_stop() {
+  local pid="$1"
+  local elapsed=0
+
+  # 等待舊程序真正離開，避免新版啟動時搶不到 listen port 或 pid 檔。
+  while kill -0 "$pid" >/dev/null 2>&1; do
+    if [ "$elapsed" -ge "$STOP_TIMEOUT_SECONDS" ]; then
+      die "等待 nginx 停止逾時（PID: $pid，逾時秒數：$STOP_TIMEOUT_SECONDS）"
+    fi
+
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+}
+
+stop_running_nginx() {
+  local pid
+
+  if [ ! -s "$NGINX_PID_FILE" ]; then
+    log "找不到 nginx pid 檔，略過停止步驟：$NGINX_PID_FILE"
+    return 0
+  fi
+
+  pid="$(cat "$NGINX_PID_FILE")"
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    log "pid 檔存在但程序未執行，略過停止步驟：$NGINX_PID_FILE (PID: $pid)"
+    return 0
+  fi
+
+  # 使用 QUIT 讓目前 nginx 優雅停止，確定舊 master 結束後才會啟動新版。
+  run kill -QUIT "$pid"
+  if [ "$DRY_RUN" != "1" ]; then
+    wait_for_nginx_stop "$pid"
+  fi
+}
+
+require_restart_privileges() {
+  if [ "$DRY_RUN" = "1" ]; then
+    return 0
+  fi
+
+  # 重啟 nginx 需要寫入 /opt/nginx/log、送 signal 給舊 master，通常也要綁定 80/443。
+  if [ "$(id -u)" != "0" ]; then
+    die "RESTART_AFTER_INSTALL=1 需要 root 權限；請用 sudo 執行，或設定 RESTART_AFTER_INSTALL=0 只建置安裝"
+  fi
+}
+
+switch_version_links() {
+  # current 指向最新安裝目錄，方便外部 service 或人工檢查固定使用同一路徑。
+  run ln -sfnT "$SERVER_INSTALL_DIR" "$CURRENT_LINK"
+
+  if [ ! -d "${SERVER_INSTALL_DIR}/modules" ]; then
+    log "新版本沒有 modules 目錄，略過 modules 切換：${SERVER_INSTALL_DIR}/modules"
+    return 0
+  fi
+
+  if [ -L "$MODULES_LINK" ] || [ ! -e "$MODULES_LINK" ]; then
+    # 若 modules 目前是 symlink 或不存在，就直接切到新版本的 dynamic modules。
+    run ln -sfnT "${SERVER_INSTALL_DIR}/modules" "$MODULES_LINK"
+    return 0
+  fi
+
+  if [ -d "$MODULES_LINK" ]; then
+    if compgen -G "${SERVER_INSTALL_DIR}/modules/*.so" >/dev/null; then
+      # 若 modules 是既有實體目錄，就覆蓋複製新版 .so，避免刪除使用者自放的模組。
+      run cp -f "${SERVER_INSTALL_DIR}"/modules/*.so "${MODULES_LINK}/"
+    else
+      log "新版本 modules 目錄沒有 .so 檔，略過 modules 複製"
+    fi
+    return 0
+  fi
+
+  die "modules 路徑已存在但不是目錄或 symlink：$MODULES_LINK"
+}
+
+switch_to_new_server() {
+  local new_binary="${SERVER_INSTALL_DIR}/nginx"
+
+  [ "$RESTART_AFTER_INSTALL" = "1" ] || {
+    log "RESTART_AFTER_INSTALL=0，略過切換與重啟"
+    return 0
+  }
+
+  [ -x "$new_binary" ] || die "找不到新編譯的 nginx 執行檔：$new_binary"
+
+  require_restart_privileges
+  switch_version_links
+
+  # 先用新 binary 驗證設定檔，避免停掉舊服務後才發現新版無法啟動。
+  run "$new_binary" -t -c "${INSTALL_ROOT}/nginx.conf" -p "${INSTALL_ROOT}/"
+
+  stop_running_nginx
+
+  # 停止舊程序後，明確用剛編譯出的 binary 啟動新版 nginx。
+  run "$new_binary" -c "${INSTALL_ROOT}/nginx.conf" -p "${INSTALL_ROOT}/"
+}
+
 main() {
   need_cmd tar
   need_cmd grep
   need_cmd sed
   need_cmd sort
   need_cmd awk
+  need_cmd kill
+  need_cmd sleep
+  need_cmd ln
+  need_cmd id
+  need_cmd cp
 
   if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     die "需要 curl 或 wget 其中一個下載工具"
@@ -277,6 +391,7 @@ main() {
   resolve_latest_versions
   download_sources
   build_server
+  switch_to_new_server
 
   log "已成功安裝以下版本套件："
   if [ "$FLAVOR" = "nginx" ]; then
@@ -293,6 +408,11 @@ main() {
   fi
 
   log "完成：${INSTALL_ROOT}/${INSTALL_NAME:-$SERVER_VERSION}/nginx"
+  if [ "$RESTART_AFTER_INSTALL" = "1" ]; then
+    log "已切換 current：${CURRENT_LINK} -> ${SERVER_INSTALL_DIR}"
+    log "已更新 modules：${MODULES_LINK}"
+    log "已使用新版 nginx 啟動服務"
+  fi
 }
 
 main "$@"
