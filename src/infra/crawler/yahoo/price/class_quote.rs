@@ -625,11 +625,11 @@ mod tests {
     fn test_all_class_categories_excludes_disabled_categories() {
         let categories = all_class_categories();
 
-        assert_eq!(categories.len(), 98);
+        assert_eq!(categories.len(), 97);
         assert!(!categories.iter().any(|category| {
             matches!(
                 (category.exchange, category.sector_id),
-                (YahooClassExchange::Listed, 31..=33)
+                (YahooClassExchange::Listed, 31..=33 | 49) // 排除指數類與回空資料的創新板(49)
                     | (YahooClassExchange::OverTheCounter, 33 | 165 | 166)
             )
         }));
