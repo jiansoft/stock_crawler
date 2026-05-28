@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use rand::RngExt;
 use tokio_retry::{
     strategy::{jitter, ExponentialBackoff},
     Retry,
@@ -7,8 +8,12 @@ use tokio_retry::{
 use crate::{core::logging, infra::crawler::yahoo, infra::database::table::dividend};
 
 /// 回補除息/發放日期尚未公布的股利資料。
+///
+/// 此函式會查詢資料庫中指定年度除息日或發放日尚未公布的股票，
+/// 並透過 Yahoo 財經進行回補。為了避免對 Yahoo 造成負擔而被阻擋，
+/// 引入了 Redis 快取（3天效期）與每檔股票 1 秒的延遲節流。
 pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()> {
-    // 除息日尚未公布
+    // 從資料庫中取得指定年度內，除息日或發放日尚未公佈的股利資料列表
     let dividends =
         dividend::Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
             year,
@@ -20,13 +25,57 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
         dividends.len()
     ));
 
+    // 依序遍歷每一檔需要回補的股利資料
     for dividend in dividends {
+        let stock_symbol = &dividend.security_code;
+        // 建立 Yahoo 股利回補用的 Redis 快取 key。
+        // 與 missing_or_multiple.rs 的快取 key 格式保持一致，共享 3 天的快取防護，避免短時間內重複對同一檔股票重複爬取
+        let cache_key = format!("yahoo:dividend:{stock_symbol}");
+
+        // 讀取 Redis 快取，確認這檔股票在 3 天內是否已經爬取過
+        let is_jump = match crate::infra::nosql::redis::CLIENT
+            .get_bool(&cache_key)
+            .await
+        {
+            Ok(val) => val,
+            Err(why) => {
+                // 若 Redis 讀取失敗，為避免卡住資料回補流程，僅記錄 log 並假設未爬取過 (false)
+                logging::error_file_async(format!(
+                    "Failed to get redis cache key {} because {:?}",
+                    cache_key, why
+                ));
+                false
+            }
+        };
+
+        // 如果 3 天內已經抓取過該股票的 Yahoo 股利頁面，則直接跳過，防範高頻請求被封鎖
+        if is_jump {
+            continue;
+        }
+
+        // 先寫入 3 天的快取旗標至 Redis，TTL 設為 3 天 (60秒 * 60分 * 24小時 * 3天 = 259200秒)
+        // 這樣做即使單次採集失敗，也能避免下一次排程運行時立刻重複請求
+        if let Err(why) = crate::infra::nosql::redis::CLIENT
+            .set(&cache_key, true, 60 * 60 * 24 * 3)
+            .await
+        {
+            logging::error_file_async(format!(
+                "Failed to set redis cache key {} because {:?}",
+                cache_key, why
+            ));
+        }
+
+        // 呼叫 Yahoo 採集器抓取並解析網頁，進而更新資料庫中該股的除息與發放日期
         if let Err(why) = backfill_unannounced_dividend_dates_from_yahoo(dividend, year).await {
             logging::error_file_async(format!(
                 "Failed to backfill_unannounced_dividend_dates_from_yahoo because {:?}",
                 why
             ));
         }
+
+        // 每檔股票請求完成後，進行隨機 1.5 到 3.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
+        let jitter_ms = rand::rng().random_range(1500..=3000);
+        tokio::time::sleep(std::time::Duration::from_millis(jitter_ms)).await;
     }
 
     Ok(())

@@ -1,5 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
+use rand::RngExt;
+
 use crate::{
     app::calculation::dividend_record, core::logging, core::util::map::Keyable,
     infra::crawler::yahoo, infra::database::table::dividend,
@@ -90,8 +92,9 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
             ));
         }
 
-        // 每檔股票間隔 1 秒，避免連續請求 Yahoo 造成限流或暫時封鎖。
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // 每檔股票請求完成後，進行隨機 1.5 到 3.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
+        let jitter_ms = rand::rng().random_range(1500..=3000);
+        tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
     }
 
     Ok(())
@@ -217,8 +220,9 @@ pub async fn backfill_historical_dividends_for_multiple_dividend_stocks(
         summary.stock_count += 1;
         summary.detail_count += detail_count;
 
-        // 批次重跑可能涵蓋多檔股票，固定節流避免短時間大量請求 Yahoo。
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // 每檔股票請求完成後，進行隨機 1.5 到 3.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
+        let jitter_ms = rand::rng().random_range(1500..=3000);
+        tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
     }
 
     Ok(summary)
