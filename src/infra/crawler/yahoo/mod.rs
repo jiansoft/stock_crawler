@@ -150,7 +150,7 @@ pub const LISTED_CLASS_CATEGORIES: &[YahooClassCategory] = &[
     YahooClassCategory::enabled(YahooClassExchange::Listed, 46, "資訊服務"),
     YahooClassCategory::enabled(YahooClassExchange::Listed, 47, "其他電子"),
     YahooClassCategory::enabled(YahooClassExchange::Listed, 48, "ETN"),
-    YahooClassCategory::enabled(YahooClassExchange::Listed, 49, "創新板"),
+    YahooClassCategory::disabled(YahooClassExchange::Listed, 49, "創新板"), // 因 Yahoo API 一直回空資料，故不採集
     YahooClassCategory::enabled(YahooClassExchange::Listed, 51, "市牛證"),
     YahooClassCategory::enabled(YahooClassExchange::Listed, 52, "市熊證"),
     YahooClassCategory::enabled(YahooClassExchange::Listed, 93, "綠能環保"),
