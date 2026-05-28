@@ -24,7 +24,7 @@ use crate::{
             read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
         },
     },
-    infra::cache::{RealtimeSnapshot, SHARE},
+    infra::cache::{RealtimeSnapshot, SHARE, TtlCacheInner, TTL},
     infra::crawler::yahoo::YahooClassCategory,
 };
 
@@ -151,6 +151,9 @@ pub fn start_caching_task() {
 
             // 依固定順序逐類股更新，這樣比較容易控制節流與追蹤問題類股。
             for category in &categories {
+                // 用於追蹤本次類股抓取是否因遭遇 Request denied (如 WAF 封鎖或 999 狀態碼) 而失敗
+                let mut is_denied = false;
+
                 // 在每個類股開始前先檢查一次停止旗標，
                 // 避免外部要求停止後還繼續多跑好幾個類股。
                 if !IS_CACHING.load(Ordering::SeqCst) {
@@ -229,6 +232,43 @@ pub fn start_caching_task() {
                     }
                     Err(why) => {
                         failure_count += 1;
+                        let err_msg = why.to_string();
+                        // 檢查錯誤訊息是否包含被阻擋特徵
+                        if err_msg.contains("Request denied") || err_msg.contains("status 999") {
+                            is_denied = true;
+
+                            let alert_cache_key = "alert:yahoo:denied";
+                            // 使用專案內建的記憶體 TTL 快取，確認 1 小時內是否已發送過警報，防範洗板
+                            let already_alerted = TTL.daily_quote_contains_key(alert_cache_key);
+
+                            if !already_alerted {
+                                // 寫入為期 1 小時的警報快取旗標至記憶體 TTL 快取 (3600秒)
+                                TTL.daily_quote_set(
+                                    alert_cache_key.to_string(),
+                                    "true".to_string(),
+                                    Duration::from_secs(3600),
+                                );
+
+                                // 準備 TG 通知所需的變數，轉移所有權至 async 區塊
+                                let exchange_label = category.exchange.label().to_string();
+                                let category_name = category.name.to_string();
+                                let sector_id = category.sector_id;
+                                let err_msg_clone = err_msg.clone();
+
+                                // 透過 tokio::spawn 非同步發送警報，避免阻塞爬蟲主流程
+                                tokio::spawn(async move {
+                                    // 發送警報至 Telegram Bot
+                                    crate::interfaces::bot::telegram::send_alert(
+                                        "Yahoo 類股採集遭遇阻擋",
+                                        &format!(
+                                            "類股: {} {}({})\n原因: {}\n該次更新將強制冷卻 10 分鐘，1小時內不重複提醒。",
+                                            exchange_label, category_name, sector_id, err_msg_clone
+                                        ),
+                                    )
+                                    .await;
+                                });
+                            }
+                        }
                         let total_count = SHARE
                             .stock_snapshots
                             .read()
@@ -284,9 +324,21 @@ pub fn start_caching_task() {
                     break;
                 }
 
-                // 類股與類股之間進行隨機 2.0 至 4.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
-                let jitter_ms = rand::rng().random_range(2000..=4000);
-                sleep(Duration::from_millis(jitter_ms)).await;
+                // 類股與類股之間進行隨機 2.0 至 4.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率。
+                // 若本次採集遭遇 WAF 阻擋 (Request denied)，則該次的延遲時間改為等待 10 分鐘 (600秒) 以進行冷卻。
+                let sleep_duration = if is_denied {
+                    crate::core::logging::warn_file_async(format!(
+                        "Yahoo 採集遭遇 Request denied，將強制冷卻等待 10 分鐘。類股: {} {}({})",
+                        category.exchange.label(),
+                        category.name,
+                        category.sector_id
+                    ));
+                    Duration::from_secs(600)
+                } else {
+                    let jitter_ms = rand::rng().random_range(2000..=4000);
+                    Duration::from_millis(jitter_ms)
+                };
+                sleep(sleep_duration).await;
             }
 
             // 如果是在整輪尾端才收到 stop，就不要再進入 cooldown。
