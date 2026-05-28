@@ -11,6 +11,7 @@ use std::{
 };
 
 use once_cell::sync::Lazy;
+use rand::RngExt;
 use rust_decimal::Decimal;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
@@ -57,8 +58,6 @@ static LAST_RSS_DELTA_KIB: Lazy<AtomicI64> = Lazy::new(|| AtomicI64::new(0));
 /// Yahoo 完成輪詢的累積輪數。
 static COMPLETED_CYCLES: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 
-/// 相鄰兩個類股請求之間的節流間隔。
-const CATEGORY_REQUEST_INTERVAL: Duration = Duration::from_secs(2);
 /// 全部類股輪詢完一輪後的休息時間。
 const CYCLE_COOLDOWN: Duration = Duration::from_secs(5);
 
@@ -285,8 +284,9 @@ pub fn start_caching_task() {
                     break;
                 }
 
-                // 類股與類股之間固定 sleep，目的是降低連續高頻請求被 Yahoo 視為異常流量的機率。
-                sleep(CATEGORY_REQUEST_INTERVAL).await;
+                // 類股與類股之間進行隨機 2.0 至 4.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
+                let jitter_ms = rand::rng().random_range(2000..=4000);
+                sleep(Duration::from_millis(jitter_ms)).await;
             }
 
             // 如果是在整輪尾端才收到 stop，就不要再進入 cooldown。
