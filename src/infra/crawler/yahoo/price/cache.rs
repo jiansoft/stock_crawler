@@ -24,7 +24,7 @@ use crate::{
             read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
         },
     },
-    infra::cache::{RealtimeSnapshot, SHARE, TtlCacheInner, TTL},
+    infra::cache::{RealtimeSnapshot, TtlCacheInner, SHARE, TTL},
     infra::crawler::yahoo::YahooClassCategory,
 };
 
