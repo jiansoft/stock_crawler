@@ -133,8 +133,17 @@ async fn update_stock_info(
         .map_err(|why| anyhow!("Failed to stock.upsert() because {:?}", why))?;
 
     // 3. 同步更新全域記憶體快取，使得外部 gRPC 或其他內部服務能即時查詢到最新屬性
+    // 注意：若快取中已存在該股票，應僅更新變更欄位（名稱、下市狀態、市場、產業），
+    // 避免直接覆蓋 (insert) 導致每股淨值、ROE、持股比率等其他重要欄位被重置為 0。
     if let Ok(mut stocks) = SHARE.stocks.write() {
-        stocks.insert(stock.stock_symbol.to_string(), stock.clone());
+        if let Some(existing) = stocks.get_mut(&stock.stock_symbol) {
+            existing.name = stock.name.clone();
+            existing.suspend_listing = stock.suspend_listing;
+            existing.stock_exchange_market_id = stock.stock_exchange_market_id;
+            existing.stock_industry_id = stock.stock_industry_id;
+        } else {
+            stocks.insert(stock.stock_symbol.to_string(), stock.clone());
+        }
     }
 
     // 4. 解析易讀的市場名稱與產業名稱，供日誌與 Telegram 通知使用

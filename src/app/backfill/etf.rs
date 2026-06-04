@@ -98,8 +98,17 @@ async fn update_stock_info(etf: &EtfInfo, msg: &mut String) -> Result<()> {
         .map_err(|why| anyhow!("資料庫 upsert 失敗: {:?}", why))?;
 
     // 3. 更新記憶體快取：確保系統的其他功能（如行情查詢）能立刻讀到最新欄位
+    // 注意：若快取中已存在該股票，應僅更新變更欄位（名稱、下市狀態、市場、產業），
+    // 避免直接覆蓋 (insert) 導致每股淨值、ROE、持股比率等其他重要欄位被重置為 0。
     if let Ok(mut stocks) = SHARE.stocks.write() {
-        stocks.insert(stock.stock_symbol.to_string(), stock.clone());
+        if let Some(existing) = stocks.get_mut(&stock.stock_symbol) {
+            existing.name = stock.name.clone();
+            existing.suspend_listing = stock.suspend_listing;
+            existing.stock_exchange_market_id = stock.stock_exchange_market_id;
+            existing.stock_industry_id = stock.stock_industry_id;
+        } else {
+            stocks.insert(stock.stock_symbol.to_string(), stock.clone());
+        }
     }
 
     // 4. 取得易讀的名稱（用於日誌與通知）
