@@ -530,16 +530,80 @@ impl Share {
         }
     }
 
-    /// 將股票全市場報價快照寫入快取。
+    /// 取得最後交易日的收盤價，優先從快取中取得，否則退回使用傳入的備援值 (fallback)。
     ///
     /// # 參數
-    /// - `snapshots`: 以股票代號為 key 的全量即時快照。
+    /// - `symbol`: 股票代號。
+    /// - `fallback`: 備援的昨收價。
+    fn get_last_close(&self, symbol: &str, fallback: Decimal) -> Decimal {
+        self.last_trading_day_quotes
+            .read()
+            .ok()
+            .and_then(|cache| cache.get(symbol).map(|q| q.closing_price))
+            .filter(|&p| p > Decimal::ZERO)
+            .unwrap_or(fallback)
+    }
+
+    /// 檢查採集到的股價是否合法（與上一個交易日的最後收盤價相比，差距是否在 10.5% 以內）。
     ///
-    /// # 行為
-    /// - 會直接以新資料覆蓋整個快照快取。
-    /// - 適合由全量抓取器在單次更新完成後整批替換。
-    pub fn set_stock_snapshots(&self, snapshots: HashMap<String, RealtimeSnapshot>) {
+    /// # 參數
+    /// - `symbol`: 股票代號。
+    /// - `price`: 最新採集到的價格。
+    /// - `snapshot_last_close`: 快照中帶有的昨收價（備援值）。
+    ///
+    /// # 回傳
+    /// - `true`：價格合法（或是無昨收價可比對）。
+    /// - `false`：價格與昨收價差距超過 10.5%，判定為異常價格。
+    pub fn is_valid_price(
+        &self,
+        symbol: &str,
+        price: Decimal,
+        snapshot_last_close: Decimal,
+    ) -> bool {
+        if price <= Decimal::ZERO {
+            return false;
+        }
+
+        let last_close = self.get_last_close(symbol, snapshot_last_close);
+
+        if last_close <= Decimal::ZERO {
+            // 如果沒有有效的昨收價，無法進行比較，暫且視為有效
+            return true;
+        }
+
+        // 10.5% (0.105) 昨收價差做為異常閾值（台股漲跌幅上限 10%）
+        // 註：使用乘法比對比除法運算更安全、且能避免 Decimal 除法時可能產生的精度截斷
+        let diff = (price - last_close).abs();
+        let limit = last_close * Decimal::new(105, 3);
+        diff <= limit
+    }
+
+    /// 以新抓到的完整快照覆蓋快照快取，會自動過濾與昨收價相差 10.5% 以上的異常價格，並保留舊有合法值。
+    pub fn set_stock_snapshots(&self, mut snapshots: HashMap<String, RealtimeSnapshot>) {
         if let Ok(mut cache) = self.stock_snapshots.write() {
+            // 檢查每一檔股票的新報價是否異常，若是，則將其價格標記為 0 準備過濾/恢復
+            for (symbol, new_snap) in &mut snapshots {
+                if !self.is_valid_price(symbol, new_snap.price, new_snap.last_close) {
+                    logging::warn_file_async(format!(
+                        "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                        symbol, new_snap.price, new_snap.last_close, new_snap.source_site
+                    ));
+                    new_snap.price = Decimal::ZERO;
+                }
+            }
+
+            // 如果新報價異常且原本快取中有舊資料，則從舊快取還原，避免直接抹除該股票
+            for (symbol, old_snap) in cache.iter() {
+                if let Some(new_snap) = snapshots.get_mut(symbol) {
+                    if new_snap.price == Decimal::ZERO {
+                        *new_snap = old_snap.clone();
+                    }
+                }
+            }
+
+            // 移除新快照中價格依然為 0 的無效資料
+            snapshots.retain(|_, snap| snap.price > Decimal::ZERO);
+
             *cache = snapshots;
         }
     }
@@ -557,6 +621,17 @@ impl Share {
     /// - 適合用於「單檔備援更新」情境，避免用不完整資料覆蓋整筆快照。
     pub fn set_stock_snapshot_price(&self, symbol: String, price: Decimal) {
         if let Ok(mut cache) = self.stock_snapshots.write() {
+            let last_close = cache
+                .get(&symbol)
+                .map(|s| s.last_close)
+                .unwrap_or(Decimal::ZERO);
+            if !self.is_valid_price(&symbol, price, last_close) {
+                logging::warn_file_async(format!(
+                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}",
+                    symbol, price, last_close
+                ));
+                return;
+            }
             if let Some(snapshot) = cache.get_mut(&symbol) {
                 snapshot.price = price;
             } else {
@@ -569,7 +644,7 @@ impl Share {
     ///
     /// # 參數
     /// - `symbol`: 股票代號。
-    /// - `price`: 最新成交價。
+    /// - `price`: 最新成交價.
     /// - `source_site`: 本次價格採集來源站點。
     ///
     /// # 行為
@@ -585,6 +660,17 @@ impl Share {
         let source_site = source_site.into();
 
         if let Ok(mut cache) = self.stock_snapshots.write() {
+            let last_close = cache
+                .get(&symbol)
+                .map(|s| s.last_close)
+                .unwrap_or(Decimal::ZERO);
+            if !self.is_valid_price(&symbol, price, last_close) {
+                logging::warn_file_async(format!(
+                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                    symbol, price, last_close, source_site
+                ));
+                return;
+            }
             if let Some(snapshot) = cache.get_mut(&symbol) {
                 snapshot.price = price;
                 snapshot.source_site = source_site;

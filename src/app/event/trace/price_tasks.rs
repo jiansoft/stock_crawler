@@ -803,6 +803,17 @@ async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
             let price_changed = previous_snapshot
                 .as_ref()
                 .is_none_or(|snapshot| snapshot.price != price);
+            let last_close = previous_snapshot
+                .as_ref()
+                .map(|s| s.last_close)
+                .unwrap_or(Decimal::ZERO);
+            if !SHARE.is_valid_price(&symbol, price, last_close) {
+                logging::warn_file_async(format!(
+                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                    symbol, price, last_close, source_site
+                ));
+                return false;
+            }
             let source_changed = previous_snapshot
                 .as_ref()
                 .is_none_or(|snapshot| snapshot.source_site != source_site);

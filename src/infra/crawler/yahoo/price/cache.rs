@@ -527,6 +527,13 @@ fn apply_category_snapshots(
             // 若 symbol 已存在，就用最新 snapshot 覆蓋。
             for (symbol, snapshot) in category_snapshots {
                 let price = snapshot.price;
+                if !SHARE.is_valid_price(&symbol, price, snapshot.last_close) {
+                    crate::core::logging::warn_file_async(format!(
+                        "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                        symbol, price, snapshot.last_close, snapshot.source_site
+                    ));
+                    continue;
+                }
                 let has_changed = snapshot.price != Decimal::ZERO
                     && cache
                         .get(&symbol)
