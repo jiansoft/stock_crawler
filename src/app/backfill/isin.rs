@@ -141,11 +141,7 @@ async fn update_stock_info(
     // 1. 獲取已存在的證券主檔或註冊一個新的，並使用業務方法更新識別資訊
     let stock = match repo.find_by_symbol(&cmd.symbol).await? {
         Some(mut existing) => {
-            existing.change_identity(
-                cmd.name.clone(),
-                cmd.market_id,
-                cmd.industry_id,
-            );
+            existing.change_identity(cmd.name.clone(), cmd.market_id, cmd.industry_id);
             existing
         }
         None => Stock::register(
