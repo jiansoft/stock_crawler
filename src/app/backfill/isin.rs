@@ -75,22 +75,28 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
     // 初始化 Telegram 訊息緩衝區，預分配 1024 位元組以減少動態記憶體配置的開銷
     let mut to_bot_msg = String::with_capacity(1024);
     for item in result {
+        // 透過防腐層 (ACL) Mapper 將外部爬蟲 DTO 轉換為內部指令
+        let cmd = match backfill::acl::IsinAclMapper::to_registration_command(&item) {
+            Some(c) => c,
+            None => continue, // 過濾無效或未分類的資料 (如 industry_id == 0)
+        };
+
         // 比對資料庫快取，檢查這檔股票是否是新上市，或是其產業、市場、名稱欄位有發生變更
         let new_stock = backfill::is_stock_identity_new_or_changed(
-            &item.stock_symbol,
-            item.industry_id,
-            item.exchange_market.stock_exchange_market_id,
-            &item.name,
+            &cmd.symbol,
+            cmd.industry_id,
+            cmd.market_id,
+            &cmd.name,
         )
         .await;
 
         // 若確認是新股票或資料有變動，則進行寫入與同步處理
-        if new_stock && item.industry_id != 0 {
-            if let Err(why) = update_stock_info(&item, &mut to_bot_msg).await {
+        if new_stock {
+            if let Err(why) = update_stock_info(&cmd, &mut to_bot_msg).await {
                 // 若更新單一股票基本資料失敗，記錄錯誤後繼續處理下一檔，避免單一錯誤導致整個市場回補中斷
                 logging::error_file_async(format!(
                     "Failed to update stock info for {} because {:?}",
-                    item.stock_symbol, why
+                    cmd.symbol, why
                 ));
             }
         }
@@ -107,22 +113,22 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
 /// 更新單一證券的詳細基本資訊至資料庫、記憶體快取，並同步通知 Go 服務與 Telegram 訊息緩衝區。
 ///
 /// # 參數
-/// - `stock`: 爬取到的原始證券識別碼資料結構實例。
+/// - `cmd`: 註冊或變更證券基本識別資料的指令。
 /// - `msg`: 用於累積 Telegram 發送通知的訊息字串緩衝區。
 ///
 /// # 運作流程
-/// 1. 將爬取到的 ISIN 資料結構轉換成對應資料庫 table::stock::Stock 欄位的實體。
-/// 2. 執行 `stock.upsert().await`，寫入資料庫（若代號衝突則更新關鍵欄位）。
-/// 3. 更新全域記憶體快取 `SHARE.stocks`，確保其他模組查詢時能立即讀取最新欄位。
-/// 4. 取得該股票對應的交易所市場名稱與產業名稱，格式化為日誌訊息。
-/// 5. 將日誌寫入系統的非同步日誌檔案，並將其追加至 `msg` 緩衝區以便後續批次發送 Telegram。
-/// 6. 呼叫 gRPC 客戶端將最新的股票資訊推送同步給 Go 的 `stock_service` 服務。
+/// 1. 獲取已存在的證券主檔或註冊一個新的，並使用業務方法更新識別資訊
+/// 2. 寫入資料庫：利用 Repository 保存，會自動觸發搜尋索引重建與快取同步
+/// 3. 解析易讀的市場名稱與產業名稱，供日誌與 Telegram 通知使用
+/// 4. 格式化股票異動資訊，對股票名稱進行 Markdown 轉義以防 Telegram 訊息格式錯誤
+/// 5. 寫入 Telegram 訊息快取緩衝區，並寫入非同步檔案日誌
+/// 6. 同步通知 Go 撰寫的另一個微服務，將最新股票資訊同步推送過去
 ///
 /// # 回傳值
 /// - `Ok(())`：更新成功。
 /// - `Err(anyhow::Error)`：資料庫寫入失敗或轉換過程發生錯誤（gRPC 同步失敗僅會記錄日誌，不會阻斷流程）。
 async fn update_stock_info(
-    isin: &twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber,
+    cmd: &backfill::acl::RegisterStockCommand,
     msg: &mut String,
 ) -> Result<()> {
     use crate::domain::registry::entity::Stock;
@@ -133,20 +139,20 @@ async fn update_stock_info(
     let repo = PgStockRepository::new();
 
     // 1. 獲取已存在的證券主檔或註冊一個新的，並使用業務方法更新識別資訊
-    let stock = match repo.find_by_symbol(&isin.stock_symbol).await? {
+    let stock = match repo.find_by_symbol(&cmd.symbol).await? {
         Some(mut existing) => {
             existing.change_identity(
-                isin.name.clone(),
-                isin.exchange_market.stock_exchange_market_id,
-                isin.industry_id,
+                cmd.name.clone(),
+                cmd.market_id,
+                cmd.industry_id,
             );
             existing
         }
         None => Stock::register(
-            isin.stock_symbol.clone(),
-            isin.name.clone(),
-            isin.exchange_market.stock_exchange_market_id,
-            isin.industry_id,
+            cmd.symbol.clone(),
+            cmd.name.clone(),
+            cmd.market_id,
+            cmd.industry_id,
         ),
     };
 
