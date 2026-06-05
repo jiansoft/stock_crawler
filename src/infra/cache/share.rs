@@ -248,8 +248,11 @@ impl Share {
             }
         }
 
-        if let Ok(ip) = crawler_share::get_public_ip().await {
-            self.set_current_ip(ip);
+        // 只有在尚未取得 IP 時才查詢公網 IP，避免在測試或多次載入中重複發起大量網路請求
+        if self.get_current_ip().is_none() {
+            if let Ok(ip) = crawler_share::get_public_ip().await {
+                self.set_current_ip(ip);
+            }
         }
 
         let current_ip = self.get_current_ip().unwrap_or_default();

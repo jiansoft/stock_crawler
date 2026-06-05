@@ -135,7 +135,7 @@ jobs:
         psql -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
 
     - name: Run tests
-      run: cargo test --release -- --nocapture
+      run: cargo test --release -- --nocapture --test-threads=1
       env:
         RUST_BACKTRACE: 1
         DATABASE_URL: postgres://user:password@localhost:5432/db
