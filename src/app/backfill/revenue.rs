@@ -67,7 +67,7 @@ pub(crate) async fn process_revenue(
 
     let name = match SHARE.get_stock(&revenue.stock_symbol).await {
         None => String::from("-"),
-        Some(s) => s.name.clone(),
+        Some(s) => s.name().to_string(),
     };
 
     logging::info_file_async(

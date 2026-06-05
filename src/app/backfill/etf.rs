@@ -7,11 +7,11 @@ use crate::{
     core::util::datetime::Weekend,
     infra::cache::SHARE,
     infra::crawler::{share::EtfInfo, tpex, twse},
-    infra::database::table,
     interfaces::bot,
     interfaces::bot::telegram::Telegram,
     interfaces::rpc,
 };
+
 use anyhow::{anyhow, Result};
 use chrono::Local;
 use scopeguard::defer;
@@ -81,50 +81,51 @@ async fn update_stocks(items: Vec<EtfInfo>) -> Result<()> {
     Ok(())
 }
 
-/// 更新單一 ETF 的實體資訊至各個儲存層。
 async fn update_stock_info(etf: &EtfInfo, msg: &mut String) -> Result<()> {
-    // 1. 準備資料庫對象：建立新的 Stock 資料列實例並填入採集到的欄位
-    let mut stock = table::stock::Stock::new();
-    stock.stock_symbol = etf.stock_symbol.clone();
-    stock.name = etf.name.clone();
-    stock.stock_exchange_market_id = etf.exchange_market.stock_exchange_market_id;
-    stock.stock_industry_id = etf.industry_id;
+    use crate::domain::registry::entity::Stock;
+    use crate::domain::registry::repository::StockRepository;
+    use crate::infra::database::repository::stock::PgStockRepository;
+    use crate::interfaces::rpc::stock::StockInfoRequest;
 
-    // 2. 寫入資料庫：執行 Upsert (Update or Insert)
-    // 如果代號已存在則更新，不存在則新增一筆
-    stock
-        .upsert()
+    let repo = PgStockRepository::new();
+
+    // 1. 獲取已存在的證券主檔或註冊一個新的，並使用業務方法更新識別資訊
+    let stock = match repo.find_by_symbol(&etf.stock_symbol).await? {
+        Some(mut existing) => {
+            existing.change_identity(
+                etf.name.clone(),
+                etf.exchange_market.stock_exchange_market_id,
+                etf.industry_id,
+            );
+            existing
+        }
+        None => Stock::register(
+            etf.stock_symbol.clone(),
+            etf.name.clone(),
+            etf.exchange_market.stock_exchange_market_id,
+            etf.industry_id,
+        ),
+    };
+
+    // 2. 寫入資料庫：利用 Repository 保存，會自動觸發搜尋索引重建與快取同步
+    repo.save(&stock)
         .await
         .map_err(|why| anyhow!("資料庫 upsert 失敗: {:?}", why))?;
 
-    // 3. 更新記憶體快取：確保系統的其他功能（如行情查詢）能立刻讀到最新欄位
-    // 注意：若快取中已存在該股票，應僅更新變更欄位（名稱、下市狀態、市場、產業），
-    // 避免直接覆蓋 (insert) 導致每股淨值、ROE、持股比率等其他重要欄位被重置為 0。
-    if let Ok(mut stocks) = SHARE.stocks.write() {
-        if let Some(existing) = stocks.get_mut(&stock.stock_symbol) {
-            existing.name = stock.name.clone();
-            existing.suspend_listing = stock.suspend_listing;
-            existing.stock_exchange_market_id = stock.stock_exchange_market_id;
-            existing.stock_industry_id = stock.stock_industry_id;
-        } else {
-            stocks.insert(stock.stock_symbol.to_string(), stock.clone());
-        }
-    }
-
-    // 4. 取得易讀的名稱（用於日誌與通知）
-    let market = StockExchangeMarket::from(stock.stock_exchange_market_id);
+    // 3. 取得易讀的名稱（用於日誌與通知）
+    let market = StockExchangeMarket::from(stock.market_id());
     let market_name = market
         .map(|m| m.name())
         .unwrap_or_else(|| "未知".to_string());
     let industry_name = SHARE
-        .get_industry_name(stock.stock_industry_id)
+        .get_industry_name(stock.industry_id())
         .unwrap_or_else(|| "未知".to_string());
 
     // 組合要顯示在通知與日誌上的訊息文字
     let log_msg = format!(
         "新增/更新 ETF︰ {} {} {} {}",
-        stock.stock_symbol,
-        Telegram::escape_markdown_v2(&stock.name), // 處理 Telegram 特殊符號轉義
+        stock.symbol().0,
+        Telegram::escape_markdown_v2(stock.name()), // 處理 Telegram 特殊符號轉義
         market_name,
         industry_name
     );
@@ -134,14 +135,13 @@ async fn update_stock_info(etf: &EtfInfo, msg: &mut String) -> Result<()> {
     // 同步記錄到系統檔案日誌
     logging::info_file_async(&log_msg);
 
-    // 5. 跨服務通知：透過 gRPC 將最新的股票基本資料推送到其他微服務 (Go Service)
-    if let Err(why) =
-        rpc::client::stock_service::push_stock_info_to_go_service(stock.to_stock_info_request())
-            .await
-    {
+    // 4. 跨服務通知：透過 gRPC 將最新的股票基本資料推送到其他微服務 (Go Service)
+    let request = StockInfoRequest::from(&stock);
+    if let Err(why) = rpc::client::stock_service::push_stock_info_to_go_service(request).await {
         logging::error_file_async(format!(
             "推送 ETF 資訊至 Go Service 失敗 ({}): {:?}",
-            stock.stock_symbol, why
+            stock.symbol().0,
+            why
         ));
     }
 

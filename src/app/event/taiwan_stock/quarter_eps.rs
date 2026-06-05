@@ -16,7 +16,7 @@ use crate::{
     core::logging,
     core::util::{self, datetime::ReportQuarter},
     infra::crawler::twse,
-    infra::database::table::{self, financial_statement, stock::Stock},
+    infra::database::table::{self, financial_statement, stock::StockDbRow},
 };
 use anyhow::Result;
 use chrono::Local;
@@ -94,7 +94,7 @@ async fn process_eps(
     market: StockExchangeMarket,
     year: i32,
     quarter: crate::core::declare::Quarter,
-    without_financial_stocks: &HashMap<String, Stock>,
+    without_financial_stocks: &HashMap<String, StockDbRow>,
 ) -> Result<()> {
     let eps = twse::eps::visit(market, year, quarter).await?;
 

@@ -74,8 +74,8 @@ async fn process_single_quote(
     // 2. 計算股價淨值比 (PBR)
     let stock = SHARE.get_stock(&dq.stock_symbol).await;
     dq.price_to_book_ratio = if let Some(s) = stock {
-        if s.net_asset_value_per_share > Decimal::ZERO && dq.closing_price > Decimal::ZERO {
-            dq.closing_price / s.net_asset_value_per_share
+        if s.net_asset_value_per_share() > Decimal::ZERO && dq.closing_price > Decimal::ZERO {
+            dq.closing_price / s.net_asset_value_per_share()
         } else {
             Decimal::ZERO
         }

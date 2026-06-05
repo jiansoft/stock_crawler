@@ -416,7 +416,7 @@ async fn format_alert_message(
     let stock_name = SHARE
         .get_stock(&target.stock_symbol)
         .await
-        .map_or_else(String::new, |stock| stock.name);
+        .map_or_else(String::new, |stock| stock.name().to_string());
 
     let (boundary, limit) = if current_price < target.floor && target.floor > Decimal::ZERO {
         ("低於最低價", target.floor)

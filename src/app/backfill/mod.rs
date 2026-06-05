@@ -34,9 +34,9 @@ pub(crate) async fn is_stock_identity_new_or_changed(
         // 情況 A：資料庫已存在該股票 (Some)
         Some(stock_db)
             // 檢查關鍵欄位是否有變動：產業 ID、市場 ID 或名稱
-            if stock_db.stock_industry_id != industry_id
-                || stock_db.stock_exchange_market_id != stock_exchange_market_id
-                || stock_db.name != name =>
+            if stock_db.industry_id() != industry_id
+                || stock_db.market_id() != stock_exchange_market_id
+                || stock_db.name() != name =>
         {
             // 有任一欄位不同，標記為需要更新
             true

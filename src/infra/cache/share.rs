@@ -43,7 +43,7 @@ pub struct Share {
     /// 存放台股歷年指數
     indices: RwLock<HashMap<String, index::Index>>,
     /// 存放台股股票代碼
-    pub stocks: RwLock<HashMap<String, stock::Stock>>,
+    pub stocks: RwLock<HashMap<String, crate::domain::registry::entity::Stock>>,
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
     last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Revenue>>>,
     /// 存放最後交易日股票報價數據
@@ -104,10 +104,10 @@ impl Share {
     }
 
     /// 以新抓到的完整股票主檔清單覆蓋舊快取。
-    fn replace_stocks_cache(&self, stocks: Vec<stock::Stock>) {
+    fn replace_stocks_cache(&self, stocks: Vec<crate::domain::registry::entity::Stock>) {
         let mut new_cache = HashMap::with_capacity(stocks.len());
         for stock in stocks {
-            new_cache.insert(stock.stock_symbol.to_string(), stock);
+            new_cache.insert(stock.symbol().0.clone(), stock);
         }
 
         match self.stocks.write() {
@@ -208,8 +208,11 @@ impl Share {
             }
         }
 
-        match stock::Stock::fetch().await {
-            Ok(stocks) => self.replace_stocks_cache(stocks),
+        match stock::StockDbRow::fetch().await {
+            Ok(stocks) => {
+                let domain_stocks = stocks.into_iter().map(Into::into).collect();
+                self.replace_stocks_cache(domain_stocks);
+            }
             Err(why) => {
                 logging::error_file_async(format!("Failed to fetch stocks because {:?}", why));
             }
@@ -413,9 +416,9 @@ impl Share {
     /// - `symbol`: 股票代號。
     ///
     /// # 回傳
-    /// - `Some(stock::Stock)`：找到資料。
+    /// - `Some(crate::domain::registry::entity::Stock)`：找到資料。
     /// - `None`：未命中或讀鎖失敗。
-    pub async fn get_stock(&self, symbol: &str) -> Option<stock::Stock> {
+    pub async fn get_stock(&self, symbol: &str) -> Option<crate::domain::registry::entity::Stock> {
         match self.stocks.read() {
             Ok(cache) => cache.get(symbol).cloned(),
             Err(_) => None,
@@ -854,15 +857,18 @@ mod tests {
     #[tokio::test]
     async fn replace_stocks_cache_controls_stock_lookup_and_contains() {
         let share = Share::new();
-        let mut stock = stock::Stock::new();
-        stock.stock_symbol = "2330".to_string();
-        stock.name = "台積電".to_string();
+        let stock = crate::domain::registry::entity::Stock::register(
+            "2330".to_string(),
+            "台積電".to_string(),
+            0,
+            0,
+        );
 
         share.replace_stocks_cache(vec![stock]);
 
         assert!(share.stock_contains_key("2330"));
         assert!(!share.stock_contains_key("2317"));
-        assert_eq!(share.get_stock("2330").await.unwrap().name, "台積電");
+        assert_eq!(share.get_stock("2330").await.unwrap().name(), "台積電");
         assert!(share.get_stock("2317").await.is_none());
     }
 
@@ -958,7 +964,7 @@ mod tests {
                 break;
             }
 
-            logging::info_file_async(format!("stock {} name {}", k, v.name));
+            logging::info_file_async(format!("stock {} name {}", k, v.name()));
             loop_count -= 1;
         }
 

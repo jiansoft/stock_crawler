@@ -7,12 +7,15 @@ use anyhow::Result;
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
 pub async fn execute() -> Result<()> {
     let stocks = table::stock::fetch_net_asset_value_per_share_is_zero().await?;
-    for mut stock in stocks {
-        if stock.is_preference_shares() || stock.is_tdr() {
+    let domain_stocks: Vec<crate::domain::registry::entity::Stock> =
+        stocks.into_iter().map(Into::into).collect();
+
+    for mut stock in domain_stocks {
+        if stock.symbol().is_preference() || stock.symbol().is_tdr() {
             continue;
         }
 
-        let profile_skip_cache_key = profile::no_valid_data_cache_key(&stock.stock_symbol);
+        let profile_skip_cache_key = profile::no_valid_data_cache_key(&stock.symbol().0);
         if crate::infra::nosql::redis::CLIENT
             .get_bool(&profile_skip_cache_key)
             .await?
@@ -20,7 +23,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        let yahoo_profile = match profile::visit(&stock.stock_symbol).await {
+        let yahoo_profile = match profile::visit(&stock.symbol().0).await {
             Ok(stock_profile) => stock_profile,
             Err(why) => {
                 if profile::is_no_valid_data_error(&why) {
@@ -34,17 +37,20 @@ pub async fn execute() -> Result<()> {
                     {
                         logging::error_file_async(format!(
                             "Failed to cache profile::visit no-valid-data skip for {} because {:?}",
-                            stock.stock_symbol, cache_err
+                            stock.symbol().0,
+                            cache_err
                         ));
                     }
                     logging::warn_file_async(format!(
                         "Skip profile::visit for {} because {}",
-                        stock.stock_symbol, why
+                        stock.symbol().0,
+                        why
                     ));
                 } else {
                     logging::error_file_async(format!(
                         "Failed to profile::visit for {} because {}",
-                        stock.stock_symbol, why
+                        stock.symbol().0,
+                        why
                     ));
                 }
                 continue;
@@ -59,7 +65,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        stock.net_asset_value_per_share = yahoo_profile.net_asset_value_per_share;
+        stock.update_net_asset_value(yahoo_profile.net_asset_value_per_share);
 
         if let Err(why) = update(&stock).await {
             logging::error_file_async(format!(

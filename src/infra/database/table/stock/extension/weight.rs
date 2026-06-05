@@ -77,7 +77,7 @@ mod tests {
 
     use rust_decimal_macros::dec;
 
-    use crate::{core::logging, infra::database::table::stock::Stock};
+    use crate::{core::logging, infra::database::table::stock::StockDbRow};
 
     use super::*;
 
@@ -109,7 +109,7 @@ FROM stocks
 WHERE stock_symbol = $1;
     "#;
 
-                let stock = sqlx::query_as::<_, Stock>(sql)
+                let stock = sqlx::query_as::<_, StockDbRow>(sql)
                     .bind(&sw.stock_symbol)
                     .fetch_one(database::get_connection())
                     .await;

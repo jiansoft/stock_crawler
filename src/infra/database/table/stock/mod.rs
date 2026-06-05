@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Datelike, Local, TimeDelta};
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
 
@@ -18,9 +17,9 @@ pub(crate) mod stock_index;
 pub mod stock_ownership_details;
 pub(crate) mod stock_word;
 
-#[derive(sqlx::Type, sqlx::FromRow, Debug)]
+#[derive(sqlx::Type, sqlx::FromRow, Debug, Clone)]
 /// 原表名 stocks
-pub struct Stock {
+pub struct StockDbRow {
     /// 股票代號。
     pub stock_symbol: String,
     /// 股票名稱。
@@ -47,10 +46,10 @@ pub struct Stock {
     pub qfii_share_holding_percentage: Decimal,
 }
 
-impl Stock {
-    /// 建立 `Stock` 預設值。
+impl StockDbRow {
+    /// 建立 `StockDbRow` 預設值。
     pub fn new() -> Self {
-        Stock {
+        StockDbRow {
             stock_symbol: "".to_string(),
             name: "".to_string(),
             suspend_listing: false,
@@ -63,28 +62,6 @@ impl Stock {
             issued_share: 0,
             qfii_shares_held: 0,
             qfii_share_holding_percentage: Default::default(),
-        }
-    }
-
-    /// 是否為特別股
-    pub fn is_preference_shares(&self) -> bool {
-        is_preference_shares(&self.stock_symbol)
-    }
-
-    /// 是否為臺灣存託憑證
-    pub fn is_tdr(&self) -> bool {
-        self.name.contains("-DR")
-    }
-
-    /// 轉成推送給 Go stock service 的股票資訊請求。
-    pub fn to_stock_info_request(&self) -> crate::interfaces::rpc::stock::StockInfoRequest {
-        crate::interfaces::rpc::stock::StockInfoRequest {
-            stock_symbol: self.stock_symbol.to_string(),
-            name: self.name.to_string(),
-            stock_exchange_market_id: self.stock_exchange_market_id,
-            stock_industry_id: self.stock_industry_id,
-            net_asset_value_per_share: self.net_asset_value_per_share.to_f64().unwrap_or(0.0),
-            suspend_listing: self.suspend_listing,
         }
     }
 
@@ -153,103 +130,8 @@ WHERE
             .context("Failed to update_last_eps from database")
     }
 
-    /// 新增或更新股票基本資訊 (Upsert)
-    ///
-    /// 在股票代號 (`stock_symbol`) 衝突時，會更新股票名稱、下市狀態等欄位。
-    /// 為了防止部分爬蟲因未提供市場編號或產業分類（傳入 0）而將現有正確資料覆蓋為 0，
-    /// SQL 語句中使用 `CASE WHEN` 進行防禦，只有當 EXCLUDED 值大於 0 時才進行更新。
-    pub async fn upsert(&self) -> Result<PgQueryResult> {
-        let sql = r#"
-INSERT INTO stocks (
-    stock_symbol, "Name", "CreateTime",
-    "SuspendListing", stock_exchange_market_id, stock_industry_id, weight)
-VALUES ($1, $2, $3, $4, $5, $6, 0)
-ON CONFLICT (stock_symbol) DO UPDATE SET
-    "Name" = EXCLUDED."Name",
-    "SuspendListing" = EXCLUDED."SuspendListing",
-    -- 當傳入的市場編號大於 0 時才更新，否則保留原有的市場編號
-    stock_exchange_market_id = CASE 
-        WHEN EXCLUDED.stock_exchange_market_id > 0 THEN EXCLUDED.stock_exchange_market_id 
-        ELSE stocks.stock_exchange_market_id 
-    END,
-    -- 當傳入的產業編號大於 0 時才更新，否則保留原有的產業編號
-    stock_industry_id = CASE 
-        WHEN EXCLUDED.stock_industry_id > 0 THEN EXCLUDED.stock_industry_id 
-        ELSE stocks.stock_industry_id 
-    END;
-"#;
-        let result = sqlx::query(sql)
-            .bind(&self.stock_symbol)
-            .bind(&self.name)
-            .bind(self.create_time)
-            .bind(self.suspend_listing)
-            .bind(self.stock_exchange_market_id)
-            .bind(self.stock_industry_id)
-            .execute(database::get_connection())
-            .await
-            .context("Failed to stock.upsert from database");
-        self.create_index().await;
-
-        result
-    }
-
-    async fn create_index(&self) {
-        // 先刪除舊的數據
-        if let Err(why) = stock_index::StockIndex::delete_by_stock_symbol(&self.stock_symbol).await
-        {
-            logging::error_file_async(format!("{:#?}", why));
-        }
-
-        // 拆解股票名稱為單詞並加入股票代碼
-        let mut words = util::text::split(&self.name);
-        words.push(self.stock_symbol.to_string());
-
-        // 查詢已存在的單詞，轉成 hashmap 方便查詢
-        let words_in_db = stock_word::StockWord::list_by_word(&words).await;
-        let exist_words = match words_in_db {
-            Ok(sw) => util::map::vec_to_hashmap(sw),
-            Err(why) => {
-                logging::error_file_async(format!("Failed to list_by_word because:{:#?}", why));
-                return;
-            }
-        };
-
-        for word in words {
-            let mut stock_index_e = stock_index::StockIndex::new(self.stock_symbol.to_string());
-
-            match exist_words.get(&word) {
-                Some(w) => {
-                    //word 已存在資料庫了
-                    stock_index_e.word_id = w.word_id;
-                }
-                None => {
-                    let mut stock_word_e = stock_word::StockWord::new(word);
-                    match stock_word_e.upsert().await {
-                        Ok(word_id) => {
-                            stock_index_e.word_id = word_id;
-                        }
-                        Err(why) => {
-                            logging::error_file_async(format!(
-                                "Failed to insert stock word because:{:#?}",
-                                why
-                            ));
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            if let Err(why) = stock_index_e.insert().await {
-                logging::error_file_async(format!(
-                    "Failed to insert stock index because:{:#?}",
-                    why
-                ));
-            }
-        }
-    }
-
     /// 取得所有股票
-    pub async fn fetch() -> Result<Vec<Stock>> {
+    pub async fn fetch() -> Result<Vec<StockDbRow>> {
         let sql = r#"
 SELECT
     stock_symbol,
@@ -272,7 +154,7 @@ ORDER BY
 "#;
         sqlx::query(sql)
             .try_map(|row: PgRow| {
-                Ok(Stock {
+                Ok(StockDbRow {
                     stock_symbol: row.try_get("stock_symbol")?,
                     net_asset_value_per_share: row.try_get("net_asset_value_per_share")?,
                     weight: row.try_get("weight")?,
@@ -291,7 +173,7 @@ ORDER BY
             .await
             .map_err(|why| {
                 anyhow!(
-                    "Failed to Stock::fetch from database({}) because:{:?}",
+                    "Failed to StockDbRow::fetch from database({}) because:{:?}",
                     database::redacted_postgresql_summary(),
                     why
                 )
@@ -303,14 +185,68 @@ ORDER BY
     /// 用於直接執行 migration 匯入資料後，補建 `company_word` / `company_index`。
     pub async fn rebuild_search_indices() -> Result<()> {
         for stock in Self::fetch().await? {
-            stock.create_index().await;
+            create_search_index(&stock.stock_symbol, &stock.name).await;
         }
 
         Ok(())
     }
 }
 
-impl Keyable for Stock {
+/// <summary>
+/// 為特定證券主檔建立或重新建立搜尋索引。
+/// </summary>
+pub async fn create_search_index(stock_symbol: &str, name: &str) {
+    // 先刪除舊的數據
+    if let Err(why) = stock_index::StockIndex::delete_by_stock_symbol(stock_symbol).await {
+        logging::error_file_async(format!("{:#?}", why));
+    }
+
+    // 拆解股票名稱為單詞並加入股票代碼
+    let mut words = util::text::split(name);
+    words.push(stock_symbol.to_string());
+
+    // 查詢已存在的單詞，轉成 hashmap 方便查詢
+    let words_in_db = stock_word::StockWord::list_by_word(&words).await;
+    let exist_words = match words_in_db {
+        Ok(sw) => util::map::vec_to_hashmap(sw),
+        Err(why) => {
+            logging::error_file_async(format!("Failed to list_by_word because:{:#?}", why));
+            return;
+        }
+    };
+
+    for word in words {
+        let mut stock_index_e = stock_index::StockIndex::new(stock_symbol.to_string());
+
+        match exist_words.get(&word) {
+            Some(w) => {
+                //word 已存在資料庫了
+                stock_index_e.word_id = w.word_id;
+            }
+            None => {
+                let mut stock_word_e = stock_word::StockWord::new(word);
+                match stock_word_e.upsert().await {
+                    Ok(word_id) => {
+                        stock_index_e.word_id = word_id;
+                    }
+                    Err(why) => {
+                        logging::error_file_async(format!(
+                            "Failed to insert stock word because:{:#?}",
+                            why
+                        ));
+                        continue;
+                    }
+                }
+            }
+        }
+
+        if let Err(why) = stock_index_e.insert().await {
+            logging::error_file_async(format!("Failed to insert stock index because:{:#?}", why));
+        }
+    }
+}
+
+impl Keyable for StockDbRow {
     fn key(&self) -> String {
         self.stock_symbol.clone()
     }
@@ -320,35 +256,60 @@ impl Keyable for Stock {
     }
 }
 
-impl Clone for Stock {
-    fn clone(&self) -> Self {
-        Stock {
-            stock_symbol: self.stock_symbol.clone(),
-            name: self.name.clone(),
-            suspend_listing: self.suspend_listing,
-            net_asset_value_per_share: self.net_asset_value_per_share,
-            weight: self.weight,
-            return_on_equity: self.return_on_equity,
-            create_time: self.create_time,
-            stock_exchange_market_id: self.stock_exchange_market_id,
-            stock_industry_id: self.stock_industry_id,
-            issued_share: self.issued_share,
-            qfii_shares_held: self.qfii_shares_held,
-            qfii_share_holding_percentage: self.qfii_share_holding_percentage,
+impl Default for StockDbRow {
+    fn default() -> Self {
+        StockDbRow::new()
+    }
+}
+
+impl From<StockDbRow> for crate::domain::registry::entity::Stock {
+    fn from(row: StockDbRow) -> Self {
+        crate::domain::registry::entity::Stock::reconstitute(
+            row.stock_symbol,
+            row.name,
+            row.suspend_listing,
+            row.net_asset_value_per_share,
+            row.weight,
+            row.return_on_equity,
+            row.create_time,
+            row.stock_exchange_market_id,
+            row.stock_industry_id,
+            row.issued_share,
+            row.qfii_shares_held,
+            row.qfii_share_holding_percentage,
+        )
+    }
+}
+
+impl From<&crate::domain::registry::entity::Stock> for StockDbRow {
+    fn from(stock: &crate::domain::registry::entity::Stock) -> Self {
+        StockDbRow {
+            stock_symbol: stock.symbol().0.clone(),
+            name: stock.name().to_string(),
+            suspend_listing: stock.suspend_listing(),
+            net_asset_value_per_share: stock.net_asset_value_per_share(),
+            weight: stock.weight(),
+            return_on_equity: stock.return_on_equity(),
+            create_time: stock.created_time(),
+            stock_exchange_market_id: stock.market_id(),
+            stock_industry_id: stock.industry_id(),
+            issued_share: stock.issued_share(),
+            qfii_shares_held: stock.qfii_shares_held(),
+            qfii_share_holding_percentage: stock.qfii_share_holding_percentage(),
         }
     }
 }
 
-impl Default for Stock {
-    fn default() -> Self {
-        Stock::new()
+impl From<crate::domain::registry::entity::Stock> for StockDbRow {
+    fn from(stock: crate::domain::registry::entity::Stock) -> Self {
+        StockDbRow::from(&stock)
     }
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber> for Stock {
+impl From<twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber> for StockDbRow {
     fn from(isin: twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber) -> Self {
-        Stock {
+        StockDbRow {
             stock_symbol: isin.stock_symbol,
             name: isin.name,
             suspend_listing: false,
@@ -366,9 +327,9 @@ impl From<twse::international_securities_identification_number::InternationalSec
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<tpex::net_asset_value_per_share::Emerging> for Stock {
+impl From<tpex::net_asset_value_per_share::Emerging> for StockDbRow {
     fn from(tpex: tpex::net_asset_value_per_share::Emerging) -> Self {
-        Stock {
+        StockDbRow {
             stock_symbol: tpex.stock_symbol,
             name: "".to_string(),
             suspend_listing: false,
@@ -386,7 +347,7 @@ impl From<tpex::net_asset_value_per_share::Emerging> for Stock {
 }
 
 /// 取得未下市上市櫃每股淨值為零的股票
-pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<Stock>> {
+pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<StockDbRow>> {
     let sql = r#"
 SELECT
     s.stock_symbol,
@@ -408,7 +369,7 @@ WHERE s.stock_exchange_market_id in (2, 4)
     AND s.net_asset_value_per_share = 0
 "#;
 
-    sqlx::query_as::<_, Stock>(sql)
+    sqlx::query_as::<_, StockDbRow>(sql)
         .bind(Industry::ExchangeTradedFund.serial())
         .fetch_all(database::get_connection())
         .await
@@ -419,7 +380,7 @@ WHERE s.stock_exchange_market_id in (2, 4)
 pub async fn fetch_stocks_without_financial_statement(
     year: i32,
     quarter: &str,
-) -> Result<Vec<Stock>> {
+) -> Result<Vec<StockDbRow>> {
     let sql = r#"
 SELECT
     s.stock_symbol,
@@ -448,7 +409,7 @@ WHERE s.stock_exchange_market_id in(2, 4)
     )
 "#;
 
-    sqlx::query_as::<_, Stock>(sql)
+    sqlx::query_as::<_, StockDbRow>(sql)
         .bind(year)
         .bind(quarter)
         .bind(Industry::ExchangeTradedFund.serial())
@@ -469,6 +430,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use crate::core::logging;
+    use crate::domain::registry::repository::StockRepository;
     use crate::infra::database::table::stock_exchange_market::StockExchangeMarket;
 
     use super::*;
@@ -484,7 +446,7 @@ mod tests {
 
     #[test]
     fn stock_methods_key_tdr_and_stock_info_request() {
-        let mut stock = Stock::new();
+        let mut stock = StockDbRow::new();
         stock.stock_symbol = "9105".to_string();
         stock.name = "泰金寶-DR".to_string();
         stock.stock_exchange_market_id = 2;
@@ -492,22 +454,13 @@ mod tests {
         stock.net_asset_value_per_share = dec!(12.34);
         stock.suspend_listing = true;
 
-        let request = stock.to_stock_info_request();
-
         assert_eq!(stock.key(), "9105");
         assert_eq!(stock.key_with_prefix(), "Stock:9105");
-        assert!(stock.is_tdr());
-        assert_eq!(request.stock_symbol, "9105");
-        assert_eq!(request.name, "泰金寶-DR");
-        assert_eq!(request.stock_exchange_market_id, 2);
-        assert_eq!(request.stock_industry_id, 20);
-        assert_eq!(request.net_asset_value_per_share, 12.34);
-        assert!(request.suspend_listing);
     }
 
     #[test]
     fn stock_clone_preserves_all_fields() {
-        let mut stock = Stock::new();
+        let mut stock = StockDbRow::new();
         stock.stock_symbol = "2330".to_string();
         stock.name = "台積電".to_string();
         stock.suspend_listing = true;
@@ -558,7 +511,7 @@ mod tests {
             industry_id: 24,
         };
 
-        let stock = Stock::from(isin);
+        let stock = StockDbRow::from(isin);
 
         assert_eq!(stock.stock_symbol, "2330");
         assert_eq!(stock.name, "台積電");
@@ -575,7 +528,7 @@ mod tests {
         let emerging =
             tpex::net_asset_value_per_share::Emerging::new("6987".to_string(), dec!(42.19));
 
-        let stock = Stock::from(emerging);
+        let stock = StockDbRow::from(emerging);
 
         assert_eq!(stock.stock_symbol, "6987");
         assert_eq!(stock.name, "");
@@ -606,22 +559,41 @@ mod tests {
             .await
             .ok();
 
+        let repo = crate::infra::database::repository::stock::PgStockRepository::new();
+
         // 2. 寫入初始的測試股票資料，並給予非零之市場與產業編號
-        let mut seed = Stock::new();
-        seed.stock_symbol = test_symbol.to_string();
-        seed.name = "測試防禦更新股".to_string();
-        seed.stock_exchange_market_id = 4; // 初始市場 ID
-        seed.stock_industry_id = 15; // 初始產業 ID
-        seed.upsert().await.expect("Failed to insert seed stock");
+        let seed = crate::domain::registry::entity::Stock::reconstitute(
+            test_symbol.to_string(),
+            "測試防禦更新股".to_string(),
+            false,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Local::now(),
+            4,
+            15,
+            0,
+            0,
+            Decimal::ZERO,
+        );
+        repo.save(&seed).await.expect("Failed to insert seed stock");
 
         // 3. 測試防禦邏輯：呼叫 upsert 時傳入 0 的市場與產業 ID
-        let mut update_zero = Stock::new();
-        update_zero.stock_symbol = test_symbol.to_string();
-        update_zero.name = "測試防禦更新股_已更新".to_string();
-        update_zero.stock_exchange_market_id = 0; // 傳入 0
-        update_zero.stock_industry_id = 0; // 傳入 0
-        update_zero
-            .upsert()
+        let update_zero = crate::domain::registry::entity::Stock::reconstitute(
+            test_symbol.to_string(),
+            "測試防禦更新股_已更新".to_string(),
+            false,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Local::now(),
+            0,
+            0,
+            0,
+            0,
+            Decimal::ZERO,
+        );
+        repo.save(&update_zero)
             .await
             .expect("Failed to upsert zero fields");
 
@@ -636,13 +608,21 @@ mod tests {
         assert_eq!(row1.get::<i32, _>("stock_industry_id"), 15);
 
         // 5. 測試正常覆寫：呼叫 upsert 時傳入新的非零之市場與產業 ID
-        let mut update_new = Stock::new();
-        update_new.stock_symbol = test_symbol.to_string();
-        update_new.name = "測試防禦更新股_二次更新".to_string();
-        update_new.stock_exchange_market_id = 2; // 新市場 ID
-        update_new.stock_industry_id = 8; // 新產業 ID
-        update_new
-            .upsert()
+        let update_new = crate::domain::registry::entity::Stock::reconstitute(
+            test_symbol.to_string(),
+            "測試防禦更新股_二次更新".to_string(),
+            false,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Local::now(),
+            2,
+            8,
+            0,
+            0,
+            Decimal::ZERO,
+        );
+        repo.save(&update_new)
             .await
             .expect("Failed to upsert new fields");
 
@@ -669,7 +649,7 @@ mod tests {
     async fn test_update_last_eps() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 update_last_eps".to_string());
-        match Stock::update_eps_and_roe().await {
+        match StockDbRow::update_eps_and_roe().await {
             Ok(_) => {}
             Err(why) => {
                 logging::debug_file_async(format!("Failed to update_last_eps because: {:?}", why));
@@ -683,8 +663,8 @@ mod tests {
     #[ignore]
     async fn test_fetch() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 Stock::fetch".to_string());
-        match Stock::fetch().await {
+        logging::debug_file_async("開始 StockDbRow::fetch".to_string());
+        match StockDbRow::fetch().await {
             Ok(stocks) => {
                 logging::debug_file_async(format!("stocks:{:#?}", stocks));
             }
@@ -692,7 +672,7 @@ mod tests {
                 logging::debug_file_async(format!("{:?}", why));
             }
         }
-        logging::debug_file_async("結束 Stock::fetch".to_string());
+        logging::debug_file_async("結束 StockDbRow::fetch".to_string());
     }
 
     #[tokio::test]
@@ -703,7 +683,11 @@ mod tests {
         match fetch_net_asset_value_per_share_is_zero().await {
             Ok(stocks) => {
                 for e in stocks {
-                    logging::debug_file_async(format!("{} {:?} ", e.is_preference_shares(), e));
+                    logging::debug_file_async(format!(
+                        "{} {:?} ",
+                        is_preference_shares(&e.stock_symbol),
+                        e
+                    ));
                 }
             }
             Err(why) => {
@@ -725,7 +709,11 @@ mod tests {
         match fetch_stocks_without_financial_statement(2022, "Q4").await {
             Ok(stocks) => {
                 for e in stocks {
-                    logging::debug_file_async(format!("{} {:?} ", e.is_preference_shares(), e));
+                    logging::debug_file_async(format!(
+                        "{} {:?} ",
+                        is_preference_shares(&e.stock_symbol),
+                        e
+                    ));
                 }
             }
             Err(why) => {
@@ -743,10 +731,7 @@ mod tests {
     #[ignore]
     async fn test_create_index() {
         dotenv::dotenv().ok();
-        let mut e = Stock::new();
-        e.stock_symbol = "2330".to_string();
-        e.name = "台積電".to_string();
-        e.create_index().await;
+        create_search_index("2330", "台積電").await;
     }
 
     #[tokio::test]
@@ -755,7 +740,7 @@ mod tests {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 rebuild_search_indices".to_string());
 
-        match Stock::rebuild_search_indices().await {
+        match StockDbRow::rebuild_search_indices().await {
             Ok(_) => {
                 logging::debug_file_async("完成 rebuild_search_indices".to_string());
             }
