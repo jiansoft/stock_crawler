@@ -826,6 +826,99 @@ mod tests {
         assert!(share.last_revenues_contains_key(202503, "2454"));
     }
 
+    #[test]
+    fn static_lookup_tables_have_known_defaults_and_fallbacks() {
+        let share = Share::new();
+
+        let listed = share.get_exchange_market(2).unwrap();
+
+        assert_eq!(listed.stock_exchange_market_id, 2);
+        assert!(share.get_exchange_market(999).is_none());
+        assert_eq!(share.get_industry_id("水泥工業"), Some(1));
+        assert_eq!(share.get_industry_id("不存在產業"), Some(99));
+        assert_eq!(share.get_industry_name(99), Some("未分類".to_string()));
+        assert_eq!(share.get_industry_name(100), None);
+    }
+
+    #[test]
+    fn current_ip_round_trips_without_loading_external_sources() {
+        let share = Share::new();
+
+        assert_eq!(share.get_current_ip(), Some(String::new()));
+
+        share.set_current_ip("203.0.113.1".to_string());
+
+        assert_eq!(share.get_current_ip(), Some("203.0.113.1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn replace_stocks_cache_controls_stock_lookup_and_contains() {
+        let share = Share::new();
+        let mut stock = stock::Stock::new();
+        stock.stock_symbol = "2330".to_string();
+        stock.name = "台積電".to_string();
+
+        share.replace_stocks_cache(vec![stock]);
+
+        assert!(share.stock_contains_key("2330"));
+        assert!(!share.stock_contains_key("2317"));
+        assert_eq!(share.get_stock("2330").await.unwrap().name, "台積電");
+        assert!(share.get_stock("2317").await.is_none());
+    }
+
+    #[test]
+    fn set_stock_snapshots_filters_invalid_new_prices_and_keeps_old_valid_snapshot() {
+        let share = Share::new();
+        let mut old_snapshot = RealtimeSnapshot::new("2330".to_string(), Decimal::new(100, 0));
+        old_snapshot.last_close = Decimal::new(100, 0);
+        old_snapshot.source_site = "old".to_string();
+        let mut old_map = HashMap::new();
+        old_map.insert("2330".to_string(), old_snapshot.clone());
+        share.set_stock_snapshots(old_map);
+
+        let mut invalid_update = RealtimeSnapshot::new("2330".to_string(), Decimal::new(200, 0));
+        invalid_update.last_close = Decimal::new(100, 0);
+        invalid_update.source_site = "new".to_string();
+        let mut invalid_map = HashMap::new();
+        invalid_map.insert("2330".to_string(), invalid_update);
+        invalid_map.insert(
+            "2317".to_string(),
+            RealtimeSnapshot::new("2317".to_string(), Decimal::ZERO),
+        );
+
+        share.set_stock_snapshots(invalid_map);
+
+        let kept = share.get_stock_snapshot("2330").unwrap();
+        assert_eq!(kept.price, old_snapshot.price);
+        assert_eq!(kept.source_site, "old");
+        assert_eq!(share.get_stock_snapshot("2317"), None);
+    }
+
+    #[test]
+    fn set_stock_snapshot_price_rejects_outliers_and_accepts_valid_updates() {
+        let share = Share::new();
+        let mut snapshot = RealtimeSnapshot::new("2330".to_string(), Decimal::new(100, 0));
+        snapshot.last_close = Decimal::new(100, 0);
+        let mut snapshots = HashMap::new();
+        snapshots.insert("2330".to_string(), snapshot);
+        share.set_stock_snapshots(snapshots);
+
+        share.set_stock_snapshot_price("2330".to_string(), Decimal::new(200, 0));
+        assert_eq!(
+            share.get_stock_snapshot("2330").unwrap().price,
+            Decimal::new(100, 0)
+        );
+
+        share.set_stock_snapshot_price_with_source(
+            "2330".to_string(),
+            Decimal::new(105, 0),
+            "Yahoo",
+        );
+        let updated = share.get_stock_snapshot("2330").unwrap();
+        assert_eq!(updated.price, Decimal::new(105, 0));
+        assert_eq!(updated.source_site, "Yahoo");
+    }
+
     /// 驗證產業代碼可反查名稱。
     #[tokio::test]
     async fn test_get_industry_name() {

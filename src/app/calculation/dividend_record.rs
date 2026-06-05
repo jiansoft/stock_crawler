@@ -477,6 +477,62 @@ mod tests {
         assert!(eligible.is_zero());
     }
 
+    #[test]
+    fn eligible_dividend_amounts_supports_cash_only_and_stock_only_dates() {
+        let holding_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
+        let number_of_shares_held = Decimal::new(1000, 0);
+        let mut dividend = dividend::Dividend::new();
+        dividend.cash_dividend = dec!(1.5);
+        dividend.stock_dividend = dec!(0.5);
+
+        dividend.ex_dividend_date1 = "2025-06-21".to_string();
+        dividend.ex_dividend_date2 = "-".to_string();
+        let cash_only =
+            calculate_eligible_dividend_amounts(holding_date, &dividend, number_of_shares_held);
+        assert_eq!(cash_only.cash, dec!(1500));
+        assert_eq!(cash_only.stock_money, Decimal::ZERO);
+        assert_eq!(cash_only.total, dec!(1500));
+
+        dividend.ex_dividend_date1 = "-".to_string();
+        dividend.ex_dividend_date2 = "2025-06-21".to_string();
+        let stock_only =
+            calculate_eligible_dividend_amounts(holding_date, &dividend, number_of_shares_held);
+        assert_eq!(stock_only.cash, Decimal::ZERO);
+        assert_eq!(stock_only.stock_money, dec!(500));
+        assert_eq!(stock_only.stock, dec!(50));
+        assert_eq!(stock_only.total, dec!(500));
+    }
+
+    #[test]
+    fn eligible_dividend_amounts_treats_invalid_or_unpublished_dates_as_ineligible() {
+        let holding_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
+        let number_of_shares_held = Decimal::new(1000, 0);
+        let mut dividend = dividend::Dividend::new();
+        dividend.cash_dividend = dec!(1.5);
+        dividend.stock_dividend = dec!(0.5);
+        dividend.ex_dividend_date1 = "".to_string();
+        dividend.ex_dividend_date2 = "2025/06/21".to_string();
+
+        let eligible =
+            calculate_eligible_dividend_amounts(holding_date, &dividend, number_of_shares_held);
+
+        assert!(eligible.is_zero());
+    }
+
+    #[test]
+    fn eligible_dividend_amounts_returns_zero_for_zero_shares() {
+        let holding_date = NaiveDate::from_ymd_opt(2025, 6, 20).unwrap();
+        let mut dividend = dividend::Dividend::new();
+        dividend.cash_dividend = dec!(1.5);
+        dividend.stock_dividend = dec!(0.5);
+        dividend.ex_dividend_date1 = "2025-06-21".to_string();
+        dividend.ex_dividend_date2 = "2025-06-21".to_string();
+
+        let eligible = calculate_eligible_dividend_amounts(holding_date, &dividend, Decimal::ZERO);
+
+        assert!(eligible.is_zero());
+    }
+
     /// 驗證只輸入股票代號即可回補該股目前持股的已領股利紀錄。
     ///
     /// 此測試使用本機既有資料庫資料，直接指定股票代號並呼叫回補入口。

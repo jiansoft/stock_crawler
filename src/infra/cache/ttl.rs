@@ -251,4 +251,37 @@ mod tests {
         assert_eq!(ttl.daily_quote_get("daily"), None);
         assert_eq!(ttl.trace_quote_get("trace"), Some(dec!(9.99)));
     }
+
+    #[tokio::test]
+    async fn trace_quote_expires_after_ttl() {
+        let ttl = Ttl::new();
+        let duration = Duration::from_millis(50);
+
+        assert_eq!(
+            ttl.trace_quote_set("trace".to_string(), dec!(9.99), duration),
+            None
+        );
+        assert!(ttl.trace_quote_contains_key("trace"));
+        assert_eq!(ttl.trace_quote_get("trace"), Some(dec!(9.99)));
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(ttl.trace_quote_get("trace"), None);
+        assert!(!ttl.trace_quote_contains_key("trace"));
+    }
+
+    #[tokio::test]
+    async fn expired_value_is_not_returned_as_previous_on_update() {
+        let ttl = Ttl::new();
+        let duration = Duration::from_millis(50);
+
+        ttl.daily_quote_set("daily".to_string(), "old".to_string(), duration);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(
+            ttl.daily_quote_set("daily".to_string(), "new".to_string(), duration),
+            None
+        );
+        assert_eq!(ttl.daily_quote_get("daily"), Some("new".to_string()));
+    }
 }

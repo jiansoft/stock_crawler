@@ -609,6 +609,50 @@ mod tests {
         assert_eq!(snapshot.volume, Decimal::ZERO);
     }
 
+    #[test]
+    fn parse_class_quote_item_skips_rows_without_symbol() {
+        let item = json!({
+            "symbolName": "缺代號",
+            "price": { "raw": "88.4" }
+        });
+
+        assert!(parse_test_item(item).unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_class_quote_item_normalizes_missing_market_price_and_percent_text() {
+        let item = json!({
+            "symbol": "2317.TW",
+            "symbolName": "鴻海",
+            "price": { "raw": "市價" },
+            "change": { "raw": "--" },
+            "changePercent": "12.34%",
+            "regularMarketOpen": { "raw": "-" },
+            "volumeK": "1,234"
+        });
+
+        let (symbol, snapshot) = parse_test_item(item).unwrap().unwrap();
+
+        assert_eq!(symbol, "2317");
+        assert_eq!(snapshot.price, Decimal::ZERO);
+        assert_eq!(snapshot.change, Decimal::ZERO);
+        assert_eq!(snapshot.change_range, dec!(12.34));
+        assert_eq!(snapshot.open, Decimal::ZERO);
+        assert_eq!(snapshot.volume, dec!(1234));
+    }
+
+    #[test]
+    fn parse_class_quote_item_reports_malformed_decimal() {
+        let item = json!({
+            "symbol": "2330.TW",
+            "price": { "raw": "not-a-number" }
+        });
+
+        let error = parse_test_item(item).unwrap_err().to_string();
+
+        assert!(error.contains("Failed to parse Yahoo price for 2330"));
+    }
+
     /// 驗證 Yahoo 的 `nextOffset` 欄位能被正確轉成數值型態。
     #[test]
     fn test_next_offset_parsing() {
@@ -618,6 +662,26 @@ mod tests {
         };
 
         assert_eq!(pagination.next_offset().unwrap(), Some(60));
+    }
+
+    #[test]
+    fn next_offset_reports_malformed_values() {
+        let pagination = ClassQuotesPagination {
+            results_total: 89,
+            next_offset: Some("next-page"),
+        };
+
+        let error = pagination.next_offset().unwrap_err().to_string();
+
+        assert!(error.contains("Failed to parse Yahoo class quote nextOffset"));
+    }
+
+    #[test]
+    fn category_key_uses_exchange_code_and_sector_id() {
+        let category =
+            YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 153, "半導體");
+
+        assert_eq!(category_key(&category), "TWO:153");
     }
 
     /// 驗證盤中輪詢清單會排除認購 / 認售 / 指數類，只保留實際需要採集的分類。

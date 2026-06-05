@@ -258,4 +258,63 @@ mod tests {
             "Trace 收盤摘要 | 事件 發佈=    10 已處理=     8( 80.00%) 丟棄=     2( 20.00%) | 通知 已送出=     3 | 對帳 次數=  2 掃描=    20 補救命中=     1(  5.00%)"
         );
     }
+
+    #[test]
+    fn format_rate_returns_zero_when_denominator_is_zero() {
+        assert_eq!(format_rate(10, 0), "0.00%");
+        assert_eq!(format_rate(0, 10), "0.00%");
+        assert_eq!(format_rate(1, 4), "25.00%");
+    }
+
+    #[test]
+    fn has_any_runtime_activity_detects_each_counter() {
+        assert!(!has_any_runtime_activity(
+            TraceRuntimeStatsSnapshot::default()
+        ));
+
+        let mut snapshot = TraceRuntimeStatsSnapshot::default();
+        snapshot.price_events_published = 1;
+        assert!(has_any_runtime_activity(snapshot));
+
+        snapshot = TraceRuntimeStatsSnapshot::default();
+        snapshot.price_events_dropped = 1;
+        assert!(has_any_runtime_activity(snapshot));
+
+        snapshot = TraceRuntimeStatsSnapshot::default();
+        snapshot.price_events_consumed = 1;
+        assert!(has_any_runtime_activity(snapshot));
+
+        snapshot = TraceRuntimeStatsSnapshot::default();
+        snapshot.notifications_sent = 1;
+        assert!(has_any_runtime_activity(snapshot));
+
+        snapshot = TraceRuntimeStatsSnapshot::default();
+        snapshot.reconciliation_runs = 1;
+        assert!(has_any_runtime_activity(snapshot));
+
+        snapshot = TraceRuntimeStatsSnapshot::default();
+        snapshot.reconciliation_symbols_scanned = 1;
+        assert!(has_any_runtime_activity(snapshot));
+
+        snapshot = TraceRuntimeStatsSnapshot::default();
+        snapshot.reconciliation_alert_hits = 1;
+        assert!(has_any_runtime_activity(snapshot));
+    }
+
+    #[test]
+    fn current_runtime_stats_snapshot_does_not_reset_counters() {
+        reset_runtime_stats();
+        record_published_price_event();
+        record_reconciliation_run(2);
+
+        let snapshot = get_runtime_stats_snapshot();
+        assert_eq!(snapshot.price_events_published, 1);
+        assert_eq!(snapshot.reconciliation_runs, 1);
+        assert_eq!(snapshot.reconciliation_symbols_scanned, 2);
+
+        let second_snapshot = get_runtime_stats_snapshot();
+        assert_eq!(second_snapshot, snapshot);
+
+        reset_runtime_stats();
+    }
 }

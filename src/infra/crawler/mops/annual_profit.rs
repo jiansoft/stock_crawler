@@ -419,6 +419,14 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_year_from_xaxis_rejects_malformed_values() {
+        assert!(parse_year_from_xaxis("").is_err());
+        assert!(parse_year_from_xaxis("202").is_err());
+        assert!(parse_year_from_xaxis("202Q4").is_err());
+        assert!(parse_year_from_xaxis("YEARQ4").is_err());
+    }
+
+    #[test]
     fn test_calc_sales_per_share() {
         let revenue = Decimal::from_str_exact("2894307699").unwrap();
         let common_stock = Decimal::from_str_exact("259327332").unwrap();
@@ -427,6 +435,13 @@ mod tests {
             calc_sales_per_share(revenue, common_stock).round_dp(2),
             Decimal::from_str_exact("111.61").unwrap()
         );
+    }
+
+    #[test]
+    fn test_calc_sales_per_share_returns_zero_when_common_stock_is_zero() {
+        let revenue = Decimal::from_str_exact("2894307699").unwrap();
+
+        assert_eq!(calc_sales_per_share(revenue, Decimal::ZERO), Decimal::ZERO);
     }
 
     #[test]
@@ -443,6 +458,15 @@ mod tests {
     }
 
     #[test]
+    fn test_round_per_share_values_uses_midpoint_to_even() {
+        let positive = Decimal::from_str_exact("12.345").unwrap().round_dp(2);
+        let negative = Decimal::from_str_exact("-12.345").unwrap().round_dp(2);
+
+        assert_eq!(positive, Decimal::from_str_exact("12.34").unwrap());
+        assert_eq!(negative, Decimal::from_str_exact("-12.34").unwrap());
+    }
+
+    #[test]
     fn test_calc_weighted_average_shares() {
         let profit_for_eps_total = Decimal::from_str_exact("1717882.627").unwrap();
         let earnings_per_share = Decimal::from_str_exact("66.26").unwrap();
@@ -450,6 +474,16 @@ mod tests {
         assert_eq!(
             calc_weighted_average_shares(profit_for_eps_total, earnings_per_share).round_dp(3),
             Decimal::from_str_exact("25926.390").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_calc_weighted_average_shares_returns_zero_when_eps_is_zero() {
+        let profit_for_eps_total = Decimal::from_str_exact("1717882.627").unwrap();
+
+        assert_eq!(
+            calc_weighted_average_shares(profit_for_eps_total, Decimal::ZERO),
+            Decimal::ZERO
         );
     }
 
@@ -462,6 +496,16 @@ mod tests {
             calc_profit_before_tax_per_share(total_profit_before_tax, weighted_average_shares)
                 .round_dp(2),
             Decimal::from_str_exact("78.75").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_calc_profit_before_tax_per_share_returns_zero_when_weighted_shares_is_zero() {
+        let total_profit_before_tax = Decimal::from_str_exact("2041663").unwrap();
+
+        assert_eq!(
+            calc_profit_before_tax_per_share(total_profit_before_tax, Decimal::ZERO),
+            Decimal::ZERO
         );
     }
 
@@ -536,6 +580,41 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_income_statement_metrics_prefers_profit_for_eps_over_net_profit() {
+        let html = r#"
+            <div id="headTable">
+                <table>
+                    <tbody>
+                        <tr><td>繼續營業單位稅前損益</td></tr>
+                        <tr><td>本期淨利（淨損）</td></tr>
+                        <tr><td>母公司業主（淨利／損）</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="bodyTable">
+                <table>
+                    <tbody>
+                        <tr><td>20,000,000</td></tr>
+                        <tr><td>15,000,000</td></tr>
+                        <tr><td>12,500,000</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        "#;
+
+        let metrics = parse_income_statement_metrics_from_report(html).unwrap();
+
+        assert_eq!(
+            metrics.profit_before_tax_total,
+            Decimal::from_str_exact("20000000").unwrap()
+        );
+        assert_eq!(
+            metrics.profit_for_eps_total,
+            Decimal::from_str_exact("12500000").unwrap()
+        );
+    }
+
+    #[test]
     fn test_parse_income_statement_metrics_from_empty_report() {
         let html = r#"
             <div id="headTable">
@@ -550,6 +629,50 @@ mod tests {
 
         assert_eq!(metrics.profit_before_tax_total, Decimal::ZERO);
         assert_eq!(metrics.profit_for_eps_total, Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_parse_income_statement_metrics_from_report_with_missing_body_values() {
+        let html = r#"
+            <div id="headTable">
+                <table>
+                    <tbody>
+                        <tr><td>稅前淨利（淨損）</td></tr>
+                        <tr><td>本期淨利（淨損）</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="bodyTable">
+                <table><tbody></tbody></table>
+            </div>
+        "#;
+
+        let metrics = parse_income_statement_metrics_from_report(html).unwrap();
+
+        assert_eq!(metrics.profit_before_tax_total, Decimal::ZERO);
+        assert_eq!(metrics.profit_for_eps_total, Decimal::ZERO);
+    }
+
+    #[test]
+    fn test_parse_income_statement_metrics_returns_error_for_malformed_number() {
+        let html = r#"
+            <div id="headTable">
+                <table>
+                    <tbody>
+                        <tr><td>稅前淨利（淨損）</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="bodyTable">
+                <table>
+                    <tbody>
+                        <tr><td>not-a-number</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        "#;
+
+        assert!(parse_income_statement_metrics_from_report(html).is_err());
     }
 
     #[tokio::test]

@@ -564,6 +564,83 @@ mod tests {
         assert_eq!(snapshot.volume, dec!(148));
     }
 
+    #[test]
+    fn parse_row_skips_header_and_non_numeric_symbols() {
+        let html = r#"<table>
+            <tr><td>代號</td><td>名稱</td></tr>
+            <tr><td>ABC</td><td>非股票列</td></tr>
+        </table>"#;
+        let fragment = Html::parse_fragment(html);
+        let tr_selector = Selector::parse("tr").expect("Failed to parse tr selector");
+
+        for row in fragment.select(&tr_selector) {
+            assert!(parse_row(row).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn parse_row_keeps_positive_change_and_range() {
+        let html = r#"<table><tr>
+            <td>2330</td><td>台積電</td><td>1000</td>
+            <td><span class="price-up">▲+15.00</span></td>
+            <td><span class="price-up">+1.52%</span></td>
+            <td>...</td><td>...</td><td>990</td><td>1005</td><td>985</td><td>985</td><td>1,234</td>
+        </tr></table>"#;
+        let fragment = Html::parse_fragment(html);
+        let tr_selector = Selector::parse("tr").expect("Failed to parse tr selector");
+        let row = fragment.select(&tr_selector).next().unwrap();
+        let (symbol, snapshot) = parse_row(row).unwrap().unwrap();
+
+        assert_eq!(symbol, "2330");
+        assert_eq!(snapshot.change, dec!(15));
+        assert_eq!(snapshot.change_range, dec!(1.52));
+        assert_eq!(snapshot.open, dec!(990));
+        assert_eq!(snapshot.high, dec!(1005));
+        assert_eq!(snapshot.low, dec!(985));
+        assert_eq!(snapshot.last_close, dec!(985));
+        assert_eq!(snapshot.volume, dec!(1234));
+    }
+
+    #[test]
+    fn parse_row_reports_malformed_numeric_fields() {
+        let html = r#"<table><tr>
+            <td>2330</td><td>台積電</td><td>not-a-price</td>
+            <td>--</td><td>--</td><td>...</td><td>...</td>
+            <td>990</td><td>1005</td><td>985</td><td>985</td><td>1234</td>
+        </tr></table>"#;
+        let fragment = Html::parse_fragment(html);
+        let tr_selector = Selector::parse("tr").expect("Failed to parse tr selector");
+        let row = fragment.select(&tr_selector).next().unwrap();
+        let error = parse_row(row).unwrap_err().to_string();
+
+        assert!(error.contains("Failed to parse price for 2330"));
+    }
+
+    #[test]
+    fn diagnostics_snapshot_reflects_idle_state_and_runtime_counters() {
+        IS_CACHING.store(false, Ordering::SeqCst);
+        ACTIVE_TASKS.store(0, Ordering::SeqCst);
+        LAST_BODY_BYTES.store(1024, Ordering::SeqCst);
+        LAST_ROW_COUNT.store(30, Ordering::SeqCst);
+        LAST_SNAPSHOT_COUNT.store(28, Ordering::SeqCst);
+        LAST_CHANGED_EVENT_COUNT.store(4, Ordering::SeqCst);
+        LAST_ELAPSED_MS.store(250, Ordering::SeqCst);
+        LAST_RSS_DELTA_KIB.store(-12, Ordering::SeqCst);
+        COMPLETED_CYCLES.store(3, Ordering::SeqCst);
+
+        let diagnostics = runtime_diagnostics_snapshot();
+
+        assert!(!diagnostics.status.enabled);
+        assert_eq!(diagnostics.status.active_tasks, 0);
+        assert_eq!(diagnostics.last_body_bytes, 1024);
+        assert_eq!(diagnostics.last_row_count, 30);
+        assert_eq!(diagnostics.last_snapshot_count, 28);
+        assert_eq!(diagnostics.last_changed_event_count, 4);
+        assert_eq!(diagnostics.last_elapsed_ms, 250);
+        assert_eq!(diagnostics.last_rss_delta_kib, -12);
+        assert_eq!(diagnostics.completed_cycles, 3);
+    }
+
     #[tokio::test]
     async fn test_cache_mechanism() {
         let _guard = TEST_STATE_LOCK.lock().await;

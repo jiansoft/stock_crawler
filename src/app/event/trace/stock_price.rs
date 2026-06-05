@@ -497,6 +497,44 @@ mod tests {
         assert_eq!(grouped.get("2317").map(Vec::len), Some(1));
     }
 
+    #[test]
+    fn trace_targets_cache_snapshot_symbols_and_diagnostics_are_consistent() {
+        clear_trace_targets_cache();
+        assert!(!has_loaded_trace_targets_cache());
+        assert_eq!(
+            trace_target_diagnostics(),
+            TraceTargetDiagnostics::default()
+        );
+
+        let grouped = group_targets_by_symbol(vec![
+            Trace::new("2330".to_string(), dec!(500), dec!(600)),
+            Trace::new("2317".to_string(), dec!(100), dec!(120)),
+            Trace::new("2330".to_string(), dec!(520), dec!(650)),
+        ]);
+        {
+            let mut cache = TRACE_TARGETS.write().unwrap();
+            *cache = grouped;
+        }
+        TRACE_TARGETS_LOADED.store(true, Ordering::SeqCst);
+
+        assert!(has_loaded_trace_targets_cache());
+        assert_eq!(get_tracked_symbols(), vec!["2317", "2330"]);
+        assert!(has_targets_for_symbol("2330"));
+        assert!(!has_targets_for_symbol("0050"));
+        assert_eq!(get_targets_by_symbol("2330").len(), 2);
+        assert_eq!(
+            trace_target_diagnostics(),
+            TraceTargetDiagnostics {
+                symbol_count: 2,
+                target_count: 3,
+            }
+        );
+
+        clear_trace_targets_cache();
+        assert!(!has_loaded_trace_targets_cache());
+        assert!(get_tracked_symbols().is_empty());
+    }
+
     /// 驗證價格區間判斷邏輯可正確處理雙邊界、單邊界與未設定情況。
     #[test]
     fn test_is_within_boundary() {
@@ -596,6 +634,24 @@ mod tests {
 
         assert_ne!(key_a, key_b);
         assert_ne!(key_a, key_c);
+    }
+
+    #[test]
+    fn build_trace_notification_key_rounds_price_to_four_decimals() {
+        let trace = Trace {
+            stock_symbol: "0050".to_string(),
+            floor: Decimal::ZERO,
+            ceiling: dec!(200),
+        };
+
+        let key = build_trace_notification_key(
+            NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
+            &trace,
+            "ceiling",
+            dec!(200.12345),
+        );
+
+        assert_eq!(key, "Trace:0050-0-200:20260605:ceiling:200.1234");
     }
 
     #[tokio::test]

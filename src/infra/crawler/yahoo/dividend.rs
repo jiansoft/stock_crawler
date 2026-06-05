@@ -293,6 +293,41 @@ mod tests {
         )
     }
 
+    fn dividend_row_without_period(cash_dividend: &str) -> String {
+        format!(
+            r#"
+            <li>
+                <div>
+                    <div>missing-period</div>
+                    <div>unused</div>
+                    <div>{cash_dividend}</div>
+                    <div>0.3</div>
+                    <div>unused</div>
+                    <div>unused</div>
+                    <div>2025/07/01</div>
+                    <div>-</div>
+                    <div>2025/07/31</div>
+                    <div>-</div>
+                </div>
+            </li>
+            "#
+        )
+    }
+
+    fn incomplete_dividend_row(period: &str) -> String {
+        format!(
+            r#"
+            <li>
+                <div>
+                    <div class="Fxg(1) Fxs(1) Fxb(0%) Ta(end)">{period}</div>
+                    <div>unused</div>
+                    <div>not-a-number</div>
+                </div>
+            </li>
+            "#
+        )
+    }
+
     #[test]
     fn parse_dividend_html_groups_records_by_paid_year_and_sorts_desc() {
         let html = wrap_rows(&[
@@ -402,6 +437,105 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("2330"));
         assert!(message.contains("https://example.test/quote/2330/dividend"));
+    }
+
+    #[test]
+    fn parse_dividend_html_skips_rows_without_period_container() {
+        let html = wrap_rows(&[
+            dividend_row_without_period("99.9"),
+            dividend_row("2024", "3.2", "-", "2025/07/01", "-", "2025/07/31", "-"),
+        ]);
+
+        let dividend =
+            parse_dividend_html("2330", "https://example.test/quote/2330/dividend", &html)
+                .expect("expected parser to ignore malformed rows and keep valid rows");
+
+        assert_eq!(dividend.dividend.len(), 1);
+        let details = dividend
+            .get_dividend_by_year(2025)
+            .expect("expected valid annual row to be grouped by ex-dividend year");
+
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0].year_of_dividend, 2024);
+        assert_eq!(details[0].cash_dividend, dec!(3.2));
+        assert_eq!(details[0].stock_dividend, Decimal::ZERO);
+    }
+
+    #[test]
+    fn parse_dividend_html_defaults_missing_columns_and_malformed_numbers() {
+        let html = wrap_rows(&[incomplete_dividend_row("2024Q2")]);
+
+        let dividend =
+            parse_dividend_html("2330", "https://example.test/quote/2330/dividend", &html)
+                .expect("expected parser to tolerate short Yahoo rows");
+
+        let details = dividend
+            .get_dividend_by_year(2025)
+            .expect("expected missing dates to fall back to estimated paid year");
+
+        assert_eq!(details.len(), 1);
+        let detail = &details[0];
+        assert_eq!(detail.year, 2025);
+        assert_eq!(detail.year_of_dividend, 2024);
+        assert_eq!(detail.quarter, "Q2");
+        assert_eq!(detail.cash_dividend, Decimal::ZERO);
+        assert_eq!(detail.stock_dividend, Decimal::ZERO);
+        assert_eq!(detail.ex_dividend_date1, "-");
+        assert_eq!(detail.ex_dividend_date2, "-");
+        assert_eq!(detail.payable_date1, "-");
+        assert_eq!(detail.payable_date2, "-");
+    }
+
+    #[test]
+    fn parse_dividend_html_uses_payable_year_for_half_year_dividends() {
+        let html = wrap_rows(&[
+            dividend_row("2024H1", "1.1", "-", "2025/01/03", "-", "2024/12/20", "-"),
+            dividend_row("2024H2", "1.2", "-", "2025/02/03", "-", "-", "2026/01/15"),
+        ]);
+
+        let dividend =
+            parse_dividend_html("2330", "https://example.test/quote/2330/dividend", &html)
+                .expect("expected half-year rows to parse");
+
+        let details_2024 = dividend
+            .get_dividend_by_year(2024)
+            .expect("expected H1 cash payable date to determine paid year");
+        assert_eq!(details_2024.len(), 1);
+        assert_eq!(details_2024[0].quarter, "H1");
+        assert_eq!(details_2024[0].cash_dividend, dec!(1.1));
+        assert_eq!(details_2024[0].ex_dividend_date1, "2025-01-03");
+        assert_eq!(details_2024[0].payable_date1, "2024-12-20");
+
+        let details_2026 = dividend
+            .get_dividend_by_year(2026)
+            .expect("expected H2 stock payable date to determine paid year");
+        assert_eq!(details_2026.len(), 1);
+        assert_eq!(details_2026[0].quarter, "H2");
+        assert_eq!(details_2026[0].cash_dividend, dec!(1.2));
+        assert_eq!(details_2026[0].ex_dividend_date1, "2025-02-03");
+        assert_eq!(details_2026[0].payable_date2, "2026-01-15");
+    }
+
+    #[test]
+    fn parse_dividend_html_keeps_input_order_within_same_paid_year() {
+        let html = wrap_rows(&[
+            dividend_row("2024Q1", "0.1", "-", "-", "-", "2025/04/01", "-"),
+            dividend_row("2024H1", "0.2", "-", "-", "-", "2025/08/01", "-"),
+            dividend_row("2024Q4", "0.4", "-", "-", "-", "2025/12/01", "-"),
+        ]);
+
+        let dividend =
+            parse_dividend_html("2330", "https://example.test/quote/2330/dividend", &html)
+                .expect("expected parser to preserve row order inside grouped year");
+
+        let details = dividend
+            .get_dividend_by_year(2025)
+            .expect("expected all rows to share paid year 2025");
+
+        assert_eq!(details.len(), 3);
+        assert_eq!(details[0].quarter, "Q1");
+        assert_eq!(details[1].quarter, "H1");
+        assert_eq!(details[2].quarter, "Q4");
     }
 
     #[tokio::test]

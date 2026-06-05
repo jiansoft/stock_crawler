@@ -531,6 +531,14 @@ mod tests {
         assert_eq!(StockExchangeMarket::from(3), None);
     }
 
+    #[test]
+    fn stock_exchange_market_from_rejects_out_of_range_serials() {
+        assert_eq!(StockExchangeMarket::from(0), None);
+        assert_eq!(StockExchangeMarket::from(-1), None);
+        assert_eq!(StockExchangeMarket::from(6), None);
+        assert_eq!(StockExchangeMarket::from(9001), None);
+    }
+
     /// 驗證市場別中文名稱。
     #[test]
     fn test_stock_exchange_market_name() {
@@ -540,6 +548,46 @@ mod tests {
         assert_eq!(StockExchangeMarket::Emerging.name(), "興櫃");
     }
 
+    #[test]
+    fn stock_exchange_market_iterator_matches_serial_lookup() {
+        let markets = StockExchangeMarket::iterator().collect::<Vec<_>>();
+
+        assert_eq!(
+            markets,
+            vec![
+                StockExchangeMarket::Public,
+                StockExchangeMarket::Listed,
+                StockExchangeMarket::OverTheCounter,
+                StockExchangeMarket::Emerging,
+            ]
+        );
+        for market in markets {
+            assert_eq!(StockExchangeMarket::from(market.serial()), Some(market));
+        }
+    }
+
+    #[test]
+    fn stock_exchange_market_exchange_mapping_is_explicit() {
+        assert_eq!(StockExchangeMarket::Public.exchange(), StockExchange::None);
+        assert_eq!(StockExchangeMarket::Listed.exchange(), StockExchange::TWSE);
+        assert_eq!(
+            StockExchangeMarket::OverTheCounter.exchange(),
+            StockExchange::TPEx
+        );
+        assert_eq!(
+            StockExchangeMarket::Emerging.exchange(),
+            StockExchange::TPEx
+        );
+    }
+
+    #[test]
+    fn stock_exchange_iterator_contains_only_trading_exchanges() {
+        assert_eq!(
+            StockExchange::iterator().collect::<Vec<_>>(),
+            vec![StockExchange::TWSE, StockExchange::TPEx]
+        );
+    }
+
     /// 驗證季度序號。
     #[test]
     fn test_serial() {
@@ -547,6 +595,19 @@ mod tests {
         assert_eq!(Quarter::Q2.serial(), 2);
         assert_eq!(Quarter::Q3.serial(), 3);
         assert_eq!(Quarter::Q4.serial(), 4);
+    }
+
+    #[test]
+    fn quarter_iterator_is_ordered_and_round_trips_by_serial() {
+        let quarters = Quarter::iterator().collect::<Vec<_>>();
+
+        assert_eq!(
+            quarters,
+            vec![Quarter::Q1, Quarter::Q2, Quarter::Q3, Quarter::Q4]
+        );
+        for quarter in quarters {
+            assert_eq!(Quarter::from_serial(quarter.serial() as u32), Some(quarter));
+        }
     }
 
     /// 驗證前一季度計算。
@@ -562,9 +623,14 @@ mod tests {
     #[test]
     fn test_from_month() {
         assert_eq!(Quarter::from_month(1), Some(Quarter::Q1));
+        assert_eq!(Quarter::from_month(3), Some(Quarter::Q1));
         assert_eq!(Quarter::from_month(4), Some(Quarter::Q2));
+        assert_eq!(Quarter::from_month(6), Some(Quarter::Q2));
         assert_eq!(Quarter::from_month(7), Some(Quarter::Q3));
+        assert_eq!(Quarter::from_month(9), Some(Quarter::Q3));
         assert_eq!(Quarter::from_month(10), Some(Quarter::Q4));
+        assert_eq!(Quarter::from_month(12), Some(Quarter::Q4));
+        assert_eq!(Quarter::from_month(0), None);
         assert_eq!(Quarter::from_month(13), None);
     }
 
@@ -575,7 +641,21 @@ mod tests {
         assert_eq!(Quarter::from_serial(2), Some(Quarter::Q2));
         assert_eq!(Quarter::from_serial(3), Some(Quarter::Q3));
         assert_eq!(Quarter::from_serial(4), Some(Quarter::Q4));
+        assert_eq!(Quarter::from_serial(0), None);
         assert_eq!(Quarter::from_serial(5), None);
+    }
+
+    #[test]
+    fn industry_iterator_contains_each_serial_once() {
+        let industries = Industry::iterator().collect::<Vec<_>>();
+        let mut serials = industries.iter().map(Industry::serial).collect::<Vec<_>>();
+        serials.sort();
+        serials.dedup();
+
+        assert_eq!(serials.len(), industries.len());
+        assert!(industries.contains(&Industry::Semiconductor));
+        assert!(industries.contains(&Industry::ExchangeTradedFund));
+        assert!(industries.contains(&Industry::Uncategorized));
     }
 
     /// 驗證較早季度清單。

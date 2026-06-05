@@ -239,6 +239,7 @@ mod tests {
         println!("big5 :{} {:?}", wording, wording.as_bytes());
 
         println!("utf8 :{} {:?}", utf8_wording, utf8_wording.as_bytes());
+        assert_eq!(utf8_wording, "有價證券代號及名稱");
     }
 
     /// 驗證 Big5 bytes 可正確轉成 UTF-8 中文字串。
@@ -263,6 +264,7 @@ mod tests {
         let result = split(chinese_word);
         let end = start.elapsed();
         println!("split: {:?}, elapsed time: {:?}", result, end);
+        assert_eq!(result, vec!["台", "台積", "台積電", "積", "積電", "電"]);
     }
 
     /// 比較兩種拆字實作的結果與耗時。
@@ -303,5 +305,45 @@ mod tests {
             "clean_string_escape_chars: {:?}, elapsed time: {:?}",
             result, end
         );
+        assert_eq!(result, "台積電");
+    }
+
+    #[test]
+    fn truncate_respects_utf8_boundaries_and_marks_truncation() {
+        assert_eq!(truncate("台積電", 2), "台積...");
+        assert_eq!(truncate("台積電", 3), "台積電");
+        assert_eq!(truncate("abc", 0), "...");
+    }
+
+    #[test]
+    fn split_removes_known_noise_and_deduplicates_sorted_tokens() {
+        let result = split("A-A*");
+
+        assert_eq!(result, vec!["A", "AA"]);
+        assert_eq!(result, split_v1("A-A*"));
+    }
+
+    #[test]
+    fn parse_number_helpers_remove_default_and_custom_escape_chars() {
+        assert_eq!(
+            parse_decimal("1,234.50元", None).unwrap(),
+            Decimal::from_str("1234.50").unwrap()
+        );
+        assert_eq!(parse_f64("+1,234.5%", None).unwrap(), 1234.5);
+        assert_eq!(parse_i32("(1,234)", Some(vec!['(', ')'])).unwrap(), 1234);
+        assert_eq!(parse_i64("\"9,876\"\n", None).unwrap(), 9876);
+    }
+
+    #[test]
+    fn parse_number_helpers_report_cleaned_value_on_error() {
+        let decimal_err = parse_decimal("N/A元", None).unwrap_err().to_string();
+        let f64_err = parse_f64("--", Some(vec!['-'])).unwrap_err().to_string();
+        let i32_err = parse_i32("abc", None).unwrap_err().to_string();
+        let i64_err = parse_i64("abc", None).unwrap_err().to_string();
+
+        assert!(decimal_err.contains("Failed to parse 'N/A' as Decimal"));
+        assert!(f64_err.contains("Failed to parse '' as f64"));
+        assert!(i32_err.contains("Failed to parse 'abc' as i32"));
+        assert!(i64_err.contains("Failed to parse 'abc' as i64"));
     }
 }

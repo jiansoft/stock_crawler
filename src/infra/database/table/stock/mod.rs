@@ -466,9 +466,125 @@ pub fn is_preference_shares(stock_symbol: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal_macros::dec;
+
     use crate::core::logging;
+    use crate::infra::database::table::stock_exchange_market::StockExchangeMarket;
 
     use super::*;
+
+    #[test]
+    fn is_preference_shares_detects_letters_only() {
+        assert!(!is_preference_shares("2330"));
+        assert!(!is_preference_shares("0050"));
+        assert!(is_preference_shares("2881A"));
+        assert!(is_preference_shares("abc"));
+        assert!(is_preference_shares("123b"));
+    }
+
+    #[test]
+    fn stock_methods_key_tdr_and_stock_info_request() {
+        let mut stock = Stock::new();
+        stock.stock_symbol = "9105".to_string();
+        stock.name = "泰金寶-DR".to_string();
+        stock.stock_exchange_market_id = 2;
+        stock.stock_industry_id = 20;
+        stock.net_asset_value_per_share = dec!(12.34);
+        stock.suspend_listing = true;
+
+        let request = stock.to_stock_info_request();
+
+        assert_eq!(stock.key(), "9105");
+        assert_eq!(stock.key_with_prefix(), "Stock:9105");
+        assert!(stock.is_tdr());
+        assert_eq!(request.stock_symbol, "9105");
+        assert_eq!(request.name, "泰金寶-DR");
+        assert_eq!(request.stock_exchange_market_id, 2);
+        assert_eq!(request.stock_industry_id, 20);
+        assert_eq!(request.net_asset_value_per_share, 12.34);
+        assert!(request.suspend_listing);
+    }
+
+    #[test]
+    fn stock_clone_preserves_all_fields() {
+        let mut stock = Stock::new();
+        stock.stock_symbol = "2330".to_string();
+        stock.name = "台積電".to_string();
+        stock.suspend_listing = true;
+        stock.net_asset_value_per_share = dec!(95.12);
+        stock.weight = dec!(31.5);
+        stock.return_on_equity = dec!(25.7);
+        stock.stock_exchange_market_id = 2;
+        stock.stock_industry_id = 24;
+        stock.issued_share = 25_000;
+        stock.qfii_shares_held = 12_000;
+        stock.qfii_share_holding_percentage = dec!(48.5);
+
+        let cloned = stock.clone();
+
+        assert_eq!(cloned.stock_symbol, stock.stock_symbol);
+        assert_eq!(cloned.name, stock.name);
+        assert_eq!(cloned.suspend_listing, stock.suspend_listing);
+        assert_eq!(
+            cloned.net_asset_value_per_share,
+            stock.net_asset_value_per_share
+        );
+        assert_eq!(cloned.weight, stock.weight);
+        assert_eq!(cloned.return_on_equity, stock.return_on_equity);
+        assert_eq!(cloned.create_time, stock.create_time);
+        assert_eq!(
+            cloned.stock_exchange_market_id,
+            stock.stock_exchange_market_id
+        );
+        assert_eq!(cloned.stock_industry_id, stock.stock_industry_id);
+        assert_eq!(cloned.issued_share, stock.issued_share);
+        assert_eq!(cloned.qfii_shares_held, stock.qfii_shares_held);
+        assert_eq!(
+            cloned.qfii_share_holding_percentage,
+            stock.qfii_share_holding_percentage
+        );
+    }
+
+    #[test]
+    fn stock_from_isin_maps_market_industry_and_identity() {
+        let isin = twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber {
+            stock_symbol: "2330".to_string(),
+            name: "台積電".to_string(),
+            isin_code: "TW0002330008".to_string(),
+            listing_date: "1994/09/05".to_string(),
+            industry: "半導體業".to_string(),
+            cfi_code: "ESVUFR".to_string(),
+            exchange_market: StockExchangeMarket::new(2, 1),
+            industry_id: 24,
+        };
+
+        let stock = Stock::from(isin);
+
+        assert_eq!(stock.stock_symbol, "2330");
+        assert_eq!(stock.name, "台積電");
+        assert!(!stock.suspend_listing);
+        assert_eq!(stock.stock_exchange_market_id, 2);
+        assert_eq!(stock.stock_industry_id, 24);
+        assert_eq!(stock.net_asset_value_per_share, Decimal::ZERO);
+        assert_eq!(stock.weight, Decimal::ZERO);
+        assert_eq!(stock.issued_share, 0);
+    }
+
+    #[test]
+    fn stock_from_emerging_maps_nav_and_symbol() {
+        let emerging =
+            tpex::net_asset_value_per_share::Emerging::new("6987".to_string(), dec!(42.19));
+
+        let stock = Stock::from(emerging);
+
+        assert_eq!(stock.stock_symbol, "6987");
+        assert_eq!(stock.name, "");
+        assert_eq!(stock.net_asset_value_per_share, dec!(42.19));
+        assert_eq!(stock.stock_exchange_market_id, 0);
+        assert_eq!(stock.stock_industry_id, 0);
+        assert!(!stock.suspend_listing);
+    }
+
     // 此測試驗證防禦性 upsert 邏輯（當新傳入的市場或產業編號為 0 時，保留資料庫中原先正確的非零值）。
     #[tokio::test]
     async fn test_upsert_industry() {
