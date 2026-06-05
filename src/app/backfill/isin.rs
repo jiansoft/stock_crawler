@@ -9,8 +9,8 @@ use std::fmt::Write;
 
 use crate::{
     app::backfill, core::declare::StockExchangeMarket, core::logging,
-    core::util::datetime::Weekend, infra::cache::SHARE, infra::crawler::twse,
-    interfaces::bot, interfaces::bot::telegram::Telegram, interfaces::rpc,
+    core::util::datetime::Weekend, infra::cache::SHARE, infra::crawler::twse, interfaces::bot,
+    interfaces::bot::telegram::Telegram, interfaces::rpc,
 };
 
 use anyhow::{anyhow, Result};

@@ -4,7 +4,6 @@ use sqlx::{postgres::PgQueryResult, FromRow};
 
 use crate::infra::database;
 
-
 /// 更新股票的每股淨值
 #[derive(FromRow, Debug)]
 pub struct SymbolAndNetAssetValuePerShare {

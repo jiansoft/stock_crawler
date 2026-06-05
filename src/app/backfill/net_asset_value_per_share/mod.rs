@@ -1,10 +1,7 @@
 use anyhow::Result;
 use sqlx::postgres::PgQueryResult;
 
-use crate::{
-    infra::cache::SHARE,
-    infra::database::table::stock::extension,
-};
+use crate::{infra::cache::SHARE, infra::database::table::stock::extension};
 
 /// 更新興櫃股票的每股淨值
 pub mod emerging;
