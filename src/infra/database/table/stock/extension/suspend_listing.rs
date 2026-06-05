@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use sqlx::{postgres::PgQueryResult, FromRow};
 
-use crate::infra::database::{self, table::stock};
+use crate::infra::database;
 
 /// 更新股票的下市狀態
 #[derive(FromRow, Debug)]
@@ -13,9 +13,9 @@ pub struct SymbolAndSuspendListing {
 }
 
 //let entity: SymbolAndSuspendListing = fs.into(); // 或者 let entity = SymbolAndSuspendListing::from(fs);
-impl From<&stock::Stock> for SymbolAndSuspendListing {
-    fn from(stock: &stock::Stock) -> Self {
-        SymbolAndSuspendListing::new(stock.stock_symbol.clone(), stock.suspend_listing)
+impl From<&crate::domain::registry::entity::Stock> for SymbolAndSuspendListing {
+    fn from(stock: &crate::domain::registry::entity::Stock) -> Self {
+        SymbolAndSuspendListing::new(stock.symbol().0.clone(), stock.suspend_listing())
     }
 }
 

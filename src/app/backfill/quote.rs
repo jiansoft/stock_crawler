@@ -136,7 +136,7 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
 
-        let stocks = stock::Stock::fetch().await.unwrap();
+        let stocks = stock::StockDbRow::fetch().await.unwrap();
         let worker_count = num_cpus::get() * 100;
         //let dqs_arc = Arc::new(stocks);
         let counter = Arc::new(AtomicUsize::new(0));
@@ -164,7 +164,7 @@ mod tests {
         sleep(Duration::from_secs(1)).await;
     }
 
-    fn calculate_day_quotes_moving_average_worker(i: usize, dq: &stock::Stock) {
+    fn calculate_day_quotes_moving_average_worker(i: usize, dq: &stock::StockDbRow) {
         logging::debug_file_async(format!("dq[{}]:{:?}", i, dq));
     }
 }

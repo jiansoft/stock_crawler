@@ -39,7 +39,7 @@ pub async fn execute() -> Result<()> {
     }
 
     if success_count > 0 {
-        table::stock::Stock::update_eps_and_roe().await?;
+        table::stock::StockDbRow::update_eps_and_roe().await?;
         let estimate_date_config =
             table::config::Config::new("estimate-date".to_string(), "".to_string());
         let date = estimate_date_config.get_val_naive_date().await?;

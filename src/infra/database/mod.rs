@@ -10,6 +10,9 @@ use crate::core::config;
 /// 關聯式資料庫資料表與查詢邏輯。
 pub mod table;
 
+/// 領域倉儲實現。
+pub mod repository;
+
 static POSTGRES: Lazy<Arc<OnceLock<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 
 /// PostgreSQL 連線池封裝。

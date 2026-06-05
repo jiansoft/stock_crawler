@@ -10,8 +10,9 @@ use std::fmt::Write;
 use crate::{
     app::backfill, core::declare::StockExchangeMarket, core::logging,
     core::util::datetime::Weekend, infra::cache::SHARE, infra::crawler::twse,
-    infra::database::table, interfaces::bot, interfaces::bot::telegram::Telegram, interfaces::rpc,
+    interfaces::bot, interfaces::bot::telegram::Telegram, interfaces::rpc,
 };
+
 use anyhow::{anyhow, Result};
 use chrono::Local;
 use scopeguard::defer;
@@ -121,63 +122,70 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
 /// - `Ok(())`：更新成功。
 /// - `Err(anyhow::Error)`：資料庫寫入失敗或轉換過程發生錯誤（gRPC 同步失敗僅會記錄日誌，不會阻斷流程）。
 async fn update_stock_info(
-    stock: &twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber,
+    isin: &twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber,
     msg: &mut String,
 ) -> Result<()> {
-    // 1. 將爬取到的 ISIN 資料結構轉換成對應資料庫 table::stock::Stock 欄位的實體
-    let stock = table::stock::Stock::from(stock.clone());
-    // 2. 將股票資訊寫入 Postgres。若 stock_symbol 衝突，則會更新 Name、SuspendListing、市場 ID 與產業 ID
-    stock
-        .upsert()
+    use crate::domain::registry::entity::Stock;
+    use crate::domain::registry::repository::StockRepository;
+    use crate::infra::database::repository::stock::PgStockRepository;
+    use crate::interfaces::rpc::stock::StockInfoRequest;
+
+    let repo = PgStockRepository::new();
+
+    // 1. 獲取已存在的證券主檔或註冊一個新的，並使用業務方法更新識別資訊
+    let stock = match repo.find_by_symbol(&isin.stock_symbol).await? {
+        Some(mut existing) => {
+            existing.change_identity(
+                isin.name.clone(),
+                isin.exchange_market.stock_exchange_market_id,
+                isin.industry_id,
+            );
+            existing
+        }
+        None => Stock::register(
+            isin.stock_symbol.clone(),
+            isin.name.clone(),
+            isin.exchange_market.stock_exchange_market_id,
+            isin.industry_id,
+        ),
+    };
+
+    // 2. 寫入資料庫：利用 Repository 保存，會自動觸發搜尋索引重建與快取同步
+    repo.save(&stock)
         .await
         .map_err(|why| anyhow!("Failed to stock.upsert() because {:?}", why))?;
 
-    // 3. 同步更新全域記憶體快取，使得外部 gRPC 或其他內部服務能即時查詢到最新屬性
-    // 注意：若快取中已存在該股票，應僅更新變更欄位（名稱、下市狀態、市場、產業），
-    // 避免直接覆蓋 (insert) 導致每股淨值、ROE、持股比率等其他重要欄位被重置為 0。
-    if let Ok(mut stocks) = SHARE.stocks.write() {
-        if let Some(existing) = stocks.get_mut(&stock.stock_symbol) {
-            existing.name = stock.name.clone();
-            existing.suspend_listing = stock.suspend_listing;
-            existing.stock_exchange_market_id = stock.stock_exchange_market_id;
-            existing.stock_industry_id = stock.stock_industry_id;
-        } else {
-            stocks.insert(stock.stock_symbol.to_string(), stock.clone());
-        }
-    }
-
-    // 4. 解析易讀的市場名稱與產業名稱，供日誌與 Telegram 通知使用
-    let market = StockExchangeMarket::from(stock.stock_exchange_market_id);
+    // 3. 解析易讀的市場名稱與產業名稱，供日誌與 Telegram 通知使用
+    let market = StockExchangeMarket::from(stock.market_id());
     let market_name = match market {
         None => " - ",
         Some(sem) => &sem.name(),
     };
     let industry_name = SHARE
-        .get_industry_name(stock.stock_industry_id)
+        .get_industry_name(stock.industry_id())
         .unwrap_or(" - ".to_string());
 
-    // 5. 格式化股票異動資訊，對股票名稱進行 Markdown 轉義以防 Telegram 訊息格式錯誤
+    // 4. 格式化股票異動資訊，對股票名稱進行 Markdown 轉義以防 Telegram 訊息格式錯誤
     let log_msg = format!(
         "新增股票︰ {stock_symbol} {stock_name} {market_name} {industry_name}",
-        stock_symbol = stock.stock_symbol,
-        stock_name = Telegram::escape_markdown_v2(&stock.name),
+        stock_symbol = stock.symbol().0,
+        stock_name = Telegram::escape_markdown_v2(stock.name()),
         market_name = market_name,
         industry_name = industry_name
     );
 
-    // 6. 寫入 Telegram 訊息快取緩衝區，並寫入非同步檔案日誌
+    // 5. 寫入 Telegram 訊息快取緩衝區，並寫入非同步檔案日誌
     writeln!(msg, "{}\r\n", log_msg).ok(); // 即使寫入 msg 緩衝區失敗也不影響主流程
     logging::info_file_async(log_msg);
 
-    // 7. 同步通知 Go 撰寫的另一個微服務，將最新股票資訊同步推送過去
-    if let Err(why) =
-        rpc::client::stock_service::push_stock_info_to_go_service(stock.to_stock_info_request())
-            .await
-    {
+    // 6. 同步通知 Go 撰寫的另一個微服務，將最新股票資訊同步推送過去
+    let request = StockInfoRequest::from(&stock);
+    if let Err(why) = rpc::client::stock_service::push_stock_info_to_go_service(request).await {
         // gRPC 推送失敗時僅記錄錯誤日誌，不拋出錯誤，避免因為外部服務異常導致本機的 backfill 流程中斷
         logging::error_file_async(format!(
             "Failed to push_stock_info_to_go_service for {} because {:?}",
-            stock.stock_symbol, why
+            stock.symbol().0,
+            why
         ));
     }
 

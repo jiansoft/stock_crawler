@@ -44,9 +44,9 @@ async fn update(qfiis: Vec<QualifiedForeignInstitutionalInvestor>) -> Result<()>
                 continue;
             }
             Some(stock) => {
-                if stock.issued_share == qfii.issued_share
-                    && stock.qfii_shares_held == qfii.qfii_shares_held
-                    && stock.qfii_share_holding_percentage == qfii.qfii_share_holding_percentage
+                if stock.issued_share() == qfii.issued_share
+                    && stock.qfii_shares_held() == qfii.qfii_shares_held
+                    && stock.qfii_share_holding_percentage() == qfii.qfii_share_holding_percentage
                 {
                     continue;
                 }
@@ -59,10 +59,9 @@ async fn update(qfiis: Vec<QualifiedForeignInstitutionalInvestor>) -> Result<()>
                 // 嘗試更新stocks_cache
                 if let Ok(mut stocks_cache) = SHARE.stocks.write() {
                     if let Some(stock_cache) = stocks_cache.get_mut(&qfii.stock_symbol) {
-                        stock_cache.qfii_shares_held = qfii.qfii_shares_held;
-                        stock_cache.issued_share = qfii.issued_share;
-                        stock_cache.qfii_share_holding_percentage =
-                            qfii.qfii_share_holding_percentage;
+                        stock_cache
+                            .update_qfii(qfii.qfii_shares_held, qfii.qfii_share_holding_percentage);
+                        stock_cache.update_issued_shares(qfii.issued_share);
                     }
                 }
             }

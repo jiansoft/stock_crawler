@@ -20,7 +20,7 @@ pub async fn execute() -> Result<()> {
 
     for company in delisted {
         if let Some(stock) = SHARE.get_stock(&company.stock_symbol).await {
-            if stock.suspend_listing {
+            if stock.suspend_listing() {
                 //println!("已下市{:?}",stock);
                 continue;
             }
@@ -42,7 +42,7 @@ pub async fn execute() -> Result<()> {
             }
 
             let mut another = stock.clone();
-            another.suspend_listing = true;
+            another.update_suspension(true);
             items_to_update.push(another);
         }
     }
@@ -56,7 +56,7 @@ pub async fn execute() -> Result<()> {
             ));
         } else if let Ok(mut stocks_cache) = SHARE.stocks.write() {
             if let Some(stock) = stocks_cache.get_mut(&item.stock_symbol) {
-                stock.suspend_listing = true;
+                stock.update_suspension(true);
             }
         }
     }

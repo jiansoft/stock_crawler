@@ -1,6 +1,6 @@
 use crate::{
     app::backfill::net_asset_value_per_share::update, core::logging, core::util::datetime::Weekend,
-    infra::cache::SHARE, infra::crawler::tpex, infra::database::table,
+    infra::cache::SHARE, infra::crawler::tpex,
 };
 use anyhow::Result;
 use chrono::Local;
@@ -24,10 +24,12 @@ pub async fn execute() -> Result<()> {
         let stock = match stock_cache {
             None => continue,
             Some(stock_cache) => {
-                if stock_cache.net_asset_value_per_share == item.net_asset_value_per_share {
+                if stock_cache.net_asset_value_per_share() == item.net_asset_value_per_share {
                     continue;
                 }
-                table::stock::Stock::from(item)
+                let mut s = stock_cache.clone();
+                s.update_net_asset_value(item.net_asset_value_per_share);
+                s
             }
         };
 
