@@ -1,3 +1,5 @@
+/// 防腐層 (Anti-Corruption Layer)
+pub mod acl;
 /// 調用 twse API 更新終止上市公司
 pub mod delisted_company;
 /// 更新股利發送數據
