@@ -1,6 +1,7 @@
 use crate::{
     app::backfill::net_asset_value_per_share::update, core::logging, core::util::datetime::Weekend,
-    infra::cache::SHARE, infra::crawler::tpex,
+    domain::registry::repository::StockRepository, infra::crawler::tpex,
+    infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::Result;
 use chrono::Local;
@@ -14,13 +15,14 @@ pub async fn execute() -> Result<()> {
 
     logging::info_file_async("更新興櫃股票的每股淨值開始");
     defer! {
-       logging::info_file_async("更新興櫃股票的每股淨值結束");
+      logging::info_file_async("更新興櫃股票的每股淨值結束");
     }
 
     let result = tpex::net_asset_value_per_share::visit().await?;
+    let repo = PgStockRepository::new();
 
     for item in result {
-        let stock_cache = SHARE.get_stock(&item.stock_symbol).await;
+        let stock_cache = repo.find_by_symbol(&item.stock_symbol).await?;
         let stock = match stock_cache {
             None => continue,
             Some(stock_cache) => {

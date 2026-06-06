@@ -1,5 +1,6 @@
 use crate::{
-    core::logging, core::util::datetime::Weekend, infra::cache::SHARE, infra::crawler::twse,
+    core::logging, core::util::datetime::Weekend, domain::registry::repository::StockRepository,
+    infra::crawler::twse, infra::database::repository::stock::PgStockRepository,
     infra::database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
 };
 use anyhow::Result;
@@ -36,37 +37,29 @@ async fn otc() -> Result<()> {
 
 /// 更新股票的外資持股狀況，資料庫更新後會更新 SHARE.stocks
 async fn update(qfiis: Vec<QualifiedForeignInstitutionalInvestor>) -> Result<()> {
+    let repo = PgStockRepository::new();
+
     for qfii in qfiis {
-        // 嘗試讀取stocks_cache
-        let stock_cache = SHARE.get_stock(&qfii.stock_symbol).await;
-        match stock_cache {
-            None => {
+        // 嘗試讀取 Stock 聚合根
+        let stock_opt = repo.find_by_symbol(&qfii.stock_symbol).await?;
+        if let Some(mut stock) = stock_opt {
+            if stock.issued_share() == qfii.issued_share
+                && stock.qfii_shares_held() == qfii.qfii_shares_held
+                && stock.qfii_share_holding_percentage() == qfii.qfii_share_holding_percentage
+            {
                 continue;
             }
-            Some(stock) => {
-                if stock.issued_share() == qfii.issued_share
-                    && stock.qfii_shares_held() == qfii.qfii_shares_held
-                    && stock.qfii_share_holding_percentage() == qfii.qfii_share_holding_percentage
-                {
-                    continue;
-                }
-            }
-        }
 
-        // 更新qfii
-        match qfii.update().await {
-            Ok(_) => {
-                // 嘗試更新stocks_cache
-                if let Ok(mut stocks_cache) = SHARE.stocks.write() {
-                    if let Some(stock_cache) = stocks_cache.get_mut(&qfii.stock_symbol) {
-                        stock_cache
-                            .update_qfii(qfii.qfii_shares_held, qfii.qfii_share_holding_percentage);
-                        stock_cache.update_issued_shares(qfii.issued_share);
-                    }
-                }
-            }
-            Err(why) => {
-                logging::error_file_async(format!("{:?}", why));
+            // 使用領域模型更新狀態
+            stock.update_qfii(qfii.qfii_shares_held, qfii.qfii_share_holding_percentage);
+            stock.update_issued_shares(qfii.issued_share);
+
+            // 儲存 Stock 聚合根，同時更新 DB 與快取
+            if let Err(why) = repo.save(&stock).await {
+                logging::error_file_async(format!(
+                    "Failed to save stock QFII updates for {} because {:?}",
+                    qfii.stock_symbol, why
+                ));
             }
         }
     }

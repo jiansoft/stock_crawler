@@ -1,6 +1,6 @@
 use crate::{
-    core::logging, core::util::datetime::Weekend, infra::cache::SHARE, infra::crawler::twse,
-    infra::database::table::stock,
+    core::logging, core::util::datetime::Weekend, domain::registry::repository::StockRepository,
+    infra::crawler::twse, infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::Result;
 use chrono::Local;
@@ -17,9 +17,10 @@ pub async fn execute() -> Result<()> {
     }
     let delisted = twse::suspend_listing::visit().await?;
     let mut items_to_update = Vec::new();
+    let repo = PgStockRepository::new();
 
     for company in delisted {
-        if let Some(stock) = SHARE.get_stock(&company.stock_symbol).await {
+        if let Some(stock) = repo.find_by_symbol(&company.stock_symbol).await? {
             if stock.suspend_listing() {
                 //println!("已下市{:?}",stock);
                 continue;
@@ -48,16 +49,11 @@ pub async fn execute() -> Result<()> {
     }
 
     for stock in items_to_update {
-        let item = stock::extension::suspend_listing::SymbolAndSuspendListing::from(&stock);
-        if let Err(why) = item.update().await {
+        if let Err(why) = repo.save(&stock).await {
             logging::error_file_async(format!(
                 "Failed to update_suspend_listing because {:?}",
                 why
             ));
-        } else if let Ok(mut stocks_cache) = SHARE.stocks.write() {
-            if let Some(stock) = stocks_cache.get_mut(&item.stock_symbol) {
-                stock.update_suspension(true);
-            }
         }
     }
 
