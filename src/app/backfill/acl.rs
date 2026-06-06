@@ -2,6 +2,7 @@
 //!
 //! 用於隔離外部爬蟲資料結構（Crawler DTO）與應用層/領域層之業務邏輯命令或實體。
 
+use crate::infra::crawler::share::EtfInfo;
 use crate::infra::crawler::twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber;
 use crate::infra::crawler::twse::suspend_listing::SuspendListing;
 use crate::infra::database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor;
@@ -107,6 +108,21 @@ impl QfiiAclMapper {
     }
 }
 
+/// ETF 爬蟲資料防腐層轉譯器。
+pub struct EtfAclMapper;
+
+impl EtfAclMapper {
+    /// 將原始 ETF DTO 轉譯成 `RegisterStockCommand`。
+    pub fn to_registration_command(dto: &EtfInfo) -> RegisterStockCommand {
+        RegisterStockCommand {
+            symbol: dto.stock_symbol.clone(),
+            name: dto.name.clone(),
+            market_id: dto.exchange_market.stock_exchange_market_id,
+            industry_id: dto.industry_id,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +219,23 @@ mod tests {
         assert_eq!(cmd.shares_held, 50000);
         assert_eq!(cmd.share_holding_percentage, dec!(75.5));
         assert_eq!(cmd.issued_share, 100000);
+    }
+
+    #[test]
+    fn test_etf_to_registration_command() {
+        let etf = EtfInfo {
+            stock_symbol: "0050".to_string(),
+            name: "元大台灣50".to_string(),
+            listing_date: "2003/06/30".to_string(),
+            industry: "ETF".to_string(),
+            exchange_market: StockExchangeMarket::new(2, 1),
+            industry_id: 9001,
+        };
+
+        let cmd = EtfAclMapper::to_registration_command(&etf);
+        assert_eq!(cmd.symbol, "0050");
+        assert_eq!(cmd.name, "元大台灣50");
+        assert_eq!(cmd.market_id, 2);
+        assert_eq!(cmd.industry_id, 9001);
     }
 }
