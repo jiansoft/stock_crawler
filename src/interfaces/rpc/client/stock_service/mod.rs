@@ -85,13 +85,16 @@ mod tests {
 
 impl From<&crate::domain::registry::entity::Stock> for StockInfoRequest {
     fn from(stock: &crate::domain::registry::entity::Stock) -> Self {
-        use rust_decimal::prelude::ToPrimitive;
         StockInfoRequest {
             stock_symbol: stock.symbol().0.clone(),
             name: stock.name().to_string(),
             stock_exchange_market_id: stock.market_id(),
             stock_industry_id: stock.industry_id(),
-            net_asset_value_per_share: stock.net_asset_value_per_share().to_f64().unwrap_or(0.0),
+            net_asset_value_per_share:
+                <rust_decimal::Decimal as rust_decimal::prelude::ToPrimitive>::to_f64(
+                    &stock.net_asset_value_per_share(),
+                )
+                .unwrap_or(0.0),
             suspend_listing: stock.suspend_listing(),
         }
     }

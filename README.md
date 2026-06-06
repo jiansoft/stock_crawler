@@ -17,6 +17,16 @@ src/
 
 > 詳細分層規則與新模組放置規範請參閱 [docs/architecture.md](docs/architecture.md)。
 
+## 領域驅動設計 (DDD) 重構狀態
+
+本專案正進行 DDD 架構重構，目前進度如下：
+- **Phase 1 (領域模型提取)**：已完成。將核心業務邏輯封裝至 `src/domain/` 中的實體 (Entities) 與值物件 (Value Objects)。
+- **Phase 2 (持久化層重構)**：已完成。實作倉儲模式 (Repository)，將資料庫存取解耦。
+- **Phase 3 (防腐層 ACL 實作)**：已完成。透過 `isin` 等回補流程的 Mapper，隔離外部爬蟲與內部領域模型。
+- **Phase 4 (快取封裝)**：已完成。記憶體快取存取完全封裝於倉儲中，確保資料一致性。
+- **Phase 5 (領域事件與副作用解耦)**：已完成。導入 `EventDispatcher`，當領域實體狀態變更時產生 `DomainEvent`，並以背景任務非同步處理 Telegram 通知與 gRPC 微服務同步。
+
+
 ## 排程時間
 
 以下排程時間為台北時間（Asia/Taipei）。
