@@ -3,11 +3,13 @@ use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
 
 use crate::{
-    core::util, infra::cache::SHARE, infra::crawler::twse, infra::database::table::revenue,
+    core::util,
+    infra::cache::SHARE,
+    infra::crawler::{share::RevenueDto, twse},
 };
 
 /// 下載月營收
-pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<revenue::Revenue>> {
+pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<RevenueDto>> {
     let year = date_time.year();
     let republic_of_china_era = util::datetime::gregorian_year_to_roc_year(year);
     let month = date_time.month();
@@ -34,7 +36,7 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<reven
 }
 
 /// 下載月營收
-async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<revenue::Revenue>> {
+async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<RevenueDto>> {
     let text = util::http::get_use_big5(&url).await?;
     let mut revenues = Vec::with_capacity(1024);
 
@@ -81,9 +83,9 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<reve
             continue;
         }
 
-        let mut entity = revenue::Revenue::from(tds);
-        entity.date = date;
-        revenues.push(entity);
+        let mut dto = RevenueDto::from(tds);
+        dto.date = date;
+        revenues.push(dto);
     }
 
     Ok(revenues)

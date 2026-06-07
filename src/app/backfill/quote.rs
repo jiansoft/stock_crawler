@@ -5,12 +5,12 @@ use chrono::NaiveDate;
 use futures::{stream, StreamExt};
 
 use crate::{
+    app::backfill::acl::QuoteAclMapper,
     core::logging,
-    core::util,
-    core::util::map::Keyable,
+    core::util::{self, map::Keyable},
     infra::cache::{TtlCacheInner, SHARE, TTL},
-    infra::crawler::{tpex, twse},
-    infra::database::table::{self, daily_quote::DailyQuote},
+    infra::crawler::{share::DailyQuoteDto, tpex, twse},
+    infra::database::table,
 };
 
 /// 調用  twse、tpex API 取得台股收盤報價
@@ -19,8 +19,8 @@ pub async fn execute(date: NaiveDate) -> Result<usize> {
     let twse = twse::quote::visit(date);
     //上櫃報價
     let tpex = tpex::quote::visit(date);
-    let mut quotes_twse: Vec<DailyQuote> = Vec::with_capacity(1024);
-    let mut quotes_tpex: Vec<DailyQuote> = Vec::with_capacity(1024);
+    let mut quotes_twse: Vec<DailyQuoteDto> = Vec::with_capacity(1024);
+    let mut quotes_tpex: Vec<DailyQuoteDto> = Vec::with_capacity(1024);
     let get_twse = get_quotes_from_source(twse, "上市", &mut quotes_twse);
     let get_tpex = get_quotes_from_source(tpex, "上櫃", &mut quotes_tpex);
     let (result_twse, result_tpex) = tokio::join!(get_twse, get_tpex);
@@ -50,9 +50,9 @@ pub async fn execute(date: NaiveDate) -> Result<usize> {
 
 /// 從指定資料來源抓取收盤價並附加到輸出向量。
 pub async fn get_quotes_from_source(
-    source: impl Future<Output = Result<Vec<DailyQuote>>>,
+    source: impl Future<Output = Result<Vec<DailyQuoteDto>>>,
     source_name: &str,
-    quotes: &mut Vec<DailyQuote>,
+    quotes: &mut Vec<DailyQuoteDto>,
 ) -> Result<()> {
     if let Ok(quote) = source.await {
         quotes.extend(quote);
@@ -62,9 +62,17 @@ pub async fn get_quotes_from_source(
 }
 
 /// 將收盤價整批寫入資料庫並更新主快取。
-pub async fn process_quotes(quotes: Vec<DailyQuote>) {
-    let result_count = DailyQuote::copy_in_raw(&quotes).await.unwrap_or_default();
-    stream::iter(quotes)
+pub async fn process_quotes(quotes: Vec<DailyQuoteDto>) {
+    let cmds: Vec<_> = quotes.iter().map(QuoteAclMapper::to_save_command).collect();
+    let entities: Vec<_> = cmds
+        .iter()
+        .map(QuoteAclMapper::to_database_entity)
+        .collect();
+
+    let result_count = table::daily_quote::DailyQuote::copy_in_raw(&entities)
+        .await
+        .unwrap_or_default();
+    stream::iter(entities)
         .for_each_concurrent(util::concurrent_limit_32(), |dq| async move {
             process_daily_quote(dq).await;
         })
@@ -72,7 +80,7 @@ pub async fn process_quotes(quotes: Vec<DailyQuote>) {
     logging::info_file_async(format!("上市櫃收盤數據更新到資料庫完成: {}", result_count));
 }
 
-async fn process_daily_quote(daily_quote: DailyQuote) {
+async fn process_daily_quote(daily_quote: table::daily_quote::DailyQuote) {
     SHARE.set_stock_last_price(&daily_quote).await;
 
     let daily_quote_memory_key = daily_quote.key_with_prefix();

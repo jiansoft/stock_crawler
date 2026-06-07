@@ -5,9 +5,11 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
+use crate::core::declare::StockExchange;
 use crate::infra::crawler::{bigdatacloud, myip};
 use crate::{
     core::util::{self, map::Keyable, text},
@@ -213,6 +215,331 @@ fn normalize_public_ip(service_name: &str, ip: &str) -> Result<String> {
         .parse::<IpAddr>()
         .map(|ip| ip.to_string())
         .map_err(|why| anyhow!("{service_name}: invalid ip response `{normalized}` because {why}"))
+}
+
+/// 營收資訊爬蟲載體 (DTO)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevenueDto {
+    /// 股票代號
+    pub stock_symbol: String,
+    /// 當月營收
+    pub monthly: Decimal,
+    /// 上月營收
+    pub last_month: Decimal,
+    /// 去年當月營收
+    pub last_year_this_month: Decimal,
+    /// 當月累計營收
+    pub monthly_accumulated: Decimal,
+    /// 去年累計營收
+    pub last_year_monthly_accumulated: Decimal,
+    /// 上月比較增減(%)
+    pub compared_with_last_month: Decimal,
+    /// 去年同月增減(%)
+    pub compared_with_last_year_same_month: Decimal,
+    /// 前期比較增減(%)
+    pub accumulated_compared_with_last_year: Decimal,
+    /// 營收月份 (YYYYMM 格式整數，如 202605)
+    pub date: i64,
+}
+
+impl From<Vec<String>> for RevenueDto {
+    fn from(item: Vec<String>) -> Self {
+        use std::str::FromStr;
+        let stock_symbol = item[0].to_string();
+
+        let monthly = {
+            let s = item[2].replace([',', ' '], "");
+            if s.is_empty() {
+                Default::default()
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!("Failed to parse 'monthly'({}) field: {}", item[2], err);
+                    Default::default()
+                })
+            }
+        };
+        let last_month = {
+            let s = item[3].replace([',', ' '], "");
+            if s.is_empty() {
+                Default::default()
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!("Failed to parse 'last_month'({}) field: {}", item[3], err);
+                    Default::default()
+                })
+            }
+        };
+        let last_year_this_month = {
+            let s = item[4].replace([',', ' '], "");
+            if s.is_empty() {
+                Default::default()
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'last_year_this_month'({}) field: {}",
+                        item[4], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        let monthly_accumulated = {
+            let s = item[7].replace([',', ' '], "");
+            if s.is_empty() {
+                Default::default()
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'monthly_accumulated'({}) field: {}",
+                        item[7], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        let last_year_monthly_accumulated = {
+            let s = item[8].replace([',', ' '], "");
+            if s.is_empty() {
+                Default::default()
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'last_year_monthly_accumulated'({}) field: {}",
+                        item[8], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        let compared_with_last_month = {
+            let s = item[5].replace([',', ' '], "");
+            if s.is_empty() {
+                Default::default()
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'compared_with_last_month'({}) field: {}",
+                        item[5], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        let compared_with_last_year_same_month = {
+            let s = item[6].replace([',', ' '], "");
+            if s.is_empty() {
+                Default::default()
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'compared_with_last_year_same_month'({}) field: {}",
+                        item[6], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+        let accumulated_compared_with_last_year = {
+            let s = item[9].replace([',', ' '], "");
+            if s.is_empty() {
+                Default::default()
+            } else {
+                Decimal::from_str(&s).unwrap_or_else(|err| {
+                    eprintln!(
+                        "Failed to parse 'accumulated_compared_with_last_year'({}) field: {}",
+                        item[9], err
+                    );
+                    Default::default()
+                })
+            }
+        };
+
+        Self {
+            stock_symbol,
+            monthly,
+            last_month,
+            last_year_this_month,
+            monthly_accumulated,
+            last_year_monthly_accumulated,
+            compared_with_last_month,
+            compared_with_last_year_same_month,
+            accumulated_compared_with_last_year,
+            date: 0,
+        }
+    }
+}
+
+/// 每日收盤報價爬蟲載體 (DTO)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DailyQuoteDto {
+    /// 股票代號
+    pub symbol: String,
+    /// 交易日期
+    pub date: NaiveDate,
+    /// 開盤價
+    pub opening_price: Decimal,
+    /// 最高價
+    pub highest_price: Decimal,
+    /// 最低價
+    pub lowest_price: Decimal,
+    /// 收盤價
+    pub closing_price: Decimal,
+    /// 漲跌價差
+    pub change: Decimal,
+    /// 漲跌幅（百分比）
+    pub change_range: Decimal,
+    /// 成交股數
+    pub trading_volume: Decimal,
+    /// 成交金額
+    pub trade_value: Decimal,
+    /// 成交筆數
+    pub transaction: Decimal,
+    /// 本益比
+    pub price_earning_ratio: Decimal,
+    /// 股價淨值比
+    pub price_to_book_ratio: Decimal,
+    /// 最後揭示買價
+    pub last_best_bid_price: Decimal,
+    /// 最後揭示買量
+    pub last_best_bid_volume: Decimal,
+    /// 最後揭示賣價
+    pub last_best_ask_price: Decimal,
+    /// 最後揭示賣量
+    pub last_best_ask_volume: Decimal,
+}
+
+impl DailyQuoteDto {
+    /// 建立 `DailyQuoteDto` 預設實例，並同步初始化代碼與日期。
+    pub fn new<S: Into<String>>(symbol: S, date: NaiveDate) -> Self {
+        Self {
+            symbol: symbol.into(),
+            date,
+            opening_price: Decimal::ZERO,
+            highest_price: Decimal::ZERO,
+            lowest_price: Decimal::ZERO,
+            closing_price: Decimal::ZERO,
+            change: Decimal::ZERO,
+            change_range: Decimal::ZERO,
+            trading_volume: Decimal::ZERO,
+            trade_value: Decimal::ZERO,
+            transaction: Decimal::ZERO,
+            price_earning_ratio: Decimal::ZERO,
+            price_to_book_ratio: Decimal::ZERO,
+            last_best_bid_price: Decimal::ZERO,
+            last_best_bid_volume: Decimal::ZERO,
+            last_best_ask_price: Decimal::ZERO,
+            last_best_ask_volume: Decimal::ZERO,
+        }
+    }
+
+    /// 依欄位名稱映射，從單筆原始字串資料建立 `DailyQuoteDto`。
+    pub fn from_with_map(
+        item: &[String],
+        map: &std::collections::HashMap<&str, usize>,
+        date: NaiveDate,
+    ) -> Self {
+        let code = map
+            .get("證券代號")
+            .and_then(|&i| item.get(i))
+            .cloned()
+            .unwrap_or_default();
+        let mut dto = DailyQuoteDto::new(code, date);
+
+        let parse_decimal = |key: &str| -> Decimal {
+            map.get(key)
+                .and_then(|&i| item.get(i))
+                .map(|s| s.replace(',', ""))
+                .and_then(|s| s.parse::<Decimal>().ok())
+                .unwrap_or_default()
+        };
+
+        dto.trading_volume = parse_decimal("成交股數");
+        dto.transaction = parse_decimal("成交筆數");
+        dto.trade_value = parse_decimal("成交金額");
+        dto.opening_price = parse_decimal("開盤價");
+        dto.highest_price = parse_decimal("最高價");
+        dto.lowest_price = parse_decimal("最低價");
+        dto.closing_price = parse_decimal("收盤價");
+        dto.change = parse_decimal("漲跌價差");
+        dto.last_best_bid_price = parse_decimal("最後揭示買價");
+        dto.last_best_bid_volume = parse_decimal("最後揭示買量");
+        dto.last_best_ask_price = parse_decimal("最後揭示賣價");
+        dto.last_best_ask_volume = parse_decimal("最後揭示賣量");
+        dto.price_earning_ratio = parse_decimal("本益比");
+
+        // 處理漲跌符號
+        if let Some(&i) = map.get("漲跌(+/-)") {
+            if let Some(sign) = item.get(i) {
+                if sign.contains('-') || sign.contains('綠') {
+                    dto.change = -dto.change.abs();
+                } else if sign.contains('+') || sign.contains('紅') {
+                    dto.change = dto.change.abs();
+                }
+            }
+        }
+
+        dto
+    }
+
+    /// 在給定交易所與日期的前提下，將來源資料轉成 `DailyQuoteDto`。
+    pub fn from_with_exchange(exchange: StockExchange, item: &[String], date: NaiveDate) -> Self {
+        let mut dto = DailyQuoteDto::new(item[0].to_string(), date);
+
+        match exchange {
+            StockExchange::TWSE => {
+                let decimal_fields = [
+                    (2, &mut dto.trading_volume),
+                    (3, &mut dto.transaction),
+                    (4, &mut dto.trade_value),
+                    (5, &mut dto.opening_price),
+                    (6, &mut dto.highest_price),
+                    (7, &mut dto.lowest_price),
+                    (8, &mut dto.closing_price),
+                    (10, &mut dto.change),
+                    (11, &mut dto.last_best_bid_price),
+                    (12, &mut dto.last_best_bid_volume),
+                    (13, &mut dto.last_best_ask_price),
+                    (14, &mut dto.last_best_ask_volume),
+                    (15, &mut dto.price_earning_ratio),
+                ];
+
+                for (index, field) in decimal_fields {
+                    let d = item.get(index).unwrap_or(&"".to_string()).replace(',', "");
+                    *field = d.parse::<Decimal>().unwrap_or_default();
+                }
+
+                if let Some(change_str) = item.get(9) {
+                    if change_str.contains('-') {
+                        dto.change = -dto.change;
+                    }
+                }
+            }
+            StockExchange::TPEx => {
+                let decimal_fields = [
+                    (7, &mut dto.trading_volume),
+                    (9, &mut dto.transaction),
+                    (8, &mut dto.trade_value),
+                    (4, &mut dto.opening_price),
+                    (5, &mut dto.highest_price),
+                    (6, &mut dto.lowest_price),
+                    (2, &mut dto.closing_price),
+                    (3, &mut dto.change),
+                    (10, &mut dto.last_best_bid_price),
+                    (11, &mut dto.last_best_bid_volume),
+                    (12, &mut dto.last_best_ask_price),
+                    (13, &mut dto.last_best_ask_volume),
+                ];
+
+                for (index, field) in decimal_fields {
+                    let d = item.get(index).unwrap_or(&"".to_string()).replace(',', "");
+                    *field = d.parse::<Decimal>().unwrap_or_default();
+                }
+            }
+            _ => {}
+        }
+
+        dto
+    }
 }
 
 #[cfg(test)]

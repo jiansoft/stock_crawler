@@ -1,13 +1,11 @@
 use crate::{
     core::declare::StockExchange,
-    core::logging,
-    core::util::{self, map::Keyable},
+    core::util,
     infra::cache::{TtlCacheInner, TTL},
-    infra::crawler::tpex,
-    infra::database::table::{self, daily_quote::FromWithExchange},
+    infra::crawler::{share::DailyQuoteDto, tpex},
 };
 use anyhow::Result;
-use chrono::{Datelike, Local, NaiveDate, TimeZone};
+use chrono::{Datelike, NaiveDate};
 use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -54,7 +52,7 @@ struct PeRatioAnalysisResponse {
 }
 
 /// 抓取上櫃公司每日收盤資訊
-pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote>> {
+pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
     let pe_ratio_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis";
     // 本益比
     let pe_ratio_response =
@@ -77,68 +75,50 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
     );
 
     let quote_response = util::http::get_json::<QuoteResponse>(&quote_url).await?;
-    let mut dqs: Vec<table::daily_quote::DailyQuote> = Vec::with_capacity(2048);
+    let mut dqs: Vec<DailyQuoteDto> = Vec::with_capacity(2048);
     if !quote_response.tables.is_empty() {
         if let Some(tpex_dqs) = &quote_response.tables[0].data {
             for item in tpex_dqs {
-                let mut dq =
-                    table::daily_quote::DailyQuote::from_with_exchange(StockExchange::TPEx, item);
-                //logging::debug_file_async(format!("item:{:?}", item));
+                let mut dto = DailyQuoteDto::from_with_exchange(StockExchange::TPEx, item, date);
 
-                if dq.closing_price.is_zero()
-                    && dq.highest_price.is_zero()
-                    && dq.lowest_price.is_zero()
-                    && dq.opening_price.is_zero()
+                if dto.closing_price.is_zero()
+                    && dto.highest_price.is_zero()
+                    && dto.lowest_price.is_zero()
+                    && dto.opening_price.is_zero()
                 {
                     continue;
                 }
 
-                let daily_quote_memory_key = dq.key();
+                let daily_quote_memory_key = format!("{}-{}", date.format("%Y%m%d"), dto.symbol);
 
                 if TTL.daily_quote_contains_key(&daily_quote_memory_key) {
                     continue;
                 }
 
-                if !dq.change.is_zero() {
+                if !dto.change.is_zero() {
                     if let Some(ldg) = crate::infra::cache::SHARE
-                        .get_last_trading_day_quotes(&dq.stock_symbol)
+                        .get_last_trading_day_quotes(&dto.symbol)
                         .await
                     {
                         if ldg.closing_price > Decimal::ZERO {
-                            // 漲幅 = (现价-上一个交易日收盘价）/ 上一个交易日收盘价*100%
-                            dq.change_range = (dq.closing_price - ldg.closing_price)
+                            // 漲幅 = (现价-上一個交易日收盤價）/ 上一個交易日收盤價*100%
+                            dto.change_range = (dto.closing_price - ldg.closing_price)
                                 / ldg.closing_price
                                 * dec!(100);
                         } else {
-                            dq.change_range = dq.change / dq.opening_price * dec!(100);
+                            dto.change_range = dto.change / dto.opening_price * dec!(100);
                         }
                     }
                 }
 
-                if let Some(pe_ratio_analysis_response) = pe_ratio_analysis.get(&dq.stock_symbol) {
-                    dq.price_earning_ratio = pe_ratio_analysis_response
+                if let Some(pe_ratio_analysis_response) = pe_ratio_analysis.get(&dto.symbol) {
+                    dto.price_earning_ratio = pe_ratio_analysis_response
                         .price_earning_ratio
                         .parse::<Decimal>()
                         .unwrap_or_default()
                 }
 
-                dq.date = date;
-                dq.year = date.year();
-                dq.month = date.month() as i32;
-                dq.day = date.day() as i32;
-
-                let record_time = date
-                    .and_hms_opt(15, 0, 0)
-                    .and_then(|naive| Local.from_local_datetime(&naive).single())
-                    .unwrap_or_else(|| {
-                        logging::warn_file_async("Failed to create DateTime<Local> from NaiveDateTime, using current time as default.".to_string());
-                        Local::now()
-                    });
-
-                dq.record_time = record_time;
-                dq.create_time = Local::now();
-
-                dqs.push(dq);
+                dqs.push(dto);
             }
         }
     }
@@ -148,7 +128,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeDelta, Timelike};
+    use chrono::{Local, TimeDelta, Timelike};
     use std::time::Duration;
 
     use crate::{core::logging, infra::cache::SHARE};
