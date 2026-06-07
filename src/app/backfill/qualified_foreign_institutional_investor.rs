@@ -29,17 +29,14 @@ pub async fn execute() -> Result<()> {
 
 async fn listed(date_time: DateTime<FixedOffset>) -> Result<()> {
     let listed = twse::qualified_foreign_institutional_investor::listed::visit(date_time).await?;
-    let cmds = listed
-        .iter()
-        .map(QfiiAclMapper::to_update_command)
-        .collect();
+    let cmds = listed.iter().map(QfiiAclMapper::from_qfii).collect();
     update(cmds).await
 }
 
 /// 回補上櫃外資持股資料。
 async fn otc() -> Result<()> {
     let toc = twse::qualified_foreign_institutional_investor::over_the_counter::visit().await?;
-    let cmds = toc.iter().map(QfiiAclMapper::to_update_command).collect();
+    let cmds = toc.iter().map(QfiiAclMapper::from_qfii).collect();
     update(cmds).await
 }
 

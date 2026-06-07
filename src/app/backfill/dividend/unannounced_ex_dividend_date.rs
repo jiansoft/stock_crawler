@@ -5,7 +5,10 @@ use tokio_retry::{
     Retry,
 };
 
-use crate::{core::logging, infra::crawler::yahoo, infra::database::table::dividend};
+use crate::{
+    app::backfill::acl::YahooDividendAclMapper, core::logging, infra::crawler::yahoo,
+    infra::database::table::dividend,
+};
 
 /// 回補除息/發放日期尚未公布的股利資料。
 ///
@@ -103,10 +106,12 @@ async fn backfill_unannounced_dividend_dates_from_yahoo(
         if let Some(yahoo_dividend_detail) =
             find_changed_dividend_detail(yahoo_dividend_details, &entity)
         {
-            entity.ex_dividend_date1 = yahoo_dividend_detail.ex_dividend_date1.to_string();
-            entity.ex_dividend_date2 = yahoo_dividend_detail.ex_dividend_date2.to_string();
-            entity.payable_date1 = yahoo_dividend_detail.payable_date1.to_string();
-            entity.payable_date2 = yahoo_dividend_detail.payable_date2.to_string();
+            let cmd =
+                YahooDividendAclMapper::from_dto(&entity.security_code, yahoo_dividend_detail);
+            entity.ex_dividend_date1 = cmd.ex_dividend_date1;
+            entity.ex_dividend_date2 = cmd.ex_dividend_date2;
+            entity.payable_date1 = cmd.payable_date1;
+            entity.payable_date2 = cmd.payable_date2;
 
             if let Err(why) = entity.update_dividend_date().await {
                 return Err(anyhow!("{}", why));

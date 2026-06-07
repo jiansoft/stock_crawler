@@ -6,11 +6,9 @@ use scopeguard::defer;
 use tokio::sync::Mutex;
 
 use crate::{
-    core::declare::StockExchange,
-    core::logging,
-    core::util,
-    infra::crawler::taifex,
-    infra::database::table::stock::{self, extension::weight::SymbolAndWeight},
+    app::backfill::acl::StockWeightAclMapper, core::declare::StockExchange, core::logging,
+    core::util, infra::crawler::taifex,
+    infra::database::table::stock::extension::weight::SymbolAndWeight,
 };
 
 /// 查詢 taifex 個股權值比重
@@ -58,7 +56,15 @@ async fn handle_stock_exchange(
     let res = taifex::stock_weight::visit(exchange)
         .await
         .with_context(|| format!("Failed to visit taifex for exchange {:?}", exchange))?;
-    let new_weights = stock::extension::weight::from(res);
+
+    let new_weights: Vec<SymbolAndWeight> = res
+        .into_iter()
+        .map(|dto| {
+            let cmd = StockWeightAclMapper::from_dto(&dto);
+            StockWeightAclMapper::from_command(&cmd)
+        })
+        .collect();
+
     let mut weights = stock_weights.lock().await;
 
     weights.extend(new_weights);

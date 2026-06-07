@@ -35,10 +35,7 @@ async fn process_revenues(last_month_timezone: chrono::DateTime<FixedOffset>) ->
     let month = last_month_timezone.month();
 
     let revenues = twse::revenue::visit(last_month_timezone).await?;
-    let cmds: Vec<UpdateRevenueCommand> = revenues
-        .iter()
-        .map(RevenueAclMapper::to_update_command)
-        .collect();
+    let cmds: Vec<UpdateRevenueCommand> = revenues.iter().map(RevenueAclMapper::from_dto).collect();
 
     stream::iter(cmds)
         .for_each_concurrent(util::concurrent_limit_16(), |cmd| async move {
@@ -58,7 +55,7 @@ pub(crate) async fn process_revenue(
     year: i32,
     month: i32,
 ) -> Result<()> {
-    let mut revenue_entity = RevenueAclMapper::to_database_entity(&cmd);
+    let mut revenue_entity = RevenueAclMapper::from_command(&cmd);
 
     if let Ok(dq) =
         table::daily_quote::fetch_monthly_stock_price_summary(&cmd.symbol, year, month).await

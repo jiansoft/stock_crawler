@@ -21,7 +21,7 @@ pub async fn execute() -> Result<()> {
 
     for company in delisted {
         // 透過防腐層轉譯為內部命令，內含格式與民國年分過濾邏輯
-        if let Some(cmd) = DelistedCompanyAclMapper::to_delisted_command(&company) {
+        if let Some(cmd) = DelistedCompanyAclMapper::from_suspend_listing(&company) {
             if let Some(stock) = repo.find_by_symbol(&cmd.symbol).await? {
                 if stock.suspend_listing() {
                     continue;
