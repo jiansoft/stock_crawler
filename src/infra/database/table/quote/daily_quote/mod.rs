@@ -1165,17 +1165,18 @@ mod tests {
         logging::debug_file_async("開始 copy_in_raw".to_string());
 
         let date = NaiveDate::from_ymd_opt(2023, 12, 4).unwrap();
-        let mut twse = twse::quote::visit(date).await.unwrap();
-        let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-        for dq in &mut twse {
-            dq.year = date.year();
-            dq.month = date.month() as i32;
-            dq.day = date.day() as i32;
-            dq.date = date;
+        let twse_dtos = twse::quote::visit(date).await.unwrap();
+        let target_date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        let mut twse = Vec::new();
+        for mut dto in twse_dtos {
+            dto.date = target_date;
+            let cmd = crate::app::backfill::acl::QuoteAclMapper::to_save_command(&dto);
+            let entity = crate::app::backfill::acl::QuoteAclMapper::to_database_entity(&cmd);
+            twse.push(entity);
         }
 
         let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
-            .bind(date)
+            .bind(target_date)
             .execute(database::get_connection())
             .await;
 

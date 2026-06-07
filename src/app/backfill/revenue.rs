@@ -1,4 +1,5 @@
 use crate::{
+    app::backfill::acl::{RevenueAclMapper, UpdateRevenueCommand},
     core::logging,
     core::util,
     infra::cache::SHARE,
@@ -34,9 +35,14 @@ async fn process_revenues(last_month_timezone: chrono::DateTime<FixedOffset>) ->
     let month = last_month_timezone.month();
 
     let revenues = twse::revenue::visit(last_month_timezone).await?;
-    stream::iter(revenues)
-        .for_each_concurrent(util::concurrent_limit_16(), |r| async move {
-            if let Err(why) = process_revenue(r, year, month as i32).await {
+    let cmds: Vec<UpdateRevenueCommand> = revenues
+        .iter()
+        .map(RevenueAclMapper::to_update_command)
+        .collect();
+
+    stream::iter(cmds)
+        .for_each_concurrent(util::concurrent_limit_16(), |cmd| async move {
+            if let Err(why) = process_revenue(cmd, year, month as i32).await {
                 logging::error_file_async(format!("Failed to process_revenue because {:?}", why));
             }
         })
@@ -48,24 +54,25 @@ async fn process_revenues(last_month_timezone: chrono::DateTime<FixedOffset>) ->
 }
 
 pub(crate) async fn process_revenue(
-    mut revenue: revenue::Revenue,
+    cmd: UpdateRevenueCommand,
     year: i32,
     month: i32,
 ) -> Result<()> {
+    let mut revenue_entity = RevenueAclMapper::to_database_entity(&cmd);
+
     if let Ok(dq) =
-        table::daily_quote::fetch_monthly_stock_price_summary(&revenue.stock_symbol, year, month)
-            .await
+        table::daily_quote::fetch_monthly_stock_price_summary(&cmd.symbol, year, month).await
     {
-        revenue.lowest_price = dq.lowest_price;
-        revenue.avg_price = dq.avg_price;
-        revenue.highest_price = dq.highest_price;
+        revenue_entity.lowest_price = dq.lowest_price;
+        revenue_entity.avg_price = dq.avg_price;
+        revenue_entity.highest_price = dq.highest_price;
     }
 
-    revenue.upsert().await?;
+    revenue_entity.upsert().await?;
 
-    SHARE.set_last_revenues(revenue.clone());
+    SHARE.set_last_revenues(revenue_entity.clone());
 
-    let name = match SHARE.get_stock(&revenue.stock_symbol).await {
+    let name = match SHARE.get_stock(&cmd.symbol).await {
         None => String::from("-"),
         Some(s) => s.name().to_string(),
     };
@@ -73,14 +80,14 @@ pub(crate) async fn process_revenue(
     logging::info_file_async(
         format!(
             "公司代號:{}  公司名稱:{} 當月營收:{} 上月營收:{} 去年當月營收:{} 月均價:{} 最低價:{} 最高價:{}",
-            revenue.stock_symbol,
+            cmd.symbol,
             name,
-            revenue.monthly,
-            revenue.last_month,
-            revenue.last_year_this_month,
-            revenue.avg_price,
-            revenue.lowest_price,
-            revenue.highest_price));
+            cmd.monthly,
+            cmd.last_month,
+            cmd.last_year_this_month,
+            revenue_entity.avg_price,
+            revenue_entity.lowest_price,
+            revenue_entity.highest_price));
 
     Ok(())
 }

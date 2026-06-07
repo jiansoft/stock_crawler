@@ -1,15 +1,14 @@
 use anyhow::Result;
-use chrono::{Datelike, Local, NaiveDate, TimeZone};
+use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     core::logging,
-    core::util::{http, map::Keyable},
+    core::util::http,
     infra::cache::{TtlCacheInner, TTL},
-    infra::crawler::twse,
-    infra::database::table::{self},
+    infra::crawler::{share::DailyQuoteDto, twse},
 };
 
 /*#[derive(Serialize, Deserialize, Debug)]
@@ -79,7 +78,7 @@ fn is_twse_quote_table(table: &Table) -> bool {
 /// 3. 盡可能計算 `change_range` 後回傳當日清單。
 ///
 /// 若 API 可連線但找不到目標表格，會記錄 warning 並回傳空陣列。
-pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote>> {
+pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
     let date_str = date.format("%Y%m%d").to_string();
     let now_ts = Local::now().timestamp_millis();
     let url = format!(
@@ -117,60 +116,40 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<table::daily_quote::DailyQuote
 
         for item in rows {
             // 2. 使用動態映射解析資料
-            let mut dq = table::daily_quote::DailyQuote::from_with_map(item, &field_map);
+            let mut dto = DailyQuoteDto::from_with_map(item, &field_map, date);
 
-            if dq.closing_price.is_zero()
-                && dq.highest_price.is_zero()
-                && dq.lowest_price.is_zero()
-                && dq.opening_price.is_zero()
+            if dto.closing_price.is_zero()
+                && dto.highest_price.is_zero()
+                && dto.lowest_price.is_zero()
+                && dto.opening_price.is_zero()
             {
                 continue;
             }
 
-            let daily_quote_memory_key = dq.key();
+            let daily_quote_memory_key = format!("{}-{}", date.format("%Y%m%d"), dto.symbol);
 
             if TTL.daily_quote_contains_key(&daily_quote_memory_key) {
                 continue;
             }
 
-            if !dq.change.is_zero() {
+            if !dto.change.is_zero() {
                 if let Some(ldg) = crate::infra::cache::SHARE
-                    .get_last_trading_day_quotes(&dq.stock_symbol)
+                    .get_last_trading_day_quotes(&dto.symbol)
                     .await
                 {
                     if ldg.closing_price > Decimal::ZERO {
                         // 漲幅 = (现价-上一个交易日收盘价）/ 上一个交易日收盘价*100%
-                        dq.change_range =
-                            (dq.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
-                    } else if dq.opening_price > Decimal::ZERO {
-                        dq.change_range = dq.change / dq.opening_price * dec!(100);
+                        dto.change_range =
+                            (dto.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
+                    } else if dto.opening_price > Decimal::ZERO {
+                        dto.change_range = dto.change / dto.opening_price * dec!(100);
                     } else {
-                        dq.change_range = Decimal::ZERO;
+                        dto.change_range = Decimal::ZERO;
                     }
                 }
             }
 
-            dq.date = date;
-            dq.year = date.year();
-            dq.month = date.month() as i32;
-            dq.day = date.day() as i32;
-
-            // 台北時區 (UTC+8)
-            let timezone = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
-            let record_time = date
-                .and_hms_opt(15, 0, 0)
-                .and_then(|naive| timezone.from_local_datetime(&naive).single())
-                .unwrap_or_else(|| {
-                    logging::warn_file_async(
-                        "Failed to create DateTime with Taipei timezone, using Local::now()."
-                            .to_string(),
-                    );
-                    Local::now().with_timezone(&timezone)
-                });
-
-            dq.record_time = record_time.with_timezone(&Local);
-            dq.create_time = Local::now();
-            dqs.push(dq);
+            dqs.push(dto);
         }
     } else {
         logging::warn_file_async(format!(
