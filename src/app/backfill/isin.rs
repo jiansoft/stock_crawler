@@ -70,7 +70,7 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
     let result = twse::international_securities_identification_number::visit(mode).await?;
     for item in result {
         // 透過防腐層 (ACL) Mapper 將外部爬蟲 DTO 轉換為內部指令
-        let cmd = match backfill::acl::IsinAclMapper::to_registration_command(&item) {
+        let cmd = match backfill::acl::IsinAclMapper::from_isin(&item) {
             Some(c) => c,
             None => continue, // 過濾無效或未分類的資料 (如 industry_id == 0)
         };

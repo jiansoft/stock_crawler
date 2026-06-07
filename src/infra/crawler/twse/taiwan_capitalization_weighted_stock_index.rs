@@ -7,7 +7,7 @@ use crate::{core::util, infra::crawler::twse};
 /// 調用台股指數 twse API 後其回應的數據
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 //#[serde(rename_all = "camelCase")]
-pub struct Index {
+pub struct TaiwanStockIndexDto {
     /// API 回應狀態。
     pub stat: String,
     /// 查詢日期。
@@ -21,7 +21,7 @@ pub struct Index {
 }
 
 /// 取得台股指數
-pub async fn visit(date: DateTime<Local>) -> Result<Index> {
+pub async fn visit(date: DateTime<Local>) -> Result<TaiwanStockIndexDto> {
     let url = format!(
         "https://www.{}/exchangeReport/FMTQIK?response=json&date={}&_={}",
         twse::HOST,
@@ -29,7 +29,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<Index> {
         date.timestamp_millis()
     );
 
-    util::http::get_json::<Index>(&url).await
+    util::http::get_json::<TaiwanStockIndexDto>(&url).await
 }
 
 #[cfg(test)]

@@ -7,7 +7,7 @@ use crate::{
     core::declare::Industry,
     core::logging,
     core::util::{self, map::Keyable},
-    infra::crawler::{tpex, twse},
+    infra::crawler::twse,
     infra::database,
 };
 
@@ -327,24 +327,6 @@ impl From<twse::international_securities_identification_number::InternationalSec
 }
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<tpex::net_asset_value_per_share::Emerging> for StockDbRow {
-    fn from(tpex: tpex::net_asset_value_per_share::Emerging) -> Self {
-        StockDbRow {
-            stock_symbol: tpex.stock_symbol,
-            name: "".to_string(),
-            suspend_listing: false,
-            net_asset_value_per_share: tpex.net_asset_value_per_share,
-            weight: Default::default(),
-            return_on_equity: Default::default(),
-            create_time: Local::now(),
-            stock_exchange_market_id: Default::default(),
-            stock_industry_id: Default::default(),
-            issued_share: 0,
-            qfii_shares_held: 0,
-            qfii_share_holding_percentage: Default::default(),
-        }
-    }
-}
 
 /// 取得未下市上市櫃每股淨值為零的股票
 pub async fn fetch_net_asset_value_per_share_is_zero() -> Result<Vec<StockDbRow>> {
@@ -521,21 +503,6 @@ mod tests {
         assert_eq!(stock.net_asset_value_per_share, Decimal::ZERO);
         assert_eq!(stock.weight, Decimal::ZERO);
         assert_eq!(stock.issued_share, 0);
-    }
-
-    #[test]
-    fn stock_from_emerging_maps_nav_and_symbol() {
-        let emerging =
-            tpex::net_asset_value_per_share::Emerging::new("6987".to_string(), dec!(42.19));
-
-        let stock = StockDbRow::from(emerging);
-
-        assert_eq!(stock.stock_symbol, "6987");
-        assert_eq!(stock.name, "");
-        assert_eq!(stock.net_asset_value_per_share, dec!(42.19));
-        assert_eq!(stock.stock_exchange_market_id, 0);
-        assert_eq!(stock.stock_industry_id, 0);
-        assert!(!stock.suspend_listing);
     }
 
     // 此測試驗證防禦性 upsert 邏輯（當新傳入的市場或產業編號為 0 時，保留資料庫中原先正確的非零值）。

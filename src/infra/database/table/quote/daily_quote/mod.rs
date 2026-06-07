@@ -1170,8 +1170,8 @@ mod tests {
         let mut twse = Vec::new();
         for mut dto in twse_dtos {
             dto.date = target_date;
-            let cmd = crate::app::backfill::acl::QuoteAclMapper::to_save_command(&dto);
-            let entity = crate::app::backfill::acl::QuoteAclMapper::to_database_entity(&cmd);
+            let cmd = crate::app::backfill::acl::QuoteAclMapper::from_dto(&dto);
+            let entity = crate::app::backfill::acl::QuoteAclMapper::from_command(&cmd);
             twse.push(entity);
         }
 

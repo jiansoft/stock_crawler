@@ -272,33 +272,40 @@ mod tests {
             TraceRuntimeStatsSnapshot::default()
         ));
 
-        let mut snapshot = TraceRuntimeStatsSnapshot::default();
-        snapshot.price_events_published = 1;
-        assert!(has_any_runtime_activity(snapshot));
+        assert!(has_any_runtime_activity(TraceRuntimeStatsSnapshot {
+            price_events_published: 1,
+            ..Default::default()
+        }));
 
-        snapshot = TraceRuntimeStatsSnapshot::default();
-        snapshot.price_events_dropped = 1;
-        assert!(has_any_runtime_activity(snapshot));
+        assert!(has_any_runtime_activity(TraceRuntimeStatsSnapshot {
+            price_events_dropped: 1,
+            ..Default::default()
+        }));
 
-        snapshot = TraceRuntimeStatsSnapshot::default();
-        snapshot.price_events_consumed = 1;
-        assert!(has_any_runtime_activity(snapshot));
+        assert!(has_any_runtime_activity(TraceRuntimeStatsSnapshot {
+            price_events_consumed: 1,
+            ..Default::default()
+        }));
 
-        snapshot = TraceRuntimeStatsSnapshot::default();
-        snapshot.notifications_sent = 1;
-        assert!(has_any_runtime_activity(snapshot));
+        assert!(has_any_runtime_activity(TraceRuntimeStatsSnapshot {
+            notifications_sent: 1,
+            ..Default::default()
+        }));
 
-        snapshot = TraceRuntimeStatsSnapshot::default();
-        snapshot.reconciliation_runs = 1;
-        assert!(has_any_runtime_activity(snapshot));
+        assert!(has_any_runtime_activity(TraceRuntimeStatsSnapshot {
+            reconciliation_runs: 1,
+            ..Default::default()
+        }));
 
-        snapshot = TraceRuntimeStatsSnapshot::default();
-        snapshot.reconciliation_symbols_scanned = 1;
-        assert!(has_any_runtime_activity(snapshot));
+        assert!(has_any_runtime_activity(TraceRuntimeStatsSnapshot {
+            reconciliation_symbols_scanned: 1,
+            ..Default::default()
+        }));
 
-        snapshot = TraceRuntimeStatsSnapshot::default();
-        snapshot.reconciliation_alert_hits = 1;
-        assert!(has_any_runtime_activity(snapshot));
+        assert!(has_any_runtime_activity(TraceRuntimeStatsSnapshot {
+            reconciliation_alert_hits: 1,
+            ..Default::default()
+        }));
     }
 
     #[test]

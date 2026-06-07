@@ -1,6 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use crate::{
+    app::backfill::acl::DividendAclMapper,
     core::logging,
     core::util::map::{vec_to_hashmap, Keyable},
     infra::crawler::goodinfo,
@@ -48,21 +49,21 @@ pub async fn execute() -> Result<()> {
             for gd in gds {
                 let key = gd.key();
                 if let Some(pri) = dividend_without_payout_ratio.get_mut(&key) {
-                    pri.payout_ratio = gd.payout_ratio;
-                    pri.payout_ratio_stock = gd.payout_ratio_stock;
-                    pri.payout_ratio_cash = gd.payout_ratio_cash;
+                    let cmd = DividendAclMapper::from_dto(pri.serial, &gd);
+                    let updated_pri = DividendAclMapper::update_payout_ratio_entity(pri, &cmd);
 
-                    match pri.update().await {
+                    match updated_pri.update().await {
                         Ok(_) => {
                             logging::info_file_async(format!(
                                 "更新盈餘分配率成功: security_code={}, year_of_dividend={}, quarter={}, payout_ratio_cash={}, payout_ratio_stock={}, payout_ratio={}",
-                                pri.security_code,
-                                pri.year,
-                                pri.quarter,
-                                pri.payout_ratio_cash,
-                                pri.payout_ratio_stock,
-                                pri.payout_ratio
+                                updated_pri.security_code,
+                                updated_pri.year,
+                                updated_pri.quarter,
+                                updated_pri.payout_ratio_cash,
+                                updated_pri.payout_ratio_stock,
+                                updated_pri.payout_ratio
                             ));
+                            *pri = updated_pri;
                         }
                         Err(why) => {
                             logging::error_file_async(format!("{} {:?}", key, why));

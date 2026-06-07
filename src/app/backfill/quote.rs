@@ -63,11 +63,8 @@ pub async fn get_quotes_from_source(
 
 /// 將收盤價整批寫入資料庫並更新主快取。
 pub async fn process_quotes(quotes: Vec<DailyQuoteDto>) {
-    let cmds: Vec<_> = quotes.iter().map(QuoteAclMapper::to_save_command).collect();
-    let entities: Vec<_> = cmds
-        .iter()
-        .map(QuoteAclMapper::to_database_entity)
-        .collect();
+    let cmds: Vec<_> = quotes.iter().map(QuoteAclMapper::from_dto).collect();
+    let entities: Vec<_> = cmds.iter().map(QuoteAclMapper::from_command).collect();
 
     let result_count = table::daily_quote::DailyQuote::copy_in_raw(&entities)
         .await

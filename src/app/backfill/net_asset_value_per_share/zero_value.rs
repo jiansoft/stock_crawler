@@ -1,6 +1,6 @@
 use crate::{
-    app::backfill::net_asset_value_per_share::update, core::logging,
-    infra::crawler::yahoo::profile, infra::database::table,
+    app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update,
+    core::logging, infra::crawler::yahoo::profile, infra::database::table,
 };
 use anyhow::Result;
 
@@ -57,7 +57,10 @@ pub async fn execute() -> Result<()> {
             }
         };
 
-        if yahoo_profile.net_asset_value_per_share.is_zero() {
+        let cmd =
+            NetAssetValueAclMapper::from_yahoo_profile(stock.symbol().0.clone(), &yahoo_profile);
+
+        if cmd.net_asset_value_per_share.is_zero() {
             logging::info_file_async(format!(
                 "the stock's net_asset_value_per_share is zero still. \r\n{:#?}",
                 yahoo_profile
@@ -65,7 +68,7 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        stock.update_net_asset_value(yahoo_profile.net_asset_value_per_share);
+        stock.update_net_asset_value(cmd.net_asset_value_per_share);
 
         if let Err(why) = update(&stock).await {
             logging::error_file_async(format!(

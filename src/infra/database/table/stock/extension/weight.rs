@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use rust_decimal::Decimal;
 use sqlx::{postgres::PgQueryResult, FromRow};
 
-use crate::{infra::crawler::taifex::stock_weight::StockWeight, infra::database};
+use crate::infra::database;
 
 /// 更新股票的權重
 #[derive(FromRow, Debug, Clone)]
@@ -11,19 +11,6 @@ pub struct SymbolAndWeight {
     pub stock_symbol: String,
     /// 權值占比。
     pub weight: Decimal,
-}
-
-//let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<StockWeight> for SymbolAndWeight {
-    fn from(stock_weight: StockWeight) -> Self {
-        SymbolAndWeight::new(stock_weight.stock_symbol, stock_weight.weight)
-    }
-}
-
-// 新增一個方法來將 StockWeight 轉換成 SymbolAndWeight
-/// 批次將 `StockWeight` 轉為 `SymbolAndWeight`。
-pub fn from(weights: Vec<StockWeight>) -> Vec<SymbolAndWeight> {
-    weights.into_iter().map(SymbolAndWeight::from).collect()
 }
 
 impl SymbolAndWeight {
@@ -86,13 +73,7 @@ mod tests {
     async fn test_update() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 update".to_string());
-        let stock_weight = StockWeight {
-            rank: 0,
-            stock_symbol: "2330".to_string(),
-            weight: dec!(28.3278),
-        };
-
-        let sw = SymbolAndWeight::from(stock_weight);
+        let sw = SymbolAndWeight::new("2330".to_string(), dec!(28.3278));
         match sw.update().await {
             Ok(_qr) => {
                 let sql = r#"

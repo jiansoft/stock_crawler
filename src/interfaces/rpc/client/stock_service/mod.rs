@@ -44,6 +44,23 @@ pub async fn push_stock_info_to_go_service(
     get_client().await?.update_stock_info(request).await
 }
 
+impl From<&crate::domain::registry::entity::Stock> for StockInfoRequest {
+    fn from(stock: &crate::domain::registry::entity::Stock) -> Self {
+        StockInfoRequest {
+            stock_symbol: stock.symbol().0.clone(),
+            name: stock.name().to_string(),
+            stock_exchange_market_id: stock.market_id(),
+            stock_industry_id: stock.industry_id(),
+            net_asset_value_per_share:
+                <rust_decimal::Decimal as rust_decimal::prelude::ToPrimitive>::to_f64(
+                    &stock.net_asset_value_per_share(),
+                )
+                .unwrap_or(0.0),
+            suspend_listing: stock.suspend_listing(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{core::logging, infra::cache::SHARE};
@@ -80,22 +97,5 @@ mod tests {
             }
         }
         logging::debug_file_async("結束 push_stock_info_to_go_service".to_string());
-    }
-}
-
-impl From<&crate::domain::registry::entity::Stock> for StockInfoRequest {
-    fn from(stock: &crate::domain::registry::entity::Stock) -> Self {
-        StockInfoRequest {
-            stock_symbol: stock.symbol().0.clone(),
-            name: stock.name().to_string(),
-            stock_exchange_market_id: stock.market_id(),
-            stock_industry_id: stock.industry_id(),
-            net_asset_value_per_share:
-                <rust_decimal::Decimal as rust_decimal::prelude::ToPrimitive>::to_f64(
-                    &stock.net_asset_value_per_share(),
-                )
-                .unwrap_or(0.0),
-            suspend_listing: stock.suspend_listing(),
-        }
     }
 }

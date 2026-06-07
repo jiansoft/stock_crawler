@@ -58,4 +58,18 @@ pub enum DomainEvent {
         /// 事件發生時間
         occurred_at: DateTime<Local>,
     },
+
+    /// <summary>
+    /// 當大盤指數更新時觸發。
+    /// </summary>
+    StockIndexUpdated {
+        /// 指數日期
+        date: chrono::NaiveDate,
+        /// 收盤指數值
+        index: Decimal,
+        /// 漲跌點數
+        change: Decimal,
+        /// 事件發生時間
+        occurred_at: DateTime<Local>,
+    },
 }

@@ -1,7 +1,7 @@
 use crate::{
-    app::backfill::net_asset_value_per_share::update, core::logging, core::util::datetime::Weekend,
-    domain::registry::repository::StockRepository, infra::crawler::tpex,
-    infra::database::repository::stock::PgStockRepository,
+    app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update,
+    core::logging, core::util::datetime::Weekend, domain::registry::repository::StockRepository,
+    infra::crawler::tpex, infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::Result;
 use chrono::Local;
@@ -22,31 +22,19 @@ pub async fn execute() -> Result<()> {
     let repo = PgStockRepository::new();
 
     for item in result {
-        let stock_cache = repo.find_by_symbol(&item.stock_symbol).await?;
+        let cmd = NetAssetValueAclMapper::from_emerging(&item);
+        let stock_cache = repo.find_by_symbol(&cmd.symbol).await?;
         let stock = match stock_cache {
             None => continue,
             Some(stock_cache) => {
-                if stock_cache.net_asset_value_per_share() == item.net_asset_value_per_share {
+                if stock_cache.net_asset_value_per_share() == cmd.net_asset_value_per_share {
                     continue;
                 }
                 let mut s = stock_cache.clone();
-                s.update_net_asset_value(item.net_asset_value_per_share);
+                s.update_net_asset_value(cmd.net_asset_value_per_share);
                 s
             }
         };
-
-        /*
-        let stock = match SHARE.stocks.read() {
-            Ok(stocks_cache) => {
-                if let Some(stock_cache) = stocks_cache.get(item.stock_symbol.as_str()) {
-                    if stock_cache.net_asset_value_per_share == item.net_asset_value_per_share {
-                        continue;
-                    }
-                }
-                table::stock::Stock::from(item)
-            }
-            Err(_) => continue,
-        };*/
 
         match update(&stock).await {
             Ok(_) => {

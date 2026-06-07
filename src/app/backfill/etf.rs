@@ -48,7 +48,7 @@ async fn update_stocks(items: Vec<EtfInfo>) -> Result<()> {
         .await;
 
         if is_new_or_changed {
-            let cmd = EtfAclMapper::to_registration_command(&item);
+            let cmd = EtfAclMapper::from_etf(&item);
             if let Err(why) = update_stock_info(&cmd).await {
                 logging::error_file_async(format!(
                     "更新 ETF {} 資訊失敗: {:?}",

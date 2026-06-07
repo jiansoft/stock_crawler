@@ -3,11 +3,10 @@ use std::{collections::HashSet, time::Duration};
 use rand::RngExt;
 
 use crate::{
-    app::calculation::dividend_record, core::logging, core::util::map::Keyable,
-    infra::crawler::yahoo, infra::database::table::dividend,
+    app::backfill::acl::YahooDividendAclMapper, app::calculation::dividend_record, core::logging,
+    core::util::map::Keyable, infra::crawler::yahoo, infra::database::table::dividend,
 };
 use anyhow::{Context, Result};
-use chrono::Local;
 
 /// 歷年股利批次回補的執行結果。
 ///
@@ -132,8 +131,8 @@ pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Resu
     // Yahoo 已依發放年度分組；歷年回補不篩年度，所有明細都要依來源資料寫回。
     for (paid_year, dividend_details_from_yahoo) in &dividends_from_yahoo.dividend {
         for dividend_from_yahoo in dividend_details_from_yahoo {
-            // 將 Yahoo 的欄位映射成 dividend 表欄位，保留日期與每股股利數值。
-            let entity = yahoo_dividend_to_entity(stock_symbol, dividend_from_yahoo);
+            let cmd = YahooDividendAclMapper::from_dto(stock_symbol, dividend_from_yahoo);
+            let entity = YahooDividendAclMapper::from_command(&cmd);
             entity.upsert().await.with_context(|| {
                 format!(
                     "historical dividend upsert failed: stock_symbol={}, paid_year={}, year_of_dividend={}, quarter={}",
@@ -285,8 +284,8 @@ async fn backfill_recent_dividends_for_stock(
                 continue;
             }
 
-            // 將 Yahoo 明細映射成資料表實體；Yahoo 沒有提供的細項欄位會保留預設值。
-            let entity = yahoo_dividend_to_entity(stock_symbol, dividend_from_yahoo);
+            let cmd = YahooDividendAclMapper::from_dto(stock_symbol, dividend_from_yahoo);
+            let entity = YahooDividendAclMapper::from_command(&cmd);
             match entity.upsert().await {
                 Ok(_) => {
                     logging::debug_file_async(format!(
@@ -352,44 +351,9 @@ fn make_cache_key(stock_symbol: &str) -> String {
     format!("yahoo:dividend:{stock_symbol}")
 }
 
-/// 將 Yahoo 股利明細轉成資料庫 `Dividend` 實體。
-///
-/// Yahoo 來源提供發放年度、股利所屬年度、季度、現金/股票股利與日期欄位；盈餘/公積拆分與
-/// 盈餘分配率在此來源沒有資料，因此沿用 `Dividend::new()` 的預設值。`sum` 由現金股利加上
-/// 股票股利計算，時間欄位使用本地現在時間。
-fn yahoo_dividend_to_entity(
-    stock_symbol: &str,
-    d: &yahoo::dividend::YahooDividendDetail,
-) -> dividend::Dividend {
-    // 先建立預設實體，讓 Yahoo 沒提供的盈餘/公積拆分與分配率維持 0。
-    let mut e = dividend::Dividend::new();
-    // 股票代號由呼叫端傳入，避免依賴 Yahoo 明細內部是否重複保存代號。
-    e.security_code = stock_symbol.to_string();
-    // `year` 是實際發放年度，會用於除權息提醒與年度彙總聚合。
-    e.year = d.year;
-    // `year_of_dividend` 是股利所屬年度，例如 2024Q4 可能在 2025 發放。
-    e.year_of_dividend = d.year_of_dividend;
-    // 季度空字串代表年度配息；Q/H 代表季配或半年配。
-    e.quarter = d.quarter.clone();
-    // Yahoo 已提供合計後的現金股利與股票股利，直接保留 Decimal 精度。
-    e.cash_dividend = d.cash_dividend;
-    e.stock_dividend = d.stock_dividend;
-    // 資料表的 `sum` 為每股現金股利與每股股票股利的合計。
-    e.sum = d.cash_dividend + d.stock_dividend;
-    // 日期欄位可能是實際日期或 `-`；此流程照來源保存，未公布日期由另一條回補流程處理。
-    e.ex_dividend_date1 = d.ex_dividend_date1.clone();
-    e.ex_dividend_date2 = d.ex_dividend_date2.clone();
-    e.payable_date1 = d.payable_date1.clone();
-    e.payable_date2 = d.payable_date2.clone();
-    // 新增與更新時間都用目前本地時間，讓後續可以追蹤本次回補寫入時間。
-    e.created_time = Local::now();
-    e.updated_time = Local::now();
-    e
-}
-
 #[cfg(test)]
 mod tests {
-    use chrono::Datelike;
+    use chrono::{Datelike, Local};
     use rust_decimal_macros::dec;
 
     use super::*;
@@ -423,7 +387,8 @@ mod tests {
             payable_date2: "2025-08-02".to_string(),
         };
 
-        let e = yahoo_dividend_to_entity("2454", &d);
+        let cmd = YahooDividendAclMapper::from_dto("2454", &d);
+        let e = YahooDividendAclMapper::from_command(&cmd);
         assert_eq!(e.security_code, "2454");
         assert_eq!(e.year, 2025);
         assert_eq!(e.year_of_dividend, 2024);

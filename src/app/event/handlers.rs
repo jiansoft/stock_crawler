@@ -224,6 +224,20 @@ impl EventDispatcher {
             DomainEvent::NetAssetValueUpdated { .. } => {
                 // 目前每股淨值更新不需要額外副作用
             }
+            DomainEvent::StockIndexUpdated {
+                date,
+                index,
+                change,
+                ..
+            } => {
+                let msg = format!(
+                    "{} 大盤指數︰{} 漲跌︰{}",
+                    Telegram::escape_markdown_v2(date.to_string()),
+                    Telegram::escape_markdown_v2(index.to_string()),
+                    Telegram::escape_markdown_v2(change.to_string())
+                );
+                debouncer.add_message(msg).await;
+            }
         }
 
         Ok(())
@@ -394,6 +408,39 @@ mod tests {
             assert_eq!(new_nav, dec!(95.12));
         } else {
             panic!("Expected NetAssetValueUpdated event");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_stock_index_updated_event() {
+        let event_log = Arc::new(Mutex::new(Vec::new()));
+        let dispatcher =
+            EventDispatcher::new_with_handler(Some(fake_handler(event_log.clone())), 10);
+
+        let events = vec![DomainEvent::StockIndexUpdated {
+            date: chrono::NaiveDate::from_ymd_opt(2026, 6, 7).unwrap(),
+            index: dec!(16500.25),
+            change: dec!(120.50),
+            occurred_at: chrono::Local::now(),
+        }];
+
+        dispatcher.dispatch_async(events).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let log = event_log.lock().await;
+        assert_eq!(log.len(), 1);
+        if let DomainEvent::StockIndexUpdated {
+            date,
+            index,
+            change,
+            ..
+        } = log[0]
+        {
+            assert_eq!(date, chrono::NaiveDate::from_ymd_opt(2026, 6, 7).unwrap());
+            assert_eq!(index, dec!(16500.25));
+            assert_eq!(change, dec!(120.50));
+        } else {
+            panic!("Expected StockIndexUpdated event");
         }
     }
 

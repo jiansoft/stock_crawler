@@ -1,33 +1,11 @@
 use anyhow::Result;
 use chrono::{Local, NaiveDate, TimeZone};
 
-use crate::core::util::map::Keyable;
-use crate::interfaces::bot::telegram::Telegram;
-use crate::{
-    core::logging, infra::cache::SHARE, infra::crawler::twse, infra::database::table,
-    interfaces::bot,
-};
+use crate::app::backfill::acl::IndexAclMapper;
+use crate::app::event::handlers::get_global_dispatcher;
+use crate::domain::events::DomainEvent;
+use crate::{core::logging, infra::cache::SHARE, infra::crawler::twse};
 
-/// 解析單筆指數字串陣列。若格式錯誤或解析失敗，會記錄 error log 並回傳 `None`。
-fn parse_index_item(item: &[String]) -> Option<table::index::Index> {
-    if item.len() != 6 {
-        logging::error_file_async(format!("資料欄位不等於6 item:{:?}", item));
-        return None;
-    }
-
-    match table::index::Index::from_strings(item) {
-        Ok(i) => Some(i),
-        Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to index::Index::from_strings({:?}) because {:?}",
-                item, why
-            ));
-            None
-        }
-    }
-}
-
-/// 調用  twse API 取得台股加權指數（使用目前日期）
 pub async fn execute() -> Result<()> {
     let tai_ex = twse::taiwan_capitalization_weighted_stock_index::visit(Local::now()).await?;
     if tai_ex.stat.to_uppercase() != "OK" {
@@ -37,35 +15,37 @@ pub async fn execute() -> Result<()> {
 
     if let Some(data) = tai_ex.data {
         for item in data {
-            let index = match parse_index_item(&item) {
-                Some(i) => i,
+            let cmd = match IndexAclMapper::from_strings(&item) {
+                Some(c) => c,
                 None => continue,
             };
 
-            //logging::debug_file_async(format!("index:{:?}", index));
-            let key = index.key();
+            let key = format!("{}-TAIEX", cmd.date);
             if SHARE.get_stock_index(&key).is_some() {
                 continue;
             }
 
-            match index.upsert().await {
+            let index_entity = IndexAclMapper::from_command(&cmd);
+
+            match index_entity.upsert().await {
                 Ok(_) => {
-                    logging::info_file_async(format!("index add {:?}", index));
-                    let msg = format!(
-                        "{} 大盤指數︰{} 漲跌︰{}",
-                        Telegram::escape_markdown_v2(index.date.to_string()),
-                        Telegram::escape_markdown_v2(index.index.to_string()),
-                        Telegram::escape_markdown_v2(index.change.to_string())
-                    );
+                    logging::info_file_async(format!("index add {:?}", index_entity));
 
-                    bot::telegram::send(&msg).await;
+                    // 派發領域事件以發送 Telegram 通知
+                    let event = DomainEvent::StockIndexUpdated {
+                        date: cmd.date,
+                        index: cmd.index,
+                        change: cmd.change,
+                        occurred_at: Local::now(),
+                    };
+                    get_global_dispatcher().dispatch_async(vec![event]).await;
 
-                    SHARE.set_stock_index(key, index).await;
+                    SHARE.set_stock_index(key, index_entity).await;
                 }
                 Err(why) => {
                     logging::error_file_async(format!(
                         "Failed to index.upsert({:#?}) because {:?}",
-                        index, why
+                        index_entity, why
                     ));
                 }
             }
@@ -105,27 +85,29 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
 
     if let Some(data) = tai_ex.data {
         for item in data {
-            let index = match parse_index_item(&item) {
-                Some(i) => i,
+            let cmd = match IndexAclMapper::from_strings(&item) {
+                Some(c) => c,
                 None => continue,
             };
 
             // TWSE 回傳整月資料，只處理與指定日期相符的那一筆。
-            if index.date != date {
+            if cmd.date != date {
                 continue;
             }
 
-            match index.upsert().await {
+            let index_entity = IndexAclMapper::from_command(&cmd);
+
+            match index_entity.upsert().await {
                 Ok(_) => {
-                    logging::info_file_async(format!("index upsert (backfill) {:?}", index));
-                    let key = index.key();
-                    SHARE.set_stock_index(key, index).await;
+                    logging::info_file_async(format!("index upsert (backfill) {:?}", index_entity));
+                    let key = format!("{}-TAIEX", index_entity.date);
+                    SHARE.set_stock_index(key, index_entity).await;
                     upserted_count += 1;
                 }
                 Err(why) => {
                     logging::error_file_async(format!(
                         "Failed to index.upsert({:#?}) because {:?}",
-                        index, why
+                        index_entity, why
                     ));
                 }
             }
