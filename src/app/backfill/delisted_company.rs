@@ -1,6 +1,7 @@
 use crate::{
-    core::logging, core::util::datetime::Weekend, domain::registry::repository::StockRepository,
-    infra::crawler::twse, infra::database::repository::stock::PgStockRepository,
+    app::backfill::acl::DelistedCompanyAclMapper, core::logging, core::util::datetime::Weekend,
+    domain::registry::repository::StockRepository, infra::crawler::twse,
+    infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::Result;
 use chrono::Local;
@@ -16,44 +17,26 @@ pub async fn execute() -> Result<()> {
        logging::info_file_async("更新下市的股票結束");
     }
     let delisted = twse::suspend_listing::visit().await?;
-    let mut items_to_update = Vec::new();
     let repo = PgStockRepository::new();
 
     for company in delisted {
-        if let Some(stock) = repo.find_by_symbol(&company.stock_symbol).await? {
-            if stock.suspend_listing() {
-                //println!("已下市{:?}",stock);
-                continue;
-            }
-
-            if company.delisting_date.len() < 3 {
-                continue;
-            }
-
-            let year = match company.delisting_date[..3].parse::<i32>() {
-                Ok(_year) => _year,
-                Err(why) => {
-                    logging::error_file_async(format!("轉換資料日期發生錯誤. because {:?}", why));
+        // 透過防腐層轉譯為內部命令，內含格式與民國年分過濾邏輯
+        if let Some(cmd) = DelistedCompanyAclMapper::to_delisted_command(&company) {
+            if let Some(stock) = repo.find_by_symbol(&cmd.symbol).await? {
+                if stock.suspend_listing() {
                     continue;
                 }
-            };
 
-            if year < 110 {
-                continue;
+                let mut another = stock.clone();
+                another.update_suspension(true);
+
+                if let Err(why) = repo.save(&another).await {
+                    logging::error_file_async(format!(
+                        "Failed to update_suspend_listing because {:?}",
+                        why
+                    ));
+                }
             }
-
-            let mut another = stock.clone();
-            another.update_suspension(true);
-            items_to_update.push(another);
-        }
-    }
-
-    for stock in items_to_update {
-        if let Err(why) = repo.save(&stock).await {
-            logging::error_file_async(format!(
-                "Failed to update_suspend_listing because {:?}",
-                why
-            ));
         }
     }
 
