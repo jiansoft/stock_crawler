@@ -4,14 +4,18 @@ use crate::{
     app::backfill,
     app::calculation,
     core::logging,
+    domain::quote::repository::QuoteRepository,
     infra::cache::{TtlCacheInner, TTL},
     infra::crawler,
-    infra::database::table::{
-        daily_money_history_member::{
-            DailyMoneyHistoryMember, DailyMoneyHistoryMemberWithPreviousTradingDay,
+    infra::database::{
+        repository::quote::PgQuoteRepository,
+        table::{
+            daily_money_history_member::{
+                DailyMoneyHistoryMember, DailyMoneyHistoryMemberWithPreviousTradingDay,
+            },
+            daily_quote,
+            yield_rank::YieldRank,
         },
-        daily_quote, last_daily_quotes,
-        yield_rank::YieldRank,
     },
     interfaces::bot::{self, telegram::Telegram},
 };
@@ -85,8 +89,10 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
     calculation::daily_quotes::calculate_moving_average(date).await?;
     logging::info_file_async("計算均線結束".to_string());
 
+    // 實例化報價領域的倉儲
+    let quote_repo = PgQuoteRepository::new();
     // 重建 last_daily_quotes 表內的數據
-    last_daily_quotes::LastDailyQuotes::rebuild().await?;
+    quote_repo.rebuild_last_daily_quotes().await?;
     logging::info_file_async("重建 last_daily_quotes 表內的數據結束".to_string());
 
     // 計算便宜、合理、昂貴價的估算

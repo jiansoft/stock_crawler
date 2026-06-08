@@ -1,0 +1,396 @@
+use crate::{
+    core::logging,
+    domain::quote::{
+        entity::{DailyQuote as DomainDailyQuote, LastDailyQuote as DomainLastDailyQuote},
+        repository::QuoteRepository,
+    },
+    infra::database,
+    infra::database::table::quote::{
+        daily_quote::{self, DailyQuote as TableDailyQuote},
+        daily_stock_price_stats::DailyStockPriceStats as TableDailyStockPriceStats,
+        last_daily_quotes::LastDailyQuotes as TableLastDailyQuotes,
+    },
+};
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use chrono::NaiveDate;
+
+/// PostgreSQL 實作之報價倉儲。
+///
+/// 基於 PostgreSQL (SQLx) 與 Redis 實現 `QuoteRepository` 介面，
+/// 負責日報價、最新收盤價及全市場估值分布統計的讀寫操作，並在查詢最新報價時封裝雙層快取策略。
+#[derive(Default)]
+pub struct PgQuoteRepository;
+
+impl PgQuoteRepository {
+    /// 建立 `PgQuoteRepository` 新實例。
+    pub fn new() -> Self {
+        // 傳回全新的 PgQuoteRepository 實例
+        PgQuoteRepository
+    }
+
+    /// 取得指定的 Redis 快取鍵。
+    fn get_cache_key(&self, security_code: &str) -> String {
+        // 以 LastDailyQuote 作為前綴，拼接股票代碼作為快取鍵
+        format!("LastDailyQuote:{}", security_code)
+    }
+}
+
+// === 實體映射實作 ===
+
+impl From<DomainDailyQuote> for TableDailyQuote {
+    fn from(domain: DomainDailyQuote) -> Self {
+        // 將領域層的每日報價實體轉換為資料庫 Table 模型，完整對齊所有屬性
+        TableDailyQuote {
+            maximum_price_in_year_date_on: domain.maximum_price_in_year_date_on,
+            minimum_price_in_year_date_on: domain.minimum_price_in_year_date_on,
+            date: domain.date,
+            create_time: domain.create_time,
+            record_time: domain.record_time,
+            price_earning_ratio: domain.price_earning_ratio,
+            moving_average_60: domain.moving_average_60,
+            closing_price: domain.closing_price,
+            change_range: domain.change_range,
+            change: domain.change,
+            last_best_bid_price: domain.last_best_bid_price,
+            last_best_bid_volume: domain.last_best_bid_volume,
+            last_best_ask_price: domain.last_best_ask_price,
+            last_best_ask_volume: domain.last_best_ask_volume,
+            moving_average_5: domain.moving_average_5,
+            moving_average_10: domain.moving_average_10,
+            moving_average_20: domain.moving_average_20,
+            lowest_price: domain.lowest_price,
+            moving_average_120: domain.moving_average_120,
+            moving_average_240: domain.moving_average_240,
+            maximum_price_in_year: domain.maximum_price_in_year,
+            minimum_price_in_year: domain.minimum_price_in_year,
+            average_price_in_year: domain.average_price_in_year,
+            highest_price: domain.highest_price,
+            opening_price: domain.opening_price,
+            trading_volume: domain.trading_volume,
+            trade_value: domain.trade_value,
+            transaction: domain.transaction,
+            price_to_book_ratio: domain.price_to_book_ratio,
+            stock_symbol: domain.stock_symbol,
+            serial: domain.serial,
+            year: domain.year,
+            month: domain.month,
+            day: domain.day,
+        }
+    }
+}
+
+impl From<TableDailyQuote> for DomainDailyQuote {
+    fn from(table: TableDailyQuote) -> Self {
+        // 將資料庫 Table 模型的每日報價轉換為領域層實體
+        DomainDailyQuote {
+            serial: table.serial,
+            stock_symbol: table.stock_symbol,
+            date: table.date,
+            opening_price: table.opening_price,
+            highest_price: table.highest_price,
+            lowest_price: table.lowest_price,
+            closing_price: table.closing_price,
+            change: table.change,
+            change_range: table.change_range,
+            trading_volume: table.trading_volume,
+            trade_value: table.trade_value,
+            transaction: table.transaction,
+            last_best_bid_price: table.last_best_bid_price,
+            last_best_bid_volume: table.last_best_bid_volume,
+            last_best_ask_price: table.last_best_ask_price,
+            last_best_ask_volume: table.last_best_ask_volume,
+            price_earning_ratio: table.price_earning_ratio,
+            price_to_book_ratio: table.price_to_book_ratio,
+            moving_average_5: table.moving_average_5,
+            moving_average_10: table.moving_average_10,
+            moving_average_20: table.moving_average_20,
+            moving_average_60: table.moving_average_60,
+            moving_average_120: table.moving_average_120,
+            moving_average_240: table.moving_average_240,
+            maximum_price_in_year: table.maximum_price_in_year,
+            minimum_price_in_year: table.minimum_price_in_year,
+            average_price_in_year: table.average_price_in_year,
+            maximum_price_in_year_date_on: table.maximum_price_in_year_date_on,
+            minimum_price_in_year_date_on: table.minimum_price_in_year_date_on,
+            year: table.year,
+            month: table.month,
+            day: table.day,
+            create_time: table.create_time,
+            record_time: table.record_time,
+        }
+    }
+}
+
+impl From<DomainLastDailyQuote> for TableLastDailyQuotes {
+    fn from(domain: DomainLastDailyQuote) -> Self {
+        // 將領域層最新收盤價實體轉換為資料庫 Table 模型
+        TableLastDailyQuotes {
+            date: domain.date,
+            closing_price: domain.closing_price,
+            stock_symbol: domain.stock_symbol,
+        }
+    }
+}
+
+impl From<TableLastDailyQuotes> for DomainLastDailyQuote {
+    fn from(table: TableLastDailyQuotes) -> Self {
+        // 將資料庫 Table 模型最新收盤價轉換為領域層實體
+        DomainLastDailyQuote {
+            date: table.date,
+            closing_price: table.closing_price,
+            stock_symbol: table.stock_symbol,
+        }
+    }
+}
+
+#[async_trait]
+impl QuoteRepository for PgQuoteRepository {
+    // === 每日報價 (DailyQuote) ===
+
+    async fn save_daily_quote(&self, quote: &DomainDailyQuote) -> Result<()> {
+        // 轉換為 Table 實體並呼叫 Table 層的 upsert
+        let table_entity = TableDailyQuote::from(quote.clone());
+        // 執行 UPSERT 寫入資料庫
+        table_entity.upsert().await?;
+        Ok(())
+    }
+
+    async fn batch_save_daily_quotes(&self, quotes: &[DomainDailyQuote]) -> Result<()> {
+        // 將所有領域實體轉換為 Table 實體
+        let table_entities: Vec<TableDailyQuote> = quotes
+            .iter()
+            .map(|q| TableDailyQuote::from(q.clone()))
+            .collect();
+        // 呼叫 Table 層的 copy_in_raw 批次寫入 PostgreSQL
+        TableDailyQuote::copy_in_raw(&table_entities).await?;
+        Ok(())
+    }
+
+    async fn fetch_quotes_by_date(&self, date: NaiveDate) -> Result<Vec<DomainDailyQuote>> {
+        // 讀取指定交易日的所有日報價 Table 資料
+        let table_quotes = daily_quote::fetch_daily_quotes_by_date(date).await?;
+        // 將所有 Table 實體轉換為領域實體清單
+        let domain_quotes = table_quotes
+            .into_iter()
+            .map(DomainDailyQuote::from)
+            .collect();
+        Ok(domain_quotes)
+    }
+
+    // === 最新報價 (LastDailyQuote) ===
+
+    async fn fetch_last_daily_quotes(&self) -> Result<Vec<DomainLastDailyQuote>> {
+        // 從資料庫抓取所有個股的最新收盤價 Table 資料
+        let table_quotes = TableLastDailyQuotes::fetch().await?;
+        // 將 Table 資料轉換為領域層實體
+        let domain_quotes = table_quotes
+            .into_iter()
+            .map(DomainLastDailyQuote::from)
+            .collect();
+        Ok(domain_quotes)
+    }
+
+    async fn rebuild_last_daily_quotes(&self) -> Result<()> {
+        // 呼叫 Table 實作的 rebuild 重建 last_daily_quotes 數據表
+        TableLastDailyQuotes::rebuild().await?;
+        Ok(())
+    }
+
+    async fn fetch_last_quote(&self, security_code: &str) -> Result<Option<DomainLastDailyQuote>> {
+        // 取得該股票對應的 Redis 快取鍵名稱
+        let cache_key = self.get_cache_key(security_code);
+
+        // 1. 嘗試從 Redis 讀取快取
+        match crate::infra::nosql::redis::CLIENT
+            .get_string(&cache_key)
+            .await
+        {
+            Ok(cached_val) => {
+                // 如果 Redis 快取命中，則進行 JSON 反序列化
+                if let Ok(quote) = serde_json::from_str::<DomainLastDailyQuote>(&cached_val) {
+                    // 順利解析成功，直接傳回快取中的領域實體
+                    return Ok(Some(quote));
+                }
+            }
+            Err(_) => {
+                // 快取未命中或 Redis 連線異常時，僅記錄除錯資訊並降級繼續查詢資料庫
+                logging::debug_file_async(format!(
+                    "Redis cache miss or error for key: {}, fallback to PostgreSQL",
+                    cache_key
+                ));
+            }
+        }
+
+        // 2. 當 Redis 未命中或出錯時，降級從 PostgreSQL 資料庫讀取
+        let sql = r#"
+            SELECT date, stock_symbol, closing_price
+            FROM last_daily_quotes
+            WHERE stock_symbol = $1
+        "#;
+        // 執行 SQL 查詢單筆最新收盤價
+        let table_quote_opt = sqlx::query_as::<_, TableLastDailyQuotes>(sql)
+            .bind(security_code)
+            .fetch_optional(database::get_connection())
+            .await?;
+
+        // 3. 處理查詢結果
+        if let Some(table_quote) = table_quote_opt {
+            // 將 Table 轉換為領域實體
+            let domain_quote = DomainLastDailyQuote::from(table_quote);
+
+            // 4. 非同步地將資料寫回 Redis 快取以供下次使用，設定過期時間為 1 天
+            if let Ok(serialized) = serde_json::to_string(&domain_quote) {
+                // 執行 Redis 寫入操作，若失敗僅記錄 log，不影響整體查詢流程
+                if let Err(why) = crate::infra::nosql::redis::CLIENT
+                    .set(&cache_key, serialized, 86400)
+                    .await
+                {
+                    logging::error_file_async(format!(
+                        "Failed to update Redis cache for {}: {:?}",
+                        security_code, why
+                    ));
+                }
+            }
+
+            // 傳回查詢到的股票最新收盤價領域實體
+            Ok(Some(domain_quote))
+        } else {
+            // 資料庫中也沒有該個股的最新收盤價，傳回 None
+            Ok(None)
+        }
+    }
+
+    async fn save_last_quotes_batch(&self, quotes: &[DomainLastDailyQuote]) -> Result<()> {
+        // 如果輸入的列表為空，則直接傳回成功
+        if quotes.is_empty() {
+            return Ok(());
+        }
+
+        // 建立容量對齊的向量陣列
+        let mut dates = Vec::with_capacity(quotes.len());
+        let mut symbols = Vec::with_capacity(quotes.len());
+        let mut closing_prices = Vec::with_capacity(quotes.len());
+
+        // 整理批次 UPSERT 所需的參數
+        for q in quotes {
+            dates.push(q.date);
+            symbols.push(q.stock_symbol.clone());
+            closing_prices.push(q.closing_price);
+        }
+
+        // 執行批次寫入的 SQL 語法
+        let sql = r#"
+            INSERT INTO last_daily_quotes (date, stock_symbol, closing_price, updated_time)
+            SELECT * FROM UNNEST($1::date[], $2::varchar[], $3::numeric[])
+              AS t(date, stock_symbol, closing_price)
+            ON CONFLICT (stock_symbol) DO UPDATE SET
+                date = EXCLUDED.date,
+                closing_price = EXCLUDED.closing_price,
+                updated_time = NOW();
+        "#;
+
+        // 在資料庫中批次執行 UPSERT
+        sqlx::query(sql)
+            .bind(&dates)
+            .bind(&symbols)
+            .bind(&closing_prices)
+            .execute(database::get_connection())
+            .await
+            .context("Failed to save_last_quotes_batch in last_daily_quotes")?;
+
+        // 5. 批次將最新收盤價更新至 Redis 快取
+        for q in quotes {
+            let cache_key = self.get_cache_key(&q.stock_symbol);
+            // 序列化為 JSON
+            if let Ok(serialized) = serde_json::to_string(q) {
+                // 更新 Redis，設為 1 天過期，失效或更新皆可，此處選擇更新最新值以達最快快取預熱效益
+                if let Err(why) = crate::infra::nosql::redis::CLIENT
+                    .set(&cache_key, serialized, 86400)
+                    .await
+                {
+                    logging::error_file_async(format!(
+                        "Failed to update Redis cache in batch for {}: {:?}",
+                        q.stock_symbol, why
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    // === 股價分布統計 (DailyStockPriceStats) ===
+
+    async fn save_stock_price_stats(&self, date: NaiveDate) -> Result<()> {
+        // 呼叫 Table 實作的 upsert 方法計算並保存當日之全市場統計
+        TableDailyStockPriceStats::upsert(date, &mut None).await?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::quote::entity::LastDailyQuote;
+    use rust_decimal_macros::dec;
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_cache_aside_flow() {
+        // 載入環境變數設定
+        dotenv::dotenv().ok();
+
+        // 建立測試專用的倉儲對象
+        let repo = PgQuoteRepository::new();
+        let test_symbol = "TEST_9999";
+
+        // 先取得快取的 key
+        let cache_key = repo.get_cache_key(test_symbol);
+        // 清除先前殘留的 Redis 快取以確保測試獨立性
+        let _ = crate::infra::nosql::redis::CLIENT.delete(&cache_key).await;
+
+        // 建立測試用的最新收盤價領域對象
+        let test_quote = LastDailyQuote {
+            date: NaiveDate::from_ymd_opt(2026, 6, 8).unwrap(),
+            stock_symbol: test_symbol.to_string(),
+            closing_price: dec!(99.9),
+        };
+
+        // 1. 執行批次寫入，內部會同時寫入資料庫與 Redis 快取
+        repo.save_last_quotes_batch(std::slice::from_ref(&test_quote))
+            .await
+            .unwrap();
+
+        // 2. 第一次讀取，此時預期可以直接從快取中命中（因為 batch 寫入時有回寫）
+        let fetched_first = repo.fetch_last_quote(test_symbol).await.unwrap();
+        assert!(fetched_first.is_some());
+        let fetched_first = fetched_first.unwrap();
+        assert_eq!(fetched_first.stock_symbol, test_symbol);
+        assert_eq!(fetched_first.closing_price, dec!(99.9));
+
+        // 3. 再次清除快取以模擬 Cache Miss 的情境
+        let _ = crate::infra::nosql::redis::CLIENT.delete(&cache_key).await;
+
+        // 4. 第二次讀取，因快取已被清除，會觸發 Cache Miss 降級並從 PostgreSQL 重新查詢，最後會回寫快取
+        let fetched_miss = repo.fetch_last_quote(test_symbol).await.unwrap();
+        assert!(fetched_miss.is_some());
+        assert_eq!(fetched_miss.unwrap().closing_price, dec!(99.9));
+
+        // 5. 驗證此時 Redis 快取是否已正確被自動回寫
+        let redis_val = crate::infra::nosql::redis::CLIENT
+            .get_string(&cache_key)
+            .await
+            .unwrap();
+        let redis_quote: LastDailyQuote = serde_json::from_str(&redis_val).unwrap();
+        assert_eq!(redis_quote.stock_symbol, test_symbol);
+        assert_eq!(redis_quote.closing_price, dec!(99.9));
+
+        // 6. 清理測試資料（同時清除 Redis 快取與資料庫內的測試列）
+        let _ = crate::infra::nosql::redis::CLIENT.delete(&cache_key).await;
+        let _ = sqlx::query("DELETE FROM last_daily_quotes WHERE stock_symbol = $1")
+            .bind(test_symbol)
+            .execute(database::get_connection())
+            .await;
+    }
+}

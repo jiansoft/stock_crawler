@@ -8,6 +8,7 @@ use crate::{
     app::backfill::acl::QuoteAclMapper,
     core::logging,
     core::util::{self, map::Keyable},
+    domain::quote::repository::QuoteRepository,
     infra::cache::{TtlCacheInner, SHARE, TTL},
     infra::crawler::{share::DailyQuoteDto, tpex, twse},
     infra::database::table,
@@ -63,13 +64,30 @@ pub async fn get_quotes_from_source(
 
 /// 將收盤價整批寫入資料庫並更新主快取。
 pub async fn process_quotes(quotes: Vec<DailyQuoteDto>) {
+    // 將 DTO 轉換為指令對象
     let cmds: Vec<_> = quotes.iter().map(QuoteAclMapper::from_dto).collect();
-    let entities: Vec<_> = cmds.iter().map(QuoteAclMapper::from_command).collect();
+    // 將指令對象轉換為資料表結構模型
+    let table_entities: Vec<table::daily_quote::DailyQuote> =
+        cmds.iter().map(QuoteAclMapper::from_command).collect();
+    // 將資料表結構模型映射至領域層的每日報價實體
+    let domain_entities: Vec<crate::domain::quote::entity::DailyQuote> = table_entities
+        .into_iter()
+        .map(crate::domain::quote::entity::DailyQuote::from)
+        .collect();
 
-    let result_count = table::daily_quote::DailyQuote::copy_in_raw(&entities)
-        .await
-        .unwrap_or_default();
-    stream::iter(entities)
+    // 實例化報價領域的倉儲
+    let repo = crate::infra::database::repository::quote::PgQuoteRepository::new();
+    // 呼叫倉儲的批次寫入合約，將資料寫入 PostgreSQL
+    let result_count = match repo.batch_save_daily_quotes(&domain_entities).await {
+        Ok(_) => domain_entities.len(),
+        Err(why) => {
+            logging::error_file_async(format!("Failed to batch save daily quotes: {:?}", why));
+            0
+        }
+    };
+
+    // 併行處理快取寫入與更新
+    stream::iter(domain_entities)
         .for_each_concurrent(util::concurrent_limit_32(), |dq| async move {
             process_daily_quote(dq).await;
         })
@@ -77,12 +95,17 @@ pub async fn process_quotes(quotes: Vec<DailyQuoteDto>) {
     logging::info_file_async(format!("上市櫃收盤數據更新到資料庫完成: {}", result_count));
 }
 
-async fn process_daily_quote(daily_quote: table::daily_quote::DailyQuote) {
-    SHARE.set_stock_last_price(&daily_quote).await;
+async fn process_daily_quote(daily_quote: crate::domain::quote::entity::DailyQuote) {
+    // 轉回 Table 實體，供 SHARE 快取使用
+    let table_quote =
+        crate::infra::database::table::daily_quote::DailyQuote::from(daily_quote.clone());
+    // 將最新報價更新至全域記憶體快取
+    SHARE.set_stock_last_price(&table_quote).await;
 
-    let daily_quote_memory_key = daily_quote.key_with_prefix();
+    // 取得記憶體快取之 key 值
+    let daily_quote_memory_key = table_quote.key_with_prefix();
 
-    //更新最後交易日的收盤價
+    // 更新最後交易日的收盤價 TTL 快取（24 小時失效時間）
     TTL.daily_quote_set(
         daily_quote_memory_key,
         "".to_string(),
