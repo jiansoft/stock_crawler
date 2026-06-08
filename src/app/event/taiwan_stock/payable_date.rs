@@ -204,15 +204,16 @@ mod tests {
         share_quantity: i64,
         date: (i32, u32, u32),
     ) -> StockOwnershipDetail {
-        let mut holding = StockOwnershipDetail::default();
-        holding.serial = serial;
-        holding.member_id = member_id;
-        holding.security_code = security_code.to_string();
-        holding.share_quantity = share_quantity;
-        holding.created_time = Local
-            .with_ymd_and_hms(date.0, date.1, date.2, 0, 0, 0)
-            .unwrap();
-        holding
+        StockOwnershipDetail {
+            serial,
+            member_id,
+            security_code: security_code.to_string(),
+            share_quantity,
+            created_time: Local
+                .with_ymd_and_hms(date.0, date.1, date.2, 0, 0, 0)
+                .unwrap(),
+            ..Default::default()
+        }
     }
 
     #[test]

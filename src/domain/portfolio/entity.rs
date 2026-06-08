@@ -36,6 +36,7 @@ pub struct StockOwnershipDetail {
 
 impl StockOwnershipDetail {
     /// 建立全新的持股明細實體。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         serial: i64,
         security_code: String,

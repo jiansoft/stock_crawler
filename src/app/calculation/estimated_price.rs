@@ -1,10 +1,7 @@
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 
-use crate::{
-    core::logging,
-    infra::database::{table, table::estimate::Estimate},
-};
+use crate::{core::logging, infra::database::table};
 
 /// 計算便宜、合理、昂貴價的估算
 pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
@@ -34,7 +31,13 @@ pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
     })
     .await;*/
 
-    Estimate::upsert_all(date, years_str).await?;
+    use crate::domain::financial::repository::FinancialRepository;
+    use crate::infra::database::repository::financial::PgFinancialRepository;
+
+    let financial_repo = PgFinancialRepository::new();
+    financial_repo
+        .rebuild_price_estimates(date, years_str)
+        .await?;
 
     let estimate_date_config = table::config::Config::new(
         "estimate-date".to_string(),
