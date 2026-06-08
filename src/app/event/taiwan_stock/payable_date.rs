@@ -5,7 +5,12 @@ use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::{
-    infra::database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
+    domain::dividend::repository::DividendRepository,
+    domain::portfolio::entity::StockOwnershipDetail,
+    domain::portfolio::repository::PortfolioRepository,
+    infra::database::repository::dividend::PgDividendRepository,
+    infra::database::repository::portfolio::PgPortfolioRepository,
+    infra::database::table::dividend::extension::stock_dividend_payable_date_info::StockDividendPayableDateInfo,
     interfaces::bot::{self, telegram::Telegram},
 };
 
@@ -36,7 +41,7 @@ impl PayableBatchDividend {
 
 fn build_batch_dividend_message(
     today: NaiveDate,
-    stocks_payable_date_info: &[dividend::extension::stock_dividend_payable_date_info::StockDividendPayableDateInfo],
+    stocks_payable_date_info: &[StockDividendPayableDateInfo],
     holdings: &[StockOwnershipDetail],
 ) -> Option<String> {
     let mut grouped = BTreeMap::<(String, i64), PayableBatchDividend>::new();
@@ -118,8 +123,8 @@ fn build_batch_dividend_message(
 /// 提提醒本日發放股利的股票(只通知自已有的股票)
 pub async fn execute() -> Result<()> {
     let today: NaiveDate = Local::now().date_naive();
-    let stocks_payable_date_info =
-        dividend::extension::stock_dividend_payable_date_info::fetch(today).await?;
+    let dividend_repo = PgDividendRepository::new();
+    let stocks_payable_date_info = dividend_repo.fetch_payable_date_info_on_date(today).await?;
     if stocks_payable_date_info.is_empty() {
         return Ok(());
     }
@@ -170,7 +175,10 @@ pub async fn execute() -> Result<()> {
     //群內通知
     bot::telegram::send(&msg).await;
 
-    let holdings = StockOwnershipDetail::fetch(Some(stock_symbols)).await?;
+    let portfolio_repo = PgPortfolioRepository::new();
+    let holdings = portfolio_repo
+        .fetch_active_holdings(Some(stock_symbols))
+        .await?;
     if let Some(batch_msg) =
         build_batch_dividend_message(today, &stocks_payable_date_info, &holdings)
     {
@@ -196,7 +204,7 @@ mod tests {
         share_quantity: i64,
         date: (i32, u32, u32),
     ) -> StockOwnershipDetail {
-        let mut holding = StockOwnershipDetail::new();
+        let mut holding = StockOwnershipDetail::default();
         holding.serial = serial;
         holding.member_id = member_id;
         holding.security_code = security_code.to_string();
@@ -210,19 +218,17 @@ mod tests {
     #[test]
     fn test_build_batch_dividend_message_groups_by_stock_and_member() {
         let today = NaiveDate::from_ymd_opt(2026, 8, 20).unwrap();
-        let stocks = vec![
-            dividend::extension::stock_dividend_payable_date_info::StockDividendPayableDateInfo {
-                stock_symbol: "2330".to_string(),
-                name: "台積電".to_string(),
-                cash_dividend: dec!(3),
-                stock_dividend: dec!(0.2),
-                sum: dec!(3.2),
-                payable_date1: "2026-08-20".to_string(),
-                payable_date2: "2026-08-20".to_string(),
-                ex_dividend_date1: "2026-07-15".to_string(),
-                ex_dividend_date2: "2026-07-15".to_string(),
-            },
-        ];
+        let stocks = vec![StockDividendPayableDateInfo {
+            stock_symbol: "2330".to_string(),
+            name: "台積電".to_string(),
+            cash_dividend: dec!(3),
+            stock_dividend: dec!(0.2),
+            sum: dec!(3.2),
+            payable_date1: "2026-08-20".to_string(),
+            payable_date2: "2026-08-20".to_string(),
+            ex_dividend_date1: "2026-07-15".to_string(),
+            ex_dividend_date2: "2026-07-15".to_string(),
+        }];
         let holdings = vec![
             make_holding(11, 1, "2330", 1000, (2026, 7, 14)),
             make_holding(12, 2, "2330", 500, (2026, 7, 14)),

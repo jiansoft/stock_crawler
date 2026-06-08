@@ -6,36 +6,32 @@ use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 use rust_decimal::Decimal;
 
 use crate::{
-    app::calculation,
-    core::declare::Industry,
-    core::logging,
-    infra::crawler::twse,
-    infra::database::table::{dividend, stock_ownership_details::StockOwnershipDetail},
-    interfaces::bot,
-    interfaces::bot::telegram::Telegram,
+    app::calculation, core::declare::Industry, core::logging,
+    domain::dividend::repository::DividendRepository,
+    domain::portfolio::entity::StockOwnershipDetail,
+    domain::portfolio::repository::PortfolioRepository, infra::crawler::twse,
+    infra::database::repository::dividend::PgDividendRepository,
+    infra::database::repository::portfolio::PgPortfolioRepository,
+    infra::database::table::dividend::extension::stock_dividend_info::StockDividendInfo,
+    interfaces::bot, interfaces::bot::telegram::Telegram,
 };
 
 use super::{format_decimal_with_commas, format_share_quantity, member_label};
 
 /// 判斷一筆除權息資料是否屬於 ETF。
-fn is_etf(stock: &dividend::extension::stock_dividend_info::StockDividendInfo) -> bool {
+fn is_etf(stock: &StockDividendInfo) -> bool {
     stock.stock_industry_id == Industry::ExchangeTradedFund.serial()
 }
 
 /// 依殖利率由高到低比較兩筆除權息資料。
-fn compare_dividend_yield_desc(
-    a: &dividend::extension::stock_dividend_info::StockDividendInfo,
-    b: &dividend::extension::stock_dividend_info::StockDividendInfo,
-) -> std::cmp::Ordering {
+fn compare_dividend_yield_desc(a: &StockDividendInfo, b: &StockDividendInfo) -> std::cmp::Ordering {
     b.dividend_yield
         .partial_cmp(&a.dividend_yield)
         .unwrap_or(std::cmp::Ordering::Equal)
 }
 
 /// 將市場清單排序成「股票在前、ETF 在後」，各群組內再按殖利率降序。
-fn sort_market_dividend_info(
-    stocks_dividend_info: &mut [dividend::extension::stock_dividend_info::StockDividendInfo],
-) {
+fn sort_market_dividend_info(stocks_dividend_info: &mut [StockDividendInfo]) {
     stocks_dividend_info.sort_by(|a, b| match (is_etf(a), is_etf(b)) {
         (false, true) => std::cmp::Ordering::Less,
         (true, false) => std::cmp::Ordering::Greater,
@@ -47,7 +43,7 @@ fn sort_market_dividend_info(
 fn write_market_dividend_rows<'a>(
     msg: &mut String,
     title: &str,
-    stocks: impl Iterator<Item = &'a dividend::extension::stock_dividend_info::StockDividendInfo>,
+    stocks: impl Iterator<Item = &'a StockDividendInfo>,
 ) {
     let mut has_rows = false;
     for stock in stocks {
@@ -76,7 +72,7 @@ fn write_market_dividend_rows<'a>(
 fn build_market_dividend_message(
     date: NaiveDate,
     title: &str,
-    stocks_dividend_info: &[dividend::extension::stock_dividend_info::StockDividendInfo],
+    stocks_dividend_info: &[StockDividendInfo],
 ) -> String {
     let mut msg = String::with_capacity(2048);
     if writeln!(
@@ -110,7 +106,7 @@ fn build_market_dividend_message(
 /// 3. 只有今天真的發生除息/除權的欄位才納入本次預估。
 fn build_holding_dividend_message(
     today: NaiveDate,
-    stocks_dividend_info: &[dividend::extension::stock_dividend_info::StockDividendInfo],
+    stocks_dividend_info: &[StockDividendInfo],
     holdings: &[StockOwnershipDetail],
 ) -> Option<String> {
     // 先把今日除權息股票轉成查表結構，後續可用持股代號快速對應股利資料。
@@ -224,11 +220,11 @@ fn build_holding_dividend_message(
 }
 
 /// 取得並排序指定日期的市場除權息資料。
-async fn fetch_sorted_market_dividend_info(
-    date: NaiveDate,
-) -> Result<Vec<dividend::extension::stock_dividend_info::StockDividendInfo>> {
-    let mut stocks_dividend_info =
-        dividend::extension::stock_dividend_info::fetch_stocks_with_dividends_on_date(date).await?;
+async fn fetch_sorted_market_dividend_info(date: NaiveDate) -> Result<Vec<StockDividendInfo>> {
+    let dividend_repo = PgDividendRepository::new();
+    let mut stocks_dividend_info = dividend_repo
+        .fetch_stocks_with_dividends_on_date(date)
+        .await?;
 
     // 先顯示股票，再顯示 ETF；兩組內部各自按殖利率降序排序。
     sort_market_dividend_info(&mut stocks_dividend_info);
@@ -240,7 +236,7 @@ async fn fetch_sorted_market_dividend_info(
 async fn send_market_dividend_message(
     date: NaiveDate,
     title: &str,
-    stocks_dividend_info: &[dividend::extension::stock_dividend_info::StockDividendInfo],
+    stocks_dividend_info: &[StockDividendInfo],
 ) {
     if stocks_dividend_info.is_empty() {
         return;
@@ -377,7 +373,10 @@ pub async fn execute() -> Result<()> {
     calculation::dividend_record::execute(today.year(), Some(stock_symbols.clone())).await;
 
     // 重新讀取持股後，組第二則「分人分股」的預估股利通知。
-    let holdings = StockOwnershipDetail::fetch(Some(stock_symbols)).await?;
+    let portfolio_repo = PgPortfolioRepository::new();
+    let holdings = portfolio_repo
+        .fetch_active_holdings(Some(stock_symbols))
+        .await?;
     if let Some(holding_msg) =
         build_holding_dividend_message(today, &stocks_dividend_info, &holdings)
     {
@@ -463,7 +462,7 @@ mod tests {
     fn test_build_holding_dividend_message_groups_by_stock_and_member() {
         let today = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
         let stocks = vec![
-            dividend::extension::stock_dividend_info::StockDividendInfo {
+            StockDividendInfo {
                 stock_symbol: "2330".to_string(),
                 name: "台積電".to_string(),
                 stock_industry_id: Industry::Semiconductor.serial(),
@@ -476,7 +475,7 @@ mod tests {
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: false,
             },
-            dividend::extension::stock_dividend_info::StockDividendInfo {
+            StockDividendInfo {
                 stock_symbol: "2317".to_string(),
                 name: "鴻海".to_string(),
                 stock_industry_id: Industry::ElectronicComponents.serial(),
@@ -577,7 +576,7 @@ mod tests {
     fn test_market_dividend_message_groups_stocks_before_etfs_and_sorts_each_group_by_yield() {
         let today = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
         let mut stocks = vec![
-            dividend::extension::stock_dividend_info::StockDividendInfo {
+            StockDividendInfo {
                 stock_symbol: "0050".to_string(),
                 name: "元大台灣50".to_string(),
                 stock_industry_id: Industry::ExchangeTradedFund.serial(),
@@ -590,7 +589,7 @@ mod tests {
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: false,
             },
-            dividend::extension::stock_dividend_info::StockDividendInfo {
+            StockDividendInfo {
                 stock_symbol: "2317".to_string(),
                 name: "鴻海".to_string(),
                 stock_industry_id: Industry::ElectronicComponents.serial(),
@@ -603,7 +602,7 @@ mod tests {
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: false,
             },
-            dividend::extension::stock_dividend_info::StockDividendInfo {
+            StockDividendInfo {
                 stock_symbol: "00878".to_string(),
                 name: "國泰永續高股息".to_string(),
                 stock_industry_id: Industry::ExchangeTradedFund.serial(),
@@ -616,7 +615,7 @@ mod tests {
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: false,
             },
-            dividend::extension::stock_dividend_info::StockDividendInfo {
+            StockDividendInfo {
                 stock_symbol: "2330".to_string(),
                 name: "台積電".to_string(),
                 stock_industry_id: Industry::Semiconductor.serial(),
