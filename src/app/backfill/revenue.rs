@@ -4,7 +4,7 @@ use crate::{
     core::util,
     infra::cache::SHARE,
     infra::crawler::twse,
-    infra::database::{table, table::revenue},
+    infra::database::table,
 };
 use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
@@ -31,6 +31,10 @@ pub async fn execute() -> Result<()> {
 }
 
 async fn process_revenues(last_month_timezone: chrono::DateTime<FixedOffset>) -> Result<()> {
+    use crate::domain::financial::repository::FinancialRepository;
+    use crate::infra::database::repository::financial::PgFinancialRepository;
+
+    let financial_repo = PgFinancialRepository::new();
     let year = last_month_timezone.year();
     let month = last_month_timezone.month();
 
@@ -45,7 +49,7 @@ async fn process_revenues(last_month_timezone: chrono::DateTime<FixedOffset>) ->
         })
         .await;
 
-    revenue::rebuild_revenue_last_date().await?;
+    financial_repo.rebuild_revenue_last_date().await?;
 
     Ok(())
 }
@@ -55,19 +59,27 @@ pub(crate) async fn process_revenue(
     year: i32,
     month: i32,
 ) -> Result<()> {
-    let mut revenue_entity = RevenueAclMapper::from_command(&cmd);
+    use crate::domain::financial::entity::MonthlyRevenue as DomainMonthlyRevenue;
+    use crate::domain::financial::repository::FinancialRepository;
+    use crate::infra::database::repository::financial::PgFinancialRepository;
+
+    let financial_repo = PgFinancialRepository::new();
+    let mut table_entity = RevenueAclMapper::from_command(&cmd);
 
     if let Ok(dq) =
         table::daily_quote::fetch_monthly_stock_price_summary(&cmd.symbol, year, month).await
     {
-        revenue_entity.lowest_price = dq.lowest_price;
-        revenue_entity.avg_price = dq.avg_price;
-        revenue_entity.highest_price = dq.highest_price;
+        table_entity.lowest_price = dq.lowest_price;
+        table_entity.avg_price = dq.avg_price;
+        table_entity.highest_price = dq.highest_price;
     }
 
-    revenue_entity.upsert().await?;
+    // 轉成領域實體進行儲存
+    let domain_entity = DomainMonthlyRevenue::from(table_entity.clone());
+    financial_repo.save_monthly_revenue(&domain_entity).await?;
 
-    SHARE.set_last_revenues(revenue_entity.clone());
+    // 快取維持使用原 Table 實體以維持相容性
+    SHARE.set_last_revenues(table_entity.clone());
 
     let name = match SHARE.get_stock(&cmd.symbol).await {
         None => String::from("-"),
@@ -82,9 +94,9 @@ pub(crate) async fn process_revenue(
             cmd.monthly,
             cmd.last_month,
             cmd.last_year_this_month,
-            revenue_entity.avg_price,
-            revenue_entity.lowest_price,
-            revenue_entity.highest_price));
+            table_entity.avg_price,
+            table_entity.lowest_price,
+            table_entity.highest_price));
 
     Ok(())
 }

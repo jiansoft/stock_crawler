@@ -12,11 +12,8 @@ use chrono::Local;
 use futures::StreamExt;
 
 use crate::{
-    app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
-    app::calculation,
-    core::logging,
-    core::util::{datetime::ReportQuarter, map::Keyable},
-    infra::crawler::yahoo,
+    app::backfill::financial_statement::update_roe_and_roa_for_zero_values, app::calculation,
+    core::logging, core::util::datetime::ReportQuarter, infra::crawler::yahoo,
     infra::database::table,
 };
 
@@ -56,13 +53,17 @@ pub async fn execute() -> Result<()> {
 /// 使用 `futures::stream` 併發呼叫 Yahoo 財經爬取 Profile 資料，
 /// 爬取完成後再一次批量 Upsert 入庫，大幅減少資料庫連線延遲，並降低 Yahoo 連線之 sequential 阻塞。
 async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
+    use crate::domain::financial::entity::FinancialStatement as DomainFinancialStatement;
+    use crate::domain::financial::repository::FinancialRepository;
+    use crate::infra::database::repository::financial::PgFinancialRepository;
+
+    let financial_repo = PgFinancialRepository::new();
     let quarter = target_report.quarter.to_string();
+
     // 找出該季度中 ROE 或 ROA 為 0 的財報清單
-    let fss = table::financial_statement::fetch_roe_or_roa_equal_to_zero(
-        Some(target_report.year),
-        Some(target_report.quarter),
-    )
-    .await?;
+    let fss = financial_repo
+        .fetch_roe_or_roa_equal_to_zero(Some(target_report.year), Some(target_report.quarter))
+        .await?;
 
     // 建立併發爬取的 async stream，並限制併發數量上限為 5
     let mut stream = futures::stream::iter(fss)
@@ -70,7 +71,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
             let target_report: ReportQuarter = target_report;
             let quarter = quarter.clone();
             async move {
-                let cache_key = fs.key_with_prefix();
+                let cache_key = format!("FinancialStatement:{}-{}-{}", fs.security_code, fs.year, fs.quarter);
                 let profile_skip_cache_key = yahoo::profile::no_valid_data_cache_key(&fs.security_code);
 
                 // 檢查 Redis 狀態，決定是否跳過（例如先前已處理過，或是已知無有效資料的股票）
@@ -134,8 +135,10 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
                     ));
                 }
 
-                // 建立新的財報結構體
-                let new_fs = table::financial_statement::FinancialStatement::from(profile);
+                // 建立新的領域財報結構體
+                let new_fs = DomainFinancialStatement::from(
+                    table::financial_statement::FinancialStatement::from(profile)
+                );
                 Some((new_fs, cache_key))
             }
         })
@@ -157,7 +160,9 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
     // 如果有成功爬取的財報資料，執行批量 Upsert 寫入資料庫，並更新對應的 Redis 快取
     if !scraped_statements.is_empty() {
         // 批量寫入資料庫
-        table::financial_statement::FinancialStatement::batch_upsert(&scraped_statements).await?;
+        financial_repo
+            .batch_save_financial_statements(&scraped_statements)
+            .await?;
         logging::debug_file_async(format!(
             "financial_statement batch_upsert executed successfully for {} records.",
             scraped_statements.len()

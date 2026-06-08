@@ -96,6 +96,11 @@ async fn process_eps(
     quarter: crate::core::declare::Quarter,
     without_financial_stocks: &HashMap<String, StockDbRow>,
 ) -> Result<()> {
+    use crate::domain::financial::entity::FinancialStatement as DomainFinancialStatement;
+    use crate::domain::financial::repository::FinancialRepository;
+    use crate::infra::database::repository::financial::PgFinancialRepository;
+
+    let financial_repo = PgFinancialRepository::new();
     let eps = twse::eps::visit(market, year, quarter).await?;
 
     for mut e in eps {
@@ -107,15 +112,15 @@ async fn process_eps(
         if e.quarter != crate::core::declare::Quarter::Q1 {
             // Q2~Q4 在來源站通常是累計 EPS，需扣掉前面季度後還原為單季值。
             let smaller_quarters = quarter.smaller_quarters();
-            let before_eps =
-                financial_statement::fetch_cumulative_eps(&e.stock_symbol, year, smaller_quarters)
-                    .await?;
+            let before_eps = financial_repo
+                .fetch_cumulative_eps(&e.stock_symbol, year, smaller_quarters)
+                .await?;
             e.earnings_per_share -= before_eps;
         }
 
-        let fs = financial_statement::FinancialStatement::from(e);
+        let fs = DomainFinancialStatement::from(financial_statement::FinancialStatement::from(e));
 
-        if let Err(why) = fs.upsert_earnings_per_share().await {
+        if let Err(why) = financial_repo.save_earnings_per_share(&fs).await {
             logging::error_file_async(format!("{:?}", why));
         }
 

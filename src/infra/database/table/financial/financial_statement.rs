@@ -18,8 +18,8 @@ use crate::{
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Deserialize, Serialize)]
 /// 財務報表
 pub struct FinancialStatement {
-    updated_time: DateTime<Local>,
-    created_time: DateTime<Local>,
+    pub updated_time: DateTime<Local>,
+    pub created_time: DateTime<Local>,
     /// 季度 Q4 Q3 Q2 Q1
     pub quarter: String,
     /// 股票代號。
@@ -44,7 +44,7 @@ pub struct FinancialStatement {
     pub return_on_equity: Decimal,
     /// 資產報酬率
     pub return_on_assets: Decimal,
-    serial: i64,
+    pub serial: i64,
     /// 年度
     pub year: i64,
 }
