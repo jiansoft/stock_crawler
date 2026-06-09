@@ -5,11 +5,12 @@ use chrono::Local;
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use rust_decimal_macros::dec;
 
+use crate::domain::quote::repository::QuoteRepository;
 use crate::interfaces::bot::telegram::Telegram;
 use crate::{
     core::declare,
     core::util::{convert::FromValue, map::Keyable},
-    infra::cache::SHARE,
+    infra::database::repository::quote::PgQuoteRepository,
     interfaces::bot,
 };
 
@@ -35,7 +36,9 @@ pub async fn execute() -> Result<()> {
                     continue;
                 }
 
-                let stock_last_price = SHARE.get_stock_last_price(&stock.stock_symbol).await;
+                // 實例化報價倉儲，並獲取個股最新收盤價（封裝雙層快取策略）
+                let quote_repo = PgQuoteRepository::new();
+                let stock_last_price = quote_repo.fetch_last_quote(&stock.stock_symbol).await?;
                 let last_price = match stock_last_price {
                     None => String::from(" - "),
                     Some(last_quote) => match last_quote.closing_price.to_f64() {
@@ -98,6 +101,7 @@ fn calculate_price_change(offering_price: Decimal, last_price: Decimal) -> Strin
 #[cfg(test)]
 mod tests {
     use crate::core::logging;
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

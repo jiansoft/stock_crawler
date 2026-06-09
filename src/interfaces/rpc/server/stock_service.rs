@@ -8,8 +8,10 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     core::logging,
+    domain::quote::repository::QuoteRepository,
     infra::cache::SHARE,
     infra::crawler::twse,
+    infra::database::repository::quote::PgQuoteRepository,
     interfaces::rpc::stock::{
         stock_server::Stock, HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest,
         StockInfoReply, StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest,
@@ -119,8 +121,9 @@ async fn fetch_current_quotes_for_symbol(stock_symbol: &str) -> Option<StockQuot
         });
     }
 
-    // 2. 若無即時報價，則從最後交易日報價取得 (作為備援)
-    if let Some(last_quote) = SHARE.get_stock_last_price(stock_symbol).await {
+    // 2. 若無即時報價，則從最後交易日報價取得 (作為備援，封裝雙層快取策略)
+    let quote_repo = PgQuoteRepository::new();
+    if let Ok(Some(last_quote)) = quote_repo.fetch_last_quote(stock_symbol).await {
         return Some(StockQuotes {
             stock_symbol: stock_symbol.to_string(),
             price: last_quote.closing_price.to_f64().unwrap_or_default(),
