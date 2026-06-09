@@ -1,26 +1,18 @@
-use std::fmt::Write;
-
 use crate::{
     app::backfill,
     app::calculation,
     core::logging,
-    domain::money_flow::{entity::MoneyFlowMemberWithPreviousDay, repository::MoneyFlowRepository},
     domain::quote::repository::QuoteRepository,
     infra::cache::{TtlCacheInner, TTL},
     infra::crawler,
     infra::database::{
-        repository::{money_flow::PgMoneyFlowRepository, quote::PgQuoteRepository},
+        repository::quote::PgQuoteRepository,
         table::{daily_quote, yield_rank::YieldRank},
     },
-    interfaces::bot::{self, telegram::Telegram},
 };
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use scopeguard::defer;
-
-use super::{format_decimal_with_fixed_two_commas as format_decimal_with_commas, member_label};
 
 /// 台股收盤事件發生時要進行的事情
 pub async fn execute() -> Result<()> {
@@ -105,83 +97,14 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
     // 清除記憶與Redis內所有的快取
     TTL.clear();
 
-    //發送通知本日與前一個交易日的市值變化
-    notify_money_change(date).await
-}
-
-fn format_money_change_line(
-    label: &str,
-    market_value: Decimal,
-    previous_market_value: Decimal,
-) -> String {
-    let diff = market_value - previous_market_value;
-    let percentage = if previous_market_value.is_zero() {
-        "N/A".to_string()
-    } else {
-        format_decimal_with_commas((diff / previous_market_value) * dec!(100))
-    };
-
-    format!(
-        "{}:{} {} \\({}%\\)",
-        Telegram::escape_markdown_v2(label),
-        Telegram::escape_markdown_v2(format_decimal_with_commas(market_value)),
-        Telegram::escape_markdown_v2(format_decimal_with_commas(diff)),
-        Telegram::escape_markdown_v2(percentage),
-    )
-}
-
-fn build_money_change_message(rows: &[MoneyFlowMemberWithPreviousDay]) -> Option<String> {
-    // 取得最新一天的日期
-    let date = rows.first()?.date;
-    let mut msg = String::with_capacity(256);
-    // 輸出訊息的標題
-    let _ = writeln!(
-        &mut msg,
-        "{} 市值變化",
-        Telegram::escape_markdown_v2(date.to_string())
-    );
-
-    // 尋找合計的列 (member_id = 0)
-    if let Some(total_row) = rows.iter().find(|row| row.member_id == 0) {
-        // 格式化合計行
-        let _ = writeln!(
-            &mut msg,
-            "{}",
-            format_money_change_line(
-                "合計",
-                total_row.market_value,
-                total_row.previous_market_value
-            )
-        );
-    }
-
-    // 依序格式化個別會員的行 (member_id > 0)
-    for row in rows.iter().filter(|row| row.member_id > 0) {
-        let _ = writeln!(
-            &mut msg,
-            "{}",
-            format_money_change_line(
-                &member_label(row.member_id),
-                row.market_value,
-                row.previous_market_value,
-            )
-        );
-    }
-
-    Some(msg.trim_end().to_string())
-}
-
-async fn notify_money_change(date: NaiveDate) -> Result<()> {
-    // 實例化資金流向倉儲
-    let money_flow_repo = PgMoneyFlowRepository::new();
-    // 透過倉儲獲取會員收盤與前日市值之對照資料
-    let rows = money_flow_repo
-        .fetch_member_money_history_with_previous_day(date)
-        .await?;
-    // 建立通知內容並發送 Telegram 訊息
-    if let Some(msg) = build_money_change_message(&rows) {
-        bot::telegram::send(&msg).await;
-    }
+    // 派發領域事件以非同步處理本日與前一個交易日的市值變化通知
+    let dispatcher = crate::app::event::get_global_dispatcher();
+    dispatcher
+        .dispatch_async(vec![crate::domain::events::DomainEvent::MoneyFlowRecalculated {
+            date,
+            occurred_at: chrono::Local::now(),
+        }])
+        .await;
 
     Ok(())
 }
@@ -190,17 +113,9 @@ async fn notify_money_change(date: NaiveDate) -> Result<()> {
 mod tests {
     use crate::{core::logging, infra::cache::SHARE};
     use std::time::Duration;
-
-    use rust_decimal_macros::dec;
-
     use super::*;
 
     /// 每日收盤事件主要匯總流程的整合測試。
-    ///
-    /// 此測試用來手動驗證 [`aggregate`] 是否能完整串起每日收盤資料回補、缺漏補齊、
-    /// 均線、最後交易日報價、估價、殖利率排行、市值重算與市值通知前置資料。
-    /// 因為會呼叫外部資料來源並寫入資料庫，所以標記為 `#[ignore]`，
-    /// 需要時請用 `cargo test event::taiwan_stock::closing::tests::test_aggregate -- --ignored --nocapture` 執行。
     #[tokio::test]
     #[ignore]
     async fn test_aggregate() {
@@ -228,89 +143,6 @@ mod tests {
         logging::debug_file_async("結束 event::taiwan_stock::closing::aggregate".to_string());
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_notify_money_change() {
-        dotenv::dotenv().ok();
-        SHARE.load().await;
-
-        logging::debug_file_async(
-            "開始 event::taiwan_stock::closing::notify_money_change".to_string(),
-        );
-
-        let current_date = Local::now().date_naive();
-
-        match notify_money_change(current_date).await {
-            Ok(_) => {
-                logging::debug_file_async(
-                    "event::taiwan_stock::closing::notify_money_change 完成".to_string(),
-                );
-            }
-            Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to event::taiwan_stock::closing::notify_money_change because {:?}",
-                    why
-                ));
-            }
-        }
-
-        logging::debug_file_async(
-            "結束 event::taiwan_stock::closing::notify_money_change".to_string(),
-        );
-    }
-
-    #[test]
-    fn test_build_money_change_message_includes_hugo() {
-        let date = NaiveDate::parse_from_str("2026-04-02", "%Y-%m-%d").unwrap();
-        let previous_date = NaiveDate::parse_from_str("2026-04-01", "%Y-%m-%d").unwrap();
-        let rows = vec![
-            MoneyFlowMemberWithPreviousDay {
-                date,
-                previous_date: Some(previous_date),
-                member_id: 0,
-                market_value: dec!(4273187.20),
-                previous_market_value: dec!(4053774.55),
-            },
-            MoneyFlowMemberWithPreviousDay {
-                date,
-                previous_date: Some(previous_date),
-                member_id: 1,
-                market_value: dec!(2195395.10),
-                previous_market_value: dec!(2207807.70),
-            },
-            MoneyFlowMemberWithPreviousDay {
-                date,
-                previous_date: Some(previous_date),
-                member_id: 2,
-                market_value: dec!(1500000.00),
-                previous_market_value: dec!(1400000.00),
-            },
-            MoneyFlowMemberWithPreviousDay {
-                date,
-                previous_date: Some(previous_date),
-                member_id: 3,
-                market_value: dec!(577792.10),
-                previous_market_value: dec!(445966.85),
-            },
-        ];
-
-        let msg = build_money_change_message(&rows).expect("message should be built");
-
-        assert!(msg.contains("合計"));
-        assert!(msg.contains("Eddie"));
-        assert!(msg.contains("Unice"));
-        assert!(msg.contains("Hugo"));
-        assert!(msg.contains("4,273,187\\.20"));
-        assert!(msg.contains("577,792\\.10"));
-        assert!(msg.contains("\\-12,412\\.60"));
-    }
-
-    #[test]
-    fn test_format_decimal_with_commas() {
-        assert_eq!(format_decimal_with_commas(dec!(4273187.20)), "4,273,187.20");
-        assert_eq!(format_decimal_with_commas(dec!(-12412.6)), "-12,412.60");
-        assert_eq!(format_decimal_with_commas(dec!(5.41)), "5.41");
-        assert_eq!(format_decimal_with_commas(dec!(0)), "0.00");
-    }
 }
+
+
