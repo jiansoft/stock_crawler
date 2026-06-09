@@ -4,3 +4,5 @@ pub mod handlers;
 pub mod taiwan_stock;
 /// 追踪 ex.即時股價是否達到高低標
 pub mod trace;
+
+pub use handlers::get_global_dispatcher;

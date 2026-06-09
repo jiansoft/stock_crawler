@@ -72,4 +72,26 @@ pub enum DomainEvent {
         /// 事件發生時間
         occurred_at: DateTime<Local>,
     },
+
+    /// <summary>
+    /// 當每日帳戶市值重新計算與儲存完成時觸發。
+    /// </summary>
+    MoneyFlowRecalculated {
+        /// 市值重算的基準日期
+        date: chrono::NaiveDate,
+        /// 事件發生時間
+        occurred_at: DateTime<Local>,
+    },
+
+    /// <summary>
+    /// 當每日除權息提醒事件觸發時觸發。
+    /// </summary>
+    ExDividendReminderTriggered {
+        /// 提醒基準日期 (今日交易日)
+        date: chrono::NaiveDate,
+        /// 下一個交易日日期
+        next_trading_date: chrono::NaiveDate,
+        /// 事件發生時間
+        occurred_at: DateTime<Local>,
+    },
 }
