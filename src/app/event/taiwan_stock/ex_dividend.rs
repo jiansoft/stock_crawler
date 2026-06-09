@@ -3,10 +3,7 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 
-use crate::{
-    core::logging,
-    infra::crawler::twse,
-};
+use crate::{core::logging, infra::crawler::twse};
 
 /// 取得指定年份的交易所休市日集合。
 ///
@@ -105,11 +102,13 @@ pub async fn execute() -> Result<()> {
     // 派發除權息提醒領域事件以進行非同步背景通知與記錄處理
     let dispatcher = crate::app::event::get_global_dispatcher();
     dispatcher
-        .dispatch_async(vec![crate::domain::events::DomainEvent::ExDividendReminderTriggered {
-            date: today,
-            next_trading_date: next_trading,
-            occurred_at: Local::now(),
-        }])
+        .dispatch_async(vec![
+            crate::domain::events::DomainEvent::ExDividendReminderTriggered {
+                date: today,
+                next_trading_date: next_trading,
+                occurred_at: Local::now(),
+            },
+        ])
         .await;
 
     Ok(())

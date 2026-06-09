@@ -100,10 +100,12 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
     // 派發領域事件以非同步處理本日與前一個交易日的市值變化通知
     let dispatcher = crate::app::event::get_global_dispatcher();
     dispatcher
-        .dispatch_async(vec![crate::domain::events::DomainEvent::MoneyFlowRecalculated {
-            date,
-            occurred_at: chrono::Local::now(),
-        }])
+        .dispatch_async(vec![
+            crate::domain::events::DomainEvent::MoneyFlowRecalculated {
+                date,
+                occurred_at: chrono::Local::now(),
+            },
+        ])
         .await;
 
     Ok(())
@@ -111,9 +113,9 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{core::logging, infra::cache::SHARE};
     use std::time::Duration;
-    use super::*;
 
     /// 每日收盤事件主要匯總流程的整合測試。
     #[tokio::test]
@@ -144,5 +146,3 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
-
-

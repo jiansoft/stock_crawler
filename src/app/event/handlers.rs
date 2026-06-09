@@ -13,28 +13,27 @@ use tokio::sync::Mutex;
 use anyhow::Result;
 use tokio::sync::mpsc;
 
-use crate::core::logging;
-use crate::domain::events::DomainEvent;
 use crate::app::event::taiwan_stock::{
-    member_label,
-    format_decimal_with_fixed_two_commas as format_decimal_with_commas,
     format_decimal_with_commas as format_decimal_flexible_commas,
-    format_share_quantity,
+    format_decimal_with_fixed_two_commas as format_decimal_with_commas, format_share_quantity,
+    member_label,
 };
-use crate::domain::money_flow::repository::MoneyFlowRepository;
-use crate::infra::database::repository::money_flow::PgMoneyFlowRepository;
+use crate::core::declare::Industry;
+use crate::core::logging;
 use crate::domain::dividend::repository::DividendRepository;
-use crate::infra::database::repository::dividend::PgDividendRepository;
+use crate::domain::events::DomainEvent;
+use crate::domain::money_flow::repository::MoneyFlowRepository;
+use crate::domain::portfolio::entity::StockOwnershipDetail;
 use crate::domain::portfolio::repository::PortfolioRepository;
+use crate::infra::database::repository::dividend::PgDividendRepository;
+use crate::infra::database::repository::money_flow::PgMoneyFlowRepository;
 use crate::infra::database::repository::portfolio::PgPortfolioRepository;
 use crate::infra::database::table::dividend::extension::stock_dividend_info::StockDividendInfo;
-use crate::domain::portfolio::entity::StockOwnershipDetail;
-use crate::core::declare::Industry;
 use crate::interfaces::bot::telegram::Telegram;
 use chrono::Datelike;
+use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::fmt::Write;
-use rust_decimal::Decimal;
 
 /// 全域事件派發器實例，使用 `OnceLock` 確保只初始化一次。
 static EVENT_DISPATCHER: OnceLock<EventDispatcher> = OnceLock::new();
@@ -261,7 +260,11 @@ impl EventDispatcher {
             DomainEvent::MoneyFlowRecalculated { date, .. } => {
                 Self::handle_money_flow_recalculated(date).await?;
             }
-            DomainEvent::ExDividendReminderTriggered { date, next_trading_date, .. } => {
+            DomainEvent::ExDividendReminderTriggered {
+                date,
+                next_trading_date,
+                ..
+            } => {
                 Self::handle_ex_dividend_reminder_triggered(date, next_trading_date).await?;
             }
         }
@@ -317,7 +320,9 @@ impl EventDispatcher {
         let percentage = if previous_market_value.is_zero() {
             "N/A".to_string()
         } else {
-            format_decimal_with_commas((diff / previous_market_value) * rust_decimal_macros::dec!(100))
+            format_decimal_with_commas(
+                (diff / previous_market_value) * rust_decimal_macros::dec!(100),
+            )
         };
 
         format!(
@@ -331,7 +336,7 @@ impl EventDispatcher {
 
     /// 組裝市值變化 Telegram 訊息。
     fn build_money_change_message(
-        rows: &[crate::domain::money_flow::entity::MoneyFlowMemberWithPreviousDay]
+        rows: &[crate::domain::money_flow::entity::MoneyFlowMemberWithPreviousDay],
     ) -> Option<String> {
         let date = rows.first()?.date;
         let mut msg = String::with_capacity(256);
@@ -411,7 +416,8 @@ impl EventDispatcher {
         }
 
         // 更新這批股票對應持股的股利記錄
-        crate::app::calculation::dividend_record::execute(date.year(), Some(stock_symbols.clone())).await;
+        crate::app::calculation::dividend_record::execute(date.year(), Some(stock_symbols.clone()))
+            .await;
 
         // 重新讀取持股後，組「分人分股」的預估股利通知
         let portfolio_repo = PgPortfolioRepository::new();
@@ -446,7 +452,10 @@ impl EventDispatcher {
     }
 
     /// 依殖利率由高到低比較兩筆除權息資料。
-    fn compare_dividend_yield_desc(a: &StockDividendInfo, b: &StockDividendInfo) -> std::cmp::Ordering {
+    fn compare_dividend_yield_desc(
+        a: &StockDividendInfo,
+        b: &StockDividendInfo,
+    ) -> std::cmp::Ordering {
         b.dividend_yield
             .partial_cmp(&a.dividend_yield)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -507,12 +516,16 @@ impl EventDispatcher {
             Self::write_market_dividend_rows(
                 &mut msg,
                 "股票",
-                stocks_dividend_info.iter().filter(|stock| !Self::is_etf(stock)),
+                stocks_dividend_info
+                    .iter()
+                    .filter(|stock| !Self::is_etf(stock)),
             );
             Self::write_market_dividend_rows(
                 &mut msg,
                 "ETF",
-                stocks_dividend_info.iter().filter(|stock| Self::is_etf(stock)),
+                stocks_dividend_info
+                    .iter()
+                    .filter(|stock| Self::is_etf(stock)),
             );
         }
 
@@ -543,7 +556,8 @@ impl EventDispatcher {
             .iter()
             .map(|stock| (stock.stock_symbol.as_str(), stock))
             .collect::<std::collections::HashMap<_, _>>();
-        let mut grouped = BTreeMap::<(String, i64), (String, i64, Decimal, Decimal, Decimal)>::new();
+        let mut grouped =
+            BTreeMap::<(String, i64), (String, i64, Decimal, Decimal, Decimal)>::new();
 
         for holding in holdings
             .iter()
@@ -908,9 +922,9 @@ mod tests {
 
     #[test]
     fn test_build_money_change_message_includes_hugo() {
-        use rust_decimal_macros::dec;
-        use chrono::NaiveDate;
         use crate::domain::money_flow::entity::MoneyFlowMemberWithPreviousDay;
+        use chrono::NaiveDate;
+        use rust_decimal_macros::dec;
 
         let date = NaiveDate::parse_from_str("2026-04-02", "%Y-%m-%d").unwrap();
         let previous_date = NaiveDate::parse_from_str("2026-04-01", "%Y-%m-%d").unwrap();
@@ -945,7 +959,8 @@ mod tests {
             },
         ];
 
-        let msg = EventDispatcher::build_money_change_message(&rows).expect("message should be built");
+        let msg =
+            EventDispatcher::build_money_change_message(&rows).expect("message should be built");
 
         assert!(msg.contains("合計"));
         assert!(msg.contains("Eddie"));
@@ -958,9 +973,9 @@ mod tests {
 
     #[test]
     fn test_build_holding_dividend_message_groups_by_stock_and_member() {
-        use rust_decimal_macros::dec;
-        use chrono::{NaiveDate, TimeZone, Local};
         use crate::domain::portfolio::entity::StockOwnershipDetail;
+        use chrono::{Local, NaiveDate, TimeZone};
+        use rust_decimal_macros::dec;
 
         let today = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
         let stocks = vec![
@@ -1054,7 +1069,8 @@ mod tests {
             },
         ];
 
-        let msg = EventDispatcher::build_holding_dividend_message(today, &stocks, &holdings).unwrap();
+        let msg =
+            EventDispatcher::build_holding_dividend_message(today, &stocks, &holdings).unwrap();
 
         assert!(msg.contains("2330"));
         assert!(msg.contains("Eddie"));
@@ -1076,8 +1092,8 @@ mod tests {
 
     #[test]
     fn test_market_dividend_message_groups_stocks_before_etfs_and_sorts_each_group_by_yield() {
-        use rust_decimal_macros::dec;
         use chrono::NaiveDate;
+        use rust_decimal_macros::dec;
 
         let today = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
         let mut stocks = vec![
@@ -1136,7 +1152,11 @@ mod tests {
         ];
 
         EventDispatcher::sort_market_dividend_info(&mut stocks);
-        let msg = EventDispatcher::build_market_dividend_message(today, "進行除權息的股票與 ETF 如下︰", &stocks);
+        let msg = EventDispatcher::build_market_dividend_message(
+            today,
+            "進行除權息的股票與 ETF 如下︰",
+            &stocks,
+        );
 
         let stock_section = msg.find("股票︰").unwrap();
         let etf_section = msg.find("ETF︰").unwrap();
