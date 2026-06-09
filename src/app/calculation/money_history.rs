@@ -1,93 +1,23 @@
-use anyhow::{anyhow, Result};
+use crate::domain::money_flow::repository::MoneyFlowRepository;
+use crate::infra::database::repository::money_flow::PgMoneyFlowRepository;
+use anyhow::Result;
 use chrono::NaiveDate;
-
-use crate::infra::database::table::{
-    daily_money_history::DailyMoneyHistory, daily_money_history_detail::DailyMoneyHistoryDetail,
-    daily_money_history_detail_more::DailyMoneyHistoryDetailMore,
-    daily_money_history_member::DailyMoneyHistoryMember,
-    daily_stock_price_stats::DailyStockPriceStats,
-};
 
 /// 計算並重建指定交易日的帳戶市值相關資料。
 ///
 /// 這個方法會在台股收盤匯總流程
-/// (`event::taiwan_stock::closing::aggregate`) 中被呼叫，並依序更新：
-/// 1. `daily_money_history`：當日市值總覽（總額、Eddie、Unice）
-/// 2. `daily_money_history_member`：會員垂直總覽（member_id 維度，可擴充）
-/// 3. `daily_money_history_detail`：持股層級明細
-/// 4. `daily_money_history_detail_more`：交易批次層級明細
-/// 5. `daily_stock_price_stats`：當日全市場估值/均線統計
+/// (`event::taiwan_stock::closing::aggregate`) 中被呼叫。
 ///
-/// `daily_money_history_detail_more` 會依賴 `daily_money_history_detail`，
-/// 因此順序不可顛倒，且 detail 類資料採「先刪除再重建」以避免殘留舊資料。
+/// 重構後，本方法已完全 DDD 化，所有資料庫 Transaction 控制與多張市值表的重建寫入
+/// 皆已被內聚封裝至 [`PgMoneyFlowRepository`]，此處僅呼叫倉儲合約。
 ///
 /// # Errors
-/// 任一步驟失敗都會回滾 transaction（若已建立），並回傳錯誤。
+/// 當倉儲內部的任何寫入步驟失敗時，會自動 Rollback 並回傳錯誤。
 pub async fn calculate_money_history(date: NaiveDate) -> Result<()> {
-    // 這個流程會一次更新多張互相依賴的資料表，必須先取得 transaction；
-    // 若無法 BEGIN 就直接回傳錯誤，避免退回非交易模式後留下部分更新。
-    let mut tx_option = Some(crate::infra::database::get_tx().await?);
-
-    // 1) 先寫入當日市值總覽，供後續明細與通知流程使用。
-    if let Err(why) = DailyMoneyHistory::upsert(date, &mut tx_option).await {
-        if let Some(tx) = tx_option {
-            tx.rollback().await?;
-        }
-        return Err(anyhow!("{:?}", why));
-    }
-
-    // 2) 寫入會員垂直總覽，保留舊表相容性的同時支援未來新會員。
-    if let Err(why) = DailyMoneyHistoryMember::upsert(date, &mut tx_option).await {
-        if let Some(tx) = tx_option {
-            tx.rollback().await?;
-        }
-        return Err(anyhow!("{:?}", why));
-    }
-
-    // 3) 先清掉當日舊明細，再重建持股層級資料，避免重複與髒資料。
-    if let Err(why) = DailyMoneyHistoryDetail::delete(date, &mut tx_option).await {
-        if let Some(tx) = tx_option {
-            tx.rollback().await?;
-        }
-        return Err(anyhow!("{:?}", why));
-    }
-
-    if let Err(why) = DailyMoneyHistoryDetail::upsert(date, &mut tx_option).await {
-        if let Some(tx) = tx_option {
-            tx.rollback().await?;
-        }
-        return Err(anyhow!("{:?}", why));
-    }
-
-    // 4) 明細延伸表依賴 daily_money_history_detail，因此必須在其後重建。
-    if let Err(why) = DailyMoneyHistoryDetailMore::delete(date, &mut tx_option).await {
-        if let Some(tx) = tx_option {
-            tx.rollback().await?;
-        }
-        return Err(anyhow!("{:?}", why));
-    }
-
-    if let Err(why) = DailyMoneyHistoryDetailMore::upsert(date, &mut tx_option).await {
-        if let Some(tx) = tx_option {
-            tx.rollback().await?;
-        }
-        return Err(anyhow!("{:?}", why));
-    }
-
-    // 5) 最後更新當日市場統計，確保收盤流程可直接使用最新數據。
-    if let Err(why) = DailyStockPriceStats::upsert(date, &mut tx_option).await {
-        if let Some(tx) = tx_option {
-            tx.rollback().await?;
-        }
-        return Err(anyhow!("{:?}", why));
-    }
-
-    // 以上步驟都成功才提交，確保跨表資料為同一版本。
-    if let Some(tx) = tx_option {
-        tx.commit().await?;
-    }
-
-    Ok(())
+    // 實例化資金流向與帳戶市值倉儲
+    let repo = PgMoneyFlowRepository::new();
+    // 呼叫倉儲提供的交易式重算與存檔合約
+    repo.recalculate_and_save_money_flow(date).await
 }
 
 #[cfg(test)]

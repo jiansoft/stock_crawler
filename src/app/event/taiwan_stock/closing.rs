@@ -4,18 +4,13 @@ use crate::{
     app::backfill,
     app::calculation,
     core::logging,
+    domain::money_flow::{entity::MoneyFlowMemberWithPreviousDay, repository::MoneyFlowRepository},
     domain::quote::repository::QuoteRepository,
     infra::cache::{TtlCacheInner, TTL},
     infra::crawler,
     infra::database::{
-        repository::quote::PgQuoteRepository,
-        table::{
-            daily_money_history_member::{
-                DailyMoneyHistoryMember, DailyMoneyHistoryMemberWithPreviousTradingDay,
-            },
-            daily_quote,
-            yield_rank::YieldRank,
-        },
+        repository::{money_flow::PgMoneyFlowRepository, quote::PgQuoteRepository},
+        table::{daily_quote, yield_rank::YieldRank},
     },
     interfaces::bot::{self, telegram::Telegram},
 };
@@ -135,18 +130,20 @@ fn format_money_change_line(
     )
 }
 
-fn build_money_change_message(
-    rows: &[DailyMoneyHistoryMemberWithPreviousTradingDay],
-) -> Option<String> {
+fn build_money_change_message(rows: &[MoneyFlowMemberWithPreviousDay]) -> Option<String> {
+    // 取得最新一天的日期
     let date = rows.first()?.date;
     let mut msg = String::with_capacity(256);
+    // 輸出訊息的標題
     let _ = writeln!(
         &mut msg,
         "{} 市值變化",
         Telegram::escape_markdown_v2(date.to_string())
     );
 
+    // 尋找合計的列 (member_id = 0)
     if let Some(total_row) = rows.iter().find(|row| row.member_id == 0) {
+        // 格式化合計行
         let _ = writeln!(
             &mut msg,
             "{}",
@@ -158,6 +155,7 @@ fn build_money_change_message(
         );
     }
 
+    // 依序格式化個別會員的行 (member_id > 0)
     for row in rows.iter().filter(|row| row.member_id > 0) {
         let _ = writeln!(
             &mut msg,
@@ -174,7 +172,13 @@ fn build_money_change_message(
 }
 
 async fn notify_money_change(date: NaiveDate) -> Result<()> {
-    let rows = DailyMoneyHistoryMember::fetch_with_previous_trading_day(date).await?;
+    // 實例化資金流向倉儲
+    let money_flow_repo = PgMoneyFlowRepository::new();
+    // 透過倉儲獲取會員收盤與前日市值之對照資料
+    let rows = money_flow_repo
+        .fetch_member_money_history_with_previous_day(date)
+        .await?;
+    // 建立通知內容並發送 Telegram 訊息
     if let Some(msg) = build_money_change_message(&rows) {
         bot::telegram::send(&msg).await;
     }
@@ -261,28 +265,28 @@ mod tests {
         let date = NaiveDate::parse_from_str("2026-04-02", "%Y-%m-%d").unwrap();
         let previous_date = NaiveDate::parse_from_str("2026-04-01", "%Y-%m-%d").unwrap();
         let rows = vec![
-            DailyMoneyHistoryMemberWithPreviousTradingDay {
+            MoneyFlowMemberWithPreviousDay {
                 date,
                 previous_date: Some(previous_date),
                 member_id: 0,
                 market_value: dec!(4273187.20),
                 previous_market_value: dec!(4053774.55),
             },
-            DailyMoneyHistoryMemberWithPreviousTradingDay {
+            MoneyFlowMemberWithPreviousDay {
                 date,
                 previous_date: Some(previous_date),
                 member_id: 1,
                 market_value: dec!(2195395.10),
                 previous_market_value: dec!(2207807.70),
             },
-            DailyMoneyHistoryMemberWithPreviousTradingDay {
+            MoneyFlowMemberWithPreviousDay {
                 date,
                 previous_date: Some(previous_date),
                 member_id: 2,
                 market_value: dec!(1500000.00),
                 previous_market_value: dec!(1400000.00),
             },
-            DailyMoneyHistoryMemberWithPreviousTradingDay {
+            MoneyFlowMemberWithPreviousDay {
                 date,
                 previous_date: Some(previous_date),
                 member_id: 3,
