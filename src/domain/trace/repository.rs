@@ -1,6 +1,6 @@
+use super::entity::PriceTrace;
 use anyhow::Result;
 use async_trait::async_trait;
-use super::entity::PriceTrace;
 
 /// 價格追蹤領域的倉儲合約 (Repository Trait)。
 ///

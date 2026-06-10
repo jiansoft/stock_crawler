@@ -878,7 +878,6 @@ mod tests {
         assert_eq!(symbols, vec!["2317".to_string(), "2330".to_string()]);
     }
 
-
     /// 驗證在未啟動 consumer 時發佈價格事件不會 panic。
     #[test]
     fn test_publish_price_update_without_consumer() {

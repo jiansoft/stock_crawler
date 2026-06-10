@@ -319,7 +319,11 @@ fn get_cached_snapshot(symbol: &str) -> Option<RealtimeSnapshot> {
 ///
 /// 不論觸發來源是價格事件還是低頻 reconciliation，
 /// 這裡都統一從共享快取取值，避免不同路徑使用不同價格來源。
-async fn process_cached_targets(symbol: String, targets: Vec<PriceTrace>, source: EvaluationSource) {
+async fn process_cached_targets(
+    symbol: String,
+    targets: Vec<PriceTrace>,
+    source: EvaluationSource,
+) {
     let snapshot = get_cached_snapshot(&symbol);
 
     match snapshot {
