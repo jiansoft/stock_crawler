@@ -5,3 +5,5 @@ pub mod money_flow;
 pub mod portfolio;
 pub mod quote;
 pub mod stock;
+pub mod trace;
+

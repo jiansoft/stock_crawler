@@ -6,3 +6,5 @@ pub mod money_flow;
 pub mod portfolio;
 pub mod quote;
 pub mod registry;
+pub mod trace;
+
