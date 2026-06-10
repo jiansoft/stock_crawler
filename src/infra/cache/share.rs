@@ -13,13 +13,15 @@ use super::{
     lookup::{default_exchange_markets, default_industries},
     realtime::RealtimeSnapshot,
 };
+use crate::domain::market_index::repository::MarketIndexRepository;
+use crate::domain::market_index::MarketIndex;
 use crate::infra::crawler::share as crawler_share;
+use crate::infra::database::repository::market_index::PgMarketIndexRepository;
 use crate::{
     core::logging,
     core::util::map::Keyable,
     infra::database::table::{
-        daily_quote, index, last_daily_quotes, quote_history_record, revenue, stock,
-        stock_exchange_market,
+        daily_quote, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
     },
 };
 
@@ -41,7 +43,7 @@ pub static SHARE: Lazy<Share> = Lazy::new(Default::default);
 /// - 真正載入資料需呼叫 [`Self::load`]。
 pub struct Share {
     /// 存放台股歷年指數
-    indices: RwLock<HashMap<String, index::Index>>,
+    indices: RwLock<HashMap<String, MarketIndex>>,
     /// 存放台股股票代碼
     pub stocks: RwLock<HashMap<String, crate::domain::registry::entity::Stock>>,
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
@@ -86,7 +88,7 @@ impl Share {
     }
 
     /// 以新抓到的完整指數清單覆蓋舊快取。
-    fn replace_indices_cache(&self, indices: Vec<index::Index>) {
+    fn replace_indices_cache(&self, indices: Vec<MarketIndex>) {
         let mut new_cache = HashMap::with_capacity(indices.len());
         for index in indices {
             new_cache.insert(index.key(), index);
@@ -201,7 +203,8 @@ impl Share {
     /// - 每一類快取都會以「整批覆蓋」方式刷新，避免舊資料殘留。
     /// - 方法本身不回傳 `Result`，屬於「盡力載入」模型。
     pub async fn load(&self) {
-        match index::Index::fetch().await {
+        let index_repo = PgMarketIndexRepository::new();
+        match index_repo.fetch_latest(30).await {
             Ok(indices) => self.replace_indices_cache(indices),
             Err(why) => {
                 logging::error_file_async(format!("Failed to fetch indices because {:?}", why));
@@ -337,7 +340,7 @@ impl Share {
     /// - `Some(old_value)`：原本已有資料，回傳被覆蓋的舊值。
     /// - `None`：原本沒有資料。
     /// - `Some(index)`：若寫入鎖失敗，回傳原輸入值，讓呼叫端可自行決定是否重試。
-    pub async fn set_stock_index(&self, key: String, index: index::Index) -> Option<index::Index> {
+    pub async fn set_stock_index(&self, key: String, index: MarketIndex) -> Option<MarketIndex> {
         match self.indices.write() {
             Ok(mut indices) => indices.insert(key, index),
             Err(_) => Some(index),
@@ -350,9 +353,9 @@ impl Share {
     /// - `key`: 指數快取鍵值。
     ///
     /// # 回傳
-    /// - `Some(index::Index)`：找到資料。
+    /// - `Some(MarketIndex)`：找到資料。
     /// - `None`：未命中或讀鎖失敗。
-    pub fn get_stock_index(&self, key: &str) -> Option<index::Index> {
+    pub fn get_stock_index(&self, key: &str) -> Option<MarketIndex> {
         match self.indices.read() {
             Ok(cache) => cache.get(key).cloned(),
             Err(_) => None,
@@ -736,11 +739,16 @@ mod tests {
     }
 
     /// 建立測試用指數資料。
-    fn make_test_index(category: &str, date: NaiveDate) -> index::Index {
-        let mut index = index::Index::new();
-        index.category = category.to_string();
-        index.date = date;
-        index
+    fn make_test_index(category: &str, date: NaiveDate) -> MarketIndex {
+        MarketIndex::new(
+            category.to_string(),
+            date,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        )
     }
 
     /// 驗證新增營收時會自動建立月份 bucket。

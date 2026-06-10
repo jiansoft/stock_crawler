@@ -4,6 +4,8 @@ use chrono::{Local, NaiveDate, TimeZone};
 use crate::app::backfill::acl::IndexAclMapper;
 use crate::app::event::handlers::get_global_dispatcher;
 use crate::domain::events::DomainEvent;
+use crate::domain::market_index::repository::MarketIndexRepository;
+use crate::infra::database::repository::market_index::PgMarketIndexRepository;
 use crate::{core::logging, infra::cache::SHARE, infra::crawler::twse};
 
 pub async fn execute() -> Result<()> {
@@ -26,8 +28,9 @@ pub async fn execute() -> Result<()> {
             }
 
             let index_entity = IndexAclMapper::from_command(&cmd);
+            let index_repo = PgMarketIndexRepository::new();
 
-            match index_entity.upsert().await {
+            match index_repo.save(&index_entity).await {
                 Ok(_) => {
                     logging::info_file_async(format!("index add {:?}", index_entity));
 
@@ -96,8 +99,9 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
             }
 
             let index_entity = IndexAclMapper::from_command(&cmd);
+            let index_repo = PgMarketIndexRepository::new();
 
-            match index_entity.upsert().await {
+            match index_repo.save(&index_entity).await {
                 Ok(_) => {
                     logging::info_file_async(format!("index upsert (backfill) {:?}", index_entity));
                     let key = format!("{}-TAIEX", index_entity.date);
