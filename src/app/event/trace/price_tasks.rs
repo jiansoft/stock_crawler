@@ -852,10 +852,10 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
-    use crate::infra::database::table::trace::Trace;
+    use crate::domain::trace::entity::PriceTrace;
 
     /// 將追蹤設定整理成不重複的股票代號清單。
-    fn collect_traced_symbols(targets: Vec<Trace>) -> Vec<String> {
+    fn collect_traced_symbols(targets: Vec<PriceTrace>) -> Vec<String> {
         let mut symbols = targets
             .into_iter()
             .map(|target| target.stock_symbol)
@@ -870,9 +870,9 @@ mod tests {
     #[test]
     fn test_collect_traced_symbols_deduplicates_and_sorts() {
         let symbols = collect_traced_symbols(vec![
-            Trace::new("2330".to_string(), dec!(500), dec!(600)),
-            Trace::new("2317".to_string(), dec!(100), dec!(120)),
-            Trace::new("2330".to_string(), dec!(520), dec!(650)),
+            PriceTrace::new("2330".to_string(), dec!(500), dec!(600)),
+            PriceTrace::new("2317".to_string(), dec!(100), dec!(120)),
+            PriceTrace::new("2330".to_string(), dec!(520), dec!(650)),
         ]);
 
         assert_eq!(symbols, vec!["2317".to_string(), "2330".to_string()]);

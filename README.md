@@ -19,12 +19,14 @@ src/
 
 ## 領域驅動設計 (DDD) 重構狀態
 
-本專案正進行 DDD 架構重構，目前進度如下：
-- **Phase 1 (領域模型提取)**：已完成。將核心業務邏輯封裝至 `src/domain/` 中的實體 (Entities) 與值物件 (Value Objects)。
-- **Phase 2 (持久化層重構)**：已完成。實作倉儲模式 (Repository)，將資料庫存取解耦。
-- **Phase 3 (防腐層 ACL 實作)**：已完成。透過 `isin` 等回補流程的 Mapper，隔離外部爬蟲與內部領域模型。
-- **Phase 4 (快取封裝)**：已完成。記憶體快取存取完全封裝於倉儲中，確保資料一致性。
-- **Phase 5 (領域事件與副作用解耦)**：已完成。導入 `EventDispatcher`，當領域實體狀態變更時產生 `DomainEvent`，並以背景任務非同步處理 Telegram 通知與 gRPC 微服務同步。
+本專案正在進行全面的領域驅動設計 (DDD) 與四層架構重構，目前進度如下：
+- **Phase 1~5 (四層架構提取)**：已完成。將 `src/` 整理為明確的 `core/`、`domain/`、`app/`、`infra/`、`interfaces/` 層級。
+- **Phase 6~11 (核心領域模型提取)**：已完成。完成證券主檔 (`registry`)、個股報價 (`quote`)、股利 (`dividend`)、財務與營收 (`financial`) 等核心領域模型與倉儲合約之重構，並實作防腐層 (ACL) 隔離外部爬蟲。
+- **Phase 12 (資金流向領域 DDD 化)**：已完成。建立 `money_flow` 領域模型與 `PgMoneyFlowRepository` 倉儲，將大盤法人資金流向與明細的存取與計算邏輯解耦。
+- **Phase 13 (領域事件解耦 Telegram)**：已完成。引入 `MoneyFlowRecalculated` 與 `ExDividendReminderTriggered` 領域事件，透過訂閱機制非同步處理 Telegram 通知，消除應用層與通訊介面層的強耦合。
+- **Phase 14 (指數領域 DDD 化)**：已完成。建立市場指數 `MarketIndex` 領域實體與 `PgMarketIndexRepository` 倉儲，並使共享快取完全使用領域模型對齊。
+- **Phase 15 (價格監控領域 DDD 化)**：已完成。重構個股價格高低標監控，建立 `PriceTrace` 領域實體與 `PgTraceRepository` 倉儲。
+
 
 
 ## 排程時間

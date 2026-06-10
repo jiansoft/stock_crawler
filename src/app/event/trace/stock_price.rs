@@ -29,17 +29,19 @@ use crate::{
     core::declare,
     core::logging,
     core::util::{datetime::Weekend, map::Keyable},
+    domain::trace::entity::PriceTrace,
+    domain::trace::repository::TraceRepository,
     infra::cache::RealtimeSnapshot,
     infra::cache::SHARE,
     infra::crawler::twse,
-    infra::database::table::trace::Trace,
+    infra::database::repository::trace::PgTraceRepository,
     interfaces::bot,
 };
 
 /// 確保整個追蹤執行流程只有一個實例在執行。
 static IS_RUNNING: AtomicBool = AtomicBool::new(false);
 /// 依股票代號分組後的追蹤條件快取。
-static TRACE_TARGETS: Lazy<RwLock<HashMap<String, Vec<Trace>>>> =
+static TRACE_TARGETS: Lazy<RwLock<HashMap<String, Vec<PriceTrace>>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 /// 標記追蹤條件快取是否至少成功載入過一次。
 static TRACE_TARGETS_LOADED: AtomicBool = AtomicBool::new(false);
@@ -169,7 +171,7 @@ async fn is_holiday(today: NaiveDate) -> Result<bool> {
 }
 
 /// 以股票代號將追蹤條件分組。
-fn group_targets_by_symbol(targets: Vec<Trace>) -> HashMap<String, Vec<Trace>> {
+fn group_targets_by_symbol(targets: Vec<PriceTrace>) -> HashMap<String, Vec<PriceTrace>> {
     let mut grouped_targets = HashMap::new();
     for target in targets {
         grouped_targets
@@ -186,7 +188,8 @@ fn group_targets_by_symbol(targets: Vec<Trace>) -> HashMap<String, Vec<Trace>> {
 /// 此快取會依股票代號分組，供價格更新事件與低頻 reconciliation 共用，
 /// 避免在每次價格變動時都重新查詢整張 `trace` 資料表。
 pub(super) async fn refresh_trace_targets_cache() -> Result<usize> {
-    let targets = Trace::fetch().await?;
+    let trace_repo = PgTraceRepository::new();
+    let targets = trace_repo.fetch_all().await?;
     let grouped_targets = group_targets_by_symbol(targets);
     let symbol_count = grouped_targets.len();
 
@@ -204,7 +207,7 @@ pub(super) fn has_loaded_trace_targets_cache() -> bool {
 }
 
 /// 取得追蹤條件快取的快照。
-fn get_grouped_targets_snapshot() -> HashMap<String, Vec<Trace>> {
+fn get_grouped_targets_snapshot() -> HashMap<String, Vec<PriceTrace>> {
     TRACE_TARGETS
         .read()
         .map(|cache| cache.clone())
@@ -212,7 +215,7 @@ fn get_grouped_targets_snapshot() -> HashMap<String, Vec<Trace>> {
 }
 
 /// 取得指定股票代號的追蹤條件清單。
-fn get_targets_by_symbol(symbol: &str) -> Vec<Trace> {
+fn get_targets_by_symbol(symbol: &str) -> Vec<PriceTrace> {
     TRACE_TARGETS
         .read()
         .ok()
@@ -316,7 +319,11 @@ fn get_cached_snapshot(symbol: &str) -> Option<RealtimeSnapshot> {
 ///
 /// 不論觸發來源是價格事件還是低頻 reconciliation，
 /// 這裡都統一從共享快取取值，避免不同路徑使用不同價格來源。
-async fn process_cached_targets(symbol: String, targets: Vec<Trace>, source: EvaluationSource) {
+async fn process_cached_targets(
+    symbol: String,
+    targets: Vec<PriceTrace>,
+    source: EvaluationSource,
+) {
     let snapshot = get_cached_snapshot(&symbol);
 
     match snapshot {
@@ -351,7 +358,7 @@ async fn process_cached_targets(symbol: String, targets: Vec<Trace>, source: Eva
 ///
 /// 只要曾經發送過，後續同一價格就不再重複通知。
 async fn alert_on_price_boundary(
-    target: Trace,
+    target: PriceTrace,
     current_price: Decimal,
     source: EvaluationSource,
     source_site: Option<&str>,
@@ -409,7 +416,7 @@ async fn alert_on_price_boundary(
 
 /// 格式化警報訊息內容。
 async fn format_alert_message(
-    target: &Trace,
+    target: &PriceTrace,
     current_price: Decimal,
     source_site: Option<&str>,
 ) -> String {
@@ -443,7 +450,7 @@ async fn format_alert_message(
 /// 判斷當前價格是否在預定的 [floor, ceiling] 範圍內。
 ///
 /// 如果設定值為 0，表示不限制該方向的邊界。
-fn is_within_boundary(target: &Trace, current_price: Decimal) -> bool {
+fn is_within_boundary(target: &PriceTrace, current_price: Decimal) -> bool {
     let floor = target.floor;
     let ceiling = target.ceiling;
 
@@ -460,7 +467,7 @@ fn is_within_boundary(target: &Trace, current_price: Decimal) -> bool {
 /// Key 結構包含交易日、股票、邊界方向與價格，避免同一交易日同一價格重複提醒。
 fn build_trace_notification_key(
     date: NaiveDate,
-    target: &Trace,
+    target: &PriceTrace,
     boundary_type: &str,
     current_price: Decimal,
 ) -> String {
@@ -487,9 +494,9 @@ mod tests {
     #[test]
     fn test_group_targets_by_symbol() {
         let grouped = group_targets_by_symbol(vec![
-            Trace::new("2330".to_string(), dec!(500), dec!(600)),
-            Trace::new("2317".to_string(), dec!(100), dec!(120)),
-            Trace::new("2330".to_string(), dec!(520), dec!(650)),
+            PriceTrace::new("2330".to_string(), dec!(500), dec!(600)),
+            PriceTrace::new("2317".to_string(), dec!(100), dec!(120)),
+            PriceTrace::new("2330".to_string(), dec!(520), dec!(650)),
         ]);
 
         assert_eq!(grouped.len(), 2);
@@ -507,9 +514,9 @@ mod tests {
         );
 
         let grouped = group_targets_by_symbol(vec![
-            Trace::new("2330".to_string(), dec!(500), dec!(600)),
-            Trace::new("2317".to_string(), dec!(100), dec!(120)),
-            Trace::new("2330".to_string(), dec!(520), dec!(650)),
+            PriceTrace::new("2330".to_string(), dec!(500), dec!(600)),
+            PriceTrace::new("2317".to_string(), dec!(100), dec!(120)),
+            PriceTrace::new("2330".to_string(), dec!(520), dec!(650)),
         ]);
         {
             let mut cache = TRACE_TARGETS.write().unwrap();
@@ -539,7 +546,7 @@ mod tests {
     #[test]
     fn test_is_within_boundary() {
         // 設定高低標 (500 ~ 600)
-        let mut trace = Trace {
+        let mut trace = PriceTrace {
             stock_symbol: "2330".to_string(),
             floor: dec!(500),
             ceiling: dec!(600),
@@ -589,7 +596,7 @@ mod tests {
 
     #[test]
     fn test_build_trace_notification_key_includes_date_boundary_and_price() {
-        let trace = Trace {
+        let trace = PriceTrace {
             stock_symbol: "2330".to_string(),
             floor: dec!(25),
             ceiling: dec!(30),
@@ -607,7 +614,7 @@ mod tests {
 
     #[test]
     fn test_build_trace_notification_key_distinguishes_price_and_day() {
-        let trace = Trace {
+        let trace = PriceTrace {
             stock_symbol: "2330".to_string(),
             floor: dec!(25),
             ceiling: dec!(30),
@@ -638,7 +645,7 @@ mod tests {
 
     #[test]
     fn build_trace_notification_key_rounds_price_to_four_decimals() {
-        let trace = Trace {
+        let trace = PriceTrace {
             stock_symbol: "0050".to_string(),
             floor: Decimal::ZERO,
             ceiling: dec!(200),
@@ -656,10 +663,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_alert_message_includes_source_site() {
-        let trace = Trace {
-            stock_symbol: "2330".to_string(),
-            floor: dec!(500),
-            ceiling: dec!(600),
+        let trace = PriceTrace {
+            stock_symbol: "0050".to_string(),
+            floor: dec!(0),
+            ceiling: dec!(200),
         };
 
         let msg = format_alert_message(&trace, dec!(650), Some("Fugle")).await;
@@ -675,7 +682,7 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
 
-        let trace = Trace {
+        let trace = PriceTrace {
             stock_symbol: "2330".to_string(),
             floor: dec!(500),
             ceiling: dec!(600),
@@ -694,7 +701,7 @@ mod tests {
         assert!(msg.contains("採集站點:Yahoo"));
     }
 
-    async fn msg_low(target: &Trace, price: Decimal, source_site: Option<&str>) -> String {
+    async fn msg_low(target: &PriceTrace, price: Decimal, source_site: Option<&str>) -> String {
         format_alert_message(target, price, source_site).await
     }
 
@@ -704,7 +711,7 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
 
-        let trace = Trace {
+        let trace = PriceTrace {
             stock_symbol: "1303".to_string(),
             floor: dec!(70),
             ceiling: dec!(60),
