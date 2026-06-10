@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 
-use crate::{core::logging, infra::database::table};
+use crate::core::logging;
 
 /// 計算便宜、合理、昂貴價的估算
 pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
@@ -39,12 +39,26 @@ pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
         .rebuild_price_estimates(date, years_str)
         .await?;
 
-    let estimate_date_config = table::config::Config::new(
-        "estimate-date".to_string(),
-        date.format("%Y-%m-%d").to_string(),
-    );
+    // 實例化系統設定領域倉儲，用來查詢與更新估值日期設定
+    let config_repo = crate::infra::database::repository::config::PgConfigRepository::new();
+    use crate::domain::config::entity::SystemConfig;
+    use crate::domain::config::repository::ConfigRepository;
 
-    estimate_date_config.set_val_as_naive_date().await?;
+    // 取得資料庫中現存的估值日期設定
+    let config_opt = config_repo.find_by_key("estimate-date").await?;
+    let should_save = match &config_opt {
+        Some(cfg) => cfg.should_update_date(date),
+        None => true, // 若無設定則必須寫入
+    };
+
+    // 只有在需要更新時（新日期大於已存在日期，或尚無設定時）才儲存
+    if should_save {
+        let new_config = SystemConfig::new(
+            "estimate-date".to_string(),
+            date.format("%Y-%m-%d").to_string(),
+        );
+        config_repo.save(&new_config).await?;
+    }
     logging::info_file_async("價格估值日期更新到資料庫完成".to_string());
 
     Ok(())

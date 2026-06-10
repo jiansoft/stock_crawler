@@ -37,12 +37,26 @@ pub async fn execute(date: NaiveDate) -> Result<usize> {
 
     if quotes_len > 0 {
         process_quotes(quotes).await;
-        let last_closing_day_config = table::config::Config::new(
-            "last-closing-day".to_string(),
-            date.format("%Y-%m-%d").to_string(),
-        );
+        // 實例化系統設定領域倉儲，用來查詢與更新最後收盤日設定
+        let config_repo = crate::infra::database::repository::config::PgConfigRepository::new();
+        use crate::domain::config::entity::SystemConfig;
+        use crate::domain::config::repository::ConfigRepository;
 
-        last_closing_day_config.set_val_as_naive_date().await?;
+        // 取得資料庫中現存的最後收盤日設定
+        let config_opt = config_repo.find_by_key("last-closing-day").await?;
+        let should_save = match &config_opt {
+            Some(cfg) => cfg.should_update_date(date),
+            None => true, // 若無設定則必須寫入
+        };
+
+        // 只有在需要更新時（新日期大於已存在日期，或尚無設定時）才儲存
+        if should_save {
+            let new_config = SystemConfig::new(
+                "last-closing-day".to_string(),
+                date.format("%Y-%m-%d").to_string(),
+            );
+            config_repo.save(&new_config).await?;
+        }
         logging::info_file_async("最後收盤日設定更新到資料庫完成".to_string());
     }
 
