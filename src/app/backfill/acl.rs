@@ -410,20 +410,17 @@ impl IndexAclMapper {
         })
     }
 
-    /// 將 `SaveIndexCommand` 轉譯為資料庫 Table 模型 `Index`。
-    pub fn from_command(cmd: &SaveIndexCommand) -> crate::infra::database::table::index::Index {
-        use chrono::Local;
-        let mut entity = crate::infra::database::table::index::Index::new();
-        entity.category = "TAIEX".to_string();
-        entity.date = cmd.date;
-        entity.index = cmd.index;
-        entity.change = cmd.change;
-        entity.trading_volume = cmd.trading_volume;
-        entity.trade_value = cmd.trade_value;
-        entity.transaction = cmd.transaction;
-        entity.create_time = Local::now();
-        entity.update_time = Local::now();
-        entity
+    /// 將 `SaveIndexCommand` 轉譯為市場指數領域實體 `MarketIndex`。
+    pub fn from_command(cmd: &SaveIndexCommand) -> crate::domain::market_index::MarketIndex {
+        crate::domain::market_index::MarketIndex::new(
+            "TAIEX".to_string(),
+            cmd.date,
+            cmd.index,
+            cmd.change,
+            cmd.trade_value,
+            cmd.transaction,
+            cmd.trading_volume,
+        )
     }
 }
 
