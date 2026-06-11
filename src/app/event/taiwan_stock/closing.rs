@@ -6,8 +6,8 @@ use crate::{
     infra::cache::{TtlCacheInner, TTL},
     infra::crawler,
     infra::database::{
-        repository::quote::PgQuoteRepository,
-        table::{daily_quote, yield_rank::YieldRank},
+        repository::{quote::PgQuoteRepository, yield_rank::PgYieldRankRepository},
+        table::daily_quote,
     },
 };
 use anyhow::Result;
@@ -86,8 +86,11 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
     calculation::estimated_price::calculate_estimated_price(date).await?;
     logging::info_file_async("計算便宜、合理、昂貴價的估算結束".to_string());
 
+    // 實例化殖利率排行領域的倉儲
+    let yield_rank_repo = PgYieldRankRepository::new();
+    use crate::domain::yield_rank::repository::YieldRankRepository;
     // 重建指定日期的 yield_rank 表內的數據
-    YieldRank::upsert(date).await?;
+    yield_rank_repo.rebuild_by_date(date).await?;
     logging::info_file_async("重建 yield_rank 表內的數據結束".to_string());
 
     // 計算帳戶內市值

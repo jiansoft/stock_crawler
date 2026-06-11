@@ -8,3 +8,4 @@ pub mod portfolio;
 pub mod quote;
 pub mod registry;
 pub mod trace;
+pub mod yield_rank;

@@ -7,3 +7,4 @@ pub mod portfolio;
 pub mod quote;
 pub mod stock;
 pub mod trace;
+pub mod yield_rank;
