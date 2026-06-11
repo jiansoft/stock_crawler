@@ -27,6 +27,7 @@ src/
 - **Phase 14 (指數領域 DDD 化)**：已完成。建立市場指數 `MarketIndex` 領域實體與 `PgMarketIndexRepository` 倉儲，並使共享快取完全使用領域模型對齊。
 - **Phase 15 (價格監控領域 DDD 化)**：已完成。重構個股價格高低標監控，建立 `PriceTrace` 領域實體與 `PgTraceRepository` 倉儲。
 - **Phase 16 (系統設定領域 DDD 化)**：已完成。重構系統設定，建立 `SystemConfig` 領域實體與 `PgConfigRepository` 倉儲，解除應用與計算邏輯對 `config` table 結構的直接依賴。
+- **Phase 17 (殖利率排行領域 DDD 化)**：已完成。重構個股殖利率排行，建立 `YieldRank` 領域實體與 `PgYieldRankRepository` 倉儲，解除應用流程對 `yield_rank` table 結構的直接依賴。
 
 
 ## 排程時間
