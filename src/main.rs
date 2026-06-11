@@ -38,10 +38,7 @@ static GLOBAL_ALLOCATOR: MiMalloc = MiMalloc;
 /// - `MIMALLOC_ARENA_EAGER_COMMIT=0`：避免過早 commit 大 arena。
 #[cfg(all(target_os = "linux", target_env = "musl"))]
 #[used]
-#[cfg_attr(
-    all(target_os = "linux", target_env = "musl"),
-    link_section = ".init_array"
-)]
+#[unsafe(link_section = ".init_array")]
 static INIT_MIMALLOC_ENV: extern "C" fn() = init_mimalloc_env;
 
 #[cfg(all(target_os = "linux", target_env = "musl"))]
