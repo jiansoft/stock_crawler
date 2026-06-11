@@ -85,14 +85,12 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
         .await;
 
         // 若確認是新股票或資料有變動，則進行寫入與同步處理
-        if new_stock {
-            if let Err(why) = update_stock_info(&cmd).await {
-                // 若更新單一股票基本資料失敗，記錄錯誤後繼續處理下一檔，避免單一錯誤導致整個市場回補中斷
-                logging::error_file_async(format!(
-                    "Failed to update stock info for {} because {:?}",
-                    cmd.symbol, why
-                ));
-            }
+        if new_stock && let Err(why) = update_stock_info(&cmd).await {
+            // 若更新單一股票基本資料失敗，記錄錯誤後繼續處理下一檔，避免單一錯誤導致整個市場回補中斷
+            logging::error_file_async(format!(
+                "Failed to update stock info for {} because {:?}",
+                cmd.symbol, why
+            ));
         }
     }
 

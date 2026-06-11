@@ -520,19 +520,19 @@ fn forward_to_seq(level: SeqLogLevel, message: &str) {
 
 /// 將累積的日誌文字寫入輪轉檔案。
 fn flush_log_buffer(rotate: &mut Rotate, now: chrono::DateTime<Local>, msg: &mut String) {
-    if let Some(writer) = rotate.get_writer(now) {
-        if let Ok(mut w) = writer.write() {
-            let to_write = msg.as_bytes();
-            if let Err(why) = w.write_all(to_write) {
-                error_console(format!("Failed to write msg:{}\r\nbecause:{:#?}", msg, why));
-            }
-
-            if let Err(why) = w.flush() {
-                error_console(format!("Failed to flush log file. because:{:#?}", why));
-            }
-
-            msg.clear();
+    if let Some(writer) = rotate.get_writer(now)
+        && let Ok(mut w) = writer.write()
+    {
+        let to_write = msg.as_bytes();
+        if let Err(why) = w.write_all(to_write) {
+            error_console(format!("Failed to write msg:{}\r\nbecause:{:#?}", msg, why));
         }
+
+        if let Err(why) = w.flush() {
+            error_console(format!("Failed to flush log file. because:{:#?}", why));
+        }
+
+        msg.clear();
     }
 }
 

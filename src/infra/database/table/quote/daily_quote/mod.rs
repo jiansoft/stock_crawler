@@ -187,13 +187,13 @@ impl DailyQuote {
         e.price_earning_ratio = parse_decimal("本益比");
 
         // 處理漲跌符號
-        if let Some(&i) = map.get("漲跌(+/-)") {
-            if let Some(sign) = item.get(i) {
-                if sign.contains('-') || sign.contains('綠') {
-                    e.change = -e.change.abs();
-                } else if sign.contains('+') || sign.contains('紅') {
-                    e.change = e.change.abs();
-                }
+        if let Some(&i) = map.get("漲跌(+/-)")
+            && let Some(sign) = item.get(i)
+        {
+            if sign.contains('-') || sign.contains('綠') {
+                e.change = -e.change.abs();
+            } else if sign.contains('+') || sign.contains('紅') {
+                e.change = e.change.abs();
             }
         }
 
@@ -517,10 +517,10 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
                     *field = d.parse::<Decimal>().unwrap_or_default();
                 }
 
-                if let Some(change_str) = item.get(9) {
-                    if change_str.contains('-') {
-                        e.change = -e.change;
-                    }
+                if let Some(change_str) = item.get(9)
+                    && change_str.contains('-')
+                {
+                    e.change = -e.change;
                 }
             }
             StockExchange::TPEx => {

@@ -105,26 +105,24 @@ async fn backfill_unannounced_dividend_dates_from_yahoo(
     };
 
     // 取得今年度的股利數據
-    if let Some(yahoo_dividend_details) = yahoo.get_dividend_by_year(year) {
-        if let Some(yahoo_dividend_detail) =
+    if let Some(yahoo_dividend_details) = yahoo.get_dividend_by_year(year)
+        && let Some(yahoo_dividend_detail) =
             find_changed_dividend_detail(yahoo_dividend_details, &entity)
-        {
-            let cmd =
-                YahooDividendAclMapper::from_dto(&entity.security_code, yahoo_dividend_detail);
-            entity.ex_dividend_date_cash = cmd.ex_dividend_date1;
-            entity.ex_dividend_date_stock = cmd.ex_dividend_date2;
-            entity.payable_date_cash = cmd.payable_date1;
-            entity.payable_date_stock = cmd.payable_date2;
+    {
+        let cmd = YahooDividendAclMapper::from_dto(&entity.security_code, yahoo_dividend_detail);
+        entity.ex_dividend_date_cash = cmd.ex_dividend_date1;
+        entity.ex_dividend_date_stock = cmd.ex_dividend_date2;
+        entity.payable_date_cash = cmd.payable_date1;
+        entity.payable_date_stock = cmd.payable_date2;
 
-            if let Err(why) = dividend_repo.update_dividend_date(&entity).await {
-                return Err(anyhow!("{}", why));
-            }
-
-            logging::info_file_async(format!(
-                "dividend update_dividend_date executed successfully. \r\n{:?}",
-                entity
-            ));
+        if let Err(why) = dividend_repo.update_dividend_date(&entity).await {
+            return Err(anyhow!("{}", why));
         }
+
+        logging::info_file_async(format!(
+            "dividend update_dividend_date executed successfully. \r\n{:?}",
+            entity
+        ));
     }
 
     Ok(())

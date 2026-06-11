@@ -76,50 +76,48 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
 
     let quote_response = util::http::get_json::<QuoteResponse>(&quote_url).await?;
     let mut dqs: Vec<DailyQuoteDto> = Vec::with_capacity(2048);
-    if !quote_response.tables.is_empty() {
-        if let Some(tpex_dqs) = &quote_response.tables[0].data {
-            for item in tpex_dqs {
-                let mut dto = DailyQuoteDto::from_with_exchange(StockExchange::TPEx, item, date);
+    if !quote_response.tables.is_empty()
+        && let Some(tpex_dqs) = &quote_response.tables[0].data
+    {
+        for item in tpex_dqs {
+            let mut dto = DailyQuoteDto::from_with_exchange(StockExchange::TPEx, item, date);
 
-                if dto.closing_price.is_zero()
-                    && dto.highest_price.is_zero()
-                    && dto.lowest_price.is_zero()
-                    && dto.opening_price.is_zero()
-                {
-                    continue;
-                }
-
-                let daily_quote_memory_key = format!("{}-{}", date.format("%Y%m%d"), dto.symbol);
-
-                if TTL.daily_quote_contains_key(&daily_quote_memory_key) {
-                    continue;
-                }
-
-                if !dto.change.is_zero() {
-                    if let Some(ldg) = crate::infra::cache::SHARE
-                        .get_last_trading_day_quotes(&dto.symbol)
-                        .await
-                    {
-                        if ldg.closing_price > Decimal::ZERO {
-                            // 漲幅 = (现价-上一個交易日收盤價）/ 上一個交易日收盤價*100%
-                            dto.change_range = (dto.closing_price - ldg.closing_price)
-                                / ldg.closing_price
-                                * dec!(100);
-                        } else {
-                            dto.change_range = dto.change / dto.opening_price * dec!(100);
-                        }
-                    }
-                }
-
-                if let Some(pe_ratio_analysis_response) = pe_ratio_analysis.get(&dto.symbol) {
-                    dto.price_earning_ratio = pe_ratio_analysis_response
-                        .price_earning_ratio
-                        .parse::<Decimal>()
-                        .unwrap_or_default()
-                }
-
-                dqs.push(dto);
+            if dto.closing_price.is_zero()
+                && dto.highest_price.is_zero()
+                && dto.lowest_price.is_zero()
+                && dto.opening_price.is_zero()
+            {
+                continue;
             }
+
+            let daily_quote_memory_key = format!("{}-{}", date.format("%Y%m%d"), dto.symbol);
+
+            if TTL.daily_quote_contains_key(&daily_quote_memory_key) {
+                continue;
+            }
+
+            if !dto.change.is_zero()
+                && let Some(ldg) = crate::infra::cache::SHARE
+                    .get_last_trading_day_quotes(&dto.symbol)
+                    .await
+            {
+                if ldg.closing_price > Decimal::ZERO {
+                    // 漲幅 = (现价-上一個交易日收盤價）/ 上一個交易日收盤價*100%
+                    dto.change_range =
+                        (dto.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
+                } else {
+                    dto.change_range = dto.change / dto.opening_price * dec!(100);
+                }
+            }
+
+            if let Some(pe_ratio_analysis_response) = pe_ratio_analysis.get(&dto.symbol) {
+                dto.price_earning_ratio = pe_ratio_analysis_response
+                    .price_earning_ratio
+                    .parse::<Decimal>()
+                    .unwrap_or_default()
+            }
+
+            dqs.push(dto);
         }
     }
 

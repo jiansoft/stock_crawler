@@ -21,21 +21,21 @@ pub async fn execute() -> Result<()> {
 
     for company in delisted {
         // 透過防腐層轉譯為內部命令，內含格式與民國年分過濾邏輯
-        if let Some(cmd) = DelistedCompanyAclMapper::from_suspend_listing(&company) {
-            if let Some(stock) = repo.find_by_symbol(&cmd.symbol).await? {
-                if stock.suspend_listing() {
-                    continue;
-                }
+        if let Some(cmd) = DelistedCompanyAclMapper::from_suspend_listing(&company)
+            && let Some(stock) = repo.find_by_symbol(&cmd.symbol).await?
+        {
+            if stock.suspend_listing() {
+                continue;
+            }
 
-                let mut another = stock.clone();
-                another.update_suspension(true);
+            let mut another = stock.clone();
+            another.update_suspension(true);
 
-                if let Err(why) = repo.save(&another).await {
-                    logging::error_file_async(format!(
-                        "Failed to update_suspend_listing because {:?}",
-                        why
-                    ));
-                }
+            if let Err(why) = repo.save(&another).await {
+                logging::error_file_async(format!(
+                    "Failed to update_suspend_listing because {:?}",
+                    why
+                ));
             }
         }
     }

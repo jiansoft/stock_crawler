@@ -61,12 +61,12 @@ impl PortfolioRepository for PgPortfolioRepository {
             "#,
         );
 
-        if let Some(scs) = security_codes {
-            if !scs.is_empty() {
-                query_builder.push(" AND security_code = ANY(");
-                query_builder.push_bind(scs);
-                query_builder.push(")");
-            }
+        if let Some(scs) = security_codes
+            && !scs.is_empty()
+        {
+            query_builder.push(" AND security_code = ANY(");
+            query_builder.push_bind(scs);
+            query_builder.push(")");
         }
 
         let query = query_builder.build();

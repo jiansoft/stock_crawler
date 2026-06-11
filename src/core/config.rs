@@ -273,10 +273,10 @@ impl App {
     fn from_env() -> Self {
         let tg_allowed = env::var(TELEGRAM_ALLOWED).expect(TELEGRAM_ALLOWED);
         let mut allowed_list: HashMap<i64, String> = Default::default();
-        if !tg_allowed.is_empty() {
-            if let Ok(allowed) = serde_json::from_str::<HashMap<i64, String>>(&tg_allowed) {
-                allowed_list = allowed;
-            }
+        if !tg_allowed.is_empty()
+            && let Ok(allowed) = serde_json::from_str::<HashMap<i64, String>>(&tg_allowed)
+        {
+            allowed_list = allowed;
         }
         let noip_hostnames = env::var(NOIP_HOSTNAMES).expect(NOIP_HOSTNAMES);
         let mut noip_hostnames_list: Vec<String> = Default::default();

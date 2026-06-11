@@ -113,11 +113,11 @@ impl Rotate {
         }
 
         // 寫入訊息
-        if let Some(ref writer) = self.out_fh {
-            if let Ok(mut w) = writer.write() {
-                w.write_all(msg)?;
-                self.current_size += msg.len() as u64;
-            }
+        if let Some(ref writer) = self.out_fh
+            && let Ok(mut w) = writer.write()
+        {
+            w.write_all(msg)?;
+            self.current_size += msg.len() as u64;
         }
 
         Ok(())
@@ -162,10 +162,10 @@ impl Rotate {
         let filename = self.generate_full_fn(&self.cur_base_fn, self.generation);
 
         // 確保目錄存在
-        if let Some(parent) = Path::new(&filename).parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = Path::new(&filename).parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)?;
         }
 
         let file = OpenOptions::new()
@@ -201,10 +201,10 @@ impl Rotate {
 
     /// flush 當前檔案
     fn flush_current(&self) {
-        if let Some(ref writer) = self.out_fh {
-            if let Ok(mut w) = writer.write() {
-                let _ = w.flush();
-            }
+        if let Some(ref writer) = self.out_fh
+            && let Ok(mut w) = writer.write()
+        {
+            let _ = w.flush();
         }
     }
 

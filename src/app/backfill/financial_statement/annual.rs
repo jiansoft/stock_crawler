@@ -71,16 +71,15 @@ pub async fn execute() -> Result<()> {
         .collect();
 
     // 如果有需要新增或更新的財報，則呼叫領域倉儲的批次寫入
-    if !statements.is_empty() {
-        if let Err(why) = financial_repo
+    if !statements.is_empty()
+        && let Err(why) = financial_repo
             .batch_save_financial_statements(&statements)
             .await
-        {
-            logging::error_file_async(format!(
-                "Failed to financial_repo.batch_save_financial_statements because {:?}",
-                why
-            ));
-        }
+    {
+        logging::error_file_async(format!(
+            "Failed to financial_repo.batch_save_financial_statements because {:?}",
+            why
+        ));
     }
 
     update_roe_and_roa_for_zero_values(None).await?;
