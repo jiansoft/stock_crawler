@@ -1,7 +1,10 @@
 use crate::{
     core::logging,
     domain::quote::{
-        entity::{DailyQuote as DomainDailyQuote, LastDailyQuote as DomainLastDailyQuote},
+        entity::{
+            DailyQuote as DomainDailyQuote, LastDailyQuote as DomainLastDailyQuote,
+            QuoteHistoryRecord as DomainQuoteHistoryRecord,
+        },
         repository::QuoteRepository,
     },
     infra::database,
@@ -9,11 +12,13 @@ use crate::{
         daily_quote::{self, DailyQuote as TableDailyQuote},
         daily_stock_price_stats::DailyStockPriceStats as TableDailyStockPriceStats,
         last_daily_quotes::LastDailyQuotes as TableLastDailyQuotes,
+        quote_history_record::QuoteHistoryRecord as TableQuoteHistoryRecord,
     },
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 
 /// PostgreSQL 實作之報價倉儲。
 ///
@@ -144,6 +149,40 @@ impl From<TableLastDailyQuotes> for DomainLastDailyQuote {
     }
 }
 
+impl From<DomainQuoteHistoryRecord> for TableQuoteHistoryRecord {
+    fn from(domain: DomainQuoteHistoryRecord) -> Self {
+        // 將領域層歷史極值紀錄實體轉換為資料庫 Table 模型
+        TableQuoteHistoryRecord {
+            maximum_price_date_on: domain.maximum_price_date_on,
+            minimum_price_date_on: domain.minimum_price_date_on,
+            maximum_price_to_book_ratio_date_on: domain.maximum_price_to_book_ratio_date_on,
+            minimum_price_to_book_ratio_date_on: domain.minimum_price_to_book_ratio_date_on,
+            security_code: domain.security_code,
+            maximum_price: domain.maximum_price,
+            minimum_price: domain.minimum_price,
+            maximum_price_to_book_ratio: domain.maximum_price_to_book_ratio,
+            minimum_price_to_book_ratio: domain.minimum_price_to_book_ratio,
+        }
+    }
+}
+
+impl From<TableQuoteHistoryRecord> for DomainQuoteHistoryRecord {
+    fn from(table: TableQuoteHistoryRecord) -> Self {
+        // 將資料庫 Table 模型歷史極值紀錄轉換為領域層實體
+        DomainQuoteHistoryRecord {
+            maximum_price_date_on: table.maximum_price_date_on,
+            minimum_price_date_on: table.minimum_price_date_on,
+            maximum_price_to_book_ratio_date_on: table.maximum_price_to_book_ratio_date_on,
+            minimum_price_to_book_ratio_date_on: table.minimum_price_to_book_ratio_date_on,
+            security_code: table.security_code,
+            maximum_price: table.maximum_price,
+            minimum_price: table.minimum_price,
+            maximum_price_to_book_ratio: table.maximum_price_to_book_ratio,
+            minimum_price_to_book_ratio: table.minimum_price_to_book_ratio,
+        }
+    }
+}
+
 #[async_trait]
 impl QuoteRepository for PgQuoteRepository {
     // === 每日報價 (DailyQuote) ===
@@ -176,6 +215,25 @@ impl QuoteRepository for PgQuoteRepository {
             .map(DomainDailyQuote::from)
             .collect();
         Ok(domain_quotes)
+    }
+
+    async fn fill_moving_average(&self, quote: &mut DomainDailyQuote) -> Result<()> {
+        // 轉換為 Table 實體並呼叫 Table 層的 fill_moving_average 進行資料庫內均線與年內極值計算
+        let mut table_entity = TableDailyQuote::from(quote.clone());
+        table_entity.fill_moving_average().await?;
+        *quote = DomainDailyQuote::from(table_entity);
+        Ok(())
+    }
+
+    async fn batch_update_moving_average(&self, quotes: &[DomainDailyQuote]) -> Result<()> {
+        // 將領域實體列表轉為 Table 實體列表
+        let table_entities: Vec<TableDailyQuote> = quotes
+            .iter()
+            .map(|q| TableDailyQuote::from(q.clone()))
+            .collect();
+        // 呼叫 Table 層的 batch_update_moving_average 進行批次更新
+        TableDailyQuote::batch_update_moving_average(&table_entities).await?;
+        Ok(())
     }
 
     // === 最新報價 (LastDailyQuote) ===
@@ -325,6 +383,60 @@ impl QuoteRepository for PgQuoteRepository {
     async fn save_stock_price_stats(&self, date: NaiveDate) -> Result<()> {
         // 呼叫 Table 實作的 upsert 方法計算並保存當日之全市場統計
         TableDailyStockPriceStats::upsert(date, &mut None).await?;
+        Ok(())
+    }
+
+    async fn makeup_for_the_lack_daily_quotes(&self, date: NaiveDate) -> Result<u64> {
+        // 呼叫 Table 實作補齊指定交易日缺漏的收盤資料
+        let result = daily_quote::makeup_for_the_lack_daily_quotes(date).await?;
+        Ok(result.rows_affected())
+    }
+
+    async fn fetch_monthly_stock_price_summary(
+        &self,
+        security_code: &str,
+        year: i32,
+        month: i32,
+    ) -> Result<Option<(Decimal, Decimal, Decimal)>> {
+        // 呼叫 Table 實作查詢指定股票於指定年月的最高、最低、平均收盤價
+        let sql = r#"
+            SELECT
+                MIN("LowestPrice") as lowest_price,
+                AVG("ClosingPrice") as avg_price,
+                MAX("HighestPrice") as highest_price
+            FROM "DailyQuotes"
+            WHERE "stock_symbol" = $1 AND "year" = $2 AND "month" = $3
+            GROUP BY "stock_symbol", "year", "month";
+        "#;
+        let row_opt: Option<
+            crate::infra::database::table::quote::daily_quote::extension::MonthlyStockPriceSummary,
+        > = sqlx::query_as(sql)
+            .bind(security_code)
+            .bind(year)
+            .bind(month)
+            .fetch_optional(database::get_connection())
+            .await?;
+
+        Ok(row_opt.map(|r| (r.lowest_price, r.avg_price, r.highest_price)))
+    }
+
+    // === 歷史極值紀錄 (QuoteHistoryRecord) ===
+
+    async fn fetch_quote_history_records(&self) -> Result<Vec<DomainQuoteHistoryRecord>> {
+        // 從資料庫抓取所有個股的歷史價格與股價淨值比極值紀錄 Table 資料
+        let table_records = TableQuoteHistoryRecord::fetch().await?;
+        // 將 Table 資料轉換為領域層實體
+        let domain_records = table_records
+            .into_iter()
+            .map(DomainQuoteHistoryRecord::from)
+            .collect();
+        Ok(domain_records)
+    }
+
+    async fn save_quote_history_record(&self, record: &DomainQuoteHistoryRecord) -> Result<()> {
+        // 將領域實體轉換為 Table 實體並呼叫 Table 層的 upsert 寫入資料庫
+        let table_record = TableQuoteHistoryRecord::from(record.clone());
+        table_record.upsert().await?;
         Ok(())
     }
 }

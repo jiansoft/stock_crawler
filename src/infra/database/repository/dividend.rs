@@ -1,14 +1,51 @@
-use crate::domain::dividend::entity::Dividend;
+use crate::domain::dividend::entity::{
+    Dividend, StockDividendInfo as DomainStockDividendInfo,
+    StockDividendPayableDateInfo as DomainStockDividendPayableDateInfo,
+};
 use crate::domain::dividend::repository::DividendRepository;
 use crate::infra::database;
 use crate::infra::database::table::dividend::extension::stock_dividend_info::{
-    self, StockDividendInfo,
+    self, StockDividendInfo as TableStockDividendInfo,
 };
-use crate::infra::database::table::dividend::extension::stock_dividend_payable_date_info::StockDividendPayableDateInfo;
+use crate::infra::database::table::dividend::extension::stock_dividend_payable_date_info::StockDividendPayableDateInfo as TableStockDividendPayableDateInfo;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Local, NaiveDate};
 use sqlx::{postgres::PgRow, Row};
+
+impl From<TableStockDividendInfo> for DomainStockDividendInfo {
+    fn from(table: TableStockDividendInfo) -> Self {
+        DomainStockDividendInfo {
+            stock_symbol: table.stock_symbol,
+            name: table.name,
+            stock_industry_id: table.stock_industry_id,
+            cash_dividend: table.cash_dividend,
+            stock_dividend: table.stock_dividend,
+            sum: table.sum,
+            closing_price: table.closing_price,
+            dividend_yield: table.dividend_yield,
+            cash_dividend_yield: table.cash_dividend_yield,
+            is_cash_ex_dividend_on_date: table.is_cash_ex_dividend_on_date,
+            is_stock_ex_dividend_on_date: table.is_stock_ex_dividend_on_date,
+        }
+    }
+}
+
+impl From<TableStockDividendPayableDateInfo> for DomainStockDividendPayableDateInfo {
+    fn from(table: TableStockDividendPayableDateInfo) -> Self {
+        DomainStockDividendPayableDateInfo {
+            stock_symbol: table.stock_symbol,
+            name: table.name,
+            cash_dividend: table.cash_dividend,
+            stock_dividend: table.stock_dividend,
+            sum: table.sum,
+            payable_date1: table.payable_date1,
+            payable_date2: table.payable_date2,
+            ex_dividend_date1: table.ex_dividend_date1,
+            ex_dividend_date2: table.ex_dividend_date2,
+        }
+    }
+}
 
 /// 基於 PostgreSQL 的股利倉儲實現 (PgDividendRepository)。
 pub struct PgDividendRepository;
@@ -70,6 +107,177 @@ impl DividendRepository for PgDividendRepository {
             .await
             .context("Failed to fetch years by security code")?;
         Ok(rows)
+    }
+
+    /// 取得尚未有指定年度配息的股票代號。
+    async fn fetch_no_dividends_for_year(&self, year: i32) -> Result<Vec<String>> {
+        let sql = r#"
+            SELECT stock_symbol
+            FROM stocks
+            WHERE "SuspendListing" = false
+                AND stock_exchange_market_id IN (2, 4)
+                AND stock_symbol NOT IN 
+                    (SELECT security_code FROM dividend WHERE year = $1 AND quarter = '');
+        "#;
+        let stock_symbols: Vec<String> = sqlx::query(sql)
+            .bind(year)
+            .fetch_all(database::get_connection())
+            .await?
+            .into_iter()
+            .map(|row: PgRow| row.get("stock_symbol"))
+            .collect();
+        Ok(stock_symbols)
+    }
+
+    /// 取得指定年度與多次配息相關的股利資料。
+    async fn fetch_multiple_dividends_for_year(&self, year: i32) -> Result<Vec<Dividend>> {
+        let sql = r#"
+            SELECT 
+                serial, security_code, year, year_of_dividend, quarter,
+                cash_dividend, stock_dividend, sum, "ex-dividend_date1", "ex-dividend_date2",
+                payable_date1, payable_date2, created_time, updated_time,
+                capital_reserve_cash_dividend, earnings_cash_dividend,
+                capital_reserve_stock_dividend, earnings_stock_dividend,
+                payout_ratio_cash, payout_ratio_stock, payout_ratio
+            FROM dividend
+            WHERE (year = $1 OR year_of_dividend = $1) AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2');
+        "#;
+        let rows = sqlx::query(sql)
+            .bind(year)
+            .try_map(Self::row_to_entity)
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch multiple dividends for year")?;
+        Ok(rows)
+    }
+
+    /// 合併並更新指定股票在指定發放年度的年度股利合計。
+    async fn upsert_annual_total_dividend(&self, security_code: &str, year: i32) -> Result<()> {
+        let sql = r#"
+            INSERT INTO dividend(security_code,
+                   year,
+                   year_of_dividend,
+                   quarter,
+                   cash_dividend,
+                   stock_dividend,
+                   sum,
+                   "ex-dividend_date1",
+                   "ex-dividend_date2",
+                   payable_date1,
+                   payable_date2,
+                   created_time,
+                   updated_time,
+                   capital_reserve_cash_dividend,
+                   earnings_cash_dividend,
+                   capital_reserve_stock_dividend,
+                   earnings_stock_dividend,
+                   payout_ratio_cash,
+                   payout_ratio_stock,
+                   payout_ratio)
+            SELECT security_code,
+                   $1,
+                   $2,
+                   '',
+                   sum(cash_dividend) as cash_dividend,
+                   sum(stock_dividend) as stock_dividend,
+                   sum(sum) as sum,
+                   '-',
+                   '-',
+                   '-',
+                   '-',
+                   now(),
+                   now(),
+                   0,
+                   0,
+                   0,
+                   0,
+                   0,
+                   0,
+                   0
+                   from dividend
+            where security_code = $3 and year = $4 and quarter != ''
+            group by security_code
+            order by security_code
+            ON CONFLICT (security_code,year,quarter) DO UPDATE SET
+                cash_dividend = EXCLUDED.cash_dividend,
+                stock_dividend = EXCLUDED.stock_dividend,
+                sum = EXCLUDED.sum;
+        "#;
+        sqlx::query(sql)
+            .bind(year)
+            .bind(year - 1)
+            .bind(security_code)
+            .bind(year)
+            .execute(database::get_connection())
+            .await
+            .context("Failed to upsert annual total dividend")?;
+        Ok(())
+    }
+
+    /// 取得指定年度尚未有配息日或發放日的股息數據。
+    async fn fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
+        &self,
+        year: i32,
+    ) -> Result<Vec<Dividend>> {
+        let sql = r#"
+            SELECT 
+                serial, security_code, year, year_of_dividend, quarter,
+                cash_dividend, stock_dividend, sum, "ex-dividend_date1", "ex-dividend_date2",
+                payable_date1, payable_date2, created_time, updated_time,
+                capital_reserve_cash_dividend, earnings_cash_dividend,
+                capital_reserve_stock_dividend, earnings_stock_dividend,
+                payout_ratio_cash, payout_ratio_stock, payout_ratio
+            FROM dividend
+            WHERE (year = $1 OR year_of_dividend = $1)
+                AND (
+                    (
+                        cash_dividend > 0
+                        AND (
+                            "ex-dividend_date1" IN ('-', '尚未公布')
+                            OR payable_date1 IN ('-', '尚未公布')
+                        )
+                    )
+                    OR
+                    (
+                        stock_dividend > 0
+                        AND (
+                            "ex-dividend_date2" IN ('-', '尚未公布')
+                            OR payable_date2 IN ('-', '尚未公布')
+                        )
+                    )
+                );
+        "#;
+        let rows = sqlx::query(sql)
+            .bind(year)
+            .try_map(Self::row_to_entity)
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch unpublished dividend/payable date for specified year")?;
+        Ok(rows)
+    }
+
+    /// 更新股利發放日期相關資訊（除息日、除權日、發放日）。
+    async fn update_dividend_date(&self, dividend: &Dividend) -> Result<()> {
+        let sql = r#"
+            UPDATE dividend
+            SET
+                "ex-dividend_date1" = $2,
+                "ex-dividend_date2" = $3,
+                payable_date1 = $4,
+                payable_date2 = $5,
+                updated_time = NOW()
+            WHERE serial = $1;
+        "#;
+        sqlx::query(sql)
+            .bind(dividend.serial)
+            .bind(&dividend.ex_dividend_date_cash)
+            .bind(&dividend.ex_dividend_date_stock)
+            .bind(&dividend.payable_date_cash)
+            .bind(&dividend.payable_date_stock)
+            .execute(database::get_connection())
+            .await
+            .context("Failed to update dividend date in PgDividendRepository")?;
+        Ok(())
     }
 
     /// 依代號、年份及持有（建立）時間，查詢所有可能重疊的股利發放資料。
@@ -134,16 +342,26 @@ impl DividendRepository for PgDividendRepository {
     async fn fetch_stocks_with_dividends_on_date(
         &self,
         date: NaiveDate,
-    ) -> Result<Vec<StockDividendInfo>> {
-        stock_dividend_info::fetch_stocks_with_dividends_on_date(date).await
+    ) -> Result<Vec<DomainStockDividendInfo>> {
+        let table_list = stock_dividend_info::fetch_stocks_with_dividends_on_date(date).await?;
+        let domain_list = table_list
+            .into_iter()
+            .map(DomainStockDividendInfo::from)
+            .collect();
+        Ok(domain_list)
     }
 
     async fn fetch_payable_date_info_on_date(
         &self,
         date: NaiveDate,
-    ) -> Result<Vec<StockDividendPayableDateInfo>> {
+    ) -> Result<Vec<DomainStockDividendPayableDateInfo>> {
         use crate::infra::database::table::dividend::extension::stock_dividend_payable_date_info;
-        stock_dividend_payable_date_info::fetch(date).await
+        let table_list = stock_dividend_payable_date_info::fetch(date).await?;
+        let domain_list = table_list
+            .into_iter()
+            .map(DomainStockDividendPayableDateInfo::from)
+            .collect();
+        Ok(domain_list)
     }
 
     /// 儲存或更新單筆股利實體。

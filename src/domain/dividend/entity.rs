@@ -107,3 +107,69 @@ impl Dividend {
         (cash, stock, stock_money, cash + stock_money)
     }
 }
+
+/// 指定日期有除權或除息事件的股票資料領域實體。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StockDividendInfo {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 股票名稱。
+    pub name: String,
+    /// 股票產業分類編號。
+    pub stock_industry_id: i32,
+    /// 現金股利（元）。
+    pub cash_dividend: Decimal,
+    /// 股票股利（股）。
+    pub stock_dividend: Decimal,
+    /// 股利合計（元）。
+    pub sum: Decimal,
+    /// 參考收盤價。
+    pub closing_price: Decimal,
+    /// 總殖利率（%）。
+    pub dividend_yield: Decimal,
+    /// 現金殖利率（%）。
+    pub cash_dividend_yield: Decimal,
+    /// 是否於查詢日期進行除息。
+    pub is_cash_ex_dividend_on_date: bool,
+    /// 是否於查詢日期進行除權。
+    pub is_stock_ex_dividend_on_date: bool,
+}
+
+/// 股票除息的發放日程資料領域實體。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StockDividendPayableDateInfo {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 股票名稱。
+    pub name: String,
+    /// 現金股利（元）。
+    pub cash_dividend: Decimal,
+    /// 股票股利（股）。
+    pub stock_dividend: Decimal,
+    /// 股利合計（元）。
+    pub sum: Decimal,
+    /// 現金股利發放日。
+    pub payable_date1: String,
+    /// 股票股利發放日。
+    pub payable_date2: String,
+    /// 除息日。
+    pub ex_dividend_date1: String,
+    /// 除權日。
+    pub ex_dividend_date2: String,
+}
+
+impl crate::core::util::map::Keyable for Dividend {
+    fn key(&self) -> String {
+        format!(
+            "{}-{}-{}",
+            self.security_code, self.year_of_dividend, self.quarter
+        )
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!(
+            "Dividend:{}-{}-{}",
+            self.security_code, self.year_of_dividend, self.quarter
+        )
+    }
+}

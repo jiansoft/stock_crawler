@@ -15,6 +15,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::{
+    app::backfill::acl::FinancialStatementAclMapper,
     core::logging,
     infra::crawler::{
         fbs::annual_profit::Fbs,
@@ -22,7 +23,6 @@ use crate::{
         mops::annual_profit::Mops,
         share::{AnnualProfit, AnnualProfitFetcher},
     },
-    infra::database::table::financial_statement::FinancialStatement,
 };
 
 /// 執行台股年度 EPS 補齊流程。
@@ -34,7 +34,6 @@ use crate::{
 /// * `Result<()>` - 成功時表示流程執行完成；
 ///   失敗時回傳資料庫、Redis 或外部來源相關錯誤。
 pub async fn execute() -> Result<()> {
-    use crate::domain::financial::entity::FinancialStatement as DomainFinancialStatement;
     use crate::domain::financial::repository::FinancialRepository;
     use crate::infra::database::repository::financial::PgFinancialRepository;
 
@@ -61,7 +60,7 @@ pub async fn execute() -> Result<()> {
         match fetch_annual_profit(&ss).await {
             Ok(aps) => {
                 for ap in aps {
-                    let fs = DomainFinancialStatement::from(FinancialStatement::from(ap));
+                    let fs = FinancialStatementAclMapper::from_annual_profit(ap);
 
                     if let Err(why) = financial_repo.save_annual_eps(&fs).await {
                         logging::error_file_async(format!("{:?} ", why));

@@ -1172,7 +1172,7 @@ mod tests {
             dto.date = target_date;
             let cmd = crate::app::backfill::acl::QuoteAclMapper::from_dto(&dto);
             let entity = crate::app::backfill::acl::QuoteAclMapper::from_command(&cmd);
-            twse.push(entity);
+            twse.push(DailyQuote::from(entity));
         }
 
         let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)

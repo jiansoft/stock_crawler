@@ -4,7 +4,8 @@ use rand::RngExt;
 
 use crate::{
     app::backfill::acl::YahooDividendAclMapper, app::calculation::dividend_record, core::logging,
-    core::util::map::Keyable, infra::crawler::yahoo, infra::database::table::dividend,
+    core::util::map::Keyable, domain::dividend::repository::DividendRepository,
+    infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
 };
 use anyhow::{Context, Result};
 
@@ -33,13 +34,17 @@ pub struct HistoricalDividendBackfillSummary {
 /// Redis 會以股票代碼建立短期快取，避免排程短時間內重複打 Yahoo。單檔股票失敗時只寫 log，
 /// 不中斷整批採集。
 pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<()> {
+    let dividend_repo = PgDividendRepository::new();
     // 先找出指定發放年度還沒有年度彙總列的股票，這批需要從 Yahoo 補出年度或近期配息資料。
-    let mut stock_symbols: HashSet<String> = dividend::Dividend::fetch_no_dividends_for_year(year)
+    let mut stock_symbols: HashSet<String> = dividend_repo
+        .fetch_no_dividends_for_year(year)
         .await?
         .into_iter()
         .collect();
     // 再找出與指定年度相關的季配/半年配資料；查詢同時看發放年度與股利所屬年度，避免跨年度漏判。
-    let multiple_dividends = dividend::Dividend::fetch_multiple_dividends_for_year(year).await?;
+    let multiple_dividends = dividend_repo
+        .fetch_multiple_dividends_for_year(year)
+        .await?;
     let mut multiple_dividend_cache = HashSet::new();
     for dividend in multiple_dividends {
         let key = dividend.key();
@@ -120,6 +125,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
 /// Yahoo 頁面抓取或解析失敗、任一筆股利明細入庫失敗、年度彙總列入庫失敗、
 /// 或持股已領股利紀錄回補失敗時會回傳 `Err`。
 pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Result<usize> {
+    let dividend_repo = PgDividendRepository::new();
     // 歷年回補是針對單一股票的手動修補流程，因此直接打 Yahoo，不讀寫排程快取。
     let dividends_from_yahoo = yahoo::dividend::visit(stock_symbol)
         .await
@@ -133,7 +139,7 @@ pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Resu
         for dividend_from_yahoo in dividend_details_from_yahoo {
             let cmd = YahooDividendAclMapper::from_dto(stock_symbol, dividend_from_yahoo);
             let entity = YahooDividendAclMapper::from_command(&cmd);
-            entity.upsert().await.with_context(|| {
+            dividend_repo.save(&entity).await.with_context(|| {
                 format!(
                     "historical dividend upsert failed: stock_symbol={}, paid_year={}, year_of_dividend={}, quarter={}",
                     stock_symbol, paid_year, entity.year_of_dividend, entity.quarter
@@ -150,11 +156,7 @@ pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Resu
 
     for refresh_year in annual_total_refresh_years {
         // 年度彙總列由資料庫現有季配/半年配明細聚合產生，因此 seed 只需要股票代號與發放年度。
-        let mut annual_total_seed = dividend::Dividend::new();
-        annual_total_seed.security_code = stock_symbol.to_string();
-        annual_total_seed.year = refresh_year;
-        annual_total_seed
-            .upsert_annual_total_dividend()
+        dividend_repo.upsert_annual_total_dividend(stock_symbol, refresh_year)
             .await
             .with_context(|| {
                 format!(
@@ -195,8 +197,10 @@ pub async fn backfill_historical_dividends_for_stock(stock_symbol: &str) -> Resu
 pub async fn backfill_historical_dividends_for_multiple_dividend_stocks(
     year: i32,
 ) -> Result<HistoricalDividendBackfillSummary> {
+    let dividend_repo = PgDividendRepository::new();
     // 先取得指定年度相關的季配/半年配資料；這批資料代表需要重新用 Yahoo 歷年資料校正的股票集合。
-    let multiple_dividends = dividend::Dividend::fetch_multiple_dividends_for_year(year)
+    let multiple_dividends = dividend_repo
+        .fetch_multiple_dividends_for_year(year)
         .await
         .with_context(|| format!("fetch multiple dividends failed: year={year}"))?;
     // 同一檔股票可能有多筆 Q/H 明細，批次回補只需要每檔股票跑一次 Yahoo 歷年採集。
@@ -252,6 +256,7 @@ async fn backfill_recent_dividends_for_stock(
     stock_symbol: &str,
     multiple_dividend_cache: &HashSet<String>,
 ) -> Result<()> {
+    let dividend_repo = PgDividendRepository::new();
     // 先從 Yahoo 讀取單一股票的股利頁面；這一步失敗代表該股票無法繼續處理，所以直接向外回錯。
     let dividends_from_yahoo = yahoo::dividend::visit(stock_symbol)
         .await
@@ -286,7 +291,7 @@ async fn backfill_recent_dividends_for_stock(
 
             let cmd = YahooDividendAclMapper::from_dto(stock_symbol, dividend_from_yahoo);
             let entity = YahooDividendAclMapper::from_command(&cmd);
-            match entity.upsert().await {
+            match dividend_repo.save(&entity).await {
                 Ok(_) => {
                     logging::debug_file_async(format!(
                         "dividend upsert executed successfully. \r\n{:#?}",
@@ -310,12 +315,10 @@ async fn backfill_recent_dividends_for_stock(
     }
 
     for refresh_year in annual_total_refresh_years {
-        // 年度彙總 SQL 只需要股票代號與發放年度，其餘欄位由聚合查詢產生。
-        let mut annual_total_seed = dividend::Dividend::new();
-        annual_total_seed.security_code = stock_symbol.to_string();
-        annual_total_seed.year = refresh_year;
-
-        if let Err(why) = annual_total_seed.upsert_annual_total_dividend().await {
+        if let Err(why) = dividend_repo
+            .upsert_annual_total_dividend(stock_symbol, refresh_year)
+            .await
+        {
             // 年度彙總失敗不影響已寫入的季配/半年配明細，因此記錄後繼續處理下一個年度。
             logging::error_file_async(format!(
                 "upsert_annual_total_dividend failed: year={}, stock_symbol={}, refresh_year={}, error={:#}",
@@ -396,10 +399,10 @@ mod tests {
         assert_eq!(e.cash_dividend, dec!(3.5));
         assert_eq!(e.stock_dividend, dec!(0.2));
         assert_eq!(e.sum, dec!(3.7));
-        assert_eq!(e.ex_dividend_date1, "2025-07-01");
-        assert_eq!(e.ex_dividend_date2, "2025-07-02");
-        assert_eq!(e.payable_date1, "2025-08-01");
-        assert_eq!(e.payable_date2, "2025-08-02");
+        assert_eq!(e.ex_dividend_date_cash, "2025-07-01");
+        assert_eq!(e.ex_dividend_date_stock, "2025-07-02");
+        assert_eq!(e.payable_date_cash, "2025-08-01");
+        assert_eq!(e.payable_date_stock, "2025-08-02");
     }
 
     #[tokio::test]
@@ -419,7 +422,9 @@ mod tests {
         SHARE.load().await;
 
         let year = 2026;
-        let multiple_dividends = dividend::Dividend::fetch_multiple_dividends_for_year(year)
+        let dividend_repo = PgDividendRepository::new();
+        let multiple_dividends = dividend_repo
+            .fetch_multiple_dividends_for_year(year)
             .await
             .unwrap();
         let mut multiple_dividend_cache = HashSet::new();

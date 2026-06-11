@@ -4,7 +4,6 @@ use crate::{
     core::util,
     infra::cache::SHARE,
     infra::crawler::twse,
-    infra::database::table,
 };
 use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
@@ -63,15 +62,20 @@ pub(crate) async fn process_revenue(
     use crate::domain::financial::repository::FinancialRepository;
     use crate::infra::database::repository::financial::PgFinancialRepository;
 
+    use crate::domain::quote::repository::QuoteRepository;
+    use crate::infra::database::repository::quote::PgQuoteRepository;
+
     let financial_repo = PgFinancialRepository::new();
+    let quote_repo = PgQuoteRepository::new();
     let mut table_entity = RevenueAclMapper::from_command(&cmd);
 
-    if let Ok(dq) =
-        table::daily_quote::fetch_monthly_stock_price_summary(&cmd.symbol, year, month).await
+    if let Ok(Some((lowest_price, avg_price, highest_price))) = quote_repo
+        .fetch_monthly_stock_price_summary(&cmd.symbol, year, month)
+        .await
     {
-        table_entity.lowest_price = dq.lowest_price;
-        table_entity.avg_price = dq.avg_price;
-        table_entity.highest_price = dq.highest_price;
+        table_entity.lowest_price = lowest_price;
+        table_entity.avg_price = avg_price;
+        table_entity.highest_price = highest_price;
     }
 
     // 轉成領域實體進行儲存

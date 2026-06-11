@@ -1,7 +1,8 @@
-use crate::domain::quote::entity::{DailyQuote, LastDailyQuote};
+use crate::domain::quote::entity::{DailyQuote, LastDailyQuote, QuoteHistoryRecord};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 
 /// 報價領域之倉儲介面 (Repository Trait)。
 ///
@@ -18,6 +19,27 @@ pub trait QuoteRepository: Send + Sync {
 
     /// 依交易日查詢全市場的每日報價資料。
     async fn fetch_quotes_by_date(&self, date: NaiveDate) -> Result<Vec<DailyQuote>>;
+
+    /// 依指定日期與股票，查詢並回填該股票的均線與年內高低點統計。
+    async fn fill_moving_average(&self, quote: &mut DailyQuote) -> Result<()>;
+
+    /// 批次更新每日收盤均線、年內統計與 PBR。
+    async fn batch_update_moving_average(&self, quotes: &[DailyQuote]) -> Result<()>;
+
+    /// 補上當日缺少的每日收盤數據。
+    ///
+    /// 回傳受影響的資料筆數。
+    async fn makeup_for_the_lack_daily_quotes(&self, date: NaiveDate) -> Result<u64>;
+
+    /// 取得指定股票在指定年月的最低、平均、最高收盤價統計。
+    ///
+    /// 回傳格式為：`(最低價, 平均價, 最高價)`。
+    async fn fetch_monthly_stock_price_summary(
+        &self,
+        security_code: &str,
+        year: i32,
+        month: i32,
+    ) -> Result<Option<(Decimal, Decimal, Decimal)>>;
 
     // === 最新報價 (LastDailyQuote) ===
 
@@ -39,4 +61,12 @@ pub trait QuoteRepository: Send + Sync {
 
     /// 產生或更新指定日期的股價分布統計資料。
     async fn save_stock_price_stats(&self, date: NaiveDate) -> Result<()>;
+
+    // === 歷史極值紀錄 (QuoteHistoryRecord) ===
+
+    /// 取得所有個股的歷史價格與股價淨值比極值紀錄。
+    async fn fetch_quote_history_records(&self) -> Result<Vec<QuoteHistoryRecord>>;
+
+    /// 新增或更新單一股票的歷史極值資料。
+    async fn save_quote_history_record(&self, record: &QuoteHistoryRecord) -> Result<()>;
 }

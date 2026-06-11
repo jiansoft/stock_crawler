@@ -12,9 +12,9 @@ use chrono::Local;
 use futures::StreamExt;
 
 use crate::{
+    app::backfill::acl::FinancialStatementAclMapper,
     app::backfill::financial_statement::update_roe_and_roa_for_zero_values, app::calculation,
     core::logging, core::util::datetime::ReportQuarter, infra::crawler::yahoo,
-    infra::database::table,
 };
 
 /// 補齊最新應已公告季度財報中缺漏的 ROE、ROA 與每股淨值欄位。
@@ -36,7 +36,10 @@ pub async fn execute() -> Result<()> {
     }
 
     if success_count > 0 {
-        table::stock::StockDbRow::update_eps_and_roe().await?;
+        // 實例化證券主檔倉儲，更新 EPS 與 ROE 數據
+        let stock_repo = crate::infra::database::repository::stock::PgStockRepository::new();
+        use crate::domain::registry::repository::StockRepository;
+        stock_repo.update_eps_and_roe().await?;
         // 實例化系統設定領域倉儲，用來查詢價格估值日期設定
         let config_repo = crate::infra::database::repository::config::PgConfigRepository::new();
         use crate::domain::config::repository::ConfigRepository;
@@ -64,7 +67,6 @@ pub async fn execute() -> Result<()> {
 /// 使用 `futures::stream` 併發呼叫 Yahoo 財經爬取 Profile 資料，
 /// 爬取完成後再一次批量 Upsert 入庫，大幅減少資料庫連線延遲，並降低 Yahoo 連線之 sequential 阻塞。
 async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
-    use crate::domain::financial::entity::FinancialStatement as DomainFinancialStatement;
     use crate::domain::financial::repository::FinancialRepository;
     use crate::infra::database::repository::financial::PgFinancialRepository;
 
@@ -147,9 +149,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
                 }
 
                 // 建立新的領域財報結構體
-                let new_fs = DomainFinancialStatement::from(
-                    table::financial_statement::FinancialStatement::from(profile)
-                );
+                let new_fs = FinancialStatementAclMapper::from_yahoo_profile(profile);
                 Some((new_fs, cache_key))
             }
         })

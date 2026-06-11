@@ -9,26 +9,25 @@
 //! 上市/上櫃公司的季報申報截止日與「季末隔天起即可預抓」規則推導目標季度清單，
 //! 避免在截止日前過早切換主季度，同時也能提早收錄已公告的下一季資料。
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::{
+    app::backfill::acl::FinancialStatementAclMapper,
     core::declare::StockExchangeMarket,
     core::logging,
     core::util::{self, datetime::ReportQuarter},
+    domain::registry::repository::StockRepository,
     infra::crawler::twse,
-    infra::database::table::{self, financial_statement, stock::StockDbRow},
+    infra::database::repository::financial::PgFinancialRepository,
+    infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::Result;
 use chrono::Local;
 use scopeguard::defer;
 
+/// <summary>
 /// 執行台股季 EPS 更新流程。
-///
-/// 流程分為三個步驟：
-///
-/// 1. 依上市/上櫃公司季報法定申報截止日與季末時點，計算正式季度與可能的預抓季度清單。
-/// 2. 查出各季度下尚未寫入 `financial_statement` 的股票。
-/// 3. 分別向上市、上櫃市場抓取 EPS，必要時將累計 EPS 轉回單季 EPS 後回寫資料庫。
+/// </summary>
 pub async fn execute() -> Result<()> {
     logging::info_file_async("更新台股季度財報開始");
     defer! {
@@ -48,13 +47,18 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
+/// <summary>
 /// 處理單一目標季度的季 EPS 抓取流程。
+/// </summary>
 async fn process_target_report(target_report: ReportQuarter) -> Result<()> {
     let quarter = target_report.quarter.to_string();
-    let without_fs_stocks =
-        table::stock::fetch_stocks_without_financial_statement(target_report.year, &quarter)
-            .await?;
-    let without_financial_stocks = util::map::vec_to_hashmap(without_fs_stocks);
+    let stock_repo = PgStockRepository::new();
+
+    // 取得指定季度中，缺漏財務報表的證券代號清單 (Vec<String>)
+    let without_fs_stocks = stock_repo
+        .fetch_stocks_without_financial_statement(target_report.year, &quarter)
+        .await?;
+    let without_financial_stocks: HashSet<String> = without_fs_stocks.into_iter().collect();
 
     for market in [
         StockExchangeMarket::Listed,
@@ -79,32 +83,26 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<()> {
     Ok(())
 }
 
+/// <summary>
 /// 依市場抓取指定季度的 EPS，並寫回 `financial_statement`。
-///
-/// 由於公開資訊觀測站提供的 Q2、Q3、Q4 EPS 多為「累計值」，因此本函式會在
-/// `Q1` 以外的季度，先扣除同年度更早季度的累計 EPS，還原成單季 EPS 後再寫入。
-///
-/// # 參數
-///
-/// * `market` - 目標市場，目前只會傳入上市或上櫃
-/// * `year` - 目標財報年度
-/// * `quarter` - 目標財報季度
-/// * `without_financial_stocks` - 尚未寫入該季度財報的股票集合
+/// </summary>
+/// <param name="market">目標市場類型 (上市或上櫃)</param>
+/// <param name="year">目標財報年度</param>
+/// <param name="quarter">目標財報季度</param>
+/// <param name="without_financial_stocks">尚未寫入該季度財報的股票代號集合</param>
 async fn process_eps(
     market: StockExchangeMarket,
     year: i32,
     quarter: crate::core::declare::Quarter,
-    without_financial_stocks: &HashMap<String, StockDbRow>,
+    without_financial_stocks: &HashSet<String>,
 ) -> Result<()> {
-    use crate::domain::financial::entity::FinancialStatement as DomainFinancialStatement;
     use crate::domain::financial::repository::FinancialRepository;
-    use crate::infra::database::repository::financial::PgFinancialRepository;
 
     let financial_repo = PgFinancialRepository::new();
     let eps = twse::eps::visit(market, year, quarter).await?;
 
     for mut e in eps {
-        if !without_financial_stocks.contains_key(&e.stock_symbol) {
+        if !without_financial_stocks.contains(&e.stock_symbol) {
             // 不在清單內代表該股票的目標季度資料已收錄。
             continue;
         }
@@ -118,7 +116,8 @@ async fn process_eps(
             e.earnings_per_share -= before_eps;
         }
 
-        let fs = DomainFinancialStatement::from(financial_statement::FinancialStatement::from(e));
+        // 透過防腐層轉譯器，直接將 DTO 轉為領域實體
+        let fs = FinancialStatementAclMapper::from_eps(e);
 
         if let Err(why) = financial_repo.save_earnings_per_share(&fs).await {
             logging::error_file_async(format!("{:?}", why));
@@ -162,13 +161,13 @@ mod tests {
         dotenv::dotenv().ok();
         SHARE.load().await;
         logging::info_file_async("開始 process_eps".to_string());
-        let without_financial_stocks = match table::stock::fetch_stocks_without_financial_statement(
-            2023,
-            Quarter::Q4.to_string().as_str(),
-        )
-        .await
+        use crate::domain::registry::repository::StockRepository;
+        let stock_repo = PgStockRepository::new();
+        let without_financial_stocks = match stock_repo
+            .fetch_stocks_without_financial_statement(2023, Quarter::Q4.to_string().as_str())
+            .await
         {
-            Ok(stocks) => util::map::vec_to_hashmap(stocks),
+            Ok(stocks) => stocks.into_iter().collect::<HashSet<String>>(),
             Err(why) => {
                 logging::debug_file_async(format!(
                     "Failed to fetch stocks without financial statement: {:?}",

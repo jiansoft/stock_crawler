@@ -6,8 +6,9 @@ use tokio_retry::{
 };
 
 use crate::{
-    app::backfill::acl::YahooDividendAclMapper, core::logging, infra::crawler::yahoo,
-    infra::database::table::dividend,
+    app::backfill::acl::YahooDividendAclMapper, core::logging,
+    domain::dividend::repository::DividendRepository, infra::crawler::yahoo,
+    infra::database::repository::dividend::PgDividendRepository,
 };
 
 /// 回補除息/發放日期尚未公布的股利資料。
@@ -16,11 +17,10 @@ use crate::{
 /// 並透過 Yahoo 財經進行回補。為了避免對 Yahoo 造成負擔而被阻擋，
 /// 引入了 Redis 快取（3天效期）與每檔股票 1 秒的延遲節流。
 pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()> {
+    let dividend_repo = PgDividendRepository::new();
     // 從資料庫中取得指定年度內，除息日或發放日尚未公佈的股利資料列表
-    let dividends =
-        dividend::Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
-            year,
-        )
+    let dividends = dividend_repo
+        .fetch_unpublished_dividend_date_or_payable_date_for_specified_year(year)
         .await?;
 
     logging::info_file_async(format!(
@@ -88,9 +88,10 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
 ///
 #[allow(deprecated)]
 async fn backfill_unannounced_dividend_dates_from_yahoo(
-    mut entity: dividend::Dividend,
+    mut entity: crate::domain::dividend::entity::Dividend,
     year: i32,
 ) -> Result<()> {
+    let dividend_repo = PgDividendRepository::new();
     let strategy = ExponentialBackoff::from_millis(100)
         .map(jitter) // 延遲加入隨機抖動 (Jitter)
         .take(5); // 限制重試次數為 5 次
@@ -110,12 +111,12 @@ async fn backfill_unannounced_dividend_dates_from_yahoo(
         {
             let cmd =
                 YahooDividendAclMapper::from_dto(&entity.security_code, yahoo_dividend_detail);
-            entity.ex_dividend_date1 = cmd.ex_dividend_date1;
-            entity.ex_dividend_date2 = cmd.ex_dividend_date2;
-            entity.payable_date1 = cmd.payable_date1;
-            entity.payable_date2 = cmd.payable_date2;
+            entity.ex_dividend_date_cash = cmd.ex_dividend_date1;
+            entity.ex_dividend_date_stock = cmd.ex_dividend_date2;
+            entity.payable_date_cash = cmd.payable_date1;
+            entity.payable_date_stock = cmd.payable_date2;
 
-            if let Err(why) = entity.update_dividend_date().await {
+            if let Err(why) = dividend_repo.update_dividend_date(&entity).await {
                 return Err(anyhow!("{}", why));
             }
 
@@ -131,15 +132,15 @@ async fn backfill_unannounced_dividend_dates_from_yahoo(
 
 fn find_changed_dividend_detail<'a>(
     details: &'a [yahoo::dividend::YahooDividendDetail],
-    entity: &dividend::Dividend,
+    entity: &crate::domain::dividend::entity::Dividend,
 ) -> Option<&'a yahoo::dividend::YahooDividendDetail> {
     details.iter().find(|detail| {
         detail.year_of_dividend == entity.year_of_dividend
             && detail.quarter == entity.quarter
-            && (detail.ex_dividend_date1 != entity.ex_dividend_date1
-                || detail.ex_dividend_date2 != entity.ex_dividend_date2
-                || detail.payable_date1 != entity.payable_date1
-                || detail.payable_date2 != entity.payable_date2)
+            && (detail.ex_dividend_date1 != entity.ex_dividend_date_cash
+                || detail.ex_dividend_date2 != entity.ex_dividend_date_stock
+                || detail.payable_date1 != entity.payable_date_cash
+                || detail.payable_date2 != entity.payable_date_stock)
     })
 }
 
@@ -172,16 +173,33 @@ mod tests {
         }
     }
 
-    fn sample_entity(year_of_dividend: i32, quarter: &str) -> dividend::Dividend {
-        let mut entity = dividend::Dividend::new();
-        entity.security_code = "2454".to_string();
-        entity.year_of_dividend = year_of_dividend;
-        entity.quarter = quarter.to_string();
-        entity.ex_dividend_date1 = "2025-07-01".to_string();
-        entity.ex_dividend_date2 = "2025-07-02".to_string();
-        entity.payable_date1 = "2025-08-01".to_string();
-        entity.payable_date2 = "2025-08-02".to_string();
-        entity
+    fn sample_entity(
+        year_of_dividend: i32,
+        quarter: &str,
+    ) -> crate::domain::dividend::entity::Dividend {
+        crate::domain::dividend::entity::Dividend {
+            serial: 0,
+            security_code: "2454".to_string(),
+            year: 2025,
+            year_of_dividend,
+            quarter: quarter.to_string(),
+            earnings_cash_dividend: dec!(0),
+            capital_reserve_cash_dividend: dec!(0),
+            cash_dividend: dec!(0),
+            earnings_stock_dividend: dec!(0),
+            capital_reserve_stock_dividend: dec!(0),
+            stock_dividend: dec!(0),
+            sum: dec!(0),
+            payout_ratio_cash: dec!(0),
+            payout_ratio_stock: dec!(0),
+            payout_ratio: dec!(0),
+            ex_dividend_date_cash: "2025-07-01".to_string(),
+            ex_dividend_date_stock: "2025-07-02".to_string(),
+            payable_date_cash: "2025-08-01".to_string(),
+            payable_date_stock: "2025-08-02".to_string(),
+            created_time: chrono::Local::now(),
+            updated_time: chrono::Local::now(),
+        }
     }
 
     #[test]

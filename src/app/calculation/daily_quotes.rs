@@ -6,12 +6,12 @@ use rust_decimal::Decimal;
 use crate::{
     core::logging,
     core::util,
-    domain::quote::{entity::DailyQuote as DomainDailyQuote, repository::QuoteRepository},
+    domain::quote::{
+        entity::{DailyQuote as DomainDailyQuote, QuoteHistoryRecord},
+        repository::QuoteRepository,
+    },
     infra::cache::SHARE,
     infra::database::repository::quote::PgQuoteRepository,
-    infra::database::table::{
-        daily_quote::DailyQuote as TableDailyQuote, quote_history_record::QuoteHistoryRecord,
-    },
 };
 
 /// 計算所有上市櫃公司在指定日期的均線值與歷史高低點。
@@ -53,13 +53,8 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
 
     // --- 批次寫入資料庫 (效能核心) ---
     if !quotes_to_update.is_empty() {
-        // 將領域實體批次轉換為 Table 實體
-        let table_quotes: Vec<TableDailyQuote> = quotes_to_update
-            .iter()
-            .map(|q| TableDailyQuote::from(q.clone()))
-            .collect();
-        // 呼叫 Table 層的批次更新方法寫入資料庫
-        if let Err(why) = TableDailyQuote::batch_update_moving_average(&table_quotes).await {
+        // 呼叫倉儲的批次更新方法寫入資料庫
+        if let Err(why) = repo.batch_update_moving_average(&quotes_to_update).await {
             logging::error_file_async(format!("Failed to batch update DailyQuotes: {:?}", why));
         }
     }
@@ -68,7 +63,7 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
     if !history_to_upsert.is_empty() {
         for qhr in history_to_upsert {
             // 寫入/更新歷史紀錄資料庫表
-            if let Err(why) = qhr.upsert().await {
+            if let Err(why) = repo.save_quote_history_record(&qhr).await {
                 logging::error_file_async(format!("Failed to upsert history record: {:?}", why));
                 continue;
             }
@@ -86,12 +81,10 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
 async fn process_single_quote(
     dq: DomainDailyQuote,
 ) -> Result<(DomainDailyQuote, Option<QuoteHistoryRecord>)> {
-    // 1. 將領域層實體轉為 Table 實體，以便呼叫 SQL 進行均線與年內統計計算
-    let mut table_dq = TableDailyQuote::from(dq);
-    // 呼叫資料庫計算均線
-    table_dq.fill_moving_average().await?;
-    // 將計算好的 Table 實體重新轉回領域層實體
-    let mut dq = DomainDailyQuote::from(table_dq);
+    let repo = PgQuoteRepository::new();
+    let mut dq = dq;
+    // 呼叫倉儲計算均線與年內極值
+    repo.fill_moving_average(&mut dq).await?;
 
     // 2. 計算股價淨值比 (PBR)
     let stock = SHARE.get_stock(&dq.stock_symbol).await;

@@ -1,15 +1,19 @@
 use crate::{
-    app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
-    core::logging,
-    core::util::{self, datetime::Weekend},
-    infra::crawler::wespai,
-    infra::database::table::{financial_statement, stock},
+    app::backfill::acl::FinancialStatementAclMapper,
+    app::backfill::financial_statement::update_roe_and_roa_for_zero_values, core::logging,
+    core::util::datetime::Weekend,
+    domain::financial::entity::FinancialStatement as DomainFinancialStatement,
+    domain::financial::repository::FinancialRepository, domain::registry::entity::StockSymbol,
+    infra::crawler::wespai, infra::database::repository::financial::PgFinancialRepository,
 };
 use anyhow::Result;
 use chrono::Local;
 use scopeguard::defer;
 
-/// 更新台股年報
+/// <summary>
+/// 更新台股年度財務報告。
+/// 下載年度財報資料，過濾已存在與特別股資料後，寫入領域倉儲。
+/// </summary>
 pub async fn execute() -> Result<()> {
     if Local::now().is_weekend() {
         return Ok(());
@@ -34,27 +38,27 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    use crate::domain::financial::entity::FinancialStatement as DomainFinancialStatement;
-    use crate::domain::financial::repository::FinancialRepository;
-    use crate::infra::database::repository::financial::PgFinancialRepository;
-
     let financial_repo = PgFinancialRepository::new();
 
     // 依據年份讀取現有的年度財報
     let annual = financial_repo
         .fetch_annual_statements(profits[0].year)
         .await?;
-    // 轉成 Domain 實體後使用
-    let exist_fs = util::map::vec_to_hashmap(
-        annual
-            .into_iter()
-            .map(financial_statement::FinancialStatement::from)
-            .collect::<Vec<_>>(),
-    );
+    // 將現有的年度財報建立為以 "股票代碼-年度-季度" 為鍵值的 HashMap，供過濾使用
+    let exist_fs: std::collections::HashMap<String, DomainFinancialStatement> = annual
+        .into_iter()
+        .map(|fs| {
+            let key = format!("{}-{}-{}", fs.security_code, fs.year, fs.quarter);
+            (key, fs)
+        })
+        .collect();
+
     // 將過濾後符合條件的財報資料轉換成領域實體 Vector
     let statements: Vec<DomainFinancialStatement> = profits
         .into_iter()
-        .filter(|profit| !stock::is_preference_shares(&profit.security_code))
+        // 過濾掉特別股/優先股 (特別股代碼中會包含英文字母)
+        .filter(|profit| !StockSymbol(profit.security_code.clone()).is_preference())
+        // 過濾掉已經存在於資料庫中的財報
         .filter(|profit| {
             let key = format!(
                 "{}-{}-{}",
@@ -62,12 +66,11 @@ pub async fn execute() -> Result<()> {
             );
             !exist_fs.contains_key(&key)
         })
-        .map(|profit| {
-            DomainFinancialStatement::from(financial_statement::FinancialStatement::from(profit))
-        })
+        // 透過防腐層轉譯器將 DTO 轉成領域實體
+        .map(FinancialStatementAclMapper::from_wespai)
         .collect();
 
-    // 如果有需要新增或更新的財報，則呼叫倉儲的批次寫入
+    // 如果有需要新增或更新的財報，則呼叫領域倉儲的批次寫入
     if !statements.is_empty() {
         if let Err(why) = financial_repo
             .batch_save_financial_statements(&statements)

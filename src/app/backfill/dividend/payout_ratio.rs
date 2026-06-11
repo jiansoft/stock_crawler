@@ -4,21 +4,25 @@ use crate::{
     app::backfill::acl::DividendAclMapper,
     core::logging,
     core::util::map::{vec_to_hashmap, Keyable},
+    domain::dividend::repository::DividendRepository,
+    domain::registry::entity::StockSymbol,
     infra::crawler::goodinfo,
-    infra::database::{table, table::stock},
+    infra::database::repository::dividend::PgDividendRepository,
 };
 use anyhow::Result;
 use scopeguard::defer;
 
-/// 將股息中盈餘分配率為零的數據向第三方取得數據後更新更新
+/// <summary>
+/// 將股息中盈餘分配率為零的數據向第三方取得數據後更新更新。
+/// </summary>
 pub async fn execute() -> Result<()> {
     logging::info_file_async("更新盈餘分配率開始");
     defer! {
        logging::info_file_async("更新盈餘分配率結束");
     }
 
-    let without_payout_ratio =
-        table::dividend::extension::payout_ratio_info::fetch_without_payout_ratio().await?;
+    let dividend_repo = PgDividendRepository::new();
+    let without_payout_ratio = dividend_repo.fetch_without_payout_ratio().await?;
     let mut unique_security_code: HashSet<String> = HashSet::new();
 
     for wpr in &without_payout_ratio {
@@ -28,7 +32,8 @@ pub async fn execute() -> Result<()> {
     let mut dividend_without_payout_ratio = vec_to_hashmap(without_payout_ratio);
 
     for security_code in unique_security_code {
-        if stock::is_preference_shares(&security_code) {
+        // 使用領域 StockSymbol 值物件判斷是否為特別股，避免與 Table 層直接耦合
+        if StockSymbol(security_code.clone()).is_preference() {
             continue;
         }
 
@@ -52,12 +57,12 @@ pub async fn execute() -> Result<()> {
                     let cmd = DividendAclMapper::from_dto(pri.serial, &gd);
                     let updated_pri = DividendAclMapper::update_payout_ratio_entity(pri, &cmd);
 
-                    match updated_pri.update().await {
+                    match dividend_repo.save(&updated_pri).await {
                         Ok(_) => {
                             logging::info_file_async(format!(
                                 "更新盈餘分配率成功: security_code={}, year_of_dividend={}, quarter={}, payout_ratio_cash={}, payout_ratio_stock={}, payout_ratio={}",
                                 updated_pri.security_code,
-                                updated_pri.year,
+                                updated_pri.year_of_dividend,
                                 updated_pri.quarter,
                                 updated_pri.payout_ratio_cash,
                                 updated_pri.payout_ratio_stock,

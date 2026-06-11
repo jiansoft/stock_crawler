@@ -5,12 +5,12 @@ use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::{
+    domain::dividend::entity::StockDividendPayableDateInfo,
     domain::dividend::repository::DividendRepository,
     domain::portfolio::entity::StockOwnershipDetail,
     domain::portfolio::repository::PortfolioRepository,
     infra::database::repository::dividend::PgDividendRepository,
     infra::database::repository::portfolio::PgPortfolioRepository,
-    infra::database::table::dividend::extension::stock_dividend_payable_date_info::StockDividendPayableDateInfo,
     interfaces::bot::{self, telegram::Telegram},
 };
 

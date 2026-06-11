@@ -5,10 +5,7 @@ use crate::{
     domain::quote::repository::QuoteRepository,
     infra::cache::{TtlCacheInner, TTL},
     infra::crawler,
-    infra::database::{
-        repository::{quote::PgQuoteRepository, yield_rank::PgYieldRankRepository},
-        table::daily_quote,
-    },
+    infra::database::repository::{quote::PgQuoteRepository, yield_rank::PgYieldRankRepository},
 };
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
@@ -65,8 +62,11 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
         return Ok(());
     }
 
+    // 實例化報價領域的倉儲
+    let quote_repo = PgQuoteRepository::new();
+
     // 補上當日缺少的每日收盤數據
-    let lack_daily_quotes_count = daily_quote::makeup_for_the_lack_daily_quotes(date).await?;
+    let lack_daily_quotes_count = quote_repo.makeup_for_the_lack_daily_quotes(date).await?;
     logging::info_file_async(format!(
         "補上當日缺少的每日收盤數據結束:{:#?}",
         lack_daily_quotes_count
@@ -76,8 +76,6 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
     calculation::daily_quotes::calculate_moving_average(date).await?;
     logging::info_file_async("計算均線結束".to_string());
 
-    // 實例化報價領域的倉儲
-    let quote_repo = PgQuoteRepository::new();
     // 重建 last_daily_quotes 表內的數據
     quote_repo.rebuild_last_daily_quotes().await?;
     logging::info_file_async("重建 last_daily_quotes 表內的數據結束".to_string());

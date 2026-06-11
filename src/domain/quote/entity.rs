@@ -278,3 +278,57 @@ mod tests {
         assert!(quote_down.is_limit_move());
     }
 }
+
+/// 個股歷史價格與股價淨值比極值紀錄之領域實體。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct QuoteHistoryRecord {
+    /// 歷史最高價發生日期。
+    pub maximum_price_date_on: NaiveDate,
+    /// 歷史最低價發生日期。
+    pub minimum_price_date_on: NaiveDate,
+    /// 歷史最高股價淨值比發生日期。
+    pub maximum_price_to_book_ratio_date_on: NaiveDate,
+    /// 歷史最低股價淨值比發生日期。
+    pub minimum_price_to_book_ratio_date_on: NaiveDate,
+    /// 股票代號。
+    pub security_code: String,
+    /// 歷史最高價。
+    pub maximum_price: Decimal,
+    /// 歷史最低價。
+    pub minimum_price: Decimal,
+    /// 歷史最高股價淨值比。
+    pub maximum_price_to_book_ratio: Decimal,
+    /// 歷史最低股價淨值比。
+    pub minimum_price_to_book_ratio: Decimal,
+}
+
+impl QuoteHistoryRecord {
+    /// 建立指定股票代號的歷史紀錄實體預設值。
+    pub fn new(security_code: String) -> Self {
+        QuoteHistoryRecord {
+            security_code,
+            maximum_price_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            minimum_price_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            maximum_price_to_book_ratio_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            minimum_price_to_book_ratio_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            maximum_price: Decimal::ZERO,
+            minimum_price: Decimal::ZERO,
+            maximum_price_to_book_ratio: Decimal::ZERO,
+            minimum_price_to_book_ratio: Decimal::ZERO,
+        }
+    }
+}
+
+impl crate::core::util::map::Keyable for DailyQuote {
+    fn key(&self) -> String {
+        format!("{}-{}", self.date.format("%Y%m%d"), self.stock_symbol)
+    }
+
+    fn key_with_prefix(&self) -> String {
+        format!(
+            "DailyQuote:{}-{}",
+            self.date.format("%Y%m%d"),
+            self.stock_symbol
+        )
+    }
+}

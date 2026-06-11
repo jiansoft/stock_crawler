@@ -20,6 +20,7 @@ use crate::app::event::taiwan_stock::{
 };
 use crate::core::declare::Industry;
 use crate::core::logging;
+use crate::domain::dividend::entity::StockDividendInfo;
 use crate::domain::dividend::repository::DividendRepository;
 use crate::domain::events::DomainEvent;
 use crate::domain::money_flow::repository::MoneyFlowRepository;
@@ -28,7 +29,6 @@ use crate::domain::portfolio::repository::PortfolioRepository;
 use crate::infra::database::repository::dividend::PgDividendRepository;
 use crate::infra::database::repository::money_flow::PgMoneyFlowRepository;
 use crate::infra::database::repository::portfolio::PgPortfolioRepository;
-use crate::infra::database::table::dividend::extension::stock_dividend_info::StockDividendInfo;
 use crate::interfaces::bot::telegram::Telegram;
 use chrono::Datelike;
 use rust_decimal::Decimal;

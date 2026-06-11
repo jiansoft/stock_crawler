@@ -6,7 +6,7 @@ use crate::infra::crawler::share::{DailyQuoteDto, EtfInfo, RevenueDto};
 use crate::infra::crawler::twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber;
 use crate::infra::crawler::twse::suspend_listing::SuspendListing;
 use crate::infra::database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor;
-use chrono::{Datelike, NaiveDate};
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 /// 註冊或變更證券識別資料命令。
@@ -331,34 +331,10 @@ impl QuoteAclMapper {
         }
     }
 
-    /// 將 `SaveDailyQuoteCommand` 轉譯為資料庫 Table 模型 `DailyQuote`。
-    pub fn from_command(
-        cmd: &SaveDailyQuoteCommand,
-    ) -> crate::infra::database::table::daily_quote::DailyQuote {
-        use chrono::{Local, TimeZone};
-        let mut dq =
-            crate::infra::database::table::daily_quote::DailyQuote::new(cmd.symbol.clone());
-
-        dq.date = cmd.date;
-        dq.year = cmd.date.year();
-        dq.month = cmd.date.month() as i32;
-        dq.day = cmd.date.day() as i32;
-        dq.opening_price = cmd.opening_price;
-        dq.highest_price = cmd.highest_price;
-        dq.lowest_price = cmd.lowest_price;
-        dq.closing_price = cmd.closing_price;
-        dq.change = cmd.change;
-        dq.change_range = cmd.change_range;
-        dq.trading_volume = cmd.trading_volume;
-        dq.trade_value = cmd.trade_value;
-        dq.transaction = cmd.transaction;
-        dq.price_earning_ratio = cmd.price_earning_ratio;
-        dq.price_to_book_ratio = cmd.price_to_book_ratio;
-        dq.last_best_bid_price = cmd.last_best_bid_price;
-        dq.last_best_bid_volume = cmd.last_best_bid_volume;
-        dq.last_best_ask_price = cmd.last_best_ask_price;
-        dq.last_best_ask_volume = cmd.last_best_ask_volume;
-
+    /// 將 `SaveDailyQuoteCommand` 轉譯為領域模型 `DailyQuote`。
+    pub fn from_command(cmd: &SaveDailyQuoteCommand) -> crate::domain::quote::entity::DailyQuote {
+        use chrono::{Datelike, Local, TimeZone};
+        use rust_decimal::Decimal;
         // 台北時區 (UTC+8)
         let timezone = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
         let record_time = cmd
@@ -367,10 +343,42 @@ impl QuoteAclMapper {
             .and_then(|naive| timezone.from_local_datetime(&naive).single())
             .unwrap_or_else(|| Local::now().with_timezone(&timezone));
 
-        dq.record_time = record_time.with_timezone(&Local);
-        dq.create_time = Local::now();
-
-        dq
+        crate::domain::quote::entity::DailyQuote {
+            serial: 0,
+            stock_symbol: cmd.symbol.clone(),
+            date: cmd.date,
+            opening_price: cmd.opening_price,
+            highest_price: cmd.highest_price,
+            lowest_price: cmd.lowest_price,
+            closing_price: cmd.closing_price,
+            change: cmd.change,
+            change_range: cmd.change_range,
+            trading_volume: cmd.trading_volume,
+            trade_value: cmd.trade_value,
+            transaction: cmd.transaction,
+            last_best_bid_price: cmd.last_best_bid_price,
+            last_best_bid_volume: cmd.last_best_bid_volume,
+            last_best_ask_price: cmd.last_best_ask_price,
+            last_best_ask_volume: cmd.last_best_ask_volume,
+            price_earning_ratio: cmd.price_earning_ratio,
+            price_to_book_ratio: cmd.price_to_book_ratio,
+            moving_average_5: Decimal::ZERO,
+            moving_average_10: Decimal::ZERO,
+            moving_average_20: Decimal::ZERO,
+            moving_average_60: Decimal::ZERO,
+            moving_average_120: Decimal::ZERO,
+            moving_average_240: Decimal::ZERO,
+            maximum_price_in_year: Decimal::ZERO,
+            minimum_price_in_year: Decimal::ZERO,
+            average_price_in_year: Decimal::ZERO,
+            maximum_price_in_year_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            minimum_price_in_year_date_on: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            year: cmd.date.year(),
+            month: cmd.date.month() as i32,
+            day: cmd.date.day() as i32,
+            create_time: Local::now(),
+            record_time: record_time.with_timezone(&Local),
+        }
     }
 }
 
@@ -424,11 +432,15 @@ impl IndexAclMapper {
     }
 }
 
+/// <summary>
 /// 個股權重爬蟲資料防腐層轉譯器。
+/// </summary>
 pub struct StockWeightAclMapper;
 
 impl StockWeightAclMapper {
+    /// <summary>
     /// 將爬蟲取得的 `StockWeight` 轉譯為 `SaveStockWeightCommand`。
+    /// </summary>
     pub fn from_dto(
         dto: &crate::infra::crawler::taifex::stock_weight::StockWeight,
     ) -> SaveStockWeightCommand {
@@ -436,16 +448,6 @@ impl StockWeightAclMapper {
             symbol: dto.stock_symbol.clone(),
             weight: dto.weight,
         }
-    }
-
-    /// 將 `SaveStockWeightCommand` 轉譯為資料庫 Table 模型 `SymbolAndWeight`。
-    pub fn from_command(
-        cmd: &SaveStockWeightCommand,
-    ) -> crate::infra::database::table::stock::extension::weight::SymbolAndWeight {
-        crate::infra::database::table::stock::extension::weight::SymbolAndWeight::new(
-            cmd.symbol.clone(),
-            cmd.weight,
-        )
     }
 }
 
@@ -492,21 +494,16 @@ impl DividendAclMapper {
         }
     }
 
-    /// 將 `UpdatePayoutRatioCommand` 套用至 `PayoutRatioInfo`。
+    /// 將 `UpdatePayoutRatioCommand` 套用至 `Dividend`。
     pub fn update_payout_ratio_entity(
-        pri: &crate::infra::database::table::dividend::extension::payout_ratio_info::PayoutRatioInfo,
+        dividend: &crate::domain::dividend::entity::Dividend,
         cmd: &UpdatePayoutRatioCommand,
-    ) -> crate::infra::database::table::dividend::extension::payout_ratio_info::PayoutRatioInfo
-    {
-        crate::infra::database::table::dividend::extension::payout_ratio_info::PayoutRatioInfo {
-            serial: cmd.serial,
-            year: pri.year,
-            quarter: pri.quarter.clone(),
-            security_code: pri.security_code.clone(),
-            payout_ratio_cash: cmd.payout_ratio_cash,
-            payout_ratio_stock: cmd.payout_ratio_stock,
-            payout_ratio: cmd.payout_ratio,
-        }
+    ) -> crate::domain::dividend::entity::Dividend {
+        let mut d = dividend.clone();
+        d.payout_ratio_cash = cmd.payout_ratio_cash;
+        d.payout_ratio_stock = cmd.payout_ratio_stock;
+        d.payout_ratio = cmd.payout_ratio;
+        d
     }
 }
 
@@ -534,26 +531,148 @@ impl YahooDividendAclMapper {
         }
     }
 
-    /// 將 `SaveDividendCommand` 轉譯為資料庫 Table 模型 `Dividend`。
-    pub fn from_command(
-        cmd: &SaveDividendCommand,
-    ) -> crate::infra::database::table::dividend::Dividend {
+    /// 將 `SaveDividendCommand` 轉譯為領域模型 `Dividend`。
+    pub fn from_command(cmd: &SaveDividendCommand) -> crate::domain::dividend::entity::Dividend {
         use chrono::Local;
-        let mut e = crate::infra::database::table::dividend::Dividend::new();
-        e.security_code = cmd.security_code.clone();
-        e.year = cmd.year;
-        e.year_of_dividend = cmd.year_of_dividend;
-        e.quarter = cmd.quarter.clone();
-        e.cash_dividend = cmd.cash_dividend;
-        e.stock_dividend = cmd.stock_dividend;
-        e.sum = cmd.sum;
-        e.ex_dividend_date1 = cmd.ex_dividend_date1.clone();
-        e.ex_dividend_date2 = cmd.ex_dividend_date2.clone();
-        e.payable_date1 = cmd.payable_date1.clone();
-        e.payable_date2 = cmd.payable_date2.clone();
-        e.created_time = Local::now();
-        e.updated_time = Local::now();
-        e
+        use rust_decimal::Decimal;
+        crate::domain::dividend::entity::Dividend {
+            serial: 0,
+            security_code: cmd.security_code.clone(),
+            year: cmd.year,
+            year_of_dividend: cmd.year_of_dividend,
+            quarter: cmd.quarter.clone(),
+            earnings_cash_dividend: Decimal::ZERO,
+            capital_reserve_cash_dividend: Decimal::ZERO,
+            cash_dividend: cmd.cash_dividend,
+            earnings_stock_dividend: Decimal::ZERO,
+            capital_reserve_stock_dividend: Decimal::ZERO,
+            stock_dividend: cmd.stock_dividend,
+            sum: cmd.sum,
+            payout_ratio_cash: Decimal::ZERO,
+            payout_ratio_stock: Decimal::ZERO,
+            payout_ratio: Decimal::ZERO,
+            ex_dividend_date_cash: cmd.ex_dividend_date1.clone(),
+            ex_dividend_date_stock: cmd.ex_dividend_date2.clone(),
+            payable_date_cash: cmd.payable_date1.clone(),
+            payable_date_stock: cmd.payable_date2.clone(),
+            created_time: Local::now(),
+            updated_time: Local::now(),
+        }
+    }
+}
+
+/// <summary>
+/// 財務報表爬蟲資料防腐層轉譯器。
+/// </summary>
+pub struct FinancialStatementAclMapper;
+
+impl FinancialStatementAclMapper {
+    /// <summary>
+    /// 將 Wespai 爬蟲取得的 Profit DTO 轉譯為領域實體 `FinancialStatement`。
+    /// </summary>
+    pub fn from_wespai(
+        dto: crate::infra::crawler::wespai::profit::Profit,
+    ) -> crate::domain::financial::entity::FinancialStatement {
+        use chrono::Local;
+        crate::domain::financial::entity::FinancialStatement {
+            serial: 0,
+            security_code: dto.security_code,
+            year: dto.year as i64,
+            quarter: dto.quarter,
+            gross_profit: dto.gross_profit,
+            operating_profit_margin: dto.operating_profit_margin,
+            pre_tax_income: dto.pre_tax_income,
+            net_income: dto.net_income,
+            net_asset_value_per_share: dto.net_asset_value_per_share,
+            sales_per_share: dto.sales_per_share,
+            earnings_per_share: dto.earnings_per_share,
+            profit_before_tax: dto.profit_before_tax,
+            return_on_equity: dto.return_on_equity,
+            return_on_assets: dto.return_on_assets,
+            created_time: Local::now(),
+            updated_time: Local::now(),
+        }
+    }
+
+    /// <summary>
+    /// 將 Yahoo 爬蟲取得的 Profile DTO 轉譯為領域實體 `FinancialStatement`。
+    /// </summary>
+    pub fn from_yahoo_profile(
+        dto: crate::infra::crawler::yahoo::profile::Profile,
+    ) -> crate::domain::financial::entity::FinancialStatement {
+        use chrono::Local;
+        crate::domain::financial::entity::FinancialStatement {
+            serial: 0,
+            security_code: dto.stock_symbol,
+            year: dto.year as i64,
+            quarter: dto.quarter,
+            gross_profit: dto.gross_profit,
+            operating_profit_margin: dto.operating_profit_margin,
+            pre_tax_income: dto.pre_tax_income,
+            net_income: dto.net_income,
+            net_asset_value_per_share: dto.net_asset_value_per_share,
+            sales_per_share: dto.sales_per_share,
+            earnings_per_share: dto.earnings_per_share,
+            profit_before_tax: dto.profit_before_tax,
+            return_on_equity: dto.return_on_equity,
+            return_on_assets: dto.return_on_assets,
+            created_time: Local::now(),
+            updated_time: Local::now(),
+        }
+    }
+
+    /// <summary>
+    /// 將 TWSE/TPEX 爬蟲取得的 Eps DTO 轉譯為領域實體 `FinancialStatement`。
+    /// </summary>
+    pub fn from_eps(
+        dto: crate::infra::crawler::twse::eps::Eps,
+    ) -> crate::domain::financial::entity::FinancialStatement {
+        use chrono::Local;
+        crate::domain::financial::entity::FinancialStatement {
+            serial: 0,
+            security_code: dto.stock_symbol,
+            year: dto.year as i64,
+            quarter: dto.quarter.to_string(),
+            gross_profit: Default::default(),
+            operating_profit_margin: Default::default(),
+            pre_tax_income: Default::default(),
+            net_income: Default::default(),
+            net_asset_value_per_share: Default::default(),
+            sales_per_share: Default::default(),
+            earnings_per_share: dto.earnings_per_share,
+            profit_before_tax: Default::default(),
+            return_on_equity: Default::default(),
+            return_on_assets: Default::default(),
+            created_time: Local::now(),
+            updated_time: Local::now(),
+        }
+    }
+
+    /// <summary>
+    /// 將爬蟲取得的 `AnnualProfit` DTO 轉譯為領域實體 `FinancialStatement`。
+    /// </summary>
+    pub fn from_annual_profit(
+        dto: crate::infra::crawler::share::AnnualProfit,
+    ) -> crate::domain::financial::entity::FinancialStatement {
+        use chrono::Local;
+        crate::domain::financial::entity::FinancialStatement {
+            serial: 0,
+            security_code: dto.stock_symbol,
+            year: dto.year as i64,
+            quarter: String::new(),
+            gross_profit: Default::default(),
+            operating_profit_margin: Default::default(),
+            pre_tax_income: Default::default(),
+            net_income: Default::default(),
+            net_asset_value_per_share: Default::default(),
+            sales_per_share: dto.sales_per_share,
+            earnings_per_share: dto.earnings_per_share,
+            profit_before_tax: dto.profit_before_tax,
+            return_on_equity: Default::default(),
+            return_on_assets: Default::default(),
+            created_time: Local::now(),
+            updated_time: Local::now(),
+        }
     }
 }
 
@@ -766,10 +885,6 @@ mod tests {
         let cmd = StockWeightAclMapper::from_dto(&dto);
         assert_eq!(cmd.symbol, "2330");
         assert_eq!(cmd.weight, dec!(28.5));
-
-        let entity = StockWeightAclMapper::from_command(&cmd);
-        assert_eq!(entity.stock_symbol, "2330");
-        assert_eq!(entity.weight, dec!(28.5));
     }
 
     #[test]
@@ -803,17 +918,31 @@ mod tests {
         assert_eq!(cmd.serial, 123);
         assert_eq!(cmd.payout_ratio_cash, dec!(45.5));
 
-        let mut pri = crate::infra::database::table::dividend::extension::payout_ratio_info::PayoutRatioInfo {
+        let mut d = crate::domain::dividend::entity::Dividend {
             serial: 123,
             year: 2024,
+            year_of_dividend: 2024,
             quarter: "Q4".to_string(),
             security_code: "2330".to_string(),
-            payout_ratio_cash: dec!(0.0),
-            payout_ratio_stock: dec!(0.0),
-            payout_ratio: dec!(0.0),
+            earnings_cash_dividend: rust_decimal_macros::dec!(0),
+            capital_reserve_cash_dividend: rust_decimal_macros::dec!(0),
+            cash_dividend: rust_decimal_macros::dec!(0),
+            earnings_stock_dividend: rust_decimal_macros::dec!(0),
+            capital_reserve_stock_dividend: rust_decimal_macros::dec!(0),
+            stock_dividend: rust_decimal_macros::dec!(0),
+            sum: rust_decimal_macros::dec!(0),
+            payout_ratio_cash: rust_decimal_macros::dec!(0.0),
+            payout_ratio_stock: rust_decimal_macros::dec!(0.0),
+            payout_ratio: rust_decimal_macros::dec!(0.0),
+            ex_dividend_date_cash: "".to_string(),
+            ex_dividend_date_stock: "".to_string(),
+            payable_date_cash: "".to_string(),
+            payable_date_stock: "".to_string(),
+            created_time: chrono::Local::now(),
+            updated_time: chrono::Local::now(),
         };
-        pri = DividendAclMapper::update_payout_ratio_entity(&pri, &cmd);
-        assert_eq!(pri.payout_ratio_cash, dec!(45.5));
+        d = DividendAclMapper::update_payout_ratio_entity(&d, &cmd);
+        assert_eq!(d.payout_ratio_cash, dec!(45.5));
     }
 
     #[test]
@@ -837,6 +966,32 @@ mod tests {
         let entity = YahooDividendAclMapper::from_command(&cmd);
         assert_eq!(entity.security_code, "2454");
         assert_eq!(entity.sum, dec!(3.7));
-        assert_eq!(entity.ex_dividend_date1, "2025-07-01");
+        assert_eq!(entity.ex_dividend_date_cash, "2025-07-01");
+    }
+
+    #[test]
+    fn test_financial_statement_acl_mapping() {
+        let profit_dto = crate::infra::crawler::wespai::profit::Profit {
+            security_code: "2330".to_string(),
+            year: 2025,
+            quarter: "Q1".to_string(),
+            gross_profit: dec!(52.5),
+            operating_profit_margin: dec!(42.0),
+            pre_tax_income: dec!(45.0),
+            net_income: dec!(38.0),
+            net_asset_value_per_share: dec!(95.0),
+            sales_per_share: dec!(12.5),
+            earnings_per_share: dec!(8.1),
+            profit_before_tax: dec!(9.5),
+            return_on_equity: dec!(25.0),
+            return_on_assets: dec!(15.0),
+        };
+
+        let entity = FinancialStatementAclMapper::from_wespai(profit_dto);
+        assert_eq!(entity.security_code, "2330");
+        assert_eq!(entity.year, 2025);
+        assert_eq!(entity.quarter, "Q1");
+        assert_eq!(entity.gross_profit, dec!(52.5));
+        assert_eq!(entity.earnings_per_share, dec!(8.1));
     }
 }

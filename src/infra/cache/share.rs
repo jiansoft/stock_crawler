@@ -20,9 +20,7 @@ use crate::infra::database::repository::market_index::PgMarketIndexRepository;
 use crate::{
     core::logging,
     core::util::map::Keyable,
-    infra::database::table::{
-        daily_quote, last_daily_quotes, quote_history_record, revenue, stock, stock_exchange_market,
-    },
+    infra::database::table::{last_daily_quotes, revenue, stock, stock_exchange_market},
 };
 
 /// 全域共享資料快取實例。
@@ -53,7 +51,8 @@ pub struct Share {
     /// 股票歷史、淨值比等最高與最低數據。
     ///
     /// 啟動時會先從資料庫載入；若後續抓到更新資料，應同步更新資料庫與這份快取。
-    pub quote_history_records: RwLock<HashMap<String, quote_history_record::QuoteHistoryRecord>>,
+    pub quote_history_records:
+        RwLock<HashMap<String, crate::domain::quote::entity::QuoteHistoryRecord>>,
     /// 股票產業分類
     industries: HashMap<String, i32>,
     /// 股票產業分類(2, 'TAI', '上市', 1),(4, 'TWO', '上櫃', 2), (5, 'TWE', '興櫃', 2);
@@ -170,7 +169,7 @@ impl Share {
     /// 以新抓到的歷史高低紀錄清單覆蓋舊快取。
     fn replace_quote_history_records_cache(
         &self,
-        records: Vec<quote_history_record::QuoteHistoryRecord>,
+        records: Vec<crate::domain::quote::entity::QuoteHistoryRecord>,
     ) {
         let mut new_cache = HashMap::with_capacity(records.len());
         for record in records {
@@ -241,7 +240,9 @@ impl Share {
             }
         }
 
-        match quote_history_record::QuoteHistoryRecord::fetch().await {
+        let quote_repo = crate::infra::database::repository::quote::PgQuoteRepository::new();
+        use crate::domain::quote::repository::QuoteRepository;
+        match quote_repo.fetch_quote_history_records().await {
             Ok(records) => self.replace_quote_history_records_cache(records),
             Err(why) => {
                 logging::error_file_async(format!(
@@ -512,7 +513,10 @@ impl Share {
     /// - 僅更新已存在於快取中的股票。
     /// - 目前只同步 `date` 與 `closing_price`。
     /// - 若快取內沒有該股票，方法不會新增資料。
-    pub async fn set_stock_last_price(&self, daily_quote: &daily_quote::DailyQuote) {
+    pub async fn set_stock_last_price(
+        &self,
+        daily_quote: &crate::domain::quote::entity::DailyQuote,
+    ) {
         if let Ok(mut last_trading_day_quotes) = self.last_trading_day_quotes.write() {
             if let Some(quote) = last_trading_day_quotes.get_mut(&daily_quote.stock_symbol) {
                 quote.date = daily_quote.date;

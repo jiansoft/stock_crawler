@@ -1,14 +1,14 @@
 use crate::{
     app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update,
-    core::logging, infra::crawler::yahoo::profile, infra::database::table,
+    core::logging, infra::crawler::yahoo::profile,
 };
 use anyhow::Result;
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
 pub async fn execute() -> Result<()> {
-    let stocks = table::stock::fetch_net_asset_value_per_share_is_zero().await?;
-    let domain_stocks: Vec<crate::domain::registry::entity::Stock> =
-        stocks.into_iter().map(Into::into).collect();
+    let stock_repo = crate::infra::database::repository::stock::PgStockRepository::new();
+    use crate::domain::registry::repository::StockRepository;
+    let domain_stocks = stock_repo.fetch_net_asset_value_per_share_is_zero().await?;
 
     for mut stock in domain_stocks {
         if stock.symbol().is_preference() || stock.symbol().is_tdr() {

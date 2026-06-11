@@ -11,7 +11,6 @@ use crate::{
     domain::quote::repository::QuoteRepository,
     infra::cache::{TtlCacheInner, SHARE, TTL},
     infra::crawler::{share::DailyQuoteDto, tpex, twse},
-    infra::database::table,
 };
 
 /// 調用  twse、tpex API 取得台股收盤報價
@@ -80,14 +79,9 @@ pub async fn get_quotes_from_source(
 pub async fn process_quotes(quotes: Vec<DailyQuoteDto>) {
     // 將 DTO 轉換為指令對象
     let cmds: Vec<_> = quotes.iter().map(QuoteAclMapper::from_dto).collect();
-    // 將指令對象轉換為資料表結構模型
-    let table_entities: Vec<table::daily_quote::DailyQuote> =
+    // 直接將指令對象轉換為領域層的每日報價實體
+    let domain_entities: Vec<crate::domain::quote::entity::DailyQuote> =
         cmds.iter().map(QuoteAclMapper::from_command).collect();
-    // 將資料表結構模型映射至領域層的每日報價實體
-    let domain_entities: Vec<crate::domain::quote::entity::DailyQuote> = table_entities
-        .into_iter()
-        .map(crate::domain::quote::entity::DailyQuote::from)
-        .collect();
 
     // 實例化報價領域的倉儲
     let repo = crate::infra::database::repository::quote::PgQuoteRepository::new();
@@ -110,14 +104,11 @@ pub async fn process_quotes(quotes: Vec<DailyQuoteDto>) {
 }
 
 async fn process_daily_quote(daily_quote: crate::domain::quote::entity::DailyQuote) {
-    // 轉回 Table 實體，供 SHARE 快取使用
-    let table_quote =
-        crate::infra::database::table::daily_quote::DailyQuote::from(daily_quote.clone());
     // 將最新報價更新至全域記憶體快取
-    SHARE.set_stock_last_price(&table_quote).await;
+    SHARE.set_stock_last_price(&daily_quote).await;
 
     // 取得記憶體快取之 key 值
-    let daily_quote_memory_key = table_quote.key_with_prefix();
+    let daily_quote_memory_key = daily_quote.key_with_prefix();
 
     // 更新最後交易日的收盤價 TTL 快取（24 小時失效時間）
     TTL.daily_quote_set(
@@ -139,9 +130,7 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{
-        core::logging, infra::cache::SHARE, infra::database, infra::database::table::stock,
-    };
+    use crate::{core::logging, infra::cache::SHARE, infra::database};
 
     use super::*;
 
@@ -178,7 +167,9 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 execute".to_string());
 
-        let stocks = stock::StockDbRow::fetch().await.unwrap();
+        let stock_repo = crate::infra::database::repository::stock::PgStockRepository::new();
+        use crate::domain::registry::repository::StockRepository;
+        let stocks = stock_repo.fetch_all_active().await.unwrap();
         let worker_count = num_cpus::get() * 100;
         //let dqs_arc = Arc::new(stocks);
         let counter = Arc::new(AtomicUsize::new(0));
@@ -206,7 +197,10 @@ mod tests {
         sleep(Duration::from_secs(1)).await;
     }
 
-    fn calculate_day_quotes_moving_average_worker(i: usize, dq: &stock::StockDbRow) {
+    fn calculate_day_quotes_moving_average_worker(
+        i: usize,
+        dq: &crate::domain::registry::entity::Stock,
+    ) {
         logging::debug_file_async(format!("dq[{}]:{:?}", i, dq));
     }
 }
