@@ -174,7 +174,6 @@ log/                 # runtime 檔案日誌輸出目錄
 + `SYSTEM_GRPC_USE_PORT`、`SYSTEM_SSL_CERT_FILE`、`SYSTEM_SSL_KEY_FILE`：本服務 gRPC 與 TLS 憑證設定。
 + `MANUAL_BACKFILL_WEB_ADDR`：HTTP 手動回補 server 監聽位址，預設 `127.0.0.1:9002`。
 + `GO_GRPC_TARGET`、`GO_GRPC_TLS_CERT_FILE`、`GO_GRPC_TLS_KEY_FILE`、`GO_GRPC_DOMAIN_NAME`：對外 Go gRPC 服務連線設定。
-+ `AFRAID_TOKEN`、`DYNU_USERNAME`、`DYNU_PASSWORD`、`NOIP_USERNAME`、`NOIP_PASSWORD`、`NOIP_HOSTNAMES`：DDNS 設定覆蓋值；目前 runtime 使用狀態待確認（To Be Verified）。
 
 
 ### 免責聲明
