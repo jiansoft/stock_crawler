@@ -1,58 +1,114 @@
 
 ### Taiwan stock crawler
 
-UI Demo︰https://jiansoft.mooo.com/stock/revenues  
-API︰https://github.com/jiansoft/stock_api
+台股資料採集、排程更新、手動回補、價格追蹤提醒與 gRPC/HTTP 管理介面服務。
+
+UI Demo︰https://jiansoft.mooo.com/stock/revenues（待確認，非本專案程式碼可驗證）
+API︰https://github.com/jiansoft/stock_api（待確認，非本專案程式碼可驗證）
+
+## 專案功能與用途
+
++ 依排程採集台股主檔、營收、財報、股利、法人資金流向、ETF、收盤報價、指數與外資持股等資料。
++ 開盤期間啟動即時報價背景採集，依 `trace` 設定監控個股高低標，並透過 Telegram 發送提醒。
++ 提供 gRPC 服務給外部系統呼叫股票更新、即時報價、假日表與手動回補功能。
++ 提供本機 HTTP 手動回補管理頁與 API，可建立、查詢與追蹤回補工作。
++ 使用 PostgreSQL 保存業務資料，使用 Redis 保存跨程序通知去重與部分執行狀態，並使用記憶體快取加速查詢。
++ 日誌會寫入 `log/`，若設定 Seq 連線資訊也會同步送到 Seq。
+
+## 技術棧
+
++ Rust 2021，主要 runtime 為 Tokio。
++ Web/API：Axum、Tonic gRPC、Prost。
++ 資料庫與快取：SQLx PostgreSQL、deadpool-redis、Moka memory cache。
++ 爬蟲與解析：Reqwest、Scraper、Regex、Serde/serde_json。
++ 排程：tokio-cron-scheduler。
++ 設定與環境變數：config、dotenv。
++ TLS/憑證：rustls、rustls-pemfile、x509-parser。
 
 ## 架構總覽
 
 ```text
 src/
-├─ main.rs           # 程式入口
+├─ main.rs           # 程式入口，載入設定、初始化日誌、DB/Redis、排程、gRPC 與 Web
 ├─ core/             # 共用基礎（config / declare / util / logging）
+├─ domain/           # 領域模型與倉儲合約（config / dividend / financial / quote / trace 等）
 ├─ app/              # 應用層（scheduler / backfill / event / calculation）
 ├─ infra/            # 基礎設施（crawler / database / cache / nosql）
 └─ interfaces/       # 對外介面（rpc / web / bot）
+
+etc/
+├─ proto/            # gRPC proto，build.rs 會產生 Rust stub 到 src/interfaces/rpc
+└─ sql/              # PostgreSQL schema 與初始化 SQL
+
+docs/                # 架構與工作紀錄文件
+log/                 # runtime 檔案日誌輸出目錄
 ```
 
 > 詳細分層規則與新模組放置規範請參閱 [docs/architecture.md](docs/architecture.md)。
 
 ## 領域驅動設計 (DDD) 重構狀態
 
-本專案正在進行全面的領域驅動設計 (DDD) 與四層架構重構，目前進度如下：
-- **Phase 1~5 (四層架構提取)**：已完成。將 `src/` 整理為明確的 `core/`、`domain/`、`app/`、`infra/`、`interfaces/` 層級。
-- **Phase 6~11 (核心領域模型提取)**：已完成。完成證券主檔 (`registry`)、個股報價 (`quote`)、股利 (`dividend`)、財務與營收 (`financial`) 等核心領域模型與倉儲合約之重構，並實作防腐層 (ACL) 隔離外部爬蟲。
-- **Phase 12 (資金流向領域 DDD 化)**：已完成。建立 `money_flow` 領域模型與 `PgMoneyFlowRepository` 倉儲，將大盤法人資金流向與明細的存取與計算邏輯解耦。
-- **Phase 13 (領域事件解耦 Telegram)**：已完成。引入 `MoneyFlowRecalculated` 與 `ExDividendReminderTriggered` 領域事件，透過訂閱機制非同步處理 Telegram 通知，消除應用層與通訊介面層的強耦合。
-- **Phase 14 (指數領域 DDD 化)**：已完成。建立市場指數 `MarketIndex` 領域實體與 `PgMarketIndexRepository` 倉儲，並使共享快取完全使用領域模型對齊。
-- **Phase 15 (價格監控領域 DDD 化)**：已完成。重構個股價格高低標監控，建立 `PriceTrace` 領域實體與 `PgTraceRepository` 倉儲。
-- **Phase 16 (系統設定領域 DDD 化)**：已完成。重構系統設定，建立 `SystemConfig` 領域實體與 `PgConfigRepository` 倉儲，解除應用與計算邏輯對 `config` table 結構的直接依賴。
-- **Phase 17 (殖利率排行領域 DDD 化)**：已完成。重構個股殖利率排行，建立 `YieldRank` 領域實體與 `PgYieldRankRepository` 倉儲，解除應用流程對 `yield_rank` table 結構的直接依賴。
++ 目前程式碼已採 `core`、`domain`、`app`、`infra`、`interfaces` 分層。
++ `domain/` 目前包含系統設定、股利、事件、財務、指數、資金流、投資組合、報價、證券主檔、價格追蹤與殖利率排行等領域。
++ `docs/checklists/` 保留 Phase 1~17 的歷史重構紀錄；這些文件是否仍完整代表目前待辦狀態：待確認（To Be Verified）。
 
+## 開發環境需求
+
++ Rust stable toolchain；CI 目前以 Rust `1.95.0` 驗證。
++ PostgreSQL 與 Redis；完整測試需先依 `.github/workflows/rust.yml` 的 SQL 順序初始化資料庫。
++ `build.rs` 使用 `protoc-bin-vendored`，一般情況不需要另外安裝 `protoc`。
++ 跨平台 ARM Linux build 腳本會用到 Zig、CMake、`cargo-zigbuild` 或交叉編譯器。
++ Docker 部署需 Docker engine，實際 Rust runtime 映像檔以 `Dockerfile_live` 為準。
+
+## 執行方式
+
++ 先準備 `app.json`，正式密碼、Token、API Key 建議放在 `.env` 或系統環境變數。
++ 初始化 PostgreSQL schema，並確認 Redis 可連線。
++ 本機開發可使用 `cargo run` 啟動服務。
++ 程式啟動後會先檢查 PostgreSQL 連線，再載入共享快取、啟動排程、gRPC server、HTTP 手動回補 server、Telegram/Redis 相關檢查。
++ `system.grpc_use_port` 不為 `0` 時會在 `0.0.0.0:{port}` 啟動 gRPC server；`app.json` 預設為 `9001`。
++ HTTP 手動回補 server 預設監聽 `127.0.0.1:9002`，可用 `MANUAL_BACKFILL_WEB_ADDR` 覆蓋。
+
+## 建置、測試與格式化
+
++ `cargo build --verbose`：本機 debug build。
++ `cargo build --release`：release build。
++ `cargo fmt --all -- --check`：檢查格式，CI 使用此指令。
++ `cargo clippy -- -D warnings`：檢查 lint，CI 使用此指令。
++ `cargo test --release -- --nocapture --test-threads=1`：CI 測試指令；需要 PostgreSQL/Redis 與初始化 SQL。
++ `cargo test module::tests::test_name -- --nocapture`：執行單一測試。
+
+## 部署方式
+
++ `control.sh build|start|stop|restart|update` 會以本機 release binary `stock_crawler` 啟停服務。
++ `control.sh docker_build|docker_start|docker_stop|docker_restart|docker_update` 會使用 `Dockerfile_live` 建立並啟停 Docker container。
++ `Dockerfile_live` 會複製 release binary、`.env`、`app.json` 到 `/app`，以 distroless nonroot runtime 執行，並 expose `9001`。
++ `control.sh docker_start` 預設建立 `stock-rust-container`，映射 `9001`、`9002`，並掛載 `log/` 與 SSL 憑證目錄。
++ `build.ps1` / `build.bat` 會使用 `cargo zigbuild --target aarch64-unknown-linux-musl --release` 建置 ARM Linux musl binary。
++ `build.sh` 會以 `aarch64-unknown-linux-gnu` target 建置 release binary。
++ 根目錄 `Dockerfile` 內容仍指向 Go 專案檔案，是否仍有使用場景：待確認（To Be Verified）。目前部署文件與腳本以 `Dockerfile_live` 為準。
 
 ## 排程時間
 
-以下排程時間為台北時間（Asia/Taipei）。
+以下排程時間為台北時間（Asia/Taipei），依 `src/app/scheduler.rs` 為準。
 
 + 01:00 更新興櫃股票的每股淨值
 + 02:30 更新盈餘分配率
-+ 03:00 更新台股季度財報
-+ 04:00 更新台股季度財報
-+ 05:00   
-  + 更新台股年度財報(僅有eps 等少數欄位的資料)
-  + 更新台股年度財報
-  + 將未下市但每股淨值為零的股票更新其數據
-  + 更新各股的當月營收
-  + 更新台股國際證券識別碼
-  + 更新下市的股票
-+ 08:00
-  + 提醒本日除權息的股票(需自行架設本服務)
-  + 提醒本日自持股票發放股利(需自行架設本服務)
-  + 提醒本日開始公開申購的股票(需自行架設本服務)
-+ 09:00
-  + 更新股票權值佔比
-  + 啟動股票追蹤高低標提醒任務
-+ 15:00 取得台股收盤報價數據計算預估價格
++ 03:00 更新台股季度 EPS
++ 04:00 更新季度財報中 ROE/ROA 為零的資料
++ 05:00 更新台股年度 EPS
++ 05:05 更新台股年度財報
++ 05:10 將未下市但每股淨值為零的股票更新其數據
++ 05:15 更新各股的當月營收
++ 05:20 更新台股國際證券識別碼
++ 05:25 更新下市股票
++ 05:30 更新 ETF 資料
++ 08:00 提醒本日與次一交易日除權息的股票（需自行架設本服務）
++ 08:02 提醒本日自持股票發放股利（需自行架設本服務）
++ 08:04 提醒本日開始公開申購的股票（需自行架設本服務）
++ 09:00 更新股票權值佔比
++ 09:02 啟動股票追蹤高低標提醒任務
++ 15:00 取得台股收盤報價數據並計算預估價格
 + 21:00 更新尚無年度配息資料的股票
 + 22:00 更新外資持股狀態
 + DDNS IP 自動更新功能已自本專案移除，相關功能請改用 https://github.com/jiansoft/dynip。
@@ -78,30 +134,47 @@ src/
 18. 元大證券 https://www.yuanta.com.tw
 
 ## 主要設定
+
 + 所有設定可透過 `app.json` 提供，並可由 `.env` 或系統環境變數覆蓋。
-+ 即時報價備援來源已加入 Fugle 官方日內行情 API。
-+ 若未設定 `FUGLE_API_KEY`，系統會略過 Fugle，繼續使用其他即時報價來源。
-+ 日誌會保留原本 `log/` 檔案輸出；若設定 `SEQ_SERVER_URL`，也會以 CLEF 格式送到 Seq。
-+ Seq 事件使用 `service=stock_rust` 作為服務識別，不送出額外的 `App` 或 `Application` 欄位。
-+ `app.json` 的 `logging.seq.serverUrl` 與 `logging.seq.apiKey` 可提供預設值，正式值建議放在 `.env`。
++ `Cargo.toml` 的 package / binary 名稱目前仍為 `stock_crawler`；Seq 日誌服務識別則使用 `service=stock_rust`。
++ `app.json` 主要包含 `system`、`logging.seq`、資料來源 API、PostgreSQL、Telegram、Redis 與外部 Go gRPC 連線設定。
++ `logging.seq.serverUrl` 與 `logging.seq.apiKey` 可提供預設值，正式值建議放在 `.env` 的 `SEQ_SERVER_URL`、`SEQ_API_KEY`。
++ 未設定 `SEQ_SERVER_URL` 時會停用 Seq 轉送；有設定時會以 CLEF 格式送到 Seq `/api/events/raw?clef`。
++ Seq 事件只送出 `service=stock_rust` 作為服務識別，不送出額外的 `App` 或 `Application` 欄位。
++ 即時報價備援來源包含 Fugle 官方日內行情 API；若未設定 `FUGLE_API_KEY`，系統會略過 Fugle 並繼續嘗試其他來源。
++ `afraid`、`dynu`、`noip` 設定結構仍存在於 `app.json` / `core::config`，但目前主啟動流程未呼叫 DDNS 更新；實際使用狀態待確認（To Be Verified）。
+
+## 對外介面
+
++ gRPC server 依 `system.grpc_use_port` 啟動，並註冊 `Control`、`ManualBackfill`、`Stock` 三個服務。
++ gRPC TLS 會在 `system.ssl_cert_file` 與 `system.ssl_key_file` 都有設定時啟用。
++ `Stock` gRPC 服務提供 `UpdateStockInfo`、`FetchCurrentStockQuotes`、`FetchHolidaySchedule`。
++ `ManualBackfill` gRPC 服務提供每日報價、收盤彙總、台股加權指數、持股股利重算、單檔/多檔歷史股利回補，以及 job 查詢。
++ HTTP 手動回補頁面位於 `/manual-backfill`，API 包含 `/api/manual-backfill/jobs`、`/api/manual-backfill/jobs/{id}` 與多個 `POST /api/manual-backfill/*` 回補入口。
++ Telegram bot 目前用於排程提醒、價格追蹤通知與部分錯誤告警。
 
 ## 盤中即時報價與追蹤
+
 + 開盤期間會同時啟動 HiStock 與 Yahoo 類股背景採集，將即時報價寫入共享記憶體快取。
-+ Yahoo 類股採集使用 `StockServices.getClassQuotes` JSON API，類股之間與同類股分頁之間都會節流 1 秒。
++ Yahoo 類股採集使用 `StockServices.getClassQuotes` JSON API；同類股分頁之間節流 1 秒，類股之間使用 2 至 4 秒隨機延遲。
 + Yahoo 類股目前不採集認購、認售、指數類，避免將大量衍生性商品帶進盤中輪詢。
 + 股票追蹤高低標判斷統一從共享快取讀值；備援抓價只負責補快取並觸發重新判斷。
-+ 若服務在開盤期間重啟，會在啟動時立即補啟動一次股票追蹤任務，避免錯過原本的 09:00 排程。
-+ 單股最新成交價備援站點：Yahoo、Fugle、NStock、CMoney、CnYes、Yuanta、PcHome、Winvest。
-+ 單股完整報價備援站點：Fugle、NStock、CMoney、CnYes、Yuanta、PcHome、Winvest。
++ 若服務在開盤期間重啟，啟動排程時會先嘗試補啟動一次股票追蹤任務，避免錯過原本的 09:02 排程。
++ 單股最新成交價備援站點：Yahoo、Fugle、NStock、CMoney、CnYes、PcHome、Winvest。
++ 單股完整報價備援站點：Fugle、NStock、CMoney、CnYes、PcHome、Winvest。
++ `Yuanta` crawler module 仍存在，但目前不在最新成交價或完整報價備援池中，因程式註解記錄其資料曾觀察為前一交易日資料。
 
-### 常用環境變數
-+ `SEQ_SERVER_URL`、`SEQ_API_KEY`：Seq 日誌收集服務網址與 API Key；未設定 `SEQ_SERVER_URL` 時停用 Seq 轉送
-+ `FUGLE_API_KEY`：Fugle 日內行情 API 金鑰（即時報價備援）
-+ `TELEGRAM_TOKEN`、`TELEGRAM_ALLOWED`：Telegram Bot 與允許通知的 chat 設定
-+ `REDIS_ADDR`、`REDIS_ACCOUNT`、`REDIS_PASSWORD`、`REDIS_DB`：Redis 連線設定
-+ `POSTGRESQL_HOST`、`POSTGRESQL_PORT`、`POSTGRESQL_USER`、`POSTGRESQL_PASSWORD`、`POSTGRESQL_DB`：PostgreSQL 連線設定
-+ `GO_GRPC_TARGET`、`GO_GRPC_TLS_CERT_FILE`、`GO_GRPC_TLS_KEY_FILE`、`GO_GRPC_DOMAIN_NAME`：對外 Go gRPC 服務連線設定
-+ `SYSTEM_GRPC_USE_PORT`、`SYSTEM_SSL_CERT_FILE`、`SYSTEM_SSL_KEY_FILE`：本服務 gRPC 與 TLS 憑證設定
+## 常用環境變數
+
++ `SEQ_SERVER_URL`、`SEQ_API_KEY`：Seq 日誌收集服務網址與 API Key；未設定 `SEQ_SERVER_URL` 時停用 Seq 轉送。
++ `FUGLE_API_KEY`：Fugle 日內行情 API 金鑰（即時報價備援）。
++ `TELEGRAM_TOKEN`、`TELEGRAM_ALLOWED`：Telegram Bot 與允許通知的 chat 設定。
++ `POSTGRESQL_HOST`、`POSTGRESQL_PORT`、`POSTGRESQL_USER`、`POSTGRESQL_PASSWORD`、`POSTGRESQL_DB`：PostgreSQL 連線設定。
++ `REDIS_ADDR`、`REDIS_ACCOUNT`、`REDIS_PASSWORD`、`REDIS_DB`：Redis 連線設定。
++ `SYSTEM_GRPC_USE_PORT`、`SYSTEM_SSL_CERT_FILE`、`SYSTEM_SSL_KEY_FILE`：本服務 gRPC 與 TLS 憑證設定。
++ `MANUAL_BACKFILL_WEB_ADDR`：HTTP 手動回補 server 監聽位址，預設 `127.0.0.1:9002`。
++ `GO_GRPC_TARGET`、`GO_GRPC_TLS_CERT_FILE`、`GO_GRPC_TLS_KEY_FILE`、`GO_GRPC_DOMAIN_NAME`：對外 Go gRPC 服務連線設定。
++ `AFRAID_TOKEN`、`DYNU_USERNAME`、`DYNU_PASSWORD`、`NOIP_USERNAME`、`NOIP_PASSWORD`、`NOIP_HOSTNAMES`：DDNS 設定覆蓋值；目前 runtime 使用狀態待確認（To Be Verified）。
 
 
 ### 免責聲明
