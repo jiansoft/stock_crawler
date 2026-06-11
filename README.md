@@ -3,8 +3,8 @@
 
 台股資料採集、排程更新、手動回補、價格追蹤提醒與 gRPC/HTTP 管理介面服務。
 
-UI Demo︰https://jiansoft.mooo.com/stock/revenues（待確認，非本專案程式碼可驗證）
-API︰https://github.com/jiansoft/stock_api（待確認，非本專案程式碼可驗證）
+UI Demo︰https://jiansoft.mooo.com/stock/revenues
+API︰https://github.com/jiansoft/stock_api
 
 ## 專案功能與用途
 
