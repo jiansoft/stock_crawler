@@ -439,7 +439,7 @@ mod tests {
             }
         }
 
-        // 驗證檔案數量 = generation + 1 (因為 gen 從 0 開始)
+        // 驗證檔案數量 = generation + 1（因為 generation_index 從 0 開始）。
         let expected_files = final_generation + 1;
         assert_eq!(
             files.len() as u32,
@@ -452,11 +452,11 @@ mod tests {
 
         // 驗證每個 generation 的檔案都存在
         let base_fn = now.format("%Y-%m-%d-no-overwrite-test").to_string();
-        for gen in 0..=final_generation {
-            let expected_name = if gen == 0 {
+        for generation_index in 0..=final_generation {
+            let expected_name = if generation_index == 0 {
                 format!("{}.log", base_fn)
             } else {
-                format!("{}.{}.log", base_fn, gen)
+                format!("{}.{}.log", base_fn, generation_index)
             };
             assert!(
                 files.contains(&expected_name),

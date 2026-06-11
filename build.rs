@@ -20,7 +20,11 @@ static OUT_DIR: &str = "src/interfaces/rpc";
 /// 編譯 protobuf 並輸出 Rust 原始碼。
 fn main() -> Result<(), Box<dyn Error>> {
     let protoc = protoc_bin_vendored::protoc_bin_path()?;
-    std::env::set_var("PROTOC", protoc);
+    // SAFETY: build script 在 Cargo 編譯流程中以單一程序執行，且此處會在呼叫
+    // tonic-prost-build 前立即設定 `PROTOC`，沒有其他執行緒同時讀寫環境變數。
+    unsafe {
+        std::env::set_var("PROTOC", protoc);
+    }
 
     let protos = [
         "./etc/proto/basic.proto",
