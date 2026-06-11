@@ -81,6 +81,9 @@ src/
 + 所有設定可透過 `app.json` 提供，並可由 `.env` 或系統環境變數覆蓋。
 + 即時報價備援來源已加入 Fugle 官方日內行情 API。
 + 若未設定 `FUGLE_API_KEY`，系統會略過 Fugle，繼續使用其他即時報價來源。
++ 日誌會保留原本 `log/` 檔案輸出；若設定 `SEQ_SERVER_URL`，也會以 CLEF 格式送到 Seq。
++ Seq 事件使用 `service=stock_rust` 作為服務識別，不送出額外的 `App` 或 `Application` 欄位。
++ `app.json` 的 `logging.seq.serverUrl` 與 `logging.seq.apiKey` 可提供預設值，正式值建議放在 `.env`。
 
 ## 盤中即時報價與追蹤
 + 開盤期間會同時啟動 HiStock 與 Yahoo 類股背景採集，將即時報價寫入共享記憶體快取。
@@ -92,6 +95,7 @@ src/
 + 單股完整報價備援站點：Fugle、NStock、CMoney、CnYes、Yuanta、PcHome、Winvest。
 
 ### 常用環境變數
++ `SEQ_SERVER_URL`、`SEQ_API_KEY`：Seq 日誌收集服務網址與 API Key；未設定 `SEQ_SERVER_URL` 時停用 Seq 轉送
 + `FUGLE_API_KEY`：Fugle 日內行情 API 金鑰（即時報價備援）
 + `TELEGRAM_TOKEN`、`TELEGRAM_ALLOWED`：Telegram Bot 與允許通知的 chat 設定
 + `REDIS_ADDR`、`REDIS_ACCOUNT`、`REDIS_PASSWORD`、`REDIS_DB`：Redis 連線設定
