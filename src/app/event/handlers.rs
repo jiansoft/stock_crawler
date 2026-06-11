@@ -5,9 +5,9 @@
 //! 此模組的目的是將核心業務邏輯 (Use Case) 與外部副作用解耦，
 //! 使 Use Case 僅負責商業編排，不直接耦合基礎設施。
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex;
 
 use anyhow::Result;
@@ -643,7 +643,9 @@ impl EventDispatcher {
                 Telegram::escape_markdown_v2(member_label(member_id)),
                 Telegram::escape_markdown_v2(format_share_quantity(share_quantity)),
                 Telegram::escape_markdown_v2(format_decimal_flexible_commas(holding_cost)),
-                Telegram::escape_markdown_v2(format_decimal_flexible_commas(current_cost_per_share)),
+                Telegram::escape_markdown_v2(format_decimal_flexible_commas(
+                    current_cost_per_share
+                )),
                 Telegram::escape_markdown_v2(format_decimal_flexible_commas(cash_dividend)),
                 Telegram::escape_markdown_v2(format_decimal_flexible_commas(stock_dividend)),
                 Telegram::escape_markdown_v2(format_decimal_flexible_commas(cash_yield)),

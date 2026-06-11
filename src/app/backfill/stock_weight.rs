@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use scopeguard::defer;
 use tokio::sync::Mutex;
 

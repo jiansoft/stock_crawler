@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use anyhow::Result;
 use chrono::Local;
-use rust_decimal::{prelude::ToPrimitive, Decimal};
+use rust_decimal::{Decimal, prelude::ToPrimitive};
 use rust_decimal_macros::dec;
 
 use crate::domain::quote::repository::QuoteRepository;
@@ -50,7 +50,8 @@ pub async fn execute() -> Result<()> {
                 let offering_price = stock.offering_price.unwrap_or(Decimal::ZERO);
                 let price_change = calculate_price_change(offering_price, last_price_dec);
                 let _ = writeln!(
-                    &mut msg, "{stock_symbol} {stock_name} 起迄日︰{start}~{end} 承銷價︰{offering_price} 參考價︰{last_price} {price_change}發行市場:{market}",
+                    &mut msg,
+                    "{stock_symbol} {stock_name} 起迄日︰{start}~{end} 承銷價︰{offering_price} 參考價︰{last_price} {price_change}發行市場:{market}",
                     market = stock.market.clone(),
                     stock_symbol = stock.stock_symbol,
                     stock_name = &stock.stock_name,

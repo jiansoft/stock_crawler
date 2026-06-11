@@ -2,14 +2,14 @@ use std::{future::Future, time::Duration};
 
 use anyhow::Result;
 use chrono::NaiveDate;
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 
 use crate::{
     app::backfill::acl::QuoteAclMapper,
     core::logging,
     core::util::{self, map::Keyable},
     domain::quote::repository::QuoteRepository,
-    infra::cache::{TtlCacheInner, SHARE, TTL},
+    infra::cache::{SHARE, TTL, TtlCacheInner},
     infra::crawler::{share::DailyQuoteDto, tpex, twse},
 };
 
@@ -122,8 +122,8 @@ async fn process_daily_quote(daily_quote: crate::domain::quote::entity::DailyQuo
 mod tests {
     use chrono::NaiveDate;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     };
 
     //use crossbeam::thread;

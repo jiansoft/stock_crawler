@@ -10,7 +10,7 @@
 //! 由於此頁面未直接提供 `sales_per_share` 與 `profit_before_tax`，
 //! 目前這兩個欄位暫時以 `0` 回填。
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use scraper::Html;

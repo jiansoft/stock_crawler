@@ -12,8 +12,8 @@
 //! 7. **發送通知**：透過 Telegram Bot 將警報訊息傳送給使用者。
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;

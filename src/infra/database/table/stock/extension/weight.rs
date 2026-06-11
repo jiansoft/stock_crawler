@@ -1,7 +1,7 @@
 #![allow(dead_code)]
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, FromRow};
+use sqlx::{FromRow, postgres::PgQueryResult};
 
 use crate::infra::database;
 

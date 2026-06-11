@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::NaiveDate;
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use rust_decimal::Decimal;
 
 use crate::{

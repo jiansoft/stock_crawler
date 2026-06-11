@@ -10,7 +10,7 @@ use crate::{
     core::util::datetime::Weekend, infra::crawler::twse,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Local;
 use scopeguard::defer;
 

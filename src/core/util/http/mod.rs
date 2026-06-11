@@ -3,11 +3,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
-use reqwest::{header, header::SET_COOKIE, Client, Method, RequestBuilder, Response};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use reqwest::{Client, Method, RequestBuilder, Response, header, header::SET_COOKIE};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::sync::Semaphore;
 
 use crate::{core::logging::Logger, core::util};
@@ -243,11 +243,7 @@ where
         headers,
         Some(
             |rb: RequestBuilder| {
-                if let Some(r) = req {
-                    rb.json(r)
-                } else {
-                    rb
-                }
+                if let Some(r) = req { rb.json(r) } else { rb }
             },
         ),
         None,

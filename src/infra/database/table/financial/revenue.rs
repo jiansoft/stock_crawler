@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
 use rust_decimal::Decimal;
 use sqlx::{
-    postgres::{PgQueryResult, PgRow},
     Row,
+    postgres::{PgQueryResult, PgRow},
 };
 
 use crate::infra::database;

@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -27,8 +27,8 @@ use crate::{
     core::declare,
     core::util::{self, text},
     infra::crawler::{
-        winvest::{Winvest, HOST},
         StockInfo,
+        winvest::{HOST, Winvest},
     },
 };
 

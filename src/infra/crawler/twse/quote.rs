@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     core::logging,
     core::util::http,
-    infra::cache::{TtlCacheInner, TTL},
+    infra::cache::{TTL, TtlCacheInner},
     infra::crawler::{share::DailyQuoteDto, twse},
 };
 

@@ -11,7 +11,7 @@ use crate::infra::database::table::dividend::extension::stock_dividend_payable_d
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Local, NaiveDate};
-use sqlx::{postgres::PgRow, Row};
+use sqlx::{Row, postgres::PgRow};
 
 impl From<TableStockDividendInfo> for DomainStockDividendInfo {
     fn from(table: TableStockDividendInfo) -> Self {

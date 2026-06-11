@@ -13,15 +13,15 @@ use std::ffi::c_char;
 use std::{
     error::Error,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Instant,
 };
 
 use tokio::signal;
 #[cfg(unix)]
-use tokio::signal::unix::{signal as unix_signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tokio_cron_scheduler::JobScheduler;
 
 #[cfg(all(target_os = "linux", target_env = "musl"))]

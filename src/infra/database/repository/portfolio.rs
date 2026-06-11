@@ -6,7 +6,7 @@ use crate::infra::database;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgRow, QueryBuilder, Row};
+use sqlx::{QueryBuilder, Row, postgres::PgRow};
 
 /// 基於 PostgreSQL 的持股倉儲實現 (PgPortfolioRepository)。
 pub struct PgPortfolioRepository;

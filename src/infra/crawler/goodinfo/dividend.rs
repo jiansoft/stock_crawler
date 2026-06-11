@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{NaiveDate, Utc};
 use hashbrown::HashMap;
 use lazy_static::lazy_static;
 use regex::Regex;
-use reqwest::header::{HeaderMap, COOKIE};
+use reqwest::header::{COOKIE, HeaderMap};
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};

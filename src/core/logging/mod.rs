@@ -6,19 +6,19 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
 };
 
-use chrono::{format::DelayedFormat, Local, SecondsFormat, Utc};
+use chrono::{Local, SecondsFormat, Utc, format::DelayedFormat};
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::Client;
 use serde::Serialize;
 use tokio::{
     runtime::Builder,
-    sync::mpsc::{self, error::TrySendError, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender, error::TrySendError},
     time::{self, Duration},
 };
 

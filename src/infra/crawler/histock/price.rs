@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
@@ -31,14 +31,14 @@ use crate::{
         self,
         atomic::decrement_atomic_usize,
         diagnostics::{
-            read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
+            ProcessMemoryStats, TaskRuntimeStatus, read_process_memory_stats, trim_allocator_memory,
         },
         text,
     },
     infra::cache::{RealtimeSnapshot, SHARE},
     infra::crawler::{
-        histock::{HiStock, HOST},
         StockInfo,
+        histock::{HOST, HiStock},
     },
 };
 

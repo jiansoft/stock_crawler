@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use scopeguard::defer;
 
 /// 調用  twse API 取得台股月營收
@@ -90,17 +90,17 @@ pub(crate) async fn process_revenue(
         Some(s) => s.name().to_string(),
     };
 
-    logging::info_file_async(
-        format!(
-            "公司代號:{}  公司名稱:{} 當月營收:{} 上月營收:{} 去年當月營收:{} 月均價:{} 最低價:{} 最高價:{}",
-            cmd.symbol,
-            name,
-            cmd.monthly,
-            cmd.last_month,
-            cmd.last_year_this_month,
-            table_entity.avg_price,
-            table_entity.lowest_price,
-            table_entity.highest_price));
+    logging::info_file_async(format!(
+        "公司代號:{}  公司名稱:{} 當月營收:{} 上月營收:{} 去年當月營收:{} 月均價:{} 最低價:{} 最高價:{}",
+        cmd.symbol,
+        name,
+        cmd.monthly,
+        cmd.last_month,
+        cmd.last_year_this_month,
+        table_entity.avg_price,
+        table_entity.lowest_price,
+        table_entity.highest_price
+    ));
 
     Ok(())
 }

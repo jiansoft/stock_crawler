@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 

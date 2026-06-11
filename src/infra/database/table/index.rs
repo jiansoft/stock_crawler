@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{Datelike, Local, NaiveDate};
 use concat_string::concat_string;
 use rust_decimal::Decimal;

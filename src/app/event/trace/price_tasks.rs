@@ -34,7 +34,7 @@ use crate::{core::declare, core::logging, infra::cache::SHARE, infra::crawler};
 use crate::{
     core::util::{
         atomic::decrement_atomic_usize,
-        diagnostics::{read_process_memory_stats, trim_allocator_memory, TaskRuntimeStatus},
+        diagnostics::{TaskRuntimeStatus, read_process_memory_stats, trim_allocator_memory},
     },
     infra::cache::RealtimeSnapshot,
 };

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, Postgres, QueryBuilder, Transaction};
+use sqlx::{Postgres, QueryBuilder, Transaction, postgres::PgQueryResult};
 
 use crate::infra::database;
 

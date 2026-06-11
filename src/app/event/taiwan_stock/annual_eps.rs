@@ -9,7 +9,7 @@
 //! 3. 取得資料後轉為 `FinancialStatement` 並寫回資料庫。
 //! 4. 將已處理的股票寫入 Redis，避免短時間內重複抓取。
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{Datelike, Local, NaiveDate};
 use std::collections::HashSet;
 use std::time::Duration;

@@ -13,8 +13,8 @@ use super::{
     lookup::{default_exchange_markets, default_industries},
     realtime::RealtimeSnapshot,
 };
-use crate::domain::market_index::repository::MarketIndexRepository;
 use crate::domain::market_index::MarketIndex;
+use crate::domain::market_index::repository::MarketIndexRepository;
 use crate::infra::crawler::share as crawler_share;
 use crate::infra::database::repository::market_index::PgMarketIndexRepository;
 use crate::{

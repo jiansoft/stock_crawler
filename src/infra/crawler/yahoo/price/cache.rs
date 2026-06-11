@@ -21,10 +21,10 @@ use crate::{
     core::util::{
         atomic::decrement_atomic_usize,
         diagnostics::{
-            read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
+            ProcessMemoryStats, TaskRuntimeStatus, read_process_memory_stats, trim_allocator_memory,
         },
     },
-    infra::cache::{RealtimeSnapshot, TtlCacheInner, SHARE, TTL},
+    infra::cache::{RealtimeSnapshot, SHARE, TTL, TtlCacheInner},
     infra::crawler::yahoo::YahooClassCategory,
 };
 

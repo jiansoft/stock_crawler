@@ -1,7 +1,7 @@
 use crate::{
     core::declare::StockExchange,
     core::util,
-    infra::cache::{TtlCacheInner, TTL},
+    infra::cache::{TTL, TtlCacheInner},
     infra::crawler::{share::DailyQuoteDto, tpex},
 };
 use anyhow::Result;

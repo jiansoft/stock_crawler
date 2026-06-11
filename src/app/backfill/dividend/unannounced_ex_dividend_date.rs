@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rand::RngExt;
 use tokio_retry::{
-    strategy::{jitter, ExponentialBackoff},
     Retry,
+    strategy::{ExponentialBackoff, jitter},
 };
 
 use crate::{
@@ -95,7 +95,7 @@ async fn backfill_unannounced_dividend_dates_from_yahoo(
     let strategy = ExponentialBackoff::from_millis(100)
         .map(jitter) // 延遲加入隨機抖動 (Jitter)
         .take(5); // 限制重試次數為 5 次
-                  // 呼叫 Retry::spawn 開啟重試流程
+    // 呼叫 Retry::spawn 開啟重試流程
     let retry_future = Retry::spawn(strategy, || yahoo::dividend::visit(&entity.security_code));
     let yahoo = match retry_future.await {
         Ok(yahoo_dividend) => yahoo_dividend,

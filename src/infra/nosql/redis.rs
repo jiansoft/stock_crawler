@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use deadpool_redis::{
-    redis::{cmd, AsyncCommands, RedisResult, ToRedisArgs, Value},
     Config, Connection, Pool, Runtime,
+    redis::{AsyncCommands, RedisResult, ToRedisArgs, Value, cmd},
 };
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 

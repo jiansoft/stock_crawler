@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
-use sqlx::{postgres::PgRow, QueryBuilder, Row};
+use sqlx::{QueryBuilder, Row, postgres::PgRow};
 
 use crate::{core::util::map::Keyable, infra::database};
 

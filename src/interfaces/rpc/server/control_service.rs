@@ -7,7 +7,7 @@ use tonic::{Request, Response, Status};
 
 use crate::interfaces::rpc::{
     basic::BaseResponse,
-    control::{control_server::Control, ControlRequest, ControlResponse},
+    control::{ControlRequest, ControlResponse, control_server::Control},
 };
 
 /// Control gRPC 服務。

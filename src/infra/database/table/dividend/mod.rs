@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
 use sqlx::{
-    postgres::{PgQueryResult, PgRow},
     QueryBuilder, Row,
+    postgres::{PgQueryResult, PgRow},
 };
 
 use crate::{core::util::map::Keyable, infra::crawler::goodinfo, infra::database};
@@ -561,8 +561,8 @@ WHERE "SuspendListing" = false
     }
 
     /*    /// 取得尚未有指定年度配息的股票代號
-        pub async fn fetch_stock_symbol_that_without_payout_ratio() -> Result<Vec<String>> {
-            let sql = r#"
+    pub async fn fetch_stock_symbol_that_without_payout_ratio() -> Result<Vec<String>> {
+        let sql = r#"
     SELECT
         security_code
     FROM dividend
@@ -570,15 +570,15 @@ WHERE "SuspendListing" = false
     GROUP BY security_code
     ORDER BY random();
     "#;
-            let stock_symbols: Vec<String> = sqlx::query(sql)
-                .fetch_all(database::get_connection())
-                .await?
-                .into_iter()
-                .map(|row| row.get("security_code"))
-                .collect();
+        let stock_symbols: Vec<String> = sqlx::query(sql)
+            .fetch_all(database::get_connection())
+            .await?
+            .into_iter()
+            .map(|row| row.get("security_code"))
+            .collect();
 
-            Ok(stock_symbols)
-        }*/
+        Ok(stock_symbols)
+    }*/
 
     fn row_to_entity(row: PgRow) -> Result<Dividend, sqlx::Error> {
         Ok(Dividend {

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use anyhow::{Context, Result};
-use sqlx::{postgres::PgQueryResult, FromRow};
+use sqlx::{FromRow, postgres::PgQueryResult};
 
 use crate::infra::database;
 

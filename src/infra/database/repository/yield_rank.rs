@@ -1,6 +1,6 @@
 use crate::domain::yield_rank::repository::YieldRankRepository;
 use crate::infra::database;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate, TimeDelta};
 

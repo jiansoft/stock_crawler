@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use moka::{sync::Cache, Expiry};
+use moka::{Expiry, sync::Cache};
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 

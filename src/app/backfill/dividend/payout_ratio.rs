@@ -3,7 +3,7 @@ use std::{collections::HashSet, time::Duration};
 use crate::{
     app::backfill::acl::DividendAclMapper,
     core::logging,
-    core::util::map::{vec_to_hashmap, Keyable},
+    core::util::map::{Keyable, vec_to_hashmap},
     domain::dividend::repository::DividendRepository,
     domain::registry::entity::StockSymbol,
     infra::crawler::goodinfo,

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
