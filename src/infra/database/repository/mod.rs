@@ -1,3 +1,4 @@
+pub mod config;
 pub mod dividend;
 pub mod financial;
 pub mod market_index;

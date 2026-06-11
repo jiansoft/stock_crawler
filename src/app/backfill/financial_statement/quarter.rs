@@ -37,9 +37,20 @@ pub async fn execute() -> Result<()> {
 
     if success_count > 0 {
         table::stock::StockDbRow::update_eps_and_roe().await?;
-        let estimate_date_config =
-            table::config::Config::new("estimate-date".to_string(), "".to_string());
-        let date = estimate_date_config.get_val_naive_date().await?;
+        // 實例化系統設定領域倉儲，用來查詢價格估值日期設定
+        let config_repo = crate::infra::database::repository::config::PgConfigRepository::new();
+        use crate::domain::config::repository::ConfigRepository;
+
+        // 取得價格估值日期 "estimate-date" 設定值
+        let config_opt = config_repo.find_by_key("estimate-date").await?;
+        let date = match config_opt {
+            Some(cfg) => cfg.parse_val_as_date()?,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "無法在系統設定中找到 'estimate-date' 的設定值"
+                ))
+            }
+        };
         // 計算便宜、合理、昂貴價的估算
         calculation::estimated_price::calculate_estimated_price(date).await?;
         logging::info_file_async("季度財報更新重新計算便宜、合理、昂貴價的估算結束".to_string());
