@@ -26,7 +26,7 @@ src/
 - **Phase 13 (領域事件解耦 Telegram)**：已完成。引入 `MoneyFlowRecalculated` 與 `ExDividendReminderTriggered` 領域事件，透過訂閱機制非同步處理 Telegram 通知，消除應用層與通訊介面層的強耦合。
 - **Phase 14 (指數領域 DDD 化)**：已完成。建立市場指數 `MarketIndex` 領域實體與 `PgMarketIndexRepository` 倉儲，並使共享快取完全使用領域模型對齊。
 - **Phase 15 (價格監控領域 DDD 化)**：已完成。重構個股價格高低標監控，建立 `PriceTrace` 領域實體與 `PgTraceRepository` 倉儲。
-
+- **Phase 16 (系統設定領域 DDD 化)**：已完成。重構系統設定，建立 `SystemConfig` 領域實體與 `PgConfigRepository` 倉儲，解除應用與計算邏輯對 `config` table 結構的直接依賴。
 
 
 ## 排程時間
