@@ -54,9 +54,9 @@ log/                 # runtime 檔案日誌輸出目錄
 
 ## 開發環境需求
 
-+ Rust stable toolchain；CI 目前以 Rust `1.95.0` 驗證。
++ Rust stable toolchain；專案使用 Rust 2024 edition，CI 目前以 Rust `1.95.0` 驗證。
 + PostgreSQL 與 Redis；完整測試需先依 `.github/workflows/rust.yml` 的 SQL 順序初始化資料庫。
-+ `build.rs` 使用 `protoc-bin-vendored`，一般情況不需要另外安裝 `protoc`。
++ `build.rs` 使用 `protoc-bin-vendored` 取得 vendored `protoc`，並透過 `prost-build` config 指定 executable；一般情況不需要另外安裝 `protoc` 或設定 `PROTOC` 環境變數。
 + 跨平台 ARM Linux build 腳本會用到 Zig、CMake、`cargo-zigbuild` 或交叉編譯器。
 + Docker 部署需 Docker engine，實際 Rust runtime 映像檔以 `Dockerfile_live` 為準。
 
