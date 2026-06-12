@@ -59,6 +59,8 @@ urlencoding = "2.1"
 lazy_static = "1.5"
 scopeguard = "1.2"
 x509-parser = "0.18"
+# 鎖定 time 版本以修復 time 0.3.36 與 sqlx E0119 trait 衝突導致的 CI 編譯失敗
+time = "<0.3.36"
 
 [target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
 mimalloc = "0.1"
