@@ -36,10 +36,10 @@ impl StockRepository for PgStockRepository {
     /// </summary>
     async fn find_by_symbol(&self, symbol: &str) -> Result<Option<Stock>> {
         // 1. 優先從全域快取取得
-        if let Ok(cache) = SHARE.stocks.read() {
-            if let Some(cached_stock) = cache.get(symbol) {
-                return Ok(Some(cached_stock.clone()));
-            }
+        if let Ok(cache) = SHARE.stocks.read()
+            && let Some(cached_stock) = cache.get(symbol)
+        {
+            return Ok(Some(cached_stock.clone()));
         }
 
         // 2. 快取未命中，從 DB 查詢

@@ -3,7 +3,7 @@ use crate::{
     app::calculation,
     core::logging,
     domain::quote::repository::QuoteRepository,
-    infra::cache::{TtlCacheInner, TTL},
+    infra::cache::{TTL, TtlCacheInner},
     infra::crawler,
     infra::database::repository::{quote::PgQuoteRepository, yield_rank::PgYieldRankRepository},
 };

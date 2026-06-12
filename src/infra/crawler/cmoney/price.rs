@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use reqwest::header::{self, HeaderValue};
 use rust_decimal::Decimal;
@@ -8,8 +8,8 @@ use crate::{
     core::declare,
     core::util::{self, text},
     infra::crawler::{
-        cmoney::{CMoney, HOST},
         StockInfo,
+        cmoney::{CMoney, HOST},
     },
 };
 

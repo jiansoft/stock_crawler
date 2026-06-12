@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Datelike, Local, TimeDelta};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, postgres::PgRow, Row};
+use sqlx::{Row, postgres::PgQueryResult, postgres::PgRow};
 
 use crate::{
     core::declare::Industry,

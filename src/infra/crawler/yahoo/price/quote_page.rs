@@ -15,8 +15,8 @@ use crate::{
     core::util::{self, text},
     infra::cache::SHARE,
     infra::crawler::{
-        yahoo::{Yahoo, HOST},
         StockInfo,
+        yahoo::{HOST, Yahoo},
     },
 };
 

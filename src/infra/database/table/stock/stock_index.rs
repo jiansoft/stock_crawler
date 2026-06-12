@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Local};
-use sqlx::{postgres::PgQueryResult, Postgres, Transaction};
+use sqlx::{Postgres, Transaction, postgres::PgQueryResult};
 
 use crate::infra::database;
 

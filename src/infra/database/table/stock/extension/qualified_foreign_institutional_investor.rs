@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, FromRow};
+use sqlx::{FromRow, postgres::PgQueryResult};
 
 use crate::{core::util::convert::FromValue, infra::database};
 

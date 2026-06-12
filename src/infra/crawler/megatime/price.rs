@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
@@ -19,8 +19,8 @@ use crate::{
     core::declare,
     core::util::{self, http::element, text},
     infra::crawler::{
-        megatime::{PcHome, HOST},
         StockInfo,
+        megatime::{HOST, PcHome},
     },
 };
 

@@ -1,14 +1,14 @@
 use std::fmt::Write;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, Row};
+use sqlx::{Row, postgres::PgQueryResult};
 
 use crate::{
     core::declare::StockExchange,
     core::util::{datetime, map::Keyable},
-    infra::database::{self, table::daily_quote::extension::MonthlyStockPriceSummary, CopyIn},
+    infra::database::{self, CopyIn, table::daily_quote::extension::MonthlyStockPriceSummary},
 };
 
 pub(crate) mod extension;
@@ -187,13 +187,13 @@ impl DailyQuote {
         e.price_earning_ratio = parse_decimal("本益比");
 
         // 處理漲跌符號
-        if let Some(&i) = map.get("漲跌(+/-)") {
-            if let Some(sign) = item.get(i) {
-                if sign.contains('-') || sign.contains('綠') {
-                    e.change = -e.change.abs();
-                } else if sign.contains('+') || sign.contains('紅') {
-                    e.change = e.change.abs();
-                }
+        if let Some(&i) = map.get("漲跌(+/-)")
+            && let Some(sign) = item.get(i)
+        {
+            if sign.contains('-') || sign.contains('綠') {
+                e.change = -e.change.abs();
+            } else if sign.contains('+') || sign.contains('紅') {
+                e.change = e.change.abs();
             }
         }
 
@@ -209,40 +209,42 @@ impl DailyQuote {
     pub fn to_csv(&self) -> String {
         let mut csv_string = String::new();
 
-        let _ = writeln!(csv_string, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-                         self.maximum_price_in_year_date_on,
-                         self.minimum_price_in_year_date_on,
-                         self.date,
-                         self.create_time,
-                         self.record_time,
-                         self.price_earning_ratio,
-                         self.moving_average_60,
-                         self.closing_price,
-                         self.change_range,
-                         self.change,
-                         self.last_best_bid_price,
-                         self.last_best_bid_volume,
-                         self.last_best_ask_price,
-                         self.last_best_ask_volume,
-                         self.moving_average_5,
-                         self.moving_average_10,
-                         self.moving_average_20,
-                         self.lowest_price,
-                         self.moving_average_120,
-                         self.moving_average_240,
-                         self.maximum_price_in_year,
-                         self.minimum_price_in_year,
-                         self.average_price_in_year,
-                         self.highest_price,
-                         self.opening_price,
-                         self.trading_volume,
-                         self.trade_value,
-                         self.transaction,
-                         self.price_to_book_ratio,
-                         self.stock_symbol,
-                         self.year,
-                         self.month,
-                         self.day,
+        let _ = writeln!(
+            csv_string,
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            self.maximum_price_in_year_date_on,
+            self.minimum_price_in_year_date_on,
+            self.date,
+            self.create_time,
+            self.record_time,
+            self.price_earning_ratio,
+            self.moving_average_60,
+            self.closing_price,
+            self.change_range,
+            self.change,
+            self.last_best_bid_price,
+            self.last_best_bid_volume,
+            self.last_best_ask_price,
+            self.last_best_ask_volume,
+            self.moving_average_5,
+            self.moving_average_10,
+            self.moving_average_20,
+            self.lowest_price,
+            self.moving_average_120,
+            self.moving_average_240,
+            self.maximum_price_in_year,
+            self.minimum_price_in_year,
+            self.average_price_in_year,
+            self.highest_price,
+            self.opening_price,
+            self.trading_volume,
+            self.trade_value,
+            self.transaction,
+            self.price_to_book_ratio,
+            self.stock_symbol,
+            self.year,
+            self.month,
+            self.day,
         );
 
         csv_string
@@ -515,10 +517,10 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
                     *field = d.parse::<Decimal>().unwrap_or_default();
                 }
 
-                if let Some(change_str) = item.get(9) {
-                    if change_str.contains('-') {
-                        e.change = -e.change;
-                    }
+                if let Some(change_str) = item.get(9)
+                    && change_str.contains('-')
+                {
+                    e.change = -e.change;
                 }
             }
             StockExchange::TPEx => {

@@ -13,8 +13,8 @@ use super::{
     lookup::{default_exchange_markets, default_industries},
     realtime::RealtimeSnapshot,
 };
-use crate::domain::market_index::repository::MarketIndexRepository;
 use crate::domain::market_index::MarketIndex;
+use crate::domain::market_index::repository::MarketIndexRepository;
 use crate::infra::crawler::share as crawler_share;
 use crate::infra::database::repository::market_index::PgMarketIndexRepository;
 use crate::{
@@ -253,10 +253,10 @@ impl Share {
         }
 
         // 只有在尚未取得 IP 時才查詢公網 IP，避免在測試或多次載入中重複發起大量網路請求
-        if self.get_current_ip().is_none() {
-            if let Ok(ip) = crawler_share::get_public_ip().await {
-                self.set_current_ip(ip);
-            }
+        if self.get_current_ip().is_none()
+            && let Ok(ip) = crawler_share::get_public_ip().await
+        {
+            self.set_current_ip(ip);
         }
 
         let current_ip = self.get_current_ip().unwrap_or_default();
@@ -517,11 +517,11 @@ impl Share {
         &self,
         daily_quote: &crate::domain::quote::entity::DailyQuote,
     ) {
-        if let Ok(mut last_trading_day_quotes) = self.last_trading_day_quotes.write() {
-            if let Some(quote) = last_trading_day_quotes.get_mut(&daily_quote.stock_symbol) {
-                quote.date = daily_quote.date;
-                quote.closing_price = daily_quote.closing_price;
-            }
+        if let Ok(mut last_trading_day_quotes) = self.last_trading_day_quotes.write()
+            && let Some(quote) = last_trading_day_quotes.get_mut(&daily_quote.stock_symbol)
+        {
+            quote.date = daily_quote.date;
+            quote.closing_price = daily_quote.closing_price;
         }
     }
 
@@ -607,10 +607,10 @@ impl Share {
 
             // 如果新報價異常且原本快取中有舊資料，則從舊快取還原，避免直接抹除該股票
             for (symbol, old_snap) in cache.iter() {
-                if let Some(new_snap) = snapshots.get_mut(symbol) {
-                    if new_snap.price == Decimal::ZERO {
-                        *new_snap = old_snap.clone();
-                    }
+                if let Some(new_snap) = snapshots.get_mut(symbol)
+                    && new_snap.price == Decimal::ZERO
+                {
+                    *new_snap = old_snap.clone();
                 }
             }
 

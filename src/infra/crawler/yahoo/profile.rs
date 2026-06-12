@@ -148,12 +148,11 @@ pub async fn visit(stock_symbol: &str) -> Result<Profile> {
 
     // 解析年份與季度 (例如 "2025 Q3")
     if let Some(year_and_quarter_text) = element::parse_value(&section, "div:nth-child(2).D\\(f\\)")
+        && let Some(quarter_match) = REG_QUARTER.find(&year_and_quarter_text)
     {
-        if let Some(quarter_match) = REG_QUARTER.find(&year_and_quarter_text) {
-            profile.quarter = quarter_match.as_str().to_uppercase();
-            if let Ok(year) = year_and_quarter_text[0..4].parse::<i32>() {
-                profile.year = year;
-            }
+        profile.quarter = quarter_match.as_str().to_uppercase();
+        if let Ok(year) = year_and_quarter_text[0..4].parse::<i32>() {
+            profile.year = year;
         }
     }
 

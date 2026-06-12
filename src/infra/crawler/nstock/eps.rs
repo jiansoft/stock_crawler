@@ -3,7 +3,7 @@
 //! 此模組會呼叫 NStock 的公開 API，整理為年度與季度兩種 EPS 資料模型，
 //! 供後續補齊 ROE、ROA 與毛利率等財務欄位使用。
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rust_decimal::Decimal;
 use serde_derive::{Deserialize, Serialize};
 

@@ -33,6 +33,9 @@ pub struct App {
     pub nosql: NoSQL,
     /// 系統全域行為設定
     pub system: System,
+    /// 日誌輸出與外部收集器設定
+    #[serde(default)]
+    pub logging: Logging,
 }
 
 const SYSTEM_GRPC_USE_PORT: &str = "SYSTEM_GRPC_USE_PORT";
@@ -48,6 +51,32 @@ pub struct System {
     pub ssl_cert_file: String,
     /// SSL 私鑰檔案路徑
     pub ssl_key_file: String,
+}
+
+const SEQ_SERVER_URL: &str = "SEQ_SERVER_URL";
+const SEQ_API_KEY: &str = "SEQ_API_KEY";
+
+/// 日誌相關設定項。
+///
+/// 目前用於控制檔案日誌之外的外部日誌收集器，例如 Seq。
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct Logging {
+    /// Seq 日誌收集器設定。
+    #[serde(default)]
+    pub seq: SeqLogging,
+}
+
+/// Seq 日誌收集器連線設定。
+///
+/// `server_url` 為 Seq 伺服器根網址；`api_key` 為送入事件時使用的 API Key。
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct SeqLogging {
+    /// Seq 伺服器根網址，例如 `http://localhost:5341`。
+    #[serde(default, rename = "serverUrl", alias = "server_url")]
+    pub server_url: String,
+    /// Seq API Key；空字串代表不附帶 API Key。
+    #[serde(default, rename = "apiKey", alias = "api_key")]
+    pub api_key: String,
 }
 
 /// RPC 服務入口設定
@@ -244,10 +273,10 @@ impl App {
     fn from_env() -> Self {
         let tg_allowed = env::var(TELEGRAM_ALLOWED).expect(TELEGRAM_ALLOWED);
         let mut allowed_list: HashMap<i64, String> = Default::default();
-        if !tg_allowed.is_empty() {
-            if let Ok(allowed) = serde_json::from_str::<HashMap<i64, String>>(&tg_allowed) {
-                allowed_list = allowed;
-            }
+        if !tg_allowed.is_empty()
+            && let Ok(allowed) = serde_json::from_str::<HashMap<i64, String>>(&tg_allowed)
+        {
+            allowed_list = allowed;
         }
         let noip_hostnames = env::var(NOIP_HOSTNAMES).expect(NOIP_HOSTNAMES);
         let mut noip_hostnames_list: Vec<String> = Default::default();
@@ -316,6 +345,12 @@ impl App {
                 ssl_cert_file: env::var(SYSTEM_SSL_CERT_FILE).expect(SYSTEM_SSL_CERT_FILE),
                 ssl_key_file: env::var(SYSTEM_SSL_KEY_FILE).expect(SYSTEM_SSL_KEY_FILE),
             },
+            logging: Logging {
+                seq: SeqLogging {
+                    server_url: env::var(SEQ_SERVER_URL).unwrap_or_default(),
+                    api_key: env::var(SEQ_API_KEY).unwrap_or_default(),
+                },
+            },
             dyny: Dynu {
                 username: env::var(DYNU_USERNAME).expect(DYNU_USERNAME),
                 password: env::var(DYNU_PASSWORD).expect(DYNU_PASSWORD),
@@ -373,6 +408,14 @@ impl App {
         }
         if let Ok(key_file) = env::var(SYSTEM_SSL_KEY_FILE) {
             self.system.ssl_key_file = key_file;
+        }
+
+        if let Ok(server_url) = env::var(SEQ_SERVER_URL) {
+            self.logging.seq.server_url = server_url;
+        }
+
+        if let Ok(api_key) = env::var(SEQ_API_KEY) {
+            self.logging.seq.api_key = api_key;
         }
 
         if let Ok(target) = env::var(GO_GRPC_TARGET) {

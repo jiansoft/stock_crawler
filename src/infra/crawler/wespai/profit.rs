@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
@@ -91,10 +91,10 @@ pub async fn visit() -> Result<Vec<Profit>> {
     };
     let re = Regex::new(r"\d{4}")?;
     let mut profit_year = 0;
-    if let Some(caps) = re.captures(year) {
-        if let Some(q) = caps.get(0) {
-            profit_year = q.as_str().parse::<i32>()?
-        }
+    if let Some(caps) = re.captures(year)
+        && let Some(q) = caps.get(0)
+    {
+        profit_year = q.as_str().parse::<i32>()?
     }
 
     if profit_year == 0 {

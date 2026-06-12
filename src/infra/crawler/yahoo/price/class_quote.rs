@@ -9,7 +9,7 @@
 
 use std::{collections::HashMap, str::FromStr, time::Duration};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use once_cell::sync::OnceCell;
 use reqwest::Client;
 use rust_decimal::Decimal;

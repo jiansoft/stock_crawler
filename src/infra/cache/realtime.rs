@@ -4,8 +4,8 @@
 //! 不包含抓取、更新或快取生命週期控制邏輯。
 
 use anyhow::{Context, Result};
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 
 use crate::core::declare;
 

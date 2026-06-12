@@ -6,7 +6,7 @@ use crate::infra::database;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgRow, QueryBuilder, Row};
+use sqlx::{QueryBuilder, Row, postgres::PgRow};
 
 /// 基於 PostgreSQL 的持股倉儲實現 (PgPortfolioRepository)。
 pub struct PgPortfolioRepository;
@@ -61,12 +61,12 @@ impl PortfolioRepository for PgPortfolioRepository {
             "#,
         );
 
-        if let Some(scs) = security_codes {
-            if !scs.is_empty() {
-                query_builder.push(" AND security_code = ANY(");
-                query_builder.push_bind(scs);
-                query_builder.push(")");
-            }
+        if let Some(scs) = security_codes
+            && !scs.is_empty()
+        {
+            query_builder.push(" AND security_code = ANY(");
+            query_builder.push_bind(scs);
+            query_builder.push(")");
         }
 
         let query = query_builder.build();

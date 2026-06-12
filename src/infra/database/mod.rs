@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use once_cell::sync::Lazy;
-use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Transaction, postgres::PgPoolOptions};
 
 use crate::core::config;
 

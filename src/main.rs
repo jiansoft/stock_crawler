@@ -13,15 +13,15 @@ use std::ffi::c_char;
 use std::{
     error::Error,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Instant,
 };
 
 use tokio::signal;
 #[cfg(unix)]
-use tokio::signal::unix::{signal as unix_signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal as unix_signal};
 use tokio_cron_scheduler::JobScheduler;
 
 #[cfg(all(target_os = "linux", target_env = "musl"))]
@@ -38,10 +38,7 @@ static GLOBAL_ALLOCATOR: MiMalloc = MiMalloc;
 /// - `MIMALLOC_ARENA_EAGER_COMMIT=0`：避免過早 commit 大 arena。
 #[cfg(all(target_os = "linux", target_env = "musl"))]
 #[used]
-#[cfg_attr(
-    all(target_os = "linux", target_env = "musl"),
-    link_section = ".init_array"
-)]
+#[unsafe(link_section = ".init_array")]
 static INIT_MIMALLOC_ENV: extern "C" fn() = init_mimalloc_env;
 
 #[cfg(all(target_os = "linux", target_env = "musl"))]
@@ -113,6 +110,14 @@ async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
 /// 啟動 `stock_crawler` 主流程。
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // 先載入本機環境設定，讓後續 logging 與 SETTINGS 都能吃到 .env 覆蓋值。
+    dotenv::dotenv().ok();
+    core::logging::init_seq(
+        &core::config::SETTINGS.logging.seq.server_url,
+        &core::config::SETTINGS.logging.seq.api_key,
+    )
+    .await;
+
     let startup_timer = Instant::now();
     let received_signal = Arc::new(AtomicBool::new(false));
     let allocator_tuning = core::util::diagnostics::tune_allocator_for_long_running_process();
@@ -144,8 +149,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     });
-
-    dotenv::dotenv().ok();
 
     // 在進入快取載入與背景服務前，先對資料庫進行連線檢查（Fail Fast）
     core::logging::info_file_async("startup database check: ping database".to_string());

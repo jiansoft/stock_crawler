@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -468,13 +468,13 @@ impl DailyQuoteDto {
         dto.price_earning_ratio = parse_decimal("本益比");
 
         // 處理漲跌符號
-        if let Some(&i) = map.get("漲跌(+/-)") {
-            if let Some(sign) = item.get(i) {
-                if sign.contains('-') || sign.contains('綠') {
-                    dto.change = -dto.change.abs();
-                } else if sign.contains('+') || sign.contains('紅') {
-                    dto.change = dto.change.abs();
-                }
+        if let Some(&i) = map.get("漲跌(+/-)")
+            && let Some(sign) = item.get(i)
+        {
+            if sign.contains('-') || sign.contains('綠') {
+                dto.change = -dto.change.abs();
+            } else if sign.contains('+') || sign.contains('紅') {
+                dto.change = dto.change.abs();
             }
         }
 
@@ -508,10 +508,10 @@ impl DailyQuoteDto {
                     *field = d.parse::<Decimal>().unwrap_or_default();
                 }
 
-                if let Some(change_str) = item.get(9) {
-                    if change_str.contains('-') {
-                        dto.change = -dto.change;
-                    }
+                if let Some(change_str) = item.get(9)
+                    && change_str.contains('-')
+                {
+                    dto.change = -dto.change;
                 }
             }
             StockExchange::TPEx => {

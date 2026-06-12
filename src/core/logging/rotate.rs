@@ -3,8 +3,8 @@ use std::{
     io::{self, BufWriter, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, RwLock,
+        atomic::{AtomicBool, Ordering},
     },
     time::UNIX_EPOCH,
 };
@@ -113,11 +113,11 @@ impl Rotate {
         }
 
         // 寫入訊息
-        if let Some(ref writer) = self.out_fh {
-            if let Ok(mut w) = writer.write() {
-                w.write_all(msg)?;
-                self.current_size += msg.len() as u64;
-            }
+        if let Some(ref writer) = self.out_fh
+            && let Ok(mut w) = writer.write()
+        {
+            w.write_all(msg)?;
+            self.current_size += msg.len() as u64;
         }
 
         Ok(())
@@ -162,10 +162,10 @@ impl Rotate {
         let filename = self.generate_full_fn(&self.cur_base_fn, self.generation);
 
         // 確保目錄存在
-        if let Some(parent) = Path::new(&filename).parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = Path::new(&filename).parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)?;
         }
 
         let file = OpenOptions::new()
@@ -201,10 +201,10 @@ impl Rotate {
 
     /// flush 當前檔案
     fn flush_current(&self) {
-        if let Some(ref writer) = self.out_fh {
-            if let Ok(mut w) = writer.write() {
-                let _ = w.flush();
-            }
+        if let Some(ref writer) = self.out_fh
+            && let Ok(mut w) = writer.write()
+        {
+            let _ = w.flush();
         }
     }
 
@@ -439,7 +439,7 @@ mod tests {
             }
         }
 
-        // 驗證檔案數量 = generation + 1 (因為 gen 從 0 開始)
+        // 驗證檔案數量 = generation + 1（因為 generation_index 從 0 開始）。
         let expected_files = final_generation + 1;
         assert_eq!(
             files.len() as u32,
@@ -452,11 +452,11 @@ mod tests {
 
         // 驗證每個 generation 的檔案都存在
         let base_fn = now.format("%Y-%m-%d-no-overwrite-test").to_string();
-        for gen in 0..=final_generation {
-            let expected_name = if gen == 0 {
+        for generation_index in 0..=final_generation {
+            let expected_name = if generation_index == 0 {
                 format!("{}.log", base_fn)
             } else {
-                format!("{}.{}.log", base_fn, gen)
+                format!("{}.{}.log", base_fn, generation_index)
             };
             assert!(
                 files.contains(&expected_name),

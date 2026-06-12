@@ -7,17 +7,17 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use axum::{
+    Json, Router,
     extract::{Path, State},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
-    Json, Router,
 };
 use chrono::{Local, NaiveDate};
 use once_cell::sync::Lazy;

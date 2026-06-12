@@ -15,13 +15,13 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Mutex, OnceLock,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Instant,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;

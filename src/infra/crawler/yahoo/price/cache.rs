@@ -21,10 +21,10 @@ use crate::{
     core::util::{
         atomic::decrement_atomic_usize,
         diagnostics::{
-            read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
+            ProcessMemoryStats, TaskRuntimeStatus, read_process_memory_stats, trim_allocator_memory,
         },
     },
-    infra::cache::{RealtimeSnapshot, TtlCacheInner, SHARE, TTL},
+    infra::cache::{RealtimeSnapshot, SHARE, TTL, TtlCacheInner},
     infra::crawler::yahoo::YahooClassCategory,
 };
 
@@ -106,10 +106,10 @@ fn store_runtime_progress(
 ///
 /// 若任務已經在執行中，重複呼叫不會再啟動第二條背景迴圈。
 pub fn start_caching_task() {
-    if let Ok(mut handle) = CACHING_TASK.lock() {
-        if handle.as_ref().is_some_and(|task| task.is_finished()) {
-            handle.take();
-        }
+    if let Ok(mut handle) = CACHING_TASK.lock()
+        && handle.as_ref().is_some_and(|task| task.is_finished())
+    {
+        handle.take();
     }
 
     // 先擋掉重複啟動，避免同一時間跑出多條背景輪詢迴圈，
@@ -447,13 +447,13 @@ pub async fn stop_caching_task() {
         }
     };
 
-    if let Some(handle) = handle {
-        if let Err(why) = handle.await {
-            crate::core::logging::error_file_async(format!(
-                "Yahoo 類股快取任務停止等待失敗: {:?}",
-                why
-            ));
-        }
+    if let Some(handle) = handle
+        && let Err(why) = handle.await
+    {
+        crate::core::logging::error_file_async(format!(
+            "Yahoo 類股快取任務停止等待失敗: {:?}",
+            why
+        ));
     }
 
     // 然後主動清空快取，避免收盤或停任務後外部仍讀到過期盤中報價。

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgRow, QueryBuilder, Row};
+use sqlx::{QueryBuilder, Row, postgres::PgRow};
 
 use crate::{core::util::map::Keyable, infra::database};
 

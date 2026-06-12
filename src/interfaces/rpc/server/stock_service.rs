@@ -13,8 +13,8 @@ use crate::{
     infra::crawler::twse,
     infra::database::repository::quote::PgQuoteRepository,
     interfaces::rpc::stock::{
-        stock_server::Stock, HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest,
-        StockInfoReply, StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest,
+        HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest, StockInfoReply,
+        StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest, stock_server::Stock,
     },
 };
 

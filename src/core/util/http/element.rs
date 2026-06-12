@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use scraper::{Html, Selector};

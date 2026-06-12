@@ -16,4 +16,4 @@ mod ttl;
 
 pub use realtime::RealtimeSnapshot;
 pub use share::SHARE;
-pub use ttl::{TtlCacheInner, TTL};
+pub use ttl::{TTL, TtlCacheInner};

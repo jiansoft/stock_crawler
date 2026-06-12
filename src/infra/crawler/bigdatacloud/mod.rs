@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use serde_derive::Serialize;
 

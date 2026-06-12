@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
 use rust_decimal::Decimal;
-use sqlx::{postgres::PgQueryResult, Postgres, QueryBuilder, Transaction};
+use sqlx::{Postgres, QueryBuilder, Transaction, postgres::PgQueryResult};
 
 use crate::infra::database;
 
@@ -78,12 +78,12 @@ FROM stock_ownership_details
 WHERE is_sold = false"#,
         );
 
-        if let Some(scs) = security_codes {
-            if !scs.is_empty() {
-                query_builder.push(" AND security_code = ANY(");
-                query_builder.push_bind(scs);
-                query_builder.push(")");
-            }
+        if let Some(scs) = security_codes
+            && !scs.is_empty()
+        {
+            query_builder.push(" AND security_code = ANY(");
+            query_builder.push_bind(scs);
+            query_builder.push(")");
         }
 
         let query = query_builder.build_query_as::<StockOwnershipDetail>();

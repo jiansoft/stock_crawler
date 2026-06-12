@@ -465,7 +465,8 @@ fn gen_chrome_ua() -> String {
     if os.starts_with("iPhone") || os.starts_with("iPad") {
         format!(
             "Mozilla/5.0 ({}) AppleWebKit/537.36 (KHTML, like Gecko) CriOS/{} Mobile/15E148 Safari/604.1",
-            os, version.split('.').next().unwrap_or("133")
+            os,
+            version.split('.').next().unwrap_or("133")
         )
     } else if os.starts_with("Linux; Android") {
         format!(

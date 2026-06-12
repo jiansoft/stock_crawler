@@ -5,6 +5,12 @@
     "ssl_cert_file": "fullchain.pem",
     "ssl_key_file": "privkey.pem"
   },
+  "logging": {
+    "seq": {
+      "serverUrl": "",
+      "apiKey": ""
+    }
+  },
   "afraid": {
     "url": "https://sync.afraid.org",
     "path": "/u",

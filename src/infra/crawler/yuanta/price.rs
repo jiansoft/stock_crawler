@@ -12,7 +12,7 @@
 //! 原因是近期觀察到 API 回傳的是前一交易日資料，不符合即時追蹤用途。
 //! 模組本身仍保留，供後續重新驗證來源品質後再決定是否恢復使用。
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use serde_derive::Deserialize;
@@ -21,8 +21,8 @@ use crate::{
     core::declare::StockQuotes,
     core::util::{self},
     infra::crawler::{
-        yuanta::{Yuanta, HOST},
         StockInfo,
+        yuanta::{HOST, Yuanta},
     },
 };
 

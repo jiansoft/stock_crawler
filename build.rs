@@ -20,7 +20,8 @@ static OUT_DIR: &str = "src/interfaces/rpc";
 /// 編譯 protobuf 並輸出 Rust 原始碼。
 fn main() -> Result<(), Box<dyn Error>> {
     let protoc = protoc_bin_vendored::protoc_bin_path()?;
-    std::env::set_var("PROTOC", protoc);
+    let mut prost_config = tonic_prost_build::Config::new();
+    prost_config.protoc_executable(protoc);
 
     let protos = [
         "./etc/proto/basic.proto",
@@ -33,7 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     tonic_prost_build::configure()
         .build_server(true)
         .out_dir(OUT_DIR)
-        .compile_protos(&protos, &["./etc/proto"])?;
+        .compile_with_config(prost_config, &protos, &["./etc/proto"])?;
 
     rerun(&protos);
 

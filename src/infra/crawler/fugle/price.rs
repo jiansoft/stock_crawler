@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use reqwest::header::{self, HeaderValue};
@@ -16,8 +16,8 @@ use crate::{
     core::declare::StockQuotes,
     core::util,
     infra::crawler::{
-        fugle::{Fugle, HOST},
         StockInfo,
+        fugle::{Fugle, HOST},
     },
 };
 

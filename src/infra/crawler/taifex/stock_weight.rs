@@ -1,6 +1,6 @@
 use core::result::Result::Ok;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use reqwest::header::HeaderMap;
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};

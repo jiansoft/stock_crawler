@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
@@ -31,14 +31,14 @@ use crate::{
         self,
         atomic::decrement_atomic_usize,
         diagnostics::{
-            read_process_memory_stats, trim_allocator_memory, ProcessMemoryStats, TaskRuntimeStatus,
+            ProcessMemoryStats, TaskRuntimeStatus, read_process_memory_stats, trim_allocator_memory,
         },
         text,
     },
     infra::cache::{RealtimeSnapshot, SHARE},
     infra::crawler::{
-        histock::{HiStock, HOST},
         StockInfo,
+        histock::{HOST, HiStock},
     },
 };
 
@@ -226,10 +226,10 @@ fn collect_changed_price_updates(
 ///
 /// 若任務已在執行中，重複呼叫不會再額外啟動第二個背景迴圈。
 pub fn start_caching_task() {
-    if let Ok(mut handle) = CACHING_TASK.lock() {
-        if handle.as_ref().is_some_and(|task| task.is_finished()) {
-            handle.take();
-        }
+    if let Ok(mut handle) = CACHING_TASK.lock()
+        && handle.as_ref().is_some_and(|task| task.is_finished())
+    {
+        handle.take();
     }
 
     if IS_CACHING.load(Ordering::SeqCst) {
@@ -349,13 +349,10 @@ pub async fn stop_caching_task() {
         }
     };
 
-    if let Some(handle) = handle {
-        if let Err(why) = handle.await {
-            crate::core::logging::error_file_async(format!(
-                "HiStock 快取任務停止等待失敗: {:?}",
-                why
-            ));
-        }
+    if let Some(handle) = handle
+        && let Err(why) = handle.await
+    {
+        crate::core::logging::error_file_async(format!("HiStock 快取任務停止等待失敗: {:?}", why));
     }
 
     SHARE.clear_stock_snapshots();

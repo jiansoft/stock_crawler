@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use anyhow::Result;
 use chrono::Local;
-use rust_decimal::{prelude::ToPrimitive, Decimal};
+use rust_decimal::{Decimal, prelude::ToPrimitive};
 use rust_decimal_macros::dec;
 
 use crate::domain::quote::repository::QuoteRepository;
@@ -25,51 +25,53 @@ pub async fn execute() -> Result<()> {
             continue;
         }
 
-        if let (Some(start), Some(end)) = (stock.offering_start_date, stock.offering_end_date) {
-            if now >= start && now <= end {
-                let cache_key = stock.key_with_prefix();
-                let is_jump = crate::infra::nosql::redis::CLIENT
-                    .get_bool(&cache_key)
-                    .await?;
+        if let (Some(start), Some(end)) = (stock.offering_start_date, stock.offering_end_date)
+            && now >= start
+            && now <= end
+        {
+            let cache_key = stock.key_with_prefix();
+            let is_jump = crate::infra::nosql::redis::CLIENT
+                .get_bool(&cache_key)
+                .await?;
 
-                if is_jump {
-                    continue;
-                }
-
-                // 實例化報價倉儲，並獲取個股最新收盤價（封裝雙層快取策略）
-                let quote_repo = PgQuoteRepository::new();
-                let stock_last_price = quote_repo.fetch_last_quote(&stock.stock_symbol).await?;
-                let last_price = match stock_last_price {
-                    None => String::from(" - "),
-                    Some(last_quote) => match last_quote.closing_price.to_f64() {
-                        None => String::from(" - "),
-                        Some(price) => price.to_string(),
-                    },
-                };
-                let last_price_dec = last_price.get_decimal(None);
-                let offering_price = stock.offering_price.unwrap_or(Decimal::ZERO);
-                let price_change = calculate_price_change(offering_price, last_price_dec);
-                let _ = writeln!(
-                    &mut msg, "{stock_symbol} {stock_name} 起迄日︰{start}~{end} 承銷價︰{offering_price} 參考價︰{last_price} {price_change}發行市場:{market}",
-                    market = stock.market.clone(),
-                    stock_symbol = stock.stock_symbol,
-                    stock_name = &stock.stock_name,
-                    start = start,
-                    end = end,
-                    offering_price = offering_price,
-                    last_price = last_price,
-                    price_change = price_change,
-                );
-                let mut duration = (end - now).num_seconds() as usize;
-
-                if duration == 0 {
-                    duration = declare::ONE_DAYS_IN_SECONDS;
-                }
-
-                crate::infra::nosql::redis::CLIENT
-                    .set(cache_key, true, duration)
-                    .await?;
+            if is_jump {
+                continue;
             }
+
+            // 實例化報價倉儲，並獲取個股最新收盤價（封裝雙層快取策略）
+            let quote_repo = PgQuoteRepository::new();
+            let stock_last_price = quote_repo.fetch_last_quote(&stock.stock_symbol).await?;
+            let last_price = match stock_last_price {
+                None => String::from(" - "),
+                Some(last_quote) => match last_quote.closing_price.to_f64() {
+                    None => String::from(" - "),
+                    Some(price) => price.to_string(),
+                },
+            };
+            let last_price_dec = last_price.get_decimal(None);
+            let offering_price = stock.offering_price.unwrap_or(Decimal::ZERO);
+            let price_change = calculate_price_change(offering_price, last_price_dec);
+            let _ = writeln!(
+                &mut msg,
+                "{stock_symbol} {stock_name} 起迄日︰{start}~{end} 承銷價︰{offering_price} 參考價︰{last_price} {price_change}發行市場:{market}",
+                market = stock.market.clone(),
+                stock_symbol = stock.stock_symbol,
+                stock_name = &stock.stock_name,
+                start = start,
+                end = end,
+                offering_price = offering_price,
+                last_price = last_price,
+                price_change = price_change,
+            );
+            let mut duration = (end - now).num_seconds() as usize;
+
+            if duration == 0 {
+                duration = declare::ONE_DAYS_IN_SECONDS;
+            }
+
+            crate::infra::nosql::redis::CLIENT
+                .set(cache_key, true, duration)
+                .await?;
         }
     }
 

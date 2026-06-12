@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{NaiveDate, Utc};
 use hashbrown::HashMap;
 use lazy_static::lazy_static;
 use regex::Regex;
-use reqwest::header::{HeaderMap, COOKIE};
+use reqwest::header::{COOKIE, HeaderMap};
 use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
@@ -347,30 +347,28 @@ fn parse_schedule_dividends(stock_symbol: &str, text: &str) -> Result<Vec<GoodIn
                 let mut target_year = 0;
 
                 // 優先從發放日提取年份
-                if e.payable_date1 != "尚未公布" && e.payable_date1 != UNSET_DATE {
-                    if let Some(y) = e
+                if e.payable_date1 != "尚未公布"
+                    && e.payable_date1 != UNSET_DATE
+                    && let Some(y) = e
                         .payable_date1
                         .split('-')
                         .next()
                         .and_then(|s| s.parse::<i32>().ok())
-                    {
-                        target_year = y;
-                    }
+                {
+                    target_year = y;
                 }
 
                 // 若無發放日，從除息日提取年份
                 if target_year == 0
                     && e.ex_dividend_date1 != "尚未公布"
                     && e.ex_dividend_date1 != UNSET_DATE
-                {
-                    if let Some(y) = e
+                    && let Some(y) = e
                         .ex_dividend_date1
                         .split('-')
                         .next()
                         .and_then(|s| s.parse::<i32>().ok())
-                    {
-                        target_year = y;
-                    }
+                {
+                    target_year = y;
                 }
 
                 if target_year != 0 {

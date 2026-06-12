@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rust_decimal::Decimal;
@@ -218,10 +218,10 @@ fn parse_dt(el: &scraper::ElementRef, child_idx: usize, year_out: &mut i32) -> S
     match raw {
         Some(s) if s.trim() == "尚未公布" => "尚未公布".to_string(),
         Some(s) if !s.is_empty() && s.contains('/') => {
-            if *year_out == 0 {
-                if let Some(y) = s.split('/').next().and_then(|y| y.parse::<i32>().ok()) {
-                    *year_out = y;
-                }
+            if *year_out == 0
+                && let Some(y) = s.split('/').next().and_then(|y| y.parse::<i32>().ok())
+            {
+                *year_out = y;
             }
             s.replace('/', "-")
         }
@@ -231,12 +231,12 @@ fn parse_dt(el: &scraper::ElementRef, child_idx: usize, year_out: &mut i32) -> S
 
 /// 解析股利期間字串（如 "2024Q4"），拆分為年度與季度。
 fn parse_period(period: &Option<String>) -> Result<(i32, String)> {
-    if let Some(p) = period {
-        if let Some(caps) = REG_PERIOD.captures(p) {
-            let year = caps.get(1).map_or(0, |m| m.as_str().parse().unwrap_or(0));
-            let quarter = caps.get(2).map_or("", |m| m.as_str()).to_string();
-            return Ok((year, quarter));
-        }
+    if let Some(p) = period
+        && let Some(caps) = REG_PERIOD.captures(p)
+    {
+        let year = caps.get(1).map_or(0, |m| m.as_str().parse().unwrap_or(0));
+        let quarter = caps.get(2).map_or("", |m| m.as_str()).to_string();
+        return Ok((year, quarter));
     }
     Ok((0, "".to_string()))
 }

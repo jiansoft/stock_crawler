@@ -51,7 +51,7 @@ pub async fn execute() -> Result<()> {
             None => {
                 return Err(anyhow::anyhow!(
                     "無法在系統設定中找到 'estimate-date' 的設定值"
-                ))
+                ));
             }
         };
         // 計算便宜、合理、昂貴價的估算
