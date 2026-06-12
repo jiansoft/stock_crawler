@@ -6,9 +6,7 @@ use serde::Deserialize;
 use crate::{
     core::declare::StockExchangeMarket,
     core::util::{self, datetime::Weekend},
-    infra::cache::SHARE,
     infra::crawler::{share::EtfInfo, tpex},
-    infra::database::table,
 };
 
 /// 櫃買中心 (TPEx) OpenAPI 的原始資料格式
@@ -40,13 +38,6 @@ pub async fn visit() -> Result<Vec<EtfInfo>> {
 
     // 取得「上櫃」市場的定義物件
     let mode = StockExchangeMarket::OverTheCounter;
-    let exchange_market = match SHARE.get_exchange_market(mode.serial()) {
-        None => table::stock_exchange_market::StockExchangeMarket::new(
-            mode.serial(),
-            mode.exchange().serial_number(),
-        ),
-        Some(em) => em,
-    };
 
     for item in data {
         let symbol = item.code.trim();
@@ -62,7 +53,7 @@ pub async fn visit() -> Result<Vec<EtfInfo>> {
                 name: name.to_string(),
                 listing_date: "".to_string(),
                 industry: "ETF".to_string(),
-                exchange_market: exchange_market.clone(),
+                market: mode,
                 industry_id: 9001,
             });
         }
@@ -79,7 +70,6 @@ mod tests {
     #[ignore]
     async fn test_visit_tpex_etf() {
         dotenv::dotenv().ok();
-        SHARE.load().await;
 
         match visit().await {
             Err(why) => println!("抓取上櫃 ETF 失敗: {:?}", why),

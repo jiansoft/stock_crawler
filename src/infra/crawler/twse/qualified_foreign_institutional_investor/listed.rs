@@ -3,8 +3,10 @@ use chrono::{DateTime, FixedOffset};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::{
-    core::logging, core::util::http, infra::crawler::twse,
-    infra::database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
+    core::logging,
+    core::util::{convert::FromValue, http},
+    infra::crawler::share::QfiiDto,
+    infra::crawler::twse,
 };
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,7 +34,7 @@ pub struct QFIIResponse {
 /// 取得上市股票外資及陸資投資持股統計
 pub async fn visit(
     date_time: DateTime<FixedOffset>,
-) -> Result<Vec<QualifiedForeignInstitutionalInvestor>> {
+) -> Result<Vec<QfiiDto>> {
     let url = format!(
         "https://www.{}/rwd/zh/fund/MI_QFIIS?date={}&selectType=ALLBUT0999&response=json&_={}",
         twse::HOST,
@@ -63,8 +65,17 @@ pub async fn visit(
         if item.len() != 12 {
             continue;
         }
-        let qfii = QualifiedForeignInstitutionalInvestor::from(item);
-        result.push(qfii);
+        let stock_symbol = item[0].get_string(None);
+        let issued_share = item[3].get_i64(None);
+        let shares_held = item[5].get_i64(None);
+        let share_holding_percentage = item[7].get_decimal(None);
+
+        result.push(QfiiDto {
+            stock_symbol,
+            issued_share,
+            shares_held,
+            share_holding_percentage,
+        });
     }
 
     Ok(result)

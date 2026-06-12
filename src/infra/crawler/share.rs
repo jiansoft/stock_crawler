@@ -9,12 +9,11 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
-use crate::core::declare::StockExchange;
+use crate::core::declare::{StockExchange, StockExchangeMarket};
 use crate::infra::crawler::{bigdatacloud, myip};
 use crate::{
     core::util::{self, map::Keyable, text},
     infra::crawler::{ipconfig, ipify, ipinfo, seeip},
-    infra::database::table,
 };
 
 /// 台灣 ETF 資訊載體。
@@ -30,8 +29,8 @@ pub struct EtfInfo {
     pub listing_date: String,
     /// 產業分類名稱（ETF 固定為 "ETF"）。
     pub industry: String,
-    /// 交易市場資料（包含市場 ID、交易所名稱等）。
-    pub exchange_market: table::stock_exchange_market::StockExchangeMarket,
+    /// 交易市場。
+    pub market: StockExchangeMarket,
     /// 產業分類 ID（專案中 ETF 的固定 ID 是 9001）。
     pub industry_id: i32,
 }
@@ -215,6 +214,21 @@ fn normalize_public_ip(service_name: &str, ip: &str) -> Result<String> {
         .parse::<IpAddr>()
         .map(|ip| ip.to_string())
         .map_err(|why| anyhow!("{service_name}: invalid ip response `{normalized}` because {why}"))
+}
+
+/// 外資及陸資持股狀況爬蟲載體 (DTO)。
+///
+/// 用於存取從 TWSE 或 TPEx 採集到的外資及陸資持股統計基本資料。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QfiiDto {
+    /// 證券代號
+    pub stock_symbol: String,
+    /// 已發行股數
+    pub issued_share: i64,
+    /// 全體外資及陸資持有股數
+    pub shares_held: i64,
+    /// 全體外資及陸資持股比率
+    pub share_holding_percentage: Decimal,
 }
 
 /// 營收資訊爬蟲載體 (DTO)。

@@ -7,7 +7,6 @@ use crate::{
     core::declare::Industry,
     core::logging,
     core::util::{self, map::Keyable},
-    infra::crawler::twse,
     infra::database,
 };
 
@@ -306,25 +305,7 @@ impl From<crate::domain::registry::entity::Stock> for StockDbRow {
     }
 }
 
-//let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
-impl From<twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber> for StockDbRow {
-    fn from(isin: twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber) -> Self {
-        StockDbRow {
-            stock_symbol: isin.stock_symbol,
-            name: isin.name,
-            suspend_listing: false,
-            net_asset_value_per_share: Default::default(),
-            weight: Default::default(),
-            return_on_equity: Default::default(),
-            create_time: Local::now(),
-            stock_exchange_market_id: isin.exchange_market.stock_exchange_market_id,
-            stock_industry_id: isin.industry_id,
-            issued_share: 0,
-            qfii_shares_held: 0,
-            qfii_share_holding_percentage: Default::default(),
-        }
-    }
-}
+
 
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
 
@@ -413,7 +394,6 @@ mod tests {
 
     use crate::core::logging;
     use crate::domain::registry::repository::StockRepository;
-    use crate::infra::database::table::stock_exchange_market::StockExchangeMarket;
 
     use super::*;
 
@@ -480,30 +460,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn stock_from_isin_maps_market_industry_and_identity() {
-        let isin = twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber {
-            stock_symbol: "2330".to_string(),
-            name: "台積電".to_string(),
-            isin_code: "TW0002330008".to_string(),
-            listing_date: "1994/09/05".to_string(),
-            industry: "半導體業".to_string(),
-            cfi_code: "ESVUFR".to_string(),
-            exchange_market: StockExchangeMarket::new(2, 1),
-            industry_id: 24,
-        };
 
-        let stock = StockDbRow::from(isin);
-
-        assert_eq!(stock.stock_symbol, "2330");
-        assert_eq!(stock.name, "台積電");
-        assert!(!stock.suspend_listing);
-        assert_eq!(stock.stock_exchange_market_id, 2);
-        assert_eq!(stock.stock_industry_id, 24);
-        assert_eq!(stock.net_asset_value_per_share, Decimal::ZERO);
-        assert_eq!(stock.weight, Decimal::ZERO);
-        assert_eq!(stock.issued_share, 0);
-    }
 
     // 此測試驗證防禦性 upsert 邏輯（當新傳入的市場或產業編號為 0 時，保留資料庫中原先正確的非零值）。
     #[tokio::test]

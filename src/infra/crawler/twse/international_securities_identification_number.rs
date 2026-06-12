@@ -5,17 +5,14 @@ use scraper::{Html, Selector};
 use crate::{
     core::declare::StockExchangeMarket,
     core::util::{self, datetime::Weekend},
-    infra::cache::SHARE,
     infra::crawler::twse,
-    infra::database::table,
 };
 
 const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺灣存託憑證(TDR)"];
 
 /// twse 國際證券識別碼
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InternationalSecuritiesIdentificationNumber {
-    //pub exchange: StockExchangeMarket,
     /// 股票代號。
     pub stock_symbol: String,
     /// 股票名稱。
@@ -24,30 +21,12 @@ pub struct InternationalSecuritiesIdentificationNumber {
     pub isin_code: String,
     /// 上市日期。
     pub listing_date: String,
-    //pub market_category: String,
     /// 產業分類名稱。
     pub industry: String,
     /// CFI Code。
     pub cfi_code: String,
-    /// 交易市場資料。
-    pub exchange_market: table::stock_exchange_market::StockExchangeMarket,
-    /// 產業分類 ID。
-    pub industry_id: i32,
-}
-
-impl Clone for InternationalSecuritiesIdentificationNumber {
-    fn clone(&self) -> Self {
-        InternationalSecuritiesIdentificationNumber {
-            stock_symbol: self.stock_symbol.clone(),
-            name: self.name.clone(),
-            isin_code: self.isin_code.clone(),
-            listing_date: self.listing_date.clone(),
-            industry: self.industry.clone(),
-            cfi_code: self.cfi_code.clone(),
-            exchange_market: self.exchange_market.clone(),
-            industry_id: self.industry_id,
-        }
-    }
+    /// 交易市場。
+    pub market: StockExchangeMarket,
 }
 
 /// 調用  twse API 取得台股國際證券識別碼
@@ -106,15 +85,6 @@ pub async fn visit(
                 }
             };
 
-            let exchange_market: table::stock_exchange_market::StockExchangeMarket =
-                match SHARE.get_exchange_market(mode.serial()) {
-                    None => table::stock_exchange_market::StockExchangeMarket::new(
-                        mode.serial(),
-                        mode.exchange().serial_number(),
-                    ),
-                    Some(em) => em,
-                };
-            let industry_id = SHARE.get_industry_id(&industry).unwrap_or(99);
             let isin = InternationalSecuritiesIdentificationNumber {
                 stock_symbol: split[0].trim().to_owned(),
                 name: split[1].to_owned(),
@@ -122,8 +92,7 @@ pub async fn visit(
                 listing_date: tds[2].to_owned(),
                 industry,
                 cfi_code,
-                exchange_market,
-                industry_id,
+                market: mode,
             };
 
             result.push(isin);
@@ -135,19 +104,14 @@ pub async fn visit(
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
-
-    //use std::collections::HashSet;
-    // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
+    use crate::core::logging;
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
         dotenv::dotenv().ok();
-        SHARE.load().await;
         logging::debug_file_async("開始 visit".to_string());
-        // let mut unique_industry_categories: HashSet<String> = HashSet::new();
         for mode in StockExchangeMarket::iterator() {
             match visit(mode).await {
                 Err(why) => {
@@ -155,24 +119,11 @@ mod tests {
                 }
                 Ok(result) => {
                     for item in result.iter() {
-                        //unique_industry_categories.insert(item.industry_category.clone());
-                        /* if !CACHE_SHARE.industries.contains_key(item.industry.as_str()) {
-                            logging::warn_file_async(format!(
-                                "stock_symbol:{} industry:{} not in industries",
-                                item.stock_symbol, item.industry
-                            ));
-                        }*/
                         logging::debug_file_async(format!("item:{:#?}", item));
                     }
-                    //logging::debug_file_async(format!("data:{:#?}", result));
                 }
             }
         }
-
-        /* for unique_industry_category in unique_industry_categories {
-            logging::debug_file_async(format!("{}", unique_industry_category));
-        }*/
-
         logging::debug_file_async("結束 visit".to_string());
     }
 }

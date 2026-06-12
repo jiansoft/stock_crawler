@@ -3,6 +3,7 @@ use crate::{
     app::backfill::acl::EtfAclMapper,
     core::logging,
     core::util::datetime::Weekend,
+    infra::cache::SHARE,
     infra::crawler::{share::EtfInfo, tpex, twse},
 };
 
@@ -39,10 +40,15 @@ pub async fn execute() -> Result<()> {
 /// 批次更新股票資訊到資料庫。
 async fn update_stocks(items: Vec<EtfInfo>) -> Result<()> {
     for item in items {
+        let market_id = SHARE
+            .get_exchange_market(item.market.serial())
+            .unwrap()
+            .stock_exchange_market_id;
+
         let is_new_or_changed = backfill::is_stock_identity_new_or_changed(
             &item.stock_symbol,
             item.industry_id,
-            item.exchange_market.stock_exchange_market_id,
+            market_id,
             &item.name,
         )
         .await;

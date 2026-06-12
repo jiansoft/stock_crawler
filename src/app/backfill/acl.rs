@@ -2,10 +2,10 @@
 //!
 //! 用於隔離外部爬蟲資料結構（Crawler DTO）與應用層/領域層之業務邏輯命令或實體。
 
-use crate::infra::crawler::share::{DailyQuoteDto, EtfInfo, RevenueDto};
+use crate::infra::crawler::share::{DailyQuoteDto, EtfInfo, QfiiDto, RevenueDto};
 use crate::infra::crawler::twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber;
 use crate::infra::crawler::twse::suspend_listing::SuspendListing;
-use crate::infra::database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor;
+use crate::infra::cache::SHARE;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
@@ -192,17 +192,23 @@ impl IsinAclMapper {
     pub fn from_isin(
         dto: &InternationalSecuritiesIdentificationNumber,
     ) -> Option<RegisterStockCommand> {
-        // 1. 過濾非法或未分類產業資料 (industry_id == 0)
-        if dto.industry_id == 0 {
+        let industry_id = SHARE.get_industry_id(&dto.industry).unwrap_or(0);
+        // 1. 過濾非法、未分類產業資料 (industry_id == 0) 或 ETF (9001) / ETN (9002)
+        if industry_id == 0 || industry_id == 9001 || industry_id == 9002 {
             return None;
         }
+
+        let market_id = SHARE
+            .get_exchange_market(dto.market.serial())
+            .unwrap()
+            .stock_exchange_market_id;
 
         // 2. 轉換為內部的 RegisterStockCommand
         Some(RegisterStockCommand {
             symbol: dto.stock_symbol.clone(),
             name: dto.name.clone(),
-            market_id: dto.exchange_market.stock_exchange_market_id,
-            industry_id: dto.industry_id,
+            market_id,
+            industry_id,
         })
     }
 }
@@ -238,11 +244,11 @@ pub struct QfiiAclMapper;
 
 impl QfiiAclMapper {
     /// 將原始的外資持股資料轉譯成系統內部的 `UpdateQfiiCommand`。
-    pub fn from_qfii(dto: &QualifiedForeignInstitutionalInvestor) -> UpdateQfiiCommand {
+    pub fn from_qfii(dto: &QfiiDto) -> UpdateQfiiCommand {
         UpdateQfiiCommand {
             symbol: dto.stock_symbol.clone(),
-            shares_held: dto.qfii_shares_held,
-            share_holding_percentage: dto.qfii_share_holding_percentage,
+            shares_held: dto.shares_held,
+            share_holding_percentage: dto.share_holding_percentage,
             issued_share: dto.issued_share,
         }
     }
@@ -254,10 +260,14 @@ pub struct EtfAclMapper;
 impl EtfAclMapper {
     /// 將原始 ETF DTO 轉譯成 `RegisterStockCommand`。
     pub fn from_etf(dto: &EtfInfo) -> RegisterStockCommand {
+        let market_id = SHARE
+            .get_exchange_market(dto.market.serial())
+            .unwrap()
+            .stock_exchange_market_id;
         RegisterStockCommand {
             symbol: dto.stock_symbol.clone(),
             name: dto.name.clone(),
-            market_id: dto.exchange_market.stock_exchange_market_id,
+            market_id,
             industry_id: dto.industry_id,
         }
     }
@@ -679,7 +689,6 @@ impl FinancialStatementAclMapper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::database::table::stock_exchange_market::StockExchangeMarket;
     use rust_decimal_macros::dec;
 
     #[test]
@@ -691,8 +700,7 @@ mod tests {
             listing_date: "1994/09/05".to_string(),
             industry: "半導體業".to_string(),
             cfi_code: "ESVUFR".to_string(),
-            exchange_market: StockExchangeMarket::new(2, 1),
-            industry_id: 24,
+            market: crate::core::declare::StockExchangeMarket::Listed,
         };
 
         let cmd = IsinAclMapper::from_isin(&isin);
@@ -713,8 +721,7 @@ mod tests {
             listing_date: "2003/06/30".to_string(),
             industry: "ETF".to_string(),
             cfi_code: "CEOGEU".to_string(),
-            exchange_market: StockExchangeMarket::new(2, 1),
-            industry_id: 0,
+            market: crate::core::declare::StockExchangeMarket::Listed,
         };
 
         let cmd = IsinAclMapper::from_isin(&isin);
@@ -760,12 +767,12 @@ mod tests {
 
     #[test]
     fn test_qfii_to_update_command() {
-        let dto = QualifiedForeignInstitutionalInvestor::new(
-            "2330".to_string(),
-            100000,
-            50000,
-            dec!(75.5),
-        );
+        let dto = QfiiDto {
+            stock_symbol: "2330".to_string(),
+            issued_share: 100000,
+            shares_held: 50000,
+            share_holding_percentage: dec!(75.5),
+        };
 
         let cmd = QfiiAclMapper::from_qfii(&dto);
         assert_eq!(cmd.symbol, "2330");
@@ -781,7 +788,7 @@ mod tests {
             name: "元大台灣50".to_string(),
             listing_date: "2003/06/30".to_string(),
             industry: "ETF".to_string(),
-            exchange_market: StockExchangeMarket::new(2, 1),
+            market: crate::core::declare::StockExchangeMarket::Listed,
             industry_id: 9001,
         };
 

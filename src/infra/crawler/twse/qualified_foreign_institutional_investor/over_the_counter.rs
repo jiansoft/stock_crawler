@@ -2,12 +2,12 @@ use anyhow::{Result, anyhow};
 use scraper::{Html, Selector};
 
 use crate::{
-    core::util, infra::crawler::twse,
-    infra::database::table::stock::extension::qualified_foreign_institutional_investor::QualifiedForeignInstitutionalInvestor,
+    core::util::{self, convert::FromValue},
+    infra::crawler::{share::QfiiDto, twse},
 };
 
 /// 取得上櫃股票外資及陸資投資持股統計
-pub async fn visit() -> Result<Vec<QualifiedForeignInstitutionalInvestor>> {
+pub async fn visit() -> Result<Vec<QfiiDto>> {
     let url = format!(
         "https://mops.{}/server-java/t13sa150_otc?&step=wh",
         twse::HOST,
@@ -23,8 +23,17 @@ pub async fn visit() -> Result<Vec<QualifiedForeignInstitutionalInvestor>> {
         if tds.len() != 23 {
             continue;
         }
-        let qfii = QualifiedForeignInstitutionalInvestor::from(tds);
-        result.push(qfii);
+        let stock_symbol = tds[1].get_string(None);
+        let issued_share = tds[5].get_i64(None);
+        let shares_held = tds[9].get_i64(None);
+        let share_holding_percentage = tds[13].get_decimal(Some(vec!['\u{a0}']));
+
+        result.push(QfiiDto {
+            stock_symbol,
+            issued_share,
+            shares_held,
+            share_holding_percentage,
+        });
     }
 
     Ok(result)
