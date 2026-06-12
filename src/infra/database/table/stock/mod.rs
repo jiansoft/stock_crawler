@@ -305,8 +305,6 @@ impl From<crate::domain::registry::entity::Stock> for StockDbRow {
     }
 }
 
-
-
 //let entity: Entity = fs.into(); // 或者 let entity = Entity::from(fs);
 
 /// 取得未下市上市櫃每股淨值為零的股票
@@ -459,8 +457,6 @@ mod tests {
             stock.qfii_share_holding_percentage
         );
     }
-
-
 
     // 此測試驗證防禦性 upsert 邏輯（當新傳入的市場或產業編號為 0 時，保留資料庫中原先正確的非零值）。
     #[tokio::test]

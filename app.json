@@ -11,22 +11,8 @@
       "apiKey": ""
     }
   },
-  "afraid": {
-    "url": "https://sync.afraid.org",
-    "path": "/u",
-    "token": "afraid_token"
-  },
   "fugle": {
     "api_key": ""
-  },
-  "dyny": {
-    "username": "username",
-    "password": "password"
-  },
-  "noip": {
-    "username": "username",
-    "password": "password",
-    "hostnames": []
   },
   "postgresql": {
     "host": "localhost",
