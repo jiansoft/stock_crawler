@@ -2,10 +2,10 @@
 //!
 //! 用於隔離外部爬蟲資料結構（Crawler DTO）與應用層/領域層之業務邏輯命令或實體。
 
+use crate::infra::cache::SHARE;
 use crate::infra::crawler::share::{DailyQuoteDto, EtfInfo, QfiiDto, RevenueDto};
 use crate::infra::crawler::twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber;
 use crate::infra::crawler::twse::suspend_listing::SuspendListing;
-use crate::infra::cache::SHARE;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 

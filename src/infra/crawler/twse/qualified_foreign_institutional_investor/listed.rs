@@ -32,9 +32,7 @@ pub struct QFIIResponse {
 }
 
 /// 取得上市股票外資及陸資投資持股統計
-pub async fn visit(
-    date_time: DateTime<FixedOffset>,
-) -> Result<Vec<QfiiDto>> {
+pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
     let url = format!(
         "https://www.{}/rwd/zh/fund/MI_QFIIS?date={}&selectType=ALLBUT0999&response=json&_={}",
         twse::HOST,

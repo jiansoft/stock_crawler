@@ -104,8 +104,8 @@ pub async fn visit(
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
     use super::*;
+    use crate::core::logging;
 
     #[tokio::test]
     #[ignore]

@@ -14,15 +14,9 @@ const CONFIG_PATH: &str = "app.json";
 /// 此結構體整合了所有子模組的設定項目，包含資料庫、通訊協定與系統行為。
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct App {
-    /// Afraid DNS 服務設定
-    pub afraid: Afraid,
     /// Fugle 行情 API 設定
     #[serde(default)]
     pub fugle: Fugle,
-    /// Dynu DNS 服務設定
-    pub dyny: Dynu,
-    /// No-IP DNS 服務設定
-    pub noip: NoIp,
     /// 機器人 (如 Telegram) 設定
     pub bot: Bot,
     /// PostgreSQL 資料庫連線設定
@@ -104,22 +98,7 @@ pub struct Grpc {
     pub domain_name: String,
 }
 
-const AFRAID_TOKEN: &str = "AFRAID_TOKEN";
 const FUGLE_API_KEY: &str = "FUGLE_API_KEY";
-
-/// Afraid DNS 服務設定
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-pub struct Afraid {
-    /// 存取權杖 (Token)
-    #[serde(default)]
-    pub token: String,
-    /// 伺服器網址
-    #[serde(default)]
-    pub url: String,
-    /// 請求路徑
-    #[serde(default)]
-    pub path: String,
-}
 
 /// Fugle 行情 API 設定
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -127,38 +106,6 @@ pub struct Fugle {
     /// Fugle API 金鑰
     #[serde(default)]
     pub api_key: String,
-}
-
-const DYNU_USERNAME: &str = "DYNU_USERNAME";
-const DYNU_PASSWORD: &str = "DYNU_PASSWORD";
-
-/// Dynu DNS 服務設定
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-pub struct Dynu {
-    /// 使用者名稱
-    #[serde(default)]
-    pub username: String,
-    /// 密碼
-    #[serde(default)]
-    pub password: String,
-}
-
-const NOIP_USERNAME: &str = "NOIP_USERNAME";
-const NOIP_PASSWORD: &str = "NOIP_PASSWORD";
-const NOIP_HOSTNAMES: &str = "NOIP_HOSTNAMES";
-
-/// No-IP DNS 服務設定
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-pub struct NoIp {
-    /// 使用者名稱
-    #[serde(default)]
-    pub username: String,
-    /// 密碼
-    #[serde(default)]
-    pub password: String,
-    /// 關聯的網域名稱列表
-    #[serde(default)]
-    pub hostnames: Vec<String>,
 }
 
 const POSTGRESQL_HOST: &str = "POSTGRESQL_HOST";
@@ -271,6 +218,7 @@ impl App {
     ///
     /// 若缺少必要的環境變數，此方法將會觸發 `expect` 導致程式崩潰。
     fn from_env() -> Self {
+        // 讀取 Telegram 允許的用戶清單，並解析成 JSON 格式
         let tg_allowed = env::var(TELEGRAM_ALLOWED).expect(TELEGRAM_ALLOWED);
         let mut allowed_list: HashMap<i64, String> = Default::default();
         if !tg_allowed.is_empty()
@@ -278,52 +226,44 @@ impl App {
         {
             allowed_list = allowed;
         }
-        let noip_hostnames = env::var(NOIP_HOSTNAMES).expect(NOIP_HOSTNAMES);
-        let mut noip_hostnames_list: Vec<String> = Default::default();
-
-        match serde_json::from_str::<Vec<String>>(&noip_hostnames) {
-            Ok(result) => {
-                noip_hostnames_list = result;
-            }
-            Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to serde_json because: {:?} \r\n {}",
-                    why, &noip_hostnames
-                ));
-            }
-        }
 
         App {
-            afraid: Afraid {
-                token: env::var(AFRAID_TOKEN).expect(AFRAID_TOKEN),
-                url: "".to_string(),
-                path: "".to_string(),
-            },
             fugle: Fugle {
+                // 若 Fugle API Key 不存在則使用預設的空字串
                 api_key: env::var(FUGLE_API_KEY).unwrap_or_default(),
             },
             postgresql: PostgreSQL {
+                // 從環境變數讀取資料庫連線主機
                 host: env::var(POSTGRESQL_HOST).expect(POSTGRESQL_HOST),
+                // 讀取資料庫埠號，預設為 5432
                 port: i32::from_str(
                     &env::var(POSTGRESQL_PORT).unwrap_or_else(|_| "5432".to_string()),
                 )
                 .unwrap_or(5432),
+                // 讀取資料庫帳號
                 user: env::var(POSTGRESQL_USER).expect(POSTGRESQL_USER),
+                // 讀取資料庫密碼
                 password: env::var(POSTGRESQL_PASSWORD).expect(POSTGRESQL_PASSWORD),
+                // 讀取資料庫名稱
                 db: env::var(POSTGRESQL_DB).expect(POSTGRESQL_DB),
             },
             bot: Bot {
                 telegram: Telegram {
                     allowed: allowed_list,
+                    // 讀取 Telegram 機器人 Token
                     token: env::var(TELEGRAM_TOKEN).expect(TELEGRAM_TOKEN),
                 },
             },
 
             nosql: NoSQL {
                 redis: Redis {
+                    // 讀取 Redis 連線位址
                     addr: env::var(REDIS_ADDR).expect(REDIS_ADDR),
+                    // 讀取 Redis 連線帳號
                     account: env::var(REDIS_ACCOUNT).expect(REDIS_ACCOUNT),
+                    // 讀取 Redis 連線密碼
                     password: env::var(REDIS_PASSWORD).expect(REDIS_PASSWORD),
+                    // 讀取 Redis 資料庫索引，預設為 6379
                     db: i32::from_str(&env::var(REDIS_DB).unwrap_or_else(|_| "6379".to_string()))
                         .unwrap_or(6379),
                 },
@@ -331,78 +271,48 @@ impl App {
 
             rpc: Rpc {
                 go_service: Grpc {
+                    // 讀取 Go gRPC 連線目標
                     target: env::var(GO_GRPC_TARGET).expect(GO_GRPC_TARGET),
+                    // 讀取 TLS 憑證檔案路徑
                     tls_cert_file: env::var(GO_GRPC_TLS_CERT_FILE).expect(GO_GRPC_TLS_CERT_FILE),
+                    // 讀取 TLS 金鑰檔案路徑
                     tls_key_file: env::var(GO_GRPC_TLS_KEY_FILE).expect(GO_GRPC_TLS_KEY_FILE),
+                    // 讀取 TLS 憑證的網域名稱
                     domain_name: env::var(GO_GRPC_DOMAIN_NAME).expect(GO_GRPC_DOMAIN_NAME),
                 },
             },
             system: System {
+                // 讀取 gRPC 服務埠號，預設為 0
                 grpc_use_port: env::var(SYSTEM_GRPC_USE_PORT)
                     .unwrap_or_else(|_| "0".to_string())
                     .parse::<i32>()
                     .unwrap_or(0),
+                // 讀取 SSL 憑證路徑
                 ssl_cert_file: env::var(SYSTEM_SSL_CERT_FILE).expect(SYSTEM_SSL_CERT_FILE),
+                // 讀取 SSL 金鑰路徑
                 ssl_key_file: env::var(SYSTEM_SSL_KEY_FILE).expect(SYSTEM_SSL_KEY_FILE),
             },
             logging: Logging {
                 seq: SeqLogging {
+                    // 讀取 Seq 伺服器網址
                     server_url: env::var(SEQ_SERVER_URL).unwrap_or_default(),
+                    // 讀取 Seq API 金鑰
                     api_key: env::var(SEQ_API_KEY).unwrap_or_default(),
                 },
-            },
-            dyny: Dynu {
-                username: env::var(DYNU_USERNAME).expect(DYNU_USERNAME),
-                password: env::var(DYNU_PASSWORD).expect(DYNU_PASSWORD),
-            },
-            noip: NoIp {
-                username: env::var(NOIP_USERNAME).expect(NOIP_USERNAME),
-                password: env::var(NOIP_USERNAME).expect(NOIP_USERNAME),
-                hostnames: noip_hostnames_list,
             },
         }
     }
 
     /// 以環境變數覆蓋設定檔中的值。
+    ///
+    /// 這裡會逐一檢查並使用環境變數覆蓋已從檔案中載入的設定。
     fn override_with_env(mut self) -> Self {
-        if let Ok(token) = env::var(AFRAID_TOKEN) {
-            self.afraid.token = token;
-        }
-
+        // 若環境變數中有 Fugle 行情金鑰，則覆蓋設定
         if let Ok(api_key) = env::var(FUGLE_API_KEY) {
             self.fugle.api_key = api_key;
         }
 
-        if let Ok(username) = env::var(DYNU_USERNAME) {
-            self.dyny.username = username;
-        }
-
-        if let Ok(pw) = env::var(DYNU_PASSWORD) {
-            self.dyny.password = pw;
-        }
-
-        if let Ok(username) = env::var(NOIP_USERNAME) {
-            self.noip.username = username;
-        }
-
-        if let Ok(pw) = env::var(NOIP_PASSWORD) {
-            self.noip.password = pw;
-        }
-
-        if let Ok(hostnames) = env::var(NOIP_HOSTNAMES) {
-            match serde_json::from_str::<Vec<String>>(&hostnames) {
-                Ok(result) => {
-                    self.noip.hostnames = result;
-                }
-                Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to serde_json because: {:?} \r\n {}",
-                        why, &hostnames
-                    ));
-                }
-            }
-        }
-
+        // 若環境變數中有 SSL 憑證資訊，則覆蓋設定
         if let Ok(cert_file) = env::var(SYSTEM_SSL_CERT_FILE) {
             self.system.ssl_cert_file = cert_file;
         }
@@ -410,50 +320,46 @@ impl App {
             self.system.ssl_key_file = key_file;
         }
 
+        // 若環境變數中有 Seq 日誌收集伺服器資訊，則覆蓋設定
         if let Ok(server_url) = env::var(SEQ_SERVER_URL) {
             self.logging.seq.server_url = server_url;
         }
-
         if let Ok(api_key) = env::var(SEQ_API_KEY) {
             self.logging.seq.api_key = api_key;
         }
 
+        // 若環境變數中有 Go 後端 gRPC 服務資訊，則覆蓋設定
         if let Ok(target) = env::var(GO_GRPC_TARGET) {
             self.rpc.go_service.target = target;
         }
-
         if let Ok(cert) = env::var(GO_GRPC_TLS_CERT_FILE) {
             self.rpc.go_service.tls_cert_file = cert;
         }
-
         if let Ok(key) = env::var(GO_GRPC_TLS_KEY_FILE) {
             self.rpc.go_service.tls_key_file = key;
         }
-
         if let Ok(domain_name) = env::var(GO_GRPC_DOMAIN_NAME) {
             self.rpc.go_service.domain_name = domain_name;
         }
 
+        // 若環境變數中有 PostgreSQL 連線資訊，則覆蓋設定
         if let Ok(host) = env::var(POSTGRESQL_HOST) {
             self.postgresql.host = host;
         }
-
         if let Ok(port) = env::var(POSTGRESQL_PORT) {
             self.postgresql.port = i32::from_str(&port).unwrap_or(5432);
         }
-
         if let Ok(user) = env::var(POSTGRESQL_USER) {
             self.postgresql.user = user;
         }
-
         if let Ok(password) = env::var(POSTGRESQL_PASSWORD) {
             self.postgresql.password = password;
         }
-
         if let Ok(db) = env::var(POSTGRESQL_DB) {
             self.postgresql.db = db;
         }
 
+        // 若環境變數中有 Telegram 允許名單與金鑰，則覆蓋設定
         if let Ok(tg_allowed) = env::var(TELEGRAM_ALLOWED) {
             match serde_json::from_str::<HashMap<i64, String>>(&tg_allowed) {
                 Ok(allowed) => {
@@ -467,23 +373,20 @@ impl App {
                 }
             }
         }
-
         if let Ok(token) = env::var(TELEGRAM_TOKEN) {
             self.bot.telegram.token = token
         }
 
+        // 若環境變數中有 Redis 快取連線資訊，則覆蓋設定
         if let Ok(addr) = env::var(REDIS_ADDR) {
             self.nosql.redis.addr = addr
         }
-
         if let Ok(db) = env::var(REDIS_DB) {
             self.nosql.redis.db = i32::from_str(db.as_str()).unwrap_or(6379)
         }
-
         if let Ok(account) = env::var(REDIS_ACCOUNT) {
             self.nosql.redis.account = account
         }
-
         if let Ok(password) = env::var(REDIS_PASSWORD) {
             self.nosql.redis.password = password
         }
