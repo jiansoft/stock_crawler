@@ -183,13 +183,13 @@ mod tests {
 
         // 1. 執行 recalculate_and_save_money_flow，驗證多表交易式批次更新是否可順利執行
         let result = repo.recalculate_and_save_money_flow(test_date).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "recalculate_and_save_money_flow failed: {:?}", result.err());
 
         // 2. 驗證讀取會員對照資料是否正常
         let compare_data = repo
             .fetch_member_money_history_with_previous_day(test_date)
             .await;
-        assert!(compare_data.is_ok());
+        assert!(compare_data.is_ok(), "fetch_member_money_history_with_previous_day failed: {:?}", compare_data.err());
         let compare_data = compare_data.unwrap();
         // 預期至少有合計列 (member_id = 0)
         assert!(!compare_data.is_empty());
