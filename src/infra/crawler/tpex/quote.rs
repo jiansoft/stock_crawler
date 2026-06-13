@@ -148,39 +148,37 @@ mod tests {
     #[tokio::test]
     async fn test_parse_quote_response() {
         let table = Table {
-            data: Some(vec![
-                vec![
-                    "5483".to_string(),     // 0: 代號
-                    "中美晶".to_string(),    // 1: 名稱
-                    "100.00".to_string(),   // 2: 收盤價
-                    "1.50".to_string(),     // 3: 漲跌
-                    "98.50".to_string(),    // 4: 開盤價
-                    "101.00".to_string(),   // 5: 最高價
-                    "98.00".to_string(),    // 6: 最低價
-                    "10,000".to_string(),   // 7: 成交股數 (含逗號)
-                    "1,000,000".to_string(),// 8: 成交金額 (含逗號)
-                    "500".to_string(),      // 9: 成交筆數
-                    "100.00".to_string(),   // 10: 最後買價
-                    "10".to_string(),       // 11: 最後買量
-                    "100.50".to_string(),   // 12: 最後賣價
-                    "20".to_string(),       // 13: 最後賣量
-                ]
-            ]),
+            data: Some(vec![vec![
+                "5483".to_string(),      // 0: 代號
+                "中美晶".to_string(),    // 1: 名稱
+                "100.00".to_string(),    // 2: 收盤價
+                "1.50".to_string(),      // 3: 漲跌
+                "98.50".to_string(),     // 4: 開盤價
+                "101.00".to_string(),    // 5: 最高價
+                "98.00".to_string(),     // 6: 最低價
+                "10,000".to_string(),    // 7: 成交股數 (含逗號)
+                "1,000,000".to_string(), // 8: 成交金額 (含逗號)
+                "500".to_string(),       // 9: 成交筆數
+                "100.00".to_string(),    // 10: 最後買價
+                "10".to_string(),        // 11: 最後買量
+                "100.50".to_string(),    // 12: 最後賣價
+                "20".to_string(),        // 13: 最後賣量
+            ]]),
         };
 
         let response = QuoteResponse {
             tables: vec![table],
         };
 
-        let pe_ratio = vec![
-            PeRatioAnalysisResponse {
-                security_code: "5483".to_string(),
-                price_earning_ratio: "12.34".to_string(),
-            }
-        ];
+        let pe_ratio = vec![PeRatioAnalysisResponse {
+            security_code: "5483".to_string(),
+            price_earning_ratio: "12.34".to_string(),
+        }];
 
         let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
-        let result = parse_quote_response(response, pe_ratio, date).await.unwrap();
+        let result = parse_quote_response(response, pe_ratio, date)
+            .await
+            .unwrap();
 
         assert_eq!(result.len(), 1);
         let quote = &result[0];

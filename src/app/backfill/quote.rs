@@ -130,7 +130,7 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{core::logging, infra::cache::SHARE, infra::database};
+    use crate::{core::logging, infra::cache::SHARE};
 
     use super::*;
 
@@ -144,10 +144,8 @@ mod tests {
         logging::debug_file_async("開始 execute".to_string());
         //let date = Local::now().date_naive();
         let date = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
-        let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
-            .bind(date)
-            .execute(database::get_connection())
-            .await;
+        let quote_repo = crate::infra::database::repository::quote::PgQuoteRepository::new();
+        let _ = quote_repo.delete_quotes_by_date(date).await;
 
         match execute(date).await {
             Ok(_) => {}

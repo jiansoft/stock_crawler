@@ -29,7 +29,6 @@ use crate::{
     app::calculation::dividend_record,
     app::event::taiwan_stock::closing,
     core::logging,
-    infra::database,
 };
 
 /// Backfill admin Web API 共用狀態。
@@ -367,10 +366,9 @@ pub(crate) async fn start_daily_quotes_job(date: NaiveDate) -> BackfillJob {
         move || async move {
             // quote::execute 使用 COPY 寫入 DailyQuotes；先清掉同日資料可避免唯一索引衝突，
             // 也讓手動回補確實以外部來源的最新內容重建當日各股收盤報價。
-            sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
-                .bind(date)
-                .execute(database::get_connection())
-                .await?;
+            use crate::domain::quote::repository::QuoteRepository;
+            let quote_repo = crate::infra::database::repository::quote::PgQuoteRepository::new();
+            quote_repo.delete_quotes_by_date(date).await?;
 
             let quote_count = quote::execute(date).await?;
             Ok(format!(

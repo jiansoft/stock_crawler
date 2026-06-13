@@ -28,7 +28,6 @@ use crate::{
     app::event::taiwan_stock::closing,
     core::logging,
     infra::cache::SHARE,
-    infra::database,
 };
 
 /// 手動回補各股每日收盤報價時使用的預設交易日。
@@ -66,9 +65,10 @@ async fn test_backfill_daily_quotes_for_date() {
 
     // quote::execute 使用 COPY 寫入 DailyQuotes；先清掉同日資料可避免唯一索引衝突，
     // 也讓這個手動回補確實以外部來源的最新內容重建當日各股收盤報價。
-    sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
-        .bind(date)
-        .execute(database::get_connection())
+    use crate::domain::quote::repository::QuoteRepository;
+    let quote_repo = crate::infra::database::repository::quote::PgQuoteRepository::new();
+    quote_repo
+        .delete_quotes_by_date(date)
         .await
         .expect("delete existing manual daily quotes failed");
 
