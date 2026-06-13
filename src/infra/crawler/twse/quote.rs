@@ -101,7 +101,10 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
 ///
 /// # 傳回值
 /// 回傳解析後的 `DailyQuoteDto` 向量，若查無資料則回傳空向量。
-pub async fn parse_listed_response(data: ListedResponse, date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+pub async fn parse_listed_response(
+    data: ListedResponse,
+    date: NaiveDate,
+) -> Result<Vec<DailyQuoteDto>> {
     // 檢查 API 回應狀態，如查無資料則直接返回空陣列
     if let Some(stat) = &data.stat {
         if stat == "很抱歉，查無資料" || stat.contains("查詢日期大於當前日期") {
@@ -236,26 +239,24 @@ mod tests {
                 "最後揭示賣量".to_string(),
                 "本益比".to_string(),
             ]),
-            data: Some(vec![
-                vec![
-                    "2330".to_string(), // 證券代號
-                    "台積電".to_string(), // 證券名稱
-                    "10,000".to_string(), // 成交股數 (含逗號)
-                    "100".to_string(), // 成交筆數
-                    "5,000,000".to_string(), // 成交金額 (含逗號)
-                    "500.00".to_string(), // 開盤價
-                    "505.00".to_string(), // 最高價
-                    "499.00".to_string(), // 最低價
-                    "502.00".to_string(), // 收盤價
-                    "+".to_string(), // 漲跌(+/-)
-                    "2.00".to_string(), // 漲跌價差
-                    "502.00".to_string(),
-                    "10".to_string(),
-                    "503.00".to_string(),
-                    "20".to_string(),
-                    "15.5".to_string(),
-                ]
-            ]),
+            data: Some(vec![vec![
+                "2330".to_string(),      // 證券代號
+                "台積電".to_string(),    // 證券名稱
+                "10,000".to_string(),    // 成交股數 (含逗號)
+                "100".to_string(),       // 成交筆數
+                "5,000,000".to_string(), // 成交金額 (含逗號)
+                "500.00".to_string(),    // 開盤價
+                "505.00".to_string(),    // 最高價
+                "499.00".to_string(),    // 最低價
+                "502.00".to_string(),    // 收盤價
+                "+".to_string(),         // 漲跌(+/-)
+                "2.00".to_string(),      // 漲跌價差
+                "502.00".to_string(),
+                "10".to_string(),
+                "503.00".to_string(),
+                "20".to_string(),
+                "15.5".to_string(),
+            ]]),
             hints: None,
         };
 
