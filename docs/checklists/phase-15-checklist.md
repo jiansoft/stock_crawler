@@ -34,7 +34,7 @@
 
 ---
 
-## C. Gate 執行與溫證
+## C. Gate 執行與驗證
 - [x] `cargo fmt --all -- --check` 格式檢查通過
 - [x] `cargo check --tests` 編譯通過
 - [x] `cargo clippy --all-targets -- -D warnings` 零警告通過

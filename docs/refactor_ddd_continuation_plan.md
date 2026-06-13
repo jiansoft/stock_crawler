@@ -1,5 +1,9 @@
 # stock_crawler DDD 重構與優化後續計畫 (Phase 18 - 20)
 
+> **前置文件**：本文為 Phase 18~20 的執行計畫，前序 Phase 1~17 的完整計畫請見
+> [`refactor_staged_plan_zh_tw.md`](./refactor_staged_plan_zh_tw.md)。
+> 所有 Phase 18~20 已標記為 ✅ 完成。
+
 更新日期：2026-06-12
 
 本計畫依據 Phase 1 ~ 17 的成果，針對「爬蟲與資料庫解耦 (方向二)」、「清理 `app.json` 設定 (方向四)」、與「測試架構升級 (方向三)」制定詳細的執行步驟。
