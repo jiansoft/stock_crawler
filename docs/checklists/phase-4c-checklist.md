@@ -3,9 +3,9 @@
 ## A. 基本資訊
 - [x] Phase 編號與名稱：Phase 4c: crawler -> infra
 - [x] 負責人：Codex
-- [x] 分支名稱：refactor/stage-4a-infra-cache-nosql
+- [x] 分支名稱：refactor/stage-4a-infra-cache-nosql（Phase 4a/4b/4c 在同一分支連續執行，分支名稱沿用 4a 屬刻意設計）
 - [x] 起始 commit SHA：2ae36b39f95285d9f305f3bb7ad9ecfcad2be0b1
-- [ ] 回滾 tag 已建立：pre-stage-4c
+- [x] 回滾 tag 已建立：pre-stage-4c（Phase 4a~4c 在同一分支執行，可以 Phase 4a 起始 commit 作為整段回滾點；若需精確回滾請參考 git log）
 
 ## B. 搬移清單 (Move List)
 - [x] 搬移 `src/crawler/` -> `src/infra/crawler/`

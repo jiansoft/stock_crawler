@@ -104,7 +104,12 @@ This inventory records the ignored tests that are excluded from the Phase 0.5 ha
 
 ## Phase 0.5 Closure Criteria
 
-- [ ] Priority 1 pure logic tests are complete.
-- [ ] Priority 2 parser/mapper characterization tests are complete.
+> **Phase 0.5 正式關閉**（Closed: 2026-06-05）。所有 Priority 1/2 測試已完成，詳細結果見 `phase-0-5-baseline.md`。
+
+- [x] Priority 1 pure logic tests are complete.
+  （詳見 `phase-0-5-baseline.md` Priority 1 各項，全數 `[x]`）
+- [x] Priority 2 parser/mapper characterization tests are complete.
+  （詳見 `phase-0-5-baseline.md` Priority 2 各項，全數 `[x]`）
 - [x] Ignored tests are categorized by file and risk.
-- [ ] For all Phase 1/2 critical files, replacement validation is present or explicitly deferred with reason.
+- [x] For all Phase 1/2 critical files, replacement validation is present or explicitly deferred with reason.
+  （DB/Redis/HTTP/Scheduler/Messaging 均已在 I/O Exemption Categories 中列明替代驗證方式）

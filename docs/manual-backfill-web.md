@@ -355,15 +355,17 @@ gRPC 串接：
 
 ## 程式檔案
 
-- `src/web/mod.rs`：Axum server 啟動入口，讀取 `MANUAL_BACKFILL_WEB_ADDR`。
-- `src/web/backfill_admin.rs`：Web UI、HTTP API routes、背景 job 狀態管理。
+> **⚠️ 路徑說明**：下列路徑為重構後（Phase 4b/4c 後）的現行路徑。
+
+- `src/interfaces/web/mod.rs`：Axum server 啟動入口，讀取 `MANUAL_BACKFILL_WEB_ADDR`。
+- `src/interfaces/web/backfill_admin.rs`：Web UI、HTTP API routes、背景 job 狀態管理。
 - `etc/proto/manual_backfill.proto`：gRPC service 定義。
-- `src/rpc/server/manual_backfill_service.rs`：gRPC service 實作。
-- `src/rpc/server/mod.rs`：註冊 `ManualBackfillServer`。
-- `src/main.rs`：主流程啟動 Web server；gRPC server 仍沿用既有 `rpc::server::start()`。
-- `src/backfill/quote.rs`：各股每日收盤報價回補流程。
-- `src/backfill/taiwan_stock_index.rs`：台股加權指數回補流程。
-- `src/backfill/dividend/missing_or_multiple.rs`：將單檔歷年股利回補從 test-only 改為 binary 可呼叫。
+- `src/interfaces/rpc/server/manual_backfill_service.rs`：gRPC service 實作。
+- `src/interfaces/rpc/server/mod.rs`：註冊 `ManualBackfillServer`。
+- `src/main.rs`：主流程啟動 Web server；gRPC server 仍沿用既有 `interfaces::rpc::server::start()`。
+- `src/app/backfill/quote.rs`：各股每日收盤報價回補流程。
+- `src/app/backfill/taiwan_stock_index.rs`：台股加權指數回補流程。
+- `src/app/backfill/dividend/missing_or_multiple.rs`：將單檔歷年股利回補從 test-only 改為 binary 可呼叫。
 
 ## 注意事項
 

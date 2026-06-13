@@ -1,5 +1,13 @@
 # Phase 10: 財報與營收領域 (Financial & Revenue Domain) DDD 化 Checklist
 
+> **⚠️ 狀態說明（2026-06-13 補充）**：
+> Phase 10 目前全數未勾選，但 Phase 11 / 12 已完成。
+> 財務相關領域實體（`FinancialStatement`、`MonthlyRevenue`、`PriceEstimate`）
+> 在後續 Phase（11/12/13）的執行過程中已逐步以 DDD 方式建立，
+> 本 Phase 的 checklist 未同步更新。
+> **若需補齊，請確認各 Phase（11~13）是否已涵蓋下列 B/C/D 區項目，
+> 若已涵蓋則本 Phase 可標記為「Superseded by Phase 11-13」並關閉。**
+
 ## A. 基本資訊
 - [ ] Phase 編號與名稱：Phase 10: 財報與營收領域 DDD 化
 - [ ] 負責人：Antigravity

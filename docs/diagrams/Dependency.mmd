@@ -1,0 +1,26 @@
+flowchart LR
+    Core["core"]
+    Domain["domain"]
+    App["app"]
+    Infra["infra"]
+    Interfaces["interfaces"]
+
+    Domain --> Core
+    App --> Domain
+    App --> Core
+    App --> Infra
+    Interfaces --> App
+    Interfaces --> Domain
+    Interfaces --> Core
+    Interfaces --> Infra
+    Infra --> Domain
+    Infra --> Core
+
+    Risk1["Risk: infra -> interfaces\nobserved in crawler notification path"]
+    Risk2["Risk: app directly constructs infra repositories"]
+    Risk3["Risk: repository touches Redis cache invalidation"]
+
+    Infra -.-> Risk1
+    App -.-> Risk2
+    Infra -.-> Risk3
+
