@@ -448,10 +448,19 @@ mod tests {
     use rust_decimal_macros::dec;
 
     #[tokio::test]
-    #[ignore]
     async fn test_cache_aside_flow() {
         // 載入環境變數設定
         dotenv::dotenv().ok();
+
+        if database::ping().await.is_err() {
+            println!("跳過 test_cache_aside_flow：無資料庫連接");
+            return;
+        }
+
+        if crate::infra::nosql::redis::CLIENT.ping().await.is_err() {
+            println!("跳過 test_cache_aside_flow：無 Redis 連接");
+            return;
+        }
 
         // 建立測試專用的倉儲對象
         let repo = PgQuoteRepository::new();

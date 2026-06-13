@@ -90,8 +90,19 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
 
     //let headers = build_headers().await;
     let data = http::get_json::<ListedResponse>(&url).await?;
+    parse_listed_response(data, date).await
+}
 
-    // 檢查 API 狀態
+/// 解析 TWSE MI_INDEX API 的回應資料，並將其轉換為 `DailyQuoteDto` 列表。
+///
+/// # 參數
+/// * `data` - 從 TWSE 取得的原始 `ListedResponse` 資料。
+/// * `date` - 資料所屬的日期。
+///
+/// # 傳回值
+/// 回傳解析後的 `DailyQuoteDto` 向量，若查無資料則回傳空向量。
+pub async fn parse_listed_response(data: ListedResponse, date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+    // 檢查 API 回應狀態，如查無資料則直接返回空陣列
     if let Some(stat) = &data.stat {
         if stat == "很抱歉，查無資料" || stat.contains("查詢日期大於當前日期") {
             return Ok(vec![]);
@@ -102,11 +113,11 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
     }
 
     let mut dqs = Vec::with_capacity(2048);
-    // 尋找目標表格：使用特徵比對定位
+    // 使用特徵比對來尋找上市每日收盤行情的目標表格
     let target_table = data.tables.iter().find(|t| is_twse_quote_table(t));
 
     if let (Some(table), Some(rows)) = (target_table, target_table.and_then(|t| t.data.as_ref())) {
-        // 1. 建立欄位名稱與索引的映射表
+        // 建立欄位名稱與索引的映射表，避免硬編碼索引位置
         let mut field_map = std::collections::HashMap::new();
         if let Some(fields) = &table.fields {
             for (i, field) in fields.iter().enumerate() {
@@ -115,9 +126,10 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
         }
 
         for item in rows {
-            // 2. 使用動態映射解析資料
+            // 使用欄位映射表解析單筆資料並建立 DTO
             let mut dto = DailyQuoteDto::from_with_map(item, &field_map, date);
 
+            // 過濾掉開高低收皆為零的無效資料（例如暫停交易的股票）
             if dto.closing_price.is_zero()
                 && dto.highest_price.is_zero()
                 && dto.lowest_price.is_zero()
@@ -126,19 +138,21 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
                 continue;
             }
 
+            // 檢查記憶體中的 TTL 快取，避免重複處理相同日期的資料
             let daily_quote_memory_key = format!("{}-{}", date.format("%Y%m%d"), dto.symbol);
 
             if TTL.daily_quote_contains_key(&daily_quote_memory_key) {
                 continue;
             }
 
+            // 如果有價格變動且能取得前一交易日的收盤價，則計算漲跌幅
             if !dto.change.is_zero()
                 && let Some(ldg) = crate::infra::cache::SHARE
                     .get_last_trading_day_quotes(&dto.symbol)
                     .await
             {
                 if ldg.closing_price > Decimal::ZERO {
-                    // 漲幅 = (现价-上一个交易日收盘价）/ 上一个交易日收盘价*100%
+                    // 漲幅 = (現價 - 上一個交易日收盤價) / 上一個交易日收盤價 * 100%
                     dto.change_range =
                         (dto.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
                 } else if dto.opening_price > Decimal::ZERO {
@@ -151,6 +165,7 @@ pub async fn visit(date: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
             dqs.push(dto);
         }
     } else {
+        // 若找不到符合欄位特徵的表格，記錄警告日誌
         logging::warn_file_async(format!(
             "TWSE MI_INDEX quote table not found for date={}, stat={:?}, tables={}",
             date,
@@ -197,6 +212,73 @@ mod tests {
         };
 
         assert!(is_twse_quote_table(&table));
+    }
+
+    #[tokio::test]
+    async fn test_parse_listed_response() {
+        let table = Table {
+            title: Some("每日收盤行情(全部(不含權證、牛熊證))".to_string()),
+            fields: Some(vec![
+                "證券代號".to_string(),
+                "證券名稱".to_string(),
+                "成交股數".to_string(),
+                "成交筆數".to_string(),
+                "成交金額".to_string(),
+                "開盤價".to_string(),
+                "最高價".to_string(),
+                "最低價".to_string(),
+                "收盤價".to_string(),
+                "漲跌(+/-)".to_string(),
+                "漲跌價差".to_string(),
+                "最後揭示買價".to_string(),
+                "最後揭示買量".to_string(),
+                "最後揭示賣價".to_string(),
+                "最後揭示賣量".to_string(),
+                "本益比".to_string(),
+            ]),
+            data: Some(vec![
+                vec![
+                    "2330".to_string(), // 證券代號
+                    "台積電".to_string(), // 證券名稱
+                    "10,000".to_string(), // 成交股數 (含逗號)
+                    "100".to_string(), // 成交筆數
+                    "5,000,000".to_string(), // 成交金額 (含逗號)
+                    "500.00".to_string(), // 開盤價
+                    "505.00".to_string(), // 最高價
+                    "499.00".to_string(), // 最低價
+                    "502.00".to_string(), // 收盤價
+                    "+".to_string(), // 漲跌(+/-)
+                    "2.00".to_string(), // 漲跌價差
+                    "502.00".to_string(),
+                    "10".to_string(),
+                    "503.00".to_string(),
+                    "20".to_string(),
+                    "15.5".to_string(),
+                ]
+            ]),
+            hints: None,
+        };
+
+        let response = ListedResponse {
+            stat: Some("OK".to_string()),
+            tables: vec![table],
+        };
+
+        let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+        let result = parse_listed_response(response, date).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        let quote = &result[0];
+        assert_eq!(quote.symbol, "2330");
+        assert_eq!(quote.opening_price, dec!(500.00));
+        assert_eq!(quote.highest_price, dec!(505.00));
+        assert_eq!(quote.lowest_price, dec!(499.00));
+        assert_eq!(quote.closing_price, dec!(502.00));
+        assert_eq!(quote.change, dec!(2.00));
+        assert_eq!(quote.trading_volume, dec!(10000));
+        assert_eq!(quote.trade_value, dec!(5000000));
+        assert_eq!(quote.transaction, dec!(100));
+        assert_eq!(quote.price_earning_ratio, dec!(15.5));
     }
 
     #[tokio::test]

@@ -164,12 +164,17 @@ impl MoneyFlowRepository for PgMoneyFlowRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::database;
 
     #[tokio::test]
-    #[ignore]
     async fn test_money_flow_repository_flow() {
         // 載入環境變數
         dotenv::dotenv().ok();
+
+        if database::ping().await.is_err() {
+            println!("跳過 test_money_flow_repository_flow：無資料庫連接");
+            return;
+        }
 
         // 建立資金流向與市值倉儲實例
         let repo = PgMoneyFlowRepository::new();

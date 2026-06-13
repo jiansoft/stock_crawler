@@ -60,7 +60,7 @@ SELECT
     dq."Serial" AS daily_quotes_serial,
     d.serial AS dividend_serial,
     -- 防止除以零並計算殖利率 (%)
-    (d."sum" / NULLIF(dq."ClosingPrice", 0)) * 100 AS yield
+    COALESCE((d."sum" / NULLIF(dq."ClosingPrice", 0)) * 100, 0) AS yield
 FROM stocks AS s
 JOIN latest_dividend d ON d.security_code = s.stock_symbol AND d.rn = 1
 JOIN latest_quote dq ON dq."stock_symbol" = s.stock_symbol AND dq.rn = 1
@@ -117,6 +117,9 @@ mod tests {
 
         // 呼叫重建函式驗證基本 SQL 是否正常執行
         let result = repo.rebuild_by_date(test_date).await;
+        if let Err(ref e) = result {
+            println!("Error during rebuild_by_date: {:?}", e);
+        }
         assert!(result.is_ok());
     }
 }
