@@ -217,6 +217,15 @@ impl QuoteRepository for PgQuoteRepository {
         Ok(domain_quotes)
     }
 
+    async fn delete_quotes_by_date(&self, date: NaiveDate) -> Result<()> {
+        // 刪除指定交易日既有的 DailyQuotes 資料
+        sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
+            .bind(date)
+            .execute(database::get_connection())
+            .await?;
+        Ok(())
+    }
+
     async fn fill_moving_average(&self, quote: &mut DomainDailyQuote) -> Result<()> {
         // 轉換為 Table 實體並呼叫 Table 層的 fill_moving_average 進行資料庫內均線與年內極值計算
         let mut table_entity = TableDailyQuote::from(quote.clone());

@@ -20,6 +20,9 @@ pub trait QuoteRepository: Send + Sync {
     /// 依交易日查詢全市場的每日報價資料。
     async fn fetch_quotes_by_date(&self, date: NaiveDate) -> Result<Vec<DailyQuote>>;
 
+    /// 刪除指定交易日的所有每日報價。
+    async fn delete_quotes_by_date(&self, date: NaiveDate) -> Result<()>;
+
     /// 依指定日期與股票，查詢並回填該股票的均線與年內高低點統計。
     async fn fill_moving_average(&self, quote: &mut DailyQuote) -> Result<()>;
 
