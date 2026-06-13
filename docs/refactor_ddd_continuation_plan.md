@@ -71,7 +71,7 @@ Phase 18 (爬蟲解耦) ──> Phase 19 (設定清理) ──> Phase 20 (測試
 
 ---
 
-## Phase 19：清理已棄用的設定欄位 (方向四 - 局部) ⏳ [待啟動]
+## Phase 19：清理已棄用的設定欄位 (方向四 - 局部) ✅ [已完成]
 
 ### 19a：清理 `app.json`
 - 從 [app.json](file:///D:/Project/Eddie/stock_rust/app.json) 中刪除以下不再使用的區塊：
