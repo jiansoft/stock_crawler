@@ -136,14 +136,23 @@ final_set AS (
     -- 1. 產生全市場總計 (ID = 0)
     SELECT
         0 as stock_exchange_market_id,
-        SUM(undervalued)::int as undervalued, SUM(fair_valued)::int as fair_valued, 
-        SUM(overvalued)::int as overvalued, SUM(highly_overvalued)::int as highly_overvalued,
-        SUM(b_ma5)::int as b_ma5, SUM(a_ma5)::int as a_ma5,
-        SUM(b_ma20)::int as b_ma20, SUM(a_ma20)::int as a_ma20,
-        SUM(b_ma60)::int as b_ma60, SUM(a_ma60)::int as a_ma60,
-        SUM(b_ma120)::int as b_ma120, SUM(a_ma120)::int as a_ma120,
-        SUM(b_ma240)::int as b_ma240, SUM(a_ma240)::int as a_ma240,
-        SUM(up)::int as up, SUM(down)::int as down, SUM(unchanged)::int as unchanged
+        COALESCE(SUM(undervalued), 0)::int as undervalued,
+        COALESCE(SUM(fair_valued), 0)::int as fair_valued, 
+        COALESCE(SUM(overvalued), 0)::int as overvalued,
+        COALESCE(SUM(highly_overvalued), 0)::int as highly_overvalued,
+        COALESCE(SUM(b_ma5), 0)::int as b_ma5,
+        COALESCE(SUM(a_ma5), 0)::int as a_ma5,
+        COALESCE(SUM(b_ma20), 0)::int as b_ma20,
+        COALESCE(SUM(a_ma20), 0)::int as a_ma20,
+        COALESCE(SUM(b_ma60), 0)::int as b_ma60,
+        COALESCE(SUM(a_ma60), 0)::int as a_ma60,
+        COALESCE(SUM(b_ma120), 0)::int as b_ma120,
+        COALESCE(SUM(a_ma120), 0)::int as a_ma120,
+        COALESCE(SUM(b_ma240), 0)::int as b_ma240,
+        COALESCE(SUM(a_ma240), 0)::int as a_ma240,
+        COALESCE(SUM(up), 0)::int as up,
+        COALESCE(SUM(down), 0)::int as down,
+        COALESCE(SUM(unchanged), 0)::int as unchanged
     FROM market_metrics
     UNION ALL
     -- 2. 產生各市場分類 (排除 ID 0 以免與總計衝突)
