@@ -59,7 +59,7 @@ urlencoding = "2.1"
 lazy_static = "1.5"
 scopeguard = "1.2"
 x509-parser = "0.18"
-time = "=0.3.47"
+time = "=0.3.49"
 
 [target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
 mimalloc = "0.1"
