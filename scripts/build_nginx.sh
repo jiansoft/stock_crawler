@@ -25,7 +25,7 @@ STOP_TIMEOUT_SECONDS="${STOP_TIMEOUT_SECONDS:-30}"
 
 NGINX_VERSION="${NGINX_VERSION:-1.31.0}"
 FREENGINX_VERSION="${FREENGINX_VERSION:-1.31.0}"
-ZLIB_VERSION="${ZLIB_VERSION:-1.3.2}"
+ZLIB_NG_VERSION="${ZLIB_NG_VERSION:-2.2.4}"
 OPENSSL_VERSION="${OPENSSL_VERSION:-4.0.0}"
 PCRE2_VERSION="${PCRE2_VERSION:-10.47}"
 LIBRESSL_VERSION="${LIBRESSL_VERSION:-4.2.1}"
@@ -64,11 +64,12 @@ latest_from_url() {
   local pattern="$2"
 
   # 先使用 grep 過濾目標行，再使用 grep 提取純版本號（數字加小數點的組合）
+  # || true 防止 grep 找不到符合行時 exit 1 造成 pipefail 靜默退出
   fetch_text "$url" \
     | grep -Eo "$pattern" \
     | grep -Eo '[0-9]+(\.[0-9]+)+' \
     | sort -V \
-    | tail -n 1
+    | tail -n 1 || true
 }
 
 latest_server_from_url() {
@@ -85,7 +86,26 @@ latest_server_from_url() {
         channel == "mainline" && ($2 % 2) == 1 { print }
       ' \
     | sort -V \
-    | tail -n 1
+    | tail -n 1 || true
+}
+
+latest_github_tag() {
+  local repo="$1"
+
+  # 追蹤 /releases/latest 的 redirect，從最終 URL 的 /tag/X.Y.Z 擷取版本號
+  # 比解析 HTML 更穩定，不受 GitHub 頁面結構變動影響
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o /dev/null -w '%{url_effective}' \
+      "https://github.com/${repo}/releases/latest" 2>/dev/null \
+      | grep -Eo '[0-9]+(\.[0-9]+)+' \
+      | tail -n 1 || true
+  else
+    wget -q --server-response --spider \
+      "https://github.com/${repo}/releases/latest" 2>&1 \
+      | grep -i 'Location:' \
+      | tail -n 1 \
+      | grep -Eo '[0-9]+(\.[0-9]+)+' || true
+  fi
 }
 
 require_version() {
@@ -115,9 +135,9 @@ resolve_latest_versions() {
     die "FLAVOR 只能是 nginx 或 freenginx，目前是：$FLAVOR"
   fi
 
-  ZLIB_VERSION="$(latest_from_url 'https://zlib.net/' 'zlib-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz')"
+  ZLIB_NG_VERSION="$(latest_github_tag 'zlib-ng/zlib-ng')"
   PCRE2_VERSION="$(latest_from_url 'https://github.com/PCRE2Project/pcre2/releases' 'pcre2-[0-9]+\.[0-9]+')"
-  require_version "zlib" "$ZLIB_VERSION"
+  require_version "zlib-ng" "$ZLIB_NG_VERSION"
   require_version "PCRE2" "$PCRE2_VERSION"
 
   case "$OPENSSL_PROVIDER" in
@@ -183,8 +203,8 @@ download_sources() {
     SERVER_VERSION="$FREENGINX_VERSION"
   fi
 
-  download "https://zlib.net/zlib-${ZLIB_VERSION}.tar.gz" "zlib-${ZLIB_VERSION}.tar.gz"
-  extract_tar "zlib-${ZLIB_VERSION}.tar.gz" "zlib-${ZLIB_VERSION}"
+  download "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/${ZLIB_NG_VERSION}.tar.gz" "zlib-ng-${ZLIB_NG_VERSION}.tar.gz"
+  extract_tar "zlib-ng-${ZLIB_NG_VERSION}.tar.gz" "zlib-ng-${ZLIB_NG_VERSION}"
 
   download "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.bz2" "pcre2-${PCRE2_VERSION}.tar.bz2"
   extract_tar "pcre2-${PCRE2_VERSION}.tar.bz2" "pcre2-${PCRE2_VERSION}"
@@ -208,8 +228,41 @@ download_sources() {
   fi
 }
 
+prebuild_zlib_ng_compat() {
+  local src="${SOURCE_DIR}/zlib-ng-${ZLIB_NG_VERSION}"
+  local bld="${src}/_cmake_build"
+
+  if [ -f "${src}/libz.a" ] && [ -f "${src}/zconf.h" ]; then
+    log "zlib-ng compat 已建置，略過"
+    return 0
+  fi
+
+  need_cmd cmake
+  log "以 cmake 預先建置 zlib-ng ${ZLIB_NG_VERSION}（compat 模式）"
+
+  run cmake -S "$src" -B "$bld" \
+    -DZLIB_COMPAT=ON \
+    -DZLIB_ENABLE_TESTS=OFF \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DCMAKE_BUILD_TYPE=Release
+
+  run cmake --build "$bld" --parallel "$JOBS"
+
+  if [ "$DRY_RUN" != "1" ]; then
+    [ -f "${bld}/libz.a" ] || die "cmake 建置完成但找不到 ${bld}/libz.a"
+    [ -f "${bld}/zconf.h" ] || die "cmake 建置完成但找不到 ${bld}/zconf.h"
+    cp "${bld}/libz.a" "${src}/libz.a"
+    # zconf.h 由 cmake 產生，nginx configure 的 compile test 及實際編譯都需要
+    cp "${bld}/zconf.h" "${src}/zconf.h"
+  fi
+  log "zlib-ng ${ZLIB_NG_VERSION} compat 建置完成"
+}
+
 build_server() {
   local install_dir
+
+  # 必須在 nginx ./configure 前建置，讓 configure 的 compile test 能找到 zconf.h
+  prebuild_zlib_ng_compat
 
   cd "$SOURCE_DIR/$SERVER_DIR"
   install_dir="${INSTALL_ROOT}/${INSTALL_NAME:-$SERVER_VERSION}"
@@ -219,7 +272,7 @@ build_server() {
     "--prefix=${install_dir}"
     "--sbin-path=${install_dir}/nginx"
     "--with-openssl=${TLS_DIR}"
-    "--with-zlib=../zlib-${ZLIB_VERSION}"
+    "--with-zlib=../zlib-ng-${ZLIB_NG_VERSION}"
     "--with-pcre=../pcre2-${PCRE2_VERSION}"
     "--with-compat"
     "--user=nginx"
@@ -271,6 +324,10 @@ build_server() {
 
   run mkdir -p "${INSTALL_ROOT}/run" "${INSTALL_ROOT}/lock" "${INSTALL_ROOT}/log" "${INSTALL_ROOT}/tmp/nginx/client" "${INSTALL_ROOT}/tmp/nginx/proxy" "${INSTALL_ROOT}/tmp/nginx/fcgi"
   run ./configure "${configure_args[@]}"
+
+  # objs/Makefile 的規則會嘗試重建 libz.a，觸碰時間戳讓 make 視為已是最新而跳過
+  [ "$DRY_RUN" != "1" ] && touch "${SOURCE_DIR}/zlib-ng-${ZLIB_NG_VERSION}/libz.a"
+
   run make -j "$JOBS"
   run make install
 }
@@ -399,7 +456,7 @@ main() {
   else
     log "  - freenginx: ${FREENGINX_VERSION}"
   fi
-  log "  - zlib: ${ZLIB_VERSION}"
+  log "  - zlib-ng: ${ZLIB_NG_VERSION}"
   log "  - PCRE2: ${PCRE2_VERSION}"
   if [ "$OPENSSL_PROVIDER" = "openssl" ]; then
     log "  - OpenSSL: ${OPENSSL_VERSION}"
