@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
 use deadpool_redis::{
     Config, Connection, Pool, Runtime,
     redis::{AsyncCommands, RedisResult, ToRedisArgs, Value, cmd},
@@ -8,11 +7,36 @@ use deadpool_redis::{
 use futures::{StreamExt, stream::FuturesUnordered};
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
+use thiserror::Error;
 
 use crate::{core::config::SETTINGS, core::util::text};
 
 /// 全域共享的 Redis 客戶端。
 pub static CLIENT: Lazy<Arc<Redis>> = Lazy::new(|| Arc::new(Redis::new()));
+
+/// Redis 操作的結構化錯誤類型。
+#[derive(Debug, Error)]
+pub enum RedisError {
+    /// 連線池取得連線失敗。
+    #[error("redis pool error: {0}")]
+    Pool(#[from] deadpool_redis::PoolError),
+
+    /// Redis 指令執行失敗。
+    #[error("redis command error: {0}")]
+    Command(#[from] deadpool_redis::redis::RedisError),
+
+    /// 指定的 key 不存在。
+    #[error("redis key not found")]
+    NotFound,
+
+    /// Redis 回傳了非預期的值型別。
+    #[error("redis unexpected value type")]
+    UnexpectedType,
+
+    /// 值解析失敗。
+    #[error("redis value parse error: {0}")]
+    Parse(String),
+}
 
 /// Redis 連線池包裝器。
 pub struct Redis {
@@ -41,61 +65,34 @@ impl Redis {
     }
 
     /// 對 Redis 執行 `PING`，確認連線可用。
-    pub async fn ping(&self) -> Result<String> {
+    pub async fn ping(&self) -> Result<String, RedisError> {
         let mut conn: Connection = self.pool.get().await?;
         let pong: String = cmd("PING").query_async(&mut conn).await?;
-
         Ok(pong)
     }
 
-    /// Deletes a key from the Redis server.
-    ///
-    /// # Arguments
-    ///
-    /// * key: The key to be deleted from the server.
-    ///
-    /// # Returns
-    ///
-    /// * Result<()>: An empty result indicating success or an error if the deletion fails.
-    pub async fn delete(&self, key: &str) -> Result<()> {
+    /// 刪除 Redis 中的指定 key。
+    pub async fn delete(&self, key: &str) -> Result<(), RedisError> {
         let mut conn = self.pool.get().await?;
-        conn.del::<&str, i64>(key)
-            .await
-            .map_err(|e| anyhow!("Failed to delete key({}) from Redis: {}", key, e))?;
-
+        conn.del::<&str, i64>(key).await?;
         Ok(())
     }
 
-    /// Sets a key-value pair in the Redis server with a specified time-to-live.
-    ///
-    /// # Type Parameters
-    ///
-    /// * K: The key type. It must implement ToRedisArgs.
-    /// * V: The value type. It must implement ToRedisArgs.
-    ///
-    /// # Arguments
-    ///
-    /// * key: The key to be set.
-    /// * value: The value to be associated with the key.
-    /// * ttl_in_seconds: The time-to-live of the key-value pair in seconds.
-    ///
-    /// # Returns
-    ///
-    /// * Result<()>: An empty result indicating success or an error if the operation fails.
+    /// 以 `SETEX` 寫入 key-value 並設定 TTL（秒）。
     pub async fn set<K: ToRedisArgs, V: ToRedisArgs>(
         &self,
         key: K,
         value: V,
         ttl_in_seconds: usize,
-    ) -> Result<()> {
+    ) -> Result<(), RedisError> {
         let mut conn = self.pool.get().await?;
-
-        Ok(cmd("SETEX")
+        cmd("SETEX")
             .arg(key)
             .arg(ttl_in_seconds)
             .arg(value)
-            .query_async::<_>(&mut conn)
-            .await?)
+            .query_async::<()>(&mut conn)
+            .await?;
+        Ok(())
     }
 
     /// 以 `NX + EX` 方式嘗試寫入鍵值。
@@ -110,7 +107,7 @@ impl Redis {
         key: K,
         value: V,
         ttl_in_seconds: usize,
-    ) -> Result<bool> {
+    ) -> Result<bool, RedisError> {
         let mut conn = self.pool.get().await?;
         let result: Option<String> = cmd("SET")
             .arg(key)
@@ -120,99 +117,42 @@ impl Redis {
             .arg(ttl_in_seconds)
             .query_async(&mut conn)
             .await?;
-
         Ok(result.is_some())
     }
 
-    /// Retrieves a string value from the Redis server for the given key.
-    ///
-    /// # Arguments
-    ///
-    /// * key: The key to fetch the value for.
-    ///
-    /// # Returns
-    ///
-    /// * Result<String>: The fetched string value, or an error if the GET operation fails.
-    pub async fn get_string(&self, key: &str) -> Result<String> {
+    /// 取得指定 key 的字串值。
+    pub async fn get_string(&self, key: &str) -> Result<String, RedisError> {
         let mut conn = self.pool.get().await?;
         let value: String = cmd("GET").arg(key).query_async(&mut conn).await?;
         Ok(value)
     }
 
-    /// Retrieves a decimal value from a data source for the given key.
-    ///
-    /// This method first fetches a string representation of a decimal value associated with the provided key
-    /// using an asynchronous call to `get_string`. It then attempts to parse the string into a `Decimal` type.
-    ///
-    /// # Arguments
-    ///
-    /// * `key`: The key for which to fetch the decimal value.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<Decimal>`: The fetched and parsed decimal value if successful, or an error if either the
-    ///   fetch operation fails or the string cannot be parsed into a decimal.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error in the following situations:
-    /// - If the `get_string` method call fails, the error from `get_string` will be propagated.
-    /// - If the string fetched from `get_string` cannot be parsed into a `Decimal`, an error will be returned.
-    pub async fn get_decimal(&self, key: &str) -> Result<Decimal> {
+    /// 取得指定 key 的 `Decimal` 值。
+    pub async fn get_decimal(&self, key: &str) -> Result<Decimal, RedisError> {
         let val = self.get_string(key).await?;
-        text::parse_decimal(&val, None)
+        text::parse_decimal(&val, None).map_err(|e| RedisError::Parse(e.to_string()))
     }
 
-    /// Retrieves a boolean value from the Redis server for the given key.
-    ///
-    /// # Arguments
-    ///
-    /// * key: The key to fetch the value for.
-    ///
-    /// # Returns
-    ///
-    /// * Result<bool>: The fetched boolean value, or an error if the GET operation fails.
-    pub async fn get_bool(&self, key: &str) -> Result<bool> {
+    /// 取得指定 key 的布林值。
+    pub async fn get_bool(&self, key: &str) -> Result<bool, RedisError> {
         let mut conn = self.pool.get().await?;
         let value: bool = cmd("GET").arg(key).query_async(&mut conn).await?;
         Ok(value)
     }
 
-    /// Retrieves a byte array value from the Redis server for the given key.
-    ///
-    /// # Arguments
-    ///
-    /// * key: The key to fetch the value for.
-    ///
-    /// # Returns
-    ///
-    /// * Result<Vec<u8>>: The fetched byte array value, or an error if the GET operation fails or the value is not found.
-    pub async fn get_bytes(&self, key: &str) -> Result<Vec<u8>> {
+    /// 取得指定 key 的原始位元組值。
+    pub async fn get_bytes(&self, key: &str) -> Result<Vec<u8>, RedisError> {
         let mut conn = self.pool.get().await?;
         let value: RedisResult<Value> = conn.get(key).await;
-        if let Ok(Value::BulkString(data)) = value {
-            return Ok(data);
+        match value {
+            Ok(Value::BulkString(data)) => Ok(data),
+            Ok(Value::Nil) => Err(RedisError::NotFound),
+            _ => Err(RedisError::UnexpectedType),
         }
-
-        if let Ok(Value::Nil) = value {
-            return Err(anyhow!(
-                "Cannot be found on the server using the given key."
-            ));
-        }
-
-        Err(anyhow!("Unexpected value type"))
     }
 
-    /// Retrieves keys from the Redis server that match any of the provided patterns.
-    ///
-    /// # Arguments
-    ///
-    /// * patterns: A vector of strings, each representing a pattern to match keys against.
-    ///
-    /// # Returns
-    ///
-    /// * Result<Vec<String>>: A vector of strings containing the matched keys, or an error if the operation fails.
-    pub async fn get_keys(&self, patterns: Vec<String>) -> Result<Vec<String>> {
+    /// 以多個 prefix pattern 批次查詢符合的 key 清單。
+    pub async fn get_keys(&self, patterns: Vec<String>) -> Result<Vec<String>, RedisError> {
         let mut results = Vec::new();
         if patterns.is_empty() {
             return Ok(results);
@@ -232,16 +172,8 @@ impl Redis {
         Ok(results)
     }
 
-    /// Finds keys in the Redis server that match the provided pattern using the SCAN command.
-    ///
-    /// # Arguments
-    ///
-    /// * pattern: The pattern to match keys against.
-    ///
-    /// # Returns
-    ///
-    /// * Result<Vec<String>, Error>: A vector of strings containing the matched keys, or an error if the operation fails.
-    async fn get_key(&self, pattern: String) -> Result<Vec<String>> {
+    /// 以 SCAN 指令查詢符合 pattern 的 key 清單。
+    async fn get_key(&self, pattern: String) -> Result<Vec<String>, RedisError> {
         let pool = self.pool.clone();
         let mut conn = pool.get().await?;
         let mut pattern_results = Vec::new();
@@ -266,7 +198,7 @@ impl Redis {
     }
 
     /// 以指定前綴模式確認 Redis 內是否存在任一鍵值。
-    pub async fn contains_key(&self, pattern: &str) -> Result<bool> {
+    pub async fn contains_key(&self, pattern: &str) -> Result<bool, RedisError> {
         let keys = self.get_key(pattern.to_string()).await?;
         Ok(!keys.is_empty())
     }
@@ -330,20 +262,9 @@ mod tests {
         SHARE.load().await;
         logging::debug_file_async("開始 test_redis".to_string());
 
-        //  let mut conn =   get_client().pool.get().await;
-        //let client = REDIS.pool;
         println!("client.pool.status:{:?}", CLIENT.pool.status());
         println!("is_closed:{}", CLIENT.pool.is_closed());
-        //let mut conn = client.pool.get().await.unwrap();
 
-        //conn.set()
-        //auth "yourpassword"
-        /*  cmd("auth")
-        .arg(&["0919118456"])
-        .query_async::<_, ()>(&mut conn)
-        .await
-        .unwrap();*/
-        //let _ = REDIS.set("deadpool/test_key", "43", 100).await;
         let is_no_key_val = CLIENT.get_string("no key").await;
         match is_no_key_val {
             Ok(_) => {}
@@ -386,25 +307,6 @@ mod tests {
             ])
             .await;
         println!("get_all_keys:{:#?}", get_all_keys);
-        /*  cmd("SET")
-        .arg(&["deadpool/test_key", "42"])
-        .query_async::<_, ()>(&mut conn)
-        .await
-        .unwrap();*/
-
-        /* let val = REDIS.get("deadpool/test_key").await;
-        println!(
-            "deadpool/test_key:{}",
-            val.unwrap_or("Can't get".to_string())
-        );
-
-        let mut conn_1 = REDIS.pool.get().await.unwrap();
-        let value: String = cmd("GET")
-            .arg(&["deadpool/test_key"])
-            .query_async(&mut conn_1)
-            .await
-            .unwrap();
-        println!("value:{}", value);*/
 
         println!("client.pool.status:{:?}", CLIENT.pool.status());
 
