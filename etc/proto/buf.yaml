@@ -1,0 +1,16 @@
+version: v1
+lint:
+  use:
+    - DEFAULT
+  except:
+    # Package names don't use vX version suffixes (e.g. basic, stock, control)
+    - PACKAGE_VERSION_SUFFIX
+    # RPC methods use method-prefix naming for requests (e.g. DailyQuotesRequest for StartDailyQuotes)
+    - RPC_REQUEST_STANDARD_NAME
+    # Response types use "Reply" suffix instead of "Response" (e.g. StockInfoReply)
+    - RPC_RESPONSE_STANDARD_NAME
+    # Multiple RPCs share BackfillJobResponse as a generic job-status response
+    - RPC_REQUEST_RESPONSE_UNIQUE
+breaking:
+  use:
+    - FILE
