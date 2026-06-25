@@ -56,10 +56,19 @@ jobs:
     - name: Clippy
       run: cargo clippy -- -D warnings
 
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: EmbarkStudios/cargo-deny-action@v2
+      with:
+        command: check advisories licenses bans
+
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [fmt, check]
+    needs: [fmt, check, deny]
     steps:
     - uses: actions/checkout@v7
     - name: Install Rust toolchain
