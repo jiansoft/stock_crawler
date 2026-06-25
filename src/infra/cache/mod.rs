@@ -9,9 +9,12 @@
 //! 若鎖取得失敗，多數 API 會回傳 `None` 或 `false` 以避免 panic，
 //! 並由上層依回傳值決定是否重試或降級處理。
 
+mod loader;
 mod lookup;
+mod query;
 mod realtime;
 mod share;
+mod snapshot;
 mod ttl;
 
 pub use realtime::RealtimeSnapshot;
