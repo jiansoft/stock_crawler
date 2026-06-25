@@ -694,7 +694,6 @@ mod tests {
     }*/
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_no_dividends_for_year() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_no_dividends_for_year".to_string());
@@ -729,7 +728,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_multiple_dividends_for_year() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_multiple_dividends_for_year".to_string());
@@ -745,7 +743,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_dividends_summary_by_date() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_dividends_summary_by_date".to_string());
@@ -764,7 +761,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_yearly_dividends_sum_by_date() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_yearly_dividends_sum_by_date".to_string());
@@ -783,7 +779,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 upsert".to_string());
@@ -826,7 +821,6 @@ mod tests {
     /// 此測試會實際寫入 `dividend` 表。先用測試股票代碼寫入 `尚未公布` 日期，再以同一主鍵
     /// upsert 正式日期，最後查回確認四個日期欄位都已被覆蓋。測試結束會刪除測試股票代碼資料。
     #[tokio::test]
-    #[ignore]
     async fn test_upsert_updates_dividend_dates_on_conflict() {
         dotenv::dotenv().ok();
 
@@ -898,7 +892,6 @@ WHERE security_code = $1 AND year = $2 AND quarter = '';
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert_annual_total_dividend_operates_database() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 upsert_annual_total_dividend".to_string());

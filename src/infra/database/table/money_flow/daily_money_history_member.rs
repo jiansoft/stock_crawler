@@ -182,7 +182,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 DailyMoneyHistoryMember::upsert".to_string());

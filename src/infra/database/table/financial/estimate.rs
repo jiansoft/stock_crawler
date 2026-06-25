@@ -497,7 +497,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert() {
         dotenv::dotenv().ok();
         SHARE.load().await;
@@ -520,7 +519,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert_all() {
         dotenv::dotenv().ok();
         SHARE.load().await;

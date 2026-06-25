@@ -325,7 +325,6 @@ mod tests {
 
     /// 驗證 Redis 常用操作。
     #[tokio::test]
-    #[ignore]
     async fn test_redis() {
         dotenv::dotenv().ok();
         SHARE.load().await;

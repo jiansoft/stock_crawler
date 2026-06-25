@@ -66,7 +66,6 @@ mod tests {
     use crate::{core::logging, infra::database::table::trace};
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_list() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_list".to_string());

@@ -414,7 +414,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_backfill_received_dividend_records_for_stock_backfills_after_dividend_insert() {
         dotenv::dotenv().ok();
         SHARE.load().await;
@@ -428,7 +427,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_calculate() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 calculate".to_string());
@@ -440,7 +438,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_calculate_dividend() {
         dotenv::dotenv().ok();
         SHARE.load().await;

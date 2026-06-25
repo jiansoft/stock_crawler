@@ -565,7 +565,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_update_last_eps() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 update_last_eps".to_string());
@@ -580,7 +579,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 StockDbRow::fetch".to_string());
@@ -596,7 +594,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_net_asset_value_per_share_is_zero() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_net_asset_value_per_share_is_zero".to_string());
@@ -622,7 +619,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_stocks_without_financial_statement() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_stocks_without_financial_statement".to_string());
@@ -648,14 +644,12 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_create_index() {
         dotenv::dotenv().ok();
         create_search_index("2330", "台積電").await;
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_rebuild_search_indices() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 rebuild_search_indices".to_string());

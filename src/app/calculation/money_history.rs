@@ -27,7 +27,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_calculate_money_history() {
         dotenv::dotenv().ok();
         SHARE.load().await;

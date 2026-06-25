@@ -97,7 +97,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_first() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 first".to_string());

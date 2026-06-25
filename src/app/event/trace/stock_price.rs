@@ -677,7 +677,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_format_alert_message() {
         dotenv::dotenv().ok();
         SHARE.load().await;

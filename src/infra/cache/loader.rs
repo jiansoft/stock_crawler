@@ -316,7 +316,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_get_industry_name() {
         dotenv::dotenv().ok();
         SHARE.load().await;
@@ -328,7 +327,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_load() {
         dotenv::dotenv().ok();
 

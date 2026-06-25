@@ -605,7 +605,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_annual() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_annual".to_string());
@@ -620,7 +619,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_roe_is_zero() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_roe_is_zero".to_string());
@@ -636,7 +634,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_without_annual() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_without_annual".to_string());
@@ -656,7 +653,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_cumulative_eps() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_cumulative_eps".to_string());

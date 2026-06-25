@@ -971,7 +971,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_moving_average() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_moving_average".to_string());
@@ -995,7 +994,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_daily_quotes_by_date() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_daily_quotes_by_date".to_string());
@@ -1016,7 +1014,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_count_by_date() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_count_by_date".to_string());
@@ -1037,7 +1034,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_makeup_for_the_lack_daily_quotes() {
         dotenv::dotenv().ok();
         SHARE.load().await;
@@ -1062,7 +1058,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_lowest_avg_highest_price() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 fetch_lowest_avg_highest_price".to_string());
@@ -1080,7 +1075,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert() {
         dotenv::dotenv().ok();
         SHARE.load().await;
@@ -1161,7 +1155,6 @@ mod tests {
     ///
     /// 此測試同時依賴外部網路與本機資料庫，預設測試集不應執行。
     #[tokio::test]
-    #[ignore]
     async fn test_copy_in_raw() {
         dotenv::dotenv().ok();
         logging::debug_file_async("開始 copy_in_raw".to_string());
