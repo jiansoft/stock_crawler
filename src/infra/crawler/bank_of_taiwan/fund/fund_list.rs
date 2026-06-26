@@ -123,7 +123,7 @@ pub async fn visit() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-use crate::infra::crawler::bank_of_taiwan;
+    use crate::infra::crawler::bank_of_taiwan;
 
     #[tokio::test]
     async fn test_visit() {

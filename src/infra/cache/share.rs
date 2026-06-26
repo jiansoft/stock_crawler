@@ -39,8 +39,7 @@ pub struct Share {
     /// 月營收的快取(防止重複寫入)，第一層 Key:日期 yyyyMM 第二層 Key:股號
     pub(super) last_revenues: RwLock<HashMap<i64, HashMap<String, revenue::Revenue>>>,
     /// 存放最後交易日股票報價數據
-    pub(super) last_trading_day_quotes:
-        RwLock<HashMap<String, last_daily_quotes::LastDailyQuotes>>,
+    pub(super) last_trading_day_quotes: RwLock<HashMap<String, last_daily_quotes::LastDailyQuotes>>,
     /// 股票歷史、淨值比等最高與最低數據。
     ///
     /// 啟動時會先從資料庫載入；若後續抓到更新資料，應同步更新資料庫與這份快取。

@@ -5,7 +5,10 @@
 //! 每天執行時會自動跳過週末，並在偵測到股票資料異動或新增時，非同步派發領域事件
 //! 由背景 EventDispatcher 處理 Telegram 通知與 gRPC 服務同步。
 
-use crate::{app::backfill, core::declare::StockExchangeMarket, core::util::datetime::Weekend, infra::crawler::twse};
+use crate::{
+    app::backfill, core::declare::StockExchangeMarket, core::util::datetime::Weekend,
+    infra::crawler::twse,
+};
 
 use anyhow::{Result, anyhow};
 use chrono::Local;
@@ -84,8 +87,11 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
         // 若確認是新股票或資料有變動，則進行寫入與同步處理
         if new_stock && let Err(why) = update_stock_info(&cmd).await {
             // 若更新單一股票基本資料失敗，記錄錯誤後繼續處理下一檔，避免單一錯誤導致整個市場回補中斷
-            tracing::error!("Failed to update stock info for {} because {:?}",
-                cmd.symbol, why);
+            tracing::error!(
+                "Failed to update stock info for {} because {:?}",
+                cmd.symbol,
+                why
+            );
         }
     }
 
@@ -141,7 +147,7 @@ async fn update_stock_info(cmd: &backfill::acl::RegisterStockCommand) -> Result<
 
 #[cfg(test)]
 mod tests {
-use crate::infra::cache::SHARE;
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

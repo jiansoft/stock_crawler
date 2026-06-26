@@ -77,8 +77,11 @@ impl Telegram {
 
         // 如果發送失敗（可能因為 MarkdownV2 解析錯誤，例如 status code 400 Bad Request），
         // 則執行降級重試機制：清除轉義用的反斜線，改用純文字模式發送。
-        tracing::warn!("{}", "Telegram message failed or returned error. Retrying with plain-text fallback..."
-                .to_string(),);
+        tracing::warn!(
+            "{}",
+            "Telegram message failed or returned error. Retrying with plain-text fallback..."
+                .to_string(),
+        );
 
         // 移除所有 Markdown 轉義字元，以便於以純文字模式清晰顯示
         let clean_msg = message.replace("\\", "");
@@ -175,7 +178,9 @@ pub async fn send(msg: &str) {
                     .map(|code| code.to_string())
                     .unwrap_or_else(|| "unknown".to_string());
                 let desc = rep.description.as_deref().unwrap_or("No description");
-                tracing::error!("Telegram API responded with error code {error_code}: {desc}\n{msg}");
+                tracing::error!(
+                    "Telegram API responded with error code {error_code}: {desc}\n{msg}"
+                );
             }
         }
         Err(error) => {
@@ -208,7 +213,7 @@ mod tests {
 
     use tokio::time;
 
-    use crate::{infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

@@ -58,13 +58,15 @@ pub async fn execute() -> Result<()> {
 
                     match dividend_repo.save(&updated_pri).await {
                         Ok(_) => {
-                            tracing::info!("更新盈餘分配率成功: security_code={}, year_of_dividend={}, quarter={}, payout_ratio_cash={}, payout_ratio_stock={}, payout_ratio={}",
+                            tracing::info!(
+                                "更新盈餘分配率成功: security_code={}, year_of_dividend={}, quarter={}, payout_ratio_cash={}, payout_ratio_stock={}, payout_ratio={}",
                                 updated_pri.security_code,
                                 updated_pri.year_of_dividend,
                                 updated_pri.quarter,
                                 updated_pri.payout_ratio_cash,
                                 updated_pri.payout_ratio_stock,
-                                updated_pri.payout_ratio);
+                                updated_pri.payout_ratio
+                            );
                             *pri = updated_pri;
                         }
                         Err(why) => {
@@ -97,8 +99,7 @@ mod tests {
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                tracing::debug!("Failed to payout_ratio::execute because {:?}",
-                    why);
+                tracing::debug!("Failed to payout_ratio::execute because {:?}", why);
             }
         }
 

@@ -10,13 +10,17 @@ use std::{
 use anyhow::Result;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
-use crate::{core::config::SETTINGS, core::util, interfaces::rpc::{
+use crate::{
+    core::config::SETTINGS,
+    core::util,
+    interfaces::rpc::{
         control::control_server::ControlServer,
         manual_backfill::manual_backfill_server::ManualBackfillServer,
         server::control_service::ControlService,
         server::manual_backfill_service::ManualBackfillService,
         server::stock_service::StockService, stock::stock_server::StockServer,
-    }};
+    },
+};
 
 /// Control 服務實作模組。
 pub mod control_service;
@@ -128,10 +132,12 @@ fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Re
     })?;
     let cert_info = describe_certificate(&cert_content);
 
-    tracing::info!("SSL 載入成功 - 憑證: {} bytes, 資訊: [{}], 金鑰: {} bytes",
+    tracing::info!(
+        "SSL 載入成功 - 憑證: {} bytes, 資訊: [{}], 金鑰: {} bytes",
         cert_content.len(),
         cert_info,
-        key_content.len());
+        key_content.len()
+    );
 
     let identity = Identity::from_pem(cert_content, key_content);
 

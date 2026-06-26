@@ -21,8 +21,11 @@ fn bench_dto_map(c: &mut Criterion) {
     let table = &response.tables[0];
     let rows = table.data.as_ref().unwrap();
     let fields = table.fields.as_ref().unwrap();
-    let field_map: HashMap<&str, usize> =
-        fields.iter().enumerate().map(|(i, f)| (f.as_str(), i)).collect();
+    let field_map: HashMap<&str, usize> = fields
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.as_str(), i))
+        .collect();
     let date = NaiveDate::from_ymd_opt(2026, 6, 25).unwrap();
 
     c.bench_function("twse_dto_map_100rows", |b| {

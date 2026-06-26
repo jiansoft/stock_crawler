@@ -136,8 +136,7 @@ mod tests {
                 tracing::debug!("cnyes::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
-                tracing::debug!("Failed to cnyes::get_stock_quotes because {:?}",
-                    why);
+                tracing::debug!("Failed to cnyes::get_stock_quotes because {:?}", why);
             }
         }
 

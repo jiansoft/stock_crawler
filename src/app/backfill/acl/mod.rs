@@ -10,17 +10,10 @@ pub mod quote;
 pub mod revenue;
 pub mod stock;
 
-pub use dividend::{
-    DividendAclMapper, YahooDividendAclMapper,
-};
-pub use financial::{
-    FinancialStatementAclMapper, NetAssetValueAclMapper,
-};
+pub use dividend::{DividendAclMapper, YahooDividendAclMapper};
+pub use financial::{FinancialStatementAclMapper, NetAssetValueAclMapper};
 pub use index::IndexAclMapper;
 pub use misc::{QfiiAclMapper, SaveStockWeightCommand, StockWeightAclMapper, UpdateQfiiCommand};
 pub use quote::QuoteAclMapper;
 pub use revenue::{RevenueAclMapper, UpdateRevenueCommand};
-pub use stock::{
-    DelistedCompanyAclMapper, EtfAclMapper, IsinAclMapper,
-    RegisterStockCommand,
-};
+pub use stock::{DelistedCompanyAclMapper, EtfAclMapper, IsinAclMapper, RegisterStockCommand};

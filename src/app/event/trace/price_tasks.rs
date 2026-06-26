@@ -104,8 +104,7 @@ pub async fn start_price_tasks() -> Result<()> {
     trace_stats::reset_runtime_stats();
 
     let traced_symbol_count = stock_price::refresh_trace_targets_cache().await?;
-    tracing::info!("追蹤條件快取初始化完成，共 {} 檔股票",
-        traced_symbol_count);
+    tracing::info!("追蹤條件快取初始化完成，共 {} 檔股票", traced_symbol_count);
 
     start_price_update_consumer_task();
     start_trace_target_refresh_task();
@@ -225,8 +224,7 @@ fn start_price_update_consumer_task() {
     let mut tx_guard = match PRICE_UPDATE_TX.write() {
         Ok(guard) => guard,
         Err(why) => {
-            tracing::error!("Failed to lock price update sender because {:?}",
-                why);
+            tracing::error!("Failed to lock price update sender because {:?}", why);
             return;
         }
     };
@@ -244,8 +242,11 @@ fn start_price_update_consumer_task() {
 
     task::spawn(async move {
         let active_tasks = PRICE_CONSUMER_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        tracing::info!("股票追蹤價格事件 consumer 啟動 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "股票追蹤價格事件 consumer 啟動 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
 
         while let Some(event) = rx.recv().await {
             let symbol = event.symbol;
@@ -253,16 +254,18 @@ fn start_price_update_consumer_task() {
             // consumer 只通知「哪支股票剛更新」，
             // evaluator 會自行回頭讀共享快取來做高低標判斷。
             if let Err(why) = stock_price::evaluate_price_update(symbol.clone()).await {
-                tracing::error!("Failed to evaluate price update event because {:?}",
-                    why);
+                tracing::error!("Failed to evaluate price update event because {:?}", why);
             }
             clear_pending_price_symbol(&symbol);
         }
 
         clear_pending_price_symbols();
         let active_tasks = decrement_atomic_usize(&PRICE_CONSUMER_ACTIVE_TASKS);
-        tracing::info!("股票追蹤價格事件 consumer 已停止 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "股票追蹤價格事件 consumer 已停止 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -286,8 +289,11 @@ fn start_trace_target_refresh_task() {
 
     task::spawn(async move {
         let active_tasks = TARGET_REFRESH_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        tracing::info!("追蹤條件快取刷新任務啟動 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "追蹤條件快取刷新任務啟動 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
 
         while IS_TARGET_CACHE_REFRESHING.load(Ordering::SeqCst) {
             time::sleep(TRACE_TARGET_REFRESH_INTERVAL).await;
@@ -298,20 +304,21 @@ fn start_trace_target_refresh_task() {
 
             match stock_price::refresh_trace_targets_cache().await {
                 Ok(symbol_count) => {
-                    tracing::debug!("追蹤條件快取已刷新，共 {} 檔股票",
-                        symbol_count);
+                    tracing::debug!("追蹤條件快取已刷新，共 {} 檔股票", symbol_count);
                 }
                 Err(why) => {
-                    tracing::error!("Failed to refresh trace target cache because {:?}",
-                        why);
+                    tracing::error!("Failed to refresh trace target cache because {:?}", why);
                 }
             }
         }
 
         IS_TARGET_CACHE_REFRESHING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&TARGET_REFRESH_ACTIVE_TASKS);
-        tracing::info!("追蹤條件快取刷新任務已停止 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "追蹤條件快取刷新任務已停止 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -332,8 +339,11 @@ fn start_trace_reconciliation_task() {
 
     task::spawn(async move {
         let active_tasks = RECONCILIATION_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        tracing::info!("追蹤股票低頻對帳任務啟動 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "追蹤股票低頻對帳任務啟動 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
         let mut ticker = time::interval(TRACE_RECONCILIATION_INTERVAL);
         ticker.tick().await;
 
@@ -353,16 +363,18 @@ fn start_trace_reconciliation_task() {
                     trace_stats::record_reconciliation_run(symbol_count);
                 }
                 Err(why) => {
-                    tracing::error!("Failed to reconcile traced stock prices because {:?}",
-                        why);
+                    tracing::error!("Failed to reconcile traced stock prices because {:?}", why);
                 }
             }
         }
 
         IS_RECONCILING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&RECONCILIATION_ACTIVE_TASKS);
-        tracing::info!("追蹤股票低頻對帳任務已停止 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "追蹤股票低頻對帳任務已停止 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -388,8 +400,11 @@ fn start_traced_stock_backup_caching_task() {
 
     task::spawn(async move {
         let active_tasks = BACKUP_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        tracing::info!("追蹤股票備援採集任務啟動 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "追蹤股票備援採集任務啟動 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
 
         while IS_BACKUP_CACHING.load(Ordering::SeqCst) {
             if !declare::StockExchange::TWSE.is_open() {
@@ -397,8 +412,7 @@ fn start_traced_stock_backup_caching_task() {
             }
 
             if let Err(why) = refresh_traced_stock_snapshot_cache().await {
-                tracing::error!("Failed to refresh traced stock snapshot cache: {:?}",
-                    why);
+                tracing::error!("Failed to refresh traced stock snapshot cache: {:?}", why);
             }
 
             if !IS_BACKUP_CACHING.load(Ordering::SeqCst) {
@@ -410,8 +424,11 @@ fn start_traced_stock_backup_caching_task() {
 
         IS_BACKUP_CACHING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&BACKUP_ACTIVE_TASKS);
-        tracing::info!("追蹤股票備援採集任務已停止 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "追蹤股票備援採集任務已停止 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -436,8 +453,11 @@ fn start_trace_diagnostics_task() {
 
     task::spawn(async move {
         let active_tasks = DIAGNOSTICS_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        tracing::info!("trace diagnostics 任務啟動 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "trace diagnostics 任務啟動 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
 
         let mut ticker = time::interval(TRACE_DIAGNOSTICS_LOG_INTERVAL);
         let mut previous_stats = trace_stats::get_runtime_stats_snapshot();
@@ -461,8 +481,11 @@ fn start_trace_diagnostics_task() {
 
         IS_DIAGNOSTICS_LOGGING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&DIAGNOSTICS_ACTIVE_TASKS);
-        tracing::info!("trace diagnostics 任務已停止 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "trace diagnostics 任務已停止 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -641,7 +664,10 @@ fn maybe_trim_allocator(
     *previous_trimmed_at = Instant::now();
 
     if trim_allocator_memory() {
-        tracing::info!("{}", "Trace diagnostics | allocator trim requested after idle snapshot".to_string(),);
+        tracing::info!(
+            "{}",
+            "Trace diagnostics | allocator trim requested after idle snapshot".to_string(),
+        );
     }
 }
 
@@ -768,8 +794,13 @@ async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
                 .map(|s| s.last_close)
                 .unwrap_or(Decimal::ZERO);
             if !SHARE.is_valid_price(&symbol, price, last_close) {
-                tracing::warn!("過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                    symbol, price, last_close, source_site);
+                tracing::warn!(
+                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                    symbol,
+                    price,
+                    last_close,
+                    source_site
+                );
                 return false;
             }
             let source_changed = previous_snapshot
@@ -796,8 +827,7 @@ async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
             false
         }
         Err(why) => {
-            tracing::error!("Failed to fetch backup price for {}: {:?}",
-                symbol, why);
+            tracing::error!("Failed to fetch backup price for {}: {:?}", symbol, why);
             false
         }
     }

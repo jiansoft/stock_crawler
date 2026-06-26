@@ -248,7 +248,7 @@ impl StockInfo for Winvest {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[test]
     /// 驗證 `StockListPrice` 會抓到最後一筆可用成交價。
@@ -278,8 +278,7 @@ use super::*;
 
         match Winvest::get_stock_price("2330").await {
             Ok(price) => tracing::debug!("winvest price: {}", price),
-            Err(why) => tracing::debug!("Failed to winvest::get_stock_price because {:?}",
-                why),
+            Err(why) => tracing::debug!("Failed to winvest::get_stock_price because {:?}", why),
         }
 
         tracing::debug!("結束 winvest::get_stock_price");
@@ -296,8 +295,7 @@ use super::*;
                 dbg!(&quotes);
                 tracing::debug!("winvest quotes: {:?}", quotes)
             }
-            Err(why) => tracing::debug!("Failed to winvest::get_stock_quotes because {:?}",
-                why),
+            Err(why) => tracing::debug!("Failed to winvest::get_stock_quotes because {:?}", why),
         }
 
         tracing::debug!("結束 winvest::get_stock_quotes");

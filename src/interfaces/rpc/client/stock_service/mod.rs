@@ -90,8 +90,7 @@ mod tests {
                 tracing::debug!("response:{:#?}", response);
             }
             Err(why) => {
-                tracing::debug!("Failed to push_stock_info_to_go_service because {:?}",
-                    why);
+                tracing::debug!("Failed to push_stock_info_to_go_service because {:?}", why);
             }
         }
         tracing::debug!("結束 push_stock_info_to_go_service");

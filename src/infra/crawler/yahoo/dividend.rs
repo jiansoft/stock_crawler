@@ -253,7 +253,7 @@ fn estimate_paid_year(year_of_dividend: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-use rust_decimal::Decimal;
+    use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
     fn dividend_row(

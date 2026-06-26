@@ -32,8 +32,7 @@ pub async fn execute() -> Result<()> {
             another.update_suspension(true);
 
             if let Err(why) = repo.save(&another).await {
-                tracing::error!("Failed to update_suspend_listing because {:?}",
-                    why);
+                tracing::error!("Failed to update_suspend_listing because {:?}", why);
             }
         }
     }

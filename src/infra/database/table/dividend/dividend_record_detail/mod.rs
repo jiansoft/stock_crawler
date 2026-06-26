@@ -115,7 +115,7 @@ impl Clone for DividendRecordDetail {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_calculate_cumulate_dividend() {

@@ -138,7 +138,7 @@ impl Default for LastDailyQuotes {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_calculate() {

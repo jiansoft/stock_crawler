@@ -102,14 +102,12 @@ WHERE stock_symbol = $1;
                         dbg!(s);
                     }
                     Err(why) => {
-                        tracing::debug!("Failed to fetch stock because: {:?}",
-                            why);
+                        tracing::debug!("Failed to fetch stock because: {:?}", why);
                     }
                 }
             }
             Err(why) => {
-                tracing::debug!("Failed to update stock weight because: {:?}",
-                    why);
+                tracing::debug!("Failed to update stock weight because: {:?}", why);
             }
         }
 
@@ -124,8 +122,7 @@ WHERE stock_symbol = $1;
         match SymbolAndWeight::zeroed_out().await {
             Ok(_qr) => {}
             Err(why) => {
-                tracing::debug!("Failed to stock weight zeroed_out because: {:?}",
-                    why);
+                tracing::debug!("Failed to stock weight zeroed_out because: {:?}", why);
             }
         }
 

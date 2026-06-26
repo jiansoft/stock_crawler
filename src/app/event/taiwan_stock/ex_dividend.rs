@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 
-use crate::{infra::crawler::twse};
+use crate::infra::crawler::twse;
 
 /// 取得指定年份的交易所休市日集合。
 ///
@@ -23,8 +23,11 @@ async fn get_holidays_set(year: i32) -> HashSet<NaiveDate> {
         }
         Err(err) => {
             // 發生網路或解析錯誤時，發送錯誤日誌並降級（回傳空集合）
-            tracing::error!("Failed to fetch TWSE holiday schedule for {}, falling back to weekend check: {:?}",
-                year, err);
+            tracing::error!(
+                "Failed to fetch TWSE holiday schedule for {}, falling back to weekend check: {:?}",
+                year,
+                err
+            );
             HashSet::new()
         }
     }
@@ -118,7 +121,7 @@ mod tests {
 
     use tokio::time;
 
-use super::*;
+    use super::*;
 
     #[tokio::test]
     #[ignore]

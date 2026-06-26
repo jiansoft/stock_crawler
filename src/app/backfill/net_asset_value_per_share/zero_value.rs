@@ -1,4 +1,7 @@
-use crate::{app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update, infra::crawler::yahoo::profile};
+use crate::{
+    app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update,
+    infra::crawler::yahoo::profile,
+};
 use anyhow::Result;
 
 /// 將未下市每股淨值為零的股票試著到 yahoo 抓取數據後更新回 stocks表
@@ -32,17 +35,23 @@ pub async fn execute() -> Result<()> {
                         )
                         .await
                     {
-                        tracing::error!("Failed to cache profile::visit no-valid-data skip for {} because {:?}",
+                        tracing::error!(
+                            "Failed to cache profile::visit no-valid-data skip for {} because {:?}",
                             stock.symbol().0,
-                            cache_err);
+                            cache_err
+                        );
                     }
-                    tracing::warn!("Skip profile::visit for {} because {}",
+                    tracing::warn!(
+                        "Skip profile::visit for {} because {}",
                         stock.symbol().0,
-                        why);
+                        why
+                    );
                 } else {
-                    tracing::error!("Failed to profile::visit for {} because {}",
+                    tracing::error!(
+                        "Failed to profile::visit for {} because {}",
                         stock.symbol().0,
-                        why);
+                        why
+                    );
                 }
                 continue;
             }
@@ -52,21 +61,27 @@ pub async fn execute() -> Result<()> {
             NetAssetValueAclMapper::from_yahoo_profile(stock.symbol().0.clone(), &yahoo_profile);
 
         if cmd.net_asset_value_per_share.is_zero() {
-            tracing::info!("the stock's net_asset_value_per_share is zero still. \r\n{:#?}",
-                yahoo_profile);
+            tracing::info!(
+                "the stock's net_asset_value_per_share is zero still. \r\n{:#?}",
+                yahoo_profile
+            );
             continue;
         }
 
         stock.update_net_asset_value(cmd.net_asset_value_per_share);
 
         if let Err(why) = update(&stock).await {
-            tracing::error!("Failed to update_net_asset_value_per_share because {:?}",
-                why);
+            tracing::error!(
+                "Failed to update_net_asset_value_per_share because {:?}",
+                why
+            );
             continue;
         }
 
-        tracing::info!("zero update_net_asset_value_per_share executed successfully. \r\n{:#?}",
-            stock);
+        tracing::info!(
+            "zero update_net_asset_value_per_share executed successfully. \r\n{:#?}",
+            stock
+        );
     }
 
     Ok(())
@@ -74,7 +89,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     #[ignore]

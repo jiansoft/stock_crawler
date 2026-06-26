@@ -106,7 +106,7 @@ DO NOTHING;
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_insert() {

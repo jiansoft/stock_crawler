@@ -1,4 +1,11 @@
-use crate::{app::backfill, app::calculation, domain::quote::repository::QuoteRepository, infra::cache::{TTL, TtlCacheInner}, infra::crawler, infra::database::repository::{quote::PgQuoteRepository, yield_rank::PgYieldRankRepository}};
+use crate::{
+    app::backfill,
+    app::calculation,
+    domain::quote::repository::QuoteRepository,
+    infra::cache::{TTL, TtlCacheInner},
+    infra::crawler,
+    infra::database::repository::{quote::PgQuoteRepository, yield_rank::PgYieldRankRepository},
+};
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use scopeguard::defer;
@@ -16,8 +23,7 @@ pub async fn execute() -> Result<()> {
     let (res_aggregation, res_index) = tokio::join!(aggregate, index);
 
     if let Err(why) = res_index {
-        tracing::error!("Failed to taiwan_stock_index::execute() because {:#?}",
-            why);
+        tracing::error!("Failed to taiwan_stock_index::execute() because {:#?}", why);
     }
 
     if let Err(why) = res_aggregation {
@@ -57,8 +63,10 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
 
     // 補上當日缺少的每日收盤數據
     let lack_daily_quotes_count = quote_repo.makeup_for_the_lack_daily_quotes(date).await?;
-    tracing::info!("補上當日缺少的每日收盤數據結束:{:#?}",
-        lack_daily_quotes_count);
+    tracing::info!(
+        "補上當日缺少的每日收盤數據結束:{:#?}",
+        lack_daily_quotes_count
+    );
 
     // 計算均線
     calculation::daily_quotes::calculate_moving_average(date).await?;
@@ -103,7 +111,7 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
     use std::time::Duration;
 
     /// 每日收盤事件主要匯總流程的整合測試。
@@ -119,11 +127,16 @@ mod tests {
 
         match aggregate(current_date).await {
             Ok(_) => {
-                tracing::debug!("{}", "event::taiwan_stock::closing::aggregate 完成".to_string(),);
+                tracing::debug!(
+                    "{}",
+                    "event::taiwan_stock::closing::aggregate 完成".to_string(),
+                );
             }
             Err(why) => {
-                tracing::debug!("Failed to event::taiwan_stock::closing::aggregate because {:?}",
-                    why);
+                tracing::debug!(
+                    "Failed to event::taiwan_stock::closing::aggregate because {:?}",
+                    why
+                );
             }
         }
 

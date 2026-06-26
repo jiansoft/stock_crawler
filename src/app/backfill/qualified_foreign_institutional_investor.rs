@@ -1,4 +1,10 @@
-use crate::{app::backfill::acl::{QfiiAclMapper, UpdateQfiiCommand}, core::util::datetime::Weekend, domain::registry::repository::StockRepository, infra::crawler::twse, infra::database::repository::stock::PgStockRepository};
+use crate::{
+    app::backfill::acl::{QfiiAclMapper, UpdateQfiiCommand},
+    core::util::datetime::Weekend,
+    domain::registry::repository::StockRepository,
+    infra::crawler::twse,
+    infra::database::repository::stock::PgStockRepository,
+};
 use anyhow::Result;
 use chrono::{DateTime, FixedOffset, Local};
 use scopeguard::defer;
@@ -54,8 +60,11 @@ async fn update(cmds: Vec<UpdateQfiiCommand>) -> Result<()> {
 
             // 儲存 Stock 聚合根，同時更新 DB 與快取
             if let Err(why) = repo.save(&stock).await {
-                tracing::error!("Failed to save stock QFII updates for {} because {:?}",
-                    cmd.symbol, why);
+                tracing::error!(
+                    "Failed to save stock QFII updates for {} because {:?}",
+                    cmd.symbol,
+                    why
+                );
             }
         }
     }
@@ -65,7 +74,7 @@ async fn update(cmds: Vec<UpdateQfiiCommand>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

@@ -67,22 +67,32 @@ pub async fn execute() -> Result<()> {
     // 子流程結果各自記錄，避免只看到一個總錯誤而失去定位資訊。
     match res_backfill_missing_or_multiple_dividends {
         Ok(_) => {
-            tracing::info!("{}", "backfill_missing_or_multiple_dividends executed successfully.".to_string(),);
+            tracing::info!(
+                "{}",
+                "backfill_missing_or_multiple_dividends executed successfully.".to_string(),
+            );
         }
         Err(why) => {
-            tracing::error!("Failed to backfill_missing_or_multiple_dividends because {:?}",
-                why);
+            tracing::error!(
+                "Failed to backfill_missing_or_multiple_dividends because {:?}",
+                why
+            );
         }
     }
 
     // 第二條流程同樣採「記錄錯誤但不中斷主流程」策略，優先確保回補任務整體可完成。
     match res_backfill_unannounced_dividend_dates {
         Ok(_) => {
-            tracing::info!("{}", "backfill_unannounced_dividend_dates executed successfully.".to_string(),);
+            tracing::info!(
+                "{}",
+                "backfill_unannounced_dividend_dates executed successfully.".to_string(),
+            );
         }
         Err(why) => {
-            tracing::error!("Failed to backfill_unannounced_dividend_dates because {:?}",
-                why);
+            tracing::error!(
+                "Failed to backfill_unannounced_dividend_dates because {:?}",
+                why
+            );
         }
     }
 

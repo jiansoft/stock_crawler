@@ -1,7 +1,13 @@
 use anyhow::Result;
 use rust_decimal::Decimal;
 
-use crate::{domain::dividend::repository::DividendRepository, domain::portfolio::entity::{ReceivedDividend, ReceivedDividendItem, StockOwnershipDetail}, domain::portfolio::repository::PortfolioRepository, infra::database::repository::dividend::PgDividendRepository, infra::database::repository::portfolio::PgPortfolioRepository};
+use crate::{
+    domain::dividend::repository::DividendRepository,
+    domain::portfolio::entity::{ReceivedDividend, ReceivedDividendItem, StockOwnershipDetail},
+    domain::portfolio::repository::PortfolioRepository,
+    infra::database::repository::dividend::PgDividendRepository,
+    infra::database::repository::portfolio::PgPortfolioRepository,
+};
 
 /// 計算指定年份領取的股利。
 ///
@@ -28,8 +34,7 @@ pub async fn execute(year: i32, security_codes: Option<Vec<String>>) {
             }
         }
         Err(why) => {
-            tracing::error!("Failed to execute fetch_active_holdings because {:?}",
-                why);
+            tracing::error!("Failed to execute fetch_active_holdings because {:?}", why);
         }
     }
 
@@ -456,8 +461,7 @@ mod tests {
         match calculate_dividend(&portfolio_repo, &dividend_repo, sod, 2023).await {
             Ok(_) => {}
             Err(why) => {
-                tracing::debug!("Failed to calculate_dividend because {:?}",
-                    why);
+                tracing::debug!("Failed to calculate_dividend because {:?}", why);
             }
         }
         tracing::debug!("結束 calculate_dividend");

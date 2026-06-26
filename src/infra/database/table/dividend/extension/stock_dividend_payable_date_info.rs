@@ -65,7 +65,7 @@ mod tests {
 
     use chrono::{Local, TimeZone};
 
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_fetch_stocks_with_payable_on_date() {
@@ -80,8 +80,10 @@ use super::*;
                 tracing::debug!("stock: {:?}", cd);
             }
             Err(why) => {
-                tracing::debug!("Failed to fetch_stocks_with_payable_on_date because {:?}",
-                    why);
+                tracing::debug!(
+                    "Failed to fetch_stocks_with_payable_on_date because {:?}",
+                    why
+                );
             }
         }
 

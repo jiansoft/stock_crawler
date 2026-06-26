@@ -598,7 +598,7 @@ impl From<crawler::share::AnnualProfit> for FinancialStatement {
 
 #[cfg(test)]
 mod tests {
-use chrono::{Datelike, NaiveDate};
+    use chrono::{Datelike, NaiveDate};
     use std::time;
 
     use super::*;

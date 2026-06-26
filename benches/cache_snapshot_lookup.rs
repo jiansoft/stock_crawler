@@ -12,7 +12,10 @@ fn bench_get_snapshot(c: &mut Criterion) {
     let mut snapshots = HashMap::new();
     for i in 1101u32..1201 {
         let sym = i.to_string();
-        snapshots.insert(sym.clone(), RealtimeSnapshot::new(sym, Decimal::new(500, 0)));
+        snapshots.insert(
+            sym.clone(),
+            RealtimeSnapshot::new(sym, Decimal::new(500, 0)),
+        );
     }
     share.set_stock_snapshots(snapshots);
 

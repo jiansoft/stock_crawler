@@ -49,8 +49,13 @@ impl Share {
             // 檢查每一檔股票的新報價是否異常，若是，則將其價格標記為 0 準備過濾/恢復
             for (symbol, new_snap) in &mut snapshots {
                 if !self.is_valid_price(symbol, new_snap.price, new_snap.last_close) {
-                    tracing::warn!("過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                        symbol, new_snap.price, new_snap.last_close, new_snap.source_site);
+                    tracing::warn!(
+                        "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                        symbol,
+                        new_snap.price,
+                        new_snap.last_close,
+                        new_snap.source_site
+                    );
                     new_snap.price = Decimal::ZERO;
                 }
             }
@@ -82,8 +87,12 @@ impl Share {
                 .map(|s| s.last_close)
                 .unwrap_or(Decimal::ZERO);
             if !self.is_valid_price(&symbol, price, last_close) {
-                tracing::warn!("過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}",
-                    symbol, price, last_close);
+                tracing::warn!(
+                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}",
+                    symbol,
+                    price,
+                    last_close
+                );
                 return;
             }
             if let Some(snapshot) = cache.get_mut(&symbol) {
@@ -109,8 +118,13 @@ impl Share {
                 .map(|s| s.last_close)
                 .unwrap_or(Decimal::ZERO);
             if !self.is_valid_price(&symbol, price, last_close) {
-                tracing::warn!("過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                    symbol, price, last_close, source_site);
+                tracing::warn!(
+                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                    symbol,
+                    price,
+                    last_close,
+                    source_site
+                );
                 return;
             }
             if let Some(snapshot) = cache.get_mut(&symbol) {

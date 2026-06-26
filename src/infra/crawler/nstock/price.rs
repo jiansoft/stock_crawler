@@ -100,8 +100,7 @@ mod tests {
                 tracing::debug!("nstock::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
-                tracing::debug!("Failed to nstock::get_stock_quotes because {:?}",
-                    why);
+                tracing::debug!("Failed to nstock::get_stock_quotes because {:?}", why);
             }
         }
 

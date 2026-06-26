@@ -46,8 +46,11 @@ pub async fn execute() -> Result<()> {
                     SHARE.set_stock_index(key, index_entity).await;
                 }
                 Err(why) => {
-                    tracing::error!("Failed to index.upsert({:#?}) because {:?}",
-                        index_entity, why);
+                    tracing::error!(
+                        "Failed to index.upsert({:#?}) because {:?}",
+                        index_entity,
+                        why
+                    );
                 }
             }
         }
@@ -105,8 +108,11 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
                     upserted_count += 1;
                 }
                 Err(why) => {
-                    tracing::error!("Failed to index.upsert({:#?}) because {:?}",
-                        index_entity, why);
+                    tracing::error!(
+                        "Failed to index.upsert({:#?}) because {:?}",
+                        index_entity,
+                        why
+                    );
                 }
             }
         }
@@ -117,7 +123,7 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     #[ignore]

@@ -26,7 +26,7 @@ impl AnnualProfitFetcher for Fbs {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_visit() {

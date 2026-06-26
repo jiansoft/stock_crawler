@@ -120,7 +120,7 @@ impl AnnualProfitFetcher for HiStockAnnualProfit {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[test]
     fn test_parse_annual_profit_from_text_nodes() {
@@ -165,8 +165,9 @@ use super::*;
                 dbg!(&result);
                 tracing::debug!("histock : {:#?}", result);
             }
-            Err(why) => tracing::debug!("Failed to histock::annual_profit::visit because {:?}",
-                why),
+            Err(why) => {
+                tracing::debug!("Failed to histock::annual_profit::visit because {:?}", why)
+            }
         }
 
         tracing::debug!("結束 histock::annual_profit::visit");

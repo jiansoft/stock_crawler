@@ -117,7 +117,7 @@ mod tests {
 
     use rust_decimal_macros::dec;
 
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_upsert() {

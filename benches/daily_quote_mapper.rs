@@ -16,8 +16,11 @@ fn bench_acl_chain(c: &mut Criterion) {
     let table = &response.tables[0];
     let rows = table.data.as_ref().unwrap();
     let fields = table.fields.as_ref().unwrap();
-    let field_map: HashMap<&str, usize> =
-        fields.iter().enumerate().map(|(i, f)| (f.as_str(), i)).collect();
+    let field_map: HashMap<&str, usize> = fields
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.as_str(), i))
+        .collect();
     let date = NaiveDate::from_ymd_opt(2026, 6, 25).unwrap();
     let dtos: Vec<DailyQuoteDto> = rows
         .iter()

@@ -11,7 +11,15 @@
 
 use std::collections::HashSet;
 
-use crate::{app::backfill::acl::FinancialStatementAclMapper, core::declare::StockExchangeMarket, core::util::{self, datetime::ReportQuarter}, domain::registry::repository::StockRepository, infra::crawler::twse, infra::database::repository::financial::PgFinancialRepository, infra::database::repository::stock::PgStockRepository};
+use crate::{
+    app::backfill::acl::FinancialStatementAclMapper,
+    core::declare::StockExchangeMarket,
+    core::util::{self, datetime::ReportQuarter},
+    domain::registry::repository::StockRepository,
+    infra::crawler::twse,
+    infra::database::repository::financial::PgFinancialRepository,
+    infra::database::repository::stock::PgStockRepository,
+};
 use anyhow::Result;
 use chrono::Local;
 use scopeguard::defer;
@@ -28,8 +36,12 @@ pub async fn execute() -> Result<()> {
     for target_report in util::datetime::eps_report_quarter_targets_for_listed_and_otc(Local::now())
     {
         if let Err(why) = process_target_report(target_report).await {
-            tracing::error!("Failed to process quarterly EPS target {} {} because {:?}",
-                target_report.year, target_report.quarter, why);
+            tracing::error!(
+                "Failed to process quarterly EPS target {} {} because {:?}",
+                target_report.year,
+                target_report.quarter,
+                why
+            );
         }
     }
 
@@ -61,8 +73,13 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<()> {
         )
         .await
         {
-            tracing::error!("Failed to update quarterly EPS for {} {} {} because {:?}",
-                market, target_report.year, target_report.quarter, why);
+            tracing::error!(
+                "Failed to update quarterly EPS for {} {} {} because {:?}",
+                market,
+                target_report.year,
+                target_report.quarter,
+                why
+            );
             continue;
         }
     }
@@ -110,8 +127,10 @@ async fn process_eps(
             tracing::error!("{:?}", why);
         }
 
-        tracing::debug!("financial_statement earnings_per_share executed successfully. \r\n{:#?}",
-            fs);
+        tracing::debug!(
+            "financial_statement earnings_per_share executed successfully. \r\n{:#?}",
+            fs
+        );
     }
 
     Ok(())
@@ -154,8 +173,10 @@ mod tests {
         {
             Ok(stocks) => stocks.into_iter().collect::<HashSet<String>>(),
             Err(why) => {
-                tracing::debug!("Failed to fetch stocks without financial statement: {:?}",
-                    why);
+                tracing::debug!(
+                    "Failed to fetch stocks without financial statement: {:?}",
+                    why
+                );
                 return;
             }
         };

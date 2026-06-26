@@ -189,7 +189,7 @@ fn parse_field(element: &scraper::ElementRef, base: &str, child_index: u32) -> D
 #[cfg(test)]
 mod tests {
     use super::*;
-#[test]
+    #[test]
     fn test_is_no_valid_data_error() {
         let err: anyhow::Error = NoValidProfileDataError {
             stock_symbol: "7811".to_string(),

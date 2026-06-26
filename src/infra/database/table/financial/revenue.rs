@@ -407,7 +407,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     //use chrono::{Datelike, Local, NaiveDate};
-use crate::infra::database::table::revenue::{fetch_last_two_month, rebuild_revenue_last_date};
+    use crate::infra::database::table::revenue::{fetch_last_two_month, rebuild_revenue_last_date};
 
     #[tokio::test]
     async fn test_date() {
@@ -488,12 +488,10 @@ use crate::infra::database::table::revenue::{fetch_last_two_month, rebuild_reven
         tracing::info!("開始 test_rebuild_revenue_last_date");
         match rebuild_revenue_last_date().await {
             Ok(result) => {
-                tracing::info!("rebuild_revenue_last_date:{:?} ",
-                    result.rows_affected());
+                tracing::info!("rebuild_revenue_last_date:{:?} ", result.rows_affected());
             }
             Err(why) => {
-                tracing::error!("Failed to rebuild_revenue_last_date because {:?}",
-                    why);
+                tracing::error!("Failed to rebuild_revenue_last_date because {:?}", why);
             }
         }
     }

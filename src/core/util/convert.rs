@@ -1,6 +1,6 @@
 use rust_decimal::Decimal;
 
-use crate::{core::util::text};
+use crate::core::util::text;
 
 /// 從來源值取出常用型別的轉換介面。
 pub trait FromValue {

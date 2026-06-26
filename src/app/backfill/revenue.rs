@@ -1,4 +1,9 @@
-use crate::{app::backfill::acl::{RevenueAclMapper, UpdateRevenueCommand}, core::util, infra::cache::SHARE, infra::crawler::twse};
+use crate::{
+    app::backfill::acl::{RevenueAclMapper, UpdateRevenueCommand},
+    core::util,
+    infra::cache::SHARE,
+    infra::crawler::twse,
+};
 use anyhow::Result;
 use chrono::{Datelike, FixedOffset, Local, NaiveDate, TimeDelta, TimeZone};
 use futures::{StreamExt, stream};
@@ -84,7 +89,8 @@ pub(crate) async fn process_revenue(
         Some(s) => s.name().to_string(),
     };
 
-    tracing::info!("公司代號:{}  公司名稱:{} 當月營收:{} 上月營收:{} 去年當月營收:{} 月均價:{} 最低價:{} 最高價:{}",
+    tracing::info!(
+        "公司代號:{}  公司名稱:{} 當月營收:{} 上月營收:{} 去年當月營收:{} 月均價:{} 最低價:{} 最高價:{}",
         cmd.symbol,
         name,
         cmd.monthly,
@@ -92,14 +98,15 @@ pub(crate) async fn process_revenue(
         cmd.last_year_this_month,
         table_entity.avg_price,
         table_entity.lowest_price,
-        table_entity.highest_price);
+        table_entity.highest_price
+    );
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-use std::time::Duration;
+    use std::time::Duration;
 
     use super::*;
 
@@ -137,8 +144,7 @@ use std::time::Duration;
         match process_revenues(month_timezone).await {
             Ok(_) => {}
             Err(why) => {
-                tracing::debug!("Failed to test_process_revenues because {:?}",
-                    why);
+                tracing::debug!("Failed to test_process_revenues because {:?}", why);
             }
         }
 

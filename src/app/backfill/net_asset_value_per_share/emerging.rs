@@ -1,4 +1,8 @@
-use crate::{app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update, core::util::datetime::Weekend, domain::registry::repository::StockRepository, infra::crawler::tpex, infra::database::repository::stock::PgStockRepository};
+use crate::{
+    app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update,
+    core::util::datetime::Weekend, domain::registry::repository::StockRepository,
+    infra::crawler::tpex, infra::database::repository::stock::PgStockRepository,
+};
 use anyhow::Result;
 use chrono::Local;
 use scopeguard::defer;
@@ -34,8 +38,10 @@ pub async fn execute() -> Result<()> {
 
         match update(&stock).await {
             Ok(_) => {
-                tracing::info!("emerging update_net_asset_value_per_share executed successfully. \r\n{:#?}",
-                    stock);
+                tracing::info!(
+                    "emerging update_net_asset_value_per_share executed successfully. \r\n{:#?}",
+                    stock
+                );
             }
             Err(why) => {
                 tracing::error!("{:?}", why);
@@ -48,7 +54,7 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     #[ignore]

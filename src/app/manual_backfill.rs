@@ -74,7 +74,9 @@ async fn test_backfill_daily_quotes_for_date() {
         .await
         .expect("manual daily quote backfill failed");
 
-    tracing::debug!("結束 app::manual_backfill::test_backfill_daily_quotes_for_date date={date} quote_count={quote_count}");
+    tracing::debug!(
+        "結束 app::manual_backfill::test_backfill_daily_quotes_for_date date={date} quote_count={quote_count}"
+    );
 }
 
 /// 手動執行每日收盤事件主要匯總流程。
@@ -94,13 +96,17 @@ async fn test_backfill_closing_aggregate_for_date() {
     let date = NaiveDate::parse_from_str(MANUAL_CLOSING_AGGREGATE_DATE, "%Y-%m-%d")
         .expect("manual closing aggregate date should be valid");
 
-    tracing::debug!("開始 app::manual_backfill::test_backfill_closing_aggregate_for_date date={date}");
+    tracing::debug!(
+        "開始 app::manual_backfill::test_backfill_closing_aggregate_for_date date={date}"
+    );
 
     closing::aggregate(date)
         .await
         .expect("manual closing aggregate backfill failed");
 
-    tracing::debug!("結束 app::manual_backfill::test_backfill_closing_aggregate_for_date date={date}");
+    tracing::debug!(
+        "結束 app::manual_backfill::test_backfill_closing_aggregate_for_date date={date}"
+    );
 }
 
 /// 手動回補台股加權指數時使用的預設日期。
@@ -132,7 +138,9 @@ async fn test_backfill_taiwan_stock_index() {
         .await
         .expect("manual taiwan stock index backfill failed");
 
-    tracing::debug!("結束 app::manual_backfill::test_backfill_taiwan_stock_index date={date} upserted_count={upserted_count}");
+    tracing::debug!(
+        "結束 app::manual_backfill::test_backfill_taiwan_stock_index date={date} upserted_count={upserted_count}"
+    );
 }
 
 /// 手動回補指定股票目前持股的已領股利紀錄。
@@ -151,13 +159,17 @@ async fn test_backfill_received_dividend_records_for_stock() {
     SHARE.load().await;
 
     let security_code = MANUAL_DIVIDEND_RECORD_SECURITY_CODE;
-    tracing::debug!("開始 app::manual_backfill::test_backfill_received_dividend_records_for_stock security_code={security_code}");
+    tracing::debug!(
+        "開始 app::manual_backfill::test_backfill_received_dividend_records_for_stock security_code={security_code}"
+    );
 
     let summary = dividend_record::backfill_received_dividend_records_for_stock(security_code)
         .await
         .expect("manual received dividend records backfill failed");
 
-    tracing::debug!("結束 app::manual_backfill::test_backfill_received_dividend_records_for_stock security_code={security_code} summary={summary:?}");
+    tracing::debug!(
+        "結束 app::manual_backfill::test_backfill_received_dividend_records_for_stock security_code={security_code} summary={summary:?}"
+    );
 }
 
 /// 手動回補指定股票在 Yahoo 可取得的歷年股利明細。
@@ -175,11 +187,15 @@ async fn test_backfill_historical_dividends_for_stock() {
     SHARE.load().await;
 
     let security_code = MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE;
-    tracing::debug!("開始 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code}");
+    tracing::debug!(
+        "開始 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code}"
+    );
 
     let upserted_count = dividend::backfill_historical_dividends_for_stock(security_code)
         .await
         .expect("manual historical dividends backfill failed");
 
-    tracing::debug!("結束 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code} upserted_count={upserted_count}");
+    tracing::debug!(
+        "結束 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code} upserted_count={upserted_count}"
+    );
 }

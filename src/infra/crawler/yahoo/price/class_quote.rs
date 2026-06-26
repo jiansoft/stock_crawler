@@ -16,7 +16,11 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::time::sleep;
 
-use crate::{core::util, infra::cache::RealtimeSnapshot, infra::crawler::yahoo::{self, YahooClassCategory, YahooClassExchange}};
+use crate::{
+    core::util,
+    infra::cache::RealtimeSnapshot,
+    infra::crawler::yahoo::{self, YahooClassCategory, YahooClassExchange},
+};
 
 /// Yahoo 類股行情 JSON API 的基底 URL。
 const CLASS_QUOTES_API_URL: &str =
@@ -365,13 +369,15 @@ async fn fetch_class_quotes_page(
     // 就算首頁沒有直接回錯，也先把「整頁空資料」寫到日誌，
     // 方便後續人工從 log 追查是 Yahoo schema 變更、類股失效還是被擋流量。
     if raw_item_count == 0 {
-        tracing::error!("Yahoo 類股 API 回空資料: {} {}({}) offset={} resultsTotal={} url={}",
+        tracing::error!(
+            "Yahoo 類股 API 回空資料: {} {}({}) offset={} resultsTotal={} url={}",
             category.exchange.label(),
             category.name,
             category.sector_id,
             offset,
             results_total,
-            url);
+            url
+        );
     }
 
     // 非首頁如果宣稱有總筆數卻回空列表，通常代表中間頁資料異常，

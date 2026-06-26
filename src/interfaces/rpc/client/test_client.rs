@@ -49,8 +49,7 @@ pub async fn run_test() -> Result<()> {
         let tls = ClientTlsConfig::new()
             .ca_certificate(ca)
             .domain_name(domain);
-        tracing::info!("TLS 模式連線 [domain={}, cert={}]",
-            domain, cert_file);
+        tracing::info!("TLS 模式連線 [domain={}, cert={}]", domain, cert_file);
         Channel::from_shared(target.clone())?
             .tls_config(tls)?
             .connect_timeout(std::time::Duration::from_secs(5))
@@ -58,8 +57,7 @@ pub async fn run_test() -> Result<()> {
         // 伺服器以 insecure 模式啟動，對應改用明文連線
         let plain_target = format!("http://127.0.0.1:{}", port);
         tracing::info!("Insecure 模式連線 [target={}]", plain_target);
-        Channel::from_shared(plain_target)?
-            .connect_timeout(std::time::Duration::from_secs(5))
+        Channel::from_shared(plain_target)?.connect_timeout(std::time::Duration::from_secs(5))
     };
 
     match tokio::time::timeout(std::time::Duration::from_secs(6), endpoint.connect()).await {
@@ -71,8 +69,7 @@ pub async fn run_test() -> Result<()> {
 
             match client.control(request).await {
                 Ok(response) => {
-                    tracing::info!("gRPC 測試成功！收到回應: {:?}",
-                        response.into_inner());
+                    tracing::info!("gRPC 測試成功！收到回應: {:?}", response.into_inner());
                 }
                 Err(e) => {
                     tracing::error!("gRPC 方法呼叫失敗: {:#}", e);
@@ -80,9 +77,11 @@ pub async fn run_test() -> Result<()> {
             }
         }
         Ok(Err(e)) => {
-            tracing::error!("連線至 gRPC 伺服器失敗 [target={}]: {}",
+            tracing::error!(
+                "連線至 gRPC 伺服器失敗 [target={}]: {}",
                 target,
-                format_error_chain(&e));
+                format_error_chain(&e)
+            );
         }
         Err(_) => {
             tracing::error!("gRPC 連線測試超時 (超過 6 秒)");

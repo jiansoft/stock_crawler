@@ -10,7 +10,7 @@ use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::core::declare::{StockExchange, StockExchangeMarket};
-use crate::infra::crawler::{bigdatacloud, myip, CrawlerError};
+use crate::infra::crawler::{CrawlerError, bigdatacloud, myip};
 use crate::{
     core::util::{self, map::Keyable, text},
     infra::crawler::{ipconfig, ipify, ipinfo, seeip},
@@ -214,11 +214,14 @@ fn normalize_public_ip(service_name: &str, ip: &str) -> Result<String, CrawlerEr
         )));
     }
 
-    normalized.parse::<IpAddr>().map(|ip| ip.to_string()).map_err(|why| {
-        CrawlerError::Parse(format!(
-            "{service_name}: invalid ip response `{normalized}` because {why}"
-        ))
-    })
+    normalized
+        .parse::<IpAddr>()
+        .map(|ip| ip.to_string())
+        .map_err(|why| {
+            CrawlerError::Parse(format!(
+                "{service_name}: invalid ip response `{normalized}` because {why}"
+            ))
+        })
 }
 
 /// 外資及陸資持股狀況爬蟲載體 (DTO)。

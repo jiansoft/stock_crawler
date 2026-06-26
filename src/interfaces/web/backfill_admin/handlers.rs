@@ -15,7 +15,7 @@ use super::job_runner::{
     start_multiple_dividend_historical_dividends_job, start_received_dividend_records_job,
     start_taiwan_stock_index_job,
 };
-use super::state::{BackfillWebState, get_backfill_job, list_backfill_jobs, BACKFILL_STATE};
+use super::state::{BACKFILL_STATE, BackfillWebState, get_backfill_job, list_backfill_jobs};
 
 /// 建立 backfill admin 的 Web UI 與 JSON API router。
 ///

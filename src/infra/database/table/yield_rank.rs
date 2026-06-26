@@ -96,7 +96,7 @@ ON CONFLICT (date, security_code) DO UPDATE SET
 mod tests {
     use chrono::Local;
 
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_upsert() {

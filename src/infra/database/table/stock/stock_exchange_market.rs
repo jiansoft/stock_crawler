@@ -64,7 +64,7 @@ impl Clone for StockExchangeMarket {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_fetch() {

@@ -78,7 +78,7 @@ async fn report_error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-use crate::infra::cache::SHARE;
+    use crate::infra::cache::SHARE;
     use chrono::Datelike;
 
     #[tokio::test]

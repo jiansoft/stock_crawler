@@ -193,7 +193,7 @@ mod tests {
     use chrono::TimeZone;
     use rust_decimal_macros::dec;
 
-use super::*;
+    use super::*;
 
     fn make_holding(
         serial: i64,

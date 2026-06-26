@@ -35,8 +35,7 @@ mod tests {
         match calculate_money_history(current_date).await {
             Ok(_) => {}
             Err(why) => {
-                tracing::debug!("Failed to calculate_money_history because {:?}",
-                    why);
+                tracing::debug!("Failed to calculate_money_history because {:?}", why);
             }
         }
         tracing::debug!("結束 calculate_money_history");

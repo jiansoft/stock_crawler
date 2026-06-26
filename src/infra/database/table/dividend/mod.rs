@@ -676,7 +676,7 @@ mod tests {
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
-use super::*;
+    use super::*;
 
     /*    #[tokio::test]
     async fn test_fetch_stock_symbol_that_without_payout_ratio() {
@@ -710,7 +710,10 @@ use super::*;
 
     async fn test_fetch_unpublished_dividend_date_or_payable_date_for_specified_year() {
         dotenv::dotenv().ok();
-        tracing::debug!("{}", "開始 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),);
+        tracing::debug!(
+            "{}",
+            "開始 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),
+        );
         let r = Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(2023)
             .await;
         if let Ok(result) = r {
@@ -718,7 +721,10 @@ use super::*;
         } else if let Err(err) = r {
             tracing::debug!("{:#?} ", err);
         }
-        tracing::debug!("{}", "結束 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),);
+        tracing::debug!(
+            "{}",
+            "結束 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),
+        );
     }
 
     #[tokio::test]

@@ -25,7 +25,17 @@ use tokio::{task, time};
 
 use super::{price_tasks as trace_price_tasks, stats as trace_stats};
 use crate::interfaces::bot::telegram::Telegram;
-use crate::{core::declare, core::util::{datetime::Weekend, map::Keyable}, domain::trace::entity::PriceTrace, domain::trace::repository::TraceRepository, infra::cache::RealtimeSnapshot, infra::cache::SHARE, infra::crawler::twse, infra::database::repository::trace::PgTraceRepository, interfaces::bot};
+use crate::{
+    core::declare,
+    core::util::{datetime::Weekend, map::Keyable},
+    domain::trace::entity::PriceTrace,
+    domain::trace::repository::TraceRepository,
+    infra::cache::RealtimeSnapshot,
+    infra::cache::SHARE,
+    infra::crawler::twse,
+    infra::database::repository::trace::PgTraceRepository,
+    interfaces::bot,
+};
 
 /// 確保整個追蹤執行流程只有一個實例在執行。
 static IS_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -94,8 +104,7 @@ pub async fn execute() -> Result<()> {
     task::spawn(async move {
         // 先啟動 trace 層的即時報價背景任務與價格事件 consumer。
         if let Err(why) = trace_price_tasks::start_price_tasks().await {
-            tracing::error!("Failed to start trace price tasks because {:?}",
-                why);
+            tracing::error!("Failed to start trace price tasks because {:?}", why);
             IS_RUNNING.store(false, Ordering::SeqCst);
             return;
         }
@@ -146,8 +155,10 @@ async fn is_holiday(today: NaiveDate) -> Result<bool> {
 
     for holiday in holidays {
         if holiday.date == today {
-            tracing::info!("Today is a holiday ({}), and the market is closed.",
-                holiday.why);
+            tracing::info!(
+                "Today is a holiday ({}), and the market is closed.",
+                holiday.why
+            );
             return Ok(true);
         }
     }

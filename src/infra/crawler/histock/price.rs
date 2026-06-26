@@ -240,8 +240,11 @@ pub fn start_caching_task() {
 
     let handle = tokio::spawn(async move {
         let active_tasks = ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        tracing::info!("HiStock 全市場快取任務啟動 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "HiStock 全市場快取任務啟動 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
 
         while IS_CACHING.load(Ordering::SeqCst) {
             let start_time = std::time::Instant::now();
@@ -297,8 +300,7 @@ pub fn start_caching_task() {
                     */
                 }
                 Err(e) => {
-                    tracing::error!("HiStock 快取更新失敗: {:?}",
-                        e);
+                    tracing::error!("HiStock 快取更新失敗: {:?}", e);
                 }
             }
 
@@ -309,14 +311,20 @@ pub fn start_caching_task() {
         }
         IS_CACHING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&ACTIVE_TASKS);
-        tracing::info!("HiStock 快取任務已停止 generation={} active_tasks={}",
-            generation, active_tasks);
+        tracing::info!(
+            "HiStock 快取任務已停止 generation={} active_tasks={}",
+            generation,
+            active_tasks
+        );
     });
 
     if let Ok(mut task) = CACHING_TASK.lock() {
         *task = Some(handle);
     } else {
-        tracing::error!("{}", "Failed to store HiStock caching task handle".to_string(),);
+        tracing::error!(
+            "{}",
+            "Failed to store HiStock caching task handle".to_string(),
+        );
     }
 }
 
@@ -329,8 +337,10 @@ pub async fn stop_caching_task() {
     let handle = match CACHING_TASK.lock() {
         Ok(mut task) => task.take(),
         Err(why) => {
-            tracing::error!("Failed to lock HiStock caching task handle because {:?}",
-                why);
+            tracing::error!(
+                "Failed to lock HiStock caching task handle because {:?}",
+                why
+            );
             None
         }
     };
@@ -417,8 +427,7 @@ async fn get_snapshot(stock_symbol: &str) -> Result<RealtimeSnapshot> {
         return Ok(s);
     }
 
-    tracing::info!("HiStock 快取失效 ({})，觸發全量抓取",
-        stock_symbol);
+    tracing::info!("HiStock 快取失效 ({})，觸發全量抓取", stock_symbol);
     let fetch_result = fetch_all_from_rank().await?;
 
     let snapshot = fetch_result
@@ -467,7 +476,7 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::*;
-use rust_decimal_macros::dec;
+    use rust_decimal_macros::dec;
 
     static TEST_STATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -710,8 +719,7 @@ use rust_decimal_macros::dec;
                 tracing::debug!("HiStock::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
-                tracing::debug!("Failed to HiStock::get_stock_quotes because {:?}",
-                    why);
+                tracing::debug!("Failed to HiStock::get_stock_quotes because {:?}", why);
             }
         }
     }

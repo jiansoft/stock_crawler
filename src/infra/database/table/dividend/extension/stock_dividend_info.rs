@@ -92,7 +92,7 @@ mod tests {
     use chrono::{Local, TimeZone};
     use tokio::time;
 
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_fetch_stocks_with_dividends_on_date() {

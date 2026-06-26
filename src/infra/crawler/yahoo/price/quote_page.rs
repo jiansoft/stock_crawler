@@ -156,7 +156,7 @@ impl StockInfo for Yahoo {
 #[cfg(test)]
 mod tests {
     use super::*;
-/// Live 測試：驗證單檔 Yahoo quote 頁仍可抓到指定股票的成交價。
+    /// Live 測試：驗證單檔 Yahoo quote 頁仍可抓到指定股票的成交價。
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_price() {
@@ -189,8 +189,7 @@ mod tests {
                 tracing::debug!("yahoo::get_stock_quotes {:#?}", e);
             }
             Err(why) => {
-                tracing::debug!("Failed to yahoo::get_stock_quotes because {:?}",
-                    why);
+                tracing::debug!("Failed to yahoo::get_stock_quotes because {:?}", why);
             }
         }
 

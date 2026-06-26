@@ -150,7 +150,7 @@ impl Clone for StockOwnershipDetail {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_fetch_stock_inventory() {

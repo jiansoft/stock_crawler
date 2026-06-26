@@ -93,7 +93,7 @@ ON CONFLICT (date) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_upsert() {
@@ -110,8 +110,7 @@ use super::*;
                     .expect("tx.unwrap().commit() is failed");
             }
             Err(why) => {
-                tracing::debug!("Failed to DailyMoneyHistory::upsert because {:?}",
-                    why);
+                tracing::debug!("Failed to DailyMoneyHistory::upsert because {:?}", why);
                 tx.unwrap()
                     .rollback()
                     .await

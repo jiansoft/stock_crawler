@@ -204,6 +204,6 @@ mod tests {
         let entities = StockWord::list_by_word(&word).await;
         tracing::debug!("entities:{:#?}", entities);
         /*tracing::debug!("word:{:#?}",
-            util::map::vec_to_hashmap(entities.unwrap()));*/
+        util::map::vec_to_hashmap(entities.unwrap()));*/
     }
 }

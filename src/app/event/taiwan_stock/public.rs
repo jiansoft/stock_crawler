@@ -102,7 +102,7 @@ fn calculate_price_change(offering_price: Decimal, last_price: Decimal) -> Strin
 
 #[cfg(test)]
 mod tests {
-use crate::infra::cache::SHARE;
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

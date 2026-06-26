@@ -201,8 +201,7 @@ mod tests {
             }
             Err(why) => {
                 dbg!(&why);
-                tracing::debug!("Failed to cmoney::get_stock_quotes because {:?}",
-                    why);
+                tracing::debug!("Failed to cmoney::get_stock_quotes because {:?}", why);
             }
         }
 

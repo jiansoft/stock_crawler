@@ -77,8 +77,7 @@ mod tests {
         match calculate_estimated_price(current_date).await {
             Ok(_) => {}
             Err(why) => {
-                tracing::debug!("Failed to calculate_estimated_price because {:?}",
-                    why);
+                tracing::debug!("Failed to calculate_estimated_price because {:?}", why);
             }
         }
         tracing::debug!("結束 calculate_estimated_price");

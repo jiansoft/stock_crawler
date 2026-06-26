@@ -3,7 +3,11 @@ use chrono::{DateTime, Datelike, Local, TimeDelta};
 use rust_decimal::Decimal;
 use sqlx::{Row, postgres::PgQueryResult, postgres::PgRow};
 
-use crate::{core::declare::Industry, core::util::{self, map::Keyable}, infra::database};
+use crate::{
+    core::declare::Industry,
+    core::util::{self, map::Keyable},
+    infra::database,
+};
 
 pub(crate) mod extension;
 pub mod stock_exchange_market;
@@ -224,8 +228,7 @@ pub async fn create_search_index(stock_symbol: &str, name: &str) {
                         stock_index_e.word_id = word_id;
                     }
                     Err(why) => {
-                        tracing::error!("Failed to insert stock word because:{:#?}",
-                            why);
+                        tracing::error!("Failed to insert stock word because:{:#?}", why);
                         continue;
                     }
                 }
@@ -383,7 +386,7 @@ pub fn is_preference_shares(stock_symbol: &str) -> bool {
 mod tests {
     use rust_decimal_macros::dec;
 
-use crate::domain::registry::repository::StockRepository;
+    use crate::domain::registry::repository::StockRepository;
 
     use super::*;
 
@@ -592,14 +595,14 @@ use crate::domain::registry::repository::StockRepository;
         match fetch_net_asset_value_per_share_is_zero().await {
             Ok(stocks) => {
                 for e in stocks {
-                    tracing::debug!("{} {:?} ",
-                        is_preference_shares(&e.stock_symbol),
-                        e);
+                    tracing::debug!("{} {:?} ", is_preference_shares(&e.stock_symbol), e);
                 }
             }
             Err(why) => {
-                tracing::debug!("Failed to fetch_net_asset_value_per_share_is_zero because: {:?}",
-                    why);
+                tracing::debug!(
+                    "Failed to fetch_net_asset_value_per_share_is_zero because: {:?}",
+                    why
+                );
             }
         }
 
@@ -613,14 +616,14 @@ use crate::domain::registry::repository::StockRepository;
         match fetch_stocks_without_financial_statement(2022, "Q4").await {
             Ok(stocks) => {
                 for e in stocks {
-                    tracing::debug!("{} {:?} ",
-                        is_preference_shares(&e.stock_symbol),
-                        e);
+                    tracing::debug!("{} {:?} ", is_preference_shares(&e.stock_symbol), e);
                 }
             }
             Err(why) => {
-                tracing::debug!("Failed to fetch_stocks_without_financial_statement because: {:?}",
-                    why);
+                tracing::debug!(
+                    "Failed to fetch_stocks_without_financial_statement because: {:?}",
+                    why
+                );
             }
         }
 
@@ -643,8 +646,7 @@ use crate::domain::registry::repository::StockRepository;
                 tracing::debug!("完成 rebuild_search_indices");
             }
             Err(why) => {
-                tracing::debug!("Failed to rebuild_search_indices because: {:?}",
-                    why);
+                tracing::debug!("Failed to rebuild_search_indices because: {:?}", why);
             }
         }
 

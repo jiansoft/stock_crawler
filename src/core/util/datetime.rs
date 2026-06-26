@@ -176,8 +176,7 @@ pub fn parse_date(date_str: &str) -> DateTime<Local> {
     match DateTime::parse_from_rfc3339(date_str) {
         Ok(dt) => dt.with_timezone(&Local),
         Err(why) => {
-            tracing::error!("Failed to parse date string '{}': {}",
-                date_str, why);
+            tracing::error!("Failed to parse date string '{}': {}", date_str, why);
             DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z")
                 .unwrap()
                 .with_timezone(&Local)

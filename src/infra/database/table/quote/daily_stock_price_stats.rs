@@ -232,12 +232,18 @@ mod tests {
 
             match DailyStockPriceStats::upsert(current_date, &mut None).await {
                 Ok(r) => {
-                    tracing::debug!("DailyStockPriceStats::upsert({:?}) 成功: {:#?}",
-                        current_date, r);
+                    tracing::debug!(
+                        "DailyStockPriceStats::upsert({:?}) 成功: {:#?}",
+                        current_date,
+                        r
+                    );
                 }
                 Err(why) => {
-                    tracing::debug!("DailyStockPriceStats::upsert({:?}) 失敗: {:?}",
-                        current_date, why);
+                    tracing::debug!(
+                        "DailyStockPriceStats::upsert({:?}) 失敗: {:?}",
+                        current_date,
+                        why
+                    );
                 }
             }
 

@@ -107,7 +107,7 @@ impl StockInfo for Yuanta {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     #[ignore]
@@ -120,8 +120,10 @@ use super::*;
                 Ok(price) => {
                     tracing::debug!("yuanta {stock_symbol} price: {price}")
                 }
-                Err(why) => tracing::debug!("Failed to yuanta::get_stock_price({stock_symbol}) because {:?}",
-                    why),
+                Err(why) => tracing::debug!(
+                    "Failed to yuanta::get_stock_price({stock_symbol}) because {:?}",
+                    why
+                ),
             }
         }
 
@@ -136,10 +138,13 @@ use super::*;
 
         for stock_symbol in ["2330", "5306"] {
             match Yuanta::get_stock_quotes(stock_symbol).await {
-                Ok(quotes) => tracing::debug!("yuanta::get_stock_quotes {stock_symbol}: {:?}",
-                    quotes),
-                Err(why) => tracing::debug!("Failed to yuanta::get_stock_quotes({stock_symbol}) because {:?}",
-                    why),
+                Ok(quotes) => {
+                    tracing::debug!("yuanta::get_stock_quotes {stock_symbol}: {:?}", quotes)
+                }
+                Err(why) => tracing::debug!(
+                    "Failed to yuanta::get_stock_quotes({stock_symbol}) because {:?}",
+                    why
+                ),
             }
         }
 

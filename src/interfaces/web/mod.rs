@@ -35,19 +35,20 @@ pub async fn start() -> Result<()> {
     tokio::spawn(async move {
         match TcpListener::bind(addr).await {
             Ok(listener) => {
-                tracing::info!("manual backfill web server listening on http://{}",
-                    addr);
+                tracing::info!("manual backfill web server listening on http://{}", addr);
 
                 // Axum serve 正常情況會持續執行；若返回錯誤，記錄原因供維運追查。
                 if let Err(why) = axum::serve(listener, app).await {
-                    tracing::error!("manual backfill web server stopped with error: {}",
-                        why);
+                    tracing::error!("manual backfill web server stopped with error: {}", why);
                 }
             }
             Err(why) => {
                 // 背景服務 bind 失敗時只寫 log，避免影響既有 gRPC/排程流程。
-                tracing::error!("manual backfill web server bind failed on {}: {}",
-                    addr, why);
+                tracing::error!(
+                    "manual backfill web server bind failed on {}: {}",
+                    addr,
+                    why
+                );
             }
         }
     });

@@ -4,7 +4,13 @@ use anyhow::Result;
 use chrono::NaiveDate;
 use futures::{StreamExt, stream};
 
-use crate::{app::backfill::acl::QuoteAclMapper, core::util::{self, map::Keyable}, domain::quote::repository::QuoteRepository, infra::cache::{SHARE, TTL, TtlCacheInner}, infra::crawler::{share::DailyQuoteDto, tpex, twse}};
+use crate::{
+    app::backfill::acl::QuoteAclMapper,
+    core::util::{self, map::Keyable},
+    domain::quote::repository::QuoteRepository,
+    infra::cache::{SHARE, TTL, TtlCacheInner},
+    infra::crawler::{share::DailyQuoteDto, tpex, twse},
+};
 
 /// 調用  twse、tpex API 取得台股收盤報價
 pub async fn execute(date: NaiveDate) -> Result<usize> {
@@ -123,7 +129,7 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

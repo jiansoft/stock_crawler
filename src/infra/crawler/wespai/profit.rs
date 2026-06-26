@@ -147,7 +147,7 @@ pub async fn visit() -> Result<Vec<Profit>> {
 
 #[cfg(test)]
 mod tests {
-use std::time::Duration;
+    use std::time::Duration;
 
     use super::*;
 

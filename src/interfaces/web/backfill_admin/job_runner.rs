@@ -5,7 +5,11 @@ use axum::Json;
 use axum::response::IntoResponse;
 use chrono::{Local, NaiveDate};
 
-use crate::{app::backfill::{dividend, quote, taiwan_stock_index}, app::calculation::dividend_record, app::event::taiwan_stock::closing};
+use crate::{
+    app::backfill::{dividend, quote, taiwan_stock_index},
+    app::calculation::dividend_record,
+    app::event::taiwan_stock::closing,
+};
 
 use super::dto::ErrorResponse;
 use super::state::{BACKFILL_STATE, BackfillJob, BackfillJobStatus, BackfillWebState};
@@ -170,8 +174,12 @@ where
     // 背景執行實際回補工作，HTTP/gRPC 呼叫端只負責後續輪詢。
     let jobs = Arc::clone(&state.jobs);
     tokio::spawn(async move {
-        tracing::info!("manual backfill job started: id={}, kind={}, input={}",
-            task_job.id, task_job.kind, task_job.input);
+        tracing::info!(
+            "manual backfill job started: id={}, kind={}, input={}",
+            task_job.id,
+            task_job.kind,
+            task_job.input
+        );
 
         // 執行呼叫端提供的回補流程，成功時回傳完成訊息，失敗時保留錯誤鏈。
         let result = run().await;
@@ -185,15 +193,25 @@ where
                     // 成功時標記 succeeded，並把回補摘要提供給 UI/API 顯示。
                     job.status = BackfillJobStatus::Succeeded;
                     job.message = message;
-                    tracing::info!("manual backfill job succeeded: id={}, kind={}, input={}, message={}",
-                        job.id, job.kind, job.input, job.message);
+                    tracing::info!(
+                        "manual backfill job succeeded: id={}, kind={}, input={}, message={}",
+                        job.id,
+                        job.kind,
+                        job.input,
+                        job.message
+                    );
                 }
                 Err(why) => {
                     // 失敗時標記 failed，message 使用 anyhow 的完整錯誤鏈。
                     job.status = BackfillJobStatus::Failed;
                     job.message = format!("{why:#}");
-                    tracing::error!("manual backfill job failed: id={}, kind={}, input={}, error={:#}",
-                        job.id, job.kind, job.input, why);
+                    tracing::error!(
+                        "manual backfill job failed: id={}, kind={}, input={}, error={:#}",
+                        job.id,
+                        job.kind,
+                        job.input,
+                        why
+                    );
                 }
             }
         }

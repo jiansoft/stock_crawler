@@ -399,9 +399,7 @@ async fn send_with_client(
                 }
 
                 // ── 403 Forbidden：Telegram 告警，不重試 ──────────────────
-                if status == reqwest::StatusCode::FORBIDDEN
-                    && !url.contains("api.telegram.org")
-                {
+                if status == reqwest::StatusCode::FORBIDDEN && !url.contains("api.telegram.org") {
                     let alert_url = url.to_string();
                     tokio::spawn(async move {
                         crate::interfaces::bot::telegram::send_alert(

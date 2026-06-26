@@ -983,8 +983,7 @@ mod tests {
                 tracing::debug!("fetch_moving_average: {:#?}", dq);
             }
             Err(why) => {
-                tracing::debug!("Failed to fetch_moving_average because {:?}",
-                    why);
+                tracing::debug!("Failed to fetch_moving_average because {:?}", why);
             }
         }
 
@@ -1001,8 +1000,7 @@ mod tests {
                 tracing::debug!("fetch_daily_quotes_by_date: {:#?}", dqs);
             }
             Err(why) => {
-                tracing::debug!("Failed to fetch_daily_quotes_by_date because {:?}",
-                    why);
+                tracing::debug!("Failed to fetch_daily_quotes_by_date because {:?}", why);
             }
         }
 
@@ -1019,8 +1017,7 @@ mod tests {
                 tracing::debug!("count_by_date: {:?}", count);
             }
             Err(why) => {
-                tracing::debug!("Failed to fetch_count_by_date because {:?}",
-                    why);
+                tracing::debug!("Failed to fetch_count_by_date because {:?}", why);
             }
         }
 
@@ -1041,8 +1038,10 @@ mod tests {
                 tracing::debug!("result:{:#?}", result);
             }
             Err(why) => {
-                tracing::debug!("Failed to makeup_for_the_lack_daily_quotes because:{:?}",
-                    why);
+                tracing::debug!(
+                    "Failed to makeup_for_the_lack_daily_quotes because:{:?}",
+                    why
+                );
             }
         }
 

@@ -10,11 +10,14 @@ use serde::{Deserialize, Serialize};
 use urlencoding::encode;
 
 use crate::infra::cache::SHARE;
-use crate::{core::util::{
+use crate::{
+    core::util::{
         http::{self},
         map::Keyable,
         text,
-    }, infra::crawler::goodinfo::HOST};
+    },
+    infra::crawler::goodinfo::HOST,
+};
 
 const UNSET_DATE: &str = "-";
 
@@ -285,8 +288,7 @@ fn parse_schedule_dividends(stock_symbol: &str, text: &str) -> Result<Vec<GoodIn
                     y
                 }
                 Err(why) => {
-                    tracing::error!("Failed to i32::parse because(year:{}) {:#?}",
-                        year_str, why);
+                    tracing::error!("Failed to i32::parse because(year:{}) {:#?}", year_str, why);
 
                     if last_year == 0 {
                         return None;
@@ -546,7 +548,7 @@ fn normalize_goodinfo_year(year: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
     use rust_decimal_macros::dec;
 
     #[test]

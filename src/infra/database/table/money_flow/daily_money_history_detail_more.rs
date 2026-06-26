@@ -147,7 +147,7 @@ ORDER BY security_code, member_id, transaction_date;
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_delete_and_upsert() {
@@ -170,8 +170,10 @@ use super::*;
                     .expect("tx.unwrap().commit() is failed");
             }
             Err(why) => {
-                tracing::debug!("Failed to DailyMoneyHistoryDetailMore::delete_and_upsert because {:?}",
-                    why);
+                tracing::debug!(
+                    "Failed to DailyMoneyHistoryDetailMore::delete_and_upsert because {:?}",
+                    why
+                );
                 tx.unwrap()
                     .rollback()
                     .await
@@ -179,6 +181,9 @@ use super::*;
             }
         }
 
-        tracing::debug!("{}", "結束 DailyMoneyHistoryDetailMore::delete_and_upsert".to_string(),);
+        tracing::debug!(
+            "{}",
+            "結束 DailyMoneyHistoryDetailMore::delete_and_upsert".to_string(),
+        );
     }
 }

@@ -76,8 +76,10 @@ pub async fn execute() -> Result<()> {
             .batch_save_financial_statements(&statements)
             .await
     {
-        tracing::error!("Failed to financial_repo.batch_save_financial_statements because {:?}",
-            why);
+        tracing::error!(
+            "Failed to financial_repo.batch_save_financial_statements because {:?}",
+            why
+        );
     }
 
     update_roe_and_roa_for_zero_values(None).await?;

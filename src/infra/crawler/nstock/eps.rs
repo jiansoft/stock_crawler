@@ -199,7 +199,7 @@ fn parse_year_and_quarter(input: &str) -> Result<(i32, u32)> {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_visit() {

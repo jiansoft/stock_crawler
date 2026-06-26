@@ -563,8 +563,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::layer::Layer<S> for FileLogLaye
         };
 
         // 轉換為 Seq 結構化欄位 map。
-        let fields: HashMap<String, serde_json::Value> =
-            collector.extra.into_iter().collect();
+        let fields: HashMap<String, serde_json::Value> = collector.extra.into_iter().collect();
 
         match level {
             tracing::Level::ERROR => {

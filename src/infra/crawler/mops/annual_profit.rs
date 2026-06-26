@@ -409,7 +409,7 @@ impl AnnualProfitFetcher for Mops {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[test]
     fn test_parse_year_from_xaxis() {
@@ -686,8 +686,11 @@ use super::*;
                     tracing::debug!("mops : {:#?}", result);
                 }
                 Err(why) => {
-                    tracing::debug!("Failed to mops::annual_profit::visit({}) because {:?}",
-                        stock_symbol, why);
+                    tracing::debug!(
+                        "Failed to mops::annual_profit::visit({}) because {:?}",
+                        stock_symbol,
+                        why
+                    );
                     panic!(
                         "mops::annual_profit::visit({}) failed: {:?}",
                         stock_symbol, why

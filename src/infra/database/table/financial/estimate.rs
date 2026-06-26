@@ -531,8 +531,7 @@ mod tests {
         match Estimate::upsert_all(current_date, years_str).await {
             Ok(r) => tracing::debug!("Estimate::upsert_all:{:#?}", r),
             Err(why) => {
-                tracing::debug!("Failed to Estimate::upsert_all because {:?}",
-                    why);
+                tracing::debug!("Failed to Estimate::upsert_all because {:?}", why);
             }
         }
 

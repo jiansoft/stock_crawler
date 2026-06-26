@@ -4,10 +4,15 @@ use anyhow::{Context, Error, Result};
 use chrono::FixedOffset;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
-use crate::{app::backfill::{
+use crate::{
+    app::backfill::{
         delisted_company, dividend, etf, financial_statement, isin, net_asset_value_per_share,
         qualified_foreign_institutional_investor, revenue, stock_weight,
-    }, app::event, core::declare, interfaces::bot::{self, telegram::Telegram}};
+    },
+    app::event,
+    core::declare,
+    interfaces::bot::{self, telegram::Telegram},
+};
 
 /// 啟動排程
 pub async fn start(sched: &JobScheduler) -> Result<()> {
@@ -15,8 +20,10 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
     tracing::info!("scheduler start begin: run_cron");
     let run_cron_timer = Instant::now();
     run_cron(sched).await.context("Failed to run cron jobs")?;
-    tracing::info!("scheduler start done: run_cron elapsed={:?}",
-        run_cron_timer.elapsed());
+    tracing::info!(
+        "scheduler start done: run_cron elapsed={:?}",
+        run_cron_timer.elapsed()
+    );
 
     //若在開盤埘間重啟服務定時任務會無法觸發，所以在啟動時要先執行股價追踪的任務，執行完後再設定一次定時任務
     if declare::StockExchange::TWSE.is_open() {
@@ -27,8 +34,10 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
             tracing::error!("{}", &err_msg);
             bot::telegram::send_alert("開盤股價追蹤初始化失敗", &err_msg).await;
         }
-        tracing::info!("scheduler start done: opening trace::stock_price elapsed={:?}",
-            opening_trace_timer.elapsed());
+        tracing::info!(
+            "scheduler start done: opening trace::stock_price elapsed={:?}",
+            opening_trace_timer.elapsed()
+        );
     }
 
     let msg = format!(
@@ -40,10 +49,11 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
     tracing::info!("scheduler start begin: telegram notify");
     let telegram_timer = Instant::now();
     bot::telegram::send(&msg).await;
-    tracing::info!("scheduler start done: telegram notify elapsed={:?}",
-        telegram_timer.elapsed());
-    tracing::info!("scheduler start done: total elapsed={:?}",
-        timer.elapsed());
+    tracing::info!(
+        "scheduler start done: telegram notify elapsed={:?}",
+        telegram_timer.elapsed()
+    );
+    tracing::info!("scheduler start done: total elapsed={:?}", timer.elapsed());
 
     Ok(())
 }
@@ -112,9 +122,11 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
     }
 
     sched.start().await.context("Failed to start scheduler")?;
-    tracing::info!("scheduler run_cron done: jobs={}, elapsed={:?}",
+    tracing::info!(
+        "scheduler run_cron done: jobs={}, elapsed={:?}",
         job_count,
-        timer.elapsed());
+        timer.elapsed()
+    );
 
     Ok(())
 }
@@ -180,9 +192,7 @@ mod tests {
             Box::pin(async move {
                 println!("_uuid {:?} now: {:?}", _uuid, chrono::Local::now());
                 dbg!("_uuid {:?} now: {:?}", _uuid, chrono::Local::now());
-                tracing::debug!("_uuid {:?} now: {:?}",
-                    _uuid,
-                    chrono::Local::now());
+                tracing::debug!("_uuid {:?} now: {:?}", _uuid, chrono::Local::now());
             })
         })?;
         sched.add(every_minute).await?;

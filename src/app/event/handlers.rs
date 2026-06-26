@@ -287,8 +287,11 @@ impl EventDispatcher {
         };
 
         if let Err(why) = stock_service::push_stock_info_to_go_service(request).await {
-            tracing::error!("Failed to push_stock_info_to_go_service for {} because {:?}",
-                symbol, why);
+            tracing::error!(
+                "Failed to push_stock_info_to_go_service for {} because {:?}",
+                symbol,
+                why
+            );
         }
     }
 

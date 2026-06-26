@@ -6,10 +6,16 @@ use futures::future::join_all;
 use rust_decimal::prelude::ToPrimitive;
 use tonic::{Request, Response, Status};
 
-use crate::{domain::quote::repository::QuoteRepository, infra::cache::SHARE, infra::crawler::twse, infra::database::repository::quote::PgQuoteRepository, interfaces::rpc::stock::{
+use crate::{
+    domain::quote::repository::QuoteRepository,
+    infra::cache::SHARE,
+    infra::crawler::twse,
+    infra::database::repository::quote::PgQuoteRepository,
+    interfaces::rpc::stock::{
         HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest, StockInfoReply,
         StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest, stock_server::Stock,
-    }};
+    },
+};
 
 /// Stock gRPC 服務。
 ///
@@ -85,8 +91,7 @@ impl Stock for StockService {
                 })
                 .collect(),
             Err(why) => {
-                tracing::error!("Failed to visit twse::holiday_schedule because {:?}",
-                    why);
+                tracing::error!("Failed to visit twse::holiday_schedule because {:?}", why);
                 vec![]
             }
         };

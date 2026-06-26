@@ -243,7 +243,7 @@ impl Keyable for Index {
 mod tests {
     use std::time;
 
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_index_fetch() {

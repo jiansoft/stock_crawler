@@ -194,7 +194,7 @@ ON CONFLICT (date, security_code, member_id) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_delete_and_upsert() {
@@ -216,8 +216,10 @@ use super::*;
                     .expect("tx.unwrap().commit() is failed");
             }
             Err(why) => {
-                tracing::debug!("Failed to DailyMoneyHistoryDetail::delete_and_upsert because {:?}",
-                    why);
+                tracing::debug!(
+                    "Failed to DailyMoneyHistoryDetail::delete_and_upsert because {:?}",
+                    why
+                );
                 tx.unwrap()
                     .rollback()
                     .await

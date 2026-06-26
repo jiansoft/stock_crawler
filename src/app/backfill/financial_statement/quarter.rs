@@ -11,7 +11,11 @@ use anyhow::Result;
 use chrono::Local;
 use futures::StreamExt;
 
-use crate::{app::backfill::acl::FinancialStatementAclMapper, app::backfill::financial_statement::update_roe_and_roa_for_zero_values, app::calculation, core::util::datetime::ReportQuarter, infra::crawler::yahoo};
+use crate::{
+    app::backfill::acl::FinancialStatementAclMapper,
+    app::backfill::financial_statement::update_roe_and_roa_for_zero_values, app::calculation,
+    core::util::datetime::ReportQuarter, infra::crawler::yahoo,
+};
 
 /// 補齊最新應已公告季度財報中缺漏的 ROE、ROA 與每股淨值欄位。
 ///
@@ -162,8 +166,10 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
         financial_repo
             .batch_save_financial_statements(&scraped_statements)
             .await?;
-        tracing::debug!("financial_statement batch_upsert executed successfully for {} records.",
-            scraped_statements.len());
+        tracing::debug!(
+            "financial_statement batch_upsert executed successfully for {} records.",
+            scraped_statements.len()
+        );
 
         // 逐一更新 Redis 成功狀態快取
         for cache_key in keys_to_cache {
@@ -171,8 +177,11 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
                 .set(&cache_key, true, 60 * 60 * 24 * 7)
                 .await
             {
-                tracing::error!("Failed to set redis cache key {} because {:?}",
-                    cache_key, why);
+                tracing::error!(
+                    "Failed to set redis cache key {} because {:?}",
+                    cache_key,
+                    why
+                );
             }
         }
     }
@@ -182,7 +191,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

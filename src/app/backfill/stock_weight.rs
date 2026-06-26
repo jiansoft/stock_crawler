@@ -5,7 +5,14 @@ use futures::{StreamExt, stream};
 use scopeguard::defer;
 use tokio::sync::Mutex;
 
-use crate::{app::backfill::acl::{SaveStockWeightCommand, StockWeightAclMapper}, core::declare::StockExchange, core::util, domain::registry::repository::StockRepository, infra::crawler::taifex, infra::database::repository::stock::PgStockRepository};
+use crate::{
+    app::backfill::acl::{SaveStockWeightCommand, StockWeightAclMapper},
+    core::declare::StockExchange,
+    core::util,
+    domain::registry::repository::StockRepository,
+    infra::crawler::taifex,
+    infra::database::repository::stock::PgStockRepository,
+};
 
 /// <summary>
 /// 執行個股權值比重回填任務。
@@ -50,8 +57,7 @@ pub async fn execute() -> Result<()> {
                 async move {
                     // 呼叫領域倉儲更新個股權重
                     if let Err(why) = repo.update_weight(&sw.symbol, sw.weight).await {
-                        tracing::error!("Failed to update stock weight: {:#?}",
-                            why);
+                        tracing::error!("Failed to update stock weight: {:#?}", why);
                     }
                 }
             })
@@ -90,7 +96,7 @@ async fn handle_stock_exchange(
 
 #[cfg(test)]
 mod tests {
-    use crate::{infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

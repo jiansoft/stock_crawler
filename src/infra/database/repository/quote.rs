@@ -1,10 +1,12 @@
-use crate::{domain::quote::{
+use crate::{
+    domain::quote::{
         entity::{
             DailyQuote as DomainDailyQuote, LastDailyQuote as DomainLastDailyQuote,
             QuoteHistoryRecord as DomainQuoteHistoryRecord,
         },
         repository::QuoteRepository,
-    }, infra::{
+    },
+    infra::{
         database,
         database::table::quote::{
             daily_quote::{self, DailyQuote as TableDailyQuote},
@@ -13,7 +15,8 @@ use crate::{domain::quote::{
             quote_history_record::QuoteHistoryRecord as TableQuoteHistoryRecord,
         },
         nosql::redis::CLIENT,
-    }};
+    },
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -47,18 +50,16 @@ impl PgQuoteRepository {
     }
 
     /// 將最新收盤價寫入 Redis 快取（TTL = 86400 秒），失敗時僅記錄 log。
-    async fn cache_set(
-        &self,
-        security_code: &str,
-        cache_key: &str,
-        quote: &DomainLastDailyQuote,
-    ) {
+    async fn cache_set(&self, security_code: &str, cache_key: &str, quote: &DomainLastDailyQuote) {
         let Ok(serialized) = serde_json::to_string(quote) else {
             return;
         };
         if let Err(why) = CLIENT.set(cache_key, serialized, 86400).await {
-            tracing::error!("Failed to update Redis cache for {}: {:?}",
-                security_code, why);
+            tracing::error!(
+                "Failed to update Redis cache for {}: {:?}",
+                security_code,
+                why
+            );
         }
     }
 
@@ -70,8 +71,11 @@ impl PgQuoteRepository {
                 continue;
             };
             if let Err(why) = CLIENT.set(&cache_key, serialized, 86400).await {
-                tracing::error!("Failed to update Redis cache in batch for {}: {:?}",
-                    q.stock_symbol, why);
+                tracing::error!(
+                    "Failed to update Redis cache in batch for {}: {:?}",
+                    q.stock_symbol,
+                    why
+                );
             }
         }
     }
@@ -367,7 +371,8 @@ impl QuoteRepository for PgQuoteRepository {
         };
 
         // 3. 回寫 Redis 快取（best-effort）
-        self.cache_set(security_code, &cache_key, &domain_quote).await;
+        self.cache_set(security_code, &cache_key, &domain_quote)
+            .await;
 
         Ok(Some(domain_quote))
     }

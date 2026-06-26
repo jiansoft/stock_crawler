@@ -14,12 +14,15 @@ use chrono::{Datelike, Local, NaiveDate};
 use std::collections::HashSet;
 use std::time::Duration;
 
-use crate::{app::backfill::acl::FinancialStatementAclMapper, infra::crawler::{
+use crate::{
+    app::backfill::acl::FinancialStatementAclMapper,
+    infra::crawler::{
         fbs::annual_profit::Fbs,
         moneydj::annual_profit::MoneyDJ,
         mops::annual_profit::Mops,
         share::{AnnualProfit, AnnualProfitFetcher},
-    }};
+    },
+};
 
 /// 執行台股年度 EPS 補齊流程。
 ///

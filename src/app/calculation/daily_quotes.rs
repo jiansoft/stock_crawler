@@ -3,10 +3,15 @@ use chrono::NaiveDate;
 use futures::{StreamExt, stream};
 use rust_decimal::Decimal;
 
-use crate::{core::util, domain::quote::{
+use crate::{
+    core::util,
+    domain::quote::{
         entity::{DailyQuote as DomainDailyQuote, QuoteHistoryRecord},
         repository::QuoteRepository,
-    }, infra::cache::SHARE, infra::database::repository::quote::PgQuoteRepository};
+    },
+    infra::cache::SHARE,
+    infra::database::repository::quote::PgQuoteRepository,
+};
 
 /// 計算所有上市櫃公司在指定日期的均線值與歷史高低點。
 ///
@@ -176,7 +181,7 @@ fn update_qhr_fields(qhr: &mut QuoteHistoryRecord, dq: &DomainDailyQuote) {
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     #[tokio::test]
     async fn test_calculate_moving_average() {
@@ -189,8 +194,7 @@ use super::*;
                 tracing::debug!("calculate_moving_average() 完成");
             }
             Err(why) => {
-                tracing::debug!("Failed to calculate_moving_average because {:?}",
-                    why);
+                tracing::debug!("Failed to calculate_moving_average because {:?}", why);
             }
         }
 

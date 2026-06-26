@@ -246,8 +246,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing::info!("allocator profile: system allocator");
 
     if allocator_tuning.applied {
-        tracing::info!("allocator tuning applied arena_max={} trim_threshold={}",
-            allocator_tuning.arena_max_applied, allocator_tuning.trim_threshold_applied,);
+        tracing::info!(
+            "allocator tuning applied arena_max={} trim_threshold={}",
+            allocator_tuning.arena_max_applied,
+            allocator_tuning.trim_threshold_applied,
+        );
     }
 
     // ── 6. 訊號監聽 task 啟動 ───────────────────────────────────────────────
@@ -291,11 +294,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // （台股約 1,800～2,000 支，通常 1～3 秒內完成）。
     // 後續爬蟲與排程任務都透過此快取直接查詢，避免頻繁打 DB；
     // 即時股價更新（set_stock_snapshot_price）也在記憶體內完成，不需回寫 DB。
-    tracing::info!("{}", "startup phase begin: crate::infra::cache::SHARE.load".to_string(),);
+    tracing::info!(
+        "{}",
+        "startup phase begin: crate::infra::cache::SHARE.load".to_string(),
+    );
     let cache_load_timer = Instant::now();
     infra::cache::SHARE.load().await;
-    tracing::info!("startup phase done: crate::infra::cache::SHARE.load elapsed={:?}",
-        cache_load_timer.elapsed());
+    tracing::info!(
+        "startup phase done: crate::infra::cache::SHARE.load elapsed={:?}",
+        cache_load_timer.elapsed()
+    );
 
     // ── 9. 排程器建立 ───────────────────────────────────────────────────────
     // `JobScheduler::new()` 建立 tokio-cron-scheduler 實例，但尚未啟動任何 job。
@@ -304,8 +312,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing::info!("startup phase begin: JobScheduler::new");
     let scheduler_new_timer = Instant::now();
     let sched = JobScheduler::new().await?;
-    tracing::info!("startup phase done: JobScheduler::new elapsed={:?}",
-        scheduler_new_timer.elapsed());
+    tracing::info!(
+        "startup phase done: JobScheduler::new elapsed={:?}",
+        scheduler_new_timer.elapsed()
+    );
 
     // ── 10. 排程任務註冊與啟動 ──────────────────────────────────────────────
     // `app::scheduler::start(&sched)` 把所有 cron job 加進 `sched`，並呼叫
@@ -315,8 +325,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing::info!("startup phase begin: scheduler::start");
     let scheduler_start_timer = Instant::now();
     app::scheduler::start(&sched).await?;
-    tracing::info!("startup phase done: scheduler::start elapsed={:?}",
-        scheduler_start_timer.elapsed());
+    tracing::info!(
+        "startup phase done: scheduler::start elapsed={:?}",
+        scheduler_start_timer.elapsed()
+    );
 
     // ── 11. gRPC 伺服器啟動 ──────────────────────────────────────────────────
     // `interfaces::rpc::server::start()` 在 app.json 設定的埠號（預設 9001）開始監聽。
@@ -332,8 +344,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         interfaces::bot::telegram::send_alert("gRPC 伺服器啟動失敗", &err_msg).await;
         return Err(why.into());
     }
-    tracing::info!("startup phase done: rpc::server::start elapsed={:?}",
-        rpc_start_timer.elapsed());
+    tracing::info!(
+        "startup phase done: rpc::server::start elapsed={:?}",
+        rpc_start_timer.elapsed()
+    );
 
     // ── 12. Web 伺服器啟動（Axum）────────────────────────────────────────────
     // `interfaces::web::start()` 啟動 Axum HTTP 伺服器，提供 REST API 與靜態頁面。
@@ -347,10 +361,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         interfaces::bot::telegram::send_alert("Web 伺服器啟動失敗", &err_msg).await;
         return Err(why.into());
     }
-    tracing::info!("startup phase done: web::start elapsed={:?}",
-        web_start_timer.elapsed());
-    tracing::info!("startup phase done: main init total elapsed={:?}",
-        startup_timer.elapsed());
+    tracing::info!(
+        "startup phase done: web::start elapsed={:?}",
+        web_start_timer.elapsed()
+    );
+    tracing::info!(
+        "startup phase done: main init total elapsed={:?}",
+        startup_timer.elapsed()
+    );
 
     // ── 13. gRPC 自我連線測試（延遲 1 秒執行）──────────────────────────────
     // gRPC 伺服器 start() 只是「開始監聽」，實際的 accept loop 可能還需幾毫秒就緒。

@@ -55,8 +55,7 @@ async fn update_stocks(items: Vec<EtfInfo>) -> Result<()> {
         if is_new_or_changed {
             let cmd = EtfAclMapper::from_etf(&item);
             if let Err(why) = update_stock_info(&cmd).await {
-                tracing::error!("更新 ETF {} 資訊失敗: {:?}",
-                    item.stock_symbol, why);
+                tracing::error!("更新 ETF {} 資訊失敗: {:?}", item.stock_symbol, why);
             }
         }
     }
@@ -101,7 +100,7 @@ async fn update_stock_info(cmd: &backfill::acl::RegisterStockCommand) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-use crate::infra::cache::SHARE;
+    use crate::infra::cache::SHARE;
 
     #[tokio::test]
     #[ignore]

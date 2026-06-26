@@ -364,8 +364,11 @@ impl App {
                     self.bot.telegram.allowed = allowed;
                 }
                 Err(why) => {
-                    tracing::error!("Failed to serde_json because: {:?} \r\n {}",
-                        why, &tg_allowed);
+                    tracing::error!(
+                        "Failed to serde_json because: {:?} \r\n {}",
+                        why,
+                        &tg_allowed
+                    );
                 }
             }
         }
@@ -419,17 +422,26 @@ mod tests {
     async fn test_init() {
         dotenv::dotenv().ok();
         tracing::debug!("SETTINGS.system: {:#?}\r\n", SETTINGS.system);
-        tracing::debug!("SETTINGS.postgresql: host={} port={} db={} user={}\r\n",
+        tracing::debug!(
+            "SETTINGS.postgresql: host={} port={} db={} user={}\r\n",
             SETTINGS.postgresql.host,
             SETTINGS.postgresql.port,
             SETTINGS.postgresql.db,
-            SETTINGS.postgresql.user);
+            SETTINGS.postgresql.user
+        );
 
-        tracing::debug!("SETTINGS.nosql.redis: addr={} account={} db={}\r\n",
-            SETTINGS.nosql.redis.addr, SETTINGS.nosql.redis.account, SETTINGS.nosql.redis.db);
+        tracing::debug!(
+            "SETTINGS.nosql.redis: addr={} account={} db={}\r\n",
+            SETTINGS.nosql.redis.addr,
+            SETTINGS.nosql.redis.account,
+            SETTINGS.nosql.redis.db
+        );
 
-        tracing::debug!("SETTINGS.rpc.go_service: target={} domain_name={}\r\n",
-            SETTINGS.rpc.go_service.target, SETTINGS.rpc.go_service.domain_name);
+        tracing::debug!(
+            "SETTINGS.rpc.go_service: target={} domain_name={}\r\n",
+            SETTINGS.rpc.go_service.target,
+            SETTINGS.rpc.go_service.domain_name
+        );
 
         let mut map: HashMap<i64, String> = HashMap::new();
         map.insert(123, "QQ".to_string());
@@ -442,8 +454,7 @@ mod tests {
                 tracing::debug!("json: {:?}\r\n", json);
             }
             Err(why) => {
-                tracing::debug!("Failed to serde_json because: {:?} \r\n {}",
-                    why, &json_str);
+                tracing::debug!("Failed to serde_json because: {:?} \r\n {}", why, &json_str);
             }
         }
         tokio::time::sleep(time::Duration::from_secs(1)).await;

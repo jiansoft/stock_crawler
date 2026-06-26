@@ -2,7 +2,11 @@ use anyhow::Result;
 use chrono::{DateTime, FixedOffset};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{core::util::{convert::FromValue, http}, infra::crawler::share::QfiiDto, infra::crawler::twse};
+use crate::{
+    core::util::{convert::FromValue, http},
+    infra::crawler::share::QfiiDto,
+    infra::crawler::twse,
+};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 /// TWSE 外資及陸資持股統計 API 回應。
@@ -39,14 +43,20 @@ pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
     let mut result = Vec::with_capacity(1024);
     let stat = match listed.stat {
         None => {
-            tracing::warn!("{}", "取得外資及陸資投資持股統計 Finish taiex.Stat is None".to_string(),);
+            tracing::warn!(
+                "{}",
+                "取得外資及陸資投資持股統計 Finish taiex.Stat is None".to_string(),
+            );
             return Ok(result);
         }
         Some(stat) => stat.to_uppercase(),
     };
 
     if stat != "OK" {
-        tracing::warn!("{}", "取得外資及陸資投資持股統計 Finish taiex.Stat is not ok".to_string(),);
+        tracing::warn!(
+            "{}",
+            "取得外資及陸資投資持股統計 Finish taiex.Stat is not ok".to_string(),
+        );
         return Ok(result);
     }
 

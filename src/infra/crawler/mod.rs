@@ -660,8 +660,15 @@ pub fn flush_site_latency_stats() {
     });
 
     for entry in entries {
-        tracing::info!("站點整體耗時統計 {}: count={}, avg={}ms, p50={}ms, p70={}ms, p99={}ms",
-            entry.site_name, entry.count, entry.avg_ms, entry.p50_ms, entry.p70_ms, entry.p99_ms);
+        tracing::info!(
+            "站點整體耗時統計 {}: count={}, avg={}ms, p50={}ms, p70={}ms, p99={}ms",
+            entry.site_name,
+            entry.count,
+            entry.avg_ms,
+            entry.p50_ms,
+            entry.p70_ms,
+            entry.p99_ms
+        );
     }
 
     stats.clear();
@@ -732,7 +739,7 @@ pub async fn fetch_stock_quotes_from_remote_site(
 
 #[cfg(test)]
 mod tests {
-use super::*;
+    use super::*;
 
     /// 驗證站點延遲統計可以正確計算平均值與各主要百分位。
     #[test]

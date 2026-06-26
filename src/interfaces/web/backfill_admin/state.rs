@@ -23,8 +23,7 @@ pub(super) struct BackfillWebState {
 }
 
 /// Backfill admin 的全域記憶體狀態。
-pub(super) static BACKFILL_STATE: Lazy<BackfillWebState> =
-    Lazy::new(BackfillWebState::new);
+pub(super) static BACKFILL_STATE: Lazy<BackfillWebState> = Lazy::new(BackfillWebState::new);
 
 impl BackfillWebState {
     /// 建立空的 job 狀態容器。

@@ -90,7 +90,7 @@ DO UPDATE SET val = excluded.val;"#;
 
 #[cfg(test)]
 mod tests {
-use chrono::{Local, NaiveDate};
+    use chrono::{Local, NaiveDate};
     use std::result::Result::Ok;
 
     use super::*;
@@ -115,8 +115,7 @@ use chrono::{Local, NaiveDate};
                         tracing::debug!("upsert:{:#?}", result);
                     }
                     Err(why) => {
-                        tracing::debug!("Failed to config.upsert because:{:?}",
-                            why);
+                        tracing::debug!("Failed to config.upsert because:{:?}", why);
                     }
                 }
             }

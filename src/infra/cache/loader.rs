@@ -1,9 +1,15 @@
 use std::collections::HashMap;
 
-use crate::{core::util::map::Keyable, domain::market_index::MarketIndex, domain::market_index::repository::MarketIndexRepository, infra::crawler::share as crawler_share, infra::database::{
+use crate::{
+    core::util::map::Keyable,
+    domain::market_index::MarketIndex,
+    domain::market_index::repository::MarketIndexRepository,
+    infra::crawler::share as crawler_share,
+    infra::database::{
         repository::market_index::PgMarketIndexRepository,
         table::{last_daily_quotes, revenue, stock},
-    }};
+    },
+};
 
 use super::share::Share;
 
@@ -18,8 +24,7 @@ impl Share {
         match self.indices.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                tracing::error!("Failed to replace indices cache because {:?}",
-                    why);
+                tracing::error!("Failed to replace indices cache because {:?}", why);
             }
         }
     }
@@ -34,8 +39,7 @@ impl Share {
         match self.stocks.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                tracing::error!("Failed to replace stocks cache because {:?}",
-                    why);
+                tracing::error!("Failed to replace stocks cache because {:?}", why);
             }
         }
     }
@@ -55,8 +59,7 @@ impl Share {
         match self.last_revenues.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                tracing::error!("Failed to replace last_revenues cache because {:?}",
-                    why);
+                tracing::error!("Failed to replace last_revenues cache because {:?}", why);
             }
         }
     }
@@ -74,8 +77,10 @@ impl Share {
         match self.last_trading_day_quotes.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                tracing::error!("Failed to replace last_trading_day_quotes cache because {:?}",
-                    why);
+                tracing::error!(
+                    "Failed to replace last_trading_day_quotes cache because {:?}",
+                    why
+                );
             }
         }
     }
@@ -93,8 +98,10 @@ impl Share {
         match self.quote_history_records.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                tracing::error!("Failed to replace quote_history_records cache because {:?}",
-                    why);
+                tracing::error!(
+                    "Failed to replace quote_history_records cache because {:?}",
+                    why
+                );
             }
         }
     }
@@ -135,16 +142,14 @@ impl Share {
         match revenue::fetch_last_two_month().await {
             Ok(revenues) => self.replace_last_revenues_cache(revenues),
             Err(why) => {
-                tracing::error!("Failed to fetch last_revenues because {:?}",
-                    why);
+                tracing::error!("Failed to fetch last_revenues because {:?}", why);
             }
         }
 
         match last_daily_quotes::LastDailyQuotes::fetch().await {
             Ok(quotes) => self.replace_last_trading_day_quotes_cache(quotes),
             Err(why) => {
-                tracing::error!("Failed to fetch last_trading_day_quotes because {:?}",
-                    why);
+                tracing::error!("Failed to fetch last_trading_day_quotes because {:?}", why);
             }
         }
 
@@ -153,8 +158,7 @@ impl Share {
         match quote_repo.fetch_quote_history_records().await {
             Ok(records) => self.replace_quote_history_records_cache(records),
             Err(why) => {
-                tracing::error!("Failed to fetch quote_history_records because {:?}",
-                    why);
+                tracing::error!("Failed to fetch quote_history_records because {:?}", why);
             }
         }
 
@@ -167,34 +171,43 @@ impl Share {
 
         let current_ip = self.get_current_ip().unwrap_or_default();
         tracing::info!("current_ip  {}", current_ip);
-        tracing::info!("CacheShare.indices 初始化 {}",
+        tracing::info!(
+            "CacheShare.indices 初始化 {}",
             self.indices
                 .read()
                 .map(|cache| cache.len())
-                .unwrap_or_default());
-        tracing::info!("CacheShare.industries 初始化 {:?}",
-            self.industries);
-        tracing::info!("CacheShare.stocks 初始化 {}",
+                .unwrap_or_default()
+        );
+        tracing::info!("CacheShare.industries 初始化 {:?}", self.industries);
+        tracing::info!(
+            "CacheShare.stocks 初始化 {}",
             self.stocks
                 .read()
                 .map(|cache| cache.len())
-                .unwrap_or_default());
-        tracing::info!("CacheShare.last_trading_day_quotes 初始化 {}",
+                .unwrap_or_default()
+        );
+        tracing::info!(
+            "CacheShare.last_trading_day_quotes 初始化 {}",
             self.last_trading_day_quotes
                 .read()
                 .map(|cache| cache.len())
-                .unwrap_or_default());
-        tracing::info!("CacheShare.quote_history_records 初始化 {}",
+                .unwrap_or_default()
+        );
+        tracing::info!(
+            "CacheShare.quote_history_records 初始化 {}",
             self.quote_history_records
                 .read()
                 .map(|cache| cache.len())
-                .unwrap_or_default());
+                .unwrap_or_default()
+        );
 
         if let Ok(revenues) = self.last_revenues.read() {
             for revenue in revenues.iter() {
-                tracing::info!("CacheShare.last_revenues 初始化 {}:{}",
+                tracing::info!(
+                    "CacheShare.last_revenues 初始化 {}:{}",
                     revenue.0,
-                    revenue.1.keys().len());
+                    revenue.1.keys().len()
+                );
             }
         }
     }
@@ -208,7 +221,7 @@ mod tests {
     use crate::domain::market_index::MarketIndex;
     use crate::infra::database::table::revenue;
 
-    use super::super::share::{Share, SHARE};
+    use super::super::share::{SHARE, Share};
 
     fn make_test_revenue(stock_symbol: &str, date: i64) -> revenue::Revenue {
         let mut r = revenue::Revenue::new();
@@ -302,8 +315,7 @@ mod tests {
             if loop_count < 0 {
                 break;
             }
-            tracing::info!("indices e.date {:?} e.index {:?}",
-                e.1.date, e.1.index);
+            tracing::info!("indices e.date {:?} e.index {:?}", e.1.date, e.1.index);
             loop_count -= 1;
         }
 
@@ -321,8 +333,7 @@ mod tests {
             if loop_count < 0 {
                 break;
             }
-            tracing::info!("security_code {} closing_price {}",
-                k, v.closing_price);
+            tracing::info!("security_code {} closing_price {}", k, v.closing_price);
             loop_count -= 1;
         }
 
