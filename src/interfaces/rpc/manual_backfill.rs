@@ -59,7 +59,7 @@ pub struct ListJobsResponse {
     pub jobs: ::prost::alloc::vec::Vec<BackfillJob>,
 }
 /// Generated client implementations.
-pub mod manual_backfill_client {
+pub mod manual_backfill_service_client {
     #![allow(
         unused_variables,
         dead_code,
@@ -69,11 +69,12 @@ pub mod manual_backfill_client {
     )]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    /// / 手動資料回補服務，提供各類歷史資料補抓與 job 查詢介面。
     #[derive(Debug, Clone)]
-    pub struct ManualBackfillClient<T> {
+    pub struct ManualBackfillServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl ManualBackfillClient<tonic::transport::Channel> {
+    impl ManualBackfillServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -84,7 +85,7 @@ pub mod manual_backfill_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> ManualBackfillClient<T>
+    impl<T> ManualBackfillServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::Body>,
         T::Error: Into<StdError>,
@@ -102,7 +103,7 @@ pub mod manual_backfill_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> ManualBackfillClient<InterceptedService<T, F>>
+        ) -> ManualBackfillServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -116,7 +117,7 @@ pub mod manual_backfill_client {
                 http::Request<tonic::body::Body>,
             >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
         {
-            ManualBackfillClient::new(InterceptedService::new(inner, interceptor))
+            ManualBackfillServiceClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -166,12 +167,15 @@ pub mod manual_backfill_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/manual_backfill.ManualBackfill/StartDailyQuotes",
+                "/manual_backfill.ManualBackfillService/StartDailyQuotes",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("manual_backfill.ManualBackfill", "StartDailyQuotes"),
+                    GrpcMethod::new(
+                        "manual_backfill.ManualBackfillService",
+                        "StartDailyQuotes",
+                    ),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -192,13 +196,13 @@ pub mod manual_backfill_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/manual_backfill.ManualBackfill/StartClosingAggregate",
+                "/manual_backfill.ManualBackfillService/StartClosingAggregate",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "manual_backfill.ManualBackfill",
+                        "manual_backfill.ManualBackfillService",
                         "StartClosingAggregate",
                     ),
                 );
@@ -221,13 +225,13 @@ pub mod manual_backfill_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/manual_backfill.ManualBackfill/StartTaiwanStockIndex",
+                "/manual_backfill.ManualBackfillService/StartTaiwanStockIndex",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "manual_backfill.ManualBackfill",
+                        "manual_backfill.ManualBackfillService",
                         "StartTaiwanStockIndex",
                     ),
                 );
@@ -250,13 +254,13 @@ pub mod manual_backfill_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/manual_backfill.ManualBackfill/StartReceivedDividendRecords",
+                "/manual_backfill.ManualBackfillService/StartReceivedDividendRecords",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "manual_backfill.ManualBackfill",
+                        "manual_backfill.ManualBackfillService",
                         "StartReceivedDividendRecords",
                     ),
                 );
@@ -279,13 +283,13 @@ pub mod manual_backfill_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/manual_backfill.ManualBackfill/StartHistoricalDividends",
+                "/manual_backfill.ManualBackfillService/StartHistoricalDividends",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "manual_backfill.ManualBackfill",
+                        "manual_backfill.ManualBackfillService",
                         "StartHistoricalDividends",
                     ),
                 );
@@ -308,13 +312,13 @@ pub mod manual_backfill_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/manual_backfill.ManualBackfill/StartMultipleDividendHistoricalDividends",
+                "/manual_backfill.ManualBackfillService/StartMultipleDividendHistoricalDividends",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new(
-                        "manual_backfill.ManualBackfill",
+                        "manual_backfill.ManualBackfillService",
                         "StartMultipleDividendHistoricalDividends",
                     ),
                 );
@@ -337,11 +341,13 @@ pub mod manual_backfill_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/manual_backfill.ManualBackfill/ListJobs",
+                "/manual_backfill.ManualBackfillService/ListJobs",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("manual_backfill.ManualBackfill", "ListJobs"));
+                .insert(
+                    GrpcMethod::new("manual_backfill.ManualBackfillService", "ListJobs"),
+                );
             self.inner.unary(req, path, codec).await
         }
         pub async fn get_job(
@@ -361,17 +367,19 @@ pub mod manual_backfill_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/manual_backfill.ManualBackfill/GetJob",
+                "/manual_backfill.ManualBackfillService/GetJob",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("manual_backfill.ManualBackfill", "GetJob"));
+                .insert(
+                    GrpcMethod::new("manual_backfill.ManualBackfillService", "GetJob"),
+                );
             self.inner.unary(req, path, codec).await
         }
     }
 }
 /// Generated server implementations.
-pub mod manual_backfill_server {
+pub mod manual_backfill_service_server {
     #![allow(
         unused_variables,
         dead_code,
@@ -380,9 +388,9 @@ pub mod manual_backfill_server {
         clippy::let_unit_value,
     )]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with ManualBackfillServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with ManualBackfillServiceServer.
     #[async_trait]
-    pub trait ManualBackfill: std::marker::Send + std::marker::Sync + 'static {
+    pub trait ManualBackfillService: std::marker::Send + std::marker::Sync + 'static {
         async fn start_daily_quotes(
             &self,
             request: tonic::Request<super::DailyQuotesRequest>,
@@ -440,15 +448,16 @@ pub mod manual_backfill_server {
             tonic::Status,
         >;
     }
+    /// / 手動資料回補服務，提供各類歷史資料補抓與 job 查詢介面。
     #[derive(Debug)]
-    pub struct ManualBackfillServer<T> {
+    pub struct ManualBackfillServiceServer<T> {
         inner: Arc<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
     }
-    impl<T> ManualBackfillServer<T> {
+    impl<T> ManualBackfillServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -499,9 +508,10 @@ pub mod manual_backfill_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>> for ManualBackfillServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>>
+    for ManualBackfillServiceServer<T>
     where
-        T: ManualBackfill,
+        T: ManualBackfillService,
         B: Body + std::marker::Send + 'static,
         B::Error: Into<StdError> + std::marker::Send + 'static,
     {
@@ -516,11 +526,11 @@ pub mod manual_backfill_server {
         }
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             match req.uri().path() {
-                "/manual_backfill.ManualBackfill/StartDailyQuotes" => {
+                "/manual_backfill.ManualBackfillService/StartDailyQuotes" => {
                     #[allow(non_camel_case_types)]
-                    struct StartDailyQuotesSvc<T: ManualBackfill>(pub Arc<T>);
+                    struct StartDailyQuotesSvc<T: ManualBackfillService>(pub Arc<T>);
                     impl<
-                        T: ManualBackfill,
+                        T: ManualBackfillService,
                     > tonic::server::UnaryService<super::DailyQuotesRequest>
                     for StartDailyQuotesSvc<T> {
                         type Response = super::BackfillJobResponse;
@@ -534,7 +544,10 @@ pub mod manual_backfill_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ManualBackfill>::start_daily_quotes(&inner, request)
+                                <T as ManualBackfillService>::start_daily_quotes(
+                                        &inner,
+                                        request,
+                                    )
                                     .await
                             };
                             Box::pin(fut)
@@ -562,11 +575,13 @@ pub mod manual_backfill_server {
                     };
                     Box::pin(fut)
                 }
-                "/manual_backfill.ManualBackfill/StartClosingAggregate" => {
+                "/manual_backfill.ManualBackfillService/StartClosingAggregate" => {
                     #[allow(non_camel_case_types)]
-                    struct StartClosingAggregateSvc<T: ManualBackfill>(pub Arc<T>);
+                    struct StartClosingAggregateSvc<T: ManualBackfillService>(
+                        pub Arc<T>,
+                    );
                     impl<
-                        T: ManualBackfill,
+                        T: ManualBackfillService,
                     > tonic::server::UnaryService<super::ClosingAggregateRequest>
                     for StartClosingAggregateSvc<T> {
                         type Response = super::BackfillJobResponse;
@@ -580,7 +595,7 @@ pub mod manual_backfill_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ManualBackfill>::start_closing_aggregate(
+                                <T as ManualBackfillService>::start_closing_aggregate(
                                         &inner,
                                         request,
                                     )
@@ -611,11 +626,13 @@ pub mod manual_backfill_server {
                     };
                     Box::pin(fut)
                 }
-                "/manual_backfill.ManualBackfill/StartTaiwanStockIndex" => {
+                "/manual_backfill.ManualBackfillService/StartTaiwanStockIndex" => {
                     #[allow(non_camel_case_types)]
-                    struct StartTaiwanStockIndexSvc<T: ManualBackfill>(pub Arc<T>);
+                    struct StartTaiwanStockIndexSvc<T: ManualBackfillService>(
+                        pub Arc<T>,
+                    );
                     impl<
-                        T: ManualBackfill,
+                        T: ManualBackfillService,
                     > tonic::server::UnaryService<super::TaiwanStockIndexRequest>
                     for StartTaiwanStockIndexSvc<T> {
                         type Response = super::BackfillJobResponse;
@@ -629,7 +646,7 @@ pub mod manual_backfill_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ManualBackfill>::start_taiwan_stock_index(
+                                <T as ManualBackfillService>::start_taiwan_stock_index(
                                         &inner,
                                         request,
                                     )
@@ -660,13 +677,13 @@ pub mod manual_backfill_server {
                     };
                     Box::pin(fut)
                 }
-                "/manual_backfill.ManualBackfill/StartReceivedDividendRecords" => {
+                "/manual_backfill.ManualBackfillService/StartReceivedDividendRecords" => {
                     #[allow(non_camel_case_types)]
-                    struct StartReceivedDividendRecordsSvc<T: ManualBackfill>(
+                    struct StartReceivedDividendRecordsSvc<T: ManualBackfillService>(
                         pub Arc<T>,
                     );
                     impl<
-                        T: ManualBackfill,
+                        T: ManualBackfillService,
                     > tonic::server::UnaryService<super::SecurityCodeRequest>
                     for StartReceivedDividendRecordsSvc<T> {
                         type Response = super::BackfillJobResponse;
@@ -680,7 +697,7 @@ pub mod manual_backfill_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ManualBackfill>::start_received_dividend_records(
+                                <T as ManualBackfillService>::start_received_dividend_records(
                                         &inner,
                                         request,
                                     )
@@ -711,11 +728,13 @@ pub mod manual_backfill_server {
                     };
                     Box::pin(fut)
                 }
-                "/manual_backfill.ManualBackfill/StartHistoricalDividends" => {
+                "/manual_backfill.ManualBackfillService/StartHistoricalDividends" => {
                     #[allow(non_camel_case_types)]
-                    struct StartHistoricalDividendsSvc<T: ManualBackfill>(pub Arc<T>);
+                    struct StartHistoricalDividendsSvc<T: ManualBackfillService>(
+                        pub Arc<T>,
+                    );
                     impl<
-                        T: ManualBackfill,
+                        T: ManualBackfillService,
                     > tonic::server::UnaryService<super::SecurityCodeRequest>
                     for StartHistoricalDividendsSvc<T> {
                         type Response = super::BackfillJobResponse;
@@ -729,7 +748,7 @@ pub mod manual_backfill_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ManualBackfill>::start_historical_dividends(
+                                <T as ManualBackfillService>::start_historical_dividends(
                                         &inner,
                                         request,
                                     )
@@ -760,15 +779,15 @@ pub mod manual_backfill_server {
                     };
                     Box::pin(fut)
                 }
-                "/manual_backfill.ManualBackfill/StartMultipleDividendHistoricalDividends" => {
+                "/manual_backfill.ManualBackfillService/StartMultipleDividendHistoricalDividends" => {
                     #[allow(non_camel_case_types)]
                     struct StartMultipleDividendHistoricalDividendsSvc<
-                        T: ManualBackfill,
+                        T: ManualBackfillService,
                     >(
                         pub Arc<T>,
                     );
                     impl<
-                        T: ManualBackfill,
+                        T: ManualBackfillService,
                     > tonic::server::UnaryService<super::YearRequest>
                     for StartMultipleDividendHistoricalDividendsSvc<T> {
                         type Response = super::BackfillJobResponse;
@@ -782,7 +801,7 @@ pub mod manual_backfill_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ManualBackfill>::start_multiple_dividend_historical_dividends(
+                                <T as ManualBackfillService>::start_multiple_dividend_historical_dividends(
                                         &inner,
                                         request,
                                     )
@@ -813,11 +832,11 @@ pub mod manual_backfill_server {
                     };
                     Box::pin(fut)
                 }
-                "/manual_backfill.ManualBackfill/ListJobs" => {
+                "/manual_backfill.ManualBackfillService/ListJobs" => {
                     #[allow(non_camel_case_types)]
-                    struct ListJobsSvc<T: ManualBackfill>(pub Arc<T>);
+                    struct ListJobsSvc<T: ManualBackfillService>(pub Arc<T>);
                     impl<
-                        T: ManualBackfill,
+                        T: ManualBackfillService,
                     > tonic::server::UnaryService<super::ListJobsRequest>
                     for ListJobsSvc<T> {
                         type Response = super::ListJobsResponse;
@@ -831,7 +850,8 @@ pub mod manual_backfill_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ManualBackfill>::list_jobs(&inner, request).await
+                                <T as ManualBackfillService>::list_jobs(&inner, request)
+                                    .await
                             };
                             Box::pin(fut)
                         }
@@ -858,11 +878,11 @@ pub mod manual_backfill_server {
                     };
                     Box::pin(fut)
                 }
-                "/manual_backfill.ManualBackfill/GetJob" => {
+                "/manual_backfill.ManualBackfillService/GetJob" => {
                     #[allow(non_camel_case_types)]
-                    struct GetJobSvc<T: ManualBackfill>(pub Arc<T>);
+                    struct GetJobSvc<T: ManualBackfillService>(pub Arc<T>);
                     impl<
-                        T: ManualBackfill,
+                        T: ManualBackfillService,
                     > tonic::server::UnaryService<super::GetJobRequest>
                     for GetJobSvc<T> {
                         type Response = super::BackfillJobResponse;
@@ -876,7 +896,7 @@ pub mod manual_backfill_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ManualBackfill>::get_job(&inner, request).await
+                                <T as ManualBackfillService>::get_job(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -925,7 +945,7 @@ pub mod manual_backfill_server {
             }
         }
     }
-    impl<T> Clone for ManualBackfillServer<T> {
+    impl<T> Clone for ManualBackfillServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -938,8 +958,8 @@ pub mod manual_backfill_server {
         }
     }
     /// Generated gRPC service name
-    pub const SERVICE_NAME: &str = "manual_backfill.ManualBackfill";
-    impl<T> tonic::server::NamedService for ManualBackfillServer<T> {
+    pub const SERVICE_NAME: &str = "manual_backfill.ManualBackfillService";
+    impl<T> tonic::server::NamedService for ManualBackfillServiceServer<T> {
         const NAME: &'static str = SERVICE_NAME;
     }
 }

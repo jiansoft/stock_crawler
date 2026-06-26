@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package basic;
 
+/// 通用的 gRPC 基礎回應訊息，供各服務共用。
 message BaseResponse {
   int32 code = 1;
   string message = 2;
-
 }

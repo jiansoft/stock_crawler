@@ -1,15 +1,15 @@
 version: v1
 lint:
   use:
-    - DEFAULT
+    - STANDARD
   except:
-    # Package names don't use vX version suffixes (e.g. basic, stock, control)
+    # 套件名稱不使用 vX 版本後綴（例如 basic、stock、control）
     - PACKAGE_VERSION_SUFFIX
-    # RPC methods use method-prefix naming for requests (e.g. DailyQuotesRequest for StartDailyQuotes)
+    # RPC 方法使用方法前綴命名 request（例如 DailyQuotesRequest 對應 StartDailyQuotes）
     - RPC_REQUEST_STANDARD_NAME
-    # Response types use "Reply" suffix instead of "Response" (e.g. StockInfoReply)
+    # Response 型別使用 "Reply" 後綴而非 "Response"（例如 StockInfoReply）
     - RPC_RESPONSE_STANDARD_NAME
-    # Multiple RPCs share BackfillJobResponse as a generic job-status response
+    # 多個 RPC 共用 BackfillJobResponse 作為通用 job 狀態回應
     - RPC_REQUEST_RESPONSE_UNIQUE
 breaking:
   use:

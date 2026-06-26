@@ -11,20 +11,23 @@ use crate::{
     interfaces::rpc::manual_backfill::{
         BackfillJob, BackfillJobResponse, ClosingAggregateRequest, DailyQuotesRequest,
         GetJobRequest, ListJobsRequest, ListJobsResponse, SecurityCodeRequest,
-        TaiwanStockIndexRequest, YearRequest, manual_backfill_server::ManualBackfill,
+        TaiwanStockIndexRequest, YearRequest,
+        // 服務定義改名為 ManualBackfillService 後，tonic 產生的 trait 也相應更名
+        manual_backfill_service_server::ManualBackfillService,
     },
     interfaces::web,
 };
 
-/// Manual backfill gRPC service implementation.
+/// Manual backfill gRPC 服務實作。
 ///
 /// 服務本身不保存狀態；所有 job 狀態都委派給 `web::backfill_admin` 的全域
 /// job store，因此 Web UI 與 gRPC API 可互相查詢對方建立的 job。
 #[derive(Default)]
-pub struct ManualBackfillService {}
+pub struct ManualBackfillServiceImpl {}
 
 #[tonic::async_trait]
-impl ManualBackfill for ManualBackfillService {
+// 實作 tonic 產生的 ManualBackfillService trait
+impl ManualBackfillService for ManualBackfillServiceImpl {
     /// 建立指定交易日的各股每日收盤報價回補 job。
     async fn start_daily_quotes(
         &self,

@@ -14,11 +14,14 @@ use crate::{
     core::config::SETTINGS,
     core::util,
     interfaces::rpc::{
-        control::control_server::ControlServer,
-        manual_backfill::manual_backfill_server::ManualBackfillServer,
-        server::control_service::ControlService,
-        server::manual_backfill_service::ManualBackfillService,
-        server::stock_service::StockService, stock::stock_server::StockServer,
+        // 服務定義加上 Service 後綴後，tonic 產生的包裝型別也相應更名
+        control::control_service_server::ControlServiceServer,
+        manual_backfill::manual_backfill_service_server::ManualBackfillServiceServer,
+        // 實作結構體已更名為 *ServiceImpl，避免與 tonic 產生 trait 同名
+        server::control_service::ControlServiceImpl,
+        server::manual_backfill_service::ManualBackfillServiceImpl,
+        server::stock_service::StockServiceImpl,
+        stock::stock_service_server::StockServiceServer,
     },
 };
 
@@ -77,9 +80,10 @@ async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
 
     tracing::info!("gRPC 伺服器正在 {:?} 開始服務...", addr);
     let result = server
-        .add_service(ControlServer::new(ControlService::default()))
-        .add_service(ManualBackfillServer::new(ManualBackfillService::default()))
-        .add_service(StockServer::new(StockService::default()))
+        // 使用更新後的 Server 包裝型別（名稱含 Service 後綴）
+        .add_service(ControlServiceServer::new(ControlServiceImpl::default()))
+        .add_service(ManualBackfillServiceServer::new(ManualBackfillServiceImpl::default()))
+        .add_service(StockServiceServer::new(StockServiceImpl::default()))
         .serve(addr)
         .await;
 

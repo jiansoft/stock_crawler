@@ -7,17 +7,19 @@ use tonic::{Request, Response, Status};
 
 use crate::interfaces::rpc::{
     basic::BaseResponse,
-    control::{ControlRequest, ControlResponse, control_server::Control},
+    // 服務定義改名為 ControlService 後，tonic 產生的 trait 名稱也相應更新
+    control::{ControlRequest, ControlResponse, control_service_server::ControlService},
 };
 
 /// Control gRPC 服務。
 ///
-/// 實作了 `Control` trait，處理來自客戶端的系統控制請求。
+/// 實作了 `ControlService` trait，處理來自客戶端的系統控制請求。
 #[derive(Default)]
-pub struct ControlService {}
+pub struct ControlServiceImpl {}
 
 #[tonic::async_trait]
-impl Control for ControlService {
+// 實作 tonic 產生的 ControlService trait
+impl ControlService for ControlServiceImpl {
     /// 處理系統控制請求。
     ///
     /// 此方法目前主要用於測試連線，會記錄客戶端 IP 並回傳 200 OK。
@@ -56,7 +58,10 @@ mod tests {
     use crate::{
         core::config::SETTINGS,
         interfaces::rpc::{
-            control, control::control_client::ControlClient, control::control_server::ControlServer,
+            // 更新為新的 Service 後綴型別名稱
+            control,
+            control::control_service_client::ControlServiceClient,
+            control::control_service_server::ControlServiceServer,
         },
     };
 
@@ -68,9 +73,9 @@ mod tests {
     #[tokio::test]
     async fn test_say_hello() {
         // Create the mock server
-        let mock_service = ControlService::default();
+        let mock_service = ControlServiceImpl::default();
         let mock_server = tonic::transport::Server::builder()
-            .add_service(ControlServer::new(mock_service))
+            .add_service(ControlServiceServer::new(mock_service))
             .serve("127.0.0.1:50051".parse().unwrap());
 
         tokio::spawn(mock_server);
@@ -78,7 +83,8 @@ mod tests {
         // 等待伺服器啟動
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let mut client = control::control_client::ControlClient::connect("http://127.0.0.1:50051")
+        // 使用更新後的 ControlServiceClient
+        let mut client = control::control_service_client::ControlServiceClient::connect("http://127.0.0.1:50051")
             .await
             .expect("Failed to connect");
 
@@ -109,7 +115,7 @@ mod tests {
             .await
             .expect("Failed to connect");
 
-        let mut client = ControlClient::new(channel);
+        let mut client = ControlServiceClient::new(channel);
 
         let request = Request::new(ControlRequest {});
 
@@ -120,7 +126,7 @@ mod tests {
     /// 驗證直接呼叫服務處理程序（不透過網路）。
     #[tokio::test]
     async fn test_control_request() {
-        let c = ControlService::default();
+        let c = ControlServiceImpl::default();
 
         let request = Request::new(ControlRequest {});
 

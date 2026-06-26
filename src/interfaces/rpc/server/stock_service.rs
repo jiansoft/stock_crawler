@@ -13,18 +13,21 @@ use crate::{
     infra::database::repository::quote::PgQuoteRepository,
     interfaces::rpc::stock::{
         HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest, StockInfoReply,
-        StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest, stock_server::Stock,
+        StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest,
+        // 服務定義改名為 StockService 後，tonic 產生的 trait 也相應更名
+        stock_service_server::StockService,
     },
 };
 
 /// Stock gRPC 服務。
 ///
-/// 實作了 `Stock` trait，提供股票資訊、報價及休市日相關的 RPC 介面。
+/// 實作了 `StockService` trait，提供股票資訊、報價及休市日相關的 RPC 介面。
 #[derive(Default)]
-pub struct StockService {}
+pub struct StockServiceImpl {}
 
 #[tonic::async_trait]
-impl Stock for StockService {
+// 實作 tonic 產生的 StockService trait
+impl StockService for StockServiceImpl {
     /// 更新股票資訊。
     ///
     /// 此方法目前尚未實作。
@@ -136,7 +139,7 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio_stream::wrappers::TcpListenerStream;
 
-    use crate::interfaces::rpc::{stock, stock::stock_server::StockServer};
+    use crate::interfaces::rpc::{stock, stock::stock_service_server::StockServiceServer};
 
     use super::*;
 
@@ -146,9 +149,9 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let addr_str = format!("http://{}", addr);
 
-        let mock_service = StockService::default();
+        let mock_service = StockServiceImpl::default();
         let server = tonic::transport::Server::builder()
-            .add_service(StockServer::new(mock_service))
+            .add_service(StockServiceServer::new(mock_service))
             .serve_with_incoming(TcpListenerStream::new(listener));
 
         tokio::spawn(server);
@@ -164,7 +167,7 @@ mod tests {
     async fn test_fetch_current_stock_price() {
         let addr = start_test_server().await;
 
-        let mut client = stock::stock_client::StockClient::connect(addr)
+        let mut client = stock::stock_service_client::StockServiceClient::connect(addr)
             .await
             .expect("Failed to connect");
 
@@ -184,7 +187,7 @@ mod tests {
     async fn test_fetch_holiday_schedule() {
         let addr = start_test_server().await;
 
-        let mut client = stock::stock_client::StockClient::connect(addr)
+        let mut client = stock::stock_service_client::StockServiceClient::connect(addr)
             .await
             .expect("Failed to connect");
 

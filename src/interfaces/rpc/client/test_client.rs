@@ -4,7 +4,8 @@
 
 use crate::core::config::SETTINGS;
 use crate::interfaces::rpc::control::ControlRequest;
-use crate::interfaces::rpc::control::control_client::ControlClient;
+// 服務定義改名為 ControlService 後，tonic 產生的客戶端型別也更名
+use crate::interfaces::rpc::control::control_service_client::ControlServiceClient;
 use anyhow::Result;
 use std::fs;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig};
@@ -64,7 +65,7 @@ pub async fn run_test() -> Result<()> {
         Ok(Ok(channel)) => {
             tracing::info!("gRPC 通道建立成功，準備發送 Request...");
 
-            let mut client = ControlClient::new(channel);
+            let mut client = ControlServiceClient::new(channel);
             let request = tonic::Request::new(ControlRequest {});
 
             match client.control(request).await {
