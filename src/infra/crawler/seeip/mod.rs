@@ -10,7 +10,7 @@ const HOST: &str = "ipv4.seeip.org";
 
 /// 取得目前的IP
 pub async fn visit() -> Result<String> {
-    crawler::get_public_ip_text(&DDNS_URL, HOST, "", false).await
+    Ok(crawler::get_public_ip_text(&DDNS_URL, HOST, "", false).await?)
 }
 
 #[cfg(test)]

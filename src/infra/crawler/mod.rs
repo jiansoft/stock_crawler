@@ -89,6 +89,30 @@ pub mod yahoo;
 /// 元大證券 (提供技術面與基本面資料)
 pub mod yuanta;
 
+/// 爬蟲層結構化錯誤類型。
+#[derive(Debug, thiserror::Error)]
+pub enum CrawlerError {
+    /// HTTP 請求失敗。
+    #[error("network error: {0}")]
+    Network(String),
+
+    /// CSS Selector 建構或 HTML 解析失敗。
+    #[error("scraper error: {0}")]
+    Scraper(String),
+
+    /// 數值、日期或資料格式解析失敗。
+    #[error("parse error: {0}")]
+    Parse(String),
+
+    /// JSON 反序列化失敗。
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    /// 回應資料為空或所有來源均失敗。
+    #[error("empty response: {0}")]
+    EmptyResponse(String),
+}
+
 /// `StockInfo` Trait 定義了股票採集器必須實作的基本行為。
 ///
 /// 任何想要加入採集序列的站點都應實作此介面，以確保能被統一調度。
@@ -149,9 +173,11 @@ pub(crate) async fn get_public_ip_text(
     host: &str,
     path: &str,
     trim: bool,
-) -> Result<String> {
+) -> Result<String, CrawlerError> {
     let url = url_cache.get_or_init(|| format!("https://{host}{path}"));
-    let ip = util::http::get(url, None).await?;
+    let ip = util::http::get(url, None)
+        .await
+        .map_err(|e| CrawlerError::Network(e.to_string()))?;
 
     if trim {
         Ok(ip.trim().to_string())

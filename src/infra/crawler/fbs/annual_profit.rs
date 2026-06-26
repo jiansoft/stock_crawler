@@ -14,7 +14,7 @@ pub async fn visit(stock_symbol: &str) -> Result<Vec<share::AnnualProfit>> {
         stock_symbol = stock_symbol,
     );
 
-    share::fetch_annual_profits(&url, stock_symbol).await
+    Ok(share::fetch_annual_profits(&url, stock_symbol).await?)
 }
 
 #[async_trait]
