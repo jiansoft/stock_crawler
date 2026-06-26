@@ -22,6 +22,8 @@ API︰https://github.com/jiansoft/stock_api
 + 資料庫與快取：SQLx PostgreSQL、deadpool-redis、Moka memory cache。
 + 爬蟲與解析：Reqwest、Scraper、Regex、Serde/serde_json。
 + 排程：tokio-cron-scheduler。
++ 日誌：tracing、tracing-subscriber（FileLogLayer 輪轉日誌 + Seq 轉發）。
++ 錯誤型別：thiserror（infra 層結構化錯誤枚舉）。
 + 設定與環境變數：config、dotenv。
 + TLS/憑證：rustls、rustls-pemfile、x509-parser。
 
@@ -31,16 +33,19 @@ API︰https://github.com/jiansoft/stock_api
 src/
 ├─ main.rs           # 程式入口，載入設定、初始化日誌、DB/Redis、排程、gRPC 與 Web
 ├─ core/             # 共用基礎（config / declare / util / logging）
-├─ domain/           # 領域模型與倉儲合約（config / dividend / financial / quote / trace 等）
+├─ domain/           # 領域模型與倉儲合約
+│                    #   config / dividend / events / financial / market_index
+│                    #   money_flow / portfolio / quote / registry / trace / yield_rank
 ├─ app/              # 應用層（scheduler / backfill / event / calculation）
 ├─ infra/            # 基礎設施（crawler / database / cache / nosql）
 └─ interfaces/       # 對外介面（rpc / web / bot）
 
+benches/             # criterion 效能基準（twse_quote_parser / daily_quote_mapper / cache_snapshot_lookup）
 etc/
 ├─ proto/            # gRPC proto，build.rs 會產生 Rust stub 到 src/interfaces/rpc
 └─ sql/              # PostgreSQL schema 與初始化 SQL
 
-docs/                # 架構與工作紀錄文件
+docs/                # 架構文件（architecture.md）
 log/                 # runtime 檔案日誌輸出目錄
 ```
 
@@ -49,8 +54,8 @@ log/                 # runtime 檔案日誌輸出目錄
 ## 領域驅動設計 (DDD) 重構狀態
 
 + 目前程式碼已採 `core`、`domain`、`app`、`infra`、`interfaces` 分層。
-+ `domain/` 目前包含系統設定、股利、事件、財務、指數、資金流、投資組合、報價、證券主檔、價格追蹤與殖利率排行等領域。
-+ `docs/checklists/` 保留 Phase 1~17 的歷史重構紀錄；這些文件是否仍完整代表目前待辦狀態：待確認（To Be Verified）。
++ `domain/` 包含 11 個領域：config、dividend、events、financial、market_index、money_flow、portfolio、quote、registry、trace、yield_rank。
++ 分層規則與模組放置規範詳見 [docs/architecture.md](docs/architecture.md)。
 
 ## 開發環境需求
 
