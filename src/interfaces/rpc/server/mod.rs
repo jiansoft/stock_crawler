@@ -82,7 +82,9 @@ async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
     let result = server
         // 使用更新後的 Server 包裝型別（名稱含 Service 後綴）
         .add_service(ControlServiceServer::new(ControlServiceImpl::default()))
-        .add_service(ManualBackfillServiceServer::new(ManualBackfillServiceImpl::default()))
+        .add_service(ManualBackfillServiceServer::new(
+            ManualBackfillServiceImpl::default(),
+        ))
         .add_service(StockServiceServer::new(StockServiceImpl::default()))
         .serve(addr)
         .await;

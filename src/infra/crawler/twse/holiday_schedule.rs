@@ -108,7 +108,10 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].date, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
         assert_eq!(result[0].why, "中華民國開國紀念日");
-        assert_eq!(result[1].date, NaiveDate::from_ymd_opt(2026, 2, 27).unwrap());
+        assert_eq!(
+            result[1].date,
+            NaiveDate::from_ymd_opt(2026, 2, 27).unwrap()
+        );
     }
 
     #[test]
@@ -123,7 +126,10 @@ mod tests {
         ];
         let result = parse_holiday_data(&data);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].date, NaiveDate::from_ymd_opt(2026, 12, 25).unwrap());
+        assert_eq!(
+            result[0].date,
+            NaiveDate::from_ymd_opt(2026, 12, 25).unwrap()
+        );
     }
 
     #[test]

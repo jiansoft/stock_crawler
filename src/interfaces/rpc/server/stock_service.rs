@@ -12,8 +12,14 @@ use crate::{
     infra::crawler::twse,
     infra::database::repository::quote::PgQuoteRepository,
     interfaces::rpc::stock::{
-        HolidaySchedule, HolidayScheduleReply, HolidayScheduleRequest, StockInfoReply,
-        StockInfoRequest, StockQuotes, StockQuotesReply, StockQuotesRequest,
+        HolidaySchedule,
+        HolidayScheduleReply,
+        HolidayScheduleRequest,
+        StockInfoReply,
+        StockInfoRequest,
+        StockQuotes,
+        StockQuotesReply,
+        StockQuotesRequest,
         // 服務定義改名為 StockService 後，tonic 產生的 trait 也相應更名
         stock_service_server::StockService,
     },

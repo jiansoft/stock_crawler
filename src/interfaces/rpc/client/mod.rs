@@ -11,7 +11,9 @@ use tokio::{fs, sync::OnceCell as TokioOnceCell};
 use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
 // 服務定義改名為 StockService 後，tonic 產生的客戶端型別也更名
-use crate::{core::config::SETTINGS, interfaces::rpc::stock::stock_service_client::StockServiceClient};
+use crate::{
+    core::config::SETTINGS, interfaces::rpc::stock::stock_service_client::StockServiceClient,
+};
 
 /// Stock 服務客戶端封裝。
 pub mod stock_service;

@@ -145,7 +145,10 @@ mod tests {
 <tr><td>9999　某權證</td><td>TW1234567890</td><td>2020/01/01</td><td>上市</td><td>其他</td><td>RWXXXX</td></tr>
 </tbody></table></body></html>"#;
         let result = parse_isin_html(html, StockExchangeMarket::Listed);
-        assert!(result.is_empty(), "認購權證不在 REQUIRED_CATEGORIES 中，應被過濾");
+        assert!(
+            result.is_empty(),
+            "認購權證不在 REQUIRED_CATEGORIES 中，應被過濾"
+        );
     }
 
     #[test]

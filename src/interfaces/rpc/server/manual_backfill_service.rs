@@ -9,9 +9,16 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     interfaces::rpc::manual_backfill::{
-        BackfillJob, BackfillJobResponse, ClosingAggregateRequest, DailyQuotesRequest,
-        GetJobRequest, ListJobsRequest, ListJobsResponse, SecurityCodeRequest,
-        TaiwanStockIndexRequest, YearRequest,
+        BackfillJob,
+        BackfillJobResponse,
+        ClosingAggregateRequest,
+        DailyQuotesRequest,
+        GetJobRequest,
+        ListJobsRequest,
+        ListJobsResponse,
+        SecurityCodeRequest,
+        TaiwanStockIndexRequest,
+        YearRequest,
         // 服務定義改名為 ManualBackfillService 後，tonic 產生的 trait 也相應更名
         manual_backfill_service_server::ManualBackfillService,
     },

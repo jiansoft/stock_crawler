@@ -84,9 +84,11 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // 使用更新後的 ControlServiceClient
-        let mut client = control::control_service_client::ControlServiceClient::connect("http://127.0.0.1:50051")
-            .await
-            .expect("Failed to connect");
+        let mut client = control::control_service_client::ControlServiceClient::connect(
+            "http://127.0.0.1:50051",
+        )
+        .await
+        .expect("Failed to connect");
 
         let request = Request::new(ControlRequest {});
 
