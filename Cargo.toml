@@ -65,6 +65,21 @@ time = "=0.3.49"
 [target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
 mimalloc = "0.1"
 
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "twse_quote_parser"
+harness = false
+
+[[bench]]
+name = "daily_quote_mapper"
+harness = false
+
+[[bench]]
+name = "cache_snapshot_lookup"
+harness = false
+
 [build-dependencies]
 protoc-bin-vendored = "3"
 tonic-prost-build = "0.14"
