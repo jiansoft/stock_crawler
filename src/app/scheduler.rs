@@ -125,7 +125,15 @@ pub trait Scheduler {
     fn is_weekend(&self) -> bool;
 }
 
-/// 將非同步工作包裝成 `tokio_cron_scheduler::Job`。
+/// 將非同步工作包裝成 `tokio_cron_scheduler::Job`，並自動記錄執行時間。
+///
+/// 每次任務觸發時會：
+/// 1. 記錄 `task.begin` 事件（含 cron 表達式作為結構化欄位）。
+/// 2. 執行任務並計時。
+/// 3. 記錄 `task.done` 事件（含 `elapsed_ms`）或 `task.failed` 事件（含錯誤訊息）。
+///
+/// 結構化欄位（`task`、`elapsed_ms`）透過 F1 `FieldCollector` 同步送到 Seq，
+/// 讓 ops 可直接在 Seq 用 `task = '0 0 15 * * *'` 查詢特定任務的執行時間趨勢。
 fn create_job<F, Fut>(cron_expr: &'static str, task: F) -> Result<Job>
 where
     F: Fn() -> Fut + Clone + Send + Sync + 'static,
@@ -135,10 +143,26 @@ where
     Ok(Job::new_async_tz(cron_expr, tz, move |_uuid, _l| {
         let task = task.clone();
         Box::pin(async move {
-            if let Err(why) = task().await {
-                let err_msg = format!("Failed to execute task({}) because {:?}", cron_expr, why);
-                tracing::error!("{}", &err_msg);
-                bot::telegram::send_alert("排程任務執行失敗", &err_msg).await;
+            tracing::info!(task = cron_expr, "task.begin");
+            let t = Instant::now();
+            match task().await {
+                Ok(()) => {
+                    tracing::info!(
+                        task = cron_expr,
+                        elapsed_ms = t.elapsed().as_millis() as u64,
+                        "task.done"
+                    );
+                }
+                Err(why) => {
+                    let err_msg = format!("{:?}", why);
+                    tracing::error!(
+                        task = cron_expr,
+                        elapsed_ms = t.elapsed().as_millis() as u64,
+                        error = %err_msg,
+                        "task.failed"
+                    );
+                    bot::telegram::send_alert("排程任務執行失敗", &err_msg).await;
+                }
             }
         })
     })?)

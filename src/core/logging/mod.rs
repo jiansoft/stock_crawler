@@ -1,6 +1,7 @@
 //! 非同步檔案與主控台日誌工具。
 
 use std::{
+    collections::HashMap,
     fmt::Write as _,
     fs::{self},
     io::Write,
@@ -92,6 +93,7 @@ impl SeqLogLevel {
 /// 送往 Seq 的 CLEF 事件。
 ///
 /// 欄位刻意不包含多餘的應用程式名稱欄位，避免 Seq 畫面重複顯示服務識別。
+/// `fields` 以 `#[serde(flatten)]` 展開為頂層 JSON 屬性，讓 Seq 可直接搜尋結構化欄位。
 #[derive(Debug, Serialize)]
 struct SeqEvent {
     /// Seq 標準事件時間欄位，使用 UTC RFC3339。
@@ -108,9 +110,13 @@ struct SeqEvent {
     /// 本專案原始日誌等級。
     #[serde(rename = "RustLogLevel")]
     rust_log_level: &'static str,
-    /// 事件來源 logger。
+    /// 事件來源模組路徑（取自 `tracing::Metadata::target()`）。
     #[serde(rename = "Logger")]
-    logger: &'static str,
+    logger: String,
+    /// tracing 事件附加的結構化欄位（如 `stock_symbol`、`elapsed_ms` 等）。
+    /// 展開為頂層 JSON 屬性，讓 Seq filter 可直接用 `stock_symbol = '2330'` 查詢。
+    #[serde(flatten)]
+    fields: HashMap<String, serde_json::Value>,
 }
 
 /// logger 執行期摘要。
@@ -279,6 +285,8 @@ impl Logger {
         let stats = Arc::new(LoggerWriterStats::new(LOG_CHANNEL_CAPACITY));
 
         // 使用專屬 thread 與 runtime，讓 logger worker 不受測試或呼叫端 tokio runtime 生命週期影響。
+        // seq_level 保留於此層用於未來擴充（例如 per-level 過濾），目前 Seq 轉送已移至 FileLogLayer。
+        let _ = seq_level;
         let path = log_path.display().to_string();
         let worker_stats = Arc::clone(&stats);
         thread::spawn(move || {
@@ -286,21 +294,20 @@ impl Logger {
                 .enable_all()
                 .build()
                 .unwrap_or_else(|e| panic!("Failed to build logger runtime: {e}"));
-            rt.block_on(Self::process_messages(rx, path, worker_stats, seq_level));
+            rt.block_on(Self::process_messages(rx, path, worker_stats));
         });
 
         AsyncLogWriter { sender: tx, stats }
     }
 
-    /// 背景處理日誌 queue，負責寫檔與送出 Seq。
+    /// 背景處理日誌 queue，負責寫檔。
     ///
-    /// 檔案寫入會累積成小批次降低 IO 次數；Seq 發送只 enqueue 到背景
-    /// sender，避免此 worker 等待網路回應。
+    /// 檔案寫入會累積成小批次降低 IO 次數。
+    /// Seq 轉送已移至 `FileLogLayer::on_event`，可攜帶完整結構化欄位。
     async fn process_messages(
         mut rx: Receiver<String>,
         log_path: String,
         stats: Arc<LoggerWriterStats>,
-        seq_level: SeqLogLevel,
     ) {
         let mut msg = String::with_capacity(2048);
         let mut rotate = Rotate::new(log_path);
@@ -310,8 +317,7 @@ impl Logger {
             stats.processed_messages.fetch_add(1, Ordering::Relaxed);
             let now = Local::now();
 
-            // Seq 發送只做 best-effort enqueue；本地寫檔仍是主要保底。
-            forward_to_seq(seq_level, &message);
+            // Seq 轉送已移至 FileLogLayer::on_event，此處只負責寫檔。
 
             if let Err(why) = writeln!(&mut msg, "{} {}", now.format("%F %X%.6f"), message) {
                 error_console(format!("Failed to writeln a message. because:{:#?}", why));
@@ -495,11 +501,16 @@ async fn flush_seq_events(
     }
 }
 
-/// 將一筆既有檔案日誌轉送到 Seq。
+/// 將 tracing 事件轉送到 Seq（結構化 CLEF 格式）。
 ///
-/// 事件會以 CLEF 格式進入背景 queue；queue 滿時直接丟棄，避免日誌流量反向拖慢
-/// 應用程式主流程。
-fn forward_to_seq(level: SeqLogLevel, message: &str) {
+/// 由 `FileLogLayer::on_event` 直接呼叫，攜帶完整的結構化欄位。
+/// 事件進入背景 queue；queue 滿時直接丟棄，避免日誌流量拖慢主流程。
+fn forward_to_seq(
+    level: SeqLogLevel,
+    message: &str,
+    fields: HashMap<String, serde_json::Value>,
+    target: &str,
+) {
     if !SEQ_LOGGING_ENABLED.load(Ordering::Relaxed) {
         return;
     }
@@ -511,17 +522,20 @@ fn forward_to_seq(level: SeqLogLevel, message: &str) {
             level: level.as_seq_level(),
             service: SEQ_SERVICE_NAME,
             rust_log_level: level.as_rust_level(),
-            logger: "core::logging",
+            logger: target.to_string(),
+            fields,
         };
 
         let _ = sender.try_send(event);
     }
 }
 
-/// tracing `Layer`，將 tracing 事件路由至既有輪轉檔案 `LOGGER`。
+/// tracing `Layer`，將 tracing 事件路由至既有輪轉檔案 `LOGGER` 並轉送 Seq。
 ///
-/// 安裝此 Layer 後，所有透過 `tracing::*!()` 發出的事件都會寫入輪轉日誌檔案。
-/// Level 映射：ERROR → error_writer、WARN → warn_writer、INFO → info_writer、其餘 → debug_writer。
+/// - 安裝後所有 `tracing::*!()` 事件都寫入輪轉日誌。
+/// - `message` 以外的附加欄位（如 `stock_symbol`、`elapsed_ms`）以 `key=val` 格式附在
+///   檔案日誌行末，並作為 CLEF 頂層屬性送到 Seq，讓 Seq 可用結構化查詢。
+/// - Level 映射：ERROR → error_writer、WARN → warn_writer、INFO → info_writer、其餘 → debug_writer。
 pub struct FileLogLayer;
 
 impl<S: tracing::Subscriber> tracing_subscriber::layer::Layer<S> for FileLogLayer {
@@ -530,33 +544,98 @@ impl<S: tracing::Subscriber> tracing_subscriber::layer::Layer<S> for FileLogLaye
         event: &tracing::Event<'_>,
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        let mut msg = String::new();
-        event.record(&mut FileLogVisitor(&mut msg));
-        if msg.is_empty() {
+        let mut collector = FieldCollector::default();
+        event.record(&mut collector);
+        if collector.message.is_empty() {
             return;
         }
-        match *event.metadata().level() {
-            tracing::Level::ERROR => LOGGER.error(msg),
-            tracing::Level::WARN => LOGGER.warn(msg),
-            tracing::Level::INFO => LOGGER.info(msg),
-            _ => LOGGER.debug(msg),
+
+        let target = event.metadata().target();
+        let level = *event.metadata().level();
+
+        // 建立檔案日誌行：message 後追加所有結構化欄位（key=val）。
+        let log_line = {
+            let mut line = collector.message.clone();
+            for (k, v) in &collector.extra {
+                let _ = write!(line, " {k}={v}");
+            }
+            line
+        };
+
+        // 轉換為 Seq 結構化欄位 map。
+        let fields: HashMap<String, serde_json::Value> =
+            collector.extra.into_iter().collect();
+
+        match level {
+            tracing::Level::ERROR => {
+                LOGGER.error(log_line);
+                forward_to_seq(SeqLogLevel::Error, &collector.message, fields, target);
+            }
+            tracing::Level::WARN => {
+                LOGGER.warn(log_line);
+                forward_to_seq(SeqLogLevel::Warn, &collector.message, fields, target);
+            }
+            tracing::Level::INFO => {
+                LOGGER.info(log_line);
+                forward_to_seq(SeqLogLevel::Info, &collector.message, fields, target);
+            }
+            _ => {
+                LOGGER.debug(log_line);
+                forward_to_seq(SeqLogLevel::Debug, &collector.message, fields, target);
+            }
         }
     }
 }
 
-/// 從 tracing 事件中擷取 `message` 欄位的訪客型別。
-struct FileLogVisitor<'a>(&'a mut String);
+/// 從 tracing 事件收集所有欄位的訪客型別。
+///
+/// - `message` 欄位存入 `message`。
+/// - 其餘欄位（結構化屬性）以 `(name, serde_json::Value)` 收集到 `extra`。
+#[derive(Default)]
+struct FieldCollector {
+    message: String,
+    extra: Vec<(String, serde_json::Value)>,
+}
 
-impl tracing::field::Visit for FileLogVisitor<'_> {
+impl tracing::field::Visit for FieldCollector {
+    fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+        self.extra
+            .push((field.name().to_string(), serde_json::Value::from(value)));
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        self.extra
+            .push((field.name().to_string(), serde_json::Value::from(value)));
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.extra
+            .push((field.name().to_string(), serde_json::Value::from(value)));
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.extra
+            .push((field.name().to_string(), serde_json::Value::from(value)));
+    }
+
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
         if field.name() == "message" {
-            self.0.push_str(value);
+            self.message.push_str(value);
+        } else {
+            self.extra
+                .push((field.name().to_string(), serde_json::Value::from(value)));
         }
     }
 
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         if field.name() == "message" {
-            let _ = write!(self.0, "{value:?}");
+            // format_args! 實作 Debug 時輸出即是格式化結果（無額外引號）。
+            let _ = write!(self.message, "{value:?}");
+        } else {
+            self.extra.push((
+                field.name().to_string(),
+                serde_json::Value::from(format!("{value:?}")),
+            ));
         }
     }
 }
