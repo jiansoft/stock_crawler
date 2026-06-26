@@ -7,18 +7,23 @@ use crate::{
         },
         repository::QuoteRepository,
     },
-    infra::database,
-    infra::database::table::quote::{
-        daily_quote::{self, DailyQuote as TableDailyQuote},
-        daily_stock_price_stats::DailyStockPriceStats as TableDailyStockPriceStats,
-        last_daily_quotes::LastDailyQuotes as TableLastDailyQuotes,
-        quote_history_record::QuoteHistoryRecord as TableQuoteHistoryRecord,
+    infra::{
+        database,
+        database::table::quote::{
+            daily_quote::{self, DailyQuote as TableDailyQuote},
+            daily_stock_price_stats::DailyStockPriceStats as TableDailyStockPriceStats,
+            last_daily_quotes::LastDailyQuotes as TableLastDailyQuotes,
+            quote_history_record::QuoteHistoryRecord as TableQuoteHistoryRecord,
+        },
+        nosql::redis::CLIENT,
     },
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
+
+use super::RepositoryError;
 
 /// PostgreSQL 實作之報價倉儲。
 ///
@@ -36,8 +41,99 @@ impl PgQuoteRepository {
 
     /// 取得指定的 Redis 快取鍵。
     fn get_cache_key(&self, security_code: &str) -> String {
-        // 以 LastDailyQuote 作為前綴，拼接股票代碼作為快取鍵
         format!("LastDailyQuote:{}", security_code)
+    }
+
+    /// 嘗試從 Redis 讀取最新收盤價，失敗時靜默回傳 `None`。
+    async fn try_cache_get(&self, cache_key: &str) -> Option<DomainLastDailyQuote> {
+        let cached_val = CLIENT.get_string(cache_key).await.ok()?;
+        serde_json::from_str::<DomainLastDailyQuote>(&cached_val).ok()
+    }
+
+    /// 將最新收盤價寫入 Redis 快取（TTL = 86400 秒），失敗時僅記錄 log。
+    async fn cache_set(
+        &self,
+        security_code: &str,
+        cache_key: &str,
+        quote: &DomainLastDailyQuote,
+    ) {
+        let Ok(serialized) = serde_json::to_string(quote) else {
+            return;
+        };
+        if let Err(why) = CLIENT.set(cache_key, serialized, 86400).await {
+            logging::error_file_async(format!(
+                "Failed to update Redis cache for {}: {:?}",
+                security_code, why
+            ));
+        }
+    }
+
+    /// 批次將最新收盤價寫入 Redis 快取（TTL = 86400 秒），失敗時僅記錄 log。
+    async fn batch_cache_set(&self, quotes: &[DomainLastDailyQuote]) {
+        for q in quotes {
+            let cache_key = self.get_cache_key(&q.stock_symbol);
+            let Ok(serialized) = serde_json::to_string(q) else {
+                continue;
+            };
+            if let Err(why) = CLIENT.set(&cache_key, serialized, 86400).await {
+                logging::error_file_async(format!(
+                    "Failed to update Redis cache in batch for {}: {:?}",
+                    q.stock_symbol, why
+                ));
+            }
+        }
+    }
+
+    /// 從 PostgreSQL 查詢指定個股的最新收盤價。
+    async fn pg_fetch_last_quote(
+        &self,
+        security_code: &str,
+    ) -> Result<Option<DomainLastDailyQuote>, RepositoryError> {
+        let sql = r#"
+            SELECT date, stock_symbol, closing_price
+            FROM last_daily_quotes
+            WHERE stock_symbol = $1
+        "#;
+        let row_opt = sqlx::query_as::<_, TableLastDailyQuotes>(sql)
+            .bind(security_code)
+            .fetch_optional(database::get_connection())
+            .await?;
+        Ok(row_opt.map(DomainLastDailyQuote::from))
+    }
+
+    /// 執行批次 UPSERT，將最新收盤價寫入 `last_daily_quotes` 資料表。
+    async fn pg_save_last_quotes(
+        &self,
+        quotes: &[DomainLastDailyQuote],
+    ) -> Result<(), RepositoryError> {
+        let mut dates = Vec::with_capacity(quotes.len());
+        let mut symbols = Vec::with_capacity(quotes.len());
+        let mut closing_prices = Vec::with_capacity(quotes.len());
+
+        for q in quotes {
+            dates.push(q.date);
+            symbols.push(q.stock_symbol.clone());
+            closing_prices.push(q.closing_price);
+        }
+
+        let sql = r#"
+            INSERT INTO last_daily_quotes (date, stock_symbol, closing_price, updated_time)
+            SELECT * FROM UNNEST($1::date[], $2::varchar[], $3::numeric[])
+              AS t(date, stock_symbol, closing_price)
+            ON CONFLICT (stock_symbol) DO UPDATE SET
+                date = EXCLUDED.date,
+                closing_price = EXCLUDED.closing_price,
+                updated_time = NOW();
+        "#;
+
+        sqlx::query(sql)
+            .bind(&dates)
+            .bind(&symbols)
+            .bind(&closing_prices)
+            .execute(database::get_connection())
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -265,125 +361,33 @@ impl QuoteRepository for PgQuoteRepository {
     }
 
     async fn fetch_last_quote(&self, security_code: &str) -> Result<Option<DomainLastDailyQuote>> {
-        // 取得該股票對應的 Redis 快取鍵名稱
         let cache_key = self.get_cache_key(security_code);
 
-        // 1. 嘗試從 Redis 讀取快取
-        match crate::infra::nosql::redis::CLIENT
-            .get_string(&cache_key)
-            .await
-        {
-            Ok(cached_val) => {
-                // 如果 Redis 快取命中，則進行 JSON 反序列化
-                if let Ok(quote) = serde_json::from_str::<DomainLastDailyQuote>(&cached_val) {
-                    // 順利解析成功，直接傳回快取中的領域實體
-                    return Ok(Some(quote));
-                }
-            }
-            Err(_) => {
-                // 快取未命中或 Redis 連線異常時，僅記錄除錯資訊並降級繼續查詢資料庫
-                logging::debug_file_async(format!(
-                    "Redis cache miss or error for key: {}, fallback to PostgreSQL",
-                    cache_key
-                ));
-            }
+        // 1. 嘗試從 Redis 快取讀取
+        if let Some(cached) = self.try_cache_get(&cache_key).await {
+            return Ok(Some(cached));
         }
+        logging::debug_file_async(format!(
+            "Redis cache miss or error for key: {cache_key}, fallback to PostgreSQL"
+        ));
 
-        // 2. 當 Redis 未命中或出錯時，降級從 PostgreSQL 資料庫讀取
-        let sql = r#"
-            SELECT date, stock_symbol, closing_price
-            FROM last_daily_quotes
-            WHERE stock_symbol = $1
-        "#;
-        // 執行 SQL 查詢單筆最新收盤價
-        let table_quote_opt = sqlx::query_as::<_, TableLastDailyQuotes>(sql)
-            .bind(security_code)
-            .fetch_optional(database::get_connection())
-            .await?;
+        // 2. 降級從 PostgreSQL 查詢
+        let Some(domain_quote) = self.pg_fetch_last_quote(security_code).await? else {
+            return Ok(None);
+        };
 
-        // 3. 處理查詢結果
-        if let Some(table_quote) = table_quote_opt {
-            // 將 Table 轉換為領域實體
-            let domain_quote = DomainLastDailyQuote::from(table_quote);
+        // 3. 回寫 Redis 快取（best-effort）
+        self.cache_set(security_code, &cache_key, &domain_quote).await;
 
-            // 4. 非同步地將資料寫回 Redis 快取以供下次使用，設定過期時間為 1 天
-            if let Ok(serialized) = serde_json::to_string(&domain_quote) {
-                // 執行 Redis 寫入操作，若失敗僅記錄 log，不影響整體查詢流程
-                if let Err(why) = crate::infra::nosql::redis::CLIENT
-                    .set(&cache_key, serialized, 86400)
-                    .await
-                {
-                    logging::error_file_async(format!(
-                        "Failed to update Redis cache for {}: {:?}",
-                        security_code, why
-                    ));
-                }
-            }
-
-            // 傳回查詢到的股票最新收盤價領域實體
-            Ok(Some(domain_quote))
-        } else {
-            // 資料庫中也沒有該個股的最新收盤價，傳回 None
-            Ok(None)
-        }
+        Ok(Some(domain_quote))
     }
 
     async fn save_last_quotes_batch(&self, quotes: &[DomainLastDailyQuote]) -> Result<()> {
-        // 如果輸入的列表為空，則直接傳回成功
         if quotes.is_empty() {
             return Ok(());
         }
-
-        // 建立容量對齊的向量陣列
-        let mut dates = Vec::with_capacity(quotes.len());
-        let mut symbols = Vec::with_capacity(quotes.len());
-        let mut closing_prices = Vec::with_capacity(quotes.len());
-
-        // 整理批次 UPSERT 所需的參數
-        for q in quotes {
-            dates.push(q.date);
-            symbols.push(q.stock_symbol.clone());
-            closing_prices.push(q.closing_price);
-        }
-
-        // 執行批次寫入的 SQL 語法
-        let sql = r#"
-            INSERT INTO last_daily_quotes (date, stock_symbol, closing_price, updated_time)
-            SELECT * FROM UNNEST($1::date[], $2::varchar[], $3::numeric[])
-              AS t(date, stock_symbol, closing_price)
-            ON CONFLICT (stock_symbol) DO UPDATE SET
-                date = EXCLUDED.date,
-                closing_price = EXCLUDED.closing_price,
-                updated_time = NOW();
-        "#;
-
-        // 在資料庫中批次執行 UPSERT
-        sqlx::query(sql)
-            .bind(&dates)
-            .bind(&symbols)
-            .bind(&closing_prices)
-            .execute(database::get_connection())
-            .await
-            .context("Failed to save_last_quotes_batch in last_daily_quotes")?;
-
-        // 5. 批次將最新收盤價更新至 Redis 快取
-        for q in quotes {
-            let cache_key = self.get_cache_key(&q.stock_symbol);
-            // 序列化為 JSON
-            if let Ok(serialized) = serde_json::to_string(q) {
-                // 更新 Redis，設為 1 天過期，失效或更新皆可，此處選擇更新最新值以達最快快取預熱效益
-                if let Err(why) = crate::infra::nosql::redis::CLIENT
-                    .set(&cache_key, serialized, 86400)
-                    .await
-                {
-                    logging::error_file_async(format!(
-                        "Failed to update Redis cache in batch for {}: {:?}",
-                        q.stock_symbol, why
-                    ));
-                }
-            }
-        }
-
+        self.pg_save_last_quotes(quotes).await?;
+        self.batch_cache_set(quotes).await;
         Ok(())
     }
 
