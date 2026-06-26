@@ -10,7 +10,7 @@ use reqwest::{Client, Method, RequestBuilder, Response, header, header::SET_COOK
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::sync::Semaphore;
 
-use crate::{core::logging::Logger, core::util};
+use crate::core::util;
 
 /// HTML 解析輔助工具。
 pub mod element;
@@ -25,7 +25,10 @@ static SEMAPHORE: Lazy<Semaphore> = Lazy::new(|| Semaphore::new(5));
 /// A singleton instance of the reqwest client.
 static CLIENT: OnceCell<Client> = OnceCell::new();
 
-static LOGGER: Lazy<Logger> = Lazy::new(|| Logger::new("http"));
+/// 網路傳輸失敗（TCP 層）的最大重試次數。
+const MAX_NETWORK_RETRIES: u32 = 3;
+/// HTTP 429 Too Many Requests 的最大重試次數。
+const MAX_RATE_LIMIT_RETRIES: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 /// An empty struct to represent an empty request or response.
@@ -304,39 +307,9 @@ pub async fn post(
         .map_err(|why| anyhow!("Error parsing response text: {:?}", why))
 }
 
-/// HTTP 請求失敗時的最大重試次數。
-const MAX_RETRIES: usize = 2;
-
-/// Sends an HTTP request using the specified method, URL, headers, and body with retries on failure.
-///
-/// # Arguments
-///
-/// * `method`: The HTTP method to use for the request (GET, POST, PUT, DELETE, etc.).
-/// * `url`: The URL to send the request to.
-/// * `headers`: An optional set of headers to include with the request.
-/// * `body`: An optional function that takes a `reqwest::RequestBuilder` and returns a new `RequestBuilder` with the request body added (JSON, form data, etc.).
-///
-/// This function will attempt to send the request up to MAX_RETRIES times. If a request attempt fails, it logs the error and retries the request after a delay. The delay increases with each attempt.
-///
-/// # Returns
-///
-/// * `Result<Response>`: The HTTP response, or an error if all attempts to send the request fail.
-///   If all attempts fail, the error message includes retry count and the last underlying request error.
-///
-/// # Errors
-///
-/// This function will return an `Err` if the request fails to send after MAX_RETRIES attempts.
-///
-/// # Example
-///
-/// ```
-/// let method = Method::GET;
-/// let url = "http://tw.yahoo.com";
-/// let headers = Some(HeaderMap::new());
-/// let body = Some(|rb: RequestBuilder| rb.json(&data));
-///
-/// let response = send(method, url, headers, body).await?;
-/// ```
+/// 以指定方法、URL、headers、body 發送 HTTP 請求，含雙層重試：
+/// - **網路層**（TCP 失敗）：最多 `MAX_NETWORK_RETRIES` 次，2^n 秒 backoff。
+/// - **頻率限制**（HTTP 429）：最多 `MAX_RATE_LIMIT_RETRIES` 次，5/15/30s + 最多 2s jitter。
 async fn send(
     method: Method,
     url: &str,
@@ -356,55 +329,84 @@ async fn send_with_client(
     body: Option<impl FnOnce(RequestBuilder) -> RequestBuilder>,
     request_detail: Option<String>,
 ) -> Result<Response> {
-    let visit_log = format!("{method}:{url}");
     let request_detail_suffix = request_detail
         .as_deref()
-        .map(|detail| format!(" {}", detail))
+        .map(|d| format!(" {d}"))
         .unwrap_or_default();
-    let mut rb = client.request(method, url);
-    let mut last_error = String::new();
+
+    // ── G2: per-request User-Agent 輪轉 ────────────────────────────────────
+    // 每次請求重新產生 UA，避免長時間使用固定 UA 被目標站辨識封鎖。
+    // 若呼叫端在 headers 中已設定 User-Agent，.headers(h) 會在後面覆蓋，
+    // 讓呼叫端的自訂 UA 優先。
+    let mut rb = client
+        .request(method.clone(), url)
+        .header(header::USER_AGENT, user_agent::gen_random_ua());
 
     if let Some(h) = headers {
         rb = rb.headers(h);
     }
-
     if let Some(body_fn) = body {
         rb = body_fn(rb);
     }
 
-    for attempt in 1..=MAX_RETRIES {
-        let msg = format!("Attempt {} to send {}", attempt, visit_log);
+    // ── G1: 雙層重試計數器 ─────────────────────────────────────────────────
+    let mut network_attempt = 0u32;
+    let mut rate_limit_attempt = 0u32;
+
+    loop {
         let rb_clone = rb
             .try_clone()
-            .ok_or_else(|| anyhow!("Failed to clone RequestBuilder"))?;
-        let (res, elapsed) = {
+            .ok_or_else(|| anyhow!("Failed to clone RequestBuilder for {url}"))?;
+
+        let (res, elapsed_ms) = {
             let _permit = SEMAPHORE.acquire().await;
             let start = Instant::now();
             let res = rb_clone.send().await;
-            let elapsed = start.elapsed().as_millis();
-            (res, elapsed)
+            (res, start.elapsed().as_millis() as u64)
         };
 
         match res {
             Ok(response) => {
-                LOGGER.info(format!(
-                    "HTTP請求耗時 {} {} ms{}",
-                    msg, elapsed, request_detail_suffix
-                ));
-
-                // 檢查是否遭遇 IP 阻擋或請求速率限制 (403 Forbidden 或 429 Too Many Requests)
-                // 必須排除向 Telegram API 發送的請求，否則會引發無限遞迴
                 let status = response.status();
-                if (status == reqwest::StatusCode::FORBIDDEN
-                    || status == reqwest::StatusCode::TOO_MANY_REQUESTS)
+
+                tracing::info!(
+                    url = url,
+                    method = method.as_str(),
+                    status = status.as_u16(),
+                    elapsed_ms,
+                    "http.done{request_detail_suffix}"
+                );
+
+                // ── 429 Too Many Requests：exponential backoff retry ───────
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    && !url.contains("api.telegram.org")
+                {
+                    rate_limit_attempt += 1;
+                    if rate_limit_attempt <= MAX_RATE_LIMIT_RETRIES {
+                        let delay = rate_limit_backoff(rate_limit_attempt);
+                        tracing::warn!(
+                            url = url,
+                            attempt = rate_limit_attempt,
+                            delay_ms = delay.as_millis() as u64,
+                            "http.rate_limited"
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    return Err(anyhow!(
+                        "Rate limited (429) at {url} after {rate_limit_attempt} retries"
+                    ));
+                }
+
+                // ── 403 Forbidden：Telegram 告警，不重試 ──────────────────
+                if status == reqwest::StatusCode::FORBIDDEN
                     && !url.contains("api.telegram.org")
                 {
                     let alert_url = url.to_string();
-                    // 使用 tokio::spawn 進行非同步警報推送，防範阻礙目前請求的正常流程
                     tokio::spawn(async move {
                         crate::interfaces::bot::telegram::send_alert(
-                            "爬蟲遭遇阻擋或頻率限制",
-                            &format!("狀態碼: {}\n請求網址: {}", status, alert_url),
+                            "爬蟲遭遇 IP 阻擋 (403)",
+                            &format!("請求網址: {alert_url}"),
                         )
                         .await;
                     });
@@ -413,26 +415,39 @@ async fn send_with_client(
                 return Ok(response);
             }
             Err(why) => {
-                last_error = format!("{:?}", why);
-                LOGGER.error(format!(
-                    "HTTP請求失敗 {} because {:?}. {} ms{}",
-                    msg, why, elapsed, request_detail_suffix
-                ));
-                if attempt < MAX_RETRIES {
-                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32))).await;
+                network_attempt += 1;
+                let err_str = format!("{why:?}");
+                tracing::error!(
+                    url = url,
+                    attempt = network_attempt,
+                    error = %err_str,
+                    elapsed_ms,
+                    "http.failed{request_detail_suffix}"
+                );
 
-                    continue;
+                if network_attempt >= MAX_NETWORK_RETRIES {
+                    return Err(anyhow!(
+                        "Failed to send {url} after {network_attempt} network retries; \
+                         last error: {err_str}"
+                    ));
                 }
+
+                // 2^n 秒 backoff：1→2s、2→4s、3→8s
+                tokio::time::sleep(Duration::from_secs(2u64.pow(network_attempt))).await;
             }
         }
     }
+}
 
-    Err(anyhow!(
-        "Failed to send request to {} after {} attempts; last error: {}",
-        url,
-        MAX_RETRIES,
-        last_error
-    ))
+/// 429 Too Many Requests 的 backoff 策略：5s / 15s / 30s，附加最多 2s jitter。
+fn rate_limit_backoff(attempt: u32) -> Duration {
+    let base_ms: u64 = match attempt {
+        1 => 5_000,
+        2 => 15_000,
+        _ => 30_000,
+    };
+    let jitter_ms = rand::random::<u64>() % 2_000;
+    Duration::from_millis(base_ms + jitter_ms)
 }
 
 fn format_form_params_log(params: &HashMap<&str, &str>) -> String {
@@ -445,9 +460,10 @@ fn format_form_params_log(params: &HashMap<&str, &str>) -> String {
     format!("params=[{}]", entries.join(", "))
 }
 
-/// 取得 HTTP logger 的執行期摘要。
+/// HTTP 層已改用 `tracing::*!()` 輸出，不再有獨立的 channel queue。
+/// 保留此函式供呼叫端相容，永遠回傳零值摘要。
 pub(crate) fn diagnostics_snapshot() -> crate::core::logging::LoggerRuntimeStatus {
-    LOGGER.diagnostics_snapshot()
+    crate::core::logging::LoggerRuntimeStatus::default()
 }
 
 #[cfg(test)]
