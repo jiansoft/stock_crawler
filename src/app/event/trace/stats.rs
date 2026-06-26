@@ -16,8 +16,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use once_cell::sync::Lazy;
 
-use crate::core::logging;
-
 /// 單次追蹤執行期間的統計快照。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct TraceRuntimeStatsSnapshot {
@@ -207,7 +205,7 @@ pub(super) fn flush_runtime_stats() {
         return;
     }
 
-    logging::info_file_async(format_runtime_stats_summary(snapshot));
+    tracing::info!("{}", format_runtime_stats_summary(snapshot));
 }
 
 #[cfg(test)]

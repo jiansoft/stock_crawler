@@ -97,9 +97,7 @@ mod tests {
     use chrono::{Local, TimeDelta};
     use std::time::Duration;
 
-    use crate::core::logging;
-
-    // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
+// 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
     #[tokio::test]
@@ -121,10 +119,10 @@ mod tests {
         println!("last_month_timezone:{:?}", last_month_timezone);
         match visit(last_month_timezone).await {
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
             Ok(list) => {
-                logging::debug_file_async(format!("data:{:#?}", list));
+                tracing::debug!("data:{:#?}", list);
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;

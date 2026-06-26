@@ -676,94 +676,88 @@ mod tests {
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     /*    #[tokio::test]
     async fn test_fetch_stock_symbol_that_without_payout_ratio() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_stock_symbol_that_without_payout_ratio".to_string());
+        tracing::debug!("開始 fetch_stock_symbol_that_without_payout_ratio");
         let r = Dividend::fetch_stock_symbol_that_without_payout_ratio().await;
         if let Ok(result) = r {
-            logging::debug_file_async(format!("{:?} ", result));
+            tracing::debug!("{:?} ", result);
         } else if let Err(err) = r {
-            logging::debug_file_async(format!("{:#?} ", err));
+            tracing::debug!("{:#?} ", err);
         }
-        logging::debug_file_async("結束 fetch_stock_symbol_that_without_payout_ratio".to_string());
+        tracing::debug!("結束 fetch_stock_symbol_that_without_payout_ratio");
     }*/
 
     #[tokio::test]
     async fn test_fetch_no_dividends_for_year() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_no_dividends_for_year".to_string());
+        tracing::debug!("開始 fetch_no_dividends_for_year");
         let r = Dividend::fetch_no_dividends_for_year(2023).await;
         if let Ok(result) = r {
             for e in result {
-                logging::debug_file_async(format!("{:?} ", e));
+                tracing::debug!("{:?} ", e);
             }
         } else if let Err(err) = r {
-            logging::debug_file_async(format!("{:#?} ", err));
+            tracing::debug!("{:#?} ", err);
         }
-        logging::debug_file_async("結束 fetch_no_dividends_for_year".to_string());
+        tracing::debug!("結束 fetch_no_dividends_for_year");
     }
 
     #[tokio::test]
 
     async fn test_fetch_unpublished_dividend_date_or_payable_date_for_specified_year() {
         dotenv::dotenv().ok();
-        logging::debug_file_async(
-            "開始 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),
-        );
+        tracing::debug!("{}", "開始 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),);
         let r = Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(2023)
             .await;
         if let Ok(result) = r {
-            logging::debug_file_async(format!("{:#?} ", result));
+            tracing::debug!("{:#?} ", result);
         } else if let Err(err) = r {
-            logging::debug_file_async(format!("{:#?} ", err));
+            tracing::debug!("{:#?} ", err);
         }
-        logging::debug_file_async(
-            "結束 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),
-        );
+        tracing::debug!("{}", "結束 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),);
     }
 
     #[tokio::test]
     async fn test_fetch_multiple_dividends_for_year() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_multiple_dividends_for_year".to_string());
+        tracing::debug!("開始 fetch_multiple_dividends_for_year");
         let r = Dividend::fetch_multiple_dividends_for_year(2023).await;
         if let Ok(result) = r {
             for e in result {
-                logging::debug_file_async(format!("{:?} ", e));
+                tracing::debug!("{:?} ", e);
             }
         } else if let Err(err) = r {
-            logging::debug_file_async(format!("{:#?} ", err));
+            tracing::debug!("{:#?} ", err);
         }
-        logging::debug_file_async("結束 fetch_multiple_dividends_for_year".to_string());
+        tracing::debug!("結束 fetch_multiple_dividends_for_year");
     }
 
     #[tokio::test]
     async fn test_fetch_dividends_summary_by_date() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_dividends_summary_by_date".to_string());
+        tracing::debug!("開始 fetch_dividends_summary_by_date");
 
         let datetime = Local.with_ymd_and_hms(2022, 3, 9, 0, 0, 0).unwrap();
 
         let r = Dividend::fetch_dividends_summary_by_date("2330", 2022, datetime).await;
         if let Ok(result) = r {
             for e in result {
-                logging::debug_file_async(format!("{:?} ", e));
+                tracing::debug!("{:?} ", e);
             }
         } else if let Err(err) = r {
-            logging::debug_file_async(format!("{:#?} ", err));
+            tracing::debug!("{:#?} ", err);
         }
-        logging::debug_file_async("結束 fetch_dividends_summary_by_date".to_string());
+        tracing::debug!("結束 fetch_dividends_summary_by_date");
     }
 
     #[tokio::test]
     async fn test_fetch_yearly_dividends_sum_by_date() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_yearly_dividends_sum_by_date".to_string());
+        tracing::debug!("開始 fetch_yearly_dividends_sum_by_date");
         let mut e = Dividend::new();
         e.security_code = "2887".to_string();
         e.year = 2022;
@@ -771,17 +765,17 @@ mod tests {
 
         let r = e.fetch_yearly_dividends_sum_by_date(datetime).await;
         if let Ok(result) = r {
-            logging::debug_file_async(format!("{:?} {:?}", e, result));
+            tracing::debug!("{:?} {:?}", e, result);
         } else if let Err(err) = r {
-            logging::debug_file_async(format!("{:#?} ", err));
+            tracing::debug!("{:#?} ", err);
         }
-        logging::debug_file_async("結束 fetch_yearly_dividends_sum_by_date".to_string());
+        tracing::debug!("結束 fetch_yearly_dividends_sum_by_date");
     }
 
     #[tokio::test]
     async fn test_upsert() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 upsert".to_string());
+        tracing::debug!("開始 upsert");
         let mut e = Dividend::new();
         e.security_code = String::from("79979");
         e.year = 2023;
@@ -806,14 +800,14 @@ mod tests {
 
         match e.upsert().await {
             Ok(result) => {
-                logging::debug_file_async(format!("{:?} {:?} ", result, e));
+                tracing::debug!("{:?} {:?} ", result, e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to upsert because {:?} ", why));
+                tracing::debug!("Failed to upsert because {:?} ", why);
             }
         }
 
-        logging::debug_file_async("結束 upsert".to_string());
+        tracing::debug!("結束 upsert");
     }
 
     /// 驗證 `upsert` 在主鍵衝突時會同步更新除權息日與股利發放日。
@@ -894,7 +888,7 @@ WHERE security_code = $1 AND year = $2 AND quarter = '';
     #[tokio::test]
     async fn test_upsert_annual_total_dividend_operates_database() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 upsert_annual_total_dividend".to_string());
+        tracing::debug!("開始 upsert_annual_total_dividend");
 
         // 此函式 SQL 只使用股票代號與發放年度兩個參數；測試只補齊必要參數並確認 SQL 可執行。
         let mut annual_total_seed = Dividend::new();
@@ -906,6 +900,6 @@ WHERE security_code = $1 AND year = $2 AND quarter = '';
             .await
             .expect("upsert annual total dividend");
 
-        logging::debug_file_async("結束 upsert_annual_total_dividend".to_string());
+        tracing::debug!("結束 upsert_annual_total_dividend");
     }
 }

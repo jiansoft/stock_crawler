@@ -156,26 +156,24 @@ impl StockInfo for Yahoo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::logging;
-
-    /// Live 測試：驗證單檔 Yahoo quote 頁仍可抓到指定股票的成交價。
+/// Live 測試：驗證單檔 Yahoo quote 頁仍可抓到指定股票的成交價。
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_price() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
 
         match Yahoo::get_stock_price("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("yahoo::get_stock_price {:#?}", e));
+                tracing::debug!("yahoo::get_stock_price {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+                tracing::debug!("Failed to visit because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 
     /// Live 測試：驗證單檔 Yahoo quote 頁仍可抓到成交價、漲跌與漲幅資訊。
@@ -183,21 +181,19 @@ mod tests {
     #[ignore]
     async fn test_get_stock_quotes() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 yahoo::get_stock_quotes".to_string());
+        tracing::debug!("開始 yahoo::get_stock_quotes");
 
         match Yahoo::get_stock_quotes("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("yahoo::get_stock_quotes {:#?}", e));
+                tracing::debug!("yahoo::get_stock_quotes {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to yahoo::get_stock_quotes because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to yahoo::get_stock_quotes because {:?}",
+                    why);
             }
         }
 
-        logging::debug_file_async("結束 yahoo::get_stock_quotes".to_string());
+        tracing::debug!("結束 yahoo::get_stock_quotes");
     }
 }

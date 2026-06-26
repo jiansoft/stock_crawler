@@ -156,22 +156,20 @@ mod tests {
     #[tokio::test]
     async fn test_get_stock_quotes() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 megatime::get_stock_quotes".to_string());
+        tracing::debug!("開始 megatime::get_stock_quotes");
 
         match PcHome::get_stock_quotes("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("megatime::get_stock_quotes : {:#?}", e));
+                tracing::debug!("megatime::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
                 dbg!(&why);
-                logging::debug_file_async(format!(
-                    "Failed to megatime::get_stock_quotes because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to megatime::get_stock_quotes because {:?}",
+                    why);
             }
         }
 
-        logging::debug_file_async("結束 megatime::get_stock_quotes".to_string());
+        tracing::debug!("結束 megatime::get_stock_quotes");
     }
 }

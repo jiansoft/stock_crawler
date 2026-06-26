@@ -4,12 +4,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    core::logging,
-    core::util::http,
-    infra::cache::{TTL, TtlCacheInner},
-    infra::crawler::{share::DailyQuoteDto, twse},
-};
+use crate::{core::util::http, infra::cache::{TTL, TtlCacheInner}, infra::crawler::{share::DailyQuoteDto, twse}};
 
 /*#[derive(Serialize, Deserialize, Debug)]
 struct ListedResponse {
@@ -169,12 +164,10 @@ pub async fn parse_listed_response(
         }
     } else {
         // 若找不到符合欄位特徵的表格，記錄警告日誌
-        logging::warn_file_async(format!(
-            "TWSE MI_INDEX quote table not found for date={}, stat={:?}, tables={}",
+        tracing::warn!("TWSE MI_INDEX quote table not found for date={}, stat={:?}, tables={}",
             date,
             data.stat,
-            data.tables.len()
-        ));
+            data.tables.len());
     }
     Ok(dqs)
 }
@@ -184,7 +177,7 @@ mod tests {
     use chrono::{TimeDelta, Timelike};
     use std::time::Duration;
 
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::{infra::cache::SHARE};
 
     use super::*;
 
@@ -294,22 +287,20 @@ mod tests {
         }
         //now -= Duration::days(3);
 
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
 
         match visit(now.date_naive()).await {
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
             Ok(list) => {
-                logging::debug_file_async(format!(
-                    "data count: {}, detail:{:#?}",
+                tracing::debug!("data count: {}, detail:{:#?}",
                     list.len(),
-                    list
-                ));
+                    list);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }

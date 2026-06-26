@@ -112,6 +112,43 @@ async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
 async fn main() -> Result<(), Box<dyn Error>> {
     // 先載入本機環境設定，讓後續 logging 與 SETTINGS 都能吃到 .env 覆蓋值。
     dotenv::dotenv().ok();
+
+    // ── 日誌系統初始化 ────────────────────────────────────────────────────────
+    //
+    // 使用 tracing + tracing-subscriber 建立兩層 subscriber：
+    //
+    // Layer 1 — fmt（標準輸出）
+    //   由 RUST_LOG 環境變數控制要不要輸出，以及輸出哪個等級。
+    //   預設不設定 RUST_LOG 時完全靜音，不影響生產環境。
+    //   開發除錯時執行：RUST_LOG=info cargo run
+    //
+    // Layer 2 — FileLogLayer（輪轉日誌檔，always-on）
+    //   實作在 core::logging::FileLogLayer，不受 RUST_LOG 控制。
+    //   每個 tracing 事件都會寫入 log/YYYY-MM-DD_default_{level}.log。
+    //   底層仍使用原有的非同步輪轉機制（core::logging::LOGGER）。
+    //
+    // 事件流向：
+    //   tracing::info!("...")
+    //     ├─ FileLogLayer → LOGGER → 輪轉日誌檔（+ Seq，若有設定）
+    //     └─ fmt layer    → stdout（僅 RUST_LOG 啟用時）
+    //
+    // 注意：subscriber 必須在任何 tracing::*! 呼叫之前完成初始化，
+    //       否則初始化前的事件會被靜默丟棄。
+    {
+        use tracing_subscriber::Layer;
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_filter(tracing_subscriber::EnvFilter::from_default_env()),
+            )
+            .with(core::logging::FileLogLayer)
+            .init();
+    }
+
+    // Seq 是選用的結構化日誌收集器（設定於 app.json logging.seq）。
+    // 未設定時此函式直接返回，不影響檔案日誌正常運作。
     core::logging::init_seq(
         &core::config::SETTINGS.logging.seq.server_url,
         &core::config::SETTINGS.logging.seq.api_key,
@@ -123,19 +160,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let allocator_tuning = core::util::diagnostics::tune_allocator_for_long_running_process();
 
     #[cfg(all(target_os = "linux", target_env = "musl"))]
-    core::logging::info_file_async(
-        "allocator profile: mimalloc (musl target), purge_delay=0, purge_decommits=1, thp=0, large_os_pages=0, arena_eager_commit=0"
-            .to_string(),
-    );
+    tracing::info!("{}", "allocator profile: mimalloc (musl target), purge_delay=0, purge_decommits=1, thp=0, large_os_pages=0, arena_eager_commit=0"
+            .to_string(),);
 
     #[cfg(not(all(target_os = "linux", target_env = "musl")))]
-    core::logging::info_file_async("allocator profile: system allocator".to_string());
+    tracing::info!("allocator profile: system allocator");
 
     if allocator_tuning.applied {
-        core::logging::info_file_async(format!(
-            "allocator tuning applied arena_max={} trim_threshold={}",
-            allocator_tuning.arena_max_applied, allocator_tuning.trim_threshold_applied,
-        ));
+        tracing::info!("allocator tuning applied arena_max={} trim_threshold={}",
+            allocator_tuning.arena_max_applied, allocator_tuning.trim_threshold_applied,);
     }
 
     tokio::spawn(shutdown_signal_handler(received_signal.clone()));
@@ -151,77 +184,63 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // 在進入快取載入與背景服務前，先對資料庫進行連線檢查（Fail Fast）
-    core::logging::info_file_async("startup database check: ping database".to_string());
+    tracing::info!("startup database check: ping database");
     if let Err(e) = infra::database::ping().await {
         let err_msg = format!("Failed to connect to database: {:?}", e);
-        core::logging::error_file_async(&err_msg);
+        tracing::error!("{}", &err_msg);
         interfaces::bot::telegram::send_alert("資料庫連線失敗（主機啟動異常）", &err_msg).await;
         return Err(err_msg.into());
     }
-    core::logging::info_file_async("startup database check: database is online".to_string());
+    tracing::info!("startup database check: database is online");
 
-    core::logging::info_file_async(
-        "startup phase begin: crate::infra::cache::SHARE.load".to_string(),
-    );
+    tracing::info!("{}", "startup phase begin: crate::infra::cache::SHARE.load".to_string(),);
     let cache_load_timer = Instant::now();
     infra::cache::SHARE.load().await;
-    core::logging::info_file_async(format!(
-        "startup phase done: crate::infra::cache::SHARE.load elapsed={:?}",
-        cache_load_timer.elapsed()
-    ));
+    tracing::info!("startup phase done: crate::infra::cache::SHARE.load elapsed={:?}",
+        cache_load_timer.elapsed());
 
-    core::logging::info_file_async("startup phase begin: JobScheduler::new".to_string());
+    tracing::info!("startup phase begin: JobScheduler::new");
     let scheduler_new_timer = Instant::now();
     let sched = JobScheduler::new().await?;
-    core::logging::info_file_async(format!(
-        "startup phase done: JobScheduler::new elapsed={:?}",
-        scheduler_new_timer.elapsed()
-    ));
+    tracing::info!("startup phase done: JobScheduler::new elapsed={:?}",
+        scheduler_new_timer.elapsed());
 
-    core::logging::info_file_async("startup phase begin: scheduler::start".to_string());
+    tracing::info!("startup phase begin: scheduler::start");
     let scheduler_start_timer = Instant::now();
     app::scheduler::start(&sched).await?;
-    core::logging::info_file_async(format!(
-        "startup phase done: scheduler::start elapsed={:?}",
-        scheduler_start_timer.elapsed()
-    ));
+    tracing::info!("startup phase done: scheduler::start elapsed={:?}",
+        scheduler_start_timer.elapsed());
 
-    core::logging::info_file_async("startup phase begin: rpc::server::start".to_string());
+    tracing::info!("startup phase begin: rpc::server::start");
     let rpc_start_timer = Instant::now();
     if let Err(why) = interfaces::rpc::server::start().await {
         let err_msg = format!("gRPC server failed to start: {:?}", why);
-        core::logging::error_file_async(&err_msg);
+        tracing::error!("{}", &err_msg);
         interfaces::bot::telegram::send_alert("gRPC 伺服器啟動失敗", &err_msg).await;
         return Err(why.into());
     }
-    core::logging::info_file_async(format!(
-        "startup phase done: rpc::server::start elapsed={:?}",
-        rpc_start_timer.elapsed()
-    ));
+    tracing::info!("startup phase done: rpc::server::start elapsed={:?}",
+        rpc_start_timer.elapsed());
 
-    core::logging::info_file_async("startup phase begin: web::start".to_string());
+    tracing::info!("startup phase begin: web::start");
     let web_start_timer = Instant::now();
     if let Err(why) = interfaces::web::start().await {
         let err_msg = format!("Web server failed to start: {:?}", why);
-        core::logging::error_file_async(&err_msg);
+        tracing::error!("{}", &err_msg);
         interfaces::bot::telegram::send_alert("Web 伺服器啟動失敗", &err_msg).await;
         return Err(why.into());
     }
-    core::logging::info_file_async(format!(
-        "startup phase done: web::start elapsed={:?}",
-        web_start_timer.elapsed()
-    ));
-    core::logging::info_file_async(format!(
-        "startup phase done: main init total elapsed={:?}",
-        startup_timer.elapsed()
-    ));
+    tracing::info!("startup phase done: web::start elapsed={:?}",
+        web_start_timer.elapsed());
+    tracing::info!("startup phase done: main init total elapsed={:?}",
+        startup_timer.elapsed());
 
     // 啟動後延遲測試 gRPC 連線
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         if let Err(why) = interfaces::rpc::client::test_client::run_test().await {
             let err_msg = format!("gRPC 自我測試失敗: {:?}", why);
-            core::logging::error_file_async(&err_msg);
+            tracing::error!("{}", &err_msg);
             interfaces::bot::telegram::send_alert("gRPC 自我測試失敗", &err_msg).await;
         }
     });
@@ -233,7 +252,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         Err(why) => {
             let err_msg = format!("Redis ping failed at startup: {:?}", why);
-            core::logging::error_file_async(&err_msg);
+            tracing::error!("{}", &err_msg);
             interfaces::bot::telegram::send_alert("Redis 快取連線失敗", &err_msg).await;
         }
     }

@@ -5,24 +5,16 @@ use futures::{StreamExt, stream};
 use scopeguard::defer;
 use tokio::sync::Mutex;
 
-use crate::{
-    app::backfill::acl::{SaveStockWeightCommand, StockWeightAclMapper},
-    core::declare::StockExchange,
-    core::logging,
-    core::util,
-    domain::registry::repository::StockRepository,
-    infra::crawler::taifex,
-    infra::database::repository::stock::PgStockRepository,
-};
+use crate::{app::backfill::acl::{SaveStockWeightCommand, StockWeightAclMapper}, core::declare::StockExchange, core::util, domain::registry::repository::StockRepository, infra::crawler::taifex, infra::database::repository::stock::PgStockRepository};
 
 /// <summary>
 /// 執行個股權值比重回填任務。
 /// 從期交所 (Taifex) 爬取最新的上市與上櫃個股權值比重資料，將所有權重重置後，再批次更新。
 /// </summary>
 pub async fn execute() -> Result<()> {
-    logging::info_file_async("更新個股權值比重開始");
+    tracing::info!("更新個股權值比重開始");
     defer! {
-       logging::info_file_async("更新個股權值比重結束");
+       tracing::info!("更新個股權值比重結束");
     }
     // 建立 Thread-safe 容器，用以收集並行處理的權重資料
     let stock_weights = Arc::new(Mutex::new(Vec::with_capacity(2000)));
@@ -58,10 +50,8 @@ pub async fn execute() -> Result<()> {
                 async move {
                     // 呼叫領域倉儲更新個股權重
                     if let Err(why) = repo.update_weight(&sw.symbol, sw.weight).await {
-                        logging::error_file_async(format!(
-                            "Failed to update stock weight: {:#?}",
-                            why
-                        ));
+                        tracing::error!("Failed to update stock weight: {:#?}",
+                            why);
                     }
                 }
             })
@@ -100,7 +90,7 @@ async fn handle_stock_exchange(
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::{infra::cache::SHARE};
 
     use super::*;
 
@@ -109,17 +99,17 @@ mod tests {
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {
-                logging::debug_file_async("成功執行 execute".to_string());
+                tracing::debug!("成功執行 execute");
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 }

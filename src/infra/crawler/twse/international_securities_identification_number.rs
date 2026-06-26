@@ -105,25 +105,23 @@ pub async fn visit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::logging;
-
-    #[tokio::test]
+#[tokio::test]
     #[ignore]
     async fn test_visit() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
         for mode in StockExchangeMarket::iterator() {
             match visit(mode).await {
                 Err(why) => {
-                    logging::error_file_async(format!("Failed to visit because {:?}", why));
+                    tracing::error!("Failed to visit because {:?}", why);
                 }
                 Ok(result) => {
                     for item in result.iter() {
-                        logging::debug_file_async(format!("item:{:#?}", item));
+                        tracing::debug!("item:{:#?}", item);
                     }
                 }
             }
         }
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

@@ -127,8 +127,7 @@ pub async fn visit(
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-    use crate::infra::cache::SHARE;
+use crate::infra::cache::SHARE;
 
     use super::*;
 
@@ -136,18 +135,18 @@ mod tests {
     async fn test_visit() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
 
         match visit(StockExchangeMarket::Listed, 2025, Quarter::Q4).await {
             Ok(list) => {
                 dbg!(&list);
-                logging::debug_file_async(format!("list:{:#?}", list));
+                tracing::debug!("list:{:#?}", list);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

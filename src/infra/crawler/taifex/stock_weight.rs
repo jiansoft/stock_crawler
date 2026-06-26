@@ -141,26 +141,24 @@ fn get_stock_weight(
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
 
         match visit(StockExchange::TWSE).await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("len:{}\r\n {:#?}", e.len(), e));
+                tracing::debug!("len:{}\r\n {:#?}", e.len(), e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+                tracing::debug!("Failed to visit because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

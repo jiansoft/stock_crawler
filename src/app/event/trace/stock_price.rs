@@ -25,18 +25,7 @@ use tokio::{task, time};
 
 use super::{price_tasks as trace_price_tasks, stats as trace_stats};
 use crate::interfaces::bot::telegram::Telegram;
-use crate::{
-    core::declare,
-    core::logging,
-    core::util::{datetime::Weekend, map::Keyable},
-    domain::trace::entity::PriceTrace,
-    domain::trace::repository::TraceRepository,
-    infra::cache::RealtimeSnapshot,
-    infra::cache::SHARE,
-    infra::crawler::twse,
-    infra::database::repository::trace::PgTraceRepository,
-    interfaces::bot,
-};
+use crate::{core::declare, core::util::{datetime::Weekend, map::Keyable}, domain::trace::entity::PriceTrace, domain::trace::repository::TraceRepository, infra::cache::RealtimeSnapshot, infra::cache::SHARE, infra::crawler::twse, infra::database::repository::trace::PgTraceRepository, interfaces::bot};
 
 /// 確保整個追蹤執行流程只有一個實例在執行。
 static IS_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -97,7 +86,7 @@ pub async fn execute() -> Result<()> {
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        logging::debug_file_async("股票追蹤任務已在運行中，跳過重複啟動".to_string());
+        tracing::debug!("股票追蹤任務已在運行中，跳過重複啟動");
         return Ok(());
     }
 
@@ -105,10 +94,8 @@ pub async fn execute() -> Result<()> {
     task::spawn(async move {
         // 先啟動 trace 層的即時報價背景任務與價格事件 consumer。
         if let Err(why) = trace_price_tasks::start_price_tasks().await {
-            logging::error_file_async(format!(
-                "Failed to start trace price tasks because {:?}",
-                why
-            ));
+            tracing::error!("Failed to start trace price tasks because {:?}",
+                why);
             IS_RUNNING.store(false, Ordering::SeqCst);
             return;
         }
@@ -140,7 +127,7 @@ async fn wait_until_market_close() {
 
     loop {
         if !declare::StockExchange::TWSE.is_open() {
-            logging::debug_file_async("已達關盤時間，停止追蹤任務".to_string());
+            tracing::debug!("已達關盤時間，停止追蹤任務");
             break;
         }
 
@@ -159,10 +146,8 @@ async fn is_holiday(today: NaiveDate) -> Result<bool> {
 
     for holiday in holidays {
         if holiday.date == today {
-            logging::info_file_async(format!(
-                "Today is a holiday ({}), and the market is closed.",
-                holiday.why
-            ));
+            tracing::info!("Today is a holiday ({}), and the market is closed.",
+                holiday.why);
             return Ok(true);
         }
     }
@@ -335,15 +320,15 @@ async fn process_cached_targets(
                 if let Err(why) =
                     alert_on_price_boundary(target, current_price, source, source_site).await
                 {
-                    logging::error_file_async(format!("Error alerting for {}: {:?}", symbol, why));
+                    tracing::error!("Error alerting for {}: {:?}", symbol, why);
                 }
             }
         }
         Some(_) => {
-            logging::debug_file_async(format!("Stock {} current price is zero, skipping", symbol));
+            tracing::debug!("Stock {} current price is zero, skipping", symbol);
         }
         None => {
-            logging::debug_file_async(format!("Stock {} snapshot cache miss, skipping", symbol));
+            tracing::debug!("Stock {} snapshot cache miss, skipping", symbol);
         }
     }
 }
@@ -392,7 +377,7 @@ async fn alert_on_price_boundary(
     {
         Ok(result) => result,
         Err(why) => {
-            logging::error_file_async(format!("Failed to set Redis key {}: {:?}", target_key, why));
+            tracing::error!("Failed to set Redis key {}: {:?}", target_key, why);
             true
         }
     };

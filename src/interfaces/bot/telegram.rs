@@ -5,7 +5,7 @@ use chrono::Local;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
-use crate::{core::config::SETTINGS, core::logging, core::util::http};
+use crate::{core::config::SETTINGS, core::util::http};
 
 //static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 static TELEGRAM: OnceLock<Telegram> = OnceLock::new();
@@ -77,10 +77,8 @@ impl Telegram {
 
         // 如果發送失敗（可能因為 MarkdownV2 解析錯誤，例如 status code 400 Bad Request），
         // 則執行降級重試機制：清除轉義用的反斜線，改用純文字模式發送。
-        logging::warn_file_async(
-            "Telegram message failed or returned error. Retrying with plain-text fallback..."
-                .to_string(),
-        );
+        tracing::warn!("{}", "Telegram message failed or returned error. Retrying with plain-text fallback..."
+                .to_string(),);
 
         // 移除所有 Markdown 轉義字元，以便於以純文字模式清晰顯示
         let clean_msg = message.replace("\\", "");
@@ -177,15 +175,11 @@ pub async fn send(msg: &str) {
                     .map(|code| code.to_string())
                     .unwrap_or_else(|| "unknown".to_string());
                 let desc = rep.description.as_deref().unwrap_or("No description");
-                logging::error_file_async(format!(
-                    "Telegram API responded with error code {error_code}: {desc}\n{msg}"
-                ));
+                tracing::error!("Telegram API responded with error code {error_code}: {desc}\n{msg}");
             }
         }
         Err(error) => {
-            logging::error_file_async(format!(
-                "Failed to send a message to telegram because {error:}"
-            ));
+            tracing::error!("Failed to send a message to telegram because {error:}");
         }
     }
 }
@@ -214,7 +208,7 @@ mod tests {
 
     use tokio::time;
 
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::{infra::cache::SHARE};
 
     use super::*;
 
@@ -224,7 +218,7 @@ mod tests {
     async fn test_send_message() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 test_send_message".to_string());
+        tracing::debug!("開始 test_send_message");
         let msg = format!(
             "test_send_message Rust OSArch: {}{}",
             Telegram::escape_markdown_v2(env::consts::OS),
@@ -233,7 +227,7 @@ mod tests {
         get_client().send(&msg).await.expect("TODO: panic message");
         // let _ = send_to_allowed(&msg).await;
 
-        logging::debug_file_async("結束 test_send_message".to_string());
+        tracing::debug!("結束 test_send_message");
         time::sleep(Duration::from_secs(1)).await;
     }
 

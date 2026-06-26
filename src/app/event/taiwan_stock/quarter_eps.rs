@@ -11,16 +11,7 @@
 
 use std::collections::HashSet;
 
-use crate::{
-    app::backfill::acl::FinancialStatementAclMapper,
-    core::declare::StockExchangeMarket,
-    core::logging,
-    core::util::{self, datetime::ReportQuarter},
-    domain::registry::repository::StockRepository,
-    infra::crawler::twse,
-    infra::database::repository::financial::PgFinancialRepository,
-    infra::database::repository::stock::PgStockRepository,
-};
+use crate::{app::backfill::acl::FinancialStatementAclMapper, core::declare::StockExchangeMarket, core::util::{self, datetime::ReportQuarter}, domain::registry::repository::StockRepository, infra::crawler::twse, infra::database::repository::financial::PgFinancialRepository, infra::database::repository::stock::PgStockRepository};
 use anyhow::Result;
 use chrono::Local;
 use scopeguard::defer;
@@ -29,18 +20,16 @@ use scopeguard::defer;
 /// 執行台股季 EPS 更新流程。
 /// </summary>
 pub async fn execute() -> Result<()> {
-    logging::info_file_async("更新台股季度財報開始");
+    tracing::info!("更新台股季度財報開始");
     defer! {
-       logging::info_file_async("更新台股季度財報結束");
+       tracing::info!("更新台股季度財報結束");
     }
 
     for target_report in util::datetime::eps_report_quarter_targets_for_listed_and_otc(Local::now())
     {
         if let Err(why) = process_target_report(target_report).await {
-            logging::error_file_async(format!(
-                "Failed to process quarterly EPS target {} {} because {:?}",
-                target_report.year, target_report.quarter, why
-            ));
+            tracing::error!("Failed to process quarterly EPS target {} {} because {:?}",
+                target_report.year, target_report.quarter, why);
         }
     }
 
@@ -72,10 +61,8 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<()> {
         )
         .await
         {
-            logging::error_file_async(format!(
-                "Failed to update quarterly EPS for {} {} {} because {:?}",
-                market, target_report.year, target_report.quarter, why
-            ));
+            tracing::error!("Failed to update quarterly EPS for {} {} {} because {:?}",
+                market, target_report.year, target_report.quarter, why);
             continue;
         }
     }
@@ -120,13 +107,11 @@ async fn process_eps(
         let fs = FinancialStatementAclMapper::from_eps(e);
 
         if let Err(why) = financial_repo.save_earnings_per_share(&fs).await {
-            logging::error_file_async(format!("{:?}", why));
+            tracing::error!("{:?}", why);
         }
 
-        logging::debug_file_async(format!(
-            "financial_statement earnings_per_share executed successfully. \r\n{:#?}",
-            fs
-        ));
+        tracing::debug!("financial_statement earnings_per_share executed successfully. \r\n{:#?}",
+            fs);
     }
 
     Ok(())
@@ -144,23 +129,23 @@ mod tests {
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 
     #[tokio::test]
     async fn test_process_eps() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::info_file_async("開始 process_eps".to_string());
+        tracing::info!("開始 process_eps");
         use crate::domain::registry::repository::StockRepository;
         let stock_repo = PgStockRepository::new();
         let without_financial_stocks = match stock_repo
@@ -169,10 +154,8 @@ mod tests {
         {
             Ok(stocks) => stocks.into_iter().collect::<HashSet<String>>(),
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to fetch stocks without financial statement: {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to fetch stocks without financial statement: {:?}",
+                    why);
                 return;
             }
         };
@@ -187,11 +170,11 @@ mod tests {
         {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to process_eps because: {:?}", why));
+                tracing::debug!("Failed to process_eps because: {:?}", why);
             }
         }
 
-        logging::info_file_async("結束 process_eps".to_string());
+        tracing::info!("結束 process_eps");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

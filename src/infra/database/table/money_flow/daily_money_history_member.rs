@@ -177,30 +177,26 @@ ORDER BY ms.member_id;
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_upsert() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 DailyMoneyHistoryMember::upsert".to_string());
+        tracing::debug!("開始 DailyMoneyHistoryMember::upsert");
         let current_date = NaiveDate::parse_from_str("2023-08-30", "%Y-%m-%d").unwrap();
         let mut tx = database::get_tx().await.ok();
 
         match DailyMoneyHistoryMember::upsert(current_date, &mut tx).await {
             Ok(r) => {
-                logging::debug_file_async(format!("DailyMoneyHistoryMember::upsert:{:#?}", r));
+                tracing::debug!("DailyMoneyHistoryMember::upsert:{:#?}", r);
                 tx.unwrap()
                     .commit()
                     .await
                     .expect("tx.unwrap().commit() is failed");
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to DailyMoneyHistoryMember::upsert because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to DailyMoneyHistoryMember::upsert because {:?}",
+                    why);
                 tx.unwrap()
                     .rollback()
                     .await
@@ -208,6 +204,6 @@ mod tests {
             }
         }
 
-        logging::debug_file_async("結束 DailyMoneyHistoryMember::upsert".to_string());
+        tracing::debug!("結束 DailyMoneyHistoryMember::upsert");
     }
 }

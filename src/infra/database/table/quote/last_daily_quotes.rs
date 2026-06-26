@@ -138,36 +138,34 @@ impl Default for LastDailyQuotes {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_calculate() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 fetch".to_string());
+        tracing::info!("開始 fetch");
         let _ = LastDailyQuotes::new();
         match LastDailyQuotes::fetch().await {
-            Ok(stocks) => logging::info_file_async(format!("{:#?}", stocks)),
+            Ok(stocks) => tracing::info!("{:#?}", stocks),
             Err(why) => {
-                logging::error_file_async(format!("Failed to fetch because {:?}", why));
+                tracing::error!("Failed to fetch because {:?}", why);
             }
         }
 
-        logging::info_file_async("結束 fetch".to_string());
+        tracing::info!("結束 fetch");
     }
 
     #[tokio::test]
     async fn test_rebuild() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 rebuild".to_string());
+        tracing::info!("開始 rebuild");
         match LastDailyQuotes::rebuild().await {
-            Ok(r) => logging::info_file_async(format!("{:#?}", r)),
+            Ok(r) => tracing::info!("{:#?}", r),
             Err(why) => {
-                logging::error_file_async(format!("Failed to rebuild because {:?}", why));
+                tracing::error!("Failed to rebuild because {:?}", why);
             }
         }
 
-        logging::info_file_async("結束 rebuild".to_string());
+        tracing::info!("結束 rebuild");
     }
 }

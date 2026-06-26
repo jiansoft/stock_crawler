@@ -3,7 +3,7 @@ use std::{collections::HashSet, time::Duration};
 use rand::RngExt;
 
 use crate::{
-    app::backfill::acl::YahooDividendAclMapper, app::calculation::dividend_record, core::logging,
+    app::backfill::acl::YahooDividendAclMapper, app::calculation::dividend_record,
     core::util::map::Keyable, domain::dividend::repository::DividendRepository,
     infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
 };
@@ -54,7 +54,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
         stock_symbols.insert(dividend.security_code.to_string());
     }
 
-    logging::info_file_async(format!("本次殖利率的採集需收集 {} 家", stock_symbols.len()));
+    tracing::info!("本次殖利率的採集需收集 {} 家", stock_symbols.len());
     for stock_symbol in stock_symbols {
         // Yahoo 股利回補使用獨立快取命名空間，避免和 Goodinfo 盈餘分配率快取互相影響。
         let cache_key = make_cache_key(&stock_symbol);
@@ -90,10 +90,8 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
         if let Err(why) =
             backfill_recent_dividends_for_stock(year, &stock_symbol, &multiple_dividend_cache).await
         {
-            logging::error_file_async(format!(
-                "backfill_missing_or_multiple_dividends failed: year={}, stock_symbol={}, stage=backfill_recent_dividends_for_stock, error={:#}",
-                year, stock_symbol, why
-            ));
+            tracing::error!("backfill_missing_or_multiple_dividends failed: year={}, stock_symbol={}, stage=backfill_recent_dividends_for_stock, error={:#}",
+                year, stock_symbol, why);
         }
 
         // 每檔股票請求完成後，進行隨機 1.5 到 3.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
@@ -293,10 +291,8 @@ async fn backfill_recent_dividends_for_stock(
             let entity = YahooDividendAclMapper::from_command(&cmd);
             match dividend_repo.save(&entity).await {
                 Ok(_) => {
-                    logging::debug_file_async(format!(
-                        "dividend upsert executed successfully. \r\n{:#?}",
-                        entity
-                    ));
+                    tracing::debug!("dividend upsert executed successfully. \r\n{:#?}",
+                        entity);
 
                     if !entity.quarter.is_empty() {
                         // 只有季配/半年配需要重算年度彙總；年度配息本身就是彙總列，不需要再聚合。
@@ -305,10 +301,8 @@ async fn backfill_recent_dividends_for_stock(
                 }
                 Err(why) => {
                     // 單筆 upsert 失敗只記錄錯誤，讓同檔股票其他季度仍有機會完成入庫。
-                    logging::error_file_async(format!(
-                        "dividend upsert failed: year={}, paid_year={}, stock_symbol={}, year_of_dividend={}, quarter={}, error={:#}",
-                        year, paid_year, stock_symbol, entity.year_of_dividend, entity.quarter, why
-                    ));
+                    tracing::error!("dividend upsert failed: year={}, paid_year={}, stock_symbol={}, year_of_dividend={}, quarter={}, error={:#}",
+                        year, paid_year, stock_symbol, entity.year_of_dividend, entity.quarter, why);
                 }
             }
         }
@@ -320,10 +314,8 @@ async fn backfill_recent_dividends_for_stock(
             .await
         {
             // 年度彙總失敗不影響已寫入的季配/半年配明細，因此記錄後繼續處理下一個年度。
-            logging::error_file_async(format!(
-                "upsert_annual_total_dividend failed: year={}, stock_symbol={}, refresh_year={}, error={:#}",
-                year, stock_symbol, refresh_year, why
-            ));
+            tracing::error!("upsert_annual_total_dividend failed: year={}, stock_symbol={}, refresh_year={}, error={:#}",
+                year, stock_symbol, refresh_year, why);
         }
     }
 

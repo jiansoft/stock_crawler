@@ -407,8 +407,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     //use chrono::{Datelike, Local, NaiveDate};
-    use crate::core::logging;
-    use crate::infra::database::table::revenue::{fetch_last_two_month, rebuild_revenue_last_date};
+use crate::infra::database::table::revenue::{fetch_last_two_month, rebuild_revenue_last_date};
 
     #[tokio::test]
     async fn test_date() {
@@ -459,7 +458,7 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_last_two_month() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 fetch_last_two_month".to_string());
+        tracing::info!("開始 fetch_last_two_month");
 
         let m = Decimal::from_str("0.00".replace([',', ' '], "").as_str()).unwrap_or_else(|err| {
             eprintln!("Failed to parse 'compared_with_last_month' field: {}", err);
@@ -469,16 +468,16 @@ mod tests {
         match fetch_last_two_month().await {
             Ok(result) => {
                 for e in result {
-                    logging::info_file_async(format!("{:?} ", e));
+                    tracing::info!("{:?} ", e);
                 }
             }
             Err(why) => {
-                logging::error_file_async(format!("because {:?}", why));
+                tracing::error!("because {:?}", why);
             }
         }
         /* if let Ok(result) = r {
             for e in result {
-                logging::info_file_async(format!("{:#?} ", e));
+                tracing::info!("{:#?} ", e);
             }
         }*/
     }
@@ -486,19 +485,15 @@ mod tests {
     #[tokio::test]
     async fn test_rebuild_revenue_last_date() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 test_rebuild_revenue_last_date".to_string());
+        tracing::info!("開始 test_rebuild_revenue_last_date");
         match rebuild_revenue_last_date().await {
             Ok(result) => {
-                logging::info_file_async(format!(
-                    "rebuild_revenue_last_date:{:?} ",
-                    result.rows_affected()
-                ));
+                tracing::info!("rebuild_revenue_last_date:{:?} ",
+                    result.rows_affected());
             }
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to rebuild_revenue_last_date because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to rebuild_revenue_last_date because {:?}",
+                    why);
             }
         }
     }

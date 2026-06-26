@@ -260,7 +260,7 @@ mod tests {
     async fn test_redis() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 test_redis".to_string());
+        tracing::debug!("開始 test_redis");
 
         println!("client.pool.status:{:?}", CLIENT.pool.status());
         println!("is_closed:{}", CLIENT.pool.is_closed());
@@ -310,6 +310,6 @@ mod tests {
 
         println!("client.pool.status:{:?}", CLIENT.pool.status());
 
-        logging::debug_file_async("結束 test_redis".to_string());
+        tracing::debug!("結束 test_redis");
     }
 }

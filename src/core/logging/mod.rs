@@ -518,6 +518,49 @@ fn forward_to_seq(level: SeqLogLevel, message: &str) {
     }
 }
 
+/// tracing `Layer`，將 tracing 事件路由至既有輪轉檔案 `LOGGER`。
+///
+/// 安裝此 Layer 後，所有透過 `tracing::*!()` 發出的事件都會寫入輪轉日誌檔案。
+/// Level 映射：ERROR → error_writer、WARN → warn_writer、INFO → info_writer、其餘 → debug_writer。
+pub struct FileLogLayer;
+
+impl<S: tracing::Subscriber> tracing_subscriber::layer::Layer<S> for FileLogLayer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let mut msg = String::new();
+        event.record(&mut FileLogVisitor(&mut msg));
+        if msg.is_empty() {
+            return;
+        }
+        match *event.metadata().level() {
+            tracing::Level::ERROR => LOGGER.error(msg),
+            tracing::Level::WARN => LOGGER.warn(msg),
+            tracing::Level::INFO => LOGGER.info(msg),
+            _ => LOGGER.debug(msg),
+        }
+    }
+}
+
+/// 從 tracing 事件中擷取 `message` 欄位的訪客型別。
+struct FileLogVisitor<'a>(&'a mut String);
+
+impl tracing::field::Visit for FileLogVisitor<'_> {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.0.push_str(value);
+        }
+    }
+
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            let _ = write!(self.0, "{value:?}");
+        }
+    }
+}
+
 /// 將累積的日誌文字寫入輪轉檔案。
 fn flush_log_buffer(rotate: &mut Rotate, now: chrono::DateTime<Local>, msg: &mut String) {
     if let Some(writer) = rotate.get_writer(now)
@@ -536,24 +579,24 @@ fn flush_log_buffer(rotate: &mut Rotate, now: chrono::DateTime<Local>, msg: &mut
     }
 }
 
-/// 使用全域 logger 寫入 `info` 等級檔案日誌。
+/// 寫入 `info` 等級日誌（透過 tracing → FileLogLayer → LOGGER）。
 pub fn info_file_async<S: Into<String>>(log: S) {
-    LOGGER.info(log.into());
+    tracing::info!("{}", log.into());
 }
 
-/// 使用全域 logger 寫入 `warn` 等級檔案日誌。
+/// 寫入 `warn` 等級日誌（透過 tracing → FileLogLayer → LOGGER）。
 pub fn warn_file_async<S: Into<String>>(log: S) {
-    LOGGER.warn(log.into());
+    tracing::warn!("{}", log.into());
 }
 
-/// 使用全域 logger 寫入 `error` 等級檔案日誌。
+/// 寫入 `error` 等級日誌（透過 tracing → FileLogLayer → LOGGER）。
 pub fn error_file_async<S: Into<String>>(log: S) {
-    LOGGER.error(log.into());
+    tracing::error!("{}", log.into());
 }
 
-/// 使用全域 logger 寫入 `debug` 等級檔案日誌。
+/// 寫入 `debug` 等級日誌（透過 tracing → FileLogLayer → LOGGER）。
 pub fn debug_file_async<S: Into<String>>(log: S) {
-    LOGGER.debug(log.into());
+    tracing::debug!("{}", log.into());
 }
 
 /// 取得預設 logger 的執行期摘要。

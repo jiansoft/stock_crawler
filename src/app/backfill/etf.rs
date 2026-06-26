@@ -1,7 +1,6 @@
 use crate::{
     app::backfill,
     app::backfill::acl::EtfAclMapper,
-    core::logging,
     core::util::datetime::Weekend,
     infra::cache::SHARE,
     infra::crawler::{share::EtfInfo, tpex, twse},
@@ -17,21 +16,21 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    logging::info_file_async("更新台股 ETF 資訊開始");
+    tracing::info!("更新台股 ETF 資訊開始");
     defer! {
-       logging::info_file_async("更新台股 ETF 資訊結束");
+       tracing::info!("更新台股 ETF 資訊結束");
     }
 
     // 1. 抓取上市 ETF 資料
     match twse::etf::visit().await {
         Ok(items) => update_stocks(items).await?,
-        Err(why) => logging::error_file_async(format!("處理上市 ETF 市場失敗: {:?}", why)),
+        Err(why) => tracing::error!("處理上市 ETF 市場失敗: {:?}", why),
     }
 
     // 2. 抓取上櫃 ETF 資料
     match tpex::etf::visit().await {
         Ok(items) => update_stocks(items).await?,
-        Err(why) => logging::error_file_async(format!("處理上櫃 ETF 市場失敗: {:?}", why)),
+        Err(why) => tracing::error!("處理上櫃 ETF 市場失敗: {:?}", why),
     }
 
     Ok(())
@@ -56,10 +55,8 @@ async fn update_stocks(items: Vec<EtfInfo>) -> Result<()> {
         if is_new_or_changed {
             let cmd = EtfAclMapper::from_etf(&item);
             if let Err(why) = update_stock_info(&cmd).await {
-                logging::error_file_async(format!(
-                    "更新 ETF {} 資訊失敗: {:?}",
-                    item.stock_symbol, why
-                ));
+                tracing::error!("更新 ETF {} 資訊失敗: {:?}",
+                    item.stock_symbol, why);
             }
         }
     }
@@ -104,22 +101,21 @@ async fn update_stock_info(cmd: &backfill::acl::RegisterStockCommand) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::logging;
-    use crate::infra::cache::SHARE;
+use crate::infra::cache::SHARE;
 
     #[tokio::test]
     #[ignore]
     async fn test_execute_etf() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute_etf".to_string());
+        tracing::debug!("開始 execute_etf");
 
         match execute().await {
             Ok(_) => {
-                logging::debug_file_async("完成 execute_etf".to_string());
+                tracing::debug!("完成 execute_etf");
             }
             Err(why) => {
-                logging::debug_file_async(format!("執行失敗: {:?}", why));
+                tracing::debug!("執行失敗: {:?}", why);
             }
         }
     }

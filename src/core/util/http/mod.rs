@@ -473,7 +473,7 @@ mod tests {
             Local::now().timestamp_millis().to_string()
         );
 
-        logging::debug_file_async(format!("request_get:{:?}", get(&url, None).await));
+        tracing::debug!("request_get:{:?}", get(&url, None).await);
 
         let bytes = reqwest::get("https://httpbin.org/ip")
             .await
@@ -489,7 +489,7 @@ mod tests {
         match get("https://jiansoft.mooo.com/stock/revenues", None).await {
             Ok(_) => {}
             Err(why) => {
-                logging::error_file_async(format!("Failed to get because {:?}", why));
+                tracing::error!("Failed to get because {:?}", why);
             }
         }
     }

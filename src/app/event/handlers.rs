@@ -19,7 +19,6 @@ use crate::app::event::taiwan_stock::{
     member_label,
 };
 use crate::core::declare::Industry;
-use crate::core::logging;
 use crate::domain::dividend::entity::StockDividendInfo;
 use crate::domain::dividend::repository::DividendRepository;
 use crate::domain::events::DomainEvent;
@@ -129,7 +128,7 @@ impl EventDispatcher {
         tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 if let Err(why) = handler(event).await {
-                    logging::error_file_async(format!("領域事件處理失敗: {:?}", why));
+                    tracing::error!("領域事件處理失敗: {:?}", why);
                 }
             }
         });
@@ -160,7 +159,7 @@ impl EventDispatcher {
     pub async fn dispatch_async(&self, events: Vec<DomainEvent>) {
         for event in events {
             if let Err(why) = self.event_sender.send(event).await {
-                logging::error_file_async(format!("無法送出領域事件至背景通道: {:?}", why));
+                tracing::error!("無法送出領域事件至背景通道: {:?}", why);
             }
         }
     }
@@ -206,7 +205,7 @@ impl EventDispatcher {
                     industry_name = industry_name
                 );
 
-                logging::info_file_async(log_msg.clone());
+                tracing::info!("{}", log_msg.clone());
                 debouncer.add_message(log_msg).await;
             }
             DomainEvent::StockIdentityChanged {
@@ -237,7 +236,7 @@ impl EventDispatcher {
                     industry_name = industry_name
                 );
 
-                logging::info_file_async(log_msg.clone());
+                tracing::info!("{}", log_msg.clone());
                 debouncer.add_message(log_msg).await;
             }
             DomainEvent::NetAssetValueUpdated { .. } => {
@@ -288,10 +287,8 @@ impl EventDispatcher {
         };
 
         if let Err(why) = stock_service::push_stock_info_to_go_service(request).await {
-            logging::error_file_async(format!(
-                "Failed to push_stock_info_to_go_service for {} because {:?}",
-                symbol, why
-            ));
+            tracing::error!("Failed to push_stock_info_to_go_service for {} because {:?}",
+                symbol, why);
         }
     }
 

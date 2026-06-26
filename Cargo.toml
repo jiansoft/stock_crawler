@@ -59,6 +59,8 @@ urlencoding = "2.1"
 lazy_static = "1.5"
 scopeguard = "1.2"
 thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 x509-parser = "0.18"
 time = "=0.3.49"
 

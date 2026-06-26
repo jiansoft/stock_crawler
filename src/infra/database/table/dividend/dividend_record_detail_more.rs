@@ -97,14 +97,12 @@ RETURNING serial;
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_upsert() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 test_upsert".to_string());
+        tracing::debug!("開始 test_upsert");
 
         let mut e = DividendRecordDetailMore::new(
             1,
@@ -118,7 +116,7 @@ mod tests {
         let mut tx_option: Option<Transaction<Postgres>> = database::get_tx().await.ok();
         match e.upsert(&mut tx_option).await {
             Ok(word_id) => {
-                logging::debug_file_async(format!("serial:{} e:{:#?}", word_id, &e));
+                tracing::debug!("serial:{} e:{:#?}", word_id, &e);
 
                 if let Some(mut tx) = tx_option.take() {
                     let _ =
@@ -129,7 +127,7 @@ mod tests {
                 }
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to upsert because:{:?}", why));
+                tracing::debug!("Failed to upsert because:{:?}", why);
                 if let Some(tx) = tx_option.take() {
                     tx.rollback().await.unwrap();
                 }
@@ -140,6 +138,6 @@ mod tests {
             tx.commit().await.unwrap();
         }
 
-        logging::debug_file_async("結束 test_upsert".to_string());
+        tracing::debug!("結束 test_upsert");
     }
 }

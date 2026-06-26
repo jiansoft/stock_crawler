@@ -25,25 +25,23 @@ impl AnnualProfitFetcher for MoneyDJ {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_visit() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
 
         match visit("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("moneydj : {:#?}", e));
+                tracing::debug!("moneydj : {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+                tracing::debug!("Failed to visit because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

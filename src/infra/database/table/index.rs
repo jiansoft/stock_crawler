@@ -6,7 +6,7 @@ use concat_string::concat_string;
 use rust_decimal::Decimal;
 use sqlx::{self, FromRow};
 
-use crate::{core::logging, core::util, core::util::map::Keyable, infra::database};
+use crate::{core::util, core::util::map::Keyable, infra::database};
 
 /// 台股指數資料列（目前以 `TAIEX` 為主）。
 #[derive(sqlx::Type, FromRow, Debug)]
@@ -188,12 +188,12 @@ impl From<Vec<String>> for Index {
         let dd = now.day().to_string();
         let mut split_date: Vec<&str> = item[0].split('/').collect();
         if split_date.len() != 3 {
-            logging::error_file_async("日期欄位不等於3".to_string());
+            tracing::error!("日期欄位不等於3");
             split_date = vec![&dy, &dm, &dd]
         }
 
         let year = split_date[0].parse::<i32>().unwrap_or_else(|why| {
-            logging::error_file_async(format!("轉換資料日期發生錯誤. because {:?}", why));
+            tracing::error!("轉換資料日期發生錯誤. because {:?}", why);
             util::datetime::gregorian_year_to_roc_year(Local::now().year())
         });
 
@@ -243,27 +243,23 @@ impl Keyable for Index {
 mod tests {
     use std::time;
 
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_index_fetch() {
         dotenv::dotenv().ok();
         let r = Index::fetch().await.unwrap();
         for e in r.iter() {
-            logging::info_file_async(format!("e.date {:?} e.index {:?}", e.date, e.index));
+            tracing::info!("e.date {:?} e.index {:?}", e.date, e.index);
         }
-        logging::info_file_async("結束".to_string());
+        tracing::info!("結束");
         tokio::time::sleep(time::Duration::from_secs(1)).await;
         /* while let Some(result) = fetch().await.next().await {
             if let Ok(ref row_result) = result {
-                logging::info_file_async(format!(
-                    "row.date {:?} row.index {:?}",
-                    row_result.date, row_result.index
-                ));
+                tracing::info!("row.date {:?} row.index {:?}",
+                    row_result.date, row_result.index);
                 /*if let Ok(row) = row_result {
-                    logging::info_file_async(format!("row.date {:?} row.index {:?}", row.date, row.index));
+                    tracing::info!("row.date {:?} row.index {:?}", row.date, row.index);
                     //indices.insert(row.date.to_string(),row);
                 };*/
             }

@@ -16,9 +16,7 @@ pub async fn visit() -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_visit() {
@@ -27,7 +25,7 @@ mod tests {
                 print!("{}", ip)
             }
             Err(why) => {
-                logging::error_file_async(format!("Failed to get because {:?}", why));
+                tracing::error!("Failed to get because {:?}", why);
             }
         }
     }

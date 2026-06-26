@@ -5,8 +5,6 @@ use config::FileFormat;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-use crate::core::logging;
-
 const CONFIG_PATH: &str = "app.json";
 
 /// 應用程式總組態結構體
@@ -366,10 +364,8 @@ impl App {
                     self.bot.telegram.allowed = allowed;
                 }
                 Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to serde_json because: {:?} \r\n {}",
-                        why, &tg_allowed
-                    ));
+                    tracing::error!("Failed to serde_json because: {:?} \r\n {}",
+                        why, &tg_allowed);
                 }
             }
         }
@@ -422,40 +418,32 @@ mod tests {
     #[tokio::test]
     async fn test_init() {
         dotenv::dotenv().ok();
-        logging::debug_file_async(format!("SETTINGS.system: {:#?}\r\n", SETTINGS.system));
-        logging::debug_file_async(format!(
-            "SETTINGS.postgresql: host={} port={} db={} user={}\r\n",
+        tracing::debug!("SETTINGS.system: {:#?}\r\n", SETTINGS.system);
+        tracing::debug!("SETTINGS.postgresql: host={} port={} db={} user={}\r\n",
             SETTINGS.postgresql.host,
             SETTINGS.postgresql.port,
             SETTINGS.postgresql.db,
-            SETTINGS.postgresql.user
-        ));
+            SETTINGS.postgresql.user);
 
-        logging::debug_file_async(format!(
-            "SETTINGS.nosql.redis: addr={} account={} db={}\r\n",
-            SETTINGS.nosql.redis.addr, SETTINGS.nosql.redis.account, SETTINGS.nosql.redis.db
-        ));
+        tracing::debug!("SETTINGS.nosql.redis: addr={} account={} db={}\r\n",
+            SETTINGS.nosql.redis.addr, SETTINGS.nosql.redis.account, SETTINGS.nosql.redis.db);
 
-        logging::debug_file_async(format!(
-            "SETTINGS.rpc.go_service: target={} domain_name={}\r\n",
-            SETTINGS.rpc.go_service.target, SETTINGS.rpc.go_service.domain_name
-        ));
+        tracing::debug!("SETTINGS.rpc.go_service: target={} domain_name={}\r\n",
+            SETTINGS.rpc.go_service.target, SETTINGS.rpc.go_service.domain_name);
 
         let mut map: HashMap<i64, String> = HashMap::new();
         map.insert(123, "QQ".to_string());
         map.insert(456, "QQ".to_string());
         let json_str = serde_json::to_string(&map).expect("TODO: panic message");
 
-        logging::debug_file_async(format!("serde_json: {}\r\n", &json_str));
+        tracing::debug!("serde_json: {}\r\n", &json_str);
         match serde_json::from_str::<HashMap<i64, String>>(&json_str) {
             Ok(json) => {
-                logging::debug_file_async(format!("json: {:?}\r\n", json));
+                tracing::debug!("json: {:?}\r\n", json);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to serde_json because: {:?} \r\n {}",
-                    why, &json_str
-                ));
+                tracing::debug!("Failed to serde_json because: {:?} \r\n {}",
+                    why, &json_str);
             }
         }
         tokio::time::sleep(time::Duration::from_secs(1)).await;

@@ -185,14 +185,14 @@ mod tests {
         let mut e = StockWord::new("小一".to_string());
         match e.upsert().await {
             Ok(word_id) => {
-                logging::debug_file_async(format!("word_id:{} e:{:#?}", word_id, &e));
+                tracing::debug!("word_id:{} e:{:#?}", word_id, &e);
                 let _ = sqlx::query("delete from company_word where word_id = $1;")
                     .bind(word_id)
                     .execute(database::get_connection())
                     .await;
             }
             Err(why) => {
-                logging::debug_file_async(format!("because:{:?}", why));
+                tracing::debug!("because:{:?}", why);
             }
         }
     }
@@ -202,10 +202,8 @@ mod tests {
         dotenv::dotenv().ok();
         let word = util::text::split("隆銘綠能");
         let entities = StockWord::list_by_word(&word).await;
-        logging::debug_file_async(format!("entities:{:#?}", entities));
-        /*logging::debug_file_async(format!(
-            "word:{:#?}",
-            util::map::vec_to_hashmap(entities.unwrap())
-        ));*/
+        tracing::debug!("entities:{:#?}", entities);
+        /*tracing::debug!("word:{:#?}",
+            util::map::vec_to_hashmap(entities.unwrap()));*/
     }
 }

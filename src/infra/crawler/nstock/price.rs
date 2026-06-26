@@ -92,21 +92,19 @@ mod tests {
     #[tokio::test]
     async fn test_get_stock_quotes() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 nstock::get_stock_quotes".to_string());
+        tracing::debug!("開始 nstock::get_stock_quotes");
 
         match NStock::get_stock_quotes("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("nstock::get_stock_quotes : {:#?}", e));
+                tracing::debug!("nstock::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to nstock::get_stock_quotes because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to nstock::get_stock_quotes because {:?}",
+                    why);
             }
         }
 
-        logging::debug_file_async("結束 nstock::get_stock_quotes".to_string());
+        tracing::debug!("結束 nstock::get_stock_quotes");
     }
 }

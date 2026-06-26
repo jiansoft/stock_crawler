@@ -68,15 +68,15 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_list() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_list".to_string());
+        tracing::debug!("開始 fetch_list");
 
         let r = trace::Trace::fetch().await;
         if let Ok(result) = r {
             dbg!(&result);
-            logging::debug_file_async(format!("{:#?}", result));
+            tracing::debug!("{:#?}", result);
         } else if let Err(err) = r {
-            logging::debug_file_async(format!("{:#?} ", err));
+            tracing::debug!("{:#?} ", err);
         }
-        logging::debug_file_async("結束 fetch_list".to_string());
+        tracing::debug!("結束 fetch_list");
     }
 }

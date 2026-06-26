@@ -45,16 +45,16 @@ mod tests {
     async fn test_visit() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
 
         match visit(Local::now()).await {
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
             Ok(list) => {
-                logging::debug_file_async(format!("data:{:#?}", list));
+                tracing::debug!("data:{:#?}", list);
             }
         }
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

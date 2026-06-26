@@ -3,16 +3,10 @@ use chrono::NaiveDate;
 use futures::{StreamExt, stream};
 use rust_decimal::Decimal;
 
-use crate::{
-    core::logging,
-    core::util,
-    domain::quote::{
+use crate::{core::util, domain::quote::{
         entity::{DailyQuote as DomainDailyQuote, QuoteHistoryRecord},
         repository::QuoteRepository,
-    },
-    infra::cache::SHARE,
-    infra::database::repository::quote::PgQuoteRepository,
-};
+    }, infra::cache::SHARE, infra::database::repository::quote::PgQuoteRepository};
 
 /// 計算所有上市櫃公司在指定日期的均線值與歷史高低點。
 ///
@@ -47,7 +41,7 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
                 }
             }
             // 記錄計算過程中的錯誤 log
-            Err(why) => logging::error_file_async(format!("Calculation error: {:?}", why)),
+            Err(why) => tracing::error!("Calculation error: {:?}", why),
         }
     }
 
@@ -55,7 +49,7 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
     if !quotes_to_update.is_empty() {
         // 呼叫倉儲的批次更新方法寫入資料庫
         if let Err(why) = repo.batch_update_moving_average(&quotes_to_update).await {
-            logging::error_file_async(format!("Failed to batch update DailyQuotes: {:?}", why));
+            tracing::error!("Failed to batch update DailyQuotes: {:?}", why);
         }
     }
 
@@ -64,7 +58,7 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
         for qhr in history_to_upsert {
             // 寫入/更新歷史紀錄資料庫表
             if let Err(why) = repo.save_quote_history_record(&qhr).await {
-                logging::error_file_async(format!("Failed to upsert history record: {:?}", why));
+                tracing::error!("Failed to upsert history record: {:?}", why);
                 continue;
             }
             // 同步更新全域記憶體快取以維持最終一致性
@@ -182,28 +176,24 @@ fn update_qhr_fields(qhr: &mut QuoteHistoryRecord, dq: &DomainDailyQuote) {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_calculate_moving_average() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 calculate_moving_average".to_string());
+        tracing::debug!("開始 calculate_moving_average");
         let date = NaiveDate::from_ymd_opt(2026, 2, 26);
         match calculate_moving_average(date.unwrap()).await {
             Ok(_) => {
-                logging::debug_file_async("calculate_moving_average() 完成".to_string());
+                tracing::debug!("calculate_moving_average() 完成");
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to calculate_moving_average because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to calculate_moving_average because {:?}",
+                    why);
             }
         }
 
-        logging::debug_file_async("結束 calculate_moving_average".to_string());
+        tracing::debug!("結束 calculate_moving_average");
     }
 }

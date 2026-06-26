@@ -78,8 +78,7 @@ async fn report_error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::logging;
-    use crate::infra::cache::SHARE;
+use crate::infra::cache::SHARE;
     use chrono::Datelike;
 
     #[tokio::test]
@@ -87,18 +86,18 @@ mod tests {
     async fn test_visit() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
         let now = Local::now();
         match visit(now.date_naive().year()).await {
             Ok(list) => {
                 dbg!(&list);
-                logging::debug_file_async(format!("list:{:#?}", list));
+                tracing::debug!("list:{:#?}", list);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

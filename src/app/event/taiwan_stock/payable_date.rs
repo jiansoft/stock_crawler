@@ -193,9 +193,7 @@ mod tests {
     use chrono::TimeZone;
     use rust_decimal_macros::dec;
 
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     fn make_holding(
         serial: i64,
@@ -254,11 +252,11 @@ mod tests {
     #[ignore]
     async fn test_calculate() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 execute".to_string());
+        tracing::info!("開始 execute");
         //let date = NaiveDate::from_ymd_opt(2023, 6, 15);
         //let today: NaiveDate = Local::today().naive_local();
         let _ = execute().await;
 
-        logging::info_file_async("結束 execute".to_string());
+        tracing::info!("結束 execute");
     }
 }

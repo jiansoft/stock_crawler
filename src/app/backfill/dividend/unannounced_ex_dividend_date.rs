@@ -6,7 +6,7 @@ use tokio_retry::{
 };
 
 use crate::{
-    app::backfill::acl::YahooDividendAclMapper, core::logging,
+    app::backfill::acl::YahooDividendAclMapper,
     domain::dividend::repository::DividendRepository, infra::crawler::yahoo,
     infra::database::repository::dividend::PgDividendRepository,
 };
@@ -23,10 +23,8 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
         .fetch_unpublished_dividend_date_or_payable_date_for_specified_year(year)
         .await?;
 
-    logging::info_file_async(format!(
-        "本次除息日與發放日的採集需收集 {} 家",
-        dividends.len()
-    ));
+    tracing::info!("本次除息日與發放日的採集需收集 {} 家",
+        dividends.len());
 
     // 依序遍歷每一檔需要回補的股利資料
     for dividend in dividends {
@@ -43,10 +41,8 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
             Ok(val) => val,
             Err(why) => {
                 // 若 Redis 讀取失敗，為避免卡住資料回補流程，僅記錄 log 並假設未爬取過 (false)
-                logging::error_file_async(format!(
-                    "Failed to get redis cache key {} because {:?}",
-                    cache_key, why
-                ));
+                tracing::error!("Failed to get redis cache key {} because {:?}",
+                    cache_key, why);
                 false
             }
         };
@@ -62,18 +58,14 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
             .set(&cache_key, true, 60 * 60 * 24 * 3)
             .await
         {
-            logging::error_file_async(format!(
-                "Failed to set redis cache key {} because {:?}",
-                cache_key, why
-            ));
+            tracing::error!("Failed to set redis cache key {} because {:?}",
+                cache_key, why);
         }
 
         // 呼叫 Yahoo 採集器抓取並解析網頁，進而更新資料庫中該股的除息與發放日期
         if let Err(why) = backfill_unannounced_dividend_dates_from_yahoo(dividend, year).await {
-            logging::error_file_async(format!(
-                "Failed to backfill_unannounced_dividend_dates_from_yahoo because {:?}",
-                why
-            ));
+            tracing::error!("Failed to backfill_unannounced_dividend_dates_from_yahoo because {:?}",
+                why);
         }
 
         // 每檔股票請求完成後，進行隨機 1.5 到 3.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
@@ -119,10 +111,8 @@ async fn backfill_unannounced_dividend_dates_from_yahoo(
             return Err(anyhow!("{}", why));
         }
 
-        logging::info_file_async(format!(
-            "dividend update_dividend_date executed successfully. \r\n{:?}",
-            entity
-        ));
+        tracing::info!("dividend update_dividend_date executed successfully. \r\n{:?}",
+            entity);
     }
 
     Ok(())

@@ -5,10 +5,7 @@
 //! 每天執行時會自動跳過週末，並在偵測到股票資料異動或新增時，非同步派發領域事件
 //! 由背景 EventDispatcher 處理 Telegram 通知與 gRPC 服務同步。
 
-use crate::{
-    app::backfill, core::declare::StockExchangeMarket, core::logging,
-    core::util::datetime::Weekend, infra::crawler::twse,
-};
+use crate::{app::backfill, core::declare::StockExchangeMarket, core::util::datetime::Weekend, infra::crawler::twse};
 
 use anyhow::{Result, anyhow};
 use chrono::Local;
@@ -29,10 +26,10 @@ pub async fn execute() -> Result<()> {
     if Local::now().is_weekend() {
         return Ok(());
     }
-    logging::info_file_async("更新台股國際證券識別碼開始");
+    tracing::info!("更新台股國際證券識別碼開始");
     // 利用 scopeguard 的 defer 機制，不論流程正常結束或提早出錯返回，都會在離開函式時寫入結束日誌
     defer! {
-       logging::info_file_async("更新台股國際證券識別碼結束");
+       tracing::info!("更新台股國際證券識別碼結束");
     }
     // 遍歷所有定義的交易所市場（如上市、上櫃），併發執行 process_market
     let tasks: Vec<_> = StockExchangeMarket::iterator()
@@ -44,7 +41,7 @@ pub async fn execute() -> Result<()> {
     for result in results {
         // 若其中某個交易所市場的任務失敗，記錄錯誤訊息，但不影響其他市場的處理結果
         if let Err(why) = result {
-            logging::error_file_async(format!("Failed to process_market because {:?}", why));
+            tracing::error!("Failed to process_market because {:?}", why);
         }
     }
 
@@ -87,10 +84,8 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
         // 若確認是新股票或資料有變動，則進行寫入與同步處理
         if new_stock && let Err(why) = update_stock_info(&cmd).await {
             // 若更新單一股票基本資料失敗，記錄錯誤後繼續處理下一檔，避免單一錯誤導致整個市場回補中斷
-            logging::error_file_async(format!(
-                "Failed to update stock info for {} because {:?}",
-                cmd.symbol, why
-            ));
+            tracing::error!("Failed to update stock info for {} because {:?}",
+                cmd.symbol, why);
         }
     }
 
@@ -146,8 +141,7 @@ async fn update_stock_info(cmd: &backfill::acl::RegisterStockCommand) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-    use crate::infra::cache::SHARE;
+use crate::infra::cache::SHARE;
 
     use super::*;
 
@@ -156,17 +150,17 @@ mod tests {
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {
-                logging::debug_file_async("完成 execute".to_string());
+                tracing::debug!("完成 execute");
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 }

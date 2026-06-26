@@ -123,8 +123,7 @@ pub async fn visit() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-    use crate::infra::crawler::bank_of_taiwan;
+use crate::infra::crawler::bank_of_taiwan;
 
     #[tokio::test]
     async fn test_visit() {
@@ -133,7 +132,7 @@ mod tests {
                 dbg!(ip);
             }
             Err(why) => {
-                logging::error_file_async(format!("Failed to get because {:?}", why));
+                tracing::error!("Failed to get because {:?}", why);
             }
         }
     }

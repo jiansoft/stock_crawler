@@ -973,64 +973,58 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_moving_average() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_moving_average".to_string());
+        tracing::debug!("開始 fetch_moving_average");
         let date = NaiveDate::from_ymd_opt(2023, 8, 1);
         let mut dq = DailyQuote::new("2330".to_string());
         dq.date = date.unwrap();
         match dq.fill_moving_average().await {
             Ok(_) => {
                 dbg!(&dq);
-                logging::debug_file_async(format!("fetch_moving_average: {:#?}", dq));
+                tracing::debug!("fetch_moving_average: {:#?}", dq);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to fetch_moving_average because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to fetch_moving_average because {:?}",
+                    why);
             }
         }
 
-        logging::debug_file_async("結束 fetch_moving_average".to_string());
+        tracing::debug!("結束 fetch_moving_average");
     }
 
     #[tokio::test]
     async fn test_fetch_daily_quotes_by_date() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_daily_quotes_by_date".to_string());
+        tracing::debug!("開始 fetch_daily_quotes_by_date");
         let date = NaiveDate::from_ymd_opt(2023, 7, 31);
         match fetch_daily_quotes_by_date(date.unwrap()).await {
             Ok(dqs) => {
-                logging::debug_file_async(format!("fetch_daily_quotes_by_date: {:#?}", dqs));
+                tracing::debug!("fetch_daily_quotes_by_date: {:#?}", dqs);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to fetch_daily_quotes_by_date because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to fetch_daily_quotes_by_date because {:?}",
+                    why);
             }
         }
 
-        logging::debug_file_async("結束 fetch_daily_quotes_by_date".to_string());
+        tracing::debug!("結束 fetch_daily_quotes_by_date");
     }
 
     #[tokio::test]
     async fn test_fetch_count_by_date() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_count_by_date".to_string());
+        tracing::debug!("開始 fetch_count_by_date");
         let date = NaiveDate::from_ymd_opt(2023, 7, 31);
         match fetch_count_by_date(date.unwrap()).await {
             Ok(count) => {
-                logging::debug_file_async(format!("count_by_date: {:?}", count));
+                tracing::debug!("count_by_date: {:?}", count);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to fetch_count_by_date because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to fetch_count_by_date because {:?}",
+                    why);
             }
         }
 
-        logging::debug_file_async("結束 fetch_count_by_date".to_string());
+        tracing::debug!("結束 fetch_count_by_date");
     }
 
     #[tokio::test]
@@ -1040,45 +1034,43 @@ mod tests {
 
         let now = Local::now().date_naive();
 
-        logging::debug_file_async("開始 makeup_for_the_lack_daily_quotes".to_string());
+        tracing::debug!("開始 makeup_for_the_lack_daily_quotes");
 
         match makeup_for_the_lack_daily_quotes(now).await {
             Ok(result) => {
-                logging::debug_file_async(format!("result:{:#?}", result));
+                tracing::debug!("result:{:#?}", result);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to makeup_for_the_lack_daily_quotes because:{:?}",
-                    why
-                ));
+                tracing::debug!("Failed to makeup_for_the_lack_daily_quotes because:{:?}",
+                    why);
             }
         }
 
-        logging::debug_file_async("結束 makeup_for_the_lack_daily_quotes".to_string());
+        tracing::debug!("結束 makeup_for_the_lack_daily_quotes");
     }
 
     #[tokio::test]
     async fn test_fetch_lowest_avg_highest_price() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_lowest_avg_highest_price".to_string());
+        tracing::debug!("開始 fetch_lowest_avg_highest_price");
 
         match fetch_monthly_stock_price_summary("2330", 2023, 4).await {
             Ok(cd) => {
-                logging::debug_file_async(format!("stock: {:?}", cd));
+                tracing::debug!("stock: {:?}", cd);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 fetch_lowest_avg_highest_price".to_string());
+        tracing::debug!("結束 fetch_lowest_avg_highest_price");
     }
 
     #[tokio::test]
     async fn test_upsert() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 upsert".to_string());
+        tracing::debug!("開始 upsert");
 
         let data = vec![
             "79979".to_string(),
@@ -1110,7 +1102,7 @@ mod tests {
         match e.upsert().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to upsert because:{:?}", why));
+                tracing::debug!("Failed to upsert because:{:?}", why);
             }
         }
 
@@ -1145,10 +1137,10 @@ mod tests {
         match e.upsert().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to upsert because:{:?}", why));
+                tracing::debug!("Failed to upsert because:{:?}", why);
             }
         }
-        logging::debug_file_async("結束 upsert".to_string());
+        tracing::debug!("結束 upsert");
     }
 
     /// 手動驗證 TWSE 報價抓取後可透過 COPY 寫入測試資料。
@@ -1157,7 +1149,7 @@ mod tests {
     #[tokio::test]
     async fn test_copy_in_raw() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 copy_in_raw".to_string());
+        tracing::debug!("開始 copy_in_raw");
 
         let date = NaiveDate::from_ymd_opt(2023, 12, 4).unwrap();
         let twse_dtos = twse::quote::visit(date).await.unwrap();
@@ -1177,13 +1169,13 @@ mod tests {
 
         match DailyQuote::copy_in_raw(&twse).await {
             Ok(cd) => {
-                logging::debug_file_async(format!("copy_in_raw: {:?}", cd));
+                tracing::debug!("copy_in_raw: {:?}", cd);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to copy_in_raw because {:?}", why));
+                tracing::debug!("Failed to copy_in_raw because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 copy_in_raw".to_string());
+        tracing::debug!("結束 copy_in_raw");
     }
 }

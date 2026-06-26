@@ -1,8 +1,6 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeDelta, Weekday};
 
 use crate::core::declare::Quarter;
-use crate::core::logging;
-
 /// 提供「是否為週末」判斷能力的 trait。
 ///
 /// 目前專門實作於 [`DateTime<Local>`]，用來統一專案內
@@ -178,10 +176,8 @@ pub fn parse_date(date_str: &str) -> DateTime<Local> {
     match DateTime::parse_from_rfc3339(date_str) {
         Ok(dt) => dt.with_timezone(&Local),
         Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to parse date string '{}': {}",
-                date_str, why
-            ));
+            tracing::error!("Failed to parse date string '{}': {}",
+                date_str, why);
             DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z")
                 .unwrap()
                 .with_timezone(&Local)

@@ -192,22 +192,20 @@ mod tests {
     /// 測試可取得指定股票完整即時報價。
     async fn test_get_stock_quotes() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 cmoney::get_stock_quotes".to_string());
+        tracing::debug!("開始 cmoney::get_stock_quotes");
 
         match CMoney::get_stock_quotes("4438").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("cmoney::get_stock_quotes : {:#?}", e));
+                tracing::debug!("cmoney::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
                 dbg!(&why);
-                logging::debug_file_async(format!(
-                    "Failed to cmoney::get_stock_quotes because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to cmoney::get_stock_quotes because {:?}",
+                    why);
             }
         }
 
-        logging::debug_file_async("結束 cmoney::get_stock_quotes".to_string());
+        tracing::debug!("結束 cmoney::get_stock_quotes");
     }
 }

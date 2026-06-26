@@ -107,50 +107,42 @@ impl StockInfo for Yuanta {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_price() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 yuanta::get_stock_price".to_string());
+        tracing::debug!("開始 yuanta::get_stock_price");
 
         for stock_symbol in ["2330", "4536"] {
             match Yuanta::get_stock_price(stock_symbol).await {
                 Ok(price) => {
-                    logging::debug_file_async(format!("yuanta {stock_symbol} price: {price}"))
+                    tracing::debug!("yuanta {stock_symbol} price: {price}")
                 }
-                Err(why) => logging::debug_file_async(format!(
-                    "Failed to yuanta::get_stock_price({stock_symbol}) because {:?}",
-                    why
-                )),
+                Err(why) => tracing::debug!("Failed to yuanta::get_stock_price({stock_symbol}) because {:?}",
+                    why),
             }
         }
 
-        logging::debug_file_async("結束 yuanta::get_stock_price".to_string());
+        tracing::debug!("結束 yuanta::get_stock_price");
     }
 
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_quotes() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 yuanta::get_stock_quotes".to_string());
+        tracing::debug!("開始 yuanta::get_stock_quotes");
 
         for stock_symbol in ["2330", "5306"] {
             match Yuanta::get_stock_quotes(stock_symbol).await {
-                Ok(quotes) => logging::debug_file_async(format!(
-                    "yuanta::get_stock_quotes {stock_symbol}: {:?}",
-                    quotes
-                )),
-                Err(why) => logging::debug_file_async(format!(
-                    "Failed to yuanta::get_stock_quotes({stock_symbol}) because {:?}",
-                    why
-                )),
+                Ok(quotes) => tracing::debug!("yuanta::get_stock_quotes {stock_symbol}: {:?}",
+                    quotes),
+                Err(why) => tracing::debug!("Failed to yuanta::get_stock_quotes({stock_symbol}) because {:?}",
+                    why),
             }
         }
 
-        logging::debug_file_async("結束 yuanta::get_stock_quotes".to_string());
+        tracing::debug!("結束 yuanta::get_stock_quotes");
     }
 }

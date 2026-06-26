@@ -1,16 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{
-    core::logging,
-    core::util::map::Keyable,
-    domain::market_index::MarketIndex,
-    domain::market_index::repository::MarketIndexRepository,
-    infra::crawler::share as crawler_share,
-    infra::database::{
+use crate::{core::util::map::Keyable, domain::market_index::MarketIndex, domain::market_index::repository::MarketIndexRepository, infra::crawler::share as crawler_share, infra::database::{
         repository::market_index::PgMarketIndexRepository,
         table::{last_daily_quotes, revenue, stock},
-    },
-};
+    }};
 
 use super::share::Share;
 
@@ -25,10 +18,8 @@ impl Share {
         match self.indices.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to replace indices cache because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to replace indices cache because {:?}",
+                    why);
             }
         }
     }
@@ -43,10 +34,8 @@ impl Share {
         match self.stocks.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to replace stocks cache because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to replace stocks cache because {:?}",
+                    why);
             }
         }
     }
@@ -66,10 +55,8 @@ impl Share {
         match self.last_revenues.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to replace last_revenues cache because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to replace last_revenues cache because {:?}",
+                    why);
             }
         }
     }
@@ -87,10 +74,8 @@ impl Share {
         match self.last_trading_day_quotes.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to replace last_trading_day_quotes cache because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to replace last_trading_day_quotes cache because {:?}",
+                    why);
             }
         }
     }
@@ -108,10 +93,8 @@ impl Share {
         match self.quote_history_records.write() {
             Ok(mut cache) => *cache = new_cache,
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to replace quote_history_records cache because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to replace quote_history_records cache because {:?}",
+                    why);
             }
         }
     }
@@ -135,7 +118,7 @@ impl Share {
         match index_repo.fetch_latest(30).await {
             Ok(indices) => self.replace_indices_cache(indices),
             Err(why) => {
-                logging::error_file_async(format!("Failed to fetch indices because {:?}", why));
+                tracing::error!("Failed to fetch indices because {:?}", why);
             }
         }
 
@@ -145,27 +128,23 @@ impl Share {
                 self.replace_stocks_cache(domain_stocks);
             }
             Err(why) => {
-                logging::error_file_async(format!("Failed to fetch stocks because {:?}", why));
+                tracing::error!("Failed to fetch stocks because {:?}", why);
             }
         }
 
         match revenue::fetch_last_two_month().await {
             Ok(revenues) => self.replace_last_revenues_cache(revenues),
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to fetch last_revenues because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to fetch last_revenues because {:?}",
+                    why);
             }
         }
 
         match last_daily_quotes::LastDailyQuotes::fetch().await {
             Ok(quotes) => self.replace_last_trading_day_quotes_cache(quotes),
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to fetch last_trading_day_quotes because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to fetch last_trading_day_quotes because {:?}",
+                    why);
             }
         }
 
@@ -174,10 +153,8 @@ impl Share {
         match quote_repo.fetch_quote_history_records().await {
             Ok(records) => self.replace_quote_history_records_cache(records),
             Err(why) => {
-                logging::error_file_async(format!(
-                    "Failed to fetch quote_history_records because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to fetch quote_history_records because {:?}",
+                    why);
             }
         }
 
@@ -189,47 +166,35 @@ impl Share {
         }
 
         let current_ip = self.get_current_ip().unwrap_or_default();
-        logging::info_file_async(format!("current_ip  {}", current_ip));
-        logging::info_file_async(format!(
-            "CacheShare.indices 初始化 {}",
+        tracing::info!("current_ip  {}", current_ip);
+        tracing::info!("CacheShare.indices 初始化 {}",
             self.indices
                 .read()
                 .map(|cache| cache.len())
-                .unwrap_or_default()
-        ));
-        logging::info_file_async(format!(
-            "CacheShare.industries 初始化 {:?}",
-            self.industries
-        ));
-        logging::info_file_async(format!(
-            "CacheShare.stocks 初始化 {}",
+                .unwrap_or_default());
+        tracing::info!("CacheShare.industries 初始化 {:?}",
+            self.industries);
+        tracing::info!("CacheShare.stocks 初始化 {}",
             self.stocks
                 .read()
                 .map(|cache| cache.len())
-                .unwrap_or_default()
-        ));
-        logging::info_file_async(format!(
-            "CacheShare.last_trading_day_quotes 初始化 {}",
+                .unwrap_or_default());
+        tracing::info!("CacheShare.last_trading_day_quotes 初始化 {}",
             self.last_trading_day_quotes
                 .read()
                 .map(|cache| cache.len())
-                .unwrap_or_default()
-        ));
-        logging::info_file_async(format!(
-            "CacheShare.quote_history_records 初始化 {}",
+                .unwrap_or_default());
+        tracing::info!("CacheShare.quote_history_records 初始化 {}",
             self.quote_history_records
                 .read()
                 .map(|cache| cache.len())
-                .unwrap_or_default()
-        ));
+                .unwrap_or_default());
 
         if let Ok(revenues) = self.last_revenues.read() {
             for revenue in revenues.iter() {
-                logging::info_file_async(format!(
-                    "CacheShare.last_revenues 初始化 {}:{}",
+                tracing::info!("CacheShare.last_revenues 初始化 {}:{}",
                     revenue.0,
-                    revenue.1.keys().len()
-                ));
+                    revenue.1.keys().len());
             }
         }
     }
@@ -337,10 +302,8 @@ mod tests {
             if loop_count < 0 {
                 break;
             }
-            crate::core::logging::info_file_async(format!(
-                "indices e.date {:?} e.index {:?}",
-                e.1.date, e.1.index
-            ));
+            tracing::info!("indices e.date {:?} e.index {:?}",
+                e.1.date, e.1.index);
             loop_count -= 1;
         }
 
@@ -349,7 +312,7 @@ mod tests {
             if loop_count < 0 {
                 break;
             }
-            crate::core::logging::info_file_async(format!("stock {} name {}", k, v.name()));
+            tracing::info!("stock {} name {}", k, v.name());
             loop_count -= 1;
         }
 
@@ -358,15 +321,13 @@ mod tests {
             if loop_count < 0 {
                 break;
             }
-            crate::core::logging::info_file_async(format!(
-                "security_code {} closing_price {}",
-                k, v.closing_price
-            ));
+            tracing::info!("security_code {} closing_price {}",
+                k, v.closing_price);
             loop_count -= 1;
         }
 
         for (k, v) in SHARE.industries.iter() {
-            crate::core::logging::info_file_async(format!("name {}  category {}", k, v));
+            tracing::info!("name {}  category {}", k, v);
         }
 
         match SHARE.quote_history_records.write() {

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 
-use crate::{core::logging, infra::crawler::twse};
+use crate::{infra::crawler::twse};
 
 /// 取得指定年份的交易所休市日集合。
 ///
@@ -23,10 +23,8 @@ async fn get_holidays_set(year: i32) -> HashSet<NaiveDate> {
         }
         Err(err) => {
             // 發生網路或解析錯誤時，發送錯誤日誌並降級（回傳空集合）
-            logging::error_file_async(format!(
-                "Failed to fetch TWSE holiday schedule for {}, falling back to weekend check: {:?}",
-                year, err
-            ));
+            tracing::error!("Failed to fetch TWSE holiday schedule for {}, falling back to weekend check: {:?}",
+                year, err);
             HashSet::new()
         }
     }
@@ -120,20 +118,18 @@ mod tests {
 
     use tokio::time;
 
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 execute".to_string());
+        tracing::info!("開始 execute");
         //let date = NaiveDate::from_ymd_opt(2023, 6, 15);
         //let today: NaiveDate = Local::today().naive_local();
         let _ = execute().await;
 
-        logging::info_file_async("結束 execute".to_string());
+        tracing::info!("結束 execute");
         time::sleep(Duration::from_secs(1)).await;
     }
 

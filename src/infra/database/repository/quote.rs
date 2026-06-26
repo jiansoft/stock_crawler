@@ -1,13 +1,10 @@
-use crate::{
-    core::logging,
-    domain::quote::{
+use crate::{domain::quote::{
         entity::{
             DailyQuote as DomainDailyQuote, LastDailyQuote as DomainLastDailyQuote,
             QuoteHistoryRecord as DomainQuoteHistoryRecord,
         },
         repository::QuoteRepository,
-    },
-    infra::{
+    }, infra::{
         database,
         database::table::quote::{
             daily_quote::{self, DailyQuote as TableDailyQuote},
@@ -16,8 +13,7 @@ use crate::{
             quote_history_record::QuoteHistoryRecord as TableQuoteHistoryRecord,
         },
         nosql::redis::CLIENT,
-    },
-};
+    }};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -61,10 +57,8 @@ impl PgQuoteRepository {
             return;
         };
         if let Err(why) = CLIENT.set(cache_key, serialized, 86400).await {
-            logging::error_file_async(format!(
-                "Failed to update Redis cache for {}: {:?}",
-                security_code, why
-            ));
+            tracing::error!("Failed to update Redis cache for {}: {:?}",
+                security_code, why);
         }
     }
 
@@ -76,10 +70,8 @@ impl PgQuoteRepository {
                 continue;
             };
             if let Err(why) = CLIENT.set(&cache_key, serialized, 86400).await {
-                logging::error_file_async(format!(
-                    "Failed to update Redis cache in batch for {}: {:?}",
-                    q.stock_symbol, why
-                ));
+                tracing::error!("Failed to update Redis cache in batch for {}: {:?}",
+                    q.stock_symbol, why);
             }
         }
     }
@@ -367,9 +359,7 @@ impl QuoteRepository for PgQuoteRepository {
         if let Some(cached) = self.try_cache_get(&cache_key).await {
             return Ok(Some(cached));
         }
-        logging::debug_file_async(format!(
-            "Redis cache miss or error for key: {cache_key}, fallback to PostgreSQL"
-        ));
+        tracing::debug!("Redis cache miss or error for key: {cache_key}, fallback to PostgreSQL");
 
         // 2. 降級從 PostgreSQL 查詢
         let Some(domain_quote) = self.pg_fetch_last_quote(security_code).await? else {

@@ -93,29 +93,25 @@ ON CONFLICT (date) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_upsert() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 DailyMoneyHistory::upsert".to_string());
+        tracing::debug!("開始 DailyMoneyHistory::upsert");
         let current_date = NaiveDate::parse_from_str("2023-08-30", "%Y-%m-%d").unwrap();
         let mut tx = database::get_tx().await.ok();
         match DailyMoneyHistory::upsert(current_date, &mut tx).await {
             Ok(r) => {
-                logging::debug_file_async(format!("DailyMoneyHistory::upsert:{:#?}", r));
+                tracing::debug!("DailyMoneyHistory::upsert:{:#?}", r);
                 tx.unwrap()
                     .commit()
                     .await
                     .expect("tx.unwrap().commit() is failed");
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to DailyMoneyHistory::upsert because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to DailyMoneyHistory::upsert because {:?}",
+                    why);
                 tx.unwrap()
                     .rollback()
                     .await
@@ -123,6 +119,6 @@ mod tests {
             }
         }
 
-        logging::debug_file_async("結束 DailyMoneyHistory::upsert".to_string());
+        tracing::debug!("結束 DailyMoneyHistory::upsert");
     }
 }

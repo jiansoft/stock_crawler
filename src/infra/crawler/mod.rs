@@ -28,7 +28,6 @@ use rust_decimal::Decimal;
 
 use crate::{
     core::declare,
-    core::logging,
     core::util,
     infra::crawler::{
         cmoney::CMoney, cnyes::CnYes, fugle::Fugle, megatime::PcHome, nstock::NStock,
@@ -136,19 +135,19 @@ pub(crate) async fn log_stock_price_test<S>(stock_symbol: &str)
 where
     S: StockInfo,
 {
-    logging::debug_file_async("開始 get_stock_price".to_string());
+    tracing::debug!("開始 get_stock_price");
 
     match S::get_stock_price(stock_symbol).await {
         Ok(price) => {
             dbg!(&price);
-            logging::debug_file_async(format!("price : {:#?}", price));
+            tracing::debug!("price : {:#?}", price);
         }
         Err(why) => {
-            logging::debug_file_async(format!("Failed to get_stock_price because {:?}", why));
+            tracing::debug!("Failed to get_stock_price because {:?}", why);
         }
     }
 
-    logging::debug_file_async("結束 get_stock_price".to_string());
+    tracing::debug!("結束 get_stock_price");
 }
 
 #[cfg(test)]
@@ -162,7 +161,7 @@ where
             dbg!(ip);
         }
         Err(why) => {
-            logging::error_file_async(format!("Failed to get because {:?}", why));
+            tracing::error!("Failed to get because {:?}", why);
         }
     }
 }
@@ -632,13 +631,13 @@ pub fn flush_site_latency_stats() {
     let mut stats = match SITE_LATENCY_STATS.lock() {
         Ok(guard) => guard,
         Err(_) => {
-            logging::error_file_async("Failed to lock site latency stats for flush");
+            tracing::error!("Failed to lock site latency stats for flush");
             return;
         }
     };
 
     if stats.is_empty() {
-        logging::info_file_async("站點延遲統計: 無資料");
+        tracing::info!("站點延遲統計: 無資料");
         return;
     }
 
@@ -661,10 +660,8 @@ pub fn flush_site_latency_stats() {
     });
 
     for entry in entries {
-        logging::info_file_async(format!(
-            "站點整體耗時統計 {}: count={}, avg={}ms, p50={}ms, p70={}ms, p99={}ms",
-            entry.site_name, entry.count, entry.avg_ms, entry.p50_ms, entry.p70_ms, entry.p99_ms
-        ));
+        tracing::info!("站點整體耗時統計 {}: count={}, avg={}ms, p50={}ms, p70={}ms, p99={}ms",
+            entry.site_name, entry.count, entry.avg_ms, entry.p50_ms, entry.p70_ms, entry.p99_ms);
     }
 
     stats.clear();
@@ -735,9 +732,7 @@ pub async fn fetch_stock_quotes_from_remote_site(
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     /// 驗證站點延遲統計可以正確計算平均值與各主要百分位。
     #[test]
@@ -804,7 +799,7 @@ mod tests {
     #[ignore]
     async fn test_fetch_stock_price_from_remote_site() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_price".to_string());
+        tracing::debug!("開始 fetch_price");
 
         let sites = [
             "2330", "1101", "1232", "1303", "1326", "3008", "9941", "2912",
@@ -817,12 +812,12 @@ mod tests {
                     println!("{}:{}", site, e);
                 }
                 Err(why) => {
-                    logging::debug_file_async(format!("Failed to fetch_price because {:?}", why));
+                    tracing::debug!("Failed to fetch_price because {:?}", why);
                 }
             }
         }
         flush_site_latency_stats();
-        logging::debug_file_async("結束 fetch_price".to_string());
+        tracing::debug!("結束 fetch_price");
     }
 
     /// 驗證完整站點池可以成功抓取多檔股票的完整報價資訊。
@@ -832,7 +827,7 @@ mod tests {
     #[ignore]
     async fn test_fetch_stock_quotes_from_remote_site() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_stock_quotes_from_remote_site".to_string());
+        tracing::debug!("開始 fetch_stock_quotes_from_remote_site");
 
         let sites = [
             "2330", "1101", "1232", "1303", "1326", "3008", "9941", "2912",
@@ -845,11 +840,11 @@ mod tests {
                     println!("{}:{:?}", site, e);
                 }
                 Err(why) => {
-                    logging::debug_file_async(format!("Failed to fetch_price because {:?}", why));
+                    tracing::debug!("Failed to fetch_price because {:?}", why);
                 }
             }
         }
 
-        logging::debug_file_async("結束 fetch_stock_quotes_from_remote_site".to_string());
+        tracing::debug!("結束 fetch_stock_quotes_from_remote_site");
     }
 }

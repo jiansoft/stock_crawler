@@ -6,12 +6,12 @@ use crate::app::event::handlers::get_global_dispatcher;
 use crate::domain::events::DomainEvent;
 use crate::domain::market_index::repository::MarketIndexRepository;
 use crate::infra::database::repository::market_index::PgMarketIndexRepository;
-use crate::{core::logging, infra::cache::SHARE, infra::crawler::twse};
+use crate::{infra::cache::SHARE, infra::crawler::twse};
 
 pub async fn execute() -> Result<()> {
     let tai_ex = twse::taiwan_capitalization_weighted_stock_index::visit(Local::now()).await?;
     if tai_ex.stat.to_uppercase() != "OK" {
-        logging::warn_file_async("抓取加權股價指數 Finish taiex.Stat is not ok".to_string());
+        tracing::warn!("抓取加權股價指數 Finish taiex.Stat is not ok");
         return Ok(());
     }
 
@@ -32,7 +32,7 @@ pub async fn execute() -> Result<()> {
 
             match index_repo.save(&index_entity).await {
                 Ok(_) => {
-                    logging::info_file_async(format!("index add {:?}", index_entity));
+                    tracing::info!("index add {:?}", index_entity);
 
                     // 派發領域事件以發送 Telegram 通知
                     let event = DomainEvent::StockIndexUpdated {
@@ -46,10 +46,8 @@ pub async fn execute() -> Result<()> {
                     SHARE.set_stock_index(key, index_entity).await;
                 }
                 Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to index.upsert({:#?}) because {:?}",
-                        index_entity, why
-                    ));
+                    tracing::error!("Failed to index.upsert({:#?}) because {:?}",
+                        index_entity, why);
                 }
             }
         }
@@ -78,9 +76,7 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
 
     let tai_ex = twse::taiwan_capitalization_weighted_stock_index::visit(datetime).await?;
     if tai_ex.stat.to_uppercase() != "OK" {
-        logging::warn_file_async(format!(
-            "抓取加權股價指數 (date={date}) Finish taiex.Stat is not ok"
-        ));
+        tracing::warn!("抓取加權股價指數 (date={date}) Finish taiex.Stat is not ok");
         return Ok(0);
     }
 
@@ -103,16 +99,14 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
 
             match index_repo.save(&index_entity).await {
                 Ok(_) => {
-                    logging::info_file_async(format!("index upsert (backfill) {:?}", index_entity));
+                    tracing::info!("index upsert (backfill) {:?}", index_entity);
                     let key = format!("{}-TAIEX", index_entity.date);
                     SHARE.set_stock_index(key, index_entity).await;
                     upserted_count += 1;
                 }
                 Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to index.upsert({:#?}) because {:?}",
-                        index_entity, why
-                    ));
+                    tracing::error!("Failed to index.upsert({:#?}) because {:?}",
+                        index_entity, why);
                 }
             }
         }
@@ -123,24 +117,22 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
         dotenv::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 }

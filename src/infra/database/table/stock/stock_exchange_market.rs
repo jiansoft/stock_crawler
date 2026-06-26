@@ -64,26 +64,24 @@ impl Clone for StockExchangeMarket {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_fetch() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 StockExchangeMarket::fetch".to_string());
+        tracing::debug!("開始 StockExchangeMarket::fetch");
         println!("開始 StockExchangeMarket::fetch");
 
         match StockExchangeMarket::fetch().await {
             Ok(markets) => {
                 println!("markets:{:#?}", &markets);
-                logging::debug_file_async(format!("markets:{:#?}", markets));
+                tracing::debug!("markets:{:#?}", markets);
             }
             Err(why) => {
                 println!("error:{:#?}", &why);
-                logging::debug_file_async(format!("{:?}", why));
+                tracing::debug!("{:?}", why);
             }
         }
-        logging::debug_file_async("結束 StockExchangeMarket::fetch".to_string());
+        tracing::debug!("結束 StockExchangeMarket::fetch");
     }
 }

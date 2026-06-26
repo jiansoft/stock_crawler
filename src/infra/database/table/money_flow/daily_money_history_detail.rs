@@ -194,14 +194,12 @@ ON CONFLICT (date, security_code, member_id) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_delete_and_upsert() {
         dotenv::dotenv().ok();
-        logging::debug_file_async("開始 DailyMoneyHistoryDetail::delete_and_upsert".to_string());
+        tracing::debug!("開始 DailyMoneyHistoryDetail::delete_and_upsert");
         let current_date = NaiveDate::parse_from_str("2023-08-05", "%Y-%m-%d").unwrap();
         let mut tx = database::get_tx().await.ok();
 
@@ -211,17 +209,15 @@ mod tests {
 
         match DailyMoneyHistoryDetail::upsert(current_date, &mut tx).await {
             Ok(r) => {
-                logging::debug_file_async(format!("DailyMoneyHistoryDetail::upsert:{:#?}", r));
+                tracing::debug!("DailyMoneyHistoryDetail::upsert:{:#?}", r);
                 tx.unwrap()
                     .commit()
                     .await
                     .expect("tx.unwrap().commit() is failed");
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to DailyMoneyHistoryDetail::delete_and_upsert because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to DailyMoneyHistoryDetail::delete_and_upsert because {:?}",
+                    why);
                 tx.unwrap()
                     .rollback()
                     .await
@@ -229,6 +225,6 @@ mod tests {
             }
         }
 
-        logging::debug_file_async("結束 DailyMoneyHistoryDetail::delete_and_upsert".to_string());
+        tracing::debug!("結束 DailyMoneyHistoryDetail::delete_and_upsert");
     }
 }

@@ -117,14 +117,12 @@ mod tests {
 
     use rust_decimal_macros::dec;
 
-    use crate::core::logging;
-
-    use super::*;
+use super::*;
 
     #[tokio::test]
     async fn test_upsert() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 upsert".to_string());
+        tracing::info!("開始 upsert");
         let date = NaiveDate::from_ymd_opt(2023, 8, 2);
         let mut qhr = QuoteHistoryRecord::new("79979".to_string());
         qhr.maximum_price = dec!(1.1);
@@ -137,27 +135,27 @@ mod tests {
         qhr.minimum_price_to_book_ratio_date_on = date.unwrap();
 
         match qhr.upsert().await {
-            Ok(_) => logging::info_file_async(format!("{:#?}", qhr)),
+            Ok(_) => tracing::info!("{:#?}", qhr),
             Err(why) => {
-                logging::error_file_async(format!("Failed to upsert because {:?}", why));
+                tracing::error!("Failed to upsert because {:?}", why);
             }
         }
 
-        logging::info_file_async("結束 upsert".to_string());
+        tracing::info!("結束 upsert");
     }
 
     #[tokio::test]
     async fn test_fetch() {
         dotenv::dotenv().ok();
-        logging::info_file_async("開始 fetch".to_string());
+        tracing::info!("開始 fetch");
 
         match QuoteHistoryRecord::fetch().await {
-            Ok(qhr) => logging::info_file_async(format!("{:#?}", qhr)),
+            Ok(qhr) => tracing::info!("{:#?}", qhr),
             Err(why) => {
-                logging::error_file_async(format!("Failed to fetch because {:?}", why));
+                tracing::error!("Failed to fetch because {:?}", why);
             }
         }
 
-        logging::info_file_async("結束 fetch".to_string());
+        tracing::info!("結束 fetch");
     }
 }
