@@ -150,9 +150,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_delete_and_upsert() {
         dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 test_delete_and_upsert：無資料庫連接");
+            return;
+        }
         tracing::debug!("開始 delete_and_upsert");
 
         let current_date = NaiveDate::parse_from_str("2023-08-05", "%Y-%m-%d").unwrap();
@@ -165,20 +168,18 @@ mod tests {
         match DailyMoneyHistoryDetailMore::upsert(current_date, &mut tx).await {
             Ok(r) => {
                 tracing::debug!("DailyMoneyHistoryDetailMore::upsert:{:#?}", r);
-                tx.unwrap()
-                    .commit()
-                    .await
-                    .expect("tx.unwrap().commit() is failed");
+                if let Some(tx) = tx {
+                    tx.commit().await.expect("commit is failed");
+                }
             }
             Err(why) => {
                 tracing::debug!(
                     "Failed to DailyMoneyHistoryDetailMore::delete_and_upsert because {:?}",
                     why
                 );
-                tx.unwrap()
-                    .rollback()
-                    .await
-                    .expect("tx.unwrap().rollback() is failed");
+                if let Some(tx) = tx {
+                    tx.rollback().await.expect("rollback is failed");
+                }
             }
         }
 
