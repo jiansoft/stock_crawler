@@ -253,7 +253,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_backfill_unannounced_dividend_dates_live() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         let _ = backfill_unannounced_dividend_dates(2025).await;
     }

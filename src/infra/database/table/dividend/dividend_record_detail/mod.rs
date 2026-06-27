@@ -119,7 +119,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_cumulate_dividend() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 calculate_cumulate_dividend");
         let drd = DividendRecordDetail::new(
             27,

@@ -69,7 +69,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_stocks_with_payable_on_date() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_stocks_with_payable_on_date");
 
         let ex_date = Local.with_ymd_and_hms(2023, 8, 25, 0, 0, 0).unwrap();

@@ -73,7 +73,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_push_stock_info_to_go_service() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 push_stock_info_to_go_service");
         let request = StockInfoRequest {

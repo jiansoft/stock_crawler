@@ -118,7 +118,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_aggregate() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         tracing::debug!("開始 event::taiwan_stock::closing::aggregate");

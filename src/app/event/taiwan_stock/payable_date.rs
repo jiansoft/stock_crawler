@@ -251,7 +251,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_calculate() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::info!("開始 execute");
         //let date = NaiveDate::from_ymd_opt(2023, 6, 15);
         //let today: NaiveDate = Local::today().naive_local();

@@ -71,7 +71,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 update");
         let sw = SymbolAndWeight::new("2330".to_string(), dec!(28.3278));
         match sw.update().await {
@@ -116,7 +116,7 @@ WHERE stock_symbol = $1;
 
     #[tokio::test]
     async fn test_zeroed_out() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 zeroed_out");
 
         match SymbolAndWeight::zeroed_out().await {

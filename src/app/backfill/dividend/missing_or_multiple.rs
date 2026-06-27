@@ -415,7 +415,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_backfill_missing_or_multiple_dividends_live() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         backfill_missing_or_multiple_dividends(2025)
             .await
@@ -425,7 +425,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_backfill_recent_dividends_for_stock_live() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         let year = 2026;
@@ -451,7 +451,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_backfill_historical_dividends_for_stock_from_multiple_dividend_year_live() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         let year = Local::now().year();

@@ -97,7 +97,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_first() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 first");
         let now = Local::now();
         let date_naive = now.date_naive();

@@ -28,7 +28,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_money_history() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 calculate_money_history");
         let current_date = NaiveDate::parse_from_str("2026-04-20", "%Y-%m-%d").unwrap();

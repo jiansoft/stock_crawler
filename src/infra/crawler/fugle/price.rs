@@ -261,7 +261,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fugle::get_stock_price");
 
         for stock_symbol in ["2330", "5306"] {
@@ -282,7 +282,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_quotes() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fugle::get_stock_quotes");
 
         for stock_symbol in ["2330", "5306"] {

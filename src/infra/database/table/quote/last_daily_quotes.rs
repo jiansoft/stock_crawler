@@ -142,7 +142,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::info!("開始 fetch");
         let _ = LastDailyQuotes::new();
         match LastDailyQuotes::fetch().await {
@@ -157,7 +157,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rebuild() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::info!("開始 rebuild");
         match LastDailyQuotes::rebuild().await {
             Ok(r) => tracing::info!("{:#?}", r),

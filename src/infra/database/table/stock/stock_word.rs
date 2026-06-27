@@ -144,7 +144,7 @@ mod tests {
 
     /*    #[tokio::test]
         async fn test_vec_to_hashmap() {
-            dotenv::dotenv().ok();
+            dotenvy::dotenv().ok();
             let mut entities: Vec<StockWord> = Vec::new();
             for i in 0..1000000 {
                 entities.push(StockWord {
@@ -170,7 +170,7 @@ mod tests {
     */
     /*    #[tokio::test]
         async fn test_split_1() {
-            dotenv::dotenv().ok();
+            dotenvy::dotenv().ok();
             let chinese_word = "台積電";
             let start = Instant::now();
             let result = split_v1(chinese_word);
@@ -181,7 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let mut e = StockWord::new("小一".to_string());
         match e.upsert().await {
             Ok(word_id) => {
@@ -199,7 +199,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_by_word() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let word = util::text::split("隆銘綠能");
         let entities = StockWord::list_by_word(&word).await;
         tracing::debug!("entities:{:#?}", entities);

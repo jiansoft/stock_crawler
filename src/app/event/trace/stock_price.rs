@@ -674,7 +674,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_alert_message() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         let trace = PriceTrace {
@@ -703,7 +703,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_handle_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         let trace = PriceTrace {
@@ -725,7 +725,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_reconcile_target_prices() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         refresh_trace_targets_cache().await.unwrap();
         let result = reconcile_target_prices().await;
@@ -735,7 +735,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         let result = execute().await;
         assert!(result.is_ok());

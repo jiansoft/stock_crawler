@@ -50,7 +50,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 visit");
 

@@ -105,7 +105,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_execute_etf() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 execute_etf");
 

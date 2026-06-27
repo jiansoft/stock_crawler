@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_basic_write() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         logging::debug_file_async("開始 test_basic_write".to_string());
 
         let mut r = Rotate::new("log/%Y-%m-%d-test.log".to_string());
@@ -318,7 +318,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_date_rotation() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         logging::debug_file_async("開始 test_date_rotation".to_string());
 
         let mut r = Rotate::new("log/%Y-%m-%d-test.log".to_string());
@@ -340,7 +340,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_size_rotation() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         logging::debug_file_async("開始 test_size_rotation".to_string());
 
         // 設定很小的檔案大小限制 (1KB) 來測試輪轉
@@ -391,7 +391,7 @@ mod tests {
     async fn test_no_overwrite() {
         use std::collections::HashSet;
 
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         // 清理舊測試檔案
         if let Ok(entries) = fs::read_dir("log") {

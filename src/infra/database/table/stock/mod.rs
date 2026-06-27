@@ -456,7 +456,7 @@ mod tests {
     // 此測試驗證防禦性 upsert 邏輯（當新傳入的市場或產業編號為 0 時，保留資料庫中原先正確的非零值）。
     #[tokio::test]
     async fn test_upsert_industry() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         // 若目前測試環境無法連接資料庫，則自動跳過，避免在無資料庫之開發環境下執行單元測試失敗
         if crate::infra::database::ping().await.is_err() {
@@ -561,7 +561,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_last_eps() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 update_last_eps");
         match StockDbRow::update_eps_and_roe().await {
             Ok(_) => {}
@@ -575,7 +575,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 StockDbRow::fetch");
         match StockDbRow::fetch().await {
             Ok(stocks) => {
@@ -590,7 +590,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_net_asset_value_per_share_is_zero() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_net_asset_value_per_share_is_zero");
         match fetch_net_asset_value_per_share_is_zero().await {
             Ok(stocks) => {
@@ -611,7 +611,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_stocks_without_financial_statement() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_stocks_without_financial_statement");
         match fetch_stocks_without_financial_statement(2022, "Q4").await {
             Ok(stocks) => {
@@ -632,13 +632,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_index() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         create_search_index("2330", "台積電").await;
     }
 
     #[tokio::test]
     async fn test_rebuild_search_indices() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 rebuild_search_indices");
 
         match StockDbRow::rebuild_search_indices().await {

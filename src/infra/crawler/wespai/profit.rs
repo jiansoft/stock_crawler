@@ -154,7 +154,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 visit");
 
         match visit().await {

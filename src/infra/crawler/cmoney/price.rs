@@ -184,14 +184,14 @@ mod tests {
     #[tokio::test]
     /// 測試可取得指定股票即時價格。
     async fn test_get_stock_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         log_stock_price_test::<CMoney>("4438").await;
     }
 
     #[tokio::test]
     /// 測試可取得指定股票完整即時報價。
     async fn test_get_stock_quotes() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 cmoney::get_stock_quotes");
 
         match CMoney::get_stock_quotes("4438").await {

@@ -67,7 +67,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_list() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_list");
 
         let r = trace::Trace::fetch().await;

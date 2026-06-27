@@ -101,7 +101,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 test_upsert");
 
         let mut e = DividendRecordDetailMore::new(

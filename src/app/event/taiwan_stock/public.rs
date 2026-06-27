@@ -109,7 +109,7 @@ mod tests {
     /// 驗證公開申購提醒流程可執行。
     #[tokio::test]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::info!("開始 execute");
         //let date = NaiveDate::from_ymd_opt(2023, 6, 15);

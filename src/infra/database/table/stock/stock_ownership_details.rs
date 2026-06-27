@@ -154,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_stock_inventory() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch");
         let r = StockOwnershipDetail::fetch(Some(vec!["2330".to_string()])).await;
         if let Ok(result) = r {

@@ -157,7 +157,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 histock::annual_profit::visit");
 
         match visit("2330").await {

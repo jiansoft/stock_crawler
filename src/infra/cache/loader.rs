@@ -295,7 +295,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_industry_name() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         assert_eq!(SHARE.get_industry_name(1), Some("水泥工業".to_string()));
@@ -306,7 +306,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         SHARE.load().await;
 

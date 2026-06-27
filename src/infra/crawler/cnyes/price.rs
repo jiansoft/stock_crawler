@@ -121,13 +121,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_stock_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         log_stock_price_test::<CnYes>("2330").await;
     }
 
     #[tokio::test]
     async fn test_get_stock_quotes() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 cnyes::get_stock_quotes");
 
         match CnYes::get_stock_quotes("2330").await {
@@ -145,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_data() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_data");
 
         // match get("2330").await {

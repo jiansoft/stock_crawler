@@ -149,13 +149,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_stock_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         log_stock_price_test::<PcHome>("2330").await;
     }
 
     #[tokio::test]
     async fn test_get_stock_quotes() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 megatime::get_stock_quotes");
 
         match PcHome::get_stock_quotes("2330").await {

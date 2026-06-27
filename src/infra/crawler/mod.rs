@@ -805,7 +805,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_fetch_stock_price_from_remote_site() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_price");
 
         let sites = [
@@ -833,7 +833,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_fetch_stock_quotes_from_remote_site() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_stock_quotes_from_remote_site");
 
         let sites = [

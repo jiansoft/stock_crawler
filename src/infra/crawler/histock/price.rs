@@ -692,7 +692,7 @@ mod tests {
     #[ignore]
     async fn test_get_stock_price() {
         let _guard = TEST_STATE_LOCK.lock().await;
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 HiStock::get_stock_price");
 
         match HiStock::get_stock_price("2330").await {
@@ -710,7 +710,7 @@ mod tests {
     #[ignore]
     async fn test_get_stock_quotes() {
         let _guard = TEST_STATE_LOCK.lock().await;
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 HiStock::get_stock_quotes");
 
         match HiStock::get_stock_quotes("2330").await {

@@ -221,7 +221,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_send_message() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 test_send_message");
         let msg = format!(

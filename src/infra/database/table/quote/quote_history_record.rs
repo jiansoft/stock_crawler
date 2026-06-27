@@ -121,7 +121,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::info!("開始 upsert");
         let date = NaiveDate::from_ymd_opt(2023, 8, 2);
         let mut qhr = QuoteHistoryRecord::new("79979".to_string());
@@ -146,7 +146,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::info!("開始 fetch");
 
         match QuoteHistoryRecord::fetch().await {

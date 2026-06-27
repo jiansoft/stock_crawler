@@ -104,7 +104,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit_tpex_etf() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         match visit().await {
             Err(why) => println!("抓取上櫃 ETF 失敗: {:?}", why),

@@ -229,7 +229,7 @@ mod tests {
     /// 驗證 `contains_key` 的基本查詢流程。
     #[tokio::test]
     async fn test_redis_contains_key() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         if skip_when_redis_unavailable().await {
             return;
         }
@@ -243,7 +243,7 @@ mod tests {
     /// 驗證 decimal 存取流程。
     #[tokio::test]
     async fn test_redis_decimal() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         if skip_when_redis_unavailable().await {
             return;
         }
@@ -258,7 +258,7 @@ mod tests {
     /// 驗證 Redis 常用操作。
     #[tokio::test]
     async fn test_redis() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 test_redis");
 

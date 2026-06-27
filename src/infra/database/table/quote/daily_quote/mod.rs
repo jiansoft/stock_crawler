@@ -972,7 +972,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_moving_average() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_moving_average");
         let date = NaiveDate::from_ymd_opt(2023, 8, 1);
         let mut dq = DailyQuote::new("2330".to_string());
@@ -992,7 +992,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_daily_quotes_by_date() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_daily_quotes_by_date");
         let date = NaiveDate::from_ymd_opt(2023, 7, 31);
         match fetch_daily_quotes_by_date(date.unwrap()).await {
@@ -1009,7 +1009,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_count_by_date() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_count_by_date");
         let date = NaiveDate::from_ymd_opt(2023, 7, 31);
         match fetch_count_by_date(date.unwrap()).await {
@@ -1026,7 +1026,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_makeup_for_the_lack_daily_quotes() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         let now = Local::now().date_naive();
@@ -1050,7 +1050,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_lowest_avg_highest_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_lowest_avg_highest_price");
 
         match fetch_monthly_stock_price_summary("2330", 2023, 4).await {
@@ -1067,7 +1067,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 upsert");
 
@@ -1147,7 +1147,7 @@ mod tests {
     /// 此測試同時依賴外部網路與本機資料庫，預設測試集不應執行。
     #[tokio::test]
     async fn test_copy_in_raw() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 copy_in_raw");
 
         let date = NaiveDate::from_ymd_opt(2023, 12, 4).unwrap();

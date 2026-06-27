@@ -152,7 +152,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         let _now = Local::now();
 

@@ -151,7 +151,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_and_upsert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 delete_and_upsert");
 
         let current_date = NaiveDate::parse_from_str("2023-08-05", "%Y-%m-%d").unwrap();

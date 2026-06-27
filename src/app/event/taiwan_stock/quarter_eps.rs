@@ -146,7 +146,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 execute");
 
@@ -162,7 +162,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_eps() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::info!("開始 process_eps");
         use crate::domain::registry::repository::StockRepository;

@@ -206,7 +206,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_split() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         run().await.expect("TODO: panic message");
         //sleep(Duration::from_secs(240)).await;
         //loop {}

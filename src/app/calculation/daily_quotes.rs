@@ -185,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_moving_average() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 calculate_moving_average");
         let date = NaiveDate::from_ymd_opt(2026, 2, 26);

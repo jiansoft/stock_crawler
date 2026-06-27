@@ -100,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 YieldRank::upsert");
         let current_date = Local::now().date_naive();
         match YieldRank::upsert(current_date).await {

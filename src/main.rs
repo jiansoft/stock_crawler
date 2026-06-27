@@ -177,7 +177,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // `.env` 檔案讓本機開發不需設定系統環境變數（資料庫密碼、Token 等敏感值）。
     // `.ok()` 讓「找不到 .env」靜默忽略—生產環境透過 Docker env 或 K8s Secret 注入。
     // 此行必須在 SETTINGS 第一次被存取之前執行，否則 config 讀不到 .env 覆蓋值。
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
 
     // ── 2. 日誌系統初始化 ────────────────────────────────────────────────────
     //

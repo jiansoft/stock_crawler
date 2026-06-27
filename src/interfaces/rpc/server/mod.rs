@@ -155,11 +155,15 @@ fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Re
 /// 用於日誌記錄，提供憑證的 Subject 與過期時間等資訊。
 /// 使用純 Rust 實作，不依賴外部 openssl 指令。
 fn describe_certificate(cert_pem: &str) -> String {
+    use rustls_pki_types::pem::PemObject;
+
+    // 建立一個讀取器，將 PEM 格式的憑證資料包裝成 BufReader
     let mut reader = BufReader::new(Cursor::new(cert_pem.as_bytes()));
-    let cert = match rustls_pemfile::certs(&mut reader).next().transpose() {
-        Ok(Some(cert)) => cert,
-        Ok(None) => return "PEM 中找不到 CERTIFICATE 區塊".to_string(),
-        Err(why) => return format!("憑證 PEM 解析失敗: {}", why),
+    // 使用 rustls-pki-types 的 pem_reader_iter 迭代解析 PEM 資料，並取出第一個憑證區塊
+    let cert = match rustls_pki_types::CertificateDer::pem_reader_iter(&mut reader).next().transpose() {
+        Ok(Some(cert)) => cert, // 成功解析出憑證
+        Ok(None) => return "PEM 中找不到 CERTIFICATE 區塊".to_string(), // 找不到憑證區塊
+        Err(why) => return format!("憑證 PEM 解析失敗: {}", why), // 解析發生錯誤
     };
 
     let parsed = match x509_parser::parse_x509_certificate(cert.as_ref()) {
@@ -183,7 +187,7 @@ mod tests {
     /// 測試 gRPC 伺服器啟動流程。
     #[tokio::test]
     async fn test_start() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 rpc::server::test_start()");
 
         tokio::spawn(start());

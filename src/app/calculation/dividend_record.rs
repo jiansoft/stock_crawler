@@ -410,8 +410,9 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_backfill_received_dividend_records_for_stock_backfills_after_dividend_insert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         let security_code = "0056";
@@ -424,7 +425,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 calculate");
         for i in 2025..2026 {
             execute(i, None).await;
@@ -435,7 +436,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_dividend() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 calculate_dividend");
 

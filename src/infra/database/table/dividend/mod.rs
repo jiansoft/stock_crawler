@@ -680,7 +680,7 @@ mod tests {
 
     /*    #[tokio::test]
     async fn test_fetch_stock_symbol_that_without_payout_ratio() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_stock_symbol_that_without_payout_ratio");
         let r = Dividend::fetch_stock_symbol_that_without_payout_ratio().await;
         if let Ok(result) = r {
@@ -693,7 +693,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_no_dividends_for_year() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_no_dividends_for_year");
         let r = Dividend::fetch_no_dividends_for_year(2023).await;
         if let Ok(result) = r {
@@ -709,7 +709,7 @@ mod tests {
     #[tokio::test]
 
     async fn test_fetch_unpublished_dividend_date_or_payable_date_for_specified_year() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!(
             "{}",
             "開始 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),
@@ -729,7 +729,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_multiple_dividends_for_year() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_multiple_dividends_for_year");
         let r = Dividend::fetch_multiple_dividends_for_year(2023).await;
         if let Ok(result) = r {
@@ -744,7 +744,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_dividends_summary_by_date() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_dividends_summary_by_date");
 
         let datetime = Local.with_ymd_and_hms(2022, 3, 9, 0, 0, 0).unwrap();
@@ -762,7 +762,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_yearly_dividends_sum_by_date() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_yearly_dividends_sum_by_date");
         let mut e = Dividend::new();
         e.security_code = "2887".to_string();
@@ -780,7 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 upsert");
         let mut e = Dividend::new();
         e.security_code = String::from("79979");
@@ -822,7 +822,7 @@ mod tests {
     /// upsert 正式日期，最後查回確認四個日期欄位都已被覆蓋。測試結束會刪除測試股票代碼資料。
     #[tokio::test]
     async fn test_upsert_updates_dividend_dates_on_conflict() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         let security_code = "__TEST_UPSERT_DATE__";
         let year = 2099;
@@ -893,7 +893,7 @@ WHERE security_code = $1 AND year = $2 AND quarter = '';
 
     #[tokio::test]
     async fn test_upsert_annual_total_dividend_operates_database() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 upsert_annual_total_dividend");
 
         // 此函式 SQL 只使用股票代號與發放年度兩個參數；測試只補齊必要參數並確認 SQL 可執行。

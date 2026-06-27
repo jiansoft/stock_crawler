@@ -102,7 +102,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_update_annual_roe_and_roa_for_zero_values() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 update_roe_and_roa_for_zero_values");
 

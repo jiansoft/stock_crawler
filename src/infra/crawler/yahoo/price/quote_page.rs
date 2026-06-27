@@ -160,7 +160,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 visit");
 
         match Yahoo::get_stock_price("2330").await {
@@ -180,7 +180,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_stock_quotes() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 yahoo::get_stock_quotes");
 
         match Yahoo::get_stock_quotes("2330").await {

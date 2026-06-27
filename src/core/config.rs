@@ -420,7 +420,7 @@ mod tests {
     /// 驗證設定可由環境變數與 JSON 載入。
     #[tokio::test]
     async fn test_init() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("SETTINGS.system: {:#?}\r\n", SETTINGS.system);
         tracing::debug!(
             "SETTINGS.postgresql: host={} port={} db={} user={}\r\n",

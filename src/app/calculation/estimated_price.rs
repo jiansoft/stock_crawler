@@ -70,7 +70,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calculate_estimated_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 calculate_estimated_price");
         let current_date = NaiveDate::parse_from_str("2026-03-31", "%Y-%m-%d").unwrap();

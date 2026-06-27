@@ -53,7 +53,7 @@ const MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE: &str = "2887";
 #[tokio::test]
 #[ignore]
 async fn test_backfill_daily_quotes_for_date() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     SHARE.load().await;
 
     let date = NaiveDate::parse_from_str(MANUAL_DAILY_QUOTE_DATE, "%Y-%m-%d")
@@ -90,7 +90,7 @@ async fn test_backfill_daily_quotes_for_date() {
 #[tokio::test]
 #[ignore]
 async fn test_backfill_closing_aggregate_for_date() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     SHARE.load().await;
 
     let date = NaiveDate::parse_from_str(MANUAL_CLOSING_AGGREGATE_DATE, "%Y-%m-%d")
@@ -126,7 +126,7 @@ const MANUAL_TAIWAN_STOCK_INDEX_DATE: &str = "2026-04-15";
 #[tokio::test]
 #[ignore]
 async fn test_backfill_taiwan_stock_index() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     SHARE.load().await;
 
     let date = NaiveDate::parse_from_str(MANUAL_TAIWAN_STOCK_INDEX_DATE, "%Y-%m-%d")
@@ -155,7 +155,7 @@ async fn test_backfill_taiwan_stock_index() {
 #[tokio::test]
 #[ignore]
 async fn test_backfill_received_dividend_records_for_stock() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     SHARE.load().await;
 
     let security_code = MANUAL_DIVIDEND_RECORD_SECURITY_CODE;
@@ -183,7 +183,7 @@ async fn test_backfill_received_dividend_records_for_stock() {
 #[tokio::test]
 #[ignore]
 async fn test_backfill_historical_dividends_for_stock() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     SHARE.load().await;
 
     let security_code = MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE;

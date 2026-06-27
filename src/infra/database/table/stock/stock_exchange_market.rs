@@ -68,7 +68,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 StockExchangeMarket::fetch");
         println!("開始 StockExchangeMarket::fetch");
 

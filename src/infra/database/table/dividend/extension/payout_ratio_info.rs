@@ -117,7 +117,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_without_payout_ratio() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 StockDividendPayoutRatioInfo::fetch");
 
         match fetch_without_payout_ratio().await {

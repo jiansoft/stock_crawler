@@ -91,7 +91,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 visit");
         //let date =  DateTime::parse_from_str("2023-09-14 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();

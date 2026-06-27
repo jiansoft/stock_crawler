@@ -498,7 +498,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 Estimate::upsert");
 
@@ -520,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_upsert_all() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         tracing::debug!("開始 Estimate::upsert_all");
 

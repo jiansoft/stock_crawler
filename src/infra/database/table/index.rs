@@ -247,7 +247,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_fetch() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let r = Index::fetch().await.unwrap();
         for e in r.iter() {
             tracing::info!("e.date {:?} e.index {:?}", e.date, e.index);

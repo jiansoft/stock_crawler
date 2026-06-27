@@ -458,7 +458,7 @@ mod tests {
     #[tokio::test]
     async fn test_cache_aside_flow() {
         // 載入環境變數設定
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         if database::ping().await.is_err() {
             println!("跳過 test_cache_aside_flow：無資料庫連接");

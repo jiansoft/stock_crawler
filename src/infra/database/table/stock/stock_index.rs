@@ -110,7 +110,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let mut e = StockIndex::new("79979".to_string());
         e.word_id = 79979;
         match e.insert().await {

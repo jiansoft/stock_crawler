@@ -676,7 +676,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 mops::annual_profit::visit");
 
         for stock_symbol in ["2330", "2838"] {

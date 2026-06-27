@@ -94,7 +94,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         tracing::debug!("開始 execute");
 
         match execute().await {

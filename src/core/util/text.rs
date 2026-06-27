@@ -258,7 +258,7 @@ mod tests {
     /// 驗證中文字拆字結果。
     #[tokio::test]
     async fn test_split() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let chinese_word = "台積電";
         let start = Instant::now();
         let result = split(chinese_word);
@@ -270,7 +270,7 @@ mod tests {
     /// 比較兩種拆字實作的結果與耗時。
     #[tokio::test]
     async fn test_split_all() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let _result = split_v1("2330台積電2330");
         let _result = split("2330台積電2330");
 
@@ -296,7 +296,7 @@ mod tests {
     /// 驗證跳脫字元清理結果。
     #[tokio::test]
     async fn test_clean_string_escape_chars() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let chinese_word = "台積電% 元 ,";
         let start = Instant::now();
         let result = clean_escape_chars(chinese_word, Some(vec!['元', '%', '%', ',']));
