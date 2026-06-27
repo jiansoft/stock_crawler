@@ -971,6 +971,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_moving_average() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_moving_average");

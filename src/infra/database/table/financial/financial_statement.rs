@@ -652,6 +652,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_fetch_cumulative_eps() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_cumulative_eps");

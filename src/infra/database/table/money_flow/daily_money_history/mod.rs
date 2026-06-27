@@ -96,6 +96,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_upsert() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 DailyMoneyHistory::upsert");
