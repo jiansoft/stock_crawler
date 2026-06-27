@@ -43,7 +43,7 @@ pub async fn visit() -> Result<Vec<QfiiDto>> {
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

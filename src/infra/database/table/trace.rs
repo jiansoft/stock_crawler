@@ -63,7 +63,7 @@ impl Clone for Trace {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::database::table::trace};
+    use crate::infra::database::table::trace;
 
     #[tokio::test]
     async fn test_fetch_list() {

@@ -141,7 +141,7 @@ mod tests {
     use chrono::{Local, TimeDelta, Timelike};
     use std::time::Duration;
 
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

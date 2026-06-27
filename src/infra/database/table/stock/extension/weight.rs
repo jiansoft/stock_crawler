@@ -65,7 +65,7 @@ mod tests {
 
     use rust_decimal_macros::dec;
 
-    use crate::{core::logging, infra::database::table::stock::StockDbRow};
+    use crate::infra::database::table::stock::StockDbRow;
 
     use super::*;
 

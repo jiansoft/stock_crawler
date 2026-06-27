@@ -765,7 +765,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use crate::infra::crawler::twse;
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

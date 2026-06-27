@@ -145,7 +145,7 @@ impl PcHome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{core::logging, infra::crawler::log_stock_price_test};
+    use crate::infra::crawler::log_stock_price_test;
 
     #[tokio::test]
     async fn test_get_stock_price() {

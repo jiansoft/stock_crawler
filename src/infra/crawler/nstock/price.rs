@@ -79,7 +79,7 @@ impl StockInfo for NStock {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::crawler::log_stock_price_test};
+    use crate::infra::crawler::log_stock_price_test;
 
     use super::*;
 

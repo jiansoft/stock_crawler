@@ -138,7 +138,7 @@ fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, core::util};
+    use crate::core::util;
 
     use super::*;
 

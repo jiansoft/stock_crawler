@@ -491,7 +491,7 @@ ON CONFLICT (date, security_code) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
     use chrono::Datelike;
 
     use super::*;

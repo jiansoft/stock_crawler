@@ -63,7 +63,7 @@ impl From<&crate::domain::registry::entity::Stock> for StockInfoRequest {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

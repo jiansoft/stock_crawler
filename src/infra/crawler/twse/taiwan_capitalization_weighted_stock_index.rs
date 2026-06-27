@@ -36,7 +36,7 @@ pub async fn visit(date: DateTime<Local>) -> Result<TaiwanStockIndexDto> {
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 

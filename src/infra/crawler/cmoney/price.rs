@@ -163,7 +163,7 @@ impl StockInfo for CMoney {
 /// 這些測試需連線外部網站，執行結果會受網路與來源頁面變動影響。
 mod tests {
     use super::*;
-    use crate::{core::logging, infra::crawler::log_stock_price_test};
+    use crate::infra::crawler::log_stock_price_test;
 
     #[test]
     fn test_parse_required_decimal_rejects_dash() {
