@@ -113,7 +113,7 @@ impl PgQuoteRepository {
         }
 
         let sql = r#"
-            INSERT INTO last_daily_quotes (date, stock_symbol, closing_price, updated_time)
+            INSERT INTO last_daily_quotes (date, stock_symbol, closing_price)
             SELECT * FROM UNNEST($1::date[], $2::varchar[], $3::numeric[])
               AS t(date, stock_symbol, closing_price)
             ON CONFLICT (stock_symbol) DO UPDATE SET

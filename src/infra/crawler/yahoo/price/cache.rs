@@ -580,6 +580,9 @@ mod tests {
     fn test_apply_category_snapshots_counts_changed_prices() {
         let _lock = TEST_STATE_LOCK.blocking_lock();
         SHARE.clear_stock_snapshots();
+        // 清空昨日收盤快取，防止並發測試（如 SHARE.load()）將真實 DB 價格寫入，
+        // 導致 is_valid_price 以真實昨收價驗證測試用的假價格而誤判為異常。
+        SHARE.clear_last_trading_day_quotes();
 
         let category = YahooClassCategory::enabled(
             crate::infra::crawler::yahoo::YahooClassExchange::Listed,
@@ -621,6 +624,7 @@ mod tests {
     fn test_apply_category_snapshots_replaces_removed_symbols_in_same_category() {
         let _lock = TEST_STATE_LOCK.blocking_lock();
         SHARE.clear_stock_snapshots();
+        SHARE.clear_last_trading_day_quotes();
 
         let category = YahooClassCategory::enabled(
             crate::infra::crawler::yahoo::YahooClassExchange::Listed,

@@ -152,6 +152,14 @@ impl Share {
             *cache = HashMap::new();
         }
     }
+
+    /// 清空昨日收盤快取，避免並發測試透過 `is_valid_price` 互相干擾。
+    #[cfg(test)]
+    pub fn clear_last_trading_day_quotes(&self) {
+        if let Ok(mut q) = self.last_trading_day_quotes.write() {
+            q.clear();
+        }
+    }
 }
 
 #[cfg(test)]
