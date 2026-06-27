@@ -150,6 +150,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_delete_and_upsert() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 delete_and_upsert");
