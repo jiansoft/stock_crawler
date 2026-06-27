@@ -59,6 +59,9 @@ jobs:
   proto-lint:
     name: Proto Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
     - uses: actions/checkout@v7
     - uses: bufbuild/buf-action@v1
