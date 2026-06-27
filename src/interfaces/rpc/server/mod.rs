@@ -160,7 +160,10 @@ fn describe_certificate(cert_pem: &str) -> String {
     // 建立一個讀取器，將 PEM 格式的憑證資料包裝成 BufReader
     let mut reader = BufReader::new(Cursor::new(cert_pem.as_bytes()));
     // 使用 rustls-pki-types 的 pem_reader_iter 迭代解析 PEM 資料，並取出第一個憑證區塊
-    let cert = match rustls_pki_types::CertificateDer::pem_reader_iter(&mut reader).next().transpose() {
+    let cert = match rustls_pki_types::CertificateDer::pem_reader_iter(&mut reader)
+        .next()
+        .transpose()
+    {
         Ok(Some(cert)) => cert, // 成功解析出憑證
         Ok(None) => return "PEM 中找不到 CERTIFICATE 區塊".to_string(), // 找不到憑證區塊
         Err(why) => return format!("憑證 PEM 解析失敗: {}", why), // 解析發生錯誤
