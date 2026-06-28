@@ -50,44 +50,43 @@ pub async fn execute() -> Result<()> {
 pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
     //抓取上市櫃公司每日收盤資訊
     let daily_quote_count = backfill::quote::execute(date).await?;
-    //tracing::info!("抓取上市櫃收盤數據結束");
-    //let daily_quote_count = daily_quote::fetch_count_by_date(date).await?;
     tracing::info!("抓取上市櫃收盤數據結束:{}", daily_quote_count);
 
-    if daily_quote_count == 0 {
-        return Ok(());
+    if daily_quote_count > 0 {
+        // 有行情資料才執行的計算（均線、估價、殖利率排行）
+        let quote_repo = PgQuoteRepository::new();
+
+        let lack_daily_quotes_count = quote_repo.makeup_for_the_lack_daily_quotes(date).await?;
+        tracing::info!(
+            "補上當日缺少的每日收盤數據結束:{:#?}",
+            lack_daily_quotes_count
+        );
+
+        calculation::daily_quotes::calculate_moving_average(date).await?;
+        tracing::info!("計算均線結束");
+
+        quote_repo.rebuild_last_daily_quotes().await?;
+        tracing::info!("重建 last_daily_quotes 表內的數據結束");
+
+        calculation::estimated_price::calculate_estimated_price(date).await?;
+        tracing::info!("計算便宜、合理、昂貴價的估算結束");
+
+        let yield_rank_repo = PgYieldRankRepository::new();
+        use crate::domain::yield_rank::repository::YieldRankRepository;
+        yield_rank_repo.rebuild_by_date(date).await?;
+        tracing::info!("重建 yield_rank 表內的數據結束");
+    } else {
+        // 非交易日（假日/收盤 0 筆）：略過行情相關計算，
+        // 但仍繼續計算帳戶市值以保持 daily_money_history_detail 與
+        // last-closing-day 的一致性（SQL 使用視窗函數，會自動取最近
+        // 一個有效交易日的收盤價，非交易日執行結果仍正確）
+        tracing::info!("日期 {} 無交易資料，略過行情相關計算", date);
     }
 
-    // 實例化報價領域的倉儲
-    let quote_repo = PgQuoteRepository::new();
-
-    // 補上當日缺少的每日收盤數據
-    let lack_daily_quotes_count = quote_repo.makeup_for_the_lack_daily_quotes(date).await?;
-    tracing::info!(
-        "補上當日缺少的每日收盤數據結束:{:#?}",
-        lack_daily_quotes_count
-    );
-
-    // 計算均線
-    calculation::daily_quotes::calculate_moving_average(date).await?;
-    tracing::info!("計算均線結束");
-
-    // 重建 last_daily_quotes 表內的數據
-    quote_repo.rebuild_last_daily_quotes().await?;
-    tracing::info!("重建 last_daily_quotes 表內的數據結束");
-
-    // 計算便宜、合理、昂貴價的估算
-    calculation::estimated_price::calculate_estimated_price(date).await?;
-    tracing::info!("計算便宜、合理、昂貴價的估算結束");
-
-    // 實例化殖利率排行領域的倉儲
-    let yield_rank_repo = PgYieldRankRepository::new();
-    use crate::domain::yield_rank::repository::YieldRankRepository;
-    // 重建指定日期的 yield_rank 表內的數據
-    yield_rank_repo.rebuild_by_date(date).await?;
-    tracing::info!("重建 yield_rank 表內的數據結束");
-
-    // 計算帳戶內市值
+    // 無論是否有新行情，都更新帳戶市值：
+    // - 交易日：使用當日收盤價計算
+    // - 非交易日：使用最近一個有效交易日的收盤價計算
+    // 確保 last-closing-day 若因任何原因被更新，daily_money_history_detail 都有對應資料
     calculation::money_history::calculate_money_history(date).await?;
     tracing::info!("計算帳戶內市值結束");
 

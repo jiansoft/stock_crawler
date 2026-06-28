@@ -190,4 +190,33 @@ mod tests {
         share.set_current_ip("203.0.113.1".to_string());
         assert_eq!(share.get_current_ip(), Some("203.0.113.1".to_string()));
     }
+
+    #[tokio::test]
+    async fn test_set_and_get_stock_index_round_trips() {
+        use crate::domain::market_index::MarketIndex;
+        use chrono::NaiveDate;
+        use rust_decimal::Decimal;
+
+        let share = Share::new();
+        let date = NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
+        let index = MarketIndex::new(
+            "TAIEX".to_string(),
+            date,
+            Decimal::from(20000),
+            Decimal::from(100),
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        );
+
+        let key = "2025-06-01-TAIEX".to_string();
+        assert!(share.get_stock_index(&key).is_none());
+
+        share.set_stock_index(key.clone(), index).await;
+
+        let got = share.get_stock_index(&key).unwrap();
+        assert_eq!(got.category, "TAIEX");
+        assert_eq!(got.date, date);
+        assert_eq!(got.index, Decimal::from(20000));
+    }
 }

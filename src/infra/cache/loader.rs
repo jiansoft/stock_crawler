@@ -294,6 +294,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_replace_last_trading_day_quotes_cache_overwrites() {
+        use crate::infra::database::table::last_daily_quotes::LastDailyQuotes;
+        use rust_decimal_macros::dec;
+
+        let share = Share::new();
+
+        let mut q1 = LastDailyQuotes::new();
+        q1.stock_symbol = "2330".to_string();
+        q1.closing_price = dec!(500);
+        q1.date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+
+        let mut q2 = LastDailyQuotes::new();
+        q2.stock_symbol = "2317".to_string();
+        q2.closing_price = dec!(100);
+
+        share.replace_last_trading_day_quotes_cache(vec![q1, q2]);
+
+        assert!(share.get_stock_last_price("2330").await.is_some());
+        assert!(share.get_stock_last_price("2317").await.is_some());
+        assert!(share.get_stock_last_price("2454").await.is_none());
+
+        let mut q3 = LastDailyQuotes::new();
+        q3.stock_symbol = "2454".to_string();
+        q3.closing_price = dec!(200);
+
+        share.replace_last_trading_day_quotes_cache(vec![q3]);
+
+        assert!(share.get_stock_last_price("2330").await.is_none());
+        assert!(share.get_stock_last_price("2454").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_set_stock_last_price_updates_existing_entry() {
+        use crate::domain::quote::entity::DailyQuote;
+        use crate::infra::database::table::last_daily_quotes::LastDailyQuotes;
+        use rust_decimal_macros::dec;
+
+        let share = Share::new();
+
+        let mut q = LastDailyQuotes::new();
+        q.stock_symbol = "2330".to_string();
+        q.closing_price = dec!(500);
+        q.date = NaiveDate::from_ymd_opt(2025, 1, 2).unwrap();
+
+        share.replace_last_trading_day_quotes_cache(vec![q]);
+
+        let before = share.get_stock_last_price("2330").await.unwrap();
+        assert_eq!(before.closing_price, dec!(500));
+
+        let new_date = NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
+        let mut dq = DailyQuote::default();
+        dq.stock_symbol = "2330".to_string();
+        dq.closing_price = dec!(620);
+        dq.date = new_date;
+
+        share.set_stock_last_price(&dq).await;
+
+        let after = share.get_last_trading_day_quotes("2330").await.unwrap();
+        assert_eq!(after.closing_price, dec!(620));
+        assert_eq!(after.date, new_date);
+    }
+
+    #[test]
+    fn test_replace_quote_history_records_cache_overwrites() {
+        use crate::domain::quote::entity::QuoteHistoryRecord;
+        use rust_decimal_macros::dec;
+
+        let share = Share::new();
+
+        let mut r1 = QuoteHistoryRecord::new("2330".to_string());
+        r1.maximum_price = dec!(600);
+        r1.minimum_price = dec!(400);
+
+        share.replace_quote_history_records_cache(vec![r1]);
+
+        {
+            let got = share.quote_history_records.read().unwrap();
+            let r = got.get("2330").unwrap();
+            assert_eq!(r.maximum_price, dec!(600));
+            assert_eq!(r.minimum_price, dec!(400));
+        }
+
+        let r2 = QuoteHistoryRecord::new("2454".to_string());
+        share.replace_quote_history_records_cache(vec![r2]);
+
+        let got = share.quote_history_records.read().unwrap();
+        assert!(got.get("2330").is_none());
+        assert!(got.get("2454").is_some());
+    }
+
+    #[tokio::test]
     async fn test_get_industry_name() {
         dotenvy::dotenv().ok();
         SHARE.load().await;

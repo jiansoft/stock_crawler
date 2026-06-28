@@ -576,6 +576,12 @@ mod tests {
     /// 驗證即時報價快取讀取可正確命中與 miss。
     #[test]
     fn test_get_cached_snapshot() {
+        // 確保全域 SHARE 的昨收快取與報價快取都是乾淨的，
+        // 避免其他測試在 SHARE.last_trading_day_quotes 留下真實收盤價，
+        // 導致 is_valid_price 判斷 dec!(998) 偏差過大而拒絕此快照。
+        SHARE.clear_last_trading_day_quotes();
+        SHARE.clear_stock_snapshots();
+
         let mut snapshots = HashMap::new();
         let mut snapshot = RealtimeSnapshot::new("2330".to_string(), dec!(998));
         snapshot.source_site = "Yahoo".to_string();

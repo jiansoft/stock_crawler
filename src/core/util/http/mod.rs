@@ -505,4 +505,45 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_rate_limit_backoff_returns_increasing_base_delays() {
+        let d1 = rate_limit_backoff(1);
+        let d2 = rate_limit_backoff(2);
+        let d3 = rate_limit_backoff(3);
+        let d_high = rate_limit_backoff(99);
+
+        // Base 5000ms + jitter 0..1999ms
+        assert!(d1.as_millis() >= 5_000);
+        assert!(d1.as_millis() < 7_000);
+
+        // Base 15000ms + jitter 0..1999ms
+        assert!(d2.as_millis() >= 15_000);
+        assert!(d2.as_millis() < 17_000);
+
+        // Base 30000ms + jitter 0..1999ms for attempt >= 3
+        assert!(d3.as_millis() >= 30_000);
+        assert!(d3.as_millis() < 32_000);
+
+        assert!(d_high.as_millis() >= 30_000);
+        assert!(d_high.as_millis() < 32_000);
+    }
+
+    #[test]
+    fn test_format_form_params_log_sorts_alphabetically() {
+        let mut params = HashMap::new();
+        params.insert("zebra", "z");
+        params.insert("apple", "a");
+        params.insert("mango", "m");
+
+        let result = format_form_params_log(&params);
+        assert_eq!(result, "params=[apple=a, mango=m, zebra=z]");
+    }
+
+    #[test]
+    fn test_format_form_params_log_empty_map() {
+        let params = HashMap::new();
+        let result = format_form_params_log(&params);
+        assert_eq!(result, "params=[]");
+    }
 }
