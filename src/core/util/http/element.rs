@@ -20,15 +20,16 @@ use crate::core::util::text;
 /// # Examples
 ///
 /// ```
-/// use scraper::{Html, Selector, ElementRef};
-/// use your_crate::element_value;
+/// use scraper::{Html, Selector};
+/// use stock_crawler::core::util::http::element::parse_value;
 ///
-/// let html = r#"<div class="example">Hello, world!</div>"#;
+/// let html = r#"<table><tr class="row"><td class="name">Apple</td></tr></table>"#;
 /// let document = Html::parse_document(html);
-/// let element: ElementRef = document.select(Selector::parse("div.example").unwrap()).next().unwrap();
+/// let selector = Selector::parse("tr.row").unwrap();
+/// let element = document.select(&selector).next().unwrap();
 ///
-/// let text = parse_value(&element, "div.example");
-/// assert_eq!(text, Some("Hello, world!".to_string()));
+/// let text = parse_value(&element, "td.name");
+/// assert_eq!(text, Some("Apple".to_string()));
 /// ```
 pub fn parse_value(element: &scraper::ElementRef, css_selector: &str) -> Option<String> {
     match Selector::parse(css_selector) {
@@ -58,14 +59,13 @@ pub fn parse_value(element: &scraper::ElementRef, css_selector: &str) -> Option<
 /// ```
 /// use scraper::{Html, Selector};
 /// use rust_decimal::Decimal;
+/// use std::str::FromStr;
+/// use stock_crawler::core::util::http::element::parse_to_decimal;
 ///
-/// let html = r#"
-/// <div class="price">100.50元</div>
-/// "#;
-///
-/// let fragment = Html::parse_fragment(html);
-/// let price_selector = Selector::parse(".price").unwrap();
-/// let element = fragment.select(&price_selector).next().unwrap();
+/// let html = r#"<table><tbody><tr><td class="price">100.50元</td></tr></tbody></table>"#;
+/// let document = Html::parse_document(html);
+/// let selector = Selector::parse("tr").unwrap();
+/// let element = document.select(&selector).next().unwrap();
 ///
 /// let price = parse_to_decimal(&element, ".price");
 /// assert_eq!(price, Decimal::from_str("100.50").unwrap());

@@ -469,8 +469,6 @@ mod tests {
     use chrono::Local;
     use concat_string::concat_string;
 
-    
-
     use super::*;
 
     /// 手動驗證外部 HTTP 來源是否可正常請求。

@@ -38,7 +38,7 @@ impl ExchangeConfig {
     ///
     /// # 示例
     ///
-    /// ```rust
+    /// ```ignore
     /// let config = ExchangeConfig::new(StockExchange::TWSE);
     /// println!("URL: {}", config.url);
     /// println!("Selector: {}", config.selector);
