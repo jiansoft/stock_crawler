@@ -178,10 +178,13 @@ impl TtlCacheInner for Ttl {
     fn trace_quote_set_if_absent(&self, key: String, val: Decimal, duration: Duration) -> bool {
         // moka 的 entry API 對同一 key 是原子的：or_insert_with 只在 key 不存在
         // （或已過期）時才會執行初始化並寫入，並透過 is_fresh() 告知是否為新寫入。
-        let entry = self.trace_quote_notify.entry(key).or_insert_with(|| TimedValue {
-            value: val,
-            duration,
-        });
+        let entry = self
+            .trace_quote_notify
+            .entry(key)
+            .or_insert_with(|| TimedValue {
+                value: val,
+                duration,
+            });
         entry.is_fresh()
     }
 }

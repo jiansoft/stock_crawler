@@ -188,9 +188,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //   預設不設定 RUST_LOG 時完全靜音，不影響生產環境。
     //   開發除錯時執行：RUST_LOG=info cargo run
     //
-    // Layer 2 — FileLogLayer（輪轉日誌檔，always-on）
-    //   實作在 core::logging::FileLogLayer，不受 RUST_LOG 控制。
-    //   每個 tracing 事件都會寫入 log/YYYY-MM-DD_default_{level}.log。
+    // Layer 2 — FileLogLayer（輪轉日誌檔）
+    //   實作在 core::logging::FileLogLayer，不受 RUST_LOG 控制，改由 FILE_LOG_LEVEL 控制等級。
+    //   預設只落 INFO 以上，寫入 log/YYYY-MM-DD_default_{level}.log；
+    //   臨時除錯可設 FILE_LOG_LEVEL=debug 開回 DEBUG。
     //   底層仍使用原有的非同步輪轉機制（core::logging::LOGGER）。
     //
     // 事件流向：
@@ -209,7 +210,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 tracing_subscriber::fmt::layer()
                     .with_filter(tracing_subscriber::EnvFilter::from_default_env()),
             )
-            .with(core::logging::FileLogLayer)
+            // 檔案日誌預設只落 INFO 以上（由 FILE_LOG_LEVEL 覆寫），
+            // 避免 prod 將大量 DEBUG/TRACE 寫入磁碟導致日誌檔暴增。
+            .with(core::logging::FileLogLayer.with_filter(core::logging::file_log_env_filter()))
             .init();
     }
 

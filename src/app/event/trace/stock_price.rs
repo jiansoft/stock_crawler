@@ -343,10 +343,11 @@ async fn process_cached_targets(
             }
         }
         Some(_) => {
-            tracing::debug!("Stock {} current price is zero, skipping", symbol);
+            // 盤中每檔股票、每次價格事件都可能觸發，屬高頻雜訊，降為 trace 避免日誌暴增。
+            tracing::trace!("Stock {} current price is zero, skipping", symbol);
         }
         None => {
-            tracing::debug!("Stock {} snapshot cache miss, skipping", symbol);
+            tracing::trace!("Stock {} snapshot cache miss, skipping", symbol);
         }
     }
 }

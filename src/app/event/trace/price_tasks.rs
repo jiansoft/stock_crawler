@@ -823,7 +823,8 @@ async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
             true
         }
         Ok(_) => {
-            tracing::debug!("Stock {} backup price is zero, skipping", symbol);
+            // 備援採集逐檔輪詢時的高頻雜訊，降為 trace 避免日誌暴增。
+            tracing::trace!("Stock {} backup price is zero, skipping", symbol);
             false
         }
         Err(why) => {

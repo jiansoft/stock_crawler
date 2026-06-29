@@ -530,6 +530,20 @@ fn forward_to_seq(
     }
 }
 
+/// 檔案日誌（`FileLogLayer`）的等級過濾器。
+///
+/// 由環境變數 `FILE_LOG_LEVEL` 控制，**預設 `info`**，避免生產環境把大量 DEBUG/TRACE
+/// 寫入磁碟導致日誌檔暴增（曾發生單一 `*_debug.log` 長到 10G、根目錄塞爆）。
+///
+/// - 不設定時：只落 `INFO` 以上（`info` / `warn` / `error`）。
+/// - 臨時除錯：`FILE_LOG_LEVEL=debug`（或更細的 `warn,stock_crawler::app::event::trace=debug`）。
+///
+/// 此過濾器只作用於檔案日誌層；stdout 的 fmt 層仍由 `RUST_LOG` 獨立控制。
+pub fn file_log_env_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_env("FILE_LOG_LEVEL")
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+}
+
 /// tracing `Layer`，將 tracing 事件路由至既有輪轉檔案 `LOGGER` 並轉送 Seq。
 ///
 /// - 安裝後所有 `tracing::*!()` 事件都寫入輪轉日誌。
