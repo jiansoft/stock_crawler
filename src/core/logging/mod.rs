@@ -530,18 +530,28 @@ fn forward_to_seq(
     }
 }
 
+/// 檔案日誌（`FileLogLayer`）的預設過濾指令。
+///
+/// - `info`：基準等級，只落 `INFO` 以上（`info` / `warn` / `error`）。
+/// - `html5ever=off`：關閉第三方 HTML 解析套件 `html5ever` 的日誌。它在解析畸形網頁時
+///   會以 `warn!` 噴出大量「foster parenting not implemented」，屬無害雜訊，且因為是
+///   `warn` 等級，單靠 `info` 基準擋不掉，必須針對 target 關閉。
+const DEFAULT_FILE_LOG_DIRECTIVES: &str = "info,html5ever=off";
+
 /// 檔案日誌（`FileLogLayer`）的等級過濾器。
 ///
-/// 由環境變數 `FILE_LOG_LEVEL` 控制，**預設 `info`**，避免生產環境把大量 DEBUG/TRACE
-/// 寫入磁碟導致日誌檔暴增（曾發生單一 `*_debug.log` 長到 10G、根目錄塞爆）。
+/// 由環境變數 `FILE_LOG_LEVEL` 控制，未設定時採用 [`DEFAULT_FILE_LOG_DIRECTIVES`]，
+/// 避免生產環境把大量 DEBUG/TRACE 或第三方套件雜訊寫入磁碟導致日誌檔暴增
+/// （曾發生單一 `*_debug.log` 長到 10G、根目錄塞爆）。
 ///
-/// - 不設定時：只落 `INFO` 以上（`info` / `warn` / `error`）。
-/// - 臨時除錯：`FILE_LOG_LEVEL=debug`（或更細的 `warn,stock_crawler::app::event::trace=debug`）。
+/// - 不設定時：只落 `INFO` 以上，並關閉 `html5ever` 雜訊。
+/// - 臨時除錯：`FILE_LOG_LEVEL=debug`（或更細的 `info,stock_crawler::app::event::trace=debug`）。
+///   注意自訂時若仍想壓掉 html5ever，記得自行附帶 `,html5ever=off`。
 ///
 /// 此過濾器只作用於檔案日誌層；stdout 的 fmt 層仍由 `RUST_LOG` 獨立控制。
 pub fn file_log_env_filter() -> tracing_subscriber::EnvFilter {
     tracing_subscriber::EnvFilter::try_from_env("FILE_LOG_LEVEL")
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(DEFAULT_FILE_LOG_DIRECTIVES))
 }
 
 /// tracing `Layer`，將 tracing 事件路由至既有輪轉檔案 `LOGGER` 並轉送 Seq。
