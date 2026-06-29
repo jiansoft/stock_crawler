@@ -11,6 +11,7 @@
 //! - reconciliation 執行次數
 //! - reconciliation 掃描的股票數
 //! - reconciliation 補救命中的通知數
+//! - Redis 去重寫入失敗次數（用於判斷 Redis 是否正常運作）
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -26,6 +27,7 @@ pub(super) struct TraceRuntimeStatsSnapshot {
     pub reconciliation_runs: u64,
     pub reconciliation_symbols_scanned: u64,
     pub reconciliation_alert_hits: u64,
+    pub redis_dedup_failures: u64,
 }
 
 /// 追蹤流程使用的執行統計計數器集合。
@@ -38,6 +40,7 @@ struct TraceRuntimeStats {
     reconciliation_runs: AtomicU64,
     reconciliation_symbols_scanned: AtomicU64,
     reconciliation_alert_hits: AtomicU64,
+    redis_dedup_failures: AtomicU64,
 }
 
 static TRACE_RUNTIME_STATS: Lazy<TraceRuntimeStats> = Lazy::new(TraceRuntimeStats::default);
@@ -73,6 +76,9 @@ fn take_runtime_stats_snapshot_and_reset() -> TraceRuntimeStatsSnapshot {
         reconciliation_alert_hits: TRACE_RUNTIME_STATS
             .reconciliation_alert_hits
             .swap(0, Ordering::SeqCst),
+        redis_dedup_failures: TRACE_RUNTIME_STATS
+            .redis_dedup_failures
+            .swap(0, Ordering::SeqCst),
     }
 }
 
@@ -99,6 +105,9 @@ fn current_runtime_stats_snapshot() -> TraceRuntimeStatsSnapshot {
         reconciliation_alert_hits: TRACE_RUNTIME_STATS
             .reconciliation_alert_hits
             .load(Ordering::SeqCst),
+        redis_dedup_failures: TRACE_RUNTIME_STATS
+            .redis_dedup_failures
+            .load(Ordering::SeqCst),
     }
 }
 
@@ -110,6 +119,7 @@ fn has_any_runtime_activity(snapshot: TraceRuntimeStatsSnapshot) -> bool {
         || snapshot.reconciliation_runs > 0
         || snapshot.reconciliation_symbols_scanned > 0
         || snapshot.reconciliation_alert_hits > 0
+        || snapshot.redis_dedup_failures > 0
 }
 
 fn format_runtime_stats_summary(snapshot: TraceRuntimeStatsSnapshot) -> String {
@@ -127,7 +137,7 @@ fn format_runtime_stats_summary(snapshot: TraceRuntimeStatsSnapshot) -> String {
     );
 
     format!(
-        "Trace 收盤摘要 | 事件 發佈={:>6} 已處理={:>6}({:>7}) 丟棄={:>6}({:>7}) | 通知 已送出={:>6} | 對帳 次數={:>3} 掃描={:>6} 補救命中={:>6}({:>7})",
+        "Trace 收盤摘要 | 事件 發佈={:>6} 已處理={:>6}({:>7}) 丟棄={:>6}({:>7}) | 通知 已送出={:>6} | 對帳 次數={:>3} 掃描={:>6} 補救命中={:>6}({:>7}) | Redis 去重失敗={:>6}",
         snapshot.price_events_published,
         snapshot.price_events_consumed,
         consumed_rate,
@@ -138,6 +148,7 @@ fn format_runtime_stats_summary(snapshot: TraceRuntimeStatsSnapshot) -> String {
         snapshot.reconciliation_symbols_scanned,
         snapshot.reconciliation_alert_hits,
         reconciliation_hit_rate,
+        snapshot.redis_dedup_failures,
     )
 }
 
@@ -196,6 +207,16 @@ pub(super) fn record_reconciliation_alert_hit() {
         .fetch_add(1, Ordering::SeqCst);
 }
 
+/// 記錄一次 Redis 去重寫入失敗。
+///
+/// 此計數若在收盤摘要中持續偏高，代表 Redis 連線或寫入異常，
+/// 去重已退回僅靠記憶體 TTL 維持，值得進一步排查 Redis 狀態。
+pub(super) fn record_redis_dedup_failure() {
+    TRACE_RUNTIME_STATS
+        .redis_dedup_failures
+        .fetch_add(1, Ordering::SeqCst);
+}
+
 /// 輸出單次追蹤執行期間的統計摘要，並在輸出後重設計數器。
 ///
 /// 若本輪沒有任何活動，則不輸出摘要，避免收盤事件重複 stop 時留下全零 log。
@@ -224,6 +245,7 @@ mod tests {
         record_notification_sent();
         record_reconciliation_run(3);
         record_reconciliation_alert_hit();
+        record_redis_dedup_failure();
 
         let snapshot = take_runtime_stats_snapshot_and_reset();
         assert_eq!(snapshot.price_events_published, 2);
@@ -233,6 +255,7 @@ mod tests {
         assert_eq!(snapshot.reconciliation_runs, 1);
         assert_eq!(snapshot.reconciliation_symbols_scanned, 3);
         assert_eq!(snapshot.reconciliation_alert_hits, 1);
+        assert_eq!(snapshot.redis_dedup_failures, 1);
 
         let reset_snapshot = take_runtime_stats_snapshot_and_reset();
         assert_eq!(reset_snapshot, TraceRuntimeStatsSnapshot::default());
@@ -249,11 +272,12 @@ mod tests {
             reconciliation_runs: 2,
             reconciliation_symbols_scanned: 20,
             reconciliation_alert_hits: 1,
+            redis_dedup_failures: 4,
         });
 
         assert_eq!(
             summary,
-            "Trace 收盤摘要 | 事件 發佈=    10 已處理=     8( 80.00%) 丟棄=     2( 20.00%) | 通知 已送出=     3 | 對帳 次數=  2 掃描=    20 補救命中=     1(  5.00%)"
+            "Trace 收盤摘要 | 事件 發佈=    10 已處理=     8( 80.00%) 丟棄=     2( 20.00%) | 通知 已送出=     3 | 對帳 次數=  2 掃描=    20 補救命中=     1(  5.00%) | Redis 去重失敗=     4"
         );
     }
 
@@ -302,6 +326,11 @@ mod tests {
 
         assert!(has_any_runtime_activity(TraceRuntimeStatsSnapshot {
             reconciliation_alert_hits: 1,
+            ..Default::default()
+        }));
+
+        assert!(has_any_runtime_activity(TraceRuntimeStatsSnapshot {
+            redis_dedup_failures: 1,
             ..Default::default()
         }));
     }

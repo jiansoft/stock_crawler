@@ -113,6 +113,20 @@ pub trait TtlCacheInner {
     /// - `Some(old_value)`：若原本已有未過期資料。
     /// - `None`：原本無值，或寫入鎖失敗。
     fn trace_quote_set(&self, key: String, val: Decimal, duration: Duration) -> Option<Decimal>;
+    /// 以 NX 語意原子地寫入 `trace_quote_notify`：僅當 key 不存在（或已過期）時才寫入。
+    ///
+    /// 相較於「先 `trace_quote_contains_key` 後 `trace_quote_set`」兩步操作，
+    /// 此方法對同一 key 是原子的，可避免併發判斷下的競態（TOCTOU）。
+    ///
+    /// # 參數
+    /// - `key`: 通知節流快取鍵值。
+    /// - `val`: 欲寫入的數值。
+    /// - `duration`: 存活時間。
+    ///
+    /// # 回傳
+    /// - `true`：本次為新寫入（呼叫端可視為「尚未通知過」）。
+    /// - `false`：key 已存在且未過期（呼叫端可視為「已通知過」）。
+    fn trace_quote_set_if_absent(&self, key: String, val: Decimal, duration: Duration) -> bool;
 }
 
 impl TtlCacheInner for Ttl {
@@ -159,6 +173,16 @@ impl TtlCacheInner for Ttl {
             },
         );
         old_value
+    }
+
+    fn trace_quote_set_if_absent(&self, key: String, val: Decimal, duration: Duration) -> bool {
+        // moka 的 entry API 對同一 key 是原子的：or_insert_with 只在 key 不存在
+        // （或已過期）時才會執行初始化並寫入，並透過 is_fresh() 告知是否為新寫入。
+        let entry = self.trace_quote_notify.entry(key).or_insert_with(|| TimedValue {
+            value: val,
+            duration,
+        });
+        entry.is_fresh()
     }
 }
 
@@ -250,6 +274,30 @@ mod tests {
 
         assert_eq!(ttl.daily_quote_get("daily"), None);
         assert_eq!(ttl.trace_quote_get("trace"), Some(dec!(9.99)));
+    }
+
+    #[tokio::test]
+    async fn trace_quote_set_if_absent_is_nx() {
+        let ttl = Ttl::new();
+        let duration = Duration::from_secs(60);
+
+        // 第一次寫入：key 不存在 → 應為新寫入。
+        assert!(ttl.trace_quote_set_if_absent("k".to_string(), dec!(1.0), duration));
+        // 同一 key 再寫入：已存在且未過期 → 不應覆寫，回傳 false，且值維持原本的 1.0。
+        assert!(!ttl.trace_quote_set_if_absent("k".to_string(), dec!(2.0), duration));
+        assert_eq!(ttl.trace_quote_get("k"), Some(dec!(1.0)));
+    }
+
+    #[tokio::test]
+    async fn trace_quote_set_if_absent_allows_rewrite_after_expiry() {
+        let ttl = Ttl::new();
+        let duration = Duration::from_millis(50);
+
+        assert!(ttl.trace_quote_set_if_absent("k".to_string(), dec!(1.0), duration));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        // 過期後再寫入：應視為新寫入並覆寫為新值。
+        assert!(ttl.trace_quote_set_if_absent("k".to_string(), dec!(2.0), duration));
+        assert_eq!(ttl.trace_quote_get("k"), Some(dec!(2.0)));
     }
 
     #[tokio::test]

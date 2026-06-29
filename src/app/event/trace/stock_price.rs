@@ -8,7 +8,8 @@
 //! 3. **價格更新事件驅動判斷**：當背景採集更新股價後，會主動觸發指定股票的追蹤條件檢查。
 //! 4. **低頻對帳掃描**：保留低頻 reconciliation 任務，補償事件遺漏、設定剛新增但價格尚未再次變動等情況。
 //! 5. **邊界檢查**：判斷最新價格是否低於設定的最低價（Floor）或超過最高價（Ceiling）。
-//! 6. **頻率限制**：利用 Redis 記錄已發送過的價格，避免同一交易日重複發送相同警報。
+//! 6. **頻率限制**：利用 Redis 記錄已發送過的提醒，於設定的時間窗（預設 1 小時）內，
+//!    對「同一股票、同一邊界方向、同一價格」只發送一次警報，避免相同報價持續洗版。
 //! 7. **發送通知**：透過 Telegram Bot 將警報訊息傳送給使用者。
 
 use std::collections::HashMap;
@@ -32,6 +33,7 @@ use crate::{
     domain::trace::repository::TraceRepository,
     infra::cache::RealtimeSnapshot,
     infra::cache::SHARE,
+    infra::cache::{TTL, TtlCacheInner},
     infra::crawler::twse,
     infra::database::repository::trace::PgTraceRepository,
     interfaces::bot,
@@ -39,6 +41,11 @@ use crate::{
 
 /// 確保整個追蹤執行流程只有一個實例在執行。
 static IS_RUNNING: AtomicBool = AtomicBool::new(false);
+/// 同一則警報（同股票、同邊界方向、同價格）的去重時間窗（秒）。
+///
+/// 在此時間窗內，相同價格的警報只會發送一次；過了時間窗後，相同價格才會再次提醒。
+/// 預設為 1 小時。
+const TRACE_ALERT_DEDUP_WINDOW_SECS: usize = 60 * 60;
 /// 依股票代號分組後的追蹤條件快取。
 static TRACE_TARGETS: Lazy<RwLock<HashMap<String, Vec<PriceTrace>>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
@@ -346,13 +353,14 @@ async fn process_cached_targets(
 
 /// 判斷股價是否觸發警報，並在必要時發送通知。
 ///
-/// 去重規則：
+/// 去重規則（時間窗內，預設 1 小時，見 [`TRACE_ALERT_DEDUP_WINDOW_SECS`]）：
 /// - 同一交易日
 /// - 同一股票
 /// - 同一邊界方向
 /// - 同一價格
 ///
-/// 只要曾經發送過，後續同一價格就不再重複通知。
+/// 在時間窗內，相同價格只發送一次提醒；不同價格仍會各自提醒。
+/// 過了時間窗後，相同價格才會再次提醒。
 async fn alert_on_price_boundary(
     target: PriceTrace,
     current_price: Decimal,
@@ -374,21 +382,34 @@ async fn alert_on_price_boundary(
         return Ok(false);
     };
 
-    let target_key = build_trace_notification_key(
-        Local::now().date_naive(),
-        &target,
-        boundary_type,
-        current_price,
-    );
+    let target_key = build_trace_notification_key(&target, boundary_type, current_price);
 
-    // 只有 key 還不存在時才寫入；若已存在，代表同一天同一價格已經通知過。
+    // 第一層：記憶體 TTL 原子去重（本地、永不失敗），是防洗版的最後防線。
+    // trace_quote_set_if_absent 以 NX 語意原子寫入，避免「先檢查後寫入」的併發競態。
+    // 回傳 false 代表本程序在時間窗內已對相同價格提醒過，直接略過。
+    let memory_fresh = TTL.trace_quote_set_if_absent(
+        target_key.clone(),
+        current_price,
+        Duration::from_secs(TRACE_ALERT_DEDUP_WINDOW_SECS as u64),
+    );
+    if !memory_fresh {
+        return Ok(false);
+    }
+
+    // 第二層：Redis 去重（跨重啟／跨實例持久化）。只有 key 還不存在時才寫入；
+    // 若已存在代表先前（可能在重啟前）已通知過。Redis 失敗時退回僅靠上方記憶體去重，避免洗版。
     let should_send = match crate::infra::nosql::redis::CLIENT
-        .set_if_absent(&target_key, current_price.to_string(), 60 * 60 * 24 * 2)
+        .set_if_absent(
+            &target_key,
+            current_price.to_string(),
+            TRACE_ALERT_DEDUP_WINDOW_SECS,
+        )
         .await
     {
         Ok(result) => result,
         Err(why) => {
             tracing::error!("Failed to set Redis key {}: {:?}", target_key, why);
+            trace_stats::record_redis_dedup_failure();
             true
         }
     };
@@ -458,19 +479,21 @@ fn is_within_boundary(target: &PriceTrace, current_price: Decimal) -> bool {
     }
 }
 
-/// 建立 trace 通知去重用的 Redis key。
+/// 建立 trace 通知去重用的 key（記憶體 TTL 與 Redis 共用）。
 ///
-/// Key 結構包含交易日、股票、邊界方向與價格，避免同一交易日同一價格重複提醒。
+/// Key 結構包含股票、邊界方向與價格，搭配時間窗 TTL，
+/// 讓相同價格的警報在時間窗內只提醒一次。
+///
+/// 不含日期：去重的時效完全由時間窗 TTL（[`TRACE_ALERT_DEDUP_WINDOW_SECS`]）決定，
+/// 額外加上日期對 1 小時的時間窗沒有實際作用，故省略以簡化 key。
 fn build_trace_notification_key(
-    date: NaiveDate,
     target: &PriceTrace,
     boundary_type: &str,
     current_price: Decimal,
 ) -> String {
     format!(
-        "{}:{}:{}:{}",
+        "{}:{}:{}",
         target.key_with_prefix(),
-        date.format("%Y%m%d"),
         boundary_type,
         current_price.round_dp(4)
     )
@@ -597,50 +620,31 @@ mod tests {
     }
 
     #[test]
-    fn test_build_trace_notification_key_includes_date_boundary_and_price() {
+    fn test_build_trace_notification_key_includes_boundary_and_price() {
         let trace = PriceTrace {
             stock_symbol: "2330".to_string(),
             floor: dec!(25),
             ceiling: dec!(30),
         };
 
-        let key = build_trace_notification_key(
-            NaiveDate::from_ymd_opt(2026, 5, 8).unwrap(),
-            &trace,
-            "floor",
-            dec!(25.50001),
-        );
+        let key = build_trace_notification_key(&trace, "floor", dec!(25.50001));
 
-        assert_eq!(key, "Trace:2330-25-30:20260508:floor:25.5000");
+        assert_eq!(key, "Trace:2330-25-30:floor:25.5000");
     }
 
     #[test]
-    fn test_build_trace_notification_key_distinguishes_price_and_day() {
+    fn test_build_trace_notification_key_distinguishes_price_and_boundary() {
         let trace = PriceTrace {
             stock_symbol: "2330".to_string(),
             floor: dec!(25),
             ceiling: dec!(30),
         };
 
-        let key_a = build_trace_notification_key(
-            NaiveDate::from_ymd_opt(2026, 5, 8).unwrap(),
-            &trace,
-            "floor",
-            dec!(25.5),
-        );
-        let key_b = build_trace_notification_key(
-            NaiveDate::from_ymd_opt(2026, 5, 8).unwrap(),
-            &trace,
-            "floor",
-            dec!(25.4),
-        );
-        let key_c = build_trace_notification_key(
-            NaiveDate::from_ymd_opt(2026, 5, 9).unwrap(),
-            &trace,
-            "floor",
-            dec!(25.5),
-        );
+        let key_a = build_trace_notification_key(&trace, "floor", dec!(25.5));
+        let key_b = build_trace_notification_key(&trace, "floor", dec!(25.4));
+        let key_c = build_trace_notification_key(&trace, "ceiling", dec!(25.5));
 
+        // 不同價格、不同邊界方向仍應產生不同 key。
         assert_ne!(key_a, key_b);
         assert_ne!(key_a, key_c);
     }
@@ -653,14 +657,9 @@ mod tests {
             ceiling: dec!(200),
         };
 
-        let key = build_trace_notification_key(
-            NaiveDate::from_ymd_opt(2026, 6, 5).unwrap(),
-            &trace,
-            "ceiling",
-            dec!(200.12345),
-        );
+        let key = build_trace_notification_key(&trace, "ceiling", dec!(200.12345));
 
-        assert_eq!(key, "Trace:0050-0-200:20260605:ceiling:200.1234");
+        assert_eq!(key, "Trace:0050-0-200:ceiling:200.1234");
     }
 
     #[tokio::test]
