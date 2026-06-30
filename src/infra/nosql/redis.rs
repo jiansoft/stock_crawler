@@ -120,6 +120,64 @@ impl Redis {
         Ok(result.is_some())
     }
 
+    /// 僅當新價格比已記錄值「更極端」時，才以 `EX` 寫入並回報需通知。
+    ///
+    /// 用於「創新低（floor）或新高（ceiling）才通知」的跨重啟／跨實例節流。
+    /// 透過 Lua 腳本在 Redis 端原子地完成「讀取-比較-寫入」，避免競態；
+    /// 每次成功寫入都會以新價格重置 TTL。
+    ///
+    /// # 參數
+    /// - `key`: 去重鍵值。
+    /// - `value`: 目前價格。
+    /// - `ttl_in_seconds`: 寫入後的存活時間（秒）。
+    /// - `lower_is_more_extreme`: `true` 表示更低才算更極端（floor）；`false` 表示更高才算（ceiling）。
+    ///
+    /// # 回傳
+    /// - `Ok(true)`：達到新的極端值（或 key 不存在），已寫入，應通知。
+    /// - `Ok(false)`：未比已記錄值更極端，未寫入。
+    pub async fn set_if_more_extreme(
+        &self,
+        key: &str,
+        value: Decimal,
+        ttl_in_seconds: usize,
+        lower_is_more_extreme: bool,
+    ) -> Result<bool, RedisError> {
+        // ARGV[1]=新價格 ARGV[2]=TTL秒 ARGV[3]='1' 代表更低才更極端（floor），否則更高（ceiling）。
+        const SCRIPT: &str = r"
+            local cur = redis.call('GET', KEYS[1])
+            local newv = tonumber(ARGV[1])
+            local more_extreme
+            if cur == false then
+                more_extreme = true
+            else
+                local curv = tonumber(cur)
+                if ARGV[3] == '1' then
+                    more_extreme = newv < curv
+                else
+                    more_extreme = newv > curv
+                end
+            end
+            if more_extreme then
+                redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+                return 1
+            end
+            return 0
+        ";
+
+        let mut conn = self.pool.get().await?;
+        let flag = if lower_is_more_extreme { "1" } else { "0" };
+        let result: i64 = cmd("EVAL")
+            .arg(SCRIPT)
+            .arg(1)
+            .arg(key)
+            .arg(value.to_string())
+            .arg(ttl_in_seconds)
+            .arg(flag)
+            .query_async(&mut conn)
+            .await?;
+        Ok(result == 1)
+    }
+
     /// 取得指定 key 的字串值。
     pub async fn get_string(&self, key: &str) -> Result<String, RedisError> {
         let mut conn = self.pool.get().await?;
@@ -253,6 +311,47 @@ mod tests {
             .expect("TODO: panic message");
         let is_no_key_val = CLIENT.get_decimal("no key").await;
         println!("no_key_val_is:{:?}", is_no_key_val);
+    }
+
+    /// 驗證「創新低才寫入」的去重邏輯。
+    #[tokio::test]
+    async fn test_set_if_more_extreme_floor() {
+        dotenvy::dotenv().ok();
+        if skip_when_redis_unavailable().await {
+            return;
+        }
+
+        let key = "deadpool/test_more_extreme_floor";
+        let _ = CLIENT.delete(key).await;
+
+        // 首次：key 不存在 → 寫入並通知。
+        assert!(CLIENT.set_if_more_extreme(key, dec!(86.0), 60, true).await.unwrap());
+        // 較高價：非新低 → 不寫入。
+        assert!(!CLIENT.set_if_more_extreme(key, dec!(86.1), 60, true).await.unwrap());
+        // 創新低 → 寫入並通知。
+        assert!(CLIENT.set_if_more_extreme(key, dec!(85.9), 60, true).await.unwrap());
+        // 回升：非新低 → 不寫入。
+        assert!(!CLIENT.set_if_more_extreme(key, dec!(86.0), 60, true).await.unwrap());
+
+        let _ = CLIENT.delete(key).await;
+    }
+
+    /// 驗證「創新高才寫入」的去重邏輯。
+    #[tokio::test]
+    async fn test_set_if_more_extreme_ceiling() {
+        dotenvy::dotenv().ok();
+        if skip_when_redis_unavailable().await {
+            return;
+        }
+
+        let key = "deadpool/test_more_extreme_ceiling";
+        let _ = CLIENT.delete(key).await;
+
+        assert!(CLIENT.set_if_more_extreme(key, dec!(100.0), 60, false).await.unwrap());
+        assert!(!CLIENT.set_if_more_extreme(key, dec!(99.9), 60, false).await.unwrap());
+        assert!(CLIENT.set_if_more_extreme(key, dec!(100.1), 60, false).await.unwrap());
+
+        let _ = CLIENT.delete(key).await;
     }
 
     /// 驗證 Redis 常用操作。

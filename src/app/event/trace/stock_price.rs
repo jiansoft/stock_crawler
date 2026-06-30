@@ -8,8 +8,9 @@
 //! 3. **價格更新事件驅動判斷**：當背景採集更新股價後，會主動觸發指定股票的追蹤條件檢查。
 //! 4. **低頻對帳掃描**：保留低頻 reconciliation 任務，補償事件遺漏、設定剛新增但價格尚未再次變動等情況。
 //! 5. **邊界檢查**：判斷最新價格是否低於設定的最低價（Floor）或超過最高價（Ceiling）。
-//! 6. **頻率限制**：利用 Redis 記錄已發送過的提醒，於設定的時間窗（預設 1 小時）內，
-//!    對「同一股票、同一邊界方向、同一價格」只發送一次警報，避免相同報價持續洗版。
+//! 6. **頻率限制**：於設定的時間窗（預設 1 小時）內，對「同一股票、同一邊界方向」
+//!    只在報價創新低（floor）或新高（ceiling）時才發送警報，避免同方向、未創極端的報價持續洗版。
+//!    時間窗以記憶體 TTL 與 Redis 雙層保存「已通知過的極端值」基準。
 //! 7. **發送通知**：透過 Telegram Bot 將警報訊息傳送給使用者。
 
 use std::collections::HashMap;
@@ -41,10 +42,10 @@ use crate::{
 
 /// 確保整個追蹤執行流程只有一個實例在執行。
 static IS_RUNNING: AtomicBool = AtomicBool::new(false);
-/// 同一則警報（同股票、同邊界方向、同價格）的去重時間窗（秒）。
+/// 同一則警報（同股票、同邊界方向）的去重時間窗（秒）。
 ///
-/// 在此時間窗內，相同價格的警報只會發送一次；過了時間窗後，相同價格才會再次提醒。
-/// 預設為 1 小時。
+/// 在此時間窗內，只有報價創新低（floor）或新高（ceiling）時才會再次發送警報；
+/// 過了時間窗後極端值基準失效，相同價格才會再次提醒一次。預設為 1 小時。
 const TRACE_ALERT_DEDUP_WINDOW_SECS: usize = 60 * 60;
 /// 依股票代號分組後的追蹤條件快取。
 static TRACE_TARGETS: Lazy<RwLock<HashMap<String, Vec<PriceTrace>>>> =
@@ -355,13 +356,12 @@ async fn process_cached_targets(
 /// 判斷股價是否觸發警報，並在必要時發送通知。
 ///
 /// 去重規則（時間窗內，預設 1 小時，見 [`TRACE_ALERT_DEDUP_WINDOW_SECS`]）：
-/// - 同一交易日
-/// - 同一股票
-/// - 同一邊界方向
-/// - 同一價格
+/// 對「同一股票、同一邊界方向」只在報價創新極端時才提醒——
+/// - floor（低於最低價）：報價比時間窗內已通知的最低價更低時才提醒。
+/// - ceiling（超過最高價）：報價比時間窗內已通知的最高價更高時才提醒。
 ///
-/// 在時間窗內，相同價格只發送一次提醒；不同價格仍會各自提醒。
-/// 過了時間窗後，相同價格才會再次提醒。
+/// 例如低標連續觸發 86.0 → 86.1 → 86.2 → 85.9：只在 86.0（首次）與 85.9（創新低）時各提醒一次。
+/// 每次創新極端都會重置時間窗；過了時間窗後基準失效，相同價格才會再次提醒一次。
 async fn alert_on_price_boundary(
     target: PriceTrace,
     current_price: Decimal,
@@ -383,27 +383,33 @@ async fn alert_on_price_boundary(
         return Ok(false);
     };
 
-    let target_key = build_trace_notification_key(&target, boundary_type, current_price);
+    // floor（低於最低價）創新低才提醒；ceiling（超過最高價）創新高才提醒。
+    let lower_is_more_extreme = boundary_type == "floor";
+    let target_key = build_trace_notification_key(&target, boundary_type);
 
     // 第一層：記憶體 TTL 原子去重（本地、永不失敗），是防洗版的最後防線。
-    // trace_quote_set_if_absent 以 NX 語意原子寫入，避免「先檢查後寫入」的併發競態。
-    // 回傳 false 代表本程序在時間窗內已對相同價格提醒過，直接略過。
-    let memory_fresh = TTL.trace_quote_set_if_absent(
+    // trace_quote_notify_if_more_extreme 以 and_compute_with 原子比較目前極端值，
+    // 僅當報價比已記錄值更極端（floor 更低 / ceiling 更高）時才寫入並回報需通知，
+    // 避免「同方向、未創極端」的報價持續洗版。
+    let memory_fresh = TTL.trace_quote_notify_if_more_extreme(
         target_key.clone(),
         current_price,
+        lower_is_more_extreme,
         Duration::from_secs(TRACE_ALERT_DEDUP_WINDOW_SECS as u64),
     );
     if !memory_fresh {
         return Ok(false);
     }
 
-    // 第二層：Redis 去重（跨重啟／跨實例持久化）。只有 key 還不存在時才寫入；
-    // 若已存在代表先前（可能在重啟前）已通知過。Redis 失敗時退回僅靠上方記憶體去重，避免洗版。
+    // 第二層：Redis 去重（跨重啟／跨實例持久化）。只有報價比已記錄值更極端時才寫入，
+    // 維持與記憶體層一致的「創新低/新高才通知」語意。
+    // Redis 失敗時退回僅靠上方記憶體去重，避免洗版。
     let should_send = match crate::infra::nosql::redis::CLIENT
-        .set_if_absent(
+        .set_if_more_extreme(
             &target_key,
-            current_price.to_string(),
+            current_price,
             TRACE_ALERT_DEDUP_WINDOW_SECS,
+            lower_is_more_extreme,
         )
         .await
     {
@@ -482,22 +488,13 @@ fn is_within_boundary(target: &PriceTrace, current_price: Decimal) -> bool {
 
 /// 建立 trace 通知去重用的 key（記憶體 TTL 與 Redis 共用）。
 ///
-/// Key 結構包含股票、邊界方向與價格，搭配時間窗 TTL，
-/// 讓相同價格的警報在時間窗內只提醒一次。
+/// Key 結構僅包含股票與邊界方向（不含價格）：價格改以快取的「值」保存，
+/// 作為已通知的極端值基準，讓同一方向的警報只在創新低/新高時才提醒。
 ///
 /// 不含日期：去重的時效完全由時間窗 TTL（[`TRACE_ALERT_DEDUP_WINDOW_SECS`]）決定，
 /// 額外加上日期對 1 小時的時間窗沒有實際作用，故省略以簡化 key。
-fn build_trace_notification_key(
-    target: &PriceTrace,
-    boundary_type: &str,
-    current_price: Decimal,
-) -> String {
-    format!(
-        "{}:{}:{}",
-        target.key_with_prefix(),
-        boundary_type,
-        current_price.round_dp(4)
-    )
+fn build_trace_notification_key(target: &PriceTrace, boundary_type: &str) -> String {
+    format!("{}:{}", target.key_with_prefix(), boundary_type)
 }
 
 #[cfg(test)]
@@ -621,46 +618,37 @@ mod tests {
     }
 
     #[test]
-    fn test_build_trace_notification_key_includes_boundary_and_price() {
+    fn test_build_trace_notification_key_includes_boundary() {
         let trace = PriceTrace {
             stock_symbol: "2330".to_string(),
             floor: dec!(25),
             ceiling: dec!(30),
         };
 
-        let key = build_trace_notification_key(&trace, "floor", dec!(25.50001));
-
-        assert_eq!(key, "Trace:2330-25-30:floor:25.5000");
+        // Key 僅含股票與邊界方向，不含價格（價格改以快取的值保存為極端值基準）。
+        assert_eq!(
+            build_trace_notification_key(&trace, "floor"),
+            "Trace:2330-25-30:floor"
+        );
+        assert_eq!(
+            build_trace_notification_key(&trace, "ceiling"),
+            "Trace:2330-25-30:ceiling"
+        );
     }
 
     #[test]
-    fn test_build_trace_notification_key_distinguishes_price_and_boundary() {
+    fn test_build_trace_notification_key_distinguishes_boundary() {
         let trace = PriceTrace {
             stock_symbol: "2330".to_string(),
             floor: dec!(25),
             ceiling: dec!(30),
         };
 
-        let key_a = build_trace_notification_key(&trace, "floor", dec!(25.5));
-        let key_b = build_trace_notification_key(&trace, "floor", dec!(25.4));
-        let key_c = build_trace_notification_key(&trace, "ceiling", dec!(25.5));
-
-        // 不同價格、不同邊界方向仍應產生不同 key。
-        assert_ne!(key_a, key_b);
-        assert_ne!(key_a, key_c);
-    }
-
-    #[test]
-    fn build_trace_notification_key_rounds_price_to_four_decimals() {
-        let trace = PriceTrace {
-            stock_symbol: "0050".to_string(),
-            floor: Decimal::ZERO,
-            ceiling: dec!(200),
-        };
-
-        let key = build_trace_notification_key(&trace, "ceiling", dec!(200.12345));
-
-        assert_eq!(key, "Trace:0050-0-200:ceiling:200.1234");
+        // 不同邊界方向應產生不同 key；同一方向不論價格皆為同一 key。
+        assert_ne!(
+            build_trace_notification_key(&trace, "floor"),
+            build_trace_notification_key(&trace, "ceiling")
+        );
     }
 
     #[tokio::test]
