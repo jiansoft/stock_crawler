@@ -186,10 +186,12 @@ pub const OTC_CLASS_CATEGORIES: &[YahooClassCategory] = &[
     YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 159, "資訊服務"),
     YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 160, "其他電子"),
     YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 161, "油電燃氣"),
-    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 163, "公司債"),
+    // 公司債（含無擔保轉換公司債 CB）無即時成交價，採集到的價格恆為 0，
+    // 會被 is_valid_price 過濾並噴出大量「過濾異常價格」雜訊，故不納入盤中採集。
+    YahooClassCategory::disabled(YahooClassExchange::OverTheCounter, 163, "公司債"),
     YahooClassCategory::disabled(YahooClassExchange::OverTheCounter, 165, "認購"),
     YahooClassCategory::disabled(YahooClassExchange::OverTheCounter, 166, "認售"),
-    YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 167, "牛證"),
+    YahooClassCategory::disabled(YahooClassExchange::OverTheCounter, 167, "牛證"),
     YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 169, "文化創意"),
     YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 170, "農業科技業"),
     YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 171, "電子商務"),

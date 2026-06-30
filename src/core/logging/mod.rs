@@ -536,7 +536,11 @@ fn forward_to_seq(
 /// - `html5ever=off`：關閉第三方 HTML 解析套件 `html5ever` 的日誌。它在解析畸形網頁時
 ///   會以 `warn!` 噴出大量「foster parenting not implemented」，屬無害雜訊，且因為是
 ///   `warn` 等級，單靠 `info` 基準擋不掉，必須針對 target 關閉。
-const DEFAULT_FILE_LOG_DIRECTIVES: &str = "info,html5ever=off";
+/// - `rustls::msgs::handshake=error`：以 IP（而非網域）直連 HTTPS 時，rustls 會以 `warn!`
+///   噴出「Illegal SNI extension: ignoring IP address presented as hostname」。依 RFC 6066
+///   SNI 僅能放主機名稱，rustls 只是忽略該 IP 後照常握手，屬無害雜訊。降到 `error`
+///   可壓掉此警告，同時保留真正的 TLS 錯誤。
+const DEFAULT_FILE_LOG_DIRECTIVES: &str = "info,html5ever=off,rustls::msgs::handshake=error";
 
 /// 檔案日誌（`FileLogLayer`）的等級過濾器。
 ///
@@ -546,7 +550,7 @@ const DEFAULT_FILE_LOG_DIRECTIVES: &str = "info,html5ever=off";
 ///
 /// - 不設定時：只落 `INFO` 以上，並關閉 `html5ever` 雜訊。
 /// - 臨時除錯：`FILE_LOG_LEVEL=debug`（或更細的 `info,stock_crawler::app::event::trace=debug`）。
-///   注意自訂時若仍想壓掉 html5ever，記得自行附帶 `,html5ever=off`。
+///   注意自訂時若仍想壓掉第三方雜訊，記得自行附帶 `,html5ever=off,rustls::msgs::handshake=error`。
 ///
 /// 此過濾器只作用於檔案日誌層；stdout 的 fmt 層仍由 `RUST_LOG` 獨立控制。
 pub fn file_log_env_filter() -> tracing_subscriber::EnvFilter {
