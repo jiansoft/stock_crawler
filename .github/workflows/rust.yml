@@ -52,7 +52,9 @@ jobs:
       uses: Swatinem/rust-cache@v2
 
     - name: Cargo check
-      run: cargo check --verbose
+      # --locked：要求 Cargo.lock 與 Cargo.toml 一致；若 lock 過期則明確報錯，
+      # 而非默默重新解析相依（避免 transitive 套件浮到不相容新版本造成編譯失敗）。
+      run: cargo check --locked --verbose
     - name: Clippy
       run: cargo clippy -- -D warnings
 
