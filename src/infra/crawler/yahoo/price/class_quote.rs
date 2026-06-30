@@ -683,17 +683,18 @@ mod tests {
         assert_eq!(category_key(&category), "TWO:153");
     }
 
-    /// 驗證盤中輪詢清單會排除認購 / 認售 / 指數類，只保留實際需要採集的分類。
+    /// 驗證盤中輪詢清單會排除認購 / 認售 / 指數類 / 公司債 / 牛證等不需採集的分類，
+    /// 只保留實際需要採集的分類。
     #[test]
     fn test_all_class_categories_excludes_disabled_categories() {
         let categories = all_class_categories();
 
-        assert_eq!(categories.len(), 97);
+        assert_eq!(categories.len(), 95);
         assert!(!categories.iter().any(|category| {
             matches!(
                 (category.exchange, category.sector_id),
                 (YahooClassExchange::Listed, 31..=33 | 49) // 排除指數類與回空資料的創新板(49)
-                    | (YahooClassExchange::OverTheCounter, 33 | 165 | 166)
+                    | (YahooClassExchange::OverTheCounter, 33 | 163 | 165..=167) // 公司債(163)、認購/認售(165/166)、牛證(167)
             )
         }));
         assert!(categories.iter().any(|category| {
