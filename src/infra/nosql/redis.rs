@@ -325,13 +325,33 @@ mod tests {
         let _ = CLIENT.delete(key).await;
 
         // 首次：key 不存在 → 寫入並通知。
-        assert!(CLIENT.set_if_more_extreme(key, dec!(86.0), 60, true).await.unwrap());
+        assert!(
+            CLIENT
+                .set_if_more_extreme(key, dec!(86.0), 60, true)
+                .await
+                .unwrap()
+        );
         // 較高價：非新低 → 不寫入。
-        assert!(!CLIENT.set_if_more_extreme(key, dec!(86.1), 60, true).await.unwrap());
+        assert!(
+            !CLIENT
+                .set_if_more_extreme(key, dec!(86.1), 60, true)
+                .await
+                .unwrap()
+        );
         // 創新低 → 寫入並通知。
-        assert!(CLIENT.set_if_more_extreme(key, dec!(85.9), 60, true).await.unwrap());
+        assert!(
+            CLIENT
+                .set_if_more_extreme(key, dec!(85.9), 60, true)
+                .await
+                .unwrap()
+        );
         // 回升：非新低 → 不寫入。
-        assert!(!CLIENT.set_if_more_extreme(key, dec!(86.0), 60, true).await.unwrap());
+        assert!(
+            !CLIENT
+                .set_if_more_extreme(key, dec!(86.0), 60, true)
+                .await
+                .unwrap()
+        );
 
         let _ = CLIENT.delete(key).await;
     }
@@ -347,9 +367,24 @@ mod tests {
         let key = "deadpool/test_more_extreme_ceiling";
         let _ = CLIENT.delete(key).await;
 
-        assert!(CLIENT.set_if_more_extreme(key, dec!(100.0), 60, false).await.unwrap());
-        assert!(!CLIENT.set_if_more_extreme(key, dec!(99.9), 60, false).await.unwrap());
-        assert!(CLIENT.set_if_more_extreme(key, dec!(100.1), 60, false).await.unwrap());
+        assert!(
+            CLIENT
+                .set_if_more_extreme(key, dec!(100.0), 60, false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !CLIENT
+                .set_if_more_extreme(key, dec!(99.9), 60, false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            CLIENT
+                .set_if_more_extreme(key, dec!(100.1), 60, false)
+                .await
+                .unwrap()
+        );
 
         let _ = CLIENT.delete(key).await;
     }
