@@ -24,6 +24,11 @@ jobs:
     - uses: actions/checkout@v7
     - name: Dependency review
       uses: actions/dependency-review-action@v5
+      with:
+        # 只擋 high/critical 的 GHSA 漏洞；low/moderate 的逐級把關交給 cargo-deny
+        # (RustSec) 那個 job。否則 GHSA 每日更新的 low-severity 公告(例如
+        # rand 0.8.5 的 unsound 邊角案例)會在不相關的 PR 上反覆觸發失敗。
+        fail-on-severity: high
 
   fmt:
     name: Rustfmt
