@@ -167,9 +167,10 @@ mod tests {
     use crate::infra::database;
 
     #[tokio::test]
+    #[ignore]
     async fn test_money_flow_repository_flow() {
         // 載入環境變數
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         if database::ping().await.is_err() {
             println!("跳過 test_money_flow_repository_flow：無資料庫連接");

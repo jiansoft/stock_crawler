@@ -209,18 +209,17 @@ ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
     use std::time::Duration;
     use tokio::time::sleep;
 
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 DailyStockPriceStats::upsert".to_string());
+        tracing::debug!("開始 DailyStockPriceStats::upsert");
 
         // 開始日期與結束日期
         let start_date = NaiveDate::parse_from_str("2026-02-03", "%Y-%m-%d").unwrap();
@@ -229,20 +228,22 @@ mod tests {
         // 迴圈遍歷日期
         let mut current_date = start_date;
         while current_date <= end_date {
-            logging::debug_file_async(format!("處理日期: {}", current_date));
+            tracing::debug!("處理日期: {}", current_date);
 
             match DailyStockPriceStats::upsert(current_date, &mut None).await {
                 Ok(r) => {
-                    logging::debug_file_async(format!(
+                    tracing::debug!(
                         "DailyStockPriceStats::upsert({:?}) 成功: {:#?}",
-                        current_date, r
-                    ));
+                        current_date,
+                        r
+                    );
                 }
                 Err(why) => {
-                    logging::debug_file_async(format!(
+                    tracing::debug!(
                         "DailyStockPriceStats::upsert({:?}) 失敗: {:?}",
-                        current_date, why
-                    ));
+                        current_date,
+                        why
+                    );
                 }
             }
 
@@ -250,7 +251,7 @@ mod tests {
             current_date += chrono::Duration::days(1);
         }
 
-        logging::debug_file_async("結束 DailyStockPriceStats::upsert".to_string());
+        tracing::debug!("結束 DailyStockPriceStats::upsert");
         // 每次迴圈暫停 0.5 秒
         sleep(Duration::from_millis(500)).await;
     }

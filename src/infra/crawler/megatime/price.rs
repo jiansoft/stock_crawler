@@ -145,33 +145,30 @@ impl PcHome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{core::logging, infra::crawler::log_stock_price_test};
+    use crate::infra::crawler::log_stock_price_test;
 
     #[tokio::test]
     async fn test_get_stock_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         log_stock_price_test::<PcHome>("2330").await;
     }
 
     #[tokio::test]
     async fn test_get_stock_quotes() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 megatime::get_stock_quotes".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 megatime::get_stock_quotes");
 
         match PcHome::get_stock_quotes("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("megatime::get_stock_quotes : {:#?}", e));
+                tracing::debug!("megatime::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
                 dbg!(&why);
-                logging::debug_file_async(format!(
-                    "Failed to megatime::get_stock_quotes because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to megatime::get_stock_quotes because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 megatime::get_stock_quotes".to_string());
+        tracing::debug!("結束 megatime::get_stock_quotes");
     }
 }

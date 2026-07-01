@@ -13,7 +13,7 @@ pub async fn visit(stock_symbol: &str) -> Result<Vec<share::AnnualProfit>> {
         stock_symbol = stock_symbol,
     );
 
-    share::fetch_annual_profits(&url, stock_symbol).await
+    Ok(share::fetch_annual_profits(&url, stock_symbol).await?)
 }
 
 #[async_trait]
@@ -25,25 +25,23 @@ impl AnnualProfitFetcher for MoneyDJ {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
     async fn test_visit() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 visit".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 visit");
 
         match visit("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("moneydj : {:#?}", e));
+                tracing::debug!("moneydj : {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+                tracing::debug!("Failed to visit because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

@@ -138,13 +138,13 @@ fn vec_to_hashmap(v: Option<Vec<Entity>>) -> HashMap<String, Entity> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, core::util};
+    use crate::core::util;
 
     use super::*;
 
     /*    #[tokio::test]
         async fn test_vec_to_hashmap() {
-            dotenv::dotenv().ok();
+            dotenvy::dotenv().ok();
             let mut entities: Vec<StockWord> = Vec::new();
             for i in 0..1000000 {
                 entities.push(StockWord {
@@ -170,7 +170,7 @@ mod tests {
     */
     /*    #[tokio::test]
         async fn test_split_1() {
-            dotenv::dotenv().ok();
+            dotenvy::dotenv().ok();
             let chinese_word = "台積電";
             let start = Instant::now();
             let result = split_v1(chinese_word);
@@ -180,34 +180,30 @@ mod tests {
     */
 
     #[tokio::test]
-    #[ignore]
     async fn test_insert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let mut e = StockWord::new("小一".to_string());
         match e.upsert().await {
             Ok(word_id) => {
-                logging::debug_file_async(format!("word_id:{} e:{:#?}", word_id, &e));
+                tracing::debug!("word_id:{} e:{:#?}", word_id, &e);
                 let _ = sqlx::query("delete from company_word where word_id = $1;")
                     .bind(word_id)
                     .execute(database::get_connection())
                     .await;
             }
             Err(why) => {
-                logging::debug_file_async(format!("because:{:?}", why));
+                tracing::debug!("because:{:?}", why);
             }
         }
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_list_by_word() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let word = util::text::split("隆銘綠能");
         let entities = StockWord::list_by_word(&word).await;
-        logging::debug_file_async(format!("entities:{:#?}", entities));
-        /*logging::debug_file_async(format!(
-            "word:{:#?}",
-            util::map::vec_to_hashmap(entities.unwrap())
-        ));*/
+        tracing::debug!("entities:{:#?}", entities);
+        /*tracing::debug!("word:{:#?}",
+        util::map::vec_to_hashmap(entities.unwrap()));*/
     }
 }

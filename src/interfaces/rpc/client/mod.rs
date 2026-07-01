@@ -10,7 +10,10 @@ use once_cell::sync::Lazy;
 use tokio::{fs, sync::OnceCell as TokioOnceCell};
 use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 
-use crate::{core::config::SETTINGS, interfaces::rpc::stock::stock_client::StockClient};
+// 服務定義改名為 StockService 後，tonic 產生的客戶端型別也更名
+use crate::{
+    core::config::SETTINGS, interfaces::rpc::stock::stock_service_client::StockServiceClient,
+};
 
 /// Stock 服務客戶端封裝。
 pub mod stock_service;
@@ -27,7 +30,7 @@ static GRPC: Lazy<Arc<TokioOnceCell<Grpc>>> = Lazy::new(|| Arc::new(TokioOnceCel
 /// 包含所有對外連線的 gRPC 客戶端實例。
 pub struct Grpc {
     /// Stock 服務的 gRPC 客戶端。
-    pub stock: StockClient<Channel>,
+    pub stock: StockServiceClient<Channel>,
 }
 
 impl Grpc {
@@ -48,7 +51,7 @@ impl Grpc {
             .tls_config(tls)?
             .connect()
             .await?;
-        let client = StockClient::new(channel);
+        let client = StockServiceClient::new(channel);
 
         Ok(Grpc { stock: client })
     }

@@ -11,7 +11,6 @@ use urlencoding::encode;
 
 use crate::infra::cache::SHARE;
 use crate::{
-    core::logging,
     core::util::{
         http::{self},
         map::Keyable,
@@ -289,10 +288,7 @@ fn parse_schedule_dividends(stock_symbol: &str, text: &str) -> Result<Vec<GoodIn
                     y
                 }
                 Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to i32::parse because(year:{}) {:#?}",
-                        year_str, why
-                    ));
+                    tracing::error!("Failed to i32::parse because(year:{}) {:#?}", year_str, why);
 
                     if last_year == 0 {
                         return None;
@@ -552,8 +548,6 @@ fn normalize_goodinfo_year(year: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
     use rust_decimal_macros::dec;
 
@@ -627,19 +621,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_visit() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 visit".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 visit");
 
         match visit("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("dividend : {:#?}", e));
+                tracing::debug!("dividend : {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+                tracing::debug!("Failed to visit because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

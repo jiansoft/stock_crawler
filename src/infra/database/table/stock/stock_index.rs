@@ -106,13 +106,11 @@ DO NOTHING;
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
     async fn test_insert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let mut e = StockIndex::new("79979".to_string());
         e.word_id = 79979;
         match e.insert().await {
@@ -124,7 +122,7 @@ mod tests {
                     .await
                 {
                     Ok((row_count, )) => {
-                        logging::info_file_async(format!("row_count:{}", row_count));
+                        tracing::info!("row_count:{}", row_count);
                         let _ = sqlx::query(
                             "delete from company_index where word_id = $1 and security_code = $2;",
                         )
@@ -134,12 +132,12 @@ mod tests {
                             .await;
                     }
                     Err(why) => {
-                        logging::error_file_async(format!("because:{:#?}", why));
+                        tracing::error!("because:{:#?}", why);
                     }
                 };
             }
             Err(why) => {
-                logging::error_file_async(format!("because:{:#?}", why));
+                tracing::error!("because:{:#?}", why);
             }
         }
     }

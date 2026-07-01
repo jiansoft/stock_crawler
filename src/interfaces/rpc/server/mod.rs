@@ -12,14 +12,16 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use crate::{
     core::config::SETTINGS,
-    core::logging,
     core::util,
     interfaces::rpc::{
-        control::control_server::ControlServer,
-        manual_backfill::manual_backfill_server::ManualBackfillServer,
-        server::control_service::ControlService,
-        server::manual_backfill_service::ManualBackfillService,
-        server::stock_service::StockService, stock::stock_server::StockServer,
+        // 服務定義加上 Service 後綴後，tonic 產生的包裝型別也相應更名
+        control::control_service_server::ControlServiceServer,
+        manual_backfill::manual_backfill_service_server::ManualBackfillServiceServer,
+        // 實作結構體已更名為 *ServiceImpl，避免與 tonic 產生 trait 同名
+        server::control_service::ControlServiceImpl,
+        server::manual_backfill_service::ManualBackfillServiceImpl,
+        server::stock_service::StockServiceImpl,
+        stock::stock_service_server::StockServiceServer,
     },
 };
 
@@ -48,11 +50,11 @@ pub async fn start() -> Result<()> {
     // 使用 tokio::spawn 啟動一個新的異步任務
     tokio::spawn(async move {
         if let Err(why) = run_grpc_server(addr).await {
-            logging::error_file_async(format!("gRPC伺服器錯誤: {}", why));
+            tracing::error!("gRPC伺服器錯誤: {}", why);
         }
     });
 
-    logging::info_file_async(format!("啟動 gRPC({:?}) 服務", addr));
+    tracing::info!("啟動 gRPC({:?}) 服務", addr);
 
     Ok(())
 }
@@ -61,14 +63,14 @@ pub async fn start() -> Result<()> {
 ///
 /// 負責建立伺服器 Builder、套用 TLS 設定並註冊服務。
 async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
-    logging::info_file_async(format!("準備建立 gRPC 伺服器並監聽 {:?}", addr));
+    tracing::info!("準備建立 gRPC 伺服器並監聽 {:?}", addr);
     let builder = Server::builder();
     let config = get_tls_config();
 
     if config.is_some() {
-        logging::info_file_async("gRPC 伺服器將使用 TLS 設定啟動");
+        tracing::info!("gRPC 伺服器將使用 TLS 設定啟動");
     } else {
-        logging::info_file_async("gRPC 伺服器將使用非加密模式 (Insecure) 啟動");
+        tracing::info!("gRPC 伺服器將使用非加密模式 (Insecure) 啟動");
     }
 
     let mut server = match config {
@@ -76,17 +78,20 @@ async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
         None => builder,
     };
 
-    logging::info_file_async(format!("gRPC 伺服器正在 {:?} 開始服務...", addr));
+    tracing::info!("gRPC 伺服器正在 {:?} 開始服務...", addr);
     let result = server
-        .add_service(ControlServer::new(ControlService::default()))
-        .add_service(ManualBackfillServer::new(ManualBackfillService::default()))
-        .add_service(StockServer::new(StockService::default()))
+        // 使用更新後的 Server 包裝型別（名稱含 Service 後綴）
+        .add_service(ControlServiceServer::new(ControlServiceImpl::default()))
+        .add_service(ManualBackfillServiceServer::new(
+            ManualBackfillServiceImpl::default(),
+        ))
+        .add_service(StockServiceServer::new(StockServiceImpl::default()))
         .serve(addr)
         .await;
 
     match &result {
-        Ok(_) => logging::info_file_async(format!("gRPC 伺服器在 {:?} 正常停止", addr)),
-        Err(why) => logging::error_file_async(format!("gRPC 伺服器運行中斷 ({:?}): {}", addr, why)),
+        Ok(_) => tracing::info!("gRPC 伺服器在 {:?} 正常停止", addr),
+        Err(why) => tracing::error!("gRPC 伺服器運行中斷 ({:?}): {}", addr, why),
     }
 
     Ok(result?)
@@ -120,25 +125,25 @@ fn get_tls_config() -> Option<(String, String)> {
 fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Result<Server> {
     util::ensure_rustls_crypto_provider();
 
-    logging::info_file_async(format!("正在載入 SSL 憑證檔案: {}", cert_file));
-    logging::info_file_async(format!("正在載入 SSL 金鑰檔案: {}", key_file));
+    tracing::info!("正在載入 SSL 憑證檔案: {}", cert_file);
+    tracing::info!("正在載入 SSL 金鑰檔案: {}", key_file);
 
     let cert_content = std::fs::read_to_string(&cert_file).map_err(|why| {
-        logging::error_file_async(format!("讀取憑證檔案失敗 ({}): {}", cert_file, why));
+        tracing::error!("讀取憑證檔案失敗 ({}): {}", cert_file, why);
         why
     })?;
     let key_content = std::fs::read_to_string(&key_file).map_err(|why| {
-        logging::error_file_async(format!("讀取金鑰檔案失敗 ({}): {}", key_file, why));
+        tracing::error!("讀取金鑰檔案失敗 ({}): {}", key_file, why);
         why
     })?;
     let cert_info = describe_certificate(&cert_content);
 
-    logging::info_file_async(format!(
+    tracing::info!(
         "SSL 載入成功 - 憑證: {} bytes, 資訊: [{}], 金鑰: {} bytes",
         cert_content.len(),
         cert_info,
         key_content.len()
-    ));
+    );
 
     let identity = Identity::from_pem(cert_content, key_content);
 
@@ -150,11 +155,18 @@ fn configure_tls(builder: Server, (cert_file, key_file): (String, String)) -> Re
 /// 用於日誌記錄，提供憑證的 Subject 與過期時間等資訊。
 /// 使用純 Rust 實作，不依賴外部 openssl 指令。
 fn describe_certificate(cert_pem: &str) -> String {
+    use rustls_pki_types::pem::PemObject;
+
+    // 建立一個讀取器，將 PEM 格式的憑證資料包裝成 BufReader
     let mut reader = BufReader::new(Cursor::new(cert_pem.as_bytes()));
-    let cert = match rustls_pemfile::certs(&mut reader).next().transpose() {
-        Ok(Some(cert)) => cert,
-        Ok(None) => return "PEM 中找不到 CERTIFICATE 區塊".to_string(),
-        Err(why) => return format!("憑證 PEM 解析失敗: {}", why),
+    // 使用 rustls-pki-types 的 pem_reader_iter 迭代解析 PEM 資料，並取出第一個憑證區塊
+    let cert = match rustls_pki_types::CertificateDer::pem_reader_iter(&mut reader)
+        .next()
+        .transpose()
+    {
+        Ok(Some(cert)) => cert, // 成功解析出憑證
+        Ok(None) => return "PEM 中找不到 CERTIFICATE 區塊".to_string(), // 找不到憑證區塊
+        Err(why) => return format!("憑證 PEM 解析失敗: {}", why), // 解析發生錯誤
     };
 
     let parsed = match x509_parser::parse_x509_certificate(cert.as_ref()) {
@@ -178,12 +190,12 @@ mod tests {
     /// 測試 gRPC 伺服器啟動流程。
     #[tokio::test]
     async fn test_start() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 rpc::server::test_start()".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 rpc::server::test_start()");
 
         tokio::spawn(start());
         tokio::time::sleep(Duration::from_secs(10)).await;
 
-        logging::debug_file_async("結束 rpc::server::test_start()".to_string());
+        tracing::debug!("結束 rpc::server::test_start()");
     }
 }

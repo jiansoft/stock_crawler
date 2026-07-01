@@ -1,6 +1,6 @@
 use crate::{
     app::backfill::acl::FinancialStatementAclMapper,
-    app::backfill::financial_statement::update_roe_and_roa_for_zero_values, core::logging,
+    app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
     core::util::datetime::Weekend,
     domain::financial::entity::FinancialStatement as DomainFinancialStatement,
     domain::financial::repository::FinancialRepository, domain::registry::entity::StockSymbol,
@@ -19,9 +19,9 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    logging::info_file_async("更新台股年度財報開始");
+    tracing::info!("更新台股年度財報開始");
     defer! {
-       logging::info_file_async("更新台股年度財報結束");
+       tracing::info!("更新台股年度財報結束");
     }
 
     let cache_key = "financial_statement:annual";
@@ -34,7 +34,7 @@ pub async fn execute() -> Result<()> {
 
     let profits = wespai::profit::visit().await?;
     if profits.is_empty() {
-        logging::warn_file_async("profits from wespai is empty".to_string());
+        tracing::warn!("profits from wespai is empty");
         return Ok(());
     }
 
@@ -76,10 +76,10 @@ pub async fn execute() -> Result<()> {
             .batch_save_financial_statements(&statements)
             .await
     {
-        logging::error_file_async(format!(
+        tracing::error!(
             "Failed to financial_repo.batch_save_financial_statements because {:?}",
             why
-        ));
+        );
     }
 
     update_roe_and_roa_for_zero_values(None).await?;
@@ -93,24 +93,24 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 }

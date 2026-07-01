@@ -1,10 +1,11 @@
 syntax = "proto3";
 
-import "basic.proto";
+import "basic/basic.proto";
 
 package control;
 
-service Control {
+/// 系統控制服務，提供健康檢查與連線測試功能。
+service ControlService {
   rpc Control(ControlRequest) returns (ControlResponse) {}
 }
 

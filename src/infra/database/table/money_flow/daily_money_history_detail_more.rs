@@ -147,15 +147,16 @@ ORDER BY security_code, member_id, transaction_date;
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_delete_and_upsert() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 delete_and_upsert".to_string());
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 test_delete_and_upsert：無資料庫連接");
+            return;
+        }
+        tracing::debug!("開始 delete_and_upsert");
 
         let current_date = NaiveDate::parse_from_str("2023-08-05", "%Y-%m-%d").unwrap();
         let mut tx = database::get_tx().await.ok();
@@ -166,25 +167,24 @@ mod tests {
 
         match DailyMoneyHistoryDetailMore::upsert(current_date, &mut tx).await {
             Ok(r) => {
-                logging::debug_file_async(format!("DailyMoneyHistoryDetailMore::upsert:{:#?}", r));
-                tx.unwrap()
-                    .commit()
-                    .await
-                    .expect("tx.unwrap().commit() is failed");
+                tracing::debug!("DailyMoneyHistoryDetailMore::upsert:{:#?}", r);
+                if let Some(tx) = tx {
+                    tx.commit().await.expect("commit is failed");
+                }
             }
             Err(why) => {
-                logging::debug_file_async(format!(
+                tracing::debug!(
                     "Failed to DailyMoneyHistoryDetailMore::delete_and_upsert because {:?}",
                     why
-                ));
-                tx.unwrap()
-                    .rollback()
-                    .await
-                    .expect("tx.unwrap().rollback() is failed");
+                );
+                if let Some(tx) = tx {
+                    tx.rollback().await.expect("rollback is failed");
+                }
             }
         }
 
-        logging::debug_file_async(
+        tracing::debug!(
+            "{}",
             "結束 DailyMoneyHistoryDetailMore::delete_and_upsert".to_string(),
         );
     }

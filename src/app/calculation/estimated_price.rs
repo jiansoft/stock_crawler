@@ -1,8 +1,6 @@
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 
-use crate::core::logging;
-
 /// 計算便宜、合理、昂貴價的估算
 pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
     let years: Vec<i32> = (0..6).map(|i| date.year() - i).collect();
@@ -25,7 +23,7 @@ pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
         async move {
             let estimate = Estimate::new(stock_symbol, date);
             if let Err(why) = estimate.upsert(years).await {
-                logging::error_file_async(format!("{:?}", why));
+                tracing::error!("{:?}", why);
             }
         }
     })
@@ -59,7 +57,7 @@ pub async fn calculate_estimated_price(date: NaiveDate) -> Result<()> {
         );
         config_repo.save(&new_config).await?;
     }
-    logging::info_file_async("價格估值日期更新到資料庫完成".to_string());
+    tracing::info!("價格估值日期更新到資料庫完成");
 
     Ok(())
 }
@@ -71,21 +69,17 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_calculate_estimated_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 calculate_estimated_price".to_string());
+        tracing::debug!("開始 calculate_estimated_price");
         let current_date = NaiveDate::parse_from_str("2026-03-31", "%Y-%m-%d").unwrap();
         match calculate_estimated_price(current_date).await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to calculate_estimated_price because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to calculate_estimated_price because {:?}", why);
             }
         }
-        logging::debug_file_async("結束 calculate_estimated_price".to_string());
+        tracing::debug!("結束 calculate_estimated_price");
     }
 }

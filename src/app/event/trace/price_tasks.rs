@@ -104,10 +104,7 @@ pub async fn start_price_tasks() -> Result<()> {
     trace_stats::reset_runtime_stats();
 
     let traced_symbol_count = stock_price::refresh_trace_targets_cache().await?;
-    logging::info_file_async(format!(
-        "追蹤條件快取初始化完成，共 {} 檔股票",
-        traced_symbol_count
-    ));
+    tracing::info!("追蹤條件快取初始化完成，共 {} 檔股票", traced_symbol_count);
 
     start_price_update_consumer_task();
     start_trace_target_refresh_task();
@@ -145,7 +142,7 @@ pub async fn wait_for_price_cache_ready() {
         time::sleep(SNAPSHOT_WARMUP_POLL_INTERVAL).await;
     }
 
-    logging::debug_file_async("股票追蹤快取暖身逾時，先以目前快取內容執行".to_string());
+    tracing::debug!("股票追蹤快取暖身逾時，先以目前快取內容執行");
 }
 
 /// 停止 trace 事件所需的即時報價背景任務。
@@ -227,10 +224,7 @@ fn start_price_update_consumer_task() {
     let mut tx_guard = match PRICE_UPDATE_TX.write() {
         Ok(guard) => guard,
         Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to lock price update sender because {:?}",
-                why
-            ));
+            tracing::error!("Failed to lock price update sender because {:?}", why);
             return;
         }
     };
@@ -248,10 +242,11 @@ fn start_price_update_consumer_task() {
 
     task::spawn(async move {
         let active_tasks = PRICE_CONSUMER_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        logging::info_file_async(format!(
+        tracing::info!(
             "股票追蹤價格事件 consumer 啟動 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
 
         while let Some(event) = rx.recv().await {
             let symbol = event.symbol;
@@ -259,20 +254,18 @@ fn start_price_update_consumer_task() {
             // consumer 只通知「哪支股票剛更新」，
             // evaluator 會自行回頭讀共享快取來做高低標判斷。
             if let Err(why) = stock_price::evaluate_price_update(symbol.clone()).await {
-                logging::error_file_async(format!(
-                    "Failed to evaluate price update event because {:?}",
-                    why
-                ));
+                tracing::error!("Failed to evaluate price update event because {:?}", why);
             }
             clear_pending_price_symbol(&symbol);
         }
 
         clear_pending_price_symbols();
         let active_tasks = decrement_atomic_usize(&PRICE_CONSUMER_ACTIVE_TASKS);
-        logging::info_file_async(format!(
+        tracing::info!(
             "股票追蹤價格事件 consumer 已停止 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -296,10 +289,11 @@ fn start_trace_target_refresh_task() {
 
     task::spawn(async move {
         let active_tasks = TARGET_REFRESH_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        logging::info_file_async(format!(
+        tracing::info!(
             "追蹤條件快取刷新任務啟動 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
 
         while IS_TARGET_CACHE_REFRESHING.load(Ordering::SeqCst) {
             time::sleep(TRACE_TARGET_REFRESH_INTERVAL).await;
@@ -310,26 +304,21 @@ fn start_trace_target_refresh_task() {
 
             match stock_price::refresh_trace_targets_cache().await {
                 Ok(symbol_count) => {
-                    logging::debug_file_async(format!(
-                        "追蹤條件快取已刷新，共 {} 檔股票",
-                        symbol_count
-                    ));
+                    tracing::debug!("追蹤條件快取已刷新，共 {} 檔股票", symbol_count);
                 }
                 Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to refresh trace target cache because {:?}",
-                        why
-                    ));
+                    tracing::error!("Failed to refresh trace target cache because {:?}", why);
                 }
             }
         }
 
         IS_TARGET_CACHE_REFRESHING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&TARGET_REFRESH_ACTIVE_TASKS);
-        logging::info_file_async(format!(
+        tracing::info!(
             "追蹤條件快取刷新任務已停止 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -350,10 +339,11 @@ fn start_trace_reconciliation_task() {
 
     task::spawn(async move {
         let active_tasks = RECONCILIATION_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        logging::info_file_async(format!(
+        tracing::info!(
             "追蹤股票低頻對帳任務啟動 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
         let mut ticker = time::interval(TRACE_RECONCILIATION_INTERVAL);
         ticker.tick().await;
 
@@ -373,20 +363,18 @@ fn start_trace_reconciliation_task() {
                     trace_stats::record_reconciliation_run(symbol_count);
                 }
                 Err(why) => {
-                    logging::error_file_async(format!(
-                        "Failed to reconcile traced stock prices because {:?}",
-                        why
-                    ));
+                    tracing::error!("Failed to reconcile traced stock prices because {:?}", why);
                 }
             }
         }
 
         IS_RECONCILING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&RECONCILIATION_ACTIVE_TASKS);
-        logging::info_file_async(format!(
+        tracing::info!(
             "追蹤股票低頻對帳任務已停止 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -412,10 +400,11 @@ fn start_traced_stock_backup_caching_task() {
 
     task::spawn(async move {
         let active_tasks = BACKUP_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        logging::info_file_async(format!(
+        tracing::info!(
             "追蹤股票備援採集任務啟動 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
 
         while IS_BACKUP_CACHING.load(Ordering::SeqCst) {
             if !declare::StockExchange::TWSE.is_open() {
@@ -423,10 +412,7 @@ fn start_traced_stock_backup_caching_task() {
             }
 
             if let Err(why) = refresh_traced_stock_snapshot_cache().await {
-                logging::error_file_async(format!(
-                    "Failed to refresh traced stock snapshot cache: {:?}",
-                    why
-                ));
+                tracing::error!("Failed to refresh traced stock snapshot cache: {:?}", why);
             }
 
             if !IS_BACKUP_CACHING.load(Ordering::SeqCst) {
@@ -438,10 +424,11 @@ fn start_traced_stock_backup_caching_task() {
 
         IS_BACKUP_CACHING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&BACKUP_ACTIVE_TASKS);
-        logging::info_file_async(format!(
+        tracing::info!(
             "追蹤股票備援採集任務已停止 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -466,10 +453,11 @@ fn start_trace_diagnostics_task() {
 
     task::spawn(async move {
         let active_tasks = DIAGNOSTICS_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        logging::info_file_async(format!(
+        tracing::info!(
             "trace diagnostics 任務啟動 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
 
         let mut ticker = time::interval(TRACE_DIAGNOSTICS_LOG_INTERVAL);
         let mut previous_stats = trace_stats::get_runtime_stats_snapshot();
@@ -493,10 +481,11 @@ fn start_trace_diagnostics_task() {
 
         IS_DIAGNOSTICS_LOGGING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&DIAGNOSTICS_ACTIVE_TASKS);
-        logging::info_file_async(format!(
+        tracing::info!(
             "trace diagnostics 任務已停止 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
     });
 }
 
@@ -589,8 +578,7 @@ fn log_trace_diagnostics(
     };
 
     /*
-    logging::info_file_async(format!(
-        "Trace diagnostics | {} | snapshots len={} cap={} strings={}KiB approx_reserved={:.1}MiB | targets symbols={} total={} | events pub={} cons={} drop={} backlog~={} pending={} delta_pub={} ({:.1}/s) delta_cons={} ({:.1}/s) delta_drop={} | tasks {} {} {} {} {} {} {} | logs default(q={}/{} drop={} proc={}) http(q={}/{} drop={} proc={})",
+    tracing::info!("Trace diagnostics | {} | snapshots len={} cap={} strings={}KiB approx_reserved={:.1}MiB | targets symbols={} total={} | events pub={} cons={} drop={} backlog~={} pending={} delta_pub={} ({:.1}/s) delta_cons={} ({:.1}/s) delta_drop={} | tasks {} {} {} {} {} {} {} | logs default(q={}/{} drop={} proc={}) http(q={}/{} drop={} proc={})",
         memory_summary,
         snapshot_len,
         snapshot_capacity,
@@ -622,11 +610,9 @@ fn log_trace_diagnostics(
         http_log_status.queued_messages,
         http_log_status.channel_capacity,
         http_log_status.dropped_messages,
-        http_log_status.processed_messages,
-    ));
+        http_log_status.processed_messages,);
 
-    logging::info_file_async(format!(
-        "Trace source diagnostics | histock cycles={} body={}KiB rows={} snaps={} changed={} rss_delta={}KiB elapsed={}ms status={} | yahoo cycles={} ok={} fail={} pages={} raw_items={} snaps={} candidate={} rss_delta={}KiB elapsed={}ms status={}",
+    tracing::info!("Trace source diagnostics | histock cycles={} body={}KiB rows={} snaps={} changed={} rss_delta={}KiB elapsed={}ms status={} | yahoo cycles={} ok={} fail={} pages={} raw_items={} snaps={} candidate={} rss_delta={}KiB elapsed={}ms status={}",
         histock_runtime.completed_cycles,
         histock_runtime.last_body_bytes / 1024,
         histock_runtime.last_row_count,
@@ -644,8 +630,7 @@ fn log_trace_diagnostics(
         yahoo_runtime.last_candidate_event_count,
         format_signed_kib(yahoo_runtime.last_rss_delta_kib),
         yahoo_runtime.last_elapsed_ms,
-        format_task_status("yahoo", yahoo_runtime.status),
-    ));
+        format_task_status("yahoo", yahoo_runtime.status),);
     */
 
     maybe_trim_allocator(
@@ -679,7 +664,8 @@ fn maybe_trim_allocator(
     *previous_trimmed_at = Instant::now();
 
     if trim_allocator_memory() {
-        logging::info_file_async(
+        tracing::info!(
+            "{}",
             "Trace diagnostics | allocator trim requested after idle snapshot".to_string(),
         );
     }
@@ -788,7 +774,7 @@ async fn refresh_traced_stock_snapshot_cache() -> Result<()> {
     .await;
 
     //let updated = results.into_iter().filter(|is_updated| *is_updated).count();
-    // logging::debug_file_async(format!("追蹤股票備援快取已更新 {} 檔", updated));
+    // tracing::debug!("追蹤股票備援快取已更新 {} 檔", updated);
 
     Ok(())
 }
@@ -808,10 +794,13 @@ async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
                 .map(|s| s.last_close)
                 .unwrap_or(Decimal::ZERO);
             if !SHARE.is_valid_price(&symbol, price, last_close) {
-                logging::warn_file_async(format!(
+                tracing::warn!(
                     "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                    symbol, price, last_close, source_site
-                ));
+                    symbol,
+                    price,
+                    last_close,
+                    source_site
+                );
                 return false;
             }
             let source_changed = previous_snapshot
@@ -834,14 +823,12 @@ async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
             true
         }
         Ok(_) => {
-            logging::debug_file_async(format!("Stock {} backup price is zero, skipping", symbol));
+            // 備援採集逐檔輪詢時的高頻雜訊，降為 trace 避免日誌暴增。
+            tracing::trace!("Stock {} backup price is zero, skipping", symbol);
             false
         }
         Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to fetch backup price for {}: {:?}",
-                symbol, why
-            ));
+            tracing::error!("Failed to fetch backup price for {}: {:?}", symbol, why);
             false
         }
     }

@@ -36,25 +36,25 @@ pub async fn visit(date: DateTime<Local>) -> Result<TaiwanStockIndexDto> {
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
 
         match visit(Local::now()).await {
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
             Ok(list) => {
-                logging::debug_file_async(format!("data:{:#?}", list));
+                tracing::debug!("data:{:#?}", list);
             }
         }
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

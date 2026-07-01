@@ -9,7 +9,7 @@ pub struct ControlResponse {
     pub message: ::core::option::Option<super::basic::BaseResponse>,
 }
 /// Generated client implementations.
-pub mod control_client {
+pub mod control_service_client {
     #![allow(
         unused_variables,
         dead_code,
@@ -19,11 +19,12 @@ pub mod control_client {
     )]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    /// / 系統控制服務，提供健康檢查與連線測試功能。
     #[derive(Debug, Clone)]
-    pub struct ControlClient<T> {
+    pub struct ControlServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl ControlClient<tonic::transport::Channel> {
+    impl ControlServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -34,7 +35,7 @@ pub mod control_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> ControlClient<T>
+    impl<T> ControlServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::Body>,
         T::Error: Into<StdError>,
@@ -52,7 +53,7 @@ pub mod control_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> ControlClient<InterceptedService<T, F>>
+        ) -> ControlServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -66,7 +67,7 @@ pub mod control_client {
                 http::Request<tonic::body::Body>,
             >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
         {
-            ControlClient::new(InterceptedService::new(inner, interceptor))
+            ControlServiceClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -115,15 +116,18 @@ pub mod control_client {
                     )
                 })?;
             let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/control.Control/Control");
+            let path = http::uri::PathAndQuery::from_static(
+                "/control.ControlService/Control",
+            );
             let mut req = request.into_request();
-            req.extensions_mut().insert(GrpcMethod::new("control.Control", "Control"));
+            req.extensions_mut()
+                .insert(GrpcMethod::new("control.ControlService", "Control"));
             self.inner.unary(req, path, codec).await
         }
     }
 }
 /// Generated server implementations.
-pub mod control_server {
+pub mod control_service_server {
     #![allow(
         unused_variables,
         dead_code,
@@ -132,23 +136,24 @@ pub mod control_server {
         clippy::let_unit_value,
     )]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with ControlServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with ControlServiceServer.
     #[async_trait]
-    pub trait Control: std::marker::Send + std::marker::Sync + 'static {
+    pub trait ControlService: std::marker::Send + std::marker::Sync + 'static {
         async fn control(
             &self,
             request: tonic::Request<super::ControlRequest>,
         ) -> std::result::Result<tonic::Response<super::ControlResponse>, tonic::Status>;
     }
+    /// / 系統控制服務，提供健康檢查與連線測試功能。
     #[derive(Debug)]
-    pub struct ControlServer<T> {
+    pub struct ControlServiceServer<T> {
         inner: Arc<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
     }
-    impl<T> ControlServer<T> {
+    impl<T> ControlServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -199,9 +204,9 @@ pub mod control_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>> for ControlServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for ControlServiceServer<T>
     where
-        T: Control,
+        T: ControlService,
         B: Body + std::marker::Send + 'static,
         B::Error: Into<StdError> + std::marker::Send + 'static,
     {
@@ -216,10 +221,12 @@ pub mod control_server {
         }
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             match req.uri().path() {
-                "/control.Control/Control" => {
+                "/control.ControlService/Control" => {
                     #[allow(non_camel_case_types)]
-                    struct ControlSvc<T: Control>(pub Arc<T>);
-                    impl<T: Control> tonic::server::UnaryService<super::ControlRequest>
+                    struct ControlSvc<T: ControlService>(pub Arc<T>);
+                    impl<
+                        T: ControlService,
+                    > tonic::server::UnaryService<super::ControlRequest>
                     for ControlSvc<T> {
                         type Response = super::ControlResponse;
                         type Future = BoxFuture<
@@ -232,7 +239,7 @@ pub mod control_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Control>::control(&inner, request).await
+                                <T as ControlService>::control(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -281,7 +288,7 @@ pub mod control_server {
             }
         }
     }
-    impl<T> Clone for ControlServer<T> {
+    impl<T> Clone for ControlServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -294,8 +301,8 @@ pub mod control_server {
         }
     }
     /// Generated gRPC service name
-    pub const SERVICE_NAME: &str = "control.Control";
-    impl<T> tonic::server::NamedService for ControlServer<T> {
+    pub const SERVICE_NAME: &str = "control.ControlService";
+    impl<T> tonic::server::NamedService for ControlServiceServer<T> {
         const NAME: &'static str = SERVICE_NAME;
     }
 }

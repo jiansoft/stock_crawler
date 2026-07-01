@@ -63,7 +63,7 @@ impl From<&crate::domain::registry::entity::Stock> for StockInfoRequest {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
@@ -73,9 +73,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_push_stock_info_to_go_service() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 push_stock_info_to_go_service".to_string());
+        tracing::debug!("開始 push_stock_info_to_go_service");
         let request = StockInfoRequest {
             stock_symbol: "7533967".to_string(),
             name: "tonic".to_string(),
@@ -87,15 +87,12 @@ mod tests {
 
         match push_stock_info_to_go_service(request).await {
             Ok(response) => {
-                logging::debug_file_async(format!("response:{:#?}", response));
+                tracing::debug!("response:{:#?}", response);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to push_stock_info_to_go_service because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to push_stock_info_to_go_service because {:?}", why);
             }
         }
-        logging::debug_file_async("結束 push_stock_info_to_go_service".to_string());
+        tracing::debug!("結束 push_stock_info_to_go_service");
     }
 }

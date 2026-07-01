@@ -2,7 +2,6 @@ use anyhow::Result;
 use rust_decimal::Decimal;
 
 use crate::{
-    core::logging,
     domain::dividend::repository::DividendRepository,
     domain::portfolio::entity::{ReceivedDividend, ReceivedDividendItem, StockOwnershipDetail},
     domain::portfolio::repository::PortfolioRepository,
@@ -15,7 +14,7 @@ use crate::{
 /// 這個入口會讀取目前未賣出的持股，逐筆重算指定年度已領取的股利總表與明細表。
 /// 若股利資料是後續才回補進資料庫，重新執行此流程即可把既有持股的股利領取紀錄補寫回去。
 pub async fn execute(year: i32, security_codes: Option<Vec<String>>) {
-    logging::info_file_async("計算指定年份領取的股利開始".to_string());
+    tracing::info!("計算指定年份領取的股利開始");
 
     let portfolio_repo = PgPortfolioRepository::new();
     let dividend_repo = PgDividendRepository::new();
@@ -31,18 +30,15 @@ pub async fn execute(year: i32, security_codes: Option<Vec<String>>) {
                 results
                     .into_iter()
                     .filter_map(|r| r.err())
-                    .for_each(|e| logging::error_file_async(format!("{:?}", e)));
+                    .for_each(|e| tracing::error!("{:?}", e));
             }
         }
         Err(why) => {
-            logging::error_file_async(format!(
-                "Failed to execute fetch_active_holdings because {:?}",
-                why
-            ));
+            tracing::error!("Failed to execute fetch_active_holdings because {:?}", why);
         }
     }
 
-    logging::info_file_async("計算指定年份領取的股利結束".to_string());
+    tracing::info!("計算指定年份領取的股利結束");
 }
 
 /// 單一股票已領股利回補的執行結果。
@@ -177,7 +173,7 @@ async fn calculate_dividend(
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, domain::dividend::entity::Dividend, infra::cache::SHARE};
+    use crate::{domain::dividend::entity::Dividend, infra::cache::SHARE};
     use chrono::{Local, NaiveDate, TimeZone};
     use rust_decimal_macros::dec;
 
@@ -416,7 +412,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_backfill_received_dividend_records_for_stock_backfills_after_dividend_insert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         let security_code = "0056";
@@ -428,23 +424,21 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_calculate() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 calculate".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 calculate");
         for i in 2025..2026 {
             execute(i, None).await;
-            logging::debug_file_async(format!("calculate({}) 完成", i));
+            tracing::debug!("calculate({}) 完成", i);
         }
-        logging::debug_file_async("結束 calculate".to_string());
+        tracing::debug!("結束 calculate");
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_calculate_dividend() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 calculate_dividend".to_string());
+        tracing::debug!("開始 calculate_dividend");
 
         let portfolio_repo = PgPortfolioRepository::new();
         let dividend_repo = PgDividendRepository::new();
@@ -468,12 +462,9 @@ mod tests {
         match calculate_dividend(&portfolio_repo, &dividend_repo, sod, 2023).await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to calculate_dividend because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to calculate_dividend because {:?}", why);
             }
         }
-        logging::debug_file_async("結束 calculate_dividend".to_string());
+        tracing::debug!("結束 calculate_dividend");
     }
 }

@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use chrono::{Datelike, FixedOffset};
 use scraper::{Html, Selector};
 
@@ -38,48 +38,49 @@ pub async fn visit(date_time: chrono::DateTime<FixedOffset>) -> Result<Vec<Reven
 /// 下載月營收
 async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<RevenueDto>> {
     let text = util::http::get_use_big5(&url).await?;
+    let date = ((year * 100) + month as i32) as i64;
+    let revenues = parse_revenue_html(&text, year, month)
+        .into_iter()
+        .filter(|dto| !SHARE.last_revenues_contains_key(date, &dto.stock_symbol))
+        .collect();
+    Ok(revenues)
+}
+
+/// 解析月營收 HTML 頁面，回傳所有可辨識的 `RevenueDto`（不含 SHARE 去重）。
+///
+/// 每列第一欄為公司代號（純數字），非數字的標題列、合計列均跳過。
+/// 至少需要 10 欄才被視為有效資料列。
+fn parse_revenue_html(html: &str, year: i32, month: u32) -> Vec<RevenueDto> {
+    let date = ((year * 100) + month as i32) as i64;
     let mut revenues = Vec::with_capacity(1024);
 
-    // 改用更具彈性的選擇器：先抓取所有 tr
-    let tr_selector = Selector::parse("tr")
-        .map_err(|why| anyhow!("Failed to Selector::parse tr because: {:?}", why))?;
-    // 用於選取 tr 內部的 td
-    let td_selector = Selector::parse("td")
-        .map_err(|why| anyhow!("Failed to Selector::parse td because: {:?}", why))?;
+    let Ok(tr_selector) = Selector::parse("tr") else {
+        return revenues;
+    };
+    let Ok(td_selector) = Selector::parse("td") else {
+        return revenues;
+    };
 
-    let date = ((year * 100) + month as i32) as i64;
-    let document = Html::parse_document(text.as_str());
+    let document = Html::parse_document(html);
 
     for node in document.select(&tr_selector) {
-        // 1. 先取得儲存格迭代器
         let mut cell_nodes = node.select(&td_selector);
 
-        // 2. 優先處理第一欄 (公司代號)
         let first_cell_text = match cell_nodes.next() {
             Some(td) => td.text().collect::<String>(),
             None => continue,
         };
         let code = first_cell_text.trim();
 
-        // 3. 立即檢查：如果第一欄不是數字，直接跳過整行，不處理後續 td
-        // 這能有效過濾掉標題列、說明文字或合計列，減少記憶體分配
         if code.is_empty() || !code.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
 
-        // 4. 只有符合條件的行，才去 collect 剩下的欄位
         let mut tds = Vec::with_capacity(11);
-        tds.push(code.to_owned()); // 加入已處理好的第一欄
-
+        tds.push(code.to_owned());
         tds.extend(cell_nodes.map(|td| td.text().collect::<String>().trim().to_owned()));
 
-        // 5. 營收資料表格通常有 10-11 個欄位
         if tds.len() < 10 {
-            continue;
-        }
-
-        // 檢查是否收錄過
-        if SHARE.last_revenues_contains_key(date, &tds[0]) {
             continue;
         }
 
@@ -88,7 +89,7 @@ async fn download_revenue(url: String, year: i32, month: u32) -> Result<Vec<Reve
         revenues.push(dto);
     }
 
-    Ok(revenues)
+    revenues
 }
 
 #[cfg(test)]
@@ -97,15 +98,61 @@ mod tests {
     use chrono::{Local, TimeDelta};
     use std::time::Duration;
 
-    use crate::core::logging;
-
-    // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
+
+    /// 最小 HTML fixture：兩筆有效資料列 + 標題列（應被跳過）。
+    ///
+    /// 欄位順序：代號 | 名稱 | 當月 | 上月 | 去年當月 | 當月累計 | 去年累計 | 上月增減% | 去年增減% | 前期增減%
+    const FIXTURE_HTML: &str = r#"<html><body><table>
+<tr><th>公司代號</th><th>公司名稱</th><th>當月營收</th><th>上月營收</th><th>去年當月營收</th>
+    <th>當月累計</th><th>去年累計</th><th>上月增減%</th><th>去年增減%</th><th>前期增減%</th></tr>
+<tr>
+  <td>2330</td><td>台積電</td>
+  <td>100,000,000</td><td>90,000,000</td><td>80,000,000</td>
+  <td>500,000,000</td><td>450,000,000</td>
+  <td>11.11</td><td>25.00</td><td>11.11</td>
+</tr>
+<tr>
+  <td>2317</td><td>鴻海</td>
+  <td>50,000,000</td><td>45,000,000</td><td>40,000,000</td>
+  <td>200,000,000</td><td>180,000,000</td>
+  <td>11.11</td><td>25.00</td><td>11.11</td>
+</tr>
+</table></body></html>"#;
+
+    #[test]
+    fn test_parse_revenue_html_count() {
+        let result = parse_revenue_html(FIXTURE_HTML, 2026, 5);
+        assert_eq!(result.len(), 2, "標題列應被跳過，只留兩筆");
+    }
+
+    #[test]
+    fn test_parse_revenue_html_date_field() {
+        let result = parse_revenue_html(FIXTURE_HTML, 2026, 5);
+        assert!(result.iter().all(|dto| dto.date == 202605));
+    }
+
+    #[test]
+    fn test_parse_revenue_html_symbol() {
+        let result = parse_revenue_html(FIXTURE_HTML, 2026, 5);
+        assert_eq!(result[0].stock_symbol, "2330");
+        assert_eq!(result[1].stock_symbol, "2317");
+    }
+
+    #[test]
+    fn test_parse_revenue_html_skips_short_rows() {
+        // 不足 10 欄的資料列應被跳過
+        let html = r#"<html><body><table>
+<tr><td>1234</td><td>公司</td><td>100</td></tr>
+</table></body></html>"#;
+        let result = parse_revenue_html(html, 2026, 5);
+        assert!(result.is_empty());
+    }
 
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
         let _now = Local::now();
 
@@ -121,10 +168,10 @@ mod tests {
         println!("last_month_timezone:{:?}", last_month_timezone);
         match visit(last_month_timezone).await {
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
             Ok(list) => {
-                logging::debug_file_async(format!("data:{:#?}", list));
+                tracing::debug!("data:{:#?}", list);
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;

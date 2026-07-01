@@ -96,23 +96,20 @@ ON CONFLICT (date, security_code) DO UPDATE SET
 mod tests {
     use chrono::Local;
 
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 YieldRank::upsert".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 YieldRank::upsert");
         let current_date = Local::now().date_naive();
         match YieldRank::upsert(current_date).await {
-            Ok(r) => logging::debug_file_async(format!("YieldRank::upsert:{:#?}", r)),
+            Ok(r) => tracing::debug!("YieldRank::upsert:{:#?}", r),
             Err(why) => {
-                logging::debug_file_async(format!("Failed to YieldRank::upsert because {:?}", why));
+                tracing::debug!("Failed to YieldRank::upsert because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 YieldRank::upsert".to_string());
+        tracing::debug!("結束 YieldRank::upsert");
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update,
-    core::logging, core::util::datetime::Weekend, domain::registry::repository::StockRepository,
+    core::util::datetime::Weekend, domain::registry::repository::StockRepository,
     infra::crawler::tpex, infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::Result;
@@ -13,9 +13,9 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    logging::info_file_async("更新興櫃股票的每股淨值開始");
+    tracing::info!("更新興櫃股票的每股淨值開始");
     defer! {
-      logging::info_file_async("更新興櫃股票的每股淨值結束");
+      tracing::info!("更新興櫃股票的每股淨值結束");
     }
 
     let result = tpex::net_asset_value_per_share::visit().await?;
@@ -38,13 +38,13 @@ pub async fn execute() -> Result<()> {
 
         match update(&stock).await {
             Ok(_) => {
-                logging::info_file_async(format!(
+                tracing::info!(
                     "emerging update_net_asset_value_per_share executed successfully. \r\n{:#?}",
                     stock
-                ));
+                );
             }
             Err(why) => {
-                logging::error_file_async(format!("{:?}", why));
+                tracing::error!("{:?}", why);
             }
         }
     }
@@ -54,23 +54,21 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 execute".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 }

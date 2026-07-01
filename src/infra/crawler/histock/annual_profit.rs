@@ -120,8 +120,6 @@ impl AnnualProfitFetcher for HiStockAnnualProfit {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[test]
@@ -159,20 +157,19 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 histock::annual_profit::visit".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 histock::annual_profit::visit");
 
         match visit("2330").await {
             Ok(result) => {
                 dbg!(&result);
-                logging::debug_file_async(format!("histock : {:#?}", result));
+                tracing::debug!("histock : {:#?}", result);
             }
-            Err(why) => logging::debug_file_async(format!(
-                "Failed to histock::annual_profit::visit because {:?}",
-                why
-            )),
+            Err(why) => {
+                tracing::debug!("Failed to histock::annual_profit::visit because {:?}", why)
+            }
         }
 
-        logging::debug_file_async("結束 histock::annual_profit::visit".to_string());
+        tracing::debug!("結束 histock::annual_profit::visit");
     }
 }

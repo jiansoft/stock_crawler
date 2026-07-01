@@ -65,31 +65,28 @@ mod tests {
 
     use chrono::{Local, TimeZone};
 
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_stocks_with_payable_on_date() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_stocks_with_payable_on_date".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 fetch_stocks_with_payable_on_date");
 
         let ex_date = Local.with_ymd_and_hms(2023, 8, 25, 0, 0, 0).unwrap();
         let d = ex_date.date_naive();
         match fetch(d).await {
             Ok(cd) => {
                 dbg!(&cd);
-                logging::debug_file_async(format!("stock: {:?}", cd));
+                tracing::debug!("stock: {:?}", cd);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
+                tracing::debug!(
                     "Failed to fetch_stocks_with_payable_on_date because {:?}",
                     why
-                ));
+                );
             }
         }
 
-        logging::debug_file_async("結束 fetch_stocks_with_payable_on_date".to_string());
+        tracing::debug!("結束 fetch_stocks_with_payable_on_date");
     }
 }

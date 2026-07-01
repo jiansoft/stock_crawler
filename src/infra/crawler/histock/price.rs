@@ -240,10 +240,11 @@ pub fn start_caching_task() {
 
     let handle = tokio::spawn(async move {
         let active_tasks = ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        crate::core::logging::info_file_async(format!(
+        tracing::info!(
             "HiStock 全市場快取任務啟動 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
 
         while IS_CACHING.load(Ordering::SeqCst) {
             let start_time = std::time::Instant::now();
@@ -278,19 +279,16 @@ pub fn start_caching_task() {
                     LAST_RSS_DELTA_KIB.store(rss_delta_kib, Ordering::SeqCst);
                     COMPLETED_CYCLES.fetch_add(1, Ordering::SeqCst);
                     /*
-                    crate::logging::debug_file_async(format!(
-                        "HiStock 快取已更新，共 {} 檔股票，rows={} body={}KiB changed_events={} rss_delta={}KiB，耗時 {:?}",
+                    crate::tracing::debug!("HiStock 快取已更新，共 {} 檔股票，rows={} body={}KiB changed_events={} rss_delta={}KiB，耗時 {:?}",
                         count,
                         row_count,
                         body_bytes / 1024,
                         changed_events,
                         rss_delta_kib,
-                        start_time.elapsed()
-                    ));
+                        start_time.elapsed());
                     */
                     /*
-                    crate::logging::info_file_async(format!(
-                        "HiStock cycle diagnostics | snapshots={} rows={} body={}KiB changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
+                    crate::tracing::info!("HiStock cycle diagnostics | snapshots={} rows={} body={}KiB changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
                         count,
                         row_count,
                         body_bytes / 1024,
@@ -298,15 +296,11 @@ pub fn start_caching_task() {
                         rss_delta_kib,
                         rss_delta_before_trim_kib,
                         allocator_trimmed,
-                        elapsed_ms,
-                    ));
+                        elapsed_ms,);
                     */
                 }
                 Err(e) => {
-                    crate::core::logging::error_file_async(format!(
-                        "HiStock 快取更新失敗: {:?}",
-                        e
-                    ));
+                    tracing::error!("HiStock 快取更新失敗: {:?}", e);
                 }
             }
 
@@ -317,16 +311,18 @@ pub fn start_caching_task() {
         }
         IS_CACHING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&ACTIVE_TASKS);
-        crate::core::logging::info_file_async(format!(
+        tracing::info!(
             "HiStock 快取任務已停止 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
     });
 
     if let Ok(mut task) = CACHING_TASK.lock() {
         *task = Some(handle);
     } else {
-        crate::core::logging::error_file_async(
+        tracing::error!(
+            "{}",
             "Failed to store HiStock caching task handle".to_string(),
         );
     }
@@ -341,10 +337,10 @@ pub async fn stop_caching_task() {
     let handle = match CACHING_TASK.lock() {
         Ok(mut task) => task.take(),
         Err(why) => {
-            crate::core::logging::error_file_async(format!(
+            tracing::error!(
                 "Failed to lock HiStock caching task handle because {:?}",
                 why
-            ));
+            );
             None
         }
     };
@@ -352,7 +348,7 @@ pub async fn stop_caching_task() {
     if let Some(handle) = handle
         && let Err(why) = handle.await
     {
-        crate::core::logging::error_file_async(format!("HiStock 快取任務停止等待失敗: {:?}", why));
+        tracing::error!("HiStock 快取任務停止等待失敗: {:?}", why);
     }
 
     SHARE.clear_stock_snapshots();
@@ -431,10 +427,7 @@ async fn get_snapshot(stock_symbol: &str) -> Result<RealtimeSnapshot> {
         return Ok(s);
     }
 
-    crate::core::logging::info_file_async(format!(
-        "HiStock 快取失效 ({})，觸發全量抓取",
-        stock_symbol
-    ));
+    tracing::info!("HiStock 快取失效 ({})，觸發全量抓取", stock_symbol);
     let fetch_result = fetch_all_from_rank().await?;
 
     let snapshot = fetch_result
@@ -483,7 +476,6 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::*;
-    use crate::core::logging;
     use rust_decimal_macros::dec;
 
     static TEST_STATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -700,16 +692,16 @@ mod tests {
     #[ignore]
     async fn test_get_stock_price() {
         let _guard = TEST_STATE_LOCK.lock().await;
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 HiStock::get_stock_price".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 HiStock::get_stock_price");
 
         match HiStock::get_stock_price("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("HiStock::get_stock_price : {:#?}", e));
+                tracing::debug!("HiStock::get_stock_price : {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+                tracing::debug!("Failed to visit because {:?}", why);
             }
         }
     }
@@ -718,19 +710,16 @@ mod tests {
     #[ignore]
     async fn test_get_stock_quotes() {
         let _guard = TEST_STATE_LOCK.lock().await;
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 HiStock::get_stock_quotes".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 HiStock::get_stock_quotes");
 
         match HiStock::get_stock_quotes("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("HiStock::get_stock_quotes : {:#?}", e));
+                tracing::debug!("HiStock::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to HiStock::get_stock_quotes because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to HiStock::get_stock_quotes because {:?}", why);
             }
         }
     }

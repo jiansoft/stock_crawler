@@ -163,7 +163,7 @@ impl StockInfo for CMoney {
 /// 這些測試需連線外部網站，執行結果會受網路與來源頁面變動影響。
 mod tests {
     use super::*;
-    use crate::{core::logging, infra::crawler::log_stock_price_test};
+    use crate::infra::crawler::log_stock_price_test;
 
     #[test]
     fn test_parse_required_decimal_rejects_dash() {
@@ -184,30 +184,27 @@ mod tests {
     #[tokio::test]
     /// 測試可取得指定股票即時價格。
     async fn test_get_stock_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         log_stock_price_test::<CMoney>("4438").await;
     }
 
     #[tokio::test]
     /// 測試可取得指定股票完整即時報價。
     async fn test_get_stock_quotes() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 cmoney::get_stock_quotes".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 cmoney::get_stock_quotes");
 
         match CMoney::get_stock_quotes("4438").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("cmoney::get_stock_quotes : {:#?}", e));
+                tracing::debug!("cmoney::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
                 dbg!(&why);
-                logging::debug_file_async(format!(
-                    "Failed to cmoney::get_stock_quotes because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to cmoney::get_stock_quotes because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 cmoney::get_stock_quotes".to_string());
+        tracing::debug!("結束 cmoney::get_stock_quotes");
     }
 }

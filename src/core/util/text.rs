@@ -108,6 +108,7 @@ pub fn split_v1(w: &str) -> Vec<String> {
 /// # Example
 ///
 /// ```
+/// use stock_crawler::core::util::text::parse_decimal;
 /// let s = "1,234.56";
 /// let decimal_value = parse_decimal(s, Some(vec![','])).unwrap();
 /// ```
@@ -146,6 +147,7 @@ pub fn parse_f64(s: &str, escape_chars: Option<Vec<char>>) -> Result<f64> {
 /// # Example
 ///
 /// ```
+/// use stock_crawler::core::util::text::parse_i32;
 /// let s = "1,234";
 /// let i32_value = parse_i32(s, None).unwrap();
 /// ```
@@ -177,8 +179,9 @@ pub fn parse_i32(s: &str, escape_chars: Option<Vec<char>>) -> Result<i32> {
 /// # Example
 ///
 /// ```
+/// use stock_crawler::core::util::text::parse_i64;
 /// let s = "1,234";
-/// let i64_value = parse_i32(s, None).unwrap();
+/// let i64_value = parse_i64(s, None).unwrap();
 /// ```
 pub fn parse_i64(s: &str, escape_chars: Option<Vec<char>>) -> Result<i64> {
     let cleaned = clean_escape_chars(s, escape_chars);
@@ -206,10 +209,10 @@ pub fn parse_i64(s: &str, escape_chars: Option<Vec<char>>) -> Result<i64> {
 ///
 /// # Example
 ///
-/// ```
+/// ```ignore
 /// let s = "Hello$Wor^ld!@#";
 /// let escape_chars = Some(vec!['$', '^', '@', '#']);
-/// let clean_s = clean_string_escape_chars(s, escape_chars);
+/// let clean_s = clean_escape_chars(s, escape_chars);
 /// assert_eq!(clean_s, "HelloWorld!");
 /// ```
 pub(crate) fn clean_escape_chars(s: &str, escape_chars: Option<Vec<char>>) -> String {
@@ -258,7 +261,7 @@ mod tests {
     /// 驗證中文字拆字結果。
     #[tokio::test]
     async fn test_split() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let chinese_word = "台積電";
         let start = Instant::now();
         let result = split(chinese_word);
@@ -270,7 +273,7 @@ mod tests {
     /// 比較兩種拆字實作的結果與耗時。
     #[tokio::test]
     async fn test_split_all() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let _result = split_v1("2330台積電2330");
         let _result = split("2330台積電2330");
 
@@ -296,7 +299,7 @@ mod tests {
     /// 驗證跳脫字元清理結果。
     #[tokio::test]
     async fn test_clean_string_escape_chars() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         let chinese_word = "台積電% 元 ,";
         let start = Instant::now();
         let result = clean_escape_chars(chinese_word, Some(vec!['元', '%', '%', ',']));

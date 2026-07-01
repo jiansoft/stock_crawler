@@ -138,7 +138,7 @@ pub async fn visit() -> Result<Vec<Profit>> {
         p.return_on_equity = element::parse_to_decimal(&element, "td:nth-child(12)");
         //returnOnAssets := s.Find(fmt.Sprintf("td:nth-child(%d)", 12+jumpColumnCount)).Text()
         p.return_on_assets = element::parse_to_decimal(&element, "td:nth-child(13)");
-        //logging::debug_file_async(format!("p:{:#?}", p));
+        //tracing::debug!("p:{:#?}", p);
         profits.push(p);
     }
 
@@ -147,7 +147,6 @@ pub async fn visit() -> Result<Vec<Profit>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
     use std::time::Duration;
 
     use super::*;
@@ -155,19 +154,19 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 visit".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 visit");
 
         match visit().await {
             Ok(e) => {
-                logging::debug_file_async(format!("{:#?}", e));
+                tracing::debug!("{:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+                tracing::debug!("Failed to visit because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }

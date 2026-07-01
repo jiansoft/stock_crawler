@@ -7,8 +7,8 @@
 **/*.rs.bk
 
 # Cargo lockfile
-# Keep this ignored only if you intentionally do not version it.
-Cargo.lock
+# 本專案為 binary 應用程式，依 Rust 慣例將 Cargo.lock 納入版控，
+# 確保 CI 與正式環境相依版本可重現（避免 transitive 套件浮到不相容的新版本）。
 
 # Local runtime artifacts
 /log/

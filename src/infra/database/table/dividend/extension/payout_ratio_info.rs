@@ -111,27 +111,26 @@ impl Keyable for PayoutRatioInfo {
 mod tests {
     use core::result::Result::Ok;
 
-    use crate::{core::logging, core::util::map::vec_to_hashmap};
+    use crate::core::util::map::vec_to_hashmap;
 
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_without_payout_ratio() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 StockDividendPayoutRatioInfo::fetch".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 StockDividendPayoutRatioInfo::fetch");
 
         match fetch_without_payout_ratio().await {
             Ok(cd) => {
                 //dbg!(&cd);
                 let h = vec_to_hashmap(cd);
-                logging::debug_file_async(format!("map: {:#?}", h));
+                tracing::debug!("map: {:#?}", h);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to fetch because {:?}", why));
+                tracing::debug!("Failed to fetch because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 StockDividendPayoutRatioInfo::fetch".to_string());
+        tracing::debug!("結束 StockDividendPayoutRatioInfo::fetch");
     }
 }

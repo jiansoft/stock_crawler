@@ -14,7 +14,7 @@ use futures::StreamExt;
 use crate::{
     app::backfill::acl::FinancialStatementAclMapper,
     app::backfill::financial_statement::update_roe_and_roa_for_zero_values, app::calculation,
-    core::logging, core::util::datetime::ReportQuarter, infra::crawler::yahoo,
+    core::util::datetime::ReportQuarter, infra::crawler::yahoo,
 };
 
 /// 補齊最新應已公告季度財報中缺漏的 ROE、ROA 與每股淨值欄位。
@@ -31,7 +31,7 @@ pub async fn execute() -> Result<()> {
         success_count += process_target_report(target_report).await?;
 
         if let Err(why) = update_roe_and_roa_for_zero_values(Some(target_report.quarter)).await {
-            logging::error_file_async(format!("{:#?}", why));
+            tracing::error!("{:#?}", why);
         }
     }
 
@@ -56,7 +56,7 @@ pub async fn execute() -> Result<()> {
         };
         // 計算便宜、合理、昂貴價的估算
         calculation::estimated_price::calculate_estimated_price(date).await?;
-        logging::info_file_async("季度財報更新重新計算便宜、合理、昂貴價的估算結束".to_string());
+        tracing::info!("季度財報更新重新計算便宜、合理、昂貴價的估算結束");
     }
 
     Ok(())
@@ -91,14 +91,14 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
                 let is_jump = match crate::infra::nosql::redis::CLIENT.get_bool(&cache_key).await {
                     Ok(val) => val,
                     Err(why) => {
-                        logging::error_file_async(format!("Redis error getting {}: {:?}", cache_key, why));
+                        tracing::error!("Redis error getting {}: {:?}", cache_key, why);
                         false
                     }
                 };
                 let is_profile_skip = match crate::infra::nosql::redis::CLIENT.get_bool(&profile_skip_cache_key).await {
                     Ok(val) => val,
                     Err(why) => {
-                        logging::error_file_async(format!("Redis error getting {}: {:?}", profile_skip_cache_key, why));
+                        tracing::error!("Redis error getting {}: {:?}", profile_skip_cache_key, why);
                         false
                     }
                 };
@@ -121,20 +121,14 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
                                 )
                                 .await
                             {
-                                logging::error_file_async(format!(
-                                    "Failed to cache yahoo::profile no-valid-data skip for {} because {:?}",
-                                    fs.security_code, cache_err
-                                ));
+                                tracing::error!("Failed to cache yahoo::profile no-valid-data skip for {} because {:?}",
+                                    fs.security_code, cache_err);
                             }
-                            logging::warn_file_async(format!(
-                                "Skip yahoo::profile::visit for {} because {}",
-                                fs.security_code, why
-                            ));
+                            tracing::warn!("Skip yahoo::profile::visit for {} because {}",
+                                fs.security_code, why);
                         } else {
-                            logging::error_file_async(format!(
-                                "Failed to yahoo::profile::visit for {} because {}",
-                                fs.security_code, why
-                            ));
+                            tracing::error!("Failed to yahoo::profile::visit for {} because {}",
+                                fs.security_code, why);
                         }
                         return None;
                     }
@@ -142,10 +136,8 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
 
                 // 比對資料年份與季度是否與目標相符，若不符則記錄警告但依原邏輯仍繼續處理
                 if target_report.year != profile.year || quarter != profile.quarter {
-                    logging::warn_file_async(format!(
-                        "the year or quarter retrieved from Yahoo is inconsistent with the current one. current year:{} ,quarter:{} {:#?}",
-                        target_report.year, quarter, profile
-                    ));
+                    tracing::warn!("the year or quarter retrieved from Yahoo is inconsistent with the current one. current year:{} ,quarter:{} {:#?}",
+                        target_report.year, quarter, profile);
                 }
 
                 // 建立新的領域財報結構體
@@ -174,10 +166,10 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
         financial_repo
             .batch_save_financial_statements(&scraped_statements)
             .await?;
-        logging::debug_file_async(format!(
+        tracing::debug!(
             "financial_statement batch_upsert executed successfully for {} records.",
             scraped_statements.len()
-        ));
+        );
 
         // 逐一更新 Redis 成功狀態快取
         for cache_key in keys_to_cache {
@@ -185,10 +177,11 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
                 .set(&cache_key, true, 60 * 60 * 24 * 7)
                 .await
             {
-                logging::error_file_async(format!(
+                tracing::error!(
                     "Failed to set redis cache key {} because {:?}",
-                    cache_key, why
-                ));
+                    cache_key,
+                    why
+                );
             }
         }
     }
@@ -198,24 +191,24 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 }

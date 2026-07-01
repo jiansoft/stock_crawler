@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use crate::{
     app::backfill::acl::FinancialStatementAclMapper,
-    core::logging,
     infra::crawler::{
         fbs::annual_profit::Fbs,
         moneydj::annual_profit::MoneyDJ,
@@ -63,12 +62,12 @@ pub async fn execute() -> Result<()> {
                     let fs = FinancialStatementAclMapper::from_annual_profit(ap);
 
                     if let Err(why) = financial_repo.save_annual_eps(&fs).await {
-                        logging::error_file_async(format!("{:?} ", why));
+                        tracing::error!("{:?} ", why);
                     }
                 }
             }
             Err(why) => {
-                logging::error_file_async(format!("{:?} ", why));
+                tracing::error!("{:?} ", why);
             }
         }
 
@@ -110,7 +109,7 @@ async fn fetch_annual_profit(ss: &str) -> Result<Vec<AnnualProfit>> {
                 return Ok(ap);
             }
             Err(why) => {
-                logging::error_file_async(format!("{:?} ", why));
+                tracing::error!("{:?} ", why);
             }
         }
     }
@@ -128,16 +127,16 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 execute".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("err:{:#?} ", why));
+                tracing::debug!("err:{:#?} ", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 }

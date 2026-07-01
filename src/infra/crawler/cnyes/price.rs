@@ -94,7 +94,7 @@ impl StockInfo for CnYes {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::crawler::log_stock_price_test};
+    use crate::infra::crawler::log_stock_price_test;
 
     use super::*;
 
@@ -121,47 +121,44 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_stock_price() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         log_stock_price_test::<CnYes>("2330").await;
     }
 
     #[tokio::test]
     async fn test_get_stock_quotes() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 cnyes::get_stock_quotes".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 cnyes::get_stock_quotes");
 
         match CnYes::get_stock_quotes("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("cnyes::get_stock_quotes : {:#?}", e));
+                tracing::debug!("cnyes::get_stock_quotes : {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to cnyes::get_stock_quotes because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to cnyes::get_stock_quotes because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 cnyes::get_stock_quotes".to_string());
+        tracing::debug!("結束 cnyes::get_stock_quotes");
     }
 
     #[tokio::test]
     async fn test_fetch_data() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_data".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 fetch_data");
 
         // match get("2330").await {
         match fetch_data("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("price : {:#?}", e));
+                tracing::debug!("price : {:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to fetch_data because {:?}", why));
+                tracing::debug!("Failed to fetch_data because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 fetch_data".to_string());
+        tracing::debug!("結束 fetch_data");
     }
 }

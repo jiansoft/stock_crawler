@@ -17,7 +17,6 @@ use serde::Deserialize;
 use tokio::time::sleep;
 
 use crate::{
-    core::logging,
     core::util,
     infra::cache::RealtimeSnapshot,
     infra::crawler::yahoo::{self, YahooClassCategory, YahooClassExchange},
@@ -266,7 +265,7 @@ pub async fn fetch_category_snapshots(
                 category.name,
                 category.sector_id
             );
-            logging::error_file_async(error_message.clone());
+            tracing::error!("{}", error_message.clone());
             return Err(anyhow!(error_message));
         }
 
@@ -305,7 +304,7 @@ pub async fn fetch_category_snapshots(
             category.name,
             category.sector_id
         );
-        logging::error_file_async(error_message.clone());
+        tracing::error!("{}", error_message.clone());
         return Err(anyhow!(error_message));
     }
 
@@ -370,7 +369,7 @@ async fn fetch_class_quotes_page(
     // 就算首頁沒有直接回錯，也先把「整頁空資料」寫到日誌，
     // 方便後續人工從 log 追查是 Yahoo schema 變更、類股失效還是被擋流量。
     if raw_item_count == 0 {
-        logging::error_file_async(format!(
+        tracing::error!(
             "Yahoo 類股 API 回空資料: {} {}({}) offset={} resultsTotal={} url={}",
             category.exchange.label(),
             category.name,
@@ -378,7 +377,7 @@ async fn fetch_class_quotes_page(
             offset,
             results_total,
             url
-        ));
+        );
     }
 
     // 非首頁如果宣稱有總筆數卻回空列表，通常代表中間頁資料異常，
@@ -684,17 +683,18 @@ mod tests {
         assert_eq!(category_key(&category), "TWO:153");
     }
 
-    /// 驗證盤中輪詢清單會排除認購 / 認售 / 指數類，只保留實際需要採集的分類。
+    /// 驗證盤中輪詢清單會排除認購 / 認售 / 指數類 / 公司債 / 牛證等不需採集的分類，
+    /// 只保留實際需要採集的分類。
     #[test]
     fn test_all_class_categories_excludes_disabled_categories() {
         let categories = all_class_categories();
 
-        assert_eq!(categories.len(), 97);
+        assert_eq!(categories.len(), 95);
         assert!(!categories.iter().any(|category| {
             matches!(
                 (category.exchange, category.sector_id),
                 (YahooClassExchange::Listed, 31..=33 | 49) // 排除指數類與回空資料的創新板(49)
-                    | (YahooClassExchange::OverTheCounter, 33 | 165 | 166)
+                    | (YahooClassExchange::OverTheCounter, 33 | 163 | 165..=167) // 公司債(163)、認購/認售(165/166)、牛證(167)
             )
         }));
         assert!(categories.iter().any(|category| {

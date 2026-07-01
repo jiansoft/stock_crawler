@@ -11,7 +11,6 @@ pub struct StockInfoRequest {
     pub stock_industry_id: i32,
     #[prost(double, tag = "5")]
     pub net_asset_value_per_share: f64,
-    /// google.protobuf.Timestamp create_time = 6;
     #[prost(bool, tag = "6")]
     pub suspend_listing: bool,
 }
@@ -59,7 +58,7 @@ pub struct HolidayScheduleReply {
     pub holiday: ::prost::alloc::vec::Vec<HolidaySchedule>,
 }
 /// Generated client implementations.
-pub mod stock_client {
+pub mod stock_service_client {
     #![allow(
         unused_variables,
         dead_code,
@@ -69,11 +68,12 @@ pub mod stock_client {
     )]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    /// / 股票資訊服務，提供股票資料更新、即時報價查詢與休市日查詢功能。
     #[derive(Debug, Clone)]
-    pub struct StockClient<T> {
+    pub struct StockServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl StockClient<tonic::transport::Channel> {
+    impl StockServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -84,7 +84,7 @@ pub mod stock_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> StockClient<T>
+    impl<T> StockServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::Body>,
         T::Error: Into<StdError>,
@@ -102,7 +102,7 @@ pub mod stock_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> StockClient<InterceptedService<T, F>>
+        ) -> StockServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -116,7 +116,7 @@ pub mod stock_client {
                 http::Request<tonic::body::Body>,
             >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
         {
-            StockClient::new(InterceptedService::new(inner, interceptor))
+            StockServiceClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -163,11 +163,11 @@ pub mod stock_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/stock.Stock/UpdateStockInfo",
+                "/stock.StockService/UpdateStockInfo",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("stock.Stock", "UpdateStockInfo"));
+                .insert(GrpcMethod::new("stock.StockService", "UpdateStockInfo"));
             self.inner.unary(req, path, codec).await
         }
         /// 取得目前的股價
@@ -188,11 +188,13 @@ pub mod stock_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/stock.Stock/FetchCurrentStockQuotes",
+                "/stock.StockService/FetchCurrentStockQuotes",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("stock.Stock", "FetchCurrentStockQuotes"));
+                .insert(
+                    GrpcMethod::new("stock.StockService", "FetchCurrentStockQuotes"),
+                );
             self.inner.unary(req, path, codec).await
         }
         /// 取得股市休市日
@@ -213,17 +215,17 @@ pub mod stock_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/stock.Stock/FetchHolidaySchedule",
+                "/stock.StockService/FetchHolidaySchedule",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("stock.Stock", "FetchHolidaySchedule"));
+                .insert(GrpcMethod::new("stock.StockService", "FetchHolidaySchedule"));
             self.inner.unary(req, path, codec).await
         }
     }
 }
 /// Generated server implementations.
-pub mod stock_server {
+pub mod stock_service_server {
     #![allow(
         unused_variables,
         dead_code,
@@ -232,9 +234,9 @@ pub mod stock_server {
         clippy::let_unit_value,
     )]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with StockServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with StockServiceServer.
     #[async_trait]
-    pub trait Stock: std::marker::Send + std::marker::Sync + 'static {
+    pub trait StockService: std::marker::Send + std::marker::Sync + 'static {
         async fn update_stock_info(
             &self,
             request: tonic::Request<super::StockInfoRequest>,
@@ -256,15 +258,16 @@ pub mod stock_server {
             tonic::Status,
         >;
     }
+    /// / 股票資訊服務，提供股票資料更新、即時報價查詢與休市日查詢功能。
     #[derive(Debug)]
-    pub struct StockServer<T> {
+    pub struct StockServiceServer<T> {
         inner: Arc<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
     }
-    impl<T> StockServer<T> {
+    impl<T> StockServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -315,9 +318,9 @@ pub mod stock_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>> for StockServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for StockServiceServer<T>
     where
-        T: Stock,
+        T: StockService,
         B: Body + std::marker::Send + 'static,
         B::Error: Into<StdError> + std::marker::Send + 'static,
     {
@@ -332,10 +335,12 @@ pub mod stock_server {
         }
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             match req.uri().path() {
-                "/stock.Stock/UpdateStockInfo" => {
+                "/stock.StockService/UpdateStockInfo" => {
                     #[allow(non_camel_case_types)]
-                    struct UpdateStockInfoSvc<T: Stock>(pub Arc<T>);
-                    impl<T: Stock> tonic::server::UnaryService<super::StockInfoRequest>
+                    struct UpdateStockInfoSvc<T: StockService>(pub Arc<T>);
+                    impl<
+                        T: StockService,
+                    > tonic::server::UnaryService<super::StockInfoRequest>
                     for UpdateStockInfoSvc<T> {
                         type Response = super::StockInfoReply;
                         type Future = BoxFuture<
@@ -348,7 +353,8 @@ pub mod stock_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Stock>::update_stock_info(&inner, request).await
+                                <T as StockService>::update_stock_info(&inner, request)
+                                    .await
                             };
                             Box::pin(fut)
                         }
@@ -375,10 +381,12 @@ pub mod stock_server {
                     };
                     Box::pin(fut)
                 }
-                "/stock.Stock/FetchCurrentStockQuotes" => {
+                "/stock.StockService/FetchCurrentStockQuotes" => {
                     #[allow(non_camel_case_types)]
-                    struct FetchCurrentStockQuotesSvc<T: Stock>(pub Arc<T>);
-                    impl<T: Stock> tonic::server::UnaryService<super::StockQuotesRequest>
+                    struct FetchCurrentStockQuotesSvc<T: StockService>(pub Arc<T>);
+                    impl<
+                        T: StockService,
+                    > tonic::server::UnaryService<super::StockQuotesRequest>
                     for FetchCurrentStockQuotesSvc<T> {
                         type Response = super::StockQuotesReply;
                         type Future = BoxFuture<
@@ -391,7 +399,10 @@ pub mod stock_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Stock>::fetch_current_stock_quotes(&inner, request)
+                                <T as StockService>::fetch_current_stock_quotes(
+                                        &inner,
+                                        request,
+                                    )
                                     .await
                             };
                             Box::pin(fut)
@@ -419,11 +430,11 @@ pub mod stock_server {
                     };
                     Box::pin(fut)
                 }
-                "/stock.Stock/FetchHolidaySchedule" => {
+                "/stock.StockService/FetchHolidaySchedule" => {
                     #[allow(non_camel_case_types)]
-                    struct FetchHolidayScheduleSvc<T: Stock>(pub Arc<T>);
+                    struct FetchHolidayScheduleSvc<T: StockService>(pub Arc<T>);
                     impl<
-                        T: Stock,
+                        T: StockService,
                     > tonic::server::UnaryService<super::HolidayScheduleRequest>
                     for FetchHolidayScheduleSvc<T> {
                         type Response = super::HolidayScheduleReply;
@@ -437,7 +448,8 @@ pub mod stock_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as Stock>::fetch_holiday_schedule(&inner, request).await
+                                <T as StockService>::fetch_holiday_schedule(&inner, request)
+                                    .await
                             };
                             Box::pin(fut)
                         }
@@ -486,7 +498,7 @@ pub mod stock_server {
             }
         }
     }
-    impl<T> Clone for StockServer<T> {
+    impl<T> Clone for StockServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -499,8 +511,8 @@ pub mod stock_server {
         }
     }
     /// Generated gRPC service name
-    pub const SERVICE_NAME: &str = "stock.Stock";
-    impl<T> tonic::server::NamedService for StockServer<T> {
+    pub const SERVICE_NAME: &str = "stock.StockService";
+    impl<T> tonic::server::NamedService for StockServiceServer<T> {
         const NAME: &'static str = SERVICE_NAME;
     }
 }

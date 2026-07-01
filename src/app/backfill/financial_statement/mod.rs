@@ -5,7 +5,6 @@ use rust_decimal::Decimal;
 
 use crate::{
     core::declare::Quarter,
-    core::logging,
     core::util::map::Keyable,
     domain::financial::{
         entity::FinancialStatement as DomainFinancialStatement, repository::FinancialRepository,
@@ -46,7 +45,7 @@ async fn update_roe_and_roa_for_zero_values(quarter: Option<Quarter>) -> Result<
                 }
             }
             Err(why) => {
-                logging::error_file_async(format!("{:?}", why));
+                tracing::error!("{:?}", why);
             }
         }
     }
@@ -90,30 +89,30 @@ async fn update_roe_and_roa(
     fs.return_on_assets = roa;
 
     if let Err(why) = repo.update_statement_roe_roa(fs).await {
-        logging::error_file_async(format!("{:?}", why));
+        tracing::error!("{:?}", why);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_update_annual_roe_and_roa_for_zero_values() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 update_roe_and_roa_for_zero_values".to_string());
+        tracing::debug!("開始 update_roe_and_roa_for_zero_values");
 
         match update_roe_and_roa_for_zero_values(Some(Quarter::Q3)).await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to roe_and_roa because {:?}", why));
+                tracing::debug!("Failed to roe_and_roa because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 update_roe_and_roa_for_zero_values".to_string());
+        tracing::debug!("結束 update_roe_and_roa_for_zero_values");
     }
 }

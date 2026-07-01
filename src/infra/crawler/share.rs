@@ -3,14 +3,14 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::core::declare::{StockExchange, StockExchangeMarket};
-use crate::infra::crawler::{bigdatacloud, myip};
+use crate::infra::crawler::{CrawlerError, bigdatacloud, myip};
 use crate::{
     core::util::{self, map::Keyable, text},
     infra::crawler::{ipconfig, ipify, ipinfo, seeip},
@@ -80,11 +80,13 @@ pub trait AnnualProfitFetcher {
 pub(super) async fn fetch_annual_profits(
     url: &str,
     stock_symbol: &str,
-) -> Result<Vec<AnnualProfit>> {
-    let text = util::http::get(url, None).await?;
+) -> Result<Vec<AnnualProfit>, CrawlerError> {
+    let text = util::http::get(url, None)
+        .await
+        .map_err(|e| CrawlerError::Network(e.to_string()))?;
     let document = Html::parse_document(&text);
     let selector = Selector::parse("#oMainTable > tbody > tr:nth-child(n+4)")
-        .map_err(|why| anyhow!("Failed to Selector::parse because: {:?}", why))?;
+        .map_err(|why| CrawlerError::Scraper(format!("{why:?}")))?;
     let mut result: Vec<AnnualProfit> = Vec::with_capacity(24);
 
     for node in document.select(&selector) {
@@ -138,7 +140,7 @@ static IP_INDEX: AtomicUsize = AtomicUsize::new(0);
 /// # 回傳值
 /// - `Ok(String)`: 成功取得、且已正規化的公網 IP 字串。
 /// - `Err`: 當所有嘗試的站點均失效時，回傳包含詳細錯誤原因的描述。
-pub async fn get_public_ip() -> Result<String> {
+pub async fn get_public_ip() -> Result<String, CrawlerError> {
     const SERVICES: &[&str] = &[
         "ipify",
         "ipconfig",
@@ -169,10 +171,10 @@ pub async fn get_public_ip() -> Result<String> {
         }
     }
 
-    Err(anyhow!(
+    Err(CrawlerError::EmptyResponse(format!(
         "Failed to get public IP from all services: {}",
         errors.join(" | ")
-    ))
+    )))
 }
 
 /// 處理單一 IP 來源的回應結果。
@@ -203,17 +205,23 @@ fn collect_public_ip_result(
 ///
 /// 這裡會先去除前後空白，再要求內容必須能被解析為合法的
 /// [`IpAddr`]；若解析成功，會回傳 `IpAddr::to_string()` 的標準化結果。
-fn normalize_public_ip(service_name: &str, ip: &str) -> Result<String> {
+fn normalize_public_ip(service_name: &str, ip: &str) -> Result<String, CrawlerError> {
     let normalized = ip.trim();
 
     if normalized.is_empty() {
-        return Err(anyhow!("{service_name}: empty response"));
+        return Err(CrawlerError::EmptyResponse(format!(
+            "{service_name}: empty response"
+        )));
     }
 
     normalized
         .parse::<IpAddr>()
         .map(|ip| ip.to_string())
-        .map_err(|why| anyhow!("{service_name}: invalid ip response `{normalized}` because {why}"))
+        .map_err(|why| {
+            CrawlerError::Parse(format!(
+                "{service_name}: invalid ip response `{normalized}` because {why}"
+            ))
+        })
 }
 
 /// 外資及陸資持股狀況爬蟲載體 (DTO)。

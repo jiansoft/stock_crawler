@@ -92,29 +92,26 @@ mod tests {
     use chrono::{Local, TimeZone};
     use tokio::time;
 
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_stocks_with_dividends_on_date() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_stocks_with_dividends_on_date".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 fetch_stocks_with_dividends_on_date");
 
         let ex_date = Local.with_ymd_and_hms(2026, 5, 19, 0, 0, 0).unwrap();
         let d = ex_date.date_naive();
         match fetch_stocks_with_dividends_on_date(d).await {
             Ok(cd) => {
                 dbg!(&cd);
-                logging::debug_file_async(format!("stock: {:?}", cd));
+                tracing::debug!("stock: {:?}", cd);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 fetch_stocks_with_dividends_on_date".to_string());
+        tracing::debug!("結束 fetch_stocks_with_dividends_on_date");
         time::sleep(Duration::from_secs(1)).await;
     }
 }

@@ -22,26 +22,22 @@ pub async fn calculate_money_history(date: NaiveDate) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_calculate_money_history() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 calculate_money_history".to_string());
+        tracing::debug!("開始 calculate_money_history");
         let current_date = NaiveDate::parse_from_str("2026-04-20", "%Y-%m-%d").unwrap();
         match calculate_money_history(current_date).await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to calculate_money_history because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to calculate_money_history because {:?}", why);
             }
         }
-        logging::debug_file_async("結束 calculate_money_history".to_string());
+        tracing::debug!("結束 calculate_money_history");
     }
 }

@@ -2,8 +2,6 @@ use anyhow::Result;
 use chrono::{Datelike, Local};
 use scopeguard::defer;
 
-use crate::core::logging;
-
 mod missing_or_multiple;
 /// 更新歷史配息率。
 pub mod payout_ratio;
@@ -45,11 +43,11 @@ pub(crate) use missing_or_multiple::{
 /// `Result<()>` 型別保留為介面一致性與未來擴充（例如改為聚合錯誤回傳）。
 pub async fn execute() -> Result<()> {
     // 進入主流程先寫開始 log，方便排程任務追蹤一次執行的起點。
-    logging::info_file_async("更新台股股利發放數據開始");
+    tracing::info!("更新台股股利發放數據開始");
     defer! {
        // 無論中途是否發生錯誤、提早返回或 panic unwind，都嘗試補上結束 log。
        // 這樣可以確保「開始/結束」成對，方便觀察是否有卡住或異常中斷。
-       logging::info_file_async("更新台股股利發放數據結束");
+       tracing::info!("更新台股股利發放數據結束");
     }
 
     // 以本地時間的「今年」當作回補目標年度。
@@ -69,30 +67,32 @@ pub async fn execute() -> Result<()> {
     // 子流程結果各自記錄，避免只看到一個總錯誤而失去定位資訊。
     match res_backfill_missing_or_multiple_dividends {
         Ok(_) => {
-            logging::info_file_async(
+            tracing::info!(
+                "{}",
                 "backfill_missing_or_multiple_dividends executed successfully.".to_string(),
             );
         }
         Err(why) => {
-            logging::error_file_async(format!(
+            tracing::error!(
                 "Failed to backfill_missing_or_multiple_dividends because {:?}",
                 why
-            ));
+            );
         }
     }
 
     // 第二條流程同樣採「記錄錯誤但不中斷主流程」策略，優先確保回補任務整體可完成。
     match res_backfill_unannounced_dividend_dates {
         Ok(_) => {
-            logging::info_file_async(
+            tracing::info!(
+                "{}",
                 "backfill_unannounced_dividend_dates executed successfully.".to_string(),
             );
         }
         Err(why) => {
-            logging::error_file_async(format!(
+            tracing::error!(
                 "Failed to backfill_unannounced_dividend_dates because {:?}",
                 why
-            ));
+            );
         }
     }
 

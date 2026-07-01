@@ -6,7 +6,6 @@ use futures::{StreamExt, stream};
 
 use crate::{
     app::backfill::acl::QuoteAclMapper,
-    core::logging,
     core::util::{self, map::Keyable},
     domain::quote::repository::QuoteRepository,
     infra::cache::{SHARE, TTL, TtlCacheInner},
@@ -56,7 +55,7 @@ pub async fn execute(date: NaiveDate) -> Result<usize> {
             );
             config_repo.save(&new_config).await?;
         }
-        logging::info_file_async("最後收盤日設定更新到資料庫完成".to_string());
+        tracing::info!("最後收盤日設定更新到資料庫完成");
     }
 
     Ok(quotes_len)
@@ -70,7 +69,7 @@ pub async fn get_quotes_from_source(
 ) -> Result<()> {
     if let Ok(quote) = source.await {
         quotes.extend(quote);
-        logging::info_file_async(format!("取完{}收盤數據", source_name));
+        tracing::info!("取完{}收盤數據", source_name);
     }
     Ok(())
 }
@@ -89,7 +88,7 @@ pub async fn process_quotes(quotes: Vec<DailyQuoteDto>) {
     let result_count = match repo.batch_save_daily_quotes(&domain_entities).await {
         Ok(_) => domain_entities.len(),
         Err(why) => {
-            logging::error_file_async(format!("Failed to batch save daily quotes: {:?}", why));
+            tracing::error!("Failed to batch save daily quotes: {:?}", why);
             0
         }
     };
@@ -100,7 +99,7 @@ pub async fn process_quotes(quotes: Vec<DailyQuoteDto>) {
             process_daily_quote(dq).await;
         })
         .await;
-    logging::info_file_async(format!("上市櫃收盤數據更新到資料庫完成: {}", result_count));
+    tracing::info!("上市櫃收盤數據更新到資料庫完成: {}", result_count);
 }
 
 async fn process_daily_quote(daily_quote: crate::domain::quote::entity::DailyQuote) {
@@ -130,7 +129,7 @@ mod tests {
     use rayon::prelude::*;
     use tokio::time::sleep;
 
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
@@ -139,9 +138,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
         //let date = Local::now().date_naive();
         let date = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
         let quote_repo = crate::infra::database::repository::quote::PgQuoteRepository::new();
@@ -150,20 +149,20 @@ mod tests {
         match execute(date).await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
         sleep(Duration::from_secs(1)).await;
     }
 
     #[tokio::test]
     #[ignore]
     async fn test_thread() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
 
         let stock_repo = crate::infra::database::repository::stock::PgStockRepository::new();
         use crate::domain::registry::repository::StockRepository;
@@ -171,7 +170,7 @@ mod tests {
         let worker_count = num_cpus::get() * 100;
         //let dqs_arc = Arc::new(stocks);
         let counter = Arc::new(AtomicUsize::new(0));
-        logging::debug_file_async(format!("stocks:{}", stocks.len()));
+        tracing::debug!("stocks:{}", stocks.len());
         /*  thread::scope(|scope| {
             for i in 0..worker_count {
                 let dqs = Arc::clone(&dqs_arc);
@@ -191,7 +190,7 @@ mod tests {
                 calculate_day_quotes_moving_average_worker(index, stock);
             });
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
         sleep(Duration::from_secs(1)).await;
     }
 
@@ -199,6 +198,6 @@ mod tests {
         i: usize,
         dq: &crate::domain::registry::entity::Stock,
     ) {
-        logging::debug_file_async(format!("dq[{}]:{:?}", i, dq));
+        tracing::debug!("dq[{}]:{:?}", i, dq);
     }
 }

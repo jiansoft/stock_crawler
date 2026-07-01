@@ -150,23 +150,20 @@ impl Clone for StockOwnershipDetail {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_stock_inventory() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 fetch");
         let r = StockOwnershipDetail::fetch(Some(vec!["2330".to_string()])).await;
         if let Ok(result) = r {
             for e in result {
-                logging::debug_file_async(format!("{:?} ", e));
+                tracing::debug!("{:?} ", e);
             }
         } else if let Err(err) = r {
-            logging::debug_file_async(format!("{:#?} ", err));
+            tracing::debug!("{:#?} ", err);
         }
-        logging::debug_file_async("結束 fetch".to_string());
+        tracing::debug!("結束 fetch");
     }
 }

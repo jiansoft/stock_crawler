@@ -18,11 +18,11 @@ config = "0.15"
 #crossbeam-channel = "0.5"
 deadpool-redis = "0.23"
 #digest = "0.10"
-dotenv = "0.15"
+dotenvy = "0.15"
 encoding_rs = "0.8"
 futures ="0.3"
 hashbrown = "0.17"
-hex = "0.4"
+#hex = "0.4"
 #lazy_static = "1.5"
 #log = { version = "^0.4", features = ["std"] }
 num_cpus = "1.17"
@@ -37,14 +37,14 @@ rayon = "1.12"
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "charset", "json", "form", "brotli", "gzip", "cookies", "zstd", "http2"] }
 rustls = { version = "0.23", features = ["ring"] }
-rustls-pemfile = "2"
+rustls-pki-types = { version = "1.14", features = ["alloc", "std"] }
 rust_decimal = "1.42"
 rust_decimal_macros = "1.40"
 scraper = "0.27"
 serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
 serde_json = "1.0"
-sha2 = { version = "0.11", features = [] }
+#sha2 = { version = "0.11", features = [] }
 sqlx = { version = "0.9", features = [ "runtime-tokio", "postgres", "time", "chrono", "bigdecimal", "macros", "rust_decimal"] }
 strum = { version = "0.28", features = ["derive"]}
 strum_macros = "0.28"
@@ -52,17 +52,35 @@ tokio = { version = "1.52", features = ["full"] }
 tokio-cron-scheduler = "0.15"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
-tokio-test = "0.4"
+#tokio-test = "0.4"
 tonic = { version = "0.14", features = ["transport", "channel", "tls-ring", "gzip"] }
 moka = { version = "0.12.15", features = ["sync"] }
 urlencoding = "2.1"
 lazy_static = "1.5"
 scopeguard = "1.2"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 x509-parser = "0.18"
-time = "=0.3.51"
+#time = "=0.3.49"
 
 [target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
 mimalloc = "0.1"
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bench]]
+name = "twse_quote_parser"
+harness = false
+
+[[bench]]
+name = "daily_quote_mapper"
+harness = false
+
+[[bench]]
+name = "cache_snapshot_lookup"
+harness = false
 
 [build-dependencies]
 protoc-bin-vendored = "3"

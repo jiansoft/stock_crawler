@@ -43,26 +43,26 @@ pub async fn visit() -> Result<Vec<QfiiDto>> {
 mod tests {
     use std::result::Result::Ok;
 
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
 
         match visit().await {
             Ok(qfiis) => {
                 dbg!(&qfiis);
-                logging::debug_file_async(format!("qfiis:{:#?}", qfiis));
+                tracing::debug!("qfiis:{:#?}", qfiis);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
         }
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

@@ -1,6 +1,5 @@
 use crate::{
     app::backfill::acl::{RevenueAclMapper, UpdateRevenueCommand},
-    core::logging,
     core::util,
     infra::cache::SHARE,
     infra::crawler::twse,
@@ -12,9 +11,9 @@ use scopeguard::defer;
 
 /// 調用  twse API 取得台股月營收
 pub async fn execute() -> Result<()> {
-    logging::info_file_async("更新台股月營收開始");
+    tracing::info!("更新台股月營收開始");
     defer! {
-        logging::info_file_async("更新台股月營收結束");
+        tracing::info!("更新台股月營收結束");
     }
 
     let now = Local::now();
@@ -43,7 +42,7 @@ async fn process_revenues(last_month_timezone: chrono::DateTime<FixedOffset>) ->
     stream::iter(cmds)
         .for_each_concurrent(util::concurrent_limit_16(), |cmd| async move {
             if let Err(why) = process_revenue(cmd, year, month as i32).await {
-                logging::error_file_async(format!("Failed to process_revenue because {:?}", why));
+                tracing::error!("Failed to process_revenue because {:?}", why);
             }
         })
         .await;
@@ -90,7 +89,7 @@ pub(crate) async fn process_revenue(
         Some(s) => s.name().to_string(),
     };
 
-    logging::info_file_async(format!(
+    tracing::info!(
         "公司代號:{}  公司名稱:{} 當月營收:{} 上月營收:{} 去年當月營收:{} 月均價:{} 最低價:{} 最高價:{}",
         cmd.symbol,
         name,
@@ -100,14 +99,13 @@ pub(crate) async fn process_revenue(
         table_entity.avg_price,
         table_entity.lowest_price,
         table_entity.highest_price
-    ));
+    );
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
     use std::time::Duration;
 
     use super::*;
@@ -115,26 +113,26 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
     #[tokio::test]
     #[ignore]
     async fn test_process_revenues() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 test_process_revenues".to_string());
+        tracing::debug!("開始 test_process_revenues");
 
         let naive_datetime = NaiveDate::from_ymd_opt(2025, 4, 1)
             .unwrap()
@@ -146,14 +144,11 @@ mod tests {
         match process_revenues(month_timezone).await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to test_process_revenues because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to test_process_revenues because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 test_process_revenues".to_string());
+        tracing::debug!("結束 test_process_revenues");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

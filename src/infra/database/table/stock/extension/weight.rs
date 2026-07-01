@@ -65,15 +65,14 @@ mod tests {
 
     use rust_decimal_macros::dec;
 
-    use crate::{core::logging, infra::database::table::stock::StockDbRow};
+    use crate::infra::database::table::stock::StockDbRow;
 
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_update() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 update".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 update");
         let sw = SymbolAndWeight::new("2330".to_string(), dec!(28.3278));
         match sw.update().await {
             Ok(_qr) => {
@@ -99,44 +98,34 @@ WHERE stock_symbol = $1;
                     Ok(s) => {
                         assert_eq!(s.weight, sw.weight);
 
-                        logging::debug_file_async(format!("stock:{:?}", s));
+                        tracing::debug!("stock:{:?}", s);
                         dbg!(s);
                     }
                     Err(why) => {
-                        logging::debug_file_async(format!(
-                            "Failed to fetch stock because: {:?}",
-                            why
-                        ));
+                        tracing::debug!("Failed to fetch stock because: {:?}", why);
                     }
                 }
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to update stock weight because: {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to update stock weight because: {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 update".to_string());
+        tracing::debug!("結束 update");
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_zeroed_out() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 zeroed_out".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 zeroed_out");
 
         match SymbolAndWeight::zeroed_out().await {
             Ok(_qr) => {}
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to stock weight zeroed_out because: {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to stock weight zeroed_out because: {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 zeroed_out".to_string());
+        tracing::debug!("結束 zeroed_out");
     }
 }

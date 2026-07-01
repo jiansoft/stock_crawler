@@ -5,7 +5,6 @@ use sqlx::{Row, postgres::PgQueryResult, postgres::PgRow};
 
 use crate::{
     core::declare::Industry,
-    core::logging,
     core::util::{self, map::Keyable},
     infra::database,
 };
@@ -197,7 +196,7 @@ ORDER BY
 pub async fn create_search_index(stock_symbol: &str, name: &str) {
     // 先刪除舊的數據
     if let Err(why) = stock_index::StockIndex::delete_by_stock_symbol(stock_symbol).await {
-        logging::error_file_async(format!("{:#?}", why));
+        tracing::error!("{:#?}", why);
     }
 
     // 拆解股票名稱為單詞並加入股票代碼
@@ -209,7 +208,7 @@ pub async fn create_search_index(stock_symbol: &str, name: &str) {
     let exist_words = match words_in_db {
         Ok(sw) => util::map::vec_to_hashmap(sw),
         Err(why) => {
-            logging::error_file_async(format!("Failed to list_by_word because:{:#?}", why));
+            tracing::error!("Failed to list_by_word because:{:#?}", why);
             return;
         }
     };
@@ -229,10 +228,7 @@ pub async fn create_search_index(stock_symbol: &str, name: &str) {
                         stock_index_e.word_id = word_id;
                     }
                     Err(why) => {
-                        logging::error_file_async(format!(
-                            "Failed to insert stock word because:{:#?}",
-                            why
-                        ));
+                        tracing::error!("Failed to insert stock word because:{:#?}", why);
                         continue;
                     }
                 }
@@ -240,7 +236,7 @@ pub async fn create_search_index(stock_symbol: &str, name: &str) {
         }
 
         if let Err(why) = stock_index_e.insert().await {
-            logging::error_file_async(format!("Failed to insert stock index because:{:#?}", why));
+            tracing::error!("Failed to insert stock index because:{:#?}", why);
         }
     }
 }
@@ -390,7 +386,6 @@ pub fn is_preference_shares(stock_symbol: &str) -> bool {
 mod tests {
     use rust_decimal_macros::dec;
 
-    use crate::core::logging;
     use crate::domain::registry::repository::StockRepository;
 
     use super::*;
@@ -461,7 +456,7 @@ mod tests {
     // 此測試驗證防禦性 upsert 邏輯（當新傳入的市場或產業編號為 0 時，保留資料庫中原先正確的非零值）。
     #[tokio::test]
     async fn test_upsert_industry() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         // 若目前測試環境無法連接資料庫，則自動跳過，避免在無資料庫之開發環境下執行單元測試失敗
         if crate::infra::database::ping().await.is_err() {
@@ -565,113 +560,96 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_update_last_eps() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 update_last_eps".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 update_last_eps");
         match StockDbRow::update_eps_and_roe().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to update_last_eps because: {:?}", why));
+                tracing::debug!("Failed to update_last_eps because: {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 update_last_eps".to_string());
+        tracing::debug!("結束 update_last_eps");
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 StockDbRow::fetch".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 StockDbRow::fetch");
         match StockDbRow::fetch().await {
             Ok(stocks) => {
-                logging::debug_file_async(format!("stocks:{:#?}", stocks));
+                tracing::debug!("stocks:{:#?}", stocks);
             }
             Err(why) => {
-                logging::debug_file_async(format!("{:?}", why));
+                tracing::debug!("{:?}", why);
             }
         }
-        logging::debug_file_async("結束 StockDbRow::fetch".to_string());
+        tracing::debug!("結束 StockDbRow::fetch");
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_net_asset_value_per_share_is_zero() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_net_asset_value_per_share_is_zero".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 fetch_net_asset_value_per_share_is_zero");
         match fetch_net_asset_value_per_share_is_zero().await {
             Ok(stocks) => {
                 for e in stocks {
-                    logging::debug_file_async(format!(
-                        "{} {:?} ",
-                        is_preference_shares(&e.stock_symbol),
-                        e
-                    ));
+                    tracing::debug!("{} {:?} ", is_preference_shares(&e.stock_symbol), e);
                 }
             }
             Err(why) => {
-                logging::debug_file_async(format!(
+                tracing::debug!(
                     "Failed to fetch_net_asset_value_per_share_is_zero because: {:?}",
                     why
-                ));
+                );
             }
         }
 
-        logging::debug_file_async("結束 fetch_net_asset_value_per_share_is_zero".to_string());
+        tracing::debug!("結束 fetch_net_asset_value_per_share_is_zero");
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_fetch_stocks_without_financial_statement() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 fetch_stocks_without_financial_statement".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 fetch_stocks_without_financial_statement");
         match fetch_stocks_without_financial_statement(2022, "Q4").await {
             Ok(stocks) => {
                 for e in stocks {
-                    logging::debug_file_async(format!(
-                        "{} {:?} ",
-                        is_preference_shares(&e.stock_symbol),
-                        e
-                    ));
+                    tracing::debug!("{} {:?} ", is_preference_shares(&e.stock_symbol), e);
                 }
             }
             Err(why) => {
-                logging::debug_file_async(format!(
+                tracing::debug!(
                     "Failed to fetch_stocks_without_financial_statement because: {:?}",
                     why
-                ));
+                );
             }
         }
 
-        logging::debug_file_async("結束 fetch_stocks_without_financial_statement".to_string());
+        tracing::debug!("結束 fetch_stocks_without_financial_statement");
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_create_index() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         create_search_index("2330", "台積電").await;
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_rebuild_search_indices() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 rebuild_search_indices".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 rebuild_search_indices");
 
         match StockDbRow::rebuild_search_indices().await {
             Ok(_) => {
-                logging::debug_file_async("完成 rebuild_search_indices".to_string());
+                tracing::debug!("完成 rebuild_search_indices");
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to rebuild_search_indices because: {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to rebuild_search_indices because: {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 rebuild_search_indices".to_string());
+        tracing::debug!("結束 rebuild_search_indices");
     }
 }

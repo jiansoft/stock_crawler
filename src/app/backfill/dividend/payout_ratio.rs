@@ -2,7 +2,6 @@ use std::{collections::HashSet, time::Duration};
 
 use crate::{
     app::backfill::acl::DividendAclMapper,
-    core::logging,
     core::util::map::{Keyable, vec_to_hashmap},
     domain::dividend::repository::DividendRepository,
     domain::registry::entity::StockSymbol,
@@ -16,9 +15,9 @@ use scopeguard::defer;
 /// 將股息中盈餘分配率為零的數據向第三方取得數據後更新更新。
 /// </summary>
 pub async fn execute() -> Result<()> {
-    logging::info_file_async("更新盈餘分配率開始");
+    tracing::info!("更新盈餘分配率開始");
     defer! {
-       logging::info_file_async("更新盈餘分配率結束");
+       tracing::info!("更新盈餘分配率結束");
     }
 
     let dividend_repo = PgDividendRepository::new();
@@ -59,7 +58,7 @@ pub async fn execute() -> Result<()> {
 
                     match dividend_repo.save(&updated_pri).await {
                         Ok(_) => {
-                            logging::info_file_async(format!(
+                            tracing::info!(
                                 "更新盈餘分配率成功: security_code={}, year_of_dividend={}, quarter={}, payout_ratio_cash={}, payout_ratio_stock={}, payout_ratio={}",
                                 updated_pri.security_code,
                                 updated_pri.year_of_dividend,
@@ -67,11 +66,11 @@ pub async fn execute() -> Result<()> {
                                 updated_pri.payout_ratio_cash,
                                 updated_pri.payout_ratio_stock,
                                 updated_pri.payout_ratio
-                            ));
+                            );
                             *pri = updated_pri;
                         }
                         Err(why) => {
-                            logging::error_file_async(format!("{} {:?}", key, why));
+                            tracing::error!("{} {:?}", key, why);
                         }
                     }
                 }
@@ -86,27 +85,24 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 payout_ratio::execute".to_string());
+        tracing::debug!("開始 payout_ratio::execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to payout_ratio::execute because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to payout_ratio::execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 payout_ratio::execute".to_string());
+        tracing::debug!("結束 payout_ratio::execute");
     }
 }

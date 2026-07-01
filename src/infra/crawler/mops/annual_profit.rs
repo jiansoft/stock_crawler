@@ -409,8 +409,6 @@ impl AnnualProfitFetcher for Mops {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[test]
@@ -678,20 +676,21 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 mops::annual_profit::visit".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 mops::annual_profit::visit");
 
         for stock_symbol in ["2330", "2838"] {
             match visit(stock_symbol).await {
                 Ok(result) => {
                     dbg!(&result);
-                    logging::debug_file_async(format!("mops : {:#?}", result));
+                    tracing::debug!("mops : {:#?}", result);
                 }
                 Err(why) => {
-                    logging::debug_file_async(format!(
+                    tracing::debug!(
                         "Failed to mops::annual_profit::visit({}) because {:?}",
-                        stock_symbol, why
-                    ));
+                        stock_symbol,
+                        why
+                    );
                     panic!(
                         "mops::annual_profit::visit({}) failed: {:?}",
                         stock_symbol, why
@@ -700,6 +699,6 @@ mod tests {
             }
         }
 
-        logging::debug_file_async("結束 mops::annual_profit::visit".to_string());
+        tracing::debug!("結束 mops::annual_profit::visit");
     }
 }

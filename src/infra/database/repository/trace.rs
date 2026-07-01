@@ -61,7 +61,7 @@ mod tests {
     #[tokio::test]
     async fn test_pg_trace_repository_contract() {
         // 這是一個單元合約測試佔位符，如果沒有資料庫連接則跳過
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         if database::ping().await.is_err() {
             println!("跳過 PgTraceRepository DB 整合測試：無資料庫連接");
             return;

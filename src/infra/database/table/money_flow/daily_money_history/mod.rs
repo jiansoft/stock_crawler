@@ -93,37 +93,32 @@ ON CONFLICT (date) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 DailyMoneyHistory::upsert".to_string());
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 test_upsert：無資料庫連接");
+            return;
+        }
+        tracing::debug!("開始 DailyMoneyHistory::upsert");
         let current_date = NaiveDate::parse_from_str("2023-08-30", "%Y-%m-%d").unwrap();
         let mut tx = database::get_tx().await.ok();
         match DailyMoneyHistory::upsert(current_date, &mut tx).await {
             Ok(r) => {
-                logging::debug_file_async(format!("DailyMoneyHistory::upsert:{:#?}", r));
-                tx.unwrap()
-                    .commit()
-                    .await
-                    .expect("tx.unwrap().commit() is failed");
+                tracing::debug!("DailyMoneyHistory::upsert:{:#?}", r);
+                if let Some(tx) = tx {
+                    tx.commit().await.expect("commit is failed");
+                }
             }
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to DailyMoneyHistory::upsert because {:?}",
-                    why
-                ));
-                tx.unwrap()
-                    .rollback()
-                    .await
-                    .expect("tx.unwrap().rollback() is failed");
+                tracing::debug!("Failed to DailyMoneyHistory::upsert because {:?}", why);
+                if let Some(tx) = tx {
+                    tx.rollback().await.expect("rollback is failed");
+                }
             }
         }
-
-        logging::debug_file_async("結束 DailyMoneyHistory::upsert".to_string());
+        tracing::debug!("結束 DailyMoneyHistory::upsert");
     }
 }

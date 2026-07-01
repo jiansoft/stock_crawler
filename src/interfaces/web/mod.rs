@@ -8,8 +8,6 @@ use std::net::SocketAddr;
 use anyhow::Result;
 use tokio::net::TcpListener;
 
-use crate::core::logging;
-
 /// Backfill admin 的 Web UI 與 HTTP API。
 pub mod backfill_admin;
 
@@ -37,25 +35,20 @@ pub async fn start() -> Result<()> {
     tokio::spawn(async move {
         match TcpListener::bind(addr).await {
             Ok(listener) => {
-                logging::info_file_async(format!(
-                    "manual backfill web server listening on http://{}",
-                    addr
-                ));
+                tracing::info!("manual backfill web server listening on http://{}", addr);
 
                 // Axum serve 正常情況會持續執行；若返回錯誤，記錄原因供維運追查。
                 if let Err(why) = axum::serve(listener, app).await {
-                    logging::error_file_async(format!(
-                        "manual backfill web server stopped with error: {}",
-                        why
-                    ));
+                    tracing::error!("manual backfill web server stopped with error: {}", why);
                 }
             }
             Err(why) => {
                 // 背景服務 bind 失敗時只寫 log，避免影響既有 gRPC/排程流程。
-                logging::error_file_async(format!(
+                tracing::error!(
                     "manual backfill web server bind failed on {}: {}",
-                    addr, why
-                ));
+                    addr,
+                    why
+                );
             }
         }
     });

@@ -253,7 +253,6 @@ fn estimate_paid_year(year_of_dividend: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::logging;
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
@@ -541,8 +540,8 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 visit".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 visit");
 
         match visit("2357").await {
             Ok(e) => {
@@ -553,6 +552,6 @@ mod tests {
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

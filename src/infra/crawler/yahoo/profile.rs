@@ -189,8 +189,6 @@ fn parse_field(element: &scraper::ElementRef, base: &str, child_index: u32) -> D
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::logging;
-
     #[test]
     fn test_is_no_valid_data_error() {
         let err: anyhow::Error = NoValidProfileDataError {
@@ -213,19 +211,19 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 visit".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 visit");
 
         match visit("2330").await {
             Ok(e) => {
                 dbg!(&e);
-                logging::debug_file_async(format!("{:#?}", e));
+                tracing::debug!("{:#?}", e);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because {:?}", why));
+                tracing::debug!("Failed to visit because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

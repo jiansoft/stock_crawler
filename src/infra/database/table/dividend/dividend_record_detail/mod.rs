@@ -115,15 +115,12 @@ impl Clone for DividendRecordDetail {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_calculate_cumulate_dividend() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 calculate_cumulate_dividend".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 calculate_cumulate_dividend");
         let drd = DividendRecordDetail::new(
             27,
             2022,
@@ -136,10 +133,10 @@ mod tests {
             Some(database::get_connection().begin().await.unwrap());
         match drd.fetch_cumulate_dividend(&mut tx_option).await {
             Ok(cd) => {
-                logging::debug_file_async(format!("cd: {:?}", cd));
+                tracing::debug!("cd: {:?}", cd);
             }
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
@@ -147,6 +144,6 @@ mod tests {
             tx.commit().await.unwrap();
         }
 
-        logging::debug_file_async("結束 calculate_cumulate_dividend".to_string());
+        tracing::debug!("結束 calculate_cumulate_dividend");
     }
 }

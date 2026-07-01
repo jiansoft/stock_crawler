@@ -102,7 +102,6 @@ fn calculate_price_change(offering_price: Decimal, last_price: Decimal) -> Strin
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
     use crate::infra::cache::SHARE;
 
     use super::*;
@@ -110,18 +109,18 @@ mod tests {
     /// 驗證公開申購提醒流程可執行。
     #[tokio::test]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::info_file_async("開始 execute".to_string());
+        tracing::info!("開始 execute");
         //let date = NaiveDate::from_ymd_opt(2023, 6, 15);
         //let today: NaiveDate = Local::today().naive_local();
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because: {why:?}"));
+                tracing::debug!("Failed to execute because: {why:?}");
             }
         }
 
-        logging::info_file_async("結束 execute".to_string());
+        tracing::info!("結束 execute");
     }
 }

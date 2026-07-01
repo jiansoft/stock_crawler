@@ -1,6 +1,5 @@
 use crate::{
     app::backfill::acl::{QfiiAclMapper, UpdateQfiiCommand},
-    core::logging,
     core::util::datetime::Weekend,
     domain::registry::repository::StockRepository,
     infra::crawler::twse,
@@ -17,9 +16,9 @@ pub async fn execute() -> Result<()> {
     if now.is_weekend() {
         return Ok(());
     }
-    logging::info_file_async("更新台股外資持股狀態開始");
+    tracing::info!("更新台股外資持股狀態開始");
     defer! {
-       logging::info_file_async("更新台股外資持股狀態結束");
+       tracing::info!("更新台股外資持股狀態結束");
     }
 
     tokio::try_join!(listed(now.fixed_offset()), otc())?;
@@ -61,10 +60,11 @@ async fn update(cmds: Vec<UpdateQfiiCommand>) -> Result<()> {
 
             // 儲存 Stock 聚合根，同時更新 DB 與快取
             if let Err(why) = repo.save(&stock).await {
-                logging::error_file_async(format!(
+                tracing::error!(
                     "Failed to save stock QFII updates for {} because {:?}",
-                    cmd.symbol, why
-                ));
+                    cmd.symbol,
+                    why
+                );
             }
         }
     }
@@ -74,7 +74,7 @@ async fn update(cmds: Vec<UpdateQfiiCommand>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
@@ -82,17 +82,17 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 execute".to_string());
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 }

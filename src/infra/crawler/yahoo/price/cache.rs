@@ -132,10 +132,11 @@ pub fn start_caching_task() {
             HashMap::with_capacity(categories.len());
 
         let active_tasks = ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        crate::core::logging::info_file_async(format!(
+        tracing::info!(
             "Yahoo 類股快取任務啟動 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
 
         // 只要旗標還是 true，就持續一輪又一輪地輪詢所有類股。
         while IS_CACHING.load(Ordering::SeqCst) {
@@ -213,8 +214,7 @@ pub fn start_caching_task() {
                             cycle_rss_delta_kib,
                         );
                         /*
-                        crate::logging::info_file_async(format!(
-                            "Yahoo category diagnostics | {} {}({}) snaps={} total={} pages={} raw_items={} changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
+                        crate::tracing::info!("Yahoo category diagnostics | {} {}({}) snaps={} total={} pages={} raw_items={} changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
                             category.exchange.label(),
                             category.name,
                             category.sector_id,
@@ -226,8 +226,7 @@ pub fn start_caching_task() {
                             category_rss_delta_kib,
                             category_rss_delta_before_trim_kib,
                             category_trimmed,
-                            started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                        ));
+                            started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,);
                         */
                     }
                     Err(why) => {
@@ -294,8 +293,7 @@ pub fn start_caching_task() {
                             cycle_rss_delta_kib,
                         );
                         /*
-                        crate::logging::info_file_async(format!(
-                            "Yahoo category diagnostics | {} {}({}) failed=true total={} pages=0 raw_items=0 changed_events=0 rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
+                        crate::tracing::info!("Yahoo category diagnostics | {} {}({}) failed=true total={} pages=0 raw_items=0 changed_events=0 rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
                             category.exchange.label(),
                             category.name,
                             category.sector_id,
@@ -303,18 +301,17 @@ pub fn start_caching_task() {
                             category_rss_delta_kib,
                             category_rss_delta_before_trim_kib,
                             category_trimmed,
-                            started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                        ));
+                            started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,);
                         */
                         // 類股失敗時只記錄錯誤，不中止整輪任務，
                         // 避免單一 sector 出問題就拖垮整個 Yahoo 報價快取。
-                        crate::core::logging::error_file_async(format!(
+                        tracing::error!(
                             "Yahoo 類股快取更新失敗: {} {}({}) {:?}",
                             category.exchange.label(),
                             category.name,
                             category.sector_id,
                             why
-                        ));
+                        );
                     }
                 }
 
@@ -327,12 +324,12 @@ pub fn start_caching_task() {
                 // 類股與類股之間進行隨機 2.0 至 4.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率。
                 // 若本次採集遭遇 WAF 阻擋 (Request denied)，則該次的延遲時間改為等待 10 分鐘 (600秒) 以進行冷卻。
                 let sleep_duration = if is_denied {
-                    crate::core::logging::warn_file_async(format!(
+                    tracing::warn!(
                         "Yahoo 採集遭遇 Request denied，將強制冷卻等待 10 分鐘。類股: {} {}({})",
                         category.exchange.label(),
                         category.name,
                         category.sector_id
-                    ));
+                    );
                     Duration::from_secs(600)
                 } else {
                     let jitter_ms = rand::rng().random_range(2000..=4000);
@@ -356,22 +353,22 @@ pub fn start_caching_task() {
             // 若整輪結束後共享快取仍然是空的，代表本輪 Yahoo 採集沒有成功落地任何資料，
             // 這是一種需要人回頭檢查程式或來源格式的明確異常。
             if total_count == 0 {
-                crate::core::logging::error_file_async(format!(
+                tracing::error!(
                     "Yahoo 類股快取輪詢完成但沒有任何資料落地: success_count={} failure_count={} 耗時 {:?}",
                     success_count,
                     failure_count,
                     cycle_started.elapsed()
-                ));
+                );
             }
 
-            crate::core::logging::debug_file_async(format!(
+            tracing::debug!(
                 "Yahoo 類股快取輪詢完成，共 {} 檔股票，成功類股 {}，失敗類股 {}，candidate_events={}，耗時 {:?}",
                 total_count,
                 success_count,
                 failure_count,
                 candidate_event_count,
                 cycle_started.elapsed()
-            ));
+            );
 
             let cycle_elapsed_ms = cycle_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
             let _cycle_rss_delta_before_trim_kib =
@@ -391,8 +388,7 @@ pub fn start_caching_task() {
             );
             COMPLETED_CYCLES.fetch_add(1, Ordering::SeqCst);
             /*
-            crate::logging::info_file_async(format!(
-                "Yahoo cycle diagnostics | total={} success={} failure={} pages={} raw_items={} candidate_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
+            crate::tracing::info!("Yahoo cycle diagnostics | total={} success={} failure={} pages={} raw_items={} candidate_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
                 total_count,
                 success_count,
                 failure_count,
@@ -402,8 +398,7 @@ pub fn start_caching_task() {
                 cycle_rss_delta_kib,
                 cycle_rss_delta_before_trim_kib,
                 allocator_trimmed,
-                cycle_elapsed_ms,
-            ));
+                cycle_elapsed_ms,);
             */
 
             // 一輪全部類股跑完後稍作休息，避免無間斷全市場輪詢造成壓力過大。
@@ -413,16 +408,18 @@ pub fn start_caching_task() {
         // 跳出 while 代表旗標已關閉，這裡補一筆停止 log 方便對照啟停時間。
         IS_CACHING.store(false, Ordering::SeqCst);
         let active_tasks = decrement_atomic_usize(&ACTIVE_TASKS);
-        crate::core::logging::info_file_async(format!(
+        tracing::info!(
             "Yahoo 類股快取任務已停止 generation={} active_tasks={}",
-            generation, active_tasks
-        ));
+            generation,
+            active_tasks
+        );
     });
 
     if let Ok(mut task) = CACHING_TASK.lock() {
         *task = Some(handle);
     } else {
-        crate::core::logging::error_file_async(
+        tracing::error!(
+            "{}",
             "Failed to store Yahoo caching task handle".to_string(),
         );
     }
@@ -439,10 +436,7 @@ pub async fn stop_caching_task() {
     let handle = match CACHING_TASK.lock() {
         Ok(mut task) => task.take(),
         Err(why) => {
-            crate::core::logging::error_file_async(format!(
-                "Failed to lock Yahoo caching task handle because {:?}",
-                why
-            ));
+            tracing::error!("Failed to lock Yahoo caching task handle because {:?}", why);
             None
         }
     };
@@ -450,10 +444,7 @@ pub async fn stop_caching_task() {
     if let Some(handle) = handle
         && let Err(why) = handle.await
     {
-        crate::core::logging::error_file_async(format!(
-            "Yahoo 類股快取任務停止等待失敗: {:?}",
-            why
-        ));
+        tracing::error!("Yahoo 類股快取任務停止等待失敗: {:?}", why);
     }
 
     // 然後主動清空快取，避免收盤或停任務後外部仍讀到過期盤中報價。
@@ -528,10 +519,13 @@ fn apply_category_snapshots(
             for (symbol, snapshot) in category_snapshots {
                 let price = snapshot.price;
                 if !SHARE.is_valid_price(&symbol, price, snapshot.last_close) {
-                    crate::core::logging::warn_file_async(format!(
+                    tracing::warn!(
                         "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                        symbol, price, snapshot.last_close, snapshot.source_site
-                    ));
+                        symbol,
+                        price,
+                        snapshot.last_close,
+                        snapshot.source_site
+                    );
                     continue;
                 }
                 let has_changed = snapshot.price != Decimal::ZERO
@@ -555,10 +549,7 @@ fn apply_category_snapshots(
         }
         Err(why) => {
             // 寫鎖失敗時記錄錯誤，並回傳 0 讓 log 明顯顯示這輪更新沒有成功落地。
-            crate::core::logging::error_file_async(format!(
-                "Failed to update Yahoo 類股快取 because {:?}",
-                why
-            ));
+            tracing::error!("Failed to update Yahoo 類股快取 because {:?}", why);
             ApplyCategoryResult::default()
         }
     }
@@ -589,6 +580,9 @@ mod tests {
     fn test_apply_category_snapshots_counts_changed_prices() {
         let _lock = TEST_STATE_LOCK.blocking_lock();
         SHARE.clear_stock_snapshots();
+        // 清空昨日收盤快取，防止並發測試（如 SHARE.load()）將真實 DB 價格寫入，
+        // 導致 is_valid_price 以真實昨收價驗證測試用的假價格而誤判為異常。
+        SHARE.clear_last_trading_day_quotes();
 
         let category = YahooClassCategory::enabled(
             crate::infra::crawler::yahoo::YahooClassExchange::Listed,
@@ -630,6 +624,7 @@ mod tests {
     fn test_apply_category_snapshots_replaces_removed_symbols_in_same_category() {
         let _lock = TEST_STATE_LOCK.blocking_lock();
         SHARE.clear_stock_snapshots();
+        SHARE.clear_last_trading_day_quotes();
 
         let category = YahooClassCategory::enabled(
             crate::infra::crawler::yahoo::YahooClassExchange::Listed,

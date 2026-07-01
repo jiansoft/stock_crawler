@@ -3,7 +3,6 @@ use chrono::{DateTime, FixedOffset};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::{
-    core::logging,
     core::util::{convert::FromValue, http},
     infra::crawler::share::QfiiDto,
     infra::crawler::twse,
@@ -44,7 +43,8 @@ pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
     let mut result = Vec::with_capacity(1024);
     let stat = match listed.stat {
         None => {
-            logging::warn_file_async(
+            tracing::warn!(
+                "{}",
                 "取得外資及陸資投資持股統計 Finish taiex.Stat is None".to_string(),
             );
             return Ok(result);
@@ -53,7 +53,8 @@ pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
     };
 
     if stat != "OK" {
-        logging::warn_file_async(
+        tracing::warn!(
+            "{}",
             "取得外資及陸資投資持股統計 Finish taiex.Stat is not ok".to_string(),
         );
         return Ok(result);
@@ -90,26 +91,26 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
         //let date =  DateTime::parse_from_str("2023-09-14 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let datetime_local: DateTime<FixedOffset> =
             match DateTime::parse_from_str("2023-09-15 12:00:00 +0800", "%Y-%m-%d %H:%M:%S %z") {
                 Ok(dt) => dt,
                 Err(why) => {
-                    logging::debug_file_async(format!("error:{:#?}", why));
+                    tracing::debug!("error:{:#?}", why);
                     return;
                 }
             };
         match visit(datetime_local).await {
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
             Ok(qfiis) => {
-                logging::debug_file_async(format!("qfiis:{:#?}", qfiis));
+                tracing::debug!("qfiis:{:#?}", qfiis);
             }
         }
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
     }
 }

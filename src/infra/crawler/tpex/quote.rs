@@ -141,7 +141,7 @@ mod tests {
     use chrono::{Local, TimeDelta, Timelike};
     use std::time::Duration;
 
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
 
     use super::*;
 
@@ -197,7 +197,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
 
         let mut now = Local::now();
@@ -206,18 +206,18 @@ mod tests {
         }
         // now -= Duration::days(3);
 
-        logging::debug_file_async("開始 visit".to_string());
+        tracing::debug!("開始 visit");
 
         match visit(now.date_naive()).await {
             Err(why) => {
-                logging::debug_file_async(format!("Failed to visit because: {:?}", why));
+                tracing::debug!("Failed to visit because: {:?}", why);
             }
             Ok(list) => {
-                logging::debug_file_async(format!("data:{:#?}", list));
+                tracing::debug!("data:{:#?}", list);
             }
         }
 
-        logging::debug_file_async("結束 visit".to_string());
+        tracing::debug!("結束 visit");
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }

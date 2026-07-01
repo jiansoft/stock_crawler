@@ -248,8 +248,6 @@ impl StockInfo for Winvest {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[test]
@@ -275,37 +273,31 @@ mod tests {
     #[tokio::test]
     /// 驗證 Winvest 可取得單一股票最新成交價。
     async fn test_get_stock_price() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 winvest::get_stock_price".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 winvest::get_stock_price");
 
         match Winvest::get_stock_price("2330").await {
-            Ok(price) => logging::debug_file_async(format!("winvest price: {}", price)),
-            Err(why) => logging::debug_file_async(format!(
-                "Failed to winvest::get_stock_price because {:?}",
-                why
-            )),
+            Ok(price) => tracing::debug!("winvest price: {}", price),
+            Err(why) => tracing::debug!("Failed to winvest::get_stock_price because {:?}", why),
         }
 
-        logging::debug_file_async("結束 winvest::get_stock_price".to_string());
+        tracing::debug!("結束 winvest::get_stock_price");
     }
 
     #[tokio::test]
     /// 驗證 Winvest 可取得統一格式報價資訊。
     async fn test_get_stock_quotes() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 winvest::get_stock_quotes".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 winvest::get_stock_quotes");
 
         match Winvest::get_stock_quotes("2330").await {
             Ok(quotes) => {
                 dbg!(&quotes);
-                logging::debug_file_async(format!("winvest quotes: {:?}", quotes))
+                tracing::debug!("winvest quotes: {:?}", quotes)
             }
-            Err(why) => logging::debug_file_async(format!(
-                "Failed to winvest::get_stock_quotes because {:?}",
-                why
-            )),
+            Err(why) => tracing::debug!("Failed to winvest::get_stock_quotes because {:?}", why),
         }
 
-        logging::debug_file_async("結束 winvest::get_stock_quotes".to_string());
+        tracing::debug!("結束 winvest::get_stock_quotes");
     }
 }

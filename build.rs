@@ -18,22 +18,27 @@ use std::{error::Error, fs};
 static OUT_DIR: &str = "src/interfaces/rpc";
 
 /// 編譯 protobuf 並輸出 Rust 原始碼。
+///
+/// 每個 `.proto` 檔案現在位於各自的子目錄下，
+/// 以符合 buf PACKAGE_DIRECTORY_STRUCTURE 規範。
 fn main() -> Result<(), Box<dyn Error>> {
     let protoc = protoc_bin_vendored::protoc_bin_path()?;
     let mut prost_config = tonic_prost_build::Config::new();
     prost_config.protoc_executable(protoc);
 
+    // 各 .proto 現已移至對應的子目錄中
     let protos = [
-        "./etc/proto/basic.proto",
-        "./etc/proto/control.proto",
-        "./etc/proto/manual_backfill.proto",
-        "./etc/proto/stock.proto",
+        "./etc/proto/basic/basic.proto",
+        "./etc/proto/control/control.proto",
+        "./etc/proto/manual_backfill/manual_backfill.proto",
+        "./etc/proto/stock/stock.proto",
     ];
 
     fs::create_dir_all(OUT_DIR)?;
     tonic_prost_build::configure()
         .build_server(true)
         .out_dir(OUT_DIR)
+        // include 根目錄設為 etc/proto，使跨套件 import 路徑正確解析
         .compile_with_config(prost_config, &protos, &["./etc/proto"])?;
 
     rerun(&protos);

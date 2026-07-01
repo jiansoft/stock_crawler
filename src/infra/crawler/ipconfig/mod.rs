@@ -10,7 +10,7 @@ const HOST: &str = "ipconfig.io";
 
 /// 取得目前的IP
 pub async fn visit() -> Result<String> {
-    crawler::get_public_ip_text(&DDNS_URL, HOST, "/ip", true).await
+    Ok(crawler::get_public_ip_text(&DDNS_URL, HOST, "/ip", true).await?)
 }
 
 #[cfg(test)]

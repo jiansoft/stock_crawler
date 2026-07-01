@@ -1,6 +1,6 @@
 use crate::{
     app::backfill::acl::NetAssetValueAclMapper, app::backfill::net_asset_value_per_share::update,
-    core::logging, infra::crawler::yahoo::profile,
+    infra::crawler::yahoo::profile,
 };
 use anyhow::Result;
 
@@ -35,23 +35,23 @@ pub async fn execute() -> Result<()> {
                         )
                         .await
                     {
-                        logging::error_file_async(format!(
+                        tracing::error!(
                             "Failed to cache profile::visit no-valid-data skip for {} because {:?}",
                             stock.symbol().0,
                             cache_err
-                        ));
+                        );
                     }
-                    logging::warn_file_async(format!(
+                    tracing::warn!(
                         "Skip profile::visit for {} because {}",
                         stock.symbol().0,
                         why
-                    ));
+                    );
                 } else {
-                    logging::error_file_async(format!(
+                    tracing::error!(
                         "Failed to profile::visit for {} because {}",
                         stock.symbol().0,
                         why
-                    ));
+                    );
                 }
                 continue;
             }
@@ -61,27 +61,27 @@ pub async fn execute() -> Result<()> {
             NetAssetValueAclMapper::from_yahoo_profile(stock.symbol().0.clone(), &yahoo_profile);
 
         if cmd.net_asset_value_per_share.is_zero() {
-            logging::info_file_async(format!(
+            tracing::info!(
                 "the stock's net_asset_value_per_share is zero still. \r\n{:#?}",
                 yahoo_profile
-            ));
+            );
             continue;
         }
 
         stock.update_net_asset_value(cmd.net_asset_value_per_share);
 
         if let Err(why) = update(&stock).await {
-            logging::error_file_async(format!(
+            tracing::error!(
                 "Failed to update_net_asset_value_per_share because {:?}",
                 why
-            ));
+            );
             continue;
         }
 
-        logging::info_file_async(format!(
+        tracing::info!(
             "zero update_net_asset_value_per_share executed successfully. \r\n{:#?}",
             stock
-        ));
+        );
     }
 
     Ok(())
@@ -89,23 +89,21 @@ pub async fn execute() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::logging;
-
     use super::*;
 
     #[tokio::test]
     #[ignore]
     async fn test_execute() {
-        dotenv::dotenv().ok();
-        logging::debug_file_async("開始 execute".to_string());
+        dotenvy::dotenv().ok();
+        tracing::debug!("開始 execute");
 
         match execute().await {
             Ok(_) => {}
             Err(why) => {
-                logging::debug_file_async(format!("Failed to execute because {:?}", why));
+                tracing::debug!("Failed to execute because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 execute".to_string());
+        tracing::debug!("結束 execute");
     }
 }

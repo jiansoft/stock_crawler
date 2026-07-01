@@ -75,7 +75,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_visit_twse_etf() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         match visit().await {
             Err(why) => println!("抓取上市 ETF 失敗: {:?}", why),

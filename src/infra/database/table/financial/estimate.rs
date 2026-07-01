@@ -491,17 +491,16 @@ ON CONFLICT (date, security_code) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use crate::{core::logging, infra::cache::SHARE};
+    use crate::infra::cache::SHARE;
     use chrono::Datelike;
 
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 Estimate::upsert".to_string());
+        tracing::debug!("開始 Estimate::upsert");
 
         let current_date = NaiveDate::parse_from_str("2023-09-15", "%Y-%m-%d").unwrap();
         let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
@@ -510,36 +509,32 @@ mod tests {
         let estimate = Estimate::new("9921".to_string(), current_date);
 
         match estimate.upsert(years_str).await {
-            Ok(r) => logging::debug_file_async(format!("Estimate::upsert:{:#?}", r)),
+            Ok(r) => tracing::debug!("Estimate::upsert:{:#?}", r),
             Err(why) => {
-                logging::debug_file_async(format!("Failed to Estimate::upsert because {:?}", why));
+                tracing::debug!("Failed to Estimate::upsert because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 Estimate::upsert".to_string());
+        tracing::debug!("結束 Estimate::upsert");
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_upsert_all() {
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
         SHARE.load().await;
-        logging::debug_file_async("開始 Estimate::upsert_all".to_string());
+        tracing::debug!("開始 Estimate::upsert_all");
 
         let current_date = NaiveDate::parse_from_str("2026-03-03", "%Y-%m-%d").unwrap();
         let years: Vec<i32> = (0..10).map(|i| current_date.year() - i).collect();
         let years_vec: Vec<String> = years.iter().map(|&year| year.to_string()).collect();
         let years_str = years_vec.join(",");
         match Estimate::upsert_all(current_date, years_str).await {
-            Ok(r) => logging::debug_file_async(format!("Estimate::upsert_all:{:#?}", r)),
+            Ok(r) => tracing::debug!("Estimate::upsert_all:{:#?}", r),
             Err(why) => {
-                logging::debug_file_async(format!(
-                    "Failed to Estimate::upsert_all because {:?}",
-                    why
-                ));
+                tracing::debug!("Failed to Estimate::upsert_all because {:?}", why);
             }
         }
 
-        logging::debug_file_async("結束 Estimate::upsert_all".to_string());
+        tracing::debug!("結束 Estimate::upsert_all");
     }
 }
