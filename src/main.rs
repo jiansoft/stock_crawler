@@ -114,7 +114,7 @@ unsafe extern "C" {
     fn setenv(name: *const c_char, value: *const c_char, overwrite: i32) -> i32;
 }
 
-// ── 子模組宣告 ────────────────────────────────────────────────────────────────
+// ── 引用函式庫 crate 的模組樹 ──────────────────────────────────────────────────
 // 五層 DDD 架構，依賴方向由內而外（內層不知道外層存在）：
 //   domain ← core ← infra ← app ← interfaces
 //
@@ -123,11 +123,12 @@ unsafe extern "C" {
 // domain     — 領域模型：實體、值物件、領域服務，零外部框架依賴（純 Rust struct/trait）
 // infra      — 基礎設施實作：database（SQLx/PostgreSQL）、nosql（Redis）、cache
 // interfaces — 外部介面：gRPC server/client、Axum Web server、Telegram bot
-pub mod app;
-pub mod core;
-pub mod domain;
-pub mod infra;
-pub mod interfaces;
+//
+// 這些模組實際定義在 `src/lib.rs`（`stock_crawler` 函式庫 target）。
+// main.rs 只透過 `use` 引入，不再用 `pub mod` 重新宣告整棵模組樹，
+// 避免 `cargo test` 把同一組程式碼（含所有單元測試）分別編譯進 lib 與 bin
+// 兩個測試執行檔、對同一組 CI 服務容器重跑兩遍。
+use stock_crawler::{app, core, infra, interfaces};
 
 /// 在 Unix 平台監聽 `SIGINT`（Ctrl+C）與 `SIGTERM`（Docker/systemd 關閉訊號），
 /// 並以原子寫入通知主迴圈結束。

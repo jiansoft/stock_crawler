@@ -359,6 +359,7 @@ mod tests {
     ///
     /// 此測試同時依賴外部網路與本機資料庫，預設測試集不應執行。
     #[tokio::test]
+    #[ignore]
     async fn test_copy_in_raw() {
         dotenvy::dotenv().ok();
         if database::ping().await.is_err() {
