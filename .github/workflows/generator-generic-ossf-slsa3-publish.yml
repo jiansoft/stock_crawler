@@ -47,7 +47,7 @@ jobs:
           cp target/release/stock_crawler dist/stock_crawler-linux-amd64
 
       - name: Upload binaries to Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: github.event_name == 'release'
         with:
           files: dist/stock_crawler-linux-amd64
