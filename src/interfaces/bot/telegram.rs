@@ -337,10 +337,7 @@ mod tests {
         for chunk in &chunks {
             assert!(chunk.chars().count() <= limit);
         }
-        assert_eq!(
-            chunks.iter().map(|c| c.chars().count()).sum::<usize>(),
-            250
-        );
+        assert_eq!(chunks.iter().map(|c| c.chars().count()).sum::<usize>(), 250);
     }
 
     /// 驗證 MarkdownV2 跳脫規則。
