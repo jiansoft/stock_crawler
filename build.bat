@@ -8,7 +8,7 @@ set BIN_NAME=stock_crawler
 set BUILD_COUNT=0
 set TOTAL_ELAPSED_CS=0
 
-echo [1/8] Checking Zig...
+echo [1/9] Checking Zig...
 zig version >nul 2>&1
 if errorlevel 1 (
   echo Zig is not installed or not in PATH.
@@ -16,7 +16,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [2/8] Checking CMake...
+echo [2/9] Checking CMake...
 cmake --version >nul 2>&1
 if errorlevel 1 (
   echo CMake is not installed or not in PATH.
@@ -26,7 +26,7 @@ if errorlevel 1 (
 
 
 
-echo [3/8] Updating Rust toolchain...
+echo [3/9] Updating Rust toolchain...
 rustup --version >nul 2>&1
 if errorlevel 1 (
   echo rustup is not installed or not in PATH.
@@ -39,7 +39,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [4/8] Tool versions:
+echo [4/9] Tool versions:
 for /f "delims=" %%i in ('cmake --version ^| findstr /B /C:"cmake version"') do echo   - %%i
 for /f "delims=" %%i in ('zig version') do echo   - zig %%i
 for /f "delims=" %%i in ('cargo --version') do echo   - %%i
@@ -57,7 +57,7 @@ if errorlevel 1 (
   for /f "delims=" %%i in ('rustup --version 2^>nul') do echo   - %%i
 )
 
-echo [5/8] Ensuring Rust targets...
+echo [5/9] Ensuring Rust targets...
 for %%T in (%TARGETS%) do (
   echo   - Adding target %%T
   rustup target add %%T
@@ -67,7 +67,7 @@ for %%T in (%TARGETS%) do (
   )
 )
 
-echo [6/8] Checking cargo-zigbuild...
+echo [6/9] Checking cargo-zigbuild...
 cargo zigbuild -h >nul 2>&1
 if errorlevel 1 (
   echo cargo-zigbuild not found, installing...
@@ -78,7 +78,7 @@ if errorlevel 1 (
   )
 )
 
-echo [7/8] Building %BIN_NAME%...
+echo [7/9] Building %BIN_NAME% for cross targets...
 for %%T in (%TARGETS%) do (
   set /a BUILD_COUNT+=1
   echo.
@@ -112,9 +112,35 @@ for %%T in (%TARGETS%) do (
   echo Elapsed for %%T: !BUILD_ELAPSED_TEXT!
 )
 
+echo.
+echo [8/9] Building %BIN_NAME% for native Windows...
+call :GetTimeCentis WIN_BUILD_START_CS
+cargo build --%PROFILE%
+if errorlevel 1 (
+  echo Build failed for native Windows target.
+  exit /b 1
+)
+
+call :GetTimeCentis WIN_BUILD_END_CS
+set /a WIN_BUILD_ELAPSED_CS=!WIN_BUILD_END_CS! - !WIN_BUILD_START_CS!
+if !WIN_BUILD_ELAPSED_CS! lss 0 set /a WIN_BUILD_ELAPSED_CS+=8640000
+set /a TOTAL_ELAPSED_CS+=WIN_BUILD_ELAPSED_CS
+set /a BUILD_COUNT+=1
+
+set WIN_OUT_PATH=target\%PROFILE%\%BIN_NAME%.exe
+if exist "!WIN_OUT_PATH!" (
+  echo Output binary: !WIN_OUT_PATH!
+) else (
+  echo Build command finished, but binary not found at: !WIN_OUT_PATH!
+  exit /b 1
+)
+
+call :FormatElapsed !WIN_BUILD_ELAPSED_CS! WIN_BUILD_ELAPSED_TEXT
+echo Elapsed for native Windows: !WIN_BUILD_ELAPSED_TEXT!
+
 call :FormatElapsed %TOTAL_ELAPSED_CS% TOTAL_ELAPSED_TEXT
 echo.
-echo [8/8] Done.
+echo [9/9] Done.
 echo Targets built: %BUILD_COUNT%
 echo Total build time: %TOTAL_ELAPSED_TEXT%
 
