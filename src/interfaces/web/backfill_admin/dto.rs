@@ -282,7 +282,11 @@ pub(super) const INDEX_HTML: &str = r##"<!doctype html>
         event.preventDefault();
         const button = form.querySelector("button");
         const toast = form.querySelector(".toast");
-        const data = Object.fromEntries(new FormData(form).entries());
+        const data = {};
+        for (const [key, value] of new FormData(form).entries()) {
+          const field = form.elements.namedItem(key);
+          data[key] = field && field.type === "number" ? Number(value) : value;
+        }
         button.disabled = true;
         toast.textContent = "Starting...";
 

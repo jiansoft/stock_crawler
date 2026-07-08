@@ -151,8 +151,9 @@ pub const LISTED_CLASS_CATEGORIES: &[YahooClassCategory] = &[
     YahooClassCategory::enabled(YahooClassExchange::Listed, 47, "其他電子"),
     YahooClassCategory::enabled(YahooClassExchange::Listed, 48, "ETN"),
     YahooClassCategory::disabled(YahooClassExchange::Listed, 49, "創新板"), // 因 Yahoo API 一直回空資料，故不採集
-    YahooClassCategory::enabled(YahooClassExchange::Listed, 51, "市牛證"),
-    YahooClassCategory::enabled(YahooClassExchange::Listed, 52, "市熊證"),
+    // 牛熊證常無成交量，採集到的價格恆為 0，會被 is_valid_price 過濾並噴出大量「過濾異常價格」雜訊，故不納入盤中採集。
+    YahooClassCategory::disabled(YahooClassExchange::Listed, 51, "市牛證"),
+    YahooClassCategory::disabled(YahooClassExchange::Listed, 52, "市熊證"),
     YahooClassCategory::enabled(YahooClassExchange::Listed, 93, "綠能環保"),
     YahooClassCategory::enabled(YahooClassExchange::Listed, 94, "數位雲端"),
     YahooClassCategory::enabled(YahooClassExchange::Listed, 95, "運動休閒"),
@@ -290,6 +291,8 @@ mod tests {
         let listed_call = find_category(YahooClassExchange::Listed, 31).unwrap();
         let listed_put = find_category(YahooClassExchange::Listed, 32).unwrap();
         let listed_index = find_category(YahooClassExchange::Listed, 33).unwrap();
+        let listed_bull = find_category(YahooClassExchange::Listed, 51).unwrap();
+        let listed_bear = find_category(YahooClassExchange::Listed, 52).unwrap();
         let otc_call = find_category(YahooClassExchange::OverTheCounter, 165).unwrap();
         let otc_put = find_category(YahooClassExchange::OverTheCounter, 166).unwrap();
         let otc_index = find_category(YahooClassExchange::OverTheCounter, 33).unwrap();
@@ -298,6 +301,8 @@ mod tests {
         assert!(!listed_call.collect_enabled);
         assert!(!listed_put.collect_enabled);
         assert!(!listed_index.collect_enabled);
+        assert!(!listed_bull.collect_enabled);
+        assert!(!listed_bear.collect_enabled);
         assert!(!otc_call.collect_enabled);
         assert!(!otc_put.collect_enabled);
         assert!(!otc_index.collect_enabled);

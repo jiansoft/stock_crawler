@@ -159,7 +159,58 @@ fn get_client() -> &'static Telegram {
     TELEGRAM.get_or_init(Telegram::new)
 }
 
+/// Telegram `sendMessage` 的文字長度上限（entities 解析後的字元數）。
+///
+/// 官方限制為 4096；這裡預留一點餘裕，避免邊界情況下的計數誤差。
+const MAX_MESSAGE_LEN: usize = 4000;
+
+/// 依行為單位切割訊息，確保每個分段都不超過 Telegram 的長度限制。
+///
+/// 以整行為切割單位，避免把 MarkdownV2 的連結或跳脫序列從中間截斷。
+/// 若單行本身就超過上限（極端情況），才退回逐字切割，避免無窮迴圈或直接送不出去。
+fn split_message_into_chunks(msg: &str, limit: usize) -> Vec<String> {
+    if msg.chars().count() <= limit {
+        return vec![msg.to_string()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+
+    for line in msg.split_inclusive('\n') {
+        if line.chars().count() > limit {
+            if !current.is_empty() {
+                chunks.push(std::mem::take(&mut current));
+            }
+            let mut slice = String::new();
+            for ch in line.chars() {
+                if slice.chars().count() >= limit {
+                    chunks.push(std::mem::take(&mut slice));
+                }
+                slice.push(ch);
+            }
+            if !slice.is_empty() {
+                chunks.push(slice);
+            }
+            continue;
+        }
+
+        if !current.is_empty() && current.chars().count() + line.chars().count() > limit {
+            chunks.push(std::mem::take(&mut current));
+        }
+        current.push_str(line);
+    }
+
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+
+    chunks
+}
+
 /// 異步發送 Telegram 消息
+///
+/// 若訊息長度超過 Telegram 的 4096 字元上限，會依行切割成多則訊息依序發送，
+/// 避免整則訊息因為過長而被 Bot API 以 400 Bad Request 拒絕。
 ///
 /// # Arguments
 ///
@@ -168,6 +219,14 @@ pub async fn send(msg: &str) {
     if msg.trim().is_empty() {
         return;
     }
+
+    for chunk in split_message_into_chunks(msg, MAX_MESSAGE_LEN) {
+        send_single(&chunk).await;
+    }
+}
+
+/// 發送單一則（已確保長度合法的）Telegram 消息。
+async fn send_single(msg: &str) {
     let client = get_client();
     match client.send(msg).await {
         Ok(rep) => {
@@ -234,6 +293,51 @@ mod tests {
 
         tracing::debug!("結束 test_send_message");
         time::sleep(Duration::from_secs(1)).await;
+    }
+
+    /// 驗證訊息未超過上限時不會被切割。
+    #[test]
+    fn test_split_message_into_chunks_keeps_short_message_intact() {
+        let msg = "line1\nline2\nline3\n";
+        let chunks = split_message_into_chunks(msg, 4000);
+        assert_eq!(chunks, vec![msg.to_string()]);
+    }
+
+    /// 驗證超過上限的訊息會依整行切割成多段，且每段都不超過上限。
+    #[test]
+    fn test_split_message_into_chunks_splits_by_line_when_too_long() {
+        let line = "x".repeat(30);
+        let msg = std::iter::repeat_n(line.clone(), 10)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let limit = 100;
+
+        let chunks = split_message_into_chunks(&msg, limit);
+
+        assert!(chunks.len() > 1);
+        for chunk in &chunks {
+            assert!(chunk.chars().count() <= limit);
+        }
+        // 每一行內容都完整保留在切割後的某個分段中，沒有被腰斬。
+        assert_eq!(
+            chunks.iter().flat_map(|c| c.lines()).count(),
+            msg.lines().count()
+        );
+    }
+
+    /// 驗證單一行本身就超過上限的極端情況，會退回逐字切割而不是卡死或整段丟棄。
+    #[test]
+    fn test_split_message_into_chunks_falls_back_to_char_split_for_oversized_line() {
+        let msg = "a".repeat(250);
+        let limit = 100;
+
+        let chunks = split_message_into_chunks(&msg, limit);
+
+        assert_eq!(chunks.len(), 3);
+        for chunk in &chunks {
+            assert!(chunk.chars().count() <= limit);
+        }
+        assert_eq!(chunks.iter().map(|c| c.chars().count()).sum::<usize>(), 250);
     }
 
     /// 驗證 MarkdownV2 跳脫規則。
