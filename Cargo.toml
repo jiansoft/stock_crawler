@@ -78,6 +78,8 @@ mimalloc = "0.1"
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
+# test-util 提供 tokio::time 虛擬時鐘（start_paused），讓逾時類測試不需真實等待。
+tokio = { version = "1.52", features = ["test-util"] }
 
 # 關於基準測試 (Benchmark)
 # 這裡定義了專案中的基準/效能測試目標。每個 [[bench]] 都會在 `benches/` 目錄下尋找同名的 `.rs` 檔案。
