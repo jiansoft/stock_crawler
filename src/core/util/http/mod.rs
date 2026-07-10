@@ -356,7 +356,7 @@ async fn send_with_client(
     loop {
         let rb_clone = rb
             .try_clone()
-            .ok_or_else(|| anyhow!("Failed to clone RequestBuilder for {url}"))?;
+            .ok_or_else(|| anyhow!("Failed to clone RequestBuilder for {}", redact_url(url)))?;
 
         let (res, elapsed_ms) = {
             let _permit = SEMAPHORE.acquire().await;
@@ -368,9 +368,10 @@ async fn send_with_client(
         match res {
             Ok(response) => {
                 let status = response.status();
+                let safe_url = redact_url(url);
 
                 tracing::info!(
-                    url = url,
+                    url = %safe_url,
                     method = method.as_str(),
                     status = status.as_u16(),
                     elapsed_ms,
@@ -385,7 +386,7 @@ async fn send_with_client(
                     if rate_limit_attempt <= MAX_RATE_LIMIT_RETRIES {
                         let delay = rate_limit_backoff(rate_limit_attempt);
                         tracing::warn!(
-                            url = url,
+                            url = %safe_url,
                             attempt = rate_limit_attempt,
                             delay_ms = delay.as_millis() as u64,
                             "http.rate_limited"
@@ -394,7 +395,8 @@ async fn send_with_client(
                         continue;
                     }
                     return Err(anyhow!(
-                        "Rate limited (429) at {url} after {rate_limit_attempt} retries"
+                        "Rate limited (429) at {} after {rate_limit_attempt} retries",
+                        safe_url
                     ));
                 }
 
@@ -415,8 +417,9 @@ async fn send_with_client(
             Err(why) => {
                 network_attempt += 1;
                 let err_str = format!("{why:?}");
+                let safe_url = redact_url(url);
                 tracing::error!(
-                    url = url,
+                    url = %safe_url,
                     attempt = network_attempt,
                     error = %err_str,
                     elapsed_ms,
@@ -425,8 +428,9 @@ async fn send_with_client(
 
                 if network_attempt >= MAX_NETWORK_RETRIES {
                     return Err(anyhow!(
-                        "Failed to send {url} after {network_attempt} network retries; \
-                         last error: {err_str}"
+                        "Failed to send {} after {network_attempt} network retries; \
+                         last error: {err_str}",
+                        safe_url
                     ));
                 }
 
@@ -434,6 +438,35 @@ async fn send_with_client(
                 tokio::time::sleep(Duration::from_secs(2u64.pow(network_attempt))).await;
             }
         }
+    }
+}
+
+/// 去除 URL 中的敏感資訊（例如 Telegram Bot Token）以避免洩露在日誌中。
+///
+/// 此函式會檢查 URL 中是否包含 `/bot{token}/` 格式，如果包含，
+/// 則會將該 token 部分替換為 `<redacted>`。
+///
+/// # 參數
+/// * `url` - 原始 URL 字串。
+///
+/// # 回傳值
+/// 返回脫敏後的 URL 字串。
+pub fn redact_url(url: &str) -> String {
+    // 尋找 URL 中是否包含 Telegram Bot Token 的關鍵路徑特徵 "/bot"
+    if let Some(bot_pos) = url.find("/bot") {
+        let after_bot = &url[bot_pos + 4..];
+        // 尋找 token 後方的第一個 "/" 分隔符號
+        if let Some(slash_pos) = after_bot.find('/') {
+            let rest = &after_bot[slash_pos..];
+            // 重組 URL，將敏感 Token 替換為 <redacted> 遮罩
+            format!("{}<redacted>{}", &url[..bot_pos + 4], rest)
+        } else {
+            // 若 token 後方沒有其他路徑，直接在 "/bot" 後方加上遮罩
+            format!("{}<redacted>", &url[..bot_pos + 4])
+        }
+    } else {
+        // 若不包含 "/bot"，則不進行任何脫敏處理，直接返回原 URL
+        url.to_string()
     }
 }
 
@@ -545,5 +578,20 @@ mod tests {
         let params = HashMap::new();
         let result = format_form_params_log(&params);
         assert_eq!(result, "params=[]");
+    }
+
+    #[test]
+    fn test_redact_url() {
+        let normal_url = "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json";
+        assert_eq!(redact_url(normal_url), normal_url);
+
+        let tg_url_with_path =
+            "https://api.telegram.org/bot123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ/sendMessage";
+        let expected_path = "https://api.telegram.org/bot<redacted>/sendMessage";
+        assert_eq!(redact_url(tg_url_with_path), expected_path);
+
+        let tg_url_no_path = "https://api.telegram.org/bot123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ";
+        let expected_no_path = "https://api.telegram.org/bot<redacted>";
+        assert_eq!(redact_url(tg_url_no_path), expected_no_path);
     }
 }

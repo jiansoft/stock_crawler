@@ -6,6 +6,10 @@ authors = ["Eddie <eddiea.chen@gmail.com>"]
 license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lints.rust]
+linker_messages = "allow"
+
+
 [dependencies]
 #rocket = "0.5.0-rc.3"
 anyhow = "1.0"
