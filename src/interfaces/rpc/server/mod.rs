@@ -4,8 +4,11 @@
 //!
 //! ## 生命週期速覽
 //!
-//! `start` 建立一個 Tonic 背景 task，並把 [`GrpcServerHandle`] 交給 `main`。收到 watch 關機
-//! 訊號後，`serve_with_shutdown` 停止接受新 RPC，等待既有 RPC 返回，`main` 再 await handle。
+//! `start` 會在「回傳之前」完成兩件容易失敗的事：載入 TLS 憑證、bind 監聽位址。
+//! 任一失敗都直接回傳 `Err`，讓 `main` 在啟動階段就中止並告警，而不是等背景
+//! task 默默死掉、程式卻宣稱啟動成功。成功後才 spawn Tonic accept loop，並把
+//! [`GrpcServerHandle`] 交給 `main`。收到 watch 關機訊號後，Tonic 停止接受新 RPC，
+//! 等待既有 RPC 返回，`main` 再 await handle。
 //! `grpc_use_port == 0` 時回傳 `None`，代表設定上刻意停用，不是啟動失敗。
 
 use std::{
@@ -14,7 +17,8 @@ use std::{
 };
 
 use anyhow::Result;
-use tokio::{sync::watch, task::JoinHandle};
+use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
+use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use crate::{
@@ -48,49 +52,74 @@ pub type GrpcServerHandle = JoinHandle<Result<()>>;
 /// 啟動 gRPC 伺服器。
 ///
 /// 根據設定檔中的埠號啟動伺服器。如果埠號為 0，則不啟動。
-/// 伺服器會在背景任務中執行，並在收到 shutdown watch 訊號後停止接受新連線。
+///
+/// 啟動採「先驗證、後背景執行」兩階段：
+///
+/// 1. 在這個函式內（也就是還在 `main` 的呼叫路徑上）完成 TLS 憑證載入與
+///    `TcpListener::bind`。這兩步是啟動期最常見的失敗點（憑證檔不存在、
+///    格式錯誤、port 被其他程式占用），放在 spawn 之前才能把錯誤直接
+///    回傳給 `main`，由 `main` 決定告警並中止啟動。
+/// 2. 都成功後才 spawn Tonic 的 accept loop；此後的錯誤屬於「運行期」問題，
+///    由 `main` 保存的 [`GrpcServerHandle`] 在關機時收割檢查。
+///
+/// 伺服器會在收到 shutdown watch 訊號後停止接受新連線。
 ///
 /// # Errors
 ///
-/// 如果解析地址失敗或啟動過程中發生錯誤，將會回傳錯誤。
+/// 解析地址失敗、TLS 憑證載入失敗或監聽位址 bind 失敗時回傳錯誤。
 pub async fn start(shutdown: watch::Receiver<bool>) -> Result<Option<GrpcServerHandle>> {
     if SETTINGS.system.grpc_use_port == 0 {
         return Ok(None);
     }
 
-    let addr = format!("0.0.0.0:{}", SETTINGS.system.grpc_use_port).parse()?;
+    let addr: SocketAddr = format!("0.0.0.0:{}", SETTINGS.system.grpc_use_port).parse()?;
 
     tracing::info!("啟動 gRPC({:?}) 服務", addr);
 
-    // 不採 fire-and-forget：保存 JoinHandle 讓 main 在關機時等待 Tonic 完成既有 RPC。
-    Ok(Some(tokio::spawn(async move {
-        run_grpc_server(addr, shutdown).await
-    })))
-}
-
-/// 運行 gRPC 伺服器實例。
-///
-/// 負責建立伺服器 Builder、套用 TLS 設定並註冊服務。
-///
-/// `shutdown` 是 watch receiver 的獨立 clone；它只讀取狀態，不會互相消耗訊號，
-/// 因此 Web 與 gRPC 能同時看到同一次關機通知。
-async fn run_grpc_server(addr: SocketAddr, shutdown: watch::Receiver<bool>) -> Result<()> {
-    tracing::info!("準備建立 gRPC 伺服器並監聽 {:?}", addr);
-    let builder = Server::builder();
+    // 步驟 1a：先建立 Server builder 並套用 TLS。讀憑證檔案發生在這裡，
+    // 檔案不存在或內容無效會立即回傳 Err，不會進入背景 task。
     let config = get_tls_config();
-
     if config.is_some() {
         tracing::info!("gRPC 伺服器將使用 TLS 設定啟動");
     } else {
         tracing::info!("gRPC 伺服器將使用非加密模式 (Insecure) 啟動");
     }
-
-    let mut server = match config {
+    let builder = Server::builder();
+    let server = match config {
         Some(config) => configure_tls(builder, config)?,
         None => builder,
     };
 
+    // 步驟 1b：在 spawn 前完成 bind。port 被占用、權限不足等錯誤此刻就會浮現，
+    // 讓「start() 回傳 Ok」真正等同於「伺服器已在監聽」。
+    let listener = TcpListener::bind(addr).await?;
+
+    // 步驟 2：不採 fire-and-forget——保存 JoinHandle 交回 main，
+    // 關機時 main 才能等待 Tonic 排空既有 RPC 並檢查結束原因。
+    Ok(Some(tokio::spawn(run_grpc_server(
+        server, listener, addr, shutdown,
+    ))))
+}
+
+/// 運行 gRPC 伺服器 accept loop。
+///
+/// 呼叫端（[`start`]）已完成 TLS 設定與位址 bind，這裡只負責註冊服務並開始服務。
+/// 用 `serve_with_incoming_shutdown` 接手「已 bind 好的 listener」，
+/// 而不是用 `serve_with_shutdown` 讓 Tonic 在背景才 bind——
+/// 這正是「bind 失敗仍回報啟動成功」問題的修正關鍵。
+///
+/// `shutdown` 是 watch receiver 的獨立 clone；它只讀取狀態，不會互相消耗訊號，
+/// 因此 Web 與 gRPC 能同時看到同一次關機通知。
+async fn run_grpc_server(
+    mut server: Server,
+    listener: TcpListener,
+    addr: SocketAddr,
+    shutdown: watch::Receiver<bool>,
+) -> Result<()> {
     tracing::info!("gRPC 伺服器正在 {:?} 開始服務...", addr);
+    // TcpListenerStream 把 listener 包成 Stream 讓 Tonic 逐一 accept；
+    // 若上面有設定 TLS，Tonic 會在每條連線建立時自動做 TLS handshake。
+    let incoming = TcpListenerStream::new(listener);
     let result = server
         // 使用更新後的 Server 包裝型別（名稱含 Service 後綴）
         .add_service(ControlServiceServer::new(ControlServiceImpl::default()))
@@ -98,7 +127,7 @@ async fn run_grpc_server(addr: SocketAddr, shutdown: watch::Receiver<bool>) -> R
             ManualBackfillServiceImpl::default(),
         ))
         .add_service(StockServiceServer::new(StockServiceImpl::default()))
-        .serve_with_shutdown(addr, crate::core::shutdown::wait_for_shutdown(shutdown))
+        .serve_with_incoming_shutdown(incoming, crate::core::shutdown::wait_for_shutdown(shutdown))
         .await;
 
     match &result {
@@ -206,8 +235,9 @@ mod tests {
         tracing::debug!("開始 rpc::server::test_start()");
 
         // app.json 設定了 TLS 憑證路徑，但 CI 等環境不會有實際的憑證檔
-        // （fullchain.pem/privkey.pem 屬於機密，不進版控）。缺檔時 Tonic 會在
-        // 啟動瞬間失敗，那是環境問題而非本測試要驗證的行為，因此先檢查並跳過。
+        // （fullchain.pem/privkey.pem 屬於機密，不進版控）。缺檔時 start() 會在
+        // 載入 TLS 階段直接回傳 Err——那是環境問題而非本測試要驗證的行為，
+        // 因此先檢查並跳過。
         if let Some((cert_file, key_file)) = get_tls_config()
             && (!std::path::Path::new(&cert_file).exists()
                 || !std::path::Path::new(&key_file).exists())
