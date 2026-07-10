@@ -151,7 +151,12 @@ pub async fn visit(stock_symbol: &str) -> Result<Profile> {
         && let Some(quarter_match) = REG_QUARTER.find(&year_and_quarter_text)
     {
         profile.quarter = quarter_match.as_str().to_uppercase();
-        if let Ok(year) = year_and_quarter_text[0..4].parse::<i32>() {
+        // 用 .get(0..4) 取代 [0..4]：外部頁面文字可能以中文開頭（每字 3 bytes），
+        // byte 4 落在字元中間時，[0..4] 會 panic，而 .get 只會回傳 None。
+        // 取不到合法年份時保持 profile.year 為 0，交由下方防禦性檢查判斷。
+        if let Some(year_str) = year_and_quarter_text.get(0..4)
+            && let Ok(year) = year_str.parse::<i32>()
+        {
             profile.year = year;
         }
     }

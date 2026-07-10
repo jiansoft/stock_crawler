@@ -187,7 +187,11 @@ fn parse_eps_quarter(stock_symbol: String, eps_quarter: &EpsDataQuarter) -> Opti
 }
 
 fn parse_year_and_quarter(input: &str) -> Result<(i32, u32)> {
-    if input.len() != 6 {
+    // 先驗證「長度為 6 且全部是 ASCII 數字」再切片。
+    // [..4] 這種 byte index 切片要求索引落在 UTF-8 字元邊界上，外部 API 若
+    // 回傳中文等多位元組字元（len() 仍可能等於 6），切在字元中間會直接 panic。
+    // 全 ASCII 數字保證每個字元恰好 1 byte，之後的固定位置切片就絕對安全。
+    if input.len() != 6 || !input.bytes().all(|b| b.is_ascii_digit()) {
         return Err(anyhow!("input:{} is InvalidDigit", input));
     }
 
@@ -200,6 +204,31 @@ fn parse_year_and_quarter(input: &str) -> Result<(i32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 驗證年季字串正常解析。
+    #[test]
+    fn test_parse_year_and_quarter_parses_valid_input() {
+        assert_eq!(parse_year_and_quarter("202301").unwrap(), (2023, 1));
+        assert_eq!(parse_year_and_quarter("202504").unwrap(), (2025, 4));
+    }
+
+    /// 驗證含多位元組字元的輸入回傳錯誤而不是 panic。
+    ///
+    /// 「台台」恰好是 6 bytes，舊版只檢查 len() == 6 就做 `[..4]` 切片，
+    /// byte 4 落在第二個字的中間會直接 panic。
+    #[test]
+    fn test_parse_year_and_quarter_rejects_multibyte_input() {
+        assert!(parse_year_and_quarter("台台").is_err()); // 6 bytes，切 ..4 會跨字元
+        assert!(parse_year_and_quarter("２０２３01").is_err()); // 全形數字
+    }
+
+    /// 驗證長度不符或含非數字的輸入回傳錯誤。
+    #[test]
+    fn test_parse_year_and_quarter_rejects_invalid_input() {
+        assert!(parse_year_and_quarter("").is_err());
+        assert!(parse_year_and_quarter("2023Q1").is_err()); // 含英文字母
+        assert!(parse_year_and_quarter("20231").is_err()); // 只有 5 碼
+    }
 
     #[tokio::test]
     async fn test_visit() {

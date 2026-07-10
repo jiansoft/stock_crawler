@@ -76,11 +76,10 @@ impl StockInfo for PcHome {
         // 取得主要資訊容器
         let root = document.select(&ROOT_SELECTOR).next().ok_or_else(|| {
             let body = document.html();
-            let snippet = if body.len() > 500 {
-                &body[0..500]
-            } else {
-                &body
-            };
+            // 錯誤訊息只需要頁面開頭片段。用 text::truncate 依「字元」截斷，
+            // 而不是 &body[0..500] 這種 byte index 切片——PCHome 頁面含中文
+            //（每字 3 bytes），byte 500 若落在字元中間會直接 panic。
+            let snippet = text::truncate(&body, 500);
             anyhow!(
                 "在 {} 找不到股票 {} 的資訊容器 (#stock_info_data_a)。HTML 內容：\n{}",
                 url,
