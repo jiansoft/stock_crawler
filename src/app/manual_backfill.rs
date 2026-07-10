@@ -44,8 +44,8 @@ const MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE: &str = "2887";
 /// 手動回補指定交易日的各股每日收盤報價。
 ///
 /// 此測試等同把原本的 `backfill::quote::tests::test_execute` 集中到手動回補檔。
-/// 它會先刪除指定交易日既有的 `DailyQuotes`，再重新呼叫 TWSE 與 TPEx 來源抓取
-/// 上市櫃各股開高低收、成交量與本益比等欄位，最後批次寫回資料庫並更新快取。
+/// 它會重新呼叫 TWSE 與 TPEx 來源抓取上市櫃各股開高低收、成交量與本益比等欄位，
+/// 抓取成功後才在單一 transaction 內刪除同日舊資料並批次寫回資料庫、更新快取。
 ///
 /// 執行範例：
 /// `cargo test app::manual_backfill::test_backfill_daily_quotes_for_date -- --ignored --nocapture`
@@ -60,15 +60,9 @@ async fn test_backfill_daily_quotes_for_date() {
 
     tracing::debug!("開始 app::manual_backfill::test_backfill_daily_quotes_for_date date={date}");
 
-    // quote::execute 使用 COPY 寫入 DailyQuotes；先清掉同日資料可避免唯一索引衝突，
-    // 也讓這個手動回補確實以外部來源的最新內容重建當日各股收盤報價。
-    use crate::domain::quote::repository::QuoteRepository;
-    let quote_repo = crate::infra::database::repository::quote::PgQuoteRepository::new();
-    quote_repo
-        .delete_quotes_by_date(date)
-        .await
-        .expect("delete existing manual daily quotes failed");
-
+    // quote::execute 內部採「先抓取、後原子替換」：同日舊資料的刪除與新資料的
+    // COPY 寫入綁在同一個 transaction，抓取或寫入失敗都不會留下資料缺口，
+    // 因此這裡不需要先手動刪除當日資料。
     let quote_count = quote::execute(date)
         .await
         .expect("manual daily quote backfill failed");

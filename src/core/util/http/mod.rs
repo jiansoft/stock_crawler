@@ -444,7 +444,7 @@ async fn send_with_client(
     }
 }
 
-/// 【保母級說明：關於 URL 敏感資訊過濾】
+/// 關於 URL 敏感資訊過濾
 ///
 /// 去除 URL 中的敏感資訊（例如 Telegram Bot Token）以避免洩露在日誌中。
 ///

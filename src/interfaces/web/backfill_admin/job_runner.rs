@@ -16,20 +16,18 @@ use super::state::{BACKFILL_STATE, BackfillJob, BackfillJobStatus, BackfillWebSt
 
 /// 建立各股每日收盤報價背景 job。
 ///
-/// Job 會先刪除指定交易日既有的 `DailyQuotes`，再呼叫 TWSE 與 TPEx 來源重抓
-/// 上市櫃各股每日開高低收、成交量與本益比等資料。
+/// Job 會呼叫 TWSE 與 TPEx 來源重抓上市櫃各股每日開高低收、成交量與本益比等
+/// 資料，抓取成功後才在單一資料庫 transaction 內刪除同日舊資料並寫入新資料。
 pub(crate) async fn start_daily_quotes_job(date: NaiveDate) -> BackfillJob {
     start_job(
         BACKFILL_STATE.clone(),
         "daily_quotes",
         date.to_string(),
         move || async move {
-            // quote::execute 使用 COPY 寫入 DailyQuotes；先清掉同日資料可避免唯一索引衝突，
-            // 也讓手動回補確實以外部來源的最新內容重建當日各股收盤報價。
-            use crate::domain::quote::repository::QuoteRepository;
-            let quote_repo = crate::infra::database::repository::quote::PgQuoteRepository::new();
-            quote_repo.delete_quotes_by_date(date).await?;
-
+            // quote::execute 內部採「先抓取、後原子替換」：抓取失敗時完全不動資料庫；
+            // 寫入階段的「刪除舊資料 + COPY 新資料」綁在同一個 transaction，
+            // 任一步失敗都會 rollback。因此這裡不需要（也不可以）先手動刪除
+            // 當日資料——那正是舊版「刪除後抓取失敗，行情永久遺失」的缺陷來源。
             let quote_count = quote::execute(date).await?;
             Ok(format!(
                 "daily quotes backfill completed: quote_count={quote_count}"

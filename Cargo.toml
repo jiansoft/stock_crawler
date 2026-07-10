@@ -7,7 +7,7 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lints.rust]
-# 【保母級說明：關於連結器警告過濾】
+# 關於連結器警告過濾
 # Rust 1.97.0 新版編譯器預設會將底層連結器（Linker）的警告輸出至終端機（受 linker_messages 控制）。
 # 在 Windows 環境下使用 MSVC 連結器進行 release 優化編譯時，會因為傳遞舊版參數而輸出無害的：
 #   "warning: linker stderr: ignoring deprecated linker optimization setting '1'"
@@ -79,7 +79,7 @@ mimalloc = "0.1"
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
 
-# 【保母級說明：關於基準測試 (Benchmark)】
+# 關於基準測試 (Benchmark)
 # 這裡定義了專案中的基準/效能測試目標。每個 [[bench]] 都會在 `benches/` 目錄下尋找同名的 `.rs` 檔案。
 # 設定 `harness = false` 是為了禁用 Rust 標準庫預設的測試框架，轉而使用更精準的第三方效能測試工具 `criterion`（宣告於 [dev-dependencies]）。
 # 執行所有基準測試指令為：`cargo bench`

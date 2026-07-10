@@ -21,7 +21,19 @@ pub trait QuoteRepository: Send + Sync {
     async fn fetch_quotes_by_date(&self, date: NaiveDate) -> Result<Vec<DailyQuote>>;
 
     /// 刪除指定交易日的所有每日報價。
+    ///
+    /// 注意：這是「單獨」的刪除操作。若目的是用新資料重建整日報價，
+    /// 請改用 [`Self::replace_quotes_by_date`]，避免刪除後寫入失敗而留下資料缺口。
     async fn delete_quotes_by_date(&self, date: NaiveDate) -> Result<()>;
+
+    /// 以「原子替換」的方式重建指定交易日的所有每日報價。
+    ///
+    /// 實作必須把「刪除既有同日資料」與「寫入新資料」放在同一個資料庫
+    /// transaction 內執行：兩步全部成功才 commit；任一步失敗（包含程序中途
+    /// 被關閉）則整批 rollback，原有資料完整保留，不會出現資料缺口。
+    ///
+    /// 回傳實際寫入的資料筆數。
+    async fn replace_quotes_by_date(&self, date: NaiveDate, quotes: &[DailyQuote]) -> Result<u64>;
 
     /// 依指定日期與股票，查詢並回填該股票的均線與年內高低點統計。
     async fn fill_moving_average(&self, quote: &mut DailyQuote) -> Result<()>;
