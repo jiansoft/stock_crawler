@@ -21,21 +21,12 @@ use std::ffi::c_char;
 // ── 標準函式庫引用 ───────────────────────────────────────────────────────────
 use std::{
     error::Error,
-    sync::{
-        Arc,
-        // AtomicBool 是無鎖布林旗標，適合跨執行緒安全地讀寫「是否收到結束訊號」。
-        // Arc（Atomic Reference Counted）讓多個執行緒共享同一個值的所有權；
-        // 每次 clone() 只遞增引用計數，不複製資料本身，因此代價極低。
-        atomic::{AtomicBool, Ordering},
-    },
     // Instant 是單調遞增時鐘，精確到奈秒，用於效能量測。
     // 與 SystemTime 的差別：不受使用者調整系統時間影響，適合計算程式執行時間。
     time::Instant,
 };
 
 // ── Tokio 非同步訊號引用 ──────────────────────────────────────────────────────
-// tokio::signal 是 Tokio 提供的跨平台非同步訊號處理模組。
-use tokio::signal;
 // Unix 平台上的細粒度訊號（SIGINT = Ctrl+C、SIGTERM = 系統/容器關閉）。
 // Windows 上沒有 POSIX 訊號機制，因此用 cfg(unix) 限制，避免編譯錯誤。
 // `unix_signal` 重命名以避免與模組名稱 `signal` 衝突。
@@ -130,16 +121,15 @@ unsafe extern "C" {
 // 兩個測試執行檔、對同一組 CI 服務容器重跑兩遍。
 use stock_crawler::{app, core, infra, interfaces};
 
-/// 在 Unix 平台監聽 `SIGINT`（Ctrl+C）與 `SIGTERM`（Docker/systemd 關閉訊號），
-/// 並以原子寫入通知主迴圈結束。
+/// 在 Unix 平台等待 `SIGINT`（Ctrl+C）或 `SIGTERM`（Docker/systemd 關閉訊號）。
 ///
 /// `tokio::select!` 同時 await 兩個訊號流，哪個先到就哪個分支觸發退出；
 /// 另一個分支對應的 future 會被自動取消（drop），不造成資源洩漏。
 ///
-/// 若 Unix 訊號建立失敗（極罕見，通常是 fd 耗盡），向上回傳錯誤，
-/// 由 main 中的 spawn 端以 eprintln 記錄（不中止程式，因為 Ctrl+C handler 仍在運作）。
+/// 若 Unix 訊號建立失敗（極罕見，通常是 fd 耗盡），向上回傳錯誤並中止服務，
+/// 避免程序在無法接收關機訊號的狀態下繼續運作。
 #[cfg(unix)]
-async fn unix_signal_handler(received_signal: Arc<AtomicBool>) -> Result<(), Box<dyn Error>> {
+async fn shutdown_signal() -> Result<(), Box<dyn Error>> {
     let mut sigint = unix_signal(SignalKind::interrupt())?;
     let mut sigterm = unix_signal(SignalKind::terminate())?;
 
@@ -148,22 +138,44 @@ async fn unix_signal_handler(received_signal: Arc<AtomicBool>) -> Result<(), Box
         _ = sigterm.recv() => {}
     }
 
-    // Ordering::SeqCst（Sequentially Consistent）確保此寫入對所有執行緒立即可見，
-    // 且不允許處理器或編譯器對此操作前後的指令進行重排序（最嚴格、最安全的記憶體序）。
-    received_signal.store(true, Ordering::SeqCst);
-
     Ok(())
 }
 
-/// 監聽跨平台 `Ctrl+C` 訊號（Windows 使用此路徑；Unix 上與 SIGINT handler 並行運作）。
+/// 在非 Unix 平台等待 `Ctrl+C` 關機訊號。
 ///
-/// 這個 handler 是保險層：確保就算 `unix_signal_handler` 沒能啟動（例如非 Unix 系統），
-/// Ctrl+C 仍能讓程式優雅退出並正確設定旗標，不讓主程式懸掛。
-async fn shutdown_signal_handler(received_signal: Arc<AtomicBool>) {
-    if let Err(e) = signal::ctrl_c().await {
-        eprintln!("Failed to listen for Ctrl+C signal: {}", e);
+/// Windows 沒有 POSIX SIGTERM，因此使用 Tokio 提供的跨平台 Ctrl+C future。
+#[cfg(not(unix))]
+async fn shutdown_signal() -> Result<(), Box<dyn Error>> {
+    tokio::signal::ctrl_c().await?;
+    Ok(())
+}
+
+/// 等待單一 server task 完成平順關機，逾時時才強制取消該 accept loop。
+///
+/// Server 內部已先收到 shutdown 訊號並停止接受新連線；此 timeout 只用來避免
+/// 異常或永不結束的連線讓整個程序永久卡在關機階段。
+async fn wait_for_server_shutdown(
+    server_name: &str,
+    mut handle: tokio::task::JoinHandle<anyhow::Result<()>>,
+    timeout: tokio::time::Duration,
+) {
+    match tokio::time::timeout(timeout, &mut handle).await {
+        Ok(Ok(Ok(()))) => tracing::info!(server = server_name, "server graceful shutdown done"),
+        Ok(Ok(Err(why))) => {
+            tracing::error!(server = server_name, error = %why, "server stopped with error")
+        }
+        Ok(Err(why)) => {
+            tracing::error!(server = server_name, error = %why, "server task join failed")
+        }
+        Err(_) => {
+            tracing::warn!(
+                server = server_name,
+                "server graceful shutdown timed out; aborting task"
+            );
+            handle.abort();
+            let _ = handle.await;
+        }
     }
-    received_signal.store(true, Ordering::SeqCst);
 }
 
 /// 啟動 `stock_crawler` 主流程。
@@ -228,12 +240,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )
     .await;
 
-    // ── 4. 啟動計時器 & 結束訊號旗標 ────────────────────────────────────────
+    // ── 4. 啟動計時器與 server 關機廣播 ─────────────────────────────────────
     // `startup_timer` 讓後面的各啟動階段都能記錄 elapsed 時間，方便找效能瓶頸。
     let startup_timer = Instant::now();
-    // `received_signal` 是主迴圈的退出條件，初始值 false（尚未收到結束訊號）。
-    // 所有訊號 handler 共享同一個 Arc，任一 handler 設為 true 即觸發退出。
-    let received_signal = Arc::new(AtomicBool::new(false));
+    // watch channel 會在收到 OS 訊號後通知 HTTP/gRPC 停止接受新連線。
+    // receiver 可廉價 clone，兩個 server 都能觀察同一個單向關機狀態。
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     // ── 5. 分配器調校（長執行程序模式）─────────────────────────────────────
     // 對 glibc malloc（透過 `mallopt` syscall）設定較積極的 arena 數量與 trim 閾值，
@@ -257,27 +269,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
     }
 
-    // ── 6. 訊號監聽 task 啟動 ───────────────────────────────────────────────
-    // 兩個 handler 各自作為獨立的 Tokio task 在背景執行，不阻塞主執行流。
-    // `tokio::spawn` 回傳 JoinHandle，此處刻意忽略—這些 task 的生命週期與程式相同，
-    // 程式結束時 Tokio runtime drop 會自動取消所有未完成的 task。
-    //
-    // Ctrl+C handler：跨平台（Windows / Linux / macOS 均有效）。
-    tokio::spawn(shutdown_signal_handler(received_signal.clone()));
-
-    // Unix 專用 SIGTERM handler：`docker stop` 或 `systemctl stop` 會發送 SIGTERM。
-    // 使用 `Arc::clone` 共享旗標所有權；內層 async block 用 move 把 clone 移入 task。
-    #[cfg(unix)]
-    tokio::spawn({
-        let received_signal = Arc::clone(&received_signal);
-        async move {
-            if let Err(e) = unix_signal_handler(received_signal).await {
-                eprintln!("Error handling unix signals: {}", e);
-            }
-        }
-    });
-
-    // ── 7. 資料庫連線檢查（Fail Fast）───────────────────────────────────────
+    // ── 6. 資料庫連線檢查（Fail Fast）───────────────────────────────────────
     // 在載入快取與啟動背景服務之前，先確認 PostgreSQL 可用。
     // 若資料庫不通，後續所有依賴 DB 的初始化都會失敗；
     // 提早報錯讓 Docker / systemd 立刻知道需要重啟或告警，比掛在後面更好追查。
@@ -315,7 +307,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // `?` 操作子：若建立失敗（極罕見，通常是 Tokio runtime 問題）直接向上回傳錯誤。
     tracing::info!("startup phase begin: JobScheduler::new");
     let scheduler_new_timer = Instant::now();
-    let sched = JobScheduler::new().await?;
+    let mut sched = JobScheduler::new().await?;
     tracing::info!(
         "startup phase done: JobScheduler::new elapsed={:?}",
         scheduler_new_timer.elapsed()
@@ -342,12 +334,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 啟動失敗（如埠號被佔用、憑證路徑錯誤）時發送 Telegram 告警並中止主程式。
     tracing::info!("startup phase begin: rpc::server::start");
     let rpc_start_timer = Instant::now();
-    if let Err(why) = interfaces::rpc::server::start().await {
-        let err_msg = format!("gRPC server failed to start: {:?}", why);
-        tracing::error!("{}", &err_msg);
-        interfaces::bot::telegram::send_alert("gRPC 伺服器啟動失敗", &err_msg).await;
-        return Err(why.into());
-    }
+    let rpc_server = match interfaces::rpc::server::start(shutdown_rx.clone()).await {
+        Ok(handle) => handle,
+        Err(why) => {
+            let err_msg = format!("gRPC server failed to start: {:?}", why);
+            tracing::error!("{}", &err_msg);
+            interfaces::bot::telegram::send_alert("gRPC 伺服器啟動失敗", &err_msg).await;
+            return Err(why.into());
+        }
+    };
     tracing::info!(
         "startup phase done: rpc::server::start elapsed={:?}",
         rpc_start_timer.elapsed()
@@ -359,12 +354,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 與 gRPC 一樣，啟動失敗時發送 Telegram 告警並中止主程式，確保不靜默失敗。
     tracing::info!("startup phase begin: web::start");
     let web_start_timer = Instant::now();
-    if let Err(why) = interfaces::web::start().await {
-        let err_msg = format!("Web server failed to start: {:?}", why);
-        tracing::error!("{}", &err_msg);
-        interfaces::bot::telegram::send_alert("Web 伺服器啟動失敗", &err_msg).await;
-        return Err(why.into());
-    }
+    let web_server = match interfaces::web::start(shutdown_rx.clone()).await {
+        Ok(handle) => handle,
+        Err(why) => {
+            let err_msg = format!("Web server failed to start: {:?}", why);
+            tracing::error!("{}", &err_msg);
+            interfaces::bot::telegram::send_alert("Web 伺服器啟動失敗", &err_msg).await;
+            return Err(why.into());
+        }
+    };
     tracing::info!(
         "startup phase done: web::start elapsed={:?}",
         web_start_timer.elapsed()
@@ -380,7 +378,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 使用 `tokio::spawn` 非阻塞地執行，不延誤主程式繼續往下走。
     // 測試失敗時僅發 Telegram 告警，不中止主程式（gRPC 非核心爬蟲功能）。
     // 注意：TLS 憑證過期（Let's Encrypt 90 天）會讓此測試失敗，請留意到期日。
-    tokio::spawn(async move {
+    let grpc_self_test = tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         if let Err(why) = interfaces::rpc::client::test_client::run_test().await {
             let err_msg = format!("gRPC 自我測試失敗: {:?}", why);
@@ -407,20 +405,48 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // ── 15. 主等待迴圈 ───────────────────────────────────────────────────────
-    // 主執行緒在此輪詢旗標，直到收到 SIGINT / SIGTERM / Ctrl+C。
-    // 各背景 task（排程器、gRPC 伺服器、Axum Web server）繼續在 Tokio runtime 中運行。
-    // 每次 sleep 100ms：足夠快速回應訊號（≤ 100ms 延遲），又不浪費 CPU 空轉。
-    // 若未來需要更低延遲的關機回應，可改為 `tokio::sync::Notify` 通知模式（零延遲喚醒）。
-    while !received_signal.load(Ordering::SeqCst) {
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // ── 15. 等待 OS 關機訊號 ─────────────────────────────────────────────────
+    // 直接 await 訊號 future，不再以 AtomicBool 每 100ms 輪詢，收到訊號後立即進入關機流程。
+    shutdown_signal().await?;
+    tracing::info!("graceful shutdown begin");
+
+    // 第一時間通知 server 停止接受新連線；既有 HTTP/gRPC request 仍會繼續執行到完成。
+    let _ = shutdown_tx.send(true);
+
+    // 先停止 cron ticker，避免關機等待期間又觸發新的資料更新工作。
+    if let Err(why) = sched.shutdown().await {
+        tracing::error!(error = %why, "scheduler shutdown failed");
     }
 
-    // 訊號已收到，main 即將返回。
-    // Tokio runtime 在 main 返回時被 drop，進而取消所有尚未完成的 task。
-    // 若需要 graceful shutdown（等待 in-flight DB 寫入、HTTP 請求完成），
-    // 可在此處 await 相關 JoinHandle 或使用 CancellationToken 通知各服務關閉。
-    println!("Server stopped: {:?}", received_signal);
+    // 自我測試不是必要的資料操作；若關機時仍未完成，主動取消以免延長服務停止時間。
+    if !grpc_self_test.is_finished() {
+        grpc_self_test.abort();
+    }
+    let _ = grpc_self_test.await;
+
+    // HTTP/gRPC 各自排空既有 request；異常連線最多允許等待 30 秒。
+    let server_shutdown_timeout = tokio::time::Duration::from_secs(30);
+    if let Some(rpc_server) = rpc_server {
+        wait_for_server_shutdown("grpc", rpc_server, server_shutdown_timeout).await;
+    }
+    wait_for_server_shutdown("web", web_server, server_shutdown_timeout).await;
+
+    // Server 已停止接收與處理 request，scheduler 也不會再派發工作，因此不會再建立
+    // 新的 cron/manual backfill。先等待既有操作，避免提早停止它們仍可能依賴的價格服務。
+    let background_timeout = tokio::time::Duration::from_secs(5 * 60);
+    let operations = &core::shutdown::BACKGROUND_OPERATIONS;
+    if !operations.wait_for_idle(background_timeout).await {
+        tracing::warn!(
+            active_operations = operations.active_count(),
+            "graceful shutdown timed out while waiting for background operations"
+        );
+    }
+
+    // 資料操作完成後再停止盤中長生命週期 task，並喚醒正在等待下一輪週期的 task。
+    app::event::trace::price_tasks::stop_price_tasks().await;
+
+    tracing::info!("graceful shutdown done");
+    println!("Server stopped gracefully");
 
     Ok(())
 }

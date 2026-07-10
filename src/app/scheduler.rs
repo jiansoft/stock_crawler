@@ -155,6 +155,8 @@ where
     Ok(Job::new_async_tz(cron_expr, tz, move |_uuid, _l| {
         let task = task.clone();
         Box::pin(async move {
+            // 排程一旦觸發就登記為 active，主程式關機時會等待此 use case 離開。
+            let _operation_guard = crate::core::shutdown::BACKGROUND_OPERATIONS.begin();
             tracing::info!(task = cron_expr, "task.begin");
             let t = Instant::now();
             match task().await {

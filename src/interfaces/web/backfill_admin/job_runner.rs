@@ -173,7 +173,11 @@ where
 
     // 背景執行實際回補工作，HTTP/gRPC 呼叫端只負責後續輪詢。
     let jobs = Arc::clone(&state.jobs);
+    // 在 spawn 前登記，避免關機流程於 task 尚未真正開始執行時誤判為 idle。
+    let operation_guard = crate::core::shutdown::BACKGROUND_OPERATIONS.begin();
     tokio::spawn(async move {
+        // guard 涵蓋整個回補 future；成功、錯誤或 panic 離開時都會自動結案。
+        let _operation_guard = operation_guard;
         tracing::info!(
             "manual backfill job started: id={}, kind={}, input={}",
             task_job.id,

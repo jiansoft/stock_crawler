@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::Result;
+use tokio::{sync::watch, task::JoinHandle};
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use crate::{
@@ -32,37 +33,36 @@ pub mod manual_backfill_service;
 /// Stock 服務實作模組。
 pub mod stock_service;
 
+/// 可由主程式平順停止的 gRPC server 背景 task。
+pub type GrpcServerHandle = JoinHandle<Result<()>>;
+
 /// 啟動 gRPC 伺服器。
 ///
 /// 根據設定檔中的埠號啟動伺服器。如果埠號為 0，則不啟動。
-/// 伺服器會在背景任務中執行，不會阻塞當前執行緒。
+/// 伺服器會在背景任務中執行，並在收到 shutdown watch 訊號後停止接受新連線。
 ///
 /// # Errors
 ///
 /// 如果解析地址失敗或啟動過程中發生錯誤，將會回傳錯誤。
-pub async fn start() -> Result<()> {
+pub async fn start(shutdown: watch::Receiver<bool>) -> Result<Option<GrpcServerHandle>> {
     if SETTINGS.system.grpc_use_port == 0 {
-        return Ok(());
+        return Ok(None);
     }
 
     let addr = format!("0.0.0.0:{}", SETTINGS.system.grpc_use_port).parse()?;
 
-    // 使用 tokio::spawn 啟動一個新的異步任務
-    tokio::spawn(async move {
-        if let Err(why) = run_grpc_server(addr).await {
-            tracing::error!("gRPC伺服器錯誤: {}", why);
-        }
-    });
-
     tracing::info!("啟動 gRPC({:?}) 服務", addr);
 
-    Ok(())
+    // 保存 JoinHandle 讓 main 在關機時等待 tonic 完成既有 RPC。
+    Ok(Some(tokio::spawn(async move {
+        run_grpc_server(addr, shutdown).await
+    })))
 }
 
 /// 運行 gRPC 伺服器實例。
 ///
 /// 負責建立伺服器 Builder、套用 TLS 設定並註冊服務。
-async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
+async fn run_grpc_server(addr: SocketAddr, shutdown: watch::Receiver<bool>) -> Result<()> {
     tracing::info!("準備建立 gRPC 伺服器並監聽 {:?}", addr);
     let builder = Server::builder();
     let config = get_tls_config();
@@ -86,7 +86,7 @@ async fn run_grpc_server(addr: SocketAddr) -> Result<()> {
             ManualBackfillServiceImpl::default(),
         ))
         .add_service(StockServiceServer::new(StockServiceImpl::default()))
-        .serve(addr)
+        .serve_with_shutdown(addr, crate::core::shutdown::wait_for_shutdown(shutdown))
         .await;
 
     match &result {
@@ -193,8 +193,17 @@ mod tests {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 rpc::server::test_start()");
 
-        tokio::spawn(start());
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        if let Some(handle) = start(shutdown_rx).await.expect("gRPC server should start") {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            shutdown_tx
+                .send(true)
+                .expect("gRPC shutdown receiver should exist");
+            handle
+                .await
+                .expect("gRPC server task should join")
+                .expect("gRPC server should stop cleanly");
+        }
 
         tracing::debug!("結束 rpc::server::test_start()");
     }
