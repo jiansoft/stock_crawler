@@ -76,7 +76,7 @@ LIMIT 30;
             .map_err(|why| {
                 anyhow!(
                     "Failed to Index::fetch() from database\nsql:{}\n {:?}",
-                    &sql,
+                    sql,
                     why
                 )
             })

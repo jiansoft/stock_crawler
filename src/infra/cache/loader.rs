@@ -344,10 +344,13 @@ mod tests {
         assert_eq!(before.closing_price, dec!(500));
 
         let new_date = NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
-        let mut dq = DailyQuote::default();
-        dq.stock_symbol = "2330".to_string();
-        dq.closing_price = dec!(620);
-        dq.date = new_date;
+        // 初始化 DailyQuote 並覆寫部分預設欄位
+        let dq = DailyQuote {
+            stock_symbol: "2330".to_string(),
+            closing_price: dec!(620),
+            date: new_date,
+            ..DailyQuote::default()
+        };
 
         share.set_stock_last_price(&dq).await;
 
@@ -432,14 +435,13 @@ mod tests {
             tracing::info!("name {}  category {}", k, v);
         }
 
-        match SHARE.quote_history_records.write() {
-            Ok(mut guard) => {
-                if let Some(qhr) = guard.get_mut("2330") {
-                    qhr.minimum_price = Decimal::from(1);
-                    qhr.maximum_price = Decimal::from(2);
-                }
+        // 由於 guard 的 mutable 借用生命週期限制，此處無法直接合併 nested if let
+        #[allow(clippy::collapsible_if)]
+        if let Ok(mut guard) = SHARE.quote_history_records.write() {
+            if let Some(qhr) = guard.get_mut("2330") {
+                qhr.minimum_price = Decimal::from(1);
+                qhr.maximum_price = Decimal::from(2);
             }
-            Err(_) => {}
         }
 
         for (k, v) in SHARE.quote_history_records.read().unwrap().iter() {

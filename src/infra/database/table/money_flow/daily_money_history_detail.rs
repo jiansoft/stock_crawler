@@ -70,7 +70,7 @@ impl DailyMoneyHistoryDetail {
 
         result.context(format!(
             "Failed to delete({}) daily_money_history_detail from database",
-            &date
+            date
         ))
     }
 

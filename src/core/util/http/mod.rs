@@ -265,7 +265,7 @@ where
     //println!("Response body: {}", res_body);
 
     serde_json::from_str(&res_body)
-        .map_err(|e| anyhow!("Error parsing response JSON({}): {:?}", &res_body, e))
+        .map_err(|e| anyhow!("Error parsing response JSON({}): {:?}", res_body, e))
 }
 
 /// Performs an HTTP POST request with form data and specified headers, and returns the response as text.

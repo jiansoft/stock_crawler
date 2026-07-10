@@ -202,7 +202,7 @@ ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
 
         result.context(format!(
             "Failed to daily_stock_price_stats::upsert({}) from database",
-            &date
+            date
         ))
     }
 }

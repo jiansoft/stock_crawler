@@ -63,7 +63,7 @@ impl DailyMoneyHistoryDetailMore {
 
         result.context(format!(
             "Failed to delete({}) daily_money_history_detail_more from database",
-            &date
+            date
         ))
     }
 
@@ -140,7 +140,7 @@ ORDER BY security_code, member_id, transaction_date;
 
         result.context(format!(
             "Failed to daily_money_history_detail_more::upsert({}) from database",
-            &date
+            date
         ))
     }
 }

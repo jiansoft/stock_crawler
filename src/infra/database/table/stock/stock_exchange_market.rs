@@ -74,11 +74,11 @@ mod tests {
 
         match StockExchangeMarket::fetch().await {
             Ok(markets) => {
-                println!("markets:{:#?}", &markets);
+                println!("markets:{:#?}", markets);
                 tracing::debug!("markets:{:#?}", markets);
             }
             Err(why) => {
-                println!("error:{:#?}", &why);
+                println!("error:{:#?}", why);
                 tracing::debug!("{:?}", why);
             }
         }

@@ -51,11 +51,11 @@ pub struct FinancialStatement {
 
 impl Keyable for FinancialStatement {
     fn key(&self) -> String {
-        format!("{}-{}-{}", &self.security_code, self.year, self.quarter)
+        format!("{}-{}-{}", self.security_code, self.year, self.quarter)
     }
 
     fn key_with_prefix(&self) -> String {
-        format!("FinancialStatement:{}", &self.key())
+        format!("FinancialStatement:{}", self.key())
     }
 }
 
@@ -150,7 +150,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
                 anyhow!(
                     "Failed to upsert({:#?}) from database\nsql:{}\n {:?}",
                     self,
-                    &sql,
+                    sql,
                     why
                 )
             })
@@ -256,7 +256,7 @@ DO UPDATE SET
                 anyhow!(
                     "Failed to upsert_earnings_per_share({:#?}) from database\nsql:{}\n {:?}",
                     self,
-                    &sql,
+                    sql,
                     why
                 )
             })
@@ -288,7 +288,7 @@ ON CONFLICT (security_code,"year",quarter) DO NOTHING;
                 anyhow!(
                     "Failed to upsert_annual_eps({:#?}) from database\nsql:{}\n {:?}",
                     self,
-                    &sql,
+                    sql,
                     why
                 )
             })
@@ -320,7 +320,7 @@ WHERE
                 anyhow!(
                     "Failed to update_roe_roa({:#?}) from database\nsql:{}\n {:?}",
                     self,
-                    &sql,
+                    sql,
                     why
                 )
             })

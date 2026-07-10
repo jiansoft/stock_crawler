@@ -56,7 +56,7 @@ pub async fn execute() -> Result<()> {
                 "{stock_symbol} {stock_name} 起迄日︰{start}~{end} 承銷價︰{offering_price} 參考價︰{last_price} {price_change}發行市場:{market}",
                 market = stock.market.clone(),
                 stock_symbol = stock.stock_symbol,
-                stock_name = &stock.stock_name,
+                stock_name = stock.stock_name,
                 start = start,
                 end = end,
                 offering_price = offering_price,
