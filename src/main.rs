@@ -406,14 +406,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // ── 15. 等待 OS 關機訊號 ─────────────────────────────────────────────────
-    // 直接 await 訊號 future，不再以 AtomicBool 每 100ms 輪詢，收到訊號後立即進入關機流程。
+    //
+    // 新進開發者可把下方關機程式理解成五道閘門：
+    //
+    //   1. Server 閘門：先拒絕新 request，避免關機期間工作持續增加。
+    //   2. Scheduler 閘門：停止 cron ticker，避免又啟動新的每日更新。
+    //   3. Request 閘門：等待已進入 HTTP/gRPC handler 的 request 返回。
+    //   4. 資料閘門：等待 handler/cron 已建立的 backfill 與 DB 寫入完成。
+    //   5. 常駐 task 閘門：最後停止只負責盤中輪詢、可以安全重建的價格 task。
+    //
+    // 這個順序很重要：如果先停掉底層價格 task，再等待上層 request，正在處理的 request
+    // 可能突然失去相依服務；如果先等背景工作但仍接受新 request，active count 又永遠可能增加。
+    // 直接 await 訊號 future，不再以 AtomicBool 每 100ms 輪詢，收到訊號後立即進入流程。
     shutdown_signal().await?;
     tracing::info!("graceful shutdown begin");
 
-    // 第一時間通知 server 停止接受新連線；既有 HTTP/gRPC request 仍會繼續執行到完成。
+    // 第 1 道閘門：watch 的值從 false 改成 true。
+    // Axum/Tonic 收到後停止 accept 新連線；已經進入 handler 的 request 不會被硬切斷。
     let _ = shutdown_tx.send(true);
 
-    // 先停止 cron ticker，避免關機等待期間又觸發新的資料更新工作。
+    // 第 2 道閘門：只停止「未來的排程觸發」。已開始的 cron future 不會被 scheduler
+    // 強制 abort，而是由下方 BACKGROUND_OPERATIONS 負責等待，避免資料只寫一半。
     if let Err(why) = sched.shutdown().await {
         tracing::error!(error = %why, "scheduler shutdown failed");
     }
@@ -424,15 +437,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     let _ = grpc_self_test.await;
 
-    // HTTP/gRPC 各自排空既有 request；異常連線最多允許等待 30 秒。
+    // 第 3 道閘門：HTTP/gRPC 各自排空既有 request。
+    // 30 秒是 server 連線層的上限；它與下方資料工作五分鐘 timeout 是不同層級。
     let server_shutdown_timeout = tokio::time::Duration::from_secs(30);
     if let Some(rpc_server) = rpc_server {
         wait_for_server_shutdown("grpc", rpc_server, server_shutdown_timeout).await;
     }
     wait_for_server_shutdown("web", web_server, server_shutdown_timeout).await;
 
-    // Server 已停止接收與處理 request，scheduler 也不會再派發工作，因此不會再建立
-    // 新的 cron/manual backfill。先等待既有操作，避免提早停止它們仍可能依賴的價格服務。
+    // 第 4 道閘門：Server 已停止處理 request，scheduler 也不會再派發工作，因此 active
+    // operation 只會減少、不會持續增加。先等待既有操作，避免提早停止其相依的價格服務。
+    // 五分鐘到期後只記錄警告並繼續關機，避免單一故障 upstream 讓部署永遠無法停止。
     let background_timeout = tokio::time::Duration::from_secs(5 * 60);
     let operations = &core::shutdown::BACKGROUND_OPERATIONS;
     if !operations.wait_for_idle(background_timeout).await {
@@ -442,7 +457,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
     }
 
-    // 資料操作完成後再停止盤中長生命週期 task，並喚醒正在等待下一輪週期的 task。
+    // 第 5 道閘門：資料操作完成後才停止盤中長生命週期 task。
+    // stop_price_tasks 會喚醒正在 sleep/ticker 的 task，無須等待下一個 5 分鐘週期自然到期。
     app::event::trace::price_tasks::stop_price_tasks().await;
 
     tracing::info!("graceful shutdown done");

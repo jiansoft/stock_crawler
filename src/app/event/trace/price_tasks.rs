@@ -160,6 +160,10 @@ pub async fn wait_for_price_cache_ready() {
 /// - 追蹤條件快取刷新任務
 /// - 低頻 reconciliation 任務
 /// - crawler 層的全市場即時報價背景任務
+///
+/// 對新進開發者的重要差異：這些是「常駐輪詢 task」，不等同於 cron/backfill 資料操作。
+/// 它們以旗標控制迴圈，並以 [`TRACE_TASK_STOP_NOTIFY`] 喚醒長時間 sleep；資料操作則由
+/// `core::shutdown::BACKGROUND_OPERATIONS` 等待。兩套機制各自處理不同的生命週期問題。
 pub async fn stop_price_tasks() {
     stop_traced_stock_backup_caching_task();
     stop_trace_target_refresh_task();
@@ -206,6 +210,9 @@ async fn wait_for_trace_tasks_to_stop() {
 }
 
 /// 等待指定週期或關機喚醒通知，讓長週期 task 可以快速回應停止要求。
+///
+/// 若只使用 `sleep(5 minutes)`，即使停止旗標已設為 false，task 仍要五分鐘後才有機會
+/// 再檢查旗標。`tokio::select!` 讓「時間到」與「收到停止通知」任一先發生都能立即前進。
 async fn wait_for_interval_or_stop(duration: Duration) {
     tokio::select! {
         _ = time::sleep(duration) => {}

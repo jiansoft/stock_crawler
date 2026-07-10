@@ -155,7 +155,9 @@ where
     Ok(Job::new_async_tz(cron_expr, tz, move |_uuid, _l| {
         let task = task.clone();
         Box::pin(async move {
-            // 排程一旦觸發就登記為 active，主程式關機時會等待此 use case 離開。
+            // 排程一旦「真正開始執行」才登記為 active，主程式關機時會等待此 use case 離開。
+            // guard 必須放在 async block 內，不能放在 create_job 階段；後者只是在啟動時
+            // 註冊排程，若那時就 +1，counter 會在整個服務生命週期永遠無法歸零。
             let _operation_guard = crate::core::shutdown::BACKGROUND_OPERATIONS.begin();
             tracing::info!(task = cron_expr, "task.begin");
             let t = Instant::now();

@@ -2,6 +2,12 @@
 //!
 //! 這個模組負責啟動 HTTP 入口，並把各功能模組的 router 掛到同一個
 //! Axum application 上。目前主要提供手動回補頁面與 API。
+//!
+//! ## 生命週期速覽
+//!
+//! `start` 只負責「準備並啟動」，真正的 accept loop 在背景 task。不同於 fire-and-forget，
+//! 背景 task 的 [`WebServerHandle`] 會交回 `main` 保存。關機時 `main` 先透過 watch channel
+//! 送出 `true`，Axum 停止收新 request 並排空既有 request，最後 `main` await handle。
 
 use std::net::SocketAddr;
 
@@ -17,6 +23,9 @@ const MANUAL_BACKFILL_WEB_ADDR: &str = "MANUAL_BACKFILL_WEB_ADDR";
 const DEFAULT_MANUAL_BACKFILL_WEB_ADDR: &str = "127.0.0.1:9002";
 
 /// 可由主程式平順停止的 Web server 背景 task。
+///
+/// `JoinHandle` 的外層錯誤代表 task panic/被取消，內層 `Result` 則代表 Axum serve 錯誤；
+/// 保留兩層可讓 `main` 在 log 中清楚區分「task 壞掉」與「server 回傳錯誤」。
 pub type WebServerHandle = JoinHandle<Result<()>>;
 
 /// 在背景 task 啟動手動回補 Web server。
@@ -37,11 +46,16 @@ pub async fn start(shutdown: watch::Receiver<bool>) -> Result<WebServerHandle> {
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("manual backfill web server listening on http://{}", addr);
 
-    // 將 JoinHandle 交回 main，關機時才能確認 server 已完成連線排空。
+    // 不在此處丟棄 JoinHandle。交回 main 後，程序才知道 server 何時真的停止，
+    // 不會發生 main 已退出、runtime 把尚在處理 request 的 server 直接砍掉。
     Ok(tokio::spawn(run_server(listener, app, shutdown)))
 }
 
 /// 執行 Axum accept loop，並在收到關機訊號後排空既有 HTTP request。
+///
+/// `with_graceful_shutdown` 的語意不是立刻取消所有 handler；它會停止接受新連線，並等待
+/// 已進入服務的 request 完成。Manual backfill handler 會另外把長工作交給 operation tracker，
+/// 因此 handler 回應 job id 後，主程式仍知道後方真正的資料工作尚未結束。
 async fn run_server(
     listener: TcpListener,
     app: axum::Router,

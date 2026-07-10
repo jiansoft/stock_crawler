@@ -173,10 +173,13 @@ where
 
     // 背景執行實際回補工作，HTTP/gRPC 呼叫端只負責後續輪詢。
     let jobs = Arc::clone(&state.jobs);
-    // 在 spawn 前登記，避免關機流程於 task 尚未真正開始執行時誤判為 idle。
+    // 在 spawn 前就登記，而不是進入 async block 後才登記。
+    // 原因是 tokio::spawn 只把 future 放進排程佇列，不保證立刻 poll；若 OS 訊號恰好在
+    // 兩者之間抵達，main 可能看到 active=0 而提早退出。先取得 guard 可關閉這個競態窗口。
     let operation_guard = crate::core::shutdown::BACKGROUND_OPERATIONS.begin();
     tokio::spawn(async move {
-        // guard 涵蓋整個回補 future；成功、錯誤或 panic 離開時都會自動結案。
+        // 把 guard move 進 task 並綁在整個 scope。以下 run().await 不論成功、錯誤、
+        // 提早 return 或 panic unwind，Rust 都會 drop guard，關機 counter 不會永久卡住。
         let _operation_guard = operation_guard;
         tracing::info!(
             "manual backfill job started: id={}, kind={}, input={}",

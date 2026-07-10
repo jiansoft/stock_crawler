@@ -1,6 +1,12 @@
 //! gRPC 伺服器模組。
 //!
 //! 負責 gRPC 伺服器的啟動、設定、TLS 憑證管理以及服務註冊。
+//!
+//! ## 生命週期速覽
+//!
+//! `start` 建立一個 Tonic 背景 task，並把 [`GrpcServerHandle`] 交給 `main`。收到 watch 關機
+//! 訊號後，`serve_with_shutdown` 停止接受新 RPC，等待既有 RPC 返回，`main` 再 await handle。
+//! `grpc_use_port == 0` 時回傳 `None`，代表設定上刻意停用，不是啟動失敗。
 
 use std::{
     io::{BufReader, Cursor},
@@ -34,6 +40,9 @@ pub mod manual_backfill_service;
 pub mod stock_service;
 
 /// 可由主程式平順停止的 gRPC server 背景 task。
+///
+/// 與 Web server 相同，外層 `JoinHandle` 表示 task 生命週期，內層 `Result` 表示 Tonic
+/// server 本身的結果；兩層都必須由 `main` 檢查。
 pub type GrpcServerHandle = JoinHandle<Result<()>>;
 
 /// 啟動 gRPC 伺服器。
@@ -53,7 +62,7 @@ pub async fn start(shutdown: watch::Receiver<bool>) -> Result<Option<GrpcServerH
 
     tracing::info!("啟動 gRPC({:?}) 服務", addr);
 
-    // 保存 JoinHandle 讓 main 在關機時等待 tonic 完成既有 RPC。
+    // 不採 fire-and-forget：保存 JoinHandle 讓 main 在關機時等待 Tonic 完成既有 RPC。
     Ok(Some(tokio::spawn(async move {
         run_grpc_server(addr, shutdown).await
     })))
@@ -62,6 +71,9 @@ pub async fn start(shutdown: watch::Receiver<bool>) -> Result<Option<GrpcServerH
 /// 運行 gRPC 伺服器實例。
 ///
 /// 負責建立伺服器 Builder、套用 TLS 設定並註冊服務。
+///
+/// `shutdown` 是 watch receiver 的獨立 clone；它只讀取狀態，不會互相消耗訊號，
+/// 因此 Web 與 gRPC 能同時看到同一次關機通知。
 async fn run_grpc_server(addr: SocketAddr, shutdown: watch::Receiver<bool>) -> Result<()> {
     tracing::info!("準備建立 gRPC 伺服器並監聽 {:?}", addr);
     let builder = Server::builder();
