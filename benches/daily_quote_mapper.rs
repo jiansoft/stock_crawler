@@ -22,9 +22,13 @@ fn bench_acl_chain(c: &mut Criterion) {
         .map(|(i, f)| (f.as_str(), i))
         .collect();
     let date = NaiveDate::from_ymd_opt(2026, 6, 25).unwrap();
+    // from_with_map 已改為 Result（typed 解析錯誤）；fixture 是真實 TWSE 資料，
+    // 理應全數可解析，失敗代表 fixture 或解析器壞掉。
     let dtos: Vec<DailyQuoteDto> = rows
         .iter()
-        .map(|row| DailyQuoteDto::from_with_map(row, &field_map, date))
+        .map(|row| {
+            DailyQuoteDto::from_with_map(row, &field_map, date).expect("fixture row should parse")
+        })
         .collect();
 
     c.bench_function("acl_chain_100rows", |b| {

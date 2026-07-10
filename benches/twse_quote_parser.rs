@@ -31,7 +31,12 @@ fn bench_dto_map(c: &mut Criterion) {
     c.bench_function("twse_dto_map_100rows", |b| {
         b.iter(|| {
             rows.iter()
-                .map(|row| DailyQuoteDto::from_with_map(black_box(row), &field_map, date))
+                .map(|row| {
+                    // from_with_map 已改為 Result（typed 解析錯誤）；fixture 是真實
+                    // TWSE 資料，理應全數可解析，失敗代表 fixture 或解析器壞掉。
+                    DailyQuoteDto::from_with_map(black_box(row), &field_map, date)
+                        .expect("fixture row should parse")
+                })
                 .collect::<Vec<_>>()
         })
     });
