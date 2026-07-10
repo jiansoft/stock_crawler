@@ -354,6 +354,8 @@ async fn send_with_client(
     let mut rate_limit_attempt = 0u32;
 
     loop {
+        // 複製 RequestBuilder 以供重試使用。
+        // 如果複製失敗（例如 RequestBuilder 中包含串流），則將 URL 脫敏後回傳錯誤，避免洩漏 Token。
         let rb_clone = rb
             .try_clone()
             .ok_or_else(|| anyhow!("Failed to clone RequestBuilder for {}", redact_url(url)))?;
@@ -368,6 +370,7 @@ async fn send_with_client(
         match res {
             Ok(response) => {
                 let status = response.status();
+                // 成功回應，先將敏感的 URL 進行脫敏遮罩處理（例如隱藏 Telegram Token），然後再記錄日誌。
                 let safe_url = redact_url(url);
 
                 tracing::info!(
@@ -441,31 +444,44 @@ async fn send_with_client(
     }
 }
 
+/// 【保母級說明：關於 URL 敏感資訊過濾】
+///
 /// 去除 URL 中的敏感資訊（例如 Telegram Bot Token）以避免洩露在日誌中。
 ///
-/// 此函式會檢查 URL 中是否包含 `/bot{token}/` 格式，如果包含，
-/// 則會將該 token 部分替換為 `<redacted>`。
+/// ### 背景原因：
+/// Telegram API URL 的路徑結構為 `https://api.telegram.org/bot<TOKEN>/sendMessage`。
+/// 如果直接輸出原始 URL，任何能讀取日誌（Stdout、檔案、或外部 Seq 日誌分析工具）的人，
+/// 都能輕易獲取此 Token，進而控制機器人發送惡意訊息。
+///
+/// ### 實作原理（安全且無 Regex 效能開銷）：
+/// 1. 尋找 URL 中是否包含 Telegram 的 `/bot` 字眼。
+/// 2. 若有，則利用 ASCII 的 `/bot` 長度為 4 字節特性進行切片取得 Token 開始位置，這可確保不會發生非 ASCII 字元切片導致 Rust 崩潰（panic）的問題。
+/// 3. 在 Token 開始位置後方尋找第一個 `/`（代表 Token 結束與下一個 API 方法開始）。
+/// 4. 將該 Token 部分替換成 `<redacted>` 遮罩後重組 URL。
+/// 5. 若找不到後續斜線，代表整個 URL 在 Token 處就結束了，直接附加 `<redacted>` 後返回。
 ///
 /// # 參數
-/// * `url` - 原始 URL 字串。
+/// * `url` - 原始的 URL 字串。
 ///
 /// # 回傳值
-/// 返回脫敏後的 URL 字串。
+/// 返回脫敏（隱藏 Token）後的安全 URL 字串。
 pub fn redact_url(url: &str) -> String {
     // 尋找 URL 中是否包含 Telegram Bot Token 的關鍵路徑特徵 "/bot"
     if let Some(bot_pos) = url.find("/bot") {
+        // 由於 "/bot" 是 ASCII 字元，長度固定為 4 byte，因此 bot_pos + 4 絕對是合法的 UTF-8 邊界
         let after_bot = &url[bot_pos + 4..];
-        // 尋找 token 後方的第一個 "/" 分隔符號
+
+        // 尋找 token 後方的第一個 "/" 分隔符號（例如 /sendMessage）
         if let Some(slash_pos) = after_bot.find('/') {
             let rest = &after_bot[slash_pos..];
             // 重組 URL，將敏感 Token 替換為 <redacted> 遮罩
             format!("{}<redacted>{}", &url[..bot_pos + 4], rest)
         } else {
-            // 若 token 後方沒有其他路徑，直接在 "/bot" 後方加上遮罩
+            // 若 token 後方沒有其他路徑（例如 https://api.telegram.org/botTOKEN 結尾），直接在 "/bot" 後方加上遮罩
             format!("{}<redacted>", &url[..bot_pos + 4])
         }
     } else {
-        // 若不包含 "/bot"，則不進行任何脫敏處理，直接返回原 URL
+        // 若不包含 "/bot"，代表是不含敏感 Token 的一般爬蟲網址（例如證交所 API），不進行任何脫敏處理，直接返回原 URL 的複本。
         url.to_string()
     }
 }
