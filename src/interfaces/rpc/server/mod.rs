@@ -205,12 +205,27 @@ mod tests {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 rpc::server::test_start()");
 
+        // app.json 設定了 TLS 憑證路徑，但 CI 等環境不會有實際的憑證檔
+        // （fullchain.pem/privkey.pem 屬於機密，不進版控）。缺檔時 Tonic 會在
+        // 啟動瞬間失敗，那是環境問題而非本測試要驗證的行為，因此先檢查並跳過。
+        if let Some((cert_file, key_file)) = get_tls_config()
+            && (!std::path::Path::new(&cert_file).exists()
+                || !std::path::Path::new(&key_file).exists())
+        {
+            println!("跳過 test_start：TLS 憑證檔不存在（cert={cert_file}, key={key_file}）");
+            return;
+        }
+
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         if let Some(handle) = start(shutdown_rx).await.expect("gRPC server should start") {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            shutdown_tx
-                .send(true)
-                .expect("gRPC shutdown receiver should exist");
+            // send 失敗代表 receiver 已被 drop——也就是 server 沒等到關機訊號就
+            // 提前結束（例如 port 被占用、bind 失敗）。此時改為 await task 取出
+            // server 真正的錯誤原因回報，比只顯示 SendError 更容易定位問題。
+            if shutdown_tx.send(true).is_err() {
+                let result = handle.await.expect("gRPC server task should join");
+                panic!("gRPC server 未收到關機訊號就提前結束：{result:?}");
+            }
             handle
                 .await
                 .expect("gRPC server task should join")
