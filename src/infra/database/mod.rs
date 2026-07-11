@@ -138,15 +138,55 @@ impl PostgresSQL {
         // readiness 通知仍註冊在「已被 drop 的舊 runtime」的 IO driver 上，
         // 凡需等待新資料的 read 將永遠不被喚醒——實測會讓 `--test-threads=1`
         // 的完整測試套件間歇性卡死在單純的 SELECT（伺服器端查詢早已完成）。
-        // 因此測試中把 idle_timeout 壓到近乎 0：任何閒置過的連線在借出前
-        // 一律丟棄重建，確保連線永遠誕生於「目前測試」的 runtime；
-        // min_connections 歸零，避免 pool 試圖維持跨 runtime 的暖連線。
-        // 代價僅是每次查詢多一次區網 TCP 連線建立（毫秒級）。
+        //
+        // 修法演進（前兩版都實測過，記錄在此避免走回頭路）：
+        // 1. idle_timeout 壓 1ms：無效——sqlx 0.9 的 idle 逾時只由背景
+        //    maintenance task 執行，而該 task 跟著第一個 runtime 一起死了，
+        //    借出路徑根本不檢查 idle_timeout。CI 因此照樣卡死 6 小時。
+        // 2. after_release 回 Ok(false)（每次歸還即關閉）：正確但太慢——
+        //    連線完全不重用，每個查詢都要付 TCP+SCRAM 建線成本，
+        //    重查詢測試（rebuild_search_indices）讓整套從 283 秒暴增到 1471 秒。
+        //
+        // 現行修法：「runtime 世代哨兵」＋借出前年齡檢查。
+        // - 連線建立（after_connect）或閒置借出（before_acquire）時，
+        //   在當前 runtime 上種一個永不結束的哨兵 task；
+        //   runtime 關閉時哨兵被 drop，把「世代起點」重設為當下時刻。
+        // - before_acquire 比較連線年齡與世代起點：連線誕生於世代起點之前
+        //   ＝上一個 runtime 的殭屍連線 → 回 Err 讓 sqlx 走 close_hard。
+        //   close_hard 只做同步的 TCP shutdown（不做 Postgres 協議告別、
+        //   不等待任何 readiness），在殭屍 socket 上也不會卡住。
+        // - 同一 runtime 內的連線照常重用，速度與正式環境相同。
+        // 另外把 test_before_acquire 關掉：它預設會在借出前 ping，
+        // ping 需要「等待回應」——在殭屍 socket 上這正是卡死點本身。
+        // min_connections 歸零，避免（已死的）維護任務語意上還想補暖連線。
         #[cfg(test)]
         {
             pool_options = pool_options
                 .min_connections(0)
-                .idle_timeout(Some(Duration::from_millis(1)));
+                .test_before_acquire(false)
+                // 「建立新連線」不會經過 before_acquire，所以哨兵也要種在
+                // after_connect——否則某個測試若只用全新連線就結束，它的
+                // runtime 死亡時沒有哨兵可 drop、世代起點不會重設，
+                // 下一個測試會把那條「年輕的殭屍連線」誤判為本世代而重用。
+                .after_connect(|_conn, _meta| {
+                    Box::pin(async {
+                        test_pool_guard::ensure_runtime_sentinel();
+                        Ok(())
+                    })
+                })
+                .before_acquire(|_conn, meta| {
+                    Box::pin(async move {
+                        test_pool_guard::ensure_runtime_sentinel();
+                        if test_pool_guard::is_stale(meta.age) {
+                            // 用 Err（而非 Ok(false)）丟棄：sqlx 對 Err 走 close_hard，
+                            // 對 Ok(false) 走 graceful close——後者會在殭屍 socket 上等待。
+                            return Err(sqlx::Error::Io(std::io::Error::other(
+                                "測試連線池：丟棄上一個 tokio runtime 世代的閒置連線",
+                            )));
+                        }
+                        Ok(true)
+                    })
+                });
         }
 
         // connect_lazy_with 接受結構化選項且不會失敗（沒有 URL 可以解析錯）。
@@ -201,4 +241,82 @@ pub async fn get_tx() -> Result<Transaction<'static, Postgres>> {
 pub async fn ping() -> Result<()> {
     sqlx::query("SELECT 1").execute(get_connection()).await?;
     Ok(())
+}
+
+/// 測試專用：偵測 tokio runtime「世代」交替，讓連線池能辨識殭屍連線。
+///
+/// # 背景（為什麼需要這個模組）
+/// 測試組建的連線池是 process 級單例，但每個 `#[tokio::test]` 都有自己的
+/// tokio runtime。連線的 socket readiness 註冊在「建立它的 runtime」的
+/// IO driver 上；runtime 結束後這些通知永遠不會再送達，任何在這種
+/// 「殭屍連線」上等待回應的操作（查詢、ping、graceful close）都會卡死。
+///
+/// # 原理
+/// 我們無法從 sqlx 的 hook 直接得知「這條連線屬於哪個 runtime」
+/// （`PgConnection` 沒有暴露這種身分），但可以用時間軸推斷：
+/// 1. runtime 上第一次「建立新連線」（after_connect）或「借出閒置連線」
+///    （before_acquire）時，種下一個「哨兵 task」（永不結束）。
+///    兩個 hook 都要種：只靠 before_acquire 的話，「整個測試只用全新連線」
+///    的 runtime 死亡時就沒有哨兵可 drop，世代起點不會重設，
+///    它留下的年輕殭屍連線會被下一個測試誤判為本世代而重用（實測會卡死）。
+/// 2. runtime 關閉時 tokio 會 drop 所有未完成的 task——哨兵的 Drop
+///    把全域的「世代起點」重設為當下時刻。
+/// 3. 借出連線時比較「連線年齡」與「世代起點」：
+///    連線比世代起點更老＝誕生於上一個 runtime → 是殭屍，必須丟棄。
+///
+/// 測試以 `--test-threads=1` 循序執行，任一時刻只有一個 runtime 存在，
+/// 所以單一全域世代起點就足夠了。
+#[cfg(test)]
+mod test_pool_guard {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    use once_cell::sync::Lazy;
+
+    /// 目前 runtime 世代的起點時刻；哨兵被 drop（runtime 關閉）時重設。
+    static EPOCH_START: Lazy<Mutex<Instant>> = Lazy::new(|| Mutex::new(Instant::now()));
+    /// 目前世代是否已種下哨兵（每個 runtime 只需要一個）。
+    static SENTINEL_ALIVE: AtomicBool = AtomicBool::new(false);
+
+    /// 哨兵守衛：`Drop` 代表 runtime 正在關閉 → 開啟新世代。
+    struct SentinelGuard;
+
+    impl Drop for SentinelGuard {
+        fn drop(&mut self) {
+            if let Ok(mut epoch) = EPOCH_START.lock() {
+                *epoch = Instant::now();
+            }
+            SENTINEL_ALIVE.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// 確保目前 runtime 上有一個存活的哨兵 task。
+    ///
+    /// 以 `swap` 原子地占用種植權，避免同一 runtime 種出多個哨兵。
+    /// 哨兵本體是一個掛在 `pending()` 上的 task——它唯一的工作
+    /// 就是「在 runtime 關閉時被 drop」，讓 [`SentinelGuard`] 重設世代。
+    pub(super) fn ensure_runtime_sentinel() {
+        if !SENTINEL_ALIVE.swap(true, Ordering::SeqCst) {
+            tokio::spawn(async {
+                let _guard = SentinelGuard;
+                std::future::pending::<()>().await;
+            });
+        }
+    }
+
+    /// 判斷一條閒置連線是否誕生於上一個 runtime 世代。
+    ///
+    /// `age` 來自 sqlx 的 `PoolConnectionMetadata::age`（距離建線的時間）。
+    /// 若連線比目前世代起點更老，代表它是上一個 runtime 留下的殭屍連線。
+    pub(super) fn is_stale(age: Duration) -> bool {
+        let epoch_elapsed = EPOCH_START
+            .lock()
+            .map(|epoch| epoch.elapsed())
+            // lock 失敗（理論上不會發生）時當作「世代剛開始」，
+            // 讓所有閒置連線都被丟棄——寧可多重連，不可冒卡死風險。
+            .unwrap_or(Duration::ZERO);
+
+        age > epoch_elapsed
+    }
 }
