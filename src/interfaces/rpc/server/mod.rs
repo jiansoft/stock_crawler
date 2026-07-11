@@ -59,6 +59,7 @@ pub type GrpcServerHandle = JoinHandle<Result<()>>;
 ///    `TcpListener::bind`。這兩步是啟動期最常見的失敗點（憑證檔不存在、
 ///    格式錯誤、port 被其他程式占用），放在 spawn 之前才能把錯誤直接
 ///    回傳給 `main`，由 `main` 決定告警並中止啟動。
+///    **注意**：若設定了 TLS 但憑證檔案不存在，為了讓程式能順利啟動，將會跳過 gRPC 服務。
 /// 2. 都成功後才 spawn Tonic 的 accept loop；此後的錯誤屬於「運行期」問題，
 ///    由 `main` 保存的 [`GrpcServerHandle`] 在關機時收割檢查。
 ///
@@ -79,7 +80,16 @@ pub async fn start(shutdown: watch::Receiver<bool>) -> Result<Option<GrpcServerH
     // 步驟 1a：先建立 Server builder 並套用 TLS。讀憑證檔案發生在這裡，
     // 檔案不存在或內容無效會立即回傳 Err，不會進入背景 task。
     let config = get_tls_config();
-    if config.is_some() {
+    if let Some((ref cert_file, ref key_file)) = config {
+        // 在載入憑證前，先檢查實體檔案是否存在，若不存在則列印警告日誌並跳過 gRPC 服務啟動
+        if !std::path::Path::new(cert_file).exists() || !std::path::Path::new(key_file).exists() {
+            tracing::warn!(
+                "TLS 憑證或金鑰檔案不存在 (憑證: {}, 金鑰: {})，將跳過 gRPC 服務以確保程式能順利啟動",
+                cert_file,
+                key_file
+            );
+            return Ok(None);
+        }
         tracing::info!("gRPC 伺服器將使用 TLS 設定啟動");
     } else {
         tracing::info!("gRPC 伺服器將使用非加密模式 (Insecure) 啟動");
