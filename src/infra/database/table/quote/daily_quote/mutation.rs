@@ -13,6 +13,11 @@ use super::{COPY_IN_QUERY, DailyQuote};
 
 impl DailyQuote {
     /// 將當前報價寫入資料庫，若主鍵衝突則更新既有資料。
+    ///
+    /// 「upsert」= update + insert：SQL 中的 `ON CONFLICT ("stock_symbol", "Date")
+    /// DO UPDATE` 表示——若該股票在該交易日還沒有資料就 INSERT 新增一筆；
+    /// 若已存在（撞到唯一索引）則改用 UPDATE 以新值覆蓋價格相關欄位。
+    /// 適合單筆補寫；大量寫入請改用 [`Self::copy_in_raw`] 系列以求效能。
     pub async fn upsert(&self) -> Result<PgQueryResult> {
         let sql = r#"
        INSERT INTO "DailyQuotes" (
@@ -113,7 +118,15 @@ impl DailyQuote {
     }
 
     /// 依指定日期回填該股票的均線與年內高低點統計。
+    ///
+    /// 運作方式：SQL 中的 CTE（`WITH cte AS ...`，可想成一張暫時的查詢結果表）
+    /// 先取出該股票截至 `self.date` 往回最多 240 個交易日的行情，再由子查詢分別
+    /// 計算 5/10/20/60/120/240 日均線與年內最高、最低、平均價。
+    /// 樣本數不足時（例如新上市股票不滿 240 筆）該均線以 0 表示，
+    /// 計算結果直接回填到 `self` 的對應欄位。
     pub async fn fill_moving_average(&mut self) -> Result<()> {
+        // 往回抓 400 個「日曆日」作為查詢下限——扣除週末與假日後，
+        // 足以涵蓋 240 個「交易日」的樣本需求。
         let year_ago = self.date - TimeDelta::try_days(400).unwrap();
         let sql = r#"
 WITH
@@ -165,6 +178,11 @@ SELECT
     }
 
     /// 批次更新均線、年內統計與 PBR。
+    ///
+    /// 效能技巧：把每個欄位各自蒐集成一個 Vec，以陣列參數一次綁定給 SQL 的
+    /// `UNNEST`（把多個平行陣列展開成一張暫時資料表），再用單一 `UPDATE ... FROM`
+    /// 完成全部更新。這樣不論幾千筆都只需要一次資料庫往返，
+    /// 遠快於逐筆執行 UPDATE。
     pub async fn batch_update_moving_average(quotes: &[Self]) -> Result<PgQueryResult> {
         if quotes.is_empty() {
             return Err(anyhow!("Cannot batch update empty quotes"));
@@ -241,8 +259,22 @@ SELECT
     }
 
     /// 使用 `COPY` 批次寫入 `DailyQuotes`。
+    ///
+    /// 這個版本會自行從連線池取連線，屬於獨立的自動提交操作；
+    /// 若需要與其他 SQL（例如先刪除同日資料）綁在同一個 transaction 內，
+    /// 請改用 [`Self::copy_in_raw_on`]。
     pub async fn copy_in_raw(quotes: &[Self]) -> Result<u64> {
         database::copy_in_raw(COPY_IN_QUERY, quotes).await
+    }
+
+    /// 在「呼叫端指定的連線」上使用 `COPY` 批次寫入 `DailyQuotes`。
+    ///
+    /// 呼叫端把 transaction 的連線（`&mut *tx`）傳進來時，這批寫入就會
+    /// 跟同一個 transaction 內的其他 SQL 一起 commit 或 rollback。
+    /// 「日報價原子替換」（先刪後寫、同生共死）正是靠這個函式達成：
+    /// 中途任何一步失敗，資料庫都會回到 transaction 開始前的狀態。
+    pub async fn copy_in_raw_on(conn: &mut sqlx::PgConnection, quotes: &[Self]) -> Result<u64> {
+        database::copy_in_raw_on(conn, COPY_IN_QUERY, quotes).await
     }
 }
 
@@ -279,6 +311,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_upsert() {
         dotenvy::dotenv().ok();
         SHARE.load().await;

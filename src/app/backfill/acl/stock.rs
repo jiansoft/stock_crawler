@@ -62,15 +62,14 @@ impl DelistedCompanyAclMapper {
     /// 將下市公司原始 DTO 轉譯成 `DelistedCompanyCommand`。
     ///
     /// # 資料清洗與過濾
-    /// - 若下市日期格式無效（長度小於 3），回傳 `None`。
+    /// - 若下市日期格式無效（長度不足、開頭不是可解析的民國年），回傳 `None`。
     /// - 過濾掉民國 110 年之前的下市資料，以縮小回補與更新範圍。
     pub fn from_suspend_listing(dto: &SuspendListing) -> Option<DelistedCompanyCommand> {
-        if dto.delisting_date.len() < 3 {
-            return None;
-        }
-
-        // 擷取民國年前 3 碼並解析為整數
-        let year = dto.delisting_date[..3].parse::<i32>().ok()?;
+        // 擷取民國年前 3 碼並解析為整數。
+        // 用 .get(..3) 取代 [..3]：外部資料可能混入多位元組字元（如中文），
+        // byte 3 落在字元中間時，[..3] 會 panic，而 .get 只會回傳 None；
+        // 長度不足 3 bytes 時 .get 也會回傳 None，因此不需另做長度檢查。
+        let year = dto.delisting_date.get(..3)?.parse::<i32>().ok()?;
         if year < 110 {
             return None;
         }
@@ -152,6 +151,29 @@ mod tests {
         let cmd = DelistedCompanyAclMapper::from_suspend_listing(&dto);
         assert!(cmd.is_some());
         assert_eq!(cmd.unwrap().symbol, "9999");
+    }
+
+    /// 驗證下市日期含多位元組字元時回傳 None 而不是 panic。
+    ///
+    /// 「éé」是 4 bytes，舊版檢查 len() >= 3 後就做 `[..3]` 切片，
+    /// byte 3 落在第二個字元中間會直接 panic；改用 .get(..3) 後安全回傳 None。
+    #[test]
+    fn test_to_delisted_command_rejects_multibyte_date() {
+        let dto = SuspendListing {
+            delisting_date: "éé".to_string(), // 4 bytes，切 ..3 會跨字元
+            name: "壞資料".to_string(),
+            stock_symbol: "9998".to_string(),
+        };
+
+        assert!(DelistedCompanyAclMapper::from_suspend_listing(&dto).is_none());
+
+        // 長度不足與非數字內容同樣回傳 None。
+        let dto = SuspendListing {
+            delisting_date: "台".to_string(), // 3 bytes 但非數字
+            name: "壞資料".to_string(),
+            stock_symbol: "9997".to_string(),
+        };
+        assert!(DelistedCompanyAclMapper::from_suspend_listing(&dto).is_none());
     }
 
     #[test]

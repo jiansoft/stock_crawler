@@ -11,7 +11,7 @@ use super::dto::{
 };
 use super::job_runner::{
     parse_request_date, parse_request_security_code, start_closing_aggregate_job,
-    start_daily_quotes_job, start_historical_dividends_job,
+    start_daily_quotes_job, start_historical_dividends_job, start_job_error_response,
     start_multiple_dividend_historical_dividends_job, start_received_dividend_records_job,
     start_taiwan_stock_index_job,
 };
@@ -95,11 +95,12 @@ async fn start_daily_quotes(
         Err(response) => return response,
     };
 
-    // 輸入有效時建立背景 job，實際資料刪除與重抓會在 job 中執行。
-    Json(StartJobResponse {
-        job: start_daily_quotes_job(date).await,
-    })
-    .into_response()
+    // 輸入有效時建立背景 job，實際資料抓取與原子替換會在 job 中執行。
+    // 建立可能被拒絕（相同 job 執行中 → 409、併行已滿 → 429）。
+    match start_daily_quotes_job(date).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
 }
 
 /// 建立收盤彙總回補 job 的 HTTP handler。
@@ -114,10 +115,11 @@ async fn start_closing_aggregate(
     };
 
     // 輸入有效時建立背景 job，立即回傳 job 狀態給呼叫端輪詢。
-    Json(StartJobResponse {
-        job: start_closing_aggregate_job(date).await,
-    })
-    .into_response()
+    // 建立可能被拒絕（相同 job 執行中 → 409、併行已滿 → 429）。
+    match start_closing_aggregate_job(date).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
 }
 
 /// 建立台股加權指數回補 job 的 HTTP handler。
@@ -132,10 +134,11 @@ async fn start_taiwan_stock_index(
     };
 
     // 輸入有效時建立背景 job，只會 upsert 指定日期的指數資料。
-    Json(StartJobResponse {
-        job: start_taiwan_stock_index_job(date).await,
-    })
-    .into_response()
+    // 建立可能被拒絕（相同 job 執行中 → 409、併行已滿 → 429）。
+    match start_taiwan_stock_index_job(date).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
 }
 
 /// 建立持股已領股利回補 job 的 HTTP handler。
@@ -149,10 +152,11 @@ async fn start_received_dividend_records(
         Err(response) => return response,
     };
     // 建立背景 job，HTTP request 不等待實際回補流程完成。
-    Json(StartJobResponse {
-        job: start_received_dividend_records_job(security_code).await,
-    })
-    .into_response()
+    // 建立可能被拒絕（相同 job 執行中 → 409、併行已滿 → 429）。
+    match start_received_dividend_records_job(security_code).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
 }
 
 /// 建立歷年股利回補 job 的 HTTP handler。
@@ -166,10 +170,11 @@ async fn start_historical_dividends(
         Err(response) => return response,
     };
     // 建立背景 job，回補結果會更新到 job message。
-    Json(StartJobResponse {
-        job: start_historical_dividends_job(security_code).await,
-    })
-    .into_response()
+    // 建立可能被拒絕（相同 job 執行中 → 409、併行已滿 → 429）。
+    match start_historical_dividends_job(security_code).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
 }
 
 /// 建立多次配息股票歷年股利批次回補 job 的 HTTP handler。
@@ -189,8 +194,9 @@ async fn start_multiple_dividend_historical_dividends(
     }
 
     // 建立背景 job，實際批次 Yahoo 回補會在 job 中執行。
-    Json(StartJobResponse {
-        job: start_multiple_dividend_historical_dividends_job(req.year).await,
-    })
-    .into_response()
+    // 建立可能被拒絕（相同 job 執行中 → 409、併行已滿 → 429）。
+    match start_multiple_dividend_historical_dividends_job(req.year).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
 }

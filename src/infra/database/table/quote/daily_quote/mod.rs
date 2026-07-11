@@ -160,58 +160,6 @@ impl DailyQuote {
         }
     }
 
-    /// 依欄位名稱映射，從單筆原始字串資料建立 `DailyQuote`。
-    ///
-    /// 適用於欄位順序可能變動的來源（例如 TWSE MI_INDEX）。
-    pub fn from_with_map(item: &[String], map: &std::collections::HashMap<&str, usize>) -> Self {
-        let code = map
-            .get("證券代號")
-            .and_then(|&i| item.get(i))
-            .cloned()
-            .unwrap_or_default();
-        let mut e = DailyQuote::new(code);
-
-        let parse_decimal = |key: &str| -> Decimal {
-            map.get(key)
-                .and_then(|&i| item.get(i))
-                .map(|s| s.replace(',', ""))
-                .and_then(|s| s.parse::<Decimal>().ok())
-                .unwrap_or_default()
-        };
-
-        e.trading_volume = parse_decimal("成交股數");
-        e.transaction = parse_decimal("成交筆數");
-        e.trade_value = parse_decimal("成交金額");
-        e.opening_price = parse_decimal("開盤價");
-        e.highest_price = parse_decimal("最高價");
-        e.lowest_price = parse_decimal("最低價");
-        e.closing_price = parse_decimal("收盤價");
-        e.change = parse_decimal("漲跌價差");
-        e.last_best_bid_price = parse_decimal("最後揭示買價");
-        e.last_best_bid_volume = parse_decimal("最後揭示買量");
-        e.last_best_ask_price = parse_decimal("最後揭示賣價");
-        e.last_best_ask_volume = parse_decimal("最後揭示賣量");
-        e.price_earning_ratio = parse_decimal("本益比");
-
-        // 處理漲跌符號
-        if let Some(&i) = map.get("漲跌(+/-)")
-            && let Some(sign) = item.get(i)
-        {
-            if sign.contains('-') || sign.contains('綠') {
-                e.change = -e.change.abs();
-            } else if sign.contains('+') || sign.contains('紅') {
-                e.change = e.change.abs();
-            }
-        }
-
-        e.create_time = Local::now();
-        let default_date = datetime::parse_date("1970-01-01T00:00:00Z");
-        e.maximum_price_in_year_date_on = default_date.date_naive();
-        e.minimum_price_in_year_date_on = default_date.date_naive();
-
-        e
-    }
-
     /// 轉換為單行 CSV 字串，供 `COPY` 批次寫入使用。
     pub fn to_csv(&self) -> String {
         let mut csv_string = String::new();
@@ -259,6 +207,11 @@ impl DailyQuote {
 }
 
 /// 不同交易所來源轉換為統一資料模型的介面。
+///
+/// 注意：production 的收盤報價解析已改走 `infra::crawler::share::DailyQuoteDto`
+/// （具備 typed 解析錯誤，欄位缺失或格式錯誤會拒絕整列而不是默默補 0）。
+/// 這個 trait 與下方實作目前僅供資料庫層測試建立樣本資料使用，
+/// 請勿在新的 production 程式碼中使用。
 pub trait FromWithExchange<T, U> {
     /// 在給定交易所資訊的前提下，將來源資料轉成統一資料模型。
     fn from_with_exchange(exchange: T, item: &U) -> Self;
@@ -332,8 +285,6 @@ impl FromWithExchange<StockExchange, Vec<String>> for DailyQuote {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use rust_decimal_macros::dec;
 
     use super::*;
@@ -361,87 +312,6 @@ mod tests {
 
         assert_eq!(quote.key(), "20250203-2330");
         assert_eq!(quote.key_with_prefix(), "DailyQuote:20250203-2330");
-    }
-
-    #[test]
-    fn from_with_map_parses_commas_and_negative_green_sign() {
-        let item = vec![
-            "2330".to_string(),
-            "1,234,000".to_string(),
-            "5,678".to_string(),
-            "987,654,321".to_string(),
-            "950.5".to_string(),
-            "960.5".to_string(),
-            "945.5".to_string(),
-            "955.5".to_string(),
-            "綠".to_string(),
-            "12.5".to_string(),
-            "955.0".to_string(),
-            "100".to_string(),
-            "956.0".to_string(),
-            "200".to_string(),
-            "20.5".to_string(),
-        ];
-        let map = HashMap::from([
-            ("證券代號", 0),
-            ("成交股數", 1),
-            ("成交筆數", 2),
-            ("成交金額", 3),
-            ("開盤價", 4),
-            ("最高價", 5),
-            ("最低價", 6),
-            ("收盤價", 7),
-            ("漲跌(+/-)", 8),
-            ("漲跌價差", 9),
-            ("最後揭示買價", 10),
-            ("最後揭示買量", 11),
-            ("最後揭示賣價", 12),
-            ("最後揭示賣量", 13),
-            ("本益比", 14),
-        ]);
-
-        let quote = DailyQuote::from_with_map(&item, &map);
-
-        assert_eq!(quote.stock_symbol, "2330");
-        assert_eq!(quote.trading_volume, dec!(1234000));
-        assert_eq!(quote.transaction, dec!(5678));
-        assert_eq!(quote.trade_value, dec!(987654321));
-        assert_eq!(quote.opening_price, dec!(950.5));
-        assert_eq!(quote.highest_price, dec!(960.5));
-        assert_eq!(quote.lowest_price, dec!(945.5));
-        assert_eq!(quote.closing_price, dec!(955.5));
-        assert_eq!(quote.change, dec!(-12.5));
-        assert_eq!(quote.last_best_bid_price, dec!(955.0));
-        assert_eq!(quote.last_best_bid_volume, dec!(100));
-        assert_eq!(quote.last_best_ask_price, dec!(956.0));
-        assert_eq!(quote.last_best_ask_volume, dec!(200));
-        assert_eq!(quote.price_earning_ratio, dec!(20.5));
-        assert_eq!(quote.maximum_price_in_year_date_on, default_date());
-        assert_eq!(quote.minimum_price_in_year_date_on, default_date());
-    }
-
-    #[test]
-    fn from_with_map_defaults_missing_or_invalid_fields() {
-        let item = vec![
-            "2330".to_string(),
-            "not-a-number".to_string(),
-            "+".to_string(),
-            "bad-change".to_string(),
-        ];
-        let map = HashMap::from([
-            ("證券代號", 0),
-            ("成交股數", 1),
-            ("漲跌(+/-)", 2),
-            ("漲跌價差", 3),
-            ("收盤價", 99),
-        ]);
-
-        let quote = DailyQuote::from_with_map(&item, &map);
-
-        assert_eq!(quote.stock_symbol, "2330");
-        assert_eq!(quote.trading_volume, Decimal::ZERO);
-        assert_eq!(quote.change, Decimal::ZERO);
-        assert_eq!(quote.closing_price, Decimal::ZERO);
     }
 
     #[test]

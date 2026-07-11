@@ -17,8 +17,9 @@
 //! - **效能**：使用 `Lazy` 靜態化正則與選擇器，並在內部使用 `HashMap` 進行年度聚合後再排序輸出。
 
 use std::collections::HashMap;
+use std::{error::Error as StdError, fmt};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rust_decimal::Decimal;
@@ -28,6 +29,13 @@ use crate::{
     core::util::{http, text},
     infra::crawler::yahoo::HOST,
 };
+
+/// Yahoo 股利頁回 HTTP 404（頁面不存在）時的短期跳過快取秒數。
+///
+/// 404 幾乎都代表該證券已終止上市櫃或清算（例如上櫃終止、反向 ETF 下架），
+/// 頁面不會突然長回來，因此以 30 天作為重試間隔，避免排程每 3 天
+/// 重打一次注定失敗的請求並噴出誤導的錯誤日誌。
+pub const PAGE_NOT_FOUND_CACHE_TTL_SECONDS: usize = 60 * 60 * 24 * 30;
 
 /// 用於解析股利所屬期間（如 2024Q4）的正則表達式
 static REG_PERIOD: Lazy<Regex> = Lazy::new(|| {
@@ -94,18 +102,71 @@ impl YahooDividend {
     }
 }
 
+/// 表示 Yahoo 對該股票代號回應 HTTP 404——整個個股頁面不存在。
+///
+/// 這幾乎都代表該證券已終止上市櫃或清算（實例：上櫃終止的 3089/8420、
+/// 下架的反向 ETF 00699R），而不是 Yahoo 改版。獨立成型別是為了讓
+/// backfill 流程能用 [`is_page_not_found_error`] 辨識並降級處理
+/// （warn＋長期跳過快取），把 ERROR 留給真正的解析異常。
+#[derive(Debug)]
+pub struct YahooPageNotFoundError {
+    /// 請求的股票代號。
+    pub stock_symbol: String,
+    /// 實際請求的 URL。
+    pub url: String,
+}
+
+impl fmt::Display for YahooPageNotFoundError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Yahoo page for {} returned HTTP 404 at {} (證券可能已下市或清算)",
+            self.stock_symbol, self.url
+        )
+    }
+}
+
+impl StdError for YahooPageNotFoundError {}
+
+/// 判斷錯誤是否屬於「Yahoo 個股頁面不存在（HTTP 404）」。
+///
+/// 供 backfill 流程分辨「標的已下市」與「真正的抓取/解析異常」：
+/// 前者降級為 warn 並長期跳過，後者維持 ERROR。
+/// `downcast_ref` 會穿透 anyhow 的 context 包裝層，因此呼叫端
+/// 即使先用 `with_context` 加了說明也能正確辨識。
+pub fn is_page_not_found_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<YahooPageNotFoundError>().is_some()
+}
+
 /// 從 Yahoo 台股頁面抓取指定股票的股利資料。
 ///
 /// # 參數
 /// * `stock_symbol` - 股票代碼 (例如: "2330")
 ///
 /// # 實作細節
-/// 遍歷股利列表表格，提取各項日期與金額。若該筆資料尚未公布日期，會以
-/// `year_of_dividend + 1` 推估發放年度，讓擬定股利也能先被回補。
+/// 先檢查 HTTP 狀態碼：404 代表整個個股頁不存在（通常是已下市或清算的
+/// 證券），回傳可被 [`is_page_not_found_error`] 辨識的專屬錯誤型別，
+/// 不要與「頁面存在但解析不到股利列」混為一談——後者才可能是 Yahoo 改版。
+///
+/// 解析時遍歷股利列表表格，提取各項日期與金額。若該筆資料尚未公布日期，
+/// 會以 `year_of_dividend + 1` 推估發放年度，讓擬定股利也能先被回補。
 /// 最終結果會依照年份降序（新年度在前）排列。
 pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     let url = format!("https://{}/quote/{}/dividend", HOST, stock_symbol);
-    let text = http::get(&url, None).await?;
+    let response = http::get_response(&url, None).await?;
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(YahooPageNotFoundError {
+            stock_symbol: stock_symbol.to_string(),
+            url,
+        }
+        .into());
+    }
+
+    let text = response
+        .text()
+        .await
+        .with_context(|| format!("Error reading Yahoo dividend page body from {url}"))?;
     parse_dividend_html(stock_symbol, &url, &text)
 }
 
@@ -535,6 +596,27 @@ mod tests {
         assert_eq!(details[0].quarter, "Q1");
         assert_eq!(details[1].quarter, "H1");
         assert_eq!(details[2].quarter, "Q4");
+    }
+
+    /// 驗證 404 型別錯誤能被 `is_page_not_found_error` 辨識，
+    /// 且穿透 anyhow 的 `with_context` 包裝層後仍可辨識——
+    /// backfill 流程就是在包了 context 之後才做判斷的。
+    #[test]
+    fn is_page_not_found_error_detects_through_context_layers() {
+        let err: anyhow::Error = YahooPageNotFoundError {
+            stock_symbol: "3089".to_string(),
+            url: "https://tw.stock.yahoo.com/quote/3089/dividend".to_string(),
+        }
+        .into();
+        assert!(is_page_not_found_error(&err));
+
+        // 模擬 backfill 的 with_context 包裝。
+        let wrapped = err.context("yahoo dividend fetch failed: year=2026, stock_symbol=3089");
+        assert!(is_page_not_found_error(&wrapped));
+
+        // 一般錯誤不得被誤判。
+        let other = anyhow!("some other error");
+        assert!(!is_page_not_found_error(&other));
     }
 
     #[tokio::test]

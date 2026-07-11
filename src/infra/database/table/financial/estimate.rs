@@ -497,6 +497,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_upsert() {
         dotenvy::dotenv().ok();
         SHARE.load().await;
@@ -519,6 +523,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_upsert_all() {
         dotenvy::dotenv().ok();
         SHARE.load().await;

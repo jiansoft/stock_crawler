@@ -48,6 +48,66 @@ pub async fn visit(
     Ok(parse_isin_html(&response, mode))
 }
 
+/// 調用 twse API 取得指定市場「全部類別」的現行掛牌證券代號名冊。
+///
+/// 與 [`visit`] 的差別：[`visit`] 只保留股票／特別股／TDR 等類別供股票主檔
+/// 回補使用；這裡**不過濾類別**（ETF、ETN、受益證券等全數納入），
+/// 專供「下市差集比對」使用——名冊必須涵蓋資料庫可能存在的所有證券類型，
+/// 否則不在名冊類別內的證券（例如 ETF）會被誤判為已下市。
+///
+/// 注意：與 [`visit`] 相同，週末直接回傳空集合（來源不更新），
+/// 呼叫端應避免在週末執行差集比對。
+pub async fn visit_all_listed_symbols(
+    mode: StockExchangeMarket,
+) -> Result<std::collections::HashSet<String>> {
+    if Local::now().is_weekend() {
+        return Ok(std::collections::HashSet::new());
+    }
+
+    let url = format!(
+        "https://isin.{}/isin/C_public.jsp?strMode={}",
+        twse::HOST,
+        mode.serial()
+    );
+
+    let response = util::http::get_use_big5(&url).await?;
+    Ok(parse_all_symbols_html(&response))
+}
+
+/// 解析 TWSE ISIN 頁面，取出「全部類別」的證券代號集合。
+///
+/// 這是一個「純函式」——輸入只有 HTML 字串，不做任何網路 I/O。
+/// 與 [`parse_isin_html`] 共用同一頁面結構，但：
+/// - 不過濾證券類別（類別標頭列直接跳過）。
+/// - 代號切割放寬為「第一個全形空格前的部分」，寧可多收也不漏收——
+///   名冊愈完整，下市差集的誤判風險愈低。
+fn parse_all_symbols_html(html: &str) -> std::collections::HashSet<String> {
+    let mut result = std::collections::HashSet::with_capacity(4096);
+    let document = Html::parse_document(html);
+
+    let Ok(selector) = Selector::parse("body > table.h4 > tbody > tr") else {
+        return result;
+    };
+
+    for node in document.select(&selector).skip(1) {
+        let tds: Vec<&str> = node.text().map(str::trim).collect();
+        // 類別標頭列只有 2 欄（例如「股票」「ETF」），不含證券資料。
+        if tds.len() == 2 {
+            continue;
+        }
+
+        // 第一欄格式為「代號\u{3000}名稱」；取全形空格前的代號。
+        if let Some((symbol, _name)) = tds.first().and_then(|first| first.split_once('\u{3000}')) {
+            let symbol = symbol.trim();
+            if !symbol.is_empty() {
+                result.insert(symbol.to_string());
+            }
+        }
+    }
+
+    result
+}
+
 /// 解析 TWSE ISIN HTML 頁面，回傳符合條件的識別碼列表。
 ///
 /// 只保留 `REQUIRED_CATEGORIES` 中的證券類別（股票、特別股、普通股、TDR）。
@@ -115,6 +175,38 @@ mod tests {
 <tr><td>2330A　台積電甲特</td><td>TW0002330016</td><td>2022/01/01</td><td>上市</td><td>ESVPFR</td></tr>
 </tbody></table>
 </body></html>"#;
+
+    /// 全類別名冊解析：不過濾類別，ETF 等也要納入；類別標頭列跳過。
+    #[test]
+    fn parse_all_symbols_html_includes_every_category() {
+        let html = r#"<html><body>
+<table class="h4"><tbody>
+<tr><th>證券名稱及代號</th><th>ISIN</th><th>上市日</th><th>市場別</th><th>產業別</th><th>CFI Code</th></tr>
+<tr><td>股票</td><td>類別</td></tr>
+<tr><td>2330　台積電</td><td>TW0002330008</td><td>1994/09/05</td><td>上市</td><td>半導體業</td><td>ESVUFR</td></tr>
+<tr><td>ETF</td><td>類別</td></tr>
+<tr><td>0050　元大台灣50</td><td>TW0000050004</td><td>2003/06/30</td><td>上市</td><td>CEOGEU</td></tr>
+<tr><td>00699R　元大美債7-10反1</td><td>TW00000699R5</td><td>2017/06/08</td><td>上市</td><td>CEOMRU</td></tr>
+<tr><td>受益證券</td><td>類別</td></tr>
+<tr><td>01001T　土銀富邦R1</td><td>TW00001001T8</td><td>2005/03/10</td><td>上市</td><td>CBCIXU</td></tr>
+</tbody></table>
+</body></html>"#;
+
+        let symbols = parse_all_symbols_html(html);
+
+        // 股票、ETF（含反向）、受益證券全部都要在名冊內。
+        assert_eq!(symbols.len(), 4);
+        assert!(symbols.contains("2330"));
+        assert!(symbols.contains("0050"));
+        assert!(symbols.contains("00699R"));
+        assert!(symbols.contains("01001T"));
+    }
+
+    /// 與目標結構無關的頁面回傳空集合，交由呼叫端的名冊大小安全閥攔下。
+    #[test]
+    fn parse_all_symbols_html_returns_empty_for_unrelated_page() {
+        assert!(parse_all_symbols_html("<html><body><p>維護中</p></body></html>").is_empty());
+    }
 
     #[test]
     fn test_parse_isin_html_basic() {

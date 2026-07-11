@@ -4,14 +4,16 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
+// 通知走 core::alert（port），跳脫工具走 core::util::text——
+// app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
 use crate::{
+    core::{alert, util::text},
     domain::dividend::entity::StockDividendPayableDateInfo,
     domain::dividend::repository::DividendRepository,
     domain::portfolio::entity::StockOwnershipDetail,
     domain::portfolio::repository::PortfolioRepository,
     infra::database::repository::dividend::PgDividendRepository,
     infra::database::repository::portfolio::PgPortfolioRepository,
-    interfaces::bot::{self, telegram::Telegram},
 };
 
 use super::{format_decimal_with_commas, format_share_quantity, member_label};
@@ -96,7 +98,7 @@ fn build_batch_dividend_message(
     if writeln!(
         &mut msg,
         "{} 持股批次預估入帳如下︰",
-        Telegram::escape_markdown_v2(today.to_string())
+        text::escape_markdown_v2(today.to_string())
     )
     .is_err()
     {
@@ -108,12 +110,12 @@ fn build_batch_dividend_message(
             &mut msg,
             "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} {2} 持股:{3}股 現金:{4}元 股票:{5}元 合計:{6}元",
             stock_symbol,
-            Telegram::escape_markdown_v2(&batch.name),
-            Telegram::escape_markdown_v2(member_label(batch.member_id)),
-            Telegram::escape_markdown_v2(format_share_quantity(batch.share_quantity)),
-            Telegram::escape_markdown_v2(format_decimal_with_commas(batch.cash)),
-            Telegram::escape_markdown_v2(format_decimal_with_commas(batch.stock_money)),
-            Telegram::escape_markdown_v2(format_decimal_with_commas(batch.total()))
+            text::escape_markdown_v2(&batch.name),
+            text::escape_markdown_v2(member_label(batch.member_id)),
+            text::escape_markdown_v2(format_share_quantity(batch.share_quantity)),
+            text::escape_markdown_v2(format_decimal_with_commas(batch.cash)),
+            text::escape_markdown_v2(format_decimal_with_commas(batch.stock_money)),
+            text::escape_markdown_v2(format_decimal_with_commas(batch.total()))
         );
     }
 
@@ -135,7 +137,7 @@ pub async fn execute() -> Result<()> {
     if writeln!(
         &mut msg,
         "{} 進行股利發放的股票如下︰",
-        Telegram::escape_markdown_v2(today.to_string())
+        text::escape_markdown_v2(today.to_string())
     )
     .is_ok()
     {
@@ -145,14 +147,14 @@ pub async fn execute() -> Result<()> {
                 &mut msg,
                 "    {0} {1} ",
                 stock.stock_symbol,
-                Telegram::escape_markdown_v2(&stock.name),
+                text::escape_markdown_v2(&stock.name),
             );
 
             if stock.payable_date1 != "-" {
                 let _ = write!(
                     &mut msg,
                     "現金︰{0}元 ",
-                    Telegram::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
+                    text::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
                 );
             }
 
@@ -160,20 +162,20 @@ pub async fn execute() -> Result<()> {
                 let _ = write!(
                     &mut msg,
                     "股票︰{0}元 ",
-                    Telegram::escape_markdown_v2(stock.stock_dividend.normalize().to_string()),
+                    text::escape_markdown_v2(stock.stock_dividend.normalize().to_string()),
                 );
             }
 
             let _ = writeln!(
                 &mut msg,
                 "合計︰{0}元 ",
-                Telegram::escape_markdown_v2(stock.sum.normalize().to_string()),
+                text::escape_markdown_v2(stock.sum.normalize().to_string()),
             );
         }
     }
 
     //群內通知
-    bot::telegram::send(&msg).await;
+    alert::send_message(&msg).await;
 
     let portfolio_repo = PgPortfolioRepository::new();
     let holdings = portfolio_repo
@@ -182,7 +184,7 @@ pub async fn execute() -> Result<()> {
     if let Some(batch_msg) =
         build_batch_dividend_message(today, &stocks_payable_date_info, &holdings)
     {
-        bot::telegram::send(&batch_msg).await;
+        alert::send_message(&batch_msg).await;
     }
 
     Ok(())

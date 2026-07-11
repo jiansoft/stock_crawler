@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, Transaction, Type, postgres::PgQueryResult};
 
 use crate::infra::database;
@@ -202,7 +202,7 @@ ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
 
         result.context(format!(
             "Failed to daily_stock_price_stats::upsert({}) from database",
-            &date
+            date
         ))
     }
 }
@@ -216,6 +216,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_upsert() {
         dotenvy::dotenv().ok();
         SHARE.load().await;

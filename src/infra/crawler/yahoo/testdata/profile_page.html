@@ -1,0 +1,37 @@
+<!--
+  依 Yahoo 個股「/quote/{symbol}/profile」頁面精簡而成的測試 fixture。
+
+  解析器（parse_profile_html）依賴的結構：
+  - #main-2-QuoteProfile-Proxy > div > section:nth-child(3) 是「獲利能力」區塊。
+  - 區塊的第 2 個子元素（div.D(f)）文字以「YYYY QN」開頭，提供年度與季度。
+  - div.table-grid.Mb(20px).row-fit-half 的第 1～6 格依序為：
+    營業毛利率、ROA、營業利益率、ROE、稅前淨利率、每股淨值；
+    每格的數值都在「格子 div > div > div」的層級。
+  - EPS 位於區塊第 4 個 div 的第 3 格，層級與上面的 grid 不同。
+
+  注意：Yahoo 使用 Atomic CSS（class 名稱含括號），HTML 中原樣書寫，
+  Rust 端的 selector 才需要跳脫（例如 Mb\(20px\)）。
+-->
+<div id="main-2-QuoteProfile-Proxy">
+  <div>
+    <section><h2>公司簡介</h2><p>台灣積體電路製造股份有限公司…</p></section>
+    <section><h2>營收比重</h2><p>晶圓 100%</p></section>
+    <section>
+      <h2>獲利能力</h2>
+      <div class="D(f)">2025 Q3</div>
+      <div class="table-grid Mb(20px) row-fit-half">
+        <div><span class="label">營業毛利率</span><div><div>58.6%</div></div></div>
+        <div><span class="label">資產報酬率</span><div><div>12.9%</div></div></div>
+        <div><span class="label">營業利益率</span><div><div>48.1%</div></div></div>
+        <div><span class="label">股東權益報酬率</span><div><div>26.3%</div></div></div>
+        <div><span class="label">稅前淨利率</span><div><div>53.2%</div></div></div>
+        <div><span class="label">每股淨值</span><div><div>158.9</div></div></div>
+      </div>
+      <div class="table-grid row-fit-half">
+        <div><span class="label">每股營收</span><div><div>83.4</div></div></div>
+        <div><span class="label">每股稅前淨利</span><div><div>18.2</div></div></div>
+        <div><span class="label">每股稅後淨利</span><div><div>15.36</div></div></div>
+      </div>
+    </section>
+  </div>
+</div>

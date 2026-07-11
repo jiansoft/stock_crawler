@@ -1,0 +1,27 @@
+<!--
+  依 Wespai「stock.wespai.com/profit」財務指標頁精簡而成的測試 fixture。
+
+  解析器（parse_profit_html）依賴的結構：
+  - body > h1 > a 的文字含四位數年度（例：「2024年報」）。
+  - #example > tbody > tr 是資料列；欄位以 nth-child 對應：
+    1=代號、2=名稱、3=收盤、4=毛利率、5=營益率、6=稅前淨利率、7=稅後淨利率、
+    8=每股淨值、9=每股營收、10=（略）、11=每股稅前淨利、12=ROE、13=ROA、14=EPS。
+
+  本 fixture 刻意涵蓋的情境：
+  1. 兩筆正常列。
+  2. 數值欄出現「-」（無法解析）→ 以 0 落地。
+-->
+<html>
+<body>
+<h1><a href="/profit">2024年報獲利能力</a></h1>
+<table id="example">
+  <thead>
+    <tr><th>代號</th><th>名稱</th><th>收盤</th><th>毛利率</th><th>營益率</th><th>稅前淨利率</th><th>稅後淨利率</th><th>每股淨值</th><th>每股營收</th><th>盈再率</th><th>每股稅前淨利</th><th>ROE</th><th>ROA</th><th>EPS</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>2330</td><td>台積電</td><td>1070</td><td>56.12</td><td>45.68</td><td>48.63</td><td>43.06</td><td>155.86</td><td>104.88</td><td>35.2</td><td>51.01</td><td>30.24</td><td>19.35</td><td>45.25</td></tr>
+    <tr><td>2884</td><td>玉山金</td><td>26.9</td><td>-</td><td>38.30</td><td>36.34</td><td>31.03</td><td>17.05</td><td>4.36</td><td>-</td><td>1.58</td><td>10.11</td><td>0.72</td><td>1.35</td></tr>
+  </tbody>
+</table>
+</body>
+</html>

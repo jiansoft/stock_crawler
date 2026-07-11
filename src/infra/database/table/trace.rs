@@ -43,11 +43,11 @@ impl Trace {
 
 impl Keyable for Trace {
     fn key(&self) -> String {
-        format!("{}-{}-{}", &self.stock_symbol, self.floor, self.ceiling)
+        format!("{}-{}-{}", self.stock_symbol, self.floor, self.ceiling)
     }
 
     fn key_with_prefix(&self) -> String {
-        format!("Trace:{}", &self.key())
+        format!("Trace:{}", self.key())
     }
 }
 
@@ -66,6 +66,10 @@ mod tests {
     use crate::infra::database::table::trace;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_list() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_list");

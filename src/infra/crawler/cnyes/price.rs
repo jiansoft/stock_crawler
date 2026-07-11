@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     core::declare::StockQuotes,
@@ -98,6 +98,28 @@ mod tests {
 
     use super::*;
 
+    /// 驗證正常回應的欄位對應：鉅亨的欄位名是數字代碼
+    /// （"6"=成交價、"11"=漲跌、"56"=漲跌幅），serde rename 不能失效。
+    #[test]
+    fn test_deserialize_response_maps_numeric_field_names() {
+        let body = r#"{
+            "statusCode": 200,
+            "message": "OK",
+            "data": [{
+                "6": 1435.0,
+                "11": -15.0,
+                "56": -1.03,
+                "200007": "台積電"
+            }]
+        }"#;
+        let response: Response = serde_json::from_str(body).expect("response should deserialize");
+        let quote = response.data.first().expect("expected one quote row");
+
+        assert_eq!(quote.required_current_price("2330").unwrap(), 1435.0);
+        assert_eq!(quote.change_or_zero(), -15.0);
+        assert_eq!(quote.change_range_or_zero(), -1.03);
+    }
+
     #[test]
     fn test_deserialize_response_with_null_current_price() {
         let body = r#"{
@@ -120,12 +142,14 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_get_stock_price() {
         dotenvy::dotenv().ok();
         log_stock_price_test::<CnYes>("2330").await;
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_get_stock_quotes() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 cnyes::get_stock_quotes");
@@ -144,6 +168,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_fetch_data() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_data");

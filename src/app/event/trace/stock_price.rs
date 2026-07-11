@@ -26,10 +26,12 @@ use rust_decimal::Decimal;
 use tokio::{task, time};
 
 use super::{price_tasks as trace_price_tasks, stats as trace_stats};
-use crate::interfaces::bot::telegram::Telegram;
+// 通知走 core::alert 抽象介面（port），MarkdownV2 跳脫用 core::util::text：
+// app 層不 import interfaces::bot，實際送到 Telegram 由 main 註冊的 adapter 決定。
 use crate::{
+    core::alert,
     core::declare,
-    core::util::{datetime::Weekend, map::Keyable},
+    core::util::{datetime::Weekend, map::Keyable, text},
     domain::trace::entity::PriceTrace,
     domain::trace::repository::TraceRepository,
     infra::cache::RealtimeSnapshot,
@@ -37,7 +39,6 @@ use crate::{
     infra::cache::{TTL, TtlCacheInner},
     infra::crawler::twse,
     infra::database::repository::trace::PgTraceRepository,
-    interfaces::bot,
 };
 
 /// 確保整個追蹤執行流程只有一個實例在執行。
@@ -428,8 +429,8 @@ async fn alert_on_price_boundary(
     // 格式化訊息並發送
     let to_bot_msg = format_alert_message(&target, current_price, source_site).await;
 
-    // 發送 Telegram 訊息
-    bot::telegram::send(&to_bot_msg).await;
+    // 透過 AlertSink port 發送通知（生產環境由 main 註冊 Telegram adapter）。
+    alert::send_message(&to_bot_msg).await;
     trace_stats::record_notification_sent();
     if source == EvaluationSource::Reconciliation {
         trace_stats::record_reconciliation_alert_hit();
@@ -455,11 +456,14 @@ async fn format_alert_message(
         ("超過最高價", target.ceiling)
     };
 
-    let escaped_name = Telegram::escape_markdown_v2(stock_name);
-    let escaped_boundary = Telegram::escape_markdown_v2(boundary.to_string());
-    let escaped_limit = Telegram::escape_markdown_v2(limit.to_string());
-    let escaped_price = Telegram::escape_markdown_v2(current_price.to_string());
-    let escaped_source_site = Telegram::escape_markdown_v2(
+    // 股名、價格等動態內容都要先做 MarkdownV2 跳脫（規則詳見
+    // core::util::text::escape_markdown_v2 的 rustdoc），否則含保留字元
+    // （如「-KY」的減號、小數點）的訊息會被 Telegram API 整則拒絕。
+    let escaped_name = text::escape_markdown_v2(stock_name);
+    let escaped_boundary = text::escape_markdown_v2(boundary.to_string());
+    let escaped_limit = text::escape_markdown_v2(limit.to_string());
+    let escaped_price = text::escape_markdown_v2(current_price.to_string());
+    let escaped_source_site = text::escape_markdown_v2(
         source_site
             .filter(|site| !site.trim().is_empty())
             .unwrap_or("未知"),
@@ -667,6 +671,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_format_alert_message() {
         dotenvy::dotenv().ok();
         SHARE.load().await;

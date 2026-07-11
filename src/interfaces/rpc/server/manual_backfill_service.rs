@@ -44,7 +44,10 @@ impl ManualBackfillService for ManualBackfillServiceImpl {
         let date = parse_grpc_date(&req.into_inner().date)?;
 
         // 建立共用背景 job，讓 HTTP UI 也能查到這筆 gRPC 建立的工作。
-        let job = web::backfill_admin::start_daily_quotes_job(date).await;
+        // 建立可能被拒絕（重複 job / 併行已滿），轉成對應的 gRPC 錯誤碼。
+        let job = web::backfill_admin::start_daily_quotes_job(date)
+            .await
+            .map_err(start_job_error_to_status)?;
         // 轉成 proto response model 後回傳。
         Ok(Response::new(BackfillJobResponse {
             job: Some(to_grpc_job(job)),
@@ -62,7 +65,10 @@ impl ManualBackfillService for ManualBackfillServiceImpl {
         let date = parse_grpc_date(&req.date)?;
 
         // 建立共用背景 job，讓 HTTP UI 也能查到這筆 gRPC 建立的工作。
-        let job = web::backfill_admin::start_closing_aggregate_job(date).await;
+        // 建立可能被拒絕（重複 job / 併行已滿），轉成對應的 gRPC 錯誤碼。
+        let job = web::backfill_admin::start_closing_aggregate_job(date)
+            .await
+            .map_err(start_job_error_to_status)?;
         // 轉成 proto response model 後回傳。
         Ok(Response::new(BackfillJobResponse {
             job: Some(to_grpc_job(job)),
@@ -78,7 +84,10 @@ impl ManualBackfillService for ManualBackfillServiceImpl {
         let date = parse_grpc_date(&req.into_inner().date)?;
 
         // 建立共用背景 job，只會 upsert 指定日期的指數資料。
-        let job = web::backfill_admin::start_taiwan_stock_index_job(date).await;
+        // 建立可能被拒絕（重複 job / 併行已滿），轉成對應的 gRPC 錯誤碼。
+        let job = web::backfill_admin::start_taiwan_stock_index_job(date)
+            .await
+            .map_err(start_job_error_to_status)?;
         Ok(Response::new(BackfillJobResponse {
             job: Some(to_grpc_job(job)),
         }))
@@ -93,7 +102,10 @@ impl ManualBackfillService for ManualBackfillServiceImpl {
         let security_code = parse_grpc_security_code(req.into_inner().security_code)?;
 
         // 建立背景 job，立即回傳 job id 與初始狀態。
-        let job = web::backfill_admin::start_received_dividend_records_job(security_code).await;
+        // 建立可能被拒絕（重複 job / 併行已滿），轉成對應的 gRPC 錯誤碼。
+        let job = web::backfill_admin::start_received_dividend_records_job(security_code)
+            .await
+            .map_err(start_job_error_to_status)?;
         Ok(Response::new(BackfillJobResponse {
             job: Some(to_grpc_job(job)),
         }))
@@ -108,7 +120,10 @@ impl ManualBackfillService for ManualBackfillServiceImpl {
         let security_code = parse_grpc_security_code(req.into_inner().security_code)?;
 
         // 建立背景 job，實際 Yahoo 抓取與 upsert 會在背景 task 中執行。
-        let job = web::backfill_admin::start_historical_dividends_job(security_code).await;
+        // 建立可能被拒絕（重複 job / 併行已滿），轉成對應的 gRPC 錯誤碼。
+        let job = web::backfill_admin::start_historical_dividends_job(security_code)
+            .await
+            .map_err(start_job_error_to_status)?;
         Ok(Response::new(BackfillJobResponse {
             job: Some(to_grpc_job(job)),
         }))
@@ -128,7 +143,10 @@ impl ManualBackfillService for ManualBackfillServiceImpl {
         }
 
         // 建立共用背景 job，讓 HTTP UI 也能查到這筆 gRPC 建立的工作。
-        let job = web::backfill_admin::start_multiple_dividend_historical_dividends_job(year).await;
+        // 建立可能被拒絕（重複 job / 併行已滿），轉成對應的 gRPC 錯誤碼。
+        let job = web::backfill_admin::start_multiple_dividend_historical_dividends_job(year)
+            .await
+            .map_err(start_job_error_to_status)?;
         Ok(Response::new(BackfillJobResponse {
             job: Some(to_grpc_job(job)),
         }))
@@ -164,6 +182,21 @@ impl ManualBackfillService for ManualBackfillServiceImpl {
         Ok(Response::new(BackfillJobResponse {
             job: Some(to_grpc_job(job)),
         }))
+    }
+}
+
+/// 將建立 job 被拒絕的原因轉成對應的 gRPC 狀態碼。
+///
+/// - 相同 job 執行中 → `ALREADY_EXISTS`（對應 HTTP 409）。
+/// - 併行名額已滿 → `RESOURCE_EXHAUSTED`（對應 HTTP 429）。
+fn start_job_error_to_status(err: web::backfill_admin::StartJobError) -> Status {
+    match &err {
+        web::backfill_admin::StartJobError::DuplicateActiveJob { .. } => {
+            Status::already_exists(err.to_string())
+        }
+        web::backfill_admin::StartJobError::TooManyActiveJobs { .. } => {
+            Status::resource_exhausted(err.to_string())
+        }
     }
 }
 

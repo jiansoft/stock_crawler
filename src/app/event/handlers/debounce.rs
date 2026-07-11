@@ -46,7 +46,9 @@ impl TelegramDebouncer {
                 if !buf.is_empty() {
                     let merged = buf.join("\r\n");
                     buf.clear();
-                    let _ = crate::interfaces::bot::telegram::send(&merged).await;
+                    // 透過 AlertSink port 發送（app 層不直接依賴 interfaces::bot）；
+                    // 單元測試中未註冊 sink 時會降級為 warning log，不會真的送出。
+                    crate::core::alert::send_message(&merged).await;
                 }
             }
         });

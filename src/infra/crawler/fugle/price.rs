@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use reqwest::header::{self, HeaderValue};
 use rust_decimal::Decimal;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 
 use crate::{
     core::config::SETTINGS,
@@ -257,6 +257,56 @@ impl StockInfo for Fugle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 驗證官方回應的 serde 欄位對應（camelCase rename）與巢狀 lastTrade。
+    #[test]
+    fn quote_deserializes_official_response_shape() {
+        let body = r#"{
+            "symbol": "2330",
+            "type": "EQUITY",
+            "openPrice": 990.0,
+            "closePrice": 1000.0,
+            "lastPrice": 1001.0,
+            "changePercent": 1.52,
+            "change": 15.0,
+            "lastTrade": { "price": 1002.0, "size": 5, "time": 1760000000000 }
+        }"#;
+
+        let quote: Quote = serde_json::from_str(body).unwrap();
+
+        // 未列在結構中的欄位（symbol、type、size…）應被忽略而不是報錯。
+        assert_eq!(quote.open_price, Some(990.0));
+        assert_eq!(quote.change, Some(15.0));
+        assert_eq!(quote.change_percent, Some(1.52));
+        assert_eq!(quote.last_trade.as_ref().unwrap().price, 1002.0);
+    }
+
+    /// 驗證即時價的取值優先序：
+    /// lastTrade.price → lastPrice → closePrice → openPrice → 錯誤。
+    #[test]
+    fn current_price_falls_back_in_priority_order() {
+        let full: Quote = serde_json::from_str(
+            r#"{ "openPrice": 1.0, "closePrice": 2.0, "lastPrice": 3.0,
+                 "lastTrade": { "price": 4.0 } }"#,
+        )
+        .unwrap();
+        assert_eq!(current_price(&full).unwrap(), 4.0, "優先取 lastTrade");
+
+        let no_trade: Quote =
+            serde_json::from_str(r#"{ "openPrice": 1.0, "closePrice": 2.0, "lastPrice": 3.0 }"#)
+                .unwrap();
+        assert_eq!(current_price(&no_trade).unwrap(), 3.0, "次選 lastPrice");
+
+        let close_only: Quote =
+            serde_json::from_str(r#"{ "openPrice": 1.0, "closePrice": 2.0 }"#).unwrap();
+        assert_eq!(current_price(&close_only).unwrap(), 2.0, "再退 closePrice");
+
+        let open_only: Quote = serde_json::from_str(r#"{ "openPrice": 1.0 }"#).unwrap();
+        assert_eq!(current_price(&open_only).unwrap(), 1.0, "最後退 openPrice");
+
+        let empty: Quote = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(current_price(&empty).is_err(), "全缺值必須回錯，不能給 0");
+    }
 
     #[tokio::test]
     #[ignore]

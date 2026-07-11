@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, FixedOffset};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     core::util::{convert::FromValue, http},
@@ -60,7 +60,25 @@ pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
         return Ok(result);
     }
 
-    for item in listed.data {
+    result.extend(map_qfii_rows(listed.data));
+
+    Ok(result)
+}
+
+/// 將 TWSE `MI_QFIIS` API 的原始資料列整理成 [`QfiiDto`] 清單。
+///
+/// 這是一個「純函式」——輸入只有已反序列化的 JSON 資料列，不做任何網路 I/O，
+/// 可直接用組好的資料驗證（見下方測試）。
+///
+/// # 欄位對應（每列 12 欄）
+/// - `item[0]`＝股票代號、`item[3]`＝發行股數、
+///   `item[5]`＝外資及陸資持有股數、`item[7]`＝持股比率(%)。
+/// - 數值欄位是含千分位逗號的字串，逗號在轉型時自動去除。
+/// - 欄位數不是 12 的列（表尾統計、備註）直接略過。
+fn map_qfii_rows(data: Vec<Vec<serde_json::Value>>) -> Vec<QfiiDto> {
+    let mut result = Vec::with_capacity(data.len());
+
+    for item in data {
         if item.len() != 12 {
             continue;
         }
@@ -77,7 +95,7 @@ pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
         });
     }
 
-    Ok(result)
+    result
 }
 
 #[cfg(test)]
@@ -87,6 +105,43 @@ mod tests {
     use crate::infra::cache::SHARE;
 
     use super::*;
+    use rust_decimal_macros::dec;
+    use serde_json::json;
+
+    /// 以貼近 MI_QFIIS 真實回應形狀的資料驗證資料列整理流程。
+    ///
+    /// TWSE 的數值欄位都是「含千分位逗號的字串」，
+    /// 整理時要正確去逗號；欄位數不是 12 的列（表尾統計）要略過。
+    #[test]
+    fn map_qfii_rows_maps_rows_and_skips_malformed() {
+        let data: Vec<Vec<serde_json::Value>> = vec![
+            // 正常列：12 欄。[0]=代號、[3]=發行股數、[5]=外資持股、[7]=持股比率。
+            vec![
+                json!("2330"),
+                json!("台積電"),
+                json!("100.00"),
+                json!("25,932,070,990"),
+                json!("0"),
+                json!("19,381,867,412"),
+                json!("0"),
+                json!("74.74"),
+                json!("25.26"),
+                json!("100.00"),
+                json!("0.00"),
+                json!(""),
+            ],
+            // 欄位數不足的統計列 → 略過。
+            vec![json!("合計"), json!("123,456")],
+        ];
+
+        let result = map_qfii_rows(data);
+
+        assert_eq!(result.len(), 1, "欄位數不是 12 的列應被略過");
+        assert_eq!(result[0].stock_symbol, "2330");
+        assert_eq!(result[0].issued_share, 25_932_070_990);
+        assert_eq!(result[0].shares_held, 19_381_867_412);
+        assert_eq!(result[0].share_holding_percentage, dec!(74.74));
+    }
 
     #[tokio::test]
     #[ignore]

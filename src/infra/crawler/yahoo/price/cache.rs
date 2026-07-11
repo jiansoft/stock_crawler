@@ -114,11 +114,17 @@ pub fn start_caching_task() {
 
     // 先擋掉重複啟動，避免同一時間跑出多條背景輪詢迴圈，
     // 導致互相覆寫快取、重複打 API 或重複發價格事件。
-    if IS_CACHING.load(Ordering::SeqCst) {
+    //
+    // 以 compare_exchange 原子地「檢查並占用」啟動權：只有一個呼叫者能把
+    // false 換成 true，其餘並行呼叫者會失敗並直接返回。舊版「先 load 檢查、
+    // 再 store 設定」不是原子操作，兩個並行呼叫者可能同時通過檢查並各自
+    // 啟動一條背景迴圈（check-then-set 競態）。
+    if IS_CACHING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         return;
     }
-    // 一旦決定啟動，就先把旗標設為 true，後面任何其他呼叫者都會看到任務已啟動。
-    IS_CACHING.store(true, Ordering::SeqCst);
     let generation = LAST_TASK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
     // 真正的輪詢工作放到背景 task 執行，避免阻塞呼叫端。
@@ -254,10 +260,11 @@ pub fn start_caching_task() {
                                 let sector_id = category.sector_id;
                                 let err_msg_clone = err_msg.clone();
 
-                                // 透過 tokio::spawn 非同步發送警報，避免阻塞爬蟲主流程
+                                // 透過 tokio::spawn 非同步發送警報，避免阻塞爬蟲主流程。
+                                // 走 core::alert 抽象介面（實際管道由 main 註冊的 adapter 決定），
+                                // infra 層不再直接依賴 interfaces::bot（反向耦合已移除）。
                                 tokio::spawn(async move {
-                                    // 發送警報至 Telegram Bot
-                                    crate::interfaces::bot::telegram::send_alert(
+                                    crate::core::alert::send_alert(
                                         "Yahoo 類股採集遭遇阻擋",
                                         &format!(
                                             "類股: {} {}({})\n原因: {}\n該次更新將強制冷卻 10 分鐘，1小時內不重複提醒。",

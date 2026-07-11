@@ -70,7 +70,7 @@ impl DailyMoneyHistoryDetail {
 
         result.context(format!(
             "Failed to delete({}) daily_money_history_detail from database",
-            &date
+            date
         ))
     }
 
@@ -197,6 +197,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_delete_and_upsert() {
         dotenvy::dotenv().ok();
         if database::ping().await.is_err() {

@@ -124,6 +124,9 @@ pub fn no_valid_data_cache_key(stock_symbol: &str) -> String {
 
 /// 從雅虎抓取指定股票的 profile 資訊（包含財務比率、獲利能力等指標）。
 ///
+/// 只負責 HTTP 抓取，解析工作交給 [`parse_profile_html`]（fetch/parse 分離，
+/// 解析邏輯才能被 fixture 單元測試覆蓋，不需要真的連 Yahoo）。
+///
 /// # 參數
 /// * `stock_symbol` - 股票代碼 (例如: "2330")
 ///
@@ -132,7 +135,24 @@ pub fn no_valid_data_cache_key(stock_symbol: &str) -> String {
 pub async fn visit(stock_symbol: &str) -> Result<Profile> {
     let url = format!("https://{}/quote/{}/profile", HOST, stock_symbol);
     let text = util::http::get(&url, None).await?;
-    let document = Html::parse_document(&text);
+    parse_profile_html(stock_symbol, &url, &text)
+}
+
+/// 解析 Yahoo profile 頁面的 HTML，取出財務比率與獲利能力指標。
+///
+/// 這是一個「純函式」——輸入只有 HTML 字串，不做任何網路 I/O，
+/// 可用 `testdata/profile_page.html` fixture 直接驗證整頁解析流程。
+///
+/// # 解析流程（對照 Yahoo 頁面結構）
+/// 1. 以 `BASE_SELECTOR` 定位「獲利能力」區塊（Proxy 容器下的第三個 section）。
+/// 2. 從區塊的第二個 `div.D(f)` 讀出「2025 Q3」形式的年度與季度。
+/// 3. 各項比率位於 CSS Grid（`table-grid`）的第 1～6 格，依序為：
+///    毛利率、ROA、營益率、ROE、稅前淨利率、每股淨值。
+/// 4. EPS 位於區塊的第四個 div 之下，層級不同需獨立解析。
+/// 5. 防禦性檢查：年份與 EPS 同時為 0 視為「頁面存在但無有效資料」，
+///    回傳 [`NoValidProfileDataError`] 讓 backfill 流程降級處理。
+fn parse_profile_html(stock_symbol: &str, url: &str, text: &str) -> Result<Profile> {
+    let document = Html::parse_document(text);
 
     // 取得主要數據區塊
     let section = document.select(&BASE_SELECTOR).next().with_context(|| {
@@ -151,7 +171,12 @@ pub async fn visit(stock_symbol: &str) -> Result<Profile> {
         && let Some(quarter_match) = REG_QUARTER.find(&year_and_quarter_text)
     {
         profile.quarter = quarter_match.as_str().to_uppercase();
-        if let Ok(year) = year_and_quarter_text[0..4].parse::<i32>() {
+        // 用 .get(0..4) 取代 [0..4]：外部頁面文字可能以中文開頭（每字 3 bytes），
+        // byte 4 落在字元中間時，[0..4] 會 panic，而 .get 只會回傳 None。
+        // 取不到合法年份時保持 profile.year 為 0，交由下方防禦性檢查判斷。
+        if let Some(year_str) = year_and_quarter_text.get(0..4)
+            && let Ok(year) = year_str.parse::<i32>()
+        {
             profile.year = year;
         }
     }
@@ -172,7 +197,7 @@ pub async fn visit(stock_symbol: &str) -> Result<Profile> {
     if profile.year == 0 && profile.earnings_per_share.is_zero() {
         return Err(NoValidProfileDataError {
             stock_symbol: stock_symbol.to_string(),
-            url,
+            url: url.to_string(),
         }
         .into());
     }
@@ -189,6 +214,72 @@ fn parse_field(element: &scraper::ElementRef, base: &str, child_index: u32) -> D
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
+
+    /// 以貼近真實 profile 頁形狀的 fixture 驗證整頁解析流程。
+    ///
+    /// 涵蓋三個層級的定位：Proxy 容器下的第三個 section、
+    /// `div.D(f)` 的年度季度文字、CSS Grid 六格比率與獨立層級的 EPS。
+    /// Yahoo 改版時只要用瀏覽器存一份新回應更新 fixture，
+    /// 測試立即反映哪一段 selector 需要調整。
+    #[test]
+    fn parse_profile_html_parses_fixture() {
+        // include_str! 的路徑相對於本檔案（yahoo/profile.rs）→ yahoo/testdata/。
+        const FIXTURE: &str = include_str!("testdata/profile_page.html");
+
+        let profile =
+            parse_profile_html("2330", "https://example.test/quote/2330/profile", FIXTURE).unwrap();
+
+        // 年度與季度來自「2025 Q3」文字：前 4 碼是年份，正則抓出季度。
+        assert_eq!(profile.year, 2025);
+        assert_eq!(profile.quarter, "Q3");
+        assert_eq!(profile.stock_symbol, "2330");
+
+        // Grid 第 1～6 格：毛利率、ROA、營益率、ROE、稅前淨利率、每股淨值。
+        assert_eq!(profile.gross_profit, dec!(58.6));
+        assert_eq!(profile.return_on_assets, dec!(12.9));
+        assert_eq!(profile.operating_profit_margin, dec!(48.1));
+        assert_eq!(profile.return_on_equity, dec!(26.3));
+        assert_eq!(profile.pre_tax_income, dec!(53.2));
+        assert_eq!(profile.net_asset_value_per_share, dec!(158.9));
+
+        // EPS 位於另一個 grid 的第 3 格（層級不同，獨立解析）。
+        assert_eq!(profile.earnings_per_share, dec!(15.36));
+    }
+
+    /// 頁面有 profile 區塊、但年份與 EPS 都解析不到時，
+    /// 應回傳 NoValidProfileDataError（可被 is_no_valid_data_error 辨識），
+    /// 讓 backfill 流程把它當「暫時無資料」降級處理，而不是一般錯誤。
+    #[test]
+    fn parse_profile_html_reports_no_valid_data_for_empty_section() {
+        let html = r#"
+            <div id="main-2-QuoteProfile-Proxy"><div>
+                <section>1</section>
+                <section>2</section>
+                <section><h2>獲利能力</h2><div class="D(f)">尚無資料</div></section>
+            </div></div>
+        "#;
+
+        let error = parse_profile_html("7811", "https://example.test/quote/7811/profile", html)
+            .unwrap_err();
+        assert!(is_no_valid_data_error(&error));
+    }
+
+    /// 整頁缺少 profile 區塊（載到錯誤頁）時，回傳的是一般解析錯誤，
+    /// 不應被誤判為「無有效資料」的暫時性跳過。
+    #[test]
+    fn parse_profile_html_rejects_page_without_profile_section() {
+        let error = parse_profile_html(
+            "2330",
+            "https://example.test/quote/2330/profile",
+            "<html><body><h1>404</h1></body></html>",
+        )
+        .unwrap_err();
+
+        assert!(!is_no_valid_data_error(&error));
+        assert!(error.to_string().contains("profile section"));
+    }
+
     #[test]
     fn test_is_no_valid_data_error() {
         let err: anyhow::Error = NoValidProfileDataError {

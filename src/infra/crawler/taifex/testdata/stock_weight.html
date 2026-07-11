@@ -1,0 +1,35 @@
+<!--
+  依臺指期「futuresQADetail」（上市權重）頁精簡而成的測試 fixture。
+
+  解析器（parse_stock_weight_html）依賴的結構：
+  - 上市版資料列 selector：#printhere > div > div > table > tbody > tr。
+  - 「一列兩檔」雙欄版面：td 1~4＝左半（排名/代號/名稱/權重）、
+    td 5~8＝右半。權重帶 %（由預設清單去除）。
+
+  本 fixture 刻意涵蓋的情境：
+  1. 表頭列 → 代號欄非空但權重解析為 0 → 兩半邊都被略過。
+  2. 完整列（左右各一檔）。
+  3. 檔數為奇數時的最後一列 → 右半空白，只解析左半。
+-->
+<div id="printhere">
+  <div>
+    <div>
+      <table>
+        <tbody>
+          <tr>
+            <td>排名</td><td>證券代號</td><td>證券名稱</td><td>市值佔大盤比重</td>
+            <td>排名</td><td>證券代號</td><td>證券名稱</td><td>市值佔大盤比重</td>
+          </tr>
+          <tr>
+            <td>1</td><td>2330</td><td>台積電</td><td>34.61%</td>
+            <td>2</td><td>2317</td><td>鴻海</td><td>3.55%</td>
+          </tr>
+          <tr>
+            <td>3</td><td>2454</td><td>聯發科</td><td>3.12%</td>
+            <td></td><td></td><td></td><td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

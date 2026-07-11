@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::{Client, Method, RequestBuilder, Response, header, header::SET_COOKIE};
@@ -29,6 +29,54 @@ static CLIENT: OnceCell<Client> = OnceCell::new();
 const MAX_NETWORK_RETRIES: u32 = 3;
 /// HTTP 429 Too Many Requests 的最大重試次數。
 const MAX_RATE_LIMIT_RETRIES: u32 = 3;
+/// HTTP 回應 body 的大小上限（8 MiB）。
+///
+/// 正常來源（TWSE/TPEx JSON、財經網站頁面）最大約 1～2 MiB，8 MiB 已留足
+/// 餘裕；異常或惡意的 upstream 若回傳超大 body，舊版會全部讀進記憶體，
+/// 可能造成高記憶體使用甚至 OOM。超限時中止讀取並回傳錯誤。
+const MAX_RESPONSE_BODY_BYTES: usize = 8 * 1024 * 1024;
+
+/// 以「逐塊讀取 + 大小上限」讀取 HTTP 回應 body。
+///
+/// 讀取策略（保母級說明）：
+/// 1. 若回應有 `Content-Length` 標頭，先檢查宣告大小——超限就連第一個
+///    位元組都不讀，直接回報錯誤。
+/// 2. 沒有或通過宣告檢查後，改用 `Response::chunk()` 一塊一塊地讀；
+///    每讀一塊就累計大小，超過上限立即中止（`Content-Length` 可以造假
+///    或缺席，所以實際讀取仍要逐塊把關）。
+///
+/// 這取代了 `res.bytes()` / `res.text()` 這類「一次全部讀進記憶體、
+/// 沒有上限」的讀法。
+async fn read_limited_body(mut res: Response, url: &str) -> Result<Vec<u8>> {
+    // 錯誤訊息中的 URL 一律先脫敏，避免把 Telegram token 等敏感片段寫進 log。
+    let safe_url = redact_url(url);
+
+    // 第一道：宣告大小檢查（若 upstream 有提供）。
+    if let Some(content_length) = res.content_length()
+        && content_length > MAX_RESPONSE_BODY_BYTES as u64
+    {
+        bail!(
+            "response body too large for {safe_url}: content-length {content_length} bytes exceeds limit {MAX_RESPONSE_BODY_BYTES}"
+        );
+    }
+
+    // 第二道：實際逐塊累積，逐塊檢查。chunk() 回傳 Ok(None) 代表 body 讀完。
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = res
+        .chunk()
+        .await
+        .with_context(|| format!("Error reading response body from {safe_url}"))?
+    {
+        if body.len() + chunk.len() > MAX_RESPONSE_BODY_BYTES {
+            bail!(
+                "response body too large for {safe_url}: exceeds limit {MAX_RESPONSE_BODY_BYTES} bytes"
+            );
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    Ok(body)
+}
 
 #[derive(Serialize, Deserialize)]
 /// An empty struct to represent an empty request or response.
@@ -70,9 +118,10 @@ fn get_client() -> Result<&'static Client> {
 
         Client::builder()
             // ===== 壓縮 =====
+            // Accept-Encoding 是協商式的：只宣告 gzip/brotli，站方會自動改用支援的編碼。
+            // 不啟用 zstd 以減少一個原生解壓依賴（Cargo.toml 已移除該 feature）。
             .brotli(true)
             .gzip(true)
-            .zstd(true)
             // ===== 超時設置 =====
             .connect_timeout(Duration::from_secs(8))
             .timeout(Duration::from_secs(15))
@@ -97,7 +146,8 @@ fn get_client() -> Result<&'static Client> {
             .referer(true)
             .user_agent(user_agent::gen_random_ua())
             .build()
-            .map_err(|e| anyhow!("Failed to create reqwest client: {:?}", e))
+            // context 保留 reqwest 原始錯誤在 source chain，不再壓成純文字。
+            .context("Failed to create reqwest client")
     })
 }
 
@@ -117,26 +167,26 @@ fn get_client() -> Result<&'static Client> {
 pub async fn get_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
     let res = get_response(url, None).await?;
     let status = res.status();
-    let res_body = res
-        .bytes()
-        .await
-        .map_err(|e| anyhow!("Error reading response body from {}: {}", url, e))?;
+    // 以「串流 + 大小上限」讀取 body，取代無上限的 res.bytes()。
+    let res_body = read_limited_body(res, url).await?;
     let res_body_preview = String::from_utf8_lossy(res_body.as_ref());
+    let safe_url = redact_url(url);
 
     if !status.is_success() {
         return Err(anyhow!(
             "HTTP request failed with status {} for {}. Body: {}",
             status,
-            url,
+            safe_url,
             util::text::truncate(&res_body_preview, 200)
         ));
     }
 
-    serde_json::from_slice(res_body.as_ref()).map_err(|e| {
-        anyhow!(
-            "Error parsing response JSON from {}: {:?}. Body: {}",
-            url,
-            e,
+    // with_context 保留 serde 原始錯誤在 source chain；
+    // 錯誤訊息中的 body 一律用 truncate 依字元截斷成固定長度片段。
+    serde_json::from_slice(res_body.as_ref()).with_context(|| {
+        format!(
+            "Error parsing response JSON from {}. Body: {}",
+            safe_url,
             util::text::truncate(&res_body_preview, 200)
         )
     })
@@ -172,11 +222,14 @@ pub(crate) async fn get_response_with_client(
 ///
 /// * `Result<String>`: The response text, or an error if the request fails or the response cannot be parsed.
 pub async fn get(url: &str, headers: Option<header::HeaderMap>) -> Result<String> {
+    // context 保留 reqwest 原始錯誤在 source chain。
+    // 注意：text() 會依 Content-Type 的 charset 解碼，因此這裡不改用
+    // read_limited_body（其為原始位元組，套 UTF-8 lossy 會弄壞非 UTF-8 頁面）。
     get_response(url, headers)
         .await?
         .text()
         .await
-        .map_err(|e| anyhow!("Error parsing response text: {:?}", e))
+        .context("Error parsing response text")
 }
 
 /// 從 HTTP 回應標頭萃取 `Set-Cookie` 並串成單一 cookie 字串。
@@ -208,11 +261,12 @@ pub fn extract_cookies(response: &Response) -> Option<String> {
 ///
 /// * `Result<String>`: The Big5 encoded response text, or an error if the request fails or the response cannot be parsed.
 pub async fn get_use_big5(url: &str) -> Result<String> {
+    // context 保留底層錯誤在 source chain。
     send(Method::GET, url, None, None::<fn(_) -> _>, None)
         .await?
         .text_force_big5()
         .await
-        .map_err(|e| anyhow!("Error parsing response text use BIG5: {:?}", e))
+        .context("Error parsing response text use BIG5")
 }
 
 /// Performs an HTTP POST request with JSON request and response, and specified headers.
@@ -253,19 +307,20 @@ where
     )
     .await?;
 
-    /*res.json::<RES>()
-    .await
-    .map_err(|why| anyhow!("Error parsing response JSON: {:?}", why))*/
-    let res_body = res
-        .text()
-        .await
-        .map_err(|e| anyhow!("Error reading response body: {}", e))?;
+    // 以「串流 + 大小上限」讀取 body，取代無上限的 res.text()。
+    let res_body = read_limited_body(res, url).await?;
+    let res_body_preview = String::from_utf8_lossy(res_body.as_ref());
 
-    // Print the response body
-    //println!("Response body: {}", res_body);
-
-    serde_json::from_str(&res_body)
-        .map_err(|e| anyhow!("Error parsing response JSON({}): {:?}", &res_body, e))
+    // with_context 保留 serde 原始錯誤在 source chain。
+    // 錯誤訊息中的 body 改為固定長度片段（舊版會把「整份 body」塞進錯誤，
+    // 造成大型 log，回應含敏感內容時也可能整段被寫進日誌）。
+    serde_json::from_slice(res_body.as_ref()).with_context(|| {
+        format!(
+            "Error parsing response JSON from {}. Body: {}",
+            redact_url(url),
+            util::text::truncate(&res_body_preview, 200)
+        )
+    })
 }
 
 /// Performs an HTTP POST request with form data and specified headers, and returns the response as text.
@@ -301,10 +356,8 @@ pub async fn post(
         None => send(Method::POST, url, headers, body_fn, None).await?,
     };
 
-    response
-        .text()
-        .await
-        .map_err(|why| anyhow!("Error parsing response text: {:?}", why))
+    // context 保留 reqwest 原始錯誤在 source chain。
+    response.text().await.context("Error parsing response text")
 }
 
 /// 以指定方法、URL、headers、body 發送 HTTP 請求，含雙層重試：
@@ -354,9 +407,11 @@ async fn send_with_client(
     let mut rate_limit_attempt = 0u32;
 
     loop {
+        // 複製 RequestBuilder 以供重試使用。
+        // 如果複製失敗（例如 RequestBuilder 中包含串流），則將 URL 脫敏後回傳錯誤，避免洩漏 Token。
         let rb_clone = rb
             .try_clone()
-            .ok_or_else(|| anyhow!("Failed to clone RequestBuilder for {url}"))?;
+            .ok_or_else(|| anyhow!("Failed to clone RequestBuilder for {}", redact_url(url)))?;
 
         let (res, elapsed_ms) = {
             let _permit = SEMAPHORE.acquire().await;
@@ -368,9 +423,11 @@ async fn send_with_client(
         match res {
             Ok(response) => {
                 let status = response.status();
+                // 成功回應，先將敏感的 URL 進行脫敏遮罩處理（例如隱藏 Telegram Token），然後再記錄日誌。
+                let safe_url = redact_url(url);
 
                 tracing::info!(
-                    url = url,
+                    url = %safe_url,
                     method = method.as_str(),
                     status = status.as_u16(),
                     elapsed_ms,
@@ -385,7 +442,7 @@ async fn send_with_client(
                     if rate_limit_attempt <= MAX_RATE_LIMIT_RETRIES {
                         let delay = rate_limit_backoff(rate_limit_attempt);
                         tracing::warn!(
-                            url = url,
+                            url = %safe_url,
                             attempt = rate_limit_attempt,
                             delay_ms = delay.as_millis() as u64,
                             "http.rate_limited"
@@ -394,15 +451,18 @@ async fn send_with_client(
                         continue;
                     }
                     return Err(anyhow!(
-                        "Rate limited (429) at {url} after {rate_limit_attempt} retries"
+                        "Rate limited (429) at {} after {rate_limit_attempt} retries",
+                        safe_url
                     ));
                 }
 
-                // ── 403 Forbidden：Telegram 告警，不重試 ──────────────────
+                // ── 403 Forbidden：發送系統告警，不重試 ──────────────────
+                // 透過 core::alert 抽象介面發送（實際管道由 main 註冊的 adapter 決定），
+                // core 層不再直接依賴 interfaces::bot（反向耦合已移除）。
                 if status == reqwest::StatusCode::FORBIDDEN && !url.contains("api.telegram.org") {
                     let alert_url = url.to_string();
                     tokio::spawn(async move {
-                        crate::interfaces::bot::telegram::send_alert(
+                        crate::core::alert::send_alert(
                             "爬蟲遭遇 IP 阻擋 (403)",
                             &format!("請求網址: {alert_url}"),
                         )
@@ -415,8 +475,9 @@ async fn send_with_client(
             Err(why) => {
                 network_attempt += 1;
                 let err_str = format!("{why:?}");
+                let safe_url = redact_url(url);
                 tracing::error!(
-                    url = url,
+                    url = %safe_url,
                     attempt = network_attempt,
                     error = %err_str,
                     elapsed_ms,
@@ -425,8 +486,9 @@ async fn send_with_client(
 
                 if network_attempt >= MAX_NETWORK_RETRIES {
                     return Err(anyhow!(
-                        "Failed to send {url} after {network_attempt} network retries; \
-                         last error: {err_str}"
+                        "Failed to send {} after {network_attempt} network retries; \
+                         last error: {err_str}",
+                        safe_url
                     ));
                 }
 
@@ -434,6 +496,48 @@ async fn send_with_client(
                 tokio::time::sleep(Duration::from_secs(2u64.pow(network_attempt))).await;
             }
         }
+    }
+}
+
+/// 關於 URL 敏感資訊過濾
+///
+/// 去除 URL 中的敏感資訊（例如 Telegram Bot Token）以避免洩露在日誌中。
+///
+/// ### 背景原因：
+/// Telegram API URL 的路徑結構為 `https://api.telegram.org/bot<TOKEN>/sendMessage`。
+/// 如果直接輸出原始 URL，任何能讀取日誌（Stdout、檔案、或外部 Seq 日誌分析工具）的人，
+/// 都能輕易獲取此 Token，進而控制機器人發送惡意訊息。
+///
+/// ### 實作原理（安全且無 Regex 效能開銷）：
+/// 1. 尋找 URL 中是否包含 Telegram 的 `/bot` 字眼。
+/// 2. 若有，則利用 ASCII 的 `/bot` 長度為 4 字節特性進行切片取得 Token 開始位置，這可確保不會發生非 ASCII 字元切片導致 Rust 崩潰（panic）的問題。
+/// 3. 在 Token 開始位置後方尋找第一個 `/`（代表 Token 結束與下一個 API 方法開始）。
+/// 4. 將該 Token 部分替換成 `<redacted>` 遮罩後重組 URL。
+/// 5. 若找不到後續斜線，代表整個 URL 在 Token 處就結束了，直接附加 `<redacted>` 後返回。
+///
+/// # 參數
+/// * `url` - 原始的 URL 字串。
+///
+/// # 回傳值
+/// 返回脫敏（隱藏 Token）後的安全 URL 字串。
+pub fn redact_url(url: &str) -> String {
+    // 尋找 URL 中是否包含 Telegram Bot Token 的關鍵路徑特徵 "/bot"
+    if let Some(bot_pos) = url.find("/bot") {
+        // 由於 "/bot" 是 ASCII 字元，長度固定為 4 byte，因此 bot_pos + 4 絕對是合法的 UTF-8 邊界
+        let after_bot = &url[bot_pos + 4..];
+
+        // 尋找 token 後方的第一個 "/" 分隔符號（例如 /sendMessage）
+        if let Some(slash_pos) = after_bot.find('/') {
+            let rest = &after_bot[slash_pos..];
+            // 重組 URL，將敏感 Token 替換為 <redacted> 遮罩
+            format!("{}<redacted>{}", &url[..bot_pos + 4], rest)
+        } else {
+            // 若 token 後方沒有其他路徑（例如 https://api.telegram.org/botTOKEN 結尾），直接在 "/bot" 後方加上遮罩
+            format!("{}<redacted>", &url[..bot_pos + 4])
+        }
+    } else {
+        // 若不包含 "/bot"，代表是不含敏感 Token 的一般爬蟲網址（例如證交所 API），不進行任何脫敏處理，直接返回原 URL 的複本。
+        url.to_string()
     }
 }
 
@@ -545,5 +649,20 @@ mod tests {
         let params = HashMap::new();
         let result = format_form_params_log(&params);
         assert_eq!(result, "params=[]");
+    }
+
+    #[test]
+    fn test_redact_url() {
+        let normal_url = "https://www.twse.com.tw/exchangeReport/FMTQIK?response=json";
+        assert_eq!(redact_url(normal_url), normal_url);
+
+        let tg_url_with_path =
+            "https://api.telegram.org/bot123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ/sendMessage";
+        let expected_path = "https://api.telegram.org/bot<redacted>/sendMessage";
+        assert_eq!(redact_url(tg_url_with_path), expected_path);
+
+        let tg_url_no_path = "https://api.telegram.org/bot123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ";
+        let expected_no_path = "https://api.telegram.org/bot<redacted>";
+        assert_eq!(redact_url(tg_url_no_path), expected_no_path);
     }
 }

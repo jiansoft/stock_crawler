@@ -126,6 +126,7 @@ mod tests {
     use crate::infra::crawler::bank_of_taiwan;
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_visit() {
         match bank_of_taiwan::fund::fund_list::visit().await {
             Ok(ip) => {

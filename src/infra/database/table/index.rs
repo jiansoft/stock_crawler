@@ -76,7 +76,7 @@ LIMIT 30;
             .map_err(|why| {
                 anyhow!(
                     "Failed to Index::fetch() from database\nsql:{}\n {:?}",
-                    &sql,
+                    sql,
                     why
                 )
             })
@@ -246,6 +246,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_index_fetch() {
         dotenvy::dotenv().ok();
         let r = Index::fetch().await.unwrap();

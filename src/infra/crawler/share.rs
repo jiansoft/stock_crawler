@@ -77,14 +77,55 @@ pub trait AnnualProfitFetcher {
     async fn visit(stock_symbol: &str) -> Result<Vec<AnnualProfit>>;
 }
 
+/// 抓取並解析「年度獲利」頁面（MoneyDJ 與 FBS 共用相同的頁面結構）。
+///
+/// ## 設計說明：fetch 與 parse 分離
+///
+/// 這個函式刻意「很薄」——只負責發出 HTTP 請求拿到 HTML 文字，
+/// 然後把文字交給純函式 [`parse_annual_profits_html`] 解析。
+/// 好處是解析邏輯（最容易因站方改版而出錯、也最值得測試的部分）
+/// 可以用本機的 fixture 檔案做單元測試，完全不需要連線真實網站；
+/// 網路層的行為（timeout、重試）則由 `core::util::http` 統一負責。
 pub(super) async fn fetch_annual_profits(
     url: &str,
     stock_symbol: &str,
 ) -> Result<Vec<AnnualProfit>, CrawlerError> {
+    // 保留 anyhow 錯誤鏈：message 只放頂層摘要，完整原因交給 source。
     let text = util::http::get(url, None)
         .await
-        .map_err(|e| CrawlerError::Network(e.to_string()))?;
-    let document = Html::parse_document(&text);
+        .map_err(|e| CrawlerError::Network {
+            message: e.to_string(),
+            source: e.into(),
+        })?;
+
+    // 拿到 HTML 文字後，解析全部交給下面的純函式。
+    parse_annual_profits_html(&text, stock_symbol)
+}
+
+/// 解析「年度獲利」頁面 HTML 的純函式。
+///
+/// ## 為什麼抽成純函式
+///
+/// 「純函式」的意思是：給同樣的輸入（HTML 字串）永遠得到同樣的輸出，
+/// 不做任何 I/O（不連網路、不碰資料庫）。因此測試它只需要準備一份
+/// HTML 檔案（fixture，見 `testdata/annual_profit.html`），
+/// 用 `include_str!` 在編譯期嵌入後直接呼叫斷言即可——
+/// 測試快、穩定、離線可跑，站方改版時也能第一時間用新頁面重現問題。
+///
+/// ## 逐步說明
+///
+/// 1. `Html::parse_document`：把 HTML 文字解析成可查詢的 DOM 樹。
+/// 2. CSS 選擇器 `#oMainTable > tbody > tr:nth-child(n+4)`：
+///    - `#oMainTable`＝id 為 oMainTable 的表格（頁面的主資料表）。
+///    - `tr:nth-child(n+4)`＝從第 4 列開始的所有列——前 3 列是表頭，不含資料。
+/// 3. 逐列交給 [`parse_annual_profit`] 解析；格式不符的列（欄位不足、
+///    年度不是數字等）回傳 `None` 被安靜略過，不會讓整頁解析失敗——
+///    這是刻意的容錯：表尾的合計列或站方插入的廣告列不應中斷正常資料。
+pub(super) fn parse_annual_profits_html(
+    html: &str,
+    stock_symbol: &str,
+) -> Result<Vec<AnnualProfit>, CrawlerError> {
+    let document = Html::parse_document(html);
     let selector = Selector::parse("#oMainTable > tbody > tr:nth-child(n+4)")
         .map_err(|why| CrawlerError::Scraper(format!("{why:?}")))?;
     let mut result: Vec<AnnualProfit> = Vec::with_capacity(24);
@@ -98,9 +139,22 @@ pub(super) async fn fetch_annual_profits(
     Ok(result)
 }
 
+/// 解析單一資料列（`<tr>`）為 [`AnnualProfit`]。
+///
+/// 回傳 `Option` 而不是 `Result`：`None` 代表「這一列不是合法資料列」
+/// （例如表尾合計列、欄位不足的裝飾列），呼叫端會直接略過，
+/// 讓其餘正常列的解析不受影響。
+///
+/// 欄位對照（`node.text()` 依序取出 `<td>` 內的文字節點）：
+/// - index 0：年度（民國年，需轉西元）
+/// - index 5：每股營收
+/// - index 6：每股稅前淨利
+/// - index 7：每股稅後盈餘（EPS）——這欄解析失敗視為整列無效，
+///   因為 EPS 是這張表的核心欄位；5、6 欄壞掉則以 0 代替、保留該列。
 fn parse_annual_profit(node: ElementRef, stock_symbol: &str) -> Option<AnnualProfit> {
     let tds: Vec<&str> = node.text().map(str::trim).collect();
 
+    // 文字節點不足 8 個代表欄位不完整（表頭殘留或裝飾列），整列略過。
     if tds.len() < 8 {
         return None;
     }
@@ -391,6 +445,118 @@ impl From<Vec<String>> for RevenueDto {
     }
 }
 
+/// 每日收盤報價欄位解析錯誤。
+///
+/// 這個錯誤型別讓「來源格式壞掉」與「真的沒有資料」可以被區分開來：
+///
+/// - [`QuoteParseError::MissingField`]：來源少了必要欄位，通常代表對方改了
+///   欄位名稱或順序——舊版程式會默默補 0，導致半套資料寫進資料庫。
+/// - [`QuoteParseError::InvalidDecimal`]：欄位內容不是數字、也不是已知的
+///   「無資料」佔位符（例如 `--`），代表內容被污染或格式變更。
+///
+/// 兩種情況都應該讓該列資料被「拒絕」而不是以零值入庫；
+/// 呼叫端再依拒絕比例決定要跳過少數壞列，還是整批失敗。
+#[derive(Debug, thiserror::Error)]
+pub enum QuoteParseError {
+    /// 來源資料缺少必要欄位（欄位名稱不存在，或該列長度不足）。
+    #[error("missing field `{field}` in quote row")]
+    MissingField {
+        /// 缺少的欄位名稱。
+        field: &'static str,
+    },
+    /// 欄位內容無法解析成數值，且不是已知的「無資料」佔位符。
+    #[error("invalid decimal for field `{field}`: `{raw}`")]
+    InvalidDecimal {
+        /// 解析失敗的欄位名稱。
+        field: &'static str,
+        /// 原始字串內容，保留下來方便對照來源網頁除錯。
+        raw: String,
+        /// 底層的 decimal 解析錯誤（保留 source chain）。
+        #[source]
+        source: rust_decimal::Error,
+    },
+}
+
+/// 判斷欄位內容是否為來源的「無資料」佔位符。
+///
+/// TWSE/TPEx 對「當日無成交、無委買賣」的價格欄位會回傳 `--`（或多個連字號）、
+/// 空字串，部分來源用 `N/A`。這些是合法的「沒有值」，應轉成 0 而不是解析錯誤；
+/// 注意負數如 `-5.00` 含有數字，不會被此規則誤判。
+fn is_no_data_placeholder(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    trimmed.is_empty() || trimmed.chars().all(|c| c == '-') || trimmed.eq_ignore_ascii_case("n/a")
+}
+
+/// 解析單一報價欄位為 `Decimal`。
+///
+/// 規則（依序）：
+/// 1. 「無資料」佔位符（`--`、空白、`N/A`）→ 回傳 0，這是合法情況。
+/// 2. 移除千分位逗號後可解析 → 回傳數值。
+/// 3. 其餘 → 回傳 [`QuoteParseError::InvalidDecimal`]，讓呼叫端拒絕該列，
+///    而不是像舊版 `unwrap_or_default()` 那樣默默寫入 0。
+pub(crate) fn parse_quote_decimal(
+    field: &'static str,
+    raw: &str,
+) -> Result<Decimal, QuoteParseError> {
+    if is_no_data_placeholder(raw) {
+        return Ok(Decimal::ZERO);
+    }
+
+    // 千分位逗號（例如 "1,234,567"）不是數字的一部分，先移除再解析。
+    let cleaned = raw.replace(',', "");
+    cleaned
+        .trim()
+        .parse::<Decimal>()
+        .map_err(|source| QuoteParseError::InvalidDecimal {
+            field,
+            raw: raw.to_owned(),
+            source,
+        })
+}
+
+/// 解析「軟性」報價欄位：解析失敗時記 warning 並回傳 0，而不是拒絕整列。
+///
+/// 用於「漲跌價差」這類欄位——除權息日等特殊情況下，來源可能在此欄放
+/// 非數字標記。漲跌為 0 的傷害有限（漲跌幅稍後會用前一交易日收盤價重算），
+/// 為了這一欄拒絕整列反而會遺失開高低收等重要資料，因此採取寬鬆策略。
+/// 價格與量能欄位仍使用嚴格的 [`parse_quote_decimal`]。
+fn parse_soft_quote_decimal(field: &'static str, raw: &str) -> Decimal {
+    match parse_quote_decimal(field, raw) {
+        Ok(value) => value,
+        Err(why) => {
+            tracing::warn!("quote field fallback to zero: {why}");
+            Decimal::ZERO
+        }
+    }
+}
+
+/// 檢查「被拒絕的資料列」比例是否仍在容忍範圍內。
+///
+/// 單一壞列可能只是來源偶發雜訊，跳過即可；但大量壞列幾乎可以肯定是
+/// 來源格式變更（欄位改名、欄位順序調整）。此時寧可讓整批抓取失敗、
+/// 觸發告警請人來調查，也不要把大量缺漏的行情資料寫進資料庫。
+///
+/// 門檻：拒絕比例超過 10% 即回傳錯誤；低於門檻時只記 warning。
+pub(crate) fn ensure_rejected_rows_within_threshold(
+    source: &str,
+    rejected: usize,
+    total: usize,
+) -> Result<(), CrawlerError> {
+    if rejected == 0 {
+        return Ok(());
+    }
+
+    // rejected * 10 > total 等價於 rejected / total > 10%，用整數運算避免浮點誤差。
+    if rejected * 10 > total {
+        return Err(CrawlerError::Parse(format!(
+            "{source}: rejected {rejected}/{total} quote rows, source format may have changed"
+        )));
+    }
+
+    tracing::warn!("{source}: rejected {rejected}/{total} quote rows during parsing");
+    Ok(())
+}
+
 /// 每日收盤報價爬蟲載體 (DTO)。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DailyQuoteDto {
@@ -455,122 +621,171 @@ impl DailyQuoteDto {
     }
 
     /// 依欄位名稱映射，從單筆原始字串資料建立 `DailyQuoteDto`。
+    ///
+    /// `map` 是「欄位名稱 → 欄位索引」的對照表（由呼叫端從來源的表頭建立），
+    /// 適用於欄位順序可能變動的來源（例如 TWSE MI_INDEX）。
+    ///
+    /// # Errors
+    ///
+    /// - 任何必要欄位在 `map` 中不存在、或該列長度不足時，
+    ///   回傳 [`QuoteParseError::MissingField`]（通常代表來源改了欄位名稱）。
+    /// - 欄位內容不是數字、也不是 `--` 等「無資料」佔位符時，
+    ///   回傳 [`QuoteParseError::InvalidDecimal`]。
+    ///
+    /// 舊版對上述兩種情況都默默補 0，導致資料庫可能寫入「部分欄位為零」的
+    /// 半套行情；現在改為把整列拒絕，由呼叫端統計拒絕比例決定後續處理。
     pub fn from_with_map(
         item: &[String],
         map: &std::collections::HashMap<&str, usize>,
         date: NaiveDate,
-    ) -> Self {
-        let code = map
-            .get("證券代號")
-            .and_then(|&i| item.get(i))
-            .cloned()
-            .unwrap_or_default();
-        let mut dto = DailyQuoteDto::new(code, date);
-
-        let parse_decimal = |key: &str| -> Decimal {
-            map.get(key)
+    ) -> Result<Self, QuoteParseError> {
+        // 依欄位名稱取出原始字串；欄位不存在或索引超界都視為結構性錯誤。
+        let get_field = |field: &'static str| -> Result<&String, QuoteParseError> {
+            map.get(field)
                 .and_then(|&i| item.get(i))
-                .map(|s| s.replace(',', ""))
-                .and_then(|s| s.parse::<Decimal>().ok())
-                .unwrap_or_default()
+                .ok_or(QuoteParseError::MissingField { field })
         };
 
-        dto.trading_volume = parse_decimal("成交股數");
-        dto.transaction = parse_decimal("成交筆數");
-        dto.trade_value = parse_decimal("成交金額");
-        dto.opening_price = parse_decimal("開盤價");
-        dto.highest_price = parse_decimal("最高價");
-        dto.lowest_price = parse_decimal("最低價");
-        dto.closing_price = parse_decimal("收盤價");
-        dto.change = parse_decimal("漲跌價差");
-        dto.last_best_bid_price = parse_decimal("最後揭示買價");
-        dto.last_best_bid_volume = parse_decimal("最後揭示買量");
-        dto.last_best_ask_price = parse_decimal("最後揭示賣價");
-        dto.last_best_ask_volume = parse_decimal("最後揭示賣量");
-        dto.price_earning_ratio = parse_decimal("本益比");
+        let code = get_field("證券代號")?.clone();
+        let mut dto = DailyQuoteDto::new(code, date);
 
-        // 處理漲跌符號
-        if let Some(&i) = map.get("漲跌(+/-)")
-            && let Some(sign) = item.get(i)
-        {
-            if sign.contains('-') || sign.contains('綠') {
-                dto.change = -dto.change.abs();
-            } else if sign.contains('+') || sign.contains('紅') {
-                dto.change = dto.change.abs();
-            }
+        // 逐一解析數值欄位；任何一欄失敗都會讓整列被拒絕（? 提早返回）。
+        dto.trading_volume = parse_quote_decimal("成交股數", get_field("成交股數")?)?;
+        dto.transaction = parse_quote_decimal("成交筆數", get_field("成交筆數")?)?;
+        dto.trade_value = parse_quote_decimal("成交金額", get_field("成交金額")?)?;
+        dto.opening_price = parse_quote_decimal("開盤價", get_field("開盤價")?)?;
+        dto.highest_price = parse_quote_decimal("最高價", get_field("最高價")?)?;
+        dto.lowest_price = parse_quote_decimal("最低價", get_field("最低價")?)?;
+        dto.closing_price = parse_quote_decimal("收盤價", get_field("收盤價")?)?;
+        // 漲跌價差採「軟性」解析：除權息日此欄可能是非數字標記，補 0 不拒絕整列。
+        dto.change = parse_soft_quote_decimal("漲跌價差", get_field("漲跌價差")?);
+        dto.last_best_bid_price = parse_quote_decimal("最後揭示買價", get_field("最後揭示買價")?)?;
+        dto.last_best_bid_volume = parse_quote_decimal("最後揭示買量", get_field("最後揭示買量")?)?;
+        dto.last_best_ask_price = parse_quote_decimal("最後揭示賣價", get_field("最後揭示賣價")?)?;
+        dto.last_best_ask_volume = parse_quote_decimal("最後揭示賣量", get_field("最後揭示賣量")?)?;
+        dto.price_earning_ratio = parse_quote_decimal("本益比", get_field("本益比")?)?;
+
+        // 處理漲跌符號。TWSE 把「漲/跌」方向放在獨立欄位（+/- 或紅/綠字），
+        // 漲跌價差本身是無號數。這個欄位若被改名而遺失，漲跌方向會整批出錯，
+        // 因此也視為必要欄位。
+        let sign = get_field("漲跌(+/-)")?;
+        if sign.contains('-') || sign.contains('綠') {
+            dto.change = -dto.change.abs();
+        } else if sign.contains('+') || sign.contains('紅') {
+            dto.change = dto.change.abs();
         }
 
-        dto
+        Ok(dto)
     }
 
-    /// 在給定交易所與日期的前提下，將來源資料轉成 `DailyQuoteDto`。
-    pub fn from_with_exchange(exchange: StockExchange, item: &[String], date: NaiveDate) -> Self {
-        let mut dto = DailyQuoteDto::new(item[0].to_string(), date);
+    /// 在給定交易所與日期的前提下，將「固定欄位順序」的來源資料轉成 `DailyQuoteDto`。
+    ///
+    /// 與 [`Self::from_with_map`] 的差別：這裡的來源（例如 TPEx 收盤行情）以
+    /// 位置（索引）而不是欄位名稱對應欄位。
+    ///
+    /// # Errors
+    ///
+    /// 該列長度不足（缺欄位）回傳 [`QuoteParseError::MissingField`]；
+    /// 欄位內容無法解析且非「無資料」佔位符時回傳 [`QuoteParseError::InvalidDecimal`]。
+    pub fn from_with_exchange(
+        exchange: StockExchange,
+        item: &[String],
+        date: NaiveDate,
+    ) -> Result<Self, QuoteParseError> {
+        // 第 0 欄固定是證券代號；整列為空時直接視為缺欄位。
+        let symbol = item.first().ok_or(QuoteParseError::MissingField {
+            field: "證券代號"
+        })?;
+        let mut dto = DailyQuoteDto::new(symbol.to_string(), date);
 
         match exchange {
             StockExchange::TWSE => {
+                // (索引, 欄位名稱)。欄位名稱只用於錯誤訊息，讓除錯時能對照來源表頭。
                 let decimal_fields = [
-                    (2, &mut dto.trading_volume),
-                    (3, &mut dto.transaction),
-                    (4, &mut dto.trade_value),
-                    (5, &mut dto.opening_price),
-                    (6, &mut dto.highest_price),
-                    (7, &mut dto.lowest_price),
-                    (8, &mut dto.closing_price),
-                    (10, &mut dto.change),
-                    (11, &mut dto.last_best_bid_price),
-                    (12, &mut dto.last_best_bid_volume),
-                    (13, &mut dto.last_best_ask_price),
-                    (14, &mut dto.last_best_ask_volume),
-                    (15, &mut dto.price_earning_ratio),
+                    (2, "成交股數", &mut dto.trading_volume),
+                    (3, "成交筆數", &mut dto.transaction),
+                    (4, "成交金額", &mut dto.trade_value),
+                    (5, "開盤價", &mut dto.opening_price),
+                    (6, "最高價", &mut dto.highest_price),
+                    (7, "最低價", &mut dto.lowest_price),
+                    (8, "收盤價", &mut dto.closing_price),
+                    (11, "最後揭示買價", &mut dto.last_best_bid_price),
+                    (12, "最後揭示買量", &mut dto.last_best_bid_volume),
+                    (13, "最後揭示賣價", &mut dto.last_best_ask_price),
+                    (14, "最後揭示賣量", &mut dto.last_best_ask_volume),
+                    (15, "本益比", &mut dto.price_earning_ratio),
                 ];
 
-                for (index, field) in decimal_fields {
-                    let d = item.get(index).unwrap_or(&"".to_string()).replace(',', "");
-                    *field = d.parse::<Decimal>().unwrap_or_default();
+                for (index, field, target) in decimal_fields {
+                    let raw = item
+                        .get(index)
+                        .ok_or(QuoteParseError::MissingField { field })?;
+                    *target = parse_quote_decimal(field, raw)?;
                 }
 
-                if let Some(change_str) = item.get(9)
-                    && change_str.contains('-')
-                {
+                // 第 10 欄是漲跌價差，採「軟性」解析：除權息日此欄可能是
+                // 非數字標記，補 0 不拒絕整列（缺欄位仍是硬錯誤）。
+                let change_raw = item.get(10).ok_or(QuoteParseError::MissingField {
+                    field: "漲跌價差",
+                })?;
+                dto.change = parse_soft_quote_decimal("漲跌價差", change_raw);
+
+                // 第 9 欄是漲跌方向（HTML 內含 + 或 -）；含 '-' 時把漲跌價差轉負。
+                let sign = item.get(9).ok_or(QuoteParseError::MissingField {
+                    field: "漲跌(+/-)",
+                })?;
+                if sign.contains('-') {
                     dto.change = -dto.change;
                 }
             }
             StockExchange::TPEx => {
+                // TPEx 的漲跌欄（索引 3）自帶正負號，不需要獨立的方向欄位。
                 let decimal_fields = [
-                    (7, &mut dto.trading_volume),
-                    (9, &mut dto.transaction),
-                    (8, &mut dto.trade_value),
-                    (4, &mut dto.opening_price),
-                    (5, &mut dto.highest_price),
-                    (6, &mut dto.lowest_price),
-                    (2, &mut dto.closing_price),
-                    (3, &mut dto.change),
-                    (10, &mut dto.last_best_bid_price),
-                    (11, &mut dto.last_best_bid_volume),
-                    (12, &mut dto.last_best_ask_price),
-                    (13, &mut dto.last_best_ask_volume),
+                    (7, "成交股數", &mut dto.trading_volume),
+                    (9, "成交筆數", &mut dto.transaction),
+                    (8, "成交金額", &mut dto.trade_value),
+                    (4, "開盤價", &mut dto.opening_price),
+                    (5, "最高價", &mut dto.highest_price),
+                    (6, "最低價", &mut dto.lowest_price),
+                    (2, "收盤價", &mut dto.closing_price),
+                    (10, "最後揭示買價", &mut dto.last_best_bid_price),
+                    (11, "最後揭示買量", &mut dto.last_best_bid_volume),
+                    (12, "最後揭示賣價", &mut dto.last_best_ask_price),
+                    (13, "最後揭示賣量", &mut dto.last_best_ask_volume),
                 ];
 
-                for (index, field) in decimal_fields {
-                    let d = item.get(index).unwrap_or(&"".to_string()).replace(',', "");
-                    *field = d.parse::<Decimal>().unwrap_or_default();
+                for (index, field, target) in decimal_fields {
+                    let raw = item
+                        .get(index)
+                        .ok_or(QuoteParseError::MissingField { field })?;
+                    *target = parse_quote_decimal(field, raw)?;
                 }
+
+                // 第 3 欄是自帶正負號的漲跌，採「軟性」解析：
+                // 除權息日此欄可能是非數字標記，補 0 不拒絕整列。
+                let change_raw = item
+                    .get(3)
+                    .ok_or(QuoteParseError::MissingField { field: "漲跌" })?;
+                dto.change = parse_soft_quote_decimal("漲跌", change_raw);
             }
             _ => {}
         }
 
-        dto
+        Ok(dto)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::net::IpAddr;
 
     use anyhow::anyhow;
+    use chrono::NaiveDate;
+    use rust_decimal_macros::dec;
 
-    use super::{collect_public_ip_result, get_public_ip, normalize_public_ip};
+    use super::*;
+    use crate::core::declare::StockExchange;
 
     /// 驗證純文字 IP 即使夾帶換行，也會先 trim 再正常回傳。
     #[test]
@@ -652,5 +867,237 @@ mod tests {
 
         println!("public_ip={ip}");
         assert!(ip.parse::<IpAddr>().is_ok());
+    }
+
+    // === 年度獲利 HTML 解析（fixture）測試 ===
+    //
+    // 這組測試示範本專案的「crawler fixture 測試模式」：
+    // 1. 把站方頁面的代表性內容存成 `testdata/` 下的檔案（fixture）。
+    // 2. 用 `include_str!` 在「編譯期」把檔案內容嵌入測試——執行時
+    //    不需要讀檔、更不需要網路，任何環境（含 CI）都能穩定執行。
+    // 3. 對「純解析函式」做斷言，涵蓋正常列與各種異常列。
+    // live 測試（真的連站方）仍保留 #[ignore]，只在懷疑站方改版時手動執行。
+
+    /// 驗證 fixture 頁面中的正常資料列被完整解析，異常列被正確略過。
+    #[test]
+    fn parse_annual_profits_html_parses_fixture_rows() {
+        // include_str! 的路徑是「相對於本原始碼檔案」（share.rs 位於
+        // src/infra/crawler/），編譯期就會檢查檔案存在，路徑錯會直接編譯失敗。
+        const FIXTURE: &str = include_str!("testdata/annual_profit.html");
+
+        let profits = parse_annual_profits_html(FIXTURE, "2330").unwrap();
+
+        // fixture 內有 5 個資料列候選：2 筆正常、3 筆異常（欄位不足的備註列、
+        // 年度非數字的合計列、EPS 為 N/A 的列）——只有正常的 2 筆會被保留。
+        assert_eq!(profits.len(), 2, "應恰好解析出 2 筆正常列: {profits:#?}");
+
+        // 第一筆：民國 112 年 → 西元 2023 年，各欄位對應正確的 <td> 位置。
+        assert_eq!(profits[0].stock_symbol, "2330");
+        assert_eq!(profits[0].year, 2023);
+        assert_eq!(profits[0].sales_per_share, dec!(83.36));
+        assert_eq!(profits[0].profit_before_tax, dec!(37.79));
+        assert_eq!(profits[0].earnings_per_share, dec!(32.34));
+
+        // 第二筆：民國 111 年 → 西元 2022 年。
+        assert_eq!(profits[1].year, 2022);
+        assert_eq!(profits[1].earnings_per_share, dec!(39.20));
+    }
+
+    /// 驗證空頁面／完全不含目標表格的頁面回傳空清單而不是錯誤。
+    ///
+    /// 站方改版把表格 id 換掉時就會出現這種情況——解析不崩潰、
+    /// 回傳空清單，由上層的資料量檢查（或 live 測試）發現異常。
+    #[test]
+    fn parse_annual_profits_html_returns_empty_for_unrelated_page() {
+        let profits =
+            parse_annual_profits_html("<html><body>改版了</body></html>", "2330").unwrap();
+        assert!(profits.is_empty());
+    }
+
+    // === 報價欄位解析（typed error）測試 ===
+
+    /// 驗證「無資料」佔位符（`--`、空白、`N/A`）規則化為 0，屬合法情況。
+    #[test]
+    fn parse_quote_decimal_treats_placeholders_as_zero() {
+        assert_eq!(parse_quote_decimal("開盤價", "--").unwrap(), Decimal::ZERO);
+        assert_eq!(parse_quote_decimal("開盤價", "").unwrap(), Decimal::ZERO);
+        assert_eq!(parse_quote_decimal("開盤價", "  ").unwrap(), Decimal::ZERO);
+        assert_eq!(
+            parse_quote_decimal("開盤價", "----").unwrap(),
+            Decimal::ZERO
+        );
+        assert_eq!(parse_quote_decimal("本益比", "N/A").unwrap(), Decimal::ZERO);
+    }
+
+    /// 驗證千分位逗號與正負號都能正確解析，負數不會被誤判為佔位符。
+    #[test]
+    fn parse_quote_decimal_parses_commas_and_signs() {
+        assert_eq!(
+            parse_quote_decimal("成交股數", "1,234,567").unwrap(),
+            dec!(1234567)
+        );
+        assert_eq!(parse_quote_decimal("漲跌", "-5.00").unwrap(), dec!(-5.00));
+        assert_eq!(parse_quote_decimal("漲跌", "+3.5").unwrap(), dec!(3.5));
+    }
+
+    /// 驗證垃圾內容回傳 InvalidDecimal，而不是像舊版一樣默默補 0。
+    #[test]
+    fn parse_quote_decimal_rejects_garbage() {
+        let err = parse_quote_decimal("收盤價", "abc").unwrap_err();
+
+        match err {
+            QuoteParseError::InvalidDecimal { field, raw, .. } => {
+                assert_eq!(field, "收盤價");
+                assert_eq!(raw, "abc");
+            }
+            other => panic!("expected InvalidDecimal, got {other:?}"),
+        }
+    }
+
+    /// 驗證拒絕比例門檻：0 筆或低於 10% 通過，超過 10% 整批失敗。
+    #[test]
+    fn rejected_rows_threshold_allows_minor_and_blocks_major() {
+        assert!(ensure_rejected_rows_within_threshold("TWSE", 0, 100).is_ok());
+        assert!(ensure_rejected_rows_within_threshold("TWSE", 5, 100).is_ok());
+        assert!(ensure_rejected_rows_within_threshold("TWSE", 11, 100).is_err());
+        // 小樣本也適用：5 列壞 1 列（20%）應整批失敗。
+        assert!(ensure_rejected_rows_within_threshold("TPEx", 1, 5).is_err());
+    }
+
+    /// 建立 TWSE 欄位名稱對照表與一筆有效資料列，供 from_with_map 測試共用。
+    fn twse_map_and_row() -> (HashMap<&'static str, usize>, Vec<String>) {
+        let map = HashMap::from([
+            ("證券代號", 0),
+            ("成交股數", 1),
+            ("成交筆數", 2),
+            ("成交金額", 3),
+            ("開盤價", 4),
+            ("最高價", 5),
+            ("最低價", 6),
+            ("收盤價", 7),
+            ("漲跌(+/-)", 8),
+            ("漲跌價差", 9),
+            ("最後揭示買價", 10),
+            ("最後揭示買量", 11),
+            ("最後揭示賣價", 12),
+            ("最後揭示賣量", 13),
+            ("本益比", 14),
+        ]);
+        let row = vec![
+            "2330".to_string(),
+            "1,234,000".to_string(),
+            "5,678".to_string(),
+            "987,654,321".to_string(),
+            "950.5".to_string(),
+            "960.5".to_string(),
+            "945.5".to_string(),
+            "955.5".to_string(),
+            "綠".to_string(),
+            "12.5".to_string(),
+            "955.0".to_string(),
+            "100".to_string(),
+            "956.0".to_string(),
+            "200".to_string(),
+            "20.5".to_string(),
+        ];
+        (map, row)
+    }
+
+    /// 驗證 from_with_map 正常解析（含千分位、綠字轉負值）。
+    #[test]
+    fn from_with_map_parses_valid_row() {
+        let (map, row) = twse_map_and_row();
+        let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+
+        let dto = DailyQuoteDto::from_with_map(&row, &map, date).unwrap();
+
+        assert_eq!(dto.symbol, "2330");
+        assert_eq!(dto.trading_volume, dec!(1234000));
+        assert_eq!(dto.closing_price, dec!(955.5));
+        // 「綠」代表下跌，漲跌價差應轉為負值。
+        assert_eq!(dto.change, dec!(-12.5));
+        assert_eq!(dto.price_earning_ratio, dec!(20.5));
+    }
+
+    /// 驗證欄位改名（對照表缺欄位）時整列被拒絕，而不是補 0。
+    #[test]
+    fn from_with_map_rejects_missing_column() {
+        let (mut map, row) = twse_map_and_row();
+        // 模擬來源把「收盤價」改名：對照表中不再有這個欄位。
+        map.remove("收盤價");
+        let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+
+        let err = DailyQuoteDto::from_with_map(&row, &map, date).unwrap_err();
+
+        assert!(matches!(
+            err,
+            QuoteParseError::MissingField { field: "收盤價" }
+        ));
+    }
+
+    /// 驗證價格欄位含垃圾內容時整列被拒絕。
+    #[test]
+    fn from_with_map_rejects_garbage_price() {
+        let (map, mut row) = twse_map_and_row();
+        row[7] = "corrupted".to_string(); // 收盤價
+        let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+
+        let err = DailyQuoteDto::from_with_map(&row, &map, date).unwrap_err();
+
+        assert!(matches!(err, QuoteParseError::InvalidDecimal { .. }));
+    }
+
+    /// 驗證漲跌價差是「軟性」欄位：非數字標記補 0，不拒絕整列。
+    #[test]
+    fn from_with_map_soft_change_falls_back_to_zero() {
+        let (map, mut row) = twse_map_and_row();
+        row[9] = "除息".to_string(); // 漲跌價差
+        let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+
+        let dto = DailyQuoteDto::from_with_map(&row, &map, date).unwrap();
+
+        assert_eq!(dto.change, Decimal::ZERO);
+        // 其餘欄位仍完整保留。
+        assert_eq!(dto.closing_price, dec!(955.5));
+    }
+
+    /// 驗證 TPEx 位置式解析：正常列成功、含自帶正負號的漲跌。
+    #[test]
+    fn from_with_exchange_tpex_parses_valid_row() {
+        let row = vec![
+            "5483".to_string(),      // 0: 代號
+            "中美晶".to_string(),    // 1: 名稱
+            "100.00".to_string(),    // 2: 收盤價
+            "-1.50".to_string(),     // 3: 漲跌（自帶負號）
+            "98.50".to_string(),     // 4: 開盤價
+            "101.00".to_string(),    // 5: 最高價
+            "98.00".to_string(),     // 6: 最低價
+            "10,000".to_string(),    // 7: 成交股數
+            "1,000,000".to_string(), // 8: 成交金額
+            "500".to_string(),       // 9: 成交筆數
+            "100.00".to_string(),    // 10: 最後買價
+            "10".to_string(),        // 11: 最後買量
+            "100.50".to_string(),    // 12: 最後賣價
+            "20".to_string(),        // 13: 最後賣量
+        ];
+        let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+
+        let dto = DailyQuoteDto::from_with_exchange(StockExchange::TPEx, &row, date).unwrap();
+
+        assert_eq!(dto.symbol, "5483");
+        assert_eq!(dto.closing_price, dec!(100.00));
+        assert_eq!(dto.change, dec!(-1.50));
+        assert_eq!(dto.trading_volume, dec!(10000));
+    }
+
+    /// 驗證 TPEx 資料列長度不足（缺欄位）時整列被拒絕。
+    #[test]
+    fn from_with_exchange_tpex_rejects_short_row() {
+        let row = vec!["5483".to_string(), "中美晶".to_string()];
+        let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+
+        let err = DailyQuoteDto::from_with_exchange(StockExchange::TPEx, &row, date).unwrap_err();
+
+        assert!(matches!(err, QuoteParseError::MissingField { .. }));
     }
 }

@@ -9,18 +9,20 @@ impl Share {
     /// 更新目前對外 IP 到快取。
     pub fn set_current_ip(&self, ip: String) {
         if let Ok(mut current_ip) = self.current_ip.write() {
-            *current_ip = ip;
+            *current_ip = Some(ip);
         }
     }
 
     /// 從快取取得目前對外 IP。
     ///
-    /// 回傳 `Some(String)` 表示成功（值可能是空字串），`None` 表示讀鎖失敗。
+    /// 回傳 `Some(ip)` 表示已取得公網 IP；`None` 表示「尚未取得」或讀鎖失敗。
+    /// 這個語意讓 loader 的「`is_none()` 才抓公網 IP」判斷真正生效——
+    /// 舊版以空字串為初始值時，初始讀取會得到 `Some("")`，該判斷永遠不成立。
     pub fn get_current_ip(&self) -> Option<String> {
-        match self.current_ip.read() {
-            Ok(ip) => Some(ip.clone()),
-            Err(_) => None,
-        }
+        self.current_ip
+            .read()
+            .ok()
+            .and_then(|current_ip| current_ip.clone())
     }
 
     /// 寫入或覆蓋單筆台股指數快取。
@@ -186,7 +188,9 @@ mod tests {
     #[test]
     fn current_ip_round_trips_without_loading_external_sources() {
         let share = Share::new();
-        assert_eq!(share.get_current_ip(), Some(String::new()));
+        // 初始狀態必須是 None（尚未取得），loader 才會真的去抓公網 IP；
+        // 舊版初始值為空字串（Some("")），導致抓取條件永遠不成立。
+        assert_eq!(share.get_current_ip(), None);
         share.set_current_ip("203.0.113.1".to_string());
         assert_eq!(share.get_current_ip(), Some("203.0.113.1".to_string()));
     }

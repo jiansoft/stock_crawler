@@ -163,7 +163,6 @@ fn get_yahoo_class_quotes_client() -> Result<&'static Client> {
         Client::builder()
             .brotli(true)
             .gzip(true)
-            .zstd(true)
             .connect_timeout(Duration::from_secs(8))
             .timeout(Duration::from_secs(15))
             .tcp_nodelay(true)

@@ -1,0 +1,45 @@
+<!--
+  依 HiStock「stock/rank.aspx?p=all」排行榜頁面精簡而成的測試 fixture。
+
+  解析器（parse_rank_html / parse_row）的規則：
+  - 只掃 #CPHB1_gv tr；每列依序為：
+    0=代號、1=名稱、2=成交、3=漲跌、4=幅(%)、5=周漲跌、6=振幅、
+    7=開盤、8=最高、9=最低、10=昨收、11=成交量(張)、12=成交金額(億)。
+  - 代號非純數字的列（表頭、含英文字母的債券 ETF 代號）回傳 None 略過。
+  - 「--」或空白的數值欄位視為 0；漲跌以「▼」判斷負向。
+
+  本 fixture 刻意涵蓋的情境：
+  1. 表頭列（代號非數字）→ 略過。
+  2. 下跌列（▼ 前綴，漲跌與幅都應轉為負值）。
+  3. 上漲列（▲ 與 + 前綴，維持正值；成交量含千分位逗號）。
+  4. 平盤列（漲跌與幅為「--」→ 0）。
+  5. 含英文字母的代號（00687B 債券 ETF）→ 依現行規則略過。
+-->
+<div class="grid-wrap">
+  <table id="CPHB1_gv" class="gvTB" cellspacing="0">
+    <tr class="header">
+      <td>代號</td><td>名稱</td><td>成交</td><td>漲跌</td><td>幅</td><td>周漲跌</td><td>振幅</td>
+      <td>開盤</td><td>最高</td><td>最低</td><td>昨收</td><td>成交量</td><td>成交金額</td>
+    </tr>
+    <tr class="alt-row">
+      <td>5274</td><td>信驊</td><td><span class="price-down">9445</span></td>
+      <td><span class="price-down">▼-55.00</span></td><td><span class="price-down">-0.58%</span></td>
+      <td>-3.18%</td><td>2.95%</td><td>9620</td><td>9715</td><td>9435</td><td>9500</td><td>44</td><td>4.156</td>
+    </tr>
+    <tr>
+      <td>2330</td><td>台積電</td><td><span class="price-up">1000</span></td>
+      <td><span class="price-up">▲+15.00</span></td><td><span class="price-up">+1.52%</span></td>
+      <td>+2.04%</td><td>2.03%</td><td>990</td><td>1005</td><td>985</td><td>985</td><td>31,415</td><td>314.15</td>
+    </tr>
+    <tr class="alt-row">
+      <td>6584</td><td>南俊國際</td><td>425</td>
+      <td>--</td><td>--</td>
+      <td>--</td><td>2.71%</td><td>423.5</td><td>435</td><td>423.5</td><td>425</td><td>148</td><td>0.629</td>
+    </tr>
+    <tr>
+      <td>00687B</td><td>國泰20年美債</td><td>29.61</td>
+      <td>▼-0.04</td><td>-0.13%</td>
+      <td>-0.34%</td><td>0.24%</td><td>29.65</td><td>29.66</td><td>29.60</td><td>29.65</td><td>12,003</td><td>3.555</td>
+    </tr>
+  </table>
+</div>

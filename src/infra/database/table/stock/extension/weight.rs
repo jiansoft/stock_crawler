@@ -70,6 +70,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_update() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 update");
@@ -115,6 +119,10 @@ WHERE stock_symbol = $1;
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_zeroed_out() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 zeroed_out");

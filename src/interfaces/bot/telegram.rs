@@ -5,7 +5,13 @@ use chrono::Local;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
-use crate::{core::config::SETTINGS, core::util::http};
+// MarkdownV2 跳脫工具（text::escape_markdown_v2）住在 core 層：
+// app 層組訊息與這裡的 adapter 都需要同一套跳脫規則，
+// 放在 core 才不會讓 app 反向依賴 interfaces（詳見該函式的 rustdoc）。
+use crate::{
+    core::config::SETTINGS,
+    core::util::{http, text},
+};
 
 //static TELEGRAM: Lazy<Arc<OnceLock<Telegram>>> = Lazy::new(|| Arc::new(OnceLock::new()));
 static TELEGRAM: OnceLock<Telegram> = OnceLock::new();
@@ -115,25 +121,6 @@ impl Telegram {
             .await
             .map_err(|err| anyhow!("Failed to send_message because: {:?}", err))
         })
-    }
-
-    /// 跳脫 Telegram `MarkdownV2` 保留字元。
-    pub fn escape_markdown_v2(text: impl Into<String>) -> String {
-        const SPECIALS: &[char] = &[
-            '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.',
-            '!',
-        ];
-
-        let text = text.into();
-        let mut result = String::with_capacity(text.len() * 2); // 預留更多空間避免重新分配
-
-        for ch in text.chars() {
-            if SPECIALS.contains(&ch) {
-                result.push('\\');
-            }
-            result.push(ch);
-        }
-        result
     }
 }
 
@@ -258,11 +245,30 @@ async fn send_single(msg: &str) {
 pub async fn send_alert(alert_title: &str, details: &str) {
     let msg = format!(
         "⚠️ *【系統關鍵警報】*\n*標題*︰{}\n*時間*︰{}\n*詳情*︰\n```\n{}\n```",
-        Telegram::escape_markdown_v2(alert_title),
-        Telegram::escape_markdown_v2(Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
-        Telegram::escape_markdown_v2(details)
+        text::escape_markdown_v2(alert_title),
+        text::escape_markdown_v2(Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+        text::escape_markdown_v2(details)
     );
     send(&msg).await;
+}
+
+/// 把 Telegram 通知接上 `core::alert::AlertSink` port 的 adapter。
+///
+/// 依 DDD 分層，core/infra 不應該直接呼叫 interfaces（內層依賴外層的
+/// 反向耦合）。因此 core 只定義抽象的 [`crate::core::alert::AlertSink`]，
+/// 由這個 adapter 提供 Telegram 實作，並在 `main` 啟動時註冊——
+/// core/infra 呼叫 `core::alert::send_alert` 時，訊息才會實際送到 Telegram。
+pub struct TelegramAlertSink;
+
+#[async_trait::async_trait]
+impl crate::core::alert::AlertSink for TelegramAlertSink {
+    async fn send_alert(&self, title: &str, message: &str) {
+        send_alert(title, message).await;
+    }
+
+    async fn send_message(&self, message: &str) {
+        send(message).await;
+    }
 }
 
 #[cfg(test)]
@@ -285,8 +291,8 @@ mod tests {
         tracing::debug!("開始 test_send_message");
         let msg = format!(
             "test_send_message Rust OSArch: {}{}",
-            Telegram::escape_markdown_v2(env::consts::OS),
-            Telegram::escape_markdown_v2(env::consts::ARCH)
+            text::escape_markdown_v2(env::consts::OS),
+            text::escape_markdown_v2(env::consts::ARCH)
         );
         get_client().send(&msg).await.expect("TODO: panic message");
         // let _ = send_to_allowed(&msg).await;
@@ -340,11 +346,5 @@ mod tests {
         assert_eq!(chunks.iter().map(|c| c.chars().count()).sum::<usize>(), 250);
     }
 
-    /// 驗證 MarkdownV2 跳脫規則。
-    #[test]
-    fn test_escape_markdown_v2() {
-        let input = "Hello_World*Test[link](url)";
-        let expected = "Hello\\_World\\*Test\\[link\\]\\(url\\)";
-        assert_eq!(Telegram::escape_markdown_v2(input), expected);
-    }
+    // MarkdownV2 跳脫規則的測試已隨函式本體移至 `core::util::text::tests`。
 }

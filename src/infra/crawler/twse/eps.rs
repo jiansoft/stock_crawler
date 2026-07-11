@@ -85,7 +85,33 @@ pub async fn visit(
     let response = util::http::post(&url, None, Some(params))
         .await
         .map_err(|err| anyhow!("HTTP request failed: {}", err))?;
-    let document = Html::parse_document(&response);
+
+    // 解析交給純函式（fetch/parse 分離，解析邏輯才能被 fixture 單元測試覆蓋）。
+    // 「代號是否為已知股票」的判斷以閉包注入：正式流程查 SHARE 快取，
+    // 測試則給一個固定清單，讓解析測試不需要載入全域快取。
+    Ok(parse_eps_html(&response, year, quarter, |symbol| {
+        SHARE.stock_contains_key(symbol)
+    }))
+}
+
+/// 解析公開資訊觀測站（MOPS）季 EPS 頁面的 HTML。
+///
+/// 這是一個「純函式」——輸入只有 HTML 字串與判斷條件，不做任何網路 I/O，
+/// 可用 `testdata/eps_t163sb19.html` fixture 直接驗證。
+///
+/// # 解析規則
+/// - MOPS 回應中可能有多個 `<table>`（各產業一表），全部掃描。
+/// - 只吃「恰好 9 個 `<td>`」的列：表頭、產業小標與備註列自然被略過。
+/// - `tds[0]`＝股票代號、`tds[3]`＝每股稅後淨利（EPS）；
+///   EPS 無法解析時以 0 落地（來源偶爾出現 `N/A` 或空欄）。
+/// - `is_known_symbol` 過濾非追蹤中的代號（例如已下市或非股票類）。
+fn parse_eps_html(
+    html: &str,
+    year: i32,
+    quarter: Quarter,
+    is_known_symbol: impl Fn(&str) -> bool,
+) -> Vec<Eps> {
+    let document = Html::parse_document(html);
     let mut result = Vec::with_capacity(1024);
     let selector_table = Selector::parse("table").expect("Failed to parse table selector");
     let selector_tr = Selector::parse("tr").expect("Failed to parse tr selector");
@@ -107,7 +133,7 @@ pub async fn visit(
                 continue;
             }
 
-            if !SHARE.stock_contains_key(stock_symbol) {
+            if !is_known_symbol(stock_symbol) {
                 continue;
             }
 
@@ -122,7 +148,7 @@ pub async fn visit(
         }
     }
 
-    Ok(result)
+    result
 }
 
 #[cfg(test)]
@@ -130,8 +156,47 @@ mod tests {
     use crate::infra::cache::SHARE;
 
     use super::*;
+    use rust_decimal_macros::dec;
+
+    /// 以貼近 MOPS 真實回應形狀的 fixture 驗證整頁解析流程。
+    ///
+    /// `is_known_symbol` 用固定清單注入，不依賴 SHARE 全域快取——
+    /// 這正是把它做成閉包參數的目的：解析測試完全離線、無外部狀態。
+    #[test]
+    fn parse_eps_html_parses_fixture_rows() {
+        // include_str! 的路徑相對於本檔案（twse/eps.rs）→ twse/testdata/。
+        const FIXTURE: &str = include_str!("testdata/eps_t163sb19.html");
+        let known = ["2330", "2317"];
+
+        let result = parse_eps_html(FIXTURE, 2025, Quarter::Q3, |symbol| known.contains(&symbol));
+
+        // 有效列只有 2330 與 2317：表頭、備註、空代號與非追蹤代號（9998）都被略過。
+        assert_eq!(result.len(), 2);
+
+        assert_eq!(result[0].stock_symbol, "2330");
+        assert_eq!(result[0].year, 2025);
+        assert_eq!(result[0].quarter, Quarter::Q3);
+        assert_eq!(result[0].earnings_per_share, dec!(15.36));
+
+        // EPS 欄為「N/A」時以 0 落地，而不是讓整頁解析失敗。
+        assert_eq!(result[1].stock_symbol, "2317");
+        assert_eq!(result[1].earnings_per_share, Decimal::ZERO);
+    }
+
+    /// 與目標結構無關的頁面（維護頁、錯誤頁）應回傳空清單，不 panic。
+    #[test]
+    fn parse_eps_html_returns_empty_for_unrelated_page() {
+        let result = parse_eps_html(
+            "<html><body><p>查無資料</p></body></html>",
+            2025,
+            Quarter::Q3,
+            |_| true,
+        );
+        assert!(result.is_empty());
+    }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_visit() {
         dotenvy::dotenv().ok();
         SHARE.load().await;

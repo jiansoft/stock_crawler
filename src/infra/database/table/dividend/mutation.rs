@@ -280,6 +280,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_upsert() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 upsert");
@@ -322,6 +326,10 @@ mod tests {
     /// 此測試會實際寫入 `dividend` 表。先用測試股票代碼寫入 `尚未公布` 日期，再以同一主鍵
     /// upsert 正式日期，最後查回確認四個日期欄位都已被覆蓋。測試結束會刪除測試股票代碼資料。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_upsert_updates_dividend_dates_on_conflict() {
         dotenvy::dotenv().ok();
 
@@ -393,6 +401,10 @@ WHERE security_code = $1 AND year = $2 AND quarter = '';
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_upsert_annual_total_dividend_operates_database() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 upsert_annual_total_dividend");

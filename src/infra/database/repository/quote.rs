@@ -293,7 +293,9 @@ impl QuoteRepository for PgQuoteRepository {
             .iter()
             .map(|q| TableDailyQuote::from(q.clone()))
             .collect();
-        // 呼叫 Table 層的 copy_in_raw 批次寫入 PostgreSQL
+        // 呼叫 Table 層的 copy_in_raw 批次寫入 PostgreSQL。
+        // 注意：COPY 不支援 upsert，若目標日期已有同股票資料會因唯一索引而整批失敗；
+        // 要「重建」某一日的報價請改用 replace_quotes_by_date（單一 transaction 內先刪後寫）。
         TableDailyQuote::copy_in_raw(&table_entities).await?;
         Ok(())
     }
@@ -316,6 +318,40 @@ impl QuoteRepository for PgQuoteRepository {
             .execute(database::get_connection())
             .await?;
         Ok(())
+    }
+
+    async fn replace_quotes_by_date(
+        &self,
+        date: NaiveDate,
+        quotes: &[DomainDailyQuote],
+    ) -> Result<u64> {
+        // 先把領域實體轉成資料庫 Table 模型。這一步只在記憶體中進行，
+        // 即使失敗也完全不會影響資料庫。
+        let table_entities: Vec<TableDailyQuote> = quotes
+            .iter()
+            .map(|q| TableDailyQuote::from(q.clone()))
+            .collect();
+
+        // 開啟一筆 transaction：接下來的「刪除」與「COPY 寫入」會綁在一起，
+        // 只有兩者都成功並 commit 後，變更才會真正生效。
+        let mut tx = database::get_tx().await?;
+
+        // 步驟 1：刪除該交易日既有的報價。因為還沒 commit，
+        // 這個刪除對其他連線是看不見的；若後續寫入失敗，刪除也會一起被取消。
+        sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
+            .bind(date)
+            .execute(&mut *tx)
+            .await?;
+
+        // 步驟 2：在「同一個 transaction 的連線」上以 COPY 批次寫入新報價。
+        // 傳入 &mut *tx 而不是連線池，正是讓 COPY 加入這筆 transaction 的關鍵。
+        let copied = TableDailyQuote::copy_in_raw_on(&mut tx, &table_entities).await?;
+
+        // 步驟 3：兩步都成功才 commit。若程式在 commit 前的任何時間點失敗
+        // （包含被強制關機），PostgreSQL 會自動 rollback，舊資料完整保留。
+        tx.commit().await?;
+
+        Ok(copied)
     }
 
     async fn fill_moving_average(&self, quote: &mut DomainDailyQuote) -> Result<()> {
@@ -456,6 +492,10 @@ mod tests {
     use rust_decimal_macros::dec;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_cache_aside_flow() {
         // 載入環境變數設定
         dotenvy::dotenv().ok();

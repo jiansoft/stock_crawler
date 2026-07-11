@@ -51,11 +51,11 @@ pub struct FinancialStatement {
 
 impl Keyable for FinancialStatement {
     fn key(&self) -> String {
-        format!("{}-{}-{}", &self.security_code, self.year, self.quarter)
+        format!("{}-{}-{}", self.security_code, self.year, self.quarter)
     }
 
     fn key_with_prefix(&self) -> String {
-        format!("FinancialStatement:{}", &self.key())
+        format!("FinancialStatement:{}", self.key())
     }
 }
 
@@ -150,7 +150,7 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
                 anyhow!(
                     "Failed to upsert({:#?}) from database\nsql:{}\n {:?}",
                     self,
-                    &sql,
+                    sql,
                     why
                 )
             })
@@ -256,7 +256,7 @@ DO UPDATE SET
                 anyhow!(
                     "Failed to upsert_earnings_per_share({:#?}) from database\nsql:{}\n {:?}",
                     self,
-                    &sql,
+                    sql,
                     why
                 )
             })
@@ -288,7 +288,7 @@ ON CONFLICT (security_code,"year",quarter) DO NOTHING;
                 anyhow!(
                     "Failed to upsert_annual_eps({:#?}) from database\nsql:{}\n {:?}",
                     self,
-                    &sql,
+                    sql,
                     why
                 )
             })
@@ -320,7 +320,7 @@ WHERE
                 anyhow!(
                     "Failed to update_roe_roa({:#?}) from database\nsql:{}\n {:?}",
                     self,
-                    &sql,
+                    sql,
                     why
                 )
             })
@@ -604,6 +604,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_annual() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_annual");
@@ -618,6 +622,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_roe_is_zero() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_roe_is_zero");
@@ -633,6 +641,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_without_annual() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_without_annual");

@@ -2,9 +2,42 @@
 name = "stock_crawler"
 version = "0.1.0"
 edition = "2024"
+# MSRV（最低支援 Rust 版本）：與 CI 的 toolchain（1.95.0）一致。
+# 宣告後 Cargo resolver 會拒絕需要更新編譯器的相依版本，
+# 使用者也能從 manifest 直接得知本專案的編譯器需求。
+rust-version = "1.95"
 authors = ["Eddie <eddiea.chen@gmail.com>"]
 license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+# 整合測試開關（本身不啟用任何相依，只作為測試分流的旗標）。
+#
+# ## 為什麼需要這個 feature
+#
+# 專案的測試分成兩類：
+# - 單元測試：純函式、不碰外部服務，任何環境都能秒級跑完。
+# - 整合測試：需要 PostgreSQL/Redis（本機或 CI 的 service container）。
+#
+# 需要外部服務的測試都標了
+# `#[cfg_attr(not(feature = "integration-tests"), ignore = "...")]`：
+# 預設（不開 feature）這些測試會被標成 ignored——`cargo test` 只跑單元測試，
+# 快速且不需要任何外部服務；要跑完整測試時再明確開啟：
+#
+#   cargo test --features integration-tests -- --test-threads=1
+#
+# CI 也依此拆成 unit（無 service、每次 PR 快速回饋）與
+# integration（有 PostgreSQL/Redis container）兩個 job。
+integration-tests = []
+
+[lints.rust]
+# 關於連結器警告過濾
+# Rust 1.97.0 新版編譯器預設會將底層連結器（Linker）的警告輸出至終端機（受 linker_messages 控制）。
+# 在 Windows 環境下使用 MSVC 連結器進行 release 優化編譯時，會因為傳遞舊版參數而輸出無害的：
+#   "warning: linker stderr: ignoring deprecated linker optimization setting '1'"
+# 將 linker_messages 設為 "allow" 可以過濾此類無害的警告，保持編譯日誌的乾淨整潔。
+linker_messages = "allow"
+
 
 [dependencies]
 #rocket = "0.5.0-rc.3"
@@ -35,20 +68,24 @@ tonic-prost = "0.14"
 rayon = "1.12"
 #redis = { version = "0.28", features = ["tokio-comp"]  }
 regex = "1"
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "charset", "json", "form", "brotli", "gzip", "cookies", "zstd", "http2"] }
+# 壓縮僅保留 gzip/brotli：Accept-Encoding 是協商式的，站方會自動退回支援的編碼，
+# 移除 zstd 可少一個原生解壓依賴；cookies（cookie_store）未使用（全域 client 刻意 stateless）。
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "charset", "json", "form", "brotli", "gzip", "http2"] }
 rustls = { version = "0.23", features = ["ring"] }
-rustls-pki-types = { version = "1.14", features = ["alloc", "std"] }
+rustls-pki-types = { version = "1.15", features = ["alloc", "std"] }
 rust_decimal = "1.42"
 rust_decimal_macros = "1.40"
 scraper = "0.27"
 serde = { version = "1.0", features = ["derive"] }
-serde_derive = "1.0"
 serde_json = "1.0"
 #sha2 = { version = "0.11", features = [] }
-sqlx = { version = "0.9", features = [ "runtime-tokio", "postgres", "time", "chrono", "bigdecimal", "macros", "rust_decimal"] }
+# type feature 僅保留實際使用的 chrono/rust_decimal（bigdecimal/time 未使用）；
+# 專案只用 FromRow/Type 這類 derive，未使用 query! 巨集，因此以 "derive" 取代 "macros"。
+sqlx = { version = "0.9", features = [ "runtime-tokio", "postgres", "chrono", "derive", "rust_decimal"] }
 strum = { version = "0.28", features = ["derive"]}
-strum_macros = "0.28"
-tokio = { version = "1.52", features = ["full"] }
+# 收斂 "full"：僅列出本 crate 直接用到的功能（rt/巨集/訊號/同步原語/計時器/net）。
+# sqlx、tonic、axum 等相依會自行帶入各自需要的 tokio feature，Cargo 會取聯集。
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net"] }
 tokio-cron-scheduler = "0.15"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
@@ -69,16 +106,27 @@ mimalloc = "0.1"
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
+# test-util 提供 tokio::time 虛擬時鐘（start_paused），讓逾時類測試不需真實等待。
+tokio = { version = "1.52", features = ["test-util"] }
+
+# 關於基準測試 (Benchmark)
+# 這裡定義了專案中的基準/效能測試目標。每個 [[bench]] 都會在 `benches/` 目錄下尋找同名的 `.rs` 檔案。
+# 設定 `harness = false` 是為了禁用 Rust 標準庫預設的測試框架，轉而使用更精準的第三方效能測試工具 `criterion`（宣告於 [dev-dependencies]）。
+# 執行所有基準測試指令為：`cargo bench`
+# 執行單一基準測試指令為：`cargo bench --bench <name>`
 
 [[bench]]
+# 測試 TWSE 行情解析效能，對應 benches/twse_quote_parser.rs
 name = "twse_quote_parser"
 harness = false
 
 [[bench]]
+# 測試每日行情轉換與處理效能，對應 benches/daily_quote_mapper.rs
 name = "daily_quote_mapper"
 harness = false
 
 [[bench]]
+# 測試快取快照查詢與過濾效能，對應 benches/cache_snapshot_lookup.rs
 name = "cache_snapshot_lookup"
 harness = false
 

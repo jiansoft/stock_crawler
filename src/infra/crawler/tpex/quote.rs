@@ -2,15 +2,14 @@ use crate::{
     core::declare::StockExchange,
     core::util,
     infra::cache::{TTL, TtlCacheInner},
-    infra::crawler::{share::DailyQuoteDto, tpex},
+    infra::crawler::{share, share::DailyQuoteDto, tpex},
 };
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use serde::Deserialize;
-use serde_derive::Serialize;
+use serde::{Deserialize, Serialize};
 
 // QuoteResponse 上櫃公司每日收盤資訊
 /*#[derive(Debug, Deserialize)]
@@ -91,8 +90,23 @@ pub async fn parse_quote_response(
     if !quote_response.tables.is_empty()
         && let Some(tpex_dqs) = &quote_response.tables[0].data
     {
+        // 統計解析失敗而被拒絕的資料列數；結尾會依比例決定只警告還是整批失敗。
+        let mut rejected_rows = 0usize;
+
         for item in tpex_dqs {
-            let mut dto = DailyQuoteDto::from_with_exchange(StockExchange::TPEx, item, date);
+            // 解析失敗（欄位缺失或數值格式錯誤）時拒絕該列，不再默默補 0——
+            // 半套零值資料入庫會污染均線、估價等後續計算。
+            let mut dto = match DailyQuoteDto::from_with_exchange(StockExchange::TPEx, item, date) {
+                Ok(dto) => dto,
+                Err(why) => {
+                    rejected_rows += 1;
+                    // 只記錄前幾筆的完整內容，避免來源整批壞掉時 log 洗版。
+                    if rejected_rows <= 5 {
+                        tracing::warn!("TPEx quote row rejected: {why}, row={item:?}");
+                    }
+                    continue;
+                }
+            };
 
             if dto.closing_price.is_zero()
                 && dto.highest_price.is_zero()
@@ -122,15 +136,27 @@ pub async fn parse_quote_response(
                 }
             }
 
+            // 本益比來自另一支 API，屬「補充」欄位：解析失敗只記 warning 並保持 0，
+            // 不值得為它拒絕整列行情（開高低收與量能仍是完整有效的）。
+            // "N/A"、"-" 等無資料佔位符會由 parse_quote_decimal 規則化為 0。
             if let Some(pe_ratio_analysis_response) = pe_ratio_analysis.get(&dto.symbol) {
-                dto.price_earning_ratio = pe_ratio_analysis_response
-                    .price_earning_ratio
-                    .parse::<Decimal>()
-                    .unwrap_or_default()
+                match share::parse_quote_decimal(
+                    "本益比",
+                    &pe_ratio_analysis_response.price_earning_ratio,
+                ) {
+                    Ok(value) => dto.price_earning_ratio = value,
+                    Err(why) => {
+                        tracing::warn!("TPEx PE ratio fallback to zero for {}: {why}", dto.symbol);
+                    }
+                }
             }
 
             dqs.push(dto);
         }
+
+        // 拒絕比例超過門檻（10%）代表來源格式極可能已變更：
+        // 整批失敗讓呼叫端告警調查，避免大量缺漏資料悄悄入庫。
+        share::ensure_rejected_rows_within_threshold("TPEx", rejected_rows, tpex_dqs.len())?;
     }
 
     Ok(dqs)
@@ -192,6 +218,81 @@ mod tests {
         assert_eq!(quote.trade_value, dec!(1000000));
         assert_eq!(quote.transaction, dec!(500));
         assert_eq!(quote.price_earning_ratio, dec!(12.34));
+    }
+
+    /// 驗證本益比為 `N/A` 這類無資料佔位符時，規則化為 0 且不影響整列。
+    #[tokio::test]
+    async fn test_parse_quote_response_pe_ratio_placeholder_becomes_zero() {
+        let table = Table {
+            data: Some(vec![vec![
+                "5483".to_string(),
+                "中美晶".to_string(),
+                "100.00".to_string(),
+                "1.50".to_string(),
+                "98.50".to_string(),
+                "101.00".to_string(),
+                "98.00".to_string(),
+                "10,000".to_string(),
+                "1,000,000".to_string(),
+                "500".to_string(),
+                "100.00".to_string(),
+                "10".to_string(),
+                "100.50".to_string(),
+                "20".to_string(),
+            ]]),
+        };
+        let response = QuoteResponse {
+            tables: vec![table],
+        };
+        // 本益比 API 回傳無資料佔位符。
+        let pe_ratio = vec![PeRatioAnalysisResponse {
+            security_code: "5483".to_string(),
+            price_earning_ratio: "N/A".to_string(),
+        }];
+
+        let date = NaiveDate::from_ymd_opt(2026, 6, 12).unwrap();
+        let result = parse_quote_response(response, pe_ratio, date)
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        // 佔位符規則化為 0；行情主體欄位完整保留。
+        assert_eq!(result[0].price_earning_ratio, Decimal::ZERO);
+        assert_eq!(result[0].closing_price, dec!(100.00));
+    }
+
+    /// 驗證欄位毀損的資料列會被拒絕；單列來源全毀時整批失敗。
+    #[tokio::test]
+    async fn test_parse_quote_response_rejects_corrupted_row() {
+        let table = Table {
+            data: Some(vec![vec![
+                "5483".to_string(),
+                "中美晶".to_string(),
+                "corrupted".to_string(), // 收盤價放垃圾內容
+                "1.50".to_string(),
+                "98.50".to_string(),
+                "101.00".to_string(),
+                "98.00".to_string(),
+                "10,000".to_string(),
+                "1,000,000".to_string(),
+                "500".to_string(),
+                "100.00".to_string(),
+                "10".to_string(),
+                "100.50".to_string(),
+                "20".to_string(),
+            ]]),
+        };
+        let response = QuoteResponse {
+            tables: vec![table],
+        };
+
+        let date = NaiveDate::from_ymd_opt(2026, 6, 12).unwrap();
+        // 僅有的一列被拒絕（100% > 10% 門檻），整批應回傳錯誤。
+        let err = parse_quote_response(response, vec![], date)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("source format may have changed"));
     }
 
     #[tokio::test]

@@ -25,7 +25,10 @@ use futures::future;
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 use tokio::{
-    sync::mpsc::{self, Sender},
+    sync::{
+        Notify,
+        mpsc::{self, Sender},
+    },
     task, time,
 };
 
@@ -79,6 +82,8 @@ static BACKUP_LAST_GENERATION: AtomicU64 = AtomicU64::new(0);
 static DIAGNOSTICS_ACTIVE_TASKS: AtomicUsize = AtomicUsize::new(0);
 /// diagnostics task 最近一次啟動的世代編號。
 static DIAGNOSTICS_LAST_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// 停止 trace 背景任務時用來中斷長時間 sleep/ticker 等待的通知器。
+static TRACE_TASK_STOP_NOTIFY: Notify = Notify::const_new();
 const SNAPSHOT_WARMUP_TIMEOUT: Duration = Duration::from_secs(3);
 const SNAPSHOT_WARMUP_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const BACKUP_SNAPSHOT_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
@@ -87,6 +92,8 @@ const TRACE_RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60 * 5);
 const TRACE_DIAGNOSTICS_LOG_INTERVAL: Duration = Duration::from_secs(30);
 const TRACE_ALLOCATOR_TRIM_INTERVAL: Duration = Duration::from_secs(60 * 5);
 const PRICE_UPDATE_CHANNEL_CAPACITY: usize = 4096;
+/// 平順關機等待 trace 內部 task 離開的最長時間。
+const TRACE_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 啟動 trace 事件所需的即時報價背景任務。
 ///
@@ -147,21 +154,70 @@ pub async fn wait_for_price_cache_ready() {
 
 /// 停止 trace 事件所需的即時報價背景任務。
 ///
-/// 目前會停止：
+/// 目前會停止並等待：
 /// - 被追蹤股票備援採集任務
 /// - 價格更新事件 consumer
 /// - 追蹤條件快取刷新任務
 /// - 低頻 reconciliation 任務
 /// - crawler 層的全市場即時報價背景任務
+///
+/// 對新進開發者的重要差異：這些是「常駐輪詢 task」，不等同於 cron/backfill 資料操作。
+/// 它們以旗標控制迴圈，並以 [`TRACE_TASK_STOP_NOTIFY`] 喚醒長時間 sleep；資料操作則由
+/// `core::shutdown::BACKGROUND_OPERATIONS` 等待。兩套機制各自處理不同的生命週期問題。
 pub async fn stop_price_tasks() {
     stop_traced_stock_backup_caching_task();
     stop_trace_target_refresh_task();
     stop_trace_reconciliation_task();
     stop_trace_diagnostics_task();
     stop_price_update_consumer_task();
+    // 喚醒正停在長週期 sleep/ticker 的 task，避免關機必須等到五分鐘週期自然到期。
+    TRACE_TASK_STOP_NOTIFY.notify_waiters();
     crawler::price_tasks::stop_price_tasks().await;
+    wait_for_trace_tasks_to_stop().await;
     stock_price::clear_trace_targets_cache();
     trace_stats::flush_runtime_stats();
+}
+
+/// 等待 trace 模組自行建立的背景 task 全部離開。
+///
+/// 若 task 因外部 I/O 無法在期限內結束，會記錄剩餘數量後返回，避免關機永久卡住。
+async fn wait_for_trace_tasks_to_stop() {
+    let wait_result = time::timeout(TRACE_TASK_SHUTDOWN_TIMEOUT, async {
+        loop {
+            let active_tasks = PRICE_CONSUMER_ACTIVE_TASKS.load(Ordering::SeqCst)
+                + TARGET_REFRESH_ACTIVE_TASKS.load(Ordering::SeqCst)
+                + RECONCILIATION_ACTIVE_TASKS.load(Ordering::SeqCst)
+                + BACKUP_ACTIVE_TASKS.load(Ordering::SeqCst)
+                + DIAGNOSTICS_ACTIVE_TASKS.load(Ordering::SeqCst);
+            if active_tasks == 0 {
+                return;
+            }
+            time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await;
+
+    if wait_result.is_err() {
+        tracing::warn!(
+            price_consumer = PRICE_CONSUMER_ACTIVE_TASKS.load(Ordering::SeqCst),
+            target_refresh = TARGET_REFRESH_ACTIVE_TASKS.load(Ordering::SeqCst),
+            reconciliation = RECONCILIATION_ACTIVE_TASKS.load(Ordering::SeqCst),
+            backup = BACKUP_ACTIVE_TASKS.load(Ordering::SeqCst),
+            diagnostics = DIAGNOSTICS_ACTIVE_TASKS.load(Ordering::SeqCst),
+            "等待 trace 背景任務停止逾時"
+        );
+    }
+}
+
+/// 等待指定週期或關機喚醒通知，讓長週期 task 可以快速回應停止要求。
+///
+/// 若只使用 `sleep(5 minutes)`，即使停止旗標已設為 false，task 仍要五分鐘後才有機會
+/// 再檢查旗標。`tokio::select!` 讓「時間到」與「收到停止通知」任一先發生都能立即前進。
+async fn wait_for_interval_or_stop(duration: Duration) {
+    tokio::select! {
+        _ = time::sleep(duration) => {}
+        _ = TRACE_TASK_STOP_NOTIFY.notified() => {}
+    }
 }
 
 /// 發佈單筆價格更新事件。
@@ -296,7 +352,7 @@ fn start_trace_target_refresh_task() {
         );
 
         while IS_TARGET_CACHE_REFRESHING.load(Ordering::SeqCst) {
-            time::sleep(TRACE_TARGET_REFRESH_INTERVAL).await;
+            wait_for_interval_or_stop(TRACE_TARGET_REFRESH_INTERVAL).await;
 
             if !IS_TARGET_CACHE_REFRESHING.load(Ordering::SeqCst) {
                 break;
@@ -348,7 +404,10 @@ fn start_trace_reconciliation_task() {
         ticker.tick().await;
 
         while IS_RECONCILING.load(Ordering::SeqCst) {
-            ticker.tick().await;
+            tokio::select! {
+                _ = ticker.tick() => {}
+                _ = TRACE_TASK_STOP_NOTIFY.notified() => {}
+            }
 
             if !IS_RECONCILING.load(Ordering::SeqCst) {
                 break;
@@ -419,7 +478,7 @@ fn start_traced_stock_backup_caching_task() {
                 break;
             }
 
-            time::sleep(BACKUP_SNAPSHOT_REFRESH_INTERVAL).await;
+            wait_for_interval_or_stop(BACKUP_SNAPSHOT_REFRESH_INTERVAL).await;
         }
 
         IS_BACKUP_CACHING.store(false, Ordering::SeqCst);
@@ -466,7 +525,10 @@ fn start_trace_diagnostics_task() {
         ticker.tick().await;
 
         while IS_DIAGNOSTICS_LOGGING.load(Ordering::SeqCst) {
-            ticker.tick().await;
+            tokio::select! {
+                _ = ticker.tick() => {}
+                _ = TRACE_TASK_STOP_NOTIFY.notified() => {}
+            }
 
             if !IS_DIAGNOSTICS_LOGGING.load(Ordering::SeqCst) {
                 break;

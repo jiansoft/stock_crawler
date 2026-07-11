@@ -11,14 +11,16 @@ use crate::app::event::taiwan_stock::{
     format_decimal_with_commas as format_decimal_flexible_commas, format_share_quantity,
     member_label,
 };
+// 通知走 core::alert（port），跳脫工具走 core::util::text——
+// app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
 use crate::core::declare::Industry;
+use crate::core::{alert, util::text};
 use crate::domain::dividend::entity::StockDividendInfo;
 use crate::domain::dividend::repository::DividendRepository;
 use crate::domain::portfolio::entity::StockOwnershipDetail;
 use crate::domain::portfolio::repository::PortfolioRepository;
 use crate::infra::database::repository::dividend::PgDividendRepository;
 use crate::infra::database::repository::portfolio::PgPortfolioRepository;
-use crate::interfaces::bot::telegram::Telegram;
 
 use super::EventDispatcher;
 
@@ -76,7 +78,7 @@ impl EventDispatcher {
         if let Some(holding_msg) =
             Self::build_holding_dividend_message(date, &stocks_dividend_info, &holdings)
         {
-            crate::interfaces::bot::telegram::send(&holding_msg).await;
+            alert::send_message(&holding_msg).await;
         }
 
         // 最後發送下一交易日的預訂除權息公告
@@ -127,7 +129,7 @@ impl EventDispatcher {
         let mut has_rows = false;
         for stock in stocks {
             if !has_rows {
-                let _ = writeln!(msg, "{}︰", Telegram::escape_markdown_v2(title));
+                let _ = writeln!(msg, "{}︰", text::escape_markdown_v2(title));
                 has_rows = true;
             }
 
@@ -135,13 +137,13 @@ impl EventDispatcher {
                 msg,
                 "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} 現金︰{2}元\\({6}%\\) 股票 {3}元 合計︰{4}元\\({7}%\\) 昨收價:{5} 現金殖利率:{6}% 殖利率:{7}%",
                 stock.stock_symbol,
-                Telegram::escape_markdown_v2(&stock.name),
-                Telegram::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.stock_dividend.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.sum.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.closing_price.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.cash_dividend_yield.normalize().to_string()),
-                Telegram::escape_markdown_v2(stock.dividend_yield.normalize().to_string())
+                text::escape_markdown_v2(&stock.name),
+                text::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
+                text::escape_markdown_v2(stock.stock_dividend.normalize().to_string()),
+                text::escape_markdown_v2(stock.sum.normalize().to_string()),
+                text::escape_markdown_v2(stock.closing_price.normalize().to_string()),
+                text::escape_markdown_v2(stock.cash_dividend_yield.normalize().to_string()),
+                text::escape_markdown_v2(stock.dividend_yield.normalize().to_string())
             );
         }
     }
@@ -156,8 +158,8 @@ impl EventDispatcher {
         if writeln!(
             &mut msg,
             "{} {}",
-            Telegram::escape_markdown_v2(date.to_string()),
-            Telegram::escape_markdown_v2(title)
+            text::escape_markdown_v2(date.to_string()),
+            text::escape_markdown_v2(title)
         )
         .is_ok()
         {
@@ -191,7 +193,7 @@ impl EventDispatcher {
         }
 
         let msg = Self::build_market_dividend_message(date, title, stocks_dividend_info);
-        crate::interfaces::bot::telegram::send(&msg).await;
+        alert::send_message(&msg).await;
     }
 
     /// 依今日除權息事件與目前持股，組出第二則持股預估股利通知。
@@ -255,7 +257,7 @@ impl EventDispatcher {
         if writeln!(
             &mut msg,
             "{} 持股除權息預估如下︰",
-            Telegram::escape_markdown_v2(today.to_string())
+            text::escape_markdown_v2(today.to_string())
         )
         .is_err()
         {
@@ -287,17 +289,15 @@ impl EventDispatcher {
                 &mut msg,
                 "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} {2} 持股:{3}股 成本:{4}元\\({5}元\\) 現金股利:{6}元 股票股利:{7}元 現金殖利率:{8}% 殖利率:{9}%",
                 stock_symbol,
-                Telegram::escape_markdown_v2(name),
-                Telegram::escape_markdown_v2(member_label(member_id)),
-                Telegram::escape_markdown_v2(format_share_quantity(share_quantity)),
-                Telegram::escape_markdown_v2(format_decimal_flexible_commas(holding_cost)),
-                Telegram::escape_markdown_v2(format_decimal_flexible_commas(
-                    current_cost_per_share
-                )),
-                Telegram::escape_markdown_v2(format_decimal_flexible_commas(cash_dividend)),
-                Telegram::escape_markdown_v2(format_decimal_flexible_commas(stock_dividend)),
-                Telegram::escape_markdown_v2(format_decimal_flexible_commas(cash_yield)),
-                Telegram::escape_markdown_v2(format_decimal_flexible_commas(total_yield))
+                text::escape_markdown_v2(name),
+                text::escape_markdown_v2(member_label(member_id)),
+                text::escape_markdown_v2(format_share_quantity(share_quantity)),
+                text::escape_markdown_v2(format_decimal_flexible_commas(holding_cost)),
+                text::escape_markdown_v2(format_decimal_flexible_commas(current_cost_per_share)),
+                text::escape_markdown_v2(format_decimal_flexible_commas(cash_dividend)),
+                text::escape_markdown_v2(format_decimal_flexible_commas(stock_dividend)),
+                text::escape_markdown_v2(format_decimal_flexible_commas(cash_yield)),
+                text::escape_markdown_v2(format_decimal_flexible_commas(total_yield))
             );
         }
 

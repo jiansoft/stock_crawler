@@ -240,7 +240,12 @@ pub fn parse_taiwan_date(date_str: &str) -> Option<NaiveDate> {
 /// assert_eq!(date.to_string(), "2026-04-09");
 /// ```
 pub fn parse_taiwan_date_short(date_str: &str) -> Option<NaiveDate> {
-    if date_str.len() != 7 {
+    // 先驗證「長度為 7 且全部是 ASCII 數字」再切片。
+    // 重要：`&s[0..3]` 這種 byte index 切片要求索引落在 UTF-8 字元邊界上，
+    // 外部資料若混入中文或全形字元（每字 3 bytes），len() == 7 仍可能成立，
+    // 但切在字元中間會直接 panic。全 ASCII 數字保證每個字元恰好 1 byte，
+    // 之後的固定位置切片就絕對安全。
+    if date_str.len() != 7 || !date_str.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
 
@@ -389,6 +394,36 @@ fn parse_date_part<T: std::str::FromStr>(date_part_str: &str) -> Option<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 驗證短格式民國日期正常解析。
+    #[test]
+    fn test_parse_taiwan_date_short_parses_valid_input() {
+        let date = parse_taiwan_date_short("1150409").unwrap();
+
+        assert_eq!(date, NaiveDate::from_ymd_opt(2026, 4, 9).unwrap());
+    }
+
+    /// 驗證含多位元組字元的輸入回傳 None 而不是 panic。
+    ///
+    /// 「台台1」恰好是 7 bytes（3+3+1），舊版只檢查 len() == 7 就做
+    /// `&s[0..3]` 切片——byte 3 落在字元邊界純屬僥倖，「x台台」這種
+    /// 內容會直接 panic。新版以 ASCII 數字檢查徹底擋掉這類輸入。
+    #[test]
+    fn test_parse_taiwan_date_short_rejects_multibyte_input() {
+        assert_eq!(parse_taiwan_date_short("台台1"), None); // 7 bytes，邊界在 3/6
+        assert_eq!(parse_taiwan_date_short("x台台"), None); // 7 bytes，切 0..3 會跨字元
+        assert_eq!(parse_taiwan_date_short("115040９"), None); // 全形數字
+    }
+
+    /// 驗證長度不符或含非數字的輸入回傳 None。
+    #[test]
+    fn test_parse_taiwan_date_short_rejects_invalid_input() {
+        assert_eq!(parse_taiwan_date_short(""), None);
+        assert_eq!(parse_taiwan_date_short("115049"), None); // 只有 6 碼
+        assert_eq!(parse_taiwan_date_short("11504091"), None); // 8 碼
+        assert_eq!(parse_taiwan_date_short("115-4-9"), None); // 含分隔符
+        assert_eq!(parse_taiwan_date_short("1150230"), None); // 2 月 30 日不存在
+    }
 
     /// 驗證上市/上櫃最新已公告季別在各截止日邊界的切換是否正確。
     #[test]

@@ -70,6 +70,9 @@ pub(crate) fn format_decimal_with_fixed_two_commas(value: Decimal) -> String {
         });
     let formatted_integer = add_thousand_separators(integer_part);
 
+    // 安全性說明：fractional_part 來自 Decimal::round_dp(2).to_string()，
+    // 內容保證是純 ASCII 數字（內部資料、非外部輸入），因此 [..2] 的
+    // byte index 切片必然落在字元邊界上，不會 panic。
     match fractional_part.len() {
         0 => format!("{formatted_integer}.00"),
         1 => format!("{formatted_integer}.{fractional_part}0"),

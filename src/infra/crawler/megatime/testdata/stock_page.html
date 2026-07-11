@@ -1,0 +1,16 @@
+<!--
+  依 PCHome 股市個股頁「/stock/sid{symbol}.html」精簡而成的測試 fixture（下跌情境）。
+
+  解析器（parse_stock_price_html / parse_stock_quotes_html）依賴的結構：
+  - 資訊容器：#stock_info_data_a（備援 .price）。
+  - span.data_close＝成交價（同時是容器的第 1 個 span）。
+  - 第 2 個 span＝漲跌值（帶 ▼/▲ 方向符號與負號）。
+  - 第 3 個 span＝漲跌幅（含 %，解析時由預設清單去除）。
+-->
+<div id="stock_page">
+  <div id="stock_info_data_a" class="price">
+    <span class="data_close">173.5</span>
+    <span class="data_diff">▼-2.5</span>
+    <span class="data_ratio">-1.42%</span>
+  </div>
+</div>

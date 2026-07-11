@@ -8,9 +8,11 @@ use rust_decimal::Decimal;
 use crate::app::event::taiwan_stock::{
     format_decimal_with_fixed_two_commas as format_decimal_with_commas, member_label,
 };
+// 通知走 core::alert（port），跳脫工具走 core::util::text——
+// app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
+use crate::core::{alert, util::text};
 use crate::domain::money_flow::repository::MoneyFlowRepository;
 use crate::infra::database::repository::money_flow::PgMoneyFlowRepository;
-use crate::interfaces::bot::telegram::Telegram;
 
 use super::EventDispatcher;
 
@@ -22,9 +24,9 @@ impl EventDispatcher {
         let rows = money_flow_repo
             .fetch_member_money_history_with_previous_day(date)
             .await?;
-        // 建立通知內容並發送 Telegram 訊息
+        // 建立通知內容並透過 AlertSink port 發送（生產環境為 Telegram adapter）
         if let Some(msg) = Self::build_money_change_message(&rows) {
-            crate::interfaces::bot::telegram::send(&msg).await;
+            alert::send_message(&msg).await;
         }
 
         Ok(())
@@ -47,10 +49,10 @@ impl EventDispatcher {
 
         format!(
             "{}:{} {} \\({}%\\)",
-            Telegram::escape_markdown_v2(label),
-            Telegram::escape_markdown_v2(format_decimal_with_commas(market_value)),
-            Telegram::escape_markdown_v2(format_decimal_with_commas(diff)),
-            Telegram::escape_markdown_v2(percentage),
+            text::escape_markdown_v2(label),
+            text::escape_markdown_v2(format_decimal_with_commas(market_value)),
+            text::escape_markdown_v2(format_decimal_with_commas(diff)),
+            text::escape_markdown_v2(percentage),
         )
     }
 
@@ -63,7 +65,7 @@ impl EventDispatcher {
         let _ = writeln!(
             &mut msg,
             "{} 市值變化",
-            Telegram::escape_markdown_v2(date.to_string())
+            text::escape_markdown_v2(date.to_string())
         );
 
         // 合計列
