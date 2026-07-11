@@ -604,6 +604,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_annual() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_annual");
@@ -618,6 +622,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_roe_is_zero() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_roe_is_zero");
@@ -633,6 +641,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_without_annual() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_without_annual");

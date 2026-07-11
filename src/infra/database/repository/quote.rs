@@ -492,6 +492,10 @@ mod tests {
     use rust_decimal_macros::dec;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_cache_aside_flow() {
         // 載入環境變數設定
         dotenvy::dotenv().ok();

@@ -6,12 +6,13 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 use rust_decimal_macros::dec;
 
 use crate::domain::quote::repository::QuoteRepository;
-use crate::interfaces::bot::telegram::Telegram;
+// 通知走 core::alert（port），跳脫工具走 core::util::text——
+// app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
 use crate::{
+    core::alert,
     core::declare,
-    core::util::{convert::FromValue, map::Keyable},
+    core::util::{convert::FromValue, map::Keyable, text},
     infra::database::repository::quote::PgQuoteRepository,
-    interfaces::bot,
 };
 
 /// 提醒目前可公開申購的股票。
@@ -76,8 +77,9 @@ pub async fn execute() -> Result<()> {
     }
 
     if !msg.is_empty() {
-        let to_bot_msg = Telegram::escape_markdown_v2(format!("{now} 可以申購的股票如下︰\n{msg}"));
-        let _ = bot::telegram::send(&to_bot_msg).await;
+        // 整段訊息為動態內容（含日期、價格的小數點），送出前統一做 MarkdownV2 跳脫。
+        let to_bot_msg = text::escape_markdown_v2(format!("{now} 可以申購的股票如下︰\n{msg}"));
+        alert::send_message(&to_bot_msg).await;
         return Ok(());
     }
 
@@ -108,6 +110,10 @@ mod tests {
 
     /// 驗證公開申購提醒流程可執行。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_execute() {
         dotenvy::dotenv().ok();
         SHARE.load().await;

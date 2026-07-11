@@ -1,0 +1,27 @@
+<!-- 年度獲利頁面 fixture（模擬 MoneyDJ zcdj / FBS 共用的表格結構）。
+
+     用途：parse_annual_profits_html 的單元測試輸入。
+     結構重點：
+     - 主資料表 id 為 oMainTable，前 3 列是表頭（選擇器從第 4 列起取資料）。
+     - 資料列的 <td> 之間「不能」有換行或空白——解析程式以文字節點順序取欄位，
+       多餘的空白文字節點會使欄位索引位移。
+     - 欄位順序：年度(民國) | 4 個中間欄位 | 每股營收 | 每股稅前淨利 | 每股盈餘(EPS)
+     - 內容為手工構造的代表性樣本（非真實數據），涵蓋：
+       2 筆正常列、1 筆欄位不足列、1 筆年度非數字列、1 筆 EPS 無法解析列。
+-->
+<html>
+<body>
+<table id="oMainTable">
+<tbody>
+<tr><td colspan="8">獲利能力－年度</td></tr>
+<tr><td>年度</td><td>加權平均股本</td><td>營業收入</td><td>稅前盈利</td><td>稅後盈利</td><td>每股營收</td><td>每股稅前盈利</td><td>每股稅後盈利</td></tr>
+<tr><td colspan="8">（單位：億元）</td></tr>
+<tr><td>112</td><td>2593</td><td>21617</td><td>9799</td><td>8385</td><td>83.36</td><td>37.79</td><td>32.34</td></tr>
+<tr><td>111</td><td>2593</td><td>22639</td><td>11322</td><td>10165</td><td>87.31</td><td>43.66</td><td>39.20</td></tr>
+<tr><td colspan="8">表尾備註列（欄位不足，應被略過）</td></tr>
+<tr><td>合計</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
+<tr><td>110</td><td>2593</td><td>15874</td><td>6631</td><td>5971</td><td>61.23</td><td>25.58</td><td>N/A</td></tr>
+</tbody>
+</table>
+</body>
+</html>

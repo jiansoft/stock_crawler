@@ -44,6 +44,54 @@ pub fn big5_2_utf8(data: &[u8]) -> Result<String> {
     Ok(decoded.into_owned())
 }
 
+/// 跳脫 Telegram `MarkdownV2` 的保留字元。
+///
+/// ## 為什麼需要這個函式
+///
+/// 本專案的通知訊息採用 Telegram 的 `MarkdownV2` 格式（可以加粗體、程式碼區塊
+/// 等排版）。這個格式規定：`_ * [ ] ( ) ~ ` > # + - = | { } . !` 這 18 個字元
+/// 是「保留字元」，若要當成普通文字顯示，前面必須加上反斜線 `\` 跳脫，
+/// 否則 Telegram API 會直接回 `400 Bad Request`，整則訊息發不出去。
+///
+/// 股票名稱、錯誤訊息這類「動態內容」隨時可能含有這些字元（例如 `台積電-KY`
+/// 的 `-`、小數點 `.`），所以組訊息時所有動態內容都要先經過這個函式。
+///
+/// ## 為什麼放在 `core::util::text` 而不是 telegram 模組
+///
+/// 依 DDD 分層，`app`（use case）不應該 import `interfaces`（傳輸層）。
+/// 但 app 層組通知訊息時需要這個跳脫規則——若它住在
+/// `interfaces::bot::telegram`，app 就被迫反向依賴外層。
+/// 因此把它下沉到 `core`（誰都可以依賴的共用工具層）：
+/// app 組訊息用它、`interfaces::bot::telegram` 的 adapter 也用它，
+/// 依賴方向全部合法（外層 → 內層）。
+///
+/// ## 逐步說明
+///
+/// 1. `SPECIALS` 列出 MarkdownV2 規格定義的所有保留字元。
+/// 2. 預先配置 `text.len() * 2` 的字串容量——最壞情況是每個字元都要跳脫
+///    （每個字元前面都插一個 `\`，長度翻倍），一次配足避免中途重新配置記憶體。
+/// 3. 逐字元走訪：遇到保留字元就先補一個反斜線，然後照抄原字元。
+pub fn escape_markdown_v2(text: impl Into<String>) -> String {
+    // MarkdownV2 規格（https://core.telegram.org/bots/api#markdownv2-style）
+    // 定義的保留字元清單。
+    const SPECIALS: &[char] = &[
+        '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!',
+    ];
+
+    let text = text.into();
+    // 預留兩倍空間：跳脫最多讓長度翻倍，先配足就不會在迴圈中反覆重新分配。
+    let mut result = String::with_capacity(text.len() * 2);
+
+    for ch in text.chars() {
+        if SPECIALS.contains(&ch) {
+            // 保留字元：先放一個反斜線，Telegram 才會把後面的字元當普通文字。
+            result.push('\\');
+        }
+        result.push(ch);
+    }
+    result
+}
+
 /// 將中文字拆分 例︰台積電 => ["台", "台積", "台積電", "積", "積電", "電"]
 pub fn split(w: &str) -> Vec<String> {
     let word = w.replace(['*', '-'], "");
@@ -234,6 +282,23 @@ mod tests {
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
 
+    /// 驗證 MarkdownV2 跳脫規則：保留字元前補反斜線、一般字元原樣保留。
+    ///
+    /// 測試案例刻意混合「需跳脫」（`_`、`*`、`[`、`]`、`(`、`)`）與
+    /// 「不需跳脫」（英數字）的字元，確認只有保留字元被加上 `\`。
+    #[test]
+    fn test_escape_markdown_v2() {
+        let input = "Hello_World*Test[link](url)";
+        let expected = "Hello\\_World\\*Test\\[link\\]\\(url\\)";
+        assert_eq!(escape_markdown_v2(input), expected);
+
+        // 不含任何保留字元的字串應原封不動。
+        assert_eq!(escape_markdown_v2("台積電2330"), "台積電2330");
+
+        // 空字串是合法輸入，輸出也應該是空字串。
+        assert_eq!(escape_markdown_v2(""), "");
+    }
+
     /// 驗證 Big5 轉 UTF-8。
     #[test]
     fn test_big5_to_utf8() {
@@ -262,6 +327,10 @@ mod tests {
 
     /// 驗證中文字拆字結果。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_split() {
         dotenvy::dotenv().ok();
         let chinese_word = "台積電";
@@ -274,6 +343,10 @@ mod tests {
 
     /// 比較兩種拆字實作的結果與耗時。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_split_all() {
         dotenvy::dotenv().ok();
         let _result = split_v1("2330台積電2330");
@@ -300,6 +373,10 @@ mod tests {
 
     /// 驗證跳脫字元清理結果。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_clean_string_escape_chars() {
         dotenvy::dotenv().ok();
         let chinese_word = "台積電% 元 ,";

@@ -121,8 +121,10 @@ impl EventDispatcher {
         debouncer: Arc<TelegramDebouncer>,
     ) -> Result<()> {
         use crate::core::declare::StockExchangeMarket;
+        // MarkdownV2 跳脫工具在 core 層（不是 interfaces::bot）：
+        // app 只依賴內層，訊息實際送往哪個管道由已註冊的 AlertSink 決定。
+        use crate::core::util::text;
         use crate::infra::cache::SHARE;
-        use crate::interfaces::bot::telegram::Telegram;
 
         match event {
             DomainEvent::StockRegistered {
@@ -148,7 +150,7 @@ impl EventDispatcher {
                 let log_msg = format!(
                     "新增股票︰ {stock_symbol} {stock_name} {market_name} {industry_name}",
                     stock_symbol = symbol,
-                    stock_name = Telegram::escape_markdown_v2(name),
+                    stock_name = text::escape_markdown_v2(name),
                     market_name = market_name,
                     industry_name = industry_name
                 );
@@ -179,7 +181,7 @@ impl EventDispatcher {
                 let log_msg = format!(
                     "新增股票︰ {stock_symbol} {stock_name} {market_name} {industry_name}",
                     stock_symbol = symbol,
-                    stock_name = Telegram::escape_markdown_v2(new_name),
+                    stock_name = text::escape_markdown_v2(new_name),
                     market_name = market_name,
                     industry_name = industry_name
                 );
@@ -198,9 +200,9 @@ impl EventDispatcher {
             } => {
                 let msg = format!(
                     "{} 大盤指數︰{} 漲跌︰{}",
-                    Telegram::escape_markdown_v2(date.to_string()),
-                    Telegram::escape_markdown_v2(index.to_string()),
-                    Telegram::escape_markdown_v2(change.to_string())
+                    text::escape_markdown_v2(date.to_string()),
+                    text::escape_markdown_v2(index.to_string()),
+                    text::escape_markdown_v2(change.to_string())
                 );
                 debouncer.add_message(msg).await;
             }

@@ -141,6 +141,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_calculate() {
         dotenvy::dotenv().ok();
         tracing::info!("開始 fetch");
@@ -156,6 +160,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_rebuild() {
         dotenvy::dotenv().ok();
         tracing::info!("開始 rebuild");

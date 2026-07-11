@@ -268,6 +268,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_no_dividends_for_year() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_no_dividends_for_year");
@@ -304,6 +308,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_multiple_dividends_for_year() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_multiple_dividends_for_year");
@@ -319,6 +327,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_dividends_summary_by_date() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_dividends_summary_by_date");
@@ -337,6 +349,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_yearly_dividends_sum_by_date() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_yearly_dividends_sum_by_date");

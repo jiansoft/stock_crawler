@@ -66,6 +66,10 @@ mod tests {
     use crate::infra::database::table::trace;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_list() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_list");

@@ -10,6 +10,26 @@ authors = ["Eddie <eddiea.chen@gmail.com>"]
 license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+# 整合測試開關（本身不啟用任何相依，只作為測試分流的旗標）。
+#
+# ## 為什麼需要這個 feature
+#
+# 專案的測試分成兩類：
+# - 單元測試：純函式、不碰外部服務，任何環境都能秒級跑完。
+# - 整合測試：需要 PostgreSQL/Redis（本機或 CI 的 service container）。
+#
+# 需要外部服務的測試都標了
+# `#[cfg_attr(not(feature = "integration-tests"), ignore = "...")]`：
+# 預設（不開 feature）這些測試會被標成 ignored——`cargo test` 只跑單元測試，
+# 快速且不需要任何外部服務；要跑完整測試時再明確開啟：
+#
+#   cargo test --features integration-tests -- --test-threads=1
+#
+# CI 也依此拆成 unit（無 service、每次 PR 快速回饋）與
+# integration（有 PostgreSQL/Redis container）兩個 job。
+integration-tests = []
+
 [lints.rust]
 # 關於連結器警告過濾
 # Rust 1.97.0 新版編譯器預設會將底層連結器（Linker）的警告輸出至終端機（受 linker_messages 控制）。

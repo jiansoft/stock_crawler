@@ -104,6 +104,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_pg_yield_rank_repository_contract() {
         // 這是一個單元合約測試佔位符，如果沒有資料庫連接則跳過
         dotenvy::dotenv().ok();

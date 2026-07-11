@@ -180,6 +180,10 @@ mod tests {
     */
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_insert() {
         dotenvy::dotenv().ok();
         let mut e = StockWord::new("小一".to_string());
@@ -198,6 +202,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_list_by_word() {
         dotenvy::dotenv().ok();
         let word = util::text::split("隆銘綠能");

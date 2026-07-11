@@ -221,6 +221,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_daily_quotes_by_date() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_daily_quotes_by_date");
@@ -238,6 +242,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_count_by_date() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_count_by_date");
@@ -255,6 +263,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_makeup_for_the_lack_daily_quotes() {
         dotenvy::dotenv().ok();
         SHARE.load().await;
@@ -279,6 +291,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_lowest_avg_highest_price() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_lowest_avg_highest_price");

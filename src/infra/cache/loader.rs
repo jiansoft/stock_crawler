@@ -452,6 +452,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_get_industry_name() {
         dotenvy::dotenv().ok();
         SHARE.load().await;
@@ -470,6 +474,10 @@ mod tests {
     /// - 資料庫可用但 stocks 為空（CI 只建 schema 未 seed）：應回傳 `Err`
     ///   且錯誤訊息點名股票主檔——這正是「空的核心快取要 fail fast」的行為。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_load_required_contract() {
         dotenvy::dotenv().ok();
 
@@ -496,6 +504,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_load() {
         dotenvy::dotenv().ok();
 

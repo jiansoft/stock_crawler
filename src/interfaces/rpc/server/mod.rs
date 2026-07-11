@@ -230,6 +230,10 @@ mod tests {
 
     /// 測試 gRPC 伺服器啟動流程。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_start() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 rpc::server::test_start()");

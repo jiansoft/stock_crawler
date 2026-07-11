@@ -447,6 +447,10 @@ mod tests {
 
     /// 驗證 `contains_key` 的基本查詢流程。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_redis_contains_key() {
         dotenvy::dotenv().ok();
         if skip_when_redis_unavailable().await {
@@ -461,6 +465,10 @@ mod tests {
 
     /// 驗證 decimal 存取流程。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_redis_decimal() {
         dotenvy::dotenv().ok();
         if skip_when_redis_unavailable().await {
@@ -476,6 +484,10 @@ mod tests {
 
     /// 驗證「創新低才寫入」的去重邏輯。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_set_if_more_extreme_floor() {
         dotenvy::dotenv().ok();
         if skip_when_redis_unavailable().await {
@@ -519,6 +531,10 @@ mod tests {
 
     /// 驗證「創新高才寫入」的去重邏輯。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_set_if_more_extreme_ceiling() {
         dotenvy::dotenv().ok();
         if skip_when_redis_unavailable().await {
@@ -552,6 +568,10 @@ mod tests {
 
     /// 驗證 Redis 常用操作。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_redis() {
         dotenvy::dotenv().ok();
         // 與其他 Redis 測試一致：本機沒有 Redis 服務時跳過，而不是紅燈。

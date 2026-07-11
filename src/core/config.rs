@@ -445,6 +445,10 @@ mod tests {
 
     /// 驗證設定可由環境變數與 JSON 載入。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_init() {
         dotenvy::dotenv().ok();
         tracing::debug!("SETTINGS.system: {:#?}\r\n", SETTINGS.system);

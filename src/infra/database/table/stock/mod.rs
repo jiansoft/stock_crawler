@@ -455,6 +455,10 @@ mod tests {
 
     // 此測試驗證防禦性 upsert 邏輯（當新傳入的市場或產業編號為 0 時，保留資料庫中原先正確的非零值）。
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_upsert_industry() {
         dotenvy::dotenv().ok();
 
@@ -560,6 +564,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_update_last_eps() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 update_last_eps");
@@ -574,6 +582,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 StockDbRow::fetch");
@@ -589,6 +601,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_net_asset_value_per_share_is_zero() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_net_asset_value_per_share_is_zero");
@@ -610,6 +626,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_stocks_without_financial_statement() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 fetch_stocks_without_financial_statement");
@@ -631,12 +651,20 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_create_index() {
         dotenvy::dotenv().ok();
         create_search_index("2330", "台積電").await;
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_rebuild_search_indices() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 rebuild_search_indices");

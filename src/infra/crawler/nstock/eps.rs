@@ -141,7 +141,28 @@ pub async fn visit(stock_symbol: &str) -> Result<Eps> {
         "https://www.nstock.tw/api/v2/eps/data?stock_id={stock_symbol}",
         stock_symbol = stock_symbol
     );
+    // fetch 與 parse 分離：這裡只負責打 API 拿回 DTO（EpsResponse），
+    // DTO → 專案數值模型的轉換交給下面的純函式 parse_eps_response，
+    // 讓轉換邏輯可以用 testdata/ 的 JSON fixture 做離線單元測試。
     let res = util::http::get_json::<EpsResponse>(&url).await?;
+    Ok(parse_eps_response(res, stock_symbol))
+}
+
+/// 把 NStock API 的原始回應（DTO）轉換成專案內的 [`Eps`] 模型（純函式）。
+///
+/// ## 為什麼抽成純函式
+///
+/// API 回傳的欄位都是字串（例如 EPS 是 `"32.34"`、年季是 `"202301"`），
+/// 而專案內需要的是 `Decimal`、`i32` 等強型別。這段「字串 → 型別」的轉換
+/// 是最容易因 API 改版而壞掉的部分，抽成不做任何 I/O 的純函式後，
+/// 就能用 `testdata/eps_response.json` 這種 fixture 做穩定的離線測試。
+///
+/// ## 轉換規則
+///
+/// - 年度與季度分開處理，各自 `filter_map`：**單筆**解析失敗（例如
+///   欄位是 `"N/A"` 或年季格式錯誤）只丟棄該筆，不影響其他筆——
+///   歷史久遠的資料常有缺值，一筆壞資料不應讓整檔股票的資料進不來。
+fn parse_eps_response(res: EpsResponse, stock_symbol: &str) -> Eps {
     let years = res
         .data
         .iter()
@@ -155,7 +176,7 @@ pub async fn visit(stock_symbol: &str) -> Result<Eps> {
         .filter_map(|edq| parse_eps_quarter(stock_symbol.to_string(), edq))
         .collect();
 
-    Ok(Eps { quarters, years })
+    Eps { quarters, years }
 }
 
 fn parse_eps_year(stock_symbol: String, eps_year: &EpsDataYear) -> Option<EpsYear> {
@@ -228,6 +249,46 @@ mod tests {
         assert!(parse_year_and_quarter("").is_err());
         assert!(parse_year_and_quarter("2023Q1").is_err()); // 含英文字母
         assert!(parse_year_and_quarter("20231").is_err()); // 只有 5 碼
+    }
+
+    // === JSON fixture 測試（離線、不連網路）===
+    //
+    // fixture 內容位於 testdata/eps_response.json，是手工構造的代表性樣本
+    // （非真實數據），涵蓋正常資料與 API 常見的髒資料（"N/A"、格式錯的年季）。
+    // 這是本專案「crawler fixture 測試模式」的 JSON 版示範：
+    // 1. serde 反序列化 fixture（同時驗證中文欄位名的 rename 對應仍正確）。
+    // 2. 呼叫純函式 parse_eps_response 驗證 DTO → 專案模型的轉換規則。
+
+    /// 驗證 fixture 中的正常資料被完整轉換、髒資料被逐筆丟棄。
+    #[test]
+    fn parse_eps_response_filters_dirty_rows_from_fixture() {
+        // include_str! 相對於本檔案（nstock/eps.rs）→ nstock/testdata/。
+        const FIXTURE: &str = include_str!("testdata/eps_response.json");
+
+        // 第一步：反序列化。若站方欄位改名（例如「年季」改「年/季」），
+        // 這裡就會失敗，等於順帶測到 serde rename 的對應。
+        let res: EpsResponse = serde_json::from_str(FIXTURE).expect("fixture 應可反序列化");
+
+        // 第二步：轉換。fixture 有 4 筆季度（1 筆年季格式錯、1 筆 EPS 為 N/A）
+        // 與 3 筆年度（1 筆年度為 N/A）——髒資料應被逐筆丟棄，不影響其他筆。
+        let eps = parse_eps_response(res, "2330");
+
+        assert_eq!(eps.quarters.len(), 2, "quarters: {:#?}", eps.quarters);
+        assert_eq!(eps.quarters[0].year, 2023);
+        assert_eq!(eps.quarters[0].quarter, Quarter::Q1);
+        assert_eq!(eps.quarters[0].eps, rust_decimal_macros::dec!(7.98));
+        assert_eq!(
+            eps.quarters[1].cumulative_eps,
+            rust_decimal_macros::dec!(14.99)
+        );
+
+        assert_eq!(eps.years.len(), 2, "years: {:#?}", eps.years);
+        assert_eq!(eps.years[0].year, 2023);
+        assert_eq!(eps.years[0].eps, rust_decimal_macros::dec!(32.34));
+        assert_eq!(eps.years[1].gross_profit, rust_decimal_macros::dec!(59.56));
+
+        // Keyable 的鍵格式順帶驗證（快取層以此當 Redis/記憶體鍵）。
+        assert_eq!(eps.quarters[0].key(), "2330-2023-Q1");
     }
 
     #[tokio::test]

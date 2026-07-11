@@ -456,6 +456,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_fetch_last_two_month() {
         dotenvy::dotenv().ok();
         tracing::info!("開始 fetch_last_two_month");
@@ -483,6 +487,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
     async fn test_rebuild_revenue_last_date() {
         dotenvy::dotenv().ok();
         tracing::info!("開始 test_rebuild_revenue_last_date");

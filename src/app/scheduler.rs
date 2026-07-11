@@ -10,8 +10,10 @@ use crate::{
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
     app::event,
-    core::declare,
-    interfaces::bot::{self, telegram::Telegram},
+    // 通知一律走 core::alert 抽象介面（port）：app 層不 import
+    // interfaces::bot（傳輸層細節），實際的 Telegram adapter 由 main 啟動時註冊。
+    // 這樣 use case 可以在單元測試中注入假的 sink 驗證，也能日後替換通知管道。
+    core::{alert, declare, util::text},
 };
 
 /// 啟動排程
@@ -32,7 +34,7 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
         if let Err(why) = event::trace::stock_price::execute().await {
             let err_msg = format!("{:?}", why);
             tracing::error!("{}", &err_msg);
-            bot::telegram::send_alert("開盤股價追蹤初始化失敗", &err_msg).await;
+            alert::send_alert("開盤股價追蹤初始化失敗", &err_msg).await;
         }
         tracing::info!(
             "scheduler start done: opening trace::stock_price elapsed={:?}",
@@ -42,13 +44,14 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
 
     let msg = format!(
         "StockCrawler 已啟動\r\nRust OS/Arch: {}/{}\r\n",
-        Telegram::escape_markdown_v2(env::consts::OS),
-        Telegram::escape_markdown_v2(env::consts::ARCH)
+        // OS/Arch 是動態內容，照規則先做 MarkdownV2 跳脫再組進訊息。
+        text::escape_markdown_v2(env::consts::OS),
+        text::escape_markdown_v2(env::consts::ARCH)
     );
 
     tracing::info!("scheduler start begin: telegram notify");
     let telegram_timer = Instant::now();
-    bot::telegram::send(&msg).await;
+    alert::send_message(&msg).await;
     tracing::info!(
         "scheduler start done: telegram notify elapsed={:?}",
         telegram_timer.elapsed()
@@ -177,7 +180,7 @@ where
                         error = %err_msg,
                         "task.failed"
                     );
-                    bot::telegram::send_alert("排程任務執行失敗", &err_msg).await;
+                    alert::send_alert("排程任務執行失敗", &err_msg).await;
                 }
             }
         })
