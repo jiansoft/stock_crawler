@@ -90,12 +90,39 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
         if let Err(why) =
             backfill_recent_dividends_for_stock(year, &stock_symbol, &multiple_dividend_cache).await
         {
-            tracing::error!(
-                "backfill_missing_or_multiple_dividends failed: year={}, stock_symbol={}, stage=backfill_recent_dividends_for_stock, error={:#}",
-                year,
-                stock_symbol,
-                why
-            );
+            if yahoo::dividend::is_page_not_found_error(&why) {
+                // Yahoo 回 404＝整個個股頁不存在，幾乎都是已下市/清算的標的
+                //（資料庫的 SuspendListing 旗標可能還沒更新）。這不是異常，
+                // 降級為 warn 避免淹沒真正的錯誤，並把跳過快取拉長到 30 天，
+                // 不再每 3 天重打一次注定 404 的請求。
+                if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
+                    .set(
+                        make_cache_key(&stock_symbol),
+                        true,
+                        yahoo::dividend::PAGE_NOT_FOUND_CACHE_TTL_SECONDS,
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        "Failed to extend yahoo dividend 404 skip cache: stock_symbol={}, error={:#}",
+                        stock_symbol,
+                        cache_err
+                    );
+                }
+                tracing::warn!(
+                    "skip dividend backfill because yahoo page not found (證券可能已下市): year={}, stock_symbol={}, error={:#}",
+                    year,
+                    stock_symbol,
+                    why
+                );
+            } else {
+                tracing::error!(
+                    "backfill_missing_or_multiple_dividends failed: year={}, stock_symbol={}, stage=backfill_recent_dividends_for_stock, error={:#}",
+                    year,
+                    stock_symbol,
+                    why
+                );
+            }
         }
 
         // 每檔股票請求完成後，進行隨機 1.5 到 3.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
