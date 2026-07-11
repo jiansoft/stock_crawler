@@ -1,0 +1,37 @@
+<!--
+  依 Goodinfo「StockDividendPolicy.asp?SHEET2=盈餘分配率」回應精簡而成的測試 fixture。
+
+  解析器（parse_payout_ratio_dividends）的規則：
+  - 只吃 #tblDetail > tbody > tr 且「恰好 15 個 <td>」的列。
+  - tds[0]=發放年度（年度彙總列為西元年；明細列是「∟月/日」縮排格式，
+    解析失敗時沿用上一列年度）、tds[1]=股利所屬期間（「-」代表年度彙總列，跳過）、
+    tds[8]=股利合計（0 則跳過）、tds[11]=EPS、tds[12..15]=盈餘配息率/配股率/合計分配率。
+  - 「累計」列（多年度統計）不具股利語意，應跳過。
+
+  本 fixture 刻意涵蓋的情境：
+  1. 年度彙總列（期間為「-」）→ 跳過，但其年度 2026 會成為後續明細列的 last_year。
+  2. ∟ 前綴明細列（25Q4，含 &nbsp; 縮排）→ 正常解析，年度沿用 2026。
+  3. 年度欄空白的明細列（25Q3）→ 同樣沿用 last_year。
+  4. 「累計」列 → 跳過。
+  5. 股利合計為 0 的明細列 → 跳過。
+-->
+<table id="tblDetail" class="b1 p4_2 r10">
+  <tbody>
+    <tr class="bg_h1"><th colspan="15">盈餘分配率一覽表</th></tr>
+    <tr align="center">
+      <td>2026</td><td>-</td><td>19</td><td>0</td><td>19</td><td>0</td><td>0</td><td>0</td><td>19</td><td>-</td><td>-</td><td>56.3</td><td>33.7</td><td>0</td><td>33.7</td>
+    </tr>
+    <tr align="center">
+      <td>&nbsp;&nbsp;&nbsp;&nbsp;∟03/19&nbsp;</td><td>25Q4</td><td>5</td><td>0</td><td>5</td><td>0</td><td>0</td><td>0</td><td>5</td><td>1</td><td>-</td><td>15.36</td><td>32.5</td><td>0</td><td>32.5</td>
+    </tr>
+    <tr align="center">
+      <td></td><td>25Q3</td><td>5</td><td>0</td><td>5</td><td>0</td><td>0</td><td>0</td><td>5</td><td>1</td><td>-</td><td>14.2</td><td>35</td><td>0</td><td>35</td>
+    </tr>
+    <tr align="center">
+      <td>累計</td><td>-</td><td>120</td><td>3</td><td>123</td><td>2</td><td>1</td><td>3</td><td>126</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+    </tr>
+    <tr align="center">
+      <td>2020</td><td>19Q4</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>-</td><td>-</td><td>3.9</td><td>0</td><td>0</td><td>0</td>
+    </tr>
+  </tbody>
+</table>

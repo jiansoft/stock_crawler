@@ -1,0 +1,37 @@
+<!--
+  依 MOPS「t13sa150_otc」上櫃外資持股統計頁精簡而成的測試 fixture。
+  （原始頁面是 Big5 編碼的舊式 HTML；fixture 已是 UTF-8，
+   對應 parse_otc_qfii_html 收到「已解碼」字串的情境。）
+
+  解析器（parse_otc_qfii_html）的規則：
+  - 只掃 body > center 下「第一個」table 的列。
+  - 每列以「文字節點」計數必須恰好 23 個——不是 <td> 數。
+    因此【資料列必須寫成單行、標籤之間不能有空白】，
+    否則換行縮排會變成多餘的文字節點，讓計數對不上。
+  - 文字節點索引：[1]=代號、[5]=發行股數、[9]=外資持股、[13]=持股比率。
+
+  本 fixture 刻意涵蓋的情境：
+  1. 表頭列（多行書寫、節點數 ≠ 23）→ 略過。
+  2. 兩筆正常資料列（含千分位逗號；比率帶 &nbsp; 前綴）。
+  3. 合計列（欄位較少）→ 略過。
+  4. center 下的第二個 table → 不在 nth-child(1) 範圍，整表不解析。
+-->
+<html>
+<body>
+<center>
+<table border="1">
+  <tr>
+    <td>序號</td><td>股票代號</td><td>名稱</td><td>上限比率</td><td>法令比率</td>
+    <td>發行股數</td><td>a</td><td>b</td><td>c</td><td>外資持有股數</td>
+    <td>d</td><td>e</td><td>f</td><td>持股比率</td><td>g</td><td>h</td><td>i</td>
+  </tr>
+  <tr><td>1</td><td>5274</td><td>信驊</td><td>100.00</td><td>100.00</td><td>36,915,132</td><td>0</td><td>36,915,132</td><td>0</td><td>12,345,678</td><td>0</td><td>12,345,678</td><td>0</td><td>&nbsp;33.44</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+  <tr><td>2</td><td>6488</td><td>環球晶</td><td>100.00</td><td>100.00</td><td>435,208,155</td><td>0</td><td>435,208,155</td><td>0</td><td>98,765,432</td><td>0</td><td>98,765,432</td><td>0</td><td>&nbsp;22.69</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+  <tr><td>合計</td><td></td><td></td></tr>
+</table>
+<table border="1">
+  <tr><td>x</td><td>9999</td><td>不該被解析</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+</table>
+</center>
+</body>
+</html>

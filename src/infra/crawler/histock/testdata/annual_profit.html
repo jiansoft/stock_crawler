@@ -1,0 +1,29 @@
+<!--
+  依 HiStock「每股盈餘」頁面精簡而成的測試 fixture。
+
+  解析器（parse_annual_profit_html）不是走 CSS 選擇器，而是把整份 HTML
+  攤平成非空白文字節點序列後定位：
+  - 找到「季別/年度」後，其後連續的四位數 token 是年度欄
+    （年度可能帶結尾連字號，如「2025-」代表年度未結束）。
+  - 找到「總計」後，其後的數值依序對應各年度 EPS；「--」代表尚無資料，視為 0。
+
+  本 fixture 刻意涵蓋的情境：
+  1. 頁面雜訊文字節點（導覽、標題）→ 不影響定位。
+  2. 帶結尾連字號的年度「2025-」→ 應正規化為 2025。
+  3. 總計欄的「--」→ EPS 應為 0 而非解析錯誤。
+-->
+<div id="Header"><a href="/">首頁</a><span>台積電 2330</span></div>
+<div id="content">
+  <h3>每股盈餘</h3>
+  <table class="tb-stock text-center">
+    <tr>
+      <th>季別/年度</th><th>2025-</th><th>2024</th><th>2023</th>
+    </tr>
+    <tr><td>Q1</td><td>13.94</td><td>8.70</td><td>7.98</td></tr>
+    <tr><td>Q2</td><td>15.36</td><td>9.56</td><td>7.01</td></tr>
+    <tr><td>Q3</td><td>--</td><td>12.54</td><td>8.14</td></tr>
+    <tr><td>Q4</td><td>--</td><td>14.45</td><td>9.21</td></tr>
+    <tr><td>總計</td><td>--</td><td>45.25</td><td>32.34</td></tr>
+  </table>
+  <p>資料僅供參考。</p>
+</div>

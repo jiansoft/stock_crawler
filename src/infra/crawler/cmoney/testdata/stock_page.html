@@ -1,0 +1,22 @@
+<!--
+  依 CMoney 個股頁「/forum/stock/{symbol}」精簡而成的測試 fixture（下跌情境）。
+
+  解析器（parse_stock_price_html / parse_stock_quotes_html）依賴的結構：
+  - 先以「section > div」定位報價容器。
+  - div.stockData__info 的第一個 div＝成交價。
+  - div.stockData__value 之下：div.stockData__quotePrice＝漲跌、
+    div.stockData__quote＝漲跌幅（括號＋百分比格式，解析時去括號與 %）。
+-->
+<main>
+  <section>
+    <div class="stockData">
+      <div class="stockData__info">
+        <div class="stockData__price">173.5</div>
+        <div class="stockData__value">
+          <div class="stockData__quotePrice">-2.5</div>
+          <div class="stockData__quote">(-1.42%)</div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>

@@ -27,6 +27,103 @@ fn snapshot_to_quotes(
     snapshot.try_into_stock_quotes()
 }
 
+/// 解析 Yahoo 單檔 quote 頁 HTML 中的成交價。
+///
+/// 這是一個「純函式」——輸入只有 HTML 字串，不做任何網路 I/O，
+/// 可用 `testdata/quote_page.html` fixture 直接驗證，
+/// 不需要真的連 Yahoo（fetch/parse 分離）。
+fn parse_quote_page_price(stock_symbol: &str, url: &str, html: &str) -> Result<Decimal> {
+    let document = Html::parse_document(html);
+
+    // 這裡沿用既有 Yahoo quote 頁的 selector，
+    // 只抓主要報價區塊中的大字成交價。
+    let price_str = util::http::element::get_one_element(util::http::element::GetOneElementText {
+        stock_symbol,
+        document,
+        selector: "#main-0-QuoteHeader-Proxy",
+        element: "span.Fz\\(32px\\)",
+        url,
+    })?;
+
+    // 解析完後 normalize，避免 `Decimal` 保留不必要的小數 scale，
+    // 讓後續比對與 log 看起來更乾淨。
+    Ok(text::parse_decimal(&price_str, None)?.normalize())
+}
+
+/// 解析 Yahoo 單檔 quote 頁 HTML 中的成交價、漲跌與漲跌幅。
+///
+/// 與 [`parse_quote_page_price`] 一樣是純函式。特別之處在於
+/// Yahoo 頁面上的漲跌數字本身可能是「正數文字」，實際漲跌方向靠
+/// 顏色 class（`C($c-trend-down)`）表現，所以解析完數字後
+/// 還要用顏色資訊校正正負號。
+fn parse_quote_page_quotes(
+    stock_symbol: &str,
+    url: &str,
+    html: &str,
+) -> Result<declare::StockQuotes> {
+    let document = Html::parse_document(html);
+
+    // Yahoo 的漲跌顏色有時比純文字更可靠，
+    // 所以先檢查是否存在「下跌」顏色 class，後面再用來校正正負號。
+    let is_negative = document
+        .select(
+            &scraper::Selector::parse("#main-0-QuoteHeader-Proxy .C\\(\\$c-trend-down\\)").unwrap(),
+        )
+        .next()
+        .is_some();
+
+    // 成交價、漲跌與漲跌幅分三次抓，雖然看起來重複，
+    // 但能讓錯誤訊息明確落在哪一個欄位 selector。
+    let price_raw = util::http::element::get_one_element(util::http::element::GetOneElementText {
+        stock_symbol,
+        document: document.clone(),
+        selector: "#main-0-QuoteHeader-Proxy",
+        element: "span.Fz\\(32px\\)",
+        url,
+    })?;
+    let price = text::parse_f64(&price_raw, None)?;
+
+    // 漲跌值使用較小字級的數字節點。
+    let change_raw =
+        util::http::element::get_one_element(util::http::element::GetOneElementText {
+            stock_symbol,
+            document: document.clone(),
+            selector: "#main-0-QuoteHeader-Proxy",
+            element: "span.Fz\\(20px\\)",
+            url,
+        })?;
+    let mut change = text::parse_f64(&change_raw, None)?;
+
+    // 漲跌幅通常包在括號與百分號中，所以 parse 時一併去掉。
+    let range_raw = util::http::element::get_one_element(util::http::element::GetOneElementText {
+        stock_symbol,
+        document,
+        selector: "#main-0-QuoteHeader-Proxy",
+        element: "span.Jc\\(fe\\)",
+        url,
+    })?;
+    let mut change_range = text::parse_f64(&range_raw, Some(vec!['(', ')', '%']))?;
+
+    // Yahoo 頁面上的數字有時是正數文字，但實際方向靠顏色表現，
+    // 所以這裡用 `is_negative` 再校正一次，避免 +/− 號判錯。
+    if is_negative {
+        if change > 0.0 {
+            change = -change;
+        }
+        if change_range > 0.0 {
+            change_range = -change_range;
+        }
+    }
+
+    // 最後統一包回專案內通用的報價型別，讓外部呼叫端不需要知道 Yahoo 頁面結構。
+    Ok(declare::StockQuotes {
+        stock_symbol: stock_symbol.to_string(),
+        price,
+        change,
+        change_range,
+    })
+}
+
 #[async_trait]
 impl StockInfo for Yahoo {
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal> {
@@ -48,24 +145,10 @@ impl StockInfo for Yahoo {
             host = HOST,
             symbol = stock_symbol
         );
-        // 先抓原始 HTML，再交給 scraper 做結構化查找。
+        // 只負責 HTTP 抓取，解析交給純函式（fetch/parse 分離，
+        // 解析邏輯才能被 fixture 單元測試覆蓋）。
         let text = util::http::get(&url, None).await?;
-        let document = Html::parse_document(&text);
-
-        // 這裡沿用既有 Yahoo quote 頁的 selector，
-        // 只抓主要報價區塊中的大字成交價。
-        let price_str =
-            util::http::element::get_one_element(util::http::element::GetOneElementText {
-                stock_symbol,
-                document,
-                selector: "#main-0-QuoteHeader-Proxy",
-                element: "span.Fz\\(32px\\)",
-                url: &url,
-            })?;
-
-        // 解析完後 normalize，避免 `Decimal` 保留不必要的小數 scale，
-        // 讓後續比對與 log 看起來更乾淨。
-        Ok(text::parse_decimal(&price_str, None)?.normalize())
+        parse_quote_page_price(stock_symbol, &url, &text)
     }
 
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes> {
@@ -85,77 +168,72 @@ impl StockInfo for Yahoo {
             host = HOST,
             symbol = stock_symbol
         );
+        // 只負責 HTTP 抓取，解析交給純函式（fetch/parse 分離，
+        // 解析邏輯才能被 fixture 單元測試覆蓋）。
         let text = util::http::get(&url, None).await?;
-        let document = Html::parse_document(&text);
-
-        // Yahoo 的漲跌顏色有時比純文字更可靠，
-        // 所以先檢查是否存在「下跌」顏色 class，後面再用來校正正負號。
-        let is_negative = document
-            .select(
-                &scraper::Selector::parse("#main-0-QuoteHeader-Proxy .C\\(\\$c-trend-down\\)")
-                    .unwrap(),
-            )
-            .next()
-            .is_some();
-
-        // 成交價、漲跌與漲跌幅分三次抓，雖然看起來重複，
-        // 但能讓錯誤訊息明確落在哪一個欄位 selector。
-        let price_raw =
-            util::http::element::get_one_element(util::http::element::GetOneElementText {
-                stock_symbol,
-                document: document.clone(),
-                selector: "#main-0-QuoteHeader-Proxy",
-                element: "span.Fz\\(32px\\)",
-                url: &url,
-            })?;
-        let price = text::parse_f64(&price_raw, None)?;
-
-        // 漲跌值使用較小字級的數字節點。
-        let change_raw =
-            util::http::element::get_one_element(util::http::element::GetOneElementText {
-                stock_symbol,
-                document: document.clone(),
-                selector: "#main-0-QuoteHeader-Proxy",
-                element: "span.Fz\\(20px\\)",
-                url: &url,
-            })?;
-        let mut change = text::parse_f64(&change_raw, None)?;
-
-        // 漲跌幅通常包在括號與百分號中，所以 parse 時一併去掉。
-        let range_raw =
-            util::http::element::get_one_element(util::http::element::GetOneElementText {
-                stock_symbol,
-                document,
-                selector: "#main-0-QuoteHeader-Proxy",
-                element: "span.Jc\\(fe\\)",
-                url: &url,
-            })?;
-        let mut change_range = text::parse_f64(&range_raw, Some(vec!['(', ')', '%']))?;
-
-        // Yahoo 頁面上的數字有時是正數文字，但實際方向靠顏色表現，
-        // 所以這裡用 `is_negative` 再校正一次，避免 +/− 號判錯。
-        if is_negative {
-            if change > 0.0 {
-                change = -change;
-            }
-            if change_range > 0.0 {
-                change_range = -change_range;
-            }
-        }
-
-        // 最後統一包回專案內通用的報價型別，讓外部呼叫端不需要知道 Yahoo 頁面結構。
-        Ok(declare::StockQuotes {
-            stock_symbol: stock_symbol.to_string(),
-            price,
-            change,
-            change_range,
-        })
+        parse_quote_page_quotes(stock_symbol, &url, &text)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
+
+    /// 以貼近真實 Yahoo quote 頁形狀的 fixture 驗證下跌情境的解析。
+    ///
+    /// 核心驗證點：Yahoo 頁面上的漲跌數字是「正數文字」（15、1.03%），
+    /// 實際方向靠顏色 class `C($c-trend-down)` 表現——解析器必須
+    /// 據此把漲跌與漲跌幅校正為負值，且千分位逗號要被正確去除。
+    #[test]
+    fn parse_quote_page_fixture_corrects_sign_by_trend_class() {
+        // include_str! 的路徑相對於本檔案（yahoo/price/quote_page.rs）
+        // → 上一層的 yahoo/testdata/。
+        const FIXTURE: &str = include_str!("../testdata/quote_page.html");
+        let url = "https://tw.stock.yahoo.com/quote/2330";
+
+        // 大字成交價：'1,435' → 1435（去逗號、normalize）。
+        let price = parse_quote_page_price("2330", url, FIXTURE).unwrap();
+        assert_eq!(price, dec!(1435));
+
+        // 完整報價：數字為正、顏色為跌 → 漲跌與漲跌幅都應轉為負值。
+        let quotes = parse_quote_page_quotes("2330", url, FIXTURE).unwrap();
+        assert_eq!(quotes.stock_symbol, "2330");
+        assert_eq!(quotes.price, 1435.0);
+        assert_eq!(quotes.change, -15.0);
+        assert_eq!(quotes.change_range, -1.03);
+    }
+
+    /// 上漲情境：沒有下跌顏色 class 時，正數必須保持正數。
+    #[test]
+    fn parse_quote_page_keeps_positive_change_without_down_class() {
+        let html = r#"
+            <div id="main-0-QuoteHeader-Proxy">
+                <span class="Fz(32px) C($c-trend-up)">990</span>
+                <span class="Fz(20px) C($c-trend-up)">12.5</span>
+                <span class="Jc(fe) C($c-trend-up)">(1.28%)</span>
+            </div>
+        "#;
+
+        let quotes =
+            parse_quote_page_quotes("2330", "https://example.test/quote/2330", html).unwrap();
+        assert_eq!(quotes.change, 12.5);
+        assert_eq!(quotes.change_range, 1.28);
+    }
+
+    /// 頁面缺少報價標頭（改版或載到錯誤頁）時必須明確報錯，
+    /// 而不是回傳 0 被誤當有效價格。
+    #[test]
+    fn parse_quote_page_rejects_page_without_quote_header() {
+        let error = parse_quote_page_price(
+            "2330",
+            "https://example.test/quote/2330",
+            "<html><body><p>頁面不存在</p></body></html>",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("element not found"));
+    }
+
     /// Live 測試：驗證單檔 Yahoo quote 頁仍可抓到指定股票的成交價。
     #[tokio::test]
     #[ignore]

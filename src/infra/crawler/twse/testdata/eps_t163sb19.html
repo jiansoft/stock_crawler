@@ -1,0 +1,31 @@
+<!--
+  依公開資訊觀測站「ajax_t163sb19」（各產業 EPS 彙總表）回應精簡而成的測試 fixture。
+
+  解析器（parse_eps_html）的規則：
+  - 掃描所有 <table>（MOPS 依產業分表）。
+  - 只吃恰好 9 個 <td> 的列；tds[0]=代號、tds[3]=EPS。
+  - 代號為空或不在追蹤清單（is_known_symbol）者略過；EPS 無法解析時以 0 落地。
+
+  本 fixture 刻意涵蓋的情境：
+  1. 表頭列（th）與備註列（colspan）→ td 數不是 9，略過。
+  2. 正常列（2330、2317）分屬兩個產業表 → 跨表掃描。
+  3. EPS 為「N/A」的列（2317）→ EPS 應為 0 而非解析錯誤。
+  4. 代號空白的列 → 略過。
+  5. 不在追蹤清單的代號（9998）→ 由 is_known_symbol 過濾。
+-->
+<html>
+<body>
+  <h2>半導體業</h2>
+  <table>
+    <tr><th>公司代號</th><th>公司名稱</th><th>營業收入</th><th>基本每股盈餘(元)</th><th>普通股每股面額</th><th>營業利益</th><th>營業外收入及支出</th><th>稅後淨利</th><th>備註</th></tr>
+    <tr><td>2330</td><td>台積電</td><td>989,918,455</td><td>15.36</td><td>10</td><td>1,050,321</td><td>25,113</td><td>398,271,401</td><td></td></tr>
+    <tr><td>9998</td><td>非追蹤代號</td><td>123</td><td>1.23</td><td>10</td><td>1</td><td>1</td><td>1</td><td></td></tr>
+    <tr><td></td><td>代號空白列</td><td>123</td><td>1.23</td><td>10</td><td>1</td><td>1</td><td>1</td><td></td></tr>
+    <tr><td colspan="9">註：本表資訊僅供參考。</td></tr>
+  </table>
+  <h2>其他電子業</h2>
+  <table>
+    <tr><td>2317</td><td>鴻海</td><td>1,540,238</td><td>N/A</td><td>10</td><td>52,301</td><td>8,110</td><td>142,338</td><td></td></tr>
+  </table>
+</body>
+</html>

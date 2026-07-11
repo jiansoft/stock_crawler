@@ -1,0 +1,22 @@
+<!--
+  依 Yahoo 個股「/quote/{symbol}」頁面精簡而成的測試 fixture（下跌情境）。
+
+  解析器（parse_quote_page_price / parse_quote_page_quotes）依賴的結構：
+  - #main-0-QuoteHeader-Proxy 是報價標頭區塊。
+  - span.Fz(32px)＝大字成交價；span.Fz(20px)＝漲跌；span.Jc(fe)＝漲跌幅（含括號與 %）。
+  - 漲跌「數字本身是正數文字」，實際方向靠顏色 class C($c-trend-down) 表現，
+    解析器須據此把漲跌與漲跌幅校正為負值——這是本 fixture 的核心驗證點。
+
+  注意：Yahoo 使用 Atomic CSS（class 名稱含括號與 $），HTML 中原樣書寫，
+  Rust 端 selector 才需要跳脫。
+-->
+<div id="main-0-QuoteHeader-Proxy">
+  <div class="D(f) Jc(sb)">
+    <h1>台積電</h1><span class="symbol">2330</span>
+  </div>
+  <div class="D(f) Ai(fe)">
+    <span class="Fz(32px) Fw(b) Lh(1) Mend(16px) D(f) Ai(c) C($c-trend-down)">1,435</span>
+    <span class="Fz(20px) Fw(b) Lh(1.2) Mend(4px) D(f) Ai(c) C($c-trend-down)">15</span>
+    <span class="Jc(fe) Fz(20px) Lh(1.2) Fw(b) D(f) Ai(c) C($c-trend-down)">(1.03%)</span>
+  </div>
+</div>

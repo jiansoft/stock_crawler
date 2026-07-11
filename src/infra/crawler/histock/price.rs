@@ -86,6 +86,10 @@ pub(crate) struct HiStockRuntimeDiagnostics {
     pub completed_cycles: u64,
 }
 
+/// HiStock 抓取結果的內部資料結構。
+///
+/// 用於封裝解析後的即時報價快照以及傳輸量、資料列數等診斷資訊。
+#[derive(Debug)]
 struct HiStockFetchResult {
     snapshots: HashMap<String, RealtimeSnapshot>,
     body_bytes: usize,
@@ -384,16 +388,25 @@ pub(crate) fn runtime_diagnostics_snapshot() -> HiStockRuntimeDiagnostics {
     }
 }
 
-/// 從 HiStock 排行榜抓取全市場即時報價資料。
+/// 解析 HiStock 排行榜頁面的 HTML，轉成全市場即時快照。
+///
+/// 這是一個「純函式」——輸入只有 HTML 字串，不做任何網路 I/O。
+/// 之所以把它從 [`fetch_all_from_rank`] 拆出來，是為了讓單元測試能用
+/// `testdata/rank_page.html` fixture 直接驗證整頁解析流程
+/// （選擇器命中、表頭略過、逐列解析），而不需要真的連 HiStock。
+///
+/// # 解析規則
+/// - 只掃 `#CPHB1_gv tr`（HiStock 排行榜的表格 id）。
+/// - 表頭列與代號非純數字的列由 [`parse_row`] 回傳 `None` 略過。
+/// - 任何一列的數值欄位損壞會讓整頁解析失敗（嚴格模式）——
+///   寧可這一輪不更新快取，也不要把壞資料混進即時報價。
 ///
 /// # 回傳
-/// - `Ok(HashMap<String, RealtimeSnapshot>)`：以股票代號為 key 的完整即時快照。
-/// - `Err(_)`：HTTP 抓取失敗、HTML 結構異常，或解析後完全沒有有效資料。
-async fn fetch_all_from_rank() -> Result<HiStockFetchResult> {
-    let url = format!("https://{host}/stock/rank.aspx?p=all", host = HOST);
-    let body = util::http::get(&url, None).await?;
+/// - `Ok(HiStockFetchResult)`：快照 map、原始 body 大小與掃描列數（供診斷）。
+/// - `Err(_)`：HTML 結構異常、數值損壞，或解析後完全沒有有效資料。
+fn parse_rank_html(body: &str) -> Result<HiStockFetchResult> {
     let body_bytes = body.len();
-    let document = Html::parse_document(&body);
+    let document = Html::parse_document(body);
 
     let mut map = HashMap::with_capacity(1200);
     let mut row_count = 0usize;
@@ -412,6 +425,16 @@ async fn fetch_all_from_rank() -> Result<HiStockFetchResult> {
         body_bytes,
         row_count,
     })
+}
+
+/// 從 HiStock 排行榜抓取全市場即時報價資料。
+///
+/// 只負責 HTTP 抓取，解析工作交給 [`parse_rank_html`]（fetch/parse 分離，
+/// 解析邏輯才能被 fixture 單元測試覆蓋）。
+async fn fetch_all_from_rank() -> Result<HiStockFetchResult> {
+    let url = format!("https://{host}/stock/rank.aspx?p=all", host = HOST);
+    let body = util::http::get(&url, None).await?;
+    parse_rank_html(&body)
 }
 
 /// 取得指定股票的即時快照。
@@ -610,6 +633,56 @@ mod tests {
         let error = parse_row(row).unwrap_err().to_string();
 
         assert!(error.contains("Failed to parse price for 2330"));
+    }
+
+    /// 以貼近真實排行榜頁面形狀的 fixture 驗證整頁解析流程。
+    ///
+    /// 上面的 `test_parse_*` 系列只餵單一 `<tr>` 給 `parse_row`，
+    /// 這裡則走 [`parse_rank_html`] 完整路徑，額外驗證：
+    /// `#CPHB1_gv tr` 選擇器命中、表頭列略過、含英文字母代號
+    /// （債券 ETF）略過，以及 row_count / body_bytes 診斷數字正確。
+    #[test]
+    fn parse_rank_html_parses_fixture_rows() {
+        // include_str! 的路徑相對於本檔案（histock/price.rs）→ histock/testdata/。
+        // 在「編譯期」把檔案內容嵌進測試執行檔，執行時不做任何檔案 I/O。
+        const FIXTURE: &str = include_str!("testdata/rank_page.html");
+
+        let result = parse_rank_html(FIXTURE).unwrap();
+
+        // fixture 有 5 個 <tr>：表頭 + 4 檔股票；全部都要被掃到（診斷用）。
+        assert_eq!(result.row_count, 5);
+        assert_eq!(result.body_bytes, FIXTURE.len());
+        // 有效快照只有 3 檔：表頭列（代號非數字）與 00687B（含英文字母的
+        // 債券 ETF 代號，依現行規則不納入）都被略過。
+        assert_eq!(result.snapshots.len(), 3);
+        assert!(!result.snapshots.contains_key("00687B"));
+
+        // 下跌列：▼ 前綴 → 漲跌與幅都轉為負值。
+        let down = &result.snapshots["5274"];
+        assert_eq!(down.name, "信驊");
+        assert_eq!(down.price, dec!(9445));
+        assert_eq!(down.change, dec!(-55));
+        assert_eq!(down.change_range, dec!(-0.58));
+
+        // 上漲列：▲ 與 + 前綴維持正值；成交量的千分位逗號要被正確去除。
+        let up = &result.snapshots["2330"];
+        assert_eq!(up.change, dec!(15));
+        assert_eq!(up.change_range, dec!(1.52));
+        assert_eq!(up.volume, dec!(31415));
+        assert_eq!(up.last_close, dec!(985));
+
+        // 平盤列：「--」的漲跌與幅視為 0，不是解析錯誤。
+        let flat = &result.snapshots["6584"];
+        assert_eq!(flat.change, Decimal::ZERO);
+        assert_eq!(flat.change_range, Decimal::ZERO);
+    }
+
+    /// 整頁完全沒有可用列（例如 HiStock 改版換了表格 id）時必須報錯，
+    /// 讓上層知道快取「這一輪沒有更新」，而不是默默拿空資料覆蓋。
+    #[test]
+    fn parse_rank_html_rejects_page_without_rank_table() {
+        let error = parse_rank_html("<html><body><p>維護中</p></body></html>").unwrap_err();
+        assert!(error.to_string().contains("empty map"));
     }
 
     #[test]

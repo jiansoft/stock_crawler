@@ -250,6 +250,36 @@ impl StockInfo for Winvest {
 mod tests {
     use super::*;
 
+    /// 驗證 `QueryDayPrice` 回應的 serde 欄位對應（PascalCase rename 與 default）。
+    #[test]
+    fn query_day_price_response_deserializes_official_shape() {
+        let body = r#"{
+            "StockListPrice": [
+                ["KlineDatetime", "ClosePrice"],
+                ["09:00", "1880"]
+            ],
+            "StockLastKline": {
+                "ClosePrice": 1885.0,
+                "Change": -15.0,
+                "YesterdayClosePrice": 1900.0,
+                "ChangeRate": -0.79
+            },
+            "errMsg": ""
+        }"#;
+
+        let response: QueryDayPriceResponse = serde_json::from_str(body).unwrap();
+        let kline = response.stock_last_kline.unwrap();
+        assert_eq!(kline.close_price, 1885.0);
+        assert_eq!(kline.change, -15.0);
+        assert_eq!(kline.yesterday_close_price, Some(1900.0));
+        assert_eq!(response.stock_list_price.len(), 2);
+
+        // 欄位缺席時（StockListPrice/errMsg 有 default）不得反序列化失敗。
+        let minimal: QueryDayPriceResponse = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(minimal.stock_last_kline.is_none());
+        assert!(minimal.stock_list_price.is_empty());
+    }
+
     #[test]
     /// 驗證 `StockListPrice` 會抓到最後一筆可用成交價。
     fn test_extract_last_price_from_stock_list() {

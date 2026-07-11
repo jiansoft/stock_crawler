@@ -595,6 +595,95 @@ mod tests {
         assert_eq!(dividends[0].payout_ratio, dec!(32.5));
     }
 
+    /// 以貼近真實頁面形狀的 fixture 驗證「解析 → 合併 → 分組排序」完整流程。
+    ///
+    /// 與上面用最小 HTML 片段的單點測試不同，這裡的 fixture
+    /// （`testdata/dividend_schedule.html`、`testdata/dividend_policy.html`）
+    /// 模擬 Goodinfo 兩個端點的實際回應形狀，一次涵蓋所有髒資料情境：
+    /// 表頭列、備註列、全年度列、只配股票列、股利合計為 0 列、
+    /// 年度欄空白列、`∟` 前綴縮排列與「累計」列。
+    ///
+    /// 為什麼用 fixture 而不是連真實網站？
+    /// 1. 測試不依賴網路與對方網站狀態，CI 可穩定執行（live 測試照舊 `#[ignore]`）。
+    /// 2. 髒資料情境可以「固定」下來——真實頁面上的邊界情況可遇不可求，
+    ///    fixture 讓每一種都必定被驗證到。
+    /// 3. Goodinfo 改版時，只要用瀏覽器存一份新回應更新 fixture，
+    ///    測試立即反映解析器是否需要調整。
+    #[test]
+    fn parse_dividend_fixtures_and_merge() {
+        // include_str! 的路徑相對於本檔案（goodinfo/dividend.rs）→ goodinfo/testdata/。
+        // 在「編譯期」把檔案內容嵌進測試執行檔，執行時不做任何檔案 I/O。
+        const SCHEDULE_FIXTURE: &str = include_str!("testdata/dividend_schedule.html");
+        const POLICY_FIXTURE: &str = include_str!("testdata/dividend_policy.html");
+
+        // ── 第一步：解析股利日程端點 ──
+        // fixture 有 8 個 <tr>，但只有 4 列是有效資料：
+        // 表頭 2 列與備註列（td 數 ≠ 19）、股利合計為 0 列、年度欄空白列都該被丟棄。
+        let mut dividends = parse_schedule_dividends("2330", SCHEDULE_FIXTURE).unwrap();
+        assert_eq!(dividends.len(), 4, "應剩 4 筆有效股利（髒資料列全數丟棄）");
+
+        // 季配息列：年度以「現金股利發放日」的年份為準（'26/04/16 → 2026），
+        // 期間 25Q4 拆成 year_of_dividend=2025（二位數年份正規化）與 quarter=Q4。
+        let q4 = &dividends[0];
+        assert_eq!(q4.year, 2026);
+        assert_eq!(q4.year_of_dividend, 2025);
+        assert_eq!(q4.quarter, "Q4");
+        assert_eq!(q4.cash_dividend, dec!(5));
+        assert_eq!(q4.ex_dividend_date1, "2026-03-19"); // '26/03/19 轉西元制
+        assert_eq!(q4.payable_date1, "2026-04-16");
+
+        // 全年度列：期間是純年份「2023」，quarter 應為空字串、年度不做修正。
+        let annual = &dividends[2];
+        assert_eq!(annual.year, 2024);
+        assert_eq!(annual.year_of_dividend, 2023);
+        assert_eq!(annual.quarter, "");
+        assert_eq!(annual.stock_dividend, dec!(1));
+
+        // 只配股票的半年配列：現金股利為 0 → 現金相關日期直接標記「-」
+        // 表示不需要再追蹤；除權日則從 tds[8] 取得。
+        let h2 = &dividends[3];
+        assert_eq!(h2.quarter, "H2");
+        assert_eq!(h2.cash_dividend, Decimal::ZERO);
+        assert_eq!(h2.ex_dividend_date1, "-");
+        assert_eq!(h2.payable_date1, "-");
+        assert_eq!(h2.ex_dividend_date2, "2024-09-10");
+
+        // ── 第二步：解析盈餘分配率端點 ──
+        // fixture 有 6 個 <tr>，有效明細只有 2 列：
+        // 年度彙總列（期間「-」）、「累計」列、股利合計為 0 列都該被丟棄。
+        // 其中 ∟ 前綴列與年度空白列的年度，應沿用前面彙總列的 2026（last_year 機制）。
+        let payout_ratios = parse_payout_ratio_dividends("2330", POLICY_FIXTURE).unwrap();
+        assert_eq!(payout_ratios.len(), 2, "應剩 2 筆有效分配率明細");
+        assert_eq!(payout_ratios[0].year, 2026, "∟ 前綴列沿用彙總列年度");
+        assert_eq!(payout_ratios[0].earnings_per_share, dec!(15.36));
+
+        // ── 第三步：合併 ──
+        // 以「股票代號-股利所屬年度-期間」為 key，把 EPS 與分配率補進日程資料；
+        // 只更新這四個欄位，日期與股利金額不得被覆寫。
+        merge_payout_ratios(&mut dividends, payout_ratios);
+
+        assert_eq!(dividends[0].earnings_per_share, dec!(15.36)); // 25Q4 配對成功
+        assert_eq!(dividends[0].payout_ratio, dec!(32.5));
+        assert_eq!(dividends[0].payable_date1, "2026-04-16", "合併不得覆寫日期");
+        assert_eq!(dividends[1].earnings_per_share, dec!(14.2)); // 25Q3 配對成功
+        assert_eq!(dividends[1].payout_ratio, dec!(35));
+        // 全年度列與 H2 列在分配率端點沒有對應明細 → EPS 維持 0，不得無中生有。
+        assert_eq!(dividends[2].earnings_per_share, Decimal::ZERO);
+        assert_eq!(dividends[3].earnings_per_share, Decimal::ZERO);
+
+        // ── 第四步：依股利所屬年度分組、由新到舊排序 ──
+        let groups = dividends_to_year_groups(dividends);
+        let years: Vec<_> = groups.iter().map(|(year, _)| *year).collect();
+        assert_eq!(years, vec![2025, 2024, 2023], "年度應由新到舊排序");
+        assert_eq!(groups[0].1.len(), 2, "2025 年度應有 Q3、Q4 兩筆");
+
+        // 全年度列（quarter 為空）在分組階段會把所有日期改標「-」——
+        // 季配/半年配的合計列不需要除權息日期，避免下游再去追蹤不存在的日期。
+        let annual_after = &groups[2].1[0];
+        assert_eq!(annual_after.ex_dividend_date1, "-");
+        assert_eq!(annual_after.payable_date1, "-");
+    }
+
     #[test]
     fn test_normalize_goodinfo_year() {
         assert_eq!(normalize_goodinfo_year(25), 2025);

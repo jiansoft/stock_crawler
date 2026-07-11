@@ -1,0 +1,47 @@
+<!--
+  依 Goodinfo「StockDividendSchedule.asp?STEP=DATA」回應精簡而成的測試 fixture。
+
+  解析器（parse_schedule_dividends）的規則：
+  - 只吃 #tblDetail > tbody > tr 且「恰好 19 個 <td>」的列，其餘（表頭、備註）自動略過。
+  - tds[0]=發放年度（空白列直接丟棄）、tds[1]=股利所屬期間、
+    tds[3]=除息日、tds[7]=現金股利發放日、tds[8]=除權日、
+    tds[12..18]=盈餘現金/公積現金/現金合計/盈餘股票/公積股票/股票合計、tds[18]=股利合計。
+  - 股利合計為 0 的列會被丟棄。
+
+  本 fixture 刻意涵蓋的情境：
+  1. 表頭列（th、colspan）→ td 數不足 19，應被略過。
+  2. 正常季配息列（25Q4、25Q3）→ 年度應以「現金股利發放日」的年份修正。
+  3. 全年度列（期間為純年份 2023）→ quarter 應為空字串、年度不做修正。
+  4. 只配股票的半年配列（24H2）→ 現金相關日期應為「-」、除權日取 tds[8]，
+     且因發放日/除息日皆無資料，年度維持 tds[0] 的原值。
+  5. 股利合計為 0 的列 → 應被整列丟棄。
+  6. 年度欄空白的列 → 應被整列丟棄（解析器規則）。
+-->
+<table id="tblDetail" class="b1 p4_2 r10">
+  <tbody>
+    <tr class="bg_h1"><th colspan="19">殖利率及除權息日程一覽表</th></tr>
+    <tr class="bg_h2">
+      <td>發放<br>年度</td><td>股利<br>所屬<br>期間</td><td>股利<br>類別</td><td>除息<br>交易日</td><td>參考價</td>
+      <td>除權<br>交易日</td><td>參考價</td><td>現金股利<br>發放日</td><td>股票股利<br>發放日</td>
+    </tr>
+    <tr align="center">
+      <td>2026</td><td>25Q4</td><td>盈餘</td><td>'26/03/19</td><td>1,050</td><td></td><td></td><td>'26/04/16</td><td></td><td>0.47%</td><td>0%</td><td>0.47%</td><td>5</td><td>0</td><td>5</td><td>0</td><td>0</td><td>0</td><td>5</td>
+    </tr>
+    <tr align="center">
+      <td>2026</td><td>25Q3</td><td>盈餘</td><td>'25/12/11</td><td>1,020</td><td></td><td></td><td>'26/01/08</td><td></td><td>0.49%</td><td>0%</td><td>0.49%</td><td>4.5</td><td>0.5</td><td>5</td><td>0</td><td>0</td><td>0</td><td>5</td>
+    </tr>
+    <tr align="center">
+      <td>2024</td><td>2023</td><td>盈餘</td><td>'24/07/11</td><td>980</td><td>'24/07/11</td><td>975</td><td>'24/08/08</td><td>'24/07/11</td><td>0.31%</td><td>0.1%</td><td>0.41%</td><td>2.8</td><td>0.2</td><td>3</td><td>0.8</td><td>0.2</td><td>1</td><td>4</td>
+    </tr>
+    <tr align="center">
+      <td>2024</td><td>24H2</td><td>盈餘</td><td></td><td></td><td>'24/09/10</td><td>60.5</td><td></td><td>'24/09/10</td><td>0%</td><td>3.3%</td><td>3.3%</td><td>0</td><td>0</td><td>0</td><td>1.5</td><td>0.5</td><td>2</td><td>2</td>
+    </tr>
+    <tr align="center">
+      <td>2023</td><td>2022</td><td>盈餘</td><td></td><td></td><td></td><td></td><td></td><td></td><td>0%</td><td>0%</td><td>0%</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td>
+    </tr>
+    <tr align="center">
+      <td></td><td>21Q4</td><td>盈餘</td><td>'22/03/17</td><td>590</td><td></td><td></td><td>'22/04/14</td><td></td><td>0.46%</td><td>0%</td><td>0.46%</td><td>2.75</td><td>0</td><td>2.75</td><td>0</td><td>0</td><td>0</td><td>2.75</td>
+    </tr>
+    <tr><td colspan="19">註︰以上資料僅供參考。</td></tr>
+  </tbody>
+</table>

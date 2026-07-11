@@ -98,6 +98,28 @@ mod tests {
 
     use super::*;
 
+    /// 驗證正常回應的欄位對應：鉅亨的欄位名是數字代碼
+    /// （"6"=成交價、"11"=漲跌、"56"=漲跌幅），serde rename 不能失效。
+    #[test]
+    fn test_deserialize_response_maps_numeric_field_names() {
+        let body = r#"{
+            "statusCode": 200,
+            "message": "OK",
+            "data": [{
+                "6": 1435.0,
+                "11": -15.0,
+                "56": -1.03,
+                "200007": "台積電"
+            }]
+        }"#;
+        let response: Response = serde_json::from_str(body).expect("response should deserialize");
+        let quote = response.data.first().expect("expected one quote row");
+
+        assert_eq!(quote.required_current_price("2330").unwrap(), 1435.0);
+        assert_eq!(quote.change_or_zero(), -15.0);
+        assert_eq!(quote.change_range_or_zero(), -1.03);
+    }
+
     #[test]
     fn test_deserialize_response_with_null_current_price() {
         let body = r#"{
