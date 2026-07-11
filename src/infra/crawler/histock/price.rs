@@ -232,10 +232,17 @@ pub fn start_caching_task() {
         handle.take();
     }
 
-    if IS_CACHING.load(Ordering::SeqCst) {
+    // 以 compare_exchange 原子地「檢查並占用」啟動權：只有一個呼叫者能把
+    // false 換成 true，其餘並行呼叫者會失敗並直接返回。
+    // 舊版「先 load 檢查、再 store 設定」不是原子操作——兩個並行呼叫者
+    // 可能同時通過檢查並各自啟動一條背景迴圈，造成重複抓取、快取互相
+    // 覆寫與事件重複發布，且 CACHING_TASK 只會保存最後一個 JoinHandle。
+    if IS_CACHING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         return;
     }
-    IS_CACHING.store(true, Ordering::SeqCst);
     let generation = LAST_TASK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
     let handle = tokio::spawn(async move {

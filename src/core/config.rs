@@ -164,6 +164,7 @@ const REDIS_ADDR: &str = "REDIS_ADDR";
 const REDIS_ACCOUNT: &str = "REDIS_ACCOUNT";
 const REDIS_PASSWORD: &str = "REDIS_PASSWORD";
 const REDIS_DB: &str = "REDIS_DB";
+const REDIS_POOL_SIZE: &str = "REDIS_POOL_SIZE";
 
 /// Redis 快取伺服器設定
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -176,12 +177,27 @@ pub struct Redis {
     pub password: String,
     /// 指定使用的資料庫索引 (DB Index)
     pub db: i32,
+    /// 連線池大小上限；`0`（或未設定）表示使用程式預設值。
+    /// 實際生效值由 `infra::nosql::redis` 收斂至安全範圍（見 `effective_pool_size`）。
+    #[serde(default)]
+    pub pool_size: u32,
 }
 
 /// 全域共享的組態設定項
 ///
 /// 使用 `Lazy` 確保在第一次存取時才進行初始化，並在整個程式生命週期中共享。
-pub static SETTINGS: Lazy<App> = Lazy::new(|| App::get().expect("Config error"));
+///
+/// 初始化時會先載入 `.env`（冪等操作，重複呼叫無害）。這很重要：
+/// `app.json` 中的敏感欄位（如資料庫帳密）可能只是 placeholder，真實值靠
+/// `.env` 的環境變數覆蓋。若第一個觸發 `SETTINGS` 初始化的呼叫端（例如
+/// 某個沒有先呼叫 `dotenvy::dotenv()` 的測試）在 `.env` 載入前存取設定，
+/// 整個 process 會鎖定 placeholder 值，之後所有資料庫連線都會失敗——
+/// 且失敗與否取決於「哪個測試先跑」，非常難排查。
+/// 在這裡集中載入後，初始化順序不再影響設定內容。
+pub static SETTINGS: Lazy<App> = Lazy::new(|| {
+    dotenvy::dotenv().ok();
+    App::get().expect("Config error")
+});
 
 impl App {
     /// 取得系統組態項
@@ -264,6 +280,11 @@ impl App {
                     // 讀取 Redis 資料庫索引，預設為 6379
                     db: i32::from_str(&env::var(REDIS_DB).unwrap_or_else(|_| "6379".to_string()))
                         .unwrap_or(6379),
+                    // 讀取 Redis 連線池大小；未設定或解析失敗時為 0（使用程式預設值）
+                    pool_size: env::var(REDIS_POOL_SIZE)
+                        .ok()
+                        .and_then(|v| u32::from_str(&v).ok())
+                        .unwrap_or(0),
                 },
             },
 
@@ -388,6 +409,11 @@ impl App {
         }
         if let Ok(password) = env::var(REDIS_PASSWORD) {
             self.nosql.redis.password = password
+        }
+        if let Ok(pool_size) = env::var(REDIS_POOL_SIZE) {
+            // 解析失敗時回退為 0（使用程式預設值），而不是沿用 app.json 的值，
+            // 讓「環境變數有設定」的優先權語意與其他欄位一致。
+            self.nosql.redis.pool_size = u32::from_str(&pool_size).unwrap_or(0)
         }
 
         self

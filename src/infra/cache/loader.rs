@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use anyhow::{Context, Result, ensure};
+
 use crate::{
     core::util::map::Keyable,
     domain::market_index::MarketIndex,
@@ -12,6 +14,20 @@ use crate::{
 };
 
 use super::share::Share;
+
+/// 主快取載入結果報告。
+///
+/// [`Share::load_required`] 成功時回傳，讓呼叫端（`main`）可以把載入數量
+/// 寫進啟動 log，也能看到哪些「非必要」快取降級失敗。
+#[derive(Debug)]
+pub struct CacheLoadReport {
+    /// 股票主檔載入筆數（必要快取，保證大於 0）。
+    pub stock_count: usize,
+    /// 最後交易日報價載入筆數（必要快取，允許為 0——全新資料庫尚無行情）。
+    pub last_trading_day_quote_count: usize,
+    /// 載入失敗而降級的「非必要」快取名稱清單；空表示全部成功。
+    pub degraded: Vec<&'static str>,
+}
 
 impl Share {
     /// 以新抓到的完整指數清單覆蓋舊快取。
@@ -106,36 +122,62 @@ impl Share {
         }
     }
 
-    /// 從資料庫與外部來源載入主快取資料。
+    /// 從資料庫與外部來源載入主快取資料，並區分「必要」與「非必要」快取。
     ///
-    /// 載入流程如下：
-    /// 1. 載入歷年指數資料到 `indices`。
-    /// 2. 載入股票主檔到 `stocks`。
-    /// 3. 載入最近兩個月營收到 `last_revenues`（依 `date -> stock_symbol` 分層）。
-    /// 4. 載入最後交易日報價到 `last_trading_day_quotes`。
-    /// 5. 載入歷史高低統計到 `quote_history_records`。
-    /// 6. 嘗試更新目前對外 IP 到 `current_ip`。
+    /// ## 必要快取（任一失敗即回傳 `Err`，呼叫端應中止啟動）
     ///
-    /// 錯誤處理策略：
-    /// - 各段落若失敗會記錄 log，其他段落仍會繼續執行。
-    /// - 每一類快取都會以「整批覆蓋」方式刷新，避免舊資料殘留。
-    /// - 方法本身不回傳 `Result`，屬於「盡力載入」模型。
-    pub async fn load(&self) {
+    /// 1. **股票主檔（stocks）**：所有爬蟲與計算的基準清單。查詢失敗或
+    ///    「不合理地為空」都視為致命——空的股票主檔代表 schema/查詢壞掉
+    ///    或連錯資料庫，此時讓服務繼續啟動只會悄悄漏抓、漏算。
+    /// 2. **最後交易日報價（last_trading_day_quotes）**：漲跌幅計算與價格
+    ///    追蹤的比較基準。查詢必須成功；但允許為空（全新資料庫尚未抓過行情，
+    ///    此時服務仍應啟動以便開始抓資料），為空時記 warning。
+    ///
+    /// ## 非必要快取（失敗記 log 並列入 degraded 清單，不影響啟動）
+    ///
+    /// 歷年指數（indices）、最近兩個月營收（last_revenues）、
+    /// 歷史高低統計（quote_history_records）、目前對外 IP（current_ip）。
+    ///
+    /// 每一類快取都以「整批覆蓋」方式刷新，避免舊資料殘留。
+    ///
+    /// # Errors
+    ///
+    /// 必要快取查詢失敗或股票主檔為空時回傳錯誤，錯誤鏈包含失敗環節說明。
+    pub async fn load_required(&self) -> Result<CacheLoadReport> {
+        // === 必要快取 1：股票主檔 ===
+        let stocks = stock::StockDbRow::fetch()
+            .await
+            .context("載入股票主檔（stocks）失敗")?;
+        // 空的主檔代表資料庫內容不正常，fail fast 讓部署流程立即發現。
+        ensure!(
+            !stocks.is_empty(),
+            "股票主檔（stocks）為空，資料庫內容可能異常，中止啟動"
+        );
+        let stock_count = stocks.len();
+        let domain_stocks = stocks.into_iter().map(Into::into).collect();
+        self.replace_stocks_cache(domain_stocks);
+
+        // === 必要快取 2：最後交易日報價（查詢必須成功；允許為空）===
+        let quotes = last_daily_quotes::LastDailyQuotes::fetch()
+            .await
+            .context("載入最後交易日報價（last_daily_quotes）失敗")?;
+        let last_trading_day_quote_count = quotes.len();
+        if last_trading_day_quote_count == 0 {
+            // 全新資料庫的正常狀態；既有部署看到這行就要警覺資料可能被清空。
+            tracing::warn!("last_trading_day_quotes 快取為空（全新資料庫或行情資料遺失）");
+        }
+        self.replace_last_trading_day_quotes_cache(quotes);
+
+        // === 非必要快取：失敗只降級，不阻擋啟動 ===
+        // degraded 蒐集失敗的快取名稱，讓呼叫端能在啟動 log 一眼看到降級狀態。
+        let mut degraded: Vec<&'static str> = Vec::new();
+
         let index_repo = PgMarketIndexRepository::new();
         match index_repo.fetch_latest(30).await {
             Ok(indices) => self.replace_indices_cache(indices),
             Err(why) => {
                 tracing::error!("Failed to fetch indices because {:?}", why);
-            }
-        }
-
-        match stock::StockDbRow::fetch().await {
-            Ok(stocks) => {
-                let domain_stocks = stocks.into_iter().map(Into::into).collect();
-                self.replace_stocks_cache(domain_stocks);
-            }
-            Err(why) => {
-                tracing::error!("Failed to fetch stocks because {:?}", why);
+                degraded.push("indices");
             }
         }
 
@@ -143,13 +185,7 @@ impl Share {
             Ok(revenues) => self.replace_last_revenues_cache(revenues),
             Err(why) => {
                 tracing::error!("Failed to fetch last_revenues because {:?}", why);
-            }
-        }
-
-        match last_daily_quotes::LastDailyQuotes::fetch().await {
-            Ok(quotes) => self.replace_last_trading_day_quotes_cache(quotes),
-            Err(why) => {
-                tracing::error!("Failed to fetch last_trading_day_quotes because {:?}", why);
+                degraded.push("last_revenues");
             }
         }
 
@@ -159,18 +195,46 @@ impl Share {
             Ok(records) => self.replace_quote_history_records_cache(records),
             Err(why) => {
                 tracing::error!("Failed to fetch quote_history_records because {:?}", why);
+                degraded.push("quote_history_records");
             }
         }
 
         // 只有在尚未取得 IP 時才查詢公網 IP，避免在測試或多次載入中重複發起大量網路請求
-        if self.get_current_ip().is_none()
-            && let Ok(ip) = crawler_share::get_public_ip().await
-        {
-            self.set_current_ip(ip);
+        if self.get_current_ip().is_none() {
+            match crawler_share::get_public_ip().await {
+                Ok(ip) => self.set_current_ip(ip),
+                Err(why) => {
+                    tracing::error!("Failed to fetch public ip because {:?}", why);
+                    degraded.push("current_ip");
+                }
+            }
         }
 
         let current_ip = self.get_current_ip().unwrap_or_default();
         tracing::info!("current_ip  {}", current_ip);
+
+        self.log_cache_summary();
+
+        Ok(CacheLoadReport {
+            stock_count,
+            last_trading_day_quote_count,
+            degraded,
+        })
+    }
+
+    /// 從資料庫與外部來源載入主快取資料（best-effort 版本）。
+    ///
+    /// 這是 [`Self::load_required`] 的寬鬆包裝：載入失敗只記錄 log，不回傳錯誤。
+    /// 保留此方法是為了測試與工具情境——它們在資料庫不可用時仍希望繼續執行。
+    /// **正式啟動路徑（main）請改用 `load_required`**，必要快取失敗時應中止啟動。
+    pub async fn load(&self) {
+        if let Err(why) = self.load_required().await {
+            tracing::error!("best-effort cache load failed: {:#}", why);
+        }
+    }
+
+    /// 把各快取目前的載入數量寫進 log，方便啟動時檢視。
+    fn log_cache_summary(&self) {
         tracing::info!(
             "CacheShare.indices 初始化 {}",
             self.indices
@@ -396,6 +460,39 @@ mod tests {
         assert_eq!(SHARE.get_industry_name(2), Some("食品工業".to_string()));
         assert_eq!(SHARE.get_industry_name(99), Some("未分類".to_string()));
         assert_eq!(SHARE.get_industry_name(100), None);
+    }
+
+    /// 驗證 `load_required` 的必要/非必要快取合約。
+    ///
+    /// 不同環境的預期：
+    /// - 資料庫不可用：應回傳 `Err`（必要快取查詢失敗），而不是默默成功。
+    /// - 資料庫可用且 stocks 有資料（本機）：`Ok` 且 `stock_count > 0`。
+    /// - 資料庫可用但 stocks 為空（CI 只建 schema 未 seed）：應回傳 `Err`
+    ///   且錯誤訊息點名股票主檔——這正是「空的核心快取要 fail fast」的行為。
+    #[tokio::test]
+    async fn test_load_required_contract() {
+        dotenvy::dotenv().ok();
+
+        match SHARE.load_required().await {
+            Ok(report) => {
+                // 成功即代表必要快取保證成立：股票主檔非空。
+                assert!(report.stock_count > 0);
+                println!(
+                    "load_required ok: stocks={}, quotes={}, degraded={:?}",
+                    report.stock_count, report.last_trading_day_quote_count, report.degraded
+                );
+            }
+            Err(why) => {
+                // 失敗必須可歸因於必要快取（連線失敗或股票主檔為空），
+                // 錯誤訊息應點名失敗環節，方便啟動時定位。
+                let msg = format!("{why:#}");
+                assert!(
+                    msg.contains("股票主檔") || msg.contains("最後交易日報價"),
+                    "unexpected error: {msg}"
+                );
+                println!("load_required err (acceptable in this environment): {msg}");
+            }
+        }
     }
 
     #[tokio::test]

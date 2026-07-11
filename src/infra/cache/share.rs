@@ -49,8 +49,13 @@ pub struct Share {
     pub(super) industries: HashMap<String, i32>,
     /// 股票產業分類(2, 'TAI', '上市', 1),(4, 'TWO', '上櫃', 2), (5, 'TWE', '興櫃', 2);
     pub(super) exchange_markets: HashMap<i32, stock_exchange_market::StockExchangeMarket>,
-    /// 目前的 IP
-    pub(super) current_ip: RwLock<String>,
+    /// 目前的對外（公網）IP。
+    ///
+    /// 用 `Option<String>` 區分「尚未取得」（`None`）與「已取得」（`Some`）。
+    /// 舊版用空字串當初始值，導致 loader 的「`is_none()` 才去抓公網 IP」
+    /// 判斷永遠不成立——空字串也是 `Some`，公網 IP 從未被真正抓取，
+    /// GoodInfo cookie 的 client ID 一直使用空 IP。
+    pub(super) current_ip: RwLock<Option<String>>,
     /// 股票即時報價快照快取 (目前主要由 HiStock 驅動)
     pub stock_snapshots: RwLock<HashMap<String, RealtimeSnapshot>>,
 }
@@ -73,7 +78,7 @@ impl Share {
             quote_history_records: RwLock::new(HashMap::new()),
             industries: default_industries(),
             exchange_markets: default_exchange_markets(),
-            current_ip: RwLock::new(String::new()),
+            current_ip: RwLock::new(None),
             stock_snapshots: RwLock::new(HashMap::new()),
         }
     }

@@ -44,6 +44,30 @@ pub async fn push_stock_info_to_go_service(
     get_client().await?.update_stock_info(request).await
 }
 
+/// 把 gRPC 推送接上 `app::ports::StockInfoGateway` port 的 adapter。
+///
+/// 依 DDD 分層，app 層不應直接依賴 prost 產生的 `StockInfoRequest`（傳輸層
+/// 細節）。app 只呼叫 `app::ports::push_stock_info`；由這個 adapter 負責
+/// 「與傳輸無關的載體 → gRPC DTO」的轉換，並在 `main` 啟動時註冊。
+pub struct GrpcStockInfoGateway;
+
+#[async_trait::async_trait]
+impl crate::app::ports::StockInfoGateway for GrpcStockInfoGateway {
+    async fn push_stock_info(&self, info: crate::app::ports::StockInfoPush) -> Result<()> {
+        // 在 adapter 內完成傳輸層 DTO 的組裝；prost 專屬欄位在這裡補預設值。
+        let request = StockInfoRequest {
+            stock_symbol: info.stock_symbol,
+            name: info.name,
+            stock_exchange_market_id: info.stock_exchange_market_id,
+            stock_industry_id: info.stock_industry_id,
+            net_asset_value_per_share: 0.0,
+            suspend_listing: false,
+        };
+        push_stock_info_to_go_service(request).await?;
+        Ok(())
+    }
+}
+
 impl From<&crate::domain::registry::entity::Stock> for StockInfoRequest {
     fn from(stock: &crate::domain::registry::entity::Stock) -> Self {
         StockInfoRequest {

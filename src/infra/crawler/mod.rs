@@ -83,8 +83,19 @@ pub use site_pool::{
 #[derive(Debug, thiserror::Error)]
 pub enum CrawlerError {
     /// HTTP 請求失敗。
-    #[error("network error: {0}")]
-    Network(String),
+    ///
+    /// `message` 是頂層摘要；底層原因（timeout、DNS、TLS、HTTP status …）
+    /// 由 `source` 以完整錯誤鏈保留。舊版只存 `e.to_string()` 文字，
+    /// source chain 遺失後，呼叫端無法用 `Error::source()` 分辨錯誤種類，
+    /// 也就無法做「timeout 才重試」這類判斷。
+    #[error("network error: {message}")]
+    Network {
+        /// 頂層錯誤摘要。
+        message: String,
+        /// 底層網路錯誤（保留原始錯誤鏈供 `source()` 走訪）。
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     /// CSS Selector 建構或 HTML 解析失敗。
     #[error("scraper error: {0}")]
@@ -165,9 +176,13 @@ pub(crate) async fn get_public_ip_text(
     trim: bool,
 ) -> Result<String, CrawlerError> {
     let url = url_cache.get_or_init(|| format!("https://{host}{path}"));
+    // 保留 anyhow 錯誤鏈：message 只放頂層摘要，完整原因交給 source。
     let ip = util::http::get(url, None)
         .await
-        .map_err(|e| CrawlerError::Network(e.to_string()))?;
+        .map_err(|e| CrawlerError::Network {
+            message: e.to_string(),
+            source: e.into(),
+        })?;
 
     if trim {
         Ok(ip.trim().to_string())

@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     core::declare::StockQuotes,
@@ -84,12 +84,14 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_get_stock_price() {
         dotenvy::dotenv().ok();
         log_stock_price_test::<NStock>("2330").await;
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_get_stock_quotes() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 nstock::get_stock_quotes");

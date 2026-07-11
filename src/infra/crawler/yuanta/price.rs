@@ -15,7 +15,7 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 
 use crate::{
     core::declare::StockQuotes,

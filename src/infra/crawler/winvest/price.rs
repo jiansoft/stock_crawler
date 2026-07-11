@@ -271,6 +271,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     /// 驗證 Winvest 可取得單一股票最新成交價。
     async fn test_get_stock_price() {
         dotenvy::dotenv().ok();
@@ -285,6 +286,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     /// 驗證 Winvest 可取得統一格式報價資訊。
     async fn test_get_stock_quotes() {
         dotenvy::dotenv().ok();

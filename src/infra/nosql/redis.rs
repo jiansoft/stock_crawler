@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use deadpool_redis::{
-    Config, Connection, Pool, Runtime,
+    Config, Connection, ConnectionAddr, ConnectionInfo, CreatePoolError, Pool, RedisConnectionInfo,
+    Runtime,
     redis::{AsyncCommands, RedisResult, ToRedisArgs, Value, cmd},
 };
 use futures::{StreamExt, stream::FuturesUnordered};
@@ -12,7 +13,14 @@ use thiserror::Error;
 use crate::{core::config::SETTINGS, core::util::text};
 
 /// 全域共享的 Redis 客戶端。
-pub static CLIENT: Lazy<Arc<Redis>> = Lazy::new(|| Arc::new(Redis::new()));
+///
+/// `Lazy` 靜態初始化無法回傳 `Result`，因此這裡對 [`Redis::try_new`] 的錯誤
+/// 使用 panic 收尾；錯誤訊息只含 deadpool 的設定錯誤描述，不含帳號密碼。
+/// 連線設定已改用結構化 `ConnectionInfo`（不經過 URL 解析），
+/// 實務上 `try_new` 只剩極罕見的 pool 建置錯誤會失敗。
+pub static CLIENT: Lazy<Arc<Redis>> = Lazy::new(|| {
+    Arc::new(Redis::try_new().unwrap_or_else(|why| panic!("failed to create redis pool: {why}")))
+});
 
 /// Redis 操作的結構化錯誤類型。
 #[derive(Debug, Error)]
@@ -44,24 +52,91 @@ pub struct Redis {
     pub pool: Pool,
 }
 
+/// 未設定 `pool_size` 時的預設連線池大小。
+///
+/// 本專案的 Redis 使用情境是排程任務與盤中價格追蹤的快取讀寫，
+/// 並發度遠低於先前寫死的 1024；32 已足以涵蓋尖峰（含 `get_keys`
+/// 以 `FuturesUnordered` 併發 SCAN 的情況），也與 PostgreSQL 的 20 同量級。
+const DEFAULT_POOL_SIZE: usize = 32;
+
+/// 連線池大小的允許範圍：下限避免併發 SCAN 時互相餓死，上限避免尖峰連線暴衝。
+const POOL_SIZE_MIN: usize = 4;
+const POOL_SIZE_MAX: usize = 64;
+
+/// 將設定值收斂為實際生效的連線池大小。
+///
+/// - `0`（未設定）→ 使用 [`DEFAULT_POOL_SIZE`]。
+/// - 其餘值 → 收斂到 `[POOL_SIZE_MIN, POOL_SIZE_MAX]` 範圍內，
+///   避免設定錯誤（例如沿用舊值 1024）造成 Redis 端連線數暴增。
+fn effective_pool_size(configured: u32) -> usize {
+    if configured == 0 {
+        DEFAULT_POOL_SIZE
+    } else {
+        (configured as usize).clamp(POOL_SIZE_MIN, POOL_SIZE_MAX)
+    }
+}
+
+/// 依設定組出結構化的 Redis 連線資訊。
+///
+/// 抽成獨立純函式的原因：`try_new` 依賴全域 `SETTINGS`，把「設定 → 連線資訊」
+/// 的轉換邏輯抽出來，單元測試就能直接以參數驗證各種邊界情況（含特殊字元密碼、
+/// 無 port、IPv6 位址），不需要真的連上 Redis。
+///
+/// 規則：
+/// - `addr` 格式為 `host:port`。用 `rsplit_once` 從右邊找最後一個冒號切出 port，
+///   這樣 IPv6 位址（本身含冒號，例如 `::1:6379`）也能正確處理；
+///   沒有冒號或 port 不是數字時，整段視為 host 並使用 Redis 預設 port 6379。
+/// - 帳號/密碼為空字串時視為「未設定」（`None`），避免對無認證的 Redis 送出空憑證。
+/// - 密碼「原樣」放進結構化欄位，不經過 URL 解析，因此 `@:/#%` 等特殊字元不需要
+///   percent-encoding，也不會被誤解析成 host 或 port 的一部分。
+fn build_connection_info(addr: &str, account: &str, password: &str, db: i32) -> ConnectionInfo {
+    let (host, port) = match addr.rsplit_once(':') {
+        Some((host, port_str)) => match port_str.parse::<u16>() {
+            Ok(port) => (host.to_string(), port),
+            Err(_) => (addr.to_string(), 6379),
+        },
+        None => (addr.to_string(), 6379),
+    };
+
+    ConnectionInfo {
+        addr: ConnectionAddr::Tcp(host, port),
+        redis: RedisConnectionInfo {
+            db: i64::from(db),
+            username: (!account.is_empty()).then(|| account.to_string()),
+            password: (!password.is_empty()).then(|| password.to_string()),
+            ..Default::default()
+        },
+    }
+}
+
 impl Redis {
     /// 依照目前設定建立 Redis 連線池。
-    pub fn new() -> Self {
-        //redis://mypassword@127.0.0.1:6379
-        let connection_url = format!(
-            "redis://{}:{}@{}/{}",
-            SETTINGS.nosql.redis.account,
-            SETTINGS.nosql.redis.password,
-            SETTINGS.nosql.redis.addr,
-            SETTINGS.nosql.redis.db
+    ///
+    /// 連線參數使用結構化的 [`ConnectionInfo`] 逐欄設定，而不是把帳號密碼
+    /// 拼進 `redis://account:password@addr/db` 這種 URL 字串——URL 需要對
+    /// 特殊字元（`@`、`:`、`/`、`#`、`%`）做 percent-encoding，直接拼字串
+    /// 會讓含這些字元的強密碼被誤解析成 host 的一部分，導致啟動失敗或連錯主機。
+    /// 結構化設定完全不經過 URL 解析，密碼內容原樣傳遞。
+    ///
+    /// # Errors
+    ///
+    /// 只有在 deadpool 無法依設定建立連線池時回傳錯誤（極罕見）；
+    /// 注意這裡是 lazy pool，實際的 TCP 連線與認證要到第一次取連線才會發生，
+    /// 健康檢查請使用 [`Self::ping`]。
+    pub fn try_new() -> Result<Self, CreatePoolError> {
+        let connection_info = build_connection_info(
+            &SETTINGS.nosql.redis.addr,
+            &SETTINGS.nosql.redis.account,
+            &SETTINGS.nosql.redis.password,
+            SETTINGS.nosql.redis.db,
         );
 
-        let cfg = Config::from_url(&connection_url);
-        let pool = cfg
-            .create_pool(Some(Runtime::Tokio1))
-            .unwrap_or_else(|_| panic!("wrong redis URL"));
-        pool.resize(1024);
-        Redis { pool }
+        let cfg = Config::from_connection_info(connection_info);
+        let pool = cfg.create_pool(Some(Runtime::Tokio1))?;
+        // 連線池大小改由設定檔／REDIS_POOL_SIZE 決定，並收斂到安全範圍；
+        // 先前寫死的 1024 遠超實際並發需求，尖峰時會對 Redis 造成不必要的連線壓力。
+        pool.resize(effective_pool_size(SETTINGS.nosql.redis.pool_size));
+        Ok(Redis { pool })
     }
 
     /// 對 Redis 執行 `PING`，確認連線可用。
@@ -262,12 +337,6 @@ impl Redis {
     }
 }
 
-impl Default for Redis {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::infra::cache::SHARE;
@@ -282,6 +351,98 @@ mod tests {
 
         println!("skip redis test: Redis is unavailable in current environment");
         true
+    }
+
+    // === effective_pool_size 純函式測試（不需要真的連上 Redis）===
+
+    /// 驗證連線池大小的收斂規則：0 用預設值，其餘 clamp 到允許範圍。
+    #[test]
+    fn effective_pool_size_clamps_configured_value() {
+        // 未設定（0）→ 預設值。
+        assert_eq!(effective_pool_size(0), DEFAULT_POOL_SIZE);
+        // 範圍內 → 原樣採用。
+        assert_eq!(effective_pool_size(16), 16);
+        // 低於下限 → 拉高到下限。
+        assert_eq!(effective_pool_size(1), POOL_SIZE_MIN);
+        // 高於上限（例如沿用舊值 1024）→ 壓回上限。
+        assert_eq!(effective_pool_size(1024), POOL_SIZE_MAX);
+        // 邊界值本身不被改動。
+        assert_eq!(effective_pool_size(POOL_SIZE_MIN as u32), POOL_SIZE_MIN);
+        assert_eq!(effective_pool_size(POOL_SIZE_MAX as u32), POOL_SIZE_MAX);
+    }
+
+    // === build_connection_info 純函式測試（不需要真的連上 Redis）===
+
+    /// 驗證結構化連線資訊與 redis-rs 解析 URL 的結果完全等價（無認證情境）。
+    ///
+    /// 這證明改用 builder 後，與舊版 `redis://addr/db` URL 的連線行為一致。
+    /// redis crate 的 `ConnectionInfo` 欄位為私有，因此以 Debug 輸出整體比較。
+    #[test]
+    fn build_connection_info_matches_url_parsing_without_auth() {
+        use deadpool_redis::redis::IntoConnectionInfo;
+
+        let built: deadpool_redis::redis::ConnectionInfo =
+            build_connection_info("localhost:6379", "", "", 0).into();
+        let from_url = "redis://localhost:6379/0".into_connection_info().unwrap();
+
+        assert_eq!(format!("{built:?}"), format!("{from_url:?}"));
+    }
+
+    /// 驗證帶帳號密碼時與 URL 解析結果等價（單純字元情境）。
+    #[test]
+    fn build_connection_info_matches_url_parsing_with_auth() {
+        use deadpool_redis::redis::IntoConnectionInfo;
+
+        let built: deadpool_redis::redis::ConnectionInfo =
+            build_connection_info("192.168.1.10:6380", "user1", "pass1", 2).into();
+        let from_url = "redis://user1:pass1@192.168.1.10:6380/2"
+            .into_connection_info()
+            .unwrap();
+
+        assert_eq!(format!("{built:?}"), format!("{from_url:?}"));
+    }
+
+    /// 驗證含 URL 特殊字元的強密碼會「原樣」傳遞——這正是本次修正的核心。
+    ///
+    /// 舊版把這種密碼直接拼進 URL：`@` 會被解析成 host 分隔符、`#` 變 fragment、
+    /// `%` 需要 percent-encoding，輕則啟動失敗、重則連到錯誤主機。
+    /// 結構化欄位不經過 URL 解析，密碼內容不會被改寫。
+    #[test]
+    fn build_connection_info_passes_special_char_password_through() {
+        let info = build_connection_info("localhost:6379", "user", "p@ss:w/rd#1%25", 0);
+
+        assert_eq!(info.redis.username.as_deref(), Some("user"));
+        assert_eq!(info.redis.password.as_deref(), Some("p@ss:w/rd#1%25"));
+    }
+
+    /// 驗證 addr 邊界情況：無 port 使用預設 6379、IPv6 位址正確切出 port。
+    ///
+    /// deadpool 的 `ConnectionAddr` 沒有實作 `PartialEq`，因此以 `matches!` 比對。
+    #[test]
+    fn build_connection_info_handles_addr_edge_cases() {
+        // 沒有冒號：整段是 host，port 用 Redis 預設值。
+        let info = build_connection_info("redis-server", "", "", 0);
+        assert!(
+            matches!(&info.addr, ConnectionAddr::Tcp(host, 6379) if host == "redis-server"),
+            "unexpected addr: {:?}",
+            info.addr
+        );
+
+        // IPv6 位址本身含冒號：rsplit_once 從右邊切，host 仍完整保留。
+        let info = build_connection_info("::1:6379", "", "", 0);
+        assert!(
+            matches!(&info.addr, ConnectionAddr::Tcp(host, 6379) if host == "::1"),
+            "unexpected addr: {:?}",
+            info.addr
+        );
+
+        // 冒號後不是數字：整段視為 host，port 用預設值。
+        let info = build_connection_info("host:notaport", "", "", 0);
+        assert!(
+            matches!(&info.addr, ConnectionAddr::Tcp(host, 6379) if host == "host:notaport"),
+            "unexpected addr: {:?}",
+            info.addr
+        );
     }
 
     /// 驗證 `contains_key` 的基本查詢流程。
@@ -393,6 +554,10 @@ mod tests {
     #[tokio::test]
     async fn test_redis() {
         dotenvy::dotenv().ok();
+        // 與其他 Redis 測試一致：本機沒有 Redis 服務時跳過，而不是紅燈。
+        if skip_when_redis_unavailable().await {
+            return;
+        }
         SHARE.load().await;
         tracing::debug!("開始 test_redis");
 

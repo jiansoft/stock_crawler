@@ -3,7 +3,8 @@ use chrono::{Datelike, Local, NaiveDate, TimeDelta};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::{core::util, core::util::map::Keyable, infra::crawler::twse, interfaces::bot};
+// 通知改走 core::alert 抽象介面，infra 層不直接依賴 interfaces::bot（反向耦合）。
+use crate::{core::alert, core::util, core::util::map::Keyable, infra::crawler::twse};
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq)]
 struct PublicFormResponse {
@@ -85,7 +86,7 @@ pub async fn visit() -> Result<Vec<Public>> {
     let stat = match res.stat {
         None => {
             let to_bot_msg = "Public\\.res\\.Stat is None";
-            bot::telegram::send(to_bot_msg).await;
+            alert::send_message(to_bot_msg).await;
             return Ok(result);
         }
         Some(stat) => stat.to_uppercase(),
@@ -93,7 +94,7 @@ pub async fn visit() -> Result<Vec<Public>> {
 
     if stat != "OK" {
         let to_bot_msg = "Public\\.res\\.Stat is not ok";
-        bot::telegram::send(to_bot_msg).await;
+        alert::send_message(to_bot_msg).await;
         return Ok(result);
     }
 

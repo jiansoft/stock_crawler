@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, FixedOffset};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     core::util::{convert::FromValue, http},

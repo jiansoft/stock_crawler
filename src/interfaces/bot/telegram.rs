@@ -265,6 +265,25 @@ pub async fn send_alert(alert_title: &str, details: &str) {
     send(&msg).await;
 }
 
+/// 把 Telegram 通知接上 `core::alert::AlertSink` port 的 adapter。
+///
+/// 依 DDD 分層，core/infra 不應該直接呼叫 interfaces（內層依賴外層的
+/// 反向耦合）。因此 core 只定義抽象的 [`crate::core::alert::AlertSink`]，
+/// 由這個 adapter 提供 Telegram 實作，並在 `main` 啟動時註冊——
+/// core/infra 呼叫 `core::alert::send_alert` 時，訊息才會實際送到 Telegram。
+pub struct TelegramAlertSink;
+
+#[async_trait::async_trait]
+impl crate::core::alert::AlertSink for TelegramAlertSink {
+    async fn send_alert(&self, title: &str, message: &str) {
+        send_alert(title, message).await;
+    }
+
+    async fn send_message(&self, message: &str) {
+        send(message).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::env;

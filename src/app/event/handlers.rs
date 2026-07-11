@@ -219,28 +219,20 @@ impl EventDispatcher {
         Ok(())
     }
 
-    /// 透過 gRPC 將股票資訊同步推送至 Go 微服務。
+    /// 將股票資訊同步推送至外部服務（目前為 Go 微服務）。
     /// 推送失敗時僅記錄錯誤日誌，不中斷流程。
+    ///
+    /// 透過 `app::ports::push_stock_info` 抽象介面推送——handler 不再直接
+    /// 依賴 gRPC 產生的 `StockInfoRequest` DTO（傳輸層細節），實際的
+    /// gRPC 轉換與呼叫由 `main` 啟動時註冊的 adapter 負責。
     async fn push_to_go_service(symbol: &str, name: &str, market_id: i32, industry_id: i32) {
-        use crate::interfaces::rpc::client::stock_service;
-        use crate::interfaces::rpc::stock::StockInfoRequest;
-
-        let request = StockInfoRequest {
+        crate::app::ports::push_stock_info(crate::app::ports::StockInfoPush {
             stock_symbol: symbol.to_string(),
             name: name.to_string(),
             stock_exchange_market_id: market_id,
             stock_industry_id: industry_id,
-            net_asset_value_per_share: 0.0,
-            suspend_listing: false,
-        };
-
-        if let Err(why) = stock_service::push_stock_info_to_go_service(request).await {
-            tracing::error!(
-                "Failed to push_stock_info_to_go_service for {} because {:?}",
-                symbol,
-                why
-            );
-        }
+        })
+        .await;
     }
 }
 

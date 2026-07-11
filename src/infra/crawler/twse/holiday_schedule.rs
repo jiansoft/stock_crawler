@@ -2,7 +2,8 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-use crate::{core::util, infra::crawler::twse, interfaces::bot};
+// 通知改走 core::alert 抽象介面，infra 層不直接依賴 interfaces::bot（反向耦合）。
+use crate::{core::alert, core::util, infra::crawler::twse};
 
 #[derive(Serialize, Deserialize)]
 struct HolidayScheduleResponse {
@@ -75,7 +76,7 @@ fn parse_holiday_data(data: &[Vec<String>]) -> Vec<HolidaySchedule> {
 }
 
 async fn report_error(message: &str) {
-    bot::telegram::send(message).await;
+    alert::send_message(message).await;
 }
 
 #[cfg(test)]

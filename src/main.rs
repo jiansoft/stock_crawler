@@ -240,6 +240,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )
     .await;
 
+    // ── 3.5 註冊 port/adapter 接線 ──────────────────────────────────────────
+    // 依 DDD 分層，core/infra/app 不直接依賴 interfaces，改呼叫抽象介面（port）；
+    // 這裡把具體實作（adapter）注入，必須在任何可能使用這些介面的流程之前完成。
+    //
+    // 1. 告警管道：core/infra 呼叫 core::alert::send_alert / send_message，
+    //    訊息由 Telegram adapter 實際送出。
+    core::alert::register_alert_sink(std::sync::Arc::new(
+        interfaces::bot::telegram::TelegramAlertSink,
+    ));
+    // 2. 股票資料推送：app handler 呼叫 app::ports::push_stock_info，
+    //    由 gRPC adapter 轉成 StockInfoRequest 後推送到 Go 服務。
+    app::ports::register_stock_info_gateway(std::sync::Arc::new(
+        interfaces::rpc::client::stock_service::GrpcStockInfoGateway,
+    ));
+
     // ── 4. 啟動計時器與 server 關機廣播 ─────────────────────────────────────
     // `startup_timer` 讓後面的各啟動階段都能記錄 elapsed 時間，方便找效能瓶頸。
     let startup_timer = Instant::now();
@@ -283,23 +298,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     tracing::info!("startup database check: database is online");
 
-    // ── 8. 全域快取預熱（SHARE.load）────────────────────────────────────────
+    // ── 8. 全域快取預熱（SHARE.load_required，Fail Fast）───────────────────
     // `infra::cache::SHARE` 是全域單例，儲存所有股票的即時快照（RealtimeSnapshot）
     // 及基本資訊（名稱、市場別、產業類別等）。
-    // `.load()` 從 PostgreSQL 載入全部股票清單並建立 HashMap，耗時視股票數量而定
-    // （台股約 1,800～2,000 支，通常 1～3 秒內完成）。
+    // `.load_required()` 從 PostgreSQL 載入全部股票清單並建立 HashMap，
+    // 耗時視股票數量而定（台股約 1,800～2,000 支，通常 1～3 秒內完成）。
     // 後續爬蟲與排程任務都透過此快取直接查詢，避免頻繁打 DB；
     // 即時股價更新（set_stock_snapshot_price）也在記憶體內完成，不需回寫 DB。
+    //
+    // 必要快取（股票主檔、最後交易日報價）載入失敗或股票主檔為空時，
+    // 這裡會直接中止啟動並發 Telegram 告警——空的核心快取代表 DB 內容或
+    // 查詢已壞，讓服務「看似正常啟動」只會悄悄漏抓、漏算。
+    // 非必要快取（指數、營收、歷史高低、公網 IP）失敗只降級，會列在 report 中。
     tracing::info!(
         "{}",
-        "startup phase begin: crate::infra::cache::SHARE.load".to_string(),
+        "startup phase begin: crate::infra::cache::SHARE.load_required".to_string(),
     );
     let cache_load_timer = Instant::now();
-    infra::cache::SHARE.load().await;
-    tracing::info!(
-        "startup phase done: crate::infra::cache::SHARE.load elapsed={:?}",
-        cache_load_timer.elapsed()
-    );
+    match infra::cache::SHARE.load_required().await {
+        Ok(report) => {
+            if !report.degraded.is_empty() {
+                tracing::warn!(
+                    "cache load degraded (non-critical caches failed): {:?}",
+                    report.degraded
+                );
+            }
+            tracing::info!(
+                "startup phase done: SHARE.load_required elapsed={:?}, stocks={}, last_trading_day_quotes={}",
+                cache_load_timer.elapsed(),
+                report.stock_count,
+                report.last_trading_day_quote_count
+            );
+        }
+        Err(why) => {
+            let err_msg = format!("Failed to load required caches: {:?}", why);
+            tracing::error!("{}", &err_msg);
+            interfaces::bot::telegram::send_alert("核心快取載入失敗（主機啟動異常）", &err_msg)
+                .await;
+            return Err(err_msg.into());
+        }
+    }
 
     // ── 9. 排程器建立 ───────────────────────────────────────────────────────
     // `JobScheduler::new()` 建立 tokio-cron-scheduler 實例，但尚未啟動任何 job。

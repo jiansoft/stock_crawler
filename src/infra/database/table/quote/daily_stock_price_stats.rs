@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local, NaiveDate};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, Transaction, Type, postgres::PgQueryResult};
 
 use crate::infra::database;

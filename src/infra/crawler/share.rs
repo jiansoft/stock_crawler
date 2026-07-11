@@ -81,9 +81,13 @@ pub(super) async fn fetch_annual_profits(
     url: &str,
     stock_symbol: &str,
 ) -> Result<Vec<AnnualProfit>, CrawlerError> {
+    // 保留 anyhow 錯誤鏈：message 只放頂層摘要，完整原因交給 source。
     let text = util::http::get(url, None)
         .await
-        .map_err(|e| CrawlerError::Network(e.to_string()))?;
+        .map_err(|e| CrawlerError::Network {
+            message: e.to_string(),
+            source: e.into(),
+        })?;
     let document = Html::parse_document(&text);
     let selector = Selector::parse("#oMainTable > tbody > tr:nth-child(n+4)")
         .map_err(|why| CrawlerError::Scraper(format!("{why:?}")))?;

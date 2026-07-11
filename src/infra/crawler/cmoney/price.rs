@@ -182,6 +182,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     /// 測試可取得指定股票即時價格。
     async fn test_get_stock_price() {
         dotenvy::dotenv().ok();
@@ -189,6 +190,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     /// 測試可取得指定股票完整即時報價。
     async fn test_get_stock_quotes() {
         dotenvy::dotenv().ok();

@@ -201,10 +201,13 @@ fn build_headers(stock_symbol: &str, referer: &str, user_agent: &str) -> Result<
 
     headers.insert("Referer", referer.parse()?);
     headers.insert("User-Agent", user_agent.parse()?);
+    // get_current_ip 在「尚未取得公網 IP」時回傳 None；此時以空字串降級組 cookie，
+    // 不能 unwrap——否則快取未載入或 IP 來源全掛時這裡會直接 panic。
+    let current_ip = SHARE.get_current_ip().unwrap_or_default();
     let cookie_val = format!(
         "CLIENT_KEY={}; CLIENT%5FID=1st%5F{}; SL_G_WPT_TO=zh-TW; TW_STOCK_BROWSE_LIST={}; SL_GWPT_Show_Hide_tmp=1; SL_wptGlobTipTmp=1; IS_TOUCH_DEVICE=F; SCREEN_SIZE=WIDTH=2560&HEIGHT=1440",
         client_key(),
-        encode(SHARE.get_current_ip().unwrap().as_str()),
+        encode(current_ip.as_str()),
         stock_symbol
     );
     headers.insert(COOKIE, cookie_val.parse()?);
@@ -620,6 +623,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_visit() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 visit");

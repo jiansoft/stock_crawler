@@ -114,15 +114,17 @@ pub fn split_v1(w: &str) -> Vec<String> {
 /// ```
 pub fn parse_decimal(s: &str, escape_chars: Option<Vec<char>>) -> Result<Decimal> {
     let cleaned = clean_escape_chars(s, escape_chars);
-    Decimal::from_str(&cleaned)
-        .map_err(|why| anyhow!("Failed to parse '{}' as Decimal because {:?}", cleaned, why))
+    // 用 with_context 而不是 anyhow!("... {:?}", why)：
+    // 前者把底層解析錯誤保留在 source chain（呼叫端可用 {:#} 或 source() 取得），
+    // 後者只把錯誤「印成文字」，原始錯誤型別與鏈路都會遺失。
+    Decimal::from_str(&cleaned).with_context(|| format!("Failed to parse '{cleaned}' as Decimal"))
 }
 
 /// 將字串解析為 `f64`。
 pub fn parse_f64(s: &str, escape_chars: Option<Vec<char>>) -> Result<f64> {
     let cleaned = clean_escape_chars(s, escape_chars);
-    f64::from_str(&cleaned)
-        .map_err(|why| anyhow!("Failed to parse '{}' as f64 because {:?}", cleaned, why))
+    // 同 parse_decimal：以 context 保留底層錯誤鏈。
+    f64::from_str(&cleaned).with_context(|| format!("Failed to parse '{cleaned}' as f64"))
 }
 
 /// Parses an `i32` value from a given string.
@@ -153,8 +155,8 @@ pub fn parse_f64(s: &str, escape_chars: Option<Vec<char>>) -> Result<f64> {
 /// ```
 pub fn parse_i32(s: &str, escape_chars: Option<Vec<char>>) -> Result<i32> {
     let cleaned = clean_escape_chars(s, escape_chars);
-    i32::from_str(&cleaned)
-        .map_err(|why| anyhow!("Failed to parse '{}' as i32 because: {:?}", cleaned, why))
+    // 同 parse_decimal：以 context 保留底層錯誤鏈。
+    i32::from_str(&cleaned).with_context(|| format!("Failed to parse '{cleaned}' as i32"))
 }
 
 /// Parses an `i64` value from a given string.
@@ -185,8 +187,8 @@ pub fn parse_i32(s: &str, escape_chars: Option<Vec<char>>) -> Result<i32> {
 /// ```
 pub fn parse_i64(s: &str, escape_chars: Option<Vec<char>>) -> Result<i64> {
     let cleaned = clean_escape_chars(s, escape_chars);
-    i64::from_str(&cleaned)
-        .map_err(|why| anyhow!("Failed to parse '{}' as i64 because: {:?}", cleaned, why))
+    // 同 parse_decimal：以 context 保留底層錯誤鏈。
+    i64::from_str(&cleaned).with_context(|| format!("Failed to parse '{cleaned}' as i64"))
 }
 
 /// Removes a set of escape characters from a given string.

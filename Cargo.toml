@@ -2,6 +2,10 @@
 name = "stock_crawler"
 version = "0.1.0"
 edition = "2024"
+# MSRV（最低支援 Rust 版本）：與 CI 的 toolchain（1.95.0）一致。
+# 宣告後 Cargo resolver 會拒絕需要更新編譯器的相依版本，
+# 使用者也能從 manifest 直接得知本專案的編譯器需求。
+rust-version = "1.95"
 authors = ["Eddie <eddiea.chen@gmail.com>"]
 license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -44,20 +48,24 @@ tonic-prost = "0.14"
 rayon = "1.12"
 #redis = { version = "0.28", features = ["tokio-comp"]  }
 regex = "1"
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "charset", "json", "form", "brotli", "gzip", "cookies", "zstd", "http2"] }
+# 壓縮僅保留 gzip/brotli：Accept-Encoding 是協商式的，站方會自動退回支援的編碼，
+# 移除 zstd 可少一個原生解壓依賴；cookies（cookie_store）未使用（全域 client 刻意 stateless）。
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "charset", "json", "form", "brotli", "gzip", "http2"] }
 rustls = { version = "0.23", features = ["ring"] }
 rustls-pki-types = { version = "1.15", features = ["alloc", "std"] }
 rust_decimal = "1.42"
 rust_decimal_macros = "1.40"
 scraper = "0.27"
 serde = { version = "1.0", features = ["derive"] }
-serde_derive = "1.0"
 serde_json = "1.0"
 #sha2 = { version = "0.11", features = [] }
-sqlx = { version = "0.9", features = [ "runtime-tokio", "postgres", "time", "chrono", "bigdecimal", "macros", "rust_decimal"] }
+# type feature 僅保留實際使用的 chrono/rust_decimal（bigdecimal/time 未使用）；
+# 專案只用 FromRow/Type 這類 derive，未使用 query! 巨集，因此以 "derive" 取代 "macros"。
+sqlx = { version = "0.9", features = [ "runtime-tokio", "postgres", "chrono", "derive", "rust_decimal"] }
 strum = { version = "0.28", features = ["derive"]}
-strum_macros = "0.28"
-tokio = { version = "1.52", features = ["full"] }
+# 收斂 "full"：僅列出本 crate 直接用到的功能（rt/巨集/訊號/同步原語/計時器/net）。
+# sqlx、tonic、axum 等相依會自行帶入各自需要的 tokio feature，Cargo 會取聯集。
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net"] }
 tokio-cron-scheduler = "0.15"
 tokio-retry = "0.3"
 tokio-stream = "0.1"

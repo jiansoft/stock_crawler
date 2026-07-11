@@ -5,7 +5,7 @@
 
 use anyhow::{Result, anyhow};
 use rust_decimal::Decimal;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     core::declare::Quarter,
@@ -231,6 +231,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_visit() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 visit");

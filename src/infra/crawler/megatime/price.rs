@@ -147,12 +147,14 @@ mod tests {
     use crate::infra::crawler::log_stock_price_test;
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_get_stock_price() {
         dotenvy::dotenv().ok();
         log_stock_price_test::<PcHome>("2330").await;
     }
 
     #[tokio::test]
+    #[ignore = "live test：連線真實外部網站，需要時手動執行"]
     async fn test_get_stock_quotes() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 megatime::get_stock_quotes");

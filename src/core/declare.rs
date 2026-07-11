@@ -1,6 +1,6 @@
 use chrono::{Local, NaiveTime};
-use serde_derive::{Deserialize, Serialize};
-use strum_macros::{Display, EnumString};
+use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
 /// 財報季度。
 #[derive(

@@ -17,6 +17,7 @@ mod share;
 mod snapshot;
 mod ttl;
 
+pub use loader::CacheLoadReport;
 pub use realtime::RealtimeSnapshot;
 pub use share::{SHARE, Share};
 pub use ttl::{TTL, TtlCacheInner};

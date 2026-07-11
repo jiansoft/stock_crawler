@@ -120,6 +120,12 @@ mod tests {
     #[tokio::test]
     async fn test_calculate_cumulate_dividend() {
         dotenvy::dotenv().ok();
+        // 與其他 DB 測試一致：資料庫不可用時明確跳過，而不是在
+        // begin().unwrap() 上 panic（舊版在無資料庫的環境會直接紅燈）。
+        if database::ping().await.is_err() {
+            println!("跳過 test_calculate_cumulate_dividend：無資料庫連接");
+            return;
+        }
         tracing::debug!("開始 calculate_cumulate_dividend");
         let drd = DividendRecordDetail::new(
             27,

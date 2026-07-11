@@ -9,8 +9,7 @@ use chrono::{Datelike, NaiveDate};
 use hashbrown::HashMap;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use serde::Deserialize;
-use serde_derive::Serialize;
+use serde::{Deserialize, Serialize};
 
 // QuoteResponse 上櫃公司每日收盤資訊
 /*#[derive(Debug, Deserialize)]
