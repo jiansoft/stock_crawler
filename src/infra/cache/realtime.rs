@@ -4,6 +4,7 @@
 //! 不包含抓取、更新或快取生命週期控制邏輯。
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
@@ -35,6 +36,8 @@ pub struct RealtimeSnapshot {
     pub last_close: Decimal,
     /// 成交量 (單位：張)
     pub volume: Decimal,
+    /// 快照最後寫入快取的 UTC 時間，供外部 API 判斷資料新鮮度。
+    pub updated_at: DateTime<Utc>,
 }
 
 impl RealtimeSnapshot {
@@ -60,6 +63,7 @@ impl RealtimeSnapshot {
             low: Decimal::ZERO,
             last_close: Decimal::ZERO,
             volume: Decimal::ZERO,
+            updated_at: Utc::now(),
         }
     }
 

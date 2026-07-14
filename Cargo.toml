@@ -98,6 +98,10 @@ scopeguard = "1.2"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+subtle = "2.6"
+utoipa = { version = "5.5", features = ["axum_extras", "chrono"] }
+utoipa-axum = "0.2"
+utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
 x509-parser = "0.18"
 #time = "=0.3.49"
 
@@ -106,6 +110,7 @@ mimalloc = "0.1"
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
+tower = { version = "0.5", features = ["util"] }
 # test-util 提供 tokio::time 虛擬時鐘（start_paused），讓逾時類測試不需真實等待。
 tokio = { version = "1.52", features = ["test-util"] }
 
