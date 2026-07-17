@@ -1,6 +1,6 @@
 # 執行計畫：擴充 stock_mcp 台股查詢工具
 
-- 狀態：執行中（Phase 0–3 已完成，Phase 4／部署待辦）
+- 狀態：開發完成（Phase 0–4 全部完成；僅剩部署 D-1～D-3 待使用者環境執行）
 - 日期：2026-07-17
 - 影響範圍：`stock_rust`（新增唯讀 Data API）、`stock_mcp_go`（新增 API client 方法與 MCP tools）
 - 前置條件：現有五個 MCP tools 與 `/api/v1` Data API 維持可用
@@ -727,18 +727,18 @@ go test ./...
 
 ### Phase 4
 
-- [ ] 指數歷史 endpoint 固定 TAIEX、排序新到舊、`from > to` 回 422。
-- [ ] 股利行事曆四種 `event_type`、區間上限 92 天、無效日期標記不產生事件。
-- [ ] QFII 排行排除暫停上市與零持股，tool 描述與摘要標明快照語意。
-- [ ] 市場廣度 `days` 序列與單日查詢語意一致（`breadth` = `history[0]`）。
+- [x] 指數歷史 endpoint 固定 TAIEX、排序新到舊、`from > to` 回 422。 2026-07-18T06:27:32
+- [x] 股利行事曆四種 `event_type`、區間上限 92 天、無效日期標記不產生事件。 2026-07-18T06:27:32（`phase4_endpoints_db_semantics` 以 DB 最大合法除息日為錨點驗證）
+- [x] QFII 排行排除暫停上市與零持股，tool 描述與摘要標明快照語意。 2026-07-18T06:27:32（Go 端 `TestMarketDataToolsAreReadOnly` 驗描述含快照限制）
+- [x] 市場廣度 `days` 序列與單日查詢語意一致（`breadth` = `history[0]`）。 2026-07-18T01:44:11（Phase 2 已完成）
 
 ### 全部完成
 
-- [ ] `stock_rust` 的 fmt、clippy、test、doc 全部通過。
-- [ ] `stock_mcp_go` 的 gofmt、vet、test 全部通過。
-- [ ] 所有新增程式碼符合 §5.3 保母級註解規範（Rustdoc／godoc ＋ 逐區塊繁體中文說明）。
-- [ ] Swagger UI、OpenAPI、README 與實際 tools/list 一致。
-- [ ] 新功能沒有暴露會員持倉、成本、損益或任何憑證。
+- [x] `stock_rust` 的 fmt、clippy、test、doc 全部通過。 2026-07-18T06:29:17（fmt OK／clippy `-D warnings` 0 警告／整合測試 416 passed／`cargo doc --no-deps` 產出成功）
+- [x] `stock_mcp_go` 的 gofmt、vet、test 全部通過。 2026-07-18T06:29:17
+- [x] 所有新增程式碼符合 §5.3 保母級註解規範（Rustdoc／godoc ＋ 逐區塊繁體中文說明）。 2026-07-18T06:29:17（Phase 1–4 各 commit 審查通過）
+- [x] OpenAPI、README 與實際 tools/list 一致（OpenAPI 測試精確固定 13 條 path；README 記載 15 個 api 模式工具；tools/list 註冊測試驗證）。 2026-07-18T06:29:17——Swagger UI 實機抽查列入 D-1 部署驗證。
+- [x] 新功能沒有暴露會員持倉、成本、損益或任何憑證。 2026-07-18T06:29:17（`data_api` 模組 grep 確認未觸及 `stock_ownership_details`／`daily_money_history*`；錯誤回應不含 SQL／主機／堆疊）
 
 ## 10. 執行進度追蹤（接手指南）
 
@@ -759,10 +759,10 @@ go test ./...
 - [x] P0-3 統計股利日期欄位的無效標記種類與數量。 2026-07-18T00:15:05
   - 結果：主要為 `-`（1.7 萬～4 萬筆／欄）與 `尚未公布`（數百筆／欄）。**另發現 `ex-dividend_date1` 有 10 筆殖利率字串（如 `1.39%`）的髒資料**——「僅合法 `YYYY-MM-DD` 才輸出、其餘一律 `null`」的規則可正確處理，無需清資料。
   - 注意：實際 DB 欄名為 `"ex-dividend_date1"`、`"ex-dividend_date2"`（含連字號，SQL 需加引號），§4.3 對照表的 DB 欄名以此為準。
-- [~] P0-4 對十類查詢執行 `EXPLAIN (ANALYZE, BUFFERS)`，記錄是否需補索引。 2026-07-18T01:44:11（Phase 1–3 共七類已完成；Phase 4 三類待辦）
+- [x] P0-4 對十類查詢執行 `EXPLAIN (ANALYZE, BUFFERS)`，記錄是否需補索引。 2026-07-18T06:27:32（十類全數完成）
   - Phase 1 三類結果：`Revenue` 走 `Revenue_SecurityCode_Date-uidx` 反向掃描（4.5ms）；`financial_statement` 走 `(security_code, year, quarter)` 唯一索引（0.14ms）；`dividend` 走 pkey bitmap ＋ top-N 排序（66 列、0.11ms）。**三者皆不需補索引**。
   - Phase 2/3 結果：估值約 0.03ms、廣度約 0.19ms、殖利率排行約 28ms；metric-sort screen 原約 1,891ms，新增 `yield_rank (security_code, date DESC) INCLUDE (yield)` 後約 134ms（約 14.1 倍），planner 已使用新索引。migration：`migration_20260718_yield_rank_latest_by_stock_index.sql`。
-  - Phase 4 尚待指數／行事曆／QFII 三類查詢。
+  - Phase 4 三類結果：指數走 `index-date_category-uidx` 反向掃描（0.06ms）；行事曆四段平行 Seq Scan ＋ Gather Merge top-N（約 99ms，符合 §4.9「dividend 表全表掃描可接受」的預期）；QFII 排行 Seq Scan ＋ top-N heapsort（2,244 列通過過濾、1.8ms）。**三者皆不需補索引**。
 - [x] P0-5 response schema 落入 OpenAPI 測試，固定欄位名稱與 null 語意。 2026-07-18T00:27:24
   - Phase 1–3 已改為依 path 精確驗證 response schema、query 限制、nullable／array item、security 與 500；Phase 4 依相同模式續增。
 
@@ -797,11 +797,16 @@ go test ./...
 
 ### Phase 4：市場輔助工具
 
-- [ ] P4-1 Rust `market/index-history` endpoint。
-- [ ] P4-2 Rust `market/dividend-calendar` endpoint。
-- [ ] P4-3 Rust `market/qfii-holding-ranking` endpoint。
-- [ ] P4-4 Go `MarketDataQuerier` 三方法 ＋ 三個 tools ＋ 測試 ＋ README 更新。
-- [ ] P4-5 §9 Phase 4 完工清單全數勾選。
+- [x] P4-1 Rust `market/index-history` endpoint。 2026-07-18T06:27:32
+- [x] P4-2 Rust `market/dividend-calendar` endpoint。 2026-07-18T06:27:32
+  - 髒字串日期以 `CASE WHEN col ~ '^\d{4}-\d{2}-\d{2}$' THEN col::date END` 防護；四段 UNION ALL（每段一個 event_type 字面值）維持字面 SQL；92 天上限採「to − from ≤ 92」語意（含首尾共 93 個日曆日），兩端測試皆固定此邊界。
+- [x] P4-3 Rust `market/qfii-holding-ranking` endpoint。 2026-07-18T06:27:32
+  - 排除 `"SuspendListing"` 與零持股；`sort_by` 兩分支字面白名單；`data_as_of` 固定 null（快照無列級日期）。
+  - P4-1～P4-3 commit：stock_rust `feature/data-api-v1` `af121b8`；驗證 fmt／clippy `-D warnings`／整合測試 416 passed 全綠。
+- [x] P4-4 Go `MarketDataQuerier` 三方法 ＋ 三個 tools ＋ 測試 ＋ README 更新。 2026-07-18T06:27:32
+  - 市場層級 endpoint 無 404 語意（404 視為部署異常）；股數欄位用 `*int64`；QFII 工具描述與摘要固定附「快照、無歷史序列」警語；行事曆 92 天上限 MCP 層先驗。gofmt／vet／test 全綠。
+  - commit：stock_mcp_go `main` `8437f1c`。
+- [x] P4-5 §9 Phase 4 完工清單全數勾選。 2026-07-18T06:27:32
 
 ### 部署
 
