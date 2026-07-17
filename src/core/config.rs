@@ -1,7 +1,6 @@
-use std::{collections::HashMap, env, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, env, fs, path::PathBuf, str::FromStr};
 
 use anyhow::Result;
-use config::FileFormat;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
@@ -203,17 +202,23 @@ impl App {
     /// 取得系統組態項
     ///
     /// 讀取流程：
-    /// 1. 嘗試讀取並解析 `app.json`。
+    /// 1. 嘗試讀取 `app.json` 並以 `serde_json` 解析成 [`App`]。
     /// 2. 如果 `app.json` 存在，則讀取環境變數進行覆蓋 (`override_with_env`)。
     /// 3. 如果 `app.json` 不存在，則直接從環境變數建立 (`from_env`)。
+    ///
+    /// 注意：`serde_json` 對型別要求嚴格——數字欄位必須是 JSON number
+    /// （例如 `"port": 5432`），寫成字串（`"port": "5432"`）會在啟動時
+    /// 直接解析失敗，不會被自動轉型。這是刻意的：設定檔打錯型別應該
+    /// 立刻報錯，而不是默默吞掉。
     fn get() -> Result<Self> {
         let config_path = config_path();
 
         if config_path.exists() {
-            let config: Result<App, _> = config::Config::builder()
-                .add_source(config::File::from(config_path.clone()).format(FileFormat::Json))
-                .build()
-                .and_then(|cfg| cfg.try_deserialize());
+            // 直接讀檔 + serde_json 解析。兩段都可能失敗（I/O 錯誤或 JSON
+            // 格式/型別錯誤），統一收斂成 anyhow::Error 交給下方 match 處理。
+            let config: Result<App> = fs::read_to_string(&config_path)
+                .map_err(anyhow::Error::from)
+                .and_then(|text| serde_json::from_str(&text).map_err(anyhow::Error::from));
 
             match config {
                 Ok(cfg) => return Ok(cfg.override_with_env()),

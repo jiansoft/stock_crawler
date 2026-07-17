@@ -46,7 +46,6 @@ async-trait = "0.1"
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 concat-string = "1.0.1"
-config = "0.15"
 #crossbeam = "0.8"
 #crossbeam-channel = "0.5"
 deadpool-redis = "0.23"
@@ -100,7 +99,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 subtle = "2.6"
 utoipa = { version = "5.5", features = ["axum_extras", "chrono"] }
-utoipa-axum = "0.2"
+#utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
 x509-parser = "0.18"
 #time = "=0.3.49"
