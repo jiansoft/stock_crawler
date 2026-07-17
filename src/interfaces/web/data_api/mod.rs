@@ -14,8 +14,8 @@ use utoipa_swagger_ui::SwaggerUi;
 /// 由 handler 註解生成的 OpenAPI 3 文件。
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::ErrorBody, dto::HealthResponse)),
+    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::stock_valuation, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::healthz),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -76,6 +76,22 @@ pub(super) fn router() -> Router {
             "/stocks/{symbol}/dividends",
             axum::routing::get(handlers::dividend_history),
         )
+        .route(
+            "/stocks/{symbol}/valuation",
+            axum::routing::get(handlers::stock_valuation),
+        )
+        .route(
+            "/market/breadth",
+            axum::routing::get(handlers::market_breadth),
+        )
+        .route(
+            "/market/dividend-yield-ranking",
+            axum::routing::get(handlers::dividend_yield_ranking),
+        )
+        .route(
+            "/stocks/screen",
+            axum::routing::get(handlers::screen_stocks),
+        )
         .layer(middleware::from_fn(auth::require_bearer_key));
     Router::new()
         .nest(
@@ -100,6 +116,87 @@ mod tests {
     use utoipa::OpenApi;
 
     use super::{ApiDoc, router};
+
+    /// 取得指定 GET operation；path 缺漏時立即顯示精確路徑。
+    fn get_operation<'a>(document: &'a serde_json::Value, path: &str) -> &'a serde_json::Value {
+        document["paths"][path]["get"]
+            .as_object()
+            .map(|_| &document["paths"][path]["get"])
+            .unwrap_or_else(|| panic!("OpenAPI 缺少 GET {path}"))
+    }
+
+    /// 驗證 operation 的 status code 指向指定 component schema。
+    fn assert_response(operation: &serde_json::Value, status: &str, schema: &str) {
+        let reference =
+            operation["responses"][status]["content"]["application/json"]["schema"]["$ref"]
+                .as_str()
+                .unwrap_or_else(|| panic!("response {status} 缺少 JSON schema ref"));
+        assert_eq!(reference, format!("#/components/schemas/{schema}"));
+    }
+
+    /// 取得 query parameter schema，避免以全文 contains 造成跨 path 假陽性。
+    fn query_schema<'a>(operation: &'a serde_json::Value, name: &str) -> &'a serde_json::Value {
+        operation["parameters"]
+            .as_array()
+            .expect("parameters 應為陣列")
+            .iter()
+            .find(|parameter| parameter["name"] == name && parameter["in"] == "query")
+            .map(|parameter| &parameter["schema"])
+            .unwrap_or_else(|| panic!("缺少 query parameter {name}"))
+    }
+
+    /// 解析 utoipa 可能 inline、`$ref` 或以 `allOf` 包裝的 enum schema。
+    fn enum_values(document: &serde_json::Value, schema: &serde_json::Value) -> serde_json::Value {
+        if schema["enum"].is_array() {
+            return schema["enum"].clone();
+        }
+        if let Some(reference) = schema["$ref"].as_str() {
+            let resolved = document
+                .pointer(reference.trim_start_matches('#'))
+                .expect("enum $ref 應指向有效 component");
+            return enum_values(document, resolved);
+        }
+        if let Some(all_of) = schema["allOf"].as_array() {
+            for nested in all_of {
+                let values = enum_values(document, nested);
+                if values.is_array() {
+                    return values;
+                }
+            }
+        }
+        if let Some(any_of) = schema["anyOf"].as_array() {
+            for nested in any_of {
+                let values = enum_values(document, nested);
+                if values.is_array() {
+                    return values;
+                }
+            }
+        }
+        if let Some(one_of) = schema["oneOf"].as_array() {
+            for nested in one_of {
+                let values = enum_values(document, nested);
+                if values.is_array() {
+                    return values;
+                }
+            }
+        }
+        panic!("無法解析 enum schema: {schema}")
+    }
+
+    /// 驗證成功與標準錯誤 responses；`has_not_found` 控制是否要求 404。
+    fn assert_endpoint_responses(
+        operation: &serde_json::Value,
+        success_schema: &str,
+        has_not_found: bool,
+    ) {
+        assert_response(operation, "200", success_schema);
+        for status in ["401", "422", "500"] {
+            assert_response(operation, status, "ErrorBody");
+        }
+        if has_not_found {
+            assert_response(operation, "404", "ErrorBody");
+        }
+    }
 
     /// 健康檢查必須免驗證，讓部署系統能在未持有 API key 時偵測存活狀態。
     #[tokio::test]
@@ -144,6 +241,10 @@ mod tests {
             "/api/v1/stocks/{symbol}/monthly-revenues",
             "/api/v1/stocks/{symbol}/financial-statements",
             "/api/v1/stocks/{symbol}/dividends",
+            "/api/v1/stocks/{symbol}/valuation",
+            "/api/v1/market/breadth",
+            "/api/v1/market/dividend-yield-ranking",
+            "/api/v1/stocks/screen",
             "/api/v1/healthz",
         ] {
             assert!(json.contains(path), "OpenAPI should contain {path}");
@@ -151,35 +252,132 @@ mod tests {
         assert!(json.contains("bearer_auth"));
     }
 
-    /// Phase 1 三個歷史 endpoint 的 response schema 必須固定欄位名稱與
-    /// null 語意（P0-5）：抽查 envelope 欄位與可為 null 的關鍵欄位。
+    /// Phase 1 三條 path 分別固定 responses、query constraints、陣列 item 與
+    /// nullable envelope；所有斷言皆從該 path/component 定位，不做全文搜尋。
     #[test]
     fn openapi_phase1_schemas_pin_field_names() {
-        let json = ApiDoc::openapi()
-            .to_json()
-            .expect("OpenAPI should serialize");
-        for field in [
-            // 月營收 envelope 與欄位。
-            "MonthlyRevenueResponse",
-            "\"revenues\"",
-            "\"month_over_month_percent\"",
-            // 財報 envelope 與 §4.2 改名後的欄位。
-            "FinancialStatementHistoryResponse",
-            "\"statements\"",
-            "\"gross_profit_margin\"",
-            "\"profit_before_tax_per_share\"",
-            // 股利 envelope 與 §4.3 改名後的欄位。
-            "DividendHistoryResponse",
-            "\"dividends\"",
-            "\"paid_year\"",
-            "\"dividend_year\"",
-            "\"ex_dividend_date\"",
-            "\"total_dividend\"",
-            // 三個 envelope 共通的資料日期欄位。
-            "\"data_as_of\"",
-        ] {
-            assert!(json.contains(field), "OpenAPI should contain {field}");
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+        let cases = [
+            (
+                "/api/v1/stocks/{symbol}/monthly-revenues",
+                "MonthlyRevenueResponse",
+                "limit",
+                24,
+                1,
+                120,
+                "revenues",
+                "MonthlyRevenue",
+            ),
+            (
+                "/api/v1/stocks/{symbol}/financial-statements",
+                "FinancialStatementHistoryResponse",
+                "limit",
+                12,
+                1,
+                40,
+                "statements",
+                "FinancialStatement",
+            ),
+            (
+                "/api/v1/stocks/{symbol}/dividends",
+                "DividendHistoryResponse",
+                "limit",
+                20,
+                1,
+                80,
+                "dividends",
+                "Dividend",
+            ),
+        ];
+        for (path, response, limit_name, default, minimum, maximum, list, item) in cases {
+            let operation = get_operation(&document, path);
+            assert_endpoint_responses(operation, response, true);
+            let limit = query_schema(operation, limit_name);
+            assert_eq!(limit["default"], default);
+            assert_eq!(limit["minimum"], minimum);
+            assert_eq!(limit["maximum"], maximum);
+            let properties = &document["components"]["schemas"][response]["properties"];
+            assert_eq!(properties[list]["type"], "array");
+            assert_eq!(
+                properties[list]["items"]["$ref"],
+                format!("#/components/schemas/{item}")
+            );
+            assert!(properties["data_as_of"].to_string().contains("null"));
         }
+        let period = query_schema(
+            get_operation(&document, "/api/v1/stocks/{symbol}/financial-statements"),
+            "period_type",
+        );
+        assert_eq!(period["default"], "quarterly");
+        assert_eq!(
+            enum_values(&document, period),
+            serde_json::json!(["quarterly", "annual", "all"])
+        );
+    }
+
+    /// Phase 2 每條 path 精確驗證 responses 與 query enum/range/default。
+    #[test]
+    fn openapi_phase2_schemas_pin_field_names() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+        let valuation = get_operation(&document, "/api/v1/stocks/{symbol}/valuation");
+        assert_endpoint_responses(valuation, "StockValuationResponse", true);
+        let breadth = get_operation(&document, "/api/v1/market/breadth");
+        assert_endpoint_responses(breadth, "MarketBreadthResponse", true);
+        assert_eq!(query_schema(breadth, "days")["default"], 1);
+        assert_eq!(query_schema(breadth, "days")["minimum"], 1);
+        assert_eq!(query_schema(breadth, "days")["maximum"], 60);
+        assert_eq!(
+            enum_values(&document, query_schema(breadth, "market")),
+            serde_json::json!(["all", "twse", "tpex"])
+        );
+        let history =
+            &document["components"]["schemas"]["MarketBreadthResponse"]["properties"]["history"];
+        assert_eq!(history["type"], "array");
+        assert_eq!(
+            history["items"]["$ref"],
+            "#/components/schemas/MarketBreadth"
+        );
+        let ranking = get_operation(&document, "/api/v1/market/dividend-yield-ranking");
+        assert_endpoint_responses(ranking, "DividendYieldRankingResponse", true);
+        assert_eq!(query_schema(ranking, "limit")["default"], 20);
+        assert_eq!(query_schema(ranking, "industry_id")["minimum"], 1);
+    }
+
+    /// Phase 3 path 精確驗證 responses、白名單 enum、數值範圍與陣列 item。
+    #[test]
+    fn openapi_phase3_schema_pins_filters_and_source_dates() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+        let operation = get_operation(&document, "/api/v1/stocks/screen");
+        assert_endpoint_responses(operation, "StockScreeningResponse", false);
+        assert_eq!(query_schema(operation, "limit")["default"], 20);
+        assert_eq!(
+            enum_values(&document, query_schema(operation, "sort_order")),
+            serde_json::json!(["asc", "desc"])
+        );
+        assert_eq!(
+            enum_values(&document, query_schema(operation, "valuation_band")),
+            serde_json::json!([
+                "undervalued",
+                "fair_valued",
+                "overvalued",
+                "highly_overvalued"
+            ])
+        );
+        assert_eq!(
+            query_schema(operation, "min_dividend_yield_percent")["minimum"],
+            0
+        );
+        assert_eq!(
+            query_schema(operation, "min_dividend_yield_percent")["maximum"],
+            1000
+        );
+        let stocks =
+            &document["components"]["schemas"]["StockScreeningResponse"]["properties"]["stocks"];
+        assert_eq!(stocks["type"], "array");
+        assert_eq!(
+            stocks["items"]["$ref"],
+            "#/components/schemas/ScreenedStock"
+        );
     }
 
     /// 新增的三個歷史 endpoint 也必須受 Bearer 驗證保護，未帶 token 一律 401。
@@ -204,6 +402,46 @@ mod tests {
                 "{path} 應回 401"
             );
         }
+    }
+
+    /// Phase 2 三個分析 endpoints 必須在 middleware 層拒絕未授權請求，
+    /// 確保 401 發生在任何 SQL 查詢之前。
+    #[tokio::test]
+    async fn phase2_endpoints_reject_missing_bearer_key() {
+        for path in [
+            "/api/v1/stocks/2330/valuation",
+            "/api/v1/market/breadth",
+            "/api/v1/market/dividend-yield-ranking",
+        ] {
+            let response = router()
+                .oneshot(
+                    Request::get(path)
+                        .body(Body::empty())
+                        .expect("request should build"),
+                )
+                .await
+                .expect("router should serve request");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{path} 應回 401"
+            );
+        }
+    }
+
+    /// Phase 3 選股 endpoint 必須先經 Bearer middleware，未授權請求不得執行
+    /// 任何每股 LATERAL SQL。
+    #[tokio::test]
+    async fn phase3_endpoint_rejects_missing_bearer_key() {
+        let response = router()
+            .oneshot(
+                Request::get("/api/v1/stocks/screen?market=twse")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should serve request");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     /// Phase 1 endpoints 的資料庫語意整合測試（§3.2、§3.3）。
@@ -317,6 +555,58 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert!(json["statements"].is_array(), "statements 必須是陣列");
+        // quarterly 不得混入年度 alias；all 則將 DB 空字串穩定輸出成 A，且
+        // year/period 必須維持由新到舊。
+        let (_, quarterly) = get(&format!(
+            "/api/v1/stocks/{symbol}/financial-statements?period_type=quarterly&limit=40"
+        ))
+        .await;
+        assert!(
+            quarterly["statements"]
+                .as_array()
+                .expect("statements array")
+                .iter()
+                .all(|row| matches!(row["quarter"].as_str(), Some("Q1" | "Q2" | "Q3" | "Q4")))
+        );
+        let (_, all_periods) = get(&format!(
+            "/api/v1/stocks/{symbol}/financial-statements?period_type=all&limit=40"
+        ))
+        .await;
+        let statements = all_periods["statements"]
+            .as_array()
+            .expect("statements array");
+        let period_rank = |quarter: &str| match quarter {
+            "A" => 7,
+            "H2" => 6,
+            "H1" => 5,
+            "Q4" => 4,
+            "Q3" => 3,
+            "Q2" => 2,
+            "Q1" => 1,
+            _ => 0,
+        };
+        for pair in statements.windows(2) {
+            let left = (
+                pair[0]["year"].as_i64().unwrap(),
+                period_rank(pair[0]["quarter"].as_str().unwrap()),
+            );
+            let right = (
+                pair[1]["year"].as_i64().unwrap(),
+                period_rank(pair[1]["quarter"].as_str().unwrap()),
+            );
+            assert!(left >= right, "財報必須依年度與期間新到舊");
+        }
+        let empty_symbol: Option<String> = sqlx::query_scalar("SELECT s.stock_symbol FROM stocks s WHERE NOT EXISTS (SELECT 1 FROM financial_statement f WHERE f.security_code = s.stock_symbol) LIMIT 1")
+            .fetch_optional(crate::infra::database::get_connection()).await.expect("empty financial symbol query");
+        if let Some(empty_symbol) = empty_symbol {
+            let (status, json) = get(&format!(
+                "/api/v1/stocks/{empty_symbol}/financial-statements"
+            ))
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(json["statements"], serde_json::json!([]));
+            assert!(json["data_as_of"].is_null());
+        }
 
         // 語意三：參數不合法 → 422（在存在性檢查之前就擋下）。
         for path in [
@@ -331,6 +621,197 @@ mod tests {
         ] {
             let (status, _) = get(&path).await;
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{path} 應回 422");
+        }
+    }
+
+    /// Phase 2 三個 authenticated endpoints 的真實 SQL 欄位、型別、JOIN 與
+    /// 404／空資料／排序語意整合測試；不建立 fixture，避免污染共享資料庫。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn phase2_endpoints_db_semantics() {
+        dotenvy::dotenv().ok();
+        let pool = crate::infra::database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 phase2_endpoints_db_semantics：無資料庫連接");
+            return;
+        }
+        let key = std::env::var("DATA_API_KEY").unwrap_or_else(|_| {
+            let generated = "phase2-integration-test-key".to_owned();
+            unsafe { std::env::set_var("DATA_API_KEY", &generated) };
+            generated
+        });
+        let get = |path: &str| {
+            let path = path.to_owned();
+            let key = key.clone();
+            async move {
+                let response = router()
+                    .oneshot(
+                        Request::get(&path)
+                            .header("Authorization", format!("Bearer {key}"))
+                            .body(Body::empty())
+                            .expect("request should build"),
+                    )
+                    .await
+                    .expect("router should serve request");
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("body readable");
+                let json: serde_json::Value =
+                    serde_json::from_slice(&bytes).expect("body should be JSON");
+                (status, json)
+            }
+        };
+
+        let (status, _) = get("/api/v1/stocks/NO_SUCH_SYMBOL/valuation").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let symbol: Option<String> =
+            sqlx::query_scalar("SELECT security_code FROM estimate ORDER BY date DESC LIMIT 1")
+                .fetch_optional(pool)
+                .await
+                .expect("estimate symbol query");
+        if let Some(symbol) = symbol {
+            let (status, json) = get(&format!(
+                "/api/v1/stocks/{symbol}/valuation?date=1900-01-01"
+            ))
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(json["valuation"].is_null());
+            let (status, json) = get(&format!("/api/v1/stocks/{symbol}/valuation")).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(json["valuation"]["stock_symbol"], symbol);
+            assert_eq!(json["data_as_of"], json["valuation"]["date"]);
+        }
+
+        for market in ["all", "twse", "tpex"] {
+            let (status, json) =
+                get(&format!("/api/v1/market/breadth?market={market}&days=3")).await;
+            if status == StatusCode::NOT_FOUND {
+                continue;
+            }
+            assert_eq!(status, StatusCode::OK);
+            let history = json["history"].as_array().expect("history array");
+            assert!((1..=3).contains(&history.len()));
+            assert_eq!(json["breadth"], history[0]);
+            assert!(history.iter().all(|row| row["market"] == market));
+        }
+        let (status, _) = get("/api/v1/market/breadth?date=1900-01-01").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        for market in ["all", "twse", "tpex"] {
+            let (status, json) = get(&format!(
+                "/api/v1/market/dividend-yield-ranking?market={market}&limit=50"
+            ))
+            .await;
+            if status == StatusCode::NOT_FOUND {
+                continue;
+            }
+            assert_eq!(status, StatusCode::OK);
+            let stocks = json["stocks"].as_array().expect("stocks array");
+            for pair in stocks.windows(2) {
+                let left = pair[0]["dividend_yield_percent"].as_f64().unwrap();
+                let right = pair[1]["dividend_yield_percent"].as_f64().unwrap();
+                assert!(left >= right);
+                if left == right {
+                    assert!(pair[0]["stock_symbol"].as_str() <= pair[1]["stock_symbol"].as_str());
+                }
+            }
+        }
+        let (status, json) =
+            get("/api/v1/market/dividend-yield-ranking?industry_id=2147483647").await;
+        if status == StatusCode::OK {
+            assert_eq!(json["stocks"], serde_json::json!([]));
+        }
+    }
+
+    /// Phase 3 選股的真實資料庫整合測試。
+    ///
+    /// 驗證空的 `all` 查詢在 SQL 前回 422，以及以 `twse` 作為有效條件時能
+    /// 執行每股最新資料查詢並維持固定 envelope。沒有資料庫連線時安全跳過。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn phase3_screen_endpoint_db_semantics() {
+        dotenvy::dotenv().ok();
+        if sqlx::query("SELECT 1")
+            .execute(crate::infra::database::get_connection())
+            .await
+            .is_err()
+        {
+            println!("跳過 phase3_screen_endpoint_db_semantics：無資料庫連接");
+            return;
+        }
+        let key = std::env::var("DATA_API_KEY").unwrap_or_else(|_| {
+            let generated = "phase3-integration-test-key".to_owned();
+            unsafe { std::env::set_var("DATA_API_KEY", &generated) };
+            generated
+        });
+        let get = |path: &'static str| {
+            let key = key.clone();
+            async move {
+                let response = router()
+                    .oneshot(
+                        Request::get(path)
+                            .header("Authorization", format!("Bearer {key}"))
+                            .body(Body::empty())
+                            .expect("request should build"),
+                    )
+                    .await
+                    .expect("router should serve request");
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("body should be readable");
+                let json: serde_json::Value =
+                    serde_json::from_slice(&bytes).expect("body should be JSON");
+                (status, json)
+            }
+        };
+
+        let (status, _) = get("/api/v1/stocks/screen").await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+        let (status, json) = get(
+            "/api/v1/stocks/screen?market=twse&sort_by=valuation_percentage&sort_order=desc&limit=2",
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "合法選股 SQL 應能在真實 schema 執行"
+        );
+        assert_eq!(json["data_as_of"], serde_json::Value::Null);
+        assert!(json["stocks"].is_array());
+        let stocks = json["stocks"].as_array().unwrap();
+        assert!(stocks.len() <= 2);
+        for stock in stocks {
+            assert_eq!(stock["market_id"], 2, "twse 篩選不可混入其他市場");
+            for field in ["valuation_date", "yield_date"] {
+                if let Some(date) = stock[field].as_str() {
+                    assert!(chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok());
+                }
+            }
+            if let Some(month) = stock["revenue_month"].as_str() {
+                assert_eq!(month.len(), 7, "營收來源月份應為 YYYY-MM");
+            }
+            if let Some(period) = stock["financial_period"].as_str() {
+                assert!(period.contains("-Q"), "財報來源期間應為 YYYY-Qn");
+            }
+        }
+        for pair in stocks.windows(2) {
+            match (
+                pair[0]["valuation_percentage"].as_f64(),
+                pair[1]["valuation_percentage"].as_f64(),
+            ) {
+                (Some(left), Some(right)) => assert!(left >= right),
+                (None, Some(_)) => panic!("DESC NULLS LAST 不可把 null 放在有效值之前"),
+                _ => {}
+            }
         }
     }
 }

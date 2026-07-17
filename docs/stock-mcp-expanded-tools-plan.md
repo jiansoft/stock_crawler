@@ -1,6 +1,6 @@
 # 執行計畫：擴充 stock_mcp 台股查詢工具
 
-- 狀態：規劃中
+- 狀態：執行中（Phase 0–3 已完成，Phase 4／部署待辦）
 - 日期：2026-07-17
 - 影響範圍：`stock_rust`（新增唯讀 Data API）、`stock_mcp_go`（新增 API client 方法與 MCP tools）
 - 前置條件：現有五個 MCP tools 與 `/api/v1` Data API 維持可用
@@ -712,18 +712,18 @@ go test ./...
 
 ### Phase 2
 
-- [ ] 估值 response 清楚標示計算結果與免責聲明。
-- [ ] 市場廣度支援 all／twse／tpex 與最近有效日期（含 31 天回溯上限）。
-- [ ] `market` 對映依 §3.6：廣度查統計列（含 `0`），排行／選股過濾 `stocks`（`all` = 上市＋上櫃）。
-- [ ] 殖利率排行支援日期、市場、產業、limit，排序穩定。
-- [ ] 三個工具不出現買賣建議或保證性描述。
+- [x] 估值 response 清楚標示計算結果與免責聲明。 2026-07-18T01:44:11
+- [x] 市場廣度支援 all／twse／tpex 與最近有效日期（含 31 天回溯上限）。 2026-07-18T01:44:11
+- [x] `market` 對映依 §3.6：廣度查統計列（含 `0`），排行／選股過濾 `stocks`（`all` = 上市＋上櫃）。 2026-07-18T01:44:11
+- [x] 殖利率排行支援日期、市場、產業、limit，排序穩定。 2026-07-18T01:44:11
+- [x] 三個工具不出現買賣建議或保證性描述。 2026-07-18T01:44:11
 
 ### Phase 3
 
-- [ ] screen 至少要求一個篩選條件，最多回 50 筆。
-- [ ] sort 欄位與方向使用白名單，沒有動態 SQL 注入風險。
-- [ ] 每筆結果帶有各指標資料日期。
-- [ ] 查詢在既有 API timeout 內完成，執行計畫沒有不可接受的全表掃描。
+- [x] screen 至少要求一個篩選條件，最多回 50 筆。 2026-07-18T01:44:11
+- [x] sort 欄位與方向使用白名單，沒有動態 SQL 注入風險。 2026-07-18T01:44:11
+- [x] 每筆結果帶有各指標資料日期。 2026-07-18T01:44:11
+- [x] 查詢在既有 API timeout 內完成，執行計畫沒有不可接受的全表掃描。 2026-07-18T01:44:11（殖利率複合索引後 metric-sort screen 約 134ms）
 
 ### Phase 4
 
@@ -759,11 +759,12 @@ go test ./...
 - [x] P0-3 統計股利日期欄位的無效標記種類與數量。 2026-07-18T00:15:05
   - 結果：主要為 `-`（1.7 萬～4 萬筆／欄）與 `尚未公布`（數百筆／欄）。**另發現 `ex-dividend_date1` 有 10 筆殖利率字串（如 `1.39%`）的髒資料**——「僅合法 `YYYY-MM-DD` 才輸出、其餘一律 `null`」的規則可正確處理，無需清資料。
   - 注意：實際 DB 欄名為 `"ex-dividend_date1"`、`"ex-dividend_date2"`（含連字號，SQL 需加引號），§4.3 對照表的 DB 欄名以此為準。
-- [~] P0-4 對十類查詢執行 `EXPLAIN (ANALYZE, BUFFERS)`，記錄是否需補索引。 2026-07-18T00:15:05（Phase 1 三類已完成）
+- [~] P0-4 對十類查詢執行 `EXPLAIN (ANALYZE, BUFFERS)`，記錄是否需補索引。 2026-07-18T01:44:11（Phase 1–3 共七類已完成；Phase 4 三類待辦）
   - Phase 1 三類結果：`Revenue` 走 `Revenue_SecurityCode_Date-uidx` 反向掃描（4.5ms）；`financial_statement` 走 `(security_code, year, quarter)` 唯一索引（0.14ms）；`dividend` 走 pkey bitmap ＋ top-N 排序（66 列、0.11ms）。**三者皆不需補索引**。
-  - 其餘七類（估值/廣度/排行/選股/指數/行事曆/QFII）依計畫在各自 Phase 開工前執行。
+  - Phase 2/3 結果：估值約 0.03ms、廣度約 0.19ms、殖利率排行約 28ms；metric-sort screen 原約 1,891ms，新增 `yield_rank (security_code, date DESC) INCLUDE (yield)` 後約 134ms（約 14.1 倍），planner 已使用新索引。migration：`migration_20260718_yield_rank_latest_by_stock_index.sql`。
+  - Phase 4 尚待指數／行事曆／QFII 三類查詢。
 - [x] P0-5 response schema 落入 OpenAPI 測試，固定欄位名稱與 null 語意。 2026-07-18T00:27:24
-  - `openapi_phase1_schemas_pin_field_names` 測試固定三個 envelope 與改名欄位；Phase 2–4 的 schema 依相同模式在各自 Phase 補進同一測試。
+  - Phase 1–3 已改為依 path 精確驗證 response schema、query 限制、nullable／array item、security 與 500；Phase 4 依相同模式續增。
 
 ### Phase 1：個股歷史財務工具
 
@@ -781,18 +782,18 @@ go test ./...
 
 ### Phase 2：估值與市場分析工具
 
-- [ ] P2-1 Rust `valuation` endpoint（含 §4.4 分界與 31 天回溯）。
-- [ ] P2-2 Rust `market/breadth` endpoint（含 `days` 序列）。
-- [ ] P2-3 Rust `dividend-yield-ranking` endpoint。
-- [ ] P2-4 Go API client：`AnalyticsQuerier` 三方法 ＋ 測試。
-- [ ] P2-5 Go MCP tools：三個工具 ＋ 測試 ＋ README 更新。
-- [ ] P2-6 §9 Phase 2 完工清單全數勾選。
+- [x] P2-1 Rust `valuation` endpoint（含 §4.4 分界與 31 天回溯）。 2026-07-18T01:44:11
+- [x] P2-2 Rust `market/breadth` endpoint（含 `days` 序列）。 2026-07-18T01:44:11
+- [x] P2-3 Rust `dividend-yield-ranking` endpoint。 2026-07-18T01:44:11
+- [x] P2-4 Go API client：`AnalyticsQuerier` 三方法 ＋ 測試。 2026-07-18T01:44:11
+- [x] P2-5 Go MCP tools：三個工具 ＋ 測試 ＋ README 更新。 2026-07-18T01:44:11
+- [x] P2-6 §9 Phase 2 完工清單全數勾選。 2026-07-18T01:44:11
 
 ### Phase 3：條件選股
 
-- [ ] P3-1 Rust `stocks/screen` endpoint（白名單排序、至少一個條件、各指標日期與新鮮度上限）。
-- [ ] P3-2 Go `StockScreener` ＋ tool ＋ 測試 ＋ README 更新。
-- [ ] P3-3 §9 Phase 3 完工清單全數勾選。
+- [x] P3-1 Rust `stocks/screen` endpoint（白名單排序、至少一個條件、各指標日期與新鮮度上限）。 2026-07-18T01:44:11
+- [x] P3-2 Go `StockScreener` ＋ tool ＋ 測試 ＋ README 更新。 2026-07-18T01:44:11
+- [x] P3-3 §9 Phase 3 完工清單全數勾選。 2026-07-18T01:44:11
 
 ### Phase 4：市場輔助工具
 
