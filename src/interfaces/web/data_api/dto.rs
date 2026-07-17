@@ -66,6 +66,38 @@ enum StockScreenSortValue {
     ValuationPercentage,
 }
 
+/// OpenAPI 文件使用的股利行事曆事件類型（§4.9）。
+///
+/// 台股領域背景：一筆股利公告有四個關鍵日期——「除息日」（買進後不再
+/// 享有現金股利的基準日）、「除權日」（股票股利的基準日）、「現金股利
+/// 發放日」與「股票股利發放日」。行事曆把每個日期各自視為一個事件。
+#[derive(ToSchema)]
+#[schema(rename_all = "snake_case")]
+#[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema；runtime 仍以 String 回傳精確 422。
+enum CalendarEventTypeValue {
+    /// 除息日事件。
+    ExDividend,
+    /// 除權日事件。
+    ExRights,
+    /// 現金股利發放日事件。
+    CashPayable,
+    /// 股票股利發放日事件。
+    StockPayable,
+    /// 四種事件全部回傳。
+    All,
+}
+
+/// OpenAPI 文件使用的 QFII 排行排序欄位（§4.10）。
+#[derive(ToSchema)]
+#[schema(rename_all = "snake_case")]
+#[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema。
+enum QfiiSortValue {
+    /// 依外資持股比例排序。
+    Percentage,
+    /// 依外資持股股數排序。
+    Shares,
+}
+
 /// OpenAPI 文件使用的排序方向。
 #[derive(ToSchema)]
 #[schema(rename_all = "snake_case")]
@@ -630,6 +662,105 @@ pub(super) struct StockScreeningResponse {
     pub(super) stocks: Vec<ScreenedStock>,
 }
 
+/// 台股大盤指數（TAIEX）單一交易日的資料點（§4.8）。
+///
+/// 對應 `index` 表一列（`category = 'TAIEX'`）。數值欄位沿用 §3.1 規則：
+/// `NUMERIC` 無法安全轉 `f64` 時輸出 `null`，資料庫中本來就是 `0` 的值
+/// 維持 `0`，不推斷成缺值。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(super) struct MarketIndexPoint {
+    /// 指數日期，格式 `YYYY-MM-DD`。
+    pub(super) date: String,
+    /// 收盤指數（點）。
+    pub(super) index: Option<f64>,
+    /// 漲跌點數；下跌為負值。
+    pub(super) change: Option<f64>,
+    /// 成交金額（元）。
+    pub(super) trade_value: Option<f64>,
+    /// 成交筆數。
+    pub(super) transaction: Option<f64>,
+    /// 成交股數。
+    pub(super) trading_volume: Option<f64>,
+}
+
+/// 大盤指數歷史的成功回應（§3.4 envelope）。
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct MarketIndexHistoryResponse {
+    /// 實際回傳資料中最新一筆的日期（`YYYY-MM-DD`）；空清單時為 `null`。
+    pub(super) data_as_of: Option<String>,
+    /// 指數資料點，依日期由新到舊。
+    pub(super) points: Vec<MarketIndexPoint>,
+}
+
+/// 股利行事曆中的單一事件（§4.9）。
+///
+/// 同一筆股利公告若有多個日期落在查詢區間，會展開成多筆事件（每筆一個
+/// `event_type`）。日期欄位在資料庫是字串且含 `-`、`尚未公布` 等無效標記，
+/// 只有合法 `YYYY-MM-DD` 的日期才會產生事件。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(super) struct DividendCalendarEvent {
+    /// 股票代號。
+    pub(super) stock_symbol: String,
+    /// 股票名稱。
+    pub(super) name: String,
+    /// 事件類型：`ex_dividend`、`ex_rights`、`cash_payable` 或 `stock_payable`。
+    pub(super) event_type: String,
+    /// 事件日期，格式 `YYYY-MM-DD`。
+    pub(super) event_date: String,
+    /// 股利所屬年度（西元）；DB 欄位 `year_of_dividend`。
+    pub(super) dividend_year: i32,
+    /// 期間標記：`A`（年度）、`H1`／`H2`（半年度）或 `Q1`–`Q4`（§3.5）。
+    pub(super) quarter: String,
+    /// 現金股利合計（元）。
+    pub(super) cash_dividend: Option<f64>,
+    /// 股票股利合計（元）。
+    pub(super) stock_dividend: Option<f64>,
+    /// 股利合計（元）；DB 欄位 `sum`。
+    pub(super) total_dividend: Option<f64>,
+}
+
+/// 股利行事曆的成功回應（§3.4 envelope）。
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct DividendCalendarResponse {
+    /// 混合事件沒有單一統計日期，固定為 `null`（各事件日期在每筆事件內）。
+    pub(super) data_as_of: Option<String>,
+    /// 依 `event_date ASC`、同日 `stock_symbol ASC` 排序的事件。
+    pub(super) events: Vec<DividendCalendarEvent>,
+}
+
+/// QFII 持股排行中的單一股票（§4.10）。
+///
+/// 「QFII」指全體外資及陸資；數字來自 `stocks` 表的**當前快照**（每日
+/// 22:00 UTC 排程更新），沒有歷史序列，不可用來回答增減持趨勢問題。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(super) struct QfiiHolding {
+    /// 一起始的名次。
+    pub(super) rank: u32,
+    /// 股票代號。
+    pub(super) stock_symbol: String,
+    /// 股票名稱。
+    pub(super) name: String,
+    /// 市場編號（上市 2、上櫃 4）。
+    pub(super) market_id: i32,
+    /// 產業分類編號。
+    pub(super) industry_id: i32,
+    /// 全體外資及陸資持有股數。
+    pub(super) qfii_shares_held: i64,
+    /// 全體外資及陸資持股比率（%）。
+    pub(super) qfii_share_holding_percentage: Option<f64>,
+    /// 發行股數。
+    pub(super) issued_share: i64,
+}
+
+/// QFII 持股排行的成功回應（§3.4 envelope）。
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct QfiiHoldingRankingResponse {
+    /// `stocks` 表快照沒有列級更新日期，不可偽造，固定為 `null`。
+    pub(super) data_as_of: Option<String>,
+    /// 依指定指標由高到低、同值股票代號由小到大排序的股票。
+    pub(super) stocks: Vec<QfiiHolding>,
+}
+
 /// 搜尋 endpoint 的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(super) struct SearchParams {
@@ -714,6 +845,53 @@ pub(super) struct DividendYieldRankingParams {
     /// 可選的正整數產業分類編號。
     #[param(minimum = 1)]
     pub(super) industry_id: Option<i32>,
+    /// 最多回傳筆數，預設 20，範圍 1–50。
+    #[param(minimum = 1, maximum = 50, default = 20)]
+    pub(super) limit: Option<u8>,
+}
+
+/// 大盤指數歷史 endpoint 的 query string（§4.8）。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(super) struct MarketIndexHistoryParams {
+    /// 起始日期，格式 `YYYY-MM-DD`；未提供時不限制起點。
+    pub(super) from: Option<String>,
+    /// 結束日期，格式 `YYYY-MM-DD`；未提供時不限制終點。
+    pub(super) to: Option<String>,
+    /// 最多回傳筆數，預設 30，範圍 1–365（與歷史日線慣例一致）。
+    #[param(minimum = 1, maximum = 365, default = 30)]
+    pub(super) limit: Option<u16>,
+}
+
+/// 股利行事曆 endpoint 的 query string（§4.9）。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(super) struct DividendCalendarParams {
+    /// 起始日期，格式 `YYYY-MM-DD`；未提供時預設查詢當日（台北時區）。
+    pub(super) from: Option<String>,
+    /// 結束日期，格式 `YYYY-MM-DD`；未提供時預設 `from + 30` 天。
+    /// `to - from` 不可超過 92 天（一季），避免全表匯出。
+    pub(super) to: Option<String>,
+    /// 事件類型：`all`（預設）、`ex_dividend`、`ex_rights`、`cash_payable`
+    /// 或 `stock_payable`。
+    #[param(value_type = CalendarEventTypeValue, inline, default = "all")]
+    pub(super) event_type: Option<String>,
+    /// 最多回傳筆數，預設 50，範圍 1–200。
+    #[param(minimum = 1, maximum = 200, default = 50)]
+    pub(super) limit: Option<u16>,
+}
+
+/// QFII 持股排行 endpoint 的 query string（§4.10）。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(super) struct QfiiHoldingRankingParams {
+    /// 市場：`all`（預設）、`twse` 或 `tpex`。
+    #[param(value_type = MarketParamValue, inline, default = "all")]
+    pub(super) market: Option<String>,
+    /// 可選的正整數產業分類編號。
+    #[param(minimum = 1)]
+    pub(super) industry_id: Option<i32>,
+    /// 排序欄位：`percentage`（預設，持股比例）或 `shares`（持股股數）；
+    /// 一律由高到低。
+    #[param(value_type = QfiiSortValue, inline, default = "percentage")]
+    pub(super) sort_by: Option<String>,
     /// 最多回傳筆數，預設 20，範圍 1–50。
     #[param(minimum = 1, maximum = 50, default = 20)]
     pub(super) limit: Option<u8>,
