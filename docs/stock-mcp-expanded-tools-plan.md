@@ -536,10 +536,19 @@ GET /api/v1/market/qfii-holding-ranking?market=twse&industry_id=24&sort_by=perce
 
 ```go
 type FinancialQuerier interface {
-	MonthlyRevenueHistory(context.Context, string, RevenueHistoryOptions) ([]MonthlyRevenue, error)
-	FinancialStatementHistory(context.Context, string, StatementHistoryOptions) ([]FinancialStatement, error)
-	DividendHistory(context.Context, string, DividendHistoryOptions) ([]Dividend, error)
+	MonthlyRevenueHistory(context.Context, string, RevenueHistoryOptions) (*MonthlyRevenueHistory, error)
+	FinancialStatementHistory(context.Context, string, StatementHistoryOptions) (*FinancialStatementHistory, error)
+	DividendHistory(context.Context, string, DividendHistoryOptions) (*DividendHistory, error)
 }
+```
+
+實作決策（2026-07-18，Phase 1 落地時定案）：client 方法回傳**完整
+envelope**（含 `stock_symbol`、`data_as_of` 與資料清單），而不是只回傳
+內層清單。理由：`data_as_of` 必須由 stock_rust 伺服器端單一來源決定，
+若 client 只拿清單、MCP 端自行重算最新一期，兩端邏輯遲早不一致。後續
+Phase 的新介面也沿用此原則。
+
+```go
 
 type AnalyticsQuerier interface {
 	StockValuation(context.Context, string, ValuationOptions) (*StockValuation, error)
@@ -695,11 +704,11 @@ go test ./...
 
 ### Phase 1
 
-- [ ] 三個個股歷史 endpoints 可在 Swagger UI 測試。
-- [ ] 三個 MCP tools 出現在 `tools/list` 並回正確 `structuredContent`。
-- [ ] 未知股票與已知股票空資料語意一致且有測試。
-- [ ] 月份、財報期間、股利日期轉換有 deterministic tests。
-- [ ] §3.5 期間標記對映（DB `''` ↔ API `A`）與 `data_as_of` 格式值域有 deterministic tests。
+- [x] 三個個股歷史 endpoints 可在 Swagger UI 測試。 2026-07-18T00:36:33（OpenAPI paths/schemas 有測試固定；實際開 Swagger UI 抽查列入 D-1 部署驗證）
+- [x] 三個 MCP tools 出現在 `tools/list` 並回正確 `structuredContent`。 2026-07-18T00:36:33（in-memory MCP client 往返測試）
+- [x] 未知股票與已知股票空資料語意一致且有測試。 2026-07-18T00:36:33（Rust `phase1_endpoints_db_semantics` ＋ Go client/tool 測試兩側皆覆蓋）
+- [x] 月份、財報期間、股利日期轉換有 deterministic tests。 2026-07-18T00:36:33
+- [x] §3.5 期間標記對映（DB `''` ↔ API `A`）與 `data_as_of` 格式值域有 deterministic tests。 2026-07-18T00:36:33（`quarter_mapping_follows_section_3_5`、`month_conversion_roundtrip_and_validation`）
 
 ### Phase 2
 
@@ -763,9 +772,12 @@ go test ./...
   - 實作注意：DB 欄名為 `"pre-tax_income"`（含連字號），SQL 已用 alias 對映。
 - [x] P1-3 Rust `dividends` endpoint（同上，含日期標記轉 null）。 2026-07-18T00:27:24
   - 三個 endpoint 的驗證：fmt／clippy `-D warnings`／單元測試 316 passed 全綠；`phase1_endpoints_db_semantics` 整合測試對實際資料庫驗證 404／200 空陣列／422 語意通過。
-- [ ] P1-4 Go API client：三個查詢方法 ＋ `apiclient_test.go`。
-- [ ] P1-5 Go MCP tools：三個工具 ＋ `tools_test.go` ＋ README 更新。
-- [ ] P1-6 §9 Phase 1 完工清單全數勾選。
+- [x] P1-4 Go API client：三個查詢方法 ＋ `apiclient_test.go`。 2026-07-18T00:36:33
+  - 方法回傳完整 envelope（見 §5.2 實作決策）；404 → `ErrStockNotFound`；測試覆蓋 200／404／5xx／無效 JSON／query string 組裝／空陣列語意。
+- [x] P1-5 Go MCP tools：三個工具 ＋ `tools_test.go` ＋ README 更新。 2026-07-18T00:36:33
+  - `FinancialQuerier` 型別斷言註冊（db 模式 4 工具、api 模式 8 工具，`tools/list` 測試驗證）；table-driven 驗證測試；`AnalysisDisclaimer` 出現在所有摘要與 structuredContent。gofmt／vet／test 全綠。
+  - commit：stock_mcp_go `main` `4f39d82`。
+- [x] P1-6 §9 Phase 1 完工清單全數勾選。 2026-07-18T00:36:33
 
 ### Phase 2：估值與市場分析工具
 
