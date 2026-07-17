@@ -211,6 +211,154 @@ pub(super) struct RealtimeSnapshotResponse {
     pub(super) updated_at: String,
 }
 
+/// 單月營收資料。
+///
+/// 對應資料表 `"Revenue"` 一列；`month` 由資料庫的 `YYYYMM` 整數（例如
+/// `202606`）轉成 `YYYY-MM` 字串，內部編碼不對外暴露。金額與百分比欄位
+/// 沿用 §3.1 規則：`NUMERIC` 無法安全轉 `f64` 時輸出 `null`，資料庫中
+/// 本來就是 `0` 的值維持 `0`，不推斷成缺值。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(super) struct MonthlyRevenue {
+    /// 營收月份，格式 `YYYY-MM`。
+    pub(super) month: String,
+    /// 當月營收（仟元）。
+    pub(super) monthly_revenue: Option<f64>,
+    /// 上月營收（仟元）。
+    pub(super) last_month_revenue: Option<f64>,
+    /// 去年同月營收（仟元）。
+    pub(super) last_year_same_month_revenue: Option<f64>,
+    /// 當年度累計營收（仟元）。
+    pub(super) monthly_accumulated_revenue: Option<f64>,
+    /// 去年同期累計營收（仟元）。
+    pub(super) last_year_monthly_accumulated_revenue: Option<f64>,
+    /// 月增率（%）。
+    pub(super) month_over_month_percent: Option<f64>,
+    /// 年增率（%）。
+    pub(super) year_over_year_percent: Option<f64>,
+    /// 累計年增率（%）。
+    pub(super) accumulated_year_over_year_percent: Option<f64>,
+    /// 當月均價（元）。
+    pub(super) average_price: Option<f64>,
+    /// 當月最低價（元）。
+    pub(super) lowest_price: Option<f64>,
+    /// 當月最高價（元）。
+    pub(super) highest_price: Option<f64>,
+}
+
+/// 月營收歷史的成功回應（§3.4 envelope）。
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct MonthlyRevenueResponse {
+    /// 股票代號。
+    pub(super) stock_symbol: String,
+    /// 實際回傳資料中最新一期的月份（`YYYY-MM`）；空清單時為 `null`。
+    pub(super) data_as_of: Option<String>,
+    /// 月營收清單，依月份由新到舊。
+    pub(super) revenues: Vec<MonthlyRevenue>,
+}
+
+/// 單期財務報表（獲利能力與每股數據）。
+///
+/// `quarter` 依 §3.5 對映：資料庫以空字串代表年度資料，API 契約統一輸出
+/// `A`；季度資料維持 `Q1`–`Q4`。百分比欄位（毛利率等）在資料庫已是
+/// 百分比數值，不再另行換算。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(super) struct FinancialStatement {
+    /// 年度（西元）。
+    pub(super) year: i64,
+    /// 期間標記：`A`（年度）或 `Q1`–`Q4`。
+    pub(super) quarter: String,
+    /// 營業毛利率（%）；DB 欄位 `gross_profit`。
+    pub(super) gross_profit_margin: Option<f64>,
+    /// 營業利益率（%）。
+    pub(super) operating_profit_margin: Option<f64>,
+    /// 稅前淨利率（%）；DB 欄位 `pre_tax_income`。
+    pub(super) pre_tax_income_margin: Option<f64>,
+    /// 稅後淨利率（%）；DB 欄位 `net_income`。
+    pub(super) net_income_margin: Option<f64>,
+    /// 每股淨值（元）。
+    pub(super) net_asset_value_per_share: Option<f64>,
+    /// 每股營收（元）。
+    pub(super) sales_per_share: Option<f64>,
+    /// 每股稅後盈餘 EPS（元）。
+    pub(super) earnings_per_share: Option<f64>,
+    /// 每股稅前淨利（元）；DB 欄位 `profit_before_tax`。
+    pub(super) profit_before_tax_per_share: Option<f64>,
+    /// 股東權益報酬率 ROE（%）。
+    pub(super) return_on_equity: Option<f64>,
+    /// 資產報酬率 ROA（%）。
+    pub(super) return_on_assets: Option<f64>,
+    /// 最後更新時間，UTC ISO 8601；DB 欄位 `updated_time`。
+    pub(super) updated_at: Option<String>,
+}
+
+/// 財報歷史的成功回應（§3.4 envelope）。
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct FinancialStatementHistoryResponse {
+    /// 股票代號。
+    pub(super) stock_symbol: String,
+    /// 實際回傳資料中最新一期的期間標記（如 `2026-Q1`、`2025-A`）；空清單時為 `null`。
+    pub(super) data_as_of: Option<String>,
+    /// 財報清單，依 §3.4 期間順序由新到舊。
+    pub(super) statements: Vec<FinancialStatement>,
+}
+
+/// 單筆股利發放資料。
+///
+/// 年度欄位語意（§4.3 對照表）：`paid_year` 是「發放年度」（DB `year`），
+/// `dividend_year` 是「股利所屬年度」（DB `year_of_dividend`）；兩者常差
+/// 一年，年份篩選一律依 `dividend_year`。日期欄位在資料庫是字串，只有可
+/// 解析為合法 `YYYY-MM-DD` 的值才輸出，`-`、`尚未公布` 等標記一律 `null`。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(super) struct Dividend {
+    /// 發放年度（西元）；DB 欄位 `year`。
+    pub(super) paid_year: i32,
+    /// 股利所屬年度（西元）；DB 欄位 `year_of_dividend`。
+    pub(super) dividend_year: i32,
+    /// 期間標記：`A`（年度）、`H1`／`H2`（半年度）或 `Q1`–`Q4`。
+    pub(super) quarter: String,
+    /// 現金股利合計（元）。
+    pub(super) cash_dividend: Option<f64>,
+    /// 股票股利合計（元）。
+    pub(super) stock_dividend: Option<f64>,
+    /// 股利合計（元）；DB 欄位 `sum`。
+    pub(super) total_dividend: Option<f64>,
+    /// 盈餘配息（元）。
+    pub(super) earnings_cash_dividend: Option<f64>,
+    /// 公積配息（元）。
+    pub(super) capital_reserve_cash_dividend: Option<f64>,
+    /// 盈餘配股（元）。
+    pub(super) earnings_stock_dividend: Option<f64>,
+    /// 公積配股（元）。
+    pub(super) capital_reserve_stock_dividend: Option<f64>,
+    /// 盈餘分配率＿配息（%）；DB 欄位 `payout_ratio_cash`。
+    pub(super) cash_payout_ratio: Option<f64>,
+    /// 盈餘分配率＿配股（%）；DB 欄位 `payout_ratio_stock`。
+    pub(super) stock_payout_ratio: Option<f64>,
+    /// 盈餘分配率合計（%）；DB 欄位 `payout_ratio`。
+    pub(super) total_payout_ratio: Option<f64>,
+    /// 除息日；DB 欄位 `"ex-dividend_date1"`，無效標記為 `null`。
+    pub(super) ex_dividend_date: Option<String>,
+    /// 除權日；DB 欄位 `"ex-dividend_date2"`，無效標記為 `null`。
+    pub(super) ex_rights_date: Option<String>,
+    /// 現金股利發放日；DB 欄位 `payable_date1`，無效標記為 `null`。
+    pub(super) cash_payable_date: Option<String>,
+    /// 股票股利發放日；DB 欄位 `payable_date2`，無效標記為 `null`。
+    pub(super) stock_payable_date: Option<String>,
+    /// 最後更新時間，UTC ISO 8601；DB 欄位 `updated_time`。
+    pub(super) updated_at: Option<String>,
+}
+
+/// 股利歷史的成功回應（§3.4 envelope）。
+#[derive(Debug, Serialize, ToSchema)]
+pub(super) struct DividendHistoryResponse {
+    /// 股票代號。
+    pub(super) stock_symbol: String,
+    /// 實際回傳資料中最新一期的期間標記（如 `2025-A`、`2025-Q4`）；空清單時為 `null`。
+    pub(super) data_as_of: Option<String>,
+    /// 股利清單，依 §3.4 期間順序由新到舊。
+    pub(super) dividends: Vec<Dividend>,
+}
+
 /// 搜尋 endpoint 的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(super) struct SearchParams {
@@ -227,5 +375,33 @@ pub(super) struct HistoryParams {
     /// 結束日期，格式 YYYY-MM-DD。
     pub(super) to: Option<String>,
     /// 最多回傳筆數，預設 100。
+    pub(super) limit: Option<u16>,
+}
+/// 月營收歷史 endpoint 的 query string。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(super) struct RevenueHistoryParams {
+    /// 起始月份，格式 YYYY-MM。
+    pub(super) from: Option<String>,
+    /// 結束月份，格式 YYYY-MM。
+    pub(super) to: Option<String>,
+    /// 最多回傳筆數，預設 24，範圍 1–120。
+    pub(super) limit: Option<u16>,
+}
+/// 財報歷史 endpoint 的 query string。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(super) struct StatementHistoryParams {
+    /// 期間類型：`quarterly`（預設）、`annual` 或 `all`。
+    pub(super) period_type: Option<String>,
+    /// 最多回傳筆數，預設 12，範圍 1–40。
+    pub(super) limit: Option<u16>,
+}
+/// 股利歷史 endpoint 的 query string。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(super) struct DividendHistoryParams {
+    /// 起始年度（股利所屬年度，西元）。
+    pub(super) from_year: Option<i32>,
+    /// 結束年度（股利所屬年度，西元）。
+    pub(super) to_year: Option<i32>,
+    /// 最多回傳筆數，預設 20，範圍 1–80。
     pub(super) limit: Option<u16>,
 }
