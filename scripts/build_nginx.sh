@@ -189,7 +189,7 @@ extract_tar() {
 
 download_sources() {
   run mkdir -p "$SOURCE_DIR"
-  cd "$SOURCE_DIR"
+  run cd "$SOURCE_DIR"
 
   if [ "$FLAVOR" = "nginx" ]; then
     download "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" "nginx-${NGINX_VERSION}.tar.gz"
@@ -264,7 +264,7 @@ build_server() {
   # 必須在 nginx ./configure 前建置，讓 configure 的 compile test 能找到 zconf.h
   prebuild_zlib_ng_compat
 
-  cd "$SOURCE_DIR/$SERVER_DIR"
+  run cd "$SOURCE_DIR/$SERVER_DIR"
   install_dir="${INSTALL_ROOT}/${INSTALL_NAME:-$SERVER_VERSION}"
   SERVER_INSTALL_DIR="$install_dir"
 
@@ -415,7 +415,10 @@ switch_to_new_server() {
     return 0
   }
 
-  [ -x "$new_binary" ] || die "找不到新編譯的 nginx 執行檔：$new_binary"
+  # dry-run 時實際上未曾建置/安裝，binary 必然不存在，跳過此存在性檢查。
+  if [ "$DRY_RUN" != "1" ]; then
+    [ -x "$new_binary" ] || die "找不到新編譯的 nginx 執行檔：$new_binary"
+  fi
 
   require_restart_privileges
   switch_version_links
