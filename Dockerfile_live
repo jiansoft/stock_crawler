@@ -1,23 +1,17 @@
 ARG BIN_FILE=stock_crawler
 
-FROM debian:13-slim AS runtime-assets
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates tzdata && \
-    rm -rf /var/lib/apt/lists/*
-
 FROM scratch AS binary
 ARG BIN_FILE
 COPY ${BIN_FILE} /stock_crawler
 
+# distroless static 已內建 CA 憑證（/etc/ssl/certs/ca-certificates.crt）與
+# 完整 tzdata（/usr/share/zoneinfo，含 Asia/Taipei），不需再從 debian 複製。
 FROM gcr.io/distroless/static-debian13:nonroot
 
 ENV TZ=Asia/Taipei
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 WORKDIR /app
 
-COPY --from=runtime-assets /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=runtime-assets /usr/share/zoneinfo/Asia/Taipei /usr/share/zoneinfo/Asia/Taipei
 COPY --from=binary --chown=65532:65532 --chmod=755 /stock_crawler /app/stock_crawler
 COPY --chown=65532:65532 ./.env /app/.env
 COPY --chown=65532:65532 ./app.json /app/app.json
