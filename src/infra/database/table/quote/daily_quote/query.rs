@@ -214,8 +214,6 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
 
 #[cfg(test)]
 mod tests {
-    use chrono::Local;
-
     use crate::infra::cache::SHARE;
 
     use super::*;
@@ -271,7 +269,12 @@ mod tests {
         dotenvy::dotenv().ok();
         SHARE.load().await;
 
-        let now = Local::now().date_naive();
+        // 使用固定的歷史「真實交易日」驗證補列 SQL，避免以 Local::now()
+        // （可能是週末或假日）為日期執行：當本機 .env 指向正式庫時，
+        // 會整批複製前一交易日產生 0 成交量占位資料並污染正式資料
+        // （2026-07-18 事件的根因之一）。歷史交易日的缺漏已補齊，
+        // 重跑僅會插入 0 筆，冪等且無副作用。
+        let now = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
 
         tracing::debug!("開始 makeup_for_the_lack_daily_quotes");
 

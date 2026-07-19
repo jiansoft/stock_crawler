@@ -67,7 +67,8 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
     //let sched = JobScheduler::new().await?;
     //                 sec  min   hour   day of month   month   day of week   year
     //let expression = "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2";
-    // UTC 時間
+    // 台北時間（UTC+8）：create_job 內以 Job::new_async_tz 搭配 FixedOffset(+8)
+    // 解讀 cron 表達式，因此以下註解標示的時間皆為台北時間。
 
     let jobs = vec![
         // 01:00 更新興櫃股票的每股淨值

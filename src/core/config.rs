@@ -111,6 +111,22 @@ const POSTGRESQL_USER: &str = "POSTGRESQL_USER";
 const POSTGRESQL_PASSWORD: &str = "POSTGRESQL_PASSWORD";
 const POSTGRESQL_DB: &str = "POSTGRESQL_DB";
 
+// 整合測試專用的 PostgreSQL 覆蓋設定（僅在 cargo test 建置時生效）：
+// 讓整合測試連往獨立的測試資料庫，避免本機 .env 指向正式庫時，
+// 測試的寫入操作直接污染正式資料（2026-07-18 事件）。
+// 五個變數皆未設定時完全不影響既有行為；CI 直接以 POSTGRESQL_* 指向
+// 測試容器，不需要本組變數。
+#[cfg(test)]
+const TEST_POSTGRESQL_HOST: &str = "TEST_POSTGRESQL_HOST";
+#[cfg(test)]
+const TEST_POSTGRESQL_PORT: &str = "TEST_POSTGRESQL_PORT";
+#[cfg(test)]
+const TEST_POSTGRESQL_USER: &str = "TEST_POSTGRESQL_USER";
+#[cfg(test)]
+const TEST_POSTGRESQL_PASSWORD: &str = "TEST_POSTGRESQL_PASSWORD";
+#[cfg(test)]
+const TEST_POSTGRESQL_DB: &str = "TEST_POSTGRESQL_DB";
+
 /// PostgreSQL 資料庫連線組態
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct PostgreSQL {
@@ -195,7 +211,13 @@ pub struct Redis {
 /// 在這裡集中載入後，初始化順序不再影響設定內容。
 pub static SETTINGS: Lazy<App> = Lazy::new(|| {
     dotenvy::dotenv().ok();
-    App::get().expect("Config error")
+    let app = App::get().expect("Config error");
+
+    // 測試建置下優先套用 TEST_POSTGRESQL_* 覆蓋，讓整合測試與正式庫隔離。
+    #[cfg(test)]
+    let app = app.override_with_test_env();
+
+    app
 });
 
 impl App {
@@ -325,6 +347,32 @@ impl App {
                 },
             },
         }
+    }
+
+    /// 測試建置時以 `TEST_POSTGRESQL_*` 覆蓋 PostgreSQL 連線設定。
+    ///
+    /// 僅覆蓋有設定的欄位；全部未設定時不改變任何行為。
+    /// 目的：本機 `.env` 的 `POSTGRESQL_*` 可能指向正式庫，
+    /// 整合測試應改連獨立的測試資料庫以免寫入污染正式資料。
+    #[cfg(test)]
+    fn override_with_test_env(mut self) -> Self {
+        if let Ok(host) = env::var(TEST_POSTGRESQL_HOST) {
+            self.postgresql.host = host;
+        }
+        if let Ok(port) = env::var(TEST_POSTGRESQL_PORT) {
+            self.postgresql.port = i32::from_str(&port).unwrap_or(5432);
+        }
+        if let Ok(user) = env::var(TEST_POSTGRESQL_USER) {
+            self.postgresql.user = user;
+        }
+        if let Ok(password) = env::var(TEST_POSTGRESQL_PASSWORD) {
+            self.postgresql.password = password;
+        }
+        if let Ok(db) = env::var(TEST_POSTGRESQL_DB) {
+            self.postgresql.db = db;
+        }
+
+        self
     }
 
     /// 以環境變數覆蓋設定檔中的值。

@@ -145,6 +145,16 @@ mod tests {
             }
         }
 
+        // 測試結束後移除假代號資料列，避免測試資料殘留在資料庫
+        // （曾在正式庫發現本測試留下的 '79979' 紀錄）。
+        if let Err(why) = sqlx::query("DELETE FROM quote_history_record WHERE security_code = $1")
+            .bind(&qhr.security_code)
+            .execute(database::get_connection())
+            .await
+        {
+            tracing::error!("Failed to cleanup test row because {:?}", why);
+        }
+
         tracing::info!("結束 upsert");
     }
 

@@ -103,26 +103,18 @@ mod tests {
     async fn test_first() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 first");
-        let now = Local::now();
-        let date_naive = now.date_naive();
 
+        // 本測試僅驗證讀取與日期解析，一律唯讀。
+        // 舊版會在「今天 > 既有值」時把 last-closing-day upsert 成當日日期，
+        // 當本機 .env 指向正式庫且於非交易日（週末/假日）執行整合測試時，
+        // 會直接污染正式資料（2026-07-18 事件的根因之一），故移除寫入行為。
         if let Ok(c) = Config::first("last-closing-day").await {
             tracing::debug!("last-closing-day:{:?}", c);
             let date = NaiveDate::parse_from_str(&c.val, "%Y-%m-%d").unwrap();
+            let today = Local::now().date_naive();
 
-            tracing::debug!("today:{:?}", date);
-            tracing::debug!("date_naive > date:{}", date_naive > date);
-            if date_naive > date {
-                let new_c = Config::new(c.key, date_naive.format("%Y-%m-%d").to_string());
-                match new_c.upsert().await {
-                    Ok(result) => {
-                        tracing::debug!("upsert:{:#?}", result);
-                    }
-                    Err(why) => {
-                        tracing::debug!("Failed to config.upsert because:{:?}", why);
-                    }
-                }
-            }
+            tracing::debug!("stored:{:?} today:{:?}", date, today);
+            tracing::debug!("today > stored:{}", today > date);
         }
 
         tracing::debug!("結束 first");

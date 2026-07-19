@@ -388,6 +388,17 @@ mod tests {
                 tracing::debug!("Failed to upsert because:{:?}", why);
             }
         }
+
+        // 測試結束後移除假代號資料列，避免測試資料殘留在資料庫
+        // （曾在正式庫發現本測試留下的 '79979' 收盤紀錄）。
+        if let Err(why) = sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE "stock_symbol" = $1"#)
+            .bind("79979")
+            .execute(database::get_connection())
+            .await
+        {
+            tracing::debug!("Failed to cleanup test rows because:{:?}", why);
+        }
+
         tracing::debug!("結束 upsert");
     }
 
