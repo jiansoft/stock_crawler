@@ -98,26 +98,30 @@ function docker_build() {
   # Dockerfile 會依 BuildKit 自動注入的 TARGETARCH/TARGETVARIANT
   # 從 build context 根目錄選用 stock_crawler_arm64 或 stock_crawler_armv7，
   # 所以這兩個檔案都必須先備妥在專案根目錄（用 build.bat/build.ps1 交叉編譯產出）。
-  local arm64_src="${DOCKER_BIN_FILE_ARM64:-$script_dir/target/aarch64-unknown-linux-musl/release/stock_crawler_arm64}"
-  local armv7_src="${DOCKER_BIN_FILE_ARMV7:-$script_dir/target/armv7-unknown-linux-musleabihf/release/stock_crawler_armv7}"
+  # 預設直接吃專案根目錄下的兩個檔案（從 Windows 用 build.bat/build.ps1
+  # 交叉編譯後，透過 scp/rsync 放到裝置上的 $script_dir 即可）。
+  local arm64_src="${DOCKER_BIN_FILE_ARM64:-$script_dir/stock_crawler_arm64}"
+  local armv7_src="${DOCKER_BIN_FILE_ARMV7:-$script_dir/stock_crawler_armv7}"
+  local arm64_dst="$script_dir/stock_crawler_arm64"
+  local armv7_dst="$script_dir/stock_crawler_armv7"
 
   if [ ! -f "$arm64_src" ]; then
     log "找不到 arm64 binary: $arm64_src"
-    log "可設定 DOCKER_BIN_FILE_ARM64，或先用 build.bat/build.ps1 產出對應 binary。"
+    log "可設定 DOCKER_BIN_FILE_ARM64，或先用 build.bat/build.ps1 產出對應 binary 並放到專案根目錄。"
     exit 1
   fi
   if [ ! -f "$armv7_src" ]; then
     log "找不到 armv7 binary: $armv7_src"
-    log "可設定 DOCKER_BIN_FILE_ARMV7，或先用 build.bat/build.ps1 產出對應 binary。"
+    log "可設定 DOCKER_BIN_FILE_ARMV7，或先用 build.bat/build.ps1 產出對應 binary 並放到專案根目錄。"
     exit 1
   fi
 
-  cp "$arm64_src" "$script_dir/stock_crawler_arm64"
-  cp "$armv7_src" "$script_dir/stock_crawler_armv7"
+  [ "$arm64_src" = "$arm64_dst" ] || cp "$arm64_src" "$arm64_dst"
+  [ "$armv7_src" = "$armv7_dst" ] || cp "$armv7_src" "$armv7_dst"
 
   log "開始建立 Docker 映像檔..."
   cd "$script_dir"
-  docker build -t stock-rust-image -f Dockerfile_live .
+  docker build -t stock-rust-image -f Dockerfile .
   log "清理過期的 Docker 資源..."
   docker system prune -f
 }
