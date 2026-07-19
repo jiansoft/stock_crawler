@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
-$Targets = @('aarch64-unknown-linux-musl')
+# armv7-unknown-linux-musleabihf: Raspberry Pi 3 (armv7l 32-bit, e.g. 5.10.103-v7+) 用的靜態連結執行檔
+$Targets = @('aarch64-unknown-linux-musl', 'armv7-unknown-linux-musleabihf')
 $BuildProfile = 'release'
 $BinName = 'stock_crawler'
 $BuildCount = 0
@@ -132,8 +133,18 @@ foreach ($target in $Targets) {
     $elapsed = (Get-Date) - $start
     $TotalElapsed = $TotalElapsed.Add($elapsed)
 
+    $archSuffix = switch ($target) {
+        'aarch64-unknown-linux-musl' { '_arm64' }
+        'armv7-unknown-linux-musleabihf' { '_armv7' }
+        default { '' }
+    }
+
     $outPath = Join-Path 'target' "$target\$BuildProfile\$BinName"
     if (Test-Path -LiteralPath $outPath) {
+        if ($archSuffix) {
+            Rename-Item -LiteralPath $outPath -NewName "$BinName$archSuffix"
+            $outPath = Join-Path 'target' "$target\$BuildProfile\$BinName$archSuffix"
+        }
         Write-Host "Output binary: $outPath"
     } else {
         Write-Host "Build command finished, but binary not found at: $outPath"

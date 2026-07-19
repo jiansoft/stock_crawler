@@ -2,7 +2,8 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-set TARGETS=aarch64-unknown-linux-musl
+rem armv7-unknown-linux-musleabihf: Raspberry Pi 3 (armv7l 32-bit, e.g. 5.10.103-v7+) 用的靜態連結執行檔
+set TARGETS=aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf
 set PROFILE=release
 set BIN_NAME=stock_crawler
 set BUILD_COUNT=0
@@ -100,8 +101,16 @@ for %%T in (%TARGETS%) do (
   if !BUILD_ELAPSED_CS! lss 0 set /a BUILD_ELAPSED_CS+=8640000
   set /a TOTAL_ELAPSED_CS+=BUILD_ELAPSED_CS
 
+  set "ARCH_SUFFIX="
+  if /I "%%T"=="aarch64-unknown-linux-musl" set "ARCH_SUFFIX=_arm64"
+  if /I "%%T"=="armv7-unknown-linux-musleabihf" set "ARCH_SUFFIX=_armv7"
+
   set OUT_PATH=target\%%T\%PROFILE%\%BIN_NAME%
   if exist "!OUT_PATH!" (
+    if defined ARCH_SUFFIX (
+      ren "!OUT_PATH!" "%BIN_NAME%!ARCH_SUFFIX!"
+      set OUT_PATH=target\%%T\%PROFILE%\%BIN_NAME%!ARCH_SUFFIX!
+    )
     echo Output binary: !OUT_PATH!
   ) else (
     echo Build command finished, but binary not found at: !OUT_PATH!
