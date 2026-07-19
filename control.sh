@@ -95,7 +95,7 @@ function move() {
 # --- Docker 相關指令 ---
 
 function docker_build() {
-  # Dockerfile_live 會依 BuildKit 自動注入的 TARGETARCH/TARGETVARIANT
+  # Dockerfile 會依 BuildKit 自動注入的 TARGETARCH/TARGETVARIANT
   # 從 build context 根目錄選用 stock_crawler_arm64 或 stock_crawler_armv7，
   # 所以這兩個檔案都必須先備妥在專案根目錄（用 build.bat/build.ps1 交叉編譯產出）。
   local arm64_src="${DOCKER_BIN_FILE_ARM64:-$script_dir/target/aarch64-unknown-linux-musl/release/stock_crawler_arm64}"

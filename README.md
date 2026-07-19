@@ -63,7 +63,7 @@ log/                 # runtime 檔案日誌輸出目錄
 + PostgreSQL 與 Redis；完整測試需先依 `.github/workflows/rust.yml` 的 SQL 順序初始化資料庫。
 + `build.rs` 使用 `protoc-bin-vendored` 取得 vendored `protoc`，並透過 `prost-build` config 指定 executable；一般情況不需要另外安裝 `protoc` 或設定 `PROTOC` 環境變數。
 + 跨平台 ARM Linux build 腳本會用到 Zig、CMake、`cargo-zigbuild` 或交叉編譯器。
-+ Docker 部署需 Docker engine，實際 Rust runtime 映像檔以 `Dockerfile_live` 為準。
++ Docker 部署需 Docker engine，實際 Rust runtime 映像檔以 `Dockerfile` 為準。
 
 ## 執行方式
 
@@ -86,12 +86,12 @@ log/                 # runtime 檔案日誌輸出目錄
 ## 部署方式
 
 + `control.sh build|start|stop|restart|update` 會以本機 release binary `stock_crawler` 啟停服務。
-+ `control.sh docker_build|docker_start|docker_stop|docker_restart|docker_update` 會使用 `Dockerfile_live` 建立並啟停 Docker container。
-+ `Dockerfile_live` 會複製 release binary、`.env`、`app.json` 到 `/app`，以 distroless nonroot runtime 執行，並 expose `9001`。
++ `control.sh docker_build|docker_start|docker_stop|docker_restart|docker_update` 會使用 `Dockerfile` 建立並啟停 Docker container。
++ `Dockerfile` 會複製 release binary、`.env`、`app.json` 到 `/app`，以 distroless nonroot runtime 執行，並 expose `9001`。
 + `control.sh docker_start` 預設建立 `stock-rust-container`，映射 `9001`、`9002`，並掛載 `log/` 與 SSL 憑證目錄。
 + `build.ps1` / `build.bat` 會使用 `cargo zigbuild --target aarch64-unknown-linux-musl --release` 建置 ARM Linux musl binary。
 + `build.sh` 會以 `aarch64-unknown-linux-gnu` target 建置 release binary。
-+ 根目錄 `Dockerfile` 內容仍指向 Go 專案檔案，是否仍有使用場景：待確認（To Be Verified）。目前部署文件與腳本以 `Dockerfile_live` 為準。
++ 根目錄 `Dockerfile` 內容仍指向 Go 專案檔案，是否仍有使用場景：待確認（To Be Verified）。目前部署文件與腳本以 `Dockerfile` 為準。
 
 ## 排程時間
 
