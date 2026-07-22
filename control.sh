@@ -13,6 +13,20 @@ export built_path="./target/release"
 export app_path="./bin"
 export binary_name="stock_crawler"
 
+# SSL 憑證掛載目錄：從 .env 的 SYSTEM_SSL_CERT_FILE 反推目錄，
+# 確保跟程式實際讀取憑證的路徑永遠一致（如需調整請直接修改 .env）。
+env_file="$script_dir/.env"
+system_ssl_cert_file_from_env=""
+if [ -f "$env_file" ]; then
+  system_ssl_cert_file_from_env="$(grep -m1 '^SYSTEM_SSL_CERT_FILE=' "$env_file" | cut -d '=' -f2-)"
+fi
+system_ssl_cert_file="${SYSTEM_SSL_CERT_FILE:-$system_ssl_cert_file_from_env}"
+if [ -n "$system_ssl_cert_file" ]; then
+  export docker_ssl_dir="$(dirname "$system_ssl_cert_file")"
+else
+  export docker_ssl_dir=""
+fi
+
 # 日誌函式
 log() {
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
@@ -135,14 +149,23 @@ function docker_stop() {
 
 function docker_start() {
   local docker_log_dir="${DOCKER_LOG_DIR:-$script_dir/log}"
-  local docker_ssl_dir="${DOCKER_SSL_DIR:-/opt/nginx/ssl/jiansoft.mooo.com}"
 
   mkdir -p "$docker_log_dir"
+
+  # 未設定 SYSTEM_SSL_CERT_FILE 時 docker_ssl_dir 會是空字串，
+  # 此時不掛載 SSL 目錄（gRPC 會以非加密模式啟動），避免產生
+  # `-v="::ro"` 這種不合法的掛載參數把 docker run 整個搞掛。
+  local ssl_volume_args=()
+  if [ -n "$docker_ssl_dir" ]; then
+    ssl_volume_args=(-v="$docker_ssl_dir:$docker_ssl_dir:ro")
+  else
+    log "未設定 SYSTEM_SSL_CERT_FILE，略過掛載 SSL 憑證目錄"
+  fi
 
   log "啟動 Docker 容器..."
   docker run --name stock-rust-container \
     -v="$docker_log_dir:/app/log:rw" \
-    -v="$docker_ssl_dir:/opt/nginx/ssl/jiansoft.mooo.com" \
+    "${ssl_volume_args[@]}" \
     -p 9001:9001 -p 9002:9002 -t -d stock-rust-image
   docker ps
 }
