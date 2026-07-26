@@ -12,6 +12,8 @@ export script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export built_path="./target/release"
 export app_path="./bin"
 export binary_name="stock_crawler"
+export pid_file="$script_dir/${app_path#./}/$binary_name.pid"
+export stdout_log="$script_dir/${app_path#./}/nohup.out"
 
 # SSL 憑證掛載目錄：從 .env 的 SYSTEM_SSL_CERT_FILE 反推目錄，
 # 確保跟程式實際讀取憑證的路徑永遠一致（如需調整請直接修改 .env）。
@@ -32,35 +34,72 @@ log() {
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
 }
 
-function start() {
-  # 使用 || true 避免 pidof 在找不到進程時導致 set -e 退出腳本
-  pid=$(pidof "$binary_name" || true)
+# 本機模式（非 Docker）用：依目前機器的 uname -m 判斷 arm64 / armv7，
+# 回傳帶架構後綴的執行檔名稱（例如 stock_crawler_arm64），
+# 讓 script_dir 底下可以同時放多個架構的執行檔而不會互相覆蓋。
+function resolve_binary_name() {
+  local arch=""
+  case "$(uname -m)" in
+    aarch64) arch="arm64" ;;
+    armv7l) arch="armv7" ;;
+    *)
+      log "不支援的本機架構: $(uname -m)（僅支援 aarch64/armv7l）"
+      exit 1
+      ;;
+  esac
+  echo "${binary_name}_${arch}"
+}
 
-  if [ -z "$pid" ]; then
-    mkdir -p "$app_path"
-    cd "$app_path"
-    nohup ./"$binary_name" > nohup.out 2>&1 &
-    log "$binary_name 啟動成功"
-  else
-    log "$binary_name 已經在運行中 (PID: $pid)"
+function start() {
+  # pid file 存在且該 pid 還活著，代表服務已經在跑，不用重複啟動。
+  if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+    log "服務已在執行中 (pid $(cat "$pid_file"))"
+    return 0
   fi
+
+  local binary_name_arch bin_path
+  binary_name_arch="$(resolve_binary_name)"
+  # 執行檔跟 control.sh 放在同一層（跟 docker_build 用的是同一份 stock_crawler_arm64/armv7），
+  # app_path（bin/）只放 nohup.out / pid file 等執行期產生的檔案。
+  bin_path="$script_dir/$binary_name_arch"
+
+  if [ ! -f "$bin_path" ]; then
+    log "找不到對應架構的執行檔: $bin_path"
+    exit 1
+  fi
+  chmod +x "$bin_path"
+  mkdir -p "$app_path"
+
+  # `nohup` 讓程序忽略登出時的 SIGHUP；`</dev/null` 避免它嘗試讀取已經消失的終端機輸入；
+  # `disown` 把它從目前 shell 的 job table 移除，雙重保險避免登出時被牽連關閉。
+  nohup "$bin_path" >>"$stdout_log" 2>&1 </dev/null &
+  local pid=$!
+  disown "$pid" 2>/dev/null || true
+  echo "$pid" > "$pid_file"
+  log "$binary_name_arch 啟動成功 (pid $pid)"
 }
 
 function stop() {
   # 備份日誌
-  if [ -f "$app_path/nohup.out" ]; then
+  if [ -f "$stdout_log" ]; then
     mkdir -p "$app_path/log_backup"
-    mv "$app_path/nohup.out" "$app_path/log_backup/nohup.out.$(date "+%Y%m%d-%H%M%S")"
+    mv "$stdout_log" "$app_path/log_backup/nohup.out.$(date "+%Y%m%d-%H%M%S")"
   fi
 
-  pid=$(pidof "$binary_name" || true)
+  if [ ! -f "$pid_file" ]; then
+    log "找不到 pid file，服務可能未啟動"
+    return 0
+  fi
 
-  if [ -n "$pid" ]; then
+  local pid
+  pid="$(cat "$pid_file")"
+  if kill -0 "$pid" 2>/dev/null; then
     kill -SIGTERM "$pid"
-    log "$binary_name 已停止"
+    log "已送出停止訊號給 pid $pid"
   else
-    log "找不到運行中的 $binary_name"
+    log "pid $pid 已經不存在，可能是上次未正常關閉"
   fi
+  rm -f "$pid_file"
 }
 
 function update() {
@@ -88,18 +127,22 @@ function build() {
 
 function move() {
   if [ -f "$built_path/$binary_name" ]; then
-    mkdir -p "$app_path"
-    backup_name="$binary_name.$(date "+%Y%m%d-%H%M%S")"
-    
+    local binary_name_arch dest_path
+    binary_name_arch="$(resolve_binary_name)"
+    # 部署到跟 control.sh 同一層，跟 docker_build 及 start() 找執行檔的位置一致。
+    dest_path="$script_dir/$binary_name_arch"
+
+    backup_name="$binary_name_arch.$(date "+%Y%m%d-%H%M%S")"
+
     # 如果舊檔案存在則備份
-    if [ -f "$app_path/$binary_name" ]; then
-      mv "$app_path/$binary_name" "$app_path/$backup_name"
-      chmod -x "$app_path/$backup_name"
+    if [ -f "$dest_path" ]; then
+      mv "$dest_path" "$script_dir/$backup_name"
+      chmod -x "$script_dir/$backup_name"
     fi
 
-    mv "$built_path/$binary_name" "$app_path/$binary_name"
-    chmod +x "$app_path/$binary_name"
-    log "檔案部署成功: $app_path/$binary_name"
+    mv "$built_path/$binary_name" "$dest_path"
+    chmod +x "$dest_path"
+    log "檔案部署成功: $dest_path"
   else
     log "錯誤: 找不到編譯後的檔案 $built_path/$binary_name"
     exit 1
