@@ -23,3 +23,7 @@
 
 # Local SSL assets
 /etc/ssl/
+
+# Docker build staging (copied in by control.sh docker_build)
+/stock_crawler_arm64
+/stock_crawler_armv7

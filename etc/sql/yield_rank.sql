@@ -22,3 +22,8 @@ create unique index if not exists "yield_rank-date-security_code-idx"
 create index if not exists "yield_rank-security_code-idx"
     on public.yield_rank (security_code);
 
+-- screen_stocks 需要依股票取最新一筆殖利率；單欄 security_code 索引仍須為每檔
+-- 股票掃過大量日期。複合索引直接以 date DESC 取第一筆，INCLUDE 避免回表取 yield。
+create index if not exists "yield_rank-security_code-date-desc-idx"
+    on public.yield_rank (security_code, date desc) include (yield);
+

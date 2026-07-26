@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use chrono::Utc;
 use rust_decimal::Decimal;
 
 use super::realtime::RealtimeSnapshot;
@@ -45,6 +46,11 @@ impl Share {
 
     /// 以新抓到的完整快照覆蓋快照快取，自動過濾與昨收價相差 10.5% 以上的異常價格，並保留舊有合法值。
     pub fn set_stock_snapshots(&self, mut snapshots: HashMap<String, RealtimeSnapshot>) {
+        // 所有批次寫入在同一入口蓋章，避免各採集器自行決定資料時間。
+        let now = Utc::now();
+        for snapshot in snapshots.values_mut() {
+            snapshot.updated_at = now;
+        }
         if let Ok(mut cache) = self.stock_snapshots.write() {
             // 檢查每一檔股票的新報價是否異常，若是，則將其價格標記為 0 準備過濾/恢復
             for (symbol, new_snap) in &mut snapshots {
@@ -97,6 +103,7 @@ impl Share {
             }
             if let Some(snapshot) = cache.get_mut(&symbol) {
                 snapshot.price = price;
+                snapshot.updated_at = Utc::now();
             } else {
                 cache.insert(symbol.clone(), RealtimeSnapshot::new(symbol, price));
             }
@@ -130,6 +137,7 @@ impl Share {
             if let Some(snapshot) = cache.get_mut(&symbol) {
                 snapshot.price = price;
                 snapshot.source_site = source_site;
+                snapshot.updated_at = Utc::now();
             } else {
                 let mut snapshot = RealtimeSnapshot::new(symbol.clone(), price);
                 snapshot.source_site = source_site;
@@ -144,6 +152,14 @@ impl Share {
             .read()
             .ok()
             .and_then(|cache| cache.get(symbol).cloned())
+    }
+
+    /// 回傳快取是否為空；收盤清空後以此辨別非交易時段。
+    pub fn stock_snapshots_are_empty(&self) -> bool {
+        self.stock_snapshots
+            .read()
+            .map(|cache| cache.is_empty())
+            .unwrap_or(true)
     }
 
     /// 清空股票報價快照快取。

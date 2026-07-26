@@ -16,6 +16,8 @@ use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 
 /// Backfill admin 的 Web UI 與 HTTP API。
 pub mod backfill_admin;
+/// 供內網服務讀取股票資料的版本化唯讀 API。
+pub mod data_api;
 
 /// 手動回補 Web 服務監聽位址的環境變數名稱。
 const MANUAL_BACKFILL_WEB_ADDR: &str = "MANUAL_BACKFILL_WEB_ADDR";
@@ -41,7 +43,7 @@ pub async fn start(shutdown: watch::Receiver<bool>) -> Result<WebServerHandle> {
         .unwrap_or_else(|_| DEFAULT_MANUAL_BACKFILL_WEB_ADDR.to_string())
         .parse::<SocketAddr>()?;
     // 建立目前 Web 服務需要的所有路由。
-    let app = backfill_admin::router();
+    let app = backfill_admin::router().merge(data_api::router());
     // bind 必須在 spawn 前完成，讓 port 被占用等錯誤可以在啟動階段直接回報。
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("manual backfill web server listening on http://{}", addr);

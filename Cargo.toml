@@ -46,7 +46,6 @@ async-trait = "0.1"
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 concat-string = "1.0.1"
-config = "0.15"
 #crossbeam = "0.8"
 #crossbeam-channel = "0.5"
 deadpool-redis = "0.23"
@@ -85,7 +84,7 @@ sqlx = { version = "0.9", features = [ "runtime-tokio", "postgres", "chrono", "d
 strum = { version = "0.28", features = ["derive"]}
 # 收斂 "full"：僅列出本 crate 直接用到的功能（rt/巨集/訊號/同步原語/計時器/net）。
 # sqlx、tonic、axum 等相依會自行帶入各自需要的 tokio feature，Cargo 會取聯集。
-tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net"] }
 tokio-cron-scheduler = "0.15"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
@@ -98,6 +97,10 @@ scopeguard = "1.2"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+subtle = "2.6"
+utoipa = { version = "5.5", features = ["axum_extras", "chrono"] }
+#utoipa-axum = "0.2"
+utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
 x509-parser = "0.18"
 #time = "=0.3.49"
 
@@ -106,6 +109,7 @@ mimalloc = "0.1"
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
+tower = { version = "0.5", features = ["util"] }
 # test-util 提供 tokio::time 虛擬時鐘（start_paused），讓逾時類測試不需真實等待。
 tokio = { version = "1.52", features = ["test-util"] }
 

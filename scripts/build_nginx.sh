@@ -18,10 +18,16 @@ OPENSSL_PROVIDER="${OPENSSL_PROVIDER:-openssl}"
 DRY_RUN="${DRY_RUN:-0}"
 JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
 RESTART_AFTER_INSTALL="${RESTART_AFTER_INSTALL:-1}"
+FORCE_REBUILD="${FORCE_REBUILD:-0}"
 CURRENT_LINK="${CURRENT_LINK:-${INSTALL_ROOT}/current}"
 MODULES_LINK="${MODULES_LINK:-${INSTALL_ROOT}/modules}"
 NGINX_PID_FILE="${NGINX_PID_FILE:-${INSTALL_ROOT}/run/nginx.pid}"
 STOP_TIMEOUT_SECONDS="${STOP_TIMEOUT_SECONDS:-30}"
+# Raspberry Pi 3（armv7l，Cortex-A53）在原生編譯時，OpenSSL 的 Configure 會依
+# `uname -m` 猜出帶 -mfloat-abi=hard 的 target，但預設不帶 -mfpu，導致 gcc
+# 報「selected architecture lacks an FPU」。Pi 3 支援 NEON/VFPv4，故預設帶
+# -mfpu=neon-vfpv4；如目標是較舊、只有 VFPv3 的板子，可用此變數覆寫。
+ARMV7_MFPU="${ARMV7_MFPU:-neon-vfpv4}"
 
 NGINX_VERSION="${NGINX_VERSION:-1.31.0}"
 FREENGINX_VERSION="${FREENGINX_VERSION:-1.31.0}"
@@ -189,7 +195,7 @@ extract_tar() {
 
 download_sources() {
   run mkdir -p "$SOURCE_DIR"
-  cd "$SOURCE_DIR"
+  run cd "$SOURCE_DIR"
 
   if [ "$FLAVOR" = "nginx" ]; then
     download "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" "nginx-${NGINX_VERSION}.tar.gz"
@@ -261,12 +267,22 @@ prebuild_zlib_ng_compat() {
 build_server() {
   local install_dir
 
+  install_dir="${INSTALL_ROOT}/${INSTALL_NAME:-$SERVER_VERSION}"
+  SERVER_INSTALL_DIR="$install_dir"
+
+  # 與 download()/extract_tar() 一致的「已存在就略過」慣例：同版本已建置好
+  # 的 binary 存在時，預設不重新 configure/make/install（在 Pi 3 上這段動輒
+  # 數十分鐘）。修改 configure 參數（WITH_BROTLI/WITH_GEOIP/ARMV7_MFPU 等）
+  # 但版本號未變時，需要設定 FORCE_REBUILD=1 才會套用新參數重建。
+  if [ "$FORCE_REBUILD" != "1" ] && [ -x "${install_dir}/nginx" ]; then
+    log "偵測到已建置的 ${install_dir}/nginx，略過重新編譯（設定 FORCE_REBUILD=1 可強制重建）"
+    return 0
+  fi
+
   # 必須在 nginx ./configure 前建置，讓 configure 的 compile test 能找到 zconf.h
   prebuild_zlib_ng_compat
 
-  cd "$SOURCE_DIR/$SERVER_DIR"
-  install_dir="${INSTALL_ROOT}/${INSTALL_NAME:-$SERVER_VERSION}"
-  SERVER_INSTALL_DIR="$install_dir"
+  run cd "$SOURCE_DIR/$SERVER_DIR"
 
   local configure_args=(
     "--prefix=${install_dir}"
@@ -320,6 +336,12 @@ build_server() {
 
   if [ "$WITH_GEOIP" = "1" ]; then
     configure_args+=("--with-http_geoip_module")
+  fi
+
+  # 透過 --with-openssl-opt 把 -mfpu 轉傳給 OpenSSL/LibreSSL 自己的 ./config，
+  # 修正純 -march=armv7-a 缺少 FPU 指定導致的編譯失敗。
+  if [ "$(uname -m)" = "armv7l" ]; then
+    configure_args+=("--with-openssl-opt=-mfpu=${ARMV7_MFPU} -mfloat-abi=hard")
   fi
 
   run mkdir -p "${INSTALL_ROOT}/run" "${INSTALL_ROOT}/lock" "${INSTALL_ROOT}/log" "${INSTALL_ROOT}/tmp/nginx/client" "${INSTALL_ROOT}/tmp/nginx/proxy" "${INSTALL_ROOT}/tmp/nginx/fcgi"
@@ -415,18 +437,26 @@ switch_to_new_server() {
     return 0
   }
 
-  [ -x "$new_binary" ] || die "找不到新編譯的 nginx 執行檔：$new_binary"
+  # dry-run 時實際上未曾建置/安裝，binary 必然不存在，跳過此存在性檢查。
+  if [ "$DRY_RUN" != "1" ]; then
+    [ -x "$new_binary" ] || die "找不到新編譯的 nginx 執行檔：$new_binary"
+  fi
 
   require_restart_privileges
   switch_version_links
 
+  # -p 必須用「每版獨立目錄」（等同編譯時的 --prefix），而不是 INSTALL_ROOT：
+  # nginx.conf 內部分路徑（如 error_log ../log/error.log;）是相對於 -p 解析，
+  # 且原本就是配合 --prefix=${install_dir} 撰寫（../log 解出來是
+  # ${INSTALL_ROOT}/log）。若誤用 INSTALL_ROOT 當 -p 會多繞一層，
+  # 解出 ${INSTALL_ROOT}/../log 而找不到目錄。
   # 先用新 binary 驗證設定檔，避免停掉舊服務後才發現新版無法啟動。
-  run "$new_binary" -t -c "${INSTALL_ROOT}/nginx.conf" -p "${INSTALL_ROOT}/"
+  run "$new_binary" -t -c "${INSTALL_ROOT}/nginx.conf" -p "${SERVER_INSTALL_DIR}/"
 
   stop_running_nginx
 
   # 停止舊程序後，明確用剛編譯出的 binary 啟動新版 nginx。
-  run "$new_binary" -c "${INSTALL_ROOT}/nginx.conf" -p "${INSTALL_ROOT}/"
+  run "$new_binary" -c "${INSTALL_ROOT}/nginx.conf" -p "${SERVER_INSTALL_DIR}/"
 }
 
 main() {

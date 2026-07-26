@@ -94,8 +94,6 @@ ON CONFLICT (date, security_code) DO UPDATE SET
 
 #[cfg(test)]
 mod tests {
-    use chrono::Local;
-
     use super::*;
 
     #[tokio::test]
@@ -106,7 +104,10 @@ mod tests {
     async fn test_upsert() {
         dotenvy::dotenv().ok();
         tracing::debug!("開始 YieldRank::upsert");
-        let current_date = Local::now().date_naive();
+        // 使用固定的歷史「真實交易日」重建，避免以 Local::now()（可能是週末
+        // 或假日）為日期寫入 .env 所指向的資料庫，於非交易日產生 yield_rank
+        // 污染資料（2026-07-18 事件的根因之一）。
+        let current_date = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
         match YieldRank::upsert(current_date).await {
             Ok(r) => tracing::debug!("YieldRank::upsert:{:#?}", r),
             Err(why) => {
