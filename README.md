@@ -151,10 +151,10 @@ log/                 # runtime 檔案日誌輸出目錄
 
 ## 對外介面
 
-+ gRPC server 依 `system.grpc_use_port` 啟動，並註冊 `Control`、`ManualBackfill`、`Stock` 三個服務。
++ gRPC server 依 `system.grpc_use_port` 啟動，並註冊 `ControlService`、`ManualBackfillService`、`StockService` 三個服務。
 + gRPC TLS 會在 `system.ssl_cert_file` 與 `system.ssl_key_file` 都有設定時啟用。
-+ `Stock` gRPC 服務提供 `UpdateStockInfo`、`FetchCurrentStockQuotes`、`FetchHolidaySchedule`。
-+ `ManualBackfill` gRPC 服務提供每日報價、收盤彙總、台股加權指數、持股股利重算、單檔/多檔歷史股利回補，以及 job 查詢。
++ `StockService` gRPC 服務提供 `UpdateStockInfo`、`FetchCurrentStockQuotes`、`FetchHolidaySchedule`。
++ `ManualBackfillService` gRPC 服務提供每日報價、收盤彙總、台股加權指數、持股股利重算、單檔/多檔歷史股利回補，以及 job 查詢。
 + HTTP 手動回補頁面位於 `/manual-backfill`，API 包含 `/api/manual-backfill/jobs`、`/api/manual-backfill/jobs/{id}` 與多個 `POST /api/manual-backfill/*` 回補入口。
 + Telegram bot 目前用於排程提醒、價格追蹤通知與部分錯誤告警。
 
