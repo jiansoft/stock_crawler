@@ -1,11 +1,13 @@
 # 執行計畫：擴充 stock_mcp 台股查詢工具
 
-- 狀態：開發完成（Phase 0–4 全部完成；僅剩部署 D-1～D-3 待使用者環境執行）
+- 狀態：已部署（Phase 0–4 全部完成；D-1／D-2 已於 2026-07-30 實機驗證通過，僅剩 D-3 持續觀測未建立）
 - 日期：2026-07-17
 - 影響範圍：`stock_rust`（新增唯讀 Data API）、`stock_mcp_go`（新增 API client 方法與 MCP tools）
 - 前置條件：現有五個 MCP tools 與 `/api/v1` Data API 維持可用
 - 修訂：2026-07-17 依程式碼實況審查修訂——新增期間標記對映（§3.5）、`market` 參數對映（§3.6）、DB 欄位對照表（§4.2、§4.3）、`valuation_band` 分界定義（§4.4）、`screen_stocks` 最新一期語意（§4.7），並將驗證命令改為 repo 標準（§7.1）
 - 修訂：2026-07-18 新增三個市場輔助工具（§4.8 指數歷史、§4.9 股利行事曆、§4.10 QFII 排行）與 `get_market_breadth` 的 `days` 序列參數，對應 Phase 4；新增保母級註解規範（§5.3）、執行進度追蹤（§10）、分支與版控策略（§6）
+- 修訂：2026-07-30 依實機查證更新 §10 部署段：D-1／D-2 勾選並附驗證證據，D-3 標為中斷（`[~]`）並記錄一次性抽測數據。`feature/data-api-v1` 已於 2026-07-26 由 PR #50 合併回 `main`（`fc0e6cb`），§6 的分支策略已完成階段性任務
+- 後續計畫：當日漲跌幅／成交量排行工具 `get_market_movers`（本計畫未涵蓋的市場排行缺口）另立 `docs/stock-mcp-market-movers-plan.md`，沿用本文件 §3 共通契約與 §5.3 註解規範
 
 ---
 
@@ -810,6 +812,14 @@ go test ./...
 
 ### 部署
 
-- [ ] D-1 `stock_rust` 部署，Swagger UI 驗證所有新 endpoint。
-- [ ] D-2 `stock_mcp_go` 部署，`tools/list` 驗證新工具全數註冊。
-- [ ] D-3 部署後觀察 latency、5xx、response 大小與 PostgreSQL query duration（§8）。
+- [x] D-1 `stock_rust` 部署，Swagger UI 驗證所有新 endpoint。 2026-07-30T23:36:16
+  - 部署位置：區網主機 `192.168.111.138:9002`。`/api/v1/healthz` 回 `{"status":"ok"}`、`/swagger-ui/` 回 200、`/api-docs/openapi.json` 回 200 且含 **16 條 path**（6 條既有 ＋ 10 條新增，全數到齊）。
+  - 驗證機制：未帶 `Authorization` 打 `/api/v1/market/breadth` 回 401，Bearer 驗證生效。
+  - 十個新 endpoint 以實際 `DATA_API_KEY` 逐一實打全部 200，資料內容符合契約。
+- [x] D-2 `stock_mcp_go` 部署，`tools/list` 驗證新工具全數註冊。 2026-07-30T23:36:16
+  - 部署位置：區網主機 `192.168.111.138:9005`（`/healthz`、`/readyz` 皆 200），`STOCK_RUST_API_BASE_URL` 指向上述 Data API。
+  - 以 MCP 協定 initialize → `tools/list` 實測：**15 個工具全數註冊，每一個 `readOnlyHint: true`**，與 api 模式預期一致。
+  - 端對端 `tools/call` 抽驗 `get_market_breadth`（`days=3`）、`get_qfii_holding_ranking`、`get_monthly_revenue_history`（2330）：摘要與 `structuredContent` 均含 `data_kind`、`is_realtime: false` 與免責聲明；QFII 摘要確實帶出 §4.10 的「快照、無歷史序列」警語。
+- [~] D-3 部署後觀察 latency、5xx、response 大小與 PostgreSQL query duration（§8）。
+  - 中斷點：**尚未建立任何持續觀測管道**。專案沒有 metrics endpoint，`.env` 亦無 Seq／OTel／Prometheus 設定，因此無法滿足 §8 的「部署後觀察」要求。相關方向可參考既有的 `feature/seq-logging-stock-rust` 分支。
+  - 目前僅有 2026-07-30T23:36:16 的一次性人工抽測（非持續觀測）：`breadth?days=20` 17ms／11.9KB、`qfii-holding-ranking` 16ms／3.5KB、`index-history` 24ms／4.2KB、`2330/valuation` 24ms／0.6KB、`2330/financial-statements` 25ms／4.3KB、`2330/dividends` 21ms／9.7KB、`dividend-yield-ranking` 105ms／3.6KB、`dividend-calendar`（一個月區間）192ms／9.8KB、`stocks/screen`（`min_roe_percent=10`＋`sort_by=roe`）193ms／7.2KB。最慢兩項與 P0-4 的 `EXPLAIN` 結論（行事曆全表掃描約 99ms、metric-sort screen 約 134ms）量級一致，無異常。
