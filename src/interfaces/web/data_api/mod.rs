@@ -14,8 +14,8 @@ use utoipa_swagger_ui::SwaggerUi;
 /// 由 handler 註解生成的 OpenAPI 3 文件。
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::stock_valuation, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::ErrorBody, dto::HealthResponse)),
+    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::stock_valuation, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::healthz),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -103,6 +103,10 @@ pub(super) fn router() -> Router {
         .route(
             "/market/qfii-holding-ranking",
             axum::routing::get(handlers::qfii_holding_ranking),
+        )
+        .route(
+            "/market/movers",
+            axum::routing::get(handlers::market_movers),
         )
         .layer(middleware::from_fn(auth::require_bearer_key));
     Router::new()
@@ -260,6 +264,7 @@ mod tests {
             "/api/v1/market/index-history",
             "/api/v1/market/dividend-calendar",
             "/api/v1/market/qfii-holding-ranking",
+            "/api/v1/market/movers",
             "/api/v1/healthz",
         ] {
             assert!(json.contains(path), "OpenAPI should contain {path}");
@@ -476,6 +481,86 @@ mod tests {
             "#/components/schemas/QfiiHolding"
         );
         assert!(properties["data_as_of"].to_string().contains("null"));
+    }
+
+    /// 漲跌幅／成交量排行的 OpenAPI 契約（movers 計畫 §4）。
+    ///
+    /// 除了一般的參數與 response 形狀，這裡刻意固定兩件容易被後人「順手統一」
+    /// 而破壞語意的事：
+    /// 1. `rank_by` 只有三個值，**沒有** `top_trade_value`（即時快照沒有成交
+    ///    金額，提供它會讓同一參數在兩個時段語意不同）。
+    /// 2. `is_realtime` 是布林且**不可為 null**——本 endpoint 是唯一可能回
+    ///    `true` 的分析型 endpoint，其餘工具固定 `false`。
+    #[test]
+    fn openapi_movers_schema_pins_sources_and_units() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+
+        let movers = get_operation(&document, "/api/v1/market/movers");
+        // 這個 endpoint 在完全沒有資料時回 404（部署異常等級），因此帶
+        // has_not_found = true。
+        assert_endpoint_responses(movers, "MarketMoversResponse", true);
+
+        let rank_by = query_schema(movers, "rank_by");
+        assert_eq!(rank_by["default"], "top_gainers");
+        assert_eq!(
+            enum_values(&document, rank_by),
+            serde_json::json!(["top_gainers", "top_losers", "top_volume"])
+        );
+        assert_eq!(
+            enum_values(&document, query_schema(movers, "market")),
+            serde_json::json!(["all", "twse", "tpex"])
+        );
+        let limit = query_schema(movers, "limit");
+        assert_eq!(limit["default"], 20);
+        assert_eq!(limit["minimum"], 1);
+        assert_eq!(limit["maximum"], 50);
+
+        let properties = &document["components"]["schemas"]["MarketMoversResponse"]["properties"];
+        assert_eq!(properties["movers"]["type"], "array");
+        assert_eq!(
+            properties["movers"]["items"]["$ref"],
+            "#/components/schemas/MarketMover"
+        );
+        // data_as_of 一定有值（即時為今日、收盤為該交易日），不可為 null。
+        assert!(!properties["data_as_of"].to_string().contains("null"));
+        assert_eq!(properties["is_realtime"]["type"], "boolean");
+        // snapshot_updated_at 只有即時來源有值，必須是 nullable。
+        assert!(
+            properties["snapshot_updated_at"]
+                .to_string()
+                .contains("null")
+        );
+
+        // 兩種成交量單位是分開的欄位，且都可為 null——這是「不做張／股換算」
+        // 這個決策在契約上的體現，不可被合併成單一欄位。
+        let mover = &document["components"]["schemas"]["MarketMover"]["properties"];
+        for field in [
+            "volume_lots",
+            "volume_shares",
+            "trade_value",
+            "transaction",
+            "last_close",
+            "source_site",
+        ] {
+            assert!(
+                mover[field].to_string().contains("null"),
+                "{field} 應為 nullable"
+            );
+        }
+    }
+
+    /// 排行 endpoint 也必須受 Bearer 驗證保護，未帶 token 一律 401。
+    #[tokio::test]
+    async fn movers_endpoint_rejects_missing_bearer_key() {
+        let response = router()
+            .oneshot(
+                Request::get("/api/v1/market/movers")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should serve request");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     /// 新增的三個歷史 endpoint 也必須受 Bearer 驗證保護，未帶 token 一律 401。
@@ -1145,5 +1230,144 @@ mod tests {
                 .iter()
                 .all(|stock| stock["market_id"] == 2)
         );
+    }
+
+    /// 漲跌幅／成交量排行的真實資料庫語意整合測試（movers 計畫 §4）。
+    ///
+    /// 這個測試跑在**非交易時段的收盤來源路徑**上：即時快取為空時
+    /// endpoint 必須回 `source = "closing"`，並且各欄位的單位與缺值語意
+    /// 完全依 §4.4 決定。覆蓋參數 422、三種排序、市場過濾、名次連續性與
+    /// 「收盤來源不得出現張數／快照時間」等契約。無資料庫連線時安全跳過。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn movers_endpoint_db_semantics() {
+        dotenvy::dotenv().ok();
+        let pool = crate::infra::database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 movers_endpoint_db_semantics：無資料庫連接");
+            return;
+        }
+        // 這個測試驗證的是「非交易時段」語意，若本機殘留即時快照會讓
+        // 來源變成 realtime，因此先確認快取為空，否則直接跳過而不是清空
+        // 別人的快取（清空會影響正在跑的追蹤任務）。
+        if !crate::infra::cache::SHARE.stock_snapshots_are_empty() {
+            println!("跳過 movers_endpoint_db_semantics：即時快照非空（目前為盤中時段）");
+            return;
+        }
+        let key = std::env::var("DATA_API_KEY").unwrap_or_else(|_| {
+            let generated = "movers-integration-test-key".to_owned();
+            unsafe { std::env::set_var("DATA_API_KEY", &generated) };
+            generated
+        });
+        let get = |path: String| {
+            let key = key.clone();
+            async move {
+                let response = router()
+                    .oneshot(
+                        Request::get(&path)
+                            .header("Authorization", format!("Bearer {key}"))
+                            .body(Body::empty())
+                            .expect("request should build"),
+                    )
+                    .await
+                    .expect("router should serve request");
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("body should be readable");
+                let json: serde_json::Value =
+                    serde_json::from_slice(&bytes).expect("body should be JSON");
+                (status, json)
+            }
+        };
+
+        // 語意一：參數不合法 → 422（在任何 SQL 之前擋下）。
+        for path in [
+            "/api/v1/market/movers?rank_by=top_trade_value",
+            "/api/v1/market/movers?rank_by=TOP_GAINERS",
+            "/api/v1/market/movers?market=emerging",
+            "/api/v1/market/movers?limit=0",
+            "/api/v1/market/movers?limit=51",
+        ] {
+            let (status, _) = get(path.to_owned()).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{path} 應回 422");
+        }
+
+        // 語意二：非交易時段固定走收盤來源，且缺值語意依 §4.4。
+        let (status, json) = get("/api/v1/market/movers?limit=20".to_owned()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["source"], "closing");
+        assert_eq!(json["is_realtime"], false);
+        assert_eq!(json["rank_by"], "top_gainers");
+        assert_eq!(json["market"], "all");
+        assert_eq!(
+            json["snapshot_updated_at"],
+            serde_json::Value::Null,
+            "收盤來源沒有快照時間，不可偽造"
+        );
+        let data_as_of = json["data_as_of"].as_str().expect("data_as_of 應為字串");
+        assert_eq!(data_as_of.len(), 10, "data_as_of 應為 YYYY-MM-DD");
+        let movers = json["movers"].as_array().expect("movers array");
+        assert!(movers.len() <= 20);
+        for (index, mover) in movers.iter().enumerate() {
+            assert_eq!(mover["rank"], index as u64 + 1, "名次必須從一連續遞增");
+            assert!(
+                matches!(mover["market_id"].as_i64(), Some(2 | 4)),
+                "all 只含上市與上櫃"
+            );
+            assert!(
+                mover["volume_shares"].as_f64().unwrap_or_default() > 0.0,
+                "零成交量必須被排除"
+            );
+            // 收盤來源沒有「張」與昨收，也沒有採集站點。
+            assert_eq!(mover["volume_lots"], serde_json::Value::Null);
+            assert_eq!(mover["last_close"], serde_json::Value::Null);
+            assert_eq!(mover["source_site"], serde_json::Value::Null);
+        }
+
+        // 語意三：三種排序鍵的方向與同值穩定排序。
+        for (rank_by, metric, descending) in [
+            ("top_gainers", "change_percent", true),
+            ("top_losers", "change_percent", false),
+            ("top_volume", "volume_shares", true),
+        ] {
+            let (status, json) =
+                get(format!("/api/v1/market/movers?rank_by={rank_by}&limit=50")).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(json["rank_by"], rank_by);
+            let movers = json["movers"].as_array().expect("movers array");
+            for pair in movers.windows(2) {
+                let left = pair[0][metric].as_f64().expect("指標應為數值");
+                let right = pair[1][metric].as_f64().expect("指標應為數值");
+                if descending {
+                    assert!(left >= right, "{rank_by} 必須由高到低");
+                } else {
+                    assert!(left <= right, "{rank_by} 必須由低到高");
+                }
+                if left == right {
+                    assert!(
+                        pair[0]["stock_symbol"].as_str() <= pair[1]["stock_symbol"].as_str(),
+                        "{rank_by} 同值時必須依股票代號升冪"
+                    );
+                }
+            }
+        }
+
+        // 語意四：市場過濾不得混入其他市場。
+        for (market, expected_id) in [("twse", 2), ("tpex", 4)] {
+            let (status, json) = get(format!("/api/v1/market/movers?market={market}")).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(json["market"], market);
+            assert!(
+                json["movers"]
+                    .as_array()
+                    .expect("movers array")
+                    .iter()
+                    .all(|mover| mover["market_id"] == expected_id)
+            );
+        }
     }
 }

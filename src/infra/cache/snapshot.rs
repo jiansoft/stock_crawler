@@ -154,6 +154,33 @@ impl Share {
             .and_then(|cache| cache.get(symbol).cloned())
     }
 
+    /// 一次取出目前快取內的所有即時報價快照。
+    ///
+    /// 供「全市場排行」這類需要掃描整份快取的唯讀使用情境（例如 Data API 的
+    /// `/api/v1/market/movers`）呼叫。
+    ///
+    /// # 為什麼是「複製出來」而不是回傳參考或在鎖內排序？
+    ///
+    /// `stock_snapshots` 是一份 `RwLock` 保護的共用快取，盤中會被採集任務
+    /// 高頻寫入（HiStock 與 Yahoo 兩條背景任務）。如果呼叫端在持有讀鎖的
+    /// 期間做排序、過濾等運算，寫入端就必須等這些運算做完才能更新報價，
+    /// 等於用「即時性」換「少複製一次」，划不來。全市場約兩千筆
+    /// [`RealtimeSnapshot`] 的複製成本遠低於延遲即時報價寫入的代價，因此
+    /// 這裡選擇在鎖內只做複製、離開鎖之後才讓呼叫端自由運算。
+    ///
+    /// # 回傳
+    ///
+    /// - 快取內全部快照的複本；順序不保證（來源是 `HashMap`），呼叫端必須
+    ///   自行排序。
+    /// - 非交易時段（快取已被 [`Share::clear_stock_snapshots`] 清空）或讀鎖
+    ///   毒化時回傳空 `Vec`。
+    pub fn all_stock_snapshots(&self) -> Vec<RealtimeSnapshot> {
+        self.stock_snapshots
+            .read()
+            .map(|cache| cache.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// 回傳快取是否為空；收盤清空後以此辨別非交易時段。
     pub fn stock_snapshots_are_empty(&self) -> bool {
         self.stock_snapshots
@@ -206,6 +233,35 @@ mod tests {
         assert_eq!(updated.name, "台積電");
         assert_eq!(updated.source_site, "HiStock");
         assert_eq!(updated.change, Decimal::new(5, 0));
+    }
+
+    /// `all_stock_snapshots` 必須把快取內每一筆都完整複製出來（供全市場排行
+    /// 掃描），且在快取為空（非交易時段）時回傳空 `Vec` 而非 panic。
+    #[test]
+    fn all_stock_snapshots_returns_every_cached_entry() {
+        let share = Share::new();
+        // 空快取代表非交易時段：必須是空 Vec，呼叫端才能據此切換資料來源。
+        assert!(share.all_stock_snapshots().is_empty());
+
+        let mut snapshots = HashMap::new();
+        for symbol in ["2330", "2317", "6446"] {
+            let mut snapshot = RealtimeSnapshot::new(symbol.to_string(), Decimal::new(100, 0));
+            // last_close 與 price 相同可避開 `is_valid_price` 的漲跌幅過濾，
+            // 讓這個測試只驗證「複製是否完整」這件事。
+            snapshot.last_close = Decimal::new(100, 0);
+            snapshot.volume = Decimal::new(1234, 0);
+            snapshots.insert(symbol.to_string(), snapshot);
+        }
+        share.set_stock_snapshots(snapshots);
+
+        let mut symbols: Vec<String> = share
+            .all_stock_snapshots()
+            .into_iter()
+            .map(|snapshot| snapshot.symbol)
+            .collect();
+        // HashMap 不保證順序，排序後再比對，避免測試因雜湊順序偶發失敗。
+        symbols.sort();
+        assert_eq!(symbols, vec!["2317", "2330", "6446"]);
     }
 
     #[test]
