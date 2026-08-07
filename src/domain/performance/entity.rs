@@ -132,7 +132,7 @@ impl CagrPeriod {
 /// 報酬口徑。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CagrMetric {
-    /// A：純價格報酬，忽略所有除權息。
+    /// A：純價格報酬，忽略所有除權息。此口徑的 `cash_received` 恆為零。
     Price,
     /// B：含息不再投入 —— 配股自動入帳，現金股利累積不動。主指標。
     Total,
@@ -142,11 +142,7 @@ pub enum CagrMetric {
 
 impl CagrMetric {
     /// 全部口徑。
-    pub const ALL: [CagrMetric; 3] = [
-        CagrMetric::Price,
-        CagrMetric::Total,
-        CagrMetric::Reinvested,
-    ];
+    pub const ALL: [CagrMetric; 3] = [CagrMetric::Price, CagrMetric::Total, CagrMetric::Reinvested];
 
     /// API 與查詢參數使用的代碼。
     pub fn code(&self) -> &'static str {
@@ -200,7 +196,10 @@ impl DividendEvent {
 pub struct SimulationOutcome {
     /// 期末持有股數（含配股）。
     pub end_shares: Decimal,
-    /// 累積現金股利（元）。再投入口徑恆為零。
+    /// 累積現金股利（元）。
+    ///
+    /// 再投入口徑通常為零（股利都買回股數了），但除息日查無收盤價而無法買回
+    /// 時，該次股利會退回現金累積 —— 不可丟棄 —— 此時不為零。
     pub cash_received: Decimal,
     /// 期末總價值（元）。
     pub end_value: Decimal,

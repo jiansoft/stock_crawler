@@ -1,11 +1,13 @@
 use crate::infra::nosql::redis::RedisError;
 use thiserror::Error;
 
+pub mod cagr_source;
 pub mod config;
 pub mod dividend;
 pub mod financial;
 pub mod market_index;
 pub mod money_flow;
+pub mod performance;
 pub mod portfolio;
 pub mod quote;
 pub mod stock;

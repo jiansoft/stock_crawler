@@ -14,8 +14,8 @@ use utoipa_swagger_ui::SwaggerUi;
 /// 由 handler 註解生成的 OpenAPI 3 文件。
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::stock_valuation, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::ErrorBody, dto::HealthResponse)),
+    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::stock_valuation, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -103,6 +103,14 @@ pub(super) fn router() -> Router {
         .route(
             "/market/qfii-holding-ranking",
             axum::routing::get(handlers::qfii_holding_ranking),
+        )
+        .route(
+            "/market/cagr-ranking",
+            axum::routing::get(handlers::cagr_ranking),
+        )
+        .route(
+            "/market/cagr-ranking/{stock_symbol}",
+            axum::routing::get(handlers::cagr_by_symbol),
         )
         .layer(middleware::from_fn(auth::require_bearer_key));
     Router::new()
@@ -260,6 +268,8 @@ mod tests {
             "/api/v1/market/index-history",
             "/api/v1/market/dividend-calendar",
             "/api/v1/market/qfii-holding-ranking",
+            "/api/v1/market/cagr-ranking",
+            "/api/v1/market/cagr-ranking/{stock_symbol}",
             "/api/v1/healthz",
         ] {
             assert!(json.contains(path), "OpenAPI should contain {path}");
@@ -934,6 +944,357 @@ mod tests {
                 response.status(),
                 StatusCode::UNAUTHORIZED,
                 "{path} 應回 401"
+            );
+        }
+    }
+
+    /// M4 每日 CAGR 兩條 path 的 OpenAPI 契約：responses、白名單 enum、
+    /// 預設值與陣列 item；並釘住「所有金額與比率為字串」這條前端契約。
+    #[test]
+    fn openapi_cagr_schemas_pin_field_names() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+
+        let ranking = get_operation(&document, "/api/v1/market/cagr-ranking");
+        assert_endpoint_responses(ranking, "CagrRankingResponse", true);
+        let period = query_schema(ranking, "period");
+        assert_eq!(period["default"], "Y1");
+        assert_eq!(
+            enum_values(&document, period),
+            serde_json::json!(["M3", "M6", "Y1", "Y1H", "Y2", "Y3", "Y5", "Y10"])
+        );
+        let metric = query_schema(ranking, "metric");
+        assert_eq!(metric["default"], "total");
+        assert_eq!(
+            enum_values(&document, metric),
+            serde_json::json!(["price", "total", "reinvested"])
+        );
+        assert_eq!(
+            enum_values(&document, query_schema(ranking, "sort")),
+            serde_json::json!(["cagr", "total_return"])
+        );
+        assert_eq!(query_schema(ranking, "market")["default"], "all");
+        assert_eq!(query_schema(ranking, "stock_industry_id")["minimum"], 1);
+        assert_eq!(query_schema(ranking, "include_incomplete")["default"], true);
+        let limit = query_schema(ranking, "limit");
+        assert_eq!(limit["default"], 50);
+        assert_eq!(limit["minimum"], 1);
+        assert_eq!(limit["maximum"], 200);
+        let offset = query_schema(ranking, "offset");
+        assert_eq!(offset["default"], 0);
+        assert_eq!(offset["minimum"], 0);
+
+        let properties = &document["components"]["schemas"]["CagrRankingResponse"]["properties"];
+        assert_eq!(properties["items"]["type"], "array");
+        assert_eq!(
+            properties["items"]["items"]["$ref"],
+            "#/components/schemas/CagrRankingItem"
+        );
+        // principal 與各種計數是整數，維持 JSON number。
+        assert_eq!(properties["principal"]["type"], "integer");
+        assert_eq!(properties["total"]["type"], "integer");
+        // base_date／years 在整頁皆資料不足時為 null。
+        assert!(properties["base_date"].to_string().contains("null"));
+        assert!(properties["years"].to_string().contains("null"));
+
+        // §M4 契約核心：Decimal 一律字串，計數一律整數。
+        let coverage = &document["components"]["schemas"]["CagrCoverageInfo"]["properties"];
+        assert_eq!(coverage["coverage_ratio"]["type"], "string");
+        assert_eq!(coverage["universe"]["type"], "integer");
+        assert_eq!(coverage["counted"]["type"], "integer");
+        assert_eq!(coverage["survivorship_note"]["type"], "boolean");
+        let summary = &document["components"]["schemas"]["CagrSummary"]["properties"];
+        assert_eq!(summary["positive"]["type"], "integer");
+        assert_eq!(summary["positive_ratio"]["type"], "string");
+
+        let item = &document["components"]["schemas"]["CagrRankingItem"]["properties"];
+        for field in [
+            "base_price",
+            "end_price",
+            "end_shares",
+            "cash_received",
+            "end_value",
+            "total_return_pct",
+            "cagr_pct",
+        ] {
+            let schema = item[field].to_string();
+            assert!(schema.contains("string"), "{field} 必須序列化為字串");
+            assert!(schema.contains("null"), "{field} 資料不足時必須可為 null");
+        }
+        assert!(item["rank"].to_string().contains("null"));
+        assert_eq!(item["dividend_events"]["type"], "integer");
+        assert_eq!(item["data_complete"]["type"], "boolean");
+        assert_eq!(item["stock_industry_id"]["type"], "integer");
+
+        // 個股端點：items 是 CagrPeriodItem（多 period、無 rank）。
+        let symbol = get_operation(&document, "/api/v1/market/cagr-ranking/{stock_symbol}");
+        assert_endpoint_responses(symbol, "CagrSymbolResponse", true);
+        assert_eq!(query_schema(symbol, "metric")["default"], "total");
+        let symbol_properties =
+            &document["components"]["schemas"]["CagrSymbolResponse"]["properties"];
+        assert_eq!(symbol_properties["items"]["type"], "array");
+        assert_eq!(
+            symbol_properties["items"]["items"]["$ref"],
+            "#/components/schemas/CagrPeriodItem"
+        );
+        let period_item = &document["components"]["schemas"]["CagrPeriodItem"]["properties"];
+        assert_eq!(period_item["period"]["type"], "string");
+        assert!(period_item["years"].to_string().contains("string"));
+        assert!(
+            period_item.get("rank").is_none(),
+            "個股端點的項目不應有 rank"
+        );
+    }
+
+    /// M4 兩個 endpoint 都必須在 middleware 層拒絕未授權請求。
+    #[tokio::test]
+    async fn cagr_endpoints_reject_missing_bearer_key() {
+        for path in [
+            "/api/v1/market/cagr-ranking",
+            "/api/v1/market/cagr-ranking/2330",
+        ] {
+            let response = router()
+                .oneshot(
+                    Request::get(path)
+                        .body(Body::empty())
+                        .expect("request should build"),
+                )
+                .await
+                .expect("router should serve request");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{path} 應回 401"
+            );
+        }
+    }
+
+    /// M4 參數驗證一律在觸及資料庫之前完成，因此此測試不需要 PostgreSQL。
+    ///
+    /// 最關鍵的是 `Y5`／`Y10` 搭配 `metric=price` 必須回 422：近十年每年皆有
+    /// 134–216 檔股票配股，長期間忽略配股的低估幅度顯著，不能默默回答。
+    #[tokio::test]
+    async fn cagr_ranking_rejects_invalid_parameters_before_any_query() {
+        // Auth middleware 讀環境變數 DATA_API_KEY；測試環境沒設定時自行
+        // 補一組（CI 以 --test-threads=1 執行，無資料競爭疑慮）。
+        let key = std::env::var("DATA_API_KEY").unwrap_or_else(|_| {
+            let generated = "cagr-param-test-key".to_owned();
+            unsafe { std::env::set_var("DATA_API_KEY", &generated) };
+            generated
+        });
+        for path in [
+            // 期間、口徑、排序鍵的白名單。
+            "/api/v1/market/cagr-ranking?period=Y7",
+            "/api/v1/market/cagr-ranking?period=y1",
+            "/api/v1/market/cagr-ranking?metric=cash",
+            "/api/v1/market/cagr-ranking?sort=return",
+            // 長期間不提供純價格口徑。
+            "/api/v1/market/cagr-ranking?period=Y5&metric=price",
+            "/api/v1/market/cagr-ranking?period=Y10&metric=price",
+            // 市場、產業、關鍵字、分頁與日期。
+            "/api/v1/market/cagr-ranking?market=emerging",
+            "/api/v1/market/cagr-ranking?stock_industry_id=0",
+            "/api/v1/market/cagr-ranking?limit=0",
+            "/api/v1/market/cagr-ranking?limit=201",
+            "/api/v1/market/cagr-ranking?date=2026-8-6",
+            // 個股端點共用同一組解析器。
+            "/api/v1/market/cagr-ranking/2330?metric=cash",
+            "/api/v1/market/cagr-ranking/2330?date=2026-08-6",
+        ] {
+            let response = router()
+                .oneshot(
+                    Request::get(path)
+                        .header("Authorization", format!("Bearer {key}"))
+                        .body(Body::empty())
+                        .expect("request should build"),
+                )
+                .await
+                .expect("router should serve request");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{path} 應回 422"
+            );
+        }
+        // 短期間可用純價格口徑這條正向路徑會觸及資料庫，交由整合測試
+        // （cagr_endpoints_db_semantics）驗證，此處刻意不發出該請求。
+    }
+
+    /// M4 兩個 endpoint 的真實資料庫語意整合測試（唯讀，不建立任何 fixture）。
+    ///
+    /// 驗證：全市場名次不受篩選影響且遞增、資料不足項目 `rank` 為 null 且
+    /// 排在最後、金額欄位序列化為字串、涵蓋率分母正確，以及個股端點回傳
+    /// 全部八個期間並依期間長度排序。M3 排程尚未產出資料時安全跳過。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn cagr_endpoints_db_semantics() {
+        dotenvy::dotenv().ok();
+        if sqlx::query("SELECT 1")
+            .execute(crate::infra::database::get_connection())
+            .await
+            .is_err()
+        {
+            println!("跳過 cagr_endpoints_db_semantics：無資料庫連接");
+            return;
+        }
+        let key = std::env::var("DATA_API_KEY").unwrap_or_else(|_| {
+            let generated = "cagr-integration-test-key".to_owned();
+            unsafe { std::env::set_var("DATA_API_KEY", &generated) };
+            generated
+        });
+        let get = |path: String| {
+            let key = key.clone();
+            async move {
+                let response = router()
+                    .oneshot(
+                        Request::get(&path)
+                            .header("Authorization", format!("Bearer {key}"))
+                            .body(Body::empty())
+                            .expect("request should build"),
+                    )
+                    .await
+                    .expect("router should serve request");
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("body should be readable");
+                let json: serde_json::Value =
+                    serde_json::from_slice(&bytes).expect("body should be JSON");
+                (status, json)
+            }
+        };
+
+        // 先以「必然無資料的基準日」跑一次完整查詢：即使排程尚未產出任何
+        // 結果，這條路徑仍會把排行 SQL（CTE、視窗函式、三個篩選、分頁）
+        // 送進 PostgreSQL，語法或欄位錯誤會立刻現形。
+        for path in [
+            "/api/v1/market/cagr-ranking?date=1990-01-02&period=Y1",
+            "/api/v1/market/cagr-ranking?date=1990-01-02&period=M3&sort=total_return",
+            "/api/v1/market/cagr-ranking?date=1990-01-02&period=Y3&metric=price&market=twse",
+            "/api/v1/market/cagr-ranking?date=1990-01-02&metric=reinvested&stock_industry_id=24",
+            "/api/v1/market/cagr-ranking?date=1990-01-02&keyword=%E5%8F%B0%E7%A9%8D&offset=10",
+            "/api/v1/market/cagr-ranking?date=1990-01-02&include_incomplete=false&limit=200",
+        ] {
+            let (status, json) = get(path.to_owned()).await;
+            assert_eq!(status, StatusCode::OK, "{path} 應能在真實 schema 執行");
+            assert_eq!(json["items"], serde_json::json!([]));
+            assert_eq!(json["total"], 0);
+            assert_eq!(json["coverage"]["universe"], 0);
+            assert_eq!(json["base_date"], serde_json::Value::Null);
+            assert_eq!(json["coverage"]["coverage_ratio"], "0.0000");
+            assert_eq!(json["summary"]["positive_ratio"], "0.0000");
+        }
+
+        let (status, json) = get("/api/v1/market/cagr-ranking?period=Y1&limit=50".to_owned()).await;
+        if status == StatusCode::NOT_FOUND {
+            println!("跳過 cagr_endpoints_db_semantics：stock_cagr 尚無計算結果");
+            return;
+        }
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["period"], "Y1");
+        assert_eq!(json["metric"], "total");
+        assert_eq!(json["sort"], "cagr", "Y1 預設應以年化報酬率排序");
+        assert_eq!(json["principal"], 10_000);
+        assert_eq!(json["coverage"]["survivorship_note"], false);
+        // 比率一律是字串（四位小數），不可是 JSON number。
+        for pointer in ["/coverage/coverage_ratio", "/summary/positive_ratio"] {
+            let value = json.pointer(pointer).expect("ratio 欄位應存在");
+            assert!(value.is_string(), "{pointer} 必須序列化為字串");
+        }
+
+        let items = json["items"].as_array().expect("items array");
+        let mut previous_rank = 0_i64;
+        let mut seen_incomplete = false;
+        for item in items {
+            match item["rank"].as_i64() {
+                Some(rank) => {
+                    assert!(!seen_incomplete, "資料不足的項目必須排在所有可算項目之後");
+                    assert!(rank > previous_rank, "名次必須嚴格遞增");
+                    assert!(item["data_complete"].as_bool().unwrap_or(false));
+                    assert!(item["cagr_pct"].is_string(), "金額與比率必須是字串");
+                    assert!(item["end_shares"].is_string());
+                    previous_rank = rank;
+                }
+                None => {
+                    seen_incomplete = true;
+                    // 查得到但算不出來：列仍在，數值欄位為 null。
+                    assert!(item["cagr_pct"].is_null());
+                    assert!(item["end_value"].is_null());
+                    assert!(item["stock_symbol"].is_string());
+                }
+            }
+        }
+
+        // 全市場名次：套用產業篩選後，名次仍是未篩選的完整市場排名，
+        // 因此第一筆的 rank 只會 >= 未篩選時的第一筆。
+        if let Some(industry) = items
+            .iter()
+            .find(|item| item["rank"].as_i64() == Some(1))
+            .and_then(|item| item["stock_industry_id"].as_i64())
+        {
+            let (status, filtered) = get(format!(
+                "/api/v1/market/cagr-ranking?period=Y1&stock_industry_id={industry}&limit=50"
+            ))
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(
+                filtered["coverage"], json["coverage"],
+                "涵蓋統計不隨畫面篩選變動"
+            );
+            assert!(
+                filtered["total"].as_i64() <= json["total"].as_i64(),
+                "篩選後的 total 不可大於未篩選"
+            );
+            if let Some(first) = filtered["items"]
+                .as_array()
+                .and_then(|list| list.first())
+                .and_then(|item| item["rank"].as_i64())
+            {
+                assert!(first >= 1, "篩選後的名次仍是全市場名次");
+            }
+        }
+
+        // Y10 + price 由 handler 在任何 SQL 之前擋下。
+        let (status, _) =
+            get("/api/v1/market/cagr-ranking?period=Y10&metric=price".to_owned()).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Y10 的揭露旗標必須為 true。
+        let (status, json) = get("/api/v1/market/cagr-ranking?period=Y10&limit=1".to_owned()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["coverage"]["survivorship_note"], true);
+
+        // 個股端點：未知代號 404；已知代號回傳全部八個期間且由短至長。
+        let (status, _) = get("/api/v1/market/cagr-ranking/NO_SUCH_SYMBOL".to_owned()).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        if let Some(symbol) = items
+            .first()
+            .and_then(|item| item["stock_symbol"].as_str())
+            .map(str::to_owned)
+        {
+            let (status, json) = get(format!("/api/v1/market/cagr-ranking/{symbol}")).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(json["stock_symbol"], symbol);
+            let periods: Vec<&str> = json["items"]
+                .as_array()
+                .expect("items array")
+                .iter()
+                .map(|item| item["period"].as_str().expect("period string"))
+                .collect();
+            assert_eq!(
+                periods,
+                vec!["M3", "M6", "Y1", "Y1H", "Y2", "Y3", "Y5", "Y10"],
+                "個股端點必須回傳全部八個期間且依期間長度排序"
+            );
+            assert!(
+                json["items"]
+                    .as_array()
+                    .expect("items array")
+                    .iter()
+                    .all(|item| item["rank"].is_null()),
+                "個股端點的項目不應有名次"
             );
         }
     }

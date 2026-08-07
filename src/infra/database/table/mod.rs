@@ -6,6 +6,8 @@ pub mod financial;
 pub mod index;
 /// 資金流向與會員市值資料表。
 pub mod money_flow;
+/// 績效指標（每日 CAGR）資料表。
+pub mod performance;
 /// 報價、歷史報價與統計資料表。
 pub mod quote;
 /// 股票主檔。

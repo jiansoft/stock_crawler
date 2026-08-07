@@ -9,6 +9,7 @@ use crate::{
         delisted_company, dividend, etf, financial_statement, isin, net_asset_value_per_share,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
+    app::calculation,
     app::event,
     // 通知一律走 core::alert 抽象介面（port）：app 層不 import
     // interfaces::bot（傳輸層細節），實際的 Telegram adapter 由 main 啟動時註冊。
@@ -125,6 +126,14 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
         ),
         // 05:30 更新台股 ETF 資訊
         create_job("0 30 5 * * *", "更新台股 ETF 資訊", etf::execute),
+        // 05:40 計算各期間年化報酬率(CAGR)
+        // 必須排在 21:00 年度配息回補與 05:00~05:30 各項回補之後，
+        // 否則當日結果會少算前一晚才補進來的股利
+        create_job(
+            "0 40 5 * * *",
+            "計算各期間年化報酬率(CAGR)",
+            calculation::cagr::execute_scheduled,
+        ),
         // 08:00 提醒本日除權息與明日預計除權息的股票
         create_job(
             "0 0 8 * * *",
