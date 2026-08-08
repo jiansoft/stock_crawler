@@ -2,7 +2,9 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 
-use crate::domain::performance::entity::{DividendEvent, PAR_VALUE, SimulationOutcome};
+use crate::domain::performance::entity::{
+    CorporateAction, DividendEvent, PAR_VALUE, SimulationOutcome,
+};
 
 /// 模擬所需的輸入。
 ///
@@ -22,6 +24,11 @@ pub struct SimulationInput<'a> {
     pub end_price: Decimal,
     /// 期間內的除權息事件。呼叫端不需預先排序。
     pub events: &'a [DividendEvent],
+    /// 期間內的公司行動（分割／減資）。呼叫端不需預先排序也不需先過濾期間。
+    ///
+    /// 報價是原始成交價，這些事件會讓價格出現無法用除權息解釋的跳動；
+    /// 不套用的話跨越分割日的報酬率會嚴重失真。
+    pub corporate_actions: &'a [CorporateAction],
     /// 各除息日的收盤價，供「含息再投入」口徑買回股數之用。
     ///
     /// 查無該日價格時該次股利改為現金累積，不強制再投入。
@@ -53,19 +60,26 @@ enum ActionKind {
     Cash,
     /// 除權（發放股票股利）。
     Stock,
+    /// 公司行動（分割／減資）造成的股數變動。
+    ///
+    /// 同日時排在除權息之後：現金與股票股利都以「事件前」的股數計算，
+    /// 分割改變的是之後的持股基數。
+    Split,
 }
 
-/// 拆解後的單一除權息動作。
+/// 拆解後的單一動作。
 #[derive(Debug, Clone, Copy)]
 struct DividendAction {
     /// 動作發生日。
     date: NaiveDate,
     /// 動作種類。
     kind: ActionKind,
-    /// 每股金額（現金股利元數，或股票股利元數）。
+    /// 每股金額（現金股利元數、股票股利元數），或分割的股數變動比例。
     amount: Decimal,
     /// 來源事件在 `events` 中的索引，用於統計採計事件筆數。
-    event_index: usize,
+    ///
+    /// 公司行動不是除權息，不列入 `dividend_events`，因此為 `None`。
+    event_index: Option<usize>,
 }
 
 /// 依固定投入金額模擬三種口徑的期末價值與報酬率。
@@ -135,7 +149,7 @@ pub fn simulate(input: &SimulationInput<'_>) -> Option<SimulationResult> {
                 date,
                 kind: ActionKind::Cash,
                 amount: event.cash_dividend,
-                event_index: index,
+                event_index: Some(index),
             });
         }
 
@@ -148,12 +162,28 @@ pub fn simulate(input: &SimulationInput<'_>) -> Option<SimulationResult> {
                 date,
                 kind: ActionKind::Stock,
                 amount: event.stock_dividend,
-                event_index: index,
+                event_index: Some(index),
             });
         }
     }
 
-    // ── 步驟二：混合後依「日期 → 種類（除息先於除權）」排序 ────────────
+    // 公司行動同樣拆成帶日期的動作；生效日落在 (base_date, end_date] 內才適用。
+    // 期初日當天生效者不算：那天的報價已經是調整後價格，再乘一次會重複計算。
+    for action in input.corporate_actions {
+        if action.share_ratio > Decimal::ZERO
+            && action.effective_date > input.base_date
+            && action.effective_date <= input.end_date
+        {
+            actions.push(DividendAction {
+                date: action.effective_date,
+                kind: ActionKind::Split,
+                amount: action.share_ratio,
+                event_index: None,
+            });
+        }
+    }
+
+    // ── 步驟二：混合後依「日期 → 種類（除息 → 除權 → 分割）」排序 ──────
     actions.sort_by_key(|action| (action.date, action.kind));
 
     // ── 步驟三：逐筆套用，口徑 B 與 C 共用骨架但各自維護狀態 ───────────
@@ -165,6 +195,9 @@ pub fn simulate(input: &SimulationInput<'_>) -> Option<SimulationResult> {
     // 口徑 C：含息再投入。
     let mut reinvested_shares = base_shares;
     let mut reinvested_cash = Decimal::ZERO;
+    // 口徑 A：純價格。忽略除權息，但**不能**忽略分割 —— 分割不是報酬，
+    // 是同一筆持股換算成不同股數，不調整等於平白虧掉四分之三。
+    let mut price_shares = base_shares;
 
     // 採計事件的索引集合（動作數 ≠ 事件數，故需去重）。
     let mut counted_events: Vec<usize> = Vec::with_capacity(actions.len());
@@ -190,19 +223,27 @@ pub fn simulate(input: &SimulationInput<'_>) -> Option<SimulationResult> {
                 total_shares += total_shares * rate;
                 reinvested_shares += reinvested_shares * rate;
             }
+            ActionKind::Split => {
+                // 分割／減資：三個口徑的持股都按同一比例換算。
+                total_shares *= action.amount;
+                reinvested_shares *= action.amount;
+                price_shares *= action.amount;
+            }
         }
 
-        if !counted_events.contains(&action.event_index) {
-            counted_events.push(action.event_index);
+        if let Some(index) = action.event_index
+            && !counted_events.contains(&index)
+        {
+            counted_events.push(index);
         }
     }
 
     // ── 步驟四：期末結算 ────────────────────────────────────────────
     let price_outcome = build_outcome(
         input.principal,
-        base_shares,
+        price_shares,
         Decimal::ZERO,
-        base_shares * input.end_price,
+        price_shares * input.end_price,
         years,
     )?;
     let total_outcome = build_outcome(
@@ -324,6 +365,32 @@ mod tests {
         base_price: Decimal,
         end_price: Decimal,
         events: &'a [DividendEvent],
+        /// 期間內的公司行動；多數案例為空。
+        corporate_actions: &'a [CorporateAction],
+    }
+
+    impl Case<'_> {
+        /// 一年期、無除權息也無公司行動的基準情境。
+        fn plain(base_price: Decimal, end_price: Decimal) -> Self {
+            Case {
+                base_date: date(2020, 1, 2),
+                end_date: date(2021, 1, 2),
+                base_price,
+                end_price,
+                events: &[],
+                corporate_actions: &[],
+            }
+        }
+    }
+
+    /// 建立一筆公司行動。
+    fn corporate_action(effective_date: NaiveDate, share_ratio: Decimal) -> CorporateAction {
+        CorporateAction {
+            stock_symbol: "0050".to_string(),
+            effective_date,
+            share_ratio,
+            note: String::new(),
+        }
     }
 
     /// 以「再投入永遠查得到固定價格」的方式執行模擬。
@@ -339,6 +406,7 @@ mod tests {
             base_price: case.base_price,
             end_price: case.end_price,
             events: case.events,
+            corporate_actions: case.corporate_actions,
             reinvest_prices: &lookup,
         };
         simulate(&input)
@@ -353,6 +421,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(150),
             events: &[],
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, Some(dec!(120))).expect("應可計算");
 
@@ -375,6 +444,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
         };
         // 再投入查價回傳 None，讓口徑 C 也走現金累積，方便與 B 對照。
         let result = run_with_price(&case, None).expect("應可計算");
@@ -400,6 +470,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, Some(dec!(90))).expect("應可計算");
 
@@ -431,6 +502,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, None).expect("應可計算");
 
@@ -457,6 +529,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, None).expect("應可計算");
 
@@ -478,6 +551,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, None).expect("應可計算");
 
@@ -511,6 +585,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, None).expect("應可計算");
 
@@ -542,12 +617,143 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, None).expect("應可計算");
 
         // 只有期末當日那筆生效：100 股 × 3 元 = 300 元。
         assert_eq!(result.total.cash_received, dec!(300));
         assert_eq!(result.dividend_events, 1);
+    }
+
+    /// 分割：三個口徑的持股都按比例換算，報酬率不受影響。
+    ///
+    /// 這正是 0050 在 2025-06-18 的情形——期初 188.65、期末 47.57 看似
+    /// 大跌，實際上是 1 股換 4 股，持股價值幾乎不變。
+    #[test]
+    fn test_split_scales_shares_in_every_metric() {
+        let actions = [corporate_action(date(2020, 6, 18), dec!(4))];
+        let case = Case {
+            corporate_actions: &actions,
+            ..Case::plain(dec!(200), dec!(50))
+        };
+
+        let result = run_with_price(&case, None).expect("應可計算");
+
+        // 期初 10000/200 = 50 股，分割後 200 股，期末 200 × 50 = 10000。
+        assert_eq!(result.price.end_shares, dec!(200));
+        assert_eq!(result.price.end_value, dec!(10000));
+        assert_eq!(result.price.total_return_pct, Decimal::ZERO);
+        assert_eq!(result.total.end_shares, dec!(200));
+        assert_eq!(result.reinvested.end_shares, dec!(200));
+        // 分割不是除權息，不列入事件數。
+        assert_eq!(result.dividend_events, 0);
+    }
+
+    /// 沒有登錄分割時，同一情境會被算成 −75% —— 這正是要修正的錯誤。
+    #[test]
+    fn test_without_the_split_the_return_is_catastrophically_wrong() {
+        let result = run_with_price(&Case::plain(dec!(200), dec!(50)), None).expect("應可計算");
+
+        assert_eq!(result.price.end_shares, dec!(50));
+        assert_eq!(result.price.end_value, dec!(2500));
+        assert_eq!(result.price.total_return_pct, dec!(-75));
+    }
+
+    /// 減資：比例小於 1，股數等比例縮減。
+    #[test]
+    fn test_capital_reduction_shrinks_shares() {
+        // 減資三成：1,000 股變 700 股，參考價相應上調。
+        let actions = [corporate_action(date(2020, 6, 18), dec!(0.7))];
+        let case = Case {
+            corporate_actions: &actions,
+            ..Case::plain(dec!(70), dec!(100))
+        };
+
+        let result = run_with_price(&case, None).expect("應可計算");
+
+        // 期初 10000/70 股 × 0.7 = 100 股，期末 100 × 100 = 10000。
+        assert_eq!(result.price.end_shares, dec!(100));
+        assert_eq!(result.price.end_value, dec!(10000));
+        assert_eq!(result.price.total_return_pct, Decimal::ZERO);
+    }
+
+    /// 區間外的公司行動不得生效，期初日當天生效者也不算。
+    #[test]
+    fn test_corporate_actions_outside_the_window_are_ignored() {
+        let actions = [
+            // 期初日之前。
+            corporate_action(date(2019, 6, 1), dec!(4)),
+            // 期初日當天：該日報價已是調整後價格，再乘一次會重複計算。
+            corporate_action(date(2020, 1, 2), dec!(4)),
+            // 期末日之後。
+            corporate_action(date(2021, 6, 1), dec!(4)),
+        ];
+        let case = Case {
+            corporate_actions: &actions,
+            ..Case::plain(dec!(100), dec!(100))
+        };
+
+        let result = run_with_price(&case, None).expect("應可計算");
+
+        assert_eq!(result.price.end_shares, dec!(100));
+        assert_eq!(result.price.total_return_pct, Decimal::ZERO);
+    }
+
+    /// 期末日當天生效的分割仍要採計（左開右閉）。
+    #[test]
+    fn test_split_on_the_end_date_is_applied() {
+        let actions = [corporate_action(date(2021, 1, 2), dec!(2))];
+        let case = Case {
+            corporate_actions: &actions,
+            ..Case::plain(dec!(100), dec!(50))
+        };
+
+        let result = run_with_price(&case, None).expect("應可計算");
+
+        assert_eq!(result.price.end_shares, dec!(200));
+        assert_eq!(result.price.total_return_pct, Decimal::ZERO);
+    }
+
+    /// 同日除息與分割：現金股利以分割前的股數計算。
+    #[test]
+    fn test_dividend_on_the_split_date_uses_pre_split_shares() {
+        let events = [DividendEvent {
+            stock_symbol: "0050".to_string(),
+            ex_dividend_date_cash: Some(date(2020, 6, 18)),
+            ex_dividend_date_stock: None,
+            cash_dividend: dec!(2),
+            stock_dividend: Decimal::ZERO,
+        }];
+        let actions = [corporate_action(date(2020, 6, 18), dec!(4))];
+        let case = Case {
+            events: &events,
+            corporate_actions: &actions,
+            ..Case::plain(dec!(200), dec!(50))
+        };
+
+        let result = run_with_price(&case, None).expect("應可計算");
+
+        // 除息基數是分割前的 50 股 → 現金 100 元；若誤用分割後的 200 股
+        // 會得到 400 元，把配息灌成四倍。
+        assert_eq!(result.total.cash_received, dec!(100));
+        assert_eq!(result.total.end_shares, dec!(200));
+        assert_eq!(result.dividend_events, 1);
+    }
+
+    /// 比例為零或負數的登錄錯誤一律略過，不得讓持股歸零。
+    #[test]
+    fn test_non_positive_ratio_is_ignored() {
+        for ratio in [Decimal::ZERO, dec!(-2)] {
+            let actions = [corporate_action(date(2020, 6, 18), ratio)];
+            let case = Case {
+                corporate_actions: &actions,
+                ..Case::plain(dec!(100), dec!(100))
+            };
+
+            let result = run_with_price(&case, None).expect("應可計算");
+            assert_eq!(result.price.end_shares, dec!(100), "ratio={ratio}");
+        }
     }
 
     /// 8. 非法輸入一律回傳 `None`。
@@ -561,6 +767,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &[],
+            corporate_actions: &[],
             reinvest_prices: &lookup,
         };
 
@@ -618,6 +825,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
             reinvest_prices: &lookup,
         };
         let result = simulate(&input).expect("應可計算");
@@ -657,6 +865,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(200),
             events: &events,
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, None).expect("應可計算");
 
@@ -724,6 +933,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, None).expect("應可計算");
 
@@ -748,6 +958,7 @@ mod tests {
             base_price: dec!(100),
             end_price: dec!(100),
             events: &events,
+            corporate_actions: &[],
         };
         let result = run_with_price(&case, None).expect("應可計算");
 

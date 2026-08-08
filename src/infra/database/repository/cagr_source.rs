@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use sqlx::Row;
 
-use crate::domain::performance::{DividendEvent, source::CagrSourceRepository};
+use crate::domain::performance::{CorporateAction, DividendEvent, source::CagrSourceRepository};
 use crate::infra::database;
 
 /// `DailyQuotes."Date"` 的預設哨兵值下界。
@@ -284,6 +284,37 @@ impl CagrSourceRepository for PgCagrSourceRepository {
             .collect()
     }
 
+    async fn fetch_corporate_actions_since(
+        &self,
+        since: NaiveDate,
+    ) -> Result<Vec<CorporateAction>> {
+        // 比例非正數的列直接在 SQL 濾掉：那是登錄錯誤（0 會讓持股歸零、
+        // 負數毫無意義），寧可當成「沒登錄」也不要算出錯誤的報酬率。
+        let sql = r#"
+            SELECT stock_symbol, effective_date, share_ratio, note
+            FROM corporate_action
+            WHERE effective_date > $1 AND share_ratio > 0
+            ORDER BY stock_symbol, effective_date
+        "#;
+
+        let rows = sqlx::query(sql)
+            .bind(since)
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch corporate actions")?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(CorporateAction {
+                    stock_symbol: row.try_get::<String, _>("stock_symbol")?,
+                    effective_date: row.try_get::<NaiveDate, _>("effective_date")?,
+                    share_ratio: row.try_get::<Decimal, _>("share_ratio")?,
+                    note: row.try_get::<String, _>("note")?,
+                })
+            })
+            .collect()
+    }
+
     async fn fetch_anomaly_events(
         &self,
         from: NaiveDate,
@@ -325,6 +356,15 @@ impl CagrSourceRepository for PgCagrSourceRepository {
                         d."ex-dividend_date1" = to_char(j."Date", 'YYYY-MM-DD')
                      OR d."ex-dividend_date2" = to_char(j."Date", 'YYYY-MM-DD')
                   )
+            )
+            -- 已登錄的分割／減資是「已建模」的事件，模擬時會正確調整股數，
+            -- 不該再標記為異常——否則旗標會一直亮著，使用者無從分辨哪些
+            -- 才是真正未處理的問題。
+            AND NOT EXISTS (
+                SELECT 1
+                FROM corporate_action ca
+                WHERE ca.stock_symbol = j.stock_symbol
+                  AND ca.effective_date = j."Date"
             )
         "#;
 
@@ -387,6 +427,24 @@ mod tests {
             .bind(&symbols)
             .execute(database::get_connection())
             .await;
+        let _ = sqlx::query("DELETE FROM corporate_action WHERE stock_symbol = ANY($1)")
+            .bind(&symbols)
+            .execute(database::get_connection())
+            .await;
+    }
+
+    async fn insert_corporate_action(symbol: &str, date: NaiveDate, ratio: Decimal) {
+        sqlx::query(
+            r#"INSERT INTO corporate_action (stock_symbol, effective_date, action_type, share_ratio, note)
+               VALUES ($1, $2, 'split', $3, '測試用')
+               ON CONFLICT (stock_symbol, effective_date) DO UPDATE SET share_ratio = excluded.share_ratio"#,
+        )
+        .bind(symbol)
+        .bind(date)
+        .bind(ratio)
+        .execute(database::get_connection())
+        .await
+        .expect("插入公司行動");
     }
 
     async fn insert_quote(symbol: &str, date: NaiveDate, close: Decimal) {
@@ -726,6 +784,69 @@ mod tests {
                 .any(|(symbol, date)| symbol == FAKE_A && *date == day(5)),
             "區間起點之後才計算跳動，起點當天不應再被標記"
         );
+
+        cleanup().await;
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn test_corporate_actions_are_fetched_and_suppress_anomaly_flags() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!(
+                "跳過 test_corporate_actions_are_fetched_and_suppress_anomaly_flags：無資料庫連接"
+            );
+            return;
+        }
+        seed().await;
+        let repo = PgCagrSourceRepository::new();
+
+        // 尚未登錄時，01-05 那次 87.5% 的跳動會被標記為異常。
+        let before = repo
+            .fetch_anomaly_events(day(2), day(8))
+            .await
+            .expect("fetch_anomaly_events");
+        assert!(
+            before
+                .iter()
+                .any(|(symbol, date)| symbol == FAKE_A && *date == day(5))
+        );
+
+        insert_corporate_action(FAKE_A, day(5), dec!(0.5)).await;
+
+        let actions = repo
+            .fetch_corporate_actions_since(day(1))
+            .await
+            .expect("fetch_corporate_actions_since");
+        let mine: Vec<&CorporateAction> = actions
+            .iter()
+            .filter(|action| action.stock_symbol == FAKE_A)
+            .collect();
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].effective_date, day(5));
+        assert_eq!(mine[0].share_ratio, dec!(0.5));
+
+        // 登錄之後同一天不得再被視為異常——事件已建模，旗標應該熄滅。
+        let after = repo
+            .fetch_anomaly_events(day(2), day(8))
+            .await
+            .expect("fetch_anomaly_events again");
+        assert!(
+            !after
+                .iter()
+                .any(|(symbol, date)| symbol == FAKE_A && *date == day(5)),
+            "已登錄的分割不該再被標記為疑似異常"
+        );
+
+        // since 之後才生效者才回傳。
+        let later = repo
+            .fetch_corporate_actions_since(day(5))
+            .await
+            .expect("fetch_corporate_actions_since later");
+        assert!(!later.iter().any(|action| action.stock_symbol == FAKE_A));
 
         cleanup().await;
     }

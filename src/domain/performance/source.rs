@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
-use crate::domain::performance::entity::DividendEvent;
+use crate::domain::performance::entity::{CorporateAction, DividendEvent};
 
 /// CAGR 計算所需的原始資料來源介面。
 ///
@@ -68,6 +68,15 @@ pub trait CagrSourceRepository: Send + Sync {
         &self,
         pairs: &[(String, NaiveDate)],
     ) -> Result<Vec<(String, NaiveDate, Decimal)>>;
+
+    /// 取得指定日期之後所有已登錄的公司行動（分割／減資）。
+    ///
+    /// 這張表是人工維護的：ETF 的受益權單位分割不在除權息表內，也沒有可靠的
+    /// 公開端點可自動匯入。內容雖少（一年數十筆），但少了它，跨越分割日的
+    /// 報酬率會嚴重失真 —— 2025-06-18 元大台灣50 的 1:4 分割會讓兩年期
+    /// 報酬顯示為 −38%。
+    async fn fetch_corporate_actions_since(&self, since: NaiveDate)
+    -> Result<Vec<CorporateAction>>;
 
     /// 找出指定期間內疑似減資或分割的「事件」，回傳 (股票代號, 發生日)。
     ///

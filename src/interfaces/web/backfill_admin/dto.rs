@@ -66,6 +66,40 @@ pub(super) struct CagrPeriodRequest {
     pub(super) period: String,
 }
 
+/// 公司行動登錄的 HTTP request body。
+#[derive(Debug, Deserialize)]
+pub(super) struct CorporateActionRequest {
+    /// 股票代號。
+    pub(super) stock_symbol: String,
+    /// 生效日（換發後恢復交易的第一個交易日），格式 `YYYY-MM-DD`。
+    pub(super) effective_date: String,
+    /// 股數變動比例：持有 1 股在事件後變成幾股。
+    pub(super) share_ratio: String,
+    /// 備註。
+    #[serde(default)]
+    pub(super) note: String,
+}
+
+/// 公司行動登錄成功時的 HTTP response body。
+#[derive(Debug, Serialize)]
+pub(super) struct CorporateActionResponse {
+    /// 股票代號。
+    pub(super) stock_symbol: String,
+    /// 該股目前已登錄的所有公司行動（生效日與比例）。
+    pub(super) actions: Vec<CorporateActionItem>,
+}
+
+/// 已登錄的單筆公司行動。
+#[derive(Debug, Serialize)]
+pub(super) struct CorporateActionItem {
+    /// 生效日。
+    pub(super) effective_date: String,
+    /// 股數變動比例。
+    pub(super) share_ratio: String,
+    /// 備註。
+    pub(super) note: String,
+}
+
 /// 建立 job 成功時的 HTTP response body。
 #[derive(Debug, Serialize)]
 pub(super) struct StartJobResponse {
@@ -301,6 +335,19 @@ pub(super) const INDEX_HTML: &str = r##"<!doctype html>
         <input id="quote-history-to" name="to" type="month" required>
         <button type="submit">Start</button>
         <div class="toast">Fills gaps only; safe to re-run. All ETFs over several years can take hours.</div>
+      </form>
+      <form class="panel" data-endpoint="/api/manual-backfill/corporate-action">
+        <h2>Corporate Action</h2>
+        <label for="ca-symbol">Stock symbol</label>
+        <input id="ca-symbol" name="stock_symbol" inputmode="latin" placeholder="0050" required>
+        <label for="ca-date">Effective date</label>
+        <input id="ca-date" name="effective_date" type="date" required>
+        <label for="ca-ratio">Share ratio (1 share becomes N)</label>
+        <input id="ca-ratio" name="share_ratio" inputmode="decimal" placeholder="4" required>
+        <label for="ca-note">Note</label>
+        <input id="ca-note" name="note" placeholder="1:4 split">
+        <button type="submit">Save</button>
+        <div class="toast">Recalculate CAGR afterwards for the change to take effect.</div>
       </form>
       <form class="panel" data-endpoint="/api/manual-backfill/cagr">
         <h2>CAGR Recalculation</h2>

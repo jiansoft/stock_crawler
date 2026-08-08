@@ -5,7 +5,7 @@ use chrono::{Months, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::domain::performance::{
-    CagrPeriod, CagrRepository, CagrSourceRepository, DividendEvent, StockCagr,
+    CagrPeriod, CagrRepository, CagrSourceRepository, CorporateAction, DividendEvent, StockCagr,
     entity::{BASE_DATE_GRACE_DAYS, PRINCIPAL},
     simulator::{SimulationInput, simulate},
 };
@@ -259,6 +259,16 @@ pub async fn calculate_periods(
         .context("Failed to fetch closing prices for reinvestment")?;
     let reinvest_prices = group_prices_by_symbol(reinvest_prices);
 
+    // ── 5.5 公司行動（分割／減資）──────────────────────────────────
+    //
+    // 與股利事件同樣只撈一次最長期間，於記憶體分派；模擬器會各自依期間
+    // 過濾生效日。
+    let corporate_actions = source
+        .fetch_corporate_actions_since(earliest_base_date)
+        .await
+        .context("Failed to fetch corporate actions")?;
+    let actions_by_symbol = group_corporate_actions_by_symbol(corporate_actions);
+
     // ── 6. 異常偵測（疑似減資／分割）────────────────────────────────
     //
     // 只查一次最長期間的事件，再依日期切分到各期間。若改成「用最長期間算一次
@@ -277,6 +287,7 @@ pub async fn calculate_periods(
 
     // ── 7. 逐期間計算 ───────────────────────────────────────────────
     let empty_events: Vec<DividendEvent> = Vec::new();
+    let empty_actions: Vec<CorporateAction> = Vec::new();
     let empty_prices: HashMap<NaiveDate, Decimal> = HashMap::new();
 
     for (period, target, base_date) in aligned {
@@ -316,6 +327,7 @@ pub async fn calculate_periods(
         let mut records = Vec::with_capacity(symbols.len());
         for symbol in &symbols {
             let events = events_by_symbol.get(symbol).unwrap_or(&empty_events);
+            let actions = actions_by_symbol.get(symbol).unwrap_or(&empty_actions);
             let prices = reinvest_prices.get(symbol).unwrap_or(&empty_prices);
             records.push(build_record(
                 symbol,
@@ -328,6 +340,7 @@ pub async fn calculate_periods(
                 end_prices.get(symbol).copied(),
                 first_quote_dates.get(symbol).copied(),
                 events,
+                actions,
                 prices,
                 period_anomalies.contains(symbol.as_str()),
             ));
@@ -369,6 +382,7 @@ fn build_record(
     end_price: Option<Decimal>,
     first_quote_date: Option<NaiveDate>,
     events: &[DividendEvent],
+    corporate_actions: &[CorporateAction],
     reinvest_prices: &HashMap<NaiveDate, Decimal>,
     has_anomaly: bool,
 ) -> StockCagr {
@@ -412,6 +426,7 @@ fn build_record(
         base_price,
         end_price,
         events,
+        corporate_actions,
         reinvest_prices: &lookup,
     };
 
@@ -438,6 +453,20 @@ fn build_record(
         has_anomaly,
         dividend_events: result.dividend_events,
     }
+}
+
+/// 將公司行動依股票代號分組。
+fn group_corporate_actions_by_symbol(
+    actions: Vec<CorporateAction>,
+) -> HashMap<String, Vec<CorporateAction>> {
+    let mut grouped: HashMap<String, Vec<CorporateAction>> = HashMap::new();
+    for action in actions {
+        grouped
+            .entry(action.stock_symbol.clone())
+            .or_default()
+            .push(action);
+    }
+    grouped
 }
 
 /// 將股利事件依股票代號分組。
@@ -519,6 +548,7 @@ mod tests {
         /// 每檔股票的收盤價序列。
         prices: HashMap<String, BTreeMap<NaiveDate, Decimal>>,
         events: Vec<DividendEvent>,
+        corporate_actions: Vec<CorporateAction>,
         anomalies: Vec<(String, NaiveDate)>,
         /// 各方法的呼叫次數，用來驗證「一次撈齊」而非 N+1 的設計。
         calls: Mutex<HashMap<&'static str, usize>>,
@@ -618,6 +648,19 @@ mod tests {
                 .events
                 .iter()
                 .filter(|event| event.sort_key().is_some_and(|day| day >= since))
+                .cloned()
+                .collect())
+        }
+
+        async fn fetch_corporate_actions_since(
+            &self,
+            since: NaiveDate,
+        ) -> Result<Vec<CorporateAction>> {
+            self.record("fetch_corporate_actions_since");
+            Ok(self
+                .corporate_actions
+                .iter()
+                .filter(|action| action.effective_date > since)
                 .cloned()
                 .collect())
         }
@@ -825,6 +868,13 @@ mod tests {
                     stock_dividend: dec(1),
                 },
             ],
+            // 2020-05-04 的 1:2 分割：模擬時應調整股數，且不得再標記為異常。
+            corporate_actions: vec![CorporateAction {
+                stock_symbol: "2330".to_string(),
+                effective_date: date(2020, 5, 4),
+                share_ratio: dec(2),
+                note: "1:2 分割".to_string(),
+            }],
             anomalies: vec![("2330".to_string(), date(2019, 3, 1))],
             calls: Mutex::default(),
         }

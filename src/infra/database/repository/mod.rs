@@ -3,6 +3,7 @@ use thiserror::Error;
 
 pub mod cagr_source;
 pub mod config;
+pub mod corporate_action;
 pub mod dividend;
 pub mod financial;
 pub mod market_index;

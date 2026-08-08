@@ -517,6 +517,33 @@ pub(super) fn parse_request_period(period: &str) -> Result<CagrPeriod, axum::res
     })
 }
 
+/// 解析公司行動的股數變動比例。
+///
+/// 必須大於零：`0` 會讓持股歸零、負數毫無意義，兩者都只會產生錯得離譜的
+/// 報酬率。上界取 1000，擋掉把「1:4」整串貼進來之類的輸入錯誤。
+#[allow(clippy::result_large_err)]
+pub(super) fn parse_request_share_ratio(
+    raw: &str,
+) -> Result<rust_decimal::Decimal, axum::response::Response> {
+    let reject = |message: String| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: message }),
+        )
+            .into_response()
+    };
+
+    let ratio = rust_decimal::Decimal::from_str_exact(raw.trim())
+        .map_err(|why| reject(format!("share_ratio must be a decimal number: {why}")))?;
+    if ratio <= rust_decimal::Decimal::ZERO {
+        return Err(reject("share_ratio must be greater than zero".to_string()));
+    }
+    if ratio > rust_decimal::Decimal::from(1000) {
+        return Err(reject("share_ratio looks implausible (> 1000)".to_string()));
+    }
+    Ok(ratio)
+}
+
 /// 解析以逗號、空白或換行分隔的代號清單；空字串回傳空 `Vec`。
 ///
 /// 空清單在呼叫端有明確語意（全部 ETF），因此不視為錯誤；

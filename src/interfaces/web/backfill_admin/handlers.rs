@@ -6,16 +6,17 @@ use axum::{
 };
 
 use super::dto::{
-    CagrPeriodRequest, CagrRequest, ClosingAggregateRequest, DailyQuotesRequest, ErrorResponse,
-    INDEX_HTML, QuoteHistoryRequest, SecurityCodeRequest, StartJobResponse,
-    TaiwanStockIndexRequest, YearRequest,
+    CagrPeriodRequest, CagrRequest, ClosingAggregateRequest, CorporateActionItem,
+    CorporateActionRequest, CorporateActionResponse, DailyQuotesRequest, ErrorResponse, INDEX_HTML,
+    QuoteHistoryRequest, SecurityCodeRequest, StartJobResponse, TaiwanStockIndexRequest,
+    YearRequest,
 };
 use super::job_runner::{
     parse_request_date, parse_request_month, parse_request_period, parse_request_security_code,
-    parse_request_symbol_list, start_cagr_job, start_cagr_period_job, start_closing_aggregate_job,
-    start_daily_quotes_job, start_historical_dividends_job, start_job_error_response,
-    start_multiple_dividend_historical_dividends_job, start_quote_history_job,
-    start_received_dividend_records_job, start_taiwan_stock_index_job,
+    parse_request_share_ratio, parse_request_symbol_list, start_cagr_job, start_cagr_period_job,
+    start_closing_aggregate_job, start_daily_quotes_job, start_historical_dividends_job,
+    start_job_error_response, start_multiple_dividend_historical_dividends_job,
+    start_quote_history_job, start_received_dividend_records_job, start_taiwan_stock_index_job,
 };
 use super::state::{BACKFILL_STATE, BackfillWebState, get_backfill_job, list_backfill_jobs};
 
@@ -59,6 +60,10 @@ pub fn router() -> Router {
         .route(
             "/api/manual-backfill/quote-history",
             post(start_quote_history),
+        )
+        .route(
+            "/api/manual-backfill/corporate-action",
+            post(save_corporate_action),
         )
         .route("/api/manual-backfill/cagr", post(start_cagr))
         .route("/api/manual-backfill/cagr-period", post(start_cagr_period))
@@ -133,6 +138,71 @@ async fn start_quote_history(
     match start_quote_history_job(stock_symbols, from, to).await {
         Ok(job) => Json(StartJobResponse { job }).into_response(),
         Err(err) => start_job_error_response(err),
+    }
+}
+
+/// 登錄公司行動（分割／減資）的 HTTP handler。
+///
+/// 這不是背景 job：寫入一筆對照資料是瞬間完成的，包成 job 只會讓使用者
+/// 多一次輪詢才知道結果。回應直接帶回該股目前已登錄的全部事件，方便核對。
+async fn save_corporate_action(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<CorporateActionRequest>,
+) -> impl IntoResponse {
+    use crate::domain::performance::repository::CorporateActionRepository;
+
+    let stock_symbol = match parse_request_security_code(req.stock_symbol) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let effective_date = match parse_request_date(&req.effective_date) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let share_ratio = match parse_request_share_ratio(&req.share_ratio) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    let repository =
+        crate::infra::database::repository::corporate_action::PgCorporateActionRepository::new();
+    let action = crate::domain::performance::CorporateAction {
+        stock_symbol: stock_symbol.clone(),
+        effective_date,
+        share_ratio,
+        note: req.note.trim().to_owned(),
+    };
+
+    if let Err(why) = repository.save(&action).await {
+        return (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("failed to save corporate action: {why:#}"),
+            }),
+        )
+            .into_response();
+    }
+
+    match repository.fetch_by_symbol(&stock_symbol).await {
+        Ok(actions) => Json(CorporateActionResponse {
+            stock_symbol,
+            actions: actions
+                .into_iter()
+                .map(|item| CorporateActionItem {
+                    effective_date: item.effective_date.to_string(),
+                    share_ratio: item.share_ratio.normalize().to_string(),
+                    note: item.note,
+                })
+                .collect(),
+        })
+        .into_response(),
+        Err(why) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("failed to read back corporate actions: {why:#}"),
+            }),
+        )
+            .into_response(),
     }
 }
 
@@ -319,6 +389,21 @@ mod tests {
             post("/api/manual-backfill/cagr-period", r#"{"period":"Y8"}"#).await,
             StatusCode::BAD_REQUEST
         );
+        // 公司行動：比例為零、負數或非數字都必須擋下。
+        for ratio in ["0", "-4", "1:4"] {
+            assert_eq!(
+                post(
+                    "/api/manual-backfill/corporate-action",
+                    &format!(
+                        r#"{{"stock_symbol":"0050","effective_date":"2025-06-18","share_ratio":"{ratio}"}}"#
+                    )
+                )
+                .await,
+                StatusCode::BAD_REQUEST,
+                "share_ratio={ratio} 應被拒絕"
+            );
+        }
+
         // CAGR 基準日格式錯誤（留空才是合法的「採用最新交易日」）。
         // 注意 parse_request_date 沿用 chrono 的寬鬆解析，"2026-8-7" 是合法的，
         // 因此這裡用真正無法解析的值。
@@ -341,6 +426,7 @@ mod tests {
             "/api/manual-backfill/quote-history",
             "/api/manual-backfill/cagr",
             "/api/manual-backfill/cagr-period",
+            "/api/manual-backfill/corporate-action",
         ] {
             assert!(
                 INDEX_HTML.contains(&format!("data-endpoint=\"{endpoint}\"")),
