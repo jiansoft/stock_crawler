@@ -63,7 +63,78 @@ pub async fn execute(date: Option<NaiveDate>) -> Result<CagrCalculationSummary> 
     calculate(&source, &repository, date).await
 }
 
-/// 實際的計算流程。
+/// 回填單一期間的執行摘要。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CagrPeriodBackfillSummary {
+    /// 待回填的基準日數。
+    pub dates_pending: usize,
+    /// 實際完成計算的基準日數。
+    pub dates_processed: usize,
+    /// 因報價歷史深度不足而無法計算的基準日數。
+    pub dates_skipped: usize,
+    /// 寫入的資料列數。
+    pub rows_written: u64,
+}
+
+/// 為既有的歷史基準日回填單一統計期間。
+///
+/// 新增期間（例如 Y7）之後，既有基準日不會自動長出該期間的資料 —— 排程只算
+/// 當日。這個進入點掃出「已有其他期間結果、但缺少指定期間」的基準日，逐日
+/// 補算**該期間**而已；不重算已存在的期間，避免多花八倍的查詢。
+///
+/// 從未計算過的日期不在範圍內：那是歷史初始化，成本與語義都是另一回事。
+pub async fn backfill_period(period: CagrPeriod) -> Result<CagrPeriodBackfillSummary> {
+    let source = crate::infra::database::repository::cagr_source::PgCagrSourceRepository::new();
+    let repository = crate::infra::database::repository::performance::PgCagrRepository::new();
+    backfill_period_with(&source, &repository, period).await
+}
+
+/// [`backfill_period`] 的可注入版本，供測試驗證流程本身。
+pub async fn backfill_period_with(
+    source: &dyn CagrSourceRepository,
+    repository: &dyn CagrRepository,
+    period: CagrPeriod,
+) -> Result<CagrPeriodBackfillSummary> {
+    let dates = repository
+        .fetch_dates_missing_period(period)
+        .await
+        .with_context(|| format!("Failed to fetch dates missing period {}", period.code()))?;
+
+    let mut summary = CagrPeriodBackfillSummary {
+        dates_pending: dates.len(),
+        ..Default::default()
+    };
+    if dates.is_empty() {
+        tracing::info!(period = period.code(), "沒有需要回填的基準日");
+        return Ok(summary);
+    }
+
+    for date in dates {
+        let result = calculate_periods(source, repository, Some(date), &[period])
+            .await
+            .with_context(|| format!("Failed to backfill period {} on {date}", period.code()))?;
+
+        // 期初日落在報價涵蓋範圍之外時整個期間會被跳過，該基準日不產生任何列。
+        if result.periods_calculated == 0 {
+            summary.dates_skipped += 1;
+            continue;
+        }
+        summary.dates_processed += 1;
+        summary.rows_written += result.rows_written;
+    }
+
+    tracing::info!(
+        period = period.code(),
+        dates_pending = summary.dates_pending,
+        dates_processed = summary.dates_processed,
+        dates_skipped = summary.dates_skipped,
+        rows_written = summary.rows_written,
+        "期間回填完成"
+    );
+    Ok(summary)
+}
+
+/// 實際的計算流程（全部期間）。
 ///
 /// 以 trait 物件而非具體型別接收相依，讓流程本身可以在測試中注入假資料源驗證，
 /// 不需要真實資料庫。
@@ -71,6 +142,19 @@ pub async fn calculate(
     source: &dyn CagrSourceRepository,
     repository: &dyn CagrRepository,
     date: Option<NaiveDate>,
+) -> Result<CagrCalculationSummary> {
+    calculate_periods(source, repository, date, &CagrPeriod::ALL).await
+}
+
+/// 計算指定的期間子集。
+///
+/// 回填單一期間時只送一個期間進來，其餘流程（母體、股利事件、異常偵測）完全
+/// 共用 —— 那些查詢本來就與期間無關，逐期間重跑只是浪費。
+pub async fn calculate_periods(
+    source: &dyn CagrSourceRepository,
+    repository: &dyn CagrRepository,
+    date: Option<NaiveDate>,
+    periods: &[CagrPeriod],
 ) -> Result<CagrCalculationSummary> {
     let mut summary = CagrCalculationSummary::default();
 
@@ -122,7 +206,7 @@ pub async fn calculate(
     // 時才套用寬限規則。若改成每檔各自往前找，長期停牌的股票會取到很久以前的
     // 價格，「期間」名不符實，也無法橫向比較。
     let mut aligned: Vec<(CagrPeriod, NaiveDate, NaiveDate)> = Vec::new();
-    for period in CagrPeriod::ALL {
+    for period in periods.iter().copied() {
         let Some(target) = end_date.checked_sub_months(Months::new(period.months())) else {
             continue;
         };
@@ -574,6 +658,8 @@ mod tests {
     struct RecordingRepository {
         saved: Mutex<Vec<StockCagr>>,
         save_calls: Mutex<usize>,
+        /// `fetch_dates_missing_period` 要回傳的基準日。
+        missing_dates: Vec<NaiveDate>,
     }
 
     impl RecordingRepository {
@@ -589,6 +675,20 @@ mod tests {
 
         fn saved_len(&self) -> usize {
             self.saved.lock().expect("測試鎖不應中毒").len()
+        }
+
+        /// 已寫入資料列涵蓋的期間集合。
+        fn saved_periods(&self) -> Vec<CagrPeriod> {
+            let mut periods: Vec<CagrPeriod> = self
+                .saved
+                .lock()
+                .expect("測試鎖不應中毒")
+                .iter()
+                .map(|row| row.period)
+                .collect();
+            periods.sort_unstable();
+            periods.dedup();
+            periods
         }
     }
 
@@ -637,6 +737,10 @@ mod tests {
 
         async fn fetch_latest_date(&self) -> Result<Option<NaiveDate>> {
             unimplemented!("計算流程不會讀取最新基準日")
+        }
+
+        async fn fetch_dates_missing_period(&self, _period: CagrPeriod) -> Result<Vec<NaiveDate>> {
+            Ok(self.missing_dates.clone())
         }
 
         async fn delete_before(&self, _date: NaiveDate) -> Result<u64> {
@@ -911,6 +1015,82 @@ mod tests {
         assert_eq!(summary.universe, 0);
         assert_eq!(summary.rows_written, 0);
         assert_eq!(source.call_count("fetch_closing_prices_on"), 0);
+    }
+
+    #[tokio::test]
+    async fn backfill_period_only_calculates_the_requested_period() {
+        let source = fixture_source();
+        let repository = RecordingRepository {
+            missing_dates: vec![date(2026, 8, 3)],
+            ..Default::default()
+        };
+
+        let summary = backfill_period_with(&source, &repository, CagrPeriod::Y7)
+            .await
+            .expect("回填不應失敗");
+
+        assert_eq!(summary.dates_pending, 1);
+        assert_eq!(summary.dates_processed, 1);
+        assert_eq!(summary.dates_skipped, 0);
+        // 母體三檔 × 只有 Y7 一個期間。
+        assert_eq!(summary.rows_written, 3);
+        assert_eq!(
+            repository.saved_periods(),
+            vec![CagrPeriod::Y7],
+            "回填不得順便重算其他期間"
+        );
+    }
+
+    #[tokio::test]
+    async fn backfill_period_processes_every_pending_date() {
+        let source = fixture_source();
+        let repository = RecordingRepository {
+            missing_dates: vec![date(2026, 7, 1), date(2026, 8, 3)],
+            ..Default::default()
+        };
+
+        let summary = backfill_period_with(&source, &repository, CagrPeriod::Y1)
+            .await
+            .expect("回填不應失敗");
+
+        assert_eq!(summary.dates_pending, 2);
+        assert_eq!(summary.dates_processed, 2);
+        assert_eq!(summary.rows_written, 6);
+    }
+
+    #[tokio::test]
+    async fn backfill_period_counts_dates_without_enough_history_as_skipped() {
+        let mut source = fixture_source();
+        // 只留最近四個月的交易日：Y10 的期初日無從對齊。
+        source.trading_days.retain(|day| *day >= date(2026, 5, 1));
+        let repository = RecordingRepository {
+            missing_dates: vec![date(2026, 8, 3)],
+            ..Default::default()
+        };
+
+        let summary = backfill_period_with(&source, &repository, CagrPeriod::Y10)
+            .await
+            .expect("回填不應失敗");
+
+        assert_eq!(summary.dates_skipped, 1);
+        assert_eq!(summary.dates_processed, 0);
+        assert_eq!(summary.rows_written, 0);
+        assert_eq!(repository.saved_len(), 0);
+    }
+
+    #[tokio::test]
+    async fn backfill_period_is_a_no_op_when_nothing_is_missing() {
+        let source = fixture_source();
+        let repository = RecordingRepository::default();
+
+        let summary = backfill_period_with(&source, &repository, CagrPeriod::Y7)
+            .await
+            .expect("回填不應失敗");
+
+        assert_eq!(summary, CagrPeriodBackfillSummary::default());
+        // 沒有待回填的日期時，連交易日都不該去查。
+        assert_eq!(source.call_count("fetch_latest_trading_day"), 0);
+        assert_eq!(source.call_count("fetch_active_symbols"), 0);
     }
 
     #[test]

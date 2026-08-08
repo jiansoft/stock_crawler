@@ -532,6 +532,31 @@ WHERE date = $1 AND period = $2
         Ok(row.0)
     }
 
+    async fn fetch_dates_missing_period(&self, period: CagrPeriod) -> Result<Vec<NaiveDate>> {
+        // 以 NOT EXISTS 而非 LEFT JOIN：只要該日期出現過任何一列指定期間的
+        // 結果就算已回填，不需要逐檔比對母體。
+        let sql = r#"
+            SELECT DISTINCT s.date
+            FROM stock_cagr s
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM stock_cagr t
+                WHERE t.date = s.date AND t.period = $1
+            )
+            ORDER BY s.date
+        "#;
+
+        let rows: Vec<(NaiveDate,)> = sqlx::query_as(sql)
+            .bind(period.code())
+            .fetch_all(database::get_connection())
+            .await
+            .context(
+                "Failed to fetch dates missing period in PgCagrRepository::fetch_dates_missing_period",
+            )?;
+
+        Ok(rows.into_iter().map(|(date,)| date).collect())
+    }
+
     /// 刪除早於指定日期的歷史資料。
     async fn delete_before(&self, date: NaiveDate) -> Result<u64> {
         let result = sqlx::query("DELETE FROM stock_cagr WHERE date < $1")
@@ -890,6 +915,49 @@ mod tests {
         // 最新基準日必定不早於測試用的 1990-01-02。
         let latest = repo.fetch_latest_date().await.expect("fetch_latest_date");
         assert!(latest.is_some_and(|d| d >= test_date()));
+
+        cleanup().await;
+    }
+
+    /// 新增期間後的回填依據：找出「已有結果、但缺少該期間」的基準日。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn test_fetch_dates_missing_period() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 test_fetch_dates_missing_period：無資料庫連接");
+            return;
+        }
+
+        let repo = PgCagrRepository::new();
+        cleanup().await;
+
+        // 只有 Y1 的基準日 —— 缺 Y7，必須被列為待回填。
+        repo.save_batch(&[complete_record(FAKE_SYMBOL, CagrPeriod::Y1, dec!(5))])
+            .await
+            .expect("save_batch");
+        let pending = repo
+            .fetch_dates_missing_period(CagrPeriod::Y7)
+            .await
+            .expect("fetch_dates_missing_period");
+        assert!(pending.contains(&test_date()));
+        assert!(
+            pending.windows(2).all(|pair| pair[0] < pair[1]),
+            "回傳的基準日必須由早至晚且不重複"
+        );
+
+        // 補上 Y7 之後該日期就不該再出現。
+        repo.save_batch(&[complete_record(FAKE_SYMBOL, CagrPeriod::Y7, dec!(5))])
+            .await
+            .expect("save_batch Y7");
+        let pending = repo
+            .fetch_dates_missing_period(CagrPeriod::Y7)
+            .await
+            .expect("fetch_dates_missing_period again");
+        assert!(!pending.contains(&test_date()));
 
         cleanup().await;
     }

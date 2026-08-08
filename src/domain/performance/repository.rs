@@ -67,6 +67,13 @@ pub trait CagrRepository: Send + Sync {
     /// 取得最新一個已完成計算的基準日。尚無資料時回傳 `None`。
     async fn fetch_latest_date(&self) -> Result<Option<NaiveDate>>;
 
+    /// 取得「已有計算結果、但缺少指定期間」的基準日，由早至晚排序。
+    ///
+    /// 用於新增統計期間後回填歷史：既有基準日不會自動長出新期間的資料，
+    /// 但也不該把從未計算過的日期一併算進來 —— 那是另一回事（歷史初始化），
+    /// 範圍與成本都完全不同。
+    async fn fetch_dates_missing_period(&self, period: CagrPeriod) -> Result<Vec<NaiveDate>>;
+
     /// 刪除早於指定日期的歷史資料，回傳刪除筆數。
     async fn delete_before(&self, date: NaiveDate) -> Result<u64>;
 }
