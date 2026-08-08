@@ -39,6 +39,33 @@ pub(super) struct SecurityCodeRequest {
     pub(super) security_code: String,
 }
 
+/// 歷史日報價回補的 HTTP request body。
+#[derive(Debug, Deserialize)]
+pub(super) struct QuoteHistoryRequest {
+    /// 股票代號，以逗號、空白或換行分隔；留空表示全部未下市的 `00` 開頭 ETF／ETN。
+    #[serde(default)]
+    pub(super) stock_symbols: String,
+    /// 起始月份，格式 `YYYY-MM`（含）。
+    pub(super) from: String,
+    /// 結束月份，格式 `YYYY-MM`（含）。
+    pub(super) to: String,
+}
+
+/// CAGR 重算的 HTTP request body。
+#[derive(Debug, Deserialize)]
+pub(super) struct CagrRequest {
+    /// 基準日，格式 `YYYY-MM-DD`；留空表示採用資料庫中最新的交易日。
+    #[serde(default)]
+    pub(super) date: String,
+}
+
+/// 單一統計期間歷史回填的 HTTP request body。
+#[derive(Debug, Deserialize)]
+pub(super) struct CagrPeriodRequest {
+    /// 期間代碼，例如 `Y7`。
+    pub(super) period: String,
+}
+
 /// 建立 job 成功時的 HTTP response body。
 #[derive(Debug, Serialize)]
 pub(super) struct StartJobResponse {
@@ -150,6 +177,15 @@ pub(super) const INDEX_HTML: &str = r##"<!doctype html>
       font-weight: 650;
       cursor: pointer;
     }
+    select {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
     button:hover { background: var(--accent-dark); }
     button:disabled { opacity: .65; cursor: progress; }
     .jobs {
@@ -254,6 +290,41 @@ pub(super) const INDEX_HTML: &str = r##"<!doctype html>
         <input id="multiple-dividend-year" name="year" type="number" min="1900" max="3000" step="1" placeholder="2026" required>
         <button type="submit">Start</button>
         <div class="toast"></div>
+      </form>
+      <form class="panel" data-endpoint="/api/manual-backfill/quote-history">
+        <h2>Quote History</h2>
+        <label for="quote-history-symbols">Stock symbols (blank = all ETFs)</label>
+        <input id="quote-history-symbols" name="stock_symbols" inputmode="latin" placeholder="0050, 0056">
+        <label for="quote-history-from">From month</label>
+        <input id="quote-history-from" name="from" type="month" required>
+        <label for="quote-history-to">To month</label>
+        <input id="quote-history-to" name="to" type="month" required>
+        <button type="submit">Start</button>
+        <div class="toast">Fills gaps only; safe to re-run. All ETFs over several years can take hours.</div>
+      </form>
+      <form class="panel" data-endpoint="/api/manual-backfill/cagr">
+        <h2>CAGR Recalculation</h2>
+        <label for="cagr-date">Base date (blank = latest)</label>
+        <input id="cagr-date" name="date" type="date">
+        <button type="submit">Start</button>
+        <div class="toast"></div>
+      </form>
+      <form class="panel" data-endpoint="/api/manual-backfill/cagr-period">
+        <h2>CAGR Period Backfill</h2>
+        <label for="cagr-period">Period</label>
+        <select id="cagr-period" name="period" required>
+          <option value="M3">M3</option>
+          <option value="M6">M6</option>
+          <option value="Y1">Y1</option>
+          <option value="Y1H">Y1H</option>
+          <option value="Y2">Y2</option>
+          <option value="Y3">Y3</option>
+          <option value="Y5">Y5</option>
+          <option value="Y7" selected>Y7</option>
+          <option value="Y10">Y10</option>
+        </select>
+        <button type="submit">Start</button>
+        <div class="toast">Fills this period on base dates that already have other periods.</div>
       </form>
     </section>
     <section class="jobs" aria-label="Backfill jobs">

@@ -6,14 +6,16 @@ use axum::{
 };
 
 use super::dto::{
-    ClosingAggregateRequest, DailyQuotesRequest, ErrorResponse, INDEX_HTML, SecurityCodeRequest,
-    StartJobResponse, TaiwanStockIndexRequest, YearRequest,
+    CagrPeriodRequest, CagrRequest, ClosingAggregateRequest, DailyQuotesRequest, ErrorResponse,
+    INDEX_HTML, QuoteHistoryRequest, SecurityCodeRequest, StartJobResponse,
+    TaiwanStockIndexRequest, YearRequest,
 };
 use super::job_runner::{
-    parse_request_date, parse_request_security_code, start_closing_aggregate_job,
+    parse_request_date, parse_request_month, parse_request_period, parse_request_security_code,
+    parse_request_symbol_list, start_cagr_job, start_cagr_period_job, start_closing_aggregate_job,
     start_daily_quotes_job, start_historical_dividends_job, start_job_error_response,
-    start_multiple_dividend_historical_dividends_job, start_received_dividend_records_job,
-    start_taiwan_stock_index_job,
+    start_multiple_dividend_historical_dividends_job, start_quote_history_job,
+    start_received_dividend_records_job, start_taiwan_stock_index_job,
 };
 use super::state::{BACKFILL_STATE, BackfillWebState, get_backfill_job, list_backfill_jobs};
 
@@ -54,6 +56,12 @@ pub fn router() -> Router {
             "/api/manual-backfill/multiple-dividend-historical-dividends",
             post(start_multiple_dividend_historical_dividends),
         )
+        .route(
+            "/api/manual-backfill/quote-history",
+            post(start_quote_history),
+        )
+        .route("/api/manual-backfill/cagr", post(start_cagr))
+        .route("/api/manual-backfill/cagr-period", post(start_cagr_period))
         .with_state(BACKFILL_STATE.clone())
 }
 
@@ -98,6 +106,68 @@ async fn start_daily_quotes(
     // 輸入有效時建立背景 job，實際資料抓取與原子替換會在 job 中執行。
     // 建立可能被拒絕（相同 job 執行中 → 409、併行已滿 → 429）。
     match start_daily_quotes_job(date).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
+}
+
+/// 建立歷史日報價回補 job 的 HTTP handler。
+async fn start_quote_history(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<QuoteHistoryRequest>,
+) -> impl IntoResponse {
+    let from = match parse_request_month(&req.from) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let to = match parse_request_month(&req.to) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    // 空清單代表「全部 ETF」，實際代號在 job 內解析。
+    let stock_symbols = match parse_request_symbol_list(&req.stock_symbols) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    match start_quote_history_job(stock_symbols, from, to).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
+}
+
+/// 建立 CAGR 重算 job 的 HTTP handler。
+async fn start_cagr(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<CagrRequest>,
+) -> impl IntoResponse {
+    // 留空表示採用資料庫中最新的交易日。
+    let date = if req.date.trim().is_empty() {
+        None
+    } else {
+        match parse_request_date(&req.date) {
+            Ok(value) => Some(value),
+            Err(response) => return response,
+        }
+    };
+
+    match start_cagr_job(date).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
+}
+
+/// 建立單一統計期間歷史回填 job 的 HTTP handler。
+async fn start_cagr_period(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<CagrPeriodRequest>,
+) -> impl IntoResponse {
+    let period = match parse_request_period(&req.period) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    match start_cagr_period_job(period).await {
         Ok(job) => Json(StartJobResponse { job }).into_response(),
         Err(err) => start_job_error_response(err),
     }
@@ -198,5 +268,84 @@ async fn start_multiple_dividend_historical_dividends(
     match start_multiple_dividend_historical_dividends_job(req.year).await {
         Ok(job) => Json(StartJobResponse { job }).into_response(),
         Err(err) => start_job_error_response(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    use super::super::dto::INDEX_HTML;
+    use super::router;
+
+    /// 送出 JSON body 並取回狀態碼。
+    async fn post(path: &str, body: &str) -> StatusCode {
+        router()
+            .oneshot(
+                Request::post(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_owned()))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should serve request")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn invalid_input_is_rejected_before_any_job_is_created() {
+        // 月份格式錯誤（缺少月份、用了日期格式）。
+        assert_eq!(
+            post(
+                "/api/manual-backfill/quote-history",
+                r#"{"stock_symbols":"0050","from":"2015","to":"2021-12"}"#
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
+        // 代號含非英數字元。
+        assert_eq!(
+            post(
+                "/api/manual-backfill/quote-history",
+                r#"{"stock_symbols":"0050; DROP","from":"2015-01","to":"2021-12"}"#
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
+        // 未知的期間代碼。
+        assert_eq!(
+            post("/api/manual-backfill/cagr-period", r#"{"period":"Y8"}"#).await,
+            StatusCode::BAD_REQUEST
+        );
+        // CAGR 基準日格式錯誤（留空才是合法的「採用最新交易日」）。
+        // 注意 parse_request_date 沿用 chrono 的寬鬆解析，"2026-8-7" 是合法的，
+        // 因此這裡用真正無法解析的值。
+        assert_eq!(
+            post("/api/manual-backfill/cagr", r#"{"date":"not-a-date"}"#).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[test]
+    fn every_form_endpoint_in_the_page_has_a_route() {
+        // 表單的 data-endpoint 與 router 若不同步，UI 會安靜地送到 404。
+        for endpoint in [
+            "/api/manual-backfill/daily-quotes",
+            "/api/manual-backfill/closing-aggregate",
+            "/api/manual-backfill/taiwan-stock-index",
+            "/api/manual-backfill/received-dividend-records",
+            "/api/manual-backfill/historical-dividends",
+            "/api/manual-backfill/multiple-dividend-historical-dividends",
+            "/api/manual-backfill/quote-history",
+            "/api/manual-backfill/cagr",
+            "/api/manual-backfill/cagr-period",
+        ] {
+            assert!(
+                INDEX_HTML.contains(&format!("data-endpoint=\"{endpoint}\"")),
+                "頁面缺少 {endpoint} 的表單"
+            );
+        }
     }
 }
