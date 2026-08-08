@@ -1377,7 +1377,9 @@ mod tests {
     ///
     /// 代號一律以 `79979` 開頭（真實市場不存在），基準日固定 1990-01-02，
     /// 遠早於本功能上線，不會與正式資料互相干擾。
-    #[cfg(feature = "integration-tests")]
+    ///
+    /// 不加 `#[cfg(feature = "integration-tests")]`：使用它的測試函式在未開
+    /// feature 時只是被標記為 `ignore`，本體仍要通過編譯。
     mod cagr_seed {
         use chrono::NaiveDate;
         use rust_decimal_macros::dec;
