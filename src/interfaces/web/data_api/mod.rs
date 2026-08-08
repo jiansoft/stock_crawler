@@ -1170,12 +1170,12 @@ mod tests {
         // 結果，這條路徑仍會把排行 SQL（CTE、視窗函式、三個篩選、分頁）
         // 送進 PostgreSQL，語法或欄位錯誤會立刻現形。
         for path in [
-            "/api/v1/market/cagr-ranking?date=1990-01-02&period=Y1",
-            "/api/v1/market/cagr-ranking?date=1990-01-02&period=M3&sort=total_return",
-            "/api/v1/market/cagr-ranking?date=1990-01-02&period=Y3&metric=price&market=twse",
-            "/api/v1/market/cagr-ranking?date=1990-01-02&metric=reinvested&stock_industry_id=24",
-            "/api/v1/market/cagr-ranking?date=1990-01-02&keyword=%E5%8F%B0%E7%A9%8D&offset=10",
-            "/api/v1/market/cagr-ranking?date=1990-01-02&include_incomplete=false&limit=200",
+            "/api/v1/market/cagr-ranking?date=1990-01-03&period=Y1",
+            "/api/v1/market/cagr-ranking?date=1990-01-03&period=M3&sort=total_return",
+            "/api/v1/market/cagr-ranking?date=1990-01-03&period=Y3&metric=price&market=twse",
+            "/api/v1/market/cagr-ranking?date=1990-01-03&metric=reinvested&stock_industry_id=24",
+            "/api/v1/market/cagr-ranking?date=1990-01-03&keyword=%E5%8F%B0%E7%A9%8D&offset=10",
+            "/api/v1/market/cagr-ranking?date=1990-01-03&include_incomplete=false&limit=200",
         ] {
             let (status, json) = get(path.to_owned()).await;
             assert_eq!(status, StatusCode::OK, "{path} 應能在真實 schema 執行");
@@ -1187,11 +1187,15 @@ mod tests {
             assert_eq!(json["summary"]["positive_ratio"], "0.0000");
         }
 
-        let (status, json) = get("/api/v1/market/cagr-ranking?period=Y1&limit=50".to_owned()).await;
-        if status == StatusCode::NOT_FOUND {
-            println!("跳過 cagr_endpoints_db_semantics：stock_cagr 尚無計算結果");
-            return;
-        }
+        // 自行寫入一組計算結果再驗證有資料時的回應。早期版本改為「排程尚未
+        // 產出結果就跳過」，於是 CI 從未跑過表頭、名次、涵蓋統計與個股端點 ——
+        // 那正是這兩個 endpoint 的主體。資料一律用假代號與 1990-01-02，
+        // 結束時清除。
+        cagr_seed::cleanup().await;
+        cagr_seed::seed().await;
+
+        let (status, json) =
+            get("/api/v1/market/cagr-ranking?date=1990-01-02&period=Y1&limit=50".to_owned()).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["period"], "Y1");
         assert_eq!(json["metric"], "total");
@@ -1204,7 +1208,17 @@ mod tests {
             assert!(value.is_string(), "{pointer} 必須序列化為字串");
         }
 
+        // 表頭的期初日與年數取自可算項目，不得因為有資料不足的列就變成 null。
+        assert_eq!(json["date"], "1990-01-02");
+        assert_eq!(json["base_date"], "1989-01-03");
+        assert!(json["years"].is_string());
+        assert_eq!(json["coverage"]["universe"], 3);
+        assert_eq!(json["coverage"]["counted"], 2);
+        assert_eq!(json["coverage"]["incomplete"], 1);
+        assert_eq!(json["total"], 3);
+
         let items = json["items"].as_array().expect("items array");
+        assert_eq!(items.len(), 3);
         let mut previous_rank = 0_i64;
         let mut seen_incomplete = false;
         for item in items {
@@ -1227,75 +1241,265 @@ mod tests {
             }
         }
 
-        // 全市場名次：套用產業篩選後，名次仍是未篩選的完整市場排名，
-        // 因此第一筆的 rank 只會 >= 未篩選時的第一筆。
-        if let Some(industry) = items
+        // 全市場名次：套用產業篩選後，名次仍是未篩選的完整市場排名。
+        let (status, filtered) = get(format!(
+            "/api/v1/market/cagr-ranking?date=1990-01-02&period=Y1&stock_industry_id={}&limit=50",
+            cagr_seed::INDUSTRY
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            filtered["coverage"], json["coverage"],
+            "涵蓋統計不隨畫面篩選變動"
+        );
+        assert!(
+            filtered["total"].as_i64() <= json["total"].as_i64(),
+            "篩選後的 total 不可大於未篩選"
+        );
+        let filtered_ranks: Vec<Option<i64>> = filtered["items"]
+            .as_array()
+            .expect("items array")
             .iter()
-            .find(|item| item["rank"].as_i64() == Some(1))
-            .and_then(|item| item["stock_industry_id"].as_i64())
-        {
-            let (status, filtered) = get(format!(
-                "/api/v1/market/cagr-ranking?period=Y1&stock_industry_id={industry}&limit=50"
-            ))
-            .await;
-            assert_eq!(status, StatusCode::OK);
-            assert_eq!(
-                filtered["coverage"], json["coverage"],
-                "涵蓋統計不隨畫面篩選變動"
-            );
-            assert!(
-                filtered["total"].as_i64() <= json["total"].as_i64(),
-                "篩選後的 total 不可大於未篩選"
-            );
-            if let Some(first) = filtered["items"]
+            .map(|item| item["rank"].as_i64())
+            .collect();
+        assert_eq!(
+            filtered_ranks,
+            items
+                .iter()
+                .map(|item| item["rank"].as_i64())
+                .collect::<Vec<_>>(),
+            "篩選後名次不得重編"
+        );
+
+        // 市場篩選對應到 stock_exchange_market_id：上櫃篩選不含這批上市假股票。
+        let (status, tpex) =
+            get("/api/v1/market/cagr-ranking?date=1990-01-02&period=Y1&market=tpex".to_owned())
+                .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(tpex["total"], 0);
+
+        // 關鍵字比對代號與名稱。
+        let (status, keyword) = get(format!(
+            "/api/v1/market/cagr-ranking?date=1990-01-02&period=Y1&keyword={}",
+            cagr_seed::TOP_SYMBOL
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(keyword["total"], 1);
+
+        // include_incomplete = false 時資料不足的列整列消失。
+        let (status, complete_only) = get(
+            "/api/v1/market/cagr-ranking?date=1990-01-02&period=Y1&include_incomplete=false"
+                .to_owned(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(complete_only["total"], 2);
+        assert!(
+            complete_only["items"]
                 .as_array()
-                .and_then(|list| list.first())
-                .and_then(|item| item["rank"].as_i64())
-            {
-                assert!(first >= 1, "篩選後的名次仍是全市場名次");
-            }
-        }
+                .expect("items array")
+                .iter()
+                .all(|item| item["rank"].is_i64())
+        );
 
         // Y10 + price 由 handler 在任何 SQL 之前擋下。
         let (status, _) =
             get("/api/v1/market/cagr-ranking?period=Y10&metric=price".to_owned()).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
-        // Y10 的揭露旗標必須為 true。
-        let (status, json) = get("/api/v1/market/cagr-ranking?period=Y10&limit=1".to_owned()).await;
+        // Y10 的揭露旗標必須為 true，且長期間不提供純價格口徑（欄位為 null）。
+        let (status, json) =
+            get("/api/v1/market/cagr-ranking?date=1990-01-02&period=Y10&limit=1".to_owned()).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["coverage"]["survivorship_note"], true);
 
         // 個股端點：未知代號 404；已知代號回傳全部八個期間且由短至長。
         let (status, _) = get("/api/v1/market/cagr-ranking/NO_SUCH_SYMBOL".to_owned()).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
-        if let Some(symbol) = items
-            .first()
-            .and_then(|item| item["stock_symbol"].as_str())
-            .map(str::to_owned)
-        {
-            let (status, json) = get(format!("/api/v1/market/cagr-ranking/{symbol}")).await;
-            assert_eq!(status, StatusCode::OK);
-            assert_eq!(json["stock_symbol"], symbol);
-            let periods: Vec<&str> = json["items"]
+
+        // 代號存在但該基準日沒有計算結果 —— 與「代號打錯」同為 404，但走的是
+        // 另一條分支。
+        let (status, _) = get(format!(
+            "/api/v1/market/cagr-ranking/{}?date=1990-01-03",
+            cagr_seed::TOP_SYMBOL
+        ))
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, json) = get(format!(
+            "/api/v1/market/cagr-ranking/{}?date=1990-01-02",
+            cagr_seed::TOP_SYMBOL
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["stock_symbol"], cagr_seed::TOP_SYMBOL);
+        assert_eq!(json["principal"], 10_000);
+        let periods: Vec<&str> = json["items"]
+            .as_array()
+            .expect("items array")
+            .iter()
+            .map(|item| item["period"].as_str().expect("period string"))
+            .collect();
+        assert_eq!(
+            periods,
+            vec!["M3", "M6", "Y1", "Y1H", "Y2", "Y3", "Y5", "Y10"],
+            "個股端點必須回傳全部八個期間且依期間長度排序"
+        );
+        assert!(
+            json["items"]
                 .as_array()
                 .expect("items array")
                 .iter()
-                .map(|item| item["period"].as_str().expect("period string"))
+                .all(|item| item["rank"].is_null()),
+            "個股端點的項目不應有名次"
+        );
+
+        // 指定 price 口徑時，長期間該口徑為 null 但列仍在。
+        let (status, price) = get(format!(
+            "/api/v1/market/cagr-ranking/{}?date=1990-01-02&metric=price",
+            cagr_seed::TOP_SYMBOL
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let long_period = price["items"]
+            .as_array()
+            .expect("items array")
+            .iter()
+            .find(|item| item["period"] == "Y10")
+            .expect("Y10 應在清單中");
+        assert!(long_period["cagr_pct"].is_null(), "長期間不提供純價格口徑");
+
+        cagr_seed::cleanup().await;
+    }
+
+    /// `cagr_endpoints_db_semantics` 專用的測試資料。
+    ///
+    /// 代號一律以 `79979` 開頭（真實市場不存在），基準日固定 1990-01-02，
+    /// 遠早於本功能上線，不會與正式資料互相干擾。
+    #[cfg(feature = "integration-tests")]
+    mod cagr_seed {
+        use chrono::NaiveDate;
+        use rust_decimal_macros::dec;
+
+        use crate::domain::performance::{
+            CagrPeriod, CagrRepository, StockCagr, entity::SimulationOutcome,
+        };
+        use crate::infra::database;
+        use crate::infra::database::repository::performance::PgCagrRepository;
+
+        /// 名次第一的假代號，同時用於個股端點與關鍵字篩選。
+        pub(super) const TOP_SYMBOL: &str = "79979E1";
+        const SECOND_SYMBOL: &str = "79979E2";
+        const INCOMPLETE_SYMBOL: &str = "79979E3";
+        /// 水泥工業，`stock_industry.sql` 已預先建立。
+        pub(super) const INDUSTRY: i32 = 1;
+        /// 上市（twse）；`cagr_market_id` 把 "twse" 對應到 2。
+        const MARKET: i32 = 2;
+
+        fn symbols() -> Vec<String> {
+            vec![
+                TOP_SYMBOL.to_string(),
+                SECOND_SYMBOL.to_string(),
+                INCOMPLETE_SYMBOL.to_string(),
+            ]
+        }
+
+        fn base_date() -> NaiveDate {
+            NaiveDate::from_ymd_opt(1990, 1, 2).expect("測試日期應合法")
+        }
+
+        fn record(symbol: &str, period: CagrPeriod, cagr: rust_decimal::Decimal) -> StockCagr {
+            let outcome = SimulationOutcome {
+                end_shares: dec!(100.5),
+                cash_received: dec!(250.0),
+                end_value: dec!(12000.0),
+                total_return_pct: dec!(20.0),
+                cagr_pct: cagr,
+            };
+            StockCagr {
+                date: base_date(),
+                stock_symbol: symbol.to_string(),
+                period,
+                base_date: NaiveDate::from_ymd_opt(1989, 1, 3),
+                base_price: Some(dec!(100.0)),
+                end_price: Some(dec!(119.4)),
+                years: Some(dec!(1.0)),
+                // 與計算層一致：長期間不提供純價格口徑。
+                price: period.supports_price_metric().then_some(outcome),
+                total: Some(outcome),
+                reinvested: Some(outcome),
+                first_quote_date: NaiveDate::from_ymd_opt(1988, 1, 4),
+                shortfall_days: Some(0),
+                data_complete: true,
+                has_anomaly: false,
+                dividend_events: 2,
+            }
+        }
+
+        fn incomplete(symbol: &str, period: CagrPeriod) -> StockCagr {
+            StockCagr {
+                date: base_date(),
+                stock_symbol: symbol.to_string(),
+                period,
+                base_date: None,
+                base_price: None,
+                end_price: None,
+                years: None,
+                price: None,
+                total: None,
+                reinvested: None,
+                first_quote_date: NaiveDate::from_ymd_opt(1989, 6, 1),
+                shortfall_days: None,
+                data_complete: false,
+                has_anomaly: true,
+                dividend_events: 0,
+            }
+        }
+
+        pub(super) async fn seed() {
+            for (index, symbol) in symbols().iter().enumerate() {
+                let _ = sqlx::query(
+                    r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_industry_id,
+                                           stock_exchange_market_id, "SuspendListing")
+                       VALUES ($1, $2, $1, $3, $4, false)
+                       ON CONFLICT (stock_symbol) DO UPDATE
+                           SET "Name" = excluded."Name",
+                               stock_industry_id = excluded.stock_industry_id,
+                               stock_exchange_market_id = excluded.stock_exchange_market_id"#,
+                )
+                .bind(symbol)
+                .bind(format!("測試股{}", index + 1))
+                .bind(INDUSTRY)
+                .bind(MARKET)
+                .execute(database::get_connection())
+                .await;
+            }
+
+            // 名次第一的個股寫滿八個期間，供個股端點驗證排序；
+            // 另外兩檔只寫 Y1，構成「可算 2 檔 + 資料不足 1 檔」的母體。
+            let mut records: Vec<StockCagr> = CagrPeriod::ALL
+                .into_iter()
+                .map(|period| record(TOP_SYMBOL, period, dec!(30)))
                 .collect();
-            assert_eq!(
-                periods,
-                vec!["M3", "M6", "Y1", "Y1H", "Y2", "Y3", "Y5", "Y10"],
-                "個股端點必須回傳全部八個期間且依期間長度排序"
-            );
-            assert!(
-                json["items"]
-                    .as_array()
-                    .expect("items array")
-                    .iter()
-                    .all(|item| item["rank"].is_null()),
-                "個股端點的項目不應有名次"
-            );
+            records.push(record(SECOND_SYMBOL, CagrPeriod::Y1, dec!(10)));
+            records.push(incomplete(INCOMPLETE_SYMBOL, CagrPeriod::Y1));
+
+            PgCagrRepository::new()
+                .save_batch(&records)
+                .await
+                .expect("寫入測試用 CAGR 結果");
+        }
+
+        pub(super) async fn cleanup() {
+            let _ = sqlx::query("DELETE FROM stock_cagr WHERE stock_symbol = ANY($1)")
+                .bind(symbols())
+                .execute(database::get_connection())
+                .await;
+            let _ = sqlx::query("DELETE FROM stocks WHERE stock_symbol = ANY($1)")
+                .bind(symbols())
+                .execute(database::get_connection())
+                .await;
         }
     }
 

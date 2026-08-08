@@ -318,6 +318,13 @@ mod tests {
             }
         }
 
+        // 假代號的測試資料必須清除，否則會殘留在資料庫裡影響其他查詢。
+        let _ = sqlx::query("DELETE FROM dividend WHERE security_code = $1 AND year = $2")
+            .bind(&e.security_code)
+            .bind(e.year)
+            .execute(database::get_connection())
+            .await;
+
         tracing::debug!("結束 upsert");
     }
 
