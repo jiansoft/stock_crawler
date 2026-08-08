@@ -12,6 +12,8 @@ export script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export built_path="./target/release"
 export app_path="./bin"
 export binary_name="stock_crawler"
+# 開發機交叉編譯好的執行檔上傳到這裡（scp 到 /tmp），move 再從這裡搬到 script_dir。
+export upload_dir="${UPLOAD_BIN_DIR:-/tmp}"
 export pid_file="$script_dir/${app_path#./}/$binary_name.pid"
 export stdout_log="$script_dir/${app_path#./}/nohup.out"
 
@@ -96,15 +98,40 @@ function stop() {
   if kill -0 "$pid" 2>/dev/null; then
     kill -SIGTERM "$pid"
     log "已送出停止訊號給 pid $pid"
+    wait_for_exit "$pid"
   else
     log "pid $pid 已經不存在，可能是上次未正常關閉"
   fi
   rm -f "$pid_file"
 }
 
+# 等舊程序真的退出再返回。程式的 graceful shutdown 最久要等
+# gRPC 30s + Web 30s + 背景作業 5 分鐘（見 src/main.rs），
+# 這裡抓 6 分鐘上限，避免 update 在舊程序還活著時就把新的啟起來變成雙實例。
+function wait_for_exit() {
+  local pid="$1"
+  local waited=0
+  local limit="${STOP_WAIT_SECONDS:-360}"
+
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$limit" ]; then
+      log "pid $pid 已等待 ${limit}s 仍未結束，請確認後手動處理（kill -9 $pid）"
+      exit 1
+    fi
+    sleep 2
+    waited=$((waited + 2))
+    # 每 30 秒回報一次，讓長時間的背景作業收尾看得出還在進行中。
+    if [ $((waited % 30)) -eq 0 ]; then
+      log "等待 pid $pid 結束中... (${waited}s)"
+    fi
+  done
+
+  log "pid $pid 已結束（耗時 ${waited}s）"
+}
+
+# 執行檔改為在開發機交叉編譯後上傳，裝置端不再 cargo build，
+# 因此 update 只做「停止 → 就位 → 啟動」。
 function update() {
-  build
-  sleep 1
   stop
   sleep 1
   move
@@ -126,27 +153,40 @@ function build() {
 }
 
 function move() {
-  if [ -f "$built_path/$binary_name" ]; then
-    local binary_name_arch dest_path
-    binary_name_arch="$(resolve_binary_name)"
-    # 部署到跟 control.sh 同一層，跟 docker_build 及 start() 找執行檔的位置一致。
-    dest_path="$script_dir/$binary_name_arch"
+  local binary_name_arch dest_path src_path backup_name
+  binary_name_arch="$(resolve_binary_name)"
+  # 部署到跟 control.sh 同一層，跟 docker_build 及 start() 找執行檔的位置一致。
+  dest_path="$script_dir/$binary_name_arch"
 
-    backup_name="$binary_name_arch.$(date "+%Y%m%d-%H%M%S")"
-
-    # 如果舊檔案存在則備份
-    if [ -f "$dest_path" ]; then
-      mv "$dest_path" "$script_dir/$backup_name"
-      chmod -x "$script_dir/$backup_name"
-    fi
-
-    mv "$built_path/$binary_name" "$dest_path"
-    chmod +x "$dest_path"
-    log "檔案部署成功: $dest_path"
+  # 來源優先序：
+  #   1. UPLOAD_BIN_FILE 指定的完整路徑
+  #   2. 上傳目錄（預設 /tmp）底下的同名檔案 —— 開發機交叉編譯後 scp 到這裡；
+  #      不直接 scp 覆蓋執行中的檔案，否則會得到 "Text file busy"(ETXTBSY)
+  #   3. 本機 cargo build 的產物（保留給仍在裝置上編譯的情境）
+  if [ -n "$UPLOAD_BIN_FILE" ]; then
+    src_path="$UPLOAD_BIN_FILE"
+  elif [ -f "$upload_dir/$binary_name_arch" ]; then
+    src_path="$upload_dir/$binary_name_arch"
+  elif [ -f "$built_path/$binary_name" ]; then
+    src_path="$built_path/$binary_name"
   else
-    log "錯誤: 找不到編譯後的檔案 $built_path/$binary_name"
+    log "錯誤: 找不到可部署的執行檔"
+    log "請先將交叉編譯好的 $binary_name_arch 上傳到 $upload_dir/（或用 UPLOAD_BIN_FILE 指定路徑）"
     exit 1
   fi
+
+  backup_name="$binary_name_arch.$(date "+%Y%m%d-%H%M%S")"
+
+  # 如果舊檔案存在則備份。先把舊檔改名移走，新檔才是建立全新的 inode，
+  # 就算舊程序還沒完全結束也不會踩到 ETXTBSY。
+  if [ -f "$dest_path" ]; then
+    mv "$dest_path" "$script_dir/$backup_name"
+    chmod -x "$script_dir/$backup_name"
+  fi
+
+  mv "$src_path" "$dest_path"
+  chmod +x "$dest_path"
+  log "檔案部署成功: $dest_path（來源 $src_path）"
 }
 
 # --- Docker 相關指令 ---
@@ -232,9 +272,9 @@ function help() {
   echo "    start          - 啟動服務"
   echo "    stop           - 停止服務"
   echo "    restart        - 重啟服務"
-  echo "    build          - 編譯專案"
-  echo "    move           - 部署編譯後的檔案"
-  echo "    update         - 完整更新 (build + stop + move + start)"
+  echo "    build          - 編譯專案（裝置端自行編譯時才需要）"
+  echo "    move           - 將上傳的執行檔就位（來源：UPLOAD_BIN_FILE > $upload_dir/ > target/release）"
+  echo "    update         - 完整更新 (stop + move + start)"
   echo ""
   echo "  [Docker 模式]"
   echo "    docker_start   - 啟動容器"
