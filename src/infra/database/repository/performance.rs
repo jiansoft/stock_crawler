@@ -625,15 +625,54 @@ mod tests {
         }
     }
 
+    /// 四個假代號，供排行榜測試建立完整母體。
+    fn fake_symbols() -> Vec<String> {
+        vec![
+            FAKE_SYMBOL.to_string(),
+            FAKE_SYMBOL_B.to_string(),
+            FAKE_SYMBOL_C.to_string(),
+            FAKE_SYMBOL_D.to_string(),
+        ]
+    }
+
+    /// 排行榜測試用的產業編號（`stock_industry.sql` 已預先建立 1 與 2）。
+    const TEST_INDUSTRY: i32 = 1;
+    const OTHER_INDUSTRY: i32 = 2;
+
     /// 清理測試寫入的資料列；測試結束務必呼叫，避免污染資料庫。
     async fn cleanup() {
         let _ = sqlx::query("DELETE FROM stock_cagr WHERE stock_symbol = ANY($1)")
-            .bind(vec![
-                FAKE_SYMBOL.to_string(),
-                FAKE_SYMBOL_B.to_string(),
-                FAKE_SYMBOL_C.to_string(),
-                FAKE_SYMBOL_D.to_string(),
-            ])
+            .bind(fake_symbols())
+            .execute(database::get_connection())
+            .await;
+    }
+
+    /// 建立排行榜測試所需的假股票母檔。
+    ///
+    /// 排行榜查詢要 JOIN `stocks` 取名稱與產業，早期版本改為借用資料庫既有的
+    /// 真實代號，但 CI 的測試資料庫只有結構沒有資料，測試因此永遠跳過 ——
+    /// 那些篩選、分頁與名次語意等於從未被驗證。改為自行寫入假代號後，
+    /// 空資料庫也能完整執行，且不會在正式資料的代號上留下痕跡。
+    async fn seed_stocks() {
+        for (index, symbol) in fake_symbols().iter().enumerate() {
+            let _ = sqlx::query(
+                r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_industry_id, "SuspendListing")
+                   VALUES ($1, $2, $1, $3, false)
+                   ON CONFLICT (stock_symbol) DO UPDATE
+                       SET "Name" = excluded."Name", stock_industry_id = excluded.stock_industry_id"#,
+            )
+            .bind(symbol)
+            .bind(format!("測試股{}", index + 1))
+            .bind(TEST_INDUSTRY)
+            .execute(database::get_connection())
+            .await;
+        }
+    }
+
+    /// 移除假股票母檔。
+    async fn cleanup_stocks() {
+        let _ = sqlx::query("DELETE FROM stocks WHERE stock_symbol = ANY($1)")
+            .bind(fake_symbols())
             .execute(database::get_connection())
             .await;
     }
@@ -859,8 +898,8 @@ mod tests {
     ///
     /// 名次必須是「未套用篩選的全市場名次」，因此以產業／關鍵字篩選後，
     /// 同一檔股票的 `rank` 不可改變——這是前端把 rank 當成股票穩定屬性的
-    /// 前提。測試借用 `stocks` 既有的真實代號（唯讀取得）以滿足 JOIN，
-    /// 並只在遠早於本功能上線的 1990-01-02 寫入，結束後一律清除。
+    /// 前提。測試自行寫入四檔假股票以滿足 JOIN，只在遠早於本功能上線的
+    /// 1990-01-02 寫入計算結果，結束後母檔與結果一律清除。
     #[tokio::test]
     #[cfg_attr(
         not(feature = "integration-tests"),
@@ -873,42 +912,16 @@ mod tests {
             return;
         }
 
-        // 排行榜要 JOIN stocks，因此借用真實存在的代號；同產業取三檔以便
-        // 驗證「篩選後名次不重編」。
-        let borrowed: Vec<(String, i32)> = sqlx::query_as(
-            r#"SELECT stock_symbol, stock_industry_id FROM stocks
-               WHERE stock_industry_id = (
-                   SELECT stock_industry_id FROM stocks
-                   GROUP BY stock_industry_id HAVING COUNT(*) >= 4 LIMIT 1
-               )
-               ORDER BY stock_symbol LIMIT 4"#,
-        )
-        .fetch_all(database::get_connection())
-        .await
-        .expect("borrow stocks");
-        if borrowed.len() < 4 {
-            println!("跳過 test_fetch_ranking_page_semantics：stocks 樣本不足");
-            return;
-        }
-        let symbols: Vec<String> = borrowed.iter().map(|(symbol, _)| symbol.clone()).collect();
-        let industry = borrowed[0].1;
-        let other_industry: Option<i32> = sqlx::query_scalar(
-            "SELECT stock_industry_id FROM stocks WHERE stock_industry_id <> $1 LIMIT 1",
-        )
-        .bind(industry)
-        .fetch_optional(database::get_connection())
-        .await
-        .expect("other industry");
+        let symbols = fake_symbols();
+        let industry = TEST_INDUSTRY;
+        let other_industry = Some(OTHER_INDUSTRY);
 
         let cleanup_borrowed = || async {
-            let _ =
-                sqlx::query("DELETE FROM stock_cagr WHERE date = $1 AND stock_symbol = ANY($2)")
-                    .bind(test_date())
-                    .bind(&symbols)
-                    .execute(database::get_connection())
-                    .await;
+            cleanup().await;
+            cleanup_stocks().await;
         };
         cleanup_borrowed().await;
+        seed_stocks().await;
 
         let repo = PgCagrRepository::new();
         // 年化 30 / 20 / 10 三檔可算，第四檔資料不足。
