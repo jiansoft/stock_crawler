@@ -17,6 +17,13 @@ pub trait QuoteRepository: Send + Sync {
     /// 批次儲存或更新多筆日報價（適用於資料庫快速匯入）。
     async fn batch_save_daily_quotes(&self, quotes: &[DailyQuote]) -> Result<()>;
 
+    /// 補寫缺漏的日報價，已存在者原封不動，回傳實際新增的列數。
+    ///
+    /// 與 [`Self::batch_save_daily_quotes`]（`COPY`，撞到既有資料整批失敗）
+    /// 和 [`Self::replace_quotes_by_date`]（整日先刪後寫）都不同：這是給
+    /// 「補歷史缺口」用的，只填空位、不覆寫也不刪除既有資料，因此可重複執行。
+    async fn insert_missing_daily_quotes(&self, quotes: &[DailyQuote]) -> Result<u64>;
+
     /// 依交易日查詢全市場的每日報價資料。
     async fn fetch_quotes_by_date(&self, date: NaiveDate) -> Result<Vec<DailyQuote>>;
 

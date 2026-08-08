@@ -300,6 +300,19 @@ impl QuoteRepository for PgQuoteRepository {
         Ok(())
     }
 
+    async fn insert_missing_daily_quotes(&self, quotes: &[DomainDailyQuote]) -> Result<u64> {
+        if quotes.is_empty() {
+            return Ok(0);
+        }
+
+        let table_entities: Vec<TableDailyQuote> = quotes
+            .iter()
+            .map(|q| TableDailyQuote::from(q.clone()))
+            .collect();
+
+        TableDailyQuote::insert_missing_batch(&table_entities).await
+    }
+
     async fn fetch_quotes_by_date(&self, date: NaiveDate) -> Result<Vec<DomainDailyQuote>> {
         // 讀取指定交易日的所有日報價 Table 資料
         let table_quotes = daily_quote::fetch_daily_quotes_by_date(date).await?;

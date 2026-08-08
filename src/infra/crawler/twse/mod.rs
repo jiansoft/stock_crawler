@@ -14,6 +14,8 @@ pub mod qualified_foreign_institutional_investor;
 pub mod quote;
 /// 月營收
 pub mod revenue;
+/// 個股日成交資訊（單一股票、整個月）
+pub mod stock_day;
 /// 終止上市公司
 pub mod suspend_listing;
 /// 台股加權指數

@@ -21,13 +21,16 @@
 //!   寫入 `dividend` 表、重算年度彙總列，並同步回補已領股利紀錄。
 //! - `test_backfill_cagr_for_date`：
 //!   依 [`MANUAL_CAGR_DATE`] 重算指定基準日的全市場各期間年化報酬率，寫入 `stock_cagr`。
+//! - `test_backfill_quote_history_for_symbols`：
+//!   依 [`MANUAL_QUOTE_HISTORY_SYMBOLS`] 與月份區間，從 TWSE 個股月行情回補
+//!   歷史日報價缺口（只補空位，不覆寫既有資料）。
 //! - `test_backfill_cagr_period`：
 //!   依 [`MANUAL_CAGR_PERIOD`] 為既有的歷史基準日回填單一統計期間（新增期間後專用）。
 
 use chrono::NaiveDate;
 
 use crate::{
-    app::backfill::{dividend, quote, taiwan_stock_index},
+    app::backfill::{dividend, quote, quote_history, taiwan_stock_index},
     app::calculation::{cagr, dividend_record},
     app::event::taiwan_stock::closing,
     domain::performance::CagrPeriod,
@@ -50,6 +53,16 @@ const MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE: &str = "2887";
 ///
 /// 空字串表示改用資料庫中最新的交易日。
 const MANUAL_CAGR_DATE: &str = "";
+
+/// 手動回補歷史日報價的代號清單。
+///
+/// 空陣列表示自動採用「目前未下市、代號以 `00` 開頭」的全部 ETF／ETN ——
+/// 2015–2021 的缺口正是整類代號，逐一列舉會漏。
+const MANUAL_QUOTE_HISTORY_SYMBOLS: &[&str] = &[];
+
+/// 手動回補歷史日報價的月份區間（含頭尾，日期部分會被忽略）。
+const MANUAL_QUOTE_HISTORY_FROM: &str = "2015-01-01";
+const MANUAL_QUOTE_HISTORY_TO: &str = "2021-12-01";
 
 /// 手動回填單一統計期間時使用的期間代碼。
 ///
@@ -234,20 +247,76 @@ async fn test_backfill_cagr_for_date() {
         )
     };
 
-    tracing::debug!("開始 app::manual_backfill::test_backfill_cagr_for_date date={date:?}");
+    println!("開始 test_backfill_cagr_for_date date={date:?}");
 
     let summary = cagr::execute(date)
         .await
         .expect("manual cagr backfill failed");
 
-    tracing::debug!(
-        "結束 app::manual_backfill::test_backfill_cagr_for_date date={:?} universe={} periods_calculated={} periods_skipped={} rows_written={} anomaly_symbols={}",
+    println!(
+        "結束 test_backfill_cagr_for_date date={:?} universe={} periods_calculated={} periods_skipped={} rows_written={} anomaly_symbols={}",
         summary.date,
         summary.universe,
         summary.periods_calculated,
         summary.periods_skipped,
         summary.rows_written,
         summary.anomaly_symbols
+    );
+}
+
+/// 從 TWSE 個股月行情回補歷史日報價缺口。
+///
+/// 排程與 `test_backfill_daily_quotes_for_date` 都是「一天的全市場」，補七年份
+/// 的缺口得跑一千七百多次、還會把不缺的股票一起重抓。這個入口改用個股月行情
+/// （`STOCK_DAY`），一次要一檔股票的一整個月。
+///
+/// 寫入是 `ON CONFLICT DO NOTHING`：只填空位，既有資料不覆寫也不刪除，
+/// 因此中途失敗直接重跑即可。單月抓取失敗只記錄並繼續。
+///
+/// 注意請求量：預設區間 84 個月 × 全部 ETF（約 250 檔）超過兩萬次請求，
+/// 每次間隔 1.2 秒，實際會跑數小時。先把 [`MANUAL_QUOTE_HISTORY_SYMBOLS`]
+/// 設成一兩檔小範圍驗證，再放大。
+///
+/// 執行範例：
+/// `cargo test app::manual_backfill::test_backfill_quote_history_for_symbols -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_quote_history_for_symbols() {
+    dotenvy::dotenv().ok();
+    SHARE.load().await;
+
+    let from = NaiveDate::parse_from_str(MANUAL_QUOTE_HISTORY_FROM, "%Y-%m-%d")
+        .expect("manual quote history from should be valid");
+    let to = NaiveDate::parse_from_str(MANUAL_QUOTE_HISTORY_TO, "%Y-%m-%d")
+        .expect("manual quote history to should be valid");
+
+    let symbols: Vec<String> = if MANUAL_QUOTE_HISTORY_SYMBOLS.is_empty() {
+        quote_history::fetch_etf_symbols()
+            .await
+            .expect("fetch etf symbols failed")
+    } else {
+        MANUAL_QUOTE_HISTORY_SYMBOLS
+            .iter()
+            .map(|symbol| (*symbol).to_owned())
+            .collect()
+    };
+
+    println!(
+        "開始 test_backfill_quote_history_for_symbols symbols={} from={from} to={to}",
+        symbols.len()
+    );
+
+    let summary = quote_history::execute(&symbols, from, to)
+        .await
+        .expect("manual quote history backfill failed");
+
+    println!(
+        "結束 test_backfill_quote_history_for_symbols months_requested={} months_with_data={} months_failed={} quotes_fetched={} rows_inserted={}",
+        summary.months_requested,
+        summary.months_with_data,
+        summary.months_failed,
+        summary.quotes_fetched,
+        summary.rows_inserted
     );
 }
 
@@ -273,17 +342,14 @@ async fn test_backfill_cagr_period() {
     let period =
         CagrPeriod::from_code(MANUAL_CAGR_PERIOD).expect("manual cagr period 應為合法代碼");
 
-    tracing::debug!(
-        "開始 app::manual_backfill::test_backfill_cagr_period period={}",
-        period.code()
-    );
+    println!("開始 test_backfill_cagr_period period={}", period.code());
 
     let summary = cagr::backfill_period(period)
         .await
         .expect("manual cagr period backfill failed");
 
-    tracing::debug!(
-        "結束 app::manual_backfill::test_backfill_cagr_period period={} dates_pending={} dates_processed={} dates_skipped={} rows_written={}",
+    println!(
+        "結束 test_backfill_cagr_period period={} dates_pending={} dates_processed={} dates_skipped={} rows_written={}",
         period.code(),
         summary.dates_pending,
         summary.dates_processed,
