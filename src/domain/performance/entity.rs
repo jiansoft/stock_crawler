@@ -35,13 +35,15 @@ pub enum CagrPeriod {
     Y3,
     /// 5 年。
     Y5,
+    /// 7 年。
+    Y7,
     /// 10 年。
     Y10,
 }
 
 impl CagrPeriod {
     /// 全部期間，依長度由短至長排列。
-    pub const ALL: [CagrPeriod; 8] = [
+    pub const ALL: [CagrPeriod; 9] = [
         CagrPeriod::M3,
         CagrPeriod::M6,
         CagrPeriod::Y1,
@@ -49,6 +51,7 @@ impl CagrPeriod {
         CagrPeriod::Y2,
         CagrPeriod::Y3,
         CagrPeriod::Y5,
+        CagrPeriod::Y7,
         CagrPeriod::Y10,
     ];
 
@@ -62,6 +65,7 @@ impl CagrPeriod {
             CagrPeriod::Y2 => "Y2",
             CagrPeriod::Y3 => "Y3",
             CagrPeriod::Y5 => "Y5",
+            CagrPeriod::Y7 => "Y7",
             CagrPeriod::Y10 => "Y10",
         }
     }
@@ -81,6 +85,7 @@ impl CagrPeriod {
             CagrPeriod::Y2 => 24,
             CagrPeriod::Y3 => 36,
             CagrPeriod::Y5 => 60,
+            CagrPeriod::Y7 => 84,
             CagrPeriod::Y10 => 120,
         }
     }
@@ -95,6 +100,7 @@ impl CagrPeriod {
             CagrPeriod::Y2 => "2 年",
             CagrPeriod::Y3 => "3 年",
             CagrPeriod::Y5 => "5 年",
+            CagrPeriod::Y7 => "7 年",
             CagrPeriod::Y10 => "10 年",
         }
     }
@@ -109,7 +115,7 @@ impl CagrPeriod {
 
     /// 是否適合作為預設曝露的期間。
     ///
-    /// Y5／Y10 的樣本涵蓋率僅約 6 成（2026-08-07 實測 65.1%／59.0%），
+    /// Y5／Y7／Y10 的樣本涵蓋率僅約 6 成（2026-08-07 實測 Y5 65.1%、Y10 59.0%），
     /// 可以提供但不宜預設，且展示時必須揭露樣本涵蓋率與存活者偏誤。
     pub fn is_default_exposed(&self) -> bool {
         self.months() <= 36
@@ -320,7 +326,7 @@ mod tests {
             );
             assert!(!period.display_name().is_empty());
         }
-        assert_eq!(CagrPeriod::from_code("Y7"), None);
+        assert_eq!(CagrPeriod::from_code("Y8"), None);
         // 小寫不視為合法代碼，避免資料庫寫入大小寫混雜的值。
         assert_eq!(CagrPeriod::from_code("y1"), None);
     }
@@ -346,7 +352,7 @@ mod tests {
     #[test]
     fn long_periods_require_coverage_disclosure_and_drop_price_metric() {
         // Y5/Y10 涵蓋率僅約六成，且長期間配股普遍，兩項限制必須同時成立。
-        for period in [CagrPeriod::Y5, CagrPeriod::Y10] {
+        for period in [CagrPeriod::Y5, CagrPeriod::Y7, CagrPeriod::Y10] {
             assert!(!period.is_default_exposed());
             assert!(period.requires_coverage_disclosure());
             assert!(!period.supports_price_metric());

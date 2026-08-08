@@ -960,7 +960,7 @@ mod tests {
         assert_eq!(period["default"], "Y1");
         assert_eq!(
             enum_values(&document, period),
-            serde_json::json!(["M3", "M6", "Y1", "Y1H", "Y2", "Y3", "Y5", "Y10"])
+            serde_json::json!(["M3", "M6", "Y1", "Y1H", "Y2", "Y3", "Y5", "Y7", "Y10"])
         );
         let metric = query_schema(ranking, "metric");
         assert_eq!(metric["default"], "total");
@@ -1083,7 +1083,7 @@ mod tests {
         });
         for path in [
             // 期間、口徑、排序鍵的白名單。
-            "/api/v1/market/cagr-ranking?period=Y7",
+            "/api/v1/market/cagr-ranking?period=Y8",
             "/api/v1/market/cagr-ranking?period=y1",
             "/api/v1/market/cagr-ranking?metric=cash",
             "/api/v1/market/cagr-ranking?sort=return",
@@ -1343,8 +1343,8 @@ mod tests {
             .collect();
         assert_eq!(
             periods,
-            vec!["M3", "M6", "Y1", "Y1H", "Y2", "Y3", "Y5", "Y10"],
-            "個股端點必須回傳全部八個期間且依期間長度排序"
+            vec!["M3", "M6", "Y1", "Y1H", "Y2", "Y3", "Y5", "Y7", "Y10"],
+            "個股端點必須回傳全部九個期間且依期間長度排序"
         );
         assert!(
             json["items"]

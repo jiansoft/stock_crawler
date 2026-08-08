@@ -740,8 +740,8 @@ mod tests {
         assert_eq!(summary.periods_calculated, CagrPeriod::ALL.len());
         assert_eq!(summary.periods_skipped, 0);
         // 母體中每一檔在每個期間都必須有一列，否則涵蓋率會被高估。
-        assert_eq!(summary.rows_written, 24);
-        assert_eq!(repository.saved_len(), 24);
+        assert_eq!(summary.rows_written, 27);
+        assert_eq!(repository.saved_len(), 27);
         assert_eq!(summary.anomaly_symbols, 1);
     }
 
@@ -878,7 +878,7 @@ mod tests {
             .expect("計算不應失敗");
 
         assert_eq!(summary.periods_calculated, 1);
-        assert_eq!(summary.periods_skipped, 7);
+        assert_eq!(summary.periods_skipped, CagrPeriod::ALL.len() - 1);
         // 跳過的期間不寫入任何列，避免灌進兩萬多列全 NULL 的資料。
         assert_eq!(summary.rows_written, 3);
     }

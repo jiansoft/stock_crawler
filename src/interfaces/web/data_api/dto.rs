@@ -130,6 +130,8 @@ enum CagrPeriodParamValue {
     Y3,
     /// 5 年。
     Y5,
+    /// 7 年。
+    Y7,
     /// 10 年。
     Y10,
 }
@@ -990,7 +992,7 @@ pub(super) struct StockScreeningParams {
 /// handler 內以固定訊息回 422，而非交給 serde 產生泛用錯誤。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(super) struct CagrRankingParams {
-    /// 統計期間：`M3`、`M6`、`Y1`（預設）、`Y1H`、`Y2`、`Y3`、`Y5` 或 `Y10`。
+    /// 統計期間：`M3`、`M6`、`Y1`（預設）、`Y1H`、`Y2`、`Y3`、`Y5`、`Y7` 或 `Y10`。
     #[param(value_type = CagrPeriodParamValue, inline, default = "Y1")]
     pub(super) period: Option<String>,
     /// 報酬口徑：`price`、`total`（預設）或 `reinvested`。

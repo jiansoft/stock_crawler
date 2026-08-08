@@ -2330,7 +2330,7 @@ pub(super) async fn cagr_by_symbol(
 /// 解析 `period` 查詢參數；未提供時預設 `Y1`。
 fn parse_cagr_period(value: Option<&str>) -> Result<CagrPeriod, &'static str> {
     CagrPeriod::from_code(value.unwrap_or("Y1"))
-        .ok_or("period 必須為 M3、M6、Y1、Y1H、Y2、Y3、Y5 或 Y10")
+        .ok_or("period 必須為 M3、M6、Y1、Y1H、Y2、Y3、Y5、Y7 或 Y10")
 }
 
 /// 解析 `metric` 查詢參數；未提供時預設主指標 `total`。
@@ -2968,7 +2968,7 @@ mod cagr_tests {
         }
         // 大小寫與別名一律不接受，避免前後端對「y1」是否合法各自解讀。
         assert!(parse_cagr_period(Some("y1")).is_err());
-        assert!(parse_cagr_period(Some("Y7")).is_err());
+        assert!(parse_cagr_period(Some("Y8")).is_err());
         assert!(parse_cagr_metric(Some("TOTAL")).is_err());
         assert!(parse_cagr_metric(Some("cash")).is_err());
     }

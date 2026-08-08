@@ -39,7 +39,7 @@ comment on table public.stock_cagr is '每日 CAGR：固定投入金額於各統
 
 comment on column public.stock_cagr.date is '計算基準日（期末交易日）';
 comment on column public.stock_cagr.stock_symbol is '股票代號';
-comment on column public.stock_cagr.period is '統計期間代碼：M3/M6/Y1/Y1H/Y2/Y3/Y5/Y10';
+comment on column public.stock_cagr.period is '統計期間代碼：M3/M6/Y1/Y1H/Y2/Y3/Y5/Y7/Y10';
 comment on column public.stock_cagr.base_date is '實際採用的期初交易日（名目期初日無報價時可順延，見 BASE_DATE_GRACE_DAYS）';
 comment on column public.stock_cagr.base_price is '期初收盤價';
 comment on column public.stock_cagr.end_price is '期末收盤價';
