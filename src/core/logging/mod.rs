@@ -4,7 +4,6 @@ use std::{
     collections::HashMap,
     fmt::Write as _,
     fs::{self},
-    io::Write,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -276,6 +275,16 @@ impl Logger {
     /// 建立指定檔名與 Seq 等級的背景 writer。
     ///
     /// 每個等級各自擁有獨立 channel 與 thread，避免單一慢速寫入拖累所有等級。
+    ///
+    /// **禁止在此函式（及 `LOGGER` 初始化路徑上的任何程式碼）存取
+    /// `core::config::SETTINGS`。** `SETTINGS` 的初始化過程本身會呼叫
+    /// `tracing::error!`（見 `config::App::override_with_env` 對 `TELEGRAM_ALLOWED`
+    /// 的解析失敗處理），那會反過來觸發 `LOGGER` 這個 `Lazy` 的初始化，
+    /// 形成同執行緒的 Lazy 重入 —— once_cell 的 std 實作在此情況下是**死鎖**
+    /// 而非 panic，症狀為啟動時無訊息卡死，且只在該環境變數剛好打錯時才出現。
+    ///
+    /// 需要設定值時一律由 `main` 讀完設定後推入（見 [`init_file_rotation`]、
+    /// [`init_seq`]）。
     fn create_writer(log_name: &str, seq_level: SeqLogLevel) -> AsyncLogWriter {
         let log_path = Self::get_log_path(log_name).unwrap_or_else(|| {
             panic!("Failed to create log directory.");
@@ -353,6 +362,24 @@ impl Logger {
 
         Some(log_path)
     }
+}
+
+/// 套用輪轉日誌檔設定（單檔大小上限與保留天數）。
+///
+/// 對應 `app.json` 的 `logging.file`，可由 `.env` 的 `LOG_FILE_MAX_SIZE_MB`、
+/// `LOG_FILE_MAX_AGE_DAYS` 覆蓋。傳入 `0` 代表未設定，沿用預設（10 MB / 7 天）。
+///
+/// 應在 `.env` 與設定載入後、開始大量寫日誌前呼叫；設定以全域參數保存，
+/// 已建立的背景 writer 也會立即套用。
+pub fn init_file_rotation(max_size_mb: u64, max_age_days: i64) {
+    rotate::configure(max_size_mb, max_age_days);
+
+    let (size, days) = rotate::effective_settings();
+    info_console(format!(
+        "Log rotation: max_size={} MB, max_age={} days",
+        size / (1024 * 1024),
+        days
+    ));
 }
 
 /// 初始化 Seq 日誌轉送。
@@ -668,21 +695,16 @@ impl tracing::field::Visit for FieldCollector {
 }
 
 /// 將累積的日誌文字寫入輪轉檔案。
+///
+/// 一律走 `Rotate::write_msg`，讓跨日切檔與單檔大小輪轉都能生效
+/// （先前直接取 writer 寫入，導致 `current_size` 永遠為 0、大小輪轉從未觸發）。
+/// 無論成功與否都清空緩衝，避免寫檔持續失敗時 buffer 無界成長。
 fn flush_log_buffer(rotate: &mut Rotate, now: chrono::DateTime<Local>, msg: &mut String) {
-    if let Some(writer) = rotate.get_writer(now)
-        && let Ok(mut w) = writer.write()
-    {
-        let to_write = msg.as_bytes();
-        if let Err(why) = w.write_all(to_write) {
-            error_console(format!("Failed to write msg:{}\r\nbecause:{:#?}", msg, why));
-        }
-
-        if let Err(why) = w.flush() {
-            error_console(format!("Failed to flush log file. because:{:#?}", why));
-        }
-
-        msg.clear();
+    if let Err(why) = rotate.write_msg(now, msg.as_bytes()) {
+        error_console(format!("Failed to write msg:{}\r\nbecause:{:#?}", msg, why));
     }
+
+    msg.clear();
 }
 
 /// 寫入 `info` 等級日誌（透過 tracing → FileLogLayer → LOGGER）。

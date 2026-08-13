@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, RwLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
     },
     time::UNIX_EPOCH,
 };
@@ -19,48 +19,97 @@ use crate::core::logging;
 const DEFAULT_MAX_SIZE: u64 = 10 * 1024 * 1024;
 /// 預設保留天數：7 天
 const DEFAULT_MAX_AGE_DAYS: i64 = 7;
+/// 同一秒內輪轉檔名的最大序號，避免極端情況下無限探測檔名。
+const MAX_FILENAME_SEQ: u32 = 1_000;
+/// 單檔大小可設定範圍（bytes）：1 MB ～ 1 GB。
+const MIN_CONFIGURABLE_SIZE: u64 = 1024 * 1024;
+const MAX_CONFIGURABLE_SIZE: u64 = 1024 * 1024 * 1024;
+/// 保留天數可設定範圍：1 ～ 365 天。
+const MIN_CONFIGURABLE_AGE_DAYS: i64 = 1;
+const MAX_CONFIGURABLE_AGE_DAYS: i64 = 365;
+
+/// 全域單檔大小上限（bytes），供未指定固定值的 [`Rotate`] 共用。
+static GLOBAL_MAX_SIZE: AtomicU64 = AtomicU64::new(DEFAULT_MAX_SIZE);
+/// 全域日誌保留天數，供未指定固定值的 [`Rotate`] 共用。
+static GLOBAL_MAX_AGE_DAYS: AtomicI64 = AtomicI64::new(DEFAULT_MAX_AGE_DAYS);
+
+/// 套用外部設定（`app.json` 的 `logging.file` 或 `.env`）到輪轉參數。
+///
+/// 由 `main` 在設定載入後呼叫。logger 的背景 worker 在此之前就已建立
+/// `Rotate`，因此參數以全域 atomic 保存並在每次判斷時讀取，讓設定即時生效，
+/// 而不需重建 writer（也避免 logger 初始化時反向依賴 `SETTINGS` 造成死鎖）。
+///
+/// 兩個參數為 `0` 時代表未設定，維持既有值；非 0 值會收斂到安全範圍內
+/// （大小 1 MB～1 GB、天數 1～365）。
+pub fn configure(max_size_mb: u64, max_age_days: i64) {
+    if max_size_mb > 0 {
+        let bytes = max_size_mb
+            .saturating_mul(1024 * 1024)
+            .clamp(MIN_CONFIGURABLE_SIZE, MAX_CONFIGURABLE_SIZE);
+        GLOBAL_MAX_SIZE.store(bytes, Ordering::Relaxed);
+    }
+
+    if max_age_days > 0 {
+        GLOBAL_MAX_AGE_DAYS.store(
+            max_age_days.clamp(MIN_CONFIGURABLE_AGE_DAYS, MAX_CONFIGURABLE_AGE_DAYS),
+            Ordering::Relaxed,
+        );
+    }
+}
+
+/// 取得目前生效的單檔大小上限（bytes）與保留天數，供啟動時記錄與診斷。
+pub fn effective_settings() -> (u64, i64) {
+    (
+        GLOBAL_MAX_SIZE.load(Ordering::Relaxed),
+        GLOBAL_MAX_AGE_DAYS.load(Ordering::Relaxed),
+    )
+}
 
 /// 依日期與大小自動輪轉的檔案 writer。
 pub struct Rotate {
     /// 檔名模式，例如 "log/%Y-%m-%d-name.log"
     fn_pattern: String,
-    /// 當前完整檔名（含 generation）
+    /// 當前完整檔名（含開檔時間戳）
     cur_fn: String,
     /// 當前完整檔名的同步保護鎖。
     cur_fn_lock: RwLock<String>,
-    /// 當前基礎檔名（不含 generation，由日期決定）
+    /// 當前基礎檔名（不含時間戳，由日期決定；僅用於偵測跨日）
     cur_base_fn: String,
     /// 檔案輸出 handle
     out_fh: Option<Arc<RwLock<BufWriter<File>>>>,
-    /// 當前世代編號 (0, 1, 2, ...)，只增不減
+    /// 當日已輪轉次數，僅供診斷與測試觀察（檔名改以時間戳區分）
     generation: u32,
-    /// 單檔最大大小 (bytes)
-    max_size: u64,
+    /// 單檔最大大小 (bytes)；`None` 表示跟隨全域設定
+    max_size: Option<u64>,
     /// 當前檔案已寫入大小
     current_size: u64,
-    /// 日誌保留時間
-    max_age: chrono::Duration,
+    /// 日誌保留天數；`None` 表示跟隨全域設定
+    max_age_days: Option<i64>,
     /// 是否正在執行輪轉
     on_rotate: AtomicBool,
 }
 
 impl Rotate {
-    /// 使用預設設定建立 Rotate 實例
+    /// 建立跟隨全域設定的 Rotate 實例。
     ///
-    /// 預設值：
-    /// - max_size: 10 MB
-    /// - max_age: 7 天
+    /// 單檔大小與保留天數取自 [`configure`] 套用的值（預設 10 MB / 7 天），
+    /// 且每次判斷時重新讀取，設定載入後不必重建 writer 即可生效。
     pub fn new(fn_pattern: String) -> Self {
-        Self::with_options(fn_pattern, DEFAULT_MAX_SIZE, DEFAULT_MAX_AGE_DAYS)
+        Self::build(fn_pattern, None, None)
     }
 
-    /// 使用自訂設定建立 Rotate 實例
+    /// 使用自訂設定建立 Rotate 實例（不受全域設定影響）。
     ///
     /// # Arguments
     /// * `fn_pattern` - 檔名模式，例如 "log/%Y-%m-%d-app.log"
     /// * `max_size` - 單檔最大大小 (bytes)
     /// * `max_age_days` - 日誌保留天數
     pub fn with_options(fn_pattern: String, max_size: u64, max_age_days: i64) -> Self {
+        Self::build(fn_pattern, Some(max_size), Some(max_age_days))
+    }
+
+    /// 共用建構流程。
+    fn build(fn_pattern: String, max_size: Option<u64>, max_age_days: Option<i64>) -> Self {
         Rotate {
             fn_pattern,
             cur_fn: String::new(),
@@ -70,110 +119,149 @@ impl Rotate {
             generation: 0,
             max_size,
             current_size: 0,
-            max_age: TimeDelta::try_days(max_age_days).unwrap_or(TimeDelta::days(7)),
+            max_age_days,
             on_rotate: Default::default(),
         }
     }
 
-    /// 取得檔案寫入器
-    pub fn get_writer(&mut self, now: DateTime<Local>) -> Option<Arc<RwLock<BufWriter<File>>>> {
-        let base_fn = self.generate_base_fn(now);
-
-        // 日期變更：重設 generation
-        if base_fn != self.cur_base_fn {
-            self.generation = 0;
-            self.current_size = 0;
-            self.cur_base_fn = base_fn;
-
-            if let Err(why) = self.open_new_file() {
-                logging::error_console(format!("Failed to open new log file: {:?}", why));
-                return None;
-            }
-
-            self.cleanup_old_files(now);
-        }
-
-        self.out_fh.clone()
+    /// 取得目前生效的單檔大小上限 (bytes)。
+    fn max_size(&self) -> u64 {
+        self.max_size
+            .unwrap_or_else(|| GLOBAL_MAX_SIZE.load(Ordering::Relaxed))
     }
 
-    /// 寫入日誌訊息，自動處理大小檢查和世代輪轉
-    ///
-    /// # Arguments
-    /// * `now` - 當前時間
-    /// * `msg` - 要寫入的訊息
-    pub fn write_msg(&mut self, now: DateTime<Local>, msg: &[u8]) -> Result<()> {
-        // 確保有有效的 writer
-        if self.get_writer(now).is_none() {
-            return Err(anyhow::anyhow!("Failed to get writer"));
+    /// 取得目前生效的日誌保留時間。
+    fn max_age(&self) -> chrono::Duration {
+        let days = self
+            .max_age_days
+            .unwrap_or_else(|| GLOBAL_MAX_AGE_DAYS.load(Ordering::Relaxed));
+
+        TimeDelta::try_days(days).unwrap_or_else(|| TimeDelta::days(DEFAULT_MAX_AGE_DAYS))
+    }
+
+    /// 確保當前有可用的檔案寫入器，必要時因跨日而切換新檔。
+    fn ensure_writer(&mut self, now: DateTime<Local>) -> Result<()> {
+        let base_fn = self.generate_base_fn(now);
+
+        // 日期未變更且檔案已開啟：沿用現有 writer
+        if base_fn == self.cur_base_fn && self.out_fh.is_some() {
+            return Ok(());
         }
 
-        // 檢查是否需要因大小超限而輪轉
-        if self.should_rotate_by_size(msg.len()) {
-            self.rotate_generation()?;
-        }
-
-        // 寫入訊息
-        if let Some(ref writer) = self.out_fh
-            && let Ok(mut w) = writer.write()
-        {
-            w.write_all(msg)?;
-            self.current_size += msg.len() as u64;
-        }
+        // 跨日（或首次開檔）：重設輪轉計數並開新檔
+        self.generation = 0;
+        self.current_size = 0;
+        self.cur_base_fn = base_fn;
+        self.open_new_file(now)?;
+        self.cleanup_old_files(now);
 
         Ok(())
     }
 
-    /// 產生基礎檔名（根據日期，不含 generation）
+    /// 寫入日誌訊息，自動處理跨日切檔與大小超限輪轉。
+    ///
+    /// 寫入後立即 flush，確保日誌即時落地（程序異常結束時不遺失緩衝內容）。
+    ///
+    /// # Arguments
+    /// * `now` - 當前時間，同時作為輪轉後新檔名的時間戳
+    /// * `msg` - 要寫入的訊息
+    pub fn write_msg(&mut self, now: DateTime<Local>, msg: &[u8]) -> Result<()> {
+        // 確保有有效的 writer（含跨日切檔）
+        self.ensure_writer(now)?;
+
+        // 檢查是否需要因大小超限而輪轉
+        if self.should_rotate_by_size(msg.len()) {
+            self.rotate_by_size(now)?;
+        }
+
+        let writer = self
+            .out_fh
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get writer"))?;
+        let mut w = writer
+            .write()
+            .map_err(|_| anyhow::anyhow!("log writer lock poisoned"))?;
+
+        w.write_all(msg)?;
+        w.flush()?;
+        self.current_size += msg.len() as u64;
+
+        Ok(())
+    }
+
+    /// 產生基礎檔名（根據日期，不含時間戳）
     fn generate_base_fn(&self, now: DateTime<Local>) -> String {
         now.format(&self.fn_pattern).to_string()
     }
 
-    /// 產生完整檔名（含 generation）
+    /// 產生完整檔名（含開檔時間戳）
     ///
-    /// generation = 0: "log/2025-02-03-app.log"
-    /// generation = 1: "log/2025-02-03-app.1.log"
-    /// generation = 2: "log/2025-02-03-app.2.log"
-    fn generate_full_fn(&self, base_fn: &str, generation: u32) -> String {
-        if generation == 0 {
-            base_fn.to_string()
+    /// 時間戳為該檔第一筆日誌的時間（時-分-秒），排查時可直接由檔名定位時段。
+    /// Windows 檔名不允許 `:`，因此改用 `-` 分隔。
+    ///
+    /// seq = 0: "log/2025-02-03-app.00-05-32.log"
+    /// seq = 1: "log/2025-02-03-app.00-05-32-1.log"（同一秒內再次輪轉時避免撞名）
+    fn generate_full_fn(&self, base_fn: &str, stamp: &str, seq: u32) -> String {
+        let path = Path::new(base_fn);
+        let parent = path.parent().unwrap_or(Path::new(""));
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("log");
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("log");
+        let suffix = if seq == 0 {
+            stamp.to_string()
         } else {
-            let path = Path::new(base_fn);
-            let parent = path.parent().unwrap_or(Path::new(""));
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("log");
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("log");
+            format!("{}-{}", stamp, seq)
+        };
 
-            parent
-                .join(format!("{}.{}.{}", stem, generation, ext))
-                .to_string_lossy()
-                .to_string()
+        parent
+            .join(format!("{}.{}.{}", stem, suffix, ext))
+            .to_string_lossy()
+            .to_string()
+    }
+
+    /// 依開檔時間挑出尚未被使用的檔名。
+    ///
+    /// 同一秒內多次輪轉（或重啟）時遞增序號，確保不會接續寫入既有檔案。
+    fn resolve_available_fn(&self, now: DateTime<Local>) -> String {
+        let stamp = now.format("%H-%M-%S").to_string();
+        let mut seq = 0;
+
+        loop {
+            let candidate = self.generate_full_fn(&self.cur_base_fn, &stamp, seq);
+            if !Path::new(&candidate).exists() || seq >= MAX_FILENAME_SEQ {
+                return candidate;
+            }
+
+            seq += 1;
         }
     }
 
     /// 檢查是否需要因大小超限而輪轉
+    ///
+    /// 空檔案不輪轉，避免單筆訊息大於 `max_size` 時每次寫入都開新檔。
     fn should_rotate_by_size(&self, additional_bytes: usize) -> bool {
-        self.current_size + additional_bytes as u64 > self.max_size
+        self.current_size > 0 && self.current_size + additional_bytes as u64 > self.max_size()
     }
 
-    /// 開啟新檔案
-    fn open_new_file(&mut self) -> Result<()> {
+    /// 開啟新檔案，檔名帶當下時間戳。
+    fn open_new_file(&mut self, now: DateTime<Local>) -> Result<()> {
         // 先 flush 並關閉舊檔案
         self.flush_current();
 
-        let filename = self.generate_full_fn(&self.cur_base_fn, self.generation);
-
-        // 確保目錄存在
-        if let Some(parent) = Path::new(&filename).parent()
+        // 確保目錄存在（須早於檔名可用性檢查，否則 exists() 永遠為 false）
+        if let Some(parent) = Path::new(&self.cur_base_fn).parent()
+            && !parent.as_os_str().is_empty()
             && !parent.exists()
         {
             fs::create_dir_all(parent)?;
         }
 
+        let filename = self.resolve_available_fn(now);
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&filename)?;
 
-        // 取得現有檔案大小
+        // 取得現有檔案大小（撞名上限時可能接續既有檔）
         self.current_size = file.metadata().map(|m| m.len()).unwrap_or(0);
 
         self.out_fh = Some(Arc::new(RwLock::new(BufWriter::with_capacity(4096, file))));
@@ -186,17 +274,12 @@ impl Rotate {
         Ok(())
     }
 
-    /// 執行世代輪轉（因大小超限）
-    fn rotate_generation(&mut self) -> Result<()> {
-        // flush 當前檔案
-        self.flush_current();
-
-        // 遞增世代（只增不減，不覆蓋舊檔案）
+    /// 執行輪轉（因大小超限），新檔以當下時間為檔名時間戳。
+    fn rotate_by_size(&mut self, now: DateTime<Local>) -> Result<()> {
         self.generation += 1;
         self.current_size = 0;
 
-        // 開啟新檔案
-        self.open_new_file()
+        self.open_new_file(now)
     }
 
     /// flush 當前檔案
@@ -216,7 +299,7 @@ impl Rotate {
 
         match Self::files_in_directory(&self.cur_fn) {
             Ok(files) => {
-                let cut_off = (now - self.max_age).timestamp() as u64;
+                let cut_off = (now - self.max_age()).timestamp() as u64;
                 let to_unlink: Vec<PathBuf> = files
                     .into_iter()
                     .filter_map(|file| {
@@ -372,20 +455,66 @@ mod tests {
         logging::debug_file_async("結束 test_size_rotation".to_string());
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn test_generation_filename() {
-        let r = Rotate::new("log/%Y-%m-%d-app.log".to_string());
+    /// 驗證外部設定的套用、範圍收斂，以及 `Rotate::new` 會跟隨全域設定。
+    ///
+    /// 測試結束時還原預設值，避免影響同一 process 內的其他測試。
+    #[test]
+    fn test_configure_limits() {
+        // 0 代表未設定，維持既有值
+        configure(0, 0);
+        assert_eq!(
+            effective_settings(),
+            (DEFAULT_MAX_SIZE, DEFAULT_MAX_AGE_DAYS)
+        );
 
-        let base = "log/2025-02-03-app.log";
-        assert_eq!(r.generate_full_fn(base, 0), "log/2025-02-03-app.log");
-        assert_eq!(r.generate_full_fn(base, 1), "log/2025-02-03-app.1.log");
-        assert_eq!(r.generate_full_fn(base, 2), "log/2025-02-03-app.2.log");
+        // 一般設定值直接生效
+        configure(20, 14);
+        assert_eq!(effective_settings(), (20 * 1024 * 1024, 14));
 
-        println!("All filename generation tests passed!");
+        // 已建立的 Rotate（跟隨全域）也會讀到新值
+        let follower = Rotate::new("log/%Y-%m-%d-configure-test.log".to_string());
+        assert_eq!(follower.max_size(), 20 * 1024 * 1024);
+        assert_eq!(follower.max_age(), TimeDelta::days(14));
+
+        // 以固定值建立者不受全域影響
+        let fixed = Rotate::with_options("log/%Y-%m-%d-configure-test.log".to_string(), 4096, 3);
+        assert_eq!(fixed.max_size(), 4096);
+        assert_eq!(fixed.max_age(), TimeDelta::days(3));
+
+        // 超出範圍者收斂至邊界
+        configure(4096, 3650);
+        assert_eq!(
+            effective_settings(),
+            (MAX_CONFIGURABLE_SIZE, MAX_CONFIGURABLE_AGE_DAYS)
+        );
+
+        // 還原預設值
+        GLOBAL_MAX_SIZE.store(DEFAULT_MAX_SIZE, Ordering::Relaxed);
+        GLOBAL_MAX_AGE_DAYS.store(DEFAULT_MAX_AGE_DAYS, Ordering::Relaxed);
     }
 
-    /// 驗證 generation 只增不減，且不會覆蓋舊檔案
+    /// 驗證輪轉檔名以「開檔時間」標記，並在同秒撞名時遞增序號。
+    #[test]
+    fn test_timestamp_filename() {
+        let r = Rotate::new("log/%Y-%m-%d-app.log".to_string());
+        let base = "log/2025-02-03-app.log";
+        let sep = std::path::MAIN_SEPARATOR;
+
+        assert_eq!(
+            r.generate_full_fn(base, "00-05-32", 0),
+            format!("log{sep}2025-02-03-app.00-05-32.log")
+        );
+        assert_eq!(
+            r.generate_full_fn(base, "01-03-07", 0),
+            format!("log{sep}2025-02-03-app.01-03-07.log")
+        );
+        assert_eq!(
+            r.generate_full_fn(base, "01-03-07", 2),
+            format!("log{sep}2025-02-03-app.01-03-07-2.log")
+        );
+    }
+
+    /// 驗證輪轉後的檔案不會互相覆蓋，且檔名都帶時間戳
     #[tokio::test]
     #[ignore]
     async fn test_no_overwrite() {
@@ -439,7 +568,7 @@ mod tests {
             }
         }
 
-        // 驗證檔案數量 = generation + 1（因為 generation_index 從 0 開始）。
+        // 驗證檔案數量 = 輪轉次數 + 1（第一個檔案不算輪轉）。
         let expected_files = final_generation + 1;
         assert_eq!(
             files.len() as u32,
@@ -450,18 +579,20 @@ mod tests {
             files
         );
 
-        // 驗證每個 generation 的檔案都存在
+        // 本測試所有寫入共用同一個 now，因此時間戳相同、以序號區分。
         let base_fn = now.format("%Y-%m-%d-no-overwrite-test").to_string();
-        for generation_index in 0..=final_generation {
-            let expected_name = if generation_index == 0 {
-                format!("{}.log", base_fn)
+        let stamp = now.format("%H-%M-%S").to_string();
+        for seq in 0..=final_generation {
+            let expected_name = if seq == 0 {
+                format!("{}.{}.log", base_fn, stamp)
             } else {
-                format!("{}.{}.log", base_fn, generation_index)
+                format!("{}.{}-{}.log", base_fn, stamp, seq)
             };
             assert!(
                 files.contains(&expected_name),
-                "缺少檔案: {}",
-                expected_name
+                "缺少檔案: {}。實際檔案: {:?}",
+                expected_name,
+                files
             );
         }
 

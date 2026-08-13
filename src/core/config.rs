@@ -46,15 +46,34 @@ pub struct System {
 
 const SEQ_SERVER_URL: &str = "SEQ_SERVER_URL";
 const SEQ_API_KEY: &str = "SEQ_API_KEY";
+const LOG_FILE_MAX_SIZE_MB: &str = "LOG_FILE_MAX_SIZE_MB";
+const LOG_FILE_MAX_AGE_DAYS: &str = "LOG_FILE_MAX_AGE_DAYS";
 
 /// 日誌相關設定項。
 ///
-/// 目前用於控制檔案日誌之外的外部日誌收集器，例如 Seq。
+/// 涵蓋本地輪轉檔案（`file`）與外部日誌收集器（`seq`）。
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Logging {
+    /// 本地輪轉日誌檔設定。
+    #[serde(default)]
+    pub file: FileLogging,
     /// Seq 日誌收集器設定。
     #[serde(default)]
     pub seq: SeqLogging,
+}
+
+/// 本地輪轉日誌檔設定。
+///
+/// 兩個欄位皆為 `0`（或未設定）時，沿用 `core::logging::rotate` 的預設值
+/// （單檔 10 MB、保留 7 天）。實際生效值會在套用時收斂至安全範圍。
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct FileLogging {
+    /// 單一日誌檔大小上限（MB）；超過即輪轉出新檔（檔名帶時間戳）。
+    #[serde(default, rename = "maxSizeMb", alias = "max_size_mb")]
+    pub max_size_mb: u64,
+    /// 日誌檔保留天數；超過此天數的舊檔會在跨日切檔時被刪除。
+    #[serde(default, rename = "maxAgeDays", alias = "max_age_days")]
+    pub max_age_days: i64,
 }
 
 /// Seq 日誌收集器連線設定。
@@ -339,6 +358,18 @@ impl App {
                 ssl_key_file: env::var(SYSTEM_SSL_KEY_FILE).expect(SYSTEM_SSL_KEY_FILE),
             },
             logging: Logging {
+                file: FileLogging {
+                    // 讀取單檔大小上限（MB）；未設定或解析失敗時為 0（使用程式預設值）
+                    max_size_mb: env::var(LOG_FILE_MAX_SIZE_MB)
+                        .ok()
+                        .and_then(|v| u64::from_str(v.trim()).ok())
+                        .unwrap_or(0),
+                    // 讀取日誌保留天數；未設定或解析失敗時為 0（使用程式預設值）
+                    max_age_days: env::var(LOG_FILE_MAX_AGE_DAYS)
+                        .ok()
+                        .and_then(|v| i64::from_str(v.trim()).ok())
+                        .unwrap_or(0),
+                },
                 seq: SeqLogging {
                     // 讀取 Seq 伺服器網址
                     server_url: env::var(SEQ_SERVER_URL).unwrap_or_default(),
@@ -400,6 +431,21 @@ impl App {
             self.logging.seq.api_key = api_key;
         }
 
+        // 若環境變數中有輪轉日誌檔設定，則覆蓋設定；
+        // 解析失敗（例如打成非數字）時保留 app.json 的值，避免靜默歸零。
+        if let Some(max_size_mb) = env::var(LOG_FILE_MAX_SIZE_MB)
+            .ok()
+            .and_then(|v| u64::from_str(v.trim()).ok())
+        {
+            self.logging.file.max_size_mb = max_size_mb;
+        }
+        if let Some(max_age_days) = env::var(LOG_FILE_MAX_AGE_DAYS)
+            .ok()
+            .and_then(|v| i64::from_str(v.trim()).ok())
+        {
+            self.logging.file.max_age_days = max_age_days;
+        }
+
         // 若環境變數中有 Go 後端 gRPC 服務資訊，則覆蓋設定
         if let Ok(target) = env::var(GO_GRPC_TARGET) {
             self.rpc.go_service.target = target;
@@ -438,6 +484,10 @@ impl App {
                     self.bot.telegram.allowed = allowed;
                 }
                 Err(why) => {
+                    // 注意：這行 tracing 位於 SETTINGS 的 Lazy 初始化路徑內，會經
+                    // FileLogLayer 觸發 core::logging::LOGGER 的初始化。因此 logging
+                    // 那側不得反向讀取 SETTINGS，否則會形成同執行緒的 Lazy 重入而死鎖
+                    // （詳見 core::logging::Logger::create_writer 的說明）。
                     tracing::error!(
                         "Failed to serde_json because: {:?} \r\n {}",
                         why,
