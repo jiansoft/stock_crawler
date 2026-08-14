@@ -270,7 +270,7 @@ jobs:
     - name: Rust cache
       uses: Swatinem/rust-cache@v2
     - name: Install cargo-llvm-cov
-      uses: taiki-e/install-action@v2.85.3
+      uses: taiki-e/install-action@v2.85.11
       with:
         tool: cargo-llvm-cov
     - name: Install PostgreSQL client
