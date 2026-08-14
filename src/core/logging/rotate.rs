@@ -66,23 +66,30 @@ pub fn effective_settings() -> (u64, i64) {
 }
 
 /// 依日期與大小自動輪轉的檔案 writer。
+///
+/// 命名策略：**正在寫入的檔案永遠不帶時間戳**（例如
+/// `log/2026-08-14_default_info.log`）；當檔案超過大小上限時，先把它更名為
+/// `log/2026-08-14_default_info.09-06-56.log`（時間戳為該檔最後一筆日誌的時間），
+/// 再開一個同名的空檔繼續寫。因此最新日誌一律位於固定檔名上，方便 tail 與監控。
 pub struct Rotate {
     /// 檔名模式，例如 "log/%Y-%m-%d-name.log"
     fn_pattern: String,
-    /// 當前完整檔名（含開檔時間戳）
+    /// 當前完整檔名（即不帶時間戳的活躍檔名）
     cur_fn: String,
     /// 當前完整檔名的同步保護鎖。
     cur_fn_lock: RwLock<String>,
-    /// 當前基礎檔名（不含時間戳，由日期決定；僅用於偵測跨日）
+    /// 當前基礎檔名（不含時間戳，由日期決定；同時就是活躍檔名，並用於偵測跨日）
     cur_base_fn: String,
     /// 檔案輸出 handle
     out_fh: Option<Arc<RwLock<BufWriter<File>>>>,
-    /// 當日已輪轉次數，僅供診斷與測試觀察（檔名改以時間戳區分）
+    /// 當日已輪轉次數，僅供診斷與測試觀察（封存檔名以時間戳區分）
     generation: u32,
     /// 單檔最大大小 (bytes)；`None` 表示跟隨全域設定
     max_size: Option<u64>,
     /// 當前檔案已寫入大小
     current_size: u64,
+    /// 當前檔案最後一筆日誌的時間；輪轉時作為封存檔名的時間戳
+    last_write_at: Option<DateTime<Local>>,
     /// 日誌保留天數；`None` 表示跟隨全域設定
     max_age_days: Option<i64>,
     /// 是否正在執行輪轉
@@ -119,6 +126,7 @@ impl Rotate {
             generation: 0,
             max_size,
             current_size: 0,
+            last_write_at: None,
             max_age_days,
             on_rotate: Default::default(),
         }
@@ -140,6 +148,9 @@ impl Rotate {
     }
 
     /// 確保當前有可用的檔案寫入器，必要時因跨日而切換新檔。
+    ///
+    /// 跨日時舊日期的活躍檔（檔名已含日期，不會與新檔撞名）保持原樣，
+    /// 直接改開新日期的活躍檔。
     fn ensure_writer(&mut self, now: DateTime<Local>) -> Result<()> {
         let base_fn = self.generate_base_fn(now);
 
@@ -151,8 +162,9 @@ impl Rotate {
         // 跨日（或首次開檔）：重設輪轉計數並開新檔
         self.generation = 0;
         self.current_size = 0;
+        self.last_write_at = None;
         self.cur_base_fn = base_fn;
-        self.open_new_file(now)?;
+        self.open_current_file()?;
         self.cleanup_old_files(now);
 
         Ok(())
@@ -184,7 +196,10 @@ impl Rotate {
 
         w.write_all(msg)?;
         w.flush()?;
+        drop(w);
+
         self.current_size += msg.len() as u64;
+        self.last_write_at = Some(now);
 
         Ok(())
     }
@@ -194,9 +209,9 @@ impl Rotate {
         now.format(&self.fn_pattern).to_string()
     }
 
-    /// 產生完整檔名（含開檔時間戳）
+    /// 產生封存檔名（含時間戳）
     ///
-    /// 時間戳為該檔第一筆日誌的時間（時-分-秒），排查時可直接由檔名定位時段。
+    /// 時間戳為該檔**最後一筆**日誌的時間（時-分-秒），排查時可直接由檔名定位時段。
     /// Windows 檔名不允許 `:`，因此改用 `-` 分隔。
     ///
     /// seq = 0: "log/2025-02-03-app.00-05-32.log"
@@ -218,11 +233,11 @@ impl Rotate {
             .to_string()
     }
 
-    /// 依開檔時間挑出尚未被使用的檔名。
+    /// 依封存時間挑出尚未被使用的封存檔名。
     ///
-    /// 同一秒內多次輪轉（或重啟）時遞增序號，確保不會接續寫入既有檔案。
-    fn resolve_available_fn(&self, now: DateTime<Local>) -> String {
-        let stamp = now.format("%H-%M-%S").to_string();
+    /// 同一秒內多次輪轉（或重啟）時遞增序號，確保不會覆蓋既有封存檔。
+    fn resolve_archive_fn(&self, stamp_at: DateTime<Local>) -> String {
+        let stamp = stamp_at.format("%H-%M-%S").to_string();
         let mut seq = 0;
 
         loop {
@@ -242,12 +257,15 @@ impl Rotate {
         self.current_size > 0 && self.current_size + additional_bytes as u64 > self.max_size()
     }
 
-    /// 開啟新檔案，檔名帶當下時間戳。
-    fn open_new_file(&mut self, now: DateTime<Local>) -> Result<()> {
+    /// 開啟（或接續）當前活躍檔案，檔名固定為不含時間戳的 `cur_base_fn`。
+    ///
+    /// 以 append 模式開啟：程序重啟後會接續寫入同一天既有的活躍檔，
+    /// 檔案大小由 metadata 取得，重啟後仍能正確判斷是否該輪轉。
+    fn open_current_file(&mut self) -> Result<()> {
         // 先 flush 並關閉舊檔案
-        self.flush_current();
+        self.close_current();
 
-        // 確保目錄存在（須早於檔名可用性檢查，否則 exists() 永遠為 false）
+        // 確保目錄存在
         if let Some(parent) = Path::new(&self.cur_base_fn).parent()
             && !parent.as_os_str().is_empty()
             && !parent.exists()
@@ -255,13 +273,13 @@ impl Rotate {
             fs::create_dir_all(parent)?;
         }
 
-        let filename = self.resolve_available_fn(now);
+        let filename = self.cur_base_fn.clone();
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&filename)?;
 
-        // 取得現有檔案大小（撞名上限時可能接續既有檔）
+        // 取得現有檔案大小（重啟後接續既有檔）
         self.current_size = file.metadata().map(|m| m.len()).unwrap_or(0);
 
         self.out_fh = Some(Arc::new(RwLock::new(BufWriter::with_capacity(4096, file))));
@@ -274,12 +292,32 @@ impl Rotate {
         Ok(())
     }
 
-    /// 執行輪轉（因大小超限），新檔以當下時間為檔名時間戳。
+    /// 執行輪轉（因大小超限）。
+    ///
+    /// 先把活躍檔更名為帶時間戳的封存檔（時間戳取該檔最後一筆日誌的時間，
+    /// 尚無寫入紀錄時退回當下時間），再開一個同名的空活躍檔繼續寫。
+    /// 更名前必須先關閉檔案 handle，否則 Windows 會拒絕更名。
     fn rotate_by_size(&mut self, now: DateTime<Local>) -> Result<()> {
-        self.generation += 1;
-        self.current_size = 0;
+        self.close_current();
 
-        self.open_new_file(now)
+        let stamp_at = self.last_write_at.unwrap_or(now);
+        let archive_fn = self.resolve_archive_fn(stamp_at);
+
+        if let Err(why) = fs::rename(&self.cur_base_fn, &archive_fn) {
+            // 更名失敗（例如檔案被其他程序鎖住）時不中斷日誌流程，
+            // 續寫原檔並在下一筆訊息再嘗試輪轉。
+            logging::error_console(format!(
+                "couldn't rotate the log file({} -> {}). because {:?}",
+                self.cur_base_fn, archive_fn, why
+            ));
+        } else {
+            self.generation += 1;
+        }
+
+        self.last_write_at = None;
+
+        // current_size 由 open_current_file 依實際檔案大小重設
+        self.open_current_file()
     }
 
     /// flush 當前檔案
@@ -289,6 +327,12 @@ impl Rotate {
         {
             let _ = w.flush();
         }
+    }
+
+    /// flush 並關閉當前檔案 handle，讓檔案可被更名。
+    fn close_current(&mut self) {
+        self.flush_current();
+        self.out_fh = None;
     }
 
     /// 清理舊檔案（超過 max_age 的檔案）
@@ -493,7 +537,7 @@ mod tests {
         GLOBAL_MAX_AGE_DAYS.store(DEFAULT_MAX_AGE_DAYS, Ordering::Relaxed);
     }
 
-    /// 驗證輪轉檔名以「開檔時間」標記，並在同秒撞名時遞增序號。
+    /// 驗證封存檔名以「最後一筆日誌時間」標記，並在同秒撞名時遞增序號。
     #[test]
     fn test_timestamp_filename() {
         let r = Rotate::new("log/%Y-%m-%d-app.log".to_string());
@@ -514,88 +558,165 @@ mod tests {
         );
     }
 
-    /// 驗證輪轉後的檔案不會互相覆蓋，且檔名都帶時間戳
-    #[tokio::test]
-    #[ignore]
-    async fn test_no_overwrite() {
-        use std::collections::HashSet;
-
-        dotenvy::dotenv().ok();
-
-        // 清理舊測試檔案
-        if let Ok(entries) = fs::read_dir("log") {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.contains("no-overwrite-test") {
-                    let _ = fs::remove_file(entry.path());
-                }
-            }
-        }
-
-        // 設定很小的檔案大小限制 (512 bytes) 來強制多次輪轉
-        let mut r = Rotate::with_options(
-            "log/%Y-%m-%d-no-overwrite-test.log".to_string(),
-            512, // 512 bytes
-            7,
+    /// 建立本次測試專用的暫存目錄，避免與其他測試（或正式 log 目錄）互相干擾。
+    fn temp_log_dir(tag: &str) -> PathBuf {
+        let unique = format!(
+            "{}-{}-{}",
+            tag,
+            std::process::id(),
+            Local::now().timestamp_nanos_opt().unwrap_or_default()
         );
+        let dir = std::env::temp_dir()
+            .join("stock_rust-rotate-test")
+            .join(unique);
+        fs::create_dir_all(&dir).expect("建立暫存日誌目錄失敗");
 
+        dir
+    }
+
+    /// 列出目錄內所有檔名（排序後回傳）。
+    fn file_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .expect("讀取暫存日誌目錄失敗")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+
+        names
+    }
+
+    /// 驗證輪轉命名策略：
+    /// 1. 正在寫入的檔案固定為不含時間戳的檔名；
+    /// 2. 超過大小上限時，舊檔被更名為帶時間戳的封存檔，彼此不覆蓋。
+    #[test]
+    fn test_active_file_has_no_timestamp() {
+        let dir = temp_log_dir("active");
+        let pattern = dir.join("%Y-%m-%d-app.log").to_string_lossy().to_string();
+
+        // 512 bytes 上限，強制多次輪轉
+        let mut r = Rotate::with_options(pattern, 512, 7);
         let now = Local::now();
 
-        // 寫入足夠多的資料來觸發多次輪轉
         for i in 0..50 {
             let msg = format!("Line {:03} - {}\r\n", i, "X".repeat(50));
             r.write_msg(now, msg.as_bytes()).unwrap();
         }
 
         let final_generation = r.generation;
-        println!("最終 generation: {}", final_generation);
-
-        // 驗證產生了多個檔案
         assert!(
             final_generation >= 3,
             "應該至少輪轉 3 次，實際: {}",
             final_generation
         );
 
-        // 收集所有產生的檔案
-        let mut files: HashSet<String> = HashSet::new();
-        if let Ok(entries) = fs::read_dir("log") {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.contains("no-overwrite-test") {
-                    files.insert(name);
-                }
-            }
-        }
+        let base_name = now.format("%Y-%m-%d-app").to_string();
+        let stamp = now.format("%H-%M-%S").to_string();
+        let files = file_names(&dir);
 
-        // 驗證檔案數量 = 輪轉次數 + 1（第一個檔案不算輪轉）。
-        let expected_files = final_generation + 1;
-        assert_eq!(
-            files.len() as u32,
-            expected_files,
-            "檔案數量應為 {}，實際: {}。檔案: {:?}",
-            expected_files,
-            files.len(),
+        // 活躍檔（不含時間戳）必定存在，且是目前寫入的目標
+        let active_name = format!("{}.log", base_name);
+        assert!(
+            files.contains(&active_name),
+            "缺少活躍檔: {}。實際檔案: {:?}",
+            active_name,
             files
         );
+        assert!(r.cur_fn.ends_with(&active_name), "cur_fn 應指向活躍檔");
 
-        // 本測試所有寫入共用同一個 now，因此時間戳相同、以序號區分。
-        let base_fn = now.format("%Y-%m-%d-no-overwrite-test").to_string();
-        let stamp = now.format("%H-%M-%S").to_string();
-        for seq in 0..=final_generation {
+        // 封存檔數量 = 輪轉次數；本測試所有寫入共用同一個 now，時間戳相同、以序號區分
+        assert_eq!(
+            files.len() as u32,
+            final_generation + 1,
+            "檔案數量應為 輪轉次數+1（活躍檔），實際檔案: {:?}",
+            files
+        );
+        for seq in 0..final_generation {
             let expected_name = if seq == 0 {
-                format!("{}.{}.log", base_fn, stamp)
+                format!("{}.{}.log", base_name, stamp)
             } else {
-                format!("{}.{}-{}.log", base_fn, stamp, seq)
+                format!("{}.{}-{}.log", base_name, stamp, seq)
             };
             assert!(
                 files.contains(&expected_name),
-                "缺少檔案: {}。實際檔案: {:?}",
+                "缺少封存檔: {}。實際檔案: {:?}",
                 expected_name,
                 files
             );
         }
 
-        println!("驗證通過: 產生了 {} 個檔案，無覆蓋", files.len());
+        drop(r);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 驗證封存檔的時間戳取自該檔「最後一筆日誌」的時間，而非輪轉當下的時間。
+    #[test]
+    fn test_archive_stamp_uses_last_write_time() {
+        let dir = temp_log_dir("stamp");
+        let pattern = dir.join("%Y-%m-%d-app.log").to_string_lossy().to_string();
+
+        let mut r = Rotate::with_options(pattern, 512, 7);
+        let first = Local::now();
+        // 寫到接近上限（每行 63 bytes × 8 = 504 < 512），輪轉留給下一次寫入觸發
+        for i in 0..8 {
+            let msg = format!("Line {:03} - {}\r\n", i, "X".repeat(50));
+            r.write_msg(first, msg.as_bytes()).unwrap();
+        }
+        assert_eq!(r.generation, 0, "第一個檔案尚未輪轉");
+
+        // 一小時後再寫入，觸發輪轉；封存檔名應標記 first（最後一筆日誌時間）
+        let later = first + TimeDelta::try_hours(1).unwrap();
+        r.write_msg(later, b"after rotate\r\n").unwrap();
+        assert_eq!(r.generation, 1, "應已輪轉一次");
+
+        let base_name = first.format("%Y-%m-%d-app").to_string();
+        let files = file_names(&dir);
+        let expected_archive = format!("{}.{}.log", base_name, first.format("%H-%M-%S"));
+        let unexpected_archive = format!("{}.{}.log", base_name, later.format("%H-%M-%S"));
+
+        assert!(
+            files.contains(&expected_archive),
+            "封存檔應標記最後一筆日誌時間 {}。實際檔案: {:?}",
+            expected_archive,
+            files
+        );
+        assert!(
+            !files.contains(&unexpected_archive),
+            "封存檔不應使用輪轉當下時間 {}。實際檔案: {:?}",
+            unexpected_archive,
+            files
+        );
+
+        drop(r);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 驗證重啟後會接續寫入同一天的活躍檔，且既有大小納入輪轉判斷。
+    #[test]
+    fn test_restart_appends_to_active_file() {
+        let dir = temp_log_dir("restart");
+        let pattern = dir.join("%Y-%m-%d-app.log").to_string_lossy().to_string();
+        let now = Local::now();
+
+        let mut first = Rotate::with_options(pattern.clone(), 1024, 7);
+        first.write_msg(now, b"first run\r\n").unwrap();
+        let size_after_first = first.current_size;
+        drop(first);
+
+        let mut second = Rotate::with_options(pattern, 1024, 7);
+        second.write_msg(now, b"second run\r\n").unwrap();
+
+        assert_eq!(second.generation, 0, "重啟不應產生輪轉");
+        assert!(
+            second.current_size > size_after_first,
+            "重啟後應接續既有檔案大小"
+        );
+        assert_eq!(file_names(&dir).len(), 1, "重啟後不應產生額外檔案");
+
+        let content = fs::read_to_string(&second.cur_fn).unwrap();
+        assert!(content.contains("first run") && content.contains("second run"));
+
+        drop(second);
+        let _ = fs::remove_dir_all(&dir);
     }
 }
