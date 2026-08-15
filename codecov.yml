@@ -10,6 +10,12 @@ ignore:
   - "src/interfaces/rpc/control.rs"
   - "src/interfaces/rpc/manual_backfill.rs"
   - "src/interfaces/rpc/stock.rs"
+  # 整檔都是 #[ignore] 的手動回補入口（維運時以 -- --ignored 手動觸發），
+  # CI 永遠不會執行它，計入覆蓋率只會製造一筆固定的 0%。
+  - "src/app/manual_backfill.rs"
+  # 測試替身：實作大型 repository trait 時，用不到的方法一律是永不執行的
+  # unimplemented!()，計入覆蓋率會讓被測模組的數字失真。
+  - "**/test_double.rs"
   - "benches/**"
 
 coverage:

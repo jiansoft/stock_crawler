@@ -176,124 +176,11 @@ fn first_day_of_month(date: NaiveDate) -> NaiveDate {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use super::*;
+    use crate::domain::quote::test_double::CountingQuoteRepository;
 
     fn date(y: i32, m: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
-    }
-
-    /// 只記錄「被呼叫過幾次」的假倉儲。
-    ///
-    /// 用途是證明流程在不該寫入時完全沒有碰倉儲；其餘方法在這些測試路徑上
-    /// 不會被走到，因此一律 `unimplemented!()`，真的被呼叫時測試會直接失敗。
-    #[derive(Default)]
-    struct CountingQuoteRepository {
-        insert_calls: AtomicUsize,
-    }
-
-    #[async_trait::async_trait]
-    impl QuoteRepository for CountingQuoteRepository {
-        async fn insert_missing_daily_quotes(
-            &self,
-            quotes: &[crate::domain::quote::entity::DailyQuote],
-        ) -> Result<u64> {
-            self.insert_calls.fetch_add(1, Ordering::Relaxed);
-            Ok(quotes.len() as u64)
-        }
-
-        async fn save_daily_quote(
-            &self,
-            _quote: &crate::domain::quote::entity::DailyQuote,
-        ) -> Result<()> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn batch_save_daily_quotes(
-            &self,
-            _quotes: &[crate::domain::quote::entity::DailyQuote],
-        ) -> Result<()> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn fetch_quotes_by_date(
-            &self,
-            _date: NaiveDate,
-        ) -> Result<Vec<crate::domain::quote::entity::DailyQuote>> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn delete_quotes_by_date(&self, _date: NaiveDate) -> Result<()> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn replace_quotes_by_date(
-            &self,
-            _date: NaiveDate,
-            _quotes: &[crate::domain::quote::entity::DailyQuote],
-        ) -> Result<u64> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn fill_moving_average(
-            &self,
-            _quote: &mut crate::domain::quote::entity::DailyQuote,
-        ) -> Result<()> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn batch_update_moving_average(
-            &self,
-            _quotes: &[crate::domain::quote::entity::DailyQuote],
-        ) -> Result<()> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn makeup_for_the_lack_daily_quotes(&self, _date: NaiveDate) -> Result<u64> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn fetch_monthly_stock_price_summary(
-            &self,
-            _security_code: &str,
-            _year: i32,
-            _month: i32,
-        ) -> Result<
-            Option<(
-                rust_decimal::Decimal,
-                rust_decimal::Decimal,
-                rust_decimal::Decimal,
-            )>,
-        > {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn fetch_last_daily_quotes(
-            &self,
-        ) -> Result<Vec<crate::domain::quote::entity::LastDailyQuote>> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn rebuild_last_daily_quotes(&self) -> Result<()> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn fetch_last_quote(
-            &self,
-            _security_code: &str,
-        ) -> Result<Option<crate::domain::quote::entity::LastDailyQuote>> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn save_last_quotes_batch(
-            &self,
-            _quotes: &[crate::domain::quote::entity::LastDailyQuote],
-        ) -> Result<()> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn save_stock_price_stats(&self, _date: NaiveDate) -> Result<()> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn fetch_quote_history_records(
-            &self,
-        ) -> Result<Vec<crate::domain::quote::entity::QuoteHistoryRecord>> {
-            unimplemented!("測試不應走到這裡")
-        }
-        async fn save_quote_history_record(
-            &self,
-            _record: &crate::domain::quote::entity::QuoteHistoryRecord,
-        ) -> Result<()> {
-            unimplemented!("測試不應走到這裡")
-        }
     }
 
     /// 沒有代號就沒有工作：不打外部網站，也不碰倉儲。
@@ -306,7 +193,7 @@ mod tests {
             .expect("空代號清單應成功");
 
         assert_eq!(summary, QuoteHistoryBackfillSummary::default());
-        assert_eq!(repository.insert_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(repository.insert_calls(), 0);
     }
 
     /// 區間反了要在送出任何請求前就失敗。
@@ -324,7 +211,7 @@ mod tests {
         .expect_err("反向區間應失敗");
 
         assert!(err.to_string().contains("起始月份"), "錯誤訊息：{err}");
-        assert_eq!(repository.insert_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(repository.insert_calls(), 0);
     }
 
     #[test]
