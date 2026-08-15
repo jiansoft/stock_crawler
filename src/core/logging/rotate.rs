@@ -656,7 +656,14 @@ mod tests {
         let pattern = dir.join("%Y-%m-%d-app.log").to_string_lossy().to_string();
 
         let mut r = Rotate::with_options(pattern, 512, 7);
-        let first = Local::now();
+        // 基準時間釘在當天中午，而不是 Local::now()：這個測試會把時間往後推一小時
+        // 來觸發「大小輪轉」，若在 23 點之後執行，加一小時就跨日了，
+        // write_msg 會改走跨日切檔的路徑並把 generation 歸零，測試每天必失敗一小時。
+        let first = Local::now()
+            .date_naive()
+            .and_hms_opt(12, 0, 0)
+            .and_then(|naive| naive.and_local_timezone(Local).earliest())
+            .expect("測試基準時間應合法");
         // 寫到接近上限（每行 63 bytes × 8 = 504 < 512），輪轉留給下一次寫入觸發
         for i in 0..8 {
             let msg = format!("Line {:03} - {}\r\n", i, "X".repeat(50));

@@ -351,7 +351,7 @@ impl QuoteRepository for PgQuoteRepository {
 
         // 步驟 1：刪除該交易日既有的報價。因為還沒 commit，
         // 這個刪除對其他連線是看不見的；若後續寫入失敗，刪除也會一起被取消。
-        sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
+        sqlx::query(r#"delete from daily_quote where date = $1;"#)
             .bind(date)
             .execute(&mut *tx)
             .await?;
@@ -502,6 +502,7 @@ impl QuoteRepository for PgQuoteRepository {
 mod tests {
     use super::*;
     use crate::domain::quote::entity::LastDailyQuote;
+    use chrono::Datelike;
     use rust_decimal_macros::dec;
 
     #[tokio::test]
@@ -574,5 +575,91 @@ mod tests {
             .bind(test_symbol)
             .execute(database::get_connection())
             .await;
+    }
+
+    /// 空清單在轉換與碰資料庫之前就短路回 0。
+    ///
+    /// 回補流程對「這批沒有缺口」的情況會傳空清單進來，屬於正常路徑。
+    #[tokio::test]
+    async fn insert_missing_daily_quotes_short_circuits_on_an_empty_slice() {
+        let repository = PgQuoteRepository::new();
+
+        assert_eq!(
+            repository
+                .insert_missing_daily_quotes(&[])
+                .await
+                .expect("空清單應成功"),
+            0
+        );
+    }
+
+    /// 經由倉儲介面補寫缺口：領域實體正確轉成 Table 模型，且只補空位。
+    ///
+    /// 與 table 層的同名測試分工不同：這裡驗證的是 domain → table 的轉換有沒有
+    /// 把日期與代號帶到位，寫入語意本身由 table 層那支負責。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn insert_missing_daily_quotes_maps_and_fills_gaps() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 insert_missing_daily_quotes_maps_and_fills_gaps：無資料庫連接");
+            return;
+        }
+
+        // 固定歷史日期 + 假代號，避免碰到任何真實資料。
+        const SYMBOL: &str = "79978";
+        let day1 = NaiveDate::from_ymd_opt(1970, 1, 1).expect("測試日期應合法");
+        let day2 = NaiveDate::from_ymd_opt(1970, 1, 2).expect("測試日期應合法");
+        let cleanup = || async {
+            let _ = sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE "stock_symbol" = $1"#)
+                .bind(SYMBOL)
+                .execute(database::get_connection())
+                .await;
+        };
+        cleanup().await;
+
+        let quote = |date: NaiveDate| DomainDailyQuote {
+            stock_symbol: SYMBOL.to_string(),
+            date,
+            year: date.year(),
+            month: date.month() as i32,
+            day: date.day() as i32,
+            closing_price: dec!(10),
+            ..Default::default()
+        };
+
+        let repository = PgQuoteRepository::new();
+        assert_eq!(
+            repository
+                .insert_missing_daily_quotes(&[quote(day1), quote(day2)])
+                .await
+                .expect("首次寫入應成功"),
+            2
+        );
+        // 重跑不得產生重複資料列。
+        assert_eq!(
+            repository
+                .insert_missing_daily_quotes(&[quote(day1), quote(day2)])
+                .await
+                .expect("重跑應成功"),
+            0
+        );
+
+        // 轉換有把代號與日期帶到位，資料才查得回來。
+        let stored: i64 = sqlx::query_scalar(
+            r#"SELECT count(*) FROM daily_quote WHERE stock_symbol = $1 AND date IN ($2, $3)"#,
+        )
+        .bind(SYMBOL)
+        .bind(day1)
+        .bind(day2)
+        .fetch_one(database::get_connection())
+        .await
+        .expect("應查得到寫入的資料");
+        assert_eq!(stored, 2);
+
+        cleanup().await;
     }
 }
