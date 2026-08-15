@@ -24,6 +24,52 @@ pub struct YearRequest {
     #[prost(int32, tag = "1")]
     pub year: i32,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QuoteHistoryRequest {
+    #[prost(string, tag = "1")]
+    pub stock_symbols: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub from: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub to: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CorporateActionRequest {
+    #[prost(string, tag = "1")]
+    pub stock_symbol: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub effective_date: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub share_ratio: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub note: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CorporateActionItem {
+    #[prost(string, tag = "1")]
+    pub effective_date: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub share_ratio: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub note: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CorporateActionResponse {
+    #[prost(string, tag = "1")]
+    pub stock_symbol: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "2")]
+    pub actions: ::prost::alloc::vec::Vec<CorporateActionItem>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CagrRequest {
+    #[prost(string, tag = "1")]
+    pub date: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CagrPeriodRequest {
+    #[prost(string, tag = "1")]
+    pub period: ::prost::alloc::string::String,
+}
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListJobsRequest {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -324,6 +370,119 @@ pub mod manual_backfill_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn start_quote_history(
+            &mut self,
+            request: impl tonic::IntoRequest<super::QuoteHistoryRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BackfillJobResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/manual_backfill.ManualBackfillService/StartQuoteHistory",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "manual_backfill.ManualBackfillService",
+                        "StartQuoteHistory",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn save_corporate_action(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CorporateActionRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CorporateActionResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/manual_backfill.ManualBackfillService/SaveCorporateAction",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "manual_backfill.ManualBackfillService",
+                        "SaveCorporateAction",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn start_cagr(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CagrRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BackfillJobResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/manual_backfill.ManualBackfillService/StartCagr",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("manual_backfill.ManualBackfillService", "StartCagr"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn start_cagr_period(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CagrPeriodRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BackfillJobResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/manual_backfill.ManualBackfillService/StartCagrPeriod",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "manual_backfill.ManualBackfillService",
+                        "StartCagrPeriod",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn list_jobs(
             &mut self,
             request: impl tonic::IntoRequest<super::ListJobsRequest>,
@@ -429,6 +588,34 @@ pub mod manual_backfill_service_server {
         async fn start_multiple_dividend_historical_dividends(
             &self,
             request: tonic::Request<super::YearRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BackfillJobResponse>,
+            tonic::Status,
+        >;
+        async fn start_quote_history(
+            &self,
+            request: tonic::Request<super::QuoteHistoryRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BackfillJobResponse>,
+            tonic::Status,
+        >;
+        async fn save_corporate_action(
+            &self,
+            request: tonic::Request<super::CorporateActionRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CorporateActionResponse>,
+            tonic::Status,
+        >;
+        async fn start_cagr(
+            &self,
+            request: tonic::Request<super::CagrRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BackfillJobResponse>,
+            tonic::Status,
+        >;
+        async fn start_cagr_period(
+            &self,
+            request: tonic::Request<super::CagrPeriodRequest>,
         ) -> std::result::Result<
             tonic::Response<super::BackfillJobResponse>,
             tonic::Status,
@@ -817,6 +1004,199 @@ pub mod manual_backfill_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = StartMultipleDividendHistoricalDividendsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/manual_backfill.ManualBackfillService/StartQuoteHistory" => {
+                    #[allow(non_camel_case_types)]
+                    struct StartQuoteHistorySvc<T: ManualBackfillService>(pub Arc<T>);
+                    impl<
+                        T: ManualBackfillService,
+                    > tonic::server::UnaryService<super::QuoteHistoryRequest>
+                    for StartQuoteHistorySvc<T> {
+                        type Response = super::BackfillJobResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::QuoteHistoryRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ManualBackfillService>::start_quote_history(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = StartQuoteHistorySvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/manual_backfill.ManualBackfillService/SaveCorporateAction" => {
+                    #[allow(non_camel_case_types)]
+                    struct SaveCorporateActionSvc<T: ManualBackfillService>(pub Arc<T>);
+                    impl<
+                        T: ManualBackfillService,
+                    > tonic::server::UnaryService<super::CorporateActionRequest>
+                    for SaveCorporateActionSvc<T> {
+                        type Response = super::CorporateActionResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CorporateActionRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ManualBackfillService>::save_corporate_action(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = SaveCorporateActionSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/manual_backfill.ManualBackfillService/StartCagr" => {
+                    #[allow(non_camel_case_types)]
+                    struct StartCagrSvc<T: ManualBackfillService>(pub Arc<T>);
+                    impl<
+                        T: ManualBackfillService,
+                    > tonic::server::UnaryService<super::CagrRequest>
+                    for StartCagrSvc<T> {
+                        type Response = super::BackfillJobResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CagrRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ManualBackfillService>::start_cagr(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = StartCagrSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/manual_backfill.ManualBackfillService/StartCagrPeriod" => {
+                    #[allow(non_camel_case_types)]
+                    struct StartCagrPeriodSvc<T: ManualBackfillService>(pub Arc<T>);
+                    impl<
+                        T: ManualBackfillService,
+                    > tonic::server::UnaryService<super::CagrPeriodRequest>
+                    for StartCagrPeriodSvc<T> {
+                        type Response = super::BackfillJobResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CagrPeriodRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ManualBackfillService>::start_cagr_period(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = StartCagrPeriodSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

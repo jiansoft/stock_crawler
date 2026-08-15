@@ -197,6 +197,29 @@ impl DividendEvent {
     }
 }
 
+/// 公司行動（股票分割、反向分割、減資）。
+///
+/// 本專案的報價一律是原始成交價，遇到這類事件價格會出現無法用除權息解釋的
+/// 跳動。若不調整，2025-06-18 元大台灣50 的 1:4 分割會讓兩年期報酬看起來是
+/// −38%，實際上該期間是上漲的。
+///
+/// 資料無法從既有來源可靠取得（ETF 的受益權單位分割不在除權息表內），
+/// 因此改為人工維護一張對照表。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorporateAction {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 生效日：換發後恢復交易的第一個交易日（該日收盤價已是調整後價格）。
+    pub effective_date: NaiveDate,
+    /// 股數變動比例：持有 1 股在事件後變成幾股。
+    ///
+    /// 1 股分割成 4 股為 `4`；減資三成（1,000 股變 700 股）為 `0.7`。
+    /// 價格的變動方向與此相反，模擬時只需調整股數，價格用當日的真實報價即可。
+    pub share_ratio: Decimal,
+    /// 備註（例如「1:4 分割」、「減資彌補虧損」）。
+    pub note: String,
+}
+
 /// 單一口徑的模擬結果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SimulationOutcome {

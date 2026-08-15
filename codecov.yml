@@ -1,0 +1,33 @@
+# Codecov 設定。
+#
+# 覆蓋率報告由 CI（.github/workflows/rust.yml）以 cargo llvm-cov 產出 lcov.info 後上傳。
+
+# prost/tonic 由 build.rs 產生的程式碼不是人工維護的邏輯，
+# 為它寫測試沒有意義，卻會用上千行未執行的程式碼壓低整體與 patch 覆蓋率
+# （例如 src/interfaces/rpc/manual_backfill.rs 單檔就有 200 多行）。
+ignore:
+  - "src/interfaces/rpc/basic.rs"
+  - "src/interfaces/rpc/control.rs"
+  - "src/interfaces/rpc/manual_backfill.rs"
+  - "src/interfaces/rpc/stock.rs"
+  # 整檔都是 #[ignore] 的手動回補入口（維運時以 -- --ignored 手動觸發），
+  # CI 永遠不會執行它，計入覆蓋率只會製造一筆固定的 0%。
+  - "src/app/manual_backfill.rs"
+  # 測試替身：實作大型 repository trait 時，用不到的方法一律是永不執行的
+  # unimplemented!()，計入覆蓋率會讓被測模組的數字失真。
+  - "**/test_double.rs"
+  - "benches/**"
+
+coverage:
+  status:
+    project:
+      default:
+        # 允許小幅波動，避免無關的重構因四捨五入就讓 CI 變紅。
+        threshold: 1%
+    patch:
+      default:
+        threshold: 1%
+
+comment:
+  layout: "reach, diff, files"
+  require_changes: true

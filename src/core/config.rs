@@ -46,15 +46,34 @@ pub struct System {
 
 const SEQ_SERVER_URL: &str = "SEQ_SERVER_URL";
 const SEQ_API_KEY: &str = "SEQ_API_KEY";
+const LOG_FILE_MAX_SIZE_MB: &str = "LOG_FILE_MAX_SIZE_MB";
+const LOG_FILE_MAX_AGE_DAYS: &str = "LOG_FILE_MAX_AGE_DAYS";
 
 /// 日誌相關設定項。
 ///
-/// 目前用於控制檔案日誌之外的外部日誌收集器，例如 Seq。
+/// 涵蓋本地輪轉檔案（`file`）與外部日誌收集器（`seq`）。
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct Logging {
+    /// 本地輪轉日誌檔設定。
+    #[serde(default)]
+    pub file: FileLogging,
     /// Seq 日誌收集器設定。
     #[serde(default)]
     pub seq: SeqLogging,
+}
+
+/// 本地輪轉日誌檔設定。
+///
+/// 兩個欄位皆為 `0`（或未設定）時，沿用 `core::logging::rotate` 的預設值
+/// （單檔 10 MB、保留 7 天）。實際生效值會在套用時收斂至安全範圍。
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct FileLogging {
+    /// 單一日誌檔大小上限（MB）；超過即輪轉出新檔（檔名帶時間戳）。
+    #[serde(default, rename = "maxSizeMb", alias = "max_size_mb")]
+    pub max_size_mb: u64,
+    /// 日誌檔保留天數；超過此天數的舊檔會在跨日切檔時被刪除。
+    #[serde(default, rename = "maxAgeDays", alias = "max_age_days")]
+    pub max_age_days: i64,
 }
 
 /// Seq 日誌收集器連線設定。
@@ -339,6 +358,18 @@ impl App {
                 ssl_key_file: env::var(SYSTEM_SSL_KEY_FILE).expect(SYSTEM_SSL_KEY_FILE),
             },
             logging: Logging {
+                file: FileLogging {
+                    // 讀取單檔大小上限（MB）；未設定或解析失敗時為 0（使用程式預設值）
+                    max_size_mb: env::var(LOG_FILE_MAX_SIZE_MB)
+                        .ok()
+                        .and_then(|v| u64::from_str(v.trim()).ok())
+                        .unwrap_or(0),
+                    // 讀取日誌保留天數；未設定或解析失敗時為 0（使用程式預設值）
+                    max_age_days: env::var(LOG_FILE_MAX_AGE_DAYS)
+                        .ok()
+                        .and_then(|v| i64::from_str(v.trim()).ok())
+                        .unwrap_or(0),
+                },
                 seq: SeqLogging {
                     // 讀取 Seq 伺服器網址
                     server_url: env::var(SEQ_SERVER_URL).unwrap_or_default(),
@@ -400,6 +431,21 @@ impl App {
             self.logging.seq.api_key = api_key;
         }
 
+        // 若環境變數中有輪轉日誌檔設定，則覆蓋設定；
+        // 解析失敗（例如打成非數字）時保留 app.json 的值，避免靜默歸零。
+        if let Some(max_size_mb) = env::var(LOG_FILE_MAX_SIZE_MB)
+            .ok()
+            .and_then(|v| u64::from_str(v.trim()).ok())
+        {
+            self.logging.file.max_size_mb = max_size_mb;
+        }
+        if let Some(max_age_days) = env::var(LOG_FILE_MAX_AGE_DAYS)
+            .ok()
+            .and_then(|v| i64::from_str(v.trim()).ok())
+        {
+            self.logging.file.max_age_days = max_age_days;
+        }
+
         // 若環境變數中有 Go 後端 gRPC 服務資訊，則覆蓋設定
         if let Ok(target) = env::var(GO_GRPC_TARGET) {
             self.rpc.go_service.target = target;
@@ -438,6 +484,10 @@ impl App {
                     self.bot.telegram.allowed = allowed;
                 }
                 Err(why) => {
+                    // 注意：這行 tracing 位於 SETTINGS 的 Lazy 初始化路徑內，會經
+                    // FileLogLayer 觸發 core::logging::LOGGER 的初始化。因此 logging
+                    // 那側不得反向讀取 SETTINGS，否則會形成同執行緒的 Lazy 重入而死鎖
+                    // （詳見 core::logging::Logger::create_writer 的說明）。
                     tracing::error!(
                         "Failed to serde_json because: {:?} \r\n {}",
                         why,
@@ -541,5 +591,108 @@ mod tests {
             }
         }
         tokio::time::sleep(time::Duration::from_secs(1)).await;
+    }
+
+    /// 最小可用的設定：只帶必填區塊，選填區塊（`fugle`、`logging`）一律省略。
+    fn minimal_config() -> serde_json::Value {
+        serde_json::json!({
+            "bot": { "telegram": {} },
+            "postgresql": {},
+            "rpc": {
+                "go_service": {
+                    "target": "",
+                    "tls_cert_file": "",
+                    "tls_key_file": "",
+                    "domain_name": ""
+                }
+            },
+            "nosql": { "redis": { "addr": "", "account": "", "password": "", "db": 0 } },
+            "system": { "grpc_use_port": 9001, "ssl_cert_file": "", "ssl_key_file": "" }
+        })
+    }
+
+    /// 未提供 `logging` 區塊時，各欄位一律為 0／空字串（代表沿用程式預設）。
+    #[test]
+    fn logging_section_is_optional_and_defaults_to_zero() {
+        let app: App = serde_json::from_value(minimal_config()).expect("最小設定應可解析");
+
+        assert_eq!(app.logging.file.max_size_mb, 0);
+        assert_eq!(app.logging.file.max_age_days, 0);
+        assert!(app.logging.seq.server_url.is_empty());
+        assert!(app.logging.seq.api_key.is_empty());
+        assert!(app.fugle.api_key.is_empty());
+        assert_eq!(app.system.grpc_use_port, 9001);
+    }
+
+    /// 日誌與 Seq 欄位同時接受 camelCase（實際使用）與 snake_case（alias）。
+    #[test]
+    fn logging_fields_accept_both_camel_case_and_snake_case() {
+        let mut camel_config = minimal_config();
+        camel_config["logging"] = serde_json::json!({
+            "file": { "maxSizeMb": 20, "maxAgeDays": 14 },
+            "seq": { "serverUrl": "http://localhost:5341", "apiKey": "secret" }
+        });
+        let mut snake_config = minimal_config();
+        snake_config["logging"] = serde_json::json!({
+            "file": { "max_size_mb": 20, "max_age_days": 14 },
+            "seq": { "server_url": "http://localhost:5341", "api_key": "secret" }
+        });
+
+        for config in [camel_config, snake_config] {
+            let app: App = serde_json::from_value(config).expect("兩種命名皆應可解析");
+            assert_eq!(app.logging.file.max_size_mb, 20);
+            assert_eq!(app.logging.file.max_age_days, 14);
+            assert_eq!(app.logging.seq.server_url, "http://localhost:5341");
+            assert_eq!(app.logging.seq.api_key, "secret");
+        }
+    }
+
+    /// 數字欄位寫成字串必須直接解析失敗，而不是被默默轉型。
+    ///
+    /// 這是刻意的設計：設定檔型別打錯應該在啟動時就爆，而不是等到連不上資料庫。
+    #[test]
+    fn numeric_fields_reject_quoted_numbers() {
+        let mut config = minimal_config();
+        config["postgresql"]["port"] = serde_json::json!("5432");
+
+        let err = serde_json::from_value::<App>(config).expect_err("字串型別的 port 應解析失敗");
+        assert!(
+            err.to_string().contains("expected i32"),
+            "錯誤訊息應指出型別不符：{err}"
+        );
+    }
+
+    /// Redis 連線池大小為選填；未提供時為 0（由 infra 層收斂成預設值）。
+    #[test]
+    fn redis_pool_size_is_optional() {
+        let app: App = serde_json::from_value(minimal_config()).expect("最小設定應可解析");
+        assert_eq!(app.nosql.redis.pool_size, 0);
+
+        let mut config = minimal_config();
+        config["nosql"]["redis"]["pool_size"] = serde_json::json!(32);
+        let app: App = serde_json::from_value(config).expect("含 pool_size 的設定應可解析");
+        assert_eq!(app.nosql.redis.pool_size, 32);
+    }
+
+    /// Telegram 允許名單為 `i64 → String` 的對照表，序列化後可原樣還原。
+    #[test]
+    fn telegram_allowed_list_round_trips() {
+        let mut config = minimal_config();
+        config["bot"]["telegram"] = serde_json::json!({ "token": "t", "allowed": { "123": "QQ" } });
+
+        let app: App = serde_json::from_value(config).expect("含允許名單的設定應可解析");
+        assert_eq!(app.bot.telegram.allowed.get(&123), Some(&"QQ".to_string()));
+
+        let restored: App =
+            serde_json::from_str(&serde_json::to_string(&app).expect("序列化應成功"))
+                .expect("反序列化應成功");
+        assert_eq!(restored.bot.telegram.allowed, app.bot.telegram.allowed);
+        assert_eq!(restored.bot.telegram.token, "t");
+    }
+
+    /// 設定檔路徑固定為專案根目錄下的 `app.json`。
+    #[test]
+    fn config_path_points_at_app_json() {
+        assert_eq!(config_path(), PathBuf::from("app.json"));
     }
 }

@@ -2,7 +2,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 
-use crate::domain::performance::entity::{CagrCoverage, CagrMetric, CagrPeriod, StockCagr};
+use crate::domain::performance::entity::{
+    CagrCoverage, CagrMetric, CagrPeriod, CorporateAction, StockCagr,
+};
 use crate::domain::performance::query::{CagrRankingPage, CagrRankingQuery};
 
 /// 績效指標領域之倉儲介面 (Repository Trait)。
@@ -76,4 +78,19 @@ pub trait CagrRepository: Send + Sync {
 
     /// 刪除早於指定日期的歷史資料，回傳刪除筆數。
     async fn delete_before(&self, date: NaiveDate) -> Result<u64>;
+}
+
+/// 公司行動（分割／減資）之倉儲介面。
+///
+/// 內容由人工維護：ETF 的受益權單位分割不在除權息表內，也沒有可靠的公開端點
+/// 可自動匯入，因此提供寫入介面讓維運人員從 backfill admin 頁面登錄。
+#[async_trait]
+pub trait CorporateActionRepository: Send + Sync {
+    /// 新增或更新一筆公司行動，回傳寫入的筆數。
+    ///
+    /// 同一 `(股票代號, 生效日)` 重複登錄視為修正既有資料。
+    async fn save(&self, action: &CorporateAction) -> Result<u64>;
+
+    /// 列出指定股票的所有公司行動，依生效日由早至晚排序。
+    async fn fetch_by_symbol(&self, stock_symbol: &str) -> Result<Vec<CorporateAction>>;
 }

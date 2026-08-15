@@ -6,6 +6,10 @@
     "ssl_key_file": "privkey.pem"
   },
   "logging": {
+    "file": {
+      "maxSizeMb": 1,
+      "maxAgeDays": 7
+    },
     "seq": {
       "serverUrl": "",
       "apiKey": ""

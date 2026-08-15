@@ -6,14 +6,17 @@ use axum::{
 };
 
 use super::dto::{
-    ClosingAggregateRequest, DailyQuotesRequest, ErrorResponse, INDEX_HTML, SecurityCodeRequest,
-    StartJobResponse, TaiwanStockIndexRequest, YearRequest,
+    CagrPeriodRequest, CagrRequest, ClosingAggregateRequest, CorporateActionItem,
+    CorporateActionRequest, CorporateActionResponse, DailyQuotesRequest, ErrorResponse, INDEX_HTML,
+    QuoteHistoryRequest, SecurityCodeRequest, StartJobResponse, TaiwanStockIndexRequest,
+    YearRequest,
 };
 use super::job_runner::{
-    parse_request_date, parse_request_security_code, start_closing_aggregate_job,
-    start_daily_quotes_job, start_historical_dividends_job, start_job_error_response,
-    start_multiple_dividend_historical_dividends_job, start_received_dividend_records_job,
-    start_taiwan_stock_index_job,
+    parse_request_date, parse_request_month, parse_request_period, parse_request_security_code,
+    parse_request_share_ratio, parse_request_symbol_list, start_cagr_job, start_cagr_period_job,
+    start_closing_aggregate_job, start_daily_quotes_job, start_historical_dividends_job,
+    start_job_error_response, start_multiple_dividend_historical_dividends_job,
+    start_quote_history_job, start_received_dividend_records_job, start_taiwan_stock_index_job,
 };
 use super::state::{BACKFILL_STATE, BackfillWebState, get_backfill_job, list_backfill_jobs};
 
@@ -54,6 +57,16 @@ pub fn router() -> Router {
             "/api/manual-backfill/multiple-dividend-historical-dividends",
             post(start_multiple_dividend_historical_dividends),
         )
+        .route(
+            "/api/manual-backfill/quote-history",
+            post(start_quote_history),
+        )
+        .route(
+            "/api/manual-backfill/corporate-action",
+            post(save_corporate_action),
+        )
+        .route("/api/manual-backfill/cagr", post(start_cagr))
+        .route("/api/manual-backfill/cagr-period", post(start_cagr_period))
         .with_state(BACKFILL_STATE.clone())
 }
 
@@ -98,6 +111,133 @@ async fn start_daily_quotes(
     // 輸入有效時建立背景 job，實際資料抓取與原子替換會在 job 中執行。
     // 建立可能被拒絕（相同 job 執行中 → 409、併行已滿 → 429）。
     match start_daily_quotes_job(date).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
+}
+
+/// 建立歷史日報價回補 job 的 HTTP handler。
+async fn start_quote_history(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<QuoteHistoryRequest>,
+) -> impl IntoResponse {
+    let from = match parse_request_month(&req.from) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let to = match parse_request_month(&req.to) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    // 空清單代表「全部 ETF」，實際代號在 job 內解析。
+    let stock_symbols = match parse_request_symbol_list(&req.stock_symbols) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    match start_quote_history_job(stock_symbols, from, to).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
+}
+
+/// 登錄公司行動（分割／減資）的 HTTP handler。
+///
+/// 這不是背景 job：寫入一筆對照資料是瞬間完成的，包成 job 只會讓使用者
+/// 多一次輪詢才知道結果。回應直接帶回該股目前已登錄的全部事件，方便核對。
+async fn save_corporate_action(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<CorporateActionRequest>,
+) -> impl IntoResponse {
+    use crate::domain::performance::repository::CorporateActionRepository;
+
+    let stock_symbol = match parse_request_security_code(req.stock_symbol) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let effective_date = match parse_request_date(&req.effective_date) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let share_ratio = match parse_request_share_ratio(&req.share_ratio) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    let repository =
+        crate::infra::database::repository::corporate_action::PgCorporateActionRepository::new();
+    let action = crate::domain::performance::CorporateAction {
+        stock_symbol: stock_symbol.clone(),
+        effective_date,
+        share_ratio,
+        note: req.note.trim().to_owned(),
+    };
+
+    if let Err(why) = repository.save(&action).await {
+        return (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("failed to save corporate action: {why:#}"),
+            }),
+        )
+            .into_response();
+    }
+
+    match repository.fetch_by_symbol(&stock_symbol).await {
+        Ok(actions) => Json(CorporateActionResponse {
+            stock_symbol,
+            actions: actions
+                .into_iter()
+                .map(|item| CorporateActionItem {
+                    effective_date: item.effective_date.to_string(),
+                    share_ratio: item.share_ratio.normalize().to_string(),
+                    note: item.note,
+                })
+                .collect(),
+        })
+        .into_response(),
+        Err(why) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("failed to read back corporate actions: {why:#}"),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// 建立 CAGR 重算 job 的 HTTP handler。
+async fn start_cagr(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<CagrRequest>,
+) -> impl IntoResponse {
+    // 留空表示採用資料庫中最新的交易日。
+    let date = if req.date.trim().is_empty() {
+        None
+    } else {
+        match parse_request_date(&req.date) {
+            Ok(value) => Some(value),
+            Err(response) => return response,
+        }
+    };
+
+    match start_cagr_job(date).await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
+}
+
+/// 建立單一統計期間歷史回填 job 的 HTTP handler。
+async fn start_cagr_period(
+    State(_state): State<BackfillWebState>,
+    Json(req): Json<CagrPeriodRequest>,
+) -> impl IntoResponse {
+    let period = match parse_request_period(&req.period) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    match start_cagr_period_job(period).await {
         Ok(job) => Json(StartJobResponse { job }).into_response(),
         Err(err) => start_job_error_response(err),
     }
@@ -198,5 +338,211 @@ async fn start_multiple_dividend_historical_dividends(
     match start_multiple_dividend_historical_dividends_job(req.year).await {
         Ok(job) => Json(StartJobResponse { job }).into_response(),
         Err(err) => start_job_error_response(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    use super::super::dto::INDEX_HTML;
+    use super::router;
+
+    /// 送出 JSON body 並取回狀態碼。
+    async fn post(path: &str, body: &str) -> StatusCode {
+        router()
+            .oneshot(
+                Request::post(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_owned()))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should serve request")
+            .status()
+    }
+
+    /// 送出 GET 並取回（狀態碼, response body 字串）。
+    async fn get(path: &str) -> (StatusCode, String) {
+        let response = router()
+            .oneshot(
+                Request::get(path)
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should serve request");
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    #[tokio::test]
+    async fn invalid_input_is_rejected_before_any_job_is_created() {
+        // 月份格式錯誤（缺少月份、用了日期格式）。
+        assert_eq!(
+            post(
+                "/api/manual-backfill/quote-history",
+                r#"{"stock_symbols":"0050","from":"2015","to":"2021-12"}"#
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
+        // 代號含非英數字元。
+        assert_eq!(
+            post(
+                "/api/manual-backfill/quote-history",
+                r#"{"stock_symbols":"0050; DROP","from":"2015-01","to":"2021-12"}"#
+            )
+            .await,
+            StatusCode::BAD_REQUEST
+        );
+        // 未知的期間代碼。
+        assert_eq!(
+            post("/api/manual-backfill/cagr-period", r#"{"period":"Y8"}"#).await,
+            StatusCode::BAD_REQUEST
+        );
+        // 公司行動：比例為零、負數或非數字都必須擋下。
+        for ratio in ["0", "-4", "1:4"] {
+            assert_eq!(
+                post(
+                    "/api/manual-backfill/corporate-action",
+                    &format!(
+                        r#"{{"stock_symbol":"0050","effective_date":"2025-06-18","share_ratio":"{ratio}"}}"#
+                    )
+                )
+                .await,
+                StatusCode::BAD_REQUEST,
+                "share_ratio={ratio} 應被拒絕"
+            );
+        }
+
+        // CAGR 基準日格式錯誤（留空才是合法的「採用最新交易日」）。
+        // 注意 parse_request_date 沿用 chrono 的寬鬆解析，"2026-8-7" 是合法的，
+        // 因此這裡用真正無法解析的值。
+        assert_eq!(
+            post("/api/manual-backfill/cagr", r#"{"date":"not-a-date"}"#).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    /// 根路徑導向操作頁，操作頁回傳內建 HTML。
+    #[tokio::test]
+    async fn root_redirects_to_the_admin_page() {
+        let (status, _) = get("/").await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+
+        let (status, body) = get("/manual-backfill").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, INDEX_HTML);
+    }
+
+    /// job 列表永遠是 JSON 陣列（沒有 job 時為空陣列，而不是 404 或 null）。
+    #[tokio::test]
+    async fn job_list_is_always_a_json_array() {
+        let (status, body) = get("/api/manual-backfill/jobs").await;
+        assert_eq!(status, StatusCode::OK);
+        let jobs: serde_json::Value = serde_json::from_str(&body).expect("回應應為合法 JSON");
+        assert!(jobs.is_array(), "回應應為陣列：{body}");
+    }
+
+    /// 查無 job 時回 404，並在錯誤訊息帶上查詢的 id。
+    #[tokio::test]
+    async fn unknown_job_id_returns_not_found() {
+        let (status, body) = get("/api/manual-backfill/jobs/no-such-job").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body.contains("no-such-job"), "錯誤訊息應帶上 id：{body}");
+    }
+
+    /// 年度欄位需落在 1900~3000，超出範圍在建立 job 前就擋下。
+    #[tokio::test]
+    async fn multiple_dividend_backfill_rejects_out_of_range_years() {
+        for year in ["1899", "3001", "0", "-1"] {
+            assert_eq!(
+                post(
+                    "/api/manual-backfill/multiple-dividend-historical-dividends",
+                    &format!(r#"{{"year":{year}}}"#)
+                )
+                .await,
+                StatusCode::BAD_REQUEST,
+                "year={year} 應被拒絕"
+            );
+        }
+    }
+
+    /// 代號類端點都會先驗證證券代號才建立 job。
+    #[tokio::test]
+    async fn security_code_endpoints_reject_invalid_codes() {
+        for endpoint in [
+            "/api/manual-backfill/received-dividend-records",
+            "/api/manual-backfill/historical-dividends",
+        ] {
+            for code in ["", "0050; DROP", "23 30"] {
+                assert_eq!(
+                    post(endpoint, &format!(r#"{{"security_code":"{code}"}}"#)).await,
+                    StatusCode::BAD_REQUEST,
+                    "{endpoint} security_code={code:?} 應被拒絕"
+                );
+            }
+        }
+    }
+
+    /// 日期類端點都會先驗證日期格式才建立 job。
+    #[tokio::test]
+    async fn date_endpoints_reject_malformed_dates() {
+        for endpoint in [
+            "/api/manual-backfill/daily-quotes",
+            "/api/manual-backfill/closing-aggregate",
+            "/api/manual-backfill/taiwan-stock-index",
+        ] {
+            for date in ["", "2026-04", "2026/04/30"] {
+                assert_eq!(
+                    post(endpoint, &format!(r#"{{"date":"{date}"}}"#)).await,
+                    StatusCode::BAD_REQUEST,
+                    "{endpoint} date={date:?} 應被拒絕"
+                );
+            }
+        }
+    }
+
+    /// body 缺欄位或非 JSON 時由 axum 的 extractor 擋下，不會進到 handler。
+    #[tokio::test]
+    async fn malformed_request_bodies_never_reach_the_handler() {
+        // 缺少必填欄位 → 422。
+        assert_eq!(
+            post("/api/manual-backfill/daily-quotes", "{}").await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // 根本不是 JSON → 400。
+        assert_eq!(
+            post("/api/manual-backfill/daily-quotes", "not json").await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[test]
+    fn every_form_endpoint_in_the_page_has_a_route() {
+        // 表單的 data-endpoint 與 router 若不同步，UI 會安靜地送到 404。
+        for endpoint in [
+            "/api/manual-backfill/daily-quotes",
+            "/api/manual-backfill/closing-aggregate",
+            "/api/manual-backfill/taiwan-stock-index",
+            "/api/manual-backfill/received-dividend-records",
+            "/api/manual-backfill/historical-dividends",
+            "/api/manual-backfill/multiple-dividend-historical-dividends",
+            "/api/manual-backfill/quote-history",
+            "/api/manual-backfill/cagr",
+            "/api/manual-backfill/cagr-period",
+            "/api/manual-backfill/corporate-action",
+        ] {
+            assert!(
+                INDEX_HTML.contains(&format!("data-endpoint=\"{endpoint}\"")),
+                "頁面缺少 {endpoint} 的表單"
+            );
+        }
     }
 }

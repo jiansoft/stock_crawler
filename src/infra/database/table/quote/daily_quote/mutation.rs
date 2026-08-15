@@ -276,6 +276,56 @@ SELECT
     pub async fn copy_in_raw_on(conn: &mut sqlx::PgConnection, quotes: &[Self]) -> Result<u64> {
         database::copy_in_raw_on(conn, COPY_IN_QUERY, quotes).await
     }
+
+    /// 批次補寫缺漏的日報價，已存在者原封不動，回傳實際新增的列數。
+    ///
+    /// 專供回補歷史缺口使用，因此是 `ON CONFLICT DO NOTHING` 而非 upsert：
+    /// 補洞不該覆寫既有資料 —— 來源（`STOCK_DAY`）沒有本益比、股價淨值比與
+    /// 最佳買賣揭示，若用 `DO UPDATE` 會把既有列的那些欄位清成 0。
+    /// `COPY` 在這裡也不能用：它不支援 `ON CONFLICT`，區間內只要有一天已存在
+    /// 就會整批因唯一索引而失敗。
+    pub async fn insert_missing_batch(quotes: &[Self]) -> Result<u64> {
+        if quotes.is_empty() {
+            return Ok(0);
+        }
+
+        let mut builder = sqlx::QueryBuilder::new(
+            r#"INSERT INTO "DailyQuotes" (
+                "Date", stock_symbol, year, month, day,
+                "OpeningPrice", "HighestPrice", "LowestPrice", "ClosingPrice",
+                "Change", "ChangeRange", "TradingVolume", "TradeValue", "Transaction",
+                maximum_price_in_year_date_on, minimum_price_in_year_date_on
+            ) "#,
+        );
+
+        builder.push_values(quotes, |mut row, quote| {
+            row.push_bind(quote.date)
+                .push_bind(quote.stock_symbol.clone())
+                .push_bind(quote.year)
+                .push_bind(quote.month)
+                .push_bind(quote.day)
+                .push_bind(quote.opening_price)
+                .push_bind(quote.highest_price)
+                .push_bind(quote.lowest_price)
+                .push_bind(quote.closing_price)
+                .push_bind(quote.change)
+                .push_bind(quote.change_range)
+                .push_bind(quote.trading_volume)
+                .push_bind(quote.trade_value)
+                .push_bind(quote.transaction)
+                .push_bind(quote.maximum_price_in_year_date_on)
+                .push_bind(quote.minimum_price_in_year_date_on);
+        });
+        builder.push(r#" ON CONFLICT (stock_symbol, "Date") DO NOTHING"#);
+
+        let result = builder
+            .build()
+            .execute(database::get_connection())
+            .await
+            .context("Failed to insert missing daily quotes")?;
+
+        Ok(result.rows_affected())
+    }
 }
 
 #[cfg(test)]
@@ -400,6 +450,106 @@ mod tests {
         }
 
         tracing::debug!("結束 upsert");
+    }
+
+    /// 空批次沒有任何可更新的目標，必須明確報錯而不是送出一句無效 SQL。
+    #[tokio::test]
+    async fn batch_update_moving_average_rejects_an_empty_batch() {
+        let err = DailyQuote::batch_update_moving_average(&[])
+            .await
+            .expect_err("空批次應回傳錯誤");
+        assert!(
+            err.to_string().contains("empty"),
+            "錯誤訊息應說明原因：{err}"
+        );
+    }
+
+    /// 空批次在碰資料庫之前就短路回 0，回補流程可以放心傳空清單。
+    #[tokio::test]
+    async fn insert_missing_batch_short_circuits_on_an_empty_slice() {
+        assert_eq!(
+            DailyQuote::insert_missing_batch(&[])
+                .await
+                .expect("空批次應成功"),
+            0
+        );
+    }
+
+    /// 建立一筆最小可寫入的測試報價（固定歷史日期 + 假代號）。
+    fn make_quote(
+        symbol: &str,
+        date: NaiveDate,
+        closing_price: rust_decimal::Decimal,
+    ) -> DailyQuote {
+        let mut quote = DailyQuote::new(symbol.to_string());
+        quote.date = date;
+        quote.year = date.year();
+        quote.month = date.month() as i32;
+        quote.day = date.day() as i32;
+        quote.closing_price = closing_price;
+        quote.opening_price = closing_price;
+        quote.highest_price = closing_price;
+        quote.lowest_price = closing_price;
+        quote
+    }
+
+    /// 回補歷史缺口時只補空位：新日期寫入，既有日期既不重複也不被覆寫。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn insert_missing_batch_fills_gaps_without_overwriting() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 insert_missing_batch_fills_gaps_without_overwriting：無資料庫連接");
+            return;
+        }
+
+        // 固定歷史日期 + 假代號，避免碰到任何真實資料。
+        const SYMBOL: &str = "79979";
+        let day1 = NaiveDate::from_ymd_opt(1970, 1, 1).expect("測試日期應合法");
+        let day2 = NaiveDate::from_ymd_opt(1970, 1, 2).expect("測試日期應合法");
+        let cleanup = || async {
+            let _ = sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE "stock_symbol" = $1"#)
+                .bind(SYMBOL)
+                .execute(database::get_connection())
+                .await;
+        };
+        cleanup().await;
+
+        // 首次寫入兩天，兩筆都是新資料。
+        let inserted = DailyQuote::insert_missing_batch(&[
+            make_quote(SYMBOL, day1, rust_decimal::Decimal::from(10)),
+            make_quote(SYMBOL, day2, rust_decimal::Decimal::from(11)),
+        ])
+        .await
+        .expect("首次寫入應成功");
+        assert_eq!(inserted, 2);
+
+        // 重跑同一批並多帶一天：只有新的那天會被寫入（ON CONFLICT DO NOTHING）。
+        let day3 = NaiveDate::from_ymd_opt(1970, 1, 3).expect("測試日期應合法");
+        let inserted = DailyQuote::insert_missing_batch(&[
+            make_quote(SYMBOL, day1, rust_decimal::Decimal::from(99)),
+            make_quote(SYMBOL, day2, rust_decimal::Decimal::from(99)),
+            make_quote(SYMBOL, day3, rust_decimal::Decimal::from(12)),
+        ])
+        .await
+        .expect("重跑應成功");
+        assert_eq!(inserted, 1);
+
+        // 既有列的價格不得被重跑的值覆寫——補洞不該動到已有資料。
+        let closing: rust_decimal::Decimal = sqlx::query_scalar(
+            r#"SELECT "ClosingPrice" FROM "DailyQuotes" WHERE "stock_symbol" = $1 AND "Date" = $2"#,
+        )
+        .bind(SYMBOL)
+        .bind(day1)
+        .fetch_one(database::get_connection())
+        .await
+        .expect("應查得到既有資料");
+        assert_eq!(closing, rust_decimal::Decimal::from(10));
+
+        cleanup().await;
     }
 
     /// 手動驗證 TWSE 報價抓取後可透過 COPY 寫入測試資料。

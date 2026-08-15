@@ -10,6 +10,10 @@ service ManualBackfillService {
   rpc StartReceivedDividendRecords(SecurityCodeRequest) returns (BackfillJobResponse) {}
   rpc StartHistoricalDividends(SecurityCodeRequest) returns (BackfillJobResponse) {}
   rpc StartMultipleDividendHistoricalDividends(YearRequest) returns (BackfillJobResponse) {}
+  rpc StartQuoteHistory(QuoteHistoryRequest) returns (BackfillJobResponse) {}
+  rpc SaveCorporateAction(CorporateActionRequest) returns (CorporateActionResponse) {}
+  rpc StartCagr(CagrRequest) returns (BackfillJobResponse) {}
+  rpc StartCagrPeriod(CagrPeriodRequest) returns (BackfillJobResponse) {}
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse) {}
   rpc GetJob(GetJobRequest) returns (BackfillJobResponse) {}
 }
@@ -32,6 +36,38 @@ message SecurityCodeRequest {
 
 message YearRequest {
   int32 year = 1;
+}
+
+message QuoteHistoryRequest {
+  string stock_symbols = 1;
+  string from = 2;
+  string to = 3;
+}
+
+message CorporateActionRequest {
+  string stock_symbol = 1;
+  string effective_date = 2;
+  string share_ratio = 3;
+  string note = 4;
+}
+
+message CorporateActionItem {
+  string effective_date = 1;
+  string share_ratio = 2;
+  string note = 3;
+}
+
+message CorporateActionResponse {
+  string stock_symbol = 1;
+  repeated CorporateActionItem actions = 2;
+}
+
+message CagrRequest {
+  string date = 1;
+}
+
+message CagrPeriodRequest {
+  string period = 1;
 }
 
 message ListJobsRequest {}

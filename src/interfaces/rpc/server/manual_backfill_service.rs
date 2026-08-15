@@ -5,17 +5,26 @@
 
 use anyhow::Result;
 use chrono::NaiveDate;
+use rust_decimal::Decimal;
 use tonic::{Request, Response, Status};
 
 use crate::{
+    domain::performance::{CagrPeriod, CorporateAction, CorporateActionRepository},
+    infra::database::repository::corporate_action::PgCorporateActionRepository,
     interfaces::rpc::manual_backfill::{
         BackfillJob,
         BackfillJobResponse,
+        CagrPeriodRequest,
+        CagrRequest,
         ClosingAggregateRequest,
+        CorporateActionItem,
+        CorporateActionRequest,
+        CorporateActionResponse,
         DailyQuotesRequest,
         GetJobRequest,
         ListJobsRequest,
         ListJobsResponse,
+        QuoteHistoryRequest,
         SecurityCodeRequest,
         TaiwanStockIndexRequest,
         YearRequest,
@@ -152,6 +161,108 @@ impl ManualBackfillService for ManualBackfillServiceImpl {
         }))
     }
 
+    /// 建立歷史日報價回補 job。
+    ///
+    /// 代號可以逗號或空白分隔；留空代表全部未下市 ETF／ETN。月份區間含首尾。
+    async fn start_quote_history(
+        &self,
+        req: Request<QuoteHistoryRequest>,
+    ) -> Result<Response<BackfillJobResponse>, Status> {
+        let req = req.into_inner();
+        let from = parse_grpc_month(&req.from)?;
+        let to = parse_grpc_month(&req.to)?;
+        let stock_symbols = parse_grpc_symbol_list(&req.stock_symbols)?;
+        let job = web::backfill_admin::start_quote_history_job(stock_symbols, from, to)
+            .await
+            .map_err(start_job_error_to_status)?;
+
+        Ok(Response::new(BackfillJobResponse {
+            job: Some(to_grpc_job(job)),
+        }))
+    }
+
+    /// 新增或更新一筆公司行動，並回傳該股全部已登錄事件。
+    ///
+    /// 公司行動是同步小型寫入，不建立背景 job；回應可讓維運人員立即核對。
+    async fn save_corporate_action(
+        &self,
+        req: Request<CorporateActionRequest>,
+    ) -> Result<Response<CorporateActionResponse>, Status> {
+        let req = req.into_inner();
+        let stock_symbol = parse_grpc_security_code(req.stock_symbol)?;
+        let effective_date = parse_grpc_date(&req.effective_date)?;
+        let share_ratio = parse_grpc_share_ratio(&req.share_ratio)?;
+        let repository = PgCorporateActionRepository::new();
+        let action = CorporateAction {
+            stock_symbol: stock_symbol.clone(),
+            effective_date,
+            share_ratio,
+            note: req.note.trim().to_owned(),
+        };
+
+        repository
+            .save(&action)
+            .await
+            .map_err(|why| Status::internal(format!("failed to save corporate action: {why:#}")))?;
+        let actions = repository
+            .fetch_by_symbol(&stock_symbol)
+            .await
+            .map_err(|why| {
+                Status::internal(format!("failed to read back corporate actions: {why:#}"))
+            })?
+            .into_iter()
+            .map(|item| CorporateActionItem {
+                effective_date: item.effective_date.to_string(),
+                share_ratio: item.share_ratio.normalize().to_string(),
+                note: item.note,
+            })
+            .collect();
+
+        Ok(Response::new(CorporateActionResponse {
+            stock_symbol,
+            actions,
+        }))
+    }
+
+    /// 建立指定基準日的 CAGR 重算 job。
+    ///
+    /// 日期留空時使用資料庫最新交易日，與 HTTP admin API 的語義一致。
+    async fn start_cagr(
+        &self,
+        req: Request<CagrRequest>,
+    ) -> Result<Response<BackfillJobResponse>, Status> {
+        let raw_date = req.into_inner().date;
+        let date = if raw_date.trim().is_empty() {
+            None
+        } else {
+            Some(parse_grpc_date(&raw_date)?)
+        };
+        let job = web::backfill_admin::start_cagr_job(date)
+            .await
+            .map_err(start_job_error_to_status)?;
+
+        Ok(Response::new(BackfillJobResponse {
+            job: Some(to_grpc_job(job)),
+        }))
+    }
+
+    /// 建立單一 CAGR 統計期間的歷史基準日回填 job。
+    async fn start_cagr_period(
+        &self,
+        req: Request<CagrPeriodRequest>,
+    ) -> Result<Response<BackfillJobResponse>, Status> {
+        let raw_period = req.into_inner().period;
+        let period = CagrPeriod::from_code(raw_period.trim())
+            .ok_or_else(|| Status::invalid_argument(format!("unknown period: {raw_period}")))?;
+        let job = web::backfill_admin::start_cagr_period_job(period)
+            .await
+            .map_err(start_job_error_to_status)?;
+
+        Ok(Response::new(BackfillJobResponse {
+            job: Some(to_grpc_job(job)),
+        }))
+    }
+
     /// 列出目前程序內所有 manual backfill jobs。
     async fn list_jobs(
         &self,
@@ -206,10 +317,50 @@ fn parse_grpc_date(date: &str) -> Result<NaiveDate, Status> {
         .map_err(|why| Status::invalid_argument(format!("date must use YYYY-MM-DD: {why}")))
 }
 
+/// 解析 gRPC request 的月份欄位（`YYYY-MM`），並回傳該月一日。
+fn parse_grpc_month(month: &str) -> Result<NaiveDate, Status> {
+    NaiveDate::parse_from_str(&format!("{}-01", month.trim()), "%Y-%m-%d")
+        .map_err(|why| Status::invalid_argument(format!("month must use YYYY-MM: {why}")))
+}
+
+/// 解析逗號或空白分隔的證券代號，並排序去重。
+///
+/// 空字串保留為空清單，由 job runner 解釋為全部 ETF／ETN。
+fn parse_grpc_symbol_list(raw: &str) -> Result<Vec<String>, Status> {
+    let mut symbols = Vec::new();
+    for token in raw.split(|c: char| c == ',' || c.is_whitespace()) {
+        if token.trim().is_empty() {
+            continue;
+        }
+        symbols.push(parse_grpc_security_code(token.to_string())?);
+    }
+    symbols.sort_unstable();
+    symbols.dedup();
+    Ok(symbols)
+}
+
 /// 解析 gRPC request 的證券代號欄位，格式錯誤時回傳 INVALID_ARGUMENT。
 fn parse_grpc_security_code(security_code: String) -> Result<String, Status> {
     web::backfill_admin::normalize_security_code(security_code)
         .map_err(|why| Status::invalid_argument(why.to_string()))
+}
+
+/// 解析 gRPC 公司行動股數比例，並擋下零、負數與明顯異常的大值。
+fn parse_grpc_share_ratio(raw: &str) -> Result<Decimal, Status> {
+    let ratio = Decimal::from_str_exact(raw.trim()).map_err(|why| {
+        Status::invalid_argument(format!("share_ratio must be a decimal number: {why}"))
+    })?;
+    if ratio <= Decimal::ZERO {
+        return Err(Status::invalid_argument(
+            "share_ratio must be greater than zero",
+        ));
+    }
+    if ratio > Decimal::from(1000) {
+        return Err(Status::invalid_argument(
+            "share_ratio looks implausible (> 1000)",
+        ));
+    }
+    Ok(ratio)
 }
 
 /// 將 crate 內部 job model 轉成 prost 產生的 gRPC job message。
@@ -226,5 +377,238 @@ fn to_grpc_job(job: web::backfill_admin::BackfillJob) -> BackfillJob {
         message: job.message,
         started_at: job.started_at,
         finished_at: job.finished_at.unwrap_or_default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tonic::Code;
+
+    use super::*;
+
+    /// 公司行動比例的 gRPC 驗證規則應與 HTTP API 一致。
+    #[test]
+    fn corporate_action_share_ratio_validation_rejects_invalid_values() {
+        assert_eq!(
+            parse_grpc_share_ratio("4").expect("正整數比例應合法"),
+            Decimal::from(4)
+        );
+        for raw in ["0", "-1", "1:4", "1001"] {
+            let err = parse_grpc_share_ratio(raw).expect_err("非法比例應被拒絕");
+            assert_eq!(err.code(), Code::InvalidArgument, "raw={raw}");
+        }
+    }
+
+    /// CAGR 期間 gRPC 在建立 job 前就應拒絕未知代碼。
+    #[tokio::test]
+    async fn start_cagr_period_rejects_unknown_period_before_job_creation() {
+        let service = ManualBackfillServiceImpl::default();
+        let err = service
+            .start_cagr_period(Request::new(CagrPeriodRequest {
+                period: "Y8".to_string(),
+            }))
+            .await
+            .expect_err("未知期間應失敗");
+        assert_eq!(err.code(), Code::InvalidArgument);
+    }
+
+    /// Corporate Action gRPC 應在確認比例合法後才觸碰資料庫。
+    #[tokio::test]
+    async fn save_corporate_action_rejects_invalid_ratio_before_database_write() {
+        let service = ManualBackfillServiceImpl::default();
+        let err = service
+            .save_corporate_action(Request::new(CorporateActionRequest {
+                stock_symbol: "0050".to_string(),
+                effective_date: "2025-06-18".to_string(),
+                share_ratio: "0".to_string(),
+                note: String::new(),
+            }))
+            .await
+            .expect_err("零比例應在寫入前被拒絕");
+        assert_eq!(err.code(), Code::InvalidArgument);
+    }
+
+    /// Quote History gRPC 應在建立 job 前驗證月份與代號格式。
+    #[tokio::test]
+    async fn start_quote_history_rejects_invalid_input_before_job_creation() {
+        let service = ManualBackfillServiceImpl::default();
+        let invalid_month = service
+            .start_quote_history(Request::new(QuoteHistoryRequest {
+                stock_symbols: "0050".to_string(),
+                from: "2015".to_string(),
+                to: "2021-12".to_string(),
+            }))
+            .await
+            .expect_err("無效月份應失敗");
+        assert_eq!(invalid_month.code(), Code::InvalidArgument);
+
+        let invalid_symbol = service
+            .start_quote_history(Request::new(QuoteHistoryRequest {
+                stock_symbols: "0050; DROP".to_string(),
+                from: "2015-01".to_string(),
+                to: "2021-12".to_string(),
+            }))
+            .await
+            .expect_err("無效代號應失敗");
+        assert_eq!(invalid_symbol.code(), Code::InvalidArgument);
+    }
+
+    /// 建立 job 被拒絕的兩種原因各自對應固定的 gRPC 狀態碼（與 HTTP 409/429 對齊）。
+    #[test]
+    fn start_job_errors_map_to_grpc_status_codes() {
+        let duplicate = web::backfill_admin::StartJobError::DuplicateActiveJob {
+            existing_id: "20260815000000-1".to_string(),
+        };
+        let status = start_job_error_to_status(duplicate);
+        assert_eq!(status.code(), Code::AlreadyExists);
+        assert!(status.message().contains("20260815000000-1"));
+
+        let too_many = web::backfill_admin::StartJobError::TooManyActiveJobs { max: 4 };
+        assert_eq!(
+            start_job_error_to_status(too_many).code(),
+            Code::ResourceExhausted
+        );
+    }
+
+    /// 日期欄位僅接受 `YYYY-MM-DD`，其餘一律 INVALID_ARGUMENT。
+    #[test]
+    fn grpc_date_parsing_matches_the_http_rules() {
+        assert_eq!(
+            parse_grpc_date(" 2026-04-30 ").expect("合法日期"),
+            NaiveDate::from_ymd_opt(2026, 4, 30).expect("測試日期應合法")
+        );
+        for raw in ["", "2026-04", "2026/04/30", "2026-02-30"] {
+            let err = parse_grpc_date(raw).expect_err("非法日期應被拒絕");
+            assert_eq!(err.code(), Code::InvalidArgument, "raw={raw}");
+        }
+    }
+
+    /// 月份欄位為 `YYYY-MM`，解析結果落在該月一日。
+    #[test]
+    fn grpc_month_parsing_resolves_to_the_first_day() {
+        assert_eq!(
+            parse_grpc_month(" 2015-01 ").expect("合法月份"),
+            NaiveDate::from_ymd_opt(2015, 1, 1).expect("測試日期應合法")
+        );
+        for raw in ["", "2015", "2015-13", "2015-01-01"] {
+            let err = parse_grpc_month(raw).expect_err("非法月份應被拒絕");
+            assert_eq!(err.code(), Code::InvalidArgument, "raw={raw}");
+        }
+    }
+
+    /// 代號驗證共用 HTTP 端規則：trim 後只允許 ASCII 英數。
+    #[test]
+    fn grpc_security_code_shares_the_http_validation() {
+        assert_eq!(
+            parse_grpc_security_code(" 2330 ".to_string()).expect("合法代號"),
+            "2330"
+        );
+        for raw in ["", "23 30", "0050;DROP"] {
+            let err = parse_grpc_security_code(raw.to_string()).expect_err("非法代號應被拒絕");
+            assert_eq!(err.code(), Code::InvalidArgument, "raw={raw}");
+        }
+    }
+
+    /// 查無此 job 時回傳 NOT_FOUND，訊息帶上查詢的 id。
+    #[tokio::test]
+    async fn get_job_returns_not_found_for_an_unknown_id() {
+        let service = ManualBackfillServiceImpl::default();
+        let err = service
+            .get_job(Request::new(GetJobRequest {
+                id: "no-such-job".to_string(),
+            }))
+            .await
+            .expect_err("未知 id 應回 NOT_FOUND");
+
+        assert_eq!(err.code(), Code::NotFound);
+        assert!(err.message().contains("no-such-job"));
+    }
+
+    /// 年度明顯超出合理範圍時，在建立 job 前就拒絕。
+    #[tokio::test]
+    async fn multiple_dividend_backfill_rejects_out_of_range_years() {
+        let service = ManualBackfillServiceImpl::default();
+        for year in [1899, 3001, 0, -1] {
+            let err = service
+                .start_multiple_dividend_historical_dividends(Request::new(YearRequest { year }))
+                .await
+                .expect_err("超出範圍的年度應被拒絕");
+            assert_eq!(err.code(), Code::InvalidArgument, "year={year}");
+        }
+    }
+
+    /// 各 start API 都應在觸碰資料庫或外部網站前先驗證日期格式。
+    #[tokio::test]
+    async fn start_apis_validate_dates_before_creating_jobs() {
+        let service = ManualBackfillServiceImpl::default();
+
+        let daily = service
+            .start_daily_quotes(Request::new(DailyQuotesRequest {
+                date: "2026-04".to_string(),
+            }))
+            .await
+            .expect_err("非法日期應失敗");
+        assert_eq!(daily.code(), Code::InvalidArgument);
+
+        let closing = service
+            .start_closing_aggregate(Request::new(ClosingAggregateRequest {
+                date: "not-a-date".to_string(),
+            }))
+            .await
+            .expect_err("非法日期應失敗");
+        assert_eq!(closing.code(), Code::InvalidArgument);
+
+        let index = service
+            .start_taiwan_stock_index(Request::new(TaiwanStockIndexRequest {
+                date: String::new(),
+            }))
+            .await
+            .expect_err("空日期應失敗");
+        assert_eq!(index.code(), Code::InvalidArgument);
+
+        // CAGR 允許留空（採最新交易日），但填了就必須合法。
+        let cagr = service
+            .start_cagr(Request::new(CagrRequest {
+                date: "not-a-date".to_string(),
+            }))
+            .await
+            .expect_err("非法日期應失敗");
+        assert_eq!(cagr.code(), Code::InvalidArgument);
+    }
+
+    /// 代號類 API 在建立 job 前先驗證代號。
+    #[tokio::test]
+    async fn start_apis_validate_security_codes_before_creating_jobs() {
+        let service = ManualBackfillServiceImpl::default();
+
+        let received = service
+            .start_received_dividend_records(Request::new(SecurityCodeRequest {
+                security_code: "0050; DROP".to_string(),
+            }))
+            .await
+            .expect_err("非法代號應失敗");
+        assert_eq!(received.code(), Code::InvalidArgument);
+
+        let historical = service
+            .start_historical_dividends(Request::new(SecurityCodeRequest {
+                security_code: String::new(),
+            }))
+            .await
+            .expect_err("空代號應失敗");
+        assert_eq!(historical.code(), Code::InvalidArgument);
+    }
+
+    /// Quote History 代號清單應支援混合分隔、排序及去重。
+    #[test]
+    fn quote_history_symbol_list_is_normalized() {
+        assert_eq!(
+            parse_grpc_symbol_list("0056, 0050\n0056").expect("代號清單應合法"),
+            vec!["0050".to_string(), "0056".to_string()]
+        );
+        assert!(
+            parse_grpc_symbol_list("  ")
+                .expect("空清單應合法")
+                .is_empty()
+        );
     }
 }

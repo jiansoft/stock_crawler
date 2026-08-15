@@ -90,7 +90,7 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 #tokio-test = "0.4"
 tonic = { version = "0.14", features = ["transport", "channel", "tls-ring", "gzip"] }
-moka = { version = "0.12.15", features = ["sync"] }
+moka = { version = "0.12", features = ["sync"] }
 urlencoding = "2.1"
 lazy_static = "1.5"
 scopeguard = "1.2"

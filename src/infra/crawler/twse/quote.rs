@@ -39,13 +39,37 @@ pub struct Table {
     /// 欄位名稱清單。
     pub fields: Option<Vec<String>>,
 
-    #[serde(rename = "data")]
+    #[serde(
+        rename = "data",
+        default,
+        deserialize_with = "deserialize_nullable_cells"
+    )]
     /// 表格資料列。
     pub data: Option<Vec<Vec<String>>>,
 
     #[serde(rename = "hints")]
     /// TWSE 附帶提示訊息。
     pub hints: Option<String>,
+}
+
+/// 反序列化表格資料列，並把 `null` 儲存格視為空字串。
+///
+/// TWSE 在部分日期（例如 2019-06、2019-08 的多個交易日）會在**指數**表格裡送出
+/// `null` 儲存格。若照 `Vec<Vec<String>>` 直接解析，serde 會在那個 `null` 上失敗，
+/// 連帶讓**整份回應**解析不出來——即使當日的每日收盤行情表格本身完全正常，
+/// 該日報價也會回補失敗。這裡把 `null` 一律降級為空字串，讓解析只取決於
+/// 真正需要的報價欄位。
+fn deserialize_nullable_cells<'de, D>(deserializer: D) -> Result<Option<Vec<Vec<String>>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<Vec<Vec<Option<String>>>>::deserialize(deserializer)?;
+
+    Ok(raw.map(|rows| {
+        rows.into_iter()
+            .map(|row| row.into_iter().map(Option::unwrap_or_default).collect())
+            .collect()
+    }))
 }
 
 /// 判斷是否為 TWSE 上市每日收盤行情表格。
@@ -298,6 +322,24 @@ mod tests {
         assert_eq!(quote.trade_value, dec!(5000000));
         assert_eq!(quote.transaction, dec!(100));
         assert_eq!(quote.price_earning_ratio, dec!(15.5));
+    }
+
+    /// TWSE 在部分日期會於指數表格送出 `null` 儲存格，整份回應仍必須解析成功。
+    ///
+    /// 這個情境曾讓 2019-06 與 2019-08 共 14 個交易日的上市報價回補全數失敗：
+    /// 報價表格本身完全正常，卻因為另一張指數表格裡的 `null` 而整批解析不出來。
+    #[tokio::test]
+    async fn test_parse_listed_response_with_null_cells() {
+        let raw = include_str!("testdata/mi_index_null_cells_20190610.json");
+        let response: ListedResponse =
+            serde_json::from_str(raw).expect("含 null 儲存格的回應仍應反序列化成功");
+
+        let date = NaiveDate::from_ymd_opt(2019, 6, 10).unwrap();
+        let result = parse_listed_response(response, date).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].symbol, "0050");
+        assert_eq!(result[0].closing_price, dec!(79.05));
     }
 
     /// 產生一筆指定代號的有效 TWSE 資料列，供批次解析測試使用。

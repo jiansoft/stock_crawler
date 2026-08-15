@@ -229,6 +229,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .init();
     }
 
+    // ── 2.5 輪轉日誌檔參數 ──────────────────────────────────────────────────
+    // 單檔大小上限與保留天數來自 app.json 的 `logging.file`，可由 .env 的
+    // LOG_FILE_MAX_SIZE_MB / LOG_FILE_MAX_AGE_DAYS 覆蓋；皆未設定時為 10 MB / 7 天。
+    // 必須在此套用（而非 logger 建立時讀 SETTINGS），避免 logger 反向依賴 config
+    // 造成 Lazy 初始化互鎖。
+    core::logging::init_file_rotation(
+        core::config::SETTINGS.logging.file.max_size_mb,
+        core::config::SETTINGS.logging.file.max_age_days,
+    );
+
     // ── 3. Seq 結構化日誌收集器（選用）──────────────────────────────────────
     // Seq 是一套可視化的結構化日誌平台（類似 ELK，但部署更輕量）。
     // 若 app.json 中 `logging.seq.server_url` 為空字串，此函式直接返回，不做任何事。

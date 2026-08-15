@@ -142,8 +142,12 @@ foreach ($target in $Targets) {
     $outPath = Join-Path 'target' "$target\$BuildProfile\$BinName"
     if (Test-Path -LiteralPath $outPath) {
         if ($archSuffix) {
-            Rename-Item -LiteralPath $outPath -NewName "$BinName$archSuffix"
-            $outPath = Join-Path 'target' "$target\$BuildProfile\$BinName$archSuffix"
+            # Rename-Item 在目標已存在時會失敗（「當檔案已存在時，無法建立該檔案」），
+            # 於是第二次之後的每一次建置都只把新執行檔留在 $BinName，加後綴的那個
+            # 仍停在第一次建置的版本。改用 Move-Item -Force 覆寫。
+            $renamedPath = Join-Path 'target' "$target\$BuildProfile\$BinName$archSuffix"
+            Move-Item -LiteralPath $outPath -Destination $renamedPath -Force
+            $outPath = $renamedPath
         }
         Write-Host "Output binary: $outPath"
     } else {

@@ -108,8 +108,17 @@ for %%T in (%TARGETS%) do (
   set OUT_PATH=target\%%T\%PROFILE%\%BIN_NAME%
   if exist "!OUT_PATH!" (
     if defined ARCH_SUFFIX (
-      ren "!OUT_PATH!" "%BIN_NAME%!ARCH_SUFFIX!"
-      set OUT_PATH=target\%%T\%PROFILE%\%BIN_NAME%!ARCH_SUFFIX!
+      set RENAMED_PATH=target\%%T\%PROFILE%\%BIN_NAME%!ARCH_SUFFIX!
+      rem 用 move /Y 覆寫既有檔案。原本的 ren 在目標已存在時會失敗，而失敗
+      rem 不會中斷腳本，於是第二次之後的每一次建置都只是把新執行檔留在
+      rem stock_crawler，加後綴的那個仍停在第一次建置的版本 —— 畫面上卻照樣
+      rem 印出 Output binary，完全看不出來。
+      move /Y "!OUT_PATH!" "!RENAMED_PATH!" >nul
+      if errorlevel 1 (
+        echo Failed to rename output binary to: !RENAMED_PATH!
+        exit /b 1
+      )
+      set OUT_PATH=!RENAMED_PATH!
     )
     echo Output binary: !OUT_PATH!
   ) else (

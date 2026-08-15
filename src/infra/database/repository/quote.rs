@@ -300,6 +300,19 @@ impl QuoteRepository for PgQuoteRepository {
         Ok(())
     }
 
+    async fn insert_missing_daily_quotes(&self, quotes: &[DomainDailyQuote]) -> Result<u64> {
+        if quotes.is_empty() {
+            return Ok(0);
+        }
+
+        let table_entities: Vec<TableDailyQuote> = quotes
+            .iter()
+            .map(|q| TableDailyQuote::from(q.clone()))
+            .collect();
+
+        TableDailyQuote::insert_missing_batch(&table_entities).await
+    }
+
     async fn fetch_quotes_by_date(&self, date: NaiveDate) -> Result<Vec<DomainDailyQuote>> {
         // 讀取指定交易日的所有日報價 Table 資料
         let table_quotes = daily_quote::fetch_daily_quotes_by_date(date).await?;
@@ -375,6 +388,38 @@ impl QuoteRepository for PgQuoteRepository {
 
     // === 最新報價 (LastDailyQuote) ===
 
+    async fn makeup_for_the_lack_daily_quotes(&self, date: NaiveDate) -> Result<u64> {
+        // 呼叫 Table 實作補齊指定交易日缺漏的收盤資料
+        let result = daily_quote::makeup_for_the_lack_daily_quotes(date).await?;
+        Ok(result.rows_affected())
+    }
+
+    async fn fetch_monthly_stock_price_summary(
+        &self,
+        security_code: &str,
+        year: i32,
+        month: i32,
+    ) -> Result<Option<(Decimal, Decimal, Decimal)>> {
+        // 呼叫 Table 實作查詢指定股票於指定年月的最高、最低、平均收盤價
+        let sql = r#"
+            SELECT
+                MIN("LowestPrice") as lowest_price,
+                AVG("ClosingPrice") as avg_price,
+                MAX("HighestPrice") as highest_price
+            FROM "DailyQuotes"
+            WHERE "stock_symbol" = $1 AND "year" = $2 AND "month" = $3
+            GROUP BY "stock_symbol", "year", "month";
+        "#;
+        let row_opt: Option<daily_quote::extension::MonthlyStockPriceSummary> = sqlx::query_as(sql)
+            .bind(security_code)
+            .bind(year)
+            .bind(month)
+            .fetch_optional(database::get_connection())
+            .await?;
+
+        Ok(row_opt.map(|r| (r.lowest_price, r.avg_price, r.highest_price)))
+    }
+
     async fn fetch_last_daily_quotes(&self) -> Result<Vec<DomainLastDailyQuote>> {
         // 從資料庫抓取所有個股的最新收盤價 Table 資料
         let table_quotes = TableLastDailyQuotes::fetch().await?;
@@ -391,6 +436,8 @@ impl QuoteRepository for PgQuoteRepository {
         TableLastDailyQuotes::rebuild().await?;
         Ok(())
     }
+
+    // === 股價分布統計 (DailyStockPriceStats) ===
 
     async fn fetch_last_quote(&self, security_code: &str) -> Result<Option<DomainLastDailyQuote>> {
         let cache_key = self.get_cache_key(security_code);
@@ -422,46 +469,10 @@ impl QuoteRepository for PgQuoteRepository {
         Ok(())
     }
 
-    // === 股價分布統計 (DailyStockPriceStats) ===
-
     async fn save_stock_price_stats(&self, date: NaiveDate) -> Result<()> {
         // 呼叫 Table 實作的 upsert 方法計算並保存當日之全市場統計
         TableDailyStockPriceStats::upsert(date, &mut None).await?;
         Ok(())
-    }
-
-    async fn makeup_for_the_lack_daily_quotes(&self, date: NaiveDate) -> Result<u64> {
-        // 呼叫 Table 實作補齊指定交易日缺漏的收盤資料
-        let result = daily_quote::makeup_for_the_lack_daily_quotes(date).await?;
-        Ok(result.rows_affected())
-    }
-
-    async fn fetch_monthly_stock_price_summary(
-        &self,
-        security_code: &str,
-        year: i32,
-        month: i32,
-    ) -> Result<Option<(Decimal, Decimal, Decimal)>> {
-        // 呼叫 Table 實作查詢指定股票於指定年月的最高、最低、平均收盤價
-        let sql = r#"
-            SELECT
-                MIN("LowestPrice") as lowest_price,
-                AVG("ClosingPrice") as avg_price,
-                MAX("HighestPrice") as highest_price
-            FROM "DailyQuotes"
-            WHERE "stock_symbol" = $1 AND "year" = $2 AND "month" = $3
-            GROUP BY "stock_symbol", "year", "month";
-        "#;
-        let row_opt: Option<
-            crate::infra::database::table::quote::daily_quote::extension::MonthlyStockPriceSummary,
-        > = sqlx::query_as(sql)
-            .bind(security_code)
-            .bind(year)
-            .bind(month)
-            .fetch_optional(database::get_connection())
-            .await?;
-
-        Ok(row_opt.map(|r| (r.lowest_price, r.avg_price, r.highest_price)))
     }
 
     // === 歷史極值紀錄 (QuoteHistoryRecord) ===
@@ -489,6 +500,7 @@ impl QuoteRepository for PgQuoteRepository {
 mod tests {
     use super::*;
     use crate::domain::quote::entity::LastDailyQuote;
+    use chrono::Datelike;
     use rust_decimal_macros::dec;
 
     #[tokio::test]
@@ -505,7 +517,7 @@ mod tests {
             return;
         }
 
-        if crate::infra::nosql::redis::CLIENT.ping().await.is_err() {
+        if CLIENT.ping().await.is_err() {
             println!("跳過 test_cache_aside_flow：無 Redis 連接");
             return;
         }
@@ -517,7 +529,7 @@ mod tests {
         // 先取得快取的 key
         let cache_key = repo.get_cache_key(test_symbol);
         // 清除先前殘留的 Redis 快取以確保測試獨立性
-        let _ = crate::infra::nosql::redis::CLIENT.delete(&cache_key).await;
+        let _ = CLIENT.delete(&cache_key).await;
 
         // 建立測試用的最新收盤價領域對象
         let test_quote = LastDailyQuote {
@@ -539,7 +551,7 @@ mod tests {
         assert_eq!(fetched_first.closing_price, dec!(99.9));
 
         // 3. 再次清除快取以模擬 Cache Miss 的情境
-        let _ = crate::infra::nosql::redis::CLIENT.delete(&cache_key).await;
+        let _ = CLIENT.delete(&cache_key).await;
 
         // 4. 第二次讀取，因快取已被清除，會觸發 Cache Miss 降級並從 PostgreSQL 重新查詢，最後會回寫快取
         let fetched_miss = repo.fetch_last_quote(test_symbol).await.unwrap();
@@ -547,19 +559,102 @@ mod tests {
         assert_eq!(fetched_miss.unwrap().closing_price, dec!(99.9));
 
         // 5. 驗證此時 Redis 快取是否已正確被自動回寫
-        let redis_val = crate::infra::nosql::redis::CLIENT
-            .get_string(&cache_key)
-            .await
-            .unwrap();
+        let redis_val = CLIENT.get_string(&cache_key).await.unwrap();
         let redis_quote: LastDailyQuote = serde_json::from_str(&redis_val).unwrap();
         assert_eq!(redis_quote.stock_symbol, test_symbol);
         assert_eq!(redis_quote.closing_price, dec!(99.9));
 
         // 6. 清理測試資料（同時清除 Redis 快取與資料庫內的測試列）
-        let _ = crate::infra::nosql::redis::CLIENT.delete(&cache_key).await;
+        let _ = CLIENT.delete(&cache_key).await;
         let _ = sqlx::query("DELETE FROM last_daily_quotes WHERE stock_symbol = $1")
             .bind(test_symbol)
             .execute(database::get_connection())
             .await;
+    }
+
+    /// 空清單在轉換與碰資料庫之前就短路回 0。
+    ///
+    /// 回補流程對「這批沒有缺口」的情況會傳空清單進來，屬於正常路徑。
+    #[tokio::test]
+    async fn insert_missing_daily_quotes_short_circuits_on_an_empty_slice() {
+        let repository = PgQuoteRepository::new();
+
+        assert_eq!(
+            repository
+                .insert_missing_daily_quotes(&[])
+                .await
+                .expect("空清單應成功"),
+            0
+        );
+    }
+
+    /// 經由倉儲介面補寫缺口：領域實體正確轉成 Table 模型，且只補空位。
+    ///
+    /// 與 table 層的同名測試分工不同：這裡驗證的是 domain → table 的轉換有沒有
+    /// 把日期與代號帶到位，寫入語意本身由 table 層那支負責。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn insert_missing_daily_quotes_maps_and_fills_gaps() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 insert_missing_daily_quotes_maps_and_fills_gaps：無資料庫連接");
+            return;
+        }
+
+        // 固定歷史日期 + 假代號，避免碰到任何真實資料。
+        const SYMBOL: &str = "79978";
+        let day1 = NaiveDate::from_ymd_opt(1970, 1, 1).expect("測試日期應合法");
+        let day2 = NaiveDate::from_ymd_opt(1970, 1, 2).expect("測試日期應合法");
+        let cleanup = || async {
+            let _ = sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE "stock_symbol" = $1"#)
+                .bind(SYMBOL)
+                .execute(database::get_connection())
+                .await;
+        };
+        cleanup().await;
+
+        let quote = |date: NaiveDate| DomainDailyQuote {
+            stock_symbol: SYMBOL.to_string(),
+            date,
+            year: date.year(),
+            month: date.month() as i32,
+            day: date.day() as i32,
+            closing_price: dec!(10),
+            ..Default::default()
+        };
+
+        let repository = PgQuoteRepository::new();
+        assert_eq!(
+            repository
+                .insert_missing_daily_quotes(&[quote(day1), quote(day2)])
+                .await
+                .expect("首次寫入應成功"),
+            2
+        );
+        // 重跑不得產生重複資料列。
+        assert_eq!(
+            repository
+                .insert_missing_daily_quotes(&[quote(day1), quote(day2)])
+                .await
+                .expect("重跑應成功"),
+            0
+        );
+
+        // 轉換有把代號與日期帶到位，資料才查得回來。
+        let stored: i64 = sqlx::query_scalar(
+            r#"SELECT count(*) FROM "DailyQuotes" WHERE "stock_symbol" = $1 AND "Date" IN ($2, $3)"#,
+        )
+        .bind(SYMBOL)
+        .bind(day1)
+        .bind(day2)
+        .fetch_one(database::get_connection())
+        .await
+        .expect("應查得到寫入的資料");
+        assert_eq!(stored, 2);
+
+        cleanup().await;
     }
 }
