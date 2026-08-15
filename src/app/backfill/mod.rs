@@ -12,6 +12,8 @@ pub mod financial_statement;
 pub mod isin;
 /// 回補每股淨值為零的股票更新其數據
 pub mod net_asset_value_per_share;
+/// 回補流程對外部資料來源的需求介面
+pub mod port;
 /// 外資及陸資投資持股統計
 pub mod qualified_foreign_institutional_investor;
 /// 調用 twse、tpex API 取得並更新台股收盤報價

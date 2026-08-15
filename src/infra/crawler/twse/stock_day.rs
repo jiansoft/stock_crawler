@@ -122,6 +122,19 @@ pub fn parse_stock_day_response(
     quotes
 }
 
+/// [`crate::app::backfill::port::MonthlyQuoteFetcher`] 的 TWSE 實作。
+///
+/// 只是把 [`visit`] 包成有 `&self` 的方法，讓回補流程能以 trait object 注入。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TwseMonthlyQuoteFetcher;
+
+#[async_trait::async_trait]
+impl crate::app::backfill::port::MonthlyQuoteFetcher for TwseMonthlyQuoteFetcher {
+    async fn fetch(&self, stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+        visit(stock_symbol, month).await
+    }
+}
+
 /// 解析民國年日期字串（`110/08/02`）。
 ///
 /// 年份限定在合理的民國紀年範圍內：若來源哪天改回西元（`2021/08/02`），

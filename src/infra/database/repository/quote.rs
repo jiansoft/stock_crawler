@@ -351,7 +351,7 @@ impl QuoteRepository for PgQuoteRepository {
 
         // 步驟 1：刪除該交易日既有的報價。因為還沒 commit，
         // 這個刪除對其他連線是看不見的；若後續寫入失敗，刪除也會一起被取消。
-        sqlx::query(r#"delete from daily_quote where date = $1;"#)
+        sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
             .bind(date)
             .execute(&mut *tx)
             .await?;
@@ -388,6 +388,38 @@ impl QuoteRepository for PgQuoteRepository {
 
     // === 最新報價 (LastDailyQuote) ===
 
+    async fn makeup_for_the_lack_daily_quotes(&self, date: NaiveDate) -> Result<u64> {
+        // 呼叫 Table 實作補齊指定交易日缺漏的收盤資料
+        let result = daily_quote::makeup_for_the_lack_daily_quotes(date).await?;
+        Ok(result.rows_affected())
+    }
+
+    async fn fetch_monthly_stock_price_summary(
+        &self,
+        security_code: &str,
+        year: i32,
+        month: i32,
+    ) -> Result<Option<(Decimal, Decimal, Decimal)>> {
+        // 呼叫 Table 實作查詢指定股票於指定年月的最高、最低、平均收盤價
+        let sql = r#"
+            SELECT
+                MIN("LowestPrice") as lowest_price,
+                AVG("ClosingPrice") as avg_price,
+                MAX("HighestPrice") as highest_price
+            FROM "DailyQuotes"
+            WHERE "stock_symbol" = $1 AND "year" = $2 AND "month" = $3
+            GROUP BY "stock_symbol", "year", "month";
+        "#;
+        let row_opt: Option<daily_quote::extension::MonthlyStockPriceSummary> = sqlx::query_as(sql)
+            .bind(security_code)
+            .bind(year)
+            .bind(month)
+            .fetch_optional(database::get_connection())
+            .await?;
+
+        Ok(row_opt.map(|r| (r.lowest_price, r.avg_price, r.highest_price)))
+    }
+
     async fn fetch_last_daily_quotes(&self) -> Result<Vec<DomainLastDailyQuote>> {
         // 從資料庫抓取所有個股的最新收盤價 Table 資料
         let table_quotes = TableLastDailyQuotes::fetch().await?;
@@ -404,6 +436,8 @@ impl QuoteRepository for PgQuoteRepository {
         TableLastDailyQuotes::rebuild().await?;
         Ok(())
     }
+
+    // === 股價分布統計 (DailyStockPriceStats) ===
 
     async fn fetch_last_quote(&self, security_code: &str) -> Result<Option<DomainLastDailyQuote>> {
         let cache_key = self.get_cache_key(security_code);
@@ -435,46 +469,10 @@ impl QuoteRepository for PgQuoteRepository {
         Ok(())
     }
 
-    // === 股價分布統計 (DailyStockPriceStats) ===
-
     async fn save_stock_price_stats(&self, date: NaiveDate) -> Result<()> {
         // 呼叫 Table 實作的 upsert 方法計算並保存當日之全市場統計
         TableDailyStockPriceStats::upsert(date, &mut None).await?;
         Ok(())
-    }
-
-    async fn makeup_for_the_lack_daily_quotes(&self, date: NaiveDate) -> Result<u64> {
-        // 呼叫 Table 實作補齊指定交易日缺漏的收盤資料
-        let result = daily_quote::makeup_for_the_lack_daily_quotes(date).await?;
-        Ok(result.rows_affected())
-    }
-
-    async fn fetch_monthly_stock_price_summary(
-        &self,
-        security_code: &str,
-        year: i32,
-        month: i32,
-    ) -> Result<Option<(Decimal, Decimal, Decimal)>> {
-        // 呼叫 Table 實作查詢指定股票於指定年月的最高、最低、平均收盤價
-        let sql = r#"
-            SELECT
-                MIN("LowestPrice") as lowest_price,
-                AVG("ClosingPrice") as avg_price,
-                MAX("HighestPrice") as highest_price
-            FROM "DailyQuotes"
-            WHERE "stock_symbol" = $1 AND "year" = $2 AND "month" = $3
-            GROUP BY "stock_symbol", "year", "month";
-        "#;
-        let row_opt: Option<
-            crate::infra::database::table::quote::daily_quote::extension::MonthlyStockPriceSummary,
-        > = sqlx::query_as(sql)
-            .bind(security_code)
-            .bind(year)
-            .bind(month)
-            .fetch_optional(database::get_connection())
-            .await?;
-
-        Ok(row_opt.map(|r| (r.lowest_price, r.avg_price, r.highest_price)))
     }
 
     // === 歷史極值紀錄 (QuoteHistoryRecord) ===
@@ -519,7 +517,7 @@ mod tests {
             return;
         }
 
-        if crate::infra::nosql::redis::CLIENT.ping().await.is_err() {
+        if CLIENT.ping().await.is_err() {
             println!("跳過 test_cache_aside_flow：無 Redis 連接");
             return;
         }
@@ -531,7 +529,7 @@ mod tests {
         // 先取得快取的 key
         let cache_key = repo.get_cache_key(test_symbol);
         // 清除先前殘留的 Redis 快取以確保測試獨立性
-        let _ = crate::infra::nosql::redis::CLIENT.delete(&cache_key).await;
+        let _ = CLIENT.delete(&cache_key).await;
 
         // 建立測試用的最新收盤價領域對象
         let test_quote = LastDailyQuote {
@@ -553,7 +551,7 @@ mod tests {
         assert_eq!(fetched_first.closing_price, dec!(99.9));
 
         // 3. 再次清除快取以模擬 Cache Miss 的情境
-        let _ = crate::infra::nosql::redis::CLIENT.delete(&cache_key).await;
+        let _ = CLIENT.delete(&cache_key).await;
 
         // 4. 第二次讀取，因快取已被清除，會觸發 Cache Miss 降級並從 PostgreSQL 重新查詢，最後會回寫快取
         let fetched_miss = repo.fetch_last_quote(test_symbol).await.unwrap();
@@ -561,16 +559,13 @@ mod tests {
         assert_eq!(fetched_miss.unwrap().closing_price, dec!(99.9));
 
         // 5. 驗證此時 Redis 快取是否已正確被自動回寫
-        let redis_val = crate::infra::nosql::redis::CLIENT
-            .get_string(&cache_key)
-            .await
-            .unwrap();
+        let redis_val = CLIENT.get_string(&cache_key).await.unwrap();
         let redis_quote: LastDailyQuote = serde_json::from_str(&redis_val).unwrap();
         assert_eq!(redis_quote.stock_symbol, test_symbol);
         assert_eq!(redis_quote.closing_price, dec!(99.9));
 
         // 6. 清理測試資料（同時清除 Redis 快取與資料庫內的測試列）
-        let _ = crate::infra::nosql::redis::CLIENT.delete(&cache_key).await;
+        let _ = CLIENT.delete(&cache_key).await;
         let _ = sqlx::query("DELETE FROM last_daily_quotes WHERE stock_symbol = $1")
             .bind(test_symbol)
             .execute(database::get_connection())
@@ -650,7 +645,7 @@ mod tests {
 
         // 轉換有把代號與日期帶到位，資料才查得回來。
         let stored: i64 = sqlx::query_scalar(
-            r#"SELECT count(*) FROM daily_quote WHERE stock_symbol = $1 AND date IN ($2, $3)"#,
+            r#"SELECT count(*) FROM "DailyQuotes" WHERE "stock_symbol" = $1 AND "Date" IN ($2, $3)"#,
         )
         .bind(SYMBOL)
         .bind(day1)

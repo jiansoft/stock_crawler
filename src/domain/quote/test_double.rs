@@ -7,29 +7,58 @@
 //! 模組的 `mod tests` 裡會被覆蓋率工具算成該模組的未覆蓋行，讓數字失真。
 //! 抽到這裡後，覆蓋率設定（`codecov.yml`）可整檔排除。
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::domain::quote::entity::{DailyQuote, LastDailyQuote, QuoteHistoryRecord};
 use crate::domain::quote::repository::QuoteRepository;
 
-/// 只記錄「被呼叫過幾次」的假倉儲。
+/// 記錄寫入內容與呼叫次數的假倉儲。
 ///
-/// 用途是證明流程在不該寫入時完全沒有碰倉儲；未實作的方法一旦被呼叫，
-/// `unimplemented!()` 會讓測試直接失敗，而不是安靜地回傳假資料。
+/// 用途是驗證流程「有沒有寫、寫了什麼」，以及倉儲失敗時流程如何反應；
+/// 未實作的方法一旦被呼叫，`unimplemented!()` 會讓測試直接失敗，
+/// 而不是安靜地回傳假資料。
 #[derive(Default)]
 pub(crate) struct CountingQuoteRepository {
     /// `insert_missing_daily_quotes` 的呼叫次數。
     insert_calls: AtomicUsize,
+    /// 歷次收到的報價，依呼叫順序展開存放。
+    inserted: Mutex<Vec<DailyQuote>>,
+    /// 為 true 時 `insert_missing_daily_quotes` 一律回傳錯誤。
+    fail_insert: bool,
 }
 
 impl CountingQuoteRepository {
+    /// 建立一個「寫入必定失敗」的假倉儲，用於驗證錯誤上拋。
+    pub(crate) fn failing() -> Self {
+        Self {
+            fail_insert: true,
+            ..Default::default()
+        }
+    }
+
     /// 取得 `insert_missing_daily_quotes` 目前的呼叫次數。
     pub(crate) fn insert_calls(&self) -> usize {
         self.insert_calls.load(Ordering::Relaxed)
+    }
+
+    /// 取得目前已收到的報價筆數。
+    pub(crate) fn inserted_len(&self) -> usize {
+        self.inserted.lock().expect("測試鎖不應中毒").len()
+    }
+
+    /// 取得已收到報價的 `(代號, 日期)` 清單，依收到順序排列。
+    pub(crate) fn inserted_keys(&self) -> Vec<(String, NaiveDate)> {
+        self.inserted
+            .lock()
+            .expect("測試鎖不應中毒")
+            .iter()
+            .map(|quote| (quote.stock_symbol.clone(), quote.date))
+            .collect()
     }
 }
 
@@ -37,6 +66,14 @@ impl CountingQuoteRepository {
 impl QuoteRepository for CountingQuoteRepository {
     async fn insert_missing_daily_quotes(&self, quotes: &[DailyQuote]) -> Result<u64> {
         self.insert_calls.fetch_add(1, Ordering::Relaxed);
+        if self.fail_insert {
+            return Err(anyhow!("假倉儲：寫入失敗"));
+        }
+
+        self.inserted
+            .lock()
+            .expect("測試鎖不應中毒")
+            .extend_from_slice(quotes);
         Ok(quotes.len() as u64)
     }
 
