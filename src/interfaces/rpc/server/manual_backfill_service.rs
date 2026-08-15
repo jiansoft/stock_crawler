@@ -453,6 +453,151 @@ mod tests {
         assert_eq!(invalid_symbol.code(), Code::InvalidArgument);
     }
 
+    /// 建立 job 被拒絕的兩種原因各自對應固定的 gRPC 狀態碼（與 HTTP 409/429 對齊）。
+    #[test]
+    fn start_job_errors_map_to_grpc_status_codes() {
+        let duplicate = web::backfill_admin::StartJobError::DuplicateActiveJob {
+            existing_id: "20260815000000-1".to_string(),
+        };
+        let status = start_job_error_to_status(duplicate);
+        assert_eq!(status.code(), Code::AlreadyExists);
+        assert!(status.message().contains("20260815000000-1"));
+
+        let too_many = web::backfill_admin::StartJobError::TooManyActiveJobs { max: 4 };
+        assert_eq!(
+            start_job_error_to_status(too_many).code(),
+            Code::ResourceExhausted
+        );
+    }
+
+    /// 日期欄位僅接受 `YYYY-MM-DD`，其餘一律 INVALID_ARGUMENT。
+    #[test]
+    fn grpc_date_parsing_matches_the_http_rules() {
+        assert_eq!(
+            parse_grpc_date(" 2026-04-30 ").expect("合法日期"),
+            NaiveDate::from_ymd_opt(2026, 4, 30).expect("測試日期應合法")
+        );
+        for raw in ["", "2026-04", "2026/04/30", "2026-02-30"] {
+            let err = parse_grpc_date(raw).expect_err("非法日期應被拒絕");
+            assert_eq!(err.code(), Code::InvalidArgument, "raw={raw}");
+        }
+    }
+
+    /// 月份欄位為 `YYYY-MM`，解析結果落在該月一日。
+    #[test]
+    fn grpc_month_parsing_resolves_to_the_first_day() {
+        assert_eq!(
+            parse_grpc_month(" 2015-01 ").expect("合法月份"),
+            NaiveDate::from_ymd_opt(2015, 1, 1).expect("測試日期應合法")
+        );
+        for raw in ["", "2015", "2015-13", "2015-01-01"] {
+            let err = parse_grpc_month(raw).expect_err("非法月份應被拒絕");
+            assert_eq!(err.code(), Code::InvalidArgument, "raw={raw}");
+        }
+    }
+
+    /// 代號驗證共用 HTTP 端規則：trim 後只允許 ASCII 英數。
+    #[test]
+    fn grpc_security_code_shares_the_http_validation() {
+        assert_eq!(
+            parse_grpc_security_code(" 2330 ".to_string()).expect("合法代號"),
+            "2330"
+        );
+        for raw in ["", "23 30", "0050;DROP"] {
+            let err = parse_grpc_security_code(raw.to_string()).expect_err("非法代號應被拒絕");
+            assert_eq!(err.code(), Code::InvalidArgument, "raw={raw}");
+        }
+    }
+
+    /// 查無此 job 時回傳 NOT_FOUND，訊息帶上查詢的 id。
+    #[tokio::test]
+    async fn get_job_returns_not_found_for_an_unknown_id() {
+        let service = ManualBackfillServiceImpl::default();
+        let err = service
+            .get_job(Request::new(GetJobRequest {
+                id: "no-such-job".to_string(),
+            }))
+            .await
+            .expect_err("未知 id 應回 NOT_FOUND");
+
+        assert_eq!(err.code(), Code::NotFound);
+        assert!(err.message().contains("no-such-job"));
+    }
+
+    /// 年度明顯超出合理範圍時，在建立 job 前就拒絕。
+    #[tokio::test]
+    async fn multiple_dividend_backfill_rejects_out_of_range_years() {
+        let service = ManualBackfillServiceImpl::default();
+        for year in [1899, 3001, 0, -1] {
+            let err = service
+                .start_multiple_dividend_historical_dividends(Request::new(YearRequest { year }))
+                .await
+                .expect_err("超出範圍的年度應被拒絕");
+            assert_eq!(err.code(), Code::InvalidArgument, "year={year}");
+        }
+    }
+
+    /// 各 start API 都應在觸碰資料庫或外部網站前先驗證日期格式。
+    #[tokio::test]
+    async fn start_apis_validate_dates_before_creating_jobs() {
+        let service = ManualBackfillServiceImpl::default();
+
+        let daily = service
+            .start_daily_quotes(Request::new(DailyQuotesRequest {
+                date: "2026-04".to_string(),
+            }))
+            .await
+            .expect_err("非法日期應失敗");
+        assert_eq!(daily.code(), Code::InvalidArgument);
+
+        let closing = service
+            .start_closing_aggregate(Request::new(ClosingAggregateRequest {
+                date: "not-a-date".to_string(),
+            }))
+            .await
+            .expect_err("非法日期應失敗");
+        assert_eq!(closing.code(), Code::InvalidArgument);
+
+        let index = service
+            .start_taiwan_stock_index(Request::new(TaiwanStockIndexRequest {
+                date: String::new(),
+            }))
+            .await
+            .expect_err("空日期應失敗");
+        assert_eq!(index.code(), Code::InvalidArgument);
+
+        // CAGR 允許留空（採最新交易日），但填了就必須合法。
+        let cagr = service
+            .start_cagr(Request::new(CagrRequest {
+                date: "not-a-date".to_string(),
+            }))
+            .await
+            .expect_err("非法日期應失敗");
+        assert_eq!(cagr.code(), Code::InvalidArgument);
+    }
+
+    /// 代號類 API 在建立 job 前先驗證代號。
+    #[tokio::test]
+    async fn start_apis_validate_security_codes_before_creating_jobs() {
+        let service = ManualBackfillServiceImpl::default();
+
+        let received = service
+            .start_received_dividend_records(Request::new(SecurityCodeRequest {
+                security_code: "0050; DROP".to_string(),
+            }))
+            .await
+            .expect_err("非法代號應失敗");
+        assert_eq!(received.code(), Code::InvalidArgument);
+
+        let historical = service
+            .start_historical_dividends(Request::new(SecurityCodeRequest {
+                security_code: String::new(),
+            }))
+            .await
+            .expect_err("空代號應失敗");
+        assert_eq!(historical.code(), Code::InvalidArgument);
+    }
+
     /// Quote History 代號清單應支援混合分隔、排序及去重。
     #[test]
     fn quote_history_symbol_list_is_normalized() {

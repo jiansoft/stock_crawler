@@ -452,6 +452,106 @@ mod tests {
         tracing::debug!("結束 upsert");
     }
 
+    /// 空批次沒有任何可更新的目標，必須明確報錯而不是送出一句無效 SQL。
+    #[tokio::test]
+    async fn batch_update_moving_average_rejects_an_empty_batch() {
+        let err = DailyQuote::batch_update_moving_average(&[])
+            .await
+            .expect_err("空批次應回傳錯誤");
+        assert!(
+            err.to_string().contains("empty"),
+            "錯誤訊息應說明原因：{err}"
+        );
+    }
+
+    /// 空批次在碰資料庫之前就短路回 0，回補流程可以放心傳空清單。
+    #[tokio::test]
+    async fn insert_missing_batch_short_circuits_on_an_empty_slice() {
+        assert_eq!(
+            DailyQuote::insert_missing_batch(&[])
+                .await
+                .expect("空批次應成功"),
+            0
+        );
+    }
+
+    /// 建立一筆最小可寫入的測試報價（固定歷史日期 + 假代號）。
+    fn make_quote(
+        symbol: &str,
+        date: NaiveDate,
+        closing_price: rust_decimal::Decimal,
+    ) -> DailyQuote {
+        let mut quote = DailyQuote::new(symbol.to_string());
+        quote.date = date;
+        quote.year = date.year();
+        quote.month = date.month() as i32;
+        quote.day = date.day() as i32;
+        quote.closing_price = closing_price;
+        quote.opening_price = closing_price;
+        quote.highest_price = closing_price;
+        quote.lowest_price = closing_price;
+        quote
+    }
+
+    /// 回補歷史缺口時只補空位：新日期寫入，既有日期既不重複也不被覆寫。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn insert_missing_batch_fills_gaps_without_overwriting() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 insert_missing_batch_fills_gaps_without_overwriting：無資料庫連接");
+            return;
+        }
+
+        // 固定歷史日期 + 假代號，避免碰到任何真實資料。
+        const SYMBOL: &str = "79979";
+        let day1 = NaiveDate::from_ymd_opt(1970, 1, 1).expect("測試日期應合法");
+        let day2 = NaiveDate::from_ymd_opt(1970, 1, 2).expect("測試日期應合法");
+        let cleanup = || async {
+            let _ = sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE "stock_symbol" = $1"#)
+                .bind(SYMBOL)
+                .execute(database::get_connection())
+                .await;
+        };
+        cleanup().await;
+
+        // 首次寫入兩天，兩筆都是新資料。
+        let inserted = DailyQuote::insert_missing_batch(&[
+            make_quote(SYMBOL, day1, rust_decimal::Decimal::from(10)),
+            make_quote(SYMBOL, day2, rust_decimal::Decimal::from(11)),
+        ])
+        .await
+        .expect("首次寫入應成功");
+        assert_eq!(inserted, 2);
+
+        // 重跑同一批並多帶一天：只有新的那天會被寫入（ON CONFLICT DO NOTHING）。
+        let day3 = NaiveDate::from_ymd_opt(1970, 1, 3).expect("測試日期應合法");
+        let inserted = DailyQuote::insert_missing_batch(&[
+            make_quote(SYMBOL, day1, rust_decimal::Decimal::from(99)),
+            make_quote(SYMBOL, day2, rust_decimal::Decimal::from(99)),
+            make_quote(SYMBOL, day3, rust_decimal::Decimal::from(12)),
+        ])
+        .await
+        .expect("重跑應成功");
+        assert_eq!(inserted, 1);
+
+        // 既有列的價格不得被重跑的值覆寫——補洞不該動到已有資料。
+        let closing: rust_decimal::Decimal = sqlx::query_scalar(
+            r#"SELECT "ClosingPrice" FROM "DailyQuotes" WHERE "stock_symbol" = $1 AND "Date" = $2"#,
+        )
+        .bind(SYMBOL)
+        .bind(day1)
+        .fetch_one(database::get_connection())
+        .await
+        .expect("應查得到既有資料");
+        assert_eq!(closing, rust_decimal::Decimal::from(10));
+
+        cleanup().await;
+    }
+
     /// 手動驗證 TWSE 報價抓取後可透過 COPY 寫入測試資料。
     ///
     /// 此測試同時依賴外部網路與本機資料庫，預設測試集不應執行。

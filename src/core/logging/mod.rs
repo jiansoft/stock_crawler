@@ -749,3 +749,298 @@ pub fn error_console(log: String) {
         log
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use tracing_subscriber::layer::SubscriberExt;
+
+    use super::*;
+
+    /// 單筆擷取結果：（訊息, 結構化欄位）。
+    type CapturedEvent = (String, Vec<(String, serde_json::Value)>);
+
+    /// 測試用的擷取層：把每筆事件交給 [`FieldCollector`] 解析後留存。
+    ///
+    /// 刻意不直接安裝 [`FileLogLayer`]：那會喚醒全域 `LOGGER` 並真的寫檔，
+    /// 測試只想驗證「事件 → 訊息 + 結構化欄位」這段轉換。
+    struct CaptureLayer {
+        events: Arc<Mutex<Vec<CapturedEvent>>>,
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::layer::Layer<S> for CaptureLayer {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut collector = FieldCollector::default();
+            event.record(&mut collector);
+            if let Ok(mut events) = self.events.lock() {
+                events.push((collector.message, collector.extra));
+            }
+        }
+    }
+
+    /// 在只裝了 [`CaptureLayer`] 的 subscriber 下執行 `emit`，回傳擷取到的事件。
+    fn capture(emit: impl FnOnce()) -> Vec<CapturedEvent> {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::registry().with(CaptureLayer {
+            events: Arc::clone(&events),
+        });
+        tracing::subscriber::with_default(subscriber, emit);
+
+        events.lock().expect("擷取結果應可取得").clone()
+    }
+
+    /// 專案自用等級名稱與 Seq/Serilog 等級名稱各自獨立，不可混用。
+    #[test]
+    fn seq_log_level_maps_to_both_naming_schemes() {
+        for (level, rust, seq) in [
+            (SeqLogLevel::Info, "Info", "Information"),
+            (SeqLogLevel::Warn, "Warn", "Warning"),
+            (SeqLogLevel::Error, "Error", "Error"),
+            (SeqLogLevel::Debug, "Debug", "Debug"),
+        ] {
+            assert_eq!(level.as_rust_level(), rust);
+            assert_eq!(level.as_seq_level(), seq);
+        }
+    }
+
+    /// `message` 欄位進 message，其餘欄位保持型別進 extra。
+    #[test]
+    fn field_collector_separates_message_from_structured_fields() {
+        let captured = capture(|| {
+            tracing::info!(
+                stock_symbol = "2330",
+                elapsed_ms = 12_i64,
+                rows = 3_u64,
+                ratio = 1.5_f64,
+                cached = true,
+                "個股月行情回補完成"
+            );
+        });
+
+        assert_eq!(captured.len(), 1);
+        let (message, extra) = &captured[0];
+        assert_eq!(message, "個股月行情回補完成");
+
+        let fields: HashMap<&str, &serde_json::Value> =
+            extra.iter().map(|(k, v)| (k.as_str(), v)).collect();
+        // 數值欄位必須保留 JSON 原生型別，Seq 才能用 `elapsed_ms > 10` 之類的條件查詢。
+        assert_eq!(fields["stock_symbol"], &serde_json::json!("2330"));
+        assert_eq!(fields["elapsed_ms"], &serde_json::json!(12));
+        assert_eq!(fields["rows"], &serde_json::json!(3));
+        assert_eq!(fields["ratio"], &serde_json::json!(1.5));
+        assert_eq!(fields["cached"], &serde_json::json!(true));
+    }
+
+    /// 格式化訊息（`format_args!`）走 `record_debug`，不可留下多餘引號。
+    #[test]
+    fn formatted_message_is_collected_without_debug_quotes() {
+        let captured = capture(|| {
+            let symbol = "0050";
+            tracing::warn!("個股月行情抓取失敗：{}", symbol);
+        });
+
+        assert_eq!(captured[0].0, "個股月行情抓取失敗：0050");
+        assert!(captured[0].1.is_empty());
+    }
+
+    /// 無 message 的事件會在 `FileLogLayer` 被略過，收集結果應為空字串。
+    #[test]
+    fn event_without_message_collects_empty_message() {
+        let captured = capture(|| {
+            tracing::info!(stock_symbol = "2330");
+        });
+
+        assert!(captured[0].0.is_empty());
+        assert_eq!(captured[0].1.len(), 1);
+    }
+
+    /// CLEF 事件必須使用 Seq 規定的 `@t`/`@mt`/`@l` 欄位名，並把結構化欄位攤平到頂層。
+    #[test]
+    fn seq_event_serializes_to_clef_shape() {
+        let event = SeqEvent {
+            timestamp: "2026-08-15T01:02:03.000000Z".to_string(),
+            message_template: "個股月行情回補完成".to_string(),
+            level: SeqLogLevel::Info.as_seq_level(),
+            service: SEQ_SERVICE_NAME,
+            rust_log_level: SeqLogLevel::Info.as_rust_level(),
+            logger: "stock_crawler::app::backfill".to_string(),
+            fields: HashMap::from([("stock_symbol".to_string(), serde_json::json!("2330"))]),
+        };
+
+        let json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&event).expect("序列化應成功"))
+                .expect("結果應為合法 JSON");
+
+        assert_eq!(json["@t"], "2026-08-15T01:02:03.000000Z");
+        assert_eq!(json["@mt"], "個股月行情回補完成");
+        assert_eq!(json["@l"], "Information");
+        assert_eq!(json["RustLogLevel"], "Info");
+        assert_eq!(json["service"], SEQ_SERVICE_NAME);
+        assert_eq!(json["Logger"], "stock_crawler::app::backfill");
+        // flatten：結構化欄位是頂層屬性，不是巢狀的 "fields" 物件。
+        assert_eq!(json["stock_symbol"], "2330");
+        assert!(json.get("fields").is_none());
+    }
+
+    /// 未啟用 Seq 時 `forward_to_seq` 必須是 no-op，不可 panic。
+    #[test]
+    fn forward_to_seq_is_a_noop_when_disabled() {
+        let was_enabled = SEQ_LOGGING_ENABLED.swap(false, Ordering::Relaxed);
+        forward_to_seq(SeqLogLevel::Info, "訊息", HashMap::new(), "test");
+        SEQ_LOGGING_ENABLED.store(was_enabled, Ordering::Relaxed);
+    }
+
+    /// 空的 server_url 代表停用 Seq，不得建立 sender。
+    #[tokio::test]
+    async fn init_seq_ignores_a_blank_server_url() {
+        let was_enabled = SEQ_LOGGING_ENABLED.load(Ordering::Relaxed);
+        init_seq("   ", "key").await;
+        assert_eq!(SEQ_LOGGING_ENABLED.load(Ordering::Relaxed), was_enabled);
+        assert!(SEQ_SENDER.get().is_none() || was_enabled);
+    }
+
+    /// 預設過濾指令必須壓掉已知的第三方雜訊來源。
+    #[test]
+    fn default_file_log_directives_silence_known_noise() {
+        assert!(DEFAULT_FILE_LOG_DIRECTIVES.starts_with("info"));
+        // html5ever 的雜訊是 warn 等級，只靠 info 基準擋不掉，必須逐 target 關閉。
+        assert!(DEFAULT_FILE_LOG_DIRECTIVES.contains("html5ever=off"));
+        assert!(DEFAULT_FILE_LOG_DIRECTIVES.contains("rustls::msgs::handshake=error"));
+    }
+
+    /// 未設定 `FILE_LOG_LEVEL` 時，過濾器應回落到預設指令。
+    #[test]
+    fn file_log_env_filter_falls_back_to_the_default_directives() {
+        if std::env::var("FILE_LOG_LEVEL").is_ok() {
+            println!(
+                "跳過 file_log_env_filter_falls_back_to_the_default_directives：環境已設定 FILE_LOG_LEVEL"
+            );
+            return;
+        }
+
+        let filter = file_log_env_filter().to_string();
+        assert!(filter.contains("html5ever=off"), "實際過濾器：{filter}");
+    }
+
+    /// 日誌檔路徑帶有 `Rotate` 用來替換的日期樣板與 logger 名稱。
+    #[test]
+    fn log_path_carries_the_date_template_and_logger_name() {
+        let path = Logger::get_log_path("default_info").expect("路徑應可建立");
+
+        assert_eq!(path.parent(), Some(Path::new("log")));
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("%Y-%m-%d_default_info.log")
+        );
+    }
+
+    /// 統計快照如實反映各計數器目前的值。
+    #[test]
+    fn writer_stats_snapshot_reports_current_counters() {
+        let stats = LoggerWriterStats::new(LOG_CHANNEL_CAPACITY);
+        stats.queued_messages.store(2, Ordering::Relaxed);
+        stats.processed_messages.store(7, Ordering::Relaxed);
+        stats.dropped_messages.store(1, Ordering::Relaxed);
+
+        assert_eq!(
+            stats.snapshot(),
+            LoggerRuntimeStatus {
+                queued_messages: 2,
+                processed_messages: 7,
+                dropped_messages: 1,
+                channel_capacity: LOG_CHANNEL_CAPACITY,
+            }
+        );
+    }
+
+    /// 佇列已滿時訊息會被丟棄，並且不留下「排隊中」的假象。
+    ///
+    /// 這裡直接建構 writer（不經 `Logger::new`），避免起背景 thread 真的寫檔。
+    #[tokio::test]
+    async fn send_drops_the_message_when_the_queue_is_full() {
+        let (sender, _rx) = mpsc::channel::<String>(1);
+        let writer = AsyncLogWriter {
+            sender,
+            stats: Arc::new(LoggerWriterStats::new(1)),
+        };
+        let logger = Logger {
+            info_writer: writer.clone(),
+            warn_writer: writer.clone(),
+            error_writer: writer.clone(),
+            debug_writer: writer.clone(),
+        };
+
+        // 容量 1：第一筆進佇列，第二筆無處可放只能丟棄。
+        logger.send("first".to_string(), &writer);
+        logger.send("second".to_string(), &writer);
+
+        let snapshot = writer.diagnostics_snapshot();
+        assert_eq!(snapshot.queued_messages, 1);
+        assert_eq!(snapshot.dropped_messages, 1);
+        assert_eq!(snapshot.channel_capacity, 1);
+    }
+
+    /// 接收端關閉後所有訊息都算丟棄，且不可 panic。
+    #[tokio::test]
+    async fn send_counts_drops_after_the_receiver_is_closed() {
+        let (sender, rx) = mpsc::channel::<String>(4);
+        drop(rx);
+        let writer = AsyncLogWriter {
+            sender,
+            stats: Arc::new(LoggerWriterStats::new(4)),
+        };
+        let logger = Logger {
+            info_writer: writer.clone(),
+            warn_writer: writer.clone(),
+            error_writer: writer.clone(),
+            debug_writer: writer.clone(),
+        };
+
+        logger.error("boom".to_string());
+
+        let snapshot = writer.diagnostics_snapshot();
+        assert_eq!(snapshot.queued_messages, 0);
+        assert_eq!(snapshot.dropped_messages, 1);
+    }
+
+    /// 四個等級的統計會彙總成單一摘要。
+    #[tokio::test]
+    async fn logger_snapshot_aggregates_every_level() {
+        let make = || {
+            let (sender, rx) = mpsc::channel::<String>(8);
+            (
+                AsyncLogWriter {
+                    sender,
+                    stats: Arc::new(LoggerWriterStats::new(8)),
+                },
+                rx,
+            )
+        };
+        // receiver 必須留著：一旦 drop，channel 關閉會讓訊息全部改記為丟棄。
+        let (info, _info_rx) = make();
+        let (warn, _warn_rx) = make();
+        let (error, _error_rx) = make();
+        let (debug, _debug_rx) = make();
+        let logger = Logger {
+            info_writer: info,
+            warn_writer: warn,
+            error_writer: error,
+            debug_writer: debug,
+        };
+
+        logger.info("i");
+        logger.warn("w");
+        logger.error("e");
+        logger.debug("d");
+
+        let snapshot = logger.diagnostics_snapshot();
+        assert_eq!(snapshot.queued_messages, 4);
+        assert_eq!(snapshot.dropped_messages, 0);
+        assert_eq!(snapshot.channel_capacity, 32);
+    }
+}

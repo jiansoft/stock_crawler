@@ -331,7 +331,7 @@ async fn start_job<F, Fut>(
 ) -> Result<BackfillJob, StartJobError>
 where
     F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<String>> + Send + 'static,
+    Fut: Future<Output = Result<String>> + Send + 'static,
 {
     start_job_with_timeout(state, kind, input, JOB_TIMEOUT, run).await
 }
@@ -350,7 +350,7 @@ async fn start_job_with_timeout<F, Fut>(
 ) -> Result<BackfillJob, StartJobError>
 where
     F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<String>> + Send + 'static,
+    Fut: Future<Output = Result<String>> + Send + 'static,
 {
     // 取得寫鎖。從這裡到 drop(jobs_guard) 之間的檢查與登記是原子的：
     // 其他請求必須等鎖釋放才能做自己的查重，因此不會有兩個相同 job 同時通過。
@@ -603,7 +603,205 @@ pub(crate) fn normalize_security_code(security_code: String) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::StatusCode;
+    use rust_decimal_macros::dec;
     use tokio::sync::Semaphore;
+
+    /// 取出解析失敗時回傳的 HTTP 狀態碼。
+    fn status_of<T>(result: Result<T, axum::response::Response>) -> StatusCode {
+        result
+            .err()
+            .map(|response| response.status())
+            .expect("應為解析失敗")
+    }
+
+    /// 日期需為 `YYYY-MM-DD`；解析失敗一律回 400。
+    #[test]
+    fn request_date_accepts_iso_dates_and_rejects_the_rest() {
+        assert_eq!(
+            parse_request_date(" 2026-04-30 ").expect("合法日期"),
+            NaiveDate::from_ymd_opt(2026, 4, 30).expect("測試日期應合法")
+        );
+        for raw in ["", "2026-04", "2026/04/30", "not-a-date", "2026-02-30"] {
+            assert_eq!(status_of(parse_request_date(raw)), StatusCode::BAD_REQUEST);
+        }
+    }
+
+    /// `<input type="month">` 送出的 `YYYY-MM` 應解析成該月一日。
+    #[test]
+    fn request_month_resolves_to_the_first_day() {
+        assert_eq!(
+            parse_request_month(" 2015-01 ").expect("合法月份"),
+            NaiveDate::from_ymd_opt(2015, 1, 1).expect("測試日期應合法")
+        );
+        for raw in ["", "2015", "2015-13", "2015-01-01"] {
+            assert_eq!(status_of(parse_request_month(raw)), StatusCode::BAD_REQUEST);
+        }
+    }
+
+    /// 期間代碼必須對得上 `CagrPeriod`，未知代碼在建立 job 前就擋下。
+    #[test]
+    fn request_period_only_accepts_known_codes() {
+        let period = parse_request_period(" Y1 ").expect("Y1 應為合法期間");
+        assert_eq!(period.code(), "Y1");
+        for raw in ["", "Y99", "1Y"] {
+            assert_eq!(
+                status_of(parse_request_period(raw)),
+                StatusCode::BAD_REQUEST
+            );
+        }
+    }
+
+    /// 股數變動比例必須為正數且不得離譜；邊界值 1000 仍屬合法。
+    #[test]
+    fn request_share_ratio_guards_against_nonsense_values() {
+        assert_eq!(parse_request_share_ratio(" 4 ").expect("正整數"), dec!(4));
+        assert_eq!(
+            parse_request_share_ratio("0.5").expect("小數比例"),
+            dec!(0.5)
+        );
+        assert_eq!(
+            parse_request_share_ratio("1000").expect("上界值應合法"),
+            dec!(1000)
+        );
+        // 0 會讓持股歸零、負數無意義、`1:4` 是把整串貼進來的常見錯誤。
+        for raw in ["0", "-4", "1:4", "", "1000.1"] {
+            assert_eq!(
+                status_of(parse_request_share_ratio(raw)),
+                StatusCode::BAD_REQUEST,
+                "share_ratio={raw} 應被拒絕"
+            );
+        }
+    }
+
+    /// 代號清單支援逗號／空白／換行混用，並排序去重；空字串代表「全部 ETF」。
+    #[test]
+    fn request_symbol_list_normalizes_separators_and_duplicates() {
+        assert_eq!(
+            parse_request_symbol_list("0056, 0050\n0056\t2330").expect("合法清單"),
+            vec!["0050".to_string(), "0056".to_string(), "2330".to_string()]
+        );
+        assert!(
+            parse_request_symbol_list("  \n ")
+                .expect("空白視為空清單")
+                .is_empty()
+        );
+        // 只要有一個代號非法，整份清單就該被拒絕，不能只丟掉那一個。
+        assert_eq!(
+            status_of(parse_request_symbol_list("0050, 00;50")),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    /// 證券代號只接受 ASCII 英數，並去除頭尾空白。
+    #[test]
+    fn security_code_is_trimmed_and_restricted_to_ascii_alphanumerics() {
+        assert_eq!(
+            normalize_security_code(" 2330 ".to_string()).expect("合法代號"),
+            "2330"
+        );
+        // trim 只作用於頭尾，中間的空白仍屬非法字元。
+        assert_eq!(
+            normalize_security_code("2330\n".to_string()).expect("尾端換行應被 trim"),
+            "2330"
+        );
+        for raw in ["", "   ", "23 30", "0050;DROP", "台積電"] {
+            assert!(
+                normalize_security_code(raw.to_string()).is_err(),
+                "security_code={raw:?} 應被拒絕"
+            );
+        }
+        assert_eq!(
+            status_of(parse_request_security_code("0050;".to_string())),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    /// 建立被拒絕的兩種原因各自對應固定的 HTTP 狀態碼。
+    #[test]
+    fn start_job_errors_map_to_conflict_and_too_many_requests() {
+        let duplicate = StartJobError::DuplicateActiveJob {
+            existing_id: "20260815000000-1".to_string(),
+        };
+        assert!(duplicate.to_string().contains("20260815000000-1"));
+        assert_eq!(
+            start_job_error_response(duplicate).status(),
+            StatusCode::CONFLICT
+        );
+
+        let too_many = StartJobError::TooManyActiveJobs {
+            max: MAX_CONCURRENT_JOBS,
+        };
+        assert!(
+            too_many
+                .to_string()
+                .contains(&MAX_CONCURRENT_JOBS.to_string())
+        );
+        assert_eq!(
+            start_job_error_response(too_many).status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    /// job 失敗時狀態轉為 failed，且 message 保留完整的 anyhow 錯誤鏈。
+    #[tokio::test]
+    async fn failed_job_records_the_error_chain() {
+        let state = BackfillWebState::new();
+        let job = start_job(
+            state.clone(),
+            "test_failure",
+            "input".to_string(),
+            || async { Err(anyhow!("外層失敗").context("回補流程中止")) },
+        )
+        .await
+        .expect("job should start");
+
+        wait_until_finished(&state, &job.id).await;
+
+        let finished = state
+            .jobs
+            .read()
+            .await
+            .get(&job.id)
+            .cloned()
+            .expect("job should remain queryable");
+        assert_eq!(finished.status_label(), "failed");
+        assert!(
+            finished.message.contains("回補流程中止") && finished.message.contains("外層失敗"),
+            "message 應包含完整錯誤鏈：{}",
+            finished.message
+        );
+        assert!(finished.finished_at.is_some());
+    }
+
+    /// job 成功時把回補摘要寫進 message，供 UI 直接顯示。
+    #[tokio::test]
+    async fn succeeded_job_keeps_the_summary_message() {
+        let state = BackfillWebState::new();
+        let job = start_job(
+            state.clone(),
+            "test_success",
+            "input".to_string(),
+            || async { Ok("rows_inserted=42".to_string()) },
+        )
+        .await
+        .expect("job should start");
+        // 剛建立時一律是 running / queued，呼叫端可立刻拿 id 去輪詢。
+        assert_eq!(job.status_label(), "running");
+        assert_eq!(job.message, "queued");
+
+        wait_until_finished(&state, &job.id).await;
+
+        let finished = state
+            .jobs
+            .read()
+            .await
+            .get(&job.id)
+            .cloned()
+            .expect("job should remain queryable");
+        assert_eq!(finished.status_label(), "succeeded");
+        assert_eq!(finished.message, "rows_inserted=42");
+    }
 
     /// 輪詢等待指定 job 離開 running 狀態（最多約 5 秒）。
     async fn wait_until_finished(state: &BackfillWebState, id: &str) {
