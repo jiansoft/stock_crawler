@@ -1,0 +1,43 @@
+# =============================================================================
+# Nextest Configuration File for stock_crawler
+# =============================================================================
+# Purpose:
+#   Configures `cargo-nextest`, a next-generation test runner for Rust.
+#   This configuration defines custom profiles for local development and CI/CD pipelines.
+#
+# Why nextest:
+#   1. Performance: Nextest runs each test in its own process and schedules them with
+#      clean isolation and high concurrency, which is significantly faster than standard `cargo test`.
+#   2. Structured JUnit Output: Built-in support for JUnit XML output allows GitHub Actions
+#      test reporter actions (like `EnricoMi/publish-unit-test-result-action`) to parse test results
+#      and render interactive PR summaries with passing/failing breakdown and timing.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Default Profile (used for local development runs: `cargo nextest run`)
+# -----------------------------------------------------------------------------
+[profile.default]
+# Number of retries for failed tests (0 = do not retry, fail immediately)
+retries = 0
+
+# Test execution status output verbosity
+status-level = "pass"
+
+# Mark tests as slow if they exceed this threshold (helps identify performance bottlenecks)
+slow-timeout = { period = "60s" }
+
+# -----------------------------------------------------------------------------
+# CI Profile (used for GitHub Actions CI runs: `cargo nextest run --profile ci`)
+# -----------------------------------------------------------------------------
+[profile.ci]
+# Generates JUnit XML report file at `target/nextest/ci/junit.xml`.
+# This file is ingested by the `EnricoMi/publish-unit-test-result-action` step in GitHub Actions.
+junit = { path = "junit.xml" }
+
+# Output mode for test failures:
+# "immediate-final" ensures test failure output is displayed immediately when it occurs,
+# as well as summarized at the end of the run for easy inspection in CI logs.
+failure-output = "immediate-final"
+
+# Mark tests as slow if they take longer than 60 seconds
+slow-timeout = { period = "60s" }

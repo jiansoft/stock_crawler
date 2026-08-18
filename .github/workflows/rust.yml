@@ -8,6 +8,10 @@ on:
 
 permissions:
   contents: read
+  # Required by EnricoMi/publish-unit-test-result-action to post check runs and PR comments
+  checks: write
+  pull-requests: write
+  issues: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -151,12 +155,27 @@ jobs:
     - name: Rust cache
       uses: Swatinem/rust-cache@v2
 
+    # 安裝 cargo-nextest 進行高效率測試執行與 JUnit XML 格式報告輸出。
+    # 使用 taiki-e/install-action 下載預編譯 binary，執行速度極快（約 1~2 秒），避免 cargo install 原始碼編譯耗時。
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@nextest
+
     - name: Run unit tests
+      # 使用 cargo nextest 執行單元測試，並透過 --profile ci 產生 JUnit XML 報告（輸出至 target/nextest/ci/junit.xml）。
       # 不開 integration-tests feature：DB/Redis 測試自動 ignored。
-      # 仍用 --test-threads=1，因為部分測試共享全域狀態（cache、event dispatcher）。
-      run: cargo test --locked -- --test-threads=1
+      # --test-threads=1 確保共享全域狀態（cache、event dispatcher）的測試依序執行，避免 race condition。
+      run: cargo nextest run --locked --test-threads=1 --profile ci
       env:
         RUST_BACKTRACE: 1
+
+    - name: Publish Unit Test Results
+      # 發布單元測試結果至 PR Comment 與 GitHub Check Run（圖表化呈現通過/失敗/略過與耗時統計）。
+      # if: always() 確保即便測試失敗，仍會解析報告並在 PR 發布留言，方便直接檢視失敗點。
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: target/nextest/ci/junit.xml
+        check_name: 'Unit Test Results'
 
   test:
     name: Integration Test
@@ -226,10 +245,15 @@ jobs:
         psql -h localhost -U user -d db -a -f etc/sql/trace.sql
         psql -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
 
+    # 安裝 cargo-nextest 進行整合測試執行與 JUnit 報告輸出。
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@nextest
+
     - name: Run tests
       # --features integration-tests：明確開啟整合測試（DB/Redis 測試不再 ignored），
       # 搭配上方 service container 提供的 PostgreSQL/Redis 執行完整驗證。
-      run: cargo test --release --locked --features integration-tests -- --nocapture --test-threads=1
+      # 使用 --profile ci 產生整合測試的 JUnit XML 報告至 target/nextest/ci/junit.xml。
+      run: cargo nextest run --release --locked --features integration-tests --test-threads=1 --profile ci
       env:
         RUST_BACKTRACE: 1
         DATABASE_URL: postgres://user:password@localhost:5432/db
@@ -238,6 +262,15 @@ jobs:
         POSTGRESQL_USER: user
         POSTGRESQL_PASSWORD: password
         POSTGRESQL_DB: db
+
+    - name: Publish Integration Test Results
+      # 發布整合測試結果至 PR Comment 與 GitHub Check Run。
+      # if: always() 確保即便整合測試失敗，仍會解析報告並在 PR 發布詳細測試摘要。
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: target/nextest/ci/junit.xml
+        check_name: 'Integration Test Results'
 
   coverage:
     name: Coverage
@@ -311,7 +344,11 @@ jobs:
     - name: Generate coverage report
       # coverage 也開 integration-tests feature：涵蓋率報告需要包含 DB/Redis
       # 相關程式碼的執行路徑，只跑單元測試會讓 infra 層涵蓋率嚴重失真。
-      run: cargo llvm-cov --lcov --output-path lcov.info --features integration-tests -- --test-threads=1
+      # 1. 執行測試並匯出 Codecov 所需的 lcov.info 格式
+      # 2. 透過 report 子命令從 raw profile 產出 Cobertura XML 格式（無需重新執行測試），供 PR 涵蓋率摘要使用
+      run: |
+        cargo llvm-cov --lcov --output-path lcov.info --features integration-tests -- --test-threads=1
+        cargo llvm-cov report --cobertura --output-path cobertura.xml
       env:
         RUST_BACKTRACE: 1
         DATABASE_URL: postgres://user:password@localhost:5432/db
@@ -321,11 +358,36 @@ jobs:
         POSTGRESQL_PASSWORD: password
         POSTGRESQL_DB: db
 
+    - name: Code Coverage Summary
+      # 解析 cobertura.xml 並生成 Markdown 格式的涵蓋率摘要表格與 Badge
+      uses: irongut/CodeCoverageSummary@v1.3.0
+      with:
+        filename: 'cobertura.xml'
+        badge: true
+        fail_below_min: false
+        format: markdown
+        hide_branch_rate: false
+        hide_complexity: false
+        indicators: true
+        output: both
+        thresholds: '60 80'
+
+    - name: Add Coverage PR Comment
+      # 將產生的 code-coverage-results.md 發布至 Pull Request 作為置頂留言
+      # recreate: true 確保在同一個 PR 重複 push 時自動就地更新該則留言，避免洗版
+      uses: marocchino/sticky-pull-request-comment@v3
+      if: github.event_name == 'pull_request'
+      with:
+        recreate: true
+        path: code-coverage-results.md
+
     - name: Upload coverage artifact
       uses: actions/upload-artifact@v7
       with:
-        name: coverage-lcov
-        path: lcov.info
+        name: coverage-reports
+        path: |
+          lcov.info
+          cobertura.xml
         retention-days: 14
 
     - name: Upload coverage to Codecov
