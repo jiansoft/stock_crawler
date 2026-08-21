@@ -123,6 +123,10 @@ impl PortfolioRepository for PgPortfolioRepository {
     }
 
     /// 儲存持股年度已領股利總計及其各配發宣告項目。
+    ///
+    /// 寫入採覆蓋語意：除了新增或更新 `items` 之外，同一筆交易內還會清掉
+    /// 「掛在其他年度總表的同一次除息」、「本年度已不再適用」與「年度總表已被刪除」
+    /// 三種殘留明細，確保 `dividend_record_detail_more` 對每筆持股的每次除息只有一列。
     async fn save_received_dividend(
         &self,
         summary: &ReceivedDividend,
@@ -158,8 +162,25 @@ impl PortfolioRepository for PgPortfolioRepository {
             .context("Failed to save received dividend summary")?;
 
         let record_detail_serial = row.0;
+        let dividend_serials: Vec<i64> = items.iter().map(|item| item.dividend_serial).collect();
 
-        // 2. 寫入或更新配發細項 (dividend_record_detail_more)
+        // 2. 同一筆持股的同一次除息只能歸屬於一個年度總表。
+        // 股利的發放年度事後被更正時，先移除掛在其他年度底下的舊明細，避免同一次除息被重複計算。
+        let sql_delete_other_years = r#"
+            DELETE FROM dividend_record_detail_more
+            WHERE stock_ownership_details_serial = $1
+              AND dividend_record_detail_serial <> $2
+              AND dividend_serial = ANY($3);
+        "#;
+        sqlx::query(sql_delete_other_years)
+            .bind(summary.stock_ownership_details_serial)
+            .bind(record_detail_serial)
+            .bind(&dividend_serials)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete received dividend items from other years")?;
+
+        // 3. 寫入或更新配發細項 (dividend_record_detail_more)
         let sql_item = r#"
             INSERT INTO dividend_record_detail_more (
                 stock_ownership_details_serial, dividend_record_detail_serial, dividend_serial,
@@ -188,6 +209,39 @@ impl PortfolioRepository for PgPortfolioRepository {
                 .await
                 .context("Failed to save received dividend item")?;
         }
+
+        // 4. 清掉本次重算後已不適用的舊明細。
+        // 股利金額被更正、持有日調整而失去領取資格等情況都會讓某筆除息不再列入，
+        // 只做 upsert 的話舊明細會殘留，導致明細加總與年度總表對不起來。
+        let sql_delete_stale = r#"
+            DELETE FROM dividend_record_detail_more
+            WHERE stock_ownership_details_serial = $1
+              AND dividend_record_detail_serial = $2
+              AND dividend_serial <> ALL($3);
+        "#;
+        sqlx::query(sql_delete_stale)
+            .bind(summary.stock_ownership_details_serial)
+            .bind(record_detail_serial)
+            .bind(&dividend_serials)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete stale received dividend items")?;
+
+        // 5. 清掉年度總表已被刪除卻殘留的孤兒明細。
+        let sql_delete_orphan = r#"
+            DELETE FROM dividend_record_detail_more AS m
+            WHERE m.stock_ownership_details_serial = $1
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM dividend_record_detail AS d
+                  WHERE d.serial = m.dividend_record_detail_serial
+              );
+        "#;
+        sqlx::query(sql_delete_orphan)
+            .bind(summary.stock_ownership_details_serial)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete orphaned received dividend items")?;
 
         tx.commit().await?;
         Ok(())
