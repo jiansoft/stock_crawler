@@ -91,60 +91,75 @@ impl RateLimiter {
             self.blocked_until = None;
         }
     }
+
+    /// 以指定時間點嘗試取得一個配額。
+    ///
+    /// 時間由參數傳入而非直接讀時鐘，因此這是可被單元測試完整驗證的純邏輯：
+    /// 測試能自行推進「現在」來覆蓋滑動視窗、封鎖與解除封鎖等分支。
+    ///
+    /// # 回傳
+    /// * `Ok(())` - 取得配額，呼叫端可以送出請求。
+    /// * `Err` - 仍在冷卻期或視窗內已達上限，呼叫端應改用下一個備援來源。
+    fn try_acquire(&mut self, now: Instant) -> Result<()> {
+        // 每次進來都先清理：
+        // 1. 移除視窗外（超過 60 秒）的舊請求
+        // 2. 若封鎖時間已過，解除封鎖
+        self.cleanup(now);
+
+        // 若目前仍在冷卻期，直接拒絕本次 Fugle 呼叫，
+        // 讓外層備援邏輯立即切到下一個網站。
+        if let Some(until) = self.blocked_until {
+            return Err(anyhow!(
+                "Fugle local rate limit active, retry after {:?}",
+                until.saturating_duration_since(now)
+            ));
+        }
+
+        // 滑動視窗內的請求數已達上限時：
+        // 1. 以「最早那筆請求 + 視窗長度」作為下次可恢復時間
+        // 2. 進入暫時封鎖狀態，避免後續短時間內持續打到 Fugle
+        // 3. 本次直接回錯，交給下一個備援來源處理
+        if self.requests.len() >= LOCAL_RATE_LIMIT_PER_MINUTE {
+            let next_reset = self
+                .requests
+                .front()
+                .copied()
+                .map(|oldest| oldest + RATE_LIMIT_WINDOW)
+                .unwrap_or(now + RATE_LIMIT_WINDOW);
+            self.blocked_until = Some(next_reset);
+
+            return Err(anyhow!(
+                "Fugle local rate limit reached ({LOCAL_RATE_LIMIT_PER_MINUTE}/min)"
+            ));
+        }
+
+        // 尚未達上限時，記錄本次請求時間，
+        // 代表這次 Fugle 配額已被占用。
+        self.requests.push_back(now);
+        Ok(())
+    }
+
+    /// 自指定時間點起強制進入一個視窗長度的冷卻期。
+    fn block_from(&mut self, now: Instant) {
+        self.blocked_until = Some(now + RATE_LIMIT_WINDOW);
+    }
 }
 
 /// 嘗試為 Fugle 取得一個本地限流配額。
 ///
 /// 若已達本地上限，直接回傳錯誤，讓外層備援鏈切到下一個網站。
 fn acquire_rate_limit_slot() -> Result<()> {
-    let now = Instant::now();
     // 先取得全域限流器鎖，確保多執行緒下的計數與封鎖狀態一致。
-    let mut limiter = RATE_LIMITER
+    RATE_LIMITER
         .lock()
-        .map_err(|_| anyhow!("Failed to lock Fugle rate limiter"))?;
-
-    // 每次進來都先清理：
-    // 1. 移除視窗外（超過 60 秒）的舊請求
-    // 2. 若封鎖時間已過，解除封鎖
-    limiter.cleanup(now);
-
-    // 若目前仍在冷卻期，直接拒絕本次 Fugle 呼叫，
-    // 讓外層備援邏輯立即切到下一個網站。
-    if let Some(until) = limiter.blocked_until {
-        return Err(anyhow!(
-            "Fugle local rate limit active, retry after {:?}",
-            until.saturating_duration_since(now)
-        ));
-    }
-
-    // 滑動視窗內的請求數已達上限時：
-    // 1. 以「最早那筆請求 + 視窗長度」作為下次可恢復時間
-    // 2. 進入暫時封鎖狀態，避免後續短時間內持續打到 Fugle
-    // 3. 本次直接回錯，交給下一個備援來源處理
-    if limiter.requests.len() >= LOCAL_RATE_LIMIT_PER_MINUTE {
-        let next_reset = limiter
-            .requests
-            .front()
-            .copied()
-            .map(|oldest| oldest + RATE_LIMIT_WINDOW)
-            .unwrap_or(now + RATE_LIMIT_WINDOW);
-        limiter.blocked_until = Some(next_reset);
-
-        return Err(anyhow!(
-            "Fugle local rate limit reached ({LOCAL_RATE_LIMIT_PER_MINUTE}/min)"
-        ));
-    }
-
-    // 尚未達上限時，記錄本次請求時間，
-    // 代表這次 Fugle 配額已被占用。
-    limiter.requests.push_back(now);
-    Ok(())
+        .map_err(|_| anyhow!("Failed to lock Fugle rate limiter"))?
+        .try_acquire(Instant::now())
 }
 
 /// 當上游已回報限流（例如 HTTP 429）時，強制進入冷卻期。
 fn mark_remote_rate_limited() {
     if let Ok(mut limiter) = RATE_LIMITER.lock() {
-        limiter.blocked_until = Some(Instant::now() + RATE_LIMIT_WINDOW);
+        limiter.block_from(Instant::now());
     }
 }
 
@@ -279,6 +294,92 @@ mod tests {
         assert_eq!(quote.change, Some(15.0));
         assert_eq!(quote.change_percent, Some(1.52));
         assert_eq!(quote.last_trade.as_ref().unwrap().price, 1002.0);
+    }
+
+    /// 視窗內未達上限時，每次請求都應取得配額並被記錄下來。
+    #[test]
+    fn rate_limiter_allows_requests_below_limit() {
+        let mut limiter = RateLimiter::default();
+        let now = Instant::now();
+
+        for i in 0..LOCAL_RATE_LIMIT_PER_MINUTE {
+            limiter
+                .try_acquire(now + Duration::from_millis(i as u64))
+                .unwrap_or_else(|why| panic!("第 {i} 次請求不該被限流：{why:?}"));
+        }
+
+        assert_eq!(limiter.requests.len(), LOCAL_RATE_LIMIT_PER_MINUTE);
+        assert!(limiter.blocked_until.is_none(), "未超量時不該進入冷卻期");
+    }
+
+    /// 一分鐘內達到上限後，下一次請求要被擋下並進入冷卻期。
+    #[test]
+    fn rate_limiter_blocks_after_reaching_limit() {
+        let mut limiter = RateLimiter::default();
+        let start = Instant::now();
+
+        for i in 0..LOCAL_RATE_LIMIT_PER_MINUTE {
+            limiter
+                .try_acquire(start + Duration::from_millis(i as u64))
+                .expect("額度內不該被限流");
+        }
+
+        let err = limiter
+            .try_acquire(start + Duration::from_millis(1_000))
+            .expect_err("超過上限必須回錯，讓外層切換備援站點");
+        assert!(err.to_string().contains("local rate limit reached"));
+
+        // 冷卻截止時間應是「最早那筆請求 + 視窗長度」。
+        assert_eq!(limiter.blocked_until, Some(start + RATE_LIMIT_WINDOW));
+
+        // 冷卻期內再次嘗試，錯誤訊息要換成 active（附剩餘等待時間）。
+        let err = limiter
+            .try_acquire(start + Duration::from_secs(30))
+            .expect_err("冷卻期內必須持續拒絕");
+        assert!(err.to_string().contains("local rate limit active"));
+    }
+
+    /// 視窗過完後舊紀錄要被清掉，Fugle 應恢復可用。
+    #[test]
+    fn rate_limiter_recovers_after_window_elapsed() {
+        let mut limiter = RateLimiter::default();
+        let start = Instant::now();
+
+        for i in 0..LOCAL_RATE_LIMIT_PER_MINUTE {
+            limiter
+                .try_acquire(start + Duration::from_millis(i as u64))
+                .expect("額度內不該被限流");
+        }
+        limiter
+            .try_acquire(start + Duration::from_millis(1_000))
+            .expect_err("先讓它進入冷卻期");
+
+        // 視窗結束後：封鎖解除、舊請求清空，重新可以取得配額。
+        limiter
+            .try_acquire(start + RATE_LIMIT_WINDOW + Duration::from_secs(1))
+            .expect("視窗過後應恢復可用");
+
+        assert!(limiter.blocked_until.is_none(), "過期封鎖必須被解除");
+        assert_eq!(limiter.requests.len(), 1, "視窗外的舊紀錄應被清掉");
+    }
+
+    /// 上游回 429 時強制冷卻一個視窗，且冷卻結束後可自行恢復。
+    #[test]
+    fn rate_limiter_block_from_marks_remote_rate_limited() {
+        let mut limiter = RateLimiter::default();
+        let now = Instant::now();
+
+        limiter.block_from(now);
+        assert_eq!(limiter.blocked_until, Some(now + RATE_LIMIT_WINDOW));
+
+        let err = limiter
+            .try_acquire(now + Duration::from_secs(1))
+            .expect_err("遠端限流期間必須跳過 Fugle");
+        assert!(err.to_string().contains("local rate limit active"));
+
+        limiter
+            .try_acquire(now + RATE_LIMIT_WINDOW)
+            .expect("冷卻期屆滿即可恢復");
     }
 
     /// 驗證即時價的取值優先序：

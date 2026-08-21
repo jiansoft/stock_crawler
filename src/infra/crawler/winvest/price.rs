@@ -89,7 +89,16 @@ async fn fetch_data(stock_symbol: &str) -> Result<QueryDayPriceResponse> {
     params.insert("inModel[SymbolCode]", stock_symbol);
 
     let response_text = util::http::post(&url, None, Some(params)).await?;
-    let response: QueryDayPriceResponse = serde_json::from_str(&response_text).map_err(|why| {
+
+    parse_query_day_price(&url, &response_text)
+}
+
+/// 解析並驗證 `QueryDayPrice` 的回應內容。
+///
+/// 這是一個純函式（不做網路 I/O），可直接用固定 JSON 樣本驗證：
+/// 解析失敗、`errMsg` 非空、兩組報價欄位同時缺失，都必須明確報錯。
+fn parse_query_day_price(url: &str, response_text: &str) -> Result<QueryDayPriceResponse> {
+    let response: QueryDayPriceResponse = serde_json::from_str(response_text).map_err(|why| {
         let preview = response_text.chars().take(300).collect::<String>();
         anyhow!(
             "Failed to parse QueryDayPrice response from {} because {:?}. body preview: {}",
@@ -293,11 +302,102 @@ mod tests {
         assert_eq!(price, 1885.0);
     }
 
+    /// 沒有任何一列有可解析價格時要回 None，不能誤把標題列當價格。
+    #[test]
+    fn extract_last_price_returns_none_when_no_numeric_row() {
+        let stock_list_price = vec![
+            vec!["KlineDatetime".to_string(), "ClosePrice".to_string()],
+            vec!["09:00".to_string()],
+        ];
+
+        assert!(extract_last_price_from_stock_list(&stock_list_price).is_none());
+    }
+
     #[test]
     /// 驗證當 API 的 `ChangeRate` 為 0 時，會用昨收回推並四捨五入到小數第 2 位。
     fn test_compute_change_range_fallback_by_yesterday_close() {
         let change_range = compute_change_range(-20.0, Some(1900.0), Some(0.0));
         assert_eq!(change_range, -1.05);
+    }
+
+    /// `ChangeRate` 有效時直接採用，不做回推。
+    #[test]
+    fn compute_change_range_prefers_valid_api_rate() {
+        assert_eq!(
+            compute_change_range(-15.0, Some(1900.0), Some(-0.79)),
+            -0.79
+        );
+        // 平盤（change 為 0）時，rate 為 0 是合法值而非異常，應原樣採用。
+        assert_eq!(compute_change_range(0.0, Some(1900.0), Some(0.0)), 0.0);
+    }
+
+    /// API 未提供 `ChangeRate` 時，用昨收回推。
+    #[test]
+    fn compute_change_range_computes_from_yesterday_close_when_rate_missing() {
+        assert_eq!(compute_change_range(19.0, Some(1900.0), None), 1.0);
+    }
+
+    /// 昨收缺失或為 0 時不可除以零，一律回 0。
+    #[test]
+    fn compute_change_range_returns_zero_without_usable_yesterday_close() {
+        assert_eq!(compute_change_range(-20.0, None, None), 0.0);
+        assert_eq!(compute_change_range(-20.0, Some(0.0), Some(0.0)), 0.0);
+        assert_eq!(compute_change_range(-20.0, None, Some(0.0)), 0.0);
+    }
+
+    /// `ChangeRate` 為 NaN 之類的非有限值時，要退回昨收回推而不是把 NaN 傳出去。
+    #[test]
+    fn compute_change_range_falls_back_when_rate_is_not_finite() {
+        assert_eq!(
+            compute_change_range(-20.0, Some(1900.0), Some(f64::NAN)),
+            -1.05
+        );
+    }
+
+    /// 回應為非 JSON（例如被導到錯誤頁）時，錯誤訊息要帶上內容預覽方便排查。
+    #[test]
+    fn parse_query_day_price_rejects_non_json_body() {
+        let err = parse_query_day_price("https://example.test/QueryDayPrice", "<html>503</html>")
+            .expect_err("non-JSON body should be an error");
+
+        assert!(err.to_string().contains("Failed to parse QueryDayPrice"));
+        assert!(err.to_string().contains("body preview: <html>503</html>"));
+    }
+
+    /// API 明確回報 `errMsg` 時必須報錯，不能把空報價當成正常結果。
+    #[test]
+    fn parse_query_day_price_rejects_non_empty_err_msg() {
+        let body = r#"{ "StockListPrice": [], "StockLastKline": null, "errMsg": " 查無此代碼 " }"#;
+        let err = parse_query_day_price("https://example.test/QueryDayPrice", body)
+            .expect_err("errMsg should be an error");
+
+        assert!(err.to_string().contains("errMsg is 查無此代碼"));
+    }
+
+    /// 兩組報價欄位同時缺失代表這次回應沒有可用資料。
+    #[test]
+    fn parse_query_day_price_rejects_empty_payload() {
+        let err = parse_query_day_price("https://example.test/QueryDayPrice", r#"{}"#)
+            .expect_err("empty payload should be an error");
+
+        assert!(
+            err.to_string()
+                .contains("StockLastKline and StockListPrice are empty")
+        );
+    }
+
+    /// 正常回應（含空字串 `errMsg`）要能通過驗證。
+    #[test]
+    fn parse_query_day_price_accepts_valid_payload() {
+        let body = r#"{
+            "StockListPrice": [["KlineDatetime", "ClosePrice"], ["09:00", "1880"]],
+            "StockLastKline": { "ClosePrice": 1885.0, "Change": -15.0,
+                                "YesterdayClosePrice": 1900.0, "ChangeRate": -0.79 },
+            "errMsg": ""
+        }"#;
+        let response = parse_query_day_price("https://example.test/QueryDayPrice", body).unwrap();
+
+        assert_eq!(response.stock_last_kline.unwrap().close_price, 1885.0);
     }
 
     #[tokio::test]
