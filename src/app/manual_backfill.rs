@@ -201,18 +201,20 @@ async fn test_backfill_received_dividend_records_for_stock() {
 ///
 /// 執行範例：
 /// `cargo test app::manual_backfill::test_backfill_historical_dividends_for_stock -- --ignored --nocapture`
+/// 可用 `MANUAL_DIVIDEND_SECURITY_CODE` 指定股票；未設定時沿用預設代號。
 #[tokio::test]
 #[ignore]
 async fn test_backfill_historical_dividends_for_stock() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    let security_code = MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE;
+    let security_code = std::env::var("MANUAL_DIVIDEND_SECURITY_CODE")
+        .unwrap_or_else(|_| MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE.to_string());
     tracing::debug!(
         "開始 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code}"
     );
 
-    let upserted_count = dividend::backfill_historical_dividends_for_stock(security_code)
+    let upserted_count = dividend::backfill_historical_dividends_for_stock(&security_code)
         .await
         .expect("manual historical dividends backfill failed");
 

@@ -68,7 +68,7 @@ pub struct YahooDividendDetail {
     pub year: i32,
     /// 股利所屬年度 (西元)
     pub year_of_dividend: i32,
-    /// 季度/半年資訊 (例如: "Q4", "H1", "年")
+    /// 期間代碼：Q1～Q4、H1～H2；單獨年配為空字串，混合配息年度的全年事件為 A。
     pub quarter: String,
     /// 現金股利 (元)
     pub cash_dividend: Decimal,
@@ -170,11 +170,13 @@ pub async fn visit(stock_symbol: &str) -> Result<YahooDividend> {
     parse_dividend_html(stock_symbol, &url, &text)
 }
 
+/// 解析下載的股利 HTML，供採集與離線測試共用，並傳回依發放年度分組的明細。
 fn parse_dividend_html(stock_symbol: &str, url: &str, text: &str) -> Result<YahooDividend> {
     let document = Html::parse_document(text);
     parse_dividend_document(stock_symbol, url, &document)
 }
 
+/// 從股利列表擷取實際配息事件，略過年度合計，避免合計被當作另一筆配息。
 fn parse_dividend_document(
     stock_symbol: &str,
     url: &str,
@@ -202,6 +204,10 @@ fn parse_dividend_document(
         }
 
         let (year_of_dividend, quarter) = parse_period(&period_raw)?;
+        // Yahoo 合計列也有期間容器，但內容是空字串；沒有有效所屬年度就不是配息明細。
+        if year_of_dividend == 0 {
+            continue;
+        }
 
         // 判定發放年度 (year)
         let mut year = 0;
@@ -247,6 +253,18 @@ fn parse_dividend_document(
                 payable_date1: pay_date1,
                 payable_date2: pay_date2,
             });
+    }
+
+    // 同一發放年同時有全年與季／半年配時，全年事件使用資料表既有的 A 代碼。
+    // 空季度留給年度合計，避免例如 2072 的 2025 年配被 2026H1 合計覆蓋。
+    for details in dividend_by_year.values_mut() {
+        if details.iter().any(|detail| !detail.quarter.is_empty()) {
+            for detail in details {
+                if detail.quarter.is_empty() {
+                    detail.quarter = "A".to_string();
+                }
+            }
+        }
     }
 
     let mut result = YahooDividend::new(stock_symbol.to_string());
@@ -312,10 +330,35 @@ fn estimate_paid_year(year_of_dividend: i32) -> i32 {
 }
 
 #[cfg(test)]
+/// 驗證 Yahoo 股利解析的期間、日期與分組行為，無須連線外部服務。
 mod tests {
     use super::*;
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
+
+    /// 驗證年配轉半年配保留兩筆事件，空期間合計列不可產生西元 1 年的假資料。
+    #[test]
+    fn mixed_annual_and_half_year_preserves_events_and_skips_total() {
+        let html = wrap_rows(&[
+            dividend_row("", "13.0833", "-", "-", "-", "-", "-"),
+            dividend_row("2026H1", "6.00", "-", "2026/08/28", "-", "2026/09/29", "-"),
+            dividend_row("2025", "7.0833", "-", "2026/04/10", "-", "2026/04/30", "-"),
+        ]);
+        let result = parse_dividend_html("2072", "fixture", &html).unwrap();
+        assert_eq!(result.dividend.len(), 1);
+        let details = result.get_dividend_by_year(2026).unwrap();
+        assert_eq!(details.len(), 2);
+        assert_eq!(details[0].quarter, "H1");
+        assert_eq!(details[0].ex_dividend_date1, "2026-08-28");
+        assert_eq!(details[0].payable_date1, "2026-09-29");
+        assert_eq!(details[1].quarter, "A");
+        assert_eq!(details[1].year_of_dividend, 2025);
+        assert_eq!(details[1].ex_dividend_date1, "2026-04-10");
+        assert_eq!(
+            details.iter().map(|d| d.cash_dividend).sum::<Decimal>(),
+            dec!(13.0833)
+        );
+    }
 
     fn dividend_row(
         period: &str,

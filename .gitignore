@@ -17,6 +17,10 @@
 # IDE
 /.idea/
 
+.playwright-mcp/
+.config/
+
+
 # Local configuration / secrets
 .env
 .env.*

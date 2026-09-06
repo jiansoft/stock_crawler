@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::{Datelike, Local};
 use scopeguard::defer;
 
+/// 定期掃描近期股利與手動回補歷年配息明細。
 mod missing_or_multiple;
 /// 更新歷史配息率。
 pub mod payout_ratio;
@@ -20,7 +21,7 @@ pub(crate) use missing_or_multiple::{
 ///
 /// 這個入口會以「今年」為處理範圍，並行執行兩條子流程：
 /// 1. `backfill_missing_or_multiple_dividends`：
-///    補抓「當年度尚無股利資料」或「當年度已有多筆配息紀錄」的股票。
+///    定期檢查上市櫃股票的近期股利，包含原本年配但後續新增半年配的股票。
 /// 2. `backfill_unannounced_dividend_dates`：
 ///    補抓「除息日/發放日尚未公告」的既有股利資料。
 ///

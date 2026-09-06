@@ -11,8 +11,8 @@ pub trait DividendRepository: Send + Sync {
     /// 依證券代號查詢該證券的所有股利年度。
     async fn fetch_years_by_security_code(&self, security_code: &str) -> Result<Vec<i32>>;
 
-    /// 取得尚未有指定年度配息的股票代號。
-    async fn fetch_no_dividends_for_year(&self, year: i32) -> Result<Vec<String>>;
+    /// 取得仍在上市櫃的股利採集候選；已有年配資料仍須定期檢查新增配息。
+    async fn fetch_dividend_refresh_candidates(&self) -> Result<Vec<String>>;
 
     /// 取得指定年度與多次配息相關的股利資料。
     async fn fetch_multiple_dividends_for_year(&self, year: i32) -> Result<Vec<Dividend>>;
