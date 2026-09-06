@@ -2,6 +2,8 @@
 pub mod eps;
 /// ETF 資訊
 pub mod etf;
+/// 上市除權除息預告表
+pub mod ex_dividend_announcement;
 /// 台股休市日期
 pub mod holiday_schedule;
 /// 國際證券辨識

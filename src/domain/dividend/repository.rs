@@ -17,6 +17,12 @@ pub trait DividendRepository: Send + Sync {
     /// 取得指定年度與多次配息相關的股利資料。
     async fn fetch_multiple_dividends_for_year(&self, year: i32) -> Result<Vec<Dividend>>;
 
+    /// 取得指定發放年度的所有股利資料。
+    ///
+    /// 供除權息公告掃描一次載入整年資料後在記憶體比對，
+    /// 避免對數百檔股票各發一次查詢。
+    async fn fetch_by_years(&self, years: &[i32]) -> Result<Vec<Dividend>>;
+
     /// 合併並更新指定股票在指定發放年度的年度股利合計。
     async fn upsert_annual_total_dividend(&self, security_code: &str, year: i32) -> Result<()>;
 
