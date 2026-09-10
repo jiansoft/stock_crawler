@@ -1,9 +1,12 @@
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use chrono::Local;
-use futures::future::join_all;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
+use tokio::time::Instant;
 
 // MarkdownV2 跳脫工具（text::escape_markdown_v2）住在 core 層：
 // app 層組訊息與這裡的 adapter 都需要同一套跳脫規則，
@@ -33,6 +36,17 @@ pub struct SendMessageResponse {
     pub error_code: Option<i32>,
     /// 失敗時的錯誤描述。
     pub description: Option<String>,
+    /// 失敗時的補充參數，目前只用到頻率限制的 `retry_after`。
+    #[serde(default)]
+    pub parameters: Option<ResponseParameters>,
+}
+
+/// Telegram 在部分錯誤回應中附帶的補充參數。
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ResponseParameters {
+    /// 觸發頻率限制（429）時，還需要等待幾秒才能重送。
+    #[serde(default)]
+    pub retry_after: Option<u64>,
 }
 
 /// Telegram 訊息物件的最小欄位表示。
@@ -54,6 +68,48 @@ pub struct SendMessageRequest<'a> {
     pub parse_mode: &'a str,
 }
 
+/// Telegram 的 MarkdownV2 解析模式。
+const MARKDOWN_V2: &str = "MarkdownV2";
+
+/// 純文字模式：`parse_mode` 留空時 Telegram 不解析任何標記。
+const PLAIN_TEXT: &str = "";
+
+/// 兩則訊息之間的最小間隔。
+///
+/// Telegram 對同一個 chat 的限制約為 1 msg/s，對整個 bot token 約為 30 msg/s。
+/// 由於所有出站訊息都會經過 [`acquire_send_slot`] 排成一列，這個間隔同時滿足
+/// 兩條限制。多留 100ms 安全邊際，因為官方門檻是浮動且未文件化的。
+const MIN_SEND_INTERVAL: Duration = Duration::from_millis(1_100);
+
+/// 上一則訊息實際送出的時間點；`None` 代表本次程序啟動後尚未送過。
+///
+/// 用 `tokio::sync::Mutex` 而非 `std::sync::Mutex`：持有期間必須跨越
+/// `sleep().await`，同步鎖會擋住整個 executor 執行緒。
+///
+/// 時間戳用 `tokio::time::Instant` 而非 `std::time::Instant`，
+/// 這樣測試才能以 `start_paused` 的虛擬時鐘驗證節流，不必真的等上一秒。
+static LAST_SENT_AT: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+
+/// 取得一個發送許可：等到距離上一則訊息已滿 [`MIN_SEND_INTERVAL`] 為止。
+///
+/// 鎖會一路持有到等待結束，因此並行的呼叫端會被排成一列依序取得許可，
+/// 不會出現多個 task 同時醒來一起打 API 的情況。
+///
+/// 這是原本缺少的一環：先前每個呼叫點各自 `join_all` 併發打 Telegram API，
+/// 一份被切成多段的長報表會在一秒內把整批送出，必然撞上 429。
+async fn acquire_send_slot() {
+    let mut last_sent_at = LAST_SENT_AT.lock().await;
+
+    if let Some(previous) = *last_sent_at {
+        let elapsed = previous.elapsed();
+        if elapsed < MIN_SEND_INTERVAL {
+            tokio::time::sleep(MIN_SEND_INTERVAL - elapsed).await;
+        }
+    }
+
+    *last_sent_at = Some(Instant::now());
+}
+
 impl Telegram {
     /// 建立 Telegram API 客戶端。
     pub fn new() -> Self {
@@ -66,45 +122,97 @@ impl Telegram {
     }
 
     /// 將同一則訊息送給設定檔中的所有允許接收者。
+    ///
+    /// 失敗時依序嘗試兩種補救：
+    ///
+    /// 1. 撞上 429 頻率限制——依 Telegram 回報的 `retry_after` 等滿後原樣重送一次。
+    ///    此時不做純文字降級：訊息本身沒問題，降級只會再撞一次限制。
+    /// 2. 其他失敗（多半是 MarkdownV2 解析錯誤的 400）——移除跳脫用的反斜線，
+    ///    改以純文字重送，讓使用者至少看得到內容。
+    ///
+    /// 兩種補救各自最多重試一次，避免在通知管道上做無界重試。
     pub async fn send(&self, message: &str) -> Result<SendMessageResponse> {
-        let allowed_ids = SETTINGS.bot.telegram.allowed.keys();
-        let futures =
-            allowed_ids.map(|id| self.send_message(SendMessageRequest::new(*id, message)));
-        let results = join_all(futures).await;
+        match self.broadcast(message, MARKDOWN_V2).await {
+            Ok(resp) => return Ok(resp),
+            Err(Some(retry_after)) => {
+                // 多等一秒：retry_after 是「還要等幾秒」的下限而非精確值。
+                let wait = Duration::from_secs(retry_after + 1);
+                tracing::warn!("Telegram 觸發頻率限制，{wait:?} 後重送");
+                tokio::time::sleep(wait).await;
 
-        // 尋找是否有成功發送且 API 返回 ok = true 的結果
-        let first_ok = results
-            .iter()
-            .find_map(|r| r.as_ref().ok().filter(|res| res.ok));
-
-        if let Some(resp) = first_ok {
-            return Ok(resp.clone());
+                if let Ok(resp) = self.broadcast(message, MARKDOWN_V2).await {
+                    return Ok(resp);
+                }
+            }
+            Err(None) => {}
         }
 
-        // 如果發送失敗（可能因為 MarkdownV2 解析錯誤，例如 status code 400 Bad Request），
-        // 則執行降級重試機制：清除轉義用的反斜線，改用純文字模式發送。
         tracing::warn!(
-            "{}",
             "Telegram message failed or returned error. Retrying with plain-text fallback..."
-                .to_string(),
         );
 
-        // 移除所有 Markdown 轉義字元，以便於以純文字模式清晰顯示
-        let clean_msg = message.replace("\\", "");
-        let fallback_futures = SETTINGS.bot.telegram.allowed.keys().map(|id| {
-            let mut req = SendMessageRequest::new(*id, &clean_msg);
-            req.parse_mode = ""; // 設定 parse_mode 為空，使其以純文字模式發送，不解析任何 markdown 標記
-            self.send_message(req)
-        });
-        let fallback_results = join_all(fallback_futures).await;
+        // 移除所有 Markdown 跳脫字元，以便於以純文字模式清晰顯示。
+        let clean_msg = message.replace('\\', "");
+        self.broadcast(&clean_msg, PLAIN_TEXT).await.map_err(|_| {
+            anyhow!("Failed to send message to any recipient even after plain-text fallback")
+        })
+    }
 
-        // 返回第一個成功的降級發送結果
-        fallback_results
-            .into_iter()
-            .find_map(|result| result.ok())
-            .ok_or_else(|| {
-                anyhow!("Failed to send message to any recipient even after plain-text fallback")
-            })
+    /// 以指定的 `parse_mode` 把訊息送給所有允許的接收者，回傳第一則成功的回應。
+    ///
+    /// 一律送完全部接收者才回傳，不會因為前一位成功就略過其餘的人。
+    ///
+    /// 送出是序列的而非 `join_all` 併發：每則都要先取得 [`acquire_send_slot`]
+    /// 的許可，併發也只是全部塞在鎖上排隊，徒增同時打 API 的機會。
+    ///
+    /// # 回傳
+    ///
+    /// * `Ok(resp)` —— 至少一位接收者送達。
+    /// * `Err(Some(secs))` —— 全部失敗，且其中有 429；`secs` 為觀察到最長的等待秒數。
+    /// * `Err(None)` —— 全部失敗且與頻率限制無關。
+    async fn broadcast(
+        &self,
+        message: &str,
+        parse_mode: &str,
+    ) -> std::result::Result<SendMessageResponse, Option<u64>> {
+        let mut first_ok: Option<SendMessageResponse> = None;
+        let mut retry_after: Option<u64> = None;
+
+        for id in SETTINGS.bot.telegram.allowed.keys() {
+            let mut req = SendMessageRequest::new(*id, message);
+            req.parse_mode = parse_mode;
+
+            match self.send_message(req).await {
+                Ok(resp) if resp.ok => {
+                    if first_ok.is_none() {
+                        first_ok = Some(resp);
+                    }
+                }
+                Ok(resp) => {
+                    if resp.error_code == Some(429) {
+                        // 沒帶 retry_after 時保守地等一秒再說。
+                        let secs = resp
+                            .parameters
+                            .as_ref()
+                            .and_then(|p| p.retry_after)
+                            .unwrap_or(1);
+                        retry_after = Some(retry_after.map_or(secs, |current| current.max(secs)));
+                    }
+
+                    let error_code = resp
+                        .error_code
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let desc = resp.description.as_deref().unwrap_or("No description");
+                    tracing::error!("Telegram API 回應錯誤 chat_id={id} code={error_code}: {desc}");
+                }
+                Err(err) => {
+                    tracing::error!("Telegram 發送失敗 chat_id={id}: {err:?}");
+                }
+            }
+        }
+
+        first_ok.ok_or(retry_after)
     }
 
     fn send_message<'a>(
@@ -113,6 +221,10 @@ impl Telegram {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<SendMessageResponse>> + Send + 'a>>
     {
         Box::pin(async move {
+            // 節流放在最底層：不論來自 broadcast 的哪一輪（首次、429 重送、
+            // 純文字降級），每一次實際的 API 呼叫都會被排進同一條佇列。
+            acquire_send_slot().await;
+
             http::post_use_json::<SendMessageRequest, SendMessageResponse>(
                 &self.send_message_url,
                 None,
@@ -136,7 +248,7 @@ impl<'a> SendMessageRequest<'a> {
         SendMessageRequest {
             chat_id,
             text,
-            parse_mode: "MarkdownV2",
+            parse_mode: MARKDOWN_V2,
         }
     }
 }
@@ -215,23 +327,10 @@ pub async fn send(msg: &str) {
 /// 發送單一則（已確保長度合法的）Telegram 消息。
 async fn send_single(msg: &str) {
     let client = get_client();
-    match client.send(msg).await {
-        Ok(rep) => {
-            if !rep.ok {
-                let error_code = rep
-                    .error_code
-                    .as_ref()
-                    .map(|code| code.to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-                let desc = rep.description.as_deref().unwrap_or("No description");
-                tracing::error!(
-                    "Telegram API responded with error code {error_code}: {desc}\n{msg}"
-                );
-            }
-        }
-        Err(error) => {
-            tracing::error!("Failed to send a message to telegram because {error:}");
-        }
+    // 個別接收者的失敗已由 Telegram::broadcast 記錄；這裡只在所有補救
+    // 手段（429 重送、純文字降級）都用盡後，補一則帶原文的錯誤 log。
+    if let Err(error) = client.send(msg).await {
+        tracing::error!("Failed to send a message to telegram because {error:}\n{msg}");
     }
 }
 
@@ -347,4 +446,67 @@ mod tests {
     }
 
     // MarkdownV2 跳脫規則的測試已隨函式本體移至 `core::util::text::tests`。
+
+    /// 驗證節拍器：第一則不等待，之後每則都要等滿 `MIN_SEND_INTERVAL`。
+    ///
+    /// 以 `start_paused` 的虛擬時鐘執行，因此不會真的花掉數秒。
+    /// `LAST_SENT_AT` 是程序層級的全域狀態，只有這個測試會動它。
+    #[tokio::test(start_paused = true)]
+    async fn test_acquire_send_slot_enforces_min_interval() {
+        let start = Instant::now();
+
+        // 尚未送過任何訊息，第一則不該被延遲。
+        acquire_send_slot().await;
+        assert_eq!(start.elapsed(), Duration::ZERO);
+
+        // 緊接著的第二、三則各自要等滿一個間隔。
+        acquire_send_slot().await;
+        assert_eq!(start.elapsed(), MIN_SEND_INTERVAL);
+
+        acquire_send_slot().await;
+        assert_eq!(start.elapsed(), MIN_SEND_INTERVAL * 2);
+
+        // 距離上次已超過間隔時不該再等。
+        time::sleep(MIN_SEND_INTERVAL * 2).await;
+        let before = Instant::now();
+        acquire_send_slot().await;
+        assert_eq!(before.elapsed(), Duration::ZERO);
+    }
+
+    /// 驗證 429 回應的 `parameters.retry_after` 能被正確解析。
+    ///
+    /// 這個欄位先前完全沒有定義，撞上頻率限制時無從得知該等多久。
+    #[test]
+    fn test_deserialize_rate_limited_response() {
+        let body = r#"{
+            "ok": false,
+            "error_code": 429,
+            "description": "Too Many Requests: retry after 17",
+            "parameters": { "retry_after": 17 }
+        }"#;
+
+        let resp: SendMessageResponse = serde_json::from_str(body).expect("回應應可解析");
+
+        assert!(!resp.ok);
+        assert_eq!(resp.error_code, Some(429));
+        assert_eq!(
+            resp.parameters.and_then(|p| p.retry_after),
+            Some(17),
+            "retry_after 必須被解析出來，否則無從得知該等多久"
+        );
+    }
+
+    /// 驗證成功回應（沒有 parameters 欄位）仍可解析。
+    ///
+    /// `parameters` 是選填欄位，缺少時不得讓整個回應解析失敗。
+    #[test]
+    fn test_deserialize_success_response_without_parameters() {
+        let body = r#"{ "ok": true, "result": { "message_id": 1234 } }"#;
+
+        let resp: SendMessageResponse = serde_json::from_str(body).expect("回應應可解析");
+
+        assert!(resp.ok);
+        assert!(resp.parameters.is_none());
+        assert!(resp.result.is_some());
+    }
 }

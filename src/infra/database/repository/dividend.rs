@@ -109,18 +109,16 @@ impl DividendRepository for PgDividendRepository {
         Ok(rows)
     }
 
-    /// 取得尚未有指定年度配息的股票代號。
-    async fn fetch_no_dividends_for_year(&self, year: i32) -> Result<Vec<String>> {
+    /// 取得仍在上市櫃的採集候選，由呼叫端的三天快取限制重抓頻率。
+    /// 已有年配不能證明全年資料完整，公司可能在年中改為半年配。
+    async fn fetch_dividend_refresh_candidates(&self) -> Result<Vec<String>> {
         let sql = r#"
             SELECT stock_symbol
             FROM stocks
             WHERE "SuspendListing" = false
-                AND stock_exchange_market_id IN (2, 4)
-                AND stock_symbol NOT IN 
-                    (SELECT security_code FROM dividend WHERE year = $1 AND quarter = '');
+                AND stock_exchange_market_id IN (2, 4);
         "#;
         let stock_symbols: Vec<String> = sqlx::query(sql)
-            .bind(year)
             .fetch_all(database::get_connection())
             .await?
             .into_iter()
@@ -148,6 +146,33 @@ impl DividendRepository for PgDividendRepository {
             .fetch_all(database::get_connection())
             .await
             .context("Failed to fetch multiple dividends for year")?;
+        Ok(rows)
+    }
+
+    /// 取得指定發放年度的所有股利資料。
+    async fn fetch_by_years(&self, years: &[i32]) -> Result<Vec<Dividend>> {
+        // 年度清單為空時直接返回，避免送出 `year = ANY('{}')` 這種必然無結果的查詢。
+        if years.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let sql = r#"
+            SELECT
+                serial, security_code, year, year_of_dividend, quarter,
+                cash_dividend, stock_dividend, sum, "ex-dividend_date1", "ex-dividend_date2",
+                payable_date1, payable_date2, created_time, updated_time,
+                capital_reserve_cash_dividend, earnings_cash_dividend,
+                capital_reserve_stock_dividend, earnings_stock_dividend,
+                payout_ratio_cash, payout_ratio_stock, payout_ratio
+            FROM dividend
+            WHERE year = ANY($1);
+        "#;
+        let rows = sqlx::query(sql)
+            .bind(years)
+            .try_map(Self::row_to_entity)
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch dividends by years")?;
         Ok(rows)
     }
 
@@ -364,8 +389,26 @@ impl DividendRepository for PgDividendRepository {
         Ok(domain_list)
     }
 
-    /// 儲存或更新單筆股利實體。
+    /// 儲存或更新股利；混合配息的全年明細改用 A，保留序號供持股紀錄關聯。
     async fn save(&self, dividend: &Dividend) -> Result<()> {
+        let mut tx = database::get_connection().begin().await?;
+        if dividend.quarter == "A" {
+            // 空季度原本同時代表年配事件與合計；先搬移事件，避免合計覆蓋它。
+            // 搬移與 upsert 使用同一交易，失敗時不留下半套資料。
+            sqlx::query(r#"
+                UPDATE dividend SET quarter = 'A'
+                WHERE security_code = $1 AND year = $2 AND year_of_dividend = $3
+                  AND quarter = ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM dividend WHERE security_code = $1 AND year = $2 AND quarter = 'A'
+                  )
+            "#)
+            .bind(&dividend.security_code)
+            .bind(dividend.year)
+            .bind(dividend.year_of_dividend)
+            .execute(&mut *tx)
+            .await?;
+        }
         let sql = r#"
             INSERT INTO dividend (
                 security_code, "year", year_of_dividend, quarter,
@@ -413,9 +456,10 @@ impl DividendRepository for PgDividendRepository {
             .bind(dividend.payout_ratio_cash)
             .bind(dividend.payout_ratio_stock)
             .bind(dividend.payout_ratio)
-            .execute(database::get_connection())
+            .execute(&mut *tx)
             .await
             .context("Failed to save dividend to database")?;
+        tx.commit().await?;
         Ok(())
     }
 }

@@ -2,6 +2,9 @@ use anyhow::Result;
 use chrono::{Datelike, Local};
 use scopeguard::defer;
 
+/// 每日掃描交易所除權息公告，補齊漏抓的股利事件。
+mod announcement_scan;
+/// 定期掃描近期股利與手動回補歷年配息明細。
 mod missing_or_multiple;
 /// 更新歷史配息率。
 pub mod payout_ratio;
@@ -20,7 +23,7 @@ pub(crate) use missing_or_multiple::{
 ///
 /// 這個入口會以「今年」為處理範圍，並行執行兩條子流程：
 /// 1. `backfill_missing_or_multiple_dividends`：
-///    補抓「當年度尚無股利資料」或「當年度已有多筆配息紀錄」的股票。
+///    定期檢查上市櫃股票的近期股利，包含原本年配但後續新增半年配的股票。
 /// 2. `backfill_unannounced_dividend_dates`：
 ///    補抓「除息日/發放日尚未公告」的既有股利資料。
 ///
@@ -95,6 +98,33 @@ pub async fn execute() -> Result<()> {
             );
         }
     }
+
+    Ok(())
+}
+
+/// 掃描交易所的除權除息公告，補齊漏抓的股利事件與日期。
+///
+/// 與 [`execute`] 的差別在於資料流向：`execute` 是從資料庫既有資料出發去補欄位，
+/// 這裡則是從交易所的全市場公告出發，因此能發現「資料庫根本沒有」的事件。
+/// 兩者互補，各自獨立排程。
+///
+/// # Errors
+///
+/// 只有在上市與上櫃的除權息預告表都取不到時才回傳錯誤；
+/// 單筆資料的更新失敗會記錄於 log 並繼續處理其餘資料。
+pub async fn scan_announcements() -> Result<()> {
+    tracing::info!("掃描除權息公告開始");
+    defer! {
+       tracing::info!("掃描除權息公告結束");
+    }
+
+    let outcome = announcement_scan::scan_ex_dividend_announcements().await?;
+    tracing::info!(
+        updated = outcome.updated,
+        inserted = outcome.inserted,
+        unresolved = outcome.unresolved,
+        "掃描除權息公告完成"
+    );
 
     Ok(())
 }

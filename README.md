@@ -85,6 +85,10 @@ log/                 # runtime 檔案日誌輸出目錄
 
 ## 部署方式
 
++ `scripts\deploy-armv7.ps1` 會把 ARMv7 執行檔一次部署到 Raspberry Pi 3：本機 ELF 預檢（32-bit ARM
+  hard-float、靜態連結）→ scp 到 `/tmp` 並比對 sha256 → ssh 執行 `control.sh update` → 驗證 `9001`／`9002`
+  是否監聽與 `/api/v1/healthz` 是否 200。加 `-Build` 會先建 armv7；加 `-StageOnly` 只上傳不重啟服務；
+  驗證失敗時會印出回滾指令。不會同步 `.env` 與 `app.json`（裝置上那兩份是手動維護的）。
 + `control.sh build|start|stop|restart|update` 會以本機 release binary `stock_crawler` 啟停服務。
 + `control.sh docker_build|docker_start|docker_stop|docker_restart|docker_update` 會使用 `Dockerfile` 建立並啟停 Docker container。
 + `Dockerfile` 會複製 release binary、`.env`、`app.json` 到 `/app`，以 distroless nonroot runtime 執行，並 expose `9001`。
@@ -108,6 +112,7 @@ log/                 # runtime 檔案日誌輸出目錄
 + 05:20 更新台股國際證券識別碼
 + 05:25 更新下市股票
 + 05:30 更新 ETF 資料
++ 05:35 掃描交易所除權息公告，補齊資料庫漏抓的股利事件與除權息日、現金股利發放日
 + 08:00 提醒本日與次一交易日除權息的股票（需自行架設本服務）
 + 08:02 提醒本日自持股票發放股利（需自行架設本服務）
 + 08:04 提醒本日開始公開申購的股票（需自行架設本服務）

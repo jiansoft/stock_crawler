@@ -21,10 +21,10 @@ pub struct HistoricalDividendBackfillSummary {
     pub detail_count: usize,
 }
 
-/// 回補指定年度缺少年度股利彙總，或涉及多次配息的股票。
+/// 定期檢查上市櫃股票的近期股利，補齊缺漏或新增的配息。
 ///
 /// 此流程會先建立兩份資料：
-/// 1. 待採集股票清單：包含指定發放年度尚未有年度彙總列的股票，以及已有季配/半年配紀錄的股票。
+/// 1. 待採集股票清單：包含仍在上市櫃的股票，以及已有季配/半年配紀錄的股票。
 /// 2. 多次配息快取：用 `security_code-year_of_dividend-quarter` 記住既有季配/半年配資料。
 ///
 /// 多次配息查詢會同時涵蓋 `year` 與 `year_of_dividend`，因為剛跨年度時常見
@@ -35,9 +35,9 @@ pub struct HistoricalDividendBackfillSummary {
 /// 不中斷整批採集。
 pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<()> {
     let dividend_repo = PgDividendRepository::new();
-    // 先找出指定發放年度還沒有年度彙總列的股票，這批需要從 Yahoo 補出年度或近期配息資料。
+    // 年配公司也可能新增半年配，不能用已有年度資料排除；重抓頻率交給三天快取。
     let mut stock_symbols: HashSet<String> = dividend_repo
-        .fetch_no_dividends_for_year(year)
+        .fetch_dividend_refresh_candidates()
         .await?
         .into_iter()
         .collect();
@@ -267,7 +267,7 @@ pub async fn backfill_historical_dividends_for_multiple_dividend_stocks(
 /// 2. 僅保留指定年度與前一年度的股利所屬年度，避免回寫太舊的歷史資料。
 /// 3. 對季配/半年配資料使用 `multiple_dividend_cache` 排除已存在紀錄。
 /// 4. 將缺少的 Yahoo 明細轉為 `Dividend` 後 upsert。
-/// 5. 如果新增或更新季配/半年配資料，最後依發放年度重算年度彙總列。
+/// 5. 如果新增或更新分期明細（含混合配息的全年 A），重算年度合計與持股領取紀錄。
 ///
 /// # 參數
 ///
@@ -325,7 +325,7 @@ async fn backfill_recent_dividends_for_stock(
                     tracing::debug!("dividend upsert executed successfully. \r\n{:#?}", entity);
 
                     if !entity.quarter.is_empty() {
-                        // 只有季配/半年配需要重算年度彙總；年度配息本身就是彙總列，不需要再聚合。
+                        // 非空期間包含季配、半年配與混合年度的全年 A，都需另算年度合計。
                         annual_total_refresh_years.insert(entity.year);
                     }
                 }
@@ -345,6 +345,7 @@ async fn backfill_recent_dividends_for_stock(
         }
     }
 
+    let has_new_multiple_dividends = !annual_total_refresh_years.is_empty();
     for refresh_year in annual_total_refresh_years {
         if let Err(why) = dividend_repo
             .upsert_annual_total_dividend(stock_symbol, refresh_year)
@@ -359,6 +360,11 @@ async fn backfill_recent_dividends_for_stock(
                 why
             );
         }
+    }
+
+    if has_new_multiple_dividends {
+        // 新發現的半年配可能早已除息，必須同步補持股紀錄，前端才查得到這次配息。
+        dividend_record::backfill_received_dividend_records_for_stock(stock_symbol).await?;
     }
 
     Ok(())
