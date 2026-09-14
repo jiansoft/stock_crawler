@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -29,6 +30,46 @@ static CLIENT: OnceCell<Client> = OnceCell::new();
 const MAX_NETWORK_RETRIES: u32 = 3;
 /// HTTP 429 Too Many Requests 的最大重試次數。
 const MAX_RATE_LIMIT_RETRIES: u32 = 3;
+/// 同一個網域重複發送 403 告警之間的最短間隔。
+///
+/// 來源站台一旦掛上 WAF，之後每次請求都會是 403；若每次都告警，真正需要注意的事件
+/// 會被洗掉。同網域在這個間隔內只會發一次，其餘只留 log。
+const FORBIDDEN_ALERT_COOLDOWN: Duration = Duration::from_secs(60 * 60 * 12);
+
+/// 各網域最近一次發送 403 告警的時間。
+///
+/// 只存在於行程記憶體：重啟後重新告警一次是可接受的，換得 core 層不必依賴外部儲存。
+static FORBIDDEN_ALERTED_AT: Lazy<Mutex<HashMap<String, Instant>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// 判斷這個網址的 403 是否該送出告警，並在送出時記下時間。
+///
+/// 取不到網域（網址無法解析）時一律告警，寧可多通知也不要漏掉。
+fn should_alert_forbidden(url: &str) -> bool {
+    let Some(host) = url
+        .split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .map(str::to_string)
+    else {
+        return true;
+    };
+
+    let Ok(mut alerted_at) = FORBIDDEN_ALERTED_AT.lock() else {
+        return true;
+    };
+
+    let now = Instant::now();
+    if let Some(last) = alerted_at.get(&host)
+        && now.duration_since(*last) < FORBIDDEN_ALERT_COOLDOWN
+    {
+        return false;
+    }
+
+    alerted_at.insert(host, now);
+    true
+}
+
 /// HTTP 回應 body 的大小上限（8 MiB）。
 ///
 /// 正常來源（TWSE/TPEx JSON、財經網站頁面）最大約 1～2 MiB，8 MiB 已留足
@@ -460,14 +501,19 @@ async fn send_with_client(
                 // 透過 core::alert 抽象介面發送（實際管道由 main 註冊的 adapter 決定），
                 // core 層不再直接依賴 interfaces::bot（反向耦合已移除）。
                 if status == reqwest::StatusCode::FORBIDDEN && !url.contains("api.telegram.org") {
-                    let alert_url = url.to_string();
-                    tokio::spawn(async move {
-                        crate::core::alert::send_alert(
-                            "爬蟲遭遇 IP 阻擋 (403)",
-                            &format!("請求網址: {alert_url}"),
-                        )
-                        .await;
-                    });
+                    if should_alert_forbidden(url) {
+                        let alert_url = url.to_string();
+                        tokio::spawn(async move {
+                            crate::core::alert::send_alert(
+                                "爬蟲遭遇 IP 阻擋 (403)",
+                                &format!("請求網址: {alert_url}"),
+                            )
+                            .await;
+                        });
+                    } else {
+                        // 同一個網域已在冷卻期內告警過，重複通知沒有新資訊，只留下記錄。
+                        tracing::warn!(url = %safe_url, "http.forbidden");
+                    }
                 }
 
                 return Ok(response);
@@ -570,6 +616,17 @@ pub(crate) fn diagnostics_snapshot() -> crate::core::logging::LoggerRuntimeStatu
 
 #[cfg(test)]
 mod tests {
+    /// 同網域的 403 在冷卻期內只告警一次，不同網域彼此不受影響。
+    #[test]
+    fn should_alert_forbidden_throttles_per_host() {
+        let host = "should-alert-forbidden-test.example";
+        let other = "should-alert-forbidden-other.example";
+
+        assert!(should_alert_forbidden(&format!("https://{host}/a")));
+        assert!(!should_alert_forbidden(&format!("https://{host}/b")));
+        assert!(should_alert_forbidden(&format!("https://{other}/a")));
+    }
+
     use chrono::Local;
     use concat_string::concat_string;
 

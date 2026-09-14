@@ -11,7 +11,7 @@ use std::{collections::HashMap, str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, anyhow};
 use once_cell::sync::OnceCell;
-use reqwest::Client;
+use reqwest::{Client, header};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::time::sleep;
@@ -25,6 +25,16 @@ use crate::{
 /// Yahoo 類股行情 JSON API 的基底 URL。
 const CLASS_QUOTES_API_URL: &str =
     "https://tw.stock.yahoo.com/_td-stock/api/resource/StockServices.getClassQuotes";
+/// Yahoo 類股頁的基底 URL，用來組出請求的 `Referer`。
+const CLASS_QUOTES_PAGE_URL: &str = "https://tw.stock.yahoo.com/class-quote";
+/// 類股輪詢固定使用的桌面瀏覽器 User-Agent。
+///
+/// 這裡刻意不用 `util::http::user_agent::gen_random_ua()`：那支會隨機挑到
+/// Safari Mobile 或 Samsung Internet 等行動裝置 UA，而本模組請求的是
+/// 桌面版類股頁背後的 XHR，UA 與 `Referer` 不一致反而更像機器流量。
+/// client 是 `OnceCell`，UA 本來就整個程序固定，隨機也換不到任何好處。
+const CLASS_QUOTES_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 /// 所有需要輪詢的 Yahoo 市場類型。
 const ALL_CLASS_EXCHANGES: [YahooClassExchange; 3] = [
     YahooClassExchange::Listed,
@@ -172,7 +182,7 @@ fn get_yahoo_class_quotes_client() -> Result<&'static Client> {
             .pool_idle_timeout(Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::limited(5))
             .referer(true)
-            .user_agent(util::http::user_agent::gen_random_ua())
+            .user_agent(CLASS_QUOTES_USER_AGENT)
             .build()
             .map_err(|e| anyhow!("Failed to create Yahoo class quote client: {:?}", e))
     })
@@ -221,6 +231,44 @@ pub fn build_class_quotes_api_url(category: &YahooClassCategory, offset: usize) 
         exchange = category.exchange.code(),
         sector_id = category.sector_id,
     )
+}
+
+/// 組出類股頁本身的網址，作為 API 請求的 `Referer`。
+///
+/// 這支 API 是該頁面的 XHR 端點，正常瀏覽時一定帶著頁面網址當 `Referer`。
+pub fn build_class_quotes_page_url(category: &YahooClassCategory) -> String {
+    format!(
+        "{base}?sectorId={sector_id}&exchange={exchange}",
+        base = CLASS_QUOTES_PAGE_URL,
+        sector_id = category.sector_id,
+        exchange = category.exchange.code(),
+    )
+}
+
+/// 組出類股 API 請求要帶的標頭。
+///
+/// 先前這支請求只帶 User-Agent 就送出去，既沒有 `Referer` 也沒有 `Accept`。
+/// 注意 `ClientBuilder::referer(true)` 只會在**跟隨轉址時**自動補 `Referer`，
+/// 不會替第一次的請求加上——所以必須在這裡自己帶。
+fn build_class_quotes_headers(category: &YahooClassCategory) -> Result<header::HeaderMap> {
+    let mut headers = header::HeaderMap::new();
+
+    let referer = build_class_quotes_page_url(category);
+    headers.insert(
+        header::REFERER,
+        header::HeaderValue::from_str(&referer)
+            .with_context(|| format!("Invalid Yahoo class quote referer: {referer}"))?,
+    );
+    headers.insert(
+        header::ACCEPT,
+        header::HeaderValue::from_static("application/json, text/plain, */*"),
+    );
+    headers.insert(
+        header::ACCEPT_LANGUAGE,
+        header::HeaderValue::from_static("zh-TW,zh;q=0.9,en;q=0.8"),
+    );
+
+    Ok(headers)
 }
 
 /// 抓取單一類股的完整即時快照。
@@ -331,8 +379,12 @@ async fn fetch_class_quotes_page(
     let url = build_class_quotes_api_url(category, offset);
     // 這裡直接拿 response bytes 後立刻解析，
     // 讓 borrowed JSON 欄位可以只活在單頁處理期間，降低暫時配置壓力。
-    let response =
-        util::http::get_response_with_client(get_yahoo_class_quotes_client()?, &url, None).await?;
+    let response = util::http::get_response_with_client(
+        get_yahoo_class_quotes_client()?,
+        &url,
+        Some(build_class_quotes_headers(category)?),
+    )
+    .await?;
     let status = response.status();
     let response_body = response.bytes().await.map_err(|e| {
         anyhow!(
@@ -555,6 +607,42 @@ mod tests {
         assert_eq!(
             build_class_quotes_api_url(&category, 30),
             "https://tw.stock.yahoo.com/_td-stock/api/resource/StockServices.getClassQuotes;exchange=TAI;sectorId=40;offset=30"
+        );
+    }
+
+    /// 驗證 `Referer` 指向該類股自己的頁面。
+    ///
+    /// 這支 API 是類股頁的 XHR 端點；先前完全沒帶 `Referer` 送出，
+    /// 是被 Yahoo WAF 以 999 Request denied 擋下的可能原因之一。
+    #[test]
+    fn test_build_class_quotes_page_url() {
+        let category = YahooClassCategory::enabled(YahooClassExchange::Listed, 21, "觀光餐旅");
+
+        assert_eq!(
+            build_class_quotes_page_url(&category),
+            "https://tw.stock.yahoo.com/class-quote?sectorId=21&exchange=TAI"
+        );
+    }
+
+    /// 驗證請求標頭帶齊 `Referer`、`Accept` 與 `Accept-Language`。
+    #[test]
+    fn test_build_class_quotes_headers() {
+        let category =
+            YahooClassCategory::enabled(YahooClassExchange::OverTheCounter, 40, "半導體");
+
+        let headers = build_class_quotes_headers(&category).expect("標頭應可組出");
+
+        assert_eq!(
+            headers.get(header::REFERER).expect("必須帶 Referer"),
+            "https://tw.stock.yahoo.com/class-quote?sectorId=40&exchange=TWO"
+        );
+        assert_eq!(
+            headers.get(header::ACCEPT).expect("必須帶 Accept"),
+            "application/json, text/plain, */*"
+        );
+        assert!(
+            headers.contains_key(header::ACCEPT_LANGUAGE),
+            "必須帶 Accept-Language"
         );
     }
 

@@ -13,10 +13,11 @@ use super::dto::{
 };
 use super::job_runner::{
     parse_request_date, parse_request_month, parse_request_period, parse_request_security_code,
-    parse_request_share_ratio, parse_request_symbol_list, start_cagr_job, start_cagr_period_job,
-    start_closing_aggregate_job, start_daily_quotes_job, start_historical_dividends_job,
-    start_job_error_response, start_multiple_dividend_historical_dividends_job,
-    start_quote_history_job, start_received_dividend_records_job, start_taiwan_stock_index_job,
+    parse_request_share_ratio, parse_request_symbol_list, start_annual_total_repair_job,
+    start_cagr_job, start_cagr_period_job, start_closing_aggregate_job, start_daily_quotes_job,
+    start_historical_dividends_job, start_job_error_response,
+    start_multiple_dividend_historical_dividends_job, start_quote_history_job,
+    start_received_dividend_records_job, start_taiwan_stock_index_job,
 };
 use super::state::{BACKFILL_STATE, BackfillWebState, get_backfill_job, list_backfill_jobs};
 
@@ -56,6 +57,10 @@ pub fn router() -> Router {
         .route(
             "/api/manual-backfill/multiple-dividend-historical-dividends",
             post(start_multiple_dividend_historical_dividends),
+        )
+        .route(
+            "/api/manual-backfill/annual-total-repair",
+            post(start_annual_total_repair),
         )
         .route(
             "/api/manual-backfill/quote-history",
@@ -341,6 +346,16 @@ async fn start_multiple_dividend_historical_dividends(
     }
 }
 
+/// 建立年度合計列修復 job。
+///
+/// 沒有輸入參數：受影響的股票與年度由 job 自行掃描，因此不解析 request body。
+async fn start_annual_total_repair(State(_state): State<BackfillWebState>) -> impl IntoResponse {
+    match start_annual_total_repair_job().await {
+        Ok(job) => Json(StartJobResponse { job }).into_response(),
+        Err(err) => start_job_error_response(err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
@@ -534,6 +549,7 @@ mod tests {
             "/api/manual-backfill/received-dividend-records",
             "/api/manual-backfill/historical-dividends",
             "/api/manual-backfill/multiple-dividend-historical-dividends",
+            "/api/manual-backfill/annual-total-repair",
             "/api/manual-backfill/quote-history",
             "/api/manual-backfill/cagr",
             "/api/manual-backfill/cagr-period",
