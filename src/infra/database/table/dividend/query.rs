@@ -62,6 +62,10 @@ impl Dividend {
     }
 
     /// 按照年份和除權息日取得數據
+    ///
+    /// 年度合計列（同一發放年度另有分期明細時的 `quarter = ''`）是加總而非一次配發，必須排除；
+    /// 判定方式與 [`crate::infra::database::repository::dividend::PgDividendRepository::fetch_dividends_summary_by_date`]
+    /// 一致，該處有完整說明。
     pub async fn fetch_dividends_summary_by_date(
         security_code: &str,
         year: i32,
@@ -70,11 +74,21 @@ impl Dividend {
         let sql = format!(
             r#"
 select {}
-from dividend
+from dividend as d
 where security_code = $1
     and year = $2
     and ("ex-dividend_date1" <= $3)
-    and ("ex-dividend_date1" >= $4 or "ex-dividend_date2" >= $4);
+    and ("ex-dividend_date1" >= $4 or "ex-dividend_date2" >= $4)
+    and (
+        d.quarter <> ''
+        or not exists (
+            select 1
+            from dividend as t
+            where t.security_code = d.security_code
+                and t.year = d.year
+                and t.quarter <> ''
+        )
+    );
 "#,
             TABLE_COLUMNS
         );
@@ -123,7 +137,7 @@ ORDER BY year;
             ))
     }
 
-    /// 取得指定年度尚未有配息日或發放日的股息數據(有排除配息金額為 0)
+    /// 取得指定年度尚未有配息日或發放日的股息數據(有排除配息金額為 0 與年度合計列)
     pub async fn fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
         year: i32,
     ) -> Result<Vec<Dividend>> {
@@ -131,7 +145,7 @@ ORDER BY year;
             r#"
 SELECT {}
 FROM
-    dividend
+    dividend AS d
 WHERE
     (year = $1 OR year_of_dividend = $1)
     AND
@@ -150,6 +164,16 @@ WHERE
                 "ex-dividend_date2" IN ('-', '尚未公布')
                 OR payable_date2 IN ('-', '尚未公布')
             )
+        )
+    )
+    AND (
+        d.quarter <> ''
+        OR NOT EXISTS (
+            SELECT 1
+            FROM dividend AS t
+            WHERE t.security_code = d.security_code
+                AND t.year = d.year
+                AND t.quarter <> ''
         )
     );
 "#,

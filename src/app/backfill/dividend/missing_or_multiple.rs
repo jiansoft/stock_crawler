@@ -1,11 +1,15 @@
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use rand::RngExt;
 
 use crate::{
     app::backfill::acl::YahooDividendAclMapper, app::calculation::dividend_record,
-    core::util::map::Keyable, domain::dividend::repository::DividendRepository,
-    infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
+    core::util::map::Keyable, domain::dividend::entity::Dividend,
+    domain::dividend::repository::DividendRepository, infra::crawler::yahoo,
+    infra::database::repository::dividend::PgDividendRepository,
 };
 use anyhow::{Context, Result};
 
@@ -45,13 +49,13 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
     let multiple_dividends = dividend_repo
         .fetch_multiple_dividends_for_year(year)
         .await?;
-    let mut multiple_dividend_cache = HashSet::new();
+    let mut multiple_dividend_cache: HashMap<String, Dividend> = HashMap::new();
     for dividend in multiple_dividends {
         let key = dividend.key();
-        // 快取 key 與 Yahoo 回補時的 key 相同，用來判斷某一季或半年配息是否已經存在。
-        multiple_dividend_cache.insert(key);
         // 已有季配/半年配的股票也要重新掃描，才能補齊缺漏季度或重算年度彙總列。
         stock_symbols.insert(dividend.security_code.to_string());
+        // 快取 key 與 Yahoo 回補時的 key 相同；連同實體一起留著，才能判斷來源是否真的有異動。
+        multiple_dividend_cache.insert(key, dividend);
     }
 
     tracing::info!("本次殖利率的採集需收集 {} 家", stock_symbols.len());
@@ -283,7 +287,7 @@ pub async fn backfill_historical_dividends_for_multiple_dividend_stocks(
 async fn backfill_recent_dividends_for_stock(
     year: i32,
     stock_symbol: &str,
-    multiple_dividend_cache: &HashSet<String>,
+    multiple_dividend_cache: &HashMap<String, Dividend>,
 ) -> Result<()> {
     let dividend_repo = PgDividendRepository::new();
     // 先從 Yahoo 讀取單一股票的股利頁面；這一步失敗代表該股票無法繼續處理，所以直接向外回錯。
@@ -297,6 +301,8 @@ async fn backfill_recent_dividends_for_stock(
         })?;
     // 記錄需要重算年度彙總列的發放年度；用 HashSet 可避免同年度多個季度重複執行聚合 SQL。
     let mut annual_total_refresh_years: HashSet<i32> = HashSet::new();
+    // 是否真的寫入了季配/半年配明細；只有這種情況才需要連帶回補持股的領息紀錄。
+    let mut saved_multiple_dividends = false;
     // Yahoo 回傳資料已依發放年度分組；這裡直接借用迭代，避免 clone 大量明細資料。
     for (paid_year, dividend_details_from_yahoo) in &dividends_from_yahoo.dividend {
         // 同一個 paid_year 底下可能有年度配息、季配或半年配，多筆都要逐一判斷。
@@ -313,20 +319,30 @@ async fn backfill_recent_dividends_for_stock(
                 &dividend_from_yahoo.quarter,
             );
 
-            if multiple_dividend_cache.contains(&key) {
-                // 既有季配/半年配資料已存在時略過，避免重複 upsert 造成日期或金額被來源資料覆寫。
-                continue;
+            // 年度合計列是由明細加總出來的；只要該發放年度有季配/半年配明細就重算，
+            // 不能只在有新明細寫入時才算——2753 的 2026 合計就是因為明細早已存在、
+            // 全部被略過，錯誤的合計列（現金 0）才一直留在資料表裡。
+            if !dividend_from_yahoo.quarter.is_empty() {
+                annual_total_refresh_years.insert(dividend_from_yahoo.year);
             }
 
             let cmd = YahooDividendAclMapper::from_dto(stock_symbol, dividend_from_yahoo);
             let entity = YahooDividendAclMapper::from_command(&cmd);
+
+            if multiple_dividend_cache
+                .get(&key)
+                .is_some_and(|existing| !dividend_content_differs(existing, &entity))
+            {
+                // 既有資料與來源一致時略過，避免無謂的 upsert；有差異才寫回，
+                // 才補得上例如「配股併入 H2」這種來源端的更正。
+                continue;
+            }
             match dividend_repo.save(&entity).await {
                 Ok(_) => {
                     tracing::debug!("dividend upsert executed successfully. \r\n{:#?}", entity);
 
                     if !entity.quarter.is_empty() {
-                        // 非空期間包含季配、半年配與混合年度的全年 A，都需另算年度合計。
-                        annual_total_refresh_years.insert(entity.year);
+                        saved_multiple_dividends = true;
                     }
                 }
                 Err(why) => {
@@ -345,7 +361,6 @@ async fn backfill_recent_dividends_for_stock(
         }
     }
 
-    let has_new_multiple_dividends = !annual_total_refresh_years.is_empty();
     for refresh_year in annual_total_refresh_years {
         if let Err(why) = dividend_repo
             .upsert_annual_total_dividend(stock_symbol, refresh_year)
@@ -362,12 +377,26 @@ async fn backfill_recent_dividends_for_stock(
         }
     }
 
-    if has_new_multiple_dividends {
+    if saved_multiple_dividends {
         // 新發現的半年配可能早已除息，必須同步補持股紀錄，前端才查得到這次配息。
         dividend_record::backfill_received_dividend_records_for_stock(stock_symbol).await?;
     }
 
     Ok(())
+}
+
+/// 判斷來源資料與資料庫既有股利是否有實質差異。
+///
+/// 只比對 Yahoo 能提供的欄位：金額與四個除權息／發放日期。盈餘分配率由 Goodinfo 另外回補，
+/// Yahoo 一律給 0，拿它比對會讓每次採集都判定為有差異而反覆覆寫。
+fn dividend_content_differs(existing: &Dividend, incoming: &Dividend) -> bool {
+    existing.cash_dividend != incoming.cash_dividend
+        || existing.stock_dividend != incoming.stock_dividend
+        || existing.sum != incoming.sum
+        || existing.ex_dividend_date_cash != incoming.ex_dividend_date_cash
+        || existing.ex_dividend_date_stock != incoming.ex_dividend_date_stock
+        || existing.payable_date_cash != incoming.payable_date_cash
+        || existing.payable_date_stock != incoming.payable_date_stock
 }
 
 /// 判斷 Yahoo 股利明細是否屬於本次回補範圍。
@@ -397,6 +426,7 @@ fn make_cache_key(stock_symbol: &str) -> String {
 #[cfg(test)]
 mod tests {
     use chrono::{Datelike, Local};
+    use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
     use super::*;
@@ -414,6 +444,56 @@ mod tests {
     #[test]
     fn test_make_dividend_key() {
         assert_eq!(make_dividend_key("2454", 2024, "Q4"), "2454-2024-Q4");
+    }
+
+    /// 建立測試用的股利實體；只有比對會用到的欄位需要指定。
+    fn dividend_for_diff(cash: Decimal, stock: Decimal, ex_dividend_date_stock: &str) -> Dividend {
+        let now = Local::now();
+        Dividend {
+            serial: 0,
+            year: 2026,
+            year_of_dividend: 2025,
+            quarter: "H2".to_string(),
+            security_code: "2753".to_string(),
+            earnings_cash_dividend: Decimal::ZERO,
+            capital_reserve_cash_dividend: Decimal::ZERO,
+            cash_dividend: cash,
+            earnings_stock_dividend: Decimal::ZERO,
+            capital_reserve_stock_dividend: Decimal::ZERO,
+            stock_dividend: stock,
+            sum: cash + stock,
+            payout_ratio_cash: Decimal::ZERO,
+            payout_ratio_stock: Decimal::ZERO,
+            payout_ratio: Decimal::ZERO,
+            ex_dividend_date_cash: "2026-07-02".to_string(),
+            ex_dividend_date_stock: ex_dividend_date_stock.to_string(),
+            payable_date_cash: "2026-07-30".to_string(),
+            payable_date_stock: "-".to_string(),
+            created_time: now,
+            updated_time: now,
+        }
+    }
+
+    /// 2753 的實況：資料庫只有現金 7.5，來源已補上併入 25H2 的 0.5 元配股與除權日，
+    /// 必須判定為有差異才寫得回去。
+    #[test]
+    fn dividend_content_differs_detects_merged_stock_dividend() {
+        let existing = dividend_for_diff(dec!(7.5), Decimal::ZERO, "-");
+        let incoming = dividend_for_diff(dec!(7.5), dec!(0.5), "2026-08-26");
+
+        assert!(dividend_content_differs(&existing, &incoming));
+    }
+
+    /// 盈餘分配率由 Goodinfo 另外回補，Yahoo 一律送 0；只有分配率不同不算內容差異，
+    /// 否則每次採集都會把已回補的分配率再洗掉一次。
+    #[test]
+    fn dividend_content_differs_ignores_payout_ratio() {
+        let existing = dividend_for_diff(dec!(7.5), dec!(0.5), "2026-08-26");
+        let mut incoming = existing.clone();
+        incoming.payout_ratio = dec!(114);
+        incoming.payout_ratio_cash = dec!(114);
+
+        assert!(!dividend_content_differs(&existing, &incoming));
     }
 
     #[test]
@@ -467,9 +547,9 @@ mod tests {
             .fetch_multiple_dividends_for_year(year)
             .await
             .unwrap();
-        let mut multiple_dividend_cache = HashSet::new();
+        let mut multiple_dividend_cache: HashMap<String, Dividend> = HashMap::new();
         for dividend in multiple_dividends {
-            multiple_dividend_cache.insert(dividend.key());
+            multiple_dividend_cache.insert(dividend.key(), dividend);
         }
 
         let _ = backfill_recent_dividends_for_stock(year, "6123", &multiple_dividend_cache).await;

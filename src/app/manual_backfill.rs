@@ -223,6 +223,34 @@ async fn test_backfill_historical_dividends_for_stock() {
     );
 }
 
+/// 手動修復帶有配息日期的年度合計列。
+///
+/// 年度合計列 (`quarter = ''`) 的日期應該一律是 `'-'`；股票從年配改成分期配發時，
+/// 原本的年度配息明細會與合計列撞上同一組主鍵，舊版只覆寫金額而留下日期，
+/// 讓合計被當成另一次真實配息重複計入持股的已領股利。
+///
+/// 此入口掃出所有受影響的 (代號, 發放年度)，重算合計列把日期清回 `'-'`，
+/// 再重算對應股票目前持股的已領股利紀錄。全程只讀寫資料庫，不會請求 Yahoo。
+///
+/// 執行範例：
+/// `cargo test app::manual_backfill::test_repair_stale_annual_total_dividends -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_repair_stale_annual_total_dividends() {
+    dotenvy::dotenv().ok();
+    SHARE.load().await;
+
+    tracing::debug!("開始 app::manual_backfill::test_repair_stale_annual_total_dividends");
+
+    let summary = dividend::repair_stale_annual_total_dividends()
+        .await
+        .expect("manual stale annual total dividend repair failed");
+
+    tracing::debug!(
+        "結束 app::manual_backfill::test_repair_stale_annual_total_dividends summary={summary:?}"
+    );
+}
+
 /// 手動重算指定基準日的全市場各期間年化報酬率（CAGR）。
 ///
 /// 排程本身每日 05:40（台北時間）自動執行，這個入口用於：

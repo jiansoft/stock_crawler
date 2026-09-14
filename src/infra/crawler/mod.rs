@@ -30,8 +30,6 @@ pub mod cnyes;
 pub mod fbs;
 /// Fugle 行情 API
 pub mod fugle;
-/// Goodinfo! 台灣股市資訊網 (提供股利與基本面資料)
-pub mod goodinfo;
 /// HiStock 嗨投資 (財經社群與數據站)
 pub mod histock;
 /// IP 檢測服務 (ipconfig.io)

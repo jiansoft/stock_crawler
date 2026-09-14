@@ -325,6 +325,12 @@ pub(super) const INDEX_HTML: &str = r##"<!doctype html>
         <button type="submit">Start</button>
         <div class="toast"></div>
       </form>
+      <form class="panel" data-endpoint="/api/manual-backfill/annual-total-repair">
+        <h2>Annual Total Repair</h2>
+        <p>Clears stray ex-dividend dates left on annual total rows and recalculates the affected holdings. No input needed.</p>
+        <button type="submit">Start</button>
+        <div class="toast"></div>
+      </form>
       <form class="panel" data-endpoint="/api/manual-backfill/quote-history">
         <h2>Quote History</h2>
         <label for="quote-history-symbols">Stock symbols (blank = all ETFs)</label>

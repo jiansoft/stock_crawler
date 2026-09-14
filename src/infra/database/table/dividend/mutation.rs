@@ -171,6 +171,9 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     }
 
     /// 更新年度內有多次配息記錄時將其合併計算成年度股利
+    ///
+    /// 合計列的日期一律是 `'-'`，衝突更新時必須連日期一起覆寫；原因與
+    /// [`crate::infra::database::repository::dividend::PgDividendRepository::upsert_annual_total_dividend`] 相同。
     pub async fn upsert_annual_total_dividend(&self) -> Result<PgQueryResult> {
         // 使用參數化查詢代替字串格式化，將 $1, $2, $3, $4 分別綁定相關欄位，以移除 AssertSqlSafe
         let sql = r#"
@@ -219,9 +222,15 @@ where security_code = $3 and year = $4 and quarter != ''
 group by security_code
 order by security_code
 ON CONFLICT (security_code,year,quarter) DO UPDATE SET
+    year_of_dividend = EXCLUDED.year_of_dividend,
     cash_dividend = EXCLUDED.cash_dividend,
     stock_dividend = EXCLUDED.stock_dividend,
-    sum = EXCLUDED.sum;;
+    sum = EXCLUDED.sum,
+    "ex-dividend_date1" = EXCLUDED."ex-dividend_date1",
+    "ex-dividend_date2" = EXCLUDED."ex-dividend_date2",
+    payable_date1 = EXCLUDED.payable_date1,
+    payable_date2 = EXCLUDED.payable_date2,
+    updated_time = EXCLUDED.updated_time;
 "#;
 
         sqlx::query(sql)

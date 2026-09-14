@@ -1,19 +1,23 @@
-use std::{collections::HashSet, time::Duration};
-
 use crate::{
-    app::backfill::acl::DividendAclMapper,
-    core::util::map::{Keyable, vec_to_hashmap},
     domain::dividend::repository::DividendRepository,
-    domain::registry::entity::StockSymbol,
-    infra::crawler::goodinfo,
     infra::database::repository::dividend::PgDividendRepository,
 };
 use anyhow::Result;
 use scopeguard::defer;
 
+/// 單次寫回的股利列數上限。
+const UPDATE_CHUNK_SIZE: usize = 500;
+
 /// <summary>
-/// 將股息中盈餘分配率為零的數據向第三方取得數據後更新更新。
+/// 依財報每股盈餘計算股利的盈餘分配率並寫回。
 /// </summary>
+///
+/// 盈餘分配率原本向 Goodinfo 取得，但該站已對機器請求全面掛上 Cloudflare 瀏覽器驗證，
+/// 連自動化瀏覽器都過不了，排程只會每天固定失敗一次。這個比率的定義就是
+/// 「配發的股利 ÷ 同期間每股盈餘」，兩項資料本地都有，因此改為自行計算，不再依賴外部站台。
+///
+/// 每次只處理 `payout_ratio` 仍為 0 的股利列：已經有值的（例如早年由 Goodinfo 回補的）
+/// 不會被覆蓋，財報還沒公布的則維持 0，等下一輪排程重算。
 pub async fn execute() -> Result<()> {
     tracing::info!("更新盈餘分配率開始");
     defer! {
@@ -21,64 +25,28 @@ pub async fn execute() -> Result<()> {
     }
 
     let dividend_repo = PgDividendRepository::new();
-    let without_payout_ratio = dividend_repo.fetch_without_payout_ratio().await?;
-    let mut unique_security_code: HashSet<String> = HashSet::new();
+    let candidates = dividend_repo.fetch_payout_ratio_candidates().await?;
+    let total = candidates.len();
 
-    for wpr in &without_payout_ratio {
-        unique_security_code.insert(wpr.security_code.to_string());
+    let ratios: Vec<_> = candidates
+        .iter()
+        .filter_map(|candidate| candidate.calculate())
+        .collect();
+
+    // 首次執行要補算全部歷史股利，一次送上萬筆陣列參數會讓正式機（樹莓派）吃緊，
+    // 因此分批寫回；每批各自是一次 UPDATE，中途失敗不影響已完成的批次。
+    let mut updated = 0;
+    for chunk in ratios.chunks(UPDATE_CHUNK_SIZE) {
+        updated += dividend_repo.update_payout_ratios(chunk).await?;
     }
 
-    let mut dividend_without_payout_ratio = vec_to_hashmap(without_payout_ratio);
-
-    for security_code in unique_security_code {
-        // 使用領域 StockSymbol 值物件判斷是否為特別股，避免與 Table 層直接耦合
-        if StockSymbol(security_code.clone()).is_preference() {
-            continue;
-        }
-
-        let cache_key = format!("goodinfo:payout_ratio:{}", security_code);
-        let is_jump = crate::infra::nosql::redis::CLIENT
-            .get_bool(&cache_key)
-            .await?;
-        if is_jump {
-            continue;
-        }
-
-        crate::infra::nosql::redis::CLIENT
-            .set(cache_key, true, 60 * 60 * 24 * 2)
-            .await?;
-
-        let dividends_from_goodinfo = goodinfo::dividend::visit(&security_code).await?;
-        for (_, gds) in dividends_from_goodinfo {
-            for gd in gds {
-                let key = gd.key();
-                if let Some(pri) = dividend_without_payout_ratio.get_mut(&key) {
-                    let cmd = DividendAclMapper::from_dto(pri.serial, &gd);
-                    let updated_pri = DividendAclMapper::update_payout_ratio_entity(pri, &cmd);
-
-                    match dividend_repo.save(&updated_pri).await {
-                        Ok(_) => {
-                            tracing::info!(
-                                "更新盈餘分配率成功: security_code={}, year_of_dividend={}, quarter={}, payout_ratio_cash={}, payout_ratio_stock={}, payout_ratio={}",
-                                updated_pri.security_code,
-                                updated_pri.year_of_dividend,
-                                updated_pri.quarter,
-                                updated_pri.payout_ratio_cash,
-                                updated_pri.payout_ratio_stock,
-                                updated_pri.payout_ratio
-                            );
-                            *pri = updated_pri;
-                        }
-                        Err(why) => {
-                            tracing::error!("{} {:?}", key, why);
-                        }
-                    }
-                }
-            }
-        }
-
-        tokio::time::sleep(Duration::from_secs(90)).await;
-    }
+    tracing::info!(
+        "更新盈餘分配率完成: candidates={}, calculated={}, updated={}, skipped={}",
+        total,
+        ratios.len(),
+        updated,
+        total - ratios.len()
+    );
 
     Ok(())
 }

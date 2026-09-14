@@ -1,18 +1,5 @@
 use rust_decimal::Decimal;
 
-/// 更新股息分配率命令。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdatePayoutRatioCommand {
-    /// 股利資料序號
-    pub serial: i64,
-    /// 現金配發率
-    pub payout_ratio_cash: Decimal,
-    /// 股票配發率
-    pub payout_ratio_stock: Decimal,
-    /// 合計配發率
-    pub payout_ratio: Decimal,
-}
-
 /// 儲存/更新股息明細命令。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaveDividendCommand {
@@ -38,36 +25,6 @@ pub struct SaveDividendCommand {
     pub payable_date1: String,
     /// 股票股利發放日
     pub payable_date2: String,
-}
-
-/// 股息分配率爬蟲資料防腐層轉譯器。
-pub struct DividendAclMapper;
-
-impl DividendAclMapper {
-    /// 將 Goodinfo 股利 DTO 轉譯為 `UpdatePayoutRatioCommand`。
-    pub fn from_dto(
-        serial: i64,
-        dto: &crate::infra::crawler::goodinfo::dividend::GoodInfoDividend,
-    ) -> UpdatePayoutRatioCommand {
-        UpdatePayoutRatioCommand {
-            serial,
-            payout_ratio_cash: dto.payout_ratio_cash,
-            payout_ratio_stock: dto.payout_ratio_stock,
-            payout_ratio: dto.payout_ratio,
-        }
-    }
-
-    /// 將 `UpdatePayoutRatioCommand` 套用至 `Dividend`。
-    pub fn update_payout_ratio_entity(
-        dividend: &crate::domain::dividend::entity::Dividend,
-        cmd: &UpdatePayoutRatioCommand,
-    ) -> crate::domain::dividend::entity::Dividend {
-        let mut d = dividend.clone();
-        d.payout_ratio_cash = cmd.payout_ratio_cash;
-        d.payout_ratio_stock = cmd.payout_ratio_stock;
-        d.payout_ratio = cmd.payout_ratio;
-        d
-    }
 }
 
 /// Yahoo 股利明細爬蟲資料防腐層轉譯器。
@@ -128,45 +85,6 @@ impl YahooDividendAclMapper {
 mod tests {
     use super::*;
     use rust_decimal_macros::dec;
-
-    #[test]
-    fn test_dividend_acl_mapping() {
-        let mut goodinfo =
-            crate::infra::crawler::goodinfo::dividend::GoodInfoDividend::new("2330".to_string());
-        goodinfo.payout_ratio_cash = dec!(45.5);
-        goodinfo.payout_ratio_stock = dec!(0.0);
-        goodinfo.payout_ratio = dec!(45.5);
-
-        let cmd = DividendAclMapper::from_dto(123, &goodinfo);
-        assert_eq!(cmd.serial, 123);
-        assert_eq!(cmd.payout_ratio_cash, dec!(45.5));
-
-        let mut d = crate::domain::dividend::entity::Dividend {
-            serial: 123,
-            year: 2024,
-            year_of_dividend: 2024,
-            quarter: "Q4".to_string(),
-            security_code: "2330".to_string(),
-            earnings_cash_dividend: rust_decimal_macros::dec!(0),
-            capital_reserve_cash_dividend: rust_decimal_macros::dec!(0),
-            cash_dividend: rust_decimal_macros::dec!(0),
-            earnings_stock_dividend: rust_decimal_macros::dec!(0),
-            capital_reserve_stock_dividend: rust_decimal_macros::dec!(0),
-            stock_dividend: rust_decimal_macros::dec!(0),
-            sum: rust_decimal_macros::dec!(0),
-            payout_ratio_cash: rust_decimal_macros::dec!(0.0),
-            payout_ratio_stock: rust_decimal_macros::dec!(0.0),
-            payout_ratio: rust_decimal_macros::dec!(0.0),
-            ex_dividend_date_cash: "".to_string(),
-            ex_dividend_date_stock: "".to_string(),
-            payable_date_cash: "".to_string(),
-            payable_date_stock: "".to_string(),
-            created_time: chrono::Local::now(),
-            updated_time: chrono::Local::now(),
-        };
-        d = DividendAclMapper::update_payout_ratio_entity(&d, &cmd);
-        assert_eq!(d.payout_ratio_cash, dec!(45.5));
-    }
 
     #[test]
     fn test_yahoo_dividend_acl_mapping() {

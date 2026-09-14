@@ -10,7 +10,7 @@ pub mod quote;
 pub mod revenue;
 pub mod stock;
 
-pub use dividend::{DividendAclMapper, YahooDividendAclMapper};
+pub use dividend::YahooDividendAclMapper;
 pub use financial::{FinancialStatementAclMapper, NetAssetValueAclMapper};
 pub use index::IndexAclMapper;
 pub use misc::{QfiiAclMapper, SaveStockWeightCommand, StockWeightAclMapper, UpdateQfiiCommand};

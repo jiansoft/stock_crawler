@@ -4,6 +4,8 @@ use scopeguard::defer;
 
 /// 每日掃描交易所除權息公告，補齊漏抓的股利事件。
 mod announcement_scan;
+/// 修復帶有配息日期的年度合計列。
+mod annual_total_repair;
 /// 定期掃描近期股利與手動回補歷年配息明細。
 mod missing_or_multiple;
 /// 更新歷史配息率。
@@ -12,6 +14,9 @@ mod unannounced_ex_dividend_date;
 
 use missing_or_multiple::backfill_missing_or_multiple_dividends;
 use unannounced_ex_dividend_date::backfill_unannounced_dividend_dates;
+
+/// 年度合計列修復的手動入口。
+pub(crate) use annual_total_repair::repair_stale_annual_total_dividends;
 
 /// 單檔歷年股利手動回補入口。
 pub(crate) use missing_or_multiple::{

@@ -116,6 +116,28 @@ pub(crate) async fn start_multiple_dividend_historical_dividends_job(
     .await
 }
 
+/// 建立年度合計列修復背景 job。
+///
+/// Job 會掃出所有帶有配息日期的年度合計列（`quarter = ''`），重算合計把日期清回 `'-'`，
+/// 再重算對應股票目前持股的已領股利紀錄。全程只讀寫資料庫，不對外部來源發出請求，
+/// 因此可以安全重跑；沒有受影響的資料時 job 立即完成。
+pub(crate) async fn start_annual_total_repair_job() -> Result<BackfillJob, StartJobError> {
+    start_job(
+        BACKFILL_STATE.clone(),
+        "annual_total_repair",
+        // 這個 job 沒有輸入參數，固定值讓同一時間只會有一個修復流程在跑。
+        "all".to_string(),
+        move || async move {
+            let summary = dividend::repair_stale_annual_total_dividends().await?;
+            Ok(format!(
+                "annual total repair completed: stale_count={}, repaired_count={}, record_backfilled_count={}",
+                summary.stale_count, summary.repaired_count, summary.record_backfilled_count
+            ))
+        },
+    )
+    .await
+}
+
 /// 建立收盤彙總背景 job。
 ///
 /// Job 會呼叫 `closing::aggregate` 重新彙總指定交易日的收盤資料。

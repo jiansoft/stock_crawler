@@ -16,7 +16,7 @@
 //!   供後續日期回補流程辨識。
 //! - **效能**：使用 `Lazy` 靜態化正則與選擇器，並在內部使用 `HashMap` 進行年度聚合後再排序輸出。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{error::Error as StdError, fmt};
 
 use anyhow::{Context, Result, anyhow};
@@ -176,6 +176,23 @@ fn parse_dividend_html(stock_symbol: &str, url: &str, text: &str) -> Result<Yaho
     parse_dividend_document(stock_symbol, url, &document)
 }
 
+/// 尚未決定發放年度的解析結果。
+///
+/// 發放年度必須等整張表看完才能決定：Yahoo 會把「已宣告但日期未定」的股利
+/// 另外列在表格最上方，該列只能用所屬年度推估，但同一次配發稍後還會以確定日期再出現一次。
+struct PendingDividendRow {
+    /// 由實際日期解析出的發放年度；`None` 代表 Yahoo 尚未公布任何日期。
+    resolved_year: Option<i32>,
+    year_of_dividend: i32,
+    quarter: String,
+    cash_dividend: Decimal,
+    stock_dividend: Decimal,
+    ex_dividend_date1: String,
+    ex_dividend_date2: String,
+    payable_date1: String,
+    payable_date2: String,
+}
+
 /// 從股利列表擷取實際配息事件，略過年度合計，避免合計被當作另一筆配息。
 fn parse_dividend_document(
     stock_symbol: &str,
@@ -191,7 +208,7 @@ fn parse_dividend_document(
         ));
     }
 
-    let mut dividend_by_year = HashMap::<i32, Vec<YahooDividendDetail>>::new();
+    let mut pending: Vec<PendingDividendRow> = Vec::with_capacity(rows.len());
 
     for element in rows {
         // 股利所屬期間 (例如 "2024Q4")，位於特定的 Class 容器中
@@ -230,34 +247,67 @@ fn parse_dividend_document(
             (ex_div_date, ex_rights_date, pay_date1, pay_date2)
         };
 
-        // 若日期皆尚未公布，Yahoo 仍可能先揭露擬定股利；此時先用股利所屬年度加一推估發放年度。
-        if year == 0 {
-            year = estimate_paid_year(year_of_dividend);
-        }
-
         // 股利數值 (3=現金股利, 4=股票股利)
         let cash_dividend = parse_val(&element, 3);
         let stock_dividend = parse_val(&element, 4);
+
+        pending.push(PendingDividendRow {
+            resolved_year: (year != 0).then_some(year),
+            year_of_dividend,
+            quarter,
+            cash_dividend,
+            stock_dividend,
+            ex_dividend_date1: ex_div_date,
+            ex_dividend_date2: ex_rights_date,
+            payable_date1: pay_date1,
+            payable_date2: pay_date2,
+        });
+    }
+
+    // 同一個所屬期間若已有「日期確定」的列，該期間的推估列就是同一次配發的舊快照
+    // （Yahoo 把尚未公布日期的股利另列在表格最上方）。兩列的主鍵相同，一起入庫只會互相覆蓋，
+    // 例如 2753 的 2025H2 會在現金 7.5 與配股 0.5 之間來回。日期確定的那一列才是完整資料。
+    let resolved_periods: HashSet<(i32, &str)> = pending
+        .iter()
+        .filter(|row| row.resolved_year.is_some())
+        .map(|row| (row.year_of_dividend, row.quarter.as_str()))
+        .collect();
+
+    let mut dividend_by_year = HashMap::<i32, Vec<YahooDividendDetail>>::new();
+    for row in &pending {
+        let year = match row.resolved_year {
+            Some(year) => year,
+            None => {
+                if resolved_periods.contains(&(row.year_of_dividend, row.quarter.as_str())) {
+                    continue;
+                }
+                // 日期全部尚未公布時，Yahoo 仍可能先揭露擬定股利；先以所屬年度加一推估發放年度，
+                // 讓擬定股利也能入庫，待日期公布後再由回補流程換成確定資料。
+                estimate_paid_year(row.year_of_dividend)
+            }
+        };
 
         dividend_by_year
             .entry(year)
             .or_default()
             .push(YahooDividendDetail {
                 year,
-                year_of_dividend,
-                quarter,
-                cash_dividend,
-                stock_dividend,
-                ex_dividend_date1: ex_div_date,
-                ex_dividend_date2: ex_rights_date,
-                payable_date1: pay_date1,
-                payable_date2: pay_date2,
+                year_of_dividend: row.year_of_dividend,
+                quarter: row.quarter.clone(),
+                cash_dividend: row.cash_dividend,
+                stock_dividend: row.stock_dividend,
+                ex_dividend_date1: row.ex_dividend_date1.clone(),
+                ex_dividend_date2: row.ex_dividend_date2.clone(),
+                payable_date1: row.payable_date1.clone(),
+                payable_date2: row.payable_date2.clone(),
             });
     }
 
-    // 同一發放年同時有全年與季／半年配時，全年事件使用資料表既有的 A 代碼。
-    // 空季度留給年度合計，避免例如 2072 的 2025 年配被 2026H1 合計覆蓋。
     for details in dividend_by_year.values_mut() {
+        merge_annual_event_into_last_period(details);
+
+        // 同一發放年同時有全年與季／半年配時，全年事件使用資料表既有的 A 代碼。
+        // 空季度留給年度合計，避免例如 2072 的 2025 年配被 2026H1 合計覆蓋。
         if details.iter().any(|detail| !detail.quarter.is_empty()) {
             for detail in details {
                 if detail.quarter.is_empty() {
@@ -273,6 +323,97 @@ fn parse_dividend_document(
     result.dividend.sort_unstable_by(|(a, _), (b, _)| b.cmp(a));
 
     Ok(result)
+}
+
+/// 把 Yahoo 另立一列的「整年度配發」併回同一所屬年度的最後一次除權息。
+///
+/// 整年度一次發放的股票股利，Yahoo 會拆成獨立一列（所屬期間只有年份、沒有 H/Q），
+/// 但 Goodinfo 的除權息日程是掛在該所屬年度最後一次配發上——例如 2753 的 0.5 元
+/// 就掛在 25H2 的 7.5 元現金旁邊。兩邊描述的是同一次配發，拆成兩列會讓年度合計
+/// 把同一年的股利算成兩個事件，畫面上的全年合計也會對不起來。
+///
+/// 只有同一發放年度、同一所屬年度，且金額欄位不互相衝突（併入方該欄為零）時才合併；
+/// 無法確定是同一次配發時保留原本的獨立列，交給 A 代碼處理，例如 2072 的全年列
+/// 所屬年度與同年的 H1 不同，就不會被併走。
+fn merge_annual_event_into_last_period(details: &mut Vec<YahooDividendDetail>) {
+    let annual_positions: Vec<usize> = details
+        .iter()
+        .enumerate()
+        .filter(|(_, detail)| detail.quarter.is_empty())
+        .map(|(index, _)| index)
+        .collect();
+
+    let mut merged_positions: Vec<usize> = Vec::new();
+    for annual_index in annual_positions {
+        let year_of_dividend = details[annual_index].year_of_dividend;
+        // 期間代碼字典序即時間序（H2 > H1、Q4 > Q3），取最後一次配發作為併入目標。
+        let Some(target_index) = details
+            .iter()
+            .enumerate()
+            .filter(|(index, detail)| {
+                *index != annual_index
+                    && detail.year_of_dividend == year_of_dividend
+                    && !detail.quarter.is_empty()
+            })
+            .max_by(|(_, left), (_, right)| left.quarter.cmp(&right.quarter))
+            .map(|(index, _)| index)
+        else {
+            continue;
+        };
+
+        let annual = details[annual_index].clone();
+        // 兩邊同一欄都有金額時無法判斷是同一次配發還是兩次，保留原狀比併錯安全。
+        let conflicts = {
+            let target = &details[target_index];
+            (!annual.cash_dividend.is_zero() && !target.cash_dividend.is_zero())
+                || (!annual.stock_dividend.is_zero() && !target.stock_dividend.is_zero())
+        };
+        if conflicts {
+            continue;
+        }
+
+        let target = &mut details[target_index];
+        if target.cash_dividend.is_zero() {
+            target.cash_dividend = annual.cash_dividend;
+        }
+        if target.stock_dividend.is_zero() {
+            target.stock_dividend = annual.stock_dividend;
+        }
+        merge_date(&mut target.ex_dividend_date1, &annual.ex_dividend_date1);
+        merge_date(&mut target.ex_dividend_date2, &annual.ex_dividend_date2);
+        merge_date(&mut target.payable_date1, &annual.payable_date1);
+        merge_date(&mut target.payable_date2, &annual.payable_date2);
+
+        merged_positions.push(annual_index);
+    }
+
+    // 由後往前刪，前面元素的索引才不會被移動。
+    merged_positions.sort_unstable_by(|a, b| b.cmp(a));
+    for index in merged_positions {
+        details.remove(index);
+    }
+}
+
+/// 併入日期欄位：只有目標欄還沒有實際日期時才採用來源日期。
+///
+/// 「尚未公布」代表 Yahoo 已宣告但日期未定，仍屬於未知，可以被實際日期取代；
+/// 反之目標欄已經是實際日期就不覆蓋，避免把確定的除權息日換成另一次配發的日期。
+fn merge_date(target: &mut String, source: &str) {
+    if source == "-" || source.is_empty() || source == *target {
+        return;
+    }
+    if is_actual_date(target) {
+        return;
+    }
+    if source == "尚未公布" && target != "-" {
+        return;
+    }
+    *target = source.to_string();
+}
+
+/// 判斷日期欄是否已經是實際日期（而非 `-` 或「尚未公布」）。
+fn is_actual_date(value: &str) -> bool {
+    value.len() == 10 && value.split('-').count() == 3
 }
 
 /// 內部輔助：解析數值欄位並轉換為 `Decimal`。
@@ -335,6 +476,65 @@ mod tests {
     use super::*;
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
+
+    /// 以 2753 的實際頁面驗證整年度配股會併回 25H2，且擬定列不會蓋掉已公布的配息。
+    ///
+    /// Yahoo 把 2753 的 0.5 元配股拆成獨立的「2025」列，另外又在表格最上方留了一筆
+    /// 日期未定的 2025H2 配股；Goodinfo 的除權息日程則是把 7.5 元現金與 0.5 元配股
+    /// 都掛在 25H2。這個測試釘住「與 Goodinfo 一致」的解析結果。
+    #[test]
+    fn real_page_merges_annual_stock_dividend_into_half_year_event() {
+        let html = include_str!("testdata/dividend_2753.html");
+        let result = parse_dividend_html("2753", "fixture", html).unwrap();
+
+        let details_2026 = result
+            .get_dividend_by_year(2026)
+            .expect("expected 2026 payout group");
+        assert_eq!(details_2026.len(), 2, "{:#?}", details_2026);
+
+        let h2 = details_2026
+            .iter()
+            .find(|detail| detail.quarter == "H2")
+            .expect("expected 2025H2 event");
+        assert_eq!(h2.year_of_dividend, 2025);
+        assert_eq!(h2.cash_dividend, dec!(7.50));
+        assert_eq!(h2.stock_dividend, dec!(0.50));
+        assert_eq!(h2.ex_dividend_date1, "2026-07-02");
+        assert_eq!(h2.ex_dividend_date2, "2026-08-26");
+        assert_eq!(h2.payable_date1, "2026-07-30");
+
+        let h1 = details_2026
+            .iter()
+            .find(|detail| detail.quarter == "H1")
+            .expect("expected 2025H1 event");
+        assert_eq!(h1.cash_dividend, dec!(4.00));
+        assert_eq!(h1.ex_dividend_date1, "2025-12-24");
+        assert_eq!(h1.payable_date1, "2026-01-22");
+
+        // 2026 年發放的股利合計：現金 11.5、股票 0.5，全年合計 12。
+        assert_eq!(
+            details_2026
+                .iter()
+                .map(|detail| detail.cash_dividend)
+                .sum::<Decimal>(),
+            dec!(11.50)
+        );
+        assert_eq!(
+            details_2026
+                .iter()
+                .map(|detail| detail.stock_dividend)
+                .sum::<Decimal>(),
+            dec!(0.50)
+        );
+
+        // 無配息年度的空白列會被推估到隔年，若不擋掉就會和 2017 的真實配息撞同一組主鍵。
+        let details_2017 = result
+            .get_dividend_by_year(2017)
+            .expect("expected 2017 payout group");
+        assert_eq!(details_2017.len(), 1, "{:#?}", details_2017);
+        assert_eq!(details_2017[0].cash_dividend, dec!(2.50));
+        assert_eq!(details_2017[0].stock_dividend, dec!(1.76));
+    }
 
     /// 驗證年配轉半年配保留兩筆事件，空期間合計列不可產生西元 1 年的假資料。
     #[test]
