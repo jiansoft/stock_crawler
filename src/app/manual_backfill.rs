@@ -201,23 +201,53 @@ async fn test_backfill_received_dividend_records_for_stock() {
 ///
 /// 執行範例：
 /// `cargo test app::manual_backfill::test_backfill_historical_dividends_for_stock -- --ignored --nocapture`
+/// 可用 `MANUAL_DIVIDEND_SECURITY_CODE` 指定股票；未設定時沿用預設代號。
 #[tokio::test]
 #[ignore]
 async fn test_backfill_historical_dividends_for_stock() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    let security_code = MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE;
+    let security_code = std::env::var("MANUAL_DIVIDEND_SECURITY_CODE")
+        .unwrap_or_else(|_| MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE.to_string());
     tracing::debug!(
         "開始 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code}"
     );
 
-    let upserted_count = dividend::backfill_historical_dividends_for_stock(security_code)
+    let upserted_count = dividend::backfill_historical_dividends_for_stock(&security_code)
         .await
         .expect("manual historical dividends backfill failed");
 
     tracing::debug!(
         "結束 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code} upserted_count={upserted_count}"
+    );
+}
+
+/// 手動修復帶有配息日期的年度合計列。
+///
+/// 年度合計列 (`quarter = ''`) 的日期應該一律是 `'-'`；股票從年配改成分期配發時，
+/// 原本的年度配息明細會與合計列撞上同一組主鍵，舊版只覆寫金額而留下日期，
+/// 讓合計被當成另一次真實配息重複計入持股的已領股利。
+///
+/// 此入口掃出所有受影響的 (代號, 發放年度)，重算合計列把日期清回 `'-'`，
+/// 再重算對應股票目前持股的已領股利紀錄。全程只讀寫資料庫，不會請求 Yahoo。
+///
+/// 執行範例：
+/// `cargo test app::manual_backfill::test_repair_stale_annual_total_dividends -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_repair_stale_annual_total_dividends() {
+    dotenvy::dotenv().ok();
+    SHARE.load().await;
+
+    tracing::debug!("開始 app::manual_backfill::test_repair_stale_annual_total_dividends");
+
+    let summary = dividend::repair_stale_annual_total_dividends()
+        .await
+        .expect("manual stale annual total dividend repair failed");
+
+    tracing::debug!(
+        "結束 app::manual_backfill::test_repair_stale_annual_total_dividends summary={summary:?}"
     );
 }
 

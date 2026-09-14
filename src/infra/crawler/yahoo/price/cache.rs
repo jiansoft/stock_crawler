@@ -61,6 +61,32 @@ static COMPLETED_CYCLES: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 /// 全部類股輪詢完一輪後的休息時間。
 const CYCLE_COOLDOWN: Duration = Duration::from_secs(5);
 
+/// 長時間冷卻時檢查停止旗標的間隔。
+const STOP_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+
+/// 遭遇 Yahoo WAF 阻擋後，整輪輪詢的冷卻時間。
+///
+/// Yahoo 的阻擋是綁在來源端（IP / client）而非個別類股上，因此一旦被擋，
+/// 換下一個類股再打只會再被擋一次。這個冷卻套用在**整輪**、只等一次，
+/// 不是每個類股各等一次。
+const DENIED_COOLDOWN: Duration = Duration::from_secs(600);
+
+/// 分段睡滿指定時間，期間只要停止旗標被關掉就提前返回。
+///
+/// 十分鐘的冷卻若用單一 `sleep` 等待，服務停止最久要拖十分鐘才會生效。
+/// 這裡切成 [`STOP_CHECK_INTERVAL`] 的小段，讓 stop 能及時中斷。
+async fn sleep_while_caching(total: Duration) {
+    let deadline = Instant::now() + total;
+
+    while IS_CACHING.load(Ordering::SeqCst) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        sleep(remaining.min(STOP_CHECK_INTERVAL)).await;
+    }
+}
+
 /// Yahoo 類股來源的最近一輪執行摘要。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct YahooRuntimeDiagnostics {
@@ -155,6 +181,9 @@ pub fn start_caching_task() {
             let mut candidate_event_count = 0usize;
             let mut page_count = 0usize;
             let mut raw_item_count = 0usize;
+            // 本輪是否曾遭遇 WAF 阻擋。阻擋是來源端層級的，一旦發生就中止整輪，
+            // 冷卻交由輪尾統一等一次，不再逐類股各等一次。
+            let mut cycle_denied = false;
 
             // 依固定順序逐類股更新，這樣比較容易控制節流與追蹤問題類股。
             for category in &categories {
@@ -241,6 +270,7 @@ pub fn start_caching_task() {
                         // 檢查錯誤訊息是否包含被阻擋特徵
                         if err_msg.contains("Request denied") || err_msg.contains("status 999") {
                             is_denied = true;
+                            cycle_denied = true;
 
                             let alert_cache_key = "alert:yahoo:denied";
                             // 使用專案內建的記憶體 TTL 快取，確認 1 小時內是否已發送過警報，防範洗板
@@ -328,21 +358,22 @@ pub fn start_caching_task() {
                     break;
                 }
 
-                // 類股與類股之間進行隨機 2.0 至 4.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率。
-                // 若本次採集遭遇 WAF 阻擋 (Request denied)，則該次的延遲時間改為等待 10 分鐘 (600秒) 以進行冷卻。
-                let sleep_duration = if is_denied {
+                // 遭遇 WAF 阻擋就直接中止本輪：阻擋綁在來源端而非個別類股，
+                // 繼續往下跑只會對每個剩餘類股各再被擋一次。
+                // 冷卻改由輪尾統一等一次（DENIED_COOLDOWN），不在這裡等。
+                if is_denied {
                     tracing::warn!(
-                        "Yahoo 採集遭遇 Request denied，將強制冷卻等待 10 分鐘。類股: {} {}({})",
+                        "Yahoo 採集遭遇 Request denied，中止本輪剩餘類股並進入冷卻。類股: {} {}({})",
                         category.exchange.label(),
                         category.name,
                         category.sector_id
                     );
-                    Duration::from_secs(600)
-                } else {
-                    let jitter_ms = rand::rng().random_range(2000..=4000);
-                    Duration::from_millis(jitter_ms)
-                };
-                sleep(sleep_duration).await;
+                    break;
+                }
+
+                // 類股與類股之間進行隨機 2.0 至 4.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率。
+                let jitter_ms = rand::rng().random_range(2000..=4000);
+                sleep(Duration::from_millis(jitter_ms)).await;
             }
 
             // 如果是在整輪尾端才收到 stop，就不要再進入 cooldown。
@@ -409,7 +440,16 @@ pub fn start_caching_task() {
             */
 
             // 一輪全部類股跑完後稍作休息，避免無間斷全市場輪詢造成壓力過大。
-            sleep(CYCLE_COOLDOWN).await;
+            // 本輪若曾被 WAF 擋下，改用較長的冷卻，讓來源端的封鎖有時間退場。
+            if cycle_denied {
+                tracing::warn!(
+                    "Yahoo 本輪遭遇 Request denied，冷卻 {:?} 後再重新輪詢。",
+                    DENIED_COOLDOWN
+                );
+                sleep_while_caching(DENIED_COOLDOWN).await;
+            } else {
+                sleep(CYCLE_COOLDOWN).await;
+            }
         }
 
         // 跳出 while 代表旗標已關閉，這裡補一筆停止 log 方便對照啟停時間。

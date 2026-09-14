@@ -1,0 +1,72 @@
+[
+  {
+    "Date": "1150907",
+    "Code": "00400A",
+    "Name": "主動國泰動能高息",
+    "Exdividend": "息",
+    "StockDividendRatio": "",
+    "SubscriptionRatio": "",
+    "SubscriptionPricePerShare": "",
+    "CashDividend": "0.120000",
+    "SharesOffered": "",
+    "SharesEmpOwner": "",
+    "SharesholderOwner": "",
+    "StockHoldingRatio": ""
+  },
+  {
+    "Date": "1150908",
+    "Code": "00940",
+    "Name": "元大台灣價值高息",
+    "Exdividend": "息",
+    "StockDividendRatio": "",
+    "SubscriptionRatio": "",
+    "SubscriptionPricePerShare": "",
+    "CashDividend": "0.055000",
+    "SharesOffered": "",
+    "SharesEmpOwner": "",
+    "SharesholderOwner": "",
+    "StockHoldingRatio": ""
+  },
+  {
+    "Date": "1150914",
+    "Code": "00401A",
+    "Name": "主動摩根台灣鑫收",
+    "Exdividend": "息",
+    "StockDividendRatio": "",
+    "SubscriptionRatio": "",
+    "SubscriptionPricePerShare": "",
+    "CashDividend": "",
+    "SharesOffered": "",
+    "SharesEmpOwner": "",
+    "SharesholderOwner": "",
+    "StockHoldingRatio": ""
+  },
+  {
+    "Date": "1150909",
+    "Code": "1438",
+    "Name": "三地開發",
+    "Exdividend": "權息",
+    "StockDividendRatio": "0.08000000",
+    "SubscriptionRatio": "",
+    "SubscriptionPricePerShare": "",
+    "CashDividend": "0.200000",
+    "SharesOffered": "",
+    "SharesEmpOwner": "",
+    "SharesholderOwner": "",
+    "StockHoldingRatio": ""
+  },
+  {
+    "Date": "1150908",
+    "Code": "2442",
+    "Name": "新美齊",
+    "Exdividend": "權息",
+    "StockDividendRatio": "0.07111516",
+    "SubscriptionRatio": "",
+    "SubscriptionPricePerShare": "",
+    "CashDividend": "2.031861",
+    "SharesOffered": "",
+    "SharesEmpOwner": "",
+    "SharesholderOwner": "",
+    "StockHoldingRatio": ""
+  }
+]

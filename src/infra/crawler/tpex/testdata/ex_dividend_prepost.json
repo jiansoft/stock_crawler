@@ -1,0 +1,58 @@
+[
+  {
+    "ExRrightsExDividendDate": "1150826",
+    "SecuritiesCompanyCode": "3287",
+    "CompanyName": "廣寰科",
+    "ExRrightsExDividend": "除息",
+    "StockDividendRatio": "0.00000000",
+    "SubscriptionRatioToNewSharesIssued": "0.00000000",
+    "SubscriptionPricePerShare": "0.00",
+    "CashDividend": "1.50000000",
+    "AllocatedForPublicUnderwriting": "0",
+    "SubscribedByEmployees": "0",
+    "SubscribedByExistingShareholders": "0",
+    "SubscribedProRataInThousandShares": "0.00000000"
+  },
+  {
+    "ExRrightsExDividendDate": "1150826",
+    "SecuritiesCompanyCode": "8410",
+    "CompanyName": "森田",
+    "ExRrightsExDividend": "除息",
+    "StockDividendRatio": "0.00000000",
+    "SubscriptionRatioToNewSharesIssued": "0.00000000",
+    "SubscriptionPricePerShare": "0.00",
+    "CashDividend": "1.60000000",
+    "AllocatedForPublicUnderwriting": "0",
+    "SubscribedByEmployees": "0",
+    "SubscribedByExistingShareholders": "0",
+    "SubscribedProRataInThousandShares": "0.00000000"
+  },
+  {
+    "ExRrightsExDividendDate": "1150826",
+    "SecuritiesCompanyCode": "3128",
+    "CompanyName": "昇銳",
+    "ExRrightsExDividend": "除權息",
+    "StockDividendRatio": "0.05999999",
+    "SubscriptionRatioToNewSharesIssued": "0.00000000",
+    "SubscriptionPricePerShare": "0.00",
+    "CashDividend": "0.40000000",
+    "AllocatedForPublicUnderwriting": "0",
+    "SubscribedByEmployees": "0",
+    "SubscribedByExistingShareholders": "0",
+    "SubscribedProRataInThousandShares": "0.00000000"
+  },
+  {
+    "ExRrightsExDividendDate": "1150826",
+    "SecuritiesCompanyCode": "3234",
+    "CompanyName": "光環",
+    "ExRrightsExDividend": "除權",
+    "StockDividendRatio": "0.00000000",
+    "SubscriptionRatioToNewSharesIssued": "0.13455969",
+    "SubscriptionPricePerShare": "110.00",
+    "CashDividend": "0.00000000",
+    "AllocatedForPublicUnderwriting": "1500000",
+    "SubscribedByEmployees": "1500000",
+    "SubscribedByExistingShareholders": "12000000",
+    "SubscribedProRataInThousandShares": "107.64775201"
+  }
+]
