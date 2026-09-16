@@ -1,6 +1,8 @@
 use crate::{
     core::declare::Quarter,
-    domain::financial::entity::{FinancialStatement, MonthlyRevenue},
+    domain::financial::entity::{
+        FinancialStatement, HoldingFinancialAlert, HoldingRevenueAlert, MonthlyRevenue,
+    },
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -68,4 +70,22 @@ pub trait FinancialRepository: Send + Sync {
 
     /// 依指定日期與年份區間，批次重建所有個股價格估值。
     async fn rebuild_price_estimates(&self, date: NaiveDate, years: String) -> Result<()>;
+
+    // === 持股通知 (Holding alerts) ===
+
+    /// 讀取指定月份中，年增率絕對值達門檻的**持股**月營收。
+    ///
+    /// `date` 為 yyyyMM 格式的營收月份。只看持股，不看全市場。
+    async fn fetch_holding_revenue_alerts(
+        &self,
+        date: i64,
+        yoy_threshold: Decimal,
+    ) -> Result<Vec<HoldingRevenueAlert>>;
+
+    /// 讀取指定年度、季度的**持股**季報，並帶出去年同季的 EPS。
+    async fn fetch_holding_financial_alerts(
+        &self,
+        year: i32,
+        quarter: &str,
+    ) -> Result<Vec<HoldingFinancialAlert>>;
 }

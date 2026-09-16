@@ -94,4 +94,29 @@ pub enum DomainEvent {
         /// 事件發生時間
         occurred_at: DateTime<Local>,
     },
+
+    /// <summary>
+    /// 當一個月份的台股月營收全部更新完畢時觸發。
+    /// </summary>
+    ///
+    /// 事件只帶月份，實際要通知哪些股票由 handler 依「持股 + 年增率門檻」自行查詢；
+    /// 逐檔發事件會讓一次更新產生上千個事件，也無從彙總成一則訊息。
+    MonthlyRevenueUpdated {
+        /// 營收月份 (yyyyMM)
+        date: i64,
+        /// 事件發生時間
+        occurred_at: DateTime<Local>,
+    },
+
+    /// <summary>
+    /// 當一個季度的台股財報更新完畢（含 ROE／ROA 補值）時觸發。
+    /// </summary>
+    QuarterlyFinancialsUpdated {
+        /// 財報年度
+        year: i32,
+        /// 財報季度 (Q1, Q2, Q3, Q4)
+        quarter: String,
+        /// 事件發生時間
+        occurred_at: DateTime<Local>,
+    },
 }

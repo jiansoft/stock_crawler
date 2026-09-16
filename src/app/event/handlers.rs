@@ -9,6 +9,7 @@
 //! - [`debounce`]：Telegram 訊息防震批次發送器。
 //! - [`money_flow`]：`MoneyFlowRecalculated` 市值變化通知。
 //! - [`ex_dividend`]：`ExDividendReminderTriggered` 除權息提醒與持股股利通知。
+//! - [`holding_review`]：`MonthlyRevenueUpdated` 與 `QuarterlyFinancialsUpdated` 的持股回顧通知。
 
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -24,6 +25,8 @@ use debounce::TelegramDebouncer;
 mod debounce;
 /// 除權息提醒事件處理子模組。
 mod ex_dividend;
+/// 持股定期回顧（月營收、季報）事件處理子模組。
+mod holding_review;
 /// 資金流（市值變化）事件處理子模組。
 mod money_flow;
 
@@ -215,6 +218,12 @@ impl EventDispatcher {
                 ..
             } => {
                 Self::handle_ex_dividend_reminder_triggered(date, next_trading_date).await?;
+            }
+            DomainEvent::MonthlyRevenueUpdated { date, .. } => {
+                Self::handle_monthly_revenue_updated(date).await?;
+            }
+            DomainEvent::QuarterlyFinancialsUpdated { year, quarter, .. } => {
+                Self::handle_quarterly_financials_updated(year, &quarter).await?;
             }
         }
 
