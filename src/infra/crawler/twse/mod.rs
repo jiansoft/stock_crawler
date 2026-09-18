@@ -1,3 +1,5 @@
+/// 上市股票減資恢復買賣參考價格
+pub mod capital_reduction;
 /// 台股財報
 pub mod eps;
 /// ETF 資訊

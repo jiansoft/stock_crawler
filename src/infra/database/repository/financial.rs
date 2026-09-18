@@ -2,12 +2,14 @@ use crate::{
     core::declare::Quarter,
     domain::financial::{
         entity::{
-            FinancialStatement as DomainFinancialStatement, MonthlyRevenue as DomainMonthlyRevenue,
+            FinancialStatement as DomainFinancialStatement, HoldingFinancialAlert,
+            HoldingRevenueAlert, MonthlyRevenue as DomainMonthlyRevenue,
         },
         repository::FinancialRepository,
     },
     infra::database::table::{
         estimate::Estimate as TableEstimate,
+        financial::holding_alert,
         financial_statement::{self, FinancialStatement as TableFinancialStatement},
         revenue::{self, Revenue as TableRevenue},
     },
@@ -249,5 +251,24 @@ impl FinancialRepository for PgFinancialRepository {
         // 依據指定條件批次重建價格估值。
         TableEstimate::upsert_all(date, years).await?;
         Ok(())
+    }
+
+    // === 持股通知 (Holding alerts) ===
+
+    async fn fetch_holding_revenue_alerts(
+        &self,
+        date: i64,
+        yoy_threshold: Decimal,
+    ) -> Result<Vec<HoldingRevenueAlert>> {
+        // 查詢已直接回傳領域實體，這裡不需要額外映射。
+        holding_alert::fetch_holding_revenue_alerts(date, yoy_threshold).await
+    }
+
+    async fn fetch_holding_financial_alerts(
+        &self,
+        year: i32,
+        quarter: &str,
+    ) -> Result<Vec<HoldingFinancialAlert>> {
+        holding_alert::fetch_holding_financial_alerts(year, quarter).await
     }
 }

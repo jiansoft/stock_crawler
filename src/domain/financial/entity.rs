@@ -229,3 +229,47 @@ impl PriceEstimate {
         }
     }
 }
+
+/// 持股月營收警示領域實體。
+///
+/// 只在月營收年增率的絕對值超過門檻時產生，供每月營收公布後的 Telegram 通知使用。
+/// 大跌與大漲都要看，因此門檻比較的是絕對值。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoldingRevenueAlert {
+    /// 股票代號
+    pub stock_symbol: String,
+    /// 股票名稱
+    pub stock_name: String,
+    /// 當月營收 (元)
+    pub monthly: Decimal,
+    /// 上月比較增減 (%)
+    pub compared_with_last_month: Decimal,
+    /// 去年同月增減 (%)
+    pub compared_with_last_year_same_month: Decimal,
+    /// 營收月份 (yyyyMM)
+    pub date: i64,
+}
+
+/// 持股財報摘要領域實體。
+///
+/// 供季報公布後的 Telegram 通知使用。`last_year_earnings_per_share` 讓通知能直接呈現
+/// 與去年同季的差距——季度之間有季節性，跟上一季比並沒有意義。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoldingFinancialAlert {
+    /// 股票代號
+    pub stock_symbol: String,
+    /// 股票名稱
+    pub stock_name: String,
+    /// 季度 (Q1, Q2, Q3, Q4)
+    pub quarter: String,
+    /// 每股稅後淨利 (元)
+    pub earnings_per_share: Decimal,
+    /// 股東權益報酬率 (%)
+    pub return_on_equity: Decimal,
+    /// 營業毛利率 (%)
+    pub gross_profit: Decimal,
+    /// 去年同季的每股稅後淨利 (元)；查無該期財報時為 None
+    pub last_year_earnings_per_share: Option<Decimal>,
+    /// 年度
+    pub year: i32,
+}

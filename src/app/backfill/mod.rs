@@ -1,5 +1,9 @@
 /// 防腐層 (Anti-Corruption Layer)
 pub mod acl;
+/// 回補交易所公告的減資事件（上市全量／上櫃每日累積）
+pub mod capital_reduction;
+/// 上櫃減資歷史缺口的候選收斂（只讀，產出待辦清單）
+pub mod capital_reduction_history;
 /// 調用 twse API 更新終止上市公司
 pub mod delisted_company;
 /// 更新股利發送數據

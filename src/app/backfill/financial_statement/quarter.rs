@@ -24,11 +24,16 @@ use crate::{
 /// 最新一季/近四季數據，並觸發估值重算。
 pub async fn execute() -> Result<()> {
     let mut success_count = 0usize;
+    // 記錄實際處理過的季度，流程結束後才派發通知事件。
+    // 這個排程（04:00）跑在季 EPS 主流程（03:00）之後，補完 ROE/ROA 的資料才算完整，
+    // 在這裡發事件，通知看到的才不是半套數字。
+    let mut processed_quarters: Vec<ReportQuarter> = Vec::new();
 
     for target_report in
         crate::core::util::datetime::backfill_report_quarter_targets_for_listed_and_otc(Local::now())
     {
         success_count += process_target_report(target_report).await?;
+        processed_quarters.push(target_report);
 
         if let Err(why) = update_roe_and_roa_for_zero_values(Some(target_report.quarter)).await {
             tracing::error!("{:#?}", why);
@@ -59,7 +64,34 @@ pub async fn execute() -> Result<()> {
         tracing::info!("季度財報更新重新計算便宜、合理、昂貴價的估算結束");
     }
 
+    dispatch_quarterly_financials_updated(&processed_quarters).await;
+
     Ok(())
+}
+
+/// 派發季報更新事件，供背景送出持股財報通知。
+///
+/// 事件只帶年度與季度，要通知哪些股票由 handler 依持股自行查詢。
+/// 通知屬於旁路副作用，即使沒有任何持股命中也不影響本流程。
+async fn dispatch_quarterly_financials_updated(processed_quarters: &[ReportQuarter]) {
+    if processed_quarters.is_empty() {
+        return;
+    }
+
+    let events: Vec<crate::domain::events::DomainEvent> = processed_quarters
+        .iter()
+        .map(
+            |report| crate::domain::events::DomainEvent::QuarterlyFinancialsUpdated {
+                year: report.year,
+                quarter: report.quarter.to_string(),
+                occurred_at: Local::now(),
+            },
+        )
+        .collect();
+
+    crate::app::event::get_global_dispatcher()
+        .dispatch_async(events)
+        .await;
 }
 
 /// 補齊單一目標季度內缺漏的 Yahoo 財務欄位。

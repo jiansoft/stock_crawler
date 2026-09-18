@@ -386,6 +386,7 @@ mod tests {
     /// 建立一筆公司行動。
     fn corporate_action(effective_date: NaiveDate, share_ratio: Decimal) -> CorporateAction {
         CorporateAction {
+            action_type: crate::domain::performance::CorporateActionType::Split,
             stock_symbol: "0050".to_string(),
             effective_date,
             share_ratio,

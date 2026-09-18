@@ -174,6 +174,9 @@ async fn save_corporate_action(
     let action = crate::domain::performance::CorporateAction {
         stock_symbol: stock_symbol.clone(),
         effective_date,
+        // 手動登錄介面只收比例，沒有型別欄位，只能沿用比例推斷這條退路。
+        // 已知限制見 CorporateActionType::infer_from_ratio 的說明。
+        action_type: crate::domain::performance::CorporateActionType::infer_from_ratio(share_ratio),
         share_ratio,
         note: req.note.trim().to_owned(),
     };

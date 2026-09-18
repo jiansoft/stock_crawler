@@ -872,6 +872,7 @@ mod tests {
             corporate_actions: vec![CorporateAction {
                 stock_symbol: "2330".to_string(),
                 effective_date: date(2020, 5, 4),
+                action_type: crate::domain::performance::CorporateActionType::Split,
                 share_ratio: dec(2),
                 note: "1:2 分割".to_string(),
             }],

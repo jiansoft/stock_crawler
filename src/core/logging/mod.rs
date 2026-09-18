@@ -382,10 +382,54 @@ pub fn init_file_rotation(max_size_mb: u64, max_age_days: i64) {
     ));
 }
 
+/// 判斷 Seq 端點是否足以安全攜帶 `X-Seq-ApiKey`。
+///
+/// API key 是以 HTTP 標頭送出的，走明文 HTTP 時任何能看到封包的人都能取得它。
+/// 兩種情況視為安全：
+///
+/// - `https://`：金鑰在 TLS 內。
+/// - 指向 loopback 的 `http://`：封包不會離開本機，沒有被竊聽的空間。
+///   本機跑 Seq container 是常見的開發組態，不該被擋。
+///
+/// 其餘（例如 `.env` 範例中的 `http://192.168.111.224:5341` 這種區域網路位址）
+/// 一律視為不安全 —— 區域網路同樣可能被側錄。
+fn seq_endpoint_protects_api_key(endpoint: &str) -> bool {
+    if endpoint.starts_with("https://") {
+        return true;
+    }
+
+    let Some(rest) = endpoint.strip_prefix("http://") else {
+        // 既非 http 也非 https（設定錯誤或未知 scheme），保守起見視為不安全。
+        return false;
+    };
+
+    // 取出主機部分：去掉路徑、userinfo 與連接埠。
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    let host = match host.strip_prefix('[') {
+        // IPv6 字面值形如 [::1]:5341。
+        Some(after_bracket) => after_bracket.split(']').next().unwrap_or_default(),
+        None => host.split(':').next().unwrap_or_default(),
+    };
+
+    host.eq_ignore_ascii_case("localhost")
+        || host == "::1"
+        || host
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 /// 初始化 Seq 日誌轉送。
 ///
 /// `server_url` 空白時代表停用 Seq；`api_key` 空白時仍會送出事件，但不附帶
 /// `X-Seq-ApiKey`。此函式應在 `.env` 載入後呼叫，確保環境變數覆蓋已生效。
+///
+/// # 安全性
+///
+/// 端點若不是 HTTPS 也不是 loopback，**API key 會被捨棄**（事件照常送出，
+/// 只是不附帶金鑰），並在 console 留下警告。這道防護是為了避免把金鑰以明文
+/// 送上網路 —— Seq 的轉送不經過 [`crate::core::util::http`]，
+/// 沒有那一層的保護。
 pub async fn init_seq<S, K>(server_url: S, api_key: K)
 where
     S: AsRef<str>,
@@ -404,7 +448,18 @@ where
     }
 
     let endpoint = server_url.trim_end_matches('/').to_string();
-    let api_key = (!api_key.is_empty()).then(|| api_key.to_string());
+    let api_key = match (!api_key.is_empty()).then(|| api_key.to_string()) {
+        // 明文端點一律不附帶金鑰：寧可 Seq 拒收（會在送出端記錄狀態碼），
+        // 也不要把金鑰攤在網路上。
+        Some(_) if !seq_endpoint_protects_api_key(&endpoint) => {
+            error_console(format!(
+                "Seq endpoint {endpoint} is not HTTPS and not loopback; \
+                 X-Seq-ApiKey will NOT be sent to avoid transmitting it in cleartext"
+            ));
+            None
+        }
+        other => other,
+    };
     let (tx, rx) = mpsc::channel::<SeqEvent>(SEQ_CHANNEL_CAPACITY);
 
     match SEQ_SENDER.set(tx) {
@@ -956,6 +1011,61 @@ mod tests {
                 channel_capacity: LOG_CHANNEL_CAPACITY,
             }
         );
+    }
+
+    /// HTTPS 端點可安全攜帶 API key。
+    #[test]
+    fn seq_endpoint_accepts_https() {
+        assert!(seq_endpoint_protects_api_key("https://seq.example.com"));
+        assert!(seq_endpoint_protects_api_key(
+            "https://192.168.111.224:5341"
+        ));
+    }
+
+    /// loopback 的明文端點可接受：封包不會離開本機。
+    #[test]
+    fn seq_endpoint_accepts_plaintext_loopback() {
+        for endpoint in [
+            "http://localhost:5341",
+            "http://LOCALHOST",
+            "http://127.0.0.1:5341",
+            "http://127.1.2.3",
+            "http://[::1]:5341",
+        ] {
+            assert!(
+                seq_endpoint_protects_api_key(endpoint),
+                "{endpoint} 應被視為安全"
+            );
+        }
+    }
+
+    /// 明文的非 loopback 端點必須被判定為不安全。
+    ///
+    /// `.env` 範例中的 `http://192.168.111.224:5341` 正是這一類 ——
+    /// 區域網路同樣可能被側錄。
+    #[test]
+    fn seq_endpoint_rejects_plaintext_remote() {
+        for endpoint in [
+            "http://192.168.111.224:5341",
+            "http://seq.example.com",
+            "http://user:pass@seq.example.com:5341",
+            "http://[2001:db8::1]:5341",
+            "ftp://seq.example.com",
+            "seq.example.com",
+            "",
+        ] {
+            assert!(
+                !seq_endpoint_protects_api_key(endpoint),
+                "{endpoint} 不應被視為安全"
+            );
+        }
+    }
+
+    /// 主機名稱以 localhost 開頭但實為他站者，不得誤判為 loopback。
+    #[test]
+    fn seq_endpoint_rejects_lookalike_hosts() {
+        assert!(!seq_endpoint_protects_api_key("http://localhost.evil.com"));
+        assert!(!seq_endpoint_protects_api_key("http://notlocalhost"));
     }
 
     /// 佇列已滿時訊息會被丟棄，並且不留下「排隊中」的假象。

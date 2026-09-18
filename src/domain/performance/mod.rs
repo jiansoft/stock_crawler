@@ -10,8 +10,8 @@ pub mod simulator;
 pub mod source;
 
 pub use entity::{
-    BASE_DATE_GRACE_DAYS, CagrCoverage, CagrMetric, CagrPeriod, CorporateAction, DividendEvent,
-    PAR_VALUE, PRINCIPAL, SimulationOutcome, StockCagr,
+    BASE_DATE_GRACE_DAYS, CagrCoverage, CagrMetric, CagrPeriod, CorporateAction,
+    CorporateActionType, DividendEvent, PAR_VALUE, PRINCIPAL, SimulationOutcome, StockCagr,
 };
 pub use query::{CagrRankingItem, CagrRankingPage, CagrRankingQuery, CagrSortKey};
 pub use repository::{CagrRepository, CorporateActionRepository};
