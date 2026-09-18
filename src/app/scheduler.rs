@@ -6,8 +6,8 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
     app::backfill::{
-        delisted_company, dividend, etf, financial_statement, isin, net_asset_value_per_share,
-        qualified_foreign_institutional_investor, revenue, stock_weight,
+        capital_reduction, delisted_company, dividend, etf, financial_statement, isin,
+        net_asset_value_per_share, qualified_foreign_institutional_investor, revenue, stock_weight,
     },
     app::calculation,
     app::event,
@@ -126,6 +126,15 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
         ),
         // 05:30 更新台股 ETF 資訊
         create_job("0 30 5 * * *", "更新台股 ETF 資訊", etf::execute),
+        // 05:32 回補交易所公告的減資事件
+        // 上櫃的 revivt 公告只涵蓋當週、無法查歷史，因此必須每天抓才不會漏。
+        // 必須排在 05:40 的 CAGR 之前：減資造成的價格跳動要先登錄成公司行動，
+        // 當日的報酬率才不會把它誤算成真實漲跌。
+        create_job(
+            "0 32 5 * * *",
+            "回補交易所公告的減資事件",
+            capital_reduction::execute,
+        ),
         // 05:35 掃描交易所除權息公告，補齊漏抓的股利事件
         // 必須排在 05:40 的 CAGR 之前，讓當日新補進來的股利能立刻被納入計算
         create_job(

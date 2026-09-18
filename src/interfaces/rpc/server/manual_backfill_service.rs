@@ -9,7 +9,9 @@ use rust_decimal::Decimal;
 use tonic::{Request, Response, Status};
 
 use crate::{
-    domain::performance::{CagrPeriod, CorporateAction, CorporateActionRepository},
+    domain::performance::{
+        CagrPeriod, CorporateAction, CorporateActionRepository, CorporateActionType,
+    },
     infra::database::repository::corporate_action::PgCorporateActionRepository,
     interfaces::rpc::manual_backfill::{
         BackfillJob,
@@ -196,6 +198,10 @@ impl ManualBackfillService for ManualBackfillServiceImpl {
         let action = CorporateAction {
             stock_symbol: stock_symbol.clone(),
             effective_date,
+            // 手動登錄介面只收比例，沒有型別欄位，只能沿用比例推斷這條退路。
+            // 已知限制：減資退還股款若比例大於 1 會被判成分割，
+            // 這類事件請改用 twse::capital_reduction 的自動回補。
+            action_type: CorporateActionType::infer_from_ratio(share_ratio),
             share_ratio,
             note: req.note.trim().to_owned(),
         };

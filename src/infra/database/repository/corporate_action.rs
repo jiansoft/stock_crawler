@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use sqlx::Row;
 
-use crate::domain::performance::entity::CorporateAction;
+use crate::domain::performance::entity::{CorporateAction, CorporateActionType};
 use crate::domain::performance::repository::CorporateActionRepository;
 use crate::infra::database;
 
@@ -36,13 +36,9 @@ impl CorporateActionRepository for PgCorporateActionRepository {
                 updated_time = now()
         "#;
 
-        // 比例小於 1 是減資或反向分割，大於 1 是分割；型別由比例推得，
-        // 讓登錄者少填一個容易與比例矛盾的欄位。
-        let action_type = if action.share_ratio < Decimal::ONE {
-            "capital_reduction"
-        } else {
-            "split"
-        };
+        // 型別由呼叫端明確指定，不再由比例反推：減資退還股款的比例可能大於 1
+        // （參考價已扣掉退還的現金），反推會把它誤存成 split。
+        let action_type = action.action_type.as_str();
 
         let result = sqlx::query(sql)
             .bind(&action.stock_symbol)
@@ -59,7 +55,7 @@ impl CorporateActionRepository for PgCorporateActionRepository {
 
     async fn fetch_by_symbol(&self, stock_symbol: &str) -> Result<Vec<CorporateAction>> {
         let sql = r#"
-            SELECT stock_symbol, effective_date, share_ratio, note
+            SELECT stock_symbol, effective_date, action_type, share_ratio, note
             FROM corporate_action
             WHERE stock_symbol = $1
             ORDER BY effective_date
@@ -73,10 +69,18 @@ impl CorporateActionRepository for PgCorporateActionRepository {
 
         rows.into_iter()
             .map(|row| {
+                let share_ratio = row.try_get::<Decimal, _>("share_ratio")?;
+                // 舊資料或人工以 SQL 寫入的列可能有無法辨識的 action_type，
+                // 此時退回以比例推斷，至少不會讓整批查詢失敗。
+                let action_type =
+                    CorporateActionType::from_db_value(row.try_get::<&str, _>("action_type")?)
+                        .unwrap_or_else(|| CorporateActionType::infer_from_ratio(share_ratio));
+
                 Ok(CorporateAction {
                     stock_symbol: row.try_get::<String, _>("stock_symbol")?,
                     effective_date: row.try_get::<NaiveDate, _>("effective_date")?,
-                    share_ratio: row.try_get::<Decimal, _>("share_ratio")?,
+                    action_type,
+                    share_ratio,
                     note: row.try_get::<String, _>("note")?,
                 })
             })
@@ -107,10 +111,10 @@ mod tests {
         not(feature = "integration-tests"),
         ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
     )]
-    async fn test_save_is_idempotent_and_infers_action_type() {
+    async fn test_save_is_idempotent_and_persists_action_type() {
         dotenvy::dotenv().ok();
         if database::ping().await.is_err() {
-            println!("跳過 test_save_is_idempotent_and_infers_action_type：無資料庫連接");
+            println!("跳過 test_save_is_idempotent_and_persists_action_type：無資料庫連接");
             return;
         }
 
@@ -120,6 +124,7 @@ mod tests {
         let mut action = CorporateAction {
             stock_symbol: FAKE_SYMBOL.to_string(),
             effective_date: date(1990, 1, 5),
+            action_type: CorporateActionType::Split,
             share_ratio: dec!(4),
             note: "1:4 分割".to_string(),
         };
@@ -134,6 +139,7 @@ mod tests {
         assert_eq!(saved[0].note, "1:4 分割");
 
         // 同一主鍵重送是修正而非新增。
+        action.action_type = CorporateActionType::CapitalReduction;
         action.share_ratio = dec!(0.7);
         action.note = "更正為減資三成".to_string();
         repo.save(&action).await.expect("save again");
@@ -145,7 +151,9 @@ mod tests {
         assert_eq!(saved.len(), 1, "重複登錄不應新增資料列");
         assert_eq!(saved[0].share_ratio, dec!(0.7));
 
-        // 比例小於 1 應被歸類為減資。
+        assert_eq!(saved[0].action_type, CorporateActionType::CapitalReduction);
+
+        // 型別以呼叫端指定者為準。
         let action_type: String =
             sqlx::query_scalar("SELECT action_type FROM corporate_action WHERE stock_symbol = $1")
                 .bind(FAKE_SYMBOL)
@@ -176,6 +184,7 @@ mod tests {
             repo.save(&CorporateAction {
                 stock_symbol: FAKE_SYMBOL.to_string(),
                 effective_date: date(1990, 1, day),
+                action_type: CorporateActionType::Split,
                 share_ratio: ratio,
                 note: String::new(),
             })
@@ -197,6 +206,48 @@ mod tests {
                 .await
                 .expect("fetch other symbol")
                 .is_empty()
+        );
+
+        cleanup().await;
+    }
+
+    /// 迴歸測試：減資退還股款的比例可能大於 1（參考價已扣掉退還的現金），
+    /// 舊實作以 `share_ratio < 1` 反推型別會把它誤存成 `split`。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn test_save_keeps_capital_reduction_when_ratio_exceeds_one() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 test_save_keeps_capital_reduction_when_ratio_exceeds_one：無資料庫連接");
+            return;
+        }
+
+        let repo = PgCorporateActionRepository::new();
+        cleanup().await;
+
+        // 取自 8201 無敵 2016-07-18：前收 8.69、恢復買賣參考價 8.12。
+        repo.save(&CorporateAction {
+            stock_symbol: FAKE_SYMBOL.to_string(),
+            effective_date: date(1990, 2, 1),
+            action_type: CorporateActionType::CapitalReduction,
+            share_ratio: dec!(1.0702),
+            note: "減資退還股款".to_string(),
+        })
+        .await
+        .expect("save");
+
+        let saved = repo
+            .fetch_by_symbol(FAKE_SYMBOL)
+            .await
+            .expect("fetch_by_symbol");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(
+            saved[0].action_type,
+            CorporateActionType::CapitalReduction,
+            "比例大於 1 仍須維持減資型別"
         );
 
         cleanup().await;

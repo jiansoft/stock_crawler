@@ -4,7 +4,9 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use sqlx::Row;
 
-use crate::domain::performance::{CorporateAction, DividendEvent, source::CagrSourceRepository};
+use crate::domain::performance::{
+    CorporateAction, CorporateActionType, DividendEvent, source::CagrSourceRepository,
+};
 use crate::infra::database;
 
 /// `DailyQuotes."Date"` 的預設哨兵值下界。
@@ -45,6 +47,46 @@ impl PgCagrSourceRepository {
     /// 建立實例。
     pub fn new() -> Self {
         Self
+    }
+
+    /// 取得指定股票在指定日期的單日收盤價變動率（%）。
+    ///
+    /// 供減資待辦清單標示跳動方向與幅度：正值代表價格上跳（減資的典型特徵），
+    /// 負值代表下跳（較可能是分割）。
+    ///
+    /// 刻意不放進 [`CagrSourceRepository`] trait：這是報表輔助資訊，
+    /// CAGR 的計算流程並不需要它，放進 trait 會讓所有測試替身被迫實作。
+    ///
+    /// 查無前一交易日報價（例如該日是該股第一天有資料）時回傳 `None`。
+    pub async fn fetch_single_day_change_percent(
+        &self,
+        stock_symbol: &str,
+        date: NaiveDate,
+    ) -> Result<Option<Decimal>> {
+        let sql = r#"
+            WITH px AS (
+                SELECT "Date",
+                       "ClosingPrice",
+                       LAG("ClosingPrice") OVER (ORDER BY "Date") AS prev_price
+                FROM "DailyQuotes"
+                WHERE stock_symbol = $1 AND "Date" <= $2 AND "ClosingPrice" > 0
+                ORDER BY "Date" DESC
+                LIMIT 2
+            )
+            SELECT ("ClosingPrice" / prev_price - 1) * 100 AS change_percent
+            FROM px
+            WHERE "Date" = $2 AND prev_price IS NOT NULL AND prev_price > 0
+        "#;
+
+        let value: Option<Decimal> = sqlx::query_scalar(sql)
+            .bind(stock_symbol)
+            .bind(date)
+            .fetch_optional(database::get_connection())
+            .await
+            .context("Failed to fetch single day change percent")?
+            .flatten();
+
+        Ok(value)
     }
 }
 
@@ -291,7 +333,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         // 比例非正數的列直接在 SQL 濾掉：那是登錄錯誤（0 會讓持股歸零、
         // 負數毫無意義），寧可當成「沒登錄」也不要算出錯誤的報酬率。
         let sql = r#"
-            SELECT stock_symbol, effective_date, share_ratio, note
+            SELECT stock_symbol, effective_date, action_type, share_ratio, note
             FROM corporate_action
             WHERE effective_date > $1 AND share_ratio > 0
             ORDER BY stock_symbol, effective_date
@@ -305,10 +347,16 @@ impl CagrSourceRepository for PgCagrSourceRepository {
 
         rows.into_iter()
             .map(|row| {
+                let share_ratio = row.try_get::<Decimal, _>("share_ratio")?;
+                let action_type =
+                    CorporateActionType::from_db_value(row.try_get::<&str, _>("action_type")?)
+                        .unwrap_or_else(|| CorporateActionType::infer_from_ratio(share_ratio));
+
                 Ok(CorporateAction {
                     stock_symbol: row.try_get::<String, _>("stock_symbol")?,
                     effective_date: row.try_get::<NaiveDate, _>("effective_date")?,
-                    share_ratio: row.try_get::<Decimal, _>("share_ratio")?,
+                    action_type,
+                    share_ratio,
                     note: row.try_get::<String, _>("note")?,
                 })
             })
