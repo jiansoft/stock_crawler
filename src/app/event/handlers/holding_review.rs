@@ -3,41 +3,37 @@
 //! 兩個事件的處理流程一樣——收到「某期資料已更新」後自己去查持股、組訊息、送出——
 //! 因此放在同一個模組共用排版工具。
 //!
-//! 只看**目前持有**的股票。全市場每個月有數百檔營收年增率超過門檻，全推等於製造雜訊；
+//! 只看**目前持有**的股票。全市場每個月有上千檔公布營收，全推等於製造雜訊；
 //! 這兩則通知的用途是「我手上的股票發生了什麼」，不是市場掃描。
+//!
+//! 月營收通知列出**每一檔**持股（不設年增率門檻）並依年增率由高到低排序，
+//! 讓整個組合的動能在同一則訊息裡一次排開，便於決定加碼或減持。
 
 use std::fmt::Write;
 
 use anyhow::Result;
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 
 use crate::app::event::taiwan_stock::format_decimal_with_commas;
 // 通知走 core::alert（port），跳脫工具走 core::util::text——
 // app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
 use crate::core::{alert, util::text};
-use crate::domain::financial::entity::{HoldingFinancialAlert, HoldingRevenueAlert};
+use crate::domain::financial::entity::{
+    EpsEstimateBasis, HoldingFinancialAlert, HoldingRevenueAlert,
+};
 use crate::domain::financial::repository::FinancialRepository;
 use crate::infra::database::repository::financial::PgFinancialRepository;
 
 use super::EventDispatcher;
 
-/// 月營收年增率的推播門檻（%，取絕對值）。
-///
-/// 大跌與大漲都值得看，所以比較的是絕對值。20% 是經驗值：低於這個幅度的月營收波動
-/// 在台股非常普遍（尤其是工作天數差異造成的），推播出來會很快被當成雜訊而忽略。
-const REVENUE_YOY_THRESHOLD: Decimal = dec!(20);
-
 impl EventDispatcher {
-    /// 處理 `MonthlyRevenueUpdated` 事件：推播持股中年增率超過門檻的月營收。
+    /// 處理 `MonthlyRevenueUpdated` 事件：推播全部持股的月營收。
     pub(super) async fn handle_monthly_revenue_updated(date: i64) -> Result<()> {
         let repo = PgFinancialRepository::new();
-        let alerts = repo
-            .fetch_holding_revenue_alerts(date, REVENUE_YOY_THRESHOLD)
-            .await?;
+        let alerts = repo.fetch_holding_revenue_alerts(date).await?;
 
         if alerts.is_empty() {
-            tracing::info!("持股月營收通知：{} 沒有超過門檻的項目", date);
+            tracing::info!("持股月營收通知：{} 沒有任何持股公布月營收", date);
             return Ok(());
         }
 
@@ -65,28 +61,78 @@ impl EventDispatcher {
     }
 
     /// 組出月營收通知訊息。
+    ///
+    /// 每檔兩行：第一行是當月數字（產業別放在股名前，方便一眼看出族群是否同步轉強），
+    /// 第二行是累計數字與由累計營收推估的 EPS。
     fn build_revenue_message(date: i64, alerts: &[HoldingRevenueAlert]) -> String {
-        let mut msg = String::with_capacity(1024);
+        // 每檔兩行、每行約 60~80 個字元，先抓一個不會反覆擴張的容量。
+        let mut msg = String::with_capacity(alerts.len() * 192 + 64);
         let _ = writeln!(
             &mut msg,
-            "{} 持股月營收（年增率達 {}%）︰",
+            "{} 持股月營收（共 {} 檔，依年增率排序；營收單位：千元）︰",
             text::escape_markdown_v2(Self::format_revenue_month(date)),
-            text::escape_markdown_v2(REVENUE_YOY_THRESHOLD.normalize().to_string())
+            alerts.len()
         );
 
         for alert in alerts {
             let _ = writeln!(
                 &mut msg,
-                "    {} {} 營收︰{}元 年增︰{}% 月增︰{}%",
+                "    {} {}{} 營收︰{} 年增︰{}% 月增︰{}%",
                 Self::stock_link(&alert.stock_symbol),
+                Self::format_industry(alert),
                 text::escape_markdown_v2(&alert.stock_name),
                 text::escape_markdown_v2(format_decimal_with_commas(alert.monthly)),
                 text::escape_markdown_v2(Self::with_sign(alert.compared_with_last_year_same_month)),
                 text::escape_markdown_v2(Self::with_sign(alert.compared_with_last_month))
             );
+            let _ = writeln!(
+                &mut msg,
+                "        累計︰{} 累計年增︰{}%{}",
+                text::escape_markdown_v2(format_decimal_with_commas(alert.monthly_accumulated)),
+                text::escape_markdown_v2(Self::with_sign(
+                    alert.accumulated_compared_with_last_year
+                )),
+                Self::format_estimated_eps(alert)
+            );
         }
 
         msg
+    }
+
+    /// 產業分類名稱，後面補一個空白接在股名前；查無分類時回傳空字串。
+    fn format_industry(alert: &HoldingRevenueAlert) -> String {
+        match &alert.industry_name {
+            Some(name) if !name.is_empty() => format!("{} ", text::escape_markdown_v2(name)),
+            _ => String::new(),
+        }
+    }
+
+    /// 組出「 推估EPS︰X（年估 Y）」這段文字；兩種推估法都算不出來時回傳空字串。
+    ///
+    /// 與去年同季 EPS 的處理一致：沒有可用資料時寧可整段不顯示，也不要把查無資料畫成 0。
+    /// 12 月的累計本身就是全年，年估與累計相同，此時不再重複列出。
+    ///
+    /// 用「推估／概估」兩個詞區分計算依據——概估是今年還沒有季報可錨定時的退路，
+    /// 誤差比推估大一個量級，混在一起看會做出錯誤的加減碼判斷。
+    fn format_estimated_eps(alert: &HoldingRevenueAlert) -> String {
+        let Some(estimate) = alert.estimate_eps() else {
+            return String::new();
+        };
+
+        let label = match estimate.basis {
+            EpsEstimateBasis::ReportedQuarters => "推估EPS",
+            EpsEstimateBasis::NetIncomeMargin => "概估EPS",
+        };
+        let annual = if alert.accumulated_months() < 12 {
+            format!("（年估 {}）", format_decimal_with_commas(estimate.annual))
+        } else {
+            String::new()
+        };
+
+        text::escape_markdown_v2(format!(
+            " {label}︰{}{annual}",
+            format_decimal_with_commas(estimate.accumulated)
+        ))
     }
 
     /// 組出季報通知訊息。
@@ -163,15 +209,25 @@ impl EventDispatcher {
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal_macros::dec;
+
     use super::*;
 
     fn revenue_alert(symbol: &str, name: &str, yoy: Decimal, mom: Decimal) -> HoldingRevenueAlert {
         HoldingRevenueAlert {
             stock_symbol: symbol.to_string(),
             stock_name: name.to_string(),
+            industry_name: Some("半導體業".to_string()),
             monthly: dec!(250000000),
+            monthly_accumulated: dec!(1000000),
             compared_with_last_month: mom,
             compared_with_last_year_same_month: yoy,
+            accumulated_compared_with_last_year: dec!(12.5),
+            issued_share: 100_000_000,
+            net_income_margin: Some(dec!(40)),
+            // 錨點 EPS 3 元、錨點營收 600,000 千元 ⇒ 3 × (1,000,000 ÷ 600,000) ＝ 5 元。
+            anchor_eps: Some(dec!(3)),
+            anchor_accumulated_revenue: Some(dec!(600000)),
             date: 202608,
         }
     }
@@ -218,6 +274,108 @@ mod tests {
         // 小數點是 MarkdownV2 保留字元，沒跳脫整則訊息會被 Bot API 退回。
         assert!(msg.contains("\\+33\\.25"), "{msg}");
         assert!(msg.contains("\\-25\\.5"), "{msg}");
+    }
+
+    #[test]
+    fn revenue_message_puts_industry_before_stock_name() {
+        let msg = EventDispatcher::build_revenue_message(
+            202608,
+            &[revenue_alert("2330", "台積電", dec!(33.25), dec!(-4.1))],
+        );
+
+        assert!(msg.contains("半導體業 台積電"), "產業別要接在股名前：{msg}");
+    }
+
+    // 查無產業分類時整段省略，不留下多餘空白或空字串。
+    #[test]
+    fn revenue_message_omits_industry_when_unknown() {
+        let mut alert = revenue_alert("2330", "台積電", dec!(33.25), dec!(-4.1));
+        alert.industry_name = None;
+
+        let msg = EventDispatcher::build_revenue_message(202608, &[alert]);
+
+        assert!(msg.contains(") 台積電 營收︰"), "{msg}");
+    }
+
+    // 錨點 EPS 3 元 × (累計 1,000,000 ÷ 錨點 600,000) ＝ 5 元；8 個月年化 ＝ 7.5 元。
+    #[test]
+    fn revenue_message_shows_estimated_eps_from_accumulated_revenue() {
+        let msg = EventDispatcher::build_revenue_message(
+            202608,
+            &[revenue_alert("2330", "台積電", dec!(33.25), dec!(-4.1))],
+        );
+
+        assert!(msg.contains("累計︰1,000,000"), "{msg}");
+        assert!(msg.contains(r"累計年增︰\+12\.5%"), "{msg}");
+        assert!(msg.contains(r"推估EPS︰5（年估 7\.5）"), "{msg}");
+    }
+
+    // 今年還沒公布季報時退回淨利率法，標籤要換成「概估」以示區別。
+    #[test]
+    fn revenue_message_labels_margin_fallback_as_rough_estimate() {
+        let mut alert = revenue_alert("2330", "台積電", dec!(33.25), dec!(-4.1));
+        alert.anchor_eps = None;
+        alert.anchor_accumulated_revenue = None;
+
+        let msg = EventDispatcher::build_revenue_message(202608, &[alert]);
+
+        assert!(msg.contains("概估EPS︰4"), "{msg}");
+        assert!(!msg.contains("推估EPS"), "{msg}");
+    }
+
+    // 兩種推估法都缺料時整段省略，不要把「查無資料」畫成 0。
+    #[test]
+    fn revenue_message_omits_estimated_eps_when_data_is_missing() {
+        let mut alert = revenue_alert("2330", "台積電", dec!(33.25), dec!(-4.1));
+        alert.anchor_eps = None;
+        alert.anchor_accumulated_revenue = None;
+        alert.net_income_margin = None;
+
+        let msg = EventDispatcher::build_revenue_message(202608, &[alert]);
+
+        assert!(!msg.contains("估EPS"), "{msg}");
+    }
+
+    // 12 月的累計就是全年，年估與累計相同時不再重複列出。
+    #[test]
+    fn revenue_message_omits_annual_estimate_in_december() {
+        let mut alert = revenue_alert("2330", "台積電", dec!(33.25), dec!(-4.1));
+        alert.date = 202612;
+
+        let msg = EventDispatcher::build_revenue_message(202612, &[alert]);
+
+        assert!(msg.contains("推估EPS︰5"), "{msg}");
+        assert!(!msg.contains("年估"), "{msg}");
+    }
+
+    // 排序由 SQL 決定，訊息必須原封不動地照傳入順序輸出。
+    #[test]
+    fn revenue_message_keeps_input_order() {
+        let msg = EventDispatcher::build_revenue_message(
+            202608,
+            &[
+                revenue_alert("2330", "台積電", dec!(33.25), dec!(-4.1)),
+                revenue_alert("2454", "聯發科", dec!(-25.5), dec!(1.2)),
+            ],
+        );
+
+        let tsmc = msg.find("台積電").expect("台積電 應該在訊息中");
+        let mtk = msg.find("聯發科").expect("聯發科 應該在訊息中");
+        assert!(tsmc < mtk, "{msg}");
+    }
+
+    // 標題要標明是全部持股與排序方式，不再出現舊版的年增率門檻。
+    #[test]
+    fn revenue_message_header_reports_count_and_sorting() {
+        let msg = EventDispatcher::build_revenue_message(
+            202608,
+            &[
+                revenue_alert("2330", "台積電", dec!(33.25), dec!(-4.1)),
+                revenue_alert("2454", "聯發科", dec!(-25.5), dec!(1.2)),
+            ],
+        );
+
+        assert!(msg.contains("共 2 檔，依年增率排序"), "{msg}");
     }
 
     #[test]

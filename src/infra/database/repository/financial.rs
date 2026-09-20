@@ -255,13 +255,9 @@ impl FinancialRepository for PgFinancialRepository {
 
     // === 持股通知 (Holding alerts) ===
 
-    async fn fetch_holding_revenue_alerts(
-        &self,
-        date: i64,
-        yoy_threshold: Decimal,
-    ) -> Result<Vec<HoldingRevenueAlert>> {
+    async fn fetch_holding_revenue_alerts(&self, date: i64) -> Result<Vec<HoldingRevenueAlert>> {
         // 查詢已直接回傳領域實體，這裡不需要額外映射。
-        holding_alert::fetch_holding_revenue_alerts(date, yoy_threshold).await
+        holding_alert::fetch_holding_revenue_alerts(date).await
     }
 
     async fn fetch_holding_financial_alerts(

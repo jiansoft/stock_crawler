@@ -73,14 +73,10 @@ pub trait FinancialRepository: Send + Sync {
 
     // === 持股通知 (Holding alerts) ===
 
-    /// 讀取指定月份中，年增率絕對值達門檻的**持股**月營收。
+    /// 讀取指定月份**所有持股**的月營收，依年增率由高到低排序。
     ///
     /// `date` 為 yyyyMM 格式的營收月份。只看持股，不看全市場。
-    async fn fetch_holding_revenue_alerts(
-        &self,
-        date: i64,
-        yoy_threshold: Decimal,
-    ) -> Result<Vec<HoldingRevenueAlert>>;
+    async fn fetch_holding_revenue_alerts(&self, date: i64) -> Result<Vec<HoldingRevenueAlert>>;
 
     /// 讀取指定年度、季度的**持股**季報，並帶出去年同季的 EPS。
     async fn fetch_holding_financial_alerts(
