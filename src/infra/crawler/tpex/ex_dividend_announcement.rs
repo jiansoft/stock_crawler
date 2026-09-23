@@ -11,6 +11,9 @@
 //!
 //! 另一個差別是空值表示法：TPEx 在「沒有配股」時給的是 `0.00000000` 而不是空字串，
 //! 所以 0 在這裡是真正的 0；仍以空字串代表未公布。
+//!
+//! 「除權」可能只是現金增資（無償配股率 0、現增配股率大於 0），這類資料列沒有股利，
+//! 會由 [`classify_ex_dividend`] 辨識後丟棄。
 
 use anyhow::Result;
 use serde::Deserialize;
@@ -21,7 +24,7 @@ use crate::{
         util::{self, datetime},
     },
     infra::crawler::{
-        share::{ExDividendAnnouncement, parse_ex_dividend_kind},
+        share::{ExDividendAnnouncement, classify_ex_dividend},
         tpex,
     },
 };
@@ -47,6 +50,9 @@ struct TpexExRightPrepostRaw {
     /// 無償配股率（股/股）。
     #[serde(rename = "StockDividendRatio")]
     stock_dividend_ratio: String,
+    /// 現金增資認購配股率（股/股）；非現增事件為 `0.00000000`。
+    #[serde(rename = "SubscriptionRatioToNewSharesIssued", default)]
+    subscription_ratio: String,
     /// 現金股利（元/股）。
     #[serde(rename = "CashDividend")]
     cash_dividend: String,
@@ -72,11 +78,20 @@ pub async fn visit() -> Result<Vec<ExDividendAnnouncement>> {
 /// 將 TPEx 原始資料列轉成共用的 [`ExDividendAnnouncement`]。
 ///
 /// 這是純函式，可用 `testdata/ex_dividend_prepost.json` fixture 直接驗證。
+/// 純現金增資除權（沒有任何股利）的資料列會丟棄。
 fn parse_announcements(rows: Vec<TpexExRightPrepostRaw>) -> Vec<ExDividendAnnouncement> {
     rows.into_iter()
         .filter_map(|row| {
             let ex_date = datetime::parse_taiwan_date_short(row.date.trim())?;
-            let (is_cash, is_stock) = parse_ex_dividend_kind(&row.ex_dividend);
+            let stock_dividend_ratio = parse_optional_decimal(&row.stock_dividend_ratio);
+            let (is_cash, is_stock) = classify_ex_dividend(
+                &row.ex_dividend,
+                stock_dividend_ratio,
+                parse_optional_decimal(&row.subscription_ratio),
+            );
+            if !is_cash && !is_stock {
+                return None;
+            }
 
             Some(ExDividendAnnouncement {
                 stock_symbol: row.code.trim().to_string(),
@@ -85,7 +100,7 @@ fn parse_announcements(rows: Vec<TpexExRightPrepostRaw>) -> Vec<ExDividendAnnoun
                 is_cash,
                 is_stock,
                 cash_dividend: parse_optional_decimal(&row.cash_dividend),
-                stock_dividend_ratio: parse_optional_decimal(&row.stock_dividend_ratio),
+                stock_dividend_ratio,
                 market: StockExchangeMarket::OverTheCounter,
             })
         })
@@ -110,7 +125,7 @@ mod tests {
 
     /// 以真實回應 fixture 驗證解析結果。
     ///
-    /// 涵蓋：除息、除權息、純除權（現金增資，無償配股率為 0）。
+    /// 涵蓋：除息、除權息、純除權（現金增資，無償配股率為 0，不是股利而被丟棄）。
     #[test]
     fn test_parse_announcements_with_fixture() {
         // include_str! 的路徑相對於本檔案（tpex/ex_dividend_announcement.rs）→ tpex/testdata/。
@@ -119,7 +134,7 @@ mod tests {
             serde_json::from_str(FIXTURE).expect("fixture should parse");
         let result = parse_announcements(rows);
 
-        assert_eq!(result.len(), 4);
+        assert_eq!(result.len(), 3);
 
         let cash_only = &result[0];
         assert_eq!(cash_only.stock_symbol, "3287");
@@ -142,14 +157,8 @@ mod tests {
         assert_eq!(both.cash_dividend, Some(dec!(0.4)));
         assert_eq!(both.stock_dividend(), Some(dec!(0.5999999)));
 
-        // 純除權（現金增資）：無償配股率是真正的 0，不是未公布。
-        let stock_only = result
-            .iter()
-            .find(|item| item.stock_symbol == "3234")
-            .expect("3234 should exist");
-        assert!(!stock_only.is_cash);
-        assert!(stock_only.is_stock);
-        assert_eq!(stock_only.stock_dividend_ratio, Some(dec!(0)));
+        // 純除權（現金增資）：沒有任何股利，不是股利事件。
+        assert!(result.iter().all(|item| item.stock_symbol != "3234"));
     }
 
     #[test]
@@ -160,10 +169,33 @@ mod tests {
             name: "環球晶".to_string(),
             ex_dividend: "除息".to_string(),
             stock_dividend_ratio: "0.00000000".to_string(),
+            subscription_ratio: "0.00000000".to_string(),
             cash_dividend: "10.00000000".to_string(),
         }];
 
         assert!(parse_announcements(rows).is_empty());
+    }
+
+    /// 現金股利＋現增的「除權息」只算除息，否則會在只有現金股利的資料列寫入除權日。
+    ///
+    /// 資料取自 2026-09-23 的 `tpex_exright_prepost`：3260 威剛。
+    #[test]
+    fn test_parse_announcements_cash_with_rights_issue_is_cash_only() {
+        let rows = vec![TpexExRightPrepostRaw {
+            date: "1150921".to_string(),
+            code: "3260".to_string(),
+            name: "威剛".to_string(),
+            ex_dividend: "除權息".to_string(),
+            stock_dividend_ratio: "0.00000000".to_string(),
+            subscription_ratio: "0.06163263".to_string(),
+            cash_dividend: "18.00773559".to_string(),
+        }];
+
+        let result = parse_announcements(rows);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_cash);
+        assert!(!result[0].is_stock);
     }
 
     #[tokio::test]

@@ -142,6 +142,7 @@ pub(super) async fn scan_ex_dividend_announcements() -> Result<ScanOutcome> {
     if listed_failed && otc_failed {
         return Err(anyhow!("上市與上櫃的除權息預告表都無法取得"));
     }
+    announcements.retain(|announcement| !is_exchange_traded_note(&announcement.stock_symbol));
 
     let allotments = match allotments {
         Ok(data) => index_allotments(data),
@@ -172,9 +173,28 @@ pub(super) async fn scan_ex_dividend_announcements() -> Result<ScanOutcome> {
     apply_plan(&repository, plan).await
 }
 
+/// 判斷代號是否為 ETN（指數投資證券，代號為 `02` 開頭的六碼）。
+///
+/// ETN 的配息不收錄在 `dividend` 資料表（表中沒有任何 ETN），Yahoo 也沒有 ETN 的
+/// 股利政策頁；留在掃描裡只會變成「無法判定期別」並多一次注定失敗的 Yahoo 請求，
+/// 因此在進入期別判定前就排除。
+fn is_exchange_traded_note(symbol: &str) -> bool {
+    symbol.len() == 6 && symbol.starts_with("02") && symbol.bytes().all(|b| b.is_ascii_digit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_exchange_traded_note() {
+        assert!(is_exchange_traded_note("020035"));
+        assert!(is_exchange_traded_note("020001"));
+        assert!(!is_exchange_traded_note("0050"));
+        assert!(!is_exchange_traded_note("00400A"));
+        assert!(!is_exchange_traded_note("2890"));
+        assert!(!is_exchange_traded_note("02003B"));
+    }
 
     /// 對真實來源做一次不碰資料庫的乾跑，印出配對統計。
     ///
