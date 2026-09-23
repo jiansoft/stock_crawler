@@ -7,5 +7,5 @@ create table public.company_word
     updated_time timestamp with time zone default ('now'::text)::timestamp with time zone not null
 );
 
-create unique index "company_word-word-idx"
+create unique index "idx-word"
     on public.company_word (word) include (word_id);
