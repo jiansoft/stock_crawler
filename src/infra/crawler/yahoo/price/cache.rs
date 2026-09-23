@@ -566,13 +566,16 @@ fn apply_category_snapshots(
             for (symbol, snapshot) in category_snapshots {
                 let price = snapshot.price;
                 if !SHARE.is_valid_price(&symbol, price, snapshot.last_close) {
-                    tracing::warn!(
-                        "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                        symbol,
-                        price,
-                        snapshot.last_close,
-                        snapshot.source_site
-                    );
+                    // 價格 0 是尚未成交（冷門股、特別股開盤後常見），不是異常，只略過不記錄
+                    if price > Decimal::ZERO {
+                        tracing::warn!(
+                            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                            symbol,
+                            price,
+                            snapshot.last_close,
+                            snapshot.source_site
+                        );
+                    }
                     continue;
                 }
                 let has_changed = snapshot.price != Decimal::ZERO

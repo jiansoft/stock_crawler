@@ -7,19 +7,27 @@ use super::realtime::RealtimeSnapshot;
 use super::share::Share;
 
 impl Share {
-    /// 取得最後交易日的收盤價，優先從快取中取得，否則退回使用傳入的備援值。
-    fn get_last_close(&self, symbol: &str, fallback: Decimal) -> Decimal {
+    /// 取得資料庫最後交易日的收盤價；快取沒有或非正數時回傳 `None`。
+    fn get_db_last_close(&self, symbol: &str) -> Option<Decimal> {
         self.last_trading_day_quotes
             .read()
             .ok()
             .and_then(|cache| cache.get(symbol).map(|q| q.closing_price))
             .filter(|&p| p > Decimal::ZERO)
-            .unwrap_or(fallback)
     }
 
-    /// 檢查採集到的股價是否合法（與上一個交易日的最後收盤價相比，差距是否在 10.5% 以內）。
+    /// 檢查採集到的股價是否合法（與比對基準相差是否在 10.5% 以內）。
     ///
-    /// 若無昨收價可比對，視為有效並回傳 `true`。
+    /// 比對基準有兩個，任一個通過即視為有效：
+    /// - 資料庫最後交易日收盤價。
+    /// - 採集站點提供的昨收／參考價（`snapshot_last_close`）。
+    ///
+    /// 除權息當日的漲跌幅是以「除權息參考價」計算，而資料庫收盤價是除權息前的價格；
+    /// 只比對資料庫收盤價會把當天的正常成交價全部當成異常（例如 2542 除息 4 元，
+    /// 參考價 41.45、成交 39.05，相對除息前收盤 45.45 跌了 14%）。Yahoo 等站點
+    /// 在除權息日回報的昨收即為參考價，因此兩個基準都要納入。
+    ///
+    /// `price <= 0`（尚未成交）一律回傳 `false`；若兩個基準都沒有有效值，無法比對，視為有效。
     pub fn is_valid_price(
         &self,
         symbol: &str,
@@ -30,18 +38,20 @@ impl Share {
             return false;
         }
 
-        let last_close = self.get_last_close(symbol, snapshot_last_close);
+        let site_last_close = Some(snapshot_last_close).filter(|&p| p > Decimal::ZERO);
+        let mut baselines = [self.get_db_last_close(symbol), site_last_close]
+            .into_iter()
+            .flatten()
+            .peekable();
 
-        if last_close <= Decimal::ZERO {
+        if baselines.peek().is_none() {
             // 如果沒有有效的昨收價，無法進行比較，暫且視為有效
             return true;
         }
 
         // 10.5% (0.105) 昨收價差做為異常閾值（台股漲跌幅上限 10%）
         // 使用乘法比對比除法運算更安全、且能避免 Decimal 除法時可能產生的精度截斷
-        let diff = (price - last_close).abs();
-        let limit = last_close * Decimal::new(105, 3);
-        diff <= limit
+        baselines.any(|last_close| (price - last_close).abs() <= last_close * Decimal::new(105, 3))
     }
 
     /// 以新抓到的完整快照覆蓋快照快取，自動過濾與昨收價相差 10.5% 以上的異常價格，並保留舊有合法值。
@@ -55,13 +65,16 @@ impl Share {
             // 檢查每一檔股票的新報價是否異常，若是，則將其價格標記為 0 準備過濾/恢復
             for (symbol, new_snap) in &mut snapshots {
                 if !self.is_valid_price(symbol, new_snap.price, new_snap.last_close) {
-                    tracing::warn!(
-                        "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                        symbol,
-                        new_snap.price,
-                        new_snap.last_close,
-                        new_snap.source_site
-                    );
+                    // 價格 0 是尚未成交，不是異常，只過濾不記錄，避免開盤前後洗版
+                    if new_snap.price > Decimal::ZERO {
+                        tracing::warn!(
+                            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                            symbol,
+                            new_snap.price,
+                            new_snap.last_close,
+                            new_snap.source_site
+                        );
+                    }
                     new_snap.price = Decimal::ZERO;
                 }
             }
@@ -183,6 +196,7 @@ mod tests {
     use std::collections::HashMap;
 
     use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
 
     use super::super::realtime::RealtimeSnapshot;
     use super::super::share::Share;
@@ -255,6 +269,53 @@ mod tests {
         assert_eq!(kept.price, old_snapshot.price);
         assert_eq!(kept.source_site, "old");
         assert_eq!(share.get_stock_snapshot("2317"), None);
+    }
+
+    /// 在測試用 `Share` 的最後交易日報價快取寫入單筆收盤價。
+    fn seed_db_last_close(share: &Share, symbol: &str, closing_price: Decimal) {
+        use crate::infra::database::table::last_daily_quotes::LastDailyQuotes;
+
+        let mut quote = LastDailyQuotes::new();
+        quote.stock_symbol = symbol.to_string();
+        quote.closing_price = closing_price;
+        share
+            .last_trading_day_quotes
+            .write()
+            .unwrap()
+            .insert(symbol.to_string(), quote);
+    }
+
+    /// 除息日：資料庫收盤價是除息前價格，站點昨收是除息參考價，成交價只貼近參考價也要放行。
+    #[test]
+    fn is_valid_price_accepts_price_near_site_reference_on_ex_dividend_day() {
+        let share = Share::new();
+        // 2542 興富發 2026-09-23 除息 4 元：除息前收盤 45.45、參考價 41.45
+        seed_db_last_close(&share, "2542", dec!(45.45));
+
+        assert!(share.is_valid_price("2542", dec!(39.05), dec!(41.45)));
+        // 站點仍回報除息前收盤時，無法得知參考價，維持過濾
+        assert!(!share.is_valid_price("2542", dec!(39.05), dec!(45.45)));
+    }
+
+    /// 任一基準通過即有效，但兩個基準都差太多時仍要過濾。
+    #[test]
+    fn is_valid_price_rejects_price_far_from_both_baselines() {
+        let share = Share::new();
+        seed_db_last_close(&share, "6456", dec!(73.6));
+
+        assert!(share.is_valid_price("6456", dec!(78.6), dec!(73.6)));
+        assert!(!share.is_valid_price("6456", dec!(188), dec!(73.6)));
+        assert!(!share.is_valid_price("6456", Decimal::ZERO, dec!(73.6)));
+    }
+
+    /// 沒有任何基準時無法比對，視為有效；只有站點基準時以站點基準比對。
+    #[test]
+    fn is_valid_price_falls_back_to_site_baseline_when_db_missing() {
+        let share = Share::new();
+
+        assert!(share.is_valid_price("2330", dec!(1000), Decimal::ZERO));
+        assert!(share.is_valid_price("2330", dec!(1000), dec!(990)));
+        assert!(!share.is_valid_price("2330", dec!(1200), dec!(990)));
     }
 
     #[test]
