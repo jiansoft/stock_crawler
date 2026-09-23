@@ -1,14 +1,12 @@
 use anyhow::{Result, anyhow};
 use rand::RngExt;
-use tokio_retry::{
-    Retry,
-    strategy::{ExponentialBackoff, jitter},
-};
 
 use crate::{
     app::backfill::acl::YahooDividendAclMapper, domain::dividend::repository::DividendRepository,
     infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
 };
+
+use super::yahoo_fetch;
 
 /// 回補除息/發放日期尚未公布的股利資料。
 ///
@@ -83,24 +81,13 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
 }
 
 /// 從 Yahoo 取得日期欄位，並更新資料庫中的除息/發放日期。
-///
-#[allow(deprecated)]
 async fn backfill_unannounced_dividend_dates_from_yahoo(
     mut entity: crate::domain::dividend::entity::Dividend,
     year: i32,
 ) -> Result<()> {
     let dividend_repo = PgDividendRepository::new();
-    let strategy = ExponentialBackoff::from_millis(100)
-        .map(jitter) // 延遲加入隨機抖動 (Jitter)
-        .take(5); // 限制重試次數為 5 次
-    // 呼叫 Retry::spawn 開啟重試流程
-    let retry_future = Retry::spawn(strategy, || yahoo::dividend::visit(&entity.security_code));
-    let yahoo = match retry_future.await {
-        Ok(yahoo_dividend) => yahoo_dividend,
-        Err(why) => {
-            return Err(anyhow!("{}", why));
-        }
-    };
+    // 重試策略見 yahoo_fetch：有上限的秒級退避，404 不重試。
+    let yahoo = yahoo_fetch::visit_with_retry(&entity.security_code).await?;
 
     // 取得今年度的股利數據
     if let Some(yahoo_dividend_details) = yahoo.get_dividend_by_year(year)
