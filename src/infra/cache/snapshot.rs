@@ -4,10 +4,31 @@ use chrono::Utc;
 use rust_decimal::Decimal;
 
 use super::realtime::RealtimeSnapshot;
+use crate::core::declare::StockExchangeMarket;
+
+/// 上市櫃的異常價格閾值：漲跌幅上限 10% 再加 0.5% 容差。
+const PRICE_LIMIT_TOLERANCE: Decimal = Decimal::from_parts(105, 0, 0, false, 3);
+
+/// 興櫃的異常價格閾值：興櫃無漲跌幅限制，只擋明顯錯誤的值
+/// （例如 HiStock 偶發回報 0.08 而昨收 227.5）。
+const EMERGING_TOLERANCE: Decimal = Decimal::from_parts(5, 0, 0, false, 1);
 use super::share::Share;
 
 impl Share {
     /// 取得資料庫最後交易日的收盤價；快取沒有或非正數時回傳 `None`。
+    /// 股票主檔記載的市場別是否為興櫃；主檔查無此代號時視為否。
+    fn is_emerging_stock(&self, symbol: &str) -> bool {
+        self.stocks
+            .read()
+            .ok()
+            .and_then(|stocks| {
+                stocks
+                    .get(symbol)
+                    .map(|stock| stock.market_id() == StockExchangeMarket::Emerging.serial())
+            })
+            .unwrap_or(false)
+    }
+
     /// 取得當日除權息參考價；當天沒有除權息時為 `None`。
     fn get_ex_rights_reference_price(&self, symbol: &str) -> Option<Decimal> {
         self.ex_rights_reference_prices
@@ -46,11 +67,31 @@ impl Share {
     /// 因此需要自行計算的參考價作為第三個基準。
     ///
     /// `price <= 0`（尚未成交）一律回傳 `false`；若兩個基準都沒有有效值，無法比對，視為有效。
+    ///
+    /// 興櫃股票（依股票主檔的市場別判斷）沒有漲跌幅限制，改用 [`EMERGING_TOLERANCE`]，見
+    /// [`Self::is_valid_price_for_market`]。
     pub fn is_valid_price(
         &self,
         symbol: &str,
         price: Decimal,
         snapshot_last_close: Decimal,
+    ) -> bool {
+        let emerging = self.is_emerging_stock(symbol);
+        self.is_valid_price_for_market(symbol, price, snapshot_last_close, emerging)
+    }
+
+    /// 同 [`Self::is_valid_price`]，但由呼叫端指定是否為興櫃股票。
+    ///
+    /// 來源本身已知市場別時使用（例如 Yahoo 興櫃類股），可涵蓋尚未寫入股票主檔的新興櫃股。
+    /// 興櫃無漲跌幅限制，昨收又是前一日加權平均價，單日偏離 10% 以上很常見
+    /// （2026-09-24 有 12 檔興櫃被誤濾，如 7934 昨收 552.86、成交 630）；
+    /// 只以 [`EMERGING_TOLERANCE`] 擋明顯錯誤的值。
+    pub fn is_valid_price_for_market(
+        &self,
+        symbol: &str,
+        price: Decimal,
+        snapshot_last_close: Decimal,
+        emerging: bool,
     ) -> bool {
         if price <= Decimal::ZERO {
             return false;
@@ -71,9 +112,13 @@ impl Share {
             return true;
         }
 
-        // 10.5% (0.105) 昨收價差做為異常閾值（台股漲跌幅上限 10%）
+        let tolerance = if emerging {
+            EMERGING_TOLERANCE
+        } else {
+            PRICE_LIMIT_TOLERANCE
+        };
         // 使用乘法比對比除法運算更安全、且能避免 Decimal 除法時可能產生的精度截斷
-        baselines.any(|last_close| (price - last_close).abs() <= last_close * Decimal::new(105, 3))
+        baselines.any(|last_close| (price - last_close).abs() <= last_close * tolerance)
     }
 
     /// 以新抓到的完整快照覆蓋快照快取，自動過濾與昨收價相差 10.5% 以上的異常價格，並保留舊有合法值。
@@ -356,6 +401,31 @@ mod tests {
         assert!(share.is_valid_price("2330", dec!(1000), Decimal::ZERO));
         assert!(share.is_valid_price("2330", dec!(1000), dec!(990)));
         assert!(!share.is_valid_price("2330", dec!(1200), dec!(990)));
+    }
+
+    /// 興櫃沒有漲跌幅限制：主檔標為興櫃時放寬到 ±50%，但仍擋明顯錯誤的值。
+    #[test]
+    fn is_valid_price_relaxes_tolerance_for_emerging_stocks() {
+        use crate::domain::registry::entity::Stock;
+
+        let share = Share::new();
+        // 4925 智微：上櫃規則下 +14% 會被濾掉
+        assert!(!share.is_valid_price("4925", dec!(133.5), dec!(117.09)));
+
+        share.stocks.write().unwrap().insert(
+            "4925".to_string(),
+            Stock::register("4925".to_string(), "智微".to_string(), 5, 1),
+        );
+        assert!(share.is_valid_price("4925", dec!(133.5), dec!(117.09)));
+        assert!(!share.is_valid_price("4925", dec!(1.2), dec!(117.09)));
+    }
+
+    /// 來源已知是興櫃時（Yahoo 興櫃類股），主檔沒有該代號也適用興櫃閾值。
+    #[test]
+    fn is_valid_price_for_market_uses_caller_hint() {
+        let share = Share::new();
+        assert!(share.is_valid_price_for_market("7934", dec!(630), dec!(552.86), true));
+        assert!(!share.is_valid_price_for_market("7934", dec!(630), dec!(552.86), false));
     }
 
     #[test]

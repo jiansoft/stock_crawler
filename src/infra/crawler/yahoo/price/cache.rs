@@ -25,7 +25,7 @@ use crate::{
         },
     },
     infra::cache::{RealtimeSnapshot, SHARE, TTL, TtlCacheInner},
-    infra::crawler::yahoo::YahooClassCategory,
+    infra::crawler::yahoo::{YahooClassCategory, YahooClassExchange},
 };
 
 use super::class_quote;
@@ -576,7 +576,13 @@ fn apply_category_snapshots(
             // 若 symbol 已存在，就用最新 snapshot 覆蓋。
             for (symbol, snapshot) in category_snapshots {
                 let price = snapshot.price;
-                if !SHARE.is_valid_price(&symbol, price, snapshot.last_close) {
+                // Yahoo 興櫃類股的股票不一定已在主檔，改用類股本身的市場別決定閾值。
+                let is_valid = if category.exchange == YahooClassExchange::Emerging {
+                    SHARE.is_valid_price_for_market(&symbol, price, snapshot.last_close, true)
+                } else {
+                    SHARE.is_valid_price(&symbol, price, snapshot.last_close)
+                };
+                if !is_valid {
                     // 價格 0 是尚未成交（冷門股、特別股開盤後常見），不是異常，只略過不記錄
                     if price > Decimal::ZERO {
                         tracing::warn!(
