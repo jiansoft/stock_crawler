@@ -8,6 +8,21 @@ use super::share::Share;
 
 impl Share {
     /// 取得資料庫最後交易日的收盤價；快取沒有或非正數時回傳 `None`。
+    /// 取得當日除權息參考價；當天沒有除權息時為 `None`。
+    fn get_ex_rights_reference_price(&self, symbol: &str) -> Option<Decimal> {
+        self.ex_rights_reference_prices
+            .read()
+            .ok()
+            .and_then(|prices| prices.get(symbol).copied())
+    }
+
+    /// 以當日除權息參考價整批覆寫快取（前一個交易日的值會被清掉）。
+    pub fn set_ex_rights_reference_prices(&self, prices: HashMap<String, Decimal>) {
+        if let Ok(mut cache) = self.ex_rights_reference_prices.write() {
+            *cache = prices;
+        }
+    }
+
     fn get_db_last_close(&self, symbol: &str) -> Option<Decimal> {
         self.last_trading_day_quotes
             .read()
@@ -18,14 +33,17 @@ impl Share {
 
     /// 檢查採集到的股價是否合法（與比對基準相差是否在 10.5% 以內）。
     ///
-    /// 比對基準有兩個，任一個通過即視為有效：
+    /// 比對基準有三個，任一個通過即視為有效：
     /// - 資料庫最後交易日收盤價。
     /// - 採集站點提供的昨收／參考價（`snapshot_last_close`）。
+    /// - 當日除權息參考價（[`Self::set_ex_rights_reference_prices`] 由資料庫股利事件算出）。
     ///
     /// 除權息當日的漲跌幅是以「除權息參考價」計算，而資料庫收盤價是除權息前的價格；
     /// 只比對資料庫收盤價會把當天的正常成交價全部當成異常（例如 2542 除息 4 元，
     /// 參考價 41.45、成交 39.05，相對除息前收盤 45.45 跌了 14%）。Yahoo 等站點
-    /// 在除權息日回報的昨收即為參考價，因此兩個基準都要納入。
+    /// 在除權息日回報的昨收即為參考價，但 HiStock 回報的是除權息前收盤
+    /// （1235 興泰 2026-09-24 除權息，參考價 38.71，HiStock 仍給 41.15，整天被誤濾），
+    /// 因此需要自行計算的參考價作為第三個基準。
     ///
     /// `price <= 0`（尚未成交）一律回傳 `false`；若兩個基準都沒有有效值，無法比對，視為有效。
     pub fn is_valid_price(
@@ -39,10 +57,14 @@ impl Share {
         }
 
         let site_last_close = Some(snapshot_last_close).filter(|&p| p > Decimal::ZERO);
-        let mut baselines = [self.get_db_last_close(symbol), site_last_close]
-            .into_iter()
-            .flatten()
-            .peekable();
+        let mut baselines = [
+            self.get_db_last_close(symbol),
+            site_last_close,
+            self.get_ex_rights_reference_price(symbol),
+        ]
+        .into_iter()
+        .flatten()
+        .peekable();
 
         if baselines.peek().is_none() {
             // 如果沒有有效的昨收價，無法進行比較，暫且視為有效
@@ -295,6 +317,24 @@ mod tests {
         assert!(share.is_valid_price("2542", dec!(39.05), dec!(41.45)));
         // 站點仍回報除息前收盤時，無法得知參考價，維持過濾
         assert!(!share.is_valid_price("2542", dec!(39.05), dec!(45.45)));
+    }
+
+    /// 1235 興泰 2026-09-24 除權息：資料庫與 HiStock 都給除權息前收盤 41.15，
+    /// 只有自行計算的參考價 38.71 能讓當天 35.5～40.2 的正常成交通過。
+    #[test]
+    fn is_valid_price_accepts_price_near_computed_ex_rights_reference() {
+        let share = Share::new();
+        seed_db_last_close(&share, "1235", dec!(41.15));
+        assert!(!share.is_valid_price("1235", dec!(35.8), dec!(41.15)));
+
+        share.set_ex_rights_reference_prices(HashMap::from([("1235".to_string(), dec!(38.71))]));
+        assert!(share.is_valid_price("1235", dec!(35.8), dec!(41.15)));
+        // 參考價的 ±10.5% 之外仍要過濾
+        assert!(!share.is_valid_price("1235", dec!(30), dec!(41.15)));
+
+        // 下一個交易日整批覆寫後，前一天的參考價不再生效
+        share.set_ex_rights_reference_prices(HashMap::new());
+        assert!(!share.is_valid_price("1235", dec!(35.8), dec!(41.15)));
     }
 
     /// 任一基準通過即有效，但兩個基準都差太多時仍要過濾。
