@@ -1,0 +1,26 @@
+{
+  "list": [
+    {
+      "symbol": "8042.TWO",
+      "date": "2025-01-01T00:00:00+08:00",
+      "depreciation": "192618000.00",
+      "amortization": "23147000.00",
+      "operatingCashFlow": "313826000.00",
+      "investingCashFlow": "65493000.00",
+      "financingCashFlow": "-310996000.00",
+      "freeCashFlow": "379319000.00",
+      "netCashFlow": "-52660000.00"
+    },
+    {
+      "symbol": "8042.TWO",
+      "date": "2024-01-01T00:00:00+08:00",
+      "depreciation": "189170000.00",
+      "amortization": "19954000.00",
+      "operatingCashFlow": "223743000.00",
+      "investingCashFlow": "-523527000.00",
+      "financingCashFlow": "73140000.00",
+      "freeCashFlow": "-299784000.00",
+      "netCashFlow": "-49756000.00"
+    }
+  ]
+}
