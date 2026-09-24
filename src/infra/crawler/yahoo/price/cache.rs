@@ -342,13 +342,24 @@ pub fn start_caching_task() {
                         */
                         // 類股失敗時只記錄錯誤，不中止整輪任務，
                         // 避免單一 sector 出問題就拖垮整個 Yahoo 報價快取。
-                        tracing::error!(
-                            "Yahoo 類股快取更新失敗: {} {}({}) {:?}",
-                            category.exchange.label(),
-                            category.name,
-                            category.sector_id,
-                            why
-                        );
+                        // 5xx 是 Yahoo 端的暫時性錯誤，下一輪即恢復，只記 warn。
+                        if is_transient_server_error(&err_msg) {
+                            tracing::warn!(
+                                "Yahoo 類股快取更新失敗（暫時性）: {} {}({}) {:#}",
+                                category.exchange.label(),
+                                category.name,
+                                category.sector_id,
+                                why
+                            );
+                        } else {
+                            tracing::error!(
+                                "Yahoo 類股快取更新失敗: {} {}({}) {:?}",
+                                category.exchange.label(),
+                                category.name,
+                                category.sector_id,
+                                why
+                            );
+                        }
                     }
                 }
 
@@ -612,8 +623,29 @@ fn rss_delta_kib(before: Option<ProcessMemoryStats>, after: Option<ProcessMemory
     }
 }
 
+/// 是否為 Yahoo 類股 API 回應的 5xx 暫時性錯誤（見 `class_quote` 的錯誤格式）。
+///
+/// 2026-09-24 盤中共 12 次 500／502，皆在 09:02～09:37，下一輪即恢復。
+fn is_transient_server_error(message: &str) -> bool {
+    message.contains("request failed with status 5")
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn is_transient_server_error_matches_only_5xx() {
+        assert!(is_transient_server_error(
+            "Yahoo 類股 API request failed with status 500 Internal Server Error for https://x. Body: "
+        ));
+        assert!(is_transient_server_error(
+            "Yahoo 類股 API request failed with status 502 Bad Gateway for https://x. Body: "
+        ));
+        assert!(!is_transient_server_error(
+            "Yahoo 類股 API request failed with status 404 Not Found for https://x. Body: "
+        ));
+        assert!(!is_transient_server_error("Request denied"));
+    }
     use std::time::{Duration, Instant};
 
     use once_cell::sync::Lazy;
