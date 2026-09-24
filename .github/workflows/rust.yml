@@ -217,6 +217,8 @@ jobs:
     - name: Run SQL file
       run: |
         export PGPASSWORD=password
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/balance_sheet.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/cash_flow_statement.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/config.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/corporate_action.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
@@ -230,6 +232,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail_more.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/estimate.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/financial_statement.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/income_statement.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/index.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/last_daily_quotes.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/quote_history_record.sql
@@ -315,6 +318,8 @@ jobs:
     - name: Run SQL file
       run: |
         export PGPASSWORD=password
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/balance_sheet.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/cash_flow_statement.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/config.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/corporate_action.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
@@ -328,6 +333,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail_more.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/estimate.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/financial_statement.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/income_statement.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/index.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/last_daily_quotes.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/quote_history_record.sql
