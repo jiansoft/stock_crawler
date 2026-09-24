@@ -1,4 +1,8 @@
-use std::{env, future::Future, time::Instant};
+use std::{
+    env,
+    future::Future,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Error, Result};
 use chrono::FixedOffset;
@@ -6,8 +10,9 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
     app::backfill::{
-        capital_reduction, delisted_company, dividend, etf, financial_statement, isin,
-        net_asset_value_per_share, qualified_foreign_institutional_investor, revenue, stock_weight,
+        capital_reduction, delisted_company, dividend, etf, financial_report, financial_statement,
+        isin, net_asset_value_per_share, qualified_foreign_institutional_investor, revenue,
+        stock_weight,
     },
     app::calculation,
     app::event,
@@ -150,6 +155,14 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "計算各期間年化報酬率(CAGR)",
             calculation::cagr::execute_scheduled,
         ),
+        // 06:00 採集 Yahoo 三大財務報表（損益表、資產負債表、現金流量表）
+        // 每輪最多 400 檔、約 45 分鐘；7 天 Redis 旗標讓每檔約每週重抓一次。
+        // 避開 21:00 的 Yahoo 股利採集，兩者不會同時對 Yahoo 發請求。
+        create_job(
+            "0 0 6 * * *",
+            "採集 Yahoo 三大財務報表",
+            financial_report::execute,
+        ),
         // 08:00 提醒本日除權息與明日預計除權息的股票
         create_job(
             "0 0 8 * * *",
@@ -223,6 +236,7 @@ pub trait Scheduler {
 /// 2. 觸發時記錄 `task.begin` 事件（含 cron 表達式與任務名稱作為結構化欄位）。
 /// 3. 執行任務並計時。
 /// 4. 記錄 `task.done` 事件（含 `elapsed_ms`）或 `task.failed` 事件（含錯誤訊息）。
+/// 5. 超過 [`JOB_TIMEOUT`] 仍未結束時中止該輪，記錄 `task.timeout` 並發送告警。
 ///
 /// 結構化欄位（`task`、`name`、`elapsed_ms`）透過 F1 `FieldCollector` 同步送到 Seq，
 /// 讓 ops 可直接在 Seq 查詢特定任務的執行時間趨勢。
@@ -242,8 +256,8 @@ where
             let _operation_guard = crate::core::shutdown::BACKGROUND_OPERATIONS.begin();
             tracing::info!(task = cron_expr, name = name, "task.begin");
             let t = Instant::now();
-            match task().await {
-                Ok(()) => {
+            match run_with_timeout(task(), JOB_TIMEOUT).await {
+                TaskOutcome::Done => {
                     tracing::info!(
                         task = cron_expr,
                         name = name,
@@ -251,7 +265,7 @@ where
                         "task.done"
                     );
                 }
-                Err(why) => {
+                TaskOutcome::Failed(why) => {
                     let err_msg = format!("{:?}", why);
                     tracing::error!(
                         task = cron_expr,
@@ -262,9 +276,59 @@ where
                     );
                     alert::send_alert(&format!("排程任務 [{}] 執行失敗", name), &err_msg).await;
                 }
+                TaskOutcome::TimedOut => {
+                    let err_msg = format!(
+                        "執行超過 {} 分鐘仍未結束，已中止本輪；請查看日誌中該任務最後的紀錄",
+                        JOB_TIMEOUT.as_secs() / 60
+                    );
+                    tracing::error!(
+                        task = cron_expr,
+                        name = name,
+                        elapsed_ms = t.elapsed().as_millis() as u64,
+                        "task.timeout"
+                    );
+                    alert::send_alert(&format!("排程任務 [{}] 逾時", name), &err_msg).await;
+                }
             }
         })
     })?)
+}
+
+/// 單輪排程任務的執行時間上限。
+///
+/// 沒有上限時，任務只要卡住就永遠不會留下 `task.done`／`task.failed`，也不會告警：
+/// 2026-09-21 21:00 的股利排程因重試延遲失控（第四次重試要等 24.75 小時）卡了兩天，
+/// 直到重新部署才被發現，期間隔天同時段又啟動了新的一輪。
+///
+/// 3 小時的依據：正式站 2026-09-17～24 各排程最長 63.9 分鐘（21:00 股利採集，
+/// 且為修正重試前的數字），Yahoo 財報採集預估約 45 分鐘。上限小於 24 小時，
+/// 也保證每日排程不會兩輪重疊。
+const JOB_TIMEOUT: Duration = Duration::from_secs(3 * 60 * 60);
+
+/// 單輪排程任務的執行結果。
+#[derive(Debug)]
+enum TaskOutcome {
+    /// 正常結束。
+    Done,
+    /// 任務回傳錯誤。
+    Failed(Error),
+    /// 超過時間上限，已中止。
+    TimedOut,
+}
+
+/// 在 `limit` 內執行任務；逾時即 drop 任務 future 將其中止。
+///
+/// 中止發生在任務的下一個 `.await` 點：進行中的資料庫交易隨 drop 回滾，
+/// 已提交的寫入保留。採集類任務皆為 upsert／逐檔處理，下一輪可以接續。
+async fn run_with_timeout<Fut>(task: Fut, limit: Duration) -> TaskOutcome
+where
+    Fut: Future<Output = Result<(), Error>>,
+{
+    match tokio::time::timeout(limit, task).await {
+        Ok(Ok(())) => TaskOutcome::Done,
+        Ok(Err(why)) => TaskOutcome::Failed(why),
+        Err(_) => TaskOutcome::TimedOut,
+    }
 }
 
 #[cfg(test)]
@@ -287,6 +351,39 @@ mod tests {
         sched.start().await?;
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn run_with_timeout_reports_done() {
+        let outcome = run_with_timeout(async { Ok(()) }, Duration::from_secs(1)).await;
+        assert!(matches!(outcome, TaskOutcome::Done));
+    }
+
+    #[tokio::test]
+    async fn run_with_timeout_reports_failure() {
+        let outcome = run_with_timeout(
+            async { Err(anyhow::anyhow!("boom")) },
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(matches!(outcome, TaskOutcome::Failed(why) if why.to_string() == "boom"));
+    }
+
+    /// 卡住的任務必須在上限到時被中止，而不是無限期等下去。
+    #[tokio::test]
+    async fn run_with_timeout_aborts_hung_task() {
+        let started = Instant::now();
+        let outcome = run_with_timeout(
+            async {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                Ok(())
+            },
+            Duration::from_millis(50),
+        )
+        .await;
+
+        assert!(matches!(outcome, TaskOutcome::TimedOut));
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     /// 手動執行排程 smoke test。

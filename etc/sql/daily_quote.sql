@@ -82,10 +82,3 @@ CREATE INDEX DailyQuotes_year_date_price_idx
     INCLUDE ("LowestPrice", "ClosingPrice", "HighestPrice",
         "price-to-book_ratio", "PriceEarningRatio")
     WHERE "ClosingPrice" > 0;
-
-CREATE INDEX CONCURRENTLY dailyquotes_stats_covering_idx
-    ON "DailyQuotes" (year, "Date", stock_symbol)
-    INCLUDE (
-        "LowestPrice", "ClosingPrice", "HighestPrice",
-        "price-to-book_ratio", "PriceEarningRatio"
-        );

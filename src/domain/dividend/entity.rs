@@ -135,6 +135,49 @@ pub struct StockDividendInfo {
     pub is_stock_ex_dividend_on_date: bool,
 }
 
+impl StockDividendInfo {
+    /// 查詢日期當天實際生效的（現金股利, 股票股利）。
+    ///
+    /// 除息日與除權日可能不同天，只有當天生效的那一項才會影響當天的參考價。
+    pub fn effective_on_date(&self) -> (Decimal, Decimal) {
+        let cash = if self.is_cash_ex_dividend_on_date {
+            self.cash_dividend
+        } else {
+            Decimal::ZERO
+        };
+        let stock = if self.is_stock_ex_dividend_on_date {
+            self.stock_dividend
+        } else {
+            Decimal::ZERO
+        };
+        (cash, stock)
+    }
+}
+
+/// 計算除權息參考價：`(前日收盤 − 現金股利) ÷ (1 + 股票股利 ÷ 面額)`，四捨五入到小數兩位。
+///
+/// `stock_dividend` 為每股配發的股票股利（元），除以面額 10 元即配股率。
+/// 前日收盤不為正、當天沒有任何除權息，或算出的參考價不為正時回傳 `None`。
+///
+/// 交易所的參考價另有升降單位的進位規則，這裡的值只用於「成交價是否偏離合理區間」的檢查，
+/// 小數兩位的精度已足夠。
+pub fn ex_rights_reference_price(
+    previous_close: Decimal,
+    cash_dividend: Decimal,
+    stock_dividend: Decimal,
+) -> Option<Decimal> {
+    if previous_close <= Decimal::ZERO
+        || (cash_dividend <= Decimal::ZERO && stock_dividend <= Decimal::ZERO)
+    {
+        return None;
+    }
+
+    let par_value = Decimal::from(crate::domain::performance::PAR_VALUE);
+    let reference = (previous_close - cash_dividend) / (Decimal::ONE + stock_dividend / par_value);
+
+    (reference > Decimal::ZERO).then(|| reference.round_dp(2))
+}
+
 /// 股票除息的發放日程資料領域實體。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StockDividendPayableDateInfo {
@@ -225,6 +268,84 @@ impl PayoutRatioCandidate {
             payout_ratio_stock: ratio(self.stock_dividend),
             payout_ratio: ratio(self.sum),
         })
+    }
+}
+
+#[cfg(test)]
+mod ex_rights_reference_price_tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    /// 1235 興泰 2026-09-24 同日除權息：現金 0.5、股票 0.5 元，前日收盤 41.15。
+    #[test]
+    fn combines_cash_and_stock_dividend() {
+        assert_eq!(
+            ex_rights_reference_price(dec!(41.15), dec!(0.5), dec!(0.5)),
+            Some(dec!(38.71))
+        );
+    }
+
+    /// 2542 興富發 2026-09-23 除息 4 元：前日收盤 45.45。
+    #[test]
+    fn cash_only() {
+        assert_eq!(
+            ex_rights_reference_price(dec!(45.45), dec!(4), Decimal::ZERO),
+            Some(dec!(41.45))
+        );
+    }
+
+    #[test]
+    fn stock_only() {
+        assert_eq!(
+            ex_rights_reference_price(dec!(110), Decimal::ZERO, dec!(1)),
+            Some(dec!(100))
+        );
+    }
+
+    #[test]
+    fn none_without_dividend_or_close() {
+        assert_eq!(
+            ex_rights_reference_price(dec!(41.15), Decimal::ZERO, Decimal::ZERO),
+            None
+        );
+        assert_eq!(
+            ex_rights_reference_price(Decimal::ZERO, dec!(0.5), Decimal::ZERO),
+            None
+        );
+        assert_eq!(
+            ex_rights_reference_price(dec!(1), dec!(2), Decimal::ZERO),
+            None
+        );
+    }
+
+    fn info(cash_today: bool, stock_today: bool) -> StockDividendInfo {
+        StockDividendInfo {
+            stock_symbol: "1235".to_string(),
+            name: "興泰".to_string(),
+            stock_industry_id: 1,
+            cash_dividend: dec!(0.5),
+            stock_dividend: dec!(0.3),
+            sum: dec!(0.8),
+            closing_price: dec!(41.15),
+            dividend_yield: Decimal::ZERO,
+            cash_dividend_yield: Decimal::ZERO,
+            is_cash_ex_dividend_on_date: cash_today,
+            is_stock_ex_dividend_on_date: stock_today,
+        }
+    }
+
+    /// 除息、除權不同天時，只計入當天生效的那一項。
+    #[test]
+    fn effective_on_date_keeps_only_today_events() {
+        assert_eq!(info(true, true).effective_on_date(), (dec!(0.5), dec!(0.3)));
+        assert_eq!(
+            info(true, false).effective_on_date(),
+            (dec!(0.5), Decimal::ZERO)
+        );
+        assert_eq!(
+            info(false, true).effective_on_date(),
+            (Decimal::ZERO, dec!(0.3))
+        );
     }
 }
 

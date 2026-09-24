@@ -10,18 +10,12 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
-use tokio_retry::{
-    Retry,
-    strategy::{ExponentialBackoff, jitter},
-};
 
 use crate::{
     domain::dividend::{entity::Dividend, repository::DividendRepository},
     infra::crawler::{
-        moneydj::dividend_schedule::DividendSchedule,
-        mops::dividend_allotment::DividendAllotment,
-        share::ExDividendAnnouncement,
-        yahoo::{self, dividend::YahooDividend},
+        moneydj::dividend_schedule::DividendSchedule, mops::dividend_allotment::DividendAllotment,
+        share::ExDividendAnnouncement, yahoo::dividend::YahooDividend,
     },
 };
 
@@ -90,8 +84,7 @@ pub(super) async fn fetch_existing(
 
 /// 抓取單一股票的 Yahoo 股利政策，失敗時記錄並回傳 `None`。
 pub(super) async fn fetch_yahoo_dividend(stock_symbol: &str) -> Option<YahooDividend> {
-    let strategy = ExponentialBackoff::from_millis(100).map(jitter).take(3);
-    match Retry::start(strategy, || yahoo::dividend::visit(stock_symbol)).await {
+    match super::super::yahoo_fetch::visit_with_retry(stock_symbol).await {
         Ok(data) => Some(data),
         Err(why) => {
             tracing::warn!("取得 {} 的 Yahoo 股利政策失敗: {:?}", stock_symbol, why);

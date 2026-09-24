@@ -7,14 +7,16 @@ create table public.stock_ownership_details
     share_quantity                 bigint                   default 0                                       not null,
     holding_cost                   numeric(18, 4)           default 0                                       not null,
     share_price_average            numeric(18, 4)           default 0                                       not null,
-    current_cost_per_share         numeric(18, 4)           default 0                                       not null,
     is_sold                        boolean                  default false,
     cumulate_dividends_cash        numeric(18, 4)           default 0,
     cumulate_dividends_stock       numeric(18, 4)           default 0,
     cumulate_dividends_stock_money numeric(18, 4)           default 0,
     cumulate_dividends_total       numeric(18, 4)           default 0,
     created_time                   timestamp with time zone default ('now'::text)::timestamp with time zone not null,
-    date                           date                     default CURRENT_DATE                            not null
+    date                           date                     default CURRENT_DATE                            not null,
+    current_cost_per_share         numeric(18, 4)           default 0                                       not null,
+    sell_history_serial            bigint                   default 0                                       not null,
+    source_stock_ownership_detail_serial bigint                   default 0                                       not null
 );
 
 comment on column public.stock_ownership_details.member_id is '會員編號 Member.Id';
@@ -29,9 +31,14 @@ comment on column public.stock_ownership_details.cumulate_dividends_stock is '�
 comment on column public.stock_ownership_details.cumulate_dividends_stock_money is '累積股票股利(元)';
 comment on column public.stock_ownership_details.cumulate_dividends_total is '總計累積股利(元)';
 comment on column public.stock_ownership_details.date is '交易日期';
+comment on column public.stock_ownership_details.sell_history_serial is '造成此筆 sold 持有的賣出紀錄序號';
+comment on column public.stock_ownership_details.source_stock_ownership_detail_serial is '拆分 sold lot 的原始持有序號';
 
 create index "stock_ownership_details-security_code_idx"
     on public.stock_ownership_details (security_code);
 
-alter table stock_ownership_details  add current_cost_per_share numeric(18, 4) default 0 not null;
-comment on column public.stock_ownership_details.current_cost_per_share is '目前每股成本';
+create index stock_ownership_details_sell_history_serial_idx
+    on public.stock_ownership_details (sell_history_serial);
+
+create index stock_ownership_details_source_serial_idx
+    on public.stock_ownership_details (source_stock_ownership_detail_serial);

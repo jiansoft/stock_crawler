@@ -11,6 +11,8 @@ mod missing_or_multiple;
 /// 更新歷史配息率。
 pub mod payout_ratio;
 mod unannounced_ex_dividend_date;
+/// Yahoo 股利政策頁的共用重試抓取。
+mod yahoo_fetch;
 
 use missing_or_multiple::backfill_missing_or_multiple_dividends;
 use unannounced_ex_dividend_date::backfill_unannounced_dividend_dates;

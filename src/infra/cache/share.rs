@@ -58,6 +58,10 @@ pub struct Share {
     pub(super) current_ip: RwLock<Option<String>>,
     /// 股票即時報價快照快取 (目前主要由 HiStock 驅動)
     pub stock_snapshots: RwLock<HashMap<String, RealtimeSnapshot>>,
+    /// 當日除權息股票的參考價，供即時報價的異常價格檢查使用。
+    ///
+    /// 每個交易日開盤追蹤前整批覆寫；key 為股票代號。
+    pub(super) ex_rights_reference_prices: RwLock<HashMap<String, rust_decimal::Decimal>>,
 }
 
 impl Share {
@@ -80,6 +84,7 @@ impl Share {
             exchange_markets: default_exchange_markets(),
             current_ip: RwLock::new(None),
             stock_snapshots: RwLock::new(HashMap::new()),
+            ex_rights_reference_prices: RwLock::new(HashMap::new()),
         }
     }
 }

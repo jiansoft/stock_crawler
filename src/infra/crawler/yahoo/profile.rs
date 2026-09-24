@@ -24,7 +24,16 @@ use rust_decimal::Decimal;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
-use crate::{core::util, core::util::http::element, infra::crawler::yahoo::HOST};
+use crate::{
+    core::util,
+    core::util::http::element,
+    infra::crawler::yahoo::{
+        HOST,
+        dividend::{
+            PAGE_NOT_FOUND_CACHE_TTL_SECONDS, YahooPageNotFoundError, is_page_not_found_error,
+        },
+    },
+};
 
 /// 用於解析季度（如 Q1, Q2）的正則表達式
 static REG_QUARTER: Lazy<Regex> =
@@ -113,6 +122,23 @@ pub fn is_no_valid_data_error(err: &anyhow::Error) -> bool {
     err.downcast_ref::<NoValidProfileDataError>().is_some()
 }
 
+/// 依錯誤類型決定這檔股票要略過多久（秒）；`None` 表示是真正的異常，不應略過。
+///
+/// - 頁面存在但無有效資料（[`NoValidProfileDataError`]）：略過 [`NO_VALID_DATA_CACHE_TTL_SECONDS`]。
+/// - 個股頁 404（[`YahooPageNotFoundError`]，多為已下市）：略過
+///   [`PAGE_NOT_FOUND_CACHE_TTL_SECONDS`]，頁面不會突然長回來。
+///
+/// 兩者都是預期中的資料狀況，呼叫端應降為 warn 並寫入 [`no_valid_data_cache_key`]。
+pub fn skip_cache_ttl_seconds(err: &anyhow::Error) -> Option<usize> {
+    if is_no_valid_data_error(err) {
+        Some(NO_VALID_DATA_CACHE_TTL_SECONDS)
+    } else if is_page_not_found_error(err) {
+        Some(PAGE_NOT_FOUND_CACHE_TTL_SECONDS)
+    } else {
+        None
+    }
+}
+
 /// 回傳 Yahoo profile 無有效資料的短期跳過快取鍵。
 ///
 /// 這個 key 以「股票代號」為粒度，而不是財報季度為粒度，讓同一支股票在
@@ -134,7 +160,22 @@ pub fn no_valid_data_cache_key(stock_symbol: &str) -> String {
 /// 成功時傳回填充好的 `Profile` 結構，失敗時傳回包含錯誤環境資訊的 `Result`。
 pub async fn visit(stock_symbol: &str) -> Result<Profile> {
     let url = format!("https://{}/quote/{}/profile", HOST, stock_symbol);
-    let text = util::http::get(&url, None).await?;
+    let response = util::http::get_response(&url, None).await?;
+
+    // 404＝整個個股頁不存在（多為已下市），與「頁面存在但解析不到區塊」分開回報，
+    // 否則 404 頁會被當成 Yahoo 改版，每天記一筆 error（4712 連續多日即是如此）。
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(YahooPageNotFoundError {
+            stock_symbol: stock_symbol.to_string(),
+            url,
+        }
+        .into());
+    }
+
+    let text = response
+        .text()
+        .await
+        .with_context(|| format!("Error reading Yahoo profile page body from {url}"))?;
     parse_profile_html(stock_symbol, &url, &text)
 }
 
@@ -215,6 +256,42 @@ fn parse_field(element: &scraper::ElementRef, base: &str, child_index: u32) -> D
 mod tests {
     use super::*;
     use rust_decimal_macros::dec;
+
+    /// 無有效資料略過 1 天、404 略過 30 天，其他錯誤不略過。
+    #[test]
+    fn skip_cache_ttl_seconds_by_error_kind() {
+        let no_data = anyhow::Error::new(NoValidProfileDataError {
+            stock_symbol: "7777".to_string(),
+            url: "https://example".to_string(),
+        })
+        .context("wrapped");
+        assert_eq!(
+            skip_cache_ttl_seconds(&no_data),
+            Some(NO_VALID_DATA_CACHE_TTL_SECONDS)
+        );
+
+        let not_found = anyhow::Error::new(YahooPageNotFoundError {
+            stock_symbol: "4712".to_string(),
+            url: "https://tw.stock.yahoo.com/quote/4712/profile".to_string(),
+        })
+        .context("wrapped");
+        assert_eq!(
+            skip_cache_ttl_seconds(&not_found),
+            Some(PAGE_NOT_FOUND_CACHE_TTL_SECONDS)
+        );
+
+        let parse_failure = anyhow::anyhow!("Failed to find profile section for 2330");
+        assert_eq!(skip_cache_ttl_seconds(&parse_failure), None);
+    }
+
+    /// 4712 已下市，Yahoo 個股頁回 404，必須辨識為頁面不存在而非解析失敗。
+    #[tokio::test]
+    #[ignore]
+    async fn visit_reports_page_not_found_for_delisted_stock() {
+        dotenvy::dotenv().ok();
+        let err = visit("4712").await.expect_err("4712 should be 404");
+        assert!(is_page_not_found_error(&err), "{err:#}");
+    }
 
     /// 以貼近真實 profile 頁形狀的 fixture 驗證整頁解析流程。
     ///

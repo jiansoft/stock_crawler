@@ -32,13 +32,14 @@ use crate::{
     core::alert,
     core::declare,
     core::util::{datetime::Weekend, map::Keyable, text},
+    domain::dividend::{entity::ex_rights_reference_price, repository::DividendRepository},
     domain::trace::entity::PriceTrace,
     domain::trace::repository::TraceRepository,
     infra::cache::RealtimeSnapshot,
     infra::cache::SHARE,
     infra::cache::{TTL, TtlCacheInner},
     infra::crawler::twse,
-    infra::database::repository::trace::PgTraceRepository,
+    infra::database::repository::{dividend::PgDividendRepository, trace::PgTraceRepository},
 };
 
 /// 確保整個追蹤執行流程只有一個實例在執行。
@@ -70,6 +71,45 @@ enum EvaluationSource {
     PriceEvent,
     /// 由低頻 reconciliation 補償掃描觸發。
     Reconciliation,
+}
+
+/// 由資料庫的股利事件算出 `date` 當天除權息股票的參考價，整批寫入 [`SHARE`]。
+///
+/// 前日收盤取自 `last_daily_quotes`（開盤前仍是前一交易日的收盤）。同一檔同一天
+/// 有多筆股利事件時合併計算。沒有除權息的交易日會寫入空集合，清掉前一天的值。
+async fn load_ex_rights_reference_prices(date: NaiveDate) -> Result<()> {
+    let infos = PgDividendRepository::new()
+        .fetch_stocks_with_dividends_on_date(date)
+        .await?;
+
+    // (前日收盤, 現金股利合計, 股票股利合計)
+    let mut totals: HashMap<String, (Decimal, Decimal, Decimal)> = HashMap::new();
+    for info in &infos {
+        let (cash, stock) = info.effective_on_date();
+        let entry = totals.entry(info.stock_symbol.clone()).or_insert((
+            info.closing_price,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        ));
+        entry.1 += cash;
+        entry.2 += stock;
+    }
+
+    let prices: HashMap<String, Decimal> = totals
+        .into_iter()
+        .filter_map(|(symbol, (close, cash, stock))| {
+            ex_rights_reference_price(close, cash, stock).map(|price| (symbol, price))
+        })
+        .collect();
+
+    tracing::info!(
+        "載入除權息參考價: date={date}, symbols={}, detail={:?}",
+        prices.len(),
+        prices
+    );
+    SHARE.set_ex_rights_reference_prices(prices);
+
+    Ok(())
 }
 
 /// 執行股票價格追蹤任務的入口點。
@@ -107,6 +147,15 @@ pub async fn execute() -> Result<()> {
     {
         tracing::debug!("股票追蹤任務已在運行中，跳過重複啟動");
         return Ok(());
+    }
+
+    // 先載入當日除權息參考價，讓開盤第一批報價就用正確的基準檢查異常價格。
+    // 失敗只影響除權息股票的過濾準確度，不阻擋追蹤啟動。
+    if let Err(why) = load_ex_rights_reference_prices(now.date_naive()).await {
+        tracing::warn!(
+            "Failed to load ex-rights reference prices because {:?}",
+            why
+        );
     }
 
     // 啟動背景監控任務

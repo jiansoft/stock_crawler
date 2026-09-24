@@ -26,24 +26,21 @@ pub async fn execute() -> Result<()> {
         let yahoo_profile = match profile::visit(&stock.symbol().0).await {
             Ok(stock_profile) => stock_profile,
             Err(why) => {
-                if profile::is_no_valid_data_error(&why) {
+                if let Some(ttl) = profile::skip_cache_ttl_seconds(&why) {
                     if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
-                        .set(
-                            &profile_skip_cache_key,
-                            true,
-                            profile::NO_VALID_DATA_CACHE_TTL_SECONDS,
-                        )
+                        .set(&profile_skip_cache_key, true, ttl)
                         .await
                     {
                         tracing::error!(
-                            "Failed to cache profile::visit no-valid-data skip for {} because {:?}",
+                            "Failed to cache profile::visit skip for {} because {:?}",
                             stock.symbol().0,
                             cache_err
                         );
                     }
                     tracing::warn!(
-                        "Skip profile::visit for {} because {}",
+                        "Skip profile::visit for {} for {} seconds because {}",
                         stock.symbol().0,
+                        ttl,
                         why
                     );
                 } else {

@@ -56,3 +56,76 @@ impl ExDividendAnnouncement {
 pub fn parse_ex_dividend_kind(kind: &str) -> (bool, bool) {
     (kind.contains('息'), kind.contains('權'))
 }
+
+/// 依預告表的類別與配股率，判定這次事件實際的 `(是否除息, 是否除權)`。
+///
+/// 預告表的「權」同時涵蓋**無償配股**與**現金增資認購**（例如 2026-09-22 金山電 8042
+/// 的「除權」是現增，完全沒有股利）。現增不是股利，不能讓它把事件標成除權：
+///
+/// - 純現增（2890、8042 這類）：類別只有「權」，會被判成兩者皆非，由呼叫端丟棄，
+///   否則會被當成找不到期別的股利事件，還白白逐檔去問 Yahoo。
+/// - 現金股利＋現增（3260 這類「除權息」）：只保留除息，否則會在只有現金股利的
+///   資料列上寫入除權日。
+///
+/// 判定規則：類別含「權」、無償配股率為未公布或 0、且現增配股率大於 0 時，視為現增而非配股。
+/// 無償配股率未公布但沒有現增時仍保留除權，交給後續流程等金額公布。
+pub fn classify_ex_dividend(
+    kind: &str,
+    stock_dividend_ratio: Option<Decimal>,
+    subscription_ratio: Option<Decimal>,
+) -> (bool, bool) {
+    let (is_cash, is_stock) = parse_ex_dividend_kind(kind);
+    let no_bonus_shares = stock_dividend_ratio.is_none_or(|ratio| ratio.is_zero());
+    let has_rights_issue = subscription_ratio.is_some_and(|ratio| ratio > Decimal::ZERO);
+
+    (is_cash, is_stock && !(no_bonus_shares && has_rights_issue))
+}
+
+#[cfg(test)]
+mod tests {
+    use rust_decimal_macros::dec;
+
+    use super::*;
+
+    /// 純現增除權（2890 永豐金、8042 金山電）不是股利事件。
+    #[test]
+    fn classify_ex_dividend_treats_pure_rights_issue_as_non_dividend() {
+        // TWSE：無償配股率空白
+        assert_eq!(
+            classify_ex_dividend("權", None, Some(dec!(0.04329540))),
+            (false, false)
+        );
+        // TPEx：無償配股率為 0
+        assert_eq!(
+            classify_ex_dividend("除權", Some(dec!(0)), Some(dec!(0.06723675))),
+            (false, false)
+        );
+    }
+
+    /// 現金股利＋現增（3260 威剛）只算除息。
+    #[test]
+    fn classify_ex_dividend_drops_stock_flag_for_cash_plus_rights_issue() {
+        assert_eq!(
+            classify_ex_dividend("除權息", Some(dec!(0)), Some(dec!(0.06163263))),
+            (true, false)
+        );
+    }
+
+    /// 真正的配股（含同時有現增的 2614）與未公布配股率的除權都要保留。
+    #[test]
+    fn classify_ex_dividend_keeps_bonus_share_events() {
+        assert_eq!(
+            classify_ex_dividend("權息", Some(dec!(0.08)), Some(dec!(0.38195352))),
+            (true, true)
+        );
+        assert_eq!(
+            classify_ex_dividend("權息", Some(dec!(0.08)), None),
+            (true, true)
+        );
+        assert_eq!(classify_ex_dividend("權", None, None), (false, true));
+        assert_eq!(
+            classify_ex_dividend("息", None, Some(dec!(0))),
+            (true, false)
+        );
+    }
+}

@@ -217,33 +217,38 @@ jobs:
     - name: Run SQL file
       run: |
         export PGPASSWORD=password
-        psql -h localhost -U user -d db -a -f etc/sql/config.sql
-        psql -h localhost -U user -d db -a -f etc/sql/corporate_action.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_money_history_member.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail_more.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_quote.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_stock_price_stats.sql
-        psql -h localhost -U user -d db -a -f etc/sql/dividend.sql
-        psql -h localhost -U user -d db -a -f etc/sql/dividend_record_detail.sql
-        psql -h localhost -U user -d db -a -f etc/sql/dividend_record_detail_more.sql
-        psql -h localhost -U user -d db -a -f etc/sql/estimate.sql
-        psql -h localhost -U user -d db -a -f etc/sql/financial_statement.sql
-        psql -h localhost -U user -d db -a -f etc/sql/index.sql
-        psql -h localhost -U user -d db -a -f etc/sql/last_daily_quotes.sql
-        psql -h localhost -U user -d db -a -f etc/sql/quote_history_record.sql
-        psql -h localhost -U user -d db -a -f etc/sql/revenue.sql
-        psql -h localhost -U user -d db -a -f etc/sql/revenue_last_date.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_cagr.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_exchange_market.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_industry.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_ownership_details.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stocks.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_word.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_index.sql
-        psql -h localhost -U user -d db -a -f etc/sql/trace.sql
-        psql -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/balance_sheet.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/cash_flow_statement.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/config.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/corporate_action.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_member.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail_more.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_quote.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_stock_price_stats.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail_more.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/estimate.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/financial_statement.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/income_statement.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/index.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/last_daily_quotes.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/quote_history_record.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/revenue.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/revenue_last_date.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_cagr.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_exchange_market.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_industry.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_ownership_details.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stocks.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_word.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_index.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/trace.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
+        # 確認股利明細表由正確的腳本建立，且包含必要欄位。
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -c "SELECT stock_ownership_details_serial, dividend_record_detail_serial, dividend_serial, cash, stock_money, stock, total FROM public.dividend_record_detail_more LIMIT 0"
 
     # 安裝 cargo-nextest 進行整合測試執行與 JUnit 報告輸出。
     - name: Install cargo-nextest
@@ -313,33 +318,38 @@ jobs:
     - name: Run SQL file
       run: |
         export PGPASSWORD=password
-        psql -h localhost -U user -d db -a -f etc/sql/config.sql
-        psql -h localhost -U user -d db -a -f etc/sql/corporate_action.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_money_history_member.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail_more.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_quote.sql
-        psql -h localhost -U user -d db -a -f etc/sql/daily_stock_price_stats.sql
-        psql -h localhost -U user -d db -a -f etc/sql/dividend.sql
-        psql -h localhost -U user -d db -a -f etc/sql/dividend_record_detail.sql
-        psql -h localhost -U user -d db -a -f etc/sql/dividend_record_detail_more.sql
-        psql -h localhost -U user -d db -a -f etc/sql/estimate.sql
-        psql -h localhost -U user -d db -a -f etc/sql/financial_statement.sql
-        psql -h localhost -U user -d db -a -f etc/sql/index.sql
-        psql -h localhost -U user -d db -a -f etc/sql/last_daily_quotes.sql
-        psql -h localhost -U user -d db -a -f etc/sql/quote_history_record.sql
-        psql -h localhost -U user -d db -a -f etc/sql/revenue.sql
-        psql -h localhost -U user -d db -a -f etc/sql/revenue_last_date.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_cagr.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_exchange_market.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_industry.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_ownership_details.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stocks.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_word.sql
-        psql -h localhost -U user -d db -a -f etc/sql/stock_index.sql
-        psql -h localhost -U user -d db -a -f etc/sql/trace.sql
-        psql -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/balance_sheet.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/cash_flow_statement.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/config.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/corporate_action.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_member.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail_more.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_quote.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_stock_price_stats.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail_more.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/estimate.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/financial_statement.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/income_statement.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/index.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/last_daily_quotes.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/quote_history_record.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/revenue.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/revenue_last_date.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_cagr.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_exchange_market.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_industry.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_ownership_details.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stocks.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_word.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/stock_index.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/trace.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/yield_rank.sql
+        # 確認股利明細表由正確的腳本建立，且包含必要欄位。
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -c "SELECT stock_ownership_details_serial, dividend_record_detail_serial, dividend_serial, cash, stock_money, stock, total FROM public.dividend_record_detail_more LIMIT 0"
 
     - name: Generate coverage report
       # coverage 也開 integration-tests feature：涵蓋率報告需要包含 DB/Redis

@@ -143,21 +143,17 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
                 let profile = match yahoo::profile::visit(&fs.security_code).await {
                     Ok(profile) => profile,
                     Err(why) => {
-                        // 若為查無有效資料的錯誤，寫入 Redis 排除快取以避免重複查詢
-                        if yahoo::profile::is_no_valid_data_error(&why) {
+                        // 查無有效資料或個股頁 404（已下市）都是預期狀況：寫入 Redis 排除快取避免重複查詢
+                        if let Some(ttl) = yahoo::profile::skip_cache_ttl_seconds(&why) {
                             if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
-                                .set(
-                                    &profile_skip_cache_key,
-                                    true,
-                                    yahoo::profile::NO_VALID_DATA_CACHE_TTL_SECONDS,
-                                )
+                                .set(&profile_skip_cache_key, true, ttl)
                                 .await
                             {
-                                tracing::error!("Failed to cache yahoo::profile no-valid-data skip for {} because {:?}",
+                                tracing::error!("Failed to cache yahoo::profile skip for {} because {:?}",
                                     fs.security_code, cache_err);
                             }
-                            tracing::warn!("Skip yahoo::profile::visit for {} because {}",
-                                fs.security_code, why);
+                            tracing::warn!("Skip yahoo::profile::visit for {} for {} seconds because {}",
+                                fs.security_code, ttl, why);
                         } else {
                             tracing::error!("Failed to yahoo::profile::visit for {} because {}",
                                 fs.security_code, why);

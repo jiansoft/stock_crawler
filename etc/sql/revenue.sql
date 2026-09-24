@@ -1,7 +1,7 @@
 create table public."Revenue"
 (
     "Serial"                          bigserial
-        constraint "Revenue_pkey" primary key,
+        constraint "CompanyRevenue_pkey" primary key,
     "SecurityCode"                    varchar(24)              default ''::character varying                   not null,
     "Date"                            bigint                   default 0                                       not null,
     "Monthly"                         numeric(18, 4)           default 0                                       not null,

@@ -25,7 +25,7 @@ use crate::{
         },
     },
     infra::cache::{RealtimeSnapshot, SHARE, TTL, TtlCacheInner},
-    infra::crawler::yahoo::YahooClassCategory,
+    infra::crawler::yahoo::{YahooClassCategory, YahooClassExchange},
 };
 
 use super::class_quote;
@@ -342,13 +342,24 @@ pub fn start_caching_task() {
                         */
                         // 類股失敗時只記錄錯誤，不中止整輪任務，
                         // 避免單一 sector 出問題就拖垮整個 Yahoo 報價快取。
-                        tracing::error!(
-                            "Yahoo 類股快取更新失敗: {} {}({}) {:?}",
-                            category.exchange.label(),
-                            category.name,
-                            category.sector_id,
-                            why
-                        );
+                        // 5xx 是 Yahoo 端的暫時性錯誤，下一輪即恢復，只記 warn。
+                        if is_transient_server_error(&err_msg) {
+                            tracing::warn!(
+                                "Yahoo 類股快取更新失敗（暫時性）: {} {}({}) {:#}",
+                                category.exchange.label(),
+                                category.name,
+                                category.sector_id,
+                                why
+                            );
+                        } else {
+                            tracing::error!(
+                                "Yahoo 類股快取更新失敗: {} {}({}) {:?}",
+                                category.exchange.label(),
+                                category.name,
+                                category.sector_id,
+                                why
+                            );
+                        }
                     }
                 }
 
@@ -565,14 +576,23 @@ fn apply_category_snapshots(
             // 若 symbol 已存在，就用最新 snapshot 覆蓋。
             for (symbol, snapshot) in category_snapshots {
                 let price = snapshot.price;
-                if !SHARE.is_valid_price(&symbol, price, snapshot.last_close) {
-                    tracing::warn!(
-                        "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                        symbol,
-                        price,
-                        snapshot.last_close,
-                        snapshot.source_site
-                    );
+                // Yahoo 興櫃類股的股票不一定已在主檔，改用類股本身的市場別決定閾值。
+                let is_valid = if category.exchange == YahooClassExchange::Emerging {
+                    SHARE.is_valid_price_for_market(&symbol, price, snapshot.last_close, true)
+                } else {
+                    SHARE.is_valid_price(&symbol, price, snapshot.last_close)
+                };
+                if !is_valid {
+                    // 價格 0 是尚未成交（冷門股、特別股開盤後常見），不是異常，只略過不記錄
+                    if price > Decimal::ZERO {
+                        tracing::warn!(
+                            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                            symbol,
+                            price,
+                            snapshot.last_close,
+                            snapshot.source_site
+                        );
+                    }
                     continue;
                 }
                 let has_changed = snapshot.price != Decimal::ZERO
@@ -609,8 +629,29 @@ fn rss_delta_kib(before: Option<ProcessMemoryStats>, after: Option<ProcessMemory
     }
 }
 
+/// 是否為 Yahoo 類股 API 回應的 5xx 暫時性錯誤（見 `class_quote` 的錯誤格式）。
+///
+/// 2026-09-24 盤中共 12 次 500／502，皆在 09:02～09:37，下一輪即恢復。
+fn is_transient_server_error(message: &str) -> bool {
+    message.contains("request failed with status 5")
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn is_transient_server_error_matches_only_5xx() {
+        assert!(is_transient_server_error(
+            "Yahoo 類股 API request failed with status 500 Internal Server Error for https://x. Body: "
+        ));
+        assert!(is_transient_server_error(
+            "Yahoo 類股 API request failed with status 502 Bad Gateway for https://x. Body: "
+        ));
+        assert!(!is_transient_server_error(
+            "Yahoo 類股 API request failed with status 404 Not Found for https://x. Body: "
+        ));
+        assert!(!is_transient_server_error("Request denied"));
+    }
     use std::time::{Duration, Instant};
 
     use once_cell::sync::Lazy;
