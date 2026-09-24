@@ -10,8 +10,9 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
     app::backfill::{
-        capital_reduction, delisted_company, dividend, etf, financial_statement, isin,
-        net_asset_value_per_share, qualified_foreign_institutional_investor, revenue, stock_weight,
+        capital_reduction, delisted_company, dividend, etf, financial_report, financial_statement,
+        isin, net_asset_value_per_share, qualified_foreign_institutional_investor, revenue,
+        stock_weight,
     },
     app::calculation,
     app::event,
@@ -153,6 +154,14 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "0 40 5 * * *",
             "計算各期間年化報酬率(CAGR)",
             calculation::cagr::execute_scheduled,
+        ),
+        // 06:00 採集 Yahoo 三大財務報表（損益表、資產負債表、現金流量表）
+        // 每輪最多 400 檔、約 45 分鐘；7 天 Redis 旗標讓每檔約每週重抓一次。
+        // 避開 21:00 的 Yahoo 股利採集，兩者不會同時對 Yahoo 發請求。
+        create_job(
+            "0 0 6 * * *",
+            "採集 Yahoo 三大財務報表",
+            financial_report::execute,
         ),
         // 08:00 提醒本日除權息與明日預計除權息的股票
         create_job(

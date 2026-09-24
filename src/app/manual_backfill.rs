@@ -35,13 +35,18 @@
 //! - `test_scan_otc_capital_reduction_gaps`：
 //!   **只讀**。列出上櫃仍未解釋的價格跳動，收斂成逐檔待辦清單，
 //!   供人工登錄或未來接上逐檔來源時當目標清單。
+//! - `test_backfill_financial_reports_for_symbols`：
+//!   依 [`MANUAL_FINANCIAL_REPORT_SYMBOLS`] 從 Yahoo 採集指定股票的三大財務報表，
+//!   不讀寫 Redis 略過旗標。
+//! - `test_backfill_financial_reports_all`：
+//!   一次採集全部上市櫃股票的三大財務報表（首次建檔用，約 3～4 小時）。
 
 use chrono::NaiveDate;
 
 use crate::{
     app::backfill::{
-        capital_reduction, capital_reduction_history, dividend, quote, quote_history,
-        taiwan_stock_index,
+        capital_reduction, capital_reduction_history, dividend, financial_report, quote,
+        quote_history, taiwan_stock_index,
     },
     app::calculation::{cagr, dividend_record},
     app::event::taiwan_stock::closing,
@@ -85,6 +90,11 @@ const MANUAL_QUOTE_HISTORY_TO: &str = "2021-12-01";
 ///
 /// 新增期間後把這裡改成該期間的代碼再執行 `test_backfill_cagr_period`。
 const MANUAL_CAGR_PERIOD: &str = "Y7";
+
+/// 手動採集三大財務報表的預設股票代號（逗號分隔）。
+///
+/// 可用環境變數 `MANUAL_FINANCIAL_REPORT_SYMBOLS` 覆蓋。
+const MANUAL_FINANCIAL_REPORT_SYMBOLS: &str = "8042,2330,2881";
 
 /// 手動回補指定交易日的各股每日收盤報價。
 ///
@@ -482,4 +492,50 @@ async fn test_scan_otc_capital_reduction_gaps() {
         report.symbol_count(),
         report.event_count()
     );
+}
+
+/// 採集指定股票的 Yahoo 三大財務報表（損益表、資產負債表、現金流量表）。
+///
+/// 每檔 5 次請求，不讀寫 Redis 略過旗標，適合補單檔或驗證資料。
+/// 任一檔失敗即中止，方便看到錯誤原因。
+///
+/// `cargo test app::manual_backfill::test_backfill_financial_reports_for_symbols -- --ignored --nocapture`
+/// 可用 `MANUAL_FINANCIAL_REPORT_SYMBOLS=2330,2317` 指定股票。
+#[tokio::test]
+#[ignore]
+async fn test_backfill_financial_reports_for_symbols() {
+    dotenvy::dotenv().ok();
+
+    let symbols = std::env::var("MANUAL_FINANCIAL_REPORT_SYMBOLS")
+        .unwrap_or_else(|_| MANUAL_FINANCIAL_REPORT_SYMBOLS.to_string());
+    let repo =
+        crate::infra::database::repository::financial_report::PgFinancialReportRepository::new();
+
+    for symbol in symbols.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let counts = financial_report::backfill_for_stock(&repo, symbol)
+            .await
+            .unwrap_or_else(|why| panic!("financial report backfill failed for {symbol}: {why:#}"));
+        println!(
+            "{symbol}: income={} balance={} cash_flow={}",
+            counts.income_statements, counts.balance_sheets, counts.cash_flow_statements
+        );
+    }
+}
+
+/// 一次採集全部上市櫃股票的 Yahoo 三大財務報表（首次建檔用）。
+///
+/// 約 1,800 檔、每檔 5 次請求，需要 3～4 小時。會寫入 7 天的 Redis 略過旗標，
+/// 中斷後重跑會從未處理的股票接續；排程之後也會自然接手。
+///
+/// `cargo test app::manual_backfill::test_backfill_financial_reports_all -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_financial_reports_all() {
+    dotenvy::dotenv().ok();
+
+    let summary = financial_report::backfill_all()
+        .await
+        .expect("financial report backfill failed");
+
+    println!("結束 test_backfill_financial_reports_all {summary:?}");
 }
