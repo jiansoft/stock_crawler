@@ -267,6 +267,14 @@ pub struct HoldingRevenueAlert {
     pub ttm_eps: Option<Decimal>,
     /// 與 `ttm_eps` 同一段期間的十二個月營收合計 (千元)；資料不齊時為 None
     pub ttm_revenue: Option<Decimal>,
+    /// 近 12 季「季 EPS 對季營收(千元)」迴歸斜率：每千元營收帶來的 EPS；只在錨點虧損且有新增營收時才有值
+    pub reg_slope: Option<Decimal>,
+    /// 上述迴歸的截距：每季固定損益 (元)
+    pub reg_intercept: Option<Decimal>,
+    /// 上述迴歸的判定係數 R²
+    pub reg_r2: Option<Decimal>,
+    /// 上述迴歸的樣本季數
+    pub reg_quarters: Option<i64>,
     /// 營收月份 (yyyyMM)
     pub date: i64,
 }
@@ -285,6 +293,15 @@ const MONTHS_PER_YEAR: Decimal = dec!(12);
 /// 與 stock_go `revenue_repository.go` 的 `revenue_pace` 門檻一致，兩邊要一起改。
 const VOLATILE_REVENUE_PACE: Decimal = dec!(2);
 
+/// 迴歸法至少要有這麼多季樣本才採用；與 stock_go `basis_pick` 的門檻一致。
+const MIN_REGRESSION_QUARTERS: i64 = 8;
+
+/// 迴歸法的 R² 下限：EPS 與營收要有穩定關係，否則斜率只是雜訊；與 stock_go 一致。
+const MIN_REGRESSION_R2: Decimal = dec!(0.5);
+
+/// 一季的月數，用於把迴歸截距（每季固定損益）折算成新增月份。
+const MONTHS_PER_QUARTER: Decimal = dec!(3);
+
 /// 推估 EPS 的計算依據。
 ///
 /// 兩種方法的可信度差很多，通知必須讓人一眼分得出來用的是哪一種。
@@ -292,6 +309,9 @@ const VOLATILE_REVENUE_PACE: Decimal = dec!(2);
 pub enum EpsEstimateBasis {
     /// 以今年已公布的實際季報 EPS 為錨點，只把尚未公布的月份按營收比例外推。
     ReportedQuarters,
+    /// 今年已公布的季報為虧損時，已實現部分沿用實際 EPS，
+    /// 新增月份以近 12 季「季 EPS 對季營收」迴歸推估（每季固定損益＋營收貢獻）。
+    ReportedQuartersWithRegression,
     /// 今年已公布的季報為虧損時，已實現部分沿用實際 EPS，
     /// 新增營收改用近四季淨利率（近四季 EPS ÷ 近四季營收）推估。
     ReportedQuartersWithTrailingMargin,
@@ -391,12 +411,14 @@ impl HoldingRevenueAlert {
     ///    等同 `錨點 EPS × (本期累計營收 ÷ 錨點季底累計營收)`。比率的分子分母都是同一檔股票的
     ///    營收，金控、保險這類「營收」與淨利率基準對不起來的產業也能算對。
     /// 2. 錨點虧損：按比例外推會變成「營收越多、虧越多」，營收大增時方向完全相反。
-    ///    改用近四季淨利率（近四季 EPS ÷ 近四季營收），前提是近四季合計獲利。
-    /// 3. 錨點虧損、近四季也不賺：營收步調正常時虧損大致隨時間累積，照比例外推仍合理；
-    ///    營收劇變時沒有可信的淨利率可用，回傳 `None` 不推估。
+    ///    近 12 季「季 EPS 對季營收」迴歸可靠時，用截距扣新增月份的固定損益、
+    ///    斜率算新增營收的獲利；建設、生技這類營收一次入帳的公司靠它才估得出來。
+    /// 3. 迴歸不可靠但近四季合計獲利：改用近四季淨利率（近四季 EPS ÷ 近四季營收）。
+    /// 4. 以上皆不成立：營收步調正常時虧損大致隨時間累積，照比例外推仍合理；
+    ///    營收劇變時沒有可信的方法可用，回傳 `None` 不推估。
     fn anchored_accumulated_eps(
         &self,
-        (anchor_eps, anchor_revenue, _): (Decimal, Decimal, i64),
+        (anchor_eps, anchor_revenue, anchor_months): (Decimal, Decimal, i64),
     ) -> Option<(Decimal, EpsEstimateBasis)> {
         let proportional = || {
             (
@@ -408,6 +430,14 @@ impl HoldingRevenueAlert {
         let extra_revenue = self.monthly_accumulated - anchor_revenue;
         if anchor_eps > Decimal::ZERO || extra_revenue <= Decimal::ZERO {
             return Some(proportional());
+        }
+
+        if let Some((slope, intercept)) = self.reliable_regression() {
+            let extra_months = Decimal::from(self.accumulated_months() - anchor_months);
+            return Some((
+                anchor_eps + intercept * extra_months / MONTHS_PER_QUARTER + slope * extra_revenue,
+                EpsEstimateBasis::ReportedQuartersWithRegression,
+            ));
         }
 
         if let (Some(ttm_eps), Some(ttm_revenue)) = (self.ttm_eps, self.ttm_revenue)
@@ -424,6 +454,16 @@ impl HoldingRevenueAlert {
             Some(pace) if pace >= VOLATILE_REVENUE_PACE => None,
             _ => Some(proportional()),
         }
+    }
+
+    /// 近 12 季迴歸符合門檻（季數、斜率為正、R²）時回傳 `(斜率, 截距)`。
+    fn reliable_regression(&self) -> Option<(Decimal, Decimal)> {
+        let slope = self.reg_slope?;
+        let intercept = self.reg_intercept?;
+        let r2 = self.reg_r2?;
+        let quarters = self.reg_quarters?;
+        (quarters >= MIN_REGRESSION_QUARTERS && slope > Decimal::ZERO && r2 >= MIN_REGRESSION_R2)
+            .then_some((slope, intercept))
     }
 
     /// 淨利率法：`累計營收(元) ÷ 發行股數 × 近四季平均稅後淨利率`。
@@ -494,6 +534,10 @@ mod tests {
             anchor_quarter_no: Some(2),
             ttm_eps: None,
             ttm_revenue: None,
+            reg_slope: None,
+            reg_intercept: None,
+            reg_r2: None,
+            reg_quarters: None,
             date,
         }
     }
@@ -606,6 +650,65 @@ mod tests {
         alert.ttm_revenue = Some(dec!(900000));
 
         assert_eq!(alert.estimate_eps(), None);
+    }
+
+    /// 全坤建 2026-08 的實際數字：上半年虧 0.52 元、近四季也虧，7、8 月建案入帳。
+    /// 近 12 季（含 2024 年交屋）迴歸：每季固定 -0.284 元、每千元營收 9.606e-7 元，R² 0.77。
+    fn construction_alert() -> HoldingRevenueAlert {
+        let mut alert = revenue_alert(202608);
+        alert.anchor_eps = Some(dec!(-0.52));
+        alert.anchor_accumulated_revenue = Some(dec!(126622));
+        alert.monthly_accumulated = dec!(1327379);
+        alert.ttm_eps = Some(dec!(-0.74));
+        alert.ttm_revenue = Some(dec!(258378));
+        alert.reg_slope = Some(dec!(0.0000009606));
+        alert.reg_intercept = Some(dec!(-0.284));
+        alert.reg_r2 = Some(dec!(0.77));
+        alert.reg_quarters = Some(12);
+        alert
+    }
+
+    // -0.52 ＋ 兩個月固定損益 (-0.284 × 2 ÷ 3) ＋ 新增營收 1,200,757 × 9.606e-7 ≈ 0.44。
+    #[test]
+    fn estimate_eps_uses_regression_when_loss_anchor_has_reliable_history() {
+        let estimate = construction_alert().estimate_eps().expect("estimate");
+
+        assert_eq!(
+            estimate.basis,
+            EpsEstimateBasis::ReportedQuartersWithRegression
+        );
+        assert_eq!(estimate.accumulated.round_dp(2), dec!(0.44));
+        assert!(estimate.volatile);
+    }
+
+    // 迴歸可靠時優先於近四季淨利率。
+    #[test]
+    fn estimate_eps_prefers_regression_over_trailing_margin() {
+        let mut alert = construction_alert();
+        alert.ttm_eps = Some(dec!(2.9));
+
+        let estimate = alert.estimate_eps().expect("estimate");
+
+        assert_eq!(
+            estimate.basis,
+            EpsEstimateBasis::ReportedQuartersWithRegression
+        );
+    }
+
+    // R² 不足、斜率不為正或季數不足時迴歸都不採用；此例近四季也虧、營收劇變，因此不推估。
+    #[test]
+    fn estimate_eps_rejects_unreliable_regression() {
+        let mut low_r2 = construction_alert();
+        low_r2.reg_r2 = Some(dec!(0.49));
+        assert_eq!(low_r2.estimate_eps(), None);
+
+        let mut negative_slope = construction_alert();
+        negative_slope.reg_slope = Some(dec!(-0.0000001));
+        assert_eq!(negative_slope.estimate_eps(), None);
+
+        let mut few_quarters = construction_alert();
+        few_quarters.reg_quarters = Some(7);
+        assert_eq!(few_quarters.estimate_eps(), None);
     }
 
     // 錨點獲利時即使營收劇變也維持按比例外推，只標記為僅供參考。

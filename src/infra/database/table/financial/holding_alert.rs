@@ -27,6 +27,8 @@ use crate::infra::database;
 ///    要求季別連續（`COUNT(*) = MAX(季別編號)`）：缺季時加總會少算，寧可放棄錨點。
 ///    另帶出錨點季往回共四季的 EPS 合計與同期十二個月營收合計（`ttm_*`），
 ///    錨點虧損時用來推估新增營收的淨利率；四季或十二個月不齊時為 NULL。
+///    錨點虧損且有新增營收時，再帶出近 12 季「季 EPS 對季營收」的迴歸（`reg_*`），
+///    營收一次入帳的公司（建設、生技）靠它才看得到「入帳一次賺多少」。
 /// 2. **近四季平均稅後淨利率**（備援）：今年還沒有任何季報可錨定時才用得到。台股季報的
 ///    公布期限比月營收晚（Q1 約 5 月中、Q2 約 8 月中），所以 1~4 月的營收通知通常只有備援可用。
 ///    只取 Q1~Q4，排除年度列以免同一段期間被重複計入；排除 `net_income = 0`，
@@ -63,7 +65,11 @@ SELECT
     anchor.anchor_accumulated_revenue,
     anchor.anchor_quarter_no,
     ttm.ttm_eps,
-    ttm.ttm_revenue
+    ttm.ttm_revenue,
+    reg.reg_slope,
+    reg.reg_intercept,
+    reg.reg_r2,
+    reg.reg_quarters
 FROM "Revenue" AS r
 INNER JOIN stocks AS s ON s.stock_symbol = r."stock_symbol"
 LEFT JOIN stock_industry AS si ON si.stock_industry_id = s.stock_industry_id
@@ -120,6 +126,36 @@ LEFT JOIN LATERAL (
     WHERE q.quarter_count = 4 AND m.month_count = 12 AND m.revenue_sum > 0
 ) AS ttm ON TRUE
 LEFT JOIN LATERAL (
+    -- 每季營收要三個月齊全才算一個樣本；外層條件不成立時以 one-time filter 略過。
+    SELECT
+        REGR_SLOPE(qq.eps, qq.revenue)::numeric AS reg_slope,
+        REGR_INTERCEPT(qq.eps, qq.revenue)::numeric AS reg_intercept,
+        REGR_R2(qq.eps, qq.revenue)::numeric AS reg_r2,
+        REGR_COUNT(qq.eps, qq.revenue) AS reg_quarters
+    FROM (
+        SELECT fs.earnings_per_share AS eps, SUM(rv."Monthly") AS revenue
+        FROM financial_statement AS fs
+        INNER JOIN "Revenue" AS rv
+            ON rv."stock_symbol" = fs.security_code
+            AND rv."Date" / 100 = fs.year
+            AND (rv."Date" % 100 + 2) / 3 = CASE fs.quarter
+                    WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2
+                    WHEN 'Q3' THEN 3 WHEN 'Q4' THEN 4
+                END
+        WHERE fs.security_code = r."stock_symbol"
+            AND fs.quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
+            AND fs.year * 4 + CASE fs.quarter
+                    WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2
+                    WHEN 'Q3' THEN 3 WHEN 'Q4' THEN 4
+                END
+                BETWEEN (r."Date" / 100) * 4 + anchor.anchor_quarter_no - 11
+                    AND (r."Date" / 100) * 4 + anchor.anchor_quarter_no
+        GROUP BY fs.year, fs.quarter, fs.earnings_per_share
+        HAVING COUNT(*) = 3
+    ) AS qq
+    WHERE anchor.anchor_eps <= 0 AND r."MonthlyAccumulated" > anchor.anchor_accumulated_revenue
+) AS reg ON TRUE
+LEFT JOIN LATERAL (
     SELECT AVG(recent.net_income) AS net_income_margin
     FROM (
         SELECT fs.net_income
@@ -157,6 +193,10 @@ ORDER BY r."ComparedWithLastYearSameMonth" DESC, r."stock_symbol"
             anchor_quarter_no: row.try_get("anchor_quarter_no")?,
             ttm_eps: row.try_get("ttm_eps")?,
             ttm_revenue: row.try_get("ttm_revenue")?,
+            reg_slope: row.try_get("reg_slope")?,
+            reg_intercept: row.try_get("reg_intercept")?,
+            reg_r2: row.try_get("reg_r2")?,
+            reg_quarters: row.try_get("reg_quarters")?,
         })
     })
     .fetch_all(database::get_connection())

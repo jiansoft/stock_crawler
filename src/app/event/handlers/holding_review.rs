@@ -243,6 +243,7 @@ impl EventDispatcher {
 
         let label = match estimate.basis {
             EpsEstimateBasis::ReportedQuarters
+            | EpsEstimateBasis::ReportedQuartersWithRegression
             | EpsEstimateBasis::ReportedQuartersWithTrailingMargin => "推估EPS",
             EpsEstimateBasis::NetIncomeMargin => "概估EPS",
         };
@@ -366,6 +367,10 @@ mod tests {
             anchor_quarter_no: Some(2),
             ttm_eps: None,
             ttm_revenue: None,
+            reg_slope: None,
+            reg_intercept: None,
+            reg_r2: None,
+            reg_quarters: None,
             date: 202608,
         }
     }
