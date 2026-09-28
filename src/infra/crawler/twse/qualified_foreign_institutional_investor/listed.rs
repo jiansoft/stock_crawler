@@ -10,6 +10,12 @@ use crate::{
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 /// TWSE 外資及陸資持股統計 API 回應。
+///
+/// 查詢休市日（例如平日的國定假日）時 TWSE 只回
+/// `{"stat":"查詢日期大於可查詢最大日期，請重新查詢!","total":0}`，
+/// 其餘欄位都不存在；因此除了 `stat` 以外的欄位一律可缺省，
+/// 讓流程能走到下方的 `stat` 判斷，而不是在反序列化階段就失敗。
+#[serde(default)]
 pub struct QFIIResponse {
     /// 回應狀態字串。
     pub stat: Option<String>,
@@ -53,9 +59,11 @@ pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
     };
 
     if stat != "OK" {
+        // 休市日也會走到這裡（stat 為「查詢日期大於可查詢最大日期」），不是錯誤。
         tracing::warn!(
-            "{}",
-            "取得外資及陸資投資持股統計 Finish taiex.Stat is not ok".to_string(),
+            "取得外資及陸資投資持股統計 {} 無資料，略過：{}",
+            date_time.format("%Y-%m-%d"),
+            stat
         );
         return Ok(result);
     }
@@ -107,6 +115,22 @@ mod tests {
     use super::*;
     use rust_decimal_macros::dec;
     use serde_json::json;
+
+    /// 休市日的回應只有 `stat` 與 `total`，必須能反序列化，才能交給 `stat` 判斷略過。
+    /// 2026-09-25（中秋節）、2026-09-28（教師節）排程曾因此在解析 JSON 時失敗並發出告警。
+    #[test]
+    fn response_on_market_holiday_deserializes_without_data() {
+        let body = r#"{"stat":"查詢日期大於可查詢最大日期，請重新查詢!","total":0}"#;
+
+        let response: QFIIResponse = serde_json::from_str(body).expect("休市日回應應可解析");
+
+        assert_eq!(
+            response.stat.as_deref(),
+            Some("查詢日期大於可查詢最大日期，請重新查詢!")
+        );
+        assert!(response.data.is_empty());
+        assert!(response.select_type.is_empty());
+    }
 
     /// 以貼近 MI_QFIIS 真實回應形狀的資料驗證資料列整理流程。
     ///
