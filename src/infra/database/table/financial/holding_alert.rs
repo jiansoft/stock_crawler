@@ -25,6 +25,8 @@ use crate::infra::database;
 /// 1. **錨點**（優先）：今年自 Q1 起連續公布、且季底不晚於本期的季報 EPS 加總，
 ///    以及該季底當月的累計營收。有了這組數字就能「已實現的用財報、未公布的按營收外推」。
 ///    要求季別連續（`COUNT(*) = MAX(季別編號)`）：缺季時加總會少算，寧可放棄錨點。
+///    另帶出錨點季往回共四季的 EPS 合計與同期十二個月營收合計（`ttm_*`），
+///    錨點虧損時用來推估新增營收的淨利率；四季或十二個月不齊時為 NULL。
 /// 2. **近四季平均稅後淨利率**（備援）：今年還沒有任何季報可錨定時才用得到。台股季報的
 ///    公布期限比月營收晚（Q1 約 5 月中、Q2 約 8 月中），所以 1~4 月的營收通知通常只有備援可用。
 ///    只取 Q1~Q4，排除年度列以免同一段期間被重複計入；排除 `net_income = 0`，
@@ -58,12 +60,16 @@ SELECT
     r."AccumulatedComparedWithLastYear",
     margin.net_income_margin,
     anchor.anchor_eps,
-    anchor.anchor_accumulated_revenue
+    anchor.anchor_accumulated_revenue,
+    anchor.anchor_quarter_no,
+    ttm.ttm_eps,
+    ttm.ttm_revenue
 FROM "Revenue" AS r
 INNER JOIN stocks AS s ON s.stock_symbol = r."stock_symbol"
 LEFT JOIN stock_industry AS si ON si.stock_industry_id = s.stock_industry_id
 LEFT JOIN LATERAL (
     SELECT
+        reported.quarter_no AS anchor_quarter_no,
         reported.eps_sum AS anchor_eps,
         anchor_revenue."MonthlyAccumulated" AS anchor_accumulated_revenue
     FROM (
@@ -88,6 +94,31 @@ LEFT JOIN LATERAL (
         AND anchor_revenue."Date" = (r."Date" / 100) * 100 + reported.quarter_no * 3
     WHERE reported.quarter_count = reported.quarter_no
 ) AS anchor ON TRUE
+LEFT JOIN LATERAL (
+    -- 季別與月份都換成連續序號（年 × 4 + 季、年 × 12 + 月）才能跨年取區間。
+    SELECT q.eps_sum AS ttm_eps, m.revenue_sum AS ttm_revenue
+    FROM (
+        SELECT COUNT(*) AS quarter_count, SUM(fs.earnings_per_share) AS eps_sum
+        FROM financial_statement AS fs
+        WHERE fs.security_code = r."stock_symbol"
+            AND fs.quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
+            AND fs.year * 4 + CASE fs.quarter
+                    WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2
+                    WHEN 'Q3' THEN 3 WHEN 'Q4' THEN 4
+                END
+                BETWEEN (r."Date" / 100) * 4 + anchor.anchor_quarter_no - 3
+                    AND (r."Date" / 100) * 4 + anchor.anchor_quarter_no
+    ) AS q
+    CROSS JOIN (
+        SELECT COUNT(*) AS month_count, SUM(rv."Monthly") AS revenue_sum
+        FROM "Revenue" AS rv
+        WHERE rv."stock_symbol" = r."stock_symbol"
+            AND (rv."Date" / 100) * 12 + rv."Date" % 100
+                BETWEEN (r."Date" / 100) * 12 + anchor.anchor_quarter_no * 3 - 11
+                    AND (r."Date" / 100) * 12 + anchor.anchor_quarter_no * 3
+    ) AS m
+    WHERE q.quarter_count = 4 AND m.month_count = 12 AND m.revenue_sum > 0
+) AS ttm ON TRUE
 LEFT JOIN LATERAL (
     SELECT AVG(recent.net_income) AS net_income_margin
     FROM (
@@ -123,6 +154,9 @@ ORDER BY r."ComparedWithLastYearSameMonth" DESC, r."stock_symbol"
             net_income_margin: row.try_get("net_income_margin")?,
             anchor_eps: row.try_get("anchor_eps")?,
             anchor_accumulated_revenue: row.try_get("anchor_accumulated_revenue")?,
+            anchor_quarter_no: row.try_get("anchor_quarter_no")?,
+            ttm_eps: row.try_get("ttm_eps")?,
+            ttm_revenue: row.try_get("ttm_revenue")?,
         })
     })
     .fetch_all(database::get_connection())
