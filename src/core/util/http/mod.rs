@@ -35,6 +35,10 @@ const MAX_RATE_LIMIT_RETRIES: u32 = 3;
 /// 來源站台一旦掛上 WAF，之後每次請求都會是 403；若每次都告警，真正需要注意的事件
 /// 會被洗掉。同網域在這個間隔內只會發一次，其餘只留 log。
 const FORBIDDEN_ALERT_COOLDOWN: Duration = Duration::from_secs(60 * 60 * 12);
+/// 成功回應耗時達到此門檻（毫秒）時改以 WARN 記錄。
+///
+/// 正式機平常 p99 約 0.4 秒、最慢約 2.4 秒，請求逾時為 15 秒；5 秒代表來源站明顯變慢。
+const SLOW_REQUEST_WARN_MS: u64 = 5_000;
 
 /// 各網域最近一次發送 403 告警的時間。
 ///
@@ -415,6 +419,9 @@ async fn send(
     send_with_client(client, method, url, headers, body, request_detail).await
 }
 
+/// 使用指定用戶端發送請求，供共用 HTTP 入口與測試使用，並處理重試及 403 告警。
+/// 一般回應記為 DEBUG；慢回應、HTTP 錯誤與待重試的網路錯誤／429 記為 WARN，重試耗盡記為 ERROR。
+/// 回傳尚未讀取內容的回應；HTTP 狀態碼仍交由呼叫端判斷，網路或限流重試耗盡則回傳錯誤。
 async fn send_with_client(
     client: &Client,
     method: Method,
@@ -464,21 +471,44 @@ async fn send_with_client(
         match res {
             Ok(response) => {
                 let status = response.status();
-                // 成功回應，先將敏感的 URL 進行脫敏遮罩處理（例如隱藏 Telegram Token），然後再記錄日誌。
+                // 收到回應不代表 HTTP 成功；先遮罩 URL，再依狀態碼決定層級，避免正常爬取淹沒警告。
                 let safe_url = redact_url(url);
+                // 會進入下方重試流程的 429，由 http.rate_limited／http.rate_limit_exhausted 記錄，
+                // 這裡不再重複記一筆。
+                let rate_limited = status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    && !url.contains("api.telegram.org");
 
-                tracing::info!(
-                    url = %safe_url,
-                    method = method.as_str(),
-                    status = status.as_u16(),
-                    elapsed_ms,
-                    "http.done{request_detail_suffix}"
-                );
+                if status.is_client_error() || status.is_server_error() {
+                    if !rate_limited {
+                        tracing::warn!(
+                            url = %safe_url,
+                            method = method.as_str(),
+                            status = status.as_u16(),
+                            elapsed_ms,
+                            "http.done{request_detail_suffix}"
+                        );
+                    }
+                } else if elapsed_ms >= SLOW_REQUEST_WARN_MS {
+                    // 成功回應平常只記 DEBUG；來源站明顯變慢時仍要在檔案日誌留下痕跡。
+                    tracing::warn!(
+                        url = %safe_url,
+                        method = method.as_str(),
+                        status = status.as_u16(),
+                        elapsed_ms,
+                        "http.slow{request_detail_suffix}"
+                    );
+                } else {
+                    tracing::debug!(
+                        url = %safe_url,
+                        method = method.as_str(),
+                        status = status.as_u16(),
+                        elapsed_ms,
+                        "http.done{request_detail_suffix}"
+                    );
+                }
 
                 // ── 429 Too Many Requests：exponential backoff retry ───────
-                if status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                    && !url.contains("api.telegram.org")
-                {
+                if rate_limited {
                     rate_limit_attempt += 1;
                     if rate_limit_attempt <= MAX_RATE_LIMIT_RETRIES {
                         let delay = rate_limit_backoff(rate_limit_attempt);
@@ -491,6 +521,14 @@ async fn send_with_client(
                         tokio::time::sleep(delay).await;
                         continue;
                     }
+                    tracing::error!(
+                        url = %safe_url,
+                        method = method.as_str(),
+                        status = status.as_u16(),
+                        attempt = rate_limit_attempt,
+                        elapsed_ms,
+                        "http.rate_limit_exhausted{request_detail_suffix}"
+                    );
                     return Err(anyhow!(
                         "Rate limited (429) at {} after {rate_limit_attempt} retries",
                         safe_url
@@ -500,20 +538,19 @@ async fn send_with_client(
                 // ── 403 Forbidden：發送系統告警，不重試 ──────────────────
                 // 透過 core::alert 抽象介面發送（實際管道由 main 註冊的 adapter 決定），
                 // core 層不再直接依賴 interfaces::bot（反向耦合已移除）。
-                if status == reqwest::StatusCode::FORBIDDEN && !url.contains("api.telegram.org") {
-                    if should_alert_forbidden(url) {
-                        let alert_url = url.to_string();
-                        tokio::spawn(async move {
-                            crate::core::alert::send_alert(
-                                "爬蟲遭遇 IP 阻擋 (403)",
-                                &format!("請求網址: {alert_url}"),
-                            )
-                            .await;
-                        });
-                    } else {
-                        // 同一個網域已在冷卻期內告警過，重複通知沒有新資訊，只留下記錄。
-                        tracing::warn!(url = %safe_url, "http.forbidden");
-                    }
+                // 冷卻期內不再告警；上方 http.done 已以 WARN 記下這次 403，不必再補一筆。
+                if status == reqwest::StatusCode::FORBIDDEN
+                    && !url.contains("api.telegram.org")
+                    && should_alert_forbidden(url)
+                {
+                    let alert_url = url.to_string();
+                    tokio::spawn(async move {
+                        crate::core::alert::send_alert(
+                            "爬蟲遭遇 IP 阻擋 (403)",
+                            &format!("請求網址: {alert_url}"),
+                        )
+                        .await;
+                    });
                 }
 
                 return Ok(response);
@@ -526,21 +563,29 @@ async fn send_with_client(
                 // 因此必須在這裡就先遮蔽。
                 let err_str = redact_secrets(&format!("{why:?}"));
                 let safe_url = redact_url(url);
-                tracing::error!(
-                    url = %safe_url,
-                    attempt = network_attempt,
-                    error = %err_str,
-                    elapsed_ms,
-                    "http.failed{request_detail_suffix}"
-                );
-
+                // 尚可重試的暫時錯誤使用 WARN，只有耗盡次數才以 ERROR 標示請求最終失敗。
                 if network_attempt >= MAX_NETWORK_RETRIES {
+                    tracing::error!(
+                        url = %safe_url,
+                        attempt = network_attempt,
+                        error = %err_str,
+                        elapsed_ms,
+                        "http.failed{request_detail_suffix}"
+                    );
                     return Err(anyhow!(
                         "Failed to send {} after {network_attempt} network retries; \
                          last error: {err_str}",
                         safe_url
                     ));
                 }
+
+                tracing::warn!(
+                    url = %safe_url,
+                    attempt = network_attempt,
+                    error = %err_str,
+                    elapsed_ms,
+                    "http.failed{request_detail_suffix}"
+                );
 
                 // 2^n 秒 backoff：1→2s、2→4s、3→8s
                 tokio::time::sleep(Duration::from_secs(2u64.pow(network_attempt))).await;
