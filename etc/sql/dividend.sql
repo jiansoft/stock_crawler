@@ -21,6 +21,8 @@ create table public.dividend
     payout_ratio_cash              numeric(18, 4)           default 0                                       not null,
     payout_ratio_stock             numeric(18, 4)           default 0                                       not null,
     payout_ratio                   numeric(18, 4)           default 0                                       not null,
+    payout_eps                     numeric(18, 4),
+    payout_period                  varchar(16),
     primary key (security_code, year, quarter)
 );
 
@@ -40,6 +42,8 @@ comment on column public.dividend.earnings_stock_dividend is '盈餘股票股利
 comment on column public.dividend.payout_ratio_cash is '盈餘分配率_現金(%)';
 comment on column public.dividend.payout_ratio_stock is '盈餘分配率_股要(%)';
 comment on column public.dividend.payout_ratio is '盈餘分配率(%)';
+comment on column public.dividend.payout_eps is '盈餘分配率的分母：這筆股利涵蓋期間的每股盈餘（尚未計算時為 NULL）';
+comment on column public.dividend.payout_period is '股利涵蓋的盈餘期間，例如 2025、2026Q2、2025Q4~2026Q2（尚未計算時為 NULL）';
 
 create index "dividend-serial-idx"
     on public.dividend (serial);

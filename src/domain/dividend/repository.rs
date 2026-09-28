@@ -1,6 +1,5 @@
-use crate::domain::dividend::entity::{
-    Dividend, PayoutRatioCandidate, PayoutRatios, StockDividendInfo, StockDividendPayableDateInfo,
-};
+use crate::domain::dividend::entity::{Dividend, StockDividendInfo, StockDividendPayableDateInfo};
+use crate::domain::dividend::payout::{PayoutDividend, PayoutRatios, PeriodEarnings};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Local, NaiveDate};
@@ -51,10 +50,13 @@ pub trait DividendRepository: Send + Sync {
         created_time: DateTime<Local>,
     ) -> Result<Vec<Dividend>>;
 
-    /// 取得待計算盈餘分配率的股利列，並帶出同期間的每股盈餘。
-    async fn fetch_payout_ratio_candidates(&self) -> Result<Vec<PayoutRatioCandidate>>;
+    /// 取得計算盈餘分配率所需的股利列（含目前寫入的結果）與各期財報每股盈餘。
+    ///
+    /// 只取有財報的股票；每股盈餘只取股利所屬年度用得到的那幾年。
+    async fn fetch_payout_ratio_inputs(&self)
+    -> Result<(Vec<PayoutDividend>, Vec<PeriodEarnings>)>;
 
-    /// 批次寫回計算好的盈餘分配率，回傳實際更新的列數。
+    /// 批次寫回計算好的盈餘分配率、分母 EPS 與涵蓋期間，回傳實際更新的列數。
     async fn update_payout_ratios(&self, ratios: &[PayoutRatios]) -> Result<u64>;
 
     /// 取得指定日期有除權或除息事件的股票資料與參考收盤價。
