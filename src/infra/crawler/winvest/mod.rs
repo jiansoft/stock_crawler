@@ -1,12 +1,14 @@
 //! # Winvest 採集器
 //!
-//! 此模組封裝 Winvest（`winvest.tw`）的即時報價來源，並提供
+//! 此模組封裝 Winvest（`winvest.tw`）的報價來源（2026-09 改版後只提供日 K），並提供
 //! `StockInfo` trait 所需的股價與報價查詢能力。
 //!
 //! 目前功能由 [`price`] 子模組提供。
 
-/// Winvest 即時報價實作。
+/// Winvest 報價實作。
 pub mod price;
+/// Winvest antiforgery 工作階段（cookie 與 token）。
+mod session;
 
 /// Winvest 網站主機名稱。
 const HOST: &str = "winvest.tw";
