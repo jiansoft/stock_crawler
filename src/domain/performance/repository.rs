@@ -93,4 +93,7 @@ pub trait CorporateActionRepository: Send + Sync {
 
     /// 列出指定股票的所有公司行動，依生效日由早至晚排序。
     async fn fetch_by_symbol(&self, stock_symbol: &str) -> Result<Vec<CorporateAction>>;
+
+    /// 列出在指定日期生效（恢復買賣）的所有公司行動，依股票代號排序。
+    async fn fetch_by_effective_date(&self, date: NaiveDate) -> Result<Vec<CorporateAction>>;
 }

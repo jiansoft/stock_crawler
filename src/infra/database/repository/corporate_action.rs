@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
-use sqlx::Row;
+use sqlx::{Row, postgres::PgRow};
 
 use crate::domain::performance::entity::{CorporateAction, CorporateActionType};
 use crate::domain::performance::repository::CorporateActionRepository;
@@ -67,25 +67,42 @@ impl CorporateActionRepository for PgCorporateActionRepository {
             .await
             .context("Failed to fetch corporate actions by symbol")?;
 
-        rows.into_iter()
-            .map(|row| {
-                let share_ratio = row.try_get::<Decimal, _>("share_ratio")?;
-                // 舊資料或人工以 SQL 寫入的列可能有無法辨識的 action_type，
-                // 此時退回以比例推斷，至少不會讓整批查詢失敗。
-                let action_type =
-                    CorporateActionType::from_db_value(row.try_get::<&str, _>("action_type")?)
-                        .unwrap_or_else(|| CorporateActionType::infer_from_ratio(share_ratio));
-
-                Ok(CorporateAction {
-                    stock_symbol: row.try_get::<String, _>("stock_symbol")?,
-                    effective_date: row.try_get::<NaiveDate, _>("effective_date")?,
-                    action_type,
-                    share_ratio,
-                    note: row.try_get::<String, _>("note")?,
-                })
-            })
-            .collect()
+        rows.iter().map(corporate_action_from_row).collect()
     }
+
+    async fn fetch_by_effective_date(&self, date: NaiveDate) -> Result<Vec<CorporateAction>> {
+        let sql = r#"
+            SELECT stock_symbol, effective_date, action_type, share_ratio, note
+            FROM corporate_action
+            WHERE effective_date = $1
+            ORDER BY stock_symbol
+        "#;
+
+        let rows = sqlx::query(sql)
+            .bind(date)
+            .fetch_all(database::get_connection())
+            .await
+            .with_context(|| format!("Failed to fetch corporate actions effective on {date}"))?;
+
+        rows.iter().map(corporate_action_from_row).collect()
+    }
+}
+
+/// 將 `corporate_action` 資料列轉成領域實體。
+fn corporate_action_from_row(row: &PgRow) -> Result<CorporateAction> {
+    let share_ratio = row.try_get::<Decimal, _>("share_ratio")?;
+    // 舊資料或人工以 SQL 寫入的列可能有無法辨識的 action_type，
+    // 此時退回以比例推斷，至少不會讓整批查詢失敗。
+    let action_type = CorporateActionType::from_db_value(row.try_get::<&str, _>("action_type")?)
+        .unwrap_or_else(|| CorporateActionType::infer_from_ratio(share_ratio));
+
+    Ok(CorporateAction {
+        stock_symbol: row.try_get::<String, _>("stock_symbol")?,
+        effective_date: row.try_get::<NaiveDate, _>("effective_date")?,
+        action_type,
+        share_ratio,
+        note: row.try_get::<String, _>("note")?,
+    })
 }
 
 #[cfg(test)]
@@ -207,6 +224,48 @@ mod tests {
                 .expect("fetch other symbol")
                 .is_empty()
         );
+
+        cleanup().await;
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn test_fetch_by_effective_date_returns_only_that_day() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 test_fetch_by_effective_date_returns_only_that_day：無資料庫連接");
+            return;
+        }
+
+        let repo = PgCorporateActionRepository::new();
+        cleanup().await;
+
+        for (day, ratio) in [(9_u32, dec!(0.5)), (10_u32, dec!(0.7))] {
+            repo.save(&CorporateAction {
+                stock_symbol: FAKE_SYMBOL.to_string(),
+                effective_date: date(1990, 3, day),
+                action_type: CorporateActionType::CapitalReduction,
+                share_ratio: ratio,
+                note: "減資彌補虧損".to_string(),
+            })
+            .await
+            .expect("save");
+        }
+
+        let found = repo
+            .fetch_by_effective_date(date(1990, 3, 9))
+            .await
+            .expect("fetch_by_effective_date");
+        let ours: Vec<_> = found
+            .iter()
+            .filter(|action| action.stock_symbol == FAKE_SYMBOL)
+            .collect();
+        assert_eq!(ours.len(), 1);
+        assert_eq!(ours[0].share_ratio, dec!(0.5));
+        assert_eq!(ours[0].action_type, CorporateActionType::CapitalReduction);
 
         cleanup().await;
     }

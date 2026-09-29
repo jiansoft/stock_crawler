@@ -29,7 +29,7 @@ impl Share {
             .unwrap_or(false)
     }
 
-    /// 取得當日除權息參考價；當天沒有除權息時為 `None`。
+    /// 取得當日除權息或恢復買賣參考價；當天沒有這類事件時為 `None`。
     fn get_ex_rights_reference_price(&self, symbol: &str) -> Option<Decimal> {
         self.ex_rights_reference_prices
             .read()
@@ -37,7 +37,7 @@ impl Share {
             .and_then(|prices| prices.get(symbol).copied())
     }
 
-    /// 以當日除權息參考價整批覆寫快取（前一個交易日的值會被清掉）。
+    /// 以當日除權息與恢復買賣參考價整批覆寫快取（前一個交易日的值會被清掉）。
     pub fn set_ex_rights_reference_prices(&self, prices: HashMap<String, Decimal>) {
         if let Ok(mut cache) = self.ex_rights_reference_prices.write() {
             *cache = prices;
@@ -57,7 +57,8 @@ impl Share {
     /// 比對基準有三個，任一個通過即視為有效：
     /// - 資料庫最後交易日收盤價。
     /// - 採集站點提供的昨收／參考價（`snapshot_last_close`）。
-    /// - 當日除權息參考價（[`Self::set_ex_rights_reference_prices`] 由資料庫股利事件算出）。
+    /// - 當日除權息或減資／分割恢復買賣參考價（[`Self::set_ex_rights_reference_prices`]
+    ///   由資料庫股利事件與 `corporate_action` 算出）。
     ///
     /// 除權息當日的漲跌幅是以「除權息參考價」計算，而資料庫收盤價是除權息前的價格；
     /// 只比對資料庫收盤價會把當天的正常成交價全部當成異常（例如 2542 除息 4 元，
