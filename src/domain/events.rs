@@ -119,4 +119,16 @@ pub enum DomainEvent {
         /// 事件發生時間
         occurred_at: DateTime<Local>,
     },
+
+    /// <summary>
+    /// 當一個交易日的外資持股快照寫入並重算趨勢後觸發。
+    /// </summary>
+    ///
+    /// 與月營收相同只帶日期，要通知哪些股票由 handler 依「目前持股」與趨勢門檻自行查詢。
+    ForeignHoldingsUpdated {
+        /// 趨勢基準日（外資持股資料日）
+        date: chrono::NaiveDate,
+        /// 事件發生時間
+        occurred_at: DateTime<Local>,
+    },
 }

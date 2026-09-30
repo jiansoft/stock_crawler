@@ -40,13 +40,16 @@
 //!   不讀寫 Redis 略過旗標。
 //! - `test_backfill_financial_reports_all`：
 //!   一次採集全部上市櫃股票的三大財務報表（首次建檔用，約 3～4 小時）。
+//! - `test_backfill_foreign_holding_history`：
+//!   依 [`MANUAL_QFII_HISTORY_START`]～[`MANUAL_QFII_HISTORY_END`] 逐日回補外資持股歷史
+//!   （`qfii_history`），最後重算 `qfii_trend`；不發持股通知。
 
 use chrono::NaiveDate;
 
 use crate::{
     app::backfill::{
-        capital_reduction, capital_reduction_history, dividend, financial_report, quote,
-        quote_history, taiwan_stock_index,
+        capital_reduction, capital_reduction_history, dividend, financial_report,
+        qualified_foreign_institutional_investor, quote, quote_history, taiwan_stock_index,
     },
     app::calculation::{cagr, dividend_record},
     app::event::taiwan_stock::closing,
@@ -90,6 +93,12 @@ const MANUAL_QUOTE_HISTORY_TO: &str = "2021-12-01";
 ///
 /// 新增期間後把這裡改成該期間的代碼再執行 `test_backfill_cagr_period`。
 const MANUAL_CAGR_PERIOD: &str = "Y7";
+
+/// 回補外資持股歷史的預設起日；可用環境變數 `MANUAL_QFII_HISTORY_START` 覆蓋。
+const MANUAL_QFII_HISTORY_START: &str = "2026-06-01";
+
+/// 回補外資持股歷史的預設迄日；可用環境變數 `MANUAL_QFII_HISTORY_END` 覆蓋。
+const MANUAL_QFII_HISTORY_END: &str = "2026-09-30";
 
 /// 手動採集三大財務報表的預設股票代號（逗號分隔）。
 ///
@@ -538,4 +547,31 @@ async fn test_backfill_financial_reports_all() {
         .expect("financial report backfill failed");
 
     println!("結束 test_backfill_financial_reports_all {summary:?}");
+}
+
+/// 手動回補外資持股歷史並重算趨勢。
+///
+/// 逐個交易日抓證交所 `MI_QFIIS` 與櫃買 QFII API（每日間隔 3 秒，4 個月約 5 分鐘），
+/// 寫入 `qfii_history` 後以最後一個交易日重算 `qfii_trend`。回補不派發持股通知。
+///
+/// 執行範例：
+/// `MANUAL_QFII_HISTORY_START=2026-06-01 MANUAL_QFII_HISTORY_END=2026-09-30 cargo test app::manual_backfill::test_backfill_foreign_holding_history -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_foreign_holding_history() {
+    dotenvy::dotenv().ok();
+
+    let parse = |name: &str, default: &str| {
+        let value = std::env::var(name).unwrap_or_else(|_| default.to_string());
+        NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} should be YYYY-MM-DD, got {value}"))
+    };
+    let start = parse("MANUAL_QFII_HISTORY_START", MANUAL_QFII_HISTORY_START);
+    let end = parse("MANUAL_QFII_HISTORY_END", MANUAL_QFII_HISTORY_END);
+
+    let summary = qualified_foreign_institutional_investor::backfill_history(start, end)
+        .await
+        .expect("foreign holding history backfill failed");
+
+    println!("結束 test_backfill_foreign_holding_history {start}~{end} {summary:?}");
 }
