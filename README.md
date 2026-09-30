@@ -170,8 +170,9 @@ log/                 # runtime 檔案日誌輸出目錄
 + Yahoo 類股目前不採集認購、認售、指數類，避免將大量衍生性商品帶進盤中輪詢。
 + 股票追蹤高低標判斷統一從共享快取讀值；備援抓價只負責補快取並觸發重新判斷。
 + 若服務在開盤期間重啟，啟動排程時會先嘗試補啟動一次股票追蹤任務，避免錯過原本的 09:02 排程。
-+ 單股最新成交價備援站點：Yahoo、Fugle、NStock、CMoney、CnYes、PcHome、Winvest。
-+ 單股完整報價備援站點：Fugle、NStock、CMoney、CnYes、PcHome、Winvest。
++ 單股最新成交價備援站點：Yahoo、Fugle、NStock、CMoney、CnYes、PcHome。
++ 單股完整報價備援站點：Fugle、NStock、CMoney、CnYes、PcHome。
++ `Winvest` crawler module 仍存在，但 2026-09 改版後只提供盤後日 K（盤中實測回傳前一交易日資料），已移出兩個備援池。
 + `Yuanta` crawler module 仍存在，但目前不在最新成交價或完整報價備援池中，因程式註解記錄其資料曾觀察為前一交易日資料。
 
 ## 常用環境變數
