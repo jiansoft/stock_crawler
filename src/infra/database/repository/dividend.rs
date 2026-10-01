@@ -1,7 +1,8 @@
 use crate::domain::dividend::entity::{
-    Dividend, PayoutRatioCandidate, PayoutRatios, StockDividendInfo as DomainStockDividendInfo,
+    Dividend, StockDividendInfo as DomainStockDividendInfo,
     StockDividendPayableDateInfo as DomainStockDividendPayableDateInfo,
 };
+use crate::domain::dividend::payout::{PayoutDividend, PayoutRatios, PeriodEarnings};
 use crate::domain::dividend::repository::DividendRepository;
 use crate::infra::database;
 use crate::infra::database::table::dividend::extension::stock_dividend_info::{
@@ -412,90 +413,82 @@ impl DividendRepository for PgDividendRepository {
         Ok(rows)
     }
 
-    /// 取得待計算盈餘分配率的股利列，並帶出同期間的每股盈餘。
+    /// 取得計算盈餘分配率所需的股利列與各期財報每股盈餘。
     ///
-    /// 每股盈餘依股利的所屬期間對應到 `financial_statement`：
-    /// 年度列（空季別與混合年度的 `A`）優先取年度財報，沒有才用四季加總；
-    /// 半年配對應上／下半年兩季的加總；季配直接對應同一季。
-    /// 加總一律要求該期間的季別到齊，避免財報只出一半就算出偏低的分配率。
-    ///
-    /// 不排序：結果整批取回後在記憶體計算，順序不影響任何結果，省掉一次 Sort。
-    async fn fetch_payout_ratio_candidates(&self) -> Result<Vec<PayoutRatioCandidate>> {
-        let sql = r#"
-            SELECT
-                d.serial,
-                d.cash_dividend,
-                d.stock_dividend,
-                d."sum",
-                CASE
-                    WHEN d.quarter IN ('', 'A') THEN COALESCE(
-                        (SELECT fs.earnings_per_share
-                           FROM financial_statement AS fs
-                          WHERE fs.security_code = d.security_code
-                            AND fs.year = d.year_of_dividend
-                            AND fs.quarter = ''),
-                        (SELECT SUM(fs.earnings_per_share)
-                           FROM financial_statement AS fs
-                          WHERE fs.security_code = d.security_code
-                            AND fs.year = d.year_of_dividend
-                            AND fs.quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
-                         HAVING COUNT(*) = 4)
-                    )
-                    WHEN d.quarter = 'H1' THEN
-                        (SELECT SUM(fs.earnings_per_share)
-                           FROM financial_statement AS fs
-                          WHERE fs.security_code = d.security_code
-                            AND fs.year = d.year_of_dividend
-                            AND fs.quarter IN ('Q1', 'Q2')
-                         HAVING COUNT(*) = 2)
-                    WHEN d.quarter = 'H2' THEN
-                        (SELECT SUM(fs.earnings_per_share)
-                           FROM financial_statement AS fs
-                          WHERE fs.security_code = d.security_code
-                            AND fs.year = d.year_of_dividend
-                            AND fs.quarter IN ('Q3', 'Q4')
-                         HAVING COUNT(*) = 2)
-                    ELSE
-                        (SELECT fs.earnings_per_share
-                           FROM financial_statement AS fs
-                          WHERE fs.security_code = d.security_code
-                            AND fs.year = d.year_of_dividend
-                            AND fs.quarter = d.quarter)
-                END AS earnings_per_share
+    /// 涵蓋期間要看同一所屬年度的其他配息才決定得了，因此整批取回後在記憶體計算
+    /// （見 [`crate::domain::dividend::payout`]）；全市場約四萬多列股利、七萬列 EPS，
+    /// 在正式機（樹莓派）上也只佔數 MB。不排序：計算結果與順序無關。
+    async fn fetch_payout_ratio_inputs(
+        &self,
+    ) -> Result<(Vec<PayoutDividend>, Vec<PeriodEarnings>)> {
+        // ETF 與債券只配息、沒有財報，分配率永遠算不出來，先整批擋掉。
+        // 資料表裡有 year_of_dividend = 0 的殘留列，財報那邊也有 year = 0 的髒資料，一併排除。
+        let dividend_sql = r#"
+            SELECT d.serial, d.security_code, d.year, d.year_of_dividend, d.quarter,
+                   d.cash_dividend, d.stock_dividend, d."sum",
+                   d.payout_ratio_cash, d.payout_ratio_stock, d.payout_ratio,
+                   d.payout_eps, d.payout_period
             FROM dividend AS d
-            WHERE d.payout_ratio = 0
-              AND d."sum" > 0
-              -- 資料表裡有 year_of_dividend = 0 的殘留列，財報那邊也有 year = 0 的髒資料，
-              -- 兩者會互相 join 出沒有意義的分配率。
-              AND d.year_of_dividend > 0
-              -- ETF 與債券只配息、沒有財報，分配率永遠算不出來。
-              -- 先擋掉整批沒有財報的標的，才不會每天都把它們撈出來跑五個子查詢。
-              -- 用 EXISTS 而不是硬編碼代號規則：新標的等財報進來就會自動納入。
+            WHERE d.year > 0
               AND EXISTS (
                   SELECT 1
                     FROM financial_statement AS fs
                    WHERE fs.security_code = d.security_code
               )
         "#;
-
-        let rows = sqlx::query(sql)
+        let dividends = sqlx::query(dividend_sql)
             .try_map(|row: PgRow| {
-                Ok(PayoutRatioCandidate {
+                Ok(PayoutDividend {
                     serial: row.try_get("serial")?,
+                    security_code: row.try_get("security_code")?,
+                    year: row.try_get("year")?,
+                    year_of_dividend: row.try_get("year_of_dividend")?,
+                    quarter: row.try_get("quarter")?,
                     cash_dividend: row.try_get("cash_dividend")?,
                     stock_dividend: row.try_get("stock_dividend")?,
                     sum: row.try_get("sum")?,
+                    payout_ratio_cash: row.try_get("payout_ratio_cash")?,
+                    payout_ratio_stock: row.try_get("payout_ratio_stock")?,
+                    payout_ratio: row.try_get("payout_ratio")?,
+                    payout_eps: row.try_get("payout_eps")?,
+                    payout_period: row.try_get("payout_period")?,
+                })
+            })
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch dividends for payout ratios")?;
+
+        // 只取股利所屬年度用得到的財報；季別限 Q1~Q4 與年報（空字串）。
+        // financial_statement.year 是 bigint，要轉成 int 才能對上 dividend.year_of_dividend 的 i32。
+        let earnings_sql = r#"
+            SELECT fs.security_code, fs.year::int AS year, fs.quarter, fs.earnings_per_share
+            FROM financial_statement AS fs
+            WHERE fs.quarter IN ('', 'Q1', 'Q2', 'Q3', 'Q4')
+              AND fs.year > 0
+              AND EXISTS (
+                  SELECT 1
+                    FROM dividend AS d
+                   WHERE d.security_code = fs.security_code
+                     AND d.year_of_dividend = fs.year
+              )
+        "#;
+        let earnings = sqlx::query(earnings_sql)
+            .try_map(|row: PgRow| {
+                Ok(PeriodEarnings {
+                    security_code: row.try_get("security_code")?,
+                    year: row.try_get("year")?,
+                    quarter: row.try_get("quarter")?,
                     earnings_per_share: row.try_get("earnings_per_share")?,
                 })
             })
             .fetch_all(database::get_connection())
             .await
-            .context("Failed to fetch payout ratio candidates")?;
+            .context("Failed to fetch earnings for payout ratios")?;
 
-        Ok(rows)
+        Ok((dividends, earnings))
     }
 
-    /// 批次寫回計算好的盈餘分配率，回傳實際更新的列數。
+    /// 批次寫回計算好的盈餘分配率、分母 EPS 與涵蓋期間，回傳實際更新的列數。
     ///
     /// 以陣列參數一次更新，避免上千列各發一次 UPDATE；資料量再大也只有一次來回。
     async fn update_payout_ratios(&self, ratios: &[PayoutRatios]) -> Result<u64> {
@@ -510,15 +503,22 @@ impl DividendRepository for PgDividendRepository {
             .map(|ratio| ratio.payout_ratio_stock)
             .collect();
         let total: Vec<Decimal> = ratios.iter().map(|ratio| ratio.payout_ratio).collect();
+        let eps: Vec<Decimal> = ratios.iter().map(|ratio| ratio.payout_eps).collect();
+        let periods: Vec<String> = ratios
+            .iter()
+            .map(|ratio| ratio.payout_period.clone())
+            .collect();
 
         let sql = r#"
             UPDATE dividend AS d
             SET payout_ratio_cash = u.payout_ratio_cash,
                 payout_ratio_stock = u.payout_ratio_stock,
                 payout_ratio = u.payout_ratio,
+                payout_eps = u.payout_eps,
+                payout_period = u.payout_period,
                 updated_time = now()
-            FROM UNNEST($1::bigint[], $2::numeric[], $3::numeric[], $4::numeric[])
-                AS u(serial, payout_ratio_cash, payout_ratio_stock, payout_ratio)
+            FROM UNNEST($1::bigint[], $2::numeric[], $3::numeric[], $4::numeric[], $5::numeric[], $6::varchar[])
+                AS u(serial, payout_ratio_cash, payout_ratio_stock, payout_ratio, payout_eps, payout_period)
             WHERE d.serial = u.serial
         "#;
 
@@ -527,6 +527,8 @@ impl DividendRepository for PgDividendRepository {
             .bind(&cash)
             .bind(&stock)
             .bind(&total)
+            .bind(&eps)
+            .bind(&periods)
             .execute(database::get_connection())
             .await
             .context("Failed to update payout ratios")?;
@@ -875,5 +877,128 @@ mod tests {
         assert_eq!(full_year.payable_date_cash, "2020-04-30");
 
         cleanup().await.expect("測試後清理失敗");
+    }
+
+    /// 清掉測試代號寫進 financial_statement 的財報。
+    async fn cleanup_earnings() -> Result<()> {
+        sqlx::query("DELETE FROM financial_statement WHERE security_code = $1")
+            .bind(MIXED_YEAR_SYMBOL)
+            .execute(database::get_connection())
+            .await?;
+        Ok(())
+    }
+
+    /// 盈餘分配率從讀取、計算到寫回走一遍，確認欄位型別與 SQL 都對得上
+    /// （`financial_statement.year` 是 bigint，曾因直接解碼成 i32 讓排程失敗）。
+    ///
+    /// 仿 4735 豪展的季配息：同一發放年度有 2019Q3、2019Q4、2020Q1 三筆，
+    /// 年度合計的分母是三者涵蓋期間 EPS 的合計（2019Q1~Q3 1.7 + 2019Q4 0.74 + 2020Q1 1.19）。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn payout_ratios_round_trip_with_covered_period() {
+        use crate::domain::dividend::payout::calculate_payout_ratios;
+
+        dotenvy::dotenv().ok();
+        let repo = PgDividendRepository::new();
+        cleanup().await.expect("測試前清理失敗");
+        cleanup_earnings().await.expect("測試前清理財報失敗");
+
+        for (year, quarter, eps) in [
+            (2019_i64, "Q1", dec!(0.29)),
+            (2019, "Q2", dec!(0.51)),
+            (2019, "Q3", dec!(0.9)),
+            (2019, "Q4", dec!(0.74)),
+            (2020, "Q1", dec!(1.19)),
+        ] {
+            sqlx::query(
+                "INSERT INTO financial_statement (security_code, year, quarter, earnings_per_share) VALUES ($1, $2, $3, $4)",
+            )
+            .bind(MIXED_YEAR_SYMBOL)
+            .bind(year)
+            .bind(quarter)
+            .bind(eps)
+            .execute(database::get_connection())
+            .await
+            .expect("測試財報寫入失敗");
+        }
+        for dividend in [
+            build_dividend(
+                MIXED_YEAR_SYMBOL,
+                2019,
+                "Q3",
+                dec!(0.7),
+                "2019-12-02",
+                "2020-01-10",
+            ),
+            build_dividend(
+                MIXED_YEAR_SYMBOL,
+                2019,
+                "Q4",
+                dec!(0.5),
+                "2020-04-10",
+                "2020-04-29",
+            ),
+            build_dividend(
+                MIXED_YEAR_SYMBOL,
+                2020,
+                "Q1",
+                dec!(1),
+                "2020-06-15",
+                "2020-07-08",
+            ),
+        ] {
+            repo.save(&dividend).await.expect("測試資料寫入失敗");
+        }
+        repo.upsert_annual_total_dividend(MIXED_YEAR_SYMBOL, TEST_PAYOUT_YEAR)
+            .await
+            .expect("年度合計重算失敗");
+
+        let (dividends, earnings) = repo
+            .fetch_payout_ratio_inputs()
+            .await
+            .expect("讀取分配率計算資料失敗");
+        let ours: Vec<_> = dividends
+            .into_iter()
+            .filter(|row| row.security_code == MIXED_YEAR_SYMBOL)
+            .collect();
+        let ratios = calculate_payout_ratios(&ours, &earnings);
+        assert_eq!(
+            ratios.len(),
+            4,
+            "三筆配息加一列年度合計都要算出來：{ratios:?}"
+        );
+        repo.update_payout_ratios(&ratios)
+            .await
+            .expect("寫回分配率失敗");
+
+        let (payout_eps, payout_period, payout_ratio): (Option<Decimal>, Option<String>, Decimal) =
+            sqlx::query_as(
+                "SELECT payout_eps, payout_period, payout_ratio FROM dividend WHERE security_code = $1 AND year = $2 AND quarter = ''",
+            )
+            .bind(MIXED_YEAR_SYMBOL)
+            .bind(TEST_PAYOUT_YEAR)
+            .fetch_one(database::get_connection())
+            .await
+            .expect("年度合計列讀取失敗");
+        assert_eq!(payout_eps, Some(dec!(3.63)));
+        assert_eq!(payout_period.as_deref(), Some("2019Q1~2020Q1"));
+        assert_eq!(payout_ratio, dec!(60.6061));
+
+        // 再算一次不該有任何列需要更新。
+        let (dividends, earnings) = repo
+            .fetch_payout_ratio_inputs()
+            .await
+            .expect("第二次讀取失敗");
+        let ours: Vec<_> = dividends
+            .into_iter()
+            .filter(|row| row.security_code == MIXED_YEAR_SYMBOL)
+            .collect();
+        assert!(calculate_payout_ratios(&ours, &earnings).is_empty());
+
+        cleanup().await.expect("測試後清理失敗");
+        cleanup_earnings().await.expect("測試後清理財報失敗");
     }
 }

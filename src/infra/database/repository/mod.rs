@@ -6,6 +6,8 @@ pub mod config;
 pub mod corporate_action;
 pub mod dividend;
 pub mod financial;
+pub mod financial_report;
+pub mod foreign_holding;
 pub mod market_index;
 pub mod money_flow;
 pub mod performance;

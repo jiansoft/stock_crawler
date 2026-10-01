@@ -52,7 +52,7 @@ fn parse_required_decimal(raw: &str, stock_symbol: &str, field_name: &str) -> Re
             "CMoney field `{}` is unavailable for stock {}: {:?}",
             field_name,
             stock_symbol,
-            raw
+            value
         ));
     }
 
@@ -66,7 +66,7 @@ fn parse_required_f64(raw: &str, stock_symbol: &str, field_name: &str) -> Result
             "CMoney field `{}` is unavailable for stock {}: {:?}",
             field_name,
             stock_symbol,
-            raw
+            value
         ));
     }
 
@@ -133,7 +133,7 @@ fn parse_stock_quotes_html(
         return Err(anyhow!(
             "CMoney field `change_range` is unavailable for stock {}: {:?}",
             stock_symbol,
-            change_range
+            change_range_raw
         ));
     } else {
         text::parse_f64(change_range_raw, Some(['(', ')'].to_vec()))?

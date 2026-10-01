@@ -54,3 +54,5 @@ comment on column public.estimate.per_expensive is '歷年80%百分位數本益�
 create unique index "estimate-security_code-date-uidx"
     on public.estimate (security_code, date);
 
+create index idx_estimate_date
+    on public.estimate (date desc);

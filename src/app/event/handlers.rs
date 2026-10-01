@@ -225,6 +225,9 @@ impl EventDispatcher {
             DomainEvent::QuarterlyFinancialsUpdated { year, quarter, .. } => {
                 Self::handle_quarterly_financials_updated(year, &quarter).await?;
             }
+            DomainEvent::ForeignHoldingsUpdated { date, .. } => {
+                Self::handle_foreign_holdings_updated(date).await?;
+            }
         }
 
         Ok(())

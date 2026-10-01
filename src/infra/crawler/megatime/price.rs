@@ -29,6 +29,29 @@ static ROOT_SELECTOR: Lazy<Selector> = Lazy::new(|| {
     Selector::parse("#stock_info_data_a, .price").expect("Failed to parse PCHome root selector")
 });
 
+/// 頁面標題的 CSS 選擇器，供錯誤訊息辨識載到的是哪一頁。
+static TITLE_SELECTOR: Lazy<Selector> =
+    Lazy::new(|| Selector::parse("title").expect("Failed to parse PCHome title selector"));
+
+/// 錯誤訊息用的單行頁面摘要：優先取 `<title>`，沒有標題才取內文前 80 字。
+///
+/// 過去直接附上 HTML 開頭 200～500 字，內容幾乎都是 `<meta>` 標籤、對判斷無用，
+/// 還夾帶換行讓一筆錯誤佔去 error 日誌十幾行（2026-09-24 共 269 行只有 68 筆事件）。
+fn page_summary(document: &Html) -> String {
+    let collapse = |text: String| text.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    let title = document
+        .select(&TITLE_SELECTOR)
+        .next()
+        .map(|title| collapse(title.text().collect()))
+        .filter(|title| !title.is_empty());
+
+    title.unwrap_or_else(|| {
+        let body = collapse(document.root_element().text().collect());
+        format!("（無標題）{}", text::truncate(&body, 80))
+    })
+}
+
 /// 解析 PCHome 個股頁 HTML 中的即時成交價。
 ///
 /// 這是一個「純函式」——輸入只有 HTML 字串，不做任何網路 I/O，
@@ -36,12 +59,11 @@ static ROOT_SELECTOR: Lazy<Selector> = Lazy::new(|| {
 fn parse_stock_price_html(stock_symbol: &str, url: &str, html: &str) -> Result<Decimal> {
     let document = Html::parse_document(html);
     let root = document.select(&ROOT_SELECTOR).next().ok_or_else(|| {
-        let html_preview = document.html().chars().take(200).collect::<String>();
         anyhow!(
-            "在 {} 找不到股票 {} 的資訊容器。頁面開頭：{}",
+            "在 {} 找不到股票 {} 的資訊容器。頁面：{}",
             url,
             stock_symbol,
-            html_preview
+            page_summary(&document)
         )
     })?;
 
@@ -69,16 +91,11 @@ fn parse_stock_quotes_html(
 
     // 取得主要資訊容器
     let root = document.select(&ROOT_SELECTOR).next().ok_or_else(|| {
-        let body = document.html();
-        // 錯誤訊息只需要頁面開頭片段。用 text::truncate 依「字元」截斷，
-        // 而不是 &body[0..500] 這種 byte index 切片——PCHome 頁面含中文
-        //（每字 3 bytes），byte 500 若落在字元中間會直接 panic。
-        let snippet = text::truncate(&body, 500);
         anyhow!(
-            "在 {} 找不到股票 {} 的資訊容器 (#stock_info_data_a)。HTML 內容：\n{}",
+            "在 {} 找不到股票 {} 的資訊容器 (#stock_info_data_a)。頁面：{}",
             url,
             stock_symbol,
-            snippet
+            page_summary(&document)
         )
     })?;
 
@@ -202,6 +219,32 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("找不到股票"));
+    }
+
+    /// 錯誤訊息只帶單行的頁面標題，不可夾帶 HTML 或換行。
+    #[test]
+    fn missing_container_error_is_single_line_with_title() {
+        let html = "<html><head>\n<meta charset=\"UTF-8\">\n<title>永記 (1726)\n 個股資訊 - PChome 股市</title>\n</head><body><p>x</p></body></html>";
+
+        for error in [
+            parse_stock_price_html("1726", "https://example.test", html).unwrap_err(),
+            parse_stock_quotes_html("1726", "https://example.test", html).unwrap_err(),
+        ] {
+            let message = error.to_string();
+            assert!(
+                message.contains("永記 (1726) 個股資訊 - PChome 股市"),
+                "{message}"
+            );
+            assert!(!message.contains('\n'), "{message}");
+            assert!(!message.contains("<meta"), "{message}");
+        }
+    }
+
+    /// 沒有標題時退回內文摘要，同樣是單行。
+    #[test]
+    fn page_summary_falls_back_to_body_text() {
+        let document = Html::parse_document("<html><body><p>查無\n  此股</p></body></html>");
+        assert_eq!(page_summary(&document), "（無標題）查無 此股");
     }
 
     #[tokio::test]

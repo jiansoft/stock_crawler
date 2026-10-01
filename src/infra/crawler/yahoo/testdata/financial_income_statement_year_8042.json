@@ -1,0 +1,48 @@
+{
+  "incomeStatementsList": [
+    {
+      "symbol": "8042.TWO",
+      "date": "2025-01-01T00:00:00+08:00",
+      "revenuePerShare": "29.09",
+      "revenue": "3765883000.00",
+      "debtCost": "2.11",
+      "operatingProfitPerShare": "1.49",
+      "profitBeforeTaxPerShare": "1.29",
+      "eps": "0.89",
+      "bps": "30.59",
+      "grossProfit": "754007000.00",
+      "sellingExpenses": "233553000.00",
+      "adminExpenses": "222501000.00",
+      "rdExpenses": "105178000.00",
+      "operatingExpenses": "561066000.00",
+      "operatingProfit": "192941000.00",
+      "nonOperatingIncome": "-25989000.00",
+      "profitBeforeTax": "166952000.00",
+      "netIncome": "114381000.00",
+      "netIncomeAcc4Q": null,
+      "ownerParentProfit": "115439000.00"
+    },
+    {
+      "symbol": "8042.TWO",
+      "date": "2024-01-01T00:00:00+08:00",
+      "revenuePerShare": "26.50",
+      "revenue": "3430181000.00",
+      "debtCost": "1.96",
+      "operatingProfitPerShare": "1.08",
+      "profitBeforeTaxPerShare": "1.06",
+      "eps": "0.60",
+      "bps": "31.38",
+      "grossProfit": "674554000.00",
+      "sellingExpenses": "205505000.00",
+      "adminExpenses": "235650000.00",
+      "rdExpenses": "93233000.00",
+      "operatingExpenses": "534387000.00",
+      "operatingProfit": "140167000.00",
+      "nonOperatingIncome": "-2968000.00",
+      "profitBeforeTax": "137199000.00",
+      "netIncome": "78091000.00",
+      "netIncomeAcc4Q": null,
+      "ownerParentProfit": "77429000.00"
+    }
+  ]
+}

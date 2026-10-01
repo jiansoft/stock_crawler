@@ -1,7 +1,8 @@
 use crate::{
     core::declare::Quarter,
-    domain::financial::entity::{
-        FinancialStatement, HoldingFinancialAlert, HoldingRevenueAlert, MonthlyRevenue,
+    domain::financial::{
+        entity::{FinancialStatement, HoldingFinancialAlert, HoldingRevenueAlert, MonthlyRevenue},
+        statement::{BalanceSheet, CashFlowStatement, IncomeStatement},
     },
 };
 use anyhow::Result;
@@ -73,14 +74,10 @@ pub trait FinancialRepository: Send + Sync {
 
     // === 持股通知 (Holding alerts) ===
 
-    /// 讀取指定月份中，年增率絕對值達門檻的**持股**月營收。
+    /// 讀取指定月份**所有持股**的月營收，依年增率由高到低排序。
     ///
     /// `date` 為 yyyyMM 格式的營收月份。只看持股，不看全市場。
-    async fn fetch_holding_revenue_alerts(
-        &self,
-        date: i64,
-        yoy_threshold: Decimal,
-    ) -> Result<Vec<HoldingRevenueAlert>>;
+    async fn fetch_holding_revenue_alerts(&self, date: i64) -> Result<Vec<HoldingRevenueAlert>>;
 
     /// 讀取指定年度、季度的**持股**季報，並帶出去年同季的 EPS。
     async fn fetch_holding_financial_alerts(
@@ -88,4 +85,21 @@ pub trait FinancialRepository: Send + Sync {
         year: i32,
         quarter: &str,
     ) -> Result<Vec<HoldingFinancialAlert>>;
+}
+
+/// 三大財務報表（損益表、資產負債表、現金流量表）之倉儲介面。
+///
+/// 寫入一律為 upsert：主鍵為 `(stock_symbol, fiscal_year, period_type, quarter, source)`，
+/// 重複採集同一期別會覆寫數值。`fetched_at` 每次寫入都更新；`updated_at` 只在數值
+/// 真的變動時更新，可用來追蹤來源的事後修正。
+#[async_trait]
+pub trait FinancialReportRepository: Send + Sync {
+    /// 批次 upsert 損益表，回傳受影響列數（含數值未變、僅更新 `fetched_at` 的列）。
+    async fn save_income_statements(&self, statements: &[IncomeStatement]) -> Result<u64>;
+
+    /// 批次 upsert 資產負債表，回傳受影響列數（含數值未變、僅更新 `fetched_at` 的列）。
+    async fn save_balance_sheets(&self, sheets: &[BalanceSheet]) -> Result<u64>;
+
+    /// 批次 upsert 現金流量表，回傳受影響列數（含數值未變、僅更新 `fetched_at` 的列）。
+    async fn save_cash_flow_statements(&self, statements: &[CashFlowStatement]) -> Result<u64>;
 }

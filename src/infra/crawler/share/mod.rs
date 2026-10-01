@@ -19,7 +19,7 @@ mod revenue;
 pub(super) use annual_profit::fetch_annual_profits;
 pub use annual_profit::{AnnualProfit, AnnualProfitFetcher};
 pub use daily_quote::DailyQuoteDto;
-pub use dividend::{ExDividendAnnouncement, parse_ex_dividend_kind};
+pub use dividend::{ExDividendAnnouncement, classify_ex_dividend, parse_ex_dividend_kind};
 pub use etf::EtfInfo;
 pub use public_ip::get_public_ip;
 pub use qfii::QfiiDto;

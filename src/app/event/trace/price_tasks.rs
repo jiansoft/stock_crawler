@@ -890,7 +890,10 @@ async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
             false
         }
         Err(why) => {
-            tracing::error!("Failed to fetch backup price for {}: {:?}", symbol, why);
+            // 備援站點全數失敗最常見的原因是冷門股開盤後尚未成交（各站回 `-`、null 或 0），
+            // 屬預期狀況；主要報價仍由 HiStock／Yahoo 類股快取提供，因此只記 warn。
+            // 2026-09-24 的 55 筆此類 error 全集中在 09:00～10:34，成交後即自行消失。
+            tracing::warn!("Failed to fetch backup price for {}: {:#}", symbol, why);
             false
         }
     }

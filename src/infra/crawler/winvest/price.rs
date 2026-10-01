@@ -1,10 +1,15 @@
-//! # Winvest 即時報價採集
+//! # Winvest 報價採集
 //!
-//! 此模組透過 Winvest 的 `QueryDayPrice` API 取得指定股票代碼的即時報價資訊。
+//! 此模組透過 Winvest 的 `QueryRecentDailyPrice` API 取得指定股票代碼的最新報價。
 //!
 //! ## 使用端點
-//! - `POST /Stock/Symbol/QueryDayPrice`
+//! - `POST /Stock/Symbol/QueryRecentDailyPrice`
 //! - 表單欄位：`inModel[SymbolCode]={symbol}`
+//! - 需帶 antiforgery cookie 與 `RequestVerificationToken` 標頭（見 [`super::session`]）
+//!
+//! 2026-09 改版前的 `QueryDayPrice` 已下線（一律 404）。新端點的頁面註明
+//! 「盤後日 K；未取得盤中資訊授權，不提供盤中走勢」：`StockListPrice` 只剩近三個月
+//! 的每日收盤（`MM/DD`），`StockLastKline` 是最近一根日 K。
 //!
 //! ## 資料對應
 //! - `StockLastKline.ClosePrice` -> 最新成交價
@@ -12,39 +17,40 @@
 //! - `StockLastKline.ChangeRate` -> 漲跌幅（若為 0 且有昨收，會改用公式回推）
 //!
 //! ## 設計重點
-//! - 先讀 `StockLastKline`，拿到最完整的報價欄位。
-//! - 若缺少 `StockLastKline`，`get_stock_price` 會回退使用 `StockListPrice` 最後一筆價格。
+//! - 只採用 `KlineDatetime` 為今天的日 K：若盤中拿到的是前一交易日的 K 線，
+//!   當成最新成交價會讓追蹤判斷用到舊價格，因此直接回錯誤，讓站點池改用下一個站點。
+//! - 回應不是 JSON（token 失效時為 HTTP 400 空內容）時，換一組 token 重試一次。
 //! - 回傳型別統一成專案內部的 `declare::StockQuotes`。
 
 use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use chrono::{Local, NaiveDate};
+use reqwest::header::{COOKIE, HeaderMap, HeaderValue};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use crate::{
     core::declare,
-    core::util::{self, text},
+    core::util,
     infra::crawler::{
         StockInfo,
-        winvest::{HOST, Winvest},
+        winvest::{HOST, Winvest, session},
     },
 };
 
 #[derive(Deserialize, Debug, Clone)]
-/// `QueryDayPrice` API 回應主體。
+/// `QueryRecentDailyPrice` API 回應主體。
 ///
 /// # 欄位說明
-/// - `stock_list_price`:
-///   分時資料表，通常第一列為欄位名稱（例如 `["KlineDatetime", "ClosePrice"]`）。
 /// - `stock_last_kline`:
-///   最新一筆 K 線摘要，包含收盤、漲跌與昨收等核心資訊。
+///   最新一根日 K 摘要，包含收盤、漲跌與昨收等核心資訊。
 /// - `err_msg`:
 ///   API 回傳的錯誤訊息；空字串或 `None` 代表未回報錯誤。
-struct QueryDayPriceResponse {
-    #[serde(rename = "StockListPrice", default)]
-    stock_list_price: Vec<Vec<String>>,
+///
+/// `StockListPrice`（近三個月每日收盤，只有 `MM/DD`）無法確認年份與是否為今天，不採用。
+struct QueryRecentDailyPriceResponse {
     #[serde(rename = "StockLastKline")]
     stock_last_kline: Option<StockLastKline>,
     #[serde(rename = "errMsg", default)]
@@ -52,8 +58,11 @@ struct QueryDayPriceResponse {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-/// Winvest 最新一筆 K 線摘要。
+/// Winvest 最新一根日 K 摘要。
 struct StockLastKline {
+    /// K 線時間，例如 `2026-09-29T13:30:00`。
+    #[serde(rename = "KlineDatetime")]
+    kline_datetime: Option<String>,
     /// 最新成交（或收盤）價格。
     #[serde(rename = "ClosePrice")]
     close_price: f64,
@@ -61,6 +70,8 @@ struct StockLastKline {
     #[serde(rename = "Change")]
     change: f64,
     /// 昨日收盤價；有些情境可能為 `null`。
+    ///
+    /// 減資恢復買賣日實測會等於當日收盤（6550 2026-09-29 回 17.4），不可當成參考價。
     #[serde(rename = "YesterdayClosePrice")]
     yesterday_close_price: Option<f64>,
     /// API 提供的漲跌幅（百分比）。
@@ -70,43 +81,75 @@ struct StockLastKline {
     change_rate: Option<f64>,
 }
 
-/// 呼叫 Winvest `QueryDayPrice` 並解析成結構化資料。
+impl StockLastKline {
+    /// K 線所屬日期；欄位缺失或格式不符時為 `None`。
+    fn date(&self) -> Option<NaiveDate> {
+        let datetime = self.kline_datetime.as_deref()?;
+        NaiveDate::parse_from_str(datetime.get(..10)?, "%Y-%m-%d").ok()
+    }
+}
+
+/// 呼叫 Winvest `QueryRecentDailyPrice` 並解析成結構化資料。
 ///
-/// # 參數
-/// - `stock_symbol`: 台股代碼（例如 `2330`）。
-///
-/// # 回傳
-/// - `Ok(QueryDayPriceResponse)`：成功取得且可解析。
-/// - `Err`：HTTP 失敗、JSON 解析失敗，或 API 明確回報 `errMsg`。
+/// 回應不是 JSON 時視為 token 失效，換一組工作階段重試一次。
 ///
 /// # 錯誤條件
-/// - API 內容無法解析。
-/// - API 回傳 `errMsg` 非空值。
-/// - `StockLastKline` 與 `StockListPrice` 同時缺失。
-async fn fetch_data(stock_symbol: &str) -> Result<QueryDayPriceResponse> {
-    let url = format!("https://{host}/Stock/Symbol/QueryDayPrice", host = HOST);
+/// - 取得 antiforgery 工作階段失敗。
+/// - 重試後仍無法解析，或 API 回傳 `errMsg` 非空值。
+async fn fetch_data(stock_symbol: &str) -> Result<QueryRecentDailyPriceResponse> {
+    let url = format!(
+        "https://{host}/Stock/Symbol/QueryRecentDailyPrice",
+        host = HOST
+    );
+
+    let current = session::current().await?;
+    let mut response_text = post_query(&url, stock_symbol, &current).await?;
+    if !looks_like_json(&response_text) {
+        let renewed = session::renew(&current).await?;
+        response_text = post_query(&url, stock_symbol, &renewed).await?;
+    }
+
+    parse_query_recent_daily_price(&url, &response_text)
+}
+
+/// 以指定工作階段送出查詢；token 放標頭，避免出現在 http 日誌的表單參數裡。
+async fn post_query(url: &str, stock_symbol: &str, session: &session::Session) -> Result<String> {
+    let mut headers = HeaderMap::new();
+    headers.insert(COOKIE, HeaderValue::from_str(&session.cookie)?);
+    headers.insert(
+        "RequestVerificationToken",
+        HeaderValue::from_str(&session.token)?,
+    );
+
     let mut params = HashMap::new();
     params.insert("inModel[SymbolCode]", stock_symbol);
 
-    let response_text = util::http::post(&url, None, Some(params)).await?;
-
-    parse_query_day_price(&url, &response_text)
+    util::http::post(url, Some(headers), Some(params)).await
 }
 
-/// 解析並驗證 `QueryDayPrice` 的回應內容。
+/// 回應是否像 JSON 物件；token 失效時伺服器回 HTTP 400 空內容。
+fn looks_like_json(body: &str) -> bool {
+    body.trim_start().starts_with('{')
+}
+
+/// 解析並驗證 `QueryRecentDailyPrice` 的回應內容。
 ///
 /// 這是一個純函式（不做網路 I/O），可直接用固定 JSON 樣本驗證：
-/// 解析失敗、`errMsg` 非空、兩組報價欄位同時缺失，都必須明確報錯。
-fn parse_query_day_price(url: &str, response_text: &str) -> Result<QueryDayPriceResponse> {
-    let response: QueryDayPriceResponse = serde_json::from_str(response_text).map_err(|why| {
-        let preview = response_text.chars().take(300).collect::<String>();
-        anyhow!(
-            "Failed to parse QueryDayPrice response from {} because {:?}. body preview: {}",
-            url,
-            why,
-            preview
-        )
-    })?;
+/// 解析失敗、`errMsg` 非空，都必須明確報錯。
+fn parse_query_recent_daily_price(
+    url: &str,
+    response_text: &str,
+) -> Result<QueryRecentDailyPriceResponse> {
+    let response: QueryRecentDailyPriceResponse =
+        serde_json::from_str(response_text).map_err(|why| {
+            let preview = response_text.chars().take(300).collect::<String>();
+            anyhow!(
+                "Failed to parse QueryRecentDailyPrice response from {} because {:?}. body preview: {}",
+                url,
+                why,
+                preview
+            )
+        })?;
 
     if let Some(err_msg) = response
         .err_msg
@@ -121,29 +164,31 @@ fn parse_query_day_price(url: &str, response_text: &str) -> Result<QueryDayPrice
         ));
     }
 
-    if response.stock_last_kline.is_none() && response.stock_list_price.is_empty() {
-        return Err(anyhow!(
-            "Failed to fetch_data from {} because StockLastKline and StockListPrice are empty",
-            url
-        ));
-    }
-
     Ok(response)
 }
 
-/// 從 `StockListPrice` 逆向尋找最後一筆可解析的成交價。
-///
-/// `StockListPrice` 第一列常為標題列，因此此函式以「倒序」掃描，
-/// 找到第一個可解析成 `f64` 的第二欄數值即回傳。
-///
-/// # 回傳
-/// - `Some(price)`：找到有效價格。
-/// - `None`：沒有可解析價格。
-fn extract_last_price_from_stock_list(stock_list_price: &[Vec<String>]) -> Option<f64> {
-    stock_list_price.iter().rev().find_map(|row| {
-        row.get(1)
-            .and_then(|close_price| text::parse_f64(close_price, None).ok())
-    })
+/// 取出 `today` 當天的日 K；缺少日 K 或日期不是今天都回錯誤。
+fn today_kline(
+    response: QueryRecentDailyPriceResponse,
+    stock_symbol: &str,
+    today: NaiveDate,
+) -> Result<StockLastKline> {
+    let kline = response.stock_last_kline.ok_or_else(|| {
+        anyhow!(
+            "Failed to parse StockLastKline from Winvest response for {}",
+            stock_symbol
+        )
+    })?;
+
+    match kline.date() {
+        Some(date) if date == today => Ok(kline),
+        _ => Err(anyhow!(
+            "Winvest StockLastKline for {} is not today's ({}): KlineDatetime={:?}",
+            stock_symbol,
+            today,
+            kline.kline_datetime
+        )),
+    }
 }
 
 /// 計算最終漲跌幅（百分比）。
@@ -190,37 +235,21 @@ fn compute_change_range(
 
 #[async_trait]
 impl StockInfo for Winvest {
-    /// 取得指定股票的最新成交價。
-    ///
-    /// # 流程
-    /// 1. 呼叫 `QueryDayPrice` API。
-    /// 2. 優先使用 `StockLastKline.ClosePrice`。
-    /// 3. 若缺少 `StockLastKline`，回退使用 `StockListPrice` 最後一筆價格。
+    /// 取得指定股票今天的最新成交價（`StockLastKline.ClosePrice`）。
     ///
     /// # 參數
     /// - `stock_symbol`: 股票代碼（例如 `2330`）。
     ///
     /// # 回傳
     /// - `Ok(Decimal)`: 最新成交價。
-    /// - `Err`: API 或解析錯誤，或找不到可用價格。
+    /// - `Err`: API 或解析錯誤，或最新日 K 不是今天。
     async fn get_stock_price(stock_symbol: &str) -> Result<Decimal> {
         let response = fetch_data(stock_symbol).await?;
-
-        if let Some(last_kline) = response.stock_last_kline {
-            return Ok(Decimal::try_from(last_kline.close_price)?);
-        }
-
-        let fallback_price = extract_last_price_from_stock_list(&response.stock_list_price)
-            .ok_or_else(|| {
-                anyhow!(
-                    "Failed to parse latest close price from StockListPrice for {}",
-                    stock_symbol
-                )
-            })?;
-        Ok(Decimal::try_from(fallback_price)?)
+        let kline = today_kline(response, stock_symbol, Local::now().date_naive())?;
+        Ok(Decimal::try_from(kline.close_price)?)
     }
 
-    /// 取得指定股票的完整報價資訊。
+    /// 取得指定股票今天的完整報價資訊。
     ///
     /// # 內容
     /// - `price`: 最新成交價（`ClosePrice`）
@@ -232,24 +261,19 @@ impl StockInfo for Winvest {
     ///
     /// # 回傳
     /// - `Ok(declare::StockQuotes)`: 統一格式報價資訊。
-    /// - `Err`: API 或解析錯誤，或缺少 `StockLastKline`。
+    /// - `Err`: API 或解析錯誤，或最新日 K 不是今天。
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes> {
         let response = fetch_data(stock_symbol).await?;
-        let last_kline = response.stock_last_kline.ok_or_else(|| {
-            anyhow!(
-                "Failed to parse StockLastKline from Winvest response for {}",
-                stock_symbol
-            )
-        })?;
+        let kline = today_kline(response, stock_symbol, Local::now().date_naive())?;
 
         Ok(declare::StockQuotes {
             stock_symbol: stock_symbol.to_string(),
-            price: last_kline.close_price,
-            change: last_kline.change,
+            price: kline.close_price,
+            change: kline.change,
             change_range: compute_change_range(
-                last_kline.change,
-                last_kline.yesterday_close_price,
-                last_kline.change_rate,
+                kline.change,
+                kline.yesterday_close_price,
+                kline.change_rate,
             ),
         })
     }
@@ -259,58 +283,74 @@ impl StockInfo for Winvest {
 mod tests {
     use super::*;
 
-    /// 驗證 `QueryDayPrice` 回應的 serde 欄位對應（PascalCase rename 與 default）。
-    #[test]
-    fn query_day_price_response_deserializes_official_shape() {
-        let body = r#"{
-            "StockListPrice": [
-                ["KlineDatetime", "ClosePrice"],
-                ["09:00", "1880"]
-            ],
-            "StockLastKline": {
-                "ClosePrice": 1885.0,
-                "Change": -15.0,
-                "YesterdayClosePrice": 1900.0,
-                "ChangeRate": -0.79
-            },
-            "errMsg": ""
-        }"#;
+    const URL: &str = "https://example.test/QueryRecentDailyPrice";
 
-        let response: QueryDayPriceResponse = serde_json::from_str(body).unwrap();
+    /// 取自 2026-09-29 實際回應（`StockListPrice` 截短）。
+    const OFFICIAL_BODY: &str = r#"{
+        "StockListPrice": [["KlineDatetime", "ClosePrice"], ["09/24", "2475"], ["09/29", "2475"]],
+        "StockLastKline": {
+            "ChangeRate": 0, "SymbolName": null, "YesterdayClosePrice": 2475,
+            "SymbolCode": "2330", "KlinePeriod": 0, "KlineDatetime": "2026-09-29T13:30:00",
+            "OpenPrice": 2475, "HighPrice": 2495, "LowPrice": 2475, "ClosePrice": 2475,
+            "TransVolume": 24536, "Change": 0
+        },
+        "DataDate": "2026/09/29", "errMsg": null, "actionUrl": "/Stock/Symbol/QueryRecentDailyPrice"
+    }"#;
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).expect("測試日期應合法")
+    }
+
+    /// 驗證實際回應的 serde 欄位對應（PascalCase rename、`errMsg` 為 null）。
+    #[test]
+    fn response_deserializes_official_shape() {
+        let response = parse_query_recent_daily_price(URL, OFFICIAL_BODY).unwrap();
         let kline = response.stock_last_kline.unwrap();
-        assert_eq!(kline.close_price, 1885.0);
-        assert_eq!(kline.change, -15.0);
-        assert_eq!(kline.yesterday_close_price, Some(1900.0));
-        assert_eq!(response.stock_list_price.len(), 2);
 
-        // 欄位缺席時（StockListPrice/errMsg 有 default）不得反序列化失敗。
-        let minimal: QueryDayPriceResponse = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(kline.close_price, 2475.0);
+        assert_eq!(kline.change, 0.0);
+        assert_eq!(kline.yesterday_close_price, Some(2475.0));
+        assert_eq!(kline.date(), Some(date(2026, 9, 29)));
+
+        // 欄位缺席時（errMsg 有 default）不得反序列化失敗。
+        let minimal = parse_query_recent_daily_price(URL, r#"{}"#).unwrap();
         assert!(minimal.stock_last_kline.is_none());
-        assert!(minimal.stock_list_price.is_empty());
     }
 
     #[test]
-    /// 驗證 `StockListPrice` 會抓到最後一筆可用成交價。
-    fn test_extract_last_price_from_stock_list() {
-        let stock_list_price = vec![
-            vec!["KlineDatetime".to_string(), "ClosePrice".to_string()],
-            vec!["09:00".to_string(), "1880".to_string()],
-            vec!["09:01".to_string(), "1885".to_string()],
-        ];
+    fn today_kline_accepts_same_day() {
+        let response = parse_query_recent_daily_price(URL, OFFICIAL_BODY).unwrap();
+        let kline = today_kline(response, "2330", date(2026, 9, 29)).unwrap();
 
-        let price = extract_last_price_from_stock_list(&stock_list_price).unwrap();
-        assert_eq!(price, 1885.0);
+        assert_eq!(kline.close_price, 2475.0);
     }
 
-    /// 沒有任何一列有可解析價格時要回 None，不能誤把標題列當價格。
+    /// 盤中若拿到前一交易日的日 K，不可當成最新成交價。
     #[test]
-    fn extract_last_price_returns_none_when_no_numeric_row() {
-        let stock_list_price = vec![
-            vec!["KlineDatetime".to_string(), "ClosePrice".to_string()],
-            vec!["09:00".to_string()],
-        ];
+    fn today_kline_rejects_previous_trading_day() {
+        let response = parse_query_recent_daily_price(URL, OFFICIAL_BODY).unwrap();
+        let err = today_kline(response, "2330", date(2026, 9, 30))
+            .expect_err("previous day's kline should be rejected");
 
-        assert!(extract_last_price_from_stock_list(&stock_list_price).is_none());
+        assert!(err.to_string().contains("is not today's"));
+    }
+
+    #[test]
+    fn today_kline_rejects_missing_kline_or_datetime() {
+        let empty = parse_query_recent_daily_price(URL, r#"{}"#).unwrap();
+        assert!(today_kline(empty, "2330", date(2026, 9, 29)).is_err());
+
+        let body = r#"{ "StockLastKline": { "ClosePrice": 10.0, "Change": 0.0 } }"#;
+        let no_datetime = parse_query_recent_daily_price(URL, body).unwrap();
+        assert!(today_kline(no_datetime, "2330", date(2026, 9, 29)).is_err());
+    }
+
+    /// token 失效時伺服器回 HTTP 400 空內容，要能辨識出來改換 token 重試。
+    #[test]
+    fn looks_like_json_detects_rejected_request() {
+        assert!(looks_like_json(OFFICIAL_BODY));
+        assert!(!looks_like_json(""));
+        assert!(!looks_like_json("<html>400</html>"));
     }
 
     #[test]
@@ -356,80 +396,50 @@ mod tests {
 
     /// 回應為非 JSON（例如被導到錯誤頁）時，錯誤訊息要帶上內容預覽方便排查。
     #[test]
-    fn parse_query_day_price_rejects_non_json_body() {
-        let err = parse_query_day_price("https://example.test/QueryDayPrice", "<html>503</html>")
+    fn parse_rejects_non_json_body() {
+        let err = parse_query_recent_daily_price(URL, "<html>503</html>")
             .expect_err("non-JSON body should be an error");
 
-        assert!(err.to_string().contains("Failed to parse QueryDayPrice"));
+        assert!(
+            err.to_string()
+                .contains("Failed to parse QueryRecentDailyPrice")
+        );
         assert!(err.to_string().contains("body preview: <html>503</html>"));
     }
 
     /// API 明確回報 `errMsg` 時必須報錯，不能把空報價當成正常結果。
     #[test]
-    fn parse_query_day_price_rejects_non_empty_err_msg() {
-        let body = r#"{ "StockListPrice": [], "StockLastKline": null, "errMsg": " 查無此代碼 " }"#;
-        let err = parse_query_day_price("https://example.test/QueryDayPrice", body)
-            .expect_err("errMsg should be an error");
+    fn parse_rejects_non_empty_err_msg() {
+        let body = r#"{ "StockLastKline": null, "errMsg": " 查無此代碼 " }"#;
+        let err = parse_query_recent_daily_price(URL, body).expect_err("errMsg should be an error");
 
         assert!(err.to_string().contains("errMsg is 查無此代碼"));
     }
 
-    /// 兩組報價欄位同時缺失代表這次回應沒有可用資料。
-    #[test]
-    fn parse_query_day_price_rejects_empty_payload() {
-        let err = parse_query_day_price("https://example.test/QueryDayPrice", r#"{}"#)
-            .expect_err("empty payload should be an error");
-
-        assert!(
-            err.to_string()
-                .contains("StockLastKline and StockListPrice are empty")
-        );
-    }
-
-    /// 正常回應（含空字串 `errMsg`）要能通過驗證。
-    #[test]
-    fn parse_query_day_price_accepts_valid_payload() {
-        let body = r#"{
-            "StockListPrice": [["KlineDatetime", "ClosePrice"], ["09:00", "1880"]],
-            "StockLastKline": { "ClosePrice": 1885.0, "Change": -15.0,
-                                "YesterdayClosePrice": 1900.0, "ChangeRate": -0.79 },
-            "errMsg": ""
-        }"#;
-        let response = parse_query_day_price("https://example.test/QueryDayPrice", body).unwrap();
-
-        assert_eq!(response.stock_last_kline.unwrap().close_price, 1885.0);
-    }
-
     #[tokio::test]
     #[ignore = "live test：連線真實外部網站，需要時手動執行"]
-    /// 驗證 Winvest 可取得單一股票最新成交價。
-    async fn test_get_stock_price() {
+    /// 驗證可取得 antiforgery token 並查到最新日 K（不檢查日期，非交易日也能跑）。
+    async fn test_fetch_data() {
         dotenvy::dotenv().ok();
-        tracing::debug!("開始 winvest::get_stock_price");
 
-        match Winvest::get_stock_price("2330").await {
-            Ok(price) => tracing::debug!("winvest price: {}", price),
-            Err(why) => tracing::debug!("Failed to winvest::get_stock_price because {:?}", why),
-        }
-
-        tracing::debug!("結束 winvest::get_stock_price");
+        let response = fetch_data("2330").await.expect("fetch_data");
+        let kline = response.stock_last_kline.expect("StockLastKline");
+        println!(
+            "winvest 2330: datetime={:?} close={} change={}",
+            kline.kline_datetime, kline.close_price, kline.change
+        );
+        assert!(kline.close_price > 0.0);
     }
 
     #[tokio::test]
     #[ignore = "live test：連線真實外部網站，需要時手動執行"]
-    /// 驗證 Winvest 可取得統一格式報價資訊。
+    /// 驗證 Winvest 可取得統一格式報價資訊（最新日 K 不是今天時會回錯誤）。
     async fn test_get_stock_quotes() {
         dotenvy::dotenv().ok();
-        tracing::debug!("開始 winvest::get_stock_quotes");
 
         match Winvest::get_stock_quotes("2330").await {
-            Ok(quotes) => {
-                dbg!(&quotes);
-                tracing::debug!("winvest quotes: {:?}", quotes)
-            }
-            Err(why) => tracing::debug!("Failed to winvest::get_stock_quotes because {:?}", why),
+            Ok(quotes) => println!("winvest quotes: {:?}", quotes),
+            Err(why) => println!("Failed to winvest::get_stock_quotes because {:?}", why),
         }
-
-        tracing::debug!("結束 winvest::get_stock_quotes");
     }
 }

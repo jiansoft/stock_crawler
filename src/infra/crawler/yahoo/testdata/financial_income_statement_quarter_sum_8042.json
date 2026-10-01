@@ -1,0 +1,48 @@
+{
+  "incomeStatementsList": [
+    {
+      "symbol": "8042.TWO",
+      "date": "2026-06-01T00:00:00+08:00",
+      "revenuePerShare": "18.10",
+      "revenue": "2380422000.00",
+      "debtCost": "1.12",
+      "operatingProfitPerShare": "1.40",
+      "profitBeforeTaxPerShare": "3.80",
+      "eps": "2.84",
+      "bps": "34.64",
+      "grossProfit": "505926000.00",
+      "sellingExpenses": "126468000.00",
+      "adminExpenses": "138553000.00",
+      "rdExpenses": "56655000.00",
+      "operatingExpenses": "321677000.00",
+      "operatingProfit": "184249000.00",
+      "nonOperatingIncome": "315963000.00",
+      "profitBeforeTax": "500212000.00",
+      "netIncome": "381320000.00",
+      "netIncomeAcc4Q": "502.45",
+      "ownerParentProfit": "372410000.00"
+    },
+    {
+      "symbol": "8042.TWO",
+      "date": "2026-03-01T00:00:00+08:00",
+      "revenuePerShare": "8.58",
+      "revenue": "1111201000.00",
+      "debtCost": "0.57",
+      "operatingProfitPerShare": "0.63",
+      "profitBeforeTaxPerShare": "3.03",
+      "eps": "2.17",
+      "bps": "32.59",
+      "grossProfit": "244120000.00",
+      "sellingExpenses": "61845000.00",
+      "adminExpenses": "73182000.00",
+      "rdExpenses": "27295000.00",
+      "operatingExpenses": "162320000.00",
+      "operatingProfit": "81800000.00",
+      "nonOperatingIncome": "309853000.00",
+      "profitBeforeTax": "391653000.00",
+      "netIncome": "289631000.00",
+      "netIncomeAcc4Q": "413.67",
+      "ownerParentProfit": "280311000.00"
+    }
+  ]
+}

@@ -1,13 +1,14 @@
 use crate::{
     app::backfill,
     app::calculation,
+    core::util::datetime::Weekend,
     domain::quote::repository::QuoteRepository,
     infra::cache::{TTL, TtlCacheInner},
-    infra::crawler,
+    infra::crawler::{self, twse},
     infra::database::repository::{quote::PgQuoteRepository, yield_rank::PgYieldRankRepository},
 };
 use anyhow::Result;
-use chrono::{Local, NaiveDate};
+use chrono::{DateTime, Datelike, Local, NaiveDate};
 use scopeguard::defer;
 
 /// 台股收盤事件發生時要進行的事情
@@ -17,7 +18,13 @@ pub async fn execute() -> Result<()> {
        tracing::info!("台股收盤事件結束");
     }
 
-    let current_date: NaiveDate = Local::now().date_naive();
+    let now = Local::now();
+    let current_date: NaiveDate = now.date_naive();
+    if is_market_closed(now).await {
+        tracing::info!("{current_date} 休市，略過收盤匯總");
+        return Ok(());
+    }
+
     let aggregate = aggregate(current_date);
     let index = backfill::taiwan_stock_index::execute();
     let (res_aggregation, res_index) = tokio::join!(aggregate, index);
@@ -36,6 +43,29 @@ pub async fn execute() -> Result<()> {
     crawler::flush_site_latency_stats();
 
     Ok(())
+}
+
+/// 週末或交易所公告的休市日回傳 `true`。
+///
+/// 休市日 TWSE `MI_INDEX` 只回 `{"stat":"很抱歉，沒有符合條件的資料!"}`，缺少 `tables`
+/// 讓解析失敗，每逢週末、假日都記一筆 error（2026-09-25～28 連續四天）。
+/// 休市日清單抓取失敗時視為開市，交給 [`aggregate`] 原本「0 筆即略過」的邏輯處理。
+async fn is_market_closed(now: DateTime<Local>) -> bool {
+    if now.is_weekend() {
+        return true;
+    }
+
+    let today = now.date_naive();
+    match twse::holiday_schedule::visit(today.year()).await {
+        Ok(holidays) => holidays.iter().any(|holiday| holiday.date == today),
+        Err(why) => {
+            tracing::warn!(
+                "Failed to fetch TWSE holiday schedule, continuing closing aggregation: {:?}",
+                why
+            );
+            false
+        }
+    }
 }
 
 /// 股票收盤數據匯總。

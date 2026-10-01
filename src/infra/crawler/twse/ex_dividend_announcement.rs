@@ -12,7 +12,8 @@
 //! ## 欄位注意事項
 //!
 //! - `StockDividendRatio` 是**無償配股率**；`SubscriptionRatio` 是現金增資認購配股率，
-//!   兩者意義完全不同，後者不能併入股票股利，因此本模組不採集它。
+//!   兩者意義完全不同，後者不能併入股票股利。現增配股率只用來辨識「權」是現增還是配股
+//!   （見 [`classify_ex_dividend`]），純現增的資料列不是股利事件，會直接丟棄。
 //! - 空字串代表「未公布或不適用」，會轉成 `None`，不可視為 0。
 
 use anyhow::Result;
@@ -24,7 +25,7 @@ use crate::{
         util::{self, datetime},
     },
     infra::crawler::{
-        share::{ExDividendAnnouncement, parse_ex_dividend_kind},
+        share::{ExDividendAnnouncement, classify_ex_dividend},
         twse,
     },
 };
@@ -50,6 +51,9 @@ struct Twt48uRaw {
     /// 無償配股率（股/股）。
     #[serde(rename = "StockDividendRatio")]
     stock_dividend_ratio: String,
+    /// 現金增資認購配股率（股/股）；非現增事件為空字串。
+    #[serde(rename = "SubscriptionRatio", default)]
+    subscription_ratio: String,
     /// 現金股利（元/股）。
     #[serde(rename = "CashDividend")]
     cash_dividend: String,
@@ -76,12 +80,21 @@ pub async fn visit() -> Result<Vec<ExDividendAnnouncement>> {
 /// 將 TWSE 原始資料列轉成共用的 [`ExDividendAnnouncement`]。
 ///
 /// 這是純函式，可用 `testdata/ex_dividend_twt48u.json` fixture 直接驗證。
-/// 日期無法解析（格式異常）的資料列會被丟棄，避免把壞資料帶進後續流程。
+/// 日期無法解析（格式異常）的資料列會被丟棄，避免把壞資料帶進後續流程；
+/// 純現金增資除權（沒有任何股利）的資料列也會丟棄。
 fn parse_announcements(rows: Vec<Twt48uRaw>) -> Vec<ExDividendAnnouncement> {
     rows.into_iter()
         .filter_map(|row| {
             let ex_date = datetime::parse_taiwan_date_short(row.date.trim())?;
-            let (is_cash, is_stock) = parse_ex_dividend_kind(&row.ex_dividend);
+            let stock_dividend_ratio = parse_optional_decimal(&row.stock_dividend_ratio);
+            let (is_cash, is_stock) = classify_ex_dividend(
+                &row.ex_dividend,
+                stock_dividend_ratio,
+                parse_optional_decimal(&row.subscription_ratio),
+            );
+            if !is_cash && !is_stock {
+                return None;
+            }
 
             Some(ExDividendAnnouncement {
                 stock_symbol: row.code.trim().to_string(),
@@ -90,7 +103,7 @@ fn parse_announcements(rows: Vec<Twt48uRaw>) -> Vec<ExDividendAnnouncement> {
                 is_cash,
                 is_stock,
                 cash_dividend: parse_optional_decimal(&row.cash_dividend),
-                stock_dividend_ratio: parse_optional_decimal(&row.stock_dividend_ratio),
+                stock_dividend_ratio,
                 market: StockExchangeMarket::Listed,
             })
         })
@@ -176,10 +189,35 @@ mod tests {
             name: "台積電".to_string(),
             ex_dividend: "息".to_string(),
             stock_dividend_ratio: "".to_string(),
+            subscription_ratio: "".to_string(),
             cash_dividend: "5.0".to_string(),
         }];
 
         assert!(parse_announcements(rows).is_empty());
+    }
+
+    /// 純現增除權不是股利事件，必須丟棄；同時有配股的除權息要保留並維持除權。
+    ///
+    /// 資料取自 2026-09-23 的 `TWT48U_ALL`：2890 永豐金現增、2614 東森配股＋現增。
+    #[test]
+    fn test_parse_announcements_drops_pure_rights_issue() {
+        let rows: Vec<Twt48uRaw> = serde_json::from_str(
+            r#"[
+                {"Date":"1151007","Code":"2890","Name":"永豐金","Exdividend":"權",
+                 "StockDividendRatio":"","SubscriptionRatio":"0.04329540","CashDividend":"0"},
+                {"Date":"1151001","Code":"2614","Name":"東森","Exdividend":"權息",
+                 "StockDividendRatio":"0.08000000","SubscriptionRatio":"0.38195352",
+                 "CashDividend":"0.400000"}
+            ]"#,
+        )
+        .expect("rows should parse");
+
+        let result = parse_announcements(rows);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].stock_symbol, "2614");
+        assert!(result[0].is_cash);
+        assert!(result[0].is_stock);
     }
 
     #[tokio::test]

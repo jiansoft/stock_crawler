@@ -2,6 +2,7 @@ pub mod config;
 pub mod dividend;
 pub mod events;
 pub mod financial;
+pub mod foreign_holding;
 pub mod market_index;
 pub mod money_flow;
 pub mod performance;

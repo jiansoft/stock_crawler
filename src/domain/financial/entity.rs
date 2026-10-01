@@ -1,5 +1,6 @@
 use chrono::{DateTime, Local, NaiveDate};
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 
 /// 財務報表領域實體。
 ///
@@ -230,24 +231,257 @@ impl PriceEstimate {
     }
 }
 
-/// 持股月營收警示領域實體。
+/// 持股月營收摘要領域實體。
 ///
-/// 只在月營收年增率的絕對值超過門檻時產生，供每月營收公布後的 Telegram 通知使用。
-/// 大跌與大漲都要看，因此門檻比較的是絕對值。
+/// 每月營收公布後為**每一檔持股**產生一筆，供 Telegram 通知使用；
+/// 不再只挑年增率超過門檻的個股——持股數量有限，全列出來才能一次看完整個組合的動能。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HoldingRevenueAlert {
     /// 股票代號
     pub stock_symbol: String,
     /// 股票名稱
     pub stock_name: String,
-    /// 當月營收 (元)
+    /// 產業分類名稱；查無分類（`stock_industry_id` 未對應）時為 None
+    pub industry_name: Option<String>,
+    /// 當月營收 (千元)
     pub monthly: Decimal,
+    /// 當月累計營收 (千元)，自當年 1 月起算
+    pub monthly_accumulated: Decimal,
     /// 上月比較增減 (%)
     pub compared_with_last_month: Decimal,
     /// 去年同月增減 (%)
     pub compared_with_last_year_same_month: Decimal,
+    /// 累計營收較去年同期增減 (%)
+    pub accumulated_compared_with_last_year: Decimal,
+    /// 發行股數 (股)；尚未回補時為 0
+    pub issued_share: i64,
+    /// 近四季平均稅後淨利率 (%)；查無可用財報時為 None
+    pub net_income_margin: Option<Decimal>,
+    /// 今年自 Q1 起連續公布、且季底不晚於本期的季報 EPS 加總 (元)；無可用錨點時為 None
+    pub anchor_eps: Option<Decimal>,
+    /// 上述錨點季底當月的累計營收 (千元)；無可用錨點時為 None
+    pub anchor_accumulated_revenue: Option<Decimal>,
+    /// 錨點最後一季的季別編號 (1~4)；無可用錨點時為 None
+    pub anchor_quarter_no: Option<i32>,
+    /// 錨點季往回共四季的 EPS 合計 (元)；四季或十二個月營收不齊時為 None
+    pub ttm_eps: Option<Decimal>,
+    /// 與 `ttm_eps` 同一段期間的十二個月營收合計 (千元)；資料不齊時為 None
+    pub ttm_revenue: Option<Decimal>,
+    /// 近 12 季「季 EPS 對季營收(千元)」迴歸斜率：每千元營收帶來的 EPS；只在錨點虧損且有新增營收時才有值
+    pub reg_slope: Option<Decimal>,
+    /// 上述迴歸的截距：每季固定損益 (元)
+    pub reg_intercept: Option<Decimal>,
+    /// 上述迴歸的判定係數 R²
+    pub reg_r2: Option<Decimal>,
+    /// 上述迴歸的樣本季數
+    pub reg_quarters: Option<i64>,
     /// 營收月份 (yyyyMM)
     pub date: i64,
+}
+
+/// 台股月營收以千元為單位；要對上「元／股」的 EPS 必須先換算成元。
+const REVENUE_THOUSANDS_TO_NTD: Decimal = dec!(1000);
+
+/// 百分比換算成比率的除數。
+const PERCENT: Decimal = dec!(100);
+
+/// 一年的月數，用於把累計 EPS 年化。
+const MONTHS_PER_YEAR: Decimal = dec!(12);
+
+/// 營收步調達到此倍數即視為營收結構劇變，推估只供參考。
+///
+/// 與 stock_go `revenue_repository.go` 的 `revenue_pace` 門檻一致，兩邊要一起改。
+const VOLATILE_REVENUE_PACE: Decimal = dec!(2);
+
+/// 迴歸法至少要有這麼多季樣本才採用；與 stock_go `basis_pick` 的門檻一致。
+const MIN_REGRESSION_QUARTERS: i64 = 8;
+
+/// 迴歸法的 R² 下限：EPS 與營收要有穩定關係，否則斜率只是雜訊；與 stock_go 一致。
+const MIN_REGRESSION_R2: Decimal = dec!(0.5);
+
+/// 一季的月數，用於把迴歸截距（每季固定損益）折算成新增月份。
+const MONTHS_PER_QUARTER: Decimal = dec!(3);
+
+/// 推估 EPS 的計算依據。
+///
+/// 兩種方法的可信度差很多，通知必須讓人一眼分得出來用的是哪一種。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EpsEstimateBasis {
+    /// 以今年已公布的實際季報 EPS 為錨點，只把尚未公布的月份按營收比例外推。
+    ReportedQuarters,
+    /// 今年已公布的季報為虧損時，已實現部分沿用實際 EPS，
+    /// 新增月份以近 12 季「季 EPS 對季營收」迴歸推估（每季固定損益＋營收貢獻）。
+    ReportedQuartersWithRegression,
+    /// 今年已公布的季報為虧損時，已實現部分沿用實際 EPS，
+    /// 新增營收改用近四季淨利率（近四季 EPS ÷ 近四季營收）推估。
+    ReportedQuartersWithTrailingMargin,
+    /// 以近四季平均稅後淨利率套用在累計營收上；今年還沒有任何季報可錨定時的退路。
+    NetIncomeMargin,
+}
+
+/// 由累計營收推估出來的 EPS。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpsEstimate {
+    /// 今年累計推估 EPS (元)
+    pub accumulated: Decimal,
+    /// 依已公布月數線性年化後的全年推估 EPS (元)
+    pub annual: Decimal,
+    /// 計算依據
+    pub basis: EpsEstimateBasis,
+    /// 營收步調達 [`VOLATILE_REVENUE_PACE`] 倍以上：營收結構劇變（例如建案入帳），推估只供參考
+    pub volatile: bool,
+}
+
+impl HoldingRevenueAlert {
+    /// 累計營收所涵蓋的月數。
+    ///
+    /// 台股的「當月累計營收」一律自當年 1 月起算，因此月份數字本身就是月數。
+    pub fn accumulated_months(&self) -> i64 {
+        self.date % 100
+    }
+
+    /// 由目前累計營收推估今年的 EPS。
+    ///
+    /// 有錨點就走錨定法（[`EpsEstimateBasis::ReportedQuarters`] 或
+    /// [`EpsEstimateBasis::ReportedQuartersWithTrailingMargin`]），查不到錨點才退回
+    /// [`EpsEstimateBasis::NetIncomeMargin`]。錨定法判定不可靠時直接回傳 `None`，
+    /// 不退回淨利率法——那會把已公布的實際 EPS 整個丟掉。
+    /// 寧可不顯示，也不要把「查無資料」畫成 0。
+    ///
+    /// 不論用哪一種方法，數字都會隨每月營收公布而變動，這是預期行為而不是資料不穩。
+    pub fn estimate_eps(&self) -> Option<EpsEstimate> {
+        let months = self.accumulated_months();
+        if !(1..=12).contains(&months) {
+            return None;
+        }
+
+        let (accumulated, basis) = match self.anchor() {
+            Some(anchor) => self.anchored_accumulated_eps(anchor)?,
+            None => (
+                self.margin_accumulated_eps()?,
+                EpsEstimateBasis::NetIncomeMargin,
+            ),
+        };
+
+        Some(EpsEstimate {
+            accumulated,
+            annual: accumulated * MONTHS_PER_YEAR / Decimal::from(months),
+            basis,
+            volatile: self
+                .revenue_pace()
+                .is_some_and(|pace| pace >= VOLATILE_REVENUE_PACE),
+        })
+    }
+
+    /// 錨點三要素：已公布累計 EPS、錨點季底累計營收、錨點涵蓋月數。
+    ///
+    /// 缺錨點（今年還沒公布季報、季別不連續、或查不到該季底的營收）時回傳 `None`。
+    fn anchor(&self) -> Option<(Decimal, Decimal, i64)> {
+        let anchor_eps = self.anchor_eps?;
+        let anchor_revenue = self.anchor_accumulated_revenue?;
+        let quarter_no = self.anchor_quarter_no?;
+        if anchor_revenue <= Decimal::ZERO || !(1..=4).contains(&quarter_no) {
+            return None;
+        }
+
+        Some((anchor_eps, anchor_revenue, i64::from(quarter_no) * 3))
+    }
+
+    /// 營收步調：錨點之後新增月份的月均營收，是錨點期間月均營收的幾倍。
+    ///
+    /// 沒有錨點或本期就是錨點季底（沒有新增月份）時回傳 `None`。
+    pub fn revenue_pace(&self) -> Option<Decimal> {
+        let (_, anchor_revenue, anchor_months) = self.anchor()?;
+        let extra_months = self.accumulated_months() - anchor_months;
+        if extra_months <= 0 {
+            return None;
+        }
+
+        let extra_monthly =
+            (self.monthly_accumulated - anchor_revenue) / Decimal::from(extra_months);
+        let anchor_monthly = anchor_revenue / Decimal::from(anchor_months);
+        Some(extra_monthly / anchor_monthly)
+    }
+
+    /// 錨定法：已公布的實際累計 EPS 加上新增營收（本期累計 − 錨點季底累計）貢獻的 EPS。
+    ///
+    /// 已實現的部分直接採用財報數字，只有尚未公布的月份需要推估，新增營收套用的淨利率：
+    ///
+    /// 1. 錨點獲利或沒有新增營收：沿用錨點期間自身的淨利率，
+    ///    等同 `錨點 EPS × (本期累計營收 ÷ 錨點季底累計營收)`。比率的分子分母都是同一檔股票的
+    ///    營收，金控、保險這類「營收」與淨利率基準對不起來的產業也能算對。
+    /// 2. 錨點虧損：按比例外推會變成「營收越多、虧越多」，營收大增時方向完全相反。
+    ///    近 12 季「季 EPS 對季營收」迴歸可靠時，用截距扣新增月份的固定損益、
+    ///    斜率算新增營收的獲利；建設、生技這類營收一次入帳的公司靠它才估得出來。
+    /// 3. 迴歸不可靠但近四季合計獲利：改用近四季淨利率（近四季 EPS ÷ 近四季營收）。
+    /// 4. 以上皆不成立：營收步調正常時虧損大致隨時間累積，照比例外推仍合理；
+    ///    營收劇變時沒有可信的方法可用，回傳 `None` 不推估。
+    fn anchored_accumulated_eps(
+        &self,
+        (anchor_eps, anchor_revenue, anchor_months): (Decimal, Decimal, i64),
+    ) -> Option<(Decimal, EpsEstimateBasis)> {
+        let proportional = || {
+            (
+                anchor_eps * self.monthly_accumulated / anchor_revenue,
+                EpsEstimateBasis::ReportedQuarters,
+            )
+        };
+
+        let extra_revenue = self.monthly_accumulated - anchor_revenue;
+        if anchor_eps > Decimal::ZERO || extra_revenue <= Decimal::ZERO {
+            return Some(proportional());
+        }
+
+        if let Some((slope, intercept)) = self.reliable_regression() {
+            let extra_months = Decimal::from(self.accumulated_months() - anchor_months);
+            return Some((
+                anchor_eps + intercept * extra_months / MONTHS_PER_QUARTER + slope * extra_revenue,
+                EpsEstimateBasis::ReportedQuartersWithRegression,
+            ));
+        }
+
+        if let (Some(ttm_eps), Some(ttm_revenue)) = (self.ttm_eps, self.ttm_revenue)
+            && ttm_eps > Decimal::ZERO
+            && ttm_revenue > Decimal::ZERO
+        {
+            return Some((
+                anchor_eps + extra_revenue * ttm_eps / ttm_revenue,
+                EpsEstimateBasis::ReportedQuartersWithTrailingMargin,
+            ));
+        }
+
+        match self.revenue_pace() {
+            Some(pace) if pace >= VOLATILE_REVENUE_PACE => None,
+            _ => Some(proportional()),
+        }
+    }
+
+    /// 近 12 季迴歸符合門檻（季數、斜率為正、R²）時回傳 `(斜率, 截距)`。
+    fn reliable_regression(&self) -> Option<(Decimal, Decimal)> {
+        let slope = self.reg_slope?;
+        let intercept = self.reg_intercept?;
+        let r2 = self.reg_r2?;
+        let quarters = self.reg_quarters?;
+        (quarters >= MIN_REGRESSION_QUARTERS && slope > Decimal::ZERO && r2 >= MIN_REGRESSION_R2)
+            .then_some((slope, intercept))
+    }
+
+    /// 淨利率法：`累計營收(元) ÷ 發行股數 × 近四季平均稅後淨利率`。
+    ///
+    /// 只在今年還沒有任何季報可錨定時使用。台股季報的公布期限比月營收晚（Q1 約 5 月中、
+    /// Q2 約 8 月中），所以實務上 1~4 月的營收通知會走這條路。淨利率取的是
+    /// **近四季未加權平均**，一次性損益或季節性都沒有反映，金融保險業的營收
+    /// 與淨利率基準也對不齊，因此誤差可能很大——通知會標成「概估」以示區別。
+    fn margin_accumulated_eps(&self) -> Option<Decimal> {
+        let margin = self.net_income_margin?;
+        if self.issued_share <= 0 || margin.is_zero() {
+            return None;
+        }
+
+        let shares = Decimal::from(self.issued_share);
+
+        Some(self.monthly_accumulated * REVENUE_THOUSANDS_TO_NTD / shares * margin / PERCENT)
+    }
 }
 
 /// 持股財報摘要領域實體。
@@ -272,4 +506,256 @@ pub struct HoldingFinancialAlert {
     pub last_year_earnings_per_share: Option<Decimal>,
     /// 年度
     pub year: i32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 建立一筆兩種推估法都算得出來的樣本。
+    ///
+    /// 累計 1,000,000 千元＝10 億元；股數 1 億股 ⇒ 每股累計營收 10 元。
+    /// 錨定法：錨點 EPS 3 元、錨點營收 600,000 千元 ⇒ 3 × (1,000,000 ÷ 600,000) ＝ 5 元。
+    /// 淨利率法：10 元 × 40% ＝ 4 元。兩者刻意給不同答案，才能分辨用了哪一條路徑。
+    fn revenue_alert(date: i64) -> HoldingRevenueAlert {
+        HoldingRevenueAlert {
+            stock_symbol: "2330".to_string(),
+            stock_name: "台積電".to_string(),
+            industry_name: Some("半導體業".to_string()),
+            monthly: dec!(514805337),
+            monthly_accumulated: dec!(1000000),
+            compared_with_last_month: dec!(10.09),
+            compared_with_last_year_same_month: dec!(53.32),
+            accumulated_compared_with_last_year: dec!(41.2),
+            issued_share: 100_000_000,
+            net_income_margin: Some(dec!(40)),
+            anchor_eps: Some(dec!(3)),
+            anchor_accumulated_revenue: Some(dec!(600000)),
+            anchor_quarter_no: Some(2),
+            ttm_eps: None,
+            ttm_revenue: None,
+            reg_slope: None,
+            reg_intercept: None,
+            reg_r2: None,
+            reg_quarters: None,
+            date,
+        }
+    }
+
+    #[test]
+    fn accumulated_months_reads_the_month_part_of_yyyymm() {
+        assert_eq!(revenue_alert(202601).accumulated_months(), 1);
+        assert_eq!(revenue_alert(202612).accumulated_months(), 12);
+    }
+
+    // 有錨點就用錨點，不會退回淨利率法（4 元）。
+    #[test]
+    fn estimate_eps_prefers_reported_quarters() {
+        let estimate = revenue_alert(202608).estimate_eps().expect("estimate");
+
+        assert_eq!(estimate.basis, EpsEstimateBasis::ReportedQuarters);
+        assert_eq!(estimate.accumulated, dec!(5));
+        // 8 個月做出 5 元，線性外推全年 7.5 元。
+        assert_eq!(estimate.annual, dec!(7.5));
+    }
+
+    // 今年還沒公布季報（1~3 月）時退回淨利率法。
+    #[test]
+    fn estimate_eps_falls_back_to_net_income_margin() {
+        let mut alert = revenue_alert(202603);
+        alert.anchor_eps = None;
+        alert.anchor_accumulated_revenue = None;
+
+        let estimate = alert.estimate_eps().expect("estimate");
+
+        assert_eq!(estimate.basis, EpsEstimateBasis::NetIncomeMargin);
+        assert_eq!(estimate.accumulated, dec!(4));
+        assert_eq!(estimate.annual, dec!(16));
+    }
+
+    // 錨點營收為 0 會讓比率除以零，必須當成沒有錨點而退回淨利率法。
+    #[test]
+    fn estimate_eps_falls_back_when_anchor_revenue_is_zero() {
+        let mut alert = revenue_alert(202608);
+        alert.anchor_accumulated_revenue = Some(Decimal::ZERO);
+
+        let estimate = alert.estimate_eps().expect("estimate");
+
+        assert_eq!(estimate.basis, EpsEstimateBasis::NetIncomeMargin);
+        assert_eq!(estimate.accumulated, dec!(4));
+    }
+
+    // 錨點季底就是本期時比率為 1，推估值等於實際公布的累計 EPS。
+    #[test]
+    fn estimate_eps_equals_reported_eps_at_quarter_end() {
+        let mut alert = revenue_alert(202606);
+        alert.monthly_accumulated = dec!(600000);
+
+        let estimate = alert.estimate_eps().expect("estimate");
+
+        assert_eq!(estimate.accumulated, dec!(3));
+    }
+
+    // 12 月的累計就是全年，年化後不應該再被放大。
+    #[test]
+    fn estimate_eps_annual_equals_accumulated_in_december() {
+        let estimate = revenue_alert(202612).estimate_eps().expect("estimate");
+
+        assert_eq!(estimate.annual, estimate.accumulated);
+    }
+
+    // 虧損公司的錨點 EPS 是負的；近四季也不賺、營收步調正常時照比例外推，推估值跟著是負的。
+    #[test]
+    fn estimate_eps_keeps_negative_anchor() {
+        let mut alert = revenue_alert(202608);
+        alert.anchor_eps = Some(dec!(-1.2));
+        // 新增兩個月共 200,000 千元，月均與錨點期間相同（步調 1 倍）。
+        alert.monthly_accumulated = dec!(800000);
+
+        let estimate = alert.estimate_eps().expect("estimate");
+
+        assert_eq!(estimate.basis, EpsEstimateBasis::ReportedQuarters);
+        assert_eq!(estimate.accumulated, dec!(-1.6));
+        assert!(!estimate.volatile);
+    }
+
+    // 怡華 2026-08 的實際數字：上半年虧 1.07 元，7、8 月建案入帳營收暴增。
+    // 按比例外推會得到 -7.83（營收越多虧越多）；改用近四季淨利率後轉為獲利。
+    #[test]
+    fn estimate_eps_uses_trailing_margin_when_anchor_is_a_loss() {
+        let mut alert = revenue_alert(202608);
+        alert.anchor_eps = Some(dec!(-1.07));
+        alert.anchor_accumulated_revenue = Some(dec!(367504));
+        alert.monthly_accumulated = dec!(2690860);
+        alert.ttm_eps = Some(dec!(2.9));
+        alert.ttm_revenue = Some(dec!(736300));
+
+        let estimate = alert.estimate_eps().expect("estimate");
+
+        assert_eq!(
+            estimate.basis,
+            EpsEstimateBasis::ReportedQuartersWithTrailingMargin
+        );
+        assert_eq!(estimate.accumulated.round_dp(2), dec!(8.08));
+        assert!(estimate.volatile, "新增月份月均營收是錨點期間的 19 倍");
+    }
+
+    // 錨點虧損、近四季也不賺、營收又劇變：沒有可信的淨利率，不推估也不退回淨利率法。
+    #[test]
+    fn estimate_eps_is_none_when_loss_anchor_meets_volatile_revenue() {
+        let mut alert = revenue_alert(202608);
+        alert.anchor_eps = Some(dec!(-1.07));
+        alert.monthly_accumulated = dec!(3000000);
+        alert.ttm_eps = Some(dec!(-0.5));
+        alert.ttm_revenue = Some(dec!(900000));
+
+        assert_eq!(alert.estimate_eps(), None);
+    }
+
+    /// 全坤建 2026-08 的實際數字：上半年虧 0.52 元、近四季也虧，7、8 月建案入帳。
+    /// 近 12 季（含 2024 年交屋）迴歸：每季固定 -0.284 元、每千元營收 9.606e-7 元，R² 0.77。
+    fn construction_alert() -> HoldingRevenueAlert {
+        let mut alert = revenue_alert(202608);
+        alert.anchor_eps = Some(dec!(-0.52));
+        alert.anchor_accumulated_revenue = Some(dec!(126622));
+        alert.monthly_accumulated = dec!(1327379);
+        alert.ttm_eps = Some(dec!(-0.74));
+        alert.ttm_revenue = Some(dec!(258378));
+        alert.reg_slope = Some(dec!(0.0000009606));
+        alert.reg_intercept = Some(dec!(-0.284));
+        alert.reg_r2 = Some(dec!(0.77));
+        alert.reg_quarters = Some(12);
+        alert
+    }
+
+    // -0.52 ＋ 兩個月固定損益 (-0.284 × 2 ÷ 3) ＋ 新增營收 1,200,757 × 9.606e-7 ≈ 0.44。
+    #[test]
+    fn estimate_eps_uses_regression_when_loss_anchor_has_reliable_history() {
+        let estimate = construction_alert().estimate_eps().expect("estimate");
+
+        assert_eq!(
+            estimate.basis,
+            EpsEstimateBasis::ReportedQuartersWithRegression
+        );
+        assert_eq!(estimate.accumulated.round_dp(2), dec!(0.44));
+        assert!(estimate.volatile);
+    }
+
+    // 迴歸可靠時優先於近四季淨利率。
+    #[test]
+    fn estimate_eps_prefers_regression_over_trailing_margin() {
+        let mut alert = construction_alert();
+        alert.ttm_eps = Some(dec!(2.9));
+
+        let estimate = alert.estimate_eps().expect("estimate");
+
+        assert_eq!(
+            estimate.basis,
+            EpsEstimateBasis::ReportedQuartersWithRegression
+        );
+    }
+
+    // R² 不足、斜率不為正或季數不足時迴歸都不採用；此例近四季也虧、營收劇變，因此不推估。
+    #[test]
+    fn estimate_eps_rejects_unreliable_regression() {
+        let mut low_r2 = construction_alert();
+        low_r2.reg_r2 = Some(dec!(0.49));
+        assert_eq!(low_r2.estimate_eps(), None);
+
+        let mut negative_slope = construction_alert();
+        negative_slope.reg_slope = Some(dec!(-0.0000001));
+        assert_eq!(negative_slope.estimate_eps(), None);
+
+        let mut few_quarters = construction_alert();
+        few_quarters.reg_quarters = Some(7);
+        assert_eq!(few_quarters.estimate_eps(), None);
+    }
+
+    // 錨點獲利時即使營收劇變也維持按比例外推，只標記為僅供參考。
+    #[test]
+    fn estimate_eps_flags_volatile_revenue_for_profitable_anchor() {
+        let mut alert = revenue_alert(202608);
+        alert.monthly_accumulated = dec!(1200000);
+
+        let estimate = alert.estimate_eps().expect("estimate");
+
+        assert_eq!(estimate.basis, EpsEstimateBasis::ReportedQuarters);
+        assert_eq!(estimate.accumulated, dec!(6));
+        assert!(estimate.volatile);
+    }
+
+    // 步調 = 新增月份月均 ÷ 錨點期間月均；本期就是錨點季底時沒有新增月份。
+    #[test]
+    fn revenue_pace_compares_monthly_average_after_anchor() {
+        // 錨點 Q2：600,000 ÷ 6 ＝ 100,000／月；新增兩個月 400,000 ÷ 2 ＝ 200,000／月。
+        assert_eq!(revenue_alert(202608).revenue_pace(), Some(dec!(2)));
+
+        let mut alert = revenue_alert(202606);
+        alert.monthly_accumulated = dec!(600000);
+        assert_eq!(alert.revenue_pace(), None);
+    }
+
+    // 兩種方法都缺料時不推估。
+    #[test]
+    fn estimate_eps_is_none_without_any_usable_input() {
+        let mut alert = revenue_alert(202608);
+        alert.anchor_eps = None;
+        alert.anchor_accumulated_revenue = None;
+        alert.net_income_margin = None;
+
+        assert_eq!(alert.estimate_eps(), None);
+
+        let mut alert = revenue_alert(202608);
+        alert.anchor_eps = None;
+        alert.anchor_accumulated_revenue = None;
+        alert.issued_share = 0;
+
+        assert_eq!(alert.estimate_eps(), None);
+    }
+
+    // 月份欄位異常（yyyyMM 的月份不在 1~12）時不推估，避免除以 0。
+    #[test]
+    fn estimate_eps_is_none_for_invalid_month() {
+        assert_eq!(revenue_alert(202600).estimate_eps(), None);
+    }
 }

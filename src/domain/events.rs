@@ -99,7 +99,7 @@ pub enum DomainEvent {
     /// 當一個月份的台股月營收全部更新完畢時觸發。
     /// </summary>
     ///
-    /// 事件只帶月份，實際要通知哪些股票由 handler 依「持股 + 年增率門檻」自行查詢；
+    /// 事件只帶月份，實際要通知哪些股票由 handler 依「目前持股」自行查詢；
     /// 逐檔發事件會讓一次更新產生上千個事件，也無從彙總成一則訊息。
     MonthlyRevenueUpdated {
         /// 營收月份 (yyyyMM)
@@ -116,6 +116,18 @@ pub enum DomainEvent {
         year: i32,
         /// 財報季度 (Q1, Q2, Q3, Q4)
         quarter: String,
+        /// 事件發生時間
+        occurred_at: DateTime<Local>,
+    },
+
+    /// <summary>
+    /// 當一個交易日的外資持股快照寫入並重算趨勢後觸發。
+    /// </summary>
+    ///
+    /// 與月營收相同只帶日期，要通知哪些股票由 handler 依「目前持股」與趨勢門檻自行查詢。
+    ForeignHoldingsUpdated {
+        /// 趨勢基準日（外資持股資料日）
+        date: chrono::NaiveDate,
         /// 事件發生時間
         occurred_at: DateTime<Local>,
     },

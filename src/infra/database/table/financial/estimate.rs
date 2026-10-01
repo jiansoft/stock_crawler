@@ -6,7 +6,7 @@ use crate::{core::declare::Industry, infra::database};
 
 /// 個股估值資料。
 ///
-/// 彙整價格區間、股利法、EPS 法、PBR 法與 PER 法等估值結果，
+/// 彙整價格法、股利法、PBR 法、PER 法的加權估值，以及僅供參考的預估股利，
 /// 供排名與市場統計使用。
 #[derive(sqlx::FromRow, Debug, Default)]
 pub struct Estimate {
@@ -40,11 +40,11 @@ pub struct Estimate {
     pub dividend_fair: f64,
     /// 股利法昂貴價。
     pub dividend_expensive: f64,
-    /// EPS 法便宜價。
+    /// 預估股利法便宜價（不計入加權）。
     pub eps_cheap: f64,
-    /// EPS 法合理價。
+    /// 預估股利法合理價（不計入加權）。
     pub eps_fair: f64,
-    /// EPS 法昂貴價。
+    /// 預估股利法昂貴價（不計入加權）。
     pub eps_expensive: f64,
     /// PBR 法便宜價。
     pub pbr_cheap: f64,
@@ -91,11 +91,16 @@ impl Estimate {
     /// 依指定日期與年份清單，批次重建所有股票估值資料。
     ///
     /// ### 估值計算公式說明：
-    /// 本方法整合五種估值模型，並依特定權重計算加權後的「便宜價」、「合理價」與「昂貴價」。
+    /// 以價格法、股利法、PBR 法、PER 法四種模型加權出「便宜價」、「合理價」與「昂貴價」；
+    /// 另存一組預估股利（`eps_*` 欄位）供參考，不計入加權。
     ///
     /// **1. 加權比例 (Weights)：**
-    /// *   價格法 (20%) + 股利法 (25%) + EPS 法 (25%) + PBR 法 (20%) + PER 法 (10%)
-    /// *   **動態調整**：若 PER 法失效（估值為 0 或負數），則其 10% 權重平分給股利法與 EPS 法（各佔 30%）。
+    /// *   價格法 (20%) + 股利法 (25%) + PBR 法 (20%) + PER 法 (35%)
+    /// *   各法便宜/合理/昂貴三價都 > 0 才算有效；**缺項不以 0 計入**，權重在有效方法之間按比例重新分配。
+    /// *   PER 法計入加權時，不超過「所有有效方法（含 PER）同一價位中位數」的 3 倍（`per_*` 欄位仍存原值）：
+    ///     景氣循環股在獲利高峰時本益比位階 × 高峰 EPS 會嚴重高估（青雲 PER 合理 1,895、股價 290）。
+    ///     中位數含 PER 本身：只排除其他三法會被看歷史的價格法、股利法拉低，連台積電都被誤截。
+    /// *   有效方法少於 2 個時不給估價（加權三價與百分比都寫 0；percentage 欄位不允許 NULL）。
     ///
     /// **2. 各別估值法細節：**
     /// *   **價格法 (Price-based)：**
@@ -105,19 +110,26 @@ impl Estimate {
     /// *   **股利法 (Dividend-based)：**
     ///     *   基準：指定年份內「年均股利」。
     ///     *   便宜/合理/昂貴：基準 × 15 / 20 / 25。
-    /// *   **EPS 法 (Expected EPS)：**
-    ///     *   基準：`近四季 EPS` × `指定年份內中位數 (50%) 的盈餘分配率 (Payout Ratio)`。
-    ///     *   便宜/合理/昂備：基準 × 15 / 20 / 25。
+    /// *   **預估股利（`eps_*` 欄位，不計入加權）：**
+    ///     *   基準：`近四季 EPS` × `完整年度盈餘分配率的中位數`（個股 → 產業 → 60%）。
+    ///     *   便宜/合理/昂貴：基準 × 15 / 20 / 25。
+    ///     *   本質與股利法同為殖利率法；計入加權會讓殖利率重複計權，低估低配發率的成長股。
     /// *   **PBR 法 (Price-to-Book Ratio)：**
-    ///     *   基準：`每股淨值`。
+    ///     *   基準：最新一季 `每股淨值`。
     ///     *   倍數：指定年份內 `PBR` 的 10% / 50% / 80% 分位數。
     ///     *   便宜/合理/昂貴：基準 × 倍數。
-    /// *   **PER 法 (Price-Earning Ratio)：**
-    ///     *   基準：指定年份內「年均 EPS」。
-    ///     *   倍數：指定年份內 `PER` 的 10% / 50% / 80% 分位數。
-    ///     *   便宜/合理/昂貴：基準 × 倍數。
+    /// *   **PER 法 (Price-Earning Ratio，本益比河流圖)：**
+    ///     *   基準：`近四季 EPS`（與資料庫本益比同一口徑）。
+    ///     *   倍數：指定年份內 `PER` 的 10% / 50% / 80% 分位數，只取 0～100 倍；
+    ///         有效天數不足 250 個交易日時 PER 法無效。
     ///
-    /// **3. 百分比 (Percentage) 計算：**
+    /// **3. 分割／減資還原（`corporate_action`）：**
+    /// *   報價、股利、財報都是事件當時的每股數字；事件之後股數改變，舊數字要除以「之後所有事件
+    ///     股數比例的乘積」才能和現在的股價比較（5904 寶雅 1:10 分割後收盤 69.7，未還原的合理價 568）。
+    /// *   歷史股價依報價日、股利依除權息日、近四季 EPS 與每股淨值依各季季底換算。
+    /// *   本益比、PBR 是比率不受影響；配發率用原始股利 ÷ 同期原始 EPS，比例同樣不受影響。
+    ///
+    /// **4. 百分比 (Percentage) 計算：**
     /// *   公式：`(當前收盤價 / 加權便宜價) * 100`。
     /// *   數值越低代表股價相對越便宜。
     ///
@@ -126,7 +138,58 @@ impl Estimate {
     /// # Errors
     /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert_all(date: NaiveDate, years: String) -> Result<PgQueryResult> {
-        let sql = r#"
+        run_estimate_upsert(date, &years, None)
+            .await
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to upsert_all() from database for date: {} with years: {}. Error: {:?}",
+                    date,
+                    years,
+                    why,
+                )
+            })
+    }
+
+    /// 只重算單一股票的估值資料。
+    ///
+    /// 與 [`Self::upsert_all`] 共用同一段 SQL，只多一個代號篩選：產業配發率中位數等
+    /// 需要全市場資料的中間結果照常以全市場計算，單檔重算的結果才會和批次重建一致。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
+    pub async fn upsert(&self, years: String) -> Result<PgQueryResult> {
+        run_estimate_upsert(self.date, &years, Some(&self.security_code))
+            .await
+            .map_err(|why| {
+                anyhow!(
+                    "Failed to upsert({:#?}) from database for years: {}. Error: {:?}",
+                    self,
+                    years,
+                    why,
+                )
+            })
+    }
+}
+
+/// 執行估值重建 SQL；`security_code` 為 `None` 時重建全市場。
+async fn run_estimate_upsert(
+    date: NaiveDate,
+    years: &str,
+    security_code: Option<&str>,
+) -> std::result::Result<PgQueryResult, sqlx::Error> {
+    sqlx::query(ESTIMATE_UPSERT_SQL)
+        .bind(date)
+        .bind(years)
+        .bind(Industry::ExchangeTradedFund.serial())
+        .bind(security_code)
+        .execute(database::get_connection())
+        .await
+}
+
+/// 估值重建 SQL，公式說明見 [`Estimate::upsert_all`]。
+///
+/// 參數：`$1` 估值日期、`$2` 逗號分隔年份、`$3` 排除的 ETF 產業代碼、`$4` 單一股票代號（NULL 為全市場）。
+const ESTIMATE_UPSERT_SQL: &str = r#"
 INSERT INTO estimate (
     security_code, "date", percentage, closing_price, cheap, fair, expensive, price_cheap,
     price_fair, price_expensive, dividend_cheap, dividend_fair, dividend_expensive, year_count,
@@ -142,41 +205,80 @@ stocks AS (
     SELECT stock_symbol, last_four_eps, net_asset_value_per_share, stock_industry_id
     FROM public.stocks WHERE "SuspendListing" = false AND stock_industry_id != $3
 ),
+action_ranges AS (
+    -- 分割／減資還原係數：生效日之前的每股數字要除以「該日之後所有事件股數比例的乘積」。
+    -- 相鄰兩事件之間 [from_date, to_date) 共用同一係數；沒有事件的股票不在此表（係數視為 1）。
+    SELECT stock_symbol,
+        LAG(effective_date) OVER (PARTITION BY stock_symbol ORDER BY effective_date) AS from_date,
+        effective_date AS to_date,
+        EXP(SUM(LN(share_ratio)) OVER (
+            PARTITION BY stock_symbol ORDER BY effective_date DESC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )) AS factor
+    FROM corporate_action
+    WHERE effective_date <= $1 AND share_ratio > 0
+),
 daily_stats AS (
     -- 核心統計 CTE：計算指定年份區間內，每支股票的價格位階與估值倍數位階
     SELECT
         dq."stock_symbol",
         -- 統計具有效成交價的年度總數，用來衡量估值樣本是否充足
         COUNT(DISTINCT dq."year") FILTER (WHERE dq."ClosingPrice" > 0) AS y_count,
-        -- 價格法：取歷史最低價的 10% 分位數作為便宜價基礎，50% 為合理，80% 為昂貴
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."LowestPrice") FILTER (WHERE dq."ClosingPrice" > 0) AS p_cheap,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."ClosingPrice") FILTER (WHERE dq."ClosingPrice" > 0) AS p_fair,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."HighestPrice") FILTER (WHERE dq."ClosingPrice" > 0) AS p_expensive,
-        -- PBR 法：取歷史股價淨值比的 10% / 50% / 80% 位階，捕捉市場對該股資產價值的評價波動
+        -- 價格法：股價先依分割／減資還原成現在的股數基準，再取最低價 10%、收盤 50%、最高價 80% 分位數
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."LowestPrice" / COALESCE(ar.factor, 1)) FILTER (WHERE dq."ClosingPrice" > 0) AS p_cheap,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."ClosingPrice" / COALESCE(ar.factor, 1)) FILTER (WHERE dq."ClosingPrice" > 0) AS p_fair,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."HighestPrice" / COALESCE(ar.factor, 1)) FILTER (WHERE dq."ClosingPrice" > 0) AS p_expensive,
+        -- PBR 法：取歷史股價淨值比的 10% / 50% / 80% 位階（比率，不受分割影響）
         PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_low,
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_mid,
         PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_high,
-        -- PER 法：取歷史本益比的 10% / 50% / 80% 位階，捕捉市場對該股獲利能力的評價波動
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_low,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_mid,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_high
-    FROM "DailyQuotes" dq, filtered_years fy
+        -- PER 法：取歷史本益比的 10% / 50% / 80% 位階。
+        -- 本益比 > 100 代表當時獲利趨近於 0，不是有意義的評價倍數（台船 6 年中位數 2,050 倍），一律排除；
+        -- pe_days 記錄有效天數，不足一年（250 個交易日）時 PER 法視為無效。
+        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_low,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_mid,
+        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_high,
+        COUNT(*) FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_days
+    FROM "DailyQuotes" dq
+    CROSS JOIN filtered_years fy
+    LEFT JOIN action_ranges ar ON ar.stock_symbol = dq.stock_symbol
+        AND dq."Date" < ar.to_date AND (ar.from_date IS NULL OR dq."Date" >= ar.from_date)
     WHERE dq."Date" <= $1 AND dq."year" = ANY(fy.years)
+      AND ($4::varchar IS NULL OR dq.stock_symbol = $4)
     GROUP BY dq."stock_symbol"
 ),
 annual_dividend AS (
-    -- 統計每支股票在指定年份內的年度配息總和，排除尚未除息或無配息紀錄的年份
+    -- 每支股票在指定年份內的年度配息總和（原始每股金額），排除尚未除息或無配息紀錄的年份。
+    -- 只供配發率使用：配發率是同期原始股利 ÷ 原始 EPS，比例不受分割影響。
     SELECT security_code, "year", SUM("sum") as annual_sum
     FROM dividend, filtered_years fy
     WHERE "year" = ANY(fy.years) AND ("ex-dividend_date1" != '-' OR "ex-dividend_date2" != '-')
     GROUP BY security_code, "year"
 ),
+adjusted_annual_dividend AS (
+    -- 股利法用的年度配息：每筆股利依除權息日之後的分割／減資還原成現在的股數基準
+    SELECT d.security_code, d."year", SUM(d."sum" / COALESCE(ar.factor, 1)) AS annual_sum
+    FROM dividend d
+    CROSS JOIN filtered_years fy
+    CROSS JOIN LATERAL (
+        SELECT CASE
+            WHEN d."ex-dividend_date1" ~ '^\d{4}-\d{2}-\d{2}$' THEN d."ex-dividend_date1"::date
+            WHEN d."ex-dividend_date2" ~ '^\d{4}-\d{2}-\d{2}$' THEN d."ex-dividend_date2"::date
+        END AS ex_date
+    ) x
+    LEFT JOIN action_ranges ar ON ar.stock_symbol = d.security_code
+        AND x.ex_date < ar.to_date AND (ar.from_date IS NULL OR x.ex_date >= ar.from_date)
+    WHERE d."year" = ANY(fy.years) AND (d."ex-dividend_date1" != '-' OR d."ex-dividend_date2" != '-')
+    GROUP BY d.security_code, d."year"
+),
 annual_eps AS (
-    -- 統計每支股票在指定年份內的年度 EPS 總和，確保 Q1-Q4 數據完整
+    -- 統計每支股票在指定年份內的年度 EPS 總和。只取 Q1-Q4 齊全的完整年度：
+    -- 今年只有半年的 EPS 若當成一整年，配發率會被高估一倍。
     SELECT security_code, "year", SUM(earnings_per_share) as annual_eps
     FROM financial_statement, filtered_years fy
     WHERE "year" = ANY(fy.years) AND quarter IN ('Q1','Q2','Q3','Q4')
     GROUP BY security_code, "year"
+    HAVING COUNT(DISTINCT quarter) = 4
 ),
 payout_history AS (
     -- 計算每年的盈餘分配率（Dividend / EPS），限制在 0%~200% 之間以過濾處分資產等異常配息
@@ -187,7 +289,7 @@ payout_history AS (
     WHERE ae.annual_eps > 0 AND ad.annual_sum > 0 AND (ad.annual_sum / ae.annual_eps) <= 2.0
 ),
 stock_payout_50th AS (
-    -- 計算個股歷史配發率的中位數，作為 EPS 估價法中「未來配息預期」的基準
+    -- 計算個股歷史配發率的中位數，作為預估股利的配發率基準
     SELECT security_code, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ratio) as stock_payout
     FROM payout_history GROUP BY security_code
 ),
@@ -203,40 +305,70 @@ final_dpr AS (
     LEFT JOIN stock_payout_50th sp ON s.stock_symbol = sp.security_code
     LEFT JOIN industry_payout_50th ip ON s.stock_industry_id = ip.stock_industry_id
 ),
+latest_quarters AS (
+    -- 今年與去年的季報（取數範圍同 stocks.last_four_eps），依新到舊編號並附上季底日期
+    SELECT fs.security_code, fs.earnings_per_share, fs.net_asset_value_per_share,
+        ROW_NUMBER() OVER (PARTITION BY fs.security_code ORDER BY fs.year DESC, fs.quarter DESC) AS rn,
+        (make_date(fs.year::int, CASE fs.quarter WHEN 'Q1' THEN 3 WHEN 'Q2' THEN 6 WHEN 'Q3' THEN 9 ELSE 12 END, 1)
+            + interval '1 month' - interval '1 day')::date AS period_end
+    FROM financial_statement fs
+    WHERE fs.quarter IN ('Q1','Q2','Q3','Q4')
+      AND fs.year IN (EXTRACT(YEAR FROM $1::date)::int, EXTRACT(YEAR FROM $1::date)::int - 1)
+),
+per_share_basis AS (
+    -- 近四季 EPS 與最新一季每股淨值，逐季依季底之後的分割／減資還原：
+    -- 分割後的第一份季報已是新股數，其餘三季仍是舊股數，只用單一係數會新舊混算。
+    SELECT lq.security_code,
+        SUM(lq.earnings_per_share / COALESCE(ar.factor, 1)) AS ttm_eps,
+        MAX(lq.net_asset_value_per_share / COALESCE(ar.factor, 1)) FILTER (WHERE lq.rn = 1) AS nav
+    FROM latest_quarters lq
+    LEFT JOIN action_ranges ar ON ar.stock_symbol = lq.security_code
+        AND lq.period_end < ar.to_date AND (ar.from_date IS NULL OR lq.period_end >= ar.from_date)
+    WHERE lq.rn <= 4
+    GROUP BY lq.security_code
+),
 valuation_base AS (
-    -- 彙整計算五大估值模型所需的所有原始數值
+    -- 彙整計算各估值模型所需的所有原始數值（每股數字皆已還原成現在的股數基準）
     SELECT
         s.stock_symbol, dq."Date" as q_date, dq."ClosingPrice" as q_close, ds.y_count,
         ds.p_cheap, ds.p_fair, ds.p_expensive,
         -- 1. 股利法：以歷史平均股利分別乘以 15 / 20 / 25 倍作為估值區間
         (COALESCE(ad_avg.avg_div, 0) * 15) as div_c, (COALESCE(ad_avg.avg_div, 0) * 20) as div_f, (COALESCE(ad_avg.avg_div, 0) * 25) as div_e,
-        -- 2. EPS 法：以「近四季 EPS x 預期配發率」算出預估股利，再分別乘以 15 / 20 / 25 倍
-        CASE WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 15 ELSE 0 END as eps_c,
-        CASE WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 20 ELSE 0 END as eps_f,
-        CASE WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 25 ELSE 0 END as eps_e,
+        -- 2. 預估股利（欄位沿用 eps_*）：「近四季 EPS x 預期配發率」算出預估股利，再乘以 15 / 20 / 25 倍。
+        --    本質與股利法同為殖利率法，只供參考、不計入加權，否則殖利率會重複計權而低估低配發率的成長股。
+        CASE WHEN b.ttm_eps > 0 THEN b.ttm_eps * (fd.payout_ratio / 100.0) * 15 ELSE 0 END as eps_c,
+        CASE WHEN b.ttm_eps > 0 THEN b.ttm_eps * (fd.payout_ratio / 100.0) * 20 ELSE 0 END as eps_f,
+        CASE WHEN b.ttm_eps > 0 THEN b.ttm_eps * (fd.payout_ratio / 100.0) * 25 ELSE 0 END as eps_e,
         -- 3. PBR 法：以當前淨值分別乘以歷史 PBR 位階（便宜/合理/昂貴）
-        (ds.pbr_low * s.net_asset_value_per_share) as pbr_c, (ds.pbr_mid * s.net_asset_value_per_share) as pbr_f, (ds.pbr_high * s.net_asset_value_per_share) as pbr_e,
-        -- 4. PER 法：以歷史平均 EPS 分別乘以歷史 PER 位階（便宜/合理/昂貴）
-        CASE WHEN ae_avg.avg_eps > 0 THEN ds.pe_low * ae_avg.avg_eps ELSE 0 END as per_c,
-        CASE WHEN ae_avg.avg_eps > 0 THEN ds.pe_mid * ae_avg.avg_eps ELSE 0 END as per_f,
-        CASE WHEN ae_avg.avg_eps > 0 THEN ds.pe_high * ae_avg.avg_eps ELSE 0 END as per_e
+        (ds.pbr_low * b.nav) as pbr_c, (ds.pbr_mid * b.nav) as pbr_f, (ds.pbr_high * b.nav) as pbr_e,
+        -- 4. PER 法（本益比河流圖）：近四季 EPS 乘以歷史 PER 位階。資料庫的本益比是以近四季 EPS 算出，
+        --    倍數與基準必須同一口徑；舊版用 6 年平均 EPS，成長股會被嚴重低估（台積電合理價 1,063 → 2,155）。
+        CASE WHEN b.ttm_eps > 0 AND ds.pe_days >= 250 THEN ds.pe_low * b.ttm_eps ELSE 0 END as per_c,
+        CASE WHEN b.ttm_eps > 0 AND ds.pe_days >= 250 THEN ds.pe_mid * b.ttm_eps ELSE 0 END as per_f,
+        CASE WHEN b.ttm_eps > 0 AND ds.pe_days >= 250 THEN ds.pe_high * b.ttm_eps ELSE 0 END as per_e
     FROM stocks s
     JOIN "DailyQuotes" dq ON s.stock_symbol = dq."stock_symbol" AND dq."Date" = $1
     JOIN daily_stats ds ON s.stock_symbol = ds."stock_symbol"
     JOIN final_dpr fd ON s.stock_symbol = fd.stock_symbol
-    LEFT JOIN (SELECT security_code, AVG(annual_sum) as avg_div FROM annual_dividend GROUP BY security_code) ad_avg ON s.stock_symbol = ad_avg.security_code
-    LEFT JOIN (SELECT security_code, AVG(annual_eps) as avg_eps FROM annual_eps GROUP BY security_code) ae_avg ON s.stock_symbol = ae_avg.security_code
+    LEFT JOIN (SELECT security_code, AVG(annual_sum) as avg_div FROM adjusted_annual_dividend GROUP BY security_code) ad_avg ON s.stock_symbol = ad_avg.security_code
+    LEFT JOIN per_share_basis psb ON s.stock_symbol = psb.security_code
+    -- 沒有近兩年季報時沿用股票主檔的值（與改版前相同）
+    CROSS JOIN LATERAL (
+        SELECT COALESCE(psb.ttm_eps, s.last_four_eps) AS ttm_eps,
+               COALESCE(psb.nav, s.net_asset_value_per_share) AS nav
+    ) b
+    WHERE ($4::varchar IS NULL OR s.stock_symbol = $4)
 )
 SELECT
     stock_symbol, q_date,
     -- 計算「收盤價相對於加權便宜價」的百分比，數值越低代表股價越具備吸引力
-    CASE WHEN calc.weighted_cheap > 0 THEN ROUND(((q_close / calc.weighted_cheap) * 100)::numeric, 4) ELSE NULL END as percentage,
+    CASE WHEN calc.weighted_cheap > 0 THEN ROUND(((q_close / calc.weighted_cheap) * 100)::numeric, 4) ELSE 0 END as percentage,
     ROUND(q_close::numeric, 4) as q_close,
     -- 輸出加權後的終極估值區間
     ROUND(calc.weighted_cheap::numeric, 4) as cheap,
     ROUND(calc.weighted_fair::numeric, 4) as fair,
     ROUND(calc.weighted_expensive::numeric, 4) as expensive,
-    -- 輸出各個單獨模型的估值結果供前端報表分析
+    -- 輸出各個單獨模型的估值結果供前端報表分析（PER 為未套上限的原值）
     ROUND(COALESCE(p_cheap, 0)::numeric, 4) as price_cheap, ROUND(COALESCE(p_fair, 0)::numeric, 4) as price_fair, ROUND(COALESCE(p_expensive, 0)::numeric, 4) as price_expensive,
     ROUND(COALESCE(div_c, 0)::numeric, 4) as dividend_cheap, ROUND(COALESCE(div_f, 0)::numeric, 4) as dividend_fair, ROUND(COALESCE(div_e, 0)::numeric, 4) as dividend_expensive,
     y_count as year_count,
@@ -246,16 +378,59 @@ SELECT
     NOW() as update_time
 FROM valuation_base vb
 CROSS JOIN LATERAL (
-    -- 動態加權邏輯：
-    -- 若 PER 有效（獲利穩定）：分配為 價格(20%) + 股利(25%) + EPS(25%) + PBR(20%) + PER(10%)
-    -- 若 PER 失效（虧損或數據缺失）：將 PER 的 10% 平分給股利法與 EPS 法，權重變為 價格(20%) + 股利(30%) + EPS(30%) + PBR(20%)
-    SELECT 
-        CASE WHEN COALESCE(per_c, 0) > 0 THEN (COALESCE(p_cheap, 0)*0.2 + COALESCE(div_c, 0)*0.25 + COALESCE(eps_c, 0)*0.25 + COALESCE(pbr_c, 0)*0.2 + per_c*0.1)
-             ELSE (COALESCE(p_cheap, 0)*0.2 + COALESCE(div_c, 0)*0.3 + COALESCE(eps_c, 0)*0.3 + COALESCE(pbr_c, 0)*0.2) END as weighted_cheap,
-        CASE WHEN COALESCE(per_f, 0) > 0 THEN (COALESCE(p_fair, 0)*0.2 + COALESCE(div_f, 0)*0.25 + COALESCE(eps_f, 0)*0.25 + COALESCE(pbr_f, 0)*0.2 + per_f*0.1)
-             ELSE (COALESCE(p_fair, 0)*0.2 + COALESCE(div_f, 0)*0.3 + COALESCE(eps_f, 0)*0.3 + COALESCE(pbr_f, 0)*0.2) END as weighted_fair,
-        CASE WHEN COALESCE(per_e, 0) > 0 THEN (COALESCE(p_expensive, 0)*0.2 + COALESCE(div_e, 0)*0.25 + COALESCE(eps_e, 0)*0.25 + COALESCE(pbr_e, 0)*0.2 + per_e*0.1)
-             ELSE (COALESCE(p_expensive, 0)*0.2 + COALESCE(div_e, 0)*0.3 + COALESCE(eps_e, 0)*0.3 + COALESCE(pbr_e, 0)*0.2) END as weighted_expensive
+    -- 各方法的便宜/合理/昂貴三個價位都 > 0 才算有效。
+    SELECT
+        (COALESCE(p_cheap, 0) > 0 AND COALESCE(p_fair, 0) > 0 AND COALESCE(p_expensive, 0) > 0) AS v_price,
+        (div_c > 0 AND div_f > 0 AND div_e > 0) AS v_div,
+        (COALESCE(pbr_c, 0) > 0 AND COALESCE(pbr_f, 0) > 0 AND COALESCE(pbr_e, 0) > 0) AS v_pbr,
+        (per_c > 0 AND per_f > 0 AND per_e > 0) AS v_per
+) v
+CROSS JOIN LATERAL (
+    -- PER 上限基準：所有有效方法（價格、股利、PBR、PER）同一價位的中位數。含 PER 本身才不會被
+    -- 看歷史的價格法、股利法拉低而誤截成長股（台積電 PER 2,156 對 其他三法中位數 625）。
+    SELECT
+        (SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) FROM (VALUES
+            (CASE WHEN v.v_price THEN p_cheap::float8 END), (CASE WHEN v.v_div THEN div_c::float8 END),
+            (CASE WHEN v.v_pbr THEN pbr_c::float8 END), (CASE WHEN v.v_per THEN per_c::float8 END)
+        ) t(x) WHERE x IS NOT NULL) AS med_c,
+        (SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) FROM (VALUES
+            (CASE WHEN v.v_price THEN p_fair::float8 END), (CASE WHEN v.v_div THEN div_f::float8 END),
+            (CASE WHEN v.v_pbr THEN pbr_f::float8 END), (CASE WHEN v.v_per THEN per_f::float8 END)
+        ) t(x) WHERE x IS NOT NULL) AS med_f,
+        (SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) FROM (VALUES
+            (CASE WHEN v.v_price THEN p_expensive::float8 END), (CASE WHEN v.v_div THEN div_e::float8 END),
+            (CASE WHEN v.v_pbr THEN pbr_e::float8 END), (CASE WHEN v.v_per THEN per_e::float8 END)
+        ) t(x) WHERE x IS NOT NULL) AS med_e
+) md
+CROSS JOIN LATERAL (
+    -- 計入加權的 PER：不超過所有有效方法中位數的 3 倍，抑制景氣循環股獲利高峰時的高估
+    SELECT
+        CASE WHEN md.med_c IS NULL THEN per_c ELSE LEAST(per_c, 3 * md.med_c) END AS per_c_w,
+        CASE WHEN md.med_f IS NULL THEN per_f ELSE LEAST(per_f, 3 * md.med_f) END AS per_f_w,
+        CASE WHEN md.med_e IS NULL THEN per_e ELSE LEAST(per_e, 3 * md.med_e) END AS per_e_w
+) pw
+CROSS JOIN LATERAL (
+    -- 權重：價格 20% + 股利 25% + PBR 20% + PER 35%。缺項不以 0 參與加權——舊版把無股利、虧損的方法
+    -- 當 0 計入，548 檔（27%）的估價被整體壓低；改為只在有效方法之間按比例重新分配權重。
+    SELECT
+        v.v_price::int + v.v_div::int + v.v_pbr::int + v.v_per::int AS method_count,
+        0.2 * v.v_price::int + 0.25 * v.v_div::int + 0.2 * v.v_pbr::int + 0.35 * v.v_per::int AS weight_sum
+) m
+CROSS JOIN LATERAL (
+    -- 有效方法少於 2 個時不給估價：加權三價與 percentage 都寫 0（percentage 欄位 NOT NULL）。
+    SELECT
+        CASE WHEN m.method_count >= 2 THEN (
+            0.2 * CASE WHEN v.v_price THEN p_cheap ELSE 0 END + 0.25 * CASE WHEN v.v_div THEN div_c ELSE 0 END
+            + 0.2 * CASE WHEN v.v_pbr THEN pbr_c ELSE 0 END + 0.35 * CASE WHEN v.v_per THEN pw.per_c_w ELSE 0 END
+        ) / m.weight_sum ELSE 0 END as weighted_cheap,
+        CASE WHEN m.method_count >= 2 THEN (
+            0.2 * CASE WHEN v.v_price THEN p_fair ELSE 0 END + 0.25 * CASE WHEN v.v_div THEN div_f ELSE 0 END
+            + 0.2 * CASE WHEN v.v_pbr THEN pbr_f ELSE 0 END + 0.35 * CASE WHEN v.v_per THEN pw.per_f_w ELSE 0 END
+        ) / m.weight_sum ELSE 0 END as weighted_fair,
+        CASE WHEN m.method_count >= 2 THEN (
+            0.2 * CASE WHEN v.v_price THEN p_expensive ELSE 0 END + 0.25 * CASE WHEN v.v_div THEN div_e ELSE 0 END
+            + 0.2 * CASE WHEN v.v_pbr THEN pbr_e ELSE 0 END + 0.35 * CASE WHEN v.v_per THEN pw.per_e_w ELSE 0 END
+        ) / m.weight_sum ELSE 0 END as weighted_expensive
 ) calc
 ON CONFLICT (date, security_code) DO UPDATE SET
     -- 若該日期與代號已存在，則更新所有估值指標至最新計算結果
@@ -282,212 +457,6 @@ ON CONFLICT (date, security_code) DO UPDATE SET
     per_expensive = EXCLUDED.per_expensive,
     update_time = NOW();
 "#;
-        sqlx::query(sql)
-            .bind(date)
-            .bind(&years)
-            .bind(Industry::ExchangeTradedFund.serial())
-            .execute(database::get_connection())
-            .await
-            .map_err(|why| {
-                anyhow!(
-                    "Failed to upsert_all() from database for date: {} with years: {}. Error: {:?}",
-                    date,
-                    years,
-                    why,
-                )
-            })
-    }
-
-    /// 只重算單一股票的估值資料。
-    ///
-    /// # Errors
-    /// 當 SQL 執行失敗時回傳錯誤。
-    pub async fn upsert(&self, years: String) -> Result<PgQueryResult> {
-        let sql = r#"
-INSERT INTO estimate (
-    security_code, "date", percentage, closing_price, cheap, fair, expensive,
-    price_cheap, price_fair, price_expensive,
-    dividend_cheap, dividend_fair, dividend_expensive,
-    eps_cheap, eps_fair, eps_expensive,
-    pbr_cheap, pbr_fair, pbr_expensive,
-    per_cheap, per_fair, per_expensive,
-    year_count, update_time
-)
-WITH filtered_years AS (
-    SELECT CAST(string_to_array($2, ',') AS int[]) as years
-),
-stocks AS (
-    SELECT stock_symbol, last_four_eps, net_asset_value_per_share, stock_industry_id
-    FROM public.stocks WHERE stock_symbol = $3 AND "SuspendListing" = false AND stock_industry_id != $4
-),
-daily_stats AS (
-    SELECT
-        dq."stock_symbol",
-        COUNT(DISTINCT dq."year") FILTER (WHERE dq."ClosingPrice" > 0) AS y_count,
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."LowestPrice") FILTER (WHERE dq."ClosingPrice" > 0) AS p_cheap,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."ClosingPrice") FILTER (WHERE dq."ClosingPrice" > 0) AS p_fair,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."HighestPrice") FILTER (WHERE dq."ClosingPrice" > 0) AS p_expensive,
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_low,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_mid,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_high,
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_low,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_mid,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0) AS pe_high
-    FROM "DailyQuotes" dq, filtered_years fy
-    WHERE dq."stock_symbol" = $3 AND dq."Date" <= $1 AND dq."year" = ANY(fy.years)
-    GROUP BY dq."stock_symbol"
-),
-annual_dividend AS (
-    SELECT security_code, "year", SUM("sum") as annual_sum
-    FROM dividend, filtered_years fy
-    WHERE security_code = $3 AND "year" = ANY(fy.years) AND ("ex-dividend_date1" != '-' OR "ex-dividend_date2" != '-')
-    GROUP BY security_code, "year"
-),
-annual_eps AS (
-    SELECT security_code, "year", SUM(earnings_per_share) as annual_eps
-    FROM financial_statement, filtered_years fy
-    WHERE security_code = $3 AND "year" = ANY(fy.years) AND quarter IN ('Q1','Q2','Q3','Q4')
-    GROUP BY security_code, "year"
-),
-payout_history_all AS (
-    SELECT ad.security_code, s.stock_industry_id, (ad.annual_sum::numeric / NULLIF(ae.annual_eps::numeric, 0)) * 100 as ratio
-    FROM annual_dividend ad
-    JOIN annual_eps ae ON ad.security_code = ae.security_code AND ad.year = ae.year
-    JOIN stocks s ON ad.security_code = s.stock_symbol
-    WHERE ae.annual_eps > 0 AND ad.annual_sum > 0 AND (ad.annual_sum / ae.annual_eps) <= 2.0
-),
-stock_payout_50th AS (
-    SELECT security_code, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ratio) as stock_payout
-    FROM payout_history_all GROUP BY security_code
-),
-industry_annual_dividend AS (
-    SELECT d.security_code, d."year", SUM(d."sum") as annual_sum, s.stock_industry_id
-    FROM dividend d
-    JOIN public.stocks s ON d.security_code = s.stock_symbol
-    WHERE s.stock_industry_id = (SELECT stock_industry_id FROM stocks)
-      AND d."year" = ANY((SELECT years FROM filtered_years))
-      AND (d."ex-dividend_date1" != '-' OR d."ex-dividend_date2" != '-')
-    GROUP BY d.security_code, d."year", s.stock_industry_id
-),
-industry_annual_eps AS (
-    SELECT fs.security_code, fs."year", SUM(fs.earnings_per_share) as annual_eps
-    FROM financial_statement fs
-    JOIN public.stocks s ON fs.security_code = s.stock_symbol
-    WHERE s.stock_industry_id = (SELECT stock_industry_id FROM stocks)
-      AND fs."year" = ANY((SELECT years FROM filtered_years))
-      AND fs.quarter IN ('Q1','Q2','Q3','Q4')
-    GROUP BY fs.security_code, fs."year"
-),
-industry_payout_history AS (
-    SELECT iad.stock_industry_id, (iad.annual_sum::numeric / NULLIF(iae.annual_eps::numeric, 0)) * 100 as ratio
-    FROM industry_annual_dividend iad
-    JOIN industry_annual_eps iae ON iad.security_code = iae.security_code AND iad."year" = iae."year"
-    WHERE iae.annual_eps > 0 AND iad.annual_sum > 0 AND (iad.annual_sum::numeric / iae.annual_eps::numeric) <= 2.0
-),
-industry_payout_50th AS (
-    SELECT stock_industry_id, PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ratio) as industry_payout
-    FROM industry_payout_history GROUP BY stock_industry_id
-),
-final_dpr AS (
-    SELECT s.stock_symbol, LEAST(GREATEST(COALESCE(sp.stock_payout, ip.industry_payout, 60.0), 0.0), 200.0) as payout_ratio
-    FROM stocks s
-    LEFT JOIN stock_payout_50th sp ON s.stock_symbol = sp.security_code
-    LEFT JOIN industry_payout_50th ip ON s.stock_industry_id = ip.stock_industry_id
-),
-valuation_base AS (
-    SELECT
-        s.stock_symbol, dq."Date" as q_date, dq."ClosingPrice" as q_close, ds.y_count,
-        ds.p_cheap, ds.p_fair, ds.p_expensive,
-        (COALESCE(ad_avg.avg_div, 0) * 15) as div_c, (COALESCE(ad_avg.avg_div, 0) * 20) as div_f, (COALESCE(ad_avg.avg_div, 0) * 25) as div_e,
-        CASE WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 15 ELSE 0 END as eps_c,
-        CASE WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 20 ELSE 0 END as eps_f,
-        CASE WHEN s.last_four_eps > 0 THEN s.last_four_eps * (fd.payout_ratio / 100.0) * 25 ELSE 0 END as eps_e,
-        (ds.pbr_low * s.net_asset_value_per_share) as pbr_c, (ds.pbr_mid * s.net_asset_value_per_share) as pbr_f, (ds.pbr_high * s.net_asset_value_per_share) as pbr_e,
-        CASE WHEN ae_avg.avg_eps > 0 THEN ds.pe_low * ae_avg.avg_eps ELSE 0 END as per_c,
-        CASE WHEN ae_avg.avg_eps > 0 THEN ds.pe_mid * ae_avg.avg_eps ELSE 0 END as per_f,
-        CASE WHEN ae_avg.avg_eps > 0 THEN ds.pe_high * ae_avg.avg_eps ELSE 0 END as per_e
-    FROM stocks s
-    JOIN "DailyQuotes" dq ON s.stock_symbol = dq."stock_symbol" AND dq."Date" = $1
-    JOIN daily_stats ds ON s.stock_symbol = ds."stock_symbol"
-    JOIN final_dpr fd ON s.stock_symbol = fd.stock_symbol
-    LEFT JOIN (SELECT security_code, AVG(annual_sum) as avg_div FROM annual_dividend GROUP BY security_code) ad_avg ON s.stock_symbol = ad_avg.security_code
-    LEFT JOIN (SELECT security_code, AVG(annual_eps) as avg_eps FROM annual_eps GROUP BY security_code) ae_avg ON s.stock_symbol = ae_avg.security_code
-)
-SELECT
-    stock_symbol, q_date,
-    CASE WHEN calc.weighted_cheap > 0 THEN ROUND(((q_close / calc.weighted_cheap) * 100)::numeric, 4) ELSE NULL END as percentage,
-    ROUND(q_close::numeric, 4) as q_close,
-    ROUND(calc.weighted_cheap::numeric, 4) as cheap,
-    ROUND(calc.weighted_fair::numeric, 4) as fair,
-    ROUND(calc.weighted_expensive::numeric, 4) as expensive,
-    ROUND(p_cheap::numeric, 4) as price_cheap,
-    ROUND(p_fair::numeric, 4) as price_fair,
-    ROUND(p_expensive::numeric, 4) as price_expensive,
-    ROUND(div_c::numeric, 4) as dividend_cheap,
-    ROUND(div_f::numeric, 4) as dividend_fair,
-    ROUND(div_e::numeric, 4) as dividend_expensive,
-    ROUND(eps_c::numeric, 4) as eps_cheap,
-    ROUND(eps_f::numeric, 4) as eps_f,
-    ROUND(eps_e::numeric, 4) as eps_expensive,
-    ROUND(pbr_c::numeric, 4) as pbr_cheap,
-    ROUND(pbr_f::numeric, 4) as pbr_fair,
-    ROUND(pbr_e::numeric, 4) as pbr_expensive,
-    ROUND(per_c::numeric, 4) as per_cheap,
-    ROUND(per_f::numeric, 4) as per_fair,
-    ROUND(per_e::numeric, 4) as per_expensive,
-    y_count as year_count, NOW() as update_time
-FROM valuation_base vb
-CROSS JOIN LATERAL (
-    SELECT 
-        CASE WHEN COALESCE(per_c, 0) > 0 THEN (COALESCE(p_cheap, 0)*0.2 + COALESCE(div_c, 0)*0.25 + COALESCE(eps_c, 0)*0.25 + COALESCE(pbr_c, 0)*0.2 + per_c*0.1)
-             ELSE (COALESCE(p_cheap, 0)*0.2 + COALESCE(div_c, 0)*0.3 + COALESCE(eps_c, 0)*0.3 + COALESCE(pbr_c, 0)*0.2) END as weighted_cheap,
-        CASE WHEN COALESCE(per_f, 0) > 0 THEN (COALESCE(p_fair, 0)*0.2 + COALESCE(div_f, 0)*0.25 + COALESCE(eps_f, 0)*0.25 + COALESCE(pbr_f, 0)*0.2 + per_f*0.1)
-             ELSE (COALESCE(p_fair, 0)*0.2 + COALESCE(div_f, 0)*0.3 + COALESCE(eps_f, 0)*0.3 + COALESCE(pbr_f, 0)*0.2) END as weighted_fair,
-        CASE WHEN COALESCE(per_e, 0) > 0 THEN (COALESCE(p_expensive, 0)*0.2 + COALESCE(div_e, 0)*0.25 + COALESCE(eps_e, 0)*0.25 + COALESCE(pbr_e, 0)*0.2 + per_e*0.1)
-             ELSE (COALESCE(p_expensive, 0)*0.2 + COALESCE(div_e, 0)*0.3 + COALESCE(eps_e, 0)*0.3 + COALESCE(pbr_e, 0)*0.2) END as weighted_expensive
-) calc
-ON CONFLICT (date, security_code) DO UPDATE SET
-    percentage = EXCLUDED.percentage,
-    closing_price = EXCLUDED.closing_price,
-    cheap = EXCLUDED.cheap,
-    fair = EXCLUDED.fair,
-    expensive = EXCLUDED.expensive,
-    price_cheap = EXCLUDED.price_cheap,
-    price_fair = EXCLUDED.price_fair,
-    price_expensive = EXCLUDED.price_expensive,
-    dividend_cheap = EXCLUDED.dividend_cheap,
-    dividend_fair = EXCLUDED.dividend_fair,
-    dividend_expensive = EXCLUDED.dividend_expensive,
-    eps_cheap = EXCLUDED.eps_cheap,
-    eps_fair = EXCLUDED.eps_fair,
-    eps_expensive = EXCLUDED.eps_expensive,
-    year_count = EXCLUDED.year_count,
-    pbr_cheap = EXCLUDED.pbr_cheap,
-    pbr_fair = EXCLUDED.pbr_fair,
-    pbr_expensive = EXCLUDED.pbr_expensive,
-    per_cheap = EXCLUDED.per_cheap,
-    per_fair = EXCLUDED.per_fair,
-    per_expensive = EXCLUDED.per_expensive,
-    update_time = NOW();
-"#;
-
-        sqlx::query(sql)
-            .bind(self.date)
-            .bind(&years)
-            .bind(&self.security_code)
-            .bind(Industry::ExchangeTradedFund.serial())
-            .execute(database::get_connection())
-            .await
-            .map_err(|why| {
-                anyhow!(
-                    "Failed to upsert({:#?}) from database for years: {}. Error: {:?}",
-                    self,
-                    years,
-                    why,
-                )
-            })
-    }
-}
 
 #[cfg(test)]
 mod tests {

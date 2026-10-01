@@ -50,7 +50,7 @@ async fn process_revenues(last_month_timezone: chrono::DateTime<FixedOffset>) ->
     financial_repo.rebuild_revenue_last_date().await?;
 
     // 整個月份的營收都寫完才派發事件：逐檔發會產生上千個事件，也無從彙總成一則通知。
-    // 事件只帶月份，要通知哪些股票由 handler 依「持股 + 年增率門檻」自行查詢。
+    // 事件只帶月份，要通知哪些股票由 handler 依「目前持股」自行查詢。
     let revenue_date = i64::from((year * 100) + month as i32);
     crate::app::event::get_global_dispatcher()
         .dispatch_async(vec![

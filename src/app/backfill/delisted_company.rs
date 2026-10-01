@@ -70,13 +70,24 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
+/// 參與差集比對的名冊市場：上市、上櫃、興櫃。
+///
+/// **刻意排除公開發行**：公司終止上市櫃或興櫃交易後，通常轉列公開發行，代號仍留在
+/// ISIN 的公開發行名冊上。若把公開發行名冊併入，這些已停止交易的股票永遠比不出差集
+/// ——2026-09-24 實測有 14 檔（4712 福格創新、3202 樺晟、2888A/2888B 新光金特別股，
+/// 以及 10 檔興櫃）因此一直維持未下市。
+fn roster_markets() -> impl Iterator<Item = StockExchangeMarket> {
+    StockExchangeMarket::iterator().filter(|market| *market != StockExchangeMarket::Public)
+}
+
 /// 以 ISIN 現行名冊的「差集」找出已下市但未被標記的證券。
 ///
 /// # 原理
-/// `isin.twse.com.tw` 的名冊只列「目前掛牌中」的證券（涵蓋上市、上櫃、
-/// 興櫃、公開發行，含 ETF）。資料庫裡 `SuspendListing = false` 卻不在
-/// 名冊上的證券，代表它已經終止上市櫃或清算——這正是 TWSE 終止上市
-/// API 蓋不到的部分（終止上櫃、ETF 下架）。
+/// `isin.twse.com.tw` 的名冊只列「目前掛牌中」的證券（含 ETF）。資料庫裡
+/// `SuspendListing = false` 卻不在上市、上櫃、興櫃任一名冊上的證券，
+/// 代表它已經終止交易或清算——這正是 TWSE 終止上市 API 蓋不到的部分
+/// （終止上櫃、終止興櫃、ETF 下架）。轉列公開發行者同樣視為下市，
+/// 見 [`roster_markets`]。
 ///
 /// # 安全設計（為什麼不直接相信差集）
 /// 差集比對的風險是「名冊不完整 → 大量誤標下市」，因此有三道防線：
@@ -99,7 +110,7 @@ pub async fn mark_stocks_missing_from_isin_roster(max_delist: usize) -> Result<u
     // 證券不在名冊範圍內，不可以拿來比對，否則必然被誤判。
     let mut covered_market_ids: HashSet<i32> = HashSet::new();
 
-    for market in StockExchangeMarket::iterator() {
+    for market in roster_markets() {
         // 注意：一定要用「全類別」名冊（visit_all_listed_symbols）而不是
         // 股票主檔用的 visit()——後者只保留股票/特別股/TDR 類別，
         // ETF 不在其中，直接拿來差集會把所有 ETF 誤判為已下市。
@@ -186,6 +197,20 @@ mod tests {
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
+
+    /// 公開發行不是交易市場，不可併入差集比對的名冊。
+    #[test]
+    fn roster_markets_excludes_public_offering() {
+        let markets: Vec<_> = roster_markets().collect();
+        assert_eq!(
+            markets,
+            vec![
+                StockExchangeMarket::Listed,
+                StockExchangeMarket::OverTheCounter,
+                StockExchangeMarket::Emerging,
+            ]
+        );
+    }
 
     #[tokio::test]
     #[ignore]
