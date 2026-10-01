@@ -18,7 +18,7 @@ use scopeguard::defer;
 ///
 /// # 運作流程
 /// 1. 檢查當前時間是否為週末，如果是則直接返回（不執行更新）。
-/// 2. 分別針對不同的交易所市場（上市、上櫃等）非同步呼叫 [`process_market`] 進行處理。
+/// 2. 分別針對上市、上櫃、興櫃非同步呼叫 [`process_market`] 進行處理（不含公開發行，見 [`registry_markets`]）。
 /// 3. 等待所有市場處理完畢，並記錄 any 發生的錯誤。
 ///
 /// # 回傳值
@@ -34,10 +34,8 @@ pub async fn execute() -> Result<()> {
     defer! {
        tracing::info!("更新台股國際證券識別碼結束");
     }
-    // 遍歷所有定義的交易所市場（如上市、上櫃），併發執行 process_market
-    let tasks: Vec<_> = StockExchangeMarket::iterator()
-        .map(process_market)
-        .collect();
+    // 遍歷要寫入股票主檔的市場（上市、上櫃、興櫃），併發執行 process_market
+    let tasks: Vec<_> = registry_markets().map(process_market).collect();
 
     // 等待所有市場的非同步任務全部執行完畢
     let results = futures::future::join_all(tasks).await;
@@ -49,6 +47,15 @@ pub async fn execute() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// 要寫入股票主檔的市場：上市、上櫃、興櫃。
+///
+/// **刻意排除公開發行**：公開發行公司沒有交易價格，股票主檔與市場別對照表都不收；
+/// 而且已下市（終止上市櫃、興櫃）的股票會轉列公開發行，若一併處理，會把這些下市股票的
+/// 市場別改成公開發行並發出變更通知。公開發行公司日後登錄興櫃時，會由興櫃名冊註冊進來。
+fn registry_markets() -> impl Iterator<Item = StockExchangeMarket> {
+    StockExchangeMarket::iterator().filter(|market| *market != StockExchangeMarket::Public)
 }
 
 /// 針對特定的交易所市場爬取 ISIN 代碼資訊，並檢查是否有新增或修改的股票。
@@ -150,6 +157,19 @@ mod tests {
     use crate::infra::cache::SHARE;
 
     use super::*;
+
+    #[test]
+    fn registry_markets_excludes_public_offering() {
+        let markets: Vec<_> = registry_markets().collect();
+        assert_eq!(
+            markets,
+            vec![
+                StockExchangeMarket::Listed,
+                StockExchangeMarket::OverTheCounter,
+                StockExchangeMarket::Emerging,
+            ]
+        );
+    }
 
     #[tokio::test]
     #[ignore]
