@@ -111,7 +111,8 @@ impl Estimate {
     ///     *   基準：指定年份內「年均股利」。
     ///     *   便宜/合理/昂貴：基準 × 15 / 20 / 25。
     /// *   **預估股利（`eps_*` 欄位，不計入加權）：**
-    ///     *   基準：`近四季 EPS` × `完整年度盈餘分配率的中位數`（個股 → 產業 → 60%）。
+    ///     *   基準：`近四季 EPS` × `各發放年度盈餘分配率的中位數`（個股 → 產業 → 60%）。
+    ///     *   盈餘分配率取 `dividend.payout_ratio`（股利 ÷ 涵蓋期間 EPS），不再用同一年的 EPS 相除。
     ///     *   便宜/合理/昂貴：基準 × 15 / 20 / 25。
     ///     *   本質與股利法同為殖利率法；計入加權會讓殖利率重複計權，低估低配發率的成長股。
     /// *   **PBR 法 (Price-to-Book Ratio)：**
@@ -127,7 +128,7 @@ impl Estimate {
     /// *   報價、股利、財報都是事件當時的每股數字；事件之後股數改變，舊數字要除以「之後所有事件
     ///     股數比例的乘積」才能和現在的股價比較（5904 寶雅 1:10 分割後收盤 69.7，未還原的合理價 568）。
     /// *   歷史股價依報價日、股利依除權息日、近四季 EPS 與每股淨值依各季季底換算。
-    /// *   本益比、PBR 是比率不受影響；配發率用原始股利 ÷ 同期原始 EPS，比例同樣不受影響。
+    /// *   本益比、PBR 是比率不受影響；配發率是原始股利 ÷ 涵蓋期間原始 EPS，比例同樣不受影響。
     ///
     /// **4. 百分比 (Percentage) 計算：**
     /// *   公式：`(當前收盤價 / 加權便宜價) * 100`。
@@ -247,14 +248,6 @@ daily_stats AS (
       AND ($4::varchar IS NULL OR dq.stock_symbol = $4)
     GROUP BY dq."stock_symbol"
 ),
-annual_dividend AS (
-    -- 每支股票在指定年份內的年度配息總和（原始每股金額），排除尚未除息或無配息紀錄的年份。
-    -- 只供配發率使用：配發率是同期原始股利 ÷ 原始 EPS，比例不受分割影響。
-    SELECT security_code, "year", SUM("sum") as annual_sum
-    FROM dividend, filtered_years fy
-    WHERE "year" = ANY(fy.years) AND ("ex-dividend_date1" != '-' OR "ex-dividend_date2" != '-')
-    GROUP BY security_code, "year"
-),
 adjusted_annual_dividend AS (
     -- 股利法用的年度配息：每筆股利依除權息日之後的分割／減資還原成現在的股數基準
     SELECT d.security_code, d."year", SUM(d."sum" / COALESCE(ar.factor, 1)) AS annual_sum
@@ -271,22 +264,17 @@ adjusted_annual_dividend AS (
     WHERE d."year" = ANY(fy.years) AND (d."ex-dividend_date1" != '-' OR d."ex-dividend_date2" != '-')
     GROUP BY d.security_code, d."year"
 ),
-annual_eps AS (
-    -- 統計每支股票在指定年份內的年度 EPS 總和。只取 Q1-Q4 齊全的完整年度：
-    -- 今年只有半年的 EPS 若當成一整年，配發率會被高估一倍。
-    SELECT security_code, "year", SUM(earnings_per_share) as annual_eps
-    FROM financial_statement, filtered_years fy
-    WHERE "year" = ANY(fy.years) AND quarter IN ('Q1','Q2','Q3','Q4')
-    GROUP BY security_code, "year"
-    HAVING COUNT(DISTINCT quarter) = 4
-),
 payout_history AS (
-    -- 計算每年的盈餘分配率（Dividend / EPS），限制在 0%~200% 之間以過濾處分資產等異常配息
-    SELECT ad.security_code, s.stock_industry_id, (ad.annual_sum::numeric / NULLIF(ae.annual_eps::numeric, 0)) * 100 as ratio
-    FROM annual_dividend ad
-    JOIN annual_eps ae ON ad.security_code = ae.security_code AND ad.year = ae.year
-    JOIN stocks s ON ad.security_code = s.stock_symbol
-    WHERE ae.annual_eps > 0 AND ad.annual_sum > 0 AND (ad.annual_sum / ae.annual_eps) <= 2.0
+    -- 每個發放年度的盈餘分配率，直接採用 dividend.payout_ratio（股利 ÷ 涵蓋期間 EPS，02:30 排程計算）。
+    -- 舊版用「Y 年發放的股利 ÷ Y 年 EPS」，年配股票的股利其實來自 Y-1 年盈餘，錯位一年
+    -- （長榮 18.5% → 50.3%）。每個發放年度只取一列年度層級的紀錄（quarter = ''：單次年配本身，
+    -- 或多次配發的年度合計列）；涵蓋期間 EPS ≤ 0 或配發率超過 200%（處分資產等異常配息）不列入。
+    SELECT d.security_code, s.stock_industry_id, d.payout_ratio AS ratio
+    FROM dividend d
+    CROSS JOIN filtered_years fy
+    JOIN stocks s ON d.security_code = s.stock_symbol
+    WHERE d."year" = ANY(fy.years) AND d.quarter = ''
+      AND d.payout_eps > 0 AND d.payout_ratio > 0 AND d.payout_ratio <= 200
 ),
 stock_payout_50th AS (
     -- 計算個股歷史配發率的中位數，作為預估股利的配發率基準

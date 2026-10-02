@@ -31,6 +31,7 @@ impl IsinAclMapper {
     ///
     /// # 安全防護與過濾
     /// - 若 `industry_id` 為 `0` (代表未分類、非法或解析錯誤的產業資料)，此函式會回傳 `None` 進行過濾阻擋。
+    /// - 市場別不在 `stock_exchange_market` 對照表（例如公開發行）時回傳 `None`，不寫入主檔。
     pub fn from_isin(
         dto: &InternationalSecuritiesIdentificationNumber,
     ) -> Option<RegisterStockCommand> {
@@ -40,9 +41,9 @@ impl IsinAclMapper {
             return None;
         }
 
+        // 對照表只有上市、上櫃、興櫃；公開發行（1）查不到就略過，不可 unwrap（會讓 ISIN 排程 panic）。
         let market_id = SHARE
-            .get_exchange_market(dto.market.serial())
-            .unwrap()
+            .get_exchange_market(dto.market.serial())?
             .stock_exchange_market_id;
 
         // 2. 轉換為內部的 RegisterStockCommand
@@ -138,6 +139,22 @@ mod tests {
 
         let cmd = IsinAclMapper::from_isin(&isin);
         assert!(cmd.is_none());
+    }
+
+    /// 公開發行不在市場別對照表內，必須回傳 None 而不是 panic。
+    #[test]
+    fn test_to_registration_command_skips_unknown_market() {
+        let isin = InternationalSecuritiesIdentificationNumber {
+            stock_symbol: "1111".to_string(),
+            name: "欣欣水泥".to_string(),
+            isin_code: "TW0001111003".to_string(),
+            listing_date: "1982/11/24".to_string(),
+            industry: "水泥工業".to_string(),
+            cfi_code: "ESVUFR".to_string(),
+            market: crate::core::declare::StockExchangeMarket::Public,
+        };
+
+        assert!(IsinAclMapper::from_isin(&isin).is_none());
     }
 
     #[test]

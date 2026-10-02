@@ -22,8 +22,8 @@
 //! - `test_backfill_cagr_for_date`：
 //!   依 [`MANUAL_CAGR_DATE`] 重算指定基準日的全市場各期間年化報酬率，寫入 `stock_cagr`。
 //! - `test_backfill_quote_history_for_symbols`：
-//!   依 [`MANUAL_QUOTE_HISTORY_SYMBOLS`] 與月份區間，從 TWSE 個股月行情回補
-//!   歷史日報價缺口（只補空位，不覆寫既有資料）。
+//!   依 [`MANUAL_QUOTE_HISTORY_SYMBOLS`] 與月份區間（皆可用同名環境變數覆寫），
+//!   從個股月行情（上市 TWSE、上櫃櫃買）回補歷史日報價缺口（只補空位，不覆寫既有資料）。
 //! - `test_backfill_cagr_period`：
 //!   依 [`MANUAL_CAGR_PERIOD`] 為既有的歷史基準日回填單一統計期間（新增期間後專用）。
 //! - `test_backfill_listed_capital_reductions`：
@@ -330,41 +330,50 @@ async fn test_backfill_cagr_for_date() {
     );
 }
 
-/// 從 TWSE 個股月行情回補歷史日報價缺口。
+/// 從個股月行情回補歷史日報價缺口（上市走 TWSE `STOCK_DAY`、上櫃走櫃買 `tradingStock`）。
 ///
 /// 排程與 `test_backfill_daily_quotes_for_date` 都是「一天的全市場」，補七年份
-/// 的缺口得跑一千七百多次、還會把不缺的股票一起重抓。這個入口改用個股月行情
-/// （`STOCK_DAY`），一次要一檔股票的一整個月。
+/// 的缺口得跑一千七百多次、還會把不缺的股票一起重抓。這個入口改用個股月行情，
+/// 一次要一檔股票的一整個月。
 ///
 /// 寫入是 `ON CONFLICT DO NOTHING`：只填空位，既有資料不覆寫也不刪除，
 /// 因此中途失敗直接重跑即可。單月抓取失敗只記錄並繼續。
 ///
-/// 注意請求量：預設區間 84 個月 × 全部 ETF（約 250 檔）超過兩萬次請求，
-/// 每次間隔 1.2 秒，實際會跑數小時。先把 [`MANUAL_QUOTE_HISTORY_SYMBOLS`]
-/// 設成一兩檔小範圍驗證，再放大。
+/// 注意請求量：預設區間 84 個月 × 全部 ETF（約 360 檔）超過三萬次請求，
+/// 每次間隔 1.2 秒，實際會跑十幾個小時。先用環境變數縮小到真正缺資料的代號與月份：
+/// `MANUAL_QUOTE_HISTORY_SYMBOLS`（逗號分隔）、`MANUAL_QUOTE_HISTORY_FROM`／`MANUAL_QUOTE_HISTORY_TO`
+/// （`YYYY-MM-DD`），未設定時沿用同名常數。
 ///
 /// 執行範例：
-/// `cargo test app::manual_backfill::test_backfill_quote_history_for_symbols -- --ignored --nocapture`
+/// `MANUAL_QUOTE_HISTORY_SYMBOLS=00679B MANUAL_QUOTE_HISTORY_FROM=2017-01-01 cargo test app::manual_backfill::test_backfill_quote_history_for_symbols -- --ignored --nocapture`
 #[tokio::test]
 #[ignore]
 async fn test_backfill_quote_history_for_symbols() {
     dotenvy::dotenv().ok();
     SHARE.load().await;
 
-    let from = NaiveDate::parse_from_str(MANUAL_QUOTE_HISTORY_FROM, "%Y-%m-%d")
-        .expect("manual quote history from should be valid");
-    let to = NaiveDate::parse_from_str(MANUAL_QUOTE_HISTORY_TO, "%Y-%m-%d")
-        .expect("manual quote history to should be valid");
+    let parse = |name: &str, default: &str| {
+        let value = std::env::var(name).unwrap_or_else(|_| default.to_string());
+        NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} should be YYYY-MM-DD, got {value}"))
+    };
+    let from = parse("MANUAL_QUOTE_HISTORY_FROM", MANUAL_QUOTE_HISTORY_FROM);
+    let to = parse("MANUAL_QUOTE_HISTORY_TO", MANUAL_QUOTE_HISTORY_TO);
 
-    let symbols: Vec<String> = if MANUAL_QUOTE_HISTORY_SYMBOLS.is_empty() {
-        quote_history::fetch_etf_symbols()
+    let symbols: Vec<String> = match std::env::var("MANUAL_QUOTE_HISTORY_SYMBOLS") {
+        Ok(value) if !value.trim().is_empty() => value
+            .split(',')
+            .map(str::trim)
+            .filter(|symbol| !symbol.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        _ if MANUAL_QUOTE_HISTORY_SYMBOLS.is_empty() => quote_history::fetch_etf_symbols()
             .await
-            .expect("fetch etf symbols failed")
-    } else {
-        MANUAL_QUOTE_HISTORY_SYMBOLS
+            .expect("fetch etf symbols failed"),
+        _ => MANUAL_QUOTE_HISTORY_SYMBOLS
             .iter()
             .map(|symbol| (*symbol).to_owned())
-            .collect()
+            .collect(),
     };
 
     println!(

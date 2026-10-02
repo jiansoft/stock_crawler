@@ -3,7 +3,8 @@
 //! 與 [`super::quote`] 的分工：那支負責「某一交易日的全市場」，是排程每天走的路；
 //! 這支負責「某幾檔股票的某段歷史」，補的是資料庫既有的缺口。實測 2015–2021
 //! 這七年間 `00` 開頭的 ETF 在 `DailyQuotes` 一筆都沒有，逐日重跑全市場既慢
-//! 又會連不缺的股票一起重抓，因此改用 TWSE 的個股月行情（`STOCK_DAY`）。
+//! 又會連不缺的股票一起重抓，因此改用個股月行情：上市走 TWSE `STOCK_DAY`，
+//! 上櫃（主要是債券 ETF）走櫃買中心 `tradingStock`，依股票主檔的市場別自動選擇。
 //!
 //! 寫入一律是「只補空位」：既有資料不覆寫也不刪除，所以中途失敗直接重跑即可。
 
@@ -11,14 +12,18 @@ use anyhow::{Context, Result};
 use chrono::{Datelike, Months, NaiveDate};
 
 use crate::{
-    app::backfill::acl::QuoteAclMapper, app::backfill::port::MonthlyQuoteFetcher,
-    domain::quote::repository::QuoteRepository, infra::crawler::twse,
+    app::backfill::acl::QuoteAclMapper,
+    app::backfill::port::MonthlyQuoteFetcher,
+    core::declare::StockExchangeMarket,
+    domain::quote::repository::QuoteRepository,
+    infra::cache::SHARE,
+    infra::crawler::{share::DailyQuoteDto, tpex, twse},
     infra::database::repository::quote::PgQuoteRepository,
 };
 
 /// 每次向 TWSE 要一個月資料之間的間隔。
 ///
-/// 證交所對同一來源的高頻請求會回 429；`core::util::http` 雖然有退避重試，
+/// 證交所與櫃買中心對同一來源的高頻請求會回 429；`core::util::http` 雖然有退避重試，
 /// 但回補動輒兩萬次請求，主動放慢比事後重試划算。
 const REQUEST_INTERVAL: std::time::Duration = std::time::Duration::from_millis(1_200);
 
@@ -39,6 +44,9 @@ pub struct QuoteHistoryBackfillSummary {
 
 /// 回補指定股票在指定月份區間的日報價。
 ///
+/// 來源依股票主檔的市場別決定（見 [`MarketRoutedMonthlyQuoteFetcher`]），
+/// 呼叫前須先 `SHARE.load()`，否則一律當上市處理。
+///
 /// `from` 與 `to` 只取年月，兩者皆含。單一月份抓取失敗只記錄並繼續 ——
 /// 回補七年份時，因為單月暫時性失敗就中止整批並不划算，重跑一次即可補上
 /// （寫入是「只補空位」，重跑不會產生重複資料）。
@@ -48,8 +56,46 @@ pub async fn execute(
     to: NaiveDate,
 ) -> Result<QuoteHistoryBackfillSummary> {
     let repository = PgQuoteRepository::new();
-    let fetcher = twse::stock_day::TwseMonthlyQuoteFetcher;
+    let fetcher = MarketRoutedMonthlyQuoteFetcher {
+        listed: &twse::stock_day::TwseMonthlyQuoteFetcher,
+        otc: &tpex::stock_day::TpexMonthlyQuoteFetcher,
+        market_of: cached_market_id,
+    };
     execute_with(&fetcher, &repository, stock_symbols, from, to).await
+}
+
+/// 依股票主檔的市場別選擇個股月行情來源：上櫃走櫃買中心，其餘走證交所。
+///
+/// TWSE `STOCK_DAY` 查上櫃代號只會回「查無資料」，不分流的話上櫃缺口永遠補不回來。
+/// 查不到市場別的代號（快取未載入、已不在主檔）沿用證交所。
+struct MarketRoutedMonthlyQuoteFetcher<'a> {
+    /// 上市（與其他非上櫃）證券的來源。
+    listed: &'a dyn MonthlyQuoteFetcher,
+    /// 上櫃證券的來源。
+    otc: &'a dyn MonthlyQuoteFetcher,
+    /// 查詢代號的市場別；正式流程是 [`cached_market_id`]。
+    market_of: fn(&str) -> Option<i32>,
+}
+
+#[async_trait::async_trait]
+impl MonthlyQuoteFetcher for MarketRoutedMonthlyQuoteFetcher<'_> {
+    async fn fetch(&self, stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
+        if (self.market_of)(stock_symbol) == Some(StockExchangeMarket::OverTheCounter.serial()) {
+            self.otc.fetch(stock_symbol, month).await
+        } else {
+            self.listed.fetch(stock_symbol, month).await
+        }
+    }
+}
+
+/// 從股票主檔快取查市場別。
+fn cached_market_id(stock_symbol: &str) -> Option<i32> {
+    SHARE
+        .stocks
+        .read()
+        .ok()?
+        .get(stock_symbol)
+        .map(|stock| stock.market_id())
 }
 
 /// [`execute`] 的可注入版本，供測試驗證流程本身。
@@ -467,5 +513,60 @@ mod tests {
     #[test]
     fn months_between_rejects_a_reversed_range() {
         assert!(months_between(date(2022, 1, 1), date(2021, 12, 1)).is_err());
+    }
+
+    /// 測試用的市場別：00679B 是上櫃，其他當上市。
+    fn stub_market_of(stock_symbol: &str) -> Option<i32> {
+        (stock_symbol == "00679B").then_some(StockExchangeMarket::OverTheCounter.serial())
+    }
+
+    /// 上櫃代號走櫃買來源，其餘（含查不到市場別的）走證交所來源。
+    #[tokio::test]
+    async fn market_routed_fetcher_sends_otc_symbols_to_tpex() {
+        let listed = StubFetcher::default();
+        let otc = StubFetcher::default();
+        let fetcher = MarketRoutedMonthlyQuoteFetcher {
+            listed: &listed,
+            otc: &otc,
+            market_of: stub_market_of,
+        };
+        let month = date(2019, 3, 1);
+
+        for symbol in ["00679B", "0050", "9999X"] {
+            fetcher
+                .fetch(symbol, month)
+                .await
+                .expect("假抓取端不會失敗");
+        }
+
+        assert_eq!(otc.requested(), vec![("00679B".to_string(), month)]);
+        assert_eq!(
+            listed.requested(),
+            vec![("0050".to_string(), month), ("9999X".to_string(), month)]
+        );
+    }
+
+    /// 市場別取自股票主檔快取；不在快取內的代號回傳 None。
+    #[test]
+    fn cached_market_id_reads_the_stock_cache() {
+        const SYMBOL: &str = "79951";
+        let stock = crate::domain::registry::entity::Stock::register(
+            SYMBOL.to_string(),
+            "測試上櫃".to_string(),
+            StockExchangeMarket::OverTheCounter.serial(),
+            1,
+        );
+        SHARE
+            .stocks
+            .write()
+            .expect("stocks lock")
+            .insert(SYMBOL.to_string(), stock);
+
+        assert_eq!(
+            cached_market_id(SYMBOL),
+            Some(StockExchangeMarket::OverTheCounter.serial())
+        );
+        SHARE.stocks.write().expect("stocks lock").remove(SYMBOL);
+        assert_eq!(cached_market_id(SYMBOL), None);
     }
 }

@@ -10,18 +10,21 @@
 //! 3. 價格更新事件 consumer，將指定股票代號交給追蹤 evaluator
 //! 4. 追蹤條件快取刷新任務，定期同步最新 `trace` 設定
 //! 5. 低頻 reconciliation 任務，補償事件遺漏或剛新增追蹤條件的情況
+//!
+//! 檔案分工：本檔負責啟停協調、價格事件發佈與 consumer、追蹤條件刷新與低頻對帳；
+//! [`backup`] 是被追蹤股票的備援採集，[`diagnostics`] 是定期診斷與記憶體整理。
+
+mod backup;
+mod diagnostics;
 
 use std::sync::RwLock;
 use std::time::Duration;
 use std::{
     collections::HashSet,
-    mem::size_of,
     sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-    time::Instant,
 };
 
 use anyhow::Result;
-use futures::future;
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 use tokio::{
@@ -33,14 +36,11 @@ use tokio::{
 };
 
 use super::{stats as trace_stats, stock_price};
-use crate::{core::declare, core::logging, infra::cache::SHARE, infra::crawler};
 use crate::{
-    core::util::{
-        atomic::decrement_atomic_usize,
-        diagnostics::{TaskRuntimeStatus, read_process_memory_stats, trim_allocator_memory},
-    },
-    infra::cache::RealtimeSnapshot,
+    core::declare, core::util::atomic::decrement_atomic_usize, infra::cache::SHARE, infra::crawler,
 };
+use backup::{start_traced_stock_backup_caching_task, stop_traced_stock_backup_caching_task};
+use diagnostics::{start_trace_diagnostics_task, stop_trace_diagnostics_task};
 
 /// 價格更新事件。
 #[derive(Debug, Clone)]
@@ -86,11 +86,8 @@ static DIAGNOSTICS_LAST_GENERATION: AtomicU64 = AtomicU64::new(0);
 static TRACE_TASK_STOP_NOTIFY: Notify = Notify::const_new();
 const SNAPSHOT_WARMUP_TIMEOUT: Duration = Duration::from_secs(3);
 const SNAPSHOT_WARMUP_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const BACKUP_SNAPSHOT_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 const TRACE_TARGET_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const TRACE_RECONCILIATION_INTERVAL: Duration = Duration::from_secs(60 * 5);
-const TRACE_DIAGNOSTICS_LOG_INTERVAL: Duration = Duration::from_secs(30);
-const TRACE_ALLOCATOR_TRIM_INTERVAL: Duration = Duration::from_secs(60 * 5);
 const PRICE_UPDATE_CHANNEL_CAPACITY: usize = 4096;
 /// 平順關機等待 trace 內部 task 離開的最長時間。
 const TRACE_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -442,361 +439,6 @@ fn stop_trace_reconciliation_task() {
     IS_RECONCILING.store(false, Ordering::SeqCst);
 }
 
-/// 啟動被追蹤股票的備援採集背景任務。
-///
-/// 此任務只採集 `Trace` 資料表中實際被追蹤的股票，並呼叫
-/// [`crawler::fetch_stock_price_from_backup_sites`] 取得最新成交價。
-/// 採集結果會以「單筆價格更新」方式寫回 `stock_snapshots`，
-/// 若價格真的有異動，還會額外發佈價格更新事件，交由 trace evaluator 判斷是否通知。
-fn start_traced_stock_backup_caching_task() {
-    if IS_BACKUP_CACHING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-    let generation = BACKUP_LAST_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-
-    task::spawn(async move {
-        let active_tasks = BACKUP_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        tracing::info!(
-            "追蹤股票備援採集任務啟動 generation={} active_tasks={}",
-            generation,
-            active_tasks
-        );
-
-        while IS_BACKUP_CACHING.load(Ordering::SeqCst) {
-            if !declare::StockExchange::TWSE.is_open() {
-                break;
-            }
-
-            if let Err(why) = refresh_traced_stock_snapshot_cache().await {
-                tracing::error!("Failed to refresh traced stock snapshot cache: {:?}", why);
-            }
-
-            if !IS_BACKUP_CACHING.load(Ordering::SeqCst) {
-                break;
-            }
-
-            wait_for_interval_or_stop(BACKUP_SNAPSHOT_REFRESH_INTERVAL).await;
-        }
-
-        IS_BACKUP_CACHING.store(false, Ordering::SeqCst);
-        let active_tasks = decrement_atomic_usize(&BACKUP_ACTIVE_TASKS);
-        tracing::info!(
-            "追蹤股票備援採集任務已停止 generation={} active_tasks={}",
-            generation,
-            active_tasks
-        );
-    });
-}
-
-/// 停止被追蹤股票的備援採集背景任務。
-///
-/// 此方法只會要求背景迴圈停止，不會直接清空共用的即時報價快取；
-/// 快取清理仍交由 crawler 層的背景任務停止流程處理。
-fn stop_traced_stock_backup_caching_task() {
-    IS_BACKUP_CACHING.store(false, Ordering::SeqCst);
-}
-
-/// 啟動 trace diagnostics 任務，定期輸出記憶體、快取與事件吞吐摘要。
-fn start_trace_diagnostics_task() {
-    if IS_DIAGNOSTICS_LOGGING
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-
-    let generation = DIAGNOSTICS_LAST_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-
-    task::spawn(async move {
-        let active_tasks = DIAGNOSTICS_ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        tracing::info!(
-            "trace diagnostics 任務啟動 generation={} active_tasks={}",
-            generation,
-            active_tasks
-        );
-
-        let mut ticker = time::interval(TRACE_DIAGNOSTICS_LOG_INTERVAL);
-        let mut previous_stats = trace_stats::get_runtime_stats_snapshot();
-        let mut previous_logged_at = Instant::now();
-        let mut previous_trimmed_at = Instant::now() - TRACE_ALLOCATOR_TRIM_INTERVAL;
-        ticker.tick().await;
-
-        while IS_DIAGNOSTICS_LOGGING.load(Ordering::SeqCst) {
-            tokio::select! {
-                _ = ticker.tick() => {}
-                _ = TRACE_TASK_STOP_NOTIFY.notified() => {}
-            }
-
-            if !IS_DIAGNOSTICS_LOGGING.load(Ordering::SeqCst) {
-                break;
-            }
-
-            log_trace_diagnostics(
-                &mut previous_stats,
-                &mut previous_logged_at,
-                &mut previous_trimmed_at,
-            );
-        }
-
-        IS_DIAGNOSTICS_LOGGING.store(false, Ordering::SeqCst);
-        let active_tasks = decrement_atomic_usize(&DIAGNOSTICS_ACTIVE_TASKS);
-        tracing::info!(
-            "trace diagnostics 任務已停止 generation={} active_tasks={}",
-            generation,
-            active_tasks
-        );
-    });
-}
-
-/// 停止 trace diagnostics 任務。
-fn stop_trace_diagnostics_task() {
-    IS_DIAGNOSTICS_LOGGING.store(false, Ordering::SeqCst);
-}
-
-#[allow(unused_variables)]
-fn log_trace_diagnostics(
-    previous_stats: &mut trace_stats::TraceRuntimeStatsSnapshot,
-    previous_logged_at: &mut Instant,
-    previous_trimmed_at: &mut Instant,
-) {
-    let now = Instant::now();
-    let elapsed = now.duration_since(*previous_logged_at);
-    *previous_logged_at = now;
-
-    let current_stats = trace_stats::get_runtime_stats_snapshot();
-    let delta_published = current_stats
-        .price_events_published
-        .saturating_sub(previous_stats.price_events_published);
-    let delta_consumed = current_stats
-        .price_events_consumed
-        .saturating_sub(previous_stats.price_events_consumed);
-    let delta_dropped = current_stats
-        .price_events_dropped
-        .saturating_sub(previous_stats.price_events_dropped);
-    *previous_stats = current_stats;
-
-    let estimated_backlog = current_stats
-        .price_events_published
-        .saturating_sub(current_stats.price_events_consumed)
-        .saturating_sub(current_stats.price_events_dropped);
-    let pending_symbols = pending_price_symbols_len();
-
-    let (snapshot_len, snapshot_capacity, snapshot_string_bytes, snapshot_reserved_bytes) =
-        snapshot_cache_diagnostics();
-    let target_diagnostics = stock_price::trace_target_diagnostics();
-    let memory_stats = read_process_memory_stats();
-    let histock_status = crate::infra::crawler::histock::price::diagnostics_snapshot();
-    let histock_runtime = crate::infra::crawler::histock::price::runtime_diagnostics_snapshot();
-    let yahoo_status = crate::infra::crawler::yahoo::price::diagnostics_snapshot();
-    let yahoo_runtime = crate::infra::crawler::yahoo::price::runtime_diagnostics_snapshot();
-    let consumer_status = price_consumer_status();
-    let refresh_status = atomic_task_status(
-        IS_TARGET_CACHE_REFRESHING.load(Ordering::SeqCst),
-        &TARGET_REFRESH_ACTIVE_TASKS,
-        &TARGET_REFRESH_LAST_GENERATION,
-    );
-    let reconciliation_status = atomic_task_status(
-        IS_RECONCILING.load(Ordering::SeqCst),
-        &RECONCILIATION_ACTIVE_TASKS,
-        &RECONCILIATION_LAST_GENERATION,
-    );
-    let backup_status = atomic_task_status(
-        IS_BACKUP_CACHING.load(Ordering::SeqCst),
-        &BACKUP_ACTIVE_TASKS,
-        &BACKUP_LAST_GENERATION,
-    );
-    let diagnostics_status = atomic_task_status(
-        IS_DIAGNOSTICS_LOGGING.load(Ordering::SeqCst),
-        &DIAGNOSTICS_ACTIVE_TASKS,
-        &DIAGNOSTICS_LAST_GENERATION,
-    );
-    let default_log_status = logging::diagnostics_snapshot();
-    let http_log_status = crate::core::util::http::diagnostics_snapshot();
-
-    let memory_summary = memory_stats.map_or_else(
-        || "rss=n/a vms=n/a".to_string(),
-        |stats| {
-            format!(
-                "rss={:.1}MiB vms={:.1}MiB",
-                kib_to_mib(stats.vm_rss_kib),
-                kib_to_mib(stats.vm_size_kib)
-            )
-        },
-    );
-
-    let elapsed_secs = elapsed.as_secs_f64();
-    let publish_rate = if elapsed_secs > 0.0 {
-        delta_published as f64 / elapsed_secs
-    } else {
-        0.0
-    };
-    let consume_rate = if elapsed_secs > 0.0 {
-        delta_consumed as f64 / elapsed_secs
-    } else {
-        0.0
-    };
-
-    /*
-    tracing::info!("Trace diagnostics | {} | snapshots len={} cap={} strings={}KiB approx_reserved={:.1}MiB | targets symbols={} total={} | events pub={} cons={} drop={} backlog~={} pending={} delta_pub={} ({:.1}/s) delta_cons={} ({:.1}/s) delta_drop={} | tasks {} {} {} {} {} {} {} | logs default(q={}/{} drop={} proc={}) http(q={}/{} drop={} proc={})",
-        memory_summary,
-        snapshot_len,
-        snapshot_capacity,
-        snapshot_string_bytes / 1024,
-        snapshot_reserved_bytes as f64 / (1024.0 * 1024.0),
-        target_diagnostics.symbol_count,
-        target_diagnostics.target_count,
-        current_stats.price_events_published,
-        current_stats.price_events_consumed,
-        current_stats.price_events_dropped,
-        estimated_backlog,
-        pending_symbols,
-        delta_published,
-        publish_rate,
-        delta_consumed,
-        consume_rate,
-        delta_dropped,
-        format_task_status("histock", histock_status),
-        format_task_status("yahoo", yahoo_status),
-        format_task_status("consumer", consumer_status),
-        format_task_status("refresh", refresh_status),
-        format_task_status("reconcile", reconciliation_status),
-        format_task_status("backup", backup_status),
-        format_task_status("diag", diagnostics_status),
-        default_log_status.queued_messages,
-        default_log_status.channel_capacity,
-        default_log_status.dropped_messages,
-        default_log_status.processed_messages,
-        http_log_status.queued_messages,
-        http_log_status.channel_capacity,
-        http_log_status.dropped_messages,
-        http_log_status.processed_messages,);
-
-    tracing::info!("Trace source diagnostics | histock cycles={} body={}KiB rows={} snaps={} changed={} rss_delta={}KiB elapsed={}ms status={} | yahoo cycles={} ok={} fail={} pages={} raw_items={} snaps={} candidate={} rss_delta={}KiB elapsed={}ms status={}",
-        histock_runtime.completed_cycles,
-        histock_runtime.last_body_bytes / 1024,
-        histock_runtime.last_row_count,
-        histock_runtime.last_snapshot_count,
-        histock_runtime.last_changed_event_count,
-        format_signed_kib(histock_runtime.last_rss_delta_kib),
-        histock_runtime.last_elapsed_ms,
-        format_task_status("histock", histock_runtime.status),
-        yahoo_runtime.completed_cycles,
-        yahoo_runtime.last_success_count,
-        yahoo_runtime.last_failure_count,
-        yahoo_runtime.last_page_count,
-        yahoo_runtime.last_raw_item_count,
-        yahoo_runtime.last_snapshot_count,
-        yahoo_runtime.last_candidate_event_count,
-        format_signed_kib(yahoo_runtime.last_rss_delta_kib),
-        yahoo_runtime.last_elapsed_ms,
-        format_task_status("yahoo", yahoo_runtime.status),);
-    */
-
-    maybe_trim_allocator(
-        previous_trimmed_at,
-        pending_symbols,
-        estimated_backlog,
-        default_log_status.queued_messages,
-        http_log_status.queued_messages,
-    );
-}
-
-fn maybe_trim_allocator(
-    previous_trimmed_at: &mut Instant,
-    pending_symbols: usize,
-    estimated_backlog: u64,
-    default_log_queued: usize,
-    http_log_queued: usize,
-) {
-    if pending_symbols > 0 || estimated_backlog > 0 {
-        return;
-    }
-
-    if default_log_queued > 0 || http_log_queued > 0 {
-        return;
-    }
-
-    if previous_trimmed_at.elapsed() < TRACE_ALLOCATOR_TRIM_INTERVAL {
-        return;
-    }
-
-    *previous_trimmed_at = Instant::now();
-
-    if trim_allocator_memory() {
-        tracing::info!(
-            "{}",
-            "Trace diagnostics | allocator trim requested after idle snapshot".to_string(),
-        );
-    }
-}
-
-fn snapshot_cache_diagnostics() -> (usize, usize, usize, usize) {
-    SHARE
-        .stock_snapshots
-        .read()
-        .map(|cache| {
-            let len = cache.len();
-            let capacity = cache.capacity();
-            let string_bytes = cache.iter().fold(0usize, |acc, (symbol, snapshot)| {
-                acc + symbol.len() + snapshot.symbol.len() + snapshot.name.len()
-            });
-            let reserved_bytes = capacity
-                .saturating_mul(size_of::<(String, RealtimeSnapshot)>())
-                .saturating_add(string_bytes);
-
-            (len, capacity, string_bytes, reserved_bytes)
-        })
-        .unwrap_or_default()
-}
-
-fn price_consumer_status() -> TaskRuntimeStatus {
-    let enabled = PRICE_UPDATE_TX
-        .read()
-        .map(|tx| tx.is_some())
-        .unwrap_or(false);
-    atomic_task_status(
-        enabled,
-        &PRICE_CONSUMER_ACTIVE_TASKS,
-        &PRICE_CONSUMER_LAST_GENERATION,
-    )
-}
-
-fn atomic_task_status(
-    enabled: bool,
-    active_tasks: &AtomicUsize,
-    last_generation: &AtomicU64,
-) -> TaskRuntimeStatus {
-    TaskRuntimeStatus::new(
-        enabled,
-        active_tasks.load(Ordering::SeqCst),
-        last_generation.load(Ordering::SeqCst),
-    )
-}
-
-#[allow(dead_code)]
-fn format_task_status(name: &str, status: TaskRuntimeStatus) -> String {
-    format!(
-        "{}(en={} active={} gen={})",
-        name, status.enabled, status.active_tasks, status.last_generation
-    )
-}
-
-fn kib_to_mib(kib: u64) -> f64 {
-    kib as f64 / 1024.0
-}
-
-#[allow(dead_code)]
-fn format_signed_kib(delta_kib: i64) -> String {
-    if delta_kib >= 0 {
-        format!("+{}", delta_kib)
-    } else {
-        delta_kib.to_string()
-    }
-}
-
 fn clear_pending_price_symbol(symbol: &str) {
     if let Ok(mut pending) = PENDING_PRICE_SYMBOLS.write() {
         pending.remove(symbol);
@@ -814,89 +456,6 @@ fn pending_price_symbols_len() -> usize {
         .read()
         .map(|pending| pending.len())
         .unwrap_or_default()
-}
-
-/// 重新整理「被追蹤股票」的備援即時報價快取。
-///
-/// 流程如下：
-/// 1. 從追蹤條件快取取得目前被追蹤的股票代號。
-/// 2. 透過 crawler 的備援站點抓取價格，避免依賴全市場快取是否已輪到該股票。
-/// 3. 僅在價格實際異動時，以單筆價格更新方式寫回共用快取並發佈價格事件。
-async fn refresh_traced_stock_snapshot_cache() -> Result<()> {
-    let symbols = stock_price::get_tracked_symbols();
-    if symbols.is_empty() {
-        return Ok(());
-    }
-
-    let _ = future::join_all(
-        symbols
-            .into_iter()
-            .map(|symbol| async move { refresh_single_traced_stock_snapshot(symbol).await }),
-    )
-    .await;
-
-    //let updated = results.into_iter().filter(|is_updated| *is_updated).count();
-    // tracing::debug!("追蹤股票備援快取已更新 {} 檔", updated);
-
-    Ok(())
-}
-
-/// 重新整理單一被追蹤股票的備援即時價格。
-async fn refresh_single_traced_stock_snapshot(symbol: String) -> bool {
-    match crate::infra::crawler::fetch_stock_price_from_backup_sites_with_source(&symbol).await {
-        Ok(result) if result.price != Decimal::ZERO => {
-            let price = result.price;
-            let source_site = result.site_name.to_string();
-            let previous_snapshot = SHARE.get_stock_snapshot(&symbol);
-            let price_changed = previous_snapshot
-                .as_ref()
-                .is_none_or(|snapshot| snapshot.price != price);
-            let last_close = previous_snapshot
-                .as_ref()
-                .map(|s| s.last_close)
-                .unwrap_or(Decimal::ZERO);
-            if !SHARE.is_valid_price(&symbol, price, last_close) {
-                tracing::warn!(
-                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                    symbol,
-                    price,
-                    last_close,
-                    source_site
-                );
-                return false;
-            }
-            let source_changed = previous_snapshot
-                .as_ref()
-                .is_none_or(|snapshot| snapshot.source_site != source_site);
-
-            if !price_changed && !source_changed {
-                return false;
-            }
-
-            // 備援採集只負責把價格補進共享快取，
-            // 後續警報判斷統一由價格事件 consumer 再從快取讀值。
-            SHARE.set_stock_snapshot_price_with_source(symbol.clone(), price, source_site);
-
-            if !price_changed {
-                return false;
-            }
-
-            publish_price_update(symbol, price);
-            true
-        }
-        Ok(_) => {
-            // 備援採集逐檔輪詢時的高頻雜訊，降為 trace 避免日誌暴增。
-            tracing::trace!("Stock {} backup price is zero, skipping", symbol);
-            false
-        }
-        Err(why) => {
-            // 備援站點全數失敗最常見的原因是冷門股開盤後尚未成交（各站回 `-`、null 或 0），
-            // 屬預期狀況；主要報價仍由 HiStock／Yahoo 類股快取提供，因此只記 warn。
-            // 2026-09-24 的 55 筆此類 error 全集中在 09:00～10:34，成交後即自行消失。
-            tracing::warn!("Failed to fetch backup price for {}: {:#}", symbol, why);
-            false
-        }
-    }
 }
 
 #[cfg(test)]

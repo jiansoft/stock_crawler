@@ -8,5 +8,7 @@ pub mod ex_dividend_announcement;
 pub mod net_asset_value_per_share;
 /// 台股收盤報價-上櫃
 pub(crate) mod quote;
+/// 上櫃個股日成交資訊（單一證券的整月日報價）
+pub mod stock_day;
 
 pub const HOST: &str = "www.tpex.org.tw";
