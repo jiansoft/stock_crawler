@@ -229,6 +229,31 @@ impl DailyQuoteDto {
     }
 }
 
+/// 計算漲跌幅（%）：(收盤 − 前一交易日收盤) ÷ 前一交易日收盤 × 100。
+///
+/// `cached_previous` 是快取的「最後交易日報價」`(日期, 收盤)`，只有日期**早於** `date` 才採用：
+/// 重跑當天的收盤彙總時，快取已是當天的收盤，拿它當前一日收盤會讓漲跌幅全部變成 0
+/// （2026-10-02 21:58 重跑後 2,405 筆全為 0，連帶市場漲跌家數統計變成全數平盤）。
+/// 快取不可用時以「收盤 − 漲跌」推回前一日收盤；漲跌為 0（含除息日交易所標示「除息」）時為 0。
+pub fn change_range_percent(
+    date: NaiveDate,
+    closing_price: Decimal,
+    change: Decimal,
+    cached_previous: Option<(NaiveDate, Decimal)>,
+) -> Decimal {
+    if change.is_zero() {
+        return Decimal::ZERO;
+    }
+    let previous = cached_previous
+        .filter(|(cached_date, close)| *cached_date < date && *close > Decimal::ZERO)
+        .map(|(_, close)| close)
+        .or_else(|| Some(closing_price - change).filter(|close| *close > Decimal::ZERO));
+    match previous {
+        Some(previous) => (closing_price - previous) / previous * Decimal::ONE_HUNDRED,
+        None => Decimal::ZERO,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -374,5 +399,49 @@ mod tests {
         let err = DailyQuoteDto::from_with_exchange(StockExchange::TPEx, &row, date).unwrap_err();
 
         assert!(matches!(err, QuoteParseError::MissingField { .. }));
+    }
+}
+
+#[cfg(test)]
+mod change_range_tests {
+    use chrono::NaiveDate;
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+
+    use super::change_range_percent;
+
+    fn day(d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, d).unwrap()
+    }
+
+    /// 快取是前一交易日：以快取收盤計算。
+    #[test]
+    fn uses_the_cached_previous_close() {
+        let range =
+            change_range_percent(day(2), dec!(70.75), dec!(7.2), Some((day(1), dec!(63.55))));
+        assert_eq!(range.round_dp(4), dec!(11.3297));
+    }
+
+    /// 重跑當天收盤時快取已是當天收盤，不可採用，改以收盤 − 漲跌推回前一日收盤。
+    #[test]
+    fn ignores_a_cache_from_the_same_day() {
+        let range =
+            change_range_percent(day(2), dec!(70.75), dec!(7.2), Some((day(2), dec!(70.75))));
+        assert_eq!(range.round_dp(4), dec!(11.3297));
+    }
+
+    #[test]
+    fn falls_back_without_a_cache_and_handles_zero_change() {
+        let range = change_range_percent(day(2), dec!(2500), dec!(-10), None);
+        assert_eq!(range.round_dp(4), dec!(-0.3984));
+        assert_eq!(
+            change_range_percent(day(2), dec!(2500), Decimal::ZERO, None),
+            Decimal::ZERO
+        );
+        // 推不出正的前一日收盤時為 0，不可除以零。
+        assert_eq!(
+            change_range_percent(day(2), dec!(1), dec!(1), None),
+            Decimal::ZERO
+        );
     }
 }

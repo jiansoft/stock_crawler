@@ -1,13 +1,15 @@
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     core::util::http,
     infra::cache::{TTL, TtlCacheInner},
-    infra::crawler::{share, share::DailyQuoteDto, twse},
+    infra::crawler::{
+        share,
+        share::{DailyQuoteDto, change_range_percent},
+        twse,
+    },
 };
 
 /*#[derive(Serialize, Deserialize, Debug)]
@@ -186,22 +188,13 @@ pub async fn parse_listed_response(
                 continue;
             }
 
-            // 如果有價格變動且能取得前一交易日的收盤價，則計算漲跌幅
-            if !dto.change.is_zero()
-                && let Some(ldg) = crate::infra::cache::SHARE
-                    .get_last_trading_day_quotes(&dto.symbol)
-                    .await
-            {
-                if ldg.closing_price > Decimal::ZERO {
-                    // 漲幅 = (現價 - 上一個交易日收盤價) / 上一個交易日收盤價 * 100%
-                    dto.change_range =
-                        (dto.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
-                } else if dto.opening_price > Decimal::ZERO {
-                    dto.change_range = dto.change / dto.opening_price * dec!(100);
-                } else {
-                    dto.change_range = Decimal::ZERO;
-                }
-            }
+            // 漲跌幅以前一交易日收盤計算；快取若已是當天的收盤（重跑收盤彙總）就不採用。
+            let cached_previous = crate::infra::cache::SHARE
+                .get_last_trading_day_quotes(&dto.symbol)
+                .await
+                .map(|quote| (quote.date, quote.closing_price));
+            dto.change_range =
+                change_range_percent(date, dto.closing_price, dto.change, cached_previous);
 
             dqs.push(dto);
         }
@@ -227,6 +220,8 @@ mod tests {
     use std::time::Duration;
 
     use crate::infra::cache::SHARE;
+
+    use rust_decimal_macros::dec;
 
     use super::*;
 

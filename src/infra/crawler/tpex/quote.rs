@@ -2,13 +2,15 @@ use crate::{
     core::declare::StockExchange,
     core::util,
     infra::cache::{TTL, TtlCacheInner},
-    infra::crawler::{share, share::DailyQuoteDto, tpex},
+    infra::crawler::{
+        share,
+        share::{DailyQuoteDto, change_range_percent},
+        tpex,
+    },
 };
 use anyhow::Result;
 use chrono::{Datelike, NaiveDate};
 use hashbrown::HashMap;
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 
 // QuoteResponse 上櫃公司每日收盤資訊
@@ -122,19 +124,13 @@ pub async fn parse_quote_response(
                 continue;
             }
 
-            if !dto.change.is_zero()
-                && let Some(ldg) = crate::infra::cache::SHARE
-                    .get_last_trading_day_quotes(&dto.symbol)
-                    .await
-            {
-                if ldg.closing_price > Decimal::ZERO {
-                    // 漲幅 = (現價 - 上一個交易日收盤價) / 上一個交易日收盤價 * 100%
-                    dto.change_range =
-                        (dto.closing_price - ldg.closing_price) / ldg.closing_price * dec!(100);
-                } else {
-                    dto.change_range = dto.change / dto.opening_price * dec!(100);
-                }
-            }
+            // 漲跌幅以前一交易日收盤計算；快取若已是當天的收盤（重跑收盤彙總）就不採用。
+            let cached_previous = crate::infra::cache::SHARE
+                .get_last_trading_day_quotes(&dto.symbol)
+                .await
+                .map(|quote| (quote.date, quote.closing_price));
+            dto.change_range =
+                change_range_percent(date, dto.closing_price, dto.change, cached_previous);
 
             // 本益比來自另一支 API，屬「補充」欄位：解析失敗只記 warning 並保持 0，
             // 不值得為它拒絕整列行情（開高低收與量能仍是完整有效的）。
@@ -168,6 +164,9 @@ mod tests {
     use std::time::Duration;
 
     use crate::infra::cache::SHARE;
+
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
 
     use super::*;
 
