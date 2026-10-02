@@ -9,6 +9,7 @@ use crate::infra::database::table::dividend::extension::stock_dividend_info::{
     self, StockDividendInfo as TableStockDividendInfo,
 };
 use crate::infra::database::table::dividend::extension::stock_dividend_payable_date_info::StockDividendPayableDateInfo as TableStockDividendPayableDateInfo;
+use crate::infra::database::table::dividend::mutation;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Local, NaiveDate};
@@ -85,6 +86,67 @@ impl PgDividendRepository {
         })
     }
 }
+
+/// 組出 [`PgDividendRepository::save`] 的 upsert SQL；`$target` 為衝突目標。
+macro_rules! save_sql {
+    ($target:expr) => {
+        concat!(
+            r#"
+            INSERT INTO dividend (
+                security_code, "year", year_of_dividend, quarter,
+                cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2",
+                payable_date1, payable_date2, created_time, updated_time, capital_reserve_cash_dividend,
+                earnings_cash_dividend, capital_reserve_stock_dividend, earnings_stock_dividend,
+                payout_ratio_cash, payout_ratio_stock, payout_ratio)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+            ON CONFLICT "#,
+            $target,
+            r#" DO UPDATE SET
+                year_of_dividend = EXCLUDED.year_of_dividend,
+                cash_dividend = EXCLUDED.cash_dividend,
+                stock_dividend = EXCLUDED.stock_dividend,
+                "sum" = EXCLUDED."sum",
+                "ex-dividend_date1" = EXCLUDED."ex-dividend_date1",
+                "ex-dividend_date2" = EXCLUDED."ex-dividend_date2",
+                payable_date1 = EXCLUDED.payable_date1,
+                payable_date2 = EXCLUDED.payable_date2,
+                updated_time = EXCLUDED.updated_time,
+                capital_reserve_cash_dividend = EXCLUDED.capital_reserve_cash_dividend,
+                earnings_cash_dividend = EXCLUDED.earnings_cash_dividend,
+                capital_reserve_stock_dividend = EXCLUDED.capital_reserve_stock_dividend,
+                earnings_stock_dividend = EXCLUDED.earnings_stock_dividend,
+                -- 盈餘分配率只有 Goodinfo 提供，Yahoo 一律送 0。
+                -- 直接覆蓋會讓每次股利採集都洗掉已回補的分配率，所以來源是 0 時保留既有值。
+                payout_ratio_cash = CASE WHEN EXCLUDED.payout_ratio_cash = 0
+                    THEN dividend.payout_ratio_cash ELSE EXCLUDED.payout_ratio_cash END,
+                payout_ratio_stock = CASE WHEN EXCLUDED.payout_ratio_stock = 0
+                    THEN dividend.payout_ratio_stock ELSE EXCLUDED.payout_ratio_stock END,
+                payout_ratio = CASE WHEN EXCLUDED.payout_ratio = 0
+                    THEN dividend.payout_ratio ELSE EXCLUDED.payout_ratio END;
+        "#
+        )
+    };
+}
+
+/// 年度層級列的 upsert：每個發放年度一列。
+const SAVE_ANNUAL_LEVEL_SQL: &str = save_sql!(mutation::annual_level_conflict_target!());
+/// 分期明細的 upsert：以主鍵為衝突目標。
+const SAVE_DETAIL_SQL: &str = save_sql!(mutation::detail_conflict_target!());
+
+/// 同一發放年度、同期別、除權息日相同但所屬年度不同的列，視為同一次配息，改成新的所屬年度。
+///
+/// 參數：`$1` 代號、`$2` 發放年度、`$3` 新的所屬年度、`$4` 期別、`$5` 除息日、`$6` 除權日。
+/// 新所屬年度若已有自己的一列就不動（那是另一次配息）。
+const RELABEL_SAME_EVENT_SQL: &str = r#"
+    UPDATE dividend SET year_of_dividend = $3
+    WHERE security_code = $1 AND year = $2 AND quarter = $4 AND year_of_dividend <> $3
+      AND (("ex-dividend_date1" = $5 AND $5 ~ '^\d{4}-\d{2}-\d{2}$')
+        OR ("ex-dividend_date2" = $6 AND $6 ~ '^\d{4}-\d{2}-\d{2}$'))
+      AND NOT EXISTS (
+          SELECT 1 FROM dividend
+          WHERE security_code = $1 AND year = $2 AND year_of_dividend = $3 AND quarter = $4
+      )
+"#;
 
 impl Default for PgDividendRepository {
     fn default() -> Self {
@@ -182,7 +244,7 @@ impl DividendRepository for PgDividendRepository {
     ///
     /// 合計列是明細的加總而非一次配發，日期一律為 `'-'`。衝突更新時必須連日期一起覆寫：
     /// 該列可能是由既有的年度配息列原地轉生（股票從年配改成半年配時，原本 `quarter = ''`
-    /// 的明細列會與新的合計列撞上同一組主鍵），留著舊日期會讓合計被下游當成真實的配息事件。
+    /// 的明細列會與新的合計列撞上同一個年度層級唯一鍵），留著舊日期會讓合計被下游當成真實的配息事件。
     async fn upsert_annual_total_dividend(&self, security_code: &str, year: i32) -> Result<()> {
         let sql = r#"
             INSERT INTO dividend(security_code,
@@ -229,7 +291,7 @@ impl DividendRepository for PgDividendRepository {
             where security_code = $3 and year = $4 and quarter != ''
             group by security_code
             order by security_code
-            ON CONFLICT (security_code,year,quarter) DO UPDATE SET
+            ON CONFLICT (security_code, "year") WHERE quarter = '' DO UPDATE SET
                 year_of_dividend = EXCLUDED.year_of_dividend,
                 cash_dividend = EXCLUDED.cash_dividend,
                 stock_dividend = EXCLUDED.stock_dividend,
@@ -563,6 +625,11 @@ impl DividendRepository for PgDividendRepository {
     }
 
     /// 儲存或更新股利；混合配息的全年明細改用 A，保留序號供持股紀錄關聯。
+    ///
+    /// 年度層級列（`quarter = ''`）以發放年度為鍵，分期明細以
+    /// `(security_code, year, year_of_dividend, quarter)` 為鍵。分期明細若在同一發放年度、
+    /// 同期別已有一列除權息日相同、只是所屬年度不同的資料，視為同一次配息的所屬年度更正，
+    /// 先把那一列改成新的所屬年度再 upsert，避免同一次配息變成兩列。
     async fn save(&self, dividend: &Dividend) -> Result<()> {
         let mut tx = database::get_connection().begin().await?;
         if dividend.quarter == "A" {
@@ -573,7 +640,8 @@ impl DividendRepository for PgDividendRepository {
                 WHERE security_code = $1 AND year = $2 AND year_of_dividend = $3
                   AND quarter = ''
                   AND NOT EXISTS (
-                      SELECT 1 FROM dividend WHERE security_code = $1 AND year = $2 AND quarter = 'A'
+                      SELECT 1 FROM dividend
+                      WHERE security_code = $1 AND year = $2 AND year_of_dividend = $3 AND quarter = 'A'
                   )
             "#)
             .bind(&dividend.security_code)
@@ -582,37 +650,23 @@ impl DividendRepository for PgDividendRepository {
             .execute(&mut *tx)
             .await?;
         }
-        let sql = r#"
-            INSERT INTO dividend (
-                security_code, "year", year_of_dividend, quarter,
-                cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2",
-                payable_date1, payable_date2, created_time, updated_time, capital_reserve_cash_dividend,
-                earnings_cash_dividend, capital_reserve_stock_dividend, earnings_stock_dividend,
-                payout_ratio_cash, payout_ratio_stock, payout_ratio)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-            ON CONFLICT (security_code, "year", quarter) DO UPDATE SET
-                year_of_dividend = EXCLUDED.year_of_dividend,
-                cash_dividend = EXCLUDED.cash_dividend,
-                stock_dividend = EXCLUDED.stock_dividend,
-                "sum" = EXCLUDED."sum",
-                "ex-dividend_date1" = EXCLUDED."ex-dividend_date1",
-                "ex-dividend_date2" = EXCLUDED."ex-dividend_date2",
-                payable_date1 = EXCLUDED.payable_date1,
-                payable_date2 = EXCLUDED.payable_date2,
-                updated_time = EXCLUDED.updated_time,
-                capital_reserve_cash_dividend = EXCLUDED.capital_reserve_cash_dividend,
-                earnings_cash_dividend = EXCLUDED.earnings_cash_dividend,
-                capital_reserve_stock_dividend = EXCLUDED.capital_reserve_stock_dividend,
-                earnings_stock_dividend = EXCLUDED.earnings_stock_dividend,
-                -- 盈餘分配率只有 Goodinfo 提供，Yahoo 一律送 0。
-                -- 直接覆蓋會讓每次股利採集都洗掉已回補的分配率，所以來源是 0 時保留既有值。
-                payout_ratio_cash = CASE WHEN EXCLUDED.payout_ratio_cash = 0
-                    THEN dividend.payout_ratio_cash ELSE EXCLUDED.payout_ratio_cash END,
-                payout_ratio_stock = CASE WHEN EXCLUDED.payout_ratio_stock = 0
-                    THEN dividend.payout_ratio_stock ELSE EXCLUDED.payout_ratio_stock END,
-                payout_ratio = CASE WHEN EXCLUDED.payout_ratio = 0
-                    THEN dividend.payout_ratio ELSE EXCLUDED.payout_ratio END;
-        "#;
+        if !dividend.quarter.is_empty() {
+            sqlx::query(RELABEL_SAME_EVENT_SQL)
+                .bind(&dividend.security_code)
+                .bind(dividend.year)
+                .bind(dividend.year_of_dividend)
+                .bind(&dividend.quarter)
+                .bind(&dividend.ex_dividend_date_cash)
+                .bind(&dividend.ex_dividend_date_stock)
+                .execute(&mut *tx)
+                .await
+                .context("Failed to relabel the year of dividend")?;
+        }
+        let sql = if dividend.quarter.is_empty() {
+            SAVE_ANNUAL_LEVEL_SQL
+        } else {
+            SAVE_DETAIL_SQL
+        };
         sqlx::query(sql)
             .bind(&dividend.security_code)
             .bind(dividend.year)
@@ -1000,5 +1054,245 @@ mod tests {
 
         cleanup().await.expect("測試後清理失敗");
         cleanup_earnings().await.expect("測試後清理財報失敗");
+    }
+
+    /// 主鍵含所屬年度的測試代號，與上面兩個代號分開清理，避免測試互相干擾。
+    const IDENTITY_SYMBOL: &str = "79977";
+
+    async fn cleanup_identity() -> Result<()> {
+        sqlx::query("DELETE FROM dividend WHERE security_code = $1")
+            .bind(IDENTITY_SYMBOL)
+            .execute(database::get_connection())
+            .await?;
+        Ok(())
+    }
+
+    /// 讀回測試代號在測試發放年度的所有列，依期別與所屬年度排序。
+    async fn fetch_identity_rows() -> Result<Vec<Dividend>> {
+        let sql = r#"
+            SELECT
+                serial, security_code, year, year_of_dividend, quarter,
+                cash_dividend, stock_dividend, sum, "ex-dividend_date1", "ex-dividend_date2",
+                payable_date1, payable_date2, created_time, updated_time,
+                capital_reserve_cash_dividend, earnings_cash_dividend,
+                capital_reserve_stock_dividend, earnings_stock_dividend,
+                payout_ratio_cash, payout_ratio_stock, payout_ratio
+            FROM dividend
+            WHERE security_code = $1 AND year = $2
+            ORDER BY quarter, year_of_dividend
+        "#;
+        sqlx::query(sql)
+            .bind(IDENTITY_SYMBOL)
+            .bind(TEST_PAYOUT_YEAR)
+            .try_map(PgDividendRepository::row_to_entity)
+            .fetch_all(database::get_connection())
+            .await
+            .context("測試資料讀取失敗")
+    }
+
+    /// 同一發放年度的兩次 H1（所屬年度不同，3008 大立光 2022 年的情況）要並存，
+    /// 年度合計把兩筆都算進去。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn same_period_of_different_fiscal_years_coexist() {
+        dotenvy::dotenv().ok();
+        let repo = PgDividendRepository::new();
+        cleanup_identity().await.expect("測試前清理失敗");
+
+        for dividend in [
+            build_dividend(
+                IDENTITY_SYMBOL,
+                TEST_PAYOUT_YEAR - 1,
+                "H1",
+                dec!(31.1561),
+                "2020-01-12",
+                "2020-02-10",
+            ),
+            build_dividend(
+                IDENTITY_SYMBOL,
+                TEST_PAYOUT_YEAR,
+                "H1",
+                dec!(39.5),
+                "2020-08-18",
+                "2020-09-10",
+            ),
+        ] {
+            repo.save(&dividend).await.expect("寫入分期明細失敗");
+        }
+        repo.upsert_annual_total_dividend(IDENTITY_SYMBOL, TEST_PAYOUT_YEAR)
+            .await
+            .expect("年度合計失敗");
+
+        let rows = fetch_identity_rows().await.expect("讀取失敗");
+        cleanup_identity().await.expect("測試後清理失敗");
+
+        let summary: Vec<(&str, i32, Decimal)> = rows
+            .iter()
+            .map(|row| (row.quarter.as_str(), row.year_of_dividend, row.sum))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("", TEST_PAYOUT_YEAR - 1, dec!(70.6561)),
+                ("H1", TEST_PAYOUT_YEAR - 1, dec!(31.1561)),
+                ("H1", TEST_PAYOUT_YEAR, dec!(39.5)),
+            ]
+        );
+    }
+
+    /// 同一次配息（除息日相同）只是所屬年度更正時，原地改寫那一列，不新增第二列，序號保留。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn corrected_year_of_dividend_updates_the_same_event() {
+        dotenvy::dotenv().ok();
+        let repo = PgDividendRepository::new();
+        cleanup_identity().await.expect("測試前清理失敗");
+
+        repo.save(&build_dividend(
+            IDENTITY_SYMBOL,
+            TEST_PAYOUT_YEAR,
+            "Q3",
+            dec!(1.5),
+            "2020-11-28",
+            "-",
+        ))
+        .await
+        .expect("首次寫入失敗");
+        let before = fetch_identity_rows().await.expect("讀取失敗");
+
+        repo.save(&build_dividend(
+            IDENTITY_SYMBOL,
+            TEST_PAYOUT_YEAR - 1,
+            "Q3",
+            dec!(1.5),
+            "2020-11-28",
+            "2020-12-20",
+        ))
+        .await
+        .expect("更正寫入失敗");
+        // 除息日不同就是另一次配息，照常新增。
+        repo.save(&build_dividend(
+            IDENTITY_SYMBOL,
+            TEST_PAYOUT_YEAR,
+            "Q3",
+            dec!(2.0),
+            "2020-02-26",
+            "-",
+        ))
+        .await
+        .expect("另一次配息寫入失敗");
+        let after = fetch_identity_rows().await.expect("讀取失敗");
+        cleanup_identity().await.expect("測試後清理失敗");
+
+        assert_eq!(after.len(), 2);
+        let corrected = after
+            .iter()
+            .find(|row| row.year_of_dividend == TEST_PAYOUT_YEAR - 1)
+            .expect("更正後的列應存在");
+        assert_eq!(corrected.serial, before[0].serial, "同一次配息要保留序號");
+        assert_eq!(corrected.payable_date_cash, "2020-12-20");
+        assert!(
+            after
+                .iter()
+                .any(|row| row.year_of_dividend == TEST_PAYOUT_YEAR && row.sum == dec!(2.0))
+        );
+    }
+
+    /// 年度層級列（quarter = ''）每個發放年度只有一列：所屬年度不同也是覆寫同一列。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn annual_level_row_stays_unique_per_payout_year() {
+        dotenvy::dotenv().ok();
+        let repo = PgDividendRepository::new();
+        cleanup_identity().await.expect("測試前清理失敗");
+
+        repo.save(&build_dividend(
+            IDENTITY_SYMBOL,
+            TEST_PAYOUT_YEAR - 1,
+            "",
+            dec!(3.0),
+            "2020-07-01",
+            "-",
+        ))
+        .await
+        .expect("首次寫入失敗");
+        repo.save(&build_dividend(
+            IDENTITY_SYMBOL,
+            TEST_PAYOUT_YEAR,
+            "",
+            dec!(3.2),
+            "2020-07-15",
+            "-",
+        ))
+        .await
+        .expect("覆寫失敗");
+        let rows = fetch_identity_rows().await.expect("讀取失敗");
+        cleanup_identity().await.expect("測試後清理失敗");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].year_of_dividend, TEST_PAYOUT_YEAR);
+        assert_eq!(rows[0].sum, dec!(3.2));
+    }
+
+    /// 混合配息年度可以同時有兩個所屬年度的全年事件 A（5287 在 2022 年發 2020 年配股與 2021 年配息）。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn full_year_events_of_two_fiscal_years_coexist() {
+        dotenvy::dotenv().ok();
+        let repo = PgDividendRepository::new();
+        cleanup_identity().await.expect("測試前清理失敗");
+
+        for dividend in [
+            build_dividend(
+                IDENTITY_SYMBOL,
+                TEST_PAYOUT_YEAR - 2,
+                "A",
+                dec!(1.8309),
+                "-",
+                "-",
+            ),
+            build_dividend(
+                IDENTITY_SYMBOL,
+                TEST_PAYOUT_YEAR - 1,
+                "A",
+                dec!(11.3),
+                "2020-04-14",
+                "-",
+            ),
+            build_dividend(
+                IDENTITY_SYMBOL,
+                TEST_PAYOUT_YEAR,
+                "H1",
+                dec!(4.5),
+                "2020-11-03",
+                "-",
+            ),
+        ] {
+            repo.save(&dividend).await.expect("寫入失敗");
+        }
+        repo.upsert_annual_total_dividend(IDENTITY_SYMBOL, TEST_PAYOUT_YEAR)
+            .await
+            .expect("年度合計失敗");
+        let rows = fetch_identity_rows().await.expect("讀取失敗");
+        cleanup_identity().await.expect("測試後清理失敗");
+
+        assert_eq!(rows.iter().filter(|row| row.quarter == "A").count(), 2);
+        let total = rows
+            .iter()
+            .find(|row| row.quarter.is_empty())
+            .expect("合計列");
+        assert_eq!(total.sum, dec!(17.6309));
     }
 }

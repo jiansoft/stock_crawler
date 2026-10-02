@@ -23,11 +23,17 @@ create table public.dividend
     payout_ratio                   numeric(18, 4)           default 0                                       not null,
     payout_eps                     numeric(18, 4),
     payout_period                  varchar(16),
-    primary key (security_code, year, quarter)
+    -- 同一發放年度可能有兩次同期別的配息（大立光 2022 年同時發 2021H1 與 2022H1），
+    -- 所屬年度必須是主鍵的一部分。
+    primary key (security_code, year, year_of_dividend, quarter)
 );
 
+-- 年度層級列（quarter = ''：單次年配本身，或多次配發的年度合計）每個發放年度只能有一列，
+-- 估價、殖利率排行與 stock_go 都依此取該年度的股利總額。
+create unique index dividend_annual_level_uidx on public.dividend (security_code, year) where quarter = '';
+
 comment on column public.dividend.year_of_dividend is '股利所屬年度';
-comment on column public.dividend.quarter is '季度 A:全年度 Q1~Q4:第一季~第四季 H1~H2︰上半季~下半季';
+comment on column public.dividend.quarter is '季度 空字串:年度（單次年配或年度合計） A:混合配息年度的全年事件 Q1~Q4:第一季~第四季 H1~H2:上半年~下半年 M01~M12:月配';
 comment on column public.dividend.cash_dividend is '現金股利';
 comment on column public.dividend.stock_dividend is '股票股利';
 comment on column public.dividend.sum is '合計';

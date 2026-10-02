@@ -30,8 +30,8 @@ use super::{
     row::{RowMatch, build_new_dividend, match_existing_row, merge_announcement_dates},
 };
 
-/// 待新增資料列的唯一鍵：`(股票代號, 發放年度, 季別)`，與資料表的唯一索引一致。
-type InsertKey = (String, i32, String);
+/// 待新增資料列的唯一鍵：`(股票代號, 發放年度, 所屬年度, 季別)`，與資料表的主鍵一致。
+type InsertKey = (String, i32, i32, String);
 
 /// 一次掃描要對資料庫做的所有異動。
 ///
@@ -148,6 +148,7 @@ pub(super) fn apply_event(
             let key = (
                 announcement.stock_symbol.clone(),
                 paid_year,
+                resolved.year_of_dividend,
                 quarter.clone(),
             );
             let entry = plan

@@ -5,7 +5,7 @@
 //! ## 這支 API 補的是什麼
 //!
 //! 交易所的除權除息預告表只有「除權息日期 + 金額」，**沒有股利所屬期間**，
-//! 而 `dividend` 資料表的唯一鍵是 `(security_code, year, quarter)`，
+//! 而 `dividend` 資料表的主鍵是 `(security_code, year, year_of_dividend, quarter)`，
 //! 少了所屬期間就無法決定一筆預告事件該落在哪一列。這支 API 補的正是這塊：
 //!
 //! - `股利所屬年(季)度`／`股利所屬期間` → `year_of_dividend` 與 `quarter`

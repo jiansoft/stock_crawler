@@ -534,7 +534,7 @@ mod tests {
             r#"INSERT INTO dividend (security_code, year, quarter, cash_dividend, stock_dividend,
                                      "ex-dividend_date1", "ex-dividend_date2")
                VALUES ($1, $2, $3, $4, $5, $6, $7)
-               ON CONFLICT (security_code, year, quarter) DO UPDATE
+               ON CONFLICT (security_code, year, year_of_dividend, quarter) DO UPDATE
                    SET cash_dividend = excluded.cash_dividend"#,
         )
         .bind(symbol)

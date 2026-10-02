@@ -4,7 +4,7 @@
 //! `quarter = ''` 的年度合計，日期欄一律填 `'-'`，代表它是明細的加總而不是一次配發。
 //!
 //! 但股票從年配改成分期配發時，原本那筆 `quarter = ''` 的年度配息明細會與新的合計列
-//! 撞上同一組主鍵 `(security_code, year, quarter)`；舊版的 `ON CONFLICT DO UPDATE`
+//! 撞上同一個年度層級唯一鍵（每個發放年度一列 `quarter = ''`）；舊版的 `ON CONFLICT DO UPDATE`
 //! 只覆寫金額，於是明細列的除息日與發放日留在合計列上，讓
 //! [`crate::app::calculation::dividend_record`] 把合計當成另一次真實配息重複計入。
 //!
