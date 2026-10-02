@@ -11,7 +11,7 @@ use crate::domain::quote::repository::QuoteRepository;
 use crate::{
     core::alert,
     core::declare,
-    core::util::{convert::FromValue, map::Keyable, text},
+    core::util::{map::Keyable, text},
     infra::database::repository::quote::PgQuoteRepository,
 };
 
@@ -42,14 +42,18 @@ pub async fn execute() -> Result<()> {
             // 實例化報價倉儲，並獲取個股最新收盤價（封裝雙層快取策略）
             let quote_repo = PgQuoteRepository::new();
             let stock_last_price = quote_repo.fetch_last_quote(&stock.stock_symbol).await?;
-            let last_price = match stock_last_price {
+            let last_price = match &stock_last_price {
                 None => String::from(" - "),
                 Some(last_quote) => match last_quote.closing_price.to_f64() {
                     None => String::from(" - "),
                     Some(price) => price.to_string(),
                 },
             };
-            let last_price_dec = last_price.get_decimal(None);
+            // 直接取報價的數值；新股還沒有收盤價時是 0，不經過 `" - "` 字串再解析（那會記一筆 warn）。
+            let last_price_dec = stock_last_price
+                .as_ref()
+                .map(|last_quote| last_quote.closing_price)
+                .unwrap_or(Decimal::ZERO);
             let offering_price = stock.offering_price.unwrap_or(Decimal::ZERO);
             let price_change = calculate_price_change(offering_price, last_price_dec);
             let _ = writeln!(

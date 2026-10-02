@@ -66,10 +66,33 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
 
         // 呼叫 Yahoo 採集器抓取並解析網頁，進而更新資料庫中該股的除息與發放日期
         if let Err(why) = backfill_unannounced_dividend_dates_from_yahoo(dividend, year).await {
-            tracing::error!(
-                "Failed to backfill_unannounced_dividend_dates_from_yahoo because {:?}",
-                why
-            );
+            if yahoo::dividend::is_page_not_found_error(&why) {
+                // Yahoo 404＝整個個股頁不存在，幾乎都是已下市／清算的標的（4987 2026-10-02），
+                // 與歷年股利回補一致降為 warn，並把略過快取拉長，不再每 3 天重打注定 404 的請求。
+                if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
+                    .set(
+                        &cache_key,
+                        true,
+                        yahoo::dividend::PAGE_NOT_FOUND_CACHE_TTL_SECONDS,
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        "Failed to extend yahoo dividend 404 skip cache {} because {:?}",
+                        cache_key,
+                        cache_err
+                    );
+                }
+                tracing::warn!(
+                    "skip unannounced dividend dates because yahoo page not found (證券可能已下市): {:#}",
+                    why
+                );
+            } else {
+                tracing::error!(
+                    "Failed to backfill_unannounced_dividend_dates_from_yahoo because {:?}",
+                    why
+                );
+            }
         }
 
         // 每檔股票請求完成後，進行隨機 1.5 到 3.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
