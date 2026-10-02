@@ -6,9 +6,14 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
+      # 只把 minor / patch 更新併成一個 PR；主版號升級（例如 utoipa 5 → 6）常伴隨 API 變更，
+      # 混在群組裡會讓整批小修正一起卡在測試失敗，改由 dependabot 各自開 PR。
       dependencies:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
