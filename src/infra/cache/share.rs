@@ -62,6 +62,9 @@ pub struct Share {
     ///
     /// 每個交易日開盤追蹤前整批覆寫；key 為股票代號。
     pub(super) ex_rights_reference_prices: RwLock<HashMap<String, rust_decimal::Decimal>>,
+    /// 各股票的漲跌幅限制與取得日期（台北時間）；只採用當天的值，前一天的漲跌停價不適用。
+    pub(super) price_limits:
+        RwLock<HashMap<String, (chrono::NaiveDate, super::realtime::PriceLimit)>>,
 }
 
 impl Share {
@@ -85,6 +88,7 @@ impl Share {
             current_ip: RwLock::new(None),
             stock_snapshots: RwLock::new(HashMap::new()),
             ex_rights_reference_prices: RwLock::new(HashMap::new()),
+            price_limits: RwLock::new(HashMap::new()),
         }
     }
 }

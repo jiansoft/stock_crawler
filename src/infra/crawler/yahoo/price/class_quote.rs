@@ -18,7 +18,7 @@ use tokio::time::sleep;
 
 use crate::{
     core::util,
-    infra::cache::RealtimeSnapshot,
+    infra::cache::{PriceLimit, RealtimeSnapshot},
     infra::crawler::yahoo::{self, YahooClassCategory, YahooClassExchange},
 };
 
@@ -122,6 +122,10 @@ struct ClassQuoteItem<'a> {
     regular_market_previous_close: Option<RawNumericField<'a>>,
     #[serde(default, borrow, rename = "volumeK")]
     volume_k: Option<RawNumericValue<'a>>,
+    #[serde(default, rename = "limitUpPrice")]
+    limit_up_price: Option<RawNumericField<'a>>,
+    #[serde(default, rename = "limitDownPrice")]
+    limit_down_price: Option<RawNumericField<'a>>,
 }
 
 /// Yahoo 把不少數值欄位包成 `{ raw: ... }` 物件。
@@ -495,8 +499,38 @@ fn parse_class_quote_item(item: &ClassQuoteItem<'_>) -> Result<Option<(String, R
         "last_close",
     )?;
     snapshot.volume = decimal_at(item.volume_k.as_ref(), &symbol, "volumeK")?;
+    snapshot.price_limit = parse_price_limit(item);
 
     Ok(Some((symbol, snapshot)))
+}
+
+/// 解析漲跌停價：兩者都是 `-` 代表沒有漲跌幅限制，都是正數才是區間，其餘視為未知。
+fn parse_price_limit(item: &ClassQuoteItem<'_>) -> PriceLimit {
+    let (up, down) = (
+        raw_value(item.limit_up_price.as_ref()),
+        raw_value(item.limit_down_price.as_ref()),
+    );
+    if is_dash(up) && is_dash(down) {
+        return PriceLimit::Unlimited;
+    }
+    let number = |raw: Option<&RawNumericValue<'_>>| {
+        raw.and_then(|raw| decimal_from_value(raw, "", "limit").ok())
+            .filter(|value| *value > Decimal::ZERO)
+    };
+    match (number(down), number(up)) {
+        (Some(down), Some(up)) if down <= up => PriceLimit::Range { down, up },
+        _ => PriceLimit::Unknown,
+    }
+}
+
+/// 取出 `{ raw: ... }` 欄位的值。
+fn raw_value<'a, 'b>(field: Option<&'b RawNumericField<'a>>) -> Option<&'b RawNumericValue<'a>> {
+    field.and_then(|field| field.raw.as_ref())
+}
+
+/// 欄位值是否為 Yahoo 表示「無」的 `-`。
+fn is_dash(raw: Option<&RawNumericValue<'_>>) -> bool {
+    matches!(raw, Some(RawNumericValue::Text(text)) if text.trim() == "-")
 }
 
 /// 移除 Yahoo 股票代號的市場尾碼，例如 `2330.TW -> 2330`。
@@ -600,6 +634,41 @@ mod tests {
     }
 
     /// 驗證類股 API URL 會使用 Yahoo 實際可用的分號參數格式。
+    /// 有漲跌停價時記成區間；Yahoo 用 `-` 表示沒有漲跌幅限制（00715L）；缺欄位為未知。
+    #[test]
+    fn parse_class_quote_item_reads_price_limits() {
+        let (_, ranged) = parse_test_item(json!({
+            "systexId": "00631L",
+            "price": {"raw": "39.58"},
+            "limitUpPrice": {"raw": "47.54"},
+            "limitDownPrice": {"raw": "31.7"}
+        }))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            ranged.price_limit,
+            PriceLimit::Range {
+                down: dec!(31.7),
+                up: dec!(47.54)
+            }
+        );
+
+        let (_, unlimited) = parse_test_item(json!({
+            "systexId": "00715L",
+            "price": {"raw": "70.75"},
+            "limitUpPrice": {"raw": "-"},
+            "limitDownPrice": {"raw": "-"}
+        }))
+        .unwrap()
+        .unwrap();
+        assert_eq!(unlimited.price_limit, PriceLimit::Unlimited);
+
+        let (_, unknown) = parse_test_item(json!({"systexId": "2330", "price": {"raw": "2500"}}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(unknown.price_limit, PriceLimit::Unknown);
+    }
+
     #[test]
     fn test_build_class_quotes_api_url() {
         let category = YahooClassCategory::enabled(YahooClassExchange::Listed, 40, "半導體");

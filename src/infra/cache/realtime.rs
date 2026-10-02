@@ -11,6 +11,23 @@ use rust_decimal::prelude::ToPrimitive;
 use crate::core::declare;
 
 /// 即時報價快照。
+/// 當日漲跌幅限制，來自 Yahoo 類股報價的 `limitUpPrice`／`limitDownPrice`。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PriceLimit {
+    /// 來源沒有提供，沿用固定門檻判斷。
+    #[default]
+    Unknown,
+    /// 沒有漲跌幅限制（國外成分 ETF，如 00715L、00646）。
+    Unlimited,
+    /// 當日的跌停價與漲停價。
+    Range {
+        /// 跌停價。
+        down: Decimal,
+        /// 漲停價。
+        up: Decimal,
+    },
+}
+
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RealtimeSnapshot {
@@ -38,6 +55,8 @@ pub struct RealtimeSnapshot {
     pub volume: Decimal,
     /// 快照最後寫入快取的 UTC 時間，供外部 API 判斷資料新鮮度。
     pub updated_at: DateTime<Utc>,
+    /// 當日漲跌幅限制；只有 Yahoo 類股報價會提供。
+    pub price_limit: PriceLimit,
 }
 
 impl RealtimeSnapshot {
@@ -64,6 +83,7 @@ impl RealtimeSnapshot {
             last_close: Decimal::ZERO,
             volume: Decimal::ZERO,
             updated_at: Utc::now(),
+            price_limit: PriceLimit::Unknown,
         }
     }
 

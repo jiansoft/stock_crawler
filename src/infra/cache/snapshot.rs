@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use chrono::Utc;
+use chrono::{Local, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
-use super::realtime::RealtimeSnapshot;
+use super::realtime::{PriceLimit, RealtimeSnapshot};
 use crate::core::declare::StockExchangeMarket;
 
 /// 上市櫃的異常價格閾值：漲跌幅上限 10% 再加 0.5% 容差。
@@ -87,6 +87,10 @@ impl Share {
     /// 興櫃無漲跌幅限制，昨收又是前一日加權平均價，單日偏離 10% 以上很常見
     /// （2026-09-24 有 12 檔興櫃被誤濾，如 7934 昨收 552.86、成交 630）；
     /// 只以 [`EMERGING_TOLERANCE`] 擋明顯錯誤的值。
+    ///
+    /// 當天有來源提供漲跌幅限制時以它為準（[`Self::set_price_limits`]）：有漲跌停價就照區間判斷，
+    /// 沒有限制的（國外成分 ETF）改用 [`EMERGING_TOLERANCE`]。固定的 10.5% 門檻會誤濾
+    /// 槓桿 ETF（00631L 的漲跌幅是 ±20%）與沒有漲跌幅限制的 ETF（00715L 2026-10-02 上漲 11.3%）。
     pub fn is_valid_price_for_market(
         &self,
         symbol: &str,
@@ -97,6 +101,13 @@ impl Share {
         if price <= Decimal::ZERO {
             return false;
         }
+
+        let today = Local::now().date_naive();
+        let emerging = match self.price_limit_on(symbol, today) {
+            PriceLimit::Range { down, up } => return price >= down && price <= up,
+            PriceLimit::Unlimited => true,
+            PriceLimit::Unknown => emerging,
+        };
 
         let site_last_close = Some(snapshot_last_close).filter(|&p| p > Decimal::ZERO);
         let mut baselines = [
@@ -120,6 +131,32 @@ impl Share {
         };
         // 使用乘法比對比除法運算更安全、且能避免 Decimal 除法時可能產生的精度截斷
         baselines.any(|last_close| (price - last_close).abs() <= last_close * tolerance)
+    }
+
+    /// 記錄各股票當天的漲跌幅限制（`date` 為台北時間的取得日期）；`Unknown` 不記錄。
+    pub fn set_price_limits(
+        &self,
+        date: NaiveDate,
+        limits: impl IntoIterator<Item = (String, PriceLimit)>,
+    ) {
+        if let Ok(mut cache) = self.price_limits.write() {
+            for (symbol, limit) in limits {
+                if limit != PriceLimit::Unknown {
+                    cache.insert(symbol, (date, limit));
+                }
+            }
+        }
+    }
+
+    /// 取得指定日期的漲跌幅限制；沒有記錄或不是當天的記錄回傳 `Unknown`。
+    pub fn price_limit_on(&self, symbol: &str, date: NaiveDate) -> PriceLimit {
+        self.price_limits
+            .read()
+            .ok()
+            .and_then(|cache| cache.get(symbol).copied())
+            .filter(|(limit_date, _)| *limit_date == date)
+            .map(|(_, limit)| limit)
+            .unwrap_or_default()
     }
 
     /// 以新抓到的完整快照覆蓋快照快取，自動過濾與昨收價相差 10.5% 以上的異常價格，並保留舊有合法值。
@@ -419,6 +456,69 @@ mod tests {
         );
         assert!(share.is_valid_price("4925", dec!(133.5), dec!(117.09)));
         assert!(!share.is_valid_price("4925", dec!(1.2), dec!(117.09)));
+    }
+
+    /// 當天有漲跌停價時照區間判斷：槓桿 ETF 的 ±20% 不被固定 10.5% 誤濾，超出區間仍擋下。
+    #[test]
+    fn todays_price_limit_range_overrides_the_fixed_tolerance() {
+        use super::super::realtime::PriceLimit;
+
+        let share = Share::new();
+        let today = chrono::Local::now().date_naive();
+        // 00631L：昨收 39.62，漲跌停 31.70～47.54。
+        assert!(!share.is_valid_price("00631L", dec!(45), dec!(39.62)));
+        share.set_price_limits(
+            today,
+            [(
+                "00631L".to_string(),
+                PriceLimit::Range {
+                    down: dec!(31.70),
+                    up: dec!(47.54),
+                },
+            )],
+        );
+        assert!(share.is_valid_price("00631L", dec!(45), dec!(39.62)));
+        assert!(share.is_valid_price("00631L", dec!(47.54), dec!(39.62)));
+        assert!(!share.is_valid_price("00631L", dec!(47.6), dec!(39.62)));
+        assert!(!share.is_valid_price("00631L", dec!(31.6), dec!(39.62)));
+    }
+
+    /// 沒有漲跌幅限制的 ETF 改用寬鬆門檻（00715L 2026-10-02 上漲 11.3%），明顯錯誤的值仍擋下。
+    #[test]
+    fn unlimited_securities_use_the_relaxed_tolerance() {
+        use super::super::realtime::PriceLimit;
+
+        let share = Share::new();
+        let today = chrono::Local::now().date_naive();
+        assert!(!share.is_valid_price("00715L", dec!(70.75), dec!(63.55)));
+        share.set_price_limits(today, [("00715L".to_string(), PriceLimit::Unlimited)]);
+        assert!(share.is_valid_price("00715L", dec!(70.75), dec!(63.55)));
+        assert!(!share.is_valid_price("00715L", dec!(0.5), dec!(63.55)));
+    }
+
+    /// 前一天的漲跌停價不適用今天；`Unknown` 不會被記錄。
+    #[test]
+    fn stale_or_unknown_price_limits_are_ignored() {
+        use super::super::realtime::PriceLimit;
+
+        let share = Share::new();
+        let today = chrono::Local::now().date_naive();
+        let yesterday = today - chrono::Duration::days(1);
+        share.set_price_limits(
+            yesterday,
+            [(
+                "00631L".to_string(),
+                PriceLimit::Range {
+                    down: dec!(31.70),
+                    up: dec!(47.54),
+                },
+            )],
+        );
+        assert_eq!(share.price_limit_on("00631L", today), PriceLimit::Unknown);
+        assert!(!share.is_valid_price("00631L", dec!(45), dec!(39.62)));
+
+        share.set_price_limits(today, [("2330".to_string(), PriceLimit::Unknown)]);
+        assert_eq!(share.price_limit_on("2330", today), PriceLimit::Unknown);
     }
 
     /// 來源已知是興櫃時（Yahoo 興櫃類股），主檔沒有該代號也適用興櫃閾值。

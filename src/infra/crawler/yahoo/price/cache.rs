@@ -561,6 +561,15 @@ fn apply_category_snapshots(
         .insert(category_key, new_symbols)
         .unwrap_or_default();
 
+    // 驗證前先記下本輪的漲跌停價：Yahoo 類股報價自帶當日漲跌幅限制，比固定的 10.5% 門檻準確，
+    // 也讓其他備援站點的報價能用同一份限制驗證。
+    SHARE.set_price_limits(
+        chrono::Local::now().date_naive(),
+        category_snapshots
+            .iter()
+            .map(|(symbol, snapshot)| (symbol.clone(), snapshot.price_limit)),
+    );
+
     match SHARE.stock_snapshots.write() {
         Ok(mut cache) => {
             let mut changed_event_count = 0usize;
