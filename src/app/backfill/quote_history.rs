@@ -56,39 +56,46 @@ pub async fn execute(
     to: NaiveDate,
 ) -> Result<QuoteHistoryBackfillSummary> {
     let repository = PgQuoteRepository::new();
-    execute_with(
-        &MarketRoutedMonthlyQuoteFetcher,
-        &repository,
-        stock_symbols,
-        from,
-        to,
-    )
-    .await
+    let fetcher = MarketRoutedMonthlyQuoteFetcher {
+        listed: &twse::stock_day::TwseMonthlyQuoteFetcher,
+        otc: &tpex::stock_day::TpexMonthlyQuoteFetcher,
+        market_of: cached_market_id,
+    };
+    execute_with(&fetcher, &repository, stock_symbols, from, to).await
 }
 
 /// 依股票主檔的市場別選擇個股月行情來源：上櫃走櫃買中心，其餘走證交所。
 ///
 /// TWSE `STOCK_DAY` 查上櫃代號只會回「查無資料」，不分流的話上櫃缺口永遠補不回來。
-/// 主檔查不到的代號（快取未載入、已不在主檔）沿用證交所。
-struct MarketRoutedMonthlyQuoteFetcher;
+/// 查不到市場別的代號（快取未載入、已不在主檔）沿用證交所。
+struct MarketRoutedMonthlyQuoteFetcher<'a> {
+    /// 上市（與其他非上櫃）證券的來源。
+    listed: &'a dyn MonthlyQuoteFetcher,
+    /// 上櫃證券的來源。
+    otc: &'a dyn MonthlyQuoteFetcher,
+    /// 查詢代號的市場別；正式流程是 [`cached_market_id`]。
+    market_of: fn(&str) -> Option<i32>,
+}
 
 #[async_trait::async_trait]
-impl MonthlyQuoteFetcher for MarketRoutedMonthlyQuoteFetcher {
+impl MonthlyQuoteFetcher for MarketRoutedMonthlyQuoteFetcher<'_> {
     async fn fetch(&self, stock_symbol: &str, month: NaiveDate) -> Result<Vec<DailyQuoteDto>> {
-        let is_otc = SHARE
-            .get_stock(stock_symbol)
-            .await
-            .is_some_and(|stock| stock.market_id() == StockExchangeMarket::OverTheCounter.serial());
-        if is_otc {
-            tpex::stock_day::TpexMonthlyQuoteFetcher
-                .fetch(stock_symbol, month)
-                .await
+        if (self.market_of)(stock_symbol) == Some(StockExchangeMarket::OverTheCounter.serial()) {
+            self.otc.fetch(stock_symbol, month).await
         } else {
-            twse::stock_day::TwseMonthlyQuoteFetcher
-                .fetch(stock_symbol, month)
-                .await
+            self.listed.fetch(stock_symbol, month).await
         }
     }
+}
+
+/// 從股票主檔快取查市場別。
+fn cached_market_id(stock_symbol: &str) -> Option<i32> {
+    SHARE
+        .stocks
+        .read()
+        .ok()?
+        .get(stock_symbol)
+        .map(|stock| stock.market_id())
 }
 
 /// [`execute`] 的可注入版本，供測試驗證流程本身。
@@ -506,5 +513,60 @@ mod tests {
     #[test]
     fn months_between_rejects_a_reversed_range() {
         assert!(months_between(date(2022, 1, 1), date(2021, 12, 1)).is_err());
+    }
+
+    /// 測試用的市場別：00679B 是上櫃，其他當上市。
+    fn stub_market_of(stock_symbol: &str) -> Option<i32> {
+        (stock_symbol == "00679B").then_some(StockExchangeMarket::OverTheCounter.serial())
+    }
+
+    /// 上櫃代號走櫃買來源，其餘（含查不到市場別的）走證交所來源。
+    #[tokio::test]
+    async fn market_routed_fetcher_sends_otc_symbols_to_tpex() {
+        let listed = StubFetcher::default();
+        let otc = StubFetcher::default();
+        let fetcher = MarketRoutedMonthlyQuoteFetcher {
+            listed: &listed,
+            otc: &otc,
+            market_of: stub_market_of,
+        };
+        let month = date(2019, 3, 1);
+
+        for symbol in ["00679B", "0050", "9999X"] {
+            fetcher
+                .fetch(symbol, month)
+                .await
+                .expect("假抓取端不會失敗");
+        }
+
+        assert_eq!(otc.requested(), vec![("00679B".to_string(), month)]);
+        assert_eq!(
+            listed.requested(),
+            vec![("0050".to_string(), month), ("9999X".to_string(), month)]
+        );
+    }
+
+    /// 市場別取自股票主檔快取；不在快取內的代號回傳 None。
+    #[test]
+    fn cached_market_id_reads_the_stock_cache() {
+        const SYMBOL: &str = "79951";
+        let stock = crate::domain::registry::entity::Stock::register(
+            SYMBOL.to_string(),
+            "測試上櫃".to_string(),
+            StockExchangeMarket::OverTheCounter.serial(),
+            1,
+        );
+        SHARE
+            .stocks
+            .write()
+            .expect("stocks lock")
+            .insert(SYMBOL.to_string(), stock);
+
+        assert_eq!(
+            cached_market_id(SYMBOL),
+            Some(StockExchangeMarket::OverTheCounter.serial())
+        );
+        SHARE.stocks.write().expect("stocks lock").remove(SYMBOL);
+        assert_eq!(cached_market_id(SYMBOL), None);
     }
 }
