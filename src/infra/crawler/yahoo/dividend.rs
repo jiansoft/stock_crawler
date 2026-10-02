@@ -403,6 +403,8 @@ fn merge_annual_event_into_last_period(details: &mut Vec<YahooDividendDetail>) {
 /// - ETF 的季別重複（00777B 每月配息、Yahoo 一季標三次 `2026Q2`）：依除權息日先後改成該季的月別，
 ///   Q2 的三次依序為 M04、M05、M06。
 /// - ETF 的半年別重複（006208 一年兩次都標 `2025H1`）：依除權息日先後改成 H1、H2。
+/// - ETF 的期別只有年份且重複（00930 雙月配每次都標 `2026`）：以除權息月份標成 M01～M12；
+///   沒有除權息日的列略過，同月份有兩次時無法標記，保留日期最晚的一列。
 /// - 個股的重複是同一次配息被列了兩次（延後除息前的舊日期仍掛著，如 1109 2022 年
 ///   07-14 與 08-04）：只留除權息日最晚的一列；抽查 10 檔有 9 檔與交易所除權息結果相符，
 ///   其餘由交易所資料核對流程修正。
@@ -452,6 +454,25 @@ fn resolve_repeated_periods(details: &mut Vec<YahooDividendDetail>, is_etf: bool
                 )
             }
             "H1" | "H2" if indexes.len() == 2 => Some(vec!["H1".to_string(), "H2".to_string()]),
+            // 期別只有年份（00930 雙月配 Yahoo 每次都只寫「2026」）：沒有期間可用，改以除息月份標記。
+            "" => {
+                // 沒有除息日的列無從決定月份，先略過，等日期公布再收；留著它日後會變成重複列。
+                let (dated, undated): (Vec<usize>, Vec<usize>) = indexes
+                    .iter()
+                    .partition(|&&index| !latest_event_date(&details[index]).is_empty());
+                let months: Vec<String> = dated
+                    .iter()
+                    .map(|&index| format!("M{}", &latest_event_date(&details[index])[5..7]))
+                    .collect();
+                let distinct: HashSet<&String> = months.iter().collect();
+                if dated.len() >= 2 && distinct.len() == months.len() {
+                    removed.extend(undated);
+                    indexes = dated;
+                    Some(months)
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
         match relabeled {
@@ -1102,6 +1123,44 @@ mod tests {
         assert_eq!(
             periods(&result, 2026),
             vec![("Q1".to_string(), dec!(0.2), "2026-03-30".to_string())]
+        );
+    }
+
+    /// ETF 期別只有年份、一年配好幾次（00930 雙月配）時，以除息月份標記，每一次都保留。
+    #[test]
+    fn repeated_year_only_periods_of_an_etf_use_the_ex_date_month() {
+        let html = wrap_rows(&[
+            dividend_row("2026", "0.815", "-", "2026/09/23", "-", "2026/10/20", "-"),
+            dividend_row("2026", "0.25", "-", "2026/07/27", "-", "2026/08/20", "-"),
+            dividend_row("2026", "0.31", "-", "2026/05/26", "-", "2026/06/20", "-"),
+            dividend_row("2026", "0.12", "-", "尚未公布", "-", "尚未公布", "-"),
+            dividend_row("2025", "0.141", "-", "2026/01/20", "-", "2026/02/12", "-"),
+        ]);
+        let result = parse_dividend_html("00930", "https://example.test", &html).expect("解析成功");
+
+        assert_eq!(
+            periods(&result, 2026),
+            vec![
+                ("A".to_string(), dec!(0.141), "2026-01-20".to_string()),
+                ("M05".to_string(), dec!(0.31), "2026-05-26".to_string()),
+                ("M07".to_string(), dec!(0.25), "2026-07-27".to_string()),
+                ("M09".to_string(), dec!(0.815), "2026-09-23".to_string()),
+            ]
+        );
+    }
+
+    /// 同一個月份除息兩次時無法以月份區分，保留日期最晚的一列。
+    #[test]
+    fn year_only_repeats_in_the_same_month_keep_the_latest_row() {
+        let html = wrap_rows(&[
+            dividend_row("2026", "0.1", "-", "2026/03/02", "-", "-", "-"),
+            dividend_row("2026", "0.2", "-", "2026/03/30", "-", "-", "-"),
+        ]);
+        let result = parse_dividend_html("00999", "https://example.test", &html).expect("解析成功");
+
+        assert_eq!(
+            periods(&result, 2026),
+            vec![("".to_string(), dec!(0.2), "2026-03-30".to_string())]
         );
     }
 }
