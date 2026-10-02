@@ -4,6 +4,8 @@ pub mod capital_reduction;
 pub mod etf;
 /// 上櫃除權除息預告表
 pub mod ex_dividend_announcement;
+/// 上櫃除權除息計算結果表（已除權息的實際日期、現金股利與配股）
+pub mod ex_right_result;
 /// 興櫃每股淨值
 pub mod net_asset_value_per_share;
 /// 台股收盤報價-上櫃

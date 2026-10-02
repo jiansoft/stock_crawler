@@ -40,6 +40,9 @@
 //!   不讀寫 Redis 略過旗標。
 //! - `test_backfill_financial_reports_all`：
 //!   一次採集全部上市櫃股票的三大財務報表（首次建檔用，約 3～4 小時）。
+//! - `test_reconcile_ex_right_results`：
+//!   以交易所除權除息計算結果核對 `MANUAL_EX_RIGHT_FROM`～`MANUAL_EX_RIGHT_TO` 的股利日期與金額；
+//!   預設只試算，`MANUAL_EX_RIGHT_APPLY=1` 才寫入。
 //! - `test_backfill_foreign_holding_history`：
 //!   依 [`MANUAL_QFII_HISTORY_START`]～[`MANUAL_QFII_HISTORY_END`] 逐日回補外資持股歷史
 //!   （`qfii_history`），最後重算 `qfii_trend`；不發持股通知。
@@ -583,4 +586,34 @@ async fn test_backfill_foreign_holding_history() {
         .expect("foreign holding history backfill failed");
 
     println!("結束 test_backfill_foreign_holding_history {start}~{end} {summary:?}");
+}
+
+/// 以交易所除權除息計算結果核對指定期間的股利日期與金額。
+///
+/// 預設只試算並印出摘要；設 `MANUAL_EX_RIGHT_APPLY=1` 才寫入（含從 Yahoo 補缺漏，每檔間隔 2 秒）。
+/// 排程每天只核對近 45 天，
+/// 歷史資料用這個入口一次核對（交易所資料自 2010 年前後起可查）。
+///
+/// 執行範例：
+/// `MANUAL_EX_RIGHT_FROM=2019-01-01 MANUAL_EX_RIGHT_TO=2026-10-01 cargo test app::manual_backfill::test_reconcile_ex_right_results -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_reconcile_ex_right_results() {
+    dotenvy::dotenv().ok();
+    SHARE.load().await;
+
+    let parse = |name: &str, default: &str| {
+        let value = std::env::var(name).unwrap_or_else(|_| default.to_string());
+        NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} should be YYYY-MM-DD, got {value}"))
+    };
+    let from = parse("MANUAL_EX_RIGHT_FROM", "2019-01-01");
+    let to = parse("MANUAL_EX_RIGHT_TO", "2026-10-01");
+    let apply = std::env::var("MANUAL_EX_RIGHT_APPLY").is_ok_and(|value| value == "1");
+
+    let summary = dividend::ex_right_reconcile::execute(from, to, apply)
+        .await
+        .expect("ex-right reconciliation failed");
+
+    println!("結束 test_reconcile_ex_right_results {from}~{to} apply={apply} {summary:?}");
 }
