@@ -6,6 +6,8 @@ pub mod eps;
 pub mod etf;
 /// 上市除權除息預告表
 pub mod ex_dividend_announcement;
+/// 上市除權除息計算結果表（已除權息的實際日期與息值）
+pub mod ex_right_result;
 /// 台股休市日期
 pub mod holiday_schedule;
 /// 國際證券辨識

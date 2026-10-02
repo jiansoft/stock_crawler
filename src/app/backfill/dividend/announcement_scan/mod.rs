@@ -21,7 +21,8 @@
 //!
 //! ## 期別怎麼來：兩階段判定
 //!
-//! `dividend` 的唯一鍵是 `(security_code, year, quarter)`，而預告表只有除權息日期，
+//! `dividend` 的主鍵是 `(security_code, year, year_of_dividend, quarter)`（年度層級列另以
+//! `(security_code, year)` 唯一），而預告表只有除權息日期，
 //! **沒有股利所屬期間**，無法決定一筆事件屬於哪一季。因此期別分兩階段解出：
 //!
 //! 1. **批次**：用 MOPS 的股利分派情形以「金額完全吻合」配對。一次請求涵蓋全部上市公司，

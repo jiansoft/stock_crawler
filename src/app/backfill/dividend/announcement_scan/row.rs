@@ -60,11 +60,13 @@ pub(super) fn match_existing_row<'a>(
         return RowMatch::NotFound;
     };
 
-    // 2. 發放年度與季別都相同。
-    if let Some(row) = candidates
-        .iter()
-        .find(|row| row.year == paid_year && row.quarter == quarter)
-    {
+    // 2. 發放年度與季別都相同；分期明細還要所屬年度相同（同一發放年度可能有
+    //    2021H1、2022H1 兩次配息），年度層級列則每個發放年度只有一列。
+    if let Some(row) = candidates.iter().find(|row| {
+        row.year == paid_year
+            && row.quarter == quarter
+            && (quarter.is_empty() || row.year_of_dividend == resolved.year_of_dividend)
+    }) {
         return RowMatch::Matched(row);
     }
 

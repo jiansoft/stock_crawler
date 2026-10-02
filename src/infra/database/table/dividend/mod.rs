@@ -7,7 +7,7 @@ pub mod dividend_record_detail;
 pub mod dividend_record_detail_more;
 pub(crate) mod extension;
 /// `Dividend` 的資料庫寫入／更新操作子模組。
-mod mutation;
+pub(crate) mod mutation;
 /// `Dividend` 的資料庫查詢操作子模組。
 mod query;
 
