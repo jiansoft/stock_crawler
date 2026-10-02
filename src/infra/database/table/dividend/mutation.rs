@@ -1,34 +1,37 @@
 //! `Dividend` 的資料庫寫入／更新操作。
 //!
-//! 包含單筆 upsert、批次 upsert、年度股利合併寫入，以及配息/發放日更新。
+//! 包含單筆 upsert、年度股利合併寫入，以及配息/發放日更新。
 
 use anyhow::{Context, Result, anyhow};
-use sqlx::{QueryBuilder, postgres::PgQueryResult};
+use sqlx::postgres::PgQueryResult;
 
 use crate::infra::database;
 
 use super::Dividend;
 
-impl Dividend {
-    /// Asynchronously upserts a dividend record into the database.
-    ///
-    /// This method inserts a new record into the `dividend` table, or updates an existing record if a conflict arises.
-    /// Conflicts are determined by a combination of `security_code`, `year`, and `quarter`.
-    ///
-    /// The method binds the properties of the `Entity` struct to the SQL query parameters and executes the query using the `DB.pool`.
-    ///
-    /// # Returns
-    ///
-    /// This method returns a `Result` wrapping a `PgQueryResult`, which represents the result of the query execution.
-    /// On success, the `PgQueryResult` includes information about the executed query, such as the number of rows affected.
-    /// On failure, the `Result` will contain an `Error`.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if the SQL query execution fails,
-    /// for instance due to a database connection error or a violation of database constraints.
-    pub async fn upsert(&self) -> Result<PgQueryResult> {
-        let sql = r#"
+/// 年度層級列（`quarter = ''`）的衝突目標：每個發放年度只有一列（部分唯一索引）。
+macro_rules! annual_level_conflict_target {
+    () => {
+        r#"(security_code, "year") WHERE quarter = ''"#
+    };
+}
+
+/// 分期明細的衝突目標：主鍵 `(security_code, year, year_of_dividend, quarter)`。
+///
+/// 所屬年度在主鍵內，同一發放年度才能同時存兩次同期別的配息（3008 的 2021H1 與 2022H1）。
+macro_rules! detail_conflict_target {
+    () => {
+        r#"(security_code, "year", year_of_dividend, quarter)"#
+    };
+}
+
+pub(crate) use {annual_level_conflict_target, detail_conflict_target};
+
+/// 組出 [`Dividend::upsert`] 的 SQL；`$target` 為衝突目標。
+macro_rules! upsert_sql {
+    ($target:expr) => {
+        concat!(
+            r#"
 INSERT INTO dividend (
     security_code, "year", year_of_dividend, quarter,
     cash_dividend, stock_dividend, "sum","ex-dividend_date1", "ex-dividend_date2",
@@ -36,7 +39,9 @@ INSERT INTO dividend (
     earnings_cash_dividend, capital_reserve_stock_dividend, earnings_stock_dividend,
     payout_ratio_cash, payout_ratio_stock, payout_ratio)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
+ON CONFLICT "#,
+            $target,
+            r#" DO UPDATE SET
     year_of_dividend = EXCLUDED.year_of_dividend,
     cash_dividend = EXCLUDED.cash_dividend,
     stock_dividend = EXCLUDED.stock_dividend,
@@ -53,7 +58,41 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
     payout_ratio_cash = EXCLUDED.payout_ratio_cash,
     payout_ratio_stock = EXCLUDED.payout_ratio_stock,
     payout_ratio = EXCLUDED.payout_ratio;
-"#;
+"#
+        )
+    };
+}
+
+/// 年度層級列的 upsert：以發放年度為衝突目標。
+const UPSERT_ANNUAL_LEVEL_SQL: &str = upsert_sql!(annual_level_conflict_target!());
+/// 分期明細的 upsert：以主鍵為衝突目標。
+const UPSERT_DETAIL_SQL: &str = upsert_sql!(detail_conflict_target!());
+
+impl Dividend {
+    /// Asynchronously upserts a dividend record into the database.
+    ///
+    /// This method inserts a new record into the `dividend` table, or updates an existing record if a conflict arises.
+    /// Conflicts follow the two unique keys: one annual-level row per payout year,
+    /// and `security_code`, `year`, `year_of_dividend`, `quarter` for period rows.
+    ///
+    /// The method binds the properties of the `Entity` struct to the SQL query parameters and executes the query using the `DB.pool`.
+    ///
+    /// # Returns
+    ///
+    /// This method returns a `Result` wrapping a `PgQueryResult`, which represents the result of the query execution.
+    /// On success, the `PgQueryResult` includes information about the executed query, such as the number of rows affected.
+    /// On failure, the `Result` will contain an `Error`.
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if the SQL query execution fails,
+    /// for instance due to a database connection error or a violation of database constraints.
+    pub async fn upsert(&self) -> Result<PgQueryResult> {
+        let sql = if self.quarter.is_empty() {
+            UPSERT_ANNUAL_LEVEL_SQL
+        } else {
+            UPSERT_DETAIL_SQL
+        };
         sqlx::query(sql)
             .bind(&self.security_code)
             .bind(self.year)
@@ -85,89 +124,6 @@ ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
                     why,
                 )
             })
-    }
-
-    /// 批次新增或更新多筆股利資料（以 `security_code + year + quarter` 為鍵）。
-    ///
-    /// 此函式使用 SQLx 的 `QueryBuilder::push_values` 建立多值 `INSERT` 語句，
-    /// 並在主鍵衝突時執行對應的欄位更新。相較於單筆逐次寫入，批次寫入能顯著降低資料庫連線延遲。
-    ///
-    /// # 參數
-    /// * `dividends` - 要寫入的股利實體清單。
-    ///
-    /// # 錯誤
-    /// 當 SQL 執行失敗或傳入清單為空時回傳錯誤。
-    pub async fn batch_upsert(dividends: &[Self]) -> Result<PgQueryResult> {
-        // 檢查傳入的股利清單是否為空
-        if dividends.is_empty() {
-            return Err(anyhow!("Cannot batch_upsert empty dividends slice"));
-        }
-
-        // 1. 初始化 QueryBuilder 並定義基本 INSERT 欄位
-        let mut query_builder = QueryBuilder::new(
-            r#"
-INSERT INTO dividend (
-    security_code, "year", year_of_dividend, quarter,
-    cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2",
-    payable_date1, payable_date2, created_time, updated_time, capital_reserve_cash_dividend,
-    earnings_cash_dividend, capital_reserve_stock_dividend, earnings_stock_dividend,
-    payout_ratio_cash, payout_ratio_stock, payout_ratio)
-"#,
-        );
-
-        // 2. 批次推入資料列與對應參數綁定
-        query_builder.push_values(dividends, |mut b, item| {
-            b.push_bind(&item.security_code)
-                .push_bind(item.year)
-                .push_bind(item.year_of_dividend)
-                .push_bind(&item.quarter)
-                .push_bind(item.cash_dividend)
-                .push_bind(item.stock_dividend)
-                .push_bind(item.sum)
-                .push_bind(&item.ex_dividend_date1)
-                .push_bind(&item.ex_dividend_date2)
-                .push_bind(&item.payable_date1)
-                .push_bind(&item.payable_date2)
-                .push_bind(item.created_time)
-                .push_bind(item.updated_time)
-                .push_bind(item.capital_reserve_cash_dividend)
-                .push_bind(item.earnings_cash_dividend)
-                .push_bind(item.capital_reserve_stock_dividend)
-                .push_bind(item.earnings_stock_dividend)
-                .push_bind(item.payout_ratio_cash)
-                .push_bind(item.payout_ratio_stock)
-                .push_bind(item.payout_ratio);
-        });
-
-        // 3. 串接衝突更新子句 (Conflict Resolution)
-        query_builder.push(
-            r#"
-ON CONFLICT (security_code,"year",quarter) DO UPDATE SET
-    year_of_dividend = EXCLUDED.year_of_dividend,
-    cash_dividend = EXCLUDED.cash_dividend,
-    stock_dividend = EXCLUDED.stock_dividend,
-    "sum" = EXCLUDED."sum",
-    "ex-dividend_date1" = EXCLUDED."ex-dividend_date1",
-    "ex-dividend_date2" = EXCLUDED."ex-dividend_date2",
-    payable_date1 = EXCLUDED.payable_date1,
-    payable_date2 = EXCLUDED.payable_date2,
-    updated_time = EXCLUDED.updated_time,
-    capital_reserve_cash_dividend = EXCLUDED.capital_reserve_cash_dividend,
-    earnings_cash_dividend = EXCLUDED.earnings_cash_dividend,
-    capital_reserve_stock_dividend = EXCLUDED.capital_reserve_stock_dividend,
-    earnings_stock_dividend = EXCLUDED.earnings_stock_dividend,
-    payout_ratio_cash = EXCLUDED.payout_ratio_cash,
-    payout_ratio_stock = EXCLUDED.payout_ratio_stock,
-    payout_ratio = EXCLUDED.payout_ratio;
-"#,
-        );
-
-        // 4. 建立並執行查詢
-        let query = query_builder.build();
-        query
-            .execute(database::get_connection())
-            .await
-            .map_err(|why| anyhow!("Failed to batch_upsert dividends from database: {:?}", why))
     }
 
     /// 更新年度內有多次配息記錄時將其合併計算成年度股利
@@ -221,7 +177,7 @@ SELECT security_code,
 where security_code = $3 and year = $4 and quarter != ''
 group by security_code
 order by security_code
-ON CONFLICT (security_code,year,quarter) DO UPDATE SET
+ON CONFLICT (security_code, "year") WHERE quarter = '' DO UPDATE SET
     year_of_dividend = EXCLUDED.year_of_dividend,
     cash_dividend = EXCLUDED.cash_dividend,
     stock_dividend = EXCLUDED.stock_dividend,

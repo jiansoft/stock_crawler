@@ -6,6 +6,8 @@ use scopeguard::defer;
 mod announcement_scan;
 /// 修復帶有配息日期的年度合計列。
 mod annual_total_repair;
+/// 以交易所除權除息計算結果核對股利資料。
+pub(crate) mod ex_right_reconcile;
 /// 定期掃描近期股利與手動回補歷年配息明細。
 mod missing_or_multiple;
 /// 更新歷史配息率。
@@ -108,6 +110,32 @@ pub async fn execute() -> Result<()> {
 
     Ok(())
 }
+
+/// 以交易所除權除息計算結果核對近 45 天的股利資料。
+///
+/// 見 [`ex_right_reconcile`]；交易所來源抓取失敗時回傳錯誤、不寫入任何資料。
+pub async fn reconcile_ex_right_results() -> Result<()> {
+    tracing::info!("核對交易所除權息結果開始");
+    defer! {
+       tracing::info!("核對交易所除權息結果結束");
+    }
+
+    let today = Local::now().date_naive();
+    let start = today - chrono::Duration::days(RECONCILE_LOOKBACK_DAYS);
+    let summary = ex_right_reconcile::execute(start, today, true).await?;
+    tracing::info!(
+        official = summary.official,
+        matched = summary.matched,
+        updated = summary.updated,
+        missing = summary.missing,
+        ambiguous = summary.ambiguous,
+        "核對交易所除權息結果完成"
+    );
+    Ok(())
+}
+
+/// 每日核對回看的天數：延後除息、日期未公布的列通常在除權息後幾週內才會被發現。
+const RECONCILE_LOOKBACK_DAYS: i64 = 45;
 
 /// 掃描交易所的除權除息公告，補齊漏抓的股利事件與日期。
 ///

@@ -147,6 +147,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "掃描除權息公告補齊漏抓事件",
             dividend::scan_announcements,
         ),
+        // 05:37 以交易所除權除息計算結果核對近 45 天的股利日期與金額
+        // Yahoo 會留著延後除息前的舊日期；必須排在 05:40 的 CAGR 之前，含息報酬才會用到正確的除息日
+        create_job(
+            "0 37 5 * * *",
+            "核對交易所除權息結果",
+            dividend::reconcile_ex_right_results,
+        ),
         // 05:40 計算各期間年化報酬率(CAGR)
         // 必須排在 21:00 年度配息回補與 05:00~05:30 各項回補之後，
         // 否則當日結果會少算前一晚才補進來的股利
