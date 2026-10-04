@@ -682,6 +682,52 @@ mod tests {
         assert_eq!(top.name, "測試79972");
     }
 
+    /// 盤中路徑讀全域快取後，回應的來源標示必須固定為即時；只驗證中繼欄位，
+    /// 不依賴快取內容（其他測試可能同時寫入或清空快取）。
+    #[test]
+    fn realtime_movers_reports_the_realtime_source() {
+        let response = super::realtime_movers(MoversRankBy::TopVolume, "tpex", 4, 5);
+        assert_eq!(response.source, "realtime");
+        assert!(response.is_realtime);
+        assert_eq!(response.rank_by, "top_volume");
+        assert_eq!(response.market, "tpex");
+        assert!(response.movers.len() <= 5);
+        assert!(response.movers.iter().all(|mover| mover.market_id == 4));
+        assert_eq!(response.data_as_of.len(), 10, "data_as_of 應為 YYYY-MM-DD");
+    }
+
+    /// 收盤來源的資料列轉成排行 DTO：張數、昨收與採集站點一律 null。
+    #[test]
+    fn closing_row_keeps_unit_semantics() {
+        let row = super::ClosingMoverRow {
+            stock_symbol: "79971".to_owned(),
+            name: "測試79971".to_owned(),
+            market_id: 2,
+            industry_id: 24,
+            price: Decimal::new(1055, 1),
+            change: Decimal::new(55, 1),
+            change_percent: Decimal::new(55, 1),
+            open_price: Decimal::new(100, 0),
+            high_price: Decimal::new(106, 0),
+            low_price: Decimal::new(99, 0),
+            volume_shares: Decimal::new(123_000, 0),
+            trade_value: Decimal::new(12_976_500, 0),
+            transaction_count: Decimal::new(321, 0),
+        };
+        let mover = row.into_dto(3);
+        assert_eq!(mover.rank, 3);
+        assert_eq!(mover.stock_symbol, "79971");
+        assert_eq!(mover.price, Some(105.5));
+        assert_eq!(mover.change_percent, Some(5.5));
+        assert_eq!(mover.open, Some(100.0));
+        assert_eq!(mover.volume_shares, Some(123_000.0));
+        assert_eq!(mover.trade_value, Some(12_976_500.0));
+        assert_eq!(mover.transaction, Some(321.0));
+        assert!(mover.volume_lots.is_none(), "收盤來源沒有張數");
+        assert!(mover.last_close.is_none(), "收盤來源沒有昨收");
+        assert!(mover.source_site.is_none(), "收盤來源沒有採集站點");
+    }
+
     /// 快照沒有名稱時改用股票主檔的名稱。
     #[test]
     fn realtime_movers_fall_back_to_the_registry_name() {
@@ -712,15 +758,11 @@ mod tests {
         }
         let pool = database::get_connection();
         // 資料太少時 planner 一律選全表掃描（CI 的測試庫 `"DailyQuotes"` 是空的），
-        // 量出來的執行計畫沒有參考價值，也不能據此判斷索引是否有效。
+        // 不能據此判斷索引是否有效；這時仍執行 EXPLAIN 確認 SQL 可規劃，只略過索引斷言。
         let row_count: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "DailyQuotes""#)
             .fetch_one(pool)
             .await
             .expect("DailyQuotes row count");
-        if row_count < 1_000 {
-            println!("跳過 M0-2 EXPLAIN：DailyQuotes 只有 {row_count} 列，不足以量測執行計畫");
-            return;
-        }
 
         // 第一步：取最新交易日。應走 "DailyQuotes_Date_include_symbol_idx"
         // 的反向掃描，而不是 Seq Scan。
@@ -734,10 +776,14 @@ mod tests {
             "\n===== movers latest-date =====\n{}",
             latest_plan.join("\n")
         );
-        assert!(
-            latest_plan.join("\n").contains("Index"),
-            "取最新交易日必須走索引，不可全表掃描"
-        );
+        if row_count >= 1_000 {
+            assert!(
+                latest_plan.join("\n").contains("Index"),
+                "取最新交易日必須走索引，不可全表掃描"
+            );
+        } else {
+            println!("DailyQuotes 只有 {row_count} 列，略過索引斷言");
+        }
 
         // 第二步：實際排行查詢，三種排序鍵各跑一次。綁定的日期必須是資料庫
         // 真正的最新交易日——若隨手綁「今天」，遇到收盤資料尚未寫入的時段
@@ -747,10 +793,9 @@ mod tests {
                 .fetch_one(pool)
                 .await
                 .expect("latest date");
-        let Some(latest_date) = latest_date else {
-            println!("跳過 M0-2 排行 EXPLAIN：DailyQuotes 無資料");
-            return;
-        };
+        // 空表時改綁固定歷史日期，仍可驗證三種排序的 SQL 都能規劃與執行。
+        let latest_date = latest_date
+            .unwrap_or_else(|| NaiveDate::from_ymd_opt(2026, 4, 30).expect("固定日期合法"));
         println!("使用交易日 {latest_date} 量測排行查詢");
         for rank_by in [
             MoversRankBy::TopGainers,
