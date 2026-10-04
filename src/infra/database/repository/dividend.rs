@@ -1304,4 +1304,66 @@ mod tests {
             .expect("合計列");
         assert_eq!(total.sum, dec!(17.6309));
     }
+
+    /// 未公布日期的查詢要排除已下市股票：下市前公告的股利永遠不會有日期（4987 科誠）。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn unpublished_dates_skip_delisted_stocks() {
+        dotenvy::dotenv().ok();
+        const DELISTED: &str = "79985";
+        const LISTED: &str = "79986";
+        let pool = database::get_connection();
+        let symbols = vec![DELISTED.to_string(), LISTED.to_string()];
+        let cleanup = || async {
+            sqlx::query("DELETE FROM dividend WHERE security_code = ANY($1)")
+                .bind(&symbols)
+                .execute(pool)
+                .await
+                .expect("清除股利");
+            sqlx::query("DELETE FROM stocks WHERE stock_symbol = ANY($1)")
+                .bind(&symbols)
+                .execute(pool)
+                .await
+                .expect("清除股票主檔");
+        };
+        cleanup().await;
+
+        let repo = PgDividendRepository::new();
+        for (symbol, suspend_listing) in [(DELISTED, true), (LISTED, false)] {
+            sqlx::query(
+                r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, "SuspendListing")
+                   VALUES ($1, $1, $1, $2)"#,
+            )
+            .bind(symbol)
+            .bind(suspend_listing)
+            .execute(pool)
+            .await
+            .expect("插入股票主檔");
+            repo.save(&build_dividend(
+                symbol,
+                TEST_PAYOUT_YEAR,
+                "Q3",
+                dec!(1.5),
+                "尚未公布",
+                "尚未公布",
+            ))
+            .await
+            .expect("測試資料寫入失敗");
+        }
+
+        let found: Vec<String> = repo
+            .fetch_unpublished_dividend_date_or_payable_date_for_specified_year(TEST_PAYOUT_YEAR)
+            .await
+            .expect("查詢未公布日期失敗")
+            .into_iter()
+            .map(|dividend| dividend.security_code)
+            .filter(|symbol| symbols.contains(symbol))
+            .collect();
+        assert_eq!(found, vec![LISTED.to_string()], "已下市股票不該再補日期");
+
+        cleanup().await;
+    }
 }

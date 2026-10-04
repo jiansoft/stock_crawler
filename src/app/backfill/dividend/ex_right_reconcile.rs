@@ -230,9 +230,11 @@ async fn fill_missing_from_yahoo(
 
         let mut total_years = BTreeSet::new();
         let mut filled_here = 0usize;
-        let mut filled_dates = BTreeSet::new();
-        for dividend in select_fills(&events, &details, rows, &plan.used) {
-            repo.save(&dividend).await.with_context(|| {
+        let fills = select_fills(&events, &details, rows, &plan.used);
+        fill.unresolved
+            .extend(unresolved_after_fill(&events, &fills));
+        for dividend in &fills {
+            repo.save(dividend).await.with_context(|| {
                 format!(
                     "Failed to save dividend filled from Yahoo {} {} {}",
                     dividend.security_code, dividend.year, dividend.quarter
@@ -241,18 +243,8 @@ async fn fill_missing_from_yahoo(
             if !dividend.quarter.is_empty() {
                 total_years.insert(dividend.year);
             }
-            filled_dates.insert(dividend.ex_dividend_date_cash.clone());
-            filled_dates.insert(dividend.ex_dividend_date_stock.clone());
             filled_here += 1;
         }
-        fill.unresolved.extend(
-            events
-                .iter()
-                .filter(|event| {
-                    !filled_dates.contains(&event.ex_date.format(DATE_FORMAT).to_string())
-                })
-                .map(|event| event_label(event)),
-        );
         for year in &total_years {
             repo.upsert_annual_total_dividend(symbol, *year).await?;
         }
@@ -290,6 +282,28 @@ async fn fill_missing_from_yahoo(
         tokio::time::sleep(YAHOO_INTERVAL).await;
     }
     Ok(fill)
+}
+
+/// 列出補入後仍沒有對應資料列的缺漏事件（`代號 除權息日`）。
+///
+/// 補入列的現金或股票除權息日與事件同一天，就算該事件已補上。
+fn unresolved_after_fill(events: &[&ExDividendAnnouncement], fills: &[Dividend]) -> Vec<String> {
+    let filled_dates: BTreeSet<&str> = fills
+        .iter()
+        .flat_map(|dividend| {
+            [
+                dividend.ex_dividend_date_cash.as_str(),
+                dividend.ex_dividend_date_stock.as_str(),
+            ]
+        })
+        .collect();
+    events
+        .iter()
+        .filter(|event| {
+            !filled_dates.contains(event.ex_date.format(DATE_FORMAT).to_string().as_str())
+        })
+        .map(|event| event_label(event))
+        .collect()
 }
 
 /// 用 Yahoo 同一個除權日的配股金額補上資料列缺的股票股利；Yahoo 沒有就回傳 `None`。
@@ -1049,5 +1063,49 @@ mod tests {
             ]
         );
         assert!(calendar_year_chunks(d(2026, 2, 3), d(2026, 1, 1)).is_empty());
+    }
+
+    /// 補入列與事件同一天才算補上；Yahoo 沒有同日資料的事件列為補不到
+    /// （00990B 2026-09-23 被同一輪補上，就不該再列為缺漏）。
+    #[test]
+    fn unresolved_after_fill_lists_only_events_without_a_fill() {
+        let filled = cash_event("2026-09-23", dec!(0.08));
+        let unfilled = cash_event("2026-10-28", dec!(0.08));
+        let stock_fill = row(11, 2026, "Q2", Decimal::ZERO, dec!(0.5), "-", "2026-07-15");
+        let stock_event = cash_event("2026-07-15", dec!(0.5));
+        let fills = vec![
+            row(
+                10,
+                2026,
+                "M08",
+                dec!(0.08),
+                Decimal::ZERO,
+                "2026-09-23",
+                "-",
+            ),
+            stock_fill,
+        ];
+
+        assert_eq!(
+            unresolved_after_fill(&[&filled, &unfilled, &stock_event], &fills),
+            vec!["1109 2026-10-28".to_string()]
+        );
+        assert_eq!(
+            unresolved_after_fill(&[&filled], &[]),
+            vec!["1109 2026-09-23".to_string()]
+        );
+        assert!(unresolved_after_fill(&[], &fills).is_empty());
+    }
+
+    /// 日誌只列前 20 筆，沒有缺漏時不記錄。
+    #[test]
+    fn missing_events_are_labelled_and_warned() {
+        assert_eq!(
+            event_label(&cash_event("2026-09-23", dec!(0.08))),
+            "1109 2026-09-23"
+        );
+        warn_missing_events("測試", &[]);
+        let many: Vec<String> = (0..25).map(|index| format!("1109 #{index}")).collect();
+        warn_missing_events("測試", &many);
     }
 }
