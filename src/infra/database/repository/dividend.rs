@@ -347,6 +347,9 @@ impl DividendRepository for PgDividendRepository {
     /// 年度合計列的日期永遠是 `'-'`，若不排除就會讓每一檔有合計列的股票每次排程都白打一次
     /// Yahoo；而且 Yahoo 那邊根本沒有對應的期別（合計列的 `quarter` 是空字串，來源端的全年
     /// 事件已改用 `A`），撈回來也補不到任何日期。
+    ///
+    /// 已下市（`"SuspendListing"`）的股票也排除：下市前公告、來不及除息的股利永遠不會有日期，
+    /// Yahoo 個股頁也已移除（4987 科誠 2026-07 下市後每天 21:00 都對 Yahoo 404）。
     async fn fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
         &self,
         year: i32,
@@ -387,6 +390,12 @@ impl DividendRepository for PgDividendRepository {
                             AND t.year = d.year
                             AND t.quarter <> ''
                     )
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM stocks AS s
+                    WHERE s.stock_symbol = d.security_code
+                        AND s."SuspendListing"
                 );
         "#;
         let rows = sqlx::query(sql)
@@ -1294,5 +1303,67 @@ mod tests {
             .find(|row| row.quarter.is_empty())
             .expect("合計列");
         assert_eq!(total.sum, dec!(17.6309));
+    }
+
+    /// 未公布日期的查詢要排除已下市股票：下市前公告的股利永遠不會有日期（4987 科誠）。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn unpublished_dates_skip_delisted_stocks() {
+        dotenvy::dotenv().ok();
+        const DELISTED: &str = "79985";
+        const LISTED: &str = "79986";
+        let pool = database::get_connection();
+        let symbols = vec![DELISTED.to_string(), LISTED.to_string()];
+        let cleanup = || async {
+            sqlx::query("DELETE FROM dividend WHERE security_code = ANY($1)")
+                .bind(&symbols)
+                .execute(pool)
+                .await
+                .expect("清除股利");
+            sqlx::query("DELETE FROM stocks WHERE stock_symbol = ANY($1)")
+                .bind(&symbols)
+                .execute(pool)
+                .await
+                .expect("清除股票主檔");
+        };
+        cleanup().await;
+
+        let repo = PgDividendRepository::new();
+        for (symbol, suspend_listing) in [(DELISTED, true), (LISTED, false)] {
+            sqlx::query(
+                r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, "SuspendListing")
+                   VALUES ($1, $1, $1, $2)"#,
+            )
+            .bind(symbol)
+            .bind(suspend_listing)
+            .execute(pool)
+            .await
+            .expect("插入股票主檔");
+            repo.save(&build_dividend(
+                symbol,
+                TEST_PAYOUT_YEAR,
+                "Q3",
+                dec!(1.5),
+                "尚未公布",
+                "尚未公布",
+            ))
+            .await
+            .expect("測試資料寫入失敗");
+        }
+
+        let found: Vec<String> = repo
+            .fetch_unpublished_dividend_date_or_payable_date_for_specified_year(TEST_PAYOUT_YEAR)
+            .await
+            .expect("查詢未公布日期失敗")
+            .into_iter()
+            .map(|dividend| dividend.security_code)
+            .filter(|symbol| symbols.contains(symbol))
+            .collect();
+        assert_eq!(found, vec![LISTED.to_string()], "已下市股票不該再補日期");
+
+        cleanup().await;
     }
 }

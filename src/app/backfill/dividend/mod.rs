@@ -129,6 +129,9 @@ pub async fn reconcile_ex_right_results() -> Result<()> {
         updated = summary.updated,
         missing = summary.missing,
         ambiguous = summary.ambiguous,
+        filled = summary.filled,
+        stock_filled = summary.stock_filled,
+        unresolved = summary.unresolved,
         "核對交易所除權息結果完成"
     );
     Ok(())
