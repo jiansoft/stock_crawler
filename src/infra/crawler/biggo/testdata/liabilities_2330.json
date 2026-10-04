@@ -1,0 +1,47 @@
+{
+  "result": true,
+  "data": [
+    {
+      "period": "2026 Q2",
+      "short_term_borrowings_total": 2454896000,
+      "short_term_borrowings": null,
+      "current_financial_liabilities_fvtpl": 2452333000,
+      "current_derivative_liabilities_hedging": 2563000,
+      "accounts_payable_total": 982556180000,
+      "accounts_payable": 108890080000,
+      "accounts_payable_related_parties": 1735737000,
+      "other_payables": 871930363000,
+      "current_tax_liabilities": 283343231000,
+      "current_provisions": null,
+      "current_contract_liabilities": null,
+      "other_current_liabilities": 589407518000,
+      "current_liabilities": 1857761825000,
+      "bonds_payable": 815036716000,
+      "long_term_borrowings": 49226958000,
+      "other_noncurrent_liabilities": 141975372000,
+      "noncurrent_liabilities": 1043421921000,
+      "total_liabilities": 2901183746000
+    },
+    {
+      "period": "2026 Q1",
+      "short_term_borrowings_total": 3076876000,
+      "short_term_borrowings": null,
+      "current_financial_liabilities_fvtpl": 3076876000,
+      "current_derivative_liabilities_hedging": 0,
+      "accounts_payable_total": 854170134000,
+      "accounts_payable": 98055133000,
+      "accounts_payable_related_parties": 1800925000,
+      "other_payables": 754314076000,
+      "current_tax_liabilities": 318839088000,
+      "current_provisions": null,
+      "current_contract_liabilities": null,
+      "other_current_liabilities": 538167350000,
+      "current_liabilities": 1714253448000,
+      "bonds_payable": 860026070000,
+      "long_term_borrowings": 40991672000,
+      "other_noncurrent_liabilities": 75898583000,
+      "noncurrent_liabilities": 1014307316000,
+      "total_liabilities": 2728560764000
+    }
+  ]
+}

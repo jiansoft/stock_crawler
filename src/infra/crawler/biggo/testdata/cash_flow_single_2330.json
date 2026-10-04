@@ -1,0 +1,24 @@
+{
+  "result": true,
+  "data": {
+    "type": "single",
+    "data": [
+      {
+        "period": "2026 Q2",
+        "operating_cash_flow": 783364977000,
+        "investing_cash_flow": -492810418000,
+        "financing_cash_flow": -184653221000,
+        "free_cash_flow": 290554559000,
+        "net_cash_flow": 98580985000
+      },
+      {
+        "period": "2026 Q1",
+        "operating_cash_flow": 698976265000,
+        "investing_cash_flow": -356853756000,
+        "financing_cash_flow": -119910612000,
+        "free_cash_flow": 342122509000,
+        "net_cash_flow": 267780826000
+      }
+    ]
+  }
+}

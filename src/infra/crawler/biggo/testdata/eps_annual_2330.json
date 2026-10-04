@@ -1,0 +1,22 @@
+{
+  "result": true,
+  "data": {
+    "type": "annual",
+    "data": [
+      {
+        "period": "2026",
+        "eps": 49.33,
+        "quarterGrowthRate": null,
+        "yoyGrowthRate": -25.55,
+        "quarterlyAverage": null
+      },
+      {
+        "period": "2025",
+        "eps": 66.26,
+        "quarterGrowthRate": null,
+        "yoyGrowthRate": 46.43,
+        "quarterlyAverage": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "result": true,
+  "data": [
+    {
+      "period": "2026 Q2",
+      "capital_stock": 259323701000,
+      "capital_surplus_total": 58806228000,
+      "capital_surplus_additional_paid_in": 35617758000,
+      "capital_surplus_donated_assets": 116964000,
+      "capital_surplus_merger": 22800434000,
+      "capital_surplus_equity_method": 271072000,
+      "capital_surplus_ownership_changes": null,
+      "capital_surplus": 72290839000,
+      "retained_earnings_total": 6051113099000,
+      "legal_reserve": 311146899000,
+      "unappropriated_retained_earnings": 5739966200000,
+      "retained_earnings": 6051113099000,
+      "other_equity_interest": 49790695000,
+      "equity_attributable_to_owners_of_parent": 6432518334000,
+      "noncontrolling_interests": 41952647000,
+      "equity": 6474470981000
+    },
+    {
+      "period": "2026 Q1",
+      "capital_stock": 259323701000,
+      "capital_surplus_total": 60181220000,
+      "capital_surplus_additional_paid_in": 35617758000,
+      "capital_surplus_donated_assets": 116964000,
+      "capital_surplus_merger": 22800434000,
+      "capital_surplus_equity_method": 1646064000,
+      "capital_surplus_ownership_changes": null,
+      "capital_surplus": 73665831000,
+      "retained_earnings_total": 5504289073000,
+      "legal_reserve": 311146899000,
+      "unappropriated_retained_earnings": 5193142174000,
+      "retained_earnings": 5520488484000,
+      "other_equity_interest": 37482236000,
+      "equity_attributable_to_owners_of_parent": 5890960252000,
+      "noncontrolling_interests": 41428669000,
+      "equity": 5932388921000
+    }
+  ]
+}
