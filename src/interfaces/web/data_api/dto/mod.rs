@@ -30,7 +30,8 @@ pub(super) use market::{
     DividendCalendarEvent, DividendCalendarParams, DividendCalendarResponse, DividendYieldRank,
     DividendYieldRankingParams, DividendYieldRankingResponse, MarketBreadth, MarketBreadthParams,
     MarketBreadthResponse, MarketIndexHistoryParams, MarketIndexHistoryResponse, MarketIndexPoint,
-    QfiiHolding, QfiiHoldingRankingParams, QfiiHoldingRankingResponse,
+    MarketMover, MarketMoversParams, MarketMoversResponse, QfiiHolding, QfiiHoldingRankingParams,
+    QfiiHoldingRankingResponse,
 };
 pub(super) use screening::{ScreenedStock, StockScreeningParams, StockScreeningResponse};
 pub(super) use stocks::{

@@ -11,8 +11,8 @@ use super::{dto, handlers};
 /// 由 handler 註解生成的 OpenAPI 3 文件。
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::stock_valuation, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::ErrorBody, dto::HealthResponse)),
+    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::stock_valuation, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -152,6 +152,7 @@ mod tests {
             "/api/v1/market/index-history",
             "/api/v1/market/dividend-calendar",
             "/api/v1/market/qfii-holding-ranking",
+            "/api/v1/market/movers",
             "/api/v1/market/cagr-ranking",
             "/api/v1/market/cagr-ranking/{stock_symbol}",
             "/api/v1/healthz",
@@ -370,6 +371,72 @@ mod tests {
             "#/components/schemas/QfiiHolding"
         );
         assert!(properties["data_as_of"].to_string().contains("null"));
+    }
+
+    /// 漲跌幅／成交量排行的 OpenAPI 契約（movers 計畫 §4）。
+    ///
+    /// 除了一般的參數與 response 形狀，這裡刻意固定兩件容易被後人「順手統一」
+    /// 而破壞語意的事：
+    /// 1. `rank_by` 只有三個值，**沒有** `top_trade_value`（即時快照沒有成交
+    ///    金額，提供它會讓同一參數在兩個時段語意不同）。
+    /// 2. `is_realtime` 是布林且**不可為 null**——本 endpoint 是唯一可能回
+    ///    `true` 的分析型 endpoint，其餘工具固定 `false`。
+    #[test]
+    fn openapi_movers_schema_pins_sources_and_units() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+
+        let movers = get_operation(&document, "/api/v1/market/movers");
+        // 這個 endpoint 在完全沒有資料時回 404（部署異常等級），因此帶
+        // has_not_found = true。
+        assert_endpoint_responses(movers, "MarketMoversResponse", true);
+
+        let rank_by = query_schema(movers, "rank_by");
+        assert_eq!(rank_by["default"], "top_gainers");
+        assert_eq!(
+            enum_values(&document, rank_by),
+            serde_json::json!(["top_gainers", "top_losers", "top_volume"])
+        );
+        assert_eq!(
+            enum_values(&document, query_schema(movers, "market")),
+            serde_json::json!(["all", "twse", "tpex"])
+        );
+        let limit = query_schema(movers, "limit");
+        assert_eq!(limit["default"], 20);
+        assert_eq!(limit["minimum"], 1);
+        assert_eq!(limit["maximum"], 50);
+
+        let properties = &document["components"]["schemas"]["MarketMoversResponse"]["properties"];
+        assert_eq!(properties["movers"]["type"], "array");
+        assert_eq!(
+            properties["movers"]["items"]["$ref"],
+            "#/components/schemas/MarketMover"
+        );
+        // data_as_of 一定有值（即時為今日、收盤為該交易日），不可為 null。
+        assert!(!properties["data_as_of"].to_string().contains("null"));
+        assert_eq!(properties["is_realtime"]["type"], "boolean");
+        // snapshot_updated_at 只有即時來源有值，必須是 nullable。
+        assert!(
+            properties["snapshot_updated_at"]
+                .to_string()
+                .contains("null")
+        );
+
+        // 兩種成交量單位是分開的欄位，且都可為 null——這是「不做張／股換算」
+        // 這個決策在契約上的體現，不可被合併成單一欄位。
+        let mover = &document["components"]["schemas"]["MarketMover"]["properties"];
+        for field in [
+            "volume_lots",
+            "volume_shares",
+            "trade_value",
+            "transaction",
+            "last_close",
+            "source_site",
+        ] {
+            assert!(
+                mover[field].to_string().contains("null"),
+                "{field} 應為 nullable"
+            );
+        }
     }
 
     /// M4 每日 CAGR 兩條 path 的 OpenAPI 契約：responses、白名單 enum、
