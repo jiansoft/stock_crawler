@@ -1305,6 +1305,12 @@ mod tests {
             println!("跳過 movers_endpoint_db_semantics：即時快照非空");
             return;
         }
+        // CI 的測試庫沒有日報價，以固定歷史日期與假代號種入資料，讓收盤路徑真的跑到
+        // 排序與過濾。資料庫已有更新的交易日時排行以那一天為準，種入的資料只用於下方
+        // 「data_as_of 是種入日期」時的精確斷言。
+        let seed_date = chrono::NaiveDate::from_ymd_opt(2026, 4, 30).expect("固定日期合法");
+        movers_seed::cleanup(seed_date).await;
+        movers_seed::seed(seed_date).await;
         let key = std::env::var("DATA_API_KEY").unwrap_or_else(|_| {
             let generated = "movers-integration-test-key".to_owned();
             unsafe { std::env::set_var("DATA_API_KEY", &generated) };
@@ -1346,10 +1352,6 @@ mod tests {
 
         // 語意二：非交易時段固定走收盤來源，且缺值語意依 §4.4。
         let (status, json) = get("/api/v1/market/movers?limit=20".to_owned()).await;
-        if status == StatusCode::NOT_FOUND {
-            println!("跳過 movers_endpoint_db_semantics：DailyQuotes 無資料");
-            return;
-        }
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["source"], "closing");
         assert_eq!(json["is_realtime"], false);
@@ -1420,6 +1422,107 @@ mod tests {
                     .iter()
                     .all(|mover| mover["market_id"] == expected_id)
             );
+        }
+
+        // 語意五：最新交易日就是種入日期時（CI 的空測試庫），名次必須完全符合種入資料：
+        // 暫停上市的 79983 與零成交量的 79984 都不得出現。
+        if json["data_as_of"] == "2026-04-30" {
+            let symbols = |json: &serde_json::Value| -> Vec<String> {
+                json["movers"]
+                    .as_array()
+                    .expect("movers array")
+                    .iter()
+                    .filter_map(|mover| mover["stock_symbol"].as_str().map(str::to_owned))
+                    .collect()
+            };
+            for (query, expected) in [
+                ("rank_by=top_gainers", vec!["79982", "79981"]),
+                ("rank_by=top_losers", vec!["79981", "79982"]),
+                ("rank_by=top_volume", vec!["79981", "79982"]),
+                ("market=twse", vec!["79981"]),
+                ("market=tpex", vec!["79982"]),
+            ] {
+                let (status, json) = get(format!("/api/v1/market/movers?{query}")).await;
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(symbols(&json), expected, "{query} 的名次不符");
+            }
+            let (_, json) = get("/api/v1/market/movers?limit=1".to_owned()).await;
+            let top = &json["movers"][0];
+            assert_eq!(top["stock_symbol"], "79982");
+            assert_eq!(top["change_percent"], 9.0);
+            assert_eq!(top["volume_shares"], 500.0);
+            assert_eq!(top["trade_value"], 50_000.0);
+            assert_eq!(top["transaction"], 10.0);
+        }
+
+        movers_seed::cleanup(seed_date).await;
+    }
+
+    /// movers 整合測試的假資料：固定歷史日期、假代號，測試前後都會清除。
+    mod movers_seed {
+        use chrono::NaiveDate;
+        use rust_decimal::Decimal;
+
+        /// `(代號, 市場, 暫停上市, 漲跌幅 %, 成交股數)`；昨收固定 100 元。
+        const ROWS: [(&str, i32, bool, i64, i64); 4] = [
+            ("79981", 2, false, 5, 1_000),
+            ("79982", 4, false, 9, 500),
+            ("79983", 2, true, 20, 300),
+            ("79984", 2, false, 8, 0),
+        ];
+
+        /// 寫入股票主檔與指定日期的日報價。
+        pub(super) async fn seed(date: NaiveDate) {
+            let pool = crate::infra::database::get_connection();
+            for (symbol, market_id, suspend_listing, change, volume) in ROWS {
+                sqlx::query(
+                    r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol,
+                                           stock_exchange_market_id, stock_industry_id, "SuspendListing")
+                       VALUES ($1, $2, $1, $3, 24, $4)"#,
+                )
+                .bind(symbol)
+                .bind(format!("測試{symbol}"))
+                .bind(market_id)
+                .bind(suspend_listing)
+                .execute(pool)
+                .await
+                .expect("插入股票主檔");
+                let change = Decimal::new(change, 0);
+                let volume = Decimal::new(volume, 0);
+                sqlx::query(
+                    r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "Change",
+                                                  "ChangeRange", "OpeningPrice", "HighestPrice",
+                                                  "LowestPrice", "TradingVolume", "TradeValue",
+                                                  "Transaction")
+                       VALUES ($1, $2, 100 + $3, $3, $3, 100, 100 + $3, 100, $4, $4 * 100, 10)"#,
+                )
+                .bind(date)
+                .bind(symbol)
+                .bind(change)
+                .bind(volume)
+                .execute(pool)
+                .await
+                .expect("插入日報價");
+            }
+        }
+
+        /// 刪除種入的日報價與股票主檔。
+        pub(super) async fn cleanup(date: NaiveDate) {
+            let pool = crate::infra::database::get_connection();
+            let symbols: Vec<&str> = ROWS.iter().map(|row| row.0).collect();
+            sqlx::query(
+                r#"DELETE FROM "DailyQuotes" WHERE "Date" = $1 AND stock_symbol = ANY($2)"#,
+            )
+            .bind(date)
+            .bind(&symbols)
+            .execute(pool)
+            .await
+            .expect("清除日報價");
+            sqlx::query("DELETE FROM stocks WHERE stock_symbol = ANY($1)")
+                .bind(&symbols)
+                .execute(pool)
+                .await
+                .expect("清除股票主檔");
         }
     }
 }
