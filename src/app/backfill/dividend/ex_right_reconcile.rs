@@ -71,6 +71,8 @@ pub struct ReconcileSummary {
     pub filled: usize,
     /// 從 Yahoo 補上配股金額的資料列數（只在寫入模式）。
     pub stock_filled: usize,
+    /// 資料庫缺、Yahoo 也補不到的事件數（只在寫入模式）。
+    pub unresolved: usize,
 }
 
 /// 一次核對要做的異動。
@@ -126,39 +128,61 @@ pub async fn execute(start: NaiveDate, end: NaiveDate, apply: bool) -> Result<Re
         ambiguous: plan.ambiguous.len(),
         filled: 0,
         stock_filled: 0,
+        unresolved: 0,
     };
-
-    if !plan.missing.is_empty() {
-        let sample: Vec<String> = plan
-            .missing
-            .iter()
-            .take(20)
-            .map(|event| format!("{} {}", event.stock_symbol, event.ex_date))
-            .collect();
-        tracing::warn!(
-            count = plan.missing.len(),
-            "交易所除權息事件在資料庫找不到對應：{}",
-            sample.join(", ")
-        );
-    }
 
     if apply {
         apply_plan(&repo, &plan).await?;
-        (summary.filled, summary.stock_filled) =
-            fill_missing_from_yahoo(&repo, &plan, &existing).await?;
+        let fill = fill_missing_from_yahoo(&repo, &plan, &existing).await?;
+        summary.filled = fill.filled;
+        summary.stock_filled = fill.stock_filled;
+        summary.unresolved = fill.unresolved.len();
+        // 缺漏事件通常會在同一輪由 Yahoo 補上，只有補不到的才需要人處理。
+        warn_missing_events(
+            "交易所除權息事件在資料庫找不到、Yahoo 也補不到",
+            &fill.unresolved,
+        );
+    } else {
+        let missing: Vec<String> = plan.missing.iter().map(event_label).collect();
+        warn_missing_events("交易所除權息事件在資料庫找不到對應", &missing);
     }
     Ok(summary)
 }
 
+/// 事件在日誌中的標示：`代號 除權息日`。
+fn event_label(event: &ExDividendAnnouncement) -> String {
+    format!("{} {}", event.stock_symbol, event.ex_date)
+}
+
+/// 有缺漏事件時記一筆 warn，最多列出 20 筆。
+fn warn_missing_events(message: &str, events: &[String]) {
+    if events.is_empty() {
+        return;
+    }
+    let sample: Vec<&str> = events.iter().take(20).map(String::as_str).collect();
+    tracing::warn!(count = events.len(), "{message}：{}", sample.join(", "));
+}
+
+/// Yahoo 補缺漏的結果。
+#[derive(Debug, Default)]
+struct YahooFill {
+    /// 補入的事件數。
+    filled: usize,
+    /// 補上配股的資料列數。
+    stock_filled: usize,
+    /// 補不到的缺漏事件（`代號 除權息日`）。
+    unresolved: Vec<String>,
+}
+
 /// 用 Yahoo 補資料庫缺的部分：缺漏事件整筆補進來，配股金額缺漏的列補上配股。
-/// 回傳 `(補入事件數, 補上配股的列數)`。
 ///
-/// 每檔股票只抓一次 Yahoo、間隔 2 秒；Yahoo 抓取失敗（例如已下市的 404）只記錄並略過。
+/// 每檔股票只抓一次 Yahoo、間隔 2 秒；Yahoo 抓取失敗（例如已下市的 404）只記錄並略過，
+/// 該檔的缺漏事件列為補不到。
 async fn fill_missing_from_yahoo(
     repo: &PgDividendRepository,
     plan: &ReconcilePlan,
     existing: &HashMap<String, Vec<Dividend>>,
-) -> Result<(usize, usize)> {
+) -> Result<YahooFill> {
     let mut by_symbol: BTreeMap<&str, Vec<&ExDividendAnnouncement>> = BTreeMap::new();
     for event in &plan.missing {
         by_symbol
@@ -180,13 +204,14 @@ async fn fill_missing_from_yahoo(
         .map(|row| (row.serial, row))
         .collect();
 
-    let mut filled = 0usize;
-    let mut stock_filled = 0usize;
+    let mut fill = YahooFill::default();
     for (symbol, events) in by_symbol {
         let yahoo = match yahoo::dividend::visit(symbol).await {
             Ok(value) => value,
             Err(why) => {
                 tracing::warn!("Yahoo 股利頁抓取失敗，略過補缺漏：{symbol} {why:#}");
+                fill.unresolved
+                    .extend(events.iter().map(|event| event_label(event)));
                 tokio::time::sleep(YAHOO_INTERVAL).await;
                 continue;
             }
@@ -205,6 +230,7 @@ async fn fill_missing_from_yahoo(
 
         let mut total_years = BTreeSet::new();
         let mut filled_here = 0usize;
+        let mut filled_dates = BTreeSet::new();
         for dividend in select_fills(&events, &details, rows, &plan.used) {
             repo.save(&dividend).await.with_context(|| {
                 format!(
@@ -215,8 +241,18 @@ async fn fill_missing_from_yahoo(
             if !dividend.quarter.is_empty() {
                 total_years.insert(dividend.year);
             }
+            filled_dates.insert(dividend.ex_dividend_date_cash.clone());
+            filled_dates.insert(dividend.ex_dividend_date_stock.clone());
             filled_here += 1;
         }
+        fill.unresolved.extend(
+            events
+                .iter()
+                .filter(|event| {
+                    !filled_dates.contains(&event.ex_date.format(DATE_FORMAT).to_string())
+                })
+                .map(|event| event_label(event)),
+        );
         for year in &total_years {
             repo.upsert_annual_total_dividend(symbol, *year).await?;
         }
@@ -242,10 +278,10 @@ async fn fill_missing_from_yahoo(
                 repo.upsert_annual_total_dividend(symbol, fixed.year)
                     .await?;
             }
-            stock_filled += 1;
+            fill.stock_filled += 1;
             filled_here += 1;
         }
-        filled += filled_here;
+        fill.filled += filled_here;
         if filled_here > 0 {
             dividend_record::backfill_received_dividend_records_for_stock(symbol)
                 .await
@@ -253,7 +289,7 @@ async fn fill_missing_from_yahoo(
         }
         tokio::time::sleep(YAHOO_INTERVAL).await;
     }
-    Ok((filled, stock_filled))
+    Ok(fill)
 }
 
 /// 用 Yahoo 同一個除權日的配股金額補上資料列缺的股票股利；Yahoo 沒有就回傳 `None`。
