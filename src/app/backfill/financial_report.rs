@@ -24,6 +24,13 @@
 //!
 //! 單檔的 5 次請求與轉譯全部成功後才開始寫入；任一步驟失敗，該檔一筆都不寫，
 //! 不會留下「損益表是新的、現金流量表是舊的」這種半套狀態。
+//!
+//! ## BigGo 備援
+//!
+//! Yahoo 失敗（HTTP 500、格式異常等，404 除外）時改從 BigGo 財經採集（[`backfill_from_biggo`]），
+//! 以 `source = 'biggo'` 寫入、與 Yahoo 的資料列並存；同樣全部成功才寫入。BigGo 只提供與
+//! Yahoo 逐期吻合的欄位（營收、營業利益、稅後淨利、EPS、資產負債總額、五項現金流量等），
+//! 其餘欄位為 `NULL`。Yahoo 回 404 多半是已下市，不走備援。
 
 use std::time::Duration;
 
@@ -31,7 +38,7 @@ use anyhow::{Context, Result, bail};
 use rand::RngExt;
 
 use crate::{
-    app::backfill::acl::YahooFinancialReportAclMapper,
+    app::backfill::acl::{BigGoFinancialReportAclMapper, YahooFinancialReportAclMapper},
     domain::{
         financial::{
             repository::FinancialReportRepository,
@@ -40,9 +47,12 @@ use crate::{
         registry::{entity::Stock, repository::StockRepository},
     },
     infra::{
-        crawler::yahoo::{
-            self,
-            financial_statement::{ReportPeriod, balance_sheet, cash_flow, income_statement},
+        crawler::{
+            biggo::financial_statement::{self as biggo_statement, FiscalPeriod, ReportKind},
+            yahoo::{
+                self,
+                financial_statement::{ReportPeriod, balance_sheet, cash_flow, income_statement},
+            },
         },
         database::repository::{
             financial_report::PgFinancialReportRepository, stock::PgStockRepository,
@@ -89,6 +99,8 @@ pub struct RunSummary {
     pub skipped: usize,
     /// 成功寫入的檔數（含沒有財報、寫入 0 列的標的）。
     pub succeeded: usize,
+    /// Yahoo 失敗、改由 BigGo 備援寫入的檔數。
+    pub fallback: usize,
     /// Yahoo 回 404 的檔數。
     pub not_found: usize,
     /// 失敗的檔數。
@@ -100,7 +112,7 @@ pub struct RunSummary {
 impl RunSummary {
     /// 本輪實際發出請求的檔數。
     pub fn attempted(&self) -> usize {
-        self.succeeded + self.not_found + self.failed
+        self.succeeded + self.fallback + self.not_found + self.failed
     }
 }
 
@@ -112,16 +124,17 @@ pub async fn execute() -> Result<()> {
     let summary = run(MAX_STOCKS_PER_RUN).await?;
 
     tracing::info!(
-        "Yahoo 財報採集結束: candidates={}, skipped={}, succeeded={}, not_found={}, failed={}, rows={}",
+        "Yahoo 財報採集結束: candidates={}, skipped={}, succeeded={}, fallback={}, not_found={}, failed={}, rows={}",
         summary.candidates,
         summary.skipped,
         summary.succeeded,
+        summary.fallback,
         summary.not_found,
         summary.failed,
         summary.rows
     );
 
-    if summary.failed > 0 && summary.succeeded == 0 {
+    if summary.failed > 0 && summary.succeeded == 0 && summary.fallback == 0 {
         bail!(
             "Yahoo financial report backfill failed for all {} attempted stocks",
             summary.failed
@@ -205,10 +218,23 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
                 );
             }
             Err(why) => {
-                summary.failed += 1;
-                tracing::error!(
-                    "financial report backfill failed: stock_symbol={stock_symbol}, error={why:#}"
-                );
+                stock_interval().await;
+                match backfill_from_biggo(&repo, stock_symbol).await {
+                    Ok(counts) => {
+                        summary.fallback += 1;
+                        summary.rows += counts.total();
+                        tracing::warn!(
+                            "financial report fell back to BigGo: stock_symbol={stock_symbol}, rows={}, yahoo_error={why:#}",
+                            counts.total()
+                        );
+                    }
+                    Err(fallback_err) => {
+                        summary.failed += 1;
+                        tracing::error!(
+                            "financial report backfill failed: stock_symbol={stock_symbol}, error={why:#}, biggo_error={fallback_err:#}"
+                        );
+                    }
+                }
             }
         }
 
@@ -231,7 +257,35 @@ pub async fn backfill_for_stock(
     stock_symbol: &str,
 ) -> Result<SavedCounts> {
     let reports = fetch_reports(stock_symbol).await?;
+    save_reports(repo, stock_symbol, &reports).await
+}
 
+/// 從 BigGo 採集單一股票的三大報表並寫入（`source = 'biggo'`），不讀寫 Redis 旗標。
+///
+/// Yahoo 失敗時的備援，手動回補也走這裡。BigGo 的年度資料含當年度累計，只寫入
+/// 已有第四季單季資料的年度。
+///
+/// # Errors
+///
+/// 任一次請求、解析或轉譯失敗，或 BigGo 完全沒有這檔的財報時回傳錯誤；
+/// 請求與轉譯階段失敗時不會寫入任何資料。
+pub async fn backfill_from_biggo(
+    repo: &impl FinancialReportRepository,
+    stock_symbol: &str,
+) -> Result<SavedCounts> {
+    let reports = fetch_biggo_reports(stock_symbol).await?;
+    if reports.is_empty() {
+        bail!("BigGo has no financial statements for {stock_symbol}");
+    }
+    save_reports(repo, stock_symbol, &reports).await
+}
+
+/// 寫入單檔三大報表並回傳各表列數。
+async fn save_reports(
+    repo: &impl FinancialReportRepository,
+    stock_symbol: &str,
+    reports: &StockReports,
+) -> Result<SavedCounts> {
     let income_statements = repo
         .save_income_statements(&reports.income_statements)
         .await
@@ -261,6 +315,15 @@ struct StockReports {
     income_statements: Vec<IncomeStatement>,
     balance_sheets: Vec<BalanceSheet>,
     cash_flow_statements: Vec<CashFlowStatement>,
+}
+
+impl StockReports {
+    /// 三張表都沒有任何資料列。
+    fn is_empty(&self) -> bool {
+        self.income_statements.is_empty()
+            && self.balance_sheets.is_empty()
+            && self.cash_flow_statements.is_empty()
+    }
 }
 
 /// 依序發出 5 次請求並轉譯；任一步失敗即回傳錯誤。
@@ -301,6 +364,54 @@ async fn fetch_reports(stock_symbol: &str) -> Result<StockReports> {
         income_statements,
         balance_sheets,
         cash_flow_statements,
+    })
+}
+
+/// 依序向 BigGo 發出 9 次請求並轉譯；任一步失敗即回傳錯誤。
+async fn fetch_biggo_reports(stock_symbol: &str) -> Result<StockReports> {
+    let context = |what: &str| format!("fetch BigGo {what} failed: {stock_symbol}");
+
+    let single_income = biggo_statement::income_statements(stock_symbol, ReportKind::Single)
+        .await
+        .with_context(|| context("single income statements"))?;
+    request_interval().await;
+    let annual_income = biggo_statement::income_statements(stock_symbol, ReportKind::Annual)
+        .await
+        .with_context(|| context("annual income statements"))?;
+    request_interval().await;
+    let single_cash_flow = biggo_statement::cash_flow_statements(stock_symbol, ReportKind::Single)
+        .await
+        .with_context(|| context("single cash flow statements"))?;
+    request_interval().await;
+    let annual_cash_flow = biggo_statement::cash_flow_statements(stock_symbol, ReportKind::Annual)
+        .await
+        .with_context(|| context("annual cash flow statements"))?;
+    request_interval().await;
+    let balance_sheets = biggo_statement::balance_sheets(stock_symbol)
+        .await
+        .with_context(|| context("balance sheets"))?;
+
+    let income_quarters: Vec<FiscalPeriod> = single_income.iter().map(|s| s.period).collect();
+    let cash_flow_quarters: Vec<FiscalPeriod> = single_cash_flow.iter().map(|s| s.period).collect();
+    let annual_income = biggo_statement::retain_completed_years(annual_income, &income_quarters);
+    let annual_cash_flow =
+        biggo_statement::retain_completed_years(annual_cash_flow, &cash_flow_quarters);
+
+    Ok(StockReports {
+        income_statements: single_income
+            .iter()
+            .chain(&annual_income)
+            .map(BigGoFinancialReportAclMapper::income_statement)
+            .collect::<Result<_>>()?,
+        balance_sheets: balance_sheets
+            .iter()
+            .map(BigGoFinancialReportAclMapper::balance_sheet)
+            .collect::<Result<_>>()?,
+        cash_flow_statements: single_cash_flow
+            .iter()
+            .chain(&annual_cash_flow)
+            .map(BigGoFinancialReportAclMapper::cash_flow_statement)
+            .collect::<Result<_>>()?,
     })
 }
 
@@ -361,12 +472,13 @@ mod tests {
     fn test_summary_counts() {
         let summary = RunSummary {
             succeeded: 3,
+            fallback: 1,
             not_found: 1,
             failed: 2,
             skipped: 10,
             ..Default::default()
         };
-        assert_eq!(summary.attempted(), 6);
+        assert_eq!(summary.attempted(), 7, "備援成功的檔數也算已嘗試");
 
         let counts = SavedCounts {
             income_statements: 2,

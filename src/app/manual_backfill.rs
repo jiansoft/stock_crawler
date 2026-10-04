@@ -38,6 +38,9 @@
 //! - `test_backfill_financial_reports_for_symbols`：
 //!   依 [`MANUAL_FINANCIAL_REPORT_SYMBOLS`] 從 Yahoo 採集指定股票的三大財務報表，
 //!   不讀寫 Redis 略過旗標。
+//! - `test_backfill_financial_reports_from_biggo_for_symbols`：
+//!   依 [`MANUAL_FINANCIAL_REPORT_SYMBOLS`] 改從 BigGo 採集指定股票的三大財務報表
+//!   （`source = 'biggo'`，Yahoo 長期失敗或沒有資料時補用）。
 //! - `test_backfill_financial_reports_all`：
 //!   一次採集全部上市櫃股票的三大財務報表（首次建檔用，約 3～4 小時）。
 //! - `test_reconcile_ex_right_results`：
@@ -536,6 +539,35 @@ async fn test_backfill_financial_reports_for_symbols() {
         let counts = financial_report::backfill_for_stock(&repo, symbol)
             .await
             .unwrap_or_else(|why| panic!("financial report backfill failed for {symbol}: {why:#}"));
+        println!(
+            "{symbol}: income={} balance={} cash_flow={}",
+            counts.income_statements, counts.balance_sheets, counts.cash_flow_statements
+        );
+    }
+}
+
+/// 從 BigGo 採集指定股票的三大財務報表（Yahoo 的備援來源，`source = 'biggo'`）。
+///
+/// 每檔 9 次請求，不讀寫 Redis 略過旗標。任一檔失敗即中止，方便看到錯誤原因。
+///
+/// `cargo test app::manual_backfill::test_backfill_financial_reports_from_biggo_for_symbols -- --ignored --nocapture`
+/// 可用 `MANUAL_FINANCIAL_REPORT_SYMBOLS=2527,9938` 指定股票。
+#[tokio::test]
+#[ignore]
+async fn test_backfill_financial_reports_from_biggo_for_symbols() {
+    dotenvy::dotenv().ok();
+
+    let symbols = std::env::var("MANUAL_FINANCIAL_REPORT_SYMBOLS")
+        .unwrap_or_else(|_| MANUAL_FINANCIAL_REPORT_SYMBOLS.to_string());
+    let repo =
+        crate::infra::database::repository::financial_report::PgFinancialReportRepository::new();
+
+    for symbol in symbols.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let counts = financial_report::backfill_from_biggo(&repo, symbol)
+            .await
+            .unwrap_or_else(|why| {
+                panic!("BigGo financial report backfill failed for {symbol}: {why:#}")
+            });
         println!(
             "{symbol}: income={} balance={} cash_flow={}",
             counts.income_statements, counts.balance_sheets, counts.cash_flow_statements
