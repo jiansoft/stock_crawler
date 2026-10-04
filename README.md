@@ -3,7 +3,7 @@
 
 台股資料採集、排程更新、手動回補、價格追蹤提醒、唯讀 Data API 與 gRPC/HTTP 管理介面服務。
 
-UI Demo︰https://jiansoft.ddns.net/stock/revenues （需登入）
+UI Demo︰https://jiansoft.mooo.com/stock/revenues
 API︰https://github.com/jiansoft/stock_api
 
 ## 專案功能與用途
