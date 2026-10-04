@@ -1,0 +1,24 @@
+{
+  "result": true,
+  "data": {
+    "type": "annual",
+    "data": [
+      {
+        "period": "2025",
+        "operating_cash_flow": 2274975625000,
+        "investing_cash_flow": -1144393407000,
+        "financing_cash_flow": -440344692000,
+        "free_cash_flow": 1130582218000,
+        "net_cash_flow": 640229359000
+      },
+      {
+        "period": "2024",
+        "operating_cash_flow": 1826177068000,
+        "investing_cash_flow": -864842769000,
+        "financing_cash_flow": -346300910000,
+        "free_cash_flow": 961334299000,
+        "net_cash_flow": 662199290000
+      }
+    ]
+  }
+}

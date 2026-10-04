@@ -2,6 +2,7 @@
 //!
 //! 用於隔離外部爬蟲資料結構（Crawler DTO）與應用層/領域層之業務邏輯命令或實體。
 
+pub mod biggo_financial_report;
 pub mod dividend;
 pub mod financial;
 pub mod financial_report;
@@ -11,6 +12,7 @@ pub mod quote;
 pub mod revenue;
 pub mod stock;
 
+pub use biggo_financial_report::BigGoFinancialReportAclMapper;
 pub use dividend::YahooDividendAclMapper;
 pub use financial::{FinancialStatementAclMapper, NetAssetValueAclMapper};
 pub use financial_report::YahooFinancialReportAclMapper;

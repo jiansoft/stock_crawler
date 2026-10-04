@@ -1,0 +1,32 @@
+{
+  "result": true,
+  "data": {
+    "type": "single",
+    "data": [
+      {
+        "period": "2026 Q2",
+        "revenue": 1270380250000,
+        "gross_profit": 860310695000,
+        "operating_expenses": 98982083000,
+        "operating_income": 766602651000,
+        "income_after_taxes": 706780923000
+      },
+      {
+        "period": "2026 Q1",
+        "revenue": 1134103440000,
+        "gross_profit": 751295421000,
+        "operating_expenses": 94005657000,
+        "operating_income": 658966142000,
+        "income_after_taxes": 572801304000
+      },
+      {
+        "period": "2025 Q4",
+        "revenue": 1046090421000,
+        "gross_profit": 651986836000,
+        "operating_expenses": 88190790000,
+        "operating_income": 564902413000,
+        "income_after_taxes": 505415333000
+      }
+    ]
+  }
+}

@@ -214,7 +214,7 @@ fn statement_period(report_period: ReportPeriod, fiscal: FiscalPeriod) -> Result
 }
 
 /// 季別數字 1～4 轉 [`Quarter`]。
-fn to_quarter(quarter: u8) -> Result<Quarter> {
+pub(super) fn to_quarter(quarter: u8) -> Result<Quarter> {
     match quarter {
         1 => Ok(Quarter::Q1),
         2 => Ok(Quarter::Q2),

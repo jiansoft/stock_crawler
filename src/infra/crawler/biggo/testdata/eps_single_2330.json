@@ -1,0 +1,29 @@
+{
+  "result": true,
+  "data": {
+    "type": "single",
+    "data": [
+      {
+        "period": "2026 Q2",
+        "eps": 27.25,
+        "quarterGrowthRate": 23.41,
+        "yoyGrowthRate": 77.41,
+        "quarterlyAverage": 2228.11
+      },
+      {
+        "period": "2026 Q1",
+        "eps": 22.08,
+        "quarterGrowthRate": 13.17,
+        "yoyGrowthRate": 58.28,
+        "quarterlyAverage": 1810
+      },
+      {
+        "period": "2025 Q4",
+        "eps": 19.51,
+        "quarterGrowthRate": 11.87,
+        "yoyGrowthRate": 35.02,
+        "quarterlyAverage": 1455
+      }
+    ]
+  }
+}

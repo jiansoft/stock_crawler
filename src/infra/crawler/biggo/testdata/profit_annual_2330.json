@@ -1,0 +1,24 @@
+{
+  "result": true,
+  "data": {
+    "type": "annual",
+    "data": [
+      {
+        "period": "2026",
+        "revenue": 2404483690000,
+        "gross_profit": 1611606116000,
+        "operating_expenses": 192987740000,
+        "operating_income": 1425568793000,
+        "income_after_taxes": 1279582227000
+      },
+      {
+        "period": "2025",
+        "revenue": 3809054272000,
+        "gross_profit": 2281293979000,
+        "operating_expenses": 345649630000,
+        "operating_income": 1936091677000,
+        "income_after_taxes": 1715396780000
+      }
+    ]
+  }
+}

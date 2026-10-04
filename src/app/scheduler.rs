@@ -164,6 +164,7 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
         ),
         // 06:00 採集 Yahoo 三大財務報表（損益表、資產負債表、現金流量表）
         // 每輪最多 400 檔、約 45 分鐘；7 天 Redis 旗標讓每檔約每週重抓一次。
+        // Yahoo 失敗（404 除外）的股票改從 BigGo 財經備援。
         // 避開 21:00 的 Yahoo 股利採集，兩者不會同時對 Yahoo 發請求。
         create_job(
             "0 0 6 * * *",

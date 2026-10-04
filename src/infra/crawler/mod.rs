@@ -22,6 +22,8 @@ use crate::{core::declare, core::util};
 pub mod bank_of_taiwan;
 /// IP 資訊服務 (BigDataCloud)
 pub mod bigdatacloud;
+/// BigGo 財經 (三大財報，作為 Yahoo 財報的備援)
+pub mod biggo;
 /// 理財寶 - 股市爆料同學會 (提供即時股價與社群資訊)
 pub mod cmoney;
 /// 鉅亨網 (提供財經新聞與即時報價)
