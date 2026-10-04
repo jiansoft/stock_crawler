@@ -711,6 +711,16 @@ mod tests {
             return;
         }
         let pool = database::get_connection();
+        // 資料太少時 planner 一律選全表掃描（CI 的測試庫 `"DailyQuotes"` 是空的），
+        // 量出來的執行計畫沒有參考價值，也不能據此判斷索引是否有效。
+        let row_count: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "DailyQuotes""#)
+            .fetch_one(pool)
+            .await
+            .expect("DailyQuotes row count");
+        if row_count < 1_000 {
+            println!("跳過 M0-2 EXPLAIN：DailyQuotes 只有 {row_count} 列，不足以量測執行計畫");
+            return;
+        }
 
         // 第一步：取最新交易日。應走 "DailyQuotes_Date_include_symbol_idx"
         // 的反向掃描，而不是 Seq Scan。
