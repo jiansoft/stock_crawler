@@ -347,6 +347,9 @@ impl DividendRepository for PgDividendRepository {
     /// 年度合計列的日期永遠是 `'-'`，若不排除就會讓每一檔有合計列的股票每次排程都白打一次
     /// Yahoo；而且 Yahoo 那邊根本沒有對應的期別（合計列的 `quarter` 是空字串，來源端的全年
     /// 事件已改用 `A`），撈回來也補不到任何日期。
+    ///
+    /// 已下市（`"SuspendListing"`）的股票也排除：下市前公告、來不及除息的股利永遠不會有日期，
+    /// Yahoo 個股頁也已移除（4987 科誠 2026-07 下市後每天 21:00 都對 Yahoo 404）。
     async fn fetch_unpublished_dividend_date_or_payable_date_for_specified_year(
         &self,
         year: i32,
@@ -387,6 +390,12 @@ impl DividendRepository for PgDividendRepository {
                             AND t.year = d.year
                             AND t.quarter <> ''
                     )
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM stocks AS s
+                    WHERE s.stock_symbol = d.security_code
+                        AND s."SuspendListing"
                 );
         "#;
         let rows = sqlx::query(sql)
