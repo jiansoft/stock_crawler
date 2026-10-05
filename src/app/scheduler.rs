@@ -210,6 +210,20 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "通知持股法說會摘要",
             event::taiwan_stock::earnings_call::execute,
         ),
+        // 20:40（週一至週五）通知持股主力進出：主力買賣超佔成交量達門檻的股票與前幾名分點
+        // 富邦證券（MoneyDJ）的分點資料於盤後更新；頁面日期不是今天的股票略過，休市日不會發訊息。
+        create_job(
+            "0 40 20 * * Mon-Fri",
+            "通知持股主力進出",
+            event::taiwan_stock::broker_flow::execute,
+        ),
+        // 20:45（每月 10–28 日）通知持股董監質押變動
+        // 董監事持股明細約每月 18 日出表；與 Redis 保存的前一期比較，同月份只通知一次。
+        create_job(
+            "0 45 20 10-28 * *",
+            "通知持股董監質押變動",
+            event::taiwan_stock::insider_pledge::execute,
+        ),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 21 * * *", "補齊缺失之年度配息數據", dividend::execute),
         // 22:00 外資持股狀態
@@ -382,6 +396,36 @@ mod tests {
         )
         .await;
         assert!(matches!(outcome, TaskOutcome::Failed(why) if why.to_string() == "boom"));
+    }
+
+    /// 排程字串解析失敗的任務會在註冊時被 `flatten` 略過而不報錯，
+    /// 因此用到星期、日期範圍的排程要確認能解析，且下次觸發落在預期的台北時間。
+    #[tokio::test]
+    async fn range_cron_expressions_parse_and_fire_in_taipei_time() {
+        use chrono::{Datelike, Timelike};
+
+        let taipei = FixedOffset::east_opt(8 * 3600).unwrap();
+        let mut sched = JobScheduler::new().await.expect("建立排程器");
+        for (expr, hour, minute) in [
+            ("0 40 20 * * Mon-Fri", 20, 40),
+            ("0 45 20 10-28 * *", 20, 45),
+        ] {
+            let job = create_job(expr, "test", || async { Ok(()) }).expect(expr);
+            let job_id = sched.add(job).await.expect("加入排程");
+            let next = sched
+                .next_tick_for_job(job_id)
+                .await
+                .expect("取得下次觸發時間")
+                .expect("應有下次觸發時間")
+                .with_timezone(&taipei);
+            assert_eq!((next.hour(), next.minute()), (hour, minute), "{expr}");
+            if expr.ends_with("Mon-Fri") {
+                assert!(next.weekday().number_from_monday() <= 5, "{expr}: {next}");
+            } else {
+                assert!((10..=28).contains(&next.day()), "{expr}: {next}");
+            }
+        }
+        assert!(create_job("0 40 20 * * Xyz", "test", || async { Ok(()) }).is_err());
     }
 
     /// 卡住的任務必須在上限到時被中止，而不是無限期等下去。

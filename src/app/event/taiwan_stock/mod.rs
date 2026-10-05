@@ -1,11 +1,17 @@
 /// 財務年報
 pub mod annual_eps;
+/// 持股主力進出通知（買超、賣超前幾名券商分點）
+pub mod broker_flow;
 /// 收盤事件
 pub mod closing;
 /// 持股法說會通知（BigGo 整理的摘要、展望與 Q&A 重點）
 pub mod earnings_call;
 /// 除息日的事件
 pub mod ex_dividend;
+/// 持股通知共用（持股普通股代號、股名）
+mod holdings;
+/// 持股董監質押變動通知
+pub mod insider_pledge;
 /// 股利發放日的事件
 pub mod payable_date;
 /// 公開申購公告
