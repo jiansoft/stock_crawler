@@ -1,0 +1,30 @@
+{
+  "result": true,
+  "data": {
+    "stock_id": "2330.TW",
+    "asset_type": "stock",
+    "current_price": 2575,
+    "previous_close": 2500,
+    "open": 2550,
+    "ask": 2575,
+    "bid": 2570,
+    "total_volume": 11573000,
+    "daily_change": 75,
+    "daily_change_percent": 3,
+    "days_range": {
+      "high": 2580,
+      "low": 2545
+    },
+    "history_date": "2026-10-02",
+    "pre_market_current_price": null,
+    "pre_market_change": null,
+    "pre_market_change_percent": null,
+    "pre_market_volume": null,
+    "after_hours_current_price": null,
+    "after_hours_change": null,
+    "after_hours_change_percent": null,
+    "after_hours_volume": null,
+    "market_session": null,
+    "snapshot_date": 1791164883
+  }
+}
