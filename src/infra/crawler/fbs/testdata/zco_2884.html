@@ -1,0 +1,523 @@
+<!DOCTYPE>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=big5">
+<script language="JavaScript"><!--
+document.writeln('<script language="JavaScript" src="/z/js/jquery.djjs"></script>\n');
+// --></script>
+<script language="JavaScript" src="/z/js/jsFunction.djjs"></script>
+<script language="JavaScript" src="/z/js/isSpecialKind.djjs"></script>
+<script language="JavaScript" src="/z/js/mdj.js"></script>
+<script type="text/javascript" src="/z/js/Applet2Canvas.djjs"></script>
+<script type="text/javascript" src="/z/js/DJWebGraph.djjs"></script>
+<script type="text/javascript" src="/z/js/xml2jsonJS.djjs"></script>
+<script type="text/javascript" src="/z/js/json2xmlJS.djjs"></script>
+<script type="text/javascript" src="/z/js/json2.djjs"></script>
+<script type="text/javascript" src="/z/js/GenUpDownJS.djjs"></script>
+<link rel=stylesheet href="/z/js/mdj.css" type="text/css">
+<title>主力賣買超-2884</title>
+</head>
+<script language="JavaScript"><!--
+CheckMenu(4, '2884');
+function chkSetUpMenu(){ 
+	if (typeof(SetUpMenu) == 'function'){
+		SetUpMenu(4,'2884');
+}
+	else
+		setTimeout(function(){chkSetUpMenu();},5000);
+}
+// --></script>
+<body leftmargin="0" topmargin="0" marginwidth="0" marginheight="0">
+<div id="SysJustIFRAMEDIV">
+<table border="0" cellpadding="0" cellspacing="0" width="100%"><tr><td colspan="3" valign="top" align="left">
+<script language="javascript" src="/z/js/disableselectionjs.djjs"></script>
+<script language="javascript" src="/z/js/SU.js"></script>
+<script language="javascript"><!--
+ chkSetUpMenu();
+//--></script>
+</td></tr>
+<tr><td valign="top" align="left">
+<script language="javascript" src="/z/js/SL.js"></script>
+<script language="javascript"><!--
+ SetLeftMenu(4,'2884')
+//--></script>
+</td><td valign="top" width="99%">
+<script language="javascript"><!--
+if(typeof(ContentCenterBegin) == 'function'){ 	ContentCenterBegin();
+ } 
+//--></script>
+
+<script language="javascript" src="/z/js/zbrokerjs.djjs"></script>
+<form name="F" onSubmit="return false;">
+<table border="0"><tr><td class="t0">
+<table id="oMainTable" class="t01" width="612" border="0" cellspacing="1" cellpadding="1">
+<tr id="oScrollHead"><td class="t10" colspan="10">玉山金(2884)主力進出比較圖</td></tr>
+<tr id="oScrollHead"><td colspan="10" class="t3n0" width="100%">
+<table border="0" cellpadding="1" cellspacing="0" width="100%">
+<tr><td class="t2" style="line-height:200%">
+	<input type=radio name=radio1 checked>總表
+	<input type=radio name=radio1 onclick="javascript:window.open('/z/zc/zco/zco0.djhtm?a=2884&b=6010','_self')">單一<SCRIPT LANGUAGE=javascript><!--
+ var sObj = eval('document.' + 'F'); 
+	iID = '6010';
+	GenFundCorpCombo('6010','6010','F');
+	for (i=0;i<sObj.sel_Broker.options.length;i++)
+	{
+		var tmpID1 = sObj.sel_Broker.options[i].value.toUpperCase();
+		if (tmpID1 == '6010') 
+		{
+			sObj.sel_Broker.selectedIndex = i;
+			break;
+		}
+	}
+	for (i=0;i<sObj.sel_BrokerBranch.options.length;i++)
+	{
+		var tmpID2 = sObj.sel_BrokerBranch.options[i].value.toUpperCase();
+		if (iID != '')
+		{
+			if (tmpID2 == iID )
+			{
+				sObj.sel_BrokerBranch.selectedIndex = i;
+				break;
+			}
+		}
+		else
+			sObj.sel_BrokerBranch.selectedIndex = 0;
+	}
+//--></SCRIPT>
+
+</td></tr>
+<tr><td width="100%" class="t3n0">
+<div id="SysJustWebGraphDIV"></div>
+</td>
+</tr>
+</table>
+</td></tr>
+<tr id="oScrollHead"><td class="t10" colspan="10">玉山金(2884)
+券商分點-進出明細
+<div class="t11">單位：張　最後更新日：2026/10/05</div></td></tr>
+<tr id="oScrollHead"><td class="t2" colspan="10">
+<select name="D" onChange="goA();">
+<option value="0">請選擇</option>
+<option value="1" selected>近一日</option>
+<option value="2">近五日</option>
+<option value="3">近十日</option>
+<option value="4">近20日</option>
+<option value="5">近40日</option>
+<option value="6">近60日</option>
+<option value="7">近120日</option>
+<option value="8">近240日</option>
+</select>
+　自設區間：
+<script language="JavaScript" src="/z/js/month.djjs"></script>
+從　<SELECT name="Y2" onChange="javascript:SetMonthDate(document.F.Y2,document.F.M2,document.F.D2);">
+	<OPTION value="91"></OPTION>
+</SELECT>年 
+<SELECT name="M2" onChange="javascript:SetMonthDate(document.F.Y2,document.F.M2,document.F.D2);">
+	<OPTION value="-1"></OPTION>
+</SELECT>月 
+<SELECT name="D2">
+	<OPTION value="-1"></OPTION>
+</SELECT>日 
+ ∼ 
+<SELECT name="Y1" onChange="javascript:SetMonthDate(document.F.Y1,document.F.M1,document.F.D1);">
+	<OPTION value="91"></OPTION>
+</SELECT>年 
+<SELECT name="M1" onChange="javascript:SetMonthDate(document.F.Y1,document.F.M1,document.F.D1);">
+	<OPTION value="-1"></OPTION>
+</SELECT>月 
+<SELECT name="D1">
+	<OPTION value="-1"></OPTION>
+</SELECT>日 
+<input type='hidden' name='bDate'>
+<input type='hidden' name='eDate'>
+<SCRIPT LANGUAGE=javascript><!--
+	var toDay ='2026/10/6'
+	var getYMD1 = '2026/10/5';
+	var getYMD2 = '2026/10/5';
+	PageInit(document.F);
+	function PageInit(obj)
+	{	//在 BODY onLoad 時候的初始化
+		ShowYear(obj.Y1,'2026/10/6',1,'N');
+		ShowYear(obj.Y2,'2026/10/6',1,'N');
+		SetOptionValue(obj.M1,1,12);
+		SetOptionValue(obj.M2,1,12);
+		//設定初始值
+		var YMDary1,Hary1;
+		if (getYMD1.indexOf(' ') > -1 ) {
+			YMDary1 = getYMD1.split(' ')[0].split('/');
+		}else {
+			YMDary1 = getYMD1.split('/');
+		}
+		SetFocus(obj.Y1,YMDary1[0]);
+		SetFocus(obj.M1,YMDary1[1]);
+		var YMDary2,Hary2;
+		if (getYMD2.indexOf(' ') > -1 ) {
+			YMDary2 = getYMD2.split(' ')[0].split('/');
+		}else {
+			YMDary2 = getYMD2.split('/');
+		}
+		SetFocus(obj.Y2,YMDary2[0]);
+		SetFocus(obj.M2,YMDary2[1]);
+		SetMonthDate(obj.Y1,obj.M1,obj.D1);
+		SetMonthDate(obj.Y2,obj.M2,obj.D2);
+		SetFocus(obj.D2,YMDary2[2]);
+		SetFocus(obj.D1,YMDary1[2]);
+		removeToday(obj.Y1,obj.M1,obj.D1,toDay);
+		removeToday(obj.Y2,obj.M2,obj.D2,toDay);
+	}
+	function CheckDate()
+	{
+		var Frm = document.F;
+		var y1 = parseInt(Frm.Y1.options[Frm.Y1.selectedIndex].value);
+		var m1 = parseInt(Frm.M1.options[Frm.M1.selectedIndex].value);
+		var d1 = parseInt(Frm.D1.options[Frm.D1.selectedIndex].value);
+		var y2 = parseInt(Frm.Y2.options[Frm.Y2.selectedIndex].value);
+		var m2 = parseInt(Frm.M2.options[Frm.M2.selectedIndex].value);
+		var d2 = parseInt(Frm.D2.options[Frm.D2.selectedIndex].value);
+		var sEDate = y1 + '-' + m1 + '-' + d1;
+		var sBDate = y2 + '-' + m2 + '-' + d2;
+		Frm.bDate.value = sBDate;
+		Frm.eDate.value = sEDate;
+		return checkBEdate(sBDate,sEDate);
+	}
+	function checkBEdate(sBDate,sEDate)
+	{
+		var aymd1 = sBDate.split(' ')[0].split('-');
+		var aymd2 = sEDate.split(' ')[0].split('-');
+		if (aymd1.length < 3 || aymd2.length < 3 ) {
+			alert ('日期選擇錯誤!!');
+			return false;
+		}
+		var nbdate = parseInt(aymd1[0])*1000000 + parseInt(aymd1[1])*10000 + parseInt(aymd1[2])*100;
+		var nedate = parseInt(aymd2[0])*1000000 + parseInt(aymd2[1])*10000 + parseInt(aymd2[2])*100;
+		if (nbdate > nedate) {
+			alert('您所輸入的起始日期大於結束日期');
+			return false;
+		}
+		return true;
+	}
+//--></SCRIPT>
+ <INPUT type="button" name="BB" value="查詢" onclick="javascript:goC();">
+</td></tr>
+<tr id="oScrollMenu">
+<td class="t2" colspan="5">買超</td>
+<td class="t2" colspan="5">賣超</td>
+</tr>
+<TR id="oScrollMenu">
+<TD class="t2" nowrap>買超券商</TD>
+<TD class="t2">買進</TD>
+<TD class="t2">賣出</TD>
+<TD class="t2">買超</TD>
+<TD class="t2">佔成交比重</TD>
+<TD class="t2" nowrap>賣超券商</TD>
+<TD class="t2">買進</TD>
+<TD class="t2">賣出</TD>
+<TD class="t2">賣超</TD>
+<TD class="t2">佔成交比重</TD>
+</TR>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=9268&BHID=9200">凱基-台北</a></TD>
+<TD class="t3n1">1,769</TD>
+<TD class="t3n1">401</TD>
+<TD class="t3n1">1,368</TD>
+<TD class="t3n1">6.98%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=7000&BHID=7000">兆豐證券</a></TD>
+<TD class="t3n1">7</TD>
+<TD class="t3n1">3,018</TD>
+<TD class="t3n1">3,011</TD>
+<TD class="t3n1">15.37%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=1440&BHID=1440">美林</a></TD>
+<TD class="t3n1">973</TD>
+<TD class="t3n1">492</TD>
+<TD class="t3n1">481</TD>
+<TD class="t3n1">2.45%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=6160&BHID=6160">中國信託</a></TD>
+<TD class="t3n1">85</TD>
+<TD class="t3n1">2,437</TD>
+<TD class="t3n1">2,352</TD>
+<TD class="t3n1">12%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=1480&BHID=1480">美商高盛</a></TD>
+<TD class="t3n1">1,230</TD>
+<TD class="t3n1">861</TD>
+<TD class="t3n1">369</TD>
+<TD class="t3n1">1.88%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=1590&BHID=1590">花旗環球</a></TD>
+<TD class="t3n1">247</TD>
+<TD class="t3n1">1,058</TD>
+<TD class="t3n1">811</TD>
+<TD class="t3n1">4.14%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=9800&BHID=9800">元大證券</a></TD>
+<TD class="t3n1">1,362</TD>
+<TD class="t3n1">1,001</TD>
+<TD class="t3n1">361</TD>
+<TD class="t3n1">1.84%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=9200&BHID=9200">凱基</a></TD>
+<TD class="t3n1">27</TD>
+<TD class="t3n1">568</TD>
+<TD class="t3n1">541</TD>
+<TD class="t3n1">2.76%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=1650&BHID=1650">新加坡商瑞銀</a></TD>
+<TD class="t3n1">1,551</TD>
+<TD class="t3n1">1,193</TD>
+<TD class="t3n1">358</TD>
+<TD class="t3n1">1.83%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=1470&BHID=1470">台灣摩根士丹利</a></TD>
+<TD class="t3n1">912</TD>
+<TD class="t3n1">1,451</TD>
+<TD class="t3n1">539</TD>
+<TD class="t3n1">2.75%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=0039004100300030&BHID=9A00">永豐金證券</a></TD>
+<TD class="t3n1">410</TD>
+<TD class="t3n1">213</TD>
+<TD class="t3n1">197</TD>
+<TD class="t3n1">1.01%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=1360&BHID=1360">港商麥格理</a></TD>
+<TD class="t3n1">0</TD>
+<TD class="t3n1">199</TD>
+<TD class="t3n1">199</TD>
+<TD class="t3n1">1.02%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=8440&BHID=8440">摩根大通</a></TD>
+<TD class="t3n1">2,100</TD>
+<TD class="t3n1">1,933</TD>
+<TD class="t3n1">167</TD>
+<TD class="t3n1">0.85%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=9634&BHID=9600">富邦-羅東</a></TD>
+<TD class="t3n1">5</TD>
+<TD class="t3n1">202</TD>
+<TD class="t3n1">197</TD>
+<TD class="t3n1">1.01%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=8888&BHID=8880">國泰-敦南</a></TD>
+<TD class="t3n1">308</TD>
+<TD class="t3n1">144</TD>
+<TD class="t3n1">164</TD>
+<TD class="t3n1">0.84%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=6010&BHID=6010">(牛牛牛)亞證券</a></TD>
+<TD class="t3n1">0</TD>
+<TD class="t3n1">138</TD>
+<TD class="t3n1">138</TD>
+<TD class="t3n1">0.7%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=8840&BHID=8840">玉山證券</a></TD>
+<TD class="t3n1">221</TD>
+<TD class="t3n1">59</TD>
+<TD class="t3n1">162</TD>
+<TD class="t3n1">0.83%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=0039003800390051&BHID=9800">元大-汐止</a></TD>
+<TD class="t3n1">3</TD>
+<TD class="t3n1">106</TD>
+<TD class="t3n1">103</TD>
+<TD class="t3n1">0.53%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=0038003800380041&BHID=8880">國泰-館前</a></TD>
+<TD class="t3n1">148</TD>
+<TD class="t3n1">6</TD>
+<TD class="t3n1">142</TD>
+<TD class="t3n1">0.72%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=003800380034004a&BHID=8840">玉山-大里</a></TD>
+<TD class="t3n1">35</TD>
+<TD class="t3n1">97</TD>
+<TD class="t3n1">62</TD>
+<TD class="t3n1">0.32%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=003500380035004d&BHID=5850">統一-士林</a></TD>
+<TD class="t3n1">141</TD>
+<TD class="t3n1">0</TD>
+<TD class="t3n1">141</TD>
+<TD class="t3n1">0.72%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=0037003700390065&BHID=7790">國票-南科</a></TD>
+<TD class="t3n1">4</TD>
+<TD class="t3n1">65</TD>
+<TD class="t3n1">61</TD>
+<TD class="t3n1">0.31%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=0038003800340048&BHID=8840">玉山-新竹</a></TD>
+<TD class="t3n1">146</TD>
+<TD class="t3n1">9</TD>
+<TD class="t3n1">137</TD>
+<TD class="t3n1">0.7%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=5262&BHID=5260">美好-楊梅</a></TD>
+<TD class="t3n1">0</TD>
+<TD class="t3n1">53</TD>
+<TD class="t3n1">53</TD>
+<TD class="t3n1">0.27%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=0039004200300030&BHID=9B00">台新</a></TD>
+<TD class="t3n1">149</TD>
+<TD class="t3n1">22</TD>
+<TD class="t3n1">127</TD>
+<TD class="t3n1">0.65%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=003900380039004e&BHID=9800">元大-內湖</a></TD>
+<TD class="t3n1">4</TD>
+<TD class="t3n1">52</TD>
+<TD class="t3n1">48</TD>
+<TD class="t3n1">0.24%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=8849&BHID=8840">玉山-景美</a></TD>
+<TD class="t3n1">125</TD>
+<TD class="t3n1">5</TD>
+<TD class="t3n1">120</TD>
+<TD class="t3n1">0.61%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=003900380031004c&BHID=9800">元大-莒光</a></TD>
+<TD class="t3n1">7</TD>
+<TD class="t3n1">55</TD>
+<TD class="t3n1">48</TD>
+<TD class="t3n1">0.24%</TD>
+</tr>
+<TR>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=9359&BHID=9300">華南永昌-中正</a></TD>
+<TD class="t3n1">123</TD>
+<TD class="t3n1">3</TD>
+<TD class="t3n1">120</TD>
+<TD class="t3n1">0.61%</TD>
+<TD class="t4t1" nowrap><a href="/z/zc/zco/zco0/zco0.djhtm?a=2884&b=5058&BHID=5050">大展-台南</a></TD>
+<TD class="t3n1">0</TD>
+<TD class="t3n1">40</TD>
+<TD class="t3n1">40</TD>
+<TD class="t3n1">0.2%</TD>
+</tr>
+<TR id="oScrollFoot">
+<TD class="t4t1" nowrap>合計買超張數</td>
+<td class="t3n1" colspan=4>4,415</td>
+<TD class="t4t1" nowrap>合計賣超張數</td>
+<td class="t3n1" colspan=4>8,205</td>
+</TR>
+<TR id="oScrollFoot">
+<TD class="t4t1" nowrap>平均買超成本</td>
+<td class="t3n1" colspan=4>45.09</td>
+<TD class="t4t1" nowrap>平均賣超成本</td>
+<td class="t3n1" colspan=4>45.04</td>
+</TR>
+<TR id="oScrollFoot">
+<td class="t3t1" colspan=10>
+【註1】合計買超或賣超，為上述家數合計。<BR>
+【註2】平均買超或賣超成本，為上述家數合計買賣超金額/上述家數合計買賣超張數。
+</td>
+</TR>
+</table></td></tr></table></form>
+<script language="javascript"><!--
+function goA()
+{
+var i = document.F.D.selectedIndex;
+i = document.F.D.options[i].value;
+if (i != 0) {
+self.location = '/z/zc/zco/zco_2884_' + i + '.djhtm';
+}
+}
+function goC()
+{
+	if (CheckDate()) {
+		var bDate = document.F.bDate.value;		//起始日期 
+		var eDate = document.F.eDate.value;		//結束日期 
+		sURL = '/z/zc/zco/zco.djhtm?a=2884&e=' + bDate + '&f=' + eDate;
+		window.location.href = sURL;
+	}
+}
+//--></script>
+
+<script language="JavaScript"><!--
+    var $DJWebGraph1;
+    var sRenderTo = 'SysJustWebGraphDIV';
+	var dataCount = 0;
+    
+    $(document).ready(function () {
+        if (!!$DJWebGraph) {
+			$DJWebGraph1 = new $DJWebGraph();
+			$DJWebGraph1.CallBack = GetBcdData;	
+        	
+            $DJWebGraph1.CreateGraphObject({
+                'CanvasClass': 'canvas', //表示為複合式圖形
+                'ID': 'ZCO',
+                'Width': '460',
+                'Height': [['120'], ['140']],
+                'RenderTo': sRenderTo,
+                'Type': [['Trend:R'], ['Histogram']],
+                'Title': [['玉山金' + '股價'], ['主力買賣超']],
+                'Unit': [['元'], ['張']],
+                'LineColor': [['ea6977'], ['2882D5']],
+                'BgColor': 'FFFFFF',
+                'Mark': 'none',
+                'BCDUrl': '/Z/ZC/ZCO/CZCO.DJBCD?A=2884'
+            });
+
+			$DJWebGraph1.GraphObj.setDrawCall(function() {
+				// base 0
+				$DJWebGraph1.GraphObj.moveTip(dataCount - 1);
+			});
+        }
+    });
+
+    function GetBcdData(data) {
+		if (data == ''){
+			$DJWebGraph1.SetPoster("無資料");
+		}else{
+			if (!!data.length) {
+				var arrData = data.split(' ');
+				var X = arrData[0];
+				var ArrY = [
+				[arrData[1]], [arrData[2]]
+				];
+
+				dataCount = X.length;
+				$DJWebGraph1.SetGraphBcd({ 'X': X, 'Y': ArrY });
+			}
+		}
+    }
+
+    function changeStkID(stk) {
+    	var sUrl;
+
+    	if (typeof (document.F.D) != 'undefined') {
+    		var i = document.F.D.selectedIndex;
+    		i = document.F.D.options[i].value;
+    	}
+    	else {
+    		var i = 1;
+    	}
+    	if (i != 1) {
+    		sUrl = '/z/zc/zco/zco_' + stk + '_' + i + '.djhtm';
+    	}
+    	else {
+    		sUrl = '/z/zc/zco/zco_' + stk + '.djhtm';
+    	}
+    	self.location = sUrl;
+    }
+	
+	function GoPage(){
+		var id = document.F.sel_BrokerBranch.options[document.F.sel_BrokerBranch.selectedIndex].value;
+		window.location.href = '/z/zc/zco/zco0/zco0.djhtm?a=2884&BHID='+ id +'&b=' + id;
+	}		
+// --></script>
+<script language="javascript"><!--
+if(typeof(ContentCenterEnd) == 'function'){ 	ContentCenterEnd();
+ } 
+//--></script>
+</td><td valign="top" align="right">
+<script language="javascript" src="/z/js/SR.js"></script>
+</td></tr>
+<tr><td colspan="3" valign="top">
+<script language="javascript" src="/z/js/SD.js"></script>
+</td></tr></table>
+</div>
+</body>
+</html>

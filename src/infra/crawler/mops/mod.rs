@@ -5,6 +5,8 @@
 pub mod annual_profit;
 /// 上市公司股利分派情形
 pub mod dividend_allotment;
+/// 董監事持股餘額明細（含設質）
+pub mod insider_holding;
 
 /// MOPS 財務比較 E 點通主機。
 pub const HOST: &str = "mopsfin.twse.com.tw";
