@@ -17,23 +17,27 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 pub(super) use cagr::{
-    CagrCoverageInfo, CagrPeriodItem, CagrRankingItem, CagrRankingParams, CagrRankingResponse,
-    CagrSummary, CagrSymbolParams, CagrSymbolResponse,
+    CagrCoverageInfo, CagrMetricParamValue, CagrPeriodItem, CagrPeriodParamValue, CagrRankingItem,
+    CagrRankingParams, CagrRankingResponse, CagrSummary, CagrSymbolParams, CagrSymbolResponse,
 };
 pub(super) use fundamentals::{
     Dividend, DividendHistoryParams, DividendHistoryResponse, FinancialStatement,
     FinancialStatementHistoryResponse, MonthlyRevenue, MonthlyRevenueResponse,
-    RevenueHistoryParams, StatementHistoryParams, StockValuation, StockValuationResponse,
-    ValuationParams,
+    RevenueHistoryParams, StatementHistoryParams, StatementPeriodTypeValue, StockValuation,
+    StockValuationResponse, ValuationParams,
 };
 pub(super) use market::{
-    DividendCalendarEvent, DividendCalendarParams, DividendCalendarResponse, DividendYieldRank,
-    DividendYieldRankingParams, DividendYieldRankingResponse, MarketBreadth, MarketBreadthParams,
-    MarketBreadthResponse, MarketIndexHistoryParams, MarketIndexHistoryResponse, MarketIndexPoint,
-    MarketMover, MarketMoversParams, MarketMoversResponse, QfiiHolding, QfiiHoldingRankingParams,
-    QfiiHoldingRankingResponse,
+    CalendarEventTypeValue, DividendCalendarEvent, DividendCalendarParams,
+    DividendCalendarResponse, DividendYieldRank, DividendYieldRankingParams,
+    DividendYieldRankingResponse, MarketBreadth, MarketBreadthParams, MarketBreadthResponse,
+    MarketIndexHistoryParams, MarketIndexHistoryResponse, MarketIndexPoint, MarketMover,
+    MarketMoversParams, MarketMoversResponse, MoversRankByValue, QfiiHolding,
+    QfiiHoldingRankingParams, QfiiHoldingRankingResponse, QfiiSortValue,
 };
-pub(super) use screening::{ScreenedStock, StockScreeningParams, StockScreeningResponse};
+pub(super) use screening::{
+    ScreenedStock, SortOrderParamValue, StockScreenSortValue, StockScreeningParams,
+    StockScreeningResponse,
+};
 pub(super) use stocks::{
     DailyQuote, HistoricalQuote, HistoryParams, LatestQuoteResponse, PriceHistoryResponse,
     QuoteHistoryRecord, RealtimeSnapshotResponse, SearchParams, SearchResponse, Stock,
@@ -44,7 +48,7 @@ pub(super) use stocks::{
 #[derive(ToSchema)]
 #[schema(rename_all = "snake_case")]
 #[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema；runtime 仍以 String 回傳精確 422。
-enum MarketParamValue {
+pub(crate) enum MarketParamValue {
     /// 上市與上櫃合併。
     All,
     /// 僅上市。

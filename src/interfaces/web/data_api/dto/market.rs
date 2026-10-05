@@ -17,7 +17,7 @@ use super::MarketParamValue;
 #[derive(ToSchema)]
 #[schema(rename_all = "snake_case")]
 #[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema；runtime 仍以 String 回傳精確 422。
-enum CalendarEventTypeValue {
+pub(crate) enum CalendarEventTypeValue {
     /// 除息日事件。
     ExDividend,
     /// 除權日事件。
@@ -34,7 +34,7 @@ enum CalendarEventTypeValue {
 #[derive(ToSchema)]
 #[schema(rename_all = "snake_case")]
 #[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema。
-enum QfiiSortValue {
+pub(crate) enum QfiiSortValue {
     /// 依外資持股比例排序。
     Percentage,
     /// 依外資持股股數排序。
@@ -52,7 +52,7 @@ enum QfiiSortValue {
 // 後者：變體共同的 `Top` 前綴是對外契約的一部分（`top_gainers` 等字面值直接
 // 由變體名稱轉成 snake_case），不可為了消除 clippy 的命名提示而改名。
 #[allow(dead_code, clippy::enum_variant_names)]
-enum MoversRankByValue {
+pub(crate) enum MoversRankByValue {
     /// 漲幅由高到低。
     TopGainers,
     /// 跌幅由深到淺（漲跌幅由低到高）。
@@ -330,7 +330,7 @@ pub(crate) struct MarketMoversResponse {
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct MarketBreadthParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
-    #[param(value_type = MarketParamValue, inline, default = "all")]
+    #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
     /// 查詢截止日，格式 `YYYY-MM-DD`；未提供時取最新資料。
     pub(crate) date: Option<String>,
@@ -345,7 +345,7 @@ pub(crate) struct DividendYieldRankingParams {
     /// 查詢截止日，格式 `YYYY-MM-DD`；未提供時取最新資料。
     pub(crate) date: Option<String>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
-    #[param(value_type = MarketParamValue, inline, default = "all")]
+    #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
     /// 可選的正整數產業分類編號。
     #[param(minimum = 1)]
@@ -377,7 +377,7 @@ pub(crate) struct DividendCalendarParams {
     pub(crate) to: Option<String>,
     /// 事件類型：`all`（預設）、`ex_dividend`、`ex_rights`、`cash_payable`
     /// 或 `stock_payable`。
-    #[param(value_type = CalendarEventTypeValue, inline, default = "all")]
+    #[param(value_type = CalendarEventTypeValue, default = "all")]
     pub(crate) event_type: Option<String>,
     /// 最多回傳筆數，預設 50，範圍 1–200。
     #[param(minimum = 1, maximum = 200, default = 50)]
@@ -388,14 +388,14 @@ pub(crate) struct DividendCalendarParams {
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct QfiiHoldingRankingParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
-    #[param(value_type = MarketParamValue, inline, default = "all")]
+    #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
     /// 可選的正整數產業分類編號。
     #[param(minimum = 1)]
     pub(crate) industry_id: Option<i32>,
     /// 排序欄位：`percentage`（預設，持股比例）或 `shares`（持股股數）；
     /// 一律由高到低。
-    #[param(value_type = QfiiSortValue, inline, default = "percentage")]
+    #[param(value_type = QfiiSortValue, default = "percentage")]
     pub(crate) sort_by: Option<String>,
     /// 最多回傳筆數，預設 20，範圍 1–50。
     #[param(minimum = 1, maximum = 50, default = 20)]
@@ -410,10 +410,10 @@ pub(crate) struct QfiiHoldingRankingParams {
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct MarketMoversParams {
     /// 排序鍵：`top_gainers`（預設）、`top_losers` 或 `top_volume`。
-    #[param(value_type = MoversRankByValue, inline, default = "top_gainers")]
+    #[param(value_type = MoversRankByValue, default = "top_gainers")]
     pub(crate) rank_by: Option<String>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
-    #[param(value_type = MarketParamValue, inline, default = "all")]
+    #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
     /// 最多回傳筆數，預設 20，範圍 1–50。
     #[param(minimum = 1, maximum = 50, default = 20)]

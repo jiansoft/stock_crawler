@@ -10,7 +10,7 @@ use utoipa::{IntoParams, ToSchema};
 #[derive(ToSchema)]
 #[schema(rename_all = "snake_case")]
 #[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema。
-enum StatementPeriodTypeValue {
+pub(crate) enum StatementPeriodTypeValue {
     /// 僅季度資料。
     Quarterly,
     /// 僅年度資料。
@@ -250,7 +250,7 @@ pub(crate) struct RevenueHistoryParams {
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StatementHistoryParams {
     /// 期間類型：`quarterly`（預設）、`annual` 或 `all`。
-    #[param(value_type = StatementPeriodTypeValue, inline, default = "quarterly")]
+    #[param(value_type = StatementPeriodTypeValue, default = "quarterly")]
     pub(crate) period_type: Option<String>,
     /// 最多回傳筆數，預設 12，範圍 1–40。
     #[param(minimum = 1, maximum = 40, default = 12)]

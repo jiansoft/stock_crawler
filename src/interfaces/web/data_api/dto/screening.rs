@@ -24,7 +24,7 @@ enum ValuationBandParamValue {
 #[derive(ToSchema)]
 #[schema(rename_all = "snake_case")]
 #[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema。
-enum StockScreenSortValue {
+pub(crate) enum StockScreenSortValue {
     /// 股票代號。
     StockSymbol,
     /// 營收年增率。
@@ -43,7 +43,7 @@ enum StockScreenSortValue {
 #[derive(ToSchema)]
 #[schema(rename_all = "snake_case")]
 #[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema。
-enum SortOrderParamValue {
+pub(crate) enum SortOrderParamValue {
     /// 升冪。
     Asc,
     /// 降冪。
@@ -102,7 +102,7 @@ pub(crate) struct StockScreeningResponse {
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
-    #[param(value_type = MarketParamValue, inline, default = "all")]
+    #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
     /// 可選的正整數產業分類編號。
     #[param(minimum = 1)]
@@ -123,10 +123,10 @@ pub(crate) struct StockScreeningParams {
     #[param(minimum = 0, maximum = 1000)]
     pub(crate) min_dividend_yield_percent: Option<f64>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
-    #[param(value_type = StockScreenSortValue, inline, default = "stock_symbol")]
+    #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,
     /// 排序方向：`asc`（預設）或 `desc`。
-    #[param(value_type = SortOrderParamValue, inline, default = "asc")]
+    #[param(value_type = SortOrderParamValue, default = "asc")]
     pub(crate) sort_order: Option<String>,
     /// 最多回傳筆數，預設 20，範圍 1–50。
     #[param(minimum = 1, maximum = 50, default = 20)]
