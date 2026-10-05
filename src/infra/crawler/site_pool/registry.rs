@@ -15,8 +15,8 @@ use rust_decimal::Decimal;
 use crate::{
     core::declare,
     infra::crawler::{
-        StockInfo, cmoney::CMoney, cnyes::CnYes, fugle::Fugle, megatime::PcHome, nstock::NStock,
-        yahoo::Yahoo,
+        StockInfo, biggo::BigGo, cmoney::CMoney, cnyes::CnYes, fugle::Fugle, megatime::PcHome,
+        nstock::NStock, yahoo::Yahoo,
     },
 };
 
@@ -127,6 +127,11 @@ define_stock_price_fetcher!(
     fetch_pchome_price,
     PcHome
 );
+define_stock_price_fetcher!(
+    "將 BigGo 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
+    fetch_biggo_price,
+    BigGo
+);
 
 define_stock_quotes_fetcher!(
     "將 Fugle 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
@@ -153,6 +158,11 @@ define_stock_quotes_fetcher!(
     fetch_pchome_quotes,
     PcHome
 );
+define_stock_quotes_fetcher!(
+    "將 BigGo 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
+    fetch_biggo_quotes,
+    BigGo
+);
 
 /// 所有可用的「最新成交價」站點池。
 ///
@@ -166,6 +176,11 @@ define_stock_quotes_fetcher!(
 /// - `CMoney`
 /// - `CnYes`
 /// - `PcHome`
+/// - `BigGo`
+///
+/// `BigGo` 於 2026-10-05 加入：盤中 09:48～09:58 每 30 秒比對 12 檔（上市、上櫃、ETF）共 220 筆，
+/// 95% 落在證交所 MIS 的最佳買賣價之間，其餘 11 筆都只差一檔，且都發生在雙方快照時間相差約
+/// 30～60 秒時；無錯誤、無限流。當天未成交的股票 BigGo 回前一個交易日的快照，爬蟲會拒收。
 ///
 /// `Yuanta` 已從此站點池移除，因為其資料目前觀察到為前一交易日資料，
 /// 不符合即時追蹤用途。
@@ -173,7 +188,7 @@ define_stock_quotes_fetcher!(
 /// `Winvest` 也已移除：2026-09 改版後只剩 `QueryRecentDailyPrice`（盤後日 K，官方註明未取得
 /// 盤中資訊授權）。2026-09-30 盤中 09:17／11:03／13:12 三次實測 10 檔，`KlineDatetime` 全是
 /// 前一交易日、價格停在昨收；爬蟲的「非今日 K 線」防呆雖會擋下，但每天仍白打上萬次請求。
-pub(super) const ALL_PRICE_SITES: [PriceSite; 6] = [
+pub(super) const ALL_PRICE_SITES: [PriceSite; 7] = [
     PriceSite {
         name: "Yahoo",
         fetch: fetch_yahoo_price,
@@ -198,6 +213,10 @@ pub(super) const ALL_PRICE_SITES: [PriceSite; 6] = [
         name: "PcHome",
         fetch: fetch_pchome_price,
     },
+    PriceSite {
+        name: "BigGo",
+        fetch: fetch_biggo_price,
+    },
 ];
 
 /// 所有可用的「完整報價」站點池。
@@ -211,10 +230,11 @@ pub(super) const ALL_PRICE_SITES: [PriceSite; 6] = [
 /// - `CMoney`
 /// - `CnYes`
 /// - `PcHome`
+/// - `BigGo`（加入原因同 [`ALL_PRICE_SITES`]）
 ///
 /// `Yuanta` 已從此站點池移除，因為其資料目前觀察到為前一交易日資料，
 /// 不適合用作即時完整報價來源。`Winvest` 移除原因同 [`ALL_PRICE_SITES`]。
-pub(super) const ALL_QUOTE_SITES: [QuoteSite; 5] = [
+pub(super) const ALL_QUOTE_SITES: [QuoteSite; 6] = [
     QuoteSite {
         name: "Fugle",
         fetch: fetch_fugle_quotes,
@@ -234,5 +254,9 @@ pub(super) const ALL_QUOTE_SITES: [QuoteSite; 5] = [
     QuoteSite {
         name: "PcHome",
         fetch: fetch_pchome_quotes,
+    },
+    QuoteSite {
+        name: "BigGo",
+        fetch: fetch_biggo_quotes,
     },
 ];

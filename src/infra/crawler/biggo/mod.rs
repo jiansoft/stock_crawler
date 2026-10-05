@@ -1,8 +1,10 @@
 //! # BigGo 財經
 //!
 //! BigGo 財經（`finance.biggo.com.tw`）的頁面由前端呼叫 `api.biggo.com/api/v1/finance`
-//! 取得資料。這支內部 API 匿名可用，回傳 `{"result": true, "data": …}`。目前只用來在
-//! Yahoo 三大財報失敗時備援（[`financial_statement`]）。
+//! 取得資料。這支內部 API 匿名可用，回傳 `{"result": true, "data": …}`。用於：
+//!
+//! - Yahoo 三大財報失敗時的備援（[`financial_statement`]）。
+//! - 即時報價備援池的站點之一（[`price`]）。
 //!
 //! ## 呼叫規則（2026-10 實測）
 //!
@@ -14,11 +16,16 @@
 
 /// 三大財報（損益表、資產負債表、現金流量表）。
 pub mod financial_statement;
+/// 即時報價（即時報價備援池）。
+pub mod price;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::core::util::{self, http};
+
+/// BigGo 財經來源命名空間標記型別。
+pub struct BigGo {}
 
 /// BigGo 財經 API 的根網址。
 const API_BASE: &str = "https://api.biggo.com/api/v1/finance";

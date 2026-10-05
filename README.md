@@ -148,7 +148,7 @@ log/                 # runtime 檔案日誌輸出目錄
 12. 台灣證券交易所 https://www.twse.com.tw
 13. 撿股讚 https://stock.wespai.com
 14. 雅虎股市 https://tw.stock.yahoo.com
-15. BigGo 財經 https://finance.biggo.com.tw（三大財務報表的備援來源）
+15. BigGo 財經 https://finance.biggo.com.tw（三大財務報表與即時報價的備援來源）
 
 + `winvest`、`yuanta`、`bank_of_taiwan`（臺灣銀行）crawler module 仍在程式碼中，但目前沒有排程或介面使用；前兩者移出即時報價備援池的原因見「盤中即時報價與追蹤」。
 
@@ -182,8 +182,9 @@ log/                 # runtime 檔案日誌輸出目錄
 + Yahoo 類股不採集認購、認售、指數類、公司債與牛熊證等分類，避免將大量衍生性商品帶進盤中輪詢。
 + 寫入快取前會驗證價格：有當日漲跌停價（取自 Yahoo 類股報價）時以漲跌停區間判斷，無漲跌幅限制的標的改用較寬的門檻，其餘沿用固定漲跌幅門檻，避免異常報價觸發追蹤通知。
 + 股票追蹤高低標判斷統一從共享快取讀值；備援抓價只負責補快取並觸發重新判斷。
-+ 單股最新成交價備援站點：Yahoo、Fugle、NStock、CMoney、CnYes、PcHome。
-+ 單股完整報價備援站點：Fugle、NStock、CMoney、CnYes、PcHome。
++ 單股最新成交價備援站點：Yahoo、Fugle、NStock、CMoney、CnYes、PcHome、BigGo。
++ 單股完整報價備援站點：Fugle、NStock、CMoney、CnYes、PcHome、BigGo。
++ BigGo 於 2026-10-05 盤中比對後加入：95% 報價落在證交所 MIS 的最佳買賣價之間，其餘只差一檔；當天未成交的股票 BigGo 會回前一個交易日的快照，爬蟲會拒收並改問下一個站點。
 + `Winvest` crawler module 仍存在，但 2026-09 改版後只提供盤後日 K（盤中實測回傳前一交易日資料），已移出兩個備援池。
 + `Yuanta` crawler module 仍存在，但目前不在最新成交價或完整報價備援池中，因程式註解記錄其資料曾觀察為前一交易日資料。
 
