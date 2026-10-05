@@ -2,6 +2,8 @@
 pub mod annual_eps;
 /// 收盤事件
 pub mod closing;
+/// 持股法說會通知（BigGo 整理的摘要、展望與 Q&A 重點）
+pub mod earnings_call;
 /// 除息日的事件
 pub mod ex_dividend;
 /// 股利發放日的事件

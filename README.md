@@ -128,6 +128,7 @@ log/                 # runtime 檔案日誌輸出目錄
 + 09:00 更新股票權值佔比
 + 09:02 啟動股票追蹤高低標提醒任務
 + 15:00 取得台股收盤報價數據並計算預估價格
++ 20:30 通知持股近 7 天內法說會的摘要、展望與 Q&A 重點（BigGo 財經整理；摘要尚未產生的場次之後再通知，每場只通知一次）
 + 21:00 更新尚無年度配息資料的股票
 + 22:00 更新外資持股比例與狀態
 + 若服務在開盤期間重啟，啟動排程時會先補啟動一次股票追蹤任務，避免錯過 09:02 的排程。
@@ -148,7 +149,7 @@ log/                 # runtime 檔案日誌輸出目錄
 12. 台灣證券交易所 https://www.twse.com.tw
 13. 撿股讚 https://stock.wespai.com
 14. 雅虎股市 https://tw.stock.yahoo.com
-15. BigGo 財經 https://finance.biggo.com.tw（三大財務報表與即時報價的備援來源）
+15. BigGo 財經 https://finance.biggo.com.tw（三大財務報表與即時報價的備援來源、持股法說會摘要）
 
 + `winvest`、`yuanta`、`bank_of_taiwan`（臺灣銀行）crawler module 仍在程式碼中，但目前沒有排程或介面使用；前兩者移出即時報價備援池的原因見「盤中即時報價與追蹤」。
 
@@ -173,7 +174,7 @@ log/                 # runtime 檔案日誌輸出目錄
 + Data API 位於 `/api/v1/*`（與手動回補共用 HTTP server），提供股票搜尋、最新與歷史報價、即時快照、基本資料、月營收、財報、股利、估值、市場廣度、殖利率排行、選股、大盤指數、股利行事曆、外資持股排行、當日漲跌幅／成交量排行、CAGR 排行等唯讀查詢。
   - 除 `/api/v1/healthz` 外都需要 `Authorization: Bearer <DATA_API_KEY>`；未設定 `DATA_API_KEY` 時一律拒絕。
   - OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不需驗證）。
-+ Telegram bot 用於排程提醒（除權息、股利發放、公開申購、持股財報、外資持股變化）、價格追蹤通知與錯誤告警。
++ Telegram bot 用於排程提醒（除權息、股利發放、公開申購、持股財報、外資持股變化、持股法說會摘要）、價格追蹤通知與錯誤告警。
 
 ## 盤中即時報價與追蹤
 

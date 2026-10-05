@@ -203,6 +203,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "取得每日收盤行情與報價",
             event::taiwan_stock::closing::execute,
         ),
+        // 20:30 通知持股近期法說會的摘要、展望與 Q&A 重點（BigGo 整理）
+        // 法說會多在下午舉行，BigGo 通常當天或隔天產生摘要；摘要未產生的場次之後的排程再看。
+        create_job(
+            "0 30 20 * * *",
+            "通知持股法說會摘要",
+            event::taiwan_stock::earnings_call::execute,
+        ),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 21 * * *", "補齊缺失之年度配息數據", dividend::execute),
         // 22:00 外資持股狀態

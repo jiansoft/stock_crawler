@@ -1,0 +1,46 @@
+{
+  "result": true,
+  "data": {
+    "list": [
+      {
+        "call_id": "TW_2330.TW_2026-07-16",
+        "date": "2026-07-16",
+        "title": "台積電 2026-07-16 法說會",
+        "duration": 4227,
+        "has_video": false,
+        "has_audio": true,
+        "has_slides": true,
+        "has_transcript": true,
+        "is_liked": null,
+        "is_favorited": null
+      },
+      {
+        "call_id": "TW_2330.TW_2026-05-26",
+        "date": "2026-05-26",
+        "title": "2330_台積電_20260526_法說會_站外",
+        "duration": 3100,
+        "has_video": true,
+        "has_audio": false,
+        "has_slides": true,
+        "has_transcript": true,
+        "is_liked": null,
+        "is_favorited": null
+      },
+      {
+        "call_id": "TW_2330.TW_2026-04-16",
+        "date": "2026-04-16",
+        "title": "台積電 2026-04-16 法說會",
+        "duration": null,
+        "has_video": false,
+        "has_audio": false,
+        "has_slides": true,
+        "has_transcript": true,
+        "is_liked": null,
+        "is_favorited": null
+      }
+    ],
+    "total": 17,
+    "page": 1,
+    "size": 10
+  }
+}
