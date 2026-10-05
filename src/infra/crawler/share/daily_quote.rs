@@ -229,29 +229,26 @@ impl DailyQuoteDto {
     }
 }
 
-/// 計算漲跌幅（%）：(收盤 − 前一交易日收盤) ÷ 前一交易日收盤 × 100。
+/// 計算漲跌幅（%）：漲跌 ÷ 參考價 × 100，參考價為「收盤 − 漲跌」。
 ///
-/// `cached_previous` 是快取的「最後交易日報價」`(日期, 收盤)`，只有日期**早於** `date` 才採用：
-/// 重跑當天的收盤彙總時，快取已是當天的收盤，拿它當前一日收盤會讓漲跌幅全部變成 0
-/// （2026-10-02 21:58 重跑後 2,405 筆全為 0，連帶市場漲跌家數統計變成全數平盤）。
-/// 快取不可用時以「收盤 − 漲跌」推回前一日收盤；漲跌為 0（含除息日交易所標示「除息」）時為 0。
-pub fn change_range_percent(
-    date: NaiveDate,
-    closing_price: Decimal,
-    change: Decimal,
-    cached_previous: Option<(NaiveDate, Decimal)>,
-) -> Decimal {
+/// 交易所與券商的漲跌幅都以當日**參考價**為基準，而參考價不一定等於前一個成交日的收盤：
+/// 除權息、減資恢復交易，或前幾天沒有成交、參考價依收盤揭示的買賣價調整時都會不同。
+/// 交易所給的漲跌就是相對參考價，所以「收盤 − 漲跌」就是參考價，漲跌幅的正負號也一定與漲跌一致。
+///
+/// 過去改用快取的前一個成交日收盤計算，在這些日子會算錯：6661 威健生技 2026-10-05 收 16.60、
+/// 漲跌 -0.15（參考價 16.75），以前一個成交日收盤 16.20 計算得到 +2.47%，正負號與漲跌相反；
+/// 2026 年約 15% 的日報價因此與官方不同。
+///
+/// 漲跌為 0（含除息日交易所標示「除息」）或推不出正的參考價時為 0。
+pub fn change_range_percent(closing_price: Decimal, change: Decimal) -> Decimal {
     if change.is_zero() {
         return Decimal::ZERO;
     }
-    let previous = cached_previous
-        .filter(|(cached_date, close)| *cached_date < date && *close > Decimal::ZERO)
-        .map(|(_, close)| close)
-        .or_else(|| Some(closing_price - change).filter(|close| *close > Decimal::ZERO));
-    match previous {
-        Some(previous) => (closing_price - previous) / previous * Decimal::ONE_HUNDRED,
-        None => Decimal::ZERO,
+    let reference = closing_price - change;
+    if reference <= Decimal::ZERO {
+        return Decimal::ZERO;
     }
+    change / reference * Decimal::ONE_HUNDRED
 }
 
 #[cfg(test)]
@@ -404,44 +401,37 @@ mod tests {
 
 #[cfg(test)]
 mod change_range_tests {
-    use chrono::NaiveDate;
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
     use super::change_range_percent;
 
-    fn day(d: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 10, d).unwrap()
-    }
-
-    /// 快取是前一交易日：以快取收盤計算。
+    /// 一般交易日：參考價就是前一日收盤（00715L 2026-10-02 收 70.75、漲 7.2）。
     #[test]
-    fn uses_the_cached_previous_close() {
-        let range =
-            change_range_percent(day(2), dec!(70.75), dec!(7.2), Some((day(1), dec!(63.55))));
+    fn uses_the_reference_price_implied_by_the_change() {
+        let range = change_range_percent(dec!(70.75), dec!(7.2));
         assert_eq!(range.round_dp(4), dec!(11.3297));
-    }
-
-    /// 重跑當天收盤時快取已是當天收盤，不可採用，改以收盤 − 漲跌推回前一日收盤。
-    #[test]
-    fn ignores_a_cache_from_the_same_day() {
-        let range =
-            change_range_percent(day(2), dec!(70.75), dec!(7.2), Some((day(2), dec!(70.75))));
-        assert_eq!(range.round_dp(4), dec!(11.3297));
-    }
-
-    #[test]
-    fn falls_back_without_a_cache_and_handles_zero_change() {
-        let range = change_range_percent(day(2), dec!(2500), dec!(-10), None);
+        let range = change_range_percent(dec!(2500), dec!(-10));
         assert_eq!(range.round_dp(4), dec!(-0.3984));
+    }
+
+    /// 參考價不等於前一個成交日收盤時，仍以參考價計算，正負號與漲跌一致
+    /// （6661 威健生技 2026-10-05：前一個成交日收 16.20，參考價 16.75，收 16.60、漲跌 -0.15）。
+    #[test]
+    fn follows_the_exchange_reference_price() {
+        let range = change_range_percent(dec!(16.60), dec!(-0.15));
+        assert_eq!(range.round_dp(4), dec!(-0.8955));
+        assert!(range.is_sign_negative());
+    }
+
+    #[test]
+    fn zero_change_or_non_positive_reference_is_zero() {
         assert_eq!(
-            change_range_percent(day(2), dec!(2500), Decimal::ZERO, None),
+            change_range_percent(dec!(2500), Decimal::ZERO),
             Decimal::ZERO
         );
-        // 推不出正的前一日收盤時為 0，不可除以零。
-        assert_eq!(
-            change_range_percent(day(2), dec!(1), dec!(1), None),
-            Decimal::ZERO
-        );
+        // 推不出正的參考價時為 0，不可除以零。
+        assert_eq!(change_range_percent(dec!(1), dec!(1)), Decimal::ZERO);
+        assert_eq!(change_range_percent(dec!(1), dec!(2)), Decimal::ZERO);
     }
 }

@@ -188,13 +188,8 @@ pub async fn parse_listed_response(
                 continue;
             }
 
-            // 漲跌幅以前一交易日收盤計算；快取若已是當天的收盤（重跑收盤彙總）就不採用。
-            let cached_previous = crate::infra::cache::SHARE
-                .get_last_trading_day_quotes(&dto.symbol)
-                .await
-                .map(|quote| (quote.date, quote.closing_price));
-            dto.change_range =
-                change_range_percent(date, dto.closing_price, dto.change, cached_previous);
+            // 漲跌幅以交易所的參考價（收盤 − 漲跌）為基準，與官方一致。
+            dto.change_range = change_range_percent(dto.closing_price, dto.change);
 
             dqs.push(dto);
         }
