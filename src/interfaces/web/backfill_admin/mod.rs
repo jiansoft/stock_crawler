@@ -12,13 +12,15 @@
 mod dto;
 mod handlers;
 mod job_runner;
+mod request;
 mod state;
 
 pub use handlers::router;
 pub(crate) use job_runner::{
-    StartJobError, normalize_security_code, start_cagr_job, start_cagr_period_job,
-    start_closing_aggregate_job, start_daily_quotes_job, start_historical_dividends_job,
+    StartJobError, start_cagr_job, start_cagr_period_job, start_closing_aggregate_job,
+    start_daily_quotes_job, start_historical_dividends_job,
     start_multiple_dividend_historical_dividends_job, start_quote_history_job,
     start_received_dividend_records_job, start_taiwan_stock_index_job,
 };
+pub(crate) use request::normalize_security_code;
 pub(crate) use state::{BackfillJob, get_backfill_job, list_backfill_jobs};
