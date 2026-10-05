@@ -552,46 +552,83 @@ mod tests {
         cleanup().await;
     }
 
-    /// 手動驗證 TWSE 報價抓取後可透過 COPY 寫入。
+    /// COPY 寫入驗證：以 TWSE 每日收盤行情 fixture（100 檔）走 ACL 轉成 [`DailyQuote`]，
+    /// 在交易內 COPY、驗證筆數後回滾，不留下任何資料列。
     ///
-    /// 此測試同時依賴外部網路與資料庫，預設測試集不執行。COPY 在交易內執行、驗證筆數後
-    /// 一律回滾，不會留下任何資料列：舊版直接 COPY 且不清理，2026-06-30 對正式庫執行後留下
-    /// 1,204 筆日期為 1970-01-01 的重複報價（2026-10-05 才清除）。
+    /// 舊版改抓 TWSE 即時資料、COPY 後不清理，且標成 `#[ignore]` 平常不跑；2026-06-30 對正式庫
+    /// 執行後留下 1,204 筆日期為 1970-01-01 的重複報價（2026-10-05 才清除）。現在不連外部網站，
+    /// 隨整合測試一起執行。
     #[tokio::test]
-    #[ignore]
-    async fn test_copy_in_raw() {
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn test_copy_in_raw_rolls_back() {
         dotenvy::dotenv().ok();
         if database::ping().await.is_err() {
-            println!("跳過 test_copy_in_raw：無資料庫連接");
+            println!("跳過 test_copy_in_raw_rolls_back：無資料庫連接");
             return;
         }
 
-        let date = NaiveDate::from_ymd_opt(2023, 12, 4).unwrap();
-        let Ok(twse_dtos) = twse::quote::visit(date).await else {
-            println!("跳過 test_copy_in_raw：無法連線 TWSE API");
-            return;
-        };
-        // 改用不會與真實資料衝突的日期，避免撞到 (stock_symbol, Date) 唯一索引。
-        let target_date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-        let twse: Vec<DailyQuote> = twse_dtos
-            .into_iter()
-            .map(|mut dto| {
-                dto.date = target_date;
+        let response: twse::quote::ListedResponse = serde_json::from_str(include_str!(
+            "../../../../../../tests/fixtures/twse_quote.json"
+        ))
+        .expect("TWSE fixture should parse");
+        let table = &response.tables[0];
+        let field_map: std::collections::HashMap<&str, usize> = table
+            .fields
+            .as_ref()
+            .expect("fixture fields")
+            .iter()
+            .enumerate()
+            .map(|(index, field)| (field.as_str(), index))
+            .collect();
+        // 用不會與真實資料衝突的日期，避免撞到 (stock_symbol, Date) 唯一索引；交易結束即回滾。
+        let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        let quotes: Vec<DailyQuote> = table
+            .data
+            .as_ref()
+            .expect("fixture rows")
+            .iter()
+            .map(|row| {
+                let dto = crate::infra::crawler::share::DailyQuoteDto::from_with_map(
+                    row, &field_map, date,
+                )
+                .expect("fixture row should parse");
                 let cmd = crate::app::backfill::acl::QuoteAclMapper::from_dto(&dto);
                 DailyQuote::from(crate::app::backfill::acl::QuoteAclMapper::from_command(
                     &cmd,
                 ))
             })
             .collect();
+        assert!(!quotes.is_empty());
 
+        let count_on_date = r#"SELECT COUNT(*) FROM "DailyQuotes" WHERE "Date" = $1"#;
         let mut tx = database::get_connection()
             .begin()
             .await
             .expect("begin transaction");
-        let copied = DailyQuote::copy_in_raw_on(&mut tx, &twse)
+        let copied = DailyQuote::copy_in_raw_on(&mut tx, &quotes)
             .await
             .expect("copy_in_raw_on should succeed");
-        assert_eq!(copied as usize, twse.len());
+        assert_eq!(copied as usize, quotes.len());
+        let inside: i64 = sqlx::query_scalar(count_on_date)
+            .bind(date)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("count inside transaction");
+        assert_eq!(
+            inside as usize,
+            quotes.len(),
+            "交易內應看得到剛 COPY 的資料"
+        );
         tx.rollback().await.expect("rollback");
+
+        let after: i64 = sqlx::query_scalar(count_on_date)
+            .bind(date)
+            .fetch_one(database::get_connection())
+            .await
+            .expect("count after rollback");
+        assert_eq!(after, 0, "回滾後不可留下任何資料列");
     }
 }
