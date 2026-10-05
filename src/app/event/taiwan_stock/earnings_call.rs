@@ -75,11 +75,7 @@ pub async fn execute() -> Result<()> {
         .fetch_active_holdings(None)
         .await
         .context("fetch active holdings for earnings call notification failed")?;
-    let symbols: BTreeSet<String> = holdings
-        .into_iter()
-        .map(|holding| holding.security_code)
-        .filter(|symbol| has_earnings_calls(symbol))
-        .collect();
+    let symbols = eligible_symbols(holdings.into_iter().map(|holding| holding.security_code));
 
     let today = Local::now().date_naive();
     let mut summary = RunSummary {
@@ -120,12 +116,8 @@ pub async fn execute() -> Result<()> {
 
 /// 處理單場法說會：未通知過且摘要已產生才送出，送出後記錄。
 async fn notify(stock_symbol: &str, call: &EarningsCall) -> Outcome {
-    let key = notified_key(&call.call_id);
-    match CLIENT.get_bool(&key).await {
-        Ok(true) => return Outcome::AlreadyNotified,
-        Ok(false) => {}
-        // Redis 異常時當作尚未通知：寧可重複發一次，也不要因為快取故障而漏發。
-        Err(why) => tracing::warn!("讀取法說會通知紀錄 {key} 失敗，視為尚未通知: {why:?}"),
+    if is_notified(&call.call_id).await {
+        return Outcome::AlreadyNotified;
     }
 
     let detail = match earnings_call::detail(stock_symbol, &call.call_id).await {
@@ -144,10 +136,38 @@ async fn notify(stock_symbol: &str, call: &EarningsCall) -> Outcome {
 
     let name = stock_name(stock_symbol);
     alert::send_message(&build_message(stock_symbol, &name, call, &detail)).await;
+    mark_notified(&call.call_id).await;
+    Outcome::Notified
+}
+
+/// 這場法說會是否已通知過。
+///
+/// Redis 異常時當作尚未通知：寧可重複發一次，也不要因為快取故障而漏發。
+async fn is_notified(call_id: &str) -> bool {
+    let key = notified_key(call_id);
+    match CLIENT.get_bool(&key).await {
+        Ok(notified) => notified,
+        Err(why) => {
+            tracing::warn!("讀取法說會通知紀錄 {key} 失敗，視為尚未通知: {why:?}");
+            false
+        }
+    }
+}
+
+/// 記錄這場法說會已通知；寫入失敗只記錄，下次排程可能重複通知。
+async fn mark_notified(call_id: &str) {
+    let key = notified_key(call_id);
     if let Err(why) = CLIENT.set(&key, true, NOTIFIED_TTL_SECONDS).await {
         tracing::warn!("寫入法說會通知紀錄 {key} 失敗，下次排程可能重複通知: {why:?}");
     }
-    Outcome::Notified
+}
+
+/// 從持股代號中挑出可能有法說會的股票（去重、排序）。
+fn eligible_symbols(security_codes: impl IntoIterator<Item = String>) -> BTreeSet<String> {
+    security_codes
+        .into_iter()
+        .filter(|symbol| has_earnings_calls(symbol))
+        .collect()
 }
 
 /// 是否可能有法說會：排除 ETF／ETN（`00` 開頭）與特別股、受益證券等含英文字母的代號。
@@ -256,6 +276,73 @@ mod tests {
             title: "台積電 2026-10-05 法說會".to_string(),
             has_transcript: true,
         }
+    }
+
+    /// 持股可能重複（同一檔分次買進），挑出來的代號去重並排序。
+    #[test]
+    fn eligible_symbols_deduplicates_and_skips_etfs() {
+        let symbols = eligible_symbols(
+            ["2330", "0050", "2330", "2753", "2887G"]
+                .into_iter()
+                .map(str::to_string),
+        );
+        assert_eq!(
+            symbols.into_iter().collect::<Vec<_>>(),
+            vec!["2330".to_string(), "2753".to_string()]
+        );
+    }
+
+    /// 股名取自股票主檔快取；查不到時為空字串。
+    #[test]
+    fn stock_name_reads_the_registry_cache() {
+        let symbol = "79988";
+        SHARE.stocks.write().expect("stocks 快取可寫入").insert(
+            symbol.to_string(),
+            crate::domain::registry::entity::Stock::reconstitute(
+                symbol.to_string(),
+                "測試法說會".to_string(),
+                false,
+                rust_decimal::Decimal::ZERO,
+                rust_decimal::Decimal::ZERO,
+                rust_decimal::Decimal::ZERO,
+                Local::now(),
+                2,
+                24,
+                0,
+                0,
+                rust_decimal::Decimal::ZERO,
+            ),
+        );
+        assert_eq!(stock_name(symbol), "測試法說會");
+        SHARE
+            .stocks
+            .write()
+            .expect("stocks 快取可寫入")
+            .remove(symbol);
+        assert_eq!(stock_name(symbol), "");
+    }
+
+    /// 通知紀錄寫入 Redis 後讀得回來；測試用假場次，結束時刪除。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn notified_record_round_trips_through_redis() {
+        dotenvy::dotenv().ok();
+        if CLIENT.ping().await.is_err() {
+            println!("跳過 notified_record_round_trips_through_redis：無 Redis 連線");
+            return;
+        }
+        let call_id = "TEST_79988.TW_1970-01-01";
+        let key = notified_key(call_id);
+        let _ = CLIENT.delete(&key).await;
+
+        assert!(!is_notified(call_id).await, "尚未記錄前應為未通知");
+        mark_notified(call_id).await;
+        assert!(is_notified(call_id).await, "記錄後應為已通知");
+
+        CLIENT.delete(&key).await.expect("清除測試紀錄");
     }
 
     #[test]
