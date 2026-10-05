@@ -552,9 +552,11 @@ mod tests {
         cleanup().await;
     }
 
-    /// 手動驗證 TWSE 報價抓取後可透過 COPY 寫入測試資料。
+    /// 手動驗證 TWSE 報價抓取後可透過 COPY 寫入。
     ///
-    /// 此測試同時依賴外部網路與本機資料庫，預設測試集不應執行。
+    /// 此測試同時依賴外部網路與資料庫，預設測試集不執行。COPY 在交易內執行、驗證筆數後
+    /// 一律回滾，不會留下任何資料列：舊版直接 COPY 且不清理，2026-06-30 對正式庫執行後留下
+    /// 1,204 筆日期為 1970-01-01 的重複報價（2026-10-05 才清除）。
     #[tokio::test]
     #[ignore]
     async fn test_copy_in_raw() {
@@ -563,36 +565,33 @@ mod tests {
             println!("跳過 test_copy_in_raw：無資料庫連接");
             return;
         }
-        tracing::debug!("開始 copy_in_raw");
 
         let date = NaiveDate::from_ymd_opt(2023, 12, 4).unwrap();
         let Ok(twse_dtos) = twse::quote::visit(date).await else {
             println!("跳過 test_copy_in_raw：無法連線 TWSE API");
             return;
         };
+        // 改用不會與真實資料衝突的日期，避免撞到 (stock_symbol, Date) 唯一索引。
         let target_date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-        let mut twse = Vec::new();
-        for mut dto in twse_dtos {
-            dto.date = target_date;
-            let cmd = crate::app::backfill::acl::QuoteAclMapper::from_dto(&dto);
-            let entity = crate::app::backfill::acl::QuoteAclMapper::from_command(&cmd);
-            twse.push(DailyQuote::from(entity));
-        }
+        let twse: Vec<DailyQuote> = twse_dtos
+            .into_iter()
+            .map(|mut dto| {
+                dto.date = target_date;
+                let cmd = crate::app::backfill::acl::QuoteAclMapper::from_dto(&dto);
+                DailyQuote::from(crate::app::backfill::acl::QuoteAclMapper::from_command(
+                    &cmd,
+                ))
+            })
+            .collect();
 
-        let _ = sqlx::query(r#"delete from "DailyQuotes" where "Date" = $1;"#)
-            .bind(target_date)
-            .execute(database::get_connection())
-            .await;
-
-        match DailyQuote::copy_in_raw(&twse).await {
-            Ok(cd) => {
-                tracing::debug!("copy_in_raw: {:?}", cd);
-            }
-            Err(why) => {
-                tracing::debug!("Failed to copy_in_raw because {:?}", why);
-            }
-        }
-
-        tracing::debug!("結束 copy_in_raw");
+        let mut tx = database::get_connection()
+            .begin()
+            .await
+            .expect("begin transaction");
+        let copied = DailyQuote::copy_in_raw_on(&mut tx, &twse)
+            .await
+            .expect("copy_in_raw_on should succeed");
+        assert_eq!(copied as usize, twse.len());
+        tx.rollback().await.expect("rollback");
     }
 }
