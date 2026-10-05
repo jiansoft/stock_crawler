@@ -12,7 +12,7 @@ use super::{dto, handlers};
 #[derive(OpenApi)]
 #[openapi(
     paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::stock_valuation, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::ErrorBody, dto::HealthResponse)),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -128,6 +128,32 @@ mod tests {
         if has_not_found {
             assert_response(operation, "404", "ErrorBody");
         }
+    }
+
+    /// utoipa 6 對「inline 列舉＋default」會產生 `allOf: [列舉, {type: object, default}]`，
+    /// 要求參數同時是字串又是物件；有預設值的列舉參數因此改用 `$ref`（default 為同層欄位），
+    /// 這裡確保所有 query 參數都不再出現這種互相矛盾的 schema。
+    #[test]
+    fn query_parameters_have_no_contradictory_all_of() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+        let mut checked = 0;
+        for (path, item) in document["paths"].as_object().expect("paths") {
+            for parameter in item["get"]["parameters"].as_array().into_iter().flatten() {
+                let schema = parameter["schema"].to_string();
+                assert!(
+                    !(schema.contains("allOf") && schema.contains(r#""type":"object""#)),
+                    "{path} {} 的 schema 互相矛盾：{schema}",
+                    parameter["name"]
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
+
+        // 有預設值的列舉參數是 `$ref` 加上同層 default，列舉值由 components 提供。
+        let rank_by = query_schema(get_operation(&document, "/api/v1/market/movers"), "rank_by");
+        assert_eq!(rank_by["$ref"], "#/components/schemas/MoversRankByValue");
+        assert_eq!(rank_by["default"], "top_gainers");
     }
 
     /// OpenAPI 契約須列出所有資料查詢路徑與健康檢查，供 Go client codegen 使用。

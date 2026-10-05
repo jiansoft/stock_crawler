@@ -13,7 +13,7 @@ use utoipa::{IntoParams, ToSchema};
 /// 讓不合法的值得到明確的 422 訊息而非 serde 的泛用錯誤。
 #[derive(ToSchema)]
 #[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema。
-enum CagrPeriodParamValue {
+pub(crate) enum CagrPeriodParamValue {
     /// 3 個月。
     M3,
     /// 6 個月。
@@ -38,7 +38,7 @@ enum CagrPeriodParamValue {
 #[derive(ToSchema)]
 #[schema(rename_all = "snake_case")]
 #[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema。
-enum CagrMetricParamValue {
+pub(crate) enum CagrMetricParamValue {
     /// 口徑 A：純價格報酬（長期間不提供）。
     Price,
     /// 口徑 B：含息不再投入，主指標。
@@ -65,13 +65,13 @@ enum CagrSortParamValue {
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct CagrRankingParams {
     /// 統計期間：`M3`、`M6`、`Y1`（預設）、`Y1H`、`Y2`、`Y3`、`Y5`、`Y7` 或 `Y10`。
-    #[param(value_type = CagrPeriodParamValue, inline, default = "Y1")]
+    #[param(value_type = CagrPeriodParamValue, default = "Y1")]
     pub(crate) period: Option<String>,
     /// 報酬口徑：`price`、`total`（預設）或 `reinvested`。
     ///
     /// `Y5`／`Y10` 不接受 `price`——近十年每年皆有 134–216 檔股票配股，
     /// 長期間忽略配股的誤差顯著，因此回 422 而非默默給出低估的數字。
-    #[param(value_type = CagrMetricParamValue, inline, default = "total")]
+    #[param(value_type = CagrMetricParamValue, default = "total")]
     pub(crate) metric: Option<String>,
     /// 排序鍵：`cagr` 或 `total_return`；未指定時依期間長度自動選擇
     /// （12 個月以上用 `cagr`，短期間用 `total_return`）。
@@ -104,7 +104,7 @@ pub(crate) struct CagrRankingParams {
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct CagrSymbolParams {
     /// 報酬口徑：`price`、`total`（預設）或 `reinvested`。
-    #[param(value_type = CagrMetricParamValue, inline, default = "total")]
+    #[param(value_type = CagrMetricParamValue, default = "total")]
     pub(crate) metric: Option<String>,
     /// 計算基準日，格式 `YYYY-MM-DD`；未提供時取最新一個已完成計算的日期。
     pub(crate) date: Option<String>,

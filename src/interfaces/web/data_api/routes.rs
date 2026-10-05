@@ -123,6 +123,49 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
+    /// OpenAPI JSON 與 Swagger UI 不需驗證；升級 utoipa-swagger-ui 後確認兩個入口仍能服務。
+    #[tokio::test]
+    async fn openapi_json_and_swagger_ui_are_served() {
+        let response = router()
+            .oneshot(
+                Request::get("/api-docs/openapi.json")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should serve request");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let document: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("OpenAPI should be JSON");
+        assert!(
+            document["openapi"]
+                .as_str()
+                .is_some_and(|v| v.starts_with("3.1"))
+        );
+        assert!(document["paths"]["/api/v1/market/movers"].is_object());
+
+        let response = router()
+            .oneshot(
+                Request::get("/swagger-ui/")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should serve request");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let html = String::from_utf8_lossy(&bytes);
+        assert!(
+            html.contains("swagger"),
+            "Swagger UI 頁面應包含 swagger 資源"
+        );
+    }
+
     /// 未帶 token 的受保護路徑必須在觸及資料庫前直接被拒絕。
     #[tokio::test]
     async fn protected_endpoint_rejects_missing_bearer_key() {
