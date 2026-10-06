@@ -4,6 +4,7 @@ use thiserror::Error;
 pub mod cagr_source;
 pub mod config;
 pub mod corporate_action;
+pub mod data_health;
 pub mod dividend;
 pub mod financial;
 pub mod financial_report;

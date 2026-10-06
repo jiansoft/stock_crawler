@@ -56,13 +56,13 @@ const COVERAGE_MIN_PERCENT: i64 = 50;
 
 /// 收盤資料不完整的市場。
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Shortfall {
+pub(crate) struct Shortfall {
     /// 市場名稱。
-    market: &'static str,
+    pub(crate) market: &'static str,
     /// 當天有成交的檔數。
-    traded: i64,
+    pub(crate) traded: i64,
     /// 近期交易日有成交檔數的最大值。
-    baseline: i64,
+    pub(crate) baseline: i64,
 }
 
 /// 排程入口：檢查今天的收盤資料是否完整，不完整就重跑收盤匯總並告警。
@@ -108,7 +108,7 @@ pub async fn ensure_complete() -> Result<()> {
 }
 
 /// 比較當天與近期交易日各市場有成交的檔數，列出不完整的市場。
-fn shortfalls(date: NaiveDate, counts: &[MarketTradedCount]) -> Vec<Shortfall> {
+pub(crate) fn shortfalls(date: NaiveDate, counts: &[MarketTradedCount]) -> Vec<Shortfall> {
     [(2, "上市"), (4, "上櫃")]
         .into_iter()
         .filter_map(|(market_id, market)| {
