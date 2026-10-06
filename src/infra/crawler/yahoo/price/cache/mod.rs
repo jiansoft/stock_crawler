@@ -3,60 +3,48 @@
 //! 此模組負責在開盤期間依序輪詢 Yahoo 的三大市場類股，
 //! 並將解析後的報價快照整批寫回 [`SHARE`](infra::cache::SHARE)。
 //! 它的設計目標與 `histock::price` 類似，但資料來源改成 Yahoo 類股 API。
+//!
+//! - [`state`]：生命週期旗標與最近一輪診斷數據。
+//! - [`apply`]：類股快照寫回共用快取並發佈價格事件。
+//! - [`errors`]：WAF 阻擋與 5xx 暫時性錯誤。
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
-use once_cell::sync::Lazy;
 use rand::RngExt;
-use rust_decimal::Decimal;
-use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::{
-    app::event::trace::price_tasks as trace_price_tasks,
     core::util::{
         atomic::decrement_atomic_usize,
-        diagnostics::{
-            ProcessMemoryStats, TaskRuntimeStatus, read_process_memory_stats, trim_allocator_memory,
-        },
+        diagnostics::{read_process_memory_stats, trim_allocator_memory},
     },
-    infra::cache::{RealtimeSnapshot, SHARE, TTL, TtlCacheInner},
-    infra::crawler::yahoo::{YahooClassCategory, YahooClassExchange},
+    infra::cache::SHARE,
 };
 
 use super::class_quote;
 
-/// 控制 Yahoo 類股快取背景任務生命週期的全域旗標。
-static IS_CACHING: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
-/// 目前存活中的 Yahoo 類股背景 task 數量。
-static ACTIVE_TASKS: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
-/// Yahoo 類股背景 task 的世代編號。
-static LAST_TASK_GENERATION: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
-/// 目前執行中的 Yahoo 類股背景 task handle。
-static CACHING_TASK: Lazy<std::sync::Mutex<Option<JoinHandle<()>>>> =
-    Lazy::new(|| std::sync::Mutex::new(None));
-/// Yahoo 最近一輪成功輪詢的類股數。
-static LAST_SUCCESS_COUNT: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
-/// Yahoo 最近一輪失敗的類股數。
-static LAST_FAILURE_COUNT: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
-/// Yahoo 最近一輪抓取的總頁數。
-static LAST_PAGE_COUNT: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
-/// Yahoo 最近一輪讀到的原始 item 總數。
-static LAST_RAW_ITEM_COUNT: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
-/// Yahoo 最近一輪落地後的總快取筆數。
-static LAST_SNAPSHOT_COUNT: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
-/// Yahoo 最近一輪候選價格事件數。
-static LAST_CANDIDATE_EVENT_COUNT: Lazy<AtomicUsize> = Lazy::new(|| AtomicUsize::new(0));
-/// Yahoo 最近一輪整體耗時毫秒數。
-static LAST_ELAPSED_MS: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
-/// Yahoo 最近一輪 RSS 差值（KiB）。
-static LAST_RSS_DELTA_KIB: Lazy<AtomicI64> = Lazy::new(|| AtomicI64::new(0));
-/// Yahoo 完成輪詢的累積輪數。
-static COMPLETED_CYCLES: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
+/// 類股快照寫回共用快取。
+mod apply;
+/// 類股 API 錯誤分類。
+mod errors;
+/// 生命週期旗標與診斷數據。
+mod state;
+
+use apply::apply_category_snapshots;
+use state::{
+    ACTIVE_TASKS, CACHING_TASK, COMPLETED_CYCLES, IS_CACHING, LAST_TASK_GENERATION, rss_delta_kib,
+    store_runtime_progress,
+};
+pub(crate) use state::{diagnostics_snapshot, runtime_diagnostics_snapshot};
+
+/// 測試間共用的鎖：套用快照的測試與 live 啟停測試都會改動全域 [`SHARE`]。
+#[cfg(test)]
+static TEST_STATE_LOCK: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
+    once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
 
 /// 全部類股輪詢完一輪後的休息時間。
 const CYCLE_COOLDOWN: Duration = Duration::from_secs(5);
@@ -85,42 +73,6 @@ async fn sleep_while_caching(total: Duration) {
         }
         sleep(remaining.min(STOP_CHECK_INTERVAL)).await;
     }
-}
-
-/// Yahoo 類股來源的最近一輪執行摘要。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct YahooRuntimeDiagnostics {
-    pub status: TaskRuntimeStatus,
-    pub last_success_count: usize,
-    pub last_failure_count: usize,
-    pub last_page_count: usize,
-    pub last_raw_item_count: usize,
-    pub last_snapshot_count: usize,
-    pub last_candidate_event_count: usize,
-    pub last_elapsed_ms: u64,
-    pub last_rss_delta_kib: i64,
-    pub completed_cycles: u64,
-}
-
-#[allow(clippy::too_many_arguments)]
-fn store_runtime_progress(
-    success_count: usize,
-    failure_count: usize,
-    page_count: usize,
-    raw_item_count: usize,
-    total_snapshot_count: usize,
-    candidate_event_count: usize,
-    elapsed_ms: u64,
-    rss_delta_kib: i64,
-) {
-    LAST_SUCCESS_COUNT.store(success_count, Ordering::SeqCst);
-    LAST_FAILURE_COUNT.store(failure_count, Ordering::SeqCst);
-    LAST_PAGE_COUNT.store(page_count, Ordering::SeqCst);
-    LAST_RAW_ITEM_COUNT.store(raw_item_count, Ordering::SeqCst);
-    LAST_SNAPSHOT_COUNT.store(total_snapshot_count, Ordering::SeqCst);
-    LAST_CANDIDATE_EVENT_COUNT.store(candidate_event_count, Ordering::SeqCst);
-    LAST_ELAPSED_MS.store(elapsed_ms, Ordering::SeqCst);
-    LAST_RSS_DELTA_KIB.store(rss_delta_kib, Ordering::SeqCst);
 }
 
 /// 啟動 Yahoo 類股快取背景任務。
@@ -268,42 +220,10 @@ pub fn start_caching_task() {
                         failure_count += 1;
                         let err_msg = why.to_string();
                         // 檢查錯誤訊息是否包含被阻擋特徵
-                        if err_msg.contains("Request denied") || err_msg.contains("status 999") {
+                        if errors::is_denied(&err_msg) {
                             is_denied = true;
                             cycle_denied = true;
-
-                            let alert_cache_key = "alert:yahoo:denied";
-                            // 使用專案內建的記憶體 TTL 快取，確認 1 小時內是否已發送過警報，防範洗板
-                            let already_alerted = TTL.daily_quote_contains_key(alert_cache_key);
-
-                            if !already_alerted {
-                                // 寫入為期 1 小時的警報快取旗標至記憶體 TTL 快取 (3600秒)
-                                TTL.daily_quote_set(
-                                    alert_cache_key.to_string(),
-                                    "true".to_string(),
-                                    Duration::from_secs(3600),
-                                );
-
-                                // 準備 TG 通知所需的變數，轉移所有權至 async 區塊
-                                let exchange_label = category.exchange.label().to_string();
-                                let category_name = category.name.to_string();
-                                let sector_id = category.sector_id;
-                                let err_msg_clone = err_msg.clone();
-
-                                // 透過 tokio::spawn 非同步發送警報，避免阻塞爬蟲主流程。
-                                // 走 core::alert 抽象介面（實際管道由 main 註冊的 adapter 決定），
-                                // infra 層不再直接依賴 interfaces::bot（反向耦合已移除）。
-                                tokio::spawn(async move {
-                                    crate::core::alert::send_alert(
-                                        "Yahoo 類股採集遭遇阻擋",
-                                        &format!(
-                                            "類股: {} {}({})\n原因: {}\n該次更新將強制冷卻 10 分鐘，1小時內不重複提醒。",
-                                            exchange_label, category_name, sector_id, err_msg_clone
-                                        ),
-                                    )
-                                    .await;
-                                });
-                            }
+                            errors::alert_denied_once(category, &err_msg);
                         }
                         let total_count = SHARE
                             .stock_snapshots
@@ -343,7 +263,7 @@ pub fn start_caching_task() {
                         // 類股失敗時只記錄錯誤，不中止整輪任務，
                         // 避免單一 sector 出問題就拖垮整個 Yahoo 報價快取。
                         // 5xx 是 Yahoo 端的暫時性錯誤，下一輪即恢復，只記 warn。
-                        if is_transient_server_error(&err_msg) {
+                        if errors::is_transient_server_error(&err_msg) {
                             tracing::warn!(
                                 "Yahoo 類股快取更新失敗（暫時性）: {} {}({}) {:#}",
                                 category.exchange.label(),
@@ -509,249 +429,13 @@ pub async fn stop_caching_task() {
     SHARE.clear_stock_snapshots();
 }
 
-/// 取得 Yahoo 類股背景任務目前的執行狀態。
-pub(crate) fn diagnostics_snapshot() -> TaskRuntimeStatus {
-    TaskRuntimeStatus::new(
-        IS_CACHING.load(Ordering::SeqCst),
-        ACTIVE_TASKS.load(Ordering::SeqCst),
-        LAST_TASK_GENERATION.load(Ordering::SeqCst),
-    )
-}
-
-/// 取得 Yahoo 最近一輪輪詢的執行摘要。
-pub(crate) fn runtime_diagnostics_snapshot() -> YahooRuntimeDiagnostics {
-    YahooRuntimeDiagnostics {
-        status: diagnostics_snapshot(),
-        last_success_count: LAST_SUCCESS_COUNT.load(Ordering::SeqCst),
-        last_failure_count: LAST_FAILURE_COUNT.load(Ordering::SeqCst),
-        last_page_count: LAST_PAGE_COUNT.load(Ordering::SeqCst),
-        last_raw_item_count: LAST_RAW_ITEM_COUNT.load(Ordering::SeqCst),
-        last_snapshot_count: LAST_SNAPSHOT_COUNT.load(Ordering::SeqCst),
-        last_candidate_event_count: LAST_CANDIDATE_EVENT_COUNT.load(Ordering::SeqCst),
-        last_elapsed_ms: LAST_ELAPSED_MS.load(Ordering::SeqCst),
-        last_rss_delta_kib: LAST_RSS_DELTA_KIB.load(Ordering::SeqCst),
-        completed_cycles: COMPLETED_CYCLES.load(Ordering::SeqCst),
-    }
-}
-
-/// 單一類股快取套用後的摘要。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct ApplyCategoryResult {
-    total_snapshot_count: usize,
-    changed_event_count: usize,
-}
-
-/// 將單一類股的最新快照套用到共用快取。
-///
-/// 這個步驟會：
-/// - 移除該類股上一輪存在、這一輪已消失的股票。
-/// - 寫入該類股本輪抓到的最新快照。
-/// - 回傳更新後整體快取的股票數量。
-fn apply_category_snapshots(
-    category: &YahooClassCategory,
-    category_snapshots: HashMap<String, RealtimeSnapshot>,
-    category_symbols: &mut HashMap<String, HashSet<String>>,
-) -> ApplyCategoryResult {
-    // 先算出這個類股本輪的內部鍵值，讓同一個 sector 的 symbol 集可以被覆蓋更新。
-    let category_key = class_quote::category_key(category);
-    // 把本輪所有 symbol 收成集合，後面可以和上一輪做集合差異比對。
-    let new_symbols: HashSet<String> = category_snapshots.keys().cloned().collect();
-    // `insert` 會回傳舊集合；這正好拿來得知上一輪這個類股有哪些股票。
-    let previous_symbols = category_symbols
-        .insert(category_key, new_symbols)
-        .unwrap_or_default();
-
-    // 驗證前先記下本輪的漲跌停價：Yahoo 類股報價自帶當日漲跌幅限制，比固定的 10.5% 門檻準確，
-    // 也讓其他備援站點的報價能用同一份限制驗證。
-    SHARE.set_price_limits(
-        chrono::Local::now().date_naive(),
-        category_snapshots
-            .iter()
-            .map(|(symbol, snapshot)| (symbol.clone(), snapshot.price_limit)),
-    );
-
-    match SHARE.stock_snapshots.write() {
-        Ok(mut cache) => {
-            let mut changed_event_count = 0usize;
-            // 先刪除這個類股上一輪有、這一輪沒有的股票，
-            // 避免共享快取殘留已不在該類股結果中的舊資料。
-            for symbol in previous_symbols {
-                if !category_snapshots.contains_key(&symbol) {
-                    cache.remove(&symbol);
-                }
-            }
-
-            // 再把本輪抓到的快照逐筆寫回共享快取。
-            // 若 symbol 已存在，就用最新 snapshot 覆蓋。
-            for (symbol, snapshot) in category_snapshots {
-                let price = snapshot.price;
-                // Yahoo 興櫃類股的股票不一定已在主檔，改用類股本身的市場別決定閾值。
-                let is_valid = if category.exchange == YahooClassExchange::Emerging {
-                    SHARE.is_valid_price_for_market(&symbol, price, snapshot.last_close, true)
-                } else {
-                    SHARE.is_valid_price(&symbol, price, snapshot.last_close)
-                };
-                if !is_valid {
-                    // 價格 0 是尚未成交（冷門股、特別股開盤後常見），不是異常，只略過不記錄
-                    if price > Decimal::ZERO {
-                        tracing::warn!(
-                            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                            symbol,
-                            price,
-                            snapshot.last_close,
-                            snapshot.source_site
-                        );
-                    }
-                    continue;
-                }
-                let has_changed = snapshot.price != Decimal::ZERO
-                    && cache
-                        .get(&symbol)
-                        .is_none_or(|old_snapshot| old_snapshot.price != snapshot.price);
-                let publish_symbol = has_changed.then(|| symbol.clone());
-                cache.insert(symbol, snapshot);
-
-                if let Some(symbol) = publish_symbol {
-                    changed_event_count += 1;
-                    trace_price_tasks::publish_price_update(symbol, price);
-                }
-            }
-
-            // 回傳整體共享快取筆數，讓呼叫端能寫 log 觀察目前快取規模。
-            ApplyCategoryResult {
-                total_snapshot_count: cache.len(),
-                changed_event_count,
-            }
-        }
-        Err(why) => {
-            // 寫鎖失敗時記錄錯誤，並回傳 0 讓 log 明顯顯示這輪更新沒有成功落地。
-            tracing::error!("Failed to update Yahoo 類股快取 because {:?}", why);
-            ApplyCategoryResult::default()
-        }
-    }
-}
-
-fn rss_delta_kib(before: Option<ProcessMemoryStats>, after: Option<ProcessMemoryStats>) -> i64 {
-    match (before, after) {
-        (Some(before), Some(after)) => after.vm_rss_kib as i64 - before.vm_rss_kib as i64,
-        _ => 0,
-    }
-}
-
-/// 是否為 Yahoo 類股 API 回應的 5xx 暫時性錯誤（見 `class_quote` 的錯誤格式）。
-///
-/// 2026-09-24 盤中共 12 次 500／502，皆在 09:02～09:37，下一輪即恢復。
-fn is_transient_server_error(message: &str) -> bool {
-    message.contains("request failed with status 5")
-}
-
 #[cfg(test)]
 mod tests {
-
-    #[test]
-    fn is_transient_server_error_matches_only_5xx() {
-        assert!(is_transient_server_error(
-            "Yahoo 類股 API request failed with status 500 Internal Server Error for https://x. Body: "
-        ));
-        assert!(is_transient_server_error(
-            "Yahoo 類股 API request failed with status 502 Bad Gateway for https://x. Body: "
-        ));
-        assert!(!is_transient_server_error(
-            "Yahoo 類股 API request failed with status 404 Not Found for https://x. Body: "
-        ));
-        assert!(!is_transient_server_error("Request denied"));
-    }
     use std::time::{Duration, Instant};
 
-    use once_cell::sync::Lazy;
-    use rust_decimal_macros::dec;
-    use tokio::sync::Mutex;
     use tokio::time::sleep;
 
     use super::*;
-
-    static TEST_STATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-    /// 驗證快取全量更新前，只會針對價格實際異動的股票產生事件。
-    #[test]
-    fn test_apply_category_snapshots_counts_changed_prices() {
-        let _lock = TEST_STATE_LOCK.blocking_lock();
-        SHARE.clear_stock_snapshots();
-        // 清空昨日收盤快取，防止並發測試（如 SHARE.load()）將真實 DB 價格寫入，
-        // 導致 is_valid_price 以真實昨收價驗證測試用的假價格而誤判為異常。
-        SHARE.clear_last_trading_day_quotes();
-
-        let category = YahooClassCategory::enabled(
-            crate::infra::crawler::yahoo::YahooClassExchange::Listed,
-            40,
-            "半導體",
-        );
-        let mut category_symbols = HashMap::new();
-
-        let mut existing = HashMap::new();
-        existing.insert(
-            "2330".to_string(),
-            RealtimeSnapshot::new("2330".to_string(), dec!(998)),
-        );
-        SHARE.set_stock_snapshots(existing);
-
-        let mut new_data = HashMap::new();
-        new_data.insert(
-            "2330".to_string(),
-            RealtimeSnapshot::new("2330".to_string(), dec!(1000)),
-        );
-        new_data.insert(
-            "2317".to_string(),
-            RealtimeSnapshot::new("2317".to_string(), dec!(180)),
-        );
-        new_data.insert(
-            "2454".to_string(),
-            RealtimeSnapshot::new("2454".to_string(), Decimal::ZERO),
-        );
-
-        let result = apply_category_snapshots(&category, new_data, &mut category_symbols);
-
-        assert_eq!(result.changed_event_count, 2);
-
-        SHARE.clear_stock_snapshots();
-    }
-
-    /// 驗證同一個類股重新更新時，已不存在的股票會從共用快取中移除。
-    #[test]
-    fn test_apply_category_snapshots_replaces_removed_symbols_in_same_category() {
-        let _lock = TEST_STATE_LOCK.blocking_lock();
-        SHARE.clear_stock_snapshots();
-        SHARE.clear_last_trading_day_quotes();
-
-        let category = YahooClassCategory::enabled(
-            crate::infra::crawler::yahoo::YahooClassExchange::Listed,
-            40,
-            "半導體",
-        );
-        let mut category_symbols = HashMap::new();
-
-        let mut first = HashMap::new();
-        first.insert(
-            "2330".to_string(),
-            RealtimeSnapshot::new("2330".to_string(), dec!(998)),
-        );
-        first.insert(
-            "2303".to_string(),
-            RealtimeSnapshot::new("2303".to_string(), dec!(45)),
-        );
-        apply_category_snapshots(&category, first, &mut category_symbols);
-
-        let mut second = HashMap::new();
-        second.insert(
-            "2330".to_string(),
-            RealtimeSnapshot::new("2330".to_string(), dec!(999)),
-        );
-        apply_category_snapshots(&category, second, &mut category_symbols);
-
-        let cache = SHARE.stock_snapshots.read().unwrap();
-        assert!(cache.contains_key("2330"));
-        assert!(!cache.contains_key("2303"));
-    }
 
     /// Live 測試：驗證啟動背景任務後快取會落地，停止後會被清空。
     #[tokio::test]
