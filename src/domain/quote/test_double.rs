@@ -30,6 +30,8 @@ pub(crate) struct CountingQuoteRepository {
     inserted: Mutex<Vec<DailyQuote>>,
     /// 為 true 時 `insert_missing_daily_quotes` 一律回傳錯誤。
     fail_insert: bool,
+    /// 歷次 `recalculate_moving_averages` 收到的 `(代號, 起始日)`。
+    recalculated: Mutex<Vec<(Vec<String>, NaiveDate)>>,
 }
 
 impl CountingQuoteRepository {
@@ -49,6 +51,11 @@ impl CountingQuoteRepository {
     /// 取得目前已收到的報價筆數。
     pub(crate) fn inserted_len(&self) -> usize {
         self.inserted.lock().expect("測試鎖不應中毒").len()
+    }
+
+    /// 取得歷次 `recalculate_moving_averages` 收到的 `(代號, 起始日)`。
+    pub(crate) fn recalculated(&self) -> Vec<(Vec<String>, NaiveDate)> {
+        self.recalculated.lock().expect("測試鎖不應中毒").clone()
     }
 
     /// 取得已收到報價的 `(代號, 日期)` 清單，依收到順序排列。
@@ -106,6 +113,22 @@ impl QuoteRepository for CountingQuoteRepository {
     }
 
     async fn batch_update_moving_average(&self, _quotes: &[DailyQuote]) -> Result<()> {
+        unimplemented!("測試不應走到這裡")
+    }
+
+    async fn recalculate_moving_averages(
+        &self,
+        stock_symbols: &[String],
+        from: NaiveDate,
+    ) -> Result<u64> {
+        self.recalculated
+            .lock()
+            .expect("測試鎖不應中毒")
+            .push((stock_symbols.to_vec(), from));
+        Ok(stock_symbols.len() as u64)
+    }
+
+    async fn fetch_symbols_quoted_since(&self, _from: NaiveDate) -> Result<Vec<String>> {
         unimplemented!("測試不應走到這裡")
     }
 

@@ -76,6 +76,51 @@ pub async fn calculate_moving_average(date: NaiveDate) -> Result<()> {
     Ok(())
 }
 
+/// 重算指定股票自 `from` 起（含）的均線與年內統計，回傳實際更新的列數。
+///
+/// 回補或替換過去日期的行情後使用（每日收盤只算當天，補進的日子不會回頭
+/// 修正之後的均線）。每批 [`RECALCULATE_BATCH`] 檔交給資料庫以視窗函數一次算完，
+/// 任一批失敗即回傳錯誤；已完成的批次不受影響，重跑只會更新仍有差異的列。
+pub async fn recalculate_moving_averages(
+    repository: &dyn QuoteRepository,
+    stock_symbols: &[String],
+    from: NaiveDate,
+) -> Result<u64> {
+    let mut updated = 0;
+    for (index, batch) in stock_symbols.chunks(RECALCULATE_BATCH).enumerate() {
+        let rows = repository.recalculate_moving_averages(batch, from).await?;
+        updated += rows;
+        tracing::info!(
+            batch = index + 1,
+            symbols = batch.len(),
+            rows,
+            from = %from,
+            "重算均線"
+        );
+    }
+    Ok(updated)
+}
+
+/// 重算 `from`（含）之後的均線；`stock_symbols` 為 `None` 時重算這段期間有報價的所有代號。
+///
+/// 手動回補用：替換過去某天的全市場行情（`backfill::quote::execute`）或整批補歷史後，
+/// 從那天起重算，之後最多 240 個交易日受影響的均線一併修正。
+pub async fn recalculate_moving_averages_since(
+    from: NaiveDate,
+    stock_symbols: Option<Vec<String>>,
+) -> Result<u64> {
+    let repository = PgQuoteRepository::new();
+    let stock_symbols = match stock_symbols {
+        Some(symbols) => symbols,
+        None => repository.fetch_symbols_quoted_since(from).await?,
+    };
+    recalculate_moving_averages(&repository, &stock_symbols, from).await
+}
+
+/// 重算均線時每批的代號數。一檔十幾年約三千多列，五十檔一批的視窗計算
+/// 在正式庫只要數秒，單一 UPDATE 也不會一次鎖住太多列。
+const RECALCULATE_BATCH: usize = 50;
+
 /// 處理單一報價的計算邏輯（純計算，不涉及全域快取寫入）。
 async fn process_single_quote(
     dq: DomainDailyQuote,
@@ -182,6 +227,43 @@ fn update_qhr_fields(qhr: &mut QuoteHistoryRecord, dq: &DomainDailyQuote) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::quote::test_double::CountingQuoteRepository;
+
+    /// 代號依批次大小切開，每批都從同一個起始日重算，更新列數累加。
+    #[tokio::test]
+    async fn recalculate_moving_averages_splits_symbols_into_batches() {
+        let repository = CountingQuoteRepository::default();
+        let symbols: Vec<String> = (0..RECALCULATE_BATCH + 1)
+            .map(|i| format!("{:04}", 1000 + i))
+            .collect();
+        let from = NaiveDate::from_ymd_opt(2019, 7, 1).expect("日期應合法");
+
+        let updated = recalculate_moving_averages(&repository, &symbols, from)
+            .await
+            .expect("重算應成功");
+
+        let calls = repository.recalculated();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0.len(), RECALCULATE_BATCH);
+        assert_eq!(calls[1].0, vec![symbols[RECALCULATE_BATCH].clone()]);
+        assert!(calls.iter().all(|(_, date)| *date == from));
+        // 假倉儲每檔回報一列。
+        assert_eq!(updated, symbols.len() as u64);
+    }
+
+    /// 沒有代號就不碰資料庫。
+    #[tokio::test]
+    async fn recalculate_moving_averages_skips_an_empty_list() {
+        let repository = CountingQuoteRepository::default();
+        let from = NaiveDate::from_ymd_opt(2019, 7, 1).expect("日期應合法");
+
+        let updated = recalculate_moving_averages(&repository, &[], from)
+            .await
+            .expect("空清單應成功");
+
+        assert_eq!(updated, 0);
+        assert!(repository.recalculated().is_empty());
+    }
 
     #[tokio::test]
     #[cfg_attr(

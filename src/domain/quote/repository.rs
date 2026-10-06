@@ -50,6 +50,18 @@ pub trait QuoteRepository: Send + Sync {
     /// 批次更新每日收盤均線、年內統計與 PBR。
     async fn batch_update_moving_average(&self, quotes: &[DailyQuote]) -> Result<()>;
 
+    /// 重算指定股票自 `from` 起（含）所有日報價的均線與年內統計，回傳實際更新的列數。
+    ///
+    /// 回補或替換過去日期的行情後使用：補進一天會影響之後最多 240 個交易日的均線。
+    async fn recalculate_moving_averages(
+        &self,
+        stock_symbols: &[String],
+        from: NaiveDate,
+    ) -> Result<u64>;
+
+    /// 查詢 `from`（含）之後有日報價的所有代號（含已下市者），依代號排序。
+    async fn fetch_symbols_quoted_since(&self, from: NaiveDate) -> Result<Vec<String>>;
+
     /// 補上當日缺少的每日收盤數據。
     ///
     /// 回傳受影響的資料筆數。
