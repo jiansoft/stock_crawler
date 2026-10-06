@@ -231,6 +231,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "通知持股董監質押變動",
             event::taiwan_stock::insider_pledge::execute,
         ),
+        // 08:30、18:30 通知持股公司的新重大訊息（上市每天早上出表前一日，上櫃再晚一天，所以跑兩次）；
+        // 同一家公司同一主旨只通知一次，公告期間每天重發的更名、面額變更不會重複推送。
+        create_job(
+            "0 30 8,18 * * *",
+            "通知持股重大訊息",
+            event::taiwan_stock::material_news::execute,
+        ),
         // 10:30（週六）持股千張大戶比例週報：集保股權分散表每週六公布上週五的資料，
         // 與 Redis 中上週的快照比較；同一份資料只通知一次。
         create_job(
