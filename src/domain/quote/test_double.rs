@@ -32,6 +32,8 @@ pub(crate) struct CountingQuoteRepository {
     fail_insert: bool,
     /// 歷次 `recalculate_moving_averages` 收到的 `(代號, 起始日)`。
     recalculated: Mutex<Vec<(Vec<String>, NaiveDate)>>,
+    /// `rebuild_quote_history_price_extremes` 收到的代號，依呼叫順序展開。
+    rebuilt_extremes: Mutex<Vec<String>>,
 }
 
 impl CountingQuoteRepository {
@@ -56,6 +58,14 @@ impl CountingQuoteRepository {
     /// 取得歷次 `recalculate_moving_averages` 收到的 `(代號, 起始日)`。
     pub(crate) fn recalculated(&self) -> Vec<(Vec<String>, NaiveDate)> {
         self.recalculated.lock().expect("測試鎖不應中毒").clone()
+    }
+
+    /// 取得 `rebuild_quote_history_price_extremes` 收到的代號。
+    pub(crate) fn rebuilt_extremes(&self) -> Vec<String> {
+        self.rebuilt_extremes
+            .lock()
+            .expect("測試鎖不應中毒")
+            .clone()
     }
 
     /// 取得已收到報價的 `(代號, 日期)` 清單，依收到順序排列。
@@ -126,6 +136,14 @@ impl QuoteRepository for CountingQuoteRepository {
             .expect("測試鎖不應中毒")
             .push((stock_symbols.to_vec(), from));
         Ok(stock_symbols.len() as u64)
+    }
+
+    async fn rebuild_quote_history_price_extremes(&self, stock_symbols: &[String]) -> Result<u64> {
+        self.rebuilt_extremes
+            .lock()
+            .expect("測試鎖不應中毒")
+            .extend_from_slice(stock_symbols);
+        Ok(0)
     }
 
     async fn fetch_symbols_quoted_since(&self, _from: NaiveDate) -> Result<Vec<String>> {

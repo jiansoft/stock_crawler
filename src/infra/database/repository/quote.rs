@@ -394,6 +394,10 @@ impl QuoteRepository for PgQuoteRepository {
         TableDailyQuote::recalculate_moving_averages(stock_symbols, from).await
     }
 
+    async fn rebuild_quote_history_price_extremes(&self, stock_symbols: &[String]) -> Result<u64> {
+        TableQuoteHistoryRecord::rebuild_price_extremes(stock_symbols).await
+    }
+
     async fn fetch_symbols_quoted_since(&self, from: NaiveDate) -> Result<Vec<String>> {
         daily_quote::fetch_symbols_quoted_since(from).await
     }

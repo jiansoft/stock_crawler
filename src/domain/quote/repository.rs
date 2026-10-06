@@ -59,6 +59,9 @@ pub trait QuoteRepository: Send + Sync {
         from: NaiveDate,
     ) -> Result<u64>;
 
+    /// 依日報價重建指定股票的歷史最高、最低價（股價淨值比極值不動），回傳變更筆數。
+    async fn rebuild_quote_history_price_extremes(&self, stock_symbols: &[String]) -> Result<u64>;
+
     /// 查詢 `from`（含）之後有日報價的所有代號（含已下市者），依代號排序。
     async fn fetch_symbols_quoted_since(&self, from: NaiveDate) -> Result<Vec<String>>;
 
