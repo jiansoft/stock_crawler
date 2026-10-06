@@ -410,6 +410,8 @@ impl DividendRepository for PgDividendRepository {
 
     /// 更新股利發放日期相關資訊（除息日、除權日、發放日）。
     async fn update_dividend_date(&self, dividend: &Dividend) -> Result<()> {
+        let mut dividend = dividend.clone();
+        dividend.clear_dates_of_zero_component();
         let sql = r#"
             UPDATE dividend
             SET
@@ -641,6 +643,9 @@ impl DividendRepository for PgDividendRepository {
     /// 同期別已有一列除權息日相同、只是所屬年度不同的資料，視為同一次配息的所屬年度更正，
     /// 先把那一列改成新的所屬年度再 upsert，避免同一次配息變成兩列。
     async fn save(&self, dividend: &Dividend) -> Result<()> {
+        let mut dividend = dividend.clone();
+        dividend.clear_dates_of_zero_component();
+        let dividend = &dividend;
         let mut tx = database::get_connection().begin().await?;
         if dividend.quarter == "A" {
             // 空季度原本同時代表年配事件與合計；先搬移事件，避免合計覆蓋它。
