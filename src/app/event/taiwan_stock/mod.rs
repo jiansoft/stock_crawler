@@ -2,6 +2,8 @@
 pub mod annual_eps;
 /// 持股主力進出通知（買超、賣超前幾名券商分點）
 pub mod broker_flow;
+/// 持股三大法人與融資融券通知
+pub mod chip_flow;
 /// 收盤事件
 pub mod closing;
 /// 持股法說會通知（BigGo 整理的摘要、展望與 Q&A 重點）

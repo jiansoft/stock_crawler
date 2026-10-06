@@ -1,5 +1,7 @@
 /// 上市股票減資恢復買賣參考價格
 pub mod capital_reduction;
+/// 三大法人買賣超與融資融券餘額
+pub mod chip;
 /// 台股財報
 pub mod eps;
 /// ETF 資訊

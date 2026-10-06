@@ -8,6 +8,8 @@
 //! 呼叫路徑完全維持不變。
 
 mod annual_profit;
+/// 籌碼資料（三大法人、融資融券）。
+pub(crate) mod chip;
 mod daily_quote;
 mod dividend;
 mod etf;
@@ -18,6 +20,7 @@ mod revenue;
 
 pub(super) use annual_profit::fetch_annual_profits;
 pub use annual_profit::{AnnualProfit, AnnualProfitFetcher};
+pub use chip::{InstitutionalFlow, MarginBalance};
 pub use daily_quote::{DailyQuoteDto, change_range_percent};
 pub use dividend::{ExDividendAnnouncement, classify_ex_dividend, parse_ex_dividend_kind};
 pub use etf::EtfInfo;
