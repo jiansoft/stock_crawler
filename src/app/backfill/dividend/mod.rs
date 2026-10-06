@@ -131,6 +131,7 @@ pub async fn reconcile_ex_right_results() -> Result<()> {
         ambiguous = summary.ambiguous,
         filled = summary.filled,
         stock_filled = summary.stock_filled,
+        exchange_filled = summary.exchange_filled,
         unresolved = summary.unresolved,
         "核對交易所除權息結果完成"
     );

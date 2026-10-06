@@ -19,11 +19,13 @@
 //! 4. **資料庫沒有**：交易所沒有股利所屬期間，無從決定該寫進哪一列；寫入模式下到 Yahoo
 //!    找同一天除權息的那筆明細，取它的所屬年度與期別補進來（2236 2024 年的第二次 H2、
 //!    006208 的 11 月配息）。目標鍵上已有一列且那列已對上另一次交易所事件時不覆蓋。
-//!    Yahoo 也找不到的只回報。
+//!    Yahoo 也找不到的 ETF 現金配息，依配息頻率推算期別、直接用交易所日期與金額補
+//!    （見 [`exchange_fill`]）；其餘只回報。
 //! 5. **配股金額缺漏**：證交所「權息」拆不出股票股利，對上的資料列若配股為 0（2327 國巨
 //!    2024-08-15 只記了現金），寫入模式下用 Yahoo 同一個除權日的配股金額補上。
 //!
-//! 一筆資料列只會對應到一次交易所事件；同日比對先全部處理完，才進行 2、3，
+//! 一筆資料列的現金側與股票側各只會對應到一次交易所事件（除息、除權不同天時分別對上）；
+//! 同日比對先全部處理完，才進行 2、3，
 //! 避免一年配兩次（006208 的 7 月與 11 月）時把第二次事件誤配到第一次的資料列上。
 //!
 //! 證交所的「權」「權息」拆不出現金與股票股利，只用日期比對、不改金額；
@@ -43,6 +45,8 @@ use crate::{
     },
 };
 
+/// 交易所資料補 ETF 配息。
+mod exchange_fill;
 /// 比對規則（同日、日期延後、日期未公布）。
 mod plan;
 /// Yahoo 補缺漏。
@@ -74,7 +78,9 @@ pub struct ReconcileSummary {
     pub filled: usize,
     /// 從 Yahoo 補上配股金額的資料列數（只在寫入模式）。
     pub stock_filled: usize,
-    /// 資料庫缺、Yahoo 也補不到的事件數（只在寫入模式）。
+    /// Yahoo 補不到、改用交易所資料補進來的 ETF 配息數（只在寫入模式）。
+    pub exchange_filled: usize,
+    /// 資料庫缺、Yahoo 與交易所資料都補不到的事件數（只在寫入模式）。
     pub unresolved: usize,
 }
 
@@ -110,17 +116,7 @@ pub async fn execute(start: NaiveDate, end: NaiveDate, apply: bool) -> Result<Re
     let repo = PgDividendRepository::new();
     // 跨年發放（12 月除息、隔年 1 月發放）的資料列在下一個發放年度，前後各多讀一年。
     let years: Vec<i32> = (start.year() - 1..=end.year() + 1).collect();
-    let mut existing: HashMap<String, Vec<Dividend>> = HashMap::new();
-    for row in repo
-        .fetch_by_years(&years)
-        .await
-        .context("Failed to load dividends for reconciliation")?
-    {
-        existing
-            .entry(row.security_code.clone())
-            .or_default()
-            .push(row);
-    }
+    let existing = load_existing(&repo, &years).await?;
 
     let plan = build_plan(&official, &existing, end);
     let mut summary = ReconcileSummary {
@@ -131,6 +127,7 @@ pub async fn execute(start: NaiveDate, end: NaiveDate, apply: bool) -> Result<Re
         ambiguous: plan.ambiguous.len(),
         filled: 0,
         stock_filled: 0,
+        exchange_filled: 0,
         unresolved: 0,
     };
 
@@ -139,17 +136,48 @@ pub async fn execute(start: NaiveDate, end: NaiveDate, apply: bool) -> Result<Re
         let fill = fill_missing_from_yahoo(&repo, &plan, &existing).await?;
         summary.filled = fill.filled;
         summary.stock_filled = fill.stock_filled;
-        summary.unresolved = fill.unresolved.len();
-        // 缺漏事件通常會在同一輪由 Yahoo 補上，只有補不到的才需要人處理。
-        warn_missing_events(
-            "交易所除權息事件在資料庫找不到、Yahoo 也補不到",
+        // 重新讀取，交易所補 ETF 配息時才看得到 Yahoo 剛補進來的期別。
+        let existing = load_existing(&repo, &years).await?;
+        let exchange = exchange_fill::fill_etf_from_exchange(
+            &repo,
             &fill.unresolved,
+            &official,
+            &existing,
+            exchange_fill::Window { start, end },
+        )
+        .await?;
+        summary.exchange_filled = exchange.len();
+        let unresolved = exchange_fill::unresolved_after_exchange_fill(&fill.unresolved, &exchange);
+        summary.unresolved = unresolved.len();
+        // 缺漏事件通常會在同一輪由 Yahoo 或交易所資料補上，只有補不到的才需要人處理。
+        warn_missing_events(
+            "交易所除權息事件在資料庫找不到、Yahoo 與交易所資料也補不到",
+            &unresolved,
         );
     } else {
         let missing: Vec<String> = plan.missing.iter().map(event_label).collect();
         warn_missing_events("交易所除權息事件在資料庫找不到對應", &missing);
     }
     Ok(summary)
+}
+
+/// 讀取指定發放年度的股利資料列，依股票分組。
+async fn load_existing(
+    repo: &PgDividendRepository,
+    years: &[i32],
+) -> Result<HashMap<String, Vec<Dividend>>> {
+    let mut existing: HashMap<String, Vec<Dividend>> = HashMap::new();
+    for row in repo
+        .fetch_by_years(years)
+        .await
+        .context("Failed to load dividends for reconciliation")?
+    {
+        existing
+            .entry(row.security_code.clone())
+            .or_default()
+            .push(row);
+    }
+    Ok(existing)
 }
 
 /// 事件在日誌中的標示：`代號 除權息日`。
