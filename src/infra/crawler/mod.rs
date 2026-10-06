@@ -60,6 +60,8 @@ pub mod share;
 mod site_pool;
 /// 臺灣期貨交易所 (TAIFEX)
 pub mod taifex;
+/// 臺灣集中保管結算所 (TDCC, 集保戶股權分散表)
+pub mod tdcc;
 /// 臺灣證券櫃檯買賣中心 (TPEX, 指數與上櫃股票資料)
 pub mod tpex;
 /// 臺灣證券交易所 (TWSE, 上市股票核心資料來源)

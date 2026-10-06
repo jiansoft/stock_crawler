@@ -238,8 +238,22 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "通知持股重大訊息",
             event::taiwan_stock::material_news::execute,
         ),
+        // 10:30（週六）持股千張大戶比例週報：集保股權分散表每週六公布上週五的資料，
+        // 與 Redis 中上週的快照比較；同一份資料只通知一次。
+        create_job(
+            "0 30 10 * * Sat",
+            "通知持股千張大戶週報",
+            event::taiwan_stock::holder_distribution::execute,
+        ),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 21 * * *", "補齊缺失之年度配息數據", dividend::execute),
+        // 21:40（週一至週五）通知持股三大法人與融資融券的明顯動作
+        // 融資融券約 21:00 後公布；外資、投信連續買賣超天數存在 Redis，同一天重跑不重複累加。
+        create_job(
+            "0 40 21 * * Mon-Fri",
+            "通知持股法人與信用交易",
+            event::taiwan_stock::chip_flow::execute,
+        ),
         // 22:00 外資持股狀態
         create_job(
             "0 0 22 * * *",
