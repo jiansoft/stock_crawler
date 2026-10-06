@@ -20,6 +20,8 @@ pub mod qualified_foreign_institutional_investor;
 pub mod quote;
 /// 月營收
 pub mod revenue;
+/// 變更面額與 ETF 分割（反分割）恢復買賣參考價格
+pub mod split;
 /// 個股日成交資訊（單一股票、整個月）
 pub mod stock_day;
 /// 終止上市公司
