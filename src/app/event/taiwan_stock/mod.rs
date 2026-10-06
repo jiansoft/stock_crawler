@@ -10,6 +10,8 @@ pub mod closing;
 pub mod earnings_call;
 /// 除息日的事件
 pub mod ex_dividend;
+/// 持股千張大戶比例週報（集保股權分散表）
+pub mod holder_distribution;
 /// 持股通知共用（持股普通股代號、股名）
 mod holdings;
 /// 持股董監質押變動通知
