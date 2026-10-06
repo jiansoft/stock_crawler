@@ -30,6 +30,7 @@ impl From<TableStockDividendInfo> for DomainStockDividendInfo {
             cash_dividend_yield: table.cash_dividend_yield,
             is_cash_ex_dividend_on_date: table.is_cash_ex_dividend_on_date,
             is_stock_ex_dividend_on_date: table.is_stock_ex_dividend_on_date,
+            quarter: table.quarter,
         }
     }
 }

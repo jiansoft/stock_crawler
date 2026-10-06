@@ -24,6 +24,20 @@ use crate::infra::database::repository::portfolio::PgPortfolioRepository;
 
 use super::EventDispatcher;
 
+/// 一年多次配息時附加在殖利率後面的「 年化殖利率:8.47%（月配）」；年配時為空字串。
+fn annualized_suffix(
+    frequency: Option<(u32, &'static str)>,
+    annualized_yield: Option<Decimal>,
+) -> String {
+    match (frequency, annualized_yield) {
+        (Some((_, label)), Some(value)) => format!(
+            " 年化殖利率:{}%（{label}）",
+            format_decimal_flexible_commas(value)
+        ),
+        _ => String::new(),
+    }
+}
+
 impl EventDispatcher {
     /// 處理 `ExDividendReminderTriggered` 事件：發送除權息提醒、重新計算持股股利並發送通知。
     pub(super) async fn handle_ex_dividend_reminder_triggered(
@@ -135,7 +149,7 @@ impl EventDispatcher {
 
             let _ = writeln!(
                 msg,
-                "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} 現金︰{2}元\\({6}%\\) 股票 {3}元 合計︰{4}元\\({7}%\\) 昨收價:{5} 現金殖利率:{6}% 殖利率:{7}%",
+                "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} 現金︰{2}元\\({6}%\\) 股票 {3}元 合計︰{4}元\\({7}%\\) 昨收價:{5} 現金殖利率:{6}% 殖利率:{7}%{8}",
                 stock.stock_symbol,
                 text::escape_markdown_v2(&stock.name),
                 text::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
@@ -143,7 +157,11 @@ impl EventDispatcher {
                 text::escape_markdown_v2(stock.sum.normalize().to_string()),
                 text::escape_markdown_v2(stock.closing_price.normalize().to_string()),
                 text::escape_markdown_v2(stock.cash_dividend_yield.normalize().to_string()),
-                text::escape_markdown_v2(stock.dividend_yield.normalize().to_string())
+                text::escape_markdown_v2(stock.dividend_yield.normalize().to_string()),
+                text::escape_markdown_v2(annualized_suffix(
+                    stock.payout_frequency(),
+                    stock.annualized_yield()
+                ))
             );
         }
     }
@@ -206,8 +224,17 @@ impl EventDispatcher {
             .iter()
             .map(|stock| (stock.stock_symbol.as_str(), stock))
             .collect::<std::collections::HashMap<_, _>>();
-        let mut grouped =
-            BTreeMap::<(String, i64), (String, i64, Decimal, Decimal, Decimal)>::new();
+        let mut grouped = BTreeMap::<
+            (String, i64),
+            (
+                String,
+                i64,
+                Decimal,
+                Decimal,
+                Decimal,
+                Option<(u32, &'static str)>,
+            ),
+        >::new();
 
         for holding in holdings
             .iter()
@@ -239,6 +266,7 @@ impl EventDispatcher {
                         Decimal::ZERO,
                         Decimal::ZERO,
                         Decimal::ZERO,
+                        stock.payout_frequency(),
                     )
                 });
             let total_shares = entry.1 + holding.share_quantity;
@@ -266,7 +294,7 @@ impl EventDispatcher {
 
         for (
             (stock_symbol, member_id),
-            (name, share_quantity, holding_cost, cash_dividend, stock_dividend),
+            (name, share_quantity, holding_cost, cash_dividend, stock_dividend, frequency),
         ) in grouped
         {
             let cash_yield = if holding_cost.is_zero() {
@@ -287,7 +315,7 @@ impl EventDispatcher {
 
             let _ = writeln!(
                 &mut msg,
-                "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} {2} 持股:{3}股 成本:{4}元\\({5}元\\) 現金股利:{6}元 股票股利:{7}元 現金殖利率:{8}% 殖利率:{9}%",
+                "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} {2} 持股:{3}股 成本:{4}元\\({5}元\\) 現金股利:{6}元 股票股利:{7}元 現金殖利率:{8}% 殖利率:{9}%{10}",
                 stock_symbol,
                 text::escape_markdown_v2(name),
                 text::escape_markdown_v2(member_label(member_id)),
@@ -297,7 +325,11 @@ impl EventDispatcher {
                 text::escape_markdown_v2(format_decimal_flexible_commas(cash_dividend)),
                 text::escape_markdown_v2(format_decimal_flexible_commas(stock_dividend)),
                 text::escape_markdown_v2(format_decimal_flexible_commas(cash_yield)),
-                text::escape_markdown_v2(format_decimal_flexible_commas(total_yield))
+                text::escape_markdown_v2(format_decimal_flexible_commas(total_yield)),
+                text::escape_markdown_v2(annualized_suffix(
+                    frequency,
+                    frequency.map(|(times, _)| (total_yield * Decimal::from(times)).round_dp(2))
+                ))
             );
         }
 
@@ -330,6 +362,7 @@ mod tests {
                 cash_dividend_yield: dec!(0.37),
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: false,
+                quarter: String::new(),
             },
             StockDividendInfo {
                 stock_symbol: "2317".to_string(),
@@ -343,6 +376,7 @@ mod tests {
                 cash_dividend_yield: dec!(3.33),
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: true,
+                quarter: String::new(),
             },
         ];
         let holdings = vec![
@@ -448,6 +482,7 @@ mod tests {
                 cash_dividend_yield: dec!(2),
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: false,
+                quarter: String::new(),
             },
             StockDividendInfo {
                 stock_symbol: "2317".to_string(),
@@ -461,6 +496,7 @@ mod tests {
                 cash_dividend_yield: dec!(5),
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: false,
+                quarter: String::new(),
             },
             StockDividendInfo {
                 stock_symbol: "00878".to_string(),
@@ -474,6 +510,7 @@ mod tests {
                 cash_dividend_yield: dec!(3),
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: false,
+                quarter: String::new(),
             },
             StockDividendInfo {
                 stock_symbol: "2330".to_string(),
@@ -487,6 +524,7 @@ mod tests {
                 cash_dividend_yield: dec!(1),
                 is_cash_ex_dividend_on_date: true,
                 is_stock_ex_dividend_on_date: false,
+                quarter: String::new(),
             },
         ];
 
@@ -510,5 +548,96 @@ mod tests {
         assert!(tsmc < etf_section);
         assert!(etf_section < high_yield_etf);
         assert!(high_yield_etf < low_yield_etf);
+    }
+
+    /// 一年多次配息的列在殖利率後加上年化殖利率與配息頻率；年配的列不加。
+    #[test]
+    fn market_dividend_message_shows_annualized_yield_for_frequent_payers() {
+        use chrono::NaiveDate;
+        use rust_decimal_macros::dec;
+
+        let etf =
+            |symbol: &str, cash: Decimal, price: Decimal, yield_pct: Decimal, quarter: &str| {
+                StockDividendInfo {
+                    stock_symbol: symbol.to_string(),
+                    name: symbol.to_string(),
+                    stock_industry_id: crate::core::declare::Industry::ExchangeTradedFund.serial(),
+                    cash_dividend: cash,
+                    stock_dividend: Decimal::ZERO,
+                    sum: cash,
+                    closing_price: price,
+                    dividend_yield: yield_pct,
+                    cash_dividend_yield: yield_pct,
+                    is_cash_ex_dividend_on_date: true,
+                    is_stock_ex_dividend_on_date: false,
+                    quarter: quarter.to_string(),
+                }
+            };
+        let stocks = vec![
+            etf("00953B", dec!(0.067), dec!(9.49), dec!(0.71), "M09"),
+            etf("00878", dec!(0.4), dec!(20), dec!(2), "Q3"),
+            etf("0050", dec!(1), dec!(100), dec!(1), "H1"),
+            etf("2330", dec!(5), dec!(1000), dec!(0.5), ""),
+        ];
+        let msg = EventDispatcher::build_market_dividend_message(
+            NaiveDate::from_ymd_opt(2026, 10, 6).unwrap(),
+            "進行除權息的股票與 ETF 如下︰",
+            &stocks,
+        );
+
+        assert!(
+            msg.contains("殖利率:0\\.71% 年化殖利率:8\\.47%（月配）\n"),
+            "{msg}"
+        );
+        assert!(msg.contains("殖利率:2% 年化殖利率:8%（季配）\n"), "{msg}");
+        assert!(msg.contains("殖利率:1% 年化殖利率:2%（半年配）\n"), "{msg}");
+        assert!(msg.contains("殖利率:0\\.5%\n"), "{msg}");
+    }
+
+    /// 持股預估訊息同樣以持股成本計算的殖利率乘上配息次數。
+    #[test]
+    fn holding_dividend_message_shows_annualized_yield_for_frequent_payers() {
+        use crate::domain::portfolio::entity::StockOwnershipDetail;
+        use chrono::{Local, NaiveDate, TimeZone};
+        use rust_decimal_macros::dec;
+
+        let today = NaiveDate::from_ymd_opt(2026, 10, 6).unwrap();
+        let stocks = vec![StockDividendInfo {
+            stock_symbol: "00953B".to_string(),
+            name: "群益優選非投等債".to_string(),
+            stock_industry_id: crate::core::declare::Industry::ExchangeTradedFund.serial(),
+            cash_dividend: dec!(0.067),
+            stock_dividend: Decimal::ZERO,
+            sum: dec!(0.067),
+            closing_price: dec!(9.49),
+            dividend_yield: dec!(0.71),
+            cash_dividend_yield: dec!(0.71),
+            is_cash_ex_dividend_on_date: true,
+            is_stock_ex_dividend_on_date: false,
+            quarter: "M09".to_string(),
+        }];
+        let holdings = vec![StockOwnershipDetail {
+            serial: 1,
+            security_code: "00953B".to_string(),
+            member_id: 1,
+            share_quantity: 10_000,
+            share_price_average: Decimal::ZERO,
+            current_cost_per_share: dec!(10),
+            holding_cost: dec!(-100000),
+            is_sold: false,
+            cumulate_dividends_cash: Decimal::ZERO,
+            cumulate_dividends_stock: Decimal::ZERO,
+            cumulate_dividends_stock_money: Decimal::ZERO,
+            cumulate_dividends_total: Decimal::ZERO,
+            created_time: Local.with_ymd_and_hms(2026, 9, 1, 9, 0, 0).unwrap(),
+        }];
+
+        let msg =
+            EventDispatcher::build_holding_dividend_message(today, &stocks, &holdings).unwrap();
+        assert!(msg.contains("現金股利:670元"), "{msg}");
+        assert!(
+            msg.contains("殖利率:0\\.67% 年化殖利率:8\\.04%（月配）\n"),
+            "{msg}"
+        );
     }
 }

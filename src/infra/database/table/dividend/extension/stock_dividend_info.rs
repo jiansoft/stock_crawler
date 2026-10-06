@@ -34,6 +34,8 @@ pub struct StockDividendInfo {
     pub is_cash_ex_dividend_on_date: bool,
     /// 是否於查詢日期進行除權。
     pub is_stock_ex_dividend_on_date: bool,
+    /// 股利期別（`M01`～`M12` 月配、`Q1`～`Q4` 季配、`H1`／`H2` 半年配，其餘為年配）。
+    pub quarter: String,
 }
 
 /// 取得指定日期為除權或除息日的股票。
@@ -61,7 +63,8 @@ SELECT
            ELSE ROUND((d.cash_dividend / ldq.closing_price) * 100, 2)
            END                                  AS cash_dividend_yield,
        d."ex-dividend_date1" = $2               AS is_cash_ex_dividend_on_date,
-       d."ex-dividend_date2" = $2               AS is_stock_ex_dividend_on_date
+       d."ex-dividend_date2" = $2               AS is_stock_ex_dividend_on_date,
+       d.quarter
 FROM
     dividend AS d
 INNER JOIN
