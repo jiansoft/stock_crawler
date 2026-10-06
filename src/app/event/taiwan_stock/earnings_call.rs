@@ -5,8 +5,8 @@
 //!
 //! ## 流程（每天 20:30 排程）
 //!
-//! 1. 取目前持股（未售出）的股票代號，排除 ETF（`00` 開頭）與特別股等含英文字母的代號——
-//!    它們沒有法說會。
+//! 1. 取目前持股（未售出）的普通股代號（[`holdings::common_stock_holdings`]）——
+//!    ETF 與特別股沒有法說會。
 //! 2. 逐檔向 BigGo 取法說會清單，只看 [`LOOKBACK_DAYS`] 天內舉行的場次。
 //! 3. 已通知過的場次（Redis `biggo:earnings_call:notified:{call_id}`）略過；AI 摘要還沒產生的
 //!    場次這次不通知也不記錄，之後的排程再看，直到超過回看天數。
@@ -14,20 +14,17 @@
 //!
 //! BigGo 的整理內容是其著作：只做個人通知，不寫進資料庫，也不經公開網站或 API 轉發。
 
-use std::collections::BTreeSet;
 use std::fmt::Write;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::{Local, NaiveDate};
 
+use super::holdings;
 use crate::{
     core::{alert, util::text},
-    domain::portfolio::repository::PortfolioRepository,
     infra::{
-        cache::SHARE,
         crawler::biggo::earnings_call::{self, EarningsCall, EarningsCallDetail},
-        database::repository::portfolio::PgPortfolioRepository,
         nosql::redis::CLIENT,
     },
 };
@@ -71,11 +68,9 @@ enum Outcome {
 ///
 /// 單檔失敗只記錄、不中斷；只有查不到持股時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let holdings = PgPortfolioRepository::new()
-        .fetch_active_holdings(None)
+    let symbols = holdings::common_stock_holdings()
         .await
         .context("fetch active holdings for earnings call notification failed")?;
-    let symbols = eligible_symbols(holdings.into_iter().map(|holding| holding.security_code));
 
     let today = Local::now().date_naive();
     let mut summary = RunSummary {
@@ -134,7 +129,7 @@ async fn notify(stock_symbol: &str, call: &EarningsCall) -> Outcome {
         return Outcome::Pending;
     }
 
-    let name = stock_name(stock_symbol);
+    let name = holdings::stock_name(stock_symbol);
     alert::send_message(&build_message(stock_symbol, &name, call, &detail)).await;
     mark_notified(&call.call_id).await;
     Outcome::Notified
@@ -162,19 +157,6 @@ async fn mark_notified(call_id: &str) {
     }
 }
 
-/// 從持股代號中挑出可能有法說會的股票（去重、排序）。
-fn eligible_symbols(security_codes: impl IntoIterator<Item = String>) -> BTreeSet<String> {
-    security_codes
-        .into_iter()
-        .filter(|symbol| has_earnings_calls(symbol))
-        .collect()
-}
-
-/// 是否可能有法說會：排除 ETF／ETN（`00` 開頭）與特別股、受益證券等含英文字母的代號。
-fn has_earnings_calls(stock_symbol: &str) -> bool {
-    !stock_symbol.starts_with("00") && stock_symbol.chars().all(|c| c.is_ascii_digit())
-}
-
 /// 回看期間內（含今天）舉行的場次。
 fn recent_calls(calls: &[EarningsCall], today: NaiveDate) -> Vec<&EarningsCall> {
     let since = today - chrono::Duration::days(LOOKBACK_DAYS);
@@ -187,20 +169,6 @@ fn recent_calls(calls: &[EarningsCall], today: NaiveDate) -> Vec<&EarningsCall> 
 /// 已通知紀錄的 Redis key。
 fn notified_key(call_id: &str) -> String {
     format!("biggo:earnings_call:notified:{call_id}")
-}
-
-/// 從股票主檔快取取股名；查不到時回空字串。
-fn stock_name(stock_symbol: &str) -> String {
-    SHARE
-        .stocks
-        .read()
-        .ok()
-        .and_then(|stocks| {
-            stocks
-                .get(stock_symbol)
-                .map(|stock| stock.name().to_string())
-        })
-        .unwrap_or_default()
 }
 
 /// 組出通知訊息（Telegram MarkdownV2）。
@@ -278,50 +246,6 @@ mod tests {
         }
     }
 
-    /// 持股可能重複（同一檔分次買進），挑出來的代號去重並排序。
-    #[test]
-    fn eligible_symbols_deduplicates_and_skips_etfs() {
-        let symbols = eligible_symbols(
-            ["2330", "0050", "2330", "2753", "2887G"]
-                .into_iter()
-                .map(str::to_string),
-        );
-        assert_eq!(
-            symbols.into_iter().collect::<Vec<_>>(),
-            vec!["2330".to_string(), "2753".to_string()]
-        );
-    }
-
-    /// 股名取自股票主檔快取；查不到時為空字串。
-    #[test]
-    fn stock_name_reads_the_registry_cache() {
-        let symbol = "79988";
-        SHARE.stocks.write().expect("stocks 快取可寫入").insert(
-            symbol.to_string(),
-            crate::domain::registry::entity::Stock::reconstitute(
-                symbol.to_string(),
-                "測試法說會".to_string(),
-                false,
-                rust_decimal::Decimal::ZERO,
-                rust_decimal::Decimal::ZERO,
-                rust_decimal::Decimal::ZERO,
-                Local::now(),
-                2,
-                24,
-                0,
-                0,
-                rust_decimal::Decimal::ZERO,
-            ),
-        );
-        assert_eq!(stock_name(symbol), "測試法說會");
-        SHARE
-            .stocks
-            .write()
-            .expect("stocks 快取可寫入")
-            .remove(symbol);
-        assert_eq!(stock_name(symbol), "");
-    }
-
     /// 通知紀錄寫入 Redis 後讀得回來；測試用假場次，結束時刪除。
     #[tokio::test]
     #[cfg_attr(
@@ -343,15 +267,6 @@ mod tests {
         assert!(is_notified(call_id).await, "記錄後應為已通知");
 
         CLIENT.delete(&key).await.expect("清除測試紀錄");
-    }
-
-    #[test]
-    fn has_earnings_calls_skips_etfs_and_preferred_shares() {
-        assert!(has_earnings_calls("2330"));
-        assert!(has_earnings_calls("6505"));
-        for symbol in ["0050", "00878", "2887G", "2887Z1"] {
-            assert!(!has_earnings_calls(symbol), "{symbol}");
-        }
     }
 
     /// 只看回看天數內（含今天）的場次，未來日期與太舊的都不看。

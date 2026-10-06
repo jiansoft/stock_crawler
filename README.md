@@ -129,6 +129,8 @@ log/                 # runtime 檔案日誌輸出目錄
 + 09:02 啟動股票追蹤高低標提醒任務
 + 15:00 取得台股收盤報價數據並計算預估價格
 + 20:30 通知持股近 7 天內法說會的摘要、展望與 Q&A 重點（BigGo 財經整理；摘要尚未產生的場次之後再通知，每場只通知一次）
++ 20:40（週一至週五）通知持股主力進出：主力（買超、賣超前 15 名分點）買賣超佔成交量達 20% 且達 100 張的持股，附買超、賣超前 3 名分點（富邦證券主力進出頁；休市日不發）
++ 20:45（每月 10–28 日）通知持股董監質押變動：與前一期比較設質、關係人設質增減與持股大幅增減（交易所董監事持股開放資料，約每月 18 日出表；第一次執行列出目前有設質的人作為基準）
 + 21:00 更新尚無年度配息資料的股票
 + 22:00 更新外資持股比例與狀態
 + 若服務在開盤期間重啟，啟動排程時會先補啟動一次股票追蹤任務，避免錯過 09:02 的排程。
@@ -137,12 +139,12 @@ log/                 # runtime 檔案日誌輸出目錄
 ## 資料來源
 1. 理財寶-股市爆料同學會 https://www.cmoney.tw/forum/popular
 2. 鉅亨網 https://www.cnyes.com
-3. 富邦證券 https://www.fbs.com.tw
+3. 富邦證券 https://www.fbs.com.tw（年度獲利、持股主力進出）
 4. Fugle 行情 API https://developer.fugle.tw/docs/data/http-api/getting-started/
 5. 嗨投資 https://histock.tw
 6. PCHOME(大時科技) https://pchome.megatime.com.tw
 7. 嘉實資訊-理財網 https://www.moneydj.com
-8. 公開資訊觀測站 https://mops.twse.com.tw
+8. 公開資訊觀測站 https://mops.twse.com.tw（經交易所開放資料取得股利分派情形、董監事持股與設質）
 9. 恩投資 https://www.nstock.tw
 10. 台灣期貨交易所 https://www.taifex.com.tw
 11. 台灣證券櫃檯買賣中心 https://www.tpex.org.tw
@@ -174,7 +176,7 @@ log/                 # runtime 檔案日誌輸出目錄
 + Data API 位於 `/api/v1/*`（與手動回補共用 HTTP server），提供股票搜尋、最新與歷史報價、即時快照、基本資料、月營收、財報、股利、估值、市場廣度、殖利率排行、選股、大盤指數、股利行事曆、外資持股排行、當日漲跌幅／成交量排行、CAGR 排行等唯讀查詢。
   - 除 `/api/v1/healthz` 外都需要 `Authorization: Bearer <DATA_API_KEY>`；未設定 `DATA_API_KEY` 時一律拒絕。
   - OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不需驗證）。
-+ Telegram bot 用於排程提醒（除權息、股利發放、公開申購、持股財報、外資持股變化、持股法說會摘要）、價格追蹤通知與錯誤告警。
++ Telegram bot 用於排程提醒（除權息、股利發放、公開申購、持股財報、外資持股變化、持股法說會摘要、持股主力進出、持股董監質押變動）、價格追蹤通知與錯誤告警。
 
 ## 盤中即時報價與追蹤
 

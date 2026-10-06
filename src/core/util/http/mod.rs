@@ -33,6 +33,9 @@ static CLIENT: OnceCell<Client> = OnceCell::new();
 /// 正常來源（TWSE/TPEx JSON、財經網站頁面）最大約 1～2 MiB，8 MiB 已留足
 /// 餘裕；異常或惡意的 upstream 若回傳超大 body，舊版會全部讀進記憶體，
 /// 可能造成高記憶體使用甚至 OOM。超限時中止讀取並回傳錯誤。
+///
+/// 已知會超過的全市場資料（例如董監持股明細約 10 MiB）改用
+/// [`get_json_with_limit`] 個別放寬。
 const MAX_RESPONSE_BODY_BYTES: usize = 8 * 1024 * 1024;
 
 /// 以「逐塊讀取 + 大小上限」讀取 HTTP 回應 body。
@@ -46,16 +49,16 @@ const MAX_RESPONSE_BODY_BYTES: usize = 8 * 1024 * 1024;
 ///
 /// 這取代了 `res.bytes()` / `res.text()` 這類「一次全部讀進記憶體、
 /// 沒有上限」的讀法。
-async fn read_limited_body(mut res: Response, url: &str) -> Result<Vec<u8>> {
+async fn read_limited_body(mut res: Response, url: &str, max_bytes: usize) -> Result<Vec<u8>> {
     // 錯誤訊息中的 URL 一律先脫敏，避免把 Telegram token 等敏感片段寫進 log。
     let safe_url = redact_url(url);
 
     // 第一道：宣告大小檢查（若 upstream 有提供）。
     if let Some(content_length) = res.content_length()
-        && content_length > MAX_RESPONSE_BODY_BYTES as u64
+        && content_length > max_bytes as u64
     {
         bail!(
-            "response body too large for {safe_url}: content-length {content_length} bytes exceeds limit {MAX_RESPONSE_BODY_BYTES}"
+            "response body too large for {safe_url}: content-length {content_length} bytes exceeds limit {max_bytes}"
         );
     }
 
@@ -66,10 +69,8 @@ async fn read_limited_body(mut res: Response, url: &str) -> Result<Vec<u8>> {
         .await
         .with_context(|| format!("Error reading response body from {safe_url}"))?
     {
-        if body.len() + chunk.len() > MAX_RESPONSE_BODY_BYTES {
-            bail!(
-                "response body too large for {safe_url}: exceeds limit {MAX_RESPONSE_BODY_BYTES} bytes"
-            );
+        if body.len() + chunk.len() > max_bytes {
+            bail!("response body too large for {safe_url}: exceeds limit {max_bytes} bytes");
         }
         body.extend_from_slice(&chunk);
     }
@@ -164,10 +165,21 @@ fn get_client() -> Result<&'static Client> {
 ///
 /// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
 pub async fn get_json<RES: DeserializeOwned>(url: &str) -> Result<RES> {
+    get_json_with_limit(url, MAX_RESPONSE_BODY_BYTES).await
+}
+
+/// 與 [`get_json`] 相同，但 body 大小上限改用 `max_body_bytes`。
+///
+/// 只給已知會超過預設上限的全市場資料使用（例如董監持股明細，解壓後約 10 MiB）；
+/// 上限仍要設，避免異常回應把記憶體吃光。
+pub async fn get_json_with_limit<RES: DeserializeOwned>(
+    url: &str,
+    max_body_bytes: usize,
+) -> Result<RES> {
     let res = get_response(url, None).await?;
     let status = res.status();
     // 以「串流 + 大小上限」讀取 body，取代無上限的 res.bytes()。
-    let res_body = read_limited_body(res, url).await?;
+    let res_body = read_limited_body(res, url, max_body_bytes).await?;
     let res_body_preview = String::from_utf8_lossy(res_body.as_ref());
     let safe_url = redact_url(url);
 
@@ -307,7 +319,7 @@ where
     .await?;
 
     // 以「串流 + 大小上限」讀取 body，取代無上限的 res.text()。
-    let res_body = read_limited_body(res, url).await?;
+    let res_body = read_limited_body(res, url, MAX_RESPONSE_BODY_BYTES).await?;
     let res_body_preview = String::from_utf8_lossy(res_body.as_ref());
 
     // with_context 保留 serde 原始錯誤在 source chain。
