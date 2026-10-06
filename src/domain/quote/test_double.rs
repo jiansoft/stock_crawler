@@ -113,6 +113,14 @@ impl QuoteRepository for CountingQuoteRepository {
         unimplemented!("測試不應走到這裡")
     }
 
+    async fn fetch_market_traded_counts(
+        &self,
+        _from: NaiveDate,
+        _to: NaiveDate,
+    ) -> Result<Vec<crate::domain::quote::entity::MarketTradedCount>> {
+        unimplemented!("測試不應走到這裡")
+    }
+
     async fn fetch_monthly_stock_price_summary(
         &self,
         _security_code: &str,

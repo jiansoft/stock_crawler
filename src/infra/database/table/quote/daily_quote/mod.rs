@@ -16,8 +16,8 @@ mod mutation;
 mod query;
 
 pub use query::{
-    fetch_count_by_date, fetch_daily_quotes_by_date, fetch_monthly_stock_price_summary,
-    makeup_for_the_lack_daily_quotes,
+    fetch_count_by_date, fetch_daily_quotes_by_date, fetch_market_traded_counts,
+    fetch_monthly_stock_price_summary, makeup_for_the_lack_daily_quotes,
 };
 
 #[derive(sqlx::Type, sqlx::FromRow, Default, Debug, Clone)]
