@@ -379,6 +379,10 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         // 上市（櫃）後前 [`LISTING_FREE_DAYS`] 筆報價沒有漲跌幅限制，期間的大幅跳動是真實價格，
         // 也不算異常（6637 2024-06-19、7810 2025-12-24）。
         //
+        // 只看有成交的報價：「缺漏補齊」在停牌期間寫入沿用前收的零量列，那不是成交價。
+        // 1538 2024-12-30 減資恢復買賣當天沒有成交、補值列還是停牌前價格，
+        // 若把它當成前一筆，跳動會落在隔天而對不上生效日。
+        //
         // 回傳帶日期的事件（而非去重後的代號），呼叫端才能把單次查詢的結果依日期
         // 切分到八個期間各自判定。
         //
@@ -396,7 +400,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
                            PARTITION BY stock_symbol ORDER BY "Date"
                        ) AS prev_date
                 FROM "DailyQuotes"
-                WHERE "Date" BETWEEN $1 AND $2 AND "ClosingPrice" > 0
+                WHERE "Date" BETWEEN $1 AND $2 AND "ClosingPrice" > 0 AND "TradingVolume" > 0
             ),
             jumps AS (
                 SELECT stock_symbol, "Date", prev_date
@@ -440,6 +444,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
                       AND e."Date" > '1970-01-01'
                       AND e."Date" < j."Date"
                       AND e."ClosingPrice" > 0
+                      AND e."TradingVolume" > 0
                     LIMIT $4
                 ) earlier
             ) >= $4
@@ -541,7 +546,8 @@ mod tests {
 
     async fn insert_quote(symbol: &str, date: NaiveDate, close: Decimal) {
         sqlx::query(
-            r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice") VALUES ($1, $2, $3)"#,
+            r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
+               VALUES ($1, $2, $3, 1000)"#,
         )
         .bind(date)
         .bind(symbol)
@@ -908,8 +914,18 @@ mod tests {
         ] {
             insert_quote(FAKE_C, day(d), close).await;
         }
-        // 01-09 生效的減資沒有報價（休市），01-10 才恢復交易、價格跳 1.5 倍：已解釋。
+        // 01-09 生效的減資當天沒有成交，只有沿用停牌前價格的零量補值列（1538 2024-12-30 的情況），
+        // 01-10 才有成交、價格跳 1.5 倍：補值列不算前一筆報價，仍視為已解釋。
         insert_corporate_action(FAKE_C, day(9), dec!(0.4)).await;
+        sqlx::query(
+            r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
+               VALUES ($1, $2, 20, 0)"#,
+        )
+        .bind(day(9))
+        .bind(FAKE_C)
+        .execute(database::get_connection())
+        .await
+        .expect("插入零量補值列");
         insert_quote(FAKE_C, day(10), dec!(50)).await;
         // 01-12 再跳一倍，沒有任何事件：異常。
         insert_quote(FAKE_C, day(12), dec!(100)).await;
