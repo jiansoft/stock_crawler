@@ -238,6 +238,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "通知持股千張大戶週報",
             event::taiwan_stock::holder_distribution::execute,
         ),
+        // 11:00（週六）資料健康週報：近 7 天的交易日完整性、均線、漲跌幅、衍生資料新鮮度、
+        // 月營收與股利佔位列；這類問題來源不會報錯，只能定期量。
+        create_job(
+            "0 0 11 * * Sat",
+            "資料健康週報",
+            event::taiwan_stock::data_health::execute,
+        ),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 21 * * *", "補齊缺失之年度配息數據", dividend::execute),
         // 21:40（週一至週五）通知持股三大法人與融資融券的明顯動作
