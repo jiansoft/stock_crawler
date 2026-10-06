@@ -13,7 +13,7 @@
 //! 5. 衍生資料：估價、殖利率排行、市場統計、最後交易日報價要更新到最新交易日；
 //!    CAGR、外資持股允許落後一個交易日。
 //! 6. 月營收：每月 15 日之後要有上個月的資料。
-//! 7. 股利：過期的「尚未公布」佔位列、年度合計與各期明細加總不符。
+//! 7. 股利：近五年過期的「尚未公布」佔位列、年度合計與各期明細加總不符。
 //!
 //! 全部正常時也會發一則簡短的週報，用來確認檢查本身有在跑。
 
@@ -239,7 +239,7 @@ fn dividend_problems(snapshot: &DataHealthSnapshot) -> Vec<String> {
     let mut problems = Vec::new();
     if snapshot.stale_dividend_placeholders > 0 {
         problems.push(format!(
-            "{} 列發放年度已過，除權息日仍是「尚未公布」",
+            "近五年有 {} 列發放年度已過，除權息日仍是「尚未公布」",
             snapshot.stale_dividend_placeholders
         ));
     }

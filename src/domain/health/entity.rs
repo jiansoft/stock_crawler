@@ -31,7 +31,7 @@ pub struct DataHealthSnapshot {
     pub misdated_rows: i64,
     /// 各衍生資料表的最新日期。
     pub derived_tables: Vec<DerivedTableLatest>,
-    /// 發放年度早於今年、除權息日仍是「尚未公布」的股利列數。
+    /// 近五年（不含今年）發放、除權息日仍是「尚未公布」的股利列數。
     pub stale_dividend_placeholders: i64,
     /// 年度合計列與各期明細加總（現金或股票股利）不符的組數。
     pub dividend_total_mismatches: i64,

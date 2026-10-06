@@ -73,11 +73,13 @@ WHERE "Date" BETWEEN $1 AND $2
   )
 "#;
 
-/// 發放年度早於今年、除權息日仍是「尚未公布」的股利列數。
+/// 近五年（不含今年）發放、除權息日仍是「尚未公布」的股利列數。
+///
+/// 更早的佔位列（1990 年代的配股）交易所已查不到實際日期，列出來也無從處理。
 const STALE_DIVIDEND_PLACEHOLDERS_SQL: &str = r#"
 SELECT count(*)
 FROM dividend
-WHERE year < $1
+WHERE year < $1 AND year >= $1 - 5
   AND ("ex-dividend_date1" = '尚未公布' OR "ex-dividend_date2" = '尚未公布')
 "#;
 
