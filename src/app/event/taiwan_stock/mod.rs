@@ -16,8 +16,6 @@ pub mod holder_distribution;
 mod holdings;
 /// 持股董監質押變動通知
 pub mod insider_pledge;
-/// 持股重大訊息通知
-pub mod material_news;
 /// 股利發放日的事件
 pub mod payable_date;
 /// 公開申購公告
