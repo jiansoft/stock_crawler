@@ -133,9 +133,42 @@ pub struct StockDividendInfo {
     pub is_cash_ex_dividend_on_date: bool,
     /// 是否於查詢日期進行除權。
     pub is_stock_ex_dividend_on_date: bool,
+    /// 股利期別（`M01`～`M12` 月配、`Q1`～`Q4` 季配、`H1`／`H2` 半年配，其餘為年配）。
+    pub quarter: String,
 }
 
 impl StockDividendInfo {
+    /// 一年配息次數與名稱：依期別判斷，`M` 月配 12 次、`Q` 季配 4 次、`H` 半年配 2 次；
+    /// 其餘（年度、`A`、空白）視為年配，回傳 `None`。
+    pub fn payout_frequency(&self) -> Option<(u32, &'static str)> {
+        let mut chars = self.quarter.chars();
+        let kind = chars.next()?;
+        if !chars.as_str().chars().all(|c| c.is_ascii_digit()) || chars.as_str().is_empty() {
+            return None;
+        }
+        match kind {
+            'M' => Some((12, "月配")),
+            'Q' => Some((4, "季配")),
+            'H' => Some((2, "半年配")),
+            _ => None,
+        }
+    }
+
+    /// 年化殖利率（%）：這次的股利合計 ÷ 參考收盤價 × 一年配息次數，四捨五入到小數兩位。
+    ///
+    /// 只有一年多次配息時才有意義；年配或沒有參考價時回傳 `None`。
+    /// 用未四捨五入的股利與價格計算，避免單次殖利率的捨入誤差被放大 12 倍。
+    pub fn annualized_yield(&self) -> Option<Decimal> {
+        let (times, _) = self.payout_frequency()?;
+        if self.closing_price <= Decimal::ZERO {
+            return None;
+        }
+        Some(
+            (self.sum / self.closing_price * Decimal::ONE_HUNDRED * Decimal::from(times))
+                .round_dp(2),
+        )
+    }
+
     /// 查詢日期當天實際生效的（現金股利, 股票股利）。
     ///
     /// 除息日與除權日可能不同天，只有當天生效的那一項才會影響當天的參考價。
@@ -277,7 +310,52 @@ mod ex_rights_reference_price_tests {
             cash_dividend_yield: Decimal::ZERO,
             is_cash_ex_dividend_on_date: cash_today,
             is_stock_ex_dividend_on_date: stock_today,
+            quarter: String::new(),
         }
+    }
+
+    /// 期別決定一年配息次數；年配與無法辨識的期別不算多次配息。
+    #[test]
+    fn payout_frequency_follows_the_period_label() {
+        let with = |quarter: &str| StockDividendInfo {
+            quarter: quarter.to_string(),
+            ..info(true, false)
+        };
+        assert_eq!(with("M07").payout_frequency(), Some((12, "月配")));
+        assert_eq!(with("Q4").payout_frequency(), Some((4, "季配")));
+        assert_eq!(with("H1").payout_frequency(), Some((2, "半年配")));
+        for quarter in ["", "A", "M", "Qx", "X1"] {
+            assert_eq!(with(quarter).payout_frequency(), None, "{quarter:?}");
+        }
+    }
+
+    /// 年化殖利率用未捨入的股利與價格乘上配息次數（00953B 月配 0.067 元、9.49 元 → 8.47%）。
+    #[test]
+    fn annualized_yield_multiplies_by_payouts_per_year() {
+        let monthly = StockDividendInfo {
+            cash_dividend: dec!(0.067),
+            stock_dividend: Decimal::ZERO,
+            sum: dec!(0.067),
+            closing_price: dec!(9.49),
+            quarter: "M09".to_string(),
+            ..info(true, false)
+        };
+        assert_eq!(monthly.annualized_yield(), Some(dec!(8.47)));
+
+        let quarterly = StockDividendInfo {
+            sum: dec!(0.5),
+            closing_price: dec!(20),
+            quarter: "Q3".to_string(),
+            ..info(true, false)
+        };
+        assert_eq!(quarterly.annualized_yield(), Some(dec!(10)));
+
+        assert_eq!(info(true, false).annualized_yield(), None, "年配");
+        let no_price = StockDividendInfo {
+            closing_price: Decimal::ZERO,
+            ..monthly
+        };
+        assert_eq!(no_price.annualized_yield(), None);
     }
 
     /// 除息、除權不同天時，只計入當天生效的那一項。
