@@ -6,7 +6,7 @@ use chrono::{Local, NaiveDate};
 
 use crate::{
     app::backfill::{dividend, quote, quote_history, taiwan_stock_index},
-    app::calculation::{cagr, dividend_record},
+    app::calculation::{cagr, daily_quotes, dividend_record},
     app::event::taiwan_stock::closing,
     domain::performance::CagrPeriod,
 };
@@ -82,8 +82,11 @@ pub(crate) async fn start_daily_quotes_job(date: NaiveDate) -> Result<BackfillJo
             // 任一步失敗都會 rollback。因此這裡不需要（也不可以）先手動刪除
             // 當日資料——那正是舊版「刪除後抓取失敗，行情永久遺失」的缺陷來源。
             let quote_count = quote::execute(date).await?;
+            // 替換過去某天的行情會改變之後最多 240 個交易日的均線，從當天起一併重算。
+            let recalculated =
+                daily_quotes::recalculate_moving_averages_since(date, None).await?;
             Ok(format!(
-                "daily quotes backfill completed: quote_count={quote_count}"
+                "daily quotes backfill completed: quote_count={quote_count}, recalculated={recalculated}"
             ))
         },
     )
@@ -259,13 +262,14 @@ pub(crate) async fn start_quote_history_job(
             };
             let summary = quote_history::execute(&symbols, from, to).await?;
             Ok(format!(
-                "quote history backfill completed: symbols={}, months_requested={}, months_with_data={}, months_failed={}, quotes_fetched={}, rows_inserted={}",
+                "quote history backfill completed: symbols={}, months_requested={}, months_with_data={}, months_failed={}, quotes_fetched={}, rows_inserted={}, rows_recalculated={}",
                 symbols.len(),
                 summary.months_requested,
                 summary.months_with_data,
                 summary.months_failed,
                 summary.quotes_fetched,
-                summary.rows_inserted
+                summary.rows_inserted,
+                summary.rows_recalculated
             ))
         },
     )

@@ -14,6 +14,7 @@ use chrono::{Datelike, Months, NaiveDate};
 use crate::{
     app::backfill::acl::QuoteAclMapper,
     app::backfill::port::MonthlyQuoteFetcher,
+    app::calculation,
     core::declare::StockExchangeMarket,
     domain::quote::repository::QuoteRepository,
     infra::cache::SHARE,
@@ -40,6 +41,8 @@ pub struct QuoteHistoryBackfillSummary {
     pub quotes_fetched: usize,
     /// 實際新增的資料列數（已存在者不計）。
     pub rows_inserted: u64,
+    /// 回補後重算均線而實際更新的日報價列數。
+    pub rows_recalculated: u64,
 }
 
 /// 回補指定股票在指定月份區間的日報價。
@@ -111,6 +114,8 @@ pub async fn execute_with(
 ) -> Result<QuoteHistoryBackfillSummary> {
     let months = months_between(from, to)?;
     let mut summary = QuoteHistoryBackfillSummary::default();
+    // 有新增資料列的代號；補進的日子會改變之後的均線，回補完要重算。
+    let mut touched: Vec<String> = Vec::new();
 
     for stock_symbol in stock_symbols {
         for month in &months {
@@ -155,6 +160,9 @@ pub async fn execute_with(
                     )
                 })?;
             summary.rows_inserted += inserted;
+            if inserted > 0 && touched.last() != Some(stock_symbol) {
+                touched.push(stock_symbol.clone());
+            }
 
             tracing::info!(
                 stock_symbol = stock_symbol,
@@ -168,6 +176,25 @@ pub async fn execute_with(
         }
     }
 
+    // 報價已經寫進去了，重算失敗只記錄、不讓整次回補失敗——
+    // 之後用 `test_recalculate_moving_averages` 補算即可，不必重抓行情。
+    if let Some(first_month) = months.first() {
+        match calculation::daily_quotes::recalculate_moving_averages(
+            repository,
+            &touched,
+            *first_month,
+        )
+        .await
+        {
+            Ok(rows) => summary.rows_recalculated = rows,
+            Err(why) => tracing::error!(
+                symbols = touched.join(","),
+                from = %first_month,
+                "回補後重算均線失敗: {why:#}"
+            ),
+        }
+    }
+
     tracing::info!(
         symbols = stock_symbols.len(),
         months_requested = summary.months_requested,
@@ -175,6 +202,7 @@ pub async fn execute_with(
         months_failed = summary.months_failed,
         quotes_fetched = summary.quotes_fetched,
         rows_inserted = summary.rows_inserted,
+        rows_recalculated = summary.rows_recalculated,
         "歷史日報價回補完成"
     );
 
@@ -374,6 +402,7 @@ mod tests {
                 months_failed: 0,
                 quotes_fetched: 6,
                 rows_inserted: 6,
+                rows_recalculated: 2,
             }
         );
 
@@ -390,6 +419,11 @@ mod tests {
         // 無資料的月份不該產生寫入呼叫。
         assert_eq!(repository.insert_calls(), 3);
         assert_eq!(repository.inserted_len(), 6);
+        // 有新增資料的兩檔，從區間第一個月起重算均線。
+        assert_eq!(
+            repository.recalculated(),
+            vec![(vec!["0050".to_string(), "0056".to_string()], jan)]
+        );
     }
 
     /// 單一月份抓取失敗只記錄並繼續，不讓整批回補中止。
@@ -425,6 +459,7 @@ mod tests {
                 months_failed: 1,
                 quotes_fetched: 3,
                 rows_inserted: 3,
+                rows_recalculated: 1,
             }
         );
         // 失敗的二月之後，三月仍然被請求。

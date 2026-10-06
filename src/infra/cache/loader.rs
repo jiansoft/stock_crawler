@@ -101,6 +101,20 @@ impl Share {
         }
     }
 
+    /// 從資料庫重新載入歷史高低紀錄；失敗只記錄，保留舊快取。
+    ///
+    /// 依日K重建極值後呼叫，讓記憶體快取與資料庫一致。
+    pub async fn reload_quote_history_records(&self) {
+        use crate::domain::quote::repository::QuoteRepository;
+        match crate::infra::database::repository::quote::PgQuoteRepository::new()
+            .fetch_quote_history_records()
+            .await
+        {
+            Ok(records) => self.replace_quote_history_records_cache(records),
+            Err(why) => tracing::error!("Failed to reload quote_history_records: {why:?}"),
+        }
+    }
+
     /// 以新抓到的歷史高低紀錄清單覆蓋舊快取。
     fn replace_quote_history_records_cache(
         &self,
