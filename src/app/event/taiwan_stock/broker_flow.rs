@@ -10,6 +10,8 @@
 //! 3. 主力買賣超佔成交量達 [`MAIN_SHARE_THRESHOLD`]%、且張數達 [`MIN_MAIN_NET_LOTS`] 張的股票
 //!    才放進通知，依佔成交量比重由買超到賣超排列；沒有任何一檔達標就不發訊息。
 //!
+//! 抓到的今天資料（不論是否達門檻）都寫入 `broker_flow` 表。
+//!
 //! 每天只跑一次，不另外記錄已通知；服務在 20:40 之後才重啟也不會補發。
 
 use std::fmt::Write;
@@ -22,6 +24,7 @@ use rust_decimal_macros::dec;
 
 use super::{add_thousand_separators, format_decimal_with_commas, holdings};
 use crate::{
+    app::backfill,
     core::{alert, util::text},
     infra::crawler::fbs::broker_flow::{self, BrokerFlow, BrokerNet},
 };
@@ -82,6 +85,7 @@ pub async fn execute() -> Result<()> {
     }
 
     summary.fetched = flows.len();
+    backfill::chip::save_broker_flows(&flows).await;
     let notable = notable_flows(flows);
     summary.notable = notable.len();
     if !notable.is_empty() {
