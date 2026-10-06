@@ -1,7 +1,8 @@
-//! # 減資事件回補
+//! # 減資與分割事件回補
 //!
-//! 把交易所公告的減資恢復買賣事件寫進 `corporate_action`，供 CAGR 計算調整
-//! 因減資造成的價格跳動。
+//! 把交易所公告的減資、變更面額、ETF 分割（反分割）恢復買賣事件寫進 `corporate_action`，
+//! 供 CAGR 計算調整這些事件造成的價格跳動。上市的變更面額與 ETF 分割來自 TWSE
+//! `TWTB8U`／`TWTCAU`（見 [`twse::split`]），與減資一樣支援區間查詢。
 //!
 //! ## 兩個市場的取得方式不同
 //!
@@ -79,6 +80,11 @@ pub async fn execute() -> Result<()> {
         Err(why) => tracing::error!("上市減資回補失敗: error={:#}", why),
     }
 
+    match backfill_listed_splits_range(start, end).await {
+        Ok(count) => saved += count,
+        Err(why) => tracing::error!("上市分割回補失敗: error={:#}", why),
+    }
+
     match backfill_otc_current().await {
         Ok(count) => saved += count,
         Err(why) => tracing::error!("上櫃減資回補失敗: error={:#}", why),
@@ -99,7 +105,30 @@ pub async fn backfill_listed_full() -> Result<u64> {
         .checked_add_months(chrono::Months::new(3))
         .unwrap_or_else(|| Local::now().date_naive());
 
-    backfill_listed_range(full_backfill_start(), end).await
+    let reductions = backfill_listed_range(full_backfill_start(), end).await?;
+    let splits = backfill_listed_splits_range(full_backfill_start(), end).await?;
+    Ok(reductions + splits)
+}
+
+/// 回補指定區間內上市的變更面額與 ETF 分割（反分割）事件，回傳實際寫入筆數。
+///
+/// 兩張表任一抓取失敗就整批放棄，不寫入另一張——兩者合起來才是完整的分割清單。
+pub async fn backfill_listed_splits_range(start: NaiveDate, end: NaiveDate) -> Result<u64> {
+    let mut actions = twse::split::visit_par_value_changes(start, end)
+        .await
+        .context("Failed to fetch listed par value changes")?;
+    actions.extend(
+        twse::split::visit_etf_splits(start, end)
+            .await
+            .context("Failed to fetch ETF splits")?,
+    );
+
+    tracing::info!(
+        "上市分割: {start} ~ {end} 取得 {} 筆可用事件",
+        actions.len()
+    );
+
+    save_all(actions, "上市分割").await
 }
 
 /// 回補指定區間內的上市減資事件，回傳實際寫入筆數。
@@ -113,7 +142,7 @@ pub async fn backfill_listed_range(start: NaiveDate, end: NaiveDate) -> Result<u
         actions.len()
     );
 
-    save_all(actions, "上市").await
+    save_all(actions, "上市減資").await
 }
 
 /// 回補上櫃當前公告中的減資事件，回傳實際寫入筆數。
@@ -126,7 +155,7 @@ pub async fn backfill_otc_current() -> Result<u64> {
 
     tracing::info!("上櫃減資: 當期公告取得 {} 筆可用事件", actions.len());
 
-    save_all(actions, "上櫃").await
+    save_all(actions, "上櫃減資").await
 }
 
 /// 逐筆寫入 `corporate_action`，回傳成功筆數。
@@ -135,7 +164,7 @@ pub async fn backfill_otc_current() -> Result<u64> {
 async fn save_all(actions: Vec<CorporateAction>, market: &str) -> Result<u64> {
     if actions.len() > MAX_ACTIONS_PER_RUN {
         anyhow::bail!(
-            "{market}減資單輪解析出 {} 筆，超過安全閥 {MAX_ACTIONS_PER_RUN}，整批放棄以免污染 corporate_action",
+            "{market}單輪解析出 {} 筆，超過安全閥 {MAX_ACTIONS_PER_RUN}，整批放棄以免污染 corporate_action",
             actions.len()
         );
     }
@@ -148,7 +177,7 @@ async fn save_all(actions: Vec<CorporateAction>, market: &str) -> Result<u64> {
             Ok(rows) => {
                 saved += rows;
                 tracing::debug!(
-                    "{market}減資已登錄: {} {} 比率 {} {}",
+                    "{market}已登錄: {} {} 比率 {} {}",
                     action.stock_symbol,
                     action.effective_date,
                     action.share_ratio.round_dp(6),
@@ -156,7 +185,7 @@ async fn save_all(actions: Vec<CorporateAction>, market: &str) -> Result<u64> {
                 );
             }
             Err(why) => tracing::error!(
-                "{market}減資登錄失敗: symbol={} date={} error={:#}",
+                "{market}登錄失敗: symbol={} date={} error={:#}",
                 action.stock_symbol,
                 action.effective_date,
                 why

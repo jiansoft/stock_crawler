@@ -39,6 +39,9 @@ const SENTINEL_DATE_FLOOR: &str = "1990-01-01";
 /// 會讓旗標因為誤判太多而被使用者完全忽略。
 const ANOMALY_JUMP_THRESHOLD: &str = "0.30";
 
+/// 上市（櫃）後沒有漲跌幅限制的交易日數：前 5 個交易日。
+const LISTING_FREE_DAYS: i64 = 5;
+
 /// CAGR 原始資料來源之 PostgreSQL 實作。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PgCagrSourceRepository;
@@ -369,7 +372,16 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         to: NaiveDate,
     ) -> Result<Vec<(String, NaiveDate)>> {
         // 本專案沒有記錄減資與股票分割，只能從價格序列反推：單日跳動超過
-        // [`ANOMALY_JUMP_THRESHOLD`]、且當天沒有對應的除權息事件，即視為疑似異常。
+        // [`ANOMALY_JUMP_THRESHOLD`]、且兩筆報價之間沒有對應的除權息或公司行動，即視為疑似異常。
+        //
+        // 「之間」是指前一筆報價之後、這一筆（含）之前：事件生效日不一定剛好有報價
+        // （1529 2018-12-22 補班日缺報價、2314 2016-09-28 颱風休市），只比對同一天會誤判。
+        // 上市（櫃）後前 [`LISTING_FREE_DAYS`] 筆報價沒有漲跌幅限制，期間的大幅跳動是真實價格，
+        // 也不算異常（6637 2024-06-19、7810 2025-12-24）。
+        //
+        // 只看有成交的報價：「缺漏補齊」在停牌期間寫入沿用前收的零量列，那不是成交價。
+        // 1538 2024-12-30 減資恢復買賣當天沒有成交、補值列還是停牌前價格，
+        // 若把它當成前一筆，跳動會落在隔天而對不上生效日。
         //
         // 回傳帶日期的事件（而非去重後的代號），呼叫端才能把單次查詢的結果依日期
         // 切分到八個期間各自判定。
@@ -383,12 +395,15 @@ impl CagrSourceRepository for PgCagrSourceRepository {
                        "ClosingPrice",
                        LAG("ClosingPrice") OVER (
                            PARTITION BY stock_symbol ORDER BY "Date"
-                       ) AS prev_price
+                       ) AS prev_price,
+                       LAG("Date") OVER (
+                           PARTITION BY stock_symbol ORDER BY "Date"
+                       ) AS prev_date
                 FROM "DailyQuotes"
-                WHERE "Date" BETWEEN $1 AND $2 AND "ClosingPrice" > 0
+                WHERE "Date" BETWEEN $1 AND $2 AND "ClosingPrice" > 0 AND "TradingVolume" > 0
             ),
             jumps AS (
-                SELECT stock_symbol, "Date"
+                SELECT stock_symbol, "Date", prev_date
                 FROM px
                 WHERE prev_price IS NOT NULL
                   AND prev_price > 0
@@ -401,8 +416,12 @@ impl CagrSourceRepository for PgCagrSourceRepository {
                 FROM dividend d
                 WHERE d.security_code = j.stock_symbol
                   AND (
-                        d."ex-dividend_date1" = to_char(j."Date", 'YYYY-MM-DD')
-                     OR d."ex-dividend_date2" = to_char(j."Date", 'YYYY-MM-DD')
+                        (d."ex-dividend_date1" ~ '^\d{4}-\d{2}-\d{2}$'
+                         AND d."ex-dividend_date1" > to_char(j.prev_date, 'YYYY-MM-DD')
+                         AND d."ex-dividend_date1" <= to_char(j."Date", 'YYYY-MM-DD'))
+                     OR (d."ex-dividend_date2" ~ '^\d{4}-\d{2}-\d{2}$'
+                         AND d."ex-dividend_date2" > to_char(j.prev_date, 'YYYY-MM-DD')
+                         AND d."ex-dividend_date2" <= to_char(j."Date", 'YYYY-MM-DD'))
                   )
             )
             -- 已登錄的分割／減資是「已建模」的事件，模擬時會正確調整股數，
@@ -412,14 +431,30 @@ impl CagrSourceRepository for PgCagrSourceRepository {
                 SELECT 1
                 FROM corporate_action ca
                 WHERE ca.stock_symbol = j.stock_symbol
-                  AND ca.effective_date = j."Date"
+                  AND ca.effective_date > j.prev_date
+                  AND ca.effective_date <= j."Date"
             )
+            -- 上市（櫃）初期：這一筆之前的有效報價不足 LISTING_FREE_DAYS 筆。
+            AND (
+                SELECT count(*)
+                FROM (
+                    SELECT 1
+                    FROM "DailyQuotes" e
+                    WHERE e.stock_symbol = j.stock_symbol
+                      AND e."Date" > '1970-01-01'
+                      AND e."Date" < j."Date"
+                      AND e."ClosingPrice" > 0
+                      AND e."TradingVolume" > 0
+                    LIMIT $4
+                ) earlier
+            ) >= $4
         "#;
 
         let rows = sqlx::query(sql)
             .bind(from)
             .bind(to)
             .bind(ANOMALY_JUMP_THRESHOLD)
+            .bind(LISTING_FREE_DAYS)
             .fetch_all(database::get_connection())
             .await
             .context("Failed to detect anomaly events")?;
@@ -454,6 +489,8 @@ mod tests {
     const FAKE_A: &str = "79979S1";
     /// 已下市的假代號，用於驗證母體排除規則。
     const FAKE_B: &str = "79979S2";
+    /// 驗證上市初期與公司行動生效日落在兩筆報價之間的假代號。
+    const FAKE_C: &str = "79979S3";
 
     /// 測試資料一律落在 1990 年初 —— 遠早於 `DailyQuotes` 實際涵蓋的 2012 年，
     /// 既不會與正式資料互相干擾，也仍在哨兵值 `1990-01-01` 之後。
@@ -462,7 +499,7 @@ mod tests {
     }
 
     async fn cleanup() {
-        let symbols = vec![FAKE_A.to_string(), FAKE_B.to_string()];
+        let symbols = vec![FAKE_A.to_string(), FAKE_B.to_string(), FAKE_C.to_string()];
         let _ = sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#)
             .bind(&symbols)
             .execute(database::get_connection())
@@ -481,6 +518,18 @@ mod tests {
             .await;
     }
 
+    /// 在 1989 年底補 5 筆前置報價，讓 1990 年初的跳動不落在上市初期。
+    async fn insert_listing_history(symbol: &str) {
+        for d in 18..=22 {
+            insert_quote(
+                symbol,
+                NaiveDate::from_ymd_opt(1989, 12, d).unwrap(),
+                dec!(100),
+            )
+            .await;
+        }
+    }
+
     async fn insert_corporate_action(symbol: &str, date: NaiveDate, ratio: Decimal) {
         sqlx::query(
             r#"INSERT INTO corporate_action (stock_symbol, effective_date, action_type, share_ratio, note)
@@ -497,7 +546,8 @@ mod tests {
 
     async fn insert_quote(symbol: &str, date: NaiveDate, close: Decimal) {
         sqlx::query(
-            r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice") VALUES ($1, $2, $3)"#,
+            r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
+               VALUES ($1, $2, $3, 1000)"#,
         )
         .bind(date)
         .bind(symbol)
@@ -804,6 +854,7 @@ mod tests {
             return;
         }
         seed().await;
+        insert_listing_history(FAKE_A).await;
         let repo = PgCagrSourceRepository::new();
 
         let events = repo
@@ -836,6 +887,63 @@ mod tests {
         cleanup().await;
     }
 
+    /// 上市初期（前 5 筆報價）的跳動不算異常；公司行動生效日沒有報價時，
+    /// 只要落在前一筆報價之後、這一筆（含）之前就算已解釋。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn test_anomaly_detection_skips_listing_days_and_matches_actions_between_quotes() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!(
+                "跳過 test_anomaly_detection_skips_listing_days_and_matches_actions_between_quotes：無資料庫連接"
+            );
+            return;
+        }
+        cleanup().await;
+        insert_stock(FAKE_C, false).await;
+        // 01-03 是上市第 2 筆、漲一倍：上市初期，不算異常。
+        for (d, close) in [
+            (2, dec!(10)),
+            (3, dec!(20)),
+            (4, dec!(20)),
+            (5, dec!(20)),
+            (8, dec!(20)),
+        ] {
+            insert_quote(FAKE_C, day(d), close).await;
+        }
+        // 01-09 生效的減資當天沒有成交，只有沿用停牌前價格的零量補值列（1538 2024-12-30 的情況），
+        // 01-10 才有成交、價格跳 1.5 倍：補值列不算前一筆報價，仍視為已解釋。
+        insert_corporate_action(FAKE_C, day(9), dec!(0.4)).await;
+        sqlx::query(
+            r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
+               VALUES ($1, $2, 20, 0)"#,
+        )
+        .bind(day(9))
+        .bind(FAKE_C)
+        .execute(database::get_connection())
+        .await
+        .expect("插入零量補值列");
+        insert_quote(FAKE_C, day(10), dec!(50)).await;
+        // 01-12 再跳一倍，沒有任何事件：異常。
+        insert_quote(FAKE_C, day(12), dec!(100)).await;
+
+        let events = PgCagrSourceRepository::new()
+            .fetch_anomaly_events(day(1), day(31))
+            .await
+            .expect("fetch_anomaly_events");
+        cleanup().await;
+
+        let mine: Vec<NaiveDate> = events
+            .iter()
+            .filter(|(symbol, _)| symbol == FAKE_C)
+            .map(|(_, date)| *date)
+            .collect();
+        assert_eq!(mine, vec![day(12)]);
+    }
+
     #[tokio::test]
     #[cfg_attr(
         not(feature = "integration-tests"),
@@ -850,6 +958,7 @@ mod tests {
             return;
         }
         seed().await;
+        insert_listing_history(FAKE_A).await;
         let repo = PgCagrSourceRepository::new();
 
         // 尚未登錄時，01-05 那次 87.5% 的跳動會被標記為異常。
