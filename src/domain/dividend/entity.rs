@@ -106,6 +106,33 @@ impl Dividend {
 
         (cash, stock, stock_money, cash + stock_money)
     }
+
+    /// 金額為 0 的那一項不會有除權息日與發放日：另一項金額已確定（大於 0）時，
+    /// 把它的「尚未公布」改成 `-`。
+    ///
+    /// 來源常把現金與股票兩組日期一起標成「尚未公布」，只配現金的股票除權日因此永遠
+    /// 等不到實際日期，每年都留下過期的佔位列（2026-10-06 清出 11 列）。兩項金額都是 0
+    /// 時代表金額還沒公告，不動。
+    pub fn clear_dates_of_zero_component(&mut self) {
+        const UNANNOUNCED: &str = "尚未公布";
+        if self.stock_dividend.is_zero() && self.cash_dividend > Decimal::ZERO {
+            for date in [
+                &mut self.ex_dividend_date_stock,
+                &mut self.payable_date_stock,
+            ] {
+                if date == UNANNOUNCED {
+                    *date = "-".to_string();
+                }
+            }
+        }
+        if self.cash_dividend.is_zero() && self.stock_dividend > Decimal::ZERO {
+            for date in [&mut self.ex_dividend_date_cash, &mut self.payable_date_cash] {
+                if date == UNANNOUNCED {
+                    *date = "-".to_string();
+                }
+            }
+        }
+    }
 }
 
 /// 指定日期有除權或除息事件的股票資料領域實體。
@@ -370,5 +397,69 @@ mod ex_rights_reference_price_tests {
             info(false, true).effective_on_date(),
             (Decimal::ZERO, dec!(0.3))
         );
+    }
+
+    fn unannounced(cash: Decimal, stock: Decimal) -> Dividend {
+        Dividend {
+            serial: 0,
+            year: 2026,
+            year_of_dividend: 2025,
+            quarter: String::new(),
+            security_code: "2330".to_string(),
+            earnings_cash_dividend: cash,
+            capital_reserve_cash_dividend: Decimal::ZERO,
+            cash_dividend: cash,
+            earnings_stock_dividend: stock,
+            capital_reserve_stock_dividend: Decimal::ZERO,
+            stock_dividend: stock,
+            sum: cash + stock,
+            payout_ratio_cash: Decimal::ZERO,
+            payout_ratio_stock: Decimal::ZERO,
+            payout_ratio: Decimal::ZERO,
+            ex_dividend_date_cash: "尚未公布".to_string(),
+            ex_dividend_date_stock: "尚未公布".to_string(),
+            payable_date_cash: "尚未公布".to_string(),
+            payable_date_stock: "尚未公布".to_string(),
+            created_time: Local::now(),
+            updated_time: Local::now(),
+        }
+    }
+
+    fn dates(dividend: &Dividend) -> [&str; 4] {
+        [
+            &dividend.ex_dividend_date_cash,
+            &dividend.payable_date_cash,
+            &dividend.ex_dividend_date_stock,
+            &dividend.payable_date_stock,
+        ]
+    }
+
+    /// 只配現金：除權日與股票股利發放日不會有日期；只配股票則相反。
+    #[test]
+    fn clear_dates_of_zero_component_marks_the_missing_side() {
+        let mut cash_only = unannounced(dec!(3), Decimal::ZERO);
+        cash_only.clear_dates_of_zero_component();
+        assert_eq!(dates(&cash_only), ["尚未公布", "尚未公布", "-", "-"]);
+
+        let mut stock_only = unannounced(Decimal::ZERO, dec!(1));
+        stock_only.clear_dates_of_zero_component();
+        assert_eq!(dates(&stock_only), ["-", "-", "尚未公布", "尚未公布"]);
+    }
+
+    /// 兩項都配、或金額還沒公告（都是 0）、或已有實際日期時，都不動。
+    #[test]
+    fn clear_dates_of_zero_component_keeps_everything_else() {
+        let mut both = unannounced(dec!(0.5), dec!(2));
+        both.clear_dates_of_zero_component();
+        assert_eq!(dates(&both), ["尚未公布"; 4]);
+
+        let mut pending = unannounced(Decimal::ZERO, Decimal::ZERO);
+        pending.clear_dates_of_zero_component();
+        assert_eq!(dates(&pending), ["尚未公布"; 4]);
+
+        let mut dated = unannounced(dec!(3), Decimal::ZERO);
+        dated.ex_dividend_date_stock = "2026-07-01".to_string();
+        dated.clear_dates_of_zero_component();
+        assert_eq!(dates(&dated)[2], "2026-07-01");
     }
 }

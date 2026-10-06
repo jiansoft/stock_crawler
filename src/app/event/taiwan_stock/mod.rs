@@ -6,6 +6,8 @@ pub mod broker_flow;
 pub mod chip_flow;
 /// 收盤事件
 pub mod closing;
+/// 每週資料健康檢查
+pub mod data_health;
 /// 持股法說會通知（BigGo 整理的摘要、展望與 Q&A 重點）
 pub mod earnings_call;
 /// 除息日的事件
@@ -16,8 +18,6 @@ pub mod holder_distribution;
 mod holdings;
 /// 持股董監質押變動通知
 pub mod insider_pledge;
-/// 持股重大訊息通知
-pub mod material_news;
 /// 股利發放日的事件
 pub mod payable_date;
 /// 公開申購公告

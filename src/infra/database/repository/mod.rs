@@ -5,6 +5,7 @@ pub mod cagr_source;
 pub mod chip;
 pub mod config;
 pub mod corporate_action;
+pub mod data_health;
 pub mod dividend;
 pub mod financial;
 pub mod financial_report;

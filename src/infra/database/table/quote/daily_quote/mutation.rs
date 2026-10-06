@@ -4,7 +4,7 @@
 //! 以及使用 `COPY` 的批次寫入。
 
 use anyhow::{Context, Result, anyhow};
-use chrono::TimeDelta;
+use chrono::{NaiveDate, TimeDelta};
 use sqlx::{Row, postgres::PgQueryResult};
 
 use crate::infra::database;
@@ -177,6 +177,104 @@ SELECT
             ))
     }
 
+    /// 以視窗函數重算指定股票自 `from` 起（含）所有日報價的均線與年內統計。
+    ///
+    /// 語意與 [`Self::fill_moving_average`] 相同：每一列取「往回 400 個日曆日內、
+    /// 最近 240 筆」為樣本，N 日均線在樣本不足 N 筆時記 0，年內最高／最低／平均
+    /// 取整個樣本，最高／最低價同價時取最近一天。差別在於這裡一次算完整段歷史，
+    /// 給「回補或替換了過去日期的行情」之後使用——補進一天會改變之後最多 240 個
+    /// 交易日的均線，逐日呼叫 [`Self::fill_moving_average`] 太慢。
+    ///
+    /// 只更新數值有變的列（`IS DISTINCT FROM`），重跑不會產生多餘寫入；
+    /// 股價淨值比與日報價本身不動。回傳實際更新的列數。
+    pub async fn recalculate_moving_averages(
+        stock_symbols: &[String],
+        from: NaiveDate,
+    ) -> Result<u64> {
+        if stock_symbols.is_empty() {
+            return Ok(0);
+        }
+
+        let sql = r#"
+WITH src AS (
+    SELECT "Serial", stock_symbol, "Date", "HighestPrice" AS h, "LowestPrice" AS l, "ClosingPrice" AS c
+    FROM "DailyQuotes"
+    WHERE stock_symbol = ANY($1) AND "Date" >= $2::date - 400
+), w AS (
+    SELECT "Serial", "Date",
+        count(*) OVER r400 AS n,
+        avg(c) OVER (sd ROWS 4 PRECEDING) AS a5,
+        avg(c) OVER (sd ROWS 9 PRECEDING) AS a10,
+        avg(c) OVER (sd ROWS 19 PRECEDING) AS a20,
+        avg(c) OVER (sd ROWS 59 PRECEDING) AS a60,
+        avg(c) OVER (sd ROWS 119 PRECEDING) AS a120,
+        avg(c) OVER (sd ROWS 239 PRECEDING) AS a240,
+        max(h) OVER (sd ROWS 239 PRECEDING) AS max_r,
+        min(l) OVER (sd ROWS 239 PRECEDING) AS min_r,
+        max(h) OVER r400 AS max_d,
+        min(l) OVER r400 AS min_d,
+        avg(c) OVER r400 AS avg_d,
+        max(round(h * 10000) * 100000 + ("Date" - DATE '1900-01-01')) OVER (sd ROWS 239 PRECEDING) AS kmax_r,
+        max(round(h * 10000) * 100000 + ("Date" - DATE '1900-01-01')) OVER r400 AS kmax_d,
+        max(round((10000000 - l) * 10000) * 100000 + ("Date" - DATE '1900-01-01')) OVER (sd ROWS 239 PRECEDING) AS kmin_r,
+        max(round((10000000 - l) * 10000) * 100000 + ("Date" - DATE '1900-01-01')) OVER r400 AS kmin_d
+    FROM src
+    WINDOW sd AS (PARTITION BY stock_symbol ORDER BY "Date"),
+           r400 AS (sd RANGE BETWEEN INTERVAL '400 days' PRECEDING AND CURRENT ROW)
+), calc AS (
+    SELECT "Serial",
+        CASE WHEN n >= 5 THEN round(a5, 2) ELSE 0 END AS ma5,
+        CASE WHEN n >= 10 THEN round(a10, 2) ELSE 0 END AS ma10,
+        CASE WHEN n >= 20 THEN round(a20, 2) ELSE 0 END AS ma20,
+        CASE WHEN n >= 60 THEN round(a60, 2) ELSE 0 END AS ma60,
+        CASE WHEN n >= 120 THEN round(a120, 2) ELSE 0 END AS ma120,
+        CASE WHEN n >= 240 THEN round(a240, 2) ELSE 0 END AS ma240,
+        round(CASE WHEN n >= 240 THEN max_r ELSE max_d END, 2) AS max_p,
+        round(CASE WHEN n >= 240 THEN min_r ELSE min_d END, 2) AS min_p,
+        round(CASE WHEN n >= 240 THEN a240 ELSE avg_d END, 2) AS avg_p,
+        DATE '1900-01-01' + mod(CASE WHEN n >= 240 THEN kmax_r ELSE kmax_d END, 100000)::int AS max_on,
+        DATE '1900-01-01' + mod(CASE WHEN n >= 240 THEN kmin_r ELSE kmin_d END, 100000)::int AS min_on
+    FROM w
+    WHERE "Date" >= $2
+)
+UPDATE "DailyQuotes" AS dq
+SET
+    "MovingAverage5" = k.ma5,
+    "MovingAverage10" = k.ma10,
+    "MovingAverage20" = k.ma20,
+    "MovingAverage60" = k.ma60,
+    "MovingAverage120" = k.ma120,
+    "MovingAverage240" = k.ma240,
+    maximum_price_in_year = k.max_p,
+    minimum_price_in_year = k.min_p,
+    average_price_in_year = k.avg_p,
+    maximum_price_in_year_date_on = k.max_on,
+    minimum_price_in_year_date_on = k.min_on
+FROM calc AS k
+WHERE dq."Serial" = k."Serial"
+  AND (dq."MovingAverage5", dq."MovingAverage10", dq."MovingAverage20", dq."MovingAverage60",
+       dq."MovingAverage120", dq."MovingAverage240", dq.maximum_price_in_year,
+       dq.minimum_price_in_year, dq.average_price_in_year,
+       dq.maximum_price_in_year_date_on, dq.minimum_price_in_year_date_on)
+      IS DISTINCT FROM
+      (k.ma5, k.ma10, k.ma20, k.ma60, k.ma120, k.ma240, k.max_p, k.min_p, k.avg_p,
+       k.max_on, k.min_on)
+"#;
+
+        let result = sqlx::query(sql)
+            .bind(stock_symbols)
+            .bind(from)
+            .execute(database::get_connection())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to recalculate_moving_averages({} symbols, from {from})",
+                    stock_symbols.len()
+                )
+            })?;
+        Ok(result.rows_affected())
+    }
+
     /// 批次更新均線、年內統計與 PBR。
     ///
     /// 效能技巧：把每個欄位各自蒐集成一個 Vec，以陣列參數一次綁定給 SQL 的
@@ -331,6 +429,7 @@ SELECT
 #[cfg(test)]
 mod tests {
     use chrono::{Datelike, Local, NaiveDate};
+    use rust_decimal::Decimal;
 
     use crate::core::declare::StockExchange;
     use crate::infra::cache::SHARE;
@@ -630,5 +729,130 @@ mod tests {
             .await
             .expect("count after rollback");
         assert_eq!(after, 0, "回滾後不可留下任何資料列");
+    }
+
+    /// 視窗函數重算的結果必須與逐日的 `fill_moving_average` 完全一致。
+    ///
+    /// 79979 是連續 300 個平日（走 240 筆分支）；79978 每 3 個平日才一筆、跨兩年多
+    /// （400 天內不滿 240 筆，走日曆日分支）。收盤價刻意帶小數與重複值，涵蓋同價取日期。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn recalculate_moving_averages_matches_fill_moving_average() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 recalculate_moving_averages_matches_fill_moving_average：無資料庫連接");
+            return;
+        }
+
+        let symbols = vec!["79979".to_string(), "79978".to_string()];
+        let cleanup = || async {
+            sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#)
+                .bind(&symbols)
+                .execute(database::get_connection())
+                .await
+                .expect("清除測試資料列");
+        };
+        cleanup().await;
+
+        let insert = r#"
+INSERT INTO "DailyQuotes" (stock_symbol, "Date", "ClosingPrice", "HighestPrice", "LowestPrice", year, month, day)
+SELECT $1, d, c, c + (i % 4) * 0.5, c - (i % 3) * 0.25, date_part('year', d), date_part('month', d), date_part('day', d)
+FROM (
+    SELECT row_number() OVER (ORDER BY d) AS i, d::date AS d
+    FROM generate_series(DATE '2001-01-01', DATE '2004-12-31', INTERVAL '1 day') AS d
+    WHERE extract(isodow FROM d) < 6
+) AS days,
+LATERAL (SELECT 10 + (i % 17) + (i % 3) * 0.25 AS c) AS price
+WHERE i % $2 = 0 AND i <= $3
+"#;
+        for (symbol, step, last) in [("79979", 1_i64, 300_i64), ("79978", 3, 900)] {
+            sqlx::query(insert)
+                .bind(symbol)
+                .bind(step)
+                .bind(last)
+                .execute(database::get_connection())
+                .await
+                .expect("寫入測試資料列");
+        }
+
+        let from = NaiveDate::from_ymd_opt(2001, 1, 1).expect("日期應合法");
+        let updated = DailyQuote::recalculate_moving_averages(&symbols, from)
+            .await
+            .expect("重算應成功");
+        assert_eq!(updated, 600, "兩檔各 300 列都從全 0 變成有值");
+
+        let again = DailyQuote::recalculate_moving_averages(&symbols, from)
+            .await
+            .expect("重算應成功");
+        assert_eq!(again, 0, "重跑時數值沒變，不該再寫入");
+
+        let dates: Vec<NaiveDate> = sqlx::query_scalar(
+            r#"SELECT DISTINCT "Date" FROM "DailyQuotes" WHERE stock_symbol = ANY($1) ORDER BY 1"#,
+        )
+        .bind(&symbols)
+        .fetch_all(database::get_connection())
+        .await
+        .expect("讀回測試日期");
+        let mut rows = Vec::new();
+        for date in dates {
+            rows.extend(
+                super::super::fetch_daily_quotes_by_date(date)
+                    .await
+                    .expect("讀回測試資料列")
+                    .into_iter()
+                    .filter(|row| symbols.contains(&row.stock_symbol)),
+            );
+        }
+        assert_eq!(rows.len(), 600);
+
+        let mut mismatches = Vec::new();
+        for row in &rows {
+            let mut expected = row.clone();
+            expected
+                .fill_moving_average()
+                .await
+                .expect("逐日計算應成功");
+            let actual = [
+                row.moving_average_5,
+                row.moving_average_10,
+                row.moving_average_20,
+                row.moving_average_60,
+                row.moving_average_120,
+                row.moving_average_240,
+                row.maximum_price_in_year,
+                row.minimum_price_in_year,
+                row.average_price_in_year,
+            ];
+            let wanted = [
+                expected.moving_average_5,
+                expected.moving_average_10,
+                expected.moving_average_20,
+                expected.moving_average_60,
+                expected.moving_average_120,
+                expected.moving_average_240,
+                expected.maximum_price_in_year,
+                expected.minimum_price_in_year,
+                expected.average_price_in_year,
+            ];
+            // 同價時逐日算法取哪一天沒有定義，比對「該日的價格等於極值」即可。
+            let price_on = |date: NaiveDate, pick: fn(&DailyQuote) -> Decimal| {
+                rows.iter()
+                    .find(|r| r.stock_symbol == row.stock_symbol && r.date == date)
+                    .map(|r| pick(r).round_dp(2))
+            };
+            let max_on_ok = price_on(row.maximum_price_in_year_date_on, |r| r.highest_price)
+                == Some(row.maximum_price_in_year);
+            let min_on_ok = price_on(row.minimum_price_in_year_date_on, |r| r.lowest_price)
+                == Some(row.minimum_price_in_year);
+            if actual != wanted || !max_on_ok || !min_on_ok {
+                mismatches.push((row.stock_symbol.clone(), row.date));
+            }
+        }
+
+        cleanup().await;
+        assert!(mismatches.is_empty(), "與逐日算法不一致：{mismatches:?}");
     }
 }

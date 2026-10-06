@@ -12,6 +12,9 @@ use super::DailyQuote;
 use super::extension::MonthlyStockPriceSummary;
 
 /// 補齊指定日期缺漏的每日收盤資料。
+///
+/// 以各股前 30 天內最後一筆報價複製出成交量為 0 的補值列；`year`／`month`／`day`
+/// 依補值日期填入（2022-09 起漏填成 0 的 3 萬多列，按年月查詢的月統計都查不到）。
 pub async fn makeup_for_the_lack_daily_quotes(date: NaiveDate) -> Result<PgQueryResult> {
     let prev_date = date - TimeDelta::try_days(30).unwrap();
 
@@ -27,7 +30,7 @@ INSERT INTO "DailyQuotes" (
     "MovingAverage120", "MovingAverage240", maximum_price_in_year,
     minimum_price_in_year, average_price_in_year,
     maximum_price_in_year_date_on, minimum_price_in_year_date_on,
-    "price-to-book_ratio"
+    "price-to-book_ratio", "year", "month", "day"
 )
 SELECT $1 as "Date",
     "stock_symbol",
@@ -58,7 +61,10 @@ SELECT $1 as "Date",
     average_price_in_year,
     maximum_price_in_year_date_on,
     minimum_price_in_year_date_on,
-    "price-to-book_ratio"
+    "price-to-book_ratio",
+    date_part('year', $1::date)::int,
+    date_part('month', $1::date)::int,
+    date_part('day', $1::date)::int
 FROM "DailyQuotes"
 WHERE "Serial" IN
 (
@@ -234,6 +240,17 @@ pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuot
         .fetch_all(database::get_connection())
         .await
         .context("Failed to fetch_daily_quotes_by_date from database")
+}
+
+/// 查詢 `from`（含）之後有日報價的所有代號（含已下市者），依代號排序。
+pub async fn fetch_symbols_quoted_since(from: NaiveDate) -> Result<Vec<String>> {
+    sqlx::query_scalar(
+        r#"SELECT DISTINCT stock_symbol FROM "DailyQuotes" WHERE "Date" >= $1 ORDER BY stock_symbol"#,
+    )
+    .bind(from)
+    .fetch_all(database::get_connection())
+    .await
+    .with_context(|| format!("Failed to fetch_symbols_quoted_since({from}) from database"))
 }
 
 #[cfg(test)]

@@ -57,7 +57,7 @@ use crate::{
         capital_reduction, capital_reduction_history, dividend, financial_report,
         qualified_foreign_institutional_investor, quote, quote_history, taiwan_stock_index,
     },
-    app::calculation::{cagr, dividend_record},
+    app::calculation::{cagr, daily_quotes, dividend_record},
     app::event::taiwan_stock::closing,
     domain::performance::CagrPeriod,
     infra::cache::SHARE,
@@ -137,10 +137,55 @@ async fn test_backfill_daily_quotes_for_date() {
         .await
         .expect("manual daily quote backfill failed");
 
+    // 替換過去某天的行情會改變之後最多 240 個交易日的均線，從當天起一併重算。
+    let recalculated = daily_quotes::recalculate_moving_averages_since(date, None)
+        .await
+        .expect("recalculate moving averages failed");
+
     tracing::debug!(
-        "結束 app::manual_backfill::test_backfill_daily_quotes_for_date date={date} quote_count={quote_count}"
+        "結束 app::manual_backfill::test_backfill_daily_quotes_for_date date={date} quote_count={quote_count} recalculated={recalculated}"
     );
 }
+
+/// 重算日報價的均線與年內統計（5～240 日均線、年內最高／最低／平均價）。
+///
+/// 每日收盤只算當天；回補或修正過去的行情後，補進的日子之後的均線不會自動更新，
+/// 用這個入口從 `MANUAL_MA_FROM` 起重算。只更新數值有變的列，可重複執行。
+/// `MANUAL_MA_SYMBOLS`（逗號分隔）留空代表這段期間有報價的全部代號。
+///
+/// 執行範例：
+/// `MANUAL_MA_FROM=2019-07-01 cargo test app::manual_backfill::test_recalculate_moving_averages -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_recalculate_moving_averages() {
+    dotenvy::dotenv().ok();
+
+    let value = std::env::var("MANUAL_MA_FROM").unwrap_or_else(|_| MANUAL_MA_FROM.to_string());
+    let from = NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+        .unwrap_or_else(|_| panic!("MANUAL_MA_FROM should be YYYY-MM-DD, got {value}"));
+    let symbols: Option<Vec<String>> = std::env::var("MANUAL_MA_SYMBOLS")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|symbol| !symbol.is_empty())
+                .map(str::to_owned)
+                .collect()
+        });
+
+    println!("開始 test_recalculate_moving_averages from={from} symbols={symbols:?}");
+
+    let updated = daily_quotes::recalculate_moving_averages_since(from, symbols)
+        .await
+        .expect("recalculate moving averages failed");
+
+    println!("結束 test_recalculate_moving_averages from={from} rows_updated={updated}");
+}
+
+/// 均線重算的預設起始日（可用環境變數 `MANUAL_MA_FROM` 覆寫）。
+const MANUAL_MA_FROM: &str = "2012-01-01";
 
 /// 手動執行每日收盤事件主要匯總流程。
 ///
@@ -392,12 +437,13 @@ async fn test_backfill_quote_history_for_symbols() {
         .expect("manual quote history backfill failed");
 
     println!(
-        "結束 test_backfill_quote_history_for_symbols months_requested={} months_with_data={} months_failed={} quotes_fetched={} rows_inserted={}",
+        "結束 test_backfill_quote_history_for_symbols months_requested={} months_with_data={} months_failed={} quotes_fetched={} rows_inserted={} rows_recalculated={}",
         summary.months_requested,
         summary.months_with_data,
         summary.months_failed,
         summary.quotes_fetched,
-        summary.rows_inserted
+        summary.rows_inserted,
+        summary.rows_recalculated
     );
 }
 
