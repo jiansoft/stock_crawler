@@ -1,4 +1,6 @@
-use crate::domain::quote::entity::{DailyQuote, LastDailyQuote, QuoteHistoryRecord};
+use crate::domain::quote::entity::{
+    DailyQuote, LastDailyQuote, MarketTradedCount, QuoteHistoryRecord,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -52,6 +54,15 @@ pub trait QuoteRepository: Send + Sync {
     ///
     /// 回傳受影響的資料筆數。
     async fn makeup_for_the_lack_daily_quotes(&self, date: NaiveDate) -> Result<u64>;
+
+    /// 查詢 `from`～`to` 每個交易日上市、上櫃各有幾檔有成交（成交量大於 0）。
+    ///
+    /// 沒有任何資料的日期不會出現在結果中。
+    async fn fetch_market_traded_counts(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<MarketTradedCount>>;
 
     /// 取得指定股票在指定年月的最低、平均、最高收盤價統計。
     ///

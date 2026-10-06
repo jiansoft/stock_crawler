@@ -2,7 +2,7 @@ use crate::{
     domain::quote::{
         entity::{
             DailyQuote as DomainDailyQuote, LastDailyQuote as DomainLastDailyQuote,
-            QuoteHistoryRecord as DomainQuoteHistoryRecord,
+            MarketTradedCount, QuoteHistoryRecord as DomainQuoteHistoryRecord,
         },
         repository::QuoteRepository,
     },
@@ -392,6 +392,22 @@ impl QuoteRepository for PgQuoteRepository {
         // 呼叫 Table 實作補齊指定交易日缺漏的收盤資料
         let result = daily_quote::makeup_for_the_lack_daily_quotes(date).await?;
         Ok(result.rows_affected())
+    }
+
+    async fn fetch_market_traded_counts(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<MarketTradedCount>> {
+        Ok(daily_quote::fetch_market_traded_counts(from, to)
+            .await?
+            .into_iter()
+            .map(|(date, market_id, traded)| MarketTradedCount {
+                date,
+                market_id,
+                traded,
+            })
+            .collect())
     }
 
     async fn fetch_monthly_stock_price_summary(

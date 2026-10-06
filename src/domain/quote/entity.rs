@@ -332,3 +332,16 @@ impl crate::core::util::map::Keyable for DailyQuote {
         )
     }
 }
+
+/// 某交易日某市場有成交的報價檔數，用來檢查收盤資料是否完整。
+///
+/// 只算成交量大於 0 的列：「缺漏補齊」寫入的零量列沿用前收，不代表當天真的抓到資料。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarketTradedCount {
+    /// 交易日。
+    pub date: NaiveDate,
+    /// 市場別（`stocks.stock_exchange_market_id`：2 上市、4 上櫃）。
+    pub market_id: i32,
+    /// 有成交的檔數。
+    pub traded: i64,
+}

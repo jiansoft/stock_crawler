@@ -203,6 +203,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "取得每日收盤行情與報價",
             event::taiwan_stock::closing::execute,
         ),
+        // 17:00、19:00（週一至週五）檢查當日收盤資料：上市或上櫃有成交的檔數明顯偏少
+        // （來源尚未公布、暫時失敗）就重跑收盤匯總並告警，避免缺口被「缺漏補齊」的零量列藏起來。
+        create_job(
+            "0 0 17,19 * * Mon-Fri",
+            "檢查收盤資料完整性",
+            event::taiwan_stock::closing::ensure_complete,
+        ),
         // 20:30 通知持股近期法說會的摘要、展望與 Q&A 重點（BigGo 整理）
         // 法說會多在下午舉行，BigGo 通常當天或隔天產生摘要；摘要未產生的場次之後的排程再看。
         create_job(

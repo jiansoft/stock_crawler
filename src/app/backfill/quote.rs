@@ -35,7 +35,9 @@ pub async fn execute(date: NaiveDate) -> Result<usize> {
     // 任一來源抓取失敗都立即中止：寧可整批失敗讓呼叫端重試，
     // 也不要只寫入「半個市場」的資料（例如只有上櫃、缺上市），造成資料不完整。
     let mut quotes = result_twse?;
-    quotes.append(&mut result_tpex?);
+    let mut tpex_quotes = result_tpex?;
+    ensure_both_markets(quotes.len(), tpex_quotes.len())?;
+    quotes.append(&mut tpex_quotes);
 
     let quotes_len = quotes.len();
 
@@ -74,6 +76,20 @@ pub async fn execute(date: NaiveDate) -> Result<usize> {
     tracing::info!("最後收盤日設定更新到資料庫完成");
 
     Ok(quotes_len)
+}
+
+/// 只有一個市場有資料時拒絕寫入。
+///
+/// 上市、上櫃同日開休市：兩邊都 0 筆是休市日；一邊有資料、另一邊 0 筆則是來源尚未公布或
+/// 回應異常。舊版照樣寫入上市，再由「缺漏補齊」把上櫃整天補成零量列，等於把缺口藏起來
+/// （2022-08-08～2026-03-17 間共 10 個交易日）。寧可整批失敗，交給收盤完整性檢查重抓。
+fn ensure_both_markets(listed: usize, otc: usize) -> Result<()> {
+    match (listed, otc) {
+        (0, 0) => Ok(()),
+        (0, _) => anyhow::bail!("上市收盤資料 0 筆、上櫃 {otc} 筆，疑似上市尚未公布，不寫入"),
+        (_, 0) => anyhow::bail!("上櫃收盤資料 0 筆、上市 {listed} 筆，疑似上櫃尚未公布，不寫入"),
+        _ => Ok(()),
+    }
 }
 
 /// 從指定資料來源抓取收盤價。
@@ -143,6 +159,17 @@ async fn process_daily_quote(daily_quote: crate::domain::quote::entity::DailyQuo
 
 #[cfg(test)]
 mod tests {
+    /// 兩邊都有資料或都沒有（休市）才放行；只有一邊有資料時拒絕寫入。
+    #[test]
+    fn ensure_both_markets_rejects_a_single_market() {
+        assert!(super::ensure_both_markets(1_050, 860).is_ok());
+        assert!(super::ensure_both_markets(0, 0).is_ok());
+        let err = super::ensure_both_markets(1_050, 0).expect_err("上櫃 0 筆");
+        assert!(err.to_string().contains("上櫃收盤資料 0 筆"), "{err}");
+        let err = super::ensure_both_markets(0, 860).expect_err("上市 0 筆");
+        assert!(err.to_string().contains("上市收盤資料 0 筆"), "{err}");
+    }
+
     use chrono::NaiveDate;
     use std::sync::{
         Arc,

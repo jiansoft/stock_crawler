@@ -125,6 +125,30 @@ pub async fn fetch_count_by_date(date: NaiveDate) -> Result<i64> {
     Ok(row.0)
 }
 
+/// 查詢 `from`～`to` 每個交易日上市（2）、上櫃（4）各有幾檔有成交。
+///
+/// 回傳 `(交易日, 市場別, 有成交檔數)`；沒有資料的日期不會出現。
+pub async fn fetch_market_traded_counts(
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Result<Vec<(NaiveDate, i32, i64)>> {
+    let sql = r#"
+        SELECT q."Date", s.stock_exchange_market_id, count(*)
+        FROM "DailyQuotes" q
+        JOIN stocks s ON s.stock_symbol = q.stock_symbol
+        WHERE q."Date" BETWEEN $1 AND $2
+          AND q."TradingVolume" > 0
+          AND s.stock_exchange_market_id IN (2, 4)
+        GROUP BY q."Date", s.stock_exchange_market_id
+    "#;
+    sqlx::query_as(sql)
+        .bind(from)
+        .bind(to)
+        .fetch_all(database::get_connection())
+        .await
+        .with_context(|| format!("Failed to fetch market traded counts {from}~{to}"))
+}
+
 /// 讀取指定日期的所有日報價資料。
 pub async fn fetch_daily_quotes_by_date(date: NaiveDate) -> Result<Vec<DailyQuote>> {
     let sql = r#"
@@ -217,6 +241,64 @@ mod tests {
     use crate::infra::cache::SHARE;
 
     use super::*;
+
+    /// 只算有成交（成交量大於 0）的列，依交易日與市場別分組。
+    /// 測試用假代號與歷史日期，結束時刪除。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn fetch_market_traded_counts_counts_only_traded_rows() {
+        dotenvy::dotenv().ok();
+        let date = NaiveDate::from_ymd_opt(1999, 3, 17).unwrap();
+        let pool = database::get_connection();
+        let cleanup = || async {
+            for sql in [
+                r#"DELETE FROM "DailyQuotes" WHERE stock_symbol IN ('79976', '79977', '79978')"#,
+                r#"DELETE FROM stocks WHERE stock_symbol IN ('79976', '79977', '79978')"#,
+            ] {
+                let _ = sqlx::query(sql).execute(pool).await;
+            }
+        };
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 fetch_market_traded_counts_counts_only_traded_rows：無資料庫連接");
+            return;
+        }
+        cleanup().await;
+
+        // 79976 上市有成交、79977 上櫃有成交、79978 上櫃零量補值列
+        for (symbol, market_id, volume) in
+            [("79976", 2, 1_000), ("79977", 4, 2_000), ("79978", 4, 0)]
+        {
+            sqlx::query(
+                r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id)
+                   VALUES ($1, $1, $1, $2)"#,
+            )
+            .bind(symbol)
+            .bind(market_id)
+            .execute(pool)
+            .await
+            .expect("插入股票母檔");
+            sqlx::query(
+                r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
+                   VALUES ($1, $2, 10, $3)"#,
+            )
+            .bind(date)
+            .bind(symbol)
+            .bind(volume)
+            .execute(pool)
+            .await
+            .expect("插入報價");
+        }
+
+        let counts = fetch_market_traded_counts(date, date).await;
+        cleanup().await;
+
+        let mut counts = counts.expect("查詢有成交檔數");
+        counts.sort_by_key(|(_, market_id, _)| *market_id);
+        assert_eq!(counts, vec![(date, 2, 1), (date, 4, 1)]);
+    }
 
     #[tokio::test]
     #[cfg_attr(
