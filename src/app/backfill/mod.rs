@@ -4,6 +4,8 @@ pub mod acl;
 pub mod capital_reduction;
 /// 上櫃減資歷史缺口的候選收斂（只讀，產出待辦清單）
 pub mod capital_reduction_history;
+/// 籌碼資料入庫（三大法人、融資融券、集保股權分散、董監持股、主力進出）
+pub mod chip;
 /// 調用 twse API 更新終止上市公司
 pub mod delisted_company;
 /// 更新股利發送數據

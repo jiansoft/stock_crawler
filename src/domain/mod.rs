@@ -1,3 +1,4 @@
+pub mod chip;
 pub mod config;
 pub mod dividend;
 pub mod events;

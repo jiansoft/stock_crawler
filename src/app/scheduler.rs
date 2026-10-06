@@ -10,9 +10,9 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
     app::backfill::{
-        capital_reduction, delisted_company, dividend, etf, financial_report, financial_statement,
-        isin, net_asset_value_per_share, qualified_foreign_institutional_investor, revenue,
-        stock_weight,
+        capital_reduction, chip, delisted_company, dividend, etf, financial_report,
+        financial_statement, isin, net_asset_value_per_share,
+        qualified_foreign_institutional_investor, revenue, stock_weight,
     },
     app::calculation,
     app::event,
@@ -253,6 +253,20 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "0 40 21 * * Mon-Fri",
             "通知持股法人與信用交易",
             event::taiwan_stock::chip_flow::execute,
+        ),
+        // 21:50（週一至週五）全市場三大法人買賣超與融資融券餘額入庫（chip_daily）
+        create_job("0 50 21 * * Mon-Fri", "籌碼資料入庫", chip::execute_daily),
+        // 10:40（週六）集保股權分散週摘要入庫（holder_distribution）；開放資料只有最新一週
+        create_job(
+            "0 40 10 * * Sat",
+            "集保股權分散入庫",
+            chip::execute_holder_distributions,
+        ),
+        // 20:50（每月 10–28 日）董監事持股與設質入庫（insider_holding）；同月份重跑只更新有變的列
+        create_job(
+            "0 50 20 10-28 * *",
+            "董監持股入庫",
+            chip::execute_insider_holdings,
         ),
         // 22:00 外資持股狀態
         create_job(
