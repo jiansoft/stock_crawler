@@ -267,6 +267,58 @@ mod tests {
 
     use super::*;
 
+    fn trace(symbol: &str, floor: Decimal, ceiling: Decimal) -> PriceTrace {
+        PriceTrace {
+            stock_symbol: symbol.to_string(),
+            floor,
+            ceiling,
+        }
+    }
+
+    /// 快取沒有報價、報價為 0 或價格仍在區間內時，都不會觸發警報。
+    #[tokio::test]
+    async fn process_cached_targets_skips_missing_zero_and_in_range_prices() {
+        SHARE.clear_last_trading_day_quotes();
+        SHARE.clear_stock_snapshots();
+        let targets = vec![trace("79985", dec!(10), dec!(20))];
+
+        // 快取沒有這檔
+        process_cached_targets(
+            "79985".to_string(),
+            targets.clone(),
+            EvaluationSource::PriceEvent,
+        )
+        .await;
+
+        // 報價為 0（尚未成交）與價格在區間內
+        for price in [Decimal::ZERO, dec!(15)] {
+            let mut snapshots = HashMap::new();
+            snapshots.insert(
+                "79985".to_string(),
+                RealtimeSnapshot::new("79985".to_string(), price),
+            );
+            SHARE.set_stock_snapshots(snapshots);
+            process_cached_targets(
+                "79985".to_string(),
+                targets.clone(),
+                EvaluationSource::Reconciliation,
+            )
+            .await;
+        }
+
+        SHARE.clear_stock_snapshots();
+    }
+
+    /// 沒有追蹤條件時，價格事件與對帳掃描都直接結束。
+    #[tokio::test]
+    async fn evaluation_entry_points_do_nothing_without_targets() {
+        clear_trace_targets_cache();
+        evaluate_price_update("79985".to_string())
+            .await
+            .expect("沒有追蹤條件也應成功");
+        assert_eq!(reconcile_target_prices().await.expect("對帳"), 0);
+    }
+
     /// 驗證即時報價快取讀取可正確命中與 miss。
     #[test]
     fn test_get_cached_snapshot() {

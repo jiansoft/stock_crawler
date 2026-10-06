@@ -210,6 +210,58 @@ mod tests {
         assert!(is_within_boundary(&trace, dec!(123)));
     }
 
+    /// 價格在區間內時直接回傳不需通知，不碰任何去重快取。
+    #[tokio::test]
+    async fn alert_on_price_boundary_ignores_prices_within_range() {
+        let target = PriceTrace {
+            stock_symbol: "79984".to_string(),
+            floor: dec!(10),
+            ceiling: dec!(20),
+        };
+        let sent = alert_on_price_boundary(target, dec!(15), EvaluationSource::PriceEvent, None)
+            .await
+            .expect("判斷邊界");
+        assert!(!sent);
+    }
+
+    /// 跌破低標第一次通知；同價或較高的價格在時間窗內不再通知，創新低才再通知。
+    /// 測試用假代號，結束時刪除 Redis 去重紀錄。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn alert_on_price_boundary_notifies_only_on_new_lows() {
+        dotenvy::dotenv().ok();
+        let redis = &crate::infra::nosql::redis::CLIENT;
+        if redis.ping().await.is_err() {
+            println!("跳過 alert_on_price_boundary_notifies_only_on_new_lows：無 Redis 連線");
+            return;
+        }
+        let target = PriceTrace {
+            stock_symbol: "79984".to_string(),
+            floor: dec!(10),
+            ceiling: Decimal::ZERO,
+        };
+        let key = build_trace_notification_key(&target, "floor");
+        let _ = redis.delete(&key).await;
+
+        let alert = |price| {
+            alert_on_price_boundary(
+                target.clone(),
+                price,
+                EvaluationSource::Reconciliation,
+                Some("Test"),
+            )
+        };
+        assert!(alert(dec!(9)).await.expect("第一次跌破"));
+        assert!(!alert(dec!(9)).await.expect("同價"));
+        assert!(!alert(dec!(9.5)).await.expect("未創新低"));
+        assert!(alert(dec!(8.5)).await.expect("創新低"));
+
+        redis.delete(&key).await.expect("清除去重紀錄");
+    }
+
     #[test]
     fn test_build_trace_notification_key_includes_boundary() {
         let trace = PriceTrace {

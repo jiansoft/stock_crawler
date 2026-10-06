@@ -437,6 +437,36 @@ mod tests {
 
     use super::*;
 
+    /// 沒有背景任務時停止也要清空共用快取，避免收盤後仍讀到盤中報價。
+    #[tokio::test]
+    async fn stop_caching_task_clears_snapshots_without_a_running_task() {
+        let _lock = TEST_STATE_LOCK.lock().await;
+        let mut snapshots = HashMap::new();
+        snapshots.insert(
+            "2330".to_string(),
+            crate::infra::cache::RealtimeSnapshot::new(
+                "2330".to_string(),
+                rust_decimal::Decimal::ONE_HUNDRED,
+            ),
+        );
+        SHARE.set_stock_snapshots(snapshots);
+
+        stop_caching_task().await;
+
+        assert!(!IS_CACHING.load(Ordering::SeqCst));
+        assert!(SHARE.stock_snapshots.read().unwrap().is_empty());
+    }
+
+    /// 停止旗標關閉時，長時間冷卻立刻返回，不會拖住服務停止。
+    #[tokio::test]
+    async fn sleep_while_caching_returns_at_once_when_stopped() {
+        let _lock = TEST_STATE_LOCK.lock().await;
+        IS_CACHING.store(false, Ordering::SeqCst);
+        let started = Instant::now();
+        sleep_while_caching(DENIED_COOLDOWN).await;
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
     /// Live 測試：驗證啟動背景任務後快取會落地，停止後會被清空。
     #[tokio::test]
     #[ignore]

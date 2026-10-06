@@ -111,3 +111,31 @@ async fn ex_rights_reference_prices(
         })
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 沒有除權息與減資事件的日子，兩類參考價都是空集合，整批寫入也不出錯。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn reference_prices_are_empty_on_a_day_without_events() {
+        dotenvy::dotenv().ok();
+        let date = NaiveDate::from_ymd_opt(1999, 1, 4).unwrap();
+        let Ok(resumption) = corporate_action_reference_prices(date).await else {
+            println!("跳過 reference_prices_are_empty_on_a_day_without_events：無資料庫連接");
+            return;
+        };
+        assert!(resumption.is_empty());
+        assert!(
+            ex_rights_reference_prices(date, &resumption)
+                .await
+                .expect("除權息參考價")
+                .is_empty()
+        );
+        load_reference_prices(date).await;
+    }
+}
