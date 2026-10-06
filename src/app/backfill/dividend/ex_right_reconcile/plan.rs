@@ -10,6 +10,34 @@ use crate::{domain::dividend::entity::Dividend, infra::crawler::share::ExDividen
 
 /// 日期延後時，資料列日期與交易所日期最多相差的天數。
 pub(super) const SHIFT_WINDOW_DAYS: i64 = 60;
+/// 資料列被交易所事件用掉的那一側。
+///
+/// 年度股利的除息與除權常在不同天（4549 桓達 2022 年 06-28 除息、08-24 除權），
+/// 兩次交易所事件要能分別對上同一列；只記 serial 會讓先對上的現金事件把整列占走，
+/// 除權事件就被誤判成缺漏。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Side {
+    Cash,
+    Stock,
+}
+
+/// 事件涉及的資料列側：除息用現金側、除權用股票側。
+fn sides(event: &ExDividendAnnouncement) -> impl Iterator<Item = Side> {
+    [(event.is_cash, Side::Cash), (event.is_stock, Side::Stock)]
+        .into_iter()
+        .filter_map(|(involved, side)| involved.then_some(side))
+}
+
+/// 資料列在這個事件涉及的每一側都還沒被其他事件用掉。
+fn is_free(used: &HashSet<(i64, Side)>, row: &Dividend, event: &ExDividendAnnouncement) -> bool {
+    sides(event).all(|side| !used.contains(&(row.serial, side)))
+}
+
+/// 記錄資料列被這個事件用掉的側。
+fn mark_used(used: &mut HashSet<(i64, Side)>, row: &Dividend, event: &ExDividendAnnouncement) {
+    used.extend(sides(event).map(|side| (row.serial, side)));
+}
+
 /// 判定「金額相近」的相對差距上限。
 pub(super) const AMOUNT_TOLERANCE: Decimal = Decimal::from_parts(2, 0, 0, false, 1);
 /// 日期未公布時，金額必須幾乎相同（相對差距 1% 以內）才敢對應。
@@ -24,7 +52,7 @@ pub(crate) fn build_plan(
     as_of: NaiveDate,
 ) -> ReconcilePlan {
     let mut plan = ReconcilePlan::default();
-    let mut used: HashSet<i64> = HashSet::new();
+    let mut used: HashSet<(i64, Side)> = HashSet::new();
     let mut pending: Vec<&ExDividendAnnouncement> = Vec::new();
 
     // 每檔股票的交易所除權息日，用來判斷資料列的日期是不是「舊日期」。
@@ -42,7 +70,7 @@ pub(crate) fn build_plan(
         let same_day: Vec<&Dividend> = rows
             .iter()
             .filter(|row| {
-                !used.contains(&row.serial)
+                is_free(&used, row, event)
                     && ((event.is_cash && row.ex_dividend_date_cash == date)
                         || (event.is_stock && row.ex_dividend_date_stock == date))
             })
@@ -51,7 +79,7 @@ pub(crate) fn build_plan(
         match same_day.as_slice() {
             [] => pending.push(event),
             [row] => {
-                used.insert(row.serial);
+                mark_used(&mut used, row, event);
                 plan.matched += 1;
                 let mut candidate = (*row).clone();
                 let changed = apply_official(&mut candidate, event);
@@ -62,7 +90,9 @@ pub(crate) fn build_plan(
             }
             // 同一天多次配息：交易所息值是合計，逐列的金額無從拆分，只確認已收錄。
             rows_on_day => {
-                used.extend(rows_on_day.iter().map(|row| row.serial));
+                for row in rows_on_day {
+                    mark_used(&mut used, row, event);
+                }
                 plan.matched += 1;
             }
         }
@@ -79,7 +109,7 @@ pub(crate) fn build_plan(
         let shifted: Vec<&Dividend> = rows
             .iter()
             .filter(|_| !is_etf)
-            .filter(|row| !used.contains(&row.serial))
+            .filter(|row| is_free(&used, row, event))
             .filter(|row| {
                 event_dates(row, event).iter().any(|date| {
                     parse_date(date).is_some_and(|row_date| {
@@ -95,7 +125,7 @@ pub(crate) fn build_plan(
 
         let candidates: Vec<&Dividend> = if shifted.is_empty() {
             rows.iter()
-                .filter(|row| !used.contains(&row.serial))
+                .filter(|row| is_free(&used, row, event))
                 .filter(|row| {
                     event_dates(row, event)
                         .iter()
@@ -113,7 +143,7 @@ pub(crate) fn build_plan(
 
         match candidates.as_slice() {
             [row] => {
-                used.insert(row.serial);
+                mark_used(&mut used, row, event);
                 let mut candidate = (*row).clone();
                 set_event_dates(&mut candidate, event);
                 apply_official(&mut candidate, event);
@@ -131,7 +161,7 @@ pub(crate) fn build_plan(
         }
     }
 
-    plan.used = used;
+    plan.used = used.into_iter().map(|(serial, _)| serial).collect();
     plan
 }
 

@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 
-use super::{DATE_FORMAT, ReconcilePlan, event_label};
+use super::{DATE_FORMAT, ReconcilePlan};
 use crate::{
     app::backfill::acl::YahooDividendAclMapper,
     app::calculation::dividend_record,
@@ -26,8 +26,8 @@ pub(super) struct YahooFill {
     pub(super) filled: usize,
     /// 補上配股的資料列數。
     pub(super) stock_filled: usize,
-    /// 補不到的缺漏事件（`代號 除權息日`）。
-    pub(super) unresolved: Vec<String>,
+    /// 補不到的缺漏事件。
+    pub(super) unresolved: Vec<ExDividendAnnouncement>,
 }
 
 /// 用 Yahoo 補資料庫缺的部分：缺漏事件整筆補進來，配股金額缺漏的列補上配股。
@@ -67,7 +67,7 @@ pub(super) async fn fill_missing_from_yahoo(
             Err(why) => {
                 tracing::warn!("Yahoo 股利頁抓取失敗，略過補缺漏：{symbol} {why:#}");
                 fill.unresolved
-                    .extend(events.iter().map(|event| event_label(event)));
+                    .extend(events.iter().map(|event| (*event).clone()));
                 tokio::time::sleep(YAHOO_INTERVAL).await;
                 continue;
             }
@@ -140,13 +140,13 @@ pub(super) async fn fill_missing_from_yahoo(
     Ok(fill)
 }
 
-/// 列出補入後仍沒有對應資料列的缺漏事件（`代號 除權息日`）。
+/// 列出補入後仍沒有對應資料列的缺漏事件。
 ///
 /// 補入列的現金或股票除權息日與事件同一天，就算該事件已補上。
 pub(super) fn unresolved_after_fill(
     events: &[&ExDividendAnnouncement],
     fills: &[Dividend],
-) -> Vec<String> {
+) -> Vec<ExDividendAnnouncement> {
     let filled_dates: BTreeSet<&str> = fills
         .iter()
         .flat_map(|dividend| {
@@ -161,7 +161,7 @@ pub(super) fn unresolved_after_fill(
         .filter(|event| {
             !filled_dates.contains(event.ex_date.format(DATE_FORMAT).to_string().as_str())
         })
-        .map(|event| event_label(event))
+        .map(|event| (*event).clone())
         .collect()
 }
 
