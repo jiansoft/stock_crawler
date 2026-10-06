@@ -10,6 +10,7 @@
 //! SQLx 錯誤，避免把資料庫主機、SQL 或堆疊資訊洩漏給呼叫端。
 
 mod cagr;
+mod chip;
 mod market_calendar;
 mod market_movers;
 mod market_rankings;
@@ -30,6 +31,7 @@ use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{ErrorBody, HealthResponse};
 
 pub(super) use cagr::{__path_cagr_by_symbol, __path_cagr_ranking, cagr_by_symbol, cagr_ranking};
+pub(super) use chip::{__path_stock_chip, stock_chip};
 pub(super) use market_calendar::{__path_dividend_calendar, dividend_calendar};
 pub(super) use market_movers::{__path_market_movers, market_movers};
 pub(super) use market_rankings::{
