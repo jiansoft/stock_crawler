@@ -819,3 +819,100 @@ fn unresolved_after_exchange_fill_lists_remaining_events() {
         vec!["00794B 2019-11-15".to_string()]
     );
 }
+
+/// 刪除測試用假代號的股利資料列。
+async fn delete_test_dividends(symbol: &str) {
+    sqlx::query("DELETE FROM dividend WHERE security_code = $1")
+        .bind(symbol)
+        .execute(crate::infra::database::get_connection())
+        .await
+        .expect("清除測試股利資料");
+}
+
+/// 交易所補登寫入資料庫並重算年度合計；不在股票主檔（或已下市）的代號不補。
+/// 測試用假代號，結束時刪除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn fill_etf_from_exchange_saves_rows_and_annual_totals() {
+    dotenvy::dotenv().ok();
+    let repo = PgDividendRepository::new();
+    if repo.fetch_by_years(&[1999]).await.is_err() {
+        println!("跳過 fill_etf_from_exchange_saves_rows_and_annual_totals：無資料庫連接");
+        return;
+    }
+    let tracked = "00999T";
+    let untracked = "00998T";
+    delete_test_dividends(tracked).await;
+    delete_test_dividends(untracked).await;
+    crate::infra::cache::SHARE
+        .stocks
+        .write()
+        .expect("stocks 快取可寫入")
+        .insert(
+            tracked.to_string(),
+            crate::domain::registry::entity::Stock::reconstitute(
+                tracked.to_string(),
+                "測試債券ETF".to_string(),
+                false,
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Local::now(),
+                4,
+                24,
+                0,
+                0,
+                Decimal::ZERO,
+            ),
+        );
+
+    let events = vec![
+        etf_event(tracked, "2019-08-15", dec!(0.181)),
+        etf_event(tracked, "2019-11-15", dec!(0.212)),
+        etf_event(untracked, "2019-08-15", dec!(0.5)),
+        etf_event(untracked, "2019-11-15", dec!(0.5)),
+    ];
+    let fills = exchange_fill::fill_etf_from_exchange(
+        &repo,
+        &events,
+        &events,
+        &HashMap::new(),
+        window("2019-01-01", "2019-12-31"),
+    )
+    .await
+    .expect("交易所補登");
+
+    let saved: Vec<Dividend> = repo
+        .fetch_by_years(&[2019])
+        .await
+        .expect("讀取股利")
+        .into_iter()
+        .filter(|row| row.security_code == tracked || row.security_code == untracked)
+        .collect();
+
+    delete_test_dividends(tracked).await;
+    crate::infra::cache::SHARE
+        .stocks
+        .write()
+        .expect("stocks 快取可寫入")
+        .remove(tracked);
+
+    assert_eq!(keys(&fills).len(), 2, "只補主檔中的代號");
+    assert!(saved.iter().all(|row| row.security_code == tracked));
+    let mut quarters: Vec<(String, Decimal)> = saved
+        .iter()
+        .map(|row| (row.quarter.clone(), row.cash_dividend))
+        .collect();
+    quarters.sort();
+    assert_eq!(
+        quarters,
+        vec![
+            (String::new(), dec!(0.393)),
+            ("Q2".to_string(), dec!(0.181)),
+            ("Q3".to_string(), dec!(0.212)),
+        ]
+    );
+}
