@@ -4,9 +4,11 @@
 //! 並記錄各站點延遲統計供收盤後輸出。對外公開的 `fetch_*` 函式由 `crawler` 模組
 //! 重新匯出，呼叫端路徑維持不變。
 //!
-//! 內容依職責拆成三個檔案：本檔負責輪詢與備援流程及對外 API，
-//! [`registry`] 收納站點清單與函式指標包裝，[`latency`] 負責延遲統計。
+//! 內容依職責拆成四個檔案：本檔負責輪詢與備援流程及對外 API，
+//! [`registry`] 收納站點清單與函式指標包裝，[`latency`] 負責延遲統計，
+//! [`health`] 依各站近期成敗與耗時決定嘗試順序（熔斷與慢站降級）。
 
+mod health;
 mod latency;
 mod registry;
 
@@ -18,15 +20,18 @@ use std::{
 use anyhow::{Result, anyhow};
 use rust_decimal::Decimal;
 
+use self::health::{plan_attempt_order, record_site_outcome};
 pub use self::latency::flush_site_latency_stats;
 use self::latency::record_site_latency;
-use self::registry::{ALL_PRICE_SITES, ALL_QUOTE_SITES, PriceSite, QuoteSite};
+use self::registry::{ALL_PRICE_SITES, ALL_QUOTE_SITES, BACKUP_PRICE_SITES, PriceSite, QuoteSite};
 use crate::core::declare;
 
 /// 標記採集站點的全局遊標。
 ///
 /// 為了避免單一站點請求過於頻繁導致被封鎖，系統使用此遊標進行輪詢 (Round-robin)。
-/// 每發起一次請求，遊標就會遞增，確保下一次嘗試會從不同的來源開始。
+/// 每次抓取只取一次遊標作為起點，再依序走過站點池；不能每試一站就取一次，
+/// 否則多檔股票並發抓取時遊標互相穿插，同一檔會重複打同一站、漏掉其他站
+/// （2026-10-07 正式機的失敗訊息裡 Fugle 出現 3 次、PcHome 一次都沒試到）。
 static INDEX: AtomicUsize = AtomicUsize::new(0);
 
 /// 單次「最新成交價」抓取的結果。
@@ -57,6 +62,7 @@ fn get_and_increment_index(max: usize) -> usize {
 ///
 /// # 行為
 /// - 依 [`get_and_increment_index`] 取得本輪起始站點，避免所有請求都從同一站開始。
+/// - 依 [`plan_attempt_order`] 略過熔斷中的站點、把慢站排到最後，每站最多試一次。
 /// - 成功時立即回傳標準化後的股價。
 /// - 失敗時累積各站點錯誤，全部失敗後再整體回傳。
 async fn fetch_stock_price_from_site_pool(
@@ -64,25 +70,24 @@ async fn fetch_stock_price_from_site_pool(
     sites: &[PriceSite],
     error_scope: &str,
 ) -> Result<FetchedStockPrice> {
-    let site_len = sites.len();
-    let mut errors = Vec::with_capacity(site_len);
+    let names = sites.iter().map(|site| site.name).collect::<Vec<_>>();
+    let order = plan_attempt_order(&names, get_and_increment_index(sites.len()));
+    let mut errors = Vec::with_capacity(order.len());
 
-    for _ in 0..site_len {
-        let current_site = get_and_increment_index(site_len);
-        let site = sites[current_site];
+    for idx in order {
+        let site = sites[idx];
         let started_at = Instant::now();
-        match (site.fetch)(stock_symbol).await {
+        let result = (site.fetch)(stock_symbol).await;
+        record_site_latency(site.name, started_at);
+        record_site_outcome(site.name, result.is_ok(), started_at);
+        match result {
             Ok(price) => {
-                record_site_latency(site.name, started_at);
                 return Ok(FetchedStockPrice {
                     price: price.normalize(),
                     site_name: site.name,
                 });
             }
-            Err(why) => {
-                record_site_latency(site.name, started_at);
-                errors.push(format!("{}: {why}", site.name));
-            }
+            Err(why) => errors.push(format!("{}: {why}", site.name)),
         }
     }
 
@@ -106,22 +111,19 @@ async fn fetch_stock_quotes_from_site_pool(
     sites: &[QuoteSite],
     error_scope: &str,
 ) -> Result<declare::StockQuotes> {
-    let site_len = sites.len();
-    let mut errors = Vec::with_capacity(site_len);
+    let names = sites.iter().map(|site| site.name).collect::<Vec<_>>();
+    let order = plan_attempt_order(&names, get_and_increment_index(sites.len()));
+    let mut errors = Vec::with_capacity(order.len());
 
-    for _ in 0..site_len {
-        let current_site = get_and_increment_index(site_len);
-        let site = sites[current_site];
+    for idx in order {
+        let site = sites[idx];
         let started_at = Instant::now();
-        match (site.fetch)(stock_symbol).await {
-            Ok(quotes) => {
-                record_site_latency(site.name, started_at);
-                return Ok(quotes);
-            }
-            Err(why) => {
-                record_site_latency(site.name, started_at);
-                errors.push(format!("{}: {why}", site.name));
-            }
+        let result = (site.fetch)(stock_symbol).await;
+        record_site_latency(site.name, started_at);
+        record_site_outcome(site.name, result.is_ok(), started_at);
+        match result {
+            Ok(quotes) => return Ok(quotes),
+            Err(why) => errors.push(format!("{}: {why}", site.name)),
         }
     }
 
@@ -154,9 +156,8 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 /// 此函數主要用於 HiStock 已有獨立背景排程時的備援抓價情境，
 /// 避免同一支股票同時由兩套流程對 HiStock 重複請求。
 ///
-/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, PcHome, BigGo。
-/// 實際站點定義直接重用 [`ALL_PRICE_SITES`]。
-/// 也就是說，最新成交價的一般抓價路徑與備援抓價路徑目前使用相同站點集合。
+/// 支援的站點包括：Fugle, NStock, CMoney, CnYes, PcHome, BigGo。
+/// 實際站點定義在 [`BACKUP_PRICE_SITES`]：比一般路徑少了 Yahoo，原因見該清單說明。
 ///
 /// # 參數
 /// * `stock_symbol` - 股票代碼 (例如: "2330")
@@ -164,16 +165,18 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 /// # 傳回值
 /// 成功時傳回 `Decimal` 型態的股價（已標準化），失敗時傳回錯誤描述。
 pub async fn fetch_stock_price_from_backup_sites(stock_symbol: &str) -> Result<Decimal> {
-    fetch_stock_price_from_site_pool(stock_symbol, &ALL_PRICE_SITES, "backup sites")
+    fetch_stock_price_from_site_pool(stock_symbol, &BACKUP_PRICE_SITES, "backup sites")
         .await
         .map(|result| result.price)
 }
 
 /// 從多個備援站點中輪詢獲取股票的最新成交價，並回傳命中的站點名稱。
+///
+/// 站點池同 [`fetch_stock_price_from_backup_sites`]。
 pub async fn fetch_stock_price_from_backup_sites_with_source(
     stock_symbol: &str,
 ) -> Result<FetchedStockPrice> {
-    fetch_stock_price_from_site_pool(stock_symbol, &ALL_PRICE_SITES, "backup sites").await
+    fetch_stock_price_from_site_pool(stock_symbol, &BACKUP_PRICE_SITES, "backup sites").await
 }
 
 /// 從多個遠端站點中輪詢獲取股票的完整報價資訊。

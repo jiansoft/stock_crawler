@@ -10,6 +10,7 @@
 use std::{future::Future, pin::Pin};
 
 use anyhow::Result;
+use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -219,6 +220,18 @@ pub(super) const ALL_PRICE_SITES: [PriceSite; 7] = [
     },
 ];
 
+/// 追蹤股票備援採集用的「最新成交價」站點池：[`ALL_PRICE_SITES`] 去掉 Yahoo。
+///
+/// Yahoo 的 `get_stock_price` 先讀共享即時快取，而備援採集要更新的正是這份快取；
+/// 輪到 Yahoo 時只會讀回原值（2026-10-07 正式機 7,846 次、avg 7ms），白白占掉一輪。
+pub(super) static BACKUP_PRICE_SITES: Lazy<Vec<PriceSite>> = Lazy::new(|| {
+    ALL_PRICE_SITES
+        .iter()
+        .copied()
+        .filter(|site| site.name != "Yahoo")
+        .collect()
+});
+
 /// 所有可用的「完整報價」站點池。
 ///
 /// 這條路徑只保留目前仍用於單股完整報價備援的站點，
@@ -260,3 +273,21 @@ pub(super) const ALL_QUOTE_SITES: [QuoteSite; 6] = [
         fetch: fetch_biggo_quotes,
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 備援站點池只少了 Yahoo，其他站點與順序不變。
+    #[test]
+    fn backup_price_sites_exclude_only_yahoo() {
+        let names = BACKUP_PRICE_SITES
+            .iter()
+            .map(|site| site.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            ["Fugle", "NStock", "CMoney", "CnYes", "PcHome", "BigGo"]
+        );
+    }
+}
