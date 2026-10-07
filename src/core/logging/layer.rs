@@ -62,7 +62,8 @@ impl<S: tracing::Subscriber> tracing_subscriber::layer::Layer<S> for FileLogLaye
         let log_line = {
             let mut line = collector.message.clone();
             for (k, v) in &collector.extra {
-                let _ = write!(line, " {k}={v}");
+                let _ = write!(line, " {k}=");
+                write_file_field(&mut line, k, v);
             }
             line
         };
@@ -89,6 +90,37 @@ impl<S: tracing::Subscriber> tracing_subscriber::layer::Layer<S> for FileLogLaye
             }
         }
     }
+}
+
+/// 檔案日誌中 `db.statement` 最多保留的字元數。
+///
+/// sqlx 的慢查詢事件會帶整段 SQL（估價重建約 8 KB），檔案日誌一行就被撐爆；
+/// 開頭已足以辨識是哪支查詢（另有 `summary` 欄位），完整 SQL 仍會送到 Seq。
+const FILE_DB_STATEMENT_MAX_CHARS: usize = 200;
+
+/// 把單一結構化欄位寫進檔案日誌行；`db.statement` 壓縮空白並截斷。
+fn write_file_field(line: &mut String, key: &str, value: &serde_json::Value) {
+    let serde_json::Value::String(text) = value else {
+        let _ = write!(line, "{value}");
+        return;
+    };
+    if key != "db.statement" {
+        let _ = write!(line, "{value}");
+        return;
+    }
+
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let total = compact.chars().count();
+    let shown = if total > FILE_DB_STATEMENT_MAX_CHARS {
+        let head = compact
+            .chars()
+            .take(FILE_DB_STATEMENT_MAX_CHARS)
+            .collect::<String>();
+        format!("{head}…（共 {total} 字）")
+    } else {
+        compact
+    };
+    let _ = write!(line, "{}", serde_json::Value::String(shown));
 }
 
 /// 從 tracing 事件收集所有欄位的訪客型別。
@@ -186,6 +218,33 @@ mod tests {
         tracing::subscriber::with_default(subscriber, emit);
 
         events.lock().expect("擷取結果應可取得").clone()
+    }
+
+    /// `db.statement` 在檔案日誌中壓縮空白並截斷，其他欄位照原樣輸出。
+    #[test]
+    fn file_field_truncates_db_statement_only() {
+        let sql = format!("\n\n  SELECT 1\n   FROM t {}", "x".repeat(400));
+        let mut line = String::new();
+        write_file_field(&mut line, "db.statement", &serde_json::Value::from(sql));
+        assert!(line.starts_with("\"SELECT 1 FROM t xxx"), "{line}");
+        assert!(line.contains("…（共 416 字）"), "{line}");
+        assert!(!line.contains("\\n"), "{line}");
+
+        let mut short = String::new();
+        write_file_field(
+            &mut short,
+            "db.statement",
+            &serde_json::Value::from("SELECT\n 1"),
+        );
+        assert_eq!(short, "\"SELECT 1\"");
+
+        let mut other = String::new();
+        write_file_field(&mut other, "summary", &serde_json::Value::from("a\nb"));
+        assert_eq!(other, "\"a\\nb\"");
+
+        let mut number = String::new();
+        write_file_field(&mut number, "elapsed_ms", &serde_json::Value::from(12));
+        assert_eq!(number, "12");
     }
 
     /// `message` 欄位進 message，其餘欄位保持型別進 extra。

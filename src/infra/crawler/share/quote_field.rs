@@ -86,11 +86,21 @@ pub(crate) fn parse_quote_decimal(
 pub(super) fn parse_soft_quote_decimal(field: &'static str, raw: &str) -> Decimal {
     match parse_quote_decimal(field, raw) {
         Ok(value) => value,
+        Err(why) if is_ex_rights_marker(raw) => {
+            // 除權息當天證交所在漲跌欄放「除權」「除息」，每天都會出現，屬預期情況。
+            tracing::debug!("quote field fallback to zero: {why}");
+            Decimal::ZERO
+        }
         Err(why) => {
             tracing::warn!("quote field fallback to zero: {why}");
             Decimal::ZERO
         }
     }
+}
+
+/// 是否為除權息當天的漲跌欄標記（`除權`、`除息`、`除權息`）。
+fn is_ex_rights_marker(raw: &str) -> bool {
+    matches!(raw.trim(), "除權" | "除息" | "除權息")
 }
 
 /// 檢查「被拒絕的資料列」比例是否仍在容忍範圍內。
@@ -167,6 +177,17 @@ mod tests {
     }
 
     /// 驗證拒絕比例門檻：0 筆或低於 10% 通過，超過 10% 整批失敗。
+    /// 除權息當天的漲跌欄標記視為 0（只記 debug），其他非數字仍視為 0。
+    #[test]
+    fn soft_quote_decimal_accepts_ex_rights_markers() {
+        for raw in ["除權", "除息", " 除權息 "] {
+            assert!(is_ex_rights_marker(raw), "{raw}");
+            assert_eq!(parse_soft_quote_decimal("漲跌", raw), Decimal::ZERO);
+        }
+        assert!(!is_ex_rights_marker("X"));
+        assert_eq!(parse_soft_quote_decimal("漲跌", "X"), Decimal::ZERO);
+    }
+
     #[test]
     fn rejected_rows_threshold_allows_minor_and_blocks_major() {
         assert!(ensure_rejected_rows_within_threshold("TWSE", 0, 100).is_ok());
