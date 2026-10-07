@@ -24,7 +24,7 @@ use self::health::{plan_attempt_order, record_site_outcome};
 pub use self::latency::flush_site_latency_stats;
 use self::latency::record_site_latency;
 use self::registry::{ALL_PRICE_SITES, ALL_QUOTE_SITES, BACKUP_PRICE_SITES, PriceSite, QuoteSite};
-use crate::core::declare;
+use crate::core::{declare, util::http};
 
 /// 標記採集站點的全局遊標。
 ///
@@ -63,6 +63,7 @@ fn get_and_increment_index(max: usize) -> usize {
 /// # 行為
 /// - 依 [`get_and_increment_index`] 取得本輪起始站點，避免所有請求都從同一站開始。
 /// - 依 [`plan_attempt_order`] 略過熔斷中的站點、把慢站排到最後，每站最多試一次。
+/// - 每站的請求以 [`http::fail_fast`] 執行：不重試、單次逾時 6 秒。
 /// - 成功時立即回傳標準化後的股價。
 /// - 失敗時累積各站點錯誤，全部失敗後再整體回傳。
 async fn fetch_stock_price_from_site_pool(
@@ -77,7 +78,8 @@ async fn fetch_stock_price_from_site_pool(
     for idx in order {
         let site = sites[idx];
         let started_at = Instant::now();
-        let result = (site.fetch)(stock_symbol).await;
+        // 即時抓價失敗就換下一站，不在單一站上做網路重試與 429 backoff。
+        let result = http::fail_fast((site.fetch)(stock_symbol)).await;
         record_site_latency(site.name, started_at);
         record_site_outcome(site.name, result.is_ok(), started_at);
         match result {
@@ -118,7 +120,8 @@ async fn fetch_stock_quotes_from_site_pool(
     for idx in order {
         let site = sites[idx];
         let started_at = Instant::now();
-        let result = (site.fetch)(stock_symbol).await;
+        // 即時抓價失敗就換下一站，不在單一站上做網路重試與 429 backoff。
+        let result = http::fail_fast((site.fetch)(stock_symbol)).await;
         record_site_latency(site.name, started_at);
         record_site_outcome(site.name, result.is_ok(), started_at);
         match result {
