@@ -3,11 +3,15 @@
 //! 全市場快取（HiStock、Yahoo 類股）輪到某檔股票前可能已經過了數十秒；這裡只針對 `Trace`
 //! 資料表內的股票，每 [`BACKUP_SNAPSHOT_REFRESH_INTERVAL`] 從備援站點補抓一次價格。
 
+use std::collections::HashSet;
+use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::Result;
+use chrono::{Local, NaiveDate};
 use futures::future;
+use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 use tokio::task;
 
@@ -21,6 +25,39 @@ use crate::{
 };
 
 const BACKUP_SNAPSHOT_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
+
+/// 今天已用 warn 記過備援抓價失敗的股票。
+static BACKUP_FAILURE_WARNED: Lazy<Mutex<DailySeen>> =
+    Lazy::new(|| Mutex::new(DailySeen::default()));
+
+/// 「每檔每天只記一次」的紀錄表；換日時清空。
+///
+/// 冷門股開盤後到第一筆成交前，每 15 秒輪詢都會失敗；每檔每天只需要一筆 warn，
+/// 其餘降為 debug。
+#[derive(Debug, Default)]
+struct DailySeen {
+    day: Option<NaiveDate>,
+    symbols: HashSet<String>,
+}
+
+impl DailySeen {
+    /// 這檔股票今天是否第一次出現（是的話記下來）。
+    fn first_today(&mut self, symbol: &str, today: NaiveDate) -> bool {
+        if self.day != Some(today) {
+            self.day = Some(today);
+            self.symbols.clear();
+        }
+        self.symbols.insert(symbol.to_string())
+    }
+}
+
+/// 這檔股票今天是否第一次備援抓價失敗；鎖中毒時一律視為第一次。
+fn first_backup_failure_today(symbol: &str) -> bool {
+    BACKUP_FAILURE_WARNED
+        .lock()
+        .map(|mut seen| seen.first_today(symbol, Local::now().date_naive()))
+        .unwrap_or(true)
+}
 
 /// 啟動被追蹤股票的備援採集背景任務。
 ///
@@ -166,7 +203,12 @@ fn apply_backup_price(symbol: String, fetched: Result<FetchedStockPrice>) -> boo
             // 備援站點全數失敗最常見的原因是冷門股開盤後尚未成交（各站回 `-`、null 或 0），
             // 屬預期狀況；主要報價仍由 HiStock／Yahoo 類股快取提供，因此只記 warn。
             // 2026-09-24 的 55 筆此類 error 全集中在 09:00～10:34，成交後即自行消失。
-            tracing::warn!("Failed to fetch backup price for {}: {:#}", symbol, why);
+            // 同一檔每天只記第一次 warn，之後的重複失敗記 debug。
+            if first_backup_failure_today(&symbol) {
+                tracing::warn!("Failed to fetch backup price for {}: {:#}", symbol, why);
+            } else {
+                tracing::debug!("Failed to fetch backup price for {}: {:#}", symbol, why);
+            }
             false
         }
     }
@@ -276,6 +318,21 @@ mod tests {
             Err(anyhow::anyhow!("all backup sites failed"))
         ));
         assert!(SHARE.get_stock_snapshot(SYMBOL_ZERO).is_none());
+    }
+
+    /// 備援抓價失敗每檔每天只回報一次，換日後重新計算。
+    #[test]
+    fn backup_failure_warns_once_per_symbol_per_day() {
+        let day1 = NaiveDate::from_ymd_opt(2001, 1, 2).expect("valid date");
+        let day2 = NaiveDate::from_ymd_opt(2001, 1, 3).expect("valid date");
+
+        let mut seen = DailySeen::default();
+
+        assert!(seen.first_today("79965", day1));
+        assert!(!seen.first_today("79965", day1));
+        assert!(seen.first_today("79966", day1));
+        assert!(seen.first_today("79965", day2));
+        assert!(!seen.first_today("79965", day2));
     }
 
     /// 沒有被追蹤的股票時不發任何請求，直接成功。

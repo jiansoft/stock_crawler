@@ -259,14 +259,13 @@ impl Logger {
                 continue;
             }
 
-            msg.push('\n');
-
+            // 每行已由 writeln! 換行，批次結尾不能再補 '\n'——舊版每次 flush 多一個空行，
+            // 正式機的 warn 日誌一半是空行（2026-10-07：652 行裡 326 行）。
             flush_log_buffer(&mut rotate, now, &mut msg);
         }
 
         if !msg.is_empty() {
             let now = Local::now();
-            msg.push('\n');
             flush_log_buffer(&mut rotate, now, &mut msg);
         }
     }
