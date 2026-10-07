@@ -371,6 +371,9 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         from: NaiveDate,
         to: NaiveDate,
     ) -> Result<Vec<(String, NaiveDate)>> {
+        // 掃描近十年全市場日K，靠 `DailyQuotes_symbol_Date_close_volume_idx`
+        // （含收盤價與成交量）走 index-only scan，見 etc/sql/daily_quote.sql。
+        //
         // 本專案沒有記錄減資與股票分割，只能從價格序列反推：單日跳動超過
         // [`ANOMALY_JUMP_THRESHOLD`]、且兩筆報價之間沒有對應的除權息或公司行動，即視為疑似異常。
         //
