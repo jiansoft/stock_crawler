@@ -198,8 +198,12 @@ INSERT INTO estimate (
     per_cheap, per_fair, per_expensive, update_time
 )
 WITH filtered_years AS (
-    -- 將傳入的逗號分隔年份字串轉為整數陣列，供後續所有 CTE 過濾使用，避免多次解析字串
-    SELECT CAST(string_to_array($2, ',') AS int[]) as years
+    -- 將傳入的逗號分隔年份字串轉為整數陣列，供後續所有 CTE 過濾使用，避免多次解析字串。
+    -- from_date 是最早年份的 1 月 1 日：daily_stats 以日期區間走 (stock_symbol, Date) 索引，
+    -- 只用 year = ANY 時會掃完全部 660 萬筆日K 再過濾（2026-10 實測掃描 2.4 秒 → 1.4 秒）。
+    SELECT p.years, make_date(m.min_year, 1, 1) AS from_date
+    FROM (SELECT CAST(string_to_array($2, ',') AS int[]) AS years) p
+    CROSS JOIN LATERAL (SELECT MIN(y) AS min_year FROM unnest(p.years) y) m
 ),
 stocks AS (
     -- 篩選出目前未停止上市的股票，獲取其代號、最新的近四季 EPS、每股淨值與所屬產業 ID
@@ -219,7 +223,7 @@ action_ranges AS (
     FROM corporate_action
     WHERE effective_date <= $1 AND share_ratio > 0
 ),
-daily_stats AS (
+daily_stats_raw AS (
     -- 核心統計 CTE：計算指定年份區間內，每支股票的價格位階與估值倍數位階
     SELECT
         dq."stock_symbol",
@@ -229,24 +233,28 @@ daily_stats AS (
         PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."LowestPrice" / COALESCE(ar.factor, 1)) FILTER (WHERE dq."ClosingPrice" > 0) AS p_cheap,
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."ClosingPrice" / COALESCE(ar.factor, 1)) FILTER (WHERE dq."ClosingPrice" > 0) AS p_fair,
         PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."HighestPrice" / COALESCE(ar.factor, 1)) FILTER (WHERE dq."ClosingPrice" > 0) AS p_expensive,
-        -- PBR 法：取歷史股價淨值比的 10% / 50% / 80% 位階（比率，不受分割影響）
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_low,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_mid,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_high,
+        -- PBR 法：取歷史股價淨值比的 10% / 50% / 80% 位階（比率，不受分割影響）。
+        -- 同一欄的三個位階用陣列版 PERCENTILE_CONT 一次算完，每組只排序一次（結果與分開算相同）。
+        PERCENTILE_CONT(ARRAY[0.1, 0.5, 0.8]) WITHIN GROUP (ORDER BY dq."price-to-book_ratio") FILTER (WHERE dq."price-to-book_ratio" > 0) AS pbr_pct,
         -- PER 法：取歷史本益比的 10% / 50% / 80% 位階。
         -- 本益比 > 100 代表當時獲利趨近於 0，不是有意義的評價倍數（台船 6 年中位數 2,050 倍），一律排除；
         -- pe_days 記錄有效天數，不足一年（250 個交易日）時 PER 法視為無效。
-        PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_low,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_mid,
-        PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_high,
+        PERCENTILE_CONT(ARRAY[0.1, 0.5, 0.8]) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_pct,
         COUNT(*) FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_days
     FROM "DailyQuotes" dq
     CROSS JOIN filtered_years fy
     LEFT JOIN action_ranges ar ON ar.stock_symbol = dq.stock_symbol
         AND dq."Date" < ar.to_date AND (ar.from_date IS NULL OR dq."Date" >= ar.from_date)
-    WHERE dq."Date" <= $1 AND dq."year" = ANY(fy.years)
+    WHERE dq."Date" >= fy.from_date AND dq."Date" <= $1 AND dq."year" = ANY(fy.years)
       AND ($4::varchar IS NULL OR dq.stock_symbol = $4)
     GROUP BY dq."stock_symbol"
+),
+daily_stats AS (
+    -- 把 PBR／PER 的位階陣列展開成個別欄位，後續 CTE 沿用原欄位名稱
+    SELECT stock_symbol, y_count, p_cheap, p_fair, p_expensive,
+        pbr_pct[1] AS pbr_low, pbr_pct[2] AS pbr_mid, pbr_pct[3] AS pbr_high,
+        pe_pct[1] AS pe_low, pe_pct[2] AS pe_mid, pe_pct[3] AS pe_high, pe_days
+    FROM daily_stats_raw
 ),
 adjusted_annual_dividend AS (
     -- 股利法用的年度配息：每筆股利依除權息日之後的分割／減資還原成現在的股數基準
