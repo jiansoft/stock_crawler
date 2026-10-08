@@ -77,6 +77,13 @@ create index "DailyQuotes_Date_include_symbol_idx"
 create unique index "DailyQuotes_stock_symbol_Date_uidx"
     on public."DailyQuotes" (stock_symbol asc, "Date" desc) include (year, "HighestPrice", "LowestPrice", "ClosingPrice", "price-to-book_ratio", "PriceEarningRatio");
 
+-- CAGR 異常跳動掃描（05:40，近十年全市場的逐檔前後收盤價比較）要讀成交量排除零量補值列；
+-- 上面的唯一索引沒有 TradingVolume，只能回表。這個窄索引讓它走 index-only scan：
+-- 2026-10-07 正式庫實測 7.0 秒 → 4.3 秒，索引 299 MB。正式庫以 CONCURRENTLY 建立：
+--   CREATE INDEX CONCURRENTLY "DailyQuotes_symbol_Date_close_volume_idx" ON public."DailyQuotes" (...);
+create index "DailyQuotes_symbol_Date_close_volume_idx"
+    on public."DailyQuotes" (stock_symbol asc, "Date" desc) include ("ClosingPrice", "TradingVolume");
+
 CREATE INDEX DailyQuotes_year_date_price_idx
     ON "DailyQuotes" ("year", "Date", "stock_symbol")
     INCLUDE ("LowestPrice", "ClosingPrice", "HighestPrice",
