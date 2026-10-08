@@ -9,9 +9,13 @@ use crate::core::declare::StockExchangeMarket;
 /// 上市櫃的異常價格閾值：漲跌幅上限 10% 再加 0.5% 容差。
 const PRICE_LIMIT_TOLERANCE: Decimal = Decimal::from_parts(105, 0, 0, false, 3);
 
-/// 興櫃的異常價格閾值：興櫃無漲跌幅限制，只擋明顯錯誤的值
-/// （例如 HiStock 偶發回報 0.08 而昨收 227.5）。
-const EMERGING_TOLERANCE: Decimal = Decimal::from_parts(5, 0, 0, false, 1);
+/// 無漲跌幅限制（興櫃、國外成分 ETF）時的倍數區間：成交價須介於基準的 1/3～3 倍。
+///
+/// 只擋明顯錯誤的值（例如 HiStock 偶發回報 0.08 而昨收 227.5）。原本用 ±50%，
+/// 但興櫃的昨收是前一日加權均價，冷門股爆量時偏離更大：2733 維格 2026-10-05
+/// 參考價 8.61、成交 14～16（+70%～+86%），被 ±50% 擋了一整天、追蹤完全失效。
+/// 倍數區間對上漲與下跌對稱（×3 與 ÷3），不像 ±50% 下跌可到 −50%、上漲卻只到 +50%。
+const UNLIMITED_BAND_FACTOR: Decimal = Decimal::from_parts(3, 0, 0, false, 0);
 use super::share::Share;
 
 impl Share {
@@ -69,7 +73,7 @@ impl Share {
     ///
     /// `price <= 0`（尚未成交）一律回傳 `false`；若兩個基準都沒有有效值，無法比對，視為有效。
     ///
-    /// 興櫃股票（依股票主檔的市場別判斷）沒有漲跌幅限制，改用 [`EMERGING_TOLERANCE`]，見
+    /// 興櫃股票（依股票主檔的市場別判斷）沒有漲跌幅限制，改用 [`UNLIMITED_BAND_FACTOR`]，見
     /// [`Self::is_valid_price_for_market`]。
     pub fn is_valid_price(
         &self,
@@ -86,10 +90,10 @@ impl Share {
     /// 來源本身已知市場別時使用（例如 Yahoo 興櫃類股），可涵蓋尚未寫入股票主檔的新興櫃股。
     /// 興櫃無漲跌幅限制，昨收又是前一日加權平均價，單日偏離 10% 以上很常見
     /// （2026-09-24 有 12 檔興櫃被誤濾，如 7934 昨收 552.86、成交 630）；
-    /// 只以 [`EMERGING_TOLERANCE`] 擋明顯錯誤的值。
+    /// 只以 [`UNLIMITED_BAND_FACTOR`] 擋明顯錯誤的值。
     ///
     /// 當天有來源提供漲跌幅限制時以它為準（[`Self::set_price_limits`]）：有漲跌停價就照區間判斷，
-    /// 沒有限制的（國外成分 ETF）改用 [`EMERGING_TOLERANCE`]。固定的 10.5% 門檻會誤濾
+    /// 沒有限制的（國外成分 ETF）改用 [`UNLIMITED_BAND_FACTOR`]。固定的 10.5% 門檻會誤濾
     /// 槓桿 ETF（00631L 的漲跌幅是 ±20%）與沒有漲跌幅限制的 ETF（00715L 2026-10-02 上漲 11.3%）。
     pub fn is_valid_price_for_market(
         &self,
@@ -124,13 +128,14 @@ impl Share {
             return true;
         }
 
-        let tolerance = if emerging {
-            EMERGING_TOLERANCE
-        } else {
-            PRICE_LIMIT_TOLERANCE
-        };
         // 使用乘法比對比除法運算更安全、且能避免 Decimal 除法時可能產生的精度截斷
-        baselines.any(|last_close| (price - last_close).abs() <= last_close * tolerance)
+        if emerging {
+            return baselines.any(|last_close| {
+                price * UNLIMITED_BAND_FACTOR >= last_close
+                    && price <= last_close * UNLIMITED_BAND_FACTOR
+            });
+        }
+        baselines.any(|last_close| (price - last_close).abs() <= last_close * PRICE_LIMIT_TOLERANCE)
     }
 
     /// 記錄各股票當天的漲跌幅限制（`date` 為台北時間的取得日期）；`Unknown` 不記錄。
@@ -497,7 +502,7 @@ mod tests {
         assert!(!share.is_valid_price("2330", dec!(1200), dec!(990)));
     }
 
-    /// 興櫃沒有漲跌幅限制：主檔標為興櫃時放寬到 ±50%，但仍擋明顯錯誤的值。
+    /// 興櫃沒有漲跌幅限制：主檔標為興櫃時放寬到基準的 1/3～3 倍，但仍擋明顯錯誤的值。
     #[test]
     fn is_valid_price_relaxes_tolerance_for_emerging_stocks() {
         use crate::domain::registry::entity::Stock;
@@ -512,6 +517,29 @@ mod tests {
         );
         assert!(share.is_valid_price("4925", dec!(133.5), dec!(117.09)));
         assert!(!share.is_valid_price("4925", dec!(1.2), dec!(117.09)));
+    }
+
+    /// 2733 維格 2026-10-05：參考價 8.61、成交 14～16，是真實行情不是錯價；
+    /// 區間邊界（剛好 3 倍、1/3）算有效，超出才擋。
+    #[test]
+    fn emerging_band_accepts_large_real_moves_and_rejects_garbage() {
+        use crate::domain::registry::entity::Stock;
+
+        let share = Share::new();
+        share.stocks.write().unwrap().insert(
+            "2733".to_string(),
+            Stock::register("2733".to_string(), "維格".to_string(), 5, 1),
+        );
+
+        assert!(share.is_valid_price("2733", dec!(14.75), dec!(8.61)));
+        assert!(share.is_valid_price("2733", dec!(16.05), dec!(8.61)));
+        assert!(share.is_valid_price("2733", dec!(25.83), dec!(8.61)));
+        assert!(share.is_valid_price("2733", dec!(2.87), dec!(8.61)));
+        assert!(!share.is_valid_price("2733", dec!(25.84), dec!(8.61)));
+        assert!(!share.is_valid_price("2733", dec!(2.86), dec!(8.61)));
+        // 興櫃類股（呼叫端指定市場別）走同一條規則。
+        assert!(share.is_valid_price_for_market("79967", dec!(14.75), dec!(8.61), true));
+        assert!(!share.is_valid_price_for_market("79967", dec!(0.08), dec!(227.5), true));
     }
 
     /// 當天有漲跌停價時照區間判斷：槓桿 ETF 的 ±20% 不被固定 10.5% 誤濾，超出區間仍擋下。
