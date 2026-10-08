@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    future::Future,
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -32,6 +33,32 @@ const FORBIDDEN_ALERT_COOLDOWN: Duration = Duration::from_secs(60 * 60 * 12);
 ///
 /// 正式機平常 p99 約 0.4 秒、最慢約 2.4 秒，請求逾時為 15 秒；5 秒代表來源站明顯變慢。
 const SLOW_REQUEST_WARN_MS: u64 = 5_000;
+
+/// 快速失敗模式下單次請求的逾時。
+///
+/// 一般請求沿用用戶端的 15 秒逾時；即時報價有其他站可以換，等太久反而拖慢整輪輪詢。
+/// 2026-10-07 正式機各站 p99 約 4.2～5.6 秒（PcHome 9.6 秒），6 秒只截掉明顯異常的尾巴。
+const FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(6);
+
+tokio::task_local! {
+    /// 存在時代表目前的請求處於快速失敗模式，見 [`fail_fast`]。
+    static FAIL_FAST: ();
+}
+
+/// 在快速失敗模式下執行 `fut`：其中的 HTTP 請求不做網路重試與 429 重試，
+/// 單次逾時縮短為 [`FAIL_FAST_TIMEOUT`]，失敗只記 WARN。
+///
+/// 給「有其他來源可以換」的呼叫端使用（即時報價站點池）。一般批次請求的重試是為了
+/// 撐過來源站的短暫異常，但站點池換下一站就好；網路重試的 2/4/8 秒 backoff 會讓
+/// 單一請求拖到 15 秒以上，2026-10-07 PcHome p99 9.6 秒、`http.failed` 12 筆即為此。
+pub async fn fail_fast<F: Future>(fut: F) -> F::Output {
+    FAIL_FAST.scope((), fut).await
+}
+
+/// 目前是否處於快速失敗模式。
+fn is_fail_fast() -> bool {
+    FAIL_FAST.try_with(|_| ()).is_ok()
+}
 
 /// 各網域最近一次發送 403 告警的時間。
 ///
@@ -70,6 +97,8 @@ fn should_alert_forbidden(url: &str) -> bool {
 /// 以指定方法、URL、headers、body 發送 HTTP 請求，含雙層重試：
 /// - **網路層**（TCP 失敗）：最多 `MAX_NETWORK_RETRIES` 次，2^n 秒 backoff。
 /// - **頻率限制**（HTTP 429）：最多 `MAX_RATE_LIMIT_RETRIES` 次，5/15/30s + 最多 2s jitter。
+///
+/// 在 [`fail_fast`] 範圍內兩層都不重試，單次逾時改為 [`FAIL_FAST_TIMEOUT`]。
 pub(super) async fn send(
     method: Method,
     url: &str,
@@ -115,6 +144,15 @@ pub(super) async fn send_with_client(
     // ── G1: 雙層重試計數器 ─────────────────────────────────────────────────
     let mut network_attempt = 0u32;
     let mut rate_limit_attempt = 0u32;
+    let fail_fast = is_fail_fast();
+    let (max_network_attempts, max_rate_limit_retries) = if fail_fast {
+        (1, 0)
+    } else {
+        (MAX_NETWORK_RETRIES, MAX_RATE_LIMIT_RETRIES)
+    };
+    if fail_fast {
+        rb = rb.timeout(FAIL_FAST_TIMEOUT);
+    }
 
     loop {
         // 複製 RequestBuilder 以供重試使用。
@@ -171,8 +209,19 @@ pub(super) async fn send_with_client(
 
                 // ── 429 Too Many Requests：exponential backoff retry ───────
                 if rate_limited {
+                    if fail_fast {
+                        // 快速失敗模式由呼叫端換下一個來源，不在這裡等 backoff。
+                        tracing::warn!(
+                            url = %safe_url,
+                            method = method.as_str(),
+                            status = status.as_u16(),
+                            elapsed_ms,
+                            "http.rate_limited.fail_fast{request_detail_suffix}"
+                        );
+                        return Err(anyhow!("Rate limited (429) at {}", safe_url));
+                    }
                     rate_limit_attempt += 1;
-                    if rate_limit_attempt <= MAX_RATE_LIMIT_RETRIES {
+                    if rate_limit_attempt <= max_rate_limit_retries {
                         let delay = rate_limit_backoff(rate_limit_attempt);
                         tracing::warn!(
                             url = %safe_url,
@@ -225,8 +274,20 @@ pub(super) async fn send_with_client(
                 // 因此必須在這裡就先遮蔽。
                 let err_str = redact_secrets(&format!("{why:?}"));
                 let safe_url = redact_url(url);
+                // 快速失敗模式不重試；呼叫端會改用其他來源，所以只記 WARN。
+                if fail_fast {
+                    tracing::warn!(
+                        url = %safe_url,
+                        attempt = network_attempt,
+                        error = %err_str,
+                        elapsed_ms,
+                        "http.failed.fail_fast{request_detail_suffix}"
+                    );
+                    return Err(anyhow!("Failed to send {}: {err_str}", safe_url));
+                }
+
                 // 尚可重試的暫時錯誤使用 WARN，只有耗盡次數才以 ERROR 標示請求最終失敗。
-                if network_attempt >= MAX_NETWORK_RETRIES {
+                if network_attempt >= max_network_attempts {
                     tracing::error!(
                         url = %safe_url,
                         attempt = network_attempt,
@@ -283,6 +344,98 @@ mod tests {
     use super::*;
 
     /// 同網域的 403 在冷卻期內只告警一次，不同網域彼此不受影響。
+    /// 測試用的 reqwest 用戶端。
+    ///
+    /// 專案的 reqwest 不帶預設 crypto provider，建 `Client` 前必須先安裝；
+    /// 單獨執行某個測試時（CI 逐一重跑失敗測試）沒有其他測試先幫忙裝好。
+    fn test_client() -> Client {
+        crate::core::util::ensure_rustls_crypto_provider();
+        Client::new()
+    }
+
+    /// 只回一次 429 的本機 HTTP 伺服器，回傳網址。
+    async fn spawn_rate_limited_server() -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local listener");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                    )
+                    .await;
+            }
+        });
+        format!("http://{addr}/quote")
+    }
+
+    /// 快速失敗模式只在 scope 內生效。
+    #[tokio::test]
+    async fn fail_fast_flag_is_scoped() {
+        assert!(!is_fail_fast());
+        assert!(fail_fast(async { is_fail_fast() }).await);
+        assert!(!is_fail_fast());
+    }
+
+    /// 快速失敗模式遇到 429 直接回錯誤，不等 5 秒以上的 backoff。
+    #[tokio::test]
+    async fn fail_fast_returns_on_rate_limit_without_backoff() {
+        let url = spawn_rate_limited_server().await;
+        let client = test_client();
+
+        let started = Instant::now();
+        let result = fail_fast(send_with_client(
+            &client,
+            Method::GET,
+            &url,
+            None,
+            None::<fn(RequestBuilder) -> RequestBuilder>,
+            None,
+        ))
+        .await;
+
+        let err = result.expect_err("429 應回錯誤");
+        assert!(err.to_string().contains("429"), "{err:#}");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "不應等待 backoff"
+        );
+    }
+
+    /// 快速失敗模式連線失敗時不重試，不會出現 2/4/8 秒的 backoff。
+    #[tokio::test]
+    async fn fail_fast_does_not_retry_network_errors() {
+        // 先綁再放掉，取得一個目前沒有人監聽的本機埠。
+        let addr = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .expect("reserve local port");
+        let url = format!("http://{addr}/quote");
+        let client = test_client();
+
+        let started = Instant::now();
+        let result = fail_fast(send_with_client(
+            &client,
+            Method::GET,
+            &url,
+            None,
+            None::<fn(RequestBuilder) -> RequestBuilder>,
+            None,
+        ))
+        .await;
+
+        // Windows 對本機被拒的連線約 2 秒才回報，所以不以單次耗時判斷；
+        // 一般模式會重試 3 次並在中間睡 2＋4 秒，錯誤訊息也會帶重試次數。
+        let err = result.expect_err("連線失敗應回錯誤");
+        assert!(!err.to_string().contains("network retries"), "{err:#}");
+        assert!(started.elapsed() < Duration::from_secs(5), "不應重試");
+    }
+
     #[test]
     fn should_alert_forbidden_throttles_per_host() {
         let host = "should-alert-forbidden-test.example";
