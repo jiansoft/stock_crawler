@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 use super::super::class_quote;
 use crate::{
     app::event::trace::price_tasks as trace_price_tasks,
-    infra::cache::{RealtimeSnapshot, SHARE},
+    infra::cache::{RealtimeSnapshot, SHARE, report_abnormal_price},
     infra::crawler::yahoo::{YahooClassCategory, YahooClassExchange},
 };
 
@@ -71,12 +71,11 @@ pub(super) fn apply_category_snapshots(
                 if !is_valid {
                     // 價格 0 是尚未成交（冷門股、特別股開盤後常見），不是異常，只略過不記錄
                     if price > Decimal::ZERO {
-                        tracing::warn!(
-                            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                            symbol,
+                        report_abnormal_price(
+                            &symbol,
                             price,
                             snapshot.last_close,
-                            snapshot.source_site
+                            &snapshot.source_site,
                         );
                     }
                     continue;

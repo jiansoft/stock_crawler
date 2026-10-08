@@ -4,6 +4,8 @@ use std::{cmp::max, sync::Once};
 
 /// 原子變數相關工具。
 pub mod atomic;
+/// 「每個鍵每天只記一次」的紀錄表。
+pub mod daily_seen;
 /// 日期時間相關工具。
 pub mod datetime;
 /// 執行期 diagnostics 與程序狀態工具。

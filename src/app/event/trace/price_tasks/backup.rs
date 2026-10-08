@@ -3,13 +3,12 @@
 //! 全市場快取（HiStock、Yahoo 類股）輪到某檔股票前可能已經過了數十秒；這裡只針對 `Trace`
 //! 資料表內的股票，每 [`BACKUP_SNAPSHOT_REFRESH_INTERVAL`] 從備援站點補抓一次價格。
 
-use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::{Local, NaiveDate};
+use chrono::Local;
 use futures::future;
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
@@ -20,8 +19,11 @@ use super::{
     wait_for_interval_or_stop,
 };
 use crate::{
-    app::event::trace::stock_price, core::declare, core::util::atomic::decrement_atomic_usize,
-    infra::cache::SHARE, infra::crawler::FetchedStockPrice,
+    app::event::trace::stock_price,
+    core::declare,
+    core::util::{atomic::decrement_atomic_usize, daily_seen::DailySeen},
+    infra::cache::{SHARE, report_abnormal_price},
+    infra::crawler::FetchedStockPrice,
 };
 
 const BACKUP_SNAPSHOT_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
@@ -29,27 +31,6 @@ const BACKUP_SNAPSHOT_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 /// 今天已用 warn 記過備援抓價失敗的股票。
 static BACKUP_FAILURE_WARNED: Lazy<Mutex<DailySeen>> =
     Lazy::new(|| Mutex::new(DailySeen::default()));
-
-/// 「每檔每天只記一次」的紀錄表；換日時清空。
-///
-/// 冷門股開盤後到第一筆成交前，每 15 秒輪詢都會失敗；每檔每天只需要一筆 warn，
-/// 其餘降為 debug。
-#[derive(Debug, Default)]
-struct DailySeen {
-    day: Option<NaiveDate>,
-    symbols: HashSet<String>,
-}
-
-impl DailySeen {
-    /// 這檔股票今天是否第一次出現（是的話記下來）。
-    fn first_today(&mut self, symbol: &str, today: NaiveDate) -> bool {
-        if self.day != Some(today) {
-            self.day = Some(today);
-            self.symbols.clear();
-        }
-        self.symbols.insert(symbol.to_string())
-    }
-}
 
 /// 這檔股票今天是否第一次備援抓價失敗；鎖中毒時一律視為第一次。
 fn first_backup_failure_today(symbol: &str) -> bool {
@@ -166,13 +147,7 @@ fn apply_backup_price(symbol: String, fetched: Result<FetchedStockPrice>) -> boo
                 .map(|s| s.last_close)
                 .unwrap_or(Decimal::ZERO);
             if !SHARE.is_valid_price(&symbol, price, last_close) {
-                tracing::warn!(
-                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                    symbol,
-                    price,
-                    last_close,
-                    source_site
-                );
+                report_abnormal_price(&symbol, price, last_close, &source_site);
                 return false;
             }
             let source_changed = previous_snapshot
@@ -318,21 +293,6 @@ mod tests {
             Err(anyhow::anyhow!("all backup sites failed"))
         ));
         assert!(SHARE.get_stock_snapshot(SYMBOL_ZERO).is_none());
-    }
-
-    /// 備援抓價失敗每檔每天只回報一次，換日後重新計算。
-    #[test]
-    fn backup_failure_warns_once_per_symbol_per_day() {
-        let day1 = NaiveDate::from_ymd_opt(2001, 1, 2).expect("valid date");
-        let day2 = NaiveDate::from_ymd_opt(2001, 1, 3).expect("valid date");
-
-        let mut seen = DailySeen::default();
-
-        assert!(seen.first_today("79965", day1));
-        assert!(!seen.first_today("79965", day1));
-        assert!(seen.first_today("79966", day1));
-        assert!(seen.first_today("79965", day2));
-        assert!(!seen.first_today("79965", day2));
     }
 
     /// 沒有被追蹤的股票時不發任何請求，直接成功。
