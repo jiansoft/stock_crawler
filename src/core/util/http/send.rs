@@ -344,6 +344,15 @@ mod tests {
     use super::*;
 
     /// 同網域的 403 在冷卻期內只告警一次，不同網域彼此不受影響。
+    /// 測試用的 reqwest 用戶端。
+    ///
+    /// 專案的 reqwest 不帶預設 crypto provider，建 `Client` 前必須先安裝；
+    /// 單獨執行某個測試時（CI 逐一重跑失敗測試）沒有其他測試先幫忙裝好。
+    fn test_client() -> Client {
+        crate::core::util::ensure_rustls_crypto_provider();
+        Client::new()
+    }
+
     /// 只回一次 429 的本機 HTTP 伺服器，回傳網址。
     async fn spawn_rate_limited_server() -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -378,7 +387,7 @@ mod tests {
     #[tokio::test]
     async fn fail_fast_returns_on_rate_limit_without_backoff() {
         let url = spawn_rate_limited_server().await;
-        let client = Client::new();
+        let client = test_client();
 
         let started = Instant::now();
         let result = fail_fast(send_with_client(
@@ -407,7 +416,7 @@ mod tests {
             .and_then(|listener| listener.local_addr())
             .expect("reserve local port");
         let url = format!("http://{addr}/quote");
-        let client = Client::new();
+        let client = test_client();
 
         let started = Instant::now();
         let result = fail_fast(send_with_client(
