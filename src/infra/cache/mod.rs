@@ -20,4 +20,5 @@ mod ttl;
 pub use loader::CacheLoadReport;
 pub use realtime::{PriceLimit, RealtimeSnapshot};
 pub use share::{SHARE, Share};
+pub use snapshot::report_abnormal_price;
 pub use ttl::{TTL, TtlCacheInner};

@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use chrono::{Local, NaiveDate, Utc};
+use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
 use super::realtime::{PriceLimit, RealtimeSnapshot};
-use crate::core::declare::StockExchangeMarket;
+use crate::core::{declare::StockExchangeMarket, util::daily_seen::DailySeen};
 
 /// 上市櫃的異常價格閾值：漲跌幅上限 10% 再加 0.5% 容差。
 const PRICE_LIMIT_TOLERANCE: Decimal = Decimal::from_parts(105, 0, 0, false, 3);
@@ -13,6 +15,38 @@ const PRICE_LIMIT_TOLERANCE: Decimal = Decimal::from_parts(105, 0, 0, false, 3);
 /// （例如 HiStock 偶發回報 0.08 而昨收 227.5）。
 const EMERGING_TOLERANCE: Decimal = Decimal::from_parts(5, 0, 0, false, 1);
 use super::share::Share;
+
+/// 今天已用 warn 記過異常價格的「股票＋站點」。
+static ABNORMAL_PRICE_WARNED: Lazy<Mutex<DailySeen>> =
+    Lazy::new(|| Mutex::new(DailySeen::default()));
+
+/// 記錄一筆被過濾的異常價格；同一檔同一站每天只記第一筆 warn，其餘記 debug。
+///
+/// 站點出錯通常會持續一段時間（10-06 開盤 HiStock 同一檔 68 次），
+/// 第一筆已足以定位，重複的只會淹沒其他警告。
+pub fn report_abnormal_price(symbol: &str, price: Decimal, last_close: Decimal, site: &str) {
+    let first = ABNORMAL_PRICE_WARNED
+        .lock()
+        .map(|mut seen| seen.first_today(&format!("{symbol}|{site}"), Local::now().date_naive()))
+        .unwrap_or(true);
+    if first {
+        tracing::warn!(
+            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}（同檔同站今天不再重複記錄）",
+            symbol,
+            price,
+            last_close,
+            site
+        );
+    } else {
+        tracing::debug!(
+            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+            symbol,
+            price,
+            last_close,
+            site
+        );
+    }
+}
 
 impl Share {
     /// 取得資料庫最後交易日的收盤價；快取沒有或非正數時回傳 `None`。
@@ -30,7 +64,7 @@ impl Share {
     }
 
     /// 取得當日除權息或恢復買賣參考價；當天沒有這類事件時為 `None`。
-    fn get_ex_rights_reference_price(&self, symbol: &str) -> Option<Decimal> {
+    pub(crate) fn get_ex_rights_reference_price(&self, symbol: &str) -> Option<Decimal> {
         self.ex_rights_reference_prices
             .read()
             .ok()
@@ -172,12 +206,11 @@ impl Share {
                 if !self.is_valid_price(symbol, new_snap.price, new_snap.last_close) {
                     // 價格 0 是尚未成交，不是異常，只過濾不記錄，避免開盤前後洗版
                     if new_snap.price > Decimal::ZERO {
-                        tracing::warn!(
-                            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
+                        report_abnormal_price(
                             symbol,
                             new_snap.price,
                             new_snap.last_close,
-                            new_snap.source_site
+                            &new_snap.source_site,
                         );
                     }
                     new_snap.price = Decimal::ZERO;
@@ -211,12 +244,7 @@ impl Share {
                 .map(|s| s.last_close)
                 .unwrap_or(Decimal::ZERO);
             if !self.is_valid_price(&symbol, price, last_close) {
-                tracing::warn!(
-                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}",
-                    symbol,
-                    price,
-                    last_close
-                );
+                report_abnormal_price(&symbol, price, last_close, "");
                 return;
             }
             if let Some(snapshot) = cache.get_mut(&symbol) {
@@ -243,13 +271,7 @@ impl Share {
                 .map(|s| s.last_close)
                 .unwrap_or(Decimal::ZERO);
             if !self.is_valid_price(&symbol, price, last_close) {
-                tracing::warn!(
-                    "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-                    symbol,
-                    price,
-                    last_close,
-                    source_site
-                );
+                report_abnormal_price(&symbol, price, last_close, &source_site);
                 return;
             }
             if let Some(snapshot) = cache.get_mut(&symbol) {
@@ -352,6 +374,30 @@ mod tests {
         assert_eq!(updated.name, "台積電");
         assert_eq!(updated.source_site, "HiStock");
         assert_eq!(updated.change, Decimal::new(5, 0));
+    }
+
+    /// 同一檔同一站的異常價格重複出現時，每一輪都要過濾並保留舊值
+    /// （第一次記 warn、之後記 debug，只影響日誌層級）。
+    #[test]
+    fn repeated_abnormal_price_keeps_previous_snapshot() {
+        let share = Share::new();
+        let mut good = RealtimeSnapshot::new("79968".to_string(), dec!(78.5));
+        good.last_close = dec!(75.4);
+        good.source_site = "HiStock".to_string();
+        share.set_stock_snapshots(HashMap::from([("79968".to_string(), good)]));
+
+        for _ in 0..2 {
+            let mut bad = RealtimeSnapshot::new("79968".to_string(), dec!(33));
+            bad.last_close = dec!(75.4);
+            bad.source_site = "HiStock".to_string();
+            share.set_stock_snapshots(HashMap::from([("79968".to_string(), bad)]));
+
+            assert_eq!(share.get_stock_snapshot("79968").unwrap().price, dec!(78.5));
+        }
+
+        share.set_stock_snapshot_price_with_source("79968".to_string(), dec!(1.08), "CnYes");
+        share.set_stock_snapshot_price("79968".to_string(), dec!(1.08));
+        assert_eq!(share.get_stock_snapshot("79968").unwrap().price, dec!(78.5));
     }
 
     /// `all_stock_snapshots` 必須把快取內每一筆都完整複製出來（供全市場排行

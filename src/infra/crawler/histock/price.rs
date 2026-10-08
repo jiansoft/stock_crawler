@@ -12,6 +12,7 @@
 //! 4. **嚴格解析**：不容忍損壞或格式錯誤的報價，解析失敗會傳回錯誤而非默默變 0。
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -30,6 +31,7 @@ use crate::{
     core::util::{
         self,
         atomic::decrement_atomic_usize,
+        daily_seen::DailySeen,
         diagnostics::{
             ProcessMemoryStats, TaskRuntimeStatus, read_process_memory_stats, trim_allocator_memory,
         },
@@ -72,6 +74,43 @@ static COMPLETED_CYCLES: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 
 /// 用於解決 Single-flight (重複抓取) 的互斥鎖
 static FETCH_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+/// 今天已用 warn 記過「列資料前後矛盾」的股票。
+static INCONSISTENT_ROW_WARNED: Lazy<std::sync::Mutex<DailySeen>> =
+    Lazy::new(|| std::sync::Mutex::new(DailySeen::default()));
+
+/// 「成交價 − 漲跌」與昨收之間允許的誤差：HiStock 漲跌到小數第二位，
+/// 正常列兩者應完全相等，這裡只留一點四捨五入空間。
+const CHANGE_TOLERANCE: Decimal = Decimal::from_parts(11, 0, 0, false, 3);
+
+/// 前後矛盾的列至少要有這麼多列，才考慮整批捨棄。
+const DIRTY_BATCH_MIN_ROWS: usize = 20;
+
+/// 前後矛盾的列超過總列數的 1/N 就整批捨棄（N = 50，即 2%）。
+const DIRTY_BATCH_RATIO_DIVISOR: usize = 50;
+
+/// 排行頁太多列前後矛盾，整批不採用。
+///
+/// 背景迴圈遇到這個錯誤只記 warn：這是站點資料錯亂，不是程式或網路故障。
+#[derive(Debug)]
+struct DirtyBatch {
+    /// 前後矛盾的列數。
+    inconsistent: usize,
+    /// 有效快照總數。
+    total: usize,
+}
+
+impl fmt::Display for DirtyBatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "HiStock 排行頁 {}/{} 列前後矛盾，整批捨棄",
+            self.inconsistent, self.total
+        )
+    }
+}
+
+impl std::error::Error for DirtyBatch {}
 
 /// HiStock 來源最近一輪抓取的執行摘要。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -310,6 +349,20 @@ pub fn start_caching_task() {
                         elapsed_ms,);
                     */
                 }
+                Err(e) if e.downcast_ref::<DirtyBatch>().is_some() => {
+                    // 錯亂通常會連續好幾輪（每 5 秒一輪），每天只記第一筆 warn。
+                    let first = INCONSISTENT_ROW_WARNED
+                        .lock()
+                        .map(|mut seen| {
+                            seen.first_today("*dirty-batch*", chrono::Local::now().date_naive())
+                        })
+                        .unwrap_or(true);
+                    if first {
+                        tracing::warn!("{}（今天不再重複記錄）", e);
+                    } else {
+                        tracing::debug!("{}", e);
+                    }
+                }
                 Err(e) => {
                     tracing::error!("HiStock 快取更新失敗: {:?}", e);
                 }
@@ -434,7 +487,110 @@ fn parse_rank_html(body: &str) -> Result<HiStockFetchResult> {
 async fn fetch_all_from_rank() -> Result<HiStockFetchResult> {
     let url = format!("https://{host}/stock/rank.aspx?p=all", host = HOST);
     let body = util::http::get(&url, None).await?;
-    parse_rank_html(&body)
+    let mut result = parse_rank_html(&body)?;
+    screen_inconsistent_rows(&mut result, |symbol| {
+        SHARE.get_ex_rights_reference_price(symbol)
+    })?;
+    Ok(result)
+}
+
+/// 檢查單一列的欄位是否彼此吻合；吻合回傳 `None`，否則回傳原因。
+///
+/// HiStock 開盤後前 20 分鐘偶爾把別檔的成交價放進這一列（10-06 有 12 檔、
+/// 10-08 的 1301 抓到 33 而實際 78.5）。錯得離譜的會被
+/// [`Share::is_valid_price`](crate::infra::cache::Share::is_valid_price) 擋下，
+/// 但錯在漲跌停範圍內的會直接寫進快取，可能誤觸高低標警報；
+/// 同一列的最高最低與漲跌是獨立欄位，拿來交叉比對就能抓出這類錯列。
+///
+/// # 規則
+/// - 尚未成交（價格為 0）不檢查，交給後續流程略過。
+/// - 有最高最低時，成交價必須落在兩者之間。
+/// - 有昨收時，「成交價 − 漲跌」必須等於昨收；除權息或減資恢復買賣當天，
+///   漲跌以參考價為準，所以等於 `reference_price` 也算吻合。
+fn row_inconsistency(
+    snapshot: &RealtimeSnapshot,
+    reference_price: Option<Decimal>,
+) -> Option<&'static str> {
+    let price = snapshot.price;
+    if price <= Decimal::ZERO {
+        return None;
+    }
+
+    if snapshot.high > Decimal::ZERO
+        && snapshot.low > Decimal::ZERO
+        && (price < snapshot.low || price > snapshot.high)
+    {
+        return Some("成交價不在最高最低之間");
+    }
+
+    if snapshot.last_close > Decimal::ZERO {
+        let implied_close = price - snapshot.change;
+        let matches = |base: Decimal| (implied_close - base).abs() <= CHANGE_TOLERANCE;
+        if !matches(snapshot.last_close) && !reference_price.is_some_and(matches) {
+            return Some("成交價減漲跌不等於昨收");
+        }
+    }
+
+    None
+}
+
+/// 剔除前後矛盾的列；矛盾的列太多時整批捨棄。
+///
+/// 剔除的列把價格設為 0，[`Share::set_stock_snapshots`](crate::infra::cache::Share::set_stock_snapshots)
+/// 會改用快取裡的舊值，不會讓這檔股票從快取消失。
+///
+/// # 回傳
+/// - `Ok(n)`：剔除了 `n` 列，其餘照常使用。
+/// - `Err(DirtyBatch)`：矛盾的列超過 `max(20, 總數 2%)`，代表整頁錯亂，這一輪不更新快取。
+fn screen_inconsistent_rows(
+    result: &mut HiStockFetchResult,
+    reference_price: impl Fn(&str) -> Option<Decimal>,
+) -> Result<usize> {
+    let inconsistent: Vec<(String, &'static str)> = result
+        .snapshots
+        .iter()
+        .filter_map(|(symbol, snapshot)| {
+            row_inconsistency(snapshot, reference_price(symbol))
+                .map(|reason| (symbol.clone(), reason))
+        })
+        .collect();
+
+    let total = result.snapshots.len();
+    let limit = DIRTY_BATCH_MIN_ROWS.max(total / DIRTY_BATCH_RATIO_DIVISOR);
+    if inconsistent.len() > limit {
+        return Err(DirtyBatch {
+            inconsistent: inconsistent.len(),
+            total,
+        }
+        .into());
+    }
+
+    let today = chrono::Local::now().date_naive();
+    for (symbol, reason) in &inconsistent {
+        if let Some(snapshot) = result.snapshots.get_mut(symbol) {
+            let first = INCONSISTENT_ROW_WARNED
+                .lock()
+                .map(|mut seen| seen.first_today(symbol, today))
+                .unwrap_or(true);
+            if first {
+                tracing::warn!(
+                    "HiStock 列資料前後矛盾，略過: 股票 {} {}（成交 {}、漲跌 {}、昨收 {}、高 {}、低 {}；同檔今天不再重複記錄）",
+                    symbol,
+                    reason,
+                    snapshot.price,
+                    snapshot.change,
+                    snapshot.last_close,
+                    snapshot.high,
+                    snapshot.low
+                );
+            } else {
+                tracing::debug!("HiStock 列資料前後矛盾，略過: 股票 {} {}", symbol, reason);
+            }
+            snapshot.price = Decimal::ZERO;
+        }
+    }
+
+    Ok(inconsistent.len())
 }
 
 /// 取得指定股票的即時快照。
@@ -675,6 +831,158 @@ mod tests {
         let flat = &result.snapshots["6584"];
         assert_eq!(flat.change, Decimal::ZERO);
         assert_eq!(flat.change_range, Decimal::ZERO);
+    }
+
+    /// 建立一列成交 78.5、漲 3.1、昨收 75.4、高 79、低 76 的正常快照。
+    fn consistent_snapshot(symbol: &str) -> RealtimeSnapshot {
+        let mut snapshot = RealtimeSnapshot::new(symbol.to_string(), dec!(78.5));
+        snapshot.change = dec!(3.1);
+        snapshot.last_close = dec!(75.4);
+        snapshot.high = dec!(79);
+        snapshot.low = dec!(76);
+        snapshot
+    }
+
+    /// 欄位彼此吻合的列不會被判為矛盾；尚未成交的列不檢查。
+    #[test]
+    fn row_inconsistency_accepts_consistent_and_untraded_rows() {
+        assert_eq!(row_inconsistency(&consistent_snapshot("1301"), None), None);
+
+        let mut untraded = consistent_snapshot("1301");
+        untraded.price = Decimal::ZERO;
+        assert_eq!(row_inconsistency(&untraded, None), None);
+
+        // 平盤列：漲跌「--」解析為 0，成交價等於昨收。
+        let mut flat = consistent_snapshot("6584");
+        flat.price = dec!(75.4);
+        flat.change = Decimal::ZERO;
+        flat.low = dec!(75);
+        assert_eq!(row_inconsistency(&flat, None), None);
+
+        // 沒有最高最低與昨收（例如剛開盤欄位還是「--」）時無從比對，視為吻合。
+        let mut sparse = RealtimeSnapshot::new("2486".to_string(), dec!(236));
+        sparse.change = dec!(-4);
+        assert_eq!(row_inconsistency(&sparse, None), None);
+    }
+
+    /// 10-08 開盤實例：1301 成交欄變成 33，但昨收與最高最低仍是自己的。
+    #[test]
+    fn row_inconsistency_rejects_price_outside_high_low() {
+        let mut snapshot = consistent_snapshot("1301");
+        snapshot.price = dec!(33);
+        assert_eq!(
+            row_inconsistency(&snapshot, None),
+            Some("成交價不在最高最低之間")
+        );
+    }
+
+    /// 成交價在高低之間但與漲跌對不上（錯在漲跌停範圍內）也要抓出來。
+    #[test]
+    fn row_inconsistency_rejects_price_that_disagrees_with_change() {
+        let mut snapshot = consistent_snapshot("1301");
+        snapshot.price = dec!(77);
+        assert_eq!(
+            row_inconsistency(&snapshot, None),
+            Some("成交價減漲跌不等於昨收")
+        );
+    }
+
+    /// 除權息當天漲跌以參考價為準：成交價減漲跌等於參考價也算吻合。
+    #[test]
+    fn row_inconsistency_accepts_change_against_reference_price() {
+        let mut snapshot = consistent_snapshot("2886");
+        snapshot.price = dec!(40);
+        snapshot.change = dec!(0.5);
+        snapshot.last_close = dec!(41);
+        snapshot.high = dec!(40.5);
+        snapshot.low = dec!(39.2);
+
+        assert_eq!(
+            row_inconsistency(&snapshot, None),
+            Some("成交價減漲跌不等於昨收")
+        );
+        assert_eq!(row_inconsistency(&snapshot, Some(dec!(39.5))), None);
+    }
+
+    fn fetch_result_with(snapshots: Vec<RealtimeSnapshot>) -> HiStockFetchResult {
+        let row_count = snapshots.len();
+        HiStockFetchResult {
+            snapshots: snapshots
+                .into_iter()
+                .map(|snapshot| (snapshot.symbol.clone(), snapshot))
+                .collect(),
+            body_bytes: 0,
+            row_count,
+        }
+    }
+
+    /// 少數矛盾列只把該列價格歸零（交給快取保留舊值），其餘照常使用。
+    #[test]
+    fn screen_inconsistent_rows_zeroes_only_bad_rows() {
+        let mut bad = consistent_snapshot("79971");
+        bad.price = dec!(33);
+        let mut result = fetch_result_with(vec![
+            consistent_snapshot("79970"),
+            bad,
+            consistent_snapshot("79972"),
+        ]);
+
+        let removed = screen_inconsistent_rows(&mut result, |_| None).unwrap();
+
+        assert_eq!(removed, 1);
+        assert_eq!(result.snapshots.len(), 3);
+        assert_eq!(result.snapshots["79971"].price, Decimal::ZERO);
+        assert_eq!(result.snapshots["79970"].price, dec!(78.5));
+        assert_eq!(result.snapshots["79972"].price, dec!(78.5));
+    }
+
+    /// 矛盾列超過 max(20, 2%) 代表整頁錯亂，整批捨棄。
+    #[test]
+    fn screen_inconsistent_rows_rejects_dirty_batch() {
+        let snapshots = (0..30)
+            .map(|i| {
+                let mut snapshot = consistent_snapshot(&format!("7990{i:02}"));
+                if i < 21 {
+                    snapshot.price = dec!(33);
+                }
+                snapshot
+            })
+            .collect();
+        let mut result = fetch_result_with(snapshots);
+
+        let error = screen_inconsistent_rows(&mut result, |_| None).unwrap_err();
+
+        let dirty = error.downcast_ref::<DirtyBatch>().expect("DirtyBatch 錯誤");
+        assert_eq!(dirty.inconsistent, 21);
+        assert_eq!(dirty.total, 30);
+        assert!(error.to_string().contains("21/30"));
+    }
+
+    /// 剛好 20 列矛盾還在容許範圍內，只剔除那幾列。
+    #[test]
+    fn screen_inconsistent_rows_tolerates_up_to_limit() {
+        let snapshots = (0..30)
+            .map(|i| {
+                let mut snapshot = consistent_snapshot(&format!("7990{i:02}"));
+                if i < 20 {
+                    snapshot.price = dec!(33);
+                }
+                snapshot
+            })
+            .collect();
+        let mut result = fetch_result_with(snapshots);
+
+        assert_eq!(screen_inconsistent_rows(&mut result, |_| None).unwrap(), 20);
+    }
+
+    /// 真實頁面形狀的 fixture 不應有任何列被判為矛盾。
+    #[test]
+    fn screen_inconsistent_rows_keeps_fixture_page_intact() {
+        const FIXTURE: &str = include_str!("testdata/rank_page.html");
+        let mut result = parse_rank_html(FIXTURE).unwrap();
+
+        assert_eq!(screen_inconsistent_rows(&mut result, |_| None).unwrap(), 0);
+        assert!(result.snapshots.values().all(|s| s.price > Decimal::ZERO));
     }
 
     /// 整頁完全沒有可用列（例如 HiStock 改版換了表格 id）時必須報錯，
