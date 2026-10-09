@@ -167,3 +167,27 @@ pub async fn scan_announcements() -> Result<()> {
 
     Ok(())
 }
+
+/// 判斷代號是否為 ETN（指數投資證券，代號為 `02` 開頭的六碼）。
+///
+/// ETN 的配息不收錄在 `dividend` 資料表（表中沒有任何 ETN），Yahoo 也沒有 ETN 的
+/// 股利政策頁。除權息公告掃描與交易所核對都要先排除：留著只會變成「無法判定期別」
+/// 或「資料庫找不到」的假警告，並多一次注定失敗的 Yahoo 請求（020035 在核對流程曾每天記 2 筆）。
+fn is_exchange_traded_note(symbol: &str) -> bool {
+    symbol.len() == 6 && symbol.starts_with("02") && symbol.bytes().all(|b| b.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_exchange_traded_note() {
+        assert!(is_exchange_traded_note("020035"));
+        assert!(is_exchange_traded_note("020001"));
+        assert!(!is_exchange_traded_note("0050"));
+        assert!(!is_exchange_traded_note("00400A"));
+        assert!(!is_exchange_traded_note("2890"));
+        assert!(!is_exchange_traded_note("02003B"));
+    }
+}
