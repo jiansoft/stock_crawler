@@ -112,6 +112,8 @@ pub async fn execute(start: NaiveDate, end: NaiveDate, apply: bool) -> Result<Re
         official.extend(twse::ex_right_result::visit(from, to).await?);
         official.extend(tpex::ex_right_result::visit(from, to).await?);
     }
+    // ETN 的配息不收錄在 dividend，留著只會每天被報成「資料庫找不到」。
+    official.retain(|event| !super::is_exchange_traded_note(&event.stock_symbol));
 
     let repo = PgDividendRepository::new();
     // 跨年發放（12 月除息、隔年 1 月發放）的資料列在下一個發放年度，前後各多讀一年。
