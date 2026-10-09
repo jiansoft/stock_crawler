@@ -39,6 +39,58 @@ const REFRESH_SKIP_TTL_MAX_SECONDS: usize = 60 * 60 * 24 * 4;
 /// 超出的股票沒有寫旗標，下一輪自然會再排到，避免單輪拖到 22:00 之後的排程。
 const MAX_FETCHES_PER_RUN: usize = 900;
 
+/// 單輪股利補抓的查詢額度與統計。
+///
+/// 已有跳過旗標的股票不經過這裡；需要查詢的股票逐一呼叫 [`Self::try_fetch`]，
+/// 超過 [`MAX_FETCHES_PER_RUN`] 的記為延後。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RefreshRun {
+    /// 本輪候選股票數。
+    candidates: usize,
+    /// 實際查詢 Yahoo 的股票數。
+    fetched: usize,
+    /// 額度用完而延到下一輪的股票數。
+    deferred: usize,
+}
+
+impl RefreshRun {
+    fn new(candidates: usize) -> Self {
+        Self {
+            candidates,
+            fetched: 0,
+            deferred: 0,
+        }
+    }
+
+    /// 占用一次查詢額度；額度已用完時記為延後並回傳 `false`。
+    fn try_fetch(&mut self) -> bool {
+        if self.fetched >= MAX_FETCHES_PER_RUN {
+            self.deferred += 1;
+            return false;
+        }
+        self.fetched += 1;
+        true
+    }
+
+    /// 因跳過旗標未到期而略過的股票數。
+    fn skipped(&self) -> usize {
+        self.candidates - self.fetched - self.deferred
+    }
+}
+
+impl std::fmt::Display for RefreshRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "candidates={} fetched={} skipped={} deferred={}",
+            self.candidates,
+            self.fetched,
+            self.skipped(),
+            self.deferred
+        )
+    }
+}
+
 /// 定期檢查上市櫃股票的近期股利，補齊缺漏或新增的配息。
 ///
 /// 此流程會先建立兩份資料：
@@ -73,9 +125,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
     }
 
     tracing::info!("本次殖利率的採集需收集 {} 家", stock_symbols.len());
-    let candidate_count = stock_symbols.len();
-    let mut fetched_count = 0usize;
-    let mut deferred_count = 0usize;
+    let mut run = RefreshRun::new(stock_symbols.len());
     for stock_symbol in stock_symbols {
         // Yahoo 股利回補使用獨立快取命名空間，避免和 Goodinfo 盈餘分配率快取互相影響。
         let cache_key = make_cache_key(&stock_symbol);
@@ -94,12 +144,10 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
             continue;
         }
 
-        if fetched_count >= MAX_FETCHES_PER_RUN {
+        if !run.try_fetch() {
             // 本輪額度已用完；不寫旗標，下一輪會再排到這檔。
-            deferred_count += 1;
             continue;
         }
-        fetched_count += 1;
 
         // 先寫入跳過旗標；即使單檔處理失敗，也避免排程下一輪立刻重試同一來源。
         let ttl_seconds = refresh_skip_ttl_seconds();
@@ -157,13 +205,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
         tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
     }
 
-    tracing::info!(
-        "殖利率採集完成 candidates={} fetched={} skipped={} deferred={}",
-        candidate_count,
-        fetched_count,
-        candidate_count - fetched_count - deferred_count,
-        deferred_count
-    );
+    tracing::info!("殖利率採集完成 {run}");
 
     Ok(())
 }
@@ -483,6 +525,38 @@ mod tests {
             let ttl = refresh_skip_ttl_seconds();
             assert!((REFRESH_SKIP_TTL_MIN_SECONDS..=REFRESH_SKIP_TTL_MAX_SECONDS).contains(&ttl));
         }
+    }
+
+    #[test]
+    fn refresh_run_defers_after_budget_is_used_up() {
+        let mut run = RefreshRun::new(MAX_FETCHES_PER_RUN + 150);
+        // 其中 100 檔已有跳過旗標，不會呼叫 try_fetch。
+        let to_fetch = MAX_FETCHES_PER_RUN + 50;
+        let accepted = (0..to_fetch).filter(|_| run.try_fetch()).count();
+
+        assert_eq!(accepted, MAX_FETCHES_PER_RUN);
+        assert_eq!(run.fetched, MAX_FETCHES_PER_RUN);
+        assert_eq!(run.deferred, to_fetch - MAX_FETCHES_PER_RUN);
+        assert_eq!(run.skipped(), 100);
+        assert_eq!(
+            run.to_string(),
+            format!(
+                "candidates={} fetched={} skipped=100 deferred={}",
+                MAX_FETCHES_PER_RUN + 150,
+                MAX_FETCHES_PER_RUN,
+                to_fetch - MAX_FETCHES_PER_RUN
+            )
+        );
+    }
+
+    #[test]
+    fn refresh_run_within_budget_defers_nothing() {
+        let mut run = RefreshRun::new(10);
+        assert!((0..4).all(|_| run.try_fetch()));
+        assert_eq!(
+            run.to_string(),
+            "candidates=10 fetched=4 skipped=6 deferred=0"
+        );
     }
 
     #[test]
