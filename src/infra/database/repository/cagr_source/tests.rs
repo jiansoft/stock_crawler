@@ -384,6 +384,15 @@ async fn test_anomaly_detection_ignores_jumps_explained_by_dividends() {
     // 01-08 僅跳 3.3%，未達 30% 門檻。
     assert_eq!(mine, vec![day(5)]);
 
+    // 分桶併發掃描與不分桶的單一語句結果必須相同。
+    let mut unbucketed = fetch_anomaly_bucket(day(2), day(8), (1, 0))
+        .await
+        .expect("不分桶掃描應成功");
+    let mut bucketed = events.clone();
+    unbucketed.sort();
+    bucketed.sort();
+    assert_eq!(bucketed, unbucketed);
+
     // 事件帶日期回傳，呼叫端才能依期間各自判定：縮小區間後該事件應消失。
     let narrowed = repo
         .fetch_anomaly_events(day(5), day(8))

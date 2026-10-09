@@ -371,107 +371,138 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         from: NaiveDate,
         to: NaiveDate,
     ) -> Result<Vec<(String, NaiveDate)>> {
-        // 掃描近十年全市場日K，靠 `DailyQuotes_symbol_Date_close_volume_idx`
-        // （含收盤價與成交量）走 index-only scan，見 etc/sql/daily_quote.sql。
-        //
-        // 本專案沒有記錄減資與股票分割，只能從價格序列反推：單日跳動超過
-        // [`ANOMALY_JUMP_THRESHOLD`]、且兩筆報價之間沒有對應的除權息或公司行動，即視為疑似異常。
-        //
-        // 「之間」是指前一筆報價之後、這一筆（含）之前：事件生效日不一定剛好有報價
-        // （1529 2018-12-22 補班日缺報價、2314 2016-09-28 颱風休市），只比對同一天會誤判。
-        // 上市（櫃）後前 [`LISTING_FREE_DAYS`] 筆報價沒有漲跌幅限制，期間的大幅跳動是真實價格，
-        // 也不算異常（6637 2024-06-19、7810 2025-12-24）。
-        //
-        // 只看有成交的報價：「缺漏補齊」在停牌期間寫入沿用前收的零量列，那不是成交價。
-        // 1538 2024-12-30 減資恢復買賣當天沒有成交、補值列還是停牌前價格，
-        // 若把它當成前一筆，跳動會落在隔天而對不上生效日。
-        //
-        // 回傳帶日期的事件（而非去重後的代號），呼叫端才能把單次查詢的結果依日期
-        // 切分到八個期間各自判定。
-        //
-        // 比對除權息日時刻意用 `to_char(...)` 把日期轉成字串去比對 varchar 欄位，
-        // 而不是把 varchar 轉成 date —— 後者會在髒值上整批失敗。
-        let sql = r#"
-            WITH px AS (
-                SELECT stock_symbol,
-                       "Date",
-                       "ClosingPrice",
-                       LAG("ClosingPrice") OVER (
-                           PARTITION BY stock_symbol ORDER BY "Date"
-                       ) AS prev_price,
-                       LAG("Date") OVER (
-                           PARTITION BY stock_symbol ORDER BY "Date"
-                       ) AS prev_date
-                FROM "DailyQuotes"
-                WHERE "Date" BETWEEN $1 AND $2 AND "ClosingPrice" > 0 AND "TradingVolume" > 0
-            ),
-            jumps AS (
-                SELECT stock_symbol, "Date", prev_date
-                FROM px
-                WHERE prev_price IS NOT NULL
-                  AND prev_price > 0
-                  AND ABS("ClosingPrice" / prev_price - 1) > $3::numeric
-            )
-            SELECT j.stock_symbol, j."Date"
-            FROM jumps j
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM dividend d
-                WHERE d.security_code = j.stock_symbol
-                  AND (
-                        (d."ex-dividend_date1" ~ '^\d{4}-\d{2}-\d{2}$'
-                         AND d."ex-dividend_date1" > to_char(j.prev_date, 'YYYY-MM-DD')
-                         AND d."ex-dividend_date1" <= to_char(j."Date", 'YYYY-MM-DD'))
-                     OR (d."ex-dividend_date2" ~ '^\d{4}-\d{2}-\d{2}$'
-                         AND d."ex-dividend_date2" > to_char(j.prev_date, 'YYYY-MM-DD')
-                         AND d."ex-dividend_date2" <= to_char(j."Date", 'YYYY-MM-DD'))
-                  )
-            )
-            -- 已登錄的分割／減資是「已建模」的事件，模擬時會正確調整股數，
-            -- 不該再標記為異常——否則旗標會一直亮著，使用者無從分辨哪些
-            -- 才是真正未處理的問題。
-            AND NOT EXISTS (
-                SELECT 1
-                FROM corporate_action ca
-                WHERE ca.stock_symbol = j.stock_symbol
-                  AND ca.effective_date > j.prev_date
-                  AND ca.effective_date <= j."Date"
-            )
-            -- 上市（櫃）初期：這一筆之前的有效報價不足 LISTING_FREE_DAYS 筆。
-            AND (
-                SELECT count(*)
-                FROM (
-                    SELECT 1
-                    FROM "DailyQuotes" e
-                    WHERE e.stock_symbol = j.stock_symbol
-                      AND e."Date" > '1970-01-01'
-                      AND e."Date" < j."Date"
-                      AND e."ClosingPrice" > 0
-                      AND e."TradingVolume" > 0
-                    LIMIT $4
-                ) earlier
-            ) >= $4
-        "#;
-
-        let rows = sqlx::query(sql)
-            .bind(from)
-            .bind(to)
-            .bind(ANOMALY_JUMP_THRESHOLD)
-            .bind(LISTING_FREE_DAYS)
-            .fetch_all(database::get_connection())
+        // 依股票代號雜湊分成 ANOMALY_BUCKETS 桶同時跑：瓶頸是近十年約 478 萬筆日K 的
+        // 開窗計算，單一語句只用得到一顆 CPU（2026-10-09 正式庫實測 4.8～5.0 秒 →
+        // 4 桶 2.1 秒，結果逐筆相同；8 桶不再變快，每桶仍要掃過整個索引）。
+        let buckets = (0..ANOMALY_BUCKETS)
+            .map(|bucket| fetch_anomaly_bucket(from, to, (ANOMALY_BUCKETS, bucket)));
+        let results = futures::future::try_join_all(buckets)
             .await
             .context("Failed to detect anomaly events")?;
 
-        rows.into_iter()
-            .map(|row| {
-                Ok((
-                    row.try_get::<String, _>("stock_symbol")?,
-                    row.try_get::<NaiveDate, _>("Date")?,
-                ))
-            })
-            .collect()
+        Ok(results.into_iter().flatten().collect())
     }
 }
+
+/// 疑似異常跳動掃描同時執行的桶數（各佔一條連線，連線池上限 20）。
+const ANOMALY_BUCKETS: i32 = 4;
+
+/// 掃描 `from`～`to` 的疑似異常跳動，只處理代號雜湊落在第 `bucket` 桶的股票；
+/// `(1, 0)` 為不分桶。SQL 說明見 [`ANOMALY_EVENTS_SQL`]。
+async fn fetch_anomaly_bucket(
+    from: NaiveDate,
+    to: NaiveDate,
+    (bucket_count, bucket): (i32, i32),
+) -> Result<Vec<(String, NaiveDate)>> {
+    let rows = sqlx::query(ANOMALY_EVENTS_SQL)
+        .bind(from)
+        .bind(to)
+        .bind(ANOMALY_JUMP_THRESHOLD)
+        .bind(LISTING_FREE_DAYS)
+        .bind(bucket_count)
+        .bind(bucket)
+        .fetch_all(database::get_connection())
+        .await
+        .with_context(|| {
+            format!("Failed to detect anomaly events in bucket {bucket}/{bucket_count}")
+        })?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<String, _>("stock_symbol")?,
+                row.try_get::<NaiveDate, _>("Date")?,
+            ))
+        })
+        .collect()
+}
+
+/// 掃描近十年全市場日K，靠 `DailyQuotes_symbol_Date_close_volume_idx`
+/// （含收盤價與成交量）走 index-only scan，見 etc/sql/daily_quote.sql。
+///
+/// 本專案沒有記錄減資與股票分割，只能從價格序列反推：單日跳動超過
+/// [`ANOMALY_JUMP_THRESHOLD`]、且兩筆報價之間沒有對應的除權息或公司行動，即視為疑似異常。
+///
+/// 「之間」是指前一筆報價之後、這一筆（含）之前：事件生效日不一定剛好有報價
+/// （1529 2018-12-22 補班日缺報價、2314 2016-09-28 颱風休市），只比對同一天會誤判。
+/// 上市（櫃）後前 [`LISTING_FREE_DAYS`] 筆報價沒有漲跌幅限制，期間的大幅跳動是真實價格，
+/// 也不算異常（6637 2024-06-19、7810 2025-12-24）。
+///
+/// 只看有成交的報價：「缺漏補齊」在停牌期間寫入沿用前收的零量列，那不是成交價。
+/// 1538 2024-12-30 減資恢復買賣當天沒有成交、補值列還是停牌前價格，
+/// 若把它當成前一筆，跳動會落在隔天而對不上生效日。
+///
+/// 回傳帶日期的事件（而非去重後的代號），呼叫端才能把單次查詢的結果依日期
+/// 切分到八個期間各自判定。
+///
+/// 比對除權息日時刻意用 `to_char(...)` 把日期轉成字串去比對 varchar 欄位，
+/// 而不是把 varchar 轉成 date —— 後者會在髒值上整批失敗。
+///
+/// 參數：`$1`～`$2` 掃描期間、`$3` 跳動門檻、`$4` 上市初期豁免筆數、
+/// `$5` 桶數、`$6` 桶號（`$5 = 1` 為不分桶）。
+const ANOMALY_EVENTS_SQL: &str = r#"
+    WITH px AS (
+        SELECT stock_symbol,
+               "Date",
+               "ClosingPrice",
+               -- 依索引的 (stock_symbol, "Date" DESC) 順序開窗，LEAD 即前一個交易日，
+               -- 省掉每檔重新排序。
+               LEAD("ClosingPrice") OVER w AS prev_price,
+               LEAD("Date") OVER w AS prev_date
+        FROM "DailyQuotes"
+        WHERE "Date" BETWEEN $1 AND $2 AND "ClosingPrice" > 0 AND "TradingVolume" > 0
+          -- 分桶：轉 bigint 再取絕對值，避免 hashtext 回傳 int 最小值時 abs() 溢位。
+          AND ($5::int = 1 OR abs(hashtext(stock_symbol)::bigint) % $5::int = $6::int)
+        WINDOW w AS (PARTITION BY stock_symbol ORDER BY "Date" DESC)
+    ),
+    jumps AS (
+        SELECT stock_symbol, "Date", prev_date
+        FROM px
+        WHERE prev_price IS NOT NULL
+          AND prev_price > 0
+          -- 以乘法比較，避免對每一筆日K做 numeric 除法。
+          AND ABS("ClosingPrice" - prev_price) > $3::numeric * prev_price
+    )
+    SELECT j.stock_symbol, j."Date"
+    FROM jumps j
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM dividend d
+        WHERE d.security_code = j.stock_symbol
+          AND (
+                (d."ex-dividend_date1" ~ '^\d{4}-\d{2}-\d{2}$'
+                 AND d."ex-dividend_date1" > to_char(j.prev_date, 'YYYY-MM-DD')
+                 AND d."ex-dividend_date1" <= to_char(j."Date", 'YYYY-MM-DD'))
+             OR (d."ex-dividend_date2" ~ '^\d{4}-\d{2}-\d{2}$'
+                 AND d."ex-dividend_date2" > to_char(j.prev_date, 'YYYY-MM-DD')
+                 AND d."ex-dividend_date2" <= to_char(j."Date", 'YYYY-MM-DD'))
+          )
+    )
+    -- 已登錄的分割／減資是「已建模」的事件，模擬時會正確調整股數，
+    -- 不該再標記為異常——否則旗標會一直亮著，使用者無從分辨哪些
+    -- 才是真正未處理的問題。
+    AND NOT EXISTS (
+        SELECT 1
+        FROM corporate_action ca
+        WHERE ca.stock_symbol = j.stock_symbol
+          AND ca.effective_date > j.prev_date
+          AND ca.effective_date <= j."Date"
+    )
+    -- 上市（櫃）初期：這一筆之前的有效報價不足 LISTING_FREE_DAYS 筆。
+    AND (
+        SELECT count(*)
+        FROM (
+            SELECT 1
+            FROM "DailyQuotes" e
+            WHERE e.stock_symbol = j.stock_symbol
+              AND e."Date" > '1970-01-01'
+              AND e."Date" < j."Date"
+              AND e."ClosingPrice" > 0
+              AND e."TradingVolume" > 0
+            LIMIT $4
+        ) earlier
+    ) >= $4
+"#;
 
 /// 解析除權息日字串。
 ///
