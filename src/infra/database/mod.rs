@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use sqlx::{
-    PgPool, Postgres, Transaction,
+    ConnectOptions, PgPool, Postgres, Transaction,
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 
@@ -23,6 +23,20 @@ pub mod repository;
 /// - 之後所有資料庫操作都透過 [`get_connection`] 取用同一個連線池，
 ///   而不是每次查詢都重新建立連線（建立連線非常昂貴）。
 static POSTGRES: Lazy<Arc<OnceLock<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceLock::new()));
+
+/// 全市場批次查詢專用的 PostgreSQL 連線池單例，見 [`get_batch_connection`]。
+static BATCH_POSTGRES: Lazy<Arc<OnceLock<PostgresSQL>>> = Lazy::new(|| Arc::new(OnceLock::new()));
+
+/// 一般連線池的慢查詢警告門檻（sqlx 預設值）。
+const SLOW_STATEMENT_THRESHOLD: Duration = Duration::from_secs(1);
+/// 批次連線池的慢查詢警告門檻。
+///
+/// 全市場估價重建與 CAGR 異常掃描已分桶平行，每桶本來就要 2～3 秒；
+/// 用 1 秒門檻會每天固定多出 4 筆假警告（2026-10-03～10 共 21 筆，占全部慢查詢六成）。
+/// 5 秒仍能抓到明顯退化（分桶前單一語句就要 5～8 秒）。
+const BATCH_SLOW_STATEMENT_THRESHOLD: Duration = Duration::from_secs(5);
+/// 批次連線池的連線上限：兩支批次查詢各 4 桶，同時跑也不必排隊。
+const BATCH_MAX_CONNECTIONS: u32 = 8;
 
 /// PostgreSQL 連線池封裝。
 ///
@@ -116,6 +130,27 @@ impl PostgresSQL {
     /// 第一次執行查詢時才會實際建立連線；因此帳密、主機等設定錯誤
     /// 要到第一次查詢才會暴露，健康檢查請使用 [`ping`]。
     pub fn new() -> PostgresSQL {
+        let pool_options = PgPoolOptions::new()
+            .max_connections(20) // 個人專案降低連接數
+            .min_connections(2)
+            .acquire_timeout(Duration::from_secs(5));
+        Self::build(pool_options, SLOW_STATEMENT_THRESHOLD)
+    }
+
+    /// 建立全市場批次查詢專用的連線池，見 [`get_batch_connection`]。
+    ///
+    /// 與 [`Self::new`] 只差在慢查詢門檻較高、連線數較少且平時不保留連線；
+    /// 取得連線最多等 60 秒，因為佔用者本身就是數秒級的查詢。
+    fn new_batch() -> PostgresSQL {
+        let pool_options = PgPoolOptions::new()
+            .max_connections(BATCH_MAX_CONNECTIONS)
+            .min_connections(0)
+            .acquire_timeout(Duration::from_secs(60));
+        Self::build(pool_options, BATCH_SLOW_STATEMENT_THRESHOLD)
+    }
+
+    /// 依連線數設定與慢查詢門檻建立連線池；兩個連線池共用連線參數與測試防護。
+    fn build(pool_options: PgPoolOptions, slow_statement_threshold: Duration) -> PostgresSQL {
         // 逐欄設定連線參數；application_name 方便在 pg_stat_activity 識別本程式的連線。
         let options = PgConnectOptions::new()
             .host(&config::SETTINGS.postgresql.host)
@@ -123,14 +158,12 @@ impl PostgresSQL {
             .username(&config::SETTINGS.postgresql.user)
             .password(&config::SETTINGS.postgresql.password)
             .database(&config::SETTINGS.postgresql.db)
-            .application_name("stock_crawler_rust");
+            .application_name("stock_crawler_rust")
+            .log_slow_statements(log::LevelFilter::Warn, slow_statement_threshold);
 
         #[allow(unused_mut)] // 測試組建（cfg(test)）會再覆寫 pool 選項
-        let mut pool_options = PgPoolOptions::new()
+        let mut pool_options = pool_options
             .max_lifetime(Some(Duration::from_secs(1800))) // 30 分鐘
-            .max_connections(20) // 個人專案降低連接數
-            .min_connections(2)
-            .acquire_timeout(Duration::from_secs(5))
             .idle_timeout(Some(Duration::from_secs(600))); // 10 分鐘
 
         // 測試組建：本 pool 是 process 級單例，但每個 `#[tokio::test]` 都會建立
@@ -222,6 +255,14 @@ fn get_postgresql() -> &'static PostgresSQL {
 /// 取得全域 PostgreSQL 連線池。
 pub fn get_connection() -> &'static PgPool {
     get_postgresql().pool()
+}
+
+/// 取得全市場批次查詢專用的連線池。
+///
+/// 只給已分桶平行、單桶就要數秒的全市場查詢使用（估價重建、CAGR 異常掃描），
+/// 慢查詢警告門檻為 [`BATCH_SLOW_STATEMENT_THRESHOLD`]；其他查詢一律用 [`get_connection`]。
+pub fn get_batch_connection() -> &'static PgPool {
+    BATCH_POSTGRES.get_or_init(PostgresSQL::new_batch).pool()
 }
 
 /// 從全域 PostgreSQL 連線池建立 transaction。

@@ -184,7 +184,7 @@ impl Estimate {
     }
 }
 
-/// 全市場重建時同時執行的桶數（各佔一條連線，連線池上限 20）。
+/// 全市場重建時同時執行的桶數（各佔批次連線池一條連線）。
 const ESTIMATE_BUCKETS: i32 = 4;
 
 /// 執行估值重建 SQL；`security_code` 為 `None` 時重建全市場。
@@ -196,6 +196,12 @@ async fn run_estimate_upsert(
     security_code: Option<&str>,
     (bucket_count, bucket): (i32, i32),
 ) -> std::result::Result<PgQueryResult, sqlx::Error> {
+    // 全市場重建每桶本來就要 2～3 秒，走批次連線池以免天天觸發 1 秒慢查詢警告；
+    // 單檔重算維持一般連線池，變慢時照樣會被警告。
+    let pool = match security_code {
+        None => database::get_batch_connection(),
+        Some(_) => database::get_connection(),
+    };
     sqlx::query(ESTIMATE_UPSERT_SQL)
         .bind(date)
         .bind(years)
@@ -203,7 +209,7 @@ async fn run_estimate_upsert(
         .bind(security_code)
         .bind(bucket_count)
         .bind(bucket)
-        .execute(database::get_connection())
+        .execute(pool)
         .await
 }
 

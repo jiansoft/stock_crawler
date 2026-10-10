@@ -3269,6 +3269,7 @@ dependencies = [
  "futures",
  "hashbrown 0.17.1",
  "lazy_static",
+ "log",
  "mimalloc",
  "moka",
  "num_cpus",

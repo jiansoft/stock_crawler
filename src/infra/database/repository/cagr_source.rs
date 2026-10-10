@@ -384,7 +384,7 @@ impl CagrSourceRepository for PgCagrSourceRepository {
     }
 }
 
-/// 疑似異常跳動掃描同時執行的桶數（各佔一條連線，連線池上限 20）。
+/// 疑似異常跳動掃描同時執行的桶數（各佔批次連線池一條連線）。
 const ANOMALY_BUCKETS: i32 = 4;
 
 /// 掃描 `from`～`to` 的疑似異常跳動，只處理代號雜湊落在第 `bucket` 桶的股票；
@@ -401,7 +401,8 @@ async fn fetch_anomaly_bucket(
         .bind(LISTING_FREE_DAYS)
         .bind(bucket_count)
         .bind(bucket)
-        .fetch_all(database::get_connection())
+        // 每桶本來就要 2 秒上下，走批次連線池以免天天觸發 1 秒慢查詢警告。
+        .fetch_all(database::get_batch_connection())
         .await
         .with_context(|| {
             format!("Failed to detect anomaly events in bucket {bucket}/{bucket_count}")
