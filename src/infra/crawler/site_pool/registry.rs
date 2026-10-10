@@ -21,38 +21,39 @@ use crate::{
     },
 };
 
+/// 站點抓取函式回傳的 boxed future 型別。
+///
+/// 用來收斂各站點 `async_trait` 產生出的回傳型別，讓站點池可以用一致的函式指標簽名
+/// 儲存不同來源；`T` 是「最新成交價」的 [`Decimal`] 或「完整報價」的
+/// [`declare::StockQuotes`]。
+pub(super) type SiteFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 /// 「最新成交價」非同步抓取函式的 boxed future 型別。
-///
-/// 這個型別別名用來收斂各站點 `async_trait` 產生出的回傳型別，
-/// 讓站點池可以用一致的函式指標簽名儲存不同來源。
-type StockPriceFuture<'a> = Pin<Box<dyn Future<Output = Result<Decimal>> + Send + 'a>>;
+type StockPriceFuture<'a> = SiteFuture<'a, Decimal>;
 /// 「完整報價」非同步抓取函式的 boxed future 型別。
-///
-/// 用途與 [`StockPriceFuture`] 相同，只是回傳內容改為 [`declare::StockQuotes`]。
-type StockQuotesFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<declare::StockQuotes>> + Send + 'a>>;
-/// 「最新成交價」站點 wrapper 函式的統一函式指標型別。
-type StockPriceFetcher = for<'a> fn(&'a str) -> StockPriceFuture<'a>;
-/// 「完整報價」站點 wrapper 函式的統一函式指標型別。
-type StockQuotesFetcher = for<'a> fn(&'a str) -> StockQuotesFuture<'a>;
+type StockQuotesFuture<'a> = SiteFuture<'a, declare::StockQuotes>;
 
-/// 單一「股價」站點的描述。
+/// 單一站點的描述：名稱與對應的抓取函式。
 ///
-/// 將站點名稱與對應抓價函式綁在一起，避免名稱陣列與函式陣列分離後產生順序錯位。
-#[derive(Clone, Copy)]
-pub(super) struct PriceSite {
+/// 將站點名稱與抓取函式綁在一起，避免名稱陣列與函式陣列分離後產生順序錯位。
+pub(super) struct Site<T: 'static> {
     pub(super) name: &'static str,
-    pub(super) fetch: StockPriceFetcher,
+    pub(super) fetch: for<'a> fn(&'a str) -> SiteFuture<'a, T>,
 }
 
-/// 單一「完整報價」站點的描述。
-///
-/// 結構與 [`PriceSite`] 相同，但抓取的是開高低收、漲跌幅等完整報價資料。
-#[derive(Clone, Copy)]
-pub(super) struct QuoteSite {
-    pub(super) name: &'static str,
-    pub(super) fetch: StockQuotesFetcher,
+// 只有名稱與函式指標，與 `T` 是否可複製無關，不能用 derive（derive 會要求 `T: Copy`）。
+impl<T> Clone for Site<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
+
+impl<T> Copy for Site<T> {}
+
+/// 「最新成交價」站點。
+pub(super) type PriceSite = Site<Decimal>;
+
+/// 「完整報價」站點：抓的是開高低收、漲跌幅等完整報價資料。
+pub(super) type QuoteSite = Site<declare::StockQuotes>;
 
 /// 產生「最新成交價」wrapper 函式。
 ///
