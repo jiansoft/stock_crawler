@@ -218,6 +218,10 @@ async fn test_trading_day_and_symbol_queries() {
         .find(|(symbol, _)| symbol == FAKE_A)
         .map(|(_, date)| *date);
     assert_eq!(first, Some(day(2)), "哨兵值 1970-01-01 必須被排除");
+    assert!(
+        !first_quotes.iter().any(|(symbol, _)| symbol == FAKE_B),
+        "已下市股票不在計算母體，不需要最早報價日"
+    );
 
     cleanup().await;
 }
