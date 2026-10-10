@@ -25,7 +25,7 @@ pub trait CagrSourceRepository: Send + Sync {
     /// 取得計算母體：未下市的股票代號。
     async fn fetch_active_symbols(&self) -> Result<Vec<String>>;
 
-    /// 取得每檔股票在報價資料中的最早日期。
+    /// 取得計算母體（未下市股票）每檔在報價資料中的最早日期。
     ///
     /// 這是判定「新上市／資料未涵蓋」的依據。專案的 `stocks` 表沒有上市日期
     /// 欄位（ISIN 爬蟲雖有抓 `listing_date`，但在防腐層即被丟棄），因此改由

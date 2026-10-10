@@ -147,11 +147,22 @@ impl CagrSourceRepository for PgCagrSourceRepository {
     }
 
     async fn fetch_first_quote_dates(&self) -> Result<Vec<(String, NaiveDate)>> {
+        // 對整張 DailyQuotes GROUP BY 要掃完全部報價（pi 上 1.5～2.8 秒）；改成逐檔沿
+        // (stock_symbol, "Date") 索引找第一筆，只讀約 2 千次索引，正式庫實測 975ms → 35ms。
+        // 只查計算母體，已下市股票本來就用不到。
         let sql = r#"
-            SELECT stock_symbol, MIN("Date") AS first_date
-            FROM "DailyQuotes"
-            WHERE "Date" > $1::date AND "ClosingPrice" > 0
-            GROUP BY stock_symbol
+            SELECT s.stock_symbol, f.first_date
+            FROM stocks s
+            CROSS JOIN LATERAL (
+                SELECT q."Date" AS first_date
+                FROM "DailyQuotes" q
+                WHERE q.stock_symbol = s.stock_symbol
+                  AND q."Date" > $1::date
+                  AND q."ClosingPrice" > 0
+                ORDER BY q."Date"
+                LIMIT 1
+            ) f
+            WHERE s."SuspendListing" = false
         "#;
 
         let rows = sqlx::query(sql)
