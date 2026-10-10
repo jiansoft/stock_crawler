@@ -268,3 +268,6 @@ impl FinancialRepository for PgFinancialRepository {
         holding_alert::fetch_holding_financial_alerts(year, quarter).await
     }
 }
+
+#[cfg(test)]
+mod tests;
