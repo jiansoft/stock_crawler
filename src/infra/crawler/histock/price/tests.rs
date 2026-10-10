@@ -340,6 +340,8 @@ fn parse_rank_html_rejects_page_without_rank_table() {
 
 #[test]
 fn diagnostics_snapshot_reflects_idle_state_and_runtime_counters() {
+    // 與 record_cycle 測試共用診斷計數器，需序列化。
+    let _guard = TEST_STATE_LOCK.blocking_lock();
     IS_CACHING.store(false, Ordering::SeqCst);
     ACTIVE_TASKS.store(0, Ordering::SeqCst);
     LAST_BODY_BYTES.store(1024, Ordering::SeqCst);
@@ -547,4 +549,101 @@ fn screen_inconsistent_rows_zeroes_repeated_bad_row() {
         assert_eq!(result.snapshots["79975"].price, Decimal::ZERO);
         assert_eq!(result.snapshots["79976"].price, dec!(78.5));
     }
+}
+
+/// 一輪成功的抓取會覆蓋快取、更新診斷計數器並累加完成輪數。
+#[tokio::test]
+async fn record_cycle_updates_cache_and_counters() {
+    let _guard = TEST_STATE_LOCK.lock().await;
+    stop_caching_task().await;
+    let cycles_before = COMPLETED_CYCLES.load(Ordering::SeqCst);
+    let mut result = fetch_result_with(vec![
+        consistent_snapshot("79977"),
+        consistent_snapshot("79978"),
+    ]);
+    result.body_bytes = 2048;
+
+    record_cycle(result, std::time::Instant::now(), None);
+
+    assert_eq!(
+        SHARE.get_stock_snapshot("79977").map(|s| s.price),
+        Some(dec!(78.5))
+    );
+    assert_eq!(LAST_BODY_BYTES.load(Ordering::SeqCst), 2048);
+    assert_eq!(LAST_ROW_COUNT.load(Ordering::SeqCst), 2);
+    assert_eq!(LAST_SNAPSHOT_COUNT.load(Ordering::SeqCst), 2);
+    assert_eq!(LAST_CHANGED_EVENT_COUNT.load(Ordering::SeqCst), 2);
+    assert_eq!(LAST_RSS_DELTA_KIB.load(Ordering::SeqCst), 0);
+    assert_eq!(COMPLETED_CYCLES.load(Ordering::SeqCst), cycles_before + 1);
+
+    stop_caching_task().await;
+}
+
+/// 整批錯亂只在當天第一次記 warn（之後記 debug）；其他錯誤記 error，都不會中斷迴圈。
+#[test]
+fn report_cycle_error_marks_dirty_batch_as_seen_today() {
+    let dirty = anyhow::Error::from(DirtyBatch {
+        inconsistent: 30,
+        total: 100,
+    });
+
+    report_cycle_error(&dirty);
+    report_cycle_error(&dirty);
+    report_cycle_error(&anyhow::anyhow!("連線逾時"));
+
+    let first_again = INCONSISTENT_ROW_WARNED
+        .lock()
+        .unwrap()
+        .first_today("*dirty-batch*", chrono::Local::now().date_naive());
+    assert!(!first_again);
+}
+
+/// 全量重抓後取出指定股票，並以新資料覆蓋快取。
+#[tokio::test]
+async fn store_and_pick_returns_symbol_and_refreshes_cache() {
+    let _guard = TEST_STATE_LOCK.lock().await;
+    stop_caching_task().await;
+
+    let snapshot = store_and_pick(
+        "79977",
+        fetch_result_with(vec![
+            consistent_snapshot("79977"),
+            consistent_snapshot("79978"),
+        ]),
+    )
+    .unwrap();
+
+    assert_eq!(snapshot.symbol, "79977");
+    assert_eq!(
+        SHARE.get_stock_snapshot("79978").map(|s| s.price),
+        Some(dec!(78.5))
+    );
+
+    stop_caching_task().await;
+}
+
+/// 目標股票不在排行頁時回錯，且不覆蓋快取。
+#[tokio::test]
+async fn store_and_pick_rejects_missing_symbol_without_touching_cache() {
+    let _guard = TEST_STATE_LOCK.lock().await;
+    stop_caching_task().await;
+
+    let result = store_and_pick(
+        "79979",
+        fetch_result_with(vec![consistent_snapshot("79977")]),
+    );
+
+    assert!(result.is_err());
+    assert!(SHARE.get_stock_snapshot("79977").is_none());
+}
+
+/// 排行頁 fixture 經解析與篩除後全部保留。
+#[test]
+fn screen_rank_page_keeps_fixture_rows() {
+    const FIXTURE: &str = include_str!("../testdata/rank_page.html");
+
+    let result = screen_rank_page(FIXTURE).unwrap();
+
+    assert!(!result.snapshots.is_empty());
+    assert!(result.snapshots.values().all(|s| s.price > Decimal::ZERO));
 }

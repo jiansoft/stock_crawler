@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use super::{
-    FETCH_LOCK, fetch_all_from_rank,
+    FETCH_LOCK, HiStockFetchResult, fetch_all_from_rank,
     screen::{DirtyBatch, INCONSISTENT_ROW_WARNED},
 };
 use crate::{
@@ -129,7 +129,7 @@ pub fn start_caching_task() {
         );
 
         while IS_CACHING.load(Ordering::SeqCst) {
-            let start_time = std::time::Instant::now();
+            let start_time = Instant::now();
             let memory_before = read_process_memory_stats();
 
             // 背景任務也受 FETCH_LOCK 控制，但優先讓外部請求先行
@@ -139,65 +139,8 @@ pub fn start_caching_task() {
             };
 
             match result {
-                Ok(fetch_result) => {
-                    let count = fetch_result.snapshots.len();
-                    let row_count = fetch_result.row_count;
-                    let body_bytes = fetch_result.body_bytes;
-                    let price_updates = collect_changed_price_updates(&fetch_result.snapshots);
-                    let changed_events = price_updates.len();
-                    SHARE.set_stock_snapshots(fetch_result.snapshots);
-                    trace_price_tasks::publish_price_updates(price_updates);
-                    let elapsed_ms = start_time.elapsed().as_millis().min(u64::MAX as u128) as u64;
-                    let _rss_delta_before_trim_kib =
-                        rss_delta_kib(memory_before, read_process_memory_stats());
-                    let _allocator_trimmed = trim_allocator_memory();
-
-                    let rss_delta_kib = rss_delta_kib(memory_before, read_process_memory_stats());
-                    LAST_BODY_BYTES.store(body_bytes, Ordering::SeqCst);
-                    LAST_ROW_COUNT.store(row_count, Ordering::SeqCst);
-                    LAST_SNAPSHOT_COUNT.store(count, Ordering::SeqCst);
-                    LAST_CHANGED_EVENT_COUNT.store(changed_events, Ordering::SeqCst);
-                    LAST_ELAPSED_MS.store(elapsed_ms, Ordering::SeqCst);
-                    LAST_RSS_DELTA_KIB.store(rss_delta_kib, Ordering::SeqCst);
-                    COMPLETED_CYCLES.fetch_add(1, Ordering::SeqCst);
-                    /*
-                    crate::tracing::debug!("HiStock 快取已更新，共 {} 檔股票，rows={} body={}KiB changed_events={} rss_delta={}KiB，耗時 {:?}",
-                        count,
-                        row_count,
-                        body_bytes / 1024,
-                        changed_events,
-                        rss_delta_kib,
-                        start_time.elapsed());
-                    */
-                    /*
-                    crate::tracing::info!("HiStock cycle diagnostics | snapshots={} rows={} body={}KiB changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
-                        count,
-                        row_count,
-                        body_bytes / 1024,
-                        changed_events,
-                        rss_delta_kib,
-                        rss_delta_before_trim_kib,
-                        allocator_trimmed,
-                        elapsed_ms,);
-                    */
-                }
-                Err(e) if e.downcast_ref::<DirtyBatch>().is_some() => {
-                    // 錯亂通常會連續好幾輪（每 5 秒一輪），每天只記第一筆 warn。
-                    let first = INCONSISTENT_ROW_WARNED
-                        .lock()
-                        .map(|mut seen| {
-                            seen.first_today("*dirty-batch*", chrono::Local::now().date_naive())
-                        })
-                        .unwrap_or(true);
-                    if first {
-                        tracing::warn!("{}（今天不再重複記錄）", e);
-                    } else {
-                        tracing::debug!("{}", e);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("HiStock 快取更新失敗: {:?}", e);
-                }
+                Ok(fetch_result) => record_cycle(fetch_result, start_time, memory_before),
+                Err(e) => report_cycle_error(&e),
             }
 
             if !IS_CACHING.load(Ordering::SeqCst) {
@@ -221,6 +164,73 @@ pub fn start_caching_task() {
             "{}",
             "Failed to store HiStock caching task handle".to_string(),
         );
+    }
+}
+
+/// 套用一輪成功的抓取結果：覆蓋快取、發布價格異動事件並更新診斷計數器。
+///
+/// 從背景迴圈拆出，不碰網路，單元測試可以直接餵組好的抓取結果。
+pub(super) fn record_cycle(
+    fetch_result: HiStockFetchResult,
+    start_time: Instant,
+    memory_before: Option<ProcessMemoryStats>,
+) {
+    let count = fetch_result.snapshots.len();
+    let row_count = fetch_result.row_count;
+    let body_bytes = fetch_result.body_bytes;
+    let price_updates = collect_changed_price_updates(&fetch_result.snapshots);
+    let changed_events = price_updates.len();
+    SHARE.set_stock_snapshots(fetch_result.snapshots);
+    trace_price_tasks::publish_price_updates(price_updates);
+    let elapsed_ms = start_time.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let _rss_delta_before_trim_kib = rss_delta_kib(memory_before, read_process_memory_stats());
+    let _allocator_trimmed = trim_allocator_memory();
+
+    let rss_delta_kib = rss_delta_kib(memory_before, read_process_memory_stats());
+    LAST_BODY_BYTES.store(body_bytes, Ordering::SeqCst);
+    LAST_ROW_COUNT.store(row_count, Ordering::SeqCst);
+    LAST_SNAPSHOT_COUNT.store(count, Ordering::SeqCst);
+    LAST_CHANGED_EVENT_COUNT.store(changed_events, Ordering::SeqCst);
+    LAST_ELAPSED_MS.store(elapsed_ms, Ordering::SeqCst);
+    LAST_RSS_DELTA_KIB.store(rss_delta_kib, Ordering::SeqCst);
+    COMPLETED_CYCLES.fetch_add(1, Ordering::SeqCst);
+    /*
+    crate::tracing::debug!("HiStock 快取已更新，共 {} 檔股票，rows={} body={}KiB changed_events={} rss_delta={}KiB，耗時 {:?}",
+        count,
+        row_count,
+        body_bytes / 1024,
+        changed_events,
+        rss_delta_kib,
+        start_time.elapsed());
+    */
+    /*
+    crate::tracing::info!("HiStock cycle diagnostics | snapshots={} rows={} body={}KiB changed_events={} rss_delta={}KiB rss_delta_before_trim={}KiB trim={} elapsed={}ms",
+        count,
+        row_count,
+        body_bytes / 1024,
+        changed_events,
+        rss_delta_kib,
+        rss_delta_before_trim_kib,
+        allocator_trimmed,
+        elapsed_ms,);
+    */
+}
+
+/// 記錄一輪失敗的抓取：整批錯亂每天只記第一筆 warn，其他錯誤記 error。
+pub(super) fn report_cycle_error(e: &anyhow::Error) {
+    if e.downcast_ref::<DirtyBatch>().is_some() {
+        // 錯亂通常會連續好幾輪（每 5 秒一輪），每天只記第一筆 warn。
+        let first = INCONSISTENT_ROW_WARNED
+            .lock()
+            .map(|mut seen| seen.first_today("*dirty-batch*", chrono::Local::now().date_naive()))
+            .unwrap_or(true);
+        if first {
+            tracing::warn!("{}（今天不再重複記錄）", e);
+        } else {
+            tracing::debug!("{}", e);
+        }
+    } else {
+        tracing::error!("HiStock 快取更新失敗: {:?}", e);
     }
 }
 

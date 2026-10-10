@@ -62,7 +62,12 @@ struct HiStockFetchResult {
 async fn fetch_all_from_rank() -> Result<HiStockFetchResult> {
     let url = format!("https://{host}/stock/rank.aspx?p=all", host = HOST);
     let body = util::http::get(&url, None).await?;
-    let mut result = parse::parse_rank_html(&body)?;
+    screen_rank_page(&body)
+}
+
+/// 解析排行頁並剔除前後矛盾的列；除權息參考價取自全域快取。
+fn screen_rank_page(body: &str) -> Result<HiStockFetchResult> {
+    let mut result = parse::parse_rank_html(body)?;
     screen::screen_inconsistent_rows(&mut result, |symbol| {
         SHARE.get_ex_rights_reference_price(symbol)
     })?;
@@ -91,7 +96,16 @@ async fn get_snapshot(stock_symbol: &str) -> Result<RealtimeSnapshot> {
 
     tracing::info!("HiStock 快取失效 ({})，觸發全量抓取", stock_symbol);
     let fetch_result = fetch_all_from_rank().await?;
+    store_and_pick(stock_symbol, fetch_result)
+}
 
+/// 以全量重抓的結果覆蓋快取，並取出指定股票的快照。
+///
+/// 目標股票不在排行頁時回傳錯誤，且不更新快取（與拆出前相同）。
+fn store_and_pick(
+    stock_symbol: &str,
+    fetch_result: HiStockFetchResult,
+) -> Result<RealtimeSnapshot> {
     let snapshot = fetch_result
         .snapshots
         .get(stock_symbol)
