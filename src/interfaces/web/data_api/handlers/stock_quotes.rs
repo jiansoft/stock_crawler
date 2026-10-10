@@ -273,7 +273,8 @@ struct ProfileRow {
     net_asset_value_per_share: Option<Decimal>,
     return_on_equity: Option<Decimal>,
     weight: Option<Decimal>,
-    issued_share: Option<Decimal>,
+    /// `stocks.issued_share` 是 bigint；宣告成 Decimal 會解碼失敗，整個 profile 回 500。
+    issued_share: Option<i64>,
     maximum_price: Option<Decimal>,
     maximum_price_date_on: Option<NaiveDate>,
     minimum_price: Option<Decimal>,
@@ -311,7 +312,8 @@ impl From<ProfileRow> for StockProfile {
             net_asset_value_per_share: decimal_to_f64(row.net_asset_value_per_share),
             return_on_equity: decimal_to_f64(row.return_on_equity),
             weight: decimal_to_f64(row.weight),
-            issued_share: decimal_to_f64(row.issued_share),
+            // 發行股數遠小於 2^53，轉 f64 不會失真。
+            issued_share: row.issued_share.map(|shares| shares as f64),
             history,
         }
     }
