@@ -24,7 +24,7 @@ use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 
 use super::closing;
 use crate::{
-    core::alert,
+    core::{alert, util::text},
     domain::health::{DataHealthRepository, DataHealthSnapshot},
     infra::{crawler::twse, database::repository::data_health::PgDataHealthRepository},
 };
@@ -253,6 +253,9 @@ fn dividend_problems(snapshot: &DataHealthSnapshot) -> Vec<String> {
 }
 
 /// 組成 Telegram 週報。
+///
+/// 通知管道以 MarkdownV2 發送，週報本身沒有格式標記，因此整則跳脫保留字元；
+/// 日期的 `-` 沒跳脫時 Telegram 會整則拒收（400）。
 fn report(from: NaiveDate, to: NaiveDate, checks: &[Check]) -> String {
     let problems = checks
         .iter()
@@ -275,7 +278,7 @@ fn report(from: NaiveDate, to: NaiveDate, checks: &[Check]) -> String {
             }
         }
     }
-    message.trim_end().to_string()
+    text::escape_markdown_v2(message.trim_end())
 }
 
 #[cfg(test)]
@@ -354,7 +357,10 @@ mod tests {
         );
 
         let message = report(day(4), day(10), &checks);
-        assert!(message.starts_with("資料健康週報 2026-10-04～2026-10-10\n全部 7 項正常"));
+        assert!(
+            message.starts_with("資料健康週報 2026\\-10\\-04～2026\\-10\\-10\n全部 7 項正常"),
+            "{message}"
+        );
         assert!(!message.contains("⚠️"));
     }
 
@@ -473,5 +479,10 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("✅ 漲跌幅"), "{message}");
+        // MarkdownV2 保留字元都要跳脫，否則 Telegram 會整則拒收。
+        assert!(
+            message.contains("test\\_recalculate\\_moving\\_averages"),
+            "{message}"
+        );
     }
 }
