@@ -492,6 +492,8 @@ impl DividendRepository for PgDividendRepository {
     /// 涵蓋期間要看同一所屬年度的其他配息才決定得了，因此整批取回後在記憶體計算
     /// （見 [`crate::domain::dividend::payout`]）；全市場約四萬多列股利、七萬列 EPS，
     /// 在正式機（樹莓派）上也只佔數 MB。不排序：計算結果與順序無關。
+    ///
+    /// 整批讀四萬多列在 pi 上約 1 秒，走慢查詢門檻 5 秒的批次連線池，避免每天誤報。
     async fn fetch_payout_ratio_inputs(
         &self,
     ) -> Result<(Vec<PayoutDividend>, Vec<PeriodEarnings>)> {
@@ -528,7 +530,7 @@ impl DividendRepository for PgDividendRepository {
                     payout_period: row.try_get("payout_period")?,
                 })
             })
-            .fetch_all(database::get_connection())
+            .fetch_all(database::get_batch_connection())
             .await
             .context("Failed to fetch dividends for payout ratios")?;
 
@@ -555,7 +557,7 @@ impl DividendRepository for PgDividendRepository {
                     earnings_per_share: row.try_get("earnings_per_share")?,
                 })
             })
-            .fetch_all(database::get_connection())
+            .fetch_all(database::get_batch_connection())
             .await
             .context("Failed to fetch earnings for payout ratios")?;
 
