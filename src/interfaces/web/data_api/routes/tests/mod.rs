@@ -1,7 +1,7 @@
 //! Data API 路由測試。
 //!
 //! 本檔是不連資料庫的基礎契約測試：路由、Bearer 驗證邊界與 OpenAPI 產物。
-//! 資料庫查詢語意依 endpoint 分組放在子模組（`phases`、`cagr`、`movers`、`chip`），
+//! 資料庫查詢語意依 endpoint 分組放在子模組（`phases`、`cagr`、`movers`、`chip`、`stocks`），
 //! 由整合測試環境驗證，避免單元測試因本機沒有 PostgreSQL 而失去可重現性。
 
 use axum::{
@@ -16,6 +16,7 @@ mod cagr;
 mod chip;
 mod movers;
 mod phases;
+mod stocks;
 
 /// 健康檢查必須免驗證，讓部署系統能在未持有 API key 時偵測存活狀態。
 #[tokio::test]
