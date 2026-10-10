@@ -25,6 +25,72 @@ pub struct HistoricalDividendBackfillSummary {
     pub detail_count: usize,
 }
 
+/// 跳過旗標存活時間下限（2 天）。
+///
+/// 旗標原本固定 3 天，同一輪寫入的旗標會在同一天一起到期：2026-10-06 一次重抓上千檔跑了
+/// 70 分鐘，隔兩天卻只抓幾十檔。改在下限與上限之間隨機，到期日會逐輪攤平到每天，
+/// 平均仍約 3 天重抓一次，對 Yahoo 的總請求量不變。
+const REFRESH_SKIP_TTL_MIN_SECONDS: usize = 60 * 60 * 24 * 2;
+/// 跳過旗標存活時間上限（4 天），見 [`REFRESH_SKIP_TTL_MIN_SECONDS`]。
+const REFRESH_SKIP_TTL_MAX_SECONDS: usize = 60 * 60 * 24 * 4;
+/// 單輪最多實際查詢 Yahoo 的檔數。
+///
+/// 約 2,355 檔÷平均 3 天≈每天 785 檔，上限留一些餘裕；遇到大量旗標同時到期時，
+/// 超出的股票沒有寫旗標，下一輪自然會再排到，避免單輪拖到 22:00 之後的排程。
+const MAX_FETCHES_PER_RUN: usize = 900;
+
+/// 單輪股利補抓的查詢額度與統計。
+///
+/// 已有跳過旗標的股票不經過這裡；需要查詢的股票逐一呼叫 [`Self::try_fetch`]，
+/// 超過 [`MAX_FETCHES_PER_RUN`] 的記為延後。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RefreshRun {
+    /// 本輪候選股票數。
+    candidates: usize,
+    /// 實際查詢 Yahoo 的股票數。
+    fetched: usize,
+    /// 額度用完而延到下一輪的股票數。
+    deferred: usize,
+}
+
+impl RefreshRun {
+    fn new(candidates: usize) -> Self {
+        Self {
+            candidates,
+            fetched: 0,
+            deferred: 0,
+        }
+    }
+
+    /// 占用一次查詢額度；額度已用完時記為延後並回傳 `false`。
+    fn try_fetch(&mut self) -> bool {
+        if self.fetched >= MAX_FETCHES_PER_RUN {
+            self.deferred += 1;
+            return false;
+        }
+        self.fetched += 1;
+        true
+    }
+
+    /// 因跳過旗標未到期而略過的股票數。
+    fn skipped(&self) -> usize {
+        self.candidates - self.fetched - self.deferred
+    }
+}
+
+impl std::fmt::Display for RefreshRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "candidates={} fetched={} skipped={} deferred={}",
+            self.candidates,
+            self.fetched,
+            self.skipped(),
+            self.deferred
+        )
+    }
+}
+
 /// 定期檢查上市櫃股票的近期股利，補齊缺漏或新增的配息。
 ///
 /// 此流程會先建立兩份資料：
@@ -35,11 +101,11 @@ pub struct HistoricalDividendBackfillSummary {
 /// 「去年 Q4 股利於今年發放」的資料。後續抓 Yahoo 後只處理指定年度與前一年度的
 /// 股利所屬年度，並依快取排除已存在的季配/半年配紀錄，再將缺少的資料 upsert 回資料庫。
 ///
-/// Redis 會以股票代碼建立短期快取，避免排程短時間內重複打 Yahoo。單檔股票失敗時只寫 log，
-/// 不中斷整批採集。
+/// Redis 會以股票代碼建立 2～4 天的隨機跳過旗標，避免排程短時間內重複打 Yahoo，
+/// 每輪最多查 [`MAX_FETCHES_PER_RUN`] 檔。單檔股票失敗時只寫 log，不中斷整批採集。
 pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<()> {
     let dividend_repo = PgDividendRepository::new();
-    // 年配公司也可能新增半年配，不能用已有年度資料排除；重抓頻率交給三天快取。
+    // 年配公司也可能新增半年配，不能用已有年度資料排除；重抓頻率交給 2～4 天的跳過旗標。
     let mut stock_symbols: HashSet<String> = dividend_repo
         .fetch_dividend_refresh_candidates()
         .await?
@@ -59,6 +125,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
     }
 
     tracing::info!("本次殖利率的採集需收集 {} 家", stock_symbols.len());
+    let mut run = RefreshRun::new(stock_symbols.len());
     for stock_symbol in stock_symbols {
         // Yahoo 股利回補使用獨立快取命名空間，避免和 Goodinfo 盈餘分配率快取互相影響。
         let cache_key = make_cache_key(&stock_symbol);
@@ -77,16 +144,20 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
             continue;
         }
 
-        // 先寫入 3 天快取旗標；即使單檔處理失敗，也避免排程下一輪立刻重試同一來源。
+        if !run.try_fetch() {
+            // 本輪額度已用完；不寫旗標，下一輪會再排到這檔。
+            continue;
+        }
+
+        // 先寫入跳過旗標；即使單檔處理失敗，也避免排程下一輪立刻重試同一來源。
+        let ttl_seconds = refresh_skip_ttl_seconds();
         crate::infra::nosql::redis::CLIENT
-            .set(cache_key, true, 60 * 60 * 24 * 3)
+            .set(cache_key, true, ttl_seconds)
             .await
             .with_context(|| {
                 format!(
                     "redis set failed: year={}, stock_symbol={}, ttl_seconds={}",
-                    year,
-                    stock_symbol,
-                    60 * 60 * 24 * 3
+                    year, stock_symbol, ttl_seconds
                 )
             })?;
 
@@ -98,7 +169,7 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
                 // Yahoo 回 404＝整個個股頁不存在，幾乎都是已下市/清算的標的
                 //（資料庫的 SuspendListing 旗標可能還沒更新）。這不是異常，
                 // 降級為 warn 避免淹沒真正的錯誤，並把跳過快取拉長到 30 天，
-                // 不再每 3 天重打一次注定 404 的請求。
+                // 不再每 2～4 天重打一次注定 404 的請求。
                 if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
                     .set(
                         make_cache_key(&stock_symbol),
@@ -133,6 +204,8 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
         let jitter_ms = rand::rng().random_range(1500..=3000);
         tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
     }
+
+    tracing::info!("殖利率採集完成 {run}");
 
     Ok(())
 }
@@ -423,6 +496,11 @@ fn make_cache_key(stock_symbol: &str) -> String {
     format!("yahoo:dividend:{stock_symbol}")
 }
 
+/// 隨機挑一個跳過旗標存活秒數，範圍見 [`REFRESH_SKIP_TTL_MIN_SECONDS`]。
+fn refresh_skip_ttl_seconds() -> usize {
+    rand::rng().random_range(REFRESH_SKIP_TTL_MIN_SECONDS..=REFRESH_SKIP_TTL_MAX_SECONDS)
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{Datelike, Local};
@@ -439,6 +517,46 @@ mod tests {
         assert!(should_process_dividend_year(target_year, 2024));
         assert!(!should_process_dividend_year(target_year, 2023));
         assert!(!should_process_dividend_year(target_year, 2026));
+    }
+
+    #[test]
+    fn refresh_skip_ttl_stays_within_two_to_four_days() {
+        for _ in 0..1_000 {
+            let ttl = refresh_skip_ttl_seconds();
+            assert!((REFRESH_SKIP_TTL_MIN_SECONDS..=REFRESH_SKIP_TTL_MAX_SECONDS).contains(&ttl));
+        }
+    }
+
+    #[test]
+    fn refresh_run_defers_after_budget_is_used_up() {
+        let mut run = RefreshRun::new(MAX_FETCHES_PER_RUN + 150);
+        // 其中 100 檔已有跳過旗標，不會呼叫 try_fetch。
+        let to_fetch = MAX_FETCHES_PER_RUN + 50;
+        let accepted = (0..to_fetch).filter(|_| run.try_fetch()).count();
+
+        assert_eq!(accepted, MAX_FETCHES_PER_RUN);
+        assert_eq!(run.fetched, MAX_FETCHES_PER_RUN);
+        assert_eq!(run.deferred, to_fetch - MAX_FETCHES_PER_RUN);
+        assert_eq!(run.skipped(), 100);
+        assert_eq!(
+            run.to_string(),
+            format!(
+                "candidates={} fetched={} skipped=100 deferred={}",
+                MAX_FETCHES_PER_RUN + 150,
+                MAX_FETCHES_PER_RUN,
+                to_fetch - MAX_FETCHES_PER_RUN
+            )
+        );
+    }
+
+    #[test]
+    fn refresh_run_within_budget_defers_nothing() {
+        let mut run = RefreshRun::new(10);
+        assert!((0..4).all(|_| run.try_fetch()));
+        assert_eq!(
+            run.to_string(),
+            "candidates=10 fetched=4 skipped=6 deferred=0"
+        );
     }
 
     #[test]
