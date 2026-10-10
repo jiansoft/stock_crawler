@@ -8,7 +8,9 @@ mod announcement_scan;
 mod annual_total_repair;
 /// 以交易所除權除息計算結果核對股利資料。
 pub(crate) mod ex_right_reconcile;
-/// 定期掃描近期股利與手動回補歷年配息明細。
+/// 手動回補 Yahoo 歷年配息明細。
+mod historical;
+/// 定期掃描近期股利，補齊缺漏或新增的配息。
 mod missing_or_multiple;
 /// 更新歷史配息率。
 pub mod payout_ratio;
@@ -23,7 +25,7 @@ use unannounced_ex_dividend_date::backfill_unannounced_dividend_dates;
 pub(crate) use annual_total_repair::repair_stale_annual_total_dividends;
 
 /// 單檔歷年股利手動回補入口。
-pub(crate) use missing_or_multiple::{
+pub(crate) use historical::{
     backfill_historical_dividends_for_multiple_dividend_stocks,
     backfill_historical_dividends_for_stock,
 };

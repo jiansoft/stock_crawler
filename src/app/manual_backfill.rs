@@ -19,6 +19,9 @@
 //! - `test_backfill_historical_dividends_for_stock`：
 //!   依 [`MANUAL_HISTORICAL_DIVIDEND_SECURITY_CODE`] 從 Yahoo 回補單檔股票歷年股利，
 //!   寫入 `dividend` 表、重算年度彙總列，並同步回補已領股利紀錄。
+//! - `test_backfill_historical_dividends_for_multiple_dividend_stocks`：
+//!   對指定年度（`MANUAL_HISTORICAL_DIVIDEND_YEAR`，預設今年）所有季配/半年配股票
+//!   逐檔執行上一項的歷年股利回補。
 //! - `test_backfill_cagr_for_date`：
 //!   依 [`MANUAL_CAGR_DATE`] 重算指定基準日的全市場各期間年化報酬率，寫入 `stock_cagr`。
 //! - `test_backfill_quote_history_for_symbols`：
@@ -307,6 +310,46 @@ async fn test_backfill_historical_dividends_for_stock() {
 
     tracing::debug!(
         "結束 app::manual_backfill::test_backfill_historical_dividends_for_stock security_code={security_code} upserted_count={upserted_count}"
+    );
+}
+
+/// 手動回補指定年度所有季配/半年配股票的 Yahoo 歷年股利明細。
+///
+/// 呼叫 [`dividend::backfill_historical_dividends_for_multiple_dividend_stocks`]：
+/// 先從資料庫找出該年度有季配/半年配紀錄的股票，再逐檔從 Yahoo 回補歷年股利；
+/// 任一檔失敗即中止，每檔之間隨機停 1.5～3 秒。
+///
+/// 執行範例：
+/// `cargo test app::manual_backfill::test_backfill_historical_dividends_for_multiple_dividend_stocks -- --ignored --nocapture`
+/// 可用 `MANUAL_HISTORICAL_DIVIDEND_YEAR` 指定年度；未設定時為今年。
+#[tokio::test]
+#[ignore]
+async fn test_backfill_historical_dividends_for_multiple_dividend_stocks() {
+    use chrono::Datelike;
+
+    dotenvy::dotenv().ok();
+    SHARE.load().await;
+
+    let year = std::env::var("MANUAL_HISTORICAL_DIVIDEND_YEAR")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or_else(|| chrono::Local::now().year());
+
+    let summary = dividend::backfill_historical_dividends_for_multiple_dividend_stocks(year)
+        .await
+        .unwrap_or_else(|why| {
+            panic!(
+                "backfill historical dividends failed for all multiple dividend stocks in {year}: {why:#}"
+            )
+        });
+
+    assert!(
+        summary.stock_count > 0,
+        "expected at least one multiple dividend stock for {year}"
+    );
+    assert!(
+        summary.detail_count > 0,
+        "expected Yahoo historical dividends to upsert at least one row for multiple dividend stocks in {year}"
     );
 }
 
