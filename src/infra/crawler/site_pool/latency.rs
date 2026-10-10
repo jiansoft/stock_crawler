@@ -201,7 +201,9 @@ mod tests {
 
         flush_site_latency_stats();
 
+        // 只檢查本測試寫入的站點：其他測試的假站點可能在 flush 之後並行寫入。
         let all_stats = SITE_LATENCY_STATS.lock().expect("lock site latency stats");
-        assert!(all_stats.is_empty());
+        assert!(!all_stats.contains_key("Yahoo"));
+        assert!(!all_stats.contains_key("Fugle"));
     }
 }

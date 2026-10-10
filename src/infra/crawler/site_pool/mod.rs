@@ -23,7 +23,9 @@ use rust_decimal::Decimal;
 use self::health::{plan_attempt_order, record_site_outcome};
 pub use self::latency::flush_site_latency_stats;
 use self::latency::record_site_latency;
-use self::registry::{ALL_PRICE_SITES, ALL_QUOTE_SITES, BACKUP_PRICE_SITES, PriceSite, QuoteSite};
+use self::registry::{
+    ALL_PRICE_SITES, ALL_QUOTE_SITES, BACKUP_PRICE_SITES, PriceSite, QuoteSite, Site,
+};
 use crate::core::{declare, util::http};
 
 /// 標記採集站點的全局遊標。
@@ -53,87 +55,72 @@ fn get_and_increment_index(max: usize) -> usize {
     INDEX.fetch_add(1, Ordering::SeqCst) % max
 }
 
-/// 依指定站點池輪詢抓取「最新成交價」。
+/// 依指定站點池輪詢抓取資料（最新成交價與完整報價共用）。
 ///
 /// # 參數
 /// - `stock_symbol`: 股票代號。
 /// - `sites`: 要參與輪詢的站點池。
+/// - `what`: 錯誤訊息中的資料名稱（`stock price`／`stock quotes`）。
 /// - `error_scope`: 錯誤訊息中使用的站點池描述字串。
 ///
 /// # 行為
 /// - 依 [`get_and_increment_index`] 取得本輪起始站點，避免所有請求都從同一站開始。
 /// - 依 [`plan_attempt_order`] 略過熔斷中的站點、把慢站排到最後，每站最多試一次。
 /// - 每站的請求以 [`http::fail_fast`] 執行：不重試、單次逾時 6 秒。
-/// - 成功時立即回傳標準化後的股價。
+/// - 成功時立即回傳資料與命中的站點名稱。
 /// - 失敗時累積各站點錯誤，全部失敗後再整體回傳。
+async fn fetch_from_site_pool<T>(
+    stock_symbol: &str,
+    sites: &[Site<T>],
+    what: &str,
+    error_scope: &str,
+) -> Result<(T, &'static str)> {
+    let names = sites.iter().map(|site| site.name).collect::<Vec<_>>();
+    let order = plan_attempt_order(&names, get_and_increment_index(sites.len()));
+    let mut errors = Vec::with_capacity(order.len());
+
+    for idx in order {
+        let site = sites[idx];
+        let started_at = Instant::now();
+        // 即時抓價失敗就換下一站，不在單一站上做網路重試與 429 backoff。
+        let result = http::fail_fast((site.fetch)(stock_symbol)).await;
+        record_site_latency(site.name, started_at);
+        record_site_outcome(site.name, result.is_ok(), started_at);
+        match result {
+            Ok(value) => return Ok((value, site.name)),
+            Err(why) => errors.push(format!("{}: {why}", site.name)),
+        }
+    }
+
+    Err(anyhow!(
+        "Failed to fetch {what}({stock_symbol}) from {error_scope}: {}",
+        errors.join(" | ")
+    ))
+}
+
+/// 依指定站點池輪詢抓取「最新成交價」，價格標準化後回傳。
 async fn fetch_stock_price_from_site_pool(
     stock_symbol: &str,
     sites: &[PriceSite],
     error_scope: &str,
 ) -> Result<FetchedStockPrice> {
-    let names = sites.iter().map(|site| site.name).collect::<Vec<_>>();
-    let order = plan_attempt_order(&names, get_and_increment_index(sites.len()));
-    let mut errors = Vec::with_capacity(order.len());
-
-    for idx in order {
-        let site = sites[idx];
-        let started_at = Instant::now();
-        // 即時抓價失敗就換下一站，不在單一站上做網路重試與 429 backoff。
-        let result = http::fail_fast((site.fetch)(stock_symbol)).await;
-        record_site_latency(site.name, started_at);
-        record_site_outcome(site.name, result.is_ok(), started_at);
-        match result {
-            Ok(price) => {
-                return Ok(FetchedStockPrice {
-                    price: price.normalize(),
-                    site_name: site.name,
-                });
-            }
-            Err(why) => errors.push(format!("{}: {why}", site.name)),
-        }
-    }
-
-    Err(anyhow!(
-        "Failed to fetch stock price({stock_symbol}) from {error_scope}: {}",
-        errors.join(" | ")
-    ))
+    let (price, site_name) =
+        fetch_from_site_pool(stock_symbol, sites, "stock price", error_scope).await?;
+    Ok(FetchedStockPrice {
+        price: price.normalize(),
+        site_name,
+    })
 }
 
 /// 依指定站點池輪詢抓取「完整報價」。
-///
-/// # 參數
-/// - `stock_symbol`: 股票代號。
-/// - `sites`: 要參與輪詢的站點池。
-/// - `error_scope`: 錯誤訊息中使用的站點池描述字串。
-///
-/// # 行為
-/// - 與 [`fetch_stock_price_from_site_pool`] 相同，差別只在回傳型別為完整報價。
 async fn fetch_stock_quotes_from_site_pool(
     stock_symbol: &str,
     sites: &[QuoteSite],
     error_scope: &str,
 ) -> Result<declare::StockQuotes> {
-    let names = sites.iter().map(|site| site.name).collect::<Vec<_>>();
-    let order = plan_attempt_order(&names, get_and_increment_index(sites.len()));
-    let mut errors = Vec::with_capacity(order.len());
-
-    for idx in order {
-        let site = sites[idx];
-        let started_at = Instant::now();
-        // 即時抓價失敗就換下一站，不在單一站上做網路重試與 429 backoff。
-        let result = http::fail_fast((site.fetch)(stock_symbol)).await;
-        record_site_latency(site.name, started_at);
-        record_site_outcome(site.name, result.is_ok(), started_at);
-        match result {
-            Ok(quotes) => return Ok(quotes),
-            Err(why) => errors.push(format!("{}: {why}", site.name)),
-        }
-    }
-
-    Err(anyhow!(
-        "Failed to fetch stock quotes({stock_symbol}) from {error_scope}: {}",
-        errors.join(" | ")
-    ))
+    fetch_from_site_pool(stock_symbol, sites, "stock quotes", error_scope)
+        .await
+        .map(|(quotes, _)| quotes)
 }
 
 /// 從多個遠端站點中輪詢獲取股票的最新成交價。
@@ -215,6 +202,118 @@ mod tests {
         INDEX.store(8, Ordering::SeqCst);
         assert_eq!(get_and_increment_index(8), 0);
         assert_eq!(get_and_increment_index(9), 0);
+    }
+
+    fn ok_price<'a>(_: &'a str) -> registry::SiteFuture<'a, Decimal> {
+        Box::pin(async { Ok(Decimal::new(12340, 2)) })
+    }
+
+    fn fail_price<'a>(stock_symbol: &'a str) -> registry::SiteFuture<'a, Decimal> {
+        Box::pin(async move { Err(anyhow!("{stock_symbol} 查無報價")) })
+    }
+
+    fn ok_quotes<'a>(stock_symbol: &'a str) -> registry::SiteFuture<'a, declare::StockQuotes> {
+        Box::pin(async move {
+            Ok(declare::StockQuotes {
+                stock_symbol: stock_symbol.to_owned(),
+                price: 101.5,
+                change: 1.5,
+                change_range: 1.5,
+            })
+        })
+    }
+
+    fn fail_quotes<'a>(_: &'a str) -> registry::SiteFuture<'a, declare::StockQuotes> {
+        Box::pin(async { Err(anyhow!("欄位格式不符")) })
+    }
+
+    /// 失敗的站點換下一站；回傳命中的站點並把價格標準化。
+    ///
+    /// 起始站點由全域遊標決定，不論從哪一站開始，結果都要是成功的那一站。
+    /// 站點名稱各測試獨立，避免健康紀錄（熔斷）互相影響。
+    #[tokio::test]
+    async fn price_pool_falls_back_to_next_site_and_normalizes() {
+        let sites = [
+            PriceSite {
+                name: "TestPriceDown",
+                fetch: fail_price,
+            },
+            PriceSite {
+                name: "TestPriceUp",
+                fetch: ok_price,
+            },
+        ];
+        for _ in 0..sites.len() {
+            let fetched = fetch_stock_price_from_site_pool("2330", &sites, "test pool")
+                .await
+                .expect("有一站成功就要回傳");
+            assert_eq!(fetched.site_name, "TestPriceUp");
+            assert_eq!(fetched.price.to_string(), "123.4");
+        }
+    }
+
+    /// 全部站點失敗時，錯誤訊息列出每一站的原因。
+    #[tokio::test]
+    async fn price_pool_reports_every_site_when_all_fail() {
+        let sites = [
+            PriceSite {
+                name: "TestPriceDownA",
+                fetch: fail_price,
+            },
+            PriceSite {
+                name: "TestPriceDownB",
+                fetch: fail_price,
+            },
+        ];
+        let message = fetch_stock_price_from_site_pool("2330", &sites, "test pool")
+            .await
+            .expect_err("全部失敗要回錯誤")
+            .to_string();
+        assert!(
+            message.starts_with("Failed to fetch stock price(2330) from test pool: "),
+            "{message}"
+        );
+        assert!(
+            message.contains("TestPriceDownA: 2330 查無報價"),
+            "{message}"
+        );
+        assert!(
+            message.contains("TestPriceDownB: 2330 查無報價"),
+            "{message}"
+        );
+    }
+
+    /// 完整報價走同一套輪詢；全部失敗時錯誤訊息標明是 stock quotes。
+    #[tokio::test]
+    async fn quote_pool_falls_back_and_reports_failures() {
+        let sites = [
+            QuoteSite {
+                name: "TestQuoteDown",
+                fetch: fail_quotes,
+            },
+            QuoteSite {
+                name: "TestQuoteUp",
+                fetch: ok_quotes,
+            },
+        ];
+        let quotes = fetch_stock_quotes_from_site_pool("1101", &sites, "test pool")
+            .await
+            .expect("有一站成功就要回傳");
+        assert_eq!(quotes.stock_symbol, "1101");
+        assert_eq!(quotes.price, 101.5);
+
+        let failing = [QuoteSite {
+            name: "TestQuoteDownOnly",
+            fetch: fail_quotes,
+        }];
+        let message = fetch_stock_quotes_from_site_pool("1101", &failing, "test pool")
+            .await
+            .expect_err("全部失敗要回錯誤")
+            .to_string();
+        assert_eq!(
+            message,
+            "Failed to fetch stock quotes(1101) from test pool: TestQuoteDownOnly: 欄位格式不符"
+        );
     }
 
     /// 驗證完整站點池可以成功抓取多檔股票的最新成交價。
