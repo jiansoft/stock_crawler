@@ -109,6 +109,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
     let fss = financial_repo
         .fetch_roe_or_roa_equal_to_zero(Some(target_report.year), Some(target_report.quarter))
         .await?;
+    let candidates = fss.len();
 
     // 建立併發爬取的 async stream，並限制併發數量上限為 5
     let mut stream = futures::stream::iter(fss)
@@ -213,6 +214,11 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
             }
         }
     }
+
+    tracing::info!(
+        "Yahoo profile 補季報欄位結束: report={}-{quarter} candidates={candidates} updated={success_count}",
+        target_report.year
+    );
 
     Ok(success_count)
 }
