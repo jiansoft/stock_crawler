@@ -4,7 +4,7 @@
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
 //! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
-//! `financial_health`、`chip`、`screening`、`market` 與 `cagr` 九個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! `financial_health`、`chip`、`screening`、`market`、`cagr` 與 `valuation_band` 十個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
@@ -16,6 +16,7 @@ mod fundamentals;
 mod market;
 mod screening;
 mod stocks;
+mod valuation_band;
 
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -61,6 +62,9 @@ pub(super) use stocks::{
     DailyQuote, HistoricalQuote, HistoryParams, LatestQuoteResponse, PriceHistoryResponse,
     QuoteHistoryRecord, RealtimeSnapshotResponse, SearchParams, SearchResponse, Stock,
     StockProfile,
+};
+pub(super) use valuation_band::{
+    ImpliedPriceBand, RatioBandItem, ValuationBandParams, ValuationBandResponse,
 };
 
 /// OpenAPI 文件使用的三種查詢市場值。

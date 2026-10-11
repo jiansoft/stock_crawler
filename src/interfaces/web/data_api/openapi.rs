@@ -11,8 +11,8 @@ use super::{dto, handlers};
 /// 由 handler 註解生成的 OpenAPI 3 文件。
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::financial_reports, handlers::financial_health, handlers::dividend_history, handlers::dividend_fill, handlers::stock_valuation, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::IncomeStatementItem, dto::BalanceSheetItem, dto::CashFlowStatementItem, dto::FinancialReportResponse, dto::HealthCriterion, dto::FinancialHealthResponse, dto::Dividend, dto::DividendHistoryResponse, dto::DividendFillEvent, dto::DividendFillSummary, dto::DividendFillResponse, dto::StockValuation, dto::StockValuationResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::ReportPeriodTypeValue, dto::HealthCategoryValue, dto::HealthValueUnitValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
+    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::financial_reports, handlers::financial_health, handlers::dividend_history, handlers::dividend_fill, handlers::stock_valuation, handlers::stock_valuation_band, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::IncomeStatementItem, dto::BalanceSheetItem, dto::CashFlowStatementItem, dto::FinancialReportResponse, dto::HealthCriterion, dto::FinancialHealthResponse, dto::Dividend, dto::DividendHistoryResponse, dto::DividendFillEvent, dto::DividendFillSummary, dto::DividendFillResponse, dto::StockValuation, dto::StockValuationResponse, dto::ImpliedPriceBand, dto::RatioBandItem, dto::ValuationBandResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::ReportPeriodTypeValue, dto::HealthCategoryValue, dto::HealthValueUnitValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -710,6 +710,37 @@ mod tests {
         assert_eq!(
             enum_values(&document, &criterion["unit"]),
             serde_json::json!(["ratio", "thousand_twd"])
+        );
+    }
+
+    /// 估值歷史區間 path 的契約：years 範圍與預設、兩個倍數共用 RatioBandItem、可為 null 的欄位。
+    #[test]
+    fn openapi_valuation_band_schema_pins_field_names() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+        let operation = get_operation(&document, "/api/v1/stocks/{symbol}/valuation-band");
+        assert_endpoint_responses(operation, "ValuationBandResponse", true);
+        let years = query_schema(operation, "years");
+        assert_eq!(years["default"], 5);
+        assert_eq!(years["minimum"], 1);
+        assert_eq!(years["maximum"], 10);
+
+        let schemas = &document["components"]["schemas"];
+        let response = &schemas["ValuationBandResponse"]["properties"];
+        for field in ["price_earning_ratio", "price_to_book_ratio"] {
+            let schema = response[field].to_string();
+            assert!(schema.contains("RatioBandItem"), "{field}");
+            assert!(schema.contains("null"), "{field}");
+        }
+        let band = &schemas["RatioBandItem"]["properties"];
+        for field in ["current", "percentile", "implied_prices"] {
+            assert!(band[field].to_string().contains("null"), "{field}");
+        }
+        assert_eq!(band["samples"]["type"], "integer");
+        assert_eq!(band["excluded_days"]["type"], "integer");
+        assert!(
+            schemas["ImpliedPriceBand"]["properties"]["median"]
+                .to_string()
+                .contains("number")
         );
     }
 

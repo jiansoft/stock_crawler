@@ -21,6 +21,7 @@ mod market_stats;
 mod screening;
 mod stock_fundamentals;
 mod stock_quotes;
+mod valuation_band;
 
 use axum::{
     Json,
@@ -58,6 +59,7 @@ pub(super) use stock_quotes::{
     __path_stock_profile, latest_quote, price_history, realtime_snapshot, search_stocks,
     stock_profile,
 };
+pub(super) use valuation_band::{__path_stock_valuation_band, stock_valuation_band};
 
 /// 產生不含內部實作細節的統一 JSON 錯誤回應。
 pub(super) fn error_response(status: StatusCode, message: &str) -> Response {

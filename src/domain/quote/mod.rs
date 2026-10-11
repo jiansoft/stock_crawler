@@ -5,3 +5,5 @@ pub mod repository;
 /// 報價領域之測試替身；僅在測試建置下編譯。
 #[cfg(test)]
 pub mod test_double;
+/// 本益比／股價淨值比歷史區間統計。
+pub mod valuation_band;
