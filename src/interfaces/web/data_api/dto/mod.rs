@@ -4,7 +4,7 @@
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
 //! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
-//! `financial_health`、`chip`、`screening`、`market`、`cagr` 與 `valuation_band` 十個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! `financial_health`、`chip`、`screening`、`market`、`portfolio`、`cagr` 與 `valuation_band` 十一個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
@@ -14,6 +14,7 @@ mod financial_health;
 mod financial_reports;
 mod fundamentals;
 mod market;
+mod portfolio;
 mod screening;
 mod stocks;
 mod valuation_band;
@@ -53,6 +54,10 @@ pub(super) use market::{
     MarketIndexHistoryParams, MarketIndexHistoryResponse, MarketIndexPoint, MarketMover,
     MarketMoversParams, MarketMoversResponse, MoversRankByValue, QfiiHolding,
     QfiiHoldingRankingParams, QfiiHoldingRankingResponse, QfiiSortValue,
+};
+pub(super) use portfolio::{
+    PortfolioHolding, PortfolioIndustry, PortfolioSummaryParams, PortfolioSummaryResponse,
+    WeightedMetricItem,
 };
 pub(super) use screening::{
     ScreenedStock, SortOrderParamValue, StockScreenSortValue, StockScreeningParams,

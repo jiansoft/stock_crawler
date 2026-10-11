@@ -812,6 +812,101 @@ async fn stock_valuation_band_endpoint_db_semantics() {
     cleanup(pool).await;
 }
 
+/// 持股總覽：同代號多筆買進合併、已賣出不算；市值、損益、已領股利與市值加權指標，
+/// 以及 member_id 篩選與 422。用不存在的會員編號隔離資料，結束時清除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn portfolio_summary_endpoint_db_semantics() {
+    use chrono::Datelike;
+
+    const MEMBER: i64 = 979_790;
+    let Some(pool) = pool_or_skip("portfolio_summary_endpoint_db_semantics").await else {
+        return;
+    };
+    let cleanup_portfolio = || async {
+        let _ = sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM yield_rank WHERE security_code = $1")
+            .bind(SYMBOL)
+            .execute(pool)
+            .await;
+        cleanup(pool).await;
+    };
+    cleanup_portfolio().await;
+
+    // 沒有持股：200、空清單。
+    let path = format!("/api/v1/portfolio/summary?member_id={MEMBER}");
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["symbols"], 0);
+    assert_eq!(json["holdings"], serde_json::json!([]));
+    assert!(json["weighted_dividend_yield"].is_null(), "{json}");
+
+    seed(pool, &[SEED_STOCK]).await;
+    // 新鮮度以查詢當天判斷，殖利率日與評分年度只能由今天推算；列屬於假代號，結束時清除。
+    let today = chrono::Local::now().date_naive();
+    for sql in [
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, cumulate_dividends_total, is_sold) VALUES ($1, $2, 1000, -40000, 300, false), ($1, $2, 1000, -50000, 200, false), ($1, $2, 500, -99999, 999, true)",
+        "INSERT INTO last_daily_quotes (date, stock_symbol, closing_price) VALUES ('2026-04-30', $2, 50)",
+    ] {
+        sqlx::query(sql)
+            .bind(MEMBER)
+            .bind(SYMBOL)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("種入持股失敗：{error}\n{sql}"));
+    }
+    sqlx::query("INSERT INTO yield_rank (date, security_code, yield) VALUES ($1, $2, 4.5)")
+        .bind(today)
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("種入 yield_rank");
+    sqlx::query("INSERT INTO financial_health (stock_symbol, f_score_year, f_score, f_score_evaluated) VALUES ($1, $2, 6, 9)")
+        .bind(SYMBOL)
+        .bind(today.year() - 1)
+        .execute(pool)
+        .await
+        .expect("種入 financial_health");
+
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["member_id"], MEMBER);
+    assert_eq!(json["data_as_of"], "2026-04-30");
+    // 兩筆未賣出合併：2,000 股 × 50＝100,000；成本 90,000；已賣出那筆不算。
+    assert_eq!(
+        (
+            json["symbols"].clone(),
+            json["market_value"].clone(),
+            json["cost"].clone()
+        ),
+        (1.into(), 100_000.0.into(), 90_000.0.into())
+    );
+    assert_eq!(json["unrealized_gain"], 10_000.0);
+    assert_eq!(json["unrealized_gain_percent"], 11.11);
+    assert_eq!(json["dividends_received"], 500.0);
+    assert_eq!(json["weighted_dividend_yield"]["value"], 4.5);
+    assert_eq!(json["weighted_f_score"]["coverage_percent"], 100.0);
+    let holding = &json["holdings"][0];
+    assert_eq!(holding["stock_symbol"], SYMBOL);
+    assert_eq!(
+        (holding["shares"].clone(), holding["weight_percent"].clone()),
+        (2_000.into(), 100.0.into())
+    );
+    assert_eq!(holding["f_score"], 6);
+    assert_eq!(json["industries"][0]["industry_id"], 1);
+
+    let (status, _) = get("/api/v1/portfolio/summary?member_id=-1").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    cleanup_portfolio().await;
+}
+
 /// 填息分析：同日多列只算一次（季別與月別重複、年度彙總列）、同日除權與除息合併、
 /// 尚未到的除息日略過；已填息算交易日數，未填息算距離填息價的百分比。
 #[tokio::test]

@@ -66,6 +66,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::stock_valuation),
         )
         .route(
+            "/portfolio/summary",
+            axum::routing::get(handlers::portfolio_summary),
+        )
+        .route(
             "/stocks/{symbol}/valuation-band",
             axum::routing::get(handlers::stock_valuation_band),
         )
