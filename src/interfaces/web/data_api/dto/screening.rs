@@ -29,6 +29,11 @@ pub(crate) enum StockScreenSortValue {
     StockSymbol,
     /// 營收年增率。
     RevenueYoy,
+    /// 連續營收年增月數。
+    RevenueYoyStreak,
+    /// 近 3 個月累計營收年增率。
+    #[schema(rename = "revenue_yoy_3m")]
+    RevenueYoy3m,
     /// 每股盈餘。
     Eps,
     /// 股東權益報酬率。
@@ -72,6 +77,12 @@ pub(crate) struct ScreenedStock {
     pub(crate) industry_id: i32,
     /// 最新且仍在三個月內的營收年增率；缺值或過期時為 `null`。
     pub(crate) revenue_yoy_percent: Option<f64>,
+    /// 從最新月份往回連續年增（年增率 > 0 且月份相連）的月數，最多算 12 個月；
+    /// 最新營收過期時為 `null`。
+    pub(crate) revenue_yoy_streak: Option<u8>,
+    /// 近 3 個月合計營收對去年同期的年增率百分比；三個月不相連、去年同期為 0
+    /// 或最新營收過期時為 `null`。
+    pub(crate) revenue_yoy_3m_percent: Option<f64>,
     /// 最新且仍在兩季內的季度 EPS；缺值或過期時為 `null`。
     pub(crate) earnings_per_share: Option<f64>,
     /// 最新且仍在兩季內的季度 ROE；缺值或過期時為 `null`。
@@ -118,7 +129,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的十八個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的二十二個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -133,6 +144,12 @@ pub(crate) struct StockScreeningParams {
     /// 最低營收年增率百分比，範圍 -100–10000。
     #[param(minimum = -100, maximum = 10000)]
     pub(crate) min_revenue_yoy_percent: Option<f64>,
+    /// 最少連續營收年增月數，範圍 1–12。
+    #[param(minimum = 1, maximum = 12)]
+    pub(crate) min_revenue_yoy_streak: Option<u8>,
+    /// 最低近 3 個月累計營收年增率百分比，範圍 -100–10000。
+    #[param(minimum = -100, maximum = 10000)]
+    pub(crate) min_revenue_yoy_3m_percent: Option<f64>,
     /// 最低每股盈餘，範圍 -10000–10000。
     #[param(minimum = -10000, maximum = 10000)]
     pub(crate) min_eps: Option<f64>,

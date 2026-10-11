@@ -55,6 +55,17 @@ async fn openapi_json_and_swagger_ui_are_served() {
             .is_some_and(|v| v.starts_with("3.1"))
     );
     assert!(document["paths"]["/api/v1/market/movers"].is_object());
+    // 排序值要與 handler 白名單一致；`RevenueYoy3m` 不可被自動轉成 `revenue_yoy3m`。
+    let sort_values = document["components"]["schemas"]["StockScreenSortValue"]["enum"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for expected in ["revenue_yoy_streak", "revenue_yoy_3m"] {
+        assert!(
+            sort_values.iter().any(|value| value == expected),
+            "StockScreenSortValue 應包含 {expected}：{sort_values:?}"
+        );
+    }
 
     let response = router()
         .oneshot(
