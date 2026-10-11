@@ -32,7 +32,7 @@
 //! Yahoo 逐期吻合的欄位（營收、營業利益、稅後淨利、EPS、資產負債總額、五項現金流量等），
 //! 其餘欄位為 `NULL`。Yahoo 回 404 多半是已下市，不走備援。
 
-use std::time::Duration;
+use std::{future::Future, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use rand::RngExt;
@@ -165,14 +165,44 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
         .collect();
     candidates.sort();
 
-    let repo = PgFinancialReportRepository::new();
+    tracing::info!("Yahoo 財報採集開始: candidates={}", candidates.len());
+    run_candidates(
+        &candidates,
+        max_stocks,
+        &PgFinancialReportRepository::new(),
+        fetch_reports,
+        fetch_biggo_reports,
+        stock_interval,
+    )
+    .await
+}
+
+/// 依序採集候選股票，跳過 Redis 旗標內處理過的，至多實際嘗試 `max_stocks` 檔。
+///
+/// Yahoo 失敗（404 除外）時改從 BigGo 採集。`yahoo`、`biggo` 是單檔報表的抓取函式，
+/// `pause` 是股票之間的間隔；測試時換成假資料與不等待。
+async fn run_candidates<'a, Y, YF, B, BF, P, PF>(
+    candidates: &'a [String],
+    max_stocks: usize,
+    repo: &impl FinancialReportRepository,
+    yahoo: Y,
+    biggo: B,
+    pause: P,
+) -> Result<RunSummary>
+where
+    Y: Fn(&'a str) -> YF,
+    YF: Future<Output = Result<StockReports>>,
+    B: Fn(&'a str) -> BF,
+    BF: Future<Output = Result<StockReports>>,
+    P: Fn() -> PF,
+    PF: Future<Output = ()>,
+{
     let mut summary = RunSummary {
         candidates: candidates.len(),
         ..Default::default()
     };
-    tracing::info!("Yahoo 財報採集開始: candidates={}", summary.candidates);
 
-    for stock_symbol in &candidates {
+    for stock_symbol in candidates {
         if summary.attempted() >= max_stocks {
             break;
         }
@@ -193,7 +223,11 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
             .await
             .with_context(|| format!("redis set failed: cache_key={cache_key}"))?;
 
-        match backfill_for_stock(&repo, stock_symbol).await {
+        let yahoo_result = match yahoo(stock_symbol).await {
+            Ok(reports) => save_reports(repo, stock_symbol, &reports).await,
+            Err(why) => Err(why),
+        };
+        match yahoo_result {
             Ok(counts) => {
                 summary.succeeded += 1;
                 summary.rows += counts.total();
@@ -218,8 +252,12 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
                 );
             }
             Err(why) => {
-                stock_interval().await;
-                match backfill_from_biggo(&repo, stock_symbol).await {
+                pause().await;
+                let fallback_result = match biggo(stock_symbol).await {
+                    Ok(reports) => save_biggo_reports(repo, stock_symbol, &reports).await,
+                    Err(fallback_err) => Err(fallback_err),
+                };
+                match fallback_result {
                     Ok(counts) => {
                         summary.fallback += 1;
                         summary.rows += counts.total();
@@ -238,7 +276,7 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
             }
         }
 
-        stock_interval().await;
+        pause().await;
     }
 
     Ok(summary)
@@ -274,10 +312,19 @@ pub async fn backfill_from_biggo(
     stock_symbol: &str,
 ) -> Result<SavedCounts> {
     let reports = fetch_biggo_reports(stock_symbol).await?;
+    save_biggo_reports(repo, stock_symbol, &reports).await
+}
+
+/// 寫入 BigGo 的單檔報表；BigGo 完全沒有這檔的財報視為失敗。
+async fn save_biggo_reports(
+    repo: &impl FinancialReportRepository,
+    stock_symbol: &str,
+    reports: &StockReports,
+) -> Result<SavedCounts> {
     if reports.is_empty() {
         bail!("BigGo has no financial statements for {stock_symbol}");
     }
-    save_reports(repo, stock_symbol, &reports).await
+    save_reports(repo, stock_symbol, reports).await
 }
 
 /// 寫入單檔三大報表並回傳各表列數。
@@ -442,7 +489,224 @@ async fn stock_interval() {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use anyhow::anyhow;
+    use async_trait::async_trait;
+
     use super::*;
+    use crate::{
+        core::declare::Quarter, domain::financial::statement::StatementPeriod,
+        infra::crawler::yahoo::dividend::YahooPageNotFoundError,
+    };
+
+    /// 記下寫入列數、回傳實際列數的假倉儲。
+    #[derive(Default)]
+    struct FakeRepository {
+        saved: Mutex<Vec<(String, usize)>>,
+    }
+
+    #[async_trait]
+    impl FinancialReportRepository for FakeRepository {
+        async fn save_income_statements(&self, statements: &[IncomeStatement]) -> Result<u64> {
+            self.record("income", statements.len())
+        }
+
+        async fn save_balance_sheets(&self, sheets: &[BalanceSheet]) -> Result<u64> {
+            self.record("balance", sheets.len())
+        }
+
+        async fn save_cash_flow_statements(&self, statements: &[CashFlowStatement]) -> Result<u64> {
+            self.record("cash_flow", statements.len())
+        }
+    }
+
+    impl FakeRepository {
+        fn record(&self, table: &str, rows: usize) -> Result<u64> {
+            self.saved.lock().unwrap().push((table.to_owned(), rows));
+            Ok(rows as u64)
+        }
+    }
+
+    fn income(stock_symbol: &str) -> IncomeStatement {
+        IncomeStatement {
+            stock_symbol: stock_symbol.to_owned(),
+            fiscal_year: 2020,
+            period: StatementPeriod::Single(Quarter::Q1),
+            source: "yahoo".to_owned(),
+            revenue: Some(1_000),
+            gross_profit: None,
+            selling_expenses: None,
+            admin_expenses: None,
+            rd_expenses: None,
+            operating_expenses: None,
+            operating_profit: None,
+            non_operating_income: None,
+            profit_before_tax: None,
+            net_income: None,
+            owner_parent_profit: None,
+            revenue_per_share: None,
+            operating_profit_per_share: None,
+            profit_before_tax_per_share: None,
+            eps: None,
+            bps: None,
+        }
+    }
+
+    /// 只有損益表一列的報表。
+    fn reports(stock_symbol: &str) -> StockReports {
+        StockReports {
+            income_statements: vec![income(stock_symbol)],
+            balance_sheets: Vec::new(),
+            cash_flow_statements: Vec::new(),
+        }
+    }
+
+    fn empty_reports() -> StockReports {
+        StockReports {
+            income_statements: Vec::new(),
+            balance_sheets: Vec::new(),
+            cash_flow_statements: Vec::new(),
+        }
+    }
+
+    /// 三張表依序寫入並回傳各表列數；BigGo 沒有任何報表時視為失敗、不寫入。
+    #[tokio::test]
+    async fn save_reports_writes_three_tables_and_rejects_empty_biggo() {
+        let repo = FakeRepository::default();
+        let counts = save_reports(&repo, "2330", &reports("2330"))
+            .await
+            .expect("save_reports");
+        assert_eq!(
+            counts,
+            SavedCounts {
+                income_statements: 1,
+                balance_sheets: 0,
+                cash_flow_statements: 0,
+            }
+        );
+        let tables: Vec<String> = repo
+            .saved
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(t, _)| t.clone())
+            .collect();
+        assert_eq!(tables, ["income", "balance", "cash_flow"]);
+
+        let repo = FakeRepository::default();
+        let err = save_biggo_reports(&repo, "2330", &empty_reports())
+            .await
+            .expect_err("BigGo 沒有報表應失敗");
+        assert!(
+            err.to_string()
+                .contains("BigGo has no financial statements")
+        );
+        assert!(repo.saved.lock().unwrap().is_empty());
+        assert!(empty_reports().is_empty() && !reports("2330").is_empty());
+    }
+
+    /// 假代號：F1 已有旗標、F2 Yahoo 成功、F3 Yahoo 404、F4 改用 BigGo、F5 兩邊都失敗、
+    /// F6 超過單輪上限不處理。
+    const SYMBOLS: [&str; 6] = [
+        "79979F1", "79979F2", "79979F3", "79979F4", "79979F5", "79979F6",
+    ];
+
+    async fn clear_flags() {
+        for symbol in SYMBOLS {
+            let _ = CLIENT.delete(&make_cache_key(symbol)).await;
+        }
+    }
+
+    /// 旗標略過、Yahoo 成功、404、BigGo 備援、兩邊都失敗各自計數，實際嘗試數到上限就停。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（Redis），請加 --features integration-tests 執行"
+    )]
+    async fn run_candidates_counts_each_outcome_and_stops_at_the_limit() {
+        dotenvy::dotenv().ok();
+        if CLIENT.ping().await.is_err() {
+            println!(
+                "跳過 run_candidates_counts_each_outcome_and_stops_at_the_limit：無 Redis 連線"
+            );
+            return;
+        }
+        clear_flags().await;
+        CLIENT
+            .set(&make_cache_key("79979F1"), true, 60)
+            .await
+            .expect("預先寫入略過旗標");
+
+        let candidates: Vec<String> = SYMBOLS.iter().map(|s| (*s).to_owned()).collect();
+        let yahoo_calls = Mutex::new(Vec::new());
+        let biggo_calls = Mutex::new(Vec::new());
+        let repo = FakeRepository::default();
+        let summary = run_candidates(
+            &candidates,
+            4,
+            &repo,
+            |symbol: &str| {
+                yahoo_calls.lock().unwrap().push(symbol.to_owned());
+                let result = match symbol {
+                    "79979F2" => Ok(reports(symbol)),
+                    "79979F3" => Err(anyhow::Error::new(YahooPageNotFoundError {
+                        stock_symbol: symbol.to_owned(),
+                        url: "https://example.invalid".to_owned(),
+                    })),
+                    _ => Err(anyhow!("Yahoo 測試失敗")),
+                };
+                async move { result }
+            },
+            |symbol: &str| {
+                biggo_calls.lock().unwrap().push(symbol.to_owned());
+                let result = match symbol {
+                    "79979F4" => Ok(reports(symbol)),
+                    _ => Ok(empty_reports()),
+                };
+                async move { result }
+            },
+            || async {},
+        )
+        .await
+        .expect("run_candidates");
+
+        assert_eq!(
+            summary,
+            RunSummary {
+                candidates: 6,
+                skipped: 1,
+                succeeded: 1,
+                fallback: 1,
+                not_found: 1,
+                failed: 1,
+                rows: 2,
+            }
+        );
+        assert_eq!(
+            *yahoo_calls.lock().unwrap(),
+            ["79979F2", "79979F3", "79979F4", "79979F5"]
+        );
+        assert_eq!(*biggo_calls.lock().unwrap(), ["79979F4", "79979F5"]);
+        // 實際嘗試過的都寫了旗標；超過上限的 F6 沒有。
+        for symbol in ["79979F2", "79979F3", "79979F4", "79979F5"] {
+            assert!(
+                CLIENT
+                    .get_bool(&make_cache_key(symbol))
+                    .await
+                    .unwrap_or(false),
+                "{symbol}"
+            );
+        }
+        assert!(
+            !CLIENT
+                .get_bool(&make_cache_key("79979F6"))
+                .await
+                .unwrap_or(false)
+        );
+
+        clear_flags().await;
+    }
 
     fn stock(symbol: &str, market_id: i32) -> Stock {
         Stock::register(symbol.to_string(), "測試".to_string(), market_id, 1)
