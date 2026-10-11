@@ -122,6 +122,9 @@ pub trait FinancialHealthRepository: Send + Sync {
     async fn fetch_quarter_figures(&self, since_year: i32)
     -> Result<Vec<(String, QuarterFigures)>>;
 
+    /// 讀出 `financial_health` 目前的全部列（上一次重算的結果）。
+    async fn fetch_financial_health(&self) -> Result<Vec<FinancialHealthSnapshot>>;
+
     /// 以這次重算結果整批取代 `financial_health`，回傳寫入列數。
     ///
     /// 刪除與寫入在同一筆交易內，寫入失敗時舊資料完整保留。

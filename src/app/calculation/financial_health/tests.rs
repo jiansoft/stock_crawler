@@ -34,6 +34,10 @@ impl FinancialHealthRepository for FakeRepository {
         Ok(self.quarters.clone())
     }
 
+    async fn fetch_financial_health(&self) -> Result<Vec<FinancialHealthSnapshot>> {
+        Ok(self.written.lock().expect("lock").clone())
+    }
+
     async fn replace_financial_health(&self, snapshots: &[FinancialHealthSnapshot]) -> Result<u64> {
         *self.written.lock().expect("lock") = snapshots.to_vec();
         Ok(snapshots.len() as u64)
@@ -112,7 +116,8 @@ async fn rebuild_reads_lookback_years_and_replaces_all_snapshots() {
         ..FakeRepository::default()
     };
 
-    let summary = rebuild(&repo, 2026).await.expect("rebuild");
+    let rebuilt = rebuild(&repo, 2026).await.expect("rebuild");
+    let summary = rebuilt.summary;
     assert_eq!(
         summary,
         RebuildSummary {
@@ -127,7 +132,8 @@ async fn rebuild_reads_lookback_years_and_replaces_all_snapshots() {
         "stocks=2 scored=1 with_quarter=1 written=2"
     );
     assert_eq!(*repo.since_years.lock().expect("lock"), vec![2023, 2024]);
-    let written = repo.written.lock().expect("lock");
+    let written = repo.fetch_financial_health().await.expect("fetch");
+    assert_eq!(written, rebuilt.snapshots, "寫入的就是回傳的快照");
     assert_eq!(written.len(), 2);
     assert_eq!(written[1].f_score, None, "B 沒有年度損益表，不算 F 分數");
 }
