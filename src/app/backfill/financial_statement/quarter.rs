@@ -7,14 +7,20 @@
 //! [`crate::util::datetime::backfill_report_quarter_targets_for_listed_and_otc`]
 //! 依上市/上櫃公司季報法定申報截止日與較保守的預抓視窗決定處理清單。
 
+use std::future::Future;
+
 use anyhow::Result;
 use chrono::Local;
 use futures::StreamExt;
 
 use crate::{
     app::backfill::acl::FinancialStatementAclMapper,
-    app::backfill::financial_statement::update_roe_and_roa_for_zero_values, app::calculation,
-    core::util::datetime::ReportQuarter, infra::crawler::yahoo,
+    app::backfill::financial_statement::update_roe_and_roa_for_zero_values,
+    app::calculation,
+    core::util::datetime::ReportQuarter,
+    domain::financial::{entity::FinancialStatement, repository::FinancialRepository},
+    infra::crawler::yahoo,
+    infra::database::repository::financial::PgFinancialRepository,
 };
 
 /// 補齊最新應已公告季度財報中缺漏的 ROE、ROA 與每股淨值欄位。
@@ -99,17 +105,37 @@ async fn dispatch_quarterly_financials_updated(processed_quarters: &[ReportQuart
 /// 使用 `futures::stream` 併發呼叫 Yahoo 財經爬取 Profile 資料，
 /// 爬取完成後再一次批量 Upsert 入庫，大幅減少資料庫連線延遲，並降低 Yahoo 連線之 sequential 阻塞。
 async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
-    use crate::domain::financial::repository::FinancialRepository;
-    use crate::infra::database::repository::financial::PgFinancialRepository;
-
     let financial_repo = PgFinancialRepository::new();
-    let quarter = target_report.quarter.to_string();
 
     // 找出該季度中 ROE 或 ROA 為 0 的財報清單
     let fss = financial_repo
         .fetch_roe_or_roa_equal_to_zero(Some(target_report.year), Some(target_report.quarter))
         .await?;
+    fill_from_yahoo_profile(
+        &financial_repo,
+        target_report,
+        fss,
+        |stock_symbol| async move { yahoo::profile::visit(&stock_symbol).await },
+    )
+    .await
+}
+
+/// 逐筆向 Yahoo 取 profile，批次寫回後記下成功快取。
+///
+/// `fetch` 是 Yahoo profile 的查詢函式，測試時換成假資料。
+async fn fill_from_yahoo_profile<F, Fut>(
+    financial_repo: &PgFinancialRepository,
+    target_report: ReportQuarter,
+    fss: Vec<FinancialStatement>,
+    fetch: F,
+) -> Result<usize>
+where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Result<yahoo::profile::Profile>>,
+{
+    let quarter = target_report.quarter.to_string();
     let candidates = fss.len();
+    let fetch = &fetch;
 
     // 建立併發爬取的 async stream，並限制併發數量上限為 5
     let mut stream = futures::stream::iter(fss)
@@ -141,7 +167,7 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
                 }
 
                 // 呼叫 Yahoo API 抓取 Profile 資訊
-                let profile = match yahoo::profile::visit(&fs.security_code).await {
+                let profile = match fetch(fs.security_code.clone()).await {
                     Ok(profile) => profile,
                     Err(why) => {
                         // 查無有效資料或個股頁 404（已下市）都是預期狀況：寫入 Redis 排除快取避免重複查詢
@@ -225,9 +251,171 @@ async fn process_target_report(target_report: ReportQuarter) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::cache::SHARE;
+    use std::sync::Mutex;
+
+    use anyhow::anyhow;
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+
+    use crate::{
+        core::declare::Quarter,
+        infra::{
+            cache::SHARE, crawler::yahoo::dividend::YahooPageNotFoundError, database,
+            nosql::redis::CLIENT,
+        },
+    };
 
     use super::*;
+
+    /// 假代號：C 補得到、D 的個股頁 404、E 是一般錯誤。
+    const SYMBOL_C: &str = "79979RC";
+    const SYMBOL_D: &str = "79979RD";
+    const SYMBOL_E: &str = "79979RE";
+    const SYMBOLS: [&str; 3] = [SYMBOL_C, SYMBOL_D, SYMBOL_E];
+    /// 固定的歷史季度，不使用今天的日期當資料日期。
+    const REPORT: ReportQuarter = ReportQuarter {
+        year: 2020,
+        quarter: Quarter::Q1,
+    };
+
+    fn success_cache_key(symbol: &str) -> String {
+        format!("FinancialStatement:{symbol}-2020-Q1")
+    }
+
+    async fn cleanup() {
+        let pool = database::get_connection();
+        for symbol in SYMBOLS {
+            for sql in [
+                "DELETE FROM financial_statement WHERE security_code = $1",
+                "DELETE FROM stocks WHERE stock_symbol = $1",
+            ] {
+                let _ = sqlx::query(sql).bind(symbol).execute(pool).await;
+            }
+            let _ = CLIENT.delete(&success_cache_key(symbol)).await;
+            let _ = CLIENT
+                .delete(&yahoo::profile::no_valid_data_cache_key(symbol))
+                .await;
+        }
+    }
+
+    /// 2020-Q1 ROE、ROA 都是 0 的財報。
+    fn zero_statement(symbol: &str) -> FinancialStatement {
+        FinancialStatement {
+            security_code: symbol.to_owned(),
+            year: 2020,
+            quarter: "Q1".to_owned(),
+            net_asset_value_per_share: dec!(30),
+            earnings_per_share: dec!(2),
+            ..FinancialStatement::default()
+        }
+    }
+
+    async fn pending_rows(repo: &PgFinancialRepository) -> Vec<FinancialStatement> {
+        repo.fetch_roe_or_roa_equal_to_zero(Some(REPORT.year), Some(REPORT.quarter))
+            .await
+            .expect("fetch_roe_or_roa_equal_to_zero")
+            .into_iter()
+            .filter(|fs| SYMBOLS.contains(&fs.security_code.as_str()))
+            .collect()
+    }
+
+    /// 補到的寫回並記成功快取；404 記排除快取；一般錯誤不記，下一輪只再查它。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn fill_from_yahoo_profile_saves_found_profiles_and_caches_outcomes() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() || CLIENT.ping().await.is_err() {
+            println!(
+                "跳過 fill_from_yahoo_profile_saves_found_profiles_and_caches_outcomes：無資料庫或 Redis 連接"
+            );
+            return;
+        }
+        cleanup().await;
+        for symbol in SYMBOLS {
+            sqlx::query(
+                r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, "SuspendListing") VALUES ($1, 'profile 補值測試', $1, 2, false)"#,
+            )
+            .bind(symbol)
+            .execute(database::get_connection())
+            .await
+            .expect("種入股票主檔");
+        }
+        let repo = PgFinancialRepository::new();
+        repo.batch_save_financial_statements(&SYMBOLS.map(zero_statement))
+            .await
+            .expect("種入假代號財報");
+
+        let calls = Mutex::new(Vec::new());
+        let fetch = |symbol: String| {
+            calls.lock().expect("calls lock").push(symbol.clone());
+            async move {
+                match symbol.as_str() {
+                    SYMBOL_C => Ok(yahoo::profile::Profile {
+                        quarter: "Q1".to_owned(),
+                        stock_symbol: symbol.clone(),
+                        net_asset_value_per_share: dec!(31),
+                        earnings_per_share: dec!(2),
+                        return_on_equity: dec!(6),
+                        return_on_assets: dec!(4),
+                        year: 2020,
+                        ..yahoo::profile::Profile::default()
+                    }),
+                    SYMBOL_D => Err(anyhow::Error::new(YahooPageNotFoundError {
+                        stock_symbol: symbol.clone(),
+                        url: "https://example.invalid".to_owned(),
+                    })),
+                    _ => Err(anyhow!("Yahoo 測試失敗")),
+                }
+            }
+        };
+
+        let saved = fill_from_yahoo_profile(&repo, REPORT, pending_rows(&repo).await, &fetch)
+            .await
+            .expect("fill_from_yahoo_profile");
+        assert_eq!(saved, 1);
+        let (roe, roa): (Decimal, Decimal) = sqlx::query_as(
+            "SELECT return_on_equity, return_on_assets FROM financial_statement WHERE security_code = $1 AND year = 2020 AND quarter = 'Q1'",
+        )
+        .bind(SYMBOL_C)
+        .fetch_one(database::get_connection())
+        .await
+        .expect("讀回假代號財報");
+        assert_eq!((roe, roa), (dec!(6), dec!(4)));
+        assert!(
+            CLIENT
+                .get_bool(&success_cache_key(SYMBOL_C))
+                .await
+                .unwrap_or(false)
+        );
+        assert!(
+            CLIENT
+                .get_bool(&yahoo::profile::no_valid_data_cache_key(SYMBOL_D))
+                .await
+                .unwrap_or(false)
+        );
+        assert!(
+            !CLIENT
+                .get_bool(&yahoo::profile::no_valid_data_cache_key(SYMBOL_E))
+                .await
+                .unwrap_or(false)
+        );
+
+        // 第二輪 C 已補好不在待補清單、D 被排除快取擋住，只剩 E 再查一次。
+        calls.lock().expect("calls lock").clear();
+        let saved = fill_from_yahoo_profile(&repo, REPORT, pending_rows(&repo).await, &fetch)
+            .await
+            .expect("fill_from_yahoo_profile");
+        assert_eq!(saved, 0);
+        assert_eq!(
+            *calls.lock().expect("calls lock"),
+            vec![SYMBOL_E.to_owned()]
+        );
+
+        cleanup().await;
+    }
 
     #[tokio::test]
     #[ignore]
