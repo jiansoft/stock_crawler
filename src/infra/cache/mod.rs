@@ -22,3 +22,11 @@ pub use realtime::{PriceLimit, RealtimeSnapshot};
 pub use share::{SHARE, Share};
 pub use snapshot::report_abnormal_price;
 pub use ttl::{TTL, TtlCacheInner};
+
+/// 測試共用的鎖：[`SHARE`] 的即時報價快取與 trace 的追蹤條件快取都是全域狀態。
+///
+/// 盤中報價相關的測試（Yahoo、HiStock 類股快取與 trace 價格任務）都持有這把鎖，
+/// 平行執行時才不會清掉彼此寫入的資料。
+#[cfg(test)]
+pub(crate) static REALTIME_TEST_LOCK: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
+    once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));

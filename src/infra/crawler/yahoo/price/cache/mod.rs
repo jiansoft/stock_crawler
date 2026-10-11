@@ -44,8 +44,7 @@ pub(crate) use state::{diagnostics_snapshot, runtime_diagnostics_snapshot};
 
 /// 測試間共用的鎖：套用快照的測試與 live 啟停測試都會改動全域 [`SHARE`]。
 #[cfg(test)]
-static TEST_STATE_LOCK: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
-    once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
+use crate::infra::cache::REALTIME_TEST_LOCK as TEST_STATE_LOCK;
 
 /// 全部類股輪詢完一輪後的休息時間。
 const CYCLE_COOLDOWN: Duration = Duration::from_secs(5);

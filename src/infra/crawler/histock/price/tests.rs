@@ -1,15 +1,14 @@
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use once_cell::sync::Lazy;
 use scraper::{Html, Selector};
-use tokio::sync::Mutex;
 
 use super::{parse::*, screen::*, task::*, *};
 use crate::core::util::diagnostics::ProcessMemoryStats;
 use rust_decimal_macros::dec;
 
-static TEST_STATE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+/// 與 Yahoo 類股快取、trace 價格任務共用：都會改動全域即時報價快取。
+use crate::infra::cache::REALTIME_TEST_LOCK as TEST_STATE_LOCK;
 
 /// 驗證全量快取更新前，只會針對價格實際異動的股票產生價格事件。
 #[test]
