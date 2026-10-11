@@ -11,8 +11,8 @@ use super::{dto, handlers};
 /// 由 handler 註解生成的 OpenAPI 3 文件。
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::financial_reports, handlers::financial_health, handlers::dividend_history, handlers::stock_valuation, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::IncomeStatementItem, dto::BalanceSheetItem, dto::CashFlowStatementItem, dto::FinancialReportResponse, dto::HealthCriterion, dto::FinancialHealthResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::ReportPeriodTypeValue, dto::HealthCategoryValue, dto::HealthValueUnitValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
+    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::financial_reports, handlers::financial_health, handlers::dividend_history, handlers::dividend_fill, handlers::stock_valuation, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::IncomeStatementItem, dto::BalanceSheetItem, dto::CashFlowStatementItem, dto::FinancialReportResponse, dto::HealthCriterion, dto::FinancialHealthResponse, dto::Dividend, dto::DividendHistoryResponse, dto::DividendFillEvent, dto::DividendFillSummary, dto::DividendFillResponse, dto::StockValuation, dto::StockValuationResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::ReportPeriodTypeValue, dto::HealthCategoryValue, dto::HealthValueUnitValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -173,6 +173,7 @@ mod tests {
             "/api/v1/stocks/{symbol}/financial-reports",
             "/api/v1/stocks/{symbol}/financial-health",
             "/api/v1/stocks/{symbol}/dividends",
+            "/api/v1/stocks/{symbol}/dividend-fill",
             "/api/v1/stocks/{symbol}/valuation",
             "/api/v1/stocks/{symbol}/chip",
             "/api/v1/market/breadth",
@@ -709,6 +710,43 @@ mod tests {
         assert_eq!(
             enum_values(&document, &criterion["unit"]),
             serde_json::json!(["ratio", "thousand_twd"])
+        );
+    }
+
+    /// 填息分析 path 的契約：limit 範圍與預設、events／summary 結構與可為 null 的欄位。
+    #[test]
+    fn openapi_dividend_fill_schema_pins_field_names() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+        let operation = get_operation(&document, "/api/v1/stocks/{symbol}/dividend-fill");
+        assert_endpoint_responses(operation, "DividendFillResponse", true);
+        let limit = query_schema(operation, "limit");
+        assert_eq!(limit["default"], 12);
+        assert_eq!(limit["minimum"], 1);
+        assert_eq!(limit["maximum"], 40);
+
+        let schemas = &document["components"]["schemas"];
+        let response = &schemas["DividendFillResponse"]["properties"];
+        assert_eq!(response["events"]["type"], "array");
+        assert_eq!(
+            response["events"]["items"]["$ref"],
+            "#/components/schemas/DividendFillEvent"
+        );
+        assert!(
+            response["summary"]
+                .to_string()
+                .contains("DividendFillSummary")
+        );
+        let event = &schemas["DividendFillEvent"]["properties"];
+        assert_eq!(event["filled"]["type"], "boolean");
+        assert_eq!(event["trading_days_since_ex"]["type"], "integer");
+        for field in ["fill_date", "trading_days_to_fill", "gap_percent"] {
+            assert!(event[field].to_string().contains("null"), "{field}");
+        }
+        let summary = &schemas["DividendFillSummary"]["properties"];
+        assert!(
+            summary["average_trading_days_to_fill"]
+                .to_string()
+                .contains("number")
         );
     }
 }

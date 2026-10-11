@@ -647,3 +647,103 @@ async fn stock_screen_financial_health_filters() {
 
     cleanup(pool).await;
 }
+
+/// 填息分析：同日多列只算一次（季別與月別重複、年度彙總列）、同日除權與除息合併、
+/// 尚未到的除息日略過；已填息算交易日數，未填息算距離填息價的百分比。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn stock_dividend_fill_endpoint_db_semantics() {
+    let Some(pool) = pool_or_skip("stock_dividend_fill_endpoint_db_semantics").await else {
+        return;
+    };
+    cleanup(pool).await;
+    seed(pool, &[SEED_STOCK]).await;
+
+    // 沒有日線與股利：統計為 0、data_as_of 為 null。
+    let path = format!("/api/v1/stocks/{SYMBOL}/dividend-fill");
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["data_as_of"].is_null(), "{json}");
+    assert_eq!(json["events"], serde_json::json!([]));
+    assert_eq!(json["summary"]["events"], 0);
+    assert!(json["summary"]["average_trading_days_to_fill"].is_null());
+
+    seed(
+        pool,
+        &[
+            r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2")
+               VALUES ($1, 2020, 2019, 'Q4', 2.5, 0, 2.5, '2020-03-17', '-'),
+                      ($1, 2020, 2019, 'M12', 2.5, 0, 2.5, '2020-03-17', '-'),
+                      ($1, 2020, 2019, '', 10, 0, 10, '2020-03-17', '-'),
+                      ($1, 2020, 2020, 'Q1', 2.6, 0, 2.6, '2020-06-16', '-'),
+                      ($1, 2020, 2020, 'Q2', 0, 0.5, 0.5, '-', '2020-06-16'),
+                      ($1, 2020, 2020, 'Q3', 3, 0, 3, '2020-12-15', '-'),
+                      ($1, 2021, 2020, 'Q4', 3, 0, 3, '尚未公布', '-')"#,
+            r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, year, month, day, "OpeningPrice", "HighestPrice", "LowestPrice", "ClosingPrice")
+               VALUES ('2020-03-16', $1, 2020, 3, 16, 100, 100, 100, 100),
+                      ('2020-03-17', $1, 2020, 3, 17, 97.5, 97.5, 97.5, 97.5),
+                      ('2020-03-18', $1, 2020, 3, 18, 99, 99, 99, 99),
+                      ('2020-03-19', $1, 2020, 3, 19, 100.5, 100.5, 100.5, 100.5),
+                      ('2020-06-15', $1, 2020, 6, 15, 110, 110, 110, 110),
+                      ('2020-06-16', $1, 2020, 6, 16, 105, 105, 105, 105),
+                      ('2020-06-17', $1, 2020, 6, 17, 104, 104, 104, 104),
+                      ('2020-06-30', $1, 2020, 6, 30, 106, 106, 106, 106)"#,
+        ],
+    )
+    .await;
+
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data_as_of"], "2020-06-30");
+    let events = json["events"].as_array().expect("events 陣列");
+    let dates: Vec<_> = events
+        .iter()
+        .map(|e| e["ex_date"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        dates,
+        ["2020-06-16", "2020-03-17"],
+        "尚未到的 12-15 與未公布的列都略過"
+    );
+
+    let june = &events[0];
+    assert_eq!(june["cash_dividend"], 2.6);
+    assert_eq!(june["stock_dividend"], 0.5);
+    assert_eq!(june["pre_ex_date"], "2020-06-15");
+    assert_eq!(june["pre_ex_close"], 110.0);
+    assert_eq!(june["filled"], false);
+    assert!(june["fill_date"].is_null());
+    assert_eq!(june["trading_days_since_ex"], 3);
+    assert_eq!(june["latest_close"], 106.0);
+    assert_eq!(june["gap_percent"], 3.64);
+
+    let march = &events[1];
+    assert_eq!(
+        march["cash_dividend"], 2.5,
+        "同日的彙總列與月別重複列都不重複計算"
+    );
+    assert_eq!(march["filled"], true);
+    assert_eq!(march["fill_date"], "2020-03-19");
+    assert_eq!(march["trading_days_to_fill"], 3);
+    assert!(march["gap_percent"].is_null());
+
+    assert_eq!(json["summary"]["events"], 2);
+    assert_eq!(json["summary"]["filled"], 1);
+    assert_eq!(json["summary"]["average_trading_days_to_fill"], 3.0);
+    assert_eq!(json["summary"]["median_trading_days_to_fill"], 3.0);
+
+    let (_, json) = get(&format!("{path}?limit=1")).await;
+    assert_eq!(json["events"].as_array().map(Vec::len), Some(1));
+
+    for query in ["limit=0", "limit=41"] {
+        let (status, _) = get(&format!("{path}?{query}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+    let (status, _) = get("/api/v1/stocks/79979ZZ/dividend-fill").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    cleanup(pool).await;
+}

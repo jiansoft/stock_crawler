@@ -3,12 +3,13 @@
 //! 此模組刻意只放 HTTP 契約型別，避免 SQLx 的資料庫列型別滲漏到 API；所有
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
-//! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`financial_reports`、`financial_health`、
-//! `chip`、`screening`、`market` 與 `cagr` 八個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
+//! `financial_health`、`chip`、`screening`、`market` 與 `cagr` 九個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
 mod chip;
+mod dividend_fill;
 mod financial_health;
 mod financial_reports;
 mod fundamentals;
@@ -26,6 +27,9 @@ pub(super) use cagr::{
 pub(super) use chip::{
     BrokerFlowDay, BrokerNet, ChipDay, ChipParams, ChipResponse, ChipStreak, HolderWeek,
     InsiderSummary,
+};
+pub(super) use dividend_fill::{
+    DividendFillEvent, DividendFillParams, DividendFillResponse, DividendFillSummary,
 };
 pub(super) use financial_health::{
     FinancialHealthParams, FinancialHealthResponse, HealthCategoryValue, HealthCriterion,
