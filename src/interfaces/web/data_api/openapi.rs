@@ -11,8 +11,8 @@ use super::{dto, handlers};
 /// 由 handler 註解生成的 OpenAPI 3 文件。
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::dividend_history, handlers::stock_valuation, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
+    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::financial_reports, handlers::dividend_history, handlers::stock_valuation, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::IncomeStatementItem, dto::BalanceSheetItem, dto::CashFlowStatementItem, dto::FinancialReportResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::ReportPeriodTypeValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -170,6 +170,7 @@ mod tests {
             "/api/v1/stocks/{symbol}/realtime-snapshot",
             "/api/v1/stocks/{symbol}/monthly-revenues",
             "/api/v1/stocks/{symbol}/financial-statements",
+            "/api/v1/stocks/{symbol}/financial-reports",
             "/api/v1/stocks/{symbol}/dividends",
             "/api/v1/stocks/{symbol}/valuation",
             "/api/v1/stocks/{symbol}/chip",
@@ -561,5 +562,60 @@ mod tests {
             period_item.get("rank").is_none(),
             "個股端點的項目不應有 rank"
         );
+    }
+
+    /// 三大報表 path 的契約：期間 enum 與預設值、limit 範圍、三個陣列的 item，
+    /// 以及「金額是整數、每股數值是可為 null 的 number」。
+    #[test]
+    fn openapi_financial_reports_schema_pins_field_names() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+        let operation = get_operation(&document, "/api/v1/stocks/{symbol}/financial-reports");
+        assert_endpoint_responses(operation, "FinancialReportResponse", true);
+        let period = query_schema(operation, "period_type");
+        assert_eq!(period["default"], "quarterly");
+        assert_eq!(
+            enum_values(&document, period),
+            serde_json::json!(["quarterly", "annual"])
+        );
+        let limit = query_schema(operation, "limit");
+        assert_eq!(limit["default"], 8);
+        assert_eq!(limit["minimum"], 1);
+        assert_eq!(limit["maximum"], 40);
+
+        let schemas = &document["components"]["schemas"];
+        let properties = &schemas["FinancialReportResponse"]["properties"];
+        for (list, item) in [
+            ("income_statements", "IncomeStatementItem"),
+            ("balance_sheets", "BalanceSheetItem"),
+            ("cash_flow_statements", "CashFlowStatementItem"),
+        ] {
+            assert_eq!(properties[list]["type"], "array");
+            assert_eq!(
+                properties[list]["items"]["$ref"],
+                format!("#/components/schemas/{item}")
+            );
+            assert_eq!(
+                schemas[item]["properties"]["fiscal_year"]["type"],
+                "integer"
+            );
+            assert_eq!(schemas[item]["properties"]["source"]["type"], "string");
+        }
+        assert_eq!(properties["amount_unit"]["type"], "string");
+        assert!(properties["data_as_of"].to_string().contains("null"));
+
+        let income = &schemas["IncomeStatementItem"]["properties"];
+        let revenue = income["revenue"].to_string();
+        assert!(revenue.contains("integer") && revenue.contains("null"));
+        let eps = income["eps"].to_string();
+        assert!(eps.contains("number") && eps.contains("null"));
+        let balance = &schemas["BalanceSheetItem"]["properties"];
+        assert!(balance["total_assets"].to_string().contains("integer"));
+        assert!(
+            balance["book_value_per_share"]
+                .to_string()
+                .contains("number")
+        );
+        let cash_flow = &schemas["CashFlowStatementItem"]["properties"];
+        assert!(cash_flow["free_cash_flow"].to_string().contains("integer"));
     }
 }

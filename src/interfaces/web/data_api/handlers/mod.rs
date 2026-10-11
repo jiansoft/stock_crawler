@@ -1,8 +1,8 @@
 //! Data API handlers 的共用工具與子模組彙整。
 //!
-//! 各組 endpoint 依路由分成 `stock_quotes`、`stock_fundamentals`、
-//! `market_stats`、`market_rankings`、`market_movers`、`market_calendar`、
-//! `screening` 與 `cagr` 八個子模組；此檔只保留跨組共用的錯誤轉換、數值與日期轉換
+//! 各組 endpoint 依路由分成 `stock_quotes`、`stock_fundamentals`、`financial_reports`、
+//! `chip`、`market_stats`、`market_rankings`、`market_movers`、`market_calendar`、
+//! `screening` 與 `cagr` 十個子模組；此檔只保留跨組共用的錯誤轉換、數值與日期轉換
 //! helper，並把 handler 重新導出，讓 `routes` 與 `openapi` 仍以
 //! `handlers::<fn>` 引用。
 //!
@@ -11,6 +11,7 @@
 
 mod cagr;
 mod chip;
+mod financial_reports;
 mod market_calendar;
 mod market_movers;
 mod market_rankings;
@@ -32,6 +33,7 @@ use crate::interfaces::web::data_api::dto::{ErrorBody, HealthResponse};
 
 pub(super) use cagr::{__path_cagr_by_symbol, __path_cagr_ranking, cagr_by_symbol, cagr_ranking};
 pub(super) use chip::{__path_stock_chip, stock_chip};
+pub(super) use financial_reports::{__path_financial_reports, financial_reports};
 pub(super) use market_calendar::{__path_dividend_calendar, dividend_calendar};
 pub(super) use market_movers::{__path_market_movers, market_movers};
 pub(super) use market_rankings::{
