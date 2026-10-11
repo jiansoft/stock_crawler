@@ -228,6 +228,7 @@ mod tests {
     /// 快取沒有這檔時寫入新價格與來源，並視為價格異動。
     #[test]
     fn new_price_is_cached_and_reported_as_changed() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.blocking_lock();
         remove_snapshot(SYMBOL_NEW);
 
         assert!(apply_backup_price(
@@ -244,6 +245,7 @@ mod tests {
     /// 價格與來源都沒變不更新；只換來源時更新來源但不算價格異動。
     #[test]
     fn unchanged_price_is_not_reported() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.blocking_lock();
         put_snapshot(SYMBOL_SAME, dec!(50), dec!(50), "Fugle");
 
         assert!(!apply_backup_price(
@@ -264,6 +266,7 @@ mod tests {
     /// 超出漲跌幅的價格（HiStock 偶發錯價那類）必須被過濾，快取維持原值。
     #[test]
     fn abnormal_price_is_filtered() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.blocking_lock();
         put_snapshot(SYMBOL_ABNORMAL, dec!(54.7), dec!(54.7), "Yahoo");
 
         assert!(!apply_backup_price(
@@ -282,6 +285,7 @@ mod tests {
     /// 0 元（尚未成交）與抓取失敗都不寫入快取。
     #[test]
     fn zero_price_and_fetch_errors_are_ignored() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.blocking_lock();
         remove_snapshot(SYMBOL_ZERO);
 
         assert!(!apply_backup_price(
@@ -298,6 +302,7 @@ mod tests {
     /// 沒有被追蹤的股票時不發任何請求，直接成功。
     #[tokio::test]
     async fn refresh_without_traced_symbols_is_a_noop() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.lock().await;
         stock_price::clear_trace_targets_cache();
         refresh_traced_stock_snapshot_cache()
             .await
@@ -307,6 +312,7 @@ mod tests {
     /// 背景任務可以啟動與停止；非交易時段會自行結束，交易時段則由停止旗標結束。
     #[tokio::test(start_paused = true)]
     async fn backup_task_starts_and_stops() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.lock().await;
         stock_price::clear_trace_targets_cache();
         start_traced_stock_backup_caching_task();
 

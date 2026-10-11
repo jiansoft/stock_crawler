@@ -110,6 +110,15 @@ pub(in crate::app::event::trace) fn trace_target_diagnostics() -> TraceTargetDia
         .unwrap_or_default()
 }
 
+/// 測試用：直接放入追蹤條件並標記為已載入，不經過資料庫。
+#[cfg(test)]
+pub(in crate::app::event::trace) fn set_trace_targets_for_test(targets: Vec<PriceTrace>) {
+    if let Ok(mut cache) = TRACE_TARGETS.write() {
+        *cache = group_targets_by_symbol(targets);
+    }
+    TRACE_TARGETS_LOADED.store(true, Ordering::SeqCst);
+}
+
 /// 清空追蹤條件快取，供收盤後釋放記憶體使用。
 pub(in crate::app::event::trace) fn clear_trace_targets_cache() {
     if let Ok(mut cache) = TRACE_TARGETS.write() {
@@ -140,6 +149,7 @@ mod tests {
 
     #[test]
     fn trace_targets_cache_snapshot_symbols_and_diagnostics_are_consistent() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.blocking_lock();
         clear_trace_targets_cache();
         assert!(!has_loaded_trace_targets_cache());
         assert_eq!(

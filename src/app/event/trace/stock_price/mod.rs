@@ -45,6 +45,8 @@ mod targets;
 
 use alert::alert_on_price_boundary;
 use reference::load_reference_prices;
+#[cfg(test)]
+pub(super) use targets::set_trace_targets_for_test;
 pub(super) use targets::{
     clear_trace_targets_cache, get_tracked_symbols, has_loaded_trace_targets_cache,
     has_targets_for_symbol, refresh_trace_targets_cache, trace_target_diagnostics,
@@ -278,6 +280,7 @@ mod tests {
     /// 快取沒有報價、報價為 0 或價格仍在區間內時，都不會觸發警報。
     #[tokio::test]
     async fn process_cached_targets_skips_missing_zero_and_in_range_prices() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.lock().await;
         SHARE.clear_last_trading_day_quotes();
         SHARE.clear_stock_snapshots();
         let targets = vec![trace("79985", dec!(10), dec!(20))];
@@ -312,6 +315,7 @@ mod tests {
     /// 沒有追蹤條件時，價格事件與對帳掃描都直接結束。
     #[tokio::test]
     async fn evaluation_entry_points_do_nothing_without_targets() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.lock().await;
         clear_trace_targets_cache();
         evaluate_price_update("79985".to_string())
             .await
@@ -322,6 +326,7 @@ mod tests {
     /// 驗證即時報價快取讀取可正確命中與 miss。
     #[test]
     fn test_get_cached_snapshot() {
+        let _lock = crate::infra::cache::REALTIME_TEST_LOCK.blocking_lock();
         // 確保全域 SHARE 的昨收快取與報價快取都是乾淨的，
         // 避免其他測試在 SHARE.last_trading_day_quotes 留下真實收盤價，
         // 導致 is_valid_price 判斷 dec!(998) 偏差過大而拒絕此快照。
