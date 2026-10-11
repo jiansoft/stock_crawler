@@ -53,17 +53,6 @@ async fn seed() {
     }
 }
 
-/// 從 `financial_health` 讀回的一列。
-#[derive(Debug, PartialEq, sqlx::FromRow)]
-struct StoredRow {
-    stock_symbol: String,
-    f_score: Option<i16>,
-    f_score_evaluated: i16,
-    gross_margin_percent: Option<Decimal>,
-    debt_ratio_percent: Option<Decimal>,
-    free_cash_flow_ttm: Option<i64>,
-}
-
 fn snapshot(symbol: &str, f_score: Option<u8>) -> FinancialHealthSnapshot {
     FinancialHealthSnapshot {
         stock_symbol: symbol.to_owned(),
@@ -153,39 +142,33 @@ async fn financial_health_repository_reads_figures_and_replaces_table() {
         .await
         .expect("replace_financial_health");
     assert_eq!(written, 2);
-    let rows: Vec<StoredRow> = sqlx::query_as(
-        "SELECT stock_symbol, f_score, f_score_evaluated, gross_margin_percent, debt_ratio_percent, free_cash_flow_ttm FROM financial_health WHERE stock_symbol IN ($1, $2) ORDER BY stock_symbol",
-    )
-    .bind(SYMBOL_A)
-    .bind(SYMBOL_B)
-    .fetch_all(database::get_connection())
-    .await
-    .expect("讀回 financial_health");
-    let stored = |stock_symbol: &str, f_score: Option<i16>, f_score_evaluated: i16| StoredRow {
-        stock_symbol: stock_symbol.to_owned(),
-        f_score,
-        f_score_evaluated,
-        gross_margin_percent: Some(dec!(42.3077)),
-        debt_ratio_percent: None,
-        free_cash_flow_ttm: Some(-200),
+    // 讀回時全欄位與寫入的快照一致（只看假代號，測試庫可能有其他列）。
+    let stored = |repo_rows: Vec<FinancialHealthSnapshot>| -> Vec<FinancialHealthSnapshot> {
+        repo_rows
+            .into_iter()
+            .filter(|s| s.stock_symbol == SYMBOL_A || s.stock_symbol == SYMBOL_B)
+            .collect()
     };
     assert_eq!(
-        rows,
-        vec![stored(SYMBOL_A, Some(8), 9), stored(SYMBOL_B, None, 0)]
+        stored(
+            repo.fetch_financial_health()
+                .await
+                .expect("fetch_financial_health")
+        ),
+        vec![snapshot(SYMBOL_A, Some(8)), snapshot(SYMBOL_B, None)]
     );
 
     repo.replace_financial_health(&[snapshot(SYMBOL_A, Some(7))])
         .await
         .expect("replace_financial_health");
-    let remaining: Vec<(String, Option<i16>)> = sqlx::query_as(
-        "SELECT stock_symbol, f_score FROM financial_health WHERE stock_symbol IN ($1, $2)",
-    )
-    .bind(SYMBOL_A)
-    .bind(SYMBOL_B)
-    .fetch_all(database::get_connection())
-    .await
-    .expect("讀回 financial_health");
-    assert_eq!(remaining, vec![(SYMBOL_A.to_owned(), Some(7))]);
+    assert_eq!(
+        stored(
+            repo.fetch_financial_health()
+                .await
+                .expect("fetch_financial_health")
+        ),
+        vec![snapshot(SYMBOL_A, Some(7))]
+    );
 
     cleanup().await;
 }

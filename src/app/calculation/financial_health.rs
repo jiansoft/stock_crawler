@@ -2,6 +2,8 @@
 //!
 //! 評分規則在 [`crate::domain::financial::health`]，與 Data API 的單檔查詢共用。
 //! 排程在 06:00 Yahoo 三大財務報表採集之後執行；`/stocks/screen` 以這張表篩選與排序。
+//! 重算前先讀出上一次的結果，重算後比對持股、發送 F 分數變化通知
+//! （[`crate::app::event::taiwan_stock::health_alert`]）。
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -12,6 +14,8 @@ use anyhow::Result;
 use chrono::{Datelike, Local};
 
 use crate::{
+    app::event::taiwan_stock::{health_alert, holdings},
+    core::alert,
     domain::financial::{
         health::{self, AnnualFigures, FinancialHealthSnapshot, QuarterFigures},
         repository::FinancialHealthRepository,
@@ -47,10 +51,37 @@ impl fmt::Display for RebuildSummary {
     }
 }
 
-/// 排程入口：以今天的年度重算並寫入。
+/// 一輪重算的統計與寫入的快照。
+pub(crate) struct Rebuilt {
+    pub(crate) summary: RebuildSummary,
+    pub(crate) snapshots: Vec<FinancialHealthSnapshot>,
+}
+
+/// 排程入口：以今天的年度重算並寫入，再通知持股的分數變化。
+///
+/// 讀不到上一次結果時照常重算、只是不通知；通知失敗不影響重算結果。
 pub async fn execute() -> Result<()> {
-    let summary = rebuild(&PgFinancialHealthRepository::new(), Local::now().year()).await?;
-    tracing::info!("財務體質重算結束: {summary}");
+    let repo = PgFinancialHealthRepository::new();
+    let previous = repo.fetch_financial_health().await.unwrap_or_else(|why| {
+        tracing::warn!("讀取上一次財務體質失敗，本次不發持股通知: {why:#}");
+        Vec::new()
+    });
+    let rebuilt = rebuild(&repo, Local::now().year()).await?;
+    tracing::info!("財務體質重算結束: {}", rebuilt.summary);
+
+    match holdings::common_stock_holdings().await {
+        Ok(held) => {
+            if let Some(message) = health_alert::build_notification(
+                &previous,
+                &rebuilt.snapshots,
+                &held,
+                holdings::stock_name,
+            ) {
+                alert::send_message(&message).await;
+            }
+        }
+        Err(why) => tracing::warn!("取得持股失敗，略過財務體質變化通知: {why:#}"),
+    }
     Ok(())
 }
 
@@ -58,7 +89,7 @@ pub async fn execute() -> Result<()> {
 pub(crate) async fn rebuild(
     repo: &impl FinancialHealthRepository,
     current_year: i32,
-) -> Result<RebuildSummary> {
+) -> Result<Rebuilt> {
     let annual = repo
         .fetch_annual_figures(current_year - ANNUAL_LOOKBACK_YEARS)
         .await?;
@@ -68,11 +99,14 @@ pub(crate) async fn rebuild(
     let snapshots = build_snapshots(annual, quarters);
     let written = repo.replace_financial_health(&snapshots).await?;
 
-    Ok(RebuildSummary {
-        stocks: snapshots.len(),
-        scored: snapshots.iter().filter(|s| s.f_score.is_some()).count(),
-        with_quarter: snapshots.iter().filter(|s| s.quarter.is_some()).count(),
-        written,
+    Ok(Rebuilt {
+        summary: RebuildSummary {
+            stocks: snapshots.len(),
+            scored: snapshots.iter().filter(|s| s.f_score.is_some()).count(),
+            with_quarter: snapshots.iter().filter(|s| s.quarter.is_some()).count(),
+            written,
+        },
+        snapshots,
     })
 }
 

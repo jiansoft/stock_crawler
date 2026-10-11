@@ -17,7 +17,7 @@ use crate::{
 /// # Errors
 ///
 /// 查詢持股失敗時回傳錯誤。
-pub(super) async fn common_stock_holdings() -> Result<BTreeSet<String>> {
+pub(crate) async fn common_stock_holdings() -> Result<BTreeSet<String>> {
     let holdings = PgPortfolioRepository::new()
         .fetch_active_holdings(None)
         .await?;
@@ -40,7 +40,7 @@ pub(super) fn is_common_stock(stock_symbol: &str) -> bool {
 }
 
 /// 從股票主檔快取取股名；查不到時回空字串。
-pub(super) fn stock_name(stock_symbol: &str) -> String {
+pub(crate) fn stock_name(stock_symbol: &str) -> String {
     SHARE
         .stocks
         .read()

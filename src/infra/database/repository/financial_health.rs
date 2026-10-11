@@ -154,6 +154,37 @@ impl From<QuarterRow> for (String, QuarterFigures) {
     }
 }
 
+#[derive(sqlx::FromRow)]
+struct StoredRow {
+    stock_symbol: String,
+    f_score_year: Option<i32>,
+    f_score: Option<i16>,
+    f_score_evaluated: i16,
+    quarter_year: Option<i32>,
+    quarter: Option<i16>,
+    gross_margin_percent: Option<Decimal>,
+    debt_ratio_percent: Option<Decimal>,
+    free_cash_flow_ttm: Option<i64>,
+}
+
+impl From<StoredRow> for FinancialHealthSnapshot {
+    fn from(row: StoredRow) -> Self {
+        // 資料表的 CHECK 限制分數 0–9、季別 1–4，轉型不會失敗。
+        let small = |value: i16| u8::try_from(value).unwrap_or_default();
+        FinancialHealthSnapshot {
+            stock_symbol: row.stock_symbol,
+            f_score_year: row.f_score_year,
+            f_score: row.f_score.map(small),
+            f_score_evaluated: small(row.f_score_evaluated),
+            quarter_year: row.quarter_year,
+            quarter: row.quarter.map(small),
+            gross_margin_percent: row.gross_margin_percent,
+            debt_ratio_percent: row.debt_ratio_percent,
+            free_cash_flow_ttm: row.free_cash_flow_ttm,
+        }
+    }
+}
+
 /// 對應資料表 `financial_health`。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PgFinancialHealthRepository;
@@ -188,6 +219,16 @@ impl FinancialHealthRepository for PgFinancialHealthRepository {
             .fetch_all(database::get_connection())
             .await
             .with_context(|| format!("讀取財務體質季報數值失敗: since_year={since_year}"))?;
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn fetch_financial_health(&self) -> Result<Vec<FinancialHealthSnapshot>> {
+        let rows: Vec<StoredRow> = sqlx::query_as(
+            "SELECT stock_symbol, f_score_year, f_score, f_score_evaluated, quarter_year, quarter, gross_margin_percent, debt_ratio_percent, free_cash_flow_ttm FROM financial_health ORDER BY stock_symbol",
+        )
+        .fetch_all(database::get_connection())
+        .await
+        .context("讀取 financial_health 失敗")?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
