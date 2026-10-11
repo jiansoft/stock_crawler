@@ -17,6 +17,8 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) market_id: i32,
     /// 最低營收年增率。
     pub(super) min_revenue_yoy_percent: Option<Decimal>,
+    /// 最低近 3 個月累計營收年增率。
+    pub(super) min_revenue_yoy_3m_percent: Option<Decimal>,
     /// 最低每股盈餘。
     pub(super) min_eps: Option<Decimal>,
     /// 最低股東權益報酬率。
@@ -27,7 +29,7 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_gross_margin_percent: Option<Decimal>,
     /// 最高季末負債比。
     pub(super) max_debt_ratio_percent: Option<Decimal>,
-    /// 十八個固定排序分支之一。
+    /// 二十二個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,
@@ -62,6 +64,18 @@ pub(super) fn validate_screening_params(
         -100.0,
         10_000.0,
         "min_revenue_yoy_percent 必須介於 -100 至 10000",
+    )?;
+    if params
+        .min_revenue_yoy_streak
+        .is_some_and(|months| !(1..=12).contains(&months))
+    {
+        return Err("min_revenue_yoy_streak 必須介於 1 至 12");
+    }
+    let min_revenue_yoy_3m_percent = decimal_in_range(
+        params.min_revenue_yoy_3m_percent,
+        -100.0,
+        10_000.0,
+        "min_revenue_yoy_3m_percent 必須介於 -100 至 10000",
     )?;
     let min_eps = decimal_in_range(
         params.min_eps,
@@ -108,6 +122,8 @@ pub(super) fn validate_screening_params(
         || params.industry_id.is_some()
         || params.valuation_band.is_some()
         || params.min_revenue_yoy_percent.is_some()
+        || params.min_revenue_yoy_streak.is_some()
+        || params.min_revenue_yoy_3m_percent.is_some()
         || params.min_eps.is_some()
         || params.min_roe_percent.is_some()
         || params.min_dividend_yield_percent.is_some()
@@ -121,6 +137,7 @@ pub(super) fn validate_screening_params(
     Ok(ValidatedScreeningParams {
         market_id,
         min_revenue_yoy_percent,
+        min_revenue_yoy_3m_percent,
         min_eps,
         min_roe_percent,
         min_dividend_yield_percent,
@@ -151,7 +168,7 @@ fn decimal_in_range(
         .transpose()
 }
 
-/// 將排序 enum 映射成十八個固定 SQL 分支。
+/// 將排序 enum 映射成二十二個固定 SQL 分支。
 ///
 /// 指標欄位一律加 `NULLS LAST`，否則 PostgreSQL 的降冪預設會把過期或缺值的
 /// NULL 排在最前面；同值再以股票代號升冪，讓分頁外的重複查詢仍穩定。
@@ -167,6 +184,18 @@ pub(super) fn screen_order_by(
         }
         ("revenue_yoy", "desc") => {
             Ok("ORDER BY revenue_yoy_percent DESC NULLS LAST, stock_symbol ASC")
+        }
+        ("revenue_yoy_streak", "asc") => {
+            Ok("ORDER BY revenue_yoy_streak ASC NULLS LAST, stock_symbol ASC")
+        }
+        ("revenue_yoy_streak", "desc") => {
+            Ok("ORDER BY revenue_yoy_streak DESC NULLS LAST, stock_symbol ASC")
+        }
+        ("revenue_yoy_3m", "asc") => {
+            Ok("ORDER BY revenue_yoy_3m_percent ASC NULLS LAST, stock_symbol ASC")
+        }
+        ("revenue_yoy_3m", "desc") => {
+            Ok("ORDER BY revenue_yoy_3m_percent DESC NULLS LAST, stock_symbol ASC")
         }
         ("eps", "asc") => Ok("ORDER BY earnings_per_share ASC NULLS LAST, stock_symbol ASC"),
         ("eps", "desc") => Ok("ORDER BY earnings_per_share DESC NULLS LAST, stock_symbol ASC"),

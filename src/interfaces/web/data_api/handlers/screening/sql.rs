@@ -2,7 +2,8 @@
 
 /// 條件選股的參數化 SQL 主體。
 ///
-/// `LATERAL ... LIMIT 1` 會使用各表以股票代號為前導欄位的索引，找出「每股
+/// 月營收取每股最近 12 個月計算動能（連續年增月數、近 3 月累計年增率），
+/// 其餘 `LATERAL ... LIMIT 1` 會使用各表以股票代號為前導欄位的索引，找出「每股
 /// 各自最新」資料；`financial_health` 每檔只有一列，直接以主鍵左接。
 /// `normalized` 僅將過期指標轉成 SQL NULL；最外層條件利用 NULL 比較不成立的
 /// 語意，自然排除以該過期指標篩選的股票。
@@ -13,8 +14,10 @@ WITH latest AS (
         s."Name" AS name,
         s.stock_exchange_market_id AS market_id,
         s.stock_industry_id AS industry_id,
-        r."Date" AS revenue_raw_month,
-        r."ComparedWithLastYearSameMonth" AS revenue_raw_yoy,
+        r.revenue_raw_month,
+        r.revenue_raw_yoy,
+        r.revenue_yoy_streak_raw,
+        r.revenue_yoy_3m_raw,
         f.year AS financial_year,
         f.quarter AS financial_quarter,
         f.earnings_per_share AS eps_raw,
@@ -37,11 +40,36 @@ WITH latest AS (
         h.free_cash_flow_ttm AS free_cash_flow_raw
     FROM stocks s
     LEFT JOIN LATERAL (
-        SELECT "Date", "ComparedWithLastYearSameMonth"
-        FROM "Revenue"
-        WHERE "SecurityCode" = s.stock_symbol
-        ORDER BY "Date" DESC
-        LIMIT 1
+        -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
+        -- 的月數，以及近 3 個月（須相連）合計營收對去年同期的年增率。
+        SELECT
+            MAX(month) FILTER (WHERE rn = 1) AS revenue_raw_month,
+            MAX(yoy) FILTER (WHERE rn = 1) AS revenue_raw_yoy,
+            COALESCE(
+                MIN(rn) FILTER (WHERE NOT (yoy > 0 AND ord = first_ord - rn + 1)) - 1,
+                COUNT(*)
+            )::smallint AS revenue_yoy_streak_raw,
+            CASE WHEN COUNT(*) FILTER (WHERE rn <= 3 AND ord = first_ord - rn + 1) = 3
+                  AND SUM(last_year) FILTER (WHERE rn <= 3) > 0
+              THEN ROUND((SUM(monthly) FILTER (WHERE rn <= 3)
+                  / SUM(last_year) FILTER (WHERE rn <= 3) - 1) * 100, 2)
+            END AS revenue_yoy_3m_raw
+        FROM (
+            SELECT month, yoy, monthly, last_year, ord,
+                ROW_NUMBER() OVER (ORDER BY month DESC) AS rn,
+                FIRST_VALUE(ord) OVER (ORDER BY month DESC) AS first_ord
+            FROM (
+                SELECT "Date" AS month,
+                    "ComparedWithLastYearSameMonth" AS yoy,
+                    "Monthly" AS monthly,
+                    "LastYearThisMonth" AS last_year,
+                    ("Date" / 100) * 12 + "Date" % 100 AS ord
+                FROM "Revenue"
+                WHERE "SecurityCode" = s.stock_symbol
+                ORDER BY "Date" DESC
+                LIMIT 12
+            ) recent
+        ) ranked
     ) r ON TRUE
     LEFT JOIN LATERAL (
         SELECT year, quarter, earnings_per_share, return_on_equity
@@ -82,6 +110,18 @@ WITH latest AS (
               - ((revenue_raw_month / 100)::int * 12
                 + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
           THEN revenue_raw_yoy END AS revenue_yoy_percent,
+        CASE WHEN revenue_raw_month IS NOT NULL
+          AND ((EXTRACT(YEAR FROM $3::date)::int * 12
+                + EXTRACT(MONTH FROM $3::date)::int)
+              - ((revenue_raw_month / 100)::int * 12
+                + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
+          THEN revenue_yoy_streak_raw END AS revenue_yoy_streak,
+        CASE WHEN revenue_raw_month IS NOT NULL
+          AND ((EXTRACT(YEAR FROM $3::date)::int * 12
+                + EXTRACT(MONTH FROM $3::date)::int)
+              - ((revenue_raw_month / 100)::int * 12
+                + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
+          THEN revenue_yoy_3m_raw END AS revenue_yoy_3m_percent,
         CASE WHEN financial_year IS NOT NULL
           AND ((EXTRACT(YEAR FROM $3::date)::int * 4
                 + EXTRACT(QUARTER FROM $3::date)::int)
@@ -126,8 +166,8 @@ WITH latest AS (
 )
 SELECT
     stock_symbol, name, market_id, industry_id,
-    revenue_yoy_percent, earnings_per_share, return_on_equity,
-    dividend_yield_percent, valuation_band, valuation_percentage,
+    revenue_yoy_percent, revenue_yoy_streak, revenue_yoy_3m_percent,
+    earnings_per_share, return_on_equity, dividend_yield_percent, valuation_band, valuation_percentage,
     revenue_raw_month AS revenue_month,
     financial_year, financial_quarter,
     valuation_raw_date AS valuation_date,
@@ -145,4 +185,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($10::numeric IS NULL OR gross_margin_percent >= $10)
   AND ($11::numeric IS NULL OR debt_ratio_percent <= $11)
   AND (NOT $12::bool OR free_cash_flow_ttm > 0)
+  AND ($13::smallint IS NULL OR revenue_yoy_streak >= $13)
+  AND ($14::numeric IS NULL OR revenue_yoy_3m_percent >= $14)
 "#;

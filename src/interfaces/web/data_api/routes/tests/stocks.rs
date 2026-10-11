@@ -648,6 +648,98 @@ async fn stock_screen_financial_health_filters() {
     cleanup(pool).await;
 }
 
+/// 條件選股的營收動能：連續年增月數遇到年增 ≤ 0 或月份斷層就停止，
+/// 近 3 月累計年增率以三個月合計營收對去年同期計算，三個月不相連時為 null。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn stock_screen_revenue_momentum_filters() {
+    use chrono::{Datelike, Months};
+
+    let Some(pool) = pool_or_skip("stock_screen_revenue_momentum_filters").await else {
+        return;
+    };
+    cleanup(pool).await;
+    seed(pool, &[SEED_STOCK]).await;
+    // 新鮮度以查詢當天判斷，營收月份只能由今天往前推；列屬於假代號，結束時清除。
+    let today = chrono::Local::now().date_naive();
+    let month_code = |back: u32| {
+        let month = today - Months::new(back);
+        i64::from(month.year()) * 100 + i64::from(month.month())
+    };
+    // 由新到舊：年增 10、20、5、-3、8 → 連續 3 個月；近 3 月合計 335 對 300 → 11.67%。
+    for (back, monthly, yoy) in [
+        (1, 110, 10),
+        (2, 120, 20),
+        (3, 105, 5),
+        (4, 97, -3),
+        (5, 108, 8),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "Monthly", "LastYearThisMonth", "ComparedWithLastYearSameMonth")
+               VALUES ($1, $1, $2, $3, 100, $4)"#,
+        )
+        .bind(SYMBOL)
+        .bind(month_code(back))
+        .bind(Decimal::from(monthly))
+        .bind(Decimal::from(yoy))
+        .execute(pool)
+        .await
+        .expect("種入 Revenue");
+    }
+
+    let listed = |json: &serde_json::Value| {
+        json["stocks"]
+            .as_array()
+            .expect("stocks 陣列")
+            .iter()
+            .find(|stock| stock["stock_symbol"] == SYMBOL)
+            .cloned()
+    };
+    let base = "/api/v1/stocks/screen?industry_id=1&limit=50";
+
+    let (status, json) = get(&format!(
+        "{base}&min_revenue_yoy_streak=3&min_revenue_yoy_3m_percent=11&sort_by=revenue_yoy_streak&sort_order=desc"
+    ))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let stock = listed(&json).expect("符合條件的假代號應出現");
+    assert_eq!(stock["revenue_yoy_streak"], 3);
+    assert_eq!(stock["revenue_yoy_3m_percent"], 11.67);
+    assert_eq!(stock["revenue_yoy_percent"], 10.0);
+
+    for query in ["min_revenue_yoy_streak=4", "min_revenue_yoy_3m_percent=12"] {
+        let (status, json) = get(&format!("{base}&{query}")).await;
+        assert_eq!(status, StatusCode::OK, "{query}");
+        assert!(listed(&json).is_none(), "{query} 應排除假代號");
+    }
+    for query in [
+        "min_revenue_yoy_streak=0",
+        "min_revenue_yoy_streak=13",
+        "min_revenue_yoy_3m_percent=-101",
+        "sort_by=revenue_yoy_3months",
+    ] {
+        let (status, _) = get(&format!("{base}&{query}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+
+    // 拿掉第二新的月份：連續月數停在 1，近 3 月不相連 → null。
+    sqlx::query(r#"DELETE FROM "Revenue" WHERE "SecurityCode" = $1 AND "Date" = $2"#)
+        .bind(SYMBOL)
+        .bind(month_code(2))
+        .execute(pool)
+        .await
+        .expect("刪除一個月份");
+    let (_, json) = get(&format!("{base}&min_revenue_yoy_streak=1")).await;
+    let stock = listed(&json).expect("仍有 1 個月年增，應出現");
+    assert_eq!(stock["revenue_yoy_streak"], 1);
+    assert!(stock["revenue_yoy_3m_percent"].is_null(), "{stock}");
+
+    cleanup(pool).await;
+}
+
 /// 填息分析：同日多列只算一次（季別與月別重複、年度彙總列）、同日除權與除息合併、
 /// 尚未到的除息日略過；已填息算交易日數，未填息算距離填息價的百分比。
 #[tokio::test]
