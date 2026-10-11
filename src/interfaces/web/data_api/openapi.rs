@@ -317,6 +317,49 @@ mod tests {
             stocks["items"]["$ref"],
             "#/components/schemas/ScreenedStock"
         );
+
+        // 財務體質條件：F 分數 0–9、毛利率上限 100、負債比 0–1000、自由現金流布林；
+        // 排序多出 f_score／gross_margin／debt_ratio。
+        assert_eq!(query_schema(operation, "min_f_score")["minimum"], 0);
+        assert_eq!(query_schema(operation, "min_f_score")["maximum"], 9);
+        assert_eq!(
+            query_schema(operation, "min_gross_margin_percent")["maximum"],
+            100
+        );
+        assert_eq!(
+            query_schema(operation, "max_debt_ratio_percent")["maximum"],
+            1000
+        );
+        assert!(
+            query_schema(operation, "positive_free_cash_flow")
+                .to_string()
+                .contains("boolean")
+        );
+        let sort_by = enum_values(&document, query_schema(operation, "sort_by"));
+        for field in ["f_score", "gross_margin", "debt_ratio"] {
+            assert!(
+                sort_by
+                    .as_array()
+                    .is_some_and(|values| values.contains(&field.into())),
+                "sort_by 缺少 {field}：{sort_by}"
+            );
+        }
+        let screened = &document["components"]["schemas"]["ScreenedStock"]["properties"];
+        for (field, kind) in [
+            ("f_score", "integer"),
+            ("f_score_evaluated", "integer"),
+            ("f_score_year", "integer"),
+            ("gross_margin_percent", "number"),
+            ("debt_ratio_percent", "number"),
+            ("free_cash_flow_ttm", "integer"),
+            ("health_period", "string"),
+        ] {
+            let schema = screened[field].to_string();
+            assert!(
+                schema.contains(kind) && schema.contains("null"),
+                "{field}：{schema}"
+            );
+        }
     }
 
     /// Phase 4 三條 path 精確驗證 responses、query enum/range/default 與

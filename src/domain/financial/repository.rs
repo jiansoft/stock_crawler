@@ -2,6 +2,7 @@ use crate::{
     core::declare::Quarter,
     domain::financial::{
         entity::{FinancialStatement, HoldingFinancialAlert, HoldingRevenueAlert, MonthlyRevenue},
+        health::{AnnualFigures, FinancialHealthSnapshot, QuarterFigures},
         statement::{BalanceSheet, CashFlowStatement, IncomeStatement},
     },
 };
@@ -102,4 +103,27 @@ pub trait FinancialReportRepository: Send + Sync {
 
     /// 批次 upsert 現金流量表，回傳受影響列數（含數值未變、僅更新 `fetched_at` 的列）。
     async fn save_cash_flow_statements(&self, statements: &[CashFlowStatement]) -> Result<u64>;
+}
+
+/// 財務體質（F 分數與選股用季報指標）之倉儲介面。
+///
+/// 讀取三大財務報表算出每檔股票的數值，寫回 `financial_health`；同一期 Yahoo 與
+/// BigGo 並存時一律取 Yahoo。
+#[async_trait]
+pub trait FinancialHealthRepository: Send + Sync {
+    /// 取得 `since_year` 起每檔股票每年的年報數值：損益與現金流量取年度報表，
+    /// 資產負債表取第 4 季季末。
+    async fn fetch_annual_figures(
+        &self,
+        since_year: i32,
+    ) -> Result<Vec<(String, i32, AnnualFigures)>>;
+
+    /// 取得 `since_year` 起每檔股票每季的單季數值。
+    async fn fetch_quarter_figures(&self, since_year: i32)
+    -> Result<Vec<(String, QuarterFigures)>>;
+
+    /// 以這次重算結果整批取代 `financial_health`，回傳寫入列數。
+    ///
+    /// 刪除與寫入在同一筆交易內，寫入失敗時舊資料完整保留。
+    async fn replace_financial_health(&self, snapshots: &[FinancialHealthSnapshot]) -> Result<u64>;
 }

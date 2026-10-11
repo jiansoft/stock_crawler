@@ -37,6 +37,12 @@ pub(crate) enum StockScreenSortValue {
     DividendYield,
     /// 估值百分比。
     ValuationPercentage,
+    /// Piotroski F 分數。
+    FScore,
+    /// 最新一季毛利率。
+    GrossMargin,
+    /// 最新一季負債比。
+    DebtRatio,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -52,7 +58,7 @@ pub(crate) enum SortOrderParamValue {
 
 /// 條件選股結果中的單一股票。
 ///
-/// 四組來源期間即使已超過新鮮度上限仍會保留，方便呼叫端判斷資料為何被
+/// 各來源期間即使已超過新鮮度上限仍會保留，方便呼叫端判斷資料為何被
 /// 轉成 `null`；過期的指標本身不參與篩選，也不會被誤當成目前數值。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct ScreenedStock {
@@ -84,6 +90,20 @@ pub(crate) struct ScreenedStock {
     pub(crate) valuation_date: Option<String>,
     /// 該股票最新殖利率日期，格式 `YYYY-MM-DD`；過期時仍保留。
     pub(crate) yield_date: Option<String>,
+    /// Piotroski F 分數（0–9）；評分年度落後查詢日超過 2 年或沒有年報時為 `null`。
+    pub(crate) f_score: Option<u8>,
+    /// F 分數可判定的指標數；與 `f_score` 同時為 `null`。
+    pub(crate) f_score_evaluated: Option<u8>,
+    /// F 分數的評分年度；過期時仍保留。
+    pub(crate) f_score_year: Option<i32>,
+    /// 最新且仍在兩季內的單季毛利率百分比；缺值或過期時為 `null`。
+    pub(crate) gross_margin_percent: Option<f64>,
+    /// 最新且仍在兩季內的季末負債比百分比；缺值或過期時為 `null`。
+    pub(crate) debt_ratio_percent: Option<f64>,
+    /// 截至最新一季的近四季自由現金流合計（新台幣千元）；四季不齊或過期時為 `null`。
+    pub(crate) free_cash_flow_ttm: Option<i64>,
+    /// 毛利率、負債比與自由現金流的期間，格式 `YYYY-Q1`～`YYYY-Q4`；過期時仍保留。
+    pub(crate) health_period: Option<String>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -98,7 +118,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的十二個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的十八個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -122,6 +142,17 @@ pub(crate) struct StockScreeningParams {
     /// 最低殖利率百分比，範圍 0–1000。
     #[param(minimum = 0, maximum = 1000)]
     pub(crate) min_dividend_yield_percent: Option<f64>,
+    /// 最低 Piotroski F 分數，範圍 0–9。
+    #[param(minimum = 0, maximum = 9)]
+    pub(crate) min_f_score: Option<u8>,
+    /// 最低單季毛利率百分比，範圍 -10000–100。
+    #[param(minimum = -10000, maximum = 100)]
+    pub(crate) min_gross_margin_percent: Option<f64>,
+    /// 最高季末負債比百分比，範圍 0–1000。
+    #[param(minimum = 0, maximum = 1000)]
+    pub(crate) max_debt_ratio_percent: Option<f64>,
+    /// `true` 時只留近四季自由現金流為正的股票；`false` 或省略不篩選。
+    pub(crate) positive_free_cash_flow: Option<bool>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,

@@ -6,5 +6,7 @@ pub mod daily_quotes;
 pub mod dividend_record;
 /// 估算便宜、合理、昂貴價
 pub mod estimated_price;
+/// 每日重算全市場財務體質（F 分數與選股季報指標）
+pub mod financial_health;
 /// 計算每日市值
 pub mod money_history;

@@ -26,6 +26,7 @@ use crate::interfaces::web::data_api::dto::{
 /// 每張分析表都先依股票代號取得該股票自己的最新一期，避免月營收分批公布
 /// 時以全市場最大日期誤刪尚未公布的股票。接著以台北本地查詢日套用各來源
 /// 的新鮮度上限；過期指標轉成 `null`，來源日期則保留供呼叫端稽核。
+/// 財務體質（F 分數、毛利率、負債比、自由現金流）讀每日重算的 `financial_health`。
 ///
 /// # Errors
 ///
@@ -41,11 +42,11 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
     // 查詢日由 handler 明確綁定，SQL 不直接讀 CURRENT_DATE；純函式測試可傳入
     // 任意日期驗證月份、季度與 31 天邊界，production 則採伺服器台北本地日。
     let query_date = Local::now().date_naive();
-    // ORDER BY 字串只可能來自下方十二個 &'static str 分支，絕不插入呼叫端
+    // ORDER BY 字串只可能來自下方十八個 &'static str 分支，絕不插入呼叫端
     // 原始文字；其他條件仍全部使用 bind parameter。
-    let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $9", validated.order_by);
+    let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $13", validated.order_by);
     // SQLx 0.9 要求動態字串顯式稽核；此處唯一動態部分已由
-    // `screen_order_by` 限制為十二個靜態常數，因此可安全標記。
+    // `screen_order_by` 限制為十八個靜態常數，因此可安全標記。
     let rows: Result<Vec<ScreenedStockRow>, _> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(validated.market_id)
         .bind(params.industry_id)
@@ -55,13 +56,17 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
         .bind(validated.min_roe_percent)
         .bind(validated.min_dividend_yield_percent)
         .bind(params.valuation_band.as_deref())
+        .bind(params.min_f_score.map(i16::from))
+        .bind(validated.min_gross_margin_percent)
+        .bind(validated.max_debt_ratio_percent)
+        .bind(params.positive_free_cash_flow.unwrap_or(false))
         .bind(i64::from(validated.limit))
         .fetch_all(database::get_connection())
         .await;
 
     match rows {
         Ok(rows) => Json(StockScreeningResponse {
-            // 每股四種資料可能來自不同日期，因此不可偽造單一 data_as_of。
+            // 每股各來源可能來自不同日期，因此不可偽造單一 data_as_of。
             data_as_of: None,
             stocks: rows.into_iter().map(Into::into).collect(),
         })
@@ -73,8 +78,9 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
 /// 條件選股的參數化 SQL 主體。
 ///
 /// `LATERAL ... LIMIT 1` 會使用各表以股票代號為前導欄位的索引，找出「每股
-/// 各自最新」資料。`normalized` 僅將過期指標轉成 SQL NULL；最外層條件利用
-/// NULL 比較不成立的語意，自然排除以該過期指標篩選的股票。
+/// 各自最新」資料；`financial_health` 每檔只有一列，直接以主鍵左接。
+/// `normalized` 僅將過期指標轉成 SQL NULL；最外層條件利用 NULL 比較不成立的
+/// 語意，自然排除以該過期指標篩選的股票。
 const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -95,7 +101,15 @@ WITH latest AS (
         e.fair,
         e.expensive,
         y.date AS yield_raw_date,
-        y.yield AS yield_raw
+        y.yield AS yield_raw,
+        h.f_score_year,
+        h.f_score AS f_score_raw,
+        h.f_score_evaluated AS f_score_evaluated_raw,
+        h.quarter_year AS health_quarter_year,
+        h.quarter AS health_quarter,
+        h.gross_margin_percent AS gross_margin_raw,
+        h.debt_ratio_percent AS debt_ratio_raw,
+        h.free_cash_flow_ttm AS free_cash_flow_raw
     FROM stocks s
     LEFT JOIN LATERAL (
         SELECT "Date", "ComparedWithLastYearSameMonth"
@@ -130,6 +144,7 @@ WITH latest AS (
         ORDER BY date DESC
         LIMIT 1
     ) y ON TRUE
+    LEFT JOIN financial_health h ON h.stock_symbol = s.stock_symbol
     WHERE (($1::int = 0 AND s.stock_exchange_market_id IN (2, 4))
         OR s.stock_exchange_market_id = $1)
       AND ($2::int IS NULL OR s.stock_industry_id = $2)
@@ -165,7 +180,23 @@ WITH latest AS (
             END
         END AS valuation_band,
         CASE WHEN yield_raw_date BETWEEN $3::date - 30 AND $3::date
-          THEN yield_raw END AS dividend_yield_percent
+          THEN yield_raw END AS dividend_yield_percent,
+        CASE WHEN EXTRACT(YEAR FROM $3::date)::int - f_score_year BETWEEN 1 AND 2
+          THEN f_score_raw END AS f_score,
+        CASE WHEN EXTRACT(YEAR FROM $3::date)::int - f_score_year BETWEEN 1 AND 2
+          THEN f_score_evaluated_raw END AS f_score_evaluated,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (health_quarter_year * 4 + health_quarter)) BETWEEN 0 AND 2
+          THEN gross_margin_raw END AS gross_margin_percent,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (health_quarter_year * 4 + health_quarter)) BETWEEN 0 AND 2
+          THEN debt_ratio_raw END AS debt_ratio_percent,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (health_quarter_year * 4 + health_quarter)) BETWEEN 0 AND 2
+          THEN free_cash_flow_raw END AS free_cash_flow_ttm
     FROM latest
 )
 SELECT
@@ -175,13 +206,20 @@ SELECT
     revenue_raw_month AS revenue_month,
     financial_year, financial_quarter,
     valuation_raw_date AS valuation_date,
-    yield_raw_date AS yield_date
+    yield_raw_date AS yield_date,
+    f_score, f_score_evaluated, f_score_year,
+    gross_margin_percent, debt_ratio_percent, free_cash_flow_ttm,
+    health_quarter_year, health_quarter
 FROM normalized
 WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($5::numeric IS NULL OR earnings_per_share >= $5)
   AND ($6::numeric IS NULL OR return_on_equity >= $6)
   AND ($7::numeric IS NULL OR dividend_yield_percent >= $7)
   AND ($8::text IS NULL OR valuation_band = $8)
+  AND ($9::smallint IS NULL OR f_score >= $9)
+  AND ($10::numeric IS NULL OR gross_margin_percent >= $10)
+  AND ($11::numeric IS NULL OR debt_ratio_percent <= $11)
+  AND (NOT $12::bool OR free_cash_flow_ttm > 0)
 "#;
 
 /// 驗證後可安全綁定條件選股 SQL 的內部參數。
@@ -199,7 +237,11 @@ struct ValidatedScreeningParams {
     min_roe_percent: Option<Decimal>,
     /// 最低殖利率。
     min_dividend_yield_percent: Option<Decimal>,
-    /// 十二個固定排序分支之一。
+    /// 最低單季毛利率。
+    min_gross_margin_percent: Option<Decimal>,
+    /// 最高季末負債比。
+    max_debt_ratio_percent: Option<Decimal>,
+    /// 十八個固定排序分支之一。
     order_by: &'static str,
     /// 查詢筆數上限。
     limit: u8,
@@ -253,6 +295,21 @@ fn validate_screening_params(
         1_000.0,
         "min_dividend_yield_percent 必須介於 0 至 1000",
     )?;
+    if params.min_f_score.is_some_and(|score| score > 9) {
+        return Err("min_f_score 必須介於 0 至 9");
+    }
+    let min_gross_margin_percent = decimal_in_range(
+        params.min_gross_margin_percent,
+        -10_000.0,
+        100.0,
+        "min_gross_margin_percent 必須介於 -10000 至 100",
+    )?;
+    let max_debt_ratio_percent = decimal_in_range(
+        params.max_debt_ratio_percent,
+        0.0,
+        1_000.0,
+        "max_debt_ratio_percent 必須介於 0 至 1000",
+    )?;
     let order_by = screen_order_by(
         params.sort_by.as_deref().unwrap_or("stock_symbol"),
         params.sort_order.as_deref().unwrap_or("asc"),
@@ -267,7 +324,11 @@ fn validate_screening_params(
         || params.min_revenue_yoy_percent.is_some()
         || params.min_eps.is_some()
         || params.min_roe_percent.is_some()
-        || params.min_dividend_yield_percent.is_some();
+        || params.min_dividend_yield_percent.is_some()
+        || params.min_f_score.is_some()
+        || params.min_gross_margin_percent.is_some()
+        || params.max_debt_ratio_percent.is_some()
+        || params.positive_free_cash_flow == Some(true);
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -277,6 +338,8 @@ fn validate_screening_params(
         min_eps,
         min_roe_percent,
         min_dividend_yield_percent,
+        min_gross_margin_percent,
+        max_debt_ratio_percent,
         order_by,
         limit,
     })
@@ -302,7 +365,7 @@ fn decimal_in_range(
         .transpose()
 }
 
-/// 將排序 enum 映射成十二個固定 SQL 分支。
+/// 將排序 enum 映射成十八個固定 SQL 分支。
 ///
 /// 指標欄位一律加 `NULLS LAST`，否則 PostgreSQL 的降冪預設會把過期或缺值的
 /// NULL 排在最前面；同值再以股票代號升冪，讓分頁外的重複查詢仍穩定。
@@ -332,6 +395,18 @@ fn screen_order_by(sort_by: &str, sort_order: &str) -> Result<&'static str, &'st
         ("valuation_percentage", "desc") => {
             Ok("ORDER BY valuation_percentage DESC NULLS LAST, stock_symbol ASC")
         }
+        ("f_score", "asc") => Ok("ORDER BY f_score ASC NULLS LAST, stock_symbol ASC"),
+        ("f_score", "desc") => Ok("ORDER BY f_score DESC NULLS LAST, stock_symbol ASC"),
+        ("gross_margin", "asc") => {
+            Ok("ORDER BY gross_margin_percent ASC NULLS LAST, stock_symbol ASC")
+        }
+        ("gross_margin", "desc") => {
+            Ok("ORDER BY gross_margin_percent DESC NULLS LAST, stock_symbol ASC")
+        }
+        ("debt_ratio", "asc") => Ok("ORDER BY debt_ratio_percent ASC NULLS LAST, stock_symbol ASC"),
+        ("debt_ratio", "desc") => {
+            Ok("ORDER BY debt_ratio_percent DESC NULLS LAST, stock_symbol ASC")
+        }
         (_, "asc" | "desc") => Err("sort_by 不在允許範圍"),
         _ => Err("sort_order 必須為 asc 或 desc"),
     }
@@ -357,6 +432,12 @@ fn financial_period_is_fresh(query_date: NaiveDate, year: i64, quarter: &str) ->
     let query_ordinal = i64::from(query_date.year()) * 4 + i64::from(query_date.month0() / 3 + 1);
     let financial_ordinal = year * 4 + quarter;
     (0..=2).contains(&(query_ordinal - financial_ordinal))
+}
+
+/// 測試 SQL F 分數評分年度新鮮度公式的純 Rust 對照實作：落後查詢年 1–2 年。
+#[cfg(test)]
+fn f_score_year_is_fresh(query_date: NaiveDate, f_score_year: i32) -> bool {
+    (1..=2).contains(&(query_date.year() - f_score_year))
 }
 
 /// 測試 SQL 31 個日曆日視窗的純 Rust 對照實作。
@@ -401,6 +482,22 @@ struct ScreenedStockRow {
     valuation_date: Option<NaiveDate>,
     /// 最新殖利率日期。
     yield_date: Option<NaiveDate>,
+    /// 新鮮的 F 分數。
+    f_score: Option<i16>,
+    /// 新鮮的 F 分數可判定指標數。
+    f_score_evaluated: Option<i16>,
+    /// F 分數評分年度。
+    f_score_year: Option<i32>,
+    /// 新鮮的單季毛利率。
+    gross_margin_percent: Option<Decimal>,
+    /// 新鮮的季末負債比。
+    debt_ratio_percent: Option<Decimal>,
+    /// 新鮮的近四季自由現金流。
+    free_cash_flow_ttm: Option<i64>,
+    /// 季報指標期間年度。
+    health_quarter_year: Option<i32>,
+    /// 季報指標期間季別。
+    health_quarter: Option<i16>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -413,6 +510,10 @@ impl From<ScreenedStockRow> for ScreenedStock {
             .financial_year
             .zip(row.financial_quarter)
             .map(|(year, quarter)| format!("{year}-{quarter}"));
+        let health_period = row
+            .health_quarter_year
+            .zip(row.health_quarter)
+            .map(|(year, quarter)| format!("{year}-Q{quarter}"));
         ScreenedStock {
             stock_symbol: row.stock_symbol,
             name: row.name,
@@ -448,6 +549,23 @@ impl From<ScreenedStockRow> for ScreenedStock {
             financial_period,
             valuation_date: row.valuation_date.map(|date| date.to_string()),
             yield_date: row.yield_date.map(|date| date.to_string()),
+            f_score: row.f_score.and_then(|score| u8::try_from(score).ok()),
+            f_score_evaluated: row
+                .f_score_evaluated
+                .and_then(|evaluated| u8::try_from(evaluated).ok()),
+            f_score_year: row.f_score_year,
+            gross_margin_percent: analytical_decimal_to_f64(
+                row.gross_margin_percent,
+                &symbol,
+                "gross_margin_percent",
+            ),
+            debt_ratio_percent: analytical_decimal_to_f64(
+                row.debt_ratio_percent,
+                &symbol,
+                "debt_ratio_percent",
+            ),
+            free_cash_flow_ttm: row.free_cash_flow_ttm,
+            health_period,
         }
     }
 }
@@ -461,8 +579,9 @@ mod tests {
     use rust_decimal::Decimal;
 
     use super::{
-        SCREEN_STOCKS_SQL, analytical_date_is_fresh, financial_period_is_fresh,
-        revenue_month_is_fresh, screen_order_by, validate_screening_params,
+        SCREEN_STOCKS_SQL, analytical_date_is_fresh, f_score_year_is_fresh,
+        financial_period_is_fresh, revenue_month_is_fresh, screen_order_by,
+        validate_screening_params,
     };
     use crate::infra::database;
     use crate::interfaces::web::data_api::dto::StockScreeningParams;
@@ -477,6 +596,10 @@ mod tests {
             min_eps: None,
             min_roe_percent: None,
             min_dividend_yield_percent: None,
+            min_f_score: None,
+            min_gross_margin_percent: None,
+            max_debt_ratio_percent: None,
+            positive_free_cash_flow: None,
             sort_by: None,
             sort_order: None,
             limit: None,
@@ -508,12 +631,61 @@ mod tests {
         let mut minimum = screening_params();
         minimum.min_eps = Some(0.0);
         assert!(validate_screening_params(&minimum).is_ok());
+
+        // 財務體質條件各自都算有效篩選；positive_free_cash_flow=false 等於沒有條件。
+        let mut f_score = screening_params();
+        f_score.min_f_score = Some(0);
+        assert!(validate_screening_params(&f_score).is_ok());
+        let mut debt = screening_params();
+        debt.max_debt_ratio_percent = Some(50.0);
+        assert!(validate_screening_params(&debt).is_ok());
+        let mut cash_flow = screening_params();
+        cash_flow.positive_free_cash_flow = Some(true);
+        assert!(validate_screening_params(&cash_flow).is_ok());
+        cash_flow.positive_free_cash_flow = Some(false);
+        assert_eq!(
+            validate_screening_params(&cash_flow).err(),
+            Some("至少需要一個篩選條件")
+        );
     }
 
-    /// 六個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
+    /// 財務體質條件的範圍：F 分數 0–9、毛利率上限 100%、負債比 0–1000%。
+    #[test]
+    fn screening_health_boundaries_are_deterministic() {
+        let mut f_score = screening_params();
+        f_score.min_f_score = Some(9);
+        assert!(validate_screening_params(&f_score).is_ok());
+        f_score.min_f_score = Some(10);
+        assert_eq!(
+            validate_screening_params(&f_score).err(),
+            Some("min_f_score 必須介於 0 至 9")
+        );
+        for (value, ok) in [
+            (100.0, true),
+            (-10_000.0, true),
+            (100.01, false),
+            (f64::NAN, false),
+        ] {
+            let mut params = screening_params();
+            params.min_gross_margin_percent = Some(value);
+            assert_eq!(validate_screening_params(&params).is_ok(), ok, "{value}");
+        }
+        for (value, ok) in [
+            (0.0, true),
+            (1_000.0, true),
+            (-0.01, false),
+            (1_000.01, false),
+        ] {
+            let mut params = screening_params();
+            params.max_debt_ratio_percent = Some(value);
+            assert_eq!(validate_screening_params(&params).is_ok(), ok, "{value}");
+        }
+    }
+
+    /// 九個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
     /// `NULLS LAST`；不在白名單的文字必須在接觸 SQL 前遭拒。
     #[test]
-    fn screening_sort_has_twelve_static_branches() {
+    fn screening_sort_has_eighteen_static_branches() {
         let fields = [
             "stock_symbol",
             "revenue_yoy",
@@ -521,6 +693,9 @@ mod tests {
             "roe",
             "dividend_yield",
             "valuation_percentage",
+            "f_score",
+            "gross_margin",
+            "debt_ratio",
         ];
         for field in fields {
             for order in ["asc", "desc"] {
@@ -572,6 +747,12 @@ mod tests {
         assert!(!financial_period_is_fresh(query_date, 2026, "Q2"));
         assert!(!financial_period_is_fresh(query_date, 2025, ""));
 
+        // F 分數：2026 年查詢時 2024、2025 年報仍有效（年報 3 月底前才公布）。
+        assert!(f_score_year_is_fresh(query_date, 2025));
+        assert!(f_score_year_is_fresh(query_date, 2024));
+        assert!(!f_score_year_is_fresh(query_date, 2023));
+        assert!(!f_score_year_is_fresh(query_date, 2026));
+
         let thirty_days_ago = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
         let thirty_one_days_ago = NaiveDate::from_ymd_opt(2025, 12, 31).unwrap();
         assert!(analytical_date_is_fresh(query_date, thirty_days_ago));
@@ -610,7 +791,7 @@ mod tests {
         let ranking: Vec<String> = sqlx::query_scalar(r#"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT y.security_code FROM yield_rank y JOIN stocks s ON s.stock_symbol = y.security_code JOIN "DailyQuotes" q ON q."Serial" = y.daily_quotes_serial JOIN dividend d ON d.serial = y.dividend_serial WHERE y.date = (SELECT MAX(date) FROM yield_rank) AND s.stock_exchange_market_id IN (2,4) ORDER BY y.yield DESC, y.security_code ASC LIMIT 20"#)
             .fetch_all(pool).await.expect("ranking EXPLAIN");
         let screen_sql = format!(
-            "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {SCREEN_STOCKS_SQL}\nORDER BY dividend_yield_percent DESC NULLS LAST, stock_symbol ASC\nLIMIT $9"
+            "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {SCREEN_STOCKS_SQL}\nORDER BY dividend_yield_percent DESC NULLS LAST, stock_symbol ASC\nLIMIT $13"
         );
         let screen: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(screen_sql.as_str()))
             .bind(0_i32)
@@ -621,6 +802,10 @@ mod tests {
             .bind(Option::<Decimal>::None)
             .bind(Option::<Decimal>::None)
             .bind(Option::<&str>::None)
+            .bind(Option::<i16>::None)
+            .bind(Option::<Decimal>::None)
+            .bind(Option::<Decimal>::None)
+            .bind(false)
             .bind(20_i64)
             .fetch_all(pool)
             .await

@@ -8,6 +8,7 @@ pub mod corporate_action;
 pub mod data_health;
 pub mod dividend;
 pub mod financial;
+pub mod financial_health;
 pub mod financial_report;
 pub mod foreign_holding;
 pub mod market_index;
