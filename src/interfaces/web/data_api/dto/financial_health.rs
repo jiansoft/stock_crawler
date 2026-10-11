@@ -6,9 +6,6 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-/// F 分數的滿分。
-pub(crate) const HEALTH_MAX_SCORE: u8 = 9;
-
 /// 財務體質 endpoint 的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct FinancialHealthParams {

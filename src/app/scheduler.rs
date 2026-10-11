@@ -171,6 +171,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "採集 Yahoo 三大財務報表",
             financial_report::execute,
         ),
+        // 07:10 以三大財務報表重算全市場財務體質（F 分數、毛利率、負債比、近四季自由現金流），
+        // 排在 06:00 採集（約 35～45 分鐘）之後；條件選股以這張表篩選。
+        create_job(
+            "0 10 7 * * *",
+            "重算財務體質評分",
+            calculation::financial_health::execute,
+        ),
         // 08:00 提醒本日除權息與明日預計除權息的股票
         create_job(
             "0 0 8 * * *",

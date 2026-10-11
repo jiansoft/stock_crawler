@@ -46,6 +46,9 @@
 //!   （`source = 'biggo'`，Yahoo 長期失敗或沒有資料時補用）。
 //! - `test_backfill_financial_reports_all`：
 //!   一次採集全部上市櫃股票的三大財務報表（首次建檔用，約 3～4 小時）。
+//! - `test_rebuild_financial_health`：
+//!   立即以三大財務報表重算全市場財務體質，整批取代 `financial_health`
+//!   （等同 07:10 排程；首次建表或補抓財報後不想等排程時使用）。
 //! - `test_reconcile_ex_right_results`：
 //!   以交易所除權除息計算結果核對 `MANUAL_EX_RIGHT_FROM`～`MANUAL_EX_RIGHT_TO` 的股利日期與金額；
 //!   預設只試算，`MANUAL_EX_RIGHT_APPLY=1` 才寫入。
@@ -795,4 +798,21 @@ async fn test_save_insider_holdings() {
     crate::app::backfill::chip::execute_insider_holdings()
         .await
         .expect("save insider holdings failed");
+}
+
+/// 立即重算全市場財務體質，整批取代 `financial_health`。
+///
+/// 等同 07:10 排程 `calculation::financial_health::execute`，只讀三大財務報表、
+/// 不呼叫外部來源。
+///
+/// 執行範例：
+/// `cargo test app::manual_backfill::test_rebuild_financial_health -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_rebuild_financial_health() {
+    dotenvy::dotenv().ok();
+
+    crate::app::calculation::financial_health::execute()
+        .await
+        .expect("manual financial health rebuild failed");
 }

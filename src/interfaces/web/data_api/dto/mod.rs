@@ -28,8 +28,8 @@ pub(super) use chip::{
     InsiderSummary,
 };
 pub(super) use financial_health::{
-    FinancialHealthParams, FinancialHealthResponse, HEALTH_MAX_SCORE, HealthCategoryValue,
-    HealthCriterion, HealthValueUnitValue,
+    FinancialHealthParams, FinancialHealthResponse, HealthCategoryValue, HealthCriterion,
+    HealthValueUnitValue,
 };
 pub(super) use financial_reports::{
     AMOUNT_UNIT, BalanceSheetItem, CashFlowStatementItem, FinancialReportParams,

@@ -67,6 +67,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
         "DELETE FROM income_statement WHERE stock_symbol = $1",
         "DELETE FROM balance_sheet WHERE stock_symbol = $1",
         "DELETE FROM cash_flow_statement WHERE stock_symbol = $1",
+        "DELETE FROM financial_health WHERE stock_symbol = $1",
         "DELETE FROM stocks WHERE stock_symbol = $1",
     ] {
         let _ = sqlx::query(sql).bind(SYMBOL).execute(pool).await;
@@ -552,6 +553,97 @@ async fn stock_financial_health_endpoint_db_semantics() {
     }
     let (status, _) = get("/api/v1/stocks/79979ZZ/financial-health").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+
+    cleanup(pool).await;
+}
+
+/// 條件選股的財務體質條件：新鮮的 F 分數、毛利率、負債比與自由現金流參與篩選與輸出；
+/// 評分年度過舊時 F 分數轉成 null、不再符合 F 分數條件，但保留評分年度。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn stock_screen_financial_health_filters() {
+    use chrono::Datelike;
+
+    let Some(pool) = pool_or_skip("stock_screen_financial_health_filters").await else {
+        return;
+    };
+    cleanup(pool).await;
+    seed(pool, &[SEED_STOCK]).await;
+    // 新鮮度以查詢當天判斷，期間只能由今天推算；列屬於假代號，結束時清除。
+    let today = chrono::Local::now().date_naive();
+    let quarter = i16::try_from(today.month0() / 3 + 1).expect("季別 1–4");
+    sqlx::query(
+        "INSERT INTO financial_health (stock_symbol, f_score_year, f_score, f_score_evaluated, quarter_year, quarter, gross_margin_percent, debt_ratio_percent, free_cash_flow_ttm) VALUES ($1, $2, 8, 9, $3, $4, 42.5, 35.25, 1200)",
+    )
+    .bind(SYMBOL)
+    .bind(today.year() - 1)
+    .bind(today.year())
+    .bind(quarter)
+    .execute(pool)
+    .await
+    .expect("種入 financial_health");
+
+    let listed = |json: &serde_json::Value| {
+        json["stocks"]
+            .as_array()
+            .expect("stocks 陣列")
+            .iter()
+            .find(|stock| stock["stock_symbol"] == SYMBOL)
+            .cloned()
+    };
+    let base = "/api/v1/stocks/screen?industry_id=1&limit=50";
+
+    let (status, json) = get(&format!(
+        "{base}&min_f_score=7&min_gross_margin_percent=40&max_debt_ratio_percent=50&positive_free_cash_flow=true&sort_by=f_score&sort_order=desc"
+    ))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let stock = listed(&json).expect("符合條件的假代號應出現");
+    assert_eq!(stock["f_score"], 8);
+    assert_eq!(stock["f_score_evaluated"], 9);
+    assert_eq!(stock["f_score_year"], today.year() - 1);
+    assert_eq!(stock["gross_margin_percent"], 42.5);
+    assert_eq!(stock["debt_ratio_percent"], 35.25);
+    assert_eq!(stock["free_cash_flow_ttm"], 1200);
+    assert_eq!(
+        stock["health_period"],
+        format!("{}-Q{quarter}", today.year())
+    );
+
+    for query in [
+        "min_f_score=9",
+        "min_gross_margin_percent=50",
+        "max_debt_ratio_percent=30",
+    ] {
+        let (status, json) = get(&format!("{base}&{query}")).await;
+        assert_eq!(status, StatusCode::OK, "{query}");
+        assert!(listed(&json).is_none(), "{query} 應排除假代號");
+    }
+    for query in [
+        "min_f_score=10",
+        "max_debt_ratio_percent=-1",
+        "sort_by=f_scores",
+    ] {
+        let (status, _) = get(&format!("{base}&{query}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+
+    // 評分年度落後 3 年：F 分數過期轉成 null、不符合 F 分數條件，評分年度照樣回傳。
+    sqlx::query("UPDATE financial_health SET f_score_year = $2 WHERE stock_symbol = $1")
+        .bind(SYMBOL)
+        .bind(today.year() - 3)
+        .execute(pool)
+        .await
+        .expect("改成過期的評分年度");
+    let (_, json) = get(&format!("{base}&min_f_score=0")).await;
+    assert!(listed(&json).is_none(), "過期的 F 分數不應符合條件");
+    let (_, json) = get(&format!("{base}&positive_free_cash_flow=true")).await;
+    let stock = listed(&json).expect("自由現金流仍新鮮，應出現");
+    assert!(stock["f_score"].is_null(), "{stock}");
+    assert_eq!(stock["f_score_year"], today.year() - 3);
 
     cleanup(pool).await;
 }
