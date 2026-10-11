@@ -50,6 +50,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::financial_health),
         )
         .route(
+            "/stocks/{symbol}/dividend-fill",
+            axum::routing::get(handlers::dividend_fill),
+        )
+        .route(
             "/stocks/{symbol}/dividends",
             axum::routing::get(handlers::dividend_history),
         )
