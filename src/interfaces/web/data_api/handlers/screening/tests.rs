@@ -75,6 +75,57 @@ fn screening_requires_a_meaningful_filter() {
     );
 }
 
+/// 產業代碼、估值區間、EPS／ROE 範圍與 limit 的錯誤訊息；合法的估值區間可單獨成立。
+#[test]
+fn screening_rejects_invalid_industry_band_and_limit() {
+    let mut industry = screening_params();
+    industry.industry_id = Some(0);
+    assert_eq!(
+        validate_screening_params(&industry).err(),
+        Some("industry_id 必須為正整數")
+    );
+
+    let mut band = screening_params();
+    band.valuation_band = Some("cheap".to_owned());
+    assert_eq!(
+        validate_screening_params(&band).err(),
+        Some("valuation_band 不在允許範圍")
+    );
+    for value in [
+        "undervalued",
+        "fair_valued",
+        "overvalued",
+        "highly_overvalued",
+    ] {
+        band.valuation_band = Some(value.to_owned());
+        assert!(validate_screening_params(&band).is_ok(), "{value}");
+    }
+
+    let mut eps = screening_params();
+    eps.min_eps = Some(10_000.5);
+    assert_eq!(
+        validate_screening_params(&eps).err(),
+        Some("min_eps 必須介於 -10000 至 10000")
+    );
+    let mut roe = screening_params();
+    roe.min_roe_percent = Some(-10_000.5);
+    assert_eq!(
+        validate_screening_params(&roe).err(),
+        Some("min_roe_percent 必須介於 -10000 至 10000")
+    );
+
+    for limit in [0, 51] {
+        let mut params = screening_params();
+        params.market = Some("twse".to_owned());
+        params.limit = Some(limit);
+        assert_eq!(
+            validate_screening_params(&params).err(),
+            Some("limit 必須介於 1 至 50"),
+            "{limit}"
+        );
+    }
+}
+
 /// 財務體質條件的範圍：F 分數 0–9、毛利率上限 100%、負債比 0–1000%。
 #[test]
 fn screening_health_boundaries_are_deterministic() {
