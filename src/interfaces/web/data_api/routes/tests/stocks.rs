@@ -465,3 +465,93 @@ async fn stock_financial_report_endpoint_db_semantics() {
 
     cleanup(pool).await;
 }
+
+/// 財務體質：兩個年度的 F 分數、Yahoo 優先於 BigGo、指定年度缺前一年時只評 3 項，
+/// 以及尚無年度財報、422 與 404。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn stock_financial_health_endpoint_db_semantics() {
+    let Some(pool) = pool_or_skip("stock_financial_health_endpoint_db_semantics").await else {
+        return;
+    };
+    cleanup(pool).await;
+    seed(pool, &[SEED_STOCK]).await;
+
+    // 主檔存在但沒有年度財報：年度為 null、9 項都無法判定。
+    let path = format!("/api/v1/stocks/{SYMBOL}/financial-health");
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["fiscal_year"].is_null(), "{json}");
+    assert!(json["compared_with"].is_null(), "{json}");
+    assert_eq!(
+        (json["score"].clone(), json["evaluated"].clone()),
+        (0.into(), 0.into())
+    );
+    assert_eq!(json["max_score"], 9);
+    let criteria = json["criteria"].as_array().expect("指標陣列");
+    assert_eq!(criteria.len(), 9);
+    assert!(criteria.iter().all(|c| c["passed"].is_null()), "{json}");
+
+    seed(
+        pool,
+        &[
+            // 2020 年 Yahoo 另有一筆 BigGo（淨利為負，若被選到資產報酬率會變負）。
+            r#"INSERT INTO income_statement (stock_symbol, fiscal_year, period_type, quarter, source, revenue, gross_profit, net_income)
+               VALUES ($1, 2020, 'annual', 'A', 'yahoo', 4600, 1900, 460),
+                      ($1, 2020, 'annual', 'A', 'biggo', 4600, 1900, -9999),
+                      ($1, 2019, 'annual', 'A', 'yahoo', 4000, 1500, 300),
+                      ($1, 2020, 'single', 'Q4', 'yahoo', 1300, 550, 120)"#,
+            r#"INSERT INTO cash_flow_statement (stock_symbol, fiscal_year, period_type, quarter, source, operating_cash_flow)
+               VALUES ($1, 2020, 'annual', 'A', 'yahoo', 900),
+                      ($1, 2019, 'annual', 'A', 'yahoo', 200)"#,
+            r#"INSERT INTO balance_sheet (stock_symbol, fiscal_year, period_type, quarter, source, total_assets, current_assets, current_liabilities, non_current_liabilities, share_capital)
+               VALUES ($1, 2020, 'single', 'Q3', 'yahoo', 99999, 1, 99999, 99999, 99999),
+                      ($1, 2020, 'single', 'Q4', 'yahoo', 52000, 20000, 10000, 11000, 1000),
+                      ($1, 2019, 'single', 'Q4', 'yahoo', 48000, 15000, 9000, 10000, 1000)"#,
+        ],
+    )
+    .await;
+
+    // 預設取最新年度 2020、比較 2019：只有長期負債比上升，8／9。
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["fiscal_year"], 2020);
+    assert_eq!(json["compared_with"], 2019);
+    assert_eq!(json["score"], 8, "{json}");
+    assert_eq!(json["evaluated"], 9);
+    let criteria = json["criteria"].as_array().expect("指標陣列");
+    let failed: Vec<_> = criteria
+        .iter()
+        .filter(|c| c["passed"] == false)
+        .map(|c| c["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(failed, ["leverage_not_increased"]);
+    assert_eq!(criteria[0]["key"], "roa_positive");
+    assert_eq!(criteria[0]["value"], 0.0088);
+    assert_eq!(criteria[3]["value"], 900.0);
+    assert_eq!(criteria[3]["baseline"], 460.0);
+    assert_eq!(criteria[3]["unit"], "thousand_twd");
+    assert_eq!(criteria[5]["key"], "current_ratio_improved");
+    assert_eq!(criteria[5]["value"], 2.0);
+
+    // 指定 2019：沒有 2018 的資料，只能判定不需比較的 3 項；盈餘品質不及格（200 < 300）。
+    let (status, json) = get(&format!("{path}?fiscal_year=2019")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["compared_with"], 2018);
+    assert_eq!(
+        (json["score"].clone(), json["evaluated"].clone()),
+        (2.into(), 3.into())
+    );
+
+    for query in ["fiscal_year=1999", "fiscal_year=2101"] {
+        let (status, _) = get(&format!("{path}?{query}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+    let (status, _) = get("/api/v1/stocks/79979ZZ/financial-health").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    cleanup(pool).await;
+}

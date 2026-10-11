@@ -11,8 +11,8 @@ use super::{dto, handlers};
 /// 由 handler 註解生成的 OpenAPI 3 文件。
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::financial_reports, handlers::dividend_history, handlers::stock_valuation, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::IncomeStatementItem, dto::BalanceSheetItem, dto::CashFlowStatementItem, dto::FinancialReportResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::ReportPeriodTypeValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
+    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::financial_reports, handlers::financial_health, handlers::dividend_history, handlers::stock_valuation, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::IncomeStatementItem, dto::BalanceSheetItem, dto::CashFlowStatementItem, dto::FinancialReportResponse, dto::HealthCriterion, dto::FinancialHealthResponse, dto::Dividend, dto::DividendHistoryResponse, dto::StockValuation, dto::StockValuationResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::ReportPeriodTypeValue, dto::HealthCategoryValue, dto::HealthValueUnitValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -171,6 +171,7 @@ mod tests {
             "/api/v1/stocks/{symbol}/monthly-revenues",
             "/api/v1/stocks/{symbol}/financial-statements",
             "/api/v1/stocks/{symbol}/financial-reports",
+            "/api/v1/stocks/{symbol}/financial-health",
             "/api/v1/stocks/{symbol}/dividends",
             "/api/v1/stocks/{symbol}/valuation",
             "/api/v1/stocks/{symbol}/chip",
@@ -617,5 +618,54 @@ mod tests {
         );
         let cash_flow = &schemas["CashFlowStatementItem"]["properties"];
         assert!(cash_flow["free_cash_flow"].to_string().contains("integer"));
+    }
+
+    /// 財務體質 path 的契約：fiscal_year 範圍、9 項指標的 item 與分類／單位列舉，
+    /// 以及「得分可為 null、數值是可為 null 的 number」。
+    #[test]
+    fn openapi_financial_health_schema_pins_field_names() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+        let operation = get_operation(&document, "/api/v1/stocks/{symbol}/financial-health");
+        assert_endpoint_responses(operation, "FinancialHealthResponse", true);
+        let fiscal_year = query_schema(operation, "fiscal_year");
+        assert_eq!(fiscal_year["minimum"], 2000);
+        assert_eq!(fiscal_year["maximum"], 2100);
+
+        let schemas = &document["components"]["schemas"];
+        let properties = &schemas["FinancialHealthResponse"]["properties"];
+        assert_eq!(properties["criteria"]["type"], "array");
+        assert_eq!(
+            properties["criteria"]["items"]["$ref"],
+            "#/components/schemas/HealthCriterion"
+        );
+        for field in ["score", "evaluated", "max_score"] {
+            assert_eq!(properties[field]["type"], "integer", "{field}");
+        }
+        for field in ["fiscal_year", "compared_with"] {
+            assert!(properties[field].to_string().contains("null"), "{field}");
+        }
+
+        let criterion = &schemas["HealthCriterion"]["properties"];
+        assert!(criterion["passed"].to_string().contains("boolean"));
+        assert!(criterion["passed"].to_string().contains("null"));
+        for field in ["value", "baseline"] {
+            let schema = criterion[field].to_string();
+            assert!(
+                schema.contains("number") && schema.contains("null"),
+                "{field}"
+            );
+        }
+        assert_eq!(
+            enum_values(&document, &criterion["category"]),
+            serde_json::json!([
+                "profitability",
+                "leverage_liquidity",
+                "operating_efficiency"
+            ])
+        );
+        assert_eq!(
+            enum_values(&document, &criterion["unit"]),
+            serde_json::json!(["ratio", "thousand_twd"])
+        );
     }
 }

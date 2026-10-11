@@ -182,7 +182,7 @@ log/                 # runtime 檔案日誌輸出目錄
 + `StockService` gRPC 服務提供 `UpdateStockInfo`、`FetchCurrentStockQuotes`、`FetchHolidaySchedule`。
 + `ManualBackfillService` gRPC 服務提供每日報價、收盤彙總、台股加權指數、持股股利重算、單檔／多檔歷史股利、個股歷史報價、公司行動（減資等）登錄、CAGR 全期間／單一期間計算的回補，以及 job 查詢。
 + HTTP 手動回補頁面位於 `/manual-backfill`，API 包含 `/api/manual-backfill/jobs`、`/api/manual-backfill/jobs/{id}` 與多個 `POST /api/manual-backfill/*` 回補入口；工作在背景執行，請求會立即回傳 job id。
-+ Data API 位於 `/api/v1/*`（與手動回補共用 HTTP server），提供股票搜尋、最新與歷史報價、即時快照、基本資料、月營收、財報、三大財務報表（損益表／資產負債表／現金流量表）、股利、估值、籌碼面、市場廣度、殖利率排行、選股、大盤指數、股利行事曆、外資持股排行、當日漲跌幅／成交量排行、CAGR 排行等唯讀查詢。
++ Data API 位於 `/api/v1/*`（與手動回補共用 HTTP server），提供股票搜尋、最新與歷史報價、即時快照、基本資料、月營收、財報、三大財務報表（損益表／資產負債表／現金流量表）、財務體質評分（Piotroski F 分數）、股利、估值、籌碼面、市場廣度、殖利率排行、選股、大盤指數、股利行事曆、外資持股排行、當日漲跌幅／成交量排行、CAGR 排行等唯讀查詢。
   - 除 `/api/v1/healthz` 外都需要 `Authorization: Bearer <DATA_API_KEY>`；未設定 `DATA_API_KEY` 時一律拒絕。
   - OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不需驗證）。
 + Telegram bot 用於排程提醒（除權息、股利發放、公開申購、持股財報、外資持股變化、持股法說會摘要、持股主力進出、持股董監質押變動、持股法人與信用交易、持股千張大戶週報、資料健康週報）、價格追蹤通知與錯誤告警。
