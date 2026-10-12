@@ -30,5 +30,7 @@ pub mod stock_day;
 pub mod suspend_listing;
 /// 台股加權指數
 pub mod taiwan_capitalization_weighted_stock_index;
+/// 個股日本益比與股價淨值比（BWIBBU_d，可查歷史日期）
+pub mod valuation_ratio;
 
 pub const HOST: &str = "twse.com.tw";

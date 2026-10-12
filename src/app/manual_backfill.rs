@@ -52,6 +52,10 @@
 //! - `test_reconcile_ex_right_results`：
 //!   以交易所除權除息計算結果核對 `MANUAL_EX_RIGHT_FROM`～`MANUAL_EX_RIGHT_TO` 的股利日期與金額；
 //!   預設只試算，`MANUAL_EX_RIGHT_APPLY=1` 才寫入。
+//! - `test_backfill_official_valuation_ratios`：
+//!   依 `MANUAL_OFFICIAL_RATIO_FROM`～`MANUAL_OFFICIAL_RATIO_TO`（預設 [`MANUAL_OFFICIAL_RATIO_FROM`]
+//!   ～[`MANUAL_OFFICIAL_RATIO_TO`]）以證交所、櫃買中心官方值補日線為 0 的本益比與股價淨值比
+//!   （只填 0、不覆寫）；每次請求間隔 3 秒，可分年分段執行，重跑只會處理仍有缺值的日期。
 //! - `test_backfill_foreign_holding_history`：
 //!   依 [`MANUAL_QFII_HISTORY_START`]～[`MANUAL_QFII_HISTORY_END`] 逐日回補外資持股歷史
 //!   （`qfii_history`），最後重算 `qfii_trend`；不發持股通知。
@@ -76,6 +80,12 @@ const MANUAL_DAILY_QUOTE_DATE: &str = "2026-04-30";
 ///
 /// 與 CAGR 最長的十年期間對齊並多留數年緩衝。
 const MANUAL_CAPITAL_REDUCTION_SCAN_FROM: &str = "2014-01-01";
+
+/// 官方本益比／股價淨值比回補的預設起日（證交所 BWIBBU_d 與櫃買 peQryDate 皆可查到）。
+const MANUAL_OFFICIAL_RATIO_FROM: &str = "2012-01-02";
+
+/// 官方本益比／股價淨值比回補的預設迄日。
+const MANUAL_OFFICIAL_RATIO_TO: &str = "2012-12-31";
 
 /// 手動回補收盤事件匯總時使用的預設交易日。
 const MANUAL_CLOSING_AGGREGATE_DATE: &str = "2026-04-30";
@@ -815,4 +825,30 @@ async fn test_rebuild_financial_health() {
     crate::app::calculation::financial_health::execute()
         .await
         .expect("manual financial health rebuild failed");
+}
+
+/// 以證交所、櫃買中心官方值回補日線為 0 的本益比與股價淨值比。
+///
+/// **會寫入 `DailyQuotes`**（只填 0、不覆寫既有值）。起訖日可用環境變數
+/// `MANUAL_OFFICIAL_RATIO_FROM`／`MANUAL_OFFICIAL_RATIO_TO` 覆寫，一年約 250 個交易日 ×
+/// 兩市場，每次請求間隔 3 秒，約 25 分鐘。
+///
+/// 執行範例：
+/// `MANUAL_OFFICIAL_RATIO_FROM=2013-01-01 MANUAL_OFFICIAL_RATIO_TO=2013-12-31 cargo test app::manual_backfill::test_backfill_official_valuation_ratios -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_official_valuation_ratios() {
+    dotenvy::dotenv().ok();
+    let date = |name: &str, default: &str| {
+        let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
+        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+    };
+    let from = date("MANUAL_OFFICIAL_RATIO_FROM", MANUAL_OFFICIAL_RATIO_FROM);
+    let to = date("MANUAL_OFFICIAL_RATIO_TO", MANUAL_OFFICIAL_RATIO_TO);
+
+    let summary = crate::app::backfill::official_ratio::backfill_range(from, to)
+        .await
+        .expect("manual official valuation ratio backfill failed");
+    println!("官方本益比淨值比回補 {from}～{to}：{summary:?}");
 }
