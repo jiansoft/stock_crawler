@@ -83,9 +83,16 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
         return Ok(0);
     }
 
+    Ok(upsert_for_date(tai_ex.data, date).await)
+}
+
+/// 從 TWSE 整月資料中挑出與 `date` 相符的那一筆寫入資料庫並更新快取；回傳寫入筆數（0 或 1）。
+///
+/// 格式不符的資料列略過；單筆寫入失敗只記錄錯誤。
+async fn upsert_for_date(data: Option<Vec<Vec<String>>>, date: NaiveDate) -> usize {
     let mut upserted_count: usize = 0;
 
-    if let Some(data) = tai_ex.data {
+    if let Some(data) = data {
         for item in data {
             let cmd = match IndexAclMapper::from_strings(&item) {
                 Some(c) => c,
@@ -118,12 +125,69 @@ pub async fn execute_for_date(date: NaiveDate) -> Result<usize> {
         }
     }
 
-    Ok(upserted_count)
+    upserted_count
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 只寫入指定日期那一筆：其他日期與格式不符的資料列略過，寫入後快取也有這一天。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn upsert_for_date_writes_only_the_requested_day() {
+        dotenvy::dotenv().ok();
+        let pool = crate::infra::database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 upsert_for_date_writes_only_the_requested_day：無資料庫連接");
+            return;
+        }
+        let date = NaiveDate::from_ymd_opt(1989, 6, 2).expect("固定日期合法");
+        let other = NaiveDate::from_ymd_opt(1989, 6, 1).expect("固定日期合法");
+        let cleanup = || async {
+            sqlx::query(r#"DELETE FROM "index" WHERE category = 'TAIEX' AND "date" = ANY($1)"#)
+                .bind(vec![date, other])
+                .execute(pool)
+                .await
+                .expect("清除測試指數");
+        };
+        cleanup().await;
+
+        let row = |day: &str, index: &str| -> Vec<String> {
+            [day, "1,000", "2,000", "300", index, "-12.5"]
+                .map(String::from)
+                .to_vec()
+        };
+        let data = vec![
+            row("78/06/01", "9,000.00"),
+            row("78/06/02", "9,123.45"),
+            vec!["78/06/02".to_string()],
+        ];
+        assert_eq!(upsert_for_date(Some(data), date).await, 1);
+        assert_eq!(upsert_for_date(None, date).await, 0);
+
+        let saved: Vec<(NaiveDate, rust_decimal::Decimal, rust_decimal::Decimal)> = sqlx::query_as(
+            r#"SELECT "date", index, change FROM "index" WHERE category = 'TAIEX' AND "date" = ANY($1)"#,
+        )
+        .bind(vec![date, other])
+        .fetch_all(pool)
+        .await
+        .expect("讀回測試指數");
+        assert_eq!(
+            saved,
+            vec![(
+                date,
+                rust_decimal::Decimal::new(912_345, 2),
+                rust_decimal::Decimal::new(-125, 1)
+            )]
+        );
+        assert!(SHARE.get_stock_index("1989-06-02-TAIEX").is_some());
+
+        cleanup().await;
+    }
 
     #[tokio::test]
     #[ignore]
