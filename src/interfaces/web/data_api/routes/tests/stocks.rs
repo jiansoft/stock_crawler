@@ -908,7 +908,8 @@ async fn portfolio_summary_endpoint_db_semantics() {
 }
 
 /// 持股績效：扣除買賣金額的時間加權報酬、事後補登的買進記在建立日、已撤銷的賣出不算、
-/// 月報酬與最大回撤、同期大盤與超額報酬。用不存在的會員編號與 2001 年的日期隔離資料，
+/// 月報酬與最大回撤、同期大盤與超額報酬。用不存在的會員編號與 2099 年的日期隔離資料（全部會員的期間以最新日期往回推，
+/// 用未來日期才能確保最新日期是測試資料，不受其他測試寫入的近期市值影響），
 /// 大盤列以 `transaction = 979790` 標記，結束時清除。
 #[tokio::test]
 #[cfg_attr(
@@ -922,7 +923,7 @@ async fn portfolio_history_endpoint_db_semantics() {
     };
     let cleanup_history = || async {
         for sql in [
-            "DELETE FROM daily_money_history_member WHERE member_id IN ($1, $1 + 1) OR (member_id = 0 AND date < '2002-01-01')",
+            "DELETE FROM daily_money_history_member WHERE member_id IN ($1, $1 + 1) OR (member_id = 0 AND date >= '2099-01-01')",
             "DELETE FROM stock_ownership_details WHERE member_id = $1",
             "DELETE FROM sell_history WHERE member_id = $1",
             "DELETE FROM index WHERE category = 'TAIEX' AND transaction = $1",
@@ -939,11 +940,11 @@ async fn portfolio_history_endpoint_db_semantics() {
     assert_eq!(json["months"], serde_json::json!([]));
 
     for sql in [
-        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2001-01-31', $1, 100), ('2001-02-01', $1, 110), ('2001-02-02', $1, 210), ('2001-03-01', $1, 99)",
+        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2099-01-31', $1, 100), ('2099-02-01', $1, 110), ('2099-02-02', $1, 210), ('2099-03-01', $1, 99)",
         // 交易日 01-15（期間前）但 02-01 才補登：記在 02-01。
-        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, date, created_time) VALUES ($1, '79979DA', 1, -10, '2001-01-15', '2001-02-01 10:00+08'), ($1, '79979DA', 1, -100, '2001-02-02', '2001-02-02 10:00+08')",
-        "INSERT INTO sell_history (member_id, security_code, date, amount, create_time, is_reverted) VALUES ($1, '79979DA', '2001-03-01', 100, '2001-03-01 10:00+08', false), ($1, '79979DA', '2001-03-01', 999, '2001-03-01 10:00+08', true)",
-        "INSERT INTO index (category, date, index, transaction) VALUES ('TAIEX', '2001-01-31', 5000, $1), ('TAIEX', '2001-02-28', 5500, $1), ('TAIEX', '2001-03-01', 5250, $1)",
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, date, created_time) VALUES ($1, '79979DA', 1, -10, '2099-01-15', '2099-02-01 10:00+08'), ($1, '79979DA', 1, -100, '2099-02-02', '2099-02-02 10:00+08')",
+        "INSERT INTO sell_history (member_id, security_code, date, amount, create_time, is_reverted) VALUES ($1, '79979DA', '2099-03-01', 100, '2099-03-01 10:00+08', false), ($1, '79979DA', '2099-03-01', 999, '2099-03-01 10:00+08', true)",
+        "INSERT INTO index (category, date, index, transaction) VALUES ('TAIEX', '2099-01-31', 5000, $1), ('TAIEX', '2099-02-28', 5500, $1), ('TAIEX', '2099-03-01', 5250, $1)",
     ] {
         sqlx::query(sql)
             .bind(MEMBER)
@@ -956,7 +957,7 @@ async fn portfolio_history_endpoint_db_semantics() {
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(
         (json["from"].clone(), json["data_as_of"].clone()),
-        ("2001-01-31".into(), "2001-03-01".into())
+        ("2099-01-31".into(), "2099-03-01".into())
     );
     // 02-01：(110 − 10) ÷ 100；02-02：(210 − 100) ÷ 110；03-01：(99 + 100) ÷ 210。
     assert_eq!(json["return_percent"], -5.24);
@@ -965,8 +966,8 @@ async fn portfolio_history_endpoint_db_semantics() {
         (110.0.into(), 100.0.into())
     );
     assert_eq!(json["max_drawdown_percent"], -5.24);
-    assert_eq!(json["max_drawdown_peak"], "2001-01-31");
-    assert_eq!(json["max_drawdown_trough"], "2001-03-01");
+    assert_eq!(json["max_drawdown_peak"], "2099-01-31");
+    assert_eq!(json["max_drawdown_trough"], "2099-03-01");
     assert_eq!(json["benchmark_return_percent"], 5.0);
     assert_eq!(json["excess_return_percent"], -10.24);
     assert!(json["annualized_return_percent"].is_null());
@@ -978,15 +979,15 @@ async fn portfolio_history_endpoint_db_semantics() {
             months[0]["return_percent"].clone(),
             months[0]["net_contribution"].clone()
         ),
-        ("2001-02".into(), 0.0.into(), 110.0.into())
+        ("2099-02".into(), 0.0.into(), 110.0.into())
     );
     assert_eq!(months[1]["benchmark_return_percent"], 5.0);
 
     // 全部會員：另一位會員 02-02 才開始記錄（市值 50），合計當天多出的 50 視為投入。
     // 02-02：(260 − 100 − 50) ÷ 110；03-01：(149 + 100) ÷ 260。
     for sql in [
-        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2001-02-02', $1 + 1, 50), ('2001-03-01', $1 + 1, 50)",
-        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2001-01-31', 0, 100), ('2001-02-01', 0, 110), ('2001-02-02', 0, 260), ('2001-03-01', 0, 149)",
+        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2099-02-02', $1 + 1, 50), ('2099-03-01', $1 + 1, 50)",
+        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2099-01-31', 0, 100), ('2099-02-01', 0, 110), ('2099-02-02', 0, 260), ('2099-03-01', 0, 149)",
     ] {
         sqlx::query(sql)
             .bind(MEMBER)
