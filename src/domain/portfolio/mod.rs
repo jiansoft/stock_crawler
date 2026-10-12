@@ -1,3 +1,5 @@
+/// 持股股利現金流預估（已公告與依去年同期推估）。
+pub mod dividend_forecast;
 pub mod entity;
 /// 持股績效（時間加權報酬、月報酬、最大回撤、與大盤比較）。
 pub mod performance;

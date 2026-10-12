@@ -12,6 +12,7 @@
 mod cagr;
 mod chip;
 mod dividend_fill;
+mod dividend_forecast;
 mod financial_health;
 mod financial_reports;
 mod market_calendar;
@@ -39,6 +40,7 @@ use crate::interfaces::web::data_api::dto::{ErrorBody, HealthResponse};
 pub(super) use cagr::{__path_cagr_by_symbol, __path_cagr_ranking, cagr_by_symbol, cagr_ranking};
 pub(super) use chip::{__path_stock_chip, stock_chip};
 pub(super) use dividend_fill::{__path_dividend_fill, dividend_fill};
+pub(super) use dividend_forecast::{__path_dividend_forecast, dividend_forecast};
 pub(super) use financial_health::{__path_financial_health, financial_health};
 pub(super) use financial_reports::{__path_financial_reports, financial_reports};
 pub(super) use market_calendar::{__path_dividend_calendar, dividend_calendar};
