@@ -76,7 +76,22 @@ pub async fn save_daily(repository: &dyn ChipRepository, date: NaiveDate) -> Res
         twse::chip::visit_margin(date),
         tpex::chip::visit_margin(date),
     );
+    let (mut summary, flows, margins) = collect_daily(
+        date,
+        [listed_flows, otc_flows],
+        [listed_margins, otc_margins],
+    )?;
+    summary.rows_written += repository.save_institutional(date, &flows).await?;
+    summary.rows_written += repository.save_margin(date, &margins).await?;
+    Ok(summary)
+}
 
+/// 上市、上櫃各兩個來源的結果轉成入庫記錄；單一來源失敗只記錄並計數，四個都失敗回錯誤。
+fn collect_daily(
+    date: NaiveDate,
+    [listed_flows, otc_flows]: [Result<HashMap<String, InstitutionalFlow>>; 2],
+    [listed_margins, otc_margins]: [Result<HashMap<String, MarginBalance>>; 2],
+) -> Result<(DailySummary, Vec<InstitutionalNet>, Vec<MarginRecord>)> {
     let mut summary = DailySummary::default();
     let mut flows = Vec::new();
     for (market, result) in [("上市", listed_flows), ("上櫃", otc_flows)] {
@@ -104,9 +119,7 @@ pub async fn save_daily(repository: &dyn ChipRepository, date: NaiveDate) -> Res
 
     summary.institutional = flows.len();
     summary.margin = margins.len();
-    summary.rows_written += repository.save_institutional(date, &flows).await?;
-    summary.rows_written += repository.save_margin(date, &margins).await?;
-    Ok(summary)
+    Ok((summary, flows, margins))
 }
 
 /// 回補 `from`～`to`（皆含）每個交易日的三大法人與融資融券，回傳寫入列數。
@@ -303,6 +316,63 @@ mod tests {
         assert_eq!(record.main_share, dec!(4.48));
         assert_eq!(record.buyers[0].name, "凱基-台北");
         assert_eq!(record.sellers[0].net, 300);
+    }
+
+    /// 四個來源的結果合併成入庫記錄：失敗的來源只計數；四個全部失敗回錯誤。
+    #[test]
+    fn collect_daily_merges_sources_and_counts_failures() {
+        let date = NaiveDate::from_ymd_opt(2026, 10, 12).expect("有效日期");
+        let flows = |symbol: &str| {
+            Ok(HashMap::from([(
+                symbol.to_string(),
+                InstitutionalFlow {
+                    foreign: 100,
+                    trust: -20,
+                    dealer: 5,
+                },
+            )]))
+        };
+        let margins = || {
+            Ok(HashMap::from([(
+                "2330".to_string(),
+                MarginBalance {
+                    margin_previous: 10,
+                    margin_today: 12,
+                    short_previous: 3,
+                    short_today: 1,
+                },
+            )]))
+        };
+
+        let (summary, institutional, margin) = collect_daily(
+            date,
+            [flows("2330"), flows("6488")],
+            [margins(), Err(anyhow::anyhow!("逾時"))],
+        )
+        .expect("部分失敗不是錯誤");
+        assert_eq!(
+            summary,
+            DailySummary {
+                institutional: 2,
+                margin: 1,
+                failed_sources: 1,
+                rows_written: 0
+            }
+        );
+        assert_eq!(institutional.len(), 2);
+        assert!(
+            institutional
+                .iter()
+                .any(|net| net.stock_symbol == "6488" && net.trust == -20)
+        );
+        assert_eq!(margin[0].margin_balance, 12);
+
+        fn failed<T>() -> Result<T> {
+            Err(anyhow::anyhow!("封鎖"))
+        }
+        let err = collect_daily(date, [failed(), failed()], [failed(), failed()])
+            .expect_err("四個來源都失敗");
+        assert!(err.to_string().contains("四個來源全部抓取失敗"), "{err}");
     }
 
     /// 融資融券欄位對應：今日餘額寫到 balance、前日餘額寫到 previous。
