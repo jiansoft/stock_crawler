@@ -1252,7 +1252,7 @@ async fn stock_peers_endpoint_db_semantics() {
     use chrono::Datelike;
 
     const PEER: &str = "79979DB";
-    const INDUSTRY: i32 = 979_79;
+    const INDUSTRY: i32 = 97_979;
     let Some(pool) = pool_or_skip("stock_peers_endpoint_db_semantics").await else {
         return;
     };
