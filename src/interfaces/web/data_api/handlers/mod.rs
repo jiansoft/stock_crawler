@@ -19,6 +19,7 @@ mod market_calendar;
 mod market_movers;
 mod market_rankings;
 mod market_stats;
+mod peers;
 mod portfolio;
 mod portfolio_history;
 mod screening;
@@ -52,6 +53,7 @@ pub(super) use market_rankings::{
 pub(super) use market_stats::{
     __path_market_breadth, __path_market_index_history, market_breadth, market_index_history,
 };
+pub(super) use peers::{__path_stock_peers, stock_peers};
 pub(super) use portfolio::{__path_portfolio_summary, portfolio_summary};
 pub(super) use portfolio_history::{__path_portfolio_history, portfolio_history};
 pub(super) use screening::{__path_screen_stocks, screen_stocks};

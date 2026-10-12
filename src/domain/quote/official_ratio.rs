@@ -63,6 +63,10 @@ pub trait OfficialRatioRepository: Send + Sync {
         ratios: &[OfficialRatio],
         policy: PePolicy,
     ) -> Result<u64>;
+
+    /// 把日線的本益比與淨值比同步到最新報價表（`last_daily_quotes`，每日 15:00 由日線複製），
+    /// 回傳更新列數。補值晚於複製時，Data API 的最新報價才看得到官方值。
+    async fn sync_latest_quotes(&self) -> Result<u64>;
 }
 
 /// 解析交易所的倍數字串：去掉千分位逗號與空白，`-`、`N/A`、空字串與非正數視為沒有值。

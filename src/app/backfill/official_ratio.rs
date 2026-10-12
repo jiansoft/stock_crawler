@@ -78,6 +78,8 @@ pub struct Summary {
     pub fetched_rows: usize,
     /// 實際更新的日線列數。
     pub updated_rows: u64,
+    /// 跟著同步的最新報價（`last_daily_quotes`）列數；日線沒有更新時不同步。
+    pub synced_latest_rows: u64,
 }
 
 /// 排程入口：補最近 [`RECENT_DAYS`] 天（台北時間，含今天）兩個市場的缺值；沒有交易日時不發請求。
@@ -85,11 +87,12 @@ pub async fn execute() -> Result<()> {
     let (from, to) = recent_window(Local::now().date_naive());
     let summary = backfill_range(from, to).await?;
     tracing::info!(
-        "官方本益比淨值比補值結束: requests={} failed={} fetched={} updated={}",
+        "官方本益比淨值比補值結束: requests={} failed={} fetched={} updated={} synced_latest={}",
         summary.requests,
         summary.failed,
         summary.fetched_rows,
-        summary.updated_rows
+        summary.updated_rows,
+        summary.synced_latest_rows
     );
     Ok(())
 }
@@ -180,6 +183,9 @@ where
             summary.requests
         );
     }
+    if summary.updated_rows > 0 {
+        summary.synced_latest_rows = repo.sync_latest_quotes().await?;
+    }
     Ok(summary)
 }
 
@@ -199,6 +205,7 @@ mod tests {
         listed: Vec<NaiveDate>,
         otc: Vec<NaiveDate>,
         filled: Mutex<Vec<(NaiveDate, usize)>>,
+        synced: Mutex<usize>,
     }
 
     #[async_trait]
@@ -233,6 +240,11 @@ mod tests {
         ) -> Result<u64> {
             self.filled.lock().unwrap().push((date, ratios.len()));
             Ok(ratios.len() as u64)
+        }
+
+        async fn sync_latest_quotes(&self) -> Result<u64> {
+            *self.synced.lock().unwrap() += 1;
+            Ok(3)
         }
     }
 
@@ -281,8 +293,14 @@ mod tests {
                 requests: 3,
                 failed: 1,
                 fetched_rows: 3,
-                updated_rows: 3
+                updated_rows: 3,
+                synced_latest_rows: 3
             }
+        );
+        assert_eq!(
+            *repo.synced.lock().unwrap(),
+            1,
+            "有更新才同步最新報價，且只同步一次"
         );
         assert_eq!(*pauses.lock().unwrap(), 2);
         assert_eq!(
@@ -308,8 +326,9 @@ mod tests {
         .await;
         assert!(result.is_err());
 
+        let idle_repo = FakeRepo::default();
         let idle = run(
-            &FakeRepo::default(),
+            &idle_repo,
             day(1),
             day(30),
             |_, _| async { Ok(Vec::new()) },
@@ -318,6 +337,7 @@ mod tests {
         .await
         .expect("沒有缺值不是錯誤");
         assert_eq!(idle, Summary::default());
+        assert_eq!(*idle_repo.synced.lock().unwrap(), 0, "沒有更新不同步");
         assert_eq!(
             (Market::Listed.market_id(), Market::Otc.market_id()),
             (2, 4)

@@ -82,6 +82,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::stock_valuation_band),
         )
         .route(
+            "/stocks/{symbol}/peers",
+            axum::routing::get(handlers::stock_peers),
+        )
+        .route(
             "/market/breadth",
             axum::routing::get(handlers::market_breadth),
         )

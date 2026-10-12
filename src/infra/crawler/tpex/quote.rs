@@ -44,6 +44,10 @@ pub struct PeRatioAnalysisResponse {
     /// 本益比
     #[serde(rename = "PriceEarningRatio")]
     pub price_earning_ratio: String,
+    /// 資料日期（民國年 `yyyMMdd`，例如 `1151012`）。這支 openapi 只給最新公布日的資料，
+    /// 收盤時（15:00）通常還是前一個交易日，重抓歷史日期時更會拿到當天的值。
+    #[serde(rename = "Date", default)]
+    pub date: String,
 }
 
 /// 抓取上櫃公司每日收盤資訊
@@ -81,11 +85,27 @@ pub async fn parse_quote_response(
     pe_ratio_response: Vec<PeRatioAnalysisResponse>,
     date: NaiveDate,
 ) -> Result<Vec<DailyQuoteDto>> {
+    // 只採用資料日期就是 `date` 的本益比；不是當天的值留 0，交給官方補值排程
+    // （app::backfill::official_ratio，17:30、20:30 以櫃買當日資料覆寫）補上。
+    let expected_date = format!(
+        "{}{}",
+        util::datetime::gregorian_year_to_roc_year(date.year()),
+        date.format("%m%d")
+    );
     let mut pe_ratio_analysis: HashMap<String, PeRatioAnalysisResponse> =
         HashMap::with_capacity(pe_ratio_response.len());
-
+    let mut stale_date = None;
     for item in pe_ratio_response {
-        pe_ratio_analysis.insert(item.security_code.to_string(), item);
+        if item.date == expected_date {
+            pe_ratio_analysis.insert(item.security_code.to_string(), item);
+        } else {
+            stale_date.get_or_insert(item.date);
+        }
+    }
+    if let Some(stale_date) = stale_date {
+        tracing::info!(
+            "上櫃本益比 openapi 的資料日期 {stale_date} 不是 {expected_date}，本益比留待官方補值排程"
+        );
     }
 
     let mut dqs: Vec<DailyQuoteDto> = Vec::with_capacity(2048);
@@ -193,6 +213,7 @@ mod tests {
         let pe_ratio = vec![PeRatioAnalysisResponse {
             security_code: "5483".to_string(),
             price_earning_ratio: "12.34".to_string(),
+            date: "1150613".to_string(),
         }];
 
         let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
@@ -242,6 +263,7 @@ mod tests {
         let pe_ratio = vec![PeRatioAnalysisResponse {
             security_code: "5483".to_string(),
             price_earning_ratio: "N/A".to_string(),
+            date: "1150612".to_string(),
         }];
 
         let date = NaiveDate::from_ymd_opt(2026, 6, 12).unwrap();
@@ -251,6 +273,49 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         // 佔位符規則化為 0；行情主體欄位完整保留。
+        assert_eq!(result[0].price_earning_ratio, Decimal::ZERO);
+        assert_eq!(result[0].closing_price, dec!(100.00));
+    }
+
+    /// 本益比資料日期不是當天（openapi 還停在前一個交易日）時不採用，本益比留 0。
+    #[tokio::test]
+    async fn test_parse_quote_response_ignores_stale_pe_ratio() {
+        let row: Vec<String> = [
+            "5483",
+            "中美晶",
+            "100.00",
+            "1.50",
+            "98.50",
+            "101.00",
+            "98.00",
+            "10,000",
+            "1,000,000",
+            "500",
+            "100.00",
+            "10",
+            "100.50",
+            "20",
+        ]
+        .iter()
+        .map(|cell| cell.to_string())
+        .collect();
+        let response = QuoteResponse {
+            tables: vec![Table {
+                data: Some(vec![row]),
+            }],
+        };
+        let pe_ratio = vec![PeRatioAnalysisResponse {
+            security_code: "5483".to_string(),
+            price_earning_ratio: "12.34".to_string(),
+            date: "1150611".to_string(),
+        }];
+
+        let date = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+        let result = parse_quote_response(response, pe_ratio, date)
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
         assert_eq!(result[0].price_earning_ratio, Decimal::ZERO);
         assert_eq!(result[0].closing_price, dec!(100.00));
     }
