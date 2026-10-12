@@ -14,6 +14,8 @@
 //!    CAGR、外資持股允許落後一個交易日。
 //! 6. 月營收：每月 15 日之後要有上個月的資料。
 //! 7. 股利：近五年過期的「尚未公布」佔位列、年度合計與各期明細加總不符。
+//! 8. 本益比／淨值比：某天某市場為 0 的比例超過門檻（官方補值排程沒跑或來源改版）。
+//!    虧損股的本益比本來就是 0（上櫃約 26%），所以本益比的門檻較寬；今天還沒補值，不列入。
 //!
 //! 全部正常時也會發一則簡短的週報，用來確認檢查本身有在跑。
 
@@ -25,7 +27,7 @@ use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 use super::closing;
 use crate::{
     core::{alert, util::text},
-    domain::health::{DataHealthRepository, DataHealthSnapshot},
+    domain::health::{DataHealthRepository, DataHealthSnapshot, ValuationRatioZeroCount},
     infra::{crawler::twse, database::repository::data_health::PgDataHealthRepository},
 };
 
@@ -37,6 +39,12 @@ const BASELINE_DAYS: u64 = 21;
 
 /// 月營收在每月這一天之後應已有上個月的資料（法定申報期限為 10 日）。
 const REVENUE_DUE_DAY: u32 = 15;
+
+/// 某天某市場的股價淨值比為 0 超過這個百分比就算異常（正常約 0～3%）。
+const PB_ZERO_LIMIT_PERCENT: i64 = 20;
+
+/// 某天某市場的本益比為 0 超過這個百分比就算異常（虧損股占上櫃約 26%、上市約 22%）。
+const PE_ZERO_LIMIT_PERCENT: i64 = 60;
 
 /// 單一檢查項目的結果。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +143,10 @@ fn evaluate(
             revenue_problems(snapshot.latest_revenue_month, today),
         ),
         Check::new("股利", dividend_problems(snapshot)),
+        Check::new(
+            "本益比／淨值比",
+            valuation_ratio_problems(&snapshot.valuation_ratio_zeros, today),
+        ),
     ]
 }
 
@@ -252,6 +264,33 @@ fn dividend_problems(snapshot: &DataHealthSnapshot) -> Vec<String> {
     problems
 }
 
+/// 本益比或淨值比為 0 的比例超過門檻的交易日與市場；`today` 還沒補值，不列入。
+fn valuation_ratio_problems(zeros: &[ValuationRatioZeroCount], today: NaiveDate) -> Vec<String> {
+    let mut problems = Vec::new();
+    for zero in zeros
+        .iter()
+        .filter(|zero| zero.date < today && zero.rows > 0)
+    {
+        let market = if zero.market_id == 2 {
+            "上市"
+        } else {
+            "上櫃"
+        };
+        for (label, count, limit) in [
+            ("本益比", zero.pe_zero, PE_ZERO_LIMIT_PERCENT),
+            ("淨值比", zero.pb_zero, PB_ZERO_LIMIT_PERCENT),
+        ] {
+            if count * 100 > zero.rows * limit {
+                problems.push(format!(
+                    "{} {market} {label}為 0 的有 {count}／{} 檔（請跑 test_backfill_official_valuation_ratios）",
+                    zero.date, zero.rows
+                ));
+            }
+        }
+    }
+    problems
+}
+
 /// 組成 Telegram 週報。
 ///
 /// 通知管道以 MarkdownV2 發送，週報本身沒有格式標記，因此整則跳脫保留字元；
@@ -358,10 +397,39 @@ mod tests {
 
         let message = report(day(4), day(10), &checks);
         assert!(
-            message.starts_with("資料健康週報 2026\\-10\\-04～2026\\-10\\-10\n全部 7 項正常"),
+            message.starts_with("資料健康週報 2026\\-10\\-04～2026\\-10\\-10\n全部 8 項正常"),
             "{message}"
         );
         assert!(!message.contains("⚠️"));
+    }
+
+    /// 本益比、淨值比為 0 的比例超過門檻才列出；今天與沒有列數的日子不檢查。
+    #[test]
+    fn zero_valuation_ratios_over_the_limit_are_flagged() {
+        let zero = |d, market_id, rows, pe_zero, pb_zero| ValuationRatioZeroCount {
+            date: day(d),
+            market_id,
+            rows,
+            pe_zero,
+            pb_zero,
+        };
+        let mut snapshot = healthy();
+        snapshot.valuation_ratio_zeros = vec![
+            zero(8, 2, 1_100, 243, 27),
+            zero(8, 4, 894, 236, 2),
+            zero(9, 2, 1_100, 243, 1_100),
+            zero(9, 4, 894, 890, 2),
+            zero(10, 4, 894, 894, 894),
+            zero(7, 4, 0, 0, 0),
+        ];
+        let checks = evaluate(&snapshot, day(4), day(10), Some(&[]));
+        assert_eq!(
+            problems_of(&checks, "本益比／淨值比"),
+            [
+                "2026-10-09 上市 淨值比為 0 的有 1100／1100 檔（請跑 test_backfill_official_valuation_ratios）",
+                "2026-10-09 上櫃 本益比為 0 的有 890／894 檔（請跑 test_backfill_official_valuation_ratios）",
+            ]
+        );
     }
 
     /// 平日整天沒有日報價要列出；休市日與週末不算。

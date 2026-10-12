@@ -16,6 +16,21 @@ pub struct DerivedTableLatest {
     pub latest: Option<NaiveDate>,
 }
 
+/// 單一交易日、單一市場的本益比與股價淨值比為 0 的列數。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValuationRatioZeroCount {
+    /// 交易日。
+    pub date: NaiveDate,
+    /// 市場別（2 上市、4 上櫃）。
+    pub market_id: i32,
+    /// 有成交的普通股與特別股列數（不含 ETF）。
+    pub rows: i64,
+    /// 本益比為 0 的列數（虧損股本來就是 0）。
+    pub pe_zero: i64,
+    /// 股價淨值比為 0 的列數。
+    pub pb_zero: i64,
+}
+
 /// 一次健康檢查量到的全部數字。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DataHealthSnapshot {
@@ -37,4 +52,6 @@ pub struct DataHealthSnapshot {
     pub dividend_total_mismatches: i64,
     /// 月營收的最新年月（`YYYYMM`）；沒有資料時為 `None`。
     pub latest_revenue_month: Option<i64>,
+    /// 檢查期間內每個交易日、每個市場的本益比與股價淨值比為 0 的列數。
+    pub valuation_ratio_zeros: Vec<ValuationRatioZeroCount>,
 }

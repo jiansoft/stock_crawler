@@ -6,7 +6,9 @@ use chrono::NaiveDate;
 
 use crate::{
     domain::{
-        health::{DataHealthRepository, DataHealthSnapshot, DerivedTableLatest},
+        health::{
+            DataHealthRepository, DataHealthSnapshot, DerivedTableLatest, ValuationRatioZeroCount,
+        },
         quote::entity::MarketTradedCount,
     },
     infra::database::{self, table::daily_quote},
@@ -101,6 +103,22 @@ WHERE total.quarter = ''
        OR abs(total.stock_dividend - details.stock_dividend) > 0.0001)
 "#;
 
+/// 每個交易日、每個市場有成交的個股（不含 ETF）中，本益比與股價淨值比為 0 的列數。
+const VALUATION_RATIO_ZEROS_SQL: &str = r#"
+SELECT q."Date", s.stock_exchange_market_id,
+       count(*),
+       count(*) FILTER (WHERE q."PriceEarningRatio" = 0),
+       count(*) FILTER (WHERE q."price-to-book_ratio" = 0)
+FROM "DailyQuotes" q
+JOIN stocks s ON s.stock_symbol = q.stock_symbol
+WHERE q."Date" BETWEEN $1 AND $2
+  AND s.stock_exchange_market_id IN (2, 4)
+  AND q."ClosingPrice" > 0
+  AND q.stock_symbol !~ '^00'
+GROUP BY 1, 2
+ORDER BY 1, 2
+"#;
+
 /// 基於 PostgreSQL 的資料健康檢查量測。
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PgDataHealthRepository;
@@ -177,6 +195,25 @@ impl DataHealthRepository for PgDataHealthRepository {
             .await
             .context("Failed to count dividend total mismatches")?;
 
+        let valuation_ratio_zeros =
+            sqlx::query_as::<_, (NaiveDate, i32, i64, i64, i64)>(VALUATION_RATIO_ZEROS_SQL)
+                .bind(from)
+                .bind(to)
+                .fetch_all(pool)
+                .await
+                .with_context(|| format!("Failed to count zero valuation ratios {from}~{to}"))?
+                .into_iter()
+                .map(
+                    |(date, market_id, rows, pe_zero, pb_zero)| ValuationRatioZeroCount {
+                        date,
+                        market_id,
+                        rows,
+                        pe_zero,
+                        pb_zero,
+                    },
+                )
+                .collect();
+
         let latest_revenue_month = sqlx::query_scalar(r#"SELECT max("Date") FROM "Revenue""#)
             .fetch_one(pool)
             .await
@@ -204,6 +241,7 @@ impl DataHealthRepository for PgDataHealthRepository {
             stale_dividend_placeholders,
             dividend_total_mismatches,
             latest_revenue_month,
+            valuation_ratio_zeros,
         })
     }
 }
