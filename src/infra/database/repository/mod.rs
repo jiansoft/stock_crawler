@@ -19,6 +19,7 @@ pub mod portfolio;
 pub mod quote;
 pub mod stock;
 pub mod trace;
+pub mod valuation_band;
 pub mod yield_rank;
 
 /// 倉儲層結構化錯誤類型。

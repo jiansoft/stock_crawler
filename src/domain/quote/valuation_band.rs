@@ -10,7 +10,30 @@
 //! - 百分位＝樣本中「小於或等於目前值」的比例（0–100）。
 //! - 對應股價＝最新收盤價 × 分位值 ÷ 目前值，假設獲利（淨值）不變、只有估值倍數改變。
 
+use anyhow::Result;
+use async_trait::async_trait;
+use chrono::NaiveDate;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
+
+/// 單日的收盤價與估值倍數。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DailyRatio {
+    /// 交易日。
+    pub date: NaiveDate,
+    /// 收盤價。
+    pub close: Decimal,
+    /// 本益比；虧損或未提供時為 0。
+    pub price_earning_ratio: Decimal,
+    /// 股價淨值比；未提供時為 0。
+    pub price_to_book_ratio: Decimal,
+}
+
+/// 估值區間的資料來源。
+#[async_trait]
+pub trait ValuationHistoryRepository: Send + Sync {
+    /// 以最新收盤日往回 `years` 年的每日倍數，依日期由新到舊；沒有成交（收盤價 0）的占位列不算。
+    async fn fetch_daily_ratios(&self, stock_symbol: &str, years: u8) -> Result<Vec<DailyRatio>>;
+}
 
 /// 單一估值倍數（本益比或股價淨值比）的歷史區間統計。
 #[derive(Debug, Clone, PartialEq)]

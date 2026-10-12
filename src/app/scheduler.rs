@@ -245,6 +245,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "通知持股千張大戶週報",
             event::taiwan_stock::holder_distribution::execute,
         ),
+        // 10:50（週六）持股估值週報：本益比、股價淨值比位於自己近 5 年 ≥ 第 90 或 ≤ 第 10 百分位的持股；
+        // 沒有就不發。
+        create_job(
+            "0 50 10 * * Sat",
+            "通知持股估值週報",
+            event::taiwan_stock::valuation_alert::execute,
+        ),
         // 11:00（週六）資料健康週報：近 7 天的交易日完整性、均線、漲跌幅、衍生資料新鮮度、
         // 月營收與股利佔位列；這類問題來源不會報錯，只能定期量。
         create_job(

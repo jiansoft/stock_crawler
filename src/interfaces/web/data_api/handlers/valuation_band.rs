@@ -9,40 +9,14 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
-use super::{database_error, ensure_stock_exists, error_response};
-use crate::domain::quote::valuation_band;
-use crate::infra::database;
+use super::{ensure_stock_exists, error_response, repository_error};
+use crate::domain::quote::valuation_band::{self, DailyRatio, ValuationHistoryRepository};
+use crate::infra::database::repository::quote::PgQuoteRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, ValuationBandParams, ValuationBandResponse,
 };
-
-/// 期間內每日的倍數，依日期由新到舊；走 `(stock_symbol, "Date" DESC)` 的覆蓋索引。
-/// 停牌等沒有成交（收盤價 0）的占位列不算，避免被當成最新一日。
-const DAILY_RATIOS_SQL: &str = r#"
-SELECT "Date", "ClosingPrice", "PriceEarningRatio", "price-to-book_ratio"
-FROM "DailyQuotes"
-WHERE stock_symbol = $1
-  AND "ClosingPrice" > 0
-  AND "Date" > (
-      SELECT max("Date") FROM "DailyQuotes" WHERE stock_symbol = $1 AND "ClosingPrice" > 0
-  ) - make_interval(years => $2)
-ORDER BY "Date" DESC
-"#;
-
-#[derive(sqlx::FromRow)]
-struct RatioRow {
-    #[sqlx(rename = "Date")]
-    date: NaiveDate,
-    #[sqlx(rename = "ClosingPrice")]
-    close: Decimal,
-    #[sqlx(rename = "PriceEarningRatio")]
-    price_earning_ratio: Decimal,
-    #[sqlx(rename = "price-to-book_ratio")]
-    price_to_book_ratio: Decimal,
-}
 
 /// 查詢單一股票本益比與股價淨值比在近幾年的歷史區間。
 ///
@@ -65,24 +39,22 @@ pub(crate) async fn stock_valuation_band(
         return response;
     }
 
-    let rows: Vec<RatioRow> = match sqlx::query_as(DAILY_RATIOS_SQL)
-        .bind(&symbol)
-        .bind(i32::from(years))
-        .fetch_all(database::get_connection())
+    let rows = match PgQuoteRepository::new()
+        .fetch_daily_ratios(&symbol, years)
         .await
     {
         Ok(rows) => rows,
-        Err(error) => return database_error(error),
+        Err(error) => return repository_error(error),
     };
 
     Json(build_response(symbol, years, &rows)).into_response()
 }
 
 /// 由新到舊的每日倍數組成回應；沒有日線時各欄位為 `null`。
-fn build_response(symbol: String, years: u8, rows: &[RatioRow]) -> ValuationBandResponse {
+fn build_response(symbol: String, years: u8, rows: &[DailyRatio]) -> ValuationBandResponse {
     let latest = rows.first();
     let closing_price = latest.map(|row| row.close);
-    let band = |pick: fn(&RatioRow) -> Decimal| {
+    let band = |pick: fn(&DailyRatio) -> Decimal| {
         let history: Vec<Decimal> = rows.iter().map(pick).collect();
         valuation_band::summarize(&history, latest.map(pick), closing_price).map(Into::into)
     };
@@ -99,12 +71,13 @@ fn build_response(symbol: String, years: u8, rows: &[RatioRow]) -> ValuationBand
 
 #[cfg(test)]
 mod tests {
+    use chrono::NaiveDate;
     use rust_decimal_macros::dec;
 
     use super::*;
 
-    fn row(day: u32, close: Decimal, pe: Decimal, pb: Decimal) -> RatioRow {
-        RatioRow {
+    fn row(day: u32, close: Decimal, pe: Decimal, pb: Decimal) -> DailyRatio {
+        DailyRatio {
             date: NaiveDate::from_ymd_opt(2026, 4, day).expect("有效日期"),
             close,
             price_earning_ratio: pe,
