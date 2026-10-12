@@ -46,11 +46,11 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
     // 查詢日由 handler 明確綁定，SQL 不直接讀 CURRENT_DATE；純函式測試可傳入
     // 任意日期驗證月份、季度與 31 天邊界，production 則採伺服器台北本地日。
     let query_date = Local::now().date_naive();
-    // ORDER BY 字串只可能來自下方二十二個 &'static str 分支，絕不插入呼叫端
+    // ORDER BY 字串只可能來自下方二十四個 &'static str 分支，絕不插入呼叫端
     // 原始文字；其他條件仍全部使用 bind parameter。
-    let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $15", validated.order_by);
+    let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $16", validated.order_by);
     // SQLx 0.9 要求動態字串顯式稽核；此處唯一動態部分已由
-    // `screen_order_by` 限制為二十二個靜態常數，因此可安全標記。
+    // `screen_order_by` 限制為二十四個靜態常數，因此可安全標記。
     let rows: Result<Vec<ScreenedStockRow>, _> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(validated.market_id)
         .bind(params.industry_id)
@@ -66,6 +66,7 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
         .bind(params.positive_free_cash_flow.unwrap_or(false))
         .bind(params.min_revenue_yoy_streak.map(i16::from))
         .bind(validated.min_revenue_yoy_3m_percent)
+        .bind(validated.min_monthly_revenue)
         .bind(i64::from(validated.limit))
         .fetch_all(database::get_connection())
         .await;

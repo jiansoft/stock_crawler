@@ -19,6 +19,8 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_revenue_yoy_percent: Option<Decimal>,
     /// 最低近 3 個月累計營收年增率。
     pub(super) min_revenue_yoy_3m_percent: Option<Decimal>,
+    /// 最新一個月營收下限（千元）。
+    pub(super) min_monthly_revenue: Option<Decimal>,
     /// 最低每股盈餘。
     pub(super) min_eps: Option<Decimal>,
     /// 最低股東權益報酬率。
@@ -29,7 +31,7 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_gross_margin_percent: Option<Decimal>,
     /// 最高季末負債比。
     pub(super) max_debt_ratio_percent: Option<Decimal>,
-    /// 二十二個固定排序分支之一。
+    /// 二十四個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,
@@ -76,6 +78,12 @@ pub(super) fn validate_screening_params(
         -100.0,
         10_000.0,
         "min_revenue_yoy_3m_percent 必須介於 -100 至 10000",
+    )?;
+    let min_monthly_revenue = decimal_in_range(
+        params.min_monthly_revenue,
+        0.0,
+        1_000_000_000_000.0,
+        "min_monthly_revenue 必須介於 0 至 1000000000000",
     )?;
     let min_eps = decimal_in_range(
         params.min_eps,
@@ -124,6 +132,7 @@ pub(super) fn validate_screening_params(
         || params.min_revenue_yoy_percent.is_some()
         || params.min_revenue_yoy_streak.is_some()
         || params.min_revenue_yoy_3m_percent.is_some()
+        || params.min_monthly_revenue.is_some()
         || params.min_eps.is_some()
         || params.min_roe_percent.is_some()
         || params.min_dividend_yield_percent.is_some()
@@ -138,6 +147,7 @@ pub(super) fn validate_screening_params(
         market_id,
         min_revenue_yoy_percent,
         min_revenue_yoy_3m_percent,
+        min_monthly_revenue,
         min_eps,
         min_roe_percent,
         min_dividend_yield_percent,
@@ -196,6 +206,12 @@ pub(super) fn screen_order_by(
         }
         ("revenue_yoy_3m", "desc") => {
             Ok("ORDER BY revenue_yoy_3m_percent DESC NULLS LAST, stock_symbol ASC")
+        }
+        ("monthly_revenue", "asc") => {
+            Ok("ORDER BY monthly_revenue ASC NULLS LAST, stock_symbol ASC")
+        }
+        ("monthly_revenue", "desc") => {
+            Ok("ORDER BY monthly_revenue DESC NULLS LAST, stock_symbol ASC")
         }
         ("eps", "asc") => Ok("ORDER BY earnings_per_share ASC NULLS LAST, stock_symbol ASC"),
         ("eps", "desc") => Ok("ORDER BY earnings_per_share DESC NULLS LAST, stock_symbol ASC"),

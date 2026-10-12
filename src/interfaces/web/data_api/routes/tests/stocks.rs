@@ -709,8 +709,18 @@ async fn stock_screen_revenue_momentum_filters() {
     assert_eq!(stock["revenue_yoy_streak"], 3);
     assert_eq!(stock["revenue_yoy_3m_percent"], 11.67);
     assert_eq!(stock["revenue_yoy_percent"], 10.0);
+    assert_eq!(stock["monthly_revenue"], 110.0);
+    let (_, json) = get(&format!(
+        "{base}&min_monthly_revenue=110&sort_by=monthly_revenue"
+    ))
+    .await;
+    assert!(listed(&json).is_some(), "月營收剛好等於下限應出現");
 
-    for query in ["min_revenue_yoy_streak=4", "min_revenue_yoy_3m_percent=12"] {
+    for query in [
+        "min_revenue_yoy_streak=4",
+        "min_revenue_yoy_3m_percent=12",
+        "min_monthly_revenue=111",
+    ] {
         let (status, json) = get(&format!("{base}&{query}")).await;
         assert_eq!(status, StatusCode::OK, "{query}");
         assert!(listed(&json).is_none(), "{query} 應排除假代號");
@@ -719,6 +729,7 @@ async fn stock_screen_revenue_momentum_filters() {
         "min_revenue_yoy_streak=0",
         "min_revenue_yoy_streak=13",
         "min_revenue_yoy_3m_percent=-101",
+        "min_monthly_revenue=-1",
         "sort_by=revenue_yoy_3months",
     ] {
         let (status, _) = get(&format!("{base}&{query}")).await;

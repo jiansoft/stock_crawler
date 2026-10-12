@@ -34,6 +34,8 @@ pub(crate) enum StockScreenSortValue {
     /// 近 3 個月累計營收年增率。
     #[schema(rename = "revenue_yoy_3m")]
     RevenueYoy3m,
+    /// 最新月營收。
+    MonthlyRevenue,
     /// 每股盈餘。
     Eps,
     /// 股東權益報酬率。
@@ -83,6 +85,8 @@ pub(crate) struct ScreenedStock {
     /// 近 3 個月合計營收對去年同期的年增率百分比；三個月不相連、去年同期為 0
     /// 或最新營收過期時為 `null`。
     pub(crate) revenue_yoy_3m_percent: Option<f64>,
+    /// 最新一個月營收（新台幣千元）；最新營收過期時為 `null`。
+    pub(crate) monthly_revenue: Option<f64>,
     /// 最新且仍在兩季內的季度 EPS；缺值或過期時為 `null`。
     pub(crate) earnings_per_share: Option<f64>,
     /// 最新且仍在兩季內的季度 ROE；缺值或過期時為 `null`。
@@ -129,7 +133,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的二十二個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的二十四個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -150,6 +154,10 @@ pub(crate) struct StockScreeningParams {
     /// 最低近 3 個月累計營收年增率百分比，範圍 -100–10000。
     #[param(minimum = -100, maximum = 10000)]
     pub(crate) min_revenue_yoy_3m_percent: Option<f64>,
+    /// 最新一個月營收下限（新台幣千元），範圍 0–1000000000000；用來排除營收規模太小、
+    /// 年增率因低基期而失真的股票。
+    #[param(minimum = 0, maximum = 1000000000000_i64)]
+    pub(crate) min_monthly_revenue: Option<f64>,
     /// 最低每股盈餘，範圍 -10000–10000。
     #[param(minimum = -10000, maximum = 10000)]
     pub(crate) min_eps: Option<f64>,

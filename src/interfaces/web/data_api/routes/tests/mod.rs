@@ -60,7 +60,7 @@ async fn openapi_json_and_swagger_ui_are_served() {
         .as_array()
         .cloned()
         .unwrap_or_default();
-    for expected in ["revenue_yoy_streak", "revenue_yoy_3m"] {
+    for expected in ["revenue_yoy_streak", "revenue_yoy_3m", "monthly_revenue"] {
         assert!(
             sort_values.iter().any(|value| value == expected),
             "StockScreenSortValue 應包含 {expected}：{sort_values:?}"
