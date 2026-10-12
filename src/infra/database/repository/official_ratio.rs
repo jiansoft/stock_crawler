@@ -65,6 +65,19 @@ WHERE q."Date" = $1
     OR (q."price-to-book_ratio" = 0 AND r.pb IS NOT NULL))
 "#;
 
+/// 最新報價表與同日日線的倍數不同時改成日線的值；值相同的列不碰。
+const SYNC_LATEST_SQL: &str = r#"
+UPDATE last_daily_quotes l SET
+    price_earning_ratio = q."PriceEarningRatio",
+    "price-to-book_ratio" = q."price-to-book_ratio",
+    updated_time = now()
+FROM "DailyQuotes" q
+WHERE q."Date" = l.date
+  AND q.stock_symbol = l.stock_symbol
+  AND (l.price_earning_ratio IS DISTINCT FROM q."PriceEarningRatio"
+    OR l."price-to-book_ratio" IS DISTINCT FROM q."price-to-book_ratio")
+"#;
+
 #[async_trait]
 impl OfficialRatioRepository for PgQuoteRepository {
     async fn fetch_dates_to_update(
@@ -111,6 +124,13 @@ impl OfficialRatioRepository for PgQuoteRepository {
             .await?;
         Ok(result.rows_affected())
     }
+
+    async fn sync_latest_quotes(&self) -> Result<u64> {
+        Ok(sqlx::query(SYNC_LATEST_SQL)
+            .execute(database::get_connection())
+            .await?
+            .rows_affected())
+    }
 }
 
 #[cfg(test)]
@@ -137,6 +157,7 @@ mod tests {
         let cleanup = || async {
             for sql in [
                 r#"DELETE FROM "DailyQuotes" WHERE stock_symbol IN ('79979A', '79979B', '0079979')"#,
+                "DELETE FROM last_daily_quotes WHERE stock_symbol IN ('79979A', '79979B', '0079979')",
                 "DELETE FROM stocks WHERE stock_symbol IN ('79979A', '79979B', '0079979')",
             ] {
                 let _ = sqlx::query(sql).execute(pool).await;
@@ -254,6 +275,22 @@ mod tests {
                 (dec!(0), dec!(1.5))
             ]
         );
+
+        // 最新報價表跟著同日日線更新；已相同的不再更新。
+        sqlx::query(
+            "INSERT INTO last_daily_quotes (date, stock_symbol) VALUES ('2001-03-05', '79979B')",
+        )
+        .execute(pool)
+        .await
+        .expect("種入最新報價");
+        assert!(repo.sync_latest_quotes().await.expect("同步") >= 1);
+        let latest: (Decimal, Decimal) = sqlx::query_as(
+            r#"SELECT price_earning_ratio, "price-to-book_ratio" FROM last_daily_quotes WHERE stock_symbol = '79979B'"#,
+        )
+        .fetch_one(pool)
+        .await
+        .expect("查詢");
+        assert_eq!(latest, (dec!(18.55), dec!(1.5)));
 
         cleanup().await;
     }
