@@ -7,11 +7,11 @@
 //! - 處理 `offset` 分頁，直到抓完整個類股。
 //! - 將 Yahoo 的原始 JSON 欄位轉成 [`RealtimeSnapshot`]。
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, future::Future, time::Duration};
 
 use anyhow::{Context, Result, anyhow};
 use once_cell::sync::OnceCell;
-use reqwest::{Client, header};
+use reqwest::{Client, StatusCode, header};
 use tokio::time::sleep;
 
 use crate::{
@@ -209,6 +209,27 @@ fn build_class_quotes_headers(category: &YahooClassCategory) -> Result<header::H
 pub async fn fetch_category_snapshots(
     category: &YahooClassCategory,
 ) -> Result<CategoryFetchResult> {
+    collect_category_pages(
+        category,
+        |offset| fetch_class_quotes_page(category, offset),
+        || sleep(PAGE_REQUEST_INTERVAL),
+    )
+    .await
+}
+
+/// 分頁迴圈本體：`fetch_page` 抓指定 offset 的單頁、`pause` 是頁與頁之間的停頓，
+/// 測試時換成假資料與不等待。錯誤條件同 [`fetch_category_snapshots`]。
+async fn collect_category_pages<F, FF, P, PF>(
+    category: &YahooClassCategory,
+    fetch_page: F,
+    pause: P,
+) -> Result<CategoryFetchResult>
+where
+    F: Fn(usize) -> FF,
+    FF: Future<Output = Result<ClassQuotesPageResult>>,
+    P: Fn() -> PF,
+    PF: Future<Output = ()>,
+{
     // 用 symbol -> snapshot 收集完整類股結果，
     // 後面若同頁或跨頁出現重複代號，後寫入的值會覆蓋前值。
     let mut snapshots = HashMap::new();
@@ -221,7 +242,7 @@ pub async fn fetch_category_snapshots(
 
     loop {
         // 每一圈只抓一頁，抓完再看 `nextOffset` 決定要不要繼續。
-        let page_result = fetch_class_quotes_page(category, offset).await?;
+        let page_result = fetch_page(offset).await?;
         let list_len = page_result.raw_item_count;
         page_count += 1;
         raw_item_count += list_len;
@@ -257,7 +278,7 @@ pub async fn fetch_category_snapshots(
             Some(next_offset) if next_offset > offset => {
                 // 同一個類股若有大量分頁，也要在頁與頁之間停一下，
                 // 避免單一 sector 連續請求過密而被 Yahoo 視為異常流量。
-                sleep(PAGE_REQUEST_INTERVAL).await;
+                pause().await;
                 offset = next_offset;
                 page += 1;
             }
@@ -316,7 +337,23 @@ async fn fetch_class_quotes_page(
             e
         )
     })?;
-    let response_body_preview = String::from_utf8_lossy(response_body.as_ref());
+    parse_class_quotes_page(category, offset, &url, status, response_body.as_ref())
+}
+
+/// 檢查並解析單頁回應（HTTP 狀態、JSON、空頁規則）；不碰網路，測試可直接餵資料。
+///
+/// # Errors
+/// - HTTP 狀態不是成功。
+/// - JSON 解析失敗或 `nextOffset` 格式錯誤。
+/// - 非首頁卻出現「有總筆數但空列表」的異常資料。
+fn parse_class_quotes_page(
+    category: &YahooClassCategory,
+    offset: usize,
+    url: &str,
+    status: StatusCode,
+    response_body: &[u8],
+) -> Result<ClassQuotesPageResult> {
+    let response_body_preview = String::from_utf8_lossy(response_body);
 
     if !status.is_success() {
         return Err(anyhow!(
@@ -327,15 +364,14 @@ async fn fetch_class_quotes_page(
         ));
     }
 
-    let response: ClassQuotesResponse<'_> = serde_json::from_slice(response_body.as_ref())
-        .map_err(|e| {
-            anyhow!(
-                "Failed to parse Yahoo 類股 API response from {}: {:?}. Body: {}",
-                url,
-                e,
-                util::text::truncate(&response_body_preview, 200)
-            )
-        })?;
+    let response: ClassQuotesResponse<'_> = serde_json::from_slice(response_body).map_err(|e| {
+        anyhow!(
+            "Failed to parse Yahoo 類股 API response from {}: {:?}. Body: {}",
+            url,
+            e,
+            util::text::truncate(&response_body_preview, 200)
+        )
+    })?;
     let raw_item_count = response.list.len();
     let results_total = response.pagination.results_total;
     let next_offset = response.pagination.next_offset()?;
@@ -457,6 +493,168 @@ mod tests {
         assert!(categories.iter().any(|category| {
             category.exchange == YahooClassExchange::Listed && category.sector_id == 40
         }));
+    }
+
+    /// 專用 client 只建立一次，之後拿到的是同一個實例。
+    #[test]
+    fn class_quotes_client_is_built_once() {
+        let first = get_yahoo_class_quotes_client().expect("可建立 client");
+        let second = get_yahoo_class_quotes_client().expect("可重用 client");
+        assert!(std::ptr::eq(first, second));
+    }
+
+    fn semiconductor() -> YahooClassCategory {
+        YahooClassCategory::enabled(YahooClassExchange::Listed, 40, "半導體")
+    }
+
+    /// 組出一頁類股 API 回應；`next` 為下一頁 offset（字串，與 Yahoo 相同）。
+    fn page_body(symbols: &[&str], total: usize, next: Option<&str>) -> Vec<u8> {
+        let list: Vec<serde_json::Value> = symbols
+            .iter()
+            .map(|symbol| serde_json::json!({"systexId": symbol, "price": {"raw": "100"}}))
+            .collect();
+        serde_json::to_vec(&serde_json::json!({
+            "list": list,
+            "pagination": {"resultsTotal": total, "nextOffset": next}
+        }))
+        .expect("序列化")
+    }
+
+    fn page(symbols: &[&str], total: usize, next: Option<usize>) -> ClassQuotesPageResult {
+        parse_class_quotes_page(
+            &semiconductor(),
+            0,
+            "test-url",
+            StatusCode::OK,
+            &page_body(
+                symbols,
+                total,
+                next.map(|offset| offset.to_string()).as_deref(),
+            ),
+        )
+        .expect("可解析")
+    }
+
+    /// 單頁解析：快照、原始筆數、總筆數與下一頁 offset。
+    #[test]
+    fn parse_page_reads_items_and_pagination() {
+        let result = page(&["2330", "2303"], 45, Some(30));
+        assert_eq!(result.snapshots.len(), 2);
+        assert_eq!(result.snapshots[0].0, "2330");
+        assert_eq!(
+            (
+                result.raw_item_count,
+                result.results_total,
+                result.next_offset
+            ),
+            (2, 45, Some(30))
+        );
+    }
+
+    /// HTTP 失敗、JSON 壞掉、nextOffset 不是數字、非首頁空列表卻有總筆數都回錯誤；
+    /// 首頁空列表不在這裡報錯（由分頁迴圈判斷）。
+    #[test]
+    fn parse_page_rejects_bad_responses() {
+        let category = semiconductor();
+        let body = page_body(&["2330"], 1, None);
+        let parse = |offset, status, body: &[u8]| {
+            parse_class_quotes_page(&category, offset, "test-url", status, body)
+        };
+        let error = parse(0, StatusCode::FORBIDDEN, b"denied")
+            .err()
+            .expect("403 應失敗");
+        assert!(error.to_string().contains("403"), "{error}");
+        assert!(parse(0, StatusCode::OK, b"<html>").is_err());
+        assert!(parse(0, StatusCode::OK, &page_body(&["2330"], 1, Some("abc"))).is_err());
+        assert!(parse(30, StatusCode::OK, &page_body(&[], 45, None)).is_err());
+        let first_empty =
+            parse(0, StatusCode::OK, &page_body(&[], 0, None)).expect("首頁空不在這裡報錯");
+        assert_eq!(first_empty.raw_item_count, 0);
+        assert!(parse(0, StatusCode::OK, &body).is_ok());
+    }
+
+    /// 分頁迴圈：依 nextOffset 往下抓、頁與頁之間停頓、重複代號以後者為準、診斷數字正確。
+    #[tokio::test]
+    async fn collect_pages_follows_next_offset() {
+        let pauses = std::sync::Mutex::new(0);
+        let requested = std::sync::Mutex::new(Vec::new());
+        let result = collect_category_pages(
+            &semiconductor(),
+            |offset| {
+                requested.lock().unwrap().push(offset);
+                async move {
+                    Ok(match offset {
+                        0 => page(&["2330", "2303"], 3, Some(2)),
+                        _ => page(&["2303", "2454"], 3, None),
+                    })
+                }
+            },
+            || {
+                *pauses.lock().unwrap() += 1;
+                async {}
+            },
+        )
+        .await
+        .expect("可抓完");
+        assert_eq!(*requested.lock().unwrap(), vec![0, 2]);
+        assert_eq!(*pauses.lock().unwrap(), 1);
+        assert_eq!(
+            result.diagnostics,
+            CategoryFetchDiagnostics {
+                page_count: 2,
+                raw_item_count: 4,
+                snapshot_count: 3
+            }
+        );
+        assert!(result.snapshots.contains_key("2454"));
+    }
+
+    /// nextOffset 沒有往前推進時停止，避免無窮迴圈。
+    #[tokio::test]
+    async fn collect_pages_stops_when_offset_does_not_advance() {
+        let result = collect_category_pages(
+            &semiconductor(),
+            |_| async { Ok(page(&["2330"], 1, Some(0))) },
+            || async {},
+        )
+        .await
+        .expect("可抓完");
+        assert_eq!(result.diagnostics.page_count, 1);
+    }
+
+    /// 首頁就空、或整個類股解析不出任何股票，都要回錯誤。
+    #[tokio::test]
+    async fn collect_pages_rejects_empty_category() {
+        let empty_first = collect_category_pages(
+            &semiconductor(),
+            |_| async { Ok(page(&[], 0, None)) },
+            || async {},
+        )
+        .await;
+        assert!(
+            empty_first
+                .err()
+                .is_some_and(|e| e.to_string().contains("首頁為空"))
+        );
+
+        let unparsable = collect_category_pages(
+            &semiconductor(),
+            |_| async {
+                Ok(ClassQuotesPageResult {
+                    snapshots: Vec::new(),
+                    raw_item_count: 2,
+                    results_total: 2,
+                    next_offset: None,
+                })
+            },
+            || async {},
+        )
+        .await;
+        assert!(
+            unparsable
+                .err()
+                .is_some_and(|e| e.to_string().contains("未解析出任何股票"))
+        );
     }
 
     /// Live 測試：驗證單一類股能抓到完整分頁資料，而不只首頁前 30 筆。

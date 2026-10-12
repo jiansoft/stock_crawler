@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     time::Duration,
 };
 
@@ -233,69 +233,39 @@ async fn backfill_recent_dividends_for_stock(
                 year, stock_symbol
             )
         })?;
-    // 記錄需要重算年度彙總列的發放年度；用 HashSet 可避免同年度多個季度重複執行聚合 SQL。
-    let mut annual_total_refresh_years: HashSet<i32> = HashSet::new();
+    let plan = plan_stock_dividends(
+        year,
+        stock_symbol,
+        &dividends_from_yahoo,
+        multiple_dividend_cache,
+    );
     // 是否真的寫入了季配/半年配明細；只有這種情況才需要連帶回補持股的領息紀錄。
     let mut saved_multiple_dividends = false;
-    // Yahoo 回傳資料已依發放年度分組；這裡直接借用迭代，避免 clone 大量明細資料。
-    for (paid_year, dividend_details_from_yahoo) in &dividends_from_yahoo.dividend {
-        // 同一個 paid_year 底下可能有年度配息、季配或半年配，多筆都要逐一判斷。
-        for dividend_from_yahoo in dividend_details_from_yahoo {
-            // Yahoo 頁面會帶歷史資料；排程只補指定年度與前一年度，避免舊資料覆蓋現有校正結果。
-            if !should_process_dividend_year(year, dividend_from_yahoo.year_of_dividend) {
-                continue;
-            }
+    for entity in &plan.to_save {
+        match dividend_repo.save(entity).await {
+            Ok(_) => {
+                tracing::debug!("dividend upsert executed successfully. \r\n{:#?}", entity);
 
-            // key 使用股利所屬年度而非發放年度，才能正確區分跨年度發放的 Q4 或 H2 配息。
-            let key = make_dividend_key(
-                stock_symbol,
-                dividend_from_yahoo.year_of_dividend,
-                &dividend_from_yahoo.quarter,
-            );
-
-            // 年度合計列是由明細加總出來的；只要該發放年度有季配/半年配明細就重算，
-            // 不能只在有新明細寫入時才算——2753 的 2026 合計就是因為明細早已存在、
-            // 全部被略過，錯誤的合計列（現金 0）才一直留在資料表裡。
-            if !dividend_from_yahoo.quarter.is_empty() {
-                annual_total_refresh_years.insert(dividend_from_yahoo.year);
-            }
-
-            let cmd = YahooDividendAclMapper::from_dto(stock_symbol, dividend_from_yahoo);
-            let entity = YahooDividendAclMapper::from_command(&cmd);
-
-            if multiple_dividend_cache
-                .get(&key)
-                .is_some_and(|existing| !dividend_content_differs(existing, &entity))
-            {
-                // 既有資料與來源一致時略過，避免無謂的 upsert；有差異才寫回，
-                // 才補得上例如「配股併入 H2」這種來源端的更正。
-                continue;
-            }
-            match dividend_repo.save(&entity).await {
-                Ok(_) => {
-                    tracing::debug!("dividend upsert executed successfully. \r\n{:#?}", entity);
-
-                    if !entity.quarter.is_empty() {
-                        saved_multiple_dividends = true;
-                    }
+                if !entity.quarter.is_empty() {
+                    saved_multiple_dividends = true;
                 }
-                Err(why) => {
-                    // 單筆 upsert 失敗只記錄錯誤，讓同檔股票其他季度仍有機會完成入庫。
-                    tracing::error!(
-                        "dividend upsert failed: year={}, paid_year={}, stock_symbol={}, year_of_dividend={}, quarter={}, error={:#}",
-                        year,
-                        paid_year,
-                        stock_symbol,
-                        entity.year_of_dividend,
-                        entity.quarter,
-                        why
-                    );
-                }
+            }
+            Err(why) => {
+                // 單筆 upsert 失敗只記錄錯誤，讓同檔股票其他季度仍有機會完成入庫。
+                tracing::error!(
+                    "dividend upsert failed: year={}, paid_year={}, stock_symbol={}, year_of_dividend={}, quarter={}, error={:#}",
+                    year,
+                    entity.year,
+                    stock_symbol,
+                    entity.year_of_dividend,
+                    entity.quarter,
+                    why
+                );
             }
         }
     }
 
-    for refresh_year in annual_total_refresh_years {
+    for refresh_year in plan.refresh_years {
         if let Err(why) = dividend_repo
             .upsert_annual_total_dividend(stock_symbol, refresh_year)
             .await
@@ -317,6 +287,53 @@ async fn backfill_recent_dividends_for_stock(
     }
 
     Ok(())
+}
+
+/// 單檔股利的寫入計畫：要 upsert 的明細與要重算年度合計的發放年度。
+#[derive(Debug, Default, PartialEq)]
+struct StockDividendPlan {
+    /// 需要寫入（新增或來源有更正）的股利，依 Yahoo 原始順序。
+    to_save: Vec<Dividend>,
+    /// 需要重算年度合計列的發放年度。
+    refresh_years: BTreeSet<i32>,
+}
+
+/// 由 Yahoo 股利明細決定這檔股票要寫哪些列、重算哪些年度合計；不碰資料庫。
+///
+/// 1. 只處理指定年度與前一年度的股利所屬年度（[`should_process_dividend_year`]）。
+/// 2. 有季配/半年配明細的發放年度一律重算合計——2753 的 2026 合計就是因為明細早已存在、
+///    全部被略過，錯誤的合計列（現金 0）才一直留在資料表裡。
+/// 3. 快取中已有、且內容與來源一致的明細不寫（[`dividend_content_differs`]）；
+///    有差異才寫回，才補得上例如「配股併入 H2」這種來源端的更正。
+fn plan_stock_dividends(
+    year: i32,
+    stock_symbol: &str,
+    dividends_from_yahoo: &yahoo::dividend::YahooDividend,
+    multiple_dividend_cache: &HashMap<String, Dividend>,
+) -> StockDividendPlan {
+    let mut plan = StockDividendPlan::default();
+    for (_, details) in &dividends_from_yahoo.dividend {
+        for detail in details {
+            if !should_process_dividend_year(year, detail.year_of_dividend) {
+                continue;
+            }
+            // key 使用股利所屬年度而非發放年度，才能正確區分跨年度發放的 Q4 或 H2 配息。
+            let key = make_dividend_key(stock_symbol, detail.year_of_dividend, &detail.quarter);
+            if !detail.quarter.is_empty() {
+                plan.refresh_years.insert(detail.year);
+            }
+
+            let cmd = YahooDividendAclMapper::from_dto(stock_symbol, detail);
+            let entity = YahooDividendAclMapper::from_command(&cmd);
+            let unchanged = multiple_dividend_cache
+                .get(&key)
+                .is_some_and(|existing| !dividend_content_differs(existing, &entity));
+            if !unchanged {
+                plan.to_save.push(entity);
+            }
+        }
+    }
+    plan
 }
 
 /// 判斷來源資料與資料庫既有股利是否有實質差異。
@@ -473,6 +490,80 @@ mod tests {
         incoming.payout_ratio_cash = dec!(114);
 
         assert!(!dividend_content_differs(&existing, &incoming));
+    }
+
+    fn yahoo_detail(
+        year: i32,
+        year_of_dividend: i32,
+        quarter: &str,
+        cash: Decimal,
+    ) -> yahoo::dividend::YahooDividendDetail {
+        yahoo::dividend::YahooDividendDetail {
+            year,
+            year_of_dividend,
+            quarter: quarter.to_owned(),
+            cash_dividend: cash,
+            stock_dividend: Decimal::ZERO,
+            ex_dividend_date1: "2026-03-17".to_owned(),
+            ex_dividend_date2: "-".to_owned(),
+            payable_date1: "2026-04-09".to_owned(),
+            payable_date2: "-".to_owned(),
+        }
+    }
+
+    /// 寫入計畫：只處理今年與去年的股利所屬年度；快取中內容一致的不寫、有更正的要寫；
+    /// 有分期明細的發放年度一律重算合計（即使明細都沒變），年配列不觸發重算。
+    #[test]
+    fn plan_stock_dividends_filters_and_detects_changes() {
+        let mut yahoo_dividend = yahoo::dividend::YahooDividend::new("2330".to_owned());
+        yahoo_dividend.dividend = vec![
+            (
+                2026,
+                vec![
+                    yahoo_detail(2026, 2025, "Q4", dec!(6)),
+                    yahoo_detail(2026, 2025, "Q3", dec!(6)),
+                    yahoo_detail(2026, 2026, "Q1", dec!(7)),
+                ],
+            ),
+            (2025, vec![yahoo_detail(2025, 2024, "Q4", dec!(5))]),
+            (2024, vec![yahoo_detail(2024, 2023, "", dec!(11))]),
+        ];
+
+        // Q4 與來源一致 → 不寫；Q3 金額被更正 → 要寫。
+        let unchanged = YahooDividendAclMapper::from_command(&YahooDividendAclMapper::from_dto(
+            "2330",
+            &yahoo_detail(2026, 2025, "Q4", dec!(6)),
+        ));
+        let mut outdated = unchanged.clone();
+        outdated.quarter = "Q3".to_owned();
+        outdated.cash_dividend = dec!(5.5);
+        let cache: HashMap<String, Dividend> = [
+            (make_dividend_key("2330", 2025, "Q4"), unchanged),
+            (make_dividend_key("2330", 2025, "Q3"), outdated),
+        ]
+        .into_iter()
+        .collect();
+
+        let plan = plan_stock_dividends(2026, "2330", &yahoo_dividend, &cache);
+        let saved: Vec<(i32, &str)> = plan
+            .to_save
+            .iter()
+            .map(|d| (d.year_of_dividend, d.quarter.as_str()))
+            .collect();
+        // 2024 年度屬於前前年、2023 年配更早，都不處理。
+        assert_eq!(saved, vec![(2025, "Q3"), (2026, "Q1")]);
+        assert_eq!(
+            plan.refresh_years.into_iter().collect::<Vec<_>>(),
+            vec![2026]
+        );
+
+        let annual_only = yahoo::dividend::YahooDividend {
+            stock_symbol: "2887".to_owned(),
+            dividend: vec![(2026, vec![yahoo_detail(2026, 2025, "", dec!(1))])],
+        };
+        let plan = plan_stock_dividends(2026, "2887", &annual_only, &HashMap::new());
+        assert_eq!(plan.to_save.len(), 1);
+        assert!(plan.refresh_years.is_empty(), "年配列不需重算合計");
     }
 
     #[test]
