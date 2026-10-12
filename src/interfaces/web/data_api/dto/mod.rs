@@ -4,7 +4,7 @@
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
 //! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
-//! `financial_health`、`chip`、`screening`、`market`、`portfolio`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band` 與 `peers` 十四個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! `financial_health`、`chip`、`screening`、`market`、`industries`、`portfolio`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band` 與 `peers` 十五個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
@@ -14,6 +14,7 @@ mod dividend_forecast;
 mod financial_health;
 mod financial_reports;
 mod fundamentals;
+mod industries;
 mod market;
 mod peers;
 mod portfolio;
@@ -53,6 +54,9 @@ pub(super) use fundamentals::{
     FinancialStatementHistoryResponse, MonthlyRevenue, MonthlyRevenueResponse,
     RevenueHistoryParams, StatementHistoryParams, StatementPeriodTypeValue, StockValuation,
     StockValuationResponse, ValuationParams,
+};
+pub(super) use industries::{
+    IndustryMover, IndustryPerformance, IndustryPerformanceParams, IndustryPerformanceResponse,
 };
 pub(super) use market::{
     CalendarEventTypeValue, DividendCalendarEvent, DividendCalendarParams,

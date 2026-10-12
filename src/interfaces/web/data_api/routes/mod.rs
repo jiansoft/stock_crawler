@@ -110,6 +110,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::qfii_holding_ranking),
         )
         .route(
+            "/market/industries",
+            axum::routing::get(handlers::industry_performance),
+        )
+        .route(
             "/market/movers",
             axum::routing::get(handlers::market_movers),
         )

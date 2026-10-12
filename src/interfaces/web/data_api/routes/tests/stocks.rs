@@ -23,7 +23,7 @@ fn api_key() -> String {
 }
 
 /// 以真實 router 發出帶金鑰的 GET，回傳狀態碼與 JSON body。
-async fn get(path: &str) -> (StatusCode, serde_json::Value) {
+pub(super) async fn get(path: &str) -> (StatusCode, serde_json::Value) {
     let response = router()
         .oneshot(
             Request::get(path)
@@ -44,7 +44,7 @@ async fn get(path: &str) -> (StatusCode, serde_json::Value) {
 }
 
 /// 資料庫可用時回傳連線池，否則印出跳過訊息。
-async fn pool_or_skip(test: &str) -> Option<&'static sqlx::PgPool> {
+pub(super) async fn pool_or_skip(test: &str) -> Option<&'static sqlx::PgPool> {
     dotenvy::dotenv().ok();
     let pool = crate::infra::database::get_connection();
     if sqlx::query("SELECT 1").execute(pool).await.is_err() {
