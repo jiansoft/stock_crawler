@@ -1,15 +1,16 @@
 //! # 官方本益比與股價淨值比回補
 //!
 //! 用證交所 BWIBBU_d 與櫃買中心 peQryDate 的官方值，補上 `DailyQuotes` 裡為 0 的
-//! 本益比與股價淨值比（只填 0、不覆寫既有值）。
+//! 本益比與股價淨值比（只填 0、不覆寫既有值）；**上櫃本益比例外**，以官方值為準直接覆寫
+//! （見 [`PePolicy`]，每日收盤流程寫入的上櫃本益比常與官方不符）。
 //!
 //! | 函式 | 用途 |
 //! |------|------|
 //! | [`execute`] | 每日 17:30 排程：補當天的缺值 |
 //! | [`backfill_range`] | 手動回補：逐日補一段期間（2012 年起約 3,400 個交易日、兩市場各一次請求） |
 //!
-//! 只處理「該市場那天仍有缺值」的交易日；虧損股的本益比本來就是 0，所以幾乎每個交易日
-//! 都會被處理一次。請求之間停頓 [`REQUEST_PAUSE`]，避免被交易所擋。單日失敗只記錄、
+//! 上市只處理「那天仍有缺值」的交易日（虧損股本益比本來就是 0，幾乎每天都會處理一次），
+//! 上櫃處理所有交易日。請求之間停頓 [`REQUEST_PAUSE`]，避免被交易所擋。單日失敗只記錄、
 //! 不中斷整段；全部失敗才回錯誤。
 
 use std::{future::Future, time::Duration};
@@ -18,7 +19,7 @@ use anyhow::{Result, bail};
 use chrono::{Local, NaiveDate};
 
 use crate::{
-    domain::quote::official_ratio::{OfficialRatio, OfficialRatioRepository},
+    domain::quote::official_ratio::{OfficialRatio, OfficialRatioRepository, PePolicy},
     infra::{
         crawler::{tpex, twse},
         database::repository::quote::PgQuoteRepository,
@@ -43,6 +44,14 @@ impl Market {
         match self {
             Self::Listed => 2,
             Self::Otc => 4,
+        }
+    }
+
+    /// 本益比寫入規則：上櫃以官方為準（每日收盤流程的上櫃本益比常與官方不符），上市只填 0。
+    pub fn pe_policy(self) -> PePolicy {
+        match self {
+            Self::Listed => PePolicy::FillZeroOnly,
+            Self::Otc => PePolicy::Authoritative,
         }
     }
 
@@ -118,7 +127,7 @@ where
     let mut summary = Summary::default();
     for market in [Market::Listed, Market::Otc] {
         let dates = repo
-            .fetch_dates_missing_ratios(market.market_id(), from, to)
+            .fetch_dates_to_update(market.market_id(), from, to, market.pe_policy())
             .await?;
         tracing::info!(
             "官方本益比淨值比回補開始: market={} dates={} from={from} to={to}",
@@ -133,7 +142,9 @@ where
             match fetch(market, *date).await {
                 Ok(ratios) => {
                     summary.fetched_rows += ratios.len();
-                    summary.updated_rows += repo.fill_official_ratios(*date, &ratios).await?;
+                    summary.updated_rows += repo
+                        .fill_official_ratios(*date, &ratios, market.pe_policy())
+                        .await?;
                 }
                 Err(why) => {
                     summary.failed += 1;
@@ -183,12 +194,21 @@ mod tests {
 
     #[async_trait]
     impl OfficialRatioRepository for FakeRepo {
-        async fn fetch_dates_missing_ratios(
+        async fn fetch_dates_to_update(
             &self,
             market_id: i32,
             _from: NaiveDate,
             _to: NaiveDate,
+            policy: PePolicy,
         ) -> Result<Vec<NaiveDate>> {
+            assert_eq!(
+                policy,
+                if market_id == 2 {
+                    PePolicy::FillZeroOnly
+                } else {
+                    PePolicy::Authoritative
+                }
+            );
             Ok(if market_id == 2 {
                 self.listed.clone()
             } else {
@@ -200,6 +220,7 @@ mod tests {
             &self,
             date: NaiveDate,
             ratios: &[OfficialRatio],
+            _policy: PePolicy,
         ) -> Result<u64> {
             self.filled.lock().unwrap().push((date, ratios.len()));
             Ok(ratios.len() as u64)
