@@ -1,9 +1,12 @@
 use std::collections::HashSet;
 
 use crate::{
-    app::backfill::acl::DelistedCompanyAclMapper, core::declare::StockExchangeMarket,
-    core::util::datetime::Weekend, domain::registry::repository::StockRepository,
-    infra::crawler::twse, infra::database::repository::stock::PgStockRepository,
+    app::backfill::acl::DelistedCompanyAclMapper,
+    core::declare::StockExchangeMarket,
+    core::util::datetime::Weekend,
+    domain::registry::{entity::Stock, repository::StockRepository},
+    infra::crawler::twse,
+    infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::{Context, Result};
 use chrono::Local;
@@ -119,48 +122,17 @@ pub async fn mark_stocks_missing_from_isin_roster(max_delist: usize) -> Result<u
                 .await
                 .with_context(|| format!("fetch isin roster failed: market={:?}", market))?;
 
-        // 防線 2：名冊異常小代表來源可能改版、被擋或適逢週末（來源回空），
-        // 放棄本輪比對。
-        if symbols.len() < MIN_ROSTER_SIZE_PER_MARKET {
-            anyhow::bail!(
-                "isin roster suspiciously small: market={:?}, size={}（放棄差集比對，避免大量誤標下市）",
-                market,
-                symbols.len()
-            );
-        }
-
+        ensure_roster_size(market, symbols.len())?;
         covered_market_ids.insert(market.serial());
         roster.extend(symbols);
     }
 
     let repo = PgStockRepository::new();
-    // 只比對「未下市且市場在名冊涵蓋範圍內」的證券。
-    let missing: Vec<_> = repo
+    let active = repo
         .fetch_all_active()
         .await
-        .context("fetch_all_active failed")?
-        .into_iter()
-        .filter(|stock| covered_market_ids.contains(&stock.market_id()))
-        .filter(|stock| !roster.contains(&stock.symbol().0))
-        .collect();
-
-    if missing.is_empty() {
-        return Ok(0);
-    }
-
-    // 防線 3：差集數量異常大時放棄自動標記，留給人工確認。
-    if missing.len() > max_delist {
-        anyhow::bail!(
-            "ISIN 名冊差集達 {} 檔（上限 {}），疑似名冊來源異常，放棄本輪自動標記。差集樣本: {:?}",
-            missing.len(),
-            max_delist,
-            missing
-                .iter()
-                .take(10)
-                .map(|stock| stock.symbol().0.clone())
-                .collect::<Vec<_>>()
-        );
-    }
+        .context("fetch_all_active failed")?;
+    let missing = missing_from_roster(active, &roster, &covered_market_ids, max_delist)?;
 
     let mut marked = 0usize;
     for stock in missing {
@@ -191,12 +163,112 @@ pub async fn mark_stocks_missing_from_isin_roster(max_delist: usize) -> Result<u
     Ok(marked)
 }
 
+/// 防線 2：名冊異常小代表來源可能改版、被擋或適逢週末（來源回空），放棄本輪比對。
+fn ensure_roster_size(market: StockExchangeMarket, size: usize) -> Result<()> {
+    if size < MIN_ROSTER_SIZE_PER_MARKET {
+        anyhow::bail!(
+            "isin roster suspiciously small: market={:?}, size={}（放棄差集比對，避免大量誤標下市）",
+            market,
+            size
+        );
+    }
+    Ok(())
+}
+
+/// 未下市、市場在名冊涵蓋範圍內、卻不在名冊上的證券。
+///
+/// 防線 3：差集數量超過 `max_delist` 時放棄自動標記，留給人工確認。
+fn missing_from_roster(
+    active: Vec<Stock>,
+    roster: &HashSet<String>,
+    covered_market_ids: &HashSet<i32>,
+    max_delist: usize,
+) -> Result<Vec<Stock>> {
+    let missing: Vec<Stock> = active
+        .into_iter()
+        .filter(|stock| covered_market_ids.contains(&stock.market_id()))
+        .filter(|stock| !roster.contains(&stock.symbol().0))
+        .collect();
+    if missing.len() > max_delist {
+        anyhow::bail!(
+            "ISIN 名冊差集達 {} 檔（上限 {}），疑似名冊來源異常，放棄本輪自動標記。差集樣本: {:?}",
+            missing.len(),
+            max_delist,
+            missing
+                .iter()
+                .take(10)
+                .map(|stock| stock.symbol().0.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+    Ok(missing)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::infra::cache::SHARE;
 
     // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
     use super::*;
+
+    fn stock(symbol: &str, market_id: i32) -> Stock {
+        Stock::reconstitute(
+            symbol.to_string(),
+            format!("{symbol} 名稱"),
+            false,
+            rust_decimal::Decimal::ZERO,
+            rust_decimal::Decimal::ZERO,
+            rust_decimal::Decimal::ZERO,
+            Local::now(),
+            market_id,
+            1,
+            0,
+            0,
+            rust_decimal::Decimal::ZERO,
+        )
+    }
+
+    /// 名冊筆數低於安全下限就放棄比對。
+    #[test]
+    fn ensure_roster_size_rejects_tiny_rosters() {
+        assert!(
+            ensure_roster_size(StockExchangeMarket::Listed, MIN_ROSTER_SIZE_PER_MARKET).is_ok()
+        );
+        let err = ensure_roster_size(StockExchangeMarket::OverTheCounter, 3).expect_err("太少");
+        assert!(err.to_string().contains("size=3"), "{err}");
+    }
+
+    /// 只挑涵蓋市場內、不在名冊上的證券；超過上限整批放棄。
+    #[test]
+    fn missing_from_roster_filters_and_caps() {
+        let roster: HashSet<String> = ["2330", "6488"].iter().map(|s| s.to_string()).collect();
+        let covered: HashSet<i32> = [2, 4].into_iter().collect();
+        let active = || {
+            vec![
+                stock("2330", 2),
+                stock("4712", 4),
+                stock("1234", 5),
+                stock("6488", 4),
+            ]
+        };
+
+        let missing = missing_from_roster(active(), &roster, &covered, 10).expect("未超過上限");
+        assert_eq!(
+            missing
+                .iter()
+                .map(|stock| stock.symbol().0.as_str())
+                .collect::<Vec<_>>(),
+            ["4712"]
+        );
+        assert!(
+            missing_from_roster(Vec::new(), &roster, &covered, 0)
+                .expect("空集合")
+                .is_empty()
+        );
+        let err =
+            missing_from_roster(active(), &HashSet::new(), &covered, 1).expect_err("超過上限");
+        assert!(err.to_string().contains("差集達 3 檔（上限 1）"), "{err}");
+    }
 
     /// 公開發行不是交易市場，不可併入差集比對的名冊。
     #[test]
