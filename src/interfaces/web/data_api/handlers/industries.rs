@@ -13,7 +13,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::NaiveDate;
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, RoundingStrategy};
 
 use super::{
     database_error, decimal_to_f64, error_response, market_id_for_stocks, parse_optional_date,
@@ -220,17 +220,15 @@ fn summarize_industry(
         advancers: values.iter().filter(|v| **v > Decimal::ZERO).count(),
         decliners: values.iter().filter(|v| **v < Decimal::ZERO).count(),
         unchanged: values.iter().filter(|v| v.is_zero()).count(),
-        median_change_percent: decimal_to_f64(peer::median(&values).map(|v| v.round_dp(2))),
-        cap_weighted_change_percent: decimal_to_f64(cap_weighted.map(|v| v.round_dp(2))),
+        median_change_percent: peer::median(&values).map(round2),
+        cap_weighted_change_percent: cap_weighted.map(round2),
         trade_value: round2(trade_value),
         trade_value_share_percent: (total_value > Decimal::ZERO)
             .then(|| round2(trade_value / total_value * Decimal::ONE_HUNDRED)),
-        median_price_earning_ratio: decimal_to_f64(
-            peer::median(&positive(|row| row.price_earning_ratio)).map(|v| v.round_dp(2)),
-        ),
-        median_price_to_book_ratio: decimal_to_f64(
-            peer::median(&positive(|row| row.price_to_book_ratio)).map(|v| v.round_dp(2)),
-        ),
+        median_price_earning_ratio: peer::median(&positive(|row| row.price_earning_ratio))
+            .map(round2),
+        median_price_to_book_ratio: peer::median(&positive(|row| row.price_to_book_ratio))
+            .map(round2),
         top_gainer: mover(top_gainer),
         top_loser: mover(top_loser),
     };
@@ -256,9 +254,12 @@ fn cap_weighted_change(changes: &[(&IndustryRow, Decimal)]) -> Option<Decimal> {
         .then(|| (end_total / base_total - Decimal::ONE) * Decimal::ONE_HUNDRED)
 }
 
-/// 四捨五入到小數 2 位的 JSON number。
+/// 四捨五入（不是 `round_dp` 預設的銀行家捨入）到小數 2 位的 JSON number。
 fn round2(value: Decimal) -> f64 {
-    decimal_to_f64(Some(value.round_dp(2))).unwrap_or_default()
+    decimal_to_f64(Some(
+        value.round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero),
+    ))
+    .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -409,6 +410,13 @@ mod tests {
             (loser.stock_symbol.as_str(), loser.change_percent),
             ("2301", -2.0)
         );
+    }
+
+    /// 0.005 進位成 0.01，不是銀行家捨入的 0。
+    #[test]
+    fn round2_rounds_half_away_from_zero() {
+        assert_eq!(round2(dec!(0.005)), 0.01);
+        assert_eq!(round2(dec!(-2.345)), -2.35);
     }
 
     /// 全市場沒有成交金額時不計算占比。
