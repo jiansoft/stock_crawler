@@ -223,6 +223,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/corporate_action.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_member.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/sell_history.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail_more.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_quote.sql
@@ -331,6 +332,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/corporate_action.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_member.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/sell_history.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_money_history_detail_more.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_quote.sql

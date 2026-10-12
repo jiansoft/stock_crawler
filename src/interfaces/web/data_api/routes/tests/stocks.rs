@@ -907,6 +907,111 @@ async fn portfolio_summary_endpoint_db_semantics() {
     cleanup_portfolio().await;
 }
 
+/// 持股績效：扣除買賣金額的時間加權報酬、事後補登的買進記在建立日、已撤銷的賣出不算、
+/// 月報酬與最大回撤、同期大盤與超額報酬。用不存在的會員編號與 2001 年的日期隔離資料，
+/// 大盤列以 `transaction = 979790` 標記，結束時清除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn portfolio_history_endpoint_db_semantics() {
+    const MEMBER: i64 = 979_790;
+    let Some(pool) = pool_or_skip("portfolio_history_endpoint_db_semantics").await else {
+        return;
+    };
+    let cleanup_history = || async {
+        for sql in [
+            "DELETE FROM daily_money_history_member WHERE member_id IN ($1, $1 + 1) OR (member_id = 0 AND date < '2002-01-01')",
+            "DELETE FROM stock_ownership_details WHERE member_id = $1",
+            "DELETE FROM sell_history WHERE member_id = $1",
+            "DELETE FROM index WHERE category = 'TAIEX' AND transaction = $1",
+        ] {
+            let _ = sqlx::query(sql).bind(MEMBER).execute(pool).await;
+        }
+    };
+    cleanup_history().await;
+
+    let path = format!("/api/v1/portfolio/history?member_id={MEMBER}");
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert!(json["return_percent"].is_null(), "{json}");
+    assert_eq!(json["months"], serde_json::json!([]));
+
+    for sql in [
+        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2001-01-31', $1, 100), ('2001-02-01', $1, 110), ('2001-02-02', $1, 210), ('2001-03-01', $1, 99)",
+        // 交易日 01-15（期間前）但 02-01 才補登：記在 02-01。
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, date, created_time) VALUES ($1, '79979DA', 1, -10, '2001-01-15', '2001-02-01 10:00+08'), ($1, '79979DA', 1, -100, '2001-02-02', '2001-02-02 10:00+08')",
+        "INSERT INTO sell_history (member_id, security_code, date, amount, create_time, is_reverted) VALUES ($1, '79979DA', '2001-03-01', 100, '2001-03-01 10:00+08', false), ($1, '79979DA', '2001-03-01', 999, '2001-03-01 10:00+08', true)",
+        "INSERT INTO index (category, date, index, transaction) VALUES ('TAIEX', '2001-01-31', 5000, $1), ('TAIEX', '2001-02-28', 5500, $1), ('TAIEX', '2001-03-01', 5250, $1)",
+    ] {
+        sqlx::query(sql)
+            .bind(MEMBER)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("種入績效資料失敗：{error}\n{sql}"));
+    }
+
+    let (status, json) = get(&format!("{path}&months=12")).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        (json["from"].clone(), json["data_as_of"].clone()),
+        ("2001-01-31".into(), "2001-03-01".into())
+    );
+    // 02-01：(110 − 10) ÷ 100；02-02：(210 − 100) ÷ 110；03-01：(99 + 100) ÷ 210。
+    assert_eq!(json["return_percent"], -5.24);
+    assert_eq!(
+        (json["buys"].clone(), json["sells"].clone()),
+        (110.0.into(), 100.0.into())
+    );
+    assert_eq!(json["max_drawdown_percent"], -5.24);
+    assert_eq!(json["max_drawdown_peak"], "2001-01-31");
+    assert_eq!(json["max_drawdown_trough"], "2001-03-01");
+    assert_eq!(json["benchmark_return_percent"], 5.0);
+    assert_eq!(json["excess_return_percent"], -10.24);
+    assert!(json["annualized_return_percent"].is_null());
+    let months = json["months"].as_array().expect("months 陣列");
+    assert_eq!(months.len(), 2);
+    assert_eq!(
+        (
+            months[0]["month"].clone(),
+            months[0]["return_percent"].clone(),
+            months[0]["net_contribution"].clone()
+        ),
+        ("2001-02".into(), 0.0.into(), 110.0.into())
+    );
+    assert_eq!(months[1]["benchmark_return_percent"], 5.0);
+
+    // 全部會員：另一位會員 02-02 才開始記錄（市值 50），合計當天多出的 50 視為投入。
+    // 02-02：(260 − 100 − 50) ÷ 110；03-01：(149 + 100) ÷ 260。
+    for sql in [
+        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2001-02-02', $1 + 1, 50), ('2001-03-01', $1 + 1, 50)",
+        "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ('2001-01-31', 0, 100), ('2001-02-01', 0, 110), ('2001-02-02', 0, 260), ('2001-03-01', 0, 149)",
+    ] {
+        sqlx::query(sql)
+            .bind(MEMBER)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "種入合計市值失敗：{error}
+{sql}"
+                )
+            });
+    }
+    let (status, json) = get("/api/v1/portfolio/history?member_id=0").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["return_percent"], -4.23);
+    assert_eq!(json["buys"], 160.0);
+
+    for query in ["member_id=-1", "months=0", "months=121"] {
+        let (status, _) = get(&format!("/api/v1/portfolio/history?{query}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+
+    cleanup_history().await;
+}
+
 /// 填息分析：同日多列只算一次（季別與月別重複、年度彙總列）、同日除權與除息合併、
 /// 尚未到的除息日略過；已填息算交易日數，未填息算距離填息價的百分比。
 #[tokio::test]
