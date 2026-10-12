@@ -23,6 +23,7 @@ pub mod financial_statement;
 pub mod price;
 
 use anyhow::{Context, Result, bail};
+use reqwest::StatusCode;
 use serde::{Deserialize, de::DeserializeOwned};
 
 use crate::core::util::{self, http};
@@ -69,24 +70,81 @@ async fn fetch<T: DeserializeOwned>(path: &str, query: &[(&str, &str)]) -> Resul
         .text()
         .await
         .with_context(|| format!("Error reading BigGo response body from {url}"))?;
+    decode(path, &url, status, &body)
+}
+
+/// 依狀態碼與 body 取出 `data`；HTTP 非 2xx、不是預期 JSON 或 `result` 為 `false` 時回傳錯誤。
+fn decode<T: DeserializeOwned>(
+    path: &str,
+    url: &str,
+    status: StatusCode,
+    body: &str,
+) -> Result<Option<T>> {
     if !status.is_success() {
         bail!(
             "BigGo {path} returned HTTP {status} for {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(body, 200)
         );
     }
 
-    let envelope: Envelope<T> = serde_json::from_str(&body).with_context(|| {
+    let envelope: Envelope<T> = serde_json::from_str(body).with_context(|| {
         format!(
             "Error parsing BigGo {path} JSON from {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(body, 200)
         )
     })?;
     if !envelope.result {
         bail!(
             "BigGo {path} returned result=false for {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(body, 200)
         );
     }
     Ok(envelope.data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const URL: &str = "https://api.biggo.com/api/v1/finance/test?region=tw";
+
+    /// 成功回 `data`；`data: null` 回 `None`。
+    #[test]
+    fn decode_returns_data() {
+        let data: Option<i32> =
+            decode("/test", URL, StatusCode::OK, r#"{"result":true,"data":7}"#).expect("可解析");
+        assert_eq!(data, Some(7));
+        let none: Option<i32> = decode(
+            "/test",
+            URL,
+            StatusCode::OK,
+            r#"{"result":true,"data":null}"#,
+        )
+        .expect("可解析");
+        assert_eq!(none, None);
+    }
+
+    /// 非 2xx、格式不符、`result=false` 都回錯誤，錯誤訊息裡的 body 是單行片段。
+    #[test]
+    fn decode_rejects_failures_with_single_line_body() {
+        let cases = [
+            (
+                StatusCode::BAD_GATEWAY,
+                "<html>\n  <head>\n</html>",
+                "HTTP 502",
+            ),
+            (StatusCode::OK, "not\njson", "Error parsing"),
+            (
+                StatusCode::OK,
+                "{\"result\": false,\n \"error\": {\"code\": 1002}}",
+                "result=false",
+            ),
+        ];
+        for (status, body, want) in cases {
+            let err = decode::<i32>("/test", URL, status, body).expect_err("應回錯誤");
+            let message = err.to_string();
+            assert!(message.contains(want), "{message}");
+            assert!(!message.contains('\n'), "{message}");
+        }
+    }
 }

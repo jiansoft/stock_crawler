@@ -15,6 +15,16 @@ pub fn truncate(s: &str, max_chars: usize) -> String {
     }
 }
 
+/// 把回應內容壓成適合寫進日誌的單行片段：連續空白（含換行）併成一個空格後再截斷。
+///
+/// 錯誤頁常是多行 HTML，直接截斷會讓一筆日誌拆成好幾行。
+pub fn log_snippet(s: &str, max_chars: usize) -> String {
+    truncate(
+        &s.split_whitespace().collect::<Vec<_>>().join(" "),
+        max_chars,
+    )
+}
+
 /// 將疑似 Big5 編碼字串轉成 UTF-8。
 pub fn big5_to_utf8(text: &str) -> Result<String> {
     let text_to_char = text.chars();
@@ -395,6 +405,16 @@ mod tests {
         assert_eq!(truncate("台積電", 2), "台積...");
         assert_eq!(truncate("台積電", 3), "台積電");
         assert_eq!(truncate("abc", 0), "...");
+    }
+
+    #[test]
+    fn log_snippet_flattens_whitespace_before_truncating() {
+        assert_eq!(
+            log_snippet("<!DOCTYPE html>\n<html lang=\"en-us\">\n  <head>", 200),
+            "<!DOCTYPE html> <html lang=\"en-us\"> <head>"
+        );
+        assert_eq!(log_snippet("  台積電\r\n\t 2330  ", 6), "台積電 23...");
+        assert_eq!(log_snippet("", 10), "");
     }
 
     #[test]

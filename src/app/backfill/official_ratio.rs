@@ -6,7 +6,7 @@
 //!
 //! | 函式 | 用途 |
 //! |------|------|
-//! | [`execute`] | 每日 17:30 排程：補當天的缺值 |
+//! | [`execute`] | 每日 17:30、20:30 排程：補最近 [`RECENT_DAYS`] 天的缺值 |
 //! | [`backfill_range`] | 手動回補：逐日補一段期間（2012 年起約 3,400 個交易日、兩市場各一次請求） |
 //!
 //! 上市只處理「那天仍有缺值」的交易日（虧損股本益比本來就是 0，幾乎每天都會處理一次），
@@ -25,6 +25,10 @@ use crate::{
         database::repository::quote::PgQuoteRepository,
     },
 };
+
+/// 排程每次回看的天數（含今天）。櫃買中心當天的本益比 17:30 常還沒公布（回 `ok` 但沒有資料），
+/// 回看幾天讓晚公布或當天失敗的日期在之後的排程補上；上櫃每天都會重抓一次，請求數約 2×交易日數。
+pub const RECENT_DAYS: i64 = 7;
 
 /// 兩次請求之間的停頓。
 pub const REQUEST_PAUSE: Duration = Duration::from_secs(3);
@@ -76,10 +80,10 @@ pub struct Summary {
     pub updated_rows: u64,
 }
 
-/// 排程入口：補今天（台北時間）兩個市場的缺值；非交易日或沒有缺值時不發請求。
+/// 排程入口：補最近 [`RECENT_DAYS`] 天（台北時間，含今天）兩個市場的缺值；沒有交易日時不發請求。
 pub async fn execute() -> Result<()> {
-    let today = Local::now().date_naive();
-    let summary = backfill_range(today, today).await?;
+    let (from, to) = recent_window(Local::now().date_naive());
+    let summary = backfill_range(from, to).await?;
     tracing::info!(
         "官方本益比淨值比補值結束: requests={} failed={} fetched={} updated={}",
         summary.requests,
@@ -88,6 +92,11 @@ pub async fn execute() -> Result<()> {
         summary.updated_rows
     );
     Ok(())
+}
+
+/// 排程回補的日期區間：`today` 往前共 [`RECENT_DAYS`] 天。
+fn recent_window(today: NaiveDate) -> (NaiveDate, NaiveDate) {
+    (today - chrono::Duration::days(RECENT_DAYS - 1), today)
 }
 
 /// 逐日回補 `from`～`to` 兩個市場的缺值。
@@ -312,6 +321,19 @@ mod tests {
         assert_eq!(
             (Market::Listed.market_id(), Market::Otc.market_id()),
             (2, 4)
+        );
+    }
+
+    /// 排程回看區間含今天共 7 天。
+    #[test]
+    fn recent_window_covers_seven_days() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 12).expect("有效日期");
+        assert_eq!(
+            recent_window(today),
+            (
+                NaiveDate::from_ymd_opt(2026, 10, 6).expect("有效日期"),
+                today
+            )
         );
     }
 }

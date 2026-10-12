@@ -51,7 +51,7 @@ pub async fn visit() -> Result<HashMap<String, HolderDistribution>> {
     anyhow::ensure!(
         !distributions.is_empty(),
         "集保股權分散表沒有可解析的資料列: {}",
-        text::truncate(&body, 200)
+        text::log_snippet(&body, 200)
     );
     Ok(distributions)
 }

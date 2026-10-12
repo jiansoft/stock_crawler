@@ -269,9 +269,10 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "集保股權分散入庫",
             chip::execute_holder_distributions,
         ),
-        // 17:30（週一至週五）以證交所、櫃買中心官方值補當天日線為 0 的本益比與股價淨值比
+        // 17:30、20:30（週一至週五）以證交所、櫃買中心官方值補最近 7 天日線的本益比與股價淨值比
+        // （櫃買當天資料 17:30 常未公布，20:30 再跑一次）
         create_job(
-            "0 30 17 * * Mon-Fri",
+            "0 30 17,20 * * Mon-Fri",
             "補齊官方本益比與股價淨值比",
             official_ratio::execute,
         ),

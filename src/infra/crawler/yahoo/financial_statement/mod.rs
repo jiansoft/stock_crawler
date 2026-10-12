@@ -134,17 +134,27 @@ async fn fetch<RES: DeserializeOwned>(
         .text()
         .await
         .with_context(|| format!("Error reading Yahoo {service} body from {url}"))?;
+    decode(service, &url, status, &body)
+}
+
+/// 依狀態碼與 body 反序列化回應（404 已由呼叫端處理）；非 2xx 或不是預期 JSON 時回傳錯誤。
+fn decode<RES: DeserializeOwned>(
+    service: &str,
+    url: &str,
+    status: reqwest::StatusCode,
+    body: &str,
+) -> Result<RES> {
     if !status.is_success() {
         return Err(anyhow!(
             "Yahoo {service} returned HTTP {status} for {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(body, 200)
         ));
     }
 
-    serde_json::from_str(&body).with_context(|| {
+    serde_json::from_str(body).with_context(|| {
         format!(
             "Error parsing Yahoo {service} JSON from {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(body, 200)
         )
     })
 }
@@ -239,6 +249,30 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use super::*;
+
+    /// 2xx 照常反序列化；非 2xx 與格式不符回錯誤，錯誤訊息裡的 body 是單行片段。
+    #[test]
+    fn decode_status_and_body() {
+        let url = build_url("balanceSheets", "2330", ReportPeriod::Quarter);
+        let ok: Vec<i32> =
+            decode("balanceSheets", &url, reqwest::StatusCode::OK, "[1, 2]").expect("可解析");
+        assert_eq!(ok, vec![1, 2]);
+
+        for (status, body, want) in [
+            (
+                reqwest::StatusCode::BAD_GATEWAY,
+                "<!DOCTYPE html>\n<html lang=\"en-us\">",
+                "HTTP 502",
+            ),
+            (reqwest::StatusCode::OK, "{\n  \"oops\"", "Error parsing"),
+        ] {
+            let err =
+                decode::<Vec<i32>>("balanceSheets", &url, status, body).expect_err("應回錯誤");
+            let message = err.to_string();
+            assert!(message.contains(want), "{message}");
+            assert!(!message.contains('\n'), "{message}");
+        }
+    }
 
     #[test]
     fn test_parse_fiscal_period() {

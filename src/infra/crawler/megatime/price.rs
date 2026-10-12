@@ -48,7 +48,7 @@ fn page_summary(document: &Html) -> String {
 
     title.unwrap_or_else(|| {
         let body = collapse(document.root_element().text().collect());
-        format!("（無標題）{}", text::truncate(&body, 80))
+        format!("（無標題）{}", text::log_snippet(&body, 80))
     })
 }
 
