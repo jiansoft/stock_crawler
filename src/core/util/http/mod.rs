@@ -189,7 +189,7 @@ pub async fn get_json_with_limit<RES: DeserializeOwned>(
             "HTTP request failed with status {} for {}. Body: {}",
             status,
             safe_url,
-            util::text::truncate(&res_body_preview, 200)
+            util::text::log_snippet(&res_body_preview, 200)
         ));
     }
 
@@ -199,7 +199,7 @@ pub async fn get_json_with_limit<RES: DeserializeOwned>(
         format!(
             "Error parsing response JSON from {}. Body: {}",
             safe_url,
-            util::text::truncate(&res_body_preview, 200)
+            util::text::log_snippet(&res_body_preview, 200)
         )
     })
 }
@@ -330,7 +330,7 @@ where
         format!(
             "Error parsing response JSON from {}. Body: {}",
             redact_url(url),
-            util::text::truncate(&res_body_preview, 200)
+            util::text::log_snippet(&res_body_preview, 200)
         )
     })
 }

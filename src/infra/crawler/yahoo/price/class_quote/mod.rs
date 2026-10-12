@@ -360,7 +360,7 @@ fn parse_class_quotes_page(
             "Yahoo 類股 API request failed with status {} for {}. Body: {}",
             status,
             url,
-            util::text::truncate(&response_body_preview, 200)
+            util::text::log_snippet(&response_body_preview, 200)
         ));
     }
 
@@ -369,7 +369,7 @@ fn parse_class_quotes_page(
             "Failed to parse Yahoo 類股 API response from {}: {:?}. Body: {}",
             url,
             e,
-            util::text::truncate(&response_body_preview, 200)
+            util::text::log_snippet(&response_body_preview, 200)
         )
     })?;
     let raw_item_count = response.list.len();

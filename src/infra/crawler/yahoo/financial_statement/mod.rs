@@ -137,14 +137,14 @@ async fn fetch<RES: DeserializeOwned>(
     if !status.is_success() {
         return Err(anyhow!(
             "Yahoo {service} returned HTTP {status} for {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(&body, 200)
         ));
     }
 
     serde_json::from_str(&body).with_context(|| {
         format!(
             "Error parsing Yahoo {service} JSON from {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(&body, 200)
         )
     })
 }

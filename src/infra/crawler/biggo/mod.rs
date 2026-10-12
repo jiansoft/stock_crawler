@@ -72,20 +72,20 @@ async fn fetch<T: DeserializeOwned>(path: &str, query: &[(&str, &str)]) -> Resul
     if !status.is_success() {
         bail!(
             "BigGo {path} returned HTTP {status} for {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(&body, 200)
         );
     }
 
     let envelope: Envelope<T> = serde_json::from_str(&body).with_context(|| {
         format!(
             "Error parsing BigGo {path} JSON from {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(&body, 200)
         )
     })?;
     if !envelope.result {
         bail!(
             "BigGo {path} returned result=false for {url}. Body: {}",
-            util::text::truncate(&body, 200)
+            util::text::log_snippet(&body, 200)
         );
     }
     Ok(envelope.data)
