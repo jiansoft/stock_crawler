@@ -188,6 +188,7 @@ log/                 # runtime 檔案日誌輸出目錄
   - 除 `/api/v1/healthz` 外都需要 `Authorization: Bearer <DATA_API_KEY>`；未設定 `DATA_API_KEY` 時一律拒絕。
   - OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不需驗證）。
   - `/api/v1/portfolio/summary` 回傳目前持股的組合總覽（市值、權重、未實現損益、已領股利、產業分布、市值加權殖利率與 F 分數），`member_id=0`（預設）為全部會員合計；屬個人持股資料，只有持有 `DATA_API_KEY` 者能查詢。
+  - `/api/v1/portfolio/history` 回傳持股近 1～120 個月的時間加權報酬（扣除買賣金額、不含現金股利）、月報酬、最大回撤與同期加權指數比較。
 + Telegram bot 用於排程提醒（除權息、股利發放、公開申購、持股財報、外資持股變化、持股法說會摘要、持股主力進出、持股董監質押變動、持股法人與信用交易、持股千張大戶週報、資料健康週報）、價格追蹤通知與錯誤告警。
 
 ## 盤中即時報價與追蹤
