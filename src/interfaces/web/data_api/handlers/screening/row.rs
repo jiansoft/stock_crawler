@@ -26,6 +26,8 @@ pub(super) struct ScreenedStockRow {
     revenue_yoy_streak: Option<i16>,
     /// 新鮮的近 3 個月累計營收年增率。
     revenue_yoy_3m_percent: Option<Decimal>,
+    /// 新鮮的最新月營收（千元）。
+    monthly_revenue: Option<Decimal>,
     /// 新鮮季度 EPS。
     earnings_per_share: Option<Decimal>,
     /// 新鮮季度 ROE。
@@ -95,6 +97,11 @@ impl From<ScreenedStockRow> for ScreenedStock {
                 row.revenue_yoy_3m_percent,
                 &symbol,
                 "revenue_yoy_3m_percent",
+            ),
+            monthly_revenue: analytical_decimal_to_f64(
+                row.monthly_revenue,
+                &symbol,
+                "monthly_revenue",
             ),
             earnings_per_share: analytical_decimal_to_f64(
                 row.earnings_per_share,

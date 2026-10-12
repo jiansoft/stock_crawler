@@ -21,6 +21,7 @@ fn screening_params() -> StockScreeningParams {
         min_revenue_yoy_percent: None,
         min_revenue_yoy_streak: None,
         min_revenue_yoy_3m_percent: None,
+        min_monthly_revenue: None,
         min_eps: None,
         min_roe_percent: None,
         min_dividend_yield_percent: None,
@@ -152,6 +153,25 @@ fn screening_revenue_momentum_boundaries() {
     }
 }
 
+/// 最低月營收：0 到一兆千元，單獨即可成立篩選；負數與非有限值回 422。
+#[test]
+fn screening_min_monthly_revenue_boundaries() {
+    for (value, ok) in [
+        (0.0, true),
+        (1_000_000_000_000.0, true),
+        (-1.0, false),
+        (f64::INFINITY, false),
+    ] {
+        let mut params = screening_params();
+        params.min_monthly_revenue = Some(value);
+        let validated = validate_screening_params(&params);
+        assert_eq!(validated.is_ok(), ok, "{value}");
+        if let Ok(validated) = validated {
+            assert!(validated.min_monthly_revenue.is_some());
+        }
+    }
+}
+
 /// 財務體質條件的範圍：F 分數 0–9、毛利率上限 100%、負債比 0–1000%。
 #[test]
 fn screening_health_boundaries_are_deterministic() {
@@ -185,15 +205,16 @@ fn screening_health_boundaries_are_deterministic() {
     }
 }
 
-/// 十一個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
+/// 十二個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
 /// `NULLS LAST`；不在白名單的文字必須在接觸 SQL 前遭拒。
 #[test]
-fn screening_sort_has_twenty_two_static_branches() {
+fn screening_sort_has_twenty_four_static_branches() {
     let fields = [
         "stock_symbol",
         "revenue_yoy",
         "revenue_yoy_streak",
         "revenue_yoy_3m",
+        "monthly_revenue",
         "eps",
         "roe",
         "dividend_yield",
@@ -296,7 +317,7 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
     let ranking: Vec<String> = sqlx::query_scalar(r#"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT y.security_code FROM yield_rank y JOIN stocks s ON s.stock_symbol = y.security_code JOIN "DailyQuotes" q ON q."Serial" = y.daily_quotes_serial JOIN dividend d ON d.serial = y.dividend_serial WHERE y.date = (SELECT MAX(date) FROM yield_rank) AND s.stock_exchange_market_id IN (2,4) ORDER BY y.yield DESC, y.security_code ASC LIMIT 20"#)
         .fetch_all(pool).await.expect("ranking EXPLAIN");
     let screen_sql = format!(
-        "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {SCREEN_STOCKS_SQL}\nORDER BY dividend_yield_percent DESC NULLS LAST, stock_symbol ASC\nLIMIT $15"
+        "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {SCREEN_STOCKS_SQL}\nORDER BY dividend_yield_percent DESC NULLS LAST, stock_symbol ASC\nLIMIT $16"
     );
     let screen: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(screen_sql.as_str()))
         .bind(0_i32)
@@ -312,6 +333,7 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(Option::<Decimal>::None)
         .bind(false)
         .bind(Option::<i16>::None)
+        .bind(Option::<Decimal>::None)
         .bind(Option::<Decimal>::None)
         .bind(20_i64)
         .fetch_all(pool)

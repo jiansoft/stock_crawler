@@ -16,6 +16,7 @@ WITH latest AS (
         s.stock_industry_id AS industry_id,
         r.revenue_raw_month,
         r.revenue_raw_yoy,
+        r.revenue_raw_monthly,
         r.revenue_yoy_streak_raw,
         r.revenue_yoy_3m_raw,
         f.year AS financial_year,
@@ -45,6 +46,7 @@ WITH latest AS (
         SELECT
             MAX(month) FILTER (WHERE rn = 1) AS revenue_raw_month,
             MAX(yoy) FILTER (WHERE rn = 1) AS revenue_raw_yoy,
+            MAX(monthly) FILTER (WHERE rn = 1) AS revenue_raw_monthly,
             COALESCE(
                 MIN(rn) FILTER (WHERE NOT (yoy > 0 AND ord = first_ord - rn + 1)) - 1,
                 COUNT(*)
@@ -122,6 +124,12 @@ WITH latest AS (
               - ((revenue_raw_month / 100)::int * 12
                 + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
           THEN revenue_yoy_3m_raw END AS revenue_yoy_3m_percent,
+        CASE WHEN revenue_raw_month IS NOT NULL
+          AND ((EXTRACT(YEAR FROM $3::date)::int * 12
+                + EXTRACT(MONTH FROM $3::date)::int)
+              - ((revenue_raw_month / 100)::int * 12
+                + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
+          THEN revenue_raw_monthly END AS monthly_revenue,
         CASE WHEN financial_year IS NOT NULL
           AND ((EXTRACT(YEAR FROM $3::date)::int * 4
                 + EXTRACT(QUARTER FROM $3::date)::int)
@@ -166,7 +174,7 @@ WITH latest AS (
 )
 SELECT
     stock_symbol, name, market_id, industry_id,
-    revenue_yoy_percent, revenue_yoy_streak, revenue_yoy_3m_percent,
+    revenue_yoy_percent, revenue_yoy_streak, revenue_yoy_3m_percent, monthly_revenue,
     earnings_per_share, return_on_equity, dividend_yield_percent, valuation_band, valuation_percentage,
     revenue_raw_month AS revenue_month,
     financial_year, financial_quarter,
@@ -187,4 +195,5 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND (NOT $12::bool OR free_cash_flow_ttm > 0)
   AND ($13::smallint IS NULL OR revenue_yoy_streak >= $13)
   AND ($14::numeric IS NULL OR revenue_yoy_3m_percent >= $14)
+  AND ($15::numeric IS NULL OR monthly_revenue >= $15)
 "#;
