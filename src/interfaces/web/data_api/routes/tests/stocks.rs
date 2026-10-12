@@ -1240,3 +1240,136 @@ async fn stock_dividend_fill_endpoint_db_semantics() {
 
     cleanup(pool).await;
 }
+
+/// 同業比較：只看同產業、近 30 天有成交、上市櫃未下市的個股；中位數與名次、依市值排序、
+/// limit 與 422／404。兩檔假代號放在不存在的產業，結束時清除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn stock_peers_endpoint_db_semantics() {
+    use chrono::Datelike;
+
+    const PEER: &str = "79979DB";
+    const INDUSTRY: i32 = 97_979;
+    let Some(pool) = pool_or_skip("stock_peers_endpoint_db_semantics").await else {
+        return;
+    };
+    let cleanup_peers = || async {
+        for sql in [
+            "DELETE FROM last_daily_quotes WHERE stock_symbol = $1",
+            "DELETE FROM yield_rank WHERE security_code = $1",
+            r#"DELETE FROM "Revenue" WHERE "SecurityCode" = $1"#,
+            "DELETE FROM financial_health WHERE stock_symbol = $1",
+            "DELETE FROM stocks WHERE stock_symbol = $1",
+        ] {
+            let _ = sqlx::query(sql).bind(PEER).execute(pool).await;
+        }
+        let _ = sqlx::query("DELETE FROM yield_rank WHERE security_code = $1")
+            .bind(SYMBOL)
+            .execute(pool)
+            .await;
+        cleanup(pool).await;
+    };
+    cleanup_peers().await;
+
+    let today = chrono::Local::now().date_naive();
+    let month = i64::from(today.year()) * 100 + i64::from(today.month());
+    for (symbol, issued, close, pe, pb, yoy) in [
+        (SYMBOL, 1_000_000_i64, 100, 20, 2, 10),
+        (PEER, 5_000_000, 50, 10, 1, -5),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id, issued_share)
+               VALUES ($1, $1, $1, 2, $2, $3)"#,
+        )
+        .bind(symbol)
+        .bind(INDUSTRY)
+        .bind(issued)
+        .execute(pool)
+        .await
+        .expect("種入 stocks");
+        sqlx::query(
+            r#"INSERT INTO last_daily_quotes (date, stock_symbol, closing_price, price_earning_ratio, "price-to-book_ratio")
+               VALUES ($1, $2, $3, $4, $5)"#,
+        )
+        .bind(today)
+        .bind(symbol)
+        .bind(Decimal::from(close))
+        .bind(Decimal::from(pe))
+        .bind(Decimal::from(pb))
+        .execute(pool)
+        .await
+        .expect("種入 last_daily_quotes");
+        sqlx::query(
+            r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "ComparedWithLastYearSameMonth")
+               VALUES ($1, $1, $2, $3)"#,
+        )
+        .bind(symbol)
+        .bind(month)
+        .bind(Decimal::from(yoy))
+        .execute(pool)
+        .await
+        .expect("種入 Revenue");
+    }
+    sqlx::query("INSERT INTO yield_rank (date, security_code, yield) VALUES ($1, $2, 4.5)")
+        .bind(today)
+        .bind(PEER)
+        .execute(pool)
+        .await
+        .expect("種入 yield_rank");
+    sqlx::query("INSERT INTO financial_health (stock_symbol, f_score_year, f_score, f_score_evaluated) VALUES ($1, $2, 7, 9)")
+        .bind(SYMBOL)
+        .bind(today.year() - 1)
+        .execute(pool)
+        .await
+        .expect("種入 financial_health");
+
+    let path = format!("/api/v1/stocks/{SYMBOL}/peers");
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["industry_id"], INDUSTRY);
+    assert_eq!(json["peer_count"], 2);
+    assert_eq!(json["data_as_of"], today.to_string());
+    assert_eq!(json["target"]["market_cap"], 100_000_000.0);
+    assert_eq!(json["target"]["f_score"], 7);
+    // 市值：PEER 2.5 億 > 目標 1 億。
+    assert_eq!(json["peers"][0]["stock_symbol"], PEER);
+    assert_eq!(json["peers"][0]["dividend_yield_percent"], 4.5);
+    let metric = |name: &str| {
+        json["metrics"]
+            .as_array()
+            .expect("metrics 是陣列")
+            .iter()
+            .find(|metric| metric["metric"] == name)
+            .cloned()
+            .expect("應有此指標")
+    };
+    let pe = metric("price_earning_ratio");
+    assert_eq!(
+        (pe["rank"].clone(), pe["industry_median"].clone()),
+        (2.into(), 15.0.into())
+    );
+    let yoy = metric("revenue_yoy_percent");
+    assert_eq!(
+        (yoy["rank"].clone(), yoy["target"].clone()),
+        (1.into(), 10.0.into())
+    );
+    let dividend = metric("dividend_yield_percent");
+    assert!(dividend["rank"].is_null(), "{dividend}");
+    assert_eq!(dividend["samples"], 1);
+
+    let (_, json) = get(&format!("{path}?limit=1")).await;
+    assert_eq!(json["peers"].as_array().map(Vec::len), Some(1));
+    assert_eq!(json["peer_count"], 2);
+
+    for query in ["limit=0", "limit=101"] {
+        let (status, _) = get(&format!("{path}?{query}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+    let (status, _) = get("/api/v1/stocks/79979ZZ/peers").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    cleanup_peers().await;
+}
