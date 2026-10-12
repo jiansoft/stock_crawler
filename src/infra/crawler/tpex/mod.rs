@@ -14,5 +14,7 @@ pub mod net_asset_value_per_share;
 pub(crate) mod quote;
 /// 上櫃個股日成交資訊（單一證券的整月日報價）
 pub mod stock_day;
+/// 上櫃個股日本益比與股價淨值比（peQryDate，可查歷史日期）
+pub mod valuation_ratio;
 
 pub const HOST: &str = "www.tpex.org.tw";

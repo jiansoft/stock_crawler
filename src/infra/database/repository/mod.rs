@@ -13,6 +13,7 @@ pub mod financial_report;
 pub mod foreign_holding;
 pub mod market_index;
 pub mod money_flow;
+pub mod official_ratio;
 pub mod performance;
 pub mod portfolio;
 pub mod quote;

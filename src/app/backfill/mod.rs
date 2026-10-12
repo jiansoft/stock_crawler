@@ -20,6 +20,8 @@ pub mod financial_statement;
 pub mod isin;
 /// 回補每股淨值為零的股票更新其數據
 pub mod net_asset_value_per_share;
+/// 以證交所、櫃買中心官方值回補日線本益比與股價淨值比
+pub mod official_ratio;
 /// 回補流程對外部資料來源的需求介面
 pub mod port;
 /// 外資及陸資投資持股統計

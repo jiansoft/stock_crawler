@@ -11,7 +11,7 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use crate::{
     app::backfill::{
         capital_reduction, chip, delisted_company, dividend, etf, financial_report,
-        financial_statement, isin, net_asset_value_per_share,
+        financial_statement, isin, net_asset_value_per_share, official_ratio,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
     app::calculation,
@@ -268,6 +268,12 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "0 40 10 * * Sat",
             "集保股權分散入庫",
             chip::execute_holder_distributions,
+        ),
+        // 17:30（週一至週五）以證交所、櫃買中心官方值補當天日線為 0 的本益比與股價淨值比
+        create_job(
+            "0 30 17 * * Mon-Fri",
+            "補齊官方本益比與股價淨值比",
+            official_ratio::execute,
         ),
         // 20:50（每月 10–28 日）董監事持股與設質入庫（insider_holding）；同月份重跑只更新有變的列
         create_job(
