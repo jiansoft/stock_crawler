@@ -26,6 +26,7 @@ mod portfolio_history;
 mod screening;
 mod stock_fundamentals;
 mod stock_quotes;
+mod technicals;
 mod valuation_band;
 
 use axum::{
@@ -69,6 +70,7 @@ pub(super) use stock_quotes::{
     __path_stock_profile, latest_quote, price_history, realtime_snapshot, search_stocks,
     stock_profile,
 };
+pub(super) use technicals::{__path_stock_technicals, stock_technicals};
 pub(super) use valuation_band::{__path_stock_valuation_band, stock_valuation_band};
 
 /// 產生不含內部實作細節的統一 JSON 錯誤回應。

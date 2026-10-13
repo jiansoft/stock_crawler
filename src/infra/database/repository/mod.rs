@@ -18,6 +18,7 @@ pub mod performance;
 pub mod portfolio;
 pub mod quote;
 pub mod stock;
+pub mod technical;
 pub mod trace;
 pub mod valuation_band;
 pub mod yield_rank;

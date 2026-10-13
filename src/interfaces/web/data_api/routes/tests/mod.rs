@@ -19,6 +19,7 @@ mod movers;
 mod phases;
 mod rankings;
 mod stocks;
+mod technicals;
 
 /// 健康檢查必須免驗證，讓部署系統能在未持有 API key 時偵測存活狀態。
 #[tokio::test]
