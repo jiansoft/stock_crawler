@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
-use super::stocks::{get, pool_or_skip};
+use super::support::{get, pool_or_skip};
 
 /// `(代號, 市場, 殖利率 %)`；79979YZ 市場別 0（如未歸類的 ETN），任何市場都不應納入。
 const STOCKS: [(&str, i32, i64); 3] = [("79979YA", 2, 5), ("79979YB", 4, 3), ("79979YZ", 0, 9)];

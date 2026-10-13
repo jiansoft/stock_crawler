@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
-use super::stocks::{get, pool_or_skip};
+use super::support::{get, pool_or_skip};
 
 const SYMBOL: &str = "79979TA";
 

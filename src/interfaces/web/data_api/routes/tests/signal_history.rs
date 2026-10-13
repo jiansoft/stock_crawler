@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
-use super::stocks::{get, pool_or_skip};
+use super::support::{get, pool_or_skip};
 
 /// `(代號, 市場, 產業)`；產業 24 為 CI 種入的「半導體業」。
 const STOCKS: [(&str, i32, i32); 3] = [("79979PA", 2, 24), ("79979PB", 2, 99), ("79979PC", 4, 24)];
