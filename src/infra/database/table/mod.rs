@@ -18,4 +18,4 @@ pub use money_flow::{
     daily_money_history_member,
 };
 pub use quote::{daily_quote, daily_stock_price_stats, last_daily_quotes, quote_history_record};
-pub use stock::{stock_exchange_market, stock_ownership_details};
+pub use stock::stock_exchange_market;
