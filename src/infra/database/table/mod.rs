@@ -2,8 +2,6 @@
 pub mod dividend;
 /// 財報、估值與營收資料表。
 pub mod financial;
-/// 指數數據表。
-pub mod index;
 /// 資金流向與會員市值資料表。
 pub mod money_flow;
 /// 績效指標（每日 CAGR）資料表。
@@ -12,13 +10,6 @@ pub mod performance;
 pub mod quote;
 /// 股票主檔。
 pub mod stock;
-
-/// 系統設定資料表。
-pub mod config;
-/// 追踪即時股價，當超過或低於設定的數值時發送TG訊息
-pub mod trace;
-/// 殖利率排行
-pub mod yield_rank;
 
 pub use dividend::{dividend_record_detail, dividend_record_detail_more};
 pub use financial::{estimate, financial_statement, revenue};
