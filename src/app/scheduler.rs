@@ -259,6 +259,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "資料健康週報",
             event::taiwan_stock::data_health::execute,
         ),
+        // 19:15（週一至週五）通知持股的重要技術訊號；排在 19:00 收盤完整性檢查之後，
+        // 若有重跑收盤匯總，訊號也已重新計算。
+        create_job(
+            "0 15 19 * * Mon-Fri",
+            "通知持股技術訊號",
+            event::taiwan_stock::technical_alert::execute,
+        ),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         create_job("0 0 21 * * *", "補齊缺失之年度配息數據", dividend::execute),
         // 21:40（週一至週五）通知持股三大法人與融資融券的明顯動作
