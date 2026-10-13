@@ -239,6 +239,11 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
 
     calculation::money_history::calculate_money_history(date).await?;
     tracing::info!("計算帳戶內市值結束");
+    // 技術訊號只供查詢與通知使用，失敗不影響後續的市值變化通知
+    match calculation::technical_signal::calculate_technical_signals(date).await {
+        Ok(count) => tracing::info!("計算技術訊號結束:{count}"),
+        Err(why) => tracing::error!("計算技術訊號失敗: {why:#}"),
+    }
 
     // 清除記憶與Redis內所有的快取
     TTL.clear();

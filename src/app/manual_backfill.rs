@@ -87,6 +87,12 @@ const MANUAL_OFFICIAL_RATIO_FROM: &str = "2012-01-02";
 /// 官方本益比／股價淨值比回補的預設迄日。
 const MANUAL_OFFICIAL_RATIO_TO: &str = "2012-12-31";
 
+/// 技術訊號回補的預設起日。
+const MANUAL_TECHNICAL_SIGNAL_FROM: &str = "2026-09-01";
+
+/// 技術訊號回補的預設迄日。
+const MANUAL_TECHNICAL_SIGNAL_TO: &str = "2026-10-12";
+
 /// 手動回補收盤事件匯總時使用的預設交易日。
 const MANUAL_CLOSING_AGGREGATE_DATE: &str = "2026-04-30";
 
@@ -851,4 +857,34 @@ async fn test_backfill_official_valuation_ratios() {
         .await
         .expect("manual official valuation ratio backfill failed");
     println!("官方本益比淨值比回補 {from}～{to}：{summary:?}");
+}
+
+/// 逐日重算全市場技術訊號（`daily_technical_signal`）。
+///
+/// **會覆蓋指定期間每個交易日的訊號**；只讀資料庫既有日線，不呼叫外部網站。非交易日沒有
+/// 有成交的股票，不會寫入任何資料。起訖日可用環境變數 `MANUAL_TECHNICAL_SIGNAL_FROM`／
+/// `MANUAL_TECHNICAL_SIGNAL_TO` 覆寫。
+///
+/// 執行範例：
+/// `MANUAL_TECHNICAL_SIGNAL_FROM=2026-09-01 cargo test app::manual_backfill::test_backfill_technical_signals -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_technical_signals() {
+    dotenvy::dotenv().ok();
+    let date = |name: &str, default: &str| {
+        let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
+        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+    };
+    let from = date("MANUAL_TECHNICAL_SIGNAL_FROM", MANUAL_TECHNICAL_SIGNAL_FROM);
+    let to = date("MANUAL_TECHNICAL_SIGNAL_TO", MANUAL_TECHNICAL_SIGNAL_TO);
+
+    for day in from.iter_days().take_while(|day| *day <= to) {
+        let count = crate::app::calculation::technical_signal::calculate_technical_signals(day)
+            .await
+            .unwrap_or_else(|why| panic!("{day} 技術訊號計算失敗：{why:#}"));
+        if count > 0 {
+            println!("{day} 技術訊號 {count} 筆");
+        }
+    }
 }

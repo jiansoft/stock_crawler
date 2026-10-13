@@ -19,6 +19,7 @@ mod industries;
 mod market_calendar;
 mod market_movers;
 mod market_rankings;
+mod market_signals;
 mod market_stats;
 mod peers;
 mod portfolio;
@@ -53,6 +54,7 @@ pub(super) use market_rankings::{
     __path_dividend_yield_ranking, __path_qfii_holding_ranking, dividend_yield_ranking,
     qfii_holding_ranking,
 };
+pub(super) use market_signals::{__path_market_signals, market_signals};
 pub(super) use market_stats::{
     __path_market_breadth, __path_market_index_history, market_breadth, market_index_history,
 };

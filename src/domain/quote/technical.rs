@@ -23,6 +23,15 @@ pub const MA_PERIODS: [usize; 6] = [5, 10, 20, 60, 120, 240];
 /// 計算前額外讀取的交易日數：涵蓋年線所需的 240 日，並讓 EMA、KD 的起始值影響衰減。
 pub const WARMUP_BARS: usize = 360;
 
+/// 52 週新高／新低訊號的來源名稱。
+pub const FIFTY_TWO_WEEK_INDICATOR: &str = "52_week";
+
+/// 52 週回看的日曆天數（不含當日），與市場廣度統計 `daily_stock_price_stats` 一致。
+const FIFTY_TWO_WEEK_DAYS: u64 = 364;
+
+/// 前 52 週至少要有的交易日數；不足（例如新上市）不判斷新高新低，與市場廣度統計一致。
+const FIFTY_TWO_WEEK_MIN_PRIOR_DAYS: usize = 200;
+
 const KD_PERIOD: usize = 9;
 const MACD_FAST: usize = 12;
 const MACD_SLOW: usize = 26;
@@ -55,6 +64,31 @@ pub trait PriceBarRepository: Send + Sync {
         until: Option<NaiveDate>,
         limit: i64,
     ) -> Result<Vec<PriceBar>>;
+}
+
+/// 某股票某交易日的技術訊號（收盤後預先計算，供全市場訊號選股查詢）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StockTechnicalSignal {
+    /// 交易日。
+    pub date: NaiveDate,
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 訊號內容。
+    pub signal: TechnicalSignal,
+}
+
+/// 全市場技術訊號的存取。
+#[async_trait]
+pub trait TechnicalSignalRepository: Send + Sync {
+    /// 指定交易日有成交、未暫停交易的上市櫃股票代號。
+    async fn fetch_signal_symbols(&self, date: NaiveDate) -> Result<Vec<String>>;
+
+    /// 以 `signals` 覆蓋指定交易日的全部訊號（同一交易內先刪後寫）。
+    async fn replace_signals(
+        &self,
+        date: NaiveDate,
+        signals: &[StockTechnicalSignal],
+    ) -> Result<()>;
 }
 
 /// 單日的各項技術指標；樣本不足的欄位為 `None`。
@@ -113,6 +147,10 @@ pub enum SignalKind {
     Overbought,
     /// 指標位於超賣區。
     Oversold,
+    /// 當日最高價創前 52 週新高。
+    NewHigh,
+    /// 當日最低價創前 52 週新低。
+    NewLow,
 }
 
 impl SignalKind {
@@ -125,9 +163,41 @@ impl SignalKind {
             Self::CrossBelow => "cross_below",
             Self::Overbought => "overbought",
             Self::Oversold => "oversold",
+            Self::NewHigh => "new_high",
+            Self::NewLow => "new_low",
         }
     }
+
+    /// 由對外名稱解析；未知名稱回 `None`。
+    pub fn parse(value: &str) -> Option<Self> {
+        SIGNAL_KINDS.into_iter().find(|kind| kind.as_str() == value)
+    }
 }
+
+/// 全部訊號種類，依對外說明的順序。
+pub const SIGNAL_KINDS: [SignalKind; 8] = [
+    SignalKind::GoldenCross,
+    SignalKind::DeathCross,
+    SignalKind::CrossAbove,
+    SignalKind::CrossBelow,
+    SignalKind::Overbought,
+    SignalKind::Oversold,
+    SignalKind::NewHigh,
+    SignalKind::NewLow,
+];
+
+/// 全部訊號來源（[`TechnicalSignal::indicator`]），依對外說明的順序。
+pub const SIGNAL_INDICATORS: [&str; 9] = [
+    "ma5_ma20",
+    "ma20_ma60",
+    "kd",
+    "macd",
+    "close_ma20",
+    "close_ma60",
+    "close_ma240",
+    "rsi14",
+    FIFTY_TWO_WEEK_INDICATOR,
+];
 
 /// 最新一日出現的技術訊號。
 #[derive(Debug, Clone, PartialEq)]
@@ -348,6 +418,48 @@ pub fn signals(prev: Option<&IndicatorPoint>, last: &IndicatorPoint) -> Vec<Tech
     }
     if let Some(k) = last.k {
         push_level(&mut out, "kd", "K 值", k, KD_OVERBOUGHT, KD_OVERSOLD);
+    }
+    out
+}
+
+/// 最新一日（`bars` 最後一根）是否創 52 週新高或新低。
+///
+/// 口徑與市場廣度統計 `daily_stock_price_stats` 相同：當日最高價高於前 364 天（不含當日）
+/// 的最高價算新高；當日最低價低於前 364 天大於 0 的最低價算新低；前 364 天不足 200 個
+/// 交易日（例如新上市）不判斷。使用原始最高／最低價，不以收盤價替代缺值。
+pub fn fifty_two_week_signals(bars: &[PriceBar]) -> Vec<TechnicalSignal> {
+    let Some((last, prior)) = bars.split_last() else {
+        return Vec::new();
+    };
+    let from = last.date - chrono::Days::new(FIFTY_TWO_WEEK_DAYS);
+    let window: Vec<&PriceBar> = prior
+        .iter()
+        .filter(|bar| bar.date >= from && bar.date < last.date)
+        .collect();
+    if window.len() < FIFTY_TWO_WEEK_MIN_PRIOR_DAYS {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    let prior_high = window.iter().map(|bar| bar.high).fold(f64::MIN, f64::max);
+    if last.high > prior_high {
+        out.push(TechnicalSignal {
+            indicator: FIFTY_TWO_WEEK_INDICATOR,
+            kind: SignalKind::NewHigh,
+            description: format!("最高價 {} 創 52 週新高（前高 {prior_high}）", last.high),
+        });
+    }
+    let prior_low = window
+        .iter()
+        .map(|bar| bar.low)
+        .filter(|low| *low > 0.0)
+        .fold(f64::MAX, f64::min);
+    if last.low > 0.0 && last.low < prior_low && prior_low < f64::MAX {
+        out.push(TechnicalSignal {
+            indicator: FIFTY_TWO_WEEK_INDICATOR,
+            kind: SignalKind::NewLow,
+            description: format!("最低價 {} 創 52 週新低（前低 {prior_low}）", last.low),
+        });
     }
     out
 }
@@ -626,18 +738,10 @@ mod tests {
         assert!(signals(Some(&point(10.0)), &point(10.0)).is_empty());
     }
 
-    /// 對外名稱固定。
+    /// 對外名稱固定，且可由名稱解析回原值。
     #[test]
     fn signal_kind_names_are_stable() {
-        let names = [
-            SignalKind::GoldenCross,
-            SignalKind::DeathCross,
-            SignalKind::CrossAbove,
-            SignalKind::CrossBelow,
-            SignalKind::Overbought,
-            SignalKind::Oversold,
-        ]
-        .map(SignalKind::as_str);
+        let names = SIGNAL_KINDS.map(SignalKind::as_str);
         assert_eq!(
             names,
             [
@@ -646,8 +750,76 @@ mod tests {
                 "cross_above",
                 "cross_below",
                 "overbought",
-                "oversold"
+                "oversold",
+                "new_high",
+                "new_low"
             ]
         );
+        for kind in SIGNAL_KINDS {
+            assert_eq!(SignalKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(SignalKind::parse("unknown"), None);
+    }
+
+    /// 前 52 週的日線：每 7 天 5 個交易日、共 `days` 根，最高 10、最低 5，最後加上當日。
+    fn year_bars(days: usize, last_high: f64, last_low: f64) -> Vec<PriceBar> {
+        let start = NaiveDate::from_ymd_opt(2025, 1, 6).expect("有效日期");
+        let mut out: Vec<PriceBar> = (0..days)
+            .map(|i| PriceBar {
+                date: start + chrono::Days::new((i / 5 * 7 + i % 5) as u64),
+                close: 8.0,
+                high: 10.0,
+                low: 5.0,
+            })
+            .collect();
+        let last_date = out.last().expect("至少一根").date + chrono::Days::new(1);
+        out.push(PriceBar {
+            date: last_date,
+            close: 8.0,
+            high: last_high,
+            low: last_low,
+        });
+        out
+    }
+
+    /// 當日最高價高於前 52 週最高價為新高、最低價低於前 52 週最低價為新低；等於不算。
+    #[test]
+    fn fifty_two_week_signals_compare_with_prior_year() {
+        let both = fifty_two_week_signals(&year_bars(250, 10.5, 4.5));
+        let kinds: Vec<SignalKind> = both.iter().map(|signal| signal.kind).collect();
+        assert_eq!(kinds, [SignalKind::NewHigh, SignalKind::NewLow]);
+        assert!(both.iter().all(|signal| signal.indicator == "52_week"));
+        assert_eq!(both[0].description, "最高價 10.5 創 52 週新高（前高 10）");
+        assert_eq!(both[1].description, "最低價 4.5 創 52 週新低（前低 5）");
+
+        assert!(fifty_two_week_signals(&year_bars(250, 10.0, 5.0)).is_empty());
+        assert!(fifty_two_week_signals(&[]).is_empty());
+    }
+
+    /// 前 52 週不足 200 個交易日不判斷；超過 364 天的舊資料不列入比較。
+    #[test]
+    fn fifty_two_week_signals_need_enough_recent_history() {
+        assert!(fifty_two_week_signals(&year_bars(199, 99.0, 1.0)).is_empty());
+        assert_eq!(fifty_two_week_signals(&year_bars(200, 99.0, 1.0)).len(), 2);
+
+        // 一年多以前的極端高低價不影響：只看前 364 天。
+        let mut bars = year_bars(300, 10.5, 4.5);
+        bars[0].high = 50.0;
+        bars[0].low = 1.0;
+        assert_eq!(fifty_two_week_signals(&bars).len(), 2);
+    }
+
+    /// 最低價為 0（缺值）的日子不參與新低比較；當日最低價為 0 也不算新低。
+    #[test]
+    fn fifty_two_week_low_ignores_missing_prices() {
+        let mut bars = year_bars(250, 10.0, 4.5);
+        let len = bars.len();
+        bars[len - 2].low = 0.0;
+        let signals = fifty_two_week_signals(&bars);
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].kind, SignalKind::NewLow);
+
+        let zero_low = year_bars(250, 10.0, 0.0);
+        assert!(fifty_two_week_signals(&zero_low).is_empty());
     }
 }
