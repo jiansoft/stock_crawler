@@ -106,37 +106,48 @@ pub async fn visit(stock_symbol: &str) -> Result<Vec<share::AnnualProfit>> {
 
     let mut result = Vec::with_capacity(eps_by_year.len());
     for (year, earnings_per_share) in eps_by_year {
-        let sales_per_share = match (
+        let metrics = fetch_income_statement_metrics(stock_symbol, year).await;
+        result.push(assemble_annual_profit(
+            stock_symbol,
+            year,
+            earnings_per_share,
             revenue_by_year.get(&year).copied(),
             common_stock_by_year.get(&year).copied(),
-        ) {
-            (Some(revenue), Some(common_stock)) => calc_sales_per_share(revenue, common_stock),
-            _ => Decimal::ZERO,
-        };
-
-        let profit_before_tax = match fetch_income_statement_metrics(stock_symbol, year).await {
-            Ok(metrics) => {
-                let weighted_average_shares =
-                    calc_weighted_average_shares(metrics.profit_for_eps_total, earnings_per_share);
-                calc_profit_before_tax_per_share(
-                    metrics.profit_before_tax_total,
-                    weighted_average_shares,
-                )
-            }
-            Err(_) => Decimal::ZERO,
-        };
-
-        result.push(share::AnnualProfit {
-            stock_symbol: stock_symbol.to_string(),
-            year,
-            sales_per_share: sales_per_share.round_dp(2),
-            earnings_per_share: earnings_per_share.round_dp(2),
-            profit_before_tax: profit_before_tax.round_dp(2),
-        });
+            metrics.ok(),
+        ));
     }
 
     result.sort_by_key(|item| item.year);
     Ok(result)
+}
+
+/// 由單一年度的 EPS、營收、股本與綜合損益表指標組出年度財報，每股值四捨五入到小數兩位。
+///
+/// 營收或股本缺值時每股營收為 0；綜合損益表抓不到（`None`）時每股稅前淨利為 0。
+fn assemble_annual_profit(
+    stock_symbol: &str,
+    year: i32,
+    earnings_per_share: Decimal,
+    revenue: Option<Decimal>,
+    common_stock: Option<Decimal>,
+    metrics: Option<IncomeStatementMetrics>,
+) -> share::AnnualProfit {
+    let sales_per_share = match (revenue, common_stock) {
+        (Some(revenue), Some(common_stock)) => calc_sales_per_share(revenue, common_stock),
+        _ => Decimal::ZERO,
+    };
+    let profit_before_tax = metrics.map_or(Decimal::ZERO, |metrics| {
+        let weighted_average_shares =
+            calc_weighted_average_shares(metrics.profit_for_eps_total, earnings_per_share);
+        calc_profit_before_tax_per_share(metrics.profit_before_tax_total, weighted_average_shares)
+    });
+    share::AnnualProfit {
+        stock_symbol: stock_symbol.to_string(),
+        year,
+        sales_per_share: sales_per_share.round_dp(2),
+        earnings_per_share: earnings_per_share.round_dp(2),
+        profit_before_tax: profit_before_tax.round_dp(2),
+    }
 }
 
 /// 建立 MOPS `compare/data` 查詢所需的表單參數。
@@ -182,7 +193,12 @@ async fn fetch_compare_series(
         )),
     )
     .await?;
-    let response: CompareDataResponse = serde_json::from_str(&raw).map_err(|why| {
+    parse_compare_series(&raw, compare_item)
+}
+
+/// 把 MOPS `compare/data` 的 JSON 轉為「年度 -> 數值」對照表；值為 `null` 的資料點略過。
+fn parse_compare_series(raw: &str, compare_item: &str) -> Result<HashMap<i32, Decimal>> {
+    let response: CompareDataResponse = serde_json::from_str(raw).map_err(|why| {
         anyhow!(
             "Failed to parse MOPS compare/data response for {} because {:?}. body={}",
             compare_item,
@@ -671,6 +687,74 @@ mod tests {
         "#;
 
         assert!(parse_income_statement_metrics_from_report(html).is_err());
+    }
+
+    /// 趨勢資料轉為年度對照表；null 資料點略過。
+    #[test]
+    fn parse_compare_series_maps_years_and_skips_nulls() {
+        let raw = r#"{"xaxisList":["2022Q4","2023Q4","2024Q4"],
+            "graphData":[{"data":[[0,13.94,"A"],[1,null,"A"],[2,45.25,"A"]]}]}"#;
+        let series = parse_compare_series(raw, "EPS").expect("解析成功");
+        assert_eq!(series.len(), 2);
+        assert_eq!(
+            series[&2022].round_dp(2),
+            Decimal::from_str_exact("13.94").unwrap()
+        );
+        assert_eq!(series[&2024], Decimal::from_str_exact("45.25").unwrap());
+        assert!(!series.contains_key(&2023));
+    }
+
+    /// JSON 格式錯誤、沒有 graphData、X 軸索引越界或年度格式錯誤都回錯誤。
+    #[test]
+    fn parse_compare_series_rejects_malformed_responses() {
+        for (raw, expected) in [
+            (
+                "<html>維護中</html>",
+                "Failed to parse MOPS compare/data response",
+            ),
+            (
+                r#"{"xaxisList":[],"graphData":[]}"#,
+                "Failed to find graphData",
+            ),
+            (
+                r#"{"xaxisList":["2024Q4"],"graphData":[{"data":[[3,1.0,"A"]]}]}"#,
+                "Failed to find xaxis index 3",
+            ),
+            (
+                r#"{"xaxisList":["年度"],"graphData":[{"data":[[0,1.0,"A"]]}]}"#,
+                "",
+            ),
+        ] {
+            let error = parse_compare_series(raw, "EPS").expect_err(raw);
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    /// 組合年度財報：有營收、股本與損益表時算出每股值；缺值時以 0 代替。
+    #[test]
+    fn assemble_annual_profit_uses_available_metrics() {
+        let d = |value: &str| Decimal::from_str_exact(value).unwrap();
+        let full = assemble_annual_profit(
+            "2330",
+            2024,
+            d("10.005"),
+            Some(d("1000000")),
+            Some(d("100000")),
+            Some(IncomeStatementMetrics {
+                profit_before_tax_total: d("1200000"),
+                profit_for_eps_total: d("1000500"),
+            }),
+        );
+        assert_eq!(full.stock_symbol, "2330");
+        assert_eq!(full.year, 2024);
+        assert_eq!(full.earnings_per_share, d("10.00"));
+        assert_eq!(full.sales_per_share, d("100.00"));
+        assert_eq!(full.profit_before_tax, d("12.00"));
+
+        let sparse = assemble_annual_profit("2330", 2023, d("5"), Some(d("1000")), None, None);
+        assert_eq!(sparse.sales_per_share, Decimal::ZERO);
+        assert_eq!(sparse.profit_before_tax, Decimal::ZERO);
+        assert_eq!(sparse.earnings_per_share, d("5"));
     }
 
     #[tokio::test]
