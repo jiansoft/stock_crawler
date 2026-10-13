@@ -6,6 +6,8 @@ pub mod official_ratio;
 pub mod peer;
 /// 報價領域之倉儲介面。
 pub mod repository;
+/// 技術指標（均線、RSI、KD、MACD 與交叉訊號）。
+pub mod technical;
 /// 報價領域之測試替身；僅在測試建置下編譯。
 #[cfg(test)]
 pub mod test_double;
