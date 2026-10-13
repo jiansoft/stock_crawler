@@ -8,7 +8,8 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     domain::quote::technical::{
-        PriceBar, PriceBarRepository, StockTechnicalSignal, TechnicalSignalRepository,
+        PriceBar, PriceBarRepository, StockTechnicalSignal, TechnicalSignal, TechnicalSignalQuery,
+        TechnicalSignalRepository,
     },
     infra::database::{self, repository::quote::PgQuoteRepository},
 };
@@ -113,6 +114,39 @@ impl TechnicalSignalRepository for PgQuoteRepository {
     }
 }
 
+/// 指定交易日、指定股票的訊號。
+const SIGNALS_OF_SYMBOLS_SQL: &str = r#"
+SELECT stock_symbol, indicator, kind, description
+FROM daily_technical_signal
+WHERE date = $1 AND stock_symbol = ANY($2)
+ORDER BY stock_symbol, indicator, kind
+"#;
+
+#[async_trait]
+impl TechnicalSignalQuery for PgQuoteRepository {
+    async fn fetch_signals(
+        &self,
+        date: NaiveDate,
+        stock_symbols: &[String],
+    ) -> Result<Vec<StockTechnicalSignal>> {
+        let rows: Vec<(String, String, String, String)> = sqlx::query_as(SIGNALS_OF_SYMBOLS_SQL)
+            .bind(date)
+            .bind(stock_symbols)
+            .fetch_all(database::get_connection())
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(stock_symbol, indicator, kind, description)| {
+                Some(StockTechnicalSignal {
+                    date,
+                    stock_symbol,
+                    signal: TechnicalSignal::from_names(&indicator, &kind, description)?,
+                })
+            })
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,6 +230,27 @@ mod tests {
         repo.replace_signals(date, &first)
             .await
             .expect("第一次寫入");
+        let read = repo
+            .fetch_signals(date, &["79979SA".to_owned(), "79979SB".to_owned()])
+            .await
+            .expect("讀回訊號");
+        assert_eq!(read, first);
+        sqlx::query(
+            "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
+             VALUES ($1, '79979SA', 'unknown', 'golden_cross', '舊資料')",
+        )
+        .bind(date)
+        .execute(pool)
+        .await
+        .expect("寫入無法辨識的訊號");
+        assert_eq!(
+            repo.fetch_signals(date, &["79979SA".to_owned()])
+                .await
+                .expect("讀回訊號")
+                .len(),
+            2,
+            "無法辨識的來源應略過"
+        );
         repo.replace_signals(date, &first[1..])
             .await
             .expect("覆蓋寫入");

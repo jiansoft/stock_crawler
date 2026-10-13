@@ -91,6 +91,17 @@ pub trait TechnicalSignalRepository: Send + Sync {
     ) -> Result<()>;
 }
 
+/// 讀取已預先計算的技術訊號。
+#[async_trait]
+pub trait TechnicalSignalQuery: Send + Sync {
+    /// 指定交易日、指定股票的訊號，依代號排序；資料表中無法辨識的來源或種類略過。
+    async fn fetch_signals(
+        &self,
+        date: NaiveDate,
+        stock_symbols: &[String],
+    ) -> Result<Vec<StockTechnicalSignal>>;
+}
+
 /// 單日的各項技術指標；樣本不足的欄位為 `None`。
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndicatorPoint {
@@ -208,6 +219,19 @@ pub struct TechnicalSignal {
     pub kind: SignalKind,
     /// 中文說明。
     pub description: String,
+}
+
+impl TechnicalSignal {
+    /// 由資料表的來源與種類名稱還原；任一名稱不在 [`SIGNAL_INDICATORS`]／[`SIGNAL_KINDS`] 時回 `None`。
+    pub fn from_names(indicator: &str, kind: &str, description: String) -> Option<Self> {
+        Some(Self {
+            indicator: SIGNAL_INDICATORS
+                .into_iter()
+                .find(|known| *known == indicator)?,
+            kind: SignalKind::parse(kind)?,
+            description,
+        })
+    }
 }
 
 /// 依日線（由舊到新）逐日計算技術指標，回傳與輸入等長、同順序的結果。
@@ -759,6 +783,18 @@ mod tests {
             assert_eq!(SignalKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(SignalKind::parse("unknown"), None);
+    }
+
+    /// 資料表的名稱可還原成訊號；未知名稱回 None。
+    #[test]
+    fn technical_signal_from_names() {
+        let signal = TechnicalSignal::from_names("52_week", "new_high", "說明".to_owned())
+            .expect("已知名稱");
+        assert_eq!(signal.indicator, FIFTY_TWO_WEEK_INDICATOR);
+        assert_eq!(signal.kind, SignalKind::NewHigh);
+        assert_eq!(signal.description, "說明");
+        assert!(TechnicalSignal::from_names("ma1", "new_high", String::new()).is_none());
+        assert!(TechnicalSignal::from_names("kd", "breakout", String::new()).is_none());
     }
 
     /// 前 52 週的日線：每 7 天 5 個交易日、共 `days` 根，最高 10、最低 5，最後加上當日。
