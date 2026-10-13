@@ -1,7 +1,7 @@
 //! Data API 路由測試。
 //!
 //! 本檔是不連資料庫的基礎契約測試：路由、Bearer 驗證邊界與 OpenAPI 產物。
-//! 資料庫查詢語意依 endpoint 分組放在子模組（`phases`、`cagr`、`movers`、`chip`、`stocks`），
+//! 資料庫查詢語意依 endpoint 分組放在子模組（`phases`、`cagr`、`movers`、`industries`、`chip`、`stocks`），
 //! 由整合測試環境驗證，避免單元測試因本機沒有 PostgreSQL 而失去可重現性。
 
 use axum::{
@@ -14,6 +14,7 @@ use super::router;
 
 mod cagr;
 mod chip;
+mod industries;
 mod movers;
 mod phases;
 mod stocks;
@@ -192,15 +193,17 @@ async fn phase4_endpoints_reject_missing_bearer_key() {
 /// 漲跌幅／成交量排行 endpoint 也必須受 Bearer 驗證保護，未帶 token 一律 401。
 #[tokio::test]
 async fn movers_endpoint_rejects_missing_bearer_key() {
-    let response = router()
-        .oneshot(
-            Request::get("/api/v1/market/movers")
-                .body(Body::empty())
-                .expect("request should build"),
-        )
-        .await
-        .expect("router should serve request");
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    for path in ["/api/v1/market/movers", "/api/v1/market/industries"] {
+        let response = router()
+            .oneshot(
+                Request::get(path)
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should serve request");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
 }
 
 /// M4 兩個 endpoint 都必須在 middleware 層拒絕未授權請求。
