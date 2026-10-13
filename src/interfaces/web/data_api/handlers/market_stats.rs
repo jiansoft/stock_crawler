@@ -51,7 +51,7 @@ pub(crate) async fn market_breadth(Query(params): Query<MarketBreadthParams>) ->
     }
     // 統計表主鍵／唯一鍵以市場與日期定位。指定日期時只允許最新一筆落在
     // 31 天回溯窗內；一旦找到終點，再向前取 N 個「有資料的交易日」。
-    let rows: Result<Vec<MarketBreadthRow>, _> = sqlx::query_as(r#"WITH endpoint AS (SELECT MAX(date) AS date FROM daily_stock_price_stats WHERE stock_exchange_market_id = $1 AND ($2::date IS NULL OR (date <= $2 AND date >= $2 - 30))) SELECT s.date, s.undervalued, s.fair_valued, s.overvalued, s.highly_overvalued, s.below_5_day_moving_average, s.above_5_day_moving_average, s.below_20_day_moving_average, s.above_20_day_moving_average, s.below_60_day_moving_average, s.above_60_day_moving_average, s.below_120_day_moving_average, s.above_120_day_moving_average, s.below_240_day_moving_average, s.above_240_day_moving_average, s.stocks_up, s.stocks_down, s.stocks_unchanged, s.updated_at FROM daily_stock_price_stats s CROSS JOIN endpoint e WHERE s.stock_exchange_market_id = $1 AND s.date <= e.date ORDER BY s.date DESC LIMIT $3"#).bind(market_id).bind(date).bind(i64::from(days)).fetch_all(database::get_connection()).await;
+    let rows: Result<Vec<MarketBreadthRow>, _> = sqlx::query_as(r#"WITH endpoint AS (SELECT MAX(date) AS date FROM daily_stock_price_stats WHERE stock_exchange_market_id = $1 AND ($2::date IS NULL OR (date <= $2 AND date >= $2 - 30))) SELECT s.date, s.undervalued, s.fair_valued, s.overvalued, s.highly_overvalued, s.below_5_day_moving_average, s.above_5_day_moving_average, s.below_20_day_moving_average, s.above_20_day_moving_average, s.below_60_day_moving_average, s.above_60_day_moving_average, s.below_120_day_moving_average, s.above_120_day_moving_average, s.below_240_day_moving_average, s.above_240_day_moving_average, s.stocks_up, s.stocks_down, s.stocks_unchanged, s.new_52_week_high, s.new_52_week_low, s.updated_at FROM daily_stock_price_stats s CROSS JOIN endpoint e WHERE s.stock_exchange_market_id = $1 AND s.date <= e.date ORDER BY s.date DESC LIMIT $3"#).bind(market_id).bind(date).bind(i64::from(days)).fetch_all(database::get_connection()).await;
     match rows {
         Ok(rows) if rows.is_empty() => error_response(StatusCode::NOT_FOUND, "查無市場廣度資料"),
         Ok(rows) => {
@@ -167,6 +167,10 @@ struct MarketBreadthRow {
     stocks_down: i32,
     /// 平盤家數。
     stocks_unchanged: i32,
+    /// 創 52 週新高家數。
+    new_52_week_high: i32,
+    /// 創 52 週新低家數。
+    new_52_week_low: i32,
     /// 最後更新時間。
     updated_at: Option<DateTime<Utc>>,
 }
@@ -194,6 +198,8 @@ impl MarketBreadthRow {
             stocks_up: self.stocks_up,
             stocks_down: self.stocks_down,
             stocks_unchanged: self.stocks_unchanged,
+            new_52_week_high: self.new_52_week_high,
+            new_52_week_low: self.new_52_week_low,
             updated_at: timestamp(self.updated_at),
         }
     }
@@ -267,6 +273,8 @@ mod tests {
             stocks_up: 15,
             stocks_down: 16,
             stocks_unchanged: 17,
+            new_52_week_high: 18,
+            new_52_week_low: 19,
             updated_at: None,
         };
         let response = build_market_breadth_response(vec![point.clone()]).unwrap();
