@@ -56,12 +56,13 @@ pub(crate) async fn stock_technicals(
     Json(build_response(symbol, days, &bars)).into_response()
 }
 
-/// 由舊到新的日線計算指標，只回傳最後 `days` 筆與最新一日的訊號。
+/// 由舊到新的日線計算指標，只回傳最後 `days` 筆與最新一日的訊號（含 52 週新高新低）。
 fn build_response(symbol: String, days: u8, bars: &[PriceBar]) -> TechnicalIndicatorsResponse {
     let points = technical::compute(bars);
     let signals = match points.split_last() {
         Some((last, rest)) => technical::signals(rest.last(), last)
             .into_iter()
+            .chain(technical::fifty_two_week_signals(bars))
             .map(|signal| TechnicalSignalItem {
                 indicator: signal.indicator.to_owned(),
                 kind: signal.kind.as_str().to_owned(),
@@ -155,6 +156,20 @@ mod tests {
                 .signals
                 .iter()
                 .any(|signal| signal.indicator == "kd" && signal.kind == "overbought")
+        );
+    }
+
+    /// 持續上漲滿 200 個交易日後，最新一日的最高價也是 52 週新高。
+    #[test]
+    fn build_response_includes_fifty_two_week_signals() {
+        let response = build_response("2330".to_owned(), 1, &bars(250));
+        assert!(
+            response
+                .signals
+                .iter()
+                .any(|signal| signal.indicator == "52_week" && signal.kind == "new_high"),
+            "{:?}",
+            response.signals
         );
     }
 

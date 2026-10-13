@@ -10,3 +10,5 @@ pub mod estimated_price;
 pub mod financial_health;
 /// 計算每日市值
 pub mod money_history;
+/// 收盤後全市場技術訊號
+pub mod technical_signal;
