@@ -402,7 +402,7 @@ FROM "DailyQuotes" q
 JOIN stocks s ON s.stock_symbol = q.stock_symbol
 WHERE q."Date" = $1
   AND (($2 = 0 AND s.stock_exchange_market_id IN (2, 4))
-    OR s.stock_exchange_market_id = $2)
+    OR ($2 <> 0 AND s.stock_exchange_market_id = $2))
   AND s."SuspendListing" = false
   AND q."TradingVolume" > 0
 "#;

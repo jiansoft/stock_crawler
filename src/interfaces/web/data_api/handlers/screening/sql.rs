@@ -101,7 +101,7 @@ WITH latest AS (
     ) y ON TRUE
     LEFT JOIN financial_health h ON h.stock_symbol = s.stock_symbol
     WHERE (($1::int = 0 AND s.stock_exchange_market_id IN (2, 4))
-        OR s.stock_exchange_market_id = $1)
+        OR ($1::int <> 0 AND s.stock_exchange_market_id = $1))
       AND ($2::int IS NULL OR s.stock_industry_id = $2)
 ), normalized AS (
     SELECT

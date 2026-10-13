@@ -59,7 +59,7 @@ LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
 LEFT JOIN "DailyQuotes" b ON b.stock_symbol = e.stock_symbol AND b."Date" = $2
 WHERE e."Date" = $1
   AND e."ClosingPrice" > 0
-  AND (($3 = 0 AND s.stock_exchange_market_id IN (2, 4)) OR s.stock_exchange_market_id = $3)
+  AND (($3 = 0 AND s.stock_exchange_market_id IN (2, 4)) OR ($3 <> 0 AND s.stock_exchange_market_id = $3))
   AND s.stock_symbol !~ '^00'
 "#;
 
