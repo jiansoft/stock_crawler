@@ -166,6 +166,9 @@ pub struct DailyStockPriceStats {
     pub stocks_up: i32,
     pub stocks_down: i32,
     pub stocks_unchanged: i32,
+    /// 創 52 週新高／新低的家數
+    pub new_52_week_high: i32,
+    pub new_52_week_low: i32,
     /// 建立與更新時間
     pub created_at: DateTime<Local>,
     pub updated_at: DateTime<Local>,
@@ -193,6 +196,8 @@ impl Default for DailyStockPriceStats {
             stocks_up: 0,
             stocks_down: 0,
             stocks_unchanged: 0,
+            new_52_week_high: 0,
+            new_52_week_low: 0,
             created_at: Local::now(),
             updated_at: Local::now(),
         }

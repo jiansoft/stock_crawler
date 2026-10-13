@@ -20,6 +20,8 @@ CREATE TABLE daily_stock_price_stats
     stocks_up                    INT                      DEFAULT 0            NOT NULL, -- 上漲的股票數量
     stocks_down                  INT                      DEFAULT 0            NOT NULL, -- 下跌的股票數量
     stocks_unchanged             INT                      DEFAULT 0            NOT NULL, -- 持平的股票數量
+    new_52_week_high             INT                      DEFAULT 0            NOT NULL, -- 創 52 週新高的股票數量
+    new_52_week_low              INT                      DEFAULT 0            NOT NULL, -- 創 52 週新低的股票數量
     created_at                   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,     -- 記錄創建時間
     updated_at                   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,     -- 記錄最後更新時間
     PRIMARY KEY (date, stock_exchange_market_id)
@@ -33,6 +35,8 @@ COMMENT ON COLUMN daily_stock_price_stats.undervalued IS '股價 <= 便宜價的
 COMMENT ON COLUMN daily_stock_price_stats.fair_valued IS '便宜價 < 股價 <= 合理價的股票數量 股票價格處於低於合理價格的情況';
 COMMENT ON COLUMN daily_stock_price_stats.overvalued IS '合理價 < 股價 <= 昂貴價的股票數量，股票價格高於其估計的"合理"價格但低於"昂貴"價格的情況';
 COMMENT ON COLUMN daily_stock_price_stats.highly_overvalued IS '股價 > 昂貴價的股票數量，股票價格高於其估計的"昂貴"價格';
+COMMENT ON COLUMN daily_stock_price_stats.new_52_week_high IS '當日最高價高於前 52 週（364 天）最高價的股票數量；前 52 週不足 200 個交易日者不計';
+COMMENT ON COLUMN daily_stock_price_stats.new_52_week_low IS '當日最低價低於前 52 週（364 天）最低價的股票數量；前 52 週不足 200 個交易日者不計';
 COMMENT ON COLUMN daily_stock_price_stats.below_5_day_moving_average IS '股價 < 周線的股票數量';
 COMMENT ON COLUMN daily_stock_price_stats.above_5_day_moving_average IS '股價 >= 周線的股票數量';
 COMMENT ON COLUMN daily_stock_price_stats.below_20_day_moving_average IS '股價 < 月線的股票數量';

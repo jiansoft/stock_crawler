@@ -102,6 +102,11 @@ pub(crate) struct MarketBreadth {
     pub(crate) stocks_down: i32,
     /// 平盤家數。
     pub(crate) stocks_unchanged: i32,
+    /// 當日最高價高於前 52 週（364 天）最高價的家數；前 52 週不足 200 個交易日者不計，
+    /// 2026-10-13 前的歷史列由一次性回補產生。
+    pub(crate) new_52_week_high: i32,
+    /// 當日最低價低於前 52 週（364 天）最低價的家數；規則同 `new_52_week_high`。
+    pub(crate) new_52_week_low: i32,
     /// 最後更新時間，UTC ISO 8601。
     pub(crate) updated_at: Option<String>,
 }

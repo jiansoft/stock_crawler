@@ -279,6 +279,10 @@ mod tests {
             history["items"]["$ref"],
             "#/components/schemas/MarketBreadth"
         );
+        let point = &document["components"]["schemas"]["MarketBreadth"]["properties"];
+        for field in ["new_52_week_high", "new_52_week_low"] {
+            assert_eq!(point[field]["type"], "integer", "{field}");
+        }
         let ranking = get_operation(&document, "/api/v1/market/dividend-yield-ranking");
         assert_endpoint_responses(ranking, "DividendYieldRankingResponse", true);
         assert_eq!(query_schema(ranking, "limit")["default"], 20);
