@@ -12,7 +12,6 @@ use crate::{
 pub(crate) mod extension;
 pub mod stock_exchange_market;
 pub(crate) mod stock_index;
-pub mod stock_ownership_details;
 pub(crate) mod stock_word;
 
 #[derive(sqlx::Type, sqlx::FromRow, Debug, Clone)]
