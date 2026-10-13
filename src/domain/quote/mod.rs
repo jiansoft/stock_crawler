@@ -1,5 +1,7 @@
 /// 報價領域之實體定義。
 pub mod entity;
+/// 未來報酬（訊號出現後 5／20／60 個交易日的還原報酬）。
+pub mod forward_return;
 /// 官方本益比與股價淨值比（回補用型別與倉儲介面）。
 pub mod official_ratio;
 /// 同業比較（產業中位數與名次）。
