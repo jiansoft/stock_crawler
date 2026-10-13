@@ -8,8 +8,9 @@ use crate::infra::database;
 /// 每日全市場估值與技術面分布統計。
 ///
 /// 同一天通常會有多筆資料：
-/// - `stock_exchange_market_id = 0`：全部市場合併統計
-/// - 其他 id：各市場分項統計（例如 TWSE、TPEx）
+/// - `stock_exchange_market_id = 0`：上市＋上櫃合併統計（不含興櫃與公開發行，
+///   與 Data API 各排行、選股的 `all` 口徑一致）
+/// - 其他 id：各市場分項統計（例如 TWSE、TPEx、興櫃）
 #[derive(Debug, Serialize, Deserialize, Type, FromRow)]
 pub struct DailyStockPriceStats {
     /// 統計日期。
@@ -66,8 +67,7 @@ impl DailyStockPriceStats {
     /// 此方法會從 `stocks`、`estimate`、`DailyQuotes` 彙整當日數據，
     /// 計算估值分布（便宜/合理/昂貴/昂貴以上）、
     /// 均線相對位置（5/20/60/120/240 日）、漲跌家數與 52 週新高／新低家數，
-    /// 並同時寫入「全部市場」與「分市場」兩種統計列
-    ///（透過 `GROUPING SETS` 產生 `stock_exchange_market_id = 0` 與各市場 id）。
+    /// 並同時寫入「上市＋上櫃合併」（`stock_exchange_market_id = 0`）與各市場的統計列。
     ///
     /// # Errors
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
@@ -156,7 +156,7 @@ market_metrics AS (
     GROUP BY market_id
 ),
 final_set AS (
-    -- 1. 產生全市場總計 (ID = 0)
+    -- 1. 產生上市＋上櫃合併 (ID = 0)；興櫃 (5) 與公開發行等其他市場只有自己的分項列
     SELECT
         0 as stock_exchange_market_id,
         COALESCE(SUM(undervalued), 0)::int as undervalued,
@@ -179,6 +179,7 @@ final_set AS (
         COALESCE(SUM(new_high), 0)::int as new_high,
         COALESCE(SUM(new_low), 0)::int as new_low
     FROM market_metrics
+    WHERE market_id IN (2, 4)
     UNION ALL
     -- 2. 產生各市場分類 (排除 ID 0 以免與總計衝突)
     SELECT
@@ -287,7 +288,7 @@ mod tests {
         sleep(Duration::from_millis(500)).await;
     }
     /// 52 週新高／新低：79979HA 創高、79979HB 創低、79979HC 歷史不足 200 日不計；
-    /// 全市場列與上市列都只有 1 檔新高、1 檔新低。
+    /// 上市列與 all 列都只有 1 檔新高、1 檔新低；興櫃 79979HD 創高只算在興櫃列。
     #[tokio::test]
     #[cfg_attr(
         not(feature = "integration-tests"),
@@ -301,7 +302,7 @@ mod tests {
             return;
         }
         let date = NaiveDate::from_ymd_opt(1991, 6, 28).expect("固定日期合法");
-        let symbols = ["79979HA", "79979HB", "79979HC"];
+        let symbols = ["79979HA", "79979HB", "79979HC", "79979HD"];
         let cleanup = || async {
             for sql in [
                 r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
@@ -317,17 +318,20 @@ mod tests {
         };
         cleanup().await;
 
-        // (代號, 前期天數, 當日最高, 當日最低)；前期每日最高 100、最低 90。
-        for (symbol, prior_days, high, low) in [
-            ("79979HA", 250, 105, 95),
-            ("79979HB", 250, 95, 85),
-            ("79979HC", 50, 200, 150),
+        // (代號, 市場, 前期天數, 當日最高, 當日最低)；前期每日最高 100、最低 90。
+        // 79979HD 是興櫃：只計入自己的分項列，不計入 all（id 0）。
+        for (symbol, market_id, prior_days, high, low) in [
+            ("79979HA", 2, 250, 105, 95),
+            ("79979HB", 2, 250, 95, 85),
+            ("79979HC", 2, 50, 200, 150),
+            ("79979HD", 5, 250, 105, 95),
         ] {
             sqlx::query(
                 r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
-                   VALUES ($1, $1, $1, 2, 1)"#,
+                   VALUES ($1, $1, $1, $2, 1)"#,
             )
             .bind(symbol)
+            .bind(market_id)
             .execute(pool)
             .await
             .expect("種入 stocks");
@@ -363,7 +367,7 @@ mod tests {
         .fetch_all(pool)
         .await
         .expect("讀回統計");
-        assert_eq!(rows, [(0, 1, 1), (2, 1, 1)]);
+        assert_eq!(rows, [(0, 1, 1), (2, 1, 1), (5, 1, 0)]);
 
         cleanup().await;
     }
