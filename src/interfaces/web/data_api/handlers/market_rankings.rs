@@ -67,7 +67,7 @@ pub(crate) async fn dividend_yield_ranking(
     };
     // `$2 = 0` 是 API 內部的 all 哨兵，只展開為固定 `IN (2,4)`；所有排序
     // 欄位均寫死，呼叫端無法提供 SQL 片段或欄位名稱。
-    let rows: Result<Vec<YieldRankRow>, _> = sqlx::query_as(r#"SELECT y.security_code AS stock_symbol, s."Name" AS name, s.stock_exchange_market_id AS market_id, s.stock_industry_id AS industry_id, y.date, q."ClosingPrice" AS closing_price, d."sum" AS dividend, y.yield AS dividend_yield_percent FROM yield_rank y JOIN stocks s ON s.stock_symbol = y.security_code JOIN "DailyQuotes" q ON q."Serial" = y.daily_quotes_serial JOIN dividend d ON d.serial = y.dividend_serial WHERE y.date = $1 AND (($2 = 0 AND s.stock_exchange_market_id IN (2, 4)) OR s.stock_exchange_market_id = $2) AND ($3::int IS NULL OR s.stock_industry_id = $3) ORDER BY y.yield DESC, y.security_code ASC LIMIT $4"#).bind(data_date).bind(market_id).bind(params.industry_id).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
+    let rows: Result<Vec<YieldRankRow>, _> = sqlx::query_as(r#"SELECT y.security_code AS stock_symbol, s."Name" AS name, s.stock_exchange_market_id AS market_id, s.stock_industry_id AS industry_id, y.date, q."ClosingPrice" AS closing_price, d."sum" AS dividend, y.yield AS dividend_yield_percent FROM yield_rank y JOIN stocks s ON s.stock_symbol = y.security_code JOIN "DailyQuotes" q ON q."Serial" = y.daily_quotes_serial JOIN dividend d ON d.serial = y.dividend_serial WHERE y.date = $1 AND (($2 = 0 AND s.stock_exchange_market_id IN (2, 4)) OR ($2 <> 0 AND s.stock_exchange_market_id = $2)) AND ($3::int IS NULL OR s.stock_industry_id = $3) ORDER BY y.yield DESC, y.security_code ASC LIMIT $4"#).bind(data_date).bind(market_id).bind(params.industry_id).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
     match rows {
         Ok(rows) => Json(DividendYieldRankingResponse {
             data_as_of: data_date.to_string(),
@@ -162,7 +162,7 @@ SELECT stock_symbol, "Name" AS name,
        qfii_shares_held, qfii_share_holding_percentage, issued_share
 FROM stocks
 WHERE (($1 = 0 AND stock_exchange_market_id IN (2, 4))
-    OR stock_exchange_market_id = $1)
+    OR ($1 <> 0 AND stock_exchange_market_id = $1))
   AND ($2::int IS NULL OR stock_industry_id = $2)
   AND "SuspendListing" = false
   AND qfii_shares_held <> 0

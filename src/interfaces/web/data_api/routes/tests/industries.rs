@@ -7,8 +7,12 @@ use rust_decimal::Decimal;
 use super::stocks::{get, pool_or_skip};
 
 const INDUSTRY: i32 = 97_979;
-/// `(代號, 市場, 發行股數)`。
-const STOCKS: [(&str, i32, i64); 2] = [("79979IA", 2, 1_000), ("79979IB", 4, 2_000)];
+/// `(代號, 市場, 發行股數)`；79979IZ 市場別 0（如未歸類的 ETN），任何市場都不應納入。
+const STOCKS: [(&str, i32, i64); 3] = [
+    ("79979IA", 2, 1_000),
+    ("79979IB", 4, 2_000),
+    ("79979IZ", 0, 0),
+];
 
 /// 固定的歷史交易日：區間起點、中間一天、資料日。
 fn days() -> [NaiveDate; 3] {
@@ -91,8 +95,9 @@ async fn industry_performance_endpoint_db_semantics() {
     insert_quote(pool, middle, "79979IA", 105, 5, 1_000).await;
     insert_quote(pool, last, "79979IA", 110, 2, 3_000).await;
     insert_quote(pool, last, "79979IB", 45, -1, 1_000).await;
+    insert_quote(pool, last, "79979IZ", 10, 9, 1_000).await;
 
-    // 1989-06-03 是週六，回推到 06-02；單日用交易所漲跌幅。
+    // 1989-06-03 是週六，回推到 06-02；單日用交易所漲跌幅；市場別 0 的 79979IZ 不納入。
     let (status, json) = get("/api/v1/market/industries?date=1989-06-03").await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["data_as_of"], "1989-06-02");
