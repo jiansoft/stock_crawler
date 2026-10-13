@@ -11,7 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{Datelike, Local, Months, NaiveDate};
-use rust_decimal::{Decimal, prelude::ToPrimitive};
+use rust_decimal::{Decimal, RoundingStrategy, prelude::ToPrimitive};
 
 use super::{database_error, error_response};
 use crate::domain::quote::peer::{self, Better};
@@ -209,8 +209,8 @@ fn build_response(
                 better: better.as_str().to_owned(),
                 target: target_value
                     .filter(|value| !positive_only || *value > Decimal::ZERO)
-                    .and_then(|value| value.to_f64()),
-                industry_median: standing.median.and_then(|value| value.to_f64()),
+                    .and_then(round2),
+                industry_median: standing.median.and_then(round2),
                 rank: standing.rank,
                 samples: standing.samples,
             }
@@ -238,22 +238,29 @@ fn build_response(
     }
 }
 
-/// 資料庫列轉成 API 契約；本益比、股價淨值比 ≤ 0 視為沒有值。
+/// 資料庫列轉成 API 契約；本益比、股價淨值比 ≤ 0 視為沒有值，數值一律四捨五入到小數 2 位。
 fn to_peer_stock(row: PeerRow) -> PeerStock {
-    let positive = |value: Decimal| (value > Decimal::ZERO).then(|| value.to_f64()).flatten();
+    let positive = |value: Decimal| (value > Decimal::ZERO).then(|| round2(value)).flatten();
     PeerStock {
-        closing_price: row.closing_price.to_f64(),
-        market_cap: row.market_cap.and_then(|value| value.to_f64()),
+        closing_price: round2(row.closing_price),
+        market_cap: row.market_cap.and_then(round2),
         price_earning_ratio: positive(row.price_earning_ratio),
         price_to_book_ratio: positive(row.price_to_book_ratio),
-        dividend_yield_percent: row.dividend_yield_percent.and_then(|value| value.to_f64()),
+        dividend_yield_percent: row.dividend_yield_percent.and_then(round2),
         f_score: row.f_score,
-        gross_margin_percent: row.gross_margin_percent.and_then(|value| value.to_f64()),
-        revenue_yoy_percent: row.revenue_yoy_percent.and_then(|value| value.to_f64()),
+        gross_margin_percent: row.gross_margin_percent.and_then(round2),
+        revenue_yoy_percent: row.revenue_yoy_percent.and_then(round2),
         stock_symbol: row.stock_symbol,
         name: row.name,
         market_id: row.market_id,
     }
+}
+
+/// 四捨五入到小數 2 位的 JSON number（資料庫欄位多為 4 位小數，例如淨值比 10.2399）。
+fn round2(value: Decimal) -> Option<f64> {
+    value
+        .round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
+        .to_f64()
 }
 
 #[cfg(test)]
@@ -290,6 +297,39 @@ mod tests {
             .iter()
             .find(|metric| metric.metric == name)
             .expect("應有此指標")
+    }
+
+    /// 個股欄位、指標目標值與中位數都四捨五入到小數 2 位。
+    #[test]
+    fn values_are_rounded_to_two_decimals() {
+        let mut target = row("2330", Some(dec!(65868219970180.0001)), dec!(29.444), None);
+        target.price_to_book_ratio = dec!(10.2399);
+        target.dividend_yield_percent = Some(dec!(0.2756));
+        target.gross_margin_percent = Some(dec!(67.7207));
+        target.revenue_yoy_percent = Some(dec!(54.645));
+        let mut other = row("2454", Some(dec!(100)), dec!(76.3849), None);
+        other.price_to_book_ratio = dec!(17.4023);
+
+        let response = build_response(
+            "2330".to_owned(),
+            24,
+            "半導體業".to_owned(),
+            20,
+            vec![target, other],
+        );
+        let stock = response.target.as_ref().expect("有目標股");
+        assert_eq!(stock.market_cap, Some(65_868_219_970_180.0));
+        assert_eq!(stock.price_earning_ratio, Some(29.44));
+        assert_eq!(stock.price_to_book_ratio, Some(10.24));
+        assert_eq!(stock.dividend_yield_percent, Some(0.28));
+        assert_eq!(stock.gross_margin_percent, Some(67.72));
+        assert_eq!(
+            stock.revenue_yoy_percent,
+            Some(54.65),
+            "四捨五入：54.645 → 54.65"
+        );
+        let pb = metric(&response, "price_to_book_ratio");
+        assert_eq!((pb.target, pb.industry_median), (Some(10.24), Some(13.82)));
     }
 
     /// 中位數與名次用全部同業；peers 依市值由大到小只列前 limit 檔，沒有市值的排最後。
