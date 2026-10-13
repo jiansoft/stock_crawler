@@ -15,9 +15,9 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 use super::{
-    database_error, decimal_to_f64, error_response, market_id_for_stocks, parse_optional_date,
+    database_error, decimal_to_f64, error_response, industry_error, market_id_for_stocks,
+    parse_optional_date, signal_filter_error, signal_indicator_order, signal_kind_order,
 };
-use crate::domain::quote::technical::{SIGNAL_INDICATORS, SignalKind};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, MarketSignalsParams, MarketSignalsResponse, SignalCount, SignalStock,
@@ -87,50 +87,20 @@ pub(crate) async fn market_signals(Query(params): Query<MarketSignalsParams>) ->
             "market 必須為 all、twse 或 tpex",
         );
     };
-    if params
-        .kind
-        .as_deref()
-        .is_some_and(|kind| SignalKind::parse(kind).is_none())
+    if let Some(response) = signal_filter_error(params.kind.as_deref(), params.indicator.as_deref())
     {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "kind 必須為 golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high 或 new_low",
-        );
-    }
-    if params
-        .indicator
-        .as_deref()
-        .is_some_and(|indicator| !SIGNAL_INDICATORS.contains(&indicator))
-    {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "indicator 必須為 ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14 或 52_week",
-        );
+        return response;
     }
     let limit = params.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "limit 必須介於 1 至 200");
     }
 
-    let pool = database::get_connection();
-    if let Some(industry) = params.industry.as_deref() {
-        let found: Result<Option<(i32,)>, _> =
-            sqlx::query_as("SELECT stock_industry_id FROM stock_industry WHERE name = $1")
-                .bind(industry)
-                .fetch_optional(pool)
-                .await;
-        match found {
-            Ok(Some(_)) => {}
-            Ok(None) => {
-                return error_response(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "industry 必須為產業名稱，例如「半導體業」",
-                );
-            }
-            Err(error) => return database_error(error),
-        }
+    if let Some(response) = industry_error(params.industry.as_deref()).await {
+        return response;
     }
 
+    let pool = database::get_connection();
     let data_date: Option<NaiveDate> = match sqlx::query_scalar(DATE_SQL)
         .bind(date)
         .fetch_one(pool)
@@ -173,7 +143,10 @@ fn build_response(
 ) -> MarketSignalsResponse {
     let mut counts: BTreeMap<(usize, usize), (String, String, usize)> = BTreeMap::new();
     for row in &rows {
-        let key = (indicator_order(&row.indicator), kind_order(&row.kind));
+        let key = (
+            signal_indicator_order(&row.indicator),
+            signal_kind_order(&row.kind),
+        );
         counts
             .entry(key)
             .or_insert_with(|| (row.indicator.clone(), row.kind.clone(), 0))
@@ -203,8 +176,10 @@ fn build_response(
             .unwrap_or_default()
             .cmp(&a.trade_value.unwrap_or_default())
             .then_with(|| a.stock_symbol.cmp(&b.stock_symbol))
-            .then_with(|| indicator_order(&a.indicator).cmp(&indicator_order(&b.indicator)))
-            .then_with(|| kind_order(&a.kind).cmp(&kind_order(&b.kind)))
+            .then_with(|| {
+                signal_indicator_order(&a.indicator).cmp(&signal_indicator_order(&b.indicator))
+            })
+            .then_with(|| signal_kind_order(&a.kind).cmp(&signal_kind_order(&b.kind)))
     });
     let total = matched.len();
     let items = matched.into_iter().take(limit).map(to_item).collect();
@@ -220,19 +195,6 @@ fn build_response(
         summary,
         items,
     }
-}
-
-/// 訊號來源在對外說明中的順序；未知來源排最後。
-fn indicator_order(indicator: &str) -> usize {
-    SIGNAL_INDICATORS
-        .iter()
-        .position(|known| *known == indicator)
-        .unwrap_or(usize::MAX)
-}
-
-/// 訊號種類在對外說明中的順序；未知種類排最後。
-fn kind_order(kind: &str) -> usize {
-    SignalKind::parse(kind).map_or(usize::MAX, |kind| kind as usize)
 }
 
 /// 轉成對外的訊號股票。
@@ -362,9 +324,9 @@ mod tests {
     /// 未知的來源或種類（資料表手動寫入的舊值）排在最後，不會讓排序失敗。
     #[test]
     fn unknown_names_sort_last() {
-        assert_eq!(indicator_order("unknown"), usize::MAX);
-        assert_eq!(kind_order("unknown"), usize::MAX);
-        assert_eq!(indicator_order("ma5_ma20"), 0);
-        assert_eq!(kind_order("new_low"), 7);
+        assert_eq!(signal_indicator_order("unknown"), usize::MAX);
+        assert_eq!(signal_kind_order("unknown"), usize::MAX);
+        assert_eq!(signal_indicator_order("ma5_ma20"), 0);
+        assert_eq!(signal_kind_order("new_low"), 7);
     }
 }

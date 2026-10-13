@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS daily_technical_signal
     PRIMARY KEY (date, stock_symbol, indicator, kind)
 );
 
+-- 個股訊號歷史（/stocks/{symbol}/signals）依代號查一段期間；主鍵以日期為首，另建代號索引。
+CREATE INDEX IF NOT EXISTS daily_technical_signal_symbol_date_idx
+    ON daily_technical_signal (stock_symbol, date DESC);
+
 COMMENT ON TABLE daily_technical_signal IS '每日技術訊號（收盤後全市場預先計算；價格未還原除權息）';
 COMMENT ON COLUMN daily_technical_signal.date IS '交易日';
 COMMENT ON COLUMN daily_technical_signal.stock_symbol IS '股票代號';
