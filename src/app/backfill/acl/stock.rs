@@ -1,3 +1,4 @@
+use crate::core::declare::Industry;
 use crate::infra::cache::SHARE;
 use crate::infra::crawler::share::EtfInfo;
 use crate::infra::crawler::twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber;
@@ -35,7 +36,18 @@ impl IsinAclMapper {
     pub fn from_isin(
         dto: &InternationalSecuritiesIdentificationNumber,
     ) -> Option<RegisterStockCommand> {
-        let industry_id = SHARE.get_industry_id(&dto.industry).unwrap_or(0);
+        let industry_id = resolve_industry(
+            SHARE.get_industry_id(&dto.industry).unwrap_or(0),
+            &dto.stock_symbol,
+            |parent| {
+                SHARE
+                    .stocks
+                    .read()
+                    .ok()?
+                    .get(parent)
+                    .map(|stock| stock.industry_id())
+            },
+        );
         // 1. 過濾非法、未分類產業資料 (industry_id == 0) 或 ETF (9001) / ETN (9002)
         if industry_id == 0 || industry_id == 9001 || industry_id == 9002 {
             return None;
@@ -54,6 +66,33 @@ impl IsinAclMapper {
             industry_id,
         })
     }
+}
+
+/// 特別股代號（4 碼數字後接大寫英文字母，例如 1101B、8349A、2887Z1）對應的普通股代號。
+fn preferred_parent(symbol: &str) -> Option<&str> {
+    let (base, suffix) = symbol.split_at_checked(4)?;
+    let is_preferred = base.bytes().all(|byte| byte.is_ascii_digit())
+        && suffix
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_uppercase());
+    is_preferred.then_some(base)
+}
+
+/// ISIN 沒有產業別而落在「未分類」的特別股，沿用普通股的產業；查不到或普通股也未分類時維持原值。
+fn resolve_industry(
+    industry_id: i32,
+    symbol: &str,
+    parent_industry: impl Fn(&str) -> Option<i32>,
+) -> i32 {
+    let uncategorized = Industry::Uncategorized.serial();
+    if industry_id != uncategorized {
+        return industry_id;
+    }
+    preferred_parent(symbol)
+        .and_then(parent_industry)
+        .filter(|id| *id != 0 && *id != uncategorized)
+        .unwrap_or(industry_id)
 }
 
 /// 下市公司爬蟲資料防腐層轉譯器。
@@ -139,6 +178,57 @@ mod tests {
 
         let cmd = IsinAclMapper::from_isin(&isin);
         assert!(cmd.is_none());
+    }
+
+    /// 特別股代號辨識：4 碼數字後接大寫字母；普通股、ETF、太短的代號都不是。
+    #[test]
+    fn preferred_parent_detects_preferred_shares() {
+        assert_eq!(preferred_parent("1101B"), Some("1101"));
+        assert_eq!(preferred_parent("2887Z1"), Some("2887"));
+        for symbol in [
+            "2330",
+            "00878",
+            "0050",
+            "910322",
+            "11A",
+            "AB12C",
+            "台泥乙特",
+        ] {
+            assert_eq!(preferred_parent(symbol), None, "{symbol}");
+        }
+    }
+
+    /// 未分類的特別股沿用普通股產業；其他產業與查不到普通股時維持原值。
+    #[test]
+    fn resolve_industry_uses_parent_for_uncategorized_preferred() {
+        let parent = |symbol: &str| match symbol {
+            "1101" => Some(1),
+            "9999" => Some(99),
+            _ => None,
+        };
+        assert_eq!(resolve_industry(99, "1101B", parent), 1);
+        assert_eq!(resolve_industry(24, "1101B", parent), 24);
+        assert_eq!(resolve_industry(99, "6592B", parent), 99);
+        assert_eq!(resolve_industry(99, "9999A", parent), 99);
+        assert_eq!(resolve_industry(99, "2330", parent), 99);
+    }
+
+    /// TDR 的「存託憑證」產業可對應到產業代碼 39；快取沒有普通股的特別股維持未分類。
+    #[test]
+    fn test_to_registration_command_maps_tdr_and_preferred() {
+        let isin = |symbol: &str, industry: &str| InternationalSecuritiesIdentificationNumber {
+            stock_symbol: symbol.to_string(),
+            name: symbol.to_string(),
+            isin_code: String::new(),
+            listing_date: String::new(),
+            industry: industry.to_string(),
+            cfi_code: String::new(),
+            market: crate::core::declare::StockExchangeMarket::Listed,
+        };
+        let tdr = IsinAclMapper::from_isin(&isin("9103", "存託憑證")).expect("TDR 應轉換");
+        assert_eq!(tdr.industry_id, 39);
+        let preferred = IsinAclMapper::from_isin(&isin("79979B", "未分類")).expect("特別股應轉換");
+        assert_eq!(preferred.industry_id, 99);
     }
 
     /// 公開發行不在市場別對照表內，必須回傳 None 而不是 panic。

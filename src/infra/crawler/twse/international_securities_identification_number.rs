@@ -8,7 +8,10 @@ use crate::{
     infra::crawler::twse,
 };
 
-const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", "臺灣存託憑證(TDR)"];
+const REQUIRED_CATEGORIES: [&str; 4] = ["股票", "特別股", "普通股", TDR_CATEGORY];
+
+/// 臺灣存託憑證的類別標頭；這類證券的產業別欄是空的，改用「存託憑證」產業。
+const TDR_CATEGORY: &str = "臺灣存託憑證(TDR)";
 
 /// twse 國際證券識別碼
 #[derive(Debug, Clone)]
@@ -124,10 +127,12 @@ fn parse_isin_html(
     };
 
     let mut is_required_category = false;
+    let mut is_tdr = false;
     for node in document.select(&selector).skip(1) {
         let tds: Vec<&str> = node.text().map(str::trim).collect();
         if tds.len() == 2 {
             is_required_category = REQUIRED_CATEGORIES.contains(&tds[0].trim());
+            is_tdr = tds[0].trim() == TDR_CATEGORY;
             continue;
         }
 
@@ -140,10 +145,13 @@ fn parse_isin_html(
             continue;
         }
 
+        // 產業別欄空白時（TDR、特別股）只會有 5 欄；TDR 歸入「存託憑證」，其餘為「未分類」
+        // （特別股在 ACL 轉換時改用普通股的產業）。
+        let missing_industry = || if is_tdr { "存託憑證" } else { "未分類" }.to_string();
         let (industry, cfi_code) = match tds.len() {
-            5 => ("未分類".to_string(), tds[4].to_owned()),
+            5 => (missing_industry(), tds[4].to_owned()),
             6 => (tds[4].to_owned(), tds[5].to_owned()),
-            _ => ("未分類".to_string(), String::new()),
+            _ => (missing_industry(), String::new()),
         };
 
         result.push(InternationalSecuritiesIdentificationNumber {
@@ -173,6 +181,8 @@ mod tests {
 <tr><td>2317　鴻海</td><td>TW0002317006</td><td>1991/06/11</td><td>上市</td><td>電腦及週邊設備業</td><td>ESVUFR</td></tr>
 <tr><td>特別股</td><td>類別</td></tr>
 <tr><td>2330A　台積電甲特</td><td>TW0002330016</td><td>2022/01/01</td><td>上市</td><td>ESVPFR</td></tr>
+<tr><td>臺灣存託憑證(TDR)</td><td>類別</td></tr>
+<tr><td>9103　美德醫療-DR</td><td>TW0009103002</td><td>2002/12/13</td><td>上市</td><td>EDSDDR</td></tr>
 </tbody></table>
 </body></html>"#;
 
@@ -211,8 +221,8 @@ mod tests {
     #[test]
     fn test_parse_isin_html_basic() {
         let result = parse_isin_html(FIXTURE_HTML, StockExchangeMarket::Listed);
-        // 2 股票 + 1 特別股（5 欄，industry = 未分類）
-        assert_eq!(result.len(), 3);
+        // 2 股票 + 1 特別股（5 欄，industry = 未分類）+ 1 TDR（5 欄，industry = 存託憑證）
+        assert_eq!(result.len(), 4);
 
         let tsmc = &result[0];
         assert_eq!(tsmc.stock_symbol, "2330");
@@ -227,6 +237,11 @@ mod tests {
         assert_eq!(preferred.stock_symbol, "2330A");
         assert_eq!(preferred.industry, "未分類");
         assert_eq!(preferred.cfi_code, "ESVPFR");
+
+        let tdr = &result[3];
+        assert_eq!(tdr.stock_symbol, "9103");
+        assert_eq!(tdr.industry, "存託憑證");
+        assert_eq!(tdr.cfi_code, "EDSDDR");
     }
 
     #[test]
