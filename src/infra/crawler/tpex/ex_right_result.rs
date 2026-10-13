@@ -5,6 +5,7 @@
 //!
 //! 與證交所不同，這裡直接給「現金股利」與「每仟股無償配股」，可以換算出現金與股票股利。
 //! 「除權」但無償配股為 0 的是現金增資，不是股利事件，直接丟棄。
+//! [`visit_references`] 另外取每列的「開始交易基準價」，用來重算除權息日的漲跌。
 
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
@@ -15,6 +16,7 @@ use crate::{
     core::{
         declare::StockExchangeMarket, util::datetime::parse_taiwan_date, util::http, util::text,
     },
+    domain::quote::ex_right::ExRightReference,
     infra::crawler::{
         share::{ExDividendAnnouncement, parse_ex_dividend_kind},
         tpex,
@@ -40,6 +42,7 @@ const COL_DATE: usize = 0;
 const COL_CODE: usize = 1;
 const COL_NAME: usize = 2;
 const COL_KIND: usize = 8;
+const COL_OPEN_BASE: usize = 11;
 const COL_CASH: usize = 13;
 const COL_STOCK_PER_THOUSAND: usize = 14;
 /// 每仟股配股換算成配股率（股/股）。
@@ -51,16 +54,58 @@ const THOUSAND: Decimal = Decimal::from_parts(1000, 0, 0, false, 0);
 ///
 /// HTTP 請求或 JSON 反序列化失敗、或回應沒有資料表時回傳錯誤。
 pub async fn visit(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExDividendAnnouncement>> {
+    parse_results(&fetch(start, end).await?)
+}
+
+/// 取得 `start`～`end`（含）之間上櫃證券除權息當天的開始交易基準價（含現金增資除權）。
+///
+/// # 錯誤
+///
+/// 與 [`visit`] 相同。
+pub async fn visit_references(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExRightReference>> {
+    parse_references(&fetch(start, end).await?)
+}
+
+async fn fetch(start: NaiveDate, end: NaiveDate) -> Result<ExDailyQResponse> {
     let url = format!(
         "https://{}/www/zh-tw/bulletin/exDailyQ?startDate={}&endDate={}&response=json",
         tpex::HOST,
         start.format("%Y/%m/%d"),
         end.format("%Y/%m/%d")
     );
-    let response = http::get_json::<ExDailyQResponse>(&url)
+    http::get_json::<ExDailyQResponse>(&url)
         .await
-        .with_context(|| format!("Failed to fetch TPEx exDailyQ for {start}~{end}"))?;
-    parse_results(&response)
+        .with_context(|| format!("Failed to fetch TPEx exDailyQ for {start}~{end}"))
+}
+
+/// 將回應轉成各股除權息當天的開始交易基準價；日期、代號或基準價無法解析的列略過。
+///
+/// # 錯誤
+///
+/// 回應沒有資料表時回傳錯誤。
+pub fn parse_references(response: &ExDailyQResponse) -> Result<Vec<ExRightReference>> {
+    let table = response
+        .tables
+        .as_ref()
+        .and_then(|tables| tables.first())
+        .context("TPEx exDailyQ 回應沒有資料表")?;
+    let rows = table.data.as_deref().unwrap_or_default();
+    Ok(rows
+        .iter()
+        .filter(|row| row.len() > COL_OPEN_BASE)
+        .filter_map(|row| {
+            let date = parse_taiwan_date(row[COL_DATE].trim())?;
+            let stock_symbol = row[COL_CODE].trim();
+            let reference_price = number(&row[COL_OPEN_BASE])?;
+            (!stock_symbol.is_empty() && reference_price > Decimal::ZERO).then(|| {
+                ExRightReference {
+                    stock_symbol: stock_symbol.to_owned(),
+                    date,
+                    reference_price,
+                }
+            })
+        })
+        .collect())
 }
 
 /// 將回應轉成除權息事件；單一資料列格式不符只略過該列。
@@ -113,6 +158,38 @@ mod tests {
     fn fixture() -> ExDailyQResponse {
         serde_json::from_str(include_str!("testdata/ex_daily_q_202307_sample.json"))
             .expect("fixture 應為合法 JSON")
+    }
+
+    /// 每列取開始交易基準價（含現金增資除權），格式不符的列略過；沒有資料表回錯誤。
+    #[test]
+    fn parse_references_reads_open_base_of_every_row() {
+        let references = parse_references(&fixture()).expect("解析成功");
+        let rows: Vec<(&str, NaiveDate, Decimal)> = references
+            .iter()
+            .map(|r| (r.stock_symbol.as_str(), r.date, r.reference_price))
+            .collect();
+        let day = |d| NaiveDate::from_ymd_opt(2023, 7, d).expect("有效日期");
+        assert_eq!(
+            rows,
+            [
+                ("4175", day(20), dec!(115.00)),
+                ("1788", day(3), dec!(140.00)),
+                ("3324", day(3), dec!(290.50)),
+                ("6804", day(7), dec!(75.60)),
+            ]
+        );
+
+        let mut broken = fixture();
+        let data = broken.tables.as_mut().expect("有資料表")[0]
+            .data
+            .as_mut()
+            .expect("有資料");
+        data[0][COL_OPEN_BASE] = "0.00".to_owned();
+        data[1][COL_DATE] = "日期".to_owned();
+        data[2].truncate(COL_OPEN_BASE);
+        assert_eq!(parse_references(&broken).expect("解析成功").len(), 1);
+
+        assert!(parse_references(&ExDailyQResponse { tables: None }).is_err());
     }
 
     #[test]
