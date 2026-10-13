@@ -139,9 +139,8 @@ fn telegram_allowed_list_round_trips() {
     let app: App = serde_json::from_value(config).expect("含允許名單的設定應可解析");
     assert_eq!(app.bot.telegram.allowed.get(&123), Some(&"QQ".to_string()));
 
-    let restored: App =
-        serde_json::from_str(&serde_json::to_string(&app).expect("序列化應成功"))
-            .expect("反序列化應成功");
+    let restored: App = serde_json::from_str(&serde_json::to_string(&app).expect("序列化應成功"))
+        .expect("反序列化應成功");
     assert_eq!(restored.bot.telegram.allowed, app.bot.telegram.allowed);
     assert_eq!(restored.bot.telegram.token, "t");
 }

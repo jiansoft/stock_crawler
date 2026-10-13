@@ -90,11 +90,7 @@ fn test_set_stock_snapshot_price_with_source_updates_source_site() {
     snapshots.insert("2330".to_string(), snapshot);
     share.set_stock_snapshots(snapshots);
 
-    share.set_stock_snapshot_price_with_source(
-        "2330".to_string(),
-        Decimal::new(1000, 0),
-        "Fugle",
-    );
+    share.set_stock_snapshot_price_with_source("2330".to_string(), Decimal::new(1000, 0), "Fugle");
 
     let updated = share.get_stock_snapshot("2330").unwrap();
     assert_eq!(updated.price, Decimal::new(1000, 0));
@@ -320,11 +316,7 @@ fn set_stock_snapshot_price_rejects_outliers_and_accepts_valid_updates() {
         Decimal::new(100, 0)
     );
 
-    share.set_stock_snapshot_price_with_source(
-        "2330".to_string(),
-        Decimal::new(105, 0),
-        "Yahoo",
-    );
+    share.set_stock_snapshot_price_with_source("2330".to_string(), Decimal::new(105, 0), "Yahoo");
     let updated = share.get_stock_snapshot("2330").unwrap();
     assert_eq!(updated.price, Decimal::new(105, 0));
     assert_eq!(updated.source_site, "Yahoo");
