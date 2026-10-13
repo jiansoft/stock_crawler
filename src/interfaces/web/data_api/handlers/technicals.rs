@@ -1,6 +1,6 @@
 //! `/stocks/{symbol}/technicals` handler：均線、乖離率、RSI、KD、MACD 與技術訊號。
 //!
-//! 日線來自 `DailyQuotes`（只讀覆蓋索引），計算規則在
+//! 日線來自 `DailyQuotes`（只讀覆蓋索引），依股利與公司行動事件還原權值後計算，規則在
 //! [`crate::domain::quote::technical`]。為讓年線與 EMA／KD 的起始值穩定，
 //! 會比請求天數多讀 [`technical::WARMUP_BARS`] 個交易日。
 
@@ -12,7 +12,9 @@ use axum::{
 };
 
 use super::{ensure_stock_exists, error_response, parse_optional_date, repository_error};
-use crate::domain::quote::technical::{self, IndicatorPoint, PriceBar, PriceBarRepository};
+use crate::domain::quote::technical::{
+    self, IndicatorPoint, PriceAdjustment, PriceBar, PriceBarRepository,
+};
 use crate::infra::database::repository::quote::PgQuoteRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, TechnicalIndicatorsParams, TechnicalIndicatorsResponse, TechnicalPoint,
@@ -21,7 +23,8 @@ use crate::interfaces::web::data_api::dto::{
 
 /// 查詢單一股票截止日之前最近幾個交易日的技術指標與最新一日的訊號。
 ///
-/// 價格未還原除權息；樣本不足的指標為 `null`（例如上市未滿 240 個交易日沒有年線）。
+/// 價格已還原權值（最新一日為實際價格，除權息、減資、分割之前的價格依參考價調整）；
+/// 樣本不足的指標為 `null`（例如上市未滿 240 個交易日沒有年線）。
 ///
 /// # Errors
 ///
@@ -44,20 +47,32 @@ pub(crate) async fn stock_technicals(
         return response;
     }
 
+    let repo = PgQuoteRepository::new();
     let limit = i64::from(days) + technical::WARMUP_BARS as i64;
-    let bars = match PgQuoteRepository::new()
-        .fetch_price_bars(&symbol, date, limit)
-        .await
-    {
+    let bars = match repo.fetch_price_bars(&symbol, date, limit).await {
         Ok(bars) => bars,
         Err(error) => return repository_error(error),
     };
+    let adjustments = match repo
+        .fetch_price_adjustments(std::slice::from_ref(&symbol))
+        .await
+    {
+        Ok(mut map) => map.remove(&symbol).unwrap_or_default(),
+        Err(error) => return repository_error(error),
+    };
 
-    Json(build_response(symbol, days, &bars)).into_response()
+    Json(build_response(symbol, days, &bars, &adjustments)).into_response()
 }
 
-/// 由舊到新的日線計算指標，只回傳最後 `days` 筆與最新一日的訊號（含 52 週新高新低）。
-fn build_response(symbol: String, days: u8, bars: &[PriceBar]) -> TechnicalIndicatorsResponse {
+/// 由舊到新的日線還原權值後計算指標，只回傳最後 `days` 筆與最新一日的訊號（含 52 週新高新低）。
+fn build_response(
+    symbol: String,
+    days: u8,
+    bars: &[PriceBar],
+    adjustments: &[PriceAdjustment],
+) -> TechnicalIndicatorsResponse {
+    let bars = technical::adjust_bars(bars, adjustments);
+    let bars = bars.as_slice();
     let points = technical::compute(bars);
     let signals = match points.split_last() {
         Some((last, rest)) => technical::signals(rest.last(), last)
@@ -77,7 +92,7 @@ fn build_response(symbol: String, days: u8, bars: &[PriceBar]) -> TechnicalIndic
         points: points[start..].iter().map(to_point).collect(),
         stock_symbol: symbol,
         days,
-        adjusted: false,
+        adjusted: true,
         signals,
     }
 }
@@ -139,11 +154,11 @@ mod tests {
     /// 只回傳最後 days 筆，資料日為最新一筆；持續上漲時 K 值進入超買。
     #[test]
     fn build_response_keeps_last_days_and_latest_signals() {
-        let response = build_response("2330".to_owned(), 3, &bars(30));
+        let response = build_response("2330".to_owned(), 3, &bars(30), &[]);
         assert_eq!(response.points.len(), 3);
         assert_eq!(response.data_as_of.as_deref(), Some("2026-01-30"));
         assert_eq!(response.points[0].date, "2026-01-28");
-        assert!(!response.adjusted);
+        assert!(response.adjusted);
         let last = response.points.last().expect("有最新一筆");
         assert_eq!(last.close, 129.0);
         assert_eq!(last.ma5, Some(127.0));
@@ -162,7 +177,7 @@ mod tests {
     /// 持續上漲滿 200 個交易日後，最新一日的最高價也是 52 週新高。
     #[test]
     fn build_response_includes_fifty_two_week_signals() {
-        let response = build_response("2330".to_owned(), 1, &bars(250));
+        let response = build_response("2330".to_owned(), 1, &bars(250), &[]);
         assert!(
             response
                 .signals
@@ -173,14 +188,33 @@ mod tests {
         );
     }
 
+    /// 除權息事件之前的價格依參考價還原，最新一日維持實際價格。
+    #[test]
+    fn build_response_adjusts_prices_before_ex_dividend() {
+        let raw = bars(30);
+        let ex_date = raw[28].date;
+        let dividend = PriceAdjustment {
+            date: ex_date,
+            cash_dividend: 12.7,
+            stock_dividend: 0.0,
+            share_ratio: 1.0,
+        };
+        let response = build_response("2330".to_owned(), 3, &raw, &[dividend]);
+        let closes: Vec<f64> = response.points.iter().map(|point| point.close).collect();
+        // 前收 127、除息 12.7 → 因子 0.9：127 → 114.3；除息日 128 與最新一日 129 不變。
+        assert_eq!(closes, [114.3, 128.0, 129.0]);
+    }
+
     /// 日線少於 days 時全部回傳；沒有日線時資料日為 null、沒有訊號。
     #[test]
     fn build_response_handles_short_and_empty_history() {
         assert_eq!(
-            build_response("2330".to_owned(), 20, &bars(2)).points.len(),
+            build_response("2330".to_owned(), 20, &bars(2), &[])
+                .points
+                .len(),
             2
         );
-        let empty = build_response("2330".to_owned(), 20, &[]);
+        let empty = build_response("2330".to_owned(), 20, &[], &[]);
         assert!(empty.data_as_of.is_none());
         assert!(empty.points.is_empty() && empty.signals.is_empty());
     }
