@@ -110,6 +110,52 @@ LEFT JOIN "DailyQuotes" dq
 WHERE s.stock_exchange_market_id IN (2, 4)
 "#;
 
+/// 各股票截至 `$1` 的外資、投信連續買賣超天數（回看到 `$2`）。
+///
+/// 與 [`FLOW_SQL`] 同一算法，只算兩個法人的連續天數，供選股條件使用；資料日沒有買賣為 0。
+const STREAKS_SQL: &str = r#"
+WITH net AS (
+    SELECT stock_symbol, "date", foreign_net, trust_net
+    FROM chip_daily
+    WHERE "date" BETWEEN $2 AND $1
+),
+latest AS (
+    SELECT stock_symbol,
+           COALESCE(SIGN(foreign_net)::int, 0) AS foreign_sign,
+           COALESCE(SIGN(trust_net)::int, 0) AS trust_sign
+    FROM net
+    WHERE "date" = $1
+),
+breaks AS (
+    SELECT l.stock_symbol, l.foreign_sign, l.trust_sign,
+           COALESCE(MAX(n."date") FILTER (
+               WHERE n.foreign_net IS NULL OR SIGN(n.foreign_net)::int <> l.foreign_sign
+           ), '-infinity'::date) AS foreign_break,
+           COALESCE(MAX(n."date") FILTER (
+               WHERE n.trust_net IS NULL OR SIGN(n.trust_net)::int <> l.trust_sign
+           ), '-infinity'::date) AS trust_break
+    FROM latest l
+    JOIN net n ON n.stock_symbol = l.stock_symbol
+    GROUP BY l.stock_symbol, l.foreign_sign, l.trust_sign
+)
+SELECT b.stock_symbol,
+       (b.foreign_sign * COUNT(*) FILTER (WHERE n."date" > b.foreign_break))::smallint
+           AS foreign_streak,
+       (b.trust_sign * COUNT(*) FILTER (WHERE n."date" > b.trust_break))::smallint
+           AS trust_streak
+FROM breaks b
+JOIN net n ON n.stock_symbol = b.stock_symbol
+GROUP BY b.stock_symbol, b.foreign_sign, b.trust_sign
+"#;
+
+/// [`STREAKS_SQL`] 的一列：正數為連續買超、負數為連續賣超的天數。
+#[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
+pub(super) struct StreakRow {
+    pub(super) stock_symbol: String,
+    pub(super) foreign_streak: i16,
+    pub(super) trust_streak: i16,
+}
+
 /// [`FLOW_SQL`] 的一列：一檔股票在期間內的法人淨買賣。
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
 pub(super) struct FlowRow {
@@ -150,6 +196,16 @@ fn flow_period(dates: &[NaiveDate], days: usize) -> Option<(FlowPeriod, NaiveDat
     ))
 }
 
+/// `until`（含）之前最近 [`STREAK_WINDOW`] 個有籌碼資料的交易日，由新到舊。
+async fn chip_dates(until: NaiveDate) -> Result<Vec<NaiveDate>, Box<Response>> {
+    sqlx::query_scalar(DATES_SQL)
+        .bind(until)
+        .bind(STREAK_WINDOW as i64)
+        .fetch_all(database::get_connection())
+        .await
+        .map_err(|error| Box::new(database_error(error)))
+}
+
 /// 載入 `until`（含）之前最近 `days` 個籌碼交易日、法人別 `investor` 的全體上市櫃淨買賣。
 ///
 /// 沒有任何籌碼資料回 `Ok(None)`；查詢失敗時回已組好的安全 500 回應，呼叫端直接回傳即可。
@@ -158,12 +214,7 @@ pub(super) async fn load_flows(
     days: usize,
     investor: &str,
 ) -> Result<Option<(FlowPeriod, Vec<FlowRow>)>, Box<Response>> {
-    let dates: Vec<NaiveDate> = sqlx::query_scalar(DATES_SQL)
-        .bind(until)
-        .bind(STREAK_WINDOW as i64)
-        .fetch_all(database::get_connection())
-        .await
-        .map_err(|error| Box::new(database_error(error)))?;
+    let dates = chip_dates(until).await?;
     let Some((period, window_start)) = flow_period(&dates, days) else {
         return Ok(None);
     };
@@ -176,6 +227,25 @@ pub(super) async fn load_flows(
         .await
         .map_err(|error| Box::new(database_error(error)))?;
     Ok(Some((period, rows)))
+}
+
+/// 載入 `until`（含）之前最新籌碼資料日的外資、投信連續買賣超天數。
+///
+/// 沒有任何籌碼資料回 `Ok(None)`；查詢失敗時回已組好的安全 500 回應。
+pub(super) async fn load_streaks(
+    until: NaiveDate,
+) -> Result<Option<(NaiveDate, Vec<StreakRow>)>, Box<Response>> {
+    let dates = chip_dates(until).await?;
+    let (Some(data_date), Some(window_start)) = (dates.first(), dates.last()) else {
+        return Ok(None);
+    };
+    let rows: Vec<StreakRow> = sqlx::query_as(STREAKS_SQL)
+        .bind(data_date)
+        .bind(window_start)
+        .fetch_all(database::get_connection())
+        .await
+        .map_err(|error| Box::new(database_error(error)))?;
+    Ok(Some((*data_date, rows)))
 }
 
 /// 查詢三大法人買賣超排行。

@@ -17,7 +17,12 @@ use axum::{
 };
 use chrono::{Local, NaiveDate};
 
-use self::{params::validate_screening_params, row::ScreenedStockRow, sql::SCREEN_STOCKS_SQL};
+use self::{
+    params::{ValidatedScreeningParams, validate_screening_params},
+    row::ScreenedStockRow,
+    sql::SCREEN_STOCKS_SQL,
+};
+use super::institutional_flow::{StreakRow, load_streaks};
 use super::relative_strength::{ScoredStock, load_scores};
 use super::{database_error, error_response};
 use crate::infra::database;
@@ -32,7 +37,8 @@ use crate::interfaces::web::data_api::dto::{
 /// 的新鮮度上限；過期指標轉成 `null`，來源日期則保留供呼叫端稽核。
 /// 財務體質（F 分數、毛利率、負債比、自由現金流）讀每日重算的 `financial_health`；
 /// 營收動能（連續年增月數、近 3 月累計年增率）由最近 12 個月營收即時計算。
-/// 相對強度分數與 `/market/relative-strength` 相同，以上市櫃全體計算後再篩選。
+/// 相對強度分數與 `/market/relative-strength` 相同，以上市櫃全體計算後再篩選；
+/// 外資、投信連續買賣超天數與 `/market/institutional-flow` 同一算法，取最新籌碼資料日。
 ///
 /// # Errors
 ///
@@ -45,17 +51,31 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    // 查詢日由 handler 明確綁定，SQL 不直接讀 CURRENT_DATE；純函式測試可傳入
-    // 任意日期驗證月份、季度與 31 天邊界，production 則採伺服器台北本地日。
-    let query_date = Local::now().date_naive();
-    // 相對強度要以上市櫃全體排名，無法在單股 LATERAL 內算，先算好再以陣列傳入。
-    let (rs_as_of, rs_symbols, rs_scores) = match load_scores(query_date).await {
+    // 查詢日由 handler 明確綁定，SQL 不直接讀 CURRENT_DATE；測試可傳入任意日期驗證
+    // 月份、季度與 31 天邊界，production 則採伺服器台北本地日。
+    screen_at(&params, validated, Local::now().date_naive()).await
+}
+
+/// 以指定查詢日執行已驗證的選股條件。
+async fn screen_at(
+    params: &StockScreeningParams,
+    validated: ValidatedScreeningParams,
+    query_date: NaiveDate,
+) -> Response {
+    // 相對強度要以上市櫃全體排名、連續天數要回看多日籌碼，都無法在單股 LATERAL 內算，
+    // 兩者同時先算好再以陣列傳入。
+    let (scores, streaks) = tokio::join!(load_scores(query_date), load_streaks(query_date));
+    let (rs_as_of, rs_symbols, rs_scores) = match scores {
         Ok(scores) => rs_columns(scores),
+        Err(response) => return *response,
+    };
+    let (chip_as_of, chip_symbols, foreign_streaks, trust_streaks) = match streaks {
+        Ok(streaks) => streak_columns(streaks),
         Err(response) => return *response,
     };
     // ORDER BY 字串只可能來自下方二十六個 &'static str 分支，絕不插入呼叫端
     // 原始文字；其他條件仍全部使用 bind parameter。
-    let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $19", validated.order_by);
+    let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $24", validated.order_by);
     // SQLx 0.9 要求動態字串顯式稽核；此處唯一動態部分已由
     // `screen_order_by` 限制為二十六個靜態常數，因此可安全標記。
     let rows: Result<Vec<ScreenedStockRow>, _> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
@@ -77,6 +97,11 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
         .bind(&rs_symbols)
         .bind(&rs_scores)
         .bind(validated.min_rs_score)
+        .bind(&chip_symbols)
+        .bind(&foreign_streaks)
+        .bind(&trust_streaks)
+        .bind(validated.min_foreign_streak)
+        .bind(validated.min_trust_streak)
         .bind(i64::from(validated.limit))
         .fetch_all(database::get_connection())
         .await;
@@ -86,6 +111,7 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
             // 每股各來源可能來自不同日期，因此不可偽造單一 data_as_of。
             data_as_of: None,
             rs_as_of,
+            chip_as_of,
             stocks: rows.into_iter().map(Into::into).collect(),
         })
         .into_response(),
@@ -105,4 +131,22 @@ fn rs_columns(
         .map(|stock| (stock.row.stock_symbol, i16::from(stock.rs_score)))
         .unzip();
     (Some(data_date.to_string()), symbols, values)
+}
+
+/// 籌碼連續天數拆成資料日與代號、外資、投信三個平行陣列；查無資料時陣列皆空。
+fn streak_columns(
+    streaks: Option<(NaiveDate, Vec<StreakRow>)>,
+) -> (Option<String>, Vec<String>, Vec<i16>, Vec<i16>) {
+    let Some((data_date, rows)) = streaks else {
+        return (None, Vec::new(), Vec::new(), Vec::new());
+    };
+    let mut symbols = Vec::with_capacity(rows.len());
+    let mut foreign = Vec::with_capacity(rows.len());
+    let mut trust = Vec::with_capacity(rows.len());
+    for row in rows {
+        symbols.push(row.stock_symbol);
+        foreign.push(row.foreign_streak);
+        trust.push(row.trust_streak);
+    }
+    (Some(data_date.to_string()), symbols, foreign, trust)
 }

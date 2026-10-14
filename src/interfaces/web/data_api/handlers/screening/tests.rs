@@ -8,10 +8,11 @@ use super::params::{
     analytical_date_is_fresh, f_score_year_is_fresh, financial_period_is_fresh,
     revenue_month_is_fresh, screen_order_by, validate_screening_params,
 };
-use super::rs_columns;
 use super::sql::SCREEN_STOCKS_SQL;
+use super::{rs_columns, screen_at, streak_columns};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::StockScreeningParams;
+use crate::interfaces::web::data_api::handlers::institutional_flow::StreakRow;
 use crate::interfaces::web::data_api::handlers::relative_strength::{ScoredStock, UniverseRow};
 
 /// 建立只覆寫測試重點欄位的 screen 預設參數。
@@ -32,6 +33,8 @@ fn screening_params() -> StockScreeningParams {
         max_debt_ratio_percent: None,
         positive_free_cash_flow: None,
         min_rs_score: None,
+        min_foreign_streak: None,
+        min_trust_streak: None,
         sort_by: None,
         sort_order: None,
         limit: None,
@@ -295,6 +298,56 @@ fn screening_rs_columns_split_scores() {
     assert_eq!(rs_columns(None), (None, Vec::new(), Vec::new()));
 }
 
+/// 外資／投信連續買超門檻 1–60 含兩端，本身就是有效篩選條件。
+#[test]
+fn screening_min_streak_boundaries() {
+    for (days, ok) in [(0, false), (1, true), (60, true), (61, false)] {
+        let mut foreign = screening_params();
+        foreign.min_foreign_streak = Some(days);
+        let result = validate_screening_params(&foreign);
+        assert_eq!(result.is_ok(), ok, "foreign {days}");
+        match result {
+            Ok(validated) => {
+                assert_eq!(validated.min_foreign_streak, Some(i16::from(days)));
+                assert_eq!(validated.min_trust_streak, None);
+            }
+            Err(message) => assert_eq!(message, "min_foreign_streak 必須介於 1 至 60"),
+        }
+
+        let mut trust = screening_params();
+        trust.min_trust_streak = Some(days);
+        let result = validate_screening_params(&trust);
+        assert_eq!(result.is_ok(), ok, "trust {days}");
+        match result {
+            Ok(validated) => assert_eq!(validated.min_trust_streak, Some(i16::from(days))),
+            Err(message) => assert_eq!(message, "min_trust_streak 必須介於 1 至 60"),
+        }
+    }
+}
+
+/// 連續天數拆成代號、外資、投信三個平行陣列；查無籌碼資料時資料日為 None、陣列為空。
+#[test]
+fn screening_streak_columns_split_rows() {
+    let streak = |symbol: &str, foreign_streak: i16, trust_streak: i16| StreakRow {
+        stock_symbol: symbol.to_owned(),
+        foreign_streak,
+        trust_streak,
+    };
+    let date = NaiveDate::from_ymd_opt(2026, 10, 13).expect("合法日期");
+    let (as_of, symbols, foreign, trust) = streak_columns(Some((
+        date,
+        vec![streak("2330", -5, 10), streak("6505", 0, 14)],
+    )));
+    assert_eq!(as_of.as_deref(), Some("2026-10-13"));
+    assert_eq!(symbols, ["2330", "6505"]);
+    assert_eq!(foreign, [-5, 0]);
+    assert_eq!(trust, [10, 14]);
+    assert_eq!(
+        streak_columns(None),
+        (None, Vec::new(), Vec::new(), Vec::new())
+    );
+}
+
 /// 數值範圍包含契約兩端，超界、NaN 與無限大都必須回 422；這可避免
 /// 非有限浮點數進入 Decimal 轉換或 PostgreSQL 比較。
 #[test]
@@ -375,7 +428,7 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
     let ranking: Vec<String> = sqlx::query_scalar(r#"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT y.security_code FROM yield_rank y JOIN stocks s ON s.stock_symbol = y.security_code JOIN "DailyQuotes" q ON q."Serial" = y.daily_quotes_serial JOIN dividend d ON d.serial = y.dividend_serial WHERE y.date = (SELECT MAX(date) FROM yield_rank) AND s.stock_exchange_market_id IN (2,4) ORDER BY y.yield DESC, y.security_code ASC LIMIT 20"#)
         .fetch_all(pool).await.expect("ranking EXPLAIN");
     let screen_sql = format!(
-        "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {SCREEN_STOCKS_SQL}\nORDER BY dividend_yield_percent DESC NULLS LAST, stock_symbol ASC\nLIMIT $19"
+        "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {SCREEN_STOCKS_SQL}\nORDER BY dividend_yield_percent DESC NULLS LAST, stock_symbol ASC\nLIMIT $24"
     );
     let screen: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(screen_sql.as_str()))
         .bind(0_i32)
@@ -395,6 +448,11 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(Option::<Decimal>::None)
         .bind(Vec::<String>::new())
         .bind(Vec::<i16>::new())
+        .bind(Option::<i16>::None)
+        .bind(Vec::<String>::new())
+        .bind(Vec::<i16>::new())
+        .bind(Vec::<i16>::new())
+        .bind(Option::<i16>::None)
         .bind(Option::<i16>::None)
         .bind(20_i64)
         .fetch_all(pool)
@@ -417,4 +475,79 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
             );
         }
     }
+}
+
+/// 法人連續買超門檻：以固定歷史查詢日 1988-03-05 執行選股，資料日回推到 03-03；
+/// 外資連買 3 天、投信連買 2 天的股票在門檻以內出現並輸出天數，超過門檻即不符合。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部 PostgreSQL，請加 --features integration-tests 執行"
+)]
+async fn screen_at_filters_chip_streaks() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 screen_at_filters_chip_streaks：無資料庫連接");
+        return;
+    }
+    const SYMBOL: &str = "79979SC";
+    let pool = database::get_connection();
+    let cleanup = || async {
+        for sql in [
+            "DELETE FROM chip_daily WHERE stock_symbol = $1",
+            "DELETE FROM stocks WHERE stock_symbol = $1",
+        ] {
+            let _ = sqlx::query(sql).bind(SYMBOL).execute(pool).await;
+        }
+    };
+    cleanup().await;
+    for sql in [
+        r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
+           VALUES ($1, '籌碼選股', $1, 2, 1)"#,
+        r#"INSERT INTO chip_daily ("date", stock_symbol, foreign_net, trust_net, dealer_net)
+           VALUES ('1988-03-01', $1, 1000, -1, 0), ('1988-03-02', $1, 1000, 1, 0), ('1988-03-03', $1, 1000, 1, 0)"#,
+    ] {
+        sqlx::query(sql)
+            .bind(SYMBOL)
+            .execute(pool)
+            .await
+            .expect("種入選股籌碼資料");
+    }
+
+    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let run = |foreign: Option<u8>, trust: Option<u8>| async move {
+        let mut params = screening_params();
+        params.industry_id = Some(1);
+        params.min_foreign_streak = foreign;
+        params.min_trust_streak = trust;
+        params.limit = Some(50);
+        let validated = validate_screening_params(&params).expect("參數合法");
+        let response = screen_at(&params, validated, query_date).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body 可讀");
+        serde_json::from_slice::<serde_json::Value>(&bytes).expect("JSON 回應")
+    };
+
+    let json = run(Some(3), Some(2)).await;
+    let excluded = run(None, Some(3)).await;
+    cleanup().await;
+    assert_eq!(json["chip_as_of"], "1988-03-03");
+    let stock = json["stocks"]
+        .as_array()
+        .expect("stocks 陣列")
+        .iter()
+        .find(|stock| stock["stock_symbol"] == SYMBOL)
+        .unwrap_or_else(|| panic!("連續天數符合，應出現：{json}"));
+    assert_eq!(stock["foreign_streak"], 3);
+    assert_eq!(stock["trust_streak"], 2);
+    assert!(
+        excluded["stocks"]
+            .as_array()
+            .expect("stocks 陣列")
+            .iter()
+            .all(|stock| stock["stock_symbol"] != SYMBOL),
+        "投信只連買 2 天，不應出現：{excluded}"
+    );
 }

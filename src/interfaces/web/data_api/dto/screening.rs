@@ -124,6 +124,11 @@ pub(crate) struct ScreenedStock {
     /// 相對強度分數 1–99（同 `/market/relative-strength`，資料日見 `rs_as_of`）；
     /// 上市未滿 240 個交易日、暫停交易或尚無報酬資料時為 `null`。
     pub(crate) rs_score: Option<u8>,
+    /// 截至 `chip_as_of` 的外資連續買賣超天數：正數為連續買超、負數為連續賣超、0 為當天沒有買賣；
+    /// 最多回看 60 個交易日。當天沒有籌碼資料時為 `null`。
+    pub(crate) foreign_streak: Option<i16>,
+    /// 截至 `chip_as_of` 的投信連續買賣超天數，規則同 `foreign_streak`。
+    pub(crate) trust_streak: Option<i16>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -133,6 +138,9 @@ pub(crate) struct StockScreeningResponse {
     pub(crate) data_as_of: Option<String>,
     /// `rs_score` 的資料日（最近一個已算好報酬的交易日）；查無相對強度資料時為 `null`。
     pub(crate) rs_as_of: Option<String>,
+    /// `foreign_streak`、`trust_streak` 的資料日（最新一個有籌碼資料的交易日，每晚 21:50 入庫）；
+    /// 查無籌碼資料時為 `null`。
+    pub(crate) chip_as_of: Option<String>,
     /// 通過所有固定條件的股票，最多五十筆。
     pub(crate) stocks: Vec<ScreenedStock>,
 }
@@ -189,6 +197,12 @@ pub(crate) struct StockScreeningParams {
     /// 沒有分數的股票不符合。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) min_rs_score: Option<u8>,
+    /// 外資至少連續買超幾個交易日（截至最新籌碼資料日），範圍 1–60。
+    #[param(minimum = 1, maximum = 60)]
+    pub(crate) min_foreign_streak: Option<u8>,
+    /// 投信至少連續買超幾個交易日（截至最新籌碼資料日），範圍 1–60。
+    #[param(minimum = 1, maximum = 60)]
+    pub(crate) min_trust_streak: Option<u8>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,

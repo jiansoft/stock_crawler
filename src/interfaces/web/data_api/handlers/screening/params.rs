@@ -33,6 +33,10 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) max_debt_ratio_percent: Option<Decimal>,
     /// 最低相對強度分數。
     pub(super) min_rs_score: Option<i16>,
+    /// 外資最少連續買超天數。
+    pub(super) min_foreign_streak: Option<i16>,
+    /// 投信最少連續買超天數。
+    pub(super) min_trust_streak: Option<i16>,
     /// 二十六個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
@@ -126,6 +130,13 @@ pub(super) fn validate_screening_params(
     {
         return Err("min_rs_score 必須介於 1 至 99");
     }
+    let streak_out_of_range = |days: Option<u8>| days.is_some_and(|days| !(1..=60).contains(&days));
+    if streak_out_of_range(params.min_foreign_streak) {
+        return Err("min_foreign_streak 必須介於 1 至 60");
+    }
+    if streak_out_of_range(params.min_trust_streak) {
+        return Err("min_trust_streak 必須介於 1 至 60");
+    }
     let order_by = screen_order_by(
         params.sort_by.as_deref().unwrap_or("stock_symbol"),
         params.sort_order.as_deref().unwrap_or("asc"),
@@ -148,7 +159,9 @@ pub(super) fn validate_screening_params(
         || params.min_gross_margin_percent.is_some()
         || params.max_debt_ratio_percent.is_some()
         || params.positive_free_cash_flow == Some(true)
-        || params.min_rs_score.is_some();
+        || params.min_rs_score.is_some()
+        || params.min_foreign_streak.is_some()
+        || params.min_trust_streak.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -163,6 +176,8 @@ pub(super) fn validate_screening_params(
         min_gross_margin_percent,
         max_debt_ratio_percent,
         min_rs_score: params.min_rs_score.map(i16::from),
+        min_foreign_streak: params.min_foreign_streak.map(i16::from),
+        min_trust_streak: params.min_trust_streak.map(i16::from),
         order_by,
         limit,
     })

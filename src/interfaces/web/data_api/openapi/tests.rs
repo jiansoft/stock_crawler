@@ -326,6 +326,8 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
         ("free_cash_flow_ttm", "integer"),
         ("health_period", "string"),
         ("rs_score", "integer"),
+        ("foreign_streak", "integer"),
+        ("trust_streak", "integer"),
     ] {
         let schema = screened[field].to_string();
         assert!(
@@ -333,6 +335,15 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
             "{field}：{schema}"
         );
     }
+
+    // 法人連續買超門檻 1–60；回應附籌碼資料日。
+    for name in ["min_foreign_streak", "min_trust_streak"] {
+        let schema = query_schema(operation, name);
+        assert_eq!(schema["minimum"], 1, "{name}");
+        assert_eq!(schema["maximum"], 60, "{name}");
+    }
+    let response = &document["components"]["schemas"]["StockScreeningResponse"]["properties"];
+    assert!(response["chip_as_of"].to_string().contains("null"));
 }
 
 /// Phase 4 三條 path 精確驗證 responses、query enum/range/default 與
