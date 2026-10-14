@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::{
-    domain::quote::forward_return::ForwardReturnRepository,
+    domain::quote::forward_return::{DerivedCounts, DerivedDataQuery, ForwardReturnRepository},
     infra::database::{self, repository::quote::PgQuoteRepository},
 };
 
@@ -109,6 +109,27 @@ SET return_5d = COALESCE(EXCLUDED.return_5d, t.return_5d),
     return_240d = COALESCE(EXCLUDED.return_240d, t.return_240d),
     updated_at = CURRENT_TIMESTAMP
 "#;
+
+/// `$1` 的技術訊號筆數，以及基準日 `$2` 已寫入 5 日報酬的筆數（都走主鍵前綴）。
+const DERIVED_COUNTS_SQL: &str = r#"
+SELECT (SELECT COUNT(*) FROM daily_technical_signal WHERE date = $1),
+       (SELECT COUNT(*) FROM daily_forward_return WHERE date = $2 AND return_5d IS NOT NULL)
+"#;
+
+#[async_trait]
+impl DerivedDataQuery for PgQuoteRepository {
+    async fn count_derived(&self, date: NaiveDate, base: NaiveDate) -> Result<DerivedCounts> {
+        let (signals, forward_returns): (i64, i64) = sqlx::query_as(DERIVED_COUNTS_SQL)
+            .bind(date)
+            .bind(base)
+            .fetch_one(database::get_connection())
+            .await?;
+        Ok(DerivedCounts {
+            signals,
+            forward_returns,
+        })
+    }
+}
 
 #[async_trait]
 impl ForwardReturnRepository for PgQuoteRepository {
@@ -245,6 +266,13 @@ mod tests {
             .await
             .expect("查詢交易日");
         assert_eq!(dates, [day(8), day(6), day(5)]);
+        assert_eq!(
+            repo.count_derived(day(8), day(2))
+                .await
+                .expect("寫入前的筆數")
+                .forward_returns,
+            0
+        );
 
         assert_eq!(
             repo.upsert_forward_returns(day(2), day(8), 5)
@@ -263,6 +291,11 @@ mod tests {
             .await
             .expect("重算 5 日");
 
+        let counts = repo
+            .count_derived(day(8), day(2))
+            .await
+            .expect("寫入後的筆數");
+        assert_eq!(counts.forward_returns, 2);
         let rows: Vec<ReturnRow> = sqlx::query_as(
             "SELECT stock_symbol, return_5d, return_20d, return_60d, return_240d FROM daily_forward_return
                  WHERE stock_symbol = ANY($1) ORDER BY 1",

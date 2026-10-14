@@ -29,6 +29,22 @@ pub trait ForwardReturnRepository: Send + Sync {
     ) -> Result<u64>;
 }
 
+/// 收盤後衍生資料的筆數，供收盤完整性檢查判斷技術訊號與未來報酬是否寫入。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DerivedCounts {
+    /// 資料日的技術訊號筆數。
+    pub signals: i64,
+    /// 基準日（資料日往前第 5 個交易日）已寫入 5 日報酬的筆數。
+    pub forward_returns: i64,
+}
+
+/// 收盤後衍生資料的筆數查詢。
+#[async_trait]
+pub trait DerivedDataQuery: Send + Sync {
+    /// `date` 的技術訊號筆數，以及基準日 `base` 已寫入 5 日報酬的筆數。
+    async fn count_derived(&self, date: NaiveDate, base: NaiveDate) -> Result<DerivedCounts>;
+}
+
 /// `end` 往前第 `horizon` 個交易日（`trading_dates` 由新到舊、第一個必須是 `end`）。
 ///
 /// `end` 不是交易日或交易日不足時回 `None`。
