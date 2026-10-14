@@ -90,9 +90,9 @@ pub(super) use signals::{
     SignalStock,
 };
 pub(super) use stocks::{
-    DailyQuote, HistoricalQuote, HistoryParams, LatestQuoteResponse, PriceHistoryResponse,
-    QuoteHistoryRecord, RealtimeSnapshotResponse, SearchParams, SearchResponse, Stock,
-    StockProfile,
+    AdjustedPrices, DailyQuote, HistoricalQuote, HistoryParams, LatestQuoteResponse,
+    PriceHistoryResponse, QuoteHistoryRecord, RealtimeSnapshotResponse, SearchParams,
+    SearchResponse, Stock, StockProfile,
 };
 pub(super) use technicals::{
     TechnicalIndicatorsParams, TechnicalIndicatorsResponse, TechnicalPoint, TechnicalSignalItem,

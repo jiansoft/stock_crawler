@@ -103,6 +103,27 @@ pub(crate) struct HistoricalQuote {
     pub(crate) price_to_book_ratio: Option<f64>,
     /// 資料紀錄時間，UTC ISO 8601。
     pub(crate) record_time: Option<String>,
+    /// 還原權值價格；只有查詢帶 `adjusted=true` 且當天有成交時才有此欄位。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) adjusted: Option<AdjustedPrices>,
+}
+
+/// 依除權息、減資、分割還原後的價格，以回傳區間內最新一筆有成交的日線為基準（實際價格）。
+///
+/// 基準日之前的價格乘上累計還原因子，讓整段日線可直接比較漲跌與畫連續走勢；
+/// 漲跌、均線、本益比等其他欄位仍是原始值。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct AdjustedPrices {
+    /// 累計還原因子（原始價格 × 因子 = 還原價），小數四位；基準日之後沒有事件時為 1。
+    pub(crate) factor: f64,
+    /// 還原開盤價；原始開盤價缺值時為 null。
+    pub(crate) opening_price: Option<f64>,
+    /// 還原最高價；原始最高價缺值時為 null。
+    pub(crate) highest_price: Option<f64>,
+    /// 還原最低價；原始最低價缺值時為 null。
+    pub(crate) lowest_price: Option<f64>,
+    /// 還原收盤價。
+    pub(crate) closing_price: f64,
 }
 
 /// 系統收錄範圍內的歷史高低點。
@@ -168,7 +189,9 @@ pub(crate) struct LatestQuoteResponse {
 /// 歷史日線的成功回應。
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct PriceHistoryResponse {
-    /// 符合範圍的歷史日線。
+    /// 是否附上還原權值價格（即查詢的 `adjusted`）。
+    pub(crate) adjusted: bool,
+    /// 符合範圍的歷史日線，新到舊。
     pub(crate) quotes: Vec<HistoricalQuote>,
 }
 
@@ -219,4 +242,7 @@ pub(crate) struct HistoryParams {
     pub(crate) to: Option<String>,
     /// 最多回傳筆數，預設 100。
     pub(crate) limit: Option<u16>,
+    /// 是否在每筆日線附上還原權值價格（`adjusted` 欄位），預設 false。
+    /// 以回傳區間內最新一筆有成交的日線為基準，之前的價格依除權息、減資、分割調整。
+    pub(crate) adjusted: Option<bool>,
 }

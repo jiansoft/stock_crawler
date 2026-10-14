@@ -109,15 +109,28 @@ pub trait PriceBarRepository: Send + Sync {
 }
 
 /// 向後還原日線：最後一根維持實際價格，每個事件日之前的收盤、最高、最低乘上該事件的
-/// 還原因子（多個事件累乘）。
+/// 還原因子（多個事件累乘），因子見 [`adjustment_factors`]。
+pub fn adjust_bars(bars: &[PriceBar], adjustments: &[PriceAdjustment]) -> Vec<PriceBar> {
+    bars.iter()
+        .zip(adjustment_factors(bars, adjustments))
+        .map(|(bar, factor)| PriceBar {
+            date: bar.date,
+            close: bar.close * factor,
+            high: bar.high * factor,
+            low: bar.low * factor,
+        })
+        .collect()
+}
+
+/// 每根日線的累計還原因子，與 `bars`（由舊到新）一一對應；最後一根與其後沒有事件的為 1。
 ///
 /// 只採用日期落在第一根之後、最後一根（含）之前的事件，因此以歷史日期為截止日計算時，
 /// 截止日之後的除權息不會影響當時的指標。事件日當天沒有成交時，以事件日前最後一根的
 /// 收盤計算因子，套用到該根（含）之前。
-pub fn adjust_bars(bars: &[PriceBar], adjustments: &[PriceAdjustment]) -> Vec<PriceBar> {
-    let mut out = bars.to_vec();
+pub fn adjustment_factors(bars: &[PriceBar], adjustments: &[PriceAdjustment]) -> Vec<f64> {
+    let mut factors = vec![1.0; bars.len()];
     let Some(last) = bars.last() else {
-        return out;
+        return factors;
     };
     for adjustment in adjustments.iter().filter(|a| a.date <= last.date) {
         // 事件日（含）之後的第一根；之前的都要調整。
@@ -128,13 +141,11 @@ pub fn adjust_bars(bars: &[PriceBar], adjustments: &[PriceAdjustment]) -> Vec<Pr
         let Some(factor) = adjustment.factor(bars[split - 1].close) else {
             continue;
         };
-        for bar in &mut out[..split] {
-            bar.close *= factor;
-            bar.high *= factor;
-            bar.low *= factor;
+        for value in &mut factors[..split] {
+            *value *= factor;
         }
     }
-    out
+    factors
 }
 
 /// 某股票某交易日的技術訊號（收盤後預先計算，供全市場訊號選股查詢）。
@@ -975,15 +986,16 @@ mod tests {
     #[test]
     fn adjust_bars_scales_prices_before_events() {
         let raw = bars(&[10.0, 10.0, 9.0, 9.0, 18.0]);
-        let adjusted = adjust_bars(
-            &raw,
-            &[
-                adjustment(day(2), 1.0, 0.0, 1.0),
-                adjustment(day(4), 0.0, 0.0, 0.5),
-                adjustment(day(9), 3.0, 0.0, 1.0),
-                adjustment(day(0), 3.0, 0.0, 1.0),
-            ],
-        );
+        let events = [
+            adjustment(day(2), 1.0, 0.0, 1.0),
+            adjustment(day(4), 0.0, 0.0, 0.5),
+            adjustment(day(9), 3.0, 0.0, 1.0),
+            adjustment(day(0), 3.0, 0.0, 1.0),
+        ];
+        // 除息 1 元：前收 10 → 參考價 9（0.9）；減資五成：前收 9 → 18（2 倍）。
+        assert_eq!(adjustment_factors(&raw, &events), [1.8, 1.8, 2.0, 2.0, 1.0]);
+        assert!(adjustment_factors(&[], &events).is_empty());
+        let adjusted = adjust_bars(&raw, &events);
         let closes: Vec<f64> = adjusted.iter().map(|bar| bar.close).collect();
         assert_eq!(closes, [18.0, 18.0, 18.0, 18.0, 18.0]);
         assert_eq!(adjusted[0].high, 18.0);
