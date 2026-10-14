@@ -64,7 +64,8 @@ pub(super) use industries::{
     IndustryMover, IndustryPerformance, IndustryPerformanceParams, IndustryPerformanceResponse,
 };
 pub(super) use institutional_flow::{
-    FlowSideParamValue, InstitutionalFlowItem, InstitutionalFlowParams, InstitutionalFlowResponse,
+    FlowSideParamValue, IndustryFlowItem, IndustryFlowParams, IndustryFlowResponse,
+    IndustryFlowStock, InstitutionalFlowItem, InstitutionalFlowParams, InstitutionalFlowResponse,
     InvestorParamValue,
 };
 pub(super) use market::{

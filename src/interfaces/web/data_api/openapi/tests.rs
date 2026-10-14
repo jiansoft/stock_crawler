@@ -149,6 +149,7 @@ fn openapi_contains_all_data_api_paths() {
         "/api/v1/stocks/{symbol}/relative-strength",
         "/api/v1/market/industry-strength",
         "/api/v1/market/institutional-flow",
+        "/api/v1/market/industry-flow",
         "/api/v1/market/cagr-ranking",
         "/api/v1/market/cagr-ranking/{stock_symbol}",
         "/api/v1/healthz",
@@ -909,6 +910,42 @@ fn openapi_institutional_flow_schema_pins_field_names() {
     assert_eq!(
         response["items"]["items"]["$ref"],
         "#/components/schemas/InstitutionalFlowItem"
+    );
+}
+
+/// 產業法人資金流向 path 的契約：days 範圍與預設、法人別與排序列舉、可為 null 的占比。
+#[test]
+fn openapi_industry_flow_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/market/industry-flow");
+    assert_endpoint_responses(operation, "IndustryFlowResponse", true);
+    let days = query_schema(operation, "days");
+    assert_eq!(days["default"], 5);
+    assert_eq!(days["minimum"], 1);
+    assert_eq!(days["maximum"], 60);
+    for (name, schema) in [
+        ("investor", "InvestorParamValue"),
+        ("market", "MarketParamValue"),
+        ("order", "SortOrderParamValue"),
+    ] {
+        assert_eq!(
+            query_schema(operation, name)["$ref"],
+            format!("#/components/schemas/{schema}"),
+            "{name}"
+        );
+    }
+
+    let schemas = &document["components"]["schemas"];
+    let item = &schemas["IndustryFlowItem"]["properties"];
+    assert!(item["trade_value_ratio"].to_string().contains("null"));
+    assert_eq!(
+        item["top_buyers"]["items"]["$ref"],
+        "#/components/schemas/IndustryFlowStock"
+    );
+    let response = &schemas["IndustryFlowResponse"]["properties"];
+    assert_eq!(
+        response["items"]["items"]["$ref"],
+        "#/components/schemas/IndustryFlowItem"
     );
 }
 

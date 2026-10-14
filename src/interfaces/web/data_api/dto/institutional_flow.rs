@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use super::MarketParamValue;
+use super::{MarketParamValue, SortOrderParamValue};
 
 /// OpenAPI 文件使用的法人別。
 #[derive(ToSchema)]
@@ -108,4 +108,78 @@ pub(crate) struct InstitutionalFlowResponse {
     pub(crate) matched: usize,
     /// 依估計金額排序的股票，最多 `limit` 筆。
     pub(crate) items: Vec<InstitutionalFlowItem>,
+}
+
+/// 產業法人資金流向的 query string。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(crate) struct IndustryFlowParams {
+    /// 交易日（`YYYY-MM-DD`）；省略為最新一個有籌碼資料的交易日，遇休市日取之前最近的交易日。
+    pub(crate) date: Option<String>,
+    /// 累計最近幾個有籌碼資料的交易日，預設 5，範圍 1–60。
+    #[param(minimum = 1, maximum = 60, default = 5)]
+    pub(crate) days: Option<u8>,
+    /// 法人別：`foreign`（預設）、`trust`、`dealer` 或 `total`。
+    #[param(value_type = InvestorParamValue, default = "foreign")]
+    pub(crate) investor: Option<String>,
+    /// 市場：`all`（預設）、`twse` 或 `tpex`。
+    #[param(value_type = MarketParamValue, default = "all")]
+    pub(crate) market: Option<String>,
+    /// `desc`（預設，淨流入最多的產業在前）或 `asc`（淨流出最多的產業在前）。
+    #[param(value_type = SortOrderParamValue, default = "desc")]
+    pub(crate) order: Option<String>,
+}
+
+/// 產業內法人淨買賣金額最大的個股。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct IndustryFlowStock {
+    /// 股票代號。
+    pub(crate) stock_symbol: String,
+    /// 股票名稱。
+    pub(crate) name: String,
+    /// 估計淨買賣金額（元，正為買超）。
+    pub(crate) net_amount: f64,
+}
+
+/// 單一產業的法人資金流向。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct IndustryFlowItem {
+    /// 依淨買賣金額由多到少的名次（1 為淨流入最多）。
+    pub(crate) rank: usize,
+    /// 產業名稱。
+    pub(crate) industry: String,
+    /// 期間內有法人買賣資料的股票數。
+    pub(crate) stocks: usize,
+    /// 淨買超的股票數。
+    pub(crate) buy_stocks: usize,
+    /// 淨賣超的股票數。
+    pub(crate) sell_stocks: usize,
+    /// 產業合計估計淨買賣金額（元）。
+    pub(crate) net_amount: f64,
+    /// 淨買賣金額占產業期間成交金額的百分比；沒有成交金額為 `null`。
+    pub(crate) trade_value_ratio: Option<f64>,
+    /// 淨買超金額最大的個股（最多 3 檔）。
+    pub(crate) top_buyers: Vec<IndustryFlowStock>,
+    /// 淨賣超金額最大的個股（最多 3 檔）。
+    pub(crate) top_sellers: Vec<IndustryFlowStock>,
+}
+
+/// 產業法人資金流向的成功回應。
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct IndustryFlowResponse {
+    /// 資料日（期間最後一個交易日，`YYYY-MM-DD`）。
+    pub(crate) data_as_of: String,
+    /// 期間第一個交易日（`YYYY-MM-DD`）。
+    pub(crate) from: String,
+    /// 實際累計的交易日數。
+    pub(crate) days: usize,
+    /// 法人別。
+    pub(crate) investor: String,
+    /// 市場條件。
+    pub(crate) market: String,
+    /// 排序方向。
+    pub(crate) order: String,
+    /// 所有產業（含未分類股票）合計的估計淨買賣金額（元）。
+    pub(crate) total_net_amount: f64,
+    /// 各產業，依 `order` 排序。
+    pub(crate) items: Vec<IndustryFlowItem>,
 }
