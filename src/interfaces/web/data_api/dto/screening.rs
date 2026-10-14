@@ -193,7 +193,7 @@ pub(crate) struct StockScreeningParams {
     pub(crate) max_debt_ratio_percent: Option<f64>,
     /// `true` 時只留近四季自由現金流為正的股票；`false` 或省略不篩選。
     pub(crate) positive_free_cash_flow: Option<bool>,
-    /// 最低相對強度分數，範圍 1–99；分數以上市櫃全體計算（同 `/market/relative-strength`），
+    /// 最低相對強度分數，範圍 1–99；分數以上市櫃股票（不含 ETF）計算（同 `/market/relative-strength`），
     /// 沒有分數的股票不符合。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) min_rs_score: Option<u8>,

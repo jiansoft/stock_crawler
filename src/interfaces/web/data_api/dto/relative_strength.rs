@@ -11,7 +11,7 @@ use super::{MarketParamValue, SortOrderParamValue};
 pub(crate) struct RelativeStrengthParams {
     /// 交易日（`YYYY-MM-DD`）；省略為最新一個已算好報酬的交易日，遇休市日取之前最近的交易日。
     pub(crate) date: Option<String>,
-    /// 市場：`all`（預設）、`twse` 或 `tpex`。只篩選輸出，分數與名次仍以上市櫃全體計算。
+    /// 市場：`all`（預設）、`twse` 或 `tpex`。只篩選輸出，分數與名次仍以上市櫃股票（不含 ETF）計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
     /// 只列出這個產業（產業名稱，例如「半導體業」）；省略為全部。只篩選輸出，不影響分數。
@@ -29,7 +29,7 @@ pub(crate) struct RelativeStrengthParams {
 /// 相對強度排行中的單一股票。
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub(crate) struct RelativeStrengthItem {
-    /// 在上市櫃全體中的名次（1 為最強；加權報酬相同時名次相同）。
+    /// 在上市櫃股票（不含 ETF）中的名次（1 為最強；加權報酬相同時名次相同）。
     pub(crate) rank: usize,
     /// 股票代號。
     pub(crate) stock_symbol: String,
@@ -89,7 +89,7 @@ pub(crate) struct RelativeStrengthPoint {
     pub(crate) date: String,
     /// 相對強度分數 1–99（與 `/market/relative-strength` 同一算法）。
     pub(crate) rs_score: u8,
-    /// 當天在上市櫃全體中的名次。
+    /// 當天在上市櫃股票（不含 ETF）中的名次。
     pub(crate) rank: i64,
     /// 當天參與計分的股票數。
     pub(crate) universe: i64,
@@ -144,7 +144,7 @@ pub(crate) struct RelativeStrengthHistoryResponse {
 pub(crate) struct IndustryStrengthParams {
     /// 交易日（`YYYY-MM-DD`）；省略為最新一個已算好報酬的交易日，遇休市日取之前最近的交易日。
     pub(crate) date: Option<String>,
-    /// 市場：`all`（預設）、`twse` 或 `tpex`。只決定各產業納入哪些股票，分數仍以上市櫃全體計算。
+    /// 市場：`all`（預設）、`twse` 或 `tpex`。只決定各產業納入哪些股票，分數仍以上市櫃股票（不含 ETF）計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
     /// 產業至少要有幾檔計分股票才列出，預設 3，範圍 1–50（檔數太少的產業中位數不穩定）。
