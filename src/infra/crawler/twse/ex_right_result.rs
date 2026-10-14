@@ -5,6 +5,8 @@
 //! 交易所依實際除權息日計算參考價，日期與息值是最可靠的來源。
 //!
 //! 支援 `startDate`／`endDate` 日期區間，一次請求就能取回一整年（2025 年 1,358 筆）。
+//! [`visit_references`] 另外取每列的「開盤競價基準」，用來重算除權息日的漲跌
+//! （日行情在除權息日的漲跌欄是「X」與 0.00）。
 //!
 //! ## 欄位注意事項
 //!
@@ -18,6 +20,7 @@ use serde::Deserialize;
 
 use crate::{
     core::{declare::StockExchangeMarket, util::http, util::text},
+    domain::quote::ex_right::ExRightReference,
     infra::crawler::{
         share::{ExDividendAnnouncement, parse_ex_dividend_kind},
         twse,
@@ -39,6 +42,7 @@ const COL_CODE: usize = 1;
 const COL_NAME: usize = 2;
 const COL_VALUE: usize = 5;
 const COL_KIND: usize = 6;
+const COL_OPEN_BASE: usize = 9;
 
 /// 取得 `start`～`end`（含）之間已除權息的上市證券。
 ///
@@ -47,16 +51,58 @@ const COL_KIND: usize = 6;
 /// HTTP 請求、JSON 反序列化失敗，或 `stat` 不是 `OK` 也不是「查無資料」時回傳錯誤；
 /// 不把來源異常當成「沒有除權息」，否則核對流程會以為資料庫多出事件。
 pub async fn visit(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExDividendAnnouncement>> {
+    parse_results(&fetch(start, end).await?)
+}
+
+/// 取得 `start`～`end`（含）之間上市證券除權息當天的開盤競價基準（含現金增資除權）。
+///
+/// # 錯誤
+///
+/// 與 [`visit`] 相同。
+pub async fn visit_references(start: NaiveDate, end: NaiveDate) -> Result<Vec<ExRightReference>> {
+    parse_references(&fetch(start, end).await?)
+}
+
+async fn fetch(start: NaiveDate, end: NaiveDate) -> Result<Twt49uResponse> {
     let url = format!(
         "https://www.{}/rwd/zh/exRight/TWT49U?response=json&startDate={}&endDate={}",
         twse::HOST,
         start.format("%Y%m%d"),
         end.format("%Y%m%d")
     );
-    let response = http::get_json::<Twt49uResponse>(&url)
+    http::get_json::<Twt49uResponse>(&url)
         .await
-        .with_context(|| format!("Failed to fetch TWT49U for {start}~{end}"))?;
-    parse_results(&response)
+        .with_context(|| format!("Failed to fetch TWT49U for {start}~{end}"))
+}
+
+/// 將回應轉成各股除權息當天的開盤競價基準；日期、代號或基準價無法解析的列略過。
+///
+/// # 錯誤
+///
+/// `stat` 不是 `OK` 也不是「查無資料」時回傳錯誤。
+pub fn parse_references(response: &Twt49uResponse) -> Result<Vec<ExRightReference>> {
+    match response.stat.as_deref() {
+        Some("OK") => {}
+        Some(stat) if stat.contains("沒有符合條件") => return Ok(Vec::new()),
+        other => anyhow::bail!("TWT49U 回應狀態異常：{other:?}"),
+    }
+    let rows = response.data.as_deref().unwrap_or_default();
+    Ok(rows
+        .iter()
+        .filter(|row| row.len() > COL_OPEN_BASE)
+        .filter_map(|row| {
+            let date = parse_roc_full_date(&row[COL_DATE])?;
+            let stock_symbol = row[COL_CODE].trim();
+            let reference_price = text::parse_decimal(&row[COL_OPEN_BASE], Some(vec![','])).ok()?;
+            (!stock_symbol.is_empty() && reference_price > rust_decimal::Decimal::ZERO).then(|| {
+                ExRightReference {
+                    stock_symbol: stock_symbol.to_owned(),
+                    date,
+                    reference_price,
+                }
+            })
+        })
+        .collect())
 }
 
 /// 將回應轉成除權息事件；單一資料列格式不符只略過該列。
@@ -126,6 +172,45 @@ mod tests {
     fn fixture() -> Twt49uResponse {
         serde_json::from_str(include_str!("testdata/twt49u_2025_sample.json"))
             .expect("fixture 應為合法 JSON")
+    }
+
+    /// 每列取開盤競價基準（權息依升降單位進位，現金增資除權為前收），格式不符的列略過。
+    #[test]
+    fn parse_references_reads_open_base_of_every_row() {
+        let references = parse_references(&fixture()).expect("解析成功");
+        let rows: Vec<(&str, NaiveDate, rust_decimal::Decimal)> = references
+            .iter()
+            .map(|r| (r.stock_symbol.as_str(), r.date, r.reference_price))
+            .collect();
+        let day = |m, d| NaiveDate::from_ymd_opt(2025, m, d).expect("有效日期");
+        assert_eq!(
+            rows,
+            [
+                ("00730", day(1, 17), dec!(22.90)),
+                ("00730", day(2, 19), dec!(23.56)),
+                ("00730", day(3, 18), dec!(22.88)),
+                ("6658", day(1, 6), dec!(76.80)),
+                ("1605", day(6, 4), dec!(20.40)),
+            ]
+        );
+
+        let mut broken = fixture();
+        let data = broken.data.as_mut().expect("有資料");
+        data[0][COL_OPEN_BASE] = "--".to_owned();
+        data[1][COL_DATE] = "日期".to_owned();
+        data[2].truncate(COL_OPEN_BASE);
+        assert_eq!(parse_references(&broken).expect("解析成功").len(), 2);
+
+        let empty = Twt49uResponse {
+            stat: Some("很抱歉，沒有符合條件的資料!".to_owned()),
+            data: None,
+        };
+        assert!(parse_references(&empty).expect("查無資料").is_empty());
+        let failed = Twt49uResponse {
+            stat: Some("查詢日期大於今日".to_owned()),
+            data: None,
+        };
+        assert!(parse_references(&failed).is_err());
     }
 
     #[test]

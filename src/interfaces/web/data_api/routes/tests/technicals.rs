@@ -61,7 +61,7 @@ async fn technicals_endpoint_db_semantics() {
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["data_as_of"], "1989-03-30");
     assert_eq!(json["days"], 20);
-    assert_eq!(json["adjusted"], false);
+    assert_eq!(json["adjusted"], true);
     let points = json["points"].as_array().expect("points array");
     assert_eq!(points.len(), 20);
     assert_eq!(points[0]["date"], "1989-03-11");

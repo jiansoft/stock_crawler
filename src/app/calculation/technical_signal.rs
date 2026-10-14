@@ -1,6 +1,6 @@
 //! 收盤後全市場技術訊號計算。
 //!
-//! 對當日有成交的上市櫃股票逐檔讀取日線、計算技術指標，把最新一日的交叉、站上或跌破均線、
+//! 對當日有成交的上市櫃股票逐檔讀取日線、還原權值後計算技術指標，把最新一日的交叉、站上或跌破均線、
 //! 超買超賣與 52 週新高新低寫入 `daily_technical_signal`，供 `/market/signals` 查詢與
 //! 持股訊號通知使用。規則都在 [`crate::domain::quote::technical`]，與 `/stocks/{symbol}/technicals`
 //! 同一套計算，結果一致。
@@ -10,8 +10,8 @@ use chrono::NaiveDate;
 use futures::{StreamExt, stream};
 
 use crate::domain::quote::technical::{
-    self, PriceBar, PriceBarRepository, StockTechnicalSignal, TechnicalSignalRepository,
-    WARMUP_BARS,
+    self, PriceAdjustment, PriceBar, PriceBarRepository, StockTechnicalSignal,
+    TechnicalSignalRepository, WARMUP_BARS,
 };
 use crate::infra::database::repository::quote::PgQuoteRepository;
 
@@ -22,7 +22,7 @@ const CONCURRENCY: usize = 4;
 ///
 /// # Errors
 ///
-/// 查詢股票清單、任一檔日線讀取或寫入失敗時回傳錯誤；讀取失敗時不寫入，
+/// 查詢股票清單、除權息事件、任一檔日線讀取或寫入失敗時回傳錯誤；讀取失敗時不寫入，
 /// 保留資料表原本的內容。
 pub async fn calculate_technical_signals(date: NaiveDate) -> Result<usize> {
     compute_and_save(&PgQuoteRepository::new(), date).await
@@ -34,6 +34,10 @@ where
     R: PriceBarRepository + TechnicalSignalRepository,
 {
     let symbols = repo.fetch_signal_symbols(date).await?;
+    let adjustments = repo
+        .fetch_price_adjustments(&symbols)
+        .await
+        .context("讀取除權息事件失敗")?;
     // 年線需要 240 日、52 週新高新低需要前 364 天，再加上前一日比較交叉。
     let limit = WARMUP_BARS as i64 + 1;
     let results: Vec<(String, Result<Vec<PriceBar>>)> = stream::iter(symbols)
@@ -48,7 +52,8 @@ where
     let mut signals = Vec::new();
     for (symbol, bars) in results {
         let bars = bars.with_context(|| format!("讀取 {symbol} 日線失敗"))?;
-        signals.extend(signals_for(&symbol, date, &bars));
+        let events = adjustments.get(&symbol).map_or(&[][..], Vec::as_slice);
+        signals.extend(signals_for(&symbol, date, &bars, events));
     }
     signals.sort_by(|a, b| {
         a.stock_symbol
@@ -59,15 +64,19 @@ where
     Ok(signals.len())
 }
 
-/// 單一股票在 `date` 的訊號；最後一根日線不是 `date`（當日沒有成交）時沒有訊號。
+/// 單一股票在 `date` 的訊號（日線先以 `adjustments` 還原權值）；最後一根日線不是 `date`
+/// （當日沒有成交）時沒有訊號。
 pub(crate) fn signals_for(
     symbol: &str,
     date: NaiveDate,
     bars: &[PriceBar],
+    adjustments: &[PriceAdjustment],
 ) -> Vec<StockTechnicalSignal> {
     if bars.last().is_none_or(|bar| bar.date != date) {
         return Vec::new();
     }
+    let bars = technical::adjust_bars(bars, adjustments);
+    let bars = bars.as_slice();
     let points = technical::compute(bars);
     let Some((last, rest)) = points.split_last() else {
         return Vec::new();
@@ -112,11 +121,13 @@ mod tests {
             .collect()
     }
 
-    /// 記錄寫入內容的假倉儲；`bars` 沒有的代號讀取時回錯誤。
+    /// 記錄寫入內容的假倉儲；`bars` 沒有的代號讀取時回錯誤，`adjustments_fail` 時讀事件回錯誤。
     #[derive(Default)]
     struct FakeRepo {
         symbols: Vec<String>,
         bars: HashMap<String, Vec<PriceBar>>,
+        adjustments: HashMap<String, Vec<PriceAdjustment>>,
+        adjustments_fail: bool,
         limits: Mutex<Vec<i64>>,
         saved: Mutex<Option<(NaiveDate, Vec<StockTechnicalSignal>)>>,
     }
@@ -134,6 +145,16 @@ mod tests {
                 .get(stock_symbol)
                 .cloned()
                 .ok_or_else(|| anyhow!("連線中斷"))
+        }
+
+        async fn fetch_price_adjustments(
+            &self,
+            _stock_symbols: &[String],
+        ) -> Result<HashMap<String, Vec<PriceAdjustment>>> {
+            if self.adjustments_fail {
+                return Err(anyhow!("連線中斷"));
+            }
+            Ok(self.adjustments.clone())
         }
     }
 
@@ -290,10 +311,72 @@ mod tests {
         cleanup().await;
     }
 
+    /// 讀除權息事件失敗時整批不寫。
+    #[tokio::test]
+    async fn compute_and_save_fails_when_adjustments_fail() {
+        let repo = FakeRepo {
+            symbols: vec!["A".into()],
+            bars: HashMap::from([("A".to_owned(), bars(&crossing_up()))]),
+            adjustments_fail: true,
+            ..Default::default()
+        };
+        let error = compute_and_save(&repo, day(26))
+            .await
+            .expect_err("讀取失敗應回錯誤");
+        assert!(
+            format!("{error:#}").contains("讀取除權息事件失敗"),
+            "{error:#}"
+        );
+        assert!(repo.saved.lock().expect("測試鎖").is_none());
+    }
+
+    /// 除息跳空：未還原會跌破月線，還原後不算跌破。
+    #[tokio::test]
+    async fn compute_and_save_adjusts_bars_before_signals() {
+        let mut closes = vec![10.0; 26];
+        closes.push(9.0);
+        let date = day(26);
+        let ex_dividend = PriceAdjustment {
+            date,
+            cash_dividend: 1.0,
+            stock_dividend: 0.0,
+            share_ratio: 1.0,
+        };
+        let below = |repo: &FakeRepo| {
+            repo.saved
+                .lock()
+                .expect("測試鎖")
+                .take()
+                .expect("有寫入")
+                .1
+                .iter()
+                .any(|s| {
+                    s.signal.indicator == "close_ma20" && s.signal.kind == SignalKind::CrossBelow
+                })
+        };
+
+        let raw = FakeRepo {
+            symbols: vec!["A".into()],
+            bars: HashMap::from([("A".to_owned(), bars(&closes))]),
+            ..Default::default()
+        };
+        compute_and_save(&raw, date).await.expect("計算成功");
+        assert!(below(&raw));
+
+        let adjusted = FakeRepo {
+            symbols: vec!["A".into()],
+            bars: HashMap::from([("A".to_owned(), bars(&closes))]),
+            adjustments: HashMap::from([("A".to_owned(), vec![ex_dividend])]),
+            ..Default::default()
+        };
+        compute_and_save(&adjusted, date).await.expect("計算成功");
+        assert!(!below(&adjusted));
+    }
+
     /// 沒有日線或只有一根時不產生交叉訊號，也不會失敗。
     #[test]
     fn signals_for_handles_short_history() {
-        assert!(signals_for("A", day(0), &[]).is_empty());
-        assert!(signals_for("A", day(0), &bars(&[10.0])).is_empty());
+        assert!(signals_for("A", day(0), &[], &[]).is_empty());
+        assert!(signals_for("A", day(0), &bars(&[10.0]), &[]).is_empty());
     }
 }

@@ -10,8 +10,12 @@
 //! - MACD(12,26,9)：DIF＝收盤價 EMA12 − EMA26（EMA 以第一日收盤為起點），
 //!   訊號線＝DIF 的 9 日 EMA（以第一個 DIF 為起點），柱狀體＝DIF − 訊號線。
 //!
-//! 價格未還原除權息，除權息日會出現跳空；樣本不足的指標為 `None`。KD、RSI 與 EMA 都
-//! 帶有遞迴記憶，呼叫端應多取 [`WARMUP_BARS`] 日讓起始值的影響衰減到可忽略。
+//! 計算前先以 [`adjust_bars`] 把日線還原權值（向後還原：最新一日為實際價格，除權息、
+//! 減資、分割之前的價格乘上還原因子），避免除權息跳空被誤判成跌破均線或 52 週新低。
+//! 樣本不足的指標為 `None`。KD、RSI 與 EMA 都帶有遞迴記憶，呼叫端應多取 [`WARMUP_BARS`]
+//! 日讓起始值的影響衰減到可忽略。
+
+use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -54,16 +58,83 @@ pub struct PriceBar {
     pub low: f64,
 }
 
+/// 讓報價跳空的除權息或股數變動事件，用來還原歷史日線。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PriceAdjustment {
+    /// 事件日：除權息交易日，或減資、分割後恢復交易的第一個交易日。
+    pub date: NaiveDate,
+    /// 每股現金股利（元）；沒有為 0。
+    pub cash_dividend: f64,
+    /// 每股股票股利（元，面額 10 元）；沒有為 0。
+    pub stock_dividend: f64,
+    /// 減資、分割、反向分割後持有 1 股變成幾股；沒有為 1。
+    pub share_ratio: f64,
+}
+
+impl PriceAdjustment {
+    /// 事件日之前的價格要乘上的還原因子：事件日參考價 ÷ 前一交易日收盤。
+    ///
+    /// 參考價＝(前收 − 現金股利) ÷ (1 + 股票股利 ÷ 10) ÷ 股數比例。前收不為正、
+    /// 參考價不為正或因子為 1 時回 `None`（不調整）。
+    fn factor(&self, prev_close: f64) -> Option<f64> {
+        if prev_close <= 0.0 || self.share_ratio <= 0.0 {
+            return None;
+        }
+        let reference = (prev_close - self.cash_dividend)
+            / (1.0 + self.stock_dividend / 10.0)
+            / self.share_ratio;
+        let factor = reference / prev_close;
+        (factor.is_finite() && factor > 0.0 && (factor - 1.0).abs() > f64::EPSILON)
+            .then_some(factor)
+    }
+}
+
 /// 技術指標的日線來源。
 #[async_trait]
 pub trait PriceBarRepository: Send + Sync {
     /// `until`（含，`None` 為不限）之前最近 `limit` 個有成交的交易日，依日期由舊到新。
+    /// 價格為原始成交價，計算前以 [`adjust_bars`] 還原。
     async fn fetch_price_bars(
         &self,
         stock_symbol: &str,
         until: Option<NaiveDate>,
         limit: i64,
     ) -> Result<Vec<PriceBar>>;
+
+    /// 多檔股票的除權息與股數變動事件，依代號分組；沒有事件的股票不在結果中。
+    async fn fetch_price_adjustments(
+        &self,
+        stock_symbols: &[String],
+    ) -> Result<HashMap<String, Vec<PriceAdjustment>>>;
+}
+
+/// 向後還原日線：最後一根維持實際價格，每個事件日之前的收盤、最高、最低乘上該事件的
+/// 還原因子（多個事件累乘）。
+///
+/// 只採用日期落在第一根之後、最後一根（含）之前的事件，因此以歷史日期為截止日計算時，
+/// 截止日之後的除權息不會影響當時的指標。事件日當天沒有成交時，以事件日前最後一根的
+/// 收盤計算因子，套用到該根（含）之前。
+pub fn adjust_bars(bars: &[PriceBar], adjustments: &[PriceAdjustment]) -> Vec<PriceBar> {
+    let mut out = bars.to_vec();
+    let Some(last) = bars.last() else {
+        return out;
+    };
+    for adjustment in adjustments.iter().filter(|a| a.date <= last.date) {
+        // 事件日（含）之後的第一根；之前的都要調整。
+        let split = bars.partition_point(|bar| bar.date < adjustment.date);
+        if split == 0 {
+            continue;
+        }
+        let Some(factor) = adjustment.factor(bars[split - 1].close) else {
+            continue;
+        };
+        for bar in &mut out[..split] {
+            bar.close *= factor;
+            bar.high *= factor;
+            bar.low *= factor;
+        }
+    }
+    out
 }
 
 /// 某股票某交易日的技術訊號（收盤後預先計算，供全市場訊號選股查詢）。
@@ -448,9 +519,10 @@ pub fn signals(prev: Option<&IndicatorPoint>, last: &IndicatorPoint) -> Vec<Tech
 
 /// 最新一日（`bars` 最後一根）是否創 52 週新高或新低。
 ///
-/// 口徑與市場廣度統計 `daily_stock_price_stats` 相同：當日最高價高於前 364 天（不含當日）
+/// 判斷規則與市場廣度統計 `daily_stock_price_stats` 相同：當日最高價高於前 364 天（不含當日）
 /// 的最高價算新高；當日最低價低於前 364 天大於 0 的最低價算新低；前 364 天不足 200 個
-/// 交易日（例如新上市）不判斷。使用原始最高／最低價，不以收盤價替代缺值。
+/// 交易日（例如新上市）不判斷；不以收盤價替代缺值。差別是這裡用的是呼叫端傳入的日線
+/// （訊號計算時已還原權值），市場廣度統計用原始價格。
 pub fn fifty_two_week_signals(bars: &[PriceBar]) -> Vec<TechnicalSignal> {
     let Some((last, prior)) = bars.split_last() else {
         return Vec::new();
@@ -470,7 +542,11 @@ pub fn fifty_two_week_signals(bars: &[PriceBar]) -> Vec<TechnicalSignal> {
         out.push(TechnicalSignal {
             indicator: FIFTY_TWO_WEEK_INDICATOR,
             kind: SignalKind::NewHigh,
-            description: format!("最高價 {} 創 52 週新高（前高 {prior_high}）", last.high),
+            description: format!(
+                "最高價 {} 創 52 週新高（前高 {}）",
+                price_text(last.high),
+                price_text(prior_high)
+            ),
         });
     }
     let prior_low = window
@@ -482,10 +558,20 @@ pub fn fifty_two_week_signals(bars: &[PriceBar]) -> Vec<TechnicalSignal> {
         out.push(TechnicalSignal {
             indicator: FIFTY_TWO_WEEK_INDICATOR,
             kind: SignalKind::NewLow,
-            description: format!("最低價 {} 創 52 週新低（前低 {prior_low}）", last.low),
+            description: format!(
+                "最低價 {} 創 52 週新低（前低 {}）",
+                price_text(last.low),
+                price_text(prior_low)
+            ),
         });
     }
     out
+}
+
+/// 價格四捨五入到小數兩位後去掉多餘的 0（還原後的價格可能有很長的小數）。
+fn price_text(value: f64) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
 /// 「向上」或「向下」。
@@ -857,5 +943,84 @@ mod tests {
 
         let zero_low = year_bars(250, 10.0, 0.0);
         assert!(fifty_two_week_signals(&zero_low).is_empty());
+    }
+
+    fn adjustment(date: NaiveDate, cash: f64, stock: f64, share_ratio: f64) -> PriceAdjustment {
+        PriceAdjustment {
+            date,
+            cash_dividend: cash,
+            stock_dividend: stock,
+            share_ratio,
+        }
+    }
+
+    /// 還原因子＝參考價 ÷ 前收：除息、除權、減資與分割；不合理或不需調整時為 None。
+    #[test]
+    fn price_adjustment_factor_follows_reference_price() {
+        let factor = |cash, stock, ratio| adjustment(day(0), cash, stock, ratio).factor(100.0);
+        assert_eq!(factor(5.0, 0.0, 1.0), Some(0.95));
+        // 配股 1 元（每股配 0.1 股）：參考價 100 ÷ 1.1。
+        assert!((factor(0.0, 1.0, 1.0).expect("有因子") - 1.0 / 1.1).abs() < 1e-12);
+        // 減資五成（1 股變 0.5 股）價格加倍；1 拆 4 價格變四分之一。
+        assert_eq!(factor(0.0, 0.0, 0.5), Some(2.0));
+        assert_eq!(factor(0.0, 0.0, 4.0), Some(0.25));
+        assert_eq!(factor(0.0, 0.0, 1.0), None);
+        assert_eq!(factor(100.0, 0.0, 1.0), None);
+        assert_eq!(factor(0.0, 0.0, 0.0), None);
+        assert_eq!(adjustment(day(0), 1.0, 0.0, 1.0).factor(0.0), None);
+    }
+
+    /// 事件日之前的價格乘上因子、最新一根不變；多個事件累乘；
+    /// 截止日之後與第一根（含）之前的事件不採用；事件日沒成交時套用到前一根（含）之前。
+    #[test]
+    fn adjust_bars_scales_prices_before_events() {
+        let raw = bars(&[10.0, 10.0, 9.0, 9.0, 18.0]);
+        let adjusted = adjust_bars(
+            &raw,
+            &[
+                adjustment(day(2), 1.0, 0.0, 1.0),
+                adjustment(day(4), 0.0, 0.0, 0.5),
+                adjustment(day(9), 3.0, 0.0, 1.0),
+                adjustment(day(0), 3.0, 0.0, 1.0),
+            ],
+        );
+        let closes: Vec<f64> = adjusted.iter().map(|bar| bar.close).collect();
+        assert_eq!(closes, [18.0, 18.0, 18.0, 18.0, 18.0]);
+        assert_eq!(adjusted[0].high, 18.0);
+        assert_eq!(adjusted[0].low, 18.0);
+        assert!(adjusted.iter().zip(&raw).all(|(a, r)| a.date == r.date));
+
+        // 事件日（day 2）沒有成交：以 day 1 收盤計算，day 1（含）之前調整。
+        let gap = vec![raw[0], raw[1], raw[3]];
+        let adjusted = adjust_bars(&gap, &[adjustment(day(2), 1.0, 0.0, 1.0)]);
+        let closes: Vec<f64> = adjusted.iter().map(|bar| bar.close).collect();
+        assert_eq!(closes, [9.0, 9.0, 9.0]);
+
+        assert!(adjust_bars(&[], &[adjustment(day(2), 1.0, 0.0, 1.0)]).is_empty());
+        assert_eq!(adjust_bars(&raw, &[]), raw);
+    }
+
+    /// 還原後除息跳空不再被誤判成 52 週新低；價格描述四捨五入到小數兩位。
+    #[test]
+    fn adjusted_bars_avoid_false_fifty_two_week_low() {
+        let mut raw = year_bars(250, 10.0, 7.0);
+        let ex_date = raw.last().expect("至少一根").date;
+        // 除息 3 元：前收 8 → 參考價 5。當日最低 4.9 低於未還原的前低 5，
+        // 還原後前低為 5 × 5/8 = 3.125，不算新低。
+        raw.last_mut().expect("至少一根").low = 4.9;
+        let unadjusted = fifty_two_week_signals(&raw);
+        assert!(unadjusted.iter().any(|s| s.kind == SignalKind::NewLow));
+
+        let adjusted = adjust_bars(&raw, &[adjustment(ex_date, 3.0, 0.0, 1.0)]);
+        assert!(
+            !fifty_two_week_signals(&adjusted)
+                .iter()
+                .any(|s| s.kind == SignalKind::NewLow)
+        );
+
+        assert_eq!(price_text(3.126), "3.13");
+        assert_eq!(price_text(256.5), "256.5");
+        assert_eq!(price_text(100.0), "100");
+        assert_eq!(price_text(1.0 / 3.0), "0.33");
     }
 }

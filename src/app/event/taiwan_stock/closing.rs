@@ -214,6 +214,13 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
         return Ok(());
     }
 
+    // 除權息日的漲跌在交易所行情中是 0，要在均線、統計表與排行之前以官方基準價重算；
+    // 失敗只影響當天除權息股的漲跌，不中斷收盤匯總
+    match backfill::ex_right_change::execute(date).await {
+        Ok(summary) => tracing::info!("除權息日漲跌修正結束:{summary:?}"),
+        Err(why) => tracing::error!("除權息日漲跌修正失敗: {why:#}"),
+    }
+
     // 有行情資料才執行的計算（均線、估價、殖利率排行）
     let quote_repo = PgQuoteRepository::new();
 

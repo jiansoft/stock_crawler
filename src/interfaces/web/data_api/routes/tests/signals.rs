@@ -98,7 +98,7 @@ async fn market_signals_endpoint_db_semantics() {
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["data_as_of"], "1991-09-03");
     assert_eq!(json["market"], "all");
-    assert_eq!(json["adjusted"], false);
+    assert_eq!(json["adjusted"], true);
     assert_eq!(json["total"], 3);
     assert_eq!(
         symbols(&json),
