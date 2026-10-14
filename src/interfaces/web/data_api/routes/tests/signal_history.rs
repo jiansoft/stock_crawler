@@ -18,7 +18,7 @@ const SIGNALS: [(u32, &str, &str, &str); 5] = [
     (2, "79979PA", "kd", "golden_cross"),
 ];
 
-/// `(日, 代號, 5 日, 20 日)` 報酬（%）；60 日一律未滿。
+/// `(日, 代號, 5 日, 20 日)` 報酬（%）；60、120 日一律未滿，240 日只有 10-01 的 PA（30%）。
 const RETURNS: [(u32, &str, i64, Option<i64>); 6] = [
     (1, "79979PA", 4, Some(10)),
     (1, "79979PB", -2, None),
@@ -92,6 +92,13 @@ async fn seed(pool: &sqlx::PgPool) {
         .await
         .expect("種入報酬");
     }
+    sqlx::query(
+        "UPDATE daily_forward_return SET return_240d = 30 WHERE stock_symbol = '79979PA' AND date = $1",
+    )
+    .bind(day(1))
+    .execute(pool)
+    .await
+    .expect("種入 240 日報酬");
 }
 
 /// 找出某來源與種類的績效項目。
@@ -148,6 +155,13 @@ async fn signal_performance_endpoint_db_semantics() {
     let sixty = &kd["horizons"][2];
     assert_eq!(sixty["samples"], 0);
     assert!(sixty["avg_return"].is_null() && sixty["median_return"].is_null());
+    // 240 日只有 PA 一筆 30%，當天大盤也只有它。
+    let long = &kd["horizons"][4];
+    assert_eq!(long["days"], 240);
+    assert_eq!(long["samples"], 1);
+    assert_eq!(long["avg_return"], 30.0);
+    assert_eq!(long["avg_excess_return"], 0.0);
+    assert_eq!(kd["horizons"][3]["samples"], 0);
     assert_eq!(item(&json, "52_week", "new_high")["occurrences"], 1);
 
     // 大盤基準：6 筆 5 日報酬平均 11/6、4 筆為正。
@@ -156,6 +170,9 @@ async fn signal_performance_endpoint_db_semantics() {
     assert_eq!(json["benchmark"][0]["win_rate"], 0.6667);
     assert_eq!(json["benchmark"][1]["samples"], 1);
     assert!(json["benchmark"][2]["avg_return"].is_null());
+    assert_eq!(json["benchmark"][4]["days"], 240);
+    assert_eq!(json["benchmark"][4]["samples"], 1);
+    assert_eq!(json["benchmark"][4]["win_rate"], 1.0);
 
     // 產業篩選只影響訊號，不影響大盤基準；上櫃的基準只算上櫃。
     let (status, json) = get(
@@ -247,6 +264,8 @@ async fn stock_signals_endpoint_db_semantics() {
     assert_eq!(first_day["return_5d"], 4.0);
     assert_eq!(first_day["return_20d"], 10.0);
     assert!(first_day["return_60d"].is_null());
+    assert!(first_day["return_120d"].is_null());
+    assert_eq!(first_day["return_240d"], 30.0);
     assert_eq!(first_day["description"], "79979PA golden_cross");
     assert!(json["items"][0]["closing_price"].is_null());
 

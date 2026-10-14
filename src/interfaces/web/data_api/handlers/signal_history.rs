@@ -1,7 +1,7 @@
 //! `/market/signals/performance` 與 `/stocks/{symbol}/signals` handler：技術訊號的歷史表現。
 //!
 //! 訊號來自 `daily_technical_signal`，之後的表現來自 `daily_forward_return`（收盤後回填的
-//! 5／20／60 個交易日還原報酬，見 [`crate::app::calculation::forward_return`]）。
+//! 5／20／60／120／240 個交易日還原報酬，見 [`crate::app::calculation::forward_return`]）。
 
 use axum::{
     Json,
@@ -24,7 +24,7 @@ use crate::interfaces::web::data_api::dto::{
 };
 
 /// 統計的天期（交易日數），與 `daily_forward_return` 的欄位對應。
-const HORIZONS: [u32; 3] = [5, 20, 60];
+const HORIZONS: [u32; 5] = [5, 20, 60, 120, 240];
 
 /// 預設統計期間：迄日往前 364 天（約一年）。
 const DEFAULT_PERIOD_DAYS: i64 = 364;
@@ -53,7 +53,8 @@ WITH sig AS (
 ),
 bench AS (
     SELECT r.date,
-           AVG(r.return_5d) AS b5, AVG(r.return_20d) AS b20, AVG(r.return_60d) AS b60
+           AVG(r.return_5d) AS b5, AVG(r.return_20d) AS b20, AVG(r.return_60d) AS b60,
+           AVG(r.return_120d) AS b120, AVG(r.return_240d) AS b240
     FROM daily_forward_return r
     JOIN stocks s ON s.stock_symbol = r.stock_symbol
     WHERE r.date BETWEEN $1 AND $2
@@ -81,7 +82,19 @@ SELECT
     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY r.return_60d::float8) AS med60,
     AVG(CASE WHEN r.return_60d > 0 THEN 1.0 WHEN r.return_60d IS NOT NULL THEN 0.0 END)::float8 AS win60,
     AVG(r.return_60d - b.b60)::float8 AS excess60,
-    AVG(CASE WHEN r.return_60d > b.b60 THEN 1.0 WHEN r.return_60d IS NOT NULL AND b.b60 IS NOT NULL THEN 0.0 END)::float8 AS beat60
+    AVG(CASE WHEN r.return_60d > b.b60 THEN 1.0 WHEN r.return_60d IS NOT NULL AND b.b60 IS NOT NULL THEN 0.0 END)::float8 AS beat60,
+    COUNT(r.return_120d) AS n120,
+    AVG(r.return_120d)::float8 AS avg120,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY r.return_120d::float8) AS med120,
+    AVG(CASE WHEN r.return_120d > 0 THEN 1.0 WHEN r.return_120d IS NOT NULL THEN 0.0 END)::float8 AS win120,
+    AVG(r.return_120d - b.b120)::float8 AS excess120,
+    AVG(CASE WHEN r.return_120d > b.b120 THEN 1.0 WHEN r.return_120d IS NOT NULL AND b.b120 IS NOT NULL THEN 0.0 END)::float8 AS beat120,
+    COUNT(r.return_240d) AS n240,
+    AVG(r.return_240d)::float8 AS avg240,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY r.return_240d::float8) AS med240,
+    AVG(CASE WHEN r.return_240d > 0 THEN 1.0 WHEN r.return_240d IS NOT NULL THEN 0.0 END)::float8 AS win240,
+    AVG(r.return_240d - b.b240)::float8 AS excess240,
+    AVG(CASE WHEN r.return_240d > b.b240 THEN 1.0 WHEN r.return_240d IS NOT NULL AND b.b240 IS NOT NULL THEN 0.0 END)::float8 AS beat240
 FROM sig
 LEFT JOIN daily_forward_return r ON r.date = sig.date AND r.stock_symbol = sig.stock_symbol
 LEFT JOIN bench b ON b.date = sig.date
@@ -99,7 +112,13 @@ SELECT
     AVG(CASE WHEN r.return_20d > 0 THEN 1.0 WHEN r.return_20d IS NOT NULL THEN 0.0 END)::float8 AS win20,
     COUNT(r.return_60d) AS n60,
     AVG(r.return_60d)::float8 AS avg60,
-    AVG(CASE WHEN r.return_60d > 0 THEN 1.0 WHEN r.return_60d IS NOT NULL THEN 0.0 END)::float8 AS win60
+    AVG(CASE WHEN r.return_60d > 0 THEN 1.0 WHEN r.return_60d IS NOT NULL THEN 0.0 END)::float8 AS win60,
+    COUNT(r.return_120d) AS n120,
+    AVG(r.return_120d)::float8 AS avg120,
+    AVG(CASE WHEN r.return_120d > 0 THEN 1.0 WHEN r.return_120d IS NOT NULL THEN 0.0 END)::float8 AS win120,
+    COUNT(r.return_240d) AS n240,
+    AVG(r.return_240d)::float8 AS avg240,
+    AVG(CASE WHEN r.return_240d > 0 THEN 1.0 WHEN r.return_240d IS NOT NULL THEN 0.0 END)::float8 AS win240
 FROM daily_forward_return r
 JOIN stocks s ON s.stock_symbol = r.stock_symbol
 WHERE r.date BETWEEN $1 AND $2
@@ -118,6 +137,8 @@ SELECT
     r.return_5d,
     r.return_20d,
     r.return_60d,
+    r.return_120d,
+    r.return_240d,
     COUNT(*) OVER () AS total
 FROM daily_technical_signal t
 LEFT JOIN "DailyQuotes" q ON q.stock_symbol = t.stock_symbol AND q."Date" = t.date
@@ -165,11 +186,23 @@ struct PerformanceRow {
     win60: Option<f64>,
     excess60: Option<f64>,
     beat60: Option<f64>,
+    n120: i64,
+    avg120: Option<f64>,
+    med120: Option<f64>,
+    win120: Option<f64>,
+    excess120: Option<f64>,
+    beat120: Option<f64>,
+    n240: i64,
+    avg240: Option<f64>,
+    med240: Option<f64>,
+    win240: Option<f64>,
+    excess240: Option<f64>,
+    beat240: Option<f64>,
 }
 
 impl PerformanceRow {
     /// 依 [`HORIZONS`] 順序的各天期統計。
-    fn horizons(&self) -> [HorizonValues; 3] {
+    fn horizons(&self) -> [HorizonValues; 5] {
         [
             HorizonValues {
                 samples: self.n5,
@@ -195,6 +228,22 @@ impl PerformanceRow {
                 excess: self.excess60,
                 beat: self.beat60,
             },
+            HorizonValues {
+                samples: self.n120,
+                avg: self.avg120,
+                median: self.med120,
+                win: self.win120,
+                excess: self.excess120,
+                beat: self.beat120,
+            },
+            HorizonValues {
+                samples: self.n240,
+                avg: self.avg240,
+                median: self.med240,
+                win: self.win240,
+                excess: self.excess240,
+                beat: self.beat240,
+            },
         ]
     }
 }
@@ -211,6 +260,12 @@ struct BenchmarkRow {
     n60: i64,
     avg60: Option<f64>,
     win60: Option<f64>,
+    n120: i64,
+    avg120: Option<f64>,
+    win120: Option<f64>,
+    n240: i64,
+    avg240: Option<f64>,
+    win240: Option<f64>,
 }
 
 /// [`STOCK_SIGNALS_SQL`] 的一列。
@@ -225,10 +280,12 @@ struct StockSignalRow {
     return_5d: Option<Decimal>,
     return_20d: Option<Decimal>,
     return_60d: Option<Decimal>,
+    return_120d: Option<Decimal>,
+    return_240d: Option<Decimal>,
     total: i64,
 }
 
-/// 統計期間內各技術訊號出現後 5／20／60 個交易日的表現。
+/// 統計期間內各技術訊號出現後 5／20／60／120／240 個交易日的表現。
 ///
 /// 報酬為基準日收盤到之後第 N 個交易日收盤的還原報酬（等同含息）；尚未滿 N 日的訊號不列入
 /// 該天期的樣本。超額報酬以同一天同市場全部股票的平均報酬為基準。
@@ -363,6 +420,8 @@ fn build_performance(
         (benchmark.n5, benchmark.avg5, benchmark.win5),
         (benchmark.n20, benchmark.avg20, benchmark.win20),
         (benchmark.n60, benchmark.avg60, benchmark.win60),
+        (benchmark.n120, benchmark.avg120, benchmark.win120),
+        (benchmark.n240, benchmark.avg240, benchmark.win240),
     ]
     .into_iter()
     .zip(HORIZONS)
@@ -387,7 +446,7 @@ fn build_performance(
     }
 }
 
-/// 查詢個股在期間內出現過的技術訊號，以及每次訊號之後 5／20／60 個交易日的還原報酬。
+/// 查詢個股在期間內出現過的技術訊號，以及每次訊號之後 5／20／60／120／240 個交易日的還原報酬。
 ///
 /// # Errors
 ///
@@ -470,6 +529,8 @@ fn build_stock_signals(
                 return_5d: decimal_to_f64(row.return_5d),
                 return_20d: decimal_to_f64(row.return_20d),
                 return_60d: decimal_to_f64(row.return_60d),
+                return_120d: decimal_to_f64(row.return_120d),
+                return_240d: decimal_to_f64(row.return_240d),
             })
             .collect(),
     }
@@ -506,6 +567,18 @@ mod tests {
             win60: None,
             excess60: None,
             beat60: None,
+            n120: 0,
+            avg120: None,
+            med120: None,
+            win120: None,
+            excess120: None,
+            beat120: None,
+            n240: 2,
+            avg240: Some(30.0),
+            med240: Some(30.0),
+            win240: Some(1.0),
+            excess240: Some(12.345),
+            beat240: Some(0.5),
         }
     }
 
@@ -553,6 +626,9 @@ mod tests {
             n5: 100,
             avg5: Some(0.123_45),
             win5: Some(0.512_34),
+            n240: 50,
+            avg240: Some(8.765),
+            win240: Some(0.6),
             ..Default::default()
         };
         let response = build_performance(
@@ -595,7 +671,28 @@ mod tests {
         assert_eq!(first[1].median_return, None);
         let last = &response.items[3].horizons[2];
         assert_eq!((last.days, last.samples, last.avg_return), (60, 0, None));
+        let days: Vec<u32> = first.iter().map(|stat| stat.days).collect();
+        assert_eq!(days, [5, 20, 60, 120, 240]);
+        assert_eq!(
+            first[4],
+            HorizonStat {
+                days: 240,
+                samples: 2,
+                avg_return: Some(30.0),
+                median_return: Some(30.0),
+                win_rate: Some(1.0),
+                avg_excess_return: Some(12.35),
+                beat_market_rate: Some(0.5),
+            }
+        );
+        assert_eq!((first[3].samples, first[3].avg_return), (0, None));
 
+        let empty = |days| BenchmarkStat {
+            days,
+            samples: 0,
+            avg_return: None,
+            win_rate: None,
+        };
         assert_eq!(
             response.benchmark,
             [
@@ -605,17 +702,14 @@ mod tests {
                     avg_return: Some(0.12),
                     win_rate: Some(0.5123),
                 },
+                empty(20),
+                empty(60),
+                empty(120),
                 BenchmarkStat {
-                    days: 20,
-                    samples: 0,
-                    avg_return: None,
-                    win_rate: None,
-                },
-                BenchmarkStat {
-                    days: 60,
-                    samples: 0,
-                    avg_return: None,
-                    win_rate: None,
+                    days: 240,
+                    samples: 50,
+                    avg_return: Some(8.77),
+                    win_rate: Some(0.6),
                 },
             ]
         );
@@ -638,6 +732,8 @@ mod tests {
             return_5d: Some(Decimal::new(25, 1)),
             return_20d: None,
             return_60d: None,
+            return_120d: None,
+            return_240d: Some(Decimal::new(-405, 1)),
             total: 7,
         }
     }
@@ -672,6 +768,8 @@ mod tests {
         assert_eq!(first.change_percent, Some(-1.23));
         assert_eq!(first.return_5d, Some(2.5));
         assert_eq!(first.return_20d, None);
+        assert_eq!(first.return_120d, None);
+        assert_eq!(first.return_240d, Some(-40.5));
 
         let empty =
             build_stock_signals("2330".to_owned(), day(2026, 1, 1), day(2026, 1, 2), vec![]);
