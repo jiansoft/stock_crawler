@@ -1,7 +1,7 @@
 //! `/market/signals` 的 request、response 與 OpenAPI schema。
 //!
 //! 收盤後預先計算的全市場技術訊號；計算規則見 [`crate::domain::quote::technical`]，
-//! 與 `/stocks/{symbol}/technicals` 同一套。價格未還原除權息。
+//! 與 `/stocks/{symbol}/technicals` 同一套。日線先還原權值再計算訊號。
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -134,7 +134,7 @@ pub(crate) struct MarketSignalsResponse {
     pub(crate) indicator: Option<String>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
-    /// 價格是否還原除權息；固定為 `false`。
+    /// 訊號是否以還原權值的日線計算；固定為 `true`（收盤價、漲跌幅為當日實際成交資料）。
     pub(crate) adjusted: bool,
     /// 符合篩選條件的訊號筆數（未套用 `limit`）。
     pub(crate) total: usize,

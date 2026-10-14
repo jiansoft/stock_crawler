@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS daily_technical_signal
     PRIMARY KEY (date, stock_symbol, indicator, kind)
 );
 
-COMMENT ON TABLE daily_technical_signal IS '每日技術訊號（收盤後全市場預先計算；價格未還原除權息）';
+COMMENT ON TABLE daily_technical_signal IS '每日技術訊號（收盤後全市場預先計算；日線依股利與公司行動還原權值後計算）';
 COMMENT ON COLUMN daily_technical_signal.date IS '交易日';
 COMMENT ON COLUMN daily_technical_signal.stock_symbol IS '股票代號';
 COMMENT ON COLUMN daily_technical_signal.indicator IS '訊號來源：ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14、52_week';

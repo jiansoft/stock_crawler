@@ -1,7 +1,7 @@
 //! `/stocks/{symbol}/technicals` 的 request、response 與 OpenAPI schema。
 //!
 //! 均線、乖離率、RSI、KD、MACD 與最新一日的技術訊號；計算規則見
-//! [`crate::domain::quote::technical`]。價格單位為新台幣元，未還原除權息。
+//! [`crate::domain::quote::technical`]。價格單位為新台幣元，已還原權值（最新一日為實際價格）。
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -83,7 +83,7 @@ pub(crate) struct TechnicalIndicatorsResponse {
     pub(crate) data_as_of: Option<String>,
     /// 請求的天數。
     pub(crate) days: u8,
-    /// 價格是否還原除權息（目前一律為 `false`）。
+    /// 價格是否還原權值（固定為 `true`：除權息、減資、分割之前的價格依參考價調整，最新一日為實際價格）。
     pub(crate) adjusted: bool,
     /// 由舊到新的每日指標，最多 `days` 筆。
     pub(crate) points: Vec<TechnicalPoint>,
