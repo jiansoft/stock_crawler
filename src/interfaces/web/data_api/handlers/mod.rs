@@ -16,6 +16,7 @@ mod dividend_forecast;
 mod financial_health;
 mod financial_reports;
 mod industries;
+mod industry_strength;
 mod market_calendar;
 mod market_movers;
 mod market_rankings;
@@ -52,6 +53,7 @@ pub(super) use dividend_forecast::{__path_dividend_forecast, dividend_forecast};
 pub(super) use financial_health::{__path_financial_health, financial_health};
 pub(super) use financial_reports::{__path_financial_reports, financial_reports};
 pub(super) use industries::{__path_industry_performance, industry_performance};
+pub(super) use industry_strength::{__path_industry_strength, industry_strength};
 pub(super) use market_calendar::{__path_dividend_calendar, dividend_calendar};
 pub(super) use market_movers::{__path_market_movers, market_movers};
 pub(super) use market_rankings::{

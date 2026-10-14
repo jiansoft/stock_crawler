@@ -1,5 +1,5 @@
-//! `/market/relative-strength` 相對強度排行與 `/stocks/{symbol}/relative-strength` 個股相對強度
-//! 歷史的 request、response 與 OpenAPI schema。
+//! `/market/relative-strength` 相對強度排行、`/stocks/{symbol}/relative-strength` 個股相對強度
+//! 歷史與 `/market/industry-strength` 產業相對強度的 request、response 與 OpenAPI schema。
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -137,4 +137,73 @@ pub(crate) struct RelativeStrengthHistoryResponse {
     pub(crate) crossings: Vec<RelativeStrengthCrossing>,
     /// 每個交易日的分數，由新到舊。
     pub(crate) items: Vec<RelativeStrengthPoint>,
+}
+
+/// 產業相對強度的 query string。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(crate) struct IndustryStrengthParams {
+    /// 交易日（`YYYY-MM-DD`）；省略為最新一個已算好報酬的交易日，遇休市日取之前最近的交易日。
+    pub(crate) date: Option<String>,
+    /// 市場：`all`（預設）、`twse` 或 `tpex`。只決定各產業納入哪些股票，分數仍以上市櫃全體計算。
+    #[param(value_type = MarketParamValue, default = "all")]
+    pub(crate) market: Option<String>,
+    /// 產業至少要有幾檔計分股票才列出，預設 3，範圍 1–50（檔數太少的產業中位數不穩定）。
+    #[param(minimum = 1, maximum = 50, default = 3)]
+    pub(crate) min_stocks: Option<u8>,
+    /// `desc`（預設，最強產業在前）或 `asc`（最弱產業在前），依 RS 中位數排序。
+    #[param(value_type = SortOrderParamValue, default = "desc")]
+    pub(crate) order: Option<String>,
+}
+
+/// 產業內相對強度最高的個股。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct IndustryLeader {
+    /// 股票代號。
+    pub(crate) stock_symbol: String,
+    /// 股票名稱。
+    pub(crate) name: String,
+    /// 相對強度分數 1–99。
+    pub(crate) rs_score: u8,
+}
+
+/// 單一產業的相對強度。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct IndustryStrengthItem {
+    /// 依 RS 中位數由強到弱的名次（同中位數同名次）。
+    pub(crate) rank: usize,
+    /// 產業名稱。
+    pub(crate) industry: String,
+    /// 計分股票數。
+    pub(crate) stocks: usize,
+    /// 成分股 RS 分數中位數。
+    pub(crate) median_rs_score: f64,
+    /// RS ≥ 80 的檔數占比（0–1）。
+    pub(crate) strong_ratio: f64,
+    /// RS ≤ 20 的檔數占比（0–1）。
+    pub(crate) weak_ratio: f64,
+    /// 成分股加權報酬（%）的平均。
+    pub(crate) avg_weighted_return: f64,
+    /// 約 20 個交易日前（見 `prior_as_of`）的 RS 中位數；當時沒有計分股票為 `null`。
+    pub(crate) prior_median_rs_score: Option<f64>,
+    /// RS 中位數的變化（本期減約 20 個交易日前）。
+    pub(crate) median_change: Option<f64>,
+    /// RS 最高的前三檔。
+    pub(crate) leaders: Vec<IndustryLeader>,
+}
+
+/// 產業相對強度結果。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct IndustryStrengthResponse {
+    /// 資料日。
+    pub(crate) data_as_of: String,
+    /// 比較基準日（資料日往前約 20 個交易日）；查無當時資料為 `null`。
+    pub(crate) prior_as_of: Option<String>,
+    /// 查詢的市場。
+    pub(crate) market: String,
+    /// 排序方向：`desc` 或 `asc`。
+    pub(crate) order: String,
+    /// 參與計分的上市櫃股票數。
+    pub(crate) universe: usize,
+    /// 依 RS 中位數排序的產業。
+    pub(crate) items: Vec<IndustryStrengthItem>,
 }

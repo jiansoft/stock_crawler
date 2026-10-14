@@ -79,6 +79,7 @@ pub(super) use portfolio_history::{
     PortfolioHistoryParams, PortfolioHistoryResponse, PortfolioMonth,
 };
 pub(super) use relative_strength::{
+    IndustryLeader, IndustryStrengthItem, IndustryStrengthParams, IndustryStrengthResponse,
     RelativeStrengthCrossing, RelativeStrengthHistoryParams, RelativeStrengthHistoryResponse,
     RelativeStrengthItem, RelativeStrengthParams, RelativeStrengthPoint, RelativeStrengthResponse,
 };
