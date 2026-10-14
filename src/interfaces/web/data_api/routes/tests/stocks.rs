@@ -96,6 +96,37 @@ async fn stock_quote_endpoints_db_semantics() {
     assert_eq!(json["quotes"][0]["date"], "2026-04-29");
     assert_eq!(json["quotes"].as_array().map(Vec::len), Some(1));
 
+    // 還原權值：預設不附；4/30 除息 1 元，4/29 收盤 101 還原成 100，以 4/30 為基準。
+    let (_, json) = get(&format!("/api/v1/stocks/{SYMBOL}/price-history")).await;
+    assert_eq!(json["adjusted"], false);
+    assert!(json["quotes"][0].get("adjusted").is_none(), "{json}");
+    seed(
+        pool,
+        &[
+            r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2")
+               VALUES ($1, 2026, 2025, '', 1, 0, 1, '2026-04-30', '-')"#,
+        ],
+    )
+    .await;
+    let (status, json) = get(&format!(
+        "/api/v1/stocks/{SYMBOL}/price-history?adjusted=true"
+    ))
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["adjusted"], true);
+    assert_eq!(json["quotes"][0]["adjusted"]["factor"], 1.0);
+    assert_eq!(json["quotes"][0]["adjusted"]["closing_price"], 103.5);
+    assert_eq!(json["quotes"][1]["closing_price"], 101.0);
+    assert_eq!(json["quotes"][1]["adjusted"]["factor"], 0.9901);
+    assert_eq!(json["quotes"][1]["adjusted"]["closing_price"], 100.0);
+    assert_eq!(json["quotes"][1]["adjusted"]["highest_price"], 100.99);
+    // 區間只到除息前一天時，基準是 4/29 本身，不受之後的除息影響。
+    let (_, json) = get(&format!(
+        "/api/v1/stocks/{SYMBOL}/price-history?adjusted=true&to=2026-04-29"
+    ))
+    .await;
+    assert_eq!(json["quotes"][0]["adjusted"]["closing_price"], 101.0);
+
     let (status, json) = get(&format!("/api/v1/stocks/{SYMBOL}/profile")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["stock"]["security_code"], SYMBOL);

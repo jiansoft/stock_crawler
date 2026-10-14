@@ -3,13 +3,15 @@
 //! 技術訊號出現後的表現，以「基準日收盤 → 之後第 N 個交易日收盤」的還原報酬衡量
 //! （除權息、減資、分割依參考價還原，等同含息報酬）。交易日 T 收盤時回填 T 往前第 N 個
 //! 交易日的 N 日報酬，資料表 `daily_forward_return` 每個基準日一列、每個天期一欄。
+//!
+//! 反過來看，基準日 T−N 的 N 日報酬就是 T 的近 N 日報酬，相對強度排行直接由此計算。
 
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 
-/// 回填的天期（交易日數）。
-pub const FORWARD_HORIZONS: [usize; 3] = [5, 20, 60];
+/// 回填的天期（交易日數）。120、240 日供相對強度排行使用。
+pub const FORWARD_HORIZONS: [usize; 5] = [5, 20, 60, 120, 240];
 
 /// 未來報酬的存取。
 #[async_trait]

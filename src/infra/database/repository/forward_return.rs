@@ -9,12 +9,12 @@ use crate::{
     infra::database::{self, repository::quote::PgQuoteRepository},
 };
 
-/// `$1`（含）之前最近 `$2` 個交易日；走 `"Date" DESC` 索引，回看 200 天足以涵蓋 60 個交易日。
+/// `$1`（含）之前最近 `$2` 個交易日；走 `"Date" DESC` 索引，回看 400 天足以涵蓋 240 個交易日。
 const TRADING_DATES_SQL: &str = r#"
 SELECT DISTINCT "Date"
 FROM "DailyQuotes"
 WHERE "Date" <= $1
-  AND "Date" > $1 - 200
+  AND "Date" > $1 - 400
 ORDER BY "Date" DESC
 LIMIT $2
 "#;
@@ -92,17 +92,21 @@ returns AS (
     FROM ending e
     LEFT JOIN factors f USING (stock_symbol)
 )
-INSERT INTO daily_forward_return AS t (date, stock_symbol, return_5d, return_20d, return_60d)
+INSERT INTO daily_forward_return AS t (date, stock_symbol, return_5d, return_20d, return_60d, return_120d, return_240d)
 SELECT $1,
        r.stock_symbol,
        CASE WHEN $3 = 5 THEN r.value END,
        CASE WHEN $3 = 20 THEN r.value END,
-       CASE WHEN $3 = 60 THEN r.value END
+       CASE WHEN $3 = 60 THEN r.value END,
+       CASE WHEN $3 = 120 THEN r.value END,
+       CASE WHEN $3 = 240 THEN r.value END
 FROM returns r
 ON CONFLICT (date, stock_symbol) DO UPDATE
 SET return_5d = COALESCE(EXCLUDED.return_5d, t.return_5d),
     return_20d = COALESCE(EXCLUDED.return_20d, t.return_20d),
     return_60d = COALESCE(EXCLUDED.return_60d, t.return_60d),
+    return_120d = COALESCE(EXCLUDED.return_120d, t.return_120d),
+    return_240d = COALESCE(EXCLUDED.return_240d, t.return_240d),
     updated_at = CURRENT_TIMESTAMP
 "#;
 
@@ -161,8 +165,14 @@ mod tests {
 
     use super::*;
 
-    /// (代號, 5 日, 20 日, 60 日報酬)。
-    type ReturnRow = (String, Option<Decimal>, Option<Decimal>, Option<Decimal>);
+    /// (代號, 5 日, 20 日, 60 日, 240 日報酬)。
+    type ReturnRow = (
+        String,
+        Option<Decimal>,
+        Option<Decimal>,
+        Option<Decimal>,
+        Option<Decimal>,
+    );
 
     /// 交易日由新到舊；報酬依除息與減資還原，不同天期寫在各自欄位、互不覆蓋。
     #[tokio::test]
@@ -273,6 +283,9 @@ mod tests {
         repo.upsert_forward_returns(day(2), day(5), 20)
             .await
             .expect("寫入 20 日");
+        repo.upsert_forward_returns(day(2), day(8), 240)
+            .await
+            .expect("寫入 240 日");
         // 重算 5 日不影響 20 日欄位。
         repo.upsert_forward_returns(day(2), day(8), 5)
             .await
@@ -284,7 +297,7 @@ mod tests {
             .expect("寫入後的筆數");
         assert_eq!(counts.forward_returns, 2);
         let rows: Vec<ReturnRow> = sqlx::query_as(
-            "SELECT stock_symbol, return_5d, return_20d, return_60d FROM daily_forward_return
+            "SELECT stock_symbol, return_5d, return_20d, return_60d, return_240d FROM daily_forward_return
                  WHERE stock_symbol = ANY($1) ORDER BY 1",
         )
         .bind(symbols)
@@ -295,8 +308,20 @@ mod tests {
         assert_eq!(
             rows,
             [
-                ("79979FA".to_owned(), Some(dec!(10)), Some(dec!(0)), None),
-                ("79979FB".to_owned(), Some(dec!(10)), Some(dec!(0)), None),
+                (
+                    "79979FA".to_owned(),
+                    Some(dec!(10)),
+                    Some(dec!(0)),
+                    None,
+                    Some(dec!(10))
+                ),
+                (
+                    "79979FB".to_owned(),
+                    Some(dec!(10)),
+                    Some(dec!(0)),
+                    None,
+                    Some(dec!(10))
+                ),
             ]
         );
     }

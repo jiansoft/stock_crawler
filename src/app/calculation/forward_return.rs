@@ -92,15 +92,15 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 10, d).expect("有效日期")
     }
 
-    /// 交易日足夠時三個天期都回填，基準日是往前第 N 個交易日。
+    /// 交易日足夠時每個天期都回填，基準日是往前第 N 個交易日。
     #[tokio::test]
     async fn run_fills_every_horizon() {
         let end = day(13);
         let repo = FakeRepo {
-            dates: calendar(end, 61),
+            dates: calendar(end, 241),
             ..Default::default()
         };
-        assert_eq!(run(&repo, end).await.expect("回填成功"), 30);
+        assert_eq!(run(&repo, end).await.expect("回填成功"), 50);
         let writes = repo.writes.lock().expect("測試鎖").clone();
         assert_eq!(
             writes,
@@ -108,11 +108,13 @@ mod tests {
                 (end - chrono::Days::new(5), end, 5),
                 (end - chrono::Days::new(20), end, 20),
                 (end - chrono::Days::new(60), end, 60),
+                (end - chrono::Days::new(120), end, 120),
+                (end - chrono::Days::new(240), end, 240),
             ]
         );
     }
 
-    /// 交易日不足 60 日只回填較短天期；結束日不是交易日時都不寫。
+    /// 交易日不足的天期不回填；結束日不是交易日時都不寫。
     #[tokio::test]
     async fn run_skips_horizons_without_enough_history() {
         let end = day(13);

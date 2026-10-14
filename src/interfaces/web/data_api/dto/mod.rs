@@ -4,7 +4,7 @@
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
 //! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
-//! `financial_health`、`chip`、`screening`、`market`、`industries`、`portfolio`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals` 與 `signal_history` 十八個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! `financial_health`、`chip`、`screening`、`market`、`industries`、`portfolio`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals`、`signal_history` 與 `relative_strength` 十九個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
@@ -19,6 +19,7 @@ mod market;
 mod peers;
 mod portfolio;
 mod portfolio_history;
+mod relative_strength;
 mod screening;
 mod signal_history;
 mod signals;
@@ -77,6 +78,9 @@ pub(super) use portfolio::{
 pub(super) use portfolio_history::{
     PortfolioHistoryParams, PortfolioHistoryResponse, PortfolioMonth,
 };
+pub(super) use relative_strength::{
+    RelativeStrengthItem, RelativeStrengthParams, RelativeStrengthResponse,
+};
 pub(super) use screening::{
     ScreenedStock, SortOrderParamValue, StockScreenSortValue, StockScreeningParams,
     StockScreeningResponse,
@@ -90,9 +94,9 @@ pub(super) use signals::{
     SignalStock,
 };
 pub(super) use stocks::{
-    DailyQuote, HistoricalQuote, HistoryParams, LatestQuoteResponse, PriceHistoryResponse,
-    QuoteHistoryRecord, RealtimeSnapshotResponse, SearchParams, SearchResponse, Stock,
-    StockProfile,
+    AdjustedPrices, DailyQuote, HistoricalQuote, HistoryParams, LatestQuoteResponse,
+    PriceHistoryResponse, QuoteHistoryRecord, RealtimeSnapshotResponse, SearchParams,
+    SearchResponse, Stock, StockProfile,
 };
 pub(super) use technicals::{
     TechnicalIndicatorsParams, TechnicalIndicatorsResponse, TechnicalPoint, TechnicalSignalItem,

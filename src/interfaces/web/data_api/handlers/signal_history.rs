@@ -14,8 +14,8 @@ use rust_decimal::Decimal;
 
 use super::{
     database_error, decimal_to_f64, ensure_stock_exists, error_response, industry_error,
-    market_id_for_stocks, parse_optional_date, signal_filter_error, signal_indicator_order,
-    signal_kind_order,
+    market_id_for_stocks, parse_optional_date, round2, round4, signal_filter_error,
+    signal_indicator_order, signal_kind_order,
 };
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
@@ -473,16 +473,6 @@ fn build_stock_signals(
             })
             .collect(),
     }
-}
-
-/// 四捨五入到小數兩位。
-fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
-}
-
-/// 四捨五入到小數四位（比例）。
-fn round4(value: f64) -> f64 {
-    (value * 10_000.0).round() / 10_000.0
 }
 
 #[cfg(test)]
