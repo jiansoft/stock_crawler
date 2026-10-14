@@ -239,6 +239,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "通知持股董監質押變動",
             event::taiwan_stock::insider_pledge::execute,
         ),
+        // 10:20（週六）每週市場摘要：產業 RS 中位數與一週變化、外資／投信近 5 日產業淨買賣、
+        // 持股 RS 一週變化；週五的籌碼 21:50 入庫、報酬收盤後回填，週六早上資料已齊。
+        create_job(
+            "0 20 10 * * Sat",
+            "每週市場摘要",
+            event::taiwan_stock::weekly_market::execute,
+        ),
         // 10:30（週六）持股千張大戶比例週報：集保股權分散表每週六公布上週五的資料，
         // 與 Redis 中上週的快照比較；同一份資料只通知一次。
         create_job(

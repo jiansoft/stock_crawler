@@ -30,6 +30,8 @@ pub mod quarter_eps;
 pub mod technical_alert;
 /// 持股估值週報（本益比／股價淨值比位於近 5 年高檔或低檔）
 pub mod valuation_alert;
+/// 每週市場摘要（產業相對強度、法人產業淨買賣、持股 RS 變化）
+pub mod weekly_market;
 
 use rust_decimal::Decimal;
 
