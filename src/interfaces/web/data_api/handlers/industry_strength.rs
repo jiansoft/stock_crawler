@@ -18,6 +18,7 @@ use super::{
     error_response, market_id_for_stocks, parse_optional_date, repository_error, round2, round4,
 };
 use crate::domain::quote::forward_return::ForwardReturnRepository;
+use crate::domain::quote::relative_strength::{group_by_industry, median_score};
 use crate::infra::database::repository::quote::PgQuoteRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, IndustryLeader, IndustryStrengthItem, IndustryStrengthParams,
@@ -101,36 +102,6 @@ pub(crate) async fn industry_strength(Query(params): Query<IndustryStrengthParam
         prior,
     ))
     .into_response()
-}
-
-/// 依市場篩選後把股票分到各產業（未分類略過），保持由強到弱的順序。
-fn group_by_industry(
-    scored: Vec<ScoredStock>,
-    market_id: i32,
-) -> BTreeMap<String, Vec<ScoredStock>> {
-    let mut groups: BTreeMap<String, Vec<ScoredStock>> = BTreeMap::new();
-    for stock in scored {
-        if stock.row.industry.is_empty() || (market_id != 0 && stock.row.market_id != market_id) {
-            continue;
-        }
-        groups
-            .entry(stock.row.industry.clone())
-            .or_default()
-            .push(stock);
-    }
-    groups
-}
-
-/// 分數中位數；偶數檔取中間兩檔的平均。
-fn median_score(stocks: &[ScoredStock]) -> Option<f64> {
-    let mut scores: Vec<u8> = stocks.iter().map(|stock| stock.rs_score).collect();
-    scores.sort_unstable();
-    let middle = scores.len() / 2;
-    match scores.len() {
-        0 => None,
-        len if len % 2 == 1 => Some(f64::from(scores[middle])),
-        _ => Some((f64::from(scores[middle - 1]) + f64::from(scores[middle])) / 2.0),
-    }
 }
 
 /// 組成回應：各產業統計、與前期中位數比較，依中位數排名（同中位數同名次、再依產業名稱）。
