@@ -236,3 +236,109 @@ async fn industry_flow_endpoint_db_semantics() {
     cleanup(pool).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+/// 融資融券：期初取期間第一天的前日餘額、只列資料日有融資資料的股票、各排序鍵、券資比、篩選與驗證。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn margin_ranking_endpoint_db_semantics() {
+    let Some(pool) = pool_or_skip("margin_ranking_endpoint_db_semantics").await else {
+        return;
+    };
+    cleanup(pool).await;
+    seed(pool).await;
+    // FA：03-02 融資 1000→1100、融券 10→20；03-03 融資 1100→1300、融券 20→15。
+    // FB：只有 03-03，融資 500→400、融券 0→100。FC 沒有融資資料，不列入。
+    for (date, symbol, margin, short) in [
+        ("1988-03-02", "79979FA", [1000, 1100], [10, 20]),
+        ("1988-03-03", "79979FA", [1100, 1300], [20, 15]),
+        ("1988-03-03", "79979FB", [500, 400], [0, 100]),
+    ] {
+        sqlx::query(
+            r#"UPDATE chip_daily SET margin_previous = $3, margin_balance = $4, short_previous = $5, short_balance = $6
+               WHERE "date" = $1::date AND stock_symbol = $2"#,
+        )
+        .bind(date)
+        .bind(symbol)
+        .bind(margin[0])
+        .bind(margin[1])
+        .bind(short[0])
+        .bind(short[1])
+        .execute(pool)
+        .await
+        .expect("種入融資融券");
+    }
+
+    let (status, json) =
+        get("/api/v1/market/margin-ranking?date=1988-03-05&days=2&limit=100").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data_as_of"], "1988-03-03");
+    assert_eq!(json["from"], "1988-03-02");
+    assert_eq!(json["days"], 2);
+    assert_eq!(json["rank_by"], "margin_increase");
+    assert_eq!(ranked(&json), [("79979FA".to_owned(), 1)]);
+    let fa = &json["items"][0];
+    assert_eq!(
+        (fa["margin_balance"].as_i64(), fa["margin_change"].as_i64()),
+        (Some(1300), Some(300))
+    );
+    assert_eq!(fa["margin_change_percent"], 30.0);
+    assert_eq!(
+        (fa["short_balance"].as_i64(), fa["short_change"].as_i64()),
+        (Some(15), Some(5))
+    );
+    assert_eq!(fa["short_margin_ratio"], 1.15);
+    assert_eq!(fa["industry"], "半導體業");
+    assert_eq!(fa["closing_price"], 10.0);
+
+    let (_, json) = get("/api/v1/market/margin-ranking?date=1988-03-03&limit=100").await;
+    assert_eq!(json["items"][0]["margin_change"], 200, "只比較資料日一天");
+    let (_, json) = get(
+        "/api/v1/market/margin-ranking?date=1988-03-03&days=2&rank_by=margin_decrease&limit=100",
+    )
+    .await;
+    assert_eq!(ranked(&json), [("79979FB".to_owned(), 1)]);
+    assert_eq!(json["items"][0]["margin_change_percent"], -20.0);
+    let (_, json) = get(
+        "/api/v1/market/margin-ranking?date=1988-03-03&days=2&rank_by=short_margin_ratio&limit=100",
+    )
+    .await;
+    assert_eq!(
+        ranked(&json),
+        [("79979FB".to_owned(), 1), ("79979FA".to_owned(), 2)]
+    );
+    assert_eq!(json["items"][0]["short_margin_ratio"], 25.0);
+    let (_, json) = get(
+        "/api/v1/market/margin-ranking?date=1988-03-03&days=2&rank_by=short_increase&market=tpex&limit=100",
+    )
+    .await;
+    assert_eq!(ranked(&json), [("79979FB".to_owned(), 1)]);
+    let (_, json) = get(
+        "/api/v1/market/margin-ranking?date=1988-03-03&days=2&rank_by=short_decrease&industry=%E5%8D%8A%E5%B0%8E%E9%AB%94%E6%A5%AD&limit=100",
+    )
+    .await;
+    assert_eq!(json["industry"], "半導體業");
+    assert!(
+        json["items"].as_array().is_some_and(Vec::is_empty),
+        "{json}"
+    );
+
+    for query in [
+        "days=0",
+        "days=61",
+        "rank_by=volume",
+        "market=otc",
+        "limit=0",
+        "limit=101",
+        "date=1988-3-3",
+        "industry=%E4%B8%8D%E5%AD%98%E5%9C%A8%E7%94%A2%E6%A5%AD",
+    ] {
+        let (status, _) = get(&format!("/api/v1/market/margin-ranking?{query}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+    let (status, _) = get("/api/v1/market/margin-ranking?date=1900-01-01").await;
+    cleanup(pool).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

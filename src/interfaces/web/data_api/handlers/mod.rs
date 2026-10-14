@@ -19,6 +19,7 @@ mod industries;
 mod industry_flow;
 mod industry_strength;
 mod institutional_flow;
+mod margin_ranking;
 mod market_calendar;
 mod market_movers;
 mod market_rankings;
@@ -58,6 +59,7 @@ pub(super) use industries::{__path_industry_performance, industry_performance};
 pub(super) use industry_flow::{__path_industry_flow, industry_flow};
 pub(super) use industry_strength::{__path_industry_strength, industry_strength};
 pub(super) use institutional_flow::{__path_institutional_flow, institutional_flow};
+pub(super) use margin_ranking::{__path_margin_ranking, margin_ranking};
 pub(super) use market_calendar::{__path_dividend_calendar, dividend_calendar};
 pub(super) use market_movers::{__path_market_movers, market_movers};
 pub(super) use market_rankings::{
