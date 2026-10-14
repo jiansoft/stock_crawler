@@ -211,7 +211,7 @@ log/                 # runtime 檔案日誌輸出目錄
 
 + `SEQ_SERVER_URL`、`SEQ_API_KEY`：Seq 日誌收集服務網址與 API Key；未設定 `SEQ_SERVER_URL` 時停用 Seq 轉送。
 + `LOG_FILE_MAX_SIZE_MB`、`LOG_FILE_MAX_AGE_DAYS`：覆蓋檔案日誌的大小上限與保留天數。
-+ `FILE_LOG_LEVEL`：檔案日誌等級過濾，預設 `info,html5ever=off,rustls::msgs::handshake=error`。
++ `FILE_LOG_LEVEL`：檔案日誌等級過濾，預設 `info,html5ever=off,rustls::msgs::handshake=error,tokio_cron_scheduler=warn`。
 + `FUGLE_API_KEY`：Fugle 日內行情 API 金鑰（即時報價備援）。
 + `TELEGRAM_TOKEN`、`TELEGRAM_ALLOWED`：Telegram Bot 與允許通知的 chat 設定。
 + `POSTGRESQL_HOST`、`POSTGRESQL_PORT`、`POSTGRESQL_USER`、`POSTGRESQL_PASSWORD`、`POSTGRESQL_DB`：PostgreSQL 連線設定。
