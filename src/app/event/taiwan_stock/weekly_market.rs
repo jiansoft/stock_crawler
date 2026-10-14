@@ -216,8 +216,8 @@ fn holding_moves(days: &[RelativeStrengthDay]) -> Vec<HoldingMove> {
             let (latest, oldest) = (group.first()?, group.last()?);
             (group.len() > 1).then(|| HoldingMove {
                 stock_symbol: latest.stock_symbol.clone(),
-                from: oldest.rs_score(),
-                to: latest.rs_score(),
+                from: oldest.rs_score,
+                to: latest.rs_score,
             })
         })
         .collect()

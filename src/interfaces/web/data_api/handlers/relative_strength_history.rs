@@ -67,7 +67,7 @@ fn build_history(
         .into_iter()
         .map(|row| RelativeStrengthPoint {
             date: row.date.to_string(),
-            rs_score: row.rs_score(),
+            rs_score: row.rs_score,
             rank: row.rank,
             universe: row.universe,
             weighted_return: round2(row.weighted),
@@ -134,13 +134,16 @@ mod tests {
             stock_symbol: "2330".to_owned(),
             date: chrono::NaiveDate::from_ymd_opt(2026, 10, day).expect("合法日期"),
             weighted: 12.345,
-            weaker,
+            rs_score: crate::domain::quote::relative_strength::percentile_score(
+                usize::try_from(weaker).expect("測試資料非負"),
+                usize::try_from(universe).expect("測試資料非負"),
+            ),
             rank: universe - weaker,
             universe,
         }
     }
 
-    /// 分數由 weaker／universe 換算；高低點同分取最近一次；變化＝最新減最舊；穿越由新到舊。
+    /// 分數取自每日分數；高低點同分取最近一次；變化＝最新減最舊；穿越由新到舊。
     #[test]
     fn build_history_scores_extremes_and_crossings() {
         // 由新到舊：13 日 99、12 日 50、9 日 40、8 日 85、7 日 99（universe 101 → 分數＝weaker × 98 ÷ 100 + 1）。

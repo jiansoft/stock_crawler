@@ -50,7 +50,10 @@ fn rs_day(symbol: &str, d: u32, weaker: i64) -> RelativeStrengthDay {
         stock_symbol: symbol.to_owned(),
         date: day(d),
         weighted: 0.0,
-        weaker,
+        rs_score: crate::domain::quote::relative_strength::percentile_score(
+            usize::try_from(weaker).expect("測試資料非負"),
+            101,
+        ),
         rank: 101 - weaker,
         universe: 101,
     }

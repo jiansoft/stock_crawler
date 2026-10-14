@@ -152,7 +152,7 @@ fn rs_turns(days: &[RelativeStrengthDay], date: NaiveDate) -> Vec<RsTurn> {
             if latest.date != date {
                 return None;
             }
-            let (current, before) = (latest.rs_score(), previous.rs_score());
+            let (current, before) = (latest.rs_score, previous.rs_score);
             let crossed = crossings(before, current);
             let direction = crossed.first()?.1;
             Some(RsTurn {
@@ -340,7 +340,10 @@ mod tests {
             stock_symbol: symbol.to_owned(),
             date: NaiveDate::from_ymd_opt(2026, 10, day).expect("有效日期"),
             weighted: 1.0,
-            weaker,
+            rs_score: crate::domain::quote::relative_strength::percentile_score(
+                usize::try_from(weaker).expect("測試資料非負"),
+                101,
+            ),
             rank: 101 - weaker,
             universe: 101,
         }

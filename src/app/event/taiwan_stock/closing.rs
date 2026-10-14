@@ -119,13 +119,15 @@ async fn ensure_quotes(date: NaiveDate) -> Result<()> {
     Ok(())
 }
 
-/// 收盤匯總最後兩步產生的衍生資料。
+/// 收盤匯總最後幾步產生的衍生資料（依計算順序：相對強度要用到未來報酬）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Derived {
     /// 當天的技術訊號（`daily_technical_signal`）。
     Signals,
     /// 5 個交易日前基準日的 5 日報酬（`daily_forward_return`）。
     ForwardReturns,
+    /// 當天的相對強度（`daily_relative_strength`）。
+    RelativeStrength,
 }
 
 impl Derived {
@@ -133,6 +135,7 @@ impl Derived {
         match self {
             Self::Signals => "技術訊號",
             Self::ForwardReturns => "未來報酬",
+            Self::RelativeStrength => "相對強度",
         }
     }
 }
@@ -150,6 +153,11 @@ async fn ensure_derived(date: NaiveDate) -> Result<()> {
             Derived::ForwardReturns => calculation::forward_return::calculate_forward_returns(date)
                 .await
                 .map(|_| ()),
+            Derived::RelativeStrength => {
+                calculation::relative_strength::calculate_relative_strength(date)
+                    .await
+                    .map(|_| ())
+            }
         }
     })
     .await?;
@@ -191,9 +199,9 @@ where
     }
     let after = missing_derived(repo.count_derived(date, base).await?);
     let title = if after.is_empty() {
-        "技術訊號／未來報酬已補算"
+        "收盤衍生資料已補算"
     } else {
-        "技術訊號／未來報酬仍缺漏"
+        "收盤衍生資料仍缺漏"
     };
     Ok(Some((
         title,
@@ -209,6 +217,9 @@ pub(crate) fn missing_derived(counts: DerivedCounts) -> Vec<Derived> {
     }
     if counts.forward_returns == 0 {
         missing.push(Derived::ForwardReturns);
+    }
+    if counts.relative_strength == 0 {
+        missing.push(Derived::RelativeStrength);
     }
     missing
 }
@@ -392,6 +403,11 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
     match calculation::forward_return::calculate_forward_returns(date).await {
         Ok(count) => tracing::info!("回填未來報酬結束:{count}"),
         Err(why) => tracing::error!("回填未來報酬失敗: {why:#}"),
+    }
+    // 相對強度要用到剛回填的未來報酬；失敗只記錄，19:00 完整性檢查會補算
+    match calculation::relative_strength::calculate_relative_strength(date).await {
+        Ok(count) => tracing::info!("寫入相對強度結束:{count}"),
+        Err(why) => tracing::error!("寫入相對強度失敗: {why:#}"),
     }
 
     // 清除記憶與Redis內所有的快取

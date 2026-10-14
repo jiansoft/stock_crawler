@@ -30,22 +30,12 @@ pub struct RelativeStrengthDay {
     pub date: NaiveDate,
     /// 加權報酬（%）。
     pub weighted: f64,
-    /// 加權報酬比它低的家數。
-    pub weaker: i64,
+    /// 相對強度分數 1–99。
+    pub rs_score: u8,
     /// 名次（比它強的家數＋1，同分同名次）。
     pub rank: i64,
     /// 當天計分的股票總數。
     pub universe: i64,
-}
-
-impl RelativeStrengthDay {
-    /// 相對強度分數 1–99。
-    pub fn rs_score(&self) -> u8 {
-        percentile_score(
-            usize::try_from(self.weaker).unwrap_or(0),
-            usize::try_from(self.universe).unwrap_or(0),
-        )
-    }
 }
 
 /// 比它弱的家數 `weaker` 在全體 `total` 中的百分位，換算成 1–99 分（只有一檔時為 99）。
@@ -221,15 +211,25 @@ pub fn median_score(stocks: &[ScoredStock]) -> Option<f64> {
 /// 相對強度歷史的查詢介面。
 #[async_trait]
 pub trait RelativeStrengthQuery: Send + Sync {
-    /// `until`（含）之前最近 `days` 個交易日，每天以上市櫃股票（不含 ETF）計分後取 `stock_symbols` 的分數，
-    /// 依代號、再由新到舊排列。報酬還沒回填的交易日沒有資料；上市未滿 240 個交易日、暫停交易
-    /// 或非上市櫃的股票沒有分數。
+    /// `until`（含）之前最近 `days` 個已寫入每日分數的交易日，取 `stock_symbols` 的分數，
+    /// 依代號、再由新到舊排列。上市未滿 240 個交易日、暫停交易、ETF 或非上市櫃的股票沒有分數。
     async fn fetch_relative_strength(
         &self,
         until: NaiveDate,
         days: u16,
         stock_symbols: &[String],
     ) -> Result<Vec<RelativeStrengthDay>>;
+}
+
+/// 每日分數的寫入介面。
+#[async_trait]
+pub trait RelativeStrengthRepository: Send + Sync {
+    /// 以 `scored`（當天全體分數）整天替換 `date` 的每日分數，回傳寫入列數。
+    async fn replace_relative_strength(
+        &self,
+        date: NaiveDate,
+        scored: &[ScoredStock],
+    ) -> Result<u64>;
 }
 
 /// 全體計分的查詢介面。
@@ -253,22 +253,13 @@ mod tests {
         NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
     }
 
-    /// 百分位分數：最弱 1、最強 99、只有一檔 99；`rs_score` 以 weaker／universe 換算。
+    /// 百分位分數：最弱 1、最強 99、只有一檔 99。
     #[test]
     fn percentile_score_maps_to_1_99() {
         assert_eq!(percentile_score(0, 5), 1);
         assert_eq!(percentile_score(4, 5), 99);
         assert_eq!(percentile_score(2, 5), 50);
         assert_eq!(percentile_score(0, 1), 99);
-        let day = RelativeStrengthDay {
-            stock_symbol: "2330".to_owned(),
-            date: NaiveDate::from_ymd_opt(2026, 10, 13).expect("合法日期"),
-            weighted: 1.0,
-            weaker: 50,
-            rank: 51,
-            universe: 101,
-        };
-        assert_eq!(day.rs_score(), 50);
     }
 
     /// 資料日與 20／60／120／240 日前的基準日；交易日不足為 None。
