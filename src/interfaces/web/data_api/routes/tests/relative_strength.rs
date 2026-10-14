@@ -180,3 +180,76 @@ async fn relative_strength_ranks_market_universe() {
         ]
     );
 }
+
+/// 個股歷史與排行同一算法：資料日的分數、名次、母體一致；沒有回填報酬的交易日略過；
+/// 未計分的股票回空清單；不存在 404、days 超界 422。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn relative_strength_history_matches_ranking() {
+    let Some(pool) = pool_or_skip("relative_strength_history_matches_ranking").await else {
+        return;
+    };
+    let dates = weekdays(242);
+    let end = dates[dates.len() - 2];
+    let latest = dates[dates.len() - 1];
+    cleanup(pool).await;
+    seed(pool, &dates).await;
+
+    let (status, ra) = get(&format!(
+        "/api/v1/stocks/79979RA/relative-strength?date={latest}&days=2"
+    ))
+    .await;
+    let (_, rb) = get(&format!(
+        "/api/v1/stocks/79979RB/relative-strength?date={end}"
+    ))
+    .await;
+    let (rc_status, rc) = get(&format!(
+        "/api/v1/stocks/79979RC/relative-strength?date={end}"
+    ))
+    .await;
+    let mut errors = Vec::new();
+    for path in [
+        "/api/v1/stocks/79979ZZ/relative-strength",
+        "/api/v1/stocks/79979RA/relative-strength?days=0",
+        "/api/v1/stocks/79979RA/relative-strength?days=121",
+        "/api/v1/stocks/79979RA/relative-strength?date=1992-02-30",
+    ] {
+        errors.push(get(path).await.0);
+    }
+    cleanup(pool).await;
+
+    assert_eq!(status, StatusCode::OK, "{ra}");
+    assert_eq!(ra["days"], 2);
+    assert_eq!(
+        ra["data_as_of"],
+        end.to_string(),
+        "最新交易日沒有報酬時略過"
+    );
+    assert_eq!(ra["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(ra["items"][0]["rs_score"], 99);
+    assert_eq!(ra["items"][0]["rank"], 1);
+    assert_eq!(ra["items"][0]["universe"], 2);
+    assert_eq!(ra["items"][0]["weighted_return"], 19.0);
+    assert_eq!(ra["latest_score"], 99);
+    assert_eq!(ra["score_change"], 0);
+    assert_eq!(rb["items"][0]["rs_score"], 1);
+    assert_eq!(rb["items"][0]["rank"], 2);
+    assert_eq!(rb["low_date"], end.to_string());
+
+    assert_eq!(rc_status, StatusCode::OK);
+    assert!(rc["data_as_of"].is_null());
+    assert_eq!(rc["items"].as_array().map(Vec::len), Some(0));
+
+    assert_eq!(
+        errors,
+        [
+            StatusCode::NOT_FOUND,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ]
+    );
+}

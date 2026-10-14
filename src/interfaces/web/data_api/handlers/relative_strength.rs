@@ -291,7 +291,7 @@ pub(super) fn market_label(market_id: i32) -> &'static str {
 }
 
 /// 比它弱的家數 `weaker` 在全體 `total` 中的百分位，換算成 1–99 分（只有一檔時為 99）。
-fn percentile_score(weaker: usize, total: usize) -> u8 {
+pub(super) fn percentile_score(weaker: usize, total: usize) -> u8 {
     if total <= 1 {
         return 99;
     }

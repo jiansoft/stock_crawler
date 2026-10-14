@@ -1,4 +1,5 @@
-//! `/market/relative-strength` 相對強度排行的 request、response 與 OpenAPI schema。
+//! `/market/relative-strength` 相對強度排行與 `/stocks/{symbol}/relative-strength` 個股相對強度
+//! 歷史的 request、response 與 OpenAPI schema。
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -69,4 +70,71 @@ pub(crate) struct RelativeStrengthResponse {
     pub(crate) matched: usize,
     /// 依 `order` 排序的前 `limit` 筆。
     pub(crate) items: Vec<RelativeStrengthItem>,
+}
+
+/// 個股相對強度歷史的 query string。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(crate) struct RelativeStrengthHistoryParams {
+    /// 最後一個交易日（`YYYY-MM-DD`）；省略為今天，遇休市日或尚未算好的交易日自動略過。
+    pub(crate) date: Option<String>,
+    /// 往回幾個交易日，預設 60，範圍 1–120。
+    #[param(minimum = 1, maximum = 120, default = 60)]
+    pub(crate) days: Option<u16>,
+}
+
+/// 單一交易日的相對強度。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct RelativeStrengthPoint {
+    /// 交易日。
+    pub(crate) date: String,
+    /// 相對強度分數 1–99（與 `/market/relative-strength` 同一算法）。
+    pub(crate) rs_score: u8,
+    /// 當天在上市櫃全體中的名次。
+    pub(crate) rank: i64,
+    /// 當天參與計分的股票數。
+    pub(crate) universe: i64,
+    /// 加權報酬（%）＝ 0.4 × 近 60 日 + 0.3 × 近 120 日 + 0.3 × 近 240 日。
+    pub(crate) weighted_return: f64,
+}
+
+/// 相對強度分數穿越門檻的轉折。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct RelativeStrengthCrossing {
+    /// 穿越當天。
+    pub(crate) date: String,
+    /// 門檻：80（強勢）或 50（中位）。
+    pub(crate) threshold: u8,
+    /// `up`：前一個交易日低於門檻、當天達到門檻；`down`：前一個交易日達到門檻、當天低於門檻。
+    pub(crate) direction: String,
+    /// 前一個交易日的分數。
+    pub(crate) from_score: u8,
+    /// 當天的分數。
+    pub(crate) to_score: u8,
+}
+
+/// 個股相對強度歷史。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct RelativeStrengthHistoryResponse {
+    /// 股票代號。
+    pub(crate) stock_symbol: String,
+    /// 最新一筆的交易日；期間內未計分（上市未滿 240 個交易日、暫停交易或非上市櫃）為 `null`。
+    pub(crate) data_as_of: Option<String>,
+    /// 查詢的交易日數。
+    pub(crate) days: u16,
+    /// 最新分數。
+    pub(crate) latest_score: Option<u8>,
+    /// 期間內最高分數。
+    pub(crate) high_score: Option<u8>,
+    /// 期間內最高分數最近一次出現的交易日。
+    pub(crate) high_date: Option<String>,
+    /// 期間內最低分數。
+    pub(crate) low_score: Option<u8>,
+    /// 期間內最低分數最近一次出現的交易日。
+    pub(crate) low_date: Option<String>,
+    /// 最新分數減期間第一筆分數。
+    pub(crate) score_change: Option<i16>,
+    /// 期間內穿越 50／80 門檻的轉折，由新到舊。
+    pub(crate) crossings: Vec<RelativeStrengthCrossing>,
+    /// 每個交易日的分數，由新到舊。
+    pub(crate) items: Vec<RelativeStrengthPoint>,
 }

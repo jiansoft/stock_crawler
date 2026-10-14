@@ -146,6 +146,7 @@ fn openapi_contains_all_data_api_paths() {
         "/api/v1/stocks/{symbol}/technicals",
         "/api/v1/market/signals",
         "/api/v1/market/relative-strength",
+        "/api/v1/stocks/{symbol}/relative-strength",
         "/api/v1/market/cagr-ranking",
         "/api/v1/market/cagr-ranking/{stock_symbol}",
         "/api/v1/healthz",
