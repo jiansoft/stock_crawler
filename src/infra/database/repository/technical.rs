@@ -10,8 +10,8 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     domain::quote::technical::{
-        PriceAdjustment, PriceBar, PriceBarRepository, StockTechnicalSignal, TechnicalSignal,
-        TechnicalSignalQuery, TechnicalSignalRepository,
+        PriceAdjustment, PriceBar, PriceBarRepository, SignalOutcome, StockTechnicalSignal,
+        TechnicalSignal, TechnicalSignalQuery, TechnicalSignalRepository,
     },
     infra::database::{self, repository::quote::PgQuoteRepository},
 };
@@ -176,6 +176,22 @@ WHERE date = $1 AND stock_symbol = ANY($2)
 ORDER BY stock_symbol, indicator, kind
 "#;
 
+/// `$1`～`$2` 期間 `$3` 來源的訊號出現後 20 個交易日的還原報酬，依來源與種類統計。
+const SIGNAL_OUTCOMES_SQL: &str = r#"
+SELECT t.indicator,
+       t.kind,
+       COUNT(*) AS samples,
+       AVG(r.return_20d)::float8 AS avg_return,
+       AVG(CASE WHEN r.return_20d > 0 THEN 1.0 ELSE 0.0 END)::float8 AS win_rate
+FROM daily_technical_signal t
+JOIN daily_forward_return r ON r.date = t.date AND r.stock_symbol = t.stock_symbol
+WHERE t.date BETWEEN $1 AND $2
+  AND t.indicator = ANY($3)
+  AND r.return_20d IS NOT NULL
+GROUP BY t.indicator, t.kind
+ORDER BY t.indicator, t.kind
+"#;
+
 #[async_trait]
 impl TechnicalSignalQuery for PgQuoteRepository {
     async fn fetch_signals(
@@ -197,6 +213,33 @@ impl TechnicalSignalQuery for PgQuoteRepository {
                     signal: TechnicalSignal::from_names(&indicator, &kind, description)?,
                 })
             })
+            .collect())
+    }
+
+    async fn fetch_signal_outcomes(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+        indicators: &[&str],
+    ) -> Result<Vec<SignalOutcome>> {
+        let indicators: Vec<String> = indicators.iter().map(|s| (*s).to_owned()).collect();
+        let rows: Vec<(String, String, i64, f64, f64)> = sqlx::query_as(SIGNAL_OUTCOMES_SQL)
+            .bind(from)
+            .bind(to)
+            .bind(&indicators)
+            .fetch_all(database::get_connection())
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(indicator, kind, samples, avg_return, win_rate)| SignalOutcome {
+                    indicator,
+                    kind,
+                    samples,
+                    avg_return,
+                    win_rate,
+                },
+            )
             .collect())
     }
 }
@@ -431,6 +474,77 @@ mod tests {
                 adjustment(day(1991, 9, 2), 0.0, 1.0, 1.0),
                 adjustment(day(1991, 10, 1), 0.0, 0.0, 0.7),
             ]
+        );
+    }
+
+    /// 只統計指定來源、已滿 20 日的訊號；依來源與種類分組。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn signal_outcomes_group_by_indicator_and_kind() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 signal_outcomes_group_by_indicator_and_kind：無資料庫連接");
+            return;
+        }
+        let pool = database::get_connection();
+        let day = |d| NaiveDate::from_ymd_opt(1989, 3, d).expect("有效日期");
+        let cleanup = || async {
+            for sql in [
+                "DELETE FROM daily_technical_signal WHERE stock_symbol LIKE '79979O_'",
+                "DELETE FROM daily_forward_return WHERE stock_symbol LIKE '79979O_'",
+            ] {
+                sqlx::query(sql).execute(pool).await.expect("清理測試資料");
+            }
+        };
+        cleanup().await;
+
+        // OA、OB 黃金交叉 +10%、−2%；OC 死亡交叉未滿 20 日；OD 是其他來源；OE 在期間外。
+        for (d, symbol, indicator, kind, value) in [
+            (3, "79979OA", "kd", "golden_cross", Some(10)),
+            (3, "79979OB", "kd", "golden_cross", Some(-2)),
+            (3, "79979OC", "kd", "death_cross", None),
+            (3, "79979OD", "rsi14", "overbought", Some(5)),
+            (28, "79979OE", "kd", "golden_cross", Some(50)),
+        ] {
+            sqlx::query(
+                "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
+                 VALUES ($1, $2, $3, $4, '測試')",
+            )
+            .bind(day(d))
+            .bind(symbol)
+            .bind(indicator)
+            .bind(kind)
+            .execute(pool)
+            .await
+            .expect("寫入測試訊號");
+            sqlx::query(
+                "INSERT INTO daily_forward_return (date, stock_symbol, return_20d) VALUES ($1, $2, $3)",
+            )
+            .bind(day(d))
+            .bind(symbol)
+            .bind(value.map(rust_decimal::Decimal::from))
+            .execute(pool)
+            .await
+            .expect("寫入測試報酬");
+        }
+
+        let outcomes = PgQuoteRepository::new()
+            .fetch_signal_outcomes(day(1), day(20), &["kd"])
+            .await
+            .expect("統計訊號表現");
+        cleanup().await;
+        assert_eq!(
+            outcomes,
+            [SignalOutcome {
+                indicator: "kd".to_owned(),
+                kind: "golden_cross".to_owned(),
+                samples: 2,
+                avg_return: 4.0,
+                win_rate: 0.5,
+            }]
         );
     }
 }
