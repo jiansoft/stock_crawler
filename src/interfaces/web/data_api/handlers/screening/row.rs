@@ -64,6 +64,8 @@ pub(super) struct ScreenedStockRow {
     health_quarter_year: Option<i32>,
     /// 季報指標期間季別。
     health_quarter: Option<i16>,
+    /// 相對強度分數。
+    rs_score: Option<i16>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -145,6 +147,7 @@ impl From<ScreenedStockRow> for ScreenedStock {
             ),
             free_cash_flow_ttm: row.free_cash_flow_ttm,
             health_period,
+            rs_score: row.rs_score.and_then(|score| u8::try_from(score).ok()),
         }
     }
 }

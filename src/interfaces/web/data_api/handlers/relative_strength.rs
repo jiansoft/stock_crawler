@@ -63,16 +63,28 @@ WHERE r60.date = $3
 
 /// 計分母體中的一檔股票。
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
-struct UniverseRow {
-    stock_symbol: String,
-    name: String,
-    market_id: i32,
-    industry: String,
-    return_20d: Option<f64>,
-    return_60d: f64,
-    return_120d: f64,
-    return_240d: f64,
-    closing_price: Option<f64>,
+pub(super) struct UniverseRow {
+    pub(super) stock_symbol: String,
+    pub(super) name: String,
+    pub(super) market_id: i32,
+    pub(super) industry: String,
+    pub(super) return_20d: Option<f64>,
+    pub(super) return_60d: f64,
+    pub(super) return_120d: f64,
+    pub(super) return_240d: f64,
+    pub(super) closing_price: Option<f64>,
+}
+
+/// 已在全體中計分排名的一檔股票。
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ScoredStock {
+    /// 名次（比它強的家數＋1，同分同名次）。
+    pub(super) rank: usize,
+    /// 相對強度分數 1–99。
+    pub(super) rs_score: u8,
+    /// 加權報酬（%）。
+    pub(super) weighted: f64,
+    pub(super) row: UniverseRow,
 }
 
 impl UniverseRow {
@@ -144,19 +156,31 @@ pub(crate) async fn relative_strength(Query(params): Query<RelativeStrengthParam
     }
 
     let until = date.unwrap_or_else(|| Local::now().date_naive());
-    let dates = match PgQuoteRepository::new()
+    match load_scores(until).await {
+        Ok(Some((data_date, scored))) => {
+            Json(build_response(data_date, &params, market_id, scored)).into_response()
+        }
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "查無相對強度資料"),
+        Err(response) => *response,
+    }
+}
+
+/// 載入 `until`（含）之前最近一個已算好報酬的交易日的計分母體，並對全體計分排名。
+///
+/// 最新一個交易日的報酬可能還沒回填（例如收盤匯總尚未跑完），最多往前退一天；兩天都沒有
+/// 資料回 `Ok(None)`。查詢失敗時回已組好的安全 500 回應，呼叫端直接回傳即可。
+pub(super) async fn load_scores(
+    until: NaiveDate,
+) -> Result<Option<(NaiveDate, Vec<ScoredStock>)>, Box<Response>> {
+    let dates = PgQuoteRepository::new()
         .fetch_trading_dates(until, LONGEST + 2)
         .await
-    {
-        Ok(dates) => dates,
-        Err(error) => return repository_error(error),
-    };
-    // 最新一個交易日的報酬可能還沒回填，最多往前退一天。
+        .map_err(|error| Box::new(repository_error(error)))?;
     for offset in 0..2 {
         let Some(bases) = dates.get(offset..).and_then(base_dates) else {
             break;
         };
-        let rows: Vec<UniverseRow> = match sqlx::query_as(UNIVERSE_SQL)
+        let rows: Vec<UniverseRow> = sqlx::query_as(UNIVERSE_SQL)
             .bind(bases.end)
             .bind(bases.d20)
             .bind(bases.d60)
@@ -164,46 +188,62 @@ pub(crate) async fn relative_strength(Query(params): Query<RelativeStrengthParam
             .bind(bases.d240)
             .fetch_all(database::get_connection())
             .await
-        {
-            Ok(rows) => rows,
-            Err(error) => return database_error(error),
-        };
+            .map_err(|error| Box::new(database_error(error)))?;
         if !rows.is_empty() {
-            return Json(build_response(bases.end, &params, market_id, rows)).into_response();
+            return Ok(Some((bases.end, score_universe(rows))));
         }
     }
-    error_response(StatusCode::NOT_FOUND, "查無相對強度資料")
+    Ok(None)
 }
 
-/// 對全體計分與排名，再依市場、產業、代號篩選，依 `order` 排序後取前 `limit` 筆。
-fn build_response(
-    data_date: NaiveDate,
-    params: &RelativeStrengthParams,
-    market_id: i32,
-    rows: Vec<UniverseRow>,
-) -> RelativeStrengthResponse {
+/// 對全體計分與排名，由強到弱；同分同名次，並依代號排列讓輸出穩定。
+pub(super) fn score_universe(rows: Vec<UniverseRow>) -> Vec<ScoredStock> {
     let universe = rows.len();
-    let mut scored: Vec<(f64, UniverseRow)> =
+    let mut weighted: Vec<(f64, UniverseRow)> =
         rows.into_iter().map(|row| (row.weighted(), row)).collect();
-    // 由強到弱；同分依代號，讓輸出穩定。
-    scored.sort_by(|(a, row_a), (b, row_b)| {
+    weighted.sort_by(|(a, row_a), (b, row_b)| {
         b.total_cmp(a)
             .then_with(|| row_a.stock_symbol.cmp(&row_b.stock_symbol))
     });
 
-    let mut items = Vec::new();
+    let mut scored = Vec::with_capacity(universe);
     let mut group_start = 0;
-    while group_start < scored.len() {
-        let weighted = scored[group_start].0;
-        let group_end = scored[group_start..]
+    while group_start < weighted.len() {
+        let value = weighted[group_start].0;
+        let group_end = weighted[group_start..]
             .iter()
-            .position(|(value, _)| value.total_cmp(&weighted) != Ordering::Equal)
-            .map_or(scored.len(), |len| group_start + len);
+            .position(|(other, _)| other.total_cmp(&value) != Ordering::Equal)
+            .map_or(weighted.len(), |len| group_start + len);
         // 名次＝比它強的家數＋1；分數＝比它弱的家數占其他家數的百分位。
-        let weaker = scored.len() - group_end;
-        let rs_score = percentile_score(weaker, universe);
-        for (_, row) in &scored[group_start..group_end] {
-            let keep = (market_id == 0 || row.market_id == market_id)
+        let rs_score = percentile_score(weighted.len() - group_end, universe);
+        scored.extend(
+            weighted[group_start..group_end]
+                .iter()
+                .map(|(_, row)| ScoredStock {
+                    rank: group_start + 1,
+                    rs_score,
+                    weighted: value,
+                    row: row.clone(),
+                }),
+        );
+        group_start = group_end;
+    }
+    scored
+}
+
+/// 依市場、產業、代號篩選已計分的全體，依 `order` 排序後取前 `limit` 筆。
+fn build_response(
+    data_date: NaiveDate,
+    params: &RelativeStrengthParams,
+    market_id: i32,
+    scored: Vec<ScoredStock>,
+) -> RelativeStrengthResponse {
+    let universe = scored.len();
+    let mut items: Vec<RelativeStrengthItem> = scored
+        .into_iter()
+        .filter(|stock| {
+            let row = &stock.row;
+            (market_id == 0 || row.market_id == market_id)
                 && params
                     .industry
                     .as_deref()
@@ -211,26 +251,23 @@ fn build_response(
                 && params
                     .symbol
                     .as_deref()
-                    .is_none_or(|symbol| row.stock_symbol == symbol);
-            if keep {
-                items.push(RelativeStrengthItem {
-                    rank: group_start + 1,
-                    stock_symbol: row.stock_symbol.clone(),
-                    name: row.name.clone(),
-                    market: if row.market_id == 4 { "tpex" } else { "twse" }.to_owned(),
-                    industry: row.industry.clone(),
-                    rs_score,
-                    weighted_return: round2(weighted),
-                    return_20d: row.return_20d.map(round2),
-                    return_60d: round2(row.return_60d),
-                    return_120d: round2(row.return_120d),
-                    return_240d: round2(row.return_240d),
-                    closing_price: row.closing_price,
-                });
-            }
-        }
-        group_start = group_end;
-    }
+                    .is_none_or(|symbol| row.stock_symbol == symbol)
+        })
+        .map(|stock| RelativeStrengthItem {
+            rank: stock.rank,
+            market: market_label(stock.row.market_id).to_owned(),
+            rs_score: stock.rs_score,
+            weighted_return: round2(stock.weighted),
+            return_20d: stock.row.return_20d.map(round2),
+            return_60d: round2(stock.row.return_60d),
+            return_120d: round2(stock.row.return_120d),
+            return_240d: round2(stock.row.return_240d),
+            closing_price: stock.row.closing_price,
+            stock_symbol: stock.row.stock_symbol,
+            name: stock.row.name,
+            industry: stock.row.industry,
+        })
+        .collect();
 
     let order = params.order.as_deref().unwrap_or("desc");
     if order == "asc" {
@@ -246,6 +283,11 @@ fn build_response(
         matched,
         items,
     }
+}
+
+/// 股票表市場 id 對應的 API 市場代碼。
+pub(super) fn market_label(market_id: i32) -> &'static str {
+    if market_id == 4 { "tpex" } else { "twse" }
 }
 
 /// 比它弱的家數 `weaker` 在全體 `total` 中的百分位，換算成 1–99 分（只有一檔時為 99）。
@@ -334,7 +376,7 @@ mod tests {
             day(2026, 10, 13),
             &params(None, None, None),
             0,
-            rows.clone(),
+            score_universe(rows.clone()),
         );
         assert_eq!(all.data_as_of, "2026-10-13");
         assert_eq!(all.market, "all");
@@ -365,7 +407,7 @@ mod tests {
             day(2026, 10, 13),
             &params(Some("tpex"), None, Some("asc")),
             4,
-            rows.clone(),
+            score_universe(rows.clone()),
         );
         assert_eq!(otc.order, "asc");
         let symbols: Vec<&str> = otc.items.iter().map(|i| i.stock_symbol.as_str()).collect();
@@ -374,14 +416,14 @@ mod tests {
 
         let mut semi = params(None, Some("半導體業"), None);
         semi.limit = Some(1);
-        let semi = build_response(day(2026, 10, 13), &semi, 0, rows.clone());
+        let semi = build_response(day(2026, 10, 13), &semi, 0, score_universe(rows.clone()));
         assert_eq!(semi.matched, 3);
         assert_eq!(semi.items.len(), 1);
         assert_eq!(semi.items[0].stock_symbol, "E");
 
         let mut one = params(None, None, None);
         one.symbol = Some("C".to_owned());
-        let one = build_response(day(2026, 10, 13), &one, 0, rows);
+        let one = build_response(day(2026, 10, 13), &one, 0, score_universe(rows));
         assert_eq!(one.items.len(), 1);
         assert_eq!((one.items[0].rank, one.items[0].rs_score), (3, 25));
     }

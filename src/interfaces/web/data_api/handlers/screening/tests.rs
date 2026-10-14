@@ -8,9 +8,11 @@ use super::params::{
     analytical_date_is_fresh, f_score_year_is_fresh, financial_period_is_fresh,
     revenue_month_is_fresh, screen_order_by, validate_screening_params,
 };
+use super::rs_columns;
 use super::sql::SCREEN_STOCKS_SQL;
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::StockScreeningParams;
+use crate::interfaces::web::data_api::handlers::relative_strength::{ScoredStock, UniverseRow};
 
 /// 建立只覆寫測試重點欄位的 screen 預設參數。
 fn screening_params() -> StockScreeningParams {
@@ -29,6 +31,7 @@ fn screening_params() -> StockScreeningParams {
         min_gross_margin_percent: None,
         max_debt_ratio_percent: None,
         positive_free_cash_flow: None,
+        min_rs_score: None,
         sort_by: None,
         sort_order: None,
         limit: None,
@@ -205,10 +208,10 @@ fn screening_health_boundaries_are_deterministic() {
     }
 }
 
-/// 十二個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
+/// 十三個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
 /// `NULLS LAST`；不在白名單的文字必須在接觸 SQL 前遭拒。
 #[test]
-fn screening_sort_has_twenty_four_static_branches() {
+fn screening_sort_has_twenty_six_static_branches() {
     let fields = [
         "stock_symbol",
         "revenue_yoy",
@@ -222,6 +225,7 @@ fn screening_sort_has_twenty_four_static_branches() {
         "f_score",
         "gross_margin",
         "debt_ratio",
+        "rs_score",
     ];
     for field in fields {
         for order in ["asc", "desc"] {
@@ -235,6 +239,60 @@ fn screening_sort_has_twenty_four_static_branches() {
     }
     assert!(screen_order_by("closing_price; DROP TABLE stocks", "asc").is_err());
     assert!(screen_order_by("eps", "sideways").is_err());
+}
+
+/// 相對強度門檻 1–99 含兩端，本身就是有效篩選條件；轉成 SQL 的 smallint。
+#[test]
+fn screening_min_rs_score_boundaries() {
+    for (score, ok) in [(0, false), (1, true), (99, true), (100, false)] {
+        let mut params = screening_params();
+        params.min_rs_score = Some(score);
+        let result = validate_screening_params(&params);
+        assert_eq!(result.is_ok(), ok, "{score}");
+        if let Ok(validated) = result {
+            assert_eq!(validated.min_rs_score, Some(i16::from(score)));
+        } else {
+            assert_eq!(result.err(), Some("min_rs_score 必須介於 1 至 99"));
+        }
+    }
+    let mut sorted = screening_params();
+    sorted.market = Some("tpex".to_owned());
+    sorted.sort_by = Some("rs_score".to_owned());
+    sorted.sort_order = Some("desc".to_owned());
+    let validated = validate_screening_params(&sorted).expect("rs_score 可排序");
+    assert_eq!(
+        validated.order_by,
+        "ORDER BY rs_score DESC NULLS LAST, stock_symbol ASC"
+    );
+    assert_eq!(validated.min_rs_score, None);
+}
+
+/// 全體計分拆成代號、分數兩個平行陣列；查無相對強度資料時資料日為 None、陣列為空。
+#[test]
+fn screening_rs_columns_split_scores() {
+    let scored = |symbol: &str, rs_score: u8| ScoredStock {
+        rank: 1,
+        rs_score,
+        weighted: 1.0,
+        row: UniverseRow {
+            stock_symbol: symbol.to_owned(),
+            name: symbol.to_owned(),
+            market_id: 2,
+            industry: String::new(),
+            return_20d: None,
+            return_60d: 1.0,
+            return_120d: 1.0,
+            return_240d: 1.0,
+            closing_price: None,
+        },
+    };
+    let date = NaiveDate::from_ymd_opt(2026, 10, 13).expect("合法日期");
+    let (as_of, symbols, scores) =
+        rs_columns(Some((date, vec![scored("2330", 99), scored("2317", 42)])));
+    assert_eq!(as_of.as_deref(), Some("2026-10-13"));
+    assert_eq!(symbols, ["2330", "2317"]);
+    assert_eq!(scores, [99, 42]);
+    assert_eq!(rs_columns(None), (None, Vec::new(), Vec::new()));
 }
 
 /// 數值範圍包含契約兩端，超界、NaN 與無限大都必須回 422；這可避免
@@ -317,7 +375,7 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
     let ranking: Vec<String> = sqlx::query_scalar(r#"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT y.security_code FROM yield_rank y JOIN stocks s ON s.stock_symbol = y.security_code JOIN "DailyQuotes" q ON q."Serial" = y.daily_quotes_serial JOIN dividend d ON d.serial = y.dividend_serial WHERE y.date = (SELECT MAX(date) FROM yield_rank) AND s.stock_exchange_market_id IN (2,4) ORDER BY y.yield DESC, y.security_code ASC LIMIT 20"#)
         .fetch_all(pool).await.expect("ranking EXPLAIN");
     let screen_sql = format!(
-        "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {SCREEN_STOCKS_SQL}\nORDER BY dividend_yield_percent DESC NULLS LAST, stock_symbol ASC\nLIMIT $16"
+        "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {SCREEN_STOCKS_SQL}\nORDER BY dividend_yield_percent DESC NULLS LAST, stock_symbol ASC\nLIMIT $19"
     );
     let screen: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(screen_sql.as_str()))
         .bind(0_i32)
@@ -335,6 +393,9 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(Option::<i16>::None)
         .bind(Option::<Decimal>::None)
         .bind(Option::<Decimal>::None)
+        .bind(Vec::<String>::new())
+        .bind(Vec::<i16>::new())
+        .bind(Option::<i16>::None)
         .bind(20_i64)
         .fetch_all(pool)
         .await
