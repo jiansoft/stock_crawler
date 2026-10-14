@@ -43,7 +43,7 @@ LIMIT $2
 ///
 /// - `total` 為三者相加，任一為 NULL（來源沒有這檔）即為 NULL。
 /// - 連續天數：資料日的買賣方向往回數，遇到方向不同或沒有買賣的一天即停；資料日沒有買賣為 0。
-/// - 金額以當日收盤價估算；沒有成交的日子不計金額與成交量。
+/// - 金額以當日收盤價估算；沒有成交的日子不計金額、成交量與成交金額。
 const FLOW_SQL: &str = r#"
 WITH net AS (
     SELECT stock_symbol, "date",
@@ -80,6 +80,7 @@ period AS (
            SUM(n.net)::bigint AS net_shares,
            COALESCE(SUM(n.net * q."ClosingPrice"), 0)::float8 AS net_amount,
            SUM(q."TradingVolume")::float8 AS volume,
+           SUM(q."TradeValue")::float8 AS trade_value,
            COUNT(*) FILTER (WHERE n.net > 0) AS buy_days,
            COUNT(*) FILTER (WHERE n.net < 0) AS sell_days
     FROM net n
@@ -95,6 +96,7 @@ SELECT p.stock_symbol,
        p.net_shares,
        p.net_amount,
        p.volume,
+       p.trade_value,
        p.buy_days,
        p.sell_days,
        COALESCE(st.streak, 0) AS streak,
@@ -118,6 +120,7 @@ pub(super) struct FlowRow {
     pub(super) net_shares: i64,
     pub(super) net_amount: f64,
     pub(super) volume: Option<f64>,
+    pub(super) trade_value: Option<f64>,
     pub(super) buy_days: i64,
     pub(super) sell_days: i64,
     pub(super) streak: i32,
@@ -339,6 +342,7 @@ mod tests {
             net_shares,
             net_amount: amount,
             volume: Some(100_000.0),
+            trade_value: Some(5_000_000.0),
             buy_days: 2,
             sell_days: 1,
             streak: 2,
