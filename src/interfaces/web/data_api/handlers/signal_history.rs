@@ -38,18 +38,22 @@ SELECT MAX(date) FROM daily_technical_signal WHERE $1::date IS NULL OR date <= $
 "#;
 
 /// 各來源與種類的訊號在各天期的報酬統計。`$3 = 0` 是 all 的哨兵（訊號只算上市櫃）；
-/// 大盤基準（`bench`）是同一天同市場全部股票的平均報酬，不受產業篩選影響。
+/// `$7`／`$8` 是訊號當天相對強度分數（`daily_relative_strength`）的上下限，有設時沒有分數的
+/// 訊號不列入。大盤基準（`bench`）是同一天同市場全部股票的平均報酬，不受產業與 RS 篩選影響。
 const PERFORMANCE_SQL: &str = r#"
 WITH sig AS (
     SELECT t.date, t.stock_symbol, t.indicator, t.kind
     FROM daily_technical_signal t
     JOIN stocks s ON s.stock_symbol = t.stock_symbol
     LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
+    LEFT JOIN daily_relative_strength rs ON rs.date = t.date AND rs.stock_symbol = t.stock_symbol
     WHERE t.date BETWEEN $1 AND $2
       AND ($3 = 0 OR s.stock_exchange_market_id = $3)
       AND ($4::text IS NULL OR t.indicator = $4)
       AND ($5::text IS NULL OR t.kind = $5)
       AND ($6::text IS NULL OR si.name = $6)
+      AND ($7::smallint IS NULL OR rs.rs_score >= $7)
+      AND ($8::smallint IS NULL OR rs.rs_score <= $8)
 ),
 bench AS (
     SELECT r.date,
@@ -293,8 +297,8 @@ struct StockSignalRow {
 /// # Errors
 ///
 /// 日期格式錯誤、起日晚於迄日、期間超過 1,096 天、`kind`／`indicator` 不在固定清單或產業
-/// 名稱不存在回 422；迄日之前沒有任何訊號資料回 404；驗證失敗回 401；資料庫查詢失敗回
-/// 不含 SQL 細節的 500。
+/// 名稱不存在、`min_rs_score`／`max_rs_score` 不在 1–99 或下限大於上限回 422；迄日之前沒有任何
+/// 訊號資料回 404；驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/market/signals/performance", tag = "data-api", params(SignalPerformanceParams), responses((status = 200, body = SignalPerformanceResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn signal_performance(Query(params): Query<SignalPerformanceParams>) -> Response {
     let (from, to) = match (
@@ -316,6 +320,9 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
     if let Some(response) = signal_filter_error(params.kind.as_deref(), params.indicator.as_deref())
     {
         return response;
+    }
+    if let Err(message) = validate_rs_range(params.min_rs_score, params.max_rs_score) {
+        return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
     if let Some(response) = industry_error(params.industry.as_deref()).await {
         return response;
@@ -345,6 +352,8 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
         .bind(params.indicator.as_deref())
         .bind(params.kind.as_deref())
         .bind(params.industry.as_deref())
+        .bind(params.min_rs_score.map(i16::from))
+        .bind(params.max_rs_score.map(i16::from))
         .fetch_all(pool)
         .await
     {
@@ -366,6 +375,21 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
         from, to, market, &params, rows, &benchmark,
     ))
     .into_response()
+}
+
+/// 相對強度上下限各在 1–99，且下限不大於上限。
+fn validate_rs_range(min: Option<u8>, max: Option<u8>) -> Result<(), &'static str> {
+    let in_range = |score: Option<u8>| score.is_none_or(|score| (1..=99).contains(&score));
+    if !in_range(min) {
+        return Err("min_rs_score 必須介於 1 至 99");
+    }
+    if !in_range(max) {
+        return Err("max_rs_score 必須介於 1 至 99");
+    }
+    if min.zip(max).is_some_and(|(min, max)| min > max) {
+        return Err("min_rs_score 不可大於 max_rs_score");
+    }
+    Ok(())
 }
 
 /// 起日：未指定為迄日往前 [`DEFAULT_PERIOD_DAYS`] 天；晚於迄日或期間超過上限回錯誤訊息。
@@ -440,6 +464,8 @@ fn build_performance(
         kind: params.kind.clone(),
         indicator: params.indicator.clone(),
         industry: params.industry.clone(),
+        min_rs_score: params.min_rs_score,
+        max_rs_score: params.max_rs_score,
         adjusted: true,
         benchmark,
         items,

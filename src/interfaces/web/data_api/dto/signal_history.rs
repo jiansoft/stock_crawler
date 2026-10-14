@@ -26,6 +26,13 @@ pub(crate) struct SignalPerformanceParams {
     pub(crate) indicator: Option<String>,
     /// 只統計這個產業（產業名稱，例如「半導體業」）的訊號；大盤基準不受影響。
     pub(crate) industry: Option<String>,
+    /// 只統計訊號當天相對強度分數至少這麼高的訊號（1–99，同 `/market/relative-strength`）；
+    /// 沒有分數的訊號（ETF、上市未滿 240 個交易日）不列入。大盤基準不受影響。
+    #[param(minimum = 1, maximum = 99)]
+    pub(crate) min_rs_score: Option<u8>,
+    /// 只統計訊號當天相對強度分數至多這麼高的訊號（1–99）；規則同 `min_rs_score`。
+    #[param(minimum = 1, maximum = 99)]
+    pub(crate) max_rs_score: Option<u8>,
 }
 
 /// 某天期（N 個交易日後）的表現統計；樣本為 0 時數值為 `null`。
@@ -88,6 +95,10 @@ pub(crate) struct SignalPerformanceResponse {
     pub(crate) indicator: Option<String>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
+    /// 相對強度分數下限；未篩選為 `null`。
+    pub(crate) min_rs_score: Option<u8>,
+    /// 相對強度分數上限；未篩選為 `null`。
+    pub(crate) max_rs_score: Option<u8>,
     /// 報酬是否還原權值；固定為 `true`。
     pub(crate) adjusted: bool,
     /// 大盤基準，依天期由短到長。

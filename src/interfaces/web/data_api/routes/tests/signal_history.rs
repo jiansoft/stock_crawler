@@ -37,6 +37,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
     let symbols: Vec<&str> = STOCKS.iter().map(|row| row.0).collect();
     for sql in [
         "DELETE FROM daily_technical_signal WHERE stock_symbol = ANY($1)",
+        "DELETE FROM daily_relative_strength WHERE stock_symbol = ANY($1)",
         "DELETE FROM daily_forward_return WHERE stock_symbol = ANY($1)",
         r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
@@ -99,6 +100,16 @@ async fn seed(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("種入 240 日報酬");
+    // 訊號當天的相對強度：10-01 PA 90、PB 40，10-02 PA 70；PC 沒有分數。
+    sqlx::query(
+        "INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
+         VALUES ($1, '79979PA', 9, 90, 1, 2), ($1, '79979PB', 4, 40, 2, 2), ($2, '79979PA', 7, 70, 1, 1)",
+    )
+    .bind(day(1))
+    .bind(day(2))
+    .execute(pool)
+    .await
+    .expect("種入相對強度");
 }
 
 /// 找出某來源與種類的績效項目。
@@ -192,6 +203,31 @@ async fn signal_performance_endpoint_db_semantics() {
     assert_eq!(tpex["horizons"][0]["avg_excess_return"], 0.0);
     assert_eq!(json["benchmark"][0]["samples"], 2);
 
+    // 相對強度條件：只看訊號當天分數，沒有分數的 PC 不列入；大盤基準不受影響。
+    for (query, occurrences, avg5) in [
+        ("min_rs_score=80", 1, 4.0),
+        ("max_rs_score=50", 1, -2.0),
+        ("min_rs_score=60&max_rs_score=95", 2, 1.5),
+    ] {
+        let (status, json) = get(&format!(
+            "/api/v1/market/signals/performance?from=1991-09-25&to=1991-10-02&kind=golden_cross&{query}"
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK, "{query}: {json}");
+        let kd = item(&json, "kd", "golden_cross");
+        assert_eq!(kd["occurrences"], occurrences, "{query}");
+        assert_eq!(kd["horizons"][0]["avg_return"], avg5, "{query}");
+        assert_eq!(json["benchmark"][0]["samples"], 6, "{query}");
+    }
+    let (_, json) = get(
+        "/api/v1/market/signals/performance?from=1991-09-25&to=1991-10-02&min_rs_score=60&max_rs_score=95",
+    )
+    .await;
+    assert_eq!(
+        (json["min_rs_score"].as_u64(), json["max_rs_score"].as_u64()),
+        (Some(60), Some(95))
+    );
+
     for (query, status) in [
         (
             "from=1991-10-03&to=1991-10-02",
@@ -208,6 +244,12 @@ async fn signal_performance_endpoint_db_semantics() {
         ("indicator=ma10", StatusCode::UNPROCESSABLE_ENTITY),
         (
             "industry=%E4%B8%8D%E5%AD%98%E5%9C%A8",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        ("min_rs_score=0", StatusCode::UNPROCESSABLE_ENTITY),
+        ("max_rs_score=100", StatusCode::UNPROCESSABLE_ENTITY),
+        (
+            "min_rs_score=81&max_rs_score=80",
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
         ("to=1900-01-01", StatusCode::NOT_FOUND),

@@ -52,7 +52,29 @@ fn params() -> SignalPerformanceParams {
         kind: Some("golden_cross".to_owned()),
         indicator: None,
         industry: Some("半導體業".to_owned()),
+        min_rs_score: Some(80),
+        max_rs_score: None,
     }
+}
+
+/// 相對強度上下限：各在 1–99、下限不大於上限，兩者都可省略。
+#[test]
+fn validate_rs_range_bounds() {
+    assert_eq!(validate_rs_range(None, None), Ok(()));
+    assert_eq!(validate_rs_range(Some(1), Some(99)), Ok(()));
+    assert_eq!(validate_rs_range(Some(80), Some(80)), Ok(()));
+    assert_eq!(
+        validate_rs_range(Some(0), None),
+        Err("min_rs_score 必須介於 1 至 99")
+    );
+    assert_eq!(
+        validate_rs_range(None, Some(100)),
+        Err("max_rs_score 必須介於 1 至 99")
+    );
+    assert_eq!(
+        validate_rs_range(Some(81), Some(80)),
+        Err("min_rs_score 不可大於 max_rs_score")
+    );
 }
 
 /// 起日預設迄日往前 364 天；起日晚於迄日或期間超過 1,096 天回錯誤。
@@ -180,6 +202,10 @@ fn build_performance_orders_and_rounds() {
     assert!(response.adjusted);
     assert_eq!(response.kind.as_deref(), Some("golden_cross"));
     assert_eq!(response.industry.as_deref(), Some("半導體業"));
+    assert_eq!(
+        (response.min_rs_score, response.max_rs_score),
+        (Some(80), None)
+    );
     assert!(response.indicator.is_none());
 }
 
