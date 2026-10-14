@@ -171,6 +171,33 @@ pub trait TechnicalSignalQuery: Send + Sync {
         date: NaiveDate,
         stock_symbols: &[String],
     ) -> Result<Vec<StockTechnicalSignal>>;
+
+    /// `from`～`to`（含）期間 `indicators` 來源的訊號，依來源與種類統計出現後
+    /// [`OUTCOME_HORIZON`] 個交易日的還原報酬（全市場；尚未滿天期的不計）。
+    async fn fetch_signal_outcomes(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+        indicators: &[&str],
+    ) -> Result<Vec<SignalOutcome>>;
+}
+
+/// [`SignalOutcome`] 統計的天期（交易日數）。
+pub const OUTCOME_HORIZON: usize = 20;
+
+/// 某種訊號在一段期間內出現後 [`OUTCOME_HORIZON`] 個交易日的表現（全市場）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct SignalOutcome {
+    /// 訊號來源。
+    pub indicator: String,
+    /// 訊號種類（[`SignalKind::as_str`]）。
+    pub kind: String,
+    /// 樣本數（已滿天期的訊號次數）。
+    pub samples: i64,
+    /// 平均還原報酬（%）。
+    pub avg_return: f64,
+    /// 上漲比例（0–1）。
+    pub win_rate: f64,
 }
 
 /// 單日的各項技術指標；樣本不足的欄位為 `None`。
