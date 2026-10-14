@@ -117,6 +117,16 @@ fn analytical_decimal_to_f64(
         }
     })
 }
+/// 四捨五入到小數兩位（`f64::round` 為遠離零捨入）。
+fn round2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
+/// 四捨五入到小數四位（比例、因子）。
+fn round4(value: f64) -> f64 {
+    (value * 10_000.0).round() / 10_000.0
+}
+
 /// 將資料庫 timestamp 轉為 UTC ISO 8601 格式。
 fn timestamp(value: Option<DateTime<Utc>>) -> Option<String> {
     value.map(|time| time.to_rfc3339())
@@ -344,7 +354,7 @@ mod tests {
 
     use super::{
         format_month, market_id_for_stats, market_id_for_stocks, parse_month, parse_optional_date,
-        quarter_to_api, sanitize_date, valuation_band,
+        quarter_to_api, round2, round4, sanitize_date, valuation_band,
     };
 
     /// `YYYY-MM` ↔ `YYYYMM` 雙向轉換與各種非法輸入。
@@ -439,5 +449,15 @@ mod tests {
         for invalid in ["2026-02-30", "2026/07/16", "2026-7-16", ""] {
             assert!(parse_optional_date(Some(invalid)).is_err());
         }
+    }
+
+    /// 遠離零捨入到小數兩位與四位。
+    #[test]
+    fn round_rounds_half_away_from_zero() {
+        assert_eq!(round2(1.234_5), 1.23);
+        assert_eq!(round2(-2.5_f64 / 100.0 * 3.0), -0.08);
+        assert_eq!(round2(0.125), 0.13);
+        assert_eq!(round4(100.0 / 101.0), 0.9901);
+        assert_eq!(round4(-2.0 / 3.0), -0.6667);
     }
 }
