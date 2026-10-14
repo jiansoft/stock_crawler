@@ -24,6 +24,7 @@ mod market_stats;
 mod peers;
 mod portfolio;
 mod portfolio_history;
+mod relative_strength;
 mod screening;
 mod signal_history;
 mod stock_fundamentals;
@@ -63,6 +64,7 @@ pub(super) use market_stats::{
 pub(super) use peers::{__path_stock_peers, stock_peers};
 pub(super) use portfolio::{__path_portfolio_summary, portfolio_summary};
 pub(super) use portfolio_history::{__path_portfolio_history, portfolio_history};
+pub(super) use relative_strength::{__path_relative_strength, relative_strength};
 pub(super) use screening::{__path_screen_stocks, screen_stocks};
 pub(super) use signal_history::{
     __path_signal_performance, __path_stock_signals, signal_performance, stock_signals,

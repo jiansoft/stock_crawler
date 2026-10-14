@@ -145,6 +145,7 @@ fn openapi_contains_all_data_api_paths() {
         "/api/v1/market/industries",
         "/api/v1/stocks/{symbol}/technicals",
         "/api/v1/market/signals",
+        "/api/v1/market/relative-strength",
         "/api/v1/market/cagr-ranking",
         "/api/v1/market/cagr-ranking/{stock_symbol}",
         "/api/v1/healthz",
@@ -836,6 +837,39 @@ fn openapi_signal_history_schema_pins_field_names() {
     for field in ["return_5d", "return_20d", "return_60d", "closing_price"] {
         assert!(item[field].to_string().contains("null"), "{field}");
     }
+}
+
+/// 相對強度排行 path 的契約：參數範圍、列舉值與可為 null 的欄位。
+#[test]
+fn openapi_relative_strength_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/market/relative-strength");
+    assert_endpoint_responses(operation, "RelativeStrengthResponse", true);
+    let limit = query_schema(operation, "limit");
+    assert_eq!(limit["default"], 50);
+    assert_eq!(limit["minimum"], 1);
+    assert_eq!(limit["maximum"], 200);
+    assert!(
+        query_schema(operation, "order")
+            .to_string()
+            .contains("SortOrderParamValue")
+    );
+    for name in ["date", "industry", "symbol"] {
+        assert!(query_schema(operation, name).is_object(), "{name}");
+    }
+
+    let schemas = &document["components"]["schemas"];
+    let item = &schemas["RelativeStrengthItem"]["properties"];
+    for field in ["return_20d", "closing_price"] {
+        assert!(item[field].to_string().contains("null"), "{field}");
+    }
+    assert_eq!(item["rs_score"]["type"], "integer");
+    let response = &schemas["RelativeStrengthResponse"]["properties"];
+    assert!(
+        response["items"]
+            .to_string()
+            .contains("RelativeStrengthItem")
+    );
 }
 
 /// 產業表現 path 的契約：days 範圍與預設、market 列舉、可為 null 的統計欄位。
