@@ -820,6 +820,11 @@ fn openapi_signal_history_schema_pins_field_names() {
             .to_string()
             .contains("SignalKindValue")
     );
+    for name in ["min_rs_score", "max_rs_score"] {
+        let schema = query_schema(operation, name);
+        assert_eq!(schema["minimum"], 1, "{name}");
+        assert_eq!(schema["maximum"], 99, "{name}");
+    }
 
     let operation = get_operation(&document, "/api/v1/stocks/{symbol}/signals");
     assert_endpoint_responses(operation, "StockSignalsResponse", true);
