@@ -79,7 +79,9 @@ pub(super) use portfolio_history::{
     PortfolioHistoryParams, PortfolioHistoryResponse, PortfolioMonth,
 };
 pub(super) use relative_strength::{
-    RelativeStrengthItem, RelativeStrengthParams, RelativeStrengthResponse,
+    IndustryLeader, IndustryStrengthItem, IndustryStrengthParams, IndustryStrengthResponse,
+    RelativeStrengthCrossing, RelativeStrengthHistoryParams, RelativeStrengthHistoryResponse,
+    RelativeStrengthItem, RelativeStrengthParams, RelativeStrengthPoint, RelativeStrengthResponse,
 };
 pub(super) use screening::{
     ScreenedStock, SortOrderParamValue, StockScreenSortValue, StockScreeningParams,

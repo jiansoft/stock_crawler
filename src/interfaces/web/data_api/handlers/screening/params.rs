@@ -31,7 +31,9 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_gross_margin_percent: Option<Decimal>,
     /// 最高季末負債比。
     pub(super) max_debt_ratio_percent: Option<Decimal>,
-    /// 二十四個固定排序分支之一。
+    /// 最低相對強度分數。
+    pub(super) min_rs_score: Option<i16>,
+    /// 二十六個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,
@@ -118,6 +120,12 @@ pub(super) fn validate_screening_params(
         1_000.0,
         "max_debt_ratio_percent 必須介於 0 至 1000",
     )?;
+    if params
+        .min_rs_score
+        .is_some_and(|score| !(1..=99).contains(&score))
+    {
+        return Err("min_rs_score 必須介於 1 至 99");
+    }
     let order_by = screen_order_by(
         params.sort_by.as_deref().unwrap_or("stock_symbol"),
         params.sort_order.as_deref().unwrap_or("asc"),
@@ -139,7 +147,8 @@ pub(super) fn validate_screening_params(
         || params.min_f_score.is_some()
         || params.min_gross_margin_percent.is_some()
         || params.max_debt_ratio_percent.is_some()
-        || params.positive_free_cash_flow == Some(true);
+        || params.positive_free_cash_flow == Some(true)
+        || params.min_rs_score.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -153,6 +162,7 @@ pub(super) fn validate_screening_params(
         min_dividend_yield_percent,
         min_gross_margin_percent,
         max_debt_ratio_percent,
+        min_rs_score: params.min_rs_score.map(i16::from),
         order_by,
         limit,
     })
@@ -178,7 +188,7 @@ fn decimal_in_range(
         .transpose()
 }
 
-/// 將排序 enum 映射成二十二個固定 SQL 分支。
+/// 將排序 enum 映射成二十六個固定 SQL 分支。
 ///
 /// 指標欄位一律加 `NULLS LAST`，否則 PostgreSQL 的降冪預設會把過期或缺值的
 /// NULL 排在最前面；同值再以股票代號升冪，讓分頁外的重複查詢仍穩定。
@@ -241,6 +251,8 @@ pub(super) fn screen_order_by(
         ("debt_ratio", "desc") => {
             Ok("ORDER BY debt_ratio_percent DESC NULLS LAST, stock_symbol ASC")
         }
+        ("rs_score", "asc") => Ok("ORDER BY rs_score ASC NULLS LAST, stock_symbol ASC"),
+        ("rs_score", "desc") => Ok("ORDER BY rs_score DESC NULLS LAST, stock_symbol ASC"),
         (_, "asc" | "desc") => Err("sort_by 不在允許範圍"),
         _ => Err("sort_order 必須為 asc 或 desc"),
     }
