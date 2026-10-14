@@ -113,20 +113,23 @@ SET return_5d = COALESCE(EXCLUDED.return_5d, t.return_5d),
 /// `$1` 的技術訊號筆數，以及基準日 `$2` 已寫入 5 日報酬的筆數（都走主鍵前綴）。
 const DERIVED_COUNTS_SQL: &str = r#"
 SELECT (SELECT COUNT(*) FROM daily_technical_signal WHERE date = $1),
-       (SELECT COUNT(*) FROM daily_forward_return WHERE date = $2 AND return_5d IS NOT NULL)
+       (SELECT COUNT(*) FROM daily_forward_return WHERE date = $2 AND return_5d IS NOT NULL),
+       (SELECT COUNT(*) FROM daily_relative_strength WHERE date = $1)
 "#;
 
 #[async_trait]
 impl DerivedDataQuery for PgQuoteRepository {
     async fn count_derived(&self, date: NaiveDate, base: NaiveDate) -> Result<DerivedCounts> {
-        let (signals, forward_returns): (i64, i64) = sqlx::query_as(DERIVED_COUNTS_SQL)
-            .bind(date)
-            .bind(base)
-            .fetch_one(database::get_connection())
-            .await?;
+        let (signals, forward_returns, relative_strength): (i64, i64, i64) =
+            sqlx::query_as(DERIVED_COUNTS_SQL)
+                .bind(date)
+                .bind(base)
+                .fetch_one(database::get_connection())
+                .await?;
         Ok(DerivedCounts {
             signals,
             forward_returns,
+            relative_strength,
         })
     }
 }

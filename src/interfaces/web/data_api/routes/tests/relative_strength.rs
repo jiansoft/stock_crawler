@@ -27,6 +27,7 @@ fn weekdays(count: usize) -> Vec<NaiveDate> {
 async fn cleanup(pool: &sqlx::PgPool) {
     let symbols: Vec<&str> = STOCKS.iter().map(|row| row.0).collect();
     for sql in [
+        "DELETE FROM daily_relative_strength WHERE stock_symbol = ANY($1)",
         "DELETE FROM daily_forward_return WHERE stock_symbol = ANY($1)",
         r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
@@ -206,6 +207,13 @@ async fn relative_strength_history_matches_ranking() {
     let latest = dates[dates.len() - 1];
     cleanup(pool).await;
     seed(pool, &dates).await;
+    // 個股歷史讀每日分數：資料日寫入 2 檔；最新一天報酬還沒回填，不寫入。
+    for (day, expected) in [(end, 2), (latest, 0)] {
+        let written = crate::app::calculation::relative_strength::calculate_relative_strength(day)
+            .await
+            .expect("寫入每日相對強度");
+        assert_eq!(written, expected, "{day}");
+    }
 
     let (status, ra) = get(&format!(
         "/api/v1/stocks/79979RA/relative-strength?date={latest}&days=2"

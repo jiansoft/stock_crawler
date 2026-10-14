@@ -141,6 +141,7 @@ fn trading_days(end: NaiveDate, count: u64) -> Vec<NaiveDate> {
 const COMPLETE: DerivedCounts = DerivedCounts {
     signals: 1800,
     forward_returns: 1900,
+    relative_strength: 1700,
 };
 
 /// 完整時不告警；非交易日不檢查；缺漏時只重算缺的項目，依重算後狀況決定標題。
@@ -154,6 +155,7 @@ async fn check_derived_recomputes_missing_items() {
             match derived {
                 Derived::Signals => Ok(()),
                 Derived::ForwardReturns => Err(anyhow::anyhow!("連線中斷")),
+                Derived::RelativeStrength => Ok(()),
             }
         }
     };
@@ -180,7 +182,7 @@ async fn check_derived_recomputes_missing_items() {
         vec![
             DerivedCounts {
                 signals: 0,
-                forward_returns: 1900,
+                ..COMPLETE
             },
             COMPLETE,
         ],
@@ -189,7 +191,7 @@ async fn check_derived_recomputes_missing_items() {
         .await
         .expect("檢查成功")
         .expect("有缺漏");
-    assert_eq!(title, "技術訊號／未來報酬已補算");
+    assert_eq!(title, "收盤衍生資料已補算");
     assert!(
         body.contains(
             "檢查時缺：技術訊號
@@ -203,8 +205,8 @@ async fn check_derived_recomputes_missing_items() {
         vec![
             DerivedCounts::default(),
             DerivedCounts {
-                signals: 1800,
                 forward_returns: 0,
+                ..COMPLETE
             },
         ],
     );
@@ -212,34 +214,38 @@ async fn check_derived_recomputes_missing_items() {
         .await
         .expect("檢查成功")
         .expect("有缺漏");
-    assert_eq!(title, "技術訊號／未來報酬仍缺漏");
+    assert_eq!(title, "收盤衍生資料仍缺漏");
     assert!(body.contains("重算失敗：未來報酬：連線中斷"), "{body}");
     assert_eq!(
         *recomputed.lock().expect("測試鎖"),
-        [Derived::Signals, Derived::Signals, Derived::ForwardReturns]
+        [
+            Derived::Signals,
+            Derived::Signals,
+            Derived::ForwardReturns,
+            Derived::RelativeStrength
+        ]
     );
 }
 
 /// 筆數為 0 的衍生資料才列為缺漏。
 #[test]
 fn missing_derived_lists_zero_counts() {
-    assert!(
-        missing_derived(DerivedCounts {
-            signals: 1800,
-            forward_returns: 1900
-        })
-        .is_empty()
-    );
+    assert!(missing_derived(COMPLETE).is_empty());
     assert_eq!(
         missing_derived(DerivedCounts::default()),
-        [Derived::Signals, Derived::ForwardReturns]
+        [
+            Derived::Signals,
+            Derived::ForwardReturns,
+            Derived::RelativeStrength
+        ]
     );
     assert_eq!(
         missing_derived(DerivedCounts {
-            signals: 5,
-            forward_returns: 0
+            forward_returns: 0,
+            relative_strength: 0,
+            ..COMPLETE
         }),
-        [Derived::ForwardReturns]
+        [Derived::ForwardReturns, Derived::RelativeStrength]
     );
 }
 

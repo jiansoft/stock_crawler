@@ -36,12 +36,14 @@ pub struct DerivedCounts {
     pub signals: i64,
     /// 基準日（資料日往前第 5 個交易日）已寫入 5 日報酬的筆數。
     pub forward_returns: i64,
+    /// 資料日的每日相對強度筆數。
+    pub relative_strength: i64,
 }
 
 /// 收盤後衍生資料的筆數查詢。
 #[async_trait]
 pub trait DerivedDataQuery: Send + Sync {
-    /// `date` 的技術訊號筆數，以及基準日 `base` 已寫入 5 日報酬的筆數。
+    /// `date` 的技術訊號與每日相對強度筆數，以及基準日 `base` 已寫入 5 日報酬的筆數。
     async fn count_derived(&self, date: NaiveDate, base: NaiveDate) -> Result<DerivedCounts>;
 }
 

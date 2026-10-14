@@ -12,5 +12,7 @@ pub mod financial_health;
 pub mod forward_return;
 /// 計算每日市值
 pub mod money_history;
+/// 收盤後寫入每日相對強度（`daily_relative_strength`）。
+pub mod relative_strength;
 /// 收盤後全市場技術訊號
 pub mod technical_signal;
