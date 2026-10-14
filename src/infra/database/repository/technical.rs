@@ -1,6 +1,8 @@
 //! 技術指標日線（[`PriceBarRepository`]）與全市場技術訊號（[`TechnicalSignalRepository`]）
 //! 的 PostgreSQL 實作。
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -8,8 +10,8 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     domain::quote::technical::{
-        PriceBar, PriceBarRepository, StockTechnicalSignal, TechnicalSignal, TechnicalSignalQuery,
-        TechnicalSignalRepository,
+        PriceAdjustment, PriceBar, PriceBarRepository, StockTechnicalSignal, TechnicalSignal,
+        TechnicalSignalQuery, TechnicalSignalRepository,
     },
     infra::database::{self, repository::quote::PgQuoteRepository},
 };
@@ -24,6 +26,37 @@ WHERE stock_symbol = $1
   AND ($2::date IS NULL OR "Date" <= $2)
 ORDER BY "Date" DESC
 LIMIT $3
+"#;
+
+/// 除息（`ex-dividend_date1` 配現金）、除權（`ex-dividend_date2` 配股）與
+/// `corporate_action`（減資、分割、反向分割）事件，依股票與日期合併。
+///
+/// 除權息日欄位是文字，`-` 等非日期值以 CASE 擋掉再轉型。同一天有多列股利時取最大值：
+/// 債券 ETF 有月配與季配兩列記同一筆配息的情形，加總會重複計算。
+const PRICE_ADJUSTMENTS_SQL: &str = r#"
+WITH events AS (
+    SELECT security_code AS stock_symbol,
+           CASE WHEN "ex-dividend_date1" ~ '^\d{4}-\d{2}-\d{2}$' THEN "ex-dividend_date1"::date END AS date,
+           cash_dividend AS cash, 0::numeric AS stock, 1::numeric AS share_ratio
+    FROM dividend
+    WHERE security_code = ANY($1) AND cash_dividend > 0
+    UNION ALL
+    SELECT security_code,
+           CASE WHEN "ex-dividend_date2" ~ '^\d{4}-\d{2}-\d{2}$' THEN "ex-dividend_date2"::date END,
+           0, stock_dividend, 1
+    FROM dividend
+    WHERE security_code = ANY($1) AND stock_dividend > 0
+    UNION ALL
+    SELECT stock_symbol, effective_date, 0, 0, share_ratio
+    FROM corporate_action
+    WHERE stock_symbol = ANY($1) AND share_ratio > 0
+)
+SELECT stock_symbol, date, MAX(cash), MAX(stock),
+       COALESCE(MAX(share_ratio) FILTER (WHERE share_ratio <> 1), 1)
+FROM events
+WHERE date IS NOT NULL
+GROUP BY stock_symbol, date
+ORDER BY stock_symbol, date
 "#;
 
 #[async_trait]
@@ -50,6 +83,27 @@ impl PriceBarRepository for PgQuoteRepository {
                 low: low.to_f64().unwrap_or_default(),
             })
             .collect())
+    }
+
+    async fn fetch_price_adjustments(
+        &self,
+        stock_symbols: &[String],
+    ) -> Result<HashMap<String, Vec<PriceAdjustment>>> {
+        let rows: Vec<(String, NaiveDate, Decimal, Decimal, Decimal)> =
+            sqlx::query_as(PRICE_ADJUSTMENTS_SQL)
+                .bind(stock_symbols)
+                .fetch_all(database::get_connection())
+                .await?;
+        let mut out: HashMap<String, Vec<PriceAdjustment>> = HashMap::new();
+        for (symbol, date, cash, stock, share_ratio) in rows {
+            out.entry(symbol).or_default().push(PriceAdjustment {
+                date,
+                cash_dividend: cash.to_f64().unwrap_or_default(),
+                stock_dividend: stock.to_f64().unwrap_or_default(),
+                share_ratio: share_ratio.to_f64().unwrap_or(1.0),
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -281,5 +335,102 @@ mod tests {
         assert_eq!(count, 0);
 
         cleanup().await;
+    }
+
+    /// 除息、除權與公司行動依股票與日期合併；同日重複的股利取最大值，非日期的除權息日略過。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn price_adjustments_merge_dividends_and_corporate_actions() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 price_adjustments_merge_dividends_and_corporate_actions：無資料庫連接");
+            return;
+        }
+        let pool = database::get_connection();
+        let cleanup = || async {
+            for sql in [
+                "DELETE FROM dividend WHERE security_code LIKE '79979J_'",
+                "DELETE FROM corporate_action WHERE stock_symbol LIKE '79979J_'",
+            ] {
+                sqlx::query(sql).execute(pool).await.expect("清理測試資料");
+            }
+        };
+        cleanup().await;
+
+        // JA：同日月配與季配重複（取一筆）、另一年同日除權息、日期為「-」的年度彙總列。
+        for (symbol, year, quarter, cash, stock, date1, date2) in [
+            ("79979JA", 1991, "M04", "0.14", "0", "1991-07-16", "-"),
+            ("79979JA", 1991, "Q2", "0.14", "0", "1991-07-16", "-"),
+            (
+                "79979JA",
+                1992,
+                "",
+                "1.5",
+                "0.5",
+                "1992-08-01",
+                "1992-08-01",
+            ),
+            ("79979JA", 1993, "", "2", "0", "-", "-"),
+            ("79979JB", 1991, "", "0", "1", "-", "1991-09-02"),
+        ] {
+            sqlx::query(
+                r#"INSERT INTO dividend (security_code, year, quarter, cash_dividend, stock_dividend,
+                                         "ex-dividend_date1", "ex-dividend_date2")
+                   VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6, $7)"#,
+            )
+            .bind(symbol)
+            .bind(year)
+            .bind(quarter)
+            .bind(cash)
+            .bind(stock)
+            .bind(date1)
+            .bind(date2)
+            .execute(pool)
+            .await
+            .expect("寫入測試股利");
+        }
+        sqlx::query(
+            "INSERT INTO corporate_action (stock_symbol, effective_date, action_type, share_ratio)
+             VALUES ('79979JB', '1991-10-01', 'capital_reduction', 0.7)",
+        )
+        .execute(pool)
+        .await
+        .expect("寫入測試公司行動");
+
+        let day = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("有效日期");
+        let map = PgQuoteRepository::new()
+            .fetch_price_adjustments(&[
+                "79979JA".to_owned(),
+                "79979JB".to_owned(),
+                "79979JC".to_owned(),
+            ])
+            .await
+            .expect("查詢事件");
+        cleanup().await;
+
+        let adjustment = |date, cash, stock, share_ratio| PriceAdjustment {
+            date,
+            cash_dividend: cash,
+            stock_dividend: stock,
+            share_ratio,
+        };
+        assert_eq!(map.len(), 2, "{map:?}");
+        assert_eq!(
+            map["79979JA"],
+            [
+                adjustment(day(1991, 7, 16), 0.14, 0.0, 1.0),
+                adjustment(day(1992, 8, 1), 1.5, 0.5, 1.0),
+            ]
+        );
+        assert_eq!(
+            map["79979JB"],
+            [
+                adjustment(day(1991, 9, 2), 0.0, 1.0, 1.0),
+                adjustment(day(1991, 10, 1), 0.0, 0.0, 0.7),
+            ]
+        );
     }
 }
