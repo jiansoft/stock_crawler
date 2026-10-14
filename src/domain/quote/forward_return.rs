@@ -1,0 +1,58 @@
+//! # 未來報酬
+//!
+//! 技術訊號出現後的表現，以「基準日收盤 → 之後第 N 個交易日收盤」的還原報酬衡量
+//! （除權息、減資、分割依參考價還原，等同含息報酬）。交易日 T 收盤時回填 T 往前第 N 個
+//! 交易日的 N 日報酬，資料表 `daily_forward_return` 每個基準日一列、每個天期一欄。
+
+use anyhow::Result;
+use async_trait::async_trait;
+use chrono::NaiveDate;
+
+/// 回填的天期（交易日數）。
+pub const FORWARD_HORIZONS: [usize; 3] = [5, 20, 60];
+
+/// 未來報酬的存取。
+#[async_trait]
+pub trait ForwardReturnRepository: Send + Sync {
+    /// `until`（含）之前最近 `count` 個交易日，由新到舊。
+    async fn fetch_trading_dates(&self, until: NaiveDate, count: usize) -> Result<Vec<NaiveDate>>;
+
+    /// 寫入 `base` 當天有成交的上市櫃股票到 `end` 收盤的 `horizon` 日還原報酬，回傳寫入列數；
+    /// 其他天期的欄位保留原值。
+    async fn upsert_forward_returns(
+        &self,
+        base: NaiveDate,
+        end: NaiveDate,
+        horizon: usize,
+    ) -> Result<u64>;
+}
+
+/// `end` 往前第 `horizon` 個交易日（`trading_dates` 由新到舊、第一個必須是 `end`）。
+///
+/// `end` 不是交易日或交易日不足時回 `None`。
+pub fn base_date(end: NaiveDate, horizon: usize, trading_dates: &[NaiveDate]) -> Option<NaiveDate> {
+    if trading_dates.first() != Some(&end) {
+        return None;
+    }
+    trading_dates.get(horizon).copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day(d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, d).expect("有效日期")
+    }
+
+    /// 第 N 個交易日：由新到舊的第 N 個（跳過假日）；結束日不是交易日或日數不足為 None。
+    #[test]
+    fn base_date_counts_trading_days_back() {
+        let dates = [day(13), day(12), day(8), day(7), day(6), day(5), day(2)];
+        assert_eq!(base_date(day(13), 1, &dates), Some(day(12)));
+        assert_eq!(base_date(day(13), 5, &dates), Some(day(5)));
+        assert_eq!(base_date(day(13), 7, &dates), None);
+        assert_eq!(base_date(day(11), 1, &dates), None);
+        assert_eq!(base_date(day(13), 1, &[]), None);
+    }
+}

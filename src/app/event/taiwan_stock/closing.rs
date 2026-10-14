@@ -251,6 +251,11 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
         Ok(count) => tracing::info!("計算技術訊號結束:{count}"),
         Err(why) => tracing::error!("計算技術訊號失敗: {why:#}"),
     }
+    // 未來報酬只供訊號績效統計使用，失敗不影響後續流程
+    match calculation::forward_return::calculate_forward_returns(date).await {
+        Ok(count) => tracing::info!("回填未來報酬結束:{count}"),
+        Err(why) => tracing::error!("回填未來報酬失敗: {why:#}"),
+    }
 
     // 清除記憶與Redis內所有的快取
     TTL.clear();
