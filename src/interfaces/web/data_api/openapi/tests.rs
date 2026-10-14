@@ -146,6 +146,8 @@ fn openapi_contains_all_data_api_paths() {
         "/api/v1/stocks/{symbol}/technicals",
         "/api/v1/market/signals",
         "/api/v1/market/relative-strength",
+        "/api/v1/stocks/{symbol}/relative-strength",
+        "/api/v1/market/industry-strength",
         "/api/v1/market/cagr-ranking",
         "/api/v1/market/cagr-ranking/{stock_symbol}",
         "/api/v1/healthz",
@@ -321,6 +323,7 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
         ("debt_ratio_percent", "number"),
         ("free_cash_flow_ttm", "integer"),
         ("health_period", "string"),
+        ("rs_score", "integer"),
     ] {
         let schema = screened[field].to_string();
         assert!(

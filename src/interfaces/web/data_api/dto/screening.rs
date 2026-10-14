@@ -50,6 +50,8 @@ pub(crate) enum StockScreenSortValue {
     GrossMargin,
     /// 最新一季負債比。
     DebtRatio,
+    /// 相對強度分數。
+    RsScore,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -119,6 +121,9 @@ pub(crate) struct ScreenedStock {
     pub(crate) free_cash_flow_ttm: Option<i64>,
     /// 毛利率、負債比與自由現金流的期間，格式 `YYYY-Q1`～`YYYY-Q4`；過期時仍保留。
     pub(crate) health_period: Option<String>,
+    /// 相對強度分數 1–99（同 `/market/relative-strength`，資料日見 `rs_as_of`）；
+    /// 上市未滿 240 個交易日、暫停交易或尚無報酬資料時為 `null`。
+    pub(crate) rs_score: Option<u8>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -126,6 +131,8 @@ pub(crate) struct ScreenedStock {
 pub(crate) struct StockScreeningResponse {
     /// 混合資料來源沒有單一正確日期，因此固定為 `null`。
     pub(crate) data_as_of: Option<String>,
+    /// `rs_score` 的資料日（最近一個已算好報酬的交易日）；查無相對強度資料時為 `null`。
+    pub(crate) rs_as_of: Option<String>,
     /// 通過所有固定條件的股票，最多五十筆。
     pub(crate) stocks: Vec<ScreenedStock>,
 }
@@ -133,7 +140,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的二十四個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的二十六個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -178,6 +185,10 @@ pub(crate) struct StockScreeningParams {
     pub(crate) max_debt_ratio_percent: Option<f64>,
     /// `true` 時只留近四季自由現金流為正的股票；`false` 或省略不篩選。
     pub(crate) positive_free_cash_flow: Option<bool>,
+    /// 最低相對強度分數，範圍 1–99；分數以上市櫃全體計算（同 `/market/relative-strength`），
+    /// 沒有分數的股票不符合。
+    #[param(minimum = 1, maximum = 99)]
+    pub(crate) min_rs_score: Option<u8>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,

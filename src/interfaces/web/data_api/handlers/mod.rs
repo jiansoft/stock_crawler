@@ -16,6 +16,7 @@ mod dividend_forecast;
 mod financial_health;
 mod financial_reports;
 mod industries;
+mod industry_strength;
 mod market_calendar;
 mod market_movers;
 mod market_rankings;
@@ -25,6 +26,7 @@ mod peers;
 mod portfolio;
 mod portfolio_history;
 mod relative_strength;
+mod relative_strength_history;
 mod screening;
 mod signal_history;
 mod stock_fundamentals;
@@ -51,6 +53,7 @@ pub(super) use dividend_forecast::{__path_dividend_forecast, dividend_forecast};
 pub(super) use financial_health::{__path_financial_health, financial_health};
 pub(super) use financial_reports::{__path_financial_reports, financial_reports};
 pub(super) use industries::{__path_industry_performance, industry_performance};
+pub(super) use industry_strength::{__path_industry_strength, industry_strength};
 pub(super) use market_calendar::{__path_dividend_calendar, dividend_calendar};
 pub(super) use market_movers::{__path_market_movers, market_movers};
 pub(super) use market_rankings::{
@@ -65,6 +68,9 @@ pub(super) use peers::{__path_stock_peers, stock_peers};
 pub(super) use portfolio::{__path_portfolio_summary, portfolio_summary};
 pub(super) use portfolio_history::{__path_portfolio_history, portfolio_history};
 pub(super) use relative_strength::{__path_relative_strength, relative_strength};
+pub(super) use relative_strength_history::{
+    __path_relative_strength_history, relative_strength_history,
+};
 pub(super) use screening::{__path_screen_stocks, screen_stocks};
 pub(super) use signal_history::{
     __path_signal_performance, __path_stock_signals, signal_performance, stock_signals,
