@@ -3,7 +3,7 @@
 //! 每個交易日的分數與 [`super::relative_strength`] 排行同一算法：近 N 日報酬取
 //! `daily_forward_return` 基準日 T−N 的 N 日欄位，加權報酬＝0.4 × 近 60 日 ＋ 0.3 × 近 120 日
 //! ＋ 0.3 × 近 240 日，分數是比它弱的家數在上市櫃全體中的百分位。每天都要以全體排名，
-//! 一次查詢在資料庫內以視窗函式算完，只回傳這檔股票的列。
+//! 由 [`RelativeStrengthQuery`] 一次查詢在資料庫內以視窗函式算完，只回傳這檔股票的列。
 
 use axum::{
     Json,
@@ -11,81 +11,15 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Local, NaiveDate};
+use chrono::Local;
 
-use super::relative_strength::percentile_score;
-use super::{database_error, ensure_stock_exists, error_response, parse_optional_date, round2};
-use crate::infra::database;
+use super::{ensure_stock_exists, error_response, parse_optional_date, repository_error, round2};
+use crate::domain::quote::relative_strength::{self, RelativeStrengthDay, RelativeStrengthQuery};
+use crate::infra::database::repository::quote::PgQuoteRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, RelativeStrengthCrossing, RelativeStrengthHistoryParams,
     RelativeStrengthHistoryResponse, RelativeStrengthPoint,
 };
-
-/// 穿越時要標記的分數門檻：80 為強勢、50 為中位。
-const THRESHOLDS: [u8; 2] = [80, 50];
-
-/// `$1`（含）之前最近 `$2` 個交易日，每天以上市櫃全體計分後，取股票 `$3` 的分數與名次。
-///
-/// 交易日曆取 `$2 + 240` 個交易日（回看 800 天足以涵蓋 120 + 240 個交易日），資料日 T 的
-/// 近 N 日報酬＝往前第 N 個交易日（基準日）的 N 日報酬；`weaker` 為加權報酬比它低的家數，
-/// 由 Rust 換算成 1–99 分。母體條件與排行相同：上市櫃、未暫停交易、三個天期的報酬都有。
-/// 報酬還沒回填的交易日沒有任何列，自然略過。
-const HISTORY_SQL: &str = r#"
-WITH td AS (
-    SELECT date, (ROW_NUMBER() OVER (ORDER BY date DESC) - 1)::int AS idx
-    FROM (
-        SELECT DISTINCT "Date" AS date
-        FROM "DailyQuotes"
-        WHERE "Date" <= $1 AND "Date" > $1 - 800
-        ORDER BY 1 DESC
-        LIMIT $2::int + 240
-    ) recent
-),
-ends AS (
-    SELECT e.date AS end_date, b60.date AS d60, b120.date AS d120, b240.date AS d240
-    FROM td e
-    JOIN td b60 ON b60.idx = e.idx + 60
-    JOIN td b120 ON b120.idx = e.idx + 120
-    JOIN td b240 ON b240.idx = e.idx + 240
-    WHERE e.idx < $2::int
-),
-scored AS (
-    SELECT e.end_date, r60.stock_symbol,
-           0.4 * r60.return_60d::float8 + 0.3 * r120.return_120d::float8
-               + 0.3 * r240.return_240d::float8 AS weighted
-    FROM ends e
-    JOIN daily_forward_return r60 ON r60.date = e.d60
-    JOIN daily_forward_return r120 ON r120.date = e.d120 AND r120.stock_symbol = r60.stock_symbol
-    JOIN daily_forward_return r240 ON r240.date = e.d240 AND r240.stock_symbol = r60.stock_symbol
-    JOIN stocks s ON s.stock_symbol = r60.stock_symbol
-    WHERE r60.return_60d IS NOT NULL
-      AND r120.return_120d IS NOT NULL
-      AND r240.return_240d IS NOT NULL
-      AND s.stock_exchange_market_id IN (2, 4)
-      AND NOT s."SuspendListing"
-),
-ranked AS (
-    SELECT end_date, stock_symbol, weighted,
-           RANK() OVER (PARTITION BY end_date ORDER BY weighted) - 1 AS weaker,
-           RANK() OVER (PARTITION BY end_date ORDER BY weighted DESC) AS rank,
-           COUNT(*) OVER (PARTITION BY end_date) AS universe
-    FROM scored
-)
-SELECT end_date AS date, weighted, weaker, rank, universe
-FROM ranked
-WHERE stock_symbol = $3
-ORDER BY end_date DESC
-"#;
-
-/// [`HISTORY_SQL`] 的一列。
-#[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
-struct HistoryRow {
-    date: NaiveDate,
-    weighted: f64,
-    weaker: i64,
-    rank: i64,
-    universe: i64,
-}
 
 /// 查詢個股近 N 個交易日的相對強度分數、名次與穿越 50／80 的轉折。
 ///
@@ -113,15 +47,12 @@ pub(crate) async fn relative_strength_history(
         return response;
     }
 
-    let rows: Vec<HistoryRow> = match sqlx::query_as(HISTORY_SQL)
-        .bind(until)
-        .bind(i32::from(days))
-        .bind(&symbol)
-        .fetch_all(database::get_connection())
+    let rows = match PgQuoteRepository::new()
+        .fetch_relative_strength(until, days, std::slice::from_ref(&symbol))
         .await
     {
         Ok(rows) => rows,
-        Err(error) => return database_error(error),
+        Err(error) => return repository_error(error),
     };
     Json(build_history(symbol, days, rows)).into_response()
 }
@@ -130,16 +61,13 @@ pub(crate) async fn relative_strength_history(
 fn build_history(
     symbol: String,
     days: u16,
-    rows: Vec<HistoryRow>,
+    rows: Vec<RelativeStrengthDay>,
 ) -> RelativeStrengthHistoryResponse {
     let items: Vec<RelativeStrengthPoint> = rows
         .into_iter()
         .map(|row| RelativeStrengthPoint {
             date: row.date.to_string(),
-            rs_score: percentile_score(
-                usize::try_from(row.weaker).unwrap_or(0),
-                usize::try_from(row.universe).unwrap_or(0),
-            ),
+            rs_score: row.rs_score(),
             rank: row.rank,
             universe: row.universe,
             weighted_return: round2(row.weighted),
@@ -177,40 +105,34 @@ fn build_history(
     }
 }
 
-/// 相鄰兩個交易日（`items` 由新到舊）穿越 [`THRESHOLDS`] 的轉折，由新到舊；同一天同時穿越
+/// 相鄰兩個交易日（`items` 由新到舊）穿越 50／80 門檻的轉折，由新到舊；同一天同時穿越
 /// 兩個門檻時兩筆都列，高門檻在前。
 fn crossings(items: &[RelativeStrengthPoint]) -> Vec<RelativeStrengthCrossing> {
-    let mut found = Vec::new();
-    for pair in items.windows(2) {
-        let (current, previous) = (&pair[0], &pair[1]);
-        for threshold in THRESHOLDS {
-            let direction = match (
-                previous.rs_score >= threshold,
-                current.rs_score >= threshold,
-            ) {
-                (false, true) => "up",
-                (true, false) => "down",
-                _ => continue,
-            };
-            found.push(RelativeStrengthCrossing {
-                date: current.date.clone(),
-                threshold,
-                direction: direction.to_owned(),
-                from_score: previous.rs_score,
-                to_score: current.rs_score,
-            });
-        }
-    }
-    found
+    items
+        .windows(2)
+        .flat_map(|pair| {
+            let (current, previous) = (&pair[0], &pair[1]);
+            relative_strength::crossings(previous.rs_score, current.rs_score)
+                .into_iter()
+                .map(|(threshold, direction)| RelativeStrengthCrossing {
+                    date: current.date.clone(),
+                    threshold,
+                    direction: direction.as_str().to_owned(),
+                    from_score: previous.rs_score,
+                    to_score: current.rs_score,
+                })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn row(day: u32, weaker: i64, universe: i64) -> HistoryRow {
-        HistoryRow {
-            date: NaiveDate::from_ymd_opt(2026, 10, day).expect("合法日期"),
+    fn row(day: u32, weaker: i64, universe: i64) -> RelativeStrengthDay {
+        RelativeStrengthDay {
+            stock_symbol: "2330".to_owned(),
+            date: chrono::NaiveDate::from_ymd_opt(2026, 10, day).expect("合法日期"),
             weighted: 12.345,
             weaker,
             rank: universe - weaker,

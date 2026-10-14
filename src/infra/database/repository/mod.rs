@@ -19,6 +19,7 @@ pub mod official_ratio;
 pub mod performance;
 pub mod portfolio;
 pub mod quote;
+pub mod relative_strength;
 pub mod stock;
 pub mod technical;
 pub mod trace;

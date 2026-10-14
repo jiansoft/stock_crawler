@@ -8,6 +8,8 @@ pub mod forward_return;
 pub mod official_ratio;
 /// 同業比較（產業中位數與名次）。
 pub mod peer;
+/// 相對強度（近 60／120／240 日加權報酬在上市櫃全體的百分位分數）。
+pub mod relative_strength;
 /// 報價領域之倉儲介面。
 pub mod repository;
 /// 技術指標（均線、RSI、KD、MACD 與交叉訊號）。

@@ -260,7 +260,7 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "資料健康週報",
             event::taiwan_stock::data_health::execute,
         ),
-        // 19:15（週一至週五）通知持股的重要技術訊號；排在 19:00 收盤完整性檢查之後，
+        // 19:15（週一至週五）通知持股的重要技術訊號與相對強度轉折；排在 19:00 收盤完整性檢查之後，
         // 若有重跑收盤匯總，訊號也已重新計算。
         create_job(
             "0 15 19 * * Mon-Fri",
