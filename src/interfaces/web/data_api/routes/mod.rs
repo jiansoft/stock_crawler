@@ -154,6 +154,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::industry_flow),
         )
         .route(
+            "/market/margin-ranking",
+            axum::routing::get(handlers::margin_ranking),
+        )
+        .route(
             "/market/cagr-ranking",
             axum::routing::get(handlers::cagr_ranking),
         )

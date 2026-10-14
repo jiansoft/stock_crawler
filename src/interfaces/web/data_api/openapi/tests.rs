@@ -150,6 +150,7 @@ fn openapi_contains_all_data_api_paths() {
         "/api/v1/market/industry-strength",
         "/api/v1/market/institutional-flow",
         "/api/v1/market/industry-flow",
+        "/api/v1/market/margin-ranking",
         "/api/v1/market/cagr-ranking",
         "/api/v1/market/cagr-ranking/{stock_symbol}",
         "/api/v1/healthz",
@@ -957,6 +958,48 @@ fn openapi_industry_flow_schema_pins_field_names() {
     assert_eq!(
         response["items"]["items"]["$ref"],
         "#/components/schemas/IndustryFlowItem"
+    );
+}
+
+/// 融資融券排行 path 的契約：days／limit 範圍與預設、排序鍵列舉、可為 null 的欄位。
+#[test]
+fn openapi_margin_ranking_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/market/margin-ranking");
+    assert_endpoint_responses(operation, "MarginRankingResponse", true);
+    for (name, default, maximum) in [("days", 1, 60), ("limit", 30, 100)] {
+        let schema = query_schema(operation, name);
+        assert_eq!(schema["default"], default, "{name}");
+        assert_eq!(schema["minimum"], 1, "{name}");
+        assert_eq!(schema["maximum"], maximum, "{name}");
+    }
+    let rank_by = query_schema(operation, "rank_by");
+    assert_eq!(rank_by["$ref"], "#/components/schemas/MarginRankByValue");
+    assert_eq!(rank_by["default"], "margin_increase");
+    assert_eq!(
+        enum_values(&document, rank_by),
+        serde_json::json!([
+            "margin_increase",
+            "margin_decrease",
+            "short_increase",
+            "short_decrease",
+            "short_margin_ratio"
+        ])
+    );
+
+    let schemas = &document["components"]["schemas"];
+    let item = &schemas["MarginRankItem"]["properties"];
+    for field in [
+        "margin_change_percent",
+        "short_margin_ratio",
+        "closing_price",
+    ] {
+        assert!(item[field].to_string().contains("null"), "{field}");
+    }
+    let response = &schemas["MarginRankingResponse"]["properties"];
+    assert_eq!(
+        response["items"]["items"]["$ref"],
+        "#/components/schemas/MarginRankItem"
     );
 }
 

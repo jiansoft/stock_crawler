@@ -182,7 +182,7 @@ pub(super) struct FlowPeriod {
 }
 
 /// 由新到舊的籌碼交易日決定累計期間與連續天數的回看起點；沒有交易日回 `None`。
-fn flow_period(dates: &[NaiveDate], days: usize) -> Option<(FlowPeriod, NaiveDate)> {
+pub(super) fn flow_period(dates: &[NaiveDate], days: usize) -> Option<(FlowPeriod, NaiveDate)> {
     let data_date = *dates.first()?;
     let days = days.min(dates.len());
     let window_start = *dates.last()?;
@@ -197,7 +197,7 @@ fn flow_period(dates: &[NaiveDate], days: usize) -> Option<(FlowPeriod, NaiveDat
 }
 
 /// `until`（含）之前最近 [`STREAK_WINDOW`] 個有籌碼資料的交易日，由新到舊。
-async fn chip_dates(until: NaiveDate) -> Result<Vec<NaiveDate>, Box<Response>> {
+pub(super) async fn chip_dates(until: NaiveDate) -> Result<Vec<NaiveDate>, Box<Response>> {
     sqlx::query_scalar(DATES_SQL)
         .bind(until)
         .bind(STREAK_WINDOW as i64)
