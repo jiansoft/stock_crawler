@@ -10,10 +10,15 @@ use axum::{
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
-use super::{database_error, decimal_to_f64, error_response, parse_range, timestamp};
+use super::{
+    database_error, decimal_to_f64, error_response, parse_range, repository_error, round2, round4,
+    timestamp,
+};
+use crate::domain::quote::technical::{self, PriceAdjustment, PriceBar, PriceBarRepository};
+use crate::infra::database::repository::quote::PgQuoteRepository;
 use crate::infra::{cache::SHARE, database};
 use crate::interfaces::web::data_api::dto::{
-    DailyQuote, ErrorBody, HistoricalQuote, HistoryParams, LatestQuoteResponse,
+    AdjustedPrices, DailyQuote, ErrorBody, HistoricalQuote, HistoryParams, LatestQuoteResponse,
     PriceHistoryResponse, QuoteHistoryRecord, RealtimeSnapshotResponse, SearchParams,
     SearchResponse, Stock, StockProfile,
 };
@@ -59,6 +64,8 @@ pub(crate) async fn latest_quote(Path(symbol): Path<String>) -> Response {
 }
 
 /// 查詢股票歷史日線資料；先確認股票存在，區分未知代號與空區間。
+///
+/// 帶 `adjusted=true` 時另讀股利與公司行動事件，為有成交的日線附上還原權值價格。
 #[utoipa::path(get, path = "/api/v1/stocks/{symbol}/price-history", tag = "data-api", params(("symbol" = String, Path, description = "股票代號"), HistoryParams), responses((status = 200, body = PriceHistoryResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn price_history(
     Path(symbol): Path<String>,
@@ -83,14 +90,87 @@ pub(crate) async fn price_history(
         Err(error) => return database_error(error),
         Ok(Some(_)) => {}
     }
-    let rows: Result<Vec<HistoricalQuoteRow>, _> = sqlx::query_as(r#"SELECT "Date" AS date, "OpeningPrice" AS opening_price, "HighestPrice" AS highest_price, "LowestPrice" AS lowest_price, "ClosingPrice" AS closing_price, "Change" AS change, "ChangeRange" AS change_range, "TradingVolume" AS trading_volume, "Transaction" AS transaction, "TradeValue" AS trade_value, "MovingAverage5" AS moving_average_5, "MovingAverage10" AS moving_average_10, "MovingAverage20" AS moving_average_20, "MovingAverage60" AS moving_average_60, "PriceEarningRatio" AS price_earning_ratio, "price-to-book_ratio" AS price_to_book_ratio, "RecordTime" AS record_time FROM "DailyQuotes" WHERE stock_symbol = $1 AND ($2::date IS NULL OR "Date" >= $2::date) AND ($3::date IS NULL OR "Date" <= $3::date) ORDER BY "Date" DESC LIMIT $4"#).bind(symbol).bind(from).bind(to).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
-    match rows {
-        Ok(rows) => Json(PriceHistoryResponse {
-            quotes: rows.into_iter().map(Into::into).collect(),
+    let rows: Result<Vec<HistoricalQuoteRow>, _> = sqlx::query_as(r#"SELECT "Date" AS date, "OpeningPrice" AS opening_price, "HighestPrice" AS highest_price, "LowestPrice" AS lowest_price, "ClosingPrice" AS closing_price, "Change" AS change, "ChangeRange" AS change_range, "TradingVolume" AS trading_volume, "Transaction" AS transaction, "TradeValue" AS trade_value, "MovingAverage5" AS moving_average_5, "MovingAverage10" AS moving_average_10, "MovingAverage20" AS moving_average_20, "MovingAverage60" AS moving_average_60, "PriceEarningRatio" AS price_earning_ratio, "price-to-book_ratio" AS price_to_book_ratio, "RecordTime" AS record_time FROM "DailyQuotes" WHERE stock_symbol = $1 AND ($2::date IS NULL OR "Date" >= $2::date) AND ($3::date IS NULL OR "Date" <= $3::date) ORDER BY "Date" DESC LIMIT $4"#).bind(&symbol).bind(from).bind(to).bind(i64::from(limit)).fetch_all(database::get_connection()).await;
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(error) => return database_error(error),
+    };
+    let adjusted = params.adjusted.unwrap_or(false);
+    let adjustments = if adjusted {
+        match PgQuoteRepository::new()
+            .fetch_price_adjustments(std::slice::from_ref(&symbol))
+            .await
+        {
+            Ok(mut map) => Some(map.remove(&symbol).unwrap_or_default()),
+            Err(error) => return repository_error(error),
+        }
+    } else {
+        None
+    };
+    Json(PriceHistoryResponse {
+        adjusted,
+        quotes: build_quotes(rows, adjustments.as_deref()),
+    })
+    .into_response()
+}
+
+/// 把日線列（新到舊）轉成回應；有還原事件清單時，為有成交的日線附上還原權值價格。
+///
+/// 還原因子以區間內有成交的日線由舊到新計算（規則見 [`technical::adjustment_factors`]），
+/// 最新一筆有成交的日線為基準；收盤缺值或為 0 的日線不附還原價。
+fn build_quotes(
+    rows: Vec<HistoricalQuoteRow>,
+    adjustments: Option<&[PriceAdjustment]>,
+) -> Vec<HistoricalQuote> {
+    let Some(adjustments) = adjustments else {
+        return rows.into_iter().map(Into::into).collect();
+    };
+    let traded: Vec<(usize, PriceBar)> = rows
+        .iter()
+        .enumerate()
+        .rev()
+        .filter_map(|(index, row)| {
+            let close = decimal_to_f64(row.closing_price).filter(|close| *close > 0.0)?;
+            Some((
+                index,
+                PriceBar {
+                    date: row.date,
+                    close,
+                    high: close,
+                    low: close,
+                },
+            ))
         })
-        .into_response(),
-        Err(error) => database_error(error),
+        .collect();
+    let bars: Vec<PriceBar> = traded.iter().map(|(_, bar)| *bar).collect();
+    let mut factors = vec![None; rows.len()];
+    for ((index, bar), factor) in traded
+        .iter()
+        .zip(technical::adjustment_factors(&bars, adjustments))
+    {
+        factors[*index] = Some((bar.close, factor));
     }
+    rows.into_iter()
+        .zip(factors)
+        .map(|(row, factor)| {
+            let mut quote = HistoricalQuote::from(row);
+            quote.adjusted = factor.map(|(close, factor)| {
+                let scale = |price: Option<f64>| {
+                    price
+                        .filter(|price| *price > 0.0)
+                        .map(|price| round2(price * factor))
+                };
+                AdjustedPrices {
+                    factor: round4(factor),
+                    opening_price: scale(quote.opening_price),
+                    highest_price: scale(quote.highest_price),
+                    lowest_price: scale(quote.lowest_price),
+                    closing_price: round2(close * factor),
+                }
+            });
+            quote
+        })
+        .collect()
 }
 
 /// 查詢股票完整基本面、最新日報價與歷史高低點。
@@ -260,6 +340,7 @@ impl From<HistoricalQuoteRow> for HistoricalQuote {
             price_earning_ratio: decimal_to_f64(row.price_earning_ratio),
             price_to_book_ratio: decimal_to_f64(row.price_to_book_ratio),
             record_time: timestamp(row.record_time),
+            adjusted: None,
         }
     }
 }
@@ -316,5 +397,82 @@ impl From<ProfileRow> for StockProfile {
             issued_share: row.issued_share.map(|shares| shares as f64),
             history,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day(d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 4, d).expect("合法日期")
+    }
+
+    /// 一筆日線列；開高低收以元為單位，`None` 表示缺值。
+    fn row(date: NaiveDate, open: Option<i64>, close: Option<i64>) -> HistoricalQuoteRow {
+        HistoricalQuoteRow {
+            date,
+            opening_price: open.map(Decimal::from),
+            highest_price: close.map(|close| Decimal::from(close + 2)),
+            lowest_price: Some(Decimal::ZERO),
+            closing_price: close.map(Decimal::from),
+            change: None,
+            change_range: None,
+            trading_volume: None,
+            transaction: None,
+            trade_value: None,
+            moving_average_5: None,
+            moving_average_10: None,
+            moving_average_20: None,
+            moving_average_60: None,
+            price_earning_ratio: None,
+            price_to_book_ratio: None,
+            record_time: None,
+        }
+    }
+
+    fn cash_dividend(date: NaiveDate, cash: f64) -> PriceAdjustment {
+        PriceAdjustment {
+            date,
+            cash_dividend: cash,
+            stock_dividend: 0.0,
+            share_ratio: 1.0,
+        }
+    }
+
+    /// 不要求還原時不附 `adjusted`；要求時以最新一筆有成交的日線為基準，
+    /// 沒有成交與缺值、為 0 的價格不換算。
+    #[test]
+    fn build_quotes_attaches_adjusted_prices() {
+        let rows = || {
+            vec![
+                row(day(30), Some(100), Some(102)),
+                row(day(29), None, Some(0)),
+                row(day(28), Some(100), Some(101)),
+                row(day(27), Some(99), None),
+            ]
+        };
+        let plain = build_quotes(rows(), None);
+        assert!(plain.iter().all(|quote| quote.adjusted.is_none()));
+        assert_eq!(plain[0].closing_price, Some(102.0));
+
+        // 4/30 除息 1 元：前一筆有成交的 4/28 收盤 101 → 參考價 100。
+        let quotes = build_quotes(rows(), Some(&[cash_dividend(day(30), 1.0)]));
+        let latest = quotes[0].adjusted.as_ref().expect("有成交");
+        assert_eq!(latest.factor, 1.0);
+        assert_eq!(latest.closing_price, 102.0);
+        assert_eq!(latest.opening_price, Some(100.0));
+        assert_eq!(latest.highest_price, Some(104.0));
+        assert_eq!(latest.lowest_price, None);
+        assert!(quotes[1].adjusted.is_none());
+        let before = quotes[2].adjusted.as_ref().expect("有成交");
+        assert_eq!(before.factor, 0.9901);
+        assert_eq!(before.closing_price, 100.0);
+        assert_eq!(before.opening_price, Some(99.01));
+        assert_eq!(before.highest_price, Some(101.98));
+        assert!(quotes[3].adjusted.is_none());
+        assert_eq!(quotes[3].opening_price, Some(99.0));
+
+        assert!(build_quotes(Vec::new(), Some(&[])).is_empty());
     }
 }

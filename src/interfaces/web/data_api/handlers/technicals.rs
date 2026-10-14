@@ -11,7 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{ensure_stock_exists, error_response, parse_optional_date, repository_error};
+use super::{ensure_stock_exists, error_response, parse_optional_date, repository_error, round2};
 use crate::domain::quote::technical::{
     self, IndicatorPoint, PriceAdjustment, PriceBar, PriceBarRepository,
 };
@@ -125,11 +125,6 @@ fn to_point(point: &IndicatorPoint) -> TechnicalPoint {
     }
 }
 
-/// 四捨五入到小數兩位（`f64::round` 為遠離零捨入）。
-fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;
@@ -217,13 +212,5 @@ mod tests {
         let empty = build_response("2330".to_owned(), 20, &[], &[]);
         assert!(empty.data_as_of.is_none());
         assert!(empty.points.is_empty() && empty.signals.is_empty());
-    }
-
-    /// 遠離零捨入到小數兩位。
-    #[test]
-    fn round2_rounds_half_away_from_zero() {
-        assert_eq!(round2(1.234_5), 1.23);
-        assert_eq!(round2(-2.5_f64 / 100.0 * 3.0), -0.08);
-        assert_eq!(round2(0.125), 0.13);
     }
 }
