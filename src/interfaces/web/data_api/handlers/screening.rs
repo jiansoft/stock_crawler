@@ -15,9 +15,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Local;
+use chrono::{Local, NaiveDate};
 
 use self::{params::validate_screening_params, row::ScreenedStockRow, sql::SCREEN_STOCKS_SQL};
+use super::relative_strength::{ScoredStock, load_scores};
 use super::{database_error, error_response};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
@@ -31,6 +32,7 @@ use crate::interfaces::web::data_api::dto::{
 /// 的新鮮度上限；過期指標轉成 `null`，來源日期則保留供呼叫端稽核。
 /// 財務體質（F 分數、毛利率、負債比、自由現金流）讀每日重算的 `financial_health`；
 /// 營收動能（連續年增月數、近 3 月累計年增率）由最近 12 個月營收即時計算。
+/// 相對強度分數與 `/market/relative-strength` 相同，以上市櫃全體計算後再篩選。
 ///
 /// # Errors
 ///
@@ -46,11 +48,16 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
     // 查詢日由 handler 明確綁定，SQL 不直接讀 CURRENT_DATE；純函式測試可傳入
     // 任意日期驗證月份、季度與 31 天邊界，production 則採伺服器台北本地日。
     let query_date = Local::now().date_naive();
-    // ORDER BY 字串只可能來自下方二十四個 &'static str 分支，絕不插入呼叫端
+    // 相對強度要以上市櫃全體排名，無法在單股 LATERAL 內算，先算好再以陣列傳入。
+    let (rs_as_of, rs_symbols, rs_scores) = match load_scores(query_date).await {
+        Ok(scores) => rs_columns(scores),
+        Err(response) => return *response,
+    };
+    // ORDER BY 字串只可能來自下方二十六個 &'static str 分支，絕不插入呼叫端
     // 原始文字；其他條件仍全部使用 bind parameter。
-    let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $16", validated.order_by);
+    let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $19", validated.order_by);
     // SQLx 0.9 要求動態字串顯式稽核；此處唯一動態部分已由
-    // `screen_order_by` 限制為二十四個靜態常數，因此可安全標記。
+    // `screen_order_by` 限制為二十六個靜態常數，因此可安全標記。
     let rows: Result<Vec<ScreenedStockRow>, _> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(validated.market_id)
         .bind(params.industry_id)
@@ -67,6 +74,9 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
         .bind(params.min_revenue_yoy_streak.map(i16::from))
         .bind(validated.min_revenue_yoy_3m_percent)
         .bind(validated.min_monthly_revenue)
+        .bind(&rs_symbols)
+        .bind(&rs_scores)
+        .bind(validated.min_rs_score)
         .bind(i64::from(validated.limit))
         .fetch_all(database::get_connection())
         .await;
@@ -75,9 +85,24 @@ pub(crate) async fn screen_stocks(Query(params): Query<StockScreeningParams>) ->
         Ok(rows) => Json(StockScreeningResponse {
             // 每股各來源可能來自不同日期，因此不可偽造單一 data_as_of。
             data_as_of: None,
+            rs_as_of,
             stocks: rows.into_iter().map(Into::into).collect(),
         })
         .into_response(),
         Err(error) => database_error(error),
     }
+}
+
+/// 把全體計分結果拆成資料日與代號、分數兩個平行陣列；查無資料時兩個陣列皆空。
+fn rs_columns(
+    scores: Option<(NaiveDate, Vec<ScoredStock>)>,
+) -> (Option<String>, Vec<String>, Vec<i16>) {
+    let Some((data_date, scored)) = scores else {
+        return (None, Vec::new(), Vec::new());
+    };
+    let (symbols, values) = scored
+        .into_iter()
+        .map(|stock| (stock.row.stock_symbol, i16::from(stock.rs_score)))
+        .unzip();
+    (Some(data_date.to_string()), symbols, values)
 }

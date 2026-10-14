@@ -321,6 +321,7 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
         ("debt_ratio_percent", "number"),
         ("free_cash_flow_ttm", "integer"),
         ("health_period", "string"),
+        ("rs_score", "integer"),
     ] {
         let schema = screened[field].to_string();
         assert!(

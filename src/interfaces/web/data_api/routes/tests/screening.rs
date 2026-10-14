@@ -198,3 +198,41 @@ async fn stock_screen_revenue_momentum_filters() {
 
     cleanup(pool).await;
 }
+
+/// 相對強度門檻：回傳的股票都有不低於門檻的分數；查無相對強度資料（`rs_as_of` 為 null）時
+/// 沒有任何股票符合。分數以查詢當天計算，不種入資料，只驗證篩選與排序的語意。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn stock_screen_min_rs_score_filter() {
+    if pool_or_skip("stock_screen_min_rs_score_filter")
+        .await
+        .is_none()
+    {
+        return;
+    }
+    let (status, json) =
+        get("/api/v1/stocks/screen?min_rs_score=90&sort_by=rs_score&sort_order=desc&limit=50")
+            .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let stocks = json["stocks"].as_array().expect("stocks 陣列");
+    if json["rs_as_of"].is_null() {
+        assert!(stocks.is_empty(), "沒有分數時不應有股票符合：{json}");
+    }
+    let scores: Vec<u64> = stocks
+        .iter()
+        .map(|stock| stock["rs_score"].as_u64().expect("符合門檻的股票必有分數"))
+        .collect();
+    assert!(scores.iter().all(|&score| score >= 90), "{scores:?}");
+    assert!(
+        scores.windows(2).all(|pair| pair[0] >= pair[1]),
+        "應由高到低：{scores:?}"
+    );
+
+    for query in ["min_rs_score=0", "min_rs_score=100", "sort_by=rs"] {
+        let (status, _) = get(&format!("/api/v1/stocks/screen?market=twse&{query}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+}
