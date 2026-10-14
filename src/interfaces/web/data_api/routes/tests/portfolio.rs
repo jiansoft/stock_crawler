@@ -92,6 +92,16 @@ async fn portfolio_summary_endpoint_db_semantics() {
         (2_000.into(), 100.0.into())
     );
     assert_eq!(holding["f_score"], 6);
+    // 假代號沒有相對強度與籌碼，欄位仍要出現（null）。
+    for field in ["rs_score", "foreign_streak", "trust_streak"] {
+        assert!(
+            holding.get(field).is_some_and(serde_json::Value::is_null),
+            "{field}：{holding}"
+        );
+    }
+    for field in ["rs_as_of", "chip_as_of"] {
+        assert!(json.get(field).is_some(), "{field}");
+    }
     assert_eq!(json["industries"][0]["industry_id"], 1);
 
     let (status, _) = get("/api/v1/portfolio/summary?member_id=-1").await;

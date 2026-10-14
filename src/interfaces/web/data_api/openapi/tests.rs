@@ -1056,11 +1056,21 @@ fn openapi_portfolio_summary_schema_pins_field_names() {
         "weighted_dividend_yield",
         "weighted_f_score",
         "unrealized_gain_percent",
+        "rs_as_of",
+        "chip_as_of",
     ] {
         assert!(response[field].to_string().contains("null"), "{field}");
     }
     let holding = &schemas["PortfolioHolding"]["properties"];
-    for field in ["closing_price", "market_value", "weight_percent", "f_score"] {
+    for field in [
+        "closing_price",
+        "market_value",
+        "weight_percent",
+        "f_score",
+        "rs_score",
+        "foreign_streak",
+        "trust_streak",
+    ] {
         assert!(holding[field].to_string().contains("null"), "{field}");
     }
 }

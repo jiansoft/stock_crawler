@@ -3,7 +3,10 @@
 //! 部位來自 `stock_ownership_details`（未賣出），同代號多筆合併；報價取
 //! `last_daily_quotes`，殖利率取 `yield_rank` 最新一筆（31 天內），F 分數取
 //! `financial_health`（評分年度落後 1–2 年內）。彙總規則在
-//! [`crate::domain::portfolio::summary`]。
+//! [`crate::domain::portfolio::summary`]。另附每檔的相對強度分數（同
+//! [`super::relative_strength`]）與外資、投信連續買賣超天數（同 [`super::institutional_flow`]）。
+
+use std::collections::HashMap;
 
 use axum::{
     Json,
@@ -11,9 +14,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
+use super::institutional_flow::{StreakRow, load_streaks};
+use super::relative_strength::{ScoredStock, load_scores};
 use super::{database_error, error_response};
 use crate::domain::portfolio::summary::{self, Position};
 use crate::infra::database;
@@ -83,15 +88,61 @@ pub(crate) async fn portfolio_summary(Query(params): Query<PortfolioSummaryParam
     if member_id < 0 {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
     }
-    let rows: Vec<PositionRow> = match sqlx::query_as(POSITIONS_SQL)
-        .bind(member_id)
-        .fetch_all(database::get_connection())
-        .await
-    {
+    let today = Local::now().date_naive();
+    let (rows, scores, streaks) = tokio::join!(
+        sqlx::query_as::<_, PositionRow>(POSITIONS_SQL)
+            .bind(member_id)
+            .fetch_all(database::get_connection()),
+        load_scores(today),
+        load_streaks(today),
+    );
+    let rows = match rows {
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
-    Json(build_response(member_id, rows)).into_response()
+    let scores = match scores {
+        Ok(scores) => scores,
+        Err(response) => return *response,
+    };
+    let streaks = match streaks {
+        Ok(streaks) => streaks,
+        Err(response) => return *response,
+    };
+    let mut response = build_response(member_id, rows);
+    attach_indicators(&mut response, scores, streaks);
+    Json(response).into_response()
+}
+
+/// 依代號把相對強度分數與連續買賣超天數附到各持股，並填入兩者的資料日。
+fn attach_indicators(
+    response: &mut PortfolioSummaryResponse,
+    scores: Option<(NaiveDate, Vec<ScoredStock>)>,
+    streaks: Option<(NaiveDate, Vec<StreakRow>)>,
+) {
+    let mut rs_scores = HashMap::new();
+    if let Some((date, scored)) = scores {
+        response.rs_as_of = Some(date.to_string());
+        rs_scores.extend(
+            scored
+                .into_iter()
+                .map(|stock| (stock.row.stock_symbol, stock.rs_score)),
+        );
+    }
+    let mut chip = HashMap::new();
+    if let Some((date, rows)) = streaks {
+        response.chip_as_of = Some(date.to_string());
+        chip.extend(
+            rows.into_iter()
+                .map(|row| (row.stock_symbol, (row.foreign_streak, row.trust_streak))),
+        );
+    }
+    for holding in &mut response.holdings {
+        holding.rs_score = rs_scores.get(&holding.stock_symbol).copied();
+        if let Some(&(foreign, trust)) = chip.get(&holding.stock_symbol) {
+            holding.foreign_streak = Some(foreign);
+            holding.trust_streak = Some(trust);
+        }
+    }
 }
 
 /// 由查詢結果組出回應；`data_as_of` 取各持股報價日中最新的一天。
@@ -156,5 +207,77 @@ mod tests {
 
         let empty = build_response(0, Vec::new());
         assert!(empty.data_as_of.is_none() && empty.holdings.is_empty());
+    }
+
+    /// 依代號附上分數與連續天數；沒有分數或籌碼的持股維持 null；資料日只在有資料時填入。
+    #[test]
+    fn attach_indicators_matches_by_symbol() {
+        use super::super::relative_strength::UniverseRow;
+
+        let position = |symbol: &str| PositionRow {
+            stock_symbol: symbol.to_owned(),
+            shares: 1_000,
+            cost: dec!(10_000),
+            dividends_received: dec!(0),
+            name: symbol.to_owned(),
+            industry_id: None,
+            industry_name: String::new(),
+            quote_date: NaiveDate::from_ymd_opt(2026, 10, 14),
+            closing_price: Some(dec!(10)),
+            dividend_yield_percent: None,
+            f_score: None,
+        };
+        let scored = |symbol: &str, rs_score: u8| ScoredStock {
+            rank: 1,
+            rs_score,
+            weighted: 1.0,
+            row: UniverseRow {
+                stock_symbol: symbol.to_owned(),
+                name: String::new(),
+                market_id: 2,
+                industry: String::new(),
+                return_20d: None,
+                return_60d: 0.0,
+                return_120d: 0.0,
+                return_240d: 0.0,
+                closing_price: None,
+            },
+        };
+        let day = |d: u32| NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期");
+        let mut response = build_response(1, vec![position("0050"), position("2330")]);
+        attach_indicators(
+            &mut response,
+            Some((day(14), vec![scored("2330", 79), scored("2317", 50)])),
+            Some((
+                day(13),
+                vec![StreakRow {
+                    stock_symbol: "2330".to_owned(),
+                    foreign_streak: -6,
+                    trust_streak: 11,
+                }],
+            )),
+        );
+        assert_eq!(response.rs_as_of.as_deref(), Some("2026-10-14"));
+        assert_eq!(response.chip_as_of.as_deref(), Some("2026-10-13"));
+        let by_symbol = |symbol: &str| {
+            response
+                .holdings
+                .iter()
+                .find(|holding| holding.stock_symbol == symbol)
+                .map(|holding| {
+                    (
+                        holding.rs_score,
+                        holding.foreign_streak,
+                        holding.trust_streak,
+                    )
+                })
+        };
+        assert_eq!(by_symbol("2330"), Some((Some(79), Some(-6), Some(11))));
+        assert_eq!(by_symbol("0050"), Some((None, None, None)));
+
+        let mut bare = build_response(1, vec![position("2330")]);
+        attach_indicators(&mut bare, None, None);
+        assert!(bare.rs_as_of.is_none() && bare.chip_as_of.is_none());
+        assert!(bare.holdings[0].rs_score.is_none());
     }
 }

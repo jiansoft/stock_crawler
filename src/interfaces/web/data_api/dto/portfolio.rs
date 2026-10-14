@@ -94,6 +94,14 @@ pub(crate) struct PortfolioHolding {
     pub(crate) dividend_yield_percent: Option<f64>,
     /// 評分年度落後不超過 2 年的 Piotroski F 分數；缺值或過期時為 `null`。
     pub(crate) f_score: Option<u8>,
+    /// 相對強度分數 1–99（同 `/market/relative-strength`，資料日見 `rs_as_of`）；
+    /// ETF、上市未滿 240 個交易日或暫停交易時為 `null`。
+    pub(crate) rs_score: Option<u8>,
+    /// 截至 `chip_as_of` 的外資連續買賣超天數：正數為連續買超、負數為連續賣超、0 為當天沒有買賣；
+    /// 當天沒有籌碼資料時為 `null`。
+    pub(crate) foreign_streak: Option<i16>,
+    /// 截至 `chip_as_of` 的投信連續買賣超天數，規則同 `foreign_streak`。
+    pub(crate) trust_streak: Option<i16>,
 }
 
 impl From<HoldingSummary> for PortfolioHolding {
@@ -114,6 +122,9 @@ impl From<HoldingSummary> for PortfolioHolding {
             dividends_received: decimal_to_f64(position.dividends_received),
             dividend_yield_percent: position.dividend_yield_percent.map(decimal_to_f64),
             f_score: position.f_score.and_then(|score| u8::try_from(score).ok()),
+            rs_score: None,
+            foreign_streak: None,
+            trust_streak: None,
         }
     }
 }
@@ -125,6 +136,10 @@ pub(crate) struct PortfolioSummaryResponse {
     pub(crate) member_id: i64,
     /// 各持股最新收盤日中最新的一天；沒有持股或報價時為 `null`。
     pub(crate) data_as_of: Option<String>,
+    /// 各持股 `rs_score` 的資料日；查無相對強度資料時為 `null`。
+    pub(crate) rs_as_of: Option<String>,
+    /// 各持股 `foreign_streak`、`trust_streak` 的資料日（每晚 21:50 入庫）；查無籌碼資料時為 `null`。
+    pub(crate) chip_as_of: Option<String>,
     /// 持有檔數。
     pub(crate) symbols: usize,
     /// 總市值（只計有報價的部位）。
@@ -157,6 +172,8 @@ impl PortfolioSummaryResponse {
         Self {
             member_id,
             data_as_of,
+            rs_as_of: None,
+            chip_as_of: None,
             symbols: summary.symbols,
             market_value: summary.market_value,
             cost: summary.cost,
