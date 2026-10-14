@@ -1,7 +1,7 @@
 //! `/market/signals/performance` 與 `/stocks/{symbol}/signals` 的 request、response 與 OpenAPI schema。
 //!
 //! 訊號來自收盤後預先計算的 `daily_technical_signal`，之後的表現來自 `daily_forward_return`
-//! （基準日收盤到之後第 5／20／60 個交易日收盤的還原報酬，等同含息）。
+//! （基準日收盤到之後第 5／20／60／120／240 個交易日收盤的還原報酬，等同含息）。
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -31,7 +31,7 @@ pub(crate) struct SignalPerformanceParams {
 /// 某天期（N 個交易日後）的表現統計；樣本為 0 時數值為 `null`。
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub(crate) struct HorizonStat {
-    /// 天期（交易日數）：5、20 或 60。
+    /// 天期（交易日數）：5、20、60、120 或 240。
     pub(crate) days: u32,
     /// 已滿天期、有報酬的樣本數。
     pub(crate) samples: i64,
@@ -136,6 +136,10 @@ pub(crate) struct StockSignalItem {
     pub(crate) return_20d: Option<f64>,
     /// 之後 60 個交易日的還原報酬（%）；未滿為 `null`。
     pub(crate) return_60d: Option<f64>,
+    /// 之後 120 個交易日的還原報酬（%）；未滿為 `null`。
+    pub(crate) return_120d: Option<f64>,
+    /// 之後 240 個交易日的還原報酬（%）；未滿為 `null`。
+    pub(crate) return_240d: Option<f64>,
 }
 
 /// 個股訊號歷史。
