@@ -62,7 +62,7 @@
 //!   漲跌幅，並同步調整市場廣度統計表的漲跌家數；按年請求，重跑安全。
 //! - `test_backfill_forward_returns`：
 //!   逐日回填 `MANUAL_FORWARD_RETURN_FROM`～`MANUAL_FORWARD_RETURN_TO`（預設 [`MANUAL_FORWARD_RETURN_FROM`]
-//!   至今天）每個交易日收盤時已滿 5／20／60 日的未來報酬；只讀資料庫，重跑安全。
+//!   至今天）每個交易日收盤時已滿 5／20／60／120／240 日的未來報酬；只讀資料庫，重跑安全。
 //! - `test_backfill_foreign_holding_history`：
 //!   依 [`MANUAL_QFII_HISTORY_START`]～[`MANUAL_QFII_HISTORY_END`] 逐日回補外資持股歷史
 //!   （`qfii_history`），最後重算 `qfii_trend`；不發持股通知。
@@ -900,10 +900,10 @@ async fn test_backfill_ex_right_changes() {
 
 /// 逐日回填未來報酬（`daily_forward_return`）。
 ///
-/// 以每個交易日為結束日，回填往前第 5、20、60 個交易日的還原報酬；只讀資料庫既有日線、
+/// 以每個交易日為結束日，回填往前第 5、20、60、120、240 個交易日的還原報酬；只讀資料庫既有日線、
 /// 股利與公司行動，不呼叫外部網站，非交易日自動略過。起訖日可用環境變數
 /// `MANUAL_FORWARD_RETURN_FROM`／`MANUAL_FORWARD_RETURN_TO` 覆寫，迄日預設今天。
-/// 基準日要從 X 開始齊全，起日需早於 X 約 60 個交易日。
+/// 基準日要從 X 開始齊全，起日需早於 X 約 240 個交易日（只需 60 日以內的天期時約 60 個）。
 ///
 /// 執行範例：
 /// `MANUAL_FORWARD_RETURN_FROM=2023-01-01 cargo test app::manual_backfill::test_backfill_forward_returns -- --ignored --nocapture`
