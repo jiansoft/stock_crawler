@@ -20,6 +20,7 @@ use super::{
     parse_optional_date, repository_error, round2,
 };
 use crate::domain::quote::forward_return::{self, ForwardReturnRepository};
+use crate::domain::quote::relative_strength::percentile_score;
 use crate::infra::database::{self, repository::quote::PgQuoteRepository};
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, RelativeStrengthItem, RelativeStrengthParams, RelativeStrengthResponse,
@@ -290,16 +291,6 @@ pub(super) fn market_label(market_id: i32) -> &'static str {
     if market_id == 4 { "tpex" } else { "twse" }
 }
 
-/// 比它弱的家數 `weaker` 在全體 `total` 中的百分位，換算成 1–99 分（只有一檔時為 99）。
-pub(super) fn percentile_score(weaker: usize, total: usize) -> u8 {
-    if total <= 1 {
-        return 99;
-    }
-    let rank = weaker as f64 / (total - 1) as f64;
-    // rank 在 0–1 之間，換算後必在 1–99。
-    (rank * 98.0).floor() as u8 + 1
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,15 +342,6 @@ mod tests {
         assert_eq!(bases.d240, day(2026, 2, 15));
         assert!(base_dates(&dates[1..]).is_none());
         assert!(base_dates(&[]).is_none());
-    }
-
-    /// 百分位分數：最弱 1、最強 99、只有一檔 99。
-    #[test]
-    fn percentile_score_maps_to_1_99() {
-        assert_eq!(percentile_score(0, 5), 1);
-        assert_eq!(percentile_score(4, 5), 99);
-        assert_eq!(percentile_score(2, 5), 50);
-        assert_eq!(percentile_score(0, 1), 99);
     }
 
     /// 以全體計分排名，篩選只影響輸出；同分同名次；asc 由弱到強；limit 截斷但 matched 不變。
