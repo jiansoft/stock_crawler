@@ -37,7 +37,7 @@ use crate::interfaces::web::data_api::dto::{
 /// 的新鮮度上限；過期指標轉成 `null`，來源日期則保留供呼叫端稽核。
 /// 財務體質（F 分數、毛利率、負債比、自由現金流）讀每日重算的 `financial_health`；
 /// 營收動能（連續年增月數、近 3 月累計年增率）由最近 12 個月營收即時計算。
-/// 相對強度分數與 `/market/relative-strength` 相同，以上市櫃全體計算後再篩選；
+/// 相對強度分數與 `/market/relative-strength` 相同，以上市櫃股票（不含 ETF）計算後再篩選；
 /// 外資、投信連續買賣超天數與 `/market/institutional-flow` 同一算法，取最新籌碼資料日。
 ///
 /// # Errors
@@ -62,7 +62,7 @@ async fn screen_at(
     validated: ValidatedScreeningParams,
     query_date: NaiveDate,
 ) -> Response {
-    // 相對強度要以上市櫃全體排名、連續天數要回看多日籌碼，都無法在單股 LATERAL 內算，
+    // 相對強度要以上市櫃股票（不含 ETF）排名、連續天數要回看多日籌碼，都無法在單股 LATERAL 內算，
     // 兩者同時先算好再以陣列傳入。
     let (scores, streaks) = tokio::join!(load_scores(query_date), load_streaks(query_date));
     let (rs_as_of, rs_symbols, rs_scores) = match scores {

@@ -15,7 +15,8 @@ use crate::{
     infra::database::{self, repository::quote::PgQuoteRepository},
 };
 
-/// 資料日 `$1` 的計分母體：上市櫃、未暫停交易，且近 60／120／240 日報酬都有的股票。
+/// 資料日 `$1` 的計分母體：上市櫃、未暫停交易、不是 ETF／ETN／受益證券（產業 9001～9003），
+/// 且近 60／120／240 日報酬都有的股票。
 ///
 /// `$2`～`$5` 是往前第 20、60、120、240 個交易日（基準日）；近 N 日報酬＝該基準日的 N 日報酬。
 const UNIVERSE_SQL: &str = r#"
@@ -42,14 +43,16 @@ WHERE r60.date = $3
   AND r120.return_120d IS NOT NULL
   AND r240.return_240d IS NOT NULL
   AND s.stock_exchange_market_id IN (2, 4)
+  AND s.stock_industry_id NOT IN (9001, 9002, 9003)
   AND NOT s."SuspendListing"
 "#;
 
-/// `$1`（含）之前最近 `$2` 個交易日，每天以上市櫃全體計分後，取股票 `$3` 的加權報酬與名次。
+/// `$1`（含）之前最近 `$2` 個交易日，每天以上市櫃股票（不含 ETF）計分後，取股票 `$3` 的加權報酬與名次。
 ///
 /// 交易日曆取 `$2 + 240` 個交易日（回看 800 天足以涵蓋 120 + 240 個交易日），資料日 T 的
 /// 近 N 日報酬＝往前第 N 個交易日（基準日）的 N 日報酬；`weaker` 為加權報酬比它低的家數，
-/// 由 domain 換算成 1–99 分。母體條件與排行相同：上市櫃、未暫停交易、三個天期的報酬都有。
+/// 由 domain 換算成 1–99 分。母體條件與排行相同：上市櫃、未暫停交易、不含 ETF／ETN／受益證券、
+/// 三個天期的報酬都有。
 /// 報酬還沒回填的交易日沒有任何列，自然略過。
 const HISTORY_SQL: &str = r#"
 WITH td AS (
@@ -83,6 +86,7 @@ scored AS (
       AND r120.return_120d IS NOT NULL
       AND r240.return_240d IS NOT NULL
       AND s.stock_exchange_market_id IN (2, 4)
+      AND s.stock_industry_id NOT IN (9001, 9002, 9003)
       AND NOT s."SuspendListing"
 ),
 ranked AS (

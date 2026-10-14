@@ -1,8 +1,10 @@
-//! 相對強度（RS）：近 60／120／240 日還原報酬加權後在上市櫃全體中的百分位分數。
+//! 相對強度（RS）：近 60／120／240 日還原報酬加權後在上市櫃股票（不含 ETF）中的百分位分數。
 //!
 //! 加權報酬＝0.4 × 近 60 日 ＋ 0.3 × 近 120 日 ＋ 0.3 × 近 240 日（近 N 日報酬取
 //! [`super::forward_return`] 基準日 T−N 的 N 日欄位），分數 1–99，99 為最強；分數、名次一律以
-//! 當天上市櫃全體計算。本模組只放純計算與查詢介面，SQL 在 infra。
+//! 當天上市櫃股票（不含 ETF）計算。本模組只放純計算與查詢介面，SQL 在 infra。
+//!
+//! 計分母體不含 ETF、ETN 與受益證券（產業 9001～9003）：股票只與股票比較，這些商品一律沒有分數。
 
 use std::{cmp::Ordering, collections::BTreeMap};
 
@@ -219,7 +221,7 @@ pub fn median_score(stocks: &[ScoredStock]) -> Option<f64> {
 /// 相對強度歷史的查詢介面。
 #[async_trait]
 pub trait RelativeStrengthQuery: Send + Sync {
-    /// `until`（含）之前最近 `days` 個交易日，每天以上市櫃全體計分後取 `stock_symbols` 的分數，
+    /// `until`（含）之前最近 `days` 個交易日，每天以上市櫃股票（不含 ETF）計分後取 `stock_symbols` 的分數，
     /// 依代號、再由新到舊排列。報酬還沒回填的交易日沒有資料；上市未滿 240 個交易日、暫停交易
     /// 或非上市櫃的股票沒有分數。
     async fn fetch_relative_strength(
@@ -233,7 +235,7 @@ pub trait RelativeStrengthQuery: Send + Sync {
 /// 全體計分的查詢介面。
 #[async_trait]
 pub trait ScoredUniverseQuery: Send + Sync {
-    /// `until`（含）之前最近一個已算好報酬的交易日的上市櫃全體分數，由強到弱。
+    /// `until`（含）之前最近一個已算好報酬的交易日的上市櫃股票（不含 ETF）分數，由強到弱。
     ///
     /// 最新一個交易日的報酬可能還沒回填（例如收盤匯總尚未跑完），最多往前退一天；兩天都沒有
     /// 資料回 `Ok(None)`。
