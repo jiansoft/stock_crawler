@@ -4,7 +4,7 @@
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
 //! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
-//! `financial_health`、`chip`、`screening`、`market`、`industries`、`portfolio`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals` 與 `signals` 十七個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! `financial_health`、`chip`、`screening`、`market`、`industries`、`portfolio`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals` 與 `signal_history` 十八個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
@@ -20,6 +20,7 @@ mod peers;
 mod portfolio;
 mod portfolio_history;
 mod screening;
+mod signal_history;
 mod signals;
 mod stocks;
 mod technicals;
@@ -79,6 +80,10 @@ pub(super) use portfolio_history::{
 pub(super) use screening::{
     ScreenedStock, SortOrderParamValue, StockScreenSortValue, StockScreeningParams,
     StockScreeningResponse,
+};
+pub(super) use signal_history::{
+    BenchmarkStat, HorizonStat, SignalPerformanceItem, SignalPerformanceParams,
+    SignalPerformanceResponse, StockSignalItem, StockSignalsParams, StockSignalsResponse,
 };
 pub(super) use signals::{
     MarketSignalsParams, MarketSignalsResponse, SignalCount, SignalIndicatorValue, SignalKindValue,

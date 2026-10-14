@@ -86,6 +86,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::stock_technicals),
         )
         .route(
+            "/stocks/{symbol}/signals",
+            axum::routing::get(handlers::stock_signals),
+        )
+        .route(
             "/stocks/{symbol}/peers",
             axum::routing::get(handlers::stock_peers),
         )
@@ -124,6 +128,10 @@ pub(crate) fn router() -> Router {
         .route(
             "/market/signals",
             axum::routing::get(handlers::market_signals),
+        )
+        .route(
+            "/market/signals/performance",
+            axum::routing::get(handlers::signal_performance),
         )
         .route(
             "/market/cagr-ranking",

@@ -11,8 +11,8 @@ use super::{dto, handlers};
 /// 由 handler 註解生成的 OpenAPI 3 文件。
 #[derive(OpenApi)]
 #[openapi(
-    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::financial_reports, handlers::financial_health, handlers::dividend_history, handlers::dividend_fill, handlers::stock_valuation, handlers::stock_valuation_band, handlers::stock_technicals, handlers::stock_peers, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::portfolio_summary, handlers::portfolio_history, handlers::dividend_forecast, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::industry_performance, handlers::market_signals, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
-    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::IncomeStatementItem, dto::BalanceSheetItem, dto::CashFlowStatementItem, dto::FinancialReportResponse, dto::HealthCriterion, dto::FinancialHealthResponse, dto::Dividend, dto::DividendHistoryResponse, dto::DividendFillEvent, dto::DividendFillSummary, dto::DividendFillResponse, dto::StockValuation, dto::StockValuationResponse, dto::ImpliedPriceBand, dto::RatioBandItem, dto::ValuationBandResponse, dto::TechnicalPoint, dto::TechnicalSignalItem, dto::TechnicalIndicatorsResponse, dto::SignalKindValue, dto::SignalIndicatorValue, dto::SignalCount, dto::SignalStock, dto::MarketSignalsResponse, dto::PeerStock, dto::PeerMetric, dto::PeersResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::WeightedMetricItem, dto::PortfolioIndustry, dto::PortfolioHolding, dto::PortfolioSummaryResponse, dto::PortfolioMonth, dto::PortfolioHistoryResponse, dto::DividendForecastItem, dto::DividendForecastMonth, dto::DividendForecastResponse, dto::ForecastBasisValue, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::IndustryMover, dto::IndustryPerformance, dto::IndustryPerformanceResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::ReportPeriodTypeValue, dto::HealthCategoryValue, dto::HealthValueUnitValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
+    paths(handlers::search_stocks, handlers::latest_quote, handlers::price_history, handlers::stock_profile, handlers::realtime_snapshot, handlers::monthly_revenues, handlers::financial_statements, handlers::financial_reports, handlers::financial_health, handlers::dividend_history, handlers::dividend_fill, handlers::stock_valuation, handlers::stock_valuation_band, handlers::stock_technicals, handlers::stock_signals, handlers::stock_peers, handlers::stock_chip, handlers::market_breadth, handlers::dividend_yield_ranking, handlers::screen_stocks, handlers::portfolio_summary, handlers::portfolio_history, handlers::dividend_forecast, handlers::market_index_history, handlers::dividend_calendar, handlers::qfii_holding_ranking, handlers::market_movers, handlers::industry_performance, handlers::market_signals, handlers::signal_performance, handlers::cagr_ranking, handlers::cagr_by_symbol, handlers::healthz),
+    components(schemas(dto::Stock, dto::DailyQuote, dto::HistoricalQuote, dto::QuoteHistoryRecord, dto::StockProfile, dto::SearchResponse, dto::LatestQuoteResponse, dto::PriceHistoryResponse, dto::RealtimeSnapshotResponse, dto::MonthlyRevenue, dto::MonthlyRevenueResponse, dto::FinancialStatement, dto::FinancialStatementHistoryResponse, dto::IncomeStatementItem, dto::BalanceSheetItem, dto::CashFlowStatementItem, dto::FinancialReportResponse, dto::HealthCriterion, dto::FinancialHealthResponse, dto::Dividend, dto::DividendHistoryResponse, dto::DividendFillEvent, dto::DividendFillSummary, dto::DividendFillResponse, dto::StockValuation, dto::StockValuationResponse, dto::ImpliedPriceBand, dto::RatioBandItem, dto::ValuationBandResponse, dto::TechnicalPoint, dto::TechnicalSignalItem, dto::TechnicalIndicatorsResponse, dto::SignalKindValue, dto::SignalIndicatorValue, dto::SignalCount, dto::SignalStock, dto::MarketSignalsResponse, dto::HorizonStat, dto::SignalPerformanceItem, dto::BenchmarkStat, dto::SignalPerformanceResponse, dto::StockSignalItem, dto::StockSignalsResponse, dto::PeerStock, dto::PeerMetric, dto::PeersResponse, dto::ChipDay, dto::ChipStreak, dto::HolderWeek, dto::InsiderSummary, dto::BrokerNet, dto::BrokerFlowDay, dto::ChipResponse, dto::MarketBreadth, dto::MarketBreadthResponse, dto::DividendYieldRank, dto::DividendYieldRankingResponse, dto::ScreenedStock, dto::StockScreeningResponse, dto::WeightedMetricItem, dto::PortfolioIndustry, dto::PortfolioHolding, dto::PortfolioSummaryResponse, dto::PortfolioMonth, dto::PortfolioHistoryResponse, dto::DividendForecastItem, dto::DividendForecastMonth, dto::DividendForecastResponse, dto::ForecastBasisValue, dto::MarketIndexPoint, dto::MarketIndexHistoryResponse, dto::DividendCalendarEvent, dto::DividendCalendarResponse, dto::QfiiHolding, dto::QfiiHoldingRankingResponse, dto::MarketMover, dto::MarketMoversResponse, dto::IndustryMover, dto::IndustryPerformance, dto::IndustryPerformanceResponse, dto::CagrCoverageInfo, dto::CagrSummary, dto::CagrRankingItem, dto::CagrRankingResponse, dto::CagrPeriodItem, dto::CagrSymbolResponse, dto::MarketParamValue, dto::CalendarEventTypeValue, dto::QfiiSortValue, dto::MoversRankByValue, dto::CagrPeriodParamValue, dto::CagrMetricParamValue, dto::StatementPeriodTypeValue, dto::ReportPeriodTypeValue, dto::HealthCategoryValue, dto::HealthValueUnitValue, dto::StockScreenSortValue, dto::SortOrderParamValue, dto::ErrorBody, dto::HealthResponse)),
     tags((name = "data-api", description = "唯讀股票資料查詢")),
     security(("bearer_auth" = [])),
     modifiers(&SecurityAddon)
@@ -831,6 +831,56 @@ mod tests {
         assert!(response["kind"].to_string().contains("null"));
         assert!(response["summary"].to_string().contains("SignalCount"));
         assert!(response["items"].to_string().contains("SignalStock"));
+    }
+
+    /// 訊號績效與個股訊號歷史 path 的契約：參數範圍、列舉值與回應欄位。
+    #[test]
+    fn openapi_signal_history_schema_pins_field_names() {
+        let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+        let operation = get_operation(&document, "/api/v1/market/signals/performance");
+        assert_endpoint_responses(operation, "SignalPerformanceResponse", true);
+        for name in ["from", "to", "industry"] {
+            assert!(query_schema(operation, name).is_object(), "{name}");
+        }
+        assert!(
+            query_schema(operation, "kind")
+                .to_string()
+                .contains("SignalKindValue")
+        );
+
+        let operation = get_operation(&document, "/api/v1/stocks/{symbol}/signals");
+        assert_endpoint_responses(operation, "StockSignalsResponse", true);
+        let days = query_schema(operation, "days");
+        assert_eq!(days["default"], 180);
+        assert_eq!(days["minimum"], 1);
+        assert_eq!(days["maximum"], 730);
+        let limit = query_schema(operation, "limit");
+        assert_eq!(limit["default"], 50);
+        assert_eq!(limit["maximum"], 200);
+
+        let schemas = &document["components"]["schemas"];
+        let horizon = &schemas["HorizonStat"]["properties"];
+        for field in [
+            "avg_return",
+            "median_return",
+            "win_rate",
+            "avg_excess_return",
+            "beat_market_rate",
+        ] {
+            assert!(horizon[field].to_string().contains("null"), "{field}");
+        }
+        let response = &schemas["SignalPerformanceResponse"]["properties"];
+        assert_eq!(response["adjusted"]["type"], "boolean");
+        assert!(response["benchmark"].to_string().contains("BenchmarkStat"));
+        assert!(
+            response["items"]
+                .to_string()
+                .contains("SignalPerformanceItem")
+        );
+        let item = &schemas["StockSignalItem"]["properties"];
+        for field in ["return_5d", "return_20d", "return_60d", "closing_price"] {
+            assert!(item[field].to_string().contains("null"), "{field}");
+        }
     }
 
     /// 產業表現 path 的契約：days 範圍與預設、market 列舉、可為 null 的統計欄位。

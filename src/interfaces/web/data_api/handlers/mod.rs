@@ -25,6 +25,7 @@ mod peers;
 mod portfolio;
 mod portfolio_history;
 mod screening;
+mod signal_history;
 mod stock_fundamentals;
 mod stock_quotes;
 mod technicals;
@@ -38,6 +39,7 @@ use axum::{
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
+use crate::domain::quote::technical::{SIGNAL_INDICATORS, SignalKind};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{ErrorBody, HealthResponse};
 
@@ -62,6 +64,9 @@ pub(super) use peers::{__path_stock_peers, stock_peers};
 pub(super) use portfolio::{__path_portfolio_summary, portfolio_summary};
 pub(super) use portfolio_history::{__path_portfolio_history, portfolio_history};
 pub(super) use screening::{__path_screen_stocks, screen_stocks};
+pub(super) use signal_history::{
+    __path_signal_performance, __path_stock_signals, signal_performance, stock_signals,
+};
 pub(super) use stock_fundamentals::{
     __path_dividend_history, __path_financial_statements, __path_monthly_revenues,
     __path_stock_valuation, dividend_history, financial_statements, monthly_revenues,
@@ -205,6 +210,54 @@ fn database_error(error: sqlx::Error) -> Response {
         StatusCode::INTERNAL_SERVER_ERROR,
         "伺服器內部發生未預期錯誤",
     )
+}
+
+/// 驗證技術訊號的 `kind`／`indicator` 篩選值；不在固定清單時回 `Some(422)`。
+fn signal_filter_error(kind: Option<&str>, indicator: Option<&str>) -> Option<Response> {
+    if kind.is_some_and(|kind| SignalKind::parse(kind).is_none()) {
+        return Some(error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "kind 必須為 golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high 或 new_low",
+        ));
+    }
+    if indicator.is_some_and(|indicator| !SIGNAL_INDICATORS.contains(&indicator)) {
+        return Some(error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "indicator 必須為 ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14 或 52_week",
+        ));
+    }
+    None
+}
+
+/// 訊號來源在對外說明中的順序；未知來源排最後。
+fn signal_indicator_order(indicator: &str) -> usize {
+    SIGNAL_INDICATORS
+        .iter()
+        .position(|known| *known == indicator)
+        .unwrap_or(usize::MAX)
+}
+
+/// 訊號種類在對外說明中的順序；未知種類排最後。
+fn signal_kind_order(kind: &str) -> usize {
+    SignalKind::parse(kind).map_or(usize::MAX, |kind| kind as usize)
+}
+
+/// 確認產業名稱存在（`None` 視為未篩選）；不存在回 `Some(422)`、查詢失敗回 `Some(500)`。
+async fn industry_error(industry: Option<&str>) -> Option<Response> {
+    let industry = industry?;
+    let found: Result<Option<(i32,)>, _> =
+        sqlx::query_as("SELECT stock_industry_id FROM stock_industry WHERE name = $1")
+            .bind(industry)
+            .fetch_optional(database::get_connection())
+            .await;
+    match found {
+        Ok(Some(_)) => None,
+        Ok(None) => Some(error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "industry 必須為產業名稱，例如「半導體業」",
+        )),
+        Err(error) => Some(database_error(error)),
+    }
 }
 
 /// 確認股票代號存在；不存在回 `Some(404)`、查詢失敗回 `Some(500)`，存在回 `None`。
