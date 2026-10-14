@@ -56,6 +56,10 @@
 //!   依 `MANUAL_OFFICIAL_RATIO_FROM`～`MANUAL_OFFICIAL_RATIO_TO`（預設 [`MANUAL_OFFICIAL_RATIO_FROM`]
 //!   ～[`MANUAL_OFFICIAL_RATIO_TO`]）以證交所、櫃買中心官方值補日線為 0 的本益比與股價淨值比
 //!   （只填 0、不覆寫）；每次請求間隔 3 秒，可分年分段執行，重跑只會處理仍有缺值的日期。
+//! - `test_backfill_ex_right_changes`：
+//!   以交易所除權除息計算結果表的開盤競價基準，重算 `MANUAL_EX_RIGHT_CHANGE_FROM`～
+//!   `MANUAL_EX_RIGHT_CHANGE_TO`（預設 [`MANUAL_EX_RIGHT_CHANGE_FROM`] 至今天）除權息日為 0 的漲跌與
+//!   漲跌幅，並同步調整市場廣度統計表的漲跌家數；按年請求，重跑安全。
 //! - `test_backfill_forward_returns`：
 //!   逐日回填 `MANUAL_FORWARD_RETURN_FROM`～`MANUAL_FORWARD_RETURN_TO`（預設 [`MANUAL_FORWARD_RETURN_FROM`]
 //!   至今天）每個交易日收盤時已滿 5／20／60 日的未來報酬；只讀資料庫，重跑安全。
@@ -90,6 +94,8 @@ const MANUAL_OFFICIAL_RATIO_FROM: &str = "2012-01-02";
 /// 官方本益比／股價淨值比回補的預設迄日。
 const MANUAL_OFFICIAL_RATIO_TO: &str = "2012-12-31";
 
+/// 除權息日漲跌修正的預設起日（日線資料的第一年）。
+const MANUAL_EX_RIGHT_CHANGE_FROM: &str = "2012-01-01";
 /// 未來報酬回填的預設起日（訊號績效統計從 2023 年起算）。
 const MANUAL_FORWARD_RETURN_FROM: &str = "2023-01-01";
 
@@ -863,6 +869,33 @@ async fn test_backfill_official_valuation_ratios() {
         .await
         .expect("manual official valuation ratio backfill failed");
     println!("官方本益比淨值比回補 {from}～{to}：{summary:?}");
+}
+
+/// 以官方開盤競價基準重算除權息日的漲跌與漲跌幅，並同步調整市場廣度統計表的漲跌家數。
+///
+/// **會寫入日線與統計表**；只改漲跌為 0、有成交的除權息日，重跑安全。按年向證交所與
+/// 櫃買中心各請求一次（間隔 3 秒）。起訖日可用環境變數 `MANUAL_EX_RIGHT_CHANGE_FROM`／
+/// `MANUAL_EX_RIGHT_CHANGE_TO` 覆寫，迄日預設今天。
+///
+/// 執行範例：
+/// `MANUAL_EX_RIGHT_CHANGE_FROM=2024-01-01 cargo test app::manual_backfill::test_backfill_ex_right_changes -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_ex_right_changes() {
+    dotenvy::dotenv().ok();
+    let today = chrono::Local::now().date_naive().to_string();
+    let date = |name: &str, default: &str| {
+        let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
+        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+    };
+    let from = date("MANUAL_EX_RIGHT_CHANGE_FROM", MANUAL_EX_RIGHT_CHANGE_FROM);
+    let to = date("MANUAL_EX_RIGHT_CHANGE_TO", &today);
+
+    let summary = crate::app::backfill::ex_right_change::backfill_range(from, to)
+        .await
+        .expect("manual ex-right change backfill failed");
+    println!("除權息日漲跌修正 {from}～{to}：{summary:?}");
 }
 
 /// 逐日回填未來報酬（`daily_forward_return`）。

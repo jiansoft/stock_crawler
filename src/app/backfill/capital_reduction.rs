@@ -263,4 +263,55 @@ mod tests {
 
         assert_eq!(saved, 0);
     }
+
+    /// 逐筆寫入並回傳成功筆數；單筆失敗（代號超過欄位長度）只記錄，不影響其他筆。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn save_all_writes_each_action_and_skips_failures() {
+        dotenvy::dotenv().ok();
+        let pool = crate::infra::database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 save_all_writes_each_action_and_skips_failures：無資料庫連接");
+            return;
+        }
+        let cleanup = || async {
+            sqlx::query("DELETE FROM corporate_action WHERE stock_symbol LIKE '79979C_'")
+                .execute(pool)
+                .await
+                .expect("清理測試資料");
+        };
+        cleanup().await;
+
+        let mut split = sample("79979CB");
+        split.action_type = CorporateActionType::Split;
+        split.share_ratio = dec!(4);
+        split.note = "1:4 分割".to_string();
+        let actions = vec![sample("79979CA"), sample(&"9".repeat(40)), split];
+        let saved = save_all(actions, "測試").await.expect("部分失敗仍成功");
+
+        let rows: Vec<(String, String, rust_decimal::Decimal)> = sqlx::query_as(
+            "SELECT stock_symbol, action_type, share_ratio FROM corporate_action
+             WHERE stock_symbol LIKE '79979C_' ORDER BY stock_symbol",
+        )
+        .fetch_all(pool)
+        .await
+        .expect("讀回公司行動");
+        cleanup().await;
+
+        assert_eq!(saved, 2);
+        assert_eq!(
+            rows,
+            [
+                (
+                    "79979CA".to_owned(),
+                    "capital_reduction".to_owned(),
+                    dec!(0.7)
+                ),
+                ("79979CB".to_owned(), "split".to_owned(), dec!(4)),
+            ]
+        );
+    }
 }

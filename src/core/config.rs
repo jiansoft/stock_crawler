@@ -278,8 +278,15 @@ impl App {
     ///
     /// 若缺少必要的環境變數，此方法將會觸發 `expect` 導致程式崩潰。
     fn from_env() -> Self {
+        Self::from_lookup(&|name| env::var(name).ok())
+    }
+
+    /// [`Self::from_env`] 的本體：以 `lookup` 取得各設定值（測試時可換成固定的對照表）。
+    ///
+    /// 缺少必要的值時以該名稱 panic，與直接讀環境變數的行為相同。
+    fn from_lookup(lookup: &dyn Fn(&str) -> Option<String>) -> Self {
         // 讀取 Telegram 允許的用戶清單，並解析成 JSON 格式
-        let tg_allowed = env::var(TELEGRAM_ALLOWED).expect(TELEGRAM_ALLOWED);
+        let tg_allowed = lookup(TELEGRAM_ALLOWED).expect(TELEGRAM_ALLOWED);
         let mut allowed_list: HashMap<i64, String> = Default::default();
         if !tg_allowed.is_empty()
             && let Ok(allowed) = serde_json::from_str::<HashMap<i64, String>>(&tg_allowed)
@@ -290,45 +297,42 @@ impl App {
         App {
             fugle: Fugle {
                 // 若 Fugle API Key 不存在則使用預設的空字串
-                api_key: env::var(FUGLE_API_KEY).unwrap_or_default(),
+                api_key: lookup(FUGLE_API_KEY).unwrap_or_default(),
             },
             postgresql: PostgreSQL {
                 // 從環境變數讀取資料庫連線主機
-                host: env::var(POSTGRESQL_HOST).expect(POSTGRESQL_HOST),
+                host: lookup(POSTGRESQL_HOST).expect(POSTGRESQL_HOST),
                 // 讀取資料庫埠號，預設為 5432
-                port: i32::from_str(
-                    &env::var(POSTGRESQL_PORT).unwrap_or_else(|_| "5432".to_string()),
-                )
-                .unwrap_or(5432),
+                port: i32::from_str(&lookup(POSTGRESQL_PORT).unwrap_or_else(|| "5432".to_string()))
+                    .unwrap_or(5432),
                 // 讀取資料庫帳號
-                user: env::var(POSTGRESQL_USER).expect(POSTGRESQL_USER),
+                user: lookup(POSTGRESQL_USER).expect(POSTGRESQL_USER),
                 // 讀取資料庫密碼
-                password: env::var(POSTGRESQL_PASSWORD).expect(POSTGRESQL_PASSWORD),
+                password: lookup(POSTGRESQL_PASSWORD).expect(POSTGRESQL_PASSWORD),
                 // 讀取資料庫名稱
-                db: env::var(POSTGRESQL_DB).expect(POSTGRESQL_DB),
+                db: lookup(POSTGRESQL_DB).expect(POSTGRESQL_DB),
             },
             bot: Bot {
                 telegram: Telegram {
                     allowed: allowed_list,
                     // 讀取 Telegram 機器人 Token
-                    token: env::var(TELEGRAM_TOKEN).expect(TELEGRAM_TOKEN),
+                    token: lookup(TELEGRAM_TOKEN).expect(TELEGRAM_TOKEN),
                 },
             },
 
             nosql: NoSQL {
                 redis: Redis {
                     // 讀取 Redis 連線位址
-                    addr: env::var(REDIS_ADDR).expect(REDIS_ADDR),
+                    addr: lookup(REDIS_ADDR).expect(REDIS_ADDR),
                     // 讀取 Redis 連線帳號
-                    account: env::var(REDIS_ACCOUNT).expect(REDIS_ACCOUNT),
+                    account: lookup(REDIS_ACCOUNT).expect(REDIS_ACCOUNT),
                     // 讀取 Redis 連線密碼
-                    password: env::var(REDIS_PASSWORD).expect(REDIS_PASSWORD),
+                    password: lookup(REDIS_PASSWORD).expect(REDIS_PASSWORD),
                     // 讀取 Redis 資料庫索引，預設為 6379
-                    db: i32::from_str(&env::var(REDIS_DB).unwrap_or_else(|_| "6379".to_string()))
+                    db: i32::from_str(&lookup(REDIS_DB).unwrap_or_else(|| "6379".to_string()))
                         .unwrap_or(6379),
                     // 讀取 Redis 連線池大小；未設定或解析失敗時為 0（使用程式預設值）
-                    pool_size: env::var(REDIS_POOL_SIZE)
-                        .ok()
+                    pool_size: lookup(REDIS_POOL_SIZE)
                         .and_then(|v| u32::from_str(&v).ok())
                         .unwrap_or(0),
                 },
@@ -337,44 +341,42 @@ impl App {
             rpc: Rpc {
                 go_service: Grpc {
                     // 讀取 Go gRPC 連線目標
-                    target: env::var(GO_GRPC_TARGET).expect(GO_GRPC_TARGET),
+                    target: lookup(GO_GRPC_TARGET).expect(GO_GRPC_TARGET),
                     // 讀取 TLS 憑證檔案路徑
-                    tls_cert_file: env::var(GO_GRPC_TLS_CERT_FILE).expect(GO_GRPC_TLS_CERT_FILE),
+                    tls_cert_file: lookup(GO_GRPC_TLS_CERT_FILE).expect(GO_GRPC_TLS_CERT_FILE),
                     // 讀取 TLS 金鑰檔案路徑
-                    tls_key_file: env::var(GO_GRPC_TLS_KEY_FILE).expect(GO_GRPC_TLS_KEY_FILE),
+                    tls_key_file: lookup(GO_GRPC_TLS_KEY_FILE).expect(GO_GRPC_TLS_KEY_FILE),
                     // 讀取 TLS 憑證的網域名稱
-                    domain_name: env::var(GO_GRPC_DOMAIN_NAME).expect(GO_GRPC_DOMAIN_NAME),
+                    domain_name: lookup(GO_GRPC_DOMAIN_NAME).expect(GO_GRPC_DOMAIN_NAME),
                 },
             },
             system: System {
                 // 讀取 gRPC 服務埠號，預設為 0
-                grpc_use_port: env::var(SYSTEM_GRPC_USE_PORT)
-                    .unwrap_or_else(|_| "0".to_string())
+                grpc_use_port: lookup(SYSTEM_GRPC_USE_PORT)
+                    .unwrap_or_else(|| "0".to_string())
                     .parse::<i32>()
                     .unwrap_or(0),
                 // 讀取 SSL 憑證路徑
-                ssl_cert_file: env::var(SYSTEM_SSL_CERT_FILE).expect(SYSTEM_SSL_CERT_FILE),
+                ssl_cert_file: lookup(SYSTEM_SSL_CERT_FILE).expect(SYSTEM_SSL_CERT_FILE),
                 // 讀取 SSL 金鑰路徑
-                ssl_key_file: env::var(SYSTEM_SSL_KEY_FILE).expect(SYSTEM_SSL_KEY_FILE),
+                ssl_key_file: lookup(SYSTEM_SSL_KEY_FILE).expect(SYSTEM_SSL_KEY_FILE),
             },
             logging: Logging {
                 file: FileLogging {
                     // 讀取單檔大小上限（MB）；未設定或解析失敗時為 0（使用程式預設值）
-                    max_size_mb: env::var(LOG_FILE_MAX_SIZE_MB)
-                        .ok()
+                    max_size_mb: lookup(LOG_FILE_MAX_SIZE_MB)
                         .and_then(|v| u64::from_str(v.trim()).ok())
                         .unwrap_or(0),
                     // 讀取日誌保留天數；未設定或解析失敗時為 0（使用程式預設值）
-                    max_age_days: env::var(LOG_FILE_MAX_AGE_DAYS)
-                        .ok()
+                    max_age_days: lookup(LOG_FILE_MAX_AGE_DAYS)
                         .and_then(|v| i64::from_str(v.trim()).ok())
                         .unwrap_or(0),
                 },
                 seq: SeqLogging {
                     // 讀取 Seq 伺服器網址
-                    server_url: env::var(SEQ_SERVER_URL).unwrap_or_default(),
+                    server_url: lookup(SEQ_SERVER_URL).unwrap_or_default(),
                     // 讀取 Seq API 金鑰
-                    api_key: env::var(SEQ_API_KEY).unwrap_or_default(),
+                    api_key: lookup(SEQ_API_KEY).unwrap_or_default(),
                 },
             },
         }
@@ -386,20 +388,26 @@ impl App {
     /// 目的：本機 `.env` 的 `POSTGRESQL_*` 可能指向正式庫，
     /// 整合測試應改連獨立的測試資料庫以免寫入污染正式資料。
     #[cfg(test)]
-    fn override_with_test_env(mut self) -> Self {
-        if let Ok(host) = env::var(TEST_POSTGRESQL_HOST) {
+    fn override_with_test_env(self) -> Self {
+        self.override_with_test(&|name| env::var(name).ok())
+    }
+
+    /// [`Self::override_with_test_env`] 的本體：以 `lookup` 取得各設定值。
+    #[cfg(test)]
+    fn override_with_test(mut self, lookup: &dyn Fn(&str) -> Option<String>) -> Self {
+        if let Some(host) = lookup(TEST_POSTGRESQL_HOST) {
             self.postgresql.host = host;
         }
-        if let Ok(port) = env::var(TEST_POSTGRESQL_PORT) {
+        if let Some(port) = lookup(TEST_POSTGRESQL_PORT) {
             self.postgresql.port = i32::from_str(&port).unwrap_or(5432);
         }
-        if let Ok(user) = env::var(TEST_POSTGRESQL_USER) {
+        if let Some(user) = lookup(TEST_POSTGRESQL_USER) {
             self.postgresql.user = user;
         }
-        if let Ok(password) = env::var(TEST_POSTGRESQL_PASSWORD) {
+        if let Some(password) = lookup(TEST_POSTGRESQL_PASSWORD) {
             self.postgresql.password = password;
         }
-        if let Ok(db) = env::var(TEST_POSTGRESQL_DB) {
+        if let Some(db) = lookup(TEST_POSTGRESQL_DB) {
             self.postgresql.db = db;
         }
 
@@ -409,76 +417,79 @@ impl App {
     /// 以環境變數覆蓋設定檔中的值。
     ///
     /// 這裡會逐一檢查並使用環境變數覆蓋已從檔案中載入的設定。
-    fn override_with_env(mut self) -> Self {
+    fn override_with_env(self) -> Self {
+        self.override_with(&|name| env::var(name).ok())
+    }
+
+    /// [`Self::override_with_env`] 的本體：以 `lookup` 取得各設定值（測試時可換成固定的對照表）。
+    fn override_with(mut self, lookup: &dyn Fn(&str) -> Option<String>) -> Self {
         // 若環境變數中有 Fugle 行情金鑰，則覆蓋設定
-        if let Ok(api_key) = env::var(FUGLE_API_KEY) {
+        if let Some(api_key) = lookup(FUGLE_API_KEY) {
             self.fugle.api_key = api_key;
         }
 
         // 若環境變數中有 SSL 憑證資訊，則覆蓋設定
-        if let Ok(cert_file) = env::var(SYSTEM_SSL_CERT_FILE) {
+        if let Some(cert_file) = lookup(SYSTEM_SSL_CERT_FILE) {
             self.system.ssl_cert_file = cert_file;
         }
-        if let Ok(key_file) = env::var(SYSTEM_SSL_KEY_FILE) {
+        if let Some(key_file) = lookup(SYSTEM_SSL_KEY_FILE) {
             self.system.ssl_key_file = key_file;
         }
 
         // 若環境變數中有 Seq 日誌收集伺服器資訊，則覆蓋設定
-        if let Ok(server_url) = env::var(SEQ_SERVER_URL) {
+        if let Some(server_url) = lookup(SEQ_SERVER_URL) {
             self.logging.seq.server_url = server_url;
         }
-        if let Ok(api_key) = env::var(SEQ_API_KEY) {
+        if let Some(api_key) = lookup(SEQ_API_KEY) {
             self.logging.seq.api_key = api_key;
         }
 
         // 若環境變數中有輪轉日誌檔設定，則覆蓋設定；
         // 解析失敗（例如打成非數字）時保留 app.json 的值，避免靜默歸零。
-        if let Some(max_size_mb) = env::var(LOG_FILE_MAX_SIZE_MB)
-            .ok()
-            .and_then(|v| u64::from_str(v.trim()).ok())
+        if let Some(max_size_mb) =
+            lookup(LOG_FILE_MAX_SIZE_MB).and_then(|v| u64::from_str(v.trim()).ok())
         {
             self.logging.file.max_size_mb = max_size_mb;
         }
-        if let Some(max_age_days) = env::var(LOG_FILE_MAX_AGE_DAYS)
-            .ok()
-            .and_then(|v| i64::from_str(v.trim()).ok())
+        if let Some(max_age_days) =
+            lookup(LOG_FILE_MAX_AGE_DAYS).and_then(|v| i64::from_str(v.trim()).ok())
         {
             self.logging.file.max_age_days = max_age_days;
         }
 
         // 若環境變數中有 Go 後端 gRPC 服務資訊，則覆蓋設定
-        if let Ok(target) = env::var(GO_GRPC_TARGET) {
+        if let Some(target) = lookup(GO_GRPC_TARGET) {
             self.rpc.go_service.target = target;
         }
-        if let Ok(cert) = env::var(GO_GRPC_TLS_CERT_FILE) {
+        if let Some(cert) = lookup(GO_GRPC_TLS_CERT_FILE) {
             self.rpc.go_service.tls_cert_file = cert;
         }
-        if let Ok(key) = env::var(GO_GRPC_TLS_KEY_FILE) {
+        if let Some(key) = lookup(GO_GRPC_TLS_KEY_FILE) {
             self.rpc.go_service.tls_key_file = key;
         }
-        if let Ok(domain_name) = env::var(GO_GRPC_DOMAIN_NAME) {
+        if let Some(domain_name) = lookup(GO_GRPC_DOMAIN_NAME) {
             self.rpc.go_service.domain_name = domain_name;
         }
 
         // 若環境變數中有 PostgreSQL 連線資訊，則覆蓋設定
-        if let Ok(host) = env::var(POSTGRESQL_HOST) {
+        if let Some(host) = lookup(POSTGRESQL_HOST) {
             self.postgresql.host = host;
         }
-        if let Ok(port) = env::var(POSTGRESQL_PORT) {
+        if let Some(port) = lookup(POSTGRESQL_PORT) {
             self.postgresql.port = i32::from_str(&port).unwrap_or(5432);
         }
-        if let Ok(user) = env::var(POSTGRESQL_USER) {
+        if let Some(user) = lookup(POSTGRESQL_USER) {
             self.postgresql.user = user;
         }
-        if let Ok(password) = env::var(POSTGRESQL_PASSWORD) {
+        if let Some(password) = lookup(POSTGRESQL_PASSWORD) {
             self.postgresql.password = password;
         }
-        if let Ok(db) = env::var(POSTGRESQL_DB) {
+        if let Some(db) = lookup(POSTGRESQL_DB) {
             self.postgresql.db = db;
         }
 
         // 若環境變數中有 Telegram 允許名單與金鑰，則覆蓋設定
-        if let Ok(tg_allowed) = env::var(TELEGRAM_ALLOWED) {
+        if let Some(tg_allowed) = lookup(TELEGRAM_ALLOWED) {
             match serde_json::from_str::<HashMap<i64, String>>(&tg_allowed) {
                 Ok(allowed) => {
                     self.bot.telegram.allowed = allowed;
@@ -496,24 +507,24 @@ impl App {
                 }
             }
         }
-        if let Ok(token) = env::var(TELEGRAM_TOKEN) {
+        if let Some(token) = lookup(TELEGRAM_TOKEN) {
             self.bot.telegram.token = token
         }
 
         // 若環境變數中有 Redis 快取連線資訊，則覆蓋設定
-        if let Ok(addr) = env::var(REDIS_ADDR) {
+        if let Some(addr) = lookup(REDIS_ADDR) {
             self.nosql.redis.addr = addr
         }
-        if let Ok(db) = env::var(REDIS_DB) {
+        if let Some(db) = lookup(REDIS_DB) {
             self.nosql.redis.db = i32::from_str(db.as_str()).unwrap_or(6379)
         }
-        if let Ok(account) = env::var(REDIS_ACCOUNT) {
+        if let Some(account) = lookup(REDIS_ACCOUNT) {
             self.nosql.redis.account = account
         }
-        if let Ok(password) = env::var(REDIS_PASSWORD) {
+        if let Some(password) = lookup(REDIS_PASSWORD) {
             self.nosql.redis.password = password
         }
-        if let Ok(pool_size) = env::var(REDIS_POOL_SIZE) {
+        if let Some(pool_size) = lookup(REDIS_POOL_SIZE) {
             // 解析失敗時回退為 0（使用程式預設值），而不是沿用 app.json 的值，
             // 讓「環境變數有設定」的優先權語意與其他欄位一致。
             self.nosql.redis.pool_size = u32::from_str(&pool_size).unwrap_or(0)

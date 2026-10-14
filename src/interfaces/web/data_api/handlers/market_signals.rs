@@ -68,7 +68,7 @@ struct SignalRow {
 /// 查詢指定交易日出現技術訊號的股票。
 ///
 /// 訊號種類：均線／KD／MACD 的黃金交叉與死亡交叉、收盤價站上或跌破月季年線、
-/// RSI(14) 與 K 值超買超賣、52 週新高新低。價格未還原除權息。
+/// RSI(14) 與 K 值超買超賣、52 週新高新低。訊號以還原權值的日線計算。
 ///
 /// # Errors
 ///
@@ -190,7 +190,7 @@ fn build_response(
         kind: params.kind.clone(),
         indicator: params.indicator.clone(),
         industry: params.industry.clone(),
-        adjusted: false,
+        adjusted: true,
         total,
         summary,
         items,
@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(response.data_as_of, "2026-10-12");
         assert_eq!(response.kind.as_deref(), Some("golden_cross"));
         assert_eq!(response.industry.as_deref(), Some("半導體業"));
-        assert!(!response.adjusted);
+        assert!(response.adjusted);
         let summary: Vec<(&str, &str, usize)> = response
             .summary
             .iter()
