@@ -66,6 +66,10 @@ pub(super) struct ScreenedStockRow {
     health_quarter: Option<i16>,
     /// 相對強度分數。
     rs_score: Option<i16>,
+    /// 外資連續買賣超天數。
+    foreign_streak: Option<i16>,
+    /// 投信連續買賣超天數。
+    trust_streak: Option<i16>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -148,6 +152,8 @@ impl From<ScreenedStockRow> for ScreenedStock {
             free_cash_flow_ttm: row.free_cash_flow_ttm,
             health_period,
             rs_score: row.rs_score.and_then(|score| u8::try_from(score).ok()),
+            foreign_streak: row.foreign_streak,
+            trust_streak: row.trust_streak,
         }
     }
 }

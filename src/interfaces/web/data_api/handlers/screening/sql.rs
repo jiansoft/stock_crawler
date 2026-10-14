@@ -7,7 +7,8 @@
 /// 各自最新」資料；`financial_health` 每檔只有一列，直接以主鍵左接。
 /// `normalized` 僅將過期指標轉成 SQL NULL；最外層條件利用 NULL 比較不成立的
 /// 語意，自然排除以該過期指標篩選的股票。相對強度分數由 handler 以全體計算後，
-/// 以 `$16` 代號、`$17` 分數兩個平行陣列傳入左接（沒有分數為 NULL）。
+/// 以 `$16` 代號、`$17` 分數兩個平行陣列傳入左接（沒有分數為 NULL）；外資、投信連續
+/// 買賣超天數同樣由 handler 算好，以 `$19` 代號、`$20` 外資、`$21` 投信三個平行陣列左接。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -184,10 +185,15 @@ SELECT
     f_score, f_score_evaluated, f_score_year,
     gross_margin_percent, debt_ratio_percent, free_cash_flow_ttm,
     health_quarter_year, health_quarter,
-    rs.rs_score
+    rs.rs_score,
+    chip.foreign_streak,
+    chip.trust_streak
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
+LEFT JOIN UNNEST($19::text[], $20::smallint[], $21::smallint[])
+       AS chip(symbol, foreign_streak, trust_streak)
+       ON chip.symbol = normalized.stock_symbol
 WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($5::numeric IS NULL OR earnings_per_share >= $5)
   AND ($6::numeric IS NULL OR return_on_equity >= $6)
@@ -201,4 +207,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($14::numeric IS NULL OR revenue_yoy_3m_percent >= $14)
   AND ($15::numeric IS NULL OR monthly_revenue >= $15)
   AND ($18::smallint IS NULL OR rs.rs_score >= $18)
+  AND ($22::smallint IS NULL OR chip.foreign_streak >= $22)
+  AND ($23::smallint IS NULL OR chip.trust_streak >= $23)
 "#;
