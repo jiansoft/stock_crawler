@@ -161,24 +161,9 @@ const PERFORMANCE_BY_YEAR_SQL: &str = concat!(signal_cte!(), performance_aggrega
 macro_rules! chip_signal_cte {
     () => {
         concat!(
-            r#"
-WITH chip_runs AS (
-    SELECT stock_symbol, "date",
-           SIGN(COALESCE(foreign_net, 0)) AS fs,
-           SIGN(COALESCE(trust_net, 0)) AS ts,
-           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
-               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(foreign_net, 0)) ORDER BY "date") AS fg,
-           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
-               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(trust_net, 0)) ORDER BY "date") AS tg
-    FROM chip_daily
-    WHERE "date" BETWEEN $1::date - 60 AND $2
-),
-chip AS (
-    SELECT stock_symbol, "date",
-           CASE WHEN fs > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, fs, fg ORDER BY "date") ELSE 0 END AS foreign_buy,
-           CASE WHEN ts > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, ts, tg ORDER BY "date") ELSE 0 END AS trust_buy
-    FROM chip_runs
-),
+            "\nWITH",
+            chip_streak_ctes!(),
+            r#",
 sig AS (
     SELECT t.date, t.stock_symbol, t.indicator, t.kind
     FROM daily_technical_signal t
@@ -195,6 +180,32 @@ sig AS (
         )
     };
 }
+
+/// 每檔股票每天外資（`foreign_buy`）、投信（`trust_buy`）已連續買超的天數（`chip`），讀取
+/// `$1 - 60`～`$2` 的籌碼；不含開頭的 `WITH` 與結尾的逗號，給需要籌碼條件的 SQL 共用。
+macro_rules! chip_streak_ctes {
+    () => {
+        r#"
+chip_runs AS (
+    SELECT stock_symbol, "date",
+           SIGN(COALESCE(foreign_net, 0)) AS fs,
+           SIGN(COALESCE(trust_net, 0)) AS ts,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
+               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(foreign_net, 0)) ORDER BY "date") AS fg,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
+               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(trust_net, 0)) ORDER BY "date") AS tg
+    FROM chip_daily
+    WHERE "date" BETWEEN $1::date - 60 AND $2
+),
+chip AS (
+    SELECT stock_symbol, "date",
+           CASE WHEN fs > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, fs, fg ORDER BY "date") ELSE 0 END AS foreign_buy,
+           CASE WHEN ts > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, ts, tg ORDER BY "date") ELSE 0 END AS trust_buy
+    FROM chip_runs
+)"#
+    };
+}
+pub(super) use chip_streak_ctes;
 
 /// 有設籌碼條件時的訊號績效。
 const PERFORMANCE_WITH_CHIP_SQL: &str = concat!(chip_signal_cte!(), performance_aggregate_sql!());
@@ -605,7 +616,7 @@ pub(super) fn total_row(rows: &[PerformanceRow]) -> PerformanceRow {
 }
 
 /// 外資、投信連續買超天數下限各在 1–20。
-fn validate_streaks(foreign: Option<u8>, trust: Option<u8>) -> Result<(), &'static str> {
+pub(super) fn validate_streaks(foreign: Option<u8>, trust: Option<u8>) -> Result<(), &'static str> {
     let in_range = |days: Option<u8>| days.is_none_or(|days| (1..=20).contains(&days));
     if !in_range(foreign) {
         return Err("min_foreign_streak 必須介於 1 至 20");
@@ -617,7 +628,7 @@ fn validate_streaks(foreign: Option<u8>, trust: Option<u8>) -> Result<(), &'stat
 }
 
 /// 相對強度上下限各在 1–99，且下限不大於上限。
-fn validate_rs_range(min: Option<u8>, max: Option<u8>) -> Result<(), &'static str> {
+pub(super) fn validate_rs_range(min: Option<u8>, max: Option<u8>) -> Result<(), &'static str> {
     let in_range = |score: Option<u8>| score.is_none_or(|score| (1..=99).contains(&score));
     if !in_range(min) {
         return Err("min_rs_score 必須介於 1 至 99");

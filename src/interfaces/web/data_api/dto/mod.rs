@@ -22,6 +22,7 @@ mod peers;
 mod portfolio;
 mod portfolio_history;
 mod relative_strength;
+mod screen_backtest;
 mod screening;
 mod signal_history;
 mod signals;
@@ -93,6 +94,9 @@ pub(super) use relative_strength::{
     IndustryLeader, IndustryStrengthItem, IndustryStrengthParams, IndustryStrengthResponse,
     RelativeStrengthCrossing, RelativeStrengthHistoryParams, RelativeStrengthHistoryResponse,
     RelativeStrengthItem, RelativeStrengthParams, RelativeStrengthPoint, RelativeStrengthResponse,
+};
+pub(super) use screen_backtest::{
+    BacktestPeriod, BacktestSummary, ScreenBacktestParams, ScreenBacktestResponse,
 };
 pub(super) use screening::{
     ScreenedStock, SortOrderParamValue, StockScreenSortValue, StockScreeningParams,
