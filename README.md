@@ -86,7 +86,7 @@ log/                 # runtime 檔案日誌輸出目錄
 + `cargo test --locked -- --test-threads=1`：只跑單元測試；需要 PostgreSQL／Redis 的測試會自動略過，不需外部服務。
 + `cargo test --locked --features integration-tests -- --test-threads=1`：連同整合測試一起跑。**請先在 `.env` 設定 `TEST_POSTGRESQL_*` 指向獨立的測試資料庫，不要對正式庫執行**；寫入資料的測試使用固定歷史日期與假代號並會自行清除。
 + CI 以 `cargo nextest run --release --locked --features integration-tests --test-threads=1 --profile ci` 對 PostgreSQL／Redis service container 執行整合測試，並以 `cargo llvm-cov` 產出覆蓋率。
-+ `cargo test --locked app::manual_backfill::<測試名稱> -- --ignored --nocapture`：手動回補入口（`src/app/manual_backfill.rs` 內以 `#[ignore]` 標記的測試）。
++ `cargo test --locked <測試名稱> -- --ignored --nocapture`：手動回補入口（`src/app/manual_backfill/` 內以 `#[ignore]` 標記的測試，依資料類別分成 quote、dividend、cagr、capital_reduction、financial、chip、derived 子模組；測試名稱不重複，只用名稱篩選即可）。
 + `cargo bench`：執行 criterion 效能基準。
 
 ## 部署方式
