@@ -149,6 +149,7 @@ fn openapi_contains_all_data_api_paths() {
         "/api/v1/stocks/{symbol}/relative-strength",
         "/api/v1/market/industry-strength",
         "/api/v1/market/institutional-flow",
+        "/api/v1/market/institutional-streak/performance",
         "/api/v1/market/industry-flow",
         "/api/v1/market/margin-ranking",
         "/api/v1/market/cagr-ranking",
@@ -927,6 +928,44 @@ fn openapi_institutional_flow_schema_pins_field_names() {
     assert_eq!(
         response["items"]["items"]["$ref"],
         "#/components/schemas/InstitutionalFlowItem"
+    );
+}
+
+/// 法人連續買賣超後報酬統計 path 的契約：streak 範圍與預設、法人別／方向／市場列舉、回應欄位。
+#[test]
+fn openapi_institutional_streak_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/market/institutional-streak/performance");
+    assert_endpoint_responses(operation, "InstitutionalStreakPerformanceResponse", true);
+    let streak = query_schema(operation, "streak");
+    assert_eq!(streak["default"], 3);
+    assert_eq!(streak["minimum"], 1);
+    assert_eq!(streak["maximum"], 20);
+    for (name, schema, default) in [
+        ("investor", "InvestorParamValue", "foreign"),
+        ("side", "FlowSideParamValue", "buy"),
+        ("market", "MarketParamValue", "all"),
+    ] {
+        let parameter = query_schema(operation, name);
+        assert_eq!(parameter["$ref"], format!("#/components/schemas/{schema}"));
+        assert_eq!(parameter["default"], default, "{name}");
+    }
+    for name in ["from", "to", "industry"] {
+        assert!(query_schema(operation, name).is_object(), "{name}");
+    }
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["InstitutionalStreakPerformanceResponse"]["properties"];
+    assert_eq!(response["adjusted"]["type"], "boolean");
+    assert_eq!(response["occurrences"]["type"], "integer");
+    assert!(response["industry"].to_string().contains("null"));
+    assert_eq!(
+        response["horizons"]["items"]["$ref"],
+        "#/components/schemas/HorizonStat"
+    );
+    assert_eq!(
+        response["benchmark"]["items"]["$ref"],
+        "#/components/schemas/BenchmarkStat"
     );
 }
 
