@@ -73,7 +73,14 @@ fn openapi_signals_schema_pins_field_names() {
         assert!(kinds.contains(kind), "{kind}");
     }
     let indicators = schemas["SignalIndicatorValue"].to_string();
-    for indicator in ["ma5_ma20", "close_ma240", "rsi14", "52_week", "rs80", "rs50"] {
+    for indicator in [
+        "ma5_ma20",
+        "close_ma240",
+        "rsi14",
+        "52_week",
+        "rs80",
+        "rs50",
+    ] {
         assert!(indicators.contains(indicator), "{indicator}");
     }
     let item = &schemas["SignalStock"]["properties"];

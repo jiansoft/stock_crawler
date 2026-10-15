@@ -93,13 +93,15 @@ pub fn crossings(previous: u8, current: u8) -> Vec<(u8, CrossDirection)> {
 }
 
 /// 依前一個交易日的分數 `previous`（代號 → 分數），產生 `date` 當天穿越 [`THRESHOLDS`] 的
-/// 技術訊號：由下往上為 `cross_above`、由上往下為 `cross_below`，來源見 [`CROSSING_INDICATORS`]。
-/// 前一天沒有分數（剛滿 240 個交易日、前一天暫停交易）的股票不產生訊號。
+/// 技術訊號：由下往上為 `cross_above`、由上往下為 `cross_below`，來源見 [`CROSSING_INDICATORS`]；
+/// 說明附當天名次與計分總數（`scored` 是當天全體）。前一天沒有分數（剛滿 240 個交易日、
+/// 前一天暫停交易）的股票不產生訊號。
 pub fn crossing_signals(
     date: NaiveDate,
     previous: &HashMap<String, u8>,
     scored: &[ScoredStock],
 ) -> Vec<StockTechnicalSignal> {
+    let universe = scored.len();
     let mut signals = Vec::new();
     for stock in scored {
         let Some(&before) = previous.get(&stock.row.stock_symbol) else {
@@ -122,8 +124,8 @@ pub fn crossing_signals(
                     indicator,
                     kind,
                     description: format!(
-                        "相對強度 {before} → {} 分，{verb} {threshold} 分",
-                        stock.rs_score
+                        "相對強度 {before} → {} 分，{verb} {threshold} 分（第 {} 名／{universe} 檔）",
+                        stock.rs_score, stock.rank
                     ),
                 },
             });
@@ -387,19 +389,19 @@ mod tests {
                     "2330",
                     "rs80",
                     SignalKind::CrossAbove,
-                    "相對強度 76 → 82 分，突破 80 分"
+                    "相對強度 76 → 82 分，突破 80 分（第 1 名／4 檔）"
                 ),
                 (
                     "2317",
                     "rs80",
                     SignalKind::CrossBelow,
-                    "相對強度 85 → 40 分，跌破 80 分"
+                    "相對強度 85 → 40 分，跌破 80 分（第 1 名／4 檔）"
                 ),
                 (
                     "2317",
                     "rs50",
                     SignalKind::CrossBelow,
-                    "相對強度 85 → 40 分，跌破 50 分"
+                    "相對強度 85 → 40 分，跌破 50 分（第 1 名／4 檔）"
                 ),
             ]
         );
