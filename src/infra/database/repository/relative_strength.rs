@@ -20,10 +20,12 @@ use crate::{
     },
 };
 
-/// 資料日 `$1` 的計分母體：上市櫃、未暫停交易、不是 ETF／ETN／受益證券（產業 9001～9003）
+/// 資料日 `$1` 的計分母體：上市櫃、近 5 個交易日內有收盤、不是 ETF／ETN／受益證券（產業 9001～9003）
 /// 與特別股（代號 4 碼數字後接英文字母，例如 2887Z1），且近 60／120／240 日報酬都有的股票。
 ///
 /// `$2`～`$5` 是往前第 20、60、120、240 個交易日（基準日）；近 N 日報酬＝該基準日的 N 日報酬。
+/// `$6` 是往前第 5 個交易日：用「當時有沒有在交易」判斷，而不是「現在有沒有下市」，回補歷史時
+/// 後來才下市的股票也在當天的母體裡，沒有存活者偏差；下市或停止交易超過 5 個交易日就不再計分。
 const UNIVERSE_SQL: &str = r#"
 SELECT
     r60.stock_symbol,
@@ -50,7 +52,12 @@ WHERE r60.date = $3
   AND s.stock_exchange_market_id IN (2, 4)
   AND s.stock_industry_id NOT IN (9001, 9002, 9003)
   AND s.stock_symbol !~ '^[0-9]{4}[A-Z]'
-  AND NOT s."SuspendListing"
+  AND EXISTS (
+      SELECT 1 FROM "DailyQuotes" a
+      WHERE a.stock_symbol = r60.stock_symbol
+        AND a."Date" > $6 AND a."Date" <= $1
+        AND a."ClosingPrice" > 0
+  )
 "#;
 
 /// `$1`（含）之前最近 `$2` 個已寫入相對強度的交易日，取股票 `$3` 的分數與名次。
@@ -242,6 +249,7 @@ impl ScoredUniverseQuery for PgQuoteRepository {
                 .bind(bases.d60)
                 .bind(bases.d120)
                 .bind(bases.d240)
+                .bind(bases.active_since)
                 .fetch_all(database::get_connection())
                 .await?;
             if !rows.is_empty() {
