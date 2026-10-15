@@ -210,7 +210,7 @@ async fn institutional_streak_performance_endpoint_db_semantics() {
         json["benchmark_by_year"][0]["benchmark"],
         whole["benchmark"]
     );
-    let (status, json) = query("streak=20&group_by=year").await;
+    let (status, json) = query("streak=60&group_by=year").await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["occurrences"], 0);
     assert_eq!(json["years"].as_array().map(Vec::len), Some(0), "{json}");
@@ -218,7 +218,7 @@ async fn institutional_streak_performance_endpoint_db_semantics() {
     for (extra, status) in [
         ("group_by=week", StatusCode::UNPROCESSABLE_ENTITY),
         ("streak=0", StatusCode::UNPROCESSABLE_ENTITY),
-        ("streak=21", StatusCode::UNPROCESSABLE_ENTITY),
+        ("streak=61", StatusCode::UNPROCESSABLE_ENTITY),
         ("side=hold", StatusCode::UNPROCESSABLE_ENTITY),
         ("investor=retail", StatusCode::UNPROCESSABLE_ENTITY),
         ("market=otc", StatusCode::UNPROCESSABLE_ENTITY),

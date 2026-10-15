@@ -369,7 +369,7 @@ async fn screen_backtest_endpoint_db_semantics() {
             "min_rs_score=90&max_rs_score=80",
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
-        ("min_foreign_streak=21", StatusCode::UNPROCESSABLE_ENTITY),
+        ("min_foreign_streak=61", StatusCode::UNPROCESSABLE_ENTITY),
         (
             "industry=%E4%B8%8D%E5%AD%98%E5%9C%A8",
             StatusCode::UNPROCESSABLE_ENTITY,

@@ -50,7 +50,7 @@ fn openapi_institutional_streak_schema_pins_field_names() {
     let streak = query_schema(operation, "streak");
     assert_eq!(streak["default"], 3);
     assert_eq!(streak["minimum"], 1);
-    assert_eq!(streak["maximum"], 20);
+    assert_eq!(streak["maximum"], 60);
     for (name, schema, default) in [
         ("investor", "InvestorParamValue", "foreign"),
         ("side", "FlowSideParamValue", "buy"),

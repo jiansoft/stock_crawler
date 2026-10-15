@@ -34,14 +34,14 @@ pub(crate) struct SignalPerformanceParams {
     /// 只統計訊號當天相對強度分數至多這麼高的訊號（1–99）；規則同 `min_rs_score`。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) max_rs_score: Option<u8>,
-    /// 只統計訊號當天外資（含外資自營商）已連續買超至少這麼多天的訊號（1–20）。連續天數與
+    /// 只統計訊號當天外資（含外資自營商）已連續買超至少這麼多天的訊號（1–60）。連續天數與
     /// `/market/institutional-flow` 同一算法（只看有籌碼資料的日子，淨額 0 會中斷）；籌碼資料從
     /// 2019 年起，之前的訊號不列入。大盤基準不受影響。
-    #[param(minimum = 1, maximum = 20)]
+    #[param(minimum = 1, maximum = 60)]
     pub(crate) min_foreign_streak: Option<u8>,
-    /// 只統計訊號當天投信已連續買超至少這麼多天的訊號（1–20）；規則同 `min_foreign_streak`，
+    /// 只統計訊號當天投信已連續買超至少這麼多天的訊號（1–60）；規則同 `min_foreign_streak`，
     /// 兩者都設時需同時符合。
-    #[param(minimum = 1, maximum = 20)]
+    #[param(minimum = 1, maximum = 60)]
     pub(crate) min_trust_streak: Option<u8>,
     /// `year`：除了整段期間，再依訊號日的年度拆分統計（每個項目的 `years`、`benchmark_by_year`），
     /// 用來看訊號在不同年份（多頭、空頭）是否穩定；省略為不拆分。

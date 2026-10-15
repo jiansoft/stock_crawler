@@ -45,12 +45,12 @@ pub(crate) struct ScreenBacktestParams {
     /// 換股當天相對強度分數至多這麼高（1–99）。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) max_rs_score: Option<u8>,
-    /// 換股當天外資（含外資自營商）已連續買超至少這麼多天（1–20），算法同
+    /// 換股當天外資（含外資自營商）已連續買超至少這麼多天（1–60），算法同
     /// `/market/institutional-flow`；籌碼資料從 2019 年起。
-    #[param(minimum = 1, maximum = 20)]
+    #[param(minimum = 1, maximum = 60)]
     pub(crate) min_foreign_streak: Option<u8>,
-    /// 換股當天投信已連續買超至少這麼多天（1–20）；規則同 `min_foreign_streak`。
-    #[param(minimum = 1, maximum = 20)]
+    /// 換股當天投信已連續買超至少這麼多天（1–60）；規則同 `min_foreign_streak`。
+    #[param(minimum = 1, maximum = 60)]
     pub(crate) min_trust_streak: Option<u8>,
     /// 只選換股前 `hold_days` 個交易日內（含換股當天）出現過這個來源訊號的股票。
     #[param(value_type = Option<SignalIndicatorValue>)]
