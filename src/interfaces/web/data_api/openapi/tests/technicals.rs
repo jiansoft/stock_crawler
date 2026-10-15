@@ -227,6 +227,10 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     assert_eq!(limit["default"], 20);
     assert_eq!(limit["minimum"], 1);
     assert_eq!(limit["maximum"], 100);
+    let fee_discount = query_schema(operation, "fee_discount");
+    assert_eq!(fee_discount["default"], 1.0);
+    assert_eq!(fee_discount["minimum"], 0.0);
+    assert_eq!(fee_discount["maximum"], 1.0);
     for (name, maximum) in [
         ("min_rs_score", 99),
         ("max_rs_score", 99),
@@ -251,17 +255,24 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     let schemas = &document["components"]["schemas"];
     let response = &schemas["ScreenBacktestResponse"]["properties"];
     assert_eq!(response["adjusted"]["type"], "boolean");
+    assert_eq!(response["fee_discount"]["type"], "number");
     assert!(response["summary"].to_string().contains("BacktestSummary"));
     assert!(response["periods"].to_string().contains("BacktestPeriod"));
     let period = &schemas["BacktestPeriod"]["properties"];
     assert!(period["avg_return"].to_string().contains("null"));
     assert_eq!(period["symbols"]["type"], "array");
+    assert_eq!(period["return_after_costs"]["type"], "number");
+    assert_eq!(period["turnover"]["type"], "number");
     let summary = &schemas["BacktestSummary"]["properties"];
     for field in [
         "total_return",
         "annualized_return",
         "max_drawdown",
         "beat_market_rate",
+        "avg_turnover",
+        "total_return_after_costs",
+        "annualized_return_after_costs",
+        "max_drawdown_after_costs",
     ] {
         assert!(summary[field].to_string().contains("null"), "{field}");
     }

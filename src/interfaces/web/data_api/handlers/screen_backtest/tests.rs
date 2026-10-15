@@ -16,6 +16,28 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
     }
 }
 
+fn holding(symbols: &[&str], avg: f64) -> PeriodRow {
+    PeriodRow {
+        holdings: symbols.len() as i64,
+        symbols: symbols.iter().map(|symbol| (*symbol).to_owned()).collect(),
+        ..row(2, 0, Some(avg), 0.0)
+    }
+}
+
+/// 沒有成本的報酬（換手率另計），用來測試彙總。
+fn free(rows: &[PeriodRow]) -> Vec<PeriodCost> {
+    rows.iter()
+        .map(|row| PeriodCost {
+            turnover: 0.0,
+            net_return: row.avg_return.unwrap_or(0.0),
+        })
+        .collect()
+}
+
+fn near(actual: f64, expected: f64) -> bool {
+    (actual - expected).abs() < 1e-9
+}
+
 /// 起日預設迄日往前 1,095 天；起日晚於迄日或期間超過 3,653 天回錯誤。
 #[test]
 fn resolve_backtest_period_defaults_and_limits() {
@@ -56,7 +78,7 @@ fn summarize_counts_cash_periods_as_zero() {
         row(4, 10, Some(-5.0), -10.0),
         row(5, 18, Some(4.0), 6.0),
     ];
-    let summary = summarize(&rows, 20);
+    let summary = summarize(&rows, &free(&rows), 20);
     assert_eq!(summary.periods, 4);
     assert_eq!(summary.invested_periods, 3);
     assert_eq!(summary.avg_holdings, Some(16.0));
@@ -80,28 +102,94 @@ fn summarize_counts_cash_periods_as_zero() {
     assert_eq!(summary.beat_market_rate, Some(0.75));
     assert_eq!(summary.avg_period_return, Some(2.25));
     assert_eq!(summary.avg_benchmark_return, Some(-0.75));
+    // 沒有成本時扣成本後與原本相同。
+    assert_eq!(summary.total_return_after_costs, Some(8.68));
+    assert_eq!(summary.max_drawdown_after_costs, Some(-5.0));
+    assert_eq!(summary.avg_turnover, Some(0.0));
+}
+
+/// 換股成本：第一期全部買進；賣出付手續費與證交稅、買進付手續費；續抱不計；空手時賣光。
+#[test]
+fn trading_costs_follow_turnover() {
+    let rows = [
+        holding(&["A", "B"], 10.0),
+        holding(&["B", "C"], 5.0),
+        holding(&["B", "C"], 1.0),
+        row(3, 0, None, 0.0),
+    ];
+    let costs = trading_costs(&rows, 1.0);
+    let turnover: Vec<f64> = costs.iter().map(|cost| cost.turnover).collect();
+    assert_eq!(turnover, [1.0, 0.5, 0.0, 0.0]);
+    // 第一期：買進全部，付 0.1425%。
+    assert!(near(costs[0].net_return, 10.0 - 0.1425), "{costs:?}");
+    // 第二期：賣出 A（一半）付 0.1425% + 0.3%，買進 C（一半）付 0.1425%。
+    assert!(
+        near(costs[1].net_return, 5.0 - 0.5 * 0.4425 - 0.5 * 0.1425),
+        "{costs:?}"
+    );
+    assert!(near(costs[2].net_return, 1.0), "{costs:?}");
+    // 空手：賣光上一期持股。
+    assert!(near(costs[3].net_return, -0.4425), "{costs:?}");
+    // 手續費 2.8 折只影響手續費。
+    let discounted = trading_costs(&rows[..2], 0.28);
+    assert!(
+        near(discounted[0].net_return, 10.0 - 0.0399),
+        "{discounted:?}"
+    );
+    assert!(
+        near(
+            discounted[1].net_return,
+            5.0 - 0.5 * (0.0399 + 0.3) - 0.5 * 0.0399
+        ),
+        "{discounted:?}"
+    );
+
+    let summary = summarize(&rows, &costs, 20);
+    // 換手率只看有持股的三期：(1 + 0.5 + 0) / 3。
+    assert_eq!(summary.avg_turnover, Some(0.5));
+    let expected = (1.0 + costs[0].net_return / 100.0)
+        * (1.0 + costs[1].net_return / 100.0)
+        * (1.0 + costs[2].net_return / 100.0)
+        * (1.0 + costs[3].net_return / 100.0);
+    assert_eq!(
+        summary.total_return_after_costs,
+        Some(round2((expected - 1.0) * 100.0))
+    );
+    assert!(summary.total_return_after_costs < summary.total_return);
 }
 
 /// 沒有任何一期時彙總全部為 `null`。
 #[test]
 fn summarize_without_periods_is_empty() {
-    let summary = summarize(&[], 20);
+    let summary = summarize(&[], &[], 20);
     assert_eq!((summary.periods, summary.invested_periods), (0, 0));
     assert!(summary.total_return.is_none() && summary.annualized_return.is_none());
     assert!(summary.max_drawdown.is_none() && summary.avg_holdings.is_none());
+    assert!(summary.total_return_after_costs.is_none() && summary.avg_turnover.is_none());
 }
 
-/// 每期輸出：報酬四捨五入到小數兩位，空手為 `null`。
+/// 每期輸出：報酬四捨五入到小數兩位，空手為 `null`；代號只列前 10 檔。
 #[test]
 fn period_rounds_returns() {
-    let mut first = row(2, 3, Some(1.234_5), -0.555);
-    first.symbols = vec!["2330".to_owned()];
-    let output = period(first);
+    let mut first = row(2, 12, Some(1.234_5), -0.555);
+    first.symbols = (0..12).map(|i| format!("{}", 2300 + i)).collect();
+    let cost = PeriodCost {
+        turnover: 1.0 / 3.0,
+        net_return: 1.091_23,
+    };
+    let output = period((first, cost));
     assert_eq!(output.date, "2024-01-02");
     assert_eq!(output.avg_return, Some(1.23));
+    assert_eq!(output.return_after_costs, 1.09);
+    assert_eq!(output.turnover, 0.3333);
     assert_eq!(output.benchmark_return, Some(-0.56));
-    assert_eq!(output.symbols, ["2330"]);
-    assert_eq!(period(row(3, 0, None, 1.0)).avg_return, None);
+    assert_eq!(output.symbols.len(), 10);
+    assert_eq!(output.symbols[0], "2300");
+    let cash = PeriodCost {
+        turnover: 0.0,
+        net_return: 0.0,
+    };
+    assert_eq!(period((row(3, 0, None, 1.0), cash)).avg_return, None);
 }
 
 /// 兩種 SQL 都以 `WITH` 開頭，籌碼版含連續買超的 CTE 與 `$11`／`$12`。

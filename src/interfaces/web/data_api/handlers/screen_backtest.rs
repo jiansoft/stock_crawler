@@ -2,9 +2,12 @@
 //!
 //! 每隔 `hold_days` 個交易日換股一次：在換股日從相對強度母體（上市櫃普通股，見
 //! `daily_relative_strength`）挑出符合條件的股票，依相對強度分數由高到低取前 `limit` 檔，
-//! 收盤等權買進、持有 `hold_days` 個交易日；該期報酬取 `daily_forward_return` 的同天期還原報酬。
-//! 只用當天就已知道的資料（相對強度、法人連續買超、技術訊號），沒有前視偏誤；但期間內下市而沒有
-//! 報酬的股票不列入平均，仍有存活者偏差。
+//! 收盤等權買進、持有 `hold_days` 個交易日；該期報酬取 `daily_forward_return` 的同天期還原報酬，
+//! 期間內下市的股票算到最後一筆收盤。只用當天就已知道的資料（相對強度、法人連續買超、技術訊號），
+//! 沒有前視偏誤；相對強度母體看當時有沒有在交易，沒有存活者偏差。
+//!
+//! 交易成本依換股時實際賣出、買進的比例扣除：買賣各付手續費 0.1425%（乘上 `fee_discount`），
+//! 賣出另付證交稅 0.3%；同一檔續抱不計成本，也不計等權再平衡的小額調整。
 
 use axum::{
     Json,
@@ -35,6 +38,15 @@ const MAX_PERIOD_DAYS: i64 = 3653;
 
 /// 每年約有幾個交易日，用來把每期報酬換算成年化報酬。
 const TRADING_DAYS_PER_YEAR: f64 = 245.0;
+
+/// 手續費率（%），買賣各付一次；未打折。
+const FEE_RATE: f64 = 0.1425;
+
+/// 股票證交稅率（%），賣出時付。
+const TAX_RATE: f64 = 0.3;
+
+/// 輸出每期前幾檔代號。
+const LISTED_SYMBOLS: usize = 10;
 
 /// `$1`（含）之前最近一個有相對強度的交易日；`$1` 為 `NULL` 時取最新。
 const LATEST_RS_DATE_SQL: &str = r#"
@@ -113,7 +125,7 @@ picks AS (
 ),
 chosen AS (
     SELECT date, COUNT(*) AS holdings, AVG(ret)::float8 AS avg_ret,
-           array_agg(stock_symbol::text ORDER BY pick_rank) FILTER (WHERE pick_rank <= 10) AS symbols
+           array_agg(stock_symbol::text ORDER BY pick_rank) AS symbols
     FROM picks
     WHERE pick_rank <= $5
     GROUP BY date
@@ -147,7 +159,7 @@ const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     )
 );
 
-/// [`BACKTEST_SQL`] 的一列：一期的結果。
+/// [`BACKTEST_SQL`] 的一列：一期的結果；`symbols` 是全部持股，依相對強度由高到低。
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 struct PeriodRow {
     date: NaiveDate,
@@ -163,7 +175,8 @@ struct PeriodRow {
 /// # Errors
 ///
 /// 日期格式錯誤、起日晚於迄日、期間超過 3,653 天、`hold_days` 不是 5／20／60／120／240、`limit`
-/// 不在 1–100、相對強度或連續買超天數超出範圍、訊號來源／種類不在固定清單或產業名稱不存在回 422；
+/// 不在 1–100、`fee_discount` 不在 0–1、相對強度或連續買超天數超出範圍、訊號來源／種類不在固定清單
+/// 或產業名稱不存在回 422；
 /// 迄日之前沒有相對強度資料回 404；驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) -> Response {
@@ -186,6 +199,13 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     let limit = params.limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "limit 必須介於 1 至 100");
+    }
+    let fee_discount = params.fee_discount.unwrap_or(1.0);
+    if !(0.0..=1.0).contains(&fee_discount) {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "fee_discount 必須介於 0 至 1",
+        );
     }
     let market = params.market.as_deref().unwrap_or("all");
     let Some(market_id) = market_id_for_stocks(market) else {
@@ -250,6 +270,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
+    let costs = trading_costs(&rows, fee_discount);
 
     Json(ScreenBacktestResponse {
         from: from.to_string(),
@@ -264,9 +285,10 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         min_trust_streak: params.min_trust_streak,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
+        fee_discount,
         adjusted: true,
-        summary: summarize(&rows, hold_days),
-        periods: rows.into_iter().map(period).collect(),
+        summary: summarize(&rows, &costs, hold_days),
+        periods: rows.into_iter().zip(costs).map(period).collect(),
     })
     .into_response()
 }
@@ -286,12 +308,51 @@ fn resolve_backtest_period(
     Ok(from)
 }
 
-/// 一期的輸出：報酬四捨五入到小數兩位。
-fn period(row: PeriodRow) -> BacktestPeriod {
+/// 一期的換手與扣成本後報酬。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PeriodCost {
+    /// 換股時新買進的部位比例（0–1）；空手為 0。
+    turnover: f64,
+    /// 扣除這次換股成本後的報酬（%）。
+    net_return: f64,
+}
+
+/// 依前後兩期的持股算出每期的換手與扣成本後報酬：賣出上一期有、這一期沒有的股票（占上一期的比例），
+/// 付手續費與證交稅；買進這一期新增的股票（占這一期的比例），付手續費。第一期全部買進。
+fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<PeriodCost> {
+    let fee = FEE_RATE * fee_discount;
+    let mut previous: &[String] = &[];
+    rows.iter()
+        .map(|row| {
+            let current = row.symbols.as_slice();
+            let share = |from: &[String], other: &[String]| {
+                if from.is_empty() {
+                    0.0
+                } else {
+                    from.iter().filter(|symbol| !other.contains(symbol)).count() as f64
+                        / from.len() as f64
+                }
+            };
+            let sold = share(previous, current);
+            let bought = share(current, previous);
+            previous = current;
+            PeriodCost {
+                turnover: bought,
+                net_return: row.avg_return.unwrap_or(0.0) - sold * (fee + TAX_RATE) - bought * fee,
+            }
+        })
+        .collect()
+}
+
+/// 一期的輸出：報酬四捨五入到小數兩位；代號只列前 [`LISTED_SYMBOLS`] 檔。
+fn period((mut row, cost): (PeriodRow, PeriodCost)) -> BacktestPeriod {
+    row.symbols.truncate(LISTED_SYMBOLS);
     BacktestPeriod {
         date: row.date.to_string(),
         holdings: row.holdings,
         avg_return: row.avg_return.map(round2),
+        return_after_costs: round2(cost.net_return),
+        turnover: round4(cost.turnover),
         benchmark_return: row.benchmark_return.map(round2),
         symbols: row.symbols,
     }
@@ -310,8 +371,9 @@ fn compound(returns: impl IntoIterator<Item = f64>) -> (f64, f64) {
     (equity, drawdown)
 }
 
-/// 彙總各期：空手的期數報酬算 0；年化以每年約 [`TRADING_DAYS_PER_YEAR`] 個交易日換算。
-fn summarize(rows: &[PeriodRow], hold_days: u16) -> BacktestSummary {
+/// 彙總各期：空手的期數報酬算 0；年化以每年約 [`TRADING_DAYS_PER_YEAR`] 個交易日換算；
+/// `costs` 與 `rows` 一一對應（見 [`trading_costs`]）。
+fn summarize(rows: &[PeriodRow], costs: &[PeriodCost], hold_days: u16) -> BacktestSummary {
     let periods = rows.len();
     let invested: Vec<&PeriodRow> = rows.iter().filter(|row| row.holdings > 0).collect();
     let returns: Vec<f64> = rows
@@ -327,11 +389,15 @@ fn summarize(rows: &[PeriodRow], hold_days: u16) -> BacktestSummary {
             periods: 0,
             invested_periods: 0,
             avg_holdings: None,
+            avg_turnover: None,
             total_return: None,
+            total_return_after_costs: None,
             benchmark_total_return: None,
             annualized_return: None,
+            annualized_return_after_costs: None,
             benchmark_annualized_return: None,
             max_drawdown: None,
+            max_drawdown_after_costs: None,
             benchmark_max_drawdown: None,
             win_rate: None,
             beat_market_rate: None,
@@ -344,6 +410,13 @@ fn summarize(rows: &[PeriodRow], hold_days: u16) -> BacktestSummary {
     let annualize = |equity: f64| (equity.powf(1.0 / years) - 1.0) * 100.0;
     let (equity, drawdown) = compound(returns.iter().copied());
     let (benchmark_equity, benchmark_drawdown) = compound(benchmarks.iter().copied());
+    let (net_equity, net_drawdown) = compound(costs.iter().map(|cost| cost.net_return));
+    let invested_turnover: Vec<f64> = rows
+        .iter()
+        .zip(costs)
+        .filter(|(row, _)| row.holdings > 0)
+        .map(|(_, cost)| cost.turnover)
+        .collect();
     let ratio = |hits: usize| round4(hits as f64 / count);
     BacktestSummary {
         periods: periods as i64,
@@ -353,11 +426,17 @@ fn summarize(rows: &[PeriodRow], hold_days: u16) -> BacktestSummary {
                 invested.iter().map(|row| row.holdings as f64).sum::<f64>() / invested.len() as f64,
             )
         }),
+        avg_turnover: (!invested_turnover.is_empty()).then(|| {
+            round4(invested_turnover.iter().sum::<f64>() / invested_turnover.len() as f64)
+        }),
         total_return: Some(round2((equity - 1.0) * 100.0)),
+        total_return_after_costs: Some(round2((net_equity - 1.0) * 100.0)),
         benchmark_total_return: Some(round2((benchmark_equity - 1.0) * 100.0)),
         annualized_return: Some(round2(annualize(equity))),
+        annualized_return_after_costs: Some(round2(annualize(net_equity))),
         benchmark_annualized_return: Some(round2(annualize(benchmark_equity))),
         max_drawdown: Some(round2(drawdown * 100.0)),
+        max_drawdown_after_costs: Some(round2(net_drawdown * 100.0)),
         benchmark_max_drawdown: Some(round2(benchmark_drawdown * 100.0)),
         win_rate: Some(ratio(returns.iter().filter(|r| **r > 0.0).count())),
         beat_market_rate: Some(ratio(
