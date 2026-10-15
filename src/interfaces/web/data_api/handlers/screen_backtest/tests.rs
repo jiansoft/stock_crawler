@@ -278,20 +278,22 @@ fn period_rounds_returns() {
     assert_eq!(period((row(3, 0, None, 1.0), cash)).avg_return, None);
 }
 
-/// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`，籌碼版另含連續買超的 CTE 與 `$12`／`$13`。
+/// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11` 與續抱門檻 `$12`，籌碼版另含連續買超的 CTE 與
+/// `$13`／`$14`。
 #[test]
 fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.trim_start().starts_with("WITH\ndays AS ("));
     assert!(BACKTEST_SQL.contains("COALESCE($11::int, 1)"));
-    assert!(!BACKTEST_SQL.contains("$12"));
+    assert!(BACKTEST_SQL.contains("rs_score >= $12"));
+    assert!(!BACKTEST_SQL.contains("$13"));
     assert!(
         BACKTEST_WITH_CHIP_SQL
             .trim_start()
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $12"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $13"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $13"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $14"));
 }
 
 /// 一期候選：代號依相對強度由高到低，報酬一一對應。
@@ -306,6 +308,8 @@ fn candidates(d: u32, list: &[(&str, Option<f64>)]) -> CandidateRow {
             .map(|(symbol, _)| (*symbol).to_owned())
             .collect(),
         candidate_returns: list.iter().map(|(_, ret)| *ret).collect(),
+        hold_symbols: Vec::new(),
+        hold_returns: Vec::new(),
     }
 }
 
@@ -414,4 +418,56 @@ fn select_holdings_goes_to_cash_when_market_filtered() {
     assert_eq!(rows[2].symbols, ["C"]);
     let summary = summarize(&rows, &free(&rows), 20);
     assert_eq!(summary.market_filtered_periods, 1);
+}
+
+/// 加上只符合續抱條件的股票（相對強度不低於門檻）。
+fn with_hold(mut row: CandidateRow, hold: &[(&str, Option<f64>)]) -> CandidateRow {
+    row.hold_symbols = hold
+        .iter()
+        .map(|(symbol, _)| (*symbol).to_owned())
+        .collect();
+    row.hold_returns = hold.iter().map(|(_, ret)| *ret).collect();
+    row
+}
+
+/// 續抱條件：上一期持股不再符合選股條件、但相對強度仍達門檻就續抱，報酬取續抱名單的報酬；
+/// 跌破門檻才換股。續抱股排在候選股之後，名額不足時先留候選股。
+#[test]
+fn select_holdings_keeps_stocks_meeting_hold_rule() {
+    let rows = select_holdings(
+        vec![
+            candidates(2, &[("A", Some(1.0)), ("B", Some(2.0))]),
+            // A、B 都不再是候選（例如連買中斷）；A 的 RS 仍達門檻續抱，B 沒有，補第 1 名 C。
+            with_hold(
+                candidates(3, &[("C", Some(3.0)), ("D", Some(4.0))]),
+                &[("C", Some(3.0)), ("A", Some(5.0))],
+            ),
+            // A 跌破門檻：換成 D。
+            with_hold(
+                candidates(4, &[("C", Some(1.0)), ("D", Some(2.0))]),
+                &[("C", Some(1.0))],
+            ),
+        ],
+        2,
+        2,
+    );
+    assert_eq!(rows[1].symbols, ["C", "A"]);
+    assert_eq!(rows[1].avg_return, Some(4.0));
+    assert_eq!(rows[2].symbols, ["C", "D"]);
+
+    // 續抱的股票多於名額時先留候選股。
+    let rows = select_holdings(
+        vec![
+            candidates(2, &[("A", None), ("B", None)]),
+            with_hold(
+                candidates(3, &[("B", None), ("X", None)]),
+                &[("A", None), ("B", None)],
+            ),
+        ],
+        1,
+        1,
+    );
+    assert_eq!(rows[0].symbols, ["A"]);
+    // A 只符合續抱條件、B 是候選第 1 名但不是上一期持股：續抱 A。
+    assert_eq!(rows[1].symbols, ["A"]);
 }

@@ -262,6 +262,7 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     assert_eq!(response["etf_benchmark"]["type"], "string");
     assert_eq!(response["keep_rank"]["type"], "integer");
     assert!(response["market_filter_ma"].to_string().contains("null"));
+    assert!(response["hold_min_rs_score"].to_string().contains("null"));
     assert_eq!(
         schemas["BacktestPeriod"]["properties"]["market_filtered"]["type"],
         "boolean"

@@ -260,6 +260,24 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert!(json["summary"]["volatility"].as_f64().is_some());
     assert!(json["summary"]["sharpe_ratio"].as_f64().is_some());
 
+    // 續抱條件：只選 RS ≥ 85（03-01 BA、03-08 BB）。BA 03-08 的 RS 50 不再符合選股條件，
+    // 但達續抱門檻 50 就續抱（報酬 3）；門檻 51 時換成 BB（報酬 8）。
+    let (status, json) = query("limit=1&min_rs_score=85&hold_min_rs_score=50").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["hold_min_rs_score"], 50);
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 1, Some(10.0)),
+            ("1993-03-08".to_owned(), 1, Some(3.0)),
+        ]
+    );
+    let (_, json) = query("limit=1&min_rs_score=85&hold_min_rs_score=51").await;
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BB"])
+    );
+
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -339,6 +357,8 @@ async fn screen_backtest_endpoint_db_semantics() {
         ("limit=5&keep_rank=4", StatusCode::UNPROCESSABLE_ENTITY),
         ("keep_rank=201", StatusCode::UNPROCESSABLE_ENTITY),
         ("market_filter_ma=50", StatusCode::UNPROCESSABLE_ENTITY),
+        ("hold_min_rs_score=0", StatusCode::UNPROCESSABLE_ENTITY),
+        ("hold_min_rs_score=100", StatusCode::UNPROCESSABLE_ENTITY),
         ("fee_discount=1.5", StatusCode::UNPROCESSABLE_ENTITY),
         ("fee_discount=-0.1", StatusCode::UNPROCESSABLE_ENTITY),
         ("market=otc", StatusCode::UNPROCESSABLE_ENTITY),
