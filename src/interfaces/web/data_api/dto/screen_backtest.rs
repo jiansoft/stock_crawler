@@ -1,7 +1,8 @@
 //! `/stocks/screen/backtest` 的 request、response 與 OpenAPI schema。
 //!
 //! 只用每天都有留存的資料（相對強度、法人連續買超、技術訊號）選股，避免用到當時還沒公布的
-//! 財報；報酬來自 `daily_forward_return`（基準日收盤到之後第 N 個交易日收盤的還原報酬，等同含息）。
+//! 財報；報酬來自 `daily_forward_return`（基準日收盤到之後第 N 個交易日收盤的還原報酬，等同含息；
+//! 期間內下市的股票算到最後一筆收盤）。
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -46,6 +47,10 @@ pub(crate) struct ScreenBacktestParams {
     /// 只選換股前 `hold_days` 個交易日內出現過這種訊號的股票；可與 `indicator` 併用。
     #[param(value_type = Option<SignalKindValue>)]
     pub(crate) kind: Option<String>,
+    /// 手續費折扣（0–1，預設 1 為不打折；例如 0.28 為 2.8 折）：扣成本後的報酬以手續費 0.1425%
+    /// 乘上折扣、賣出另加證交稅 0.3% 計算。
+    #[param(minimum = 0.0, maximum = 1.0, default = 1.0)]
+    pub(crate) fee_discount: Option<f64>,
 }
 
 /// 一次換股（一期）的結果。
@@ -55,11 +60,16 @@ pub(crate) struct BacktestPeriod {
     pub(crate) date: String,
     /// 這期持有的檔數；0 代表沒有符合條件的股票，這期空手（報酬 0）。
     pub(crate) holdings: i64,
-    /// 持股等權平均報酬（%）；期間內下市等沒有報酬的股票不列入平均，空手為 `null`。
+    /// 持股等權平均報酬（%），未扣交易成本；期間內下市的股票算到最後一筆收盤，之後完全沒有收盤的
+    /// 股票不列入平均；空手為 `null`。
     pub(crate) avg_return: Option<f64>,
+    /// 扣除這次換股的手續費與證交稅後的報酬（%）；空手但賣出上一期持股時為負的成本。
+    pub(crate) return_after_costs: f64,
+    /// 換手率（0–1）：這期新買進的檔數占持股的比例，第一期為 1、空手為 0。
+    pub(crate) turnover: f64,
     /// 同一天同市場全部母體股票的平均報酬（%）。
     pub(crate) benchmark_return: Option<f64>,
-    /// 依相對強度分數由高到低的前 10 檔代號。
+    /// 依相對強度分數由高到低的前 10 檔代號（換手率以全部持股計算）。
     pub(crate) symbols: Vec<String>,
 }
 
@@ -72,19 +82,27 @@ pub(crate) struct BacktestSummary {
     pub(crate) invested_periods: i64,
     /// 有持股的期平均持有檔數。
     pub(crate) avg_holdings: Option<f64>,
-    /// 累積報酬（%）：各期報酬連乘，空手的期數報酬為 0。
+    /// 有持股的期平均換手率（0–1）。
+    pub(crate) avg_turnover: Option<f64>,
+    /// 累積報酬（%）：各期報酬連乘，空手的期數報酬為 0；未扣交易成本。
     pub(crate) total_return: Option<f64>,
+    /// 扣除交易成本後的累積報酬（%）。
+    pub(crate) total_return_after_costs: Option<f64>,
     /// 大盤基準的累積報酬（%）。
     pub(crate) benchmark_total_return: Option<f64>,
-    /// 年化報酬（%），以每年約 245 個交易日換算。
+    /// 年化報酬（%），以每年約 245 個交易日換算；未扣交易成本。
     pub(crate) annualized_return: Option<f64>,
+    /// 扣除交易成本後的年化報酬（%）。
+    pub(crate) annualized_return_after_costs: Option<f64>,
     /// 大盤基準的年化報酬（%）。
     pub(crate) benchmark_annualized_return: Option<f64>,
     /// 最大回撤（%，負值）：以每期期末的累積淨值計算，看不到期中的波動。
     pub(crate) max_drawdown: Option<f64>,
+    /// 扣除交易成本後的最大回撤（%）。
+    pub(crate) max_drawdown_after_costs: Option<f64>,
     /// 大盤基準的最大回撤（%）。
     pub(crate) benchmark_max_drawdown: Option<f64>,
-    /// 報酬大於 0 的期數比例（0–1）。
+    /// 報酬大於 0 的期數比例（0–1），未扣交易成本。
     pub(crate) win_rate: Option<f64>,
     /// 報酬高於大盤基準的期數比例（0–1）。
     pub(crate) beat_market_rate: Option<f64>,
@@ -121,6 +139,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) indicator: Option<String>,
     /// 訊號種類；未篩選為 `null`。
     pub(crate) kind: Option<String>,
+    /// 計算交易成本用的手續費折扣（0–1）。
+    pub(crate) fee_discount: f64,
     /// 報酬是否還原權值；固定為 `true`。
     pub(crate) adjusted: bool,
     /// 整段回測的彙總。

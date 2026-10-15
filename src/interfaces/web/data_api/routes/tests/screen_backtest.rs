@@ -12,7 +12,7 @@ const STOCKS: [(&str, i32, i32); 3] = [("79979BA", 2, 24), ("79979BB", 2, 99), (
 /// 有相對強度的交易日（1993-03-dd）：持有 5 日時第 1、6 天換股，第 11 天還沒有報酬。
 const DAYS: [u32; 11] = [1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 15];
 
-/// `(日, 代號, 相對強度分數, 5 日報酬)`；03-08 的 BC 沒有報酬（期間內下市）。
+/// `(日, 代號, 相對強度分數, 5 日報酬)`；03-08 的 BC 沒有報酬（之後完全沒有收盤）。
 const SCORES: [(u32, &str, i16, Option<i64>); 6] = [
     (1, "79979BA", 90, Some(10)),
     (1, "79979BB", 60, Some(-4)),
@@ -127,7 +127,8 @@ fn periods(json: &serde_json::Value) -> Vec<(String, i64, Option<f64>)> {
         .collect()
 }
 
-/// 換股日、相對強度排序取前 N 檔、下市股不列入平均、大盤基準、各種條件、空手與參數驗證。
+/// 換股日、相對強度排序取前 N 檔、沒有報酬的股票不列入平均、大盤基準、交易成本、各種條件、空手與
+/// 參數驗證。
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
@@ -172,6 +173,18 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(summary["win_rate"], 1.0);
     assert_eq!(summary["beat_market_rate"], 1.0);
     assert_eq!(summary["max_drawdown"], 0.0);
+    // 交易成本：03-01 全部買進（0.1425%）；03-08 賣出 BA（一半，0.4425%）、買進 BB（一半，0.1425%）。
+    assert_eq!(json["fee_discount"], 1.0);
+    assert_eq!(json["periods"][0]["turnover"], 1.0);
+    assert_eq!(json["periods"][0]["return_after_costs"], 5.86);
+    assert_eq!(json["periods"][1]["turnover"], 0.5);
+    assert_eq!(json["periods"][1]["return_after_costs"], 7.71);
+    assert_eq!(summary["avg_turnover"], 0.75);
+    // 1.058575 × 1.077075 − 1 ≈ 14.02%。
+    assert_eq!(summary["total_return_after_costs"], 14.02);
+    let (_, free) = query("limit=2&fee_discount=0").await;
+    assert_eq!(free["periods"][0]["return_after_costs"], 6.0);
+    assert_eq!(free["periods"][1]["return_after_costs"], 7.85);
 
     // 上櫃只有 BC：03-08 母體沒有任何報酬，那一期不列入。
     let (_, json) = query("market=tpex").await;
@@ -230,6 +243,8 @@ async fn screen_backtest_endpoint_db_semantics() {
     for (extra, status) in [
         ("limit=0", StatusCode::UNPROCESSABLE_ENTITY),
         ("limit=101", StatusCode::UNPROCESSABLE_ENTITY),
+        ("fee_discount=1.5", StatusCode::UNPROCESSABLE_ENTITY),
+        ("fee_discount=-0.1", StatusCode::UNPROCESSABLE_ENTITY),
         ("market=otc", StatusCode::UNPROCESSABLE_ENTITY),
         ("kind=breakout", StatusCode::UNPROCESSABLE_ENTITY),
         ("indicator=ma10", StatusCode::UNPROCESSABLE_ENTITY),
