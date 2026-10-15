@@ -80,7 +80,7 @@ fn a_healthy_week_reports_no_problems() {
 
     let message = report(day(4), day(10), &checks);
     assert!(
-        message.starts_with("資料健康週報 2026\\-10\\-04～2026\\-10\\-10\n全部 9 項正常"),
+        message.starts_with("資料健康週報 2026\\-10\\-04～2026\\-10\\-10\n全部 10 項正常"),
         "{message}"
     );
     assert!(!message.contains("⚠️"));
@@ -249,11 +249,16 @@ fn counted_problems_are_listed_in_the_report() {
     snapshot.missing_moving_averages = 12;
     snapshot.stale_dividend_placeholders = 3;
     snapshot.dividend_total_mismatches = 1;
+    snapshot.chip_streak_missing = 1_890;
 
     let checks = evaluate(&snapshot, day(4), day(10), Some(&[]));
     let message = report(day(4), day(10), &checks);
 
-    assert!(message.contains("2 項需要處理"), "{message}");
+    assert!(message.contains("3 項需要處理"), "{message}");
+    assert!(
+        message.contains("⚠️ 籌碼連續天數\n  • 1890 列連續買賣超天數未計算"),
+        "{message}"
+    );
     assert!(
         message.contains("⚠️ 均線\n  • 12 列 5 日均線是 0"),
         "{message}"
