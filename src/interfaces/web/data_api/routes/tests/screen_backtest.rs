@@ -230,11 +230,17 @@ async fn screen_backtest_endpoint_db_semantics() {
             ("1993-03-08".to_owned(), 1, Some(3.0)),
         ]
     );
-    assert_eq!(json["periods"][1]["symbols"], serde_json::json!(["79979BA"]));
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BA"])
+    );
     assert_eq!(json["periods"][1]["turnover"], 0.0);
     // 緩衝 2 名時 BA（第 3 名）賣出、換成 BB。
     let (_, json) = query("limit=1&keep_rank=2").await;
-    assert_eq!(json["periods"][1]["symbols"], serde_json::json!(["79979BB"]));
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BB"])
+    );
     // 只有兩期，報酬有波動才有夏普值。
     assert!(json["summary"]["volatility"].as_f64().is_some());
     assert!(json["summary"]["sharpe_ratio"].as_f64().is_some());
