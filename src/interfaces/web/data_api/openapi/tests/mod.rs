@@ -172,6 +172,7 @@ fn openapi_contains_all_data_api_paths() {
         "/api/v1/market/institutional-streak/performance",
         "/api/v1/market/industry-flow",
         "/api/v1/market/margin-ranking",
+        "/api/v1/market/regime",
         "/api/v1/market/cagr-ranking",
         "/api/v1/market/cagr-ranking/{stock_symbol}",
         "/api/v1/healthz",

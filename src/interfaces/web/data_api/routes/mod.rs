@@ -166,6 +166,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::margin_ranking),
         )
         .route(
+            "/market/regime",
+            axum::routing::get(handlers::market_regime),
+        )
+        .route(
             "/market/cagr-ranking",
             axum::routing::get(handlers::cagr_ranking),
         )
