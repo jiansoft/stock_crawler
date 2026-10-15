@@ -386,14 +386,17 @@ pub(super) fn total_row(rows: &[PerformanceRow]) -> PerformanceRow {
         .unwrap_or_default()
 }
 
-/// 外資、投信連續買超天數下限各在 1–20。
+/// 連續買超天數門檻的上限；連續天數入庫時預先計算、不限回看長度，與條件選股一致。
+pub(super) const MAX_STREAK_DAYS: u8 = 60;
+
+/// 外資、投信連續買超天數下限各在 1–[`MAX_STREAK_DAYS`]。
 pub(super) fn validate_streaks(foreign: Option<u8>, trust: Option<u8>) -> Result<(), &'static str> {
-    let in_range = |days: Option<u8>| days.is_none_or(|days| (1..=20).contains(&days));
+    let in_range = |days: Option<u8>| days.is_none_or(|days| (1..=MAX_STREAK_DAYS).contains(&days));
     if !in_range(foreign) {
-        return Err("min_foreign_streak 必須介於 1 至 20");
+        return Err("min_foreign_streak 必須介於 1 至 60");
     }
     if !in_range(trust) {
-        return Err("min_trust_streak 必須介於 1 至 20");
+        return Err("min_trust_streak 必須介於 1 至 60");
     }
     Ok(())
 }

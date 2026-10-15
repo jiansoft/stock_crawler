@@ -200,9 +200,9 @@ pub(crate) struct InstitutionalStreakPerformanceParams {
     /// `buy`（預設，連續買超）或 `sell`（連續賣超）。
     #[param(value_type = FlowSideParamValue, default = "buy")]
     pub(crate) side: Option<String>,
-    /// 連續天數 N（1–20，預設 3）：某檔股票連續買超（或賣超）剛好滿 N 天的那一天算一次事件，
+    /// 連續天數 N（1–60，預設 3）：某檔股票連續買超（或賣超）剛好滿 N 天的那一天算一次事件，
     /// 之後延續的天數不重複計算。
-    #[param(minimum = 1, maximum = 20, default = 3)]
+    #[param(minimum = 1, maximum = 60, default = 3)]
     pub(crate) streak: Option<u8>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
