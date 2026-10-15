@@ -150,6 +150,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::institutional_flow),
         )
         .route(
+            "/market/institutional-streak/performance",
+            axum::routing::get(handlers::institutional_streak_performance),
+        )
+        .route(
             "/market/industry-flow",
             axum::routing::get(handlers::industry_flow),
         )
