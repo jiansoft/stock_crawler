@@ -1,7 +1,8 @@
 //! `/market/signals` 的 request、response 與 OpenAPI schema。
 //!
 //! 收盤後預先計算的全市場技術訊號；計算規則見 [`crate::domain::quote::technical`]，
-//! 與 `/stocks/{symbol}/technicals` 同一套。日線先還原權值再計算訊號。
+//! 與 `/stocks/{symbol}/technicals` 同一套。日線先還原權值再計算訊號。相對強度穿越 80／50 分
+//! （`rs80`、`rs50`）在寫入每日相對強度時產生，見 [`crate::domain::quote::relative_strength`]。
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -17,9 +18,9 @@ pub(crate) enum SignalKindValue {
     GoldenCross,
     /// 短線向下穿越長線。
     DeathCross,
-    /// 收盤價站上均線。
+    /// 收盤價站上均線，或相對強度分數向上穿越 80／50 分。
     CrossAbove,
-    /// 收盤價跌破均線。
+    /// 收盤價跌破均線，或相對強度分數向下穿越 80／50 分。
     CrossBelow,
     /// RSI(14) ≥ 70 或 K ≥ 80。
     Overbought,
@@ -62,6 +63,12 @@ pub(crate) enum SignalIndicatorValue {
     /// 52 週新高新低。
     #[schema(rename = "52_week")]
     FiftyTwoWeek,
+    /// 相對強度分數穿越 80 分（前一個交易日未滿 80、當天 ≥ 80 為站上，反之為跌破）。
+    #[schema(rename = "rs80")]
+    Rs80,
+    /// 相對強度分數穿越 50 分。
+    #[schema(rename = "rs50")]
+    Rs50,
 }
 
 /// 技術訊號選股的 query string。

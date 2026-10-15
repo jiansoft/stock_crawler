@@ -5,7 +5,10 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::{
-    domain::quote::forward_return::{DerivedCounts, DerivedDataQuery, ForwardReturnRepository},
+    domain::quote::{
+        forward_return::{DerivedCounts, DerivedDataQuery, ForwardReturnRepository},
+        relative_strength::CROSSING_INDICATORS,
+    },
     infra::database::{self, repository::quote::PgQuoteRepository},
 };
 
@@ -110,9 +113,10 @@ SET return_5d = COALESCE(EXCLUDED.return_5d, t.return_5d),
     updated_at = CURRENT_TIMESTAMP
 "#;
 
-/// `$1` 的技術訊號筆數，以及基準日 `$2` 已寫入 5 日報酬的筆數（都走主鍵前綴）。
+/// `$1` 的技術訊號筆數（不含相對強度穿越訊號 `$3`，那些隨每日相對強度寫入），以及基準日 `$2`
+/// 已寫入 5 日報酬的筆數與 `$1` 的相對強度筆數（都走主鍵前綴）。
 const DERIVED_COUNTS_SQL: &str = r#"
-SELECT (SELECT COUNT(*) FROM daily_technical_signal WHERE date = $1),
+SELECT (SELECT COUNT(*) FROM daily_technical_signal WHERE date = $1 AND indicator <> ALL($3)),
        (SELECT COUNT(*) FROM daily_forward_return WHERE date = $2 AND return_5d IS NOT NULL),
        (SELECT COUNT(*) FROM daily_relative_strength WHERE date = $1)
 "#;
@@ -124,6 +128,7 @@ impl DerivedDataQuery for PgQuoteRepository {
             sqlx::query_as(DERIVED_COUNTS_SQL)
                 .bind(date)
                 .bind(base)
+                .bind(&CROSSING_INDICATORS[..])
                 .fetch_one(database::get_connection())
                 .await?;
         Ok(DerivedCounts {
@@ -199,6 +204,7 @@ mod tests {
                 "DELETE FROM dividend WHERE security_code = ANY($1)",
                 "DELETE FROM corporate_action WHERE stock_symbol = ANY($1)",
                 "DELETE FROM daily_forward_return WHERE stock_symbol = ANY($1)",
+                "DELETE FROM daily_technical_signal WHERE stock_symbol = ANY($1)",
             ] {
                 sqlx::query(sql)
                     .bind(symbols)
@@ -269,13 +275,20 @@ mod tests {
             .await
             .expect("查詢交易日");
         assert_eq!(dates, [day(8), day(6), day(5)]);
-        assert_eq!(
-            repo.count_derived(day(8), day(2))
-                .await
-                .expect("寫入前的筆數")
-                .forward_returns,
-            0
-        );
+        // 只有相對強度穿越訊號時，技術訊號仍算缺漏。
+        sqlx::query(
+            "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
+             VALUES ($1, '79979FA', 'rs50', 'cross_above', '相對強度 40 → 60 分，突破 50 分')",
+        )
+        .bind(day(8))
+        .execute(pool)
+        .await
+        .expect("寫入相對強度訊號");
+        let before = repo
+            .count_derived(day(8), day(2))
+            .await
+            .expect("寫入前的筆數");
+        assert_eq!((before.signals, before.forward_returns), (0, 0));
 
         assert_eq!(
             repo.upsert_forward_returns(day(2), day(8), 5)

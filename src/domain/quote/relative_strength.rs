@@ -7,11 +7,18 @@
 //! 計分母體不含 ETF、ETN、受益證券（產業 9001～9003）與特別股（代號 4 碼數字後接英文字母）：
 //! 只拿普通股互相比較，這些商品一律沒有分數。
 
-use std::{cmp::Ordering, collections::BTreeMap};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap},
+};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
+
+use super::technical::{
+    RS50_INDICATOR, RS80_INDICATOR, SignalKind, StockTechnicalSignal, TechnicalSignal,
+};
 
 /// 計分用的最長天期（交易日數）。
 pub const LONGEST: usize = 240;
@@ -21,6 +28,9 @@ pub const WEIGHTS: [f64; 3] = [0.4, 0.3, 0.3];
 
 /// 穿越時要標記的分數門檻：80 為強勢、50 為中位（高門檻在前）。
 pub const THRESHOLDS: [u8; 2] = [80, 50];
+
+/// 每日技術訊號中，穿越 [`THRESHOLDS`] 各門檻的訊號來源（一一對應）。
+pub const CROSSING_INDICATORS: [&str; 2] = [RS80_INDICATOR, RS50_INDICATOR];
 
 /// 一檔股票某個交易日的相對強度。
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +91,46 @@ pub fn crossings(previous: u8, current: u8) -> Vec<(u8, CrossDirection)> {
             .map(|direction| (threshold, direction))
         })
         .collect()
+}
+
+/// 依前一個交易日的分數 `previous`（代號 → 分數），產生 `date` 當天穿越 [`THRESHOLDS`] 的
+/// 技術訊號：由下往上為 `cross_above`、由上往下為 `cross_below`，來源見 [`CROSSING_INDICATORS`]。
+/// 前一天沒有分數（剛滿 240 個交易日、前一天暫停交易）的股票不產生訊號。
+pub fn crossing_signals(
+    date: NaiveDate,
+    previous: &HashMap<String, u8>,
+    scored: &[ScoredStock],
+) -> Vec<StockTechnicalSignal> {
+    let mut signals = Vec::new();
+    for stock in scored {
+        let Some(&before) = previous.get(&stock.row.stock_symbol) else {
+            continue;
+        };
+        for (threshold, direction) in crossings(before, stock.rs_score) {
+            let (kind, verb) = match direction {
+                CrossDirection::Up => (SignalKind::CrossAbove, "突破"),
+                CrossDirection::Down => (SignalKind::CrossBelow, "跌破"),
+            };
+            let indicator = THRESHOLDS
+                .into_iter()
+                .zip(CROSSING_INDICATORS)
+                .find_map(|(known, indicator)| (known == threshold).then_some(indicator))
+                .unwrap_or(RS50_INDICATOR);
+            signals.push(StockTechnicalSignal {
+                date,
+                stock_symbol: stock.row.stock_symbol.clone(),
+                signal: TechnicalSignal {
+                    indicator,
+                    kind,
+                    description: format!(
+                        "相對強度 {before} → {} 分，{verb} {threshold} 分",
+                        stock.rs_score
+                    ),
+                },
+            });
+        }
+    }
+    signals
 }
 
 /// 計分母體中的一檔股票。
@@ -225,11 +275,13 @@ pub trait RelativeStrengthQuery: Send + Sync {
 /// 每日分數的寫入介面。
 #[async_trait]
 pub trait RelativeStrengthRepository: Send + Sync {
-    /// 以 `scored`（當天全體分數）整天替換 `date` 的每日分數，回傳寫入列數。
+    /// 在同一個交易內以 `scored`（當天全體分數）整天替換 `date` 的每日分數，並以 `signals`
+    /// 替換當天的相對強度穿越訊號（[`CROSSING_INDICATORS`]，其他技術訊號不動），回傳分數寫入列數。
     async fn replace_relative_strength(
         &self,
         date: NaiveDate,
         scored: &[ScoredStock],
+        signals: &[StockTechnicalSignal],
     ) -> Result<u64>;
 }
 
@@ -277,6 +329,81 @@ mod tests {
         assert_eq!(bases.d240, ymd(2026, 2, 15));
         assert!(base_dates(&dates[1..]).is_none());
         assert!(base_dates(&[]).is_none());
+    }
+
+    fn scored(symbol: &str, rs_score: u8) -> ScoredStock {
+        ScoredStock {
+            rank: 1,
+            rs_score,
+            weighted: 0.0,
+            row: UniverseRow {
+                stock_symbol: symbol.to_owned(),
+                name: symbol.to_owned(),
+                market_id: 2,
+                industry: String::new(),
+                return_20d: None,
+                return_60d: 0.0,
+                return_120d: 0.0,
+                return_240d: 0.0,
+                closing_price: None,
+            },
+        }
+    }
+
+    /// 穿越訊號：向上為 cross_above、向下為 cross_below，跨兩個門檻兩筆都列；
+    /// 前一天沒有分數或沒有穿越的股票不產生。
+    #[test]
+    fn crossing_signals_map_thresholds_to_indicators() {
+        let date = ymd(2026, 10, 15);
+        let previous: HashMap<String, u8> = [("2330", 76), ("2317", 85), ("2454", 60)]
+            .into_iter()
+            .map(|(symbol, score)| (symbol.to_owned(), score))
+            .collect();
+        let signals = crossing_signals(
+            date,
+            &previous,
+            &[
+                scored("2330", 82),
+                scored("2317", 40),
+                scored("2454", 70),
+                scored("6669", 99),
+            ],
+        );
+        let actual: Vec<(&str, &str, SignalKind, &str)> = signals
+            .iter()
+            .map(|s| {
+                assert_eq!(s.date, date);
+                (
+                    s.stock_symbol.as_str(),
+                    s.signal.indicator,
+                    s.signal.kind,
+                    s.signal.description.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            actual,
+            [
+                (
+                    "2330",
+                    "rs80",
+                    SignalKind::CrossAbove,
+                    "相對強度 76 → 82 分，突破 80 分"
+                ),
+                (
+                    "2317",
+                    "rs80",
+                    SignalKind::CrossBelow,
+                    "相對強度 85 → 40 分，跌破 80 分"
+                ),
+                (
+                    "2317",
+                    "rs50",
+                    SignalKind::CrossBelow,
+                    "相對強度 85 → 40 分，跌破 50 分"
+                ),
+            ]
+        );
     }
 
     /// 穿越：同一天跨兩個門檻兩筆都列（高門檻在前）；剛好等於門檻算在門檻以上；沒穿越為空。

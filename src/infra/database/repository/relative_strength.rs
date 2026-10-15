@@ -8,11 +8,16 @@ use crate::{
     domain::quote::{
         forward_return::ForwardReturnRepository,
         relative_strength::{
-            LONGEST, RelativeStrengthDay, RelativeStrengthQuery, RelativeStrengthRepository,
-            ScoredStock, ScoredUniverseQuery, UniverseRow, base_dates, score_universe,
+            CROSSING_INDICATORS, LONGEST, RelativeStrengthDay, RelativeStrengthQuery,
+            RelativeStrengthRepository, ScoredStock, ScoredUniverseQuery, UniverseRow, base_dates,
+            score_universe,
         },
+        technical::StockTechnicalSignal,
     },
-    infra::database::{self, repository::quote::PgQuoteRepository},
+    infra::database::{
+        self,
+        repository::{quote::PgQuoteRepository, technical::insert_signals},
+    },
 };
 
 /// 資料日 `$1` 的計分母體：上市櫃、未暫停交易、不是 ETF／ETN／受益證券（產業 9001～9003）
@@ -68,6 +73,10 @@ ORDER BY r.stock_symbol, r.date DESC
 
 /// 整天替換：刪除 `$1` 的舊分數。
 const DELETE_DAY_SQL: &str = "DELETE FROM daily_relative_strength WHERE date = $1";
+
+/// 整天替換：刪除 `$1` 的相對強度穿越訊號（來源 `$2`），其他技術訊號不動。
+const DELETE_DAY_SIGNALS_SQL: &str =
+    "DELETE FROM daily_technical_signal WHERE date = $1 AND indicator = ANY($2)";
 
 /// 整天替換：寫入 `$1` 的分數（代號、加權報酬、分數、名次四個平行陣列，`$6` 為母體數）。
 const INSERT_DAY_SQL: &str = r#"
@@ -135,6 +144,7 @@ impl RelativeStrengthRepository for PgQuoteRepository {
         &self,
         date: NaiveDate,
         scored: &[ScoredStock],
+        signals: &[StockTechnicalSignal],
     ) -> Result<u64> {
         let symbols: Vec<&str> = scored
             .iter()
@@ -165,6 +175,12 @@ impl RelativeStrengthRepository for PgQuoteRepository {
             .execute(&mut *tx)
             .await?
             .rows_affected();
+        sqlx::query(DELETE_DAY_SIGNALS_SQL)
+            .bind(date)
+            .bind(&CROSSING_INDICATORS[..])
+            .execute(&mut *tx)
+            .await?;
+        insert_signals(&mut tx, date, signals).await?;
         tx.commit().await?;
         Ok(written)
     }
