@@ -27,7 +27,8 @@ const MAX_DELIST_PER_RUN: usize = 100;
 /// 更新資料庫中終止上市櫃的證券。
 ///
 /// 兩階段：
-/// 1. TWSE `suspendListingCsvAndHtml`——官方「終止上市」名單（只涵蓋上市公司）。
+/// 1. TWSE `suspendListingCsvAndHtml`——官方「終止上市」名單（只涵蓋上市公司）。只標記目前仍屬
+///    上市市場的股票：終止上市後轉上櫃的公司（例如 6423 億而得從創新板轉上櫃）代號不變、仍在交易。
 /// 2. ISIN 名冊差集——補足第一階段的盲區：終止**上櫃**（TPEX 沒有對應的
 ///    OpenAPI 名單）與 ETF 下架/清算都不在 TWSE 名單內，但它們會從
 ///    ISIN 現行名冊中消失，因此「資料庫未下市、卻不在任何市場名冊上」
@@ -48,7 +49,7 @@ pub async fn execute() -> Result<()> {
         if let Some(cmd) = DelistedCompanyAclMapper::from_suspend_listing(&company)
             && let Some(stock) = repo.find_by_symbol(&cmd.symbol).await?
         {
-            if stock.suspend_listing() {
+            if !should_mark_twse_delisted(&stock) {
                 continue;
             }
 
@@ -79,6 +80,13 @@ pub async fn execute() -> Result<()> {
 /// ISIN 的公開發行名冊上。若把公開發行名冊併入，這些已停止交易的股票永遠比不出差集
 /// ——2026-09-24 實測有 14 檔（4712 福格創新、3202 樺晟、2888A/2888B 新光金特別股，
 /// 以及 10 檔興櫃）因此一直維持未下市。
+/// 證交所終止上市名單上的股票是否要標記下市：尚未標記、且目前仍屬上市市場。
+///
+/// 終止上市後轉到上櫃的公司代號不變，名單會一直列著它，只看代號會把仍在交易的股票誤標下市。
+fn should_mark_twse_delisted(stock: &Stock) -> bool {
+    !stock.suspend_listing() && stock.market_id() == StockExchangeMarket::Listed.serial()
+}
+
 fn roster_markets() -> impl Iterator<Item = StockExchangeMarket> {
     StockExchangeMarket::iterator().filter(|market| *market != StockExchangeMarket::Public)
 }
@@ -226,6 +234,17 @@ mod tests {
             0,
             rust_decimal::Decimal::ZERO,
         )
+    }
+
+    /// 終止上市名單只標記目前仍在上市市場、尚未標記的股票；已轉上櫃或興櫃的不標記。
+    #[test]
+    fn twse_delisting_only_marks_listed_stocks() {
+        assert!(should_mark_twse_delisted(&stock("1101", 2)));
+        assert!(!should_mark_twse_delisted(&stock("6423", 4)));
+        assert!(!should_mark_twse_delisted(&stock("6423", 5)));
+        let mut marked = stock("1101", 2);
+        marked.update_suspension(true);
+        assert!(!should_mark_twse_delisted(&marked));
     }
 
     /// 名冊筆數低於安全下限就放棄比對。
