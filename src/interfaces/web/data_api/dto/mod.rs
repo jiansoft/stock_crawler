@@ -4,7 +4,7 @@
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
 //! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
-//! `financial_health`、`chip`、`institutional_flow`、`margin`、`screening`、`market`、`industries`、`portfolio`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals`、`signal_history` 與 `relative_strength` 二十一個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! `financial_health`、`chip`、`institutional_flow`、`margin`、`market_regime`、`screening`、`market`、`industries`、`portfolio`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals`、`signal_history` 與 `relative_strength` 二十二個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
@@ -18,6 +18,7 @@ mod industries;
 mod institutional_flow;
 mod margin;
 mod market;
+mod market_regime;
 mod peers;
 mod portfolio;
 mod portfolio_history;
@@ -82,6 +83,7 @@ pub(super) use market::{
     MarketMoversParams, MarketMoversResponse, MoversRankByValue, QfiiHolding,
     QfiiHoldingRankingParams, QfiiHoldingRankingResponse, QfiiSortValue,
 };
+pub(super) use market_regime::{MarketRegimeParams, MarketRegimeResponse, MovingAverageStatus};
 pub(super) use peers::{PeerMetric, PeerStock, PeersParams, PeersResponse};
 pub(super) use portfolio::{
     PortfolioHolding, PortfolioIndustry, PortfolioSummaryParams, PortfolioSummaryResponse,
