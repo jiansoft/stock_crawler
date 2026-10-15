@@ -19,6 +19,7 @@
 //!    虧損股的本益比本來就是 0（上櫃約 26%），所以本益比的門檻較寬；今天還沒補值，不列入。
 //! 9. 未來報酬（整張表）：基準日有兩成以上「長天期有值、短天期是空的」，代表回補的結束日沒涵蓋到
 //!    （2026-10 曾發現 2022 年的 5／20／60 日報酬缺了 45 萬列，訊號績效默默少了樣本）。
+//! 10. 籌碼連續天數：`chip_daily` 的連續買賣超天數是 NULL（每日入庫後的重算失敗）。
 //!
 //! 全部正常時也會發一則簡短的週報，用來確認檢查本身有在跑。
 
@@ -144,6 +145,9 @@ fn evaluate(
         }),
         Check::count("年月日欄位", snapshot.misdated_rows, |count| {
             format!("{count} 列 year／month／day 與日期不符")
+        }),
+        Check::count("籌碼連續天數", snapshot.chip_streak_missing, |count| {
+            format!("{count} 列連續買賣超天數未計算（請跑 test_backfill_chip_streaks）")
         }),
         Check::new("衍生資料", derived_table_problems(snapshot, &trading_days)),
         Check::new(
