@@ -55,6 +55,7 @@ async fn seed(pool: &sqlx::PgPool) {
             .await
             .expect("種入籌碼與日線");
     }
+    crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
 }
 
 /// 回應中各檔的 `(代號, 名次)`。

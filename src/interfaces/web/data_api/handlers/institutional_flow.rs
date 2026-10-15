@@ -2,7 +2,7 @@
 //!
 //! 資料來自 `chip_daily`（每晚 21:50 入庫的全市場三大法人買賣超股數）。期間累計淨股數，
 //! 估計金額＝每日淨股數 × 當日收盤價加總，依金額排名；另附占期間成交量比例與截至資料日的
-//! 連續買賣超天數（最多回看 [`STREAK_WINDOW`] 個有籌碼資料的交易日）。
+//! 連續買賣超天數（入庫時預先算好，不限回看長度）。
 
 use axum::{
     Json,
@@ -24,11 +24,11 @@ use crate::interfaces::web::data_api::dto::{
 };
 
 pub(super) use crate::domain::chip::flow::{
-    FlowPeriod, INVESTORS, STREAK_WINDOW, StockFlow as FlowRow, StockStreak as StreakRow,
+    FlowPeriod, INVESTORS, MAX_FLOW_DAYS, StockFlow as FlowRow, StockStreak as StreakRow,
     flow_period,
 };
 
-/// `until`（含）之前最近 [`STREAK_WINDOW`] 個有籌碼資料的交易日，由新到舊；查詢失敗時回已組好的
+/// `until`（含）之前最近 [`MAX_FLOW_DAYS`] 個有籌碼資料的交易日，由新到舊；查詢失敗時回已組好的
 /// 安全 500 回應。
 pub(super) async fn chip_dates(until: NaiveDate) -> Result<Vec<NaiveDate>, Box<Response>> {
     PgChipRepository::new()
@@ -77,7 +77,7 @@ pub(crate) async fn institutional_flow(Query(params): Query<InstitutionalFlowPar
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let days = params.days.unwrap_or(1);
-    if !(1..=STREAK_WINDOW).contains(&usize::from(days)) {
+    if !(1..=MAX_FLOW_DAYS).contains(&usize::from(days)) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "days 必須介於 1 至 60");
     }
     let investor = params.investor.as_deref().unwrap_or("foreign");

@@ -1,7 +1,8 @@
 //! `/market/institutional-streak/performance` handler：法人連續買賣超之後的報酬統計。
 //!
 //! 事件＝某檔股票的法人（`chip_daily`）連續買超（或賣超）剛好滿 N 天的那一天；之後延續的天數
-//! 不重複計算。連續天數只看有籌碼資料的日子（與 `/market/institutional-flow` 相同，淨額為 0 會中斷）。
+//! 不重複計算。連續天數只看有籌碼資料的日子（與 `/market/institutional-flow` 相同，淨額為 0 或
+//! 沒有資料會中斷），讀入庫時預先算好的欄位。
 //! 事件之後的報酬、大盤基準與統計方式沿用 [`super::signal_history`] 的訊號績效。
 
 use axum::{
@@ -33,43 +34,26 @@ SELECT MAX("date") FROM chip_daily WHERE $1::date IS NULL OR "date" <= $1
 /// 期間內連續買賣超滿 N 天的事件與其後的報酬統計。
 ///
 /// `$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 法人別、`$5` 方向（1 買超、-1 賣超）、
-/// `$6` 連續天數 N、`$7` 產業名稱。往前多讀 60 個日曆天，讓期間開頭的事件也能數到 20 天。
-/// 連續段以「依日期的列號 − 依方向分組的列號」切出（gaps and islands），段內第 N 天即為事件。
+/// `$6` 連續天數 N、`$7` 產業名稱。連續天數讀 `chip_daily` 預先算好的欄位（正數買超、負數賣超），
+/// 等於 `$5 × $6` 的那一天即為事件；同一段連續只會剛好等於一次。
 macro_rules! streak_event_cte {
     () => {
         r#"
-WITH net AS (
-    SELECT c.stock_symbol, c."date",
-           CASE $4
-               WHEN 'foreign' THEN c.foreign_net
-               WHEN 'trust' THEN c.trust_net
-               WHEN 'dealer' THEN c.dealer_net
-               ELSE c.foreign_net + c.trust_net + c.dealer_net
-           END AS net
+WITH sig AS (
+    SELECT c."date" AS date, c.stock_symbol, 'institutional_streak'::text AS indicator, ''::text AS kind
     FROM chip_daily c
     JOIN stocks s ON s.stock_symbol = c.stock_symbol
     LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
-    WHERE c."date" BETWEEN $1::date - 60 AND $2
+    WHERE c."date" BETWEEN $1 AND $2
+      AND CASE $4
+              WHEN 'foreign' THEN c.foreign_streak
+              WHEN 'trust' THEN c.trust_streak
+              WHEN 'dealer' THEN c.dealer_streak
+              ELSE c.total_streak
+          END = $5::int * $6::int
       AND s.stock_exchange_market_id IN (2, 4)
       AND ($3 = 0 OR s.stock_exchange_market_id = $3)
       AND ($7::text IS NULL OR si.name = $7)
-),
-runs AS (
-    SELECT stock_symbol, "date", SIGN(net)::int AS sgn,
-           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
-               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(net) ORDER BY "date") AS grp
-    FROM net
-    WHERE net IS NOT NULL
-),
-counted AS (
-    SELECT stock_symbol, "date", sgn,
-           ROW_NUMBER() OVER (PARTITION BY stock_symbol, sgn, grp ORDER BY "date") AS len
-    FROM runs
-),
-sig AS (
-    SELECT "date" AS date, stock_symbol, 'institutional_streak'::text AS indicator, ''::text AS kind
-    FROM counted
-    WHERE sgn = $5 AND len = $6 AND "date" BETWEEN $1 AND $2
 ),
 "#
     };

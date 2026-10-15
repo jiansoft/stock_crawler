@@ -77,6 +77,7 @@ async fn seed(pool: &sqlx::PgPool) {
         .await
         .expect("種入籌碼");
     }
+    crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
     for (d, symbol, r5, r20) in RETURNS {
         sqlx::query(
             "INSERT INTO daily_forward_return (date, stock_symbol, return_5d, return_20d)

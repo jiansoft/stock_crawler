@@ -176,20 +176,11 @@ impl ChipFlowQuery for FakeChip {
         Ok(self.dates.clone())
     }
 
-    async fn fetch_flows(
-        &self,
-        _period: FlowPeriod,
-        _window_start: NaiveDate,
-        investor: &str,
-    ) -> Result<Vec<StockFlow>> {
+    async fn fetch_flows(&self, _period: FlowPeriod, investor: &str) -> Result<Vec<StockFlow>> {
         Ok(self.flows.get(investor).cloned().unwrap_or_default())
     }
 
-    async fn fetch_streaks(
-        &self,
-        _data_date: NaiveDate,
-        _window_start: NaiveDate,
-    ) -> Result<Vec<flow::StockStreak>> {
+    async fn fetch_streaks(&self, _data_date: NaiveDate) -> Result<Vec<flow::StockStreak>> {
         Ok(Vec::new())
     }
 }

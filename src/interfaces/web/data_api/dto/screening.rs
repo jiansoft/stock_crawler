@@ -125,7 +125,7 @@ pub(crate) struct ScreenedStock {
     /// 上市未滿 240 個交易日、暫停交易或尚無報酬資料時為 `null`。
     pub(crate) rs_score: Option<u8>,
     /// 截至 `chip_as_of` 的外資連續買賣超天數：正數為連續買超、負數為連續賣超、0 為當天沒有買賣；
-    /// 最多回看 60 個交易日。當天沒有籌碼資料時為 `null`。
+    /// 從 2019 年籌碼資料起算，不限回看長度。當天沒有籌碼資料時為 `null`。
     pub(crate) foreign_streak: Option<i16>,
     /// 截至 `chip_as_of` 的投信連續買賣超天數，規則同 `foreign_streak`。
     pub(crate) trust_streak: Option<i16>,

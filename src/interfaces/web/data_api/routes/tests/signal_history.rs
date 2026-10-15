@@ -122,6 +122,7 @@ async fn seed(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("種入籌碼");
+    crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
 }
 
 /// 找出某來源與種類的績效項目。

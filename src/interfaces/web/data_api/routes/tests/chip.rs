@@ -56,6 +56,7 @@ async fn chip_endpoint_db_semantics() {
             .await
             .expect("種入籌碼測試資料");
     }
+    crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
 
     let key = std::env::var("DATA_API_KEY").unwrap_or_else(|_| {
         let generated = "chip-integration-test-key".to_owned();

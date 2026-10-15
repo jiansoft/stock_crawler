@@ -11,7 +11,7 @@ use axum::{
 };
 use chrono::Local;
 
-use super::institutional_flow::{FlowPeriod, STREAK_WINDOW, chip_dates, flow_period};
+use super::institutional_flow::{FlowPeriod, MAX_FLOW_DAYS, chip_dates, flow_period};
 use super::relative_strength::market_label;
 use super::{
     database_error, error_response, industry_error, market_id_for_stocks, parse_optional_date,
@@ -95,7 +95,7 @@ pub(crate) async fn margin_ranking(Query(params): Query<MarginRankingParams>) ->
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let days = params.days.unwrap_or(1);
-    if !(1..=STREAK_WINDOW).contains(&usize::from(days)) {
+    if !(1..=MAX_FLOW_DAYS).contains(&usize::from(days)) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "days 必須介於 1 至 60");
     }
     let rank_by = params.rank_by.as_deref().unwrap_or("margin_increase");
@@ -125,7 +125,7 @@ pub(crate) async fn margin_ranking(Query(params): Query<MarginRankingParams>) ->
         Ok(dates) => dates,
         Err(response) => return *response,
     };
-    let Some((period, _)) = flow_period(&dates, usize::from(days)) else {
+    let Some(period) = flow_period(&dates, usize::from(days)) else {
         return error_response(StatusCode::NOT_FOUND, "查無籌碼資料");
     };
     let rows: Vec<MarginRow> = match sqlx::query_as(MARGIN_SQL)

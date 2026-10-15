@@ -513,6 +513,7 @@ async fn screen_at_filters_chip_streaks() {
             .await
             .expect("種入選股籌碼資料");
     }
+    crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
 
     let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
     let run = |foreign: Option<u8>, trust: Option<u8>| async move {

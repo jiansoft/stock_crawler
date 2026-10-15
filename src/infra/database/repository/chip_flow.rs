@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::{
-    domain::chip::flow::{ChipFlowQuery, FlowPeriod, STREAK_WINDOW, StockFlow, StockStreak},
+    domain::chip::flow::{ChipFlowQuery, FlowPeriod, MAX_FLOW_DAYS, StockFlow, StockStreak},
     infra::database::{self, repository::chip::PgChipRepository},
 };
 
-/// `$1`（含）之前最近 [`STREAK_WINDOW`] 個有籌碼資料的交易日，由新到舊。
+/// `$1`（含）之前最近 [`MAX_FLOW_DAYS`] 個有籌碼資料的交易日，由新到舊（累計期間最多這麼長）。
 ///
 /// 只回看 200 個日曆天，足以涵蓋 60 個交易日（含春節等長假）。
 const DATES_SQL: &str = r#"
@@ -20,41 +20,23 @@ ORDER BY 1 DESC
 LIMIT $2
 "#;
 
-/// 上市櫃股票在 `$2`～`$1` 期間的法人（`$4`）淨買賣，與截至 `$1` 的連續天數（回看到 `$3`）。
+/// 上市櫃股票在 `$2`～`$1` 期間的法人（`$3`）淨買賣，與資料日 `$1` 的連續天數。
 ///
-/// - `total` 為三者相加，任一為 NULL（來源沒有這檔）即為 NULL。
-/// - 連續天數：資料日的買賣方向往回數，遇到方向不同或沒有買賣的一天即停；資料日沒有買賣為 0。
+/// - `total` 為三者相加，任一為 NULL（來源沒有這檔）即為 NULL，不列入期間累計。
+/// - 連續天數讀 `chip_daily` 預先算好的欄位（見 `PgChipRepository::refresh_streaks`）；
+///   資料日沒有買賣或尚未計算為 0。
 /// - 金額以當日收盤價估算；沒有成交的日子不計金額、成交量與成交金額。
 const FLOW_SQL: &str = r#"
 WITH net AS (
     SELECT stock_symbol, "date",
-           CASE $4
+           CASE $3
                WHEN 'foreign' THEN foreign_net
                WHEN 'trust' THEN trust_net
                WHEN 'dealer' THEN dealer_net
                ELSE foreign_net + trust_net + dealer_net
            END AS net
     FROM chip_daily
-    WHERE "date" BETWEEN $3 AND $1
-),
-latest AS (
-    SELECT stock_symbol, SIGN(net)::int AS sign
-    FROM net
-    WHERE "date" = $1 AND net <> 0
-),
-breaks AS (
-    SELECT l.stock_symbol, l.sign,
-           MAX(n."date") FILTER (WHERE n.net IS NULL OR SIGN(n.net)::int <> l.sign) AS break_date
-    FROM latest l
-    JOIN net n ON n.stock_symbol = l.stock_symbol
-    GROUP BY l.stock_symbol, l.sign
-),
-streaks AS (
-    SELECT b.stock_symbol, (b.sign * COUNT(*))::int AS streak
-    FROM breaks b
-    JOIN net n ON n.stock_symbol = b.stock_symbol
-              AND n."date" > COALESCE(b.break_date, '-infinity'::date)
-    GROUP BY b.stock_symbol, b.sign
+    WHERE "date" BETWEEN $2 AND $1
 ),
 period AS (
     SELECT n.stock_symbol,
@@ -67,7 +49,7 @@ period AS (
     FROM net n
     LEFT JOIN "DailyQuotes" q
            ON q.stock_symbol = n.stock_symbol AND q."Date" = n."date" AND q."ClosingPrice" > 0
-    WHERE n."date" >= $2 AND n.net IS NOT NULL
+    WHERE n.net IS NOT NULL
     GROUP BY n.stock_symbol
 )
 SELECT p.stock_symbol,
@@ -80,53 +62,29 @@ SELECT p.stock_symbol,
        p.trade_value,
        p.buy_days,
        p.sell_days,
-       COALESCE(st.streak, 0) AS streak,
+       COALESCE(CASE $3
+                    WHEN 'foreign' THEN cd.foreign_streak
+                    WHEN 'trust' THEN cd.trust_streak
+                    WHEN 'dealer' THEN cd.dealer_streak
+                    ELSE cd.total_streak
+                END, 0)::int AS streak,
        dq."ClosingPrice"::float8 AS closing_price
 FROM period p
 JOIN stocks s ON s.stock_symbol = p.stock_symbol
 LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
-LEFT JOIN streaks st ON st.stock_symbol = p.stock_symbol
+LEFT JOIN chip_daily cd ON cd."date" = $1 AND cd.stock_symbol = p.stock_symbol
 LEFT JOIN "DailyQuotes" dq
        ON dq.stock_symbol = p.stock_symbol AND dq."Date" = $1 AND dq."ClosingPrice" > 0
 WHERE s.stock_exchange_market_id IN (2, 4)
 "#;
 
-/// 各股票截至 `$1` 的外資、投信連續買賣超天數（回看到 `$2`）。
-///
-/// 與 [`FLOW_SQL`] 同一算法，只算外資與投信的連續天數；資料日沒有買賣為 0。
+/// 各股票在資料日 `$1` 的外資、投信連續買賣超天數（預先算好的欄位）；尚未計算為 0。
 const STREAKS_SQL: &str = r#"
-WITH net AS (
-    SELECT stock_symbol, "date", foreign_net, trust_net
-    FROM chip_daily
-    WHERE "date" BETWEEN $2 AND $1
-),
-latest AS (
-    SELECT stock_symbol,
-           COALESCE(SIGN(foreign_net)::int, 0) AS foreign_sign,
-           COALESCE(SIGN(trust_net)::int, 0) AS trust_sign
-    FROM net
-    WHERE "date" = $1
-),
-breaks AS (
-    SELECT l.stock_symbol, l.foreign_sign, l.trust_sign,
-           COALESCE(MAX(n."date") FILTER (
-               WHERE n.foreign_net IS NULL OR SIGN(n.foreign_net)::int <> l.foreign_sign
-           ), '-infinity'::date) AS foreign_break,
-           COALESCE(MAX(n."date") FILTER (
-               WHERE n.trust_net IS NULL OR SIGN(n.trust_net)::int <> l.trust_sign
-           ), '-infinity'::date) AS trust_break
-    FROM latest l
-    JOIN net n ON n.stock_symbol = l.stock_symbol
-    GROUP BY l.stock_symbol, l.foreign_sign, l.trust_sign
-)
-SELECT b.stock_symbol,
-       (b.foreign_sign * COUNT(*) FILTER (WHERE n."date" > b.foreign_break))::smallint
-           AS foreign_streak,
-       (b.trust_sign * COUNT(*) FILTER (WHERE n."date" > b.trust_break))::smallint
-           AS trust_streak
-FROM breaks b
-JOIN net n ON n.stock_symbol = b.stock_symbol
-GROUP BY b.stock_symbol, b.foreign_sign, b.trust_sign
+SELECT stock_symbol,
+       COALESCE(foreign_streak, 0)::smallint AS foreign_streak,
+       COALESCE(trust_streak, 0)::smallint AS trust_streak
+FROM chip_daily
+WHERE "date" = $1
 "#;
 
 /// [`FLOW_SQL`] 的一列。
@@ -151,21 +109,15 @@ impl ChipFlowQuery for PgChipRepository {
     async fn fetch_chip_dates(&self, until: NaiveDate) -> Result<Vec<NaiveDate>> {
         Ok(sqlx::query_scalar(DATES_SQL)
             .bind(until)
-            .bind(STREAK_WINDOW as i64)
+            .bind(MAX_FLOW_DAYS as i64)
             .fetch_all(database::get_connection())
             .await?)
     }
 
-    async fn fetch_flows(
-        &self,
-        period: FlowPeriod,
-        window_start: NaiveDate,
-        investor: &str,
-    ) -> Result<Vec<StockFlow>> {
+    async fn fetch_flows(&self, period: FlowPeriod, investor: &str) -> Result<Vec<StockFlow>> {
         let rows: Vec<FlowRow> = sqlx::query_as(FLOW_SQL)
             .bind(period.data_date)
             .bind(period.from)
-            .bind(window_start)
             .bind(investor)
             .fetch_all(database::get_connection())
             .await?;
@@ -188,14 +140,9 @@ impl ChipFlowQuery for PgChipRepository {
             .collect())
     }
 
-    async fn fetch_streaks(
-        &self,
-        data_date: NaiveDate,
-        window_start: NaiveDate,
-    ) -> Result<Vec<StockStreak>> {
+    async fn fetch_streaks(&self, data_date: NaiveDate) -> Result<Vec<StockStreak>> {
         let rows: Vec<(String, i16, i16)> = sqlx::query_as(STREAKS_SQL)
             .bind(data_date)
-            .bind(window_start)
             .fetch_all(database::get_connection())
             .await?;
         Ok(rows

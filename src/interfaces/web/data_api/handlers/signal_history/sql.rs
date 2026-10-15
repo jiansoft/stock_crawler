@@ -124,9 +124,8 @@ pub(super) const PERFORMANCE_BY_YEAR_SQL: &str =
     concat!(signal_cte!(), performance_aggregate_sql!(by_year));
 
 /// [`signal_cte`] 再加籌碼條件：訊號當天外資（`$9`）／投信（`$10`）已連續買超至少 N 天，
-/// `NULL` 為不篩選。連續天數與 `/market/institutional-flow` 同一算法：只看有籌碼資料的日子，
-/// 以「依日期的列號 − 依方向分組的列號」切出連續段（淨額 0 或缺值會中斷）；往前多讀 60 個日曆天，
-/// 讓期間開頭的訊號也能數到 20 天。只在有設籌碼條件時使用，避免一般查詢多算整段籌碼。
+/// `NULL` 為不篩選。連續天數與 `/market/institutional-flow` 相同，讀 `chip_daily` 預先算好的欄位。
+/// 只在有設籌碼條件時使用。
 macro_rules! chip_signal_cte {
     () => {
         concat!(
@@ -150,27 +149,18 @@ sig AS (
     };
 }
 
-/// 每檔股票每天外資（`foreign_buy`）、投信（`trust_buy`）已連續買超的天數（`chip`），讀取
-/// `$1 - 60`～`$2` 的籌碼；不含開頭的 `WITH` 與結尾的逗號，給需要籌碼條件的 SQL 共用。
+/// 每檔股票每天外資（`foreign_buy`）、投信（`trust_buy`）已連續買超的天數（`chip`；賣超或沒有
+/// 買賣為 0），讀 `$1`～`$2` 預先算好的連續天數；不含開頭的 `WITH` 與結尾的逗號，給需要籌碼條件的
+/// SQL 共用。
 macro_rules! chip_streak_ctes {
     () => {
         r#"
-chip_runs AS (
-    SELECT stock_symbol, "date",
-           SIGN(COALESCE(foreign_net, 0)) AS fs,
-           SIGN(COALESCE(trust_net, 0)) AS ts,
-           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
-               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(foreign_net, 0)) ORDER BY "date") AS fg,
-           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
-               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(trust_net, 0)) ORDER BY "date") AS tg
-    FROM chip_daily
-    WHERE "date" BETWEEN $1::date - 60 AND $2
-),
 chip AS (
     SELECT stock_symbol, "date",
-           CASE WHEN fs > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, fs, fg ORDER BY "date") ELSE 0 END AS foreign_buy,
-           CASE WHEN ts > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, ts, tg ORDER BY "date") ELSE 0 END AS trust_buy
-    FROM chip_runs
+           GREATEST(COALESCE(foreign_streak, 0), 0) AS foreign_buy,
+           GREATEST(COALESCE(trust_streak, 0), 0) AS trust_buy
+    FROM chip_daily
+    WHERE "date" BETWEEN $1 AND $2
 )"#
     };
 }

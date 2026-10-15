@@ -200,7 +200,7 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(
         BACKTEST_WITH_CHIP_SQL
             .trim_start()
-            .starts_with("WITH\nchip_runs AS (")
+            .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $11"));
