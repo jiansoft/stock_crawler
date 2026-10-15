@@ -1,4 +1,5 @@
 use crate::domain::market_index::entity::MarketIndex;
+use crate::domain::market_index::regime::IndexCloseQuery;
 use crate::domain::market_index::repository::MarketIndexRepository;
 use crate::infra::database;
 use anyhow::{Context, Result};
@@ -133,6 +134,32 @@ impl MarketIndexRepository for PgMarketIndexRepository {
     }
 }
 
+#[async_trait]
+impl IndexCloseQuery for PgMarketIndexRepository {
+    /// 分類 `category` 在 `until`（含）之前最近 `limit` 個交易日的收盤，由新到舊。
+    async fn fetch_index_closes(
+        &self,
+        category: &str,
+        until: Option<NaiveDate>,
+        limit: usize,
+    ) -> Result<Vec<(NaiveDate, f64)>> {
+        let sql = r#"
+            SELECT "date", "index"::float8
+            FROM "index"
+            WHERE category = $1 AND ($2::date IS NULL OR "date" <= $2)
+            ORDER BY "date" DESC
+            LIMIT $3
+        "#;
+        sqlx::query_as(sql)
+            .bind(category)
+            .bind(until)
+            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch index closes from PG")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +215,23 @@ mod tests {
         assert_eq!(found_index.trade_value, dec!(5000000000));
         assert_eq!(found_index.transaction, dec!(200000));
         assert_eq!(found_index.trading_volume, dec!(300000000));
+
+        // 收盤查詢：含當天、由新到舊；指定日期之前沒有資料回空。
+        let closes = repo
+            .fetch_index_closes(test_category, Some(test_date), 5)
+            .await
+            .unwrap();
+        assert_eq!(closes, vec![(test_date, 16000.5)]);
+        let before = repo
+            .fetch_index_closes(test_category, test_date.pred_opt(), 5)
+            .await
+            .unwrap();
+        assert!(before.is_empty());
+        let latest_closes = repo
+            .fetch_index_closes(test_category, None, 1)
+            .await
+            .unwrap();
+        assert_eq!(latest_closes, vec![(test_date, 16000.5)]);
 
         // 4. 清理
         sqlx::query("DELETE FROM \"index\" WHERE category = $1 AND date = $2")

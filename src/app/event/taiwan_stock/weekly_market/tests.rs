@@ -76,6 +76,55 @@ fn flow(symbol: &str, industry: &str, amount: f64) -> StockFlow {
     }
 }
 
+/// 回傳固定加權指數收盤的假倉儲；`fail` 時查詢失敗。
+struct FakeIndex {
+    points: Vec<(NaiveDate, f64)>,
+    fail: bool,
+}
+
+#[async_trait]
+impl IndexCloseQuery for FakeIndex {
+    async fn fetch_index_closes(
+        &self,
+        category: &str,
+        until: Option<NaiveDate>,
+        limit: usize,
+    ) -> Result<Vec<(NaiveDate, f64)>> {
+        assert_eq!((category, until), (regime::TAIEX, Some(day(17))));
+        if self.fail {
+            return Err(anyhow!("index down"));
+        }
+        Ok(self.points.iter().copied().take(limit).collect())
+    }
+}
+
+/// 加權指數由新到舊：最新一天 2026-10-16 收盤 300，往前每天少 1，共 300 天（一路上漲，
+/// 多頭排列、沒有穿越）。
+fn index_points() -> Vec<(NaiveDate, f64)> {
+    (0..300u32)
+        .map(|offset| {
+            (
+                day(16) - chrono::Days::new(u64::from(offset)),
+                300.0 - f64::from(offset),
+            )
+        })
+        .collect()
+}
+
+fn index() -> FakeIndex {
+    FakeIndex {
+        points: index_points(),
+        fail: false,
+    }
+}
+
+fn failing_index() -> FakeIndex {
+    FakeIndex {
+        points: Vec::new(),
+        fail: true,
+    }
+}
+
 /// 依查詢日回傳全體分數、交易日與持股分數的假倉儲。
 #[derive(Default)]
 struct FakeQuote {
@@ -283,7 +332,7 @@ async fn industry_section_ranks_medians_with_weekly_change() {
 /// 完整訊息：三段內容、億元換算、持股上升下降、沒有變化或只有一筆的持股不列。
 #[tokio::test]
 async fn run_builds_full_message() {
-    let message = run(&quote(), &chip(), day(17), &holdings())
+    let message = run(&quote(), &chip(), &index(), day(17), &holdings())
         .await
         .expect("有內容");
     // name 由 holdings::stock_name 提供；這裡只驗證與名稱無關的段落。
@@ -299,6 +348,11 @@ async fn run_builds_full_message() {
         "• 流入：半導體業 +20.0 億、金融保險業 +12.0 億",
         "• 流出：航運業 -5.0 億",
         "持股相對強度（與 5 個交易日前相比）",
+        "大盤趨勢（加權指數 2026-10-16）",
+        "• 收盤 300.00，近 5 日 +1.69%；多頭排列",
+        "• 60 日均線 270.50，收盤在上方 10.91%（均線上揚），連續 241 個交易日在上方",
+        "• 240 日均線 180.50，收盤在上方 66.20%（均線上揚）",
+        "• 近 5 日沒有穿越 20／60／240 日均線",
     ] {
         assert!(message.contains(&esc(line)), "缺少 {line}：{message}");
     }
@@ -331,7 +385,7 @@ fn crossing_lines_rank_by_latest_score() {
         to: day(16),
         crossings,
     };
-    let message = build_message(None, Some(&section), &[], &[], name).expect("有穿越");
+    let message = build_message(None, None, Some(&section), &[], &[], name).expect("有穿越");
     assert!(
         message.starts_with(&esc("每週市場摘要︰2026-10-16\n")),
         "{message}"
@@ -346,7 +400,7 @@ fn crossing_lines_rank_by_latest_score() {
         crossings: Vec::new(),
         ..section
     };
-    assert!(build_message(None, Some(&empty), &[], &[], name).is_none());
+    assert!(build_message(None, None, Some(&empty), &[], &[], name).is_none());
 }
 
 /// 持股 RS 變化：依變化排序，上升與下降各列最多 3 檔，沒有變化的不列。
@@ -373,7 +427,7 @@ fn build_message_lists_holding_moves() {
             },
         ]
     );
-    let message = build_message(None, None, &[], &moves, name).expect("有持股變化");
+    let message = build_message(None, None, None, &[], &moves, name).expect("有持股變化");
     assert!(message.starts_with(&esc("每週市場摘要\n")), "{message}");
     assert!(
         message.contains(&esc("• 上升：2317 鴻海 50 → 59（+9）")),
@@ -384,7 +438,7 @@ fn build_message_lists_holding_moves() {
         "{message}"
     );
     assert!(!message.contains("1101"), "沒有變化的不列");
-    assert!(build_message(None, None, &[], &[], name).is_none());
+    assert!(build_message(None, None, None, &[], &[], name).is_none());
 }
 
 /// 各段查詢失敗只略過該段；全部失敗或沒有資料時不發送。
@@ -394,7 +448,7 @@ async fn run_degrades_per_section() {
         fail: true,
         ..chip()
     };
-    let message = run(&quote(), &failing_chip, day(17), &holdings())
+    let message = run(&quote(), &failing_chip, &index(), day(17), &holdings())
         .await
         .expect("產業與持股仍有內容");
     assert!(!message.contains("外資"), "{message}");
@@ -404,9 +458,15 @@ async fn run_degrades_per_section() {
         fail: true,
         ..quote()
     };
-    let message = run(&failing_quote, &chip(), day(17), &holdings())
-        .await
-        .expect("法人仍有內容");
+    let message = run(
+        &failing_quote,
+        &chip(),
+        &failing_index(),
+        day(17),
+        &holdings(),
+    )
+    .await
+    .expect("法人仍有內容");
     assert!(
         message.contains(&esc("每週市場摘要︰2026-10-16")),
         "{message}"
@@ -414,10 +474,84 @@ async fn run_degrades_per_section() {
     assert!(!message.contains("相對強度"), "{message}");
 
     assert!(
-        run(&failing_quote, &failing_chip, day(17), &holdings())
+        run(
+            &failing_quote,
+            &failing_chip,
+            &failing_index(),
+            day(17),
+            &holdings()
+        )
+        .await
+        .is_none()
+    );
+}
+
+/// 大盤趨勢：跌破均線、資料不足、穿越由舊到新；沒有加權指數或查詢失敗時不列這段。
+#[tokio::test]
+async fn regime_section_lists_crosses() {
+    // 由新到舊：最新一天跌到 100（跌破 20／60 日均線），前一天 400（站上 20／60 日均線），
+    // 再之前往前每天高 1（一路下跌、都在均線下方）；只有 102 天，240 日均線資料不足。
+    let mut closes = vec![100.0, 400.0];
+    closes.extend((2..102u32).map(|offset| 200.0 + f64::from(offset)));
+    let points: Vec<(NaiveDate, f64)> = closes
+        .iter()
+        .enumerate()
+        .map(|(offset, close)| (day(16) - chrono::Days::new(offset as u64), *close))
+        .collect();
+    let fake = FakeIndex {
+        points,
+        fail: false,
+    };
+    let section = regime_section(&fake, day(17))
+        .await
+        .expect("查詢成功")
+        .expect("有加權指數");
+    assert_eq!(
+        section
+            .crosses
+            .iter()
+            .map(|cross| (cross.date, cross.days, cross.above))
+            .collect::<Vec<_>>(),
+        [
+            (day(15), 20, true),
+            (day(15), 60, true),
+            (day(16), 20, false),
+            (day(16), 60, false)
+        ]
+    );
+    let lines = regime_lines(&section);
+    assert_eq!(lines[2], "• 收盤 100.00，近 5 日 -51.22%；均線糾結");
+    assert_eq!(
+        lines[3],
+        "• 60 日均線 231.15，收盤在下方 56.74%（均線下彎），連續 1 個交易日在下方"
+    );
+    assert_eq!(lines[4], "• 240 日均線資料不足");
+    assert_eq!(
+        lines[5],
+        "• 近 5 日：10-15 站上 20 日均線、10-15 站上 60 日均線、10-16 跌破 20 日均線、10-16 跌破 60 日均線"
+    );
+
+    let message = build_message(Some(&section), None, None, &[], &[], name).expect("有大盤");
+    assert!(
+        message.starts_with(&format!(
+            "{}\n\n{}",
+            esc("每週市場摘要︰2026-10-16"),
+            esc("大盤趨勢")
+        )),
+        "{message}"
+    );
+
+    let empty = FakeIndex {
+        points: Vec::new(),
+        fail: false,
+    };
+    assert!(
+        regime_section(&empty, day(17))
             .await
+            .expect("查詢成功")
             .is_none()
     );
+    assert!(regime_section(&failing_index(), day(17)).await.is_err());
 }
 
 /// 數字格式：分數變化與億元都帶正負號、一位小數。

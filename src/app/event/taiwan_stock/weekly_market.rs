@@ -2,6 +2,8 @@
 //!
 //! 每週六整理最近 [`WEEK_DAYS`] 個交易日的市場輪動，發一則 Telegram：
 //!
+//! - 大盤趨勢：加權指數收盤、近 [`WEEK_DAYS`] 日漲跌、均線排列、相對 60／240 日均線的位置與方向
+//!   （見 [`crate::domain::market_index::regime`]），以及這週穿越 20／60／240 日均線的日子。
 //! - 產業相對強度：成分股 RS 中位數（見 [`crate::domain::quote::relative_strength`]）最強、最弱，
 //!   以及與 [`WEEK_DAYS`] 個交易日前相比轉強、轉弱最多的產業；成分股少於 [`MIN_INDUSTRY_STOCKS`]
 //!   檔的產業不列。
@@ -24,6 +26,7 @@ use crate::{
     core::{alert, util::text},
     domain::{
         chip::flow::{self, ChipFlowQuery, FlowPeriod, StockFlow},
+        market_index::regime::{self, IndexCloseQuery, MarketRegime, MovingAverageCross},
         quote::{
             forward_return::ForwardReturnRepository,
             relative_strength::{
@@ -33,7 +36,9 @@ use crate::{
             },
         },
     },
-    infra::database::repository::{chip::PgChipRepository, quote::PgQuoteRepository},
+    infra::database::repository::{
+        chip::PgChipRepository, market_index::PgMarketIndexRepository, quote::PgQuoteRepository,
+    },
 };
 
 /// 一週的交易日數。
@@ -47,6 +52,19 @@ const TOP: usize = 3;
 
 /// 要統計的法人別與名稱。
 const FLOW_INVESTORS: [(&str, &str); 2] = [("foreign", "外資"), ("trust", "投信")];
+
+/// 大盤趨勢一段要列出位置的均線天數。
+const REGIME_MA_DAYS: [u16; 2] = [60, 240];
+
+/// 大盤趨勢一段要列出穿越的均線天數。
+const REGIME_CROSS_DAYS: [u16; 3] = [20, 60, 240];
+
+/// 大盤趨勢一段：資料日的趨勢狀態與最近 [`WEEK_DAYS`] 個交易日穿越均線的日子（由舊到新）。
+#[derive(Debug, Clone, PartialEq)]
+struct RegimeSection {
+    state: MarketRegime,
+    crosses: Vec<MovingAverageCross>,
+}
 
 /// 產業 RS 中位數與一週變化。
 #[derive(Debug, Clone, PartialEq)]
@@ -107,6 +125,7 @@ pub async fn execute() -> Result<()> {
     let message = run(
         &PgQuoteRepository::new(),
         &PgChipRepository::new(),
+        &PgMarketIndexRepository::new(),
         date,
         &symbols,
     )
@@ -126,9 +145,14 @@ async fn run(
          + ForwardReturnRepository
      ),
     chip: &impl ChipFlowQuery,
+    index: &impl IndexCloseQuery,
     date: NaiveDate,
     symbols: &BTreeSet<String>,
 ) -> Option<String> {
+    let market = regime_section(index, date).await.unwrap_or_else(|why| {
+        tracing::warn!("每週市場摘要：讀取加權指數失敗: {why:#}");
+        None
+    });
     let industries = industry_section(quote, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取產業相對強度失敗: {why:#}");
         None
@@ -166,12 +190,92 @@ async fn run(
         moves.len()
     );
     build_message(
+        market.as_ref(),
         industries.as_ref(),
         crossings.as_ref(),
         &flows,
         &moves,
         holdings::stock_name,
     )
+}
+
+/// `date`（含）之前的加權指數趨勢狀態與最近 [`WEEK_DAYS`] 個交易日穿越
+/// [`REGIME_CROSS_DAYS`] 均線的日子；沒有加權指數回 `None`。
+async fn regime_section(
+    index: &impl IndexCloseQuery,
+    date: NaiveDate,
+) -> Result<Option<RegimeSection>> {
+    let points = regime::load_taiex(index, Some(date)).await?;
+    let Some(state) = regime::regime(&points) else {
+        return Ok(None);
+    };
+    let mut crosses: Vec<MovingAverageCross> = REGIME_CROSS_DAYS
+        .iter()
+        .flat_map(|&days| regime::crosses(&points, days, WEEK_DAYS))
+        .collect();
+    crosses.sort_by_key(|cross| (cross.date, cross.days));
+    Ok(Some(RegimeSection { state, crosses }))
+}
+
+/// 大盤趨勢一段的各行。
+fn regime_lines(section: &RegimeSection) -> Vec<String> {
+    let state = &section.state;
+    let mut lines = vec![
+        String::new(),
+        format!("大盤趨勢（加權指數 {}）", state.date),
+        format!(
+            "• 收盤 {:.2}，近 {WEEK_DAYS} 日 {}；{}",
+            state.close,
+            state
+                .return_5d
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:+.2}%")),
+            state.alignment.label()
+        ),
+    ];
+    for days in REGIME_MA_DAYS {
+        let Some(status) = state.moving_average(days) else {
+            continue;
+        };
+        let (Some(value), Some(distance)) = (status.value, status.distance_percent) else {
+            lines.push(format!("• {days} 日均線資料不足"));
+            continue;
+        };
+        let side = if distance >= 0.0 { "上方" } else { "下方" };
+        let trend = if status.rising == Some(true) {
+            "上揚"
+        } else {
+            "下彎"
+        };
+        let mut line = format!(
+            "• {days} 日均線 {value:.2}，收盤在{side} {:.2}%（均線{trend}）",
+            distance.abs()
+        );
+        if days == 60
+            && let Some(count) = state.days_on_side_of_ma60
+        {
+            let _ = write!(&mut line, "，連續 {count} 個交易日在{side}");
+        }
+        lines.push(line);
+    }
+    let crosses: Vec<String> = section
+        .crosses
+        .iter()
+        .map(|cross| {
+            format!(
+                "{} {} {} 日均線",
+                cross.date.format("%m-%d"),
+                if cross.above { "站上" } else { "跌破" },
+                cross.days
+            )
+        })
+        .collect();
+    let days = REGIME_CROSS_DAYS.map(|days| days.to_string()).join("／");
+    lines.push(if crosses.is_empty() {
+        format!("• 近 {WEEK_DAYS} 日沒有穿越 {days} 日均線")
+    } else {
+        format!("• 近 {WEEK_DAYS} 日：{}", crosses.join("、"))
+    });
+    lines
 }
 
 /// 最近 [`WEEK_DAYS`] 個交易日的相對強度穿越；沒有交易日回 `None`。
@@ -321,8 +425,9 @@ fn hundred_million(amount: f64) -> String {
     format!("{:+.1} 億", amount / 1e8)
 }
 
-/// 組出訊息；三段都沒有內容時回 `None`。
+/// 組出訊息；各段都沒有內容時回 `None`。
 fn build_message(
+    market: Option<&RegimeSection>,
     industries: Option<&IndustrySection>,
     crossings: Option<&CrossingSection>,
     flows: &[FlowSection],
@@ -331,6 +436,11 @@ fn build_message(
 ) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut data_date = None;
+
+    if let Some(section) = market {
+        data_date = Some(section.state.date);
+        lines.extend(regime_lines(section));
+    }
 
     if let Some(section) = industries.filter(|section| !section.industries.is_empty()) {
         data_date = Some(section.data_date);
