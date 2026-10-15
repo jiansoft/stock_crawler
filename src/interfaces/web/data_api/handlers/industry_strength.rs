@@ -1,6 +1,6 @@
 //! `/market/industry-strength` handler：各產業成分股相對強度的分布，用來看資金輪動到哪些產業。
 //!
-//! 個股分數沿用 [`super::relative_strength`] 的上市櫃股票（不含 ETF）計分；產業強度＝成分股 RS 的中位數，
+//! 個股分數沿用 [`super::relative_strength`] 的上市櫃普通股（不含 ETF、特別股）計分；產業強度＝成分股 RS 的中位數，
 //! 另附強勢（RS ≥ 80）與弱勢（RS ≤ 20）占比，並與約 20 個交易日前的中位數比較。
 
 use std::collections::BTreeMap;
@@ -39,7 +39,7 @@ const LEADERS: usize = 3;
 
 /// 查詢各產業的相對強度：成分股 RS 中位數、強弱勢占比、平均加權報酬與約 20 個交易日前的比較。
 ///
-/// 個股分數以上市櫃股票（不含 ETF）計算（與 `/market/relative-strength` 相同），`market` 只決定各產業納入
+/// 個股分數以上市櫃普通股（不含 ETF、特別股）計算（與 `/market/relative-strength` 相同），`market` 只決定各產業納入
 /// 哪些股票；未分類的股票不列入任何產業。
 ///
 /// # Errors

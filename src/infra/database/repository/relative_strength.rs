@@ -20,8 +20,8 @@ use crate::{
     },
 };
 
-/// 資料日 `$1` 的計分母體：上市櫃、未暫停交易、不是 ETF／ETN／受益證券（產業 9001～9003），
-/// 且近 60／120／240 日報酬都有的股票。
+/// 資料日 `$1` 的計分母體：上市櫃、未暫停交易、不是 ETF／ETN／受益證券（產業 9001～9003）
+/// 與特別股（代號 4 碼數字後接英文字母，例如 2887Z1），且近 60／120／240 日報酬都有的股票。
 ///
 /// `$2`～`$5` 是往前第 20、60、120、240 個交易日（基準日）；近 N 日報酬＝該基準日的 N 日報酬。
 const UNIVERSE_SQL: &str = r#"
@@ -49,6 +49,7 @@ WHERE r60.date = $3
   AND r240.return_240d IS NOT NULL
   AND s.stock_exchange_market_id IN (2, 4)
   AND s.stock_industry_id NOT IN (9001, 9002, 9003)
+  AND s.stock_symbol !~ '^[0-9]{4}[A-Z]'
   AND NOT s."SuspendListing"
 "#;
 
