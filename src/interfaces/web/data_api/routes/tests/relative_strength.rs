@@ -285,7 +285,7 @@ async fn relative_strength_history_matches_ranking() {
             "79979RB".to_owned(),
             "rs50".to_owned(),
             "cross_below".to_owned(),
-            "相對強度 60 → 1 分，跌破 50 分".to_owned()
+            "相對強度 60 → 1 分，跌破 50 分（第 2 名／2 檔）".to_owned()
         )]
     );
 
