@@ -28,6 +28,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
     let symbols: Vec<&str> = STOCKS.iter().map(|row| row.0).collect();
     for sql in [
         "DELETE FROM daily_relative_strength WHERE stock_symbol = ANY($1)",
+        "DELETE FROM daily_technical_signal WHERE stock_symbol = ANY($1)",
         "DELETE FROM daily_forward_return WHERE stock_symbol = ANY($1)",
         r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
@@ -207,13 +208,31 @@ async fn relative_strength_history_matches_ranking() {
     let latest = dates[dates.len() - 1];
     cleanup(pool).await;
     seed(pool, &dates).await;
-    // 個股歷史讀每日分數：資料日寫入 2 檔；最新一天報酬還沒回填，不寫入。
-    for (day, expected) in [(end, 2), (latest, 0)] {
+    // 前一個交易日只有 RB 有分數（60 分）：資料日 RB 掉到 1 分，產生跌破 50 分的訊號；RA 前一天
+    // 沒有分數，不產生訊號。
+    sqlx::query(
+        "INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
+         VALUES ($1, '79979RB', 0, 60, 1, 1)",
+    )
+    .bind(dates[dates.len() - 3])
+    .execute(pool)
+    .await
+    .expect("種入前一天分數");
+    // 個股歷史讀每日分數：資料日寫入 2 檔（重跑一次確認穿越訊號整天替換）；最新一天報酬還沒回填，不寫入。
+    for (day, expected) in [(end, 2), (end, 2), (latest, 0)] {
         let written = crate::app::calculation::relative_strength::calculate_relative_strength(day)
             .await
             .expect("寫入每日相對強度");
         assert_eq!(written, expected, "{day}");
     }
+    let crossings: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT stock_symbol, indicator, kind, description FROM daily_technical_signal
+         WHERE date = $1 AND stock_symbol LIKE '79979R_'",
+    )
+    .bind(end)
+    .fetch_all(pool)
+    .await
+    .expect("讀回穿越訊號");
 
     let (status, ra) = get(&format!(
         "/api/v1/stocks/79979RA/relative-strength?date={latest}&days=2"
@@ -255,6 +274,15 @@ async fn relative_strength_history_matches_ranking() {
     assert_eq!(rb["items"][0]["rs_score"], 1);
     assert_eq!(rb["items"][0]["rank"], 2);
     assert_eq!(rb["low_date"], end.to_string());
+    assert_eq!(
+        crossings,
+        [(
+            "79979RB".to_owned(),
+            "rs50".to_owned(),
+            "cross_below".to_owned(),
+            "相對強度 60 → 1 分，跌破 50 分".to_owned()
+        )]
+    );
 
     assert_eq!(rc_status, StatusCode::OK);
     assert!(rc["data_as_of"].is_null());

@@ -247,7 +247,7 @@ fn signal_filter_error(kind: Option<&str>, indicator: Option<&str>) -> Option<Re
     if indicator.is_some_and(|indicator| !SIGNAL_INDICATORS.contains(&indicator)) {
         return Some(error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "indicator 必須為 ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14 或 52_week",
+            "indicator 必須為 ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14、52_week、rs80 或 rs50",
         ));
     }
     None
