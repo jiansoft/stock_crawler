@@ -9,6 +9,8 @@
 //! 交易成本依換股時實際賣出、買進的比例扣除：買賣各付手續費 0.1425%（乘上 `fee_discount`），
 //! 賣出另付證交稅 0.3%；同一檔續抱不計成本，也不計等權再平衡的小額調整。
 
+use std::collections::HashSet;
+
 use axum::{
     Json,
     extract::Query,
@@ -65,7 +67,7 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 
 /// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期候選檔數、
 /// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類、`$11` 大盤濾網均線天數
-/// （`NULL` 為不濾）；籌碼版另有 `$12`／`$13`。
+/// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）；籌碼版另有 `$13`／`$14`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後每隔 `$4` 個交易日的換股日；`window_start` 是含當天往前第 `$4` 個交易日，
@@ -73,6 +75,7 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入。
 /// - `candidates`：符合條件的股票依相對強度由高到低的前 `$5` 檔與各自的報酬；實際持股由
 ///   [`select_holdings`] 依上一期持股與 `keep_rank` 決定。
+/// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
 /// - `taiex`：加權指數收盤是否不低於含當天往前 `$11` 個交易日的平均；低於時 `market_ok` 為
 ///   false，這期空手。
 /// - `etf_return`：同一天買進 [`ETF_BENCHMARK`] 持有同樣天數的還原報酬，作為實際買得到的大盤基準。
@@ -147,6 +150,14 @@ candidates AS (
     WHERE pick_rank <= $5
     GROUP BY date
 ),
+holdable AS (
+    SELECT date,
+           array_agg(stock_symbol::text ORDER BY rs_score DESC, stock_symbol) AS symbols,
+           array_agg(ret::float8 ORDER BY rs_score DESC, stock_symbol) AS returns
+    FROM universe
+    WHERE $12::smallint IS NOT NULL AND rs_score >= $12
+    GROUP BY date
+),
 taiex AS (
     SELECT "date",
            "index" >= AVG("index") OVER (
@@ -167,9 +178,12 @@ SELECT b.date,
             ELSE e.return_240d
         END)::float8 AS etf_return,
        COALESCE(c.symbols, ARRAY[]::text[]) AS candidates,
-       COALESCE(c.returns, ARRAY[]::float8[]) AS candidate_returns
+       COALESCE(c.returns, ARRAY[]::float8[]) AS candidate_returns,
+       COALESCE(h.symbols, ARRAY[]::text[]) AS hold_symbols,
+       COALESCE(h.returns, ARRAY[]::float8[]) AS hold_returns
 FROM bench b
 LEFT JOIN candidates c ON c.date = b.date
+LEFT JOIN holdable h ON h.date = b.date
 LEFT JOIN daily_forward_return e ON e.date = b.date AND e.stock_symbol = '0050'
 LEFT JOIN taiex t ON t."date" = b.date
 WHERE b.samples > 0
@@ -182,7 +196,7 @@ ORDER BY b.date
 /// 沒有籌碼條件的回測。
 const BACKTEST_SQL: &str = backtest_sql!("\nWITH", "", "");
 
-/// 有籌碼條件的回測：換股當天外資（`$12`）／投信（`$13`）已連續買超至少 N 天，`NULL` 為不篩選。
+/// 有籌碼條件的回測：換股當天外資（`$13`）／投信（`$14`）已連續買超至少 N 天，`NULL` 為不篩選。
 const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
     chip_streak_ctes!(),
@@ -190,7 +204,7 @@ const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($12::bigint IS NULL OR c.foreign_buy >= $12)\n      AND ($13::bigint IS NULL OR c.trust_buy >= $13)"
+        "\n      AND ($13::bigint IS NULL OR c.foreign_buy >= $13)\n      AND ($14::bigint IS NULL OR c.trust_buy >= $14)"
     )
 );
 
@@ -204,6 +218,9 @@ struct CandidateRow {
     etf_return: Option<f64>,
     candidates: Vec<String>,
     candidate_returns: Vec<Option<f64>>,
+    /// 相對強度不低於續抱門檻的母體股票（依相對強度由高到低）與報酬；沒設門檻為空。
+    hold_symbols: Vec<String>,
+    hold_returns: Vec<Option<f64>>,
 }
 
 /// 一期的結果；`symbols` 是全部持股，依相對強度由高到低。
@@ -258,6 +275,15 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         return error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
             "market_filter_ma 必須為 20、60、120 或 240",
+        );
+    }
+    if params
+        .hold_min_rs_score
+        .is_some_and(|score| !(1..=99).contains(&score))
+    {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "hold_min_rs_score 必須介於 1 至 99",
         );
     }
     let keep_rank = params.keep_rank.unwrap_or(limit);
@@ -328,7 +354,8 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     .bind(params.max_rs_score.map(i16::from))
     .bind(params.indicator.as_deref())
     .bind(params.kind.as_deref())
-    .bind(params.market_filter_ma.map(i32::from));
+    .bind(params.market_filter_ma.map(i32::from))
+    .bind(params.hold_min_rs_score.map(i16::from));
     if with_chip {
         query = query
             .bind(params.min_foreign_streak.map(i64::from))
@@ -349,6 +376,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         limit,
         keep_rank,
         market_filter_ma: params.market_filter_ma,
+        hold_min_rs_score: params.hold_min_rs_score,
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
@@ -420,19 +448,40 @@ fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<PeriodCost> {
 /// 依候選股決定每期持股：上一期持有、這期仍符合條件且排在前 `keep_rank` 名的股票續抱，
 /// 其餘名額依相對強度由高到低補滿 `limit` 檔；`keep_rank` 等於 `limit` 時就是每期取前 `limit` 檔。
 ///
+/// 有設 `hold_min_rs_score` 時，上一期持股即使不再符合選股條件（例如法人連買中斷），只要相對強度
+/// 不低於門檻也可續抱；這類股票排在候選股之後，名額不足時先留候選股。
 /// 大盤濾網沒過的那期空手（上一期持股全部賣出）。平均報酬只算有報酬的持股（之後完全沒有收盤的
 /// 股票不列入），全部都沒有報酬為 `None`。
 fn select_holdings(rows: Vec<CandidateRow>, limit: usize, keep_rank: usize) -> Vec<PeriodRow> {
-    let mut previous: Vec<String> = Vec::new();
+    let mut previous: HashSet<String> = HashSet::new();
     rows.into_iter()
         .map(|row| {
             let slots = if row.market_ok { limit } else { 0 };
-            let mut picked: Vec<usize> = row
+            let holdable: HashSet<&str> = row.hold_symbols.iter().map(String::as_str).collect();
+            let listed: HashSet<&str> = row.candidates.iter().map(String::as_str).collect();
+            // 股票池：先是依相對強度排序的候選股，再接只符合續抱條件的股票；第三欄為可否續抱。
+            let mut pool: Vec<(&str, Option<f64>, bool)> = row
                 .candidates
                 .iter()
-                .take(keep_rank)
+                .zip(&row.candidate_returns)
                 .enumerate()
-                .filter(|(_, symbol)| previous.contains(symbol))
+                .map(|(index, (symbol, ret))| {
+                    let keepable = index < keep_rank || holdable.contains(symbol.as_str());
+                    (symbol.as_str(), *ret, keepable)
+                })
+                .collect();
+            pool.extend(
+                row.hold_symbols
+                    .iter()
+                    .zip(&row.hold_returns)
+                    .filter(|(symbol, _)| !listed.contains(symbol.as_str()))
+                    .map(|(symbol, ret)| (symbol.as_str(), *ret, true)),
+            );
+
+            let mut picked: Vec<usize> = pool
+                .iter()
+                .enumerate()
+                .filter(|(_, (symbol, _, keepable))| *keepable && previous.contains(*symbol))
                 .map(|(index, _)| index)
                 .take(slots)
                 .collect();
@@ -446,15 +495,12 @@ fn select_holdings(rows: Vec<CandidateRow>, limit: usize, keep_rank: usize) -> V
             }
             picked.sort_unstable();
 
-            let returns: Vec<f64> = picked
-                .iter()
-                .filter_map(|&index| row.candidate_returns.get(index).copied().flatten())
-                .collect();
+            let returns: Vec<f64> = picked.iter().filter_map(|&index| pool[index].1).collect();
             let symbols: Vec<String> = picked
                 .iter()
-                .map(|&index| row.candidates[index].clone())
+                .map(|&index| pool[index].0.to_owned())
                 .collect();
-            previous.clone_from(&symbols);
+            previous = symbols.iter().cloned().collect();
             PeriodRow {
                 date: row.date,
                 market_filtered: !row.market_ok,

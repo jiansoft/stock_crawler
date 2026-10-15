@@ -30,6 +30,10 @@ pub(crate) struct ScreenBacktestParams {
     /// 大盤濾網：換股日加權指數收盤低於自己的 N 日均線（20、60、120 或 240 個交易日）時這期空手，
     /// 上一期持股全部賣出；省略為不濾。
     pub(crate) market_filter_ma: Option<u16>,
+    /// 續抱條件（1–99）：上一期持有的股票即使不再符合選股條件（例如法人連買中斷、訊號過期），只要
+    /// 換股當天相對強度分數不低於此值就續抱；省略為不續抱（只看 `keep_rank`）。
+    #[param(minimum = 1, maximum = 99)]
+    pub(crate) hold_min_rs_score: Option<u8>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -184,6 +188,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) keep_rank: u8,
     /// 大盤濾網的均線天數；未設定為 `null`。
     pub(crate) market_filter_ma: Option<u16>,
+    /// 續抱的相對強度門檻；未設定為 `null`。
+    pub(crate) hold_min_rs_score: Option<u8>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。
