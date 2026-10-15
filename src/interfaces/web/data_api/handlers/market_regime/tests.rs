@@ -20,7 +20,7 @@ fn response_rounds_values() {
     // 最新 300 天由 100 線性漲到 399（由新到舊為 399、398、…、100）。
     let closes: Vec<f64> = (0..300).map(|index| 399.0 - f64::from(index)).collect();
     let state = regime::regime(&series(&closes)).expect("有資料");
-    let result = response(&state);
+    let result = response(&state, &[]);
 
     assert_eq!(result.data_as_of, "2026-10-15");
     assert_eq!((result.close, result.change), (399.0, Some(1.0)));
@@ -36,7 +36,9 @@ fn response_rounds_values() {
         (result.from_high_percent, result.from_low_percent),
         (0.0, 166.0)
     );
+    assert_eq!(result.return_5d, Some(1.27));
     assert_eq!(result.return_20d, Some(5.28));
+    assert!(result.recent_crosses.is_empty());
     assert_eq!(result.return_60d, Some(17.7));
     assert_eq!(result.return_240d, Some(150.94));
 }
@@ -45,7 +47,7 @@ fn response_rounds_values() {
 #[test]
 fn response_with_single_point() {
     let state = regime::regime(&series(&[100.0])).expect("有資料");
-    let result = response(&state);
+    let result = response(&state, &[]);
     assert_eq!((result.change, result.change_percent), (None, None));
     assert_eq!(result.alignment, "mixed");
     assert!(
@@ -58,4 +60,39 @@ fn response_with_single_point() {
         (result.return_20d, result.return_60d, result.return_240d),
         (None, None, None)
     );
+}
+
+/// 穿越：只列 20／60／120／240 日均線、近 60 個交易日內，由新到舊、同一天依均線天數；
+/// 方向轉成 up／down。
+#[test]
+fn recent_crosses_sorted_newest_first() {
+    // 最新一天跌到 100、前一天 400，再之前往前每天高 1（一路下跌）：
+    // 前一天站上 5／20／60 日均線、最新一天跌破；5 日均線不列。
+    let mut closes = vec![100.0, 400.0];
+    closes.extend((2..102u32).map(|offset| 200.0 + f64::from(offset)));
+    let points = series(&closes);
+    let crosses = recent_crosses(&points);
+    assert_eq!(
+        crosses
+            .iter()
+            .map(|cross| (cross.date.to_string(), cross.days, cross.above))
+            .collect::<Vec<_>>(),
+        [
+            ("2026-10-15".to_owned(), 20, false),
+            ("2026-10-15".to_owned(), 60, false),
+            ("2026-10-14".to_owned(), 20, true),
+            ("2026-10-14".to_owned(), 60, true),
+        ]
+    );
+    let state = regime::regime(&points).expect("有資料");
+    let items = response(&state, &crosses).recent_crosses;
+    assert_eq!(
+        (
+            items[0].date.as_str(),
+            items[0].days,
+            items[0].direction.as_str()
+        ),
+        ("2026-10-15", 20, "down")
+    );
+    assert_eq!(items[3].direction, "up");
 }
