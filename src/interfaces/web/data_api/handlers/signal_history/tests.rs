@@ -69,18 +69,18 @@ fn parse_group_by_accepts_only_year() {
     assert_eq!(parse_group_by(Some("month")), Err("group_by 只支援 year"));
 }
 
-/// 外資、投信連續買超天數下限：各在 1–20，兩者都可省略。
+/// 外資、投信連續買超天數下限：各在 1–60，兩者都可省略。
 #[test]
 fn validate_streaks_bounds() {
     assert_eq!(validate_streaks(None, None), Ok(()));
-    assert_eq!(validate_streaks(Some(1), Some(20)), Ok(()));
+    assert_eq!(validate_streaks(Some(1), Some(60)), Ok(()));
     assert_eq!(
         validate_streaks(Some(0), None),
-        Err("min_foreign_streak 必須介於 1 至 20")
+        Err("min_foreign_streak 必須介於 1 至 60")
     );
     assert_eq!(
-        validate_streaks(None, Some(21)),
-        Err("min_trust_streak 必須介於 1 至 20")
+        validate_streaks(None, Some(61)),
+        Err("min_trust_streak 必須介於 1 至 60")
     );
 }
 

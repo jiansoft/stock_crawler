@@ -56,6 +56,8 @@ pub struct DataHealthSnapshot {
     pub change_range_mismatches: i64,
     /// 檢查期間內 `year`／`month`／`day` 與日期不符的列數。
     pub misdated_rows: i64,
+    /// 檢查期間內 `chip_daily` 的連續買賣超天數還沒計算（NULL）的列數。
+    pub chip_streak_missing: i64,
     /// 各衍生資料表的最新日期。
     pub derived_tables: Vec<DerivedTableLatest>,
     /// 近五年（不含今年）發放、除權息日仍是「尚未公布」的股利列數。

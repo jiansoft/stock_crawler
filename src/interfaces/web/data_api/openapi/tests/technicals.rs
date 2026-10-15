@@ -111,8 +111,8 @@ fn openapi_signal_history_schema_pins_field_names() {
     for (name, maximum) in [
         ("min_rs_score", 99),
         ("max_rs_score", 99),
-        ("min_foreign_streak", 20),
-        ("min_trust_streak", 20),
+        ("min_foreign_streak", 60),
+        ("min_trust_streak", 60),
     ] {
         let schema = query_schema(operation, name);
         assert_eq!(schema["minimum"], 1, "{name}");
@@ -234,8 +234,8 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     for (name, maximum) in [
         ("min_rs_score", 99),
         ("max_rs_score", 99),
-        ("min_foreign_streak", 20),
-        ("min_trust_streak", 20),
+        ("min_foreign_streak", 60),
+        ("min_trust_streak", 60),
     ] {
         let schema = query_schema(operation, name);
         assert_eq!(schema["minimum"], 1, "{name}");
@@ -261,6 +261,12 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     assert!(response["years"].to_string().contains("BacktestYear"));
     assert_eq!(response["etf_benchmark"]["type"], "string");
     assert_eq!(response["keep_rank"]["type"], "integer");
+    assert!(response["market_filter_ma"].to_string().contains("null"));
+    assert!(response["hold_min_rs_score"].to_string().contains("null"));
+    assert_eq!(
+        schemas["BacktestPeriod"]["properties"]["market_filtered"]["type"],
+        "boolean"
+    );
     let year = &schemas["BacktestYear"]["properties"];
     assert_eq!(year["year"]["type"], "integer");
     assert!(year["etf_total_return"].to_string().contains("null"));

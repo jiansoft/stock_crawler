@@ -38,6 +38,12 @@ async fn cleanup(pool: &sqlx::PgPool) {
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
     }
+    let _ =
+        sqlx::query(r#"DELETE FROM "index" WHERE category = 'TAIEX' AND "date" BETWEEN $1 AND $2"#)
+            .bind(day(1))
+            .bind(day(31))
+            .execute(pool)
+            .await;
     let _ = sqlx::query(
         "DELETE FROM daily_forward_return WHERE stock_symbol = '0050' AND date BETWEEN $1 AND $2",
     )
@@ -89,6 +95,15 @@ async fn seed(pool: &sqlx::PgPool) {
         .execute(pool)
         .await
         .expect("種入報酬");
+    }
+    // 加權指數：03-01～03-05 為 100，03-08 跌到 90，低於近 6 日平均（約 98.3）。
+    for (d, index) in [(1, 100), (2, 100), (3, 100), (4, 100), (5, 100), (8, 90)] {
+        sqlx::query(r#"INSERT INTO "index" (category, "date", "index") VALUES ('TAIEX', $1, $2)"#)
+            .bind(day(d))
+            .bind(Decimal::from(index))
+            .execute(pool)
+            .await
+            .expect("種入加權指數");
     }
     // 0050：03-01 買進 5 日報酬 4%；03-08 沒有資料（彙總時算 0）。
     sqlx::query(
@@ -245,6 +260,43 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert!(json["summary"]["volatility"].as_f64().is_some());
     assert!(json["summary"]["sharpe_ratio"].as_f64().is_some());
 
+    // 續抱條件：只選 RS ≥ 85（03-01 BA、03-08 BB）。BA 03-08 的 RS 50 不再符合選股條件，
+    // 但達續抱門檻 50 就續抱（報酬 3）；門檻 51 時換成 BB（報酬 8）。
+    let (status, json) = query("limit=1&min_rs_score=85&hold_min_rs_score=50").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["hold_min_rs_score"], 50);
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 1, Some(10.0)),
+            ("1993-03-08".to_owned(), 1, Some(3.0)),
+        ]
+    );
+    let (_, json) = query("limit=1&min_rs_score=85&hold_min_rs_score=51").await;
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BB"])
+    );
+
+    // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
+    let (status, json) = query("limit=2&market_filter_ma=20").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["market_filter_ma"], 20);
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 2, Some(6.0)),
+            ("1993-03-08".to_owned(), 0, None),
+        ]
+    );
+    assert_eq!(json["periods"][0]["market_filtered"], false);
+    assert_eq!(json["periods"][1]["market_filtered"], true);
+    assert_eq!(json["summary"]["market_filtered_periods"], 1);
+    assert_eq!(json["summary"]["invested_periods"], 1);
+    // 沒設濾網時不受加權指數影響。
+    let (_, json) = query("limit=2").await;
+    assert_eq!(json["summary"]["market_filtered_periods"], 0);
+
     // 上櫃只有 BC：03-08 母體沒有任何報酬，那一期不列入。
     let (_, json) = query("market=tpex").await;
     assert_eq!(periods(&json), [("1993-03-01".to_owned(), 1, Some(2.0))]);
@@ -304,6 +356,9 @@ async fn screen_backtest_endpoint_db_semantics() {
         ("limit=101", StatusCode::UNPROCESSABLE_ENTITY),
         ("limit=5&keep_rank=4", StatusCode::UNPROCESSABLE_ENTITY),
         ("keep_rank=201", StatusCode::UNPROCESSABLE_ENTITY),
+        ("market_filter_ma=50", StatusCode::UNPROCESSABLE_ENTITY),
+        ("hold_min_rs_score=0", StatusCode::UNPROCESSABLE_ENTITY),
+        ("hold_min_rs_score=100", StatusCode::UNPROCESSABLE_ENTITY),
         ("fee_discount=1.5", StatusCode::UNPROCESSABLE_ENTITY),
         ("fee_discount=-0.1", StatusCode::UNPROCESSABLE_ENTITY),
         ("market=otc", StatusCode::UNPROCESSABLE_ENTITY),
@@ -314,7 +369,7 @@ async fn screen_backtest_endpoint_db_semantics() {
             "min_rs_score=90&max_rs_score=80",
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
-        ("min_foreign_streak=21", StatusCode::UNPROCESSABLE_ENTITY),
+        ("min_foreign_streak=61", StatusCode::UNPROCESSABLE_ENTITY),
         (
             "industry=%E4%B8%8D%E5%AD%98%E5%9C%A8",
             StatusCode::UNPROCESSABLE_ENTITY,

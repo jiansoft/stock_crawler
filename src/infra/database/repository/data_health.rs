@@ -121,6 +121,14 @@ WHERE "Date" BETWEEN $1 AND $2
   )
 "#;
 
+/// 連續買賣超天數還沒計算的籌碼列數：每日入庫後的重算失敗時，排行、選股與回測會把它們當成 0。
+const CHIP_STREAK_MISSING_SQL: &str = r#"
+SELECT count(*)
+FROM chip_daily
+WHERE "date" BETWEEN $1 AND $2
+  AND (foreign_streak IS NULL OR trust_streak IS NULL OR dealer_streak IS NULL OR total_streak IS NULL)
+"#;
+
 /// 近五年（不含今年）發放、除權息日仍是「尚未公布」的股利列數。
 ///
 /// 更早的佔位列（1990 年代的配股）交易所已查不到實際日期，列出來也無從處理。
@@ -292,6 +300,13 @@ impl DataHealthRepository for PgDataHealthRepository {
             )
             .await?,
             misdated_rows: count_between(MISDATED_ROWS_SQL, from, to, "misdated rows").await?,
+            chip_streak_missing: count_between(
+                CHIP_STREAK_MISSING_SQL,
+                from,
+                to,
+                "chip streak missing",
+            )
+            .await?,
             derived_tables,
             stale_dividend_placeholders,
             dividend_total_mismatches,
@@ -327,6 +342,7 @@ mod tests {
 
         assert_eq!(snapshot.derived_tables.len(), DERIVED_TABLES.len());
         assert!(snapshot.missing_moving_averages >= 0);
+        assert!(snapshot.chip_streak_missing >= 0);
     }
 
     /// 短天期缺漏占比達門檻的基準日要列出；零星缺值與最早有 5 日報酬之前的基準日不列入。

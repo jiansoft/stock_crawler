@@ -356,7 +356,7 @@ async fn signal_performance_endpoint_db_semantics() {
         ("min_rs_score=0", StatusCode::UNPROCESSABLE_ENTITY),
         ("group_by=month", StatusCode::UNPROCESSABLE_ENTITY),
         ("min_foreign_streak=0", StatusCode::UNPROCESSABLE_ENTITY),
-        ("min_trust_streak=21", StatusCode::UNPROCESSABLE_ENTITY),
+        ("min_trust_streak=61", StatusCode::UNPROCESSABLE_ENTITY),
         ("max_rs_score=100", StatusCode::UNPROCESSABLE_ENTITY),
         (
             "min_rs_score=81&max_rs_score=80",
