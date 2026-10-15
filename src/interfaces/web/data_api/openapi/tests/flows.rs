@@ -63,9 +63,20 @@ fn openapi_institutional_streak_schema_pins_field_names() {
     for name in ["from", "to", "industry"] {
         assert!(query_schema(operation, name).is_object(), "{name}");
     }
+    assert!(
+        query_schema(operation, "group_by")
+            .to_string()
+            .contains("GroupByParamValue")
+    );
 
     let schemas = &document["components"]["schemas"];
     let response = &schemas["InstitutionalStreakPerformanceResponse"]["properties"];
+    assert!(response["years"].to_string().contains("PerformanceYear"));
+    assert!(
+        response["benchmark_by_year"]
+            .to_string()
+            .contains("BenchmarkYear")
+    );
     assert_eq!(response["adjusted"]["type"], "boolean");
     assert_eq!(response["occurrences"]["type"], "integer");
     assert!(response["industry"].to_string().contains("null"));

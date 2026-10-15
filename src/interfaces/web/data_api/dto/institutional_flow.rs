@@ -3,7 +3,10 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use super::{BenchmarkStat, HorizonStat, MarketParamValue, SortOrderParamValue};
+use super::{
+    BenchmarkStat, BenchmarkYear, GroupByParamValue, HorizonStat, MarketParamValue,
+    PerformanceYear, SortOrderParamValue,
+};
 
 /// OpenAPI 文件使用的法人別。
 #[derive(ToSchema)]
@@ -206,6 +209,9 @@ pub(crate) struct InstitutionalStreakPerformanceParams {
     pub(crate) market: Option<String>,
     /// 只統計這個產業（產業名稱，例如「半導體業」）的事件；大盤基準不受影響。
     pub(crate) industry: Option<String>,
+    /// `year`：除了整段期間，再依事件日的年度拆分統計（`years`、`benchmark_by_year`）；省略為不拆分。
+    #[param(value_type = Option<GroupByParamValue>)]
+    pub(crate) group_by: Option<String>,
 }
 
 /// 法人連續買賣超後報酬統計的成功回應。
@@ -225,12 +231,18 @@ pub(crate) struct InstitutionalStreakPerformanceResponse {
     pub(crate) streak: u8,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
+    /// 拆分方式：`year` 或未拆分為 `null`。
+    pub(crate) group_by: Option<String>,
     /// 報酬是否還原權值；固定為 `true`。
     pub(crate) adjusted: bool,
     /// 期間內的事件數（連續滿 N 天的次數）。
     pub(crate) occurrences: i64,
     /// 事件之後 5／20／60／120／240 個交易日的表現。
     pub(crate) horizons: Vec<HorizonStat>,
+    /// `group_by=year` 時各年度的表現，由舊到新（只列有事件的年度）；未拆分為 `null`。
+    pub(crate) years: Option<Vec<PerformanceYear>>,
     /// 大盤基準，依天期由短到長。
     pub(crate) benchmark: Vec<BenchmarkStat>,
+    /// `group_by=year` 時各年度的大盤基準，由舊到新；未拆分為 `null`。
+    pub(crate) benchmark_by_year: Option<Vec<BenchmarkYear>>,
 }

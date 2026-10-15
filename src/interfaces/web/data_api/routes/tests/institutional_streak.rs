@@ -191,7 +191,31 @@ async fn institutional_streak_performance_endpoint_db_semantics() {
         assert_eq!(json["occurrences"], occurrences, "{from}");
     }
 
+    // 依年度拆分：只有 1986 一年，年度統計與整段相同；沒有事件時年度為空清單、整段為 0。
+    let (status, whole) = query("streak=3").await;
+    assert_eq!(status, StatusCode::OK, "{whole}");
+    assert!(whole["years"].is_null() && whole["group_by"].is_null());
+    let (status, json) = query("streak=3&group_by=year").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["group_by"], "year");
+    assert_eq!(json["occurrences"], whole["occurrences"]);
+    assert_eq!(json["horizons"], whole["horizons"]);
+    assert_eq!(json["years"].as_array().map(Vec::len), Some(1), "{json}");
+    assert_eq!(json["years"][0]["year"], 1986);
+    assert_eq!(json["years"][0]["occurrences"], whole["occurrences"]);
+    assert_eq!(json["years"][0]["horizons"], whole["horizons"]);
+    assert_eq!(json["benchmark_by_year"][0]["year"], 1986);
+    assert_eq!(
+        json["benchmark_by_year"][0]["benchmark"],
+        whole["benchmark"]
+    );
+    let (status, json) = query("streak=20&group_by=year").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["occurrences"], 0);
+    assert_eq!(json["years"].as_array().map(Vec::len), Some(0), "{json}");
+
     for (extra, status) in [
+        ("group_by=week", StatusCode::UNPROCESSABLE_ENTITY),
         ("streak=0", StatusCode::UNPROCESSABLE_ENTITY),
         ("streak=21", StatusCode::UNPROCESSABLE_ENTITY),
         ("side=hold", StatusCode::UNPROCESSABLE_ENTITY),

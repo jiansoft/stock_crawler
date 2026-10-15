@@ -264,6 +264,70 @@ async fn signal_performance_endpoint_db_semantics() {
         (json["min_rs_score"].as_u64(), json["max_rs_score"].as_u64()),
         (Some(60), Some(95))
     );
+    assert!(json["group_by"].is_null() && json["benchmark_by_year"].is_null());
+    assert!(item(&json, "kd", "golden_cross")["years"].is_null());
+
+    // 依年度拆分：再種一筆 1990-12-28 的 kd 黃金交叉（5 日報酬 8%），整段與各年度一次算出。
+    sqlx::query(
+        "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
+         VALUES ('1990-12-28', '79979PA', 'kd', 'golden_cross', '跨年')",
+    )
+    .execute(pool)
+    .await
+    .expect("種入跨年訊號");
+    sqlx::query(
+        "INSERT INTO daily_forward_return (date, stock_symbol, return_5d) VALUES ('1990-12-28', '79979PA', 8)",
+    )
+    .execute(pool)
+    .await
+    .expect("種入跨年報酬");
+    let (status, json) = get(
+        "/api/v1/market/signals/performance?from=1990-12-01&to=1991-10-02&kind=golden_cross&group_by=year",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["group_by"], "year");
+    let kd = item(&json, "kd", "golden_cross");
+    assert_eq!(kd["occurrences"], 5);
+    assert_eq!(kd["horizons"][0]["median_return"], 4.0);
+    let years: Vec<(i64, i64, f64)> = kd["years"]
+        .as_array()
+        .expect("years array")
+        .iter()
+        .map(|year| {
+            (
+                year["year"].as_i64().unwrap_or_default(),
+                year["occurrences"].as_i64().unwrap_or_default(),
+                year["horizons"][0]["avg_return"]
+                    .as_f64()
+                    .unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(years, [(1990, 1, 8.0), (1991, 4, 1.75)]);
+    assert_eq!(json["benchmark"][0]["samples"], 7);
+    let benchmark_years: Vec<(i64, i64)> = json["benchmark_by_year"]
+        .as_array()
+        .expect("benchmark_by_year array")
+        .iter()
+        .map(|year| {
+            (
+                year["year"].as_i64().unwrap_or_default(),
+                year["benchmark"][0]["samples"].as_i64().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(benchmark_years, [(1990, 1), (1991, 6)]);
+    // 籌碼條件也能依年度拆分：1990 年沒有籌碼資料，只剩 1991。
+    let (status, json) = get(
+        "/api/v1/market/signals/performance?from=1990-12-01&to=1991-10-02&kind=golden_cross&group_by=year&min_foreign_streak=1",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let kd = item(&json, "kd", "golden_cross");
+    assert_eq!(kd["occurrences"], 2);
+    assert_eq!(kd["years"].as_array().map(Vec::len), Some(1));
+    assert_eq!(kd["years"][0]["year"], 1991);
 
     for (query, status) in [
         (
@@ -284,6 +348,7 @@ async fn signal_performance_endpoint_db_semantics() {
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
         ("min_rs_score=0", StatusCode::UNPROCESSABLE_ENTITY),
+        ("group_by=month", StatusCode::UNPROCESSABLE_ENTITY),
         ("min_foreign_streak=0", StatusCode::UNPROCESSABLE_ENTITY),
         ("min_trust_streak=21", StatusCode::UNPROCESSABLE_ENTITY),
         ("max_rs_score=100", StatusCode::UNPROCESSABLE_ENTITY),
