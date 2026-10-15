@@ -119,6 +119,13 @@ fn summarize_counts_cash_periods_as_zero() {
     assert_eq!(summary.avg_turnover, Some(0.0));
     // 全期都沒有 0050 資料時，0050 相關欄位為 null。
     assert!(summary.etf_total_return.is_none() && summary.beat_etf_rate.is_none());
+    assert!(summary.etf_volatility.is_none() && summary.etf_sharpe_ratio.is_none());
+    // 每年 245 / 20 = 12.25 期。
+    assert_eq!(
+        summary.volatility,
+        risk(&[10.0, 0.0, -5.0, 4.0], 12.25).map(|(volatility, _)| volatility)
+    );
+    assert!(summary.sharpe_ratio.is_some() && summary.benchmark_sharpe_ratio.is_some());
 }
 
 /// 0050 基準：缺值的期數算 0，勝過 0050 以期數計。
@@ -283,4 +290,99 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $11"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $12"));
+}
+
+/// 一期候選：代號依相對強度由高到低，報酬一一對應。
+fn candidates(d: u32, list: &[(&str, Option<f64>)]) -> CandidateRow {
+    CandidateRow {
+        date: day(2024, 1, d),
+        benchmark_return: Some(1.0),
+        etf_return: Some(0.5),
+        candidates: list
+            .iter()
+            .map(|(symbol, _)| (*symbol).to_owned())
+            .collect(),
+        candidate_returns: list.iter().map(|(_, ret)| *ret).collect(),
+    }
+}
+
+/// 不緩衝時每期取前 limit 檔；沒有報酬的股票占名額但不列入平均；沒有候選為空手。
+#[test]
+fn select_holdings_without_buffer_takes_top_limit() {
+    let rows = select_holdings(
+        vec![
+            candidates(2, &[("A", Some(10.0)), ("B", None), ("C", Some(2.0))]),
+            candidates(3, &[]),
+            candidates(4, &[("D", None)]),
+        ],
+        2,
+        2,
+    );
+    assert_eq!(rows[0].symbols, ["A", "B"]);
+    assert_eq!((rows[0].holdings, rows[0].avg_return), (2, Some(10.0)));
+    assert_eq!(
+        (rows[0].benchmark_return, rows[0].etf_return),
+        (Some(1.0), Some(0.5))
+    );
+    assert_eq!((rows[1].holdings, rows[1].avg_return), (0, None));
+    assert!(rows[1].symbols.is_empty());
+    assert_eq!((rows[2].holdings, rows[2].avg_return), (1, None));
+}
+
+/// 緩衝：上一期持股只要仍在前 keep_rank 名就續抱，空出的名額依排名補滿；輸出依排名排序。
+#[test]
+fn select_holdings_keeps_previous_within_buffer() {
+    let rows = select_holdings(
+        vec![
+            candidates(2, &[("A", Some(1.0)), ("B", Some(2.0)), ("C", Some(3.0))]),
+            // A 掉到第 4 名仍在緩衝內續抱；B 跌出名單賣出，補第 1 名 D。
+            candidates(
+                3,
+                &[
+                    ("D", Some(4.0)),
+                    ("C", Some(5.0)),
+                    ("E", Some(6.0)),
+                    ("A", Some(7.0)),
+                ],
+            ),
+            // A 掉到第 5 名超出緩衝：換成排名最高、尚未持有的 E。
+            candidates(
+                4,
+                &[
+                    ("C", Some(1.0)),
+                    ("D", Some(1.0)),
+                    ("E", Some(1.0)),
+                    ("F", Some(1.0)),
+                    ("A", Some(1.0)),
+                ],
+            ),
+        ],
+        2,
+        4,
+    );
+    assert_eq!(rows[0].symbols, ["A", "B"]);
+    assert_eq!(rows[1].symbols, ["D", "A"]);
+    assert_eq!(rows[1].avg_return, Some(5.5));
+    assert_eq!(rows[2].symbols, ["C", "D"]);
+    // 續抱的股票比名額多時只留排名最前的 limit 檔。
+    let rows = select_holdings(
+        vec![
+            candidates(2, &[("A", None), ("B", None), ("C", None)]),
+            candidates(3, &[("X", None), ("C", None), ("B", None), ("A", None)]),
+        ],
+        3,
+        4,
+    );
+    assert_eq!(rows[1].symbols, ["C", "B", "A"]);
+}
+
+/// 波動率與夏普值：樣本標準差 × √每年期數；不足 2 期為 None，沒有波動時夏普值為 None。
+#[test]
+fn risk_annualizes_volatility_and_sharpe() {
+    // 平均 2、樣本標準差 √(((4−2)² + (0−2)²) / 1) = 2√2；每年 4 期 → 波動 4√2、夏普 2/(2√2)×2 = √2。
+    let (volatility, sharpe) = risk(&[4.0, 0.0], 4.0).expect("兩期以上");
+    assert_eq!(volatility, round2(4.0 * 2.0_f64.sqrt()));
+    assert_eq!(sharpe, Some(round2(2.0_f64.sqrt())));
+    assert_eq!(risk(&[3.0], 4.0), None);
+    assert_eq!(risk(&[1.0, 1.0, 1.0], 4.0), Some((0.0, None)));
 }
