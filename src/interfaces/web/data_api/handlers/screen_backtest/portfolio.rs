@@ -99,7 +99,7 @@ pub(super) fn select_holdings(
 
             // 先放續抱的上一期持股，再依排名補候選股；同產業滿 `cap` 檔就跳過。
             let mut counts: HashMap<i32, usize> = HashMap::new();
-            let mut picked: Vec<usize> = Vec::with_capacity(slots);
+            let mut picked: Vec<usize> = Vec::new();
             let mut admit = |index: usize, picked: &mut Vec<usize>| {
                 let count = counts.entry(pool[index].3).or_default();
                 if *count < cap {
