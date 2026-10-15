@@ -47,30 +47,35 @@ const DERIVED_TABLES: [(&str, &str); 10] = [
     ),
 ];
 
-/// 未來報酬短天期缺漏的基準日至少要缺這麼多列才列出（個股停牌只會造成零星缺值）。
-const FORWARD_RETURN_GAP_MIN_ROWS: i64 = 100;
+/// 短天期缺漏的列數占該基準日全部列數至少這個百分比才列出。
+///
+/// 回補範圍沒涵蓋到時整天都缺（接近 100%）；個股停牌、債券 ETF 不是每天成交，之後第 N 個
+/// 交易日沒有報價，會造成零星缺值（2021-12-30 有 154 檔上櫃債券 ETF，約 8%），不算異常。
+const FORWARD_RETURN_GAP_MIN_PERCENT: i64 = 20;
 
-/// 從最早有 5 日報酬的基準日起，「較短天期為空、較長天期有值」的列數達門檻的基準日。
+/// 從最早有 5 日報酬的基準日起，「較短天期為空、較長天期有值」的列數占比達門檻的基準日。
 ///
 /// 更早的基準日本來就只回補了長天期（例如只為了相對強度補 240 日報酬），不列入。
 const FORWARD_RETURN_GAPS_SQL: &str = r#"
 WITH start AS (
     SELECT min(date) AS first_date FROM daily_forward_return WHERE return_5d IS NOT NULL
+),
+flagged AS (
+    SELECT r.date,
+           (r.return_5d IS NULL
+            AND coalesce(r.return_20d, r.return_60d, r.return_120d, r.return_240d) IS NOT NULL)
+           OR (r.return_20d IS NULL
+               AND coalesce(r.return_60d, r.return_120d, r.return_240d) IS NOT NULL)
+           OR (r.return_60d IS NULL AND coalesce(r.return_120d, r.return_240d) IS NOT NULL)
+           OR (r.return_120d IS NULL AND r.return_240d IS NOT NULL) AS gap
+    FROM daily_forward_return AS r, start
+    WHERE r.date >= start.first_date
 )
-SELECT r.date, count(*)
-FROM daily_forward_return AS r, start
-WHERE r.date >= start.first_date
-  AND (
-      (r.return_5d IS NULL
-       AND coalesce(r.return_20d, r.return_60d, r.return_120d, r.return_240d) IS NOT NULL)
-      OR (r.return_20d IS NULL
-          AND coalesce(r.return_60d, r.return_120d, r.return_240d) IS NOT NULL)
-      OR (r.return_60d IS NULL AND coalesce(r.return_120d, r.return_240d) IS NOT NULL)
-      OR (r.return_120d IS NULL AND r.return_240d IS NOT NULL)
-  )
-GROUP BY r.date
-HAVING count(*) >= $1
-ORDER BY r.date
+SELECT date, count(*) FILTER (WHERE gap)
+FROM flagged
+GROUP BY date
+HAVING count(*) FILTER (WHERE gap) * 100 >= count(*) * $1
+ORDER BY date
 "#;
 
 /// 檢查期間內有收盤價、前 400 天內已有至少 5 筆報價，5 日均線卻仍是 0 的列數。
@@ -256,7 +261,7 @@ impl DataHealthRepository for PgDataHealthRepository {
                 .collect();
 
         let forward_return_gaps = sqlx::query_as::<_, (NaiveDate, i64)>(FORWARD_RETURN_GAPS_SQL)
-            .bind(FORWARD_RETURN_GAP_MIN_ROWS)
+            .bind(FORWARD_RETURN_GAP_MIN_PERCENT)
             .fetch_all(pool)
             .await
             .context("Failed to find forward return gaps")?
@@ -324,7 +329,7 @@ mod tests {
         assert!(snapshot.missing_moving_averages >= 0);
     }
 
-    /// 短天期缺漏達門檻的基準日要列出；零星缺值與最早有 5 日報酬之前的基準日不列入。
+    /// 短天期缺漏占比達門檻的基準日要列出；零星缺值與最早有 5 日報酬之前的基準日不列入。
     #[tokio::test]
     #[cfg_attr(
         not(feature = "integration-tests"),
@@ -345,34 +350,42 @@ mod tests {
             .expect("清空應成功");
         let insert = r#"
 INSERT INTO daily_forward_return (date, stock_symbol, return_5d, return_20d, return_60d)
-SELECT $1::date, 'G' || n, $2, 1.0, 1.0 FROM generate_series(1, $3) AS n
+SELECT $1::date, $4 || n, $2, 1.0, 1.0 FROM generate_series(1, $3) AS n
 "#;
         let day = |d| NaiveDate::from_ymd_opt(2021, 3, d).expect("日期應合法");
-        for (date, return_5d, rows) in [
+        for (date, return_5d, rows, prefix) in [
             // 最早有 5 日報酬之前、只有長天期的基準日：不列入。
-            (day(1), None, 150),
-            (day(2), Some(1.0), 150),
+            (day(1), None, 150, "G"),
+            (day(2), Some(1.0), 150, "G"),
             // 整天缺 5 日報酬：列出。
-            (day(3), None, 120),
-            // 零星缺值：不列入。
-            (day(4), None, 3),
+            (day(3), None, 120, "G"),
+            // 零星缺值（3%）：不列入。
+            (day(4), None, 3, "G"),
+            (day(4), Some(1.0), 100, "H"),
+            // 不常成交的債券 ETF（13%）：不列入。
+            (day(5), None, 15, "G"),
+            (day(5), Some(1.0), 100, "H"),
+            // 一半缺漏：列出缺漏的列數。
+            (day(8), None, 60, "G"),
+            (day(8), Some(1.0), 60, "H"),
         ] {
             sqlx::query(insert)
                 .bind(date)
                 .bind(return_5d)
                 .bind(rows)
+                .bind(prefix)
                 .execute(&mut *tx)
                 .await
                 .expect("寫入應成功");
         }
 
         let gaps: Vec<(NaiveDate, i64)> = sqlx::query_as(FORWARD_RETURN_GAPS_SQL)
-            .bind(FORWARD_RETURN_GAP_MIN_ROWS)
+            .bind(FORWARD_RETURN_GAP_MIN_PERCENT)
             .fetch_all(&mut *tx)
             .await
             .expect("查詢應成功");
         tx.rollback().await.expect("rollback 應成功");
 
-        assert_eq!(gaps, [(day(3), 120)]);
+        assert_eq!(gaps, [(day(3), 120), (day(8), 60)]);
     }
 }
