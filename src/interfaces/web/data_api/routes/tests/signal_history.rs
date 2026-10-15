@@ -338,6 +338,11 @@ async fn signal_performance_endpoint_db_semantics() {
             "from=1988-01-01&to=1991-10-02",
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
+        (
+            "from=1981-10-01&to=1991-10-02&indicator=kd",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        ("from=1988-01-01&to=1991-10-02&indicator=kd", StatusCode::OK),
         ("to=1991-1-02", StatusCode::UNPROCESSABLE_ENTITY),
         ("from=bad", StatusCode::UNPROCESSABLE_ENTITY),
         ("market=otc", StatusCode::UNPROCESSABLE_ENTITY),

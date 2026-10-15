@@ -104,23 +104,41 @@ fn validate_rs_range_bounds() {
     );
 }
 
-/// 起日預設迄日往前 364 天；起日晚於迄日或期間超過 1,096 天回錯誤。
+/// 起日預設迄日往前 364 天；起日晚於迄日或期間超過 3,653 天回錯誤。
 #[test]
 fn resolve_period_defaults_and_limits() {
     let to = day(2026, 10, 13);
     assert_eq!(resolve_period(None, to), Ok(day(2025, 10, 14)));
     assert_eq!(resolve_period(Some(to), to), Ok(to));
     assert_eq!(
-        resolve_period(Some(day(2023, 10, 14)), to),
-        Ok(day(2023, 10, 14))
+        resolve_period(Some(day(2016, 10, 13)), to),
+        Ok(day(2016, 10, 13))
     );
     assert_eq!(
-        resolve_period(Some(day(2023, 10, 13)), to),
-        Err("統計期間最長 1,096 天")
+        resolve_period(Some(day(2016, 10, 12)), to),
+        Err("統計期間最長 3,653 天")
     );
     assert_eq!(
         resolve_period(Some(day(2026, 10, 14)), to),
         Err("from 不可晚於 to")
+    );
+}
+
+/// 超過 1,096 天時必須指定訊號來源；1,096 天以內不需要。
+#[test]
+fn long_periods_require_an_indicator() {
+    let to = day(2026, 10, 13);
+    assert_eq!(
+        require_indicator_for_long_period(day(2023, 10, 14), to, None),
+        Ok(())
+    );
+    assert_eq!(
+        require_indicator_for_long_period(day(2023, 10, 13), to, None),
+        Err("統計期間超過 1,096 天時必須指定 indicator")
+    );
+    assert_eq!(
+        require_indicator_for_long_period(day(2019, 1, 2), to, Some("52_week")),
+        Ok(())
     );
 }
 
