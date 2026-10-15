@@ -23,6 +23,9 @@ use super::technical::{
 /// 計分用的最長天期（交易日數）。
 pub const LONGEST: usize = 240;
 
+/// 近幾個交易日內有收盤才列入計分母體（含資料日）：下市或停止交易超過這個天數就不再計分。
+pub const ACTIVE_DAYS: usize = 5;
+
 /// 加權報酬中近 60、120、240 日報酬的權重。
 pub const WEIGHTS: [f64; 3] = [0.4, 0.3, 0.3];
 
@@ -96,7 +99,7 @@ pub fn crossings(previous: u8, current: u8) -> Vec<(u8, CrossDirection)> {
 /// 依前一個交易日的分數 `previous`（代號 → 分數），產生 `date` 當天穿越 [`THRESHOLDS`] 的
 /// 技術訊號：由下往上為 `cross_above`、由上往下為 `cross_below`，來源見 [`CROSSING_INDICATORS`]；
 /// 說明附當天名次與計分總數（`scored` 是當天全體）。前一天沒有分數（剛滿 240 個交易日、
-/// 前一天暫停交易）的股票不產生訊號。
+/// 前一天已停止交易超過 [`ACTIVE_DAYS`] 個交易日）的股票不產生訊號。
 pub fn crossing_signals(
     date: NaiveDate,
     previous: &HashMap<String, u8>,
@@ -181,6 +184,8 @@ pub struct BaseDates {
     pub d120: NaiveDate,
     /// 往前第 240 個交易日。
     pub d240: NaiveDate,
+    /// 往前第 [`ACTIVE_DAYS`] 個交易日：之後（不含）到資料日有收盤才列入母體。
+    pub active_since: NaiveDate,
 }
 
 /// 以 `trading_dates`（由新到舊）的第一天為資料日，找出各天期的基準日；交易日不足回 `None`。
@@ -193,6 +198,7 @@ pub fn base_dates(trading_dates: &[NaiveDate]) -> Option<BaseDates> {
         d60: base(60)?,
         d120: base(120)?,
         d240: base(LONGEST)?,
+        active_since: base(ACTIVE_DAYS)?,
     })
 }
 
@@ -265,7 +271,8 @@ pub fn median_score(stocks: &[ScoredStock]) -> Option<f64> {
 #[async_trait]
 pub trait RelativeStrengthQuery: Send + Sync {
     /// `until`（含）之前最近 `days` 個已寫入每日分數的交易日，取 `stock_symbols` 的分數，
-    /// 依代號、再由新到舊排列。上市未滿 240 個交易日、暫停交易、ETF 或非上市櫃的股票沒有分數。
+    /// 依代號、再由新到舊排列。上市未滿 240 個交易日、近 5 個交易日沒有收盤、ETF 或非上市櫃的股票
+    /// 沒有分數。
     async fn fetch_relative_strength(
         &self,
         until: NaiveDate,
@@ -367,6 +374,7 @@ mod tests {
         assert_eq!(bases.d60, ymd(2026, 8, 14));
         assert_eq!(bases.d120, ymd(2026, 6, 15));
         assert_eq!(bases.d240, ymd(2026, 2, 15));
+        assert_eq!(bases.active_since, ymd(2026, 10, 8));
         assert!(base_dates(&dates[1..]).is_none());
         assert!(base_dates(&[]).is_none());
     }

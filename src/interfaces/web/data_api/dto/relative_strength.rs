@@ -117,7 +117,8 @@ pub(crate) struct RelativeStrengthCrossing {
 pub(crate) struct RelativeStrengthHistoryResponse {
     /// 股票代號。
     pub(crate) stock_symbol: String,
-    /// 最新一筆的交易日；期間內未計分（上市未滿 240 個交易日、暫停交易或非上市櫃）為 `null`。
+    /// 最新一筆的交易日；期間內未計分（上市未滿 240 個交易日、近 5 個交易日沒有收盤或非上市櫃）為
+    /// `null`。
     pub(crate) data_as_of: Option<String>,
     /// 查詢的交易日數。
     pub(crate) days: u16,
