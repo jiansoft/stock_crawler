@@ -23,6 +23,10 @@ pub(crate) struct ScreenBacktestParams {
     /// 每期最多持有幾檔（1–100，預設 20）：符合條件的股票依相對強度分數由高到低取前 N 檔，等權持有。
     #[param(minimum = 1, maximum = 100, default = 20)]
     pub(crate) limit: Option<u8>,
+    /// 換股緩衝（`limit`–200，預設等於 `limit` 即不緩衝）：上一期持有的股票只要這期仍符合條件、
+    /// 且排在前 `keep_rank` 名就續抱，空出的名額才依相對強度補滿，用來降低換手與交易成本。
+    #[param(minimum = 1, maximum = 200)]
+    pub(crate) keep_rank: Option<u8>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -120,6 +124,19 @@ pub(crate) struct BacktestSummary {
     pub(crate) etf_max_drawdown: Option<f64>,
     /// 報酬高於 0050 的期數比例（0–1）。
     pub(crate) beat_etf_rate: Option<f64>,
+    /// 年化波動率（%）：每期報酬（未扣成本）的標準差 × √每年期數；不足 2 期為 `null`。
+    pub(crate) volatility: Option<f64>,
+    /// 夏普值：扣交易成本後每期平均報酬 ÷ 每期標準差 × √每年期數，無風險利率以 0 計；
+    /// 不足 2 期或報酬沒有波動為 `null`。
+    pub(crate) sharpe_ratio: Option<f64>,
+    /// 大盤基準的年化波動率（%）。
+    pub(crate) benchmark_volatility: Option<f64>,
+    /// 大盤基準的夏普值（未扣成本）。
+    pub(crate) benchmark_sharpe_ratio: Option<f64>,
+    /// 0050 的年化波動率（%）；全期都缺資料為 `null`。
+    pub(crate) etf_volatility: Option<f64>,
+    /// 0050 的夏普值（未扣成本）。
+    pub(crate) etf_sharpe_ratio: Option<f64>,
 }
 
 /// 依換股日所屬年度彙總的一年（跨年的那一期算在換股日的年度）。
@@ -156,6 +173,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) hold_days: u16,
     /// 每期最多持有檔數。
     pub(crate) limit: u8,
+    /// 續抱的排名緩衝；等於 `limit` 為不緩衝。
+    pub(crate) keep_rank: u8,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。

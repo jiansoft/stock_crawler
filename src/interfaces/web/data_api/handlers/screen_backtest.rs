@@ -49,6 +49,9 @@ const TAX_RATE: f64 = 0.3;
 /// 可投資的大盤基準：元大台灣 50（0050），SQL 內以字面值寫死，改這裡要一併改 [`backtest_sql`]。
 const ETF_BENCHMARK: &str = "0050";
 
+/// `keep_rank` 上限：續抱的股票最多可以落到符合條件者的第幾名。
+const MAX_KEEP_RANK: u8 = 200;
+
 /// 輸出每期前幾檔代號。
 const LISTED_SYMBOLS: usize = 10;
 
@@ -57,13 +60,15 @@ const LATEST_RS_DATE_SQL: &str = r#"
 SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= $1
 "#;
 
-/// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期檔數、
+/// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期候選檔數、
 /// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類；籌碼版另有 `$11`／`$12`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後每隔 `$4` 個交易日的換股日；`window_start` 是含當天往前第 `$4` 個交易日，
 ///   訊號條件看 `window_start`～換股日。
 /// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入。
+/// - `candidates`：符合條件的股票依相對強度由高到低的前 `$5` 檔與各自的報酬；實際持股由
+///   [`select_holdings`] 依上一期持股與 `keep_rank` 決定。
 /// - `etf_return`：同一天買進 [`ETF_BENCHMARK`] 持有同樣天數的還原報酬，作為實際買得到的大盤基準。
 macro_rules! backtest_sql {
     ($with:literal, $chip_join:literal, $chip_filter:literal) => {
@@ -128,16 +133,15 @@ picks AS (
             $chip_filter,
             r#"
 ),
-chosen AS (
-    SELECT date, COUNT(*) AS holdings, AVG(ret)::float8 AS avg_ret,
-           array_agg(stock_symbol::text ORDER BY pick_rank) AS symbols
+candidates AS (
+    SELECT date,
+           array_agg(stock_symbol::text ORDER BY pick_rank) AS symbols,
+           array_agg(ret::float8 ORDER BY pick_rank) AS returns
     FROM picks
     WHERE pick_rank <= $5
     GROUP BY date
 )
 SELECT b.date,
-       COALESCE(c.holdings, 0) AS holdings,
-       c.avg_ret AS avg_return,
        b.avg_ret AS benchmark_return,
        (CASE $4::int
             WHEN 5 THEN e.return_5d
@@ -146,9 +150,10 @@ SELECT b.date,
             WHEN 120 THEN e.return_120d
             ELSE e.return_240d
         END)::float8 AS etf_return,
-       COALESCE(c.symbols, ARRAY[]::text[]) AS symbols
+       COALESCE(c.symbols, ARRAY[]::text[]) AS candidates,
+       COALESCE(c.returns, ARRAY[]::float8[]) AS candidate_returns
 FROM bench b
-LEFT JOIN chosen c ON c.date = b.date
+LEFT JOIN candidates c ON c.date = b.date
 LEFT JOIN daily_forward_return e ON e.date = b.date AND e.stock_symbol = '0050'
 WHERE b.samples > 0
 ORDER BY b.date
@@ -172,8 +177,18 @@ const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     )
 );
 
-/// [`BACKTEST_SQL`] 的一列：一期的結果；`symbols` 是全部持股，依相對強度由高到低。
+/// [`BACKTEST_SQL`] 的一列：換股日、基準與依相對強度由高到低的候選股（與報酬一一對應）。
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
+struct CandidateRow {
+    date: NaiveDate,
+    benchmark_return: Option<f64>,
+    etf_return: Option<f64>,
+    candidates: Vec<String>,
+    candidate_returns: Vec<Option<f64>>,
+}
+
+/// 一期的結果；`symbols` 是全部持股，依相對強度由高到低。
+#[derive(Debug, Clone, Default, PartialEq)]
 struct PeriodRow {
     date: NaiveDate,
     holdings: i64,
@@ -214,6 +229,13 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     let limit = params.limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "limit 必須介於 1 至 100");
+    }
+    let keep_rank = params.keep_rank.unwrap_or(limit);
+    if !(limit..=MAX_KEEP_RANK).contains(&keep_rank) {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "keep_rank 必須介於 limit 至 200",
+        );
     }
     let fee_discount = params.fee_discount.unwrap_or(1.0);
     if !(0.0..=1.0).contains(&fee_discount) {
@@ -270,7 +292,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     .bind(to)
     .bind(market_id)
     .bind(i32::from(hold_days))
-    .bind(i64::from(limit))
+    .bind(i64::from(keep_rank))
     .bind(params.industry.as_deref())
     .bind(params.min_rs_score.map(i16::from))
     .bind(params.max_rs_score.map(i16::from))
@@ -281,10 +303,11 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
             .bind(params.min_foreign_streak.map(i64::from))
             .bind(params.min_trust_streak.map(i64::from));
     }
-    let rows: Vec<PeriodRow> = match query.fetch_all(pool).await {
+    let candidates: Vec<CandidateRow> = match query.fetch_all(pool).await {
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
+    let rows = select_holdings(candidates, usize::from(limit), usize::from(keep_rank));
     let costs = trading_costs(&rows, fee_discount);
 
     Json(ScreenBacktestResponse {
@@ -293,6 +316,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         market: market.to_owned(),
         hold_days,
         limit,
+        keep_rank,
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
@@ -356,6 +380,55 @@ fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<PeriodCost> {
             PeriodCost {
                 turnover: bought,
                 net_return: row.avg_return.unwrap_or(0.0) - sold * (fee + TAX_RATE) - bought * fee,
+            }
+        })
+        .collect()
+}
+
+/// 依候選股決定每期持股：上一期持有、這期仍符合條件且排在前 `keep_rank` 名的股票續抱，
+/// 其餘名額依相對強度由高到低補滿 `limit` 檔；`keep_rank` 等於 `limit` 時就是每期取前 `limit` 檔。
+///
+/// 平均報酬只算有報酬的持股（之後完全沒有收盤的股票不列入），全部都沒有報酬為 `None`。
+fn select_holdings(rows: Vec<CandidateRow>, limit: usize, keep_rank: usize) -> Vec<PeriodRow> {
+    let mut previous: Vec<String> = Vec::new();
+    rows.into_iter()
+        .map(|row| {
+            let mut picked: Vec<usize> = row
+                .candidates
+                .iter()
+                .take(keep_rank)
+                .enumerate()
+                .filter(|(_, symbol)| previous.contains(symbol))
+                .map(|(index, _)| index)
+                .take(limit)
+                .collect();
+            for index in 0..row.candidates.len() {
+                if picked.len() >= limit {
+                    break;
+                }
+                if !picked.contains(&index) {
+                    picked.push(index);
+                }
+            }
+            picked.sort_unstable();
+
+            let returns: Vec<f64> = picked
+                .iter()
+                .filter_map(|&index| row.candidate_returns.get(index).copied().flatten())
+                .collect();
+            let symbols: Vec<String> = picked
+                .iter()
+                .map(|&index| row.candidates[index].clone())
+                .collect();
+            previous.clone_from(&symbols);
+            PeriodRow {
+                date: row.date,
+                holdings: symbols.len() as i64,
+                avg_return: (!returns.is_empty())
+                    .then(|| returns.iter().sum::<f64>() / returns.len() as f64),
+                benchmark_return: row.benchmark_return,
+                etf_return: row.etf_return,
+                symbols,
             }
         })
         .collect()
@@ -430,8 +503,16 @@ fn summarize(rows: &[PeriodRow], costs: &[PeriodCost], hold_days: u16) -> Backte
             etf_annualized_return: None,
             etf_max_drawdown: None,
             beat_etf_rate: None,
+            volatility: None,
+            sharpe_ratio: None,
+            benchmark_volatility: None,
+            benchmark_sharpe_ratio: None,
+            etf_volatility: None,
+            etf_sharpe_ratio: None,
         };
     }
+    let per_year = TRADING_DAYS_PER_YEAR / f64::from(hold_days);
+    let net: Vec<f64> = costs.iter().map(|cost| cost.net_return).collect();
     let count = periods as f64;
     let years = count * f64::from(hold_days) / TRADING_DAYS_PER_YEAR;
     let annualize = |equity: f64| (equity.powf(1.0 / years) - 1.0) * 100.0;
@@ -481,7 +562,31 @@ fn summarize(rows: &[PeriodRow], costs: &[PeriodCost], hold_days: u16) -> Backte
         etf_max_drawdown: has_etf.then(|| round2(etf_drawdown * 100.0)),
         beat_etf_rate: has_etf
             .then(|| ratio(returns.iter().zip(&etf).filter(|(r, e)| r > e).count())),
+        volatility: risk(&returns, per_year).map(|(volatility, _)| volatility),
+        sharpe_ratio: risk(&net, per_year).and_then(|(_, sharpe)| sharpe),
+        benchmark_volatility: risk(&benchmarks, per_year).map(|(volatility, _)| volatility),
+        benchmark_sharpe_ratio: risk(&benchmarks, per_year).and_then(|(_, sharpe)| sharpe),
+        etf_volatility: risk(&etf, per_year)
+            .filter(|_| has_etf)
+            .map(|(volatility, _)| volatility),
+        etf_sharpe_ratio: risk(&etf, per_year)
+            .filter(|_| has_etf)
+            .and_then(|(_, sharpe)| sharpe),
     }
+}
+
+/// 每期報酬（%）的年化波動率（%）與夏普值（無風險利率 0），`per_year` 為每年期數；不足 2 期回
+/// `None`，報酬沒有波動時夏普值為 `None`。兩者都四捨五入到小數兩位。
+fn risk(returns: &[f64], per_year: f64) -> Option<(f64, Option<f64>)> {
+    if returns.len() < 2 {
+        return None;
+    }
+    let count = returns.len() as f64;
+    let mean = returns.iter().sum::<f64>() / count;
+    let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (count - 1.0);
+    let deviation = variance.sqrt();
+    let sharpe = (deviation > 0.0).then(|| round2(mean / deviation * per_year.sqrt()));
+    Some((round2(deviation * per_year.sqrt()), sharpe))
 }
 
 /// 依換股日的年度彙總，由舊到新；`costs` 與 `rows` 一一對應。

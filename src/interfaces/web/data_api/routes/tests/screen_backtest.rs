@@ -219,6 +219,32 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(free["periods"][0]["return_after_costs"], 6.0);
     assert_eq!(free["periods"][1]["return_after_costs"], 7.85);
 
+    // 換股緩衝：只持 1 檔、緩衝 3 名。03-08 的 BA 掉到第 3 名仍續抱（報酬 3），不換成第 1 名的 BB。
+    let (status, json) = query("limit=1&keep_rank=3").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["keep_rank"], 3);
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 1, Some(10.0)),
+            ("1993-03-08".to_owned(), 1, Some(3.0)),
+        ]
+    );
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BA"])
+    );
+    assert_eq!(json["periods"][1]["turnover"], 0.0);
+    // 緩衝 2 名時 BA（第 3 名）賣出、換成 BB。
+    let (_, json) = query("limit=1&keep_rank=2").await;
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BB"])
+    );
+    // 只有兩期，報酬有波動才有夏普值。
+    assert!(json["summary"]["volatility"].as_f64().is_some());
+    assert!(json["summary"]["sharpe_ratio"].as_f64().is_some());
+
     // 上櫃只有 BC：03-08 母體沒有任何報酬，那一期不列入。
     let (_, json) = query("market=tpex").await;
     assert_eq!(periods(&json), [("1993-03-01".to_owned(), 1, Some(2.0))]);
@@ -276,6 +302,8 @@ async fn screen_backtest_endpoint_db_semantics() {
     for (extra, status) in [
         ("limit=0", StatusCode::UNPROCESSABLE_ENTITY),
         ("limit=101", StatusCode::UNPROCESSABLE_ENTITY),
+        ("limit=5&keep_rank=4", StatusCode::UNPROCESSABLE_ENTITY),
+        ("keep_rank=201", StatusCode::UNPROCESSABLE_ENTITY),
         ("fee_discount=1.5", StatusCode::UNPROCESSABLE_ENTITY),
         ("fee_discount=-0.1", StatusCode::UNPROCESSABLE_ENTITY),
         ("market=otc", StatusCode::UNPROCESSABLE_ENTITY),

@@ -260,6 +260,7 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     assert!(response["periods"].to_string().contains("BacktestPeriod"));
     assert!(response["years"].to_string().contains("BacktestYear"));
     assert_eq!(response["etf_benchmark"]["type"], "string");
+    assert_eq!(response["keep_rank"]["type"], "integer");
     let year = &schemas["BacktestYear"]["properties"];
     assert_eq!(year["year"]["type"], "integer");
     assert!(year["etf_total_return"].to_string().contains("null"));
@@ -283,6 +284,12 @@ fn openapi_screen_backtest_schema_pins_field_names() {
         "etf_annualized_return",
         "etf_max_drawdown",
         "beat_etf_rate",
+        "volatility",
+        "sharpe_ratio",
+        "benchmark_volatility",
+        "benchmark_sharpe_ratio",
+        "etf_volatility",
+        "etf_sharpe_ratio",
     ] {
         assert!(summary[field].to_string().contains("null"), "{field}");
     }
