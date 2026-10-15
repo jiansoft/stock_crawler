@@ -9,6 +9,7 @@ fn day(y: i32, m: u32, d: u32) -> NaiveDate {
 fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
     PeriodRow {
         date: day(2024, 1, d),
+        market_filtered: false,
         holdings,
         avg_return: avg,
         benchmark_return: Some(benchmark),
@@ -277,25 +278,27 @@ fn period_rounds_returns() {
     assert_eq!(period((row(3, 0, None, 1.0), cash)).avg_return, None);
 }
 
-/// 兩種 SQL 都以 `WITH` 開頭，籌碼版含連續買超的 CTE 與 `$11`／`$12`。
+/// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`，籌碼版另含連續買超的 CTE 與 `$12`／`$13`。
 #[test]
 fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.trim_start().starts_with("WITH\ndays AS ("));
-    assert!(!BACKTEST_SQL.contains("$11"));
+    assert!(BACKTEST_SQL.contains("COALESCE($11::int, 1)"));
+    assert!(!BACKTEST_SQL.contains("$12"));
     assert!(
         BACKTEST_WITH_CHIP_SQL
             .trim_start()
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $11"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $12"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $12"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $13"));
 }
 
 /// 一期候選：代號依相對強度由高到低，報酬一一對應。
 fn candidates(d: u32, list: &[(&str, Option<f64>)]) -> CandidateRow {
     CandidateRow {
         date: day(2024, 1, d),
+        market_ok: true,
         benchmark_return: Some(1.0),
         etf_return: Some(0.5),
         candidates: list
@@ -385,4 +388,30 @@ fn risk_annualizes_volatility_and_sharpe() {
     assert_eq!(sharpe, Some(round2(2.0_f64.sqrt())));
     assert_eq!(risk(&[3.0], 4.0), None);
     assert_eq!(risk(&[1.0, 1.0, 1.0], 4.0), Some((0.0, None)));
+}
+
+/// 大盤濾網沒過的那期空手並賣光；下一期重新依排名買進（不算續抱）。
+#[test]
+fn select_holdings_goes_to_cash_when_market_filtered() {
+    let mut filtered = candidates(3, &[("A", Some(5.0)), ("B", Some(1.0))]);
+    filtered.market_ok = false;
+    let rows = select_holdings(
+        vec![
+            candidates(2, &[("A", Some(1.0)), ("B", Some(2.0))]),
+            filtered,
+            candidates(4, &[("C", Some(3.0)), ("A", Some(4.0))]),
+        ],
+        1,
+        2,
+    );
+    assert_eq!(
+        (rows[0].symbols.clone(), rows[0].market_filtered),
+        (vec!["A".to_owned()], false)
+    );
+    assert!(rows[1].market_filtered && rows[1].symbols.is_empty());
+    assert_eq!((rows[1].holdings, rows[1].avg_return), (0, None));
+    // 上一期空手，A 雖在緩衝內也不是續抱，改買第 1 名 C。
+    assert_eq!(rows[2].symbols, ["C"]);
+    let summary = summarize(&rows, &free(&rows), 20);
+    assert_eq!(summary.market_filtered_periods, 1);
 }

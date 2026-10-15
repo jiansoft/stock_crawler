@@ -27,6 +27,9 @@ pub(crate) struct ScreenBacktestParams {
     /// 且排在前 `keep_rank` 名就續抱，空出的名額才依相對強度補滿，用來降低換手與交易成本。
     #[param(minimum = 1, maximum = 200)]
     pub(crate) keep_rank: Option<u8>,
+    /// 大盤濾網：換股日加權指數收盤低於自己的 N 日均線（20、60、120 或 240 個交易日）時這期空手，
+    /// 上一期持股全部賣出；省略為不濾。
+    pub(crate) market_filter_ma: Option<u16>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -62,8 +65,10 @@ pub(crate) struct ScreenBacktestParams {
 pub(crate) struct BacktestPeriod {
     /// 換股日（收盤買進）。
     pub(crate) date: String,
-    /// 這期持有的檔數；0 代表沒有符合條件的股票，這期空手（報酬 0）。
+    /// 這期持有的檔數；0 代表沒有符合條件的股票或大盤濾網沒過，這期空手（報酬 0）。
     pub(crate) holdings: i64,
+    /// 換股日加權指數低於濾網均線而空手。
+    pub(crate) market_filtered: bool,
     /// 持股等權平均報酬（%），未扣交易成本；期間內下市的股票算到最後一筆收盤，之後完全沒有收盤的
     /// 股票不列入平均；空手為 `null`。
     pub(crate) avg_return: Option<f64>,
@@ -86,6 +91,8 @@ pub(crate) struct BacktestSummary {
     pub(crate) periods: i64,
     /// 有持股的期數。
     pub(crate) invested_periods: i64,
+    /// 因大盤濾網空手的期數。
+    pub(crate) market_filtered_periods: i64,
     /// 有持股的期平均持有檔數。
     pub(crate) avg_holdings: Option<f64>,
     /// 有持股的期平均換手率（0–1）。
@@ -175,6 +182,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) limit: u8,
     /// 續抱的排名緩衝；等於 `limit` 為不緩衝。
     pub(crate) keep_rank: u8,
+    /// 大盤濾網的均線天數；未設定為 `null`。
+    pub(crate) market_filter_ma: Option<u16>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。
