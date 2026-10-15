@@ -38,6 +38,13 @@ async fn cleanup(pool: &sqlx::PgPool) {
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
     }
+    let _ = sqlx::query(
+        "DELETE FROM daily_forward_return WHERE stock_symbol = '0050' AND date BETWEEN $1 AND $2",
+    )
+    .bind(day(1))
+    .bind(day(31))
+    .execute(pool)
+    .await;
 }
 
 async fn seed(pool: &sqlx::PgPool) {
@@ -83,6 +90,14 @@ async fn seed(pool: &sqlx::PgPool) {
         .await
         .expect("種入報酬");
     }
+    // 0050：03-01 買進 5 日報酬 4%；03-08 沒有資料（彙總時算 0）。
+    sqlx::query(
+        "INSERT INTO daily_forward_return (date, stock_symbol, return_5d) VALUES ($1, '0050', 4)",
+    )
+    .bind(day(1))
+    .execute(pool)
+    .await
+    .expect("種入 0050 報酬");
     // BB 在 03-03 出現 KD 黃金交叉（落在 03-08 換股的回看視窗 03-02～03-08 內）。
     sqlx::query(
         "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
@@ -174,6 +189,23 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(summary["win_rate"], 1.0);
     assert_eq!(summary["beat_market_rate"], 1.0);
     assert_eq!(summary["max_drawdown"], 0.0);
+    // 0050：03-01 報酬 4%、03-08 缺值算 0；兩期都勝過 0050。
+    assert_eq!(json["etf_benchmark"], "0050");
+    assert_eq!(json["periods"][0]["etf_return"], 4.0);
+    assert!(json["periods"][1]["etf_return"].is_null());
+    assert_eq!(summary["etf_total_return"], 4.0);
+    assert_eq!(summary["etf_max_drawdown"], 0.0);
+    assert_eq!(summary["beat_etf_rate"], 1.0);
+    // 年度彙總：兩期都在 1993 年。
+    let years = json["years"].as_array().expect("years array");
+    assert_eq!(years.len(), 1);
+    assert_eq!(
+        (years[0]["year"].as_i64(), years[0]["periods"].as_i64()),
+        (Some(1993), Some(2))
+    );
+    assert_eq!(years[0]["total_return"], 14.48);
+    assert_eq!(years[0]["benchmark_total_return"], 8.31);
+    assert_eq!(years[0]["etf_total_return"], 4.0);
     // 交易成本：03-01 全部買進（0.1425%）；03-08 賣出 BA（一半，0.4425%）、買進 BB（一半，0.1425%）。
     assert_eq!(json["fee_discount"], 1.0);
     assert_eq!(json["periods"][0]["turnover"], 1.0);

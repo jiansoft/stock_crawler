@@ -12,7 +12,18 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
         holdings,
         avg_return: avg,
         benchmark_return: Some(benchmark),
+        etf_return: None,
         symbols: Vec::new(),
+    }
+}
+
+/// 指定年月日與 0050 報酬的一期。
+fn dated(date: NaiveDate, avg: Option<f64>, benchmark: f64, etf: Option<f64>) -> PeriodRow {
+    PeriodRow {
+        date,
+        holdings: i64::from(avg.is_some()),
+        etf_return: etf,
+        ..row(2, 0, avg, benchmark)
     }
 }
 
@@ -106,6 +117,71 @@ fn summarize_counts_cash_periods_as_zero() {
     assert_eq!(summary.total_return_after_costs, Some(8.68));
     assert_eq!(summary.max_drawdown_after_costs, Some(-5.0));
     assert_eq!(summary.avg_turnover, Some(0.0));
+    // 全期都沒有 0050 資料時，0050 相關欄位為 null。
+    assert!(summary.etf_total_return.is_none() && summary.beat_etf_rate.is_none());
+}
+
+/// 0050 基準：缺值的期數算 0，勝過 0050 以期數計。
+#[test]
+fn summarize_compares_with_etf() {
+    let rows = [
+        dated(day(2024, 1, 2), Some(10.0), 5.0, Some(4.0)),
+        dated(day(2024, 2, 1), Some(-2.0), -1.0, Some(-5.0)),
+        dated(day(2024, 3, 1), Some(1.0), 0.0, None),
+        dated(day(2024, 4, 1), None, 2.0, Some(2.0)),
+    ];
+    let summary = summarize(&rows, &free(&rows), 20);
+    // 1.04 × 0.95 × 1 × 1.02 = 1.00776。
+    assert_eq!(summary.etf_total_return, Some(0.78));
+    // 1.04 → 0.988：回撤 -5%。
+    assert_eq!(summary.etf_max_drawdown, Some(-5.0));
+    // 10 > 4、-2 > -5、1 > 0（缺值算 0）；空手 0 < 2 不算。
+    assert_eq!(summary.beat_etf_rate, Some(0.75));
+    let years = 80.0 / 245.0;
+    assert_eq!(
+        summary.etf_annualized_return,
+        Some(round2((1.00776_f64.powf(1.0 / years) - 1.0) * 100.0))
+    );
+}
+
+/// 年度彙總：依換股日年度分組、各年從淨值 1 起算；整年缺 0050 資料為 null。
+#[test]
+fn yearly_groups_by_rebalance_year() {
+    let rows = [
+        dated(day(2022, 11, 1), Some(10.0), 5.0, None),
+        dated(day(2022, 12, 1), Some(-10.0), -2.0, None),
+        dated(day(2023, 1, 3), Some(5.0), 6.0, Some(3.0)),
+        dated(day(2023, 6, 1), None, -1.0, Some(-1.0)),
+        dated(day(2023, 12, 29), Some(2.0), 1.0, None),
+    ];
+    let costs: Vec<PeriodCost> = free(&rows)
+        .into_iter()
+        .map(|cost| PeriodCost {
+            net_return: cost.net_return - 1.0,
+            ..cost
+        })
+        .collect();
+    let years = yearly(&rows, &costs);
+    assert_eq!(years.len(), 2);
+    let y2022 = &years[0];
+    assert_eq!((y2022.year, y2022.periods), (2022, 2));
+    // 1.1 × 0.9 = 0.99。
+    assert_eq!(y2022.total_return, -1.0);
+    // 1.09 × 0.89 = 0.9701。
+    assert_eq!(y2022.total_return_after_costs, -2.99);
+    // 1.05 × 0.98 = 1.029。
+    assert_eq!(y2022.benchmark_total_return, 2.9);
+    assert_eq!(y2022.etf_total_return, None);
+    assert_eq!((y2022.win_rate, y2022.beat_market_rate), (0.5, 0.5));
+    let y2023 = &years[1];
+    assert_eq!((y2023.year, y2023.periods), (2023, 3));
+    // 1.05 × 1 × 1.02 = 1.071。
+    assert_eq!(y2023.total_return, 7.1);
+    // 1.03 × 0.99 × 1 = 1.0197。
+    assert_eq!(y2023.etf_total_return, Some(1.97));
+    // 報酬 > 0：5、2；勝過基準：0 > -1、2 > 1。
+    assert_eq!((y2023.win_rate, y2023.beat_market_rate), (0.6667, 0.6667));
+    assert!(yearly(&[], &[]).is_empty());
 }
 
 /// 換股成本：第一期全部買進；賣出付手續費與證交稅、買進付手續費；續抱不計；空手時賣光。
@@ -166,6 +242,7 @@ fn summarize_without_periods_is_empty() {
     assert!(summary.total_return.is_none() && summary.annualized_return.is_none());
     assert!(summary.max_drawdown.is_none() && summary.avg_holdings.is_none());
     assert!(summary.total_return_after_costs.is_none() && summary.avg_turnover.is_none());
+    assert!(summary.etf_total_return.is_none() && summary.etf_max_drawdown.is_none());
 }
 
 /// 每期輸出：報酬四捨五入到小數兩位，空手為 `null`；代號只列前 10 檔。
@@ -183,6 +260,7 @@ fn period_rounds_returns() {
     assert_eq!(output.return_after_costs, 1.09);
     assert_eq!(output.turnover, 0.3333);
     assert_eq!(output.benchmark_return, Some(-0.56));
+    assert_eq!(output.etf_return, None);
     assert_eq!(output.symbols.len(), 10);
     assert_eq!(output.symbols[0], "2300");
     let cash = PeriodCost {

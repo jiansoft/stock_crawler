@@ -15,7 +15,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 
 use super::signal_history::{chip_streak_ctes, validate_rs_range, validate_streaks};
 use super::{
@@ -24,7 +24,8 @@ use super::{
 };
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
-    BacktestPeriod, BacktestSummary, ErrorBody, ScreenBacktestParams, ScreenBacktestResponse,
+    BacktestPeriod, BacktestSummary, BacktestYear, ErrorBody, ScreenBacktestParams,
+    ScreenBacktestResponse,
 };
 
 /// 可選的持有天數，與 `daily_forward_return` 的報酬欄位對應。
@@ -45,6 +46,9 @@ const FEE_RATE: f64 = 0.1425;
 /// 股票證交稅率（%），賣出時付。
 const TAX_RATE: f64 = 0.3;
 
+/// 可投資的大盤基準：元大台灣 50（0050），SQL 內以字面值寫死，改這裡要一併改 [`backtest_sql`]。
+const ETF_BENCHMARK: &str = "0050";
+
 /// 輸出每期前幾檔代號。
 const LISTED_SYMBOLS: usize = 10;
 
@@ -60,6 +64,7 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// - `rebal`：起日之後每隔 `$4` 個交易日的換股日；`window_start` 是含當天往前第 `$4` 個交易日，
 ///   訊號條件看 `window_start`～換股日。
 /// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入。
+/// - `etf_return`：同一天買進 [`ETF_BENCHMARK`] 持有同樣天數的還原報酬，作為實際買得到的大盤基準。
 macro_rules! backtest_sql {
     ($with:literal, $chip_join:literal, $chip_filter:literal) => {
         concat!(
@@ -134,9 +139,17 @@ SELECT b.date,
        COALESCE(c.holdings, 0) AS holdings,
        c.avg_ret AS avg_return,
        b.avg_ret AS benchmark_return,
+       (CASE $4::int
+            WHEN 5 THEN e.return_5d
+            WHEN 20 THEN e.return_20d
+            WHEN 60 THEN e.return_60d
+            WHEN 120 THEN e.return_120d
+            ELSE e.return_240d
+        END)::float8 AS etf_return,
        COALESCE(c.symbols, ARRAY[]::text[]) AS symbols
 FROM bench b
 LEFT JOIN chosen c ON c.date = b.date
+LEFT JOIN daily_forward_return e ON e.date = b.date AND e.stock_symbol = '0050'
 WHERE b.samples > 0
 ORDER BY b.date
 "#
@@ -166,6 +179,8 @@ struct PeriodRow {
     holdings: i64,
     avg_return: Option<f64>,
     benchmark_return: Option<f64>,
+    /// [`ETF_BENCHMARK`] 同期的還原報酬；尚未上市或缺資料為 `None`。
+    etf_return: Option<f64>,
     symbols: Vec<String>,
 }
 
@@ -287,7 +302,9 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         kind: params.kind.clone(),
         fee_discount,
         adjusted: true,
+        etf_benchmark: ETF_BENCHMARK.to_owned(),
         summary: summarize(&rows, &costs, hold_days),
+        years: yearly(&rows, &costs),
         periods: rows.into_iter().zip(costs).map(period).collect(),
     })
     .into_response()
@@ -354,6 +371,7 @@ fn period((mut row, cost): (PeriodRow, PeriodCost)) -> BacktestPeriod {
         return_after_costs: round2(cost.net_return),
         turnover: round4(cost.turnover),
         benchmark_return: row.benchmark_return.map(round2),
+        etf_return: row.etf_return.map(round2),
         symbols: row.symbols,
     }
 }
@@ -384,6 +402,11 @@ fn summarize(rows: &[PeriodRow], costs: &[PeriodCost], hold_days: u16) -> Backte
         .iter()
         .map(|row| row.benchmark_return.unwrap_or(0.0))
         .collect();
+    let etf: Vec<f64> = rows
+        .iter()
+        .map(|row| row.etf_return.unwrap_or(0.0))
+        .collect();
+    let has_etf = rows.iter().any(|row| row.etf_return.is_some());
     if periods == 0 {
         return BacktestSummary {
             periods: 0,
@@ -403,6 +426,10 @@ fn summarize(rows: &[PeriodRow], costs: &[PeriodCost], hold_days: u16) -> Backte
             beat_market_rate: None,
             avg_period_return: None,
             avg_benchmark_return: None,
+            etf_total_return: None,
+            etf_annualized_return: None,
+            etf_max_drawdown: None,
+            beat_etf_rate: None,
         };
     }
     let count = periods as f64;
@@ -411,6 +438,7 @@ fn summarize(rows: &[PeriodRow], costs: &[PeriodCost], hold_days: u16) -> Backte
     let (equity, drawdown) = compound(returns.iter().copied());
     let (benchmark_equity, benchmark_drawdown) = compound(benchmarks.iter().copied());
     let (net_equity, net_drawdown) = compound(costs.iter().map(|cost| cost.net_return));
+    let (etf_equity, etf_drawdown) = compound(etf.iter().copied());
     let invested_turnover: Vec<f64> = rows
         .iter()
         .zip(costs)
@@ -448,7 +476,58 @@ fn summarize(rows: &[PeriodRow], costs: &[PeriodCost], hold_days: u16) -> Backte
         )),
         avg_period_return: Some(round2(returns.iter().sum::<f64>() / count)),
         avg_benchmark_return: Some(round2(benchmarks.iter().sum::<f64>() / count)),
+        etf_total_return: has_etf.then(|| round2((etf_equity - 1.0) * 100.0)),
+        etf_annualized_return: has_etf.then(|| round2(annualize(etf_equity))),
+        etf_max_drawdown: has_etf.then(|| round2(etf_drawdown * 100.0)),
+        beat_etf_rate: has_etf
+            .then(|| ratio(returns.iter().zip(&etf).filter(|(r, e)| r > e).count())),
     }
+}
+
+/// 依換股日的年度彙總，由舊到新；`costs` 與 `rows` 一一對應。
+fn yearly(rows: &[PeriodRow], costs: &[PeriodCost]) -> Vec<BacktestYear> {
+    let paired: Vec<(&PeriodRow, &PeriodCost)> = rows.iter().zip(costs).collect();
+    paired
+        .chunk_by(|(a, _), (b, _)| a.date.year() == b.date.year())
+        .map(year_summary)
+        .collect()
+}
+
+/// 同一年的各期：各年各自從淨值 1 起算，空手與缺值的報酬算 0。
+fn year_summary(chunk: &[(&PeriodRow, &PeriodCost)]) -> BacktestYear {
+    let count = chunk.len() as f64;
+    let returns: Vec<f64> = chunk
+        .iter()
+        .map(|(row, _)| row.avg_return.unwrap_or(0.0))
+        .collect();
+    let benchmarks: Vec<f64> = chunk
+        .iter()
+        .map(|(row, _)| row.benchmark_return.unwrap_or(0.0))
+        .collect();
+    let has_etf = chunk.iter().any(|(row, _)| row.etf_return.is_some());
+    BacktestYear {
+        year: chunk[0].0.date.year(),
+        periods: chunk.len() as i64,
+        total_return: cumulative(returns.iter().copied()),
+        total_return_after_costs: cumulative(chunk.iter().map(|(_, cost)| cost.net_return)),
+        benchmark_total_return: cumulative(benchmarks.iter().copied()),
+        etf_total_return: has_etf
+            .then(|| cumulative(chunk.iter().map(|(row, _)| row.etf_return.unwrap_or(0.0)))),
+        win_rate: round4(returns.iter().filter(|r| **r > 0.0).count() as f64 / count),
+        beat_market_rate: round4(
+            returns
+                .iter()
+                .zip(&benchmarks)
+                .filter(|(r, b)| r > b)
+                .count() as f64
+                / count,
+        ),
+    }
+}
+
+/// 各期報酬（%）連乘後的累積報酬（%），四捨五入到小數兩位。
+fn cumulative(returns: impl IntoIterator<Item = f64>) -> f64 {
+    round2((compound(returns).0 - 1.0) * 100.0)
 }
 
 #[cfg(test)]
