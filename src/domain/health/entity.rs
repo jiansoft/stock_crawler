@@ -31,6 +31,18 @@ pub struct ValuationRatioZeroCount {
     pub pb_zero: i64,
 }
 
+/// 未來報酬表中，短天期報酬缺漏的基準日。
+///
+/// 「長天期有值、短天期卻是空的」代表回補時結束日沒有涵蓋這個基準日之後的 5／20 個交易日，
+/// 個股停牌也會造成零星缺值，所以只列出缺漏列數達門檻的基準日。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForwardReturnGap {
+    /// 基準日。
+    pub date: NaiveDate,
+    /// 較短天期為空、較長天期有值的列數。
+    pub rows: i64,
+}
+
 /// 一次健康檢查量到的全部數字。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DataHealthSnapshot {
@@ -54,4 +66,6 @@ pub struct DataHealthSnapshot {
     pub latest_revenue_month: Option<i64>,
     /// 檢查期間內每個交易日、每個市場的本益比與股價淨值比為 0 的列數。
     pub valuation_ratio_zeros: Vec<ValuationRatioZeroCount>,
+    /// 未來報酬表（整張表，從最早有 5 日報酬的基準日起）短天期缺漏的基準日，由舊到新。
+    pub forward_return_gaps: Vec<ForwardReturnGap>,
 }
