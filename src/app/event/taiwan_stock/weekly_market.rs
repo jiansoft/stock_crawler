@@ -5,11 +5,13 @@
 //! - 產業相對強度：成分股 RS 中位數（見 [`crate::domain::quote::relative_strength`]）最強、最弱，
 //!   以及與 [`WEEK_DAYS`] 個交易日前相比轉強、轉弱最多的產業；成分股少於 [`MIN_INDUSTRY_STOCKS`]
 //!   檔的產業不列。
+//! - 近 [`WEEK_DAYS`] 個交易日相對強度站上、跌破 80 與 50 分的家數（每檔每個門檻只取最後一次
+//!   穿越），各附分數最高（站上）或最低（跌破）的幾檔。
 //! - 外資、投信近 [`WEEK_DAYS`] 個交易日在各產業的估計淨買賣金額（見 [`crate::domain::chip::flow`]），
 //!   淨流入與淨流出最多的產業。
 //! - 持股（普通股）的 RS 與 [`WEEK_DAYS`] 個交易日前相比上升、下降最多的幾檔。
 //!
-//! 三段各自查詢，某段失敗只記錄警告並略過；三段都沒有資料時不發送。
+//! 各段各自查詢，某段失敗只記錄警告並略過；都沒有資料時不發送。
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -25,7 +27,8 @@ use crate::{
         quote::{
             forward_return::ForwardReturnRepository,
             relative_strength::{
-                RelativeStrengthDay, RelativeStrengthQuery, ScoredUniverseQuery, group_by_industry,
+                CrossDirection, PeriodCrossing, RelativeStrengthCrossingQuery, RelativeStrengthDay,
+                RelativeStrengthQuery, ScoredUniverseQuery, THRESHOLDS, group_by_industry,
                 median_score,
             },
         },
@@ -69,6 +72,14 @@ struct FlowSection {
     industries: Vec<(String, f64)>,
 }
 
+/// 一週的相對強度穿越：期間與每檔每個門檻的最後一次穿越。
+#[derive(Debug, Clone, PartialEq)]
+struct CrossingSection {
+    from: NaiveDate,
+    to: NaiveDate,
+    crossings: Vec<PeriodCrossing>,
+}
+
 /// 一檔持股的 RS 一週變化。
 #[derive(Debug, Clone, PartialEq)]
 struct HoldingMove {
@@ -106,15 +117,24 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-/// 查詢三段資料並組出訊息；某段失敗只記錄警告；都沒有資料時回 `None`。
+/// 查詢各段資料並組出訊息；某段失敗只記錄警告；都沒有資料時回 `None`。
 async fn run(
-    quote: &(impl ScoredUniverseQuery + RelativeStrengthQuery + ForwardReturnRepository),
+    quote: &(
+         impl ScoredUniverseQuery
+         + RelativeStrengthQuery
+         + RelativeStrengthCrossingQuery
+         + ForwardReturnRepository
+     ),
     chip: &impl ChipFlowQuery,
     date: NaiveDate,
     symbols: &BTreeSet<String>,
 ) -> Option<String> {
     let industries = industry_section(quote, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取產業相對強度失敗: {why:#}");
+        None
+    });
+    let crossings = crossing_section(quote, date).await.unwrap_or_else(|why| {
+        tracing::warn!("每週市場摘要：讀取相對強度穿越失敗: {why:#}");
         None
     });
     let mut flows = Vec::new();
@@ -145,7 +165,75 @@ async fn run(
         symbols.len(),
         moves.len()
     );
-    build_message(industries.as_ref(), &flows, &moves, holdings::stock_name)
+    build_message(
+        industries.as_ref(),
+        crossings.as_ref(),
+        &flows,
+        &moves,
+        holdings::stock_name,
+    )
+}
+
+/// 最近 [`WEEK_DAYS`] 個交易日的相對強度穿越；沒有交易日回 `None`。
+async fn crossing_section(
+    quote: &(impl RelativeStrengthCrossingQuery + ForwardReturnRepository),
+    date: NaiveDate,
+) -> Result<Option<CrossingSection>> {
+    let dates = quote.fetch_trading_dates(date, WEEK_DAYS).await?;
+    let (Some(&to), Some(&from)) = (dates.first(), dates.last()) else {
+        return Ok(None);
+    };
+    let crossings = quote.fetch_period_crossings(from, to).await?;
+    Ok(Some(CrossingSection {
+        from,
+        to,
+        crossings,
+    }))
+}
+
+/// 穿越一行，例如「站上 80 分 45 檔：2330 台積電 92、…」；沒有股票時回 `None`。站上依最新分數
+/// 由高到低、跌破由低到高列前 [`TOP`] 檔（沒有最新分數的排最後）。
+fn crossing_line(
+    crossings: &[PeriodCrossing],
+    threshold: u8,
+    direction: CrossDirection,
+    stock_name: &impl Fn(&str) -> String,
+) -> Option<String> {
+    let mut picked: Vec<&PeriodCrossing> = crossings
+        .iter()
+        .filter(|crossing| crossing.threshold == threshold && crossing.direction == direction)
+        .collect();
+    if picked.is_empty() {
+        return None;
+    }
+    picked.sort_by_key(|crossing| {
+        let score = crossing.latest_score.map(i16::from);
+        let key = match direction {
+            CrossDirection::Up => score.map(|score| -score),
+            CrossDirection::Down => score,
+        };
+        (key.is_none(), key, crossing.stock_symbol.clone())
+    });
+    let examples: Vec<String> = picked
+        .iter()
+        .take(TOP)
+        .map(|crossing| {
+            let name = stock_name(&crossing.stock_symbol);
+            match crossing.latest_score {
+                Some(score) => format!("{} {name} {score}", crossing.stock_symbol),
+                None => format!("{} {name}", crossing.stock_symbol),
+            }
+        })
+        .collect();
+    let verb = match direction {
+        CrossDirection::Up => "站上",
+        CrossDirection::Down => "跌破",
+    };
+    Some(format!(
+        "• {verb} {threshold} 分 {} 檔：{}",
+        picked.len(),
+        examples.join("、")
+    ))
 }
 
 /// 最新資料日與 [`WEEK_DAYS`] 個交易日前的產業 RS 中位數；沒有分數回 `None`。
@@ -236,6 +324,7 @@ fn hundred_million(amount: f64) -> String {
 /// 組出訊息；三段都沒有內容時回 `None`。
 fn build_message(
     industries: Option<&IndustrySection>,
+    crossings: Option<&CrossingSection>,
     flows: &[FlowSection],
     moves: &[HoldingMove],
     stock_name: impl Fn(&str) -> String,
@@ -289,6 +378,30 @@ fn build_message(
         let down = movers(&mut changed.iter().rev().filter(|(_, change)| *change < 0.0));
         if !down.is_empty() {
             lines.push(format!("• 轉弱：{down}"));
+        }
+    }
+
+    if let Some(section) = crossings {
+        let rows: Vec<String> = THRESHOLDS
+            .into_iter()
+            .flat_map(|threshold| {
+                [
+                    (threshold, CrossDirection::Up),
+                    (threshold, CrossDirection::Down),
+                ]
+            })
+            .filter_map(|(threshold, direction)| {
+                crossing_line(&section.crossings, threshold, direction, &stock_name)
+            })
+            .collect();
+        if !rows.is_empty() {
+            data_date.get_or_insert(section.to);
+            lines.push(String::new());
+            lines.push(format!(
+                "相對強度穿越（{}～{}，每檔只取最後一次；後面數字為最新分數）",
+                section.from, section.to
+            ));
+            lines.extend(rows);
         }
     }
 

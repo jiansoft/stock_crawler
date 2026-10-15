@@ -1,13 +1,17 @@
 //! 收盤後寫入每日相對強度。
 //!
-//! 回填未來報酬之後，以當天的近 60／120／240 日報酬對上市櫃股票（不含 ETF）計分排名，整天替換
+//! 回填未來報酬之後，以當天的近 60／120／240 日報酬對上市櫃普通股（不含 ETF、特別股）計分排名，整天替換
 //! `daily_relative_strength`（見 [`crate::domain::quote::relative_strength`]）。當天報酬還沒齊
 //! （全體計分退回前一個交易日）或不是交易日時不寫入。
 
-use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use std::collections::HashMap;
 
-use crate::domain::quote::relative_strength::{RelativeStrengthRepository, ScoredUniverseQuery};
+use anyhow::{Context, Result};
+use chrono::{Days, NaiveDate};
+
+use crate::domain::quote::relative_strength::{
+    RelativeStrengthQuery, RelativeStrengthRepository, ScoredUniverseQuery, crossing_signals,
+};
 use crate::infra::database::repository::quote::PgQuoteRepository;
 
 /// 計算並寫入 `date` 的每日相對強度，回傳寫入列數；當天沒有可計分的資料時回 0。
@@ -20,8 +24,11 @@ pub async fn calculate_relative_strength(date: NaiveDate) -> Result<u64> {
 }
 
 /// [`calculate_relative_strength`] 的本體，倉儲可替換以便測試。
+///
+/// 同時以前一個已寫入的交易日分數比對，寫入當天穿越 80、50 分的技術訊號（見
+/// [`crossing_signals`]），供訊號選股與訊號績效使用。
 pub(crate) async fn run(
-    repo: &(impl ScoredUniverseQuery + RelativeStrengthRepository),
+    repo: &(impl ScoredUniverseQuery + RelativeStrengthQuery + RelativeStrengthRepository),
     date: NaiveDate,
 ) -> Result<u64> {
     let Some((data_date, scored)) = repo
@@ -34,7 +41,19 @@ pub(crate) async fn run(
     if data_date != date {
         return Ok(0);
     }
-    repo.replace_relative_strength(date, &scored)
+    let symbols: Vec<String> = scored
+        .iter()
+        .map(|stock| stock.row.stock_symbol.clone())
+        .collect();
+    let previous: HashMap<String, u8> = repo
+        .fetch_relative_strength(date - Days::new(1), 1, &symbols)
+        .await
+        .context("讀取前一個交易日的相對強度失敗")?
+        .into_iter()
+        .map(|day| (day.stock_symbol, day.rs_score))
+        .collect();
+    let signals = crossing_signals(date, &previous, &scored);
+    repo.replace_relative_strength(date, &scored, &signals)
         .await
         .with_context(|| format!("寫入 {date} 的相對強度失敗"))
 }
@@ -47,7 +66,8 @@ mod tests {
     use async_trait::async_trait;
 
     use super::*;
-    use crate::domain::quote::relative_strength::{ScoredStock, UniverseRow};
+    use crate::domain::quote::relative_strength::{RelativeStrengthDay, ScoredStock, UniverseRow};
+    use crate::domain::quote::technical::StockTechnicalSignal;
 
     fn day(d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期")
@@ -72,12 +92,28 @@ mod tests {
         }
     }
 
-    /// 回傳固定全體分數、記錄寫入的假倉儲。
+    /// 回傳固定全體分數與前一天分數、記錄寫入的假倉儲。
     #[derive(Default)]
     struct FakeRepo {
         universe: Option<(NaiveDate, Vec<ScoredStock>)>,
+        previous: Vec<RelativeStrengthDay>,
         fail: bool,
-        written: Mutex<Vec<(NaiveDate, usize)>>,
+        written: Mutex<Vec<(NaiveDate, usize, Vec<String>)>>,
+        asked: Mutex<Vec<NaiveDate>>,
+    }
+
+    #[async_trait]
+    impl RelativeStrengthQuery for FakeRepo {
+        async fn fetch_relative_strength(
+            &self,
+            until: NaiveDate,
+            days: u16,
+            _stock_symbols: &[String],
+        ) -> Result<Vec<RelativeStrengthDay>> {
+            assert_eq!(days, 1);
+            self.asked.lock().expect("測試鎖").push(until);
+            Ok(self.previous.clone())
+        }
     }
 
     #[async_trait]
@@ -96,23 +132,48 @@ mod tests {
             &self,
             date: NaiveDate,
             scored: &[ScoredStock],
+            signals: &[StockTechnicalSignal],
         ) -> Result<u64> {
             if self.fail {
                 return Err(anyhow!("寫入逾時"));
             }
+            let signals = signals
+                .iter()
+                .map(|s| {
+                    format!(
+                        "{} {} {}",
+                        s.stock_symbol,
+                        s.signal.indicator,
+                        s.signal.kind.as_str()
+                    )
+                })
+                .collect();
             self.written
                 .lock()
                 .expect("測試鎖")
-                .push((date, scored.len()));
+                .push((date, scored.len(), signals));
             Ok(scored.len() as u64)
         }
     }
 
+    fn previous(symbol: &str, rs_score: u8) -> RelativeStrengthDay {
+        RelativeStrengthDay {
+            stock_symbol: symbol.to_owned(),
+            date: day(13),
+            weighted: 0.0,
+            rs_score,
+            rank: 1,
+            universe: 2,
+        }
+    }
+
     /// 當天有分數才整天寫入；退回前一天或沒有資料都不寫；寫入失敗回錯誤。
+    /// 穿越訊號以前一天（查詢迄日為前一個日曆天）的分數比對，和分數一起寫入。
     #[tokio::test]
     async fn run_writes_only_the_requested_day() {
         let repo = FakeRepo {
             universe: Some((day(14), vec![scored("2330"), scored("2317")])),
+            previous: vec![previous("2330", 75), previous("2317", 99)],
             ..Default::default()
         };
         assert_eq!(run(&repo, day(14)).await.expect("成功"), 2);
@@ -121,7 +182,11 @@ mod tests {
             0,
             "退回前一天不寫"
         );
-        assert_eq!(repo.written.lock().expect("測試鎖").clone(), [(day(14), 2)]);
+        assert_eq!(
+            repo.written.lock().expect("測試鎖").clone(),
+            [(day(14), 2, vec!["2330 rs80 cross_above".to_owned()])]
+        );
+        assert_eq!(repo.asked.lock().expect("測試鎖").clone(), [day(13)]);
 
         assert_eq!(run(&FakeRepo::default(), day(14)).await.expect("成功"), 0);
 

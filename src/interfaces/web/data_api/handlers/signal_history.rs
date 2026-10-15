@@ -37,25 +37,11 @@ const LATEST_SIGNAL_DATE_SQL: &str = r#"
 SELECT MAX(date) FROM daily_technical_signal WHERE $1::date IS NULL OR date <= $1
 "#;
 
-/// 各來源與種類的訊號在各天期的報酬統計。`$3 = 0` 是 all 的哨兵（訊號只算上市櫃）；
-/// `$7`／`$8` 是訊號當天相對強度分數（`daily_relative_strength`）的上下限，有設時沒有分數的
-/// 訊號不列入。大盤基準（`bench`）是同一天同市場全部股票的平均報酬，不受產業與 RS 篩選影響。
-const PERFORMANCE_SQL: &str = r#"
-WITH sig AS (
-    SELECT t.date, t.stock_symbol, t.indicator, t.kind
-    FROM daily_technical_signal t
-    JOIN stocks s ON s.stock_symbol = t.stock_symbol
-    LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
-    LEFT JOIN daily_relative_strength rs ON rs.date = t.date AND rs.stock_symbol = t.stock_symbol
-    WHERE t.date BETWEEN $1 AND $2
-      AND ($3 = 0 OR s.stock_exchange_market_id = $3)
-      AND ($4::text IS NULL OR t.indicator = $4)
-      AND ($5::text IS NULL OR t.kind = $5)
-      AND ($6::text IS NULL OR si.name = $6)
-      AND ($7::smallint IS NULL OR rs.rs_score >= $7)
-      AND ($8::smallint IS NULL OR rs.rs_score <= $8)
-),
-bench AS (
+/// 訊號績效 SQL 的共用尾段：大盤基準（`bench`）與依 `sig(date, stock_symbol, indicator, kind)`
+/// 彙總的各天期統計。`$1`～`$3` 為起日、迄日與市場 id（0 為上市櫃全部）。
+macro_rules! performance_aggregate_sql {
+    () => {
+        r#"bench AS (
     SELECT r.date,
            AVG(r.return_5d) AS b5, AVG(r.return_20d) AS b20, AVG(r.return_60d) AS b60,
            AVG(r.return_120d) AS b120, AVG(r.return_240d) AS b240
@@ -103,10 +89,85 @@ FROM sig
 LEFT JOIN daily_forward_return r ON r.date = sig.date AND r.stock_symbol = sig.stock_symbol
 LEFT JOIN bench b ON b.date = sig.date
 GROUP BY sig.indicator, sig.kind
-"#;
+"#
+    };
+}
+pub(super) use performance_aggregate_sql;
+
+/// 訊號篩選的共用條件：`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4`／`$5` 來源與種類、
+/// `$6` 產業名稱、`$7`／`$8` 訊號當天相對強度分數（`daily_relative_strength`，別名 `rs`）的上下限，
+/// 有設時沒有分數的訊號不列入。
+macro_rules! signal_filter_sql {
+    () => {
+        r#"
+    WHERE t.date BETWEEN $1 AND $2
+      AND ($3 = 0 OR s.stock_exchange_market_id = $3)
+      AND ($4::text IS NULL OR t.indicator = $4)
+      AND ($5::text IS NULL OR t.kind = $5)
+      AND ($6::text IS NULL OR si.name = $6)
+      AND ($7::smallint IS NULL OR rs.rs_score >= $7)
+      AND ($8::smallint IS NULL OR rs.rs_score <= $8)"#
+    };
+}
+
+/// 各來源與種類的訊號在各天期的報酬統計，條件見 [`signal_filter_sql`]。大盤基準（`bench`）是
+/// 同一天同市場全部股票的平均報酬，不受產業、RS 與籌碼篩選影響。
+const PERFORMANCE_SQL: &str = concat!(
+    r#"
+WITH sig AS (
+    SELECT t.date, t.stock_symbol, t.indicator, t.kind
+    FROM daily_technical_signal t
+    JOIN stocks s ON s.stock_symbol = t.stock_symbol
+    LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
+    LEFT JOIN daily_relative_strength rs ON rs.date = t.date AND rs.stock_symbol = t.stock_symbol"#,
+    signal_filter_sql!(),
+    r#"
+),
+"#,
+    performance_aggregate_sql!()
+);
+
+/// [`PERFORMANCE_SQL`] 再加籌碼條件：訊號當天外資（`$9`）／投信（`$10`）已連續買超至少 N 天，
+/// `NULL` 為不篩選。連續天數與 `/market/institutional-flow` 同一算法：只看有籌碼資料的日子，
+/// 以「依日期的列號 − 依方向分組的列號」切出連續段（淨額 0 或缺值會中斷）；往前多讀 60 個日曆天，
+/// 讓期間開頭的訊號也能數到 20 天。只在有設籌碼條件時使用，避免一般查詢多算整段籌碼。
+const PERFORMANCE_WITH_CHIP_SQL: &str = concat!(
+    r#"
+WITH chip_runs AS (
+    SELECT stock_symbol, "date",
+           SIGN(COALESCE(foreign_net, 0)) AS fs,
+           SIGN(COALESCE(trust_net, 0)) AS ts,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
+               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(foreign_net, 0)) ORDER BY "date") AS fg,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
+               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(trust_net, 0)) ORDER BY "date") AS tg
+    FROM chip_daily
+    WHERE "date" BETWEEN $1::date - 60 AND $2
+),
+chip AS (
+    SELECT stock_symbol, "date",
+           CASE WHEN fs > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, fs, fg ORDER BY "date") ELSE 0 END AS foreign_buy,
+           CASE WHEN ts > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, ts, tg ORDER BY "date") ELSE 0 END AS trust_buy
+    FROM chip_runs
+),
+sig AS (
+    SELECT t.date, t.stock_symbol, t.indicator, t.kind
+    FROM daily_technical_signal t
+    JOIN stocks s ON s.stock_symbol = t.stock_symbol
+    JOIN chip c ON c."date" = t.date AND c.stock_symbol = t.stock_symbol
+    LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
+    LEFT JOIN daily_relative_strength rs ON rs.date = t.date AND rs.stock_symbol = t.stock_symbol"#,
+    signal_filter_sql!(),
+    r#"
+      AND ($9::bigint IS NULL OR c.foreign_buy >= $9)
+      AND ($10::bigint IS NULL OR c.trust_buy >= $10)
+),
+"#,
+    performance_aggregate_sql!()
+);
 
 /// 期間內同市場全部股票的報酬統計（大盤基準）。
-const BENCHMARK_SQL: &str = r#"
+pub(super) const BENCHMARK_SQL: &str = r#"
 SELECT
     COUNT(r.return_5d) AS n5,
     AVG(r.return_5d)::float8 AS avg5,
@@ -157,7 +218,7 @@ LIMIT $6
 
 /// 單一天期的統計值。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-struct HorizonValues {
+pub(super) struct HorizonValues {
     samples: i64,
     avg: Option<f64>,
     median: Option<f64>,
@@ -167,11 +228,11 @@ struct HorizonValues {
 }
 
 /// [`PERFORMANCE_SQL`] 的一列。
-#[derive(Debug, Clone, sqlx::FromRow)]
-struct PerformanceRow {
+#[derive(Debug, Clone, Default, sqlx::FromRow)]
+pub(super) struct PerformanceRow {
     indicator: String,
     kind: String,
-    occurrences: i64,
+    pub(super) occurrences: i64,
     n5: i64,
     avg5: Option<f64>,
     med5: Option<f64>,
@@ -254,7 +315,7 @@ impl PerformanceRow {
 
 /// [`BENCHMARK_SQL`] 的結果。
 #[derive(Debug, Clone, Default, sqlx::FromRow)]
-struct BenchmarkRow {
+pub(super) struct BenchmarkRow {
     n5: i64,
     avg5: Option<f64>,
     win5: Option<f64>,
@@ -324,6 +385,9 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
     if let Err(message) = validate_rs_range(params.min_rs_score, params.max_rs_score) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
+    if let Err(message) = validate_streaks(params.min_foreign_streak, params.min_trust_streak) {
+        return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
     if let Some(response) = industry_error(params.industry.as_deref()).await {
         return response;
     }
@@ -345,18 +409,26 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    let rows: Vec<PerformanceRow> = match sqlx::query_as(PERFORMANCE_SQL)
-        .bind(from)
-        .bind(to)
-        .bind(market_id)
-        .bind(params.indicator.as_deref())
-        .bind(params.kind.as_deref())
-        .bind(params.industry.as_deref())
-        .bind(params.min_rs_score.map(i16::from))
-        .bind(params.max_rs_score.map(i16::from))
-        .fetch_all(pool)
-        .await
-    {
+    let with_chip = params.min_foreign_streak.is_some() || params.min_trust_streak.is_some();
+    let mut query = sqlx::query_as(if with_chip {
+        PERFORMANCE_WITH_CHIP_SQL
+    } else {
+        PERFORMANCE_SQL
+    })
+    .bind(from)
+    .bind(to)
+    .bind(market_id)
+    .bind(params.indicator.as_deref())
+    .bind(params.kind.as_deref())
+    .bind(params.industry.as_deref())
+    .bind(params.min_rs_score.map(i16::from))
+    .bind(params.max_rs_score.map(i16::from));
+    if with_chip {
+        query = query
+            .bind(params.min_foreign_streak.map(i64::from))
+            .bind(params.min_trust_streak.map(i64::from));
+    }
+    let rows: Vec<PerformanceRow> = match query.fetch_all(pool).await {
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
@@ -377,6 +449,18 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
     .into_response()
 }
 
+/// 外資、投信連續買超天數下限各在 1–20。
+fn validate_streaks(foreign: Option<u8>, trust: Option<u8>) -> Result<(), &'static str> {
+    let in_range = |days: Option<u8>| days.is_none_or(|days| (1..=20).contains(&days));
+    if !in_range(foreign) {
+        return Err("min_foreign_streak 必須介於 1 至 20");
+    }
+    if !in_range(trust) {
+        return Err("min_trust_streak 必須介於 1 至 20");
+    }
+    Ok(())
+}
+
 /// 相對強度上下限各在 1–99，且下限不大於上限。
 fn validate_rs_range(min: Option<u8>, max: Option<u8>) -> Result<(), &'static str> {
     let in_range = |score: Option<u8>| score.is_none_or(|score| (1..=99).contains(&score));
@@ -393,7 +477,10 @@ fn validate_rs_range(min: Option<u8>, max: Option<u8>) -> Result<(), &'static st
 }
 
 /// 起日：未指定為迄日往前 [`DEFAULT_PERIOD_DAYS`] 天；晚於迄日或期間超過上限回錯誤訊息。
-fn resolve_period(from: Option<NaiveDate>, to: NaiveDate) -> Result<NaiveDate, &'static str> {
+pub(super) fn resolve_period(
+    from: Option<NaiveDate>,
+    to: NaiveDate,
+) -> Result<NaiveDate, &'static str> {
     let from = from.unwrap_or(to - chrono::Duration::days(DEFAULT_PERIOD_DAYS));
     if from > to {
         return Err("from 不可晚於 to");
@@ -402,6 +489,43 @@ fn resolve_period(from: Option<NaiveDate>, to: NaiveDate) -> Result<NaiveDate, &
         return Err("統計期間最長 1,096 天");
     }
     Ok(from)
+}
+
+/// 一列的各天期統計：平均與中位數四捨五入到小數兩位、比例到四位。
+pub(super) fn horizon_stats(row: &PerformanceRow) -> Vec<HorizonStat> {
+    HORIZONS
+        .iter()
+        .zip(row.horizons())
+        .map(|(&days, values)| HorizonStat {
+            days,
+            samples: values.samples,
+            avg_return: values.avg.map(round2),
+            median_return: values.median.map(round2),
+            win_rate: values.win.map(round4),
+            avg_excess_return: values.excess.map(round2),
+            beat_market_rate: values.beat.map(round4),
+        })
+        .collect()
+}
+
+/// 大盤基準的各天期統計。
+pub(super) fn benchmark_stats(benchmark: &BenchmarkRow) -> Vec<BenchmarkStat> {
+    [
+        (benchmark.n5, benchmark.avg5, benchmark.win5),
+        (benchmark.n20, benchmark.avg20, benchmark.win20),
+        (benchmark.n60, benchmark.avg60, benchmark.win60),
+        (benchmark.n120, benchmark.avg120, benchmark.win120),
+        (benchmark.n240, benchmark.avg240, benchmark.win240),
+    ]
+    .into_iter()
+    .zip(HORIZONS)
+    .map(|((samples, avg, win), days)| BenchmarkStat {
+        days,
+        samples,
+        avg_return: avg.map(round2),
+        win_rate: win.map(round4),
+    })
+    .collect()
 }
 
 /// 組成回應：項目依來源、種類的固定順序；平均與中位數四捨五入到小數兩位、比例到四位。
@@ -425,37 +549,10 @@ fn build_performance(
             indicator: row.indicator.clone(),
             kind: row.kind.clone(),
             occurrences: row.occurrences,
-            horizons: HORIZONS
-                .iter()
-                .zip(row.horizons())
-                .map(|(&days, values)| HorizonStat {
-                    days,
-                    samples: values.samples,
-                    avg_return: values.avg.map(round2),
-                    median_return: values.median.map(round2),
-                    win_rate: values.win.map(round4),
-                    avg_excess_return: values.excess.map(round2),
-                    beat_market_rate: values.beat.map(round4),
-                })
-                .collect(),
+            horizons: horizon_stats(row),
         })
         .collect();
-    let benchmark = [
-        (benchmark.n5, benchmark.avg5, benchmark.win5),
-        (benchmark.n20, benchmark.avg20, benchmark.win20),
-        (benchmark.n60, benchmark.avg60, benchmark.win60),
-        (benchmark.n120, benchmark.avg120, benchmark.win120),
-        (benchmark.n240, benchmark.avg240, benchmark.win240),
-    ]
-    .into_iter()
-    .zip(HORIZONS)
-    .map(|((samples, avg, win), days)| BenchmarkStat {
-        days,
-        samples,
-        avg_return: avg.map(round2),
-        win_rate: win.map(round4),
-    })
-    .collect();
+    let benchmark = benchmark_stats(benchmark);
 
     SignalPerformanceResponse {
         from: from.to_string(),
@@ -466,6 +563,8 @@ fn build_performance(
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
+        min_foreign_streak: params.min_foreign_streak,
+        min_trust_streak: params.min_trust_streak,
         adjusted: true,
         benchmark,
         items,

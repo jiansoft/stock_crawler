@@ -8,15 +8,20 @@ use crate::{
     domain::quote::{
         forward_return::ForwardReturnRepository,
         relative_strength::{
-            LONGEST, RelativeStrengthDay, RelativeStrengthQuery, RelativeStrengthRepository,
-            ScoredStock, ScoredUniverseQuery, UniverseRow, base_dates, score_universe,
+            CROSSING_INDICATORS, LONGEST, PeriodCrossing, RelativeStrengthCrossingQuery,
+            RelativeStrengthDay, RelativeStrengthQuery, RelativeStrengthRepository, ScoredStock,
+            ScoredUniverseQuery, UniverseRow, base_dates, parse_crossing, score_universe,
         },
+        technical::StockTechnicalSignal,
     },
-    infra::database::{self, repository::quote::PgQuoteRepository},
+    infra::database::{
+        self,
+        repository::{quote::PgQuoteRepository, technical::insert_signals},
+    },
 };
 
-/// 資料日 `$1` 的計分母體：上市櫃、未暫停交易、不是 ETF／ETN／受益證券（產業 9001～9003），
-/// 且近 60／120／240 日報酬都有的股票。
+/// 資料日 `$1` 的計分母體：上市櫃、未暫停交易、不是 ETF／ETN／受益證券（產業 9001～9003）
+/// 與特別股（代號 4 碼數字後接英文字母，例如 2887Z1），且近 60／120／240 日報酬都有的股票。
 ///
 /// `$2`～`$5` 是往前第 20、60、120、240 個交易日（基準日）；近 N 日報酬＝該基準日的 N 日報酬。
 const UNIVERSE_SQL: &str = r#"
@@ -44,6 +49,7 @@ WHERE r60.date = $3
   AND r240.return_240d IS NOT NULL
   AND s.stock_exchange_market_id IN (2, 4)
   AND s.stock_industry_id NOT IN (9001, 9002, 9003)
+  AND s.stock_symbol !~ '^[0-9]{4}[A-Z]'
   AND NOT s."SuspendListing"
 "#;
 
@@ -68,11 +74,26 @@ ORDER BY r.stock_symbol, r.date DESC
 /// 整天替換：刪除 `$1` 的舊分數。
 const DELETE_DAY_SQL: &str = "DELETE FROM daily_relative_strength WHERE date = $1";
 
+/// 整天替換：刪除 `$1` 的相對強度穿越訊號（來源 `$2`），其他技術訊號不動。
+const DELETE_DAY_SIGNALS_SQL: &str =
+    "DELETE FROM daily_technical_signal WHERE date = $1 AND indicator = ANY($2)";
+
 /// 整天替換：寫入 `$1` 的分數（代號、加權報酬、分數、名次四個平行陣列，`$6` 為母體數）。
 const INSERT_DAY_SQL: &str = r#"
 INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
 SELECT $1, symbol, weighted, score, rank, $6
 FROM UNNEST($2::text[], $3::float8[], $4::smallint[], $5::int[]) AS t(symbol, weighted, score, rank)
+"#;
+
+/// `$1`～`$2` 每檔股票對每個門檻（來源 `$3`）的最後一次穿越，附 `$2` 當天的分數。
+const PERIOD_CROSSINGS_SQL: &str = r#"
+SELECT DISTINCT ON (t.stock_symbol, t.indicator)
+       t.stock_symbol, t.indicator, t.kind, rs.rs_score
+FROM daily_technical_signal t
+LEFT JOIN daily_relative_strength rs ON rs.date = $2 AND rs.stock_symbol = t.stock_symbol
+WHERE t.date BETWEEN $1 AND $2
+  AND t.indicator = ANY($3)
+ORDER BY t.stock_symbol, t.indicator, t.date DESC
 "#;
 
 /// [`UNIVERSE_SQL`] 的一列。
@@ -134,6 +155,7 @@ impl RelativeStrengthRepository for PgQuoteRepository {
         &self,
         date: NaiveDate,
         scored: &[ScoredStock],
+        signals: &[StockTechnicalSignal],
     ) -> Result<u64> {
         let symbols: Vec<&str> = scored
             .iter()
@@ -164,8 +186,42 @@ impl RelativeStrengthRepository for PgQuoteRepository {
             .execute(&mut *tx)
             .await?
             .rows_affected();
+        sqlx::query(DELETE_DAY_SIGNALS_SQL)
+            .bind(date)
+            .bind(&CROSSING_INDICATORS[..])
+            .execute(&mut *tx)
+            .await?;
+        insert_signals(&mut tx, date, signals).await?;
         tx.commit().await?;
         Ok(written)
+    }
+}
+
+#[async_trait]
+impl RelativeStrengthCrossingQuery for PgQuoteRepository {
+    async fn fetch_period_crossings(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<PeriodCrossing>> {
+        let rows: Vec<(String, String, String, Option<i16>)> = sqlx::query_as(PERIOD_CROSSINGS_SQL)
+            .bind(from)
+            .bind(to)
+            .bind(&CROSSING_INDICATORS[..])
+            .fetch_all(database::get_connection())
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(stock_symbol, indicator, kind, score)| {
+                let (threshold, direction) = parse_crossing(&indicator, &kind)?;
+                Some(PeriodCrossing {
+                    stock_symbol,
+                    threshold,
+                    direction,
+                    latest_score: score.and_then(|score| u8::try_from(score).ok()),
+                })
+            })
+            .collect())
     }
 }
 

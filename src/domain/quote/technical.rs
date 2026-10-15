@@ -30,6 +30,13 @@ pub const WARMUP_BARS: usize = 360;
 /// 52 週新高／新低訊號的來源名稱。
 pub const FIFTY_TWO_WEEK_INDICATOR: &str = "52_week";
 
+/// 相對強度分數穿越 80 分的訊號來源名稱（收盤後寫入每日相對強度時產生，見
+/// [`super::relative_strength::crossing_signals`]）。
+pub const RS80_INDICATOR: &str = "rs80";
+
+/// 相對強度分數穿越 50 分的訊號來源名稱。
+pub const RS50_INDICATOR: &str = "rs50";
+
 /// 52 週回看的日曆天數（不含當日），與市場廣度統計 `daily_stock_price_stats` 一致。
 const FIFTY_TWO_WEEK_DAYS: u64 = 364;
 
@@ -307,7 +314,7 @@ pub const SIGNAL_KINDS: [SignalKind; 8] = [
 ];
 
 /// 全部訊號來源（[`TechnicalSignal::indicator`]），依對外說明的順序。
-pub const SIGNAL_INDICATORS: [&str; 9] = [
+pub const SIGNAL_INDICATORS: [&str; 11] = [
     "ma5_ma20",
     "ma20_ma60",
     "kd",
@@ -317,6 +324,8 @@ pub const SIGNAL_INDICATORS: [&str; 9] = [
     "close_ma240",
     "rsi14",
     FIFTY_TWO_WEEK_INDICATOR,
+    RS80_INDICATOR,
+    RS50_INDICATOR,
 ];
 
 /// 最新一日出現的技術訊號。

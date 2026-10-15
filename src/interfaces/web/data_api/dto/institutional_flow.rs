@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use super::{MarketParamValue, SortOrderParamValue};
+use super::{BenchmarkStat, HorizonStat, MarketParamValue, SortOrderParamValue};
 
 /// OpenAPI 文件使用的法人別。
 #[derive(ToSchema)]
@@ -182,4 +182,55 @@ pub(crate) struct IndustryFlowResponse {
     pub(crate) total_net_amount: f64,
     /// 各產業，依 `order` 排序。
     pub(crate) items: Vec<IndustryFlowItem>,
+}
+
+/// 法人連續買賣超後報酬統計的 query string。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(crate) struct InstitutionalStreakPerformanceParams {
+    /// 統計起日（`YYYY-MM-DD`）；省略為迄日往前 364 天。
+    pub(crate) from: Option<String>,
+    /// 統計迄日（`YYYY-MM-DD`）；省略為最新有籌碼資料的交易日。起訖最長 1,096 天。
+    pub(crate) to: Option<String>,
+    /// 法人別：`foreign`（預設）、`trust`、`dealer` 或 `total`。
+    #[param(value_type = InvestorParamValue, default = "foreign")]
+    pub(crate) investor: Option<String>,
+    /// `buy`（預設，連續買超）或 `sell`（連續賣超）。
+    #[param(value_type = FlowSideParamValue, default = "buy")]
+    pub(crate) side: Option<String>,
+    /// 連續天數 N（1–20，預設 3）：某檔股票連續買超（或賣超）剛好滿 N 天的那一天算一次事件，
+    /// 之後延續的天數不重複計算。
+    #[param(minimum = 1, maximum = 20, default = 3)]
+    pub(crate) streak: Option<u8>,
+    /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
+    #[param(value_type = MarketParamValue, default = "all")]
+    pub(crate) market: Option<String>,
+    /// 只統計這個產業（產業名稱，例如「半導體業」）的事件；大盤基準不受影響。
+    pub(crate) industry: Option<String>,
+}
+
+/// 法人連續買賣超後報酬統計的成功回應。
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct InstitutionalStreakPerformanceResponse {
+    /// 統計起日。
+    pub(crate) from: String,
+    /// 統計迄日。
+    pub(crate) to: String,
+    /// 市場：`all`、`twse` 或 `tpex`。
+    pub(crate) market: String,
+    /// 法人別。
+    pub(crate) investor: String,
+    /// 買賣方向。
+    pub(crate) side: String,
+    /// 連續天數 N。
+    pub(crate) streak: u8,
+    /// 篩選的產業；未篩選為 `null`。
+    pub(crate) industry: Option<String>,
+    /// 報酬是否還原權值；固定為 `true`。
+    pub(crate) adjusted: bool,
+    /// 期間內的事件數（連續滿 N 天的次數）。
+    pub(crate) occurrences: i64,
+    /// 事件之後 5／20／60／120／240 個交易日的表現。
+    pub(crate) horizons: Vec<HorizonStat>,
+    /// 大盤基準，依天期由短到長。
+    pub(crate) benchmark: Vec<BenchmarkStat>,
 }

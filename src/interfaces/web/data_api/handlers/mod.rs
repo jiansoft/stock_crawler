@@ -19,6 +19,7 @@ mod industries;
 mod industry_flow;
 mod industry_strength;
 mod institutional_flow;
+mod institutional_streak;
 mod margin_ranking;
 mod market_calendar;
 mod market_movers;
@@ -59,6 +60,9 @@ pub(super) use industries::{__path_industry_performance, industry_performance};
 pub(super) use industry_flow::{__path_industry_flow, industry_flow};
 pub(super) use industry_strength::{__path_industry_strength, industry_strength};
 pub(super) use institutional_flow::{__path_institutional_flow, institutional_flow};
+pub(super) use institutional_streak::{
+    __path_institutional_streak_performance, institutional_streak_performance,
+};
 pub(super) use margin_ranking::{__path_margin_ranking, margin_ranking};
 pub(super) use market_calendar::{__path_dividend_calendar, dividend_calendar};
 pub(super) use market_movers::{__path_market_movers, market_movers};
@@ -247,7 +251,7 @@ fn signal_filter_error(kind: Option<&str>, indicator: Option<&str>) -> Option<Re
     if indicator.is_some_and(|indicator| !SIGNAL_INDICATORS.contains(&indicator)) {
         return Some(error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "indicator 必須為 ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14 或 52_week",
+            "indicator 必須為 ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14、52_week、rs80 或 rs50",
         ));
     }
     None

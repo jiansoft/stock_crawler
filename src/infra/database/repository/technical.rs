@@ -9,9 +9,12 @@ use chrono::NaiveDate;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
-    domain::quote::technical::{
-        PriceAdjustment, PriceBar, PriceBarRepository, SignalOutcome, StockTechnicalSignal,
-        TechnicalSignal, TechnicalSignalQuery, TechnicalSignalRepository,
+    domain::quote::{
+        relative_strength::CROSSING_INDICATORS,
+        technical::{
+            PriceAdjustment, PriceBar, PriceBarRepository, SignalOutcome, StockTechnicalSignal,
+            TechnicalSignal, TechnicalSignalQuery, TechnicalSignalRepository,
+        },
     },
     infra::database::{self, repository::quote::PgQuoteRepository},
 };
@@ -119,7 +122,7 @@ ORDER BY s.stock_symbol
 "#;
 
 /// 一次寫入整批訊號（以陣列展開，避免逐筆往返）。
-const INSERT_SIGNALS_SQL: &str = r#"
+pub(super) const INSERT_SIGNALS_SQL: &str = r#"
 INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
 SELECT $1, s.stock_symbol, s.indicator, s.kind, s.description
 FROM UNNEST($2::varchar[], $3::varchar[], $4::varchar[], $5::text[])
@@ -142,30 +145,43 @@ impl TechnicalSignalRepository for PgQuoteRepository {
         signals: &[StockTechnicalSignal],
     ) -> Result<()> {
         let mut tx = database::get_tx().await?;
-        sqlx::query("DELETE FROM daily_technical_signal WHERE date = $1")
+        // 相對強度穿越訊號由每日相對強度的寫入負責，這裡不動。
+        sqlx::query("DELETE FROM daily_technical_signal WHERE date = $1 AND indicator <> ALL($2)")
             .bind(date)
+            .bind(&CROSSING_INDICATORS[..])
             .execute(&mut *tx)
             .await?;
-        if !signals.is_empty() {
-            let symbols: Vec<&str> = signals.iter().map(|s| s.stock_symbol.as_str()).collect();
-            let indicators: Vec<&str> = signals.iter().map(|s| s.signal.indicator).collect();
-            let kinds: Vec<&str> = signals.iter().map(|s| s.signal.kind.as_str()).collect();
-            let descriptions: Vec<&str> = signals
-                .iter()
-                .map(|s| s.signal.description.as_str())
-                .collect();
-            sqlx::query(INSERT_SIGNALS_SQL)
-                .bind(date)
-                .bind(symbols)
-                .bind(indicators)
-                .bind(kinds)
-                .bind(descriptions)
-                .execute(&mut *tx)
-                .await?;
-        }
+        insert_signals(&mut tx, date, signals).await?;
         tx.commit().await?;
         Ok(())
     }
+}
+
+/// 在呼叫端的交易內寫入 `date` 的訊號；空清單不送查詢。
+pub(super) async fn insert_signals(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    date: NaiveDate,
+    signals: &[StockTechnicalSignal],
+) -> Result<()> {
+    if signals.is_empty() {
+        return Ok(());
+    }
+    let symbols: Vec<&str> = signals.iter().map(|s| s.stock_symbol.as_str()).collect();
+    let indicators: Vec<&str> = signals.iter().map(|s| s.signal.indicator).collect();
+    let kinds: Vec<&str> = signals.iter().map(|s| s.signal.kind.as_str()).collect();
+    let descriptions: Vec<&str> = signals
+        .iter()
+        .map(|s| s.signal.description.as_str())
+        .collect();
+    sqlx::query(INSERT_SIGNALS_SQL)
+        .bind(date)
+        .bind(symbols)
+        .bind(indicators)
+        .bind(kinds)
+        .bind(descriptions)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 /// 指定交易日、指定股票的訊號。
@@ -348,11 +364,21 @@ mod tests {
             2,
             "無法辨識的來源應略過"
         );
+        // 相對強度穿越訊號由每日相對強度負責寫入，整天替換技術訊號時要保留。
+        sqlx::query(
+            "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
+             VALUES ($1, '79979SA', 'rs80', 'cross_above', '相對強度 76 → 82 分，突破 80 分')",
+        )
+        .bind(date)
+        .execute(pool)
+        .await
+        .expect("寫入相對強度訊號");
         repo.replace_signals(date, &first[1..])
             .await
             .expect("覆蓋寫入");
         let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-            "SELECT stock_symbol, indicator, kind, description FROM daily_technical_signal WHERE date = $1",
+            "SELECT stock_symbol, indicator, kind, description FROM daily_technical_signal
+             WHERE date = $1 ORDER BY indicator",
         )
         .bind(date)
         .fetch_all(pool)
@@ -360,12 +386,20 @@ mod tests {
         .expect("讀回訊號");
         assert_eq!(
             rows,
-            [(
-                "79979SA".to_owned(),
-                "kd".to_owned(),
-                "overbought".to_owned(),
-                "79979SA 測試訊號".to_owned()
-            )]
+            [
+                (
+                    "79979SA".to_owned(),
+                    "kd".to_owned(),
+                    "overbought".to_owned(),
+                    "79979SA 測試訊號".to_owned()
+                ),
+                (
+                    "79979SA".to_owned(),
+                    "rs80".to_owned(),
+                    "cross_above".to_owned(),
+                    "相對強度 76 → 82 分，突破 80 分".to_owned()
+                )
+            ]
         );
 
         repo.replace_signals(date, &[]).await.expect("清空");
@@ -375,7 +409,7 @@ mod tests {
                 .fetch_one(pool)
                 .await
                 .expect("計數");
-        assert_eq!(count, 0);
+        assert_eq!(count, 1, "只剩相對強度訊號");
 
         cleanup().await;
     }
