@@ -106,6 +106,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::dividend_yield_ranking),
         )
         .route(
+            "/stocks/screen/backtest",
+            axum::routing::get(handlers::screen_backtest),
+        )
+        .route(
             "/stocks/screen",
             axum::routing::get(handlers::screen_stocks),
         )

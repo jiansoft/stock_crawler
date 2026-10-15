@@ -157,6 +157,7 @@ fn openapi_contains_all_data_api_paths() {
         "/api/v1/market/breadth",
         "/api/v1/market/dividend-yield-ranking",
         "/api/v1/stocks/screen",
+        "/api/v1/stocks/screen/backtest",
         "/api/v1/market/index-history",
         "/api/v1/market/dividend-calendar",
         "/api/v1/market/qfii-holding-ranking",

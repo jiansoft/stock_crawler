@@ -215,3 +215,54 @@ fn openapi_relative_strength_schema_pins_field_names() {
             .contains("RelativeStrengthItem")
     );
 }
+
+/// 條件選股回測 path 的契約：持有天數與檔數的預設、條件參數範圍、回應欄位。
+#[test]
+fn openapi_screen_backtest_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/stocks/screen/backtest");
+    assert_endpoint_responses(operation, "ScreenBacktestResponse", true);
+    assert_eq!(query_schema(operation, "hold_days")["default"], 20);
+    let limit = query_schema(operation, "limit");
+    assert_eq!(limit["default"], 20);
+    assert_eq!(limit["minimum"], 1);
+    assert_eq!(limit["maximum"], 100);
+    for (name, maximum) in [
+        ("min_rs_score", 99),
+        ("max_rs_score", 99),
+        ("min_foreign_streak", 20),
+        ("min_trust_streak", 20),
+    ] {
+        let schema = query_schema(operation, name);
+        assert_eq!(schema["minimum"], 1, "{name}");
+        assert_eq!(schema["maximum"], maximum, "{name}");
+    }
+    for (name, schema) in [
+        ("indicator", "SignalIndicatorValue"),
+        ("kind", "SignalKindValue"),
+        ("market", "MarketParamValue"),
+    ] {
+        assert!(
+            query_schema(operation, name).to_string().contains(schema),
+            "{name}"
+        );
+    }
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["ScreenBacktestResponse"]["properties"];
+    assert_eq!(response["adjusted"]["type"], "boolean");
+    assert!(response["summary"].to_string().contains("BacktestSummary"));
+    assert!(response["periods"].to_string().contains("BacktestPeriod"));
+    let period = &schemas["BacktestPeriod"]["properties"];
+    assert!(period["avg_return"].to_string().contains("null"));
+    assert_eq!(period["symbols"]["type"], "array");
+    let summary = &schemas["BacktestSummary"]["properties"];
+    for field in [
+        "total_return",
+        "annualized_return",
+        "max_drawdown",
+        "beat_market_rate",
+    ] {
+        assert!(summary[field].to_string().contains("null"), "{field}");
+    }
+}
