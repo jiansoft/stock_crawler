@@ -3,5 +3,7 @@ pub mod entity;
 /// 資料健康檢查的倉儲合約。
 pub mod repository;
 
-pub use entity::{DataHealthSnapshot, DerivedTableLatest, ValuationRatioZeroCount};
+pub use entity::{
+    DataHealthSnapshot, DerivedTableLatest, ForwardReturnGap, ValuationRatioZeroCount,
+};
 pub use repository::DataHealthRepository;
