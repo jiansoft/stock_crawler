@@ -34,7 +34,7 @@ pub(crate) struct SignalPerformanceParams {
     /// 只統計訊號當天相對強度分數至多這麼高的訊號（1–99）；規則同 `min_rs_score`。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) max_rs_score: Option<u8>,
-    /// 只統計訊號當天外資（不含外資自營商）已連續買超至少這麼多天的訊號（1–20）。連續天數與
+    /// 只統計訊號當天外資（含外資自營商）已連續買超至少這麼多天的訊號（1–20）。連續天數與
     /// `/market/institutional-flow` 同一算法（只看有籌碼資料的日子，淨額 0 會中斷）；籌碼資料從
     /// 2019 年起，之前的訊號不列入。大盤基準不受影響。
     #[param(minimum = 1, maximum = 20)]

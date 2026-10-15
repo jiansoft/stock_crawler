@@ -258,11 +258,17 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     assert_eq!(response["fee_discount"]["type"], "number");
     assert!(response["summary"].to_string().contains("BacktestSummary"));
     assert!(response["periods"].to_string().contains("BacktestPeriod"));
+    assert!(response["years"].to_string().contains("BacktestYear"));
+    assert_eq!(response["etf_benchmark"]["type"], "string");
+    let year = &schemas["BacktestYear"]["properties"];
+    assert_eq!(year["year"]["type"], "integer");
+    assert!(year["etf_total_return"].to_string().contains("null"));
     let period = &schemas["BacktestPeriod"]["properties"];
     assert!(period["avg_return"].to_string().contains("null"));
     assert_eq!(period["symbols"]["type"], "array");
     assert_eq!(period["return_after_costs"]["type"], "number");
     assert_eq!(period["turnover"]["type"], "number");
+    assert!(period["etf_return"].to_string().contains("null"));
     let summary = &schemas["BacktestSummary"]["properties"];
     for field in [
         "total_return",
@@ -273,6 +279,10 @@ fn openapi_screen_backtest_schema_pins_field_names() {
         "total_return_after_costs",
         "annualized_return_after_costs",
         "max_drawdown_after_costs",
+        "etf_total_return",
+        "etf_annualized_return",
+        "etf_max_drawdown",
+        "beat_etf_rate",
     ] {
         assert!(summary[field].to_string().contains("null"), "{field}");
     }

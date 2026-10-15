@@ -34,7 +34,7 @@ pub(crate) struct ScreenBacktestParams {
     /// 換股當天相對強度分數至多這麼高（1–99）。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) max_rs_score: Option<u8>,
-    /// 換股當天外資（不含外資自營商）已連續買超至少這麼多天（1–20），算法同
+    /// 換股當天外資（含外資自營商）已連續買超至少這麼多天（1–20），算法同
     /// `/market/institutional-flow`；籌碼資料從 2019 年起。
     #[param(minimum = 1, maximum = 20)]
     pub(crate) min_foreign_streak: Option<u8>,
@@ -69,6 +69,8 @@ pub(crate) struct BacktestPeriod {
     pub(crate) turnover: f64,
     /// 同一天同市場全部母體股票的平均報酬（%）。
     pub(crate) benchmark_return: Option<f64>,
+    /// 同一天買進 0050 持有同樣天數的還原報酬（%）；缺資料為 `null`。
+    pub(crate) etf_return: Option<f64>,
     /// 依相對強度分數由高到低的前 10 檔代號（換手率以全部持股計算）。
     pub(crate) symbols: Vec<String>,
 }
@@ -110,6 +112,35 @@ pub(crate) struct BacktestSummary {
     pub(crate) avg_period_return: Option<f64>,
     /// 大盤基準的每期平均報酬（%）。
     pub(crate) avg_benchmark_return: Option<f64>,
+    /// 每期都買 0050 的累積報酬（%）：實際買得到的大盤基準，未扣交易成本；全期都缺資料為 `null`。
+    pub(crate) etf_total_return: Option<f64>,
+    /// 0050 的年化報酬（%）。
+    pub(crate) etf_annualized_return: Option<f64>,
+    /// 0050 的最大回撤（%）。
+    pub(crate) etf_max_drawdown: Option<f64>,
+    /// 報酬高於 0050 的期數比例（0–1）。
+    pub(crate) beat_etf_rate: Option<f64>,
+}
+
+/// 依換股日所屬年度彙總的一年（跨年的那一期算在換股日的年度）。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestYear {
+    /// 年度。
+    pub(crate) year: i32,
+    /// 這一年換股的期數。
+    pub(crate) periods: i64,
+    /// 這一年各期報酬連乘的累積報酬（%），空手算 0；未扣交易成本。
+    pub(crate) total_return: f64,
+    /// 扣除交易成本後的累積報酬（%）。
+    pub(crate) total_return_after_costs: f64,
+    /// 大盤基準（同市場全部母體平均）的累積報酬（%）。
+    pub(crate) benchmark_total_return: f64,
+    /// 0050 的累積報酬（%）；這一年都缺資料為 `null`。
+    pub(crate) etf_total_return: Option<f64>,
+    /// 報酬大於 0 的期數比例（0–1）。
+    pub(crate) win_rate: f64,
+    /// 報酬高於大盤基準的期數比例（0–1）。
+    pub(crate) beat_market_rate: f64,
 }
 
 /// 條件選股回測結果。
@@ -143,8 +174,12 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) fee_discount: f64,
     /// 報酬是否還原權值；固定為 `true`。
     pub(crate) adjusted: bool,
+    /// 可投資的大盤基準代號（固定為 `0050`）。
+    pub(crate) etf_benchmark: String,
     /// 整段回測的彙總。
     pub(crate) summary: BacktestSummary,
+    /// 依換股日年度的彙總，由舊到新；用來看策略在多頭、空頭年份是否穩定。
+    pub(crate) years: Vec<BacktestYear>,
     /// 各期結果，由舊到新；只列已滿持有天數的期數。
     pub(crate) periods: Vec<BacktestPeriod>,
 }
