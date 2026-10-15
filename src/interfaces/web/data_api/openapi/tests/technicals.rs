@@ -119,6 +119,12 @@ fn openapi_signal_history_schema_pins_field_names() {
         assert_eq!(schema["maximum"], maximum, "{name}");
     }
 
+    assert!(
+        query_schema(operation, "group_by")
+            .to_string()
+            .contains("GroupByParamValue")
+    );
+
     let operation = get_operation(&document, "/api/v1/stocks/{symbol}/signals");
     assert_endpoint_responses(operation, "StockSignalsResponse", true);
     let days = query_schema(operation, "days");
@@ -147,6 +153,29 @@ fn openapi_signal_history_schema_pins_field_names() {
         response["items"]
             .to_string()
             .contains("SignalPerformanceItem")
+    );
+    assert!(response["group_by"].to_string().contains("null"));
+    assert!(
+        response["benchmark_by_year"]
+            .to_string()
+            .contains("BenchmarkYear")
+    );
+    let years = schemas["SignalPerformanceItem"]["properties"]["years"].to_string();
+    assert!(
+        years.contains("PerformanceYear") && years.contains("null"),
+        "{years}"
+    );
+    assert_eq!(
+        schemas["GroupByParamValue"]["enum"],
+        serde_json::json!(["year"])
+    );
+    let year = &schemas["PerformanceYear"]["properties"];
+    assert_eq!(year["year"]["type"], "integer");
+    assert!(year["horizons"].to_string().contains("HorizonStat"));
+    assert!(
+        schemas["BenchmarkYear"]["properties"]["benchmark"]
+            .to_string()
+            .contains("BenchmarkStat")
     );
     let item = &schemas["StockSignalItem"]["properties"];
     for field in ["return_5d", "return_20d", "return_60d", "closing_price"] {

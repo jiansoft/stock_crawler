@@ -42,6 +42,38 @@ pub(crate) struct SignalPerformanceParams {
     /// 兩者都設時需同時符合。
     #[param(minimum = 1, maximum = 20)]
     pub(crate) min_trust_streak: Option<u8>,
+    /// `year`：除了整段期間，再依訊號日的年度拆分統計（每個項目的 `years`、`benchmark_by_year`），
+    /// 用來看訊號在不同年份（多頭、空頭）是否穩定；省略為不拆分。
+    #[param(value_type = Option<GroupByParamValue>)]
+    pub(crate) group_by: Option<String>,
+}
+
+/// 依年度拆分統計的 `group_by` 值。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum GroupByParamValue {
+    /// 依年度拆分。
+    Year,
+}
+
+/// 某一年度（事件或訊號日所在的年度）的表現統計。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct PerformanceYear {
+    /// 年度（西元）。
+    pub(crate) year: i32,
+    /// 該年度的出現次數。
+    pub(crate) occurrences: i64,
+    /// 依天期由短到長的表現；年底的事件之後的報酬可能落在下一年，仍算在事件的年度。
+    pub(crate) horizons: Vec<HorizonStat>,
+}
+
+/// 某一年度的大盤基準。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BenchmarkYear {
+    /// 年度（西元）。
+    pub(crate) year: i32,
+    /// 該年度每天同市場全部股票的平均報酬，依天期由短到長。
+    pub(crate) benchmark: Vec<BenchmarkStat>,
 }
 
 /// 某天期（N 個交易日後）的表現統計；樣本為 0 時數值為 `null`。
@@ -74,6 +106,8 @@ pub(crate) struct SignalPerformanceItem {
     pub(crate) occurrences: i64,
     /// 依天期由短到長的表現。
     pub(crate) horizons: Vec<HorizonStat>,
+    /// `group_by=year` 時各年度的表現，由舊到新（只列有出現的年度）；未拆分為 `null`。
+    pub(crate) years: Option<Vec<PerformanceYear>>,
 }
 
 /// 大盤基準：期間內每天同市場全部股票的平均報酬。
@@ -112,10 +146,14 @@ pub(crate) struct SignalPerformanceResponse {
     pub(crate) min_foreign_streak: Option<u8>,
     /// 投信連續買超天數下限；未篩選為 `null`。
     pub(crate) min_trust_streak: Option<u8>,
+    /// 拆分方式：`year` 或未拆分為 `null`。
+    pub(crate) group_by: Option<String>,
     /// 報酬是否還原權值；固定為 `true`。
     pub(crate) adjusted: bool,
     /// 大盤基準，依天期由短到長。
     pub(crate) benchmark: Vec<BenchmarkStat>,
+    /// `group_by=year` 時各年度的大盤基準，由舊到新；未拆分為 `null`。
+    pub(crate) benchmark_by_year: Option<Vec<BenchmarkYear>>,
     /// 各來源與種類的績效，依來源、種類的固定順序。
     pub(crate) items: Vec<SignalPerformanceItem>,
 }

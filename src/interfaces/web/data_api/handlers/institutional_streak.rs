@@ -14,8 +14,8 @@ use chrono::NaiveDate;
 
 use super::institutional_flow::INVESTORS;
 use super::signal_history::{
-    BENCHMARK_SQL, BenchmarkRow, PerformanceRow, benchmark_stats, horizon_stats,
-    performance_aggregate_sql, resolve_period,
+    PerformanceRow, benchmark_output, fetch_benchmark, horizon_stats, parse_group_by,
+    performance_aggregate_sql, performance_years, resolve_period, total_row,
 };
 use super::{
     database_error, error_response, industry_error, market_id_for_stocks, parse_optional_date,
@@ -35,8 +35,9 @@ SELECT MAX("date") FROM chip_daily WHERE $1::date IS NULL OR "date" <= $1
 /// `$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 法人別、`$5` 方向（1 買超、-1 賣超）、
 /// `$6` 連續天數 N、`$7` 產業名稱。往前多讀 60 個日曆天，讓期間開頭的事件也能數到 20 天。
 /// 連續段以「依日期的列號 − 依方向分組的列號」切出（gaps and islands），段內第 N 天即為事件。
-const STREAK_PERFORMANCE_SQL: &str = concat!(
-    r#"
+macro_rules! streak_event_cte {
+    () => {
+        r#"
 WITH net AS (
     SELECT c.stock_symbol, c."date",
            CASE $4
@@ -70,9 +71,16 @@ sig AS (
     FROM counted
     WHERE sgn = $5 AND len = $6 AND "date" BETWEEN $1 AND $2
 ),
-"#,
-    performance_aggregate_sql!()
-);
+"#
+    };
+}
+
+/// 期間內連續買賣超滿 N 天的事件（[`streak_event_cte`]）與其後的報酬統計。
+const STREAK_PERFORMANCE_SQL: &str = concat!(streak_event_cte!(), performance_aggregate_sql!());
+
+/// [`STREAK_PERFORMANCE_SQL`] 再加上各年度的統計（`year` 不為 `NULL` 的列）。
+const STREAK_PERFORMANCE_BY_YEAR_SQL: &str =
+    concat!(streak_event_cte!(), performance_aggregate_sql!(by_year));
 
 /// 統計期間內法人連續買超（或賣超）滿 N 天之後 5／20／60／120／240 個交易日的表現。
 ///
@@ -121,6 +129,10 @@ pub(crate) async fn institutional_streak_performance(
             "market 必須為 all、twse 或 tpex",
         );
     };
+    let by_year = match parse_group_by(params.group_by.as_deref()) {
+        Ok(by_year) => by_year,
+        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
     if let Some(response) = industry_error(params.industry.as_deref()).await {
         return response;
     }
@@ -142,7 +154,12 @@ pub(crate) async fn institutional_streak_performance(
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    let rows: Vec<PerformanceRow> = match sqlx::query_as(STREAK_PERFORMANCE_SQL)
+    let sql = if by_year {
+        STREAK_PERFORMANCE_BY_YEAR_SQL
+    } else {
+        STREAK_PERFORMANCE_SQL
+    };
+    let rows: Vec<PerformanceRow> = match sqlx::query_as(sql)
         .bind(from)
         .bind(to)
         .bind(market_id)
@@ -156,18 +173,13 @@ pub(crate) async fn institutional_streak_performance(
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
-    let benchmark: BenchmarkRow = match sqlx::query_as(BENCHMARK_SQL)
-        .bind(from)
-        .bind(to)
-        .bind(market_id)
-        .fetch_one(pool)
-        .await
-    {
-        Ok(row) => row,
+    let benchmark = match fetch_benchmark(from, to, market_id, by_year).await {
+        Ok(benchmark) => benchmark,
         Err(error) => return database_error(error),
     };
 
-    let row = rows.into_iter().next().unwrap_or_default();
+    let row = total_row(&rows);
+    let (benchmark, benchmark_by_year) = benchmark_output(&benchmark);
     Json(InstitutionalStreakPerformanceResponse {
         from: from.to_string(),
         to: to.to_string(),
@@ -176,10 +188,13 @@ pub(crate) async fn institutional_streak_performance(
         side: side.to_owned(),
         streak,
         industry: params.industry.clone(),
+        group_by: by_year.then(|| "year".to_owned()),
         adjusted: true,
         occurrences: row.occurrences,
         horizons: horizon_stats(&row),
-        benchmark: benchmark_stats(&benchmark),
+        years: by_year.then(|| performance_years(&rows, "institutional_streak", "")),
+        benchmark,
+        benchmark_by_year,
     })
     .into_response()
 }

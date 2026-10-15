@@ -99,8 +99,9 @@ pub(super) use screening::{
     StockScreeningResponse,
 };
 pub(super) use signal_history::{
-    BenchmarkStat, HorizonStat, SignalPerformanceItem, SignalPerformanceParams,
-    SignalPerformanceResponse, StockSignalItem, StockSignalsParams, StockSignalsResponse,
+    BenchmarkStat, BenchmarkYear, GroupByParamValue, HorizonStat, PerformanceYear,
+    SignalPerformanceItem, SignalPerformanceParams, SignalPerformanceResponse, StockSignalItem,
+    StockSignalsParams, StockSignalsResponse,
 };
 pub(super) use signals::{
     MarketSignalsParams, MarketSignalsResponse, SignalCount, SignalIndicatorValue, SignalKindValue,

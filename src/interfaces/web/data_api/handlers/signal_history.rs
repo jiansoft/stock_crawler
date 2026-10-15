@@ -19,8 +19,9 @@ use super::{
 };
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
-    BenchmarkStat, ErrorBody, HorizonStat, SignalPerformanceItem, SignalPerformanceParams,
-    SignalPerformanceResponse, StockSignalItem, StockSignalsParams, StockSignalsResponse,
+    BenchmarkStat, BenchmarkYear, ErrorBody, HorizonStat, PerformanceYear, SignalPerformanceItem,
+    SignalPerformanceParams, SignalPerformanceResponse, StockSignalItem, StockSignalsParams,
+    StockSignalsResponse,
 };
 
 /// 統計的天期（交易日數），與 `daily_forward_return` 的欄位對應。
@@ -39,9 +40,22 @@ SELECT MAX(date) FROM daily_technical_signal WHERE $1::date IS NULL OR date <= $
 
 /// 訊號績效 SQL 的共用尾段：大盤基準（`bench`）與依 `sig(date, stock_symbol, indicator, kind)`
 /// 彙總的各天期統計。`$1`～`$3` 為起日、迄日與市場 id（0 為上市櫃全部）。
+///
+/// `by_year` 版本以 `GROUPING SETS` 在同一次掃描算出整段期間（`year` 為 `NULL`）與各年度的統計；
+/// 中位數無法由各年度合併，所以不另外跑兩次查詢。
 macro_rules! performance_aggregate_sql {
     () => {
-        r#"bench AS (
+        performance_aggregate_sql!(@ "", "GROUP BY sig.indicator, sig.kind")
+    };
+    (by_year) => {
+        performance_aggregate_sql!(@
+            "\n    date_part('year', sig.date)::int AS year,",
+            "GROUP BY GROUPING SETS ((sig.indicator, sig.kind), (sig.indicator, sig.kind, date_part('year', sig.date)::int))"
+        )
+    };
+    (@ $year:literal, $group:literal) => {
+        concat!(
+            r#"bench AS (
     SELECT r.date,
            AVG(r.return_5d) AS b5, AVG(r.return_20d) AS b20, AVG(r.return_60d) AS b60,
            AVG(r.return_120d) AS b120, AVG(r.return_240d) AS b240
@@ -53,7 +67,9 @@ macro_rules! performance_aggregate_sql {
 )
 SELECT
     sig.indicator,
-    sig.kind,
+    sig.kind,"#,
+            $year,
+            r#"
     COUNT(*) AS occurrences,
     COUNT(r.return_5d) AS n5,
     AVG(r.return_5d)::float8 AS avg5,
@@ -88,8 +104,10 @@ SELECT
 FROM sig
 LEFT JOIN daily_forward_return r ON r.date = sig.date AND r.stock_symbol = sig.stock_symbol
 LEFT JOIN bench b ON b.date = sig.date
-GROUP BY sig.indicator, sig.kind
-"#
+"#,
+            $group,
+            "\n"
+        )
     };
 }
 pub(super) use performance_aggregate_sql;
@@ -110,29 +128,40 @@ macro_rules! signal_filter_sql {
     };
 }
 
-/// 各來源與種類的訊號在各天期的報酬統計，條件見 [`signal_filter_sql`]。大盤基準（`bench`）是
-/// 同一天同市場全部股票的平均報酬，不受產業、RS 與籌碼篩選影響。
-const PERFORMANCE_SQL: &str = concat!(
-    r#"
+/// 依 [`signal_filter_sql`] 篩出的訊號（`sig`）。
+macro_rules! signal_cte {
+    () => {
+        concat!(
+            r#"
 WITH sig AS (
     SELECT t.date, t.stock_symbol, t.indicator, t.kind
     FROM daily_technical_signal t
     JOIN stocks s ON s.stock_symbol = t.stock_symbol
     LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
     LEFT JOIN daily_relative_strength rs ON rs.date = t.date AND rs.stock_symbol = t.stock_symbol"#,
-    signal_filter_sql!(),
-    r#"
+            signal_filter_sql!(),
+            r#"
 ),
-"#,
-    performance_aggregate_sql!()
-);
+"#
+        )
+    };
+}
 
-/// [`PERFORMANCE_SQL`] 再加籌碼條件：訊號當天外資（`$9`）／投信（`$10`）已連續買超至少 N 天，
+/// 各來源與種類的訊號在各天期的報酬統計，條件見 [`signal_filter_sql`]。大盤基準（`bench`）是
+/// 同一天同市場全部股票的平均報酬，不受產業、RS 與籌碼篩選影響。
+const PERFORMANCE_SQL: &str = concat!(signal_cte!(), performance_aggregate_sql!());
+
+/// [`PERFORMANCE_SQL`] 再加上各年度的統計（`year` 不為 `NULL` 的列）。
+const PERFORMANCE_BY_YEAR_SQL: &str = concat!(signal_cte!(), performance_aggregate_sql!(by_year));
+
+/// [`signal_cte`] 再加籌碼條件：訊號當天外資（`$9`）／投信（`$10`）已連續買超至少 N 天，
 /// `NULL` 為不篩選。連續天數與 `/market/institutional-flow` 同一算法：只看有籌碼資料的日子，
 /// 以「依日期的列號 − 依方向分組的列號」切出連續段（淨額 0 或缺值會中斷）；往前多讀 60 個日曆天，
 /// 讓期間開頭的訊號也能數到 20 天。只在有設籌碼條件時使用，避免一般查詢多算整段籌碼。
-const PERFORMANCE_WITH_CHIP_SQL: &str = concat!(
-    r#"
+macro_rules! chip_signal_cte {
+    () => {
+        concat!(
+            r#"
 WITH chip_runs AS (
     SELECT stock_symbol, "date",
            SIGN(COALESCE(foreign_net, 0)) AS fs,
@@ -157,18 +186,27 @@ sig AS (
     JOIN chip c ON c."date" = t.date AND c.stock_symbol = t.stock_symbol
     LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
     LEFT JOIN daily_relative_strength rs ON rs.date = t.date AND rs.stock_symbol = t.stock_symbol"#,
-    signal_filter_sql!(),
-    r#"
+            signal_filter_sql!(),
+            r#"
       AND ($9::bigint IS NULL OR c.foreign_buy >= $9)
       AND ($10::bigint IS NULL OR c.trust_buy >= $10)
 ),
-"#,
-    performance_aggregate_sql!()
-);
+"#
+        )
+    };
+}
 
-/// 期間內同市場全部股票的報酬統計（大盤基準）。
-pub(super) const BENCHMARK_SQL: &str = r#"
-SELECT
+/// 有設籌碼條件時的訊號績效。
+const PERFORMANCE_WITH_CHIP_SQL: &str = concat!(chip_signal_cte!(), performance_aggregate_sql!());
+
+/// [`PERFORMANCE_WITH_CHIP_SQL`] 再加上各年度的統計。
+const PERFORMANCE_WITH_CHIP_BY_YEAR_SQL: &str =
+    concat!(chip_signal_cte!(), performance_aggregate_sql!(by_year));
+
+/// 大盤基準的欄位：同市場全部股票各天期的樣本數、平均報酬與上漲比例。
+macro_rules! benchmark_columns {
+    () => {
+        r#"
     COUNT(r.return_5d) AS n5,
     AVG(r.return_5d)::float8 AS avg5,
     AVG(CASE WHEN r.return_5d > 0 THEN 1.0 WHEN r.return_5d IS NOT NULL THEN 0.0 END)::float8 AS win5,
@@ -188,7 +226,19 @@ FROM daily_forward_return r
 JOIN stocks s ON s.stock_symbol = r.stock_symbol
 WHERE r.date BETWEEN $1 AND $2
   AND ($3 = 0 OR s.stock_exchange_market_id = $3)
-"#;
+"#
+    };
+}
+
+/// 期間內同市場全部股票的報酬統計（大盤基準）。
+pub(super) const BENCHMARK_SQL: &str = concat!("SELECT", benchmark_columns!());
+
+/// [`BENCHMARK_SQL`] 再加上各年度的基準；整段期間那一列的 `year` 為 `NULL`。空期間也會回整段那一列。
+const BENCHMARK_BY_YEAR_SQL: &str = concat!(
+    "SELECT date_part('year', r.date)::int AS year,",
+    benchmark_columns!(),
+    "GROUP BY GROUPING SETS ((), (date_part('year', r.date)::int))\n"
+);
 
 /// 個股在期間內的訊號，附當日報價與之後的報酬，由新到舊；`total` 為未套用 limit 的筆數。
 const STOCK_SIGNALS_SQL: &str = r#"
@@ -232,6 +282,9 @@ pub(super) struct HorizonValues {
 pub(super) struct PerformanceRow {
     indicator: String,
     kind: String,
+    /// 年度；整段期間的統計（或沒有依年度拆分的查詢）為 `None`。
+    #[sqlx(default)]
+    year: Option<i32>,
     pub(super) occurrences: i64,
     n5: i64,
     avg5: Option<f64>,
@@ -316,6 +369,9 @@ impl PerformanceRow {
 /// [`BENCHMARK_SQL`] 的結果。
 #[derive(Debug, Clone, Default, sqlx::FromRow)]
 pub(super) struct BenchmarkRow {
+    /// 年度；整段期間（或沒有依年度拆分的查詢）為 `None`。
+    #[sqlx(default)]
+    year: Option<i32>,
     n5: i64,
     avg5: Option<f64>,
     win5: Option<f64>,
@@ -388,6 +444,10 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
     if let Err(message) = validate_streaks(params.min_foreign_streak, params.min_trust_streak) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
+    let by_year = match parse_group_by(params.group_by.as_deref()) {
+        Ok(by_year) => by_year,
+        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
     if let Some(response) = industry_error(params.industry.as_deref()).await {
         return response;
     }
@@ -410,19 +470,21 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
     };
 
     let with_chip = params.min_foreign_streak.is_some() || params.min_trust_streak.is_some();
-    let mut query = sqlx::query_as(if with_chip {
-        PERFORMANCE_WITH_CHIP_SQL
-    } else {
-        PERFORMANCE_SQL
-    })
-    .bind(from)
-    .bind(to)
-    .bind(market_id)
-    .bind(params.indicator.as_deref())
-    .bind(params.kind.as_deref())
-    .bind(params.industry.as_deref())
-    .bind(params.min_rs_score.map(i16::from))
-    .bind(params.max_rs_score.map(i16::from));
+    let sql = match (with_chip, by_year) {
+        (true, true) => PERFORMANCE_WITH_CHIP_BY_YEAR_SQL,
+        (true, false) => PERFORMANCE_WITH_CHIP_SQL,
+        (false, true) => PERFORMANCE_BY_YEAR_SQL,
+        (false, false) => PERFORMANCE_SQL,
+    };
+    let mut query = sqlx::query_as(sql)
+        .bind(from)
+        .bind(to)
+        .bind(market_id)
+        .bind(params.indicator.as_deref())
+        .bind(params.kind.as_deref())
+        .bind(params.industry.as_deref())
+        .bind(params.min_rs_score.map(i16::from))
+        .bind(params.max_rs_score.map(i16::from));
     if with_chip {
         query = query
             .bind(params.min_foreign_streak.map(i64::from))
@@ -432,14 +494,8 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
-    let benchmark: BenchmarkRow = match sqlx::query_as(BENCHMARK_SQL)
-        .bind(from)
-        .bind(to)
-        .bind(market_id)
-        .fetch_one(pool)
-        .await
-    {
-        Ok(row) => row,
+    let benchmark = match fetch_benchmark(from, to, market_id, by_year).await {
+        Ok(benchmark) => benchmark,
         Err(error) => return database_error(error),
     };
 
@@ -447,6 +503,105 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
         from, to, market, &params, rows, &benchmark,
     ))
     .into_response()
+}
+
+/// `group_by`：省略為不拆分，`year` 為依年度拆分，其他值回錯誤訊息。
+pub(super) fn parse_group_by(value: Option<&str>) -> Result<bool, &'static str> {
+    match value {
+        None => Ok(false),
+        Some("year") => Ok(true),
+        Some(_) => Err("group_by 只支援 year"),
+    }
+}
+
+/// 期間內的大盤基準；`by_year` 時一併取各年度的基準。
+pub(super) struct Benchmark {
+    total: BenchmarkRow,
+    years: Option<Vec<BenchmarkRow>>,
+}
+
+/// 查詢大盤基準；`by_year` 時用 [`BENCHMARK_BY_YEAR_SQL`] 一次取整段與各年度。
+pub(super) async fn fetch_benchmark(
+    from: NaiveDate,
+    to: NaiveDate,
+    market_id: i32,
+    by_year: bool,
+) -> Result<Benchmark, sqlx::Error> {
+    let pool = database::get_connection();
+    if !by_year {
+        let total = sqlx::query_as(BENCHMARK_SQL)
+            .bind(from)
+            .bind(to)
+            .bind(market_id)
+            .fetch_one(pool)
+            .await?;
+        return Ok(Benchmark { total, years: None });
+    }
+    let rows: Vec<BenchmarkRow> = sqlx::query_as(BENCHMARK_BY_YEAR_SQL)
+        .bind(from)
+        .bind(to)
+        .bind(market_id)
+        .fetch_all(pool)
+        .await?;
+    Ok(split_benchmark(rows))
+}
+
+/// 把 [`BENCHMARK_BY_YEAR_SQL`] 的結果分成整段期間與各年度（由舊到新）。
+fn split_benchmark(rows: Vec<BenchmarkRow>) -> Benchmark {
+    let (totals, mut years): (Vec<_>, Vec<_>) =
+        rows.into_iter().partition(|row| row.year.is_none());
+    years.sort_by_key(|row| row.year);
+    Benchmark {
+        total: totals.into_iter().next().unwrap_or_default(),
+        years: Some(years),
+    }
+}
+
+/// 整段期間與各年度的大盤基準統計；沒有依年度拆分時第二項為 `None`。
+pub(super) fn benchmark_output(
+    benchmark: &Benchmark,
+) -> (Vec<BenchmarkStat>, Option<Vec<BenchmarkYear>>) {
+    let years = benchmark.years.as_ref().map(|years| {
+        years
+            .iter()
+            .filter_map(|row| {
+                Some(BenchmarkYear {
+                    year: row.year?,
+                    benchmark: benchmark_stats(row),
+                })
+            })
+            .collect()
+    });
+    (benchmark_stats(&benchmark.total), years)
+}
+
+/// 某來源與種類（`year` 不為 `None` 的列）的各年度統計，由舊到新。
+pub(super) fn performance_years(
+    rows: &[PerformanceRow],
+    indicator: &str,
+    kind: &str,
+) -> Vec<PerformanceYear> {
+    let mut years: Vec<PerformanceYear> = rows
+        .iter()
+        .filter(|row| row.indicator == indicator && row.kind == kind)
+        .filter_map(|row| {
+            Some(PerformanceYear {
+                year: row.year?,
+                occurrences: row.occurrences,
+                horizons: horizon_stats(row),
+            })
+        })
+        .collect();
+    years.sort_by_key(|year| year.year);
+    years
+}
+
+/// 整段期間的那一列（`year` 為 `None`）；沒有事件時為全 0 的預設值。
+pub(super) fn total_row(rows: &[PerformanceRow]) -> PerformanceRow {
+    rows.iter()
+        .find(|row| row.year.is_none())
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// 外資、投信連續買超天數下限各在 1–20。
@@ -534,25 +689,28 @@ fn build_performance(
     to: NaiveDate,
     market: &str,
     params: &SignalPerformanceParams,
-    mut rows: Vec<PerformanceRow>,
-    benchmark: &BenchmarkRow,
+    rows: Vec<PerformanceRow>,
+    benchmark: &Benchmark,
 ) -> SignalPerformanceResponse {
-    rows.sort_by_key(|row| {
+    let by_year = benchmark.years.is_some();
+    let mut totals: Vec<&PerformanceRow> = rows.iter().filter(|row| row.year.is_none()).collect();
+    totals.sort_by_key(|row| {
         (
             signal_indicator_order(&row.indicator),
             signal_kind_order(&row.kind),
         )
     });
-    let items = rows
-        .iter()
+    let items = totals
+        .into_iter()
         .map(|row| SignalPerformanceItem {
             indicator: row.indicator.clone(),
             kind: row.kind.clone(),
             occurrences: row.occurrences,
             horizons: horizon_stats(row),
+            years: by_year.then(|| performance_years(&rows, &row.indicator, &row.kind)),
         })
         .collect();
-    let benchmark = benchmark_stats(benchmark);
+    let (benchmark, benchmark_by_year) = benchmark_output(benchmark);
 
     SignalPerformanceResponse {
         from: from.to_string(),
@@ -565,8 +723,10 @@ fn build_performance(
         max_rs_score: params.max_rs_score,
         min_foreign_streak: params.min_foreign_streak,
         min_trust_streak: params.min_trust_streak,
+        group_by: by_year.then(|| "year".to_owned()),
         adjusted: true,
         benchmark,
+        benchmark_by_year,
         items,
     }
 }
