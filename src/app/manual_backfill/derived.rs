@@ -12,11 +12,12 @@
 
 use chrono::NaiveDate;
 
-/// 未來報酬回填的預設起日（訊號績效統計從 2023 年起算）。
-const MANUAL_FORWARD_RETURN_FROM: &str = "2023-01-01";
+/// 未來報酬回填的預設起日（結束日）：技術訊號從 2019 年起，以 2019 年初為結束日，5 日報酬的基準日
+/// 從 2018 年底齊、240 日報酬的基準日從 2018 年初齊。
+const MANUAL_FORWARD_RETURN_FROM: &str = "2019-01-02";
 
-/// 每日相對強度回填的預設起日：未來報酬從 2023 年起算，240 日報酬約在 2024 年初才齊。
-const MANUAL_RELATIVE_STRENGTH_FROM: &str = "2024-01-01";
+/// 每日相對強度回填的預設起日：240 日報酬的基準日從 2018 年初齊，相對強度從 2019 年初起算。
+const MANUAL_RELATIVE_STRENGTH_FROM: &str = "2019-01-02";
 
 /// 技術訊號回補的預設起日。
 const MANUAL_TECHNICAL_SIGNAL_FROM: &str = "2026-09-01";

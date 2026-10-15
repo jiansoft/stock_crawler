@@ -192,7 +192,7 @@ pub(crate) struct IndustryFlowResponse {
 pub(crate) struct InstitutionalStreakPerformanceParams {
     /// 統計起日（`YYYY-MM-DD`）；省略為迄日往前 364 天。
     pub(crate) from: Option<String>,
-    /// 統計迄日（`YYYY-MM-DD`）；省略為最新有籌碼資料的交易日。起訖最長 1,096 天。
+    /// 統計迄日（`YYYY-MM-DD`）；省略為最新有籌碼資料的交易日。起訖最長 3,653 天（籌碼資料從 2019 年起）。
     pub(crate) to: Option<String>,
     /// 法人別：`foreign`（預設）、`trust`、`dealer` 或 `total`。
     #[param(value_type = InvestorParamValue, default = "foreign")]

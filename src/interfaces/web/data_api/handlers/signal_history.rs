@@ -30,8 +30,11 @@ const HORIZONS: [u32; 5] = [5, 20, 60, 120, 240];
 /// 預設統計期間：迄日往前 364 天（約一年）。
 const DEFAULT_PERIOD_DAYS: i64 = 364;
 
-/// 統計期間上限（日曆天，含起訖）。
-const MAX_PERIOD_DAYS: i64 = 1096;
+/// 統計期間上限（日曆天，含起訖）：技術訊號、未來報酬、相對強度與籌碼都從 2019 年起。
+const MAX_PERIOD_DAYS: i64 = 3653;
+
+/// 不指定訊號來源時的期間上限：全部來源一次統計多年要數十秒，超過時必須指定 `indicator`。
+const MAX_ALL_SIGNALS_PERIOD_DAYS: i64 = 1096;
 
 /// `$1`（含）之前最近一個有訊號的交易日；`$1` 為 `NULL` 時取最新。
 const LATEST_SIGNAL_DATE_SQL: &str = r#"
@@ -424,7 +427,8 @@ struct StockSignalRow {
 ///
 /// # Errors
 ///
-/// 日期格式錯誤、起日晚於迄日、期間超過 1,096 天、`kind`／`indicator` 不在固定清單或產業
+/// 日期格式錯誤、起日晚於迄日、期間超過 3,653 天（沒有指定 `indicator` 時 1,096 天）、
+/// `kind`／`indicator` 不在固定清單或產業
 /// 名稱不存在、`min_rs_score`／`max_rs_score` 不在 1–99 或下限大於上限回 422；迄日之前沒有任何
 /// 訊號資料回 404；驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/market/signals/performance", tag = "data-api", params(SignalPerformanceParams), responses((status = 200, body = SignalPerformanceResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
@@ -479,6 +483,9 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
         Ok(from) => from,
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    if let Err(message) = require_indicator_for_long_period(from, to, params.indicator.as_deref()) {
+        return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
 
     let with_chip = params.min_foreign_streak.is_some() || params.min_trust_streak.is_some();
     let sql = match (with_chip, by_year) {
@@ -652,9 +659,21 @@ pub(super) fn resolve_period(
         return Err("from 不可晚於 to");
     }
     if (to - from).num_days() >= MAX_PERIOD_DAYS {
-        return Err("統計期間最長 1,096 天");
+        return Err("統計期間最長 3,653 天");
     }
     Ok(from)
+}
+
+/// 期間超過 [`MAX_ALL_SIGNALS_PERIOD_DAYS`] 時必須指定訊號來源。
+fn require_indicator_for_long_period(
+    from: NaiveDate,
+    to: NaiveDate,
+    indicator: Option<&str>,
+) -> Result<(), &'static str> {
+    if indicator.is_none() && (to - from).num_days() >= MAX_ALL_SIGNALS_PERIOD_DAYS {
+        return Err("統計期間超過 1,096 天時必須指定 indicator");
+    }
+    Ok(())
 }
 
 /// 一列的各天期統計：平均與中位數四捨五入到小數兩位、比例到四位。

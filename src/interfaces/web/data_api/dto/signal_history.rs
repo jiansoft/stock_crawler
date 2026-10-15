@@ -13,7 +13,8 @@ use super::{MarketParamValue, SignalIndicatorValue, SignalKindValue};
 pub(crate) struct SignalPerformanceParams {
     /// 統計起日（`YYYY-MM-DD`）；省略為迄日往前 364 天。
     pub(crate) from: Option<String>,
-    /// 統計迄日（`YYYY-MM-DD`）；省略為最新有訊號的交易日。起訖最長 1,096 天。
+    /// 統計迄日（`YYYY-MM-DD`）；省略為最新有訊號的交易日。起訖最長 3,653 天；超過 1,096 天時
+    /// 必須指定 `indicator`（全部來源一次統計多年太慢）。
     pub(crate) to: Option<String>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
@@ -35,7 +36,7 @@ pub(crate) struct SignalPerformanceParams {
     pub(crate) max_rs_score: Option<u8>,
     /// 只統計訊號當天外資（不含外資自營商）已連續買超至少這麼多天的訊號（1–20）。連續天數與
     /// `/market/institutional-flow` 同一算法（只看有籌碼資料的日子，淨額 0 會中斷）；籌碼資料從
-    /// 2022-10 起，之前的訊號不列入。大盤基準不受影響。
+    /// 2019 年起，之前的訊號不列入。大盤基準不受影響。
     #[param(minimum = 1, maximum = 20)]
     pub(crate) min_foreign_streak: Option<u8>,
     /// 只統計訊號當天投信已連續買超至少這麼多天的訊號（1–20）；規則同 `min_foreign_streak`，

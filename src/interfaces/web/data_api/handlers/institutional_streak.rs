@@ -89,7 +89,7 @@ const STREAK_PERFORMANCE_BY_YEAR_SQL: &str =
 ///
 /// # Errors
 ///
-/// 日期格式錯誤、起日晚於迄日、期間超過 1,096 天、`streak` 不在 1–20、`investor`／`side`／`market`
+/// 日期格式錯誤、起日晚於迄日、期間超過 3,653 天、`streak` 不在 1–20、`investor`／`side`／`market`
 /// 不合法或產業名稱不存在回 422；迄日之前沒有任何籌碼資料回 404；驗證失敗回 401；資料庫查詢失敗回
 /// 不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/market/institutional-streak/performance", tag = "data-api", params(InstitutionalStreakPerformanceParams), responses((status = 200, body = InstitutionalStreakPerformanceResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
