@@ -8,9 +8,9 @@ use crate::{
     domain::quote::{
         forward_return::ForwardReturnRepository,
         relative_strength::{
-            CROSSING_INDICATORS, LONGEST, RelativeStrengthDay, RelativeStrengthQuery,
-            RelativeStrengthRepository, ScoredStock, ScoredUniverseQuery, UniverseRow, base_dates,
-            score_universe,
+            CROSSING_INDICATORS, LONGEST, PeriodCrossing, RelativeStrengthCrossingQuery,
+            RelativeStrengthDay, RelativeStrengthQuery, RelativeStrengthRepository, ScoredStock,
+            ScoredUniverseQuery, UniverseRow, base_dates, parse_crossing, score_universe,
         },
         technical::StockTechnicalSignal,
     },
@@ -82,6 +82,17 @@ const INSERT_DAY_SQL: &str = r#"
 INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
 SELECT $1, symbol, weighted, score, rank, $6
 FROM UNNEST($2::text[], $3::float8[], $4::smallint[], $5::int[]) AS t(symbol, weighted, score, rank)
+"#;
+
+/// `$1`～`$2` 每檔股票對每個門檻（來源 `$3`）的最後一次穿越，附 `$2` 當天的分數。
+const PERIOD_CROSSINGS_SQL: &str = r#"
+SELECT DISTINCT ON (t.stock_symbol, t.indicator)
+       t.stock_symbol, t.indicator, t.kind, rs.rs_score
+FROM daily_technical_signal t
+LEFT JOIN daily_relative_strength rs ON rs.date = $2 AND rs.stock_symbol = t.stock_symbol
+WHERE t.date BETWEEN $1 AND $2
+  AND t.indicator = ANY($3)
+ORDER BY t.stock_symbol, t.indicator, t.date DESC
 "#;
 
 /// [`UNIVERSE_SQL`] 的一列。
@@ -182,6 +193,34 @@ impl RelativeStrengthRepository for PgQuoteRepository {
         insert_signals(&mut tx, date, signals).await?;
         tx.commit().await?;
         Ok(written)
+    }
+}
+
+#[async_trait]
+impl RelativeStrengthCrossingQuery for PgQuoteRepository {
+    async fn fetch_period_crossings(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<PeriodCrossing>> {
+        let rows: Vec<(String, String, String, Option<i16>)> = sqlx::query_as(PERIOD_CROSSINGS_SQL)
+            .bind(from)
+            .bind(to)
+            .bind(&CROSSING_INDICATORS[..])
+            .fetch_all(database::get_connection())
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(stock_symbol, indicator, kind, score)| {
+                let (threshold, direction) = parse_crossing(&indicator, &kind)?;
+                Some(PeriodCrossing {
+                    stock_symbol,
+                    threshold,
+                    direction,
+                    latest_score: score.and_then(|score| u8::try_from(score).ok()),
+                })
+            })
+            .collect())
     }
 }
 
