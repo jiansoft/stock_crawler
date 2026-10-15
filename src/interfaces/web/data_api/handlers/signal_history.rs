@@ -94,9 +94,24 @@ GROUP BY sig.indicator, sig.kind
 }
 pub(super) use performance_aggregate_sql;
 
-/// 各來源與種類的訊號在各天期的報酬統計。`$3 = 0` 是 all 的哨兵（訊號只算上市櫃）；
-/// `$7`／`$8` 是訊號當天相對強度分數（`daily_relative_strength`）的上下限，有設時沒有分數的
-/// 訊號不列入。大盤基準（`bench`）是同一天同市場全部股票的平均報酬，不受產業與 RS 篩選影響。
+/// 訊號篩選的共用條件：`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4`／`$5` 來源與種類、
+/// `$6` 產業名稱、`$7`／`$8` 訊號當天相對強度分數（`daily_relative_strength`，別名 `rs`）的上下限，
+/// 有設時沒有分數的訊號不列入。
+macro_rules! signal_filter_sql {
+    () => {
+        r#"
+    WHERE t.date BETWEEN $1 AND $2
+      AND ($3 = 0 OR s.stock_exchange_market_id = $3)
+      AND ($4::text IS NULL OR t.indicator = $4)
+      AND ($5::text IS NULL OR t.kind = $5)
+      AND ($6::text IS NULL OR si.name = $6)
+      AND ($7::smallint IS NULL OR rs.rs_score >= $7)
+      AND ($8::smallint IS NULL OR rs.rs_score <= $8)"#
+    };
+}
+
+/// 各來源與種類的訊號在各天期的報酬統計，條件見 [`signal_filter_sql`]。大盤基準（`bench`）是
+/// 同一天同市場全部股票的平均報酬，不受產業、RS 與籌碼篩選影響。
 const PERFORMANCE_SQL: &str = concat!(
     r#"
 WITH sig AS (
@@ -104,14 +119,48 @@ WITH sig AS (
     FROM daily_technical_signal t
     JOIN stocks s ON s.stock_symbol = t.stock_symbol
     LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
-    LEFT JOIN daily_relative_strength rs ON rs.date = t.date AND rs.stock_symbol = t.stock_symbol
-    WHERE t.date BETWEEN $1 AND $2
-      AND ($3 = 0 OR s.stock_exchange_market_id = $3)
-      AND ($4::text IS NULL OR t.indicator = $4)
-      AND ($5::text IS NULL OR t.kind = $5)
-      AND ($6::text IS NULL OR si.name = $6)
-      AND ($7::smallint IS NULL OR rs.rs_score >= $7)
-      AND ($8::smallint IS NULL OR rs.rs_score <= $8)
+    LEFT JOIN daily_relative_strength rs ON rs.date = t.date AND rs.stock_symbol = t.stock_symbol"#,
+    signal_filter_sql!(),
+    r#"
+),
+"#,
+    performance_aggregate_sql!()
+);
+
+/// [`PERFORMANCE_SQL`] 再加籌碼條件：訊號當天外資（`$9`）／投信（`$10`）已連續買超至少 N 天，
+/// `NULL` 為不篩選。連續天數與 `/market/institutional-flow` 同一算法：只看有籌碼資料的日子，
+/// 以「依日期的列號 − 依方向分組的列號」切出連續段（淨額 0 或缺值會中斷）；往前多讀 60 個日曆天，
+/// 讓期間開頭的訊號也能數到 20 天。只在有設籌碼條件時使用，避免一般查詢多算整段籌碼。
+const PERFORMANCE_WITH_CHIP_SQL: &str = concat!(
+    r#"
+WITH chip_runs AS (
+    SELECT stock_symbol, "date",
+           SIGN(COALESCE(foreign_net, 0)) AS fs,
+           SIGN(COALESCE(trust_net, 0)) AS ts,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
+               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(foreign_net, 0)) ORDER BY "date") AS fg,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date")
+               - ROW_NUMBER() OVER (PARTITION BY stock_symbol, SIGN(COALESCE(trust_net, 0)) ORDER BY "date") AS tg
+    FROM chip_daily
+    WHERE "date" BETWEEN $1::date - 60 AND $2
+),
+chip AS (
+    SELECT stock_symbol, "date",
+           CASE WHEN fs > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, fs, fg ORDER BY "date") ELSE 0 END AS foreign_buy,
+           CASE WHEN ts > 0 THEN ROW_NUMBER() OVER (PARTITION BY stock_symbol, ts, tg ORDER BY "date") ELSE 0 END AS trust_buy
+    FROM chip_runs
+),
+sig AS (
+    SELECT t.date, t.stock_symbol, t.indicator, t.kind
+    FROM daily_technical_signal t
+    JOIN stocks s ON s.stock_symbol = t.stock_symbol
+    JOIN chip c ON c."date" = t.date AND c.stock_symbol = t.stock_symbol
+    LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
+    LEFT JOIN daily_relative_strength rs ON rs.date = t.date AND rs.stock_symbol = t.stock_symbol"#,
+    signal_filter_sql!(),
+    r#"
+      AND ($9::bigint IS NULL OR c.foreign_buy >= $9)
+      AND ($10::bigint IS NULL OR c.trust_buy >= $10)
 ),
 "#,
     performance_aggregate_sql!()
@@ -336,6 +385,9 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
     if let Err(message) = validate_rs_range(params.min_rs_score, params.max_rs_score) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
+    if let Err(message) = validate_streaks(params.min_foreign_streak, params.min_trust_streak) {
+        return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
     if let Some(response) = industry_error(params.industry.as_deref()).await {
         return response;
     }
@@ -357,18 +409,26 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    let rows: Vec<PerformanceRow> = match sqlx::query_as(PERFORMANCE_SQL)
-        .bind(from)
-        .bind(to)
-        .bind(market_id)
-        .bind(params.indicator.as_deref())
-        .bind(params.kind.as_deref())
-        .bind(params.industry.as_deref())
-        .bind(params.min_rs_score.map(i16::from))
-        .bind(params.max_rs_score.map(i16::from))
-        .fetch_all(pool)
-        .await
-    {
+    let with_chip = params.min_foreign_streak.is_some() || params.min_trust_streak.is_some();
+    let mut query = sqlx::query_as(if with_chip {
+        PERFORMANCE_WITH_CHIP_SQL
+    } else {
+        PERFORMANCE_SQL
+    })
+    .bind(from)
+    .bind(to)
+    .bind(market_id)
+    .bind(params.indicator.as_deref())
+    .bind(params.kind.as_deref())
+    .bind(params.industry.as_deref())
+    .bind(params.min_rs_score.map(i16::from))
+    .bind(params.max_rs_score.map(i16::from));
+    if with_chip {
+        query = query
+            .bind(params.min_foreign_streak.map(i64::from))
+            .bind(params.min_trust_streak.map(i64::from));
+    }
+    let rows: Vec<PerformanceRow> = match query.fetch_all(pool).await {
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
@@ -387,6 +447,18 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
         from, to, market, &params, rows, &benchmark,
     ))
     .into_response()
+}
+
+/// 外資、投信連續買超天數下限各在 1–20。
+fn validate_streaks(foreign: Option<u8>, trust: Option<u8>) -> Result<(), &'static str> {
+    let in_range = |days: Option<u8>| days.is_none_or(|days| (1..=20).contains(&days));
+    if !in_range(foreign) {
+        return Err("min_foreign_streak 必須介於 1 至 20");
+    }
+    if !in_range(trust) {
+        return Err("min_trust_streak 必須介於 1 至 20");
+    }
+    Ok(())
 }
 
 /// 相對強度上下限各在 1–99，且下限不大於上限。
@@ -491,6 +563,8 @@ fn build_performance(
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
+        min_foreign_streak: params.min_foreign_streak,
+        min_trust_streak: params.min_trust_streak,
         adjusted: true,
         benchmark,
         items,

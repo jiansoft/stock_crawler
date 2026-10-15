@@ -54,7 +54,24 @@ fn params() -> SignalPerformanceParams {
         industry: Some("半導體業".to_owned()),
         min_rs_score: Some(80),
         max_rs_score: None,
+        min_foreign_streak: Some(3),
+        min_trust_streak: None,
     }
+}
+
+/// 外資、投信連續買超天數下限：各在 1–20，兩者都可省略。
+#[test]
+fn validate_streaks_bounds() {
+    assert_eq!(validate_streaks(None, None), Ok(()));
+    assert_eq!(validate_streaks(Some(1), Some(20)), Ok(()));
+    assert_eq!(
+        validate_streaks(Some(0), None),
+        Err("min_foreign_streak 必須介於 1 至 20")
+    );
+    assert_eq!(
+        validate_streaks(None, Some(21)),
+        Err("min_trust_streak 必須介於 1 至 20")
+    );
 }
 
 /// 相對強度上下限：各在 1–99、下限不大於上限，兩者都可省略。
@@ -205,6 +222,10 @@ fn build_performance_orders_and_rounds() {
     assert_eq!(
         (response.min_rs_score, response.max_rs_score),
         (Some(80), None)
+    );
+    assert_eq!(
+        (response.min_foreign_streak, response.min_trust_streak),
+        (Some(3), None)
     );
     assert!(response.indicator.is_none());
 }

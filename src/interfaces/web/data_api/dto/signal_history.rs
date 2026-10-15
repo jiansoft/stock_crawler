@@ -33,6 +33,15 @@ pub(crate) struct SignalPerformanceParams {
     /// 只統計訊號當天相對強度分數至多這麼高的訊號（1–99）；規則同 `min_rs_score`。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) max_rs_score: Option<u8>,
+    /// 只統計訊號當天外資（不含外資自營商）已連續買超至少這麼多天的訊號（1–20）。連續天數與
+    /// `/market/institutional-flow` 同一算法（只看有籌碼資料的日子，淨額 0 會中斷）；籌碼資料從
+    /// 2022-10 起，之前的訊號不列入。大盤基準不受影響。
+    #[param(minimum = 1, maximum = 20)]
+    pub(crate) min_foreign_streak: Option<u8>,
+    /// 只統計訊號當天投信已連續買超至少這麼多天的訊號（1–20）；規則同 `min_foreign_streak`，
+    /// 兩者都設時需同時符合。
+    #[param(minimum = 1, maximum = 20)]
+    pub(crate) min_trust_streak: Option<u8>,
 }
 
 /// 某天期（N 個交易日後）的表現統計；樣本為 0 時數值為 `null`。
@@ -99,6 +108,10 @@ pub(crate) struct SignalPerformanceResponse {
     pub(crate) min_rs_score: Option<u8>,
     /// 相對強度分數上限；未篩選為 `null`。
     pub(crate) max_rs_score: Option<u8>,
+    /// 外資連續買超天數下限；未篩選為 `null`。
+    pub(crate) min_foreign_streak: Option<u8>,
+    /// 投信連續買超天數下限；未篩選為 `null`。
+    pub(crate) min_trust_streak: Option<u8>,
     /// 報酬是否還原權值；固定為 `true`。
     pub(crate) adjusted: bool,
     /// 大盤基準，依天期由短到長。
