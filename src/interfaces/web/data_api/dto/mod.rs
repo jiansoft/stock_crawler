@@ -67,6 +67,7 @@ pub(super) use industries::{
 pub(super) use institutional_flow::{
     FlowSideParamValue, IndustryFlowItem, IndustryFlowParams, IndustryFlowResponse,
     IndustryFlowStock, InstitutionalFlowItem, InstitutionalFlowParams, InstitutionalFlowResponse,
+    InstitutionalStreakPerformanceParams, InstitutionalStreakPerformanceResponse,
     InvestorParamValue,
 };
 pub(super) use margin::{
