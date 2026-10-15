@@ -82,7 +82,36 @@ struct FakeQuote {
     universes: HashMap<NaiveDate, (NaiveDate, Vec<ScoredStock>)>,
     dates: Vec<NaiveDate>,
     rs: Vec<RelativeStrengthDay>,
+    crossings: Vec<PeriodCrossing>,
     fail: bool,
+}
+
+#[async_trait]
+impl RelativeStrengthCrossingQuery for FakeQuote {
+    async fn fetch_period_crossings(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<PeriodCrossing>> {
+        assert_eq!((from, to), (day(12), day(16)), "最近 5 個交易日");
+        if self.fail {
+            return Err(anyhow!("連線中斷"));
+        }
+        Ok(self.crossings.clone())
+    }
+}
+
+fn crossing(symbol: &str, threshold: u8, up: bool, score: Option<u8>) -> PeriodCrossing {
+    PeriodCrossing {
+        stock_symbol: symbol.to_owned(),
+        threshold,
+        direction: if up {
+            CrossDirection::Up
+        } else {
+            CrossDirection::Down
+        },
+        latest_score: score,
+    }
 }
 
 #[async_trait]
@@ -186,6 +215,14 @@ fn quote() -> FakeQuote {
             rs_day("2330", 9, 85),
             rs_day("2454", 16, 90),
         ],
+        crossings: vec![
+            crossing("2330", 80, true, Some(85)),
+            crossing("2317", 80, true, Some(92)),
+            crossing("2454", 80, true, None),
+            crossing("6669", 80, true, Some(81)),
+            crossing("1101", 50, false, Some(30)),
+            crossing("2603", 50, false, Some(45)),
+        ],
         fail: false,
     }
 }
@@ -266,6 +303,7 @@ async fn run_builds_full_message() {
         "• 最弱：光電業 30、航運業 50（-10.0）、半導體業 70（+5.0）",
         "• 轉強：半導體業 +5.0",
         "• 轉弱：航運業 -10.0",
+        "相對強度穿越（2026-10-12～2026-10-16，每檔只取最後一次；後面數字為最新分數）",
         "外資近 5 日產業淨買賣（2026-10-12～2026-10-16）",
         "• 流入：半導體業 +20.0 億、金融保險業 +12.0 億",
         "• 流出：航運業 -5.0 億",
@@ -275,6 +313,49 @@ async fn run_builds_full_message() {
     }
     assert!(!message.contains("投信"), "投信沒有資料不列：{message}");
     assert!(!message.contains("觀光業"), "少於 5 檔的產業不列");
+}
+
+/// 穿越：站上依最新分數由高到低、跌破由低到高，各列最多 3 檔；沒有最新分數的排最後；
+/// 沒有股票的門檻與方向不列。
+#[test]
+fn crossing_lines_rank_by_latest_score() {
+    let crossings = quote().crossings;
+    assert_eq!(
+        crossing_line(&crossings, 80, CrossDirection::Up, &name).as_deref(),
+        Some("• 站上 80 分 4 檔：2317 鴻海 92、2330 台積電 85、6669 其他 81")
+    );
+    assert_eq!(
+        crossing_line(&crossings, 50, CrossDirection::Down, &name).as_deref(),
+        Some("• 跌破 50 分 2 檔：1101 其他 30、2603 其他 45")
+    );
+    assert!(crossing_line(&crossings, 80, CrossDirection::Down, &name).is_none());
+    let unscored = [crossing("2454", 80, true, None)];
+    assert_eq!(
+        crossing_line(&unscored, 80, CrossDirection::Up, &name).as_deref(),
+        Some("• 站上 80 分 1 檔：2454 其他")
+    );
+
+    let section = CrossingSection {
+        from: day(12),
+        to: day(16),
+        crossings,
+    };
+    let message = build_message(None, Some(&section), &[], &[], name).expect("有穿越");
+    assert!(
+        message.starts_with(&esc("每週市場摘要︰2026-10-16\n")),
+        "{message}"
+    );
+    assert!(
+        message.contains(&esc(
+            "• 站上 80 分 4 檔：2317 鴻海 92、2330 台積電 85、6669 其他 81\n• 跌破 50 分 2 檔"
+        )),
+        "{message}"
+    );
+    let empty = CrossingSection {
+        crossings: Vec::new(),
+        ..section
+    };
+    assert!(build_message(None, Some(&empty), &[], &[], name).is_none());
 }
 
 /// 持股 RS 變化：依變化排序，上升與下降各列最多 3 檔，沒有變化的不列。
@@ -301,7 +382,7 @@ fn build_message_lists_holding_moves() {
             },
         ]
     );
-    let message = build_message(None, &[], &moves, name).expect("有持股變化");
+    let message = build_message(None, None, &[], &moves, name).expect("有持股變化");
     assert!(message.starts_with(&esc("每週市場摘要\n")), "{message}");
     assert!(
         message.contains(&esc("• 上升：2317 鴻海 50 → 59（+9）")),
@@ -312,7 +393,7 @@ fn build_message_lists_holding_moves() {
         "{message}"
     );
     assert!(!message.contains("1101"), "沒有變化的不列");
-    assert!(build_message(None, &[], &[], name).is_none());
+    assert!(build_message(None, None, &[], &[], name).is_none());
 }
 
 /// 各段查詢失敗只略過該段；全部失敗或沒有資料時不發送。

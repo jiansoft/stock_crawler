@@ -287,6 +287,44 @@ pub trait RelativeStrengthRepository: Send + Sync {
     ) -> Result<u64>;
 }
 
+/// 期間內某檔股票對某個門檻的最後一次穿越（取自 [`CROSSING_INDICATORS`] 訊號）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PeriodCrossing {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 穿越的門檻（[`THRESHOLDS`] 之一）。
+    pub threshold: u8,
+    /// 期間內最後一次穿越的方向。
+    pub direction: CrossDirection,
+    /// 期間最後一天的分數；當天沒有分數時為 `None`。
+    pub latest_score: Option<u8>,
+}
+
+/// 由訊號來源與種類還原門檻與方向；不是相對強度穿越訊號時回 `None`。
+pub fn parse_crossing(indicator: &str, kind: &str) -> Option<(u8, CrossDirection)> {
+    let threshold = THRESHOLDS
+        .into_iter()
+        .zip(CROSSING_INDICATORS)
+        .find_map(|(threshold, known)| (known == indicator).then_some(threshold))?;
+    let direction = match SignalKind::parse(kind)? {
+        SignalKind::CrossAbove => CrossDirection::Up,
+        SignalKind::CrossBelow => CrossDirection::Down,
+        _ => return None,
+    };
+    Some((threshold, direction))
+}
+
+/// 相對強度穿越訊號的期間查詢介面。
+#[async_trait]
+pub trait RelativeStrengthCrossingQuery: Send + Sync {
+    /// `from`～`to`（皆含）每檔股票對每個門檻的最後一次穿越，附 `to` 當天的分數。
+    async fn fetch_period_crossings(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<PeriodCrossing>>;
+}
+
 /// 全體計分的查詢介面。
 #[async_trait]
 pub trait ScoredUniverseQuery: Send + Sync {
@@ -406,6 +444,22 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// 只有 rs80／rs50 的站上、跌破能還原成門檻與方向。
+    #[test]
+    fn parse_crossing_maps_indicator_and_kind() {
+        assert_eq!(
+            parse_crossing("rs80", "cross_above"),
+            Some((80, CrossDirection::Up))
+        );
+        assert_eq!(
+            parse_crossing("rs50", "cross_below"),
+            Some((50, CrossDirection::Down))
+        );
+        assert_eq!(parse_crossing("rs50", "new_high"), None);
+        assert_eq!(parse_crossing("close_ma60", "cross_above"), None);
+        assert_eq!(parse_crossing("rs80", "unknown"), None);
     }
 
     /// 穿越：同一天跨兩個門檻兩筆都列（高門檻在前）；剛好等於門檻算在門檻以上；沒穿越為空。

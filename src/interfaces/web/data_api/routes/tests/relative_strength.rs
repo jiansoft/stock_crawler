@@ -238,6 +238,16 @@ async fn relative_strength_history_matches_ranking() {
     .fetch_all(pool)
     .await
     .expect("讀回穿越訊號");
+    let period: Vec<_> = {
+        use crate::domain::quote::relative_strength::RelativeStrengthCrossingQuery;
+        crate::infra::database::repository::quote::PgQuoteRepository::new()
+            .fetch_period_crossings(dates[dates.len() - 7], end)
+            .await
+            .expect("讀取期間穿越")
+            .into_iter()
+            .filter(|crossing| crossing.stock_symbol.starts_with("79979R"))
+            .collect()
+    };
 
     let (status, ra) = get(&format!(
         "/api/v1/stocks/79979RA/relative-strength?date={latest}&days=2"
@@ -287,6 +297,15 @@ async fn relative_strength_history_matches_ranking() {
             "cross_below".to_owned(),
             "相對強度 60 → 1 分，跌破 50 分（第 2 名／2 檔）".to_owned()
         )]
+    );
+    assert_eq!(
+        period,
+        [crate::domain::quote::relative_strength::PeriodCrossing {
+            stock_symbol: "79979RB".to_owned(),
+            threshold: 50,
+            direction: crate::domain::quote::relative_strength::CrossDirection::Down,
+            latest_score: Some(1),
+        }]
     );
 
     assert_eq!(rc_status, StatusCode::OK);
