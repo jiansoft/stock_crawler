@@ -1,7 +1,7 @@
-//! 條件選股回測的持股選擇與交易成本：依上一期持股與 `keep_rank`、續抱門檻決定每期持股，
+//! 條件選股回測的持股選擇與交易成本：依上一期持股與 `keep_rank`、續抱門檻、產業上限決定每期持股，
 //! 再依換手扣除手續費與證交稅。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::{CandidateRow, PeriodRow, round2, round4};
 use crate::interfaces::web::data_api::dto::BacktestPeriod;
@@ -56,51 +56,71 @@ pub(super) fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<Period
 ///
 /// 有設 `hold_min_rs_score` 時，上一期持股即使不再符合選股條件（例如法人連買中斷），只要相對強度
 /// 不低於門檻也可續抱；這類股票排在候選股之後，名額不足時先留候選股。
+/// 有設 `max_per_industry` 時，同一產業（含續抱）最多 N 檔，排名較後的跳過、由其他產業補上。
 /// 大盤濾網沒過的那期空手（上一期持股全部賣出）。平均報酬只算有報酬的持股（之後完全沒有收盤的
 /// 股票不列入），全部都沒有報酬為 `None`。
 pub(super) fn select_holdings(
     rows: Vec<CandidateRow>,
     limit: usize,
     keep_rank: usize,
+    max_per_industry: Option<usize>,
 ) -> Vec<PeriodRow> {
+    let cap = max_per_industry.unwrap_or(usize::MAX);
     let mut previous: HashSet<String> = HashSet::new();
     rows.into_iter()
         .map(|row| {
             let slots = if row.market_ok { limit } else { 0 };
             let holdable: HashSet<&str> = row.hold_symbols.iter().map(String::as_str).collect();
             let listed: HashSet<&str> = row.candidates.iter().map(String::as_str).collect();
-            // 股票池：先是依相對強度排序的候選股，再接只符合續抱條件的股票；第三欄為可否續抱。
-            let mut pool: Vec<(&str, Option<f64>, bool)> = row
+            // 股票池：先是依相對強度排序的候選股，再接只符合續抱條件的股票；
+            // 欄位為代號、報酬、可否續抱、產業編號。
+            let mut pool: Vec<(&str, Option<f64>, bool, i32)> = row
                 .candidates
                 .iter()
                 .zip(&row.candidate_returns)
                 .enumerate()
                 .map(|(index, (symbol, ret))| {
                     let keepable = index < keep_rank || holdable.contains(symbol.as_str());
-                    (symbol.as_str(), *ret, keepable)
+                    let industry = row.candidate_industries.get(index).copied().unwrap_or(0);
+                    (symbol.as_str(), *ret, keepable, industry)
                 })
                 .collect();
             pool.extend(
                 row.hold_symbols
                     .iter()
                     .zip(&row.hold_returns)
-                    .filter(|(symbol, _)| !listed.contains(symbol.as_str()))
-                    .map(|(symbol, ret)| (symbol.as_str(), *ret, true)),
+                    .enumerate()
+                    .filter(|(_, (symbol, _))| !listed.contains(symbol.as_str()))
+                    .map(|(index, (symbol, ret))| {
+                        let industry = row.hold_industries.get(index).copied().unwrap_or(0);
+                        (symbol.as_str(), *ret, true, industry)
+                    }),
             );
 
-            let mut picked: Vec<usize> = pool
-                .iter()
-                .enumerate()
-                .filter(|(_, (symbol, _, keepable))| *keepable && previous.contains(*symbol))
-                .map(|(index, _)| index)
-                .take(slots)
-                .collect();
+            // 先放續抱的上一期持股，再依排名補候選股；同產業滿 `cap` 檔就跳過。
+            let mut counts: HashMap<i32, usize> = HashMap::new();
+            let mut picked: Vec<usize> = Vec::with_capacity(slots);
+            let mut admit = |index: usize, picked: &mut Vec<usize>| {
+                let count = counts.entry(pool[index].3).or_default();
+                if *count < cap {
+                    *count += 1;
+                    picked.push(index);
+                }
+            };
+            for (index, (symbol, _, keepable, _)) in pool.iter().enumerate() {
+                if picked.len() >= slots {
+                    break;
+                }
+                if *keepable && previous.contains(*symbol) {
+                    admit(index, &mut picked);
+                }
+            }
             for index in 0..row.candidates.len() {
                 if picked.len() >= slots {
                     break;
                 }
                 if !picked.contains(&index) {
-                    picked.push(index);
+                    admit(index, &mut picked);
                 }
             }
             picked.sort_unstable();

@@ -34,6 +34,10 @@ pub(crate) struct ScreenBacktestParams {
     /// 換股當天相對強度分數不低於此值就續抱；省略為不續抱（只看 `keep_rank`）。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) hold_min_rs_score: Option<u8>,
+    /// 同產業最多持有幾檔（1–100）：每期持股（含續抱）同一產業超過 N 檔時，排名較後的跳過、
+    /// 改由其他產業依相對強度補滿，用來降低產業集中；省略為不限。
+    #[param(minimum = 1, maximum = 100)]
+    pub(crate) max_per_industry: Option<u8>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -190,6 +194,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) market_filter_ma: Option<u16>,
     /// 續抱的相對強度門檻；未設定為 `null`。
     pub(crate) hold_min_rs_score: Option<u8>,
+    /// 同產業最多持有檔數；未設定為 `null`。
+    pub(crate) max_per_industry: Option<u8>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。

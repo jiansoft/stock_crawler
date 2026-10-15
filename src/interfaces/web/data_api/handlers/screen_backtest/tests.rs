@@ -309,8 +309,10 @@ fn candidates(d: u32, list: &[(&str, Option<f64>)]) -> CandidateRow {
             .map(|(symbol, _)| (*symbol).to_owned())
             .collect(),
         candidate_returns: list.iter().map(|(_, ret)| *ret).collect(),
+        candidate_industries: Vec::new(),
         hold_symbols: Vec::new(),
         hold_returns: Vec::new(),
+        hold_industries: Vec::new(),
     }
 }
 
@@ -325,6 +327,7 @@ fn select_holdings_without_buffer_takes_top_limit() {
         ],
         2,
         2,
+        None,
     );
     assert_eq!(rows[0].symbols, ["A", "B"]);
     assert_eq!((rows[0].holdings, rows[0].avg_return), (2, Some(10.0)));
@@ -367,6 +370,7 @@ fn select_holdings_keeps_previous_within_buffer() {
         ],
         2,
         4,
+        None,
     );
     assert_eq!(rows[0].symbols, ["A", "B"]);
     assert_eq!(rows[1].symbols, ["D", "A"]);
@@ -380,6 +384,7 @@ fn select_holdings_keeps_previous_within_buffer() {
         ],
         3,
         4,
+        None,
     );
     assert_eq!(rows[1].symbols, ["C", "B", "A"]);
 }
@@ -408,6 +413,7 @@ fn select_holdings_goes_to_cash_when_market_filtered() {
         ],
         1,
         2,
+        None,
     );
     assert_eq!(
         (rows[0].symbols.clone(), rows[0].market_filtered),
@@ -451,6 +457,7 @@ fn select_holdings_keeps_stocks_meeting_hold_rule() {
         ],
         2,
         2,
+        None,
     );
     assert_eq!(rows[1].symbols, ["C", "A"]);
     assert_eq!(rows[1].avg_return, Some(4.0));
@@ -467,8 +474,80 @@ fn select_holdings_keeps_stocks_meeting_hold_rule() {
         ],
         1,
         1,
+        None,
     );
     assert_eq!(rows[0].symbols, ["A"]);
     // A 只符合續抱條件、B 是候選第 1 名但不是上一期持股：續抱 A。
     assert_eq!(rows[1].symbols, ["A"]);
+}
+
+/// 設定候選股與續抱名單的產業編號（依序對應）。
+fn with_industries(mut row: CandidateRow, candidates: &[i32], hold: &[i32]) -> CandidateRow {
+    row.candidate_industries = candidates.to_vec();
+    row.hold_industries = hold.to_vec();
+    row
+}
+
+/// 產業上限：同產業滿 N 檔後排名較後的跳過、由其他產業補上；續抱的股票也計入上限；
+/// 沒有產業資料視為同一組（編號 0）。
+#[test]
+fn select_holdings_caps_stocks_per_industry() {
+    // A、B、C 同產業 1，D 產業 2：上限 2 時取 A、B 後跳過 C，補 D。
+    let rows = select_holdings(
+        vec![with_industries(
+            candidates(
+                2,
+                &[
+                    ("A", Some(1.0)),
+                    ("B", Some(2.0)),
+                    ("C", Some(3.0)),
+                    ("D", Some(4.0)),
+                ],
+            ),
+            &[1, 1, 1, 2],
+            &[],
+        )],
+        3,
+        3,
+        Some(2),
+    );
+    assert_eq!(rows[0].symbols, ["A", "B", "D"]);
+    assert_eq!(rows[0].avg_return, Some(7.0 / 3.0));
+    // 不設上限時就是前 3 名。
+    let rows = select_holdings(
+        vec![with_industries(
+            candidates(2, &[("A", None), ("B", None), ("C", None), ("D", None)]),
+            &[1, 1, 1, 2],
+            &[],
+        )],
+        3,
+        3,
+        None,
+    );
+    assert_eq!(rows[0].symbols, ["A", "B", "C"]);
+
+    // 續抱：上一期 A（產業 1）只符合續抱條件也計入上限，這期產業 1 只能再放 0 檔（上限 1），
+    // 候選 B（產業 1）跳過，補 C（產業 3）。
+    let rows = select_holdings(
+        vec![
+            with_industries(candidates(2, &[("A", None)]), &[1], &[]),
+            with_hold(
+                with_industries(candidates(3, &[("B", None), ("C", None)]), &[1, 3], &[1]),
+                &[("A", None)],
+            ),
+        ],
+        2,
+        2,
+        Some(1),
+    );
+    assert_eq!(rows[1].symbols, ["C", "A"]);
+
+    // 沒有產業資料（舊資料或測試）視為同一組：上限 1 只放 1 檔。
+    let rows = select_holdings(
+        vec![candidates(2, &[("A", None), ("B", None)])],
+        2,
+        2,
+        Some(1),
+    );
+    assert_eq!(rows[0].symbols, ["A"]);
 }

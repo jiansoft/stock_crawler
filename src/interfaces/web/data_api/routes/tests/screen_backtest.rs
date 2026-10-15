@@ -278,6 +278,23 @@ async fn screen_backtest_endpoint_db_semantics() {
         serde_json::json!(["79979BB"])
     );
 
+    // 產業上限：03-01 前兩名 BA（90）、BC（80）同為產業 24，上限 1 時跳過 BC、補產業 99 的 BB；
+    // 03-08 的 BB（95，產業 99）、BC（70，產業 24）本來就不同產業。
+    let (status, json) = query("limit=2&max_per_industry=1").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["max_per_industry"], 1);
+    assert_eq!(
+        json["periods"][0]["symbols"],
+        serde_json::json!(["79979BA", "79979BB"])
+    );
+    assert_eq!(json["periods"][0]["avg_return"], 3.0);
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BB", "79979BC"])
+    );
+    let (_, json) = query("limit=2").await;
+    assert!(json["max_per_industry"].is_null());
+
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -359,6 +376,8 @@ async fn screen_backtest_endpoint_db_semantics() {
         ("market_filter_ma=50", StatusCode::UNPROCESSABLE_ENTITY),
         ("hold_min_rs_score=0", StatusCode::UNPROCESSABLE_ENTITY),
         ("hold_min_rs_score=100", StatusCode::UNPROCESSABLE_ENTITY),
+        ("max_per_industry=0", StatusCode::UNPROCESSABLE_ENTITY),
+        ("max_per_industry=101", StatusCode::UNPROCESSABLE_ENTITY),
         ("fee_discount=1.5", StatusCode::UNPROCESSABLE_ENTITY),
         ("fee_discount=-0.1", StatusCode::UNPROCESSABLE_ENTITY),
         ("market=otc", StatusCode::UNPROCESSABLE_ENTITY),

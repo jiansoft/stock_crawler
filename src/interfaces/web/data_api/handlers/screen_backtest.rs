@@ -51,7 +51,8 @@ const ETF_BENCHMARK: &str = "0050";
 /// 大盤濾網可選的均線天數（交易日）。
 const MARKET_FILTER_DAYS: [u16; 4] = [20, 60, 120, 240];
 
-/// `keep_rank` 上限：續抱的股票最多可以落到符合條件者的第幾名。
+/// `keep_rank` 上限：續抱的股票最多可以落到符合條件者的第幾名；設了 `max_per_industry` 時
+/// 也是每期讀取的候選檔數（同產業額滿後要往後補）。
 const MAX_KEEP_RANK: u8 = 200;
 
 /// [`BACKTEST_SQL`] 的一列：換股日、基準與依相對強度由高到低的候選股（與報酬一一對應）。
@@ -64,9 +65,12 @@ struct CandidateRow {
     etf_return: Option<f64>,
     candidates: Vec<String>,
     candidate_returns: Vec<Option<f64>>,
-    /// 相對強度不低於續抱門檻的母體股票（依相對強度由高到低）與報酬；沒設門檻為空。
+    /// 候選股的產業編號（`stocks.stock_industry_id`），與 `candidates` 一一對應。
+    candidate_industries: Vec<i32>,
+    /// 相對強度不低於續抱門檻的母體股票（依相對強度由高到低）與報酬、產業編號；沒設門檻為空。
     hold_symbols: Vec<String>,
     hold_returns: Vec<Option<f64>>,
+    hold_industries: Vec<i32>,
 }
 
 /// 一期的結果；`symbols` 是全部持股，依相對強度由高到低。
@@ -132,6 +136,15 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
             "hold_min_rs_score 必須介於 1 至 99",
         );
     }
+    if params
+        .max_per_industry
+        .is_some_and(|count| !(1..=100).contains(&count))
+    {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "max_per_industry 必須介於 1 至 100",
+        );
+    }
     let keep_rank = params.keep_rank.unwrap_or(limit);
     if !(limit..=MAX_KEEP_RANK).contains(&keep_rank) {
         return error_response(
@@ -194,7 +207,11 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     .bind(to)
     .bind(market_id)
     .bind(i32::from(hold_days))
-    .bind(i64::from(keep_rank))
+    .bind(i64::from(if params.max_per_industry.is_some() {
+        MAX_KEEP_RANK
+    } else {
+        keep_rank
+    }))
     .bind(params.industry.as_deref())
     .bind(params.min_rs_score.map(i16::from))
     .bind(params.max_rs_score.map(i16::from))
@@ -211,7 +228,12 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
-    let rows = select_holdings(candidates, usize::from(limit), usize::from(keep_rank));
+    let rows = select_holdings(
+        candidates,
+        usize::from(limit),
+        usize::from(keep_rank),
+        params.max_per_industry.map(usize::from),
+    );
     let costs = trading_costs(&rows, fee_discount);
 
     Json(ScreenBacktestResponse {
@@ -223,6 +245,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         keep_rank,
         market_filter_ma: params.market_filter_ma,
         hold_min_rs_score: params.hold_min_rs_score,
+        max_per_industry: params.max_per_industry,
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
