@@ -49,6 +49,9 @@ const TAX_RATE: f64 = 0.3;
 /// 可投資的大盤基準：元大台灣 50（0050），SQL 內以字面值寫死，改這裡要一併改 [`backtest_sql`]。
 const ETF_BENCHMARK: &str = "0050";
 
+/// 大盤濾網可選的均線天數（交易日）。
+const MARKET_FILTER_DAYS: [u16; 4] = [20, 60, 120, 240];
+
 /// `keep_rank` 上限：續抱的股票最多可以落到符合條件者的第幾名。
 const MAX_KEEP_RANK: u8 = 200;
 
@@ -61,7 +64,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 "#;
 
 /// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期候選檔數、
-/// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類；籌碼版另有 `$11`／`$12`。
+/// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類、`$11` 大盤濾網均線天數
+/// （`NULL` 為不濾）；籌碼版另有 `$12`／`$13`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後每隔 `$4` 個交易日的換股日；`window_start` 是含當天往前第 `$4` 個交易日，
@@ -69,6 +73,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入。
 /// - `candidates`：符合條件的股票依相對強度由高到低的前 `$5` 檔與各自的報酬；實際持股由
 ///   [`select_holdings`] 依上一期持股與 `keep_rank` 決定。
+/// - `taiex`：加權指數收盤是否不低於含當天往前 `$11` 個交易日的平均；低於時 `market_ok` 為
+///   false，這期空手。
 /// - `etf_return`：同一天買進 [`ETF_BENCHMARK`] 持有同樣天數的還原報酬，作為實際買得到的大盤基準。
 macro_rules! backtest_sql {
     ($with:literal, $chip_join:literal, $chip_filter:literal) => {
@@ -140,8 +146,18 @@ candidates AS (
     FROM picks
     WHERE pick_rank <= $5
     GROUP BY date
+),
+taiex AS (
+    SELECT "date",
+           "index" >= AVG("index") OVER (
+               ORDER BY "date"
+               ROWS BETWEEN (COALESCE($11::int, 1) - 1) PRECEDING AND CURRENT ROW
+           ) AS above
+    FROM "index"
+    WHERE category = 'TAIEX' AND "date" BETWEEN $1::date - 400 AND $2
 )
 SELECT b.date,
+       ($11::int IS NULL OR t.above IS NOT FALSE) AS market_ok,
        b.avg_ret AS benchmark_return,
        (CASE $4::int
             WHEN 5 THEN e.return_5d
@@ -155,6 +171,7 @@ SELECT b.date,
 FROM bench b
 LEFT JOIN candidates c ON c.date = b.date
 LEFT JOIN daily_forward_return e ON e.date = b.date AND e.stock_symbol = '0050'
+LEFT JOIN taiex t ON t."date" = b.date
 WHERE b.samples > 0
 ORDER BY b.date
 "#
@@ -165,7 +182,7 @@ ORDER BY b.date
 /// 沒有籌碼條件的回測。
 const BACKTEST_SQL: &str = backtest_sql!("\nWITH", "", "");
 
-/// 有籌碼條件的回測：換股當天外資（`$11`）／投信（`$12`）已連續買超至少 N 天，`NULL` 為不篩選。
+/// 有籌碼條件的回測：換股當天外資（`$12`）／投信（`$13`）已連續買超至少 N 天，`NULL` 為不篩選。
 const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
     chip_streak_ctes!(),
@@ -173,7 +190,7 @@ const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($11::bigint IS NULL OR c.foreign_buy >= $11)\n      AND ($12::bigint IS NULL OR c.trust_buy >= $12)"
+        "\n      AND ($12::bigint IS NULL OR c.foreign_buy >= $12)\n      AND ($13::bigint IS NULL OR c.trust_buy >= $13)"
     )
 );
 
@@ -181,6 +198,8 @@ const BACKTEST_WITH_CHIP_SQL: &str = concat!(
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 struct CandidateRow {
     date: NaiveDate,
+    /// 大盤濾網是否通過；沒有設濾網時恆為 true。
+    market_ok: bool,
     benchmark_return: Option<f64>,
     etf_return: Option<f64>,
     candidates: Vec<String>,
@@ -191,6 +210,8 @@ struct CandidateRow {
 #[derive(Debug, Clone, Default, PartialEq)]
 struct PeriodRow {
     date: NaiveDate,
+    /// 大盤濾網沒過、這期被迫空手。
+    market_filtered: bool,
     holdings: i64,
     avg_return: Option<f64>,
     benchmark_return: Option<f64>,
@@ -229,6 +250,15 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     let limit = params.limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "limit 必須介於 1 至 100");
+    }
+    if params
+        .market_filter_ma
+        .is_some_and(|days| !MARKET_FILTER_DAYS.contains(&days))
+    {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "market_filter_ma 必須為 20、60、120 或 240",
+        );
     }
     let keep_rank = params.keep_rank.unwrap_or(limit);
     if !(limit..=MAX_KEEP_RANK).contains(&keep_rank) {
@@ -297,7 +327,8 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     .bind(params.min_rs_score.map(i16::from))
     .bind(params.max_rs_score.map(i16::from))
     .bind(params.indicator.as_deref())
-    .bind(params.kind.as_deref());
+    .bind(params.kind.as_deref())
+    .bind(params.market_filter_ma.map(i32::from));
     if with_chip {
         query = query
             .bind(params.min_foreign_streak.map(i64::from))
@@ -317,6 +348,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         hold_days,
         limit,
         keep_rank,
+        market_filter_ma: params.market_filter_ma,
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
@@ -388,11 +420,13 @@ fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<PeriodCost> {
 /// 依候選股決定每期持股：上一期持有、這期仍符合條件且排在前 `keep_rank` 名的股票續抱，
 /// 其餘名額依相對強度由高到低補滿 `limit` 檔；`keep_rank` 等於 `limit` 時就是每期取前 `limit` 檔。
 ///
-/// 平均報酬只算有報酬的持股（之後完全沒有收盤的股票不列入），全部都沒有報酬為 `None`。
+/// 大盤濾網沒過的那期空手（上一期持股全部賣出）。平均報酬只算有報酬的持股（之後完全沒有收盤的
+/// 股票不列入），全部都沒有報酬為 `None`。
 fn select_holdings(rows: Vec<CandidateRow>, limit: usize, keep_rank: usize) -> Vec<PeriodRow> {
     let mut previous: Vec<String> = Vec::new();
     rows.into_iter()
         .map(|row| {
+            let slots = if row.market_ok { limit } else { 0 };
             let mut picked: Vec<usize> = row
                 .candidates
                 .iter()
@@ -400,10 +434,10 @@ fn select_holdings(rows: Vec<CandidateRow>, limit: usize, keep_rank: usize) -> V
                 .enumerate()
                 .filter(|(_, symbol)| previous.contains(symbol))
                 .map(|(index, _)| index)
-                .take(limit)
+                .take(slots)
                 .collect();
             for index in 0..row.candidates.len() {
-                if picked.len() >= limit {
+                if picked.len() >= slots {
                     break;
                 }
                 if !picked.contains(&index) {
@@ -423,6 +457,7 @@ fn select_holdings(rows: Vec<CandidateRow>, limit: usize, keep_rank: usize) -> V
             previous.clone_from(&symbols);
             PeriodRow {
                 date: row.date,
+                market_filtered: !row.market_ok,
                 holdings: symbols.len() as i64,
                 avg_return: (!returns.is_empty())
                     .then(|| returns.iter().sum::<f64>() / returns.len() as f64),
@@ -440,6 +475,7 @@ fn period((mut row, cost): (PeriodRow, PeriodCost)) -> BacktestPeriod {
     BacktestPeriod {
         date: row.date.to_string(),
         holdings: row.holdings,
+        market_filtered: row.market_filtered,
         avg_return: row.avg_return.map(round2),
         return_after_costs: round2(cost.net_return),
         turnover: round4(cost.turnover),
@@ -484,6 +520,7 @@ fn summarize(rows: &[PeriodRow], costs: &[PeriodCost], hold_days: u16) -> Backte
         return BacktestSummary {
             periods: 0,
             invested_periods: 0,
+            market_filtered_periods: 0,
             avg_holdings: None,
             avg_turnover: None,
             total_return: None,
@@ -530,6 +567,7 @@ fn summarize(rows: &[PeriodRow], costs: &[PeriodCost], hold_days: u16) -> Backte
     BacktestSummary {
         periods: periods as i64,
         invested_periods: invested.len() as i64,
+        market_filtered_periods: rows.iter().filter(|row| row.market_filtered).count() as i64,
         avg_holdings: (!invested.is_empty()).then(|| {
             round2(
                 invested.iter().map(|row| row.holdings as f64).sum::<f64>() / invested.len() as f64,
