@@ -38,6 +38,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
     for sql in [
         "DELETE FROM daily_technical_signal WHERE stock_symbol = ANY($1)",
         "DELETE FROM daily_relative_strength WHERE stock_symbol = ANY($1)",
+        "DELETE FROM chip_daily WHERE stock_symbol = ANY($1)",
         "DELETE FROM daily_forward_return WHERE stock_symbol = ANY($1)",
         r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
@@ -110,6 +111,17 @@ async fn seed(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("種入相對強度");
+    // 籌碼：PA 外資 09-27～10-01 連買 3 天、10-02 賣超；PB 外資只有 10-01 買超（09-30 是 0），
+    // 投信 09-30～10-01 連買 2 天；PC 沒有籌碼資料。
+    sqlx::query(
+        r#"INSERT INTO chip_daily ("date", stock_symbol, foreign_net, trust_net, dealer_net) VALUES
+           ('1991-09-27', '79979PA', 100, 0, 0), ('1991-09-30', '79979PA', 100, 0, 0),
+           ('1991-10-01', '79979PA', 100, 0, 0), ('1991-10-02', '79979PA', -100, 0, 0),
+           ('1991-09-30', '79979PB', 0, 50, 0), ('1991-10-01', '79979PB', 100, 50, 0)"#,
+    )
+    .execute(pool)
+    .await
+    .expect("種入籌碼");
 }
 
 /// 找出某來源與種類的績效項目。
@@ -219,6 +231,31 @@ async fn signal_performance_endpoint_db_semantics() {
         assert_eq!(kd["horizons"][0]["avg_return"], avg5, "{query}");
         assert_eq!(json["benchmark"][0]["samples"], 6, "{query}");
     }
+    // 籌碼條件：只看訊號當天外資／投信已連續買超的訊號；沒有籌碼資料的 PC 不列入。
+    for (query, occurrences, avg5) in [
+        ("min_foreign_streak=3", 1, 4.0),
+        ("min_foreign_streak=1", 2, 1.0),
+        ("min_trust_streak=2", 1, -2.0),
+        ("min_foreign_streak=1&min_trust_streak=1", 1, -2.0),
+    ] {
+        let (status, json) = get(&format!(
+            "/api/v1/market/signals/performance?from=1991-09-25&to=1991-10-02&kind=golden_cross&{query}"
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK, "{query}: {json}");
+        let kd = item(&json, "kd", "golden_cross");
+        assert_eq!(kd["occurrences"], occurrences, "{query}");
+        assert_eq!(kd["horizons"][0]["avg_return"], avg5, "{query}");
+        assert_eq!(json["benchmark"][0]["samples"], 6, "{query}");
+    }
+    let (_, json) = get(
+        "/api/v1/market/signals/performance?from=1991-09-25&to=1991-10-02&min_foreign_streak=5",
+    )
+    .await;
+    assert_eq!(json["items"].as_array().map(Vec::len), Some(0), "{json}");
+    assert_eq!(json["min_foreign_streak"], 5);
+    assert!(json["min_trust_streak"].is_null());
+
     let (_, json) = get(
         "/api/v1/market/signals/performance?from=1991-09-25&to=1991-10-02&min_rs_score=60&max_rs_score=95",
     )
@@ -247,6 +284,8 @@ async fn signal_performance_endpoint_db_semantics() {
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
         ("min_rs_score=0", StatusCode::UNPROCESSABLE_ENTITY),
+        ("min_foreign_streak=0", StatusCode::UNPROCESSABLE_ENTITY),
+        ("min_trust_streak=21", StatusCode::UNPROCESSABLE_ENTITY),
         ("max_rs_score=100", StatusCode::UNPROCESSABLE_ENTITY),
         (
             "min_rs_score=81&max_rs_score=80",
