@@ -6,12 +6,14 @@ use rust_decimal::Decimal;
 
 use super::support::{get, pool_or_skip};
 
-/// `(代號, 市場, 產業)`；產業 24 為 CI 種入的「半導體業」，9001 為 ETF（不計分）。
-const STOCKS: [(&str, i32, i32); 4] = [
+/// `(代號, 市場, 產業)`；產業 24 為 CI 種入的「半導體業」，9001 為 ETF（不計分）；
+/// 7997Z9 是特別股代號（4 碼數字後接英文字母，不計分）。
+const STOCKS: [(&str, i32, i32); 5] = [
     ("79979RA", 2, 24),
     ("79979RB", 4, 24),
     ("79979RC", 2, 24),
     ("79979RE", 2, 9001),
+    ("7997Z9", 2, 17),
 ];
 
 /// 1992 年起的前 `count` 個平日，由舊到新。
@@ -37,7 +39,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
 }
 
 /// RA 每個平日都有日線（構成交易日曆），RB 只有資料日有收盤；RC 沒有 240 日報酬，不計分；
-/// RE 是 ETF，報酬最高但不列入母體。
+/// RE 是 ETF、Z9 是特別股，報酬最高但都不列入母體。
 /// 資料日之後再加一個交易日但不回填報酬，用來驗證退回前一個交易日。
 async fn seed(pool: &sqlx::PgPool, dates: &[NaiveDate]) {
     for (symbol, market_id, industry) in STOCKS {
@@ -84,6 +86,9 @@ async fn seed(pool: &sqlx::PgPool, dates: &[NaiveDate]) {
         ("79979RE", 60, 90),
         ("79979RE", 120, 90),
         ("79979RE", 240, 90),
+        ("7997Z9", 60, 80),
+        ("7997Z9", 120, 80),
+        ("7997Z9", 240, 80),
     ] {
         sqlx::query(
             "INSERT INTO daily_forward_return AS t (date, stock_symbol, return_20d, return_60d, return_120d, return_240d)
