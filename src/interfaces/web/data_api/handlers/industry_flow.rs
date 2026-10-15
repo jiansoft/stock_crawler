@@ -13,7 +13,7 @@ use axum::{
 };
 use chrono::Local;
 
-use super::institutional_flow::{FlowPeriod, FlowRow, INVESTORS, STREAK_WINDOW, load_flows};
+use super::institutional_flow::{FlowPeriod, FlowRow, INVESTORS, MAX_FLOW_DAYS, load_flows};
 use super::{error_response, market_id_for_stocks, parse_optional_date, round2};
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, IndustryFlowItem, IndustryFlowParams, IndustryFlowResponse, IndustryFlowStock,
@@ -37,7 +37,7 @@ pub(crate) async fn industry_flow(Query(params): Query<IndustryFlowParams>) -> R
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let days = params.days.unwrap_or(5);
-    if !(1..=STREAK_WINDOW).contains(&usize::from(days)) {
+    if !(1..=MAX_FLOW_DAYS).contains(&usize::from(days)) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "days 必須介於 1 至 60");
     }
     let investor = params.investor.as_deref().unwrap_or("foreign");

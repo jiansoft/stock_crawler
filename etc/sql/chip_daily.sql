@@ -9,6 +9,10 @@ create table if not exists public.chip_daily
     margin_balance  bigint,
     short_previous  bigint,
     short_balance   bigint,
+    foreign_streak  smallint,
+    trust_streak    smallint,
+    dealer_streak   smallint,
+    total_streak    smallint,
     created_time    timestamp with time zone default now()                 not null,
     updated_time    timestamp with time zone default now()                 not null,
     primary key ("date", stock_symbol)
@@ -25,6 +29,10 @@ comment on column public.chip_daily.margin_previous is '前日融資餘額（張
 comment on column public.chip_daily.margin_balance is '今日融資餘額（張）';
 comment on column public.chip_daily.short_previous is '前日融券餘額（張）';
 comment on column public.chip_daily.short_balance is '今日融券餘額（張）';
+comment on column public.chip_daily.foreign_streak is '外資截至當日的連續買賣超天數：正數連續買超、負數連續賣超、0 為當日淨額 0 或沒有資料；只數這檔有籌碼列的日子，NULL 為尚未計算';
+comment on column public.chip_daily.trust_streak is '投信連續買賣超天數（規則同 foreign_streak）';
+comment on column public.chip_daily.dealer_streak is '自營商連續買賣超天數（規則同 foreign_streak）';
+comment on column public.chip_daily.total_streak is '三大法人合計連續買賣超天數（規則同 foreign_streak，缺值以 0 相加）';
 
 -- 依股票查歷史（近 N 日買賣超、連續天數）。
 create index if not exists "chip_daily-stock_symbol-date-idx"

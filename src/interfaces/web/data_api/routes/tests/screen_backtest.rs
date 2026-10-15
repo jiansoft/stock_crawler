@@ -101,6 +101,7 @@ async fn seed(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("種入籌碼");
+    crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
 }
 
 /// 呼叫 endpoint（固定 03-01～03-15、持有 5 日），回傳狀態與 JSON。

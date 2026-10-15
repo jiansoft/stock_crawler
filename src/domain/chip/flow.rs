@@ -1,14 +1,14 @@
 //! 三大法人期間淨買賣與連續買賣超天數（讀 `chip_daily` 的全市場資料）。
 //!
 //! 估計金額＝每日淨股數 × 當日收盤價加總；連續天數為資料日的買賣方向往回數，遇到方向不同或
-//! 沒有買賣的一天即停，最多回看 [`STREAK_WINDOW`] 個有籌碼資料的交易日。
+//! 沒有買賣的一天即停，讀 `chip_daily` 入庫時預先算好的欄位，不限回看長度。
 
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 
-/// 連續買賣超天數最多回看的交易日數，也是累計天數的上限。
-pub const STREAK_WINDOW: usize = 60;
+/// 期間累計最多的交易日數。
+pub const MAX_FLOW_DAYS: usize = 60;
 
 /// 合法的法人別：外資、投信、自營商與三者合計。
 pub const INVESTORS: [&str; 4] = ["foreign", "trust", "dealer", "total"];
@@ -64,42 +64,29 @@ pub struct FlowPeriod {
     pub days: usize,
 }
 
-/// 由新到舊的籌碼交易日決定累計期間與連續天數的回看起點；沒有交易日回 `None`。
-pub fn flow_period(dates: &[NaiveDate], days: usize) -> Option<(FlowPeriod, NaiveDate)> {
+/// 由新到舊的籌碼交易日決定累計期間；沒有交易日回 `None`。
+pub fn flow_period(dates: &[NaiveDate], days: usize) -> Option<FlowPeriod> {
     let data_date = *dates.first()?;
     let days = days.clamp(1, dates.len());
-    let window_start = *dates.last()?;
-    Some((
-        FlowPeriod {
-            data_date,
-            from: dates[days - 1],
-            days,
-        },
-        window_start,
-    ))
+    Some(FlowPeriod {
+        data_date,
+        from: dates[days - 1],
+        days,
+    })
 }
 
 /// 法人買賣超的查詢介面。
 #[async_trait]
 pub trait ChipFlowQuery: Send + Sync {
-    /// `until`（含）之前最近 [`STREAK_WINDOW`] 個有籌碼資料的交易日，由新到舊。
+    /// `until`（含）之前最近 [`MAX_FLOW_DAYS`] 個有籌碼資料的交易日，由新到舊。
     async fn fetch_chip_dates(&self, until: NaiveDate) -> Result<Vec<NaiveDate>>;
 
-    /// 期間 `period` 內法人別 `investor`（[`INVESTORS`] 之一）的全體上市櫃淨買賣；
-    /// 連續天數回看到 `window_start`。
-    async fn fetch_flows(
-        &self,
-        period: FlowPeriod,
-        window_start: NaiveDate,
-        investor: &str,
-    ) -> Result<Vec<StockFlow>>;
+    /// 期間 `period` 內法人別 `investor`（[`INVESTORS`] 之一）的全體上市櫃淨買賣，
+    /// 附資料日的連續天數。
+    async fn fetch_flows(&self, period: FlowPeriod, investor: &str) -> Result<Vec<StockFlow>>;
 
-    /// 截至 `data_date` 各股票的外資、投信連續買賣超天數，回看到 `window_start`。
-    async fn fetch_streaks(
-        &self,
-        data_date: NaiveDate,
-        window_start: NaiveDate,
-    ) -> Result<Vec<StockStreak>>;
+    /// 截至 `data_date` 各股票的外資、投信連續買賣超天數。
+    async fn fetch_streaks(&self, data_date: NaiveDate) -> Result<Vec<StockStreak>>;
 }
 
 /// 載入 `until`（含）之前最近 `days` 個籌碼交易日、法人別 `investor` 的全體淨買賣；
@@ -115,10 +102,10 @@ pub async fn load_flows(
     investor: &str,
 ) -> Result<Option<(FlowPeriod, Vec<StockFlow>)>> {
     let dates = query.fetch_chip_dates(until).await?;
-    let Some((period, window_start)) = flow_period(&dates, days) else {
+    let Some(period) = flow_period(&dates, days) else {
         return Ok(None);
     };
-    let rows = query.fetch_flows(period, window_start, investor).await?;
+    let rows = query.fetch_flows(period, investor).await?;
     Ok(Some((period, rows)))
 }
 
@@ -132,10 +119,10 @@ pub async fn load_streaks(
     until: NaiveDate,
 ) -> Result<Option<(NaiveDate, Vec<StockStreak>)>> {
     let dates = query.fetch_chip_dates(until).await?;
-    let (Some(&data_date), Some(&window_start)) = (dates.first(), dates.last()) else {
+    let Some(&data_date) = dates.first() else {
         return Ok(None);
     };
-    let rows = query.fetch_streaks(data_date, window_start).await?;
+    let rows = query.fetch_streaks(data_date).await?;
     Ok(Some((data_date, rows)))
 }
 
@@ -149,16 +136,15 @@ mod tests {
         NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
     }
 
-    /// 期間：資料日為第一天、天數不超過已有的交易日、回看起點為最舊一天；沒有交易日為 None。
+    /// 期間：資料日為第一天、天數不超過已有的交易日；沒有交易日為 None。
     #[test]
     fn flow_period_counts_trading_days() {
         let dates = [day(2026, 10, 13), day(2026, 10, 12), day(2026, 10, 8)];
-        let (period, window_start) = flow_period(&dates, 2).expect("有交易日");
+        let period = flow_period(&dates, 2).expect("有交易日");
         assert_eq!(period.data_date, day(2026, 10, 13));
         assert_eq!(period.from, day(2026, 10, 12));
         assert_eq!(period.days, 2);
-        assert_eq!(window_start, day(2026, 10, 8));
-        let (short, _) = flow_period(&dates, 60).expect("有交易日");
+        let short = flow_period(&dates, 60).expect("有交易日");
         assert_eq!((short.from, short.days), (day(2026, 10, 8), 3));
         assert!(flow_period(&[], 1).is_none());
     }
@@ -176,33 +162,24 @@ mod tests {
             Ok(self.dates.clone())
         }
 
-        async fn fetch_flows(
-            &self,
-            period: FlowPeriod,
-            window_start: NaiveDate,
-            investor: &str,
-        ) -> Result<Vec<StockFlow>> {
-            self.got.lock().expect("測試鎖").push(format!(
-                "flows {} {} {window_start} {investor}",
-                period.from, period.days
-            ));
-            Ok(Vec::new())
-        }
-
-        async fn fetch_streaks(
-            &self,
-            data_date: NaiveDate,
-            window_start: NaiveDate,
-        ) -> Result<Vec<StockStreak>> {
+        async fn fetch_flows(&self, period: FlowPeriod, investor: &str) -> Result<Vec<StockFlow>> {
             self.got
                 .lock()
                 .expect("測試鎖")
-                .push(format!("streaks {data_date} {window_start}"));
+                .push(format!("flows {} {} {investor}", period.from, period.days));
+            Ok(Vec::new())
+        }
+
+        async fn fetch_streaks(&self, data_date: NaiveDate) -> Result<Vec<StockStreak>> {
+            self.got
+                .lock()
+                .expect("測試鎖")
+                .push(format!("streaks {data_date}"));
             Ok(Vec::new())
         }
     }
 
-    /// 載入函式以籌碼交易日決定期間與回看起點；沒有交易日回 None 且不再查詢。
+    /// 載入函式以籌碼交易日決定期間與資料日；沒有交易日回 None 且不再查詢。
     #[tokio::test]
     async fn load_functions_use_chip_dates() {
         let chip = FakeChip {
@@ -223,10 +200,7 @@ mod tests {
         assert_eq!(data_date, day(2026, 10, 13));
         assert_eq!(
             chip.got.lock().expect("測試鎖").clone(),
-            [
-                "flows 2026-10-12 2 2026-10-08 trust",
-                "streaks 2026-10-13 2026-10-08"
-            ]
+            ["flows 2026-10-12 2 trust", "streaks 2026-10-13"]
         );
 
         let empty = FakeChip::default();

@@ -5,7 +5,7 @@
 //!
 //! | 函式 | 資料 | 排程 | 能否回補 |
 //! |------|------|------|----------|
-//! | [`execute_daily`] | 三大法人買賣超＋融資融券餘額（上市、上櫃） | 週一至週五 21:30 | 可（[`backfill_daily`]） |
+//! | [`execute_daily`] | 三大法人買賣超＋融資融券餘額（上市、上櫃），接著更新當天的連續買賣超天數 | 週一至週五 21:30 | 可（[`backfill_daily`]） |
 //! | [`execute_holder_distributions`] | 集保股權分散週摘要 | 週六 10:20 | 否，只有最新一週 |
 //! | [`execute_insider_holdings`] | 董監事持股與設質 | 每月 10–28 日 20:35 | 否，只有最新月份 |
 //! | [`broker_flow_records`] | 券商分點主力進出（只有持股） | 由 20:40 的主力進出通知順便寫入 | 否，只有最近一天 |
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-use chrono::{Local, NaiveDate};
+use chrono::{Datelike, Local, NaiveDate};
 
 use crate::{
     domain::{
@@ -50,6 +50,8 @@ pub struct DailySummary {
     pub failed_sources: usize,
     /// 實際新增或變更的列數。
     pub rows_written: u64,
+    /// 連續買賣超天數有變的列數（與 `rows_written` 可能是同一列）。
+    pub streaks_updated: u64,
 }
 
 /// 排程入口：今天的三大法人與融資融券入庫。
@@ -57,11 +59,12 @@ pub async fn execute_daily() -> Result<()> {
     let date = Local::now().date_naive();
     let summary = save_daily(&PgChipRepository::new(), date).await?;
     tracing::info!(
-        "籌碼資料入庫結束: date={date}, institutional={}, margin={}, failed_sources={}, rows_written={}",
+        "籌碼資料入庫結束: date={date}, institutional={}, margin={}, failed_sources={}, rows_written={}, streaks_updated={}",
         summary.institutional,
         summary.margin,
         summary.failed_sources,
-        summary.rows_written
+        summary.rows_written,
+        summary.streaks_updated
     );
     Ok(())
 }
@@ -83,7 +86,42 @@ pub async fn save_daily(repository: &dyn ChipRepository, date: NaiveDate) -> Res
     )?;
     summary.rows_written += repository.save_institutional(date, &flows).await?;
     summary.rows_written += repository.save_margin(date, &margins).await?;
+    summary.streaks_updated = repository.refresh_streaks(date, date).await?;
     Ok(summary)
+}
+
+/// 從 `from` 起逐年重算連續買賣超天數到 `to`（皆含），回傳更新列數。
+///
+/// 每年一段、各自一個交易：每段開頭接續前一段最後一列的天數，結果與一次重算全期相同，
+/// 但不會一次鎖住或改寫整張表。
+pub async fn refresh_streaks_since(
+    repository: &dyn ChipRepository,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Result<u64> {
+    let mut updated = 0;
+    for (start, end) in yearly_chunks(from, to) {
+        let rows = repository.refresh_streaks(start, end).await?;
+        tracing::info!("籌碼連續天數重算 {start}～{end}: rows_updated={rows}");
+        updated += rows;
+    }
+    Ok(updated)
+}
+
+/// 把 `from`～`to` 依日曆年切段（皆含）；起日晚於迄日回空。
+fn yearly_chunks(from: NaiveDate, to: NaiveDate) -> Vec<(NaiveDate, NaiveDate)> {
+    let mut chunks = Vec::new();
+    let mut start = from;
+    while start <= to {
+        let year_end = NaiveDate::from_ymd_opt(start.year(), 12, 31).unwrap_or(to);
+        let end = year_end.min(to);
+        chunks.push((start, end));
+        match end.succ_opt() {
+            Some(next) => start = next,
+            None => break,
+        }
+    }
+    chunks
 }
 
 /// 上市、上櫃各兩個來源的結果轉成入庫記錄；單一來源失敗只記錄並計數，四個都失敗回錯誤。
@@ -154,6 +192,10 @@ pub async fn backfill_daily(from: NaiveDate, to: NaiveDate) -> Result<u64> {
             Err(why) => tracing::warn!("籌碼回補 {date} 失敗，略過: {why:#}"),
         }
         tokio::time::sleep(BACKFILL_INTERVAL).await;
+    }
+    // 補寫的日子已逐日更新連續天數；之後的日子要接續新的天數，從起日重算到今天。
+    if let Some(&first) = dates.first() {
+        written += refresh_streaks_since(&repository, first, Local::now().date_naive()).await?;
     }
     Ok(written)
 }
@@ -356,7 +398,8 @@ mod tests {
                 institutional: 2,
                 margin: 1,
                 failed_sources: 1,
-                rows_written: 0
+                rows_written: 0,
+                streaks_updated: 0
             }
         );
         assert_eq!(institutional.len(), 2);
@@ -397,6 +440,79 @@ mod tests {
                 short_previous: 3,
                 short_balance: 1,
             }]
+        );
+    }
+
+    fn ymd(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).expect("合法日期")
+    }
+
+    /// 逐年切段：頭尾不足一年照實際起訖，同一年只有一段，起日晚於迄日沒有任何段。
+    #[test]
+    fn yearly_chunks_split_by_calendar_year() {
+        assert_eq!(
+            yearly_chunks(ymd(2024, 3, 5), ymd(2026, 2, 1)),
+            [
+                (ymd(2024, 3, 5), ymd(2024, 12, 31)),
+                (ymd(2025, 1, 1), ymd(2025, 12, 31)),
+                (ymd(2026, 1, 1), ymd(2026, 2, 1)),
+            ]
+        );
+        assert_eq!(
+            yearly_chunks(ymd(2026, 10, 15), ymd(2026, 10, 15)),
+            [(ymd(2026, 10, 15), ymd(2026, 10, 15))]
+        );
+        assert!(yearly_chunks(ymd(2026, 10, 16), ymd(2026, 10, 15)).is_empty());
+    }
+
+    /// 只記錄連續天數重算區間的假倉儲；其餘方法不應被呼叫。
+    #[derive(Default)]
+    struct StreakRecorder {
+        calls: std::sync::Mutex<Vec<(NaiveDate, NaiveDate)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ChipRepository for StreakRecorder {
+        async fn save_institutional(&self, _: NaiveDate, _: &[InstitutionalNet]) -> Result<u64> {
+            unreachable!("不應寫入三大法人")
+        }
+
+        async fn save_margin(&self, _: NaiveDate, _: &[MarginRecord]) -> Result<u64> {
+            unreachable!("不應寫入融資融券")
+        }
+
+        async fn refresh_streaks(&self, from: NaiveDate, to: NaiveDate) -> Result<u64> {
+            self.calls.lock().expect("測試鎖").push((from, to));
+            Ok(10)
+        }
+
+        async fn save_holder_distributions(&self, _: &[HolderDistributionRecord]) -> Result<u64> {
+            unreachable!("不應寫入集保")
+        }
+
+        async fn replace_insider_holdings(&self, _: &[InsiderHoldingRecord]) -> Result<u64> {
+            unreachable!("不應寫入董監持股")
+        }
+
+        async fn save_broker_flows(&self, _: &[BrokerFlowRecord]) -> Result<u64> {
+            unreachable!("不應寫入分點")
+        }
+    }
+
+    /// 逐年依序重算並加總更新列數。
+    #[tokio::test]
+    async fn refresh_streaks_since_runs_each_year_in_order() {
+        let repo = StreakRecorder::default();
+        let updated = refresh_streaks_since(&repo, ymd(2025, 6, 1), ymd(2026, 10, 15))
+            .await
+            .expect("成功");
+        assert_eq!(updated, 20);
+        assert_eq!(
+            repo.calls.lock().expect("測試鎖").clone(),
+            [
+                (ymd(2025, 6, 1), ymd(2025, 12, 31)),
+                (ymd(2026, 1, 1), ymd(2026, 10, 15)),
+            ]
         );
     }
 }

@@ -30,6 +30,79 @@ impl PgChipRepository {
     }
 }
 
+/// 重算 `$1`～`$2` 每列的連續買賣超天數（外資、投信、自營商、三者合計），只更新有變的列。
+///
+/// - `base`／`grouped`：方向（淨額正負號，缺值當 0）依「依日期的列號 − 依方向分組的列號」切出
+///   連續段；同一檔期間內第一段的分組值必為 0。
+/// - `counted`：每列在所屬連續段內是第幾天。
+/// - `seed`：每檔 `$1` 之前最後一列的天數（走 `(stock_symbol, date DESC)` 索引）；第一段方向
+///   相同時接續累加，因此逐日或分段重算的結果與一次重算全期相同。
+const REFRESH_STREAKS_SQL: &str = r#"
+WITH base AS (
+    SELECT stock_symbol, "date",
+           SIGN(COALESCE(foreign_net, 0))::int AS fs,
+           SIGN(COALESCE(trust_net, 0))::int AS ts,
+           SIGN(COALESCE(dealer_net, 0))::int AS ds,
+           SIGN(COALESCE(foreign_net, 0) + COALESCE(trust_net, 0) + COALESCE(dealer_net, 0))::int AS os,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY "date") AS rn
+    FROM chip_daily
+    WHERE "date" BETWEEN $1 AND $2
+),
+grouped AS (
+    SELECT stock_symbol, "date", fs, ts, ds, os,
+           rn - ROW_NUMBER() OVER (PARTITION BY stock_symbol, fs ORDER BY "date") AS fg,
+           rn - ROW_NUMBER() OVER (PARTITION BY stock_symbol, ts ORDER BY "date") AS tg,
+           rn - ROW_NUMBER() OVER (PARTITION BY stock_symbol, ds ORDER BY "date") AS dg,
+           rn - ROW_NUMBER() OVER (PARTITION BY stock_symbol, os ORDER BY "date") AS og
+    FROM base
+),
+counted AS (
+    SELECT stock_symbol, "date", fs, ts, ds, os, fg, tg, dg, og,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol, fs, fg ORDER BY "date") AS fl,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol, ts, tg ORDER BY "date") AS tl,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol, ds, dg ORDER BY "date") AS dl,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol, os, og ORDER BY "date") AS ol
+    FROM grouped
+),
+seed AS (
+    SELECT sym.stock_symbol,
+           COALESCE(p.foreign_streak, 0) AS fp,
+           COALESCE(p.trust_streak, 0) AS tp,
+           COALESCE(p.dealer_streak, 0) AS dp,
+           COALESCE(p.total_streak, 0) AS op
+    FROM (SELECT DISTINCT stock_symbol FROM base) AS sym
+    CROSS JOIN LATERAL (
+        SELECT c.foreign_streak, c.trust_streak, c.dealer_streak, c.total_streak
+        FROM chip_daily c
+        WHERE c.stock_symbol = sym.stock_symbol AND c."date" < $1
+        ORDER BY c."date" DESC
+        LIMIT 1
+    ) AS p
+),
+computed AS (
+    SELECT c.stock_symbol, c."date",
+           (c.fs * (c.fl + CASE WHEN c.fg = 0 AND SIGN(COALESCE(s.fp, 0)) = c.fs
+                                THEN ABS(COALESCE(s.fp, 0)) ELSE 0 END))::smallint AS foreign_streak,
+           (c.ts * (c.tl + CASE WHEN c.tg = 0 AND SIGN(COALESCE(s.tp, 0)) = c.ts
+                                THEN ABS(COALESCE(s.tp, 0)) ELSE 0 END))::smallint AS trust_streak,
+           (c.ds * (c.dl + CASE WHEN c.dg = 0 AND SIGN(COALESCE(s.dp, 0)) = c.ds
+                                THEN ABS(COALESCE(s.dp, 0)) ELSE 0 END))::smallint AS dealer_streak,
+           (c.os * (c.ol + CASE WHEN c.og = 0 AND SIGN(COALESCE(s.op, 0)) = c.os
+                                THEN ABS(COALESCE(s.op, 0)) ELSE 0 END))::smallint AS total_streak
+    FROM counted c
+    LEFT JOIN seed s ON s.stock_symbol = c.stock_symbol
+)
+UPDATE chip_daily d
+SET foreign_streak = x.foreign_streak,
+    trust_streak = x.trust_streak,
+    dealer_streak = x.dealer_streak,
+    total_streak = x.total_streak
+FROM computed x
+WHERE d."date" = x."date" AND d.stock_symbol = x.stock_symbol
+  AND (d.foreign_streak, d.trust_streak, d.dealer_streak, d.total_streak)
+      IS DISTINCT FROM (x.foreign_streak, x.trust_streak, x.dealer_streak, x.total_streak)
+"#;
+
 /// 同一批內主鍵重複時 `ON CONFLICT DO UPDATE` 會直接報錯，先以最後一筆為準去重（保留原順序）。
 fn dedup_by_key<T, K: std::hash::Hash + Eq>(items: &[T], key: impl Fn(&T) -> K) -> Vec<&T> {
     let mut last: HashMap<K, usize> = HashMap::new();
@@ -116,6 +189,16 @@ WHERE (chip_daily.margin_previous, chip_daily.margin_balance, chip_daily.short_p
             .execute(database::get_connection())
             .await
             .with_context(|| format!("Failed to save margin balances of {date}"))?;
+        Ok(result.rows_affected())
+    }
+
+    async fn refresh_streaks(&self, from: NaiveDate, to: NaiveDate) -> Result<u64> {
+        let result = sqlx::query(REFRESH_STREAKS_SQL)
+            .bind(from)
+            .bind(to)
+            .execute(database::get_connection())
+            .await
+            .with_context(|| format!("Failed to refresh chip streaks of {from}~{to}"))?;
         Ok(result.rows_affected())
     }
 
@@ -270,6 +353,17 @@ WHERE (broker_flow.buy_total, broker_flow.sell_total, broker_flow.main_share, br
             .context("Failed to save broker flows")?;
         Ok(result.rows_affected())
     }
+}
+
+/// 測試種入籌碼後重算全部日期的連續天數（測試庫資料量小，整段重算即可）。
+#[cfg(test)]
+pub(crate) async fn refresh_streaks_for_tests() {
+    let from = NaiveDate::from_ymd_opt(1980, 1, 1).expect("固定日期合法");
+    let to = NaiveDate::from_ymd_opt(2100, 12, 31).expect("固定日期合法");
+    PgChipRepository::new()
+        .refresh_streaks(from, to)
+        .await
+        .expect("重算籌碼連續天數");
 }
 
 #[cfg(test)]
@@ -433,6 +527,91 @@ mod tests {
             1
         );
         assert_eq!(repo.save_broker_flows(&[broker]).await.unwrap(), 0);
+
+        cleanup().await;
+    }
+
+    /// 連續天數：同方向累加、反向重來、淨額 0 或沒有法人資料（只有融資融券）為 0；
+    /// 分段重算接續前一段最後一列，結果與整段重算相同；內容沒變時不更新任何列。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn refresh_streaks_counts_runs_and_resumes_from_previous_row() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!(
+                "跳過 refresh_streaks_counts_runs_and_resumes_from_previous_row：無資料庫連接"
+            );
+            return;
+        }
+        cleanup().await;
+        let repo = PgChipRepository::new();
+        let d = |n: u32| NaiveDate::from_ymd_opt(2001, 1, n).expect("日期應合法");
+        let flow = |foreign, trust, dealer| InstitutionalNet {
+            stock_symbol: FAKE.to_string(),
+            foreign,
+            trust,
+            dealer,
+        };
+        for (n, f, t, dl) in [
+            (2, 10, -5, 0),
+            (3, 10, -5, 0),
+            (4, -1, 0, 0),
+            (8, 5, 5, 5),
+            (9, 5, 5, 0),
+        ] {
+            repo.save_institutional(d(n), &[flow(f, t, dl)])
+                .await
+                .unwrap();
+        }
+        // 01-05 只有融資融券，法人欄位為 NULL。
+        let margin = MarginRecord {
+            stock_symbol: FAKE.to_string(),
+            margin_previous: 1,
+            margin_balance: 1,
+            short_previous: 0,
+            short_balance: 0,
+        };
+        repo.save_margin(d(5), &[margin]).await.unwrap();
+
+        let streaks = || async {
+            sqlx::query_as::<_, (Option<i16>, Option<i16>, Option<i16>, Option<i16>)>(
+                r#"SELECT foreign_streak, trust_streak, dealer_streak, total_streak
+                   FROM chip_daily WHERE stock_symbol = $1 ORDER BY "date""#,
+            )
+            .bind(FAKE)
+            .fetch_all(database::get_connection())
+            .await
+            .unwrap()
+        };
+        let expected = vec![
+            (Some(1), Some(-1), Some(0), Some(1)),
+            (Some(2), Some(-2), Some(0), Some(2)),
+            (Some(-1), Some(0), Some(0), Some(-1)),
+            (Some(0), Some(0), Some(0), Some(0)),
+            (Some(1), Some(1), Some(1), Some(1)),
+            (Some(2), Some(2), Some(0), Some(2)),
+        ];
+
+        assert_eq!(repo.refresh_streaks(d(1), d(31)).await.unwrap(), 6);
+        assert_eq!(streaks().await, expected);
+        assert_eq!(repo.refresh_streaks(d(1), d(31)).await.unwrap(), 0);
+
+        sqlx::query(
+            r#"UPDATE chip_daily SET foreign_streak = NULL, trust_streak = NULL, dealer_streak = NULL, total_streak = NULL
+               WHERE stock_symbol = $1 AND "date" >= $2"#,
+        )
+        .bind(FAKE)
+        .bind(d(3))
+        .execute(database::get_connection())
+        .await
+        .unwrap();
+        for (from, to) in [(d(3), d(3)), (d(4), d(5)), (d(6), d(9))] {
+            repo.refresh_streaks(from, to).await.unwrap();
+        }
+        assert_eq!(streaks().await, expected);
 
         cleanup().await;
     }

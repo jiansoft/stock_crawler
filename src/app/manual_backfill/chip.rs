@@ -5,6 +5,8 @@
 //!   （`qfii_history`），最後重算 `qfii_trend`；不發持股通知。
 //! - `test_backfill_chip_daily`：
 //!   回補每日籌碼（三大法人買賣超、融資融券餘額）到 `chip_daily`。
+//! - `test_backfill_chip_streaks`：
+//!   重算 `chip_daily` 的連續買賣超天數（只讀寫資料庫，不呼叫外部網站）。
 //! - `test_save_holder_distributions`：
 //!   立即把最新一週的集保股權分散寫入 `holder_distribution`（排程是週六 10:40）。
 //! - `test_save_insider_holdings`：
@@ -74,6 +76,37 @@ async fn test_backfill_chip_daily() {
         .expect("manual chip backfill failed");
     println!("結束 test_backfill_chip_daily from={from} to={to} rows_written={written}");
 }
+
+/// 逐年重算 `chip_daily` 的外資、投信、自營商與合計連續買賣超天數。
+///
+/// 只讀寫資料庫、不呼叫外部網站；只更新有變的列，可重複執行。起日用 `MANUAL_CHIP_STREAK_FROM`
+/// 指定（預設 [`MANUAL_CHIP_STREAK_FROM`]，即籌碼資料最早一天），一路重算到今天。
+///
+/// 執行範例：
+/// `MANUAL_CHIP_STREAK_FROM=2019-01-02 cargo test app::manual_backfill::chip::test_backfill_chip_streaks -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_chip_streaks() {
+    dotenvy::dotenv().ok();
+
+    let raw = std::env::var("MANUAL_CHIP_STREAK_FROM")
+        .unwrap_or_else(|_| MANUAL_CHIP_STREAK_FROM.to_string());
+    let from = NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+        .unwrap_or_else(|_| panic!("MANUAL_CHIP_STREAK_FROM should be YYYY-MM-DD, got {raw}"));
+    let to = chrono::Local::now().date_naive();
+
+    let updated = crate::app::backfill::chip::refresh_streaks_since(
+        &crate::infra::database::repository::chip::PgChipRepository::new(),
+        from,
+        to,
+    )
+    .await
+    .expect("chip streak refresh failed");
+    println!("結束 test_backfill_chip_streaks {from}～{to} rows_updated={updated}");
+}
+
+/// 重算連續買賣超天數的預設起日：`chip_daily` 最早一天。
+const MANUAL_CHIP_STREAK_FROM: &str = "2019-01-02";
 
 /// 每日籌碼回補的預設區間（可用環境變數覆寫）。
 const MANUAL_CHIP_FROM: &str = "2025-10-01";

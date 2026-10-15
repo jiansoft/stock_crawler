@@ -84,7 +84,7 @@ pub(crate) struct InstitutionalFlowItem {
     /// 期間內淨賣超的天數。
     pub(crate) sell_days: i64,
     /// 截至資料日的連續天數：正數為連續買超、負數為連續賣超、0 為資料日沒有買賣；
-    /// 最多回看 60 個有籌碼資料的交易日。
+    /// 從 2019 年籌碼資料起算，不限回看長度。
     pub(crate) streak: i32,
     /// 資料日收盤價；當天沒有成交為 `null`。
     pub(crate) closing_price: Option<f64>,
