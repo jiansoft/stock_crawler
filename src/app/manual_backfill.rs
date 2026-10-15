@@ -941,7 +941,7 @@ async fn test_backfill_forward_returns() {
 
 /// 逐日寫入每日相對強度（`daily_relative_strength`）。
 ///
-/// 每個交易日以當天的近 60／120／240 日報酬（`daily_forward_return`）對上市櫃股票（不含 ETF）計分，
+/// 每個交易日以當天的近 60／120／240 日報酬（`daily_forward_return`）對上市櫃普通股（不含 ETF、特別股）計分，
 /// 整天替換；報酬不齊或非交易日不寫入。只讀資料庫，不呼叫外部網站。起訖日可用環境變數
 /// `MANUAL_RELATIVE_STRENGTH_FROM`／`MANUAL_RELATIVE_STRENGTH_TO` 覆寫，迄日預設今天。
 ///
