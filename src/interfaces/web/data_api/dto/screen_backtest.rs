@@ -30,6 +30,10 @@ pub(crate) struct ScreenBacktestParams {
     /// 大盤濾網：換股日加權指數收盤低於自己的 N 日均線（20、60、120 或 240 個交易日）時這期空手，
     /// 上一期持股全部賣出；省略為不濾。
     pub(crate) market_filter_ma: Option<u16>,
+    /// 市場廣度濾網（1–99）：換股日同市場站上 60 日均線的股票比例低於 N% 時這期空手，上一期持股
+    /// 全部賣出；可與 `market_filter_ma` 併用（兩者都通過才持股）。統計從 2019 年起；省略為不濾。
+    #[param(minimum = 1, maximum = 99)]
+    pub(crate) market_filter_breadth: Option<u8>,
     /// 續抱條件（1–99）：上一期持有的股票即使不再符合選股條件（例如法人連買中斷、訊號過期），只要
     /// 換股當天相對強度分數不低於此值就續抱；省略為不續抱（只看 `keep_rank`）。
     #[param(minimum = 1, maximum = 99)]
@@ -75,7 +79,7 @@ pub(crate) struct BacktestPeriod {
     pub(crate) date: String,
     /// 這期持有的檔數；0 代表沒有符合條件的股票或大盤濾網沒過，這期空手（報酬 0）。
     pub(crate) holdings: i64,
-    /// 換股日加權指數低於濾網均線而空手。
+    /// 換股日加權指數低於濾網均線或市場廣度低於門檻而空手。
     pub(crate) market_filtered: bool,
     /// 持股等權平均報酬（%），未扣交易成本；期間內下市的股票算到最後一筆收盤，之後完全沒有收盤的
     /// 股票不列入平均；空手為 `null`。
@@ -99,7 +103,7 @@ pub(crate) struct BacktestSummary {
     pub(crate) periods: i64,
     /// 有持股的期數。
     pub(crate) invested_periods: i64,
-    /// 因大盤濾網空手的期數。
+    /// 因大盤濾網（均線或市場廣度）空手的期數。
     pub(crate) market_filtered_periods: i64,
     /// 有持股的期平均持有檔數。
     pub(crate) avg_holdings: Option<f64>,
@@ -175,6 +179,32 @@ pub(crate) struct BacktestYear {
     pub(crate) beat_market_rate: f64,
 }
 
+/// 整段回測中一檔股票的貢獻。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestContributor {
+    /// 股票代號。
+    pub(crate) symbol: String,
+    /// 股票名稱；查無為 `null`。
+    pub(crate) name: Option<String>,
+    /// 持有過的期數。
+    pub(crate) periods_held: i64,
+    /// 累計貢獻（百分點）：各期「這檔報酬 ÷ 當期有報酬的持股數」相加，不複利、未扣交易成本。
+    pub(crate) contribution: f64,
+    /// 持有各期的平均報酬（%），沒有報酬的期不計；全部沒有為 `null`。
+    pub(crate) avg_return: Option<f64>,
+}
+
+/// 個股貢獻：報酬集中在哪幾檔、哪幾檔拖累最多。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestContributors {
+    /// 整段回測持有過的不同股票數。
+    pub(crate) held_symbols: i64,
+    /// 累計貢獻為正的前 10 檔，由大到小。
+    pub(crate) best: Vec<BacktestContributor>,
+    /// 累計貢獻為負的前 10 檔，由最拖累起。
+    pub(crate) worst: Vec<BacktestContributor>,
+}
+
 /// 條件選股回測結果。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct ScreenBacktestResponse {
@@ -192,6 +222,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) keep_rank: u8,
     /// 大盤濾網的均線天數；未設定為 `null`。
     pub(crate) market_filter_ma: Option<u16>,
+    /// 市場廣度濾網門檻（%）；未設定為 `null`。
+    pub(crate) market_filter_breadth: Option<u8>,
     /// 續抱的相對強度門檻；未設定為 `null`。
     pub(crate) hold_min_rs_score: Option<u8>,
     /// 同產業最多持有檔數；未設定為 `null`。
@@ -220,6 +252,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) summary: BacktestSummary,
     /// 依換股日年度的彙總，由舊到新；用來看策略在多頭、空頭年份是否穩定。
     pub(crate) years: Vec<BacktestYear>,
+    /// 個股貢獻最多與拖累最多的股票。
+    pub(crate) contributors: BacktestContributors,
     /// 各期結果，由舊到新；只列已滿持有天數的期數。
     pub(crate) periods: Vec<BacktestPeriod>,
 }

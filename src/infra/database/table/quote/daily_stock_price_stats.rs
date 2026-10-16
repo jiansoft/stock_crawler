@@ -5,78 +5,10 @@ use sqlx::{FromRow, Postgres, Transaction, Type, postgres::PgQueryResult};
 
 use crate::infra::database;
 
-/// 每日全市場估值與技術面分布統計。
-///
-/// 同一天通常會有多筆資料：
-/// - `stock_exchange_market_id = 0`：上市＋上櫃合併統計（不含興櫃與公開發行，
-///   與 Data API 各排行、選股的 `all` 口徑一致）
-/// - 其他 id：各市場分項統計（例如 TWSE、TPEx、興櫃）
-#[derive(Debug, Serialize, Deserialize, Type, FromRow)]
-pub struct DailyStockPriceStats {
-    /// 統計日期。
-    pub date: NaiveDate,
-    /// 市場類型（TWSE: 2、TPEx: 4、全部市場: 0）。
-    pub stock_exchange_market_id: i32,
-    /// 股價 <= 便宜價的股票數量。
-    pub undervalued: i32,
-    /// 便宜價 < 股價 <= 合理價的股票數量。
-    pub fair_valued: i32,
-    /// 合理價 < 股價 <= 昂貴價的股票數量。
-    pub overvalued: i32,
-    /// 股價 > 昂貴價的股票數量。
-    pub highly_overvalued: i32,
-    /// 股價 <= 5 日均線的股票數量。
-    pub below_5_day_moving_average: i32,
-    /// 股價 > 5 日均線的股票數量。
-    pub above_5_day_moving_average: i32,
-    /// 股價 <= 20 日均線的股票數量。
-    pub below_20_day_moving_average: i32,
-    /// 股價 > 20 日均線的股票數量。
-    pub above_20_day_moving_average: i32,
-    /// 股價 <= 60 日均線的股票數量。
-    pub below_60_day_moving_average: i32,
-    /// 股價 > 60 日均線的股票數量。
-    pub above_60_day_moving_average: i32,
-    /// 股價 <= 120 日均線的股票數量。
-    pub below_120_day_moving_average: i32,
-    /// 股價 > 120 日均線的股票數量。
-    pub above_120_day_moving_average: i32,
-    /// 股價 <= 240 日均線的股票數量。
-    pub below_240_day_moving_average: i32,
-    /// 股價 > 240 日均線的股票數量。
-    pub above_240_day_moving_average: i32,
-    /// 當日上漲家數。
-    pub stocks_up: i32,
-    /// 當日下跌家數。
-    pub stocks_down: i32,
-    /// 當日平盤家數。
-    pub stocks_unchanged: i32,
-    /// 當日最高價創 52 週新高的家數。
-    pub new_52_week_high: i32,
-    /// 當日最低價創 52 週新低的家數。
-    pub new_52_week_low: i32,
-    /// 建立時間。
-    pub created_at: DateTime<Local>,
-    /// 最後更新時間。
-    pub updated_at: DateTime<Local>,
-}
-
-impl DailyStockPriceStats {
-    /// 產生或更新指定日期的股價統計資料。
-    ///
-    /// 此方法會從 `stocks`、`estimate`、`DailyQuotes` 彙整當日數據，
-    /// 計算估值分布（便宜/合理/昂貴/昂貴以上）、
-    /// 均線相對位置（5/20/60/120/240 日）、漲跌家數與 52 週新高／新低家數，
-    /// 並同時寫入「上市＋上櫃合併」（`stock_exchange_market_id = 0`）與各市場的統計列。
-    ///
-    /// # Errors
-    /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
-    /// 是否回滾由呼叫端控制。
-    pub async fn upsert(
-        date: NaiveDate,
-        tx: &mut Option<Transaction<'_, Postgres>>,
-    ) -> Result<PgQueryResult> {
-        let sql = r#"
+/// 寫入語句開頭：欄位清單與 `raw_data` CTE 起頭；後面接各自的 `raw_data` 內容。
+macro_rules! stats_insert_head {
+    () => {
+        r#"
 INSERT INTO daily_stock_price_stats (
     date,
     stock_exchange_market_id,
@@ -101,32 +33,14 @@ INSERT INTO daily_stock_price_stats (
     new_52_week_low
 )
 WITH raw_data AS (
-    -- 核心數據拉取
-    SELECT 
-        s.stock_exchange_market_id as market_id,
-        dq."ClosingPrice" as actual_close, 
-        e.cheap, e.fair, e.expensive,
-        dq."ChangeRange",
-        dq."MovingAverage5", dq."MovingAverage20", dq."MovingAverage60",
-        dq."MovingAverage120", dq."MovingAverage240",
-        dq."HighestPrice" as day_high, dq."LowestPrice" as day_low,
-        w.prior_high, w.prior_low, w.prior_days
-    FROM stocks s
-    JOIN estimate e ON s."SuspendListing" = FALSE AND s.stock_symbol = e.security_code
-    JOIN "DailyQuotes" dq ON e.date = dq."Date" AND e.security_code = dq."stock_symbol"
-    -- 前 52 週（364 天、不含當日）的最高／最低價，走 (stock_symbol, "Date" DESC) 覆蓋索引
-    CROSS JOIN LATERAL (
-        SELECT
-            MAX(p."HighestPrice") as prior_high,
-            MIN(p."LowestPrice") FILTER (WHERE p."LowestPrice" > 0) as prior_low,
-            COUNT(*) as prior_days
-        FROM "DailyQuotes" p
-        WHERE p.stock_symbol = dq.stock_symbol
-          AND p."Date" < dq."Date"
-          AND p."Date" >= dq."Date" - 364
-          AND p."ClosingPrice" > 0
-    ) w
-    WHERE e.date = $1
+"#
+    };
+}
+
+/// 由 `raw_data` 聚合出各市場與上市＋上櫃合併列的共用段落；後面接衝突處理。
+macro_rules! stats_aggregate_tail {
+    () => {
+        r#"
 ),
 market_metrics AS (
     -- 先按市場 ID 聚合
@@ -199,7 +113,49 @@ SELECT
     b_ma120, a_ma120, b_ma240, a_ma240,
     up, down, unchanged, new_high, new_low
 FROM final_set
-ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
+"#
+    };
+}
+
+/// 每日收盤後統計的 `raw_data`：只算當天有估價（`estimate`）且目前未下市的股票。
+macro_rules! stats_estimate_raw_data {
+    () => {
+        r#"    -- 核心數據拉取
+    SELECT 
+        s.stock_exchange_market_id as market_id,
+        dq."ClosingPrice" as actual_close, 
+        e.cheap, e.fair, e.expensive,
+        dq."ChangeRange",
+        dq."MovingAverage5", dq."MovingAverage20", dq."MovingAverage60",
+        dq."MovingAverage120", dq."MovingAverage240",
+        dq."HighestPrice" as day_high, dq."LowestPrice" as day_low,
+        w.prior_high, w.prior_low, w.prior_days
+    FROM stocks s
+    JOIN estimate e ON s."SuspendListing" = FALSE AND s.stock_symbol = e.security_code
+    JOIN "DailyQuotes" dq ON e.date = dq."Date" AND e.security_code = dq."stock_symbol"
+    -- 前 52 週（364 天、不含當日）的最高／最低價，走 (stock_symbol, "Date" DESC) 覆蓋索引
+    CROSS JOIN LATERAL (
+        SELECT
+            MAX(p."HighestPrice") as prior_high,
+            MIN(p."LowestPrice") FILTER (WHERE p."LowestPrice" > 0) as prior_low,
+            COUNT(*) as prior_days
+        FROM "DailyQuotes" p
+        WHERE p.stock_symbol = dq.stock_symbol
+          AND p."Date" < dq."Date"
+          AND p."Date" >= dq."Date" - 364
+          AND p."ClosingPrice" > 0
+    ) w
+    WHERE e.date = $1
+"#
+    };
+}
+
+/// 每日收盤後統計：同一天重算時覆寫所有欄位。
+const UPSERT_SQL: &str = concat!(
+    stats_insert_head!(),
+    stats_estimate_raw_data!(),
+    stats_aggregate_tail!(),
+    r#"ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
     undervalued = EXCLUDED.undervalued,
     fair_valued = EXCLUDED.fair_valued,
     overvalued = EXCLUDED.overvalued,
@@ -220,9 +176,119 @@ ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
     new_52_week_high = EXCLUDED.new_52_week_high,
     new_52_week_low = EXCLUDED.new_52_week_low,
     updated_at = CURRENT_TIMESTAMP;
-"#;
+"#
+);
 
-        let query = sqlx::query(sql).bind(date);
+/// 歷史市場廣度回補：`estimate` 只有 2022-02-17 起的資料，更早的日子改從 `DailyQuotes` 取當天有日線的
+/// 上市櫃股票（排除 `00` 開頭的 ETF／ETN，與 `estimate` 的範圍一致）；不看目前是否已下市，
+/// 避免只留下存活到今天的股票。估值分布四欄沒有估價可比，一律為 0。
+/// 已有的列一律保留（`DO NOTHING`），不會蓋掉收盤後依估價算出的統計。
+const BACKFILL_BREADTH_SQL: &str = concat!(
+    stats_insert_head!(),
+    r#"
+    SELECT
+        s.stock_exchange_market_id as market_id,
+        dq."ClosingPrice" as actual_close,
+        NULL::numeric as cheap, NULL::numeric as fair, NULL::numeric as expensive,
+        dq."ChangeRange",
+        dq."MovingAverage5", dq."MovingAverage20", dq."MovingAverage60",
+        dq."MovingAverage120", dq."MovingAverage240",
+        dq."HighestPrice" as day_high, dq."LowestPrice" as day_low,
+        w.prior_high, w.prior_low, w.prior_days
+    FROM "DailyQuotes" dq
+    JOIN stocks s ON s.stock_symbol = dq.stock_symbol
+    CROSS JOIN LATERAL (
+        SELECT
+            MAX(p."HighestPrice") as prior_high,
+            MIN(p."LowestPrice") FILTER (WHERE p."LowestPrice" > 0) as prior_low,
+            COUNT(*) as prior_days
+        FROM "DailyQuotes" p
+        WHERE p.stock_symbol = dq.stock_symbol
+          AND p."Date" < dq."Date"
+          AND p."Date" >= dq."Date" - 364
+          AND p."ClosingPrice" > 0
+    ) w
+    WHERE dq."Date" = $1
+      AND dq.stock_symbol NOT LIKE '00%'
+"#,
+    stats_aggregate_tail!(),
+    // 合併列（id 0）是對空集合 SUM，非交易日也會產生一列全 0；當天沒有日線就整句不寫。
+    "WHERE EXISTS (SELECT 1 FROM raw_data)
+ON CONFLICT (date, stock_exchange_market_id) DO NOTHING;"
+);
+
+/// 每日全市場估值與技術面分布統計。
+///
+/// 同一天通常會有多筆資料：
+/// - `stock_exchange_market_id = 0`：上市＋上櫃合併統計（不含興櫃與公開發行，
+///   與 Data API 各排行、選股的 `all` 口徑一致）
+/// - 其他 id：各市場分項統計（例如 TWSE、TPEx、興櫃）
+#[derive(Debug, Serialize, Deserialize, Type, FromRow)]
+pub struct DailyStockPriceStats {
+    /// 統計日期。
+    pub date: NaiveDate,
+    /// 市場類型（TWSE: 2、TPEx: 4、全部市場: 0）。
+    pub stock_exchange_market_id: i32,
+    /// 股價 <= 便宜價的股票數量。
+    pub undervalued: i32,
+    /// 便宜價 < 股價 <= 合理價的股票數量。
+    pub fair_valued: i32,
+    /// 合理價 < 股價 <= 昂貴價的股票數量。
+    pub overvalued: i32,
+    /// 股價 > 昂貴價的股票數量。
+    pub highly_overvalued: i32,
+    /// 股價 <= 5 日均線的股票數量。
+    pub below_5_day_moving_average: i32,
+    /// 股價 > 5 日均線的股票數量。
+    pub above_5_day_moving_average: i32,
+    /// 股價 <= 20 日均線的股票數量。
+    pub below_20_day_moving_average: i32,
+    /// 股價 > 20 日均線的股票數量。
+    pub above_20_day_moving_average: i32,
+    /// 股價 <= 60 日均線的股票數量。
+    pub below_60_day_moving_average: i32,
+    /// 股價 > 60 日均線的股票數量。
+    pub above_60_day_moving_average: i32,
+    /// 股價 <= 120 日均線的股票數量。
+    pub below_120_day_moving_average: i32,
+    /// 股價 > 120 日均線的股票數量。
+    pub above_120_day_moving_average: i32,
+    /// 股價 <= 240 日均線的股票數量。
+    pub below_240_day_moving_average: i32,
+    /// 股價 > 240 日均線的股票數量。
+    pub above_240_day_moving_average: i32,
+    /// 當日上漲家數。
+    pub stocks_up: i32,
+    /// 當日下跌家數。
+    pub stocks_down: i32,
+    /// 當日平盤家數。
+    pub stocks_unchanged: i32,
+    /// 當日最高價創 52 週新高的家數。
+    pub new_52_week_high: i32,
+    /// 當日最低價創 52 週新低的家數。
+    pub new_52_week_low: i32,
+    /// 建立時間。
+    pub created_at: DateTime<Local>,
+    /// 最後更新時間。
+    pub updated_at: DateTime<Local>,
+}
+
+impl DailyStockPriceStats {
+    /// 產生或更新指定日期的股價統計資料。
+    ///
+    /// 此方法會從 `stocks`、`estimate`、`DailyQuotes` 彙整當日數據，
+    /// 計算估值分布（便宜/合理/昂貴/昂貴以上）、
+    /// 均線相對位置（5/20/60/120/240 日）、漲跌家數與 52 週新高／新低家數，
+    /// 並同時寫入「上市＋上櫃合併」（`stock_exchange_market_id = 0`）與各市場的統計列。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
+    /// 是否回滾由呼叫端控制。
+    pub async fn upsert(
+        date: NaiveDate,
+        tx: &mut Option<Transaction<'_, Postgres>>,
+    ) -> Result<PgQueryResult> {
+        let query = sqlx::query(UPSERT_SQL).bind(date);
         let result = match tx {
             None => query.execute(database::get_connection()).await,
             Some(t) => query.execute(&mut **t).await,
@@ -232,6 +298,23 @@ ON CONFLICT (date, stock_exchange_market_id) DO UPDATE SET
             "Failed to daily_stock_price_stats::upsert({}) from database",
             date
         ))
+    }
+
+    /// 回補指定日期的市場廣度（均線上下、漲跌家數、52 週新高／新低），只補沒有統計列的日子。
+    ///
+    /// 給 `estimate` 還沒有資料的歷史日期用（2022-02-17 以前）：改從 `DailyQuotes` 取當天有日線的
+    /// 上市櫃股票（不含 ETF／ETN、含後來下市的股票），估值分布四欄為 0。該日已有統計列時不動，
+    /// 非交易日沒有日線也不會寫入。回傳新寫入的列數。
+    ///
+    /// # Errors
+    /// 當 SQL 執行失敗時回傳錯誤。
+    pub async fn backfill_breadth(date: NaiveDate) -> Result<u64> {
+        let result = sqlx::query(BACKFILL_BREADTH_SQL)
+            .bind(date)
+            .execute(database::get_connection())
+            .await
+            .with_context(|| format!("daily_stock_price_stats::backfill_breadth({date}) 失敗"))?;
+        Ok(result.rows_affected())
     }
 }
 
@@ -368,6 +451,119 @@ mod tests {
         .await
         .expect("讀回統計");
         assert_eq!(rows, [(0, 1, 1), (2, 1, 1), (5, 1, 0)]);
+
+        cleanup().await;
+    }
+
+    /// 歷史市場廣度回補：沒有估價也算、含已下市股票、排除 `00` 開頭的 ETF；估值四欄為 0；
+    /// 已有的統計列不覆寫。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn backfill_breadth_counts_without_estimate_and_keeps_existing_rows() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!(
+                "跳過 backfill_breadth_counts_without_estimate_and_keeps_existing_rows：無資料庫連接"
+            );
+            return;
+        }
+        let date = NaiveDate::from_ymd_opt(1991, 7, 31).expect("固定日期合法");
+        let symbols = ["79979HE", "79979HF", "0079979"];
+        let cleanup = || async {
+            for sql in [
+                r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
+                "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
+            ] {
+                let _ = sqlx::query(sql).bind(symbols).execute(pool).await;
+            }
+            let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date = $1")
+                .bind(date)
+                .execute(pool)
+                .await;
+        };
+        cleanup().await;
+
+        // (代號, 市場, 已下市, 收盤, 60 日均線, 漲跌幅)：79979HE 已下市仍要算；0079979 是 ETF 不算。
+        for (symbol, market_id, suspended, close, ma60, change) in [
+            ("79979HE", 2, true, 110, 100, 1),
+            ("79979HF", 4, false, 90, 100, -1),
+            ("0079979", 2, false, 120, 100, 1),
+        ] {
+            sqlx::query(
+                r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id, "SuspendListing")
+                   VALUES ($1, $1, $1, $2, 1, $3)"#,
+            )
+            .bind(symbol)
+            .bind(market_id)
+            .bind(suspended)
+            .execute(pool)
+            .await
+            .expect("種入 stocks");
+            sqlx::query(
+                r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "HighestPrice", "LowestPrice", "MovingAverage60", "ChangeRange")
+                   VALUES ($2, $1, $3, $3, $3, $4, $5)"#,
+            )
+            .bind(symbol)
+            .bind(date)
+            .bind(close)
+            .bind(ma60)
+            .bind(change)
+            .execute(pool)
+            .await
+            .expect("種入日報價");
+        }
+
+        let written = DailyStockPriceStats::backfill_breadth(date)
+            .await
+            .expect("回補成功");
+        assert_eq!(written, 3, "all、上市、上櫃各一列");
+        let rows: Vec<(i32, i32, i32, i32, i32, i32)> = sqlx::query_as(
+            "SELECT stock_exchange_market_id, above_60_day_moving_average, below_60_day_moving_average,
+                    stocks_up, stocks_down, undervalued + fair_valued + overvalued + highly_overvalued
+             FROM daily_stock_price_stats WHERE date = $1 ORDER BY 1",
+        )
+        .bind(date)
+        .fetch_all(pool)
+        .await
+        .expect("讀回統計");
+        assert_eq!(
+            rows,
+            [(0, 1, 1, 1, 1, 0), (2, 1, 0, 1, 0, 0), (4, 0, 1, 0, 1, 0)]
+        );
+
+        // 已有的列不覆寫：手動改掉 all 列後再回補一次，不寫入也不還原。
+        sqlx::query(
+            "UPDATE daily_stock_price_stats SET above_60_day_moving_average = 99
+             WHERE date = $1 AND stock_exchange_market_id = 0",
+        )
+        .bind(date)
+        .execute(pool)
+        .await
+        .expect("改寫統計");
+        let written = DailyStockPriceStats::backfill_breadth(date)
+            .await
+            .expect("第二次回補成功");
+        assert_eq!(written, 0);
+        let kept: i32 = sqlx::query_scalar(
+            "SELECT above_60_day_moving_average FROM daily_stock_price_stats
+             WHERE date = $1 AND stock_exchange_market_id = 0",
+        )
+        .bind(date)
+        .fetch_one(pool)
+        .await
+        .expect("讀回 all 列");
+        assert_eq!(kept, 99);
+
+        // 沒有日線的日子（非交易日）不寫入，連全 0 的合併列也不產生。
+        let holiday = date + chrono::Duration::days(3);
+        let written = DailyStockPriceStats::backfill_breadth(holiday)
+            .await
+            .expect("非交易日回補成功");
+        assert_eq!(written, 0);
 
         cleanup().await;
     }

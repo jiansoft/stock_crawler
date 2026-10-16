@@ -72,6 +72,13 @@ fn openapi_portfolio_history_schema_pins_field_names() {
         "max_drawdown_percent",
         "benchmark_return_percent",
         "excess_return_percent",
+        "beta",
+        "alpha_percent",
+        "correlation",
+        "tracking_error_percent",
+        "volatility_percent",
+        "benchmark_volatility_percent",
+        "risk_days",
     ] {
         assert!(response[field].to_string().contains("null"), "{field}");
     }
