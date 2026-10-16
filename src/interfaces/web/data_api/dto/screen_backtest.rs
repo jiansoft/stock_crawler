@@ -179,6 +179,32 @@ pub(crate) struct BacktestYear {
     pub(crate) beat_market_rate: f64,
 }
 
+/// 整段回測中一檔股票的貢獻。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestContributor {
+    /// 股票代號。
+    pub(crate) symbol: String,
+    /// 股票名稱；查無為 `null`。
+    pub(crate) name: Option<String>,
+    /// 持有過的期數。
+    pub(crate) periods_held: i64,
+    /// 累計貢獻（百分點）：各期「這檔報酬 ÷ 當期有報酬的持股數」相加，不複利、未扣交易成本。
+    pub(crate) contribution: f64,
+    /// 持有各期的平均報酬（%），沒有報酬的期不計；全部沒有為 `null`。
+    pub(crate) avg_return: Option<f64>,
+}
+
+/// 個股貢獻：報酬集中在哪幾檔、哪幾檔拖累最多。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestContributors {
+    /// 整段回測持有過的不同股票數。
+    pub(crate) held_symbols: i64,
+    /// 累計貢獻為正的前 10 檔，由大到小。
+    pub(crate) best: Vec<BacktestContributor>,
+    /// 累計貢獻為負的前 10 檔，由最拖累起。
+    pub(crate) worst: Vec<BacktestContributor>,
+}
+
 /// 條件選股回測結果。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct ScreenBacktestResponse {
@@ -226,6 +252,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) summary: BacktestSummary,
     /// 依換股日年度的彙總，由舊到新；用來看策略在多頭、空頭年份是否穩定。
     pub(crate) years: Vec<BacktestYear>,
+    /// 個股貢獻最多與拖累最多的股票。
+    pub(crate) contributors: BacktestContributors,
     /// 各期結果，由舊到新；只列已滿持有天數的期數。
     pub(crate) periods: Vec<BacktestPeriod>,
 }

@@ -9,8 +9,10 @@
 //! 交易成本依換股時實際賣出、買進的比例扣除：買賣各付手續費 0.1425%（乘上 `fee_discount`），
 //! 賣出另付證交稅 0.3%；同一檔續抱不計成本，也不計等權再平衡的小額調整。
 //!
-//! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）。
+//! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
+//! [`contributors`]（個股貢獻）。
 
+mod contributors;
 mod portfolio;
 mod sql;
 mod summary;
@@ -23,6 +25,7 @@ use axum::{
 };
 use chrono::NaiveDate;
 
+use self::contributors::{Contribution, LISTED_CONTRIBUTORS, contributors};
 use self::portfolio::{PeriodCost, period, select_holdings, trading_costs};
 use self::sql::{BACKTEST_SQL, BACKTEST_WITH_CHIP_SQL, LATEST_RS_DATE_SQL};
 use self::summary::{summarize, yearly};
@@ -33,7 +36,8 @@ use super::{
 };
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
-    ErrorBody, ScreenBacktestParams, ScreenBacktestResponse,
+    BacktestContributor, BacktestContributors, ErrorBody, ScreenBacktestParams,
+    ScreenBacktestResponse,
 };
 
 /// 可選的持有天數，與 `daily_forward_return` 的報酬欄位對應。
@@ -85,6 +89,8 @@ struct PeriodRow {
     /// [`ETF_BENCHMARK`] 同期的還原報酬；尚未上市或缺資料為 `None`。
     etf_return: Option<f64>,
     symbols: Vec<String>,
+    /// 各持股這期的報酬，與 `symbols` 一一對應；之後完全沒有收盤的為 `None`。
+    returns: Vec<Option<f64>>,
 }
 
 /// 依條件每隔 `hold_days` 個交易日換股，回測等權持有前 `limit` 檔（相對強度由高到低）的報酬，
@@ -245,6 +251,28 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         params.max_per_industry.map(usize::from),
     );
     let costs = trading_costs(&rows, fee_discount);
+    let (held_symbols, best, worst) = contributors(&rows, LISTED_CONTRIBUTORS);
+    let symbols: Vec<&str> = best
+        .iter()
+        .chain(&worst)
+        .map(|item| item.symbol.as_str())
+        .collect();
+    let names: Vec<(String, String)> = match sqlx::query_as(STOCK_NAMES_SQL)
+        .bind(&symbols)
+        .fetch_all(pool)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => return database_error(error),
+    };
+    let names: std::collections::HashMap<String, String> = names.into_iter().collect();
+    let contributor = |item: Contribution| BacktestContributor {
+        name: names.get(&item.symbol).cloned(),
+        symbol: item.symbol,
+        periods_held: item.periods_held,
+        contribution: item.contribution,
+        avg_return: item.avg_return,
+    };
 
     Json(ScreenBacktestResponse {
         from: from.to_string(),
@@ -269,10 +297,19 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         summary: summarize(&rows, &costs, hold_days),
         years: yearly(&rows, &costs),
+        contributors: BacktestContributors {
+            held_symbols: held_symbols as i64,
+            best: best.into_iter().map(contributor).collect(),
+            worst: worst.into_iter().map(contributor).collect(),
+        },
         periods: rows.into_iter().zip(costs).map(period).collect(),
     })
     .into_response()
 }
+
+/// 個股貢獻名單的股票名稱。
+const STOCK_NAMES_SQL: &str =
+    r#"SELECT stock_symbol::text, "Name"::text FROM stocks WHERE stock_symbol = ANY($1)"#;
 
 /// 起日：未指定為迄日往前 [`DEFAULT_PERIOD_DAYS`] 天；晚於迄日或期間超過上限回錯誤訊息。
 fn resolve_backtest_period(

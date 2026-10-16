@@ -125,7 +125,9 @@ pub(super) fn select_holdings(
             }
             picked.sort_unstable();
 
-            let returns: Vec<f64> = picked.iter().filter_map(|&index| pool[index].1).collect();
+            let held_returns: Vec<Option<f64>> =
+                picked.iter().map(|&index| pool[index].1).collect();
+            let returns: Vec<f64> = held_returns.iter().flatten().copied().collect();
             let symbols: Vec<String> = picked
                 .iter()
                 .map(|&index| pool[index].0.to_owned())
@@ -140,6 +142,7 @@ pub(super) fn select_holdings(
                 benchmark_return: row.benchmark_return,
                 etf_return: row.etf_return,
                 symbols,
+                returns: held_returns,
             }
         })
         .collect()
