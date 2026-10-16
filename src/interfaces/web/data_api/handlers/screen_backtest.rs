@@ -14,9 +14,11 @@
 //! 都是混合後的組合報酬；個股貢獻與持股仍只看策略部位。
 //!
 //! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
-//! [`contributors`]（個股貢獻）、[`offsets`]（換股日偏移穩健度端點）。
+//! [`contributors`]（個股貢獻）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
+//! 比例前緣端點）。
 
 mod contributors;
+mod frontier;
 mod offsets;
 mod portfolio;
 mod sql;
@@ -30,6 +32,7 @@ use axum::{
 };
 use chrono::NaiveDate;
 
+pub(crate) use self::frontier::{__path_screen_backtest_frontier, screen_backtest_frontier};
 pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
 
 use self::contributors::{Contribution, LISTED_CONTRIBUTORS, contributors};
@@ -247,6 +250,35 @@ struct Backtest<'a> {
     etf_weight: u8,
 }
 
+/// 一次回測混合 0050 之前的各期結果（含還沒滿持有天數的最後一期）；同一組候選股可依不同的
+/// `etf_weight` 重複混合（見 [`Raw::finish`]）。
+#[derive(Clone)]
+struct Raw {
+    rows: Vec<PeriodRow>,
+    costs: Vec<PeriodCost>,
+    /// 最後一期還沒滿持有天數時，換股日之後到迄日經過的交易日數。
+    elapsed_days: Option<i64>,
+}
+
+impl Raw {
+    /// 以 `etf_weight`（%）混合 0050 核心部位，並把還沒滿持有天數的最後一期移到
+    /// [`Simulation::current`]。
+    fn finish(mut self, etf_weight: u8) -> Simulation {
+        blend_etf(
+            &mut self.rows,
+            &mut self.costs,
+            f64::from(etf_weight) / 100.0,
+        );
+        let current = split_current(&mut self.rows, &mut self.costs);
+        Simulation {
+            rows: self.rows,
+            costs: self.costs,
+            current,
+            elapsed_days: self.elapsed_days,
+        }
+    }
+}
+
 /// 一次回測的各期結果與目前持股。
 struct Simulation {
     /// 已滿持有天數的各期持股與報酬。
@@ -375,9 +407,14 @@ impl<'a> Backtest<'a> {
         })
     }
 
-    /// 以換股日偏移 `rebalance_offset` 跑一次回測：查候選股、決定每期持股、扣交易成本，並把還沒滿
+    /// 以換股日偏移 `rebalance_offset` 跑一次回測：混合 `etf_weight` 的 0050 核心部位，並把還沒滿
     /// 持有天數的最後一期移到 [`Simulation::current`]。
     async fn simulate(&self, rebalance_offset: u16) -> Result<Simulation, sqlx::Error> {
+        Ok(self.run(rebalance_offset).await?.finish(self.etf_weight))
+    }
+
+    /// 以換股日偏移 `rebalance_offset` 查候選股、決定每期持股並扣交易成本，尚未混合 0050。
+    async fn run(&self, rebalance_offset: u16) -> Result<Raw, sqlx::Error> {
         let params = self.params;
         let with_chip = params.min_foreign_streak.is_some()
             || params.min_trust_streak.is_some()
@@ -421,19 +458,16 @@ impl<'a> Backtest<'a> {
             .last()
             .filter(|row| row.pending)
             .map(|row| row.elapsed_days);
-        let mut rows = select_holdings(
+        let rows = select_holdings(
             candidates,
             usize::from(self.limit),
             usize::from(self.keep_rank),
             params.max_per_industry.map(usize::from),
         );
-        let mut costs = trading_costs(&rows, self.fee_discount);
-        blend_etf(&mut rows, &mut costs, f64::from(self.etf_weight) / 100.0);
-        let current = split_current(&mut rows, &mut costs);
-        Ok(Simulation {
+        let costs = trading_costs(&rows, self.fee_discount);
+        Ok(Raw {
             rows,
             costs,
-            current,
             elapsed_days,
         })
     }
