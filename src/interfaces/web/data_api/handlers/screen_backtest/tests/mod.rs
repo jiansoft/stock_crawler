@@ -82,7 +82,7 @@ fn resolve_backtest_period_defaults_and_limits() {
 }
 
 /// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`、續抱門檻 `$12`、市場廣度門檻 `$13`、換股日偏移 `$14`
-/// 、流動性門檻 `$15`、排序方式 `$16` 與加權方式 `$17`，籌碼版另含連續買超的 CTE 與 `$18`／`$19`；沒有籌碼的版本
+/// 、流動性門檻 `$15`、排序方式 `$16`、加權方式 `$17` 與排除產業 `$18`，籌碼版另含連續買超的 CTE 與 `$19`／`$20`；沒有籌碼的版本
 /// 排序用的連續買超欄位恆為 `NULL`。
 #[test]
 fn backtest_sql_variants_are_well_formed() {
@@ -103,7 +103,8 @@ fn backtest_sql_variants_are_well_formed() {
     );
     assert!(BACKTEST_SQL.contains("AS candidate_trade_values"));
     assert!(BACKTEST_SQL.contains("AS hold_trade_values"));
-    assert!(!BACKTEST_SQL.contains("$18"));
+    assert!(BACKTEST_SQL.contains("NOT si.name = ANY($18)"));
+    assert!(!BACKTEST_SQL.contains("$19"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -112,9 +113,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $18"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $19"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$20"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $19"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $20"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$21"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     for rank_by in RANK_BY {
@@ -188,4 +189,21 @@ fn split_current_takes_pending_last_period() {
     assert!(split_current(&mut rows, &mut costs).is_none());
     assert_eq!(rows.len(), 1);
     assert!(split_current(&mut Vec::new(), &mut Vec::new()).is_none());
+}
+
+/// 排除產業：逗號分隔、去掉空白與空項目、去除重複；超過 10 個回錯誤。
+#[test]
+fn parse_excluded_industries_splits_and_limits() {
+    assert_eq!(parse_excluded_industries(None), Ok(Vec::new()));
+    assert_eq!(parse_excluded_industries(Some(" , ")), Ok(Vec::new()));
+    assert_eq!(
+        parse_excluded_industries(Some(" 金融保險業,航運業, 金融保險業,")),
+        Ok(vec!["金融保險業".to_owned(), "航運業".to_owned()])
+    );
+    let many: Vec<String> = (0..11).map(|i| format!("產業{i}")).collect();
+    assert!(parse_excluded_industries(Some(&many.join(","))).is_err());
+    assert_eq!(
+        parse_excluded_industries(Some(&many[..10].join(","))).map(|names| names.len()),
+        Ok(10)
+    );
 }

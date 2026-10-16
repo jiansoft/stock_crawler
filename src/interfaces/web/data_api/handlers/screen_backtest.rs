@@ -83,6 +83,9 @@ const MAX_KEEP_RANK: u8 = 200;
 /// `min_avg_trade_value` 上限（百萬元）：日均成交 1,000 億元，已超過全市場最大的個股。
 const MAX_TRADE_VALUE_MILLION: u32 = 100_000;
 
+/// `exclude_industry` 最多幾個產業。
+const MAX_EXCLUDED_INDUSTRIES: usize = 10;
+
 /// 候選股可用的排序方式（`rank_by`），第一個為預設；字面值與 [`sql`] 回測 SQL 的 `$16` 對應。
 const RANK_BY: [&str; 4] = ["rs_score", "trade_value", "foreign_streak", "trust_streak"];
 
@@ -225,6 +228,8 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         weighting: backtest.weighting.as_str().to_owned(),
         max_weight: backtest.max_weight,
         industry: params.industry.clone(),
+        exclude_industry: (!backtest.excluded_industries.is_empty())
+            .then(|| backtest.excluded_industries.join(",")),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
         min_foreign_streak: params.min_foreign_streak,
@@ -270,6 +275,8 @@ struct Backtest<'a> {
     max_weight: Option<u8>,
     /// 樣本內外分割日（只用於偏移穩健度與前緣）。
     split: Option<NaiveDate>,
+    /// 排除的產業名稱；空的為不排除。
+    excluded_industries: Vec<String>,
 }
 
 /// 一次回測混合 0050 之前的各期結果（含還沒滿持有天數的最後一期）；同一組候選股可依不同的
@@ -416,6 +423,24 @@ impl<'a> Backtest<'a> {
         if let Some(response) = industry_error(params.industry.as_deref()).await {
             return Err(Box::new(response));
         }
+        let excluded =
+            parse_excluded_industries(params.exclude_industry.as_deref()).map_err(unprocessable)?;
+        if params
+            .industry
+            .as_ref()
+            .is_some_and(|industry| excluded.contains(industry))
+        {
+            return Err(unprocessable(
+                "exclude_industry 不可包含 industry 指定的產業",
+            ));
+        }
+        for industry in &excluded {
+            if industry_error(Some(industry)).await.is_some() {
+                return Err(unprocessable(
+                    "exclude_industry 必須為產業名稱（逗號分隔），例如「金融保險業」",
+                ));
+            }
+        }
 
         let latest: Option<NaiveDate> = sqlx::query_scalar(LATEST_RS_DATE_SQL)
             .bind(to)
@@ -448,6 +473,7 @@ impl<'a> Backtest<'a> {
             weighting,
             max_weight: params.max_weight,
             split,
+            excluded_industries: excluded,
         })
     }
 
@@ -497,7 +523,8 @@ impl<'a> Backtest<'a> {
                 .map(|value| i64::from(value) * 1_000_000),
         )
         .bind(self.rank_by)
-        .bind(self.weighting.as_str());
+        .bind(self.weighting.as_str())
+        .bind((!self.excluded_industries.is_empty()).then_some(&self.excluded_industries));
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))
@@ -527,6 +554,21 @@ impl<'a> Backtest<'a> {
             fee_discount: self.fee_discount,
         })
     }
+}
+
+/// 解析 `exclude_industry`：逗號分隔、去掉前後空白與空項目、去除重複；超過
+/// [`MAX_EXCLUDED_INDUSTRIES`] 個回錯誤訊息。
+fn parse_excluded_industries(value: Option<&str>) -> Result<Vec<String>, &'static str> {
+    let mut names: Vec<String> = Vec::new();
+    for name in value.unwrap_or_default().split(',').map(str::trim) {
+        if !name.is_empty() && !names.iter().any(|existing| existing == name) {
+            names.push(name.to_owned());
+        }
+    }
+    if names.len() > MAX_EXCLUDED_INDUSTRIES {
+        return Err("exclude_industry 最多 10 個產業");
+    }
+    Ok(names)
 }
 
 /// 起日：未指定為迄日往前 [`DEFAULT_PERIOD_DAYS`] 天；晚於迄日或期間超過上限回錯誤訊息。
