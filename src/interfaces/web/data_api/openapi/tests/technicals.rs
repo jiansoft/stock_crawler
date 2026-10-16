@@ -364,6 +364,19 @@ fn openapi_screen_backtest_offsets_schema_pins_field_names() {
     assert_eq!(response["offsets"]["type"], "array");
     assert_eq!(response["years"]["type"], "array");
     assert_eq!(response["rank_by"]["type"], "string");
+    for field in ["split", "before_split", "after_split"] {
+        assert!(response[field].to_string().contains("null"), "{field}");
+    }
+    assert!(
+        response["after_split"]
+            .to_string()
+            .contains("BacktestOffsetDistribution")
+    );
+    assert!(
+        query_schema(operation, "split")
+            .to_string()
+            .contains("string")
+    );
     let year = &schemas["BacktestOffsetYear"]["properties"];
     for field in [
         "year",
@@ -433,10 +446,18 @@ fn openapi_screen_backtest_frontier_schema_pins_field_names() {
             .to_string()
             .contains("BacktestFrontierPoint")
     );
-    for field in ["best_sharpe_weight", "best_return_weight"] {
+    for field in [
+        "best_sharpe_weight",
+        "best_return_weight",
+        "split",
+        "best_sharpe_weight_before_split",
+    ] {
         assert!(response[field].to_string().contains("null"), "{field}");
     }
     let point = &schemas["BacktestFrontierPoint"]["properties"];
+    for field in ["before_split", "after_split"] {
+        assert!(point[field].to_string().contains("null"), "{field}");
+    }
     assert_eq!(point["etf_weight"]["type"], "integer");
     assert!(
         point["distribution"]

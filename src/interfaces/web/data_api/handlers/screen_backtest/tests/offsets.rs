@@ -155,7 +155,8 @@ fn frontier_blends_each_weight() {
         elapsed_days: Some(3),
         fee_discount: 1.0,
     };
-    let points = frontier(&[(0, raw.clone()), (1, raw)], 20);
+    let raws = [(0, raw.clone()), (1, raw)];
+    let points = frontier(&raws, 20, None);
     assert_eq!(
         points
             .iter()
@@ -186,6 +187,67 @@ fn frontier_blends_each_weight() {
             .map(|stat| stat.median)
             == etf
     }));
+    assert!(
+        points
+            .iter()
+            .all(|point| point.before_split.is_none() && point.after_split.is_none())
+    );
+
+    // 分割日 02-01：01-02 那期為樣本內，02-01、03-01 為樣本外（還沒滿持有天數的 04-01 不列入）。
+    let points = frontier(&raws, 20, Some(day(2024, 2, 1)));
+    let periods =
+        |spread: &Option<crate::interfaces::web::data_api::dto::BacktestOffsetDistribution>| {
+            spread
+                .as_ref()
+                .and_then(|spread| spread.etf_annualized_return.as_ref())
+                .map(|stat| stat.median)
+        };
+    assert!(periods(&points[10].before_split).is_some(), "{points:?}");
+    assert_ne!(
+        periods(&points[10].before_split),
+        periods(&points[10].after_split)
+    );
+    assert_eq!(
+        points[0]
+            .after_split
+            .as_ref()
+            .and_then(|spread| spread.annualized_return_after_costs.as_ref())
+            .map(|stat| stat.median),
+        points[0]
+            .after_split
+            .as_ref()
+            .and_then(|spread| spread.annualized_return_after_costs.as_ref())
+            .map(|stat| stat.max),
+        "兩個偏移相同，分布只有一個值"
+    );
+}
+
+/// 樣本內外：依換股日切開各自彙總；沒有分割日時都是 `None`。
+#[test]
+fn split_results_partition_by_rebalance_date() {
+    use super::super::offsets::{split_distributions, split_results};
+    use super::super::summary::summarize;
+    let rows = vec![
+        dated(day(2024, 1, 2), Some(10.0), 0.0, Some(2.0)),
+        dated(day(2024, 2, 1), Some(-4.0), 0.0, Some(1.0)),
+        dated(day(2024, 3, 1), Some(8.0), 0.0, Some(3.0)),
+    ];
+    let costs = free(&rows);
+    assert!(split_results(3, &rows, &costs, 20, None).is_none());
+    let (before, after) =
+        split_results(3, &rows, &costs, 20, Some(day(2024, 2, 1))).expect("有分割日");
+    assert_eq!((before.rebalance_offset, after.rebalance_offset), (3, 3));
+    assert_eq!(before.summary, summarize(&rows[..1], &costs[..1], 20));
+    assert_eq!(after.summary, summarize(&rows[1..], &costs[1..], 20));
+    // 分割日早於全部換股日：樣本內沒有期數。
+    let (empty, all) =
+        split_results(0, &rows, &costs, 20, Some(day(2023, 1, 1))).expect("有分割日");
+    assert_eq!(empty.summary.periods, 0);
+    assert_eq!(all.summary, summarize(&rows, &costs, 20));
+
+    assert_eq!(split_distributions(Vec::new()), (None, None));
+    let (before, after) = split_distributions(vec![(before, after)]);
+    assert!(before.is_some() && after.is_some());
 }
 
 /// 最佳比例：中位數最高者，同值取較低的比例；全部沒有數值為 `None`。
@@ -206,6 +268,8 @@ fn best_weight_prefers_lower_on_tie() {
         BacktestFrontierPoint {
             etf_weight,
             distribution,
+            before_split: None,
+            after_split: None,
         }
     };
     let sharpe = |spread: &crate::interfaces::web::data_api::dto::BacktestOffsetDistribution| {

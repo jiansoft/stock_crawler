@@ -14,7 +14,11 @@ use axum::{
 };
 use futures::{StreamExt, TryStreamExt, stream};
 
-use super::offsets::{CONCURRENCY, distribution, sample_offsets};
+use chrono::NaiveDate;
+
+use super::offsets::{
+    CONCURRENCY, distribution, sample_offsets, split_distributions, split_results,
+};
 use super::summary::summarize;
 use super::{Backtest, ETF_BENCHMARK, Raw};
 use crate::interfaces::web::data_api::dto::{
@@ -53,7 +57,21 @@ pub(crate) async fn screen_backtest_frontier(
         Ok(raws) => raws,
         Err(error) => return database_error(error),
     };
-    let points = frontier(&raws, backtest.hold_days);
+    let points = frontier(&raws, backtest.hold_days, backtest.split);
+    let sharpe =
+        |spread: &BacktestOffsetDistribution| spread.sharpe_ratio.as_ref().map(|stat| stat.median);
+    let before_split: Vec<BacktestFrontierPoint> = points
+        .iter()
+        .filter_map(|point| {
+            point
+                .before_split
+                .clone()
+                .map(|distribution| BacktestFrontierPoint {
+                    distribution,
+                    ..point.clone()
+                })
+        })
+        .collect();
 
     Json(ScreenBacktestFrontierResponse {
         from: backtest.from.to_string(),
@@ -67,38 +85,50 @@ pub(crate) async fn screen_backtest_frontier(
         fee_discount: backtest.fee_discount,
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         offsets: raws.len() as i64,
-        best_sharpe_weight: best_weight(&points, |spread| {
-            spread.sharpe_ratio.as_ref().map(|stat| stat.median)
-        }),
+        best_sharpe_weight: best_weight(&points, sharpe),
         best_return_weight: best_weight(&points, |spread| {
             spread
                 .annualized_return_after_costs
                 .as_ref()
                 .map(|stat| stat.median)
         }),
+        split: backtest.split.map(|date| date.to_string()),
+        best_sharpe_weight_before_split: best_weight(&before_split, sharpe),
         weights: points,
     })
     .into_response()
 }
 
-/// 每個 [`WEIGHTS`] 比例：各偏移混合 0050 後彙總，再算分布。
-pub(super) fn frontier(raws: &[(u16, Raw)], hold_days: u16) -> Vec<BacktestFrontierPoint> {
+/// 每個 [`WEIGHTS`] 比例：各偏移混合 0050 後彙總，再算分布；有分割日時另算樣本內外的分布。
+pub(super) fn frontier(
+    raws: &[(u16, Raw)],
+    hold_days: u16,
+    split: Option<NaiveDate>,
+) -> Vec<BacktestFrontierPoint> {
     WEIGHTS
         .iter()
         .map(|&etf_weight| {
-            let results: Vec<BacktestOffsetResult> = raws
+            let (results, halves): (Vec<BacktestOffsetResult>, Vec<_>) = raws
                 .iter()
                 .map(|(offset, raw)| {
                     let simulation = raw.clone().finish(etf_weight);
-                    BacktestOffsetResult {
-                        rebalance_offset: *offset,
-                        summary: summarize(&simulation.rows, &simulation.costs, hold_days),
-                    }
+                    let (rows, costs) = (&simulation.rows, &simulation.costs);
+                    (
+                        BacktestOffsetResult {
+                            rebalance_offset: *offset,
+                            summary: summarize(rows, costs, hold_days),
+                        },
+                        split_results(*offset, rows, costs, hold_days, split),
+                    )
                 })
-                .collect();
+                .unzip();
+            let (before_split, after_split) =
+                split_distributions(halves.into_iter().flatten().collect());
             BacktestFrontierPoint {
                 etf_weight,
                 distribution: distribution(&results),
+                before_split,
+                after_split,
             }
         })
         .collect()

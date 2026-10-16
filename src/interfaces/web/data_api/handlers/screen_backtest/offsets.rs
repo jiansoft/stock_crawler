@@ -4,9 +4,11 @@
 //! 晚幾天開始換股，年化報酬可能差上一倍。這裡把偏移 0 到 `hold_days` − 1 都跑一遍（超過
 //! [`MAX_OFFSET_SAMPLES`] 個時平均抽樣），回傳每個偏移的彙總與年化報酬、夏普值、最大回撤的分布，
 //! 波動率與 0050 同期的對照，以及勝過 0050 的偏移比例；分布的中位數比任何單一偏移更能代表這組條件。另附依年度的分布，
-//! 看策略在哪些年份穩定勝過 0050。
+//! 看策略在哪些年份穩定勝過 0050；指定 `split` 時另把各期依換股日分成樣本內、樣本外，各算一次分布。
 
 use std::collections::BTreeMap;
+
+use chrono::NaiveDate;
 
 use axum::{
     Json,
@@ -15,8 +17,9 @@ use axum::{
 };
 use futures::{StreamExt, TryStreamExt, stream};
 
+use super::portfolio::PeriodCost;
 use super::summary::{summarize, yearly};
-use super::{Backtest, ETF_BENCHMARK, Simulation};
+use super::{Backtest, ETF_BENCHMARK, PeriodRow, Simulation};
 use crate::interfaces::web::data_api::dto::{
     BacktestOffsetDistribution, BacktestOffsetResult, BacktestOffsetYear, BacktestStat,
     BacktestSummary, BacktestYear, ErrorBody, ScreenBacktestOffsetsResponse, ScreenBacktestParams,
@@ -48,31 +51,38 @@ pub(crate) async fn screen_backtest_offsets(
     };
     let backtest = &backtest;
     let hold_days = backtest.hold_days;
-    let simulated: Vec<(BacktestOffsetResult, Vec<BacktestYear>)> =
-        match stream::iter(sample_offsets(hold_days))
-            .map(|offset| async move {
-                backtest
-                    .simulate(offset)
-                    .await
-                    .map(|Simulation { rows, costs, .. }| {
-                        (
-                            BacktestOffsetResult {
-                                rebalance_offset: offset,
-                                summary: summarize(&rows, &costs, hold_days),
-                            },
-                            yearly(&rows, &costs),
-                        )
-                    })
-            })
-            .buffered(CONCURRENCY)
-            .try_collect()
-            .await
-        {
-            Ok(simulated) => simulated,
-            Err(error) => return database_error(error),
-        };
-    let (results, years): (Vec<BacktestOffsetResult>, Vec<Vec<BacktestYear>>) =
-        simulated.into_iter().unzip();
+    let split = backtest.split;
+    let simulated: Vec<OffsetRun> = match stream::iter(sample_offsets(hold_days))
+        .map(|offset| async move {
+            backtest
+                .simulate(offset)
+                .await
+                .map(|Simulation { rows, costs, .. }| OffsetRun {
+                    result: BacktestOffsetResult {
+                        rebalance_offset: offset,
+                        summary: summarize(&rows, &costs, hold_days),
+                    },
+                    years: yearly(&rows, &costs),
+                    halves: split_results(offset, &rows, &costs, hold_days, split),
+                })
+        })
+        .buffered(CONCURRENCY)
+        .try_collect()
+        .await
+    {
+        Ok(simulated) => simulated,
+        Err(error) => return database_error(error),
+    };
+    let (before_split, after_split) = split_distributions(
+        simulated
+            .iter()
+            .filter_map(|run| run.halves.clone())
+            .collect(),
+    );
+    let (results, years): (Vec<BacktestOffsetResult>, Vec<Vec<BacktestYear>>) = simulated
+        .into_iter()
+        .map(|run| (run.result, run.years))
+        .unzip();
 
     Json(ScreenBacktestOffsetsResponse {
         from: backtest.from.to_string(),
@@ -88,9 +98,51 @@ pub(crate) async fn screen_backtest_offsets(
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         distribution: distribution(&results),
         years: offset_years(&years),
+        split: split.map(|date| date.to_string()),
+        before_split,
+        after_split,
         offsets: results,
     })
     .into_response()
+}
+
+/// 一個偏移的回測結果：整段彙總、依年度彙總與樣本內外的彙總。
+struct OffsetRun {
+    result: BacktestOffsetResult,
+    years: Vec<BacktestYear>,
+    halves: Option<(BacktestOffsetResult, BacktestOffsetResult)>,
+}
+
+/// 依分割日把各期分成換股日早於 `split` 的樣本內與其餘的樣本外，各自彙總；沒有分割日回 `None`。
+/// `rows` 依換股日由舊到新，`costs` 與之一一對應。
+pub(super) fn split_results(
+    offset: u16,
+    rows: &[PeriodRow],
+    costs: &[PeriodCost],
+    hold_days: u16,
+    split: Option<NaiveDate>,
+) -> Option<(BacktestOffsetResult, BacktestOffsetResult)> {
+    let split = split?;
+    let at = rows.partition_point(|row| row.date < split);
+    let result = |range: std::ops::Range<usize>| BacktestOffsetResult {
+        rebalance_offset: offset,
+        summary: summarize(&rows[range.clone()], &costs[range], hold_days),
+    };
+    Some((result(0..at), result(at..rows.len())))
+}
+
+/// 各偏移樣本內、樣本外彙總的分布；沒有分割日（`halves` 為空）時都是 `None`。
+pub(super) fn split_distributions(
+    halves: Vec<(BacktestOffsetResult, BacktestOffsetResult)>,
+) -> (
+    Option<BacktestOffsetDistribution>,
+    Option<BacktestOffsetDistribution>,
+) {
+    if halves.is_empty() {
+        return (None, None);
+    }
+    let (before, after): (Vec<_>, Vec<_>) = halves.into_iter().unzip();
+    (Some(distribution(&before)), Some(distribution(&after)))
 }
 
 /// 要跑的換股日偏移：`hold_days` 不超過 [`MAX_OFFSET_SAMPLES`] 時為全部，否則平均抽樣（含 0）。
