@@ -37,6 +37,8 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_foreign_streak: Option<i16>,
     /// 投信最少連續買超天數。
     pub(super) min_trust_streak: Option<i16>,
+    /// 近 20 筆日線平均成交金額下限（元）。
+    pub(super) min_avg_trade_value: Option<Decimal>,
     /// 二十六個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
@@ -137,6 +139,12 @@ pub(super) fn validate_screening_params(
     if streak_out_of_range(params.min_trust_streak) {
         return Err("min_trust_streak 必須介於 1 至 60");
     }
+    if params
+        .min_avg_trade_value
+        .is_some_and(|value| !(1..=100_000).contains(&value))
+    {
+        return Err("min_avg_trade_value 必須介於 1 至 100000（百萬元）");
+    }
     let order_by = screen_order_by(
         params.sort_by.as_deref().unwrap_or("stock_symbol"),
         params.sort_order.as_deref().unwrap_or("asc"),
@@ -161,7 +169,8 @@ pub(super) fn validate_screening_params(
         || params.positive_free_cash_flow == Some(true)
         || params.min_rs_score.is_some()
         || params.min_foreign_streak.is_some()
-        || params.min_trust_streak.is_some();
+        || params.min_trust_streak.is_some()
+        || params.min_avg_trade_value.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -178,6 +187,9 @@ pub(super) fn validate_screening_params(
         min_rs_score: params.min_rs_score.map(i16::from),
         min_foreign_streak: params.min_foreign_streak.map(i16::from),
         min_trust_streak: params.min_trust_streak.map(i16::from),
+        min_avg_trade_value: params
+            .min_avg_trade_value
+            .map(|value| Decimal::from(value) * Decimal::from(1_000_000)),
         order_by,
         limit,
     })

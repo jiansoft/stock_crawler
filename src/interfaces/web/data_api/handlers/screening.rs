@@ -103,6 +103,7 @@ async fn screen_at(
         .bind(validated.min_foreign_streak)
         .bind(validated.min_trust_streak)
         .bind(i64::from(validated.limit))
+        .bind(validated.min_avg_trade_value)
         .fetch_all(database::get_connection())
         .await;
 

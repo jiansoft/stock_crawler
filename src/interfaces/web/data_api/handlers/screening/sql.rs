@@ -9,6 +9,8 @@
 /// 語意，自然排除以該過期指標篩選的股票。相對強度分數由 handler 以全體計算後，
 /// 以 `$16` 代號、`$17` 分數兩個平行陣列傳入左接（沒有分數為 NULL）；外資、投信連續
 /// 買賣超天數同樣由 handler 算好，以 `$19` 代號、`$20` 外資、`$21` 投信三個平行陣列左接。
+/// 平均成交金額取查詢日（含）之前 45 天內最近 20 筆日線（`DailyQuotes` 以代號、日期為前導的唯一
+/// 索引），`$25` 為門檻（元，`NULL` 為不限）；`$24` 是外層附加的 `LIMIT`。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -40,7 +42,8 @@ WITH latest AS (
         h.quarter AS health_quarter,
         h.gross_margin_percent AS gross_margin_raw,
         h.debt_ratio_percent AS debt_ratio_raw,
-        h.free_cash_flow_ttm AS free_cash_flow_raw
+        h.free_cash_flow_ttm AS free_cash_flow_raw,
+        q.avg_trade_value
     FROM stocks s
     LEFT JOIN LATERAL (
         -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
@@ -101,6 +104,18 @@ WITH latest AS (
         ORDER BY date DESC
         LIMIT 1
     ) y ON TRUE
+    LEFT JOIN LATERAL (
+        -- 近 20 筆日線的平均成交金額（元）；停牌超過 45 天沒有日線時為 NULL。
+        SELECT AVG(recent_quotes."TradeValue") AS avg_trade_value
+        FROM (
+            SELECT "TradeValue"
+            FROM "DailyQuotes"
+            WHERE stock_symbol = s.stock_symbol
+              AND "Date" BETWEEN $3::date - 45 AND $3::date
+            ORDER BY "Date" DESC
+            LIMIT 20
+        ) recent_quotes
+    ) q ON TRUE
     LEFT JOIN financial_health h ON h.stock_symbol = s.stock_symbol
     WHERE (($1::int = 0 AND s.stock_exchange_market_id IN (2, 4))
         OR ($1::int <> 0 AND s.stock_exchange_market_id = $1))
@@ -187,7 +202,8 @@ SELECT
     health_quarter_year, health_quarter,
     rs.rs_score,
     chip.foreign_streak,
-    chip.trust_streak
+    chip.trust_streak,
+    avg_trade_value
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -209,4 +225,5 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($18::smallint IS NULL OR rs.rs_score >= $18)
   AND ($22::smallint IS NULL OR chip.foreign_streak >= $22)
   AND ($23::smallint IS NULL OR chip.trust_streak >= $23)
+  AND ($25::numeric IS NULL OR avg_trade_value >= $25)
 "#;

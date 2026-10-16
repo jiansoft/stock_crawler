@@ -174,6 +174,7 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
         ("rs_score", "integer"),
         ("foreign_streak", "integer"),
         ("trust_streak", "integer"),
+        ("avg_trade_value_20d", "number"),
     ] {
         let schema = screened[field].to_string();
         assert!(
@@ -188,6 +189,11 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
         assert_eq!(schema["minimum"], 1, "{name}");
         assert_eq!(schema["maximum"], 60, "{name}");
     }
+    let liquidity = query_schema(operation, "min_avg_trade_value");
+    assert_eq!(
+        (liquidity["minimum"].as_u64(), liquidity["maximum"].as_u64()),
+        (Some(1), Some(100_000))
+    );
     let response = &document["components"]["schemas"]["StockScreeningResponse"]["properties"];
     assert!(response["chip_as_of"].to_string().contains("null"));
 }
