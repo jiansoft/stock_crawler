@@ -129,6 +129,8 @@ pub(crate) struct ScreenedStock {
     pub(crate) foreign_streak: Option<i16>,
     /// 截至 `chip_as_of` 的投信連續買賣超天數，規則同 `foreign_streak`。
     pub(crate) trust_streak: Option<i16>,
+    /// 查詢日（含）之前 45 天內最近 20 筆日線的平均成交金額（百萬元）；沒有日線時為 `null`。
+    pub(crate) avg_trade_value_20d: Option<f64>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -203,6 +205,10 @@ pub(crate) struct StockScreeningParams {
     /// 投信至少連續買超幾個交易日（截至最新籌碼資料日），範圍 1–60。
     #[param(minimum = 1, maximum = 60)]
     pub(crate) min_trust_streak: Option<u8>,
+    /// 近 20 筆日線平均成交金額下限（百萬元，1–100000）；例如 50 代表日均成交 5,000 萬元。
+    /// 與條件選股回測的 `min_avg_trade_value` 相同，用來排除實際買不到量的股票。
+    #[param(minimum = 1, maximum = 100000)]
+    pub(crate) min_avg_trade_value: Option<u32>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,

@@ -70,6 +70,8 @@ pub(super) struct ScreenedStockRow {
     foreign_streak: Option<i16>,
     /// 投信連續買賣超天數。
     trust_streak: Option<i16>,
+    /// 近 20 筆日線平均成交金額（元）。
+    avg_trade_value: Option<Decimal>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -154,6 +156,12 @@ impl From<ScreenedStockRow> for ScreenedStock {
             rs_score: row.rs_score.and_then(|score| u8::try_from(score).ok()),
             foreign_streak: row.foreign_streak,
             trust_streak: row.trust_streak,
+            avg_trade_value_20d: analytical_decimal_to_f64(
+                row.avg_trade_value,
+                &symbol,
+                "avg_trade_value",
+            )
+            .map(|value| (value / 10_000.0).round() / 100.0),
         }
     }
 }
