@@ -311,6 +311,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "董監持股入庫",
             chip::execute_insider_holdings,
         ),
+        // 22:10（週一至週五）策略換股通知：依 .env 的 STRATEGY_ALERT_QUERY 跑條件選股回測，
+        // 今天是換股日才發；排在 21:50 籌碼入庫之後，外資／投信連續買超條件才看得到今天。
+        create_job(
+            "0 10 22 * * Mon-Fri",
+            "策略換股通知",
+            event::taiwan_stock::strategy_alert::execute,
+        ),
         // 22:00 外資持股狀態
         create_job(
             "0 0 22 * * *",

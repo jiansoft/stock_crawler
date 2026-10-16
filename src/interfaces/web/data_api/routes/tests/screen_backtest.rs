@@ -343,16 +343,17 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(contributors["worst"], serde_json::json!([]));
 
     // 目前持股：03-15 還沒滿 5 日（不列入各期），三檔分數都是 50、依代號取 BA、BB；
-    // 上一期的 BB 續抱、BA 新買進（換手 0.5）。
+    // 上一期的 BB 續抱、BA 新買進（換手 0.5），上一期的 BC 賣出。
     assert_eq!(
         json["current"],
         serde_json::json!({
             "date": "1993-03-15", "days_elapsed": 0, "days_to_next_rebalance": 5,
             "market_filtered": false, "turnover": 0.5, "cash": 0.0,
             "holdings": [
-                {"symbol": "79979BA", "name": "79979BA", "weight": 50.0},
-                {"symbol": "79979BB", "name": "79979BB", "weight": 50.0},
+                {"symbol": "79979BA", "name": "79979BA", "weight": 50.0, "added": true},
+                {"symbol": "79979BB", "name": "79979BB", "weight": 50.0, "added": false},
             ],
+            "exited": [{"symbol": "79979BC", "name": "79979BC", "weight": 50.0}],
         })
     );
     // 迄日 03-12：最後換股日 03-08 已有報酬，沒有目前持股。
@@ -391,7 +392,7 @@ async fn screen_backtest_endpoint_db_semantics() {
     );
     assert_eq!(
         json["current"]["holdings"],
-        serde_json::json!([{"symbol": "79979BC", "name": "79979BC", "weight": 100.0}])
+        serde_json::json!([{"symbol": "79979BC", "name": "79979BC", "weight": 100.0, "added": false}])
     );
     // 門檻 30 百萬元：BA 剛好等於門檻算通過。
     let (_, json) = query("limit=2&min_avg_trade_value=30").await;
@@ -487,8 +488,8 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(
         json["current"]["holdings"],
         serde_json::json!([
-            {"symbol": "79979BA", "name": "79979BA", "weight": 50.0},
-            {"symbol": "79979BB", "name": "79979BB", "weight": 50.0},
+            {"symbol": "79979BA", "name": "79979BA", "weight": 50.0, "added": true},
+            {"symbol": "79979BB", "name": "79979BB", "weight": 50.0, "added": false},
         ])
     );
     let (_, json) = query("limit=2&weighting=sqrt_trade_value").await;
@@ -763,5 +764,63 @@ async fn screen_backtest_endpoint_db_semantics() {
         assert_eq!(actual, status, "{path}: {json}");
     }
 
+    strategy_gateway_reports_latest_rebalance().await;
     cleanup(pool).await;
+}
+
+/// 策略換股通知的 adapter：與回測端點相同的條件與目前持股，拆成新買進、續抱與賣出；條件錯誤、
+/// 缺 `from`、最後一期已滿或籌碼還沒入庫時回錯誤或 `None`。
+async fn strategy_gateway_reports_latest_rebalance() {
+    use crate::app::ports::{StrategyGateway, StrategyHolding};
+    use crate::interfaces::web::data_api::BacktestStrategyGateway;
+
+    let gateway = BacktestStrategyGateway;
+    let holding = |symbol: &str| StrategyHolding {
+        symbol: symbol.to_owned(),
+        name: Some(symbol.to_owned()),
+        weight: 50.0,
+    };
+    let rebalance = gateway
+        .latest_rebalance("from=1993-03-01&to=1993-03-15&hold_days=5&limit=2&etf_weight=20")
+        .await
+        .expect("回測成功")
+        .expect("03-15 還沒滿持有天數");
+    assert_eq!(rebalance.date, day(15));
+    assert_eq!((rebalance.hold_days, rebalance.etf_weight), (5, 20));
+    assert!(!rebalance.market_filtered);
+    assert_eq!(rebalance.added, [holding("79979BA")]);
+    assert_eq!(rebalance.kept, [holding("79979BB")]);
+    assert_eq!(rebalance.exited, [holding("79979BC")]);
+
+    // 03-12 時最後換股日 03-08 已有報酬，沒有目前持股。
+    let none = gateway
+        .latest_rebalance("from=1993-03-01&to=1993-03-12&hold_days=5&limit=2")
+        .await
+        .expect("回測成功");
+    assert!(none.is_none());
+
+    for (query, expected) in [
+        ("to=1993-03-15&hold_days=5", "必須指定 from"),
+        ("from=1993-03-01&to=1993-03-15&hold_days=7", "HTTP 422"),
+        (
+            "from=1993-03-01&to=1993-03-15&hold_days=5&rebalance_offset=5",
+            "rebalance_offset",
+        ),
+        (
+            "from=1993-03-01&to=1993-03-15&hold_days=5&limit=x",
+            "無法解析",
+        ),
+        // 03-15 沒有籌碼資料：外資連買條件看不到當天。
+        (
+            "from=1993-03-01&to=1993-03-15&hold_days=5&min_foreign_streak=1",
+            "籌碼資料尚未入庫",
+        ),
+    ] {
+        let error = gateway
+            .latest_rebalance(query)
+            .await
+            .expect_err(query)
+            .to_string();
+        assert!(error.contains(expected), "{query}: {error}");
+    }
 }

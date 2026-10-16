@@ -299,6 +299,11 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     assert_eq!(current["cash"]["type"], "number");
     assert!(response["max_weight"].to_string().contains("null"));
     assert!(current["holdings"].to_string().contains("BacktestHolding"));
+    assert!(current["exited"].to_string().contains("BacktestExit"));
+    assert_eq!(
+        schemas["BacktestHolding"]["properties"]["added"]["type"],
+        "boolean"
+    );
     assert_eq!(response["etf_benchmark"]["type"], "string");
     assert_eq!(response["keep_rank"]["type"], "integer");
     assert!(response["market_filter_ma"].to_string().contains("null"));
