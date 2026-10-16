@@ -1,11 +1,13 @@
 //! # 大盤趨勢變化通知
 //!
 //! 每個交易日 15:30（15:00 收盤事件寫入加權指數之後）檢查加權指數當天是否站上或跌破
-//! [`ALERT_MA_DAYS`] 日均線、均線排列是否改變（見 [`regime`]），有變化才發 Telegram。
-//! 最新一筆加權指數不是今天（休市或尚未寫入）就不發。
+//! [`ALERT_MA_DAYS`] 日均線、均線排列是否改變（見 [`regime`]），以及上市櫃站上 60 日均線的
+//! 股票比例是否跨過 [`ALERT_BREADTH_PERCENT`]（見 [`breadth`]），有變化才發 Telegram；發送時一併
+//! 附上當天的市場廣度。最新一筆加權指數不是今天（休市或尚未寫入）就不發；市場廣度讀取失敗或
+//! 今天還沒有統計時只略過廣度。
 //!
-//! 條件選股回測的大盤濾網（`market_filter_ma`）也是看加權指數相對均線的位置，這則通知讓
-//! 環境轉換當天就知道。
+//! 條件選股回測的大盤濾網（`market_filter_ma`）與市場廣度濾網（`market_filter_breadth`）也是看
+//! 這兩件事，這則通知讓環境轉換當天就知道。
 
 use std::fmt::Write;
 
@@ -14,12 +16,19 @@ use chrono::{Local, NaiveDate};
 
 use crate::{
     core::{alert, util::text},
-    domain::market_index::regime::{self, IndexCloseQuery, MarketRegime},
+    domain::market_index::{
+        breadth::{self, BreadthDay, BreadthQuery},
+        regime::{self, IndexCloseQuery, MarketRegime},
+    },
     infra::database::repository::market_index::PgMarketIndexRepository,
 };
 
 /// 要通知穿越的均線天數。
 const ALERT_MA_DAYS: [u16; 2] = [60, 240];
+
+/// 站上 60 日均線的股票比例（%）跨過這條線就通知；回測時 60 日均線濾網再加上市場廣度 30% 的
+/// 濾網效果最好，與 `market_filter_breadth` 一樣以「不低於」算通過。
+const ALERT_BREADTH_PERCENT: f64 = 30.0;
 
 /// 排程入口：今天加權指數有穿越均線或排列改變就發通知。
 ///
@@ -34,8 +43,11 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-/// 讀取加權指數並組出訊息；最新一筆不是 `today` 或沒有變化時回 `None`。
-async fn run(index: &impl IndexCloseQuery, today: NaiveDate) -> Result<Option<String>> {
+/// 讀取加權指數與市場廣度並組出訊息；最新一筆不是 `today` 或沒有變化時回 `None`。
+async fn run(
+    index: &(impl IndexCloseQuery + BreadthQuery),
+    today: NaiveDate,
+) -> Result<Option<String>> {
     let points = regime::load_taiex(index, Some(today))
         .await
         .context("load TAIEX closes for market regime alert failed")?;
@@ -44,12 +56,21 @@ async fn run(index: &impl IndexCloseQuery, today: NaiveDate) -> Result<Option<St
         tracing::info!("大盤趨勢變化：最新加權指數為 {latest:?}，不是今天 {today}，略過");
         return Ok(None);
     }
-    Ok(build_message(&points))
+    let breadth = match index.fetch_breadth(Some(today), 2).await {
+        Ok(days) if days.first().is_some_and(|day| day.date == today) => days,
+        Ok(_) => Vec::new(),
+        Err(error) => {
+            tracing::warn!("大盤趨勢變化：讀取市場廣度失敗，略過廣度：{error:?}");
+            Vec::new()
+        }
+    };
+    Ok(build_message(&points, &breadth))
 }
 
-/// 由新到舊的收盤組出訊息：最新一天穿越 [`ALERT_MA_DAYS`] 日均線、或排列和前一天不同；
-/// 都沒有時回 `None`。
-fn build_message(points: &[(NaiveDate, f64)]) -> Option<String> {
+/// 由新到舊的收盤與市場廣度組出訊息：最新一天穿越 [`ALERT_MA_DAYS`] 日均線、排列和前一天不同、
+/// 或站上 60 日均線的比例跨過 [`ALERT_BREADTH_PERCENT`]；都沒有時回 `None`。`breadth` 為今天與
+/// 前一個交易日的統計（由新到舊），沒有時不看廣度。
+fn build_message(points: &[(NaiveDate, f64)], breadth: &[BreadthDay]) -> Option<String> {
     let today = regime::regime(points)?;
     let previous = regime::regime(points.get(1..)?);
     let crosses: Vec<_> = ALERT_MA_DAYS
@@ -59,7 +80,11 @@ fn build_message(points: &[(NaiveDate, f64)]) -> Option<String> {
     let alignment_change = previous
         .as_ref()
         .filter(|previous| previous.alignment != today.alignment);
-    if crosses.is_empty() && alignment_change.is_none() {
+    let breadth = breadth_change(breadth);
+    let breadth_crossed = breadth.is_some_and(|(now, before)| {
+        (now >= ALERT_BREADTH_PERCENT) != (before >= ALERT_BREADTH_PERCENT)
+    });
+    if crosses.is_empty() && alignment_change.is_none() && !breadth_crossed {
         return None;
     }
 
@@ -85,6 +110,9 @@ fn build_message(points: &[(NaiveDate, f64)]) -> Option<String> {
             today.alignment.label()
         ));
     }
+    if let Some((now, before)) = breadth {
+        lines.push(breadth_line(now, before));
+    }
 
     let mut message = String::with_capacity(256);
     let _ = writeln!(
@@ -101,6 +129,31 @@ fn build_message(points: &[(NaiveDate, f64)]) -> Option<String> {
         text::escape_markdown_v2("＊只描述價格與均線的位置，不代表後續走勢")
     );
     Some(message)
+}
+
+/// 今天與前一個交易日站上 60 日均線的股票比例（%）；任一天沒有統計為 `None`。
+fn breadth_change(days: &[BreadthDay]) -> Option<(f64, f64)> {
+    let summary = breadth::summarize(days, 1)?;
+    Some((
+        summary.above_ma60_percent?,
+        summary.above_ma60_percent_before?,
+    ))
+}
+
+/// 市場廣度的一行：今天與前一日的比例，跨過 [`ALERT_BREADTH_PERCENT`] 時註明方向。
+fn breadth_line(now: f64, before: f64) -> String {
+    let mut line = format!("• 市場廣度：站上 60 日均線的股票 {now:.2}%（前一日 {before:.2}%）");
+    let threshold = ALERT_BREADTH_PERCENT;
+    match (now >= threshold, before >= threshold) {
+        (true, false) => {
+            let _ = write!(&mut line, "，回到 {threshold:.0}% 以上");
+        }
+        (false, true) => {
+            let _ = write!(&mut line, "，跌破 {threshold:.0}%");
+        }
+        _ => {}
+    }
+    line
 }
 
 /// 穿越 `days` 日均線的一行；60 日均線另附穿越前連續在另一側的交易日數。
