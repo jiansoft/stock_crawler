@@ -13,15 +13,19 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期候選檔數、
 /// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類、`$11` 大盤濾網均線天數
 /// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）、`$13` 市場廣度門檻（%，`NULL` 為不濾）、
-/// `$14` 換股日偏移（起日之後先跳過幾個交易日）；籌碼版另有 `$15`／`$16`。
+/// `$14` 換股日偏移（起日之後先跳過幾個交易日）、`$15` 流動性門檻（元，`NULL` 為不限）；籌碼版另有
+/// `$16`／`$17`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
-///   含當天往前第 `$4` 個交易日，訊號條件看 `window_start`～換股日。
+///   含當天往前第 `$4` 個交易日，訊號條件看 `window_start`～換股日；`liquidity_start` 是含當天往前
+///   第 20 個交易日（之前不足 20 個交易日時取最早一天），流動性看 `liquidity_start`～換股日的平均
+///   成交金額。
 /// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入，
 ///   只有最後一個換股日例外：以 `pending` 標記列出，當作策略目前的持股（`elapsed_days` 為換股日之後
 ///   到迄日經過的交易日數）。
-/// - `candidates`：符合條件的股票依相對強度由高到低的前 `$5` 檔與各自的報酬、產業編號；實際持股由
+/// - `candidates`：符合條件（含流動性門檻，只對其他條件都通過的股票逐檔查成交金額）的股票依相對強度
+///   由高到低的前 `$5` 檔與各自的報酬、產業編號；實際持股由
 ///   [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
 /// - `taiex`：加權指數收盤是否不低於含當天往前 `$11` 個交易日的平均；低於時 `market_ok` 為
@@ -40,20 +44,23 @@ days AS (
     GROUP BY date
 ),
 windowed AS (
-    SELECT date, LAG(date, $4::int - 1, date) OVER (ORDER BY date) AS window_start
+    SELECT date,
+           LAG(date, $4::int - 1, date) OVER (ORDER BY date) AS window_start,
+           COALESCE(LAG(date, 19) OVER (ORDER BY date), MIN(date) OVER (ORDER BY date))
+               AS liquidity_start
     FROM days
 ),
 rebal AS (
-    SELECT date, window_start
+    SELECT date, window_start, liquidity_start
     FROM (
-        SELECT date, window_start, ROW_NUMBER() OVER (ORDER BY date) - 1 AS i
+        SELECT date, window_start, liquidity_start, ROW_NUMBER() OVER (ORDER BY date) - 1 AS i
         FROM windowed
         WHERE date >= $1
     ) AS numbered
     WHERE i >= $14::int AND (i - $14::int) % $4::int = 0
 ),
 universe AS (
-    SELECT rb.date, rb.window_start, rs.stock_symbol, rs.rs_score, s.stock_industry_id,
+    SELECT rb.date, rb.window_start, rb.liquidity_start, rs.stock_symbol, rs.rs_score, s.stock_industry_id,
            CASE $4::int
                WHEN 5 THEN f.return_5d
                WHEN 20 THEN f.return_20d
@@ -91,6 +98,11 @@ picks AS (
       ))"#,
             $chip_filter,
             r#"
+      AND ($15::int8 IS NULL OR (
+          SELECT AVG(q."TradeValue") FROM "DailyQuotes" q
+          WHERE q.stock_symbol = u.stock_symbol
+            AND q."Date" BETWEEN u.liquidity_start AND u.date
+      ) >= $15)
 ),
 candidates AS (
     SELECT date,
@@ -161,7 +173,7 @@ ORDER BY b.date
 /// 沒有籌碼條件的回測。
 pub(super) const BACKTEST_SQL: &str = backtest_sql!("\nWITH", "", "");
 
-/// 有籌碼條件的回測：換股當天外資（`$15`）／投信（`$16`）已連續買超至少 N 天，`NULL` 為不篩選。
+/// 有籌碼條件的回測：換股當天外資（`$16`）／投信（`$17`）已連續買超至少 N 天，`NULL` 為不篩選。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
     chip_streak_ctes!(),
@@ -169,6 +181,6 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($15::bigint IS NULL OR c.foreign_buy >= $15)\n      AND ($16::bigint IS NULL OR c.trust_buy >= $16)"
+        "\n      AND ($16::bigint IS NULL OR c.foreign_buy >= $16)\n      AND ($17::bigint IS NULL OR c.trust_buy >= $17)"
     )
 );

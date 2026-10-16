@@ -241,6 +241,7 @@ fn openapi_screen_backtest_schema_pins_field_names() {
         ("max_rs_score", 99),
         ("min_foreign_streak", 60),
         ("min_trust_streak", 60),
+        ("min_avg_trade_value", 100000),
     ] {
         let schema = query_schema(operation, name);
         assert_eq!(schema["minimum"], 1, "{name}");
@@ -320,5 +321,55 @@ fn openapi_screen_backtest_schema_pins_field_names() {
         "etf_sharpe_ratio",
     ] {
         assert!(summary[field].to_string().contains("null"), "{field}");
+    }
+}
+
+/// 換股日偏移穩健度 path 的契約：與單次回測共用參數、回應含各偏移彙總與分布。
+#[test]
+fn openapi_screen_backtest_offsets_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/stocks/screen/backtest/offsets");
+    assert_endpoint_responses(operation, "ScreenBacktestOffsetsResponse", true);
+    assert_eq!(query_schema(operation, "hold_days")["default"], 20);
+    assert_eq!(
+        query_schema(operation, "min_avg_trade_value")["maximum"],
+        100000
+    );
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["ScreenBacktestOffsetsResponse"]["properties"];
+    assert_eq!(response["hold_days"]["type"], "integer");
+    assert_eq!(response["offsets"]["type"], "array");
+    assert!(
+        response["offsets"]
+            .to_string()
+            .contains("BacktestOffsetResult")
+    );
+    assert!(
+        response["distribution"]
+            .to_string()
+            .contains("BacktestOffsetDistribution")
+    );
+    let result = &schemas["BacktestOffsetResult"]["properties"];
+    assert_eq!(result["rebalance_offset"]["type"], "integer");
+    assert!(result["summary"].to_string().contains("BacktestSummary"));
+    let spread = &schemas["BacktestOffsetDistribution"]["properties"];
+    for field in [
+        "annualized_return_after_costs",
+        "sharpe_ratio",
+        "max_drawdown_after_costs",
+        "etf_annualized_return",
+        "etf_sharpe_ratio",
+    ] {
+        assert!(
+            spread[field].to_string().contains("BacktestStat"),
+            "{field}"
+        );
+        assert!(spread[field].to_string().contains("null"), "{field}");
+    }
+    assert!(spread["beat_etf_return_rate"].to_string().contains("null"));
+    let stat = &schemas["BacktestStat"]["properties"];
+    for field in ["min", "p25", "median", "mean", "p75", "max"] {
+        assert_eq!(stat[field]["type"], "number", "{field}");
     }
 }

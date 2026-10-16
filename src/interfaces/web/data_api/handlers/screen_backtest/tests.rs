@@ -335,8 +335,8 @@ fn period_rounds_returns() {
     assert_eq!(period((row(3, 0, None, 1.0), cash)).avg_return, None);
 }
 
-/// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`、續抱門檻 `$12` 與市場廣度門檻 `$13`，籌碼版另含
-/// 連續買超的 CTE 與 `$14`／`$15`。
+/// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`、續抱門檻 `$12`、市場廣度門檻 `$13`、換股日偏移 `$14`
+/// 與流動性門檻 `$15`，籌碼版另含連續買超的 CTE 與 `$16`／`$17`。
 #[test]
 fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.trim_start().starts_with("WITH\ndays AS ("));
@@ -344,7 +344,9 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("rs_score >= $12"));
     assert!(BACKTEST_SQL.contains("$13::int IS NULL OR br.above"));
     assert!(BACKTEST_SQL.contains("WHERE i >= $14::int AND (i - $14::int) % $4::int = 0"));
-    assert!(!BACKTEST_SQL.contains("$15"));
+    assert!(BACKTEST_SQL.contains("$15::int8 IS NULL OR"));
+    assert!(BACKTEST_SQL.contains("BETWEEN u.liquidity_start AND u.date"));
+    assert!(!BACKTEST_SQL.contains("$16"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -353,8 +355,8 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $15"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $16"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $16"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $17"));
 }
 
 /// 一期候選：代號依相對強度由高到低，報酬一一對應。
@@ -640,4 +642,84 @@ fn split_current_takes_pending_last_period() {
     assert!(split_current(&mut rows, &mut costs).is_none());
     assert_eq!(rows.len(), 1);
     assert!(split_current(&mut Vec::new(), &mut Vec::new()).is_none());
+}
+
+/// 持有 20 日以內跑全部偏移；更長時平均抽 20 個（含 0、不超過 hold_days − 1）。
+#[test]
+fn sample_offsets_covers_or_spreads() {
+    use super::offsets::sample_offsets;
+    assert_eq!(sample_offsets(5), [0, 1, 2, 3, 4]);
+    assert_eq!(sample_offsets(20), (0..20).collect::<Vec<u16>>());
+    let sixty = sample_offsets(60);
+    assert_eq!(sixty.len(), 20);
+    assert_eq!((sixty[0], sixty[1], sixty[19]), (0, 3, 57));
+    let long = sample_offsets(240);
+    assert_eq!((long.len(), long[1], long[19]), (20, 12, 228));
+}
+
+/// 分布：排序後取最小、四分位（線性內插）、中位數、平均與最大；空集合為 None。
+#[test]
+fn stat_interpolates_quartiles() {
+    use super::offsets::stat;
+    let result = stat([4.0, 1.0, 3.0, 2.0].into_iter()).expect("有數值");
+    assert_eq!(
+        (
+            result.min,
+            result.p25,
+            result.median,
+            result.mean,
+            result.p75,
+            result.max
+        ),
+        (1.0, 1.75, 2.5, 2.5, 3.25, 4.0)
+    );
+    let single = stat([7.123].into_iter()).expect("一個數值");
+    assert_eq!((single.min, single.median, single.max), (7.12, 7.12, 7.12));
+    assert!(stat(std::iter::empty()).is_none());
+}
+
+/// 各偏移的分布只算有數值的偏移；勝過 0050 的比例只看兩邊都有數值的偏移。
+#[test]
+fn distribution_counts_offsets_beating_etf() {
+    use super::offsets::distribution;
+    use crate::interfaces::web::data_api::dto::BacktestOffsetResult;
+    let result = |offset: u16, annualized: Option<f64>, sharpe: Option<f64>| {
+        let mut summary = summarize(&[], &[], 20);
+        summary.annualized_return_after_costs = annualized;
+        summary.sharpe_ratio = sharpe;
+        summary.max_drawdown_after_costs = annualized.map(|value| -value);
+        summary.etf_annualized_return = Some(20.0);
+        summary.etf_sharpe_ratio = Some(1.0);
+        BacktestOffsetResult {
+            rebalance_offset: offset,
+            summary,
+        }
+    };
+    let results = [
+        result(0, Some(30.0), Some(1.5)),
+        result(1, Some(10.0), Some(0.5)),
+        result(2, Some(25.0), Some(0.9)),
+        result(3, None, None),
+    ];
+    let spread = distribution(&results);
+    let annualized = spread.annualized_return_after_costs.expect("有年化報酬");
+    assert_eq!(
+        (annualized.min, annualized.median, annualized.max),
+        (10.0, 25.0, 30.0)
+    );
+    assert_eq!(
+        spread.max_drawdown_after_costs.map(|stat| stat.min),
+        Some(-30.0)
+    );
+    assert_eq!(
+        spread.etf_annualized_return.map(|stat| stat.median),
+        Some(20.0)
+    );
+    // 年化 30、25 勝過 20（2/3）；夏普只有 1.5 勝過 1.0（1/3）。
+    assert_eq!(spread.beat_etf_return_rate, Some(0.6667));
+    assert_eq!(spread.beat_etf_sharpe_rate, Some(0.3333));
+
+    let empty = distribution(&[]);
+    assert!(empty.annualized_return_after_costs.is_none());
+    assert!(empty.beat_etf_return_rate.is_none());
 }

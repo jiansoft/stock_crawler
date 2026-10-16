@@ -1,9 +1,12 @@
 //! [`PgDividendRepository`] 的整合測試（需要 PostgreSQL；固定使用歷史年度與假代號 79977～79979）。
 
+use anyhow::Context;
 use chrono::TimeZone;
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use super::*;
+use crate::infra::database;
 
 /// 混合配息年度的測試代號：同一發放年度同時有半年配與全年事件，因此會有年度合計列。
 const MIXED_YEAR_SYMBOL: &str = "79979";

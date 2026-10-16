@@ -34,6 +34,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
         "DELETE FROM daily_forward_return WHERE stock_symbol = ANY($1)",
         "DELETE FROM daily_technical_signal WHERE stock_symbol = ANY($1)",
         "DELETE FROM chip_daily WHERE stock_symbol = ANY($1)",
+        r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
@@ -152,6 +153,14 @@ async fn seed(pool: &sqlx::PgPool) {
     .await
     .expect("種入籌碼");
     crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
+    // 成交金額：BA 只有 03-01 的 3,000 萬元、BC 03-01 有 2 億元；BB 沒有日線。
+    sqlx::query(
+        r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "TradeValue") VALUES
+           ('1993-03-01', '79979BA', 30000000), ('1993-03-01', '79979BC', 200000000)"#,
+    )
+    .execute(pool)
+    .await
+    .expect("種入日線成交金額");
 }
 
 /// 呼叫 endpoint（固定 03-01～03-15、持有 5 日），回傳狀態與 JSON。
@@ -364,6 +373,35 @@ async fn screen_backtest_endpoint_db_semantics() {
     let (status, _) = query("rebalance_offset=5").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
+    // 流動性門檻 50 百萬元：BA（20 日平均 3,000 萬）與沒有日線的 BB 不買，只剩 BC；
+    // 03-08 的 BC 沒有報酬。目前持股 03-15 也只有 BC。
+    let (status, json) = query("limit=2&min_avg_trade_value=50").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["min_avg_trade_value"], 50);
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 1, Some(2.0)),
+            ("1993-03-08".to_owned(), 1, None),
+        ]
+    );
+    assert_eq!(
+        json["current"]["holdings"],
+        serde_json::json!([{"symbol": "79979BC", "name": "79979BC"}])
+    );
+    // 門檻 30 百萬元：BA 剛好等於門檻算通過。
+    let (_, json) = query("limit=2&min_avg_trade_value=30").await;
+    assert_eq!(
+        json["periods"][0]["symbols"],
+        serde_json::json!(["79979BA", "79979BC"])
+    );
+    let (_, json) = query("limit=2").await;
+    assert!(json["min_avg_trade_value"].is_null());
+    for value in ["0", "100001"] {
+        let (status, _) = query(&format!("min_avg_trade_value={value}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{value}");
+    }
+
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -501,6 +539,48 @@ async fn screen_backtest_endpoint_db_semantics() {
         ("to=1900-01-01", StatusCode::NOT_FOUND),
     ] {
         let (actual, json) = get(&format!("/api/v1/stocks/screen/backtest?{path}")).await;
+        assert_eq!(actual, status, "{path}: {json}");
+    }
+
+    // 換股日偏移穩健度：持有 5 日跑偏移 0～4。只有偏移 0 的 03-01、03-08 有報酬，彙總與單跑
+    // 偏移 0 相同；其他偏移沒有已滿的期數，不列入分布。
+    let (status, json) = get(
+        "/api/v1/stocks/screen/backtest/offsets?from=1993-03-01&to=1993-03-15&hold_days=5&limit=2",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        (json["hold_days"].as_u64(), json["limit"].as_u64()),
+        (Some(5), Some(2))
+    );
+    assert_eq!(json["etf_benchmark"], "0050");
+    let offsets = json["offsets"].as_array().expect("offsets array");
+    assert_eq!(
+        offsets
+            .iter()
+            .map(|item| item["rebalance_offset"].as_u64().unwrap_or(99))
+            .collect::<Vec<_>>(),
+        [0, 1, 2, 3, 4]
+    );
+    let (_, single) = query("limit=2").await;
+    assert_eq!(offsets[0]["summary"], single["summary"]);
+    assert_eq!(offsets[1]["summary"]["periods"], 0);
+    let spread = &json["distribution"];
+    let annualized = &single["summary"]["annualized_return_after_costs"];
+    assert_eq!(spread["annualized_return_after_costs"]["min"], *annualized);
+    assert_eq!(spread["annualized_return_after_costs"]["max"], *annualized);
+    assert_eq!(spread["beat_etf_return_rate"], 1.0);
+    // 參數驗證與單次回測相同；rebalance_offset 不使用。
+    for (path, status) in [
+        ("hold_days=5&rebalance_offset=9", StatusCode::OK),
+        ("hold_days=10", StatusCode::UNPROCESSABLE_ENTITY),
+        ("limit=0", StatusCode::UNPROCESSABLE_ENTITY),
+        ("to=1900-01-01", StatusCode::NOT_FOUND),
+    ] {
+        let (actual, json) = get(&format!(
+            "/api/v1/stocks/screen/backtest/offsets?from=1993-03-01&{path}"
+        ))
+        .await;
         assert_eq!(actual, status, "{path}: {json}");
     }
 

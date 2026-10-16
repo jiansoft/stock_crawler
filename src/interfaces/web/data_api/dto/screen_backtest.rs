@@ -46,6 +46,10 @@ pub(crate) struct ScreenBacktestParams {
     /// 同一組條件換不同偏移重跑，可看結果是否只是剛好碰上某幾個換股日。
     #[param(minimum = 0, maximum = 239)]
     pub(crate) rebalance_offset: Option<u16>,
+    /// 流動性門檻（百萬元，1–100000）：換股日含當天往前 20 個交易日的平均成交金額低於此值的股票
+    /// 不新買進（上一期持股的續抱不受限）；例如 50 代表日均成交 5,000 萬元。省略為不限。
+    #[param(minimum = 1, maximum = 100000)]
+    pub(crate) min_avg_trade_value: Option<u32>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -260,6 +264,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_per_industry: Option<u8>,
     /// 換股日偏移（交易日）。
     pub(crate) rebalance_offset: u16,
+    /// 流動性門檻（百萬元，20 日平均成交金額）；未設定為 `null`。
+    pub(crate) min_avg_trade_value: Option<u32>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。
@@ -291,4 +297,62 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) current: Option<BacktestCurrent>,
     /// 各期結果，由舊到新；只列已滿持有天數的期數。
     pub(crate) periods: Vec<BacktestPeriod>,
+}
+
+/// 一組數值的分布（四分位以線性內插，四捨五入到小數兩位）。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestStat {
+    pub(crate) min: f64,
+    pub(crate) p25: f64,
+    pub(crate) median: f64,
+    pub(crate) mean: f64,
+    pub(crate) p75: f64,
+    pub(crate) max: f64,
+}
+
+/// 一個換股日偏移的回測彙總。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestOffsetResult {
+    /// 換股日偏移（起日之後先跳過的交易日數）。
+    pub(crate) rebalance_offset: u16,
+    /// 與 `/stocks/screen/backtest` 相同的整段彙總。
+    pub(crate) summary: BacktestSummary,
+}
+
+/// 各偏移績效的分布；沒有任何偏移有該項數值時為 `null`。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestOffsetDistribution {
+    /// 扣交易成本後的年化報酬（%）。
+    pub(crate) annualized_return_after_costs: Option<BacktestStat>,
+    /// 扣成本後的夏普值。
+    pub(crate) sharpe_ratio: Option<BacktestStat>,
+    /// 扣成本後的最大回撤（%，負值）。
+    pub(crate) max_drawdown_after_costs: Option<BacktestStat>,
+    /// 0050 同期（同樣的換股日進出）的年化報酬（%）。
+    pub(crate) etf_annualized_return: Option<BacktestStat>,
+    /// 0050 同期的夏普值。
+    pub(crate) etf_sharpe_ratio: Option<BacktestStat>,
+    /// 扣成本後年化報酬高於同偏移 0050 的偏移比例（0–1）。
+    pub(crate) beat_etf_return_rate: Option<f64>,
+    /// 扣成本後夏普值高於同偏移 0050 的偏移比例（0–1）。
+    pub(crate) beat_etf_sharpe_rate: Option<f64>,
+}
+
+/// 換股日偏移穩健度結果。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct ScreenBacktestOffsetsResponse {
+    pub(crate) from: String,
+    /// 實際迄日（不晚於指定迄日、最近一個有相對強度的交易日）。
+    pub(crate) to: String,
+    pub(crate) market: String,
+    pub(crate) hold_days: u16,
+    pub(crate) limit: u8,
+    /// 計算交易成本用的手續費折扣（0–1）。
+    pub(crate) fee_discount: f64,
+    /// 可投資的大盤基準代號（固定為 `0050`）。
+    pub(crate) etf_benchmark: String,
+    /// 各偏移績效的分布。
+    pub(crate) distribution: BacktestOffsetDistribution,
+    /// 每個偏移的彙總，依偏移由小到大。
+    pub(crate) offsets: Vec<BacktestOffsetResult>,
 }
