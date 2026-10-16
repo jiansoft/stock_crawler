@@ -542,5 +542,47 @@ async fn screen_backtest_endpoint_db_semantics() {
         assert_eq!(actual, status, "{path}: {json}");
     }
 
+    // 換股日偏移穩健度：持有 5 日跑偏移 0～4。只有偏移 0 的 03-01、03-08 有報酬，彙總與單跑
+    // 偏移 0 相同；其他偏移沒有已滿的期數，不列入分布。
+    let (status, json) = get(
+        "/api/v1/stocks/screen/backtest/offsets?from=1993-03-01&to=1993-03-15&hold_days=5&limit=2",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        (json["hold_days"].as_u64(), json["limit"].as_u64()),
+        (Some(5), Some(2))
+    );
+    assert_eq!(json["etf_benchmark"], "0050");
+    let offsets = json["offsets"].as_array().expect("offsets array");
+    assert_eq!(
+        offsets
+            .iter()
+            .map(|item| item["rebalance_offset"].as_u64().unwrap_or(99))
+            .collect::<Vec<_>>(),
+        [0, 1, 2, 3, 4]
+    );
+    let (_, single) = query("limit=2").await;
+    assert_eq!(offsets[0]["summary"], single["summary"]);
+    assert_eq!(offsets[1]["summary"]["periods"], 0);
+    let spread = &json["distribution"];
+    let annualized = &single["summary"]["annualized_return_after_costs"];
+    assert_eq!(spread["annualized_return_after_costs"]["min"], *annualized);
+    assert_eq!(spread["annualized_return_after_costs"]["max"], *annualized);
+    assert_eq!(spread["beat_etf_return_rate"], 1.0);
+    // 參數驗證與單次回測相同；rebalance_offset 不使用。
+    for (path, status) in [
+        ("hold_days=5&rebalance_offset=9", StatusCode::OK),
+        ("hold_days=10", StatusCode::UNPROCESSABLE_ENTITY),
+        ("limit=0", StatusCode::UNPROCESSABLE_ENTITY),
+        ("to=1900-01-01", StatusCode::NOT_FOUND),
+    ] {
+        let (actual, json) = get(&format!(
+            "/api/v1/stocks/screen/backtest/offsets?from=1993-03-01&{path}"
+        ))
+        .await;
+        assert_eq!(actual, status, "{path}: {json}");
+    }
+
     cleanup(pool).await;
 }

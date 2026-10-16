@@ -10,9 +10,10 @@
 //! 賣出另付證交稅 0.3%；同一檔續抱不計成本，也不計等權再平衡的小額調整。
 //!
 //! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
-//! [`contributors`]（個股貢獻）。
+//! [`contributors`]（個股貢獻）、[`offsets`]（換股日偏移穩健度端點）。
 
 mod contributors;
+mod offsets;
 mod portfolio;
 mod sql;
 mod summary;
@@ -24,6 +25,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::NaiveDate;
+
+pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
 
 use self::contributors::{Contribution, LISTED_CONTRIBUTORS, contributors};
 use self::portfolio::{PeriodCost, period, select_holdings, trading_costs};
@@ -113,62 +116,11 @@ struct PeriodRow {
 /// 迄日之前沒有相對強度資料回 404；驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) -> Response {
-    let (from, to) = match (
-        parse_optional_date(params.from.as_deref()),
-        parse_optional_date(params.to.as_deref()),
-    ) {
-        (Ok(from), Ok(to)) => (from, to),
-        (Err(message), _) | (_, Err(message)) => {
-            return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
-        }
+    let backtest = match Backtest::prepare(&params).await {
+        Ok(backtest) => backtest,
+        Err(response) => return *response,
     };
-    let hold_days = params.hold_days.unwrap_or(20);
-    if !HOLD_DAYS.contains(&hold_days) {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "hold_days 必須為 5、20、60、120 或 240",
-        );
-    }
-    let limit = params.limit.unwrap_or(20);
-    if !(1..=100).contains(&limit) {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "limit 必須介於 1 至 100");
-    }
-    if params
-        .market_filter_ma
-        .is_some_and(|days| !MARKET_FILTER_DAYS.contains(&days))
-    {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "market_filter_ma 必須為 20、60、120 或 240",
-        );
-    }
-    if params
-        .market_filter_breadth
-        .is_some_and(|percent| !(1..=99).contains(&percent))
-    {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "market_filter_breadth 必須介於 1 至 99",
-        );
-    }
-    if params
-        .hold_min_rs_score
-        .is_some_and(|score| !(1..=99).contains(&score))
-    {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "hold_min_rs_score 必須介於 1 至 99",
-        );
-    }
-    if params
-        .max_per_industry
-        .is_some_and(|count| !(1..=100).contains(&count))
-    {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "max_per_industry 必須介於 1 至 100",
-        );
-    }
+    let hold_days = backtest.hold_days;
     let rebalance_offset = params.rebalance_offset.unwrap_or(0);
     if rebalance_offset >= hold_days {
         return error_response(
@@ -176,117 +128,15 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
             "rebalance_offset 必須介於 0 至 hold_days − 1",
         );
     }
-    if params
-        .min_avg_trade_value
-        .is_some_and(|value| !(1..=MAX_TRADE_VALUE_MILLION).contains(&value))
-    {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "min_avg_trade_value 必須介於 1 至 100000（百萬元）",
-        );
-    }
-    let keep_rank = params.keep_rank.unwrap_or(limit);
-    if !(limit..=MAX_KEEP_RANK).contains(&keep_rank) {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "keep_rank 必須介於 limit 至 200",
-        );
-    }
-    let fee_discount = params.fee_discount.unwrap_or(1.0);
-    if !(0.0..=1.0).contains(&fee_discount) {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "fee_discount 必須介於 0 至 1",
-        );
-    }
-    let market = params.market.as_deref().unwrap_or("all");
-    let Some(market_id) = market_id_for_stocks(market) else {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "market 必須為 all、twse 或 tpex",
-        );
-    };
-    if let Some(response) = signal_filter_error(params.kind.as_deref(), params.indicator.as_deref())
-    {
-        return response;
-    }
-    if let Err(message) = validate_rs_range(params.min_rs_score, params.max_rs_score) {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
-    }
-    if let Err(message) = validate_streaks(params.min_foreign_streak, params.min_trust_streak) {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
-    }
-    if let Some(response) = industry_error(params.industry.as_deref()).await {
-        return response;
-    }
-
-    let pool = database::get_connection();
-    let latest: Option<NaiveDate> = match sqlx::query_scalar(LATEST_RS_DATE_SQL)
-        .bind(to)
-        .fetch_one(pool)
-        .await
-    {
-        Ok(value) => value,
+    let Simulation {
+        rows,
+        costs,
+        current,
+        elapsed_days,
+    } = match backtest.simulate(rebalance_offset).await {
+        Ok(simulation) => simulation,
         Err(error) => return database_error(error),
     };
-    let Some(to) = latest else {
-        return error_response(StatusCode::NOT_FOUND, "查無相對強度資料");
-    };
-    let from = match resolve_backtest_period(from, to) {
-        Ok(from) => from,
-        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
-    };
-
-    let with_chip = params.min_foreign_streak.is_some() || params.min_trust_streak.is_some();
-    let mut query = sqlx::query_as(if with_chip {
-        BACKTEST_WITH_CHIP_SQL
-    } else {
-        BACKTEST_SQL
-    })
-    .bind(from)
-    .bind(to)
-    .bind(market_id)
-    .bind(i32::from(hold_days))
-    .bind(i64::from(if params.max_per_industry.is_some() {
-        MAX_KEEP_RANK
-    } else {
-        keep_rank
-    }))
-    .bind(params.industry.as_deref())
-    .bind(params.min_rs_score.map(i16::from))
-    .bind(params.max_rs_score.map(i16::from))
-    .bind(params.indicator.as_deref())
-    .bind(params.kind.as_deref())
-    .bind(params.market_filter_ma.map(i32::from))
-    .bind(params.hold_min_rs_score.map(i16::from))
-    .bind(params.market_filter_breadth.map(i32::from))
-    .bind(i32::from(rebalance_offset))
-    .bind(
-        params
-            .min_avg_trade_value
-            .map(|value| i64::from(value) * 1_000_000),
-    );
-    if with_chip {
-        query = query
-            .bind(params.min_foreign_streak.map(i64::from))
-            .bind(params.min_trust_streak.map(i64::from));
-    }
-    let candidates: Vec<CandidateRow> = match query.fetch_all(pool).await {
-        Ok(rows) => rows,
-        Err(error) => return database_error(error),
-    };
-    let elapsed_days = candidates
-        .last()
-        .filter(|row| row.pending)
-        .map(|row| row.elapsed_days);
-    let mut rows = select_holdings(
-        candidates,
-        usize::from(limit),
-        usize::from(keep_rank),
-        params.max_per_industry.map(usize::from),
-    );
-    let mut costs = trading_costs(&rows, fee_discount);
-    let current = split_current(&mut rows, &mut costs);
     let (held_symbols, best, worst) = contributors(&rows, LISTED_CONTRIBUTORS);
     let symbols: Vec<&str> = best
         .iter()
@@ -300,7 +150,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         .collect();
     let names: Vec<(String, String)> = match sqlx::query_as(STOCK_NAMES_SQL)
         .bind(&symbols)
-        .fetch_all(pool)
+        .fetch_all(database::get_connection())
         .await
     {
         Ok(rows) => rows,
@@ -334,12 +184,12 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     });
 
     Json(ScreenBacktestResponse {
-        from: from.to_string(),
-        to: to.to_string(),
-        market: market.to_owned(),
+        from: backtest.from.to_string(),
+        to: backtest.to.to_string(),
+        market: backtest.market.to_owned(),
         hold_days,
-        limit,
-        keep_rank,
+        limit: backtest.limit,
+        keep_rank: backtest.keep_rank,
         market_filter_ma: params.market_filter_ma,
         market_filter_breadth: params.market_filter_breadth,
         hold_min_rs_score: params.hold_min_rs_score,
@@ -353,7 +203,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         min_trust_streak: params.min_trust_streak,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
-        fee_discount,
+        fee_discount: backtest.fee_discount,
         adjusted: true,
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         summary: summarize(&rows, &costs, hold_days),
@@ -367,6 +217,197 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         periods: rows.into_iter().zip(costs).map(period).collect(),
     })
     .into_response()
+}
+
+/// 驗證過的回測條件（換股日偏移除外，由呼叫端決定）；`/stocks/screen/backtest` 與
+/// `/stocks/screen/backtest/offsets` 共用。
+struct Backtest<'a> {
+    params: &'a ScreenBacktestParams,
+    from: NaiveDate,
+    /// 迄日（含）之前最近一個有相對強度的交易日。
+    to: NaiveDate,
+    market: &'a str,
+    market_id: i32,
+    hold_days: u16,
+    limit: u8,
+    keep_rank: u8,
+    fee_discount: f64,
+}
+
+/// 一次回測的各期結果與目前持股。
+struct Simulation {
+    /// 已滿持有天數的各期持股與報酬。
+    rows: Vec<PeriodRow>,
+    /// 與 `rows` 一一對應的換手與扣成本後報酬。
+    costs: Vec<PeriodCost>,
+    /// 最後一次換股、還沒滿持有天數的持股（見 [`split_current`]）。
+    current: Option<(PeriodRow, PeriodCost)>,
+    /// `current` 換股日之後到迄日經過的交易日數。
+    elapsed_days: Option<i64>,
+}
+
+impl<'a> Backtest<'a> {
+    /// 驗證參數、確認產業存在，並決定實際的起訖日；失敗時回錯誤回應（422／404／500）。
+    async fn prepare(params: &'a ScreenBacktestParams) -> Result<Self, Box<Response>> {
+        let unprocessable =
+            |message: &str| Box::new(error_response(StatusCode::UNPROCESSABLE_ENTITY, message));
+        let (from, to) = match (
+            parse_optional_date(params.from.as_deref()),
+            parse_optional_date(params.to.as_deref()),
+        ) {
+            (Ok(from), Ok(to)) => (from, to),
+            (Err(message), _) | (_, Err(message)) => return Err(unprocessable(message)),
+        };
+        let hold_days = params.hold_days.unwrap_or(20);
+        if !HOLD_DAYS.contains(&hold_days) {
+            return Err(unprocessable("hold_days 必須為 5、20、60、120 或 240"));
+        }
+        let limit = params.limit.unwrap_or(20);
+        if !(1..=100).contains(&limit) {
+            return Err(unprocessable("limit 必須介於 1 至 100"));
+        }
+        if params
+            .market_filter_ma
+            .is_some_and(|days| !MARKET_FILTER_DAYS.contains(&days))
+        {
+            return Err(unprocessable("market_filter_ma 必須為 20、60、120 或 240"));
+        }
+        if params
+            .market_filter_breadth
+            .is_some_and(|percent| !(1..=99).contains(&percent))
+        {
+            return Err(unprocessable("market_filter_breadth 必須介於 1 至 99"));
+        }
+        if params
+            .hold_min_rs_score
+            .is_some_and(|score| !(1..=99).contains(&score))
+        {
+            return Err(unprocessable("hold_min_rs_score 必須介於 1 至 99"));
+        }
+        if params
+            .max_per_industry
+            .is_some_and(|count| !(1..=100).contains(&count))
+        {
+            return Err(unprocessable("max_per_industry 必須介於 1 至 100"));
+        }
+        if params
+            .min_avg_trade_value
+            .is_some_and(|value| !(1..=MAX_TRADE_VALUE_MILLION).contains(&value))
+        {
+            return Err(unprocessable(
+                "min_avg_trade_value 必須介於 1 至 100000（百萬元）",
+            ));
+        }
+        let keep_rank = params.keep_rank.unwrap_or(limit);
+        if !(limit..=MAX_KEEP_RANK).contains(&keep_rank) {
+            return Err(unprocessable("keep_rank 必須介於 limit 至 200"));
+        }
+        let fee_discount = params.fee_discount.unwrap_or(1.0);
+        if !(0.0..=1.0).contains(&fee_discount) {
+            return Err(unprocessable("fee_discount 必須介於 0 至 1"));
+        }
+        let market = params.market.as_deref().unwrap_or("all");
+        let Some(market_id) = market_id_for_stocks(market) else {
+            return Err(unprocessable("market 必須為 all、twse 或 tpex"));
+        };
+        if let Some(response) =
+            signal_filter_error(params.kind.as_deref(), params.indicator.as_deref())
+        {
+            return Err(Box::new(response));
+        }
+        if let Err(message) = validate_rs_range(params.min_rs_score, params.max_rs_score) {
+            return Err(unprocessable(message));
+        }
+        if let Err(message) = validate_streaks(params.min_foreign_streak, params.min_trust_streak) {
+            return Err(unprocessable(message));
+        }
+        if let Some(response) = industry_error(params.industry.as_deref()).await {
+            return Err(Box::new(response));
+        }
+
+        let latest: Option<NaiveDate> = sqlx::query_scalar(LATEST_RS_DATE_SQL)
+            .bind(to)
+            .fetch_one(database::get_connection())
+            .await
+            .map_err(|error| Box::new(database_error(error)))?;
+        let Some(to) = latest else {
+            return Err(Box::new(error_response(
+                StatusCode::NOT_FOUND,
+                "查無相對強度資料",
+            )));
+        };
+        let from = resolve_backtest_period(from, to).map_err(unprocessable)?;
+        Ok(Self {
+            params,
+            from,
+            to,
+            market,
+            market_id,
+            hold_days,
+            limit,
+            keep_rank,
+            fee_discount,
+        })
+    }
+
+    /// 以換股日偏移 `rebalance_offset` 跑一次回測：查候選股、決定每期持股、扣交易成本，並把還沒滿
+    /// 持有天數的最後一期移到 [`Simulation::current`]。
+    async fn simulate(&self, rebalance_offset: u16) -> Result<Simulation, sqlx::Error> {
+        let params = self.params;
+        let with_chip = params.min_foreign_streak.is_some() || params.min_trust_streak.is_some();
+        let mut query = sqlx::query_as(if with_chip {
+            BACKTEST_WITH_CHIP_SQL
+        } else {
+            BACKTEST_SQL
+        })
+        .bind(self.from)
+        .bind(self.to)
+        .bind(self.market_id)
+        .bind(i32::from(self.hold_days))
+        .bind(i64::from(if params.max_per_industry.is_some() {
+            MAX_KEEP_RANK
+        } else {
+            self.keep_rank
+        }))
+        .bind(params.industry.as_deref())
+        .bind(params.min_rs_score.map(i16::from))
+        .bind(params.max_rs_score.map(i16::from))
+        .bind(params.indicator.as_deref())
+        .bind(params.kind.as_deref())
+        .bind(params.market_filter_ma.map(i32::from))
+        .bind(params.hold_min_rs_score.map(i16::from))
+        .bind(params.market_filter_breadth.map(i32::from))
+        .bind(i32::from(rebalance_offset))
+        .bind(
+            params
+                .min_avg_trade_value
+                .map(|value| i64::from(value) * 1_000_000),
+        );
+        if with_chip {
+            query = query
+                .bind(params.min_foreign_streak.map(i64::from))
+                .bind(params.min_trust_streak.map(i64::from));
+        }
+        let candidates: Vec<CandidateRow> = query.fetch_all(database::get_connection()).await?;
+        let elapsed_days = candidates
+            .last()
+            .filter(|row| row.pending)
+            .map(|row| row.elapsed_days);
+        let mut rows = select_holdings(
+            candidates,
+            usize::from(self.limit),
+            usize::from(self.keep_rank),
+            params.max_per_industry.map(usize::from),
+        );
+        let mut costs = trading_costs(&rows, self.fee_discount);
+        let current = split_current(&mut rows, &mut costs);
+        Ok(Simulation {
+            rows,
+            costs,
+            current,
+            elapsed_days,
+        })
+    }
 }
 
 /// 最後一期還沒滿持有天數時把它從各期結果移出，回傳該期持股與換手；其餘期數不受影響。

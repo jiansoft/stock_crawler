@@ -84,7 +84,10 @@ pub(super) use relative_strength::{__path_relative_strength, relative_strength};
 pub(super) use relative_strength_history::{
     __path_relative_strength_history, relative_strength_history,
 };
-pub(super) use screen_backtest::{__path_screen_backtest, screen_backtest};
+pub(super) use screen_backtest::{
+    __path_screen_backtest, __path_screen_backtest_offsets, screen_backtest,
+    screen_backtest_offsets,
+};
 pub(super) use screening::{__path_screen_stocks, screen_stocks};
 pub(super) use signal_history::{
     __path_signal_performance, __path_stock_signals, signal_performance, stock_signals,

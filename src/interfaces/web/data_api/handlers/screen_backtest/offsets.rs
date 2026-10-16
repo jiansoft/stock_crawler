@@ -1,0 +1,145 @@
+//! `/stocks/screen/backtest/offsets` handler：同一組條件換不同的換股日偏移重跑，看績效分布。
+//!
+//! 每隔 `hold_days` 個交易日換股的回測，結果會受「剛好在哪幾天換股」影響：同樣的條件，起日之後
+//! 晚幾天開始換股，年化報酬可能差上一倍。這裡把偏移 0 到 `hold_days` − 1 都跑一遍（超過
+//! [`MAX_OFFSET_SAMPLES`] 個時平均抽樣），回傳每個偏移的彙總與年化報酬、夏普值、最大回撤的分布，
+//! 以及勝過 0050 的偏移比例；分布的中位數比任何單一偏移更能代表這組條件。
+
+use axum::{
+    Json,
+    extract::Query,
+    response::{IntoResponse, Response},
+};
+use futures::{StreamExt, TryStreamExt, stream};
+
+use super::summary::summarize;
+use super::{Backtest, ETF_BENCHMARK, Simulation};
+use crate::interfaces::web::data_api::dto::{
+    BacktestOffsetDistribution, BacktestOffsetResult, BacktestStat, BacktestSummary, ErrorBody,
+    ScreenBacktestOffsetsResponse, ScreenBacktestParams,
+};
+use crate::interfaces::web::data_api::handlers::{database_error, round2, round4};
+
+/// 最多跑幾個偏移；`hold_days` 超過時在 0～`hold_days` − 1 之間平均抽樣。
+const MAX_OFFSET_SAMPLES: u16 = 20;
+
+/// 同時執行的回測查詢數，避免一次占滿連線池。
+const CONCURRENCY: usize = 4;
+
+/// 同一組條件換不同的換股日偏移重跑，回傳每個偏移的績效彙總與分布。
+///
+/// 參數與 `/stocks/screen/backtest` 相同，`rebalance_offset` 不使用：`hold_days` 不超過 20 時跑全部
+/// 偏移，否則在 0～`hold_days` − 1 之間平均取 20 個。
+///
+/// # Errors
+///
+/// 參數驗證與 `/stocks/screen/backtest` 相同（422）；迄日之前沒有相對強度資料回 404；驗證失敗回 401；
+/// 資料庫查詢失敗回不含 SQL 細節的 500。
+#[utoipa::path(get, path = "/api/v1/stocks/screen/backtest/offsets", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestOffsetsResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
+pub(crate) async fn screen_backtest_offsets(
+    Query(params): Query<ScreenBacktestParams>,
+) -> Response {
+    let backtest = match Backtest::prepare(&params).await {
+        Ok(backtest) => backtest,
+        Err(response) => return *response,
+    };
+    let backtest = &backtest;
+    let hold_days = backtest.hold_days;
+    let results: Vec<BacktestOffsetResult> = match stream::iter(sample_offsets(hold_days))
+        .map(|offset| async move {
+            backtest
+                .simulate(offset)
+                .await
+                .map(|Simulation { rows, costs, .. }| BacktestOffsetResult {
+                    rebalance_offset: offset,
+                    summary: summarize(&rows, &costs, hold_days),
+                })
+        })
+        .buffered(CONCURRENCY)
+        .try_collect()
+        .await
+    {
+        Ok(results) => results,
+        Err(error) => return database_error(error),
+    };
+
+    Json(ScreenBacktestOffsetsResponse {
+        from: backtest.from.to_string(),
+        to: backtest.to.to_string(),
+        market: backtest.market.to_owned(),
+        hold_days,
+        limit: backtest.limit,
+        fee_discount: backtest.fee_discount,
+        etf_benchmark: ETF_BENCHMARK.to_owned(),
+        distribution: distribution(&results),
+        offsets: results,
+    })
+    .into_response()
+}
+
+/// 要跑的換股日偏移：`hold_days` 不超過 [`MAX_OFFSET_SAMPLES`] 時為全部，否則平均抽樣（含 0）。
+pub(super) fn sample_offsets(hold_days: u16) -> Vec<u16> {
+    if hold_days <= MAX_OFFSET_SAMPLES {
+        return (0..hold_days).collect();
+    }
+    (0..MAX_OFFSET_SAMPLES)
+        .map(|k| (u32::from(k) * u32::from(hold_days) / u32::from(MAX_OFFSET_SAMPLES)) as u16)
+        .collect()
+}
+
+/// 各偏移扣成本後年化報酬、夏普值、最大回撤（與 0050 同期）的分布，以及勝過 0050 的偏移比例。
+pub(super) fn distribution(results: &[BacktestOffsetResult]) -> BacktestOffsetDistribution {
+    let field = |pick: fn(&BacktestSummary) -> Option<f64>| {
+        stat(results.iter().filter_map(|result| pick(&result.summary)))
+    };
+    let beat = |pick: fn(&BacktestSummary) -> (Option<f64>, Option<f64>)| {
+        let pairs: Vec<(f64, f64)> = results
+            .iter()
+            .filter_map(|result| match pick(&result.summary) {
+                (Some(strategy), Some(etf)) => Some((strategy, etf)),
+                _ => None,
+            })
+            .collect();
+        (!pairs.is_empty()).then(|| {
+            round4(
+                pairs
+                    .iter()
+                    .filter(|(strategy, etf)| strategy > etf)
+                    .count() as f64
+                    / pairs.len() as f64,
+            )
+        })
+    };
+    BacktestOffsetDistribution {
+        annualized_return_after_costs: field(|s| s.annualized_return_after_costs),
+        sharpe_ratio: field(|s| s.sharpe_ratio),
+        max_drawdown_after_costs: field(|s| s.max_drawdown_after_costs),
+        etf_annualized_return: field(|s| s.etf_annualized_return),
+        etf_sharpe_ratio: field(|s| s.etf_sharpe_ratio),
+        beat_etf_return_rate: beat(|s| (s.annualized_return_after_costs, s.etf_annualized_return)),
+        beat_etf_sharpe_rate: beat(|s| (s.sharpe_ratio, s.etf_sharpe_ratio)),
+    }
+}
+
+/// 一組數值的最小、四分位、中位數、平均與最大值（四分位以線性內插）；沒有數值回 `None`。
+pub(super) fn stat(values: impl Iterator<Item = f64>) -> Option<BacktestStat> {
+    let mut values: Vec<f64> = values.collect();
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(f64::total_cmp);
+    let quantile = |q: f64| {
+        let position = q * (values.len() - 1) as f64;
+        let lower = position.floor() as usize;
+        let upper = position.ceil() as usize;
+        values[lower] + (values[upper] - values[lower]) * (position - lower as f64)
+    };
+    Some(BacktestStat {
+        min: round2(values[0]),
+        p25: round2(quantile(0.25)),
+        median: round2(quantile(0.5)),
+        mean: round2(values.iter().sum::<f64>() / values.len() as f64),
+        p75: round2(quantile(0.75)),
+        max: round2(values[values.len() - 1]),
+    })
+}
