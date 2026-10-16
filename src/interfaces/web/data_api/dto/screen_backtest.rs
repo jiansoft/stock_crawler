@@ -42,6 +42,10 @@ pub(crate) struct ScreenBacktestParams {
     /// 改由其他產業依相對強度補滿，用來降低產業集中；省略為不限。
     #[param(minimum = 1, maximum = 100)]
     pub(crate) max_per_industry: Option<u8>,
+    /// 換股日偏移（0 到 `hold_days` − 1，預設 0）：起日之後先跳過幾個交易日才第一次換股。
+    /// 同一組條件換不同偏移重跑，可看結果是否只是剛好碰上某幾個換股日。
+    #[param(minimum = 0, maximum = 239)]
+    pub(crate) rebalance_offset: Option<u16>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -254,6 +258,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) hold_min_rs_score: Option<u8>,
     /// 同產業最多持有檔數；未設定為 `null`。
     pub(crate) max_per_industry: Option<u8>,
+    /// 換股日偏移（交易日）。
+    pub(crate) rebalance_offset: u16,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。

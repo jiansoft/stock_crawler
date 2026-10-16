@@ -343,7 +343,8 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("COALESCE($11::int, 1)"));
     assert!(BACKTEST_SQL.contains("rs_score >= $12"));
     assert!(BACKTEST_SQL.contains("$13::int IS NULL OR br.above"));
-    assert!(!BACKTEST_SQL.contains("$14"));
+    assert!(BACKTEST_SQL.contains("WHERE i >= $14::int AND (i - $14::int) % $4::int = 0"));
+    assert!(!BACKTEST_SQL.contains("$15"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -352,8 +353,8 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $14"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $15"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $15"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $16"));
 }
 
 /// 一期候選：代號依相對強度由高到低，報酬一一對應。
