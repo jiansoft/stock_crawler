@@ -752,6 +752,9 @@ fn distribution_counts_offsets_beating_etf() {
         summary.max_drawdown_after_costs = annualized.map(|value| -value);
         summary.etf_annualized_return = Some(20.0);
         summary.etf_sharpe_ratio = Some(1.0);
+        summary.etf_max_drawdown = Some(-20.0);
+        summary.volatility = sharpe.map(|value| value * 10.0);
+        summary.etf_volatility = Some(15.0);
         BacktestOffsetResult {
             rebalance_offset: offset,
             summary,
@@ -777,13 +780,21 @@ fn distribution_counts_offsets_beating_etf() {
         spread.etf_annualized_return.map(|stat| stat.median),
         Some(20.0)
     );
-    // 年化 30、25 勝過 20（2/3）；夏普只有 1.5 勝過 1.0（1/3）。
+    // 年化 30、25 勝過 20（2/3）；夏普只有 1.5 勝過 1.0（1/3）；回撤只有 -10 比 -20 淺（1/3）。
     assert_eq!(spread.beat_etf_return_rate, Some(0.6667));
     assert_eq!(spread.beat_etf_sharpe_rate, Some(0.3333));
+    assert_eq!(spread.beat_etf_drawdown_rate, Some(0.3333));
+    assert_eq!(
+        spread.volatility.map(|stat| (stat.min, stat.max)),
+        Some((5.0, 15.0))
+    );
+    assert_eq!(spread.etf_volatility.map(|stat| stat.median), Some(15.0));
+    assert_eq!(spread.etf_max_drawdown.map(|stat| stat.median), Some(-20.0));
 
     let empty = distribution(&[]);
     assert!(empty.annualized_return_after_costs.is_none());
     assert!(empty.beat_etf_return_rate.is_none());
+    assert!(empty.beat_etf_drawdown_rate.is_none());
 }
 
 /// 依年度合併各偏移：每年各自算分布，勝過 0050 的比例只看該年 0050 有資料的偏移；年度由舊到新。
