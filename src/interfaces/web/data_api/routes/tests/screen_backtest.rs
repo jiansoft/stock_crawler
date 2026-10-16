@@ -188,20 +188,25 @@ fn periods(json: &serde_json::Value) -> Vec<(String, i64, Option<f64>)> {
         .collect()
 }
 
-/// 換股日、相對強度排序取前 N 檔、沒有報酬的股票不列入平均、大盤基準、交易成本、各種條件、空手與
-/// 參數驗證。
+/// 取得資料庫連線並重新種入測試資料；沒有資料庫時回 `None`（測試略過）。
+async fn seeded(test: &str) -> Option<&'static sqlx::PgPool> {
+    let pool = pool_or_skip(test).await?;
+    cleanup(pool).await;
+    seed(pool).await;
+    Some(pool)
+}
+
+/// 換股日、相對強度排序取前 N 檔、沒有報酬的股票不列入平均、大盤基準、0050、年度彙總、交易成本、換股緩衝、
+/// 續抱條件、產業上限、個股貢獻、目前持股與換股日偏移。
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
     ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
 )]
-async fn screen_backtest_endpoint_db_semantics() {
-    let Some(pool) = pool_or_skip("screen_backtest_endpoint_db_semantics").await else {
+async fn screen_backtest_periods_costs_and_current() {
+    let Some(pool) = seeded("screen_backtest_periods_costs_and_current").await else {
         return;
     };
-    cleanup(pool).await;
-    seed(pool).await;
-
     // 每期取相對強度前 2 檔：03-01 BA、BC（10、2），03-08 BB、BC（BC 沒有報酬，只算 BB 的 8）。
     // 03-15 還沒有報酬，不列入。
     let (status, json) = query("limit=2").await;
@@ -380,6 +385,19 @@ async fn screen_backtest_endpoint_db_semantics() {
     let (status, _) = query("rebalance_offset=5").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
+    cleanup(pool).await;
+}
+
+/// 流動性門檻、排序方式、0050 核心部位、持股加權與單檔權重上限。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn screen_backtest_ranking_and_weighting() {
+    let Some(pool) = seeded("screen_backtest_ranking_and_weighting").await else {
+        return;
+    };
     // 流動性門檻 50 百萬元：BA（20 日平均 3,000 萬）與沒有日線的 BB 不買，只剩 BC；
     // 03-08 的 BC 沒有報酬。目前持股 03-15 也只有 BC。
     let (status, json) = query("limit=2&min_avg_trade_value=50").await;
@@ -524,6 +542,19 @@ async fn screen_backtest_endpoint_db_semantics() {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{value}");
     }
 
+    cleanup(pool).await;
+}
+
+/// 大盤與市場廣度濾網、市場與產業篩選、排除產業、相對強度與訊號、籌碼條件，以及參數驗證。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn screen_backtest_filters_and_validation() {
+    let Some(pool) = seeded("screen_backtest_filters_and_validation").await else {
+        return;
+    };
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -696,6 +727,19 @@ async fn screen_backtest_endpoint_db_semantics() {
         assert_eq!(actual, status, "{path}: {json}");
     }
 
+    cleanup(pool).await;
+}
+
+/// 換股日偏移穩健度、依年度分布、0050 核心部位前緣與樣本內外分割。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn screen_backtest_offsets_and_frontier() {
+    let Some(pool) = seeded("screen_backtest_offsets_and_frontier").await else {
+        return;
+    };
     // 換股日偏移穩健度：持有 5 日跑偏移 0～4。只有偏移 0 的 03-01、03-08 有報酬，彙總與單跑
     // 偏移 0 相同；其他偏移沒有已滿的期數，不列入分布。
     let (status, json) = get(
@@ -833,13 +877,20 @@ async fn screen_backtest_endpoint_db_semantics() {
         assert_eq!(actual, status, "{path}: {json}");
     }
 
-    strategy_gateway_reports_latest_rebalance().await;
     cleanup(pool).await;
 }
 
 /// 策略換股通知的 adapter：與回測端點相同的條件與目前持股，拆成新買進、續抱與賣出；條件錯誤、
 /// 缺 `from`、最後一期已滿或籌碼還沒入庫時回錯誤或 `None`。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
 async fn strategy_gateway_reports_latest_rebalance() {
+    let Some(pool) = seeded("strategy_gateway_reports_latest_rebalance").await else {
+        return;
+    };
     use crate::app::ports::{StrategyGateway, StrategyHolding};
     use crate::interfaces::web::data_api::BacktestStrategyGateway;
 
@@ -893,4 +944,6 @@ async fn strategy_gateway_reports_latest_rebalance() {
             .to_string();
         assert!(error.contains(expected), "{query}: {error}");
     }
+
+    cleanup(pool).await;
 }
