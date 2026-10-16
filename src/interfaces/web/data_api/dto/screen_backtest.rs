@@ -280,6 +280,8 @@ pub(crate) struct BacktestHolding {
     pub(crate) weight: f64,
     /// 這次換股新買進（上一期沒有持有）。
     pub(crate) added: bool,
+    /// 換股日收盤到迄日的還原報酬（%）；查不到日線為 `null`。
+    pub(crate) return_to_date: Option<f64>,
 }
 
 /// 這次換股賣出的一檔（上一期持有、這一期沒有）。
@@ -312,6 +314,11 @@ pub(crate) struct BacktestCurrent {
     pub(crate) holdings: Vec<BacktestHolding>,
     /// 這次換股賣出的股票（上一期持有、這一期沒有）；沒有上一期為空陣列。
     pub(crate) exited: Vec<BacktestExit>,
+    /// 策略部位換股日收盤到迄日的還原報酬（%）：持股依權重的加權平均乘上持股比例，未扣交易成本、
+    /// 不含 0050 核心部位；持股都查不到日線或空手時為 `null`。
+    pub(crate) return_to_date: Option<f64>,
+    /// 0050 同期（換股日收盤到迄日）的還原報酬（%）；查不到為 `null`。
+    pub(crate) etf_return_to_date: Option<f64>,
 }
 
 /// 條件選股回測結果。

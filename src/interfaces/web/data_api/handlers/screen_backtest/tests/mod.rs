@@ -207,3 +207,58 @@ fn parse_excluded_industries_splits_and_limits() {
         Ok(10)
     );
 }
+
+/// 換股日至今的報酬：以換股日（或之前最近一根）還原收盤為基準；除權息後的價格向後還原。
+#[test]
+fn return_since_uses_adjusted_close_from_rebalance_day() {
+    use super::current::return_since;
+    use crate::domain::quote::technical::{PriceAdjustment, PriceBar};
+    let bar = |d: u32, close: f64| PriceBar {
+        date: day(2024, 1, d),
+        close,
+        high: close,
+        low: close,
+    };
+    let bars = [bar(2, 100.0), bar(3, 110.0), bar(5, 99.0)];
+    // 換股日 01-03：110 → 99，跌 10%。
+    let ret = return_since(&bars, &[], day(2024, 1, 3)).expect("有日線");
+    assert!(near(ret, -10.0), "{ret}");
+    // 換股日 01-04 沒有成交：往前取 01-03。
+    assert_eq!(return_since(&bars, &[], day(2024, 1, 4)), Some(ret));
+    // 01-05 除息 11 元：01-03 的 110 還原成 99，報酬 0。
+    let dividend = PriceAdjustment {
+        date: day(2024, 1, 5),
+        cash_dividend: 11.0,
+        stock_dividend: 0.0,
+        share_ratio: 1.0,
+    };
+    let adjusted = return_since(&bars, &[dividend], day(2024, 1, 3)).expect("有日線");
+    assert!(near(adjusted, 0.0), "{adjusted}");
+    // 換股日早於全部日線、沒有日線、價格為 0 時都沒有報酬。
+    assert_eq!(return_since(&bars, &[], day(2024, 1, 1)), None);
+    assert_eq!(return_since(&[], &[], day(2024, 1, 3)), None);
+    assert_eq!(
+        return_since(&[bar(2, 0.0), bar(3, 5.0)], &[], day(2024, 1, 2)),
+        None
+    );
+}
+
+/// 持股依權重的報酬：只算有報酬的持股，乘上持股比例；都沒有報酬為 `None`。
+#[test]
+fn weighted_return_uses_shares_and_cash() {
+    use super::current::weighted_return;
+    let mut row = holding(&["A", "B", "C"], 0.0);
+    row.weights = vec![2.0, 1.0, 1.0];
+    let returns: std::collections::HashMap<String, f64> =
+        [("A".to_owned(), 10.0), ("B".to_owned(), -2.0)].into();
+    // (10×0.5 − 2×0.25) ÷ 0.75 = 6；C 沒有報酬不列入。
+    let ret = weighted_return(&row, &returns).expect("有報酬");
+    assert!(near(ret, 6.0), "{ret}");
+    row.cash = 0.5;
+    let ret = weighted_return(&row, &returns).expect("有報酬");
+    assert!(near(ret, 3.0), "{ret}");
+    assert_eq!(
+        weighted_return(&row, &std::collections::HashMap::new()),
+        None
+    );
+}

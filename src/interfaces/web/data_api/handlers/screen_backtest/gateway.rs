@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use axum::{extract::Query, http::Uri, response::Response};
 use chrono::NaiveDate;
 
-use super::{Backtest, Simulation, current_holdings, exited, stock_names};
+use super::{Backtest, Simulation, current_holdings, exited, returns_to_date, stock_names};
 use crate::app::ports::{StrategyGateway, StrategyHolding, StrategyRebalance};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::ScreenBacktestParams;
@@ -67,12 +67,14 @@ impl StrategyGateway for BacktestStrategyGateway {
             .collect();
         let names = stock_names(&symbols).await.context("讀取股票名稱失敗")?;
         let date = row.date;
+        let returns = returns_to_date(&row, backtest.to, elapsed_days.unwrap_or(0)).await;
         let current = current_holdings(
             (row, cost),
             previous,
             elapsed_days.unwrap_or(0),
             backtest.hold_days,
             &names,
+            &returns,
         );
         let (added, kept): (Vec<_>, Vec<_>) = current
             .holdings
