@@ -641,6 +641,25 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(spread["annualized_return_after_costs"]["min"], *annualized);
     assert_eq!(spread["annualized_return_after_costs"]["max"], *annualized);
     assert_eq!(spread["beat_etf_return_rate"], 1.0);
+    // 依年度：只有偏移 0 有期數，1993 年的分布就是單次回測的年度彙總。
+    assert_eq!(
+        (json["rank_by"].as_str(), json["etf_weight"].as_u64()),
+        (Some("rs_score"), Some(0))
+    );
+    let years = json["years"].as_array().expect("years array");
+    assert_eq!(years.len(), 1, "{years:?}");
+    assert_eq!(
+        (years[0]["year"].as_i64(), years[0]["offsets"].as_i64()),
+        (Some(1993), Some(1))
+    );
+    assert_eq!(
+        years[0]["return_after_costs"]["median"],
+        single["years"][0]["total_return_after_costs"]
+    );
+    assert_eq!(
+        years[0]["etf_return"]["median"],
+        single["years"][0]["etf_total_return"]
+    );
     // 參數驗證與單次回測相同；rebalance_offset 不使用。
     for (path, status) in [
         ("hold_days=5&rebalance_offset=9", StatusCode::OK),

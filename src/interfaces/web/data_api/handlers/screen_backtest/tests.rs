@@ -785,3 +785,45 @@ fn distribution_counts_offsets_beating_etf() {
     assert!(empty.annualized_return_after_costs.is_none());
     assert!(empty.beat_etf_return_rate.is_none());
 }
+
+/// 依年度合併各偏移：每年各自算分布，勝過 0050 的比例只看該年 0050 有資料的偏移；年度由舊到新。
+#[test]
+fn offset_years_merge_by_year() {
+    use super::offsets::offset_years;
+    use crate::interfaces::web::data_api::dto::BacktestYear;
+    let year = |year: i32, net: f64, etf: Option<f64>| BacktestYear {
+        year,
+        periods: 1,
+        total_return: net,
+        total_return_after_costs: net,
+        benchmark_total_return: 0.0,
+        etf_total_return: etf,
+        win_rate: 0.0,
+        beat_market_rate: 0.0,
+    };
+    let years = offset_years(&[
+        vec![year(2021, -3.0, Some(2.0)), year(2020, 10.0, Some(5.0))],
+        vec![year(2020, 4.0, Some(6.0)), year(2021, 1.0, None)],
+        Vec::new(),
+    ]);
+    assert_eq!(
+        years.iter().map(|item| item.year).collect::<Vec<_>>(),
+        [2020, 2021]
+    );
+    assert_eq!(years[0].offsets, 2);
+    let net = years[0].return_after_costs.as_ref().expect("有報酬");
+    assert_eq!((net.min, net.median, net.max), (4.0, 7.0, 10.0));
+    let etf = years[0].etf_return.as_ref().expect("有 0050");
+    assert_eq!(etf.median, 5.5);
+    assert_eq!(years[0].beat_etf_rate, Some(0.5));
+    assert_eq!(years[1].offsets, 2);
+    assert_eq!(
+        years[1].etf_return.as_ref().map(|stat| stat.median),
+        Some(2.0)
+    );
+    assert_eq!(years[1].beat_etf_rate, Some(0.0));
+    let only_missing = offset_years(&[vec![year(2022, 1.0, None)]]);
+    assert!(only_missing[0].etf_return.is_none());
+    assert!(only_missing[0].beat_etf_rate.is_none());
+    assert!(offset_years(&[]).is_empty());
+}

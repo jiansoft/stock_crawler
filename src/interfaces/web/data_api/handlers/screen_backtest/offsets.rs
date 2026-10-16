@@ -3,7 +3,10 @@
 //! 每隔 `hold_days` 個交易日換股的回測，結果會受「剛好在哪幾天換股」影響：同樣的條件，起日之後
 //! 晚幾天開始換股，年化報酬可能差上一倍。這裡把偏移 0 到 `hold_days` − 1 都跑一遍（超過
 //! [`MAX_OFFSET_SAMPLES`] 個時平均抽樣），回傳每個偏移的彙總與年化報酬、夏普值、最大回撤的分布，
-//! 以及勝過 0050 的偏移比例；分布的中位數比任何單一偏移更能代表這組條件。
+//! 以及勝過 0050 的偏移比例；分布的中位數比任何單一偏移更能代表這組條件。另附依年度的分布，
+//! 看策略在哪些年份穩定勝過 0050。
+
+use std::collections::BTreeMap;
 
 use axum::{
     Json,
@@ -12,11 +15,11 @@ use axum::{
 };
 use futures::{StreamExt, TryStreamExt, stream};
 
-use super::summary::summarize;
+use super::summary::{summarize, yearly};
 use super::{Backtest, ETF_BENCHMARK, Simulation};
 use crate::interfaces::web::data_api::dto::{
-    BacktestOffsetDistribution, BacktestOffsetResult, BacktestStat, BacktestSummary, ErrorBody,
-    ScreenBacktestOffsetsResponse, ScreenBacktestParams,
+    BacktestOffsetDistribution, BacktestOffsetResult, BacktestOffsetYear, BacktestStat,
+    BacktestSummary, BacktestYear, ErrorBody, ScreenBacktestOffsetsResponse, ScreenBacktestParams,
 };
 use crate::interfaces::web::data_api::handlers::{database_error, round2, round4};
 
@@ -45,23 +48,31 @@ pub(crate) async fn screen_backtest_offsets(
     };
     let backtest = &backtest;
     let hold_days = backtest.hold_days;
-    let results: Vec<BacktestOffsetResult> = match stream::iter(sample_offsets(hold_days))
-        .map(|offset| async move {
-            backtest
-                .simulate(offset)
-                .await
-                .map(|Simulation { rows, costs, .. }| BacktestOffsetResult {
-                    rebalance_offset: offset,
-                    summary: summarize(&rows, &costs, hold_days),
-                })
-        })
-        .buffered(CONCURRENCY)
-        .try_collect()
-        .await
-    {
-        Ok(results) => results,
-        Err(error) => return database_error(error),
-    };
+    let simulated: Vec<(BacktestOffsetResult, Vec<BacktestYear>)> =
+        match stream::iter(sample_offsets(hold_days))
+            .map(|offset| async move {
+                backtest
+                    .simulate(offset)
+                    .await
+                    .map(|Simulation { rows, costs, .. }| {
+                        (
+                            BacktestOffsetResult {
+                                rebalance_offset: offset,
+                                summary: summarize(&rows, &costs, hold_days),
+                            },
+                            yearly(&rows, &costs),
+                        )
+                    })
+            })
+            .buffered(CONCURRENCY)
+            .try_collect()
+            .await
+        {
+            Ok(simulated) => simulated,
+            Err(error) => return database_error(error),
+        };
+    let (results, years): (Vec<BacktestOffsetResult>, Vec<Vec<BacktestYear>>) =
+        simulated.into_iter().unzip();
 
     Json(ScreenBacktestOffsetsResponse {
         from: backtest.from.to_string(),
@@ -69,9 +80,12 @@ pub(crate) async fn screen_backtest_offsets(
         market: backtest.market.to_owned(),
         hold_days,
         limit: backtest.limit,
+        rank_by: backtest.rank_by.to_owned(),
+        etf_weight: backtest.etf_weight,
         fee_discount: backtest.fee_discount,
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         distribution: distribution(&results),
+        years: offset_years(&years),
         offsets: results,
     })
     .into_response()
@@ -119,6 +133,30 @@ pub(super) fn distribution(results: &[BacktestOffsetResult]) -> BacktestOffsetDi
         beat_etf_return_rate: beat(|s| (s.annualized_return_after_costs, s.etf_annualized_return)),
         beat_etf_sharpe_rate: beat(|s| (s.sharpe_ratio, s.etf_sharpe_ratio)),
     }
+}
+
+/// 各偏移的依年度彙總（每個偏移一組，見 [`yearly`]）合併成每年的分布，由舊到新。
+pub(super) fn offset_years(per_offset: &[Vec<BacktestYear>]) -> Vec<BacktestOffsetYear> {
+    // 年度 → (扣成本後報酬, 0050 報酬, 勝過 0050 的偏移數)
+    let mut by_year: BTreeMap<i32, (Vec<f64>, Vec<f64>, usize)> = BTreeMap::new();
+    for year in per_offset.iter().flatten() {
+        let entry = by_year.entry(year.year).or_default();
+        entry.0.push(year.total_return_after_costs);
+        if let Some(etf) = year.etf_total_return {
+            entry.1.push(etf);
+            entry.2 += usize::from(year.total_return_after_costs > etf);
+        }
+    }
+    by_year
+        .into_iter()
+        .map(|(year, (strategy, etf, beat))| BacktestOffsetYear {
+            year,
+            offsets: strategy.len() as i64,
+            return_after_costs: stat(strategy.iter().copied()),
+            beat_etf_rate: (!etf.is_empty()).then(|| round4(beat as f64 / etf.len() as f64)),
+            etf_return: stat(etf.into_iter()),
+        })
+        .collect()
 }
 
 /// 一組數值的最小、四分位、中位數、平均與最大值（四分位以線性內插）；沒有數值回 `None`。

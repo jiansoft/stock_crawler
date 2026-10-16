@@ -354,6 +354,18 @@ fn openapi_screen_backtest_offsets_schema_pins_field_names() {
     let response = &schemas["ScreenBacktestOffsetsResponse"]["properties"];
     assert_eq!(response["hold_days"]["type"], "integer");
     assert_eq!(response["offsets"]["type"], "array");
+    assert_eq!(response["years"]["type"], "array");
+    assert_eq!(response["rank_by"]["type"], "string");
+    let year = &schemas["BacktestOffsetYear"]["properties"];
+    for field in [
+        "year",
+        "offsets",
+        "return_after_costs",
+        "etf_return",
+        "beat_etf_rate",
+    ] {
+        assert!(year.get(field).is_some(), "{field}");
+    }
     assert!(
         response["offsets"]
             .to_string()
