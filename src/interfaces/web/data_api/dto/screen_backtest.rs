@@ -46,6 +46,10 @@ pub(crate) struct ScreenBacktestParams {
     /// 同一組條件換不同偏移重跑，可看結果是否只是剛好碰上某幾個換股日。
     #[param(minimum = 0, maximum = 239)]
     pub(crate) rebalance_offset: Option<u16>,
+    /// 流動性門檻（百萬元，1–100000）：換股日含當天往前 20 個交易日的平均成交金額低於此值的股票
+    /// 不新買進（上一期持股的續抱不受限）；例如 50 代表日均成交 5,000 萬元。省略為不限。
+    #[param(minimum = 1, maximum = 100000)]
+    pub(crate) min_avg_trade_value: Option<u32>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -260,6 +264,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_per_industry: Option<u8>,
     /// 換股日偏移（交易日）。
     pub(crate) rebalance_offset: u16,
+    /// 流動性門檻（百萬元，20 日平均成交金額）；未設定為 `null`。
+    pub(crate) min_avg_trade_value: Option<u32>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。
