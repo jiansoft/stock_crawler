@@ -18,6 +18,8 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
         etf_return: None,
         symbols: Vec::new(),
         returns: Vec::new(),
+        trade_values: Vec::new(),
+        weights: Vec::new(),
     }
 }
 
@@ -389,7 +391,7 @@ fn period_rounds_returns() {
 }
 
 /// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`、續抱門檻 `$12`、市場廣度門檻 `$13`、換股日偏移 `$14`
-/// 、流動性門檻 `$15` 與排序方式 `$16`，籌碼版另含連續買超的 CTE 與 `$17`／`$18`；沒有籌碼的版本
+/// 、流動性門檻 `$15`、排序方式 `$16` 與加權方式 `$17`，籌碼版另含連續買超的 CTE 與 `$18`／`$19`；沒有籌碼的版本
 /// 排序用的連續買超欄位恆為 `NULL`。
 #[test]
 fn backtest_sql_variants_are_well_formed() {
@@ -403,7 +405,14 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("$15::int8 IS NOT NULL OR $16::text = 'trade_value'"));
     assert!(BACKTEST_SQL.contains("ORDER BY CASE $16::text"));
     assert!(BACKTEST_SQL.contains("NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"));
-    assert!(!BACKTEST_SQL.contains("$17"));
+    assert!(BACKTEST_SQL.contains("OR $17::text <> 'equal' THEN ("));
+    assert!(
+        BACKTEST_SQL
+            .contains("CASE WHEN $17::text <> 'equal' THEN (\n                   SELECT AVG")
+    );
+    assert!(BACKTEST_SQL.contains("AS candidate_trade_values"));
+    assert!(BACKTEST_SQL.contains("AS hold_trade_values"));
+    assert!(!BACKTEST_SQL.contains("$18"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -412,8 +421,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $17"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $18"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $18"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $19"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$20"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     for rank_by in RANK_BY {
@@ -436,9 +446,11 @@ fn candidates(d: u32, list: &[(&str, Option<f64>)]) -> CandidateRow {
             .collect(),
         candidate_returns: list.iter().map(|(_, ret)| *ret).collect(),
         candidate_industries: Vec::new(),
+        candidate_trade_values: Vec::new(),
         hold_symbols: Vec::new(),
         hold_returns: Vec::new(),
         hold_industries: Vec::new(),
+        hold_trade_values: Vec::new(),
     }
 }
 
@@ -924,4 +936,104 @@ fn best_weight_prefers_lower_on_tie() {
     assert_eq!(best_weight(&points, sharpe), Some(20));
     assert_eq!(best_weight(&[point(0, None)], sharpe), None);
     assert_eq!(best_weight(&[], sharpe), None);
+}
+
+/// 加權方式的參數值雙向對照；不認得的值為 `None`。
+#[test]
+fn weighting_parses_and_prints() {
+    for (name, weighting) in Weighting::ALL {
+        assert_eq!(Weighting::parse(name), Some(weighting));
+        assert_eq!(weighting.as_str(), name);
+    }
+    assert_eq!(Weighting::parse("market_cap"), None);
+    assert_eq!(Weighting::parse("EQUAL"), None);
+}
+
+/// 持股權重：等權各為 1；依成交金額或其平方根；缺值與非正值以最小值補；全部缺值改等權。
+#[test]
+fn holding_weights_follow_trade_value() {
+    use super::portfolio::holding_weights;
+    let values = [Some(400.0), None, Some(100.0), Some(0.0)];
+    assert_eq!(
+        holding_weights(&values, Weighting::Equal),
+        [1.0, 1.0, 1.0, 1.0]
+    );
+    assert_eq!(
+        holding_weights(&values, Weighting::TradeValue),
+        [400.0, 100.0, 100.0, 100.0]
+    );
+    assert_eq!(
+        holding_weights(&values, Weighting::SqrtTradeValue),
+        [20.0, 10.0, 10.0, 10.0]
+    );
+    assert_eq!(
+        holding_weights(&[None, None], Weighting::TradeValue),
+        [1.0, 1.0]
+    );
+    assert!(holding_weights(&[], Weighting::TradeValue).is_empty());
+}
+
+/// 依成交金額加權：平均報酬為有報酬持股的加權平均（沒有報酬的不列入）；等權不變；個股貢獻與換手
+/// 都依權重計算。
+#[test]
+fn weigh_uses_trade_value_for_returns_costs_and_contributors() {
+    use super::contributors::contributors;
+    use super::portfolio::weigh;
+    let rows = select_holdings(
+        vec![
+            CandidateRow {
+                candidate_trade_values: vec![Some(300.0), Some(100.0), Some(50.0)],
+                ..candidates(2, &[("A", Some(10.0)), ("B", Some(-2.0)), ("C", None)])
+            },
+            CandidateRow {
+                candidate_trade_values: vec![Some(300.0), Some(100.0)],
+                ..candidates(3, &[("A", Some(4.0)), ("D", Some(8.0))])
+            },
+        ],
+        3,
+        3,
+        None,
+    );
+    assert_eq!(rows[0].trade_values, [Some(300.0), Some(100.0), Some(50.0)]);
+    let mut equal = rows.clone();
+    weigh(&mut equal, Weighting::Equal);
+    assert_eq!(equal, rows);
+    assert_eq!(rows[0].avg_return, Some(4.0));
+
+    let mut weighted = rows;
+    weigh(&mut weighted, Weighting::TradeValue);
+    assert_eq!(weighted[0].weights, [300.0, 100.0, 50.0]);
+    // (10×300 − 2×100) ÷ 400 = 7；C 沒有報酬，不列入。
+    assert_eq!(weighted[0].avg_return, Some(7.0));
+    // (4×300 + 8×100) ÷ 400 = 5。
+    assert_eq!(weighted[1].avg_return, Some(5.0));
+
+    // 第二期賣出 B、C（占上一期權重 150 ÷ 450）、買進 D（占這一期 100 ÷ 400）。
+    let costs = trading_costs(&weighted, 0.0);
+    assert!(near(costs[0].turnover, 1.0), "{costs:?}");
+    assert!(near(costs[1].turnover, 0.25), "{costs:?}");
+    assert!(
+        near(
+            costs[1].net_return,
+            5.0 - 150.0 / 450.0 * super::portfolio::TAX_RATE
+        ),
+        "{costs:?}"
+    );
+
+    let (held, best, worst) = contributors(&weighted, 10);
+    assert_eq!(held, 4);
+    // A：10×300÷400 + 4×300÷400 = 10.5；D：8×100÷400 = 2；B：−2×100÷400 = −0.5。
+    assert_eq!(
+        best.iter()
+            .map(|item| (item.symbol.as_str(), item.contribution))
+            .collect::<Vec<_>>(),
+        [("A", 10.5), ("D", 2.0)]
+    );
+    assert_eq!(
+        worst
+            .iter()
+            .map(|item| (item.symbol.as_str(), item.contribution))
+            .collect::<Vec<_>>(),
+        [("B", -0.5)]
+    );
 }

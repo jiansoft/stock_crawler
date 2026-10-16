@@ -347,8 +347,8 @@ async fn screen_backtest_endpoint_db_semantics() {
             "date": "1993-03-15", "days_elapsed": 0, "days_to_next_rebalance": 5,
             "market_filtered": false, "turnover": 0.5,
             "holdings": [
-                {"symbol": "79979BA", "name": "79979BA"},
-                {"symbol": "79979BB", "name": "79979BB"},
+                {"symbol": "79979BA", "name": "79979BA", "weight": 50.0},
+                {"symbol": "79979BB", "name": "79979BB", "weight": 50.0},
             ],
         })
     );
@@ -388,7 +388,7 @@ async fn screen_backtest_endpoint_db_semantics() {
     );
     assert_eq!(
         json["current"]["holdings"],
-        serde_json::json!([{"symbol": "79979BC", "name": "79979BC"}])
+        serde_json::json!([{"symbol": "79979BC", "name": "79979BC", "weight": 100.0}])
     );
     // 門檻 30 百萬元：BA 剛好等於門檻算通過。
     let (_, json) = query("limit=2&min_avg_trade_value=30").await;
@@ -465,6 +465,34 @@ async fn screen_backtest_endpoint_db_semantics() {
     let (_, json) = query("limit=2").await;
     assert_eq!(json["etf_weight"], 0);
     let (status, _) = query("etf_weight=101").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // 依成交金額加權：03-01 BA（3,000 萬）與 BC（2 億）為 (10×30 + 2×200) ÷ 230；03-08 只有 BB 有報酬。
+    // 目前持股 BA、BB：BB 沒有日線，以 BA 的成交金額補，兩檔各半。平方根加權介於等權與成交金額之間。
+    let (_, json) = query("limit=2").await;
+    assert_eq!(json["weighting"], "equal");
+    let (status, json) = query("limit=2&weighting=trade_value").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["weighting"], "trade_value");
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 2, Some(3.04)),
+            ("1993-03-08".to_owned(), 2, Some(8.0)),
+        ]
+    );
+    assert_eq!(
+        json["current"]["holdings"],
+        serde_json::json!([
+            {"symbol": "79979BA", "name": "79979BA", "weight": 50.0},
+            {"symbol": "79979BB", "name": "79979BB", "weight": 50.0},
+        ])
+    );
+    let (_, json) = query("limit=2&weighting=sqrt_trade_value").await;
+    assert_eq!(json["periods"][0]["avg_return"], 4.23);
+    let (_, json) = query("limit=2&weighting=trade_value&hold_min_rs_score=10").await;
+    assert_eq!(json["periods"][0]["avg_return"], 3.04);
+    let (status, _) = query("weighting=market_cap").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
@@ -648,8 +676,12 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(spread["volatility"]["max"], single["summary"]["volatility"]);
     // 依年度：只有偏移 0 有期數，1993 年的分布就是單次回測的年度彙總。
     assert_eq!(
-        (json["rank_by"].as_str(), json["etf_weight"].as_u64()),
-        (Some("rs_score"), Some(0))
+        (
+            json["rank_by"].as_str(),
+            json["etf_weight"].as_u64(),
+            json["weighting"].as_str()
+        ),
+        (Some("rs_score"), Some(0), Some("equal"))
     );
     let years = json["years"].as_array().expect("years array");
     assert_eq!(years.len(), 1, "{years:?}");
@@ -672,6 +704,7 @@ async fn screen_backtest_endpoint_db_semantics() {
     .await;
     assert_eq!(status, StatusCode::OK, "{frontier}");
     assert_eq!(frontier["offsets"], 5);
+    assert_eq!(frontier["weighting"], "equal");
     let weights = frontier["weights"].as_array().expect("weights array");
     assert_eq!(
         weights

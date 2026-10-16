@@ -13,6 +13,9 @@
 //! 有設 `etf_weight` 時，組合固定以該比例持有 0050、其餘才跑策略（核心／衛星配置），彙總與每期報酬
 //! 都是混合後的組合報酬；個股貢獻與持股仍只看策略部位。
 //!
+//! `weighting` 決定策略部位的持股權重：預設等權，也可依換股日前 20 個交易日的平均成交金額（接近
+//! 市值加權，和 0050 一樣偏重大型股）或其平方根加權。
+//!
 //! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
 //! [`contributors`]（個股貢獻）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
 //! 比例前緣端點）。
@@ -36,7 +39,9 @@ pub(crate) use self::frontier::{__path_screen_backtest_frontier, screen_backtest
 pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
 
 use self::contributors::{Contribution, LISTED_CONTRIBUTORS, contributors};
-use self::portfolio::{PeriodCost, blend_etf, period, select_holdings, trading_costs};
+use self::portfolio::{
+    PeriodCost, Weighting, blend_etf, period, select_holdings, trading_costs, weigh,
+};
 use self::sql::{BACKTEST_SQL, BACKTEST_WITH_CHIP_SQL, LATEST_RS_DATE_SQL};
 use self::summary::{summarize, yearly};
 use super::signal_history::{validate_rs_range, validate_streaks};
@@ -91,10 +96,14 @@ struct CandidateRow {
     candidate_returns: Vec<Option<f64>>,
     /// 候選股的產業編號（`stocks.stock_industry_id`），與 `candidates` 一一對應。
     candidate_industries: Vec<i32>,
+    /// 候選股的平均成交金額（元），與 `candidates` 一一對應；沒有用到成交金額時為 `NULL`。
+    candidate_trade_values: Vec<Option<f64>>,
     /// 相對強度不低於續抱門檻的母體股票（依相對強度由高到低）與報酬、產業編號；沒設門檻為空。
     hold_symbols: Vec<String>,
     hold_returns: Vec<Option<f64>>,
     hold_industries: Vec<i32>,
+    /// 續抱名單的平均成交金額（元）；只有依成交金額加權時才查。
+    hold_trade_values: Vec<Option<f64>>,
 }
 
 /// 一期的結果；`symbols` 是全部持股，依相對強度由高到低。
@@ -113,6 +122,11 @@ struct PeriodRow {
     symbols: Vec<String>,
     /// 各持股這期的報酬，與 `symbols` 一一對應；之後完全沒有收盤的為 `None`。
     returns: Vec<Option<f64>>,
+    /// 各持股換股日的平均成交金額（元），與 `symbols` 一一對應。
+    trade_values: Vec<Option<f64>>,
+    /// 各持股的相對權重（未正規化），與 `symbols` 一一對應；空的代表等權（見
+    /// [`portfolio::weight_at`]）。
+    weights: Vec<f64>,
 }
 
 /// 依條件每隔 `hold_days` 個交易日換股，回測等權持有前 `limit` 檔（相對強度由高到低）的報酬，
@@ -176,6 +190,12 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     };
     let current = current.map(|(row, cost)| {
         let elapsed = elapsed_days.unwrap_or(0);
+        let total: f64 = (0..row.symbols.len())
+            .map(|index| portfolio::weight_at(&row, index))
+            .sum();
+        let weights: Vec<f64> = (0..row.symbols.len())
+            .map(|index| round2(portfolio::weight_at(&row, index) / total * 100.0))
+            .collect();
         BacktestCurrent {
             date: row.date.to_string(),
             days_elapsed: elapsed,
@@ -185,9 +205,11 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
             holdings: row
                 .symbols
                 .into_iter()
-                .map(|symbol| BacktestHolding {
+                .zip(weights)
+                .map(|(symbol, weight)| BacktestHolding {
                     name: names.get(&symbol).cloned(),
                     symbol,
+                    weight,
                 })
                 .collect(),
         }
@@ -208,6 +230,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         etf_weight: backtest.etf_weight,
         min_avg_trade_value: params.min_avg_trade_value,
         rank_by: backtest.rank_by.to_owned(),
+        weighting: backtest.weighting.as_str().to_owned(),
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
@@ -248,6 +271,8 @@ struct Backtest<'a> {
     rank_by: &'a str,
     /// 0050 核心部位的比例（%，0 為純策略）。
     etf_weight: u8,
+    /// 策略部位的持股加權方式。
+    weighting: Weighting,
 }
 
 /// 一次回測混合 0050 之前的各期結果（含還沒滿持有天數的最後一期）；同一組候選股可依不同的
@@ -349,6 +374,12 @@ impl<'a> Backtest<'a> {
                 "rank_by 必須為 rs_score、trade_value、foreign_streak 或 trust_streak",
             ));
         }
+        let Some(weighting) = Weighting::parse(params.weighting.as_deref().unwrap_or("equal"))
+        else {
+            return Err(unprocessable(
+                "weighting 必須為 equal、trade_value 或 sqrt_trade_value",
+            ));
+        };
         let etf_weight = params.etf_weight.unwrap_or(0);
         if etf_weight > 100 {
             return Err(unprocessable("etf_weight 必須介於 0 至 100"));
@@ -404,6 +435,7 @@ impl<'a> Backtest<'a> {
             fee_discount,
             rank_by,
             etf_weight,
+            weighting,
         })
     }
 
@@ -447,7 +479,8 @@ impl<'a> Backtest<'a> {
                 .min_avg_trade_value
                 .map(|value| i64::from(value) * 1_000_000),
         )
-        .bind(self.rank_by);
+        .bind(self.rank_by)
+        .bind(self.weighting.as_str());
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))
@@ -458,12 +491,13 @@ impl<'a> Backtest<'a> {
             .last()
             .filter(|row| row.pending)
             .map(|row| row.elapsed_days);
-        let rows = select_holdings(
+        let mut rows = select_holdings(
             candidates,
             usize::from(self.limit),
             usize::from(self.keep_rank),
             params.max_per_industry.map(usize::from),
         );
+        weigh(&mut rows, self.weighting);
         let costs = trading_costs(&rows, self.fee_discount);
         Ok(Raw {
             rows,

@@ -82,6 +82,7 @@ pub(crate) async fn screen_backtest_offsets(
         limit: backtest.limit,
         rank_by: backtest.rank_by.to_owned(),
         etf_weight: backtest.etf_weight,
+        weighting: backtest.weighting.as_str().to_owned(),
         fee_discount: backtest.fee_discount,
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         distribution: distribution(&results),
