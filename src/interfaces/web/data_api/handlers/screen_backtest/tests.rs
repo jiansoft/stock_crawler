@@ -16,6 +16,7 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
         benchmark_return: Some(benchmark),
         etf_return: None,
         symbols: Vec::new(),
+        returns: Vec::new(),
     }
 }
 
@@ -49,6 +50,60 @@ fn free(rows: &[PeriodRow]) -> Vec<PeriodCost> {
 
 fn near(actual: f64, expected: f64) -> bool {
     (actual - expected).abs() < 1e-9
+}
+
+/// 個股貢獻：每期貢獻是報酬 ÷ 當期有報酬的持股數，各期相加；沒有報酬的期只算持有期數；
+/// 正負各自排序並截斷，貢獻為 0 的不列。
+#[test]
+fn contributors_sum_equal_weight_shares() {
+    use super::contributors::contributors;
+    let period = |symbols: &[&str], returns: &[Option<f64>]| PeriodRow {
+        holdings: symbols.len() as i64,
+        symbols: symbols.iter().map(|symbol| (*symbol).to_owned()).collect(),
+        returns: returns.to_vec(),
+        ..row(2, 0, None, 0.0)
+    };
+    let rows = [
+        // A 10、B -4、C 沒有報酬：有報酬的 2 檔，A 貢獻 5、B -2。
+        period(&["A", "B", "C"], &[Some(10.0), Some(-4.0), None]),
+        // A 6、D -9、E 0：3 檔各 1/3。
+        period(&["A", "D", "E"], &[Some(6.0), Some(-9.0), Some(0.0)]),
+        // 空手的期沒有任何持股。
+        period(&[], &[]),
+    ];
+    let (held, best, worst) = contributors(&rows, 10);
+    assert_eq!(held, 5);
+    let brief = |items: &[super::contributors::Contribution]| {
+        items
+            .iter()
+            .map(|item| {
+                (
+                    item.symbol.clone(),
+                    item.periods_held,
+                    item.contribution,
+                    item.avg_return,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(brief(&best), [("A".to_owned(), 2, 7.0, Some(8.0))]);
+    assert_eq!(
+        brief(&worst),
+        [
+            ("D".to_owned(), 1, -3.0, Some(-9.0)),
+            ("B".to_owned(), 1, -2.0, Some(-4.0)),
+        ]
+    );
+    // 截斷：只留最差 1 檔。
+    let (_, _, worst) = contributors(&rows, 1);
+    assert_eq!(worst.len(), 1);
+    assert_eq!(worst[0].symbol, "D");
+    // C 只有持有沒有報酬、E 貢獻 0，都不在名單中但算持有過。
+    assert!(
+        best.iter()
+            .chain(&worst)
+            .all(|item| item.symbol != "C" && item.symbol != "E")
+    );
 }
 
 /// 起日預設迄日往前 1,095 天；起日晚於迄日或期間超過 3,653 天回錯誤。

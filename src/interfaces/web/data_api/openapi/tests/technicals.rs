@@ -259,6 +259,18 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     assert!(response["summary"].to_string().contains("BacktestSummary"));
     assert!(response["periods"].to_string().contains("BacktestPeriod"));
     assert!(response["years"].to_string().contains("BacktestYear"));
+    assert!(
+        response["contributors"]
+            .to_string()
+            .contains("BacktestContributors")
+    );
+    let contributor = &schemas["BacktestContributor"]["properties"];
+    assert_eq!(contributor["contribution"]["type"], "number");
+    assert!(contributor["name"].to_string().contains("null"));
+    assert_eq!(
+        schemas["BacktestContributors"]["properties"]["best"]["type"],
+        "array"
+    );
     assert_eq!(response["etf_benchmark"]["type"], "string");
     assert_eq!(response["keep_rank"]["type"], "integer");
     assert!(response["market_filter_ma"].to_string().contains("null"));

@@ -315,6 +315,20 @@ async fn screen_backtest_endpoint_db_semantics() {
     let (_, json) = query("limit=2").await;
     assert!(json["max_per_industry"].is_null());
 
+    // 個股貢獻：limit=2 時 03-01 BA 10、BC 2（各 1/2）、03-08 BB 8、BC 沒有報酬（BB 獨得）。
+    let (_, json) = query("limit=2").await;
+    let contributors = &json["contributors"];
+    assert_eq!(contributors["held_symbols"], 3);
+    assert_eq!(
+        contributors["best"],
+        serde_json::json!([
+            {"symbol": "79979BB", "name": "79979BB", "periods_held": 1, "contribution": 8.0, "avg_return": 8.0},
+            {"symbol": "79979BA", "name": "79979BA", "periods_held": 1, "contribution": 5.0, "avg_return": 10.0},
+            {"symbol": "79979BC", "name": "79979BC", "periods_held": 2, "contribution": 1.0, "avg_return": 2.0},
+        ])
+    );
+    assert_eq!(contributors["worst"], serde_json::json!([]));
+
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
     assert_eq!(status, StatusCode::OK, "{json}");
