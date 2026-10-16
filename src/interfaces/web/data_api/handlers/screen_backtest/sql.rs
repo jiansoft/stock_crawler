@@ -14,8 +14,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類、`$11` 大盤濾網均線天數
 /// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）、`$13` 市場廣度門檻（%，`NULL` 為不濾）、
 /// `$14` 換股日偏移（起日之後先跳過幾個交易日）、`$15` 流動性門檻（元，`NULL` 為不限）、`$16`
-/// 候選股排序方式（見 [`super::RANK_BY`]）、`$17` 持股加權方式（見 [`super::WEIGHTING`]）；籌碼版
-/// 另有 `$18`／`$19`。
+/// 候選股排序方式（見 [`super::RANK_BY`]）、`$17` 持股加權方式（見 [`super::WEIGHTING`]）、`$18`
+/// 排除的產業名稱（`NULL` 為不排除）；籌碼版另有 `$19`／`$20`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
@@ -92,6 +92,7 @@ filtered AS (
             $chip_join,
             r#"
     WHERE ($6::text IS NULL OR si.name = $6)
+      AND ($18::text[] IS NULL OR si.name IS NULL OR NOT si.name = ANY($18))
       AND ($7::smallint IS NULL OR u.rs_score >= $7)
       AND ($8::smallint IS NULL OR u.rs_score <= $8)
       AND (($9::text IS NULL AND $10::text IS NULL) OR EXISTS (
@@ -213,7 +214,7 @@ pub(super) const BACKTEST_SQL: &str = backtest_sql!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$18`）／投信（`$19`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$19`）／投信（`$20`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
@@ -222,7 +223,7 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($18::bigint IS NULL OR c.foreign_buy >= $18)\n      AND ($19::bigint IS NULL OR c.trust_buy >= $19)",
+        "\n      AND ($19::bigint IS NULL OR c.foreign_buy >= $19)\n      AND ($20::bigint IS NULL OR c.trust_buy >= $20)",
         "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
     )
 );

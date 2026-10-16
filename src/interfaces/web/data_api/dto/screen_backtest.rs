@@ -108,6 +108,9 @@ pub(crate) struct ScreenBacktestParams {
     pub(crate) market: Option<String>,
     /// 只選這個產業（產業名稱，例如「半導體業」）的股票；大盤基準不受影響。
     pub(crate) industry: Option<String>,
+    /// 排除的產業（產業名稱，多個以逗號分隔，最多 10 個，例如「金融保險業,航運業」）：這些產業的股票
+    /// 不買進；大盤基準不受影響。不可與 `industry` 相同。
+    pub(crate) exclude_industry: Option<String>,
     /// 換股當天相對強度分數至少這麼高（1–99）。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) min_rs_score: Option<u8>,
@@ -348,6 +351,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_weight: Option<u8>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
+    /// 排除的產業（逗號分隔）；未排除為 `null`。
+    pub(crate) exclude_industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。
     pub(crate) min_rs_score: Option<u8>,
     /// 相對強度分數上限；未篩選為 `null`。

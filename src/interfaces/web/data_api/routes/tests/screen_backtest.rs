@@ -571,6 +571,20 @@ async fn screen_backtest_endpoint_db_semantics() {
         ]
     );
     assert_eq!(json["periods"][1]["benchmark_return"], 5.5);
+    assert!(json["exclude_industry"].is_null());
+
+    // 排除半導體業：只剩產業 99 的 BB（03-01 −4、03-08 8），大盤基準不變。
+    let (status, json) = query("limit=2&exclude_industry=%20%E5%8D%8A%E5%B0%8E%E9%AB%94%E6%A5%AD,%E5%8D%8A%E5%B0%8E%E9%AB%94%E6%A5%AD").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["exclude_industry"], "半導體業");
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 1, Some(-4.0)),
+            ("1993-03-08".to_owned(), 1, Some(8.0)),
+        ]
+    );
+    assert_eq!(json["periods"][1]["benchmark_return"], 5.5);
 
     // 相對強度門檻：03-01 BA、03-08 BB。
     let (_, json) = query("min_rs_score=85").await;
@@ -644,6 +658,18 @@ async fn screen_backtest_endpoint_db_semantics() {
         ("min_foreign_streak=61", StatusCode::UNPROCESSABLE_ENTITY),
         (
             "industry=%E4%B8%8D%E5%AD%98%E5%9C%A8",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "exclude_industry=%E5%8D%8A%E5%B0%8E%E9%AB%94%E6%A5%AD,%E4%B8%8D%E5%AD%98%E5%9C%A8",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "industry=%E5%8D%8A%E5%B0%8E%E9%AB%94%E6%A5%AD&exclude_industry=%E5%8D%8A%E5%B0%8E%E9%AB%94%E6%A5%AD",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "exclude_industry=a,b,c,d,e,f,g,h,i,j,k",
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
     ] {

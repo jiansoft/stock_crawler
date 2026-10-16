@@ -297,6 +297,12 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     let current = &schemas["BacktestCurrent"]["properties"];
     assert_eq!(current["days_to_next_rebalance"]["type"], "integer");
     assert_eq!(current["cash"]["type"], "number");
+    assert!(
+        query_schema(operation, "exclude_industry")
+            .to_string()
+            .contains("string")
+    );
+    assert!(response["exclude_industry"].to_string().contains("null"));
     assert!(response["max_weight"].to_string().contains("null"));
     assert!(current["holdings"].to_string().contains("BacktestHolding"));
     assert!(current["exited"].to_string().contains("BacktestExit"));
