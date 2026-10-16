@@ -349,9 +349,11 @@ async fn screen_backtest_endpoint_db_semantics() {
         serde_json::json!({
             "date": "1993-03-15", "days_elapsed": 0, "days_to_next_rebalance": 5,
             "market_filtered": false, "turnover": 0.5, "cash": 0.0,
+            // 種入的日線沒有收盤價，換股日至今的報酬都是 null。
+            "return_to_date": null, "etf_return_to_date": null,
             "holdings": [
-                {"symbol": "79979BA", "name": "79979BA", "weight": 50.0, "added": true},
-                {"symbol": "79979BB", "name": "79979BB", "weight": 50.0, "added": false},
+                {"symbol": "79979BA", "name": "79979BA", "weight": 50.0, "added": true, "return_to_date": null},
+                {"symbol": "79979BB", "name": "79979BB", "weight": 50.0, "added": false, "return_to_date": null},
             ],
             "exited": [{"symbol": "79979BC", "name": "79979BC", "weight": 50.0}],
         })
@@ -392,7 +394,7 @@ async fn screen_backtest_endpoint_db_semantics() {
     );
     assert_eq!(
         json["current"]["holdings"],
-        serde_json::json!([{"symbol": "79979BC", "name": "79979BC", "weight": 100.0, "added": false}])
+        serde_json::json!([{"symbol": "79979BC", "name": "79979BC", "weight": 100.0, "added": false, "return_to_date": null}])
     );
     // 門檻 30 百萬元：BA 剛好等於門檻算通過。
     let (_, json) = query("limit=2&min_avg_trade_value=30").await;
@@ -488,8 +490,8 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(
         json["current"]["holdings"],
         serde_json::json!([
-            {"symbol": "79979BA", "name": "79979BA", "weight": 50.0, "added": true},
-            {"symbol": "79979BB", "name": "79979BB", "weight": 50.0, "added": false},
+            {"symbol": "79979BA", "name": "79979BA", "weight": 50.0, "added": true, "return_to_date": null},
+            {"symbol": "79979BB", "name": "79979BB", "weight": 50.0, "added": false, "return_to_date": null},
         ])
     );
     let (_, json) = query("limit=2&weighting=sqrt_trade_value").await;

@@ -44,7 +44,7 @@ pub use self::gateway::BacktestStrategyGateway;
 pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
 
 use self::contributors::{Contribution, LISTED_CONTRIBUTORS, contributors};
-use self::current::{current_holdings, exited, split_current, stock_names};
+use self::current::{current_holdings, exited, returns_to_date, split_current, stock_names};
 use self::portfolio::{
     PeriodCost, Weighting, blend_etf, period, select_holdings, trading_costs, weigh,
 };
@@ -200,6 +200,10 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         avg_return: item.avg_return,
     };
     let previous = rows.last();
+    let returns = match &current {
+        Some((row, _)) => returns_to_date(row, backtest.to, elapsed_days.unwrap_or(0)).await,
+        None => std::collections::HashMap::new(),
+    };
     let current = current.map(|(row, cost)| {
         current_holdings(
             (row, cost),
@@ -207,6 +211,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
             elapsed_days.unwrap_or(0),
             hold_days,
             &names,
+            &returns,
         )
     });
 
