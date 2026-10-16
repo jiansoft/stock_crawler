@@ -25,6 +25,17 @@ pub(crate) struct MovingAverageStatus {
     pub(crate) rising: Option<bool>,
 }
 
+/// 收盤穿越均線的一天。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct MovingAverageCrossItem {
+    /// 穿越當天。
+    pub(crate) date: String,
+    /// 均線天數：20、60、120 或 240。
+    pub(crate) days: u16,
+    /// `up` 為由下往上站上均線，`down` 為跌破。
+    pub(crate) direction: String,
+}
+
 /// 大盤趨勢狀態。
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub(crate) struct MarketRegimeResponse {
@@ -51,10 +62,14 @@ pub(crate) struct MarketRegimeResponse {
     pub(crate) from_high_percent: f64,
     /// 收盤距 52 週低點的百分比（0 或正值）。
     pub(crate) from_low_percent: f64,
+    /// 近 5 個交易日的漲跌幅（%）；資料不足為 `null`。
+    pub(crate) return_5d: Option<f64>,
     /// 近 20 個交易日的漲跌幅（%）；資料不足為 `null`。
     pub(crate) return_20d: Option<f64>,
     /// 近 60 個交易日的漲跌幅（%）。
     pub(crate) return_60d: Option<f64>,
     /// 近 240 個交易日的漲跌幅（%）。
     pub(crate) return_240d: Option<f64>,
+    /// 近 60 個交易日內收盤穿越 20／60／120／240 日均線的日子，由新到舊（同一天依均線天數）。
+    pub(crate) recent_crosses: Vec<MovingAverageCrossItem>,
 }

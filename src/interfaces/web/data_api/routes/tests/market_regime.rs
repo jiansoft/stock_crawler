@@ -63,6 +63,8 @@ async fn market_regime_endpoint_db_semantics() {
         (Some(120.0), Some(100.0))
     );
     assert_eq!(json["from_low_percent"], 20.0);
+    assert!(json["return_5d"].is_null());
+    assert_eq!(json["recent_crosses"], serde_json::json!([]));
 
     let (_, json) = get("/api/v1/market/regime?date=1994-05-03").await;
     assert_eq!(json["close"], 110.0);
