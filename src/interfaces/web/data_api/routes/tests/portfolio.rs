@@ -174,6 +174,16 @@ async fn portfolio_history_endpoint_db_semantics() {
     assert_eq!(json["benchmark_return_percent"], 5.0);
     assert_eq!(json["excess_return_percent"], -10.24);
     assert!(json["annualized_return_percent"].is_null());
+    // 只有 3 天報酬，不足 20 個成對交易日，沒有風險指標。
+    for field in [
+        "beta",
+        "alpha_percent",
+        "correlation",
+        "volatility_percent",
+        "risk_days",
+    ] {
+        assert!(json[field].is_null(), "{field}: {json}");
+    }
     let months = json["months"].as_array().expect("months 陣列");
     assert_eq!(months.len(), 2);
     assert_eq!(

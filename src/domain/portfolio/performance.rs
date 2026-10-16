@@ -8,6 +8,11 @@
 //! - 報酬只看股價，**不含現金股利**（股利以現金入帳，不在市值裡）。
 //! - 前一日市值為 0（尚未持有）的日子報酬記為 0。
 //! - 期間第一天只當基準，不計報酬；落在第一天（含）以前的買賣已反映在起始市值。
+//! - 風險指標（beta、alpha、相關係數、追蹤誤差、波動率）以「持股與大盤都有報酬」的交易日計算：
+//!   前一日市值為 0 的日子，以及當天或前一個交易日缺指數的日子都不算；不足
+//!   [`MIN_RISK_DAYS`] 天時為 `None`。
+
+use std::collections::HashMap;
 
 use chrono::{Datelike, NaiveDate};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
@@ -32,6 +37,65 @@ pub struct IndexClose {
     pub date: NaiveDate,
     /// 收盤指數。
     pub close: Decimal,
+}
+
+/// 計算風險指標至少需要的成對交易日數。
+pub const MIN_RISK_DAYS: usize = 20;
+
+/// 每年約有幾個交易日，用來把日報酬的平均與標準差年化。
+pub const TRADING_DAYS_PER_YEAR: f64 = 245.0;
+
+/// 持股相對大盤（加權指數）的風險指標，以每日報酬計算、無風險利率以 0 計。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RiskStats {
+    /// 參與計算的交易日數。
+    pub days: usize,
+    /// Beta：持股日報酬對大盤日報酬的迴歸斜率（共變異數 ÷ 大盤變異數），四捨五入到小數兩位；
+    /// 大盤沒有波動時為 `None`。
+    pub beta: Option<f64>,
+    /// 年化 alpha（%）：（持股日均報酬 − beta × 大盤日均報酬）× 每年交易日數；beta 為 `None` 時也是 `None`。
+    pub alpha_percent: Option<f64>,
+    /// 持股與大盤日報酬的相關係數（−1～1），四捨五入到小數兩位；任一方沒有波動時為 `None`。
+    pub correlation: Option<f64>,
+    /// 年化追蹤誤差（%）：每日（持股 − 大盤）報酬的標準差 × √每年交易日數。
+    pub tracking_error_percent: f64,
+    /// 持股年化波動率（%）。
+    pub volatility_percent: f64,
+    /// 大盤年化波動率（%）。
+    pub benchmark_volatility_percent: f64,
+}
+
+/// 由成對的每日報酬（比率，持股, 大盤）計算風險指標；不足 [`MIN_RISK_DAYS`] 天回傳 `None`。
+pub fn risk_stats(pairs: &[(f64, f64)]) -> Option<RiskStats> {
+    if pairs.len() < MIN_RISK_DAYS {
+        return None;
+    }
+    let count = pairs.len() as f64;
+    let mean = |values: &mut dyn Iterator<Item = f64>| values.sum::<f64>() / count;
+    let mean_p = mean(&mut pairs.iter().map(|pair| pair.0));
+    let mean_m = mean(&mut pairs.iter().map(|pair| pair.1));
+    // 樣本變異數／共變異數（除以 n − 1）。
+    let sample = |values: &mut dyn Iterator<Item = f64>| values.sum::<f64>() / (count - 1.0);
+    let var_p = sample(&mut pairs.iter().map(|pair| (pair.0 - mean_p).powi(2)));
+    let var_m = sample(&mut pairs.iter().map(|pair| (pair.1 - mean_m).powi(2)));
+    let cov = sample(
+        &mut pairs
+            .iter()
+            .map(|pair| (pair.0 - mean_p) * (pair.1 - mean_m)),
+    );
+    let mean_d = mean_p - mean_m;
+    let var_d = sample(&mut pairs.iter().map(|pair| (pair.0 - pair.1 - mean_d).powi(2)));
+    let annual_sd = |variance: f64| percent(variance.sqrt() * TRADING_DAYS_PER_YEAR.sqrt());
+    let beta = (var_m > 0.0).then(|| cov / var_m);
+    Some(RiskStats {
+        days: pairs.len(),
+        beta: beta.map(round2),
+        alpha_percent: beta.map(|beta| percent((mean_p - beta * mean_m) * TRADING_DAYS_PER_YEAR)),
+        correlation: (var_p > 0.0 && var_m > 0.0).then(|| round2(cov / (var_p * var_m).sqrt())),
+        tracking_error_percent: annual_sd(var_d),
+        volatility_percent: annual_sd(var_p),
+        benchmark_volatility_percent: annual_sd(var_m),
+    })
 }
 
 /// 單月績效。
@@ -78,6 +142,8 @@ pub struct Performance {
     pub benchmark_return_percent: Option<f64>,
     /// 各月績效，依月份由舊到新。
     pub months: Vec<MonthReturn>,
+    /// 相對大盤的風險指標；成對交易日不足時為 `None`。
+    pub risk: Option<RiskStats>,
 }
 
 /// 計算期間績效；`points` 需依日期由舊到新，少於兩個交易日時回傳 `None`。
@@ -92,6 +158,11 @@ pub fn evaluate(points: &[ValuePoint], index: &[IndexClose]) -> Option<Performan
     let mut month_growth = 1.0_f64;
     let mut month_flow = Decimal::ZERO;
     let mut previous = first;
+    let closes: HashMap<NaiveDate, Decimal> = index
+        .iter()
+        .map(|point| (point.date, point.close))
+        .collect();
+    let mut pairs: Vec<(f64, f64)> = Vec::new();
 
     for (position, point) in rest.iter().enumerate() {
         let flow = point.buys - point.sells;
@@ -102,6 +173,14 @@ pub fn evaluate(points: &[ValuePoint], index: &[IndexClose]) -> Option<Performan
         } else {
             1.0
         };
+        if previous.market_value > Decimal::ZERO
+            && let (Some(&before), Some(&close)) =
+                (closes.get(&previous.date), closes.get(&point.date))
+            && before > Decimal::ZERO
+        {
+            let market = (close / before).to_f64().unwrap_or(1.0) - 1.0;
+            pairs.push((daily - 1.0, market));
+        }
         wealth *= daily;
         month_growth *= daily;
         month_flow += flow;
@@ -158,6 +237,7 @@ pub fn evaluate(points: &[ValuePoint], index: &[IndexClose]) -> Option<Performan
         max_drawdown_trough: drawdown.1.map(|(_, trough)| trough),
         benchmark_return_percent: index_return(index, first.date, last.date),
         months,
+        risk: risk_stats(&pairs),
     })
 }
 
@@ -185,6 +265,11 @@ fn index_return(index: &[IndexClose], from: NaiveDate, to: NaiveDate) -> Option<
 /// 比率轉百分比並四捨五入到小數兩位。
 fn percent(ratio: f64) -> f64 {
     (ratio * 10_000.0).round() / 100.0
+}
+
+/// 四捨五入到小數兩位。
+fn round2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
 }
 
 /// 金額四捨五入到小數兩位。
@@ -291,5 +376,69 @@ mod tests {
 
         assert!(evaluate(&points[..1], &[]).is_none());
         assert!(evaluate(&[], &[]).is_none());
+    }
+
+    /// 持股每天剛好是大盤報酬的 2 倍再加 0.1%：beta 2、相關係數 1、alpha 為 0.1% × 245。
+    #[test]
+    fn risk_stats_regression() {
+        let pairs: Vec<(f64, f64)> = (0..30)
+            .map(|i| {
+                let market = if i % 2 == 0 { 0.01 } else { -0.005 } * (1.0 + f64::from(i) / 30.0);
+                (2.0 * market + 0.001, market)
+            })
+            .collect();
+        let stats = risk_stats(&pairs).expect("30 天");
+        assert_eq!(stats.days, 30);
+        assert_eq!(stats.beta, Some(2.0));
+        assert_eq!(stats.correlation, Some(1.0));
+        assert_eq!(stats.alpha_percent, Some(24.5));
+        // 持股波動是大盤的 2 倍，追蹤誤差等於大盤波動。
+        assert!((stats.volatility_percent - 2.0 * stats.benchmark_volatility_percent).abs() < 0.02);
+        assert!((stats.tracking_error_percent - stats.benchmark_volatility_percent).abs() < 0.02);
+
+        // 不足 20 天回 None；大盤完全沒有波動時 beta、alpha、相關係數為 None。
+        assert!(risk_stats(&pairs[..19]).is_none());
+        let flat: Vec<(f64, f64)> = pairs.iter().map(|pair| (pair.0, 0.0)).collect();
+        let stats = risk_stats(&flat).expect("30 天");
+        assert_eq!(
+            (stats.beta, stats.alpha_percent, stats.correlation),
+            (None, None, None)
+        );
+        assert_eq!(stats.benchmark_volatility_percent, 0.0);
+    }
+
+    /// evaluate 只用持股與指數都有報酬的日子：前一日市值為 0、缺指數的日子不算。
+    #[test]
+    fn evaluate_pairs_daily_returns_with_index() {
+        let start = NaiveDate::from_ymd_opt(2026, 1, 1).expect("有效日期");
+        let mut points = vec![point(start, dec!(0), dec!(0), dec!(0))];
+        let mut index = vec![IndexClose {
+            date: start,
+            close: dec!(100),
+        }];
+        let (mut value, mut close) = (dec!(100), dec!(100));
+        for i in 1..=25_u32 {
+            let date = start + chrono::Days::new(u64::from(i));
+            // 第 1 天才買進（前一日市值 0），第 10 天缺指數。
+            let buys = if i == 1 { dec!(100) } else { dec!(0) };
+            if i > 1 {
+                let up = i % 2 == 0;
+                value *= if up { dec!(1.02) } else { dec!(0.99) };
+                close *= if up { dec!(1.01) } else { dec!(0.995) };
+            }
+            points.push(point(date, value, buys, dec!(0)));
+            if i != 10 {
+                index.push(IndexClose { date, close });
+            }
+        }
+        let performance = evaluate(&points, &index).expect("兩天以上");
+        let risk = performance.risk.expect("足夠天數");
+        // 25 天報酬：第 1 天前一日市值 0、第 10 與 11 天缺指數，剩 22 天。
+        assert_eq!(risk.days, 22);
+        assert_eq!(risk.beta, Some(2.0));
+        assert_eq!(risk.correlation, Some(1.0));
+
+        // 指數完全沒有資料時沒有風險指標。
+        assert!(evaluate(&points, &[]).expect("兩天以上").risk.is_none());
     }
 }
