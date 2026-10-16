@@ -77,6 +77,21 @@ pub(crate) struct PortfolioHistoryResponse {
     pub(crate) benchmark_return_percent: Option<f64>,
     /// 超額報酬（報酬 − 大盤，百分點）；缺任一時為 `null`。
     pub(crate) excess_return_percent: Option<f64>,
+    /// Beta：持股日報酬對加權指數日報酬的迴歸斜率；>1 代表比大盤波動大。資料不足（成對交易日少於
+    /// 20 天）或大盤沒有波動時為 `null`。
+    pub(crate) beta: Option<f64>,
+    /// 年化 alpha（%）：扣掉 beta × 大盤之後的超額日均報酬 × 245，無風險利率以 0 計。
+    pub(crate) alpha_percent: Option<f64>,
+    /// 持股與加權指數日報酬的相關係數（−1～1）。
+    pub(crate) correlation: Option<f64>,
+    /// 年化追蹤誤差（%）：每日（持股 − 大盤）報酬的標準差 × √245。
+    pub(crate) tracking_error_percent: Option<f64>,
+    /// 持股年化波動率（%）。
+    pub(crate) volatility_percent: Option<f64>,
+    /// 加權指數同期年化波動率（%）。
+    pub(crate) benchmark_volatility_percent: Option<f64>,
+    /// 計算上述風險指標用的交易日數（持股與大盤都有報酬的日子）；資料不足時為 `null`。
+    pub(crate) risk_days: Option<i64>,
     /// 各月績效，依月份由舊到新。
     pub(crate) months: Vec<PortfolioMonth>,
 }
@@ -100,6 +115,13 @@ impl PortfolioHistoryResponse {
                 max_drawdown_trough: None,
                 benchmark_return_percent: None,
                 excess_return_percent: None,
+                beta: None,
+                alpha_percent: None,
+                correlation: None,
+                tracking_error_percent: None,
+                volatility_percent: None,
+                benchmark_volatility_percent: None,
+                risk_days: None,
                 months: Vec::new(),
             };
         };
@@ -120,6 +142,16 @@ impl PortfolioHistoryResponse {
                 .benchmark_return_percent
                 .map(|benchmark| ((p.return_percent - benchmark) * 100.0).round() / 100.0),
             benchmark_return_percent: p.benchmark_return_percent,
+            beta: p.risk.as_ref().and_then(|risk| risk.beta),
+            alpha_percent: p.risk.as_ref().and_then(|risk| risk.alpha_percent),
+            correlation: p.risk.as_ref().and_then(|risk| risk.correlation),
+            tracking_error_percent: p.risk.as_ref().map(|risk| risk.tracking_error_percent),
+            volatility_percent: p.risk.as_ref().map(|risk| risk.volatility_percent),
+            benchmark_volatility_percent: p
+                .risk
+                .as_ref()
+                .map(|risk| risk.benchmark_volatility_percent),
+            risk_days: p.risk.as_ref().map(|risk| risk.days as i64),
             months: p.months.into_iter().map(Into::into).collect(),
         }
     }
