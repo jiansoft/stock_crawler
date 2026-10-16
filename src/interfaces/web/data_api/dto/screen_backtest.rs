@@ -85,13 +85,13 @@ pub(crate) struct ScreenBacktestParams {
     #[param(value_type = BacktestRankByValue, inline)]
     pub(crate) rank_by: Option<String>,
     /// 0050 核心部位（%，0–100，預設 0）：組合固定以這個比例持有 0050、其餘才依條件選股，
-    /// 用來看策略搭配大盤的效果；彙總為混合後的組合報酬，0050 部位不計買賣成本，空手時 0050 照常持有。
-    /// 100 等於只持有 0050。
+    /// 用來看策略搭配大盤的效果；彙總為混合後的組合報酬，每期換股時調回固定比例的買賣計入成本
+    /// （0050 證交稅 0.1%，第一次買進 0050 不計），空手時 0050 照常持有。100 等於只持有 0050。
     #[param(minimum = 0, maximum = 100, default = 0)]
     pub(crate) etf_weight: Option<u8>,
     /// 策略部位的持股加權方式：`equal`（預設，等權）、`trade_value`（依換股日含當天往前 20 個交易日的
     /// 平均成交金額，接近市值加權、偏重大型股）或 `sqrt_trade_value`（依平均成交金額的平方根，介於
-    /// 兩者之間）。換手成本依進出股票的權重計算，續抱股票的權重調整不計成本。
+    /// 兩者之間）。換手成本依每期目標權重與上一期持股漲跌後權重的差額計算，續抱股票的權重調整也計入。
     #[param(value_type = BacktestWeightingValue, inline)]
     pub(crate) weighting: Option<String>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
@@ -138,7 +138,7 @@ pub(crate) struct BacktestPeriod {
     pub(crate) avg_return: Option<f64>,
     /// 扣除這次換股的手續費與證交稅後的報酬（%）；空手但賣出上一期持股時為負的成本。
     pub(crate) return_after_costs: f64,
-    /// 換手率（0–1）：這期新買進的檔數占持股的比例，第一期為 1、空手為 0。
+    /// 換手率（0–1）：這期新買進與加碼（含續抱股票調回目標權重）占組合的比例，第一期為 1、空手為 0。
     pub(crate) turnover: f64,
     /// 同一天同市場全部母體股票的平均報酬（%）。
     pub(crate) benchmark_return: Option<f64>,
