@@ -80,30 +80,37 @@ impl StrategyGateway for BacktestStrategyGateway {
             .holdings
             .into_iter()
             .partition(|holding| holding.added);
-        let holding = |symbol: String, name: Option<String>, weight: f64| StrategyHolding {
+        let holding = |symbol: String,
+                       name: Option<String>,
+                       weight: f64,
+                       return_to_date: Option<f64>| StrategyHolding {
             symbol,
             name,
             weight,
+            return_to_date,
         };
         Ok(Some(StrategyRebalance {
             date,
             hold_days: backtest.hold_days,
+            days_elapsed: current.days_elapsed,
+            return_to_date: current.return_to_date,
+            etf_return_to_date: current.etf_return_to_date,
             etf_weight: backtest.etf_weight,
             market_filtered: current.market_filtered,
             cash: current.cash,
             turnover: current.turnover,
             added: added
                 .into_iter()
-                .map(|item| holding(item.symbol, item.name, item.weight))
+                .map(|item| holding(item.symbol, item.name, item.weight, item.return_to_date))
                 .collect(),
             kept: kept
                 .into_iter()
-                .map(|item| holding(item.symbol, item.name, item.weight))
+                .map(|item| holding(item.symbol, item.name, item.weight, item.return_to_date))
                 .collect(),
             exited: current
                 .exited
                 .into_iter()
-                .map(|item| holding(item.symbol, item.name, item.weight))
+                .map(|item| holding(item.symbol, item.name, item.weight, None))
                 .collect(),
         }))
     }

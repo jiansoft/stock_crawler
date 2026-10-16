@@ -355,7 +355,7 @@ async fn industry_section_ranks_medians_with_weekly_change() {
 /// 完整訊息：三段內容、億元換算、持股上升下降、沒有變化或只有一筆的持股不列。
 #[tokio::test]
 async fn run_builds_full_message() {
-    let message = run(&quote(), &chip(), &index(), day(17), &holdings())
+    let message = run(&quote(), &chip(), &index(), day(17), &holdings(), None)
         .await
         .expect("有內容");
     // name 由 holdings::stock_name 提供；這裡只驗證與名稱無關的段落。
@@ -408,7 +408,7 @@ fn crossing_lines_rank_by_latest_score() {
         to: day(16),
         crossings,
     };
-    let message = build_message(None, None, Some(&section), &[], &[], name).expect("有穿越");
+    let message = build_message(None, None, Some(&section), &[], &[], None, name).expect("有穿越");
     assert!(
         message.starts_with(&esc("每週市場摘要︰2026-10-16\n")),
         "{message}"
@@ -423,7 +423,7 @@ fn crossing_lines_rank_by_latest_score() {
         crossings: Vec::new(),
         ..section
     };
-    assert!(build_message(None, None, Some(&empty), &[], &[], name).is_none());
+    assert!(build_message(None, None, Some(&empty), &[], &[], None, name).is_none());
 }
 
 /// 持股 RS 變化：依變化排序，上升與下降各列最多 3 檔，沒有變化的不列。
@@ -450,7 +450,7 @@ fn build_message_lists_holding_moves() {
             },
         ]
     );
-    let message = build_message(None, None, None, &[], &moves, name).expect("有持股變化");
+    let message = build_message(None, None, None, &[], &moves, None, name).expect("有持股變化");
     assert!(message.starts_with(&esc("每週市場摘要\n")), "{message}");
     assert!(
         message.contains(&esc("• 上升：2317 鴻海 50 → 59（+9）")),
@@ -461,7 +461,7 @@ fn build_message_lists_holding_moves() {
         "{message}"
     );
     assert!(!message.contains("1101"), "沒有變化的不列");
-    assert!(build_message(None, None, None, &[], &[], name).is_none());
+    assert!(build_message(None, None, None, &[], &[], None, name).is_none());
 }
 
 /// 各段查詢失敗只略過該段；全部失敗或沒有資料時不發送。
@@ -471,9 +471,16 @@ async fn run_degrades_per_section() {
         fail: true,
         ..chip()
     };
-    let message = run(&quote(), &failing_chip, &index(), day(17), &holdings())
-        .await
-        .expect("產業與持股仍有內容");
+    let message = run(
+        &quote(),
+        &failing_chip,
+        &index(),
+        day(17),
+        &holdings(),
+        None,
+    )
+    .await
+    .expect("產業與持股仍有內容");
     assert!(!message.contains("外資"), "{message}");
     assert!(message.contains(&esc("• 轉強：半導體業 +5.0")));
 
@@ -487,6 +494,7 @@ async fn run_degrades_per_section() {
         &failing_index(),
         day(17),
         &holdings(),
+        None,
     )
     .await
     .expect("法人仍有內容");
@@ -502,7 +510,8 @@ async fn run_degrades_per_section() {
             &failing_chip,
             &failing_index(),
             day(17),
-            &holdings()
+            &holdings(),
+            None,
         )
         .await
         .is_none()
@@ -588,7 +597,7 @@ async fn regime_section_lists_crosses() {
     assert!(section.breadth.is_none());
     assert_eq!(market::lines(&section).len(), 6);
 
-    let message = build_message(Some(&section), None, None, &[], &[], name).expect("有大盤");
+    let message = build_message(Some(&section), None, None, &[], &[], None, name).expect("有大盤");
     assert!(
         message.starts_with(&format!(
             "{}\n\n{}",
@@ -615,4 +624,101 @@ fn number_formats() {
     assert_eq!(signed(-2.24), "-2.2");
     assert_eq!(hundred_million(1.234e9), "+12.3 億");
     assert_eq!(hundred_million(-5e7), "-0.5 億");
+}
+
+/// 策略一段：換股日、已過與剩下的交易日數、本期至今報酬與 0050、最好與最差的持股（沒有報酬的不列）。
+#[test]
+fn strategy_lines_rank_holdings_by_return() {
+    use super::strategy::{StrategySection, lines};
+    use crate::app::event::taiwan_stock::strategy_alert::tests::{holding, rebalance};
+    use crate::app::ports::StrategyHolding;
+    let with_return = |symbol: &str, ret: Option<f64>| StrategyHolding {
+        return_to_date: ret,
+        ..holding(symbol, None, 20.0)
+    };
+    let mut section = StrategySection {
+        name: "動能".to_owned(),
+        rebalance: crate::app::ports::StrategyRebalance {
+            days_elapsed: 7,
+            return_to_date: Some(3.456),
+            etf_return_to_date: Some(-1.0),
+            added: vec![
+                with_return("A", Some(10.0)),
+                with_return("B", Some(-5.0)),
+                with_return("C", None),
+            ],
+            kept: vec![
+                with_return("D", Some(2.0)),
+                with_return("E", Some(1.0)),
+                with_return("F", Some(-1.0)),
+                StrategyHolding {
+                    name: Some("台積電".to_owned()),
+                    ..with_return("2330", Some(4.0))
+                },
+            ],
+            ..rebalance()
+        },
+    };
+    assert_eq!(
+        lines(&section),
+        [
+            String::new(),
+            "策略持股（動能）：2026-10-16 換股、已過 7 個交易日，再 13 個交易日換股".to_owned(),
+            "• 持有 7 檔，本期至今 +3.46%（0050 -1.00%，未扣成本）".to_owned(),
+            "• 最好：A +10.00%、2330 台積電 +4.00%、D +2.00%".to_owned(),
+            "• 最差：B -5.00%、F -1.00%、E +1.00%".to_owned(),
+        ]
+    );
+
+    // 有報酬的持股不多於 3 檔時只列最好；只有 1 檔多出來時最差只列 1 檔。
+    section.rebalance.kept.truncate(2);
+    let few = lines(&section);
+    assert_eq!(few.len(), 5, "{few:?}");
+    assert_eq!(few[4], "• 最差：B -5.00%");
+    section.rebalance.added.truncate(1);
+    let one = lines(&section);
+    assert_eq!(
+        one.last().map(String::as_str),
+        Some("• 最好：A +10.00%、D +2.00%、E +1.00%")
+    );
+
+    // 大盤濾網空手、沒有符合條件的股票；沒有名稱時標題只寫「策略持股」。
+    section.name.clear();
+    section.rebalance.market_filtered = true;
+    section.rebalance.etf_return_to_date = None;
+    let filtered = lines(&section);
+    assert_eq!(
+        filtered[1],
+        "策略持股：2026-10-16 換股、已過 7 個交易日，再 13 個交易日換股"
+    );
+    assert_eq!(filtered[2], "• 大盤濾網沒過，策略部位空手；0050 同期 —");
+    section.rebalance.market_filtered = false;
+    section.rebalance.added.clear();
+    section.rebalance.kept.clear();
+    assert!(lines(&section)[2].starts_with("• 沒有符合條件的股票"));
+
+    // 有報酬但都查不到個股報酬時只列持有檔數。
+    section.rebalance.kept = vec![with_return("G", None)];
+    assert_eq!(lines(&section).len(), 3);
+
+    // 組進訊息：放在最後一段。
+    let message = build_message(None, None, None, &[], &[], Some(&section), |_| {
+        String::new()
+    })
+    .expect("有策略段");
+    assert!(
+        message.contains("策略持股︰") || message.contains("策略持股："),
+        "{message}"
+    );
+}
+
+/// 沒有設定策略條件時不跑回測。
+#[tokio::test]
+async fn strategy_section_without_query_is_none() {
+    use crate::app::event::taiwan_stock::strategy_alert::QUERY_ENV;
+    if std::env::var(QUERY_ENV).is_ok_and(|query| !query.trim().is_empty()) {
+        println!("跳過 strategy_section_without_query_is_none：環境已設定 {QUERY_ENV}");
+        return;
+    }
+    assert!(super::strategy::strategy_section().await.is_none());
 }

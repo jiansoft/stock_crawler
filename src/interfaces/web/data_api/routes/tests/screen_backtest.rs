@@ -848,6 +848,7 @@ async fn strategy_gateway_reports_latest_rebalance() {
         symbol: symbol.to_owned(),
         name: Some(symbol.to_owned()),
         weight: 50.0,
+        return_to_date: None,
     };
     let rebalance = gateway
         .latest_rebalance("from=1993-03-01&to=1993-03-15&hold_days=5&limit=2&etf_weight=20")

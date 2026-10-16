@@ -14,15 +14,18 @@
 //! - 外資、投信近 [`WEEK_DAYS`] 個交易日在各產業的估計淨買賣金額（見 [`crate::domain::chip::flow`]），
 //!   淨流入與淨流出最多的產業。
 //! - 持股（普通股）的 RS 與 [`WEEK_DAYS`] 個交易日前相比上升、下降最多的幾檔。
+//! - 有設定策略換股通知的條件時，策略這一期的換股日、本期至今報酬與 0050 對照、最好與最差的持股。
 //!
 //! 各段各自查詢，某段失敗只記錄警告並略過；都沒有資料時不發送。各段的查詢與文字在子模組
-//! [`market`]、[`industry`]、[`crossing`]、[`flows`]、[`holding`]，這裡只負責排程、查詢順序與組訊息。
+//! [`market`]、[`industry`]、[`crossing`]、[`flows`]、[`holding`]、[`strategy`]，這裡只負責排程、
+//! 查詢順序與組訊息。
 
 mod crossing;
 mod flows;
 mod holding;
 mod industry;
 mod market;
+mod strategy;
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -36,6 +39,7 @@ use self::{
     holding::{HoldingMove, holding_moves},
     industry::{IndustrySection, industry_section},
     market::{RegimeSection, regime_section},
+    strategy::{StrategySection, strategy_section},
 };
 use super::holdings;
 use crate::{
@@ -74,12 +78,14 @@ pub async fn execute() -> Result<()> {
         .await
         .context("fetch holdings for weekly market summary failed")?;
     let date = Local::now().date_naive();
+    let strategy = strategy_section().await;
     let message = run(
         &PgQuoteRepository::new(),
         &PgChipRepository::new(),
         &PgMarketIndexRepository::new(),
         date,
         &symbols,
+        strategy.as_ref(),
     )
     .await;
     if let Some(message) = message {
@@ -100,6 +106,7 @@ async fn run(
     index: &(impl IndexCloseQuery + BreadthQuery),
     date: NaiveDate,
     symbols: &BTreeSet<String>,
+    strategy: Option<&StrategySection>,
 ) -> Option<String> {
     let market = regime_section(index, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取加權指數失敗: {why:#}");
@@ -147,6 +154,7 @@ async fn run(
         crossings.as_ref(),
         &flows,
         &moves,
+        strategy,
         holdings::stock_name,
     )
 }
@@ -168,6 +176,7 @@ fn build_message(
     crossings: Option<&CrossingSection>,
     flows: &[FlowSection],
     moves: &[HoldingMove],
+    strategy: Option<&StrategySection>,
     stock_name: impl Fn(&str) -> String,
 ) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
@@ -200,6 +209,9 @@ fn build_message(
     }
 
     lines.extend(holding::lines(moves, &stock_name));
+    if let Some(section) = strategy {
+        lines.extend(strategy::lines(section));
+    }
 
     if lines.is_empty() {
         return None;

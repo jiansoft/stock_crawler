@@ -84,6 +84,8 @@ pub struct StrategyHolding {
     pub name: Option<String>,
     /// 在策略部位中的權重（%）；賣出的股票為上一期換股時的權重。
     pub weight: f64,
+    /// 換股日收盤到最新收盤的還原報酬（%）；賣出的股票或查不到日線為 `None`。
+    pub return_to_date: Option<f64>,
 }
 
 /// 依策略條件最後一次換股的結果。
@@ -93,6 +95,8 @@ pub struct StrategyRebalance {
     pub date: NaiveDate,
     /// 持有天數（交易日），也就是距下次換股的交易日數。
     pub hold_days: u16,
+    /// 換股日之後到最新交易日經過的交易日數（換股當天為 0）。
+    pub days_elapsed: i64,
     /// 0050 核心部位（%）；0 為純策略。
     pub etf_weight: u8,
     /// 大盤濾網沒過、策略部位空手。
@@ -101,6 +105,10 @@ pub struct StrategyRebalance {
     pub cash: f64,
     /// 相對上一期新買進與加碼的部位比例（0–1）。
     pub turnover: f64,
+    /// 策略部位換股日收盤至今的還原報酬（%，依權重、未扣成本）；查不到為 `None`。
+    pub return_to_date: Option<f64>,
+    /// 0050 同期的還原報酬（%）；查不到為 `None`。
+    pub etf_return_to_date: Option<f64>,
     /// 新買進的股票，依排序由前到後。
     pub added: Vec<StrategyHolding>,
     /// 續抱的股票，依排序由前到後。
