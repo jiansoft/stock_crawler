@@ -24,6 +24,19 @@ enum BacktestRankByValue {
     TrustStreak,
 }
 
+/// OpenAPI 文件使用的持股加權方式。
+#[derive(ToSchema)]
+#[schema(rename_all = "snake_case")]
+#[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema；runtime 仍以 String 回傳精確 422。
+enum BacktestWeightingValue {
+    /// 等權。
+    Equal,
+    /// 依換股日含當天往前 20 個交易日的平均成交金額加權（接近市值加權）。
+    TradeValue,
+    /// 依平均成交金額的平方根加權（介於等權與成交金額加權之間）。
+    SqrtTradeValue,
+}
+
 /// 條件選股回測的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct ScreenBacktestParams {
@@ -76,6 +89,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 100 等於只持有 0050。
     #[param(minimum = 0, maximum = 100, default = 0)]
     pub(crate) etf_weight: Option<u8>,
+    /// 策略部位的持股加權方式：`equal`（預設，等權）、`trade_value`（依換股日含當天往前 20 個交易日的
+    /// 平均成交金額，接近市值加權、偏重大型股）或 `sqrt_trade_value`（依平均成交金額的平方根，介於
+    /// 兩者之間）。換手成本依進出股票的權重計算，續抱股票的權重調整不計成本。
+    #[param(value_type = BacktestWeightingValue, inline)]
+    pub(crate) weighting: Option<String>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -246,6 +264,8 @@ pub(crate) struct BacktestHolding {
     pub(crate) symbol: String,
     /// 股票名稱；查無為 `null`。
     pub(crate) name: Option<String>,
+    /// 在策略部位中的權重（%）；等權時各檔相同。
+    pub(crate) weight: f64,
 }
 
 /// 最後一次換股、還沒滿持有天數的持股，也就是依策略現在應該持有的股票。
@@ -296,6 +316,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) rank_by: String,
     /// 0050 核心部位（%）；0 為純策略。
     pub(crate) etf_weight: u8,
+    /// 策略部位的持股加權方式。
+    pub(crate) weighting: String,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。
@@ -405,6 +427,8 @@ pub(crate) struct ScreenBacktestOffsetsResponse {
     pub(crate) rank_by: String,
     /// 0050 核心部位（%）；0 為純策略。
     pub(crate) etf_weight: u8,
+    /// 策略部位的持股加權方式。
+    pub(crate) weighting: String,
     /// 計算交易成本用的手續費折扣（0–1）。
     pub(crate) fee_discount: f64,
     /// 可投資的大盤基準代號（固定為 `0050`）。
@@ -437,6 +461,8 @@ pub(crate) struct ScreenBacktestFrontierResponse {
     pub(crate) limit: u8,
     /// 候選股排序方式。
     pub(crate) rank_by: String,
+    /// 策略部位的持股加權方式。
+    pub(crate) weighting: String,
     /// 計算交易成本用的手續費折扣（0–1）。
     pub(crate) fee_discount: f64,
     /// 可投資的大盤基準代號（固定為 `0050`）。

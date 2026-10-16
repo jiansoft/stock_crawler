@@ -1,10 +1,12 @@
 //! 條件選股回測的個股貢獻：整段回測中哪些股票把報酬拉高、哪些拖累最多。
 //!
-//! 每期的報酬是有報酬持股的等權平均，所以一檔股票在該期的貢獻是「這檔報酬 ÷ 當期有報酬的持股數」
-//! （百分點）；整段的貢獻是各期貢獻直接相加，不複利、不扣交易成本，用來看報酬集中在哪幾檔。
+//! 每期的報酬是有報酬持股的加權平均（等權時權重相同），所以一檔股票在該期的貢獻是「這檔報酬 ×
+//! 權重 ÷ 當期有報酬持股的權重合計」（百分點）；整段的貢獻是各期貢獻直接相加，不複利、不扣交易
+//! 成本，用來看報酬集中在哪幾檔。
 
 use std::collections::HashMap;
 
+use super::portfolio::weight_at;
 use super::{PeriodRow, round2};
 
 /// 貢獻最多、拖累最多各列幾檔。
@@ -31,12 +33,18 @@ pub(super) fn contributors(
     // 代號 → (持有期數, 累計貢獻, 報酬合計, 有報酬的期數)
     let mut totals: HashMap<&str, (i64, f64, f64, usize)> = HashMap::new();
     for row in rows {
-        let priced = row.returns.iter().flatten().count();
-        for (symbol, ret) in row.symbols.iter().zip(&row.returns) {
+        let priced: f64 = row
+            .returns
+            .iter()
+            .enumerate()
+            .filter(|(_, ret)| ret.is_some())
+            .map(|(index, _)| weight_at(row, index))
+            .sum();
+        for (index, (symbol, ret)) in row.symbols.iter().zip(&row.returns).enumerate() {
             let entry = totals.entry(symbol.as_str()).or_default();
             entry.0 += 1;
             if let Some(ret) = ret {
-                entry.1 += ret / priced as f64;
+                entry.1 += ret * weight_at(row, index) / priced;
                 entry.2 += ret;
                 entry.3 += 1;
             }
