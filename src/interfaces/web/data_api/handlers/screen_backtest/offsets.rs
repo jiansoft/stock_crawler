@@ -3,7 +3,7 @@
 //! 每隔 `hold_days` 個交易日換股的回測，結果會受「剛好在哪幾天換股」影響：同樣的條件，起日之後
 //! 晚幾天開始換股，年化報酬可能差上一倍。這裡把偏移 0 到 `hold_days` − 1 都跑一遍（超過
 //! [`MAX_OFFSET_SAMPLES`] 個時平均抽樣），回傳每個偏移的彙總與年化報酬、夏普值、最大回撤的分布，
-//! 以及勝過 0050 的偏移比例；分布的中位數比任何單一偏移更能代表這組條件。另附依年度的分布，
+//! 波動率與 0050 同期的對照，以及勝過 0050 的偏移比例；分布的中位數比任何單一偏移更能代表這組條件。另附依年度的分布，
 //! 看策略在哪些年份穩定勝過 0050。
 
 use std::collections::BTreeMap;
@@ -101,7 +101,8 @@ pub(super) fn sample_offsets(hold_days: u16) -> Vec<u16> {
         .collect()
 }
 
-/// 各偏移扣成本後年化報酬、夏普值、最大回撤（與 0050 同期）的分布，以及勝過 0050 的偏移比例。
+/// 各偏移扣成本後年化報酬、夏普值、最大回撤與波動率（與 0050 同期）的分布，以及勝過 0050 的偏移
+/// 比例（回撤以較淺為勝）。
 pub(super) fn distribution(results: &[BacktestOffsetResult]) -> BacktestOffsetDistribution {
     let field = |pick: fn(&BacktestSummary) -> Option<f64>| {
         stat(results.iter().filter_map(|result| pick(&result.summary)))
@@ -130,8 +131,12 @@ pub(super) fn distribution(results: &[BacktestOffsetResult]) -> BacktestOffsetDi
         max_drawdown_after_costs: field(|s| s.max_drawdown_after_costs),
         etf_annualized_return: field(|s| s.etf_annualized_return),
         etf_sharpe_ratio: field(|s| s.etf_sharpe_ratio),
+        volatility: field(|s| s.volatility),
+        etf_volatility: field(|s| s.etf_volatility),
+        etf_max_drawdown: field(|s| s.etf_max_drawdown),
         beat_etf_return_rate: beat(|s| (s.annualized_return_after_costs, s.etf_annualized_return)),
         beat_etf_sharpe_rate: beat(|s| (s.sharpe_ratio, s.etf_sharpe_ratio)),
+        beat_etf_drawdown_rate: beat(|s| (s.max_drawdown_after_costs, s.etf_max_drawdown)),
     }
 }
 

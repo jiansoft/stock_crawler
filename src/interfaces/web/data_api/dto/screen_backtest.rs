@@ -362,10 +362,18 @@ pub(crate) struct BacktestOffsetDistribution {
     pub(crate) etf_annualized_return: Option<BacktestStat>,
     /// 0050 同期的夏普值。
     pub(crate) etf_sharpe_ratio: Option<BacktestStat>,
+    /// 年化波動率（%，未扣成本）。
+    pub(crate) volatility: Option<BacktestStat>,
+    /// 0050 同期的年化波動率（%）。
+    pub(crate) etf_volatility: Option<BacktestStat>,
+    /// 0050 同期的最大回撤（%，負值）。
+    pub(crate) etf_max_drawdown: Option<BacktestStat>,
     /// 扣成本後年化報酬高於同偏移 0050 的偏移比例（0–1）。
     pub(crate) beat_etf_return_rate: Option<f64>,
     /// 扣成本後夏普值高於同偏移 0050 的偏移比例（0–1）。
     pub(crate) beat_etf_sharpe_rate: Option<f64>,
+    /// 扣成本後最大回撤比同偏移 0050 淺（數值較大）的偏移比例（0–1）。
+    pub(crate) beat_etf_drawdown_rate: Option<f64>,
 }
 
 /// 某一年各偏移的表現分布（年度依換股日，各偏移該年各期的累積報酬，年度各自從 1 起算）；

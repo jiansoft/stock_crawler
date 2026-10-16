@@ -641,6 +641,11 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(spread["annualized_return_after_costs"]["min"], *annualized);
     assert_eq!(spread["annualized_return_after_costs"]["max"], *annualized);
     assert_eq!(spread["beat_etf_return_rate"], 1.0);
+    assert_eq!(
+        spread["etf_max_drawdown"]["median"],
+        single["summary"]["etf_max_drawdown"]
+    );
+    assert_eq!(spread["volatility"]["max"], single["summary"]["volatility"]);
     // 依年度：只有偏移 0 有期數，1993 年的分布就是單次回測的年度彙總。
     assert_eq!(
         (json["rank_by"].as_str(), json["etf_weight"].as_u64()),
