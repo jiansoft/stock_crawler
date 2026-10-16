@@ -10,6 +10,9 @@
 //! 交易成本依換股時實際賣出、買進的比例扣除：買賣各付手續費 0.1425%（乘上 `fee_discount`），
 //! 賣出另付證交稅 0.3%；同一檔續抱不計成本，也不計等權再平衡的小額調整。
 //!
+//! 有設 `etf_weight` 時，組合固定以該比例持有 0050、其餘才跑策略（核心／衛星配置），彙總與每期報酬
+//! 都是混合後的組合報酬；個股貢獻與持股仍只看策略部位。
+//!
 //! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
 //! [`contributors`]（個股貢獻）、[`offsets`]（換股日偏移穩健度端點）。
 
@@ -30,7 +33,7 @@ use chrono::NaiveDate;
 pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
 
 use self::contributors::{Contribution, LISTED_CONTRIBUTORS, contributors};
-use self::portfolio::{PeriodCost, period, select_holdings, trading_costs};
+use self::portfolio::{PeriodCost, blend_etf, period, select_holdings, trading_costs};
 use self::sql::{BACKTEST_SQL, BACKTEST_WITH_CHIP_SQL, LATEST_RS_DATE_SQL};
 use self::summary::{summarize, yearly};
 use super::signal_history::{validate_rs_range, validate_streaks};
@@ -199,6 +202,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         hold_min_rs_score: params.hold_min_rs_score,
         max_per_industry: params.max_per_industry,
         rebalance_offset,
+        etf_weight: backtest.etf_weight,
         min_avg_trade_value: params.min_avg_trade_value,
         rank_by: backtest.rank_by.to_owned(),
         industry: params.industry.clone(),
@@ -239,6 +243,8 @@ struct Backtest<'a> {
     fee_discount: f64,
     /// 候選股排序方式（[`RANK_BY`] 其中之一）。
     rank_by: &'a str,
+    /// 0050 核心部位的比例（%，0 為純策略）。
+    etf_weight: u8,
 }
 
 /// 一次回測的各期結果與目前持股。
@@ -311,6 +317,10 @@ impl<'a> Backtest<'a> {
                 "rank_by 必須為 rs_score、trade_value、foreign_streak 或 trust_streak",
             ));
         }
+        let etf_weight = params.etf_weight.unwrap_or(0);
+        if etf_weight > 100 {
+            return Err(unprocessable("etf_weight 必須介於 0 至 100"));
+        }
         let keep_rank = params.keep_rank.unwrap_or(limit);
         if !(limit..=MAX_KEEP_RANK).contains(&keep_rank) {
             return Err(unprocessable("keep_rank 必須介於 limit 至 200"));
@@ -361,6 +371,7 @@ impl<'a> Backtest<'a> {
             keep_rank,
             fee_discount,
             rank_by,
+            etf_weight,
         })
     }
 
@@ -417,6 +428,7 @@ impl<'a> Backtest<'a> {
             params.max_per_industry.map(usize::from),
         );
         let mut costs = trading_costs(&rows, self.fee_discount);
+        blend_etf(&mut rows, &mut costs, f64::from(self.etf_weight) / 100.0);
         let current = split_current(&mut rows, &mut costs);
         Ok(Simulation {
             rows,

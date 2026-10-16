@@ -247,6 +247,15 @@ fn openapi_screen_backtest_schema_pins_field_names() {
         assert_eq!(schema["minimum"], 1, "{name}");
         assert_eq!(schema["maximum"], maximum, "{name}");
     }
+    let etf_weight = query_schema(operation, "etf_weight");
+    assert_eq!(
+        (
+            etf_weight["minimum"].as_u64(),
+            etf_weight["maximum"].as_u64()
+        ),
+        (Some(0), Some(100))
+    );
+    assert_eq!(etf_weight["default"], 0);
     let rank_by = query_schema(operation, "rank_by");
     assert_eq!(
         rank_by["enum"],
