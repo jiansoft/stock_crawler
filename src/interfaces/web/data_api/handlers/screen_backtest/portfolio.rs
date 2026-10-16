@@ -1,5 +1,5 @@
 //! 條件選股回測的持股選擇與交易成本：依上一期持股與 `keep_rank`、續抱門檻、產業上限決定每期持股，
-//! 再依換手扣除手續費與證交稅。
+//! 再依換手扣除手續費與證交稅；有設 `etf_weight` 時再與 0050 核心部位混合。
 
 use std::collections::{HashMap, HashSet};
 
@@ -49,6 +49,24 @@ pub(super) fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<Period
             }
         })
         .collect()
+}
+
+/// 把每期報酬換成「`weight` 比例持有 0050、其餘為策略」的組合報酬（`weight` 為 0–1）：扣成本前後的
+/// 報酬都是 `weight × 0050 + (1 − weight) × 策略`，換手只算策略部位（乘上 `1 − weight`）。
+///
+/// 0050 核心部位視為一直持有，不計買賣成本，也不計每期調回目標比例的小額調整；空手（大盤濾網）時
+/// 只有策略部位轉成現金，0050 照常持有。0050 缺資料的期數該部位報酬算 0。`weight` 為 0 時不變。
+pub(super) fn blend_etf(rows: &mut [PeriodRow], costs: &mut [PeriodCost], weight: f64) {
+    if weight <= 0.0 {
+        return;
+    }
+    let mix = |etf: f64, strategy: f64| weight * etf + (1.0 - weight) * strategy;
+    for (row, cost) in rows.iter_mut().zip(costs.iter_mut()) {
+        let etf = row.etf_return.unwrap_or(0.0);
+        row.avg_return = Some(mix(etf, row.avg_return.unwrap_or(0.0)));
+        cost.net_return = mix(etf, cost.net_return);
+        cost.turnover *= 1.0 - weight;
+    }
 }
 
 /// 依候選股決定每期持股：上一期持有、這期仍符合條件且排在前 `keep_rank` 名的股票續抱，

@@ -249,6 +249,59 @@ fn yearly_groups_by_rebalance_year() {
     assert!(yearly(&[], &[]).is_empty());
 }
 
+/// 0050 核心部位：報酬與扣成本後報酬依比例混合、換手只算策略部位；空手與 0050 缺資料的期數照算；
+/// 比例 0 不變、100 等於只持有 0050。
+#[test]
+fn blend_etf_mixes_core_and_strategy() {
+    let mut rows = [
+        dated(day(2024, 1, 2), Some(10.0), 0.0, Some(4.0)),
+        dated(day(2024, 2, 1), None, 0.0, Some(-2.0)),
+        dated(day(2024, 3, 1), Some(6.0), 0.0, None),
+    ];
+    let mut costs = [
+        PeriodCost {
+            turnover: 1.0,
+            net_return: 9.8,
+        },
+        PeriodCost {
+            turnover: 0.0,
+            net_return: -0.4,
+        },
+        PeriodCost {
+            turnover: 0.5,
+            net_return: 5.9,
+        },
+    ];
+    let (original_rows, original_costs) = (rows.clone(), costs);
+    blend_etf(&mut rows, &mut costs, 0.0);
+    assert_eq!(
+        (rows.clone(), costs),
+        (original_rows.clone(), original_costs)
+    );
+
+    blend_etf(&mut rows, &mut costs, 0.25);
+    let avg: Vec<Option<f64>> = rows.iter().map(|row| row.avg_return).collect();
+    assert_eq!(avg, [Some(8.5), Some(-0.5), Some(4.5)]);
+    assert!(
+        near(costs[0].net_return, 0.25 * 4.0 + 0.75 * 9.8),
+        "{costs:?}"
+    );
+    assert!(
+        near(costs[1].net_return, 0.25 * -2.0 + 0.75 * -0.4),
+        "{costs:?}"
+    );
+    assert!(near(costs[2].net_return, 0.75 * 5.9), "{costs:?}");
+    let turnover: Vec<f64> = costs.iter().map(|cost| cost.turnover).collect();
+    assert_eq!(turnover, [0.75, 0.0, 0.375]);
+    // 持股與報酬明細只看策略部位，不受影響。
+    assert_eq!(rows[0].holdings, original_rows[0].holdings);
+
+    let (mut rows, mut costs) = (original_rows, original_costs);
+    blend_etf(&mut rows, &mut costs, 1.0);
+    let net: Vec<f64> = costs.iter().map(|cost| cost.net_return).collect();
+    assert_eq!(net, [4.0, -2.0, 0.0]);
+}
+
 /// 換股成本：第一期全部買進；賣出付手續費與證交稅、買進付手續費；續抱不計；空手時賣光。
 #[test]
 fn trading_costs_follow_turnover() {

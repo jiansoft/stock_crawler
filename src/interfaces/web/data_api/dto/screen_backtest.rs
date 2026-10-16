@@ -71,6 +71,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 買超天數）；同值再依相對強度分數。`keep_rank` 的名次也依此排序。
     #[param(value_type = BacktestRankByValue, inline)]
     pub(crate) rank_by: Option<String>,
+    /// 0050 核心部位（%，0–100，預設 0）：組合固定以這個比例持有 0050、其餘才依條件選股，
+    /// 用來看策略搭配大盤的效果；彙總為混合後的組合報酬，0050 部位不計買賣成本，空手時 0050 照常持有。
+    /// 100 等於只持有 0050。
+    #[param(minimum = 0, maximum = 100, default = 0)]
+    pub(crate) etf_weight: Option<u8>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -289,6 +294,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) min_avg_trade_value: Option<u32>,
     /// 候選股排序方式。
     pub(crate) rank_by: String,
+    /// 0050 核心部位（%）；0 為純策略。
+    pub(crate) etf_weight: u8,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。

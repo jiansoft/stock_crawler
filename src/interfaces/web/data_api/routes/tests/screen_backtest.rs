@@ -448,6 +448,25 @@ async fn screen_backtest_endpoint_db_semantics() {
     let (status, _) = query("rank_by=volume").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
+    // 0050 核心部位 50%：03-01 為 (6 + 4) / 2、03-08 0050 沒有資料算 0 → 8 / 2；100% 等於只持有 0050。
+    let (status, json) = query("limit=2&etf_weight=50").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["etf_weight"], 50);
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 2, Some(5.0)),
+            ("1993-03-08".to_owned(), 2, Some(4.0)),
+        ]
+    );
+    let (_, json) = query("limit=2&etf_weight=100").await;
+    assert_eq!(json["summary"]["total_return_after_costs"], 4.0);
+    assert_eq!(json["summary"]["avg_turnover"], 0.0);
+    let (_, json) = query("limit=2").await;
+    assert_eq!(json["etf_weight"], 0);
+    let (status, _) = query("etf_weight=101").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
     assert_eq!(status, StatusCode::OK, "{json}");
