@@ -535,7 +535,10 @@ impl<'a> Backtest<'a> {
                 .bind(params.min_foreign_streak.map(i64::from))
                 .bind(params.min_trust_streak.map(i64::from));
         }
-        let candidates: Vec<CandidateRow> = query.fetch_all(database::get_connection()).await?;
+        // 回測主查詢依條件要 1～2 秒，偏移穩健度與前緣一次就跑 20 個偏移；用批次連線池（慢查詢門檻
+        // 5 秒），避免每次回測都留下一串慢查詢警告，蓋過真正的退化。
+        let candidates: Vec<CandidateRow> =
+            query.fetch_all(database::get_batch_connection()).await?;
         let elapsed_days = candidates
             .last()
             .filter(|row| row.pending)
