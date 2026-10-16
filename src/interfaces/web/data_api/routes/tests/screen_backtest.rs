@@ -251,18 +251,21 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(years[0]["total_return"], 14.48);
     assert_eq!(years[0]["benchmark_total_return"], 8.31);
     assert_eq!(years[0]["etf_total_return"], 4.0);
-    // 交易成本：03-01 全部買進（0.1425%）；03-08 賣出 BA（一半，0.4425%）、買進 BB（一半，0.1425%）。
+    // 交易成本：03-01 全部買進（0.1425%）；03-01 那期 BA 漲 10%、BC 漲 2%，期末 BA 占 0.55 ÷ 1.06。
+    // 03-08 賣出 BA（0.4425%）、BC 加碼回一半與買進 BB 一半（0.1425%），兩邊都是 0.55 ÷ 1.06。
     assert_eq!(json["fee_discount"], 1.0);
     assert_eq!(json["periods"][0]["turnover"], 1.0);
     assert_eq!(json["periods"][0]["return_after_costs"], 5.86);
-    assert_eq!(json["periods"][1]["turnover"], 0.5);
-    assert_eq!(json["periods"][1]["return_after_costs"], 7.71);
-    assert_eq!(summary["avg_turnover"], 0.75);
-    // 1.058575 × 1.077075 − 1 ≈ 14.02%。
-    assert_eq!(summary["total_return_after_costs"], 14.02);
+    assert_eq!(json["periods"][1]["turnover"], 0.5189);
+    // 8 − 0.5189 × (0.4425 + 0.1425) ≈ 7.70。
+    assert_eq!(json["periods"][1]["return_after_costs"], 7.7);
+    assert_eq!(summary["avg_turnover"], 0.7594);
+    // 1.058575 × 1.076965 − 1 ≈ 14.00%。
+    assert_eq!(summary["total_return_after_costs"], 14.0);
     let (_, free) = query("limit=2&fee_discount=0").await;
     assert_eq!(free["periods"][0]["return_after_costs"], 6.0);
-    assert_eq!(free["periods"][1]["return_after_costs"], 7.85);
+    // 只剩賣出 BA 的證交稅：8 − 0.5189 × 0.3。
+    assert_eq!(free["periods"][1]["return_after_costs"], 7.84);
 
     // 換股緩衝：只持 1 檔、緩衝 3 名。03-08 的 BA 掉到第 3 名仍續抱（報酬 3），不換成第 1 名的 BB。
     let (status, json) = query("limit=1&keep_rank=3").await;

@@ -8,10 +8,11 @@
 //! 沒有前視偏誤；相對強度母體看當時有沒有在交易，沒有存活者偏差。
 //!
 //! 交易成本依換股時實際賣出、買進的比例扣除：買賣各付手續費 0.1425%（乘上 `fee_discount`），
-//! 賣出另付證交稅 0.3%；同一檔續抱不計成本，也不計等權再平衡的小額調整。
+//! 賣出另付證交稅 0.3%；續抱股票漲跌後調回目標權重（再平衡）的買賣也計入。
 //!
 //! 有設 `etf_weight` 時，組合固定以該比例持有 0050、其餘才跑策略（核心／衛星配置），彙總與每期報酬
-//! 都是混合後的組合報酬；個股貢獻與持股仍只看策略部位。
+//! 都是混合後的組合報酬，每期調回固定比例的買賣也扣成本（0050 證交稅 0.1%）；個股貢獻與持股仍只看
+//! 策略部位。
 //!
 //! `weighting` 決定策略部位的持股權重：預設等權，也可依換股日前 20 個交易日的平均成交金額（接近
 //! 市值加權，和 0050 一樣偏重大型股）或其平方根加權。
@@ -283,6 +284,8 @@ struct Raw {
     costs: Vec<PeriodCost>,
     /// 最後一期還沒滿持有天數時，換股日之後到迄日經過的交易日數。
     elapsed_days: Option<i64>,
+    /// 手續費折扣，0050 再平衡成本也用這個折扣。
+    fee_discount: f64,
 }
 
 impl Raw {
@@ -293,6 +296,7 @@ impl Raw {
             &mut self.rows,
             &mut self.costs,
             f64::from(etf_weight) / 100.0,
+            self.fee_discount,
         );
         let current = split_current(&mut self.rows, &mut self.costs);
         Simulation {
@@ -503,6 +507,7 @@ impl<'a> Backtest<'a> {
             rows,
             costs,
             elapsed_days,
+            fee_discount: self.fee_discount,
         })
     }
 }

@@ -275,36 +275,69 @@ fn blend_etf_mixes_core_and_strategy() {
         },
     ];
     let (original_rows, original_costs) = (rows.clone(), costs);
-    blend_etf(&mut rows, &mut costs, 0.0);
+    blend_etf(&mut rows, &mut costs, 0.0, 1.0);
     assert_eq!(
         (rows.clone(), costs),
         (original_rows.clone(), original_costs)
     );
 
-    blend_etf(&mut rows, &mut costs, 0.25);
+    blend_etf(&mut rows, &mut costs, 0.25, 1.0);
     let avg: Vec<Option<f64>> = rows.iter().map(|row| row.avg_return).collect();
     assert_eq!(avg, [Some(8.5), Some(-0.5), Some(4.5)]);
+    // 第一期 0050 第一次買進不計成本。
     assert!(
         near(costs[0].net_return, 0.25 * 4.0 + 0.75 * 9.8),
         "{costs:?}"
     );
+    // 第一期策略漲 10%、0050 漲 4%：0050 比例掉到 0.26 ÷ 1.085，換股時減碼策略（手續費與證交稅）、
+    // 買進 0050（手續費）。
+    let drift = 0.25 - 0.26 / 1.085;
     assert!(
-        near(costs[1].net_return, 0.25 * -2.0 + 0.75 * -0.4),
+        near(
+            costs[1].net_return,
+            0.25 * -2.0 + 0.75 * -0.4 - drift * (0.1425 + 0.4425)
+        ),
         "{costs:?}"
     );
-    assert!(near(costs[2].net_return, 0.75 * 5.9), "{costs:?}");
+    // 第二期策略空手：0050 跌 2% 後比例低於 0.25，減碼的是現金，只付買進 0050 的手續費。
+    let cash_drift = 0.25 - 0.245 / 0.995;
+    assert!(
+        near(costs[2].net_return, 0.75 * 5.9 - cash_drift * 0.1425),
+        "{costs:?}"
+    );
     let turnover: Vec<f64> = costs.iter().map(|cost| cost.turnover).collect();
-    assert_eq!(turnover, [0.75, 0.0, 0.375]);
+    assert!(near(turnover[0], 0.75), "{turnover:?}");
+    assert!(near(turnover[1], drift), "{turnover:?}");
+    assert!(near(turnover[2], 0.375 + cash_drift), "{turnover:?}");
     // 持股與報酬明細只看策略部位，不受影響。
     assert_eq!(rows[0].holdings, original_rows[0].holdings);
 
-    let (mut rows, mut costs) = (original_rows, original_costs);
-    blend_etf(&mut rows, &mut costs, 1.0);
+    // 比例 100% 不用調整，等於只持有 0050。
+    let (mut rows, mut costs) = (original_rows.clone(), original_costs);
+    blend_etf(&mut rows, &mut costs, 1.0, 1.0);
     let net: Vec<f64> = costs.iter().map(|cost| cost.net_return).collect();
     assert_eq!(net, [4.0, -2.0, 0.0]);
+
+    // 0050 漲得比策略多：賣出 0050（手續費與 ETF 證交稅）、加碼策略（手續費）。
+    let mut rows = [
+        dated(day(2024, 1, 2), Some(0.0), 0.0, Some(10.0)),
+        dated(day(2024, 2, 1), Some(1.0), 0.0, Some(0.0)),
+    ];
+    let mut costs = free(&rows);
+    blend_etf(&mut rows, &mut costs, 0.5, 0.0);
+    let excess = 0.55 / 1.05 - 0.5;
+    assert!(
+        near(
+            costs[1].net_return,
+            0.5 - excess * super::portfolio::ETF_TAX_RATE
+        ),
+        "{costs:?}"
+    );
+    assert!(near(costs[1].turnover, excess), "{costs:?}");
 }
 
-/// 換股成本：第一期全部買進；賣出付手續費與證交稅、買進付手續費；續抱不計；空手時賣光。
+/// 換股成本：第一期全部買進；賣出付手續費與證交稅、買進付手續費；續抱且比例不變的不計，
+/// 漲跌後調回目標比例的部分要計；空手時賣光。
 #[test]
 fn trading_costs_follow_turnover() {
     let rows = [
@@ -338,6 +371,20 @@ fn trading_costs_follow_turnover() {
             5.0 - 0.5 * (0.0399 + 0.3) - 0.5 * 0.0399
         ),
         "{discounted:?}"
+    );
+
+    // 續抱股票漲跌後調回等權：A 漲 20%、B 持平，期末 A 占 0.6 ÷ 1.1，換股時減碼 A、加碼 B。
+    let mut drifting = [holding(&["A", "B"], 10.0), holding(&["A", "B"], 2.0)];
+    drifting[0].returns = vec![Some(20.0), Some(0.0)];
+    let costs_drift = trading_costs(&drifting, 1.0);
+    let trimmed = 0.6 / 1.1 - 0.5;
+    assert!(near(costs_drift[1].turnover, trimmed), "{costs_drift:?}");
+    assert!(
+        near(
+            costs_drift[1].net_return,
+            2.0 - trimmed * 0.4425 - trimmed * 0.1425
+        ),
+        "{costs_drift:?}"
     );
 
     let summary = summarize(&rows, &costs, 20);
@@ -869,6 +916,7 @@ fn frontier_blends_each_weight() {
         costs: free(&rows),
         rows,
         elapsed_days: Some(3),
+        fee_discount: 1.0,
     };
     let points = frontier(&[(0, raw.clone()), (1, raw)], 20);
     assert_eq!(
@@ -1008,14 +1056,16 @@ fn weigh_uses_trade_value_for_returns_costs_and_contributors() {
     // (4×300 + 8×100) ÷ 400 = 5。
     assert_eq!(weighted[1].avg_return, Some(5.0));
 
-    // 第二期賣出 B、C（占上一期權重 150 ÷ 450）、買進 D（占這一期 100 ÷ 400）。
+    // 第一期期末：A 300×1.1、B 100×0.98、C（沒有報酬，視為平均 7%）50×1.07，合計 481.5。
+    // 第二期 A 調到 0.75（加碼）、買進 D 0.25，賣出 B、C。
     let costs = trading_costs(&weighted, 0.0);
     assert!(near(costs[0].turnover, 1.0), "{costs:?}");
-    assert!(near(costs[1].turnover, 0.25), "{costs:?}");
+    let a_before = 330.0 / 481.5;
+    assert!(near(costs[1].turnover, 0.75 - a_before + 0.25), "{costs:?}");
     assert!(
         near(
             costs[1].net_return,
-            5.0 - 150.0 / 450.0 * super::portfolio::TAX_RATE
+            5.0 - (98.0 + 53.5) / 481.5 * super::portfolio::TAX_RATE
         ),
         "{costs:?}"
     );

@@ -12,6 +12,9 @@ pub(super) const FEE_RATE: f64 = 0.1425;
 /// 股票證交稅率（%），賣出時付。
 pub(super) const TAX_RATE: f64 = 0.3;
 
+/// ETF 證交稅率（%），賣出 0050 時付。
+pub(super) const ETF_TAX_RATE: f64 = 0.1;
+
 /// 輸出每期前幾檔代號。
 pub(super) const LISTED_SYMBOLS: usize = 10;
 
@@ -105,36 +108,64 @@ pub(super) struct PeriodCost {
     pub(super) net_return: f64,
 }
 
-/// 依前後兩期的持股算出每期的換手與扣成本後報酬：賣出上一期有、這一期沒有的股票（占上一期的權重），
-/// 付手續費與證交稅；買進這一期新增的股票（占這一期的權重），付手續費。第一期全部買進；續抱股票的
-/// 權重調整不計成本。
+/// 持股占策略部位的比例（合計為 1）；沒有持股為空。
+fn shares(row: &PeriodRow) -> Vec<f64> {
+    let weights: Vec<f64> = (0..row.symbols.len())
+        .map(|index| weight_at(row, index))
+        .collect();
+    let total: f64 = weights.iter().sum();
+    if total <= 0.0 {
+        return weights.iter().map(|_| 0.0).collect();
+    }
+    weights.iter().map(|weight| weight / total).collect()
+}
+
+/// 一期結束、下次換股前各持股占策略部位的比例：期初比例依各檔報酬漲跌後重新換算（合計為 1）。
+/// 沒有報酬的持股（之後沒有收盤）視為與該期平均報酬同幅。
+fn drifted(row: &PeriodRow) -> Vec<f64> {
+    let start = shares(row);
+    let average = row.avg_return.unwrap_or(0.0);
+    let grown: Vec<f64> = start
+        .iter()
+        .enumerate()
+        .map(|(index, share)| {
+            let ret = row.returns.get(index).copied().flatten().unwrap_or(average);
+            share * (1.0 + ret / 100.0).max(0.0)
+        })
+        .collect();
+    let total: f64 = grown.iter().sum();
+    if total <= 0.0 {
+        return start;
+    }
+    grown.iter().map(|value| value / total).collect()
+}
+
+/// 依前後兩期的持股算出每期的換手與扣成本後報酬：上一期持股漲跌後的比例調到這一期的目標比例，
+/// 減碼（含整檔賣出）的部分付手續費與證交稅，加碼（含新買進）的部分付手續費。第一期全部買進；
+/// 空手時賣光。續抱股票的再平衡（例如等權持股漲多的減碼、依成交金額加權時權重變動）也計入。
 pub(super) fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<PeriodCost> {
     let fee = FEE_RATE * fee_discount;
-    let mut previous: Option<&PeriodRow> = None;
+    // 上一期期末各持股的比例。
+    let mut previous: HashMap<&str, f64> = HashMap::new();
     rows.iter()
         .map(|row| {
-            let share = |from: Option<&PeriodRow>, other: Option<&PeriodRow>| {
-                let Some(from) = from else {
-                    return 0.0;
-                };
-                let total: f64 = (0..from.symbols.len())
-                    .map(|index| weight_at(from, index))
-                    .sum();
-                if total <= 0.0 {
-                    return 0.0;
+            let mut bought = 0.0;
+            let mut sold = 0.0;
+            for (symbol, target) in row.symbols.iter().zip(shares(row)) {
+                let before = previous.remove(symbol.as_str()).unwrap_or(0.0);
+                if target > before {
+                    bought += target - before;
+                } else {
+                    sold += before - target;
                 }
-                let other: &[String] = other.map_or(&[], |other| other.symbols.as_slice());
-                from.symbols
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, symbol)| !other.contains(symbol))
-                    .map(|(index, _)| weight_at(from, index))
-                    .sum::<f64>()
-                    / total
-            };
-            let sold = share(previous, Some(row));
-            let bought = share(Some(row), previous);
-            previous = Some(row);
+            }
+            sold += previous.values().sum::<f64>();
+            previous = row
+                .symbols
+                .iter()
+                .map(String::as_str)
+                .zip(drifted(row))
+                .collect();
             PeriodCost {
                 turnover: bought,
                 net_return: row.avg_return.unwrap_or(0.0) - sold * (fee + TAX_RATE) - bought * fee,
@@ -143,21 +174,63 @@ pub(super) fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<Period
         .collect()
 }
 
-/// 把每期報酬換成「`weight` 比例持有 0050、其餘為策略」的組合報酬（`weight` 為 0–1）：扣成本前後的
-/// 報酬都是 `weight × 0050 + (1 − weight) × 策略`，換手只算策略部位（乘上 `1 − weight`）。
+/// 把每期報酬換成「`weight` 比例持有 0050、其餘為策略」的組合報酬（`weight` 為 0–1）：扣成本前的
+/// 報酬是 `weight × 0050 + (1 − weight) × 策略`，扣成本後另扣每期換股時把組合調回固定比例的成本；
+/// 策略部位自己的換手乘上 `1 − weight`。
 ///
-/// 0050 核心部位視為一直持有，不計買賣成本，也不計每期調回目標比例的小額調整；空手（大盤濾網）時
-/// 只有策略部位轉成現金，0050 照常持有。0050 缺資料的期數該部位報酬算 0。`weight` 為 0 時不變。
-pub(super) fn blend_etf(rows: &mut [PeriodRow], costs: &mut [PeriodCost], weight: f64) {
+/// 上一期 0050 漲得比策略多，換股時賣出多出的 0050（手續費與 ETF 證交稅 0.1%）、加碼策略部位
+/// （手續費）；反之減碼策略部位（手續費與證交稅）、買進 0050（手續費）。策略部位上一期空手時減碼
+/// 的是現金、這一期空手時加碼的是現金，不付成本。0050 第一次買進不計成本，與只持有 0050 的基準
+/// 一致；比例 100% 時沒有調整，等於只持有 0050。空手（大盤濾網）時只有策略部位轉成現金，0050 照常
+/// 持有。0050 缺資料的期數該部位報酬算 0。`weight` 為 0 時不變。
+pub(super) fn blend_etf(
+    rows: &mut [PeriodRow],
+    costs: &mut [PeriodCost],
+    weight: f64,
+    fee_discount: f64,
+) {
     if weight <= 0.0 {
         return;
     }
+    let fee = FEE_RATE * fee_discount;
     let mix = |etf: f64, strategy: f64| weight * etf + (1.0 - weight) * strategy;
+    // 上一期的 0050 報酬、策略報酬（扣成本前）與策略部位是否有持股。
+    let mut previous: Option<(f64, f64, bool)> = None;
     for (row, cost) in rows.iter_mut().zip(costs.iter_mut()) {
         let etf = row.etf_return.unwrap_or(0.0);
-        row.avg_return = Some(mix(etf, row.avg_return.unwrap_or(0.0)));
-        cost.net_return = mix(etf, cost.net_return);
-        cost.turnover *= 1.0 - weight;
+        let strategy = row.avg_return.unwrap_or(0.0);
+        let invested = row.holdings > 0;
+        let (rebalance, rebalance_cost) = match previous {
+            Some((last_etf, last_strategy, last_invested)) => {
+                let etf_value = weight * (1.0 + last_etf / 100.0).max(0.0);
+                let total = etf_value + (1.0 - weight) * (1.0 + last_strategy / 100.0).max(0.0);
+                let drift = if total > 0.0 {
+                    etf_value / total - weight
+                } else {
+                    0.0
+                };
+                let amount = drift.abs();
+                // 0050 多了：賣 0050、加碼策略；少了：減碼策略、買 0050。策略部位是現金的那一側不付
+                // 成本；換手只算買進股票或 0050 的部分。
+                let (etf_rate, strategy_rate, bought) = if drift > 0.0 {
+                    let rate = if invested { fee } else { 0.0 };
+                    (
+                        fee + ETF_TAX_RATE,
+                        rate,
+                        if invested { amount } else { 0.0 },
+                    )
+                } else {
+                    let rate = if last_invested { fee + TAX_RATE } else { 0.0 };
+                    (fee, rate, amount)
+                };
+                (bought, amount * (etf_rate + strategy_rate))
+            }
+            None => (0.0, 0.0),
+        };
+        previous = Some((etf, strategy, invested));
+        row.avg_return = Some(mix(etf, strategy));
+        cost.net_return = mix(etf, cost.net_return) - rebalance_cost;
+        cost.turnover = cost.turnover * (1.0 - weight) + rebalance;
     }
 }
 
