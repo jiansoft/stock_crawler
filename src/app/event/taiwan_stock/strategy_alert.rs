@@ -208,7 +208,7 @@ fn build_message(
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::app::event::taiwan_stock) mod tests {
     use std::sync::Mutex;
 
     use anyhow::bail;
@@ -220,18 +220,26 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 10, d).expect("固定日期合法")
     }
 
-    fn holding(symbol: &str, name: Option<&str>, weight: f64) -> StrategyHolding {
+    pub(in crate::app::event::taiwan_stock) fn holding(
+        symbol: &str,
+        name: Option<&str>,
+        weight: f64,
+    ) -> StrategyHolding {
         StrategyHolding {
             symbol: symbol.to_owned(),
             name: name.map(str::to_owned),
             weight,
+            return_to_date: None,
         }
     }
 
-    fn rebalance() -> StrategyRebalance {
+    pub(in crate::app::event::taiwan_stock) fn rebalance() -> StrategyRebalance {
         StrategyRebalance {
             date: day(16),
             hold_days: 20,
+            days_elapsed: 0,
+            return_to_date: None,
+            etf_return_to_date: None,
             etf_weight: 0,
             market_filtered: false,
             cash: 0.0,
