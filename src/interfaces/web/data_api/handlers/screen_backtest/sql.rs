@@ -12,7 +12,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 
 /// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期候選檔數、
 /// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類、`$11` 大盤濾網均線天數
-/// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）；籌碼版另有 `$13`／`$14`。
+/// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）、`$13` 市場廣度門檻（%，`NULL` 為不濾）；
+/// 籌碼版另有 `$14`／`$15`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後每隔 `$4` 個交易日的換股日；`window_start` 是含當天往前第 `$4` 個交易日，
@@ -23,6 +24,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
 /// - `taiex`：加權指數收盤是否不低於含當天往前 `$11` 個交易日的平均；低於時 `market_ok` 為
 ///   false，這期空手。
+/// - `breadth`：同市場站上 60 日均線的股票比例（`daily_stock_price_stats`）是否不低於 `$13`%；
+///   低於時同樣空手。換股日沒有統計列視為通過（與加權指數缺資料相同）。
 /// - `etf_return`：同一天買進 [`ETF_BENCHMARK`] 持有同樣天數的還原報酬，作為實際買得到的大盤基準。
 macro_rules! backtest_sql {
     ($with:literal, $chip_join:literal, $chip_filter:literal) => {
@@ -113,9 +116,17 @@ taiex AS (
            ) AS above
     FROM "index"
     WHERE category = 'TAIEX' AND "date" BETWEEN $1::date - 400 AND $2
+),
+breadth AS (
+    SELECT date,
+           above_60_day_moving_average * 100
+               >= $13::int * NULLIF(above_60_day_moving_average + below_60_day_moving_average, 0) AS above
+    FROM daily_stock_price_stats
+    WHERE stock_exchange_market_id = $3 AND date BETWEEN $1 AND $2
 )
 SELECT b.date,
-       ($11::int IS NULL OR t.above IS NOT FALSE) AS market_ok,
+       ($11::int IS NULL OR t.above IS NOT FALSE)
+           AND ($13::int IS NULL OR br.above IS NOT FALSE) AS market_ok,
        b.avg_ret AS benchmark_return,
        (CASE $4::int
             WHEN 5 THEN e.return_5d
@@ -135,6 +146,7 @@ LEFT JOIN candidates c ON c.date = b.date
 LEFT JOIN holdable h ON h.date = b.date
 LEFT JOIN daily_forward_return e ON e.date = b.date AND e.stock_symbol = '0050'
 LEFT JOIN taiex t ON t."date" = b.date
+LEFT JOIN breadth br ON br.date = b.date
 WHERE b.samples > 0
 ORDER BY b.date
 "#
@@ -145,7 +157,7 @@ ORDER BY b.date
 /// 沒有籌碼條件的回測。
 pub(super) const BACKTEST_SQL: &str = backtest_sql!("\nWITH", "", "");
 
-/// 有籌碼條件的回測：換股當天外資（`$13`）／投信（`$14`）已連續買超至少 N 天，`NULL` 為不篩選。
+/// 有籌碼條件的回測：換股當天外資（`$14`）／投信（`$15`）已連續買超至少 N 天，`NULL` 為不篩選。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
     chip_streak_ctes!(),
@@ -153,6 +165,6 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($13::bigint IS NULL OR c.foreign_buy >= $13)\n      AND ($14::bigint IS NULL OR c.trust_buy >= $14)"
+        "\n      AND ($14::bigint IS NULL OR c.foreign_buy >= $14)\n      AND ($15::bigint IS NULL OR c.trust_buy >= $15)"
     )
 );
