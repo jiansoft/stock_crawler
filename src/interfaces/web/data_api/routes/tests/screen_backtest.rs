@@ -329,6 +329,27 @@ async fn screen_backtest_endpoint_db_semantics() {
     );
     assert_eq!(contributors["worst"], serde_json::json!([]));
 
+    // 目前持股：03-15 還沒滿 5 日（不列入各期），三檔分數都是 50、依代號取 BA、BB；
+    // 上一期的 BB 續抱、BA 新買進（換手 0.5）。
+    assert_eq!(
+        json["current"],
+        serde_json::json!({
+            "date": "1993-03-15", "days_elapsed": 0, "days_to_next_rebalance": 5,
+            "market_filtered": false, "turnover": 0.5,
+            "holdings": [
+                {"symbol": "79979BA", "name": "79979BA"},
+                {"symbol": "79979BB", "name": "79979BB"},
+            ],
+        })
+    );
+    // 迄日 03-12：最後換股日 03-08 已有報酬，沒有目前持股。
+    let (status, json) =
+        get("/api/v1/stocks/screen/backtest?from=1993-03-01&to=1993-03-12&hold_days=5&limit=2")
+            .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["periods"].as_array().map(Vec::len), Some(2));
+    assert!(json["current"].is_null());
+
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
     assert_eq!(status, StatusCode::OK, "{json}");
