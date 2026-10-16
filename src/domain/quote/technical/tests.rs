@@ -1,5 +1,9 @@
 //! 技術指標計算、還原權值與訊號判斷的純函式測試。
 
+use chrono::NaiveDate;
+
+use super::detection::{ma_name, price_text};
+use super::indicators::{bar_high, bar_low, macd, rsi};
 use super::*;
 
 fn day(offset: usize) -> NaiveDate {
