@@ -368,6 +368,22 @@ pub(crate) struct BacktestOffsetDistribution {
     pub(crate) beat_etf_sharpe_rate: Option<f64>,
 }
 
+/// 某一年各偏移的表現分布（年度依換股日，各偏移該年各期的累積報酬，年度各自從 1 起算）；
+/// 起訖所在的年度可能不滿一年，各偏移的期數也可能不同。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestOffsetYear {
+    /// 年度。
+    pub(crate) year: i32,
+    /// 這一年有換股的偏移數。
+    pub(crate) offsets: i64,
+    /// 扣交易成本後該年累積報酬（%）的分布。
+    pub(crate) return_after_costs: Option<BacktestStat>,
+    /// 0050 同期（同樣的換股日進出）該年累積報酬（%）的分布；全部缺資料為 `null`。
+    pub(crate) etf_return: Option<BacktestStat>,
+    /// 該年扣成本後累積報酬高於同偏移 0050 的偏移比例（0–1）；0050 全部缺資料為 `null`。
+    pub(crate) beat_etf_rate: Option<f64>,
+}
+
 /// 換股日偏移穩健度結果。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct ScreenBacktestOffsetsResponse {
@@ -377,12 +393,18 @@ pub(crate) struct ScreenBacktestOffsetsResponse {
     pub(crate) market: String,
     pub(crate) hold_days: u16,
     pub(crate) limit: u8,
+    /// 候選股排序方式。
+    pub(crate) rank_by: String,
+    /// 0050 核心部位（%）；0 為純策略。
+    pub(crate) etf_weight: u8,
     /// 計算交易成本用的手續費折扣（0–1）。
     pub(crate) fee_discount: f64,
     /// 可投資的大盤基準代號（固定為 `0050`）。
     pub(crate) etf_benchmark: String,
     /// 各偏移績效的分布。
     pub(crate) distribution: BacktestOffsetDistribution,
+    /// 依年度的分布，由舊到新：看策略在哪些年份穩定勝過 0050、哪些年份輸。
+    pub(crate) years: Vec<BacktestOffsetYear>,
     /// 每個偏移的彙總，依偏移由小到大。
     pub(crate) offsets: Vec<BacktestOffsetResult>,
 }
