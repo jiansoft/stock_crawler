@@ -18,8 +18,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// - `rebal`：起日之後每隔 `$4` 個交易日的換股日；`window_start` 是含當天往前第 `$4` 個交易日，
 ///   訊號條件看 `window_start`～換股日。
 /// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入。
-/// - `candidates`：符合條件的股票依相對強度由高到低的前 `$5` 檔與各自的報酬；實際持股由
-///   [`select_holdings`] 依上一期持股與 `keep_rank` 決定。
+/// - `candidates`：符合條件的股票依相對強度由高到低的前 `$5` 檔與各自的報酬、產業編號；實際持股由
+///   [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
 /// - `taiex`：加權指數收盤是否不低於含當天往前 `$11` 個交易日的平均；低於時 `market_ok` 為
 ///   false，這期空手。
@@ -68,7 +68,7 @@ bench AS (
     GROUP BY date
 ),
 picks AS (
-    SELECT u.date, u.stock_symbol, u.ret,
+    SELECT u.date, u.stock_symbol, u.ret, u.stock_industry_id,
            ROW_NUMBER() OVER (PARTITION BY u.date ORDER BY u.rs_score DESC, u.stock_symbol) AS pick_rank
     FROM universe u
     LEFT JOIN stock_industry si ON si.stock_industry_id = u.stock_industry_id"#,
@@ -90,7 +90,8 @@ picks AS (
 candidates AS (
     SELECT date,
            array_agg(stock_symbol::text ORDER BY pick_rank) AS symbols,
-           array_agg(ret::float8 ORDER BY pick_rank) AS returns
+           array_agg(ret::float8 ORDER BY pick_rank) AS returns,
+           array_agg(stock_industry_id::int4 ORDER BY pick_rank) AS industries
     FROM picks
     WHERE pick_rank <= $5
     GROUP BY date
@@ -98,7 +99,8 @@ candidates AS (
 holdable AS (
     SELECT date,
            array_agg(stock_symbol::text ORDER BY rs_score DESC, stock_symbol) AS symbols,
-           array_agg(ret::float8 ORDER BY rs_score DESC, stock_symbol) AS returns
+           array_agg(ret::float8 ORDER BY rs_score DESC, stock_symbol) AS returns,
+           array_agg(stock_industry_id::int4 ORDER BY rs_score DESC, stock_symbol) AS industries
     FROM universe
     WHERE $12::smallint IS NOT NULL AND rs_score >= $12
     GROUP BY date
@@ -124,8 +126,10 @@ SELECT b.date,
         END)::float8 AS etf_return,
        COALESCE(c.symbols, ARRAY[]::text[]) AS candidates,
        COALESCE(c.returns, ARRAY[]::float8[]) AS candidate_returns,
+       COALESCE(c.industries, ARRAY[]::int4[]) AS candidate_industries,
        COALESCE(h.symbols, ARRAY[]::text[]) AS hold_symbols,
-       COALESCE(h.returns, ARRAY[]::float8[]) AS hold_returns
+       COALESCE(h.returns, ARRAY[]::float8[]) AS hold_returns,
+       COALESCE(h.industries, ARRAY[]::int4[]) AS hold_industries
 FROM bench b
 LEFT JOIN candidates c ON c.date = b.date
 LEFT JOIN holdable h ON h.date = b.date
