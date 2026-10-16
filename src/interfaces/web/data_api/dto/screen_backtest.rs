@@ -94,6 +94,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 兩者之間）。換手成本依每期目標權重與上一期持股漲跌後權重的差額計算，續抱股票的權重調整也計入。
     #[param(value_type = BacktestWeightingValue, inline)]
     pub(crate) weighting: Option<String>,
+    /// 單檔權重上限（%，1–100，選填）：策略部位中每檔最多占這個比例，超出的部分依權重分給其他持股；
+    /// 檔數 × 上限不到 100%（例如上限 10% 只選到 5 檔）時剩下的放現金。依成交金額加權時用來避免集中在
+    /// 少數大型股。
+    #[param(minimum = 1, maximum = 100)]
+    pub(crate) max_weight: Option<u8>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -264,7 +269,7 @@ pub(crate) struct BacktestHolding {
     pub(crate) symbol: String,
     /// 股票名稱；查無為 `null`。
     pub(crate) name: Option<String>,
-    /// 在策略部位中的權重（%）；等權時各檔相同。
+    /// 在策略部位中的權重（%）；等權時各檔相同，有現金時合計不到 100。
     pub(crate) weight: f64,
 }
 
@@ -281,6 +286,8 @@ pub(crate) struct BacktestCurrent {
     pub(crate) market_filtered: bool,
     /// 相對上一期新買進的部位比例（0–1）。
     pub(crate) turnover: f64,
+    /// 策略部位放現金的比例（%）：設 `max_weight` 且檔數 × 上限不到 100% 時才大於 0。
+    pub(crate) cash: f64,
     /// 全部持股，依相對強度由高到低；空手為空陣列。
     pub(crate) holdings: Vec<BacktestHolding>,
 }
@@ -318,6 +325,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) etf_weight: u8,
     /// 策略部位的持股加權方式。
     pub(crate) weighting: String,
+    /// 單檔權重上限（%）；未設定為 `null`。
+    pub(crate) max_weight: Option<u8>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。
@@ -429,6 +438,8 @@ pub(crate) struct ScreenBacktestOffsetsResponse {
     pub(crate) etf_weight: u8,
     /// 策略部位的持股加權方式。
     pub(crate) weighting: String,
+    /// 單檔權重上限（%）；未設定為 `null`。
+    pub(crate) max_weight: Option<u8>,
     /// 計算交易成本用的手續費折扣（0–1）。
     pub(crate) fee_discount: f64,
     /// 可投資的大盤基準代號（固定為 `0050`）。
@@ -463,6 +474,8 @@ pub(crate) struct ScreenBacktestFrontierResponse {
     pub(crate) rank_by: String,
     /// 策略部位的持股加權方式。
     pub(crate) weighting: String,
+    /// 單檔權重上限（%）；未設定為 `null`。
+    pub(crate) max_weight: Option<u8>,
     /// 計算交易成本用的手續費折扣（0–1）。
     pub(crate) fee_discount: f64,
     /// 可投資的大盤基準代號（固定為 `0050`）。

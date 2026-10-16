@@ -1,7 +1,7 @@
 //! 條件選股回測的個股貢獻：整段回測中哪些股票把報酬拉高、哪些拖累最多。
 //!
-//! 每期的報酬是有報酬持股的加權平均（等權時權重相同），所以一檔股票在該期的貢獻是「這檔報酬 ×
-//! 權重 ÷ 當期有報酬持股的權重合計」（百分點）；整段的貢獻是各期貢獻直接相加，不複利、不扣交易
+//! 每期的報酬是有報酬持股的加權平均（等權時權重相同）乘上持股比例（設 `max_weight` 時可能有現金），
+//! 所以一檔股票在該期的貢獻是「這檔報酬 × 權重 ÷ 當期有報酬持股的權重合計 × 持股比例」（百分點）；整段的貢獻是各期貢獻直接相加，不複利、不扣交易
 //! 成本，用來看報酬集中在哪幾檔。
 
 use std::collections::HashMap;
@@ -44,7 +44,7 @@ pub(super) fn contributors(
             let entry = totals.entry(symbol.as_str()).or_default();
             entry.0 += 1;
             if let Some(ret) = ret {
-                entry.1 += ret * weight_at(row, index) / priced;
+                entry.1 += ret * weight_at(row, index) / priced * (1.0 - row.cash);
                 entry.2 += ret;
                 entry.3 += 1;
             }

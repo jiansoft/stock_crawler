@@ -80,13 +80,64 @@ pub(super) fn weight_at(row: &PeriodRow, index: usize) -> f64 {
     row.weights.get(index).copied().unwrap_or(1.0)
 }
 
-/// 依加權方式設定每期持股權重，並把平均報酬改為有報酬持股的加權平均；等權不變。
-pub(super) fn weigh(rows: &mut [PeriodRow], weighting: Weighting) {
-    if weighting == Weighting::Equal {
+/// 把相對權重正規化並套用單檔上限 `cap`（0–1）：超過上限的持股固定在上限，多出的部分依比例分給
+/// 其他持股，重複到沒有持股超過上限；全部都到上限仍分不完（檔數 × 上限 < 1）時剩下的放現金。
+/// 回傳正規化後的權重（合計為 1 − 現金）與現金比例；沒有持股時現金為 0。
+pub(super) fn cap_weights(weights: &[f64], cap: f64) -> (Vec<f64>, f64) {
+    let mut capped = vec![false; weights.len()];
+    loop {
+        let fixed = capped.iter().filter(|capped| **capped).count() as f64 * cap;
+        let free: f64 = weights
+            .iter()
+            .zip(&capped)
+            .filter(|(_, capped)| !**capped)
+            .map(|(weight, _)| weight)
+            .sum();
+        let share = |weight: f64| {
+            if free > 0.0 {
+                weight / free * (1.0 - fixed)
+            } else {
+                0.0
+            }
+        };
+        let mut changed = false;
+        for (weight, capped) in weights.iter().zip(capped.iter_mut()) {
+            if !*capped && share(*weight) > cap + 1e-12 {
+                *capped = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            let result: Vec<f64> = weights
+                .iter()
+                .zip(&capped)
+                .map(|(weight, capped)| if *capped { cap } else { share(*weight) })
+                .collect();
+            let cash = if result.is_empty() {
+                0.0
+            } else {
+                (1.0 - result.iter().sum::<f64>()).max(0.0)
+            };
+            return (result, cash);
+        }
+    }
+}
+
+/// 依加權方式與單檔上限 `max_weight`（0–1）設定每期持股權重與現金比例，並把平均報酬改為有報酬
+/// 持股的加權平均乘上持股比例（現金報酬為 0）；等權且沒有上限時不變。
+pub(super) fn weigh(rows: &mut [PeriodRow], weighting: Weighting, max_weight: Option<f64>) {
+    if weighting == Weighting::Equal && max_weight.is_none() {
         return;
     }
     for row in rows {
-        row.weights = holding_weights(&row.trade_values, weighting);
+        let values: Vec<Option<f64>> = (0..row.symbols.len())
+            .map(|index| row.trade_values.get(index).copied().flatten())
+            .collect();
+        let weights = holding_weights(&values, weighting);
+        (row.weights, row.cash) = match max_weight {
+            Some(cap) => cap_weights(&weights, cap),
+            None => (weights, 0.0),
+        };
         let (sum, total) = row
             .weights
             .iter()
@@ -95,7 +146,7 @@ pub(super) fn weigh(rows: &mut [PeriodRow], weighting: Weighting) {
             .fold((0.0, 0.0), |(sum, total), (value, weight)| {
                 (sum + value, total + weight)
             });
-        row.avg_return = (total > 0.0).then(|| sum / total);
+        row.avg_return = (total > 0.0).then(|| sum / total * (1.0 - row.cash));
     }
 }
 
@@ -108,8 +159,8 @@ pub(super) struct PeriodCost {
     pub(super) net_return: f64,
 }
 
-/// 持股占策略部位的比例（合計為 1）；沒有持股為空。
-fn shares(row: &PeriodRow) -> Vec<f64> {
+/// 持股占策略部位的比例（合計為 1 − 現金）；沒有持股為空。
+pub(super) fn shares(row: &PeriodRow) -> Vec<f64> {
     let weights: Vec<f64> = (0..row.symbols.len())
         .map(|index| weight_at(row, index))
         .collect();
@@ -117,14 +168,22 @@ fn shares(row: &PeriodRow) -> Vec<f64> {
     if total <= 0.0 {
         return weights.iter().map(|_| 0.0).collect();
     }
-    weights.iter().map(|weight| weight / total).collect()
+    weights
+        .iter()
+        .map(|weight| weight / total * (1.0 - row.cash))
+        .collect()
 }
 
-/// 一期結束、下次換股前各持股占策略部位的比例：期初比例依各檔報酬漲跌後重新換算（合計為 1）。
-/// 沒有報酬的持股（之後沒有收盤）視為與該期平均報酬同幅。
+/// 一期結束、下次換股前各持股占策略部位的比例：期初比例依各檔報酬漲跌後重新換算（連同報酬為 0
+/// 的現金合計為 1）。沒有報酬的持股（之後沒有收盤）視為與該期持股的平均報酬同幅。
 fn drifted(row: &PeriodRow) -> Vec<f64> {
     let start = shares(row);
-    let average = row.avg_return.unwrap_or(0.0);
+    let invested = 1.0 - row.cash;
+    let average = if invested > 0.0 {
+        row.avg_return.unwrap_or(0.0) / invested
+    } else {
+        0.0
+    };
     let grown: Vec<f64> = start
         .iter()
         .enumerate()
@@ -133,7 +192,7 @@ fn drifted(row: &PeriodRow) -> Vec<f64> {
             share * (1.0 + ret / 100.0).max(0.0)
         })
         .collect();
-    let total: f64 = grown.iter().sum();
+    let total: f64 = grown.iter().sum::<f64>() + row.cash;
     if total <= 0.0 {
         return start;
     }
@@ -333,6 +392,7 @@ pub(super) fn select_holdings(
                 returns: held_returns,
                 trade_values: picked.iter().map(|&index| pool[index].4).collect(),
                 weights: Vec::new(),
+                cash: 0.0,
             }
         })
         .collect()

@@ -15,7 +15,8 @@
 //! 策略部位。
 //!
 //! `weighting` 決定策略部位的持股權重：預設等權，也可依換股日前 20 個交易日的平均成交金額（接近
-//! 市值加權，和 0050 一樣偏重大型股）或其平方根加權。
+//! 市值加權，和 0050 一樣偏重大型股）或其平方根加權；`max_weight` 限制單檔權重，超出的分給其他持股，
+//! 檔數太少分不完時放現金。
 //!
 //! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
 //! [`contributors`]（個股貢獻）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
@@ -128,6 +129,8 @@ struct PeriodRow {
     /// 各持股的相對權重（未正規化），與 `symbols` 一一對應；空的代表等權（見
     /// [`portfolio::weight_at`]）。
     weights: Vec<f64>,
+    /// 策略部位放現金的比例（0–1）：設 `max_weight` 且檔數 × 上限不到 100% 時才大於 0。
+    cash: f64,
 }
 
 /// 依條件每隔 `hold_days` 個交易日換股，回測等權持有前 `limit` 檔（相對強度由高到低）的報酬，
@@ -191,11 +194,9 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     };
     let current = current.map(|(row, cost)| {
         let elapsed = elapsed_days.unwrap_or(0);
-        let total: f64 = (0..row.symbols.len())
-            .map(|index| portfolio::weight_at(&row, index))
-            .sum();
-        let weights: Vec<f64> = (0..row.symbols.len())
-            .map(|index| round2(portfolio::weight_at(&row, index) / total * 100.0))
+        let weights: Vec<f64> = portfolio::shares(&row)
+            .into_iter()
+            .map(|share| round2(share * 100.0))
             .collect();
         BacktestCurrent {
             date: row.date.to_string(),
@@ -203,6 +204,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
             days_to_next_rebalance: (i64::from(hold_days) - elapsed).max(0),
             market_filtered: row.market_filtered,
             turnover: round4(cost.turnover),
+            cash: round2(row.cash * 100.0),
             holdings: row
                 .symbols
                 .into_iter()
@@ -232,6 +234,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         min_avg_trade_value: params.min_avg_trade_value,
         rank_by: backtest.rank_by.to_owned(),
         weighting: backtest.weighting.as_str().to_owned(),
+        max_weight: backtest.max_weight,
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
@@ -274,6 +277,8 @@ struct Backtest<'a> {
     etf_weight: u8,
     /// 策略部位的持股加權方式。
     weighting: Weighting,
+    /// 單檔權重上限（%）；未設定為不限。
+    max_weight: Option<u8>,
 }
 
 /// 一次回測混合 0050 之前的各期結果（含還沒滿持有天數的最後一期）；同一組候選股可依不同的
@@ -384,6 +389,12 @@ impl<'a> Backtest<'a> {
                 "weighting 必須為 equal、trade_value 或 sqrt_trade_value",
             ));
         };
+        if params
+            .max_weight
+            .is_some_and(|percent| !(1..=100).contains(&percent))
+        {
+            return Err(unprocessable("max_weight 必須介於 1 至 100"));
+        }
         let etf_weight = params.etf_weight.unwrap_or(0);
         if etf_weight > 100 {
             return Err(unprocessable("etf_weight 必須介於 0 至 100"));
@@ -440,6 +451,7 @@ impl<'a> Backtest<'a> {
             rank_by,
             etf_weight,
             weighting,
+            max_weight: params.max_weight,
         })
     }
 
@@ -501,7 +513,11 @@ impl<'a> Backtest<'a> {
             usize::from(self.keep_rank),
             params.max_per_industry.map(usize::from),
         );
-        weigh(&mut rows, self.weighting);
+        weigh(
+            &mut rows,
+            self.weighting,
+            self.max_weight.map(|percent| f64::from(percent) / 100.0),
+        );
         let costs = trading_costs(&rows, self.fee_discount);
         Ok(Raw {
             rows,
