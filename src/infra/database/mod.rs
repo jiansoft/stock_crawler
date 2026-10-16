@@ -35,7 +35,8 @@ const SLOW_STATEMENT_THRESHOLD: Duration = Duration::from_secs(1);
 /// 用 1 秒門檻會每天固定多出 4 筆假警告（2026-10-03～10 共 21 筆，占全部慢查詢六成）。
 /// 5 秒仍能抓到明顯退化（分桶前單一語句就要 5～8 秒）。
 const BATCH_SLOW_STATEMENT_THRESHOLD: Duration = Duration::from_secs(5);
-/// 批次連線池的連線上限：兩支批次查詢各 4 桶，同時跑也不必排隊。
+/// 批次連線池的連線上限：兩支批次查詢各 4 桶，同時跑也不必排隊；條件選股回測的偏移穩健度一次
+/// 同時跑 4 個偏移。
 const BATCH_MAX_CONNECTIONS: u32 = 8;
 
 /// PostgreSQL 連線池封裝。
@@ -259,8 +260,9 @@ pub fn get_connection() -> &'static PgPool {
 
 /// 取得全市場批次查詢專用的連線池。
 ///
-/// 只給已分桶平行、單桶就要數秒的全市場查詢使用（估價重建、CAGR 異常掃描），
-/// 慢查詢警告門檻為 [`BATCH_SLOW_STATEMENT_THRESHOLD`]；其他查詢一律用 [`get_connection`]。
+/// 只給已分桶平行、單桶就要數秒的全市場查詢使用（估價重建、CAGR 異常掃描），以及每次要 1～2 秒、
+/// 一次請求就跑 20 個換股日偏移的條件選股回測主查詢；慢查詢警告門檻為
+/// [`BATCH_SLOW_STATEMENT_THRESHOLD`]。其他查詢一律用 [`get_connection`]。
 pub fn get_batch_connection() -> &'static PgPool {
     BATCH_POSTGRES.get_or_init(PostgresSQL::new_batch).pool()
 }
