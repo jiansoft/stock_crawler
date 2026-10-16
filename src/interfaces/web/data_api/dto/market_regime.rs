@@ -36,6 +36,25 @@ pub(crate) struct MovingAverageCrossItem {
     pub(crate) direction: String,
 }
 
+/// 上市櫃合併的市場廣度（每日收盤後的股價分布統計）。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct MarketRegimeBreadth {
+    /// 統計日期（資料日之前最近一個有統計的交易日）。
+    pub(crate) date: String,
+    /// 收盤站上 20 日均線的股票比例（%）；沒有家數為 `null`。
+    pub(crate) above_ma20_percent: Option<f64>,
+    /// 收盤站上 60 日均線的股票比例（%）。
+    pub(crate) above_ma60_percent: Option<f64>,
+    /// 收盤站上 240 日均線的股票比例（%）。
+    pub(crate) above_ma240_percent: Option<f64>,
+    /// 5 個交易日前站上 60 日均線的比例（%）；資料不足為 `null`。
+    pub(crate) above_ma60_percent_5d_ago: Option<f64>,
+    /// 近 5 個交易日（含統計日）創 52 週新高的家次合計。
+    pub(crate) new_highs_5d: i64,
+    /// 近 5 個交易日創 52 週新低的家次合計。
+    pub(crate) new_lows_5d: i64,
+}
+
 /// 大盤趨勢狀態。
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub(crate) struct MarketRegimeResponse {
@@ -72,4 +91,6 @@ pub(crate) struct MarketRegimeResponse {
     pub(crate) return_240d: Option<f64>,
     /// 近 60 個交易日內收盤穿越 20／60／120／240 日均線的日子，由新到舊（同一天依均線天數）。
     pub(crate) recent_crosses: Vec<MovingAverageCrossItem>,
+    /// 市場廣度：大盤漲跌是否有多數個股跟上；資料日之前沒有統計為 `null`。
+    pub(crate) breadth: Option<MarketRegimeBreadth>,
 }

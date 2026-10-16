@@ -10,8 +10,13 @@ fn day(d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(1994, 5, d).expect("固定日期合法")
 }
 
-/// 刪除種入的加權指數。
+/// 刪除種入的加權指數與市場廣度。
 async fn cleanup(pool: &sqlx::PgPool) {
+    let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date BETWEEN $1 AND $2")
+        .bind(day(1))
+        .bind(day(31))
+        .execute(pool)
+        .await;
     let _ =
         sqlx::query(r#"DELETE FROM "index" WHERE category = 'TAIEX' AND "date" BETWEEN $1 AND $2"#)
             .bind(day(1))
@@ -46,6 +51,23 @@ async fn market_regime_endpoint_db_semantics() {
             .await
             .expect("種入指數");
     }
+    // 市場廣度：05-03 站上 60 日線 3／4、05-04 沒有統計（取之前最近的 05-03）；上市列（id 2）不讀。
+    for (d, market_id, above, below, high) in [(2, 0, 1, 3, 1), (3, 0, 3, 1, 2), (4, 2, 0, 9, 0)] {
+        sqlx::query(
+            "INSERT INTO daily_stock_price_stats
+                 (date, stock_exchange_market_id, above_60_day_moving_average, below_60_day_moving_average,
+                  above_20_day_moving_average, below_20_day_moving_average, new_52_week_high)
+             VALUES ($1, $2, $3, $4, $3, $4, $5)",
+        )
+        .bind(day(d))
+        .bind(market_id)
+        .bind(above)
+        .bind(below)
+        .bind(high)
+        .execute(pool)
+        .await
+        .expect("種入市場廣度");
+    }
 
     // 05-06 沒有 TAIEX：取之前最近的 05-04。
     let (status, json) = get("/api/v1/market/regime?date=1994-05-06").await;
@@ -65,9 +87,25 @@ async fn market_regime_endpoint_db_semantics() {
     assert_eq!(json["from_low_percent"], 20.0);
     assert!(json["return_5d"].is_null());
     assert_eq!(json["recent_crosses"], serde_json::json!([]));
+    assert_eq!(
+        json["breadth"],
+        serde_json::json!({
+            "date": "1994-05-03",
+            "above_ma20_percent": 75.0,
+            "above_ma60_percent": 75.0,
+            "above_ma240_percent": null,
+            "above_ma60_percent_5d_ago": null,
+            "new_highs_5d": 3,
+            "new_lows_5d": 0,
+        })
+    );
 
     let (_, json) = get("/api/v1/market/regime?date=1994-05-03").await;
     assert_eq!(json["close"], 110.0);
+    // 05-02 之前沒有加權指數；05-02 的廣度只有自己一天。
+    let (_, json) = get("/api/v1/market/regime?date=1994-05-02").await;
+    assert_eq!(json["breadth"]["above_ma60_percent"], 25.0);
+    assert_eq!(json["breadth"]["new_highs_5d"], 1);
     let (status, _) = get("/api/v1/market/regime?date=1994-5-3").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     let (status, _) = get("/api/v1/market/regime?date=1900-01-01").await;

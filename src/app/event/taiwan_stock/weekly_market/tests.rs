@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 
 use super::*;
+use crate::domain::market_index::breadth::BreadthDay;
 use crate::domain::quote::relative_strength::{ScoredStock, UniverseRow};
 
 fn day(d: u32) -> NaiveDate {
@@ -76,10 +77,28 @@ fn flow(symbol: &str, industry: &str, amount: f64) -> StockFlow {
     }
 }
 
-/// 回傳固定加權指數收盤的假倉儲；`fail` 時查詢失敗。
+/// 回傳固定加權指數收盤與市場廣度的假倉儲；`fail` 時指數查詢失敗，`breadth_fail` 時廣度查詢失敗。
+#[derive(Default)]
 struct FakeIndex {
     points: Vec<(NaiveDate, f64)>,
     fail: bool,
+    breadth: Vec<BreadthDay>,
+    breadth_fail: bool,
+}
+
+#[async_trait]
+impl BreadthQuery for FakeIndex {
+    async fn fetch_breadth(
+        &self,
+        until: Option<NaiveDate>,
+        limit: usize,
+    ) -> Result<Vec<BreadthDay>> {
+        assert_eq!((until, limit), (Some(day(16)), WEEK_DAYS + 1));
+        if self.breadth_fail {
+            return Err(anyhow!("breadth down"));
+        }
+        Ok(self.breadth.iter().copied().take(limit).collect())
+    }
 }
 
 #[async_trait]
@@ -114,14 +133,14 @@ fn index_points() -> Vec<(NaiveDate, f64)> {
 fn index() -> FakeIndex {
     FakeIndex {
         points: index_points(),
-        fail: false,
+        ..FakeIndex::default()
     }
 }
 
 fn failing_index() -> FakeIndex {
     FakeIndex {
-        points: Vec::new(),
         fail: true,
+        ..FakeIndex::default()
     }
 }
 
@@ -498,9 +517,25 @@ async fn regime_section_lists_crosses() {
         .enumerate()
         .map(|(offset, close)| (day(16) - chrono::Days::new(offset as u64), *close))
         .collect();
+    // 市場廣度由新到舊：10-16 站上 60 日線 40%、5 個交易日前（10-09）65%；新高新低只加總前 5 天。
+    let breadth: Vec<BreadthDay> = [(16, 40), (15, 45), (14, 50), (13, 55), (12, 60), (9, 65)]
+        .into_iter()
+        .map(|(d, above_ma60)| BreadthDay {
+            date: day(d),
+            above_ma20: 30,
+            below_ma20: 70,
+            above_ma60,
+            below_ma60: 100 - above_ma60,
+            above_ma240: 0,
+            below_ma240: 0,
+            new_high: 3,
+            new_low: if d == 9 { 100 } else { 1 },
+        })
+        .collect();
     let fake = FakeIndex {
-        points,
-        fail: false,
+        points: points.clone(),
+        breadth,
+        ..FakeIndex::default()
     };
     let section = regime_section(&fake, day(17))
         .await
@@ -530,6 +565,24 @@ async fn regime_section_lists_crosses() {
         lines[5],
         "• 近 5 日：10-15 站上 20 日均線、10-15 站上 60 日均線、10-16 跌破 20 日均線、10-16 跌破 60 日均線"
     );
+    assert_eq!(
+        lines[6],
+        "• 市場廣度 10-16：站上 60 日線 40.0%（5 日前 65.0%）、20 日線 30.0%、240 日線 —；近 5 日創 52 週新高 15 家次、新低 5 家次"
+    );
+    assert_eq!(lines.len(), 7);
+
+    // 廣度讀取失敗只少這一行；沒有統計也是。
+    let failing_breadth = FakeIndex {
+        points: points.clone(),
+        breadth_fail: true,
+        ..FakeIndex::default()
+    };
+    let section = regime_section(&failing_breadth, day(17))
+        .await
+        .expect("指數查詢成功")
+        .expect("有加權指數");
+    assert!(section.breadth.is_none());
+    assert_eq!(regime_lines(&section).len(), 6);
 
     let message = build_message(Some(&section), None, None, &[], &[], name).expect("有大盤");
     assert!(
@@ -541,10 +594,7 @@ async fn regime_section_lists_crosses() {
         "{message}"
     );
 
-    let empty = FakeIndex {
-        points: Vec::new(),
-        fail: false,
-    };
+    let empty = FakeIndex::default();
     assert!(
         regime_section(&empty, day(17))
             .await

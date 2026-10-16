@@ -1,3 +1,4 @@
+use crate::domain::market_index::breadth::{BreadthDay, BreadthQuery};
 use crate::domain::market_index::entity::MarketIndex;
 use crate::domain::market_index::regime::IndexCloseQuery;
 use crate::domain::market_index::repository::MarketIndexRepository;
@@ -157,6 +158,62 @@ impl IndexCloseQuery for PgMarketIndexRepository {
             .fetch_all(database::get_connection())
             .await
             .context("Failed to fetch index closes from PG")
+    }
+}
+
+#[async_trait]
+impl BreadthQuery for PgMarketIndexRepository {
+    /// 上市櫃合併（市場 id 0）在 `until`（含）之前最近 `limit` 個交易日的市場廣度，由新到舊。
+    async fn fetch_breadth(
+        &self,
+        until: Option<NaiveDate>,
+        limit: usize,
+    ) -> Result<Vec<BreadthDay>> {
+        let sql = r#"
+            SELECT date,
+                   above_20_day_moving_average, below_20_day_moving_average,
+                   above_60_day_moving_average, below_60_day_moving_average,
+                   above_240_day_moving_average, below_240_day_moving_average,
+                   new_52_week_high, new_52_week_low
+            FROM daily_stock_price_stats
+            WHERE stock_exchange_market_id = 0 AND ($1::date IS NULL OR date <= $1)
+            ORDER BY date DESC
+            LIMIT $2
+        "#;
+        let rows: Vec<(NaiveDate, i32, i32, i32, i32, i32, i32, i32, i32)> = sqlx::query_as(sql)
+            .bind(until)
+            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch market breadth from PG")?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    date,
+                    above_ma20,
+                    below_ma20,
+                    above_ma60,
+                    below_ma60,
+                    above_ma240,
+                    below_ma240,
+                    new_high,
+                    new_low,
+                )| {
+                    BreadthDay {
+                        date,
+                        above_ma20,
+                        below_ma20,
+                        above_ma60,
+                        below_ma60,
+                        above_ma240,
+                        below_ma240,
+                        new_high,
+                        new_low,
+                    }
+                },
+            )
+            .collect())
     }
 }
 
