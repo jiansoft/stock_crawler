@@ -166,6 +166,13 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
             "max_per_industry 必須介於 1 至 100",
         );
     }
+    let rebalance_offset = params.rebalance_offset.unwrap_or(0);
+    if rebalance_offset >= hold_days {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "rebalance_offset 必須介於 0 至 hold_days − 1",
+        );
+    }
     let keep_rank = params.keep_rank.unwrap_or(limit);
     if !(limit..=MAX_KEEP_RANK).contains(&keep_rank) {
         return error_response(
@@ -240,7 +247,8 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     .bind(params.kind.as_deref())
     .bind(params.market_filter_ma.map(i32::from))
     .bind(params.hold_min_rs_score.map(i16::from))
-    .bind(params.market_filter_breadth.map(i32::from));
+    .bind(params.market_filter_breadth.map(i32::from))
+    .bind(i32::from(rebalance_offset));
     if with_chip {
         query = query
             .bind(params.min_foreign_streak.map(i64::from))
@@ -319,6 +327,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         market_filter_breadth: params.market_filter_breadth,
         hold_min_rs_score: params.hold_min_rs_score,
         max_per_industry: params.max_per_industry,
+        rebalance_offset,
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,

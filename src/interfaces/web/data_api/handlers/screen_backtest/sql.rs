@@ -12,12 +12,12 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 
 /// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期候選檔數、
 /// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類、`$11` 大盤濾網均線天數
-/// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）、`$13` 市場廣度門檻（%，`NULL` 為不濾）；
-/// 籌碼版另有 `$14`／`$15`。
+/// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）、`$13` 市場廣度門檻（%，`NULL` 為不濾）、
+/// `$14` 換股日偏移（起日之後先跳過幾個交易日）；籌碼版另有 `$15`／`$16`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
-/// - `rebal`：起日之後每隔 `$4` 個交易日的換股日；`window_start` 是含當天往前第 `$4` 個交易日，
-///   訊號條件看 `window_start`～換股日。
+/// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
+///   含當天往前第 `$4` 個交易日，訊號條件看 `window_start`～換股日。
 /// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入，
 ///   只有最後一個換股日例外：以 `pending` 標記列出，當作策略目前的持股（`elapsed_days` 為換股日之後
 ///   到迄日經過的交易日數）。
@@ -50,7 +50,7 @@ rebal AS (
         FROM windowed
         WHERE date >= $1
     ) AS numbered
-    WHERE i % $4::int = 0
+    WHERE i >= $14::int AND (i - $14::int) % $4::int = 0
 ),
 universe AS (
     SELECT rb.date, rb.window_start, rs.stock_symbol, rs.rs_score, s.stock_industry_id,
@@ -161,7 +161,7 @@ ORDER BY b.date
 /// 沒有籌碼條件的回測。
 pub(super) const BACKTEST_SQL: &str = backtest_sql!("\nWITH", "", "");
 
-/// 有籌碼條件的回測：換股當天外資（`$14`）／投信（`$15`）已連續買超至少 N 天，`NULL` 為不篩選。
+/// 有籌碼條件的回測：換股當天外資（`$15`）／投信（`$16`）已連續買超至少 N 天，`NULL` 為不篩選。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
     chip_streak_ctes!(),
@@ -169,6 +169,6 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($14::bigint IS NULL OR c.foreign_buy >= $14)\n      AND ($15::bigint IS NULL OR c.trust_buy >= $15)"
+        "\n      AND ($15::bigint IS NULL OR c.foreign_buy >= $15)\n      AND ($16::bigint IS NULL OR c.trust_buy >= $16)"
     )
 );

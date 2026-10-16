@@ -350,6 +350,20 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(json["periods"].as_array().map(Vec::len), Some(2));
     assert!(json["current"].is_null());
 
+    // 換股日偏移 1：換股日變成 03-02、03-09，都沒有種入報酬；03-02 不列入，03-09 是目前持股，
+    // 之後經過 03-10、11、12、15 四個交易日，再 1 天換股。
+    let (status, json) = query("limit=2&rebalance_offset=1").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["rebalance_offset"], 1);
+    assert_eq!(periods(&json), []);
+    assert_eq!(json["current"]["date"], "1993-03-09");
+    assert_eq!(json["current"]["days_elapsed"], 4);
+    assert_eq!(json["current"]["days_to_next_rebalance"], 1);
+    let (_, json) = query("limit=2").await;
+    assert_eq!(json["rebalance_offset"], 0);
+    let (status, _) = query("rebalance_offset=5").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
     assert_eq!(status, StatusCode::OK, "{json}");
