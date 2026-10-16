@@ -110,6 +110,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::screen_backtest),
         )
         .route(
+            "/stocks/screen/backtest/offsets",
+            axum::routing::get(handlers::screen_backtest_offsets),
+        )
+        .route(
             "/stocks/screen",
             axum::routing::get(handlers::screen_stocks),
         )
