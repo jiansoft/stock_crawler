@@ -268,6 +268,8 @@ struct Backtest<'a> {
     weighting: Weighting,
     /// 單檔權重上限（%）；未設定為不限。
     max_weight: Option<u8>,
+    /// 樣本內外分割日（只用於偏移穩健度與前緣）。
+    split: Option<NaiveDate>,
 }
 
 /// 一次回測混合 0050 之前的各期結果（含還沒滿持有天數的最後一期）；同一組候選股可依不同的
@@ -427,6 +429,10 @@ impl<'a> Backtest<'a> {
             )));
         };
         let from = resolve_backtest_period(from, to).map_err(unprocessable)?;
+        let split = parse_optional_date(params.split.as_deref()).map_err(unprocessable)?;
+        if split.is_some_and(|split| split <= from || split > to) {
+            return Err(unprocessable("split 必須晚於起日、不晚於迄日"));
+        }
         Ok(Self {
             params,
             from,
@@ -441,6 +447,7 @@ impl<'a> Backtest<'a> {
             etf_weight,
             weighting,
             max_weight: params.max_weight,
+            split,
         })
     }
 

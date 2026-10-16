@@ -750,6 +750,47 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert!(frontier["best_return_weight"].is_u64(), "{frontier}");
     let (status, _) = get("/api/v1/stocks/screen/backtest/frontier?hold_days=10").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(json["split"].is_null() && json["before_split"].is_null());
+    assert!(frontier["best_sharpe_weight_before_split"].is_null());
+    assert!(weights[0]["after_split"].is_null());
+
+    // 樣本內外：分割日 03-08，偏移 0 的 03-01 為樣本內、03-08 為樣本外；其他偏移沒有已滿的期數。
+    let (status, halves) = get(
+        "/api/v1/stocks/screen/backtest/offsets?from=1993-03-01&to=1993-03-15&hold_days=5&limit=2&split=1993-03-08",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{halves}");
+    assert_eq!(halves["split"], "1993-03-08");
+    assert_eq!(halves["distribution"], json["distribution"]);
+    // 03-01 那期 6%、03-08 那期 8%（扣成本前），兩段各自年化。
+    let before = &halves["before_split"]["annualized_return_after_costs"];
+    let after = &halves["after_split"]["annualized_return_after_costs"];
+    assert!(
+        before["median"].is_number() && after["median"].is_number(),
+        "{halves}"
+    );
+    assert_ne!(before["median"], after["median"], "{halves}");
+    let (status, frontier) = get(
+        "/api/v1/stocks/screen/backtest/frontier?from=1993-03-01&to=1993-03-15&hold_days=5&limit=2&split=1993-03-08",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{frontier}");
+    assert_eq!(frontier["split"], "1993-03-08");
+    assert_eq!(
+        frontier["weights"][0]["after_split"], halves["after_split"],
+        "比例 0 的樣本外分布與偏移穩健度相同"
+    );
+    assert!(
+        frontier["best_sharpe_weight_before_split"].is_u64()
+            || frontier["best_sharpe_weight_before_split"].is_null()
+    );
+    for split in ["1993-03-01", "1993-03-16", "1993/03/08"] {
+        let (status, json) = get(&format!(
+            "/api/v1/stocks/screen/backtest/offsets?from=1993-03-01&to=1993-03-15&hold_days=5&split={split}"
+        ))
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{split}: {json}");
+    }
     // 參數驗證與單次回測相同；rebalance_offset 不使用。
     for (path, status) in [
         ("hold_days=5&rebalance_offset=9", StatusCode::OK),

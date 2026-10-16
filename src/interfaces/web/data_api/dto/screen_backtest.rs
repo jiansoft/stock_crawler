@@ -99,6 +99,10 @@ pub(crate) struct ScreenBacktestParams {
     /// 少數大型股。
     #[param(minimum = 1, maximum = 100)]
     pub(crate) max_weight: Option<u8>,
+    /// 樣本內外分割日（`YYYY-MM-DD`，選填，只用於 `/offsets` 與 `/frontier`）：換股日早於這天的期數為
+    /// 樣本內、其餘為樣本外，各自再算一次分布，用來看在前段調出來的條件到後段是否仍然成立。必須晚於
+    /// 起日、不晚於迄日。
+    pub(crate) split: Option<String>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -463,6 +467,12 @@ pub(crate) struct ScreenBacktestOffsetsResponse {
     pub(crate) distribution: BacktestOffsetDistribution,
     /// 依年度的分布，由舊到新：看策略在哪些年份穩定勝過 0050、哪些年份輸。
     pub(crate) years: Vec<BacktestOffsetYear>,
+    /// 樣本內外分割日；未指定為 `null`。
+    pub(crate) split: Option<String>,
+    /// 換股日早於分割日的期數（樣本內）的分布；未指定分割日為 `null`。
+    pub(crate) before_split: Option<BacktestOffsetDistribution>,
+    /// 換股日不早於分割日的期數（樣本外）的分布；未指定分割日為 `null`。
+    pub(crate) after_split: Option<BacktestOffsetDistribution>,
     /// 每個偏移的彙總，依偏移由小到大。
     pub(crate) offsets: Vec<BacktestOffsetResult>,
 }
@@ -474,6 +484,10 @@ pub(crate) struct BacktestFrontierPoint {
     pub(crate) etf_weight: u8,
     /// 這個比例下各偏移績效的分布（欄位與偏移穩健度相同）。
     pub(crate) distribution: BacktestOffsetDistribution,
+    /// 樣本內（換股日早於分割日）的分布；未指定分割日為 `null`。
+    pub(crate) before_split: Option<BacktestOffsetDistribution>,
+    /// 樣本外（換股日不早於分割日）的分布；未指定分割日為 `null`。
+    pub(crate) after_split: Option<BacktestOffsetDistribution>,
 }
 
 /// 0050 核心部位前緣：同一組條件搭配 0%～100% 的 0050，各比例的績效分布。
@@ -501,6 +515,10 @@ pub(crate) struct ScreenBacktestFrontierResponse {
     pub(crate) best_sharpe_weight: Option<u8>,
     /// 扣成本後年化報酬中位數最高的比例（%）；同值取較低的比例，全部沒有數值為 `null`。
     pub(crate) best_return_weight: Option<u8>,
+    /// 樣本內外分割日；未指定為 `null`。
+    pub(crate) split: Option<String>,
+    /// 只看樣本內時夏普值中位數最高的比例（之後看它在樣本外的表現）；未指定分割日為 `null`。
+    pub(crate) best_sharpe_weight_before_split: Option<u8>,
     /// 各比例的分布，依比例由小到大（0、10、…、100）。
     pub(crate) weights: Vec<BacktestFrontierPoint>,
 }
