@@ -1,6 +1,15 @@
 //! 訊號績效與個股訊號歷史的期間解析、回應組裝與排序測試。
 
+use chrono::NaiveDate;
+use rust_decimal::Decimal;
+
+use super::benchmark::{Benchmark, split_benchmark};
+use super::performance::build_performance;
+use super::rows::{BenchmarkRow, StockSignalRow};
+use super::stock_signals::build_stock_signals;
+use super::validation::require_indicator_for_long_period;
 use super::*;
+use crate::interfaces::web::data_api::dto::{BenchmarkStat, HorizonStat, SignalPerformanceParams};
 
 fn day(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, d).expect("有效日期")
