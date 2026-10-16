@@ -3,7 +3,9 @@
 //! 每週六整理最近 [`WEEK_DAYS`] 個交易日的市場輪動，發一則 Telegram：
 //!
 //! - 大盤趨勢：加權指數收盤、近 [`WEEK_DAYS`] 日漲跌、均線排列、相對 60／240 日均線的位置與方向
-//!   （見 [`crate::domain::market_index::regime`]），以及這週穿越 20／60／240 日均線的日子。
+//!   （見 [`crate::domain::market_index::regime`]）、這週穿越 20／60／240 日均線的日子，以及市場廣度
+//!   （站上 20／60／240 日均線的股票比例、與一週前比較，與這週創 52 週新高／新低的家次，見
+//!   [`crate::domain::market_index::breadth`]）。
 //! - 產業相對強度：成分股 RS 中位數（見 [`crate::domain::quote::relative_strength`]）最強、最弱，
 //!   以及與 [`WEEK_DAYS`] 個交易日前相比轉強、轉弱最多的產業；成分股少於 [`MIN_INDUSTRY_STOCKS`]
 //!   檔的產業不列。
@@ -26,7 +28,10 @@ use crate::{
     core::{alert, util::text},
     domain::{
         chip::flow::{self, ChipFlowQuery, FlowPeriod, StockFlow},
-        market_index::regime::{self, IndexCloseQuery, MarketRegime, MovingAverageCross},
+        market_index::{
+            breadth::{self, BreadthQuery, MarketBreadth},
+            regime::{self, IndexCloseQuery, MarketRegime, MovingAverageCross},
+        },
         quote::{
             forward_return::ForwardReturnRepository,
             relative_strength::{
@@ -59,11 +64,13 @@ const REGIME_MA_DAYS: [u16; 2] = [60, 240];
 /// 大盤趨勢一段要列出穿越的均線天數。
 const REGIME_CROSS_DAYS: [u16; 3] = [20, 60, 240];
 
-/// 大盤趨勢一段：資料日的趨勢狀態與最近 [`WEEK_DAYS`] 個交易日穿越均線的日子（由舊到新）。
+/// 大盤趨勢一段：資料日的趨勢狀態、最近 [`WEEK_DAYS`] 個交易日穿越均線的日子（由舊到新）與
+/// 市場廣度（沒有統計或讀取失敗為 `None`，不影響其他行）。
 #[derive(Debug, Clone, PartialEq)]
 struct RegimeSection {
     state: MarketRegime,
     crosses: Vec<MovingAverageCross>,
+    breadth: Option<MarketBreadth>,
 }
 
 /// 產業 RS 中位數與一週變化。
@@ -145,7 +152,7 @@ async fn run(
          + ForwardReturnRepository
      ),
     chip: &impl ChipFlowQuery,
-    index: &impl IndexCloseQuery,
+    index: &(impl IndexCloseQuery + BreadthQuery),
     date: NaiveDate,
     symbols: &BTreeSet<String>,
 ) -> Option<String> {
@@ -199,10 +206,10 @@ async fn run(
     )
 }
 
-/// `date`（含）之前的加權指數趨勢狀態與最近 [`WEEK_DAYS`] 個交易日穿越
-/// [`REGIME_CROSS_DAYS`] 均線的日子；沒有加權指數回 `None`。
+/// `date`（含）之前的加權指數趨勢狀態、最近 [`WEEK_DAYS`] 個交易日穿越
+/// [`REGIME_CROSS_DAYS`] 均線的日子與同一天的市場廣度；沒有加權指數回 `None`。
 async fn regime_section(
-    index: &impl IndexCloseQuery,
+    index: &(impl IndexCloseQuery + BreadthQuery),
     date: NaiveDate,
 ) -> Result<Option<RegimeSection>> {
     let points = regime::load_taiex(index, Some(date)).await?;
@@ -214,7 +221,38 @@ async fn regime_section(
         .flat_map(|&days| regime::crosses(&points, days, WEEK_DAYS))
         .collect();
     crosses.sort_by_key(|cross| (cross.date, cross.days));
-    Ok(Some(RegimeSection { state, crosses }))
+    let breadth = breadth::load(index, Some(state.date), WEEK_DAYS)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("每週市場摘要：讀取市場廣度失敗: {why:#}");
+            None
+        });
+    Ok(Some(RegimeSection {
+        state,
+        crosses,
+        breadth,
+    }))
+}
+
+/// 市場廣度一行，例如「• 市場廣度 10-16：站上 60 日線 40.0%（5 日前 65.0%）、20 日線 30.0%、
+/// 240 日線 —；近 5 日創 52 週新高 15 家次、新低 15 家次」。
+fn breadth_line(breadth: &MarketBreadth) -> String {
+    let percent = |value: Option<f64>| value.map_or_else(|| "—".to_owned(), |v| format!("{v:.1}%"));
+    let before = breadth
+        .above_ma60_percent_before
+        .map_or_else(String::new, |value| {
+            format!("（{WEEK_DAYS} 日前 {value:.1}%）")
+        });
+    format!(
+        "• 市場廣度 {}：站上 60 日線 {}{before}、20 日線 {}、240 日線 {}；近 {} 日創 52 週新高 {} 家次、新低 {} 家次",
+        breadth.date.format("%m-%d"),
+        percent(breadth.above_ma60_percent),
+        percent(breadth.above_ma20_percent),
+        percent(breadth.above_ma240_percent),
+        breadth.days,
+        breadth.new_highs,
+        breadth.new_lows
+    )
 }
 
 /// 大盤趨勢一段的各行。
@@ -275,6 +313,9 @@ fn regime_lines(section: &RegimeSection) -> Vec<String> {
     } else {
         format!("• 近 {WEEK_DAYS} 日：{}", crosses.join("、"))
     });
+    if let Some(breadth) = &section.breadth {
+        lines.push(breadth_line(breadth));
+    }
     lines
 }
 

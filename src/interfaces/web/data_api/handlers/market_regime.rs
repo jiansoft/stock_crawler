@@ -4,7 +4,8 @@
 //! [`crate::domain::market_index::regime`] 計算 5／20／60／120／240 日均線的位置與方向、均線排列、
 //! 站在 60 日均線同一側的天數、52 週高低點距離、近 5／20／60／240 日漲跌幅與近
 //! [`CROSS_WINDOW`] 個交易日穿越 [`CROSS_MA_DAYS`] 日均線的日子，用來判斷多空環境
-//! （條件選股回測的 `market_filter_ma` 用的也是加權指數相對均線的位置）。
+//! （條件選股回測的 `market_filter_ma` 用的也是加權指數相對均線的位置）；另附同一天的市場廣度
+//! （[`crate::domain::market_index::breadth`]），看大盤漲跌有沒有多數個股跟上。
 
 use axum::{
     Json,
@@ -14,11 +15,12 @@ use axum::{
 };
 
 use super::{error_response, parse_optional_date, repository_error, round2};
+use crate::domain::market_index::breadth::{self, MarketBreadth};
 use crate::domain::market_index::regime::{self, MarketRegime, MovingAverageCross};
 use crate::infra::database::repository::market_index::PgMarketIndexRepository;
 use crate::interfaces::web::data_api::dto::{
-    ErrorBody, MarketRegimeParams, MarketRegimeResponse, MovingAverageCrossItem,
-    MovingAverageStatus,
+    ErrorBody, MarketRegimeBreadth, MarketRegimeParams, MarketRegimeResponse,
+    MovingAverageCrossItem, MovingAverageStatus,
 };
 
 /// 列出穿越的均線天數（5 日均線穿越太頻繁，不列）。
@@ -26,6 +28,9 @@ const CROSS_MA_DAYS: [u16; 4] = [20, 60, 120, 240];
 
 /// 列出最近幾個交易日內的穿越。
 const CROSS_WINDOW: usize = 60;
+
+/// 市場廣度比較幾個交易日前、加總幾個交易日的新高新低。
+const BREADTH_WINDOW: usize = 5;
 
 /// 查詢加權指數的趨勢狀態。
 ///
@@ -39,13 +44,33 @@ pub(crate) async fn market_regime(Query(params): Query<MarketRegimeParams>) -> R
         Ok(value) => value,
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let points = match regime::load_taiex(&PgMarketIndexRepository::new(), date).await {
+    let repository = PgMarketIndexRepository::new();
+    let points = match regime::load_taiex(&repository, date).await {
         Ok(points) => points,
         Err(error) => return repository_error(error),
     };
-    match regime::regime(&points) {
-        Some(state) => Json(response(&state, &recent_crosses(&points))).into_response(),
-        None => error_response(StatusCode::NOT_FOUND, "查無加權指數資料"),
+    let Some(state) = regime::regime(&points) else {
+        return error_response(StatusCode::NOT_FOUND, "查無加權指數資料");
+    };
+    let breadth = match breadth::load(&repository, Some(state.date), BREADTH_WINDOW).await {
+        Ok(breadth) => breadth,
+        Err(error) => return repository_error(error),
+    };
+    let mut body = response(&state, &recent_crosses(&points));
+    body.breadth = breadth.as_ref().map(breadth_item);
+    Json(body).into_response()
+}
+
+/// 市場廣度轉成回應；比例四捨五入到小數兩位。
+fn breadth_item(breadth: &MarketBreadth) -> MarketRegimeBreadth {
+    MarketRegimeBreadth {
+        date: breadth.date.to_string(),
+        above_ma20_percent: breadth.above_ma20_percent.map(round2),
+        above_ma60_percent: breadth.above_ma60_percent.map(round2),
+        above_ma240_percent: breadth.above_ma240_percent.map(round2),
+        above_ma60_percent_5d_ago: breadth.above_ma60_percent_before.map(round2),
+        new_highs_5d: breadth.new_highs,
+        new_lows_5d: breadth.new_lows,
     }
 }
 
@@ -59,7 +84,7 @@ fn recent_crosses(points: &[(chrono::NaiveDate, f64)]) -> Vec<MovingAverageCross
     crosses
 }
 
-/// 把趨勢狀態與穿越轉成回應；數值四捨五入到小數兩位。
+/// 把趨勢狀態與穿越轉成回應；數值四捨五入到小數兩位；市場廣度另外填入。
 fn response(state: &MarketRegime, crosses: &[MovingAverageCross]) -> MarketRegimeResponse {
     MarketRegimeResponse {
         data_as_of: state.date.to_string(),
@@ -95,6 +120,7 @@ fn response(state: &MarketRegime, crosses: &[MovingAverageCross]) -> MarketRegim
                 direction: if cross.above { "up" } else { "down" }.to_owned(),
             })
             .collect(),
+        breadth: None,
     }
 }
 
