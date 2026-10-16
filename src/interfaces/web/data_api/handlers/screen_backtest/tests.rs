@@ -1,5 +1,6 @@
 //! 條件選股回測的期間解析、累積報酬、回撤與彙總測試。
 
+use super::summary::{compound, risk};
 use super::*;
 
 fn day(y: i32, m: u32, d: u32) -> NaiveDate {
