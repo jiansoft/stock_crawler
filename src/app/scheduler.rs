@@ -210,6 +210,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "取得每日收盤行情與報價",
             event::taiwan_stock::closing::execute,
         ),
+        // 15:30（週一至週五）大盤趨勢變化通知：加權指數當天站上或跌破 60／240 日均線、
+        // 均線排列改變才發；15:00 收盤事件已寫入加權指數，最新一筆不是今天（休市）就不發。
+        create_job(
+            "0 30 15 * * Mon-Fri",
+            "通知大盤趨勢變化",
+            event::taiwan_stock::market_regime_alert::execute,
+        ),
         // 17:00、19:00（週一至週五）檢查當日收盤資料：上市或上櫃有成交的檔數明顯偏少
         // （來源尚未公布、暫時失敗）就重跑收盤匯總並告警，避免缺口被「缺漏補齊」的零量列藏起來。
         // 行情完整後再檢查技術訊號與未來報酬，沒寫入就只重算缺的那一步並告警。
@@ -485,6 +492,7 @@ mod tests {
         let taipei = FixedOffset::east_opt(8 * 3600).unwrap();
         let mut sched = JobScheduler::new().await.expect("建立排程器");
         for (expr, hour, minute) in [
+            ("0 30 15 * * Mon-Fri", 15, 30),
             ("0 40 20 * * Mon-Fri", 20, 40),
             ("0 45 20 10-28 * *", 20, 45),
         ] {
