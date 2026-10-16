@@ -26,6 +26,21 @@ pub(crate) async fn common_stock_holdings() -> Result<BTreeSet<String>> {
     ))
 }
 
+/// 目前持股（未售出）的全部代號（含 ETF），去重並排序。
+///
+/// # Errors
+///
+/// 查詢持股失敗時回傳錯誤。
+pub(crate) async fn active_holding_symbols() -> Result<BTreeSet<String>> {
+    let holdings = PgPortfolioRepository::new()
+        .fetch_active_holdings(None)
+        .await?;
+    Ok(holdings
+        .into_iter()
+        .map(|holding| holding.security_code)
+        .collect())
+}
+
 /// 從持股代號中挑出普通股（去重、排序）；持股可能重複（同一檔分次買進）。
 pub(super) fn common_stocks(security_codes: impl IntoIterator<Item = String>) -> BTreeSet<String> {
     security_codes
@@ -80,6 +95,24 @@ mod tests {
         for symbol in ["0050", "00878", "2887G", "2887Z1"] {
             assert!(!is_common_stock(symbol), "{symbol}");
         }
+    }
+
+    /// 全部持股代號包含普通股持股（另含 ETF 等）；查詢失敗時跳過。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn active_holding_symbols_cover_common_stocks() {
+        dotenvy::dotenv().ok();
+        let (Ok(all), Ok(common)) = (
+            active_holding_symbols().await,
+            common_stock_holdings().await,
+        ) else {
+            println!("跳過 active_holding_symbols_cover_common_stocks：無資料庫連接");
+            return;
+        };
+        assert!(common.is_subset(&all), "{common:?} ⊄ {all:?}");
     }
 
     /// 股名取自股票主檔快取；查不到時為空字串。
