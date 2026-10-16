@@ -128,6 +128,15 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         );
     }
     if params
+        .market_filter_breadth
+        .is_some_and(|percent| !(1..=99).contains(&percent))
+    {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "market_filter_breadth 必須介於 1 至 99",
+        );
+    }
+    if params
         .hold_min_rs_score
         .is_some_and(|score| !(1..=99).contains(&score))
     {
@@ -218,7 +227,8 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     .bind(params.indicator.as_deref())
     .bind(params.kind.as_deref())
     .bind(params.market_filter_ma.map(i32::from))
-    .bind(params.hold_min_rs_score.map(i16::from));
+    .bind(params.hold_min_rs_score.map(i16::from))
+    .bind(params.market_filter_breadth.map(i32::from));
     if with_chip {
         query = query
             .bind(params.min_foreign_streak.map(i64::from))
@@ -244,6 +254,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         limit,
         keep_rank,
         market_filter_ma: params.market_filter_ma,
+        market_filter_breadth: params.market_filter_breadth,
         hold_min_rs_score: params.hold_min_rs_score,
         max_per_industry: params.max_per_industry,
         industry: params.industry.clone(),

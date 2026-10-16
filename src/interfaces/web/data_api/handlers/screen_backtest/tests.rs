@@ -279,22 +279,23 @@ fn period_rounds_returns() {
     assert_eq!(period((row(3, 0, None, 1.0), cash)).avg_return, None);
 }
 
-/// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11` 與續抱門檻 `$12`，籌碼版另含連續買超的 CTE 與
-/// `$13`／`$14`。
+/// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`、續抱門檻 `$12` 與市場廣度門檻 `$13`，籌碼版另含
+/// 連續買超的 CTE 與 `$14`／`$15`。
 #[test]
 fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.trim_start().starts_with("WITH\ndays AS ("));
     assert!(BACKTEST_SQL.contains("COALESCE($11::int, 1)"));
     assert!(BACKTEST_SQL.contains("rs_score >= $12"));
-    assert!(!BACKTEST_SQL.contains("$13"));
+    assert!(BACKTEST_SQL.contains("$13::int IS NULL OR br.above"));
+    assert!(!BACKTEST_SQL.contains("$14"));
     assert!(
         BACKTEST_WITH_CHIP_SQL
             .trim_start()
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $13"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $14"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $14"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $15"));
 }
 
 /// 一期候選：代號依相對強度由高到低，報酬一一對應。

@@ -44,6 +44,11 @@ async fn cleanup(pool: &sqlx::PgPool) {
             .bind(day(31))
             .execute(pool)
             .await;
+    let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date BETWEEN $1 AND $2")
+        .bind(day(1))
+        .bind(day(31))
+        .execute(pool)
+        .await;
     let _ = sqlx::query(
         "DELETE FROM daily_forward_return WHERE stock_symbol = '0050' AND date BETWEEN $1 AND $2",
     )
@@ -104,6 +109,21 @@ async fn seed(pool: &sqlx::PgPool) {
             .execute(pool)
             .await
             .expect("種入加權指數");
+    }
+    // 市場廣度（上市櫃合併）：03-01 站上 60 日線 70%、03-08 只剩 30%；上櫃（id 4）只有 03-01 的 40%。
+    for (d, market_id, above, below) in [(1, 0, 70, 30), (8, 0, 30, 70), (1, 4, 40, 60)] {
+        sqlx::query(
+            "INSERT INTO daily_stock_price_stats
+                 (date, stock_exchange_market_id, above_60_day_moving_average, below_60_day_moving_average)
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(day(d))
+        .bind(market_id)
+        .bind(above)
+        .bind(below)
+        .execute(pool)
+        .await
+        .expect("種入市場廣度");
     }
     // 0050：03-01 買進 5 日報酬 4%；03-08 沒有資料（彙總時算 0）。
     sqlx::query(
@@ -310,6 +330,21 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(json["periods"][1]["market_filtered"], true);
     assert_eq!(json["summary"]["market_filtered_periods"], 1);
     assert_eq!(json["summary"]["invested_periods"], 1);
+    // 市場廣度濾網：門檻 50% 時 03-08（30%）空手；門檻 30% 剛好通過（等於門檻算通過）。
+    let (status, json) = query("limit=2&market_filter_breadth=50").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["market_filter_breadth"], 50);
+    assert!(json["market_filter_ma"].is_null());
+    assert_eq!(json["periods"][1]["market_filtered"], true);
+    assert_eq!(json["summary"]["market_filtered_periods"], 1);
+    let (_, json) = query("limit=2&market_filter_breadth=30").await;
+    assert_eq!(json["summary"]["market_filtered_periods"], 0);
+    // 與均線濾網併用：兩者都要通過；上櫃 03-01 只有 40%、03-08 沒有統計列視為通過。
+    let (_, json) = query("limit=2&market_filter_breadth=30&market_filter_ma=20").await;
+    assert_eq!(json["summary"]["market_filtered_periods"], 1);
+    let (_, json) = query("market=tpex&market_filter_breadth=50").await;
+    assert_eq!(json["periods"][0]["market_filtered"], true);
+    assert_eq!(json["summary"]["invested_periods"], 0);
     // 沒設濾網時不受加權指數影響。
     let (_, json) = query("limit=2").await;
     assert_eq!(json["summary"]["market_filtered_periods"], 0);
@@ -374,6 +409,11 @@ async fn screen_backtest_endpoint_db_semantics() {
         ("limit=5&keep_rank=4", StatusCode::UNPROCESSABLE_ENTITY),
         ("keep_rank=201", StatusCode::UNPROCESSABLE_ENTITY),
         ("market_filter_ma=50", StatusCode::UNPROCESSABLE_ENTITY),
+        ("market_filter_breadth=0", StatusCode::UNPROCESSABLE_ENTITY),
+        (
+            "market_filter_breadth=100",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
         ("hold_min_rs_score=0", StatusCode::UNPROCESSABLE_ENTITY),
         ("hold_min_rs_score=100", StatusCode::UNPROCESSABLE_ENTITY),
         ("max_per_industry=0", StatusCode::UNPROCESSABLE_ENTITY),
