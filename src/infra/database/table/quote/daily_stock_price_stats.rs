@@ -212,7 +212,9 @@ const BACKFILL_BREADTH_SQL: &str = concat!(
       AND dq.stock_symbol NOT LIKE '00%'
 "#,
     stats_aggregate_tail!(),
-    "ON CONFLICT (date, stock_exchange_market_id) DO NOTHING;"
+    // 合併列（id 0）是對空集合 SUM，非交易日也會產生一列全 0；當天沒有日線就整句不寫。
+    "WHERE EXISTS (SELECT 1 FROM raw_data)
+ON CONFLICT (date, stock_exchange_market_id) DO NOTHING;"
 );
 
 /// 每日全市場估值與技術面分布統計。
@@ -555,6 +557,13 @@ mod tests {
         .await
         .expect("讀回 all 列");
         assert_eq!(kept, 99);
+
+        // 沒有日線的日子（非交易日）不寫入，連全 0 的合併列也不產生。
+        let holiday = date + chrono::Duration::days(3);
+        let written = DailyStockPriceStats::backfill_breadth(holiday)
+            .await
+            .expect("非交易日回補成功");
+        assert_eq!(written, 0);
 
         cleanup().await;
     }
