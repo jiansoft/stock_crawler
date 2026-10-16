@@ -9,6 +9,9 @@
 //!   要先有未來報酬，整天替換，重跑安全。
 //! - `test_backfill_technical_signals`：
 //!   逐日重算全市場技術訊號（`daily_technical_signal`）。
+//! - `test_backfill_market_breadth`：
+//!   逐日補上 `MANUAL_MARKET_BREADTH_FROM`～`MANUAL_MARKET_BREADTH_TO`（預設 2019-01-02～2022-02-16）
+//!   沒有統計列的市場廣度（`daily_stock_price_stats`）；已有的列不動，重跑安全。
 
 use chrono::NaiveDate;
 
@@ -24,6 +27,12 @@ const MANUAL_TECHNICAL_SIGNAL_FROM: &str = "2026-09-01";
 
 /// 技術訊號回補的預設迄日。
 const MANUAL_TECHNICAL_SIGNAL_TO: &str = "2026-10-12";
+
+/// 市場廣度回補的預設起日：與相對強度、技術訊號的歷史起點一致。
+const MANUAL_MARKET_BREADTH_FROM: &str = "2019-01-02";
+
+/// 市場廣度回補的預設迄日：`estimate` 從 2022-02-17 起才有資料，之後的統計由收盤流程產生。
+const MANUAL_MARKET_BREADTH_TO: &str = "2022-02-16";
 
 /// 逐日回填未來報酬（`daily_forward_return`）。
 ///
@@ -128,4 +137,41 @@ async fn test_backfill_technical_signals() {
             println!("{day} 技術訊號 {count} 筆");
         }
     }
+}
+
+/// 逐日補上沒有統計列的市場廣度（`daily_stock_price_stats`）。
+///
+/// 只讀資料庫既有日線：均線上下家數、漲跌家數、52 週新高／新低；估值分布四欄沒有估價可比，寫 0。
+/// 已有統計列的日子不動，非交易日沒有日線也不寫入，重跑安全。起訖日可用環境變數
+/// `MANUAL_MARKET_BREADTH_FROM`／`MANUAL_MARKET_BREADTH_TO` 覆寫。
+///
+/// 執行範例：
+/// `MANUAL_MARKET_BREADTH_FROM=2019-01-02 cargo test app::manual_backfill::derived::test_backfill_market_breadth -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_market_breadth() {
+    dotenvy::dotenv().ok();
+    let date = |name: &str, default: &str| {
+        let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
+        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+    };
+    let from = date("MANUAL_MARKET_BREADTH_FROM", MANUAL_MARKET_BREADTH_FROM);
+    let to = date("MANUAL_MARKET_BREADTH_TO", MANUAL_MARKET_BREADTH_TO);
+
+    let (mut days, mut total) = (0, 0);
+    for day in from.iter_days().take_while(|day| *day <= to) {
+        let count =
+            crate::infra::database::table::quote::daily_stock_price_stats::DailyStockPriceStats::backfill_breadth(day)
+                .await
+                .unwrap_or_else(|why| panic!("{day} 市場廣度回補失敗：{why:#}"));
+        if count > 0 {
+            days += 1;
+            total += count;
+        }
+        if day.format("%d").to_string() == "01" {
+            println!("{day} 累計 {days} 個交易日、{total} 列");
+        }
+    }
+    println!("市場廣度回補 {from}～{to}：{days} 個交易日、共 {total} 列");
 }
