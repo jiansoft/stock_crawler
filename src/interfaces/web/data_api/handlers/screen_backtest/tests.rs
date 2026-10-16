@@ -10,6 +10,7 @@ fn day(y: i32, m: u32, d: u32) -> NaiveDate {
 fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
     PeriodRow {
         date: day(2024, 1, d),
+        pending: false,
         market_filtered: false,
         holdings,
         avg_return: avg,
@@ -343,6 +344,8 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("rs_score >= $12"));
     assert!(BACKTEST_SQL.contains("$13::int IS NULL OR br.above"));
     assert!(!BACKTEST_SQL.contains("$14"));
+    assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
+    assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
         BACKTEST_WITH_CHIP_SQL
             .trim_start()
@@ -357,6 +360,8 @@ fn backtest_sql_variants_are_well_formed() {
 fn candidates(d: u32, list: &[(&str, Option<f64>)]) -> CandidateRow {
     CandidateRow {
         date: day(2024, 1, d),
+        pending: false,
+        elapsed_days: 0,
         market_ok: true,
         benchmark_return: Some(1.0),
         etf_return: Some(0.5),
@@ -606,4 +611,32 @@ fn select_holdings_caps_stocks_per_industry() {
         Some(1),
     );
     assert_eq!(rows[0].symbols, ["A"]);
+}
+
+/// 最後一期未滿持有天數時移出各期、保留持股與換手；未標記或沒有期數時不動。
+#[test]
+fn split_current_takes_pending_last_period() {
+    let mut pending = candidates(16, &[("A", None), ("C", None)]);
+    pending.pending = true;
+    let mut rows = select_holdings(
+        vec![
+            candidates(2, &[("A", Some(4.0)), ("B", Some(2.0))]),
+            pending,
+        ],
+        2,
+        2,
+        None,
+    );
+    assert!(rows[1].pending && !rows[0].pending);
+    let mut costs = trading_costs(&rows, 1.0);
+    let (row, cost) = split_current(&mut rows, &mut costs).expect("有目前持股");
+    assert_eq!(row.symbols, ["A", "C"]);
+    assert_eq!(row.avg_return, None);
+    assert!(near(cost.turnover, 0.5));
+    assert_eq!((rows.len(), costs.len()), (1, 1));
+
+    // 最後一期已滿：不移出。
+    assert!(split_current(&mut rows, &mut costs).is_none());
+    assert_eq!(rows.len(), 1);
+    assert!(split_current(&mut Vec::new(), &mut Vec::new()).is_none());
 }

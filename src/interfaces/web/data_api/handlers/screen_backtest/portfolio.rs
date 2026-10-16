@@ -135,6 +135,7 @@ pub(super) fn select_holdings(
             previous = symbols.iter().cloned().collect();
             PeriodRow {
                 date: row.date,
+                pending: row.pending,
                 market_filtered: !row.market_ok,
                 holdings: symbols.len() as i64,
                 avg_return: (!returns.is_empty())

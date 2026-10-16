@@ -36,8 +36,8 @@ use super::{
 };
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
-    BacktestContributor, BacktestContributors, ErrorBody, ScreenBacktestParams,
-    ScreenBacktestResponse,
+    BacktestContributor, BacktestContributors, BacktestCurrent, BacktestHolding, ErrorBody,
+    ScreenBacktestParams, ScreenBacktestResponse,
 };
 
 /// 可選的持有天數，與 `daily_forward_return` 的報酬欄位對應。
@@ -63,6 +63,10 @@ const MAX_KEEP_RANK: u8 = 200;
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 struct CandidateRow {
     date: NaiveDate,
+    /// 最後一個換股日、還沒滿持有天數（沒有報酬）；代表策略目前的持股。
+    pending: bool,
+    /// 換股日之後到迄日經過的交易日數。
+    elapsed_days: i64,
     /// 大盤濾網是否通過；沒有設濾網時恆為 true。
     market_ok: bool,
     benchmark_return: Option<f64>,
@@ -81,6 +85,8 @@ struct CandidateRow {
 #[derive(Debug, Clone, Default, PartialEq)]
 struct PeriodRow {
     date: NaiveDate,
+    /// 還沒滿持有天數的最後一期（見 [`CandidateRow::pending`]）。
+    pending: bool,
     /// 大盤濾網沒過、這期被迫空手。
     market_filtered: bool,
     holdings: i64,
@@ -244,18 +250,28 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
-    let rows = select_holdings(
+    let elapsed_days = candidates
+        .last()
+        .filter(|row| row.pending)
+        .map(|row| row.elapsed_days);
+    let mut rows = select_holdings(
         candidates,
         usize::from(limit),
         usize::from(keep_rank),
         params.max_per_industry.map(usize::from),
     );
-    let costs = trading_costs(&rows, fee_discount);
+    let mut costs = trading_costs(&rows, fee_discount);
+    let current = split_current(&mut rows, &mut costs);
     let (held_symbols, best, worst) = contributors(&rows, LISTED_CONTRIBUTORS);
     let symbols: Vec<&str> = best
         .iter()
         .chain(&worst)
         .map(|item| item.symbol.as_str())
+        .chain(
+            current
+                .iter()
+                .flat_map(|(row, _)| row.symbols.iter().map(String::as_str)),
+        )
         .collect();
     let names: Vec<(String, String)> = match sqlx::query_as(STOCK_NAMES_SQL)
         .bind(&symbols)
@@ -273,6 +289,24 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         contribution: item.contribution,
         avg_return: item.avg_return,
     };
+    let current = current.map(|(row, cost)| {
+        let elapsed = elapsed_days.unwrap_or(0);
+        BacktestCurrent {
+            date: row.date.to_string(),
+            days_elapsed: elapsed,
+            days_to_next_rebalance: (i64::from(hold_days) - elapsed).max(0),
+            market_filtered: row.market_filtered,
+            turnover: round4(cost.turnover),
+            holdings: row
+                .symbols
+                .into_iter()
+                .map(|symbol| BacktestHolding {
+                    name: names.get(&symbol).cloned(),
+                    symbol,
+                })
+                .collect(),
+        }
+    });
 
     Json(ScreenBacktestResponse {
         from: from.to_string(),
@@ -302,12 +336,24 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
             best: best.into_iter().map(contributor).collect(),
             worst: worst.into_iter().map(contributor).collect(),
         },
+        current,
         periods: rows.into_iter().zip(costs).map(period).collect(),
     })
     .into_response()
 }
 
-/// 個股貢獻名單的股票名稱。
+/// 最後一期還沒滿持有天數時把它從各期結果移出，回傳該期持股與換手；其餘期數不受影響。
+fn split_current(
+    rows: &mut Vec<PeriodRow>,
+    costs: &mut Vec<PeriodCost>,
+) -> Option<(PeriodRow, PeriodCost)> {
+    if !rows.last()?.pending {
+        return None;
+    }
+    Some((rows.pop()?, costs.pop()?))
+}
+
+/// 個股貢獻與目前持股的股票名稱。
 const STOCK_NAMES_SQL: &str =
     r#"SELECT stock_symbol::text, "Name"::text FROM stocks WHERE stock_symbol = ANY($1)"#;
 

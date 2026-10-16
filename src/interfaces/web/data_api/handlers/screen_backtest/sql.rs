@@ -18,7 +18,9 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後每隔 `$4` 個交易日的換股日；`window_start` 是含當天往前第 `$4` 個交易日，
 ///   訊號條件看 `window_start`～換股日。
-/// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入。
+/// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入，
+///   只有最後一個換股日例外：以 `pending` 標記列出，當作策略目前的持股（`elapsed_days` 為換股日之後
+///   到迄日經過的交易日數）。
 /// - `candidates`：符合條件的股票依相對強度由高到低的前 `$5` 檔與各自的報酬、產業編號；實際持股由
 ///   [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
@@ -125,6 +127,8 @@ breadth AS (
     WHERE stock_exchange_market_id = $3 AND date BETWEEN $1 AND $2
 )
 SELECT b.date,
+       b.samples = 0 AS pending,
+       (SELECT COUNT(*) FROM days d WHERE d.date > b.date)::int8 AS elapsed_days,
        ($11::int IS NULL OR t.above IS NOT FALSE)
            AND ($13::int IS NULL OR br.above IS NOT FALSE) AS market_ok,
        b.avg_ret AS benchmark_return,
@@ -147,7 +151,7 @@ LEFT JOIN holdable h ON h.date = b.date
 LEFT JOIN daily_forward_return e ON e.date = b.date AND e.stock_symbol = '0050'
 LEFT JOIN taiex t ON t."date" = b.date
 LEFT JOIN breadth br ON br.date = b.date
-WHERE b.samples > 0
+WHERE b.samples > 0 OR b.date = (SELECT MAX(date) FROM rebal)
 ORDER BY b.date
 "#
         )

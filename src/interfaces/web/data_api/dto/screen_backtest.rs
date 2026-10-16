@@ -205,6 +205,32 @@ pub(crate) struct BacktestContributors {
     pub(crate) worst: Vec<BacktestContributor>,
 }
 
+/// 目前持股的一檔。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestHolding {
+    /// 股票代號。
+    pub(crate) symbol: String,
+    /// 股票名稱；查無為 `null`。
+    pub(crate) name: Option<String>,
+}
+
+/// 最後一次換股、還沒滿持有天數的持股，也就是依策略現在應該持有的股票。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestCurrent {
+    /// 換股日。
+    pub(crate) date: String,
+    /// 換股日之後到回測迄日經過的交易日數。
+    pub(crate) days_elapsed: i64,
+    /// 距離下次換股還有幾個交易日。
+    pub(crate) days_to_next_rebalance: i64,
+    /// 大盤濾網沒過、這期空手。
+    pub(crate) market_filtered: bool,
+    /// 相對上一期新買進的部位比例（0–1）。
+    pub(crate) turnover: f64,
+    /// 全部持股，依相對強度由高到低；空手為空陣列。
+    pub(crate) holdings: Vec<BacktestHolding>,
+}
+
 /// 條件選股回測結果。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct ScreenBacktestResponse {
@@ -254,6 +280,9 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) years: Vec<BacktestYear>,
     /// 個股貢獻最多與拖累最多的股票。
     pub(crate) contributors: BacktestContributors,
+    /// 最後一次換股、還沒滿持有天數的持股（策略目前的持股，不計入彙總與各期）；最後一期已滿或迄日
+    /// 剛好沒有未滿的換股日為 `null`。
+    pub(crate) current: Option<BacktestCurrent>,
     /// 各期結果，由舊到新；只列已滿持有天數的期數。
     pub(crate) periods: Vec<BacktestPeriod>,
 }
