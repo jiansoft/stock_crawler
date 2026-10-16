@@ -5,9 +5,13 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use async_trait::async_trait;
 
+use super::crossing::crossing_line;
 use super::*;
-use crate::domain::market_index::breadth::BreadthDay;
-use crate::domain::quote::relative_strength::{ScoredStock, UniverseRow};
+use crate::domain::chip::flow::{FlowPeriod, StockFlow};
+use crate::domain::market_index::{breadth::BreadthDay, regime};
+use crate::domain::quote::relative_strength::{
+    CrossDirection, PeriodCrossing, RelativeStrengthDay, ScoredStock, UniverseRow,
+};
 
 fn day(d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 10, d).expect("合法日期")
@@ -554,7 +558,7 @@ async fn regime_section_lists_crosses() {
             (day(16), 60, false)
         ]
     );
-    let lines = regime_lines(&section);
+    let lines = market::lines(&section);
     assert_eq!(lines[2], "• 收盤 100.00，近 5 日 -51.22%；均線糾結");
     assert_eq!(
         lines[3],
@@ -582,7 +586,7 @@ async fn regime_section_lists_crosses() {
         .expect("指數查詢成功")
         .expect("有加權指數");
     assert!(section.breadth.is_none());
-    assert_eq!(regime_lines(&section).len(), 6);
+    assert_eq!(market::lines(&section).len(), 6);
 
     let message = build_message(Some(&section), None, None, &[], &[], name).expect("有大盤");
     assert!(
