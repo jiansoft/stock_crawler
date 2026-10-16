@@ -665,6 +665,31 @@ async fn screen_backtest_endpoint_db_semantics() {
         years[0]["etf_return"]["median"],
         single["years"][0]["etf_total_return"]
     );
+    // 0050 前緣：每個偏移只查一次，比例 0 的分布與偏移穩健度相同，100 等於只持有 0050。
+    let (status, frontier) = get(
+        "/api/v1/stocks/screen/backtest/frontier?from=1993-03-01&to=1993-03-15&hold_days=5&limit=2&etf_weight=40",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{frontier}");
+    assert_eq!(frontier["offsets"], 5);
+    let weights = frontier["weights"].as_array().expect("weights array");
+    assert_eq!(
+        weights
+            .iter()
+            .map(|point| point["etf_weight"].as_u64().unwrap_or(999))
+            .collect::<Vec<_>>(),
+        [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    );
+    assert_eq!(weights[0]["distribution"], json["distribution"]);
+    let full = &weights[10]["distribution"];
+    assert_eq!(
+        full["annualized_return_after_costs"]["median"],
+        full["etf_annualized_return"]["median"]
+    );
+    assert!(frontier["best_sharpe_weight"].is_u64() || frontier["best_sharpe_weight"].is_null());
+    assert!(frontier["best_return_weight"].is_u64(), "{frontier}");
+    let (status, _) = get("/api/v1/stocks/screen/backtest/frontier?hold_days=10").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     // 參數驗證與單次回測相同；rebalance_offset 不使用。
     for (path, status) in [
         ("hold_days=5&rebalance_offset=9", StatusCode::OK),

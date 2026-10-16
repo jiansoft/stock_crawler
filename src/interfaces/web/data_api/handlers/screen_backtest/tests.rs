@@ -838,3 +838,90 @@ fn offset_years_merge_by_year() {
     assert!(only_missing[0].beat_etf_rate.is_none());
     assert!(offset_years(&[]).is_empty());
 }
+
+/// 0050 前緣：每個比例各偏移混合後彙總；比例 0 為純策略、100 等於只持有 0050；還沒滿持有天數的
+/// 最後一期不列入。
+#[test]
+fn frontier_blends_each_weight() {
+    use super::frontier::{WEIGHTS, frontier};
+    let rows = vec![
+        dated(day(2024, 1, 2), Some(10.0), 0.0, Some(2.0)),
+        dated(day(2024, 2, 1), Some(-4.0), 0.0, Some(1.0)),
+        dated(day(2024, 3, 1), Some(8.0), 0.0, Some(3.0)),
+        PeriodRow {
+            pending: true,
+            ..dated(day(2024, 4, 1), None, 0.0, None)
+        },
+    ];
+    let raw = Raw {
+        costs: free(&rows),
+        rows,
+        elapsed_days: Some(3),
+    };
+    let points = frontier(&[(0, raw.clone()), (1, raw)], 20);
+    assert_eq!(
+        points
+            .iter()
+            .map(|point| point.etf_weight)
+            .collect::<Vec<_>>(),
+        WEIGHTS
+    );
+    let annualized = |index: usize| {
+        points[index]
+            .distribution
+            .annualized_return_after_costs
+            .as_ref()
+            .map(|stat| stat.median)
+    };
+    let etf = points[0]
+        .distribution
+        .etf_annualized_return
+        .as_ref()
+        .map(|stat| stat.median);
+    assert_eq!(annualized(10), etf);
+    assert!(annualized(0) > annualized(10), "{points:?}");
+    // 兩個偏移相同，比例越高報酬越接近 0050；全部比例的 0050 欄位都一樣。
+    assert!(points.iter().all(|point| {
+        point
+            .distribution
+            .etf_annualized_return
+            .as_ref()
+            .map(|stat| stat.median)
+            == etf
+    }));
+}
+
+/// 最佳比例：中位數最高者，同值取較低的比例；全部沒有數值為 `None`。
+#[test]
+fn best_weight_prefers_lower_on_tie() {
+    use super::frontier::best_weight;
+    use crate::interfaces::web::data_api::dto::{BacktestFrontierPoint, BacktestStat};
+    let point = |etf_weight: u8, median: Option<f64>| {
+        let mut distribution = super::offsets::distribution(&[]);
+        distribution.sharpe_ratio = median.map(|median| BacktestStat {
+            min: median,
+            p25: median,
+            median,
+            mean: median,
+            p75: median,
+            max: median,
+        });
+        BacktestFrontierPoint {
+            etf_weight,
+            distribution,
+        }
+    };
+    let sharpe = |spread: &crate::interfaces::web::data_api::dto::BacktestOffsetDistribution| {
+        spread.sharpe_ratio.as_ref().map(|stat| stat.median)
+    };
+    let points = [
+        point(0, Some(1.0)),
+        point(10, None),
+        point(20, Some(1.4)),
+        point(30, Some(1.4)),
+        point(40, Some(1.2)),
+    ];
+    assert_eq!(best_weight(&points, sharpe), Some(20));
+    assert_eq!(best_weight(&[point(0, None)], sharpe), None);
+    assert_eq!(best_weight(&[], sharpe), None);
+}

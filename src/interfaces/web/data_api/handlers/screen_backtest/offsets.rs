@@ -27,7 +27,7 @@ use crate::interfaces::web::data_api::handlers::{database_error, round2, round4}
 const MAX_OFFSET_SAMPLES: u16 = 20;
 
 /// 同時執行的回測查詢數，避免一次占滿連線池。
-const CONCURRENCY: usize = 4;
+pub(super) const CONCURRENCY: usize = 4;
 
 /// 同一組條件換不同的換股日偏移重跑，回傳每個偏移的績效彙總與分布。
 ///

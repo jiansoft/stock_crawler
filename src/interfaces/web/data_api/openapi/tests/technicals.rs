@@ -386,6 +386,9 @@ fn openapi_screen_backtest_offsets_schema_pins_field_names() {
         "max_drawdown_after_costs",
         "etf_annualized_return",
         "etf_sharpe_ratio",
+        "volatility",
+        "etf_volatility",
+        "etf_max_drawdown",
     ] {
         assert!(
             spread[field].to_string().contains("BacktestStat"),
@@ -394,8 +397,42 @@ fn openapi_screen_backtest_offsets_schema_pins_field_names() {
         assert!(spread[field].to_string().contains("null"), "{field}");
     }
     assert!(spread["beat_etf_return_rate"].to_string().contains("null"));
+    assert!(
+        spread["beat_etf_drawdown_rate"]
+            .to_string()
+            .contains("null")
+    );
     let stat = &schemas["BacktestStat"]["properties"];
     for field in ["min", "p25", "median", "mean", "p75", "max"] {
         assert_eq!(stat[field]["type"], "number", "{field}");
     }
+}
+
+/// 0050 核心部位前緣 path 的契約：與單次回測共用參數、回應含各比例的分布與最佳比例。
+#[test]
+fn openapi_screen_backtest_frontier_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/stocks/screen/backtest/frontier");
+    assert_endpoint_responses(operation, "ScreenBacktestFrontierResponse", true);
+    assert_eq!(query_schema(operation, "hold_days")["default"], 20);
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["ScreenBacktestFrontierResponse"]["properties"];
+    assert_eq!(response["offsets"]["type"], "integer");
+    assert_eq!(response["weights"]["type"], "array");
+    assert!(
+        response["weights"]
+            .to_string()
+            .contains("BacktestFrontierPoint")
+    );
+    for field in ["best_sharpe_weight", "best_return_weight"] {
+        assert!(response[field].to_string().contains("null"), "{field}");
+    }
+    let point = &schemas["BacktestFrontierPoint"]["properties"];
+    assert_eq!(point["etf_weight"]["type"], "integer");
+    assert!(
+        point["distribution"]
+            .to_string()
+            .contains("BacktestOffsetDistribution")
+    );
 }
