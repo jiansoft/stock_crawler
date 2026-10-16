@@ -59,6 +59,9 @@ const MARKET_FILTER_DAYS: [u16; 4] = [20, 60, 120, 240];
 /// 也是每期讀取的候選檔數（同產業額滿後要往後補）。
 const MAX_KEEP_RANK: u8 = 200;
 
+/// `min_avg_trade_value` 上限（百萬元）：日均成交 1,000 億元，已超過全市場最大的個股。
+const MAX_TRADE_VALUE_MILLION: u32 = 100_000;
+
 /// [`BACKTEST_SQL`] 的一列：換股日、基準與依相對強度由高到低的候選股（與報酬一一對應）。
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 struct CandidateRow {
@@ -173,6 +176,15 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
             "rebalance_offset 必須介於 0 至 hold_days − 1",
         );
     }
+    if params
+        .min_avg_trade_value
+        .is_some_and(|value| !(1..=MAX_TRADE_VALUE_MILLION).contains(&value))
+    {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "min_avg_trade_value 必須介於 1 至 100000（百萬元）",
+        );
+    }
     let keep_rank = params.keep_rank.unwrap_or(limit);
     if !(limit..=MAX_KEEP_RANK).contains(&keep_rank) {
         return error_response(
@@ -248,7 +260,12 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     .bind(params.market_filter_ma.map(i32::from))
     .bind(params.hold_min_rs_score.map(i16::from))
     .bind(params.market_filter_breadth.map(i32::from))
-    .bind(i32::from(rebalance_offset));
+    .bind(i32::from(rebalance_offset))
+    .bind(
+        params
+            .min_avg_trade_value
+            .map(|value| i64::from(value) * 1_000_000),
+    );
     if with_chip {
         query = query
             .bind(params.min_foreign_streak.map(i64::from))
@@ -328,6 +345,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         hold_min_rs_score: params.hold_min_rs_score,
         max_per_industry: params.max_per_industry,
         rebalance_offset,
+        min_avg_trade_value: params.min_avg_trade_value,
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,

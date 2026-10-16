@@ -241,6 +241,7 @@ fn openapi_screen_backtest_schema_pins_field_names() {
         ("max_rs_score", 99),
         ("min_foreign_streak", 60),
         ("min_trust_streak", 60),
+        ("min_avg_trade_value", 100000),
     ] {
         let schema = query_schema(operation, name);
         assert_eq!(schema["minimum"], 1, "{name}");
