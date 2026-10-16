@@ -1,7 +1,8 @@
 //! `/stocks/screen/backtest` handler：依每日留存的條件定期選股，回測等權持有的報酬。
 //!
 //! 每隔 `hold_days` 個交易日換股一次：在換股日從相對強度母體（上市櫃普通股，見
-//! `daily_relative_strength`）挑出符合條件的股票，依相對強度分數由高到低取前 `limit` 檔，
+//! `daily_relative_strength`）挑出符合條件的股票，依 `rank_by`（預設相對強度分數）由高到低取前
+//! `limit` 檔，
 //! 收盤等權買進、持有 `hold_days` 個交易日；該期報酬取 `daily_forward_return` 的同天期還原報酬，
 //! 期間內下市的股票算到最後一筆收盤。只用當天就已知道的資料（相對強度、法人連續買超、技術訊號），
 //! 沒有前視偏誤；相對強度母體看當時有沒有在交易，沒有存活者偏差。
@@ -64,6 +65,9 @@ const MAX_KEEP_RANK: u8 = 200;
 
 /// `min_avg_trade_value` 上限（百萬元）：日均成交 1,000 億元，已超過全市場最大的個股。
 const MAX_TRADE_VALUE_MILLION: u32 = 100_000;
+
+/// 候選股可用的排序方式（`rank_by`），第一個為預設；字面值與 [`sql`] 回測 SQL 的 `$16` 對應。
+const RANK_BY: [&str; 4] = ["rs_score", "trade_value", "foreign_streak", "trust_streak"];
 
 /// [`BACKTEST_SQL`] 的一列：換股日、基準與依相對強度由高到低的候選股（與報酬一一對應）。
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
@@ -196,6 +200,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         max_per_industry: params.max_per_industry,
         rebalance_offset,
         min_avg_trade_value: params.min_avg_trade_value,
+        rank_by: backtest.rank_by.to_owned(),
         industry: params.industry.clone(),
         min_rs_score: params.min_rs_score,
         max_rs_score: params.max_rs_score,
@@ -232,6 +237,8 @@ struct Backtest<'a> {
     limit: u8,
     keep_rank: u8,
     fee_discount: f64,
+    /// 候選股排序方式（[`RANK_BY`] 其中之一）。
+    rank_by: &'a str,
 }
 
 /// 一次回測的各期結果與目前持股。
@@ -298,6 +305,12 @@ impl<'a> Backtest<'a> {
                 "min_avg_trade_value 必須介於 1 至 100000（百萬元）",
             ));
         }
+        let rank_by = params.rank_by.as_deref().unwrap_or(RANK_BY[0]);
+        if !RANK_BY.contains(&rank_by) {
+            return Err(unprocessable(
+                "rank_by 必須為 rs_score、trade_value、foreign_streak 或 trust_streak",
+            ));
+        }
         let keep_rank = params.keep_rank.unwrap_or(limit);
         if !(limit..=MAX_KEEP_RANK).contains(&keep_rank) {
             return Err(unprocessable("keep_rank 必須介於 limit 至 200"));
@@ -347,6 +360,7 @@ impl<'a> Backtest<'a> {
             limit,
             keep_rank,
             fee_discount,
+            rank_by,
         })
     }
 
@@ -354,7 +368,9 @@ impl<'a> Backtest<'a> {
     /// 持有天數的最後一期移到 [`Simulation::current`]。
     async fn simulate(&self, rebalance_offset: u16) -> Result<Simulation, sqlx::Error> {
         let params = self.params;
-        let with_chip = params.min_foreign_streak.is_some() || params.min_trust_streak.is_some();
+        let with_chip = params.min_foreign_streak.is_some()
+            || params.min_trust_streak.is_some()
+            || self.rank_by.ends_with("_streak");
         let mut query = sqlx::query_as(if with_chip {
             BACKTEST_WITH_CHIP_SQL
         } else {
@@ -382,7 +398,8 @@ impl<'a> Backtest<'a> {
             params
                 .min_avg_trade_value
                 .map(|value| i64::from(value) * 1_000_000),
-        );
+        )
+        .bind(self.rank_by);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

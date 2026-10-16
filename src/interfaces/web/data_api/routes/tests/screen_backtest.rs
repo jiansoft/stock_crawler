@@ -143,11 +143,12 @@ async fn seed(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("種入訊號");
-    // 外資：BA 02-26、03-01 連買 2 天；BB 03-05、03-08 連買 2 天。
+    // 外資：BA 02-26、03-01 連買 2 天；BB 03-05、03-08 連買 2 天。投信：BC 03-08 買超 1 天。
     sqlx::query(
         r#"INSERT INTO chip_daily ("date", stock_symbol, foreign_net, trust_net, dealer_net) VALUES
            ('1993-02-26', '79979BA', 100, 0, 0), ('1993-03-01', '79979BA', 100, 0, 0),
-           ('1993-03-05', '79979BB', 100, 0, 0), ('1993-03-08', '79979BB', 100, 0, 0)"#,
+           ('1993-03-05', '79979BB', 100, 0, 0), ('1993-03-08', '79979BB', 100, 0, 0),
+           ('1993-03-08', '79979BC', 0, 100, 0)"#,
     )
     .execute(pool)
     .await
@@ -402,6 +403,51 @@ async fn screen_backtest_endpoint_db_semantics() {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{value}");
     }
 
+    // 排序方式：預設依相對強度（03-01 BA、03-08 BB）；依成交金額改選 BC（2 億元）。
+    let (_, json) = query("limit=1").await;
+    assert_eq!(json["rank_by"], "rs_score");
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BB"])
+    );
+    let (status, json) = query("limit=1&rank_by=trade_value").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["rank_by"], "trade_value");
+    assert_eq!(
+        json["periods"][0]["symbols"],
+        serde_json::json!(["79979BC"])
+    );
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BC"])
+    );
+    // 依成交金額且有門檻：BB 沒有日線不列入，BA 排在 BC 之後。
+    let (_, json) = query("limit=3&rank_by=trade_value&min_avg_trade_value=30").await;
+    assert_eq!(
+        json["periods"][0]["symbols"],
+        serde_json::json!(["79979BC", "79979BA"])
+    );
+    // 依投信連買：03-08 BC（1 天）排在相對強度較高的 BB 之前；沒設門檻時沒有籌碼資料的股票
+    // 也照樣列入（03-01 三檔都有，連買天數都算 0、依相對強度排）。
+    let (status, json) = query("limit=3&rank_by=trust_streak").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        json["periods"][0]["symbols"],
+        serde_json::json!(["79979BA", "79979BC", "79979BB"])
+    );
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BC", "79979BB", "79979BA"])
+    );
+    // 依外資連買：03-08 BB（2 天）在前，其餘依相對強度。
+    let (_, json) = query("limit=3&rank_by=foreign_streak").await;
+    assert_eq!(
+        json["periods"][1]["symbols"],
+        serde_json::json!(["79979BB", "79979BC", "79979BA"])
+    );
+    let (status, _) = query("rank_by=volume").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -477,7 +523,7 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(json["summary"]["win_rate"], 0.5);
     assert_eq!(json["indicator"], "kd");
 
-    // 籌碼條件：外資連買 2 天，03-01 BA、03-08 BB；投信沒有連買 → 全部空手。
+    // 籌碼條件：外資連買 2 天，03-01 BA、03-08 BB；投信連買 1 天只有 03-08 的 BC（沒有報酬）。
     let (_, json) = query("min_foreign_streak=2").await;
     assert_eq!(
         periods(&json),
@@ -487,7 +533,13 @@ async fn screen_backtest_endpoint_db_semantics() {
         ]
     );
     let (_, json) = query("min_trust_streak=1").await;
-    assert_eq!(json["summary"]["invested_periods"], 0);
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 0, None),
+            ("1993-03-08".to_owned(), 1, None),
+        ]
+    );
     assert_eq!(json["summary"]["total_return"], 0.0);
 
     for (extra, status) in [

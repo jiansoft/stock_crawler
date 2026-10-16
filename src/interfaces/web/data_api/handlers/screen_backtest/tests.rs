@@ -336,7 +336,8 @@ fn period_rounds_returns() {
 }
 
 /// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`、續抱門檻 `$12`、市場廣度門檻 `$13`、換股日偏移 `$14`
-/// 與流動性門檻 `$15`，籌碼版另含連續買超的 CTE 與 `$16`／`$17`。
+/// 、流動性門檻 `$15` 與排序方式 `$16`，籌碼版另含連續買超的 CTE 與 `$17`／`$18`；沒有籌碼的版本
+/// 排序用的連續買超欄位恆為 `NULL`。
 #[test]
 fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.trim_start().starts_with("WITH\ndays AS ("));
@@ -345,8 +346,11 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("$13::int IS NULL OR br.above"));
     assert!(BACKTEST_SQL.contains("WHERE i >= $14::int AND (i - $14::int) % $4::int = 0"));
     assert!(BACKTEST_SQL.contains("$15::int8 IS NULL OR"));
-    assert!(BACKTEST_SQL.contains("BETWEEN u.liquidity_start AND u.date"));
-    assert!(!BACKTEST_SQL.contains("$16"));
+    assert!(BACKTEST_SQL.contains("BETWEEN f.liquidity_start AND f.date"));
+    assert!(BACKTEST_SQL.contains("$15::int8 IS NOT NULL OR $16::text = 'trade_value'"));
+    assert!(BACKTEST_SQL.contains("ORDER BY CASE $16::text"));
+    assert!(BACKTEST_SQL.contains("NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"));
+    assert!(!BACKTEST_SQL.contains("$17"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -355,8 +359,13 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $16"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $17"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $17"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $18"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
+    for rank_by in RANK_BY {
+        assert!(rank_by == "rs_score" || BACKTEST_SQL.contains(&format!("WHEN '{rank_by}' THEN")));
+    }
 }
 
 /// 一期候選：代號依相對強度由高到低，報酬一一對應。

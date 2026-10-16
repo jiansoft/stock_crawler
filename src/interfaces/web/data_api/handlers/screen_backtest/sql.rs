@@ -13,8 +13,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期候選檔數、
 /// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類、`$11` 大盤濾網均線天數
 /// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）、`$13` 市場廣度門檻（%，`NULL` 為不濾）、
-/// `$14` 換股日偏移（起日之後先跳過幾個交易日）、`$15` 流動性門檻（元，`NULL` 為不限）；籌碼版另有
-/// `$16`／`$17`。
+/// `$14` 換股日偏移（起日之後先跳過幾個交易日）、`$15` 流動性門檻（元，`NULL` 為不限）、`$16`
+/// 候選股排序方式（見 [`super::RANK_BY`]）；籌碼版另有 `$17`／`$18`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
@@ -24,8 +24,10 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入，
 ///   只有最後一個換股日例外：以 `pending` 標記列出，當作策略目前的持股（`elapsed_days` 為換股日之後
 ///   到迄日經過的交易日數）。
-/// - `candidates`：符合條件（含流動性門檻，只對其他條件都通過的股票逐檔查成交金額）的股票依相對強度
-///   由高到低的前 `$5` 檔與各自的報酬、產業編號；實際持股由
+/// - `filtered`／`valued`：符合流動性以外條件的股票；有設流動性門檻或依成交金額排序時，才對這些股票
+///   逐檔查 `liquidity_start`～換股日的平均成交金額（`trade_value`）。
+/// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
+///   成交金額或法人連續買超天數，同值再依相對強度）的前 `$5` 檔與各自的報酬、產業編號；實際持股由
 ///   [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
 /// - `taiex`：加權指數收盤是否不低於含當天往前 `$11` 個交易日的平均；低於時 `market_ok` 為
@@ -34,7 +36,7 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 ///   低於時同樣空手。換股日沒有統計列視為通過（與加權指數缺資料相同）。
 /// - `etf_return`：同一天買進 [`ETF_BENCHMARK`] 持有同樣天數的還原報酬，作為實際買得到的大盤基準。
 macro_rules! backtest_sql {
-    ($with:literal, $chip_join:literal, $chip_filter:literal) => {
+    ($with:literal, $chip_join:literal, $chip_filter:literal, $chip_columns:literal) => {
         concat!(
             $with,
             r#"
@@ -79,9 +81,10 @@ bench AS (
     FROM universe
     GROUP BY date
 ),
-picks AS (
-    SELECT u.date, u.stock_symbol, u.ret, u.stock_industry_id,
-           ROW_NUMBER() OVER (PARTITION BY u.date ORDER BY u.rs_score DESC, u.stock_symbol) AS pick_rank
+filtered AS (
+    SELECT u.date, u.liquidity_start, u.stock_symbol, u.rs_score, u.ret, u.stock_industry_id,"#,
+            $chip_columns,
+            r#"
     FROM universe u
     LEFT JOIN stock_industry si ON si.stock_industry_id = u.stock_industry_id"#,
             $chip_join,
@@ -98,11 +101,29 @@ picks AS (
       ))"#,
             $chip_filter,
             r#"
-      AND ($15::int8 IS NULL OR (
-          SELECT AVG(q."TradeValue") FROM "DailyQuotes" q
-          WHERE q.stock_symbol = u.stock_symbol
-            AND q."Date" BETWEEN u.liquidity_start AND u.date
-      ) >= $15)
+),
+valued AS (
+    SELECT f.*,
+           CASE WHEN $15::int8 IS NOT NULL OR $16::text = 'trade_value' THEN (
+               SELECT AVG(q."TradeValue")::float8 FROM "DailyQuotes" q
+               WHERE q.stock_symbol = f.stock_symbol
+                 AND q."Date" BETWEEN f.liquidity_start AND f.date
+           ) END AS trade_value
+    FROM filtered f
+),
+picks AS (
+    SELECT date, stock_symbol, ret, stock_industry_id,
+           ROW_NUMBER() OVER (
+               PARTITION BY date
+               ORDER BY CASE $16::text
+                            WHEN 'trade_value' THEN trade_value
+                            WHEN 'foreign_streak' THEN foreign_buy
+                            WHEN 'trust_streak' THEN trust_buy
+                        END DESC NULLS LAST,
+                        rs_score DESC, stock_symbol
+           ) AS pick_rank
+    FROM valued
+    WHERE $15::int8 IS NULL OR trade_value >= $15
 ),
 candidates AS (
     SELECT date,
@@ -171,16 +192,23 @@ ORDER BY b.date
 }
 
 /// 沒有籌碼條件的回測。
-pub(super) const BACKTEST_SQL: &str = backtest_sql!("\nWITH", "", "");
+pub(super) const BACKTEST_SQL: &str = backtest_sql!(
+    "\nWITH",
+    "",
+    "",
+    "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
+);
 
-/// 有籌碼條件的回測：換股當天外資（`$16`）／投信（`$17`）已連續買超至少 N 天，`NULL` 為不篩選。
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$17`）／投信（`$18`）已連續買超至少
+/// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
     chip_streak_ctes!(),
     ",",
     backtest_sql!(
         "",
-        "\n    JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($16::bigint IS NULL OR c.foreign_buy >= $16)\n      AND ($17::bigint IS NULL OR c.trust_buy >= $17)"
+        "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
+        "\n      AND ($17::bigint IS NULL OR c.foreign_buy >= $17)\n      AND ($18::bigint IS NULL OR c.trust_buy >= $18)",
+        "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
     )
 );

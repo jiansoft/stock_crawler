@@ -9,6 +9,21 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::{MarketParamValue, SignalIndicatorValue, SignalKindValue};
 
+/// OpenAPI 文件使用的候選股排序方式。
+#[derive(ToSchema)]
+#[schema(rename_all = "snake_case")]
+#[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema；runtime 仍以 String 回傳精確 422。
+enum BacktestRankByValue {
+    /// 相對強度分數由高到低。
+    RsScore,
+    /// 換股日含當天往前 20 個交易日的平均成交金額由高到低。
+    TradeValue,
+    /// 外資連續買超天數由長到短。
+    ForeignStreak,
+    /// 投信連續買超天數由長到短。
+    TrustStreak,
+}
+
 /// 條件選股回測的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct ScreenBacktestParams {
@@ -20,7 +35,8 @@ pub(crate) struct ScreenBacktestParams {
     /// 持有到下一次換股，報酬為這段期間的還原報酬。
     #[param(default = 20)]
     pub(crate) hold_days: Option<u16>,
-    /// 每期最多持有幾檔（1–100，預設 20）：符合條件的股票依相對強度分數由高到低取前 N 檔，等權持有。
+    /// 每期最多持有幾檔（1–100，預設 20）：符合條件的股票依 `rank_by`（預設相對強度分數）由高到低取前
+    /// N 檔，等權持有。
     #[param(minimum = 1, maximum = 100, default = 20)]
     pub(crate) limit: Option<u8>,
     /// 換股緩衝（`limit`–200，預設等於 `limit` 即不緩衝）：上一期持有的股票只要這期仍符合條件、
@@ -50,6 +66,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 不新買進（上一期持股的續抱不受限）；例如 50 代表日均成交 5,000 萬元。省略為不限。
     #[param(minimum = 1, maximum = 100000)]
     pub(crate) min_avg_trade_value: Option<u32>,
+    /// 符合條件的股票依什麼排序取前 `limit` 檔：`rs_score`（預設，相對強度分數）、`trade_value`
+    /// （近 20 個交易日平均成交金額，偏向大型股）、`foreign_streak`／`trust_streak`（外資／投信連續
+    /// 買超天數）；同值再依相對強度分數。`keep_rank` 的名次也依此排序。
+    #[param(value_type = BacktestRankByValue, inline)]
+    pub(crate) rank_by: Option<String>,
     /// 市場：`all`（預設）、`twse` 或 `tpex`；大盤基準也依此市場計算。
     #[param(value_type = MarketParamValue, default = "all")]
     pub(crate) market: Option<String>,
@@ -266,6 +287,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) rebalance_offset: u16,
     /// 流動性門檻（百萬元，20 日平均成交金額）；未設定為 `null`。
     pub(crate) min_avg_trade_value: Option<u32>,
+    /// 候選股排序方式。
+    pub(crate) rank_by: String,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 相對強度分數下限；未篩選為 `null`。

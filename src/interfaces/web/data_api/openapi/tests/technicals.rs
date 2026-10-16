@@ -247,6 +247,11 @@ fn openapi_screen_backtest_schema_pins_field_names() {
         assert_eq!(schema["minimum"], 1, "{name}");
         assert_eq!(schema["maximum"], maximum, "{name}");
     }
+    let rank_by = query_schema(operation, "rank_by");
+    assert_eq!(
+        rank_by["enum"],
+        serde_json::json!(["rs_score", "trade_value", "foreign_streak", "trust_streak"])
+    );
     for (name, schema) in [
         ("indicator", "SignalIndicatorValue"),
         ("kind", "SignalKindValue"),
