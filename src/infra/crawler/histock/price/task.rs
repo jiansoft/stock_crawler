@@ -1,7 +1,7 @@
 //! HiStock 全市場快取的背景任務與診斷資訊。
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
@@ -23,6 +23,15 @@ use crate::{
     },
     infra::cache::{RealtimeSnapshot, SHARE},
 };
+
+/// 連續失敗到第幾輪才記 error（每輪約 5 秒，12 輪約 1 分鐘）；之前的單次逾時、連線重置只記 warn。
+const ERROR_AFTER_FAILURES: u32 = 12;
+
+/// 持續失敗時每隔幾輪再記一次 error（約 10 分鐘），其餘記 debug，避免每 5 秒一筆 error。
+const ERROR_REPEAT_FAILURES: u32 = 120;
+
+/// 目前連續失敗的輪數；成功一輪就歸零。
+pub(super) static CONSECUTIVE_FAILURES: Lazy<AtomicU32> = Lazy::new(|| AtomicU32::new(0));
 
 /// 全域快取狀態
 pub(super) static IS_CACHING: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
@@ -175,6 +184,10 @@ pub(super) fn record_cycle(
     start_time: Instant,
     memory_before: Option<ProcessMemoryStats>,
 ) {
+    let failures = CONSECUTIVE_FAILURES.swap(0, Ordering::SeqCst);
+    if failures > 0 {
+        tracing::info!("HiStock 快取更新恢復（之前連續失敗 {failures} 輪）");
+    }
     let count = fetch_result.snapshots.len();
     let row_count = fetch_result.row_count;
     let body_bytes = fetch_result.body_bytes;
@@ -216,7 +229,21 @@ pub(super) fn record_cycle(
     */
 }
 
-/// 記錄一輪失敗的抓取：整批錯亂每天只記第一筆 warn，其他錯誤記 error。
+/// 連續失敗第 `failures` 輪（從 1 起算）該用的日誌等級：未滿 [`ERROR_AFTER_FAILURES`] 輪為 warn
+/// （多半是單次逾時或連線重置，下一輪就好），到達時與之後每 [`ERROR_REPEAT_FAILURES`] 輪為 error，
+/// 其餘為 debug。
+pub(super) fn failure_level(failures: u32) -> tracing::Level {
+    if failures < ERROR_AFTER_FAILURES {
+        tracing::Level::WARN
+    } else if (failures - ERROR_AFTER_FAILURES).is_multiple_of(ERROR_REPEAT_FAILURES) {
+        tracing::Level::ERROR
+    } else {
+        tracing::Level::DEBUG
+    }
+}
+
+/// 記錄一輪失敗的抓取：整批錯亂每天只記第一筆 warn；其他錯誤依連續失敗輪數決定等級（見
+/// [`failure_level`]）。
 pub(super) fn report_cycle_error(e: &anyhow::Error) {
     if e.downcast_ref::<DirtyBatch>().is_some() {
         // 錯亂通常會連續好幾輪（每 5 秒一輪），每天只記第一筆 warn。
@@ -230,7 +257,16 @@ pub(super) fn report_cycle_error(e: &anyhow::Error) {
             tracing::debug!("{}", e);
         }
     } else {
-        tracing::error!("HiStock 快取更新失敗: {:?}", e);
+        let failures = CONSECUTIVE_FAILURES.fetch_add(1, Ordering::SeqCst) + 1;
+        match failure_level(failures) {
+            tracing::Level::ERROR => {
+                tracing::error!("HiStock 快取已連續 {failures} 輪更新失敗: {:?}", e);
+            }
+            tracing::Level::WARN => {
+                tracing::warn!("HiStock 快取更新失敗（連續第 {failures} 輪）: {:#}", e);
+            }
+            _ => tracing::debug!("HiStock 快取更新失敗（連續第 {failures} 輪）: {:#}", e),
+        }
     }
 }
 

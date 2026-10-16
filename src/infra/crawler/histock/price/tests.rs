@@ -562,7 +562,10 @@ async fn record_cycle_updates_cache_and_counters() {
     ]);
     result.body_bytes = 2048;
 
+    // 成功一輪就把連續失敗歸零。
+    CONSECUTIVE_FAILURES.store(3, Ordering::SeqCst);
     record_cycle(result, std::time::Instant::now(), None);
+    assert_eq!(CONSECUTIVE_FAILURES.load(Ordering::SeqCst), 0);
 
     assert_eq!(
         SHARE.get_stock_snapshot("79977").map(|s| s.price),
@@ -578,7 +581,22 @@ async fn record_cycle_updates_cache_and_counters() {
     stop_caching_task().await;
 }
 
-/// 整批錯亂只在當天第一次記 warn（之後記 debug）；其他錯誤記 error，都不會中斷迴圈。
+/// 連續失敗未滿 12 輪記 warn，第 12 輪與之後每 120 輪記 error，其餘 debug。
+#[test]
+fn failure_level_escalates_after_consecutive_failures() {
+    use tracing::Level;
+    for failures in [1, 2, 11] {
+        assert_eq!(failure_level(failures), Level::WARN, "{failures}");
+    }
+    for failures in [12, 132, 252] {
+        assert_eq!(failure_level(failures), Level::ERROR, "{failures}");
+    }
+    for failures in [13, 131, 133] {
+        assert_eq!(failure_level(failures), Level::DEBUG, "{failures}");
+    }
+}
+
+/// 整批錯亂只在當天第一次記 warn（之後記 debug）；其他錯誤依連續失敗輪數記錄，都不會中斷迴圈。
 #[test]
 fn report_cycle_error_marks_dirty_batch_as_seen_today() {
     let dirty = anyhow::Error::from(DirtyBatch {
@@ -586,9 +604,20 @@ fn report_cycle_error_marks_dirty_batch_as_seen_today() {
         total: 100,
     });
 
+    let _guard = TEST_STATE_LOCK.blocking_lock();
+    CONSECUTIVE_FAILURES.store(0, Ordering::SeqCst);
     report_cycle_error(&dirty);
     report_cycle_error(&dirty);
+    // 整批錯亂不算連續失敗；其他錯誤每輪加一。
+    assert_eq!(CONSECUTIVE_FAILURES.load(Ordering::SeqCst), 0);
     report_cycle_error(&anyhow::anyhow!("連線逾時"));
+    report_cycle_error(&anyhow::anyhow!("連線重置"));
+    assert_eq!(CONSECUTIVE_FAILURES.load(Ordering::SeqCst), 2);
+    for _ in 0..20 {
+        report_cycle_error(&anyhow::anyhow!("持續逾時"));
+    }
+    assert_eq!(CONSECUTIVE_FAILURES.load(Ordering::SeqCst), 22);
+    CONSECUTIVE_FAILURES.store(0, Ordering::SeqCst);
 
     let first_again = INCONSISTENT_ROW_WARNED
         .lock()
