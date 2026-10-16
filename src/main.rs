@@ -264,6 +264,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     app::ports::register_stock_info_gateway(std::sync::Arc::new(
         interfaces::rpc::client::stock_service::GrpcStockInfoGateway,
     ));
+    // 3. 策略換股通知：app use case 呼叫 app::ports::strategy_gateway，
+    //    由 data API 的條件選股回測引擎實際計算。
+    app::ports::register_strategy_gateway(std::sync::Arc::new(
+        interfaces::web::data_api::BacktestStrategyGateway,
+    ));
 
     // ── 4. 啟動計時器與 server 關機廣播 ─────────────────────────────────────
     // `startup_timer` 讓後面的各啟動階段都能記錄 elapsed 時間，方便找效能瓶頸。

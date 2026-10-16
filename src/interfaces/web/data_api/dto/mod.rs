@@ -101,10 +101,11 @@ pub(super) use relative_strength::{
     RelativeStrengthItem, RelativeStrengthParams, RelativeStrengthPoint, RelativeStrengthResponse,
 };
 pub(super) use screen_backtest::{
-    BacktestContributor, BacktestContributors, BacktestCurrent, BacktestFrontierPoint,
-    BacktestHolding, BacktestOffsetDistribution, BacktestOffsetResult, BacktestOffsetYear,
-    BacktestPeriod, BacktestStat, BacktestSummary, BacktestYear, ScreenBacktestFrontierResponse,
-    ScreenBacktestOffsetsResponse, ScreenBacktestParams, ScreenBacktestResponse,
+    BacktestContributor, BacktestContributors, BacktestCurrent, BacktestExit,
+    BacktestFrontierPoint, BacktestHolding, BacktestOffsetDistribution, BacktestOffsetResult,
+    BacktestOffsetYear, BacktestPeriod, BacktestStat, BacktestSummary, BacktestYear,
+    ScreenBacktestFrontierResponse, ScreenBacktestOffsetsResponse, ScreenBacktestParams,
+    ScreenBacktestResponse,
 };
 pub(super) use screening::{
     ScreenedStock, SortOrderParamValue, StockScreenSortValue, StockScreeningParams,

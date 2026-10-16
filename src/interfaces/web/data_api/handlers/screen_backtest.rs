@@ -20,14 +20,17 @@
 //!
 //! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
 //! [`contributors`]（個股貢獻）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
-//! 比例前緣端點）。
+//! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）。
 
 mod contributors;
 mod frontier;
+mod gateway;
 mod offsets;
 mod portfolio;
 mod sql;
 mod summary;
+
+use std::collections::HashMap;
 
 use axum::{
     Json,
@@ -38,6 +41,7 @@ use axum::{
 use chrono::NaiveDate;
 
 pub(crate) use self::frontier::{__path_screen_backtest_frontier, screen_backtest_frontier};
+pub use self::gateway::BacktestStrategyGateway;
 pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
 
 use self::contributors::{Contribution, LISTED_CONTRIBUTORS, contributors};
@@ -53,8 +57,8 @@ use super::{
 };
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
-    BacktestContributor, BacktestContributors, BacktestCurrent, BacktestHolding, ErrorBody,
-    ScreenBacktestParams, ScreenBacktestResponse,
+    BacktestContributor, BacktestContributors, BacktestCurrent, BacktestExit, BacktestHolding,
+    ErrorBody, ScreenBacktestParams, ScreenBacktestResponse,
 };
 
 /// 可選的持有天數，與 `daily_forward_return` 的報酬欄位對應。
@@ -166,6 +170,10 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         Err(error) => return database_error(error),
     };
     let (held_symbols, best, worst) = contributors(&rows, LISTED_CONTRIBUTORS);
+    let exits = current
+        .as_ref()
+        .map(|(row, _)| exited(row, rows.last()))
+        .unwrap_or_default();
     let symbols: Vec<&str> = best
         .iter()
         .chain(&worst)
@@ -175,16 +183,12 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
                 .iter()
                 .flat_map(|(row, _)| row.symbols.iter().map(String::as_str)),
         )
+        .chain(exits.iter().map(|(symbol, _)| symbol.as_str()))
         .collect();
-    let names: Vec<(String, String)> = match sqlx::query_as(STOCK_NAMES_SQL)
-        .bind(&symbols)
-        .fetch_all(database::get_connection())
-        .await
-    {
-        Ok(rows) => rows,
+    let names = match stock_names(&symbols).await {
+        Ok(names) => names,
         Err(error) => return database_error(error),
     };
-    let names: std::collections::HashMap<String, String> = names.into_iter().collect();
     let contributor = |item: Contribution| BacktestContributor {
         name: names.get(&item.symbol).cloned(),
         symbol: item.symbol,
@@ -192,30 +196,15 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         contribution: item.contribution,
         avg_return: item.avg_return,
     };
+    let previous = rows.last();
     let current = current.map(|(row, cost)| {
-        let elapsed = elapsed_days.unwrap_or(0);
-        let weights: Vec<f64> = portfolio::shares(&row)
-            .into_iter()
-            .map(|share| round2(share * 100.0))
-            .collect();
-        BacktestCurrent {
-            date: row.date.to_string(),
-            days_elapsed: elapsed,
-            days_to_next_rebalance: (i64::from(hold_days) - elapsed).max(0),
-            market_filtered: row.market_filtered,
-            turnover: round4(cost.turnover),
-            cash: round2(row.cash * 100.0),
-            holdings: row
-                .symbols
-                .into_iter()
-                .zip(weights)
-                .map(|(symbol, weight)| BacktestHolding {
-                    name: names.get(&symbol).cloned(),
-                    symbol,
-                    weight,
-                })
-                .collect(),
-        }
+        current_holdings(
+            (row, cost),
+            previous,
+            elapsed_days.unwrap_or(0),
+            hold_days,
+            &names,
+        )
     });
 
     Json(ScreenBacktestResponse {
@@ -455,6 +444,13 @@ impl<'a> Backtest<'a> {
         })
     }
 
+    /// 條件或排序用到外資／投信連續買超（要查籌碼）。
+    fn with_chip(&self) -> bool {
+        self.params.min_foreign_streak.is_some()
+            || self.params.min_trust_streak.is_some()
+            || self.rank_by.ends_with("_streak")
+    }
+
     /// 以換股日偏移 `rebalance_offset` 跑一次回測：混合 `etf_weight` 的 0050 核心部位，並把還沒滿
     /// 持有天數的最後一期移到 [`Simulation::current`]。
     async fn simulate(&self, rebalance_offset: u16) -> Result<Simulation, sqlx::Error> {
@@ -464,9 +460,7 @@ impl<'a> Backtest<'a> {
     /// 以換股日偏移 `rebalance_offset` 查候選股、決定每期持股並扣交易成本，尚未混合 0050。
     async fn run(&self, rebalance_offset: u16) -> Result<Raw, sqlx::Error> {
         let params = self.params;
-        let with_chip = params.min_foreign_streak.is_some()
-            || params.min_trust_streak.is_some()
-            || self.rank_by.ends_with("_streak");
+        let with_chip = self.with_chip();
         let mut query = sqlx::query_as(if with_chip {
             BACKTEST_WITH_CHIP_SQL
         } else {
@@ -542,6 +536,74 @@ fn split_current(
 /// 個股貢獻與目前持股的股票名稱。
 const STOCK_NAMES_SQL: &str =
     r#"SELECT stock_symbol::text, "Name"::text FROM stocks WHERE stock_symbol = ANY($1)"#;
+
+/// 股票代號 → 名稱；查無的代號不列。
+async fn stock_names(symbols: &[&str]) -> Result<HashMap<String, String>, sqlx::Error> {
+    let names: Vec<(String, String)> = sqlx::query_as(STOCK_NAMES_SQL)
+        .bind(symbols)
+        .fetch_all(database::get_connection())
+        .await?;
+    Ok(names.into_iter().collect())
+}
+
+/// 上一期持有、這一期沒有的股票與上一期換股時的權重（%）；沒有上一期或上一期空手為空。
+fn exited(row: &PeriodRow, previous: Option<&PeriodRow>) -> Vec<(String, f64)> {
+    let Some(previous) = previous else {
+        return Vec::new();
+    };
+    previous
+        .symbols
+        .iter()
+        .zip(portfolio::shares(previous))
+        .filter(|(symbol, _)| !row.symbols.contains(symbol))
+        .map(|(symbol, share)| (symbol.clone(), round2(share * 100.0)))
+        .collect()
+}
+
+/// 最後一次換股、還沒滿持有天數的持股：各檔權重、是否為新買進，以及相對上一期賣出的股票。
+fn current_holdings(
+    (row, cost): (PeriodRow, PeriodCost),
+    previous: Option<&PeriodRow>,
+    elapsed: i64,
+    hold_days: u16,
+    names: &HashMap<String, String>,
+) -> BacktestCurrent {
+    let held: Vec<&str> = previous
+        .map(|previous| previous.symbols.iter().map(String::as_str).collect())
+        .unwrap_or_default();
+    let exits = exited(&row, previous);
+    let weights: Vec<f64> = portfolio::shares(&row)
+        .into_iter()
+        .map(|share| round2(share * 100.0))
+        .collect();
+    BacktestCurrent {
+        date: row.date.to_string(),
+        days_elapsed: elapsed,
+        days_to_next_rebalance: (i64::from(hold_days) - elapsed).max(0),
+        market_filtered: row.market_filtered,
+        turnover: round4(cost.turnover),
+        cash: round2(row.cash * 100.0),
+        holdings: row
+            .symbols
+            .into_iter()
+            .zip(weights)
+            .map(|(symbol, weight)| BacktestHolding {
+                name: names.get(&symbol).cloned(),
+                added: !held.contains(&symbol.as_str()),
+                symbol,
+                weight,
+            })
+            .collect(),
+        exited: exits
+            .into_iter()
+            .map(|(symbol, weight)| BacktestExit {
+                name: names.get(&symbol).cloned(),
+                symbol,
+                weight,
+            })
+            .collect(),
+    }
+}
 
 /// 起日：未指定為迄日往前 [`DEFAULT_PERIOD_DAYS`] 天；晚於迄日或期間超過上限回錯誤訊息。
 fn resolve_backtest_period(

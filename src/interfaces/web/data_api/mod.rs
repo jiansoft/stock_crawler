@@ -13,4 +13,5 @@ mod handlers;
 mod openapi;
 mod routes;
 
+pub use handlers::BacktestStrategyGateway;
 pub(super) use routes::router;

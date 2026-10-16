@@ -271,6 +271,19 @@ pub(crate) struct BacktestHolding {
     pub(crate) name: Option<String>,
     /// 在策略部位中的權重（%）；等權時各檔相同，有現金時合計不到 100。
     pub(crate) weight: f64,
+    /// 這次換股新買進（上一期沒有持有）。
+    pub(crate) added: bool,
+}
+
+/// 這次換股賣出的一檔（上一期持有、這一期沒有）。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct BacktestExit {
+    /// 股票代號。
+    pub(crate) symbol: String,
+    /// 股票名稱；查無為 `null`。
+    pub(crate) name: Option<String>,
+    /// 上一期換股時在策略部位中的權重（%）。
+    pub(crate) weight: f64,
 }
 
 /// 最後一次換股、還沒滿持有天數的持股，也就是依策略現在應該持有的股票。
@@ -290,6 +303,8 @@ pub(crate) struct BacktestCurrent {
     pub(crate) cash: f64,
     /// 全部持股，依相對強度由高到低；空手為空陣列。
     pub(crate) holdings: Vec<BacktestHolding>,
+    /// 這次換股賣出的股票（上一期持有、這一期沒有）；沒有上一期為空陣列。
+    pub(crate) exited: Vec<BacktestExit>,
 }
 
 /// 條件選股回測結果。

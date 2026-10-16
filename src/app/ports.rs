@@ -12,11 +12,15 @@
 //! - 具體實作（gRPC client）由 `interfaces::rpc::client` 提供（adapter），
 //!   並在 `main` 啟動時透過 [`register_stock_info_gateway`] 注入。
 //! - 未註冊時（例如單元測試）推送會被略過並記 warning，不影響主流程。
+//!
+//! 策略換股通知（[`StrategyGateway`]）也用同樣的方式：回測引擎在 `interfaces::web::data_api`，
+//! 由 `main` 注入，use case 只拿到與傳輸層無關的換股結果。
 
 use std::sync::{Arc, OnceLock};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use chrono::NaiveDate;
 
 /// 與傳輸層無關的股票基本資料載體。
 ///
@@ -69,4 +73,68 @@ pub async fn push_stock_info(info: StockInfoPush) {
             );
         }
     }
+}
+
+/// 策略換股的一檔股票。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrategyHolding {
+    /// 股票代號。
+    pub symbol: String,
+    /// 股票名稱；查無為 `None`。
+    pub name: Option<String>,
+    /// 在策略部位中的權重（%）；賣出的股票為上一期換股時的權重。
+    pub weight: f64,
+}
+
+/// 依策略條件最後一次換股的結果。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrategyRebalance {
+    /// 換股日。
+    pub date: NaiveDate,
+    /// 持有天數（交易日），也就是距下次換股的交易日數。
+    pub hold_days: u16,
+    /// 0050 核心部位（%）；0 為純策略。
+    pub etf_weight: u8,
+    /// 大盤濾網沒過、策略部位空手。
+    pub market_filtered: bool,
+    /// 策略部位放現金的比例（%）。
+    pub cash: f64,
+    /// 相對上一期新買進與加碼的部位比例（0–1）。
+    pub turnover: f64,
+    /// 新買進的股票，依排序由前到後。
+    pub added: Vec<StrategyHolding>,
+    /// 續抱的股票，依排序由前到後。
+    pub kept: Vec<StrategyHolding>,
+    /// 上一期持有、這次賣出的股票。
+    pub exited: Vec<StrategyHolding>,
+}
+
+/// 依條件選股回測的條件取得策略最後一次換股的 gateway（port）。
+#[async_trait]
+pub trait StrategyGateway: Send + Sync {
+    /// 以 `query`（條件選股回測的 query string）跑一次回測，回傳最後一次換股、還沒滿持有天數的
+    /// 持股；最後一期剛好滿持有天數（今天沒有持股資料）時回 `None`。
+    async fn latest_rebalance(&self, query: &str) -> Result<Option<StrategyRebalance>>;
+}
+
+/// 全域策略 gateway。
+static STRATEGY_GATEWAY: OnceLock<Arc<dyn StrategyGateway>> = OnceLock::new();
+
+/// 註冊策略 gateway，應於 `main` 啟動流程呼叫一次。
+pub fn register_strategy_gateway(gateway: Arc<dyn StrategyGateway>) {
+    if STRATEGY_GATEWAY.set(gateway).is_err() {
+        tracing::warn!("strategy gateway already registered; duplicate registration ignored");
+    }
+}
+
+/// 已註冊的策略 gateway。
+///
+/// # Errors
+///
+/// 尚未註冊時回傳錯誤。
+pub fn strategy_gateway() -> Result<Arc<dyn StrategyGateway>> {
+    STRATEGY_GATEWAY
+        .get()
+        .cloned()
+        .ok_or_else(|| anyhow!("strategy gateway not registered"))
 }
