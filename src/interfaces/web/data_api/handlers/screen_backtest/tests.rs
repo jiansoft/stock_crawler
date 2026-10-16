@@ -20,6 +20,7 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
         returns: Vec::new(),
         trade_values: Vec::new(),
         weights: Vec::new(),
+        cash: 0.0,
     }
 }
 
@@ -1044,12 +1045,12 @@ fn weigh_uses_trade_value_for_returns_costs_and_contributors() {
     );
     assert_eq!(rows[0].trade_values, [Some(300.0), Some(100.0), Some(50.0)]);
     let mut equal = rows.clone();
-    weigh(&mut equal, Weighting::Equal);
+    weigh(&mut equal, Weighting::Equal, None);
     assert_eq!(equal, rows);
     assert_eq!(rows[0].avg_return, Some(4.0));
 
     let mut weighted = rows;
-    weigh(&mut weighted, Weighting::TradeValue);
+    weigh(&mut weighted, Weighting::TradeValue, None);
     assert_eq!(weighted[0].weights, [300.0, 100.0, 50.0]);
     // (10×300 − 2×100) ÷ 400 = 7；C 沒有報酬，不列入。
     assert_eq!(weighted[0].avg_return, Some(7.0));
@@ -1085,5 +1086,103 @@ fn weigh_uses_trade_value_for_returns_costs_and_contributors() {
             .map(|item| (item.symbol.as_str(), item.contribution))
             .collect::<Vec<_>>(),
         [("B", -0.5)]
+    );
+}
+
+/// 單檔上限：超過的固定在上限、多出的依比例分給其他持股，重複到沒有超過；檔數 × 上限不到 1 時放現金。
+#[test]
+fn cap_weights_redistributes_and_keeps_cash() {
+    use super::portfolio::cap_weights;
+    let close = |actual: &[f64], expected: &[f64]| {
+        actual.len() == expected.len() && actual.iter().zip(expected).all(|(a, b)| near(*a, *b))
+    };
+    // 沒有超過上限：只正規化。
+    let (weights, cash) = cap_weights(&[3.0, 1.0], 0.8);
+    assert!(close(&weights, &[0.75, 0.25]), "{weights:?}");
+    assert_eq!(cash, 0.0);
+    // 第一檔 0.8 → 0.5，多出的 0.3 依 1:1 分給其他兩檔（各 0.25）；不再超過上限。
+    let (weights, cash) = cap_weights(&[8.0, 1.0, 1.0], 0.5);
+    assert!(close(&weights, &[0.5, 0.25, 0.25]), "{weights:?}");
+    assert!(near(cash, 0.0), "{cash}");
+    // 第一輪只有 A 超過；分配後 B 也超過，再固定 B，剩下的全給 C。
+    let (weights, cash) = cap_weights(&[6.0, 3.0, 1.0], 0.4);
+    assert!(close(&weights, &[0.4, 0.4, 0.2]), "{weights:?}");
+    assert!(near(cash, 0.0), "{cash}");
+    // 兩檔、上限 30%：各 30%，現金 40%。
+    let (weights, cash) = cap_weights(&[1.0, 1.0], 0.3);
+    assert!(close(&weights, &[0.3, 0.3]), "{weights:?}");
+    assert!(near(cash, 0.4), "{cash}");
+    // 沒有持股：沒有現金。
+    assert_eq!(cap_weights(&[], 0.3), (Vec::new(), 0.0));
+}
+
+/// 等權搭配單檔上限：持股太少時放現金，平均報酬、換手、個股貢獻與目前持股權重都只算持股的部分。
+#[test]
+fn weigh_with_max_weight_holds_cash() {
+    use super::contributors::contributors;
+    use super::portfolio::{shares, weigh};
+    let mut rows = vec![
+        holding(&["A", "B"], 0.0),
+        holding(&["A", "B", "C", "D"], 0.0),
+    ];
+    rows[0].returns = vec![Some(10.0), Some(-2.0)];
+    rows[1].returns = vec![Some(4.0), Some(8.0), Some(0.0), None];
+    weigh(&mut rows, Weighting::Equal, Some(0.25));
+    // 兩檔各 25%、現金 50%：(10 − 2) ÷ 2 × 0.5 = 2。
+    assert!(near(rows[0].cash, 0.5), "{:?}", rows[0]);
+    assert_eq!(rows[0].avg_return, Some(2.0));
+    assert!(
+        shares(&rows[0]).iter().all(|share| near(*share, 0.25)),
+        "{:?}",
+        shares(&rows[0])
+    );
+    // 四檔各 25%，沒有現金；D 沒有報酬，平均 (4 + 8 + 0) ÷ 3 = 4。
+    assert!(near(rows[1].cash, 0.0), "{:?}", rows[1]);
+    assert!(
+        rows[1].avg_return.is_some_and(|avg| near(avg, 4.0)),
+        "{:?}",
+        rows[1]
+    );
+
+    // 第一期買進一半（另一半是現金）；期末 A 0.25×1.1、B 0.25×0.98、現金 0.5，合計 1.02。
+    // 第二期 A、B 調到 0.25，再買進 C、D 各 0.25。
+    let costs = trading_costs(&rows, 0.0);
+    assert!(near(costs[0].turnover, 0.5), "{costs:?}");
+    let a_before = 0.275 / 1.02;
+    let b_before = 0.245 / 1.02;
+    assert!(near(costs[1].turnover, 0.25 - b_before + 0.5), "{costs:?}");
+    assert!(
+        near(
+            costs[1].net_return,
+            4.0 - (a_before - 0.25) * super::portfolio::TAX_RATE
+        ),
+        "{costs:?}"
+    );
+
+    // 第一期持股只占一半：A 10 × 1/2 × 0.5、B −2 × 1/2 × 0.5；第二期 A、B 各占有報酬持股的 1/3。
+    let (_, best, worst) = contributors(&rows, 10);
+    assert_eq!(
+        best.iter()
+            .map(|item| (item.symbol.as_str(), item.contribution))
+            .collect::<Vec<_>>(),
+        [
+            ("A", round2(2.5 + 4.0 / 3.0)),
+            ("B", round2(-0.5 + 8.0 / 3.0))
+        ]
+    );
+    assert!(worst.is_empty(), "{worst:?}");
+
+    // 依成交金額加權搭配上限：與沒有上限時相同的持股，只是權重被壓到上限。
+    let mut weighted = vec![PeriodRow {
+        trade_values: vec![Some(900.0), Some(100.0)],
+        returns: vec![Some(10.0), Some(0.0)],
+        ..holding(&["A", "B"], 0.0)
+    }];
+    weigh(&mut weighted, Weighting::TradeValue, Some(0.6));
+    assert!(near(weighted[0].weights[0], 0.6), "{weighted:?}");
+    assert!(near(weighted[0].cash, 0.0), "{weighted:?}");
+    assert!(
+        weighted[0].avg_return.is_some_and(|avg| near(avg, 6.0)),
+        "{weighted:?}"
     );
 }

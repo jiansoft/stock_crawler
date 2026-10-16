@@ -242,6 +242,7 @@ fn openapi_screen_backtest_schema_pins_field_names() {
         ("min_foreign_streak", 60),
         ("min_trust_streak", 60),
         ("min_avg_trade_value", 100000),
+        ("max_weight", 100),
     ] {
         let schema = query_schema(operation, name);
         assert_eq!(schema["minimum"], 1, "{name}");
@@ -295,6 +296,8 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     assert!(response["current"].to_string().contains("null"));
     let current = &schemas["BacktestCurrent"]["properties"];
     assert_eq!(current["days_to_next_rebalance"]["type"], "integer");
+    assert_eq!(current["cash"]["type"], "number");
+    assert!(response["max_weight"].to_string().contains("null"));
     assert!(current["holdings"].to_string().contains("BacktestHolding"));
     assert_eq!(response["etf_benchmark"]["type"], "string");
     assert_eq!(response["keep_rank"]["type"], "integer");

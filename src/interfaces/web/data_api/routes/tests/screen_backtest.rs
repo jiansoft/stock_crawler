@@ -348,7 +348,7 @@ async fn screen_backtest_endpoint_db_semantics() {
         json["current"],
         serde_json::json!({
             "date": "1993-03-15", "days_elapsed": 0, "days_to_next_rebalance": 5,
-            "market_filtered": false, "turnover": 0.5,
+            "market_filtered": false, "turnover": 0.5, "cash": 0.0,
             "holdings": [
                 {"symbol": "79979BA", "name": "79979BA", "weight": 50.0},
                 {"symbol": "79979BB", "name": "79979BB", "weight": 50.0},
@@ -497,6 +497,29 @@ async fn screen_backtest_endpoint_db_semantics() {
     assert_eq!(json["periods"][0]["avg_return"], 3.04);
     let (status, _) = query("weighting=market_cap").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // 單檔上限：依成交金額加權時 BC（2 億）壓到 60%、BA 拿到 40%：10×0.4 + 2×0.6 = 5.2。
+    // 等權上限 30%：兩檔各 30%、現金 40%；03-08 BC 沒有報酬，只算 BB 的 8 × 0.6。
+    assert!(json["max_weight"].is_null());
+    let (status, json) = query("limit=2&weighting=trade_value&max_weight=60").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["max_weight"], 60);
+    assert_eq!(json["periods"][0]["avg_return"], 5.2);
+    assert_eq!(json["current"]["cash"], 0.0);
+    let (_, json) = query("limit=2&max_weight=30").await;
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 2, Some(3.6)),
+            ("1993-03-08".to_owned(), 2, Some(4.8)),
+        ]
+    );
+    assert_eq!(json["current"]["cash"], 40.0);
+    assert_eq!(json["current"]["holdings"][0]["weight"], 30.0);
+    for value in ["0", "101"] {
+        let (status, _) = query(&format!("max_weight={value}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{value}");
+    }
 
     // 大盤濾網：03-08 加權指數低於 20 日均線，這期空手並賣光（扣賣出成本）。
     let (status, json) = query("limit=2&market_filter_ma=20").await;
