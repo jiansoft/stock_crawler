@@ -23,7 +23,7 @@
 //!
 //! 子模組：[`attribution`]（相對類 0050 基準的報酬歸因端點）、[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
 //! [`contributors`]（個股貢獻）、[`current`]（目前持股）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
-//! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`stops`]（期間停損）。
+//! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`stops`]（期間停損）、[`walk_forward`]（滾動前推最佳化端點）。
 
 mod attribution;
 mod contributors;
@@ -35,6 +35,7 @@ mod portfolio;
 mod sql;
 mod stops;
 mod summary;
+mod walk_forward;
 
 use axum::{
     Json,
@@ -50,6 +51,9 @@ pub(crate) use self::attribution::{
 pub(crate) use self::frontier::{__path_screen_backtest_frontier, screen_backtest_frontier};
 pub use self::gateway::BacktestStrategyGateway;
 pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
+pub(crate) use self::walk_forward::{
+    __path_screen_backtest_walk_forward, screen_backtest_walk_forward,
+};
 
 use self::contributors::{Contribution, LISTED_CONTRIBUTORS, contributors};
 use self::current::{current_holdings, exited, returns_to_date, split_current, stock_names};
@@ -533,6 +537,18 @@ impl<'a> Backtest<'a> {
 
     /// 以換股日偏移 `rebalance_offset` 查候選股、決定每期持股並扣交易成本，尚未混合 0050。
     async fn run(&self, rebalance_offset: u16) -> Result<Raw, sqlx::Error> {
+        let candidates = self.candidates(rebalance_offset, self.keep_rank).await?;
+        self.assemble(candidates, self.keep_rank, self.max_weight)
+            .await
+    }
+
+    /// 以換股日偏移 `rebalance_offset` 查每期的候選股；每期至少讀到第 `keep_rank` 名（設
+    /// `max_per_industry` 時讀到 [`MAX_KEEP_RANK`] 名，同產業額滿後要往後補）。
+    async fn candidates(
+        &self,
+        rebalance_offset: u16,
+        keep_rank: u8,
+    ) -> Result<Vec<CandidateRow>, sqlx::Error> {
         let params = self.params;
         let with_chip = self.with_chip();
         let mut query = sqlx::query_as(if with_chip {
@@ -547,7 +563,7 @@ impl<'a> Backtest<'a> {
         .bind(i64::from(if params.max_per_industry.is_some() {
             MAX_KEEP_RANK
         } else {
-            self.keep_rank
+            keep_rank
         }))
         .bind(params.industry.as_deref())
         .bind(params.min_rs_score.map(i16::from))
@@ -573,8 +589,18 @@ impl<'a> Backtest<'a> {
         }
         // 回測主查詢依條件要 1～2 秒，偏移穩健度與前緣一次就跑 20 個偏移；用批次連線池（慢查詢門檻
         // 5 秒），避免每次回測都留下一串慢查詢警告，蓋過真正的退化。
-        let candidates: Vec<CandidateRow> =
-            query.fetch_all(database::get_batch_connection()).await?;
+        query.fetch_all(database::get_batch_connection()).await
+    }
+
+    /// 依候選股決定每期持股（續抱緩衝 `keep_rank`）、期間停損、持股權重（單檔上限 `max_weight`）並扣
+    /// 交易成本，尚未混合 0050；`candidates` 每期至少要讀到第 `keep_rank` 名（見 [`Self::candidates`]）。
+    async fn assemble(
+        &self,
+        candidates: Vec<CandidateRow>,
+        keep_rank: u8,
+        max_weight: Option<u8>,
+    ) -> Result<Raw, sqlx::Error> {
+        let params = self.params;
         let elapsed_days = candidates
             .last()
             .filter(|row| row.pending)
@@ -582,7 +608,7 @@ impl<'a> Backtest<'a> {
         let mut rows = select_holdings(
             candidates,
             usize::from(self.limit),
-            usize::from(self.keep_rank),
+            usize::from(keep_rank),
             params.max_per_industry.map(usize::from),
         );
         if self.stops.is_active() {
@@ -592,7 +618,7 @@ impl<'a> Backtest<'a> {
         weigh(
             &mut rows,
             self.weighting,
-            self.max_weight.map(|percent| f64::from(percent) / 100.0),
+            max_weight.map(|percent| f64::from(percent) / 100.0),
         );
         let costs = trading_costs(&rows, self.fee_discount);
         Ok(Raw {
