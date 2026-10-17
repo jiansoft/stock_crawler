@@ -39,7 +39,11 @@ enum BacktestWeightingValue {
 
 /// 條件選股回測的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct ScreenBacktestParams {
+    /// 具名策略（見 `/strategy-presets`）：以存的條件為準，請求另帶的參數覆蓋同名參數，例如
+    /// `preset=最佳組合&rebalance_offset=3`；查無策略回 404。
+    pub(crate) preset: Option<String>,
     /// 回測起日（`YYYY-MM-DD`）；省略為迄日往前 1,095 天（約三年）。
     pub(crate) from: Option<String>,
     /// 回測迄日（`YYYY-MM-DD`）；省略為最新有相對強度的交易日。起訖最長 3,653 天（約十年）。
@@ -341,6 +345,8 @@ pub(crate) struct BacktestCurrent {
 /// 條件選股回測結果。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct ScreenBacktestResponse {
+    /// 引用的具名策略；沒有用 `preset` 為 `null`。
+    pub(crate) preset: Option<String>,
     /// 回測起日。
     pub(crate) from: String,
     /// 回測迄日。
@@ -709,4 +715,24 @@ pub(crate) struct ScreenBacktestWalkForwardResponse {
     pub(crate) offsets: BacktestOffsetDistribution,
     /// 各換股日偏移不調參數的分布。
     pub(crate) baseline_offsets: BacktestOffsetDistribution,
+}
+
+/// 一個具名策略。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct StrategyPresetItem {
+    /// 策略名稱，回測端點以 `preset=名稱` 引用。
+    pub(crate) name: String,
+    /// 存的條件（`/stocks/screen/backtest` 的 query string）。
+    pub(crate) query: String,
+    /// 說明。
+    pub(crate) description: String,
+    /// 是否在每個交易日 22:10 發策略換股通知。
+    pub(crate) alert: bool,
+}
+
+/// 具名策略清單。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct StrategyPresetsResponse {
+    /// 全部策略，依名稱排序。
+    pub(crate) presets: Vec<StrategyPresetItem>,
 }

@@ -9,7 +9,6 @@
 
 use axum::{
     Json,
-    extract::Query,
     response::{IntoResponse, Response},
 };
 use futures::{StreamExt, TryStreamExt, stream};
@@ -19,6 +18,7 @@ use chrono::NaiveDate;
 use super::offsets::{
     CONCURRENCY, distribution, sample_offsets, split_distributions, split_results,
 };
+use super::preset::BacktestQuery;
 use super::summary::summarize;
 use super::{Backtest, ETF_BENCHMARK, Raw};
 use crate::interfaces::web::data_api::dto::{
@@ -40,9 +40,7 @@ pub(super) const WEIGHTS: [u8; 11] = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100
 /// 參數驗證與 `/stocks/screen/backtest` 相同（422）；迄日之前沒有相對強度資料回 404；驗證失敗回 401；
 /// 資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest/frontier", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestFrontierResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn screen_backtest_frontier(
-    Query(params): Query<ScreenBacktestParams>,
-) -> Response {
+pub(crate) async fn screen_backtest_frontier(BacktestQuery(params): BacktestQuery) -> Response {
     let backtest = match Backtest::prepare(&params).await {
         Ok(backtest) => backtest,
         Err(response) => return *response,

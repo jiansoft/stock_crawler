@@ -12,12 +12,12 @@ use chrono::NaiveDate;
 
 use axum::{
     Json,
-    extract::Query,
     response::{IntoResponse, Response},
 };
 use futures::{StreamExt, TryStreamExt, stream};
 
 use super::portfolio::PeriodCost;
+use super::preset::BacktestQuery;
 use super::summary::{summarize, yearly};
 use super::{Backtest, ETF_BENCHMARK, PeriodRow, Simulation};
 use crate::interfaces::web::data_api::dto::{
@@ -42,9 +42,7 @@ pub(super) const CONCURRENCY: usize = 4;
 /// 參數驗證與 `/stocks/screen/backtest` 相同（422）；迄日之前沒有相對強度資料回 404；驗證失敗回 401；
 /// 資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest/offsets", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestOffsetsResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn screen_backtest_offsets(
-    Query(params): Query<ScreenBacktestParams>,
-) -> Response {
+pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery) -> Response {
     let backtest = match Backtest::prepare(&params).await {
         Ok(backtest) => backtest,
         Err(response) => return *response,

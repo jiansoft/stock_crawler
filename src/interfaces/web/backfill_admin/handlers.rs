@@ -30,6 +30,7 @@ use super::state::{BACKFILL_STATE, BackfillWebState, get_backfill_job, list_back
 /// - `GET /api/manual-backfill/jobs`：列出所有 job。
 /// - `GET /api/manual-backfill/jobs/{id}`：查詢單一 job。
 /// - `POST /api/manual-backfill/*`：建立不同類型的回補 job。
+/// - `/api/strategy-presets`：具名策略的列出、新增或覆蓋、刪除。
 pub fn router() -> Router {
     Router::new()
         .route("/", get(|| async { Redirect::to("/manual-backfill") }))
@@ -75,6 +76,7 @@ pub fn router() -> Router {
         .route("/api/manual-backfill/cagr", post(start_cagr))
         .route("/api/manual-backfill/cagr-period", post(start_cagr_period))
         .with_state(BACKFILL_STATE.clone())
+        .merge(super::strategy_presets::router())
 }
 
 /// 回傳 manual backfill 操作頁 HTML。

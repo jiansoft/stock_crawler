@@ -1,56 +1,123 @@
 //! # 策略換股通知
 //!
-//! 以 `.env` 的 [`QUERY_ENV`] 設定一組條件選股回測的條件（與 `/stocks/screen/backtest` 的 query
-//! string 相同，必須指定 `from`，換股日從起日起算），每個交易日 22:10（籌碼 21:50 入庫之後）跑一次
+//! 每個交易日 22:10（籌碼 21:50 入庫之後），對每個 `alert` 為 true 的具名策略（`strategy_preset`，
+//! 條件與 `/stocks/screen/backtest` 的 query string 相同，必須指定 `from`，換股日從起日起算）各跑一次
 //! 回測；最後一次換股是今天時，用 Telegram 通知新買進、續抱與賣出的股票與權重，並對照目前的實際持股
-//! （策略持股中已持有、尚未持有的股票，策略賣出但仍持有的股票，以及 0050 核心部位）。沒有設定就不做事；
-//! 讀不到實際持股時只略過對照。
+//! （策略持股中已持有、尚未持有的股票，策略賣出但仍持有的股票，以及 0050 核心部位）。`.env` 的
+//! [`QUERY_ENV`]／[`NAME_ENV`] 仍可另設一組（與具名策略條件相同時不重複通知）。都沒有就不做事；
+//! 讀不到實際持股時只略過對照；某個策略失敗時其餘照常通知，最後回傳錯誤。
 //!
 //! 回測引擎在 `interfaces::web::data_api`，這裡只透過 [`ports::StrategyGateway`] 取得換股結果。
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use chrono::{Local, NaiveDate};
 
 use super::holdings;
 use crate::{
     app::ports::{self, StrategyGateway, StrategyHolding, StrategyRebalance},
     core::{alert, util::text},
+    domain::strategy::{StrategyPreset, StrategyPresetRepository},
+    infra::database::repository::strategy_preset::PgStrategyPresetRepository,
 };
 
-/// 策略條件的環境變數（條件選股回測的 query string）；沒有設定或空白時不通知。
+/// 另一組策略條件的環境變數（條件選股回測的 query string）；沒有設定或空白時只看具名策略。
 pub const QUERY_ENV: &str = "STRATEGY_ALERT_QUERY";
 
 /// 通知標題中的策略名稱環境變數；未設定時只寫「策略換股」。
 pub const NAME_ENV: &str = "STRATEGY_ALERT_NAME";
 
-/// 排程入口：有設定策略條件且今天是換股日時發通知。
+/// 要通知的一個策略：名稱（通知標題用，可為空）與條件。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AlertStrategy {
+    name: String,
+    query: String,
+}
+
+/// 要通知的策略：`alert` 為 true 的具名策略（依名稱），再加上環境變數的那一組（條件空白或與某個
+/// 具名策略相同時不加）。
+fn alert_strategies(
+    presets: Vec<StrategyPreset>,
+    env_query: Option<String>,
+    env_name: Option<String>,
+) -> Vec<AlertStrategy> {
+    let mut strategies: Vec<AlertStrategy> = presets
+        .into_iter()
+        .filter(|preset| preset.alert)
+        .map(|preset| AlertStrategy {
+            name: preset.name,
+            query: preset.query.trim().to_owned(),
+        })
+        .collect();
+    let query = env_query.unwrap_or_default().trim().to_owned();
+    if !query.is_empty() && !strategies.iter().any(|strategy| strategy.query == query) {
+        strategies.push(AlertStrategy {
+            name: env_name.unwrap_or_default().trim().to_owned(),
+            query,
+        });
+    }
+    strategies
+}
+
+/// 排程入口：對每個要通知的策略，今天是換股日時發通知。
 ///
 /// # Errors
 ///
-/// 策略 gateway 未註冊、回測條件錯誤或回測失敗時回傳錯誤。
+/// 讀不到具名策略、策略 gateway 未註冊，或有策略的回測條件錯誤或回測失敗時回傳錯誤（其餘策略照常
+/// 通知）。
 pub async fn execute() -> Result<()> {
-    let query = std::env::var(QUERY_ENV).unwrap_or_default();
-    if query.trim().is_empty() {
-        tracing::info!("策略換股通知：未設定 {QUERY_ENV}，略過");
+    let presets = PgStrategyPresetRepository::new()
+        .list()
+        .await
+        .context("讀取具名策略失敗")?;
+    let strategies = alert_strategies(
+        presets,
+        std::env::var(QUERY_ENV).ok(),
+        std::env::var(NAME_ENV).ok(),
+    );
+    if strategies.is_empty() {
+        tracing::info!("策略換股通知：沒有要通知的具名策略，也未設定 {QUERY_ENV}，略過");
         return Ok(());
     }
-    let name = std::env::var(NAME_ENV).unwrap_or_default();
     let gateway = ports::strategy_gateway()?;
-    let today = Local::now().date_naive();
-    let Some(rebalance) = rebalance_today(gateway.as_ref(), query.trim(), today).await? else {
-        return Ok(());
-    };
-    let held = match holdings::active_holding_symbols().await {
-        Ok(held) => Some(held),
-        Err(error) => {
-            tracing::warn!("策略換股通知：讀取實際持股失敗，略過對照：{error:?}");
-            None
+    notify(gateway.as_ref(), &strategies, Local::now().date_naive()).await
+}
+
+/// 逐一跑策略回測，今天換股的發通知；實際持股只在第一次需要時讀一次。
+async fn notify(
+    gateway: &dyn StrategyGateway,
+    strategies: &[AlertStrategy],
+    today: NaiveDate,
+) -> Result<()> {
+    let mut held: Option<Option<BTreeSet<String>>> = None;
+    let mut failures: Vec<String> = Vec::new();
+    for strategy in strategies {
+        let rebalance = match rebalance_today(gateway, &strategy.query, today).await {
+            Ok(Some(rebalance)) => rebalance,
+            Ok(None) => continue,
+            Err(error) => {
+                tracing::error!("策略換股通知：{} 失敗：{error:?}", strategy.name);
+                failures.push(format!("{}：{error:#}", strategy.name));
+                continue;
+            }
+        };
+        if held.is_none() {
+            held = Some(match holdings::active_holding_symbols().await {
+                Ok(held) => Some(held),
+                Err(error) => {
+                    tracing::warn!("策略換股通知：讀取實際持股失敗，略過對照：{error:?}");
+                    None
+                }
+            });
         }
-    };
-    alert::send_message(&build_message(&rebalance, name.trim(), held.as_ref())).await;
+        let actual = held.as_ref().and_then(Option::as_ref);
+        alert::send_message(&build_message(&rebalance, &strategy.name, actual)).await;
+    }
+    if !failures.is_empty() {
+        bail!("策略換股通知失敗：{}", failures.join("；"));
+    }
     Ok(())
 }
 
@@ -396,14 +463,81 @@ pub(in crate::app::event::taiwan_stock) mod tests {
         assert!(!build_message(&rebalance(), "", None).contains("對照實際持股"));
     }
 
-    /// 沒有設定策略條件時不做事（也不需要 gateway）。
-    #[tokio::test]
-    async fn execute_without_query_is_noop() {
-        if std::env::var(QUERY_ENV).is_ok_and(|query| !query.trim().is_empty()) {
-            println!("跳過 execute_without_query_is_noop：環境已設定 {QUERY_ENV}");
-            return;
+    fn preset(name: &str, query: &str, alert: bool) -> StrategyPreset {
+        StrategyPreset {
+            name: name.to_owned(),
+            query: query.to_owned(),
+            description: String::new(),
+            alert,
         }
-        execute().await.expect("未設定時不做事");
+    }
+
+    /// 只取 `alert` 的具名策略；環境變數的條件空白或與具名策略相同時不重複加入。
+    #[test]
+    fn alert_strategies_merge_presets_and_env() {
+        let presets = vec![
+            preset("甲", " from=2019-01-02&limit=20 ", true),
+            preset("乙", "from=2020-01-02", false),
+        ];
+        let strategies = alert_strategies(
+            presets.clone(),
+            Some("from=2021-01-04".to_owned()),
+            Some(" 環境 ".to_owned()),
+        );
+        assert_eq!(
+            strategies,
+            [
+                AlertStrategy {
+                    name: "甲".to_owned(),
+                    query: "from=2019-01-02&limit=20".to_owned()
+                },
+                AlertStrategy {
+                    name: "環境".to_owned(),
+                    query: "from=2021-01-04".to_owned()
+                },
+            ]
+        );
+        let same = alert_strategies(
+            presets.clone(),
+            Some("from=2019-01-02&limit=20".to_owned()),
+            None,
+        );
+        assert_eq!(same.len(), 1);
+        assert_eq!(
+            alert_strategies(presets, Some("  ".to_owned()), None).len(),
+            1
+        );
+        assert!(alert_strategies(Vec::new(), None, None).is_empty());
+    }
+
+    /// 逐一執行：今天不換股的不發、失敗的記下但不中斷其他策略，最後回傳錯誤；沒有策略不需要 gateway。
+    #[tokio::test]
+    async fn notify_continues_after_failures() {
+        let strategy = |name: &str| AlertStrategy {
+            name: name.to_owned(),
+            query: format!("from=2019-01-02&name={name}"),
+        };
+        let idle = gateway(None);
+        notify(&idle, &[strategy("甲"), strategy("乙")], day(16))
+            .await
+            .expect("都不換股");
+        assert_eq!(idle.queries.lock().expect("鎖未中毒").len(), 2);
+
+        let failing = FakeGateway {
+            fail: true,
+            ..gateway(None)
+        };
+        let error = notify(&failing, &[strategy("甲"), strategy("乙")], day(16))
+            .await
+            .expect_err("回測失敗");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("甲：") && message.contains("乙："),
+            "{message}"
+        );
+        assert_eq!(failing.queries.lock().expect("鎖未中毒").len(), 2);
+
+        notify(&idle, &[], day(16)).await.expect("沒有策略");
     }
 
     /// 今天是換股日才發；最後一期已滿或換股日不是今天都不發；回測錯誤往上傳。

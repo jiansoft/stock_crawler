@@ -246,6 +246,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/holder_distribution.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/insider_holding.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/broker_flow.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/strategy_preset.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/quote_history_record.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/revenue.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/revenue_last_date.sql
@@ -358,6 +359,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/holder_distribution.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/insider_holding.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/broker_flow.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/strategy_preset.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/quote_history_record.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/revenue.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/revenue_last_date.sql

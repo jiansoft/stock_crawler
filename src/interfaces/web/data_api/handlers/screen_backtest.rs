@@ -23,7 +23,7 @@
 //!
 //! 子模組：[`attribution`]（相對類 0050 基準的報酬歸因端點）、[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
 //! [`contributors`]（個股貢獻）、[`current`]（目前持股）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
-//! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`stops`]（期間停損）、[`walk_forward`]（滾動前推最佳化端點）。
+//! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`preset`]（具名策略 `preset=名稱` 與清單端點）、[`stops`]（期間停損）、[`walk_forward`]（滾動前推最佳化端點）。
 
 mod attribution;
 mod contributors;
@@ -32,6 +32,7 @@ mod frontier;
 mod gateway;
 mod offsets;
 mod portfolio;
+mod preset;
 mod sql;
 mod stops;
 mod summary;
@@ -39,7 +40,6 @@ mod walk_forward;
 
 use axum::{
     Json,
-    extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -51,6 +51,9 @@ pub(crate) use self::attribution::{
 pub(crate) use self::frontier::{__path_screen_backtest_frontier, screen_backtest_frontier};
 pub use self::gateway::BacktestStrategyGateway;
 pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
+pub(crate) use self::preset::{
+    __path_strategy_presets, BacktestQuery, strategy_presets, validate_strategy_query,
+};
 pub(crate) use self::walk_forward::{
     __path_screen_backtest_walk_forward, screen_backtest_walk_forward,
 };
@@ -167,7 +170,7 @@ struct PeriodRow {
 /// 或產業名稱不存在回 422；
 /// 迄日之前沒有相對強度資料回 404；驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) -> Response {
+pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Response {
     let backtest = match Backtest::prepare(&params).await {
         Ok(backtest) => backtest,
         Err(response) => return *response,
@@ -233,6 +236,7 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
     });
 
     Json(ScreenBacktestResponse {
+        preset: params.preset.clone(),
         from: backtest.from.to_string(),
         to: backtest.to.to_string(),
         market: backtest.market.to_owned(),
