@@ -426,6 +426,7 @@ pub(super) fn select_holdings(
                 weights: Vec::new(),
                 cash: 0.0,
                 stopped: Vec::new(),
+                industries: picked.iter().map(|&index| pool[index].3).collect(),
             }
         })
         .collect()

@@ -21,10 +21,11 @@
 //! 設 `stop_loss`／`trailing_stop` 時，持有期間每天以還原收盤檢查，觸發就提前賣出放現金（見
 //! [`stops`]）。
 //!
-//! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
+//! 子模組：[`attribution`]（相對類 0050 基準的報酬歸因端點）、[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
 //! [`contributors`]（個股貢獻）、[`current`]（目前持股）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
 //! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`stops`]（期間停損）。
 
+mod attribution;
 mod contributors;
 mod current;
 mod frontier;
@@ -43,6 +44,9 @@ use axum::{
 };
 use chrono::NaiveDate;
 
+pub(crate) use self::attribution::{
+    __path_screen_backtest_attribution, screen_backtest_attribution,
+};
 pub(crate) use self::frontier::{__path_screen_backtest_frontier, screen_backtest_frontier};
 pub use self::gateway::BacktestStrategyGateway;
 pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
@@ -145,6 +149,8 @@ struct PeriodRow {
     cash: f64,
     /// 各持股這期是否在持有期間停損賣出，與 `symbols` 一一對應；空的代表都沒有（見 [`stops`]）。
     stopped: Vec<bool>,
+    /// 各持股的產業編號（`stocks.stock_industry_id`），與 `symbols` 一一對應。
+    industries: Vec<i32>,
 }
 
 /// 依條件每隔 `hold_days` 個交易日換股，回測等權持有前 `limit` 檔（相對強度由高到低）的報酬，
