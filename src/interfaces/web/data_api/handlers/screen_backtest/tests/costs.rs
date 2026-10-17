@@ -176,3 +176,28 @@ fn period_rounds_returns() {
     };
     assert_eq!(period((row(3, 0, None, 1.0), cash)).avg_return, None);
 }
+
+/// 期間停損：停損賣出的部位當期付手續費與證交稅、期末比例為 0，下次換股仍入選時視為重新買進；
+/// 沒有停損時 [`portfolio::stopped_value`] 為 0。
+#[test]
+fn trading_costs_charge_stop_exits() {
+    let mut first = holding(&["A", "B"], 0.0);
+    first.returns = vec![Some(-10.0), Some(10.0)];
+    first.stopped = vec![true, false];
+    let mut second = holding(&["A", "B"], 0.0);
+    second.returns = vec![Some(0.0), Some(0.0)];
+    assert!(near(super::super::portfolio::stopped_value(&first), 0.45));
+    assert!(near(super::super::portfolio::stopped_value(&second), 0.0));
+
+    let costs = trading_costs(&[first, second], 1.0);
+    assert!(
+        near(costs[0].net_return, -0.1425 - 0.45 * 0.4425),
+        "{costs:?}"
+    );
+    // A 已在期間賣出（期末比例 0）、B 期末 0.55 ÷ 1：買回 A 一半、B 減碼 0.05。
+    assert!(near(costs[1].turnover, 0.5), "{costs:?}");
+    assert!(
+        near(costs[1].net_return, -0.05 * 0.4425 - 0.5 * 0.1425),
+        "{costs:?}"
+    );
+}

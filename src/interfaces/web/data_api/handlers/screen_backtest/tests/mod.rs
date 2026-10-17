@@ -27,6 +27,7 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
         trade_values: Vec::new(),
         weights: Vec::new(),
         cash: 0.0,
+        stopped: Vec::new(),
     }
 }
 

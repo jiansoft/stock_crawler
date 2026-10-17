@@ -21,6 +21,11 @@ pub(super) fn compound(returns: impl IntoIterator<Item = f64>) -> (f64, f64) {
     (equity, drawdown)
 }
 
+/// 這期在期間停損賣出的檔數。
+pub(super) fn stop_count(row: &PeriodRow) -> i64 {
+    row.stopped.iter().filter(|stopped| **stopped).count() as i64
+}
+
 /// 彙總各期：空手的期數報酬算 0；年化以每年約 [`TRADING_DAYS_PER_YEAR`] 個交易日換算；
 /// `costs` 與 `rows` 一一對應（見 [`super::portfolio::trading_costs`]）。
 pub(super) fn summarize(
@@ -48,6 +53,7 @@ pub(super) fn summarize(
             periods: 0,
             invested_periods: 0,
             market_filtered_periods: 0,
+            stop_exits: 0,
             avg_holdings: None,
             avg_turnover: None,
             total_return: None,
@@ -95,6 +101,7 @@ pub(super) fn summarize(
         periods: periods as i64,
         invested_periods: invested.len() as i64,
         market_filtered_periods: rows.iter().filter(|row| row.market_filtered).count() as i64,
+        stop_exits: rows.iter().map(stop_count).sum(),
         avg_holdings: (!invested.is_empty()).then(|| {
             round2(
                 invested.iter().map(|row| row.holdings as f64).sum::<f64>() / invested.len() as f64,

@@ -18,9 +18,12 @@
 //! 市值加權，和 0050 一樣偏重大型股）或其平方根加權；`max_weight` 限制單檔權重，超出的分給其他持股，
 //! 檔數太少分不完時放現金。
 //!
+//! 設 `stop_loss`／`trailing_stop` 時，持有期間每天以還原收盤檢查，觸發就提前賣出放現金（見
+//! [`stops`]）。
+//!
 //! 子模組：[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
 //! [`contributors`]（個股貢獻）、[`current`]（目前持股）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
-//! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）。
+//! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`stops`]（期間停損）。
 
 mod contributors;
 mod current;
@@ -29,6 +32,7 @@ mod gateway;
 mod offsets;
 mod portfolio;
 mod sql;
+mod stops;
 mod summary;
 
 use axum::{
@@ -49,6 +53,7 @@ use self::portfolio::{
     PeriodCost, Weighting, blend_etf, period, select_holdings, trading_costs, weigh,
 };
 use self::sql::{BACKTEST_SQL, BACKTEST_WITH_CHIP_SQL, LATEST_RS_DATE_SQL};
+use self::stops::{BarCache, StopRule, apply_stops};
 use self::summary::{summarize, yearly};
 use super::signal_history::{validate_rs_range, validate_streaks};
 use super::{
@@ -138,6 +143,8 @@ struct PeriodRow {
     weights: Vec<f64>,
     /// 策略部位放現金的比例（0–1）：設 `max_weight` 且檔數 × 上限不到 100% 時才大於 0。
     cash: f64,
+    /// 各持股這期是否在持有期間停損賣出，與 `symbols` 一一對應；空的代表都沒有（見 [`stops`]）。
+    stopped: Vec<bool>,
 }
 
 /// 依條件每隔 `hold_days` 個交易日換股，回測等權持有前 `limit` 檔（相對強度由高到低）的報酬，
@@ -232,6 +239,8 @@ pub(crate) async fn screen_backtest(Query(params): Query<ScreenBacktestParams>) 
         rank_by: backtest.rank_by.to_owned(),
         weighting: backtest.weighting.as_str().to_owned(),
         max_weight: backtest.max_weight,
+        stop_loss: params.stop_loss,
+        trailing_stop: params.trailing_stop,
         industry: params.industry.clone(),
         exclude_industry: (!backtest.excluded_industries.is_empty())
             .then(|| backtest.excluded_industries.join(",")),
@@ -282,6 +291,10 @@ struct Backtest<'a> {
     split: Option<NaiveDate>,
     /// 排除的產業名稱；空的為不排除。
     excluded_industries: Vec<String>,
+    /// 期間停損規則。
+    stops: StopRule,
+    /// 期間停損用的日線，各換股日偏移共用。
+    bars: BarCache,
 }
 
 /// 一次回測混合 0050 之前的各期結果（含還沒滿持有天數的最後一期）；同一組候選股可依不同的
@@ -398,6 +411,18 @@ impl<'a> Backtest<'a> {
         {
             return Err(unprocessable("max_weight 必須介於 1 至 100"));
         }
+        if params
+            .stop_loss
+            .is_some_and(|percent| !(1..=50).contains(&percent))
+        {
+            return Err(unprocessable("stop_loss 必須介於 1 至 50"));
+        }
+        if params
+            .trailing_stop
+            .is_some_and(|percent| !(1..=50).contains(&percent))
+        {
+            return Err(unprocessable("trailing_stop 必須介於 1 至 50"));
+        }
         let etf_weight = params.etf_weight.unwrap_or(0);
         if etf_weight > 100 {
             return Err(unprocessable("etf_weight 必須介於 0 至 100"));
@@ -479,6 +504,11 @@ impl<'a> Backtest<'a> {
             max_weight: params.max_weight,
             split,
             excluded_industries: excluded,
+            stops: StopRule {
+                stop_loss: params.stop_loss.map(f64::from),
+                trailing_stop: params.trailing_stop.map(f64::from),
+            },
+            bars: BarCache::default(),
         })
     }
 
@@ -549,6 +579,10 @@ impl<'a> Backtest<'a> {
             usize::from(self.keep_rank),
             params.max_per_industry.map(usize::from),
         );
+        if self.stops.is_active() {
+            let bars = self.bars.load(&rows, self.from, self.to).await?;
+            apply_stops(&mut rows, &bars, self.stops, self.hold_days);
+        }
         weigh(
             &mut rows,
             self.weighting,
