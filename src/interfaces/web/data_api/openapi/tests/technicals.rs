@@ -539,3 +539,44 @@ fn openapi_screen_backtest_attribution_schema_pins_field_names() {
     assert_eq!(effect["industry"]["type"], "string");
     assert_eq!(effect["total"]["type"], "number");
 }
+
+/// 滾動前推 path 的契約：共用回測參數加 `train_years`，回應含逐年參數、彙總與各偏移分布。
+#[test]
+fn openapi_screen_backtest_walk_forward_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/stocks/screen/backtest/walk-forward");
+    assert_endpoint_responses(operation, "ScreenBacktestWalkForwardResponse", true);
+    let train_years = query_schema(operation, "train_years");
+    assert_eq!(
+        (
+            train_years["minimum"].as_u64(),
+            train_years["maximum"].as_u64(),
+            train_years["default"].as_u64()
+        ),
+        (Some(1), Some(5), Some(3))
+    );
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["ScreenBacktestWalkForwardResponse"]["properties"];
+    for field in ["train_years", "candidates", "rebalance_offset"] {
+        assert_eq!(response[field]["type"], "integer", "{field}");
+    }
+    for (field, schema) in [
+        ("summary", "BacktestSummary"),
+        ("baseline", "BacktestSummary"),
+        ("offsets", "BacktestOffsetDistribution"),
+        ("baseline_offsets", "BacktestOffsetDistribution"),
+        ("years", "BacktestWalkForwardYear"),
+    ] {
+        assert!(response[field].to_string().contains(schema), "{field}");
+    }
+    let year = &schemas["BacktestWalkForwardYear"]["properties"];
+    for field in ["year", "etf_weight", "keep_rank", "periods"] {
+        assert_eq!(year[field]["type"], "integer", "{field}");
+    }
+    for field in ["max_weight", "etf_return"] {
+        assert!(year[field].to_string().contains("null"), "{field}");
+    }
+    assert_eq!(year["train_sharpe_ratio"]["type"], "number");
+    assert_eq!(year["baseline_return_after_costs"]["type"], "number");
+}
