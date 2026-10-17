@@ -496,3 +496,46 @@ fn openapi_screen_backtest_frontier_schema_pins_field_names() {
             .contains("BacktestOffsetDistribution")
     );
 }
+
+/// 報酬歸因 path 的契約：與單次回測共用參數、回應含整段／年度合計與產業效果。
+#[test]
+fn openapi_screen_backtest_attribution_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/stocks/screen/backtest/attribution");
+    assert_endpoint_responses(operation, "ScreenBacktestAttributionResponse", true);
+    assert_eq!(query_schema(operation, "hold_days")["default"], 20);
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["ScreenBacktestAttributionResponse"]["properties"];
+    assert_eq!(response["benchmark_size"]["type"], "integer");
+    assert!(
+        response["summary"]
+            .to_string()
+            .contains("BacktestAttributionTotals")
+    );
+    assert!(
+        response["years"]
+            .to_string()
+            .contains("BacktestAttributionYear")
+    );
+    assert!(
+        response["industries"]
+            .to_string()
+            .contains("BacktestIndustryEffect")
+    );
+    let totals = &schemas["BacktestAttributionTotals"]["properties"];
+    for field in [
+        "strategy_return",
+        "benchmark_return",
+        "excess_return",
+        "allocation",
+        "selection",
+        "interaction",
+    ] {
+        assert_eq!(totals[field]["type"], "number", "{field}");
+    }
+    assert!(totals["etf_return"].to_string().contains("null"));
+    let effect = &schemas["BacktestIndustryEffect"]["properties"];
+    assert_eq!(effect["industry"]["type"], "string");
+    assert_eq!(effect["total"]["type"], "number");
+}

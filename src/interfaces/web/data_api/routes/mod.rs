@@ -118,6 +118,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::screen_backtest_frontier),
         )
         .route(
+            "/stocks/screen/backtest/attribution",
+            axum::routing::get(handlers::screen_backtest_attribution),
+        )
+        .route(
             "/stocks/screen",
             axum::routing::get(handlers::screen_stocks),
         )
