@@ -107,7 +107,7 @@ pub(super) use screen_backtest::{
     BacktestStat, BacktestSummary, BacktestWalkForwardYear, BacktestYear,
     ScreenBacktestAttributionResponse, ScreenBacktestFrontierResponse,
     ScreenBacktestOffsetsResponse, ScreenBacktestParams, ScreenBacktestResponse,
-    ScreenBacktestWalkForwardResponse,
+    ScreenBacktestWalkForwardResponse, StrategyPresetItem, StrategyPresetsResponse,
 };
 pub(super) use screening::{
     ScreenedStock, SortOrderParamValue, StockScreenSortValue, StockScreeningParams,

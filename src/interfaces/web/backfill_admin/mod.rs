@@ -8,12 +8,15 @@
 //! 相同 `(kind, input)` 互斥（409/ALREADY_EXISTS）、全域併行上限
 //! （429/RESOURCE_EXHAUSTED），以及已完成 job 的保留數量上限；
 //! 每個 job 另有執行逾時保護，逾時會標記 failed 並釋放併行名額。
+//!
+//! 另有具名策略的管理 API（`/api/strategy-presets`，見 [`strategy_presets`]）。
 
 mod dto;
 mod handlers;
 mod job_runner;
 mod request;
 mod state;
+mod strategy_presets;
 
 pub use handlers::router;
 pub(crate) use job_runner::{

@@ -13,7 +13,6 @@ use std::ops::Range;
 
 use axum::{
     Json,
-    extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -22,6 +21,7 @@ use futures::{StreamExt, TryStreamExt, stream};
 
 use super::offsets::{CONCURRENCY, distribution, sample_offsets};
 use super::portfolio::PeriodCost;
+use super::preset::BacktestQuery;
 use super::summary::{compound, summarize};
 use super::{Backtest, ETF_BENCHMARK, MAX_KEEP_RANK, PeriodRow, Simulation, round2};
 use crate::interfaces::web::data_api::dto::{
@@ -258,9 +258,7 @@ impl Backtest<'_> {
 /// 參數驗證與 `/stocks/screen/backtest` 相同（422），`train_years` 不在 1–5 或期間沒有超過訓練年數也
 /// 回 422；迄日之前沒有相對強度資料回 404；驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest/walk-forward", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestWalkForwardResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn screen_backtest_walk_forward(
-    Query(params): Query<ScreenBacktestParams>,
-) -> Response {
+pub(crate) async fn screen_backtest_walk_forward(BacktestQuery(params): BacktestQuery) -> Response {
     let unprocessable = |message: &str| error_response(StatusCode::UNPROCESSABLE_ENTITY, message);
     let train_years = params.train_years.unwrap_or(DEFAULT_TRAIN_YEARS);
     if !(1..=5).contains(&train_years) {

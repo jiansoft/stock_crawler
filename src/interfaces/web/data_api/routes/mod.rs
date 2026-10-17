@@ -118,6 +118,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::screen_backtest_frontier),
         )
         .route(
+            "/strategy-presets",
+            axum::routing::get(handlers::strategy_presets),
+        )
+        .route(
             "/stocks/screen/backtest/walk-forward",
             axum::routing::get(handlers::screen_backtest_walk_forward),
         )

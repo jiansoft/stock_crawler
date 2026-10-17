@@ -126,7 +126,7 @@ async fn chip_ready(date: NaiveDate) -> Result<bool> {
 }
 
 /// 驗證失敗的回應：狀態碼與錯誤訊息。
-async fn rejection(response: Response) -> String {
+pub(super) async fn rejection(response: Response) -> String {
     let status = response.status();
     let body = axum::body::to_bytes(response.into_body(), ERROR_BODY_LIMIT)
         .await

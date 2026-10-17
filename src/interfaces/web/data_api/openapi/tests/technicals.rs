@@ -3,7 +3,7 @@
 use utoipa::OpenApi;
 
 use super::super::ApiDoc;
-use super::{assert_endpoint_responses, get_operation, query_schema};
+use super::{assert_endpoint_responses, assert_response, get_operation, query_schema};
 
 /// 技術指標 path 的契約：days 範圍與預設、date 參數、可為 null 的指標欄位。
 #[test]
@@ -579,4 +579,37 @@ fn openapi_screen_backtest_walk_forward_schema_pins_field_names() {
     }
     assert_eq!(year["train_sharpe_ratio"]["type"], "number");
     assert_eq!(year["baseline_return_after_costs"]["type"], "number");
+}
+
+/// 具名策略清單 path 與回測的 `preset` 參數。
+#[test]
+fn openapi_strategy_presets_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/strategy-presets");
+    assert_response(operation, "200", "StrategyPresetsResponse");
+    for status in ["401", "500"] {
+        assert_response(operation, status, "ErrorBody");
+    }
+    let schemas = &document["components"]["schemas"];
+    let item = &schemas["StrategyPresetItem"]["properties"];
+    for field in ["name", "query", "description"] {
+        assert_eq!(item[field]["type"], "string", "{field}");
+    }
+    assert_eq!(item["alert"]["type"], "boolean");
+    assert!(
+        schemas["StrategyPresetsResponse"]["properties"]["presets"]
+            .to_string()
+            .contains("StrategyPresetItem")
+    );
+    let backtest = get_operation(&document, "/api/v1/stocks/screen/backtest");
+    assert!(
+        query_schema(backtest, "preset")
+            .to_string()
+            .contains("string")
+    );
+    assert!(
+        schemas["ScreenBacktestResponse"]["properties"]["preset"]
+            .to_string()
+            .contains("null")
+    );
 }

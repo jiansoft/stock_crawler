@@ -14,4 +14,5 @@ mod openapi;
 mod routes;
 
 pub use handlers::BacktestStrategyGateway;
+pub(crate) use handlers::validate_strategy_query;
 pub(super) use routes::router;

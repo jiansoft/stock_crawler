@@ -11,5 +11,6 @@ pub mod performance;
 pub mod portfolio;
 pub mod quote;
 pub mod registry;
+pub mod strategy;
 pub mod trace;
 pub mod yield_rank;

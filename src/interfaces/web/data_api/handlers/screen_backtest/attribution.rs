@@ -15,12 +15,12 @@ use std::collections::{BTreeMap, HashMap};
 
 use axum::{
     Json,
-    extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use chrono::{Datelike, NaiveDate};
 
+use super::preset::BacktestQuery;
 use super::{Backtest, PeriodRow, portfolio};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
@@ -346,9 +346,7 @@ pub(super) fn attribution_years(
 /// 參數驗證與 `/stocks/screen/backtest` 相同（422）；迄日之前沒有相對強度資料回 404；驗證失敗回 401；
 /// 資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest/attribution", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestAttributionResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn screen_backtest_attribution(
-    Query(params): Query<ScreenBacktestParams>,
-) -> Response {
+pub(crate) async fn screen_backtest_attribution(BacktestQuery(params): BacktestQuery) -> Response {
     let backtest = match Backtest::prepare(&params).await {
         Ok(backtest) => backtest,
         Err(response) => return *response,

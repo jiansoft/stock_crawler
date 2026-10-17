@@ -22,6 +22,7 @@ pub mod portfolio;
 pub mod quote;
 pub mod relative_strength;
 pub mod stock;
+pub mod strategy_preset;
 pub mod technical;
 pub mod trace;
 pub mod valuation_band;
