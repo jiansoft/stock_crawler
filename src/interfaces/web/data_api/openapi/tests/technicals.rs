@@ -312,6 +312,23 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     );
     assert!(response["exclude_industry"].to_string().contains("null"));
     assert!(response["max_weight"].to_string().contains("null"));
+    for name in ["stop_loss", "trailing_stop"] {
+        let schema = query_schema(operation, name);
+        assert_eq!(
+            (schema["minimum"].as_u64(), schema["maximum"].as_u64()),
+            (Some(1), Some(50)),
+            "{name}"
+        );
+        assert!(response[name].to_string().contains("null"), "{name}");
+    }
+    assert_eq!(
+        schemas["BacktestPeriod"]["properties"]["stopped"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        schemas["BacktestSummary"]["properties"]["stop_exits"]["type"],
+        "integer"
+    );
     assert!(current["holdings"].to_string().contains("BacktestHolding"));
     assert!(current["exited"].to_string().contains("BacktestExit"));
     assert_eq!(

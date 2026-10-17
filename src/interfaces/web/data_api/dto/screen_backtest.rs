@@ -99,6 +99,15 @@ pub(crate) struct ScreenBacktestParams {
     /// 少數大型股。
     #[param(minimum = 1, maximum = 100)]
     pub(crate) max_weight: Option<u8>,
+    /// 停損（%，1–50，選填）：持有期間收盤相對買進價跌幅達這個比例，當天收盤賣出、該檔到下次換股前
+    /// 放現金（賣出付手續費與證交稅，下次仍入選視為重新買進）。以每天的還原收盤檢查，只用於已滿持有
+    /// 天數的期數，目前持股不檢查。
+    #[param(minimum = 1, maximum = 50)]
+    pub(crate) stop_loss: Option<u8>,
+    /// 移動停利（%，1–50，選填）：持有期間收盤相對這期最高收盤（含買進價）回落達這個比例就賣出，
+    /// 規則同 `stop_loss`；兩者都設時先觸發的為準。
+    #[param(minimum = 1, maximum = 50)]
+    pub(crate) trailing_stop: Option<u8>,
     /// 樣本內外分割日（`YYYY-MM-DD`，選填，只用於 `/offsets` 與 `/frontier`）：換股日早於這天的期數為
     /// 樣本內、其餘為樣本外，各自再算一次分布，用來看在前段調出來的條件到後段是否仍然成立。必須晚於
     /// 起日、不晚於迄日。
@@ -145,6 +154,8 @@ pub(crate) struct BacktestPeriod {
     pub(crate) holdings: i64,
     /// 換股日加權指數低於濾網均線或市場廣度低於門檻而空手。
     pub(crate) market_filtered: bool,
+    /// 這期在持有期間觸發停損或移動停利、提前賣出的檔數；沒設停損為 0。
+    pub(crate) stopped: i64,
     /// 持股等權平均報酬（%），未扣交易成本；期間內下市的股票算到最後一筆收盤，之後完全沒有收盤的
     /// 股票不列入平均；空手為 `null`。
     pub(crate) avg_return: Option<f64>,
@@ -169,6 +180,8 @@ pub(crate) struct BacktestSummary {
     pub(crate) invested_periods: i64,
     /// 因大盤濾網（均線或市場廣度）空手的期數。
     pub(crate) market_filtered_periods: i64,
+    /// 各期觸發停損或移動停利、提前賣出的總檔次；沒設停損為 0。
+    pub(crate) stop_exits: i64,
     /// 有持股的期平均持有檔數。
     pub(crate) avg_holdings: Option<f64>,
     /// 有持股的期平均換手率（0–1）。
@@ -356,6 +369,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) weighting: String,
     /// 單檔權重上限（%）；未設定為 `null`。
     pub(crate) max_weight: Option<u8>,
+    /// 停損（%）；未設定為 `null`。
+    pub(crate) stop_loss: Option<u8>,
+    /// 移動停利（%）；未設定為 `null`。
+    pub(crate) trailing_stop: Option<u8>,
     /// 篩選的產業；未篩選為 `null`。
     pub(crate) industry: Option<String>,
     /// 排除的產業（逗號分隔）；未排除為 `null`。
@@ -471,6 +488,10 @@ pub(crate) struct ScreenBacktestOffsetsResponse {
     pub(crate) weighting: String,
     /// 單檔權重上限（%）；未設定為 `null`。
     pub(crate) max_weight: Option<u8>,
+    /// 停損（%）；未設定為 `null`。
+    pub(crate) stop_loss: Option<u8>,
+    /// 移動停利（%）；未設定為 `null`。
+    pub(crate) trailing_stop: Option<u8>,
     /// 計算交易成本用的手續費折扣（0–1）。
     pub(crate) fee_discount: f64,
     /// 可投資的大盤基準代號（固定為 `0050`）。
@@ -517,6 +538,10 @@ pub(crate) struct ScreenBacktestFrontierResponse {
     pub(crate) weighting: String,
     /// 單檔權重上限（%）；未設定為 `null`。
     pub(crate) max_weight: Option<u8>,
+    /// 停損（%）；未設定為 `null`。
+    pub(crate) stop_loss: Option<u8>,
+    /// 移動停利（%）；未設定為 `null`。
+    pub(crate) trailing_stop: Option<u8>,
     /// 計算交易成本用的手續費折扣（0–1）。
     pub(crate) fee_discount: f64,
     /// 可投資的大盤基準代號（固定為 `0050`）。

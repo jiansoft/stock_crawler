@@ -82,6 +82,8 @@ pub(crate) async fn screen_backtest_frontier(
         rank_by: backtest.rank_by.to_owned(),
         weighting: backtest.weighting.as_str().to_owned(),
         max_weight: backtest.max_weight,
+        stop_loss: backtest.params.stop_loss,
+        trailing_stop: backtest.params.trailing_stop,
         fee_discount: backtest.fee_discount,
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         offsets: raws.len() as i64,

@@ -175,7 +175,8 @@ pub(super) fn shares(row: &PeriodRow) -> Vec<f64> {
 }
 
 /// 一期結束、下次換股前各持股占策略部位的比例：期初比例依各檔報酬漲跌後重新換算（連同報酬為 0
-/// 的現金合計為 1）。沒有報酬的持股（之後沒有收盤）視為與該期持股的平均報酬同幅。
+/// 的現金合計為 1）。沒有報酬的持股（之後沒有收盤）視為與該期持股的平均報酬同幅。期間停損賣出的
+/// 持股已轉成現金，比例為 0（出場時的價值仍計入合計）。
 fn drifted(row: &PeriodRow) -> Vec<f64> {
     let start = shares(row);
     let invested = 1.0 - row.cash;
@@ -196,12 +197,41 @@ fn drifted(row: &PeriodRow) -> Vec<f64> {
     if total <= 0.0 {
         return start;
     }
-    grown.iter().map(|value| value / total).collect()
+    grown
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            if is_stopped(row, index) {
+                0.0
+            } else {
+                value / total
+            }
+        })
+        .collect()
+}
+
+/// 第 `index` 檔持股這期是否在期間停損賣出。
+fn is_stopped(row: &PeriodRow, index: usize) -> bool {
+    row.stopped.get(index).copied().unwrap_or(false)
+}
+
+/// 期間停損賣出的部位占期初策略部位的比例：各停損持股的期初比例 × (1 + 出場報酬)；沒有停損為 0。
+pub(super) fn stopped_value(row: &PeriodRow) -> f64 {
+    shares(row)
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| is_stopped(row, *index))
+        .map(|(index, share)| {
+            let ret = row.returns.get(index).copied().flatten().unwrap_or(0.0);
+            share * (1.0 + ret / 100.0).max(0.0)
+        })
+        .sum()
 }
 
 /// 依前後兩期的持股算出每期的換手與扣成本後報酬：上一期持股漲跌後的比例調到這一期的目標比例，
 /// 減碼（含整檔賣出）的部分付手續費與證交稅，加碼（含新買進）的部分付手續費。第一期全部買進；
 /// 空手時賣光。續抱股票的再平衡（例如等權持股漲多的減碼、依成交金額加權時權重變動）也計入。
+/// 期間停損賣出的部位（見 [`stopped_value`]）在當期付手續費與證交稅，下次換股若仍入選視為重新買進。
 pub(super) fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<PeriodCost> {
     let fee = FEE_RATE * fee_discount;
     // 上一期期末各持股的比例。
@@ -227,7 +257,9 @@ pub(super) fn trading_costs(rows: &[PeriodRow], fee_discount: f64) -> Vec<Period
                 .collect();
             PeriodCost {
                 turnover: bought,
-                net_return: row.avg_return.unwrap_or(0.0) - sold * (fee + TAX_RATE) - bought * fee,
+                net_return: row.avg_return.unwrap_or(0.0)
+                    - (sold + stopped_value(row)) * (fee + TAX_RATE)
+                    - bought * fee,
             }
         })
         .collect()
@@ -393,6 +425,7 @@ pub(super) fn select_holdings(
                 trade_values: picked.iter().map(|&index| pool[index].4).collect(),
                 weights: Vec::new(),
                 cash: 0.0,
+                stopped: Vec::new(),
             }
         })
         .collect()
@@ -402,6 +435,7 @@ pub(super) fn select_holdings(
 pub(super) fn period((mut row, cost): (PeriodRow, PeriodCost)) -> BacktestPeriod {
     row.symbols.truncate(LISTED_SYMBOLS);
     BacktestPeriod {
+        stopped: super::summary::stop_count(&row),
         date: row.date.to_string(),
         holdings: row.holdings,
         market_filtered: row.market_filtered,
