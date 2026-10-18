@@ -9,7 +9,7 @@ use utoipa::{IntoParams, ToSchema};
 /// 籌碼 endpoint 的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct ChipParams {
-    /// 每日籌碼回傳的交易日數，預設 20，範圍 1–120。
+    /// 每日籌碼回傳的交易日數，預設 20，範圍 1–120；不限制 streak 的連續天數。
     #[param(minimum = 1, maximum = 120, default = 20)]
     pub(crate) days: Option<u16>,
 }
@@ -43,7 +43,7 @@ pub(crate) struct ChipDay {
 /// 外資、投信從最新一天往回數的連續同向買賣超天數。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
 pub(crate) struct ChipStreak {
-    /// 外資連續天數；正值為連續買超、負值為連續賣超、0 為最新一天沒有買賣超或沒有資料。
+    /// 外資完整連續天數，不受 days 限制；正值為連續買超、負值為連續賣超、0 為最新一天沒有買賣超或沒有資料。
     pub(crate) foreign_days: i64,
     /// 投信連續天數，正負意義同 `foreign_days`。
     pub(crate) trust_days: i64,

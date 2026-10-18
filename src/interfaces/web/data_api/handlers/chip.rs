@@ -111,9 +111,22 @@ pub(crate) async fn stock_chip(
     }
     let pool = database::get_connection();
 
-    // 主鍵是 (date, stock_symbol)，依股票查歷史走 `chip_daily-stock_symbol-date-idx`。
+    // 顯示筆數不能截斷連續天數。保留指定筆數，以及外資／投信第一個反向、零或缺值邊界；
+    // SQL 只傳回計算所需資料，不把所有歷史列帶入 HTTP 記憶體。
     let daily: Vec<ChipDailyRow> = match sqlx::query_as(
-        r#"SELECT "date", foreign_net, trust_net, dealer_net, margin_previous, margin_balance, short_previous, short_balance FROM chip_daily WHERE stock_symbol = $1 ORDER BY "date" DESC LIMIT $2"#,
+        r#"WITH ordered AS (
+            SELECT *, row_number() OVER (ORDER BY "date" DESC) AS n,
+                first_value(sign(foreign_net)) OVER (ORDER BY "date" DESC) AS fs,
+                first_value(sign(trust_net)) OVER (ORDER BY "date" DESC) AS ts
+            FROM chip_daily WHERE stock_symbol = $1
+        ), bounds AS (
+            SELECT greatest($2::bigint,
+                coalesce(min(n) FILTER (WHERE foreign_net IS NULL OR foreign_net = 0 OR sign(foreign_net) <> fs), max(n)),
+                coalesce(min(n) FILTER (WHERE trust_net IS NULL OR trust_net = 0 OR sign(trust_net) <> ts), max(n))) AS last_n
+            FROM ordered
+        )
+        SELECT "date", foreign_net, trust_net, dealer_net, margin_previous, margin_balance, short_previous, short_balance
+        FROM ordered WHERE n <= (SELECT last_n FROM bounds) ORDER BY "date" DESC"#,
     )
     .bind(&symbol)
     .bind(i64::from(days))
@@ -162,7 +175,12 @@ pub(crate) async fn stock_chip(
         foreign_days: streak(daily.iter().map(|row| row.foreign_net)),
         trust_days: streak(daily.iter().map(|row| row.trust_net)),
     };
-    let daily: Vec<ChipDay> = daily.into_iter().map(ChipDailyRow::into_dto).collect();
+    // streak 使用完整停止邊界後，才對對外明細套用 days；兩個欄位的語意保持獨立。
+    let daily: Vec<ChipDay> = daily
+        .into_iter()
+        .take(usize::from(days))
+        .map(ChipDailyRow::into_dto)
+        .collect();
     Json(ChipResponse {
         stock_symbol: symbol,
         data_as_of: daily.first().map(|day| day.date.clone()),
@@ -265,6 +283,19 @@ mod tests {
         assert_eq!(streak([Some(0), Some(3)].into_iter()), 0);
         assert_eq!(streak([None, Some(3)].into_iter()), 0);
         assert_eq!(streak(std::iter::empty()), 0);
+    }
+
+    /// 超過明細最大筆數的連續期間仍須完整計算，直到零或缺值才停止。
+    #[test]
+    fn streak_is_not_capped_by_the_detail_window() {
+        assert_eq!(
+            streak(std::iter::repeat_n(Some(1), 130).chain([Some(0), Some(1)])),
+            130
+        );
+        assert_eq!(
+            streak(std::iter::repeat_n(Some(-1), 130).chain([None, Some(-1)])),
+            -130
+        );
     }
 
     /// 融資融券增減由今日減前日；法人任一類缺資料時合計為 null。

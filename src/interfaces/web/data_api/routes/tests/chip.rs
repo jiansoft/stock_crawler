@@ -17,6 +17,7 @@ async fn chip_endpoint_rejects_missing_bearer_key() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+/// 在明確啟用的隔離 PostgreSQL 驗證明細與完整連續天數的獨立性。
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
@@ -25,10 +26,10 @@ async fn chip_endpoint_rejects_missing_bearer_key() {
 async fn chip_endpoint_db_semantics() {
     dotenvy::dotenv().ok();
     let pool = crate::infra::database::get_connection();
-    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
-        println!("跳過 chip_endpoint_db_semantics：無資料庫連接");
-        return;
-    }
+    sqlx::query("SELECT 1")
+        .execute(pool)
+        .await
+        .expect("整合測試必須連上明確設定的隔離 PostgreSQL");
     const SYMBOL: &str = "79979CP";
     let cleanup = || async {
         for sql in [
@@ -101,8 +102,14 @@ async fn chip_endpoint_db_semantics() {
         StatusCode::NOT_FOUND
     );
 
+    // 切成一日明細後，完整外資連買仍為兩日，不應跟著被截成一日。
+    let (one_status, one_day) = get(format!("/api/v1/stocks/{SYMBOL}/chip?days=1")).await;
     let (status, json) = get(format!("/api/v1/stocks/{SYMBOL}/chip?days=2")).await;
     cleanup().await;
+    assert_eq!(one_status, StatusCode::OK);
+    assert_eq!(one_day["daily"].as_array().expect("daily array").len(), 1);
+    assert_eq!(one_day["streak"]["foreign_days"], 2);
+    assert_eq!(one_day["streak"], json["streak"]);
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["data_as_of"], "2026-04-30");
     let daily = json["daily"].as_array().expect("daily array");
