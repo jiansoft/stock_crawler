@@ -1,6 +1,7 @@
 use crate::infra::nosql::redis::RedisError;
 use thiserror::Error;
 
+pub mod after_hours;
 pub mod cagr_source;
 pub mod chip;
 pub mod chip_flow;

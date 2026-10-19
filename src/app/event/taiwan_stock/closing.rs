@@ -15,6 +15,10 @@ use anyhow::Result;
 use chrono::{DateTime, Datelike, Local, NaiveDate};
 use scopeguard::defer;
 
+mod after_hours;
+
+pub use after_hours::ensure_after_hours;
+
 /// 台股收盤事件發生時要進行的事情
 pub async fn execute() -> Result<()> {
     tracing::info!("台股收盤事件開始");
@@ -76,7 +80,8 @@ pub(crate) struct Shortfall {
 /// （2018～2026 年共找到 15 個這樣的交易日）。這裡在盤後再檢查：上市或上櫃有成交的檔數
 /// 低於近期交易日的 [`COVERAGE_MIN_PERCENT`]% 就重跑 [`aggregate`]，並把結果告警出來。
 ///
-/// 行情檢查之後再以 [`ensure_derived`] 檢查技術訊號與未來報酬。
+/// 行情檢查之後再以 [`ensure_derived`] 檢查技術訊號與未來報酬，最後檢查同時段寫入的大盤指數
+/// （見 [`after_hours`]）。
 ///
 /// # Errors
 ///
@@ -89,7 +94,8 @@ pub async fn ensure_complete() -> Result<()> {
     }
 
     ensure_quotes(date).await?;
-    ensure_derived(date).await
+    ensure_derived(date).await?;
+    after_hours::ensure(date, &after_hours::WITH_CLOSING).await
 }
 
 /// 上市或上櫃有成交的檔數偏少就重跑收盤匯總並告警。
