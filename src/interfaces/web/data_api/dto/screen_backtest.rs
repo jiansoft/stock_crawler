@@ -1,11 +1,12 @@
 //! `/stocks/screen/backtest` 的 request、response 與 OpenAPI schema。
 //!
-//! 只用每天都有留存的資料（相對強度、法人連續買超、技術訊號）選股，避免用到當時還沒公布的
-//! 財報；報酬來自 `daily_forward_return`（基準日收盤到之後第 N 個交易日收盤的還原報酬，等同含息；
-//! 期間內下市的股票算到最後一筆收盤）。
+//! 選股條件只用換股當天就已知道的資料：每天留存的相對強度、法人連續買超、技術訊號，以及依法定
+//! 公布期限判斷當時已公布的月營收與季報（見 `min_revenue_yoy_percent`、`min_eps`）；報酬來自
+//! `daily_forward_return`（基準日收盤到之後第 N 個交易日收盤的還原報酬，等同含息；期間內下市的股票
+//! 算到最後一筆收盤）。
 //!
-//! 子模組依端點放 response：[`offsets`]（換股日偏移）、[`frontier`]（0050 比例前緣）、[`attribution`]（報酬歸因）、
-//! [`walk_forward`]（滾動前推）、[`preset`]（具名策略清單）。
+//! 子模組依端點放 response：[`offsets`]（換股日偏移）、[`frontier`]（0050 比例前緣）、
+//! [`attribution`]（報酬歸因）、[`walk_forward`]（滾動前推）、[`preset`]（具名策略清單）。
 
 mod attribution;
 mod frontier;
@@ -162,6 +163,28 @@ pub(crate) struct ScreenBacktestParams {
     /// 換股當天投信已連續買超至少這麼多天（1–60）；規則同 `min_foreign_streak`。
     #[param(minimum = 1, maximum = 60)]
     pub(crate) min_trust_streak: Option<u8>,
+    /// 換股當天已公布的最近一個月營收年增率至少這麼高（%，-100–10000）。每月營收最晚次月 10 日公布，
+    /// 次月 11 日起才使用（例如 9 月營收從 10 月 11 日起），最近一筆已公布的月份距換股日超過 3 個月
+    /// 視為沒有資料、不會通過。只用於新買進，續抱不看基本面條件。
+    #[param(minimum = -100.0, maximum = 10000.0)]
+    pub(crate) min_revenue_yoy_percent: Option<f64>,
+    /// 換股當天已公布的月營收從最近一個月往回連續年增（> 0、月份相連）至少這麼多個月（1–12）；
+    /// 公布日規則同 `min_revenue_yoy_percent`。
+    #[param(minimum = 1, maximum = 12)]
+    pub(crate) min_revenue_yoy_streak: Option<u8>,
+    /// 換股當天已公布的最近 3 個月（須相連）合計營收對去年同期的年增率至少這麼高（%，-100–10000）；
+    /// 公布日規則同 `min_revenue_yoy_percent`。
+    #[param(minimum = -100.0, maximum = 10000.0)]
+    pub(crate) min_revenue_yoy_3m_percent: Option<f64>,
+    /// 換股當天已公布的最近一季每股盈餘至少這麼高（元，-10000–10000）。季報以法定期限的隔天起才使用：
+    /// Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1；最近一季距換股日超過 3 季視為沒有資料。財報從 2018
+    /// 年起，且為目前留存的數字（事後更正會沿用更正後的值）。
+    #[param(minimum = -10000.0, maximum = 10000.0)]
+    pub(crate) min_eps: Option<f64>,
+    /// 換股當天已公布的最近一季股東權益報酬率至少這麼高（%，-10000–10000，與 `/stocks/screen` 的
+    /// `min_roe_percent` 同一欄位）；公布日規則同 `min_eps`。
+    #[param(minimum = -10000.0, maximum = 10000.0)]
+    pub(crate) min_roe_percent: Option<f64>,
     /// 只選換股前 `hold_days` 個交易日內（含換股當天）出現過這個來源訊號的股票。
     #[param(value_type = Option<SignalIndicatorValue>)]
     pub(crate) indicator: Option<String>,
@@ -416,6 +439,16 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) min_foreign_streak: Option<u8>,
     /// 投信連續買超天數下限；未篩選為 `null`。
     pub(crate) min_trust_streak: Option<u8>,
+    /// 月營收年增率下限（%）；未篩選為 `null`。
+    pub(crate) min_revenue_yoy_percent: Option<f64>,
+    /// 月營收連續年增月數下限；未篩選為 `null`。
+    pub(crate) min_revenue_yoy_streak: Option<u8>,
+    /// 近 3 個月營收年增率下限（%）；未篩選為 `null`。
+    pub(crate) min_revenue_yoy_3m_percent: Option<f64>,
+    /// 最近一季每股盈餘下限（元）；未篩選為 `null`。
+    pub(crate) min_eps: Option<f64>,
+    /// 最近一季股東權益報酬率下限（%）；未篩選為 `null`。
+    pub(crate) min_roe_percent: Option<f64>,
     /// 訊號來源；未篩選為 `null`。
     pub(crate) indicator: Option<String>,
     /// 訊號種類；未篩選為 `null`。
