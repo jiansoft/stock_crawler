@@ -117,7 +117,11 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("$23::float8 IS NULL OR fs.return_on_equity >= $23"));
     assert!(BACKTEST_SQL.contains("HAVING MAX(ord) >= u.revenue_ord - 2"));
     assert!(BACKTEST_SQL.contains("ELSE make_date(fs.year::int + 1, 4, 1)"));
-    assert!(!BACKTEST_SQL.contains("$24"));
+    assert!(BACKTEST_SQL.contains("$24::float8 IS NULL OR ym.gross_margin >= $24"));
+    assert!(BACKTEST_SQL.contains("$25::float8 IS NULL OR ym.operating_margin >= $25"));
+    assert!(BACKTEST_SQL.contains("NOT $26::bool OR ym.margins_up IS TRUE"));
+    assert!(BACKTEST_SQL.contains("$27::float8 IS NULL OR bs.debt_ratio <= $27"));
+    assert!(!BACKTEST_SQL.contains("$28"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -126,9 +130,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $24"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $25"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$26"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $28"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $29"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$30"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     for rank_by in RANK_BY {
@@ -217,7 +221,8 @@ fn validate_fundamentals_checks_ranges() {
     assert_eq!(
         validate_fundamentals(&params(
             "min_revenue_yoy_percent=-100&min_revenue_yoy_streak=12&min_revenue_yoy_3m_percent=10000\
-             &min_eps=-10000&min_roe_percent=10000"
+             &min_eps=-10000&min_roe_percent=10000&min_gross_margin_percent=100\
+             &min_operating_margin_percent=-10000&max_debt_ratio_percent=0&margins_yoy_up=true"
         )),
         Ok(())
     );
@@ -246,6 +251,18 @@ fn validate_fundamentals_checks_ranges() {
         (
             "min_roe_percent=inf",
             "min_roe_percent 必須介於 -10000 至 10000",
+        ),
+        (
+            "min_gross_margin_percent=100.1",
+            "min_gross_margin_percent 必須介於 -10000 至 100",
+        ),
+        (
+            "min_operating_margin_percent=-10000.5",
+            "min_operating_margin_percent 必須介於 -10000 至 100",
+        ),
+        (
+            "max_debt_ratio_percent=1000.1",
+            "max_debt_ratio_percent 必須介於 0 至 1000",
         ),
     ] {
         assert_eq!(

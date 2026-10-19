@@ -1,7 +1,8 @@
 //! `/stocks/screen/backtest` 的 request、response 與 OpenAPI schema。
 //!
 //! 選股條件只用換股當天就已知道的資料：每天留存的相對強度、法人連續買超、技術訊號，以及依法定
-//! 公布期限判斷當時已公布的月營收與季報（見 `min_revenue_yoy_percent`、`min_eps`）；報酬來自
+//! 公布期限判斷當時已公布的月營收與季報（見 `min_revenue_yoy_percent`、`min_eps`、
+//! `min_gross_margin_percent`）；報酬來自
 //! `daily_forward_return`（基準日收盤到之後第 N 個交易日收盤的還原報酬，等同含息；期間內下市的股票
 //! 算到最後一筆收盤）。
 //!
@@ -187,6 +188,22 @@ pub(crate) struct ScreenBacktestParams {
     /// `min_roe_percent` 同一欄位）；公布日規則同 `min_eps`。
     #[param(minimum = -10000.0, maximum = 10000.0)]
     pub(crate) min_roe_percent: Option<f64>,
+    /// 換股當天已公布的最近一季單季毛利率（毛利 ÷ 營收）至少這麼高（%，-10000–100）。用 Yahoo 單季損益表
+    /// （2015 年起），公布日規則同 `min_eps`；營收為 0 或沒有資料的股票不會通過。
+    #[param(minimum = -10000.0, maximum = 100.0)]
+    pub(crate) min_gross_margin_percent: Option<f64>,
+    /// 換股當天已公布的最近一季單季營業利益率（營業利益 ÷ 營收）至少這麼高（%，-10000–100）；資料與
+    /// 公布日規則同 `min_gross_margin_percent`。
+    #[param(minimum = -10000.0, maximum = 100.0)]
+    pub(crate) min_operating_margin_percent: Option<f64>,
+    /// `true` 時只選「三率三升」：換股當天已公布的最近一季毛利率、營業利益率與稅後淨利率都高於去年
+    /// 同一季；去年同季沒有資料的不會通過。資料與公布日規則同 `min_gross_margin_percent`；`false` 或
+    /// 省略不篩選。
+    pub(crate) margins_yoy_up: Option<bool>,
+    /// 換股當天已公布的最近一季季末負債比（總負債 ÷ 總資產）不超過這個值（%，0–1000）。用 Yahoo 單季
+    /// 資產負債表（2015 年起），公布日規則同 `min_eps`；沒有資料的股票不會通過。
+    #[param(minimum = 0.0, maximum = 1000.0)]
+    pub(crate) max_debt_ratio_percent: Option<f64>,
     /// 只選換股前 `hold_days` 個交易日內（含換股當天）出現過這個來源訊號的股票。
     #[param(value_type = Option<SignalIndicatorValue>)]
     pub(crate) indicator: Option<String>,
@@ -451,6 +468,14 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) min_eps: Option<f64>,
     /// 最近一季股東權益報酬率下限（%）；未篩選為 `null`。
     pub(crate) min_roe_percent: Option<f64>,
+    /// 最近一季毛利率下限（%）；未篩選為 `null`。
+    pub(crate) min_gross_margin_percent: Option<f64>,
+    /// 最近一季營業利益率下限（%）；未篩選為 `null`。
+    pub(crate) min_operating_margin_percent: Option<f64>,
+    /// 只選三率三升；未篩選為 `false`。
+    pub(crate) margins_yoy_up: bool,
+    /// 最近一季負債比上限（%）；未篩選為 `null`。
+    pub(crate) max_debt_ratio_percent: Option<f64>,
     /// 訊號來源；未篩選為 `null`。
     pub(crate) indicator: Option<String>,
     /// 訊號種類；未篩選為 `null`。

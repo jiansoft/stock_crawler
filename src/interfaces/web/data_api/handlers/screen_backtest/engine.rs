@@ -334,7 +334,11 @@ impl<'a> Backtest<'a> {
         .bind(params.min_revenue_yoy_streak.map(i16::from))
         .bind(params.min_revenue_yoy_3m_percent)
         .bind(params.min_eps)
-        .bind(params.min_roe_percent);
+        .bind(params.min_roe_percent)
+        .bind(params.min_gross_margin_percent)
+        .bind(params.min_operating_margin_percent)
+        .bind(params.margins_yoy_up.unwrap_or(false))
+        .bind(params.max_debt_ratio_percent);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))
@@ -405,6 +409,15 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     }
     if !within(params.min_roe_percent, -10_000.0, 10_000.0) {
         return Err("min_roe_percent 必須介於 -10000 至 10000");
+    }
+    if !within(params.min_gross_margin_percent, -10_000.0, 100.0) {
+        return Err("min_gross_margin_percent 必須介於 -10000 至 100");
+    }
+    if !within(params.min_operating_margin_percent, -10_000.0, 100.0) {
+        return Err("min_operating_margin_percent 必須介於 -10000 至 100");
+    }
+    if !within(params.max_debt_ratio_percent, 0.0, 1_000.0) {
+        return Err("max_debt_ratio_percent 必須介於 0 至 1000");
     }
     Ok(())
 }
