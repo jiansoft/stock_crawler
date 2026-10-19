@@ -50,6 +50,8 @@ pub(crate) enum StockScreenSortValue {
     GrossMargin,
     /// 最新一季負債比。
     DebtRatio,
+    /// 最新一季營業利益率。
+    OperatingMargin,
     /// 相對強度分數。
     RsScore,
 }
@@ -121,6 +123,15 @@ pub(crate) struct ScreenedStock {
     pub(crate) free_cash_flow_ttm: Option<i64>,
     /// 毛利率、負債比與自由現金流的期間，格式 `YYYY-Q1`～`YYYY-Q4`；過期時仍保留。
     pub(crate) health_period: Option<String>,
+    /// 最新且仍在兩季內的單季營業利益率百分比（Yahoo 單季損益表）；營收為 0、缺值或過期時為 `null`。
+    pub(crate) operating_margin_percent: Option<f64>,
+    /// 最新且仍在兩季內的單季稅後淨利率百分比；規則同 `operating_margin_percent`。
+    pub(crate) net_margin_percent: Option<f64>,
+    /// 三率三升：最新一季毛利率、營業利益率、稅後淨利率是否都高於去年同一季；去年同季沒有資料或
+    /// 過期時為 `null`。
+    pub(crate) margins_yoy_up: Option<bool>,
+    /// 營業利益率、稅後淨利率與三率三升的損益表期間，格式 `YYYY-Q1`～`YYYY-Q4`；過期時仍保留。
+    pub(crate) margin_period: Option<String>,
     /// 相對強度分數 1–99（同 `/market/relative-strength`，資料日見 `rs_as_of`）；
     /// 上市未滿 240 個交易日、暫停交易或尚無報酬資料時為 `null`。
     pub(crate) rs_score: Option<u8>,
@@ -193,6 +204,12 @@ pub(crate) struct StockScreeningParams {
     /// 最高季末負債比百分比，範圍 0–1000。
     #[param(minimum = 0, maximum = 1000)]
     pub(crate) max_debt_ratio_percent: Option<f64>,
+    /// 最低單季營業利益率百分比（Yahoo 最新一季單季損益表），範圍 -10000–100。
+    #[param(minimum = -10000, maximum = 100)]
+    pub(crate) min_operating_margin_percent: Option<f64>,
+    /// `true` 時只留「三率三升」：最新一季毛利率、營業利益率、稅後淨利率都高於去年同一季；
+    /// `false` 或省略不篩選。
+    pub(crate) margins_yoy_up: Option<bool>,
     /// `true` 時只留近四季自由現金流為正的股票；`false` 或省略不篩選。
     pub(crate) positive_free_cash_flow: Option<bool>,
     /// 最低相對強度分數，範圍 1–99；分數以上市櫃普通股（不含 ETF、特別股）計算（同 `/market/relative-strength`），

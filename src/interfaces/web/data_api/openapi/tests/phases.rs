@@ -153,8 +153,17 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
             .to_string()
             .contains("boolean")
     );
+    assert_eq!(
+        query_schema(operation, "min_operating_margin_percent")["maximum"],
+        100
+    );
+    assert!(
+        query_schema(operation, "margins_yoy_up")
+            .to_string()
+            .contains("boolean")
+    );
     let sort_by = enum_values(&document, query_schema(operation, "sort_by"));
-    for field in ["f_score", "gross_margin", "debt_ratio"] {
+    for field in ["f_score", "gross_margin", "debt_ratio", "operating_margin"] {
         assert!(
             sort_by
                 .as_array()
@@ -171,6 +180,10 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
         ("debt_ratio_percent", "number"),
         ("free_cash_flow_ttm", "integer"),
         ("health_period", "string"),
+        ("operating_margin_percent", "number"),
+        ("net_margin_percent", "number"),
+        ("margins_yoy_up", "boolean"),
+        ("margin_period", "string"),
         ("rs_score", "integer"),
         ("foreign_streak", "integer"),
         ("trust_streak", "integer"),

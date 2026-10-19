@@ -11,6 +11,8 @@
 /// 買賣超天數同樣由 handler 算好，以 `$19` 代號、`$20` 外資、`$21` 投信三個平行陣列左接。
 /// 平均成交金額取查詢日（含）之前 45 天內最近 20 筆日線（`DailyQuotes` 以代號、日期為前導的唯一
 /// 索引），`$25` 為門檻（元，`NULL` 為不限）；`$24` 是外層附加的 `LIMIT`。
+/// 營業利益率、稅後淨利率與三率三升取 Yahoo 最新一季單季損益表（`income_statement_history_idx`），
+/// 三率三升比較去年同一季；新鮮度同財務體質（兩季內）。`$26` 營業利益率下限、`$27` 是否只選三率三升。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -43,6 +45,11 @@ WITH latest AS (
         h.gross_margin_percent AS gross_margin_raw,
         h.debt_ratio_percent AS debt_ratio_raw,
         h.free_cash_flow_ttm AS free_cash_flow_raw,
+        m.margin_year,
+        m.margin_quarter,
+        m.operating_margin_raw,
+        m.net_margin_raw,
+        m.margins_up_raw,
         q.avg_trade_value
     FROM stocks s
     LEFT JOIN LATERAL (
@@ -116,6 +123,35 @@ WITH latest AS (
             LIMIT 20
         ) recent_quotes
     ) q ON TRUE
+    LEFT JOIN LATERAL (
+        -- Yahoo 最新一季單季損益表：營業利益率、稅後淨利率，以及毛利率、營業利益率、稅後淨利率
+        -- 是否都高於去年同一季（三率三升；去年同季沒有資料或營收為 0 時為 NULL）。
+        SELECT cur.fiscal_year AS margin_year,
+            SUBSTRING(cur.quarter FROM 2)::smallint AS margin_quarter,
+            ROUND(cur.operating_profit::numeric / NULLIF(cur.revenue, 0) * 100, 2) AS operating_margin_raw,
+            ROUND(cur.net_income::numeric / NULLIF(cur.revenue, 0) * 100, 2) AS net_margin_raw,
+            cur.gross_profit::numeric / NULLIF(cur.revenue, 0)
+                    > prev.gross_profit::numeric / NULLIF(prev.revenue, 0)
+                AND cur.operating_profit::numeric / NULLIF(cur.revenue, 0)
+                    > prev.operating_profit::numeric / NULLIF(prev.revenue, 0)
+                AND cur.net_income::numeric / NULLIF(cur.revenue, 0)
+                    > prev.net_income::numeric / NULLIF(prev.revenue, 0) AS margins_up_raw
+        FROM (
+            SELECT fiscal_year, quarter, revenue, gross_profit, operating_profit, net_income
+            FROM income_statement
+            WHERE source = 'yahoo'
+              AND stock_symbol = s.stock_symbol
+              AND period_type = 'single'
+            ORDER BY fiscal_year DESC, quarter DESC
+            LIMIT 1
+        ) cur
+        LEFT JOIN income_statement prev
+               ON prev.source = 'yahoo'
+              AND prev.stock_symbol = s.stock_symbol
+              AND prev.period_type = 'single'
+              AND prev.fiscal_year = cur.fiscal_year - 1
+              AND prev.quarter = cur.quarter
+    ) m ON TRUE
     LEFT JOIN financial_health h ON h.stock_symbol = s.stock_symbol
     WHERE (($1::int = 0 AND s.stock_exchange_market_id IN (2, 4))
         OR ($1::int <> 0 AND s.stock_exchange_market_id = $1))
@@ -186,7 +222,19 @@ WITH latest AS (
         CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
                 + EXTRACT(QUARTER FROM $3::date)::int)
               - (health_quarter_year * 4 + health_quarter)) BETWEEN 0 AND 2
-          THEN free_cash_flow_raw END AS free_cash_flow_ttm
+          THEN free_cash_flow_raw END AS free_cash_flow_ttm,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (margin_year * 4 + margin_quarter)) BETWEEN 0 AND 2
+          THEN operating_margin_raw END AS operating_margin_percent,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (margin_year * 4 + margin_quarter)) BETWEEN 0 AND 2
+          THEN net_margin_raw END AS net_margin_percent,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (margin_year * 4 + margin_quarter)) BETWEEN 0 AND 2
+          THEN margins_up_raw END AS margins_yoy_up
     FROM latest
 )
 SELECT
@@ -200,6 +248,7 @@ SELECT
     f_score, f_score_evaluated, f_score_year,
     gross_margin_percent, debt_ratio_percent, free_cash_flow_ttm,
     health_quarter_year, health_quarter,
+    operating_margin_percent, net_margin_percent, margins_yoy_up, margin_year, margin_quarter,
     rs.rs_score,
     chip.foreign_streak,
     chip.trust_streak,
@@ -226,4 +275,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($22::smallint IS NULL OR chip.foreign_streak >= $22)
   AND ($23::smallint IS NULL OR chip.trust_streak >= $23)
   AND ($25::numeric IS NULL OR avg_trade_value >= $25)
+  AND ($26::numeric IS NULL OR operating_margin_percent >= $26)
+  AND (NOT $27::bool OR margins_yoy_up IS TRUE)
 "#;

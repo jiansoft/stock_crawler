@@ -64,6 +64,16 @@ pub(super) struct ScreenedStockRow {
     health_quarter_year: Option<i32>,
     /// 季報指標期間季別。
     health_quarter: Option<i16>,
+    /// 新鮮的單季營業利益率。
+    operating_margin_percent: Option<Decimal>,
+    /// 新鮮的單季稅後淨利率。
+    net_margin_percent: Option<Decimal>,
+    /// 新鮮的三率三升判斷。
+    margins_yoy_up: Option<bool>,
+    /// 損益表期間年度。
+    margin_year: Option<i32>,
+    /// 損益表期間季別。
+    margin_quarter: Option<i16>,
     /// 相對強度分數。
     rs_score: Option<i16>,
     /// 外資連續買賣超天數。
@@ -87,6 +97,10 @@ impl From<ScreenedStockRow> for ScreenedStock {
         let health_period = row
             .health_quarter_year
             .zip(row.health_quarter)
+            .map(|(year, quarter)| format!("{year}-Q{quarter}"));
+        let margin_period = row
+            .margin_year
+            .zip(row.margin_quarter)
             .map(|(year, quarter)| format!("{year}-Q{quarter}"));
         ScreenedStock {
             stock_symbol: row.stock_symbol,
@@ -153,6 +167,18 @@ impl From<ScreenedStockRow> for ScreenedStock {
             ),
             free_cash_flow_ttm: row.free_cash_flow_ttm,
             health_period,
+            operating_margin_percent: analytical_decimal_to_f64(
+                row.operating_margin_percent,
+                &symbol,
+                "operating_margin_percent",
+            ),
+            net_margin_percent: analytical_decimal_to_f64(
+                row.net_margin_percent,
+                &symbol,
+                "net_margin_percent",
+            ),
+            margins_yoy_up: row.margins_yoy_up,
+            margin_period,
             rs_score: row.rs_score.and_then(|score| u8::try_from(score).ok()),
             foreign_streak: row.foreign_streak,
             trust_streak: row.trust_streak,

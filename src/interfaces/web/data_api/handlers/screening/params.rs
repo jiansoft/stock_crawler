@@ -31,6 +31,8 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_gross_margin_percent: Option<Decimal>,
     /// 最高季末負債比。
     pub(super) max_debt_ratio_percent: Option<Decimal>,
+    /// 最低單季營業利益率。
+    pub(super) min_operating_margin_percent: Option<Decimal>,
     /// 最低相對強度分數。
     pub(super) min_rs_score: Option<i16>,
     /// 外資最少連續買超天數。
@@ -39,7 +41,7 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_trust_streak: Option<i16>,
     /// 近 20 筆日線平均成交金額下限（元）。
     pub(super) min_avg_trade_value: Option<Decimal>,
-    /// 二十六個固定排序分支之一。
+    /// 二十八個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,
@@ -126,6 +128,12 @@ pub(super) fn validate_screening_params(
         1_000.0,
         "max_debt_ratio_percent 必須介於 0 至 1000",
     )?;
+    let min_operating_margin_percent = decimal_in_range(
+        params.min_operating_margin_percent,
+        -10_000.0,
+        100.0,
+        "min_operating_margin_percent 必須介於 -10000 至 100",
+    )?;
     if params
         .min_rs_score
         .is_some_and(|score| !(1..=99).contains(&score))
@@ -167,6 +175,8 @@ pub(super) fn validate_screening_params(
         || params.min_gross_margin_percent.is_some()
         || params.max_debt_ratio_percent.is_some()
         || params.positive_free_cash_flow == Some(true)
+        || params.min_operating_margin_percent.is_some()
+        || params.margins_yoy_up == Some(true)
         || params.min_rs_score.is_some()
         || params.min_foreign_streak.is_some()
         || params.min_trust_streak.is_some()
@@ -184,6 +194,7 @@ pub(super) fn validate_screening_params(
         min_dividend_yield_percent,
         min_gross_margin_percent,
         max_debt_ratio_percent,
+        min_operating_margin_percent,
         min_rs_score: params.min_rs_score.map(i16::from),
         min_foreign_streak: params.min_foreign_streak.map(i16::from),
         min_trust_streak: params.min_trust_streak.map(i16::from),
@@ -215,7 +226,7 @@ fn decimal_in_range(
         .transpose()
 }
 
-/// 將排序 enum 映射成二十六個固定 SQL 分支。
+/// 將排序 enum 映射成二十八個固定 SQL 分支。
 ///
 /// 指標欄位一律加 `NULLS LAST`，否則 PostgreSQL 的降冪預設會把過期或缺值的
 /// NULL 排在最前面；同值再以股票代號升冪，讓分頁外的重複查詢仍穩定。
@@ -277,6 +288,12 @@ pub(super) fn screen_order_by(
         ("debt_ratio", "asc") => Ok("ORDER BY debt_ratio_percent ASC NULLS LAST, stock_symbol ASC"),
         ("debt_ratio", "desc") => {
             Ok("ORDER BY debt_ratio_percent DESC NULLS LAST, stock_symbol ASC")
+        }
+        ("operating_margin", "asc") => {
+            Ok("ORDER BY operating_margin_percent ASC NULLS LAST, stock_symbol ASC")
+        }
+        ("operating_margin", "desc") => {
+            Ok("ORDER BY operating_margin_percent DESC NULLS LAST, stock_symbol ASC")
         }
         ("rs_score", "asc") => Ok("ORDER BY rs_score ASC NULLS LAST, stock_symbol ASC"),
         ("rs_score", "desc") => Ok("ORDER BY rs_score DESC NULLS LAST, stock_symbol ASC"),

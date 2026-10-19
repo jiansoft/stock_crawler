@@ -31,6 +31,8 @@ fn screening_params() -> StockScreeningParams {
         min_f_score: None,
         min_gross_margin_percent: None,
         max_debt_ratio_percent: None,
+        min_operating_margin_percent: None,
+        margins_yoy_up: None,
         positive_free_cash_flow: None,
         min_rs_score: None,
         min_foreign_streak: None,
@@ -212,10 +214,10 @@ fn screening_health_boundaries_are_deterministic() {
     }
 }
 
-/// 十三個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
+/// 十四個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
 /// `NULLS LAST`；不在白名單的文字必須在接觸 SQL 前遭拒。
 #[test]
-fn screening_sort_has_twenty_six_static_branches() {
+fn screening_sort_has_twenty_eight_static_branches() {
     let fields = [
         "stock_symbol",
         "revenue_yoy",
@@ -229,6 +231,7 @@ fn screening_sort_has_twenty_six_static_branches() {
         "f_score",
         "gross_margin",
         "debt_ratio",
+        "operating_margin",
         "rs_score",
     ];
     for field in fields {
@@ -457,6 +460,8 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(Option::<i16>::None)
         .bind(20_i64)
         .bind(Option::<Decimal>::None)
+        .bind(Option::<Decimal>::None)
+        .bind(false)
         .fetch_all(pool)
         .await
         .expect("screen EXPLAIN");
@@ -651,4 +656,134 @@ fn validate_avg_trade_value_range() {
             }
         }
     }
+}
+
+/// 營業利益率門檻範圍 -10000–100；營業利益率與三率三升單獨設定都算有篩選條件，三率三升 `false` 不算。
+#[test]
+fn validate_margin_filters() {
+    for (value, ok) in [
+        (-10_000.5, false),
+        (-10_000.0, true),
+        (100.0, true),
+        (100.5, false),
+    ] {
+        let mut params = screening_params();
+        params.min_operating_margin_percent = Some(value);
+        assert_eq!(validate_screening_params(&params).is_ok(), ok, "{value}");
+    }
+    let mut params = screening_params();
+    params.margins_yoy_up = Some(true);
+    assert!(validate_screening_params(&params).is_ok());
+    params.margins_yoy_up = Some(false);
+    assert_eq!(
+        validate_screening_params(&params).err(),
+        Some("至少需要一個篩選條件")
+    );
+}
+
+/// 三率三升與營業利益率：以固定查詢日 1988-03-05 執行，最新一季須在兩季內；
+/// 去年同季沒有資料時三率三升為 `null`，過期的一季只保留期間。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部 PostgreSQL，請加 --features integration-tests 執行"
+)]
+async fn screen_at_filters_margins() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 screen_at_filters_margins：無資料庫連接");
+        return;
+    }
+    const SYMBOLS: [&str; 4] = ["79979SM1", "79979SM2", "79979SM3", "79979SM4"];
+    let pool = database::get_connection();
+    let cleanup = || async {
+        for sql in [
+            "DELETE FROM income_statement WHERE stock_symbol = ANY($1)",
+            "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
+        ] {
+            let _ = sqlx::query(sql).bind(&SYMBOLS[..]).execute(pool).await;
+        }
+    };
+    cleanup().await;
+    for symbol in SYMBOLS {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
+               VALUES ($1, '三率選股', $1, 2, 1)"#,
+        )
+        .bind(symbol)
+        .execute(pool)
+        .await
+        .expect("種入股票");
+    }
+    // 營收 100，毛利／營業利益／稅後淨利：SM1 1987 Q4 40／20／15、去年同季 30／10／5（三率三升）；
+    // SM2 1987 Q4 50／30／20、去年同季 55／25／15（毛利率下降）；SM3 只有 1987 Q4 30／10／8；
+    // SM4 最新是 1987 Q2（落後三季，過期）。
+    sqlx::query(
+        "INSERT INTO income_statement
+             (stock_symbol, fiscal_year, period_type, quarter, source, revenue, gross_profit, operating_profit, net_income)
+         VALUES ('79979SM1', 1987, 'single', 'Q4', 'yahoo', 100, 40, 20, 15),
+                ('79979SM1', 1986, 'single', 'Q4', 'yahoo', 100, 30, 10, 5),
+                ('79979SM2', 1987, 'single', 'Q4', 'yahoo', 100, 50, 30, 20),
+                ('79979SM2', 1986, 'single', 'Q4', 'yahoo', 100, 55, 25, 15),
+                ('79979SM3', 1987, 'single', 'Q4', 'yahoo', 100, 30, 10, 8),
+                ('79979SM4', 1987, 'single', 'Q2', 'yahoo', 100, 60, 40, 30)",
+    )
+    .execute(pool)
+    .await
+    .expect("種入損益表");
+
+    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let run = |operating: Option<f64>, up: Option<bool>| async move {
+        let mut params = screening_params();
+        params.industry_id = Some(1);
+        params.min_operating_margin_percent = operating;
+        params.margins_yoy_up = up;
+        params.sort_by = Some("operating_margin".to_owned());
+        params.sort_order = Some("desc".to_owned());
+        params.limit = Some(50);
+        let validated = validate_screening_params(&params).expect("參數合法");
+        let response = screen_at(&params, validated, query_date).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body 可讀");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON 回應");
+        json["stocks"]
+            .as_array()
+            .expect("stocks 陣列")
+            .iter()
+            .filter(|stock| {
+                SYMBOLS
+                    .iter()
+                    .any(|symbol| stock["stock_symbol"] == *symbol)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    let up = run(None, Some(true)).await;
+    let operating = run(Some(25.0), None).await;
+    let all = run(None, None).await;
+    let positive = run(Some(5.0), None).await;
+    cleanup().await;
+
+    assert_eq!(up.len(), 1, "{up:?}");
+    assert_eq!(up[0]["stock_symbol"], "79979SM1");
+    assert_eq!(up[0]["operating_margin_percent"], 20.0);
+    assert_eq!(up[0]["net_margin_percent"], 15.0);
+    assert_eq!(up[0]["margins_yoy_up"], true);
+    assert_eq!(up[0]["margin_period"], "1987-Q4");
+    assert_eq!(operating.len(), 1, "{operating:?}");
+    assert_eq!(operating[0]["stock_symbol"], "79979SM2");
+    assert_eq!(operating[0]["margins_yoy_up"], false);
+    // 依營業利益率降冪：SM2 30%、SM1 20%、SM3 10%，過期的 SM4 為 null 排最後。
+    let order: Vec<&str> = all
+        .iter()
+        .filter_map(|stock| stock["stock_symbol"].as_str())
+        .collect();
+    assert_eq!(order, ["79979SM2", "79979SM1", "79979SM3", "79979SM4"]);
+    assert!(all[2]["margins_yoy_up"].is_null());
+    assert!(all[3]["operating_margin_percent"].is_null());
+    assert_eq!(all[3]["margin_period"], "1987-Q2");
+    assert_eq!(positive.len(), 3, "{positive:?}");
 }
