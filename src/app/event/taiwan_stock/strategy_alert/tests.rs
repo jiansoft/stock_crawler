@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use super::message::build_message;
 use super::*;
-use crate::app::ports::StrategyHolding;
+use crate::app::ports::{StrategyHolding, StrategySettlement};
 
 fn day(d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 10, d).expect("固定日期合法")
@@ -107,10 +107,13 @@ fn rebalance_record_keeps_added_then_kept() {
     );
 }
 
-/// 回傳固定結果並記下收到的條件。
+/// 回傳固定結果並記下收到的條件與結算的策略。
 struct FakeGateway {
     result: Option<StrategyRebalance>,
     fail: bool,
+    settlement: Option<StrategySettlement>,
+    settlement_fail: bool,
+    settled: Mutex<Vec<(String, NaiveDate)>>,
     queries: Mutex<Vec<String>>,
 }
 
@@ -126,20 +129,83 @@ impl StrategyGateway for FakeGateway {
         }
         Ok(self.result.clone())
     }
+
+    async fn settlement(
+        &self,
+        preset_name: &str,
+        date: NaiveDate,
+    ) -> Result<Option<StrategySettlement>> {
+        self.settled
+            .lock()
+            .expect("鎖未中毒")
+            .push((preset_name.to_owned(), date));
+        if self.settlement_fail {
+            bail!("讀不到換股紀錄");
+        }
+        Ok(self.settlement.clone())
+    }
 }
 
 fn gateway(result: Option<StrategyRebalance>) -> FakeGateway {
     FakeGateway {
         result,
         fail: false,
+        settlement: None,
+        settlement_fail: false,
+        settled: Mutex::new(Vec::new()),
         queries: Mutex::new(Vec::new()),
     }
+}
+
+fn settlement(etf_weight: u8) -> StrategySettlement {
+    StrategySettlement {
+        start: NaiveDate::from_ymd_opt(2026, 9, 17).expect("固定日期合法"),
+        end: day(16),
+        strategy_return: Some(2.034),
+        etf_return: Some(-4.21),
+        portfolio_return: Some(-1.09),
+        etf_weight,
+        tracked_from: NaiveDate::from_ymd_opt(2026, 8, 19).expect("固定日期合法"),
+        periods: 2,
+        cumulative_return: Some(5.5),
+        etf_cumulative_return: Some(1.25),
+    }
+}
+
+/// 有上一期結算時附兩行：上一期組合／策略部位／0050，追蹤以來累積與超額；純策略只列策略與 0050，
+/// 查不到的寫「查不到」、沒有超額。
+#[test]
+fn build_message_includes_settlement() {
+    let message = build_message(&rebalance(), "", None, Some(&settlement(50)));
+    let expected = [
+        r"• 上一期 2026\-09\-17～2026\-10\-16 實盤（未扣成本）：組合 \-1\.09%（策略部位 \+2\.03%，0050 \-4\.21%）",
+        r"• 追蹤 2026\-08\-19 起 2 期：累積 \+5\.50%，0050 \+1\.25%，超額 \+4\.25 個百分點",
+        "",
+    ]
+    .join("\n");
+    assert!(message.contains(&expected), "{message}");
+    let pure = StrategySettlement {
+        strategy_return: None,
+        cumulative_return: None,
+        ..settlement(0)
+    };
+    let message = build_message(&rebalance(), "", None, Some(&pure));
+    assert!(
+        message.contains("實盤（未扣成本）：策略 查不到，0050 \\-4\\.21%\n"),
+        "{message}"
+    );
+    assert!(
+        message.contains("累積 查不到，0050 \\+1\\.25%\n"),
+        "{message}"
+    );
+    assert!(!message.contains("超額"), "{message}");
+    assert!(!build_message(&rebalance(), "", None, None).contains("上一期"));
 }
 
 /// 新買進、續抱、賣出各一行，附換手與下次換股。
 #[test]
 fn build_message_lists_changes() {
-    let message = build_message(&rebalance(), "動能", None);
+    let message = build_message(&rebalance(), "動能", None, None);
     assert_eq!(
         message,
         [
@@ -168,7 +234,7 @@ fn build_message_describes_cash_and_core() {
         etf_weight: 50,
         ..rebalance()
     };
-    let message = build_message(&filtered, "", None);
+    let message = build_message(&filtered, "", None, None);
     assert!(
         message.starts_with("策略換股︰2026\\-10\\-16\n"),
         "{message}"
@@ -185,16 +251,16 @@ fn build_message_describes_cash_and_core() {
         kept: Vec::new(),
         ..rebalance()
     };
-    assert!(build_message(&empty, "", None).contains("沒有符合條件的股票"));
+    assert!(build_message(&empty, "", None, None).contains("沒有符合條件的股票"));
 
     let capped = StrategyRebalance {
         cash: 40.0,
         ..rebalance()
     };
     assert!(
-        build_message(&capped, "", None).contains("策略部位現金 40\\.0%"),
+        build_message(&capped, "", None, None).contains("策略部位現金 40\\.0%"),
         "{}",
-        build_message(&capped, "", None)
+        build_message(&capped, "", None, None)
     );
 }
 
@@ -205,7 +271,7 @@ fn build_message_compares_with_actual_holdings() {
         .into_iter()
         .map(str::to_owned)
         .collect();
-    let message = build_message(&rebalance(), "", Some(&held));
+    let message = build_message(&rebalance(), "", Some(&held), None);
     assert!(
         message.contains(
             "• 對照實際持股：策略 2 檔中已持有 1 檔；尚未持有：2330 台積電
@@ -227,11 +293,11 @@ fn build_message_compares_with_actual_holdings() {
         exited: Vec::new(),
         ..rebalance()
     };
-    let message = build_message(&core, "", Some(&held));
+    let message = build_message(&core, "", Some(&held), None);
     assert!(message.contains("• 0050 核心部位：已持有"), "{message}");
     assert!(!message.contains("仍持有"), "{message}");
     let all: BTreeSet<String> = ["2330", "2317"].into_iter().map(str::to_owned).collect();
-    let message = build_message(&core, "", Some(&all));
+    let message = build_message(&core, "", Some(&all), None);
     assert!(
         message.contains(
             "已持有 2 檔
@@ -247,10 +313,10 @@ fn build_message_compares_with_actual_holdings() {
         kept: Vec::new(),
         ..rebalance()
     };
-    let message = build_message(&filtered, "", Some(&held));
+    let message = build_message(&filtered, "", Some(&held), None);
     assert!(!message.contains("對照實際持股"), "{message}");
     assert!(message.contains("策略賣出但仍持有：79979"), "{message}");
-    assert!(!build_message(&rebalance(), "", None).contains("對照實際持股"));
+    assert!(!build_message(&rebalance(), "", None, None).contains("對照實際持股"));
 }
 
 fn preset(name: &str, query: &str, alert: bool) -> StrategyPreset {
@@ -371,4 +437,45 @@ async fn run_only_alerts_on_rebalance_day() {
         ..gateway(None)
     };
     assert!(rebalance_today(&failing, "from=x", day(16)).await.is_err());
+}
+
+/// 換股日：寫入紀錄、依策略名稱結算上一期後發通知；結算失敗只略過結算，不影響通知與其他策略。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn notify_settles_previous_period_on_rebalance_day() {
+    dotenvy::dotenv().ok();
+    let strategy = AlertStrategy {
+        name: "甲".to_owned(),
+        query: "from=2019-01-02".to_owned(),
+    };
+    let recorder = FakeRecorder::default();
+    let settled = FakeGateway {
+        settlement: Some(settlement(50)),
+        ..gateway(Some(rebalance()))
+    };
+    notify(
+        &settled,
+        &recorder,
+        std::slice::from_ref(&strategy),
+        day(16),
+    )
+    .await
+    .expect("換股通知成功");
+    assert_eq!(
+        settled.settled.lock().expect("鎖未中毒").as_slice(),
+        [("甲".to_owned(), day(16))]
+    );
+
+    let failing = FakeGateway {
+        settlement_fail: true,
+        ..gateway(Some(rebalance()))
+    };
+    notify(&failing, &recorder, &[strategy], day(16))
+        .await
+        .expect("結算失敗不影響通知");
+    assert_eq!(failing.settled.lock().expect("鎖未中毒").len(), 1);
+    assert_eq!(recorder.saved.lock().expect("鎖未中毒").len(), 2);
 }

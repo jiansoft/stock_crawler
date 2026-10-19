@@ -1,6 +1,8 @@
 //! 條件選股回測 endpoint 整合測試：具名策略實盤追蹤。
 
 use super::*;
+use crate::app::ports::StrategyGateway;
+use crate::interfaces::web::data_api::handlers::BacktestStrategyGateway;
 
 const PRESET: &str = "79979 實盤追蹤";
 const SYMBOLS: [&str; 3] = ["79979KA", "79979KB", "0050"];
@@ -96,6 +98,35 @@ async fn strategy_track_follows_recorded_rebalances() {
     assert_eq!(second["ongoing"], true);
     assert_eq!(second["strategy_return"], 10.0);
     assert!(json["cumulative_return"].is_number(), "{json}");
+
+    // 換股通知的結算：05-15 換股時，上一期是 05-01～05-15，累積只算到 05-15。
+    let gateway = BacktestStrategyGateway;
+    let settlement = gateway
+        .settlement(PRESET, track_day(15))
+        .await
+        .expect("結算成功")
+        .expect("有上一期");
+    assert_eq!(
+        (settlement.start, settlement.end, settlement.periods),
+        (track_day(1), track_day(15), 1)
+    );
+    assert_eq!(
+        (
+            settlement.strategy_return,
+            settlement.etf_return,
+            settlement.portfolio_return,
+            settlement.cumulative_return,
+            settlement.etf_cumulative_return,
+        ),
+        (Some(3.0), Some(2.0), Some(2.5), Some(2.5), Some(2.0))
+    );
+    assert!(
+        gateway
+            .settlement(PRESET, track_day(1))
+            .await
+            .expect("結算成功")
+            .is_none()
+    );
 
     let (status, _) =
         get("/api/v1/strategy-presets/79979%20%E4%B8%8D%E5%AD%98%E5%9C%A8/track").await;

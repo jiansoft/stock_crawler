@@ -8,7 +8,8 @@
 //! 讀不到實際持股時只略過對照；某個策略失敗時其餘照常通知，最後回傳錯誤。
 //!
 //! 換股日另把當天的持股寫進 `strategy_rebalance`（見 [`rebalance_record`]），供
-//! `/strategy-presets/{name}/track` 追蹤實際表現；寫入失敗只記 warning，通知照發。
+//! `/strategy-presets/{name}/track` 追蹤實際表現；寫入失敗只記 warning，通知照發。通知同時附上依換股
+//! 紀錄結算的上一期實盤表現與追蹤以來的累積（vs 0050）；還沒有上一期紀錄或結算失敗時不附。
 //!
 //! 回測引擎在 `interfaces::web::data_api`，這裡只透過 [`ports::StrategyGateway`] 取得換股結果。
 
@@ -167,6 +168,16 @@ async fn notify(
                 record.preset_name
             ),
         }
+        let settlement = match gateway.settlement(&record.preset_name, record.date).await {
+            Ok(settlement) => settlement,
+            Err(error) => {
+                tracing::warn!(
+                    "策略換股通知：結算 {} 上一期實盤失敗，略過：{error:?}",
+                    record.preset_name
+                );
+                None
+            }
+        };
         if held.is_none() {
             held = Some(match holdings::active_holding_symbols().await {
                 Ok(held) => Some(held),
@@ -177,7 +188,13 @@ async fn notify(
             });
         }
         let actual = held.as_ref().and_then(Option::as_ref);
-        alert::send_message(&build_message(&rebalance, &strategy.name, actual)).await;
+        alert::send_message(&build_message(
+            &rebalance,
+            &strategy.name,
+            actual,
+            settlement.as_ref(),
+        ))
+        .await;
     }
     if !failures.is_empty() {
         bail!("策略換股通知失敗：{}", failures.join("；"));
