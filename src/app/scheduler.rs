@@ -219,7 +219,7 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
         ),
         // 17:00、19:00（週一至週五）檢查當日收盤資料：上市或上櫃有成交的檔數明顯偏少
         // （來源尚未公布、暫時失敗）就重跑收盤匯總並告警，避免缺口被「缺漏補齊」的零量列藏起來。
-        // 行情完整後再檢查技術訊號與未來報酬，沒寫入就只重算缺的那一步並告警。
+        // 行情完整後再檢查技術訊號與未來報酬，沒寫入就只重算缺的那一步並告警；大盤指數沒寫入也重抓。
         create_job(
             "0 0 17,19 * * Mon-Fri",
             "檢查收盤資料完整性",
@@ -323,6 +323,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "0 0 22 * * *",
             "更新外資持股比例與狀態",
             qualified_foreign_institutional_investor::execute,
+        ),
+        // 23:00（週一至週五）檢查大盤指數、籌碼與外資持股是否寫入，缺漏就重跑並告警；
+        // 另重跑一次官方本益比補寫，有補到才告警（排程失敗時當天的資料不會一直缺著）。
+        create_job(
+            "0 0 23 * * Mon-Fri",
+            "檢查盤後籌碼與外資資料完整性",
+            event::taiwan_stock::closing::ensure_after_hours,
         ),
     ];
     let mut job_count = 0usize;
