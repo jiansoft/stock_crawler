@@ -180,3 +180,24 @@ fn official_ratio_report_only_when_rows_updated() {
         )
     );
 }
+
+/// 以資料庫實際查詢：當天沒有日線（不是交易日）時不檢查、不重跑也不告警。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn ensure_skips_day_without_quotes() {
+    dotenvy::dotenv().ok();
+    if crate::infra::database::ping().await.is_err() {
+        println!("跳過 ensure_skips_day_without_quotes：無資料庫連接");
+        return;
+    }
+    let date = NaiveDate::from_ymd_opt(1900, 1, 2).expect("固定日期合法");
+    ensure(date, &LATE_EVENING)
+        .await
+        .expect("不是交易日，不檢查");
+    ensure(date, &WITH_CLOSING)
+        .await
+        .expect("不是交易日，不檢查");
+}
