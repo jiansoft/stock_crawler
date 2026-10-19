@@ -7,6 +7,9 @@
 //! [`QUERY_ENV`]／[`NAME_ENV`] 仍可另設一組（與具名策略條件相同時不重複通知）。都沒有就不做事；
 //! 讀不到實際持股時只略過對照；某個策略失敗時其餘照常通知，最後回傳錯誤。
 //!
+//! 換股日另把當天的持股寫進 `strategy_rebalance`（見 [`rebalance_record`]），供
+//! `/strategy-presets/{name}/track` 追蹤實際表現；寫入失敗只記 warning，通知照發。
+//!
 //! 回測引擎在 `interfaces::web::data_api`，這裡只透過 [`ports::StrategyGateway`] 取得換股結果。
 
 use std::collections::BTreeSet;
@@ -19,8 +22,14 @@ use super::holdings;
 use crate::{
     app::ports::{self, StrategyGateway, StrategyHolding, StrategyRebalance},
     core::{alert, util::text},
-    domain::strategy::{StrategyPreset, StrategyPresetRepository},
-    infra::database::repository::strategy_preset::PgStrategyPresetRepository,
+    domain::strategy::{
+        StrategyPreset, StrategyPresetRepository,
+        rebalance::{RecordedHolding, StrategyRebalanceRecord, StrategyRebalanceRepository},
+    },
+    infra::database::repository::{
+        strategy_preset::PgStrategyPresetRepository,
+        strategy_rebalance::PgStrategyRebalanceRepository,
+    },
 };
 
 /// 另一組策略條件的環境變數（條件選股回測的 query string）；沒有設定或空白時只看具名策略。
@@ -82,12 +91,48 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
     let gateway = ports::strategy_gateway()?;
-    notify(gateway.as_ref(), &strategies, Local::now().date_naive()).await
+    notify(
+        gateway.as_ref(),
+        &PgStrategyRebalanceRepository::new(),
+        &strategies,
+        Local::now().date_naive(),
+    )
+    .await
 }
 
-/// 逐一跑策略回測，今天換股的發通知；實際持股只在第一次需要時讀一次。
+/// 手動回補用：以具名策略目前的條件跑一次回測，把最後一次換股（還沒滿持有天數的那一期）寫進換股
+/// 紀錄，回傳換股日與是否新寫入；策略不存在回錯誤，最後一期剛好滿持有天數回 `None`。
+///
+/// 換股通知啟用前的那一期沒有被記錄，用這個補上，之後的換股由 22:10 的通知照常記錄。
+///
+/// # Errors
+///
+/// 讀不到策略、策略 gateway 未註冊、回測失敗或寫入失敗時回傳錯誤。
+pub async fn record_current_rebalance(preset_name: &str) -> Result<Option<(NaiveDate, bool)>> {
+    let preset = PgStrategyPresetRepository::new()
+        .find(preset_name)
+        .await
+        .context("讀取具名策略失敗")?
+        .with_context(|| format!("查無具名策略：{preset_name}"))?;
+    let strategy = AlertStrategy {
+        name: preset.name,
+        query: preset.query.trim().to_owned(),
+    };
+    let Some(rebalance) = ports::strategy_gateway()?
+        .latest_rebalance(&strategy.query)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let record = rebalance_record(&strategy, &rebalance);
+    let inserted = PgStrategyRebalanceRepository::new().save(&record).await?;
+    Ok(Some((record.date, inserted)))
+}
+
+/// 逐一跑策略回測，今天換股的寫入換股紀錄並發通知；實際持股只在第一次需要時讀一次。
 async fn notify(
     gateway: &dyn StrategyGateway,
+    recorder: &dyn StrategyRebalanceRepository,
     strategies: &[AlertStrategy],
     today: NaiveDate,
 ) -> Result<()> {
@@ -103,6 +148,23 @@ async fn notify(
                 continue;
             }
         };
+        let record = rebalance_record(strategy, &rebalance);
+        match recorder.save(&record).await {
+            Ok(true) => tracing::info!(
+                "策略換股通知：已記錄 {} {} 的換股",
+                record.preset_name,
+                record.date
+            ),
+            Ok(false) => tracing::info!(
+                "策略換股通知：{} {} 已有換股紀錄，保留原本的",
+                record.preset_name,
+                record.date
+            ),
+            Err(error) => tracing::warn!(
+                "策略換股通知：寫入 {} 換股紀錄失敗：{error:?}",
+                record.preset_name
+            ),
+        }
         if held.is_none() {
             held = Some(match holdings::active_holding_symbols().await {
                 Ok(held) => Some(held),
@@ -119,6 +181,39 @@ async fn notify(
         bail!("策略換股通知失敗：{}", failures.join("；"));
     }
     Ok(())
+}
+
+/// 沒有名稱（只設 [`QUERY_ENV`]）的策略在換股紀錄中的名稱。
+const UNNAMED_STRATEGY: &str = "STRATEGY_ALERT_QUERY";
+
+/// 換股紀錄：策略部位的新買進（在前）與續抱持股及權重；賣出的不記。
+fn rebalance_record(
+    strategy: &AlertStrategy,
+    rebalance: &StrategyRebalance,
+) -> StrategyRebalanceRecord {
+    StrategyRebalanceRecord {
+        preset_name: if strategy.name.is_empty() {
+            UNNAMED_STRATEGY.to_owned()
+        } else {
+            strategy.name.clone()
+        },
+        date: rebalance.date,
+        query: strategy.query.clone(),
+        hold_days: rebalance.hold_days,
+        etf_weight: rebalance.etf_weight,
+        cash: rebalance.cash,
+        market_filtered: rebalance.market_filtered,
+        holdings: rebalance
+            .added
+            .iter()
+            .chain(&rebalance.kept)
+            .map(|holding| RecordedHolding {
+                symbol: holding.symbol.clone(),
+                name: holding.name.clone(),
+                weight: holding.weight,
+            })
+            .collect(),
+    }
 }
 
 /// 跑一次策略回測，取今天的換股；最後一次換股不是 `today`（今天不是換股日或休市）時回 `None`。
@@ -315,6 +410,70 @@ pub(in crate::app::event::taiwan_stock) mod tests {
             kept: vec![holding("2317", Some("鴻海"), 50.0)],
             exited: vec![holding("79979", None, 50.0)],
         }
+    }
+
+    /// 記下寫入的換股紀錄。
+    #[derive(Default)]
+    struct FakeRecorder {
+        saved: Mutex<Vec<StrategyRebalanceRecord>>,
+    }
+
+    #[async_trait]
+    impl StrategyRebalanceRepository for FakeRecorder {
+        async fn save(&self, record: &StrategyRebalanceRecord) -> Result<bool> {
+            self.saved.lock().expect("鎖未中毒").push(record.clone());
+            Ok(true)
+        }
+
+        async fn list(&self, _preset_name: &str) -> Result<Vec<StrategyRebalanceRecord>> {
+            Ok(Vec::new())
+        }
+    }
+
+    /// 換股紀錄：新買進在前、續抱在後，賣出的不記；沒有名稱的策略以環境變數名稱記錄。
+    #[test]
+    fn rebalance_record_keeps_added_then_kept() {
+        let strategy = AlertStrategy {
+            name: "最佳組合".to_owned(),
+            query: "from=2019-01-02".to_owned(),
+        };
+        let core = StrategyRebalance {
+            etf_weight: 50,
+            cash: 10.0,
+            ..rebalance()
+        };
+        assert_eq!(
+            rebalance_record(&strategy, &core),
+            StrategyRebalanceRecord {
+                preset_name: "最佳組合".to_owned(),
+                date: day(16),
+                query: "from=2019-01-02".to_owned(),
+                hold_days: 20,
+                etf_weight: 50,
+                cash: 10.0,
+                market_filtered: false,
+                holdings: vec![
+                    RecordedHolding {
+                        symbol: "2330".to_owned(),
+                        name: Some("台積電".to_owned()),
+                        weight: 50.0,
+                    },
+                    RecordedHolding {
+                        symbol: "2317".to_owned(),
+                        name: Some("鴻海".to_owned()),
+                        weight: 50.0,
+                    },
+                ],
+            }
+        );
+        let unnamed = AlertStrategy {
+            name: String::new(),
+            ..strategy
+        };
+        assert_eq!(
+            rebalance_record(&unnamed, &rebalance()).preset_name,
+            UNNAMED_STRATEGY
+        );
     }
 
     /// 回傳固定結果並記下收到的條件。
@@ -517,8 +676,9 @@ pub(in crate::app::event::taiwan_stock) mod tests {
             name: name.to_owned(),
             query: format!("from=2019-01-02&name={name}"),
         };
+        let recorder = FakeRecorder::default();
         let idle = gateway(None);
-        notify(&idle, &[strategy("甲"), strategy("乙")], day(16))
+        notify(&idle, &recorder, &[strategy("甲"), strategy("乙")], day(16))
             .await
             .expect("都不換股");
         assert_eq!(idle.queries.lock().expect("鎖未中毒").len(), 2);
@@ -527,9 +687,14 @@ pub(in crate::app::event::taiwan_stock) mod tests {
             fail: true,
             ..gateway(None)
         };
-        let error = notify(&failing, &[strategy("甲"), strategy("乙")], day(16))
-            .await
-            .expect_err("回測失敗");
+        let error = notify(
+            &failing,
+            &recorder,
+            &[strategy("甲"), strategy("乙")],
+            day(16),
+        )
+        .await
+        .expect_err("回測失敗");
         let message = format!("{error:#}");
         assert!(
             message.contains("甲：") && message.contains("乙："),
@@ -537,7 +702,11 @@ pub(in crate::app::event::taiwan_stock) mod tests {
         );
         assert_eq!(failing.queries.lock().expect("鎖未中毒").len(), 2);
 
-        notify(&idle, &[], day(16)).await.expect("沒有策略");
+        notify(&idle, &recorder, &[], day(16))
+            .await
+            .expect("沒有策略");
+        // 都不是換股日（或失敗），不寫換股紀錄。
+        assert!(recorder.saved.lock().expect("鎖未中毒").is_empty());
     }
 
     /// 今天是換股日才發；最後一期已滿或換股日不是今天都不發；回測錯誤往上傳。

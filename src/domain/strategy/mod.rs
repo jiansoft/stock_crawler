@@ -6,6 +6,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
+/// 策略換股紀錄（換股通知當天的持股，供追蹤實際表現）。
+pub mod rebalance;
+
 /// 策略名稱的長度上限（字元）。
 pub const MAX_NAME_CHARS: usize = 64;
 

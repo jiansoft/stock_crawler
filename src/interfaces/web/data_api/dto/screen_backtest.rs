@@ -12,6 +12,7 @@ mod attribution;
 mod frontier;
 mod offsets;
 mod preset;
+mod track;
 mod walk_forward;
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,7 @@ pub(crate) use self::offsets::{
     ScreenBacktestOffsetsResponse,
 };
 pub(crate) use self::preset::{StrategyPresetItem, StrategyPresetsResponse};
+pub(crate) use self::track::{StrategyTrackHolding, StrategyTrackPeriod, StrategyTrackResponse};
 pub(crate) use self::walk_forward::{BacktestWalkForwardYear, ScreenBacktestWalkForwardResponse};
 
 /// OpenAPI 文件使用的候選股排序方式。

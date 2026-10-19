@@ -12,6 +12,9 @@
 //! - `test_backfill_market_breadth`：
 //!   逐日補上 `MANUAL_MARKET_BREADTH_FROM`～`MANUAL_MARKET_BREADTH_TO`（預設 2019-01-02～2022-02-16）
 //!   沒有統計列的市場廣度（`daily_stock_price_stats`）；已有的列不動，重跑安全。
+//! - `test_record_strategy_rebalance`：
+//!   把具名策略（`MANUAL_STRATEGY_PRESET`，預設「最佳組合」）目前這一期的持股寫進換股紀錄
+//!   （`strategy_rebalance`），供實盤追蹤；同一天已有紀錄不覆蓋，重跑安全。
 
 use chrono::NaiveDate;
 
@@ -174,4 +177,29 @@ async fn test_backfill_market_breadth() {
         }
     }
     println!("市場廣度回補 {from}～{to}：{days} 個交易日、共 {total} 列");
+}
+
+/// 把具名策略目前這一期（最後一次換股、還沒滿持有天數）的持股寫進換股紀錄（`strategy_rebalance`）。
+///
+/// 換股通知啟用前的那一期沒有紀錄，用這個補上後 `/strategy-presets/{name}/track` 就能從這一期開始追蹤；
+/// 之後的換股由 22:10 的通知照常記錄。**會寫入資料庫**；同策略同一天已有紀錄不覆蓋。
+///
+/// 執行範例：
+/// `MANUAL_STRATEGY_PRESET=最佳組合 cargo test app::manual_backfill::derived::test_record_strategy_rebalance -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_record_strategy_rebalance() {
+    dotenvy::dotenv().ok();
+    crate::app::ports::register_strategy_gateway(std::sync::Arc::new(
+        crate::interfaces::web::data_api::BacktestStrategyGateway,
+    ));
+    let preset = std::env::var("MANUAL_STRATEGY_PRESET").unwrap_or_else(|_| "最佳組合".to_owned());
+    let result = crate::app::event::taiwan_stock::strategy_alert::record_current_rebalance(&preset)
+        .await
+        .expect("記錄目前換股失敗");
+    match result {
+        Some((date, true)) => println!("已記錄 {preset} {date} 的換股"),
+        Some((date, false)) => println!("{preset} {date} 已有換股紀錄，保留原本的"),
+        None => println!("{preset} 最後一期剛好滿持有天數，沒有目前持股可記錄"),
+    }
 }
