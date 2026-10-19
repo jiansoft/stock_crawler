@@ -231,7 +231,12 @@ SELECT
     fs.earnings_per_share,
     fs.return_on_equity,
     fs.gross_profit,
-    prev.earnings_per_share AS last_year_earnings_per_share
+    fs.operating_profit_margin,
+    fs.net_income AS net_margin,
+    prev.earnings_per_share AS last_year_earnings_per_share,
+    prev.gross_profit AS last_year_gross_profit,
+    prev.operating_profit_margin AS last_year_operating_margin,
+    prev.net_income AS last_year_net_margin
 FROM financial_statement AS fs
 INNER JOIN stocks AS s ON s.stock_symbol = fs.security_code
 LEFT JOIN financial_statement AS prev
@@ -257,7 +262,12 @@ ORDER BY fs.security_code
             earnings_per_share: row.try_get("earnings_per_share")?,
             return_on_equity: row.try_get("return_on_equity")?,
             gross_profit: row.try_get("gross_profit")?,
+            operating_margin: row.try_get("operating_profit_margin")?,
+            net_margin: row.try_get("net_margin")?,
             last_year_earnings_per_share: row.try_get("last_year_earnings_per_share")?,
+            last_year_gross_profit: row.try_get("last_year_gross_profit")?,
+            last_year_operating_margin: row.try_get("last_year_operating_margin")?,
+            last_year_net_margin: row.try_get("last_year_net_margin")?,
         })
     })
     .fetch_all(database::get_connection())

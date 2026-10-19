@@ -24,7 +24,7 @@ use crate::app::event::taiwan_stock::format_decimal_with_commas;
 // app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
 use crate::core::{alert, util::text};
 use crate::domain::financial::entity::{
-    EpsEstimateBasis, HoldingFinancialAlert, HoldingRevenueAlert,
+    EpsEstimateBasis, HoldingFinancialAlert, HoldingRevenueAlert, MarginTrend,
 };
 use crate::domain::financial::repository::FinancialRepository;
 use crate::domain::foreign_holding::entity::{
@@ -431,14 +431,14 @@ impl EventDispatcher {
         for alert in alerts {
             let _ = writeln!(
                 &mut msg,
-                "    {}{} {} EPS︰{}元{} ROE︰{}% 毛利率︰{}%",
+                "    {}{} {} EPS︰{}元{} ROE︰{}% {}",
                 Self::new_mark(&alert.stock_symbol, new_symbols),
                 Self::stock_link(&alert.stock_symbol),
                 text::escape_markdown_v2(&alert.stock_name),
                 text::escape_markdown_v2(format_decimal_with_commas(alert.earnings_per_share)),
                 Self::format_eps_comparison(alert),
                 text::escape_markdown_v2(format_decimal_with_commas(alert.return_on_equity)),
-                text::escape_markdown_v2(format_decimal_with_commas(alert.gross_profit))
+                Self::format_margins(alert)
             );
         }
 
@@ -459,6 +459,32 @@ impl EventDispatcher {
             format_decimal_with_commas(last_year),
             Self::with_sign(diff)
         ))
+    }
+
+    /// 三率與去年同季的比較：「毛利率︰53.1%（+2.3） 營益率︰…（…） 淨利率︰…（…）」，三率同向時再標
+    /// 三率三升／三率三降。毛利率一律列出（與過去的通知相同）；營益率、淨利率為 0（來源沒有提供）時
+    /// 不列；查不到去年同季的那一率不附括號。
+    fn format_margins(alert: &HoldingFinancialAlert) -> String {
+        let [gross, operating, net] = alert.margin_changes();
+        let item = |label: &str, value: Decimal, change: Option<Decimal>| {
+            let change = change
+                .map(|change| format!("（{}）", Self::with_sign(change)))
+                .unwrap_or_default();
+            format!("{label}︰{}%{change}", format_decimal_with_commas(value))
+        };
+        let mut parts = vec![item("毛利率", alert.gross_profit, gross)];
+        if !alert.operating_margin.is_zero() {
+            parts.push(item("營益率", alert.operating_margin, operating));
+        }
+        if !alert.net_margin.is_zero() {
+            parts.push(item("淨利率", alert.net_margin, net));
+        }
+        match alert.margin_trend() {
+            Some(MarginTrend::AllUp) => parts.push("📈三率三升".to_owned()),
+            Some(MarginTrend::AllDown) => parts.push("📉三率三降".to_owned()),
+            Some(MarginTrend::Mixed) | None => {}
+        }
+        text::escape_markdown_v2(parts.join(" "))
     }
 
     /// 數值一律帶正負號，讓方向一眼可辨；`format_decimal_with_commas` 不會替正數補 `+`。
