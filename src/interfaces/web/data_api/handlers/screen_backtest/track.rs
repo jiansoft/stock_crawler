@@ -18,6 +18,7 @@ use futures::{StreamExt, stream};
 
 use super::current::return_since;
 use super::{ETF_BENCHMARK, round2};
+use crate::app::ports::StrategySettlement;
 use crate::domain::quote::technical::{PriceAdjustment, PriceBar, PriceBarRepository};
 use crate::domain::strategy::StrategyPresetRepository;
 use crate::domain::strategy::rebalance::{StrategyRebalanceRecord, StrategyRebalanceRepository};
@@ -29,7 +30,7 @@ use crate::infra::database::repository::{
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, StrategyTrackHolding, StrategyTrackPeriod, StrategyTrackResponse,
 };
-use crate::interfaces::web::data_api::handlers::{database_error, error_response};
+use crate::interfaces::web::data_api::handlers::error_response;
 
 /// 同時查詢日線的股票數。
 const BAR_CONCURRENCY: usize = 4;
@@ -67,27 +68,56 @@ pub(crate) async fn strategy_track(Path(name): Path<String>) -> Response {
             Err(error) => internal_error(&error),
         };
     }
-    let latest: Option<NaiveDate> = match sqlx::query_scalar(LATEST_TRADING_DATE_SQL)
-        .fetch_one(database::get_connection())
-        .await
-    {
-        Ok(latest) => latest,
-        Err(error) => return database_error(error),
-    };
-    let (bars, adjustments) = match latest {
-        Some(latest) => match load_bars(&records, latest).await {
-            Ok(loaded) => loaded,
-            Err(error) => return internal_error(&error),
-        },
-        None => (HashMap::new(), HashMap::new()),
-    };
-    Json(track(&name, &records, latest, &bars, &adjustments)).into_response()
+    match track_records(&name, &records, None).await {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => internal_error(&error),
+    }
 }
 
 /// 不含細節的 500（細節只記 log）。
 fn internal_error(error: &anyhow::Error) -> Response {
     tracing::error!("策略實盤追蹤查詢失敗: {error:?}");
     error_response(StatusCode::INTERNAL_SERVER_ERROR, "資料庫查詢失敗")
+}
+
+/// 讀取 `records` 需要的日線，逐期計算到最新交易日（有 `until` 時最多到 `until`）的表現。
+pub(super) async fn track_records(
+    name: &str,
+    records: &[StrategyRebalanceRecord],
+    until: Option<NaiveDate>,
+) -> anyhow::Result<StrategyTrackResponse> {
+    let latest: Option<NaiveDate> = sqlx::query_scalar(LATEST_TRADING_DATE_SQL)
+        .fetch_one(database::get_connection())
+        .await?;
+    let latest = latest.map(|latest| until.map_or(latest, |until| latest.min(until)));
+    let (bars, adjustments) = match latest {
+        Some(latest) => load_bars(records, latest).await?,
+        None => (HashMap::new(), HashMap::new()),
+    };
+    Ok(track(name, records, latest, &bars, &adjustments))
+}
+
+/// 換股通知用的結算：最後一期（已經過至少一個交易日）的表現與追蹤以來的累積；沒有紀錄或最後一期
+/// 還沒有收盤可比時回 `None`。
+pub(super) fn settlement(response: &StrategyTrackResponse) -> Option<StrategySettlement> {
+    let parse = |date: &str| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok();
+    let last = response.periods.last()?;
+    let (start, end) = (parse(&last.date)?, parse(&last.end)?);
+    if end <= start {
+        return None;
+    }
+    Some(StrategySettlement {
+        start,
+        end,
+        strategy_return: last.strategy_return,
+        etf_return: last.etf_return,
+        portfolio_return: last.portfolio_return,
+        etf_weight: last.etf_weight,
+        tracked_from: parse(response.from.as_deref()?)?,
+        periods: response.periods.len(),
+        cumulative_return: response.cumulative_return,
+        etf_cumulative_return: response.etf_cumulative_return,
+    })
 }
 
 /// 讀取全部持股與 0050 從第一次換股日（往前多讀幾根）到 `latest` 的日線與除權息事件。

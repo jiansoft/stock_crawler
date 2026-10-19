@@ -6,9 +6,12 @@ use async_trait::async_trait;
 use axum::{extract::Query, http::Uri, response::Response};
 use chrono::NaiveDate;
 
+use super::track::{settlement, track_records};
 use super::{Backtest, Simulation, current_holdings, exited, returns_to_date, stock_names};
-use crate::app::ports::{StrategyGateway, StrategyHolding, StrategyRebalance};
+use crate::app::ports::{StrategyGateway, StrategyHolding, StrategyRebalance, StrategySettlement};
+use crate::domain::strategy::rebalance::StrategyRebalanceRepository;
 use crate::infra::database;
+use crate::infra::database::repository::strategy_rebalance::PgStrategyRebalanceRepository;
 use crate::interfaces::web::data_api::dto::ScreenBacktestParams;
 
 /// 讀取錯誤回應內容的上限（位元組）。
@@ -113,6 +116,26 @@ impl StrategyGateway for BacktestStrategyGateway {
                 .map(|item| holding(item.symbol, item.name, item.weight, None))
                 .collect(),
         }))
+    }
+
+    async fn settlement(
+        &self,
+        preset_name: &str,
+        date: NaiveDate,
+    ) -> Result<Option<StrategySettlement>> {
+        let mut records = PgStrategyRebalanceRepository::new()
+            .list(preset_name)
+            .await
+            .context("讀取換股紀錄失敗")?;
+        // 只看 `date` 之前的換股、算到 `date` 為止：上一期持有到這次換股日，與有沒有寫入這次的紀錄無關。
+        records.retain(|record| record.date < date);
+        if records.is_empty() {
+            return Ok(None);
+        }
+        let response = track_records(preset_name, &records, Some(date))
+            .await
+            .context("計算實盤表現失敗")?;
+        Ok(settlement(&response))
     }
 }
 
