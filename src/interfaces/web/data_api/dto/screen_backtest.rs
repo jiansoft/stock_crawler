@@ -3,11 +3,32 @@
 //! 只用每天都有留存的資料（相對強度、法人連續買超、技術訊號）選股，避免用到當時還沒公布的
 //! 財報；報酬來自 `daily_forward_return`（基準日收盤到之後第 N 個交易日收盤的還原報酬，等同含息；
 //! 期間內下市的股票算到最後一筆收盤）。
+//!
+//! 子模組依端點放 response：[`offsets`]（換股日偏移）、[`frontier`]（0050 比例前緣）、[`attribution`]（報酬歸因）、
+//! [`walk_forward`]（滾動前推）、[`preset`]（具名策略清單）。
+
+mod attribution;
+mod frontier;
+mod offsets;
+mod preset;
+mod walk_forward;
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::{MarketParamValue, SignalIndicatorValue, SignalKindValue};
+
+pub(crate) use self::attribution::{
+    BacktestAttributionTotals, BacktestAttributionYear, BacktestIndustryEffect,
+    ScreenBacktestAttributionResponse,
+};
+pub(crate) use self::frontier::{BacktestFrontierPoint, ScreenBacktestFrontierResponse};
+pub(crate) use self::offsets::{
+    BacktestOffsetDistribution, BacktestOffsetResult, BacktestOffsetYear, BacktestStat,
+    ScreenBacktestOffsetsResponse,
+};
+pub(crate) use self::preset::{StrategyPresetItem, StrategyPresetsResponse};
+pub(crate) use self::walk_forward::{BacktestWalkForwardYear, ScreenBacktestWalkForwardResponse};
 
 /// OpenAPI 文件使用的候選股排序方式。
 #[derive(ToSchema)]
@@ -416,323 +437,4 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) current: Option<BacktestCurrent>,
     /// 各期結果，由舊到新；只列已滿持有天數的期數。
     pub(crate) periods: Vec<BacktestPeriod>,
-}
-
-/// 一組數值的分布（四分位以線性內插，四捨五入到小數兩位）。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct BacktestStat {
-    pub(crate) min: f64,
-    pub(crate) p25: f64,
-    pub(crate) median: f64,
-    pub(crate) mean: f64,
-    pub(crate) p75: f64,
-    pub(crate) max: f64,
-}
-
-/// 一個換股日偏移的回測彙總。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct BacktestOffsetResult {
-    /// 換股日偏移（起日之後先跳過的交易日數）。
-    pub(crate) rebalance_offset: u16,
-    /// 與 `/stocks/screen/backtest` 相同的整段彙總。
-    pub(crate) summary: BacktestSummary,
-}
-
-/// 各偏移績效的分布；沒有任何偏移有該項數值時為 `null`。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct BacktestOffsetDistribution {
-    /// 扣交易成本後的年化報酬（%）。
-    pub(crate) annualized_return_after_costs: Option<BacktestStat>,
-    /// 扣成本後的夏普值。
-    pub(crate) sharpe_ratio: Option<BacktestStat>,
-    /// 扣成本後的最大回撤（%，負值）。
-    pub(crate) max_drawdown_after_costs: Option<BacktestStat>,
-    /// 0050 同期（同樣的換股日進出）的年化報酬（%）。
-    pub(crate) etf_annualized_return: Option<BacktestStat>,
-    /// 0050 同期的夏普值。
-    pub(crate) etf_sharpe_ratio: Option<BacktestStat>,
-    /// 年化波動率（%，未扣成本）。
-    pub(crate) volatility: Option<BacktestStat>,
-    /// 0050 同期的年化波動率（%）。
-    pub(crate) etf_volatility: Option<BacktestStat>,
-    /// 0050 同期的最大回撤（%，負值）。
-    pub(crate) etf_max_drawdown: Option<BacktestStat>,
-    /// 扣成本後年化報酬高於同偏移 0050 的偏移比例（0–1）。
-    pub(crate) beat_etf_return_rate: Option<f64>,
-    /// 扣成本後夏普值高於同偏移 0050 的偏移比例（0–1）。
-    pub(crate) beat_etf_sharpe_rate: Option<f64>,
-    /// 扣成本後最大回撤比同偏移 0050 淺（數值較大）的偏移比例（0–1）。
-    pub(crate) beat_etf_drawdown_rate: Option<f64>,
-}
-
-/// 某一年各偏移的表現分布（年度依換股日，各偏移該年各期的累積報酬，年度各自從 1 起算）；
-/// 起訖所在的年度可能不滿一年，各偏移的期數也可能不同。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct BacktestOffsetYear {
-    /// 年度。
-    pub(crate) year: i32,
-    /// 這一年有換股的偏移數。
-    pub(crate) offsets: i64,
-    /// 扣交易成本後該年累積報酬（%）的分布。
-    pub(crate) return_after_costs: Option<BacktestStat>,
-    /// 0050 同期（同樣的換股日進出）該年累積報酬（%）的分布；全部缺資料為 `null`。
-    pub(crate) etf_return: Option<BacktestStat>,
-    /// 該年扣成本後累積報酬高於同偏移 0050 的偏移比例（0–1）；0050 全部缺資料為 `null`。
-    pub(crate) beat_etf_rate: Option<f64>,
-}
-
-/// 換股日偏移穩健度結果。
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub(crate) struct ScreenBacktestOffsetsResponse {
-    pub(crate) from: String,
-    /// 實際迄日（不晚於指定迄日、最近一個有相對強度的交易日）。
-    pub(crate) to: String,
-    pub(crate) market: String,
-    pub(crate) hold_days: u16,
-    pub(crate) limit: u8,
-    /// 候選股排序方式。
-    pub(crate) rank_by: String,
-    /// 0050 核心部位（%）；0 為純策略。
-    pub(crate) etf_weight: u8,
-    /// 策略部位的持股加權方式。
-    pub(crate) weighting: String,
-    /// 單檔權重上限（%）；未設定為 `null`。
-    pub(crate) max_weight: Option<u8>,
-    /// 停損（%）；未設定為 `null`。
-    pub(crate) stop_loss: Option<u8>,
-    /// 移動停利（%）；未設定為 `null`。
-    pub(crate) trailing_stop: Option<u8>,
-    /// 計算交易成本用的手續費折扣（0–1）。
-    pub(crate) fee_discount: f64,
-    /// 可投資的大盤基準代號（固定為 `0050`）。
-    pub(crate) etf_benchmark: String,
-    /// 各偏移績效的分布。
-    pub(crate) distribution: BacktestOffsetDistribution,
-    /// 依年度的分布，由舊到新：看策略在哪些年份穩定勝過 0050、哪些年份輸。
-    pub(crate) years: Vec<BacktestOffsetYear>,
-    /// 樣本內外分割日；未指定為 `null`。
-    pub(crate) split: Option<String>,
-    /// 換股日早於分割日的期數（樣本內）的分布；未指定分割日為 `null`。
-    pub(crate) before_split: Option<BacktestOffsetDistribution>,
-    /// 換股日不早於分割日的期數（樣本外）的分布；未指定分割日為 `null`。
-    pub(crate) after_split: Option<BacktestOffsetDistribution>,
-    /// 每個偏移的彙總，依偏移由小到大。
-    pub(crate) offsets: Vec<BacktestOffsetResult>,
-}
-
-/// 0050 核心部位前緣的一個比例：各換股日偏移混合後的績效分布。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct BacktestFrontierPoint {
-    /// 0050 核心部位（%）：0 為純策略、100 為只持有 0050。
-    pub(crate) etf_weight: u8,
-    /// 這個比例下各偏移績效的分布（欄位與偏移穩健度相同）。
-    pub(crate) distribution: BacktestOffsetDistribution,
-    /// 樣本內（換股日早於分割日）的分布；未指定分割日為 `null`。
-    pub(crate) before_split: Option<BacktestOffsetDistribution>,
-    /// 樣本外（換股日不早於分割日）的分布；未指定分割日為 `null`。
-    pub(crate) after_split: Option<BacktestOffsetDistribution>,
-}
-
-/// 0050 核心部位前緣：同一組條件搭配 0%～100% 的 0050，各比例的績效分布。
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub(crate) struct ScreenBacktestFrontierResponse {
-    pub(crate) from: String,
-    /// 實際迄日（不晚於指定迄日、最近一個有相對強度的交易日）。
-    pub(crate) to: String,
-    pub(crate) market: String,
-    pub(crate) hold_days: u16,
-    pub(crate) limit: u8,
-    /// 候選股排序方式。
-    pub(crate) rank_by: String,
-    /// 策略部位的持股加權方式。
-    pub(crate) weighting: String,
-    /// 單檔權重上限（%）；未設定為 `null`。
-    pub(crate) max_weight: Option<u8>,
-    /// 停損（%）；未設定為 `null`。
-    pub(crate) stop_loss: Option<u8>,
-    /// 移動停利（%）；未設定為 `null`。
-    pub(crate) trailing_stop: Option<u8>,
-    /// 計算交易成本用的手續費折扣（0–1）。
-    pub(crate) fee_discount: f64,
-    /// 可投資的大盤基準代號（固定為 `0050`）。
-    pub(crate) etf_benchmark: String,
-    /// 跑了幾個換股日偏移（取法與偏移穩健度相同）。
-    pub(crate) offsets: i64,
-    /// 扣成本後夏普值中位數最高的比例（%）；同值取較低的比例，全部沒有數值為 `null`。
-    pub(crate) best_sharpe_weight: Option<u8>,
-    /// 扣成本後年化報酬中位數最高的比例（%）；同值取較低的比例，全部沒有數值為 `null`。
-    pub(crate) best_return_weight: Option<u8>,
-    /// 樣本內外分割日；未指定為 `null`。
-    pub(crate) split: Option<String>,
-    /// 只看樣本內時夏普值中位數最高的比例（之後看它在樣本外的表現）；未指定分割日為 `null`。
-    pub(crate) best_sharpe_weight_before_split: Option<u8>,
-    /// 各比例的分布，依比例由小到大（0、10、…、100）。
-    pub(crate) weights: Vec<BacktestFrontierPoint>,
-}
-
-/// 報酬歸因中一個產業（或現金）的效果；效果為各期相加（百分點，不複利、未扣交易成本）。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct BacktestIndustryEffect {
-    /// 產業名稱；策略部位的現金（大盤濾網空手、單檔上限分不完）為「現金」，查無產業為「未分類」。
-    pub(crate) industry: String,
-    /// 策略部位在這個產業的平均權重（%，各期平均，沒持有的期數算 0）。
-    pub(crate) avg_weight: f64,
-    /// 基準在這個產業的平均權重（%）。
-    pub(crate) benchmark_avg_weight: f64,
-    /// 配置效果：多配或少配這個產業，乘上該產業基準報酬相對基準整體的差。
-    pub(crate) allocation: f64,
-    /// 選股效果：以基準權重計，策略在這個產業選到的股票相對基準同產業股票的報酬差。
-    pub(crate) selection: f64,
-    /// 交互效果：多配或少配的部分乘上選股的報酬差。
-    pub(crate) interaction: f64,
-    /// 三項合計：這個產業對策略相對基準超額報酬的貢獻。
-    pub(crate) total: f64,
-}
-
-/// 一段期間的報酬歸因合計（各期相加，百分點，不複利、未扣交易成本）。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct BacktestAttributionTotals {
-    /// 有基準資料、納入歸因的期數。
-    pub(crate) periods: i64,
-    /// 策略部位各期報酬相加（%）。
-    pub(crate) strategy_return: f64,
-    /// 基準各期報酬相加（%）。
-    pub(crate) benchmark_return: f64,
-    /// 0050 同期各期報酬相加（%），用來看基準與 0050 的差距；全部缺資料為 `null`。
-    pub(crate) etf_return: Option<f64>,
-    /// 超額報酬：策略減基準（= 配置 + 選股 + 交互）。
-    pub(crate) excess_return: f64,
-    /// 配置效果合計。
-    pub(crate) allocation: f64,
-    /// 選股效果合計。
-    pub(crate) selection: f64,
-    /// 交互效果合計。
-    pub(crate) interaction: f64,
-}
-
-/// 一年的報酬歸因（年度依換股日）。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct BacktestAttributionYear {
-    /// 年度。
-    pub(crate) year: i32,
-    /// 這一年的合計。
-    pub(crate) totals: BacktestAttributionTotals,
-    /// 這一年影響最大的 5 個產業（依三項合計的絕對值由大到小）。
-    pub(crate) industries: Vec<BacktestIndustryEffect>,
-}
-
-/// 條件選股回測的報酬歸因（Brinson-Fachler）：把策略部位相對類 0050 基準的超額報酬，拆成產業配置、
-/// 選股與交互三項。
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub(crate) struct ScreenBacktestAttributionResponse {
-    pub(crate) from: String,
-    /// 實際迄日（不晚於指定迄日、最近一個有相對強度的交易日）。
-    pub(crate) to: String,
-    pub(crate) market: String,
-    pub(crate) hold_days: u16,
-    pub(crate) limit: u8,
-    /// 候選股排序方式。
-    pub(crate) rank_by: String,
-    /// 策略部位的持股加權方式。
-    pub(crate) weighting: String,
-    /// 單檔權重上限（%）；未設定為 `null`。
-    pub(crate) max_weight: Option<u8>,
-    /// 停損（%）；未設定為 `null`。
-    pub(crate) stop_loss: Option<u8>,
-    /// 移動停利（%）；未設定為 `null`。
-    pub(crate) trailing_stop: Option<u8>,
-    /// 換股日偏移（交易日）。
-    pub(crate) rebalance_offset: u16,
-    /// 基準的檔數：每個換股日同市場母體中近 20 個交易日平均成交金額最高的 N 檔，依平均成交金額加權
-    /// （近似 0050 的市值加權）。
-    pub(crate) benchmark_size: i64,
-    /// 整段的合計。
-    pub(crate) summary: BacktestAttributionTotals,
-    /// 依年度的合計與影響最大的產業，由舊到新。
-    pub(crate) years: Vec<BacktestAttributionYear>,
-    /// 整段各產業（含現金）的效果，依三項合計由大到小。
-    pub(crate) industries: Vec<BacktestIndustryEffect>,
-}
-
-/// 滾動前推的一年：用前幾年挑出的參數與這一年的結果。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct BacktestWalkForwardYear {
-    /// 套用的年度（換股日所屬年度）。
-    pub(crate) year: i32,
-    /// 挑出的 0050 核心部位（%）。
-    pub(crate) etf_weight: u8,
-    /// 挑出的單檔權重上限（%）；不設上限為 `null`。
-    pub(crate) max_weight: Option<u8>,
-    /// 挑出的換股緩衝名次。
-    pub(crate) keep_rank: u8,
-    /// 挑參數時（訓練期間）這組參數的扣成本後夏普值。
-    pub(crate) train_sharpe_ratio: f64,
-    /// 這一年的期數。
-    pub(crate) periods: i64,
-    /// 這一年扣成本後的累積報酬（%）。
-    pub(crate) return_after_costs: f64,
-    /// 同一組條件、不調參數（請求的 `etf_weight`、`max_weight`、`keep_rank`）這一年扣成本後的累積報酬（%）。
-    pub(crate) baseline_return_after_costs: f64,
-    /// 0050 同期的累積報酬（%）；這一年都缺資料為 `null`。
-    pub(crate) etf_return: Option<f64>,
-}
-
-/// 滾動前推最佳化（walk-forward）：每年只用之前的資料挑參數再套用到這一年，看「每年重新調參數」
-/// 能不能在沒看過的年份勝過 0050，以及比固定參數好還是壞。
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub(crate) struct ScreenBacktestWalkForwardResponse {
-    pub(crate) from: String,
-    /// 實際迄日（不晚於指定迄日、最近一個有相對強度的交易日）。
-    pub(crate) to: String,
-    pub(crate) market: String,
-    pub(crate) hold_days: u16,
-    pub(crate) limit: u8,
-    /// 候選股排序方式。
-    pub(crate) rank_by: String,
-    /// 策略部位的持股加權方式。
-    pub(crate) weighting: String,
-    /// 停損（%）；未設定為 `null`。
-    pub(crate) stop_loss: Option<u8>,
-    /// 移動停利（%）；未設定為 `null`。
-    pub(crate) trailing_stop: Option<u8>,
-    /// 計算交易成本用的手續費折扣（0–1）。
-    pub(crate) fee_discount: f64,
-    /// 可投資的大盤基準代號（固定為 `0050`）。
-    pub(crate) etf_benchmark: String,
-    /// 訓練年數。
-    pub(crate) train_years: u8,
-    /// 每年比較的參數組合數（`etf_weight` × `max_weight` × `keep_rank`）。
-    pub(crate) candidates: i64,
-    /// 下列 `years`、`summary`、`baseline` 用的換股日偏移（`rebalance_offset`，預設 0）。
-    pub(crate) rebalance_offset: u16,
-    /// 每年挑出的參數與結果，由舊到新；訓練期間沒有夏普值的年份不列。
-    pub(crate) years: Vec<BacktestWalkForwardYear>,
-    /// 串起各年樣本外期數的彙總（換參數當下的調整成本不另計）。
-    pub(crate) summary: BacktestSummary,
-    /// 同樣年份、不調參數的彙總。
-    pub(crate) baseline: BacktestSummary,
-    /// 各換股日偏移（取法與偏移穩健度相同）滾動前推結果的分布。
-    pub(crate) offsets: BacktestOffsetDistribution,
-    /// 各換股日偏移不調參數的分布。
-    pub(crate) baseline_offsets: BacktestOffsetDistribution,
-}
-
-/// 一個具名策略。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub(crate) struct StrategyPresetItem {
-    /// 策略名稱，回測端點以 `preset=名稱` 引用。
-    pub(crate) name: String,
-    /// 存的條件（`/stocks/screen/backtest` 的 query string）。
-    pub(crate) query: String,
-    /// 說明。
-    pub(crate) description: String,
-    /// 是否在每個交易日 22:10 發策略換股通知。
-    pub(crate) alert: bool,
-}
-
-/// 具名策略清單。
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub(crate) struct StrategyPresetsResponse {
-    /// 全部策略，依名稱排序。
-    pub(crate) presets: Vec<StrategyPresetItem>,
 }
