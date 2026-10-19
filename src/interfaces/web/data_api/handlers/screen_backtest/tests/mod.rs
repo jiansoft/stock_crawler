@@ -1,5 +1,9 @@
 //! 條件選股回測的單元測試：共用的測試資料與期間解析、SQL、目前持股；其餘依主題分在子模組。
 
+use super::current::split_current;
+use super::engine::{parse_excluded_industries, resolve_backtest_period};
+use super::portfolio::{Weighting, blend_etf, select_holdings, trading_costs};
+use super::sql::{BACKTEST_SQL, BACKTEST_WITH_CHIP_SQL};
 use super::summary::{compound, risk};
 use super::*;
 
