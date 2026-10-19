@@ -35,7 +35,8 @@ use crate::interfaces::web::data_api::dto::{
 /// 每張分析表都先依股票代號取得該股票自己的最新一期，避免月營收分批公布
 /// 時以全市場最大日期誤刪尚未公布的股票。接著以台北本地查詢日套用各來源
 /// 的新鮮度上限；過期指標轉成 `null`，來源日期則保留供呼叫端稽核。
-/// 財務體質（F 分數、毛利率、負債比、自由現金流）讀每日重算的 `financial_health`；
+/// 財務體質（F 分數、毛利率、負債比、自由現金流）讀每日重算的 `financial_health`，營業利益率、
+/// 稅後淨利率與三率三升取 Yahoo 最新一季單季損益表；
 /// 營收動能（連續年增月數、近 3 月累計年增率）由最近 12 個月營收即時計算。
 /// 相對強度分數與 `/market/relative-strength` 相同，以上市櫃普通股（不含 ETF、特別股）計算後再篩選；
 /// 外資、投信連續買賣超天數與 `/market/institutional-flow` 同一算法，取最新籌碼資料日。
@@ -73,11 +74,11 @@ async fn screen_at(
         Ok(streaks) => streak_columns(streaks),
         Err(response) => return *response,
     };
-    // ORDER BY 字串只可能來自下方二十六個 &'static str 分支，絕不插入呼叫端
+    // ORDER BY 字串只可能來自下方二十八個 &'static str 分支，絕不插入呼叫端
     // 原始文字；其他條件仍全部使用 bind parameter。
     let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $24", validated.order_by);
     // SQLx 0.9 要求動態字串顯式稽核；此處唯一動態部分已由
-    // `screen_order_by` 限制為二十六個靜態常數，因此可安全標記。
+    // `screen_order_by` 限制為二十八個靜態常數，因此可安全標記。
     let rows: Result<Vec<ScreenedStockRow>, _> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(validated.market_id)
         .bind(params.industry_id)
@@ -104,6 +105,8 @@ async fn screen_at(
         .bind(validated.min_trust_streak)
         .bind(i64::from(validated.limit))
         .bind(validated.min_avg_trade_value)
+        .bind(validated.min_operating_margin_percent)
+        .bind(params.margins_yoy_up.unwrap_or(false))
         .fetch_all(database::get_connection())
         .await;
 
