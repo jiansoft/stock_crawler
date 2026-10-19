@@ -1,10 +1,10 @@
-//! 換股通知的訊息內容：新買進／續抱／賣出、現金與 0050 核心部位，以及對照實際持股。
+//! 換股通知的訊息內容：新買進／續抱／賣出、現金與 0050 核心部位、上一期實盤結算，以及對照實際持股。
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use crate::{
-    app::ports::{StrategyHolding, StrategyRebalance},
+    app::ports::{StrategyHolding, StrategyRebalance, StrategySettlement},
     core::util::text,
 };
 
@@ -84,11 +84,56 @@ fn group_line(label: &str, holdings: &[StrategyHolding]) -> Option<String> {
     ))
 }
 
-/// 組出換股通知（MarkdownV2 已跳脫）；`actual` 為目前的實際持股代號，`None` 時不對照。
+/// 帶正負號的百分比；查不到為「查不到」。
+fn signed_percent(value: Option<f64>) -> String {
+    value.map_or_else(|| "查不到".to_owned(), |value| format!("{value:+.2}%"))
+}
+
+/// 上一期實盤結算與追蹤以來累積的兩行（還原報酬、未扣成本）。
+fn settlement_lines(settlement: &StrategySettlement) -> Vec<String> {
+    let mut period = format!(
+        "• 上一期 {}～{} 實盤（未扣成本）：",
+        settlement.start, settlement.end
+    );
+    if settlement.etf_weight > 0 {
+        let _ = write!(
+            &mut period,
+            "組合 {}（策略部位 {}，0050 {}）",
+            signed_percent(settlement.portfolio_return),
+            signed_percent(settlement.strategy_return),
+            signed_percent(settlement.etf_return)
+        );
+    } else {
+        let _ = write!(
+            &mut period,
+            "策略 {}，0050 {}",
+            signed_percent(settlement.strategy_return),
+            signed_percent(settlement.etf_return)
+        );
+    }
+    let mut cumulative = format!(
+        "• 追蹤 {} 起 {} 期：累積 {}，0050 {}",
+        settlement.tracked_from,
+        settlement.periods,
+        signed_percent(settlement.cumulative_return),
+        signed_percent(settlement.etf_cumulative_return)
+    );
+    if let (Some(total), Some(etf)) = (
+        settlement.cumulative_return,
+        settlement.etf_cumulative_return,
+    ) {
+        let _ = write!(&mut cumulative, "，超額 {:+.2} 個百分點", total - etf);
+    }
+    vec![period, cumulative]
+}
+
+/// 組出換股通知（MarkdownV2 已跳脫）；`actual` 為目前的實際持股代號，`None` 時不對照；`settlement`
+/// 為上一期實盤結算，`None` 時不附。
 pub(super) fn build_message(
     rebalance: &StrategyRebalance,
     name: &str,
     actual: Option<&BTreeSet<String>>,
+    settlement: Option<&StrategySettlement>,
 ) -> String {
     let title = if name.is_empty() {
         format!("策略換股︰{}", rebalance.date)
@@ -122,6 +167,9 @@ pub(super) fn build_message(
     }
     lines.push(summary);
     lines.push(format!("• 下次換股：{} 個交易日後", rebalance.hold_days));
+    if let Some(settlement) = settlement {
+        lines.extend(settlement_lines(settlement));
+    }
     if let Some(actual) = actual {
         lines.extend(holdings_lines(rebalance, actual));
     }

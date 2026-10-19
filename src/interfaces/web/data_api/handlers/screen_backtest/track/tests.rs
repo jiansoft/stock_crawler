@@ -152,3 +152,51 @@ fn track_handles_missing_bars_cash_and_rebalance_today() {
     let empty = track("甲", &[], None, &HashMap::new(), &HashMap::new());
     assert!(empty.from.is_none() && empty.to.is_none() && empty.periods.is_empty());
 }
+
+/// 換股通知的結算取最後一期與累積；沒有紀錄或最後一期還沒有收盤可比時為 `None`。
+#[test]
+fn settlement_takes_last_started_period() {
+    let records = [
+        record(
+            day(9, 1),
+            vec![holding("A", 60.0), holding("B", 30.0)],
+            10.0,
+        ),
+        record(
+            day(9, 29),
+            vec![holding("A", 50.0), holding("C", 50.0)],
+            0.0,
+        ),
+    ];
+    let response = track(
+        "最佳組合",
+        &records,
+        Some(day(10, 20)),
+        &bars(),
+        &HashMap::new(),
+    );
+    let settled = settlement(&response).expect("最後一期已開始");
+    assert_eq!(
+        (
+            settled.start,
+            settled.end,
+            settled.periods,
+            settled.etf_weight
+        ),
+        (day(9, 29), day(10, 20), 2, 50)
+    );
+    assert_eq!(
+        (
+            settled.tracked_from,
+            settled.portfolio_return,
+            settled.cumulative_return,
+            settled.etf_cumulative_return,
+        ),
+        (day(9, 1), Some(6.47), Some(9.13), Some(5.0))
+    );
+
+    let today = track("甲", &records, Some(day(9, 29)), &bars(), &HashMap::new());
+    assert!(settlement(&today).is_none());
+    let empty = track("甲", &[], None, &HashMap::new(), &HashMap::new());
+    assert!(settlement(&empty).is_none());
+}

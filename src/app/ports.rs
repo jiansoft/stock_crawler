@@ -117,12 +117,45 @@ pub struct StrategyRebalance {
     pub exited: Vec<StrategyHolding>,
 }
 
+/// 依換股紀錄算出的上一期實盤結算與追蹤以來的累積表現（還原報酬、未扣成本）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrategySettlement {
+    /// 上一期的換股日。
+    pub start: NaiveDate,
+    /// 上一期的結束日（這次換股日或最新交易日）。
+    pub end: NaiveDate,
+    /// 上一期策略部位的報酬（%）；查不到日線為 `None`。
+    pub strategy_return: Option<f64>,
+    /// 上一期 0050 的報酬（%）。
+    pub etf_return: Option<f64>,
+    /// 上一期組合（策略部位與 0050 核心部位依比例混合）的報酬（%）。
+    pub portfolio_return: Option<f64>,
+    /// 上一期的 0050 核心部位（%）。
+    pub etf_weight: u8,
+    /// 第一次記錄的換股日。
+    pub tracked_from: NaiveDate,
+    /// 追蹤以來已結束的期數（含上一期）。
+    pub periods: usize,
+    /// 追蹤以來各期組合報酬連乘的累積報酬（%）；有任一期查不到為 `None`。
+    pub cumulative_return: Option<f64>,
+    /// 同一段期間持有 0050 的報酬（%）。
+    pub etf_cumulative_return: Option<f64>,
+}
+
 /// 依條件選股回測的條件取得策略最後一次換股的 gateway（port）。
 #[async_trait]
 pub trait StrategyGateway: Send + Sync {
     /// 以 `query`（條件選股回測的 query string）跑一次回測，回傳最後一次換股、還沒滿持有天數的
     /// 持股；最後一期剛好滿持有天數（今天沒有持股資料）時回 `None`。
     async fn latest_rebalance(&self, query: &str) -> Result<Option<StrategyRebalance>>;
+
+    /// 依 `preset_name` 的換股紀錄，結算 `date` 之前最後一次換股的那一期（持有到 `date` 或最新交易日）
+    /// 與追蹤以來的累積表現；`date` 之前沒有紀錄時回 `None`。
+    async fn settlement(
+        &self,
+        preset_name: &str,
+        date: NaiveDate,
+    ) -> Result<Option<StrategySettlement>>;
 }
 
 /// 全域策略 gateway。
