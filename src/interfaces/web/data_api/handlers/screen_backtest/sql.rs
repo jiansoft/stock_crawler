@@ -16,7 +16,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// `$14` 換股日偏移（起日之後先跳過幾個交易日）、`$15` 流動性門檻（元，`NULL` 為不限）、`$16`
 /// 候選股排序方式（見 [`super::RANK_BY`]）、`$17` 持股加權方式（見 [`super::WEIGHTING`]）、`$18`
 /// 排除的產業名稱（`NULL` 為不排除）、`$19`～`$23` 基本面門檻（月營收年增率、連續年增月數、近 3 月
-/// 年增率、每股盈餘、股東權益報酬率，`NULL` 為不篩）；籌碼版另有 `$24`／`$25`。
+/// 年增率、每股盈餘、股東權益報酬率，`NULL` 為不篩）、`$24`～`$27` 財報三率與負債比（毛利率、營業
+/// 利益率下限、是否只選三率三升、負債比上限）；籌碼版另有 `$28`／`$29`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
@@ -32,6 +33,9 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 ///   `/stocks/screen`）；最新一筆早於 `revenue_ord` 超過 2 個月視為沒有資料。`fs`：已公布的最近一季財報，
 ///   以法定期限的隔天起才使用（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1），距換股日超過 3 季不用。兩者都
 ///   只在有設對應門檻時才查。
+/// - `filtered` 的 `ym`：已公布的最近一季 Yahoo 單季損益表（公布日規則同 `fs`）的毛利率、營業利益率，
+///   以及毛利率、營業利益率、稅後淨利率是否都高於去年同一季（三率三升）；`bs`：同樣規則的最近一季
+///   資產負債表負債比。同樣只在有設門檻時才查。
 /// - `filtered`／`valued`：符合流動性以外條件的股票；有設流動性門檻、依成交金額排序或依成交金額
 ///   加權時，才對這些股票逐檔查 `liquidity_start`～換股日的平均成交金額（`trade_value`）。
 /// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
@@ -147,7 +151,66 @@ filtered AS (
               - (fs.year::int * 4 + SUBSTRING(fs.quarter FROM 2)::int) <= 3
         ORDER BY fs.year DESC, fs.quarter DESC
         LIMIT 1
-    ) fs ON TRUE"#,
+    ) fs ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT cur.gross_margin, cur.operating_margin,
+               cur.gross_margin > prev.gross_margin
+                   AND cur.operating_margin > prev.operating_margin
+                   AND cur.net_margin > prev.net_margin AS margins_up
+        FROM (
+            SELECT i.fiscal_year, i.quarter,
+                   i.gross_profit::float8 / NULLIF(i.revenue, 0) * 100 AS gross_margin,
+                   i.operating_profit::float8 / NULLIF(i.revenue, 0) * 100 AS operating_margin,
+                   i.net_income::float8 / NULLIF(i.revenue, 0) * 100 AS net_margin
+            FROM income_statement i
+            WHERE ($24::float8 IS NOT NULL OR $25::float8 IS NOT NULL OR $26::bool)
+              AND i.source = 'yahoo'
+              AND i.stock_symbol = u.stock_symbol
+              AND i.period_type = 'single'
+              AND i.fiscal_year BETWEEN EXTRACT(YEAR FROM u.date)::int - 1 AND EXTRACT(YEAR FROM u.date)::int
+              AND CASE i.quarter
+                      WHEN 'Q1' THEN make_date(i.fiscal_year, 5, 16)
+                      WHEN 'Q2' THEN make_date(i.fiscal_year, 8, 15)
+                      WHEN 'Q3' THEN make_date(i.fiscal_year, 11, 15)
+                      ELSE make_date(i.fiscal_year + 1, 4, 1)
+                  END <= u.date
+              AND (EXTRACT(YEAR FROM u.date)::int * 4 + EXTRACT(QUARTER FROM u.date)::int)
+                  - (i.fiscal_year * 4 + SUBSTRING(i.quarter FROM 2)::int) <= 3
+            ORDER BY i.fiscal_year DESC, i.quarter DESC
+            LIMIT 1
+        ) cur
+        LEFT JOIN LATERAL (
+            SELECT p.gross_profit::float8 / NULLIF(p.revenue, 0) * 100 AS gross_margin,
+                   p.operating_profit::float8 / NULLIF(p.revenue, 0) * 100 AS operating_margin,
+                   p.net_income::float8 / NULLIF(p.revenue, 0) * 100 AS net_margin
+            FROM income_statement p
+            WHERE $26::bool
+              AND p.source = 'yahoo'
+              AND p.stock_symbol = u.stock_symbol
+              AND p.period_type = 'single'
+              AND p.fiscal_year = cur.fiscal_year - 1
+              AND p.quarter = cur.quarter
+        ) prev ON TRUE
+    ) ym ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT b.total_liabilities::float8 / NULLIF(b.total_assets, 0) * 100 AS debt_ratio
+        FROM balance_sheet b
+        WHERE $27::float8 IS NOT NULL
+          AND b.source = 'yahoo'
+          AND b.stock_symbol = u.stock_symbol
+          AND b.period_type = 'single'
+          AND b.fiscal_year BETWEEN EXTRACT(YEAR FROM u.date)::int - 1 AND EXTRACT(YEAR FROM u.date)::int
+          AND CASE b.quarter
+                  WHEN 'Q1' THEN make_date(b.fiscal_year, 5, 16)
+                  WHEN 'Q2' THEN make_date(b.fiscal_year, 8, 15)
+                  WHEN 'Q3' THEN make_date(b.fiscal_year, 11, 15)
+                  ELSE make_date(b.fiscal_year + 1, 4, 1)
+              END <= u.date
+          AND (EXTRACT(YEAR FROM u.date)::int * 4 + EXTRACT(QUARTER FROM u.date)::int)
+              - (b.fiscal_year * 4 + SUBSTRING(b.quarter FROM 2)::int) <= 3
+        ORDER BY b.fiscal_year DESC, b.quarter DESC
+        LIMIT 1
+    ) bs ON TRUE"#,
             $chip_join,
             r#"
     WHERE ($6::text IS NULL OR si.name = $6)
@@ -165,7 +228,11 @@ filtered AS (
       AND ($20::smallint IS NULL OR rv.revenue_yoy_streak >= $20)
       AND ($21::float8 IS NULL OR rv.revenue_yoy_3m >= $21)
       AND ($22::float8 IS NULL OR fs.earnings_per_share >= $22)
-      AND ($23::float8 IS NULL OR fs.return_on_equity >= $23)"#,
+      AND ($23::float8 IS NULL OR fs.return_on_equity >= $23)
+      AND ($24::float8 IS NULL OR ym.gross_margin >= $24)
+      AND ($25::float8 IS NULL OR ym.operating_margin >= $25)
+      AND (NOT $26::bool OR ym.margins_up IS TRUE)
+      AND ($27::float8 IS NULL OR bs.debt_ratio <= $27)"#,
             $chip_filter,
             r#"
 ),
@@ -278,7 +345,7 @@ pub(super) const BACKTEST_SQL: &str = backtest_sql!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$24`）／投信（`$25`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$28`）／投信（`$29`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
@@ -287,7 +354,7 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($24::bigint IS NULL OR c.foreign_buy >= $24)\n      AND ($25::bigint IS NULL OR c.trust_buy >= $25)",
+        "\n      AND ($28::bigint IS NULL OR c.foreign_buy >= $28)\n      AND ($29::bigint IS NULL OR c.trust_buy >= $29)",
         "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
     )
 );

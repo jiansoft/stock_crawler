@@ -3,6 +3,7 @@
 mod attribution;
 mod filters;
 mod fundamentals;
+mod margins;
 mod offsets;
 mod presets;
 mod ranking;
@@ -36,7 +37,7 @@ fn day(d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(1993, 3, d).expect("固定日期合法")
 }
 
-/// 刪除種入的相對強度、報酬、訊號、籌碼、月營收、季報與股票主檔。
+/// 刪除種入的相對強度、報酬、訊號、籌碼、月營收、季報、三大財報與股票主檔。
 async fn cleanup(pool: &sqlx::PgPool) {
     let symbols: Vec<&str> = STOCKS.iter().map(|row| row.0).collect();
     for sql in [
@@ -47,6 +48,8 @@ async fn cleanup(pool: &sqlx::PgPool) {
         r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
         r#"DELETE FROM "Revenue" WHERE "SecurityCode" = ANY($1)"#,
         "DELETE FROM financial_statement WHERE security_code = ANY($1)",
+        "DELETE FROM income_statement WHERE stock_symbol = ANY($1)",
+        "DELETE FROM balance_sheet WHERE stock_symbol = ANY($1)",
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
