@@ -23,7 +23,7 @@
 //!
 //! 子模組：[`engine`]（驗證條件、查候選股、決定持股與扣成本的回測引擎，各端點共用）、[`attribution`]（相對類 0050 基準的報酬歸因端點）、[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
 //! [`contributors`]（個股貢獻）、[`current`]（目前持股）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
-//! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`preset`]（具名策略 `preset=名稱` 與清單端點）、[`stops`]（期間停損）、[`walk_forward`]（滾動前推最佳化端點）。
+//! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`preset`]（具名策略 `preset=名稱` 與清單端點）、[`stops`]（期間停損）、[`track`]（具名策略實盤追蹤端點）、[`walk_forward`]（滾動前推最佳化端點）。
 
 mod attribution;
 mod contributors;
@@ -37,6 +37,7 @@ mod preset;
 mod sql;
 mod stops;
 mod summary;
+mod track;
 mod walk_forward;
 
 use axum::{
@@ -55,6 +56,7 @@ pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_o
 pub(crate) use self::preset::{
     __path_strategy_presets, BacktestQuery, strategy_presets, validate_strategy_query,
 };
+pub(crate) use self::track::{__path_strategy_track, strategy_track};
 pub(crate) use self::walk_forward::{
     __path_screen_backtest_walk_forward, screen_backtest_walk_forward,
 };

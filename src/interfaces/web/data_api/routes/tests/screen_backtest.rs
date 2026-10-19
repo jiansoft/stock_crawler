@@ -6,6 +6,7 @@ mod offsets;
 mod presets;
 mod ranking;
 mod stops;
+mod track;
 mod walk_forward;
 
 use axum::http::StatusCode;
