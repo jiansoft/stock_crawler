@@ -90,6 +90,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::stock_signals),
         )
         .route(
+            "/stocks/{symbol}/timeline",
+            axum::routing::get(handlers::stock_timeline),
+        )
+        .route(
             "/stocks/{symbol}/relative-strength",
             axum::routing::get(handlers::relative_strength_history),
         )

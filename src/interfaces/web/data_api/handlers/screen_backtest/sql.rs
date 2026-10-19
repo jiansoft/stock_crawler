@@ -15,7 +15,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）、`$13` 市場廣度門檻（%，`NULL` 為不濾）、
 /// `$14` 換股日偏移（起日之後先跳過幾個交易日）、`$15` 流動性門檻（元，`NULL` 為不限）、`$16`
 /// 候選股排序方式（見 [`super::RANK_BY`]）、`$17` 持股加權方式（見 [`super::WEIGHTING`]）、`$18`
-/// 排除的產業名稱（`NULL` 為不排除）；籌碼版另有 `$19`／`$20`。
+/// 排除的產業名稱（`NULL` 為不排除）、`$19`～`$23` 基本面門檻（月營收年增率、連續年增月數、近 3 月
+/// 年增率、每股盈餘、股東權益報酬率，`NULL` 為不篩）；籌碼版另有 `$24`／`$25`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
@@ -25,6 +26,12 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入，
 ///   只有最後一個換股日例外：以 `pending` 標記列出，當作策略目前的持股（`elapsed_days` 為換股日之後
 ///   到迄日經過的交易日數）。
+/// - `rebal` 另算 `revenue_ord`：換股日當天已公布的最新營收月份（年 × 12 + 月）。每月營收最晚次月 10 日
+///   公布，次月 11 日起才使用，即換股日往前 10 天所在月份的前一個月。
+/// - `filtered` 的 `rv`：已公布的最近 12 個月營收，算最新一月年增率、連續年增月數與近 3 月年增率（算法同
+///   `/stocks/screen`）；最新一筆早於 `revenue_ord` 超過 2 個月視為沒有資料。`fs`：已公布的最近一季財報，
+///   以法定期限的隔天起才使用（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1），距換股日超過 3 季不用。兩者都
+///   只在有設對應門檻時才查。
 /// - `filtered`／`valued`：符合流動性以外條件的股票；有設流動性門檻、依成交金額排序或依成交金額
 ///   加權時，才對這些股票逐檔查 `liquidity_start`～換股日的平均成交金額（`trade_value`）。
 /// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
@@ -55,7 +62,9 @@ windowed AS (
     FROM days
 ),
 rebal AS (
-    SELECT date, window_start, liquidity_start
+    SELECT date, window_start, liquidity_start,
+           EXTRACT(YEAR FROM date - 10)::int * 12 + EXTRACT(MONTH FROM date - 10)::int - 1
+               AS revenue_ord
     FROM (
         SELECT date, window_start, liquidity_start, ROW_NUMBER() OVER (ORDER BY date) - 1 AS i
         FROM windowed
@@ -64,7 +73,8 @@ rebal AS (
     WHERE i >= $14::int AND (i - $14::int) % $4::int = 0
 ),
 universe AS (
-    SELECT rb.date, rb.window_start, rb.liquidity_start, rs.stock_symbol, rs.rs_score, s.stock_industry_id,
+    SELECT rb.date, rb.window_start, rb.liquidity_start, rb.revenue_ord, rs.stock_symbol, rs.rs_score,
+           s.stock_industry_id,
            CASE $4::int
                WHEN 5 THEN f.return_5d
                WHEN 20 THEN f.return_20d
@@ -88,7 +98,56 @@ filtered AS (
             $chip_columns,
             r#"
     FROM universe u
-    LEFT JOIN stock_industry si ON si.stock_industry_id = u.stock_industry_id"#,
+    LEFT JOIN stock_industry si ON si.stock_industry_id = u.stock_industry_id
+    LEFT JOIN LATERAL (
+        SELECT
+            MAX(yoy) FILTER (WHERE rn = 1) AS revenue_yoy,
+            COALESCE(
+                MIN(rn) FILTER (WHERE NOT (yoy > 0 AND ord = first_ord - rn + 1)) - 1,
+                COUNT(*)
+            ) AS revenue_yoy_streak,
+            CASE WHEN COUNT(*) FILTER (WHERE rn <= 3 AND ord = first_ord - rn + 1) = 3
+                  AND SUM(last_year) FILTER (WHERE rn <= 3) > 0
+              THEN (SUM(monthly) FILTER (WHERE rn <= 3)
+                  / SUM(last_year) FILTER (WHERE rn <= 3) - 1) * 100
+            END AS revenue_yoy_3m
+        FROM (
+            SELECT yoy, monthly, last_year, ord,
+                   ROW_NUMBER() OVER (ORDER BY ord DESC) AS rn,
+                   FIRST_VALUE(ord) OVER (ORDER BY ord DESC) AS first_ord
+            FROM (
+                SELECT "ComparedWithLastYearSameMonth" AS yoy,
+                       "Monthly" AS monthly,
+                       "LastYearThisMonth" AS last_year,
+                       ("Date" / 100)::int * 12 + ("Date" % 100)::int AS ord
+                FROM "Revenue"
+                WHERE ($19::float8 IS NOT NULL OR $20::smallint IS NOT NULL OR $21::float8 IS NOT NULL)
+                  AND "SecurityCode" = u.stock_symbol
+                  AND "Date" <= ((u.revenue_ord - 1) / 12) * 100 + (u.revenue_ord - 1) % 12 + 1
+                ORDER BY "Date" DESC
+                LIMIT 12
+            ) recent
+        ) ranked
+        HAVING MAX(ord) >= u.revenue_ord - 2
+    ) rv ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT fs.earnings_per_share, fs.return_on_equity
+        FROM financial_statement fs
+        WHERE ($22::float8 IS NOT NULL OR $23::float8 IS NOT NULL)
+          AND fs.security_code = u.stock_symbol
+          AND fs.quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
+          AND fs.year BETWEEN EXTRACT(YEAR FROM u.date)::int - 1 AND EXTRACT(YEAR FROM u.date)::int
+          AND CASE fs.quarter
+                  WHEN 'Q1' THEN make_date(fs.year::int, 5, 16)
+                  WHEN 'Q2' THEN make_date(fs.year::int, 8, 15)
+                  WHEN 'Q3' THEN make_date(fs.year::int, 11, 15)
+                  ELSE make_date(fs.year::int + 1, 4, 1)
+              END <= u.date
+          AND (EXTRACT(YEAR FROM u.date)::int * 4 + EXTRACT(QUARTER FROM u.date)::int)
+              - (fs.year::int * 4 + SUBSTRING(fs.quarter FROM 2)::int) <= 3
+        ORDER BY fs.year DESC, fs.quarter DESC
+        LIMIT 1
+    ) fs ON TRUE"#,
             $chip_join,
             r#"
     WHERE ($6::text IS NULL OR si.name = $6)
@@ -101,7 +160,12 @@ filtered AS (
             AND t.date BETWEEN u.window_start AND u.date
             AND ($9::text IS NULL OR t.indicator = $9)
             AND ($10::text IS NULL OR t.kind = $10)
-      ))"#,
+      ))
+      AND ($19::float8 IS NULL OR rv.revenue_yoy >= $19)
+      AND ($20::smallint IS NULL OR rv.revenue_yoy_streak >= $20)
+      AND ($21::float8 IS NULL OR rv.revenue_yoy_3m >= $21)
+      AND ($22::float8 IS NULL OR fs.earnings_per_share >= $22)
+      AND ($23::float8 IS NULL OR fs.return_on_equity >= $23)"#,
             $chip_filter,
             r#"
 ),
@@ -214,7 +278,7 @@ pub(super) const BACKTEST_SQL: &str = backtest_sql!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$19`）／投信（`$20`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$24`）／投信（`$25`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
@@ -223,7 +287,7 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($19::bigint IS NULL OR c.foreign_buy >= $19)\n      AND ($20::bigint IS NULL OR c.trust_buy >= $20)",
+        "\n      AND ($24::bigint IS NULL OR c.foreign_buy >= $24)\n      AND ($25::bigint IS NULL OR c.trust_buy >= $25)",
         "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
     )
 );

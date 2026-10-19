@@ -29,6 +29,7 @@ mod signal_history;
 mod signals;
 mod stocks;
 mod technicals;
+mod timeline;
 mod valuation_band;
 
 use serde::Serialize;
@@ -130,6 +131,9 @@ pub(super) use stocks::{
 };
 pub(super) use technicals::{
     TechnicalIndicatorsParams, TechnicalIndicatorsResponse, TechnicalPoint, TechnicalSignalItem,
+};
+pub(super) use timeline::{
+    StockTimelineParams, StockTimelineResponse, TimelineEvent, TimelineKindCount, TimelineKindValue,
 };
 pub(super) use valuation_band::{
     ImpliedPriceBand, RatioBandItem, ValuationBandParams, ValuationBandResponse,

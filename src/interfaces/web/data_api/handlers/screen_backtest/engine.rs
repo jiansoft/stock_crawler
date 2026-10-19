@@ -205,6 +205,9 @@ impl<'a> Backtest<'a> {
         if let Err(message) = validate_streaks(params.min_foreign_streak, params.min_trust_streak) {
             return Err(unprocessable(message));
         }
+        if let Err(message) = validate_fundamentals(params) {
+            return Err(unprocessable(message));
+        }
         if let Some(response) = industry_error(params.industry.as_deref()).await {
             return Err(Box::new(response));
         }
@@ -326,7 +329,12 @@ impl<'a> Backtest<'a> {
         )
         .bind(self.rank_by)
         .bind(self.weighting.as_str())
-        .bind((!self.excluded_industries.is_empty()).then_some(&self.excluded_industries));
+        .bind((!self.excluded_industries.is_empty()).then_some(&self.excluded_industries))
+        .bind(params.min_revenue_yoy_percent)
+        .bind(params.min_revenue_yoy_streak.map(i16::from))
+        .bind(params.min_revenue_yoy_3m_percent)
+        .bind(params.min_eps)
+        .bind(params.min_roe_percent);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))
@@ -373,6 +381,32 @@ impl<'a> Backtest<'a> {
             fee_discount: self.fee_discount,
         })
     }
+}
+
+/// 檢查基本面門檻的範圍（與 `/stocks/screen` 相同）；超出時回錯誤訊息。
+pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(), &'static str> {
+    let within = |value: Option<f64>, min: f64, max: f64| {
+        value.is_none_or(|value| value.is_finite() && (min..=max).contains(&value))
+    };
+    if !within(params.min_revenue_yoy_percent, -100.0, 10_000.0) {
+        return Err("min_revenue_yoy_percent 必須介於 -100 至 10000");
+    }
+    if params
+        .min_revenue_yoy_streak
+        .is_some_and(|months| !(1..=12).contains(&months))
+    {
+        return Err("min_revenue_yoy_streak 必須介於 1 至 12");
+    }
+    if !within(params.min_revenue_yoy_3m_percent, -100.0, 10_000.0) {
+        return Err("min_revenue_yoy_3m_percent 必須介於 -100 至 10000");
+    }
+    if !within(params.min_eps, -10_000.0, 10_000.0) {
+        return Err("min_eps 必須介於 -10000 至 10000");
+    }
+    if !within(params.min_roe_percent, -10_000.0, 10_000.0) {
+        return Err("min_roe_percent 必須介於 -10000 至 10000");
+    }
+    Ok(())
 }
 
 /// 解析 `exclude_industry`：逗號分隔、去掉前後空白與空項目、去除重複；超過

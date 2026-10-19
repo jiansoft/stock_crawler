@@ -1,7 +1,7 @@
 //! 條件選股回測的單元測試：共用的測試資料與期間解析、SQL、目前持股；其餘依主題分在子模組。
 
 use super::current::split_current;
-use super::engine::{parse_excluded_industries, resolve_backtest_period};
+use super::engine::{parse_excluded_industries, resolve_backtest_period, validate_fundamentals};
 use super::portfolio::{Weighting, blend_etf, select_holdings, trading_costs};
 use super::sql::{BACKTEST_SQL, BACKTEST_WITH_CHIP_SQL};
 use super::summary::{compound, risk};
@@ -88,8 +88,8 @@ fn resolve_backtest_period_defaults_and_limits() {
 }
 
 /// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`、續抱門檻 `$12`、市場廣度門檻 `$13`、換股日偏移 `$14`
-/// 、流動性門檻 `$15`、排序方式 `$16`、加權方式 `$17` 與排除產業 `$18`，籌碼版另含連續買超的 CTE 與 `$19`／`$20`；沒有籌碼的版本
-/// 排序用的連續買超欄位恆為 `NULL`。
+/// 、流動性門檻 `$15`、排序方式 `$16`、加權方式 `$17`、排除產業 `$18` 與基本面門檻 `$19`～`$23`，籌碼版另含
+/// 連續買超的 CTE 與 `$24`／`$25`；沒有籌碼的版本排序用的連續買超欄位恆為 `NULL`。
 #[test]
 fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.trim_start().starts_with("WITH\ndays AS ("));
@@ -110,7 +110,14 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("AS candidate_trade_values"));
     assert!(BACKTEST_SQL.contains("AS hold_trade_values"));
     assert!(BACKTEST_SQL.contains("NOT si.name = ANY($18)"));
-    assert!(!BACKTEST_SQL.contains("$19"));
+    assert!(BACKTEST_SQL.contains("$19::float8 IS NULL OR rv.revenue_yoy >= $19"));
+    assert!(BACKTEST_SQL.contains("$20::smallint IS NULL OR rv.revenue_yoy_streak >= $20"));
+    assert!(BACKTEST_SQL.contains("$21::float8 IS NULL OR rv.revenue_yoy_3m >= $21"));
+    assert!(BACKTEST_SQL.contains("$22::float8 IS NULL OR fs.earnings_per_share >= $22"));
+    assert!(BACKTEST_SQL.contains("$23::float8 IS NULL OR fs.return_on_equity >= $23"));
+    assert!(BACKTEST_SQL.contains("HAVING MAX(ord) >= u.revenue_ord - 2"));
+    assert!(BACKTEST_SQL.contains("ELSE make_date(fs.year::int + 1, 4, 1)"));
+    assert!(!BACKTEST_SQL.contains("$24"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -119,9 +126,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $19"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $20"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$21"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $24"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $25"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$26"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     for rank_by in RANK_BY {
@@ -195,6 +202,58 @@ fn split_current_takes_pending_last_period() {
     assert!(split_current(&mut rows, &mut costs).is_none());
     assert_eq!(rows.len(), 1);
     assert!(split_current(&mut Vec::new(), &mut Vec::new()).is_none());
+}
+
+/// 基本面門檻：未設定與邊界值通過，超出範圍、非數值或連續月數為 0 回錯誤訊息。
+#[test]
+fn validate_fundamentals_checks_ranges() {
+    let params = |query: &str| {
+        let uri: axum::http::Uri = format!("/?{query}").parse().expect("有效網址");
+        axum::extract::Query::<ScreenBacktestParams>::try_from_uri(&uri)
+            .expect("可解析的參數")
+            .0
+    };
+    assert_eq!(validate_fundamentals(&params("")), Ok(()));
+    assert_eq!(
+        validate_fundamentals(&params(
+            "min_revenue_yoy_percent=-100&min_revenue_yoy_streak=12&min_revenue_yoy_3m_percent=10000\
+             &min_eps=-10000&min_roe_percent=10000"
+        )),
+        Ok(())
+    );
+    for (query, message) in [
+        (
+            "min_revenue_yoy_percent=-100.5",
+            "min_revenue_yoy_percent 必須介於 -100 至 10000",
+        ),
+        (
+            "min_revenue_yoy_percent=NaN",
+            "min_revenue_yoy_percent 必須介於 -100 至 10000",
+        ),
+        (
+            "min_revenue_yoy_streak=0",
+            "min_revenue_yoy_streak 必須介於 1 至 12",
+        ),
+        (
+            "min_revenue_yoy_streak=13",
+            "min_revenue_yoy_streak 必須介於 1 至 12",
+        ),
+        (
+            "min_revenue_yoy_3m_percent=10001",
+            "min_revenue_yoy_3m_percent 必須介於 -100 至 10000",
+        ),
+        ("min_eps=-10001", "min_eps 必須介於 -10000 至 10000"),
+        (
+            "min_roe_percent=inf",
+            "min_roe_percent 必須介於 -10000 至 10000",
+        ),
+    ] {
+        assert_eq!(
+            validate_fundamentals(&params(query)),
+            Err(message),
+            "{query}"
+        );
+    }
 }
 
 /// 排除產業：逗號分隔、去掉空白與空項目、去除重複；超過 10 個回錯誤。

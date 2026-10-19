@@ -38,6 +38,7 @@ mod signal_history;
 mod stock_fundamentals;
 mod stock_quotes;
 mod technicals;
+mod timeline;
 mod valuation_band;
 
 use axum::{
@@ -107,6 +108,7 @@ pub(super) use stock_quotes::{
     stock_profile,
 };
 pub(super) use technicals::{__path_stock_technicals, stock_technicals};
+pub(super) use timeline::{__path_stock_timeline, stock_timeline};
 pub(super) use valuation_band::{__path_stock_valuation_band, stock_valuation_band};
 
 /// 產生不含內部實作細節的統一 JSON 錯誤回應。
