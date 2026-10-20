@@ -1,9 +1,11 @@
 //! 每週市場摘要的測試：產業 RS 中位數與一週變化、產業法人淨買賣、持股 RS 變化、降級與訊息格式。
 //!
 //! 子模組：[`fakes`]（假倉儲與固定資料）、[`sections`]（產業、穿越、大盤趨勢、策略各段）、
+//! [`holding_flow`]（持股法人一段）、
 //! [`message`]（組成整則訊息、各段降級與數字格式）；這裡放共用的資料建構函式。
 
 mod fakes;
+mod holding_flow;
 mod message;
 mod sections;
 

@@ -15,17 +15,21 @@
 //! - 外資、投信近 [`WEEK_DAYS`] 個交易日在各產業的估計淨買賣金額（見 [`crate::domain::chip::flow`]），
 //!   淨流入與淨流出最多的產業。
 //! - 持股（普通股）的 RS 與 [`WEEK_DAYS`] 個交易日前相比上升、下降最多的幾檔。
+//! - 外資、投信近 [`WEEK_DAYS`] 個交易日在持股的累計買賣超，買超、賣超最多的幾檔（沿用產業資金一段
+//!   已載入的個股淨買賣，不另外查詢）。
 //! - 持股的基本面警示：營收連續年減、三率三降、營業虧損、自由現金流為負（見 [`crate::domain::portfolio::health`]）。
 //! - 有設定策略換股通知的條件時，策略這一期的換股日、本期至今報酬與 0050 對照、最好與最差的持股。
 //!
 //! 各段各自查詢，某段失敗只記錄警告並略過；都沒有資料時不發送。各段的查詢與文字在子模組
-//! [`market`]、[`industry`]、[`crossing`]、[`flows`]、[`holding`]、[`fundamentals`]、[`strategy`]，這裡只負責排程、
+//! [`market`]、[`industry`]、[`crossing`]、[`flows`]、[`holding`]、[`holding_flow`]、[`fundamentals`]、
+//! [`strategy`]，這裡只負責排程、
 //! 查詢順序與組訊息。
 
 mod crossing;
 mod flows;
 mod fundamentals;
 mod holding;
+mod holding_flow;
 mod industry;
 mod market;
 mod strategy;
@@ -40,6 +44,7 @@ use self::{
     crossing::{CrossingSection, crossing_section},
     flows::{FlowSection, flow_section},
     holding::{HoldingSection, holding_moves},
+    holding_flow::holding_flow_section,
     industry::{IndustrySection, industry_section},
     market::{RegimeSection, regime_section, valuation_level},
     strategy::{StrategySection, strategy_section},
@@ -144,9 +149,13 @@ async fn run(
         None
     });
     let mut flows = Vec::new();
+    let mut holding_flows = Vec::new();
     for (investor, label) in FLOW_INVESTORS {
         match flow::load_flows(chip, date, WEEK_DAYS, investor).await {
-            Ok(Some((period, rows))) => flows.push(flow_section(label, period, rows)),
+            Ok(Some((period, rows))) => {
+                holding_flows.push(holding_flow_section(label, period, &rows, symbols));
+                flows.push(flow_section(label, period, rows));
+            }
             Ok(None) => {}
             Err(why) => tracing::warn!("每週市場摘要：讀取{label}產業買賣超失敗: {why:#}"),
         }
@@ -185,6 +194,7 @@ async fn run(
         &flows,
         HoldingSection {
             moves: &moves,
+            flows: &holding_flows,
             fundamentals: &fundamentals,
         },
         strategy,
@@ -242,6 +252,9 @@ fn build_message(
     }
 
     lines.extend(holding::lines(holdings.moves, &stock_name));
+    for section in holdings.flows {
+        lines.extend(holding_flow::lines(section));
+    }
     lines.extend(fundamentals::lines(holdings.fundamentals, &stock_name));
     if let Some(section) = strategy {
         lines.extend(strategy::lines(section));
