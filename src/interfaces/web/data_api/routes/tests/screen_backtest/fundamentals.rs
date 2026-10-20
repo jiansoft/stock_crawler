@@ -85,6 +85,21 @@ async fn screen_backtest_fundamentals_use_published_data_only() {
     assert_eq!(periods(&json)[1], ("1993-03-08".to_owned(), 1, Some(8.0)));
     assert_eq!(current_symbols(&json), ["79979BB"]);
 
+    // 最新月營收 ≥ 100 千元：只有 BB（每月 110）；BA 每月 90，BC 過期。
+    let (status, json) = query("limit=2&min_monthly_revenue=100").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["min_monthly_revenue"], 100.0);
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 1, Some(-4.0)),
+            ("1993-03-08".to_owned(), 1, Some(8.0)),
+        ]
+    );
+    assert_eq!(current_symbols(&json), ["79979BB"]);
+    let (_, json) = query("limit=2").await;
+    assert!(json["min_monthly_revenue"].is_null(), "{json}");
+
     // EPS ≥ 1：BA（Q3 2 元）與 BC（Q2 3 元）；03-08 的 BC 沒有報酬，占名額但不列入平均。
     let (status, json) = query("limit=2&min_eps=1").await;
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -117,6 +132,7 @@ async fn screen_backtest_fundamentals_use_published_data_only() {
         "min_revenue_yoy_percent=-101",
         "min_revenue_yoy_streak=13",
         "min_revenue_yoy_3m_percent=10001",
+        "min_monthly_revenue=-1",
         "min_eps=10001",
         "min_roe_percent=-10001",
     ] {

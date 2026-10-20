@@ -339,7 +339,8 @@ impl<'a> Backtest<'a> {
         .bind(params.min_operating_margin_percent)
         .bind(params.margins_yoy_up.unwrap_or(false))
         .bind(params.max_debt_ratio_percent)
-        .bind(params.revenue_record.unwrap_or(false));
+        .bind(params.revenue_record.unwrap_or(false))
+        .bind(params.min_monthly_revenue);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))
@@ -404,6 +405,9 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     }
     if !within(params.min_revenue_yoy_3m_percent, -100.0, 10_000.0) {
         return Err("min_revenue_yoy_3m_percent 必須介於 -100 至 10000");
+    }
+    if !within(params.min_monthly_revenue, 0.0, 1_000_000_000_000.0) {
+        return Err("min_monthly_revenue 必須介於 0 至 1000000000000");
     }
     if !within(params.min_eps, -10_000.0, 10_000.0) {
         return Err("min_eps 必須介於 -10000 至 10000");
