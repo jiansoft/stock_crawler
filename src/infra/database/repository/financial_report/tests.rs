@@ -442,7 +442,11 @@ async fn test_fetch_lagging_statements() {
             .await
             .expect("fetch stale"),
     );
-    let ten_days_ago = (chrono::Local::now() - chrono::Duration::days(10)).date_naive();
+    // SQL 以台北時間（`AT TIME ZONE 'Asia/Taipei'`）換算公布日；預期值也要用 UTC+8，不能用執行機器的
+    // 本地時區（CI 是 UTC，台北 00:00～08:00 之間兩邊會差一天）。
+    let taipei = chrono::FixedOffset::east_opt(8 * 3600).expect("UTC+8 合法");
+    let ten_days_ago =
+        (chrono::Utc::now().with_timezone(&taipei) - chrono::Duration::days(10)).date_naive();
     assert_eq!(
         stale,
         [LaggingStatement {

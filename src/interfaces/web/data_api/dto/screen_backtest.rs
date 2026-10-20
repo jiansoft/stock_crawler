@@ -105,6 +105,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 換股日沒有估值資料時視為通過；省略為不濾。
     #[param(minimum = 5, maximum = 100)]
     pub(crate) market_filter_max_pe: Option<f64>,
+    /// 相對估值濾網（百分位，1–99）：換股日同市場本益比中位數在換股日之前近 5 年（不含當天）的每日中位數中，
+    /// 低於當天值的比例達 N% 時這期空手，上一期持股全部賣出。只用換股日以前的資料，市場本益比長期上移時
+    /// 門檻也會跟著移動；之前不足 250 個交易日或換股日沒有估值資料時視為通過。可與其他濾網併用；省略為不濾。
+    #[param(minimum = 1, maximum = 99)]
+    pub(crate) market_filter_pe_percentile: Option<u8>,
     /// 續抱條件（1–99）：上一期持有的股票即使不再符合選股條件（例如法人連買中斷、訊號過期），只要
     /// 換股當天相對強度分數不低於此值就續抱；省略為不續抱（只看 `keep_rank`）。
     #[param(minimum = 1, maximum = 99)]
@@ -462,6 +467,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) market_filter_breadth: Option<u8>,
     /// 大盤估值濾網門檻（市場本益比中位數上限，倍）；未設定為 `null`。
     pub(crate) market_filter_max_pe: Option<f64>,
+    /// 相對估值濾網門檻（近 5 年百分位）；未設定為 `null`。
+    pub(crate) market_filter_pe_percentile: Option<u8>,
     /// 續抱的相對強度門檻；未設定為 `null`。
     pub(crate) hold_min_rs_score: Option<u8>,
     /// 同產業最多持有檔數；未設定為 `null`。
