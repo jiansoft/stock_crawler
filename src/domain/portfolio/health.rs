@@ -27,6 +27,17 @@ pub enum HoldingWarning {
     OperatingLoss,
 }
 
+impl HoldingWarning {
+    /// 警示的中文名稱。
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RevenueDecline => "營收連續年減",
+            Self::MarginsAllDown => "三率三降",
+            Self::OperatingLoss => "營業虧損",
+        }
+    }
+}
+
 /// 一檔持股的基本面訊號；查不到或過期的項目為 `None`。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct FundamentalSignals {
