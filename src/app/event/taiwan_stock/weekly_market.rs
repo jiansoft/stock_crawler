@@ -14,14 +14,16 @@
 //! - 外資、投信近 [`WEEK_DAYS`] 個交易日在各產業的估計淨買賣金額（見 [`crate::domain::chip::flow`]），
 //!   淨流入與淨流出最多的產業。
 //! - 持股（普通股）的 RS 與 [`WEEK_DAYS`] 個交易日前相比上升、下降最多的幾檔。
+//! - 持股的基本面警示：營收連續年減、三率三降、營業虧損（見 [`crate::domain::portfolio::health`]）。
 //! - 有設定策略換股通知的條件時，策略這一期的換股日、本期至今報酬與 0050 對照、最好與最差的持股。
 //!
 //! 各段各自查詢，某段失敗只記錄警告並略過；都沒有資料時不發送。各段的查詢與文字在子模組
-//! [`market`]、[`industry`]、[`crossing`]、[`flows`]、[`holding`]、[`strategy`]，這裡只負責排程、
+//! [`market`]、[`industry`]、[`crossing`]、[`flows`]、[`holding`]、[`fundamentals`]、[`strategy`]，這裡只負責排程、
 //! 查詢順序與組訊息。
 
 mod crossing;
 mod flows;
+mod fundamentals;
 mod holding;
 mod industry;
 mod market;
@@ -36,7 +38,7 @@ use chrono::{Local, NaiveDate};
 use self::{
     crossing::{CrossingSection, crossing_section},
     flows::{FlowSection, flow_section},
-    holding::{HoldingMove, holding_moves},
+    holding::{HoldingSection, holding_moves},
     industry::{IndustrySection, industry_section},
     market::{RegimeSection, regime_section},
     strategy::{StrategySection, strategy_section},
@@ -47,6 +49,7 @@ use crate::{
     domain::{
         chip::flow::{self, ChipFlowQuery},
         market_index::{breadth::BreadthQuery, regime::IndexCloseQuery},
+        portfolio::health::HoldingFundamentalsQuery,
         quote::{
             forward_return::ForwardReturnRepository,
             relative_strength::{
@@ -55,7 +58,8 @@ use crate::{
         },
     },
     infra::database::repository::{
-        chip::PgChipRepository, market_index::PgMarketIndexRepository, quote::PgQuoteRepository,
+        chip::PgChipRepository, market_index::PgMarketIndexRepository,
+        portfolio::PgPortfolioRepository, quote::PgQuoteRepository,
     },
 };
 
@@ -83,6 +87,7 @@ pub async fn execute() -> Result<()> {
         &PgQuoteRepository::new(),
         &PgChipRepository::new(),
         &PgMarketIndexRepository::new(),
+        &PgPortfolioRepository::new(),
         date,
         &symbols,
         strategy.as_ref(),
@@ -104,6 +109,7 @@ async fn run(
      ),
     chip: &impl ChipFlowQuery,
     index: &(impl IndexCloseQuery + BreadthQuery),
+    portfolio: &impl HoldingFundamentalsQuery,
     date: NaiveDate,
     symbols: &BTreeSet<String>,
     strategy: Option<&StrategySection>,
@@ -139,6 +145,13 @@ async fn run(
             Vec::new()
         }
     };
+    let fundamentals = portfolio
+        .fetch_holding_fundamentals(&symbols)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("每週市場摘要：讀取持股基本面失敗: {why:#}");
+            Vec::new()
+        });
     tracing::info!(
         "每週市場摘要: industries={} flows={} holdings={} moves={}",
         industries
@@ -153,7 +166,10 @@ async fn run(
         industries.as_ref(),
         crossings.as_ref(),
         &flows,
-        &moves,
+        HoldingSection {
+            moves: &moves,
+            fundamentals: &fundamentals,
+        },
         strategy,
         holdings::stock_name,
     )
@@ -175,7 +191,7 @@ fn build_message(
     industries: Option<&IndustrySection>,
     crossings: Option<&CrossingSection>,
     flows: &[FlowSection],
-    moves: &[HoldingMove],
+    holdings: HoldingSection<'_>,
     strategy: Option<&StrategySection>,
     stock_name: impl Fn(&str) -> String,
 ) -> Option<String> {
@@ -208,7 +224,8 @@ fn build_message(
         lines.extend(flows::lines(section));
     }
 
-    lines.extend(holding::lines(moves, &stock_name));
+    lines.extend(holding::lines(holdings.moves, &stock_name));
+    lines.extend(fundamentals::lines(holdings.fundamentals, &stock_name));
     if let Some(section) = strategy {
         lines.extend(strategy::lines(section));
     }

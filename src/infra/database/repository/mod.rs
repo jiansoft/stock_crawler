@@ -15,6 +15,7 @@ pub mod financial_health;
 pub mod financial_report;
 pub mod foreign_holding;
 pub mod forward_return;
+pub mod holding_fundamentals;
 pub mod market_index;
 pub mod money_flow;
 pub mod official_ratio;

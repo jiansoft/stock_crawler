@@ -57,7 +57,16 @@ fn crossing_lines_rank_by_latest_score() {
         to: day(16),
         crossings,
     };
-    let message = build_message(None, None, Some(&section), &[], &[], None, name).expect("有穿越");
+    let message = build_message(
+        None,
+        None,
+        Some(&section),
+        &[],
+        HoldingSection::default(),
+        None,
+        name,
+    )
+    .expect("有穿越");
     assert!(
         message.starts_with(&esc("每週市場摘要︰2026-10-16\n")),
         "{message}"
@@ -72,7 +81,18 @@ fn crossing_lines_rank_by_latest_score() {
         crossings: Vec::new(),
         ..section
     };
-    assert!(build_message(None, None, Some(&empty), &[], &[], None, name).is_none());
+    assert!(
+        build_message(
+            None,
+            None,
+            Some(&empty),
+            &[],
+            HoldingSection::default(),
+            None,
+            name
+        )
+        .is_none()
+    );
 }
 
 /// 大盤趨勢：跌破均線、資料不足、穿越由舊到新；沒有加權指數或查詢失敗時不列這段。
@@ -154,7 +174,16 @@ async fn regime_section_lists_crosses() {
     assert!(section.breadth.is_none());
     assert_eq!(market::lines(&section).len(), 6);
 
-    let message = build_message(Some(&section), None, None, &[], &[], None, name).expect("有大盤");
+    let message = build_message(
+        Some(&section),
+        None,
+        None,
+        &[],
+        HoldingSection::default(),
+        None,
+        name,
+    )
+    .expect("有大盤");
     assert!(
         message.starts_with(&format!(
             "{}\n\n{}",
@@ -250,9 +279,15 @@ fn strategy_lines_rank_holdings_by_return() {
     assert_eq!(lines(&section).len(), 3);
 
     // 組進訊息：放在最後一段。
-    let message = build_message(None, None, None, &[], &[], Some(&section), |_| {
-        String::new()
-    })
+    let message = build_message(
+        None,
+        None,
+        None,
+        &[],
+        HoldingSection::default(),
+        Some(&section),
+        |_| String::new(),
+    )
     .expect("有策略段");
     assert!(
         message.contains("策略持股︰") || message.contains("策略持股："),

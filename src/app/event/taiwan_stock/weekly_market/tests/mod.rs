@@ -13,6 +13,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 
 use super::crossing::crossing_line;
+use super::holding::HoldingMove;
 use super::*;
 use crate::domain::chip::flow::{FlowPeriod, StockFlow};
 use crate::domain::market_index::{breadth::BreadthDay, regime};
