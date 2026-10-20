@@ -246,9 +246,12 @@ pub struct BrokerPeriodNet {
     pub sell_days: i64,
 }
 
-/// 持股主力進出的期間彙總（每週市場摘要用）。
+/// 持股主力進出的期間彙總（每週市場摘要、每日主力進出通知用）。
 #[async_trait]
 pub trait HoldingBrokerQuery: Send + Sync {
+    /// `until`（含）之前最近 `limit` 個有主力資料的交易日，由新到舊。
+    async fn fetch_broker_dates(&self, until: NaiveDate, limit: usize) -> Result<Vec<NaiveDate>>;
+
     /// `from`～`to`（含）期間 `symbols` 的主力買賣超合計，依代號排序；期間內沒有主力資料的股票不回傳。
     async fn fetch_broker_period(
         &self,

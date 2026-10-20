@@ -267,6 +267,10 @@ impl FakePortfolio {
 
 #[async_trait]
 impl HoldingBrokerQuery for FakePortfolio {
+    async fn fetch_broker_dates(&self, _until: NaiveDate, _limit: usize) -> Result<Vec<NaiveDate>> {
+        unreachable!("週摘要沿用法人一段的期間，不查主力交易日")
+    }
+
     async fn fetch_broker_period(
         &self,
         from: NaiveDate,
