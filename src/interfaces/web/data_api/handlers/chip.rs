@@ -1,7 +1,7 @@
 //! `/stocks/{symbol}/chip` handler：單一股票的籌碼面。
 //!
 //! 資料來自 `chip_daily`、`holder_distribution`、`insider_holding`、`broker_flow`
-//! 四張表（由 `app::backfill::chip` 排程寫入）。
+//! 四張表（由 `app::backfill::chip` 排程寫入）；每日籌碼依日期接上當天的主力進出。
 
 use axum::{
     Json,
@@ -22,7 +22,7 @@ use crate::interfaces::web::data_api::dto::{
 /// 千張大戶回傳的週數。
 const HOLDER_WEEKS: i64 = 8;
 
-/// `chip_daily` 的一列。
+/// `chip_daily` 的一列，附當天 `broker_flow` 的主力買賣超（沒有為 `None`）。
 #[derive(sqlx::FromRow)]
 struct ChipDailyRow {
     date: NaiveDate,
@@ -33,6 +33,8 @@ struct ChipDailyRow {
     margin_balance: Option<i64>,
     short_previous: Option<i64>,
     short_balance: Option<i64>,
+    main_net: Option<i64>,
+    main_share: Option<Decimal>,
 }
 
 impl ChipDailyRow {
@@ -57,6 +59,8 @@ impl ChipDailyRow {
                 .short_balance
                 .zip(self.short_previous)
                 .map(|(t, p)| t - p),
+            main_net: self.main_net,
+            main_share: decimal_to_f64(self.main_share),
         }
     }
 }
@@ -125,8 +129,11 @@ pub(crate) async fn stock_chip(
                 coalesce(min(n) FILTER (WHERE trust_net IS NULL OR trust_net = 0 OR sign(trust_net) <> ts), max(n))) AS last_n
             FROM ordered
         )
-        SELECT "date", foreign_net, trust_net, dealer_net, margin_previous, margin_balance, short_previous, short_balance
-        FROM ordered WHERE n <= (SELECT last_n FROM bounds) ORDER BY "date" DESC"#,
+        SELECT o."date", o.foreign_net, o.trust_net, o.dealer_net, o.margin_previous, o.margin_balance,
+            o.short_previous, o.short_balance, b.buy_total - b.sell_total AS main_net, b.main_share
+        FROM ordered o
+        LEFT JOIN broker_flow b ON b.stock_symbol = o.stock_symbol AND b."date" = o."date"
+        WHERE o.n <= (SELECT last_n FROM bounds) ORDER BY o."date" DESC"#,
     )
     .bind(&symbol)
     .bind(i64::from(days))
@@ -310,11 +317,15 @@ mod tests {
             margin_balance: Some(30_500),
             short_previous: None,
             short_balance: Some(49),
+            main_net: Some(-120),
+            main_share: Some(Decimal::new(-35, 1)),
         };
         let day = row.into_dto();
         assert_eq!(day.total_net, Some(-1_121_670));
         assert_eq!(day.margin_change, Some(365));
         assert_eq!(day.short_change, None);
+        assert_eq!(day.main_net, Some(-120));
+        assert_eq!(day.main_share, Some(-3.5));
     }
 
     /// 分點的比重存成字串也要讀得出來；欄位不全的項目略過。

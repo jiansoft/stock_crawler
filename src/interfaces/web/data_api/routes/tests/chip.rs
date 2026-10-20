@@ -117,6 +117,9 @@ async fn chip_endpoint_db_semantics() {
     assert_eq!(daily[0]["date"], "2026-04-30");
     assert_eq!(daily[0]["total_net"], 16);
     assert_eq!(daily[0]["margin_change"], -5);
+    assert_eq!(daily[0]["main_net"], 40);
+    assert_eq!(daily[0]["main_share"], 3.5);
+    assert!(daily[1]["main_net"].is_null(), "沒有主力進出的日子為 null");
     assert_eq!(json["streak"]["foreign_days"], 2);
     assert_eq!(json["streak"]["trust_days"], -1);
     assert_eq!(json["holder_distribution"][0]["major_percent"], 70.5);
