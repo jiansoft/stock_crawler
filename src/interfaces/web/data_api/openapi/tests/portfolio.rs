@@ -43,9 +43,30 @@ fn openapi_portfolio_summary_schema_pins_field_names() {
         "rs_score",
         "foreign_streak",
         "trust_streak",
+        "revenue_month",
+        "revenue_yoy_percent",
+        "revenue_decline_months",
+        "margin_period",
+        "gross_margin_percent",
+        "operating_margin_percent",
+        "net_margin_percent",
+        "margins_trend",
     ] {
         assert!(holding[field].to_string().contains("null"), "{field}");
     }
+    assert_eq!(
+        holding["warnings"]["items"]["$ref"],
+        "#/components/schemas/PortfolioWarningValue"
+    );
+    assert_eq!(
+        schemas["PortfolioWarningValue"]["enum"],
+        serde_json::json!(["revenue_decline", "margins_all_down", "operating_loss"])
+    );
+    assert_eq!(
+        schemas["PortfolioMarginTrendValue"]["enum"],
+        serde_json::json!(["all_up", "all_down", "mixed"])
+    );
+    assert_eq!(response["warning_symbols"]["type"], "integer");
 }
 
 /// 持股績效 path 的契約：member_id／months 範圍與預設、月績效陣列、可為 null 的欄位。

@@ -90,8 +90,9 @@ pub(super) use market_regime::{
 };
 pub(super) use peers::{PeerMetric, PeerStock, PeersParams, PeersResponse};
 pub(super) use portfolio::{
-    PortfolioHolding, PortfolioIndustry, PortfolioSummaryParams, PortfolioSummaryResponse,
-    WeightedMetricItem,
+    PortfolioHolding, PortfolioIndustry, PortfolioMarginTrendValue, PortfolioSummaryParams,
+    PortfolioSummaryResponse, PortfolioWarningValue, WeightedMetricItem, margin_trend_code,
+    warning_code,
 };
 pub(super) use portfolio_history::{
     PortfolioHistoryParams, PortfolioHistoryResponse, PortfolioMonth,
