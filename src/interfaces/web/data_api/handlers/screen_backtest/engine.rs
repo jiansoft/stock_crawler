@@ -129,6 +129,12 @@ impl<'a> Backtest<'a> {
             return Err(unprocessable("market_filter_breadth 必須介於 1 至 99"));
         }
         if params
+            .market_filter_max_pe
+            .is_some_and(|pe| !(pe.is_finite() && (5.0..=100.0).contains(&pe)))
+        {
+            return Err(unprocessable("market_filter_max_pe 必須介於 5 至 100"));
+        }
+        if params
             .hold_min_rs_score
             .is_some_and(|score| !(1..=99).contains(&score))
         {
@@ -343,7 +349,8 @@ impl<'a> Backtest<'a> {
         .bind(params.min_monthly_revenue)
         .bind(params.positive_free_cash_flow.unwrap_or(false))
         .bind(params.max_pe)
-        .bind(params.max_pb);
+        .bind(params.max_pb)
+        .bind(params.market_filter_max_pe);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

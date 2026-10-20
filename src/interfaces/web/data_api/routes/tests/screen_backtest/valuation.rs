@@ -112,7 +112,47 @@ async fn screen_backtest_valuation_caps_use_rebalance_day_ratios() {
     let (_, json) = query("limit=2").await;
     assert!(json["max_pe"].is_null(), "{json}");
 
-    for bad in ["max_pe=-1", "max_pe=10001", "max_pb=1001"] {
+    // 大盤估值濾網：03-01 市場本益比中位數 12、03-08 為 25；門檻 20 時 03-08 空手，門檻 25 剛好通過。
+    // 03-15 沒有估值列，視為通過。
+    let dates = [day(1), day(8)];
+    let clear = || async {
+        let _ = sqlx::query("DELETE FROM daily_market_valuation WHERE date = ANY($1)")
+            .bind(dates.to_vec())
+            .execute(pool)
+            .await;
+    };
+    clear().await;
+    for (date, median_pe) in dates.into_iter().zip([12, 25]) {
+        sqlx::query(
+            "INSERT INTO daily_market_valuation (date, stock_exchange_market_id, median_pe, pe_samples, pb_samples)
+             VALUES ($1, 0, $2, 3, 3)",
+        )
+        .bind(date)
+        .bind(rust_decimal::Decimal::from(median_pe))
+        .execute(pool)
+        .await
+        .expect("種入市場估值");
+    }
+    let (status, json) = query("limit=2&market_filter_max_pe=20").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["market_filter_max_pe"], 20.0);
+    assert_eq!(json["periods"][0]["market_filtered"], false);
+    assert_eq!(json["periods"][1]["market_filtered"], true);
+    assert_eq!(json["summary"]["market_filtered_periods"], 1);
+    let (_, json) = query("limit=2&market_filter_max_pe=25").await;
+    assert_eq!(json["summary"]["market_filtered_periods"], 0);
+    // 上櫃（市場 4）沒有估值列：都通過。
+    let (_, json) = query("market=tpex&market_filter_max_pe=5").await;
+    assert_eq!(json["summary"]["market_filtered_periods"], 0);
+    clear().await;
+
+    for bad in [
+        "max_pe=-1",
+        "max_pe=10001",
+        "max_pb=1001",
+        "market_filter_max_pe=4.9",
+        "market_filter_max_pe=101",
+    ] {
         let (status, json) = query(&format!("limit=2&{bad}")).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}: {json}");
     }

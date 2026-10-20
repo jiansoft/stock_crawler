@@ -249,6 +249,7 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         keep_rank: backtest.keep_rank,
         market_filter_ma: params.market_filter_ma,
         market_filter_breadth: params.market_filter_breadth,
+        market_filter_max_pe: params.market_filter_max_pe,
         hold_min_rs_score: params.hold_min_rs_score,
         max_per_industry: params.max_per_industry,
         rebalance_offset,
