@@ -23,8 +23,13 @@ pub(crate) enum TimelineKindValue {
     CorporateAction,
     /// 月營收（以法定公布期限次月 10 日為事件日）。
     MonthlyRevenue,
+    /// 月營收創歷史新高（高於之前所有月份，至少要有 12 個月的歷史；事件日同月營收）。
+    RevenueRecord,
     /// 季報（以法定公布期限為事件日：Q1 5/15、Q2 8/14、Q3 11/14、Q4 隔年 3/31）。
     QuarterlyReport,
+    /// 三率三升或三率三降（Yahoo 單季財報的毛利率、營業利益率、稅後淨利率都高於或都低於去年同季；
+    /// 事件日同季報；金融保險業不列）。
+    MarginTrend,
     /// 技術訊號（均線、KD、MACD、RSI、相對強度穿越、52 週新高新低）。
     Signal,
     /// 外資或投信連續買超／賣超剛好達到 5、10、20 天。

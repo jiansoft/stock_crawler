@@ -13,6 +13,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
         "DELETE FROM corporate_action WHERE stock_symbol = $1",
         r#"DELETE FROM "Revenue" WHERE "SecurityCode" = $1"#,
         "DELETE FROM financial_statement WHERE security_code = $1",
+        "DELETE FROM income_statement WHERE stock_symbol = $1",
         "DELETE FROM daily_technical_signal WHERE stock_symbol = $1",
         "DELETE FROM chip_daily WHERE stock_symbol = $1",
         "DELETE FROM insider_holding WHERE stock_symbol = $1",
@@ -41,6 +42,18 @@ async fn seed(pool: &sqlx::PgPool) {
         r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "Monthly", "ComparedWithLastMonth", "ComparedWithLastYearSameMonth")
            VALUES ('79979TL', '79979TL', 199406, 100000, 1, 10), ('79979TL', '79979TL', 199407, 200000, 100, 20),
                   ('79979TL', '79979TL', 199408, 150000, -25, -5), ('79979TL', '79979TL', 199409, 150000, 0, 0)"#,
+        // 1993-06～1994-05 每月 120,000：1994-07 的 200,000 高於之前 13 個月，創歷史新高（08-10）；
+        // 1994-06（100,000）、1994-08（150,000）不是。這些月份的營收事件都早於起日。
+        r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "Monthly")
+           SELECT '79979TL', '79979TL', to_char(month, 'YYYYMM')::bigint, 120000
+           FROM generate_series('1993-06-01'::date, '1994-05-01'::date, INTERVAL '1 month') AS month"#,
+        // Yahoo 單季損益表：1994 Q2 三率（40／20／15%）都高於 1993 Q2（30／10／5%），三率三升（08-14）；
+        // 1994 Q1 有升有降，不列。
+        r#"INSERT INTO income_statement (stock_symbol, fiscal_year, period_type, quarter, source, revenue, gross_profit, operating_profit, net_income)
+           VALUES ('79979TL', 1994, 'single', 'Q2', 'yahoo', 100, 40, 20, 15),
+                  ('79979TL', 1993, 'single', 'Q2', 'yahoo', 100, 30, 10, 5),
+                  ('79979TL', 1994, 'single', 'Q1', 'yahoo', 100, 40, 5, 15),
+                  ('79979TL', 1993, 'single', 'Q1', 'yahoo', 100, 30, 10, 5)"#,
         // Q2 財報期限 08-14；Q1（05-15）早於起日，不列。
         r#"INSERT INTO financial_statement (security_code, year, quarter, earnings_per_share, return_on_equity)
            VALUES ('79979TL', 1994, 'Q1', 1, 2), ('79979TL', 1994, 'Q2', 1.25, 3.5)"#,
@@ -116,10 +129,17 @@ async fn stock_timeline_merges_events() {
             "1994Q2 財報：EPS 1.25 元",
             false,
         ),
+        ("1994-08-14", "margin_trend", "1994Q2 三率三升", false),
         (
             "1994-08-10",
             "monthly_revenue",
             "1994-07 營收年增 +20%",
+            false,
+        ),
+        (
+            "1994-08-10",
+            "revenue_record",
+            "1994-07 營收創歷史新高",
             false,
         ),
         ("1994-07-20", "ex_dividend", "除息：現金股利 2.5 元", false),
@@ -141,10 +161,15 @@ async fn stock_timeline_merges_events() {
         )),
         "{json}"
     );
-    assert_eq!(json["total"], 12);
+    assert_eq!(json["total"], 14);
     assert_eq!(json["events"][2]["detail"], "質押比例 20%（+10 個百分點）");
     assert_eq!(json["events"][3]["detail"], "營收 1.5 億元、月增 -25%");
-    assert_eq!(json["events"][9]["detail"], "1993 年度股利");
+    assert_eq!(
+        json["events"][8]["detail"],
+        "毛利率 40%、營益率 20%、淨利率 15%"
+    );
+    assert_eq!(json["events"][10]["detail"], "營收 2 億元，前高 1.2 億元");
+    assert_eq!(json["events"][11]["detail"], "1993 年度股利");
     assert_eq!(
         json["counts"][0],
         serde_json::json!({"kind": "ex_dividend", "count": 1})
@@ -168,7 +193,19 @@ async fn stock_timeline_merges_events() {
         "/api/v1/stocks/{SYMBOL}/timeline?date=1994-09-30&days=90&upcoming_days=0"
     ))
     .await;
-    assert_eq!(json["total"], 10);
+    assert_eq!(json["total"], 12);
+
+    // 金融保險業不列三率事件，營收新高照列。
+    sqlx::query("UPDATE stocks SET stock_industry_id = 17 WHERE stock_symbol = $1")
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("改為金融保險業");
+    let (_, json) = get(&format!("{base}&kinds=margin_trend,revenue_record")).await;
+    assert_eq!(
+        json["counts"],
+        serde_json::json!([{"kind": "revenue_record", "count": 1}])
+    );
 
     for (query, expected) in [
         ("days=0", StatusCode::UNPROCESSABLE_ENTITY),

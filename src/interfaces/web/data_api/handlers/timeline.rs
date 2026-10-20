@@ -16,20 +16,23 @@ use rust_decimal::Decimal;
 
 use self::sql::STOCK_TIMELINE_SQL;
 use super::{database_error, error_response, parse_optional_date};
+use crate::core::declare::Industry;
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, StockTimelineParams, StockTimelineResponse, TimelineEvent, TimelineKindCount,
 };
 
 /// 事件種類；同一天依此順序排列，也是 `counts` 的順序。
-const KINDS: [&str; 10] = [
+const KINDS: [&str; 12] = [
     "ex_dividend",
     "ex_right",
     "cash_payable",
     "stock_payable",
     "corporate_action",
     "monthly_revenue",
+    "revenue_record",
     "quarterly_report",
+    "margin_trend",
     "signal",
     "chip_streak",
     "insider",
@@ -51,8 +54,9 @@ pub(super) struct TimelineRow {
     pub(super) count_values: Vec<i64>,
 }
 
-/// 查詢個股在期間內的事件時間軸：除權息與股利發放、減資／分割、月營收、季報、技術訊號、法人連續
-/// 買賣超里程碑與董監持股變化，並列出迄日之後 `upcoming_days` 天內已公告的除權息、發放與減資。
+/// 查詢個股在期間內的事件時間軸：除權息與股利發放、減資／分割、月營收與營收新高、季報與三率三升／
+/// 三降、技術訊號、法人連續買賣超里程碑與董監持股變化，並列出迄日之後 `upcoming_days` 天內已公告的
+/// 除權息、發放與減資。
 ///
 /// # Errors
 ///
@@ -106,6 +110,7 @@ pub(crate) async fn stock_timeline(
         .bind(upcoming_to)
         .bind(kinds.as_deref())
         .bind(i64::from(limit))
+        .bind(Industry::FinanceInsurance as i32)
         .fetch_all(database::get_connection())
         .await
     {
@@ -126,7 +131,8 @@ pub(super) fn parse_kinds(value: Option<&str>) -> Result<Option<Vec<String>>, &'
         if !KINDS.contains(&kind) {
             return Err(
                 "kinds 必須為 ex_dividend、ex_right、cash_payable、stock_payable、corporate_action、\
-                 monthly_revenue、quarterly_report、signal、chip_streak 或 insider（逗號分隔）",
+                 monthly_revenue、revenue_record、quarterly_report、margin_trend、signal、chip_streak \
+                 或 insider（逗號分隔）",
             );
         }
         kinds.push(kind.to_owned());
@@ -245,10 +251,37 @@ pub(super) fn describe(row: &TimelineRow) -> (String, Option<String>) {
             }
             (title, (!detail.is_empty()).then(|| detail.join("、")))
         }
+        "revenue_record" => (
+            format!("{period} 營收創歷史新高"),
+            row.v1.map(|monthly| {
+                let hundred_million = |value: Decimal| number(value / Decimal::from(100_000));
+                let previous = row
+                    .v2
+                    .map(|high| format!("，前高 {} 億元", hundred_million(high)))
+                    .unwrap_or_default();
+                format!("營收 {} 億元{previous}", hundred_million(monthly))
+            }),
+        ),
         "quarterly_report" => (
             format!("{period} 財報：EPS {v1} 元"),
             row.v2.map(|roe| format!("ROE {}%", number(roe))),
         ),
+        "margin_trend" => {
+            let trend = match row.label.as_deref() {
+                Some("all_down") => "三率三降",
+                _ => "三率三升",
+            };
+            let margin = |value: Option<Decimal>| value.map(number).unwrap_or_default();
+            (
+                format!("{period} {trend}"),
+                Some(format!(
+                    "毛利率 {}%、營益率 {}%、淨利率 {}%",
+                    margin(row.v1),
+                    margin(row.v2),
+                    margin(row.v3)
+                )),
+            )
+        }
         "signal" => (
             row.note
                 .clone()
