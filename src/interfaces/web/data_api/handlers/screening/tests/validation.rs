@@ -139,6 +139,30 @@ fn screening_min_monthly_revenue_boundaries() {
     }
 }
 
+/// 本益比上限 0–10000、股價淨值比上限 0–1000，單獨即可成立篩選；負數與非有限值回 422。
+#[test]
+fn screening_valuation_cap_boundaries() {
+    for (pe, pb, ok) in [
+        (Some(0.0), None, true),
+        (Some(10_000.0), Some(1_000.0), true),
+        (None, Some(0.5), true),
+        (Some(-1.0), None, false),
+        (Some(10_001.0), None, false),
+        (None, Some(1_001.0), false),
+        (None, Some(f64::NAN), false),
+    ] {
+        let mut params = screening_params();
+        params.max_pe = pe;
+        params.max_pb = pb;
+        let validated = validate_screening_params(&params);
+        assert_eq!(validated.is_ok(), ok, "{pe:?} {pb:?}");
+        if let Ok(validated) = validated {
+            assert_eq!(validated.max_pe.is_some(), pe.is_some());
+            assert_eq!(validated.max_pb.is_some(), pb.is_some());
+        }
+    }
+}
+
 /// 財務體質條件的範圍：F 分數 0–9、毛利率上限 100%、負債比 0–1000%。
 #[test]
 fn screening_health_boundaries_are_deterministic() {
@@ -172,10 +196,10 @@ fn screening_health_boundaries_are_deterministic() {
     }
 }
 
-/// 十四個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
+/// 十六個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
 /// `NULLS LAST`；不在白名單的文字必須在接觸 SQL 前遭拒。
 #[test]
-fn screening_sort_has_twenty_eight_static_branches() {
+fn screening_sort_has_thirty_two_static_branches() {
     let fields = [
         "stock_symbol",
         "revenue_yoy",
@@ -191,6 +215,8 @@ fn screening_sort_has_twenty_eight_static_branches() {
         "debt_ratio",
         "operating_margin",
         "rs_score",
+        "pe_ratio",
+        "pb_ratio",
     ];
     for field in fields {
         for order in ["asc", "desc"] {

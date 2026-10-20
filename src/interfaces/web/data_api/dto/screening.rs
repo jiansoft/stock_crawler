@@ -54,6 +54,10 @@ pub(crate) enum StockScreenSortValue {
     OperatingMargin,
     /// 相對強度分數。
     RsScore,
+    /// 本益比。
+    PeRatio,
+    /// 股價淨值比。
+    PbRatio,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -144,6 +148,12 @@ pub(crate) struct ScreenedStock {
     pub(crate) trust_streak: Option<i16>,
     /// 查詢日（含）之前 45 天內最近 20 筆日線的平均成交金額（百萬元）；沒有日線時為 `null`。
     pub(crate) avg_trade_value_20d: Option<f64>,
+    /// 查詢日（含）之前 10 天內最新一筆日線的官方本益比（證交所／櫃買中心）；虧損或沒有資料時為 `null`。
+    pub(crate) pe_ratio: Option<f64>,
+    /// 同一筆日線的官方股價淨值比；沒有資料時為 `null`。
+    pub(crate) pb_ratio: Option<f64>,
+    /// `pe_ratio`、`pb_ratio` 的日線日期，格式 `YYYY-MM-DD`；10 天內沒有日線時為 `null`。
+    pub(crate) ratio_date: Option<String>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -163,7 +173,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的二十六個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的三十二個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -234,6 +244,13 @@ pub(crate) struct StockScreeningParams {
     /// 與條件選股回測的 `min_avg_trade_value` 相同，用來排除實際買不到量的股票。
     #[param(minimum = 1, maximum = 100000)]
     pub(crate) min_avg_trade_value: Option<u32>,
+    /// 本益比上限（倍，0–10000）：取查詢日之前 10 天內最新一筆日線的官方本益比，虧損或沒有資料的股票
+    /// 不符合。
+    #[param(minimum = 0, maximum = 10000)]
+    pub(crate) max_pe: Option<f64>,
+    /// 股價淨值比上限（倍，0–1000），資料規則同 `max_pe`。
+    #[param(minimum = 0, maximum = 1000)]
+    pub(crate) max_pb: Option<f64>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,

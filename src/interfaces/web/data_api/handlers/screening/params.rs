@@ -43,7 +43,11 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_avg_trade_value: Option<Decimal>,
     /// 排除的產業 id；沒有指定時為 `None`。
     pub(super) exclude_industry_ids: Option<Vec<i32>>,
-    /// 二十八個固定排序分支之一。
+    /// 本益比上限。
+    pub(super) max_pe: Option<Decimal>,
+    /// 股價淨值比上限。
+    pub(super) max_pb: Option<Decimal>,
+    /// 三十二個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,
@@ -164,6 +168,8 @@ pub(super) fn validate_screening_params(
         100.0,
         "min_operating_margin_percent 必須介於 -10000 至 100",
     )?;
+    let max_pe = decimal_in_range(params.max_pe, 0.0, 10_000.0, "max_pe 必須介於 0 至 10000")?;
+    let max_pb = decimal_in_range(params.max_pb, 0.0, 1_000.0, "max_pb 必須介於 0 至 1000")?;
     if params
         .min_rs_score
         .is_some_and(|score| !(1..=99).contains(&score))
@@ -218,7 +224,9 @@ pub(super) fn validate_screening_params(
         || params.min_rs_score.is_some()
         || params.min_foreign_streak.is_some()
         || params.min_trust_streak.is_some()
-        || params.min_avg_trade_value.is_some();
+        || params.min_avg_trade_value.is_some()
+        || params.max_pe.is_some()
+        || params.max_pb.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -240,6 +248,8 @@ pub(super) fn validate_screening_params(
         min_avg_trade_value: params
             .min_avg_trade_value
             .map(|value| Decimal::from(value) * Decimal::from(1_000_000)),
+        max_pe,
+        max_pb,
         order_by,
         limit,
     })
@@ -265,7 +275,7 @@ fn decimal_in_range(
         .transpose()
 }
 
-/// 將排序 enum 映射成二十八個固定 SQL 分支。
+/// 將排序 enum 映射成三十二個固定 SQL 分支。
 ///
 /// 指標欄位一律加 `NULLS LAST`，否則 PostgreSQL 的降冪預設會把過期或缺值的
 /// NULL 排在最前面；同值再以股票代號升冪，讓分頁外的重複查詢仍穩定。
@@ -276,6 +286,10 @@ pub(super) fn screen_order_by(
     match (sort_by, sort_order) {
         ("stock_symbol", "asc") => Ok("ORDER BY stock_symbol ASC"),
         ("stock_symbol", "desc") => Ok("ORDER BY stock_symbol DESC"),
+        ("pe_ratio", "asc") => Ok("ORDER BY pe_ratio ASC NULLS LAST, stock_symbol ASC"),
+        ("pe_ratio", "desc") => Ok("ORDER BY pe_ratio DESC NULLS LAST, stock_symbol ASC"),
+        ("pb_ratio", "asc") => Ok("ORDER BY pb_ratio ASC NULLS LAST, stock_symbol ASC"),
+        ("pb_ratio", "desc") => Ok("ORDER BY pb_ratio DESC NULLS LAST, stock_symbol ASC"),
         ("revenue_yoy", "asc") => {
             Ok("ORDER BY revenue_yoy_percent ASC NULLS LAST, stock_symbol ASC")
         }

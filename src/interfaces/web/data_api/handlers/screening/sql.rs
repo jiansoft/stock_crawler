@@ -15,6 +15,8 @@
 /// 三率三升比較去年同一季；新鮮度同財務體質（兩季內）。`$26` 營業利益率下限、`$27` 是否只選三率三升。
 /// 營收創歷史新高：最新一月營收高於之前所有月份（之前至少 12 個月才判斷），新鮮度同月營收；
 /// `$28` 是否只選創新高；`$29` 排除的產業 id（`NULL` 為不排除）。
+/// 本益比、股價淨值比取查詢日（含）之前 10 天內最新一筆日線的官方值（0 代表虧損或沒有資料，轉成
+/// NULL）；`$30`／`$31` 為上限（`NULL` 為不限）。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -53,7 +55,10 @@ WITH latest AS (
         m.operating_margin_raw,
         m.net_margin_raw,
         m.margins_up_raw,
-        q.avg_trade_value
+        q.avg_trade_value,
+        pv.ratio_date,
+        pv.pe_ratio,
+        pv.pb_ratio
     FROM stocks s
     LEFT JOIN LATERAL (
         -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
@@ -134,6 +139,17 @@ WITH latest AS (
             LIMIT 20
         ) recent_quotes
     ) q ON TRUE
+    LEFT JOIN LATERAL (
+        -- 查詢日（含）之前 10 天內最新一筆日線的官方本益比、股價淨值比；0（虧損或沒有資料）轉成 NULL。
+        SELECT "Date" AS ratio_date,
+            CASE WHEN "PriceEarningRatio" > 0 THEN "PriceEarningRatio" END AS pe_ratio,
+            CASE WHEN "price-to-book_ratio" > 0 THEN "price-to-book_ratio" END AS pb_ratio
+        FROM "DailyQuotes"
+        WHERE stock_symbol = s.stock_symbol
+          AND "Date" BETWEEN $3::date - 10 AND $3::date
+        ORDER BY "Date" DESC
+        LIMIT 1
+    ) pv ON TRUE
     LEFT JOIN LATERAL (
         -- Yahoo 最新一季單季損益表：營業利益率、稅後淨利率，以及毛利率、營業利益率、稅後淨利率
         -- 是否都高於去年同一季（三率三升；去年同季沒有資料或營收為 0 時為 NULL）。
@@ -270,7 +286,8 @@ SELECT
     rs.rs_score,
     chip.foreign_streak,
     chip.trust_streak,
-    avg_trade_value
+    avg_trade_value,
+    pe_ratio, pb_ratio, ratio_date
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -296,4 +313,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($26::numeric IS NULL OR operating_margin_percent >= $26)
   AND (NOT $27::bool OR margins_yoy_up IS TRUE)
   AND (NOT $28::bool OR revenue_record IS TRUE)
+  AND ($30::numeric IS NULL OR pe_ratio <= $30)
+  AND ($31::numeric IS NULL OR pb_ratio <= $31)
 "#;
