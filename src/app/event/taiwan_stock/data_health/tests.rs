@@ -59,6 +59,8 @@ fn healthy() -> DataHealthSnapshot {
         })
         .collect(),
         latest_revenue_month: Some(202609),
+        latest_holder_week: Some(day(2)),
+        latest_insider_month: NaiveDate::from_ymd_opt(2026, 8, 1),
         ..Default::default()
     }
 }
@@ -82,7 +84,7 @@ fn a_healthy_week_reports_no_problems() {
 
     let message = report(day(4), day(10), &checks);
     assert!(
-        message.starts_with("資料健康週報 2026\\-10\\-04～2026\\-10\\-10\n全部 10 項正常"),
+        message.starts_with("資料健康週報 2026\\-10\\-04～2026\\-10\\-10\n全部 11 項正常"),
         "{message}"
     );
     assert!(!message.contains("⚠️"));
@@ -243,6 +245,36 @@ fn revenue_is_due_after_the_fifteenth() {
     assert_eq!(
         revenue_problems(Some(202611), january),
         ["最新只到 202611，應已有 202612"]
+    );
+}
+
+/// 千張大戶超過 9 天、董監持股早於 55 天前那個月才算停更；沒有資料也列出。
+#[test]
+fn periodic_tables_must_not_go_stale() {
+    let mut snapshot = healthy();
+    // 10-10 往前 9 天是 10-01（剛好到期限不算停更）；55 天前是 08-16，應至少有 8 月。
+    snapshot.latest_holder_week = Some(day(1));
+    assert!(periodic_table_problems(&snapshot, day(10)).is_empty());
+    snapshot.latest_holder_week = NaiveDate::from_ymd_opt(2026, 9, 30);
+    snapshot.latest_insider_month = NaiveDate::from_ymd_opt(2026, 7, 1);
+    assert_eq!(
+        periodic_table_problems(&snapshot, day(10)),
+        [
+            "holder_distribution 最新 2026-09-30，已超過 9 天沒更新",
+            "insider_holding 最新 2026-07，應已有 2026-08",
+        ]
+    );
+    snapshot.latest_holder_week = None;
+    snapshot.latest_insider_month = None;
+    assert_eq!(
+        problems_of(
+            &evaluate(&snapshot, day(4), day(10), Some(&[])),
+            "週／月資料"
+        ),
+        [
+            "holder_distribution 沒有任何資料",
+            "insider_holding 沒有任何資料"
+        ]
     );
 }
 

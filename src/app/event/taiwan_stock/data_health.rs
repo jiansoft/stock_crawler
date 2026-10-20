@@ -22,6 +22,9 @@
 //! 10. 籌碼連續天數：`chip_daily` 的連續買賣超天數是 NULL（每日入庫後的重算失敗）。
 //! 11. 財報落後：官方季報公布滿 [`LAGGING_MIN_AGE_DAYS`] 天（一年內）的上市櫃股票，Yahoo／BigGo 單季
 //!     損益表還沒有那一季（季報期優先採集也沒追上，選股、回測與持股健檢會用到舊一季）。
+//! 12. 週／月資料：千張大戶（`holder_distribution`）超過 [`HOLDER_MAX_AGE_DAYS`] 天沒更新、董監持股
+//!     （`insider_holding`）的最新月份早於 [`INSIDER_MAX_AGE_DAYS`] 天前那個月。兩者來源都只有最新
+//!     一期，停更幾期就永遠補不回來。
 //!
 //! 全部正常時也會發一則簡短的週報，用來確認檢查本身有在跑。
 
@@ -55,6 +58,14 @@ const BASELINE_DAYS: u64 = 21;
 
 /// 月營收在每月這一天之後應已有上個月的資料（法定申報期限為 10 日）。
 const REVENUE_DUE_DAY: u32 = 15;
+
+/// 千張大戶週摘要最多可以幾天沒更新：週六 10:40 抓上週五的資料，週五休市時資料日更早，
+/// 寬限到 9 天才算漏了一週。
+const HOLDER_MAX_AGE_DAYS: u64 = 9;
+
+/// 董監持股的最新月份不能早於這麼多天前那個月：每月 10～28 日抓上個月的資料，月中前還沒公布
+/// 時最新只到前兩個月，55 天涵蓋這段空窗。
+const INSIDER_MAX_AGE_DAYS: u64 = 55;
 
 /// 某天某市場的股價淨值比為 0 超過這個百分比就算異常（正常約 0～3%）。
 const PB_ZERO_LIMIT_PERCENT: i64 = 20;
@@ -175,6 +186,7 @@ fn evaluate(
             revenue_problems(snapshot.latest_revenue_month, today),
         ),
         Check::new("股利", dividend_problems(snapshot)),
+        Check::new("週／月資料", periodic_table_problems(snapshot, today)),
         Check::new(
             "本益比／淨值比",
             valuation_ratio_problems(&snapshot.valuation_ratio_zeros, today),
@@ -283,6 +295,32 @@ fn revenue_problems(latest_month: Option<i64>, today: NaiveDate) -> Vec<String> 
         (None, _) => vec!["沒有任何月營收資料".to_string()],
         (_, None) => Vec::new(),
     }
+}
+
+/// 千張大戶與董監持股是否停更；沒有任何資料也列出。
+fn periodic_table_problems(snapshot: &DataHealthSnapshot, today: NaiveDate) -> Vec<String> {
+    let mut problems = Vec::new();
+    let holder_due = today.checked_sub_days(Days::new(HOLDER_MAX_AGE_DAYS));
+    match (snapshot.latest_holder_week, holder_due) {
+        (None, _) => problems.push("holder_distribution 沒有任何資料".to_string()),
+        (Some(latest), Some(due)) if latest < due => problems.push(format!(
+            "holder_distribution 最新 {latest}，已超過 {HOLDER_MAX_AGE_DAYS} 天沒更新"
+        )),
+        _ => {}
+    }
+    let insider_due = today
+        .checked_sub_days(Days::new(INSIDER_MAX_AGE_DAYS))
+        .and_then(|date| date.with_day(1));
+    match (snapshot.latest_insider_month, insider_due) {
+        (None, _) => problems.push("insider_holding 沒有任何資料".to_string()),
+        (Some(latest), Some(due)) if latest < due => problems.push(format!(
+            "insider_holding 最新 {}，應已有 {}",
+            latest.format("%Y-%m"),
+            due.format("%Y-%m")
+        )),
+        _ => {}
+    }
+    problems
 }
 
 /// 過期的「尚未公布」佔位列與年度合計不符。
