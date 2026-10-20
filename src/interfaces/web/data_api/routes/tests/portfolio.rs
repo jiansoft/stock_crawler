@@ -60,12 +60,6 @@ async fn portfolio_summary_endpoint_db_semantics() {
         .execute(pool)
         .await
         .expect("種入 yield_rank");
-    sqlx::query("INSERT INTO financial_health (stock_symbol, f_score_year, f_score, f_score_evaluated) VALUES ($1, $2, 6, 9)")
-        .bind(SYMBOL)
-        .bind(today.year() - 1)
-        .execute(pool)
-        .await
-        .expect("種入 financial_health");
     // 營收：上個月起連 3 個月年減（−5、−3、−1），第 4 個月年增；財報：上一季營業虧損且三率都比去年同季低。
     let month_ord = today.year() * 12 + today.month0() as i32;
     for (back, yoy) in [(1, -5), (2, -3), (3, -1), (4, 2)] {
@@ -89,6 +83,15 @@ async fn portfolio_summary_endpoint_db_semantics() {
     .execute(pool)
     .await
     .expect("種入損益表");
+    // 財務體質：上一季的近四季自由現金流 −300 千元。
+    sqlx::query("INSERT INTO financial_health (stock_symbol, f_score_year, f_score, f_score_evaluated, quarter_year, quarter, free_cash_flow_ttm) VALUES ($1, $2, 6, 9, $3, $4, -300)")
+        .bind(SYMBOL)
+        .bind(today.year() - 1)
+        .bind(margin_year)
+        .bind(i16::try_from(margin_quarter).expect("季別 1–4"))
+        .execute(pool)
+        .await
+        .expect("種入 financial_health");
 
     let (status, json) = get(&path).await;
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -146,12 +149,18 @@ async fn portfolio_summary_endpoint_db_semantics() {
         (30.0.into(), (-2.0).into(), 1.0.into())
     );
     assert_eq!(holding["margins_trend"], "all_down");
+    assert_eq!(holding["free_cash_flow_ttm"], -300);
     assert_eq!(
         holding["warnings"],
-        serde_json::json!(["revenue_decline", "margins_all_down", "operating_loss"])
+        serde_json::json!([
+            "revenue_decline",
+            "margins_all_down",
+            "operating_loss",
+            "negative_free_cash_flow"
+        ])
     );
     assert_eq!(json["warning_symbols"], 1);
-    // 金融保險業不取三率：只剩營收警示。
+    // 金融保險業不取三率與自由現金流：只剩營收警示。
     sqlx::query("UPDATE stocks SET stock_industry_id = 17 WHERE stock_symbol = $1")
         .bind(SYMBOL)
         .execute(pool)
@@ -162,6 +171,7 @@ async fn portfolio_summary_endpoint_db_semantics() {
     assert!(holding["margin_period"].is_null(), "{holding}");
     assert!(holding["operating_margin_percent"].is_null(), "{holding}");
     assert!(holding["margins_trend"].is_null(), "{holding}");
+    assert!(holding["free_cash_flow_ttm"].is_null(), "{holding}");
     assert_eq!(holding["warnings"], serde_json::json!(["revenue_decline"]));
 
     let (status, _) = get("/api/v1/portfolio/summary?member_id=-1").await;

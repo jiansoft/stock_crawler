@@ -51,6 +51,7 @@ fn openapi_portfolio_summary_schema_pins_field_names() {
         "operating_margin_percent",
         "net_margin_percent",
         "margins_trend",
+        "free_cash_flow_ttm",
     ] {
         assert!(holding[field].to_string().contains("null"), "{field}");
     }
@@ -60,7 +61,12 @@ fn openapi_portfolio_summary_schema_pins_field_names() {
     );
     assert_eq!(
         schemas["PortfolioWarningValue"]["enum"],
-        serde_json::json!(["revenue_decline", "margins_all_down", "operating_loss"])
+        serde_json::json!([
+            "revenue_decline",
+            "margins_all_down",
+            "operating_loss",
+            "negative_free_cash_flow"
+        ])
     );
     assert_eq!(
         schemas["PortfolioMarginTrendValue"]["enum"],
