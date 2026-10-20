@@ -1,7 +1,18 @@
 //! 每週市場摘要的持股相對強度一段：持股 RS 與一週前相比上升、下降最多的幾檔。
 
 use super::{TOP, WEEK_DAYS};
-use crate::domain::quote::relative_strength::RelativeStrengthDay;
+use crate::domain::{
+    portfolio::health::HoldingFundamentals, quote::relative_strength::RelativeStrengthDay,
+};
+
+/// 持股相關的兩段：RS 一週變化與基本面警示。
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct HoldingSection<'a> {
+    /// 持股 RS 一週變化。
+    pub(super) moves: &'a [HoldingMove],
+    /// 持股的營收與三率（基本面警示一段用）。
+    pub(super) fundamentals: &'a [HoldingFundamentals],
+}
 
 /// 一檔持股的 RS 一週變化。
 #[derive(Debug, Clone, PartialEq)]

@@ -4,7 +4,14 @@
 //! [`REVENUE_DECLINE_WARNING_MONTHS`] 個月年減、三率（毛利率、營業利益率、稅後淨利率）都比去年
 //! 同季低、最近一季營業虧損。
 
-use crate::domain::financial::entity::MarginTrend;
+use anyhow::Result;
+use async_trait::async_trait;
+use rust_decimal::Decimal;
+
+use crate::{core::declare::Industry, domain::financial::entity::MarginTrend};
+
+/// 不取三率的產業：金融保險業的營收口徑與一般公司不同，三率沒有可比性。
+pub const MARGIN_EXCLUDED_INDUSTRY: Industry = Industry::FinanceInsurance;
 
 /// 營收連續年減達這個月數就發警示。
 pub const REVENUE_DECLINE_WARNING_MONTHS: u8 = 3;
@@ -54,6 +61,34 @@ impl FundamentalSignals {
         }
         warnings
     }
+}
+
+/// 一檔持股的最新月營收與最近一季三率；查不到或過期的項目為 `None`。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HoldingFundamentals {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 最新月營收月份（`YYYYMM`）。
+    pub revenue_month: Option<i64>,
+    /// 最新月營收年增率（%）。
+    pub revenue_yoy: Option<Decimal>,
+    /// 最近一季（Yahoo 單季財報）的年度與季別。
+    pub margin_period: Option<(i32, i16)>,
+    /// 最近一季毛利率、營業利益率、稅後淨利率（%）。
+    pub margins: [Option<f64>; 3],
+    /// 判斷警示用的訊號。
+    pub signals: FundamentalSignals,
+}
+
+/// 持股基本面的查詢介面。
+#[async_trait]
+pub trait HoldingFundamentalsQuery: Send + Sync {
+    /// 依今天判斷新鮮度：月營收超過 2 個月沒更新、財報落後超過 2 季視為過期；
+    /// [`MARGIN_EXCLUDED_INDUSTRY`] 不取三率。查不到的代號不回傳。
+    async fn fetch_holding_fundamentals(
+        &self,
+        symbols: &[String],
+    ) -> Result<Vec<HoldingFundamentals>>;
 }
 
 #[cfg(test)]

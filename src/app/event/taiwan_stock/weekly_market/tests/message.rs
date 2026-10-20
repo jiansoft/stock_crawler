@@ -6,9 +6,17 @@ use super::*;
 /// 完整訊息：三段內容、億元換算、持股上升下降、沒有變化或只有一筆的持股不列。
 #[tokio::test]
 async fn run_builds_full_message() {
-    let message = run(&quote(), &chip(), &index(), day(17), &holdings(), None)
-        .await
-        .expect("有內容");
+    let message = run(
+        &quote(),
+        &chip(),
+        &index(),
+        &portfolio(),
+        day(17),
+        &holdings(),
+        None,
+    )
+    .await
+    .expect("有內容");
     // name 由 holdings::stock_name 提供；這裡只驗證與名稱無關的段落。
     for line in [
         "每週市場摘要︰2026-10-16",
@@ -22,6 +30,7 @@ async fn run_builds_full_message() {
         "• 流入：半導體業 +20.0 億、金融保險業 +12.0 億",
         "• 流出：航運業 -5.0 億",
         "持股相對強度（與 5 個交易日前相比）",
+        "持股基本面警示（1 檔）",
         "大盤趨勢（加權指數 2026-10-16）",
         "• 收盤 300.00，近 5 日 +1.69%；多頭排列",
         "• 60 日均線 270.50，收盤在上方 10.91%（均線上揚），連續 241 個交易日在上方",
@@ -58,7 +67,19 @@ fn build_message_lists_holding_moves() {
             },
         ]
     );
-    let message = build_message(None, None, None, &[], &moves, None, name).expect("有持股變化");
+    let message = build_message(
+        None,
+        None,
+        None,
+        &[],
+        HoldingSection {
+            moves: &moves,
+            ..Default::default()
+        },
+        None,
+        name,
+    )
+    .expect("有持股變化");
     assert!(message.starts_with(&esc("每週市場摘要\n")), "{message}");
     assert!(
         message.contains(&esc("• 上升：2317 鴻海 50 → 59（+9）")),
@@ -69,7 +90,7 @@ fn build_message_lists_holding_moves() {
         "{message}"
     );
     assert!(!message.contains("1101"), "沒有變化的不列");
-    assert!(build_message(None, None, None, &[], &[], None, name).is_none());
+    assert!(build_message(None, None, None, &[], HoldingSection::default(), None, name).is_none());
 }
 
 /// 各段查詢失敗只略過該段；全部失敗或沒有資料時不發送。
@@ -83,6 +104,7 @@ async fn run_degrades_per_section() {
         &quote(),
         &failing_chip,
         &index(),
+        &portfolio(),
         day(17),
         &holdings(),
         None,
@@ -100,6 +122,7 @@ async fn run_degrades_per_section() {
         &failing_quote,
         &chip(),
         &failing_index(),
+        &portfolio(),
         day(17),
         &holdings(),
         None,
@@ -117,6 +140,7 @@ async fn run_degrades_per_section() {
             &failing_quote,
             &failing_chip,
             &failing_index(),
+            &FakePortfolio::failing(),
             day(17),
             &holdings(),
             None,

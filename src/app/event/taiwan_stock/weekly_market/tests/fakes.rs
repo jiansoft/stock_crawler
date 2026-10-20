@@ -1,6 +1,7 @@
 //! 每週市場摘要測試用的假倉儲與固定資料。
 
 use super::*;
+use crate::domain::portfolio::health::HoldingFundamentals;
 
 /// 回傳固定加權指數收盤與市場廣度的假倉儲；`fail` 時指數查詢失敗，`breadth_fail` 時廣度查詢失敗。
 #[derive(Default)]
@@ -242,4 +243,50 @@ pub(super) fn name(symbol: &str) -> String {
         _ => "其他",
     }
     .to_owned()
+}
+
+/// 回傳固定持股基本面的假倉儲；`fail` 時查詢失敗。
+pub(super) struct FakePortfolio {
+    pub(super) fundamentals: Vec<HoldingFundamentals>,
+    pub(super) fail: bool,
+}
+
+impl FakePortfolio {
+    pub(super) fn failing() -> Self {
+        Self {
+            fundamentals: Vec::new(),
+            fail: true,
+        }
+    }
+}
+
+#[async_trait]
+impl HoldingFundamentalsQuery for FakePortfolio {
+    async fn fetch_holding_fundamentals(
+        &self,
+        symbols: &[String],
+    ) -> Result<Vec<HoldingFundamentals>> {
+        assert_eq!(symbols, ["1101", "2317", "2330", "2454"]);
+        if self.fail {
+            return Err(anyhow!("portfolio down"));
+        }
+        Ok(self.fundamentals.clone())
+    }
+}
+
+/// 2330 營業虧損、2317 沒有警示。
+pub(super) fn portfolio() -> FakePortfolio {
+    use crate::domain::portfolio::health::FundamentalSignals;
+    let item = |symbol: &str, operating_margin: f64| HoldingFundamentals {
+        stock_symbol: symbol.to_owned(),
+        signals: FundamentalSignals {
+            operating_margin: Some(operating_margin),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    FakePortfolio {
+        fundamentals: vec![item("2317", 3.0), item("2330", -2.5)],
+        fail: false,
+    }
 }
