@@ -15,6 +15,8 @@ pub mod financial_health;
 pub mod financial_report;
 pub mod foreign_holding;
 pub mod forward_return;
+/// 持股籌碼日報（當日持股與法人、信用交易、主力進出）。
+pub mod holding_chip;
 pub mod holding_fundamentals;
 pub mod market_index;
 pub mod market_valuation;

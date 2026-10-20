@@ -17,25 +17,20 @@
 use std::fmt::Write;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use chrono::{Local, NaiveDate};
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
-
 use super::{add_thousand_separators, format_decimal_with_commas, holdings};
 use crate::{
     app::backfill,
     core::{alert, util::text},
+    domain::portfolio::chip,
     infra::crawler::fbs::broker_flow::{self, BrokerFlow, BrokerNet},
 };
+use anyhow::{Context, Result};
+use chrono::{Local, NaiveDate};
 
-/// 主力買賣超佔成交量比重（%）的通知門檻。
-///
-/// 2026-10-05 持股 44 檔普通股中約三分之一超過 20%，再低會讓每天的訊息太長。
-pub const MAIN_SHARE_THRESHOLD: Decimal = dec!(20);
-
-/// 主力買賣超張數的通知門檻；成交清淡的股票幾十張就能有很高的比重，不具意義。
-pub const MIN_MAIN_NET_LOTS: i64 = 100;
+// 門檻與 `/portfolio/chip`、stock_go 持股籌碼頁共用，定義在 domain。
+pub use crate::domain::portfolio::chip::{
+    BROKER_MIN_LOTS as MIN_MAIN_NET_LOTS, BROKER_MIN_SHARE as MAIN_SHARE_THRESHOLD,
+};
 
 /// 每側列出的分點數。
 const TOP_BROKERS: usize = 3;
@@ -106,7 +101,7 @@ pub async fn execute() -> Result<()> {
 
 /// 主力動作是否明顯：比重與張數都達門檻。
 fn is_notable(flow: &BrokerFlow) -> bool {
-    flow.main_share().abs() >= MAIN_SHARE_THRESHOLD && flow.main_net().abs() >= MIN_MAIN_NET_LOTS
+    chip::broker_notable(flow.main_share(), flow.main_net())
 }
 
 /// 挑出達門檻的股票，依主力佔成交量比重由買超到賣超排列。
@@ -182,6 +177,9 @@ fn top_brokers(brokers: &[BrokerNet]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+
     use super::*;
 
     fn broker(name: &str, net: i64, share: Decimal) -> BrokerNet {
