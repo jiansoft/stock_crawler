@@ -12,6 +12,7 @@ use utoipa::OpenApi;
 
 use super::ApiDoc;
 
+mod backtest;
 mod flows;
 mod fundamentals;
 mod market;
