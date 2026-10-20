@@ -2,11 +2,11 @@ use anyhow::Result;
 use chrono::{Datelike, Local};
 use scopeguard::defer;
 
-/// 每日掃描交易所除權息公告，補齊漏抓的股利事件。
+// 每日掃描交易所除權息公告，補齊漏抓的股利事件。
 mod announcement_scan;
 /// 修復帶有配息日期的年度合計列。
 mod annual_total_repair;
-/// 以交易所除權除息計算結果核對股利資料。
+// 以交易所除權除息計算結果核對股利資料。
 pub(crate) mod ex_right_reconcile;
 /// 手動回補 Yahoo 歷年配息明細。
 mod historical;

@@ -5,7 +5,7 @@
 //!
 //! 目前功能由 [`price`] 子模組提供。
 
-/// Winvest 報價實作。
+// Winvest 報價實作。
 pub mod price;
 /// Winvest antiforgery 工作階段（cookie 與 token）。
 mod session;

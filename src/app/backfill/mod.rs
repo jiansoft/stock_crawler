@@ -1,10 +1,10 @@
 /// 防腐層 (Anti-Corruption Layer)
 pub mod acl;
-/// 回補交易所公告的減資事件（上市全量／上櫃每日累積）
+// 回補交易所公告的減資事件（上市全量／上櫃每日累積）
 pub mod capital_reduction;
-/// 上櫃減資歷史缺口的候選收斂（只讀，產出待辦清單）
+// 上櫃減資歷史缺口的候選收斂（只讀，產出待辦清單）
 pub mod capital_reduction_history;
-/// 籌碼資料入庫（三大法人、融資融券、集保股權分散、董監持股、主力進出）
+// 籌碼資料入庫（三大法人、融資融券、集保股權分散、董監持股、主力進出）
 pub mod chip;
 /// 調用 twse API 更新終止上市公司
 pub mod delisted_company;
@@ -12,9 +12,9 @@ pub mod delisted_company;
 pub mod dividend;
 /// 調用 twse API 取得 ETF 並更新股票相關欄位
 pub mod etf;
-/// 以官方開盤競價基準重算除權息日的漲跌與漲跌幅
+// 以官方開盤競價基準重算除權息日的漲跌與漲跌幅
 pub mod ex_right_change;
-/// 採集 Yahoo 三大財務報表（損益表、資產負債表、現金流量表）
+// 採集 Yahoo 三大財務報表（損益表、資產負債表、現金流量表）
 pub mod financial_report;
 /// 回補財報
 pub mod financial_statement;
@@ -22,7 +22,7 @@ pub mod financial_statement;
 pub mod isin;
 /// 回補每股淨值為零的股票更新其數據
 pub mod net_asset_value_per_share;
-/// 以證交所、櫃買中心官方值回補日線本益比與股價淨值比
+// 以證交所、櫃買中心官方值回補日線本益比與股價淨值比
 pub mod official_ratio;
 /// 回補流程對外部資料來源的需求介面
 pub mod port;
@@ -30,7 +30,7 @@ pub mod port;
 pub mod qualified_foreign_institutional_investor;
 /// 調用 twse、tpex API 取得並更新台股收盤報價
 pub mod quote;
-/// 以「代號 × 月份區間」回補歷史日報價（補既有缺口）
+// 以「代號 × 月份區間」回補歷史日報價（補既有缺口）
 pub mod quote_history;
 /// 調用 twse API 取得並更新每月營收
 pub mod revenue;

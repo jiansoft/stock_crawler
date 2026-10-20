@@ -7,7 +7,7 @@ use crate::infra::database;
 
 /// 每日市值明細（交易批次層級）資料列。
 ///
-/// 與 [`crate::database::table::daily_money_history_detail::DailyMoneyHistoryDetail`] 不同，
+/// 與 [`crate::infra::database::table::daily_money_history_detail::DailyMoneyHistoryDetail`] 不同，
 /// 這張表保留每筆持股來源（交易日期）維度，方便追蹤批次成本與損益。
 #[derive(Debug, sqlx::FromRow)]
 pub struct DailyMoneyHistoryDetailMore {

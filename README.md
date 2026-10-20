@@ -82,6 +82,7 @@ log/                 # runtime 檔案日誌輸出目錄
 + `cargo build --release`：release build。
 + `cargo fmt --all -- --check`：檢查格式（CI gate）。
 + `cargo clippy --all-targets --all-features --locked -- -D warnings`：檢查 lint（CI gate）。
++ `RUSTDOCFLAGS="-D warnings -A rustdoc::private_intra_doc_links" cargo doc --no-deps --locked --document-private-items`：檢查文件連結（CI gate）；子模組的說明寫在模組檔的 `//!`，`mod x;` 上方不要再加 `///`（rustdoc 會把兩段合併並改用上層範圍解析連結）。
 + `cargo deny check advisories licenses bans`：檢查相依套件的安全通報、授權與禁用套件（CI gate）。
 + `cargo test --locked -- --test-threads=1`：只跑單元測試；需要 PostgreSQL／Redis 的測試會自動略過，不需外部服務。
 + `cargo test --locked --features integration-tests -- --test-threads=1`：連同整合測試一起跑。**請先在 `.env` 設定 `TEST_POSTGRESQL_*` 指向獨立的測試資料庫，不要對正式庫執行**；寫入資料的測試使用固定歷史日期與假代號並會自行清除。

@@ -43,7 +43,7 @@ fn first_backup_failure_today(symbol: &str) -> bool {
 /// 啟動被追蹤股票的備援採集背景任務。
 ///
 /// 此任務只採集 `Trace` 資料表中實際被追蹤的股票，並呼叫
-/// [`crawler::fetch_stock_price_from_backup_sites`] 取得最新成交價。
+/// [`crawler::fetch_stock_price_from_backup_sites`](crate::infra::crawler::fetch_stock_price_from_backup_sites) 取得最新成交價。
 /// 採集結果會以「單筆價格更新」方式寫回 `stock_snapshots`，
 /// 若價格真的有異動，還會額外發佈價格更新事件，交由 trace evaluator 判斷是否通知。
 pub(super) fn start_traced_stock_backup_caching_task() {

@@ -129,7 +129,7 @@ impl Dividend {
     /// 更新年度內有多次配息記錄時將其合併計算成年度股利
     ///
     /// 合計列的日期一律是 `'-'`，衝突更新時必須連日期一起覆寫；原因與
-    /// [`crate::infra::database::repository::dividend::PgDividendRepository::upsert_annual_total_dividend`] 相同。
+    /// [`DividendRepository::upsert_annual_total_dividend`](crate::domain::dividend::repository::DividendRepository::upsert_annual_total_dividend) 相同。
     pub async fn upsert_annual_total_dividend(&self) -> Result<PgQueryResult> {
         // 使用參數化查詢代替字串格式化，將 $1, $2, $3, $4 分別綁定相關欄位，以移除 AssertSqlSafe
         let sql = r#"

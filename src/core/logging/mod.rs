@@ -24,11 +24,11 @@ use tokio::{
 use crate::core::logging::rotate::Rotate;
 use crate::core::util::atomic::decrement_atomic_usize;
 
-/// tracing 事件寫入輪轉檔案與轉送 Seq 的 layer。
+// tracing 事件寫入輪轉檔案與轉送 Seq 的 layer。
 mod layer;
 /// 日誌檔輪轉模組。
 pub mod rotate;
-/// Seq 日誌轉送。
+// Seq 日誌轉送。
 mod seq;
 
 pub use layer::{FileLogLayer, file_log_env_filter};

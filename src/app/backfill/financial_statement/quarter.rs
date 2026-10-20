@@ -4,7 +4,7 @@
 //! 再到 Yahoo 財經補抓對應欄位並回寫資料庫。
 //!
 //! 目標季度必須與季 EPS 主流程一致，因此同樣使用
-//! [`crate::util::datetime::backfill_report_quarter_targets_for_listed_and_otc`]
+//! [`crate::core::util::datetime::backfill_report_quarter_targets_for_listed_and_otc`]
 //! 依上市/上櫃公司季報法定申報截止日與較保守的預抓視窗決定處理清單。
 
 use std::future::Future;

@@ -23,7 +23,7 @@ use debounce::TelegramDebouncer;
 
 /// Telegram 訊息防震批次發送器子模組。
 mod debounce;
-/// 除權息提醒事件處理子模組。
+// 除權息提醒事件處理子模組。
 mod ex_dividend;
 /// 持股定期回顧（月營收、季報）事件處理子模組。
 mod holding_review;

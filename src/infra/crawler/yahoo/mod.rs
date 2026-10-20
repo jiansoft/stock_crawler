@@ -14,9 +14,9 @@
 //! - 來源域名：`tw.stock.yahoo.com`
 //! - 抓取技術：HTTP GET 搭配 CSS Selector 解析。
 
-/// 股利數據採集子模組
+// 股利數據採集子模組
 pub mod dividend;
-/// 財務報表（損益表、資產負債表、現金流量表）採集子模組
+// 財務報表（損益表、資產負債表、現金流量表）採集子模組
 pub mod financial_statement;
 /// 即時報價與行情採集子模組
 pub mod price;
@@ -79,7 +79,7 @@ pub struct YahooClassCategory {
     /// 是否納入盤中 Yahoo 類股採集任務。
     ///
     /// `false` 代表該分類只保留在靜態字典中，不會被
-    /// [`crate::infra::crawler::yahoo::price::class_quote::all_class_categories`]
+    /// `price::class_quote::all_class_categories`
     /// 納入背景輪詢清單。
     pub collect_enabled: bool,
 }

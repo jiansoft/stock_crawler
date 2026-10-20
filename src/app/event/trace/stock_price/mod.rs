@@ -14,7 +14,7 @@
 //! 7. **發送通知**：透過 Telegram Bot 將警報訊息傳送給使用者。
 //!
 //! ## 子模組
-//! - [`reference`]：開盤前載入當日除權息、減資恢復買賣的參考價。
+//! - [`mod@reference`]：開盤前載入當日除權息、減資恢復買賣的參考價。
 //! - [`targets`]：依股票代號分組的追蹤條件快取。
 //! - [`alert`]：邊界判斷、去重與警報訊息。
 
@@ -74,7 +74,7 @@ enum EvaluationSource {
 /// 3. 追蹤結束時停止所有 trace 相關背景任務。
 ///
 /// 追蹤任務本身不直接對外網站採集報價，而是由背景採集器寫入
-/// [`SHARE`](SHARE) 中的 `stock_snapshots` 快取，再由價格更新事件
+/// [`SHARE`] 中的 `stock_snapshots` 快取，再由價格更新事件
 /// 驅動 [`evaluate_price_update`] 執行指定股票的邊界檢查。
 ///
 /// # Errors
