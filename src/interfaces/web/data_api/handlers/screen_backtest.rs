@@ -272,6 +272,7 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         min_gross_margin_percent: params.min_gross_margin_percent,
         min_operating_margin_percent: params.min_operating_margin_percent,
         margins_yoy_up: params.margins_yoy_up.unwrap_or(false),
+        revenue_record: params.revenue_record.unwrap_or(false),
         max_debt_ratio_percent: params.max_debt_ratio_percent,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
