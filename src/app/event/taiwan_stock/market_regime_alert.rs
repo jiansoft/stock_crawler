@@ -3,8 +3,9 @@
 //! 每個交易日 15:30（15:00 收盤事件寫入加權指數之後）檢查加權指數當天是否站上或跌破
 //! [`ALERT_MA_DAYS`] 日均線、均線排列是否改變（見 [`regime`]），以及上市櫃站上 60 日均線的
 //! 股票比例是否跨過 [`ALERT_BREADTH_PERCENT`]（見 [`breadth`]），有變化才發 Telegram；發送時一併
-//! 附上當天的市場廣度。最新一筆加權指數不是今天（休市或尚未寫入）就不發；市場廣度讀取失敗或
-//! 今天還沒有統計時只略過廣度。
+//! 附上當天的市場廣度與估值水位（[`valuation::level`]；官方本益比 17:30 才補齊，通知裡的估值多半是前一個
+//! 交易日，行內標出日期）。最新一筆加權指數不是今天（休市或尚未寫入）就不發；市場廣度或估值讀取失敗、
+//! 沒有資料時只略過那一行。
 //!
 //! 條件選股回測的大盤濾網（`market_filter_ma`）與市場廣度濾網（`market_filter_breadth`）也是看
 //! 這兩件事，這則通知讓環境轉換當天就知道。
@@ -19,9 +20,15 @@ use crate::{
     domain::market_index::{
         breadth::{self, BreadthDay, BreadthQuery},
         regime::{self, IndexCloseQuery, MarketRegime},
+        valuation::{self, MarketValuationRepository, ValuationLevel},
     },
-    infra::database::repository::market_index::PgMarketIndexRepository,
+    infra::database::repository::{
+        market_index::PgMarketIndexRepository, market_valuation::PgMarketValuationRepository,
+    },
 };
+
+/// 估值水位附帶幾個交易日前的本益比中位數。
+const VALUATION_BEFORE_DAYS: usize = 5;
 
 /// 要通知穿越的均線天數。
 const ALERT_MA_DAYS: [u16; 2] = [60, 240];
@@ -37,15 +44,22 @@ const ALERT_BREADTH_PERCENT: f64 = 30.0;
 /// 讀取加權指數失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
     let today = Local::now().date_naive();
-    if let Some(message) = run(&PgMarketIndexRepository::new(), today).await? {
+    if let Some(message) = run(
+        &PgMarketIndexRepository::new(),
+        &PgMarketValuationRepository::new(),
+        today,
+    )
+    .await?
+    {
         alert::send_message(&message).await;
     }
     Ok(())
 }
 
-/// 讀取加權指數與市場廣度並組出訊息；最新一筆不是 `today` 或沒有變化時回 `None`。
+/// 讀取加權指數、市場廣度與估值水位並組出訊息；最新一筆不是 `today` 或沒有變化時回 `None`。
 async fn run(
     index: &(impl IndexCloseQuery + BreadthQuery),
+    valuation_repo: &impl MarketValuationRepository,
     today: NaiveDate,
 ) -> Result<Option<String>> {
     let points = regime::load_taiex(index, Some(today))
@@ -64,13 +78,23 @@ async fn run(
             Vec::new()
         }
     };
-    Ok(build_message(&points, &breadth))
+    let level = valuation::level(valuation_repo, today, VALUATION_BEFORE_DAYS)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("大盤趨勢變化：讀取估值水位失敗，略過估值：{why:#}");
+            None
+        });
+    Ok(build_message(&points, &breadth, level.as_ref()))
 }
 
 /// 由新到舊的收盤與市場廣度組出訊息：最新一天穿越 [`ALERT_MA_DAYS`] 日均線、排列和前一天不同、
 /// 或站上 60 日均線的比例跨過 [`ALERT_BREADTH_PERCENT`]；都沒有時回 `None`。`breadth` 為今天與
-/// 前一個交易日的統計（由新到舊），沒有時不看廣度。
-fn build_message(points: &[(NaiveDate, f64)], breadth: &[BreadthDay]) -> Option<String> {
+/// 前一個交易日的統計（由新到舊），沒有時不看廣度；`valuation` 只附在訊息裡，不影響是否發送。
+fn build_message(
+    points: &[(NaiveDate, f64)],
+    breadth: &[BreadthDay],
+    valuation: Option<&ValuationLevel>,
+) -> Option<String> {
     let today = regime::regime(points)?;
     let previous = regime::regime(points.get(1..)?);
     let crosses: Vec<_> = ALERT_MA_DAYS
@@ -112,6 +136,14 @@ fn build_message(points: &[(NaiveDate, f64)], breadth: &[BreadthDay]) -> Option<
     }
     if let Some((now, before)) = breadth {
         lines.push(breadth_line(now, before));
+    }
+    if let Some(level) = valuation
+        && let Some(summary) = level.summary()
+    {
+        lines.push(format!(
+            "• 估值水位 {}：{summary}",
+            level.date.format("%m-%d")
+        ));
     }
 
     let mut message = String::with_capacity(256);

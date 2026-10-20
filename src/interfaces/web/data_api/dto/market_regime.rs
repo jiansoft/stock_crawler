@@ -55,6 +55,23 @@ pub(crate) struct MarketRegimeBreadth {
     pub(crate) new_lows_5d: i64,
 }
 
+/// 估值水位：上市櫃官方本益比、股價淨值比中位數在近 5 年的位置（同 `/market/valuation` 的每日值）。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct MarketRegimeValuation {
+    /// 估值日期（資料日之前最近一個有估值的交易日；官方值 17:30 後才補齊，收盤後到補值前會是前一個交易日）。
+    pub(crate) date: String,
+    /// 本益比中位數（倍）；沒有為 `null`。
+    pub(crate) median_pe: Option<f64>,
+    /// 本益比中位數在近 5 年每日值中的百分位（不高於它的日子占比，%）。
+    pub(crate) pe_percentile_5y: Option<f64>,
+    /// 5 個交易日前的本益比中位數；資料不足為 `null`。
+    pub(crate) median_pe_5d_ago: Option<f64>,
+    /// 股價淨值比中位數（倍）。
+    pub(crate) median_pb: Option<f64>,
+    /// 股價淨值比中位數在近 5 年的百分位（%）。
+    pub(crate) pb_percentile_5y: Option<f64>,
+}
+
 /// 大盤趨勢狀態。
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub(crate) struct MarketRegimeResponse {
@@ -93,4 +110,6 @@ pub(crate) struct MarketRegimeResponse {
     pub(crate) recent_crosses: Vec<MovingAverageCrossItem>,
     /// 市場廣度：大盤漲跌是否有多數個股跟上；資料日之前沒有統計為 `null`。
     pub(crate) breadth: Option<MarketRegimeBreadth>,
+    /// 估值水位：市場是否偏貴；資料日之前沒有估值或讀取失敗為 `null`（不影響其他欄位）。
+    pub(crate) valuation: Option<MarketRegimeValuation>,
 }
