@@ -168,6 +168,13 @@ jobs:
       env:
         RUST_BACKTRACE: 1
 
+    - name: Run doc tests
+      # nextest 不跑 doc-test；另外編譯並執行文件範例與 `#[cfg(doc)]` 的 import，
+      # 避免文件裡的路徑壞掉沒人發現（2026-10 曾有 `select_holdings` 路徑錯誤讓 `cargo test` 失敗）。
+      run: cargo test --locked --doc
+      env:
+        RUST_BACKTRACE: 1
+
     - name: Publish Unit Test Results
       # 發布單元測試結果至 PR Comment 與 GitHub Check Run（圖表化呈現通過/失敗/略過與耗時統計）。
       # if: always() 確保即便測試失敗，仍會解析報告並在 PR 發布留言，方便直接檢視失敗點。
