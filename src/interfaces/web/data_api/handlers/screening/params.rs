@@ -177,6 +177,7 @@ pub(super) fn validate_screening_params(
         || params.positive_free_cash_flow == Some(true)
         || params.min_operating_margin_percent.is_some()
         || params.margins_yoy_up == Some(true)
+        || params.revenue_record == Some(true)
         || params.min_rs_score.is_some()
         || params.min_foreign_streak.is_some()
         || params.min_trust_streak.is_some()

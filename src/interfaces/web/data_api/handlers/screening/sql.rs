@@ -13,6 +13,8 @@
 /// 索引），`$25` 為門檻（元，`NULL` 為不限）；`$24` 是外層附加的 `LIMIT`。
 /// 營業利益率、稅後淨利率與三率三升取 Yahoo 最新一季單季損益表（`income_statement_history_idx`），
 /// 三率三升比較去年同一季；新鮮度同財務體質（兩季內）。`$26` 營業利益率下限、`$27` 是否只選三率三升。
+/// 營收創歷史新高：最新一月營收高於之前所有月份（之前至少 12 個月才判斷），新鮮度同月營收；
+/// `$28` 是否只選創新高。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -25,6 +27,7 @@ WITH latest AS (
         r.revenue_raw_monthly,
         r.revenue_yoy_streak_raw,
         r.revenue_yoy_3m_raw,
+        rh.revenue_record_raw,
         f.year AS financial_year,
         f.quarter AS financial_quarter,
         f.earnings_per_share AS eps_raw,
@@ -85,6 +88,14 @@ WITH latest AS (
             ) recent
         ) ranked
     ) r ON TRUE
+    LEFT JOIN LATERAL (
+        -- 最新一月之前所有月份的最高營收；之前不滿 12 個月不判斷（NULL）。
+        SELECT CASE WHEN COUNT(*) >= 12 THEN r.revenue_raw_monthly > MAX("Monthly") END
+                   AS revenue_record_raw
+        FROM "Revenue"
+        WHERE "SecurityCode" = s.stock_symbol
+          AND "Date" < r.revenue_raw_month
+    ) rh ON TRUE
     LEFT JOIN LATERAL (
         SELECT year, quarter, earnings_per_share, return_on_equity
         FROM financial_statement
@@ -183,6 +194,12 @@ WITH latest AS (
               - ((revenue_raw_month / 100)::int * 12
                 + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
           THEN revenue_raw_monthly END AS monthly_revenue,
+        CASE WHEN revenue_raw_month IS NOT NULL
+          AND ((EXTRACT(YEAR FROM $3::date)::int * 12
+                + EXTRACT(MONTH FROM $3::date)::int)
+              - ((revenue_raw_month / 100)::int * 12
+                + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
+          THEN revenue_record_raw END AS revenue_record,
         CASE WHEN financial_year IS NOT NULL
           AND ((EXTRACT(YEAR FROM $3::date)::int * 4
                 + EXTRACT(QUARTER FROM $3::date)::int)
@@ -239,7 +256,7 @@ WITH latest AS (
 )
 SELECT
     stock_symbol, name, market_id, industry_id,
-    revenue_yoy_percent, revenue_yoy_streak, revenue_yoy_3m_percent, monthly_revenue,
+    revenue_yoy_percent, revenue_yoy_streak, revenue_yoy_3m_percent, monthly_revenue, revenue_record,
     earnings_per_share, return_on_equity, dividend_yield_percent, valuation_band, valuation_percentage,
     revenue_raw_month AS revenue_month,
     financial_year, financial_quarter,
@@ -277,4 +294,5 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($25::numeric IS NULL OR avg_trade_value >= $25)
   AND ($26::numeric IS NULL OR operating_margin_percent >= $26)
   AND (NOT $27::bool OR margins_yoy_up IS TRUE)
+  AND (NOT $28::bool OR revenue_record IS TRUE)
 "#;
