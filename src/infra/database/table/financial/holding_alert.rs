@@ -69,7 +69,9 @@ SELECT
     reg.reg_slope,
     reg.reg_intercept,
     reg.reg_r2,
-    reg.reg_quarters
+    reg.reg_quarters,
+    record.previous_high,
+    decline.yoy_decline_months
 FROM "Revenue" AS r
 INNER JOIN stocks AS s ON s.stock_symbol = r."stock_symbol"
 LEFT JOIN stock_industry AS si ON si.stock_industry_id = s.stock_industry_id
@@ -167,6 +169,32 @@ LEFT JOIN LATERAL (
         LIMIT 4
     ) AS recent
 ) AS margin ON TRUE
+LEFT JOIN LATERAL (
+    -- 之前所有月份的最高營收；之前不滿 12 個月不判斷是否創新高。
+    SELECT CASE WHEN COUNT(*) >= 12 THEN MAX(h."Monthly") END AS previous_high
+    FROM "Revenue" AS h
+    WHERE h."stock_symbol" = r."stock_symbol" AND h."Date" < r."Date"
+) AS record ON TRUE
+LEFT JOIN LATERAL (
+    -- 從當月往回、月份相連且年增率為負的月數（最多看 12 個月）。
+    SELECT COALESCE(
+               MIN(rn) FILTER (WHERE NOT (yoy < 0 AND ord = first_ord - rn + 1)) - 1,
+               COUNT(*)
+           ) AS yoy_decline_months
+    FROM (
+        SELECT yoy, ord,
+            ROW_NUMBER() OVER (ORDER BY ord DESC) AS rn,
+            FIRST_VALUE(ord) OVER (ORDER BY ord DESC) AS first_ord
+        FROM (
+            SELECT d."ComparedWithLastYearSameMonth" AS yoy,
+                (d."Date" / 100)::int * 12 + (d."Date" % 100)::int AS ord
+            FROM "Revenue" AS d
+            WHERE d."stock_symbol" = r."stock_symbol" AND d."Date" <= r."Date"
+            ORDER BY d."Date" DESC
+            LIMIT 12
+        ) AS recent
+    ) AS ranked
+) AS decline ON TRUE
 WHERE r."Date" = $1
     AND r."stock_symbol" IN (
         SELECT security_code FROM stock_ownership_details WHERE is_sold = false
@@ -197,6 +225,8 @@ ORDER BY r."ComparedWithLastYearSameMonth" DESC, r."stock_symbol"
             reg_intercept: row.try_get("reg_intercept")?,
             reg_r2: row.try_get("reg_r2")?,
             reg_quarters: row.try_get("reg_quarters")?,
+            previous_high: row.try_get("previous_high")?,
+            yoy_decline_months: row.try_get("yoy_decline_months")?,
         })
     })
     .fetch_all(database::get_connection())
@@ -531,6 +561,60 @@ mod tests {
         assert_eq!(a.year, 2026);
         assert_eq!(a.quarter, "Q2");
         assert_eq!(a.earnings_per_share, dec!(1.8));
+
+        cleanup().await;
+    }
+
+    /// 創歷史新高與連續年減：A 在 1989-07～1990-07 每月 100、1990-08 為 150（高於之前 13 個月）；
+    /// B 只有 1990-05～08 四個月（不滿 12 個月不判斷新高），年增率 +1、−1、−2、−3（連續 3 個月年減）。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn test_fetch_holding_revenue_alerts_marks_record_and_decline() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!(
+                "跳過 test_fetch_holding_revenue_alerts_marks_record_and_decline：無資料庫連接"
+            );
+            return;
+        }
+        cleanup().await;
+        seed_stock(FAKE_SYMBOL_A, "測試甲", TEST_INDUSTRY, 100_000_000).await;
+        seed_stock(FAKE_SYMBOL_B, "測試乙", TEST_INDUSTRY, 100_000_000).await;
+        for sql in [
+            r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "Monthly", "ComparedWithLastYearSameMonth")
+               SELECT '79979', '79979', to_char(month, 'YYYYMM')::bigint, 100, 5
+               FROM generate_series('1989-07-01'::date, '1990-07-01'::date, INTERVAL '1 month') AS month"#,
+            r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "Monthly", "ComparedWithLastYearSameMonth")
+               VALUES ('79979', '79979', 199008, 150, 50),
+                      ('79978', '79978', 199005, 100, 1), ('79978', '79978', 199006, 100, -1),
+                      ('79978', '79978', 199007, 100, -2), ('79978', '79978', 199008, 100, -3)"#,
+        ] {
+            sqlx::query(sql)
+                .execute(database::get_connection())
+                .await
+                .expect("種入月營收");
+        }
+
+        let alerts = fetch_holding_revenue_alerts(199008)
+            .await
+            .expect("fetch_holding_revenue_alerts");
+        let find = |symbol: &str| {
+            alerts
+                .iter()
+                .find(|alert| alert.stock_symbol == symbol)
+                .expect("symbol")
+        };
+        let a = find(FAKE_SYMBOL_A);
+        assert_eq!(a.previous_high, Some(dec!(100)));
+        assert!(a.is_record_high());
+        assert_eq!(a.yoy_decline_months, 0);
+        let b = find(FAKE_SYMBOL_B);
+        assert_eq!(b.previous_high, None);
+        assert!(!b.is_record_high());
+        assert_eq!(b.yoy_decline_months, 3);
 
         cleanup().await;
     }

@@ -14,7 +14,7 @@
 /// 營業利益率、稅後淨利率與三率三升取 Yahoo 最新一季單季損益表（`income_statement_history_idx`），
 /// 三率三升比較去年同一季；新鮮度同財務體質（兩季內）。`$26` 營業利益率下限、`$27` 是否只選三率三升。
 /// 營收創歷史新高：最新一月營收高於之前所有月份（之前至少 12 個月才判斷），新鮮度同月營收；
-/// `$28` 是否只選創新高。
+/// `$28` 是否只選創新高；`$29` 排除的產業 id（`NULL` 為不排除）。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -167,6 +167,7 @@ WITH latest AS (
     WHERE (($1::int = 0 AND s.stock_exchange_market_id IN (2, 4))
         OR ($1::int <> 0 AND s.stock_exchange_market_id = $1))
       AND ($2::int IS NULL OR s.stock_industry_id = $2)
+      AND ($29::int[] IS NULL OR NOT s.stock_industry_id = ANY($29))
 ), normalized AS (
     SELECT
         latest.*,
