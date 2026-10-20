@@ -22,7 +22,7 @@ use crate::{core::declare, core::util};
 pub mod bank_of_taiwan;
 /// IP 資訊服務 (BigDataCloud)
 pub mod bigdatacloud;
-/// BigGo 財經 (三大財報，作為 Yahoo 財報的備援)
+// BigGo 財經 (三大財報，作為 Yahoo 財報的備援)
 pub mod biggo;
 /// 理財寶 - 股市爆料同學會 (提供即時股價與社群資訊)
 pub mod cmoney;
@@ -56,11 +56,11 @@ pub mod price_tasks;
 pub mod seeip;
 /// 內部共享模組，包含多個來源共用的解析邏輯 (如元大、嘉實、富邦)
 pub mod share;
-/// 站點池與股價聚合（多來源輪詢、備援與延遲統計）
+// 站點池與股價聚合（多來源輪詢、備援與延遲統計）
 mod site_pool;
 /// 臺灣期貨交易所 (TAIFEX)
 pub mod taifex;
-/// 臺灣集中保管結算所 (TDCC, 集保戶股權分散表)
+// 臺灣集中保管結算所 (TDCC, 集保戶股權分散表)
 pub mod tdcc;
 /// 臺灣證券櫃檯買賣中心 (TPEX, 指數與上櫃股票資料)
 pub mod tpex;
@@ -68,7 +68,7 @@ pub mod tpex;
 pub mod twse;
 /// 撿股讚 (提供股利與選股資料)
 pub mod wespai;
-/// Winvest (提供即時行情與多維度個股資料)
+// Winvest (提供即時行情與多維度個股資料)
 pub mod winvest;
 /// Yahoo 財經 (國際與台灣股市即時行情)
 pub mod yahoo;

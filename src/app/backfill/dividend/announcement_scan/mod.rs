@@ -73,17 +73,17 @@ use crate::infra::{
     database::repository::dividend::PgDividendRepository,
 };
 
-/// 把異動計畫逐筆套用到資料庫。
+// 把異動計畫逐筆套用到資料庫。
 mod apply;
-/// 異動計畫的彙整。
+// 異動計畫的彙整。
 mod plan;
-/// 期別判定的資料模型與第一階段配對。
+// 期別判定的資料模型與第一階段配對。
 mod quarter;
-/// 既有資料列的比對與資料列組裝。
+// 既有資料列的比對與資料列組裝。
 mod row;
-/// 各資料來源的擷取與正規化。
+// 各資料來源的擷取與正規化。
 mod source;
-/// 第二階段：逐檔查詢 Yahoo 補救期別。
+// 第二階段：逐檔查詢 Yahoo 補救期別。
 mod yahoo_fallback;
 
 /// 測試共用的夾具。

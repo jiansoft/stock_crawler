@@ -106,7 +106,7 @@ pub(super) fn collect_changed_price_updates(
 /// 啟動定時快取任務。
 ///
 /// 此任務會固定重新抓取 HiStock 全市場排行榜，並以全量覆蓋方式更新
-/// [`SHARE`](infra::cache::SHARE) 的即時報價快取。
+/// [`SHARE`] 的即時報價快取。
 ///
 /// 若任務已在執行中，重複呼叫不會再額外啟動第二個背景迴圈。
 pub fn start_caching_task() {

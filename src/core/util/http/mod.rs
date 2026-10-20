@@ -19,7 +19,7 @@ pub mod element;
 mod redact;
 /// 請求的送出與重試。
 mod send;
-/// 隨機 User-Agent 產生器。
+// 隨機 User-Agent 產生器。
 pub mod user_agent;
 
 pub use redact::{redact_secrets, redact_url};
@@ -89,7 +89,7 @@ pub struct Empty {}
 pub trait TextForceBig5 {
     /// Converts the body of a reqwest::Response from Big5 encoding to UTF-8 encoding.
     ///
-    /// This method awaits the bytes of the response, converts them to a Vec<u8>,
+    /// This method awaits the bytes of the response, converts them to a `Vec<u8>`,
     /// and then calls `big5_2_utf8` function to perform the encoding conversion.
     ///
     /// # Returns

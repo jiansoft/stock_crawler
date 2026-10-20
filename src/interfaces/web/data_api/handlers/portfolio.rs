@@ -4,7 +4,7 @@
 //! `last_daily_quotes`，殖利率取 `yield_rank` 最新一筆（31 天內），F 分數取
 //! `financial_health`（評分年度落後 1–2 年內）。彙總規則在
 //! [`crate::domain::portfolio::summary`]。另附每檔的相對強度分數（同
-//! [`super::relative_strength`]）與外資、投信連續買賣超天數（同 [`super::institutional_flow`]），
+//! [`mod@super::relative_strength`]）與外資、投信連續買賣超天數（同 [`mod@super::institutional_flow`]），
 //! 以及最新月營收、最近一季三率與基本面警示（規則在 [`crate::domain::portfolio::health`]）：
 //! 月營收超過 2 個月沒更新、財報落後超過 2 季視為過期。
 

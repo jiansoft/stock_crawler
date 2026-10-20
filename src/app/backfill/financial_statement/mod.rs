@@ -21,7 +21,7 @@ use crate::{
 
 /// 更新台股年度財報
 pub mod annual;
-/// 更新台股季度財報
+// 更新台股季度財報
 pub mod quarter;
 
 /// nstock 查過的股票，這段時間內不再查（3 天）。

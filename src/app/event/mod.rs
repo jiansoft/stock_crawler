@@ -1,4 +1,4 @@
-/// 領域事件處理器與派發器
+// 領域事件處理器與派發器
 pub mod handlers;
 /// 台股事件
 pub mod taiwan_stock;

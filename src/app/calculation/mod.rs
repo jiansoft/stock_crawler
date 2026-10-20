@@ -1,4 +1,4 @@
-/// 固定投入 10,000 元的各期間年化報酬率（CAGR）
+// 固定投入 10,000 元的各期間年化報酬率（CAGR）
 pub mod cagr;
 /// 股票每日行情
 pub mod daily_quotes;
@@ -8,7 +8,7 @@ pub mod dividend_record;
 pub mod estimated_price;
 /// 每日重算全市場財務體質（F 分數與選股季報指標）
 pub mod financial_health;
-/// 收盤後回填訊號績效用的未來報酬
+// 收盤後回填訊號績效用的未來報酬
 pub mod forward_return;
 /// 計算每日市值
 pub mod money_history;

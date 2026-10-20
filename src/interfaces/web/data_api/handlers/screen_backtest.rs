@@ -22,7 +22,7 @@
 //! [`stops`]）。
 //!
 //! 子模組：[`engine`]（驗證條件、查候選股、決定持股與扣成本的回測引擎，各端點共用）、[`attribution`]（相對類 0050 基準的報酬歸因端點）、[`sql`]（回測 SQL）、[`portfolio`]（每期持股與交易成本）、[`summary`]（績效彙總）、
-//! [`contributors`]（個股貢獻）、[`current`]（目前持股）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
+//! [`mod@contributors`]（個股貢獻）、[`current`]（目前持股）、[`offsets`]（換股日偏移穩健度端點）、[`frontier`]（0050 核心部位
 //! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`preset`]（具名策略 `preset=名稱` 與清單端點）、[`stops`]（期間停損）、[`track`]（具名策略實盤追蹤端點）、[`walk_forward`]（滾動前推最佳化端點）。
 
 mod attribution;
@@ -107,7 +107,7 @@ const RANK_BY: [&str; 6] = [
     "operating_margin",
 ];
 
-/// [`BACKTEST_SQL`] 的一列：換股日、基準與依相對強度由高到低的候選股（與報酬一一對應）。
+/// [`BACKTEST_SQL`](sql::BACKTEST_SQL) 的一列：換股日、基準與依相對強度由高到低的候選股（與報酬一一對應）。
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 struct CandidateRow {
     date: NaiveDate,

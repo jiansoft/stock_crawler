@@ -1,6 +1,6 @@
 //! `/market/industry-flow` handler：三大法人資金在各產業的淨流入流出。
 //!
-//! 個股淨買賣沿用 [`super::institutional_flow`] 的期間累計（估計金額＝每日淨股數 × 當日收盤價），
+//! 個股淨買賣沿用 [`mod@super::institutional_flow`] 的期間累計（估計金額＝每日淨股數 × 當日收盤價），
 //! 依產業加總；另附買超／賣超家數、淨額占產業成交金額的比例與買賣超金額最大的個股。
 
 use std::collections::BTreeMap;

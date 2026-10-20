@@ -64,7 +64,7 @@ impl Dividend {
     /// 按照年份和除權息日取得數據
     ///
     /// 年度合計列（同一發放年度另有分期明細時的 `quarter = ''`）是加總而非一次配發，必須排除；
-    /// 判定方式與 [`crate::infra::database::repository::dividend::PgDividendRepository::fetch_dividends_summary_by_date`]
+    /// 判定方式與 [`DividendRepository::fetch_dividends_summary_by_date`](crate::domain::dividend::repository::DividendRepository::fetch_dividends_summary_by_date)
     /// 一致，該處有完整說明。
     pub async fn fetch_dividends_summary_by_date(
         security_code: &str,

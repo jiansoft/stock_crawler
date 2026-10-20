@@ -45,7 +45,7 @@ use crate::{
     },
 };
 
-/// 交易所資料補 ETF 配息。
+// 交易所資料補 ETF 配息。
 mod exchange_fill;
 /// 比對規則（同日、日期延後、日期未公布）。
 mod plan;

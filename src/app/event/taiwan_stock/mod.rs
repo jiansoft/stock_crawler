@@ -1,40 +1,40 @@
 /// 財務年報
 pub mod annual_eps;
-/// 持股主力進出通知（買超、賣超前幾名券商分點）
+// 持股主力進出通知（買超、賣超前幾名券商分點）
 pub mod broker_flow;
-/// 持股三大法人與融資融券通知
+// 持股三大法人與融資融券通知
 pub mod chip_flow;
 /// 收盤事件
 pub mod closing;
-/// 每週資料健康檢查
+// 每週資料健康檢查
 pub mod data_health;
-/// 持股法說會通知（BigGo 整理的摘要、展望與 Q&A 重點）
+// 持股法說會通知（BigGo 整理的摘要、展望與 Q&A 重點）
 pub mod earnings_call;
 /// 除息日的事件
 pub mod ex_dividend;
-/// 持股財務體質（F 分數）變化通知
+// 持股財務體質（F 分數）變化通知
 pub mod health_alert;
-/// 持股千張大戶比例週報（集保股權分散表）
+// 持股千張大戶比例週報（集保股權分散表）
 pub mod holder_distribution;
 /// 持股通知共用（持股普通股代號、股名）
 pub(crate) mod holdings;
-/// 持股董監質押變動通知
+// 持股董監質押變動通知
 pub mod insider_pledge;
-/// 大盤趨勢變化通知（加權指數站上或跌破 60／240 日均線、均線排列改變）
+// 大盤趨勢變化通知（加權指數站上或跌破 60／240 日均線、均線排列改變）
 pub mod market_regime_alert;
 /// 股利發放日的事件
 pub mod payable_date;
 /// 公開申購公告
 pub mod public;
-/// 財務季報
+// 財務季報
 pub mod quarter_eps;
-/// 策略換股通知（依設定的條件選股回測，換股日通知新買進、續抱與賣出）
+// 策略換股通知（依設定的條件選股回測，換股日通知新買進、續抱與賣出）
 pub mod strategy_alert;
-/// 持股技術訊號通知（52 週新高新低、站上或跌破季線年線、中期均線交叉）
+// 持股技術訊號通知（52 週新高新低、站上或跌破季線年線、中期均線交叉）
 pub mod technical_alert;
-/// 持股估值週報（本益比／股價淨值比位於近 5 年高檔或低檔）
+// 持股估值週報（本益比／股價淨值比位於近 5 年高檔或低檔）
 pub mod valuation_alert;
-/// 每週市場摘要（產業相對強度、法人產業淨買賣、持股 RS 變化）
+// 每週市場摘要（產業相對強度、法人產業淨買賣、持股 RS 變化）
 pub mod weekly_market;
 
 use rust_decimal::Decimal;

@@ -88,6 +88,13 @@ jobs:
       # -D warnings：把警告升級成錯誤——CI 的警告沒人會回頭看，
       #   不擋下來等於沒檢查。
       run: cargo clippy --all-targets --all-features --locked -- -D warnings
+    - name: Rustdoc
+      # 檢查文件裡的 intra-doc 連結：路徑寫錯、模組改名或拆檔後連結失效都會擋下。
+      # --document-private-items：這是應用程式，文件給維護者看，私有項目也要能連；
+      #   因此允許 private_intra_doc_links（公開文件連到私有項目）。
+      run: cargo doc --no-deps --locked --document-private-items
+      env:
+        RUSTDOCFLAGS: -D warnings -A rustdoc::private_intra_doc_links
 
   proto-lint:
     name: Proto Lint

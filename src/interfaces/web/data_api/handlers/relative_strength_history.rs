@@ -1,6 +1,6 @@
 //! `/stocks/{symbol}/relative-strength` handler：個股近 N 個交易日的相對強度走勢。
 //!
-//! 每個交易日的分數與 [`super::relative_strength`] 排行同一算法：近 N 日報酬取
+//! 每個交易日的分數與 [`mod@super::relative_strength`] 排行同一算法：近 N 日報酬取
 //! `daily_forward_return` 基準日 T−N 的 N 日欄位，加權報酬＝0.4 × 近 60 日 ＋ 0.3 × 近 120 日
 //! ＋ 0.3 × 近 240 日，分數是比它弱的家數在上市櫃普通股（不含 ETF、特別股）中的百分位。每天都要以全體排名，
 //! 由 [`RelativeStrengthQuery`] 一次查詢在資料庫內以視窗函式算完，只回傳這檔股票的列。

@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use anyhow::Result;
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 
-/// Backfill admin 的 Web UI 與 HTTP API。
+// Backfill admin 的 Web UI 與 HTTP API。
 pub mod backfill_admin;
 /// 供內網服務讀取股票資料的版本化唯讀 API。
 pub mod data_api;
