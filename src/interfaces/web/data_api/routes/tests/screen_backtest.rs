@@ -50,6 +50,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
         "DELETE FROM financial_statement WHERE security_code = ANY($1)",
         "DELETE FROM income_statement WHERE stock_symbol = ANY($1)",
         "DELETE FROM balance_sheet WHERE stock_symbol = ANY($1)",
+        "DELETE FROM cash_flow_statement WHERE stock_symbol = ANY($1)",
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
