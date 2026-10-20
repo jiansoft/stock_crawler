@@ -103,6 +103,10 @@ pub trait FinancialReportRepository: Send + Sync {
 
     /// 批次 upsert 現金流量表，回傳受影響列數（含數值未變、僅更新 `fetched_at` 的列）。
     async fn save_cash_flow_statements(&self, statements: &[CashFlowStatement]) -> Result<u64>;
+
+    /// 官方季報（`financial_statement`）在最近 `published_within_days` 天內新公布、
+    /// 但損益表（Yahoo 或 BigGo 單季）還沒有那一季的股票代號，依代號排序。
+    async fn fetch_lagging_symbols(&self, published_within_days: i32) -> Result<Vec<String>>;
 }
 
 /// 財務體質（F 分數與選股用季報指標）之倉儲介面。

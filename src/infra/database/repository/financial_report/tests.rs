@@ -329,3 +329,80 @@ async fn test_save_touches_updated_at_only_when_values_change() {
 
     cleanup().await;
 }
+
+/// 落後判斷用的假代號：LA 官方新公布 Q2、Yahoo 只到 Q1；LB 官方新公布 Q2、BigGo 已有 Q2；
+/// LC 官方 Q2 是 60 天前公布；LD 官方新公布 Q1（另有年度列）、損益表完全沒有。
+const LAGGING_SYMBOLS: [&str; 4] = ["79979LA", "79979LB", "79979LC", "79979LD"];
+
+async fn cleanup_lagging() {
+    for table in ["financial_statement", "income_statement"] {
+        let column = if table == "financial_statement" {
+            "security_code"
+        } else {
+            "stock_symbol"
+        };
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM {table} WHERE {column} = ANY($1)"
+        )))
+        .bind(&LAGGING_SYMBOLS[..])
+        .execute(database::get_connection())
+        .await;
+    }
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn test_fetch_lagging_symbols() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 test_fetch_lagging_symbols：無資料庫連接");
+        return;
+    }
+    cleanup_lagging().await;
+
+    for (symbol, quarter, days_ago) in [
+        ("79979LA", "Q1", 0),
+        ("79979LA", "Q2", 0),
+        ("79979LB", "Q2", 0),
+        ("79979LC", "Q2", 60),
+        ("79979LD", "Q1", 0),
+        ("79979LD", "A", 0),
+    ] {
+        sqlx::query(
+            "INSERT INTO financial_statement (security_code, \"year\", quarter, created_time) \
+             VALUES ($1, $2, $3, now() - make_interval(days => $4))",
+        )
+        .bind(symbol)
+        .bind(i64::from(FAKE_YEAR))
+        .bind(quarter)
+        .bind(days_ago)
+        .execute(database::get_connection())
+        .await
+        .expect("insert official statement");
+    }
+    let statement = |symbol: &str, quarter: Quarter, source: &str| IncomeStatement {
+        stock_symbol: symbol.to_owned(),
+        source: source.to_owned(),
+        ..income_statement(StatementPeriod::Single(quarter), 1_000)
+    };
+    let repo = PgFinancialReportRepository::new();
+    repo.save_income_statements(&[
+        statement("79979LA", Quarter::Q1, "yahoo"),
+        statement("79979LB", Quarter::Q2, "biggo"),
+    ])
+    .await
+    .expect("save income statements");
+
+    let lagging = repo.fetch_lagging_symbols(30).await.expect("fetch lagging");
+    let fake: Vec<&str> = lagging
+        .iter()
+        .map(String::as_str)
+        .filter(|symbol| LAGGING_SYMBOLS.contains(symbol))
+        .collect();
+    assert_eq!(fake, ["79979LA", "79979LD"]);
+
+    cleanup_lagging().await;
+}

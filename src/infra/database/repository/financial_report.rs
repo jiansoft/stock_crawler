@@ -71,7 +71,43 @@ impl FinancialReportRepository for PgFinancialReportRepository {
         )
         .await
     }
+
+    async fn fetch_lagging_symbols(&self, published_within_days: i32) -> Result<Vec<String>> {
+        sqlx::query_scalar(LAGGING_SYMBOLS_SQL)
+            .bind(published_within_days)
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch symbols whose income statements lag the official reports")
+    }
 }
+
+/// 官方季報近期新公布、損益表還沒有那一季的股票。
+///
+/// 以 `created_time`（只在第一次寫入時設定）當作官方公布日；同一檔取期間內最新一季，
+/// Yahoo 與 BigGo 任一來源已有該季（或更新的季別）就不算落後。
+const LAGGING_SYMBOLS_SQL: &str = r#"
+WITH official AS (
+    SELECT DISTINCT ON (security_code)
+        security_code,
+        "year"::int AS fiscal_year,
+        quarter
+    FROM financial_statement
+    WHERE quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
+      AND created_time >= now() - make_interval(days => $1)
+    ORDER BY security_code, "year" DESC, quarter DESC
+)
+SELECT o.security_code
+FROM official AS o
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM income_statement AS i
+    WHERE i.source IN ('yahoo', 'biggo')
+      AND i.stock_symbol = o.security_code
+      AND i.period_type = 'single'
+      AND (i.fiscal_year, i.quarter) >= (o.fiscal_year, o.quarter)
+)
+ORDER BY o.security_code
+"#;
 
 /// 分批執行多列 upsert，回傳受影響列數總和。
 async fn upsert<T>(
