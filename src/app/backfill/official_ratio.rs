@@ -6,7 +6,7 @@
 //!
 //! | 函式 | 用途 |
 //! |------|------|
-//! | [`execute`] | 每日 17:30、20:30 排程：補最近 [`RECENT_DAYS`] 天的缺值 |
+//! | [`execute`] | 每日 17:30、20:30 排程：補最近 [`RECENT_DAYS`] 天的缺值，再重算同一段期間的市場估值水位（`daily_market_valuation`） |
 //! | [`backfill_range`] | 手動回補：逐日補一段期間（2012 年起約 3,400 個交易日、兩市場各一次請求） |
 //!
 //! 上市只處理「那天仍有缺值」的交易日（虧損股本益比本來就是 0，幾乎每天都會處理一次），
@@ -19,10 +19,15 @@ use anyhow::{Result, bail};
 use chrono::{Local, NaiveDate};
 
 use crate::{
-    domain::quote::official_ratio::{OfficialRatio, OfficialRatioRepository, PePolicy},
+    domain::{
+        market_index::valuation::MarketValuationRepository,
+        quote::official_ratio::{OfficialRatio, OfficialRatioRepository, PePolicy},
+    },
     infra::{
         crawler::{tpex, twse},
-        database::repository::quote::PgQuoteRepository,
+        database::repository::{
+            market_valuation::PgMarketValuationRepository, quote::PgQuoteRepository,
+        },
     },
 };
 
@@ -94,6 +99,14 @@ pub async fn execute() -> Result<()> {
         summary.updated_rows,
         summary.synced_latest_rows
     );
+    // 上櫃本益比以官方值覆寫，補值之後才重算中位數；失敗只記錄，下一次排程會再重算同一段期間。
+    match PgMarketValuationRepository::new()
+        .refresh_market_valuation(from, to)
+        .await
+    {
+        Ok(rows) => tracing::info!("重算市場估值水位結束: {from}～{to} {rows} 列"),
+        Err(why) => tracing::error!("重算市場估值水位失敗: {why:#}"),
+    }
     Ok(())
 }
 

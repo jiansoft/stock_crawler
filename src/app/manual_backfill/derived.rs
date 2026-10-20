@@ -12,6 +12,9 @@
 //! - `test_backfill_market_breadth`：
 //!   逐日補上 `MANUAL_MARKET_BREADTH_FROM`～`MANUAL_MARKET_BREADTH_TO`（預設 2019-01-02～2022-02-16）
 //!   沒有統計列的市場廣度（`daily_stock_price_stats`）；已有的列不動，重跑安全。
+//! - `test_backfill_market_valuation`：
+//!   逐年重算 `MANUAL_MARKET_VALUATION_FROM`～`MANUAL_MARKET_VALUATION_TO`（預設 2012-01-02 至今天）每個
+//!   交易日的市場估值水位（`daily_market_valuation`）；只讀日線，同一天同市場覆蓋，重跑安全。
 //! - `test_record_strategy_rebalance`：
 //!   把具名策略（`MANUAL_STRATEGY_PRESET`，預設「最佳組合」）目前這一期的持股寫進換股紀錄
 //!   （`strategy_rebalance`），供實盤追蹤；同一天已有紀錄不覆蓋，重跑安全。
@@ -24,6 +27,9 @@ const MANUAL_FORWARD_RETURN_FROM: &str = "2019-01-02";
 
 /// 每日相對強度回填的預設起日：240 日報酬的基準日從 2018 年初齊，相對強度從 2019 年初起算。
 const MANUAL_RELATIVE_STRENGTH_FROM: &str = "2019-01-02";
+
+/// 市場估值水位回補的預設起日：官方本益比與股價淨值比從 2012 年起回補。
+const MANUAL_MARKET_VALUATION_FROM: &str = "2012-01-02";
 
 /// 技術訊號回補的預設起日。
 const MANUAL_TECHNICAL_SIGNAL_FROM: &str = "2026-09-01";
@@ -110,6 +116,46 @@ async fn test_backfill_relative_strength() {
         }
     }
     println!("相對強度回填 {from}～{to}：{days} 個交易日、共 {total} 列");
+}
+
+/// 逐年重算市場估值水位（`daily_market_valuation`）。
+///
+/// 只讀資料庫既有日線，同一天同市場覆蓋，重跑安全。起訖日可用環境變數
+/// `MANUAL_MARKET_VALUATION_FROM`／`MANUAL_MARKET_VALUATION_TO` 覆寫。
+///
+/// 執行範例：
+/// `cargo test app::manual_backfill::derived::test_backfill_market_valuation -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_market_valuation() {
+    use crate::domain::market_index::valuation::MarketValuationRepository;
+    use crate::infra::database::repository::market_valuation::PgMarketValuationRepository;
+
+    dotenvy::dotenv().ok();
+    let today = chrono::Local::now().date_naive().to_string();
+    let date = |name: &str, default: &str| {
+        let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
+        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+    };
+    let from = date("MANUAL_MARKET_VALUATION_FROM", MANUAL_MARKET_VALUATION_FROM);
+    let to = date("MANUAL_MARKET_VALUATION_TO", &today);
+    let repo = PgMarketValuationRepository::new();
+    let mut total = 0;
+    let mut start = from;
+    while start <= to {
+        let end = NaiveDate::from_ymd_opt(chrono::Datelike::year(&start), 12, 31)
+            .expect("合法日期")
+            .min(to);
+        let rows = repo
+            .refresh_market_valuation(start, end)
+            .await
+            .unwrap_or_else(|why| panic!("{start}～{end} 重算失敗：{why:#}"));
+        println!("{start}～{end}：{rows} 列");
+        total += rows;
+        start = end.succ_opt().expect("合法日期");
+    }
+    println!("市場估值水位回補 {from}～{to}：共 {total} 列");
 }
 
 /// 逐日重算全市場技術訊號（`daily_technical_signal`）。

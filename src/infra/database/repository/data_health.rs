@@ -18,7 +18,7 @@ use crate::{
 /// 每日收盤後會更新的衍生資料表，與各自的日期欄位。
 ///
 /// 表名與欄位名無法用參數綁定，只能寫死在這裡；新增衍生表時同步加入。
-const DERIVED_TABLES: [(&str, &str); 10] = [
+const DERIVED_TABLES: [(&str, &str); 11] = [
     ("estimate", "SELECT max(date) FROM estimate"),
     ("yield_rank", "SELECT max(date) FROM yield_rank"),
     (
@@ -40,6 +40,10 @@ const DERIVED_TABLES: [(&str, &str); 10] = [
         "SELECT max(date) FROM daily_relative_strength",
     ),
     ("chip_daily", "SELECT max(date) FROM chip_daily"),
+    (
+        "daily_market_valuation",
+        "SELECT max(date) FROM daily_market_valuation",
+    ),
     // 基準日要再過 5 個交易日才有 5 日報酬，看「有 5 日報酬的最新基準日」。
     (
         "daily_forward_return",

@@ -6,6 +6,8 @@ pub mod entity;
 pub mod regime;
 /// 市場指數倉儲介面模組。
 pub mod repository;
+/// 市場估值水位（上市櫃本益比與股價淨值比每日中位數）。
+pub mod valuation;
 
 pub use entity::MarketIndex;
 pub use repository::MarketIndexRepository;

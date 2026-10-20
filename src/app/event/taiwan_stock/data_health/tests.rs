@@ -48,6 +48,7 @@ fn healthy() -> DataHealthSnapshot {
             ("daily_technical_signal", day(9)),
             ("daily_relative_strength", day(9)),
             ("chip_daily", day(8)),
+            ("daily_market_valuation", day(9)),
             ("daily_forward_return", day(2)),
         ]
         .into_iter()
