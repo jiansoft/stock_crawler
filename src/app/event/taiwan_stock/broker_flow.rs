@@ -9,11 +9,14 @@
 //! 2. 逐檔抓富邦證券（MoneyDJ）主力進出頁；頁面日期不是今天（休市或尚未更新）的股票略過。
 //! 3. 主力買賣超佔成交量達 [`MAIN_SHARE_THRESHOLD`]%、且張數達 [`MIN_MAIN_NET_LOTS`] 張的股票
 //!    才放進通知，依佔成交量比重由買超到賣超排列；沒有任何一檔達標就不發訊息。
+//! 4. 每檔另附含今天在內最近 [`HISTORY_DAYS`] 個有主力資料的交易日的主力累計，看今天是延續還是
+//!    反轉；讀取失敗或只有今天一天時不附。
 //!
 //! 抓到的今天資料（不論是否達門檻）都寫入 `broker_flow` 表。
 //!
 //! 每天只跑一次，不另外記錄已通知；服務在 20:40 之後才重啟也不會補發。
 
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::time::Duration;
 
@@ -21,8 +24,11 @@ use super::{add_thousand_separators, format_decimal_with_commas, holdings};
 use crate::{
     app::backfill,
     core::{alert, util::text},
-    domain::portfolio::chip,
-    infra::crawler::fbs::broker_flow::{self, BrokerFlow, BrokerNet},
+    domain::portfolio::chip::{self, BrokerPeriodNet, HoldingBrokerQuery},
+    infra::{
+        crawler::fbs::broker_flow::{self, BrokerFlow, BrokerNet},
+        database::repository::portfolio::PgPortfolioRepository,
+    },
 };
 use anyhow::{Context, Result};
 use chrono::{Local, NaiveDate};
@@ -34,6 +40,9 @@ pub use crate::domain::portfolio::chip::{
 
 /// 每側列出的分點數。
 const TOP_BROKERS: usize = 3;
+
+/// 主力累計涵蓋的交易日數（含今天）。
+const HISTORY_DAYS: usize = 5;
 
 /// 股票之間的請求間隔。
 const STOCK_INTERVAL: Duration = Duration::from_millis(500);
@@ -84,7 +93,18 @@ pub async fn execute() -> Result<()> {
     let notable = notable_flows(flows);
     summary.notable = notable.len();
     if !notable.is_empty() {
-        let message = build_message(today, &notable, summary.fetched, holdings::stock_name);
+        let symbols: Vec<String> = notable
+            .iter()
+            .map(|flow| flow.stock_symbol.clone())
+            .collect();
+        let history = load_history(&PgPortfolioRepository::new(), today, &symbols).await;
+        let message = build_message(
+            today,
+            &notable,
+            summary.fetched,
+            history.as_ref(),
+            holdings::stock_name,
+        );
         alert::send_message(&message).await;
     }
 
@@ -97,6 +117,55 @@ pub async fn execute() -> Result<()> {
         summary.notable
     );
     Ok(())
+}
+
+/// 近幾個交易日的主力累計：實際涵蓋的交易日數與各股合計。
+#[derive(Debug, Default)]
+struct BrokerHistory {
+    days: usize,
+    nets: HashMap<String, BrokerPeriodNet>,
+}
+
+/// 讀取 `today`（含）之前最近 [`HISTORY_DAYS`] 個有主力資料的交易日裡 `symbols` 的主力合計；
+/// 只有今天一天時回 `None`，查詢失敗只記錄警告、也回 `None`。
+async fn load_history(
+    repository: &impl HoldingBrokerQuery,
+    today: NaiveDate,
+    symbols: &[String],
+) -> Option<BrokerHistory> {
+    let history = async {
+        let dates = repository.fetch_broker_dates(today, HISTORY_DAYS).await?;
+        let Some(&from) = dates.last().filter(|_| dates.len() > 1) else {
+            return Ok(None);
+        };
+        let nets = repository.fetch_broker_period(from, today, symbols).await?;
+        Ok::<_, anyhow::Error>(Some(BrokerHistory {
+            days: dates.len(),
+            nets: nets
+                .into_iter()
+                .map(|net| (net.stock_symbol.clone(), net))
+                .collect(),
+        }))
+    }
+    .await;
+    history.unwrap_or_else(|why| {
+        tracing::warn!("讀取持股主力近日累計失敗: {why:#}");
+        None
+    })
+}
+
+/// 主力累計一行：方向、張數與買超、賣超天數。
+fn history_line(days: usize, net: &BrokerPeriodNet) -> String {
+    let lots = add_thousand_separators(&net.main_net.abs().to_string());
+    let amount = match net.main_net.signum() {
+        1 => format!("買超 {lots} 張"),
+        -1 => format!("賣超 {lots} 張"),
+        _ => "持平".to_string(),
+    };
+    format!(
+        "近 {days} 日主力{amount}（買超 {} 日、賣超 {} 日）",
+        net.buy_days, net.sell_days
+    )
 }
 
 /// 主力動作是否明顯：比重與張數都達門檻。
@@ -118,6 +187,7 @@ fn build_message(
     date: NaiveDate,
     flows: &[BrokerFlow],
     checked: usize,
+    history: Option<&BrokerHistory>,
     stock_name: impl Fn(&str) -> String,
 ) -> String {
     let mut message = String::with_capacity(256 + flows.len() * 256);
@@ -143,10 +213,19 @@ fn build_message(
             add_thousand_separators(&net.abs().to_string()),
             format_decimal_with_commas(flow.main_share().abs())
         );
+        let _ = write!(&mut message, "\n{}\n", text::escape_markdown_v2(headline));
+        if let Some(history) = history
+            && let Some(net) = history.nets.get(&flow.stock_symbol)
+        {
+            let _ = writeln!(
+                &mut message,
+                "{}",
+                text::escape_markdown_v2(history_line(history.days, net))
+            );
+        }
         let _ = write!(
             &mut message,
-            "\n{}\n{}\n{}\n",
-            text::escape_markdown_v2(headline),
+            "{}\n{}\n",
             text::escape_markdown_v2(format!("買︰{}", top_brokers(&flow.buyers))),
             text::escape_markdown_v2(format!("賣︰{}", top_brokers(&flow.sellers)))
         );
@@ -264,20 +343,106 @@ mod tests {
             flow("2330", (8_109, dec!(30.72)), (0, dec!(0))),
             flow("1101", (0, dec!(0)), (11_926, dec!(33.37))),
         ];
-        let message = build_message(date, &flows, 44, |symbol| match symbol {
+        let history = BrokerHistory {
+            days: 5,
+            nets: HashMap::from([("2330".to_string(), period_net("2330", 12_500, 4, 1))]),
+        };
+        let message = build_message(date, &flows, 44, Some(&history), |symbol| match symbol {
             "2330" => "台積電".to_string(),
             _ => "台泥".to_string(),
         });
 
         assert!(message.starts_with("持股主力進出︰2026\\-10\\-05\n"));
         assert!(message.contains("主力買賣超佔成交量達 20% 的持股（今日資料 44 檔）"));
+        assert!(message.contains(
+            "\n2330 台積電 主力買超 8,109 張（30\\.72%）\n近 5 日主力買超 12,500 張（買超 4 日、賣超 1 日）\n買︰買方 8,109\n賣︰無\n"
+        ));
         assert!(
             message
-                .contains("\n2330 台積電 主力買超 8,109 張（30\\.72%）\n買︰買方 8,109\n賣︰無\n")
+                .contains("\n1101 台泥 主力賣超 11,926 張（33\\.37%）\n買︰無\n賣︰賣方 11,926\n"),
+            "沒有累計資料的股票不附累計行"
         );
-        assert!(
-            message
-                .contains("\n1101 台泥 主力賣超 11,926 張（33\\.37%）\n買︰無\n賣︰賣方 11,926\n")
+        let without = build_message(date, &flows, 44, None, |_| String::new());
+        assert!(!without.contains("近 5 日"));
+    }
+
+    fn period_net(symbol: &str, main_net: i64, buy_days: i64, sell_days: i64) -> BrokerPeriodNet {
+        BrokerPeriodNet {
+            stock_symbol: symbol.to_string(),
+            main_net,
+            buy_days,
+            sell_days,
+        }
+    }
+
+    /// 累計一行：買超、賣超與持平的寫法。
+    #[test]
+    fn history_line_shows_direction_and_days() {
+        assert_eq!(
+            history_line(5, &period_net("1301", -15_293, 1, 4)),
+            "近 5 日主力賣超 15,293 張（買超 1 日、賣超 4 日）"
         );
+        assert_eq!(
+            history_line(3, &period_net("1301", 0, 1, 1)),
+            "近 3 日主力持平（買超 1 日、賣超 1 日）"
+        );
+    }
+
+    /// 回傳固定主力交易日與期間合計的假倉儲；`fail` 時查交易日失敗。
+    struct FakeBrokers {
+        dates: Vec<NaiveDate>,
+        fail: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl HoldingBrokerQuery for FakeBrokers {
+        async fn fetch_broker_dates(
+            &self,
+            until: NaiveDate,
+            limit: usize,
+        ) -> Result<Vec<NaiveDate>> {
+            assert_eq!(limit, HISTORY_DAYS);
+            if self.fail {
+                anyhow::bail!("db down");
+            }
+            Ok(self.dates.iter().copied().filter(|d| *d <= until).collect())
+        }
+
+        async fn fetch_broker_period(
+            &self,
+            from: NaiveDate,
+            to: NaiveDate,
+            symbols: &[String],
+        ) -> Result<Vec<BrokerPeriodNet>> {
+            assert_eq!(symbols, ["2330"]);
+            Ok(vec![period_net("2330", (to - from).num_days(), 1, 0)])
+        }
+    }
+
+    /// 期間從最舊的主力交易日到今天；只有今天一天或查詢失敗時不附累計。
+    #[tokio::test]
+    async fn load_history_spans_recent_broker_days() {
+        let day = |d| NaiveDate::from_ymd_opt(2026, 10, d).unwrap();
+        let symbols = ["2330".to_string()];
+        let repository = FakeBrokers {
+            dates: vec![day(20), day(17), day(16)],
+            fail: false,
+        };
+        let history = load_history(&repository, day(20), &symbols)
+            .await
+            .expect("有三個交易日");
+        assert_eq!(history.days, 3);
+        assert_eq!(history.nets["2330"].main_net, 4, "期間 10-16～10-20");
+
+        let only_today = FakeBrokers {
+            dates: vec![day(20)],
+            fail: false,
+        };
+        assert!(load_history(&only_today, day(20), &symbols).await.is_none());
+        let failing = FakeBrokers {
+            dates: Vec::new(),
+            fail: true,
+        };
+        assert!(load_history(&failing, day(20), &symbols).await.is_none());
     }
 }
