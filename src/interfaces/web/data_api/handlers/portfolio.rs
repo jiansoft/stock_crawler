@@ -103,6 +103,7 @@ fn apply_fundamentals(fundamentals: HoldingFundamentals, holding: &mut Portfolio
         .signals
         .margin_trend()
         .map(|trend| margin_trend_code(trend).to_owned());
+    holding.free_cash_flow_ttm = fundamentals.signals.free_cash_flow_ttm;
     holding.warnings = fundamentals
         .signals
         .warnings()
@@ -365,6 +366,7 @@ mod tests {
                 revenue_decline_months: Some(3),
                 operating_margin: Some(-1.5),
                 margin_changes: [Some(-4.874), Some(-4.5), Some(-2.0)],
+                free_cash_flow_ttm: Some(-500),
             },
         };
         let response = build_response(
@@ -399,9 +401,15 @@ mod tests {
             (Some(40.13), Some(-1.5), Some(2.0))
         );
         assert_eq!(tsmc.margins_trend.as_deref(), Some("all_down"));
+        assert_eq!(tsmc.free_cash_flow_ttm, Some(-500));
         assert_eq!(
             tsmc.warnings,
-            ["revenue_decline", "margins_all_down", "operating_loss"]
+            [
+                "revenue_decline",
+                "margins_all_down",
+                "operating_loss",
+                "negative_free_cash_flow"
+            ]
         );
         let etf = holding("0050");
         assert!(etf.revenue_month.is_none() && etf.margin_period.is_none());

@@ -1,4 +1,4 @@
-//! 持股基本面（最新月營收與最近一季三率）的 PostgreSQL 查詢。
+//! 持股基本面（最新月營收、最近一季三率與近四季自由現金流）的 PostgreSQL 查詢。
 //!
 //! `/portfolio/summary` 與每週市場摘要共用；新鮮度與產業排除規則見
 //! [`crate::domain::portfolio::health::HoldingFundamentalsQuery`]。
@@ -18,9 +18,16 @@ const HOLDING_FUNDAMENTALS_SQL: &str = r#"
 SELECT held.stock_symbol,
     rv.revenue_month, rv.revenue_yoy, rv.revenue_decline_months,
     m.margin_year, m.margin_quarter, m.gross_margin, m.operating_margin, m.net_margin,
-    m.last_year_gross_margin, m.last_year_operating_margin, m.last_year_net_margin
+    m.last_year_gross_margin, m.last_year_operating_margin, m.last_year_net_margin,
+    h.free_cash_flow_ttm
 FROM UNNEST($1::text[]) AS held(stock_symbol)
 LEFT JOIN stocks s ON s.stock_symbol = held.stock_symbol
+-- 每日重算的財務體質：截至最新一季的近四季自由現金流（四季不齊為 NULL）；落後超過 2 季或 `$2` 產業不取。
+LEFT JOIN financial_health h
+       ON h.stock_symbol = held.stock_symbol
+      AND s.stock_industry_id IS DISTINCT FROM $2
+      AND (EXTRACT(YEAR FROM CURRENT_DATE)::int * 4 + EXTRACT(QUARTER FROM CURRENT_DATE)::int)
+          - (h.quarter_year * 4 + h.quarter) BETWEEN 0 AND 2
 LEFT JOIN LATERAL (
     -- 最近 12 個月營收：最新一個月的年增率，與從最新一個月起連續年減（月份不中斷）的月數。
     SELECT
@@ -94,6 +101,7 @@ pub(crate) struct FundamentalsRow {
     last_year_gross_margin: Option<f64>,
     last_year_operating_margin: Option<f64>,
     last_year_net_margin: Option<f64>,
+    free_cash_flow_ttm: Option<i64>,
 }
 
 impl From<FundamentalsRow> for HoldingFundamentals {
@@ -115,6 +123,7 @@ impl From<FundamentalsRow> for HoldingFundamentals {
                     change(row.operating_margin, row.last_year_operating_margin),
                     change(row.net_margin, row.last_year_net_margin),
                 ],
+                free_cash_flow_ttm: row.free_cash_flow_ttm,
             },
             stock_symbol: row.stock_symbol,
         }
@@ -160,9 +169,11 @@ mod tests {
             last_year_gross_margin: Some(45.0),
             last_year_operating_margin: None,
             last_year_net_margin: Some(4.0),
+            free_cash_flow_ttm: Some(-120),
         });
         assert_eq!(fundamentals.margin_period, Some((2026, 2)));
         assert_eq!(fundamentals.signals.revenue_decline_months, Some(3));
+        assert_eq!(fundamentals.signals.free_cash_flow_ttm, Some(-120));
         assert_eq!(
             fundamentals.signals.margin_changes,
             [Some(-5.0), None, Some(-2.0)]

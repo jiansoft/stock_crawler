@@ -10,7 +10,7 @@
 //! 換股日另把當天的持股寫進 `strategy_rebalance`（見 [`rebalance_record`]），供
 //! `/strategy-presets/{name}/track` 追蹤實際表現；寫入失敗只記 warning，通知照發。通知同時附上依換股
 //! 紀錄結算的上一期實盤表現與追蹤以來的累積（vs 0050）；還沒有上一期紀錄或結算失敗時不附。策略持股有
-//! 基本面警示（營收連續年減、三率三降、營業虧損，見 [`crate::domain::portfolio::health`]）時另列一行，
+//! 基本面警示（營收連續年減、三率三降、營業虧損、自由現金流為負，見 [`crate::domain::portfolio::health`]）時另列一行，
 //! 查詢失敗只略過。
 //!
 //! 回測引擎在 `interfaces::web::data_api`，這裡只透過 [`ports::StrategyGateway`] 取得換股結果。

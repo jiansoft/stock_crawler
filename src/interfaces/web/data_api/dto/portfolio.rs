@@ -23,6 +23,8 @@ pub(crate) enum PortfolioWarningValue {
     MarginsAllDown,
     /// 最近一季營業利益為負。
     OperatingLoss,
+    /// 截至最近一季的近四季自由現金流合計為負。
+    NegativeFreeCashFlow,
 }
 
 /// OpenAPI 文件使用的三率方向。
@@ -44,6 +46,7 @@ pub(crate) fn warning_code(warning: HoldingWarning) -> &'static str {
         HoldingWarning::RevenueDecline => "revenue_decline",
         HoldingWarning::MarginsAllDown => "margins_all_down",
         HoldingWarning::OperatingLoss => "operating_loss",
+        HoldingWarning::NegativeFreeCashFlow => "negative_free_cash_flow",
     }
 }
 
@@ -166,7 +169,10 @@ pub(crate) struct PortfolioHolding {
     /// 三率與去年同季相比的方向；去年同季查不到時為 `null`。
     #[schema(value_type = Option<PortfolioMarginTrendValue>)]
     pub(crate) margins_trend: Option<String>,
-    /// 基本面警示：營收連續 3 個月以上年減、三率三降、營業虧損；沒有時為空陣列。
+    /// 截至最近一季的近四季自由現金流合計（新台幣千元）；四季不齊、落後超過 2 季或屬於金融保險業時為
+    /// `null`。
+    pub(crate) free_cash_flow_ttm: Option<i64>,
+    /// 基本面警示：營收連續 3 個月以上年減、三率三降、營業虧損、近四季自由現金流為負；沒有時為空陣列。
     #[schema(value_type = Vec<PortfolioWarningValue>)]
     pub(crate) warnings: Vec<String>,
 }
@@ -200,6 +206,7 @@ impl From<HoldingSummary> for PortfolioHolding {
             operating_margin_percent: None,
             net_margin_percent: None,
             margins_trend: None,
+            free_cash_flow_ttm: None,
             warnings: Vec::new(),
         }
     }

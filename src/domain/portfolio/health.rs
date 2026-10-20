@@ -1,8 +1,8 @@
 //! 持股健檢的基本面警示。
 //!
-//! 由最新月營收與最近一季財報（過期資料由查詢端排除）判斷三種警示：營收連續
+//! 由最新月營收與最近一季財報（過期資料由查詢端排除）判斷四種警示：營收連續
 //! [`REVENUE_DECLINE_WARNING_MONTHS`] 個月年減、三率（毛利率、營業利益率、稅後淨利率）都比去年
-//! 同季低、最近一季營業虧損。
+//! 同季低、最近一季營業虧損、近四季自由現金流合計為負。
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -10,7 +10,8 @@ use rust_decimal::Decimal;
 
 use crate::{core::declare::Industry, domain::financial::entity::MarginTrend};
 
-/// 不取三率的產業：金融保險業的營收口徑與一般公司不同，三率沒有可比性。
+/// 不取三率與自由現金流的產業：金融保險業的營收口徑與一般公司不同，三率沒有可比性；放款與存款
+/// 也算在營業現金流裡，自由現金流同樣不適用。
 pub const MARGIN_EXCLUDED_INDUSTRY: Industry = Industry::FinanceInsurance;
 
 /// 營收連續年減達這個月數就發警示。
@@ -25,6 +26,8 @@ pub enum HoldingWarning {
     MarginsAllDown,
     /// 最近一季營業利益為負。
     OperatingLoss,
+    /// 截至最近一季的近四季自由現金流合計為負。
+    NegativeFreeCashFlow,
 }
 
 impl HoldingWarning {
@@ -34,6 +37,7 @@ impl HoldingWarning {
             Self::RevenueDecline => "營收連續年減",
             Self::MarginsAllDown => "三率三降",
             Self::OperatingLoss => "營業虧損",
+            Self::NegativeFreeCashFlow => "自由現金流為負",
         }
     }
 }
@@ -47,6 +51,8 @@ pub struct FundamentalSignals {
     pub operating_margin: Option<f64>,
     /// 最近一季三率（毛利率、營業利益率、稅後淨利率）對去年同季的變化（百分點）。
     pub margin_changes: [Option<f64>; 3],
+    /// 截至最近一季的近四季自由現金流合計（新台幣千元）；四季不齊時為 `None`。
+    pub free_cash_flow_ttm: Option<i64>,
 }
 
 impl FundamentalSignals {
@@ -55,7 +61,7 @@ impl FundamentalSignals {
         MarginTrend::classify(self.margin_changes)
     }
 
-    /// 依序列出觸發的警示：營收連續年減、三率三降、營業虧損。
+    /// 依序列出觸發的警示：營收連續年減、三率三降、營業虧損、自由現金流為負。
     pub fn warnings(&self) -> Vec<HoldingWarning> {
         let mut warnings = Vec::new();
         if self
@@ -69,6 +75,9 @@ impl FundamentalSignals {
         }
         if self.operating_margin.is_some_and(|margin| margin < 0.0) {
             warnings.push(HoldingWarning::OperatingLoss);
+        }
+        if self.free_cash_flow_ttm.is_some_and(|amount| amount < 0) {
+            warnings.push(HoldingWarning::NegativeFreeCashFlow);
         }
         warnings
     }
@@ -95,7 +104,7 @@ pub struct HoldingFundamentals {
 #[async_trait]
 pub trait HoldingFundamentalsQuery: Send + Sync {
     /// 依今天判斷新鮮度：月營收超過 2 個月沒更新、財報落後超過 2 季視為過期；
-    /// [`MARGIN_EXCLUDED_INDUSTRY`] 不取三率。查不到的代號不回傳。
+    /// [`MARGIN_EXCLUDED_INDUSTRY`] 不取三率與自由現金流。查不到的代號不回傳。
     async fn fetch_holding_fundamentals(
         &self,
         symbols: &[String],
@@ -106,13 +115,14 @@ pub trait HoldingFundamentalsQuery: Send + Sync {
 mod tests {
     use super::*;
 
-    /// 三種警示各自的門檻：營收年減滿 3 個月、三率都下降、營業利益率為負。
+    /// 四種警示各自的門檻：營收年減滿 3 個月、三率都下降、營業利益率為負、近四季自由現金流為負。
     #[test]
     fn warnings_follow_each_threshold() {
         let all = FundamentalSignals {
             revenue_decline_months: Some(3),
             operating_margin: Some(-1.5),
             margin_changes: [Some(-2.0), Some(-1.0), Some(-0.5)],
+            free_cash_flow_ttm: Some(-1),
         };
         assert_eq!(all.margin_trend(), Some(MarginTrend::AllDown));
         assert_eq!(
@@ -120,14 +130,20 @@ mod tests {
             [
                 HoldingWarning::RevenueDecline,
                 HoldingWarning::MarginsAllDown,
-                HoldingWarning::OperatingLoss
+                HoldingWarning::OperatingLoss,
+                HoldingWarning::NegativeFreeCashFlow
             ]
+        );
+        assert_eq!(
+            HoldingWarning::NegativeFreeCashFlow.label(),
+            "自由現金流為負"
         );
 
         let healthy = FundamentalSignals {
             revenue_decline_months: Some(2),
             operating_margin: Some(0.0),
             margin_changes: [Some(1.0), Some(-1.0), Some(0.5)],
+            free_cash_flow_ttm: Some(0),
         };
         assert_eq!(healthy.margin_trend(), Some(MarginTrend::Mixed));
         assert!(healthy.warnings().is_empty());

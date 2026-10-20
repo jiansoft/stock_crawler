@@ -1,4 +1,4 @@
-//! 每週市場摘要的持股基本面警示一段：營收連續年減、三率三降、營業虧損（規則見
+//! 每週市場摘要的持股基本面警示一段：營收連續年減、三率三降、營業虧損、自由現金流為負（規則見
 //! [`crate::domain::portfolio::health`]）。
 
 use crate::domain::portfolio::health::{HoldingFundamentals, HoldingWarning};
@@ -60,6 +60,14 @@ fn warning_text(item: &HoldingFundamentals, warning: HoldingWarning) -> String {
             Some(margin) => format!("營業虧損（營益率 {margin:.2}%）"),
             None => "營業虧損".to_owned(),
         },
+        // 千元換成億元：1 億元 = 100,000 千元。
+        HoldingWarning::NegativeFreeCashFlow => match item.signals.free_cash_flow_ttm {
+            Some(amount) => format!(
+                "自由現金流為負（近四季 {:.2} 億元）",
+                amount as f64 / 100_000.0
+            ),
+            None => "自由現金流為負".to_owned(),
+        },
     }
 }
 
@@ -88,6 +96,7 @@ mod tests {
                 revenue_decline_months: Some(3),
                 operating_margin: Some(-1.456),
                 margin_changes: [Some(-1.0), Some(-2.0), Some(-3.0)],
+                free_cash_flow_ttm: Some(-123_456),
             },
         );
         let healthy = fundamentals(
@@ -115,7 +124,8 @@ mod tests {
                 String::new(),
                 "持股基本面警示（2 檔）".to_owned(),
                 "• 1598 名1598：營收連 4 月年減、營業虧損（營益率 -9.95%）".to_owned(),
-                "• 2330 名2330：營收連 3 月年減（最新 -12.5%）、三率三降、營業虧損（營益率 -1.46%）"
+                "• 2330 名2330：營收連 3 月年減（最新 -12.5%）、三率三降、營業虧損（營益率 -1.46%）、\
+                 自由現金流為負（近四季 -1.23 億元）"
                     .to_owned(),
             ]
         );
@@ -145,6 +155,13 @@ mod tests {
                 HoldingWarning::OperatingLoss
             ),
             "營業虧損"
+        );
+        assert_eq!(
+            warning_text(
+                &HoldingFundamentals::default(),
+                HoldingWarning::NegativeFreeCashFlow
+            ),
+            "自由現金流為負"
         );
     }
 }
