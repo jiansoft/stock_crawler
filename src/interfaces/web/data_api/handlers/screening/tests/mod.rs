@@ -1,8 +1,12 @@
-//! 條件選股的測試：[`validation`]（參數驗證、排序白名單與新鮮度公式的 deterministic tests）、
-//! [`queries`]（以真實 PostgreSQL 執行選股與驗證執行計畫的整合測試）；這裡放共用的參數建構函式。
+//! 條件選股的測試：[`validation`]（參數驗證、排序白名單與新鮮度公式的 deterministic tests），以及以真實
+//! PostgreSQL 執行的整合測試——[`query_plans`]（執行計畫）、[`chip_liquidity`]（法人連買、成交金額）、
+//! [`valuation_margins`]（估值上限、三率）、[`revenue_industry`]（營收新高、排除產業）；這裡放共用的參數建構函式。
 
-mod queries;
+mod chip_liquidity;
+mod query_plans;
+mod revenue_industry;
 mod validation;
+mod valuation_margins;
 
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
