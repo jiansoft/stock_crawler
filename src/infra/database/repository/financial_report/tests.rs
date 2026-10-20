@@ -330,17 +330,19 @@ async fn test_save_touches_updated_at_only_when_values_change() {
     cleanup().await;
 }
 
-/// 落後判斷用的假代號：LA 官方新公布 Q2、Yahoo 只到 Q1；LB 官方新公布 Q2、BigGo 已有 Q2；
-/// LC 官方 Q2 是 60 天前公布；LD 官方新公布 Q1（另有年度列）、損益表完全沒有。
-const LAGGING_SYMBOLS: [&str; 4] = ["79979LA", "79979LB", "79979LC", "79979LD"];
+/// 落後判斷用的假代號：LA 官方今天公布 Q2、Yahoo 只到 Q1；LB 官方今天公布 Q2、BigGo 已有 Q2；
+/// LC 官方 Q2 是 60 天前公布；LD 官方 10 天前公布 Q1（另有年度列）、損益表完全沒有；
+/// LE 已下市、LF 興櫃，官方今天公布 Q2、損益表沒有。
+const LAGGING_SYMBOLS: [&str; 6] = [
+    "79979LA", "79979LB", "79979LC", "79979LD", "79979LE", "79979LF",
+];
 
 async fn cleanup_lagging() {
-    for table in ["financial_statement", "income_statement"] {
-        let column = if table == "financial_statement" {
-            "security_code"
-        } else {
-            "stock_symbol"
-        };
+    for (table, column) in [
+        ("financial_statement", "security_code"),
+        ("income_statement", "stock_symbol"),
+        ("stocks", "stock_symbol"),
+    ] {
         let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM {table} WHERE {column} = ANY($1)"
         )))
@@ -355,25 +357,45 @@ async fn cleanup_lagging() {
     not(feature = "integration-tests"),
     ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
 )]
-async fn test_fetch_lagging_symbols() {
+async fn test_fetch_lagging_statements() {
     dotenvy::dotenv().ok();
     if database::ping().await.is_err() {
-        println!("跳過 test_fetch_lagging_symbols：無資料庫連接");
+        println!("跳過 test_fetch_lagging_statements：無資料庫連接");
         return;
     }
     cleanup_lagging().await;
 
+    for (symbol, market_id, suspended) in [
+        ("79979LA", 2, false),
+        ("79979LB", 2, false),
+        ("79979LC", 4, false),
+        ("79979LD", 4, false),
+        ("79979LE", 2, true),
+        ("79979LF", 5, false),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id, "SuspendListing")
+               VALUES ($1, $1, $1, $2, 1, $3)"#,
+        )
+        .bind(symbol)
+        .bind(market_id)
+        .bind(suspended)
+        .execute(database::get_connection())
+        .await
+        .expect("insert stock");
+    }
     for (symbol, quarter, days_ago) in [
         ("79979LA", "Q1", 0),
         ("79979LA", "Q2", 0),
         ("79979LB", "Q2", 0),
         ("79979LC", "Q2", 60),
-        ("79979LD", "Q1", 0),
-        ("79979LD", "A", 0),
+        ("79979LD", "Q1", 10),
+        ("79979LD", "A", 10),
+        ("79979LE", "Q2", 0),
+        ("79979LF", "Q2", 0),
     ] {
         sqlx::query(
-            "INSERT INTO financial_statement (security_code, \"year\", quarter, created_time) \
-             VALUES ($1, $2, $3, now() - make_interval(days => $4))",
+            "INSERT INTO financial_statement (security_code, \"year\", quarter, created_time)              VALUES ($1, $2, $3, now() - make_interval(days => $4))",
         )
         .bind(symbol)
         .bind(i64::from(FAKE_YEAR))
@@ -396,13 +418,40 @@ async fn test_fetch_lagging_symbols() {
     .await
     .expect("save income statements");
 
-    let lagging = repo.fetch_lagging_symbols(30).await.expect("fetch lagging");
-    let fake: Vec<&str> = lagging
-        .iter()
-        .map(String::as_str)
-        .filter(|symbol| LAGGING_SYMBOLS.contains(symbol))
-        .collect();
-    assert_eq!(fake, ["79979LA", "79979LD"]);
+    let fake = |statements: Vec<LaggingStatement>| -> Vec<LaggingStatement> {
+        statements
+            .into_iter()
+            .filter(|statement| LAGGING_SYMBOLS.contains(&statement.stock_symbol.as_str()))
+            .collect()
+    };
+    let recent = fake(
+        repo.fetch_lagging_statements(30, 0)
+            .await
+            .expect("fetch lagging"),
+    );
+    let symbols: Vec<&str> = recent.iter().map(|s| s.stock_symbol.as_str()).collect();
+    assert_eq!(symbols, ["79979LA", "79979LD"]);
+    assert_eq!(
+        (recent[0].fiscal_year, recent[0].quarter.as_str()),
+        (FAKE_YEAR, "Q2")
+    );
+
+    // 公布滿 7 天才算：只剩 10 天前公布的 LD。
+    let stale = fake(
+        repo.fetch_lagging_statements(30, 7)
+            .await
+            .expect("fetch stale"),
+    );
+    let ten_days_ago = (chrono::Local::now() - chrono::Duration::days(10)).date_naive();
+    assert_eq!(
+        stale,
+        [LaggingStatement {
+            stock_symbol: "79979LD".to_owned(),
+            fiscal_year: FAKE_YEAR,
+            quarter: "Q1".to_owned(),
+            published_on: ten_days_ago,
+        }]
+    );
 
     cleanup_lagging().await;
 }

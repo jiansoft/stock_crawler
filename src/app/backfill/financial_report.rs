@@ -196,9 +196,15 @@ async fn order_candidates(
         .collect();
     candidates.sort();
 
-    let lagging = repo
-        .fetch_lagging_symbols(PRIORITY_LOOKBACK_DAYS)
+    let lagging: Vec<String> = repo
+        .fetch_lagging_statements(PRIORITY_LOOKBACK_DAYS, 0)
         .await
+        .map(|statements| {
+            statements
+                .into_iter()
+                .map(|statement| statement.stock_symbol)
+                .collect()
+        })
         .unwrap_or_else(|why| {
             tracing::warn!("fetch lagging financial report symbols failed: {why:#}");
             Vec::new()

@@ -13,6 +13,7 @@ mod sql;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use sqlx::{Postgres, QueryBuilder, query_builder::Separated};
 
 use self::rows::{
@@ -22,7 +23,7 @@ use self::rows::{
 use self::sql::{insert_prefix, upsert_suffix};
 use crate::domain::financial::{
     repository::FinancialReportRepository,
-    statement::{BalanceSheet, CashFlowStatement, IncomeStatement},
+    statement::{BalanceSheet, CashFlowStatement, IncomeStatement, LaggingStatement},
 };
 use crate::infra::database;
 
@@ -72,33 +73,54 @@ impl FinancialReportRepository for PgFinancialReportRepository {
         .await
     }
 
-    async fn fetch_lagging_symbols(&self, published_within_days: i32) -> Result<Vec<String>> {
-        sqlx::query_scalar(LAGGING_SYMBOLS_SQL)
+    async fn fetch_lagging_statements(
+        &self,
+        published_within_days: i32,
+        min_age_days: i32,
+    ) -> Result<Vec<LaggingStatement>> {
+        let rows: Vec<(String, i32, String, NaiveDate)> = sqlx::query_as(LAGGING_STATEMENTS_SQL)
             .bind(published_within_days)
+            .bind(min_age_days)
             .fetch_all(database::get_connection())
             .await
-            .context("Failed to fetch symbols whose income statements lag the official reports")
+            .context("Failed to fetch stocks whose income statements lag the official reports")?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(stock_symbol, fiscal_year, quarter, published_on)| LaggingStatement {
+                    stock_symbol,
+                    fiscal_year,
+                    quarter,
+                    published_on,
+                },
+            )
+            .collect())
     }
 }
 
-/// 官方季報近期新公布、損益表還沒有那一季的股票。
+/// 官方季報在 `$1` 天內、至少 `$2` 天前公布，損益表還沒有那一季的上市櫃股票。
 ///
 /// 以 `created_time`（只在第一次寫入時設定）當作官方公布日；同一檔取期間內最新一季，
-/// Yahoo 與 BigGo 任一來源已有該季（或更新的季別）就不算落後。
-const LAGGING_SYMBOLS_SQL: &str = r#"
+/// Yahoo 與 BigGo 任一來源已有該季（或更新的季別）就不算落後。已下市與興櫃股票不採集，不列。
+const LAGGING_STATEMENTS_SQL: &str = r#"
 WITH official AS (
     SELECT DISTINCT ON (security_code)
         security_code,
         "year"::int AS fiscal_year,
-        quarter
+        quarter,
+        created_time
     FROM financial_statement
     WHERE quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
       AND created_time >= now() - make_interval(days => $1)
     ORDER BY security_code, "year" DESC, quarter DESC
 )
-SELECT o.security_code
+SELECT o.security_code, o.fiscal_year, o.quarter::text, (o.created_time AT TIME ZONE 'Asia/Taipei')::date
 FROM official AS o
-WHERE NOT EXISTS (
+JOIN stocks AS s ON s.stock_symbol = o.security_code
+WHERE s.stock_exchange_market_id IN (2, 4)
+  AND NOT s."SuspendListing"
+  AND o.created_time <= now() - make_interval(days => $2)
+  AND NOT EXISTS (
     SELECT 1
     FROM income_statement AS i
     WHERE i.source IN ('yahoo', 'biggo')
