@@ -157,3 +157,72 @@ async fn screen_backtest_valuation_caps_use_rebalance_day_ratios() {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}: {json}");
     }
 }
+
+/// 相對估值濾網：只用換股日之前近 5 年的市場本益比中位數算百分位；歷史不足 250 天視為通過。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn screen_backtest_market_pe_percentile_uses_prior_history_only() {
+    let Some(pool) = seeded("screen_backtest_market_pe_percentile_uses_prior_history_only").await
+    else {
+        return;
+    };
+    let clear = || async {
+        let _ = sqlx::query(
+            "DELETE FROM daily_market_valuation
+             WHERE stock_exchange_market_id = 0 AND date BETWEEN '1992-01-01' AND '1993-03-31'",
+        )
+        .execute(pool)
+        .await;
+    };
+    clear().await;
+    // 換股日之前的 300 天：中位數依序循環 10～29 倍（每個值 15 天）。
+    sqlx::query(
+        "INSERT INTO daily_market_valuation (date, stock_exchange_market_id, median_pe, pe_samples, pb_samples)
+         SELECT DATE '1992-01-01' + i, 0, 10 + i % 20, 3, 3 FROM generate_series(0, 299) AS i",
+    )
+    .execute(pool)
+    .await
+    .expect("種入歷史估值");
+    // 03-01 為 12 倍（低於它的只有 10、11，約第 10 百分位）；03-08 為 25 倍（約第 75 百分位）。
+    for (date, median_pe) in [(day(1), 12), (day(8), 25)] {
+        sqlx::query(
+            "INSERT INTO daily_market_valuation (date, stock_exchange_market_id, median_pe, pe_samples, pb_samples)
+             VALUES ($1, 0, $2, 3, 3)",
+        )
+        .bind(date)
+        .bind(rust_decimal::Decimal::from(median_pe))
+        .execute(pool)
+        .await
+        .expect("種入換股日估值");
+    }
+
+    let (status, json) = query("limit=2&market_filter_pe_percentile=50").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["market_filter_pe_percentile"], 50);
+    assert_eq!(json["periods"][0]["market_filtered"], false);
+    assert_eq!(json["periods"][1]["market_filtered"], true);
+    assert_eq!(json["summary"]["market_filtered_periods"], 1);
+    // 門檻 80：25 倍只在第 75 百分位，兩期都通過。
+    let (_, json) = query("limit=2&market_filter_pe_percentile=80").await;
+    assert_eq!(json["summary"]["market_filtered_periods"], 0);
+    // 與固定倍數濾網併用：任一不符就空手（03-01 的 12 倍高於 11 倍）。
+    let (_, json) = query("limit=2&market_filter_pe_percentile=80&market_filter_max_pe=11").await;
+    assert_eq!(json["summary"]["market_filtered_periods"], 2);
+    // 上櫃沒有歷史（不足 250 天）：都通過。
+    let (_, json) = query("market=tpex&market_filter_pe_percentile=1").await;
+    assert_eq!(json["summary"]["market_filtered_periods"], 0);
+    let (_, json) = query("limit=2").await;
+    assert!(json["market_filter_pe_percentile"].is_null(), "{json}");
+    clear().await;
+
+    for bad in [
+        "market_filter_pe_percentile=0",
+        "market_filter_pe_percentile=100",
+    ] {
+        let (status, json) = query(&format!("limit=2&{bad}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}: {json}");
+    }
+}
