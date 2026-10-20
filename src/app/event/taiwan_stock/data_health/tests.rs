@@ -48,6 +48,7 @@ fn healthy() -> DataHealthSnapshot {
             ("daily_technical_signal", day(9)),
             ("daily_relative_strength", day(9)),
             ("chip_daily", day(8)),
+            ("broker_flow", day(8)),
             ("daily_market_valuation", day(9)),
             ("daily_forward_return", day(2)),
         ]
@@ -178,6 +179,7 @@ fn derived_tables_must_keep_up_with_the_latest_trading_day() {
             "yield_rank" => derived.latest = None,
             "daily_relative_strength" => derived.latest = Some(day(8)),
             "chip_daily" => derived.latest = Some(day(7)),
+            "broker_flow" => derived.latest = None,
             "daily_forward_return" => derived.latest = Some(day(1)),
             _ => {}
         }
@@ -193,6 +195,7 @@ fn derived_tables_must_keep_up_with_the_latest_trading_day() {
             "stock_cagr 最新 2026-10-07，應至少到 2026-10-08",
             "daily_relative_strength 最新 2026-10-08，應至少到 2026-10-09",
             "chip_daily 最新 2026-10-07，應至少到 2026-10-08",
+            "broker_flow 沒有任何資料",
             "daily_forward_return 最新 2026-10-01，應至少到 2026-10-02",
         ]
     );
