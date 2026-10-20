@@ -274,6 +274,46 @@ impl HoldingFundamentalsQuery for FakePortfolio {
     }
 }
 
+/// 回傳固定每日估值的假倉儲；`fail` 時查詢失敗。查詢期間必須是資料日往回 5 年。
+#[derive(Default)]
+pub(super) struct FakeValuation {
+    pub(super) days: Vec<MarketValuationDay>,
+    pub(super) fail: bool,
+}
+
+impl FakeValuation {
+    pub(super) fn failing() -> Self {
+        Self {
+            fail: true,
+            ..Self::default()
+        }
+    }
+}
+
+#[async_trait]
+impl MarketValuationRepository for FakeValuation {
+    async fn refresh_market_valuation(&self, _from: NaiveDate, _to: NaiveDate) -> Result<u64> {
+        Ok(0)
+    }
+
+    async fn fetch_market_valuation(
+        &self,
+        market_id: i32,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<MarketValuationDay>> {
+        assert_eq!((market_id, to), (0, day(16)));
+        assert_eq!(
+            from,
+            NaiveDate::from_ymd_opt(2021, 10, 16).expect("合法日期")
+        );
+        if self.fail {
+            return Err(anyhow!("valuation down"));
+        }
+        Ok(self.days.clone())
+    }
+}
+
 /// 2330 營業虧損、2317 沒有警示。
 pub(super) fn portfolio() -> FakePortfolio {
     use crate::domain::portfolio::health::FundamentalSignals;

@@ -5,7 +5,8 @@
 //! - 大盤趨勢：加權指數收盤、近 [`WEEK_DAYS`] 日漲跌、均線排列、相對 60／240 日均線的位置與方向
 //!   （見 [`crate::domain::market_index::regime`]）、這週穿越 20／60／240 日均線的日子，以及市場廣度
 //!   （站上 20／60／240 日均線的股票比例、與一週前比較，與這週創 52 週新高／新低的家次，見
-//!   [`crate::domain::market_index::breadth`]）。
+//!   [`crate::domain::market_index::breadth`]），以及上市櫃本益比、股價淨值比中位數在近 5 年的位置（見
+//!   [`crate::domain::market_index::valuation`]）。
 //! - 產業相對強度：成分股 RS 中位數（見 [`crate::domain::quote::relative_strength`]）最強、最弱，
 //!   以及與 [`WEEK_DAYS`] 個交易日前相比轉強、轉弱最多的產業；成分股少於
 //!   [`industry::MIN_INDUSTRY_STOCKS`] 檔的產業不列。
@@ -40,7 +41,7 @@ use self::{
     flows::{FlowSection, flow_section},
     holding::{HoldingSection, holding_moves},
     industry::{IndustrySection, industry_section},
-    market::{RegimeSection, regime_section},
+    market::{RegimeSection, regime_section, valuation_level},
     strategy::{StrategySection, strategy_section},
 };
 use super::holdings;
@@ -48,7 +49,9 @@ use crate::{
     core::{alert, util::text},
     domain::{
         chip::flow::{self, ChipFlowQuery},
-        market_index::{breadth::BreadthQuery, regime::IndexCloseQuery},
+        market_index::{
+            breadth::BreadthQuery, regime::IndexCloseQuery, valuation::MarketValuationRepository,
+        },
         portfolio::health::HoldingFundamentalsQuery,
         quote::{
             forward_return::ForwardReturnRepository,
@@ -59,7 +62,8 @@ use crate::{
     },
     infra::database::repository::{
         chip::PgChipRepository, market_index::PgMarketIndexRepository,
-        portfolio::PgPortfolioRepository, quote::PgQuoteRepository,
+        market_valuation::PgMarketValuationRepository, portfolio::PgPortfolioRepository,
+        quote::PgQuoteRepository,
     },
 };
 
@@ -87,6 +91,7 @@ pub async fn execute() -> Result<()> {
         &PgQuoteRepository::new(),
         &PgChipRepository::new(),
         &PgMarketIndexRepository::new(),
+        &PgMarketValuationRepository::new(),
         &PgPortfolioRepository::new(),
         date,
         &symbols,
@@ -100,6 +105,9 @@ pub async fn execute() -> Result<()> {
 }
 
 /// 查詢各段資料並組出訊息；某段失敗只記錄警告；都沒有資料時回 `None`。
+///
+/// 每個資料來源各自傳入，測試才能逐一替換成假倉儲、驗證各段降級。
+#[allow(clippy::too_many_arguments)]
 async fn run(
     quote: &(
          impl ScoredUniverseQuery
@@ -109,15 +117,24 @@ async fn run(
      ),
     chip: &impl ChipFlowQuery,
     index: &(impl IndexCloseQuery + BreadthQuery),
+    valuation: &impl MarketValuationRepository,
     portfolio: &impl HoldingFundamentalsQuery,
     date: NaiveDate,
     symbols: &BTreeSet<String>,
     strategy: Option<&StrategySection>,
 ) -> Option<String> {
-    let market = regime_section(index, date).await.unwrap_or_else(|why| {
+    let mut market = regime_section(index, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取加權指數失敗: {why:#}");
         None
     });
+    if let Some(section) = market.as_mut() {
+        section.valuation = valuation_level(valuation, section.state.date)
+            .await
+            .unwrap_or_else(|why| {
+                tracing::warn!("每週市場摘要：讀取估值水位失敗: {why:#}");
+                None
+            });
+    }
     let industries = industry_section(quote, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取產業相對強度失敗: {why:#}");
         None

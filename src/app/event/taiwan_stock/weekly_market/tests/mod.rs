@@ -16,7 +16,11 @@ use super::crossing::crossing_line;
 use super::holding::HoldingMove;
 use super::*;
 use crate::domain::chip::flow::{FlowPeriod, StockFlow};
-use crate::domain::market_index::{breadth::BreadthDay, regime};
+use crate::domain::market_index::{
+    breadth::BreadthDay,
+    regime,
+    valuation::{MarketValuationDay, MarketValuationRepository},
+};
 use crate::domain::quote::relative_strength::{
     CrossDirection, PeriodCrossing, RelativeStrengthDay, ScoredStock, UniverseRow,
 };
