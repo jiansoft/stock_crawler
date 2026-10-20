@@ -45,7 +45,7 @@ async fn portfolio_summary_endpoint_db_semantics() {
     let today = chrono::Local::now().date_naive();
     for sql in [
         "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, cumulate_dividends_total, is_sold) VALUES ($1, $2, 1000, -40000, 300, false), ($1, $2, 1000, -50000, 200, false), ($1, $2, 500, -99999, 999, true)",
-        "INSERT INTO last_daily_quotes (date, stock_symbol, closing_price) VALUES ('2026-04-30', $2, 50)",
+        r#"INSERT INTO last_daily_quotes (date, stock_symbol, closing_price, price_earning_ratio, "price-to-book_ratio") VALUES ('2026-04-30', $2, 50, 12.5, 0)"#,
     ] {
         sqlx::query(sql)
             .bind(MEMBER)
@@ -111,6 +111,9 @@ async fn portfolio_summary_endpoint_db_semantics() {
     assert_eq!(json["dividends_received"], 500.0);
     assert_eq!(json["weighted_dividend_yield"]["value"], 4.5);
     assert_eq!(json["weighted_f_score"]["coverage_percent"], 100.0);
+    // 本益比 12.5；淨值比 0 視為沒有資料。
+    assert_eq!(json["weighted_pe"]["value"], 12.5);
+    assert!(json["weighted_pb"].is_null(), "{json}");
     let holding = &json["holdings"][0];
     assert_eq!(holding["stock_symbol"], SYMBOL);
     assert_eq!(
@@ -118,6 +121,8 @@ async fn portfolio_summary_endpoint_db_semantics() {
         (2_000.into(), 100.0.into())
     );
     assert_eq!(holding["f_score"], 6);
+    assert_eq!(holding["pe_ratio"], 12.5);
+    assert!(holding["pb_ratio"].is_null(), "{holding}");
     // 假代號沒有相對強度與籌碼，欄位仍要出現（null）。
     for field in ["rs_score", "foreign_streak", "trust_streak"] {
         assert!(

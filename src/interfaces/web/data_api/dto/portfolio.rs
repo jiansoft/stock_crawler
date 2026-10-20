@@ -143,6 +143,10 @@ pub(crate) struct PortfolioHolding {
     pub(crate) dividend_yield_percent: Option<f64>,
     /// 評分年度落後不超過 2 年的 Piotroski F 分數；缺值或過期時為 `null`。
     pub(crate) f_score: Option<u8>,
+    /// 最新一筆日線的官方本益比（證交所／櫃買中心）；虧損或沒有資料時為 `null`。
+    pub(crate) pe_ratio: Option<f64>,
+    /// 最新一筆日線的官方股價淨值比；沒有資料時為 `null`。
+    pub(crate) pb_ratio: Option<f64>,
     /// 相對強度分數 1–99（同 `/market/relative-strength`，資料日見 `rs_as_of`）；
     /// ETF、上市未滿 240 個交易日或暫停交易時為 `null`。
     pub(crate) rs_score: Option<u8>,
@@ -195,6 +199,8 @@ impl From<HoldingSummary> for PortfolioHolding {
             dividends_received: decimal_to_f64(position.dividends_received),
             dividend_yield_percent: position.dividend_yield_percent.map(decimal_to_f64),
             f_score: position.f_score.and_then(|score| u8::try_from(score).ok()),
+            pe_ratio: position.pe_ratio.map(decimal_to_f64),
+            pb_ratio: position.pb_ratio.map(decimal_to_f64),
             rs_score: None,
             foreign_streak: None,
             trust_streak: None,
@@ -241,6 +247,11 @@ pub(crate) struct PortfolioSummaryResponse {
     pub(crate) weighted_dividend_yield: Option<WeightedMetricItem>,
     /// 市值加權 F 分數；沒有任何部位有 F 分數時為 `null`。
     pub(crate) weighted_f_score: Option<WeightedMetricItem>,
+    /// 組合本益比：市值加權的調和平均（Σ市值 ÷ Σ(市值 ÷ 本益比)，等同總市值 ÷ 依持股比例分得的盈餘），
+    /// 虧損的部位不列入；沒有任何部位有本益比時為 `null`。
+    pub(crate) weighted_pe: Option<WeightedMetricItem>,
+    /// 組合股價淨值比，算法同 `weighted_pe`；沒有任何部位有淨值比時為 `null`。
+    pub(crate) weighted_pb: Option<WeightedMetricItem>,
     /// 產業分布，依市值由大到小。
     pub(crate) industries: Vec<PortfolioIndustry>,
     /// 各持股，依市值由大到小。
@@ -268,6 +279,8 @@ impl PortfolioSummaryResponse {
             dividends_received: summary.dividends_received,
             weighted_dividend_yield: summary.weighted_dividend_yield.map(Into::into),
             weighted_f_score: summary.weighted_f_score.map(Into::into),
+            weighted_pe: summary.weighted_pe.map(Into::into),
+            weighted_pb: summary.weighted_pb.map(Into::into),
             industries: summary.industries.into_iter().map(Into::into).collect(),
             holdings: summary.holdings.into_iter().map(Into::into).collect(),
         }

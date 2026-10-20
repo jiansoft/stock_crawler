@@ -28,6 +28,8 @@ fn openapi_portfolio_summary_schema_pins_field_names() {
     for field in [
         "weighted_dividend_yield",
         "weighted_f_score",
+        "weighted_pe",
+        "weighted_pb",
         "unrealized_gain_percent",
         "rs_as_of",
         "chip_as_of",
@@ -52,6 +54,8 @@ fn openapi_portfolio_summary_schema_pins_field_names() {
         "net_margin_percent",
         "margins_trend",
         "free_cash_flow_ttm",
+        "pe_ratio",
+        "pb_ratio",
     ] {
         assert!(holding[field].to_string().contains("null"), "{field}");
     }

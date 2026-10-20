@@ -2,7 +2,8 @@
 //!
 //! 部位來自 `stock_ownership_details`（未賣出），同代號多筆合併；報價取
 //! `last_daily_quotes`，殖利率取 `yield_rank` 最新一筆（31 天內），F 分數取
-//! `financial_health`（評分年度落後 1–2 年內）。彙總規則在
+//! `financial_health`（評分年度落後 1–2 年內），本益比與股價淨值比取 `last_daily_quotes` 的官方值（0 視為
+//! 沒有）。彙總規則在
 //! [`crate::domain::portfolio::summary`]。另附每檔的相對強度分數（同
 //! [`mod@super::relative_strength`]）與外資、投信連續買賣超天數（同 [`mod@super::institutional_flow`]），
 //! 以及最新月營收、最近一季三率與基本面警示（規則在 [`crate::domain::portfolio::health`]）：
@@ -51,7 +52,9 @@ SELECT held.stock_symbol, held.shares, held.cost, held.dividends_received,
     CASE WHEN q.closing_price > 0 THEN q.closing_price END AS closing_price,
     CASE WHEN y.date >= CURRENT_DATE - 30 THEN y.yield END AS dividend_yield_percent,
     CASE WHEN EXTRACT(YEAR FROM CURRENT_DATE)::int - h.f_score_year BETWEEN 1 AND 2
-        THEN h.f_score END AS f_score
+        THEN h.f_score END AS f_score,
+    CASE WHEN q.price_earning_ratio > 0 THEN q.price_earning_ratio END AS pe_ratio,
+    CASE WHEN q."price-to-book_ratio" > 0 THEN q."price-to-book_ratio" END AS pb_ratio
 FROM held
 LEFT JOIN stocks s ON s.stock_symbol = held.stock_symbol
 LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
@@ -80,6 +83,8 @@ struct PositionRow {
     closing_price: Option<Decimal>,
     dividend_yield_percent: Option<Decimal>,
     f_score: Option<i16>,
+    pe_ratio: Option<Decimal>,
+    pb_ratio: Option<Decimal>,
 }
 
 /// 把營收、三率與警示填入持股。
@@ -213,6 +218,8 @@ fn build_response(
             closing_price: row.closing_price,
             dividend_yield_percent: row.dividend_yield_percent,
             f_score: row.f_score,
+            pe_ratio: row.pe_ratio,
+            pb_ratio: row.pb_ratio,
         })
         .collect();
     let mut response = PortfolioSummaryResponse::new(
@@ -255,6 +262,8 @@ mod tests {
             closing_price: price,
             dividend_yield_percent: Some(dec!(3.5)),
             f_score: Some(7),
+            pe_ratio: Some(dec!(15)),
+            pb_ratio: None,
         };
         let response = build_response(
             2,
@@ -267,6 +276,12 @@ mod tests {
         assert_eq!(response.dividends_received, 240.0);
         assert_eq!(response.holdings[0].stock_symbol, "1101");
         assert_eq!(response.holdings[0].f_score, Some(7));
+        assert_eq!(
+            (response.holdings[0].pe_ratio, response.holdings[0].pb_ratio),
+            (Some(15.0), None)
+        );
+        // 只有 1101 有市值：組合本益比就是它的 15 倍。
+        assert_eq!(response.weighted_pe.map(|metric| metric.value), Some(15.0));
         assert_eq!(response.holdings[1].closing_price, None);
         assert_eq!(response.industries[0].symbols, 2);
 
@@ -291,6 +306,8 @@ mod tests {
             closing_price: Some(dec!(10)),
             dividend_yield_percent: None,
             f_score: None,
+            pe_ratio: None,
+            pb_ratio: None,
         };
         let scored = |symbol: &str, rs_score: u8| ScoredStock {
             rank: 1,
