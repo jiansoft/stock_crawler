@@ -128,8 +128,11 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("NOT $30::bool OR cf.free_cash_flow_ttm > 0"));
     assert!(BACKTEST_SQL.contains("WHEN COUNT(c.free_cash_flow) = 4 THEN SUM(c.free_cash_flow)"));
     assert!(BACKTEST_SQL.contains("BETWEEN latest.ord - 3 AND latest.ord"));
-    assert!(BACKTEST_SQL.contains("$31::float8 IS NULL OR (qv.pe > 0 AND qv.pe <= $31)"));
-    assert!(BACKTEST_SQL.contains("$32::float8 IS NULL OR (qv.pb > 0 AND qv.pb <= $32)"));
+    assert!(BACKTEST_SQL.contains("$31::float8 IS NULL OR qv.pe <= $31"));
+    assert!(BACKTEST_SQL.contains("$32::float8 IS NULL OR qv.pb <= $32"));
+    assert!(BACKTEST_SQL.contains("CASE WHEN q.\"PriceEarningRatio\" > 0 THEN"));
+    assert!(BACKTEST_SQL.contains("OR $16::text IN ('pe_ratio', 'pb_ratio')"));
+    assert!(BACKTEST_SQL.contains("WHEN 'pe_ratio' THEN -pe"));
     assert!(BACKTEST_SQL.contains("AND q.\"Date\" = u.date"));
     assert!(!BACKTEST_SQL.contains("$33"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));

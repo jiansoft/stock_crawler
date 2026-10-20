@@ -42,11 +42,12 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 ///   資產負債表負債比；`cf`：同樣規則的最近一季 Yahoo 單季現金流量表，連同之前 3 季（須四季都有自由
 ///   現金流）的合計。同樣只在有設門檻時才查。
 /// - `filtered` 的 `qv`：換股當天日線的官方本益比與股價淨值比（收盤後公布，與收盤買進同一時點），只在
-///   有設 `$31`／`$32` 時才查；值為 0 代表虧損或沒有資料，有設門檻時不會通過。
+///   有設 `$31`／`$32` 或依兩者排序時才查；值為 0 代表虧損或沒有資料，轉成 NULL（有設門檻時不會通過、
+///   排序時排最後）。
 /// - `filtered`／`valued`：符合流動性以外條件的股票；有設流動性門檻、依成交金額排序或依成交金額
 ///   加權時，才對這些股票逐檔查 `liquidity_start`～換股日的平均成交金額（`trade_value`）。
 /// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
-///   成交金額或法人連續買超天數，同值再依相對強度）的前 `$5` 檔與各自的報酬、產業編號、平均成交
+///   成交金額或法人連續買超天數，本益比與股價淨值比由低到高，同值再依相對強度）的前 `$5` 檔與各自的報酬、產業編號、平均成交
 ///   金額；實際持股由 [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）；
 ///   依成交金額加權時同樣逐檔查平均成交金額。
@@ -115,7 +116,7 @@ bench AS (
 ),
 filtered AS (
     SELECT u.date, u.liquidity_start, u.stock_symbol, u.rs_score, u.ret, u.stock_industry_id,
-           rv.revenue_yoy::float8 AS revenue_yoy, ym.operating_margin,"#,
+           rv.revenue_yoy::float8 AS revenue_yoy, ym.operating_margin, qv.pe, qv.pb,"#,
             $chip_columns,
             r#"
     FROM universe u
@@ -263,9 +264,10 @@ filtered AS (
          AND c.fiscal_year * 4 + SUBSTRING(c.quarter FROM 2)::int BETWEEN latest.ord - 3 AND latest.ord
     ) cf ON TRUE
     LEFT JOIN LATERAL (
-        SELECT q."PriceEarningRatio"::float8 AS pe, q."price-to-book_ratio"::float8 AS pb
+        SELECT CASE WHEN q."PriceEarningRatio" > 0 THEN q."PriceEarningRatio"::float8 END AS pe,
+               CASE WHEN q."price-to-book_ratio" > 0 THEN q."price-to-book_ratio"::float8 END AS pb
         FROM "DailyQuotes" q
-        WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL)
+        WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL OR $16::text IN ('pe_ratio', 'pb_ratio'))
           AND q.stock_symbol = u.stock_symbol
           AND q."Date" = u.date
     ) qv ON TRUE"#,
@@ -294,8 +296,8 @@ filtered AS (
       AND (NOT $28::bool OR rr.is_record IS TRUE)
       AND ($29::float8 IS NULL OR rv.monthly_revenue >= $29)
       AND (NOT $30::bool OR cf.free_cash_flow_ttm > 0)
-      AND ($31::float8 IS NULL OR (qv.pe > 0 AND qv.pe <= $31))
-      AND ($32::float8 IS NULL OR (qv.pb > 0 AND qv.pb <= $32))"#,
+      AND ($31::float8 IS NULL OR qv.pe <= $31)
+      AND ($32::float8 IS NULL OR qv.pb <= $32)"#,
             $chip_filter,
             r#"
 ),
@@ -318,6 +320,8 @@ picks AS (
                             WHEN 'trust_streak' THEN trust_buy
                             WHEN 'revenue_yoy' THEN revenue_yoy
                             WHEN 'operating_margin' THEN operating_margin
+                            WHEN 'pe_ratio' THEN -pe
+                            WHEN 'pb_ratio' THEN -pb
                         END DESC NULLS LAST,
                         rs_score DESC, stock_symbol
            ) AS pick_rank
