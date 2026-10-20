@@ -413,3 +413,27 @@ fn validate_margin_filters() {
     params.revenue_record = Some(false);
     assert!(validate_screening_params(&params).is_err());
 }
+
+/// 排除產業 id：逗號分隔、去空白與重複，最多 10 個；非正整數、超過上限或包含 `industry_id` 回 422；
+/// 單獨設定也算篩選條件。
+#[test]
+fn validate_exclude_industry_ids() {
+    assert_eq!(parse_exclude_industry_ids(None), Ok(None));
+    assert_eq!(parse_exclude_industry_ids(Some(" , ")), Ok(None));
+    assert_eq!(
+        parse_exclude_industry_ids(Some("17, 15,17")),
+        Ok(Some(vec![17, 15]))
+    );
+    for bad in ["0", "-3", "金融", "1,2,3,4,5,6,7,8,9,10,11"] {
+        assert!(parse_exclude_industry_ids(Some(bad)).is_err(), "{bad}");
+    }
+    let mut params = screening_params();
+    params.exclude_industry_ids = Some("17".to_owned());
+    let validated = validate_screening_params(&params).expect("單獨設定即可篩選");
+    assert_eq!(validated.exclude_industry_ids, Some(vec![17]));
+    params.industry_id = Some(17);
+    assert_eq!(
+        validate_screening_params(&params).err(),
+        Some("exclude_industry_ids 不可包含 industry_id 指定的產業")
+    );
+}

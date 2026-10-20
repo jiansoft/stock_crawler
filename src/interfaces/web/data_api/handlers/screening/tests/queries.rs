@@ -61,6 +61,7 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(Option::<Decimal>::None)
         .bind(false)
         .bind(false)
+        .bind(Option::<Vec<i32>>::None)
         .fetch_all(pool)
         .await
         .expect("screen EXPLAIN");
@@ -452,6 +453,80 @@ async fn screen_at_filters_revenue_record() {
         run(Some(true)).await,
         [("79979SR1".to_owned(), serde_json::json!(true))]
     );
+
+    cleanup().await;
+}
+
+/// 排除產業：以固定查詢日 1988-03-05 執行，金融保險業（17）的 SX1 被排除，SX2（產業 1）與 SX3（產業 2）
+/// 保留；排除兩個產業時只剩 SX3。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn screen_at_excludes_industries() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 screen_at_excludes_industries：無資料庫連接");
+        return;
+    }
+    const SYMBOLS: [&str; 3] = ["79979SX1", "79979SX2", "79979SX3"];
+    let pool = database::get_connection();
+    let cleanup = || async {
+        for sql in [
+            r#"DELETE FROM "Revenue" WHERE "SecurityCode" = ANY($1)"#,
+            "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
+        ] {
+            let _ = sqlx::query(sql).bind(&SYMBOLS[..]).execute(pool).await;
+        }
+    };
+    cleanup().await;
+    for (symbol, industry) in [("79979SX1", 17), ("79979SX2", 1), ("79979SX3", 2)] {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
+               VALUES ($1, '排除產業', $1, 2, $2)"#,
+        )
+        .bind(symbol)
+        .bind(industry)
+        .execute(pool)
+        .await
+        .expect("種入股票");
+        sqlx::query(
+            r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "Monthly", "ComparedWithLastYearSameMonth")
+               VALUES ($1, $1, 198801, 979790, 50)"#,
+        )
+        .bind(symbol)
+        .execute(pool)
+        .await
+        .expect("種入月營收");
+    }
+
+    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let run = |excluded: &'static str| async move {
+        let mut params = screening_params();
+        params.min_monthly_revenue = Some(979_790.0);
+        params.exclude_industry_ids = Some(excluded.to_owned());
+        params.limit = Some(50);
+        let validated = validate_screening_params(&params).expect("參數合法");
+        let response = screen_at(&params, validated, query_date).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body 可讀");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON 回應");
+        let mut symbols: Vec<String> = json["stocks"]
+            .as_array()
+            .expect("stocks")
+            .iter()
+            .filter_map(|stock| stock["stock_symbol"].as_str())
+            .filter(|symbol| SYMBOLS.contains(symbol))
+            .map(str::to_owned)
+            .collect();
+        symbols.sort_unstable();
+        symbols
+    };
+    assert_eq!(run("17").await, ["79979SX2", "79979SX3"]);
+    assert_eq!(run("17,1").await, ["79979SX3"]);
 
     cleanup().await;
 }

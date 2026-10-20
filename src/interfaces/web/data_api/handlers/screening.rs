@@ -108,6 +108,7 @@ async fn screen_at(
         .bind(validated.min_operating_margin_percent)
         .bind(params.margins_yoy_up.unwrap_or(false))
         .bind(params.revenue_record.unwrap_or(false))
+        .bind(validated.exclude_industry_ids.as_deref())
         .fetch_all(database::get_connection())
         .await;
 

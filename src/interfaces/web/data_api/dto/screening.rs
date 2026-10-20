@@ -172,6 +172,9 @@ pub(crate) struct StockScreeningParams {
     /// 可選的正整數產業分類編號。
     #[param(minimum = 1)]
     pub(crate) industry_id: Option<i32>,
+    /// 排除的產業 id（逗號分隔，最多 10 個，例如 `17` 排除金融保險業，其營收口徑與一般公司不同、
+    /// 毛利率與營業利益率排名常落在最前面）；不可包含 `industry_id`。單獨設定也算篩選條件。
+    pub(crate) exclude_industry_ids: Option<String>,
     /// 估值區間固定 enum。
     #[param(value_type = ValuationBandParamValue, inline)]
     pub(crate) valuation_band: Option<String>,

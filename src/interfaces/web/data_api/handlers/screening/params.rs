@@ -41,10 +41,40 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_trust_streak: Option<i16>,
     /// 近 20 筆日線平均成交金額下限（元）。
     pub(super) min_avg_trade_value: Option<Decimal>,
+    /// 排除的產業 id；沒有指定時為 `None`。
+    pub(super) exclude_industry_ids: Option<Vec<i32>>,
     /// 二十八個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,
+}
+
+/// 排除產業最多幾個。
+const MAX_EXCLUDED_INDUSTRIES: usize = 10;
+
+/// 解析逗號分隔的排除產業 id：去掉空白與重複，空字串或省略為 `None`；非正整數或超過
+/// [`MAX_EXCLUDED_INDUSTRIES`] 個回錯誤訊息。
+pub(super) fn parse_exclude_industry_ids(
+    value: Option<&str>,
+) -> Result<Option<Vec<i32>>, &'static str> {
+    let mut ids: Vec<i32> = Vec::new();
+    for part in value.unwrap_or_default().split(',').map(str::trim) {
+        if part.is_empty() {
+            continue;
+        }
+        let id = part
+            .parse::<i32>()
+            .ok()
+            .filter(|id| *id > 0)
+            .ok_or("exclude_industry_ids 必須為逗號分隔的正整數產業 id，例如 17")?;
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    if ids.len() > MAX_EXCLUDED_INDUSTRIES {
+        return Err("exclude_industry_ids 最多 10 個");
+    }
+    Ok((!ids.is_empty()).then_some(ids))
 }
 
 /// 驗證條件選股參數並轉換成資料庫可直接綁定的型別。
@@ -153,6 +183,12 @@ pub(super) fn validate_screening_params(
     {
         return Err("min_avg_trade_value 必須介於 1 至 100000（百萬元）");
     }
+    let exclude_industry_ids = parse_exclude_industry_ids(params.exclude_industry_ids.as_deref())?;
+    if let (Some(industry_id), Some(excluded)) = (params.industry_id, &exclude_industry_ids)
+        && excluded.contains(&industry_id)
+    {
+        return Err("exclude_industry_ids 不可包含 industry_id 指定的產業");
+    }
     let order_by = screen_order_by(
         params.sort_by.as_deref().unwrap_or("stock_symbol"),
         params.sort_order.as_deref().unwrap_or("asc"),
@@ -163,6 +199,7 @@ pub(super) fn validate_screening_params(
     }
     let has_filter = market != "all"
         || params.industry_id.is_some()
+        || exclude_industry_ids.is_some()
         || params.valuation_band.is_some()
         || params.min_revenue_yoy_percent.is_some()
         || params.min_revenue_yoy_streak.is_some()
@@ -198,6 +235,7 @@ pub(super) fn validate_screening_params(
         min_operating_margin_percent,
         min_rs_score: params.min_rs_score.map(i16::from),
         min_foreign_streak: params.min_foreign_streak.map(i16::from),
+        exclude_industry_ids,
         min_trust_streak: params.min_trust_streak.map(i16::from),
         min_avg_trade_value: params
             .min_avg_trade_value
