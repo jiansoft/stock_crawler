@@ -10,6 +10,7 @@ async fn run_builds_full_message() {
         &quote(),
         &chip(),
         &index(),
+        &FakeValuation::default(),
         &portfolio(),
         day(17),
         &holdings(),
@@ -104,6 +105,7 @@ async fn run_degrades_per_section() {
         &quote(),
         &failing_chip,
         &index(),
+        &FakeValuation::default(),
         &portfolio(),
         day(17),
         &holdings(),
@@ -122,6 +124,7 @@ async fn run_degrades_per_section() {
         &failing_quote,
         &chip(),
         &failing_index(),
+        &FakeValuation::default(),
         &portfolio(),
         day(17),
         &holdings(),
@@ -140,6 +143,7 @@ async fn run_degrades_per_section() {
             &failing_quote,
             &failing_chip,
             &failing_index(),
+            &FakeValuation::failing(),
             &FakePortfolio::failing(),
             day(17),
             &holdings(),
@@ -148,6 +152,50 @@ async fn run_degrades_per_section() {
         .await
         .is_none()
     );
+}
+
+/// 估值水位接在大盤趨勢之後：最新一天在近 5 年的百分位與 5 個交易日前的本益比；讀取失敗只少這一行。
+#[tokio::test]
+async fn run_appends_valuation_level_to_regime() {
+    // 7 個交易日：本益比 10、11、…、16，淨值比都是 1.5；最新 16 是最高（第 100 百分位），5 日前為 11。
+    let days: Vec<MarketValuationDay> = (0..7)
+        .map(|i| MarketValuationDay {
+            date: day(8 + i),
+            median_pe: Some(10.0 + f64::from(i)),
+            median_pb: Some(1.5),
+            pe_samples: 900,
+            pb_samples: 950,
+        })
+        .collect();
+    let valuation = FakeValuation { days, fail: false };
+    let message = run(
+        &quote(),
+        &chip(),
+        &index(),
+        &valuation,
+        &portfolio(),
+        day(17),
+        &holdings(),
+        None,
+    )
+    .await
+    .expect("有內容");
+    let line = "• 估值水位 10-14：本益比中位數 16.00 倍（近 5 年第 100 百分位，5 日前 11.00 倍）、股價淨值比中位數 1.50 倍（第 100 百分位）";
+    assert!(message.contains(&esc(line)), "缺少 {line}：{message}");
+
+    let message = run(
+        &quote(),
+        &chip(),
+        &index(),
+        &FakeValuation::failing(),
+        &portfolio(),
+        day(17),
+        &holdings(),
+        None,
+    )
+    .await
+    .expect("其他段仍有內容");
+    assert!(!message.contains("估值水位"), "{message}");
 }
 
 /// 數字格式：分數變化與億元都帶正負號、一位小數。

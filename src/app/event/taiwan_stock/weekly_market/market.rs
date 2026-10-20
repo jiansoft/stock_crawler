@@ -1,15 +1,20 @@
-//! 每週市場摘要的大盤趨勢一段：加權指數收盤、近一週漲跌、均線排列與位置、這週穿越均線的日子與市場廣度。
+//! 每週市場摘要的大盤趨勢一段：加權指數收盤、近一週漲跌、均線排列與位置、這週穿越均線的日子、市場廣度
+//! 與估值水位（上市櫃本益比、股價淨值比中位數在近 [`VALUATION_YEARS`] 年的位置）。
 
 use std::fmt::Write;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use chrono::{Months, NaiveDate};
 
 use super::WEEK_DAYS;
 use crate::domain::market_index::{
     breadth::{self, BreadthQuery, MarketBreadth},
     regime::{self, IndexCloseQuery, MarketRegime, MovingAverageCross},
+    valuation::{self, ALL_MARKETS, MarketValuationRepository, ValuationDistribution},
 };
+
+/// 估值水位回看的年數。
+pub(super) const VALUATION_YEARS: u32 = 5;
 
 /// 大盤趨勢一段要列出位置的均線天數。
 pub(super) const REGIME_MA_DAYS: [u16; 2] = [60, 240];
@@ -24,6 +29,82 @@ pub(super) struct RegimeSection {
     pub(super) state: MarketRegime,
     pub(super) crosses: Vec<MovingAverageCross>,
     pub(super) breadth: Option<MarketBreadth>,
+    /// 估值水位；由 [`valuation_level`] 另外查詢後填入，沒有資料或讀取失敗為 `None`。
+    pub(super) valuation: Option<ValuationLevel>,
+}
+
+/// 上市櫃本益比、股價淨值比中位數在近 [`VALUATION_YEARS`] 年的位置。
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ValuationLevel {
+    /// 最新一個有估值資料的交易日。
+    pub(super) date: NaiveDate,
+    /// 本益比中位數的分布；最新一天沒有時為 `None`。
+    pub(super) pe: Option<ValuationDistribution>,
+    /// 股價淨值比中位數的分布；最新一天沒有時為 `None`。
+    pub(super) pb: Option<ValuationDistribution>,
+    /// [`WEEK_DAYS`] 個交易日前的本益比中位數。
+    pub(super) pe_before: Option<f64>,
+}
+
+/// `date`（含）之前近 [`VALUATION_YEARS`] 年的上市櫃估值水位；沒有資料回 `None`。
+pub(super) async fn valuation_level(
+    repo: &impl MarketValuationRepository,
+    date: NaiveDate,
+) -> Result<Option<ValuationLevel>> {
+    let since = date
+        .checked_sub_months(Months::new(VALUATION_YEARS * 12))
+        .unwrap_or(NaiveDate::MIN);
+    let days = valuation::complete_days(
+        repo.fetch_market_valuation(ALL_MARKETS, since, date)
+            .await?,
+    );
+    let Some(latest) = days.last() else {
+        return Ok(None);
+    };
+    let pe_before = days
+        .len()
+        .checked_sub(WEEK_DAYS + 1)
+        .and_then(|index| days[index].median_pe);
+    Ok(Some(ValuationLevel {
+        date: latest.date,
+        pe: valuation::distribution(
+            days.iter().filter_map(|day| day.median_pe).collect(),
+            latest.median_pe,
+        ),
+        pb: valuation::distribution(
+            days.iter().filter_map(|day| day.median_pb).collect(),
+            latest.median_pb,
+        ),
+        pe_before,
+    }))
+}
+
+/// 估值水位一行，例如「• 估值水位 10-16：本益比中位數 17.87 倍（近 5 年第 34 百分位，5 日前 18.10 倍）、
+/// 股價淨值比中位數 1.78 倍（第 48 百分位）」；兩者都沒有時回 `None`。
+pub(super) fn valuation_line(level: &ValuationLevel) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(pe) = &level.pe {
+        let before = level.pe_before.map_or_else(String::new, |value| {
+            format!("，{WEEK_DAYS} 日前 {value:.2} 倍")
+        });
+        parts.push(format!(
+            "本益比中位數 {:.2} 倍（近 {VALUATION_YEARS} 年第 {:.0} 百分位{before}）",
+            pe.current, pe.percentile
+        ));
+    }
+    if let Some(pb) = &level.pb {
+        parts.push(format!(
+            "股價淨值比中位數 {:.2} 倍（第 {:.0} 百分位）",
+            pb.current, pb.percentile
+        ));
+    }
+    (!parts.is_empty()).then(|| {
+        format!(
+            "• 估值水位 {}：{}",
+            level.date.format("%m-%d"),
+            parts.join("、")
+        )
+    })
 }
 
 /// `date`（含）之前的加權指數趨勢狀態、最近 [`WEEK_DAYS`] 個交易日穿越
@@ -51,6 +132,7 @@ pub(super) async fn regime_section(
         state,
         crosses,
         breadth,
+        valuation: None,
     }))
 }
 
@@ -135,6 +217,9 @@ pub(super) fn lines(section: &RegimeSection) -> Vec<String> {
     });
     if let Some(breadth) = &section.breadth {
         lines.push(breadth_line(breadth));
+    }
+    if let Some(line) = section.valuation.as_ref().and_then(valuation_line) {
+        lines.push(line);
     }
     lines
 }
