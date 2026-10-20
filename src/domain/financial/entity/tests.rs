@@ -1,3 +1,6 @@
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
+
 use super::*;
 
 /// 建立一筆兩種推估法都算得出來的樣本。
@@ -247,4 +250,36 @@ fn estimate_eps_is_none_without_any_usable_input() {
 #[test]
 fn estimate_eps_is_none_for_invalid_month() {
     assert_eq!(revenue_alert(202600).estimate_eps(), None);
+}
+
+/// 財報、月營收與估價的建構函式只帶入識別欄位，其餘數值歸零。
+#[test]
+fn constructors_start_from_zeroed_defaults() {
+    let statement = FinancialStatement::new("2330".to_string());
+    assert_eq!(statement.security_code, "2330");
+    assert_eq!(statement.serial, 0);
+    assert!(statement.quarter.is_empty());
+    assert_eq!(statement.earnings_per_share, Decimal::ZERO);
+    assert_eq!(statement.return_on_assets, Decimal::ZERO);
+
+    let revenue = MonthlyRevenue::new();
+    assert!(revenue.stock_symbol.is_empty());
+    assert_eq!(revenue.date, 0);
+    assert_eq!(revenue.monthly, Decimal::ZERO);
+    assert_eq!(revenue.highest_price, Decimal::ZERO);
+
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 20).expect("合法日期");
+    let estimate = PriceEstimate::new("2330".to_string(), date);
+    assert_eq!(
+        (estimate.security_code.as_str(), estimate.date),
+        ("2330", date)
+    );
+    assert!(estimate.name.is_empty() && estimate.last_daily_quote_date.is_empty());
+    assert_eq!(estimate.cheap + estimate.fair + estimate.expensive, 0.0);
+    assert_eq!(estimate.pbr_expensive, 0.0);
+    assert_eq!((estimate.year_count, estimate.index), (0, 0));
+    assert_eq!(
+        PriceEstimate::default().date,
+        chrono::NaiveDate::from_ymd_opt(1970, 1, 1).expect("合法日期")
+    );
 }
