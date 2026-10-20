@@ -1,12 +1,14 @@
 //! # 持股組合總覽
 //!
 //! 把目前持有（未賣出）的各檔部位彙總成一份總覽：市值與權重、未實現損益、
-//! 已領股利、產業分布，以及以市值加權的殖利率與 Piotroski F 分數。
+//! 已領股利、產業分布，以及以市值加權的殖利率、Piotroski F 分數、本益比與股價淨值比。
 //!
 //! - 市值＝持有股數 × 最新收盤價；沒有收盤價的部位不計市值、權重與損益，
 //!   但股數、成本與已領股利照常列出。
 //! - 加權殖利率與加權 F 分數只用「有該指標」的部位加權，另回報這些部位占總市值的
 //!   比例（覆蓋率），避免少數有值的部位被誤當成整體。
+//! - 本益比與股價淨值比用市值加權的調和平均（Σ市值 ÷ Σ(市值 ÷ 比值)），等同把整個組合當成一家公司：
+//!   總市值 ÷ 依持股比例分得的盈餘（或淨值）。虧損（本益比 0）的部位不列入。
 //! - 成本是買進時付出的金額（含手續費），配股取得的股數成本為 0。
 
 use std::collections::HashMap;
@@ -36,6 +38,10 @@ pub struct Position {
     pub dividend_yield_percent: Option<Decimal>,
     /// Piotroski F 分數；沒有或過期時為 `None`。
     pub f_score: Option<i16>,
+    /// 最新一筆日線的官方本益比；虧損或沒有資料時為 `None`。
+    pub pe_ratio: Option<Decimal>,
+    /// 最新一筆日線的官方股價淨值比；沒有資料時為 `None`。
+    pub pb_ratio: Option<Decimal>,
 }
 
 /// 部位加上市值、權重與損益後的結果。
@@ -96,6 +102,10 @@ pub struct PortfolioSummary {
     pub weighted_dividend_yield: Option<WeightedMetric>,
     /// 市值加權 F 分數；沒有任何部位有 F 分數時為 `None`。
     pub weighted_f_score: Option<WeightedMetric>,
+    /// 市值加權（調和平均）本益比；沒有任何部位有本益比時為 `None`。
+    pub weighted_pe: Option<WeightedMetric>,
+    /// 市值加權（調和平均）股價淨值比；沒有任何部位有淨值比時為 `None`。
+    pub weighted_pb: Option<WeightedMetric>,
     /// 產業分布，依市值由大到小。
     pub industries: Vec<IndustrySummary>,
     /// 各部位，依市值由大到小（沒有市值的排最後、再依代號）。
@@ -132,6 +142,12 @@ pub fn summarize(positions: Vec<Position>) -> PortfolioSummary {
     });
     let weighted_f_score = weighted(&positions, &market_values, total_value, |position| {
         position.f_score.map(Decimal::from)
+    });
+    let weighted_pe = weighted_harmonic(&positions, &market_values, total_value, |position| {
+        position.pe_ratio
+    });
+    let weighted_pb = weighted_harmonic(&positions, &market_values, total_value, |position| {
+        position.pb_ratio
     });
 
     let mut by_industry: HashMap<Option<i32>, (String, Decimal, usize)> = HashMap::new();
@@ -191,9 +207,36 @@ pub fn summarize(positions: Vec<Position>) -> PortfolioSummary {
         dividends_received: money(dividends),
         weighted_dividend_yield,
         weighted_f_score,
+        weighted_pe,
+        weighted_pb,
         industries,
         holdings,
     }
+}
+
+/// 以市值加權 `metric` 的調和平均（Σ市值 ÷ Σ(市值 ÷ 比值)）；只有比值為正且有市值的部位參與。
+fn weighted_harmonic(
+    positions: &[Position],
+    market_values: &[Option<Decimal>],
+    total_value: Decimal,
+    metric: impl Fn(&Position) -> Option<Decimal>,
+) -> Option<WeightedMetric> {
+    let (inverse_sum, covered) = positions.iter().zip(market_values).fold(
+        (Decimal::ZERO, Decimal::ZERO),
+        |(sum, covered), (position, value)| match (metric(position), value) {
+            (Some(metric), Some(value)) if metric > Decimal::ZERO => {
+                (sum + *value / metric, covered + value)
+            }
+            _ => (sum, covered),
+        },
+    );
+    if inverse_sum.is_zero() {
+        return None;
+    }
+    Some(WeightedMetric {
+        value: round_to(covered / inverse_sum, 2),
+        coverage_percent: percent(covered, total_value).unwrap_or(0.0),
+    })
 }
 
 /// 以市值加權 `metric`；只有有值且有市值的部位參與。
@@ -251,7 +294,43 @@ mod tests {
             closing_price: None,
             dividend_yield_percent: None,
             f_score: None,
+            pe_ratio: None,
+            pb_ratio: None,
         }
+    }
+
+    /// 本益比與股價淨值比用市值加權的調和平均；非正值（虧損）不列入，也不算覆蓋。
+    #[test]
+    fn summarize_uses_harmonic_mean_for_valuation_ratios() {
+        let positions = vec![
+            Position {
+                closing_price: Some(dec!(100)),
+                pe_ratio: Some(dec!(10)),
+                pb_ratio: Some(dec!(1)),
+                ..position("1101", Some(1), 1_000, dec!(80_000))
+            },
+            Position {
+                closing_price: Some(dec!(100)),
+                pe_ratio: Some(dec!(40)),
+                pb_ratio: Some(dec!(4)),
+                ..position("2330", Some(24), 1_000, dec!(60_000))
+            },
+            Position {
+                closing_price: Some(dec!(100)),
+                pe_ratio: Some(Decimal::ZERO),
+                ..position("2603", Some(15), 1_000, dec!(90_000))
+            },
+        ];
+        let summary = summarize(positions);
+        // 200,000 ÷ (100,000/10 + 100,000/40)＝16；覆蓋 2/3 市值。
+        assert_eq!(
+            summary.weighted_pe,
+            Some(WeightedMetric {
+                value: 16.0,
+                coverage_percent: 66.67
+            })
+        );
+        assert_eq!(summary.weighted_pb.map(|metric| metric.value), Some(1.6));
     }
 
     /// 市值、權重、損益、產業分布與市值加權指標。
@@ -341,6 +420,7 @@ mod tests {
         assert_eq!(summary.unrealized_gain_percent, None);
         assert_eq!(summary.weighted_dividend_yield, None);
         assert_eq!(summary.weighted_f_score, None);
+        assert_eq!((summary.weighted_pe, summary.weighted_pb), (None, None));
 
         let priced = &summary.holdings[0];
         assert_eq!(priced.position.stock_symbol, "2887");
