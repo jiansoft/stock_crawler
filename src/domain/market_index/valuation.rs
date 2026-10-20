@@ -2,11 +2,12 @@
 //!
 //! 每日中位數預先算好存在 `daily_market_valuation`（只計大於 0 的值：虧損股沒有本益比、ETF 兩者都沒有）。
 //! 這裡放讀寫介面與分布計算：樣本數不到期間每日樣本數中位數一半的日子（資料寫入到一半或缺漏）不列入，
-//! 再看最新一天的中位數落在期間的哪個位置。`/market/valuation`、每週市場摘要與回測的大盤估值濾網共用。
+//! 再看最新一天的中位數落在期間的哪個位置。`/market/valuation`、`/market/regime`、每週市場摘要、大盤趨勢
+//! 通知與回測的大盤估值濾網共用。
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{Months, NaiveDate};
 
 /// 上市加上櫃合計的市場編號（上市 2、上櫃 4）。
 pub const ALL_MARKETS: i32 = 0;
@@ -96,6 +97,88 @@ pub fn distribution(mut values: Vec<f64>, current: Option<f64>) -> Option<Valuat
         max: values[values.len() - 1],
         days: values.len(),
     })
+}
+
+/// 估值水位回看的年數。
+pub const LEVEL_YEARS: u32 = 5;
+
+/// 上市櫃本益比、股價淨值比中位數在近 [`LEVEL_YEARS`] 年的位置。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValuationLevel {
+    /// 最新一個有估值資料的交易日。
+    pub date: NaiveDate,
+    /// 本益比中位數的分布；最新一天沒有時為 `None`。
+    pub pe: Option<ValuationDistribution>,
+    /// 股價淨值比中位數的分布；最新一天沒有時為 `None`。
+    pub pb: Option<ValuationDistribution>,
+    /// [`Self::before_days`] 個交易日前的本益比中位數；資料不夠時為 `None`。
+    pub pe_before: Option<f64>,
+    /// `pe_before` 是幾個交易日前。
+    pub before_days: usize,
+}
+
+impl ValuationLevel {
+    /// 一行摘要，例如「本益比中位數 17.87 倍（近 5 年第 34 百分位，5 日前 18.10 倍）、股價淨值比中位數
+    /// 1.78 倍（第 48 百分位）」；兩者都沒有時回 `None`。
+    pub fn summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if let Some(pe) = &self.pe {
+            let before = self.pe_before.map_or_else(String::new, |value| {
+                format!("，{} 日前 {value:.2} 倍", self.before_days)
+            });
+            parts.push(format!(
+                "本益比中位數 {:.2} 倍（近 {LEVEL_YEARS} 年第 {:.0} 百分位{before}）",
+                pe.current, pe.percentile
+            ));
+        }
+        if let Some(pb) = &self.pb {
+            parts.push(format!(
+                "股價淨值比中位數 {:.2} 倍（第 {:.0} 百分位）",
+                pb.current, pb.percentile
+            ));
+        }
+        (!parts.is_empty()).then(|| parts.join("、"))
+    }
+}
+
+/// `date`（含）之前近 [`LEVEL_YEARS`] 年的上市櫃估值水位，另附 `before_days` 個交易日前的本益比中位數；
+/// 沒有資料回 `None`。
+///
+/// # Errors
+///
+/// 讀取每日中位數失敗時回傳錯誤。
+pub async fn level(
+    repo: &impl MarketValuationRepository,
+    date: NaiveDate,
+    before_days: usize,
+) -> Result<Option<ValuationLevel>> {
+    let since = date
+        .checked_sub_months(Months::new(LEVEL_YEARS * 12))
+        .unwrap_or(NaiveDate::MIN);
+    let days = complete_days(
+        repo.fetch_market_valuation(ALL_MARKETS, since, date)
+            .await?,
+    );
+    let Some(latest) = days.last() else {
+        return Ok(None);
+    };
+    let pe_before = days
+        .len()
+        .checked_sub(before_days + 1)
+        .and_then(|index| days[index].median_pe);
+    Ok(Some(ValuationLevel {
+        date: latest.date,
+        pe: distribution(
+            days.iter().filter_map(|day| day.median_pe).collect(),
+            latest.median_pe,
+        ),
+        pb: distribution(
+            days.iter().filter_map(|day| day.median_pb).collect(),
+            latest.median_pb,
+        ),
+        pe_before,
+        before_days,
+    }))
 }
 
 /// 已排序資料的分位數，線性內插（同 PostgreSQL `percentile_cont`）。
