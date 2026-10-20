@@ -148,6 +148,54 @@ fn describe_formats_each_kind() {
                 Some("質押比例 12.5%（+1.5 個百分點）"),
             ),
         ),
+        (
+            TimelineRow {
+                period: Some("2026-09".to_owned()),
+                v1: Some(dec!(321000000)),
+                v2: Some(dec!(298765432.1)),
+                ..row("revenue_record")
+            },
+            (
+                "2026-09 營收創歷史新高",
+                Some("營收 3210 億元，前高 2987.65 億元"),
+            ),
+        ),
+        (
+            TimelineRow {
+                period: Some("2026-09".to_owned()),
+                v1: Some(dec!(150000)),
+                ..row("revenue_record")
+            },
+            ("2026-09 營收創歷史新高", Some("營收 1.5 億元")),
+        ),
+        (
+            TimelineRow {
+                period: Some("2026Q2".to_owned()),
+                label: Some("all_up".to_owned()),
+                v1: Some(dec!(59.123)),
+                v2: Some(dec!(49.6)),
+                v3: Some(dec!(42.70)),
+                ..row("margin_trend")
+            },
+            (
+                "2026Q2 三率三升",
+                Some("毛利率 59.12%、營益率 49.6%、淨利率 42.7%"),
+            ),
+        ),
+        (
+            TimelineRow {
+                period: Some("2026Q2".to_owned()),
+                label: Some("all_down".to_owned()),
+                v1: Some(dec!(10)),
+                v2: Some(dec!(-2)),
+                v3: Some(dec!(-3.5)),
+                ..row("margin_trend")
+            },
+            (
+                "2026Q2 三率三降",
+                Some("毛利率 10%、營益率 -2%、淨利率 -3.5%"),
+            ),
+        ),
         (row("unknown"), ("unknown", None)),
     ];
     for (row, (title, detail)) in cases {
