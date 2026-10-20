@@ -267,6 +267,7 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         min_revenue_yoy_percent: params.min_revenue_yoy_percent,
         min_revenue_yoy_streak: params.min_revenue_yoy_streak,
         min_revenue_yoy_3m_percent: params.min_revenue_yoy_3m_percent,
+        min_monthly_revenue: params.min_monthly_revenue,
         min_eps: params.min_eps,
         min_roe_percent: params.min_roe_percent,
         min_gross_margin_percent: params.min_gross_margin_percent,

@@ -17,8 +17,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// 候選股排序方式（見 [`super::RANK_BY`]）、`$17` 持股加權方式（見 [`super::portfolio::Weighting`]）、`$18`
 /// 排除的產業名稱（`NULL` 為不排除）、`$19`～`$23` 基本面門檻（月營收年增率、連續年增月數、近 3 月
 /// 年增率、每股盈餘、股東權益報酬率，`NULL` 為不篩）、`$24`～`$27` 財報三率與負債比（毛利率、營業
-/// 利益率下限、是否只選三率三升、負債比上限）、`$28` 是否只選最新月營收創歷史新高；籌碼版另有
-/// `$29`／`$30`。
+/// 利益率下限、是否只選三率三升、負債比上限）、`$28` 是否只選最新月營收創歷史新高、`$29` 最新月營收
+/// 下限（千元，`NULL` 為不篩）；籌碼版另有 `$30`／`$31`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
@@ -30,7 +30,7 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 ///   到迄日經過的交易日數）。
 /// - `rebal` 另算 `revenue_ord`：換股日當天已公布的最新營收月份（年 × 12 + 月）。每月營收最晚次月 10 日
 ///   公布，次月 11 日起才使用，即換股日往前 10 天所在月份的前一個月。
-/// - `filtered` 的 `rv`：已公布的最近 12 個月營收，算最新一月年增率、連續年增月數與近 3 月年增率（算法同
+/// - `filtered` 的 `rv`：已公布的最近 12 個月營收，算最新一月營收與年增率、連續年增月數與近 3 月年增率（算法同
 ///   `/stocks/screen`）；最新一筆早於 `revenue_ord` 超過 2 個月視為沒有資料。`fs`：已公布的最近一季財報，
 ///   以法定期限的隔天起才使用（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1），距換股日超過 3 季不用。兩者都
 ///   只在有設對應門檻時才查。
@@ -120,6 +120,7 @@ filtered AS (
         SELECT
             MAX(yoy) FILTER (WHERE rn = 1) AS revenue_yoy,
             MAX(month) FILTER (WHERE rn = 1) AS latest_month,
+            MAX(monthly) FILTER (WHERE rn = 1) AS monthly_revenue,
             COALESCE(
                 MIN(rn) FILTER (WHERE NOT (yoy > 0 AND ord = first_ord - rn + 1)) - 1,
                 COUNT(*)
@@ -141,7 +142,7 @@ filtered AS (
                        ("Date" / 100)::int * 12 + ("Date" % 100)::int AS ord
                 FROM "Revenue"
                 WHERE ($19::float8 IS NOT NULL OR $20::smallint IS NOT NULL OR $21::float8 IS NOT NULL
-                       OR $16::text = 'revenue_yoy' OR $28::bool)
+                       OR $16::text = 'revenue_yoy' OR $28::bool OR $29::float8 IS NOT NULL)
                   AND "SecurityCode" = u.stock_symbol
                   AND "Date" <= ((u.revenue_ord - 1) / 12) * 100 + (u.revenue_ord - 1) % 12 + 1
                 ORDER BY "Date" DESC
@@ -251,7 +252,8 @@ filtered AS (
       AND ($25::float8 IS NULL OR ym.operating_margin >= $25)
       AND (NOT $26::bool OR ym.margins_up IS TRUE)
       AND ($27::float8 IS NULL OR bs.debt_ratio <= $27)
-      AND (NOT $28::bool OR rr.is_record IS TRUE)"#,
+      AND (NOT $28::bool OR rr.is_record IS TRUE)
+      AND ($29::float8 IS NULL OR rv.monthly_revenue >= $29)"#,
             $chip_filter,
             r#"
 ),
@@ -366,7 +368,7 @@ pub(super) const BACKTEST_SQL: &str = backtest_sql!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$29`）／投信（`$30`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$30`）／投信（`$31`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
@@ -375,7 +377,7 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($29::bigint IS NULL OR c.foreign_buy >= $29)\n      AND ($30::bigint IS NULL OR c.trust_buy >= $30)",
+        "\n      AND ($30::bigint IS NULL OR c.foreign_buy >= $30)\n      AND ($31::bigint IS NULL OR c.trust_buy >= $31)",
         "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
     )
 );

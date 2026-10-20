@@ -184,6 +184,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 公布日規則同 `min_revenue_yoy_percent`。
     #[param(minimum = -100.0, maximum = 10000.0)]
     pub(crate) min_revenue_yoy_3m_percent: Option<f64>,
+    /// 換股當天已公布的最近一個月營收至少這麼多（新台幣千元，0–1000000000000，與 `/stocks/screen` 的
+    /// `min_monthly_revenue` 同單位）；公布日規則同 `min_revenue_yoy_percent`。用來排除營收規模太小、
+    /// 年增率或利潤率因低基期失真的股票（例如依 `rank_by=revenue_yoy`、`operating_margin` 排序時）。
+    #[param(minimum = 0.0, maximum = 1000000000000.0)]
+    pub(crate) min_monthly_revenue: Option<f64>,
     /// 換股當天已公布的最近一季每股盈餘至少這麼高（元，-10000–10000）。季報以法定期限的隔天起才使用：
     /// Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1；最近一季距換股日超過 3 季視為沒有資料。財報從 2018
     /// 年起，且為目前留存的數字（事後更正會沿用更正後的值）。
@@ -472,6 +477,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) min_revenue_yoy_streak: Option<u8>,
     /// 近 3 個月營收年增率下限（%）；未篩選為 `null`。
     pub(crate) min_revenue_yoy_3m_percent: Option<f64>,
+    /// 最新月營收下限（千元）；未篩選為 `null`。
+    pub(crate) min_monthly_revenue: Option<f64>,
     /// 最近一季每股盈餘下限（元）；未篩選為 `null`。
     pub(crate) min_eps: Option<f64>,
     /// 最近一季股東權益報酬率下限（%）；未篩選為 `null`。

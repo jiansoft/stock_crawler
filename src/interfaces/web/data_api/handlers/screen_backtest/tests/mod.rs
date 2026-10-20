@@ -123,7 +123,9 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("$27::float8 IS NULL OR bs.debt_ratio <= $27"));
     assert!(BACKTEST_SQL.contains("NOT $28::bool OR rr.is_record IS TRUE"));
     assert!(BACKTEST_SQL.contains("rr.month = rv.latest_month"));
-    assert!(!BACKTEST_SQL.contains("$29"));
+    assert!(BACKTEST_SQL.contains("$29::float8 IS NULL OR rv.monthly_revenue >= $29"));
+    assert!(BACKTEST_SQL.contains("MAX(monthly) FILTER (WHERE rn = 1) AS monthly_revenue"));
+    assert!(!BACKTEST_SQL.contains("$30"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -132,9 +134,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $29"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $30"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$31"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $30"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $31"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$32"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     for rank_by in RANK_BY {
@@ -224,7 +226,8 @@ fn validate_fundamentals_checks_ranges() {
         validate_fundamentals(&params(
             "min_revenue_yoy_percent=-100&min_revenue_yoy_streak=12&min_revenue_yoy_3m_percent=10000\
              &min_eps=-10000&min_roe_percent=10000&min_gross_margin_percent=100\
-             &min_operating_margin_percent=-10000&max_debt_ratio_percent=0&margins_yoy_up=true"
+             &min_operating_margin_percent=-10000&max_debt_ratio_percent=0&margins_yoy_up=true\
+             &min_monthly_revenue=0"
         )),
         Ok(())
     );
@@ -248,6 +251,14 @@ fn validate_fundamentals_checks_ranges() {
         (
             "min_revenue_yoy_3m_percent=10001",
             "min_revenue_yoy_3m_percent 必須介於 -100 至 10000",
+        ),
+        (
+            "min_monthly_revenue=-1",
+            "min_monthly_revenue 必須介於 0 至 1000000000000",
+        ),
+        (
+            "min_monthly_revenue=1000000000001",
+            "min_monthly_revenue 必須介於 0 至 1000000000000",
         ),
         ("min_eps=-10001", "min_eps 必須介於 -10000 至 10000"),
         (
