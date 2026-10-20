@@ -1,5 +1,6 @@
 use super::*;
 use crate::domain::performance::entity::SimulationOutcome;
+use crate::infra::database;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
