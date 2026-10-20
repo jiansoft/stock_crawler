@@ -12,10 +12,11 @@ use crate::{
     infra::crawler::yahoo::dividend::YahooPageNotFoundError,
 };
 
-/// 記下寫入列數、回傳實際列數的假倉儲。
+/// 記下寫入列數、回傳實際列數的假倉儲；`lagging` 為 `None` 時查落後名單失敗。
 #[derive(Default)]
 struct FakeRepository {
     saved: Mutex<Vec<(String, usize)>>,
+    lagging: Option<Vec<String>>,
 }
 
 #[async_trait]
@@ -30,6 +31,13 @@ impl FinancialReportRepository for FakeRepository {
 
     async fn save_cash_flow_statements(&self, statements: &[CashFlowStatement]) -> Result<u64> {
         self.record("cash_flow", statements.len())
+    }
+
+    async fn fetch_lagging_symbols(&self, published_within_days: i32) -> Result<Vec<String>> {
+        assert_eq!(published_within_days, PRIORITY_LOOKBACK_DAYS);
+        self.lagging
+            .clone()
+            .ok_or_else(|| anyhow!("落後名單測試失敗"))
     }
 }
 
@@ -154,6 +162,7 @@ async fn run_candidates_counts_each_outcome_and_stops_at_the_limit() {
     let repo = FakeRepository::default();
     let summary = run_candidates(
         &candidates,
+        0,
         4,
         &repo,
         |symbol: &str| {
@@ -186,6 +195,7 @@ async fn run_candidates_counts_each_outcome_and_stops_at_the_limit() {
         RunSummary {
             candidates: 6,
             skipped: 1,
+            prioritized: 0,
             succeeded: 1,
             fallback: 1,
             not_found: 1,
@@ -218,6 +228,127 @@ async fn run_candidates_counts_each_outcome_and_stops_at_the_limit() {
     clear_flags().await;
 }
 
+/// 優先測試的假代號：P1 有每週旗標但仍要抓、P2 已有優先旗標、N1 有每週旗標、N2 一般輪替。
+const PRIORITY_SYMBOLS: [&str; 4] = ["79979P1", "79979P2", "79979N1", "79979N2"];
+
+async fn clear_priority_flags() {
+    for symbol in PRIORITY_SYMBOLS {
+        let _ = CLIENT.delete(&make_cache_key(symbol)).await;
+        let _ = CLIENT.delete(&make_priority_cache_key(symbol)).await;
+    }
+}
+
+/// 優先股票只看優先旗標、不看每週旗標，嘗試時兩個旗標都寫；其餘股票照每週旗標略過。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（Redis），請加 --features integration-tests 執行"
+)]
+async fn run_candidates_prioritizes_lagging_stocks_past_the_weekly_flag() {
+    dotenvy::dotenv().ok();
+    if CLIENT.ping().await.is_err() {
+        println!(
+            "跳過 run_candidates_prioritizes_lagging_stocks_past_the_weekly_flag：無 Redis 連線"
+        );
+        return;
+    }
+    clear_priority_flags().await;
+    for key in [
+        make_cache_key("79979P1"),
+        make_priority_cache_key("79979P2"),
+        make_cache_key("79979N1"),
+    ] {
+        CLIENT.set(&key, true, 60).await.expect("預先寫入略過旗標");
+    }
+
+    let candidates: Vec<String> = PRIORITY_SYMBOLS.iter().map(|s| (*s).to_owned()).collect();
+    let yahoo_calls = Mutex::new(Vec::new());
+    let summary = run_candidates(
+        &candidates,
+        2,
+        10,
+        &FakeRepository::default(),
+        |symbol: &str| {
+            yahoo_calls.lock().unwrap().push(symbol.to_owned());
+            let result = Ok(reports(symbol));
+            async move { result }
+        },
+        |_symbol: &str| async { Ok(empty_reports()) },
+        || async {},
+    )
+    .await
+    .expect("run_candidates");
+
+    assert_eq!(*yahoo_calls.lock().unwrap(), ["79979P1", "79979N2"]);
+    assert_eq!(
+        (summary.skipped, summary.prioritized, summary.succeeded),
+        (2, 1, 2)
+    );
+    for key in [
+        make_cache_key("79979P1"),
+        make_priority_cache_key("79979P1"),
+    ] {
+        assert!(CLIENT.get_bool(&key).await.unwrap_or(false), "{key}");
+    }
+    assert!(
+        !CLIENT
+            .get_bool(&make_priority_cache_key("79979N2"))
+            .await
+            .unwrap_or(false),
+        "一般輪替不寫優先旗標"
+    );
+
+    clear_priority_flags().await;
+}
+
+/// 只採集上市櫃普通股並依代號排序，落後的排最前面；查不到落後名單時照代號順序、沒有優先。
+#[tokio::test]
+async fn order_candidates_puts_lagging_stocks_first() {
+    let stocks = [
+        stock("2454", 2),
+        stock("0050", 2),
+        stock("1101", 2),
+        stock("7708", 5),
+        stock("8042", 4),
+    ];
+    let repo = FakeRepository {
+        lagging: Some(vec!["8042".to_owned(), "7708".to_owned()]),
+        ..Default::default()
+    };
+    assert_eq!(
+        order_candidates(&repo, &stocks).await,
+        (
+            vec!["8042".to_owned(), "1101".to_owned(), "2454".to_owned()],
+            1
+        )
+    );
+    assert_eq!(
+        order_candidates(&FakeRepository::default(), &stocks).await,
+        (
+            vec!["1101".to_owned(), "2454".to_owned(), "8042".to_owned()],
+            0
+        )
+    );
+}
+
+/// 落後的候選股票移到最前面、各自維持原順序；不在候選名單的落後代號忽略。
+#[test]
+fn test_prioritize() {
+    let candidates: Vec<String> = ["1101", "2330", "2454", "3008"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let lagging: Vec<String> = ["3008", "0050", "2330"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let (ordered, priority) = prioritize(candidates.clone(), &lagging);
+    assert_eq!(ordered, ["2330", "3008", "1101", "2454"]);
+    assert_eq!(priority, 2);
+
+    assert_eq!(prioritize(candidates.clone(), &[]), (candidates, 0));
+}
+
 fn stock(symbol: &str, market_id: i32) -> Stock {
     Stock::register(symbol.to_string(), "測試".to_string(), market_id, 1)
 }
@@ -240,6 +371,10 @@ fn test_is_candidate() {
 #[test]
 fn test_make_cache_key() {
     assert_eq!(make_cache_key("2330"), "yahoo:financial_report:2330");
+    assert_eq!(
+        make_priority_cache_key("2330"),
+        "yahoo:financial_report:priority:2330"
+    );
 }
 
 #[test]

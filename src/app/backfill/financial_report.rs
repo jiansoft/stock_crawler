@@ -20,6 +20,13 @@
 //! 因此每天跑一次、約 5 天掃完一輪、每檔約每週重抓一次。Yahoo 回 404 的代號
 //! （多為已下市）略過 30 天。
 //!
+//! ## 季報期優先
+//!
+//! 官方季報（`financial_statement`，03:00 排程寫入）在 [`PRIORITY_LOOKBACK_DAYS`] 天內新公布、
+//! 但損益表還沒有那一季的股票排在最前面，而且不看每週旗標、改用 [`PRIORITY_TTL_SECONDS`]
+//! 的優先旗標：截止日前後每天有上百檔公布，不必等到下一次輪到才有新一季的單季財報。
+//! Yahoo 還沒更新時隔天會再試，直到損益表追上官方或超過回看天數。
+//!
 //! ## 寫入的原子性
 //!
 //! 單檔的 5 次請求與轉譯全部成功後才開始寫入；任一步驟失敗，該檔一筆都不寫，
@@ -34,7 +41,7 @@
 
 mod fetch;
 
-use std::{future::Future, time::Duration};
+use std::{collections::HashSet, future::Future, time::Duration};
 
 use self::fetch::{StockReports, fetch_biggo_reports, fetch_reports};
 
@@ -62,6 +69,12 @@ pub const MAX_STOCKS_PER_RUN: usize = 400;
 
 /// 處理過的股票在這段時間內不重抓（7 天）。
 pub const REFRESH_TTL_SECONDS: usize = 60 * 60 * 24 * 7;
+
+/// 優先股票（損益表落後官方季報）在這段時間內不重抓（20 小時）：每天跑一次，隔天一定會再試。
+pub const PRIORITY_TTL_SECONDS: usize = 60 * 60 * 20;
+
+/// 官方季報在這段天數內新公布才列為優先，避免 Yahoo 一直沒有的代號天天重打。
+pub const PRIORITY_LOOKBACK_DAYS: i32 = 30;
 
 /// 上市、上櫃的 `stock_exchange_market_id`。
 const LISTED_MARKET_IDS: [i32; 2] = [2, 4];
@@ -91,6 +104,8 @@ pub struct RunSummary {
     pub candidates: usize,
     /// 因 Redis 旗標而略過的檔數。
     pub skipped: usize,
+    /// 實際嘗試的優先股票（損益表落後官方季報）檔數，已含在各結果的計數裡。
+    pub prioritized: usize,
     /// 成功寫入的檔數（含沒有財報、寫入 0 列的標的）。
     pub succeeded: usize,
     /// Yahoo 失敗、改由 BigGo 備援寫入的檔數。
@@ -118,9 +133,10 @@ pub async fn execute() -> Result<()> {
     let summary = run(MAX_STOCKS_PER_RUN).await?;
 
     tracing::info!(
-        "Yahoo 財報採集結束: candidates={}, skipped={}, succeeded={}, fallback={}, not_found={}, failed={}, rows={}",
+        "Yahoo 財報採集結束: candidates={}, skipped={}, prioritized={}, succeeded={}, fallback={}, not_found={}, failed={}, rows={}",
         summary.candidates,
         summary.skipped,
+        summary.prioritized,
         summary.succeeded,
         summary.fallback,
         summary.not_found,
@@ -152,18 +168,13 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
         .fetch_all_active()
         .await
         .context("fetch active stocks for financial report backfill failed")?;
-    let mut candidates: Vec<String> = stocks
-        .iter()
-        .filter(|stock| is_candidate(stock))
-        .map(|stock| stock.symbol().0.clone())
-        .collect();
-    candidates.sort();
-
-    tracing::info!("Yahoo 財報採集開始: candidates={}", candidates.len());
+    let repo = PgFinancialReportRepository::new();
+    let (candidates, priority) = order_candidates(&repo, &stocks).await;
     run_candidates(
         &candidates,
+        priority,
         max_stocks,
-        &PgFinancialReportRepository::new(),
+        &repo,
         fetch_reports,
         fetch_biggo_reports,
         stock_interval,
@@ -171,12 +182,56 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
     .await
 }
 
+/// 從股票主檔挑出候選股票並排出採集順序：損益表落後官方季報的在前，其餘依代號。
+///
+/// 回傳順序與優先檔數；查不到落後名單只是少了優先順序，照一般輪替採集即可。
+async fn order_candidates(
+    repo: &impl FinancialReportRepository,
+    stocks: &[Stock],
+) -> (Vec<String>, usize) {
+    let mut candidates: Vec<String> = stocks
+        .iter()
+        .filter(|stock| is_candidate(stock))
+        .map(|stock| stock.symbol().0.clone())
+        .collect();
+    candidates.sort();
+
+    let lagging = repo
+        .fetch_lagging_symbols(PRIORITY_LOOKBACK_DAYS)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("fetch lagging financial report symbols failed: {why:#}");
+            Vec::new()
+        });
+    let (candidates, priority) = prioritize(candidates, &lagging);
+    tracing::info!(
+        "Yahoo 財報採集開始: candidates={}, priority={priority}",
+        candidates.len()
+    );
+    (candidates, priority)
+}
+
+/// 把損益表落後官方季報的候選股票移到最前面（各自維持原順序），回傳新順序與優先檔數。
+///
+/// 不在候選名單裡的落後代號（如興櫃、ETF）不採集。
+fn prioritize(candidates: Vec<String>, lagging: &[String]) -> (Vec<String>, usize) {
+    let lagging: HashSet<&str> = lagging.iter().map(String::as_str).collect();
+    let (mut ordered, rest): (Vec<String>, Vec<String>) = candidates
+        .into_iter()
+        .partition(|symbol| lagging.contains(symbol.as_str()));
+    let priority = ordered.len();
+    ordered.extend(rest);
+    (ordered, priority)
+}
+
 /// 依序採集候選股票，跳過 Redis 旗標內處理過的，至多實際嘗試 `max_stocks` 檔。
 ///
-/// Yahoo 失敗（404 除外）時改從 BigGo 採集。`yahoo`、`biggo` 是單檔報表的抓取函式，
-/// `pause` 是股票之間的間隔；測試時換成假資料與不等待。
+/// 前 `priority` 檔是優先股票：只看 [`PRIORITY_TTL_SECONDS`] 的優先旗標、不看每週旗標，
+/// 嘗試時兩個旗標都寫。Yahoo 失敗（404 除外）時改從 BigGo 採集。`yahoo`、`biggo` 是
+/// 單檔報表的抓取函式，`pause` 是股票之間的間隔；測試時換成假資料與不等待。
 async fn run_candidates<'a, Y, YF, B, BF, P, PF>(
     candidates: &'a [String],
+    priority: usize,
     max_stocks: usize,
     repo: &impl FinancialReportRepository,
     yahoo: Y,
@@ -196,22 +251,35 @@ where
         ..Default::default()
     };
 
-    for stock_symbol in candidates {
+    for (index, stock_symbol) in candidates.iter().enumerate() {
         if summary.attempted() >= max_stocks {
             break;
         }
 
+        let prioritized = index < priority;
         let cache_key = make_cache_key(stock_symbol);
+        let skip_key = if prioritized {
+            make_priority_cache_key(stock_symbol)
+        } else {
+            cache_key.clone()
+        };
         if CLIENT
-            .get_bool(&cache_key)
+            .get_bool(&skip_key)
             .await
-            .with_context(|| format!("redis get_bool failed: cache_key={cache_key}"))?
+            .with_context(|| format!("redis get_bool failed: cache_key={skip_key}"))?
         {
             summary.skipped += 1;
             continue;
         }
 
         // 先寫旗標：即使這檔失敗，下一輪也不會立刻重打同一來源。
+        if prioritized {
+            summary.prioritized += 1;
+            CLIENT
+                .set(&skip_key, true, PRIORITY_TTL_SECONDS)
+                .await
+                .with_context(|| format!("redis set failed: cache_key={skip_key}"))?;
+        }
         CLIENT
             .set(&cache_key, true, REFRESH_TTL_SECONDS)
             .await
@@ -228,18 +296,17 @@ where
             }
             Err(why) if yahoo::dividend::is_page_not_found_error(&why) => {
                 summary.not_found += 1;
-                // 404 幾乎都是已下市、主檔旗標還沒更新的代號，拉長略過時間。
-                if let Err(cache_err) = CLIENT
-                    .set(
-                        &cache_key,
-                        true,
-                        yahoo::dividend::PAGE_NOT_FOUND_CACHE_TTL_SECONDS,
-                    )
-                    .await
-                {
-                    tracing::error!(
-                        "Failed to extend yahoo financial report 404 skip cache: stock_symbol={stock_symbol}, error={cache_err:#}"
-                    );
+                // 404 幾乎都是已下市、主檔旗標還沒更新的代號，拉長略過時間（優先旗標也一樣）。
+                let keys = [Some(&cache_key), prioritized.then_some(&skip_key)];
+                for key in keys.into_iter().flatten() {
+                    if let Err(cache_err) = CLIENT
+                        .set(key, true, yahoo::dividend::PAGE_NOT_FOUND_CACHE_TTL_SECONDS)
+                        .await
+                    {
+                        tracing::error!(
+                            "Failed to extend yahoo financial report 404 skip cache: stock_symbol={stock_symbol}, error={cache_err:#}"
+                        );
+                    }
                 }
                 tracing::warn!(
                     "skip financial report backfill because yahoo page not found (證券可能已下市): stock_symbol={stock_symbol}, error={why:#}"
@@ -362,6 +429,11 @@ fn is_candidate(stock: &Stock) -> bool {
 /// Redis 略過旗標的 key。
 fn make_cache_key(stock_symbol: &str) -> String {
     format!("yahoo:financial_report:{stock_symbol}")
+}
+
+/// 優先股票（損益表落後官方季報）的 Redis 略過旗標 key。
+fn make_priority_cache_key(stock_symbol: &str) -> String {
+    format!("yahoo:financial_report:priority:{stock_symbol}")
 }
 
 /// 股票之間隨機停 1.5～3 秒，降低規律請求被 Yahoo WAF 判定為爬蟲的機率。
