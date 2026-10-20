@@ -275,8 +275,19 @@ pub struct HoldingRevenueAlert {
     pub reg_r2: Option<Decimal>,
     /// 上述迴歸的樣本季數
     pub reg_quarters: Option<i64>,
+    /// 之前所有月份的最高營收 (千元)；之前不滿 12 個月時為 None（不判斷是否創新高）
+    pub previous_high: Option<Decimal>,
+    /// 到當月為止連續年減（月份相連）的月數，最多看 12 個月；當月沒有年減為 0
+    pub yoy_decline_months: i64,
     /// 營收月份 (yyyyMM)
     pub date: i64,
+}
+
+impl HoldingRevenueAlert {
+    /// 當月營收是否高於之前所有月份（之前至少 12 個月）。
+    pub fn is_record_high(&self) -> bool {
+        self.previous_high.is_some_and(|high| self.monthly > high)
+    }
 }
 
 /// 台股月營收以千元為單位；要對上「元／股」的 EPS 必須先換算成元。

@@ -26,6 +26,8 @@ fn revenue_alert(date: i64) -> HoldingRevenueAlert {
         reg_intercept: None,
         reg_r2: None,
         reg_quarters: None,
+        previous_high: None,
+        yoy_decline_months: 0,
         date,
     }
 }

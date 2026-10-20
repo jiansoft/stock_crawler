@@ -24,6 +24,8 @@ fn revenue_alert(symbol: &str, name: &str, yoy: Decimal, mom: Decimal) -> Holdin
         reg_intercept: None,
         reg_r2: None,
         reg_quarters: None,
+        previous_high: None,
+        yoy_decline_months: 0,
         date: 202608,
     }
 }
@@ -489,4 +491,33 @@ async fn is_already_notified_reads_redis_key() {
     assert!(EventDispatcher::is_already_notified(key).await);
     let _ = CLIENT.delete(key).await;
     assert!(!EventDispatcher::is_already_notified(key).await);
+}
+
+// 月營收創歷史新高標🏆；之前不滿 12 個月（previous_high 為 None）不判斷；連續年減滿 3 個月標📉，
+// 創新高優先。
+#[test]
+fn revenue_message_marks_record_highs_and_declines() {
+    let mut record = revenue_alert("2330", "台積電", dec!(30), dec!(5));
+    record.previous_high = Some(dec!(200000000));
+    assert!(record.is_record_high());
+    let mut tied = revenue_alert("2317", "鴻海", dec!(10), dec!(1));
+    tied.previous_high = Some(dec!(250000000));
+    assert!(!tied.is_record_high(), "追平不算創新高");
+    let mut declining = revenue_alert("1101", "台泥", dec!(-8), dec!(-1));
+    declining.yoy_decline_months = 3;
+    let mut short = revenue_alert("1102", "亞泥", dec!(-3), dec!(-1));
+    short.yoy_decline_months = 2;
+
+    let msg =
+        EventDispatcher::build_revenue_message(202608, &[record, tied, declining, short], None);
+    let line = |symbol: &str| {
+        msg.lines()
+            .find(|line| line.contains(symbol) && line.contains("營收︰"))
+            .unwrap_or_default()
+            .to_owned()
+    };
+    assert!(line("2330").ends_with("🏆創歷史新高"), "{msg}");
+    assert!(!line("2317").contains("🏆"), "{msg}");
+    assert!(line("1101").ends_with("📉連續 3 月年減"), "{msg}");
+    assert!(!line("1102").contains("📉"), "{msg}");
 }
