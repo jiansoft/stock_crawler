@@ -205,6 +205,9 @@ pub(crate) struct ScreenBacktestParams {
     /// 同一季；去年同季沒有資料的不會通過。資料與公布日規則同 `min_gross_margin_percent`；`false` 或
     /// 省略不篩選。
     pub(crate) margins_yoy_up: Option<bool>,
+    /// `true` 時只選換股當天已公布的最新月營收創歷史新高（高於之前所有月份，之前至少 12 個月）的股票；
+    /// 公布日規則同 `min_revenue_yoy_percent`；`false` 或省略不篩選。
+    pub(crate) revenue_record: Option<bool>,
     /// 換股當天已公布的最近一季季末負債比（總負債 ÷ 總資產）不超過這個值（%，0–1000）。用 Yahoo 單季
     /// 資產負債表（2015 年起），公布日規則同 `min_eps`；沒有資料的股票不會通過。
     #[param(minimum = 0.0, maximum = 1000.0)]
@@ -479,6 +482,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) min_operating_margin_percent: Option<f64>,
     /// 只選三率三升；未篩選為 `false`。
     pub(crate) margins_yoy_up: bool,
+    /// 只選最新月營收創歷史新高；未篩選為 `false`。
+    pub(crate) revenue_record: bool,
     /// 最近一季負債比上限（%）；未篩選為 `null`。
     pub(crate) max_debt_ratio_percent: Option<f64>,
     /// 訊號來源；未篩選為 `null`。

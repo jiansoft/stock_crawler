@@ -338,7 +338,8 @@ impl<'a> Backtest<'a> {
         .bind(params.min_gross_margin_percent)
         .bind(params.min_operating_margin_percent)
         .bind(params.margins_yoy_up.unwrap_or(false))
-        .bind(params.max_debt_ratio_percent);
+        .bind(params.max_debt_ratio_percent)
+        .bind(params.revenue_record.unwrap_or(false));
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

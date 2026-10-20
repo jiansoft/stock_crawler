@@ -17,7 +17,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// 候選股排序方式（見 [`super::RANK_BY`]）、`$17` 持股加權方式（見 [`super::WEIGHTING`]）、`$18`
 /// 排除的產業名稱（`NULL` 為不排除）、`$19`～`$23` 基本面門檻（月營收年增率、連續年增月數、近 3 月
 /// 年增率、每股盈餘、股東權益報酬率，`NULL` 為不篩）、`$24`～`$27` 財報三率與負債比（毛利率、營業
-/// 利益率下限、是否只選三率三升、負債比上限）；籌碼版另有 `$28`／`$29`。
+/// 利益率下限、是否只選三率三升、負債比上限）、`$28` 是否只選最新月營收創歷史新高；籌碼版另有
+/// `$29`／`$30`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
@@ -33,6 +34,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 ///   `/stocks/screen`）；最新一筆早於 `revenue_ord` 超過 2 個月視為沒有資料。`fs`：已公布的最近一季財報，
 ///   以法定期限的隔天起才使用（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1），距換股日超過 3 季不用。兩者都
 ///   只在有設對應門檻時才查。
+/// - `revenue_records`：每檔每個月的營收是否高於之前所有月份（之前至少 12 個月），以視窗函式一次算完全表，
+///   `filtered` 以 `rv` 的最新一月（已公布）對上；只在 `$28` 時才算（逐期逐檔掃歷史要多 5 秒以上）。
 /// - `filtered` 的 `ym`：已公布的最近一季 Yahoo 單季損益表（公布日規則同 `fs`）的毛利率、營業利益率，
 ///   以及毛利率、營業利益率、稅後淨利率是否都高於去年同一季（三率三升）；`bs`：同樣規則的最近一季
 ///   資產負債表負債比。同樣只在有設門檻時才查。
@@ -76,6 +79,15 @@ rebal AS (
     ) AS numbered
     WHERE i >= $14::int AND (i - $14::int) % $4::int = 0
 ),
+revenue_records AS (
+    SELECT "SecurityCode" AS stock_symbol, "Date" AS month,
+           COUNT(*) OVER prior >= 12 AND "Monthly" > MAX("Monthly") OVER prior AS is_record
+    FROM "Revenue"
+    WHERE $28::bool
+    WINDOW prior AS (
+        PARTITION BY "SecurityCode" ORDER BY "Date" ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+    )
+),
 universe AS (
     SELECT rb.date, rb.window_start, rb.liquidity_start, rb.revenue_ord, rs.stock_symbol, rs.rs_score,
            s.stock_industry_id,
@@ -107,6 +119,7 @@ filtered AS (
     LEFT JOIN LATERAL (
         SELECT
             MAX(yoy) FILTER (WHERE rn = 1) AS revenue_yoy,
+            MAX(month) FILTER (WHERE rn = 1) AS latest_month,
             COALESCE(
                 MIN(rn) FILTER (WHERE NOT (yoy > 0 AND ord = first_ord - rn + 1)) - 1,
                 COUNT(*)
@@ -117,17 +130,18 @@ filtered AS (
                   / SUM(last_year) FILTER (WHERE rn <= 3) - 1) * 100
             END AS revenue_yoy_3m
         FROM (
-            SELECT yoy, monthly, last_year, ord,
+            SELECT month, yoy, monthly, last_year, ord,
                    ROW_NUMBER() OVER (ORDER BY ord DESC) AS rn,
                    FIRST_VALUE(ord) OVER (ORDER BY ord DESC) AS first_ord
             FROM (
-                SELECT "ComparedWithLastYearSameMonth" AS yoy,
+                SELECT "Date" AS month,
+                       "ComparedWithLastYearSameMonth" AS yoy,
                        "Monthly" AS monthly,
                        "LastYearThisMonth" AS last_year,
                        ("Date" / 100)::int * 12 + ("Date" % 100)::int AS ord
                 FROM "Revenue"
                 WHERE ($19::float8 IS NOT NULL OR $20::smallint IS NOT NULL OR $21::float8 IS NOT NULL
-                       OR $16::text = 'revenue_yoy')
+                       OR $16::text = 'revenue_yoy' OR $28::bool)
                   AND "SecurityCode" = u.stock_symbol
                   AND "Date" <= ((u.revenue_ord - 1) / 12) * 100 + (u.revenue_ord - 1) % 12 + 1
                 ORDER BY "Date" DESC
@@ -136,6 +150,7 @@ filtered AS (
         ) ranked
         HAVING MAX(ord) >= u.revenue_ord - 2
     ) rv ON TRUE
+    LEFT JOIN revenue_records rr ON rr.stock_symbol = u.stock_symbol AND rr.month = rv.latest_month
     LEFT JOIN LATERAL (
         SELECT fs.earnings_per_share, fs.return_on_equity
         FROM financial_statement fs
@@ -235,7 +250,8 @@ filtered AS (
       AND ($24::float8 IS NULL OR ym.gross_margin >= $24)
       AND ($25::float8 IS NULL OR ym.operating_margin >= $25)
       AND (NOT $26::bool OR ym.margins_up IS TRUE)
-      AND ($27::float8 IS NULL OR bs.debt_ratio <= $27)"#,
+      AND ($27::float8 IS NULL OR bs.debt_ratio <= $27)
+      AND (NOT $28::bool OR rr.is_record IS TRUE)"#,
             $chip_filter,
             r#"
 ),
@@ -350,7 +366,7 @@ pub(super) const BACKTEST_SQL: &str = backtest_sql!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$28`）／投信（`$29`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$29`）／投信（`$30`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
@@ -359,7 +375,7 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($28::bigint IS NULL OR c.foreign_buy >= $28)\n      AND ($29::bigint IS NULL OR c.trust_buy >= $29)",
+        "\n      AND ($29::bigint IS NULL OR c.foreign_buy >= $29)\n      AND ($30::bigint IS NULL OR c.trust_buy >= $30)",
         "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
     )
 );

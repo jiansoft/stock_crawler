@@ -139,3 +139,45 @@ async fn screen_backtest_fundamentals_use_published_data_only() {
 
     cleanup(pool).await;
 }
+
+/// 營收創歷史新高：補上 1991-11～1992-10 每月 100（BB）與 1992-01～1992-11 每月 50（BA），BB 的 1 月營收改為
+/// 150（高於之前 14 個月），BA 的 1 月 90 只追平 1992-12；尚未公布的 2 月（BA 改成 500）不會用到。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn screen_backtest_revenue_record_uses_published_months_only() {
+    let Some(pool) = seeded("screen_backtest_revenue_record_uses_published_months_only").await
+    else {
+        return;
+    };
+    seed_fundamentals(pool).await;
+    for sql in [
+        r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "Monthly")
+           SELECT '79979BB', '79979BB', to_char(month, 'YYYYMM')::bigint, 100
+           FROM generate_series('1991-11-01'::date, '1992-10-01'::date, INTERVAL '1 month') AS month"#,
+        r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "Monthly")
+           SELECT '79979BA', '79979BA', to_char(month, 'YYYYMM')::bigint, 50
+           FROM generate_series('1992-01-01'::date, '1992-11-01'::date, INTERVAL '1 month') AS month"#,
+        r#"UPDATE "Revenue" SET "Monthly" = 150 WHERE "SecurityCode" = '79979BB' AND "Date" = 199301"#,
+        r#"UPDATE "Revenue" SET "Monthly" = 500 WHERE "SecurityCode" = '79979BA' AND "Date" = 199302"#,
+    ] {
+        sqlx::query(sql).execute(pool).await.expect("種入營收歷史");
+    }
+
+    let (status, json) = query("limit=3&revenue_record=true").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["revenue_record"], true);
+    for period in json["periods"].as_array().expect("periods") {
+        assert_eq!(
+            period["symbols"],
+            serde_json::json!(["79979BB"]),
+            "{period}"
+        );
+    }
+    let (_, json) = query("limit=3").await;
+    assert_eq!(json["revenue_record"], false);
+
+    cleanup(pool).await;
+}
