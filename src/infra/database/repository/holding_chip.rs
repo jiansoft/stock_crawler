@@ -1,4 +1,5 @@
-//! 持股籌碼日報的 PostgreSQL 查詢：查詢日換成交易日，以及某交易日收盤時的持股與當天籌碼。
+//! 持股籌碼日報的 PostgreSQL 查詢：查詢日換成交易日、某交易日收盤時的持股與當天籌碼，以及一段期間的
+//! 主力買賣超合計（每週市場摘要）。
 //!
 //! 介面與持股推算規則見 [`crate::domain::portfolio::chip::HoldingChipQuery`]；stock_go 的持股籌碼頁用的是
 //! 同一段 SQL。
@@ -12,9 +13,22 @@ use sqlx::types::Json;
 use super::portfolio::PgPortfolioRepository;
 use crate::domain::chip::BrokerNetRecord;
 use crate::domain::portfolio::chip::{
-    ChipTradingDay, HoldingBroker, HoldingChip, HoldingChipQuery,
+    BrokerPeriodNet, ChipTradingDay, HoldingBroker, HoldingBrokerQuery, HoldingChip,
+    HoldingChipQuery,
 };
 use crate::infra::database;
+
+/// `$1`～`$2` 期間、`$3` 代號清單的主力買賣超合計與買超、賣超天數。
+const BROKER_PERIOD_SQL: &str = r#"
+SELECT stock_symbol,
+       SUM(buy_total - sell_total)::bigint AS main_net,
+       COUNT(*) FILTER (WHERE buy_total > sell_total) AS buy_days,
+       COUNT(*) FILTER (WHERE buy_total < sell_total) AS sell_days
+FROM broker_flow
+WHERE "date" BETWEEN $1 AND $2 AND stock_symbol = ANY($3)
+GROUP BY stock_symbol
+ORDER BY stock_symbol
+"#;
 
 /// `$1` 查詢日（`NULL` 為今天）：不晚於它的最近交易日與前後一個交易日（以 `chip_daily` 為準）。
 const RESOLVE_DAY_SQL: &str = r#"
@@ -134,6 +148,35 @@ impl HoldingChipQuery for PgPortfolioRepository {
             .await
             .context("Failed to fetch holding chips")?;
         Ok(rows.into_iter().map(HoldingChip::from).collect())
+    }
+}
+
+#[async_trait]
+impl HoldingBrokerQuery for PgPortfolioRepository {
+    async fn fetch_broker_period(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+        symbols: &[String],
+    ) -> Result<Vec<BrokerPeriodNet>> {
+        let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(BROKER_PERIOD_SQL)
+            .bind(from)
+            .bind(to)
+            .bind(symbols)
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch broker period nets")?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(stock_symbol, main_net, buy_days, sell_days)| BrokerPeriodNet {
+                    stock_symbol,
+                    main_net,
+                    buy_days,
+                    sell_days,
+                },
+            )
+            .collect())
     }
 }
 

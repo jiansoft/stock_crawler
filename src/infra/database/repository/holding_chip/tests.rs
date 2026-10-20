@@ -176,3 +176,60 @@ async fn holding_chips_follow_holdings_on_each_day() {
 
     cleanup().await;
 }
+
+/// 期間主力合計：只算期間內、只算指定代號；買超、賣超天數分開數，持平的日子都不算。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn broker_period_sums_main_net_within_the_period() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 broker_period_sums_main_net_within_the_period：無資料庫連接");
+        return;
+    }
+    cleanup().await;
+    for (date, symbol, buy, sell) in [
+        (day(19), "79971", 900_i64, 0_i64),
+        (day(22), "79971", 300, 100),
+        (day(23), "79971", 50, 450),
+        (day(24), "79971", 70, 70),
+        (day(23), "79972", 10, 0),
+        (day(23), "79973", 500, 0),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO broker_flow ("date", stock_symbol, buy_total, sell_total) VALUES ($1, $2, $3, $4)"#,
+        )
+        .bind(date)
+        .bind(symbol)
+        .bind(buy)
+        .bind(sell)
+        .execute(database::get_connection())
+        .await
+        .expect("種入主力進出");
+    }
+    let symbols = ["79971", "79972"].map(str::to_owned).to_vec();
+    let nets = PgPortfolioRepository::new()
+        .fetch_broker_period(day(22), day(24), &symbols)
+        .await;
+    cleanup().await;
+    let nets = nets.expect("查詢期間主力合計");
+    assert_eq!(
+        nets,
+        [
+            BrokerPeriodNet {
+                stock_symbol: "79971".to_owned(),
+                main_net: -200,
+                buy_days: 1,
+                sell_days: 1,
+            },
+            BrokerPeriodNet {
+                stock_symbol: "79972".to_owned(),
+                main_net: 10,
+                buy_days: 1,
+                sell_days: 0,
+            },
+        ]
+    );
+}

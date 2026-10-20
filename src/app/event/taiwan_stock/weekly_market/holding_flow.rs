@@ -1,11 +1,16 @@
-//! 每週市場摘要的持股法人一段：外資、投信近一週在持股（普通股）的累計買賣超，買超、賣超最多的幾檔。
+//! 每週市場摘要的持股法人與主力一段：外資、投信、主力近一週在持股（普通股）的累計買賣超，買超、
+//! 賣超最多的幾檔。
 //!
-//! 直接沿用產業資金一段已載入的全體個股淨買賣（[`StockFlow`]），只篩出持股，不另外查詢。
+//! 法人直接沿用產業資金一段已載入的全體個股淨買賣（[`StockFlow`]），只篩出持股；主力另外查
+//! `broker_flow` 同一期間的合計（[`BrokerPeriodNet`]），佔量與名稱借用法人資料的同期成交量。
 
 use std::collections::BTreeSet;
 
 use super::TOP;
-use crate::domain::chip::flow::{FlowPeriod, StockFlow};
+use crate::domain::{
+    chip::flow::{FlowPeriod, StockFlow},
+    portfolio::chip::BrokerPeriodNet,
+};
 
 /// 單一法人在一檔持股的期間累計買賣超。
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +25,8 @@ pub(super) struct HoldingFlow {
     pub(super) share: Option<f64>,
     /// 截至資料日的連續天數：正數為連續買超、負數為連續賣超。
     pub(super) streak: i32,
+    /// 期間內買超、賣超的天數（主力用；法人以連續天數表示，為 `None`）。
+    pub(super) buy_sell_days: Option<(i64, i64)>,
 }
 
 /// 單一法人的持股買賣超一段。
@@ -53,19 +60,60 @@ pub(super) fn holding_flow_section(
                     .filter(|volume| *volume > 0.0)
                     .map(|volume| row.net_shares as f64 / volume * 100.0),
                 streak: row.streak,
+                buy_sell_days: None,
             })
         })
         .collect();
-    flows.sort_by(|a, b| {
-        b.net_amount
-            .total_cmp(&a.net_amount)
-            .then_with(|| a.stock_symbol.cmp(&b.stock_symbol))
-    });
+    sort_by_amount(&mut flows);
     HoldingFlowSection {
         label,
         period,
         flows,
     }
+}
+
+/// 主力一段：期間主力合計（張）；名稱、期間成交量與收盤價取自同期法人資料 `rows`，找不到時以代號
+/// 為名、不算佔量，排序金額以 0 計。
+pub(super) fn broker_flow_section(
+    period: FlowPeriod,
+    nets: &[BrokerPeriodNet],
+    rows: &[StockFlow],
+) -> HoldingFlowSection {
+    let mut flows: Vec<HoldingFlow> = nets
+        .iter()
+        .filter(|net| net.main_net != 0)
+        .map(|net| {
+            let row = rows.iter().find(|row| row.stock_symbol == net.stock_symbol);
+            let shares = net.main_net as f64 * 1000.0;
+            HoldingFlow {
+                stock_symbol: net.stock_symbol.clone(),
+                name: row.map_or_else(|| net.stock_symbol.clone(), |row| row.name.clone()),
+                net_lots: net.main_net,
+                net_amount: shares * row.and_then(|row| row.closing_price).unwrap_or_default(),
+                share: row
+                    .and_then(|row| row.volume)
+                    .filter(|volume| *volume > 0.0)
+                    .map(|volume| shares / volume * 100.0),
+                streak: 0,
+                buy_sell_days: Some((net.buy_days, net.sell_days)),
+            }
+        })
+        .collect();
+    sort_by_amount(&mut flows);
+    HoldingFlowSection {
+        label: "主力",
+        period,
+        flows,
+    }
+}
+
+/// 依估計淨買賣金額由多到少，同額依代號。
+fn sort_by_amount(flows: &mut [HoldingFlow]) {
+    flows.sort_by(|a, b| {
+        b.net_amount
+            .total_cmp(&a.net_amount)
+            .then_with(|| a.stock_symbol.cmp(&b.stock_symbol))
+    });
 }
 
 /// 一檔持股的文字：代號、名稱、張數，括號內為佔量與連續天數。
@@ -78,6 +126,9 @@ fn flow_text(flow: &HoldingFlow) -> String {
         days if days > 0 => details.push(format!("連買 {days} 日")),
         days if days < 0 => details.push(format!("連賣 {} 日", -days)),
         _ => {}
+    }
+    if let Some((buy, sell)) = flow.buy_sell_days {
+        details.push(format!("買超 {buy} 日、賣超 {sell} 日"));
     }
     let mut text = format!("{} {} {:+} 張", flow.stock_symbol, flow.name, flow.net_lots);
     if !details.is_empty() {

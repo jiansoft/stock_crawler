@@ -16,7 +16,7 @@
 //!   淨流入與淨流出最多的產業。
 //! - 持股（普通股）的 RS 與 [`WEEK_DAYS`] 個交易日前相比上升、下降最多的幾檔。
 //! - 外資、投信近 [`WEEK_DAYS`] 個交易日在持股的累計買賣超，買超、賣超最多的幾檔（沿用產業資金一段
-//!   已載入的個股淨買賣，不另外查詢）。
+//!   已載入的個股淨買賣，不另外查詢），以及同期主力（`broker_flow`）的累計買賣超。
 //! - 持股的基本面警示：營收連續年減、三率三降、營業虧損、自由現金流為負（見 [`crate::domain::portfolio::health`]）。
 //! - 有設定策略換股通知的條件時，策略這一期的換股日、本期至今報酬與 0050 對照、最好與最差的持股。
 //!
@@ -44,7 +44,7 @@ use self::{
     crossing::{CrossingSection, crossing_section},
     flows::{FlowSection, flow_section},
     holding::{HoldingSection, holding_moves},
-    holding_flow::holding_flow_section,
+    holding_flow::{broker_flow_section, holding_flow_section},
     industry::{IndustrySection, industry_section},
     market::{RegimeSection, regime_section, valuation_level},
     strategy::{StrategySection, strategy_section},
@@ -57,7 +57,7 @@ use crate::{
         market_index::{
             breadth::BreadthQuery, regime::IndexCloseQuery, valuation::MarketValuationRepository,
         },
-        portfolio::health::HoldingFundamentalsQuery,
+        portfolio::{chip::HoldingBrokerQuery, health::HoldingFundamentalsQuery},
         quote::{
             forward_return::ForwardReturnRepository,
             relative_strength::{
@@ -123,7 +123,7 @@ async fn run(
     chip: &impl ChipFlowQuery,
     index: &(impl IndexCloseQuery + BreadthQuery),
     valuation: &impl MarketValuationRepository,
-    portfolio: &impl HoldingFundamentalsQuery,
+    portfolio: &(impl HoldingFundamentalsQuery + HoldingBrokerQuery),
     date: NaiveDate,
     symbols: &BTreeSet<String>,
     strategy: Option<&StrategySection>,
@@ -150,10 +150,20 @@ async fn run(
     });
     let mut flows = Vec::new();
     let mut holding_flows = Vec::new();
+    // 主力一段沿用第一個法人的期間，並借它的成交量與收盤價算佔量、排序。
+    let mut broker_basis = None;
     for (investor, label) in FLOW_INVESTORS {
         match flow::load_flows(chip, date, WEEK_DAYS, investor).await {
             Ok(Some((period, rows))) => {
                 holding_flows.push(holding_flow_section(label, period, &rows, symbols));
+                if broker_basis.is_none() {
+                    let held: Vec<_> = rows
+                        .iter()
+                        .filter(|row| symbols.contains(&row.stock_symbol))
+                        .cloned()
+                        .collect();
+                    broker_basis = Some((period, held));
+                }
                 flows.push(flow_section(label, period, rows));
             }
             Ok(None) => {}
@@ -161,6 +171,15 @@ async fn run(
         }
     }
     let symbols: Vec<String> = symbols.iter().cloned().collect();
+    if let Some((period, rows)) = &broker_basis {
+        match portfolio
+            .fetch_broker_period(period.from, period.data_date, &symbols)
+            .await
+        {
+            Ok(nets) => holding_flows.push(broker_flow_section(*period, &nets, rows)),
+            Err(why) => tracing::warn!("每週市場摘要：讀取持股主力進出失敗: {why:#}"),
+        }
+    }
     let moves = match quote
         .fetch_relative_strength(date, WEEK_DAYS as u16 + 1, &symbols)
         .await
