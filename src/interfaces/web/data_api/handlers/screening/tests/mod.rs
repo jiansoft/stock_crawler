@@ -43,6 +43,8 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_foreign_streak: None,
         min_trust_streak: None,
         min_avg_trade_value: None,
+        max_pe: None,
+        max_pb: None,
         sort_by: None,
         sort_order: None,
         limit: None,
