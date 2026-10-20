@@ -6,6 +6,7 @@ use std::fmt::Write;
 use crate::{
     app::ports::{StrategyHolding, StrategyRebalance, StrategySettlement},
     core::util::text,
+    domain::portfolio::health::HoldingFundamentals,
 };
 
 /// 代號與名稱；沒有名稱時只有代號。
@@ -129,11 +130,36 @@ fn settlement_lines(settlement: &StrategySettlement) -> Vec<String> {
 
 /// 組出換股通知（MarkdownV2 已跳脫）；`actual` 為目前的實際持股代號，`None` 時不對照；`settlement`
 /// 為上一期實盤結算，`None` 時不附。
+/// 策略持股（新買進在前、再來續抱）中有基本面警示的股票，一行列出；沒有時回 `None`。
+fn warning_line(
+    rebalance: &StrategyRebalance,
+    fundamentals: &[HoldingFundamentals],
+) -> Option<String> {
+    let warned: Vec<String> = rebalance
+        .added
+        .iter()
+        .chain(&rebalance.kept)
+        .filter_map(|holding| {
+            let warnings = fundamentals
+                .iter()
+                .find(|item| item.stock_symbol == holding.symbol)?
+                .signals
+                .warnings();
+            (!warnings.is_empty()).then(|| {
+                let labels: Vec<&str> = warnings.iter().map(|warning| warning.label()).collect();
+                format!("{}（{}）", symbol_text(holding), labels.join("、"))
+            })
+        })
+        .collect();
+    (!warned.is_empty()).then(|| format!("• 基本面警示：{}", warned.join("、")))
+}
+
 pub(super) fn build_message(
     rebalance: &StrategyRebalance,
     name: &str,
     actual: Option<&BTreeSet<String>>,
     settlement: Option<&StrategySettlement>,
+    fundamentals: &[HoldingFundamentals],
 ) -> String {
     let title = if name.is_empty() {
         format!("策略換股︰{}", rebalance.date)
@@ -157,6 +183,7 @@ pub(super) fn build_message(
     lines.extend(group_line("新買進", &rebalance.added));
     lines.extend(group_line("續抱", &rebalance.kept));
     lines.extend(group_line("賣出", &rebalance.exited));
+    lines.extend(warning_line(rebalance, fundamentals));
     let mut summary = format!("• 換手 {:.1}%", rebalance.turnover * 100.0);
     if rebalance.etf_weight > 0 {
         let _ = write!(

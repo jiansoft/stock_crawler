@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use super::message::build_message;
 use super::*;
 use crate::app::ports::{StrategyHolding, StrategySettlement};
+use crate::domain::portfolio::health::{FundamentalSignals, HoldingFundamentals};
 
 fn day(d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, 10, d).expect("固定日期合法")
@@ -40,6 +41,35 @@ pub(in crate::app::event::taiwan_stock) fn rebalance() -> StrategyRebalance {
         added: vec![holding("2330", Some("台積電"), 50.0)],
         kept: vec![holding("2317", Some("鴻海"), 50.0)],
         exited: vec![holding("79979", None, 50.0)],
+    }
+}
+
+/// 回傳固定持股基本面的假查詢；`fail` 時查詢失敗。
+#[derive(Default)]
+struct FakeFundamentals {
+    fundamentals: Vec<HoldingFundamentals>,
+    fail: bool,
+}
+
+impl FakeFundamentals {
+    fn failing() -> Self {
+        Self {
+            fail: true,
+            ..Self::default()
+        }
+    }
+}
+
+#[async_trait]
+impl HoldingFundamentalsQuery for FakeFundamentals {
+    async fn fetch_holding_fundamentals(
+        &self,
+        _symbols: &[String],
+    ) -> Result<Vec<HoldingFundamentals>> {
+        if self.fail {
+            bail!("db down");
+        }
+        Ok(self.fundamentals.clone())
     }
 }
 
@@ -176,7 +206,7 @@ fn settlement(etf_weight: u8) -> StrategySettlement {
 /// 查不到的寫「查不到」、沒有超額。
 #[test]
 fn build_message_includes_settlement() {
-    let message = build_message(&rebalance(), "", None, Some(&settlement(50)));
+    let message = build_message(&rebalance(), "", None, Some(&settlement(50)), &[]);
     let expected = [
         r"• 上一期 2026\-09\-17～2026\-10\-16 實盤（未扣成本）：組合 \-1\.09%（策略部位 \+2\.03%，0050 \-4\.21%）",
         r"• 追蹤 2026\-08\-19 起 2 期：累積 \+5\.50%，0050 \+1\.25%，超額 \+4\.25 個百分點",
@@ -189,7 +219,7 @@ fn build_message_includes_settlement() {
         cumulative_return: None,
         ..settlement(0)
     };
-    let message = build_message(&rebalance(), "", None, Some(&pure));
+    let message = build_message(&rebalance(), "", None, Some(&pure), &[]);
     assert!(
         message.contains("實盤（未扣成本）：策略 查不到，0050 \\-4\\.21%\n"),
         "{message}"
@@ -199,13 +229,13 @@ fn build_message_includes_settlement() {
         "{message}"
     );
     assert!(!message.contains("超額"), "{message}");
-    assert!(!build_message(&rebalance(), "", None, None).contains("上一期"));
+    assert!(!build_message(&rebalance(), "", None, None, &[]).contains("上一期"));
 }
 
 /// 新買進、續抱、賣出各一行，附換手與下次換股。
 #[test]
 fn build_message_lists_changes() {
-    let message = build_message(&rebalance(), "動能", None, None);
+    let message = build_message(&rebalance(), "動能", None, None, &[]);
     assert_eq!(
         message,
         [
@@ -234,7 +264,7 @@ fn build_message_describes_cash_and_core() {
         etf_weight: 50,
         ..rebalance()
     };
-    let message = build_message(&filtered, "", None, None);
+    let message = build_message(&filtered, "", None, None, &[]);
     assert!(
         message.starts_with("策略換股︰2026\\-10\\-16\n"),
         "{message}"
@@ -251,16 +281,16 @@ fn build_message_describes_cash_and_core() {
         kept: Vec::new(),
         ..rebalance()
     };
-    assert!(build_message(&empty, "", None, None).contains("沒有符合條件的股票"));
+    assert!(build_message(&empty, "", None, None, &[]).contains("沒有符合條件的股票"));
 
     let capped = StrategyRebalance {
         cash: 40.0,
         ..rebalance()
     };
     assert!(
-        build_message(&capped, "", None, None).contains("策略部位現金 40\\.0%"),
+        build_message(&capped, "", None, None, &[]).contains("策略部位現金 40\\.0%"),
         "{}",
-        build_message(&capped, "", None, None)
+        build_message(&capped, "", None, None, &[])
     );
 }
 
@@ -271,7 +301,7 @@ fn build_message_compares_with_actual_holdings() {
         .into_iter()
         .map(str::to_owned)
         .collect();
-    let message = build_message(&rebalance(), "", Some(&held), None);
+    let message = build_message(&rebalance(), "", Some(&held), None, &[]);
     assert!(
         message.contains(
             "• 對照實際持股：策略 2 檔中已持有 1 檔；尚未持有：2330 台積電
@@ -293,11 +323,11 @@ fn build_message_compares_with_actual_holdings() {
         exited: Vec::new(),
         ..rebalance()
     };
-    let message = build_message(&core, "", Some(&held), None);
+    let message = build_message(&core, "", Some(&held), None, &[]);
     assert!(message.contains("• 0050 核心部位：已持有"), "{message}");
     assert!(!message.contains("仍持有"), "{message}");
     let all: BTreeSet<String> = ["2330", "2317"].into_iter().map(str::to_owned).collect();
-    let message = build_message(&core, "", Some(&all), None);
+    let message = build_message(&core, "", Some(&all), None, &[]);
     assert!(
         message.contains(
             "已持有 2 檔
@@ -313,10 +343,10 @@ fn build_message_compares_with_actual_holdings() {
         kept: Vec::new(),
         ..rebalance()
     };
-    let message = build_message(&filtered, "", Some(&held), None);
+    let message = build_message(&filtered, "", Some(&held), None, &[]);
     assert!(!message.contains("對照實際持股"), "{message}");
     assert!(message.contains("策略賣出但仍持有：79979"), "{message}");
-    assert!(!build_message(&rebalance(), "", None, None).contains("對照實際持股"));
+    assert!(!build_message(&rebalance(), "", None, None, &[]).contains("對照實際持股"));
 }
 
 fn preset(name: &str, query: &str, alert: bool) -> StrategyPreset {
@@ -375,9 +405,15 @@ async fn notify_continues_after_failures() {
     };
     let recorder = FakeRecorder::default();
     let idle = gateway(None);
-    notify(&idle, &recorder, &[strategy("甲"), strategy("乙")], day(16))
-        .await
-        .expect("都不換股");
+    notify(
+        &idle,
+        &recorder,
+        &FakeFundamentals::default(),
+        &[strategy("甲"), strategy("乙")],
+        day(16),
+    )
+    .await
+    .expect("都不換股");
     assert_eq!(idle.queries.lock().expect("鎖未中毒").len(), 2);
 
     let failing = FakeGateway {
@@ -387,6 +423,7 @@ async fn notify_continues_after_failures() {
     let error = notify(
         &failing,
         &recorder,
+        &FakeFundamentals::default(),
         &[strategy("甲"), strategy("乙")],
         day(16),
     )
@@ -399,7 +436,7 @@ async fn notify_continues_after_failures() {
     );
     assert_eq!(failing.queries.lock().expect("鎖未中毒").len(), 2);
 
-    notify(&idle, &recorder, &[], day(16))
+    notify(&idle, &recorder, &FakeFundamentals::default(), &[], day(16))
         .await
         .expect("沒有策略");
     // 都不是換股日（或失敗），不寫換股紀錄。
@@ -459,6 +496,7 @@ async fn notify_settles_previous_period_on_rebalance_day() {
     notify(
         &settled,
         &recorder,
+        &FakeFundamentals::default(),
         std::slice::from_ref(&strategy),
         day(16),
     )
@@ -473,9 +511,57 @@ async fn notify_settles_previous_period_on_rebalance_day() {
         settlement_fail: true,
         ..gateway(Some(rebalance()))
     };
-    notify(&failing, &recorder, &[strategy], day(16))
-        .await
-        .expect("結算失敗不影響通知");
+    notify(
+        &failing,
+        &recorder,
+        &FakeFundamentals::failing(),
+        &[strategy],
+        day(16),
+    )
+    .await
+    .expect("結算失敗不影響通知");
     assert_eq!(failing.settled.lock().expect("鎖未中毒").len(), 1);
     assert_eq!(recorder.saved.lock().expect("鎖未中毒").len(), 2);
+}
+
+/// 策略持股有基本面警示時列一行（新買進在前），附名稱與警示；賣出的股票與沒有警示的不列。
+#[test]
+fn build_message_lists_fundamental_warnings() {
+    let warned = |symbol: &str, signals: FundamentalSignals| HoldingFundamentals {
+        stock_symbol: symbol.to_owned(),
+        signals,
+        ..Default::default()
+    };
+    let fundamentals = [
+        warned(
+            "2317",
+            FundamentalSignals {
+                revenue_decline_months: Some(4),
+                operating_margin: Some(-1.0),
+                ..Default::default()
+            },
+        ),
+        warned(
+            "2330",
+            FundamentalSignals {
+                margin_changes: [Some(-1.0), Some(-1.0), Some(-1.0)],
+                ..Default::default()
+            },
+        ),
+        warned(
+            "79979",
+            FundamentalSignals {
+                operating_margin: Some(-5.0),
+                ..Default::default()
+            },
+        ),
+    ];
+    let message = build_message(&rebalance(), "", None, None, &fundamentals);
+    assert!(
+        message.contains(&crate::core::util::text::escape_markdown_v2(
+            "• 基本面警示：2330 台積電（三率三降）、2317 鴻海（營收連續年減、營業虧損）"
+        )),
+        "{message}"
+    );
+    assert!(!build_message(&rebalance(), "", None, None, &[]).contains("基本面警示"));
 }

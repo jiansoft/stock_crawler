@@ -9,7 +9,9 @@
 //!
 //! 換股日另把當天的持股寫進 `strategy_rebalance`（見 [`rebalance_record`]），供
 //! `/strategy-presets/{name}/track` 追蹤實際表現；寫入失敗只記 warning，通知照發。通知同時附上依換股
-//! 紀錄結算的上一期實盤表現與追蹤以來的累積（vs 0050）；還沒有上一期紀錄或結算失敗時不附。
+//! 紀錄結算的上一期實盤表現與追蹤以來的累積（vs 0050）；還沒有上一期紀錄或結算失敗時不附。策略持股有
+//! 基本面警示（營收連續年減、三率三降、營業虧損，見 [`crate::domain::portfolio::health`]）時另列一行，
+//! 查詢失敗只略過。
 //!
 //! 回測引擎在 `interfaces::web::data_api`，這裡只透過 [`ports::StrategyGateway`] 取得換股結果。
 
@@ -23,12 +25,15 @@ use super::holdings;
 use crate::{
     app::ports::{self, StrategyGateway, StrategyRebalance},
     core::alert,
-    domain::strategy::{
-        StrategyPreset, StrategyPresetRepository,
-        rebalance::{RecordedHolding, StrategyRebalanceRecord, StrategyRebalanceRepository},
+    domain::{
+        portfolio::health::HoldingFundamentalsQuery,
+        strategy::{
+            StrategyPreset, StrategyPresetRepository,
+            rebalance::{RecordedHolding, StrategyRebalanceRecord, StrategyRebalanceRepository},
+        },
     },
     infra::database::repository::{
-        strategy_preset::PgStrategyPresetRepository,
+        portfolio::PgPortfolioRepository, strategy_preset::PgStrategyPresetRepository,
         strategy_rebalance::PgStrategyRebalanceRepository,
     },
 };
@@ -97,6 +102,7 @@ pub async fn execute() -> Result<()> {
     notify(
         gateway.as_ref(),
         &PgStrategyRebalanceRepository::new(),
+        &PgPortfolioRepository::new(),
         &strategies,
         Local::now().date_naive(),
     )
@@ -136,6 +142,7 @@ pub async fn record_current_rebalance(preset_name: &str) -> Result<Option<(Naive
 async fn notify(
     gateway: &dyn StrategyGateway,
     recorder: &dyn StrategyRebalanceRepository,
+    fundamentals: &dyn HoldingFundamentalsQuery,
     strategies: &[AlertStrategy],
     today: NaiveDate,
 ) -> Result<()> {
@@ -188,11 +195,25 @@ async fn notify(
             });
         }
         let actual = held.as_ref().and_then(Option::as_ref);
+        let symbols: Vec<String> = rebalance
+            .added
+            .iter()
+            .chain(&rebalance.kept)
+            .map(|holding| holding.symbol.clone())
+            .collect();
+        let warned = fundamentals
+            .fetch_holding_fundamentals(&symbols)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!("策略換股通知：讀取持股基本面失敗，略過警示：{error:?}");
+                Vec::new()
+            });
         alert::send_message(&build_message(
             &rebalance,
             &strategy.name,
             actual,
             settlement.as_ref(),
+            &warned,
         ))
         .await;
     }
