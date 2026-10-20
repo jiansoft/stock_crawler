@@ -229,3 +229,28 @@ fn quote_history_symbol_list_is_normalized() {
             .is_empty()
     );
 }
+
+/// job 轉成 gRPC message：狀態用 snake_case 字串，未完成時 finished_at 為空字串。
+#[test]
+fn backfill_jobs_convert_to_grpc_messages() {
+    let running = to_grpc_job(web::backfill_admin::BackfillJob::for_test("job-1", None));
+    assert_eq!(
+        (
+            running.id.as_str(),
+            running.kind.as_str(),
+            running.status.as_str()
+        ),
+        ("job-1", "cagr", "running")
+    );
+    assert_eq!(running.input, "date=2026-10-20");
+    assert_eq!(running.message, "ok");
+    assert_eq!(running.started_at, "2026-10-20T10:00:00+08:00");
+    assert!(running.finished_at.is_empty());
+
+    let done = to_grpc_job(web::backfill_admin::BackfillJob::for_test(
+        "job-2",
+        Some("2026-10-20T10:05:00+08:00"),
+    ));
+    assert_eq!(done.status, "succeeded");
+    assert_eq!(done.finished_at, "2026-10-20T10:05:00+08:00");
+}

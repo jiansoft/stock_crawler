@@ -156,6 +156,24 @@ pub(crate) struct BackfillJob {
 }
 
 impl BackfillJob {
+    /// 測試用：建立一筆執行中（`finished_at` 為 `None`）或已成功完成的 job。
+    #[cfg(test)]
+    pub(crate) fn for_test(id: &str, finished_at: Option<&str>) -> Self {
+        BackfillJob {
+            id: id.to_string(),
+            kind: "cagr".to_string(),
+            input: "date=2026-10-20".to_string(),
+            status: if finished_at.is_some() {
+                BackfillJobStatus::Succeeded
+            } else {
+                BackfillJobStatus::Running
+            },
+            message: "ok".to_string(),
+            started_at: "2026-10-20T10:00:00+08:00".to_string(),
+            finished_at: finished_at.map(str::to_string),
+        }
+    }
+
     /// 回傳對外 API 使用的 snake_case 狀態標籤。
     pub(crate) fn status_label(&self) -> &'static str {
         match self.status {
