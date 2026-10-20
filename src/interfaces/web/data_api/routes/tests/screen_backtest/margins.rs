@@ -102,5 +102,18 @@ async fn screen_backtest_margins_use_published_statements_only() {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{extra}: {json}");
     }
 
+    // 依營業利益率排序：BB（30%）、BA（20%）、BC（5%），與預設依相對強度（03-01 BA 在前）不同；
+    // 只看得到 Q3，BA 的 Q4（5%）不會提前用到。
+    let (status, json) = query("limit=3&rank_by=operating_margin").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["rank_by"], "operating_margin");
+    for period in json["periods"].as_array().expect("periods") {
+        assert_eq!(
+            period["symbols"],
+            serde_json::json!(["79979BB", "79979BA", "79979BC"]),
+            "{period}"
+        );
+    }
+
     cleanup(pool).await;
 }

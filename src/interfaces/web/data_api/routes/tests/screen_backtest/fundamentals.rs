@@ -124,5 +124,18 @@ async fn screen_backtest_fundamentals_use_published_data_only() {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{extra}: {json}");
     }
 
+    // 依最新月營收年增率排序：1 月 BB（+30）在 BA（−5）之前，尚未公布的 2 月（BA +50）不會用到；
+    // BC 沒有新鮮營收排最後。
+    let (status, json) = query("limit=3&rank_by=revenue_yoy").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["rank_by"], "revenue_yoy");
+    for period in json["periods"].as_array().expect("periods") {
+        assert_eq!(
+            period["symbols"],
+            serde_json::json!(["79979BB", "79979BA", "79979BC"]),
+            "{period}"
+        );
+    }
+
     cleanup(pool).await;
 }

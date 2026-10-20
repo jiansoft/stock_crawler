@@ -47,6 +47,10 @@ enum BacktestRankByValue {
     ForeignStreak,
     /// 投信連續買超天數由長到短。
     TrustStreak,
+    /// 換股日已公布的最新月營收年增率由高到低。
+    RevenueYoy,
+    /// 換股日已公布的最近一季（Yahoo 單季財報）營業利益率由高到低。
+    OperatingMargin,
 }
 
 /// OpenAPI 文件使用的持股加權方式。
@@ -110,7 +114,8 @@ pub(crate) struct ScreenBacktestParams {
     pub(crate) min_avg_trade_value: Option<u32>,
     /// 符合條件的股票依什麼排序取前 `limit` 檔：`rs_score`（預設，相對強度分數）、`trade_value`
     /// （近 20 個交易日平均成交金額，偏向大型股）、`foreign_streak`／`trust_streak`（外資／投信連續
-    /// 買超天數）；同值再依相對強度分數。`keep_rank` 的名次也依此排序。
+    /// 買超天數）、`revenue_yoy`（換股日已公布的最新月營收年增率）、`operating_margin`（換股日已公布的
+    /// 最近一季營業利益率）；同值或查不到時再依相對強度分數（查不到的排最後）。`keep_rank` 的名次也依此排序。
     #[param(value_type = BacktestRankByValue, inline)]
     pub(crate) rank_by: Option<String>,
     /// 0050 核心部位（%，0–100，預設 0）：組合固定以這個比例持有 0050、其餘才依條件選股，
