@@ -12,10 +12,11 @@ use crate::{
     infra::crawler::yahoo::dividend::YahooPageNotFoundError,
 };
 
-/// 記下寫入列數、回傳實際列數的假倉儲。
+/// 記下寫入列數、回傳實際列數的假倉儲；`lagging` 為 `None` 時查落後名單失敗。
 #[derive(Default)]
 struct FakeRepository {
     saved: Mutex<Vec<(String, usize)>>,
+    lagging: Option<Vec<String>>,
 }
 
 #[async_trait]
@@ -32,8 +33,11 @@ impl FinancialReportRepository for FakeRepository {
         self.record("cash_flow", statements.len())
     }
 
-    async fn fetch_lagging_symbols(&self, _published_within_days: i32) -> Result<Vec<String>> {
-        Ok(Vec::new())
+    async fn fetch_lagging_symbols(&self, published_within_days: i32) -> Result<Vec<String>> {
+        assert_eq!(published_within_days, PRIORITY_LOOKBACK_DAYS);
+        self.lagging
+            .clone()
+            .ok_or_else(|| anyhow!("落後名單測試失敗"))
     }
 }
 
@@ -295,6 +299,36 @@ async fn run_candidates_prioritizes_lagging_stocks_past_the_weekly_flag() {
     );
 
     clear_priority_flags().await;
+}
+
+/// 只採集上市櫃普通股並依代號排序，落後的排最前面；查不到落後名單時照代號順序、沒有優先。
+#[tokio::test]
+async fn order_candidates_puts_lagging_stocks_first() {
+    let stocks = [
+        stock("2454", 2),
+        stock("0050", 2),
+        stock("1101", 2),
+        stock("7708", 5),
+        stock("8042", 4),
+    ];
+    let repo = FakeRepository {
+        lagging: Some(vec!["8042".to_owned(), "7708".to_owned()]),
+        ..Default::default()
+    };
+    assert_eq!(
+        order_candidates(&repo, &stocks).await,
+        (
+            vec!["8042".to_owned(), "1101".to_owned(), "2454".to_owned()],
+            1
+        )
+    );
+    assert_eq!(
+        order_candidates(&FakeRepository::default(), &stocks).await,
+        (
+            vec!["1101".to_owned(), "2454".to_owned(), "8042".to_owned()],
+            0
+        )
+    );
 }
 
 /// 落後的候選股票移到最前面、各自維持原順序；不在候選名單的落後代號忽略。

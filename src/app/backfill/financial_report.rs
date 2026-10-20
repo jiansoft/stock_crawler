@@ -168,28 +168,8 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
         .fetch_all_active()
         .await
         .context("fetch active stocks for financial report backfill failed")?;
-    let mut candidates: Vec<String> = stocks
-        .iter()
-        .filter(|stock| is_candidate(stock))
-        .map(|stock| stock.symbol().0.clone())
-        .collect();
-    candidates.sort();
-
     let repo = PgFinancialReportRepository::new();
-    // 查不到落後名單只是少了優先順序，照一般輪替採集即可。
-    let lagging = repo
-        .fetch_lagging_symbols(PRIORITY_LOOKBACK_DAYS)
-        .await
-        .unwrap_or_else(|why| {
-            tracing::warn!("fetch lagging financial report symbols failed: {why:#}");
-            Vec::new()
-        });
-    let (candidates, priority) = prioritize(candidates, &lagging);
-
-    tracing::info!(
-        "Yahoo 財報採集開始: candidates={}, priority={priority}",
-        candidates.len()
-    );
+    let (candidates, priority) = order_candidates(&repo, &stocks).await;
     run_candidates(
         &candidates,
         priority,
@@ -200,6 +180,35 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
         stock_interval,
     )
     .await
+}
+
+/// 從股票主檔挑出候選股票並排出採集順序：損益表落後官方季報的在前，其餘依代號。
+///
+/// 回傳順序與優先檔數；查不到落後名單只是少了優先順序，照一般輪替採集即可。
+async fn order_candidates(
+    repo: &impl FinancialReportRepository,
+    stocks: &[Stock],
+) -> (Vec<String>, usize) {
+    let mut candidates: Vec<String> = stocks
+        .iter()
+        .filter(|stock| is_candidate(stock))
+        .map(|stock| stock.symbol().0.clone())
+        .collect();
+    candidates.sort();
+
+    let lagging = repo
+        .fetch_lagging_symbols(PRIORITY_LOOKBACK_DAYS)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("fetch lagging financial report symbols failed: {why:#}");
+            Vec::new()
+        });
+    let (candidates, priority) = prioritize(candidates, &lagging);
+    tracing::info!(
+        "Yahoo 財報採集開始: candidates={}, priority={priority}",
+        candidates.len()
+    );
+    (candidates, priority)
 }
 
 /// 把損益表落後官方季報的候選股票移到最前面（各自維持原順序），回傳新順序與優先檔數。
