@@ -1,4 +1,4 @@
-//! 條件選股回測 endpoint 整合測試：換股當天的官方本益比與股價淨值比上限。
+//! 條件選股回測 endpoint 整合測試：換股當天的官方本益比與股價淨值比上限與排序。
 
 use super::*;
 
@@ -84,6 +84,28 @@ async fn screen_backtest_valuation_caps_use_rebalance_day_ratios() {
         [
             ("1993-03-01".to_owned(), 1, Some(10.0)),
             ("1993-03-08".to_owned(), 1, Some(8.0)),
+        ]
+    );
+
+    // 依本益比由低到高：03-01 BA（10）、BC（30），BB 虧損排最後；03-08 BB（8）、BC（9）。
+    let (status, json) = query("limit=2&rank_by=pe_ratio").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["rank_by"], "pe_ratio");
+    assert_eq!(
+        periods(&json)[..2],
+        [
+            ("1993-03-01".to_owned(), 2, Some(6.0)),
+            ("1993-03-08".to_owned(), 2, Some(8.0)),
+        ]
+    );
+    // 依股價淨值比由低到高：03-01 BA（1.5）、BB（2）；03-08 BB（0.8）、BA（1.2）。
+    let (status, json) = query("limit=2&rank_by=pb_ratio").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        periods(&json)[..2],
+        [
+            ("1993-03-01".to_owned(), 2, Some(3.0)),
+            ("1993-03-08".to_owned(), 2, Some(5.5)),
         ]
     );
 

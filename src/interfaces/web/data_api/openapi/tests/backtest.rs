@@ -54,7 +54,9 @@ fn openapi_screen_backtest_schema_pins_field_names() {
             "foreign_streak",
             "trust_streak",
             "revenue_yoy",
-            "operating_margin"
+            "operating_margin",
+            "pe_ratio",
+            "pb_ratio"
         ])
     );
     for (name, schema) in [
