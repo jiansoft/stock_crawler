@@ -220,6 +220,14 @@ pub(crate) struct ScreenBacktestParams {
     /// `true` 時只選換股當天已公布的最近四季自由現金流合計為正的股票。用 Yahoo 單季現金流量表（2015 年起），
     /// 最近一季的公布日規則同 `min_eps`，連同之前 3 季須四季都有資料，否則不會通過；`false` 或省略不篩選。
     pub(crate) positive_free_cash_flow: Option<bool>,
+    /// 換股當天的官方本益比（證交所／櫃買中心公布的日資料）不超過這個值（倍，0–10000）。本益比為 0
+    /// （近四季虧損或當天沒有資料）的股票不會通過；換股當天收盤後才公布，與以收盤價買進同一時點。
+    #[param(minimum = 0.0, maximum = 10000.0)]
+    pub(crate) max_pe: Option<f64>,
+    /// 換股當天的官方股價淨值比不超過這個值（倍，0–1000）；為 0（沒有資料）的股票不會通過，其餘同
+    /// `max_pe`。
+    #[param(minimum = 0.0, maximum = 1000.0)]
+    pub(crate) max_pb: Option<f64>,
     /// 只選換股前 `hold_days` 個交易日內（含換股當天）出現過這個來源訊號的股票。
     #[param(value_type = Option<SignalIndicatorValue>)]
     pub(crate) indicator: Option<String>,
@@ -498,6 +506,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_debt_ratio_percent: Option<f64>,
     /// 只選近四季自由現金流為正；未篩選為 `false`。
     pub(crate) positive_free_cash_flow: bool,
+    /// 換股當天本益比上限（倍）；未篩選為 `null`。
+    pub(crate) max_pe: Option<f64>,
+    /// 換股當天股價淨值比上限（倍）；未篩選為 `null`。
+    pub(crate) max_pb: Option<f64>,
     /// 訊號來源；未篩選為 `null`。
     pub(crate) indicator: Option<String>,
     /// 訊號種類；未篩選為 `null`。

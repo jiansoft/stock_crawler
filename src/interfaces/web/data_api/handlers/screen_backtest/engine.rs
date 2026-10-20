@@ -341,7 +341,9 @@ impl<'a> Backtest<'a> {
         .bind(params.max_debt_ratio_percent)
         .bind(params.revenue_record.unwrap_or(false))
         .bind(params.min_monthly_revenue)
-        .bind(params.positive_free_cash_flow.unwrap_or(false));
+        .bind(params.positive_free_cash_flow.unwrap_or(false))
+        .bind(params.max_pe)
+        .bind(params.max_pb);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))
@@ -424,6 +426,12 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     }
     if !within(params.max_debt_ratio_percent, 0.0, 1_000.0) {
         return Err("max_debt_ratio_percent 必須介於 0 至 1000");
+    }
+    if !within(params.max_pe, 0.0, 10_000.0) {
+        return Err("max_pe 必須介於 0 至 10000");
+    }
+    if !within(params.max_pb, 0.0, 1_000.0) {
+        return Err("max_pb 必須介於 0 至 1000");
     }
     Ok(())
 }

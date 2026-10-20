@@ -9,6 +9,7 @@ mod presets;
 mod ranking;
 mod stops;
 mod track;
+mod valuation;
 mod walk_forward;
 
 use axum::http::StatusCode;

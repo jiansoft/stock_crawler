@@ -18,7 +18,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// 排除的產業名稱（`NULL` 為不排除）、`$19`～`$23` 基本面門檻（月營收年增率、連續年增月數、近 3 月
 /// 年增率、每股盈餘、股東權益報酬率，`NULL` 為不篩）、`$24`～`$27` 財報三率與負債比（毛利率、營業
 /// 利益率下限、是否只選三率三升、負債比上限）、`$28` 是否只選最新月營收創歷史新高、`$29` 最新月營收
-/// 下限（千元，`NULL` 為不篩）、`$30` 是否只選近四季自由現金流為正；籌碼版另有 `$31`／`$32`。
+/// 下限（千元，`NULL` 為不篩）、`$30` 是否只選近四季自由現金流為正、`$31`／`$32` 換股當天本益比與股價
+/// 淨值比上限（倍，`NULL` 為不篩）；籌碼版另有 `$33`／`$34`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
@@ -40,6 +41,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 ///   以及毛利率、營業利益率、稅後淨利率是否都高於去年同一季（三率三升）；`bs`：同樣規則的最近一季
 ///   資產負債表負債比；`cf`：同樣規則的最近一季 Yahoo 單季現金流量表，連同之前 3 季（須四季都有自由
 ///   現金流）的合計。同樣只在有設門檻時才查。
+/// - `filtered` 的 `qv`：換股當天日線的官方本益比與股價淨值比（收盤後公布，與收盤買進同一時點），只在
+///   有設 `$31`／`$32` 時才查；值為 0 代表虧損或沒有資料，有設門檻時不會通過。
 /// - `filtered`／`valued`：符合流動性以外條件的股票；有設流動性門檻、依成交金額排序或依成交金額
 ///   加權時，才對這些股票逐檔查 `liquidity_start`～換股日的平均成交金額（`trade_value`）。
 /// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
@@ -258,7 +261,14 @@ filtered AS (
          AND c.period_type = 'single'
          AND c.fiscal_year BETWEEN latest.fiscal_year - 1 AND latest.fiscal_year
          AND c.fiscal_year * 4 + SUBSTRING(c.quarter FROM 2)::int BETWEEN latest.ord - 3 AND latest.ord
-    ) cf ON TRUE"#,
+    ) cf ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT q."PriceEarningRatio"::float8 AS pe, q."price-to-book_ratio"::float8 AS pb
+        FROM "DailyQuotes" q
+        WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL)
+          AND q.stock_symbol = u.stock_symbol
+          AND q."Date" = u.date
+    ) qv ON TRUE"#,
             $chip_join,
             r#"
     WHERE ($6::text IS NULL OR si.name = $6)
@@ -283,7 +293,9 @@ filtered AS (
       AND ($27::float8 IS NULL OR bs.debt_ratio <= $27)
       AND (NOT $28::bool OR rr.is_record IS TRUE)
       AND ($29::float8 IS NULL OR rv.monthly_revenue >= $29)
-      AND (NOT $30::bool OR cf.free_cash_flow_ttm > 0)"#,
+      AND (NOT $30::bool OR cf.free_cash_flow_ttm > 0)
+      AND ($31::float8 IS NULL OR (qv.pe > 0 AND qv.pe <= $31))
+      AND ($32::float8 IS NULL OR (qv.pb > 0 AND qv.pb <= $32))"#,
             $chip_filter,
             r#"
 ),
@@ -398,7 +410,7 @@ pub(super) const BACKTEST_SQL: &str = backtest_sql!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$31`）／投信（`$32`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$33`）／投信（`$34`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
@@ -407,7 +419,7 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($31::bigint IS NULL OR c.foreign_buy >= $31)\n      AND ($32::bigint IS NULL OR c.trust_buy >= $32)",
+        "\n      AND ($33::bigint IS NULL OR c.foreign_buy >= $33)\n      AND ($34::bigint IS NULL OR c.trust_buy >= $34)",
         "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
     )
 );
