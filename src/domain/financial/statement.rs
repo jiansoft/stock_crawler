@@ -9,9 +9,23 @@
 //! - 每股數值為新台幣元（`Decimal`，資料庫 `numeric(12, 2)`）。
 //! - `None` 表示來源未提供，**不可**當成 0。
 
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 use crate::core::declare::Quarter;
+
+/// 官方季報（`financial_statement`）已公布、損益表（Yahoo 或 BigGo 單季）卻還沒有那一季的股票。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaggingStatement {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 官方最新一季的年度。
+    pub fiscal_year: i32,
+    /// 官方最新一季的季別（`Q1`～`Q4`）。
+    pub quarter: String,
+    /// 官方季報的公布日（第一次寫入 `financial_statement` 的日期）。
+    pub published_on: NaiveDate,
+}
 
 /// 報表期間口徑。
 ///
