@@ -5,7 +5,8 @@
 //! 站在 60 日均線同一側的天數、52 週高低點距離、近 5／20／60／240 日漲跌幅與近
 //! [`CROSS_WINDOW`] 個交易日穿越 [`CROSS_MA_DAYS`] 日均線的日子，用來判斷多空環境
 //! （條件選股回測的 `market_filter_ma` 用的也是加權指數相對均線的位置）；另附同一天的市場廣度
-//! （[`crate::domain::market_index::breadth`]），看大盤漲跌有沒有多數個股跟上。
+//! （[`crate::domain::market_index::breadth`]），看大盤漲跌有沒有多數個股跟上；以及估值水位
+//! （[`crate::domain::market_index::valuation::level`]），看市場是否偏貴。
 
 use axum::{
     Json,
@@ -17,10 +18,13 @@ use axum::{
 use super::{error_response, parse_optional_date, repository_error, round2};
 use crate::domain::market_index::breadth::{self, MarketBreadth};
 use crate::domain::market_index::regime::{self, MarketRegime, MovingAverageCross};
-use crate::infra::database::repository::market_index::PgMarketIndexRepository;
+use crate::domain::market_index::valuation::{self, ValuationLevel};
+use crate::infra::database::repository::{
+    market_index::PgMarketIndexRepository, market_valuation::PgMarketValuationRepository,
+};
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, MarketRegimeBreadth, MarketRegimeParams, MarketRegimeResponse,
-    MovingAverageCrossItem, MovingAverageStatus,
+    MarketRegimeValuation, MovingAverageCrossItem, MovingAverageStatus,
 };
 
 /// 列出穿越的均線天數（5 日均線穿越太頻繁，不列）。
@@ -56,9 +60,33 @@ pub(crate) async fn market_regime(Query(params): Query<MarketRegimeParams>) -> R
         Ok(breadth) => breadth,
         Err(error) => return repository_error(error),
     };
+    // 估值水位只是附加資訊：讀取失敗只記錄，不讓整個趨勢狀態失敗。
+    let level = valuation::level(
+        &PgMarketValuationRepository::new(),
+        state.date,
+        BREADTH_WINDOW,
+    )
+    .await
+    .unwrap_or_else(|why| {
+        tracing::warn!("大盤趨勢狀態：讀取估值水位失敗: {why:#}");
+        None
+    });
     let mut body = response(&state, &recent_crosses(&points));
     body.breadth = breadth.as_ref().map(breadth_item);
+    body.valuation = level.as_ref().map(valuation_item);
     Json(body).into_response()
+}
+
+/// 估值水位轉成回應；數值四捨五入到小數兩位。
+fn valuation_item(level: &ValuationLevel) -> MarketRegimeValuation {
+    MarketRegimeValuation {
+        date: level.date.to_string(),
+        median_pe: level.pe.map(|pe| round2(pe.current)),
+        pe_percentile_5y: level.pe.map(|pe| round2(pe.percentile)),
+        median_pe_5d_ago: level.pe_before.map(round2),
+        median_pb: level.pb.map(|pb| round2(pb.current)),
+        pb_percentile_5y: level.pb.map(|pb| round2(pb.percentile)),
+    }
 }
 
 /// 市場廣度轉成回應；比例四捨五入到小數兩位。
@@ -121,6 +149,7 @@ fn response(state: &MarketRegime, crosses: &[MovingAverageCross]) -> MarketRegim
             })
             .collect(),
         breadth: None,
+        valuation: None,
     }
 }
 

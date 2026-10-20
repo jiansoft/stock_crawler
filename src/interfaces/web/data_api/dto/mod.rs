@@ -86,8 +86,8 @@ pub(super) use market::{
     QfiiHoldingRankingParams, QfiiHoldingRankingResponse, QfiiSortValue,
 };
 pub(super) use market_regime::{
-    MarketRegimeBreadth, MarketRegimeParams, MarketRegimeResponse, MovingAverageCrossItem,
-    MovingAverageStatus,
+    MarketRegimeBreadth, MarketRegimeParams, MarketRegimeResponse, MarketRegimeValuation,
+    MovingAverageCrossItem, MovingAverageStatus,
 };
 pub(super) use market_valuation::{
     MarketValuationParams, MarketValuationPoint, MarketValuationResponse, ValuationRatioStats,
