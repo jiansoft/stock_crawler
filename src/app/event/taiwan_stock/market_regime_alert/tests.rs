@@ -41,7 +41,7 @@ fn breakout() -> Vec<(NaiveDate, f64)> {
 /// 跌破 60 日均線：附均線值、距離與之前在上方的天數；20 日均線不在通知範圍。
 #[test]
 fn build_message_reports_breakdown() {
-    let message = build_message(&breakdown(), &[]).expect("有跌破");
+    let message = build_message(&breakdown(), &[], None).expect("有跌破");
     for line in [
         "大盤趨勢變化︰2026-10-16",
         "加權指數收盤 100.00（-75.00%）",
@@ -57,7 +57,7 @@ fn build_message_reports_breakdown() {
 /// 站上 60 日均線並轉為多頭排列。
 #[test]
 fn build_message_reports_breakout_and_alignment() {
-    let message = build_message(&breakout(), &[]).expect("有站上");
+    let message = build_message(&breakout(), &[], None).expect("有站上");
     for line in [
         "加權指數收盤 1000.00（+300.00%）",
         "• 站上 60 日均線 281.35（收盤在上方 255.43%），之前連續 1 個交易日在下方",
@@ -72,9 +72,9 @@ fn build_message_reports_breakout_and_alignment() {
 #[test]
 fn build_message_skips_without_change() {
     let closes: Vec<f64> = (0..300).map(|offset| 300.0 - f64::from(offset)).collect();
-    assert!(build_message(&series(&closes), &[]).is_none());
-    assert!(build_message(&series(&[100.0]), &[]).is_none());
-    assert!(build_message(&[], &[]).is_none());
+    assert!(build_message(&series(&closes), &[], None).is_none());
+    assert!(build_message(&series(&[100.0]), &[], None).is_none());
+    assert!(build_message(&[], &[], None).is_none());
 }
 
 /// 一路上漲、沒有穿越也沒有排列改變的收盤。
@@ -101,13 +101,13 @@ fn breadth_day(d: u32, above: i32) -> BreadthDay {
 /// 加權指數沒有變化，但市場廣度跨過 30%：跌破、回到都發；剛好 30% 算在線上。
 #[test]
 fn build_message_reports_breadth_cross() {
-    let message = build_message(&steady(), &[breadth_day(16, 28), breadth_day(15, 31)])
+    let message = build_message(&steady(), &[breadth_day(16, 28), breadth_day(15, 31)], None)
         .expect("廣度跌破 30%");
     let line = "• 市場廣度：站上 60 日均線的股票 28.00%（前一日 31.00%），跌破 30%";
     assert!(message.contains(&esc(line)), "{message}");
     assert!(!message.contains("均線排列"), "{message}");
 
-    let message = build_message(&steady(), &[breadth_day(16, 30), breadth_day(15, 29)])
+    let message = build_message(&steady(), &[breadth_day(16, 30), breadth_day(15, 29)], None)
         .expect("廣度回到 30%");
     assert!(
         message.contains(&esc("（前一日 29.00%），回到 30% 以上")),
@@ -115,15 +115,19 @@ fn build_message_reports_breadth_cross() {
     );
 
     // 都在線的同一側：不發。
-    assert!(build_message(&steady(), &[breadth_day(16, 45), breadth_day(15, 52)]).is_none());
-    assert!(build_message(&steady(), &[breadth_day(16, 20)]).is_none());
+    assert!(build_message(&steady(), &[breadth_day(16, 45), breadth_day(15, 52)], None).is_none());
+    assert!(build_message(&steady(), &[breadth_day(16, 20)], None).is_none());
 }
 
 /// 因加權指數穿越而發送時附上當天廣度，沒有跨過門檻就不註明方向。
 #[test]
 fn build_message_appends_breadth() {
-    let message =
-        build_message(&breakdown(), &[breadth_day(16, 45), breadth_day(15, 52)]).expect("有跌破");
+    let message = build_message(
+        &breakdown(),
+        &[breadth_day(16, 45), breadth_day(15, 52)],
+        None,
+    )
+    .expect("有跌破");
     let line = "• 市場廣度：站上 60 日均線的股票 45.00%（前一日 52.00%）";
     assert!(message.contains(&format!("{}\n", esc(line))), "{message}");
 }
@@ -200,16 +204,35 @@ impl IndexCloseQuery for FakeIndex {
 #[tokio::test]
 async fn run_requires_today() {
     let fake = FakeIndex::new(breakdown());
-    assert!(run(&fake, day(16)).await.expect("查詢成功").is_some());
+    assert!(
+        run(&fake, &FakeValuation::default(), day(16))
+            .await
+            .expect("查詢成功")
+            .is_some()
+    );
     // 10-17 沒有資料：最新一筆是 10-16，不發。
-    assert!(run(&fake, day(17)).await.expect("查詢成功").is_none());
+    assert!(
+        run(&fake, &FakeValuation::default(), day(17))
+            .await
+            .expect("查詢成功")
+            .is_none()
+    );
     let empty = FakeIndex::new(Vec::new());
-    assert!(run(&empty, day(16)).await.expect("查詢成功").is_none());
+    assert!(
+        run(&empty, &FakeValuation::default(), day(16))
+            .await
+            .expect("查詢成功")
+            .is_none()
+    );
     let failing = FakeIndex {
         fail: true,
         ..FakeIndex::new(Vec::new())
     };
-    assert!(run(&failing, day(16)).await.is_err());
+    assert!(
+        run(&failing, &FakeValuation::default(), day(16))
+            .await
+            .is_err()
+    );
 }
 
 /// 只有今天的廣度才看；廣度跨過門檻就發、讀取失敗只略過廣度。
@@ -219,7 +242,9 @@ async fn run_reads_today_breadth() {
         breadth: vec![breadth_day(16, 28), breadth_day(15, 31)],
         ..FakeIndex::new(steady())
     };
-    let message = run(&crossing, day(16)).await.expect("查詢成功");
+    let message = run(&crossing, &FakeValuation::default(), day(16))
+        .await
+        .expect("查詢成功");
     assert!(message.is_some_and(|message| message.contains("跌破 30%")));
 
     // 最新的統計是 10-15（今天還沒寫入）：不看廣度，加權指數沒變化就不發。
@@ -227,12 +252,92 @@ async fn run_reads_today_breadth() {
         breadth: vec![breadth_day(15, 28), breadth_day(14, 31)],
         ..FakeIndex::new(steady())
     };
-    assert!(run(&stale, day(16)).await.expect("查詢成功").is_none());
+    assert!(
+        run(&stale, &FakeValuation::default(), day(16))
+            .await
+            .expect("查詢成功")
+            .is_none()
+    );
 
     let failing = FakeIndex {
         breadth_fail: true,
         ..FakeIndex::new(breakdown())
     };
-    let message = run(&failing, day(16)).await.expect("廣度失敗不影響通知");
+    let message = run(&failing, &FakeValuation::default(), day(16))
+        .await
+        .expect("廣度失敗不影響通知");
     assert!(message.is_some_and(|message| !message.contains("市場廣度")));
+}
+
+/// 回傳固定每日估值的假倉儲；`fail` 時查詢失敗。
+#[derive(Default)]
+struct FakeValuation {
+    days: Vec<valuation::MarketValuationDay>,
+    fail: bool,
+}
+
+#[async_trait]
+impl MarketValuationRepository for FakeValuation {
+    async fn refresh_market_valuation(&self, _from: NaiveDate, _to: NaiveDate) -> Result<u64> {
+        Ok(0)
+    }
+
+    async fn fetch_market_valuation(
+        &self,
+        market_id: i32,
+        _from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<valuation::MarketValuationDay>> {
+        assert_eq!(market_id, valuation::ALL_MARKETS);
+        if self.fail {
+            return Err(anyhow!("valuation down"));
+        }
+        Ok(self
+            .days
+            .iter()
+            .filter(|day| day.date <= to)
+            .cloned()
+            .collect())
+    }
+}
+
+/// 發送時附上估值水位（官方值還沒補齊時是前一個交易日，行內標日期）；讀取失敗只略過那一行，
+/// 估值本身不會觸發通知。
+#[tokio::test]
+async fn run_appends_valuation_level() {
+    // 10-09～10-15 的本益比中位數 15～21，最新 10-15 為 21（第 100 百分位）、5 日前 16。
+    let days: Vec<_> = (9..=15u32)
+        .map(|d| valuation::MarketValuationDay {
+            date: day(d),
+            median_pe: Some(f64::from(d) + 6.0),
+            median_pb: Some(1.5),
+            pe_samples: 1_000,
+            pb_samples: 1_000,
+        })
+        .collect();
+    let valuation = FakeValuation { days, fail: false };
+    let message = run(&FakeIndex::new(breakdown()), &valuation, day(16))
+        .await
+        .expect("查詢成功")
+        .expect("有跌破");
+    let line = "• 估值水位 10-15：本益比中位數 21.00 倍（近 5 年第 100 百分位，5 日前 16.00 倍）、\
+                股價淨值比中位數 1.50 倍（第 100 百分位）";
+    assert!(message.contains(&format!("{}\n", esc(line))), "{message}");
+
+    // 加權指數沒有變化時，估值再高也不發。
+    assert!(
+        run(&FakeIndex::new(steady()), &valuation, day(16))
+            .await
+            .expect("查詢成功")
+            .is_none()
+    );
+
+    let failing = FakeValuation {
+        days: Vec::new(),
+        fail: true,
+    };
+    let message = run(&FakeIndex::new(breakdown()), &failing, day(16))
+        .await
+        .expect("估值失敗不影響通知");
+    assert!(message.is_some_and(|message| !message.contains("估值水位")));
 }
