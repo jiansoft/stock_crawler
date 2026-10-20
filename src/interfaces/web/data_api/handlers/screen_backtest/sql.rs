@@ -98,7 +98,8 @@ bench AS (
     GROUP BY date
 ),
 filtered AS (
-    SELECT u.date, u.liquidity_start, u.stock_symbol, u.rs_score, u.ret, u.stock_industry_id,"#,
+    SELECT u.date, u.liquidity_start, u.stock_symbol, u.rs_score, u.ret, u.stock_industry_id,
+           rv.revenue_yoy::float8 AS revenue_yoy, ym.operating_margin,"#,
             $chip_columns,
             r#"
     FROM universe u
@@ -125,7 +126,8 @@ filtered AS (
                        "LastYearThisMonth" AS last_year,
                        ("Date" / 100)::int * 12 + ("Date" % 100)::int AS ord
                 FROM "Revenue"
-                WHERE ($19::float8 IS NOT NULL OR $20::smallint IS NOT NULL OR $21::float8 IS NOT NULL)
+                WHERE ($19::float8 IS NOT NULL OR $20::smallint IS NOT NULL OR $21::float8 IS NOT NULL
+                       OR $16::text = 'revenue_yoy')
                   AND "SecurityCode" = u.stock_symbol
                   AND "Date" <= ((u.revenue_ord - 1) / 12) * 100 + (u.revenue_ord - 1) % 12 + 1
                 ORDER BY "Date" DESC
@@ -163,7 +165,8 @@ filtered AS (
                    i.operating_profit::float8 / NULLIF(i.revenue, 0) * 100 AS operating_margin,
                    i.net_income::float8 / NULLIF(i.revenue, 0) * 100 AS net_margin
             FROM income_statement i
-            WHERE ($24::float8 IS NOT NULL OR $25::float8 IS NOT NULL OR $26::bool)
+            WHERE ($24::float8 IS NOT NULL OR $25::float8 IS NOT NULL OR $26::bool
+                   OR $16::text = 'operating_margin')
               AND i.source = 'yahoo'
               AND i.stock_symbol = u.stock_symbol
               AND i.period_type = 'single'
@@ -253,6 +256,8 @@ picks AS (
                             WHEN 'trade_value' THEN trade_value
                             WHEN 'foreign_streak' THEN foreign_buy
                             WHEN 'trust_streak' THEN trust_buy
+                            WHEN 'revenue_yoy' THEN revenue_yoy
+                            WHEN 'operating_margin' THEN operating_margin
                         END DESC NULLS LAST,
                         rs_score DESC, stock_symbol
            ) AS pick_rank

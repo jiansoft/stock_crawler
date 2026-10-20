@@ -260,7 +260,14 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     let rank_by = query_schema(operation, "rank_by");
     assert_eq!(
         rank_by["enum"],
-        serde_json::json!(["rs_score", "trade_value", "foreign_streak", "trust_streak"])
+        serde_json::json!([
+            "rs_score",
+            "trade_value",
+            "foreign_streak",
+            "trust_streak",
+            "revenue_yoy",
+            "operating_margin"
+        ])
     );
     for (name, schema) in [
         ("indicator", "SignalIndicatorValue"),
