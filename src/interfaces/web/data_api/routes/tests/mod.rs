@@ -1,7 +1,7 @@
 //! Data API 路由測試。
 //!
 //! 本檔是不連資料庫的基礎契約測試：路由、Bearer 驗證邊界與 OpenAPI 產物。
-//! 資料庫查詢語意依 endpoint 分組放在子模組（`phases`、`cagr`、`movers`、`industries`、`chip`、`flows`、`institutional_streak`、`market_regime`、`signals`、`signal_history`、`relative_strength`、`stocks`、
+//! 資料庫查詢語意依 endpoint 分組放在子模組（`phases`、`cagr`、`movers`、`industries`、`chip`、`flows`、`institutional_streak`、`market_regime`、`market_valuation`、`signals`、`signal_history`、`relative_strength`、`stocks`、
 //! `financials`、`screening`、`screen_backtest`、`portfolio`、`stock_analysis`、`timeline`；共用工具在 `support`），
 //! 由整合測試環境驗證，避免單元測試因本機沒有 PostgreSQL 而失去可重現性。
 
@@ -20,6 +20,7 @@ mod flows;
 mod industries;
 mod institutional_streak;
 mod market_regime;
+mod market_valuation;
 mod movers;
 mod phases;
 mod portfolio;

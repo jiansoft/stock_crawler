@@ -27,6 +27,7 @@ mod market_rankings;
 mod market_regime;
 mod market_signals;
 mod market_stats;
+mod market_valuation;
 mod peers;
 mod portfolio;
 mod portfolio_history;
@@ -78,6 +79,7 @@ pub(super) use market_signals::{__path_market_signals, market_signals};
 pub(super) use market_stats::{
     __path_market_breadth, __path_market_index_history, market_breadth, market_index_history,
 };
+pub(super) use market_valuation::{__path_market_valuation, market_valuation};
 pub(super) use peers::{__path_stock_peers, stock_peers};
 pub(super) use portfolio::{__path_portfolio_summary, portfolio_summary};
 pub(super) use portfolio_history::{__path_portfolio_history, portfolio_history};

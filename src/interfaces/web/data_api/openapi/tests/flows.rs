@@ -126,6 +126,46 @@ fn openapi_industry_flow_schema_pins_field_names() {
     );
 }
 
+/// 市場估值水位 path 的契約：years 範圍與預設、分布與每月取樣的欄位。
+#[test]
+fn openapi_market_valuation_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/market/valuation");
+    assert_endpoint_responses(operation, "MarketValuationResponse", true);
+    let years = query_schema(operation, "years");
+    assert_eq!(
+        (
+            years["default"].clone(),
+            years["minimum"].clone(),
+            years["maximum"].clone()
+        ),
+        (5.into(), 1.into(), 10.into())
+    );
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["MarketValuationResponse"]["properties"];
+    for field in ["pe", "pb"] {
+        assert!(response[field].to_string().contains("null"), "{field}");
+    }
+    assert_eq!(
+        response["monthly"]["items"]["$ref"],
+        "#/components/schemas/MarketValuationPoint"
+    );
+    for field in ["median_pe", "median_pb"] {
+        assert!(
+            schemas["MarketValuationPoint"]["properties"][field]
+                .to_string()
+                .contains("null"),
+            "{field}"
+        );
+    }
+    for field in ["current", "percentile", "p25", "median", "p75", "days"] {
+        assert!(
+            schemas["ValuationRatioStats"]["properties"][field].is_object(),
+            "{field}"
+        );
+    }
+}
+
 /// 融資融券排行 path 的契約：days／limit 範圍與預設、排序鍵列舉、可為 null 的欄位。
 #[test]
 fn openapi_margin_ranking_schema_pins_field_names() {
