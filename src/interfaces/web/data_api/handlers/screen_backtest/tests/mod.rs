@@ -128,7 +128,10 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("NOT $30::bool OR cf.free_cash_flow_ttm > 0"));
     assert!(BACKTEST_SQL.contains("WHEN COUNT(c.free_cash_flow) = 4 THEN SUM(c.free_cash_flow)"));
     assert!(BACKTEST_SQL.contains("BETWEEN latest.ord - 3 AND latest.ord"));
-    assert!(!BACKTEST_SQL.contains("$31"));
+    assert!(BACKTEST_SQL.contains("$31::float8 IS NULL OR (qv.pe > 0 AND qv.pe <= $31)"));
+    assert!(BACKTEST_SQL.contains("$32::float8 IS NULL OR (qv.pb > 0 AND qv.pb <= $32)"));
+    assert!(BACKTEST_SQL.contains("AND q.\"Date\" = u.date"));
+    assert!(!BACKTEST_SQL.contains("$33"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -137,9 +140,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $31"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $32"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$33"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $33"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $34"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$35"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     for rank_by in RANK_BY {
@@ -230,7 +233,7 @@ fn validate_fundamentals_checks_ranges() {
             "min_revenue_yoy_percent=-100&min_revenue_yoy_streak=12&min_revenue_yoy_3m_percent=10000\
              &min_eps=-10000&min_roe_percent=10000&min_gross_margin_percent=100\
              &min_operating_margin_percent=-10000&max_debt_ratio_percent=0&margins_yoy_up=true\
-             &min_monthly_revenue=0"
+             &min_monthly_revenue=0&max_pe=10000&max_pb=0"
         )),
         Ok(())
     );
@@ -255,6 +258,10 @@ fn validate_fundamentals_checks_ranges() {
             "min_revenue_yoy_3m_percent=10001",
             "min_revenue_yoy_3m_percent 必須介於 -100 至 10000",
         ),
+        ("max_pe=-1", "max_pe 必須介於 0 至 10000"),
+        ("max_pe=10001", "max_pe 必須介於 0 至 10000"),
+        ("max_pb=1001", "max_pb 必須介於 0 至 1000"),
+        ("max_pb=NaN", "max_pb 必須介於 0 至 1000"),
         (
             "min_monthly_revenue=-1",
             "min_monthly_revenue 必須介於 0 至 1000000000000",
