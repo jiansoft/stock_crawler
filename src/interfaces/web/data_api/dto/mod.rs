@@ -4,7 +4,7 @@
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
 //! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
-//! `financial_health`、`chip`、`institutional_flow`、`margin`、`market_regime`、`market_valuation`、`screening`、`market`、`industries`、`portfolio`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals`、`signal_history` 與 `relative_strength` 二十三個子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! `financial_health`、`chip`、`institutional_flow`、`margin`、`market_regime`、`market_valuation`、`screening`、`market`、`industries`、`portfolio`、`portfolio_chip`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals`、`signal_history` 與 `relative_strength` 等子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
@@ -22,6 +22,7 @@ mod market_regime;
 mod market_valuation;
 mod peers;
 mod portfolio;
+mod portfolio_chip;
 mod portfolio_history;
 mod relative_strength;
 mod screen_backtest;
@@ -97,6 +98,10 @@ pub(super) use portfolio::{
     PortfolioHolding, PortfolioIndustry, PortfolioMarginTrendValue, PortfolioSummaryParams,
     PortfolioSummaryResponse, PortfolioWarningValue, WeightedMetricItem, margin_trend_code,
     warning_code,
+};
+pub(super) use portfolio_chip::{
+    PortfolioChipBroker, PortfolioChipBrokerNet, PortfolioChipItem, PortfolioChipParams,
+    PortfolioChipResponse,
 };
 pub(super) use portfolio_history::{
     PortfolioHistoryParams, PortfolioHistoryResponse, PortfolioMonth,

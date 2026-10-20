@@ -38,29 +38,12 @@ use crate::{
     },
 };
 
-/// 外資買賣超佔當日成交量的門檻（%）。
-///
-/// 門檻以 2026-10-05 的持股試算：外資 10%／100 張時 46 檔中有 24 檔達標（外資買賣超佔量
-/// 本來就常在一到三成），拉高到 30%／1,000 張並配合下列門檻後剩 9 檔。
-pub const FOREIGN_MIN_PERCENT: i64 = 30;
-/// 外資買賣超的張數門檻。
-pub const FOREIGN_MIN_LOTS: i64 = 1_000;
-/// 投信買賣超佔當日成交量的門檻（%）；投信部位較小，門檻低於外資。
-pub const TRUST_MIN_PERCENT: i64 = 15;
-/// 投信買賣超的張數門檻。
-pub const TRUST_MIN_LOTS: i64 = 200;
-/// 外資連續同向買賣超的天數門檻。
-pub const FOREIGN_STREAK_MIN: i32 = 5;
-/// 投信連續同向買賣超的天數門檻。
-pub const TRUST_STREAK_MIN: i32 = 3;
-/// 融資餘額增減的比例門檻（%）。
-pub const MARGIN_MIN_PERCENT: i64 = 10;
-/// 融資餘額增減的張數門檻。
-pub const MARGIN_MIN_LOTS: i64 = 500;
-/// 融券餘額增減的比例門檻（%）。
-pub const SHORT_MIN_PERCENT: i64 = 50;
-/// 融券餘額增減的張數門檻。
-pub const SHORT_MIN_LOTS: i64 = 200;
+// 門檻與 `/portfolio/chip`、stock_go 持股籌碼頁共用，定義在 domain。
+pub use crate::domain::portfolio::chip::{
+    FOREIGN_MIN_LOTS, FOREIGN_MIN_PERCENT, FOREIGN_STREAK_MIN, MARGIN_MIN_LOTS, MARGIN_MIN_PERCENT,
+    SHORT_MIN_LOTS, SHORT_MIN_PERCENT, TRUST_MIN_LOTS, TRUST_MIN_PERCENT, TRUST_STREAK_MIN,
+};
+use crate::domain::portfolio::chip::{balance_changed as changed, heavy_flow};
 
 /// 連續天數紀錄的保存時間（30 天）；中斷超過就重新起算。
 const STREAK_TTL_SECONDS: usize = 60 * 60 * 24 * 30;
@@ -213,9 +196,7 @@ fn next_streak(
 fn reasons(report: &ChipReport) -> Vec<&'static str> {
     let mut reasons = Vec::new();
     let heavy = |net: i64, min_percent: i64, min_lots: i64| {
-        report.volume.is_some_and(|volume| {
-            volume > 0 && net.abs() * 100 >= volume * min_percent && net.abs() >= min_lots * 1_000
-        })
+        heavy_flow(net, report.volume, min_percent, min_lots)
     };
     if let Some(flow) = report.flow {
         if heavy(flow.foreign, FOREIGN_MIN_PERCENT, FOREIGN_MIN_LOTS) {
@@ -250,12 +231,6 @@ fn reasons(report: &ChipReport) -> Vec<&'static str> {
         }
     }
     reasons
-}
-
-/// 餘額增減是否同時達到比例與張數門檻；前日為 0 時只看張數。
-fn changed(previous: i64, today: i64, min_percent: i64, min_lots: i64) -> bool {
-    let delta = (today - previous).abs();
-    delta >= min_lots && (previous == 0 || delta * 100 >= previous * min_percent)
 }
 
 /// 組出通知訊息（Telegram MarkdownV2）。

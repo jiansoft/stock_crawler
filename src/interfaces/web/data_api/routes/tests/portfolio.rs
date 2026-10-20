@@ -417,3 +417,26 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
 
     cleanup_forecast().await;
 }
+
+/// 持股籌碼日報：日期格式錯誤回 422；查詢日之前沒有任何籌碼資料時回 200、`date` 為 null 與空清單。
+/// 持股推算與籌碼欄位由倉儲的整合測試驗證。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn portfolio_chip_endpoint_db_semantics() {
+    if pool_or_skip("portfolio_chip_endpoint_db_semantics")
+        .await
+        .is_none()
+    {
+        return;
+    }
+    let (status, _) = get("/api/v1/portfolio/chip?date=2026-13-01").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, json) = get("/api/v1/portfolio/chip?date=1900-01-01").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert!(json["date"].is_null(), "{json}");
+    assert_eq!(json["items"], serde_json::json!([]));
+    assert_eq!(json["notable"], 0);
+}
