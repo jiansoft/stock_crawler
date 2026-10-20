@@ -1,3 +1,6 @@
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
+
 use super::*;
 
 /// 建立一筆兩種推估法都算得出來的樣本。
