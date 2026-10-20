@@ -62,6 +62,8 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(false)
         .bind(false)
         .bind(Option::<Vec<i32>>::None)
+        .bind(Option::<Decimal>::None)
+        .bind(Option::<Decimal>::None)
         .fetch_all(pool)
         .await
         .expect("screen EXPLAIN");
@@ -231,6 +233,95 @@ async fn screen_at_filters_avg_trade_value() {
             .all(|stock| stock["stock_symbol"] != SYMBOL),
         "平均 6,000 萬元低於 61 百萬元，不應出現：{excluded}"
     );
+}
+
+/// 本益比與股價淨值比：取查詢日 1988-03-05 之前 10 天內最新一筆日線，0 轉成 `null` 且不符合上限；
+/// 超過 10 天的日線不採用。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部 PostgreSQL，請加 --features integration-tests 執行"
+)]
+async fn screen_at_filters_valuation_caps() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 screen_at_filters_valuation_caps：無資料庫連接");
+        return;
+    }
+    // PA：03-03 本益比 12、淨值比 1.5（02-01 的 5 倍已被取代）；PB：本益比 0（虧損）、淨值比 0.9；
+    // PC：只有 02-01 的日線，超過 10 天。
+    const SYMBOLS: [&str; 3] = ["79979PA", "79979PB", "79979PC"];
+    let pool = database::get_connection();
+    let cleanup = || async {
+        for sql in [
+            r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
+            "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
+        ] {
+            let _ = sqlx::query(sql).bind(SYMBOLS).execute(pool).await;
+        }
+    };
+    cleanup().await;
+    for symbol in SYMBOLS {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
+               VALUES ($1, '估值選股', $1, 2, 1)"#,
+        )
+        .bind(symbol)
+        .execute(pool)
+        .await
+        .expect("種入股票");
+    }
+    sqlx::query(
+        r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "PriceEarningRatio", "price-to-book_ratio") VALUES
+           ('1988-02-01', '79979PA', 5, 0.5), ('1988-03-03', '79979PA', 12, 1.5),
+           ('1988-03-03', '79979PB', 0, 0.9), ('1988-02-01', '79979PC', 3, 0.3)"#,
+    )
+    .execute(pool)
+    .await
+    .expect("種入日線本益比");
+
+    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let run = |max_pe: Option<f64>, max_pb: Option<f64>| async move {
+        let mut params = screening_params();
+        params.industry_id = Some(1);
+        params.max_pe = max_pe;
+        params.max_pb = max_pb;
+        params.sort_by = Some("pe_ratio".to_owned());
+        params.limit = Some(50);
+        let validated = validate_screening_params(&params).expect("參數合法");
+        let response = screen_at(&params, validated, query_date).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body 可讀");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON 回應");
+        json["stocks"]
+            .as_array()
+            .expect("stocks 陣列")
+            .iter()
+            .filter(|stock| {
+                stock["stock_symbol"]
+                    .as_str()
+                    .is_some_and(|symbol| SYMBOLS.contains(&symbol))
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    let pe_capped = run(Some(12.0), None).await;
+    let pe_tight = run(Some(11.9), None).await;
+    let pb_capped = run(None, Some(1.0)).await;
+    cleanup().await;
+    assert_eq!(pe_capped.len(), 1, "{pe_capped:?}");
+    assert_eq!(pe_capped[0]["stock_symbol"], "79979PA");
+    assert_eq!(pe_capped[0]["pe_ratio"], 12.0);
+    assert_eq!(pe_capped[0]["pb_ratio"], 1.5);
+    assert_eq!(pe_capped[0]["ratio_date"], "1988-03-03");
+    assert!(pe_tight.is_empty(), "{pe_tight:?}");
+    assert_eq!(pb_capped.len(), 1, "{pb_capped:?}");
+    assert_eq!(pb_capped[0]["stock_symbol"], "79979PB");
+    assert!(pb_capped[0]["pe_ratio"].is_null(), "{pb_capped:?}");
+    assert_eq!(pb_capped[0]["pb_ratio"], 0.9);
 }
 
 /// 三率三升與營業利益率：以固定查詢日 1988-03-05 執行，最新一季須在兩季內；

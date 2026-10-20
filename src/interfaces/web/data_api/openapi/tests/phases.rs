@@ -163,7 +163,14 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
             .contains("boolean")
     );
     let sort_by = enum_values(&document, query_schema(operation, "sort_by"));
-    for field in ["f_score", "gross_margin", "debt_ratio", "operating_margin"] {
+    for field in [
+        "f_score",
+        "gross_margin",
+        "debt_ratio",
+        "operating_margin",
+        "pe_ratio",
+        "pb_ratio",
+    ] {
         assert!(
             sort_by
                 .as_array()
@@ -188,6 +195,9 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
         ("foreign_streak", "integer"),
         ("trust_streak", "integer"),
         ("avg_trade_value_20d", "number"),
+        ("pe_ratio", "number"),
+        ("pb_ratio", "number"),
+        ("ratio_date", "string"),
     ] {
         let schema = screened[field].to_string();
         assert!(
@@ -209,6 +219,9 @@ fn openapi_phase3_schema_pins_filters_and_source_dates() {
     );
     let response = &document["components"]["schemas"]["StockScreeningResponse"]["properties"];
     assert!(response["chip_as_of"].to_string().contains("null"));
+    // 本益比上限 0–10000、股價淨值比上限 0–1000。
+    assert_eq!(query_schema(operation, "max_pe")["maximum"], 10000);
+    assert_eq!(query_schema(operation, "max_pb")["maximum"], 1000);
 }
 
 /// Phase 4 三條 path 精確驗證 responses、query enum/range/default 與

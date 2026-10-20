@@ -84,6 +84,12 @@ pub(super) struct ScreenedStockRow {
     trust_streak: Option<i16>,
     /// 近 20 筆日線平均成交金額（元）。
     avg_trade_value: Option<Decimal>,
+    /// 10 天內最新一筆日線的官方本益比；虧損或沒有資料為 `None`。
+    pe_ratio: Option<Decimal>,
+    /// 10 天內最新一筆日線的官方股價淨值比；沒有資料為 `None`。
+    pb_ratio: Option<Decimal>,
+    /// 本益比與股價淨值比的日線日期。
+    ratio_date: Option<NaiveDate>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -191,6 +197,9 @@ impl From<ScreenedStockRow> for ScreenedStock {
                 "avg_trade_value",
             )
             .map(|value| (value / 10_000.0).round() / 100.0),
+            pe_ratio: analytical_decimal_to_f64(row.pe_ratio, &symbol, "pe_ratio"),
+            pb_ratio: analytical_decimal_to_f64(row.pb_ratio, &symbol, "pb_ratio"),
+            ratio_date: row.ratio_date.map(|date| date.to_string()),
         }
     }
 }
