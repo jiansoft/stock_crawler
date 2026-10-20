@@ -287,6 +287,16 @@ impl DataHealthRepository for PgDataHealthRepository {
             .fetch_one(pool)
             .await
             .context("Failed to fetch latest revenue month")?;
+        let latest_holder_week =
+            sqlx::query_scalar(r#"SELECT max("date") FROM holder_distribution"#)
+                .fetch_one(pool)
+                .await
+                .context("Failed to fetch latest holder distribution week")?;
+        let latest_insider_month =
+            sqlx::query_scalar(r#"SELECT max("month") FROM insider_holding"#)
+                .fetch_one(pool)
+                .await
+                .context("Failed to fetch latest insider holding month")?;
 
         Ok(DataHealthSnapshot {
             market_counts,
@@ -317,6 +327,8 @@ impl DataHealthRepository for PgDataHealthRepository {
             stale_dividend_placeholders,
             dividend_total_mismatches,
             latest_revenue_month,
+            latest_holder_week,
+            latest_insider_month,
             valuation_ratio_zeros,
             forward_return_gaps,
         })

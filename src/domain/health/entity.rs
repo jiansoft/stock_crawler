@@ -66,6 +66,10 @@ pub struct DataHealthSnapshot {
     pub dividend_total_mismatches: i64,
     /// 月營收的最新年月（`YYYYMM`）；沒有資料時為 `None`。
     pub latest_revenue_month: Option<i64>,
+    /// 集保千張大戶週摘要（`holder_distribution`）的最新資料日；沒有資料時為 `None`。
+    pub latest_holder_week: Option<NaiveDate>,
+    /// 董監持股與設質（`insider_holding`）的最新月份（該月 1 日）；沒有資料時為 `None`。
+    pub latest_insider_month: Option<NaiveDate>,
     /// 檢查期間內每個交易日、每個市場的本益比與股價淨值比為 0 的列數。
     pub valuation_ratio_zeros: Vec<ValuationRatioZeroCount>,
     /// 未來報酬表（整張表，從最早有 5 日報酬的基準日起）短天期缺漏的基準日，由舊到新。
