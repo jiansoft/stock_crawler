@@ -291,7 +291,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 | `/stocks/{symbol}/technicals` | 均線與乖離率、RSI、KD、MACD 與各類訊號（價格依除權息、減資、分割還原） |
 | `/stocks/{symbol}/signals` | 個股技術訊號歷史，附每次訊號之後的報酬 |
 | `/stocks/{symbol}/relative-strength` | 相對強度歷史（分數、名次、期間高低點與穿越 50／80 的轉折） |
-| `/stocks/{symbol}/chip` | 籌碼面（三大法人、融資融券、千張大戶、董監設質、主力進出） |
+| `/stocks/{symbol}/chip` | 籌碼面（三大法人、融資融券與每日主力買賣超、千張大戶、董監設質、最新一天的主力分點） |
 | `/stocks/{symbol}/timeline` | 事件時間軸：除權息與股利發放、減資／分割、月營收與營收創新高、季報與三率三升／三降、技術訊號、法人連續買賣超里程碑與董監持股變化，另列已公告的未來除權息與減資 |
 
 **市場**

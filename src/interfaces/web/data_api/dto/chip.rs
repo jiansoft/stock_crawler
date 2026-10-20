@@ -14,9 +14,9 @@ pub(crate) struct ChipParams {
     pub(crate) days: Option<u16>,
 }
 
-/// 單一交易日的三大法人買賣超與融資融券餘額。
+/// 單一交易日的三大法人買賣超、融資融券餘額與主力進出。
 ///
-/// 法人單位是「股」、融資融券單位是「張」（與交易所公告一致）；
+/// 法人單位是「股」、融資融券與主力單位是「張」（與交易所、券商頁公告一致）；
 /// 來源當天沒有這檔股票的那一類資料時為 `null`（例如不能信用交易的股票沒有融資融券）。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct ChipDay {
@@ -38,6 +38,10 @@ pub(crate) struct ChipDay {
     pub(crate) short_balance: Option<i64>,
     /// 融券餘額較前一日增減（張）。
     pub(crate) short_change: Option<i64>,
+    /// 主力（買賣超前幾名分點）買賣超張數，正值為買超；只有持股、2026-10-07 起才有，其餘為 `null`。
+    pub(crate) main_net: Option<i64>,
+    /// 主力買賣超佔成交量比重（%），正值為買超；沒有主力進出資料為 `null`。
+    pub(crate) main_share: Option<f64>,
 }
 
 /// 外資、投信從最新一天往回數的連續同向買賣超天數。
