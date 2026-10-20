@@ -1,4 +1,4 @@
-//! 條件選股回測 endpoint 整合測試：財報三率與負債比（Yahoo 單季財報）只用換股當天已公布的那一季。
+//! 條件選股回測 endpoint 整合測試：財報三率、負債比與自由現金流（Yahoo 單季財報）只用換股當天已公布的那一季。
 
 use super::*;
 
@@ -114,6 +114,51 @@ async fn screen_backtest_margins_use_published_statements_only() {
             "{period}"
         );
     }
+
+    cleanup(pool).await;
+}
+
+/// 近四季自由現金流為正：3 月換股最新已公布的是 1992 Q3，往回四季（1991 Q4～1992 Q3）合計。
+///
+/// BA 10、−5、10、10（+25，通過；尚未公布的 1992 Q4 −1000 不會用到）；BB 10、10、−30、5（−5）；
+/// BC 只有 1992 Q1～Q3（不足四季，不通過）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn screen_backtest_positive_free_cash_flow_uses_published_quarters_only() {
+    let Some(pool) =
+        seeded("screen_backtest_positive_free_cash_flow_uses_published_quarters_only").await
+    else {
+        return;
+    };
+    sqlx::query(
+        "INSERT INTO cash_flow_statement (stock_symbol, fiscal_year, period_type, quarter, source, free_cash_flow)
+         VALUES ('79979BA', 1991, 'single', 'Q4', 'yahoo', 10), ('79979BA', 1992, 'single', 'Q1', 'yahoo', -5),
+                ('79979BA', 1992, 'single', 'Q2', 'yahoo', 10), ('79979BA', 1992, 'single', 'Q3', 'yahoo', 10),
+                ('79979BA', 1992, 'single', 'Q4', 'yahoo', -1000),
+                ('79979BB', 1991, 'single', 'Q4', 'yahoo', 10), ('79979BB', 1992, 'single', 'Q1', 'yahoo', 10),
+                ('79979BB', 1992, 'single', 'Q2', 'yahoo', -30), ('79979BB', 1992, 'single', 'Q3', 'yahoo', 5),
+                ('79979BC', 1992, 'single', 'Q1', 'yahoo', 100), ('79979BC', 1992, 'single', 'Q2', 'yahoo', 100),
+                ('79979BC', 1992, 'single', 'Q3', 'yahoo', 100)",
+    )
+    .execute(pool)
+    .await
+    .expect("種入現金流量表");
+
+    let (status, json) = query("limit=2&positive_free_cash_flow=true").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["positive_free_cash_flow"], true);
+    assert_eq!(
+        periods(&json),
+        [
+            ("1993-03-01".to_owned(), 1, Some(10.0)),
+            ("1993-03-08".to_owned(), 1, Some(3.0)),
+        ]
+    );
+    let (_, json) = query("limit=2").await;
+    assert_eq!(json["positive_free_cash_flow"], false);
 
     cleanup(pool).await;
 }

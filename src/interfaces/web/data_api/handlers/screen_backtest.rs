@@ -275,6 +275,7 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         margins_yoy_up: params.margins_yoy_up.unwrap_or(false),
         revenue_record: params.revenue_record.unwrap_or(false),
         max_debt_ratio_percent: params.max_debt_ratio_percent,
+        positive_free_cash_flow: params.positive_free_cash_flow.unwrap_or(false),
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
         fee_discount: backtest.fee_discount,
