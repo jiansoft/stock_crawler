@@ -1,8 +1,19 @@
-//! `/market/valuation` 的資料庫語意整合測試。
+//! `/market/valuation` 的資料庫語意整合測試：由日線重算 `daily_market_valuation` 再查詢。
 
 use axum::http::StatusCode;
+use chrono::NaiveDate;
 
 use super::support::{get, pool_or_skip};
+use crate::domain::market_index::valuation::MarketValuationRepository;
+use crate::infra::database::repository::market_valuation::PgMarketValuationRepository;
+
+/// 測試資料的日期範圍（重算與清除都只碰這段期間）。
+fn window() -> (NaiveDate, NaiveDate) {
+    (
+        NaiveDate::from_ymd_opt(1986, 12, 1).expect("合法日期"),
+        NaiveDate::from_ymd_opt(1987, 3, 31).expect("合法日期"),
+    )
+}
 
 /// 測試用假代號：VA、VB 上市，VC 上櫃。
 const SYMBOLS: [(&str, i32); 3] = [("79979VA", 2), ("79979VB", 2), ("79979VC", 4)];
@@ -15,6 +26,12 @@ async fn cleanup(pool: &sqlx::PgPool) {
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
     }
+    let (from, to) = window();
+    let _ = sqlx::query("DELETE FROM daily_market_valuation WHERE date BETWEEN $1 AND $2")
+        .bind(from)
+        .bind(to)
+        .execute(pool)
+        .await;
 }
 
 /// 1986-12-31、1987-01-30、1987-02-27 三檔都有資料；1987-03-02 只有 VA（樣本不足，不列入）。
@@ -41,6 +58,19 @@ async fn seed(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("種入日線本益比");
+    let (from, to) = window();
+    // 4 個交易日 × 3 列（上市、上櫃、合計）；03-02 只有上市，少了上櫃一列。
+    let rows = PgMarketValuationRepository::new()
+        .refresh_market_valuation(from, to)
+        .await
+        .expect("重算市場估值水位");
+    assert_eq!(rows, 11);
+    // 重算是 upsert：再跑一次列數相同、不會重複。
+    let again = PgMarketValuationRepository::new()
+        .refresh_market_valuation(from, to)
+        .await
+        .expect("重算市場估值水位");
+    assert_eq!(again, 11);
 }
 
 /// 每日中位數只計大於 0 的值、樣本不足的日子不列入、月底取樣、百分位與市場篩選；參數錯誤回 422，

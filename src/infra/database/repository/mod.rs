@@ -17,6 +17,7 @@ pub mod foreign_holding;
 pub mod forward_return;
 pub mod holding_fundamentals;
 pub mod market_index;
+pub mod market_valuation;
 pub mod money_flow;
 pub mod official_ratio;
 pub mod performance;
