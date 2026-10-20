@@ -19,7 +19,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// 年增率、每股盈餘、股東權益報酬率，`NULL` 為不篩）、`$24`～`$27` 財報三率與負債比（毛利率、營業
 /// 利益率下限、是否只選三率三升、負債比上限）、`$28` 是否只選最新月營收創歷史新高、`$29` 最新月營收
 /// 下限（千元，`NULL` 為不篩）、`$30` 是否只選近四季自由現金流為正、`$31`／`$32` 換股當天本益比與股價
-/// 淨值比上限（倍，`NULL` 為不篩）；籌碼版另有 `$33`／`$34`。
+/// 淨值比上限（倍，`NULL` 為不篩）、`$33` 大盤估值濾網（市場本益比中位數上限，`NULL` 為不濾）；籌碼版另有
+/// `$34`／`$35`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
@@ -55,6 +56,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 ///   false，這期空手。
 /// - `breadth`：同市場站上 60 日均線的股票比例（`daily_stock_price_stats`）是否不低於 `$13`%；
 ///   低於時同樣空手。換股日沒有統計列視為通過（與加權指數缺資料相同）。
+/// - `valuation_level`：同市場（`$3`）換股日的本益比中位數（`daily_market_valuation`）是否不高於 `$33`；
+///   高於時同樣空手。換股日沒有估值列視為通過。
 /// - `etf_return`：同一天買進 [`ETF_BENCHMARK`] 持有同樣天數的還原報酬，作為實際買得到的大盤基準。
 macro_rules! backtest_sql {
     ($with:literal, $chip_join:literal, $chip_filter:literal, $chip_columns:literal) => {
@@ -371,12 +374,18 @@ breadth AS (
                >= $13::int * NULLIF(above_60_day_moving_average + below_60_day_moving_average, 0) AS above
     FROM daily_stock_price_stats
     WHERE stock_exchange_market_id = $3 AND date BETWEEN $1 AND $2
+),
+valuation_level AS (
+    SELECT date, median_pe::float8 <= $33::float8 AS cheap
+    FROM daily_market_valuation
+    WHERE $33::float8 IS NOT NULL AND stock_exchange_market_id = $3 AND date BETWEEN $1 AND $2
 )
 SELECT b.date,
        b.samples = 0 AS pending,
        (SELECT COUNT(*) FROM days d WHERE d.date > b.date)::int8 AS elapsed_days,
        ($11::int IS NULL OR t.above IS NOT FALSE)
-           AND ($13::int IS NULL OR br.above IS NOT FALSE) AS market_ok,
+           AND ($13::int IS NULL OR br.above IS NOT FALSE)
+           AND ($33::float8 IS NULL OR vl.cheap IS NOT FALSE) AS market_ok,
        b.avg_ret AS benchmark_return,
        (CASE $4::int
             WHEN 5 THEN e.return_5d
@@ -399,6 +408,7 @@ LEFT JOIN holdable h ON h.date = b.date
 LEFT JOIN daily_forward_return e ON e.date = b.date AND e.stock_symbol = '0050'
 LEFT JOIN taiex t ON t."date" = b.date
 LEFT JOIN breadth br ON br.date = b.date
+LEFT JOIN valuation_level vl ON vl.date = b.date
 WHERE b.samples > 0 OR b.date = (SELECT MAX(date) FROM rebal)
 ORDER BY b.date
 "#
@@ -414,7 +424,7 @@ pub(super) const BACKTEST_SQL: &str = backtest_sql!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$33`）／投信（`$34`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$34`）／投信（`$35`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     "\nWITH",
@@ -423,7 +433,7 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
     backtest_sql!(
         "",
         "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($33::bigint IS NULL OR c.foreign_buy >= $33)\n      AND ($34::bigint IS NULL OR c.trust_buy >= $34)",
+        "\n      AND ($34::bigint IS NULL OR c.foreign_buy >= $34)\n      AND ($35::bigint IS NULL OR c.trust_buy >= $35)",
         "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
     )
 );

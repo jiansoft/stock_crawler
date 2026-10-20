@@ -100,6 +100,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 全部賣出；可與 `market_filter_ma` 併用（兩者都通過才持股）。統計從 2019 年起；省略為不濾。
     #[param(minimum = 1, maximum = 99)]
     pub(crate) market_filter_breadth: Option<u8>,
+    /// 大盤估值濾網（倍，5–100）：換股日同市場（`market`）官方本益比中位數（`/market/valuation` 的每日值）
+    /// 高於 N 倍時這期空手，上一期持股全部賣出；可與其他濾網併用（都通過才持股）。資料從 2012 年起，
+    /// 換股日沒有估值資料時視為通過；省略為不濾。
+    #[param(minimum = 5, maximum = 100)]
+    pub(crate) market_filter_max_pe: Option<f64>,
     /// 續抱條件（1–99）：上一期持有的股票即使不再符合選股條件（例如法人連買中斷、訊號過期），只要
     /// 換股當天相對強度分數不低於此值就續抱；省略為不續抱（只看 `keep_rank`）。
     #[param(minimum = 1, maximum = 99)]
@@ -455,6 +460,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) market_filter_ma: Option<u16>,
     /// 市場廣度濾網門檻（%）；未設定為 `null`。
     pub(crate) market_filter_breadth: Option<u8>,
+    /// 大盤估值濾網門檻（市場本益比中位數上限，倍）；未設定為 `null`。
+    pub(crate) market_filter_max_pe: Option<f64>,
     /// 續抱的相對強度門檻；未設定為 `null`。
     pub(crate) hold_min_rs_score: Option<u8>,
     /// 同產業最多持有檔數；未設定為 `null`。

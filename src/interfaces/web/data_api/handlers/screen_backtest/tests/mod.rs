@@ -134,7 +134,9 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("OR $16::text IN ('pe_ratio', 'pb_ratio')"));
     assert!(BACKTEST_SQL.contains("WHEN 'pe_ratio' THEN -pe"));
     assert!(BACKTEST_SQL.contains("AND q.\"Date\" = u.date"));
-    assert!(!BACKTEST_SQL.contains("$33"));
+    assert!(BACKTEST_SQL.contains("$33::float8 IS NULL OR vl.cheap IS NOT FALSE"));
+    assert!(BACKTEST_SQL.contains("LEFT JOIN valuation_level vl ON vl.date = b.date"));
+    assert!(!BACKTEST_SQL.contains("$34"));
     assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
@@ -143,9 +145,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $33"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $34"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$35"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $34"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $35"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$36"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     for rank_by in RANK_BY {
