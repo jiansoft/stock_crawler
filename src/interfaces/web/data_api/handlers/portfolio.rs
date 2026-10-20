@@ -4,7 +4,9 @@
 //! `last_daily_quotes`，殖利率取 `yield_rank` 最新一筆（31 天內），F 分數取
 //! `financial_health`（評分年度落後 1–2 年內）。彙總規則在
 //! [`crate::domain::portfolio::summary`]。另附每檔的相對強度分數（同
-//! [`super::relative_strength`]）與外資、投信連續買賣超天數（同 [`super::institutional_flow`]）。
+//! [`super::relative_strength`]）與外資、投信連續買賣超天數（同 [`super::institutional_flow`]），
+//! 以及最新月營收、最近一季三率與基本面警示（規則在 [`crate::domain::portfolio::health`]）：
+//! 月營收超過 2 個月沒更新、財報落後超過 2 季視為過期。
 
 use std::collections::HashMap;
 
@@ -19,14 +21,17 @@ use rust_decimal::Decimal;
 
 use super::institutional_flow::{StreakRow, load_streaks};
 use super::relative_strength::{ScoredStock, load_scores};
-use super::{database_error, error_response};
+use super::{analytical_decimal_to_f64, database_error, error_response, format_month};
+use crate::core::declare::Industry;
+use crate::domain::portfolio::health::FundamentalSignals;
 use crate::domain::portfolio::summary::{self, Position};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
-    ErrorBody, PortfolioSummaryParams, PortfolioSummaryResponse,
+    ErrorBody, PortfolioHolding, PortfolioSummaryParams, PortfolioSummaryResponse,
+    margin_trend_code, warning_code,
 };
 
-/// 依代號合併的持有部位與各項指標；`$1 = 0` 時為全部會員。
+/// 依代號合併的持有部位與各項指標；`$1 = 0` 時為全部會員，`$2` 為不取三率的產業（金融保險業）。
 const POSITIONS_SQL: &str = r#"
 WITH held AS (
     SELECT security_code AS stock_symbol,
@@ -45,7 +50,10 @@ SELECT held.stock_symbol, held.shares, held.cost, held.dividends_received,
     CASE WHEN q.closing_price > 0 THEN q.closing_price END AS closing_price,
     CASE WHEN y.date >= CURRENT_DATE - 30 THEN y.yield END AS dividend_yield_percent,
     CASE WHEN EXTRACT(YEAR FROM CURRENT_DATE)::int - h.f_score_year BETWEEN 1 AND 2
-        THEN h.f_score END AS f_score
+        THEN h.f_score END AS f_score,
+    rv.revenue_month, rv.revenue_yoy, rv.revenue_decline_months,
+    m.margin_year, m.margin_quarter, m.gross_margin, m.operating_margin, m.net_margin,
+    m.last_year_gross_margin, m.last_year_operating_margin, m.last_year_net_margin
 FROM held
 LEFT JOIN stocks s ON s.stock_symbol = held.stock_symbol
 LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
@@ -57,11 +65,67 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) y ON TRUE
 LEFT JOIN financial_health h ON h.stock_symbol = held.stock_symbol
+LEFT JOIN LATERAL (
+    -- 最近 12 個月營收：最新一個月的年增率，與從最新一個月起連續年減（月份不中斷）的月數。
+    SELECT
+        MAX(revenue_month) FILTER (WHERE rn = 1) AS revenue_month,
+        MAX(yoy) FILTER (WHERE rn = 1) AS revenue_yoy,
+        COALESCE(
+            MIN(rn) FILTER (WHERE NOT (yoy < 0 AND ord = first_ord - rn + 1)) - 1,
+            COUNT(*)
+        )::smallint AS revenue_decline_months
+    FROM (
+        SELECT revenue_month, yoy, ord,
+            ROW_NUMBER() OVER (ORDER BY ord DESC) AS rn,
+            FIRST_VALUE(ord) OVER (ORDER BY ord DESC) AS first_ord
+        FROM (
+            SELECT "Date" AS revenue_month,
+                "ComparedWithLastYearSameMonth" AS yoy,
+                ("Date" / 100)::int * 12 + ("Date" % 100)::int AS ord
+            FROM "Revenue"
+            WHERE "SecurityCode" = held.stock_symbol
+            ORDER BY "Date" DESC
+            LIMIT 12
+        ) recent
+    ) ranked
+    HAVING MAX(ord) >= EXTRACT(YEAR FROM CURRENT_DATE)::int * 12
+        + EXTRACT(MONTH FROM CURRENT_DATE)::int - 2
+) rv ON TRUE
+LEFT JOIN LATERAL (
+    -- Yahoo 最新一季單季損益表的三率與去年同季的三率（營收為 0 時為 NULL）；金融保險業的營收口徑
+    -- 與一般公司不同，三率沒有可比性，不取。
+    SELECT cur.fiscal_year AS margin_year,
+        SUBSTRING(cur.quarter FROM 2)::smallint AS margin_quarter,
+        cur.gross_profit::float8 / NULLIF(cur.revenue, 0) * 100 AS gross_margin,
+        cur.operating_profit::float8 / NULLIF(cur.revenue, 0) * 100 AS operating_margin,
+        cur.net_income::float8 / NULLIF(cur.revenue, 0) * 100 AS net_margin,
+        prev.gross_profit::float8 / NULLIF(prev.revenue, 0) * 100 AS last_year_gross_margin,
+        prev.operating_profit::float8 / NULLIF(prev.revenue, 0) * 100 AS last_year_operating_margin,
+        prev.net_income::float8 / NULLIF(prev.revenue, 0) * 100 AS last_year_net_margin
+    FROM (
+        SELECT fiscal_year, quarter, revenue, gross_profit, operating_profit, net_income
+        FROM income_statement
+        WHERE source = 'yahoo'
+          AND stock_symbol = held.stock_symbol
+          AND period_type = 'single'
+          AND s.stock_industry_id IS DISTINCT FROM $2
+        ORDER BY fiscal_year DESC, quarter DESC
+        LIMIT 1
+    ) cur
+    LEFT JOIN income_statement prev
+           ON prev.source = 'yahoo'
+          AND prev.stock_symbol = held.stock_symbol
+          AND prev.period_type = 'single'
+          AND prev.fiscal_year = cur.fiscal_year - 1
+          AND prev.quarter = cur.quarter
+    WHERE (EXTRACT(YEAR FROM CURRENT_DATE)::int * 4 + EXTRACT(QUARTER FROM CURRENT_DATE)::int)
+        - (cur.fiscal_year * 4 + SUBSTRING(cur.quarter FROM 2)::int) BETWEEN 0 AND 2
+) m ON TRUE
 WHERE held.shares > 0
 ORDER BY held.stock_symbol
 "#;
 
-#[derive(sqlx::FromRow)]
+#[derive(Default, sqlx::FromRow)]
 struct PositionRow {
     stock_symbol: String,
     shares: i64,
@@ -74,6 +138,77 @@ struct PositionRow {
     closing_price: Option<Decimal>,
     dividend_yield_percent: Option<Decimal>,
     f_score: Option<i16>,
+    revenue_month: Option<i64>,
+    revenue_yoy: Option<Decimal>,
+    revenue_decline_months: Option<i16>,
+    margin_year: Option<i32>,
+    margin_quarter: Option<i16>,
+    gross_margin: Option<f64>,
+    operating_margin: Option<f64>,
+    net_margin: Option<f64>,
+    last_year_gross_margin: Option<f64>,
+    last_year_operating_margin: Option<f64>,
+    last_year_net_margin: Option<f64>,
+}
+
+/// 一檔持股的營收與三率欄位，在組出領域彙總前先從查詢列取出。
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Fundamentals {
+    revenue_month: Option<i64>,
+    revenue_yoy: Option<Decimal>,
+    margin_period: Option<String>,
+    margins: [Option<f64>; 3],
+    signals: FundamentalSignals,
+}
+
+impl Fundamentals {
+    fn from_row(row: &PositionRow) -> Self {
+        let change = |current: Option<f64>, last_year: Option<f64>| Some(current? - last_year?);
+        Self {
+            revenue_month: row.revenue_month,
+            revenue_yoy: row.revenue_yoy,
+            margin_period: row
+                .margin_year
+                .zip(row.margin_quarter)
+                .map(|(year, quarter)| format!("{year}-Q{quarter}")),
+            margins: [row.gross_margin, row.operating_margin, row.net_margin],
+            signals: FundamentalSignals {
+                revenue_decline_months: row
+                    .revenue_decline_months
+                    .and_then(|months| u8::try_from(months).ok()),
+                operating_margin: row.operating_margin,
+                margin_changes: [
+                    change(row.gross_margin, row.last_year_gross_margin),
+                    change(row.operating_margin, row.last_year_operating_margin),
+                    change(row.net_margin, row.last_year_net_margin),
+                ],
+            },
+        }
+    }
+
+    /// 把營收、三率與警示填入持股。
+    fn apply(self, holding: &mut PortfolioHolding) {
+        let round = |value: f64| (value * 100.0).round() / 100.0;
+        holding.revenue_month = self.revenue_month.map(format_month);
+        holding.revenue_yoy_percent =
+            analytical_decimal_to_f64(self.revenue_yoy, &holding.stock_symbol, "revenue_yoy");
+        holding.revenue_decline_months = self.signals.revenue_decline_months;
+        holding.margin_period = self.margin_period;
+        let [gross, operating, net] = self.margins.map(|margin| margin.map(round));
+        holding.gross_margin_percent = gross;
+        holding.operating_margin_percent = operating;
+        holding.net_margin_percent = net;
+        holding.margins_trend = self
+            .signals
+            .margin_trend()
+            .map(|trend| margin_trend_code(trend).to_owned());
+        holding.warnings = self
+            .signals
+            .warnings()
+            .into_iter()
+            .map(|warning| warning_code(warning).to_owned())
+            .collect();
+    }
 }
 
 /// 查詢目前持股的組合總覽：市值、權重、未實現損益、已領股利、產業分布與加權指標。
@@ -92,6 +227,7 @@ pub(crate) async fn portfolio_summary(Query(params): Query<PortfolioSummaryParam
     let (rows, scores, streaks) = tokio::join!(
         sqlx::query_as::<_, PositionRow>(POSITIONS_SQL)
             .bind(member_id)
+            .bind(Industry::FinanceInsurance as i32)
             .fetch_all(database::get_connection()),
         load_scores(today),
         load_streaks(today),
@@ -148,6 +284,10 @@ fn attach_indicators(
 /// 由查詢結果組出回應；`data_as_of` 取各持股報價日中最新的一天。
 fn build_response(member_id: i64, rows: Vec<PositionRow>) -> PortfolioSummaryResponse {
     let data_as_of = rows.iter().filter_map(|row| row.quote_date).max();
+    let mut fundamentals: HashMap<String, Fundamentals> = rows
+        .iter()
+        .map(|row| (row.stock_symbol.clone(), Fundamentals::from_row(row)))
+        .collect();
     let positions = rows
         .into_iter()
         .map(|row| Position {
@@ -163,11 +303,22 @@ fn build_response(member_id: i64, rows: Vec<PositionRow>) -> PortfolioSummaryRes
             f_score: row.f_score,
         })
         .collect();
-    PortfolioSummaryResponse::new(
+    let mut response = PortfolioSummaryResponse::new(
         member_id,
         data_as_of.map(|date| date.to_string()),
         summary::summarize(positions),
-    )
+    );
+    for holding in &mut response.holdings {
+        if let Some(fundamentals) = fundamentals.remove(&holding.stock_symbol) {
+            fundamentals.apply(holding);
+        }
+    }
+    response.warning_symbols = response
+        .holdings
+        .iter()
+        .filter(|holding| !holding.warnings.is_empty())
+        .count();
+    response
 }
 
 #[cfg(test)]
@@ -191,6 +342,7 @@ mod tests {
             closing_price: price,
             dividend_yield_percent: Some(dec!(3.5)),
             f_score: Some(7),
+            ..Default::default()
         };
         let response = build_response(
             2,
@@ -226,6 +378,7 @@ mod tests {
             closing_price: Some(dec!(10)),
             dividend_yield_percent: None,
             f_score: None,
+            ..Default::default()
         };
         let scored = |symbol: &str, rs_score: u8| ScoredStock {
             rank: 1,
@@ -279,5 +432,69 @@ mod tests {
         attach_indicators(&mut bare, None, None);
         assert!(bare.rs_as_of.is_none() && bare.chip_as_of.is_none());
         assert!(bare.holdings[0].rs_score.is_none());
+    }
+
+    /// 營收、三率與警示依代號填入持股：三率四捨五入到小數 2 位、三率三降與營收連 3 月年減發警示，
+    /// 沒有營收與財報的持股維持 `null` 與空警示；`warning_symbols` 只算有警示的檔數。
+    #[test]
+    fn build_response_attaches_fundamentals_and_warnings() {
+        let warned = PositionRow {
+            stock_symbol: "2330".to_owned(),
+            shares: 1_000,
+            closing_price: Some(dec!(100)),
+            revenue_month: Some(202609),
+            revenue_yoy: Some(dec!(-12.5)),
+            revenue_decline_months: Some(3),
+            margin_year: Some(2026),
+            margin_quarter: Some(2),
+            gross_margin: Some(40.126),
+            operating_margin: Some(-1.5),
+            net_margin: Some(2.0),
+            last_year_gross_margin: Some(45.0),
+            last_year_operating_margin: Some(3.0),
+            last_year_net_margin: Some(4.0),
+            ..Default::default()
+        };
+        let bare = PositionRow {
+            stock_symbol: "0050".to_owned(),
+            shares: 1_000,
+            closing_price: Some(dec!(50)),
+            ..Default::default()
+        };
+        let response = build_response(0, vec![warned, bare]);
+        assert_eq!(response.warning_symbols, 1);
+        let holding = |symbol: &str| {
+            response
+                .holdings
+                .iter()
+                .find(|holding| holding.stock_symbol == symbol)
+                .expect("holding")
+        };
+        let tsmc = holding("2330");
+        assert_eq!(
+            (
+                tsmc.revenue_month.as_deref(),
+                tsmc.revenue_yoy_percent,
+                tsmc.revenue_decline_months
+            ),
+            (Some("2026-09"), Some(-12.5), Some(3))
+        );
+        assert_eq!(tsmc.margin_period.as_deref(), Some("2026-Q2"));
+        assert_eq!(
+            (
+                tsmc.gross_margin_percent,
+                tsmc.operating_margin_percent,
+                tsmc.net_margin_percent
+            ),
+            (Some(40.13), Some(-1.5), Some(2.0))
+        );
+        assert_eq!(tsmc.margins_trend.as_deref(), Some("all_down"));
+        assert_eq!(
+            tsmc.warnings,
+            ["revenue_decline", "margins_all_down", "operating_loss"]
+        );
+        let etf = holding("0050");
+        assert!(etf.revenue_month.is_none() && etf.margin_period.is_none());
+        assert!(etf.margins_trend.is_none() && etf.warnings.is_empty());
     }
 }

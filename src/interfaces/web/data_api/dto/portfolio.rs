@@ -6,9 +6,55 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::domain::financial::entity::MarginTrend;
+use crate::domain::portfolio::health::HoldingWarning;
 use crate::domain::portfolio::summary::{
     HoldingSummary, IndustrySummary, PortfolioSummary, WeightedMetric,
 };
+
+/// OpenAPI 文件使用的持股基本面警示。
+#[derive(ToSchema)]
+#[schema(rename_all = "snake_case")]
+#[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema。
+pub(crate) enum PortfolioWarningValue {
+    /// 最新月營收起連續 3 個月以上年減。
+    RevenueDecline,
+    /// 最近一季毛利率、營業利益率、稅後淨利率都比去年同季低（三率三降）。
+    MarginsAllDown,
+    /// 最近一季營業利益為負。
+    OperatingLoss,
+}
+
+/// OpenAPI 文件使用的三率方向。
+#[derive(ToSchema)]
+#[schema(rename_all = "snake_case")]
+#[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema。
+pub(crate) enum PortfolioMarginTrendValue {
+    /// 三率都比去年同季高（三率三升）。
+    AllUp,
+    /// 三率都比去年同季低（三率三降）。
+    AllDown,
+    /// 有升有降或持平。
+    Mixed,
+}
+
+/// 警示的 API 契約值。
+pub(crate) fn warning_code(warning: HoldingWarning) -> &'static str {
+    match warning {
+        HoldingWarning::RevenueDecline => "revenue_decline",
+        HoldingWarning::MarginsAllDown => "margins_all_down",
+        HoldingWarning::OperatingLoss => "operating_loss",
+    }
+}
+
+/// 三率方向的 API 契約值。
+pub(crate) fn margin_trend_code(trend: MarginTrend) -> &'static str {
+    match trend {
+        MarginTrend::AllUp => "all_up",
+        MarginTrend::AllDown => "all_down",
+        MarginTrend::Mixed => "mixed",
+    }
+}
 
 /// 持股總覽 endpoint 的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
@@ -102,6 +148,27 @@ pub(crate) struct PortfolioHolding {
     pub(crate) foreign_streak: Option<i16>,
     /// 截至 `chip_as_of` 的投信連續買賣超天數，規則同 `foreign_streak`。
     pub(crate) trust_streak: Option<i16>,
+    /// 最新月營收月份（`YYYY-MM`）；沒有或超過 2 個月沒更新時為 `null`，以下兩個營收欄位同。
+    pub(crate) revenue_month: Option<String>,
+    /// 最新月營收年增率（%）。
+    pub(crate) revenue_yoy_percent: Option<f64>,
+    /// 最新月營收起往前連續年減的月數（最多看 12 個月；0 代表最新一個月沒有年減）。
+    pub(crate) revenue_decline_months: Option<u8>,
+    /// 最近一季（Yahoo 單季財報）期間，如 `2026-Q2`；沒有、落後超過 2 季或屬於金融保險業（營收口徑
+    /// 不同，三率沒有可比性）時為 `null`，以下四個三率欄位同。
+    pub(crate) margin_period: Option<String>,
+    /// 最近一季毛利率（%）。
+    pub(crate) gross_margin_percent: Option<f64>,
+    /// 最近一季營業利益率（%）。
+    pub(crate) operating_margin_percent: Option<f64>,
+    /// 最近一季稅後淨利率（%）。
+    pub(crate) net_margin_percent: Option<f64>,
+    /// 三率與去年同季相比的方向；去年同季查不到時為 `null`。
+    #[schema(value_type = Option<PortfolioMarginTrendValue>)]
+    pub(crate) margins_trend: Option<String>,
+    /// 基本面警示：營收連續 3 個月以上年減、三率三降、營業虧損；沒有時為空陣列。
+    #[schema(value_type = Vec<PortfolioWarningValue>)]
+    pub(crate) warnings: Vec<String>,
 }
 
 impl From<HoldingSummary> for PortfolioHolding {
@@ -125,6 +192,15 @@ impl From<HoldingSummary> for PortfolioHolding {
             rs_score: None,
             foreign_streak: None,
             trust_streak: None,
+            revenue_month: None,
+            revenue_yoy_percent: None,
+            revenue_decline_months: None,
+            margin_period: None,
+            gross_margin_percent: None,
+            operating_margin_percent: None,
+            net_margin_percent: None,
+            margins_trend: None,
+            warnings: Vec::new(),
         }
     }
 }
@@ -140,6 +216,8 @@ pub(crate) struct PortfolioSummaryResponse {
     pub(crate) rs_as_of: Option<String>,
     /// 各持股 `foreign_streak`、`trust_streak` 的資料日（每晚 21:50 入庫）；查無籌碼資料時為 `null`。
     pub(crate) chip_as_of: Option<String>,
+    /// 有基本面警示（`holdings[].warnings` 不為空）的檔數。
+    pub(crate) warning_symbols: usize,
     /// 持有檔數。
     pub(crate) symbols: usize,
     /// 總市值（只計有報價的部位）。
@@ -174,6 +252,7 @@ impl PortfolioSummaryResponse {
             data_as_of,
             rs_as_of: None,
             chip_as_of: None,
+            warning_symbols: 0,
             symbols: summary.symbols,
             market_value: summary.market_value,
             cost: summary.cost,

@@ -529,6 +529,21 @@ pub enum MarginTrend {
     Mixed,
 }
 
+impl MarginTrend {
+    /// 依三率對去年同季的變化（正為上升）判斷方向；任一率無法比較（`None`）時為 `None`。
+    pub fn classify<T: PartialOrd + Default>(changes: [Option<T>; 3]) -> Option<Self> {
+        let changes: Vec<T> = changes.into_iter().collect::<Option<_>>()?;
+        let zero = T::default();
+        Some(if changes.iter().all(|change| *change > zero) {
+            Self::AllUp
+        } else if changes.iter().all(|change| *change < zero) {
+            Self::AllDown
+        } else {
+            Self::Mixed
+        })
+    }
+}
+
 impl HoldingFinancialAlert {
     /// 三率（毛利率、營業利益率、稅後淨利率）對去年同季的變化（百分點），依序排列；某一率本季或
     /// 去年同季查不到、或為 0（來源沒有提供）時該項為 `None`。
@@ -547,15 +562,7 @@ impl HoldingFinancialAlert {
 
     /// 三率與去年同季相比的方向；任一率無法比較時為 `None`。
     pub fn margin_trend(&self) -> Option<MarginTrend> {
-        let changes = self.margin_changes();
-        let changes: Vec<Decimal> = changes.into_iter().collect::<Option<_>>()?;
-        Some(if changes.iter().all(|change| *change > Decimal::ZERO) {
-            MarginTrend::AllUp
-        } else if changes.iter().all(|change| *change < Decimal::ZERO) {
-            MarginTrend::AllDown
-        } else {
-            MarginTrend::Mixed
-        })
+        MarginTrend::classify(self.margin_changes())
     }
 }
 

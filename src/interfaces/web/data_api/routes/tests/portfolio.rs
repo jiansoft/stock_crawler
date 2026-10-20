@@ -66,6 +66,29 @@ async fn portfolio_summary_endpoint_db_semantics() {
         .execute(pool)
         .await
         .expect("種入 financial_health");
+    // 營收：上個月起連 3 個月年減（−5、−3、−1），第 4 個月年增；財報：上一季營業虧損且三率都比去年同季低。
+    let month_ord = today.year() * 12 + today.month0() as i32;
+    for (back, yoy) in [(1, -5), (2, -3), (3, -1), (4, 2)] {
+        let ord = month_ord - back;
+        sqlx::query(r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "ComparedWithLastYearSameMonth") VALUES ($1, $1, $2, $3)"#)
+            .bind(SYMBOL)
+            .bind(i64::from((ord / 12) * 100 + ord % 12 + 1))
+            .bind(Decimal::from(yoy))
+            .execute(pool)
+            .await
+            .expect("種入月營收");
+    }
+    let quarter_ord = today.year() * 4 + (today.month0() / 3) as i32 - 1;
+    let (margin_year, margin_quarter) = (quarter_ord / 4, quarter_ord % 4 + 1);
+    sqlx::query(
+        "INSERT INTO income_statement (stock_symbol, fiscal_year, period_type, quarter, source, revenue, gross_profit, operating_profit, net_income)          VALUES ($1, $2, 'single', $3, 'yahoo', 100, 30, -2, 1), ($1, $2 - 1, 'single', $3, 'yahoo', 100, 35, 5, 3)",
+    )
+    .bind(SYMBOL)
+    .bind(margin_year)
+    .bind(format!("Q{margin_quarter}"))
+    .execute(pool)
+    .await
+    .expect("種入損益表");
 
     let (status, json) = get(&path).await;
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -103,6 +126,43 @@ async fn portfolio_summary_endpoint_db_semantics() {
         assert!(json.get(field).is_some(), "{field}");
     }
     assert_eq!(json["industries"][0]["industry_id"], 1);
+    let last_month = month_ord - 1;
+    assert_eq!(
+        holding["revenue_month"],
+        format!("{:04}-{:02}", last_month / 12, last_month % 12 + 1)
+    );
+    assert_eq!(holding["revenue_yoy_percent"], -5.0);
+    assert_eq!(holding["revenue_decline_months"], 3);
+    assert_eq!(
+        holding["margin_period"],
+        format!("{margin_year}-Q{margin_quarter}")
+    );
+    assert_eq!(
+        (
+            holding["gross_margin_percent"].clone(),
+            holding["operating_margin_percent"].clone(),
+            holding["net_margin_percent"].clone()
+        ),
+        (30.0.into(), (-2.0).into(), 1.0.into())
+    );
+    assert_eq!(holding["margins_trend"], "all_down");
+    assert_eq!(
+        holding["warnings"],
+        serde_json::json!(["revenue_decline", "margins_all_down", "operating_loss"])
+    );
+    assert_eq!(json["warning_symbols"], 1);
+    // 金融保險業不取三率：只剩營收警示。
+    sqlx::query("UPDATE stocks SET stock_industry_id = 17 WHERE stock_symbol = $1")
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("改為金融保險業");
+    let (_, json) = get(&path).await;
+    let holding = &json["holdings"][0];
+    assert!(holding["margin_period"].is_null(), "{holding}");
+    assert!(holding["operating_margin_percent"].is_null(), "{holding}");
+    assert!(holding["margins_trend"].is_null(), "{holding}");
+    assert_eq!(holding["warnings"], serde_json::json!(["revenue_decline"]));
 
     let (status, _) = get("/api/v1/portfolio/summary?member_id=-1").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
