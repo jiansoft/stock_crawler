@@ -3,7 +3,7 @@
 use super::super::signal_history::chip_streak_ctes;
 
 #[cfg(doc)]
-use super::{ETF_BENCHMARK, select_holdings};
+use super::{ETF_BENCHMARK, portfolio::select_holdings};
 
 /// `$1`（含）之前最近一個有相對強度的交易日；`$1` 為 `NULL` 時取最新。
 pub(super) const LATEST_RS_DATE_SQL: &str = r#"
