@@ -10,8 +10,13 @@ fn day(d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(1994, 5, d).expect("固定日期合法")
 }
 
-/// 刪除種入的加權指數與市場廣度。
+/// 刪除種入的加權指數、市場廣度與估值。
 async fn cleanup(pool: &sqlx::PgPool) {
+    let _ = sqlx::query("DELETE FROM daily_market_valuation WHERE date BETWEEN $1 AND $2")
+        .bind(day(1))
+        .bind(day(31))
+        .execute(pool)
+        .await;
     let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date BETWEEN $1 AND $2")
         .bind(day(1))
         .bind(day(31))
@@ -68,6 +73,21 @@ async fn market_regime_endpoint_db_semantics() {
         .await
         .expect("種入市場廣度");
     }
+    // 估值：合計（id 0）05-02 本益比 15、05-03 為 16；05-04 只有上市列（id 2），不讀。
+    for (d, market_id, pe, pb) in [(2, 0, "15", "1.5"), (3, 0, "16", "1.6"), (4, 2, "30", "3")] {
+        sqlx::query(
+            "INSERT INTO daily_market_valuation
+                 (date, stock_exchange_market_id, median_pe, median_pb, pe_samples, pb_samples)
+             VALUES ($1, $2, $3::numeric, $4::numeric, 100, 100)",
+        )
+        .bind(day(d))
+        .bind(market_id)
+        .bind(pe)
+        .bind(pb)
+        .execute(pool)
+        .await
+        .expect("種入估值");
+    }
 
     // 05-06 沒有 TAIEX：取之前最近的 05-04。
     let (status, json) = get("/api/v1/market/regime?date=1994-05-06").await;
@@ -100,12 +120,31 @@ async fn market_regime_endpoint_db_semantics() {
         })
     );
 
+    // 估值取資料日（05-04）之前最近的合計列 05-03；只有兩天，5 日前為 null。
+    assert_eq!(
+        json["valuation"],
+        serde_json::json!({
+            "date": "1994-05-03",
+            "median_pe": 16.0,
+            "pe_percentile_5y": 100.0,
+            "median_pe_5d_ago": null,
+            "median_pb": 1.6,
+            "pb_percentile_5y": 100.0,
+        })
+    );
+
     let (_, json) = get("/api/v1/market/regime?date=1994-05-03").await;
     assert_eq!(json["close"], 110.0);
     // 05-02 之前沒有加權指數；05-02 的廣度只有自己一天。
     let (_, json) = get("/api/v1/market/regime?date=1994-05-02").await;
     assert_eq!(json["breadth"]["above_ma60_percent"], 25.0);
     assert_eq!(json["breadth"]["new_highs_5d"], 1);
+    assert_eq!(json["valuation"]["median_pe"], 15.0);
+    // 沒有估值資料時為 null，不影響其他欄位。
+    cleanup_valuation(pool).await;
+    let (status, json) = get("/api/v1/market/regime?date=1994-05-03").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert!(json["valuation"].is_null(), "{json}");
     let (status, _) = get("/api/v1/market/regime?date=1994-5-3").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     let (status, _) = get("/api/v1/market/regime?date=1900-01-01").await;
@@ -116,4 +155,13 @@ async fn market_regime_endpoint_db_semantics() {
         .await
         .expect("清除 TPEx");
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// 只刪除種入的估值，驗證沒有估值時的回應。
+async fn cleanup_valuation(pool: &sqlx::PgPool) {
+    let _ = sqlx::query("DELETE FROM daily_market_valuation WHERE date BETWEEN $1 AND $2")
+        .bind(day(1))
+        .bind(day(31))
+        .execute(pool)
+        .await;
 }
