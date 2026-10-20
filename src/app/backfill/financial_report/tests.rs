@@ -7,7 +7,7 @@ use super::*;
 use crate::{
     core::declare::Quarter,
     domain::financial::statement::{
-        BalanceSheet, CashFlowStatement, IncomeStatement, StatementPeriod,
+        BalanceSheet, CashFlowStatement, IncomeStatement, LaggingStatement, StatementPeriod,
     },
     infra::crawler::yahoo::dividend::YahooPageNotFoundError,
 };
@@ -33,11 +33,28 @@ impl FinancialReportRepository for FakeRepository {
         self.record("cash_flow", statements.len())
     }
 
-    async fn fetch_lagging_symbols(&self, published_within_days: i32) -> Result<Vec<String>> {
-        assert_eq!(published_within_days, PRIORITY_LOOKBACK_DAYS);
-        self.lagging
+    async fn fetch_lagging_statements(
+        &self,
+        published_within_days: i32,
+        min_age_days: i32,
+    ) -> Result<Vec<LaggingStatement>> {
+        assert_eq!(
+            (published_within_days, min_age_days),
+            (PRIORITY_LOOKBACK_DAYS, 0)
+        );
+        let symbols = self
+            .lagging
             .clone()
-            .ok_or_else(|| anyhow!("落後名單測試失敗"))
+            .ok_or_else(|| anyhow!("落後名單測試失敗"))?;
+        Ok(symbols
+            .into_iter()
+            .map(|stock_symbol| LaggingStatement {
+                stock_symbol,
+                fiscal_year: 2026,
+                quarter: "Q3".to_owned(),
+                published_on: chrono::NaiveDate::from_ymd_opt(2026, 11, 10).expect("date"),
+            })
+            .collect())
     }
 }
 

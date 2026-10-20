@@ -20,6 +20,8 @@
 //! 9. 未來報酬（整張表）：基準日有兩成以上「長天期有值、短天期是空的」，代表回補的結束日沒涵蓋到
 //!    （2026-10 曾發現 2022 年的 5／20／60 日報酬缺了 45 萬列，訊號績效默默少了樣本）。
 //! 10. 籌碼連續天數：`chip_daily` 的連續買賣超天數是 NULL（每日入庫後的重算失敗）。
+//! 11. 財報落後：官方季報公布滿 [`LAGGING_MIN_AGE_DAYS`] 天（一年內）的上市櫃股票，Yahoo／BigGo 單季
+//!     損益表還沒有那一季（季報期優先採集也沒追上，選股、回測與持股健檢會用到舊一季）。
 //!
 //! 全部正常時也會發一則簡短的週報，用來確認檢查本身有在跑。
 
@@ -31,10 +33,18 @@ use chrono::{Datelike, Days, Local, NaiveDate, Weekday};
 use super::closing;
 use crate::{
     core::{alert, util::text},
-    domain::health::{
-        DataHealthRepository, DataHealthSnapshot, ForwardReturnGap, ValuationRatioZeroCount,
+    domain::{
+        financial::{repository::FinancialReportRepository, statement::LaggingStatement},
+        health::{
+            DataHealthRepository, DataHealthSnapshot, ForwardReturnGap, ValuationRatioZeroCount,
+        },
     },
-    infra::{crawler::twse, database::repository::data_health::PgDataHealthRepository},
+    infra::{
+        crawler::twse,
+        database::repository::{
+            data_health::PgDataHealthRepository, financial_report::PgFinancialReportRepository,
+        },
+    },
 };
 
 /// 檢查最近幾個日曆日（含今天）。
@@ -54,6 +64,15 @@ const PE_ZERO_LIMIT_PERCENT: i64 = 60;
 
 /// 未來報酬缺漏最多列出幾個基準日，其餘只計數。
 const FORWARD_RETURN_GAP_LISTED: usize = 5;
+
+/// 官方季報公布滿這麼多天、損益表仍沒有那一季才算落後（Yahoo 通常 1～2 天內更新）。
+const LAGGING_MIN_AGE_DAYS: i32 = 7;
+
+/// 財報落後只看一年內公布的官方季報。
+const LAGGING_LOOKBACK_DAYS: i32 = 365;
+
+/// 財報落後最多列出幾檔，其餘只計數。
+const LAGGING_LISTED: usize = 10;
 
 /// 單一檢查項目的結果。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +116,8 @@ pub async fn build_report(today: NaiveDate) -> Result<String> {
         .fetch_snapshot(baseline_from, from, today, today.year())
         .await?;
 
-    let checks = evaluate(&snapshot, from, today, holidays.as_deref());
+    let mut checks = evaluate(&snapshot, from, today, holidays.as_deref());
+    checks.push(lagging_check(&PgFinancialReportRepository::new()).await);
     let problems = checks
         .iter()
         .filter(|check| !check.problems.is_empty())
@@ -340,6 +360,52 @@ fn forward_return_gap_problems(gaps: &[ForwardReturnGap]) -> Vec<String> {
 ///
 /// 通知管道以 MarkdownV2 發送，週報本身沒有格式標記，因此整則跳脫保留字元；
 /// 日期的 `-` 沒跳脫時 Telegram 會整則拒收（400）。
+/// 財報落後項目：查詢官方季報公布已久、損益表仍沒有那一季的股票。
+async fn lagging_check(repo: &impl FinancialReportRepository) -> Check {
+    let lagging = match repo
+        .fetch_lagging_statements(LAGGING_LOOKBACK_DAYS, LAGGING_MIN_AGE_DAYS)
+        .await
+    {
+        Ok(lagging) => Some(lagging),
+        Err(why) => {
+            tracing::warn!("查詢財報落後失敗: {why:#}");
+            None
+        }
+    };
+    Check::new("財報落後", lagging_problems(lagging.as_deref()))
+}
+
+/// 官方季報公布已久、損益表仍沒有那一季的股票；查詢失敗（`None`）本身也是問題。
+fn lagging_problems(lagging: Option<&[LaggingStatement]>) -> Vec<String> {
+    let Some(lagging) = lagging else {
+        return vec!["查詢失敗，見 warn 日誌".to_owned()];
+    };
+    if lagging.is_empty() {
+        return Vec::new();
+    }
+    let mut listed: Vec<String> = lagging
+        .iter()
+        .take(LAGGING_LISTED)
+        .map(|statement| {
+            format!(
+                "{} {}{}（{} 公布）",
+                statement.stock_symbol,
+                statement.fiscal_year,
+                statement.quarter,
+                statement.published_on.format("%m-%d")
+            )
+        })
+        .collect();
+    if lagging.len() > LAGGING_LISTED {
+        listed.push(format!("…共 {} 檔", lagging.len()));
+    }
+    vec![format!(
+        "{} 檔官方季報已公布 {LAGGING_MIN_AGE_DAYS} 天以上、損益表還沒有那一季：{}",
+        lagging.len(),
+        listed.join("、")
+    )]
+}
+
 fn report(from: NaiveDate, to: NaiveDate, checks: &[Check]) -> String {
     let problems = checks
         .iter()
