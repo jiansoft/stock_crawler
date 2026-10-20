@@ -198,6 +198,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::market_regime),
         )
         .route(
+            "/market/valuation",
+            axum::routing::get(handlers::market_valuation),
+        )
+        .route(
             "/market/cagr-ranking",
             axum::routing::get(handlers::cagr_ranking),
         )
