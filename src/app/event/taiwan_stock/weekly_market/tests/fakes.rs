@@ -1,7 +1,10 @@
 //! 每週市場摘要測試用的假倉儲與固定資料。
 
 use super::*;
-use crate::domain::portfolio::health::HoldingFundamentals;
+use crate::domain::portfolio::{
+    chip::{BrokerPeriodNet, HoldingBrokerQuery},
+    health::HoldingFundamentals,
+};
 
 /// 回傳固定加權指數收盤與市場廣度的假倉儲；`fail` 時指數查詢失敗，`breadth_fail` 時廣度查詢失敗。
 #[derive(Default)]
@@ -245,18 +248,37 @@ pub(super) fn name(symbol: &str) -> String {
     .to_owned()
 }
 
-/// 回傳固定持股基本面的假倉儲；`fail` 時查詢失敗。
+/// 回傳固定持股基本面與主力期間合計的假倉儲；`fail` 時查詢失敗。
+#[derive(Default)]
 pub(super) struct FakePortfolio {
     pub(super) fundamentals: Vec<HoldingFundamentals>,
+    pub(super) brokers: Vec<BrokerPeriodNet>,
     pub(super) fail: bool,
 }
 
 impl FakePortfolio {
     pub(super) fn failing() -> Self {
         Self {
-            fundamentals: Vec::new(),
             fail: true,
+            ..Self::default()
         }
+    }
+}
+
+#[async_trait]
+impl HoldingBrokerQuery for FakePortfolio {
+    async fn fetch_broker_period(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+        symbols: &[String],
+    ) -> Result<Vec<BrokerPeriodNet>> {
+        assert_eq!((from, to), (day(12), day(16)), "沿用法人一段的期間");
+        assert_eq!(symbols, ["1101", "2317", "2330", "2454"]);
+        if self.fail {
+            return Err(anyhow!("broker down"));
+        }
+        Ok(self.brokers.clone())
     }
 }
 
@@ -327,6 +349,6 @@ pub(super) fn portfolio() -> FakePortfolio {
     };
     FakePortfolio {
         fundamentals: vec![item("2317", 3.0), item("2330", -2.5)],
-        fail: false,
+        ..FakePortfolio::default()
     }
 }

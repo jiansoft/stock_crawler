@@ -233,5 +233,30 @@ pub trait HoldingChipQuery: Send + Sync {
     async fn fetch_holding_chips(&self, date: NaiveDate) -> Result<Vec<HoldingChip>>;
 }
 
+/// 一檔股票在一段期間內的主力（買賣超前幾名分點）買賣超合計。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokerPeriodNet {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 期間內主力買賣超合計（張，買超為正）。
+    pub main_net: i64,
+    /// 主力買超的天數。
+    pub buy_days: i64,
+    /// 主力賣超的天數。
+    pub sell_days: i64,
+}
+
+/// 持股主力進出的期間彙總（每週市場摘要用）。
+#[async_trait]
+pub trait HoldingBrokerQuery: Send + Sync {
+    /// `from`～`to`（含）期間 `symbols` 的主力買賣超合計，依代號排序；期間內沒有主力資料的股票不回傳。
+    async fn fetch_broker_period(
+        &self,
+        from: NaiveDate,
+        to: NaiveDate,
+        symbols: &[String],
+    ) -> Result<Vec<BrokerPeriodNet>>;
+}
+
 #[cfg(test)]
 mod tests;

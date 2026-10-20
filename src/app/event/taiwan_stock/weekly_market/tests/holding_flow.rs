@@ -1,8 +1,11 @@
 //! 持股法人一段：只篩持股、張數四捨五入、佔量與連續天數、依金額排序與各段降級。
 
-use super::super::holding_flow::{HoldingFlowSection, holding_flow_section, lines};
+use super::super::holding_flow::{
+    HoldingFlowSection, broker_flow_section, holding_flow_section, lines,
+};
 use super::fakes::*;
 use super::*;
+use crate::domain::portfolio::chip::BrokerPeriodNet;
 
 /// 持股的一筆法人淨買賣：淨股數、估計金額、期間成交量與連續天數。
 fn held(symbol: &str, net_shares: i64, amount: f64, volume: Option<f64>, streak: i32) -> StockFlow {
@@ -124,4 +127,111 @@ async fn run_includes_holding_flows() {
     .await
     .expect("其他段仍有內容");
     assert!(!message.contains("持股外資"), "{message}");
+}
+
+fn broker(symbol: &str, main_net: i64, buy_days: i64, sell_days: i64) -> BrokerPeriodNet {
+    BrokerPeriodNet {
+        stock_symbol: symbol.to_owned(),
+        main_net,
+        buy_days,
+        sell_days,
+    }
+}
+
+/// 主力一段：名稱、佔量與排序金額借用法人資料；找不到法人資料時以代號為名、不算佔量；合計 0 的略過。
+#[test]
+fn broker_section_borrows_volume_and_price() {
+    let rows = vec![
+        StockFlow {
+            closing_price: Some(1000.0),
+            ..held("2330", 0, 0.0, Some(50_000_000.0), 0)
+        },
+        StockFlow {
+            closing_price: Some(100.0),
+            ..held("2317", 0, 0.0, None, 0)
+        },
+    ];
+    let nets = [
+        broker("2317", 9_000, 4, 1),
+        broker("2330", 2_000, 3, 2),
+        broker("2454", -300, 0, 2),
+        broker("1101", 0, 1, 1),
+    ];
+    let section = broker_flow_section(period(), &nets, &rows);
+    assert_eq!(section.label, "主力");
+    let order: Vec<&str> = section
+        .flows
+        .iter()
+        .map(|flow| flow.stock_symbol.as_str())
+        .collect();
+    assert_eq!(
+        order,
+        ["2330", "2317", "2454"],
+        "依金額：2330 20 億、2317 9 億"
+    );
+    assert_eq!(
+        lines(&section),
+        [
+            String::new(),
+            "持股主力近 5 日買賣超（2026-10-12～2026-10-16）".to_owned(),
+            "• 買超：2330 2330名 +2000 張（佔量 +4.0%，買超 3 日、賣超 2 日）、2317 2317名 +9000 張（買超 4 日、賣超 1 日）".to_owned(),
+            "• 賣超：2454 2454 -300 張（買超 0 日、賣超 2 日）".to_owned(),
+        ]
+    );
+}
+
+/// run 以法人一段的期間查主力合計，接在法人之後；查詢失敗只少這一段。
+#[tokio::test]
+async fn run_includes_holding_broker_flows() {
+    let mut chip = chip();
+    chip.flows.get_mut("foreign").expect("有外資").push(held(
+        "2330",
+        3_000_000,
+        4e9,
+        Some(30_000_000.0),
+        2,
+    ));
+    let portfolio = FakePortfolio {
+        brokers: vec![broker("2330", -1_500, 1, 3)],
+        ..portfolio()
+    };
+    let message = run(
+        &quote(),
+        &chip,
+        &index(),
+        &FakeValuation::default(),
+        &portfolio,
+        day(17),
+        &holdings(),
+        None,
+    )
+    .await
+    .expect("有內容");
+    let header = esc("持股主力近 5 日買賣超（2026-10-12～2026-10-16）");
+    let sell = esc("• 賣超：2330 2330名 -1500 張（佔量 -5.0%，買超 1 日、賣超 3 日）");
+    assert!(message.contains(&header), "{message}");
+    assert!(message.contains(&sell), "{message}");
+    assert!(
+        message.find(&esc("持股外資")) < message.find(&header),
+        "主力接在法人之後：{message}"
+    );
+
+    let failing = FakePortfolio {
+        brokers: vec![broker("2330", -1_500, 1, 3)],
+        ..FakePortfolio::failing()
+    };
+    let message = run(
+        &quote(),
+        &chip,
+        &index(),
+        &FakeValuation::default(),
+        &failing,
+        day(17),
+        &holdings(),
+        None,
+    )
+    .await
+    .expect("其他段仍有內容");
+    assert!(!message.contains("持股主力"), "{message}");
+    assert!(message.contains(&esc("持股外資")), "{message}");
 }
