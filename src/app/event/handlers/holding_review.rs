@@ -31,6 +31,7 @@ use crate::domain::foreign_holding::entity::{
     ForeignHoldingDirection, HoldingForeignHoldingAlert, SIGNIFICANT_CHANGE_20D_PERCENTAGE_POINTS,
 };
 use crate::domain::foreign_holding::repository::ForeignHoldingRepository;
+use crate::domain::portfolio::health::REVENUE_DECLINE_WARNING_MONTHS;
 use crate::infra::database::repository::financial::PgFinancialRepository;
 use crate::infra::database::repository::foreign_holding::PgForeignHoldingRepository;
 use crate::infra::nosql::redis::{CLIENT, RedisError};
@@ -342,14 +343,15 @@ impl EventDispatcher {
         for alert in alerts {
             let _ = writeln!(
                 &mut msg,
-                "    {}{} {}{} 營收︰{} 年增︰{}% 月增︰{}%",
+                "    {}{} {}{} 營收︰{} 年增︰{}% 月增︰{}%{}",
                 Self::new_mark(&alert.stock_symbol, new_symbols),
                 Self::stock_link(&alert.stock_symbol),
                 Self::format_industry(alert),
                 text::escape_markdown_v2(&alert.stock_name),
                 text::escape_markdown_v2(format_decimal_with_commas(alert.monthly)),
                 text::escape_markdown_v2(Self::with_sign(alert.compared_with_last_year_same_month)),
-                text::escape_markdown_v2(Self::with_sign(alert.compared_with_last_month))
+                text::escape_markdown_v2(Self::with_sign(alert.compared_with_last_month)),
+                Self::revenue_marks(alert)
             );
             let _ = writeln!(
                 &mut msg,
@@ -363,6 +365,17 @@ impl EventDispatcher {
         }
 
         msg
+    }
+
+    /// 當月營收的標記：創歷史新高（🏆），或連續年減達持股健檢門檻（📉連續 N 月年減）；都沒有時回傳空字串。
+    fn revenue_marks(alert: &HoldingRevenueAlert) -> String {
+        if alert.is_record_high() {
+            return " 🏆創歷史新高".to_owned();
+        }
+        if alert.yoy_decline_months >= i64::from(REVENUE_DECLINE_WARNING_MONTHS) {
+            return format!(" 📉連續 {} 月年減", alert.yoy_decline_months);
+        }
+        String::new()
     }
 
     /// 產業分類名稱，後面補一個空白接在股名前；查無分類時回傳空字串。
