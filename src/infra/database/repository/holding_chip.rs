@@ -18,6 +18,11 @@ use crate::domain::portfolio::chip::{
 };
 use crate::infra::database;
 
+/// `$1`（含）之前最近 `$2` 個有主力資料的交易日，由新到舊。
+const BROKER_DATES_SQL: &str = r#"
+SELECT DISTINCT "date" FROM broker_flow WHERE "date" <= $1 ORDER BY "date" DESC LIMIT $2
+"#;
+
 /// `$1`～`$2` 期間、`$3` 代號清單的主力買賣超合計與買超、賣超天數。
 const BROKER_PERIOD_SQL: &str = r#"
 SELECT stock_symbol,
@@ -153,6 +158,15 @@ impl HoldingChipQuery for PgPortfolioRepository {
 
 #[async_trait]
 impl HoldingBrokerQuery for PgPortfolioRepository {
+    async fn fetch_broker_dates(&self, until: NaiveDate, limit: usize) -> Result<Vec<NaiveDate>> {
+        sqlx::query_scalar(BROKER_DATES_SQL)
+            .bind(until)
+            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch broker flow dates")
+    }
+
     async fn fetch_broker_period(
         &self,
         from: NaiveDate,

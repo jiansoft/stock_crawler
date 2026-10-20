@@ -210,10 +210,17 @@ async fn broker_period_sums_main_net_within_the_period() {
         .expect("種入主力進出");
     }
     let symbols = ["79971", "79972"].map(str::to_owned).to_vec();
-    let nets = PgPortfolioRepository::new()
+    let repository = PgPortfolioRepository::new();
+    let nets = repository
         .fetch_broker_period(day(22), day(24), &symbols)
         .await;
+    let dates = repository.fetch_broker_dates(day(23), 2).await;
     cleanup().await;
+    assert_eq!(
+        dates.expect("查詢主力交易日"),
+        [day(23), day(22)],
+        "同一天多檔只算一次、不含之後的日子"
+    );
     let nets = nets.expect("查詢期間主力合計");
     assert_eq!(
         nets,
