@@ -17,15 +17,17 @@
 //! - 持股（普通股）的 RS 與 [`WEEK_DAYS`] 個交易日前相比上升、下降最多的幾檔。
 //! - 外資、投信近 [`WEEK_DAYS`] 個交易日在持股的累計買賣超，買超、賣超最多的幾檔（沿用產業資金一段
 //!   已載入的個股淨買賣，不另外查詢），以及同期主力（`broker_flow`）的累計買賣超。
+//! - 持股（含 ETF）近 7 天內填息的除權息，與尚未填息、離填息價最遠的幾檔（見 [`crate::domain::dividend::fill`]）。
 //! - 持股的基本面警示：營收連續年減、三率三降、營業虧損、自由現金流為負（見 [`crate::domain::portfolio::health`]）。
 //! - 有設定策略換股通知的條件時，策略這一期的換股日、本期至今報酬與 0050 對照、最好與最差的持股。
 //!
 //! 各段各自查詢，某段失敗只記錄警告並略過；都沒有資料時不發送。各段的查詢與文字在子模組
-//! [`market`]、[`industry`]、[`crossing`]、[`flows`]、[`holding`]、[`holding_flow`]、[`fundamentals`]、
+//! [`market`]、[`industry`]、[`crossing`]、[`flows`]、[`holding`]、[`holding_flow`]、[`dividend`]、[`fundamentals`]、
 //! [`strategy`]，這裡只負責排程、
 //! 查詢順序與組訊息。
 
 mod crossing;
+mod dividend;
 mod flows;
 mod fundamentals;
 mod holding;
@@ -42,6 +44,7 @@ use chrono::{Local, NaiveDate};
 
 use self::{
     crossing::{CrossingSection, crossing_section},
+    dividend::{HoldingFill, holding_fills},
     flows::{FlowSection, flow_section},
     holding::{HoldingSection, holding_moves},
     holding_flow::{broker_flow_section, holding_flow_section},
@@ -66,9 +69,9 @@ use crate::{
         },
     },
     infra::database::repository::{
-        chip::PgChipRepository, market_index::PgMarketIndexRepository,
-        market_valuation::PgMarketValuationRepository, portfolio::PgPortfolioRepository,
-        quote::PgQuoteRepository,
+        chip::PgChipRepository, dividend_fill::PgDividendFillRepository,
+        market_index::PgMarketIndexRepository, market_valuation::PgMarketValuationRepository,
+        portfolio::PgPortfolioRepository, quote::PgQuoteRepository,
     },
 };
 
@@ -92,6 +95,14 @@ pub async fn execute() -> Result<()> {
         .context("fetch holdings for weekly market summary failed")?;
     let date = Local::now().date_naive();
     let strategy = strategy_section().await;
+    // 填息看全部持股（含 ETF）；查不到持股只少這一段。
+    let fills = match holdings::active_holding_symbols().await {
+        Ok(all) => holding_fills(&PgDividendFillRepository::new(), &all, date).await,
+        Err(why) => {
+            tracing::warn!("每週市場摘要：讀取持股（含 ETF）失敗: {why:#}");
+            Vec::new()
+        }
+    };
     let message = run(
         &PgQuoteRepository::new(),
         &PgChipRepository::new(),
@@ -101,6 +112,7 @@ pub async fn execute() -> Result<()> {
         date,
         &symbols,
         strategy.as_ref(),
+        &fills,
     )
     .await;
     if let Some(message) = message {
@@ -127,6 +139,7 @@ async fn run(
     date: NaiveDate,
     symbols: &BTreeSet<String>,
     strategy: Option<&StrategySection>,
+    fills: &[HoldingFill],
 ) -> Option<String> {
     let mut market = regime_section(index, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取加權指數失敗: {why:#}");
@@ -214,6 +227,7 @@ async fn run(
         HoldingSection {
             moves: &moves,
             flows: &holding_flows,
+            fills,
             fundamentals: &fundamentals,
         },
         strategy,
@@ -273,6 +287,9 @@ fn build_message(
     lines.extend(holding::lines(holdings.moves, &stock_name));
     for section in holdings.flows {
         lines.extend(holding_flow::lines(section));
+    }
+    if let Some(date) = data_date {
+        lines.extend(dividend::lines(holdings.fills, date, &stock_name));
     }
     lines.extend(fundamentals::lines(holdings.fundamentals, &stock_name));
     if let Some(section) = strategy {
