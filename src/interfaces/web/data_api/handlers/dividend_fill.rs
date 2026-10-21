@@ -19,9 +19,6 @@ use crate::interfaces::web::data_api::dto::{
     DividendFillEvent, DividendFillParams, DividendFillResponse, DividendFillSummary, ErrorBody,
 };
 
-/// 往除權息日前多抓幾天日線，確保長假或停牌後仍找得到除權息前一日的收盤。
-const PRE_EX_LOOKBACK_DAYS: u64 = 30;
-
 /// 查詢單一股票最近幾次除權息的填息結果與統計。
 ///
 /// 只看最新收盤日（含）以前的除權息；除權息前後任一側沒有收盤的事件略過。
@@ -55,7 +52,7 @@ pub(crate) async fn dividend_fill(
 
     let outcomes: Vec<FillOutcome> = match events.last() {
         Some(oldest) => {
-            let since = oldest.ex_date - Days::new(PRE_EX_LOOKBACK_DAYS);
+            let since = oldest.ex_date - Days::new(fill::PRE_EX_LOOKBACK_DAYS);
             let closes = match repository.fetch_daily_closes(&symbol, since).await {
                 Ok(closes) => closes,
                 Err(error) => return repository_error(error),
@@ -104,7 +101,7 @@ fn select_events(
     events
 }
 
-fn into_dto(outcome: &FillOutcome, symbol: &str) -> DividendFillEvent {
+pub(super) fn into_dto(outcome: &FillOutcome, symbol: &str) -> DividendFillEvent {
     let price =
         |value: Decimal, field: &'static str| analytical_decimal_to_f64(Some(value), symbol, field);
     DividendFillEvent {
