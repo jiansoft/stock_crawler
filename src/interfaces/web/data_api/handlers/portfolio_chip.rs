@@ -1,24 +1,37 @@
 //! `/portfolio/chip` handler：持股籌碼日報。
 //!
-//! 某交易日收盤時仍持有的普通股，當天的三大法人買賣超、融資融券增減與主力進出，並依 Telegram 通知
-//! 的門檻標出達標原因（[`crate::domain::portfolio::chip`]）。屬個人持股資料。
+//! 某交易日收盤時仍持有的普通股，當天的三大法人買賣超、融資融券增減與主力進出（另附近
+//! [`BROKER_RECENT_DAYS`] 個主力交易日的累計），並依 Telegram 通知的門檻標出達標原因
+//! （[`crate::domain::portfolio::chip`]）。屬個人持股資料。
 
+use std::collections::HashMap;
+
+use anyhow::Result;
 use axum::{
     Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use chrono::NaiveDate;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use super::{error_response, parse_optional_date, repository_error, round2};
 use crate::domain::chip::BrokerNetRecord;
-use crate::domain::portfolio::chip::{ChipTradingDay, HoldingChip, HoldingChipQuery};
+use crate::domain::portfolio::chip::{
+    BrokerPeriodNet, ChipTradingDay, HoldingBrokerQuery, HoldingChip, HoldingChipQuery,
+};
 use crate::infra::database::repository::portfolio::PgPortfolioRepository;
 use crate::interfaces::web::data_api::dto::{
-    ErrorBody, PortfolioChipBroker, PortfolioChipBrokerNet, PortfolioChipItem, PortfolioChipParams,
-    PortfolioChipResponse,
+    ErrorBody, PortfolioChipBroker, PortfolioChipBrokerNet, PortfolioChipBrokerRecent,
+    PortfolioChipItem, PortfolioChipParams, PortfolioChipResponse,
 };
+
+/// 主力累計涵蓋的交易日數（含當天），與 20:40 主力進出通知相同。
+const BROKER_RECENT_DAYS: usize = 5;
+
+/// 主力累計：實際涵蓋的交易日數與各股合計。
+type BrokerRecent = (usize, Vec<BrokerPeriodNet>);
 
 /// 查詢持股籌碼日報。
 ///
@@ -44,12 +57,57 @@ pub(crate) async fn portfolio_chip(Query(params): Query<PortfolioChipParams>) ->
         },
         None => Vec::new(),
     };
-    Json(response(day, chips)).into_response()
+    let recent = match day {
+        Some(day) => match broker_recent(&repository, day.date, &chips).await {
+            Ok(recent) => recent,
+            Err(error) => return repository_error(error),
+        },
+        None => (0, Vec::new()),
+    };
+    Json(response(day, chips, recent)).into_response()
 }
 
-/// 組出回應：股換算成張、佔量取兩位小數、達標原因用代碼。
-fn response(day: Option<ChipTradingDay>, chips: Vec<HoldingChip>) -> PortfolioChipResponse {
-    let items: Vec<PortfolioChipItem> = chips.iter().map(item).collect();
+/// `date`（含）之前最近 [`BROKER_RECENT_DAYS`] 個有主力資料的交易日裡各持股的主力合計；
+/// 沒有任何主力資料時為 `(0, [])`。
+async fn broker_recent(
+    repository: &impl HoldingBrokerQuery,
+    date: NaiveDate,
+    chips: &[HoldingChip],
+) -> Result<BrokerRecent> {
+    let dates = repository
+        .fetch_broker_dates(date, BROKER_RECENT_DAYS)
+        .await?;
+    let Some(&from) = dates.last() else {
+        return Ok((0, Vec::new()));
+    };
+    let symbols: Vec<String> = chips.iter().map(|chip| chip.stock_symbol.clone()).collect();
+    let nets = repository.fetch_broker_period(from, date, &symbols).await?;
+    Ok((dates.len(), nets))
+}
+
+/// 組出回應：股換算成張、佔量取兩位小數、達標原因用代碼、附主力近日累計。
+fn response(
+    day: Option<ChipTradingDay>,
+    chips: Vec<HoldingChip>,
+    (recent_days, recent): BrokerRecent,
+) -> PortfolioChipResponse {
+    let recent: HashMap<String, BrokerPeriodNet> = recent
+        .into_iter()
+        .map(|net| (net.stock_symbol.clone(), net))
+        .collect();
+    let items: Vec<PortfolioChipItem> = chips
+        .iter()
+        .map(|chip| PortfolioChipItem {
+            broker_recent: recent
+                .get(&chip.stock_symbol)
+                .map(|net| PortfolioChipBrokerRecent {
+                    main_net: net.main_net,
+                    buy_days: net.buy_days,
+                    sell_days: net.sell_days,
+                }),
+            ..item(chip)
+        })
+        .collect();
     PortfolioChipResponse {
         date: day.map(|day| day.date.to_string()),
         previous_date: day
@@ -57,6 +115,7 @@ fn response(day: Option<ChipTradingDay>, chips: Vec<HoldingChip>) -> PortfolioCh
             .map(|date| date.to_string()),
         next_date: day.and_then(|day| day.next).map(|date| date.to_string()),
         notable: items.iter().filter(|item| !item.reasons.is_empty()).count(),
+        broker_recent_days: recent_days,
         items,
     }
 }
@@ -84,6 +143,7 @@ fn item(chip: &HoldingChip) -> PortfolioChipItem {
             buyers: broker.buyers.iter().map(broker_net).collect(),
             sellers: broker.sellers.iter().map(broker_net).collect(),
         }),
+        broker_recent: None,
         reasons: chip
             .reasons()
             .into_iter()
