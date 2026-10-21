@@ -6,6 +6,8 @@ pub mod chip;
 pub mod eps;
 /// ETF 資訊
 pub mod etf;
+/// ETF 預估淨值、折溢價與受益單位（MIS）
+pub mod etf_nav;
 // 上市除權除息預告表
 pub mod ex_dividend_announcement;
 // 上市除權除息計算結果表（已除權息的實際日期與息值）

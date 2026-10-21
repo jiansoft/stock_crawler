@@ -13,6 +13,7 @@ pub mod earnings_call;
 // 持股填息通知（除權息後收盤第一次回到除權息前一日收盤）
 pub mod dividend_fill_alert;
 /// 除息日的事件
+pub mod etf_premium_alert;
 pub mod ex_dividend;
 // 持股財務體質（F 分數）變化通知
 pub mod health_alert;

@@ -16,6 +16,8 @@
 
 // 股利數據採集子模組
 pub mod dividend;
+/// ETF 基本資料、持股與淨值報酬
+pub mod etf;
 // 財務報表（損益表、資產負債表、現金流量表）採集子模組
 pub mod financial_statement;
 /// 即時報價與行情採集子模組
