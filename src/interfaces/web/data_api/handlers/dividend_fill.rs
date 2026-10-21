@@ -1,6 +1,6 @@
 //! `/stocks/{symbol}/dividend-fill` handler：最近幾次除權息的填息天數。
 //!
-//! 除權息事件來自 `dividend`，收盤價來自 `DailyQuotes`；計算規則在
+//! 除權息事件與收盤價由 [`PgDividendFillRepository`] 讀取（與持股填息通知共用）；計算規則在
 //! [`crate::domain::dividend::fill`]。
 
 use axum::{
@@ -12,52 +12,15 @@ use axum::{
 use chrono::{Days, NaiveDate};
 use rust_decimal::Decimal;
 
-use super::{analytical_decimal_to_f64, database_error, ensure_stock_exists, error_response};
-use crate::domain::dividend::fill::{self, DailyClose, ExRightEvent, FillOutcome};
-use crate::infra::database;
+use super::{analytical_decimal_to_f64, ensure_stock_exists, error_response, repository_error};
+use crate::domain::dividend::fill::{self, DividendFillQuery, ExRightEvent, FillOutcome};
+use crate::infra::database::repository::dividend_fill::PgDividendFillRepository;
 use crate::interfaces::web::data_api::dto::{
     DividendFillEvent, DividendFillParams, DividendFillResponse, DividendFillSummary, ErrorBody,
 };
 
 /// 往除權息日前多抓幾天日線，確保長假或停牌後仍找得到除權息前一日的收盤。
 const PRE_EX_LOOKBACK_DAYS: u64 = 30;
-
-/// 每個除權息日一列。
-///
-/// 同一個除權息日可能有多列：季配股的年度彙總列、或同一期以季別與月別各記一次。
-/// 每個日期只取一列，有各期列時不取彙總列（彙總列的金額是全年加總）。
-const EX_RIGHT_EVENTS_SQL: &str = r#"
-WITH cash AS (
-    SELECT DISTINCT ON ("ex-dividend_date1") "ex-dividend_date1" AS ex_date, cash_dividend
-    FROM dividend
-    WHERE security_code = $1 AND "ex-dividend_date1" ~ '^\d{4}-\d{2}-\d{2}$' AND cash_dividend > 0
-    ORDER BY "ex-dividend_date1", (quarter = ''), cash_dividend DESC
-), stock AS (
-    SELECT DISTINCT ON ("ex-dividend_date2") "ex-dividend_date2" AS ex_date, stock_dividend
-    FROM dividend
-    WHERE security_code = $1 AND "ex-dividend_date2" ~ '^\d{4}-\d{2}-\d{2}$' AND stock_dividend > 0
-    ORDER BY "ex-dividend_date2", (quarter = ''), stock_dividend DESC
-)
-SELECT ex_date, COALESCE(cash.cash_dividend, 0) AS cash_dividend,
-    COALESCE(stock.stock_dividend, 0) AS stock_dividend
-FROM cash FULL JOIN stock USING (ex_date)
-ORDER BY ex_date DESC
-"#;
-
-#[derive(sqlx::FromRow)]
-struct EventRow {
-    ex_date: String,
-    cash_dividend: Decimal,
-    stock_dividend: Decimal,
-}
-
-#[derive(sqlx::FromRow)]
-struct CloseRow {
-    #[sqlx(rename = "Date")]
-    date: NaiveDate,
-    #[sqlx(rename = "ClosingPrice")]
-    close: Decimal,
-}
 
 /// 查詢單一股票最近幾次除權息的填息結果與統計。
 ///
@@ -79,49 +42,24 @@ pub(crate) async fn dividend_fill(
     if let Some(response) = ensure_stock_exists(&symbol).await {
         return response;
     }
-    let pool = database::get_connection();
+    let repository = PgDividendFillRepository::new();
 
-    let latest_quote: Option<NaiveDate> = match sqlx::query_scalar(
-        r#"SELECT max("Date") FROM "DailyQuotes" WHERE stock_symbol = $1"#,
-    )
-    .bind(&symbol)
-    .fetch_one(pool)
-    .await
-    {
+    let latest_quote = match repository.fetch_latest_quote_date(&symbol).await {
         Ok(date) => date,
-        Err(error) => return database_error(error),
+        Err(error) => return repository_error(error),
     };
-    let rows: Vec<EventRow> = match sqlx::query_as(EX_RIGHT_EVENTS_SQL)
-        .bind(&symbol)
-        .fetch_all(pool)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(error) => return database_error(error),
+    let events = match repository.fetch_ex_right_events(&symbol).await {
+        Ok(events) => select_events(events, latest_quote, usize::from(limit)),
+        Err(error) => return repository_error(error),
     };
-    let events = select_events(rows, latest_quote, usize::from(limit));
 
     let outcomes: Vec<FillOutcome> = match events.last() {
         Some(oldest) => {
             let since = oldest.ex_date - Days::new(PRE_EX_LOOKBACK_DAYS);
-            let closes: Vec<CloseRow> = match sqlx::query_as(
-                r#"SELECT "Date", "ClosingPrice" FROM "DailyQuotes" WHERE stock_symbol = $1 AND "Date" >= $2 ORDER BY "Date""#,
-            )
-            .bind(&symbol)
-            .bind(since)
-            .fetch_all(pool)
-            .await
-            {
-                Ok(rows) => rows,
-                Err(error) => return database_error(error),
+            let closes = match repository.fetch_daily_closes(&symbol, since).await {
+                Ok(closes) => closes,
+                Err(error) => return repository_error(error),
             };
-            let closes: Vec<DailyClose> = closes
-                .into_iter()
-                .map(|row| DailyClose {
-                    date: row.date,
-                    close: row.close,
-                })
-                .collect();
             events
                 .into_iter()
                 .filter_map(|event| fill::fill_outcome(event, &closes))
@@ -148,25 +86,18 @@ pub(crate) async fn dividend_fill(
     .into_response()
 }
 
-/// 解析除權息日、略過格式錯誤與最新收盤日之後的事件，取最近 `limit` 次（由新到舊）。
+/// 略過最新收盤日之後（尚未除權息）的事件，取最近 `limit` 次（由新到舊）。
 fn select_events(
-    rows: Vec<EventRow>,
+    events: Vec<ExRightEvent>,
     latest_quote: Option<NaiveDate>,
     limit: usize,
 ) -> Vec<ExRightEvent> {
     let Some(latest_quote) = latest_quote else {
         return Vec::new();
     };
-    let mut events: Vec<ExRightEvent> = rows
+    let mut events: Vec<ExRightEvent> = events
         .into_iter()
-        .filter_map(|row| {
-            let ex_date = NaiveDate::parse_from_str(&row.ex_date, "%Y-%m-%d").ok()?;
-            (ex_date <= latest_quote).then_some(ExRightEvent {
-                ex_date,
-                cash_dividend: row.cash_dividend,
-                stock_dividend: row.stock_dividend,
-            })
-        })
+        .filter(|event| event.ex_date <= latest_quote)
         .collect();
     events.sort_by_key(|event| std::cmp::Reverse(event.ex_date));
     events.truncate(limit);
@@ -197,15 +128,15 @@ mod tests {
 
     use super::*;
 
-    fn row(ex_date: &str) -> EventRow {
-        EventRow {
-            ex_date: ex_date.to_owned(),
+    fn row(ex_date: &str) -> ExRightEvent {
+        ExRightEvent {
+            ex_date: NaiveDate::parse_from_str(ex_date, "%Y-%m-%d").expect("測試日期合法"),
             cash_dividend: dec!(1),
             stock_dividend: Decimal::ZERO,
         }
     }
 
-    /// 格式錯誤與最新收盤日之後（尚未除息）的事件略過，其餘由新到舊取前 limit 筆；沒有日線時為空。
+    /// 最新收盤日之後（尚未除息）的事件略過，其餘由新到舊取前 limit 筆；沒有日線時為空。
     #[test]
     fn select_events_filters_and_limits() {
         let latest = NaiveDate::from_ymd_opt(2026, 10, 8);
@@ -214,7 +145,6 @@ mod tests {
                 row("2025-06-12"),
                 row("2026-12-10"),
                 row("2026-09-16"),
-                row("2026-02-30"),
                 row("2026-06-11"),
             ]
         };

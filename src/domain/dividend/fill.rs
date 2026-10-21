@@ -6,6 +6,8 @@
 //! - **填息**：除權息日起第一個收盤價大於等於前一日收盤的交易日；除權息當日就回到算第 1 天。
 //! - 收盤價為 0（停牌、無成交）的日子不算交易日。
 
+use anyhow::Result;
+use async_trait::async_trait;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
@@ -130,6 +132,19 @@ pub fn summarize(outcomes: &[FillOutcome]) -> FillSummary {
         average_trading_days,
         median_trading_days,
     }
+}
+
+/// 填息分析的資料來源：除權息事件、日收盤與最新收盤日。
+#[async_trait]
+pub trait DividendFillQuery: Send + Sync {
+    /// 股票最新一筆日線的日期；沒有日線為 `None`。
+    async fn fetch_latest_quote_date(&self, symbol: &str) -> Result<Option<NaiveDate>>;
+
+    /// 股票的每次除權息（同一天的現金與股票股利合併），由新到舊；除權息日格式錯誤的略過。
+    async fn fetch_ex_right_events(&self, symbol: &str) -> Result<Vec<ExRightEvent>>;
+
+    /// `since`（含）起的日收盤，依日期升冪。
+    async fn fetch_daily_closes(&self, symbol: &str, since: NaiveDate) -> Result<Vec<DailyClose>>;
 }
 
 #[cfg(test)]

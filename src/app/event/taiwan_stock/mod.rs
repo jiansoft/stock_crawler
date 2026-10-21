@@ -10,6 +10,8 @@ pub mod closing;
 pub mod data_health;
 // 持股法說會通知（BigGo 整理的摘要、展望與 Q&A 重點）
 pub mod earnings_call;
+// 持股填息通知（除權息後收盤第一次回到除權息前一日收盤）
+pub mod dividend_fill_alert;
 /// 除息日的事件
 pub mod ex_dividend;
 // 持股財務體質（F 分數）變化通知
