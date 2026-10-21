@@ -138,7 +138,7 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
 /// - 「近 12 個月」以每檔 ETF 自己的最新行情日為基準（沒有行情時用今天）。
 const REFRESH_SNAPSHOT_SQL: &str = r#"
 WITH etf AS (
-    SELECT s.stock_symbol, s."Name" AS name, s.stock_exchange_market_id AS market_id,
+    SELECT s.stock_symbol, replace(s."Name", '&amp;', '&') AS name, s.stock_exchange_market_id AS market_id,
            COALESCE(q.date, CURRENT_DATE) AS ref_date
     FROM stocks AS s
     LEFT JOIN last_daily_quotes AS q ON q.stock_symbol = s.stock_symbol

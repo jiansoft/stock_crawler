@@ -68,7 +68,16 @@ pub struct Classification {
     pub themes: Vec<String>,
 }
 
-const HIGH_DIVIDEND_WORDS: &[&str] = &["高股息", "高息", "優息", "股利", "收益", "存股", "收息"];
+const HIGH_DIVIDEND_WORDS: &[&str] = &[
+    "高股息",
+    "高息",
+    "優息",
+    "股利",
+    "收益",
+    "存股",
+    "收息",
+    "填息",
+];
 
 const MARKET_CAP_WORDS: &[&str] = &[
     "台灣50",
@@ -243,6 +252,9 @@ fn is_market_cap_benchmark(benchmark: &str) -> bool {
         "發行量加權股價指數",
         "臺灣中型100指數",
         "富櫃50指數",
+        "MSCI臺灣指數",
+        "MSCI台灣指數",
+        "富時臺灣50",
     ]
     .iter()
     .any(|name| benchmark.contains(name))
@@ -314,6 +326,18 @@ mod tests {
         assert_eq!(
             classify("009816", "凱基台灣TOP", &hint).strategy,
             Strategy::MarketCap
+        );
+        let msci = ClassifyHint {
+            benchmark: "MSCI臺灣指數",
+            ..Default::default()
+        };
+        assert_eq!(
+            classify("0057", "富邦摩台", &msci).strategy,
+            Strategy::MarketCap
+        );
+        assert_eq!(
+            plain("00918", "大華優利高填息30").strategy,
+            Strategy::HighDividend
         );
     }
 
