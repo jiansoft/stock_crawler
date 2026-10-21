@@ -1,0 +1,21 @@
+//! # ETF 專區
+//!
+//! 淨值與折溢價、基本資料與分類、持股，以及以還原日線計算的含息報酬。
+//! stock_go 的 `/stock/etfs` 讀 `etf_snapshot`（由 [`EtfRepository::refresh_snapshot`] 重建）。
+
+/// 由代號、名稱與來源提示推得的分類（類型、投資地區、題材）。
+pub mod classify;
+/// ETF 實體。
+pub mod entity;
+/// 含息期間報酬與近 1 年風險指標。
+pub mod performance;
+/// ETF 倉儲合約。
+pub mod repository;
+
+pub use classify::{Classification, ClassifyHint, Strategy, classify};
+pub use entity::{
+    EtfAllocationRecord, EtfHoldingRecord, EtfNavRecord, EtfPortfolio, EtfProfileRecord,
+    PremiumPoint,
+};
+pub use performance::{EtfPerformance, compute_performance};
+pub use repository::EtfRepository;

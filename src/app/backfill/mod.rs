@@ -12,6 +12,8 @@ pub mod delisted_company;
 pub mod dividend;
 /// 調用 twse API 取得 ETF 並更新股票相關欄位
 pub mod etf;
+// ETF 專區（淨值、基本資料、持股、績效、快照）
+pub mod etf_zone;
 // 以官方開盤競價基準重算除權息日的漲跌與漲跌幅
 pub mod ex_right_change;
 // 採集 Yahoo 三大財務報表（損益表、資產負債表、現金流量表）

@@ -10,7 +10,7 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
     app::backfill::{
-        capital_reduction, chip, delisted_company, dividend, etf, financial_report,
+        capital_reduction, chip, delisted_company, dividend, etf, etf_zone, financial_report,
         financial_statement, isin, net_asset_value_per_share, official_ratio,
         qualified_foreign_institutional_investor, revenue, stock_weight,
     },
@@ -232,6 +232,19 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "通知持股填息",
             event::taiwan_stock::dividend_fill_alert::execute,
         ),
+        // 17:30（週一至週五）ETF 專區：證交所 MIS 預估淨值（投信約 17:00 前更新完）→ 補推斷分類 →
+        // 含息績效 → 重建清單頁快照；淨值抓取失敗時其餘步驟照做並告警。
+        create_job(
+            "0 30 17 * * Mon-Fri",
+            "更新 ETF 淨值與專區快照",
+            etf_zone::execute_daily,
+        ),
+        // 17:45（週一至週五）持有 ETF 剛轉為高溢價或剛好連續折價滿 5 天就通知，排在 17:30 淨值入庫之後。
+        create_job(
+            "0 45 17 * * Mon-Fri",
+            "通知持有 ETF 折溢價",
+            event::taiwan_stock::etf_premium_alert::execute,
+        ),
         // 20:30 通知持股近期法說會的摘要、展望與 Q&A 重點（BigGo 整理）
         // 法說會多在下午舉行，BigGo 通常當天或隔天產生摘要；摘要未產生的場次之後的排程再看。
         create_job(
@@ -273,6 +286,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "0 50 10 * * Sat",
             "通知持股估值週報",
             event::taiwan_stock::valuation_alert::execute,
+        ),
+        // 12:10（週六）Yahoo ETF 頁：基本資料、分類、前十大持股、行業比重與資產分佈（約 15 分鐘），
+        // 避開每天 06:00 的 Yahoo 財報採集。
+        create_job(
+            "0 10 12 * * Sat",
+            "更新 ETF 基本資料與持股",
+            etf_zone::execute_weekly_profiles,
         ),
         // 11:00（週六）資料健康週報：近 7 天的交易日完整性、均線、漲跌幅、衍生資料新鮮度、
         // 月營收與股利佔位列；這類問題來源不會報錯，只能定期量。
@@ -317,6 +337,12 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "0 50 20 10-28 * *",
             "董監持股入庫",
             chip::execute_insider_holdings,
+        ),
+        // 22:05（週一至週五）重建 ETF 專區快照，帶進 21:50 入庫的外資買賣超
+        create_job(
+            "0 5 22 * * Mon-Fri",
+            "重建 ETF 專區快照",
+            etf_zone::refresh_snapshot,
         ),
         // 22:10（週一至週五）策略換股通知：依 .env 的 STRATEGY_ALERT_QUERY 跑條件選股回測，
         // 今天是換股日才發；排在 21:50 籌碼入庫之後，外資／投信連續買超條件才看得到今天。

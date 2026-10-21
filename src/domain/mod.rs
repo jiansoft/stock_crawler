@@ -1,6 +1,7 @@
 pub mod chip;
 pub mod config;
 pub mod dividend;
+pub mod etf;
 pub mod events;
 pub mod financial;
 pub mod foreign_holding;

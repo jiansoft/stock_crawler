@@ -13,6 +13,7 @@
 //! - [`financial`]：三大財務報表與財務體質
 //! - [`chip`]：籌碼：外資持股、三大法人與融資融券、集保股權分散、董監持股
 //! - [`derived`]：收盤後衍生資料：未來報酬、每日相對強度、技術訊號
+//! - [`etf`]：ETF 專區：基本資料與持股、淨值與績效、快照
 //!
 //! 測試名稱不重複，執行時可只用名稱篩選，例如
 //! `cargo test --locked test_backfill_chip_daily -- --ignored --nocapture`。
@@ -22,5 +23,6 @@ mod capital_reduction;
 mod chip;
 mod derived;
 mod dividend;
+mod etf;
 mod financial;
 mod quote;
