@@ -38,6 +38,17 @@ pub(crate) struct PortfolioChipBroker {
     pub(crate) sellers: Vec<PortfolioChipBrokerNet>,
 }
 
+/// 持股近幾個交易日的主力累計（張）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub(crate) struct PortfolioChipBrokerRecent {
+    /// 主力買賣超合計（張），正值為買超。
+    pub(crate) main_net: i64,
+    /// 主力買超的天數。
+    pub(crate) buy_days: i64,
+    /// 主力賣超的天數。
+    pub(crate) sell_days: i64,
+}
+
 /// 單一持股當天的籌碼；張數皆已由股換算成張（四捨五入），來源沒有資料時為 `null`。
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub(crate) struct PortfolioChipItem {
@@ -73,6 +84,8 @@ pub(crate) struct PortfolioChipItem {
     pub(crate) short_change: Option<i64>,
     /// 主力進出；當天沒有（2026-10-07 以前或來源只有持股）為 `null`。
     pub(crate) broker: Option<PortfolioChipBroker>,
+    /// 含當天在內最近 `broker_recent_days` 個有主力資料的交易日的主力累計；期間內沒有資料為 `null`。
+    pub(crate) broker_recent: Option<PortfolioChipBrokerRecent>,
     /// 達到 Telegram 通知門檻的原因代碼：`foreign_heavy`、`trust_heavy`、`foreign_streak`、
     /// `trust_streak`、`margin`、`short`、`broker`。
     pub(crate) reasons: Vec<String>,
@@ -89,6 +102,8 @@ pub(crate) struct PortfolioChipResponse {
     pub(crate) next_date: Option<String>,
     /// 達通知門檻的持股檔數。
     pub(crate) notable: usize,
+    /// `broker_recent` 涵蓋的主力交易日數（最多 5，含當天；沒有主力資料為 0）。
+    pub(crate) broker_recent_days: usize,
     /// 當天收盤時仍持有的普通股（不含 ETF），依代號排序。
     pub(crate) items: Vec<PortfolioChipItem>,
 }

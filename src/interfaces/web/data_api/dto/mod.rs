@@ -100,8 +100,8 @@ pub(super) use portfolio::{
     warning_code,
 };
 pub(super) use portfolio_chip::{
-    PortfolioChipBroker, PortfolioChipBrokerNet, PortfolioChipItem, PortfolioChipParams,
-    PortfolioChipResponse,
+    PortfolioChipBroker, PortfolioChipBrokerNet, PortfolioChipBrokerRecent, PortfolioChipItem,
+    PortfolioChipParams, PortfolioChipResponse,
 };
 pub(super) use portfolio_history::{
     PortfolioHistoryParams, PortfolioHistoryResponse, PortfolioMonth,
