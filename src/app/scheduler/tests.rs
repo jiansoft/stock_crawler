@@ -6,9 +6,7 @@ async fn run() -> Result<()> {
     let sched = JobScheduler::new().await?;
     let every_minute = Job::new_async("* * * * * *", |_uuid, _l| {
         Box::pin(async move {
-            println!("_uuid {:?} now: {:?}", _uuid, chrono::Local::now());
-            dbg!("_uuid {:?} now: {:?}", _uuid, chrono::Local::now());
-            tracing::debug!("_uuid {:?} now: {:?}", _uuid, chrono::Local::now());
+            tracing::debug!("每秒任務 now: {:?}", chrono::Local::now());
         })
     })?;
     sched.add(every_minute).await?;

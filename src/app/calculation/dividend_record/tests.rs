@@ -237,11 +237,9 @@ async fn test_backfill_received_dividend_records_for_stock_backfills_after_divid
     SHARE.load().await;
 
     let security_code = "0056";
-    let summary = backfill_received_dividend_records_for_stock(security_code)
+    backfill_received_dividend_records_for_stock(security_code)
         .await
         .expect("backfill received dividend records by stock");
-
-    dbg!(summary);
 }
 
 #[tokio::test]
