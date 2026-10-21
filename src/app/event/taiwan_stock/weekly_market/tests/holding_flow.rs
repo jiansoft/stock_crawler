@@ -97,6 +97,7 @@ async fn run_includes_holding_flows() {
         day(17),
         &holdings(),
         None,
+        &[],
     )
     .await
     .expect("有內容");
@@ -123,6 +124,7 @@ async fn run_includes_holding_flows() {
         day(17),
         &holdings(),
         None,
+        &[],
     )
     .await
     .expect("其他段仍有內容");
@@ -204,6 +206,7 @@ async fn run_includes_holding_broker_flows() {
         day(17),
         &holdings(),
         None,
+        &[],
     )
     .await
     .expect("有內容");
@@ -229,6 +232,7 @@ async fn run_includes_holding_broker_flows() {
         day(17),
         &holdings(),
         None,
+        &[],
     )
     .await
     .expect("其他段仍有內容");
