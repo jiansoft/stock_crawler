@@ -49,7 +49,7 @@ impl DividendFillQuery for FakeFills {
     async fn fetch_daily_closes(&self, symbol: &str, since: NaiveDate) -> Result<Vec<DailyClose>> {
         let closes: &[(u32, Decimal)] = match symbol {
             "2330" => {
-                assert_eq!(since, day(14) - Days::new(PRE_EX_LOOKBACK_DAYS));
+                assert_eq!(since, day(14) - Days::new(fill::PRE_EX_LOOKBACK_DAYS));
                 &[
                     (13, dec!(100)),
                     (14, dec!(95)),

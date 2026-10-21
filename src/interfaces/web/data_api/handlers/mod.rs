@@ -31,6 +31,7 @@ mod market_valuation;
 mod peers;
 mod portfolio;
 mod portfolio_chip;
+mod portfolio_dividend_fill;
 mod portfolio_history;
 mod relative_strength;
 mod relative_strength_history;
@@ -84,6 +85,7 @@ pub(super) use market_valuation::{__path_market_valuation, market_valuation};
 pub(super) use peers::{__path_stock_peers, stock_peers};
 pub(super) use portfolio::{__path_portfolio_summary, portfolio_summary};
 pub(super) use portfolio_chip::{__path_portfolio_chip, portfolio_chip};
+pub(super) use portfolio_dividend_fill::{__path_portfolio_dividend_fill, portfolio_dividend_fill};
 pub(super) use portfolio_history::{__path_portfolio_history, portfolio_history};
 pub(super) use relative_strength::{__path_relative_strength, relative_strength};
 pub(super) use relative_strength_history::{

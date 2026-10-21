@@ -8,8 +8,11 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{Days, NaiveDate};
 use rust_decimal::Decimal;
+
+/// 往除權息日前多抓幾天日線，確保長假或停牌後仍找得到除權息前一日的收盤。
+pub const PRE_EX_LOOKBACK_DAYS: u64 = 30;
 
 /// 一次除權息：同一天的現金股利與股票股利合併成一次。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +148,37 @@ pub trait DividendFillQuery: Send + Sync {
 
     /// `since`（含）起的日收盤，依日期升冪。
     async fn fetch_daily_closes(&self, symbol: &str, since: NaiveDate) -> Result<Vec<DailyClose>>;
+}
+
+/// 除權息日在 `since`（不含）～`until`（含）之間的每次除權息的填息結果，依除權息日由舊到新；
+/// 期間內沒有除權息時不查日線。
+///
+/// # Errors
+///
+/// 查詢失敗時回傳錯誤。
+pub async fn recent_outcomes(
+    query: &impl DividendFillQuery,
+    symbol: &str,
+    since: NaiveDate,
+    until: NaiveDate,
+) -> Result<Vec<FillOutcome>> {
+    let mut events: Vec<ExRightEvent> = query
+        .fetch_ex_right_events(symbol)
+        .await?
+        .into_iter()
+        .filter(|event| event.ex_date > since && event.ex_date <= until)
+        .collect();
+    events.sort_by_key(|event| event.ex_date);
+    let Some(oldest) = events.first() else {
+        return Ok(Vec::new());
+    };
+    let closes = query
+        .fetch_daily_closes(symbol, oldest.ex_date - Days::new(PRE_EX_LOOKBACK_DAYS))
+        .await?;
+    Ok(events
+        .into_iter()
+        .filter_map(|event| fill_outcome(event, &closes))
+        .collect())
 }
 
 #[cfg(test)]

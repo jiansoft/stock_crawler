@@ -24,9 +24,6 @@ use crate::{
 /// 只看除權息日在今天往前這麼多天內的事件；超過一年還沒填息的不再追蹤。
 const LOOKBACK_DAYS: u64 = 365;
 
-/// 往除權息日前多抓幾天日線，確保長假或停牌後仍找得到除權息前一日的收盤。
-const PRE_EX_LOOKBACK_DAYS: u64 = 30;
-
 /// 排程入口：通知今天填息的持股。
 ///
 /// # Errors
@@ -72,24 +69,9 @@ async fn symbol_filled_today(
     today: NaiveDate,
 ) -> Result<Vec<FillOutcome>> {
     let since = today - Days::new(LOOKBACK_DAYS);
-    let mut events: Vec<_> = repository
-        .fetch_ex_right_events(symbol)
-        .await?
-        .into_iter()
-        .filter(|event| event.ex_date > since && event.ex_date <= today)
-        .collect();
-    events.sort_by_key(|event| event.ex_date);
-    let Some(oldest) = events.first() else {
-        return Ok(Vec::new());
-    };
-    let closes = repository
-        .fetch_daily_closes(symbol, oldest.ex_date - Days::new(PRE_EX_LOOKBACK_DAYS))
-        .await?;
-    Ok(events
-        .into_iter()
-        .filter_map(|event| fill::fill_outcome(event, &closes))
-        .filter(|outcome| outcome.fill_date == Some(today))
-        .collect())
+    let mut outcomes = fill::recent_outcomes(repository, symbol, since, today).await?;
+    outcomes.retain(|outcome| outcome.fill_date == Some(today));
+    Ok(outcomes)
 }
 
 /// 股利文字：現金與股票股利（元），沒有的那一種不列。

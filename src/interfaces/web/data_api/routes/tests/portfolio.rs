@@ -440,3 +440,27 @@ async fn portfolio_chip_endpoint_db_semantics() {
     assert_eq!(json["items"], serde_json::json!([]));
     assert_eq!(json["notable"], 0);
 }
+
+/// 持股填息：天數範圍檢查，回應帶回看天數、統計與清單（填息規則由 handler 與 domain 單元測試驗證）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn portfolio_dividend_fill_endpoint_db_semantics() {
+    if pool_or_skip("portfolio_dividend_fill_endpoint_db_semantics")
+        .await
+        .is_none()
+    {
+        return;
+    }
+    for days in [29, 731] {
+        let (status, _) = get(&format!("/api/v1/portfolio/dividend-fill?days={days}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "days={days}");
+    }
+    let (status, json) = get("/api/v1/portfolio/dividend-fill").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["days"], 365);
+    assert!(json["items"].is_array(), "{json}");
+    assert!(json["summary"]["events"].is_number(), "{json}");
+}
