@@ -38,6 +38,7 @@ mod sql;
 mod stops;
 mod summary;
 mod track;
+mod validate;
 mod walk_forward;
 
 use axum::{
