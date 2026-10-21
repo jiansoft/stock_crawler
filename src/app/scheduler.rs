@@ -225,6 +225,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "檢查收盤資料完整性",
             event::taiwan_stock::closing::ensure_complete,
         ),
+        // 17:20（週一至週五）通知今天填息的持股：17:00 已確認收盤資料完整（不完整會重跑），
+        // 以「填息日是今天」判斷，同一次除權息只會通知一次；休市日沒有今天的收盤，不會發送。
+        create_job(
+            "0 20 17 * * Mon-Fri",
+            "通知持股填息",
+            event::taiwan_stock::dividend_fill_alert::execute,
+        ),
         // 20:30 通知持股近期法說會的摘要、展望與 Q&A 重點（BigGo 整理）
         // 法說會多在下午舉行，BigGo 通常當天或隔天產生摘要；摘要未產生的場次之後的排程再看。
         create_job(

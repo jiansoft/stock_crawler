@@ -9,6 +9,7 @@ pub mod config;
 pub mod corporate_action;
 pub mod data_health;
 pub mod dividend;
+pub mod dividend_fill;
 pub mod ex_right;
 pub mod financial;
 pub mod financial_health;
