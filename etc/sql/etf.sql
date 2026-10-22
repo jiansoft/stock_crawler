@@ -122,6 +122,21 @@ CREATE TABLE IF NOT EXISTS etf_performance
 
 COMMENT ON TABLE etf_performance IS 'ETF 含息報酬與近 1 年風險指標（還原日線計算，每個交易日重算）';
 
+-- 2026-10-23：以正式淨值（現金配息還原）自算的含息報酬，取代每週更新的 Yahoo 淨值報酬（已建表的資料庫也要執行）。
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_calc_date DATE;
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_1w NUMERIC(12, 4);
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_1m NUMERIC(12, 4);
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_3m NUMERIC(12, 4);
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_6m NUMERIC(12, 4);
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_ytd NUMERIC(12, 4);
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_1y NUMERIC(12, 4);
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_2y NUMERIC(12, 4);
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_3y NUMERIC(12, 4);
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_5y NUMERIC(12, 4);
+ALTER TABLE etf_performance ADD COLUMN IF NOT EXISTS nav_ret_10y NUMERIC(12, 4);
+COMMENT ON COLUMN etf_performance.nav_calc_date IS '淨值含息報酬的基準日（最後一筆淨值；當天正式淨值未公布時用預估淨值）';
+COMMENT ON COLUMN etf_performance.nav_ret_1y IS '以正式淨值計算、現金配息還原的報酬（%）；nav_ret_* 規則同 ret_*，1 年以上年化，歷史不足為 NULL';
+
 CREATE TABLE IF NOT EXISTS etf_snapshot
 (
     stock_symbol       VARCHAR(24)                            NOT NULL,

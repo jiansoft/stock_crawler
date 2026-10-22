@@ -12,9 +12,10 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     domain::etf::{
-        EtfAllocationRecord, EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio,
-        EtfProfileRecord, EtfRepository, EtfWeeklyFlow, PremiumPoint,
+        EtfAllocationRecord, EtfNavHistoryPoint, EtfNavRecord, EtfNavReturns, EtfPerformance,
+        EtfPortfolio, EtfProfileRecord, EtfRepository, EtfWeeklyFlow, PremiumPoint,
     },
+    domain::quote::technical::PriceBar,
     infra::database,
 };
 
@@ -147,11 +148,15 @@ WHERE etf_profile.source = 'heuristic'
 const SAVE_PERFORMANCES_SQL: &str = r#"
 INSERT INTO etf_performance (stock_symbol, calc_date, ret_1w, ret_1m, ret_3m, ret_6m, ret_ytd, ret_1y,
                              ret_2y, ret_3y, ret_5y, ret_10y, vol_1y, mdd_1y, mdd_date, beta_1y,
-                             sharpe_1y, year_low, year_high)
+                             sharpe_1y, year_low, year_high, nav_calc_date, nav_ret_1w, nav_ret_1m,
+                             nav_ret_3m, nav_ret_6m, nav_ret_ytd, nav_ret_1y, nav_ret_2y, nav_ret_3y,
+                             nav_ret_5y, nav_ret_10y)
 SELECT * FROM UNNEST($1::varchar[], $2::date[], $3::numeric[], $4::numeric[], $5::numeric[], $6::numeric[],
                      $7::numeric[], $8::numeric[], $9::numeric[], $10::numeric[], $11::numeric[],
                      $12::numeric[], $13::numeric[], $14::numeric[], $15::date[], $16::numeric[],
-                     $17::numeric[], $18::numeric[], $19::numeric[])
+                     $17::numeric[], $18::numeric[], $19::numeric[], $20::date[], $21::numeric[],
+                     $22::numeric[], $23::numeric[], $24::numeric[], $25::numeric[], $26::numeric[],
+                     $27::numeric[], $28::numeric[], $29::numeric[], $30::numeric[])
 ON CONFLICT (stock_symbol) DO UPDATE SET
     calc_date = EXCLUDED.calc_date,
     ret_1w = EXCLUDED.ret_1w, ret_1m = EXCLUDED.ret_1m, ret_3m = EXCLUDED.ret_3m,
@@ -160,7 +165,19 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
     ret_10y = EXCLUDED.ret_10y, vol_1y = EXCLUDED.vol_1y, mdd_1y = EXCLUDED.mdd_1y,
     mdd_date = EXCLUDED.mdd_date, beta_1y = EXCLUDED.beta_1y, sharpe_1y = EXCLUDED.sharpe_1y,
     year_low = EXCLUDED.year_low, year_high = EXCLUDED.year_high,
+    nav_calc_date = EXCLUDED.nav_calc_date, nav_ret_1w = EXCLUDED.nav_ret_1w,
+    nav_ret_1m = EXCLUDED.nav_ret_1m, nav_ret_3m = EXCLUDED.nav_ret_3m, nav_ret_6m = EXCLUDED.nav_ret_6m,
+    nav_ret_ytd = EXCLUDED.nav_ret_ytd, nav_ret_1y = EXCLUDED.nav_ret_1y, nav_ret_2y = EXCLUDED.nav_ret_2y,
+    nav_ret_3y = EXCLUDED.nav_ret_3y, nav_ret_5y = EXCLUDED.nav_ret_5y, nav_ret_10y = EXCLUDED.nav_ret_10y,
     updated_at = NOW()
+"#;
+
+/// 多檔 ETF 自 `$2` 起的淨值序列：正式淨值優先，當天還沒回填時用預估淨值。
+const NAV_SERIES_SQL: &str = r#"
+SELECT stock_symbol::text, date, COALESCE(nav, estimated_nav)::float8 AS value
+FROM etf_daily_nav
+WHERE stock_symbol = ANY($1) AND date >= $2 AND COALESCE(nav, estimated_nav) > 0
+ORDER BY stock_symbol, date
 "#;
 
 /// 清單頁快照：每檔上市櫃 ETF 一列，彙整行情、淨值、分類、配息、績效、受益人數與外資買賣超。
@@ -551,6 +568,29 @@ impl EtfRepository for PgEtfRepository {
         Ok(written)
     }
 
+    async fn nav_series(
+        &self,
+        stock_symbols: &[String],
+        from: NaiveDate,
+    ) -> Result<HashMap<String, Vec<PriceBar>>> {
+        let rows: Vec<(String, NaiveDate, f64)> = sqlx::query_as(NAV_SERIES_SQL)
+            .bind(stock_symbols)
+            .bind(from)
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch ETF nav series")?;
+        let mut series: HashMap<String, Vec<PriceBar>> = HashMap::new();
+        for (symbol, date, value) in rows {
+            series.entry(symbol).or_default().push(PriceBar {
+                date,
+                close: value,
+                high: value,
+                low: value,
+            });
+        }
+        Ok(series)
+    }
+
     async fn save_performances(&self, performances: &[EtfPerformance]) -> Result<u64> {
         let rows: Vec<&EtfPerformance> = performances
             .iter()
@@ -559,6 +599,11 @@ impl EtfRepository for PgEtfRepository {
         let symbols: Vec<&str> = rows.iter().map(|p| p.stock_symbol.as_str()).collect();
         let column = |f: fn(&EtfPerformance) -> Option<f64>| -> Vec<Option<Decimal>> {
             rows.iter().map(|p| to_decimal(f(p))).collect()
+        };
+        let nav_column = |f: fn(&EtfNavReturns) -> Option<f64>| -> Vec<Option<Decimal>> {
+            rows.iter()
+                .map(|p| to_decimal(p.nav_returns.as_ref().and_then(f)))
+                .collect()
         };
         let mut tx = database::get_tx().await?;
         let mut written = 0;
@@ -583,6 +628,21 @@ impl EtfRepository for PgEtfRepository {
                 .bind(column(|p| p.sharpe_1y))
                 .bind(column(|p| p.year_low))
                 .bind(column(|p| p.year_high))
+                .bind(
+                    rows.iter()
+                        .map(|p| p.nav_returns.as_ref().map(|n| n.calc_date))
+                        .collect::<Vec<_>>(),
+                )
+                .bind(nav_column(|n| n.ret_1w))
+                .bind(nav_column(|n| n.ret_1m))
+                .bind(nav_column(|n| n.ret_3m))
+                .bind(nav_column(|n| n.ret_6m))
+                .bind(nav_column(|n| n.ret_ytd))
+                .bind(nav_column(|n| n.ret_1y))
+                .bind(nav_column(|n| n.ret_2y))
+                .bind(nav_column(|n| n.ret_3y))
+                .bind(nav_column(|n| n.ret_5y))
+                .bind(nav_column(|n| n.ret_10y))
                 .execute(&mut *tx)
                 .await
                 .context("Failed to save ETF performances")?
