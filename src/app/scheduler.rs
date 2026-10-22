@@ -239,10 +239,10 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "更新 ETF 淨值與專區快照",
             etf_zone::execute_daily,
         ),
-        // 17:45（週一至週五）持有 ETF 剛轉為高溢價或剛好連續折價滿 5 天就通知，排在 17:30 淨值入庫之後。
+        // 17:45（週一至週五）持有 ETF 剛轉為高溢價、剛好連續折價滿 5 天，或單日申贖達 ±3% 就通知，排在 17:30 淨值入庫之後。
         create_job(
             "0 45 17 * * Mon-Fri",
-            "通知持有 ETF 折溢價",
+            "通知持有 ETF 折溢價與申贖",
             event::taiwan_stock::etf_premium_alert::execute,
         ),
         // 20:30 通知持股近期法說會的摘要、展望與 Q&A 重點（BigGo 整理）

@@ -1,11 +1,12 @@
-//! # 持有 ETF 折溢價通知
+//! # 持有 ETF 折溢價與大額申贖通知
 //!
 //! 每個交易日 17:30 的淨值入庫之後，檢查持有的 ETF：
 //!
 //! - **溢價**：今天的折溢價 ≥ `PREMIUM_THRESHOLD`%，且前一筆還沒達門檻（剛轉為高溢價）。
 //! - **折價**：最近 `DISCOUNT_DAYS` 筆都 ≤ `DISCOUNT_THRESHOLD`%，且再前一筆不是（剛好連續滿 5 天）。
+//! - **大額申贖**：今天的受益單位增減達前一營業日單位數的 ±`FLOW_THRESHOLD`%（單日事件，每次都通知）。
 //!
-//! 都只在「剛發生」那天通知一次，持續溢價或折價不會天天重發。最新一筆不是今天（休市、
+//! 折溢價都只在「剛發生」那天通知一次，持續溢價或折價不會天天重發。最新一筆不是今天（休市、
 //! 淨值尚未公布）時不判斷。
 
 use std::{collections::HashMap, fmt::Write};
@@ -16,7 +17,7 @@ use chrono::{Local, NaiveDate};
 use super::holdings;
 use crate::{
     core::{alert, util::text},
-    domain::etf::{EtfRepository, PremiumPoint},
+    domain::etf::{EtfRepository, PremiumPoint, UnitsChangePoint},
     infra::database::repository::etf::PgEtfRepository,
 };
 
@@ -26,6 +27,8 @@ pub const PREMIUM_THRESHOLD: f64 = 2.0;
 pub const DISCOUNT_THRESHOLD: f64 = -1.0;
 /// 連續折價天數。
 pub const DISCOUNT_DAYS: usize = 5;
+/// 大額申贖門檻：單日受益單位增減佔前一營業日單位數（%）。
+pub const FLOW_THRESHOLD: f64 = 3.0;
 
 /// 一則折溢價通知。
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +40,14 @@ pub(crate) enum PremiumAlert {
         symbol: String,
         rate: f64,
         average: f64,
+    },
+    /// 單日淨申購（正）或淨贖回（負）達 [`FLOW_THRESHOLD`]%。
+    Flow {
+        symbol: String,
+        /// 單位增減佔前一營業日單位數（%）。
+        ratio: f64,
+        /// 單位增減 × 淨值（元）；沒有淨值時為 `None`。
+        amount: Option<f64>,
     },
 }
 
@@ -55,11 +66,14 @@ pub async fn execute() -> Result<()> {
     if symbols.is_empty() {
         return Ok(());
     }
-    let premiums = PgEtfRepository::new()
+    let repo = PgEtfRepository::new();
+    let premiums = repo
         .recent_premiums(&symbols, DISCOUNT_DAYS as i64 + 1)
         .await?;
+    let units = repo.latest_units(&symbols).await?;
     let today = Local::now().date_naive();
-    let alerts = detect(&premiums, today);
+    let mut alerts = detect(&premiums, today);
+    alerts.extend(detect_flows(&units, today));
     tracing::info!(
         "持有 ETF 折溢價通知: etfs={}, alerts={}",
         symbols.len(),
@@ -107,6 +121,31 @@ pub(crate) fn detect(
         .collect()
 }
 
+/// 依代號排序找出今天單日申贖達門檻的 ETF。
+pub(crate) fn detect_flows(
+    units: &HashMap<String, UnitsChangePoint>,
+    today: NaiveDate,
+) -> Vec<PremiumAlert> {
+    let mut symbols: Vec<&String> = units.keys().collect();
+    symbols.sort();
+    symbols
+        .into_iter()
+        .filter_map(|symbol| {
+            let point = units.get(symbol).filter(|p| p.date == today)?;
+            let before = point.outstanding_units - point.units_change;
+            if before <= 0 {
+                return None;
+            }
+            let ratio = point.units_change as f64 / before as f64 * 100.0;
+            (ratio.abs() >= FLOW_THRESHOLD).then(|| PremiumAlert::Flow {
+                symbol: symbol.clone(),
+                ratio,
+                amount: point.nav.map(|nav| point.units_change as f64 * nav),
+            })
+        })
+        .collect()
+}
+
 /// 組出通知訊息（Telegram MarkdownV2）；沒有通知時回 `None`。
 pub(crate) fn build_message(
     date: NaiveDate,
@@ -120,7 +159,7 @@ pub(crate) fn build_message(
     let _ = writeln!(
         &mut message,
         "{}",
-        text::escape_markdown_v2(format!("持有 ETF 折溢價︰{date}"))
+        text::escape_markdown_v2(format!("持有 ETF 折溢價與申贖︰{date}"))
     );
     for alert in alerts {
         let line = match alert {
@@ -135,6 +174,20 @@ pub(crate) fn build_message(
             } => format!(
                 "{symbol} {} 連續 {DISCOUNT_DAYS} 日折價，今日 {rate:+.2}%、平均 {average:+.2}%",
                 stock_name(symbol)
+            ),
+            PremiumAlert::Flow {
+                symbol,
+                ratio,
+                amount,
+            } => format!(
+                "{symbol} {} 單日{} {ratio:+.2}%（受益單位{}，≥ {FLOW_THRESHOLD}%）",
+                stock_name(symbol),
+                if *ratio > 0.0 {
+                    "淨申購"
+                } else {
+                    "淨贖回"
+                },
+                amount.map_or_else(String::new, |a| format!("約 {:+.1} 億", a / 1e8))
             ),
         };
         let _ = writeln!(&mut message, "{}", text::escape_markdown_v2(line));
@@ -207,6 +260,67 @@ mod tests {
         assert!(detect(&one("00830", Vec::new()), day(21)).is_empty());
     }
 
+    fn units(date: NaiveDate, outstanding: i64, change: i64, nav: Option<f64>) -> UnitsChangePoint {
+        UnitsChangePoint {
+            date,
+            outstanding_units: outstanding,
+            units_change: change,
+            nav,
+        }
+    }
+
+    #[test]
+    fn flow_alerts_when_daily_change_reaches_threshold() {
+        let units = HashMap::from([
+            // 前一日 1000 萬單位，淨申購 31 萬（3.1%）。
+            (
+                "00919".to_string(),
+                units(day(21), 10_310_000, 310_000, Some(22.5)),
+            ),
+            // 淨贖回 4%。
+            (
+                "0056".to_string(),
+                units(day(21), 9_600_000, -400_000, None),
+            ),
+            // 2.9% 不到門檻。
+            (
+                "0050".to_string(),
+                units(day(21), 10_290_000, 290_000, Some(100.0)),
+            ),
+            // 不是今天。
+            (
+                "00878".to_string(),
+                units(day(20), 2_000_000, 1_000_000, Some(20.0)),
+            ),
+            // 前一日單位數不為正。
+            ("00999".to_string(), units(day(21), 100, 100, Some(10.0))),
+        ]);
+        let alerts = detect_flows(&units, day(21));
+        assert_eq!(alerts.len(), 2);
+        match &alerts[0] {
+            PremiumAlert::Flow {
+                symbol,
+                ratio,
+                amount,
+            } => {
+                assert_eq!(symbol, "0056");
+                assert!((ratio + 4.0).abs() < 1e-9);
+                assert!(amount.is_none());
+            }
+            other => panic!("應為 0056 淨贖回：{other:?}"),
+        }
+        let message = build_message(day(21), &alerts, |s| format!("名稱{s}")).expect("有訊息");
+        assert!(
+            message.contains("0056 名稱0056 單日淨贖回 \\-4\\.00%（受益單位，≥ 3%）"),
+            "{message}"
+        );
+        assert!(
+            message
+                .contains("00919 名稱00919 單日淨申購 \\+3\\.10%（受益單位約 \\+0\\.1 億，≥ 3%）"),
+            "{message}"
+        );
+    }
+
     #[test]
     fn message_lists_alerts_in_order() {
         let alerts = vec![
@@ -221,7 +335,7 @@ mod tests {
             },
         ];
         let message = build_message(day(21), &alerts, |s| format!("名稱{s}")).expect("有訊息");
-        assert!(message.contains("持有 ETF 折溢價︰2026\\-10\\-21"));
+        assert!(message.contains("持有 ETF 折溢價與申贖︰2026\\-10\\-21"));
         assert!(message.contains("00830 名稱00830 溢價 \\+2\\.31%"));
         assert!(
             message.contains("00679B 名稱00679B 連續 5 日折價，今日 \\-1\\.20%、平均 \\-1\\.25%")

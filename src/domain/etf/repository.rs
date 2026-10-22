@@ -8,7 +8,7 @@ use crate::domain::quote::technical::PriceBar;
 
 use super::{
     EtfHoldingPeriods, EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio,
-    EtfProfileRecord, EtfWeeklyFlow, PremiumPoint,
+    EtfProfileRecord, EtfWeeklyFlow, PremiumPoint, UnitsChangePoint,
 };
 
 /// ETF 專區資料的倉儲合約。寫入方法回傳實際新增或變更的列數。
@@ -63,6 +63,12 @@ pub trait EtfRepository: Send + Sync {
 
     /// 全部 ETF 最近 `days` 個有單位數的交易日的淨申購合計與折溢價；沒有單位數的歷史回補日不計。
     async fn weekly_flows(&self, days: i64) -> Result<Vec<EtfWeeklyFlow>>;
+
+    /// 指定 ETF 最近一筆有單位數的受益單位變動，依代號分組；沒有的代號不在結果中。
+    async fn latest_units(
+        &self,
+        stock_symbols: &[String],
+    ) -> Result<HashMap<String, UnitsChangePoint>>;
 
     /// 指定 ETF 最近 `days` 筆折溢價，依代號分組、由新到舊。
     async fn recent_premiums(

@@ -377,6 +377,47 @@ async fn nav_series_prefers_official_nav() {
     not(feature = "integration-tests"),
     ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
 )]
+async fn latest_units_skips_rows_without_units() {
+    dotenvy::dotenv().ok();
+    cleanup().await;
+    let repo = PgEtfRepository::new();
+    repo.save_navs(&[nav(day(28), 100, None), nav(day(29), 120, None)])
+        .await
+        .expect("寫入 MIS");
+    // 歷史回補的列沒有單位數，即使日期較新也不算。
+    repo.insert_nav_history(
+        FAKE,
+        &[EtfNavHistoryPoint {
+            date: day(30),
+            nav: dec!(20.5),
+            market_price: None,
+        }],
+    )
+    .await
+    .expect("回補歷史");
+    let units = repo
+        .latest_units(&[FAKE.to_string(), "79979XX".to_string()])
+        .await
+        .expect("讀單位數");
+    assert_eq!(units.len(), 1);
+    let point = &units[FAKE];
+    assert_eq!(
+        (
+            point.date,
+            point.outstanding_units,
+            point.units_change,
+            point.nav
+        ),
+        (day(29), 120, 1_000, Some(20.0))
+    );
+    cleanup().await;
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
 async fn heuristic_profiles_never_overwrite_source_profiles() {
     dotenvy::dotenv().ok();
     cleanup().await;

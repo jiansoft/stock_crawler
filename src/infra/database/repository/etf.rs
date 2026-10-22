@@ -14,7 +14,7 @@ use crate::{
     domain::etf::{
         EtfAllocationRecord, EtfHoldingPeriod, EtfHoldingPeriods, EtfHoldingRecord,
         EtfNavHistoryPoint, EtfNavRecord, EtfNavReturns, EtfPerformance, EtfPortfolio,
-        EtfProfileRecord, EtfRepository, EtfWeeklyFlow, PremiumPoint,
+        EtfProfileRecord, EtfRepository, EtfWeeklyFlow, PremiumPoint, UnitsChangePoint,
     },
     domain::quote::technical::PriceBar,
     infra::database,
@@ -399,6 +399,15 @@ GROUP BY n.stock_symbol
 ORDER BY n.stock_symbol
 "#;
 
+/// 指定 ETF 最近一筆有單位數的資料（MIS 寫入的列）。
+const LATEST_UNITS_SQL: &str = r#"
+SELECT DISTINCT ON (stock_symbol) stock_symbol::text, date, outstanding_units, units_change,
+       COALESCE(estimated_nav, nav)::float8 AS nav
+FROM etf_daily_nav
+WHERE stock_symbol = ANY($1) AND outstanding_units IS NOT NULL AND units_change IS NOT NULL
+ORDER BY stock_symbol, date DESC
+"#;
+
 /// f64 轉成 4 位小數的 `Decimal`；NaN、無限大為 `None`。
 fn to_decimal(value: Option<f64>) -> Option<Decimal> {
     value
@@ -777,6 +786,32 @@ impl EtfRepository for PgEtfRepository {
                 premium_last: row.premium_last,
                 from: row.from_date,
                 to: row.to_date,
+            })
+            .collect())
+    }
+
+    async fn latest_units(
+        &self,
+        stock_symbols: &[String],
+    ) -> Result<HashMap<String, UnitsChangePoint>> {
+        let rows: Vec<(String, NaiveDate, i64, i64, Option<f64>)> =
+            sqlx::query_as(LATEST_UNITS_SQL)
+                .bind(stock_symbols)
+                .fetch_all(database::get_connection())
+                .await
+                .context("Failed to fetch ETF units")?;
+        Ok(rows
+            .into_iter()
+            .map(|(symbol, date, outstanding_units, units_change, nav)| {
+                (
+                    symbol,
+                    UnitsChangePoint {
+                        date,
+                        outstanding_units,
+                        units_change,
+                        nav,
+                    },
+                )
             })
             .collect())
     }

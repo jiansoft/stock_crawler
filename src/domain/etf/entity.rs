@@ -162,6 +162,19 @@ pub struct EtfWeeklyFlow {
     pub to: NaiveDate,
 }
 
+/// 某一天的受益單位變動，供大額申贖通知使用。
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitsChangePoint {
+    /// 資料日期。
+    pub date: NaiveDate,
+    /// 當天已發行受益權單位數（已含當天增減）。
+    pub outstanding_units: i64,
+    /// 與前一營業日已發行單位數的差異（正為淨申購）。
+    pub units_change: i64,
+    /// 當天淨值（預估淨值優先）；沒有時為 `None`。
+    pub nav: Option<f64>,
+}
+
 /// 某一天的折溢價，供折溢價通知判斷連續天數。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PremiumPoint {
