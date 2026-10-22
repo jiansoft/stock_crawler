@@ -13,6 +13,9 @@ pub mod performance;
 pub mod query;
 /// ETF 倉儲合約。
 pub mod repository;
+/// ETF 領域之測試替身；僅在測試建置下編譯。
+#[cfg(test)]
+pub mod test_double;
 
 pub use classify::{Classification, ClassifyHint, Strategy, classify};
 pub use entity::{
