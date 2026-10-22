@@ -18,7 +18,7 @@ use rand::RngExt;
 use crate::{
     app::calculation,
     core::util::datetime::Weekend,
-    domain::etf::{ClassifyHint, EtfProfileRecord, EtfRepository, classify},
+    domain::etf::{ClassifyHint, EtfNavHistoryPoint, EtfProfileRecord, EtfRepository, classify},
     infra::{
         crawler::{moneydj, twse, yahoo},
         database::repository::etf::PgEtfRepository,
@@ -120,30 +120,65 @@ pub async fn backfill_nav_history(years: u32) -> Result<()> {
         nav_history_range(Local::now().date_naive(), years).context("回補起日超出範圍")?;
     let repo = PgEtfRepository::new();
     let listed = repo.listed_etfs().await?;
-    let (mut inserted, mut empty, mut failed) = (0u64, 0usize, 0usize);
+    let symbols: Vec<&str> = listed.iter().map(|(symbol, _)| symbol.as_str()).collect();
+    let tally = backfill_symbols(
+        &symbols,
+        async |symbol| moneydj::etf_nav::visit(symbol, from, to).await,
+        async |symbol, points| repo.insert_nav_history(symbol, points).await,
+        request_interval,
+    )
+    .await?;
+    let rows = repo.refresh_snapshot().await?;
+    tracing::info!(
+        "ETF 歷史淨值回補: etfs={}, from={from}, to={to}, inserted={}, empty={}, failed={}, snapshot_rows={rows}",
+        symbols.len(),
+        tally.inserted,
+        tally.empty,
+        tally.failed
+    );
+    if too_many_failures(tally.failed, symbols.len()) {
+        bail!(
+            "MoneyDJ ETF 淨值抓取失敗 {}／{} 檔",
+            tally.failed,
+            symbols.len()
+        );
+    }
+    Ok(())
+}
 
-    for (index, (symbol, _)) in listed.iter().enumerate() {
+/// 逐檔回補的統計。
+#[derive(Debug, Default, PartialEq, Eq)]
+struct NavHistoryTally {
+    /// 新增的列數。
+    inserted: u64,
+    /// 來源查無資料的檔數。
+    empty: usize,
+    /// 抓取失敗的檔數。
+    failed: usize,
+}
+
+/// 逐檔抓取並寫入；檔與檔之間呼叫 `pause`。抓取失敗只記錄並略過，寫入失敗則中止。
+async fn backfill_symbols(
+    symbols: &[&str],
+    mut fetch: impl AsyncFnMut(&str) -> Result<Vec<EtfNavHistoryPoint>>,
+    mut save: impl AsyncFnMut(&str, &[EtfNavHistoryPoint]) -> Result<u64>,
+    mut pause: impl AsyncFnMut(),
+) -> Result<NavHistoryTally> {
+    let mut tally = NavHistoryTally::default();
+    for (index, symbol) in symbols.iter().enumerate() {
         if index > 0 {
-            request_interval().await;
+            pause().await;
         }
-        match moneydj::etf_nav::visit(symbol, from, to).await {
-            Ok(points) if points.is_empty() => empty += 1,
-            Ok(points) => inserted += repo.insert_nav_history(symbol, &points).await?,
+        match fetch(symbol).await {
+            Ok(points) if points.is_empty() => tally.empty += 1,
+            Ok(points) => tally.inserted += save(symbol, &points).await?,
             Err(why) => {
-                failed += 1;
+                tally.failed += 1;
                 tracing::warn!("MoneyDJ ETF 淨值抓取失敗: stock_symbol={symbol}, error={why:#}");
             }
         }
     }
-    let rows = repo.refresh_snapshot().await?;
-    tracing::info!(
-        "ETF 歷史淨值回補: etfs={}, from={from}, to={to}, inserted={inserted}, empty={empty}, failed={failed}, snapshot_rows={rows}",
-        listed.len()
-    );
-    if too_many_failures(failed, listed.len()) {
-        bail!("MoneyDJ ETF 淨值抓取失敗 {failed}／{} 檔", listed.len());
-    }
-    Ok(())
+    Ok(tally)
 }
 
 /// 回補區間：`years` 年前的今天到昨天。
@@ -223,6 +258,51 @@ async fn request_interval() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn backfill_symbols_counts_and_skips_failures() {
+        let point = EtfNavHistoryPoint {
+            date: NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法"),
+            nav: rust_decimal::Decimal::ONE,
+            market_price: None,
+        };
+        let mut saved: Vec<String> = Vec::new();
+        let mut pauses = 0;
+        let tally = backfill_symbols(
+            &["0050", "9999", "00679B"],
+            async |symbol| match symbol {
+                "0050" => Ok(vec![point.clone(), point.clone()]),
+                "9999" => Ok(Vec::new()),
+                _ => Err(anyhow::anyhow!("逾時")),
+            },
+            async |symbol, points| {
+                saved.push(symbol.to_string());
+                Ok(points.len() as u64)
+            },
+            async || pauses += 1,
+        )
+        .await
+        .expect("抓取失敗不應中止");
+        assert_eq!(
+            tally,
+            NavHistoryTally {
+                inserted: 2,
+                empty: 1,
+                failed: 1
+            }
+        );
+        assert_eq!(saved, vec!["0050"]);
+        assert_eq!(pauses, 2);
+
+        let result = backfill_symbols(
+            &["0050"],
+            async |_| Ok(vec![point.clone()]),
+            async |_, _| Err(anyhow::anyhow!("連線中斷")),
+            async || {},
+        )
+        .await;
+        assert!(result.is_err(), "寫入失敗要中止");
+    }
 
     #[test]
     fn nav_history_range_ends_yesterday() {

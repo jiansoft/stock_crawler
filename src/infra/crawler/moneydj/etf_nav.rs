@@ -34,14 +34,18 @@ pub async fn visit(
     from: NaiveDate,
     to: NaiveDate,
 ) -> Result<Vec<EtfNavHistoryPoint>> {
-    let url = format!(
+    let text = util::http::get(&url(symbol, from, to), None).await?;
+    parse(&text)
+}
+
+/// 走勢圖資料網址；上市、上櫃一律加 `.TW`。
+fn url(symbol: &str, from: NaiveDate, to: NaiveDate) -> String {
+    format!(
         "https://www.{host}/ETF/X/xdjbcd/Basic0003BCD.xdjbcd?etfid={symbol}.TW&b={from}&c={to}",
         host = moneydj::WEB_HOST,
         from = from.format("%Y%m%d"),
         to = to.format("%Y%m%d"),
-    );
-    let text = util::http::get(&url, None).await?;
-    parse(&text)
+    )
 }
 
 /// 解析走勢圖資料。淨值無法解析或不為正數的日期略過；市價無法解析或不為正數時為 `None`。
@@ -119,6 +123,14 @@ mod tests {
                 nav: dec!(108.2700),
                 market_price: Some(dec!(108.1500)),
             })
+        );
+    }
+
+    #[test]
+    fn url_uses_tw_suffix_and_compact_dates() {
+        assert_eq!(
+            url("00679B", day(10, 1), day(10, 21)),
+            "https://www.moneydj.com/ETF/X/xdjbcd/Basic0003BCD.xdjbcd?etfid=00679B.TW&b=20261001&c=20261021"
         );
     }
 
