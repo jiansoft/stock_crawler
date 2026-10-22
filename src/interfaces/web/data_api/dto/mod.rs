@@ -55,9 +55,9 @@ pub(super) use dividend_forecast::{
     ForecastBasisValue,
 };
 pub(super) use etf::{
-    EtfAllocationItem, EtfDetailParams, EtfDetailResponse, EtfFrequencyValue, EtfHoldingItem,
-    EtfItem, EtfListParams, EtfListResponse, EtfNavPoint, EtfPerformanceInfo, EtfProfileInfo,
-    EtfSortValue, EtfStrategyValue,
+    EtfAllocationItem, EtfCompareItem, EtfCompareParams, EtfCompareResponse, EtfDetailParams,
+    EtfDetailResponse, EtfFrequencyValue, EtfHoldingItem, EtfItem, EtfListParams, EtfListResponse,
+    EtfNavPoint, EtfOverlap, EtfPerformanceInfo, EtfProfileInfo, EtfSortValue, EtfStrategyValue,
 };
 pub(super) use financial_health::{
     FinancialHealthParams, FinancialHealthResponse, HealthCategoryValue, HealthCriterion,
