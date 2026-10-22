@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::{EtfNavRecord, EtfPerformance, EtfPortfolio, EtfProfileRecord, PremiumPoint};
+use super::{
+    EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio, EtfProfileRecord, PremiumPoint,
+};
 
 /// ETF 專區資料的倉儲合約。寫入方法回傳實際新增或變更的列數。
 #[async_trait]
@@ -13,6 +15,14 @@ pub trait EtfRepository: Send + Sync {
 
     /// 寫入（或更正）淨值資料，並以每筆的「前一營業日單位淨值」回填該 ETF 上一筆的正式淨值。
     async fn save_navs(&self, records: &[EtfNavRecord]) -> Result<u64>;
+
+    /// 回補一檔 ETF 的歷史正式淨值與市價，折溢價由兩者算出；已發行單位留空。
+    /// 只新增還沒有的日期，MIS 寫入的列一律不動。
+    async fn insert_nav_history(
+        &self,
+        stock_symbol: &str,
+        points: &[EtfNavHistoryPoint],
+    ) -> Result<u64>;
 
     /// 寫入（或更正）基本資料；不動 `manual_override`。
     async fn save_profiles(&self, profiles: &[EtfProfileRecord]) -> Result<u64>;

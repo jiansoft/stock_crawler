@@ -14,8 +14,8 @@ pub mod repository;
 
 pub use classify::{Classification, ClassifyHint, Strategy, classify};
 pub use entity::{
-    EtfAllocationRecord, EtfHoldingRecord, EtfNavRecord, EtfPortfolio, EtfProfileRecord,
-    PremiumPoint,
+    EtfAllocationRecord, EtfHoldingRecord, EtfNavHistoryPoint, EtfNavRecord, EtfPortfolio,
+    EtfProfileRecord, PremiumPoint,
 };
 pub use performance::{EtfPerformance, compute_performance};
 pub use repository::EtfRepository;

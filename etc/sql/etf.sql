@@ -1,7 +1,8 @@
 -- ETF 專區（2026-10-21）。
 --
 -- stock_crawler 寫入、stock_go 的 /stock/etfs 讀取：
---   etf_daily_nav   每個交易日 17:30 由證交所 MIS「ETF 預估淨值」寫入，隔一個營業日以「前一營業日單位淨值」回填 nav
+--   etf_daily_nav   每個交易日 17:30 由證交所 MIS「ETF 預估淨值」寫入，隔一個營業日以「前一營業日單位淨值」回填 nav；
+--                   MIS 上線（2026-10-21）前的日子由 MoneyDJ 歷史淨值回補（只有 nav 與市價，單位數為 NULL）
 --   etf_profile     每週六由 Yahoo ETF 頁寫入；沒有 Yahoo 資料的 ETF 以代號與名稱推得的分類補一列（source = 'heuristic'）
 --   etf_holding     前十大持股（只留最新一期）
 --   etf_allocation  行業比重與資產分佈（只留最新一期）
@@ -11,8 +12,8 @@ CREATE TABLE IF NOT EXISTS etf_daily_nav
 (
     date              DATE                                   NOT NULL, -- 資料日期（證交所 MIS 的 i 欄）
     stock_symbol      VARCHAR(24)                            NOT NULL,
-    outstanding_units BIGINT                                 NOT NULL, -- 已發行受益權單位數
-    units_change      BIGINT                                 NOT NULL, -- 與前一營業日已發行單位數的差異（正為淨申購）
+    outstanding_units BIGINT,                                          -- 已發行受益權單位數；歷史回補的列為 NULL
+    units_change      BIGINT,                                          -- 與前一營業日已發行單位數的差異（正為淨申購）；歷史回補的列為 NULL
     market_price      NUMERIC(18, 4),                                  -- 資料時間的成交價；無成交為 NULL
     estimated_nav     NUMERIC(18, 4),                                  -- 投信預估淨值
     premium_rate      NUMERIC(10, 4),                                  -- 預估折溢價幅度（%）
@@ -23,6 +24,10 @@ CREATE TABLE IF NOT EXISTS etf_daily_nav
 );
 
 CREATE INDEX IF NOT EXISTS etf_daily_nav_symbol_date_idx ON etf_daily_nav (stock_symbol, date DESC);
+
+-- 2026-10-22：單位數改為可空，供 MoneyDJ 歷史淨值回補（已建表的資料庫也要執行）。
+ALTER TABLE etf_daily_nav ALTER COLUMN outstanding_units DROP NOT NULL;
+ALTER TABLE etf_daily_nav ALTER COLUMN units_change DROP NOT NULL;
 
 COMMENT ON TABLE etf_daily_nav IS 'ETF 每日淨值、折溢價與受益單位（證交所 MIS 預估淨值）';
 COMMENT ON COLUMN etf_daily_nav.units_change IS '與前一營業日已發行單位數的差異；正為淨申購、負為淨買回';

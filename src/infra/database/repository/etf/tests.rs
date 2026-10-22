@@ -3,7 +3,7 @@
 use rust_decimal_macros::dec;
 
 use super::*;
-use crate::domain::etf::EtfHoldingRecord;
+use crate::domain::etf::{EtfHoldingRecord, EtfNavHistoryPoint};
 
 /// 測試用的假代號；寫入後一律清除。
 const FAKE: &str = "79979ET";
@@ -101,6 +101,70 @@ async fn save_navs_upserts_and_backfills_previous_official_nav() {
     assert_eq!(points.len(), 1);
     assert_eq!(points[0].date, day(30));
     assert!((points[0].premium_rate - 0.5).abs() < 1e-9);
+    cleanup().await;
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn nav_history_fills_missing_dates_only() {
+    dotenvy::dotenv().ok();
+    cleanup().await;
+    let repo = PgEtfRepository::new();
+    repo.save_navs(&[nav(day(30), 100, None)])
+        .await
+        .expect("寫入 MIS 那天");
+
+    let history = |date, nav, price| EtfNavHistoryPoint {
+        date,
+        nav,
+        market_price: price,
+    };
+    let inserted = repo
+        .insert_nav_history(
+            FAKE,
+            &[
+                history(day(28), dec!(20.00), Some(dec!(20.10))),
+                history(day(29), dec!(19.90), None),
+                history(day(30), dec!(1.00), Some(dec!(1.00))),
+            ],
+        )
+        .await
+        .expect("回補歷史淨值");
+    assert_eq!(inserted, 2);
+    assert_eq!(repo.insert_nav_history(FAKE, &[]).await.expect("空批次"), 0);
+
+    type Row = (
+        NaiveDate,
+        Option<i64>,
+        Option<Decimal>,
+        Option<Decimal>,
+        Option<Decimal>,
+    );
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT date, outstanding_units, nav, estimated_nav, premium_rate FROM etf_daily_nav WHERE stock_symbol = $1 ORDER BY date",
+    )
+    .bind(FAKE)
+    .fetch_all(database::get_connection())
+    .await
+    .expect("讀回淨值");
+    assert_eq!(
+        rows,
+        vec![
+            (day(28), None, Some(dec!(20.0000)), None, Some(dec!(0.5000))),
+            (day(29), None, Some(dec!(19.9000)), None, None),
+            // MIS 寫入的那天不被回補覆蓋。
+            (
+                day(30),
+                Some(100),
+                None,
+                Some(dec!(20.0000)),
+                Some(dec!(0.5000))
+            ),
+        ]
+    );
     cleanup().await;
 }
 

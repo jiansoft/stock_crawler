@@ -4,6 +4,8 @@
 //!   （與週六排程相同，約 15 分鐘）；已有資料覆蓋，重跑安全。
 //! - `test_backfill_etf_daily`：抓證交所 MIS 預估淨值、補推斷分類、重算含息績效並重建快照
 //!   （與週一～五 17:30 排程相同）；週末不執行。
+//! - `test_backfill_etf_nav_history`：抓 MoneyDJ 近 3 年到昨天的淨值與市價，補進 `etf_daily_nav`
+//!   還沒有的日期並重建快照（約 15 分鐘）；MIS 寫入的列不動，重跑安全。
 //! - `test_refresh_etf_snapshot`：只重建清單頁快照。
 
 use crate::app::backfill::etf_zone;
@@ -24,6 +26,16 @@ async fn test_backfill_etf_profiles() {
 async fn test_backfill_etf_daily() {
     dotenvy::dotenv().ok();
     etf_zone::execute_daily().await.expect("ETF 每日更新失敗");
+}
+
+/// MoneyDJ 歷史淨值（近 3 年）。
+#[tokio::test]
+#[ignore]
+async fn test_backfill_etf_nav_history() {
+    dotenvy::dotenv().ok();
+    etf_zone::backfill_nav_history(3)
+        .await
+        .expect("ETF 歷史淨值回補失敗");
 }
 
 /// 只重建快照（週末也會執行）。
