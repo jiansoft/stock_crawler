@@ -6,6 +6,7 @@
 //! - 波動、beta、夏普值用近 1 年的日報酬：波動＝標準差 × √252；beta＝與基準（0050）同日報酬的
 //!   共變異數 ÷ 基準變異數；夏普值＝日報酬平均 × 252 ÷ 年化波動（未扣無風險利率）。
 //! - 最大回撤取近 1 年收盤從前高到後低的最大跌幅。
+//! - 淨值含息報酬（[`compute_nav_returns`]）用同一套期間規則，序列換成以現金配息還原的正式淨值。
 
 use chrono::{Datelike, Months, NaiveDate};
 
@@ -52,6 +53,53 @@ pub struct EtfPerformance {
     pub year_low: Option<f64>,
     /// 今年還原後最高收盤。
     pub year_high: Option<f64>,
+    /// 以正式淨值計算的含息報酬；沒有淨值歷史時為 `None`。
+    pub nav_returns: Option<EtfNavReturns>,
+}
+
+/// 以正式淨值（現金配息已還原）計算的期間報酬；百分比，1 年以上為年化。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EtfNavReturns {
+    /// 計算基準日（最後一筆淨值的日期）。
+    pub calc_date: NaiveDate,
+    /// 1 週報酬。
+    pub ret_1w: Option<f64>,
+    /// 1 個月報酬。
+    pub ret_1m: Option<f64>,
+    /// 3 個月報酬。
+    pub ret_3m: Option<f64>,
+    /// 6 個月報酬。
+    pub ret_6m: Option<f64>,
+    /// 今年至今報酬。
+    pub ret_ytd: Option<f64>,
+    /// 1 年報酬。
+    pub ret_1y: Option<f64>,
+    /// 2 年年化報酬。
+    pub ret_2y: Option<f64>,
+    /// 3 年年化報酬。
+    pub ret_3y: Option<f64>,
+    /// 5 年年化報酬。
+    pub ret_5y: Option<f64>,
+    /// 10 年年化報酬。
+    pub ret_10y: Option<f64>,
+}
+
+/// 由還原後淨值序列（由舊到新，`close` 為淨值）計算期間報酬；序列為空時回傳 `None`。
+pub fn compute_nav_returns(nav_bars: &[PriceBar]) -> Option<EtfNavReturns> {
+    let perf = compute_performance("", nav_bars, &[]);
+    Some(EtfNavReturns {
+        calc_date: perf.calc_date?,
+        ret_1w: perf.ret_1w,
+        ret_1m: perf.ret_1m,
+        ret_3m: perf.ret_3m,
+        ret_6m: perf.ret_6m,
+        ret_ytd: perf.ret_ytd,
+        ret_1y: perf.ret_1y,
+        ret_2y: perf.ret_2y,
+        ret_3y: perf.ret_3y,
+        ret_5y: perf.ret_5y,
+        ret_10y: perf.ret_10y,
+    })
 }
 
 /// 近 1 年至少要有這麼多個日報酬，才計算波動、beta 與夏普值（約半年）。
@@ -212,6 +260,20 @@ mod tests {
 
     fn date(y: i32, m: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, d).expect("固定日期合法")
+    }
+
+    #[test]
+    fn nav_returns_follow_price_period_rules() {
+        assert_eq!(compute_nav_returns(&[]), None);
+        // 兩年每天漲一點：1 年報酬與 2 年年化都有，3 年以上歷史不足。
+        let bars = series(date(2024, 10, 1), 731, |i| 100.0 + i as f64 * 0.1);
+        let nav = compute_nav_returns(&bars).expect("有淨值");
+        assert_eq!(nav.calc_date, date(2026, 10, 1));
+        let price = compute_performance("x", &bars, &[]);
+        assert_eq!(nav.ret_1y, price.ret_1y);
+        assert_eq!(nav.ret_2y, price.ret_2y);
+        assert!(nav.ret_1m.is_some() && nav.ret_ytd.is_some());
+        assert_eq!(nav.ret_3y, None);
     }
 
     #[test]

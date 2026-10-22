@@ -3,7 +3,7 @@
 use rust_decimal_macros::dec;
 
 use super::*;
-use crate::domain::etf::{EtfHoldingRecord, EtfNavHistoryPoint};
+use crate::domain::etf::{EtfHoldingRecord, EtfNavHistoryPoint, EtfNavReturns};
 
 /// 測試用的假代號；寫入後一律清除。
 const FAKE: &str = "79979ET";
@@ -164,6 +164,46 @@ async fn nav_history_fills_missing_dates_only() {
                 Some(dec!(0.5000))
             ),
         ]
+    );
+    cleanup().await;
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn nav_series_prefers_official_nav() {
+    dotenvy::dotenv().ok();
+    cleanup().await;
+    let repo = PgEtfRepository::new();
+    repo.save_navs(&[nav(day(30), 100, None)])
+        .await
+        .expect("寫入 MIS 那天");
+    repo.insert_nav_history(
+        FAKE,
+        &[EtfNavHistoryPoint {
+            date: day(28),
+            nav: dec!(19.50),
+            market_price: None,
+        }],
+    )
+    .await
+    .expect("回補歷史");
+
+    let series = repo
+        .nav_series(&[FAKE.to_string()], day(1))
+        .await
+        .expect("讀淨值序列");
+    let points: Vec<(NaiveDate, f64)> = series[FAKE].iter().map(|b| (b.date, b.close)).collect();
+    // 4/30 還沒回填正式淨值，用預估淨值。
+    assert_eq!(points, vec![(day(28), 19.5), (day(30), 20.0)]);
+    assert!(
+        repo.nav_series(&[FAKE.to_string()], day(30))
+            .await
+            .expect("起日之後")[FAKE]
+            .len()
+            == 1
     );
     cleanup().await;
 }
@@ -375,10 +415,24 @@ async fn snapshot_combines_quote_nav_dividends_and_performance() {
         calc_date: Some(day(30)),
         ret_1y: Some(12.345_67),
         year_low: Some(18.0),
+        nav_returns: Some(EtfNavReturns {
+            calc_date: day(29),
+            ret_1y: Some(10.123_45),
+            ret_3y: None,
+            ..Default::default()
+        }),
         ..Default::default()
     }])
     .await
     .expect("寫入績效");
+    let nav_perf: (Option<NaiveDate>, Option<Decimal>, Option<Decimal>) = sqlx::query_as(
+        "SELECT nav_calc_date, nav_ret_1y, nav_ret_3y FROM etf_performance WHERE stock_symbol = $1",
+    )
+    .bind(FAKE)
+    .fetch_one(pool)
+    .await
+    .expect("讀回淨值報酬");
+    assert_eq!(nav_perf, (Some(day(29)), Some(dec!(10.1235)), None));
 
     assert!(repo.refresh_snapshot().await.expect("重建快照") >= 1);
 
