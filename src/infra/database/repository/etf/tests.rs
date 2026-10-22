@@ -287,6 +287,55 @@ async fn nav_history_fills_missing_dates_only() {
     not(feature = "integration-tests"),
     ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
 )]
+async fn weekly_flows_sum_recent_days_with_units() {
+    dotenvy::dotenv().ok();
+    cleanup().await;
+    // 用遠在未來的日期，確保是全表最近的幾天。
+    let future = |d| NaiveDate::from_ymd_opt(2099, 1, d).expect("日期應合法");
+    let repo = PgEtfRepository::new();
+    let record = |date, change: i64, premium| EtfNavRecord {
+        units_change: change,
+        premium_rate: Some(premium),
+        ..nav(date, 1_000, None)
+    };
+    repo.save_navs(&[
+        record(future(5), 999, dec!(9.0)),
+        record(future(6), 2_000, dec!(0.20)),
+        record(future(7), -500, dec!(0.40)),
+    ])
+    .await
+    .expect("寫入淨值");
+    // 沒有單位數的歷史回補列不算一個交易日。
+    repo.insert_nav_history(
+        FAKE,
+        &[EtfNavHistoryPoint {
+            date: future(8),
+            nav: dec!(20.0),
+            market_price: None,
+        }],
+    )
+    .await
+    .expect("回補歷史");
+
+    let flows = repo.weekly_flows(2).await.expect("讀資金流向");
+    let mine = flows
+        .iter()
+        .find(|flow| flow.stock_symbol == FAKE)
+        .expect("有測試代號");
+    // 預估淨值 20：(2000 − 500) × 20。
+    assert_eq!(mine.net_flow, 30_000.0);
+    assert_eq!((mine.from, mine.to), (future(6), future(7)));
+    assert_eq!(mine.premium_last, Some(0.4));
+    assert!((mine.premium_avg.expect("有平均") - 0.3).abs() < 1e-9);
+    assert_eq!(mine.name, FAKE, "沒有快照時以代號當名稱");
+    cleanup().await;
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
 async fn heuristic_profiles_never_overwrite_source_profiles() {
     dotenvy::dotenv().ok();
     cleanup().await;

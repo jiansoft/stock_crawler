@@ -12,7 +12,7 @@ use async_trait::async_trait;
 
 use super::{
     EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio, EtfProfileRecord,
-    EtfRepository, PremiumPoint,
+    EtfRepository, EtfWeeklyFlow, PremiumPoint,
 };
 
 /// 回傳固定的上市 ETF 清單，記錄歷史淨值的寫入與快照重建次數。
@@ -24,6 +24,8 @@ pub(crate) struct RecordingEtfRepository {
     pub(crate) inserted: Mutex<Vec<(String, usize)>>,
     /// `refresh_snapshot` 的呼叫次數。
     pub(crate) snapshots: AtomicUsize,
+    /// `weekly_flows` 回傳的資料。
+    pub(crate) weekly: Vec<EtfWeeklyFlow>,
 }
 
 impl RecordingEtfRepository {
@@ -91,6 +93,10 @@ impl EtfRepository for RecordingEtfRepository {
     async fn refresh_snapshot(&self) -> Result<u64> {
         self.snapshots.fetch_add(1, Ordering::SeqCst);
         Ok(self.listed.len() as u64)
+    }
+
+    async fn weekly_flows(&self, _days: i64) -> Result<Vec<EtfWeeklyFlow>> {
+        Ok(self.weekly.clone())
     }
 
     async fn recent_premiums(

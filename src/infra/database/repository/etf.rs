@@ -13,7 +13,7 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 use crate::{
     domain::etf::{
         EtfAllocationRecord, EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio,
-        EtfProfileRecord, EtfRepository, PremiumPoint,
+        EtfProfileRecord, EtfRepository, EtfWeeklyFlow, PremiumPoint,
     },
     infra::database,
 };
@@ -340,6 +340,24 @@ WHERE rn <= $2
 ORDER BY stock_symbol, date DESC
 "#;
 
+/// 最近 `$1` 個有單位數的交易日：每檔 ETF 的淨申購合計（單位增減 × 當日淨值）與折溢價。
+const WEEKLY_FLOWS_SQL: &str = r#"
+WITH d AS (
+    SELECT DISTINCT date FROM etf_daily_nav WHERE units_change IS NOT NULL ORDER BY date DESC LIMIT $1
+)
+SELECT n.stock_symbol::text AS stock_symbol, COALESCE(MAX(s.name), n.stock_symbol::text) AS name,
+       COALESCE(SUM(n.units_change * COALESCE(n.estimated_nav, n.nav)), 0)::float8 AS net_flow,
+       AVG(n.premium_rate)::float8 AS premium_avg,
+       (ARRAY_AGG(n.premium_rate ORDER BY n.date DESC))[1]::float8 AS premium_last,
+       MIN(n.date) AS from_date, MAX(n.date) AS to_date
+FROM etf_daily_nav AS n
+JOIN d USING (date)
+LEFT JOIN etf_snapshot AS s ON s.stock_symbol = n.stock_symbol
+WHERE n.units_change IS NOT NULL
+GROUP BY n.stock_symbol
+ORDER BY n.stock_symbol
+"#;
+
 /// f64 轉成 4 位小數的 `Decimal`；NaN、無限大為 `None`。
 fn to_decimal(value: Option<f64>) -> Option<Decimal> {
     value
@@ -600,6 +618,26 @@ impl EtfRepository for PgEtfRepository {
         Ok(written)
     }
 
+    async fn weekly_flows(&self, days: i64) -> Result<Vec<EtfWeeklyFlow>> {
+        let rows: Vec<WeeklyFlowRow> = sqlx::query_as(WEEKLY_FLOWS_SQL)
+            .bind(days)
+            .fetch_all(database::get_connection())
+            .await
+            .context("Failed to fetch ETF weekly flows")?;
+        Ok(rows
+            .into_iter()
+            .map(|row| EtfWeeklyFlow {
+                stock_symbol: row.stock_symbol,
+                name: row.name,
+                net_flow: row.net_flow,
+                premium_avg: row.premium_avg,
+                premium_last: row.premium_last,
+                from: row.from_date,
+                to: row.to_date,
+            })
+            .collect())
+    }
+
     async fn recent_premiums(
         &self,
         stock_symbols: &[String],
@@ -620,6 +658,18 @@ impl EtfRepository for PgEtfRepository {
         }
         Ok(out)
     }
+}
+
+/// [`WEEKLY_FLOWS_SQL`] 的一列。
+#[derive(sqlx::FromRow)]
+struct WeeklyFlowRow {
+    stock_symbol: String,
+    name: String,
+    net_flow: f64,
+    premium_avg: Option<f64>,
+    premium_last: Option<f64>,
+    from_date: NaiveDate,
+    to_date: NaiveDate,
 }
 
 async fn replace_allocation(

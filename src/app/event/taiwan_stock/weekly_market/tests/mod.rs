@@ -5,6 +5,7 @@
 //! [`message`]（組成整則訊息、各段降級與數字格式）；這裡放共用的資料建構函式。
 
 mod dividend;
+mod etf;
 mod fakes;
 mod holding_flow;
 mod message;
