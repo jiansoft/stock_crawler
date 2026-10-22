@@ -106,7 +106,7 @@ pub async fn execute() -> Result<()> {
             BTreeSet::new()
         });
     let fills = holding_fills(&PgDividendFillRepository::new(), &all, date).await;
-    let etfs = etf_section(&PgEtfRepository::new(), &all)
+    let etfs = etf_section(&PgEtfRepository::new(), &all, date)
         .await
         .unwrap_or_else(|why| {
             tracing::warn!("每週市場摘要：讀取 ETF 資金流向失敗: {why:#}");
