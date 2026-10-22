@@ -188,6 +188,7 @@ log/                 # runtime 檔案日誌輸出目錄
   - 千張大戶超過 9 天沒更新、董監持股的最新月份早於 55 天前那個月（兩者來源都只有最新一期，停更就補不回來）
   - 全部正常也會發一則簡短週報
 + 12:10 ETF 基本資料與持股：逐檔抓 Yahoo ETF 頁（全名、發行投信、追蹤指數、費率、配息頻率、投資地區、淨值報酬、前十大持股、行業比重、資產分佈），寫入 `etf_profile`、`etf_holding`、`etf_allocation` 後重建快照（約 15 分鐘；分類可用 `etf_profile.manual_override` 人工覆寫）
++ 13:05 補 ETF 淨值缺日：抓 MoneyDJ 近 30 天的正式淨值與市價，補上 MIS 排程失敗那天的資料列與還沒回填的正式淨值（MIS 寫入的市價與預估折溢價不動），再重建快照（約 15 分鐘）
 
 > DDNS IP 自動更新功能已自本專案移除，相關功能請改用 https://github.com/jiansoft/dynip。
 
@@ -209,10 +210,10 @@ log/                 # runtime 檔案日誌輸出目錄
 | `financial_health` | F 分數、毛利率、負債比、近四季自由現金流 | 07:10 | `test_rebuild_financial_health` |
 | `qfii_history` | 外資持股比例 | 22:00 | `test_backfill_foreign_holding_history` |
 | `strategy_rebalance` | 具名策略每次換股的持股紀錄 | 22:10（換股日） | `test_record_strategy_rebalance` |
-| `etf_daily_nav` | ETF 預估淨值、折溢價、已發行單位與單位增減 | 17:30 | `test_backfill_etf_nav_history`：MoneyDJ 近 3 年正式淨值與市價（折溢價由兩者算出、單位數留空），只補沒有的日期 |
+| `etf_daily_nav` | ETF 預估淨值、折溢價、已發行單位與單位增減 | 17:30、週六 13:05 補缺日 | `test_backfill_etf_nav_history`：MoneyDJ 近 3 年正式淨值與市價（折溢價由兩者算出、單位數留空），只補沒有的日期 |
 | `etf_performance` | ETF 市價含息報酬、淨值含息報酬（`nav_ret_*`）與近 1 年風險指標 | 17:30 | `test_backfill_etf_daily` |
 | `etf_profile`／`etf_holding`／`etf_allocation` | ETF 基本資料與分類、前十大持股、行業比重與資產分佈 | 週六 12:10 | `test_backfill_etf_profiles` |
-| `etf_snapshot` | stock_go ETF 專區清單頁的預先彙整（每檔一列） | 17:30、22:05、週六 12:10 | `test_refresh_etf_snapshot` |
+| `etf_snapshot` | stock_go ETF 專區清單頁的預先彙整（每檔一列） | 17:30、22:05、週六 12:10／13:05 | `test_refresh_etf_snapshot` |
 
 技術訊號、未來報酬、相對強度與籌碼從 2019 年起；2022-02-17 以前沒有估價，市場廣度只有均線上下、漲跌家數與 52 週新高／新低。
 

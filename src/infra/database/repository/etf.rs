@@ -57,24 +57,48 @@ WHERE (etf_daily_nav.outstanding_units, etf_daily_nav.units_change, etf_daily_na
        EXCLUDED.estimated_nav, EXCLUDED.premium_rate, EXCLUDED.source_time)
 "#;
 
-/// 以「前一營業日單位淨值」回填同一檔 ETF 在該日期之前最後一筆的正式淨值。
+/// 以「前一營業日單位淨值」回填前一個交易日那一列的正式淨值；那天 MIS 沒抓到時補一列只有淨值的資料。
+///
+/// 前一個交易日取加權指數與 `etf_daily_nav` 兩份日曆中較晚的那天：只看這檔 ETF 自己的上一筆，
+/// 遇到前一天缺資料就會把淨值寫進更早一天；兩份日曆互為備援，其中一邊漏寫一天也不會錯位。
 const BACKFILL_NAV_SQL: &str = r#"
-UPDATE etf_daily_nav AS n
-SET nav = b.prev_nav, updated_at = NOW()
+INSERT INTO etf_daily_nav (date, stock_symbol, nav)
+SELECT p.date, b.stock_symbol, b.prev_nav
 FROM UNNEST($1::date[], $2::varchar[], $3::numeric[]) AS b(date, stock_symbol, prev_nav)
-WHERE n.stock_symbol = b.stock_symbol
-  AND n.date = (SELECT MAX(p.date) FROM etf_daily_nav AS p
-                WHERE p.stock_symbol = b.stock_symbol AND p.date < b.date)
-  AND n.nav IS DISTINCT FROM b.prev_nav
+CROSS JOIN LATERAL (
+    SELECT GREATEST(
+        (SELECT MAX(i."date") FROM "index" AS i WHERE i.category = 'TAIEX' AND i."date" < b.date),
+        (SELECT MAX(n.date) FROM etf_daily_nav AS n WHERE n.date < b.date)
+    ) AS date
+) AS p
+WHERE p.date IS NOT NULL
+ON CONFLICT (date, stock_symbol) DO UPDATE SET nav = EXCLUDED.nav, updated_at = NOW()
+WHERE etf_daily_nav.nav IS DISTINCT FROM EXCLUDED.nav
 "#;
 
-/// 回補歷史淨值：只新增沒有的日期（MIS 寫入的列不動），折溢價以收盤市價對正式淨值計算。
+/// 回補歷史淨值：新增沒有的日期，折溢價以收盤市價對正式淨值計算。
+/// 已有的列只補空欄：正式淨值為空就補上；市價與折溢價只補沒有單位數的列（回補或回填補出的列），
+/// 折溢價以保留下來的淨值計算（MIS 回填的正式淨值優先）；MIS 寫入的市價、預估折溢價一律不動。
 const INSERT_NAV_HISTORY_SQL: &str = r#"
 INSERT INTO etf_daily_nav (date, stock_symbol, market_price, nav, premium_rate)
 SELECT h.date, $1, h.market_price, h.nav,
        CASE WHEN h.market_price IS NOT NULL THEN ROUND((h.market_price - h.nav) / h.nav * 100, 4) END
 FROM UNNEST($2::date[], $3::numeric[], $4::numeric[]) AS h(date, nav, market_price)
-ON CONFLICT (date, stock_symbol) DO NOTHING
+ON CONFLICT (date, stock_symbol) DO UPDATE SET
+    nav = COALESCE(etf_daily_nav.nav, EXCLUDED.nav),
+    market_price = CASE WHEN etf_daily_nav.outstanding_units IS NULL
+                        THEN COALESCE(etf_daily_nav.market_price, EXCLUDED.market_price)
+                        ELSE etf_daily_nav.market_price END,
+    premium_rate = CASE WHEN etf_daily_nav.outstanding_units IS NULL
+                        THEN COALESCE(etf_daily_nav.premium_rate,
+                                      ROUND((COALESCE(etf_daily_nav.market_price, EXCLUDED.market_price)
+                                             - COALESCE(etf_daily_nav.nav, EXCLUDED.nav))
+                                            / COALESCE(etf_daily_nav.nav, EXCLUDED.nav) * 100, 4))
+                        ELSE etf_daily_nav.premium_rate END,
+    updated_at = NOW()
+WHERE etf_daily_nav.nav IS NULL
+   OR (etf_daily_nav.outstanding_units IS NULL AND etf_daily_nav.market_price IS NULL
+       AND EXCLUDED.market_price IS NOT NULL)
 "#;
 
 const SAVE_PROFILE_SQL: &str = r#"
