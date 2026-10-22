@@ -209,6 +209,8 @@ pub(crate) fn router() -> Router {
             "/market/valuation",
             axum::routing::get(handlers::market_valuation),
         )
+        .route("/etfs", axum::routing::get(handlers::list_etfs))
+        .route("/etfs/{symbol}", axum::routing::get(handlers::etf_detail))
         .route(
             "/market/cagr-ranking",
             axum::routing::get(handlers::cagr_ranking),

@@ -9,6 +9,8 @@ pub mod classify;
 pub mod entity;
 /// 含息期間報酬與近 1 年風險指標。
 pub mod performance;
+/// Data API 讀取 ETF 專區的查詢合約。
+pub mod query;
 /// ETF 倉儲合約。
 pub mod repository;
 /// ETF 領域之測試替身；僅在測試建置下編譯。

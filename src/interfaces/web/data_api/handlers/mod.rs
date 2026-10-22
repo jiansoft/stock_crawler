@@ -13,6 +13,7 @@ mod cagr;
 mod chip;
 mod dividend_fill;
 mod dividend_forecast;
+mod etf;
 mod financial_health;
 mod financial_reports;
 mod industries;
@@ -60,6 +61,7 @@ pub(super) use cagr::{__path_cagr_by_symbol, __path_cagr_ranking, cagr_by_symbol
 pub(super) use chip::{__path_stock_chip, stock_chip};
 pub(super) use dividend_fill::{__path_dividend_fill, dividend_fill};
 pub(super) use dividend_forecast::{__path_dividend_forecast, dividend_forecast};
+pub(super) use etf::{__path_etf_detail, __path_list_etfs, etf_detail, list_etfs};
 pub(super) use financial_health::{__path_financial_health, financial_health};
 pub(super) use financial_reports::{__path_financial_reports, financial_reports};
 pub(super) use industries::{__path_industry_performance, industry_performance};
