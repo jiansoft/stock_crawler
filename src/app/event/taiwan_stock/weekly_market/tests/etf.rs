@@ -2,9 +2,14 @@
 
 use std::collections::BTreeSet;
 
+use rust_decimal_macros::dec;
+
 use super::super::etf::{EtfWeekSection, etf_section, lines};
 use super::*;
-use crate::domain::etf::{EtfWeeklyFlow, test_double::RecordingEtfRepository};
+use crate::domain::etf::{
+    EtfHoldingPeriod, EtfHoldingPeriods, EtfHoldingRecord, EtfWeeklyFlow,
+    test_double::RecordingEtfRepository,
+};
 
 fn flow(symbol: &str, net_flow: f64) -> EtfWeeklyFlow {
     EtfWeeklyFlow {
@@ -33,7 +38,7 @@ async fn section_keeps_held_etfs_with_data_and_lists_top_flows() {
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let section = etf_section(&repo, &holdings)
+    let section = etf_section(&repo, &holdings, day(24))
         .await
         .expect("查詢成功")
         .expect("有資料");
@@ -56,7 +61,7 @@ async fn section_keeps_held_etfs_with_data_and_lists_top_flows() {
 
     let empty = RecordingEtfRepository::default();
     assert!(
-        etf_section(&empty, &holdings)
+        etf_section(&empty, &holdings, day(24))
             .await
             .expect("查詢成功")
             .is_none()
@@ -66,6 +71,7 @@ async fn section_keeps_held_etfs_with_data_and_lists_top_flows() {
         to: day(23),
         flows: vec![flow("0050", 0.0)],
         held: Vec::new(),
+        changes: Vec::new(),
     };
     assert!(
         lines(&quiet).is_empty(),
@@ -80,6 +86,7 @@ fn etf_section_alone_makes_a_message_dated_by_its_last_day() {
         to: day(23),
         flows: vec![flow("0050", 2e8)],
         held: Vec::new(),
+        changes: Vec::new(),
     };
     let message = build_message(
         None,
@@ -101,5 +108,77 @@ fn etf_section_alone_makes_a_message_dated_by_its_last_day() {
     assert!(
         message.contains(&esc("淨流入：0050 名稱0050 +2.0 億")),
         "{message}"
+    );
+}
+
+fn holding(rank: i16, symbol: &str, name: &str, weight: rust_decimal::Decimal) -> EtfHoldingRecord {
+    EtfHoldingRecord {
+        rank,
+        holding_symbol: symbol.to_owned(),
+        holding_name: name.to_owned(),
+        weight,
+    }
+}
+
+#[tokio::test]
+async fn held_etf_with_new_holding_period_lists_changes() {
+    let period = |month, rows: Vec<EtfHoldingRecord>| EtfHoldingPeriod {
+        as_of: NaiveDate::from_ymd_opt(2026, month, 1).expect("合法日期"),
+        holdings: rows,
+    };
+    let repo = RecordingEtfRepository {
+        weekly: vec![flow("0050", 1e8)],
+        periods: vec![
+            EtfHoldingPeriods {
+                stock_symbol: "0050".to_owned(),
+                previous: period(
+                    9,
+                    vec![
+                        holding(1, "2330", "台積電", dec!(56.40)),
+                        holding(2, "2317", "鴻海", dec!(4.80)),
+                    ],
+                ),
+                current: period(
+                    10,
+                    vec![
+                        holding(1, "2330", "台積電", dec!(58.10)),
+                        holding(2, "2308", "台達電", dec!(2.30)),
+                    ],
+                ),
+            },
+            // 沒有差異的不列。
+            EtfHoldingPeriods {
+                stock_symbol: "0056".to_owned(),
+                previous: period(9, vec![holding(1, "2454", "聯發科", dec!(4.00))]),
+                current: period(10, vec![holding(1, "2454", "聯發科", dec!(4.00))]),
+            },
+        ],
+        ..Default::default()
+    };
+    let holdings: BTreeSet<String> = ["0050", "0056"].iter().map(|s| s.to_string()).collect();
+    let section = etf_section(&repo, &holdings, day(24))
+        .await
+        .expect("查詢成功")
+        .expect("有資料");
+    assert_eq!(section.changes.len(), 1);
+    let text = lines(&section);
+    assert_eq!(
+        text.last().map(String::as_str),
+        Some(concat!(
+            "持有 0050 名稱0050 前十大持股更新（09-01 → 10-01）：新進 2308 台達電 2.30%；",
+            "剔除 2317 鴻海 4.80%；權重變化 2330 台積電 56.40% → 58.10%（+1.70）"
+        ))
+    );
+
+    // 只有持股換期、沒有任何淨申購時，整段仍出現。
+    let quiet = EtfWeekSection {
+        flows: vec![flow("0050", 0.0)],
+        held: Vec::new(),
+        ..section
+    };
+    assert!(
+        lines(&quiet)
+            .iter()
+            .any(|line| line.contains("前十大持股更新"))
     );
 }

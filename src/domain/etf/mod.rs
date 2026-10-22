@@ -7,6 +7,8 @@
 pub mod classify;
 /// ETF 實體。
 pub mod entity;
+/// 前十大持股兩期之間的差異。
+pub mod holding_diff;
 /// 含息期間報酬與近 1 年風險指標。
 pub mod performance;
 /// Data API 讀取 ETF 專區的查詢合約。
@@ -19,8 +21,8 @@ pub mod test_double;
 
 pub use classify::{Classification, ClassifyHint, Strategy, classify};
 pub use entity::{
-    EtfAllocationRecord, EtfHoldingRecord, EtfNavHistoryPoint, EtfNavRecord, EtfPortfolio,
-    EtfProfileRecord, EtfWeeklyFlow, PremiumPoint,
+    EtfAllocationRecord, EtfHoldingPeriod, EtfHoldingPeriods, EtfHoldingRecord, EtfNavHistoryPoint,
+    EtfNavRecord, EtfPortfolio, EtfProfileRecord, EtfWeeklyFlow, PremiumPoint,
 };
 pub use performance::{EtfNavReturns, EtfPerformance, compute_nav_returns, compute_performance};
 pub use repository::EtfRepository;

@@ -81,6 +81,26 @@ CREATE TABLE IF NOT EXISTS etf_holding
 
 COMMENT ON TABLE etf_holding IS 'ETF 前十大持股（只留最新一期）';
 
+-- 2026-10-23：前十大持股每一期都留一份，供每週市場摘要比較持有 ETF 的持股變化。
+CREATE TABLE IF NOT EXISTS etf_holding_history
+(
+    stock_symbol   VARCHAR(24)                            NOT NULL,
+    as_of          DATE                                   NOT NULL, -- 持股資料日期（一期）
+    rank           SMALLINT                               NOT NULL,
+    holding_symbol VARCHAR(32)                            NOT NULL DEFAULT '',
+    holding_name   TEXT                                   NOT NULL,
+    weight         NUMERIC(8, 4)                          NOT NULL, -- 比例（%）
+    recorded_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL, -- 第一次收到這一期的時間
+    CONSTRAINT etf_holding_history_pkey PRIMARY KEY (stock_symbol, as_of, rank)
+);
+
+COMMENT ON TABLE etf_holding_history IS 'ETF 前十大持股的歷史，每一期一份；recorded_at 為第一次收到該期的時間';
+
+-- 建表時把目前的最新一期帶進來（重跑安全）。
+INSERT INTO etf_holding_history (stock_symbol, as_of, rank, holding_symbol, holding_name, weight)
+SELECT stock_symbol, as_of, rank, holding_symbol, holding_name, weight FROM etf_holding
+ON CONFLICT (stock_symbol, as_of, rank) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS etf_allocation
 (
     stock_symbol VARCHAR(24)                            NOT NULL,

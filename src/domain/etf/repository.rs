@@ -7,8 +7,8 @@ use chrono::NaiveDate;
 use crate::domain::quote::technical::PriceBar;
 
 use super::{
-    EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio, EtfProfileRecord,
-    EtfWeeklyFlow, PremiumPoint,
+    EtfHoldingPeriods, EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio,
+    EtfProfileRecord, EtfWeeklyFlow, PremiumPoint,
 };
 
 /// ETF 專區資料的倉儲合約。寫入方法回傳實際新增或變更的列數。
@@ -52,6 +52,14 @@ pub trait EtfRepository: Send + Sync {
 
     /// 重建清單頁快照 `etf_snapshot`（每檔一列），回傳寫入列數。
     async fn refresh_snapshot(&self) -> Result<u64>;
+
+    /// 指定 ETF 中，最新一期前十大持股在 `recorded_since`（含）之後才收到、且有前一期可比的，
+    /// 回傳兩期的持股。
+    async fn holding_periods(
+        &self,
+        stock_symbols: &[String],
+        recorded_since: NaiveDate,
+    ) -> Result<Vec<EtfHoldingPeriods>>;
 
     /// 全部 ETF 最近 `days` 個有單位數的交易日的淨申購合計與折溢價；沒有單位數的歷史回補日不計。
     async fn weekly_flows(&self, days: i64) -> Result<Vec<EtfWeeklyFlow>>;
