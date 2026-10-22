@@ -12,8 +12,8 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     domain::etf::{
-        EtfAllocationRecord, EtfNavRecord, EtfPerformance, EtfPortfolio, EtfProfileRecord,
-        EtfRepository, PremiumPoint,
+        EtfAllocationRecord, EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio,
+        EtfProfileRecord, EtfRepository, PremiumPoint,
     },
     infra::database,
 };
@@ -65,6 +65,15 @@ WHERE n.stock_symbol = b.stock_symbol
   AND n.date = (SELECT MAX(p.date) FROM etf_daily_nav AS p
                 WHERE p.stock_symbol = b.stock_symbol AND p.date < b.date)
   AND n.nav IS DISTINCT FROM b.prev_nav
+"#;
+
+/// 回補歷史淨值：只新增沒有的日期（MIS 寫入的列不動），折溢價以收盤市價對正式淨值計算。
+const INSERT_NAV_HISTORY_SQL: &str = r#"
+INSERT INTO etf_daily_nav (date, stock_symbol, market_price, nav, premium_rate)
+SELECT h.date, $1, h.market_price, h.nav,
+       CASE WHEN h.market_price IS NOT NULL THEN ROUND((h.market_price - h.nav) / h.nav * 100, 4) END
+FROM UNNEST($2::date[], $3::numeric[], $4::numeric[]) AS h(date, nav, market_price)
+ON CONFLICT (date, stock_symbol) DO NOTHING
 "#;
 
 const SAVE_PROFILE_SQL: &str = r#"
@@ -376,6 +385,28 @@ impl EtfRepository for PgEtfRepository {
             .rows_affected();
         tx.commit().await?;
         Ok(written + backfilled)
+    }
+
+    async fn insert_nav_history(
+        &self,
+        stock_symbol: &str,
+        points: &[EtfNavHistoryPoint],
+    ) -> Result<u64> {
+        if points.is_empty() {
+            return Ok(0);
+        }
+        let dates: Vec<NaiveDate> = points.iter().map(|p| p.date).collect();
+        let navs: Vec<Decimal> = points.iter().map(|p| p.nav).collect();
+        let prices: Vec<Option<Decimal>> = points.iter().map(|p| p.market_price).collect();
+        Ok(sqlx::query(INSERT_NAV_HISTORY_SQL)
+            .bind(stock_symbol)
+            .bind(&dates)
+            .bind(&navs)
+            .bind(&prices)
+            .execute(database::get_connection())
+            .await
+            .context("Failed to insert ETF nav history")?
+            .rows_affected())
     }
 
     async fn save_profiles(&self, profiles: &[EtfProfileRecord]) -> Result<u64> {

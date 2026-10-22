@@ -24,6 +24,17 @@ pub struct EtfNavRecord {
     pub source_time: Option<DateTime<FixedOffset>>,
 }
 
+/// 一檔 ETF 某一天的正式淨值與收盤市價（MoneyDJ 歷史資料，用來回補 MIS 上線前的日子）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct EtfNavHistoryPoint {
+    /// 資料日期。
+    pub date: NaiveDate,
+    /// 正式單位淨值。
+    pub nav: Decimal,
+    /// 收盤市價；來源沒有時為 `None`。
+    pub market_price: Option<Decimal>,
+}
+
 /// ETF 基本資料與分類。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EtfProfileRecord {

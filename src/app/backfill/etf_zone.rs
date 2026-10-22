@@ -7,11 +7,12 @@
 //! | [`execute_daily`] | 證交所 MIS 預估淨值 → 補推斷分類 → 含息績效 → 重建快照 | 週一～五 17:30 |
 //! | [`execute_weekly_profiles`] | Yahoo ETF 頁的基本資料、分類與持股 → 重建快照 | 週六 12:10 |
 //! | [`refresh_snapshot`] | 只重建快照（21:50 籌碼入庫後帶進外資買賣超） | 週一～五 22:05 |
+//! | [`backfill_nav_history`] | MoneyDJ 歷史淨值與市價 → 重建快照（補 MIS 上線前的日子） | 手動 |
 
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use chrono::Local;
+use chrono::{Local, Months, NaiveDate};
 use rand::RngExt;
 
 use crate::{
@@ -19,7 +20,7 @@ use crate::{
     core::util::datetime::Weekend,
     domain::etf::{ClassifyHint, EtfProfileRecord, EtfRepository, classify},
     infra::{
-        crawler::{twse, yahoo},
+        crawler::{moneydj, twse, yahoo},
         database::repository::etf::PgEtfRepository,
     },
 };
@@ -108,6 +109,49 @@ pub async fn execute_weekly_profiles() -> Result<()> {
     Ok(())
 }
 
+/// 逐檔抓 MoneyDJ 最近 `years` 年到昨天的淨值與市價，補進 `etf_daily_nav` 還沒有的日期，最後重建快照
+/// （近 20 筆折溢價平均跟著有歷史可算）。今天交給 MIS：MoneyDJ 當天的淨值可能還是前一天的數字。
+///
+/// # Errors
+///
+/// 資料庫操作失敗，或超過一半的 ETF 抓取失敗時回傳錯誤。
+pub async fn backfill_nav_history(years: u32) -> Result<()> {
+    let (from, to) =
+        nav_history_range(Local::now().date_naive(), years).context("回補起日超出範圍")?;
+    let repo = PgEtfRepository::new();
+    let listed = repo.listed_etfs().await?;
+    let (mut inserted, mut empty, mut failed) = (0u64, 0usize, 0usize);
+
+    for (index, (symbol, _)) in listed.iter().enumerate() {
+        if index > 0 {
+            request_interval().await;
+        }
+        match moneydj::etf_nav::visit(symbol, from, to).await {
+            Ok(points) if points.is_empty() => empty += 1,
+            Ok(points) => inserted += repo.insert_nav_history(symbol, &points).await?,
+            Err(why) => {
+                failed += 1;
+                tracing::warn!("MoneyDJ ETF 淨值抓取失敗: stock_symbol={symbol}, error={why:#}");
+            }
+        }
+    }
+    let rows = repo.refresh_snapshot().await?;
+    tracing::info!(
+        "ETF 歷史淨值回補: etfs={}, from={from}, to={to}, inserted={inserted}, empty={empty}, failed={failed}, snapshot_rows={rows}",
+        listed.len()
+    );
+    if too_many_failures(failed, listed.len()) {
+        bail!("MoneyDJ ETF 淨值抓取失敗 {failed}／{} 檔", listed.len());
+    }
+    Ok(())
+}
+
+/// 回補區間：`years` 年前的今天到昨天。
+fn nav_history_range(today: NaiveDate, years: u32) -> Option<(NaiveDate, NaiveDate)> {
+    let from = today.checked_sub_months(Months::new(years.checked_mul(12)?))?;
+    Some((from, today.pred_opt()?))
+}
+
 /// 只重建快照。
 ///
 /// # Errors
@@ -179,6 +223,19 @@ async fn request_interval() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nav_history_range_ends_yesterday() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 22).expect("日期應合法");
+        assert_eq!(
+            nav_history_range(today, 3),
+            Some((
+                NaiveDate::from_ymd_opt(2023, 10, 22).expect("日期應合法"),
+                NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法"),
+            ))
+        );
+        assert_eq!(nav_history_range(today, u32::MAX), None);
+    }
 
     #[test]
     fn heuristic_profile_uses_symbol_and_name_only() {

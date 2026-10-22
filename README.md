@@ -209,7 +209,7 @@ log/                 # runtime 檔案日誌輸出目錄
 | `financial_health` | F 分數、毛利率、負債比、近四季自由現金流 | 07:10 | `test_rebuild_financial_health` |
 | `qfii_history` | 外資持股比例 | 22:00 | `test_backfill_foreign_holding_history` |
 | `strategy_rebalance` | 具名策略每次換股的持股紀錄 | 22:10（換股日） | `test_record_strategy_rebalance` |
-| `etf_daily_nav` | ETF 預估淨值、折溢價、已發行單位與單位增減 | 17:30 | 無法回補（來源只有當天） |
+| `etf_daily_nav` | ETF 預估淨值、折溢價、已發行單位與單位增減 | 17:30 | `test_backfill_etf_nav_history`：MoneyDJ 近 3 年正式淨值與市價（折溢價由兩者算出、單位數留空），只補沒有的日期 |
 | `etf_performance` | ETF 含息報酬與近 1 年風險指標 | 17:30 | `test_backfill_etf_daily` |
 | `etf_profile`／`etf_holding`／`etf_allocation` | ETF 基本資料與分類、前十大持股、行業比重與資產分佈 | 週六 12:10 | `test_backfill_etf_profiles` |
 | `etf_snapshot` | stock_go ETF 專區清單頁的預先彙整（每檔一列） | 17:30、22:05、週六 12:10 | `test_refresh_etf_snapshot` |
