@@ -13,7 +13,7 @@ use chrono::NaiveDate;
 
 use super::{
     EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio, EtfProfileRecord,
-    EtfRepository, EtfWeeklyFlow, PremiumPoint,
+    EtfRepository, EtfWeeklyFlow, PremiumPoint, UnitsChangePoint,
 };
 use crate::domain::quote::technical::PriceBar;
 
@@ -107,6 +107,13 @@ impl EtfRepository for RecordingEtfRepository {
 
     async fn weekly_flows(&self, _days: i64) -> Result<Vec<EtfWeeklyFlow>> {
         Ok(self.weekly.clone())
+    }
+
+    async fn latest_units(
+        &self,
+        _stock_symbols: &[String],
+    ) -> Result<HashMap<String, UnitsChangePoint>> {
+        unimplemented!()
     }
 
     async fn recent_premiums(
