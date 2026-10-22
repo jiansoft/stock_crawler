@@ -142,7 +142,7 @@ resolve_latest_versions() {
   fi
 
   ZLIB_NG_VERSION="$(latest_github_tag 'zlib-ng/zlib-ng')"
-  PCRE2_VERSION="$(latest_from_url 'https://github.com/PCRE2Project/pcre2/releases' 'pcre2-[0-9]+\.[0-9]+')"
+  PCRE2_VERSION="$(latest_github_tag 'PCRE2Project/pcre2')"
   require_version "zlib-ng" "$ZLIB_NG_VERSION"
   require_version "PCRE2" "$PCRE2_VERSION"
 
