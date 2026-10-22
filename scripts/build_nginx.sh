@@ -16,7 +16,12 @@ WITH_IMAGE_FILTER="${WITH_IMAGE_FILTER:-1}"
 BROTLI_DIR="${BROTLI_DIR:-/opt/nginx/source/ngx_brotli}"
 OPENSSL_PROVIDER="${OPENSSL_PROVIDER:-openssl}"
 DRY_RUN="${DRY_RUN:-0}"
-JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
+# 平行編譯數：未指定時依記憶體決定，每 1 GiB 一個、至少 1、不超過 CPU 數（見 default_jobs）。
+# Pi 3 只有 1 GiB，`make -j 4` 連 OpenSSL 一起編時會大量 swap，sshd 與 stock-go-web 都沒反應
+# （2026-10-22 實測 SSH 逾時、網站 504），因此 1 GiB 的機器預設只開 1 個。
+JOBS="${JOBS:-}"
+# 1＝以最低 CPU 優先權（nice 19）與 idle I/O 類別編譯，正式服務優先；0＝不調整。
+LOW_PRIORITY="${LOW_PRIORITY:-1}"
 RESTART_AFTER_INSTALL="${RESTART_AFTER_INSTALL:-1}"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 CURRENT_LINK="${CURRENT_LINK:-${INSTALL_ROOT}/current}"
@@ -93,6 +98,26 @@ latest_server_from_url() {
       ' \
     | sort -V \
     | tail -n 1 || true
+}
+
+default_jobs() {
+  local cpus mem_kb jobs
+  cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
+  mem_kb="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 0)"
+  jobs=$(( mem_kb / 1048576 ))
+  [ "$jobs" -ge 1 ] || jobs=1
+  [ "$jobs" -le "$cpus" ] || jobs="$cpus"
+  echo "$jobs"
+}
+
+lower_priority() {
+  [ "$LOW_PRIORITY" = "1" ] || return 0
+
+  # 子程序（configure、make、gcc）都會繼承本程序的 nice 值與 I/O 類別。
+  renice -n 19 -p "$$" >/dev/null 2>&1 || log "警告：renice 失敗，維持原 CPU 優先權"
+  if command -v ionice >/dev/null 2>&1; then
+    ionice -c 3 -p "$$" >/dev/null 2>&1 || log "警告：ionice 失敗，維持原 I/O 優先權"
+  fi
 }
 
 latest_github_tag() {
@@ -474,6 +499,10 @@ main() {
   if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     die "需要 curl 或 wget 其中一個下載工具"
   fi
+
+  [ -n "$JOBS" ] || JOBS="$(default_jobs)"
+  lower_priority
+  log "平行編譯數：${JOBS}；低優先權：${LOW_PRIORITY}"
 
   resolve_latest_versions
   download_sources
