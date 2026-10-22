@@ -7,6 +7,7 @@
 //! | [`execute_daily`] | 證交所 MIS 預估淨值 → 補推斷分類 → 含息績效 → 重建快照 | 週一～五 17:30 |
 //! | [`execute_weekly_profiles`] | Yahoo ETF 頁的基本資料、分類與持股 → 重建快照 | 週六 12:10 |
 //! | [`refresh_snapshot`] | 只重建快照（21:50 籌碼入庫後帶進外資買賣超） | 週一～五 22:05 |
+//! | [`fill_recent_nav_gaps`] | MoneyDJ 近 30 天淨值 → 補缺日與空欄 → 重建快照 | 週六 13:05 |
 //! | [`backfill_nav_history`] | MoneyDJ 歷史淨值與市價 → 重建快照（補 MIS 上線前的日子） | 手動 |
 
 use std::time::Duration;
@@ -27,6 +28,9 @@ use crate::{
 
 /// 每累積這麼多檔 Yahoo 基本資料就寫入一次，任務中途中止也不會全部白抓。
 const PROFILE_BATCH: usize = 50;
+
+/// 每週補缺日往回看的天數（日曆天）。
+const GAP_FILL_DAYS: i64 = 30;
 
 /// 每個交易日：淨值、推斷分類、績效與快照。淨值抓取失敗時其餘步驟照做，最後回傳錯誤以觸發告警。
 ///
@@ -118,13 +122,27 @@ pub async fn execute_weekly_profiles() -> Result<()> {
 pub async fn backfill_nav_history(years: u32) -> Result<()> {
     let (from, to) =
         nav_history_range(Local::now().date_naive(), years).context("回補起日超出範圍")?;
+    backfill_nav_range(from, to).await
+}
+
+/// 每週：以 MoneyDJ 近 30 天的淨值補上缺日（MIS 排程失敗的日子）與空欄（正式淨值還沒回填的列）。
+///
+/// # Errors
+///
+/// 資料庫操作失敗，或超過一半的 ETF 抓取失敗時回傳錯誤。
+pub async fn fill_recent_nav_gaps() -> Result<()> {
+    let (from, to) = recent_range(Local::now().date_naive()).context("補缺日區間超出範圍")?;
+    backfill_nav_range(from, to).await
+}
+
+async fn backfill_nav_range(from: NaiveDate, to: NaiveDate) -> Result<()> {
     let repo = PgEtfRepository::new();
     let listed = repo.listed_etfs().await?;
     let symbols: Vec<&str> = listed.iter().map(|(symbol, _)| symbol.as_str()).collect();
     let tally = backfill_symbols(
         &symbols,
-        async |symbol| moneydj::etf_nav::visit(symbol, from, to).await,
-        async |symbol, points| repo.insert_nav_history(symbol, points).await,
+        |symbol| async move { moneydj::etf_nav::visit(&symbol, from, to).await },
+        |symbol, points| async move { repo.insert_nav_history(&symbol, &points).await },
         request_interval,
     )
     .await?;
@@ -158,20 +176,31 @@ struct NavHistoryTally {
 }
 
 /// 逐檔抓取並寫入；檔與檔之間呼叫 `pause`。抓取失敗只記錄並略過，寫入失敗則中止。
-async fn backfill_symbols(
+///
+/// 參數都傳擁有權而不是借用：借用參數的 async closure 產生的 future 無法證明是 `Send`，
+/// 排程任務（`create_job`）要求 `Send`。
+async fn backfill_symbols<Fetch, FetchFut, Save, SaveFut, Pause, PauseFut>(
     symbols: &[&str],
-    mut fetch: impl AsyncFnMut(&str) -> Result<Vec<EtfNavHistoryPoint>>,
-    mut save: impl AsyncFnMut(&str, &[EtfNavHistoryPoint]) -> Result<u64>,
-    mut pause: impl AsyncFnMut(),
-) -> Result<NavHistoryTally> {
+    mut fetch: Fetch,
+    mut save: Save,
+    mut pause: Pause,
+) -> Result<NavHistoryTally>
+where
+    Fetch: FnMut(String) -> FetchFut,
+    FetchFut: Future<Output = Result<Vec<EtfNavHistoryPoint>>>,
+    Save: FnMut(String, Vec<EtfNavHistoryPoint>) -> SaveFut,
+    SaveFut: Future<Output = Result<u64>>,
+    Pause: FnMut() -> PauseFut,
+    PauseFut: Future<Output = ()>,
+{
     let mut tally = NavHistoryTally::default();
     for (index, symbol) in symbols.iter().enumerate() {
         if index > 0 {
             pause().await;
         }
-        match fetch(symbol).await {
+        match fetch(symbol.to_string()).await {
             Ok(points) if points.is_empty() => tally.empty += 1,
-            Ok(points) => tally.inserted += save(symbol, &points).await?,
+            Ok(points) => tally.inserted += save(symbol.to_string(), points).await?,
             Err(why) => {
                 tally.failed += 1;
                 tracing::warn!("MoneyDJ ETF 淨值抓取失敗: stock_symbol={symbol}, error={why:#}");
@@ -179,6 +208,14 @@ async fn backfill_symbols(
         }
     }
     Ok(tally)
+}
+
+/// 補缺日區間：[`GAP_FILL_DAYS`] 天前到昨天。
+fn recent_range(today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
+    Some((
+        today.checked_sub_signed(chrono::Duration::days(GAP_FILL_DAYS))?,
+        today.pred_opt()?,
+    ))
 }
 
 /// 回補區間：`years` 年前的今天到昨天。
@@ -270,16 +307,22 @@ mod tests {
         let mut pauses = 0;
         let tally = backfill_symbols(
             &["0050", "9999", "00679B"],
-            async |symbol| match symbol {
-                "0050" => Ok(vec![point.clone(), point.clone()]),
-                "9999" => Ok(Vec::new()),
-                _ => Err(anyhow::anyhow!("逾時")),
+            |symbol| {
+                let result = match symbol.as_str() {
+                    "0050" => Ok(vec![point.clone(), point.clone()]),
+                    "9999" => Ok(Vec::new()),
+                    _ => Err(anyhow::anyhow!("逾時")),
+                };
+                async move { result }
             },
-            async |symbol, points| {
-                saved.push(symbol.to_string());
-                Ok(points.len() as u64)
+            |symbol, points| {
+                saved.push(symbol);
+                async move { Ok(points.len() as u64) }
             },
-            async || pauses += 1,
+            || {
+                pauses += 1;
+                async {}
+            },
         )
         .await
         .expect("抓取失敗不應中止");
@@ -296,9 +339,12 @@ mod tests {
 
         let result = backfill_symbols(
             &["0050"],
-            async |_| Ok(vec![point.clone()]),
-            async |_, _| Err(anyhow::anyhow!("連線中斷")),
-            async || {},
+            |_| {
+                let points = vec![point.clone()];
+                async move { Ok(points) }
+            },
+            |_, _| async { Err(anyhow::anyhow!("連線中斷")) },
+            || async {},
         )
         .await;
         assert!(result.is_err(), "寫入失敗要中止");
@@ -315,6 +361,13 @@ mod tests {
             ))
         );
         assert_eq!(nav_history_range(today, u32::MAX), None);
+        assert_eq!(
+            recent_range(today),
+            Some((
+                NaiveDate::from_ymd_opt(2026, 9, 22).expect("日期應合法"),
+                NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法"),
+            ))
+        );
     }
 
     #[test]

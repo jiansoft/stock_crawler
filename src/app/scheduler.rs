@@ -294,6 +294,13 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "更新 ETF 基本資料與持股",
             etf_zone::execute_weekly_profiles,
         ),
+        // 13:05（週六）MoneyDJ 補近 30 天的 ETF 淨值缺日與空欄（MIS 只給當天，排程失敗那天不補就永遠缺），
+        // 排在 12:10 Yahoo 基本資料（約 15 分鐘）之後，兩個來源不同時抓。
+        create_job(
+            "0 5 13 * * Sat",
+            "補 ETF 淨值缺日",
+            etf_zone::fill_recent_nav_gaps,
+        ),
         // 11:00（週六）資料健康週報：近 7 天的交易日完整性、均線、漲跌幅、衍生資料新鮮度、
         // 月營收與股利佔位列；這類問題來源不會報錯，只能定期量。
         create_job(
