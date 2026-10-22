@@ -136,14 +136,38 @@ pub async fn fill_recent_nav_gaps() -> Result<()> {
 }
 
 async fn backfill_nav_range(from: NaiveDate, to: NaiveDate) -> Result<()> {
-    let repo = PgEtfRepository::new();
+    backfill_nav_range_with(
+        &PgEtfRepository::new(),
+        from,
+        to,
+        |symbol| async move { moneydj::etf_nav::visit(&symbol, from, to).await },
+        request_interval,
+    )
+    .await
+}
+
+/// 逐檔回補上市 ETF 的淨值，最後重建快照；倉儲、抓取與停頓由呼叫端注入。
+async fn backfill_nav_range_with<R, Fetch, FetchFut, Pause, PauseFut>(
+    repo: &R,
+    from: NaiveDate,
+    to: NaiveDate,
+    fetch: Fetch,
+    pause: Pause,
+) -> Result<()>
+where
+    R: EtfRepository,
+    Fetch: FnMut(String) -> FetchFut,
+    FetchFut: Future<Output = Result<Vec<EtfNavHistoryPoint>>>,
+    Pause: FnMut() -> PauseFut,
+    PauseFut: Future<Output = ()>,
+{
     let listed = repo.listed_etfs().await?;
     let symbols: Vec<&str> = listed.iter().map(|(symbol, _)| symbol.as_str()).collect();
     let tally = backfill_symbols(
         &symbols,
-        |symbol| async move { moneydj::etf_nav::visit(&symbol, from, to).await },
+        fetch,
         |symbol, points| async move { repo.insert_nav_history(&symbol, &points).await },
-        request_interval,
+        pause,
     )
     .await?;
     let rows = repo.refresh_snapshot().await?;
@@ -348,6 +372,52 @@ mod tests {
         )
         .await;
         assert!(result.is_err(), "寫入失敗要中止");
+    }
+
+    #[tokio::test]
+    async fn backfill_range_writes_rebuilds_snapshot_and_alerts_on_mass_failure() {
+        use crate::domain::etf::test_double::RecordingEtfRepository;
+
+        let day = NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法");
+        let point = EtfNavHistoryPoint {
+            date: day,
+            nav: rust_decimal::Decimal::ONE,
+            market_price: None,
+        };
+        let repo = RecordingEtfRepository::with_listed(&["0050", "0056", "00679B"]);
+        backfill_nav_range_with(
+            &repo,
+            day,
+            day,
+            |symbol| {
+                let result = if symbol == "00679B" {
+                    Err(anyhow::anyhow!("逾時"))
+                } else {
+                    Ok(vec![point.clone()])
+                };
+                async move { result }
+            },
+            || async {},
+        )
+        .await
+        .expect("一檔失敗不算整體失敗");
+        assert_eq!(
+            repo.inserted(),
+            vec![("0050".to_string(), 1), ("0056".to_string(), 1)]
+        );
+        assert_eq!(repo.snapshots(), 1);
+
+        let failing = RecordingEtfRepository::with_listed(&["0050", "0056"]);
+        let result = backfill_nav_range_with(
+            &failing,
+            day,
+            day,
+            |_| async { Err(anyhow::anyhow!("封鎖")) },
+            || async {},
+        )
+        .await;
+        assert!(result.is_err(), "超過一半失敗要告警");
+        assert_eq!(failing.snapshots(), 1, "失敗也照樣重建快照");
     }
 
     #[test]
