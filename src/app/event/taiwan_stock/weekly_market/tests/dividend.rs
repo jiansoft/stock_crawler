@@ -121,6 +121,7 @@ async fn run_includes_dividend_fills() {
         &holdings(),
         None,
         &fills,
+        None,
     )
     .await
     .expect("有內容");

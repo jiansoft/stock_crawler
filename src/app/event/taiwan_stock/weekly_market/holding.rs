@@ -1,11 +1,13 @@
 //! 每週市場摘要的持股相對強度一段：持股 RS 與一週前相比上升、下降最多的幾檔。
 
-use super::{TOP, WEEK_DAYS, dividend::HoldingFill, holding_flow::HoldingFlowSection};
+use super::{
+    TOP, WEEK_DAYS, dividend::HoldingFill, etf::EtfWeekSection, holding_flow::HoldingFlowSection,
+};
 use crate::domain::{
     portfolio::health::HoldingFundamentals, quote::relative_strength::RelativeStrengthDay,
 };
 
-/// 持股相關的四段：RS 一週變化、法人與主力一週買賣超、填息、基本面警示。
+/// 持股相關的各段：RS 一週變化、法人與主力一週買賣超、填息、基本面警示，以及 ETF 資金流向。
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct HoldingSection<'a> {
     /// 持股 RS 一週變化。
@@ -16,6 +18,8 @@ pub(super) struct HoldingSection<'a> {
     pub(super) fills: &'a [HoldingFill],
     /// 持股的營收與三率（基本面警示一段用）。
     pub(super) fundamentals: &'a [HoldingFundamentals],
+    /// 全市場與持有 ETF 的一週淨申購與折溢價。
+    pub(super) etfs: Option<&'a EtfWeekSection>,
 }
 
 /// 一檔持股的 RS 一週變化。

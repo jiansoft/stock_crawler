@@ -123,6 +123,25 @@ pub struct EtfPortfolio {
     pub assets: Vec<EtfAllocationRecord>,
 }
 
+/// 一檔 ETF 最近幾個交易日的資金流向與折溢價，供每週市場摘要使用。
+#[derive(Debug, Clone, PartialEq)]
+pub struct EtfWeeklyFlow {
+    /// ETF 代號。
+    pub stock_symbol: String,
+    /// 名稱（沒有快照時為代號）。
+    pub name: String,
+    /// 期間淨申購金額（元）：每日單位增減 × 當日淨值的合計，正為淨流入。
+    pub net_flow: f64,
+    /// 期間折溢價平均（%）。
+    pub premium_avg: Option<f64>,
+    /// 期間最後一天的折溢價（%）。
+    pub premium_last: Option<f64>,
+    /// 期間第一個交易日。
+    pub from: NaiveDate,
+    /// 期間最後一個交易日。
+    pub to: NaiveDate,
+}
+
 /// 某一天的折溢價，供折溢價通知判斷連續天數。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PremiumPoint {

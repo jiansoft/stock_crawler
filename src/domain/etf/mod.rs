@@ -20,7 +20,7 @@ pub mod test_double;
 pub use classify::{Classification, ClassifyHint, Strategy, classify};
 pub use entity::{
     EtfAllocationRecord, EtfHoldingRecord, EtfNavHistoryPoint, EtfNavRecord, EtfPortfolio,
-    EtfProfileRecord, PremiumPoint,
+    EtfProfileRecord, EtfWeeklyFlow, PremiumPoint,
 };
 pub use performance::{EtfNavReturns, EtfPerformance, compute_nav_returns, compute_performance};
 pub use repository::EtfRepository;
