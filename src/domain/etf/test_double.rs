@@ -9,11 +9,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::NaiveDate;
 
 use super::{
     EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio, EtfProfileRecord,
     EtfRepository, PremiumPoint,
 };
+use crate::domain::quote::technical::PriceBar;
 
 /// 回傳固定的上市 ETF 清單，記錄歷史淨值的寫入與快照重建次數。
 #[derive(Default)]
@@ -81,6 +83,14 @@ impl EtfRepository for RecordingEtfRepository {
     }
 
     async fn replace_portfolio(&self, _portfolio: &EtfPortfolio) -> Result<u64> {
+        unimplemented!()
+    }
+
+    async fn nav_series(
+        &self,
+        _stock_symbols: &[String],
+        _from: NaiveDate,
+    ) -> Result<HashMap<String, Vec<PriceBar>>> {
         unimplemented!()
     }
 

@@ -20,5 +20,5 @@ pub use entity::{
     EtfAllocationRecord, EtfHoldingRecord, EtfNavHistoryPoint, EtfNavRecord, EtfPortfolio,
     EtfProfileRecord, PremiumPoint,
 };
-pub use performance::{EtfPerformance, compute_performance};
+pub use performance::{EtfNavReturns, EtfPerformance, compute_nav_returns, compute_performance};
 pub use repository::EtfRepository;

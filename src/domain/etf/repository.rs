@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::NaiveDate;
+
+use crate::domain::quote::technical::PriceBar;
 
 use super::{
     EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio, EtfProfileRecord, PremiumPoint,
@@ -34,6 +37,14 @@ pub trait EtfRepository: Send + Sync {
     /// 以最新一期取代一檔 ETF 的前十大持股、行業比重與資產分佈。
     /// 某個區塊沒有資料時保留舊資料（來源暫時缺漏不應把已知的持股清空）。
     async fn replace_portfolio(&self, portfolio: &EtfPortfolio) -> Result<u64>;
+
+    /// 多檔 ETF 自 `from` 起的淨值序列（`close` 為淨值；正式淨值優先，當天未回填時用預估淨值），
+    /// 依代號分組、由舊到新；沒有淨值的代號不在結果中。
+    async fn nav_series(
+        &self,
+        stock_symbols: &[String],
+        from: NaiveDate,
+    ) -> Result<HashMap<String, Vec<PriceBar>>>;
 
     /// 寫入（或更正）績效；也刪除已下市 ETF 的績效。
     async fn save_performances(&self, performances: &[EtfPerformance]) -> Result<u64>;
