@@ -32,6 +32,31 @@ async fn cleanup() {
     }
 }
 
+/// 在加權指數日曆補上交易日（回填前一個交易日要用），回傳本測試新增的列，結束時交給 [`remove_trading_days`]。
+async fn trading_days(dates: &[NaiveDate]) -> Vec<i64> {
+    let mut serials = Vec::new();
+    for date in dates {
+        let inserted: Option<i64> = sqlx::query_scalar(
+            r#"INSERT INTO "index" (category, "date") VALUES ('TAIEX', $1)
+               ON CONFLICT DO NOTHING RETURNING serial"#,
+        )
+        .bind(date)
+        .fetch_optional(database::get_connection())
+        .await
+        .expect("寫入交易日");
+        serials.extend(inserted);
+    }
+    serials
+}
+
+async fn remove_trading_days(serials: &[i64]) {
+    sqlx::query(r#"DELETE FROM "index" WHERE serial = ANY($1)"#)
+        .bind(serials)
+        .execute(database::get_connection())
+        .await
+        .expect("清除交易日");
+}
+
 fn nav(date: NaiveDate, units: i64, previous_nav: Option<Decimal>) -> EtfNavRecord {
     EtfNavRecord {
         date,
@@ -61,6 +86,7 @@ fn to_decimal_rounds_and_rejects_non_finite() {
 async fn save_navs_upserts_and_backfills_previous_official_nav() {
     dotenvy::dotenv().ok();
     cleanup().await;
+    let calendar = trading_days(&[day(29), day(30)]).await;
     let repo = PgEtfRepository::new();
 
     repo.save_navs(&[nav(day(29), 100, None)])
@@ -101,6 +127,94 @@ async fn save_navs_upserts_and_backfills_previous_official_nav() {
     assert_eq!(points.len(), 1);
     assert_eq!(points[0].date, day(30));
     assert!((points[0].premium_rate - 0.5).abs() < 1e-9);
+    remove_trading_days(&calendar).await;
+    cleanup().await;
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn missing_day_gets_its_own_official_nav_and_gap_fill_completes_it() {
+    dotenvy::dotenv().ok();
+    cleanup().await;
+    let calendar = trading_days(&[day(27), day(28), day(29)]).await;
+    let repo = PgEtfRepository::new();
+
+    // 4/28 MIS 沒抓到；4/29 帶來的「前一營業日淨值」屬於 4/28，不可寫進 4/27。
+    repo.save_navs(&[nav(day(27), 100, None)])
+        .await
+        .expect("寫入 4/27");
+    repo.save_navs(&[nav(day(29), 100, Some(dec!(19.80)))])
+        .await
+        .expect("寫入 4/29");
+
+    // 每週補缺：4/28 補上市價與折溢價；4/27 的正式淨值補上；MIS 寫入的市價不動。
+    let point = |date, nav, price| EtfNavHistoryPoint {
+        date,
+        nav,
+        market_price: Some(price),
+    };
+    let filled = repo
+        .insert_nav_history(
+            FAKE,
+            &[
+                point(day(27), dec!(19.70), dec!(1.00)),
+                point(day(28), dec!(19.85), dec!(19.80)),
+                point(day(29), dec!(19.90), dec!(1.00)),
+            ],
+        )
+        .await
+        .expect("補缺日");
+    assert_eq!(filled, 3, "4/27、4/29 的正式淨值與 4/28 的市價");
+    let again = repo
+        .insert_nav_history(FAKE, &[point(day(28), dec!(19.85), dec!(19.80))])
+        .await
+        .expect("重送");
+    assert_eq!(again, 0, "沒有空欄可補時不寫入");
+
+    type Row = (
+        NaiveDate,
+        Option<i64>,
+        Option<Decimal>,
+        Option<Decimal>,
+        Option<Decimal>,
+    );
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT date, outstanding_units, nav, market_price, premium_rate FROM etf_daily_nav WHERE stock_symbol = $1 ORDER BY date",
+    )
+    .bind(FAKE)
+    .fetch_all(database::get_connection())
+    .await
+    .expect("讀回淨值");
+    assert_eq!(
+        rows,
+        vec![
+            (
+                day(27),
+                Some(100),
+                Some(dec!(19.7000)),
+                Some(dec!(20.1000)),
+                Some(dec!(0.5000))
+            ),
+            (
+                day(28),
+                None,
+                Some(dec!(19.8000)),
+                Some(dec!(19.8000)),
+                Some(dec!(0.0000))
+            ),
+            (
+                day(29),
+                Some(100),
+                Some(dec!(19.9000)),
+                Some(dec!(20.1000)),
+                Some(dec!(0.5000))
+            ),
+        ]
+    );
+    remove_trading_days(&calendar).await;
     cleanup().await;
 }
 
@@ -133,7 +247,7 @@ async fn nav_history_fills_missing_dates_only() {
         )
         .await
         .expect("回補歷史淨值");
-    assert_eq!(inserted, 2);
+    assert_eq!(inserted, 3, "新增 4/28、4/29，並補上 4/30 空的正式淨值");
     assert_eq!(repo.insert_nav_history(FAKE, &[]).await.expect("空批次"), 0);
 
     type Row = (
@@ -155,11 +269,11 @@ async fn nav_history_fills_missing_dates_only() {
         vec![
             (day(28), None, Some(dec!(20.0000)), None, Some(dec!(0.5000))),
             (day(29), None, Some(dec!(19.9000)), None, None),
-            // MIS 寫入的那天不被回補覆蓋。
+            // MIS 寫入的那天只補空的正式淨值，預估淨值與折溢價不動。
             (
                 day(30),
                 Some(100),
-                None,
+                Some(dec!(1.0000)),
                 Some(dec!(20.0000)),
                 Some(dec!(0.5000))
             ),
