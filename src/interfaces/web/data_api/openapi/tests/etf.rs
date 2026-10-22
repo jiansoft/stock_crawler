@@ -83,3 +83,27 @@ fn openapi_etf_detail_schema_pins_field_names() {
         "#/components/schemas/EtfNavPoint"
     );
 }
+
+/// ETF 比較 path 的契約：symbols 參數、404、重疊欄位。
+#[test]
+fn openapi_etf_compare_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/etfs/compare");
+    assert_endpoint_responses(operation, "EtfCompareResponse", true);
+    assert!(
+        query_schema(operation, "symbols")["type"]
+            .to_string()
+            .contains("string")
+    );
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["EtfCompareResponse"]["properties"]["overlaps"]["items"]["$ref"],
+        "#/components/schemas/EtfOverlap"
+    );
+    for field in ["a", "b", "common", "overlap_weight"] {
+        assert!(
+            schemas["EtfOverlap"]["properties"].get(field).is_some(),
+            "缺少 {field}"
+        );
+    }
+}

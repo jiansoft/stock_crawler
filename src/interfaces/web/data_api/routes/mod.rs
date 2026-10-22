@@ -210,6 +210,7 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::market_valuation),
         )
         .route("/etfs", axum::routing::get(handlers::list_etfs))
+        .route("/etfs/compare", axum::routing::get(handlers::compare_etfs))
         .route("/etfs/{symbol}", axum::routing::get(handlers::etf_detail))
         .route(
             "/market/cagr-ranking",

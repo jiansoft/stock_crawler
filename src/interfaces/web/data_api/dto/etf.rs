@@ -301,3 +301,75 @@ pub(crate) struct EtfDetailResponse {
     /// 近期每日淨值與折溢價，由新到舊。
     pub(crate) navs: Vec<EtfNavPoint>,
 }
+
+/// ETF 比較的 query string。
+#[derive(Debug, Default, Deserialize, IntoParams)]
+pub(crate) struct EtfCompareParams {
+    /// 要比較的 ETF 代號，2 至 4 檔，以逗號分隔（例如 `0050,006208`）。
+    pub(crate) symbols: Option<String>,
+}
+
+/// 比較表的一檔 ETF；比率為 %，金額為元，報酬 3 年以上年化。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct EtfCompareItem {
+    /// ETF 代號。
+    pub(crate) stock_symbol: String,
+    /// 名稱。
+    pub(crate) name: String,
+    /// 分類代碼。
+    pub(crate) strategy: String,
+    /// 追蹤指數。
+    pub(crate) benchmark: String,
+    /// 經理費（來源原文）；沒有基本資料時為空字串。
+    pub(crate) management_fee: String,
+    /// 保管費（來源原文）；沒有基本資料時為空字串。
+    pub(crate) custodian_fee: String,
+    /// 資產規模（元）。
+    pub(crate) total_assets: Option<f64>,
+    /// 收盤價。
+    pub(crate) closing_price: Option<f64>,
+    /// 折溢價（%）。
+    pub(crate) premium_rate: Option<f64>,
+    /// 近 20 筆折溢價平均（%）。
+    pub(crate) premium_avg_20d: Option<f64>,
+    /// 近 12 個月殖利率（%）。
+    pub(crate) yield_12m: Option<f64>,
+    /// 配息頻率。
+    pub(crate) dividend_frequency: String,
+    /// 近 1 年市價含息報酬（%）。
+    pub(crate) ret_1y: Option<f64>,
+    /// 3 年年化市價含息報酬（%）。
+    pub(crate) ret_3y: Option<f64>,
+    /// 近 1 年淨值含息報酬（%）。
+    pub(crate) nav_ret_1y: Option<f64>,
+    /// 近 1 年年化波動（%）。
+    pub(crate) vol_1y: Option<f64>,
+    /// 近 1 年最大回撤（%，負值）。
+    pub(crate) mdd_1y: Option<f64>,
+    /// 近 1 年夏普值。
+    pub(crate) sharpe_1y: Option<f64>,
+    /// 前十大持股的資料日期。
+    pub(crate) holdings_as_of: Option<String>,
+}
+
+/// 兩檔 ETF 前十大持股的重疊。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct EtfOverlap {
+    /// 第一檔代號。
+    pub(crate) a: String,
+    /// 第二檔代號。
+    pub(crate) b: String,
+    /// 兩檔前十大都有的持股（依重疊權重由大到小）。
+    pub(crate) common: Vec<String>,
+    /// 重疊權重（%）：共同持股取兩檔比例較小者加總；只看前十大，實際重疊只會更高。
+    pub(crate) overlap_weight: f64,
+}
+
+/// ETF 比較。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct EtfCompareResponse {
+    /// 依查詢順序的各檔資料。
+    pub(crate) items: Vec<EtfCompareItem>,
+    /// 兩兩之間的前十大持股重疊（任一檔沒有前十大時不列）。
+    pub(crate) overlaps: Vec<EtfOverlap>,
+}

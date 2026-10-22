@@ -18,8 +18,9 @@ use crate::domain::etf::query::{
 };
 use crate::infra::database::repository::etf_query::PgEtfQueryRepository;
 use crate::interfaces::web::data_api::dto::{
-    ErrorBody, EtfAllocationItem, EtfDetailParams, EtfDetailResponse, EtfHoldingItem, EtfItem,
-    EtfListParams, EtfListResponse, EtfNavPoint, EtfPerformanceInfo, EtfProfileInfo,
+    ErrorBody, EtfAllocationItem, EtfCompareItem, EtfCompareParams, EtfCompareResponse,
+    EtfDetailParams, EtfDetailResponse, EtfHoldingItem, EtfItem, EtfListParams, EtfListResponse,
+    EtfNavPoint, EtfOverlap, EtfPerformanceInfo, EtfProfileInfo,
 };
 
 /// 可用的分類代碼。
@@ -90,6 +91,141 @@ pub(crate) async fn etf_detail(
         Ok(None) => error_response(StatusCode::NOT_FOUND, "查無這檔 ETF"),
         Err(error) => repository_error(error),
     }
+}
+
+/// 一次最多比較幾檔。
+const MAX_COMPARE: usize = 4;
+
+/// 比較 2 至 4 檔 ETF 的費率、規模、折溢價、配息、報酬、風險與前十大持股重疊。
+///
+/// # Errors
+///
+/// `symbols` 不是 2 至 4 個不重複的合法代號回 422；其中有不是上市櫃 ETF 的代號回 404；
+/// 驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。
+#[utoipa::path(get, path = "/api/v1/etfs/compare", tag = "data-api", params(EtfCompareParams), responses((status = 200, body = EtfCompareResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
+pub(crate) async fn compare_etfs(Query(params): Query<EtfCompareParams>) -> Response {
+    let symbols = match compare_symbols(params.symbols.as_deref()) {
+        Ok(symbols) => symbols,
+        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let repo = PgEtfQueryRepository::new();
+    let mut details = Vec::with_capacity(symbols.len());
+    for symbol in &symbols {
+        match repo.etf_detail(symbol, 1).await {
+            Ok(Some(detail)) => details.push(detail),
+            Ok(None) => {
+                return error_response(StatusCode::NOT_FOUND, &format!("查無這檔 ETF：{symbol}"));
+            }
+            Err(error) => return repository_error(error),
+        }
+    }
+    Json(compare_response(&details)).into_response()
+}
+
+/// 解析比較的代號：去空白、轉大寫、2 至 [`MAX_COMPARE`] 檔、不重複、格式合法。
+fn compare_symbols(value: Option<&str>) -> Result<Vec<String>, &'static str> {
+    let symbols: Vec<String> = value
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_ascii_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if !(2..=MAX_COMPARE).contains(&symbols.len()) {
+        return Err("symbols 必須是 2 至 4 檔 ETF 代號，以逗號分隔");
+    }
+    if symbols.iter().any(|s| !valid_symbol(s)) {
+        return Err("ETF 代號格式不正確");
+    }
+    if (1..symbols.len()).any(|i| symbols[..i].contains(&symbols[i])) {
+        return Err("symbols 不可重複");
+    }
+    Ok(symbols)
+}
+
+/// 前十大持股的比對鍵：有台股代號用代號，債券等沒有代號用名稱。
+fn holding_key(row: &EtfWeightRow) -> &str {
+    if row.symbol.is_empty() {
+        &row.label
+    } else {
+        &row.symbol
+    }
+}
+
+/// 兩檔前十大持股的重疊；任一檔沒有前十大時回 `None`。
+fn overlap(a: &EtfDetail, b: &EtfDetail) -> Option<EtfOverlap> {
+    let holdings = |detail: &'_ EtfDetail| -> Vec<EtfWeightRow> {
+        detail
+            .weights
+            .iter()
+            .filter(|w| w.kind == "holding")
+            .cloned()
+            .collect()
+    };
+    let (left, right) = (holdings(a), holdings(b));
+    if left.is_empty() || right.is_empty() {
+        return None;
+    }
+    let mut common: Vec<(String, f64)> = left
+        .iter()
+        .filter_map(|l| {
+            let r = right.iter().find(|r| holding_key(r) == holding_key(l))?;
+            let label = if l.symbol.is_empty() {
+                l.label.clone()
+            } else {
+                format!("{} {}", l.symbol, l.label)
+            };
+            Some((label, l.weight.min(r.weight)))
+        })
+        .collect();
+    common.sort_by(|x, y| y.1.total_cmp(&x.1));
+    Some(EtfOverlap {
+        a: a.overview.stock_symbol.clone(),
+        b: b.overview.stock_symbol.clone(),
+        overlap_weight: round2(common.iter().map(|(_, w)| w).sum()),
+        common: common.into_iter().map(|(label, _)| label).collect(),
+    })
+}
+
+/// 組出比較回應：各檔一列，加上兩兩重疊。
+fn compare_response(details: &[EtfDetail]) -> EtfCompareResponse {
+    let items = details
+        .iter()
+        .map(|d| {
+            let o = &d.overview;
+            let p = d.performance.clone().unwrap_or_default();
+            let (fee, custodian) = d
+                .profile
+                .as_ref()
+                .map(|p| (p.management_fee.clone(), p.custodian_fee.clone()))
+                .unwrap_or_default();
+            EtfCompareItem {
+                stock_symbol: o.stock_symbol.clone(),
+                name: o.name.clone(),
+                strategy: o.strategy.clone(),
+                benchmark: o.benchmark.clone(),
+                management_fee: fee,
+                custodian_fee: custodian,
+                total_assets: o.total_assets,
+                closing_price: o.closing_price.map(round2),
+                premium_rate: o.premium_rate.map(round2),
+                premium_avg_20d: o.premium_avg_20d.map(round2),
+                yield_12m: o.yield_12m.map(round2),
+                dividend_frequency: o.dividend_frequency.clone(),
+                ret_1y: p.ret_1y.map(round2),
+                ret_3y: p.ret_3y.map(round2),
+                nav_ret_1y: p.nav_ret_1y.map(round2),
+                vol_1y: p.vol_1y.map(round2),
+                mdd_1y: p.mdd_1y.map(round2),
+                sharpe_1y: p.sharpe_1y.map(round2),
+                holdings_as_of: block(&d.weights, "holding").0,
+            }
+        })
+        .collect();
+    let overlaps = (0..details.len())
+        .flat_map(|i| ((i + 1)..details.len()).map(move |j| (i, j)))
+        .filter_map(|(i, j)| overlap(&details[i], &details[j]))
+        .collect();
+    EtfCompareResponse { items, overlaps }
 }
 
 /// 驗證並轉換清單參數。
@@ -371,6 +507,95 @@ mod tests {
         ] {
             assert!(list_filter(&bad).is_err(), "{bad:?} 應為 422");
         }
+    }
+
+    #[test]
+    fn compare_symbols_normalize_and_validate() {
+        assert_eq!(
+            compare_symbols(Some(" 0050, 006208 ,00679b,")),
+            Ok(vec![
+                "0050".to_owned(),
+                "006208".to_owned(),
+                "00679B".to_owned()
+            ])
+        );
+        for bad in [
+            None,
+            Some("0050"),
+            Some("1,2,3,4,5"),
+            Some("0050,0050"),
+            Some("0050,00;"),
+        ] {
+            assert!(compare_symbols(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn compare_response_lists_items_and_pairwise_overlap() {
+        let day = NaiveDate::from_ymd_opt(2026, 10, 1).expect("日期合法");
+        let holding = |symbol: &str, label: &str, weight: f64| EtfWeightRow {
+            kind: "holding".to_owned(),
+            as_of: day,
+            symbol: symbol.to_owned(),
+            label: label.to_owned(),
+            weight,
+        };
+        let detail = |symbol: &str, weights: Vec<EtfWeightRow>| EtfDetail {
+            overview: EtfOverview {
+                stock_symbol: symbol.to_owned(),
+                premium_rate: Some(0.456),
+                ..Default::default()
+            },
+            weights,
+            ..Default::default()
+        };
+        let details = vec![
+            detail(
+                "0050",
+                vec![
+                    holding("2330", "台積電", 56.4),
+                    holding("2317", "鴻海", 4.8),
+                    holding("2454", "聯發科", 4.5),
+                ],
+            ),
+            EtfDetail {
+                profile: Some(EtfProfileView {
+                    management_fee: "0.15%".to_owned(),
+                    ..Default::default()
+                }),
+                performance: Some(EtfPerformanceView {
+                    nav_ret_1y: Some(73.891),
+                    ..Default::default()
+                }),
+                ..detail(
+                    "006208",
+                    vec![
+                        holding("2330", "台積電", 57.0),
+                        holding("2454", "聯發科", 4.2),
+                    ],
+                )
+            },
+            // 債券 ETF 沒有台股持股；與其他檔沒有共同持股時仍列出 0。
+            detail("00679B", vec![holding("", "US TREASURY 2055", 5.3)]),
+            // 沒有前十大持股的不列重疊。
+            detail("00632R", Vec::new()),
+        ];
+        let response = compare_response(&details);
+        assert_eq!(response.items.len(), 4);
+        assert_eq!(response.items[0].premium_rate, Some(0.46));
+        assert_eq!(
+            response.items[0].holdings_as_of.as_deref(),
+            Some("2026-10-01")
+        );
+        assert_eq!(response.items[1].management_fee, "0.15%");
+        assert_eq!(response.items[1].nav_ret_1y, Some(73.89));
+        assert_eq!(response.overlaps.len(), 3, "00632R 沒有持股不列");
+        let first = &response.overlaps[0];
+        assert_eq!((first.a.as_str(), first.b.as_str()), ("0050", "006208"));
+        assert_eq!(first.common, vec!["2330 台積電", "2454 聯發科"]);
+        assert_eq!(first.overlap_weight, 60.6);
+        assert_eq!(response.overlaps[1].overlap_weight, 0.0);
+        assert!(response.overlaps[1].common.is_empty());
     }
 
     #[test]
