@@ -11,6 +11,7 @@ mod cagr;
 mod chip;
 mod dividend_fill;
 mod dividend_forecast;
+mod etf;
 mod financial_health;
 mod financial_reports;
 mod fundamentals;
@@ -52,6 +53,11 @@ pub(super) use dividend_fill::{
 pub(super) use dividend_forecast::{
     DividendForecastItem, DividendForecastMonth, DividendForecastParams, DividendForecastResponse,
     ForecastBasisValue,
+};
+pub(super) use etf::{
+    EtfAllocationItem, EtfDetailParams, EtfDetailResponse, EtfFrequencyValue, EtfHoldingItem,
+    EtfItem, EtfListParams, EtfListResponse, EtfNavPoint, EtfPerformanceInfo, EtfProfileInfo,
+    EtfSortValue, EtfStrategyValue,
 };
 pub(super) use financial_health::{
     FinancialHealthParams, FinancialHealthResponse, HealthCategoryValue, HealthCriterion,

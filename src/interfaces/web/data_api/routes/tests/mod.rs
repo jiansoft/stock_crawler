@@ -15,6 +15,7 @@ use super::router;
 
 mod cagr;
 mod chip;
+mod etf;
 mod financials;
 mod flows;
 mod industries;
