@@ -95,6 +95,26 @@ pub struct EtfHoldingRecord {
     pub weight: Decimal,
 }
 
+/// 一檔 ETF 某一期的前十大持股。
+#[derive(Debug, Clone, PartialEq)]
+pub struct EtfHoldingPeriod {
+    /// 持股資料日期。
+    pub as_of: NaiveDate,
+    /// 前十大持股，依排名。
+    pub holdings: Vec<EtfHoldingRecord>,
+}
+
+/// 一檔 ETF 最新一期與前一期的前十大持股。
+#[derive(Debug, Clone, PartialEq)]
+pub struct EtfHoldingPeriods {
+    /// ETF 代號。
+    pub stock_symbol: String,
+    /// 前一期。
+    pub previous: EtfHoldingPeriod,
+    /// 最新一期。
+    pub current: EtfHoldingPeriod,
+}
+
 /// 行業比重或資產分佈的一列。
 #[derive(Debug, Clone, PartialEq)]
 pub struct EtfAllocationRecord {

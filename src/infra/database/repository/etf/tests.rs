@@ -17,6 +17,7 @@ async fn cleanup() {
         "DELETE FROM etf_daily_nav WHERE stock_symbol = $1",
         "DELETE FROM etf_profile WHERE stock_symbol = $1",
         "DELETE FROM etf_holding WHERE stock_symbol = $1",
+        "DELETE FROM etf_holding_history WHERE stock_symbol = $1",
         "DELETE FROM etf_allocation WHERE stock_symbol = $1",
         "DELETE FROM etf_performance WHERE stock_symbol = $1",
         "DELETE FROM etf_snapshot WHERE stock_symbol = $1",
@@ -437,6 +438,68 @@ async fn heuristic_profiles_never_overwrite_source_profiles() {
     assert_eq!(strategy, "market_cap");
     assert_eq!(themes, vec!["半導體".to_string()]);
     assert_eq!(source, "yahoo");
+    cleanup().await;
+}
+
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn holding_history_keeps_every_period() {
+    dotenvy::dotenv().ok();
+    cleanup().await;
+    let repo = PgEtfRepository::new();
+    let holding = |rank, symbol: &str, weight| EtfHoldingRecord {
+        rank,
+        holding_symbol: symbol.to_string(),
+        holding_name: format!("名稱{symbol}"),
+        weight,
+    };
+    let portfolio = |as_of, holdings| EtfPortfolio {
+        stock_symbol: FAKE.to_string(),
+        holdings_as_of: Some(as_of),
+        holdings,
+        ..Default::default()
+    };
+    let symbols = [FAKE.to_string()];
+    let since = NaiveDate::from_ymd_opt(2000, 1, 1).expect("日期應合法");
+
+    repo.replace_portfolio(&portfolio(day(1), vec![holding(1, "2330", dec!(50))]))
+        .await
+        .expect("第一期");
+    assert!(
+        repo.holding_periods(&symbols, since)
+            .await
+            .expect("查詢")
+            .is_empty(),
+        "只有一期時沒有可比"
+    );
+    // 同一期重抓只更正內容；再收到新一期。
+    repo.replace_portfolio(&portfolio(day(1), vec![holding(1, "2330", dec!(51))]))
+        .await
+        .expect("同期重抓");
+    repo.replace_portfolio(&portfolio(
+        day(30),
+        vec![holding(1, "2330", dec!(55)), holding(2, "2308", dec!(3))],
+    ))
+    .await
+    .expect("新一期");
+
+    let periods = repo.holding_periods(&symbols, since).await.expect("查詢");
+    assert_eq!(periods.len(), 1);
+    let p = &periods[0];
+    assert_eq!((p.previous.as_of, p.current.as_of), (day(1), day(30)));
+    assert_eq!(p.previous.holdings[0].weight, dec!(51.0000));
+    assert_eq!(p.current.holdings.len(), 2);
+    // 最新一期在 since 之前收到的不列。
+    let future = NaiveDate::from_ymd_opt(2099, 1, 1).expect("日期應合法");
+    assert!(
+        repo.holding_periods(&symbols, future)
+            .await
+            .expect("查詢")
+            .is_empty()
+    );
     cleanup().await;
 }
 

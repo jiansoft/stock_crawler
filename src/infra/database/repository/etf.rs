@@ -12,8 +12,9 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use crate::{
     domain::etf::{
-        EtfAllocationRecord, EtfNavHistoryPoint, EtfNavRecord, EtfNavReturns, EtfPerformance,
-        EtfPortfolio, EtfProfileRecord, EtfRepository, EtfWeeklyFlow, PremiumPoint,
+        EtfAllocationRecord, EtfHoldingPeriod, EtfHoldingPeriods, EtfHoldingRecord,
+        EtfNavHistoryPoint, EtfNavRecord, EtfNavReturns, EtfPerformance, EtfPortfolio,
+        EtfProfileRecord, EtfRepository, EtfWeeklyFlow, PremiumPoint,
     },
     domain::quote::technical::PriceBar,
     infra::database,
@@ -357,6 +358,29 @@ WHERE rn <= $2
 ORDER BY stock_symbol, date DESC
 "#;
 
+/// 指定 ETF 最新兩期的前十大持股；只取最新一期在 `$2`（含）之後才收到、且有前一期的。
+const HOLDING_PERIODS_SQL: &str = r#"
+WITH periods AS (
+    SELECT stock_symbol, as_of, MIN(recorded_at) AS recorded_at,
+           ROW_NUMBER() OVER (PARTITION BY stock_symbol ORDER BY as_of DESC) AS rn
+    FROM etf_holding_history
+    WHERE stock_symbol = ANY($1)
+    GROUP BY stock_symbol, as_of
+),
+fresh AS (
+    SELECT p.stock_symbol FROM periods AS p
+    WHERE p.rn = 1 AND p.recorded_at >= $2::date
+      AND EXISTS (SELECT 1 FROM periods AS q WHERE q.stock_symbol = p.stock_symbol AND q.rn = 2)
+)
+SELECT h.stock_symbol::text AS stock_symbol, p.rn, h.as_of, h.rank, h.holding_symbol::text AS holding_symbol,
+       h.holding_name, h.weight
+FROM etf_holding_history AS h
+JOIN periods AS p ON p.stock_symbol = h.stock_symbol AND p.as_of = h.as_of
+JOIN fresh AS f ON f.stock_symbol = h.stock_symbol
+WHERE p.rn <= 2
+ORDER BY h.stock_symbol, p.rn, h.rank
+"#;
+
 /// 最近 `$1` 個有單位數的交易日：每檔 ETF 的淨申購合計（單位增減 × 當日淨值）與折溢價。
 const WEEKLY_FLOWS_SQL: &str = r#"
 WITH d AS (
@@ -548,6 +572,23 @@ impl EtfRepository for PgEtfRepository {
                 .await
                 .with_context(|| format!("Failed to save ETF holdings {symbol}"))?
                 .rows_affected();
+                // 每一期另存一份；同一期重抓只更正內容，保留第一次收到的時間。
+                sqlx::query(
+                    "INSERT INTO etf_holding_history (stock_symbol, as_of, rank, holding_symbol, holding_name, weight)
+                     VALUES ($1, $2, $3, $4, $5, $6)
+                     ON CONFLICT (stock_symbol, as_of, rank) DO UPDATE SET
+                         holding_symbol = EXCLUDED.holding_symbol, holding_name = EXCLUDED.holding_name,
+                         weight = EXCLUDED.weight",
+                )
+                .bind(symbol)
+                .bind(as_of)
+                .bind(h.rank)
+                .bind(&h.holding_symbol)
+                .bind(&h.holding_name)
+                .bind(h.weight)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("Failed to save ETF holding history {symbol}"))?;
             }
         }
 
@@ -676,6 +717,48 @@ impl EtfRepository for PgEtfRepository {
             .context("Failed to delete stale ETF snapshot rows")?;
         tx.commit().await?;
         Ok(written)
+    }
+
+    async fn holding_periods(
+        &self,
+        stock_symbols: &[String],
+        recorded_since: NaiveDate,
+    ) -> Result<Vec<EtfHoldingPeriods>> {
+        let rows: Vec<(String, i64, NaiveDate, i16, String, String, Decimal)> =
+            sqlx::query_as(HOLDING_PERIODS_SQL)
+                .bind(stock_symbols)
+                .bind(recorded_since)
+                .fetch_all(database::get_connection())
+                .await
+                .context("Failed to fetch ETF holding periods")?;
+        let mut out: Vec<EtfHoldingPeriods> = Vec::new();
+        for (symbol, rn, as_of, rank, holding_symbol, holding_name, weight) in rows {
+            if out.last().is_none_or(|last| last.stock_symbol != symbol) {
+                let empty = EtfHoldingPeriod {
+                    as_of,
+                    holdings: Vec::new(),
+                };
+                out.push(EtfHoldingPeriods {
+                    stock_symbol: symbol.clone(),
+                    previous: empty.clone(),
+                    current: empty,
+                });
+            }
+            let entry = out.last_mut().expect("剛放入");
+            let period = if rn == 1 {
+                &mut entry.current
+            } else {
+                &mut entry.previous
+            };
+            period.as_of = as_of;
+            period.holdings.push(EtfHoldingRecord {
+                rank,
+                holding_symbol,
+                holding_name,
+                weight,
+            });
+        }
+        Ok(out)
     }
 
     async fn weekly_flows(&self, days: i64) -> Result<Vec<EtfWeeklyFlow>> {

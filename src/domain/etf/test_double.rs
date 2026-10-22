@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use super::{
-    EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio, EtfProfileRecord,
-    EtfRepository, EtfWeeklyFlow, PremiumPoint,
+    EtfHoldingPeriods, EtfNavHistoryPoint, EtfNavRecord, EtfPerformance, EtfPortfolio,
+    EtfProfileRecord, EtfRepository, EtfWeeklyFlow, PremiumPoint,
 };
 use crate::domain::quote::technical::PriceBar;
 
@@ -28,6 +28,8 @@ pub(crate) struct RecordingEtfRepository {
     pub(crate) snapshots: AtomicUsize,
     /// `weekly_flows` 回傳的資料。
     pub(crate) weekly: Vec<EtfWeeklyFlow>,
+    /// `holding_periods` 回傳的資料（依代號過濾）。
+    pub(crate) periods: Vec<EtfHoldingPeriods>,
 }
 
 impl RecordingEtfRepository {
@@ -103,6 +105,19 @@ impl EtfRepository for RecordingEtfRepository {
     async fn refresh_snapshot(&self) -> Result<u64> {
         self.snapshots.fetch_add(1, Ordering::SeqCst);
         Ok(self.listed.len() as u64)
+    }
+
+    async fn holding_periods(
+        &self,
+        stock_symbols: &[String],
+        _recorded_since: NaiveDate,
+    ) -> Result<Vec<EtfHoldingPeriods>> {
+        Ok(self
+            .periods
+            .iter()
+            .filter(|p| stock_symbols.contains(&p.stock_symbol))
+            .cloned()
+            .collect())
     }
 
     async fn weekly_flows(&self, _days: i64) -> Result<Vec<EtfWeeklyFlow>> {
