@@ -84,6 +84,36 @@ fn openapi_etf_detail_schema_pins_field_names() {
     );
 }
 
+/// ETF 持股歷史 path 的契約：periods 範圍與預設、每期差異可為 null。
+#[test]
+fn openapi_etf_holding_history_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/etfs/{symbol}/holdings/history");
+    assert_endpoint_responses(operation, "EtfHoldingHistoryResponse", true);
+    let periods = query_schema(operation, "periods");
+    assert_eq!(
+        (
+            periods["default"].clone(),
+            periods["minimum"].clone(),
+            periods["maximum"].clone()
+        ),
+        (6.into(), 1.into(), 24.into())
+    );
+    let schemas = &document["components"]["schemas"];
+    let period = &schemas["EtfHoldingPeriodItem"]["properties"];
+    for field in ["as_of", "holdings", "changes"] {
+        assert!(period.get(field).is_some(), "缺少 {field}");
+    }
+    for field in ["previous_as_of", "added", "removed", "moved"] {
+        assert!(
+            schemas["EtfHoldingChanges"]["properties"]
+                .get(field)
+                .is_some(),
+            "缺少 {field}"
+        );
+    }
+}
+
 /// ETF 比較 path 的契約：symbols 參數、404、重疊欄位。
 #[test]
 fn openapi_etf_compare_schema_pins_field_names() {
