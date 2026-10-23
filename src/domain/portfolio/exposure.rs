@@ -61,9 +61,12 @@ pub struct Exposure {
 }
 
 impl Exposure {
-    /// 經由 ETF 持有的合計金額。
+    /// 經由 ETF 持有的合計金額；沒有經由 ETF 時為 0（`Iterator::sum` 對空的 f64 會得到 -0.0，
+    /// JSON 會輸出成 `-0.0`）。
     pub fn etf_value(&self) -> f64 {
-        self.sources.iter().map(|source| source.value).sum()
+        self.sources
+            .iter()
+            .fold(0.0, |total, source| total + source.value)
     }
 
     /// 直接加上經由 ETF 的合計金額。
@@ -298,6 +301,13 @@ mod tests {
         assert_eq!(report.exposures[2].name, "現金");
         assert_eq!(report.exposures[2].symbol, "");
         assert_eq!(report.exposures.len(), 3);
+    }
+
+    #[test]
+    fn direct_only_positions_have_positive_zero_etf_value() {
+        let report = look_through(&[position("2887", "台新新光金", Some(1.0), false)], &[]);
+        let value = report.exposures[0].etf_value();
+        assert!(value == 0.0 && value.is_sign_positive(), "{value}");
     }
 
     #[test]
