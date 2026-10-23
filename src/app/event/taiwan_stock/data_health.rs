@@ -10,7 +10,8 @@
 //! 2. 均線：前 400 天已有 5 筆以上報價，5 日均線卻是 0。
 //! 3. 漲跌幅：與「漲跌 ÷ 參考價」不符。
 //! 4. 年月日欄位：與日期不符。
-//! 5. 衍生資料：估價、殖利率排行、市場統計、最後交易日報價、技術訊號、相對強度要更新到最新交易日；
+//! 5. 衍生資料：估價、殖利率排行、市場統計、最後交易日報價、技術訊號、相對強度、ETF 績效與快照
+//!    要更新到最新交易日；
 //!    CAGR、外資持股、三大法人與融資融券（`chip_daily`）、持股主力進出（`broker_flow`）允許落後一個交易日；
 //!    未來報酬的 5 日報酬應到第 5 個交易日前的基準日。
 //! 6. 月營收：每月 15 日之後要有上個月的資料。
@@ -25,6 +26,9 @@
 //! 12. 週／月資料：千張大戶（`holder_distribution`）超過 [`HOLDER_MAX_AGE_DAYS`] 天沒更新、董監持股
 //!     （`insider_holding`）的最新月份早於 [`INSIDER_MAX_AGE_DAYS`] 天前那個月。兩者來源都只有最新
 //!     一期，停更幾期就永遠補不回來。
+//! 13. ETF 資料：交易日的 ETF 淨值（`etf_daily_nav`）比近期少一成以上；最新交易日以前的正式淨值
+//!     有一成以上沒回填；基本資料（`etf_profile`）超過 [`ETF_PROFILE_MAX_AGE_DAYS`] 天沒更新。
+//!     MIS 只給當天，漏抓那天要靠週六的 MoneyDJ 補缺日，太久沒發現就超出補的範圍。
 //!
 //! 全部正常時也會發一則簡短的週報，用來確認檢查本身有在跑。
 
@@ -66,6 +70,19 @@ const HOLDER_MAX_AGE_DAYS: u64 = 9;
 /// 董監持股的最新月份不能早於這麼多天前那個月：每月 10～28 日抓上個月的資料，月中前還沒公布
 /// 時最新只到前兩個月，55 天涵蓋這段空窗。
 const INSIDER_MAX_AGE_DAYS: u64 = 55;
+
+/// ETF 基本資料最多可以幾天沒更新：週六 12:10 更新，健康週報排在同一天 11:00，
+/// 正常時剛好差 7 天，寬限到 9 天才算漏了一週。
+const ETF_PROFILE_MAX_AGE_DAYS: u64 = 9;
+
+/// 某天的 ETF 淨值列數少於近期最多列數的這個百分比就算漏抓。
+const ETF_NAV_MIN_PERCENT: i64 = 90;
+
+/// 某天沒有正式淨值的 ETF 超過這個百分比就算回填失敗（不公布正式淨值的只有零星幾檔）。
+const ETF_MISSING_NAV_LIMIT_PERCENT: i64 = 10;
+
+/// 停更的 ETF 基本資料最多列出幾檔，其餘只計數。
+const STALE_ETF_PROFILES_LISTED: usize = 10;
 
 /// 某天某市場的股價淨值比為 0 超過這個百分比就算異常（正常約 0～3%）。
 const PB_ZERO_LIMIT_PERCENT: i64 = 20;
@@ -123,8 +140,9 @@ pub async fn build_report(today: NaiveDate) -> Result<String> {
     let baseline_from = from - Days::new(BASELINE_DAYS);
 
     let holidays = fetch_holidays(from, today).await;
+    let profile_due = today - Days::new(ETF_PROFILE_MAX_AGE_DAYS);
     let snapshot = PgDataHealthRepository::new()
-        .fetch_snapshot(baseline_from, from, today, today.year())
+        .fetch_snapshot(baseline_from, from, today, today.year(), profile_due)
         .await?;
 
     let mut checks = evaluate(&snapshot, from, today, holidays.as_deref());
@@ -194,6 +212,10 @@ fn evaluate(
         Check::new(
             "未來報酬",
             forward_return_gap_problems(&snapshot.forward_return_gaps),
+        ),
+        Check::new(
+            "ETF 資料",
+            etf_problems(snapshot, from, today, &trading_days),
         ),
     ]
 }
@@ -393,6 +415,72 @@ fn forward_return_gap_problems(gaps: &[ForwardReturnGap]) -> Vec<String> {
         last.date,
         first.date
     )]
+}
+
+/// ETF 淨值漏抓、正式淨值沒回填與基本資料停更。
+///
+/// 只看台股交易日：台股休市時海外 ETF 仍有當天的淨值，筆數本來就少。比較基準是檢查期間
+/// 之前、交易日的最多列數（新上市只會讓列數變多）；最新交易日的正式淨值要到下一個營業日
+/// 才回填，不列入。
+fn etf_problems(
+    snapshot: &DataHealthSnapshot,
+    from: NaiveDate,
+    today: NaiveDate,
+    trading_days: &[NaiveDate],
+) -> Vec<String> {
+    let rows_on = |date: NaiveDate| {
+        snapshot
+            .etf_nav_counts
+            .iter()
+            .find(|count| count.date == date)
+    };
+    let baseline = trading_days
+        .iter()
+        .filter(|date| **date < from)
+        .filter_map(|date| rows_on(*date).map(|count| count.rows))
+        .max();
+    let mut problems = Vec::new();
+    for date in trading_days
+        .iter()
+        .rev()
+        .filter(|date| (from..today).contains(*date))
+    {
+        match (rows_on(*date), baseline) {
+            (None, _) => problems.push(format!("{date} 沒有 ETF 淨值")),
+            (Some(count), Some(baseline)) if count.rows * 100 < baseline * ETF_NAV_MIN_PERCENT => {
+                problems.push(format!(
+                    "{date} ETF 淨值只有 {} 檔（近期 {baseline} 檔）",
+                    count.rows
+                ));
+            }
+            _ => {}
+        }
+        if let Some(count) = rows_on(*date).filter(|_| Some(date) != trading_days.first())
+            && count.missing_nav * 100 > count.rows * ETF_MISSING_NAV_LIMIT_PERCENT
+        {
+            problems.push(format!(
+                "{date} 有 {}／{} 檔 ETF 沒有正式淨值（下一個營業日的回填沒成功）",
+                count.missing_nav, count.rows
+            ));
+        }
+    }
+    let stale = &snapshot.stale_etf_profiles;
+    if !stale.is_empty() {
+        let mut listed = stale
+            .iter()
+            .take(STALE_ETF_PROFILES_LISTED)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("、");
+        if stale.len() > STALE_ETF_PROFILES_LISTED {
+            listed.push('…');
+        }
+        problems.push(format!(
+            "{} 檔 ETF 基本資料超過 {ETF_PROFILE_MAX_AGE_DAYS} 天沒更新：{listed}",
+            stale.len()
+        ));
+    }
+    problems
 }
 
 /// 組成 Telegram 週報。

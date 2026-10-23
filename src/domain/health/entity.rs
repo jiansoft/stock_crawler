@@ -43,6 +43,17 @@ pub struct ForwardReturnGap {
     pub rows: i64,
 }
 
+/// 單一日期的 ETF 淨值列數（`etf_daily_nav`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EtfNavDayCount {
+    /// 資料日期；台股休市時海外 ETF 仍會有當天的淨值。
+    pub date: NaiveDate,
+    /// 當天的列數。
+    pub rows: i64,
+    /// 正式單位淨值還沒回填（`nav` 為 NULL）的列數；下一個營業日的排程才會回填。
+    pub missing_nav: i64,
+}
+
 /// 一次健康檢查量到的全部數字。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DataHealthSnapshot {
@@ -74,4 +85,8 @@ pub struct DataHealthSnapshot {
     pub valuation_ratio_zeros: Vec<ValuationRatioZeroCount>,
     /// 未來報酬表（整張表，從最早有 5 日報酬的基準日起）短天期缺漏的基準日，由舊到新。
     pub forward_return_gaps: Vec<ForwardReturnGap>,
+    /// 期間內（含基準期）每天的 ETF 淨值列數，由舊到新。
+    pub etf_nav_counts: Vec<EtfNavDayCount>,
+    /// 基本資料（`etf_profile`）在期限前就沒再更新、或上市已久仍沒有基本資料的 ETF 代號。
+    pub stale_etf_profiles: Vec<String>,
 }
