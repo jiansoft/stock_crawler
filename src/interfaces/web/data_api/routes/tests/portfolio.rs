@@ -464,3 +464,83 @@ async fn portfolio_dividend_fill_endpoint_db_semantics() {
     assert!(json["items"].is_array(), "{json}");
     assert!(json["summary"]["events"].is_number(), "{json}");
 }
+
+/// 持股穿透：持有的假 ETF 依前十大持股拆到成分股，與直接持有的假股票合併；
+/// 沒有收盤價的部位列入 unpriced；member_id 篩選與 422。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn portfolio_etf_exposure_endpoint_db_semantics() {
+    const MEMBER: i64 = 979_791;
+    const ETF: &str = "79979EX";
+    const UNPRICED: &str = "79979UP";
+    let Some(pool) = pool_or_skip("portfolio_etf_exposure_endpoint_db_semantics").await else {
+        return;
+    };
+    let cleanup_exposure = || async {
+        for sql in [
+            "DELETE FROM stock_ownership_details WHERE member_id = $1",
+            "DELETE FROM etf_holding WHERE stock_symbol = $2",
+            "DELETE FROM etf_snapshot WHERE stock_symbol = $2",
+            "DELETE FROM last_daily_quotes WHERE stock_symbol = $2",
+        ] {
+            let _ = sqlx::query(sql).bind(MEMBER).bind(ETF).execute(pool).await;
+        }
+        cleanup(pool).await;
+    };
+    cleanup_exposure().await;
+
+    let path = format!("/api/v1/portfolio/etf-exposure?member_id={MEMBER}");
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["total_value"], 0.0);
+    assert_eq!(json["items"], serde_json::json!([]));
+
+    seed(pool, &[SEED_STOCK]).await;
+    for sql in [
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, is_sold) VALUES ($1, $2, 1000, -1, false), ($1, $3, 2000, -1, false), ($1, $4, 10, -1, false), ($1, $2, 500, -1, true)",
+        "INSERT INTO last_daily_quotes (date, stock_symbol, closing_price) VALUES ('2026-04-30', $2, 50), ('2026-04-30', $3, 100)",
+        "INSERT INTO etf_snapshot (stock_symbol, name, market_id) VALUES ($3, '端點測試 ETF', 2)",
+        "INSERT INTO etf_holding (stock_symbol, rank, as_of, holding_symbol, holding_name, weight) VALUES ($3, 1, '2026-03-31', $2, '端點測試股', 25), ($3, 2, '2026-03-31', '', '現金', 5)",
+    ] {
+        sqlx::query(sql)
+            .bind(MEMBER)
+            .bind(SYMBOL)
+            .bind(ETF)
+            .bind(UNPRICED)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("種入持股失敗：{error}\n{sql}"));
+    }
+
+    let (status, json) = get(&format!("{path}&limit=1")).await;
+    cleanup_exposure().await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    // 直接 1000 × 50 = 50,000；ETF 2000 × 100 = 200,000，25% 拆到同一檔、5% 為現金。
+    assert_eq!(json["total_value"], 250_000.0);
+    assert_eq!(json["etf_value"], 200_000.0);
+    assert_eq!(json["uncovered_value"], 140_000.0);
+    assert_eq!(json["total_items"], 2);
+    assert_eq!(json["unpriced"], serde_json::json!([UNPRICED]));
+    assert_eq!(json["etfs"][0]["name"], "端點測試 ETF");
+    assert_eq!(json["etfs"][0]["holdings_as_of"], "2026-03-31");
+    let items = json["items"].as_array().expect("items 是陣列");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["symbol"], SYMBOL);
+    assert_eq!(items[0]["name"], "端點測試股");
+    assert_eq!(items[0]["direct_value"], 50_000.0);
+    assert_eq!(items[0]["etf_value"], 50_000.0);
+    assert_eq!(items[0]["weight"], 40.0);
+    assert_eq!(items[0]["sources"][0]["etf_symbol"], ETF);
+
+    for bad in [
+        "/api/v1/portfolio/etf-exposure?member_id=-1",
+        "/api/v1/portfolio/etf-exposure?limit=0",
+        "/api/v1/portfolio/etf-exposure?limit=201",
+    ] {
+        let (status, json) = get(bad).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad} {json}");
+    }
+}

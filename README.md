@@ -362,6 +362,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 | `/portfolio/dividend-forecast` | 未來 1～24 個月每月的預估現金股利入帳與預估殖利率 |
 | `/portfolio/chip` | 持股籌碼日報：某交易日收盤時仍持有的普通股（依持股批次與賣出紀錄推回）的三大法人買賣超（張、佔成交量、連續天數）、融資融券增減與主力進出（另附近 5 個主力交易日的累計），並以與 Telegram 通知相同的門檻標出達標原因 |
 | `/portfolio/dividend-fill` | 持股填息狀態：目前持股（含 ETF）近 `days` 天（預設 365）每次除權息的填息結果，尚未填息的依距離填息價的缺口由大到小排在前面，附整體填息統計（規則同 `/dividend-fill`） |
+| `/portfolio/etf-exposure` | 持股穿透曝險：持有 ETF 的市值依前十大持股權重拆到成分股，與直接持股合併，列出合計曝險最大的成分股（直接、經由哪些 ETF、占總市值比例）；前十大以外無法拆解的金額另計 |
 
 ### Telegram 通知
 

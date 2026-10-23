@@ -25,6 +25,7 @@ mod peers;
 mod portfolio;
 mod portfolio_chip;
 mod portfolio_dividend_fill;
+mod portfolio_etf_exposure;
 mod portfolio_history;
 mod relative_strength;
 mod screen_backtest;
@@ -112,6 +113,10 @@ pub(super) use portfolio_chip::{
 };
 pub(super) use portfolio_dividend_fill::{
     PortfolioDividendFillItem, PortfolioDividendFillParams, PortfolioDividendFillResponse,
+};
+pub(super) use portfolio_etf_exposure::{
+    ExposureEtfItem, ExposureItem, ExposureSourceItem, PortfolioEtfExposureParams,
+    PortfolioEtfExposureResponse,
 };
 pub(super) use portfolio_history::{
     PortfolioHistoryParams, PortfolioHistoryResponse, PortfolioMonth,

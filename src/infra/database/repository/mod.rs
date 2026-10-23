@@ -27,6 +27,8 @@ pub mod money_flow;
 pub mod official_ratio;
 pub mod performance;
 pub mod portfolio;
+/// 持股穿透曝險的查詢（持有部位市值、持有 ETF 的前十大持股）。
+pub mod portfolio_exposure;
 pub mod quote;
 pub mod relative_strength;
 pub mod stock;
