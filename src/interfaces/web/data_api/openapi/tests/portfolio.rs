@@ -121,3 +121,47 @@ fn openapi_portfolio_history_schema_pins_field_names() {
     );
     assert!(month["return_percent"].to_string().contains("number"));
 }
+
+/// 持股穿透 path 的契約：member_id、limit 範圍與預設，ETF 前十大日期可為 null。
+#[test]
+fn openapi_portfolio_etf_exposure_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/portfolio/etf-exposure");
+    assert_endpoint_responses(operation, "PortfolioEtfExposureResponse", false);
+    let limit = query_schema(operation, "limit");
+    assert_eq!(
+        (
+            limit["default"].clone(),
+            limit["minimum"].clone(),
+            limit["maximum"].clone()
+        ),
+        (20.into(), 1.into(), 200.into())
+    );
+    assert_eq!(query_schema(operation, "member_id")["minimum"], 0);
+    let schemas = &document["components"]["schemas"];
+    for field in [
+        "total_value",
+        "etf_value",
+        "uncovered_value",
+        "total_items",
+        "etfs",
+        "items",
+        "unpriced",
+    ] {
+        assert!(
+            schemas["PortfolioEtfExposureResponse"]["properties"]
+                .get(field)
+                .is_some(),
+            "缺少 {field}"
+        );
+    }
+    assert!(
+        schemas["ExposureEtfItem"]["properties"]["holdings_as_of"]
+            .to_string()
+            .contains("null")
+    );
+    assert_eq!(
+        schemas["ExposureItem"]["properties"]["sources"]["items"]["$ref"],
+        "#/components/schemas/ExposureSourceItem"
+    );
+}

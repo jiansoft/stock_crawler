@@ -82,6 +82,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::portfolio_dividend_fill),
         )
         .route(
+            "/portfolio/etf-exposure",
+            axum::routing::get(handlers::portfolio_etf_exposure),
+        )
+        .route(
             "/portfolio/dividend-forecast",
             axum::routing::get(handlers::dividend_forecast),
         )
