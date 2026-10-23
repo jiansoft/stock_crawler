@@ -7,8 +7,8 @@ use chrono::NaiveDate;
 use crate::{
     domain::{
         health::{
-            DataHealthRepository, DataHealthSnapshot, DerivedTableLatest, ForwardReturnGap,
-            ValuationRatioZeroCount,
+            DataHealthRepository, DataHealthSnapshot, DerivedTableLatest, EtfNavDayCount,
+            ForwardReturnGap, ValuationRatioZeroCount,
         },
         quote::entity::MarketTradedCount,
     },
@@ -18,7 +18,7 @@ use crate::{
 /// 每日收盤後會更新的衍生資料表，與各自的日期欄位。
 ///
 /// 表名與欄位名無法用參數綁定，只能寫死在這裡；新增衍生表時同步加入。
-const DERIVED_TABLES: [(&str, &str); 12] = [
+const DERIVED_TABLES: [(&str, &str); 14] = [
     ("estimate", "SELECT max(date) FROM estimate"),
     ("yield_rank", "SELECT max(date) FROM yield_rank"),
     (
@@ -46,6 +46,12 @@ const DERIVED_TABLES: [(&str, &str); 12] = [
         "daily_market_valuation",
         "SELECT max(date) FROM daily_market_valuation",
     ),
+    // 17:30 ETF 專區每日更新：含息績效與清單頁快照（計算基準日都是最後一個有成交的交易日）。
+    (
+        "etf_performance",
+        "SELECT max(calc_date) FROM etf_performance",
+    ),
+    ("etf_snapshot", "SELECT max(quote_date) FROM etf_snapshot"),
     // 基準日要再過 5 個交易日才有 5 日報酬，看「有 5 日報酬的最新基準日」。
     (
         "daily_forward_return",
@@ -179,6 +185,29 @@ GROUP BY 1, 2
 ORDER BY 1, 2
 "#;
 
+/// 每天的 ETF 淨值列數與正式淨值還沒回填的列數。
+const ETF_NAV_COUNTS_SQL: &str = r#"
+SELECT date, count(*), count(*) FILTER (WHERE nav IS NULL)
+FROM etf_daily_nav
+WHERE date BETWEEN $1 AND $2
+GROUP BY date
+ORDER BY date
+"#;
+
+/// 清單頁上的 ETF 中，基本資料在 `$1` 之前就沒再更新的代號；還沒有基本資料的，
+/// 只列出淨值在 `$1` 之前就出現（上市已超過一次週更）的，剛上市的等下一次週六更新。
+const STALE_ETF_PROFILES_SQL: &str = r#"
+SELECT s.stock_symbol
+FROM etf_snapshot AS s
+LEFT JOIN etf_profile AS p ON p.stock_symbol = s.stock_symbol
+WHERE CASE
+          WHEN p.stock_symbol IS NULL THEN
+              (SELECT min(n.date) FROM etf_daily_nav AS n WHERE n.stock_symbol = s.stock_symbol) < $1
+          ELSE p.updated_at < $1::date
+      END
+ORDER BY s.stock_symbol
+"#;
+
 /// 基於 PostgreSQL 的資料健康檢查量測。
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PgDataHealthRepository;
@@ -213,6 +242,7 @@ impl DataHealthRepository for PgDataHealthRepository {
         from: NaiveDate,
         to: NaiveDate,
         current_year: i32,
+        profile_due: NaiveDate,
     ) -> Result<DataHealthSnapshot> {
         let pool = database::get_connection();
 
@@ -283,6 +313,25 @@ impl DataHealthRepository for PgDataHealthRepository {
             .map(|(date, rows)| ForwardReturnGap { date, rows })
             .collect();
 
+        let etf_nav_counts = sqlx::query_as::<_, (NaiveDate, i64, i64)>(ETF_NAV_COUNTS_SQL)
+            .bind(baseline_from)
+            .bind(to)
+            .fetch_all(pool)
+            .await
+            .with_context(|| format!("Failed to count ETF NAV rows {baseline_from}~{to}"))?
+            .into_iter()
+            .map(|(date, rows, missing_nav)| EtfNavDayCount {
+                date,
+                rows,
+                missing_nav,
+            })
+            .collect();
+        let stale_etf_profiles = sqlx::query_scalar(STALE_ETF_PROFILES_SQL)
+            .bind(profile_due)
+            .fetch_all(pool)
+            .await
+            .context("Failed to find stale ETF profiles")?;
+
         let latest_revenue_month = sqlx::query_scalar(r#"SELECT max("Date") FROM "Revenue""#)
             .fetch_one(pool)
             .await
@@ -331,6 +380,8 @@ impl DataHealthRepository for PgDataHealthRepository {
             latest_insider_month,
             valuation_ratio_zeros,
             forward_return_gaps,
+            etf_nav_counts,
+            stale_etf_profiles,
         })
     }
 }
@@ -354,13 +405,97 @@ mod tests {
 
         let day = |d| NaiveDate::from_ymd_opt(2026, 4, d).expect("日期應合法");
         let snapshot = PgDataHealthRepository::new()
-            .fetch_snapshot(day(1), day(24), day(30), 2026)
+            .fetch_snapshot(day(1), day(24), day(30), 2026, day(21))
             .await
             .expect("量測應成功");
 
         assert_eq!(snapshot.derived_tables.len(), DERIVED_TABLES.len());
         assert!(snapshot.missing_moving_averages >= 0);
         assert!(snapshot.chip_streak_missing >= 0);
+    }
+
+    /// ETF 淨值依日期計數；基本資料停更或上市已久仍沒有基本資料的才列出。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn etf_queries_count_nav_rows_and_find_stale_profiles() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 etf_queries_count_nav_rows_and_find_stale_profiles：無資料庫連接");
+            return;
+        }
+        let pool = database::get_connection();
+        let mut tx = pool.begin().await.expect("開交易應成功");
+        // 交易內清空，測完 rollback，不影響其他測試的資料。
+        for sql in [
+            "DELETE FROM etf_snapshot",
+            "DELETE FROM etf_profile",
+            "DELETE FROM etf_daily_nav",
+        ] {
+            sqlx::query(sql)
+                .execute(&mut *tx)
+                .await
+                .expect("清空應成功");
+        }
+        let day = |d| NaiveDate::from_ymd_opt(2021, 3, d).expect("日期應合法");
+        for (symbol, date, nav) in [
+            ("79971", day(1), Some(10.0)),
+            ("79972", day(1), None),
+            ("79971", day(2), Some(10.1)),
+            ("79973", day(9), Some(9.9)),
+        ] {
+            sqlx::query(
+                "INSERT INTO etf_daily_nav (date, stock_symbol, estimated_nav, nav) VALUES ($1, $2, $3, $3)",
+            )
+            .bind(date)
+            .bind(symbol)
+            .bind(nav)
+            .execute(&mut *tx)
+            .await
+            .expect("寫入淨值應成功");
+        }
+        // 79971 剛更新、79972 停更、79973 剛上市還沒有基本資料（不列）、79974 上市已久沒有基本資料。
+        for (symbol, updated) in [("79971", "2021-03-09"), ("79972", "2021-03-01")] {
+            sqlx::query("INSERT INTO etf_profile (stock_symbol, updated_at) VALUES ($1, $2::date)")
+                .bind(symbol)
+                .bind(updated)
+                .execute(&mut *tx)
+                .await
+                .expect("寫入基本資料應成功");
+        }
+        sqlx::query(
+            "INSERT INTO etf_daily_nav (date, stock_symbol, nav) VALUES ('2021-02-01', '79974', 10)",
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("寫入淨值應成功");
+        for symbol in ["79971", "79972", "79973", "79974"] {
+            sqlx::query(
+                "INSERT INTO etf_snapshot (stock_symbol, name, market_id) VALUES ($1, $1, 2)",
+            )
+            .bind(symbol)
+            .execute(&mut *tx)
+            .await
+            .expect("寫入快照應成功");
+        }
+
+        let counts: Vec<(NaiveDate, i64, i64)> = sqlx::query_as(ETF_NAV_COUNTS_SQL)
+            .bind(day(1))
+            .bind(day(9))
+            .fetch_all(&mut *tx)
+            .await
+            .expect("計數應成功");
+        let stale: Vec<String> = sqlx::query_scalar(STALE_ETF_PROFILES_SQL)
+            .bind(day(5))
+            .fetch_all(&mut *tx)
+            .await
+            .expect("查詢應成功");
+        tx.rollback().await.expect("rollback 應成功");
+
+        assert_eq!(counts, [(day(1), 2, 1), (day(2), 1, 0), (day(9), 1, 0)]);
+        assert_eq!(stale, ["79972", "79974"]);
     }
 
     /// 短天期缺漏占比達門檻的基準日要列出；零星缺值與最早有 5 日報酬之前的基準日不列入。
