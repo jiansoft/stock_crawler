@@ -60,8 +60,10 @@ WHERE (etf_daily_nav.outstanding_units, etf_daily_nav.units_change, etf_daily_na
 
 /// 以「前一營業日單位淨值」回填前一個交易日那一列的正式淨值；那天 MIS 沒抓到時補一列只有淨值的資料。
 ///
-/// 前一個交易日取加權指數與 `etf_daily_nav` 兩份日曆中較晚的那天：只看這檔 ETF 自己的上一筆，
-/// 遇到前一天缺資料就會把淨值寫進更早一天；兩份日曆互為備援，其中一邊漏寫一天也不會錯位。
+/// 前一個營業日取三份日曆中較晚的那天：加權指數、日報價（兩者是台股交易日，互為備援），以及
+/// 這檔 ETF 自己的上一筆（台股休市、海外照常交易時，海外 ETF 當天也有淨值，例如 2026-10-23）。
+/// 只看自己的上一筆，遇到前一天 MIS 沒抓到就會把淨值寫進更早一天；不能看整張表的日期，
+/// 否則休市日只有海外 ETF 的那天，會被台股 ETF 當成前一個營業日。
 const BACKFILL_NAV_SQL: &str = r#"
 INSERT INTO etf_daily_nav (date, stock_symbol, nav)
 SELECT p.date, b.stock_symbol, b.prev_nav
@@ -69,7 +71,9 @@ FROM UNNEST($1::date[], $2::varchar[], $3::numeric[]) AS b(date, stock_symbol, p
 CROSS JOIN LATERAL (
     SELECT GREATEST(
         (SELECT MAX(i."date") FROM "index" AS i WHERE i.category = 'TAIEX' AND i."date" < b.date),
-        (SELECT MAX(n.date) FROM etf_daily_nav AS n WHERE n.date < b.date)
+        (SELECT MAX(q."Date") FROM "DailyQuotes" AS q WHERE q."Date" < b.date),
+        (SELECT MAX(n.date) FROM etf_daily_nav AS n
+         WHERE n.stock_symbol = b.stock_symbol AND n.date < b.date)
     ) AS date
 ) AS p
 WHERE p.date IS NOT NULL
@@ -381,10 +385,16 @@ WHERE p.rn <= 2
 ORDER BY h.stock_symbol, p.rn, h.rank
 "#;
 
-/// 最近 `$1` 個有單位數的交易日：每檔 ETF 的淨申購合計（單位增減 × 當日淨值）與折溢價。
+/// 最近 `$1` 個台股交易日（加權指數日曆）起有單位數的日子：每檔 ETF 的淨申購合計
+/// （單位增減 × 當日淨值）與折溢價。期間內台股休市、只有海外 ETF 有資料的日子也算進去，
+/// 但不佔交易日的名額。
 const WEEKLY_FLOWS_SQL: &str = r#"
 WITH d AS (
-    SELECT DISTINCT date FROM etf_daily_nav WHERE units_change IS NOT NULL ORDER BY date DESC LIMIT $1
+    SELECT DISTINCT date FROM etf_daily_nav
+    WHERE units_change IS NOT NULL
+      AND date >= (SELECT MIN(t."date")
+                   FROM (SELECT i."date" FROM "index" AS i WHERE i.category = 'TAIEX'
+                         ORDER BY i."date" DESC LIMIT $1) AS t)
 )
 SELECT n.stock_symbol::text AS stock_symbol, COALESCE(MAX(s.name), n.stock_symbol::text) AS name,
        COALESCE(SUM(n.units_change * COALESCE(n.estimated_nav, n.nav)), 0)::float8 AS net_flow,

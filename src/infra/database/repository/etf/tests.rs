@@ -219,6 +219,68 @@ async fn missing_day_gets_its_own_official_nav_and_gap_fill_completes_it() {
     cleanup().await;
 }
 
+/// 台股休市、海外 ETF 照常有淨值的那天（2026-04-24 五）：台股 ETF 下一個營業日帶來的
+/// 「前一營業日淨值」要回填到 4/23，海外 ETF 的要回填到它自己的 4/24。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn holiday_rows_of_other_etfs_do_not_shift_the_backfill_date() {
+    dotenvy::dotenv().ok();
+    cleanup().await;
+    const OVERSEAS: &str = "79979OS";
+    let remove_overseas = || async {
+        sqlx::query("DELETE FROM etf_daily_nav WHERE stock_symbol = $1")
+            .bind(OVERSEAS)
+            .execute(database::get_connection())
+            .await
+            .expect("清除海外 ETF");
+    };
+    remove_overseas().await;
+    let calendar = trading_days(&[day(23), day(27)]).await;
+    let repo = PgEtfRepository::new();
+    let overseas = |date, previous_nav| EtfNavRecord {
+        stock_symbol: OVERSEAS.to_string(),
+        ..nav(date, 500, previous_nav)
+    };
+
+    repo.save_navs(&[nav(day(23), 100, None), overseas(day(23), None)])
+        .await
+        .expect("寫入 4/23");
+    repo.save_navs(&[overseas(day(24), Some(dec!(30.10)))])
+        .await
+        .expect("寫入休市日的海外 ETF");
+    repo.save_navs(&[
+        nav(day(27), 100, Some(dec!(19.95))),
+        overseas(day(27), Some(dec!(30.20))),
+    ])
+    .await
+    .expect("寫入 4/27");
+
+    let rows: Vec<(String, NaiveDate, Option<Decimal>)> = sqlx::query_as(
+        "SELECT stock_symbol::text, date, nav FROM etf_daily_nav
+         WHERE stock_symbol = ANY($1) ORDER BY stock_symbol, date",
+    )
+    .bind([FAKE, OVERSEAS])
+    .fetch_all(database::get_connection())
+    .await
+    .expect("讀回淨值");
+    remove_trading_days(&calendar).await;
+    remove_overseas().await;
+    cleanup().await;
+    assert_eq!(
+        rows,
+        vec![
+            (FAKE.to_string(), day(23), Some(dec!(19.95))),
+            (FAKE.to_string(), day(27), None),
+            (OVERSEAS.to_string(), day(23), Some(dec!(30.10))),
+            (OVERSEAS.to_string(), day(24), Some(dec!(30.20))),
+            (OVERSEAS.to_string(), day(27), None),
+        ]
+    );
+}
+
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
@@ -318,7 +380,9 @@ async fn weekly_flows_sum_recent_days_with_units() {
     .await
     .expect("回補歷史");
 
+    let calendar = trading_days(&[future(5), future(6), future(7)]).await;
     let flows = repo.weekly_flows(2).await.expect("讀資金流向");
+    remove_trading_days(&calendar).await;
     let mine = flows
         .iter()
         .find(|flow| flow.stock_symbol == FAKE)
