@@ -2,8 +2,16 @@
 
 use rust_decimal_macros::dec;
 
+use chrono::NaiveDate;
+use rust_decimal::Decimal;
+
+use super::snapshot::to_decimal;
 use super::*;
-use crate::domain::etf::{EtfHoldingRecord, EtfNavHistoryPoint, EtfNavReturns};
+use crate::domain::etf::{
+    EtfAllocationRecord, EtfHoldingRecord, EtfNavHistoryPoint, EtfNavRecord, EtfNavReturns,
+    EtfPerformance, EtfPortfolio, EtfProfileRecord,
+};
+use crate::infra::database;
 
 /// 測試用的假代號；寫入後一律清除。
 const FAKE: &str = "79979ET";
