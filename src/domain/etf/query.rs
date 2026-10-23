@@ -6,6 +6,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 
+use super::EtfHoldingPeriod;
+
 /// 清單可用的排序鍵；以白名單對應欄位，避免把使用者輸入拼進 SQL。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EtfSort {
@@ -249,6 +251,17 @@ pub struct EtfDetail {
     pub navs: Vec<EtfNavDay>,
 }
 
+/// 一檔 ETF 近幾期的前十大持股。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EtfHoldingHistory {
+    /// ETF 代號。
+    pub stock_symbol: String,
+    /// 名稱。
+    pub name: String,
+    /// 每一期的前十大持股，由新到舊。
+    pub periods: Vec<EtfHoldingPeriod>,
+}
+
 /// ETF 專區的讀取合約。
 #[async_trait]
 pub trait EtfQueryRepository: Send + Sync {
@@ -257,6 +270,13 @@ pub trait EtfQueryRepository: Send + Sync {
 
     /// 單檔明細；不是上市櫃 ETF 時回傳 `None`。`nav_days` 為近期淨值的筆數。
     async fn etf_detail(&self, stock_symbol: &str, nav_days: i64) -> Result<Option<EtfDetail>>;
+
+    /// 最近 `periods` 期的前十大持股（`etf_holding_history`）；不是上市櫃 ETF 時回傳 `None`。
+    async fn holding_history(
+        &self,
+        stock_symbol: &str,
+        periods: i64,
+    ) -> Result<Option<EtfHoldingHistory>>;
 }
 
 #[cfg(test)]

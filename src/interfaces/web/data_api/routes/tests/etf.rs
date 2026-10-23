@@ -14,6 +14,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
         "DELETE FROM etf_snapshot WHERE stock_symbol = $1",
         "DELETE FROM etf_performance WHERE stock_symbol = $1",
         "DELETE FROM etf_daily_nav WHERE stock_symbol = $1",
+        "DELETE FROM etf_holding_history WHERE stock_symbol = $1",
     ] {
         for symbol in [SYMBOL, OTHER] {
             let _ = sqlx::query(sql).bind(symbol).execute(pool).await;
@@ -99,7 +100,31 @@ async fn etf_endpoints_db_semantics() {
         Some(0),
         "沒有前十大不列重疊"
     );
+    // 持股歷史：三期取兩期，最舊那期仍和更早一期比較。
+    sqlx::query(
+        "INSERT INTO etf_holding_history (stock_symbol, as_of, rank, holding_symbol, holding_name, weight)
+         VALUES ($1, '1987-01-31', 1, '2330', '台積電', 50), ($1, '1987-02-28', 1, '2330', '台積電', 51),
+                ($1, '1987-02-28', 2, '2317', '鴻海', 5), ($1, '1987-03-31', 1, '2330', '台積電', 52.345)",
+    )
+    .bind(SYMBOL)
+    .execute(pool)
+    .await
+    .expect("寫入持股歷史");
+    let (status, json) = get("/api/v1/etfs/79979ec/holdings/history?periods=2").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["name"], "路由測試債券");
+    let periods = json["periods"].as_array().expect("periods 是陣列");
+    assert_eq!(periods.len(), 2);
+    assert_eq!(periods[0]["as_of"], "1987-03-31");
+    assert_eq!(periods[0]["holdings"][0]["weight"], 52.35);
+    assert_eq!(periods[0]["changes"]["removed"][0]["label"], "2317 鴻海");
+    assert_eq!(periods[1]["changes"]["previous_as_of"], "1987-01-31");
+    assert_eq!(periods[1]["changes"]["added"][0]["label"], "2317 鴻海");
+    let (status, _) = get("/api/v1/etfs/79979XX/holdings/history").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     for bad in [
+        "/api/v1/etfs/0050/holdings/history?periods=0",
+        "/api/v1/etfs/0050/holdings/history?periods=25",
         "/api/v1/etfs?sort=name",
         "/api/v1/etfs?limit=0",
         "/api/v1/etfs/0050;?nav_days=1",

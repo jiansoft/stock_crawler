@@ -12,6 +12,7 @@ mod chip;
 mod dividend_fill;
 mod dividend_forecast;
 mod etf;
+mod etf_holding_history;
 mod financial_health;
 mod financial_reports;
 mod fundamentals;
@@ -58,6 +59,10 @@ pub(super) use etf::{
     EtfAllocationItem, EtfCompareItem, EtfCompareParams, EtfCompareResponse, EtfDetailParams,
     EtfDetailResponse, EtfFrequencyValue, EtfHoldingItem, EtfItem, EtfListParams, EtfListResponse,
     EtfNavPoint, EtfOverlap, EtfPerformanceInfo, EtfProfileInfo, EtfSortValue, EtfStrategyValue,
+};
+pub(super) use etf_holding_history::{
+    EtfHoldingChanges, EtfHoldingHistoryParams, EtfHoldingHistoryResponse, EtfHoldingMoveItem,
+    EtfHoldingPeriodItem, EtfHoldingWeightItem,
 };
 pub(super) use financial_health::{
     FinancialHealthParams, FinancialHealthResponse, HealthCategoryValue, HealthCriterion,

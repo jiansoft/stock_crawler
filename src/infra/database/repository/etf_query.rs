@@ -6,9 +6,12 @@ use async_trait::async_trait;
 use sqlx::{Postgres, QueryBuilder, Row, postgres::PgRow};
 
 use crate::{
-    domain::etf::query::{
-        EtfDetail, EtfListFilter, EtfNavDay, EtfOverview, EtfPerformanceView, EtfProfileView,
-        EtfQueryRepository, EtfWeightRow,
+    domain::etf::{
+        EtfHoldingPeriod, EtfHoldingRecord,
+        query::{
+            EtfDetail, EtfHoldingHistory, EtfListFilter, EtfNavDay, EtfOverview,
+            EtfPerformanceView, EtfProfileView, EtfQueryRepository, EtfWeightRow,
+        },
     },
     infra::database,
 };
@@ -71,6 +74,19 @@ SELECT date, COALESCE(nav, estimated_nav)::float8 AS nav, market_price::float8 A
        premium_rate::float8 AS premium_rate, units_change
 FROM etf_daily_nav WHERE stock_symbol = $1
 ORDER BY date DESC LIMIT $2
+"#;
+
+/// 最近 `$2` 期的前十大持股，由新到舊、期內依排名。
+const HOLDING_HISTORY_SQL: &str = r#"
+WITH p AS (
+    SELECT DISTINCT as_of FROM etf_holding_history WHERE stock_symbol = $1
+    ORDER BY as_of DESC LIMIT $2
+)
+SELECT h.as_of, h.rank, h.holding_symbol::text AS holding_symbol, h.holding_name, h.weight
+FROM etf_holding_history AS h
+JOIN p USING (as_of)
+WHERE h.stock_symbol = $1
+ORDER BY h.as_of DESC, h.rank
 "#;
 
 /// 由篩選條件組出清單查詢：條件值一律綁定參數，排序欄位只來自白名單。
@@ -274,6 +290,57 @@ impl EtfQueryRepository for PgEtfQueryRepository {
             weights,
             navs,
         }))
+    }
+
+    async fn holding_history(
+        &self,
+        stock_symbol: &str,
+        periods: i64,
+    ) -> Result<Option<EtfHoldingHistory>> {
+        let pool = database::get_connection();
+        let Some(name) = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM etf_snapshot WHERE stock_symbol = $1",
+        )
+        .bind(stock_symbol)
+        .fetch_optional(pool)
+        .await
+        .with_context(|| format!("Failed to fetch ETF name {stock_symbol}"))?
+        else {
+            return Ok(None);
+        };
+        let rows: Vec<(
+            chrono::NaiveDate,
+            i16,
+            String,
+            String,
+            rust_decimal::Decimal,
+        )> = sqlx::query_as(HOLDING_HISTORY_SQL)
+            .bind(stock_symbol)
+            .bind(periods)
+            .fetch_all(pool)
+            .await
+            .with_context(|| format!("Failed to fetch ETF holding history {stock_symbol}"))?;
+        let mut history = EtfHoldingHistory {
+            stock_symbol: stock_symbol.to_owned(),
+            name,
+            periods: Vec::new(),
+        };
+        for (as_of, rank, holding_symbol, holding_name, weight) in rows {
+            let record = EtfHoldingRecord {
+                rank,
+                holding_symbol,
+                holding_name,
+                weight,
+            };
+            match history.periods.last_mut() {
+                Some(period) if period.as_of == as_of => period.holdings.push(record),
+                _ => history.periods.push(EtfHoldingPeriod {
+                    as_of,
+                    holdings: vec![record],
+                }),
+            }
+        }
+        Ok(Some(history))
     }
 }
 
