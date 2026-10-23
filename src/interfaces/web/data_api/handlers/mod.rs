@@ -14,6 +14,7 @@ mod chip;
 mod dividend_fill;
 mod dividend_forecast;
 mod etf;
+mod etf_holding_history;
 mod financial_health;
 mod financial_reports;
 mod industries;
@@ -65,6 +66,7 @@ pub(super) use dividend_forecast::{__path_dividend_forecast, dividend_forecast};
 pub(super) use etf::{
     __path_compare_etfs, __path_etf_detail, __path_list_etfs, compare_etfs, etf_detail, list_etfs,
 };
+pub(super) use etf_holding_history::{__path_etf_holding_history, etf_holding_history};
 pub(super) use financial_health::{__path_financial_health, financial_health};
 pub(super) use financial_reports::{__path_financial_reports, financial_reports};
 pub(super) use industries::{__path_industry_performance, industry_performance};

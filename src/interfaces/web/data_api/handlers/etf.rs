@@ -309,7 +309,7 @@ fn non_empty(value: Option<&str>) -> Option<String> {
 }
 
 /// ETF 代號只有英數字，最多 12 碼。
-fn valid_symbol(symbol: &str) -> bool {
+pub(super) fn valid_symbol(symbol: &str) -> bool {
     !symbol.is_empty() && symbol.len() <= 12 && symbol.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
