@@ -9,6 +9,7 @@ mod holding;
 mod nav;
 mod profile;
 mod snapshot;
+pub(crate) mod tracking;
 
 use std::collections::HashMap;
 
@@ -32,6 +33,16 @@ impl PgEtfRepository {
     /// 建立實例。
     pub fn new() -> Self {
         Self
+    }
+
+    /// 加權指數已留存的市場交易日，由新到舊，供連續折溢價判定。
+    pub(crate) async fn recent_trading_dates(
+        &self,
+        until: NaiveDate,
+        limit: i64,
+    ) -> Result<Vec<NaiveDate>> {
+        Ok(sqlx::query_scalar("SELECT date FROM \"index\" WHERE category = 'TAIEX' AND date <= $1 ORDER BY date DESC LIMIT $2")
+            .bind(until).bind(limit).fetch_all(crate::infra::database::get_connection()).await?)
     }
 }
 

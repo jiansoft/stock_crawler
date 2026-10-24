@@ -248,6 +248,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_market_valuation.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/etf.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/etf_tracking_error.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail_more.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/estimate.sql
@@ -364,6 +365,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_market_valuation.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/etf.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/etf_tracking_error.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend_record_detail_more.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/estimate.sql

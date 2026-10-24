@@ -270,6 +270,30 @@ fn unlimited_securities_use_the_relaxed_tolerance() {
 
 /// 前一天的漲跌停價不適用今天；`Unknown` 不會被記錄。
 #[test]
+fn ipo_uses_todays_source_limits_and_resumes_normal_limits() {
+    use super::super::realtime::PriceLimit;
+    let share = Share::new();
+    let today = chrono::Local::now().date_naive();
+    // 普通股未建主檔也可依來源辨識無漲跌幅限制，不使用主檔匯入日期猜測 IPO。
+    share.set_price_limits(today, [("7999".to_string(), PriceLimit::Unlimited)]);
+    assert!(share.is_valid_price("7999", dec!(180), dec!(100)));
+    assert!(!share.is_valid_price("7999", dec!(0.08), dec!(100)));
+    share.set_price_limits(
+        today,
+        [(
+            "7999".to_string(),
+            PriceLimit::Range {
+                down: dec!(90),
+                up: dec!(110),
+            },
+        )],
+    );
+    assert!(!share.is_valid_price("7999", dec!(180), dec!(100)));
+    assert!(share.is_valid_price("7999", dec!(110), dec!(100)));
+}
+
+/// 前一天的漲跌停價不適用今天；`Unknown` 不會被記錄。
+#[test]
 fn stale_or_unknown_price_limits_are_ignored() {
     use super::super::realtime::PriceLimit;
 

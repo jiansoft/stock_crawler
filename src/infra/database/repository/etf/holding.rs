@@ -131,6 +131,7 @@ pub(super) async fn replace_portfolio(portfolio: &EtfPortfolio) -> Result<u64> {
         written += replace_allocation(&mut tx, symbol, kind, as_of, rows).await?;
     }
     tx.commit().await?;
+    crate::infra::cache::etf_analysis::ETF_ANALYSIS.invalidate();
     Ok(written)
 }
 

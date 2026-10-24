@@ -4,6 +4,7 @@
 //! warn 只需要當天第一筆，其餘降為 debug，避免洗版又不會漏掉新狀況。
 
 use std::collections::HashSet;
+use std::sync::RwLock;
 
 use chrono::NaiveDate;
 
@@ -15,6 +16,11 @@ pub struct DailySeen {
 }
 
 impl DailySeen {
+    /// 只讀檢查，讓已出現過的鍵不必取得寫鎖。
+    pub fn contains_today(&self, key: &str, today: NaiveDate) -> bool {
+        self.day == Some(today) && self.keys.contains(key)
+    }
+
     /// 這個鍵今天是否第一次出現（是的話記下來）。
     pub fn first_today(&mut self, key: &str, today: NaiveDate) -> bool {
         if self.day != Some(today) {
@@ -22,6 +28,28 @@ impl DailySeen {
             self.keys.clear();
         }
         self.keys.insert(key.to_string())
+    }
+}
+
+/// 並行去重紀錄；重複鍵走讀鎖，新增與換日才取得寫鎖。
+#[derive(Debug, Default)]
+pub struct ConcurrentDailySeen(RwLock<DailySeen>);
+
+impl ConcurrentDailySeen {
+    /// 原子地判斷並記錄當天第一筆；鎖毒化時允許重新記錄警告。
+    pub fn first_today(&self, key: &str, today: NaiveDate) -> bool {
+        if self
+            .0
+            .read()
+            .is_ok_and(|seen| seen.contains_today(key, today))
+        {
+            return false;
+        }
+        // 讀鎖釋放後重新檢查，避免兩個首次查詢同時通過。
+        self.0
+            .write()
+            .map(|mut seen| seen.first_today(key, today))
+            .unwrap_or(true)
     }
 }
 
@@ -42,5 +70,28 @@ mod tests {
         assert!(seen.first_today("79966", day1));
         assert!(seen.first_today("79965", day2));
         assert!(!seen.first_today("79965", day2));
+    }
+
+    #[test]
+    fn concurrent_first_today_reports_once_per_key_and_day() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let seen = ConcurrentDailySeen::default();
+        let firsts = AtomicUsize::new(0);
+        let day = NaiveDate::from_ymd_opt(2026, 10, 23).expect("日期合法");
+        std::thread::scope(|scope| {
+            for _ in 0..16 {
+                scope.spawn(|| {
+                    for _ in 0..100 {
+                        if seen.first_today("2330|Yahoo", day) {
+                            firsts.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                });
+            }
+        });
+        assert_eq!(firsts.load(Ordering::Relaxed), 1);
+        assert!(seen.first_today("2330|HiStock", day));
+        assert!(seen.first_today("2330|Yahoo", day.succ_opt().expect("隔天合法")));
+        assert!(!seen.first_today("2330|Yahoo", day.succ_opt().expect("隔天合法")));
     }
 }

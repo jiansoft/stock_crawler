@@ -80,6 +80,16 @@ log/                 # runtime 檔案日誌輸出目錄
 
 ## 建置、測試與格式化
 
+ETF 分析新增 `GET /api/v1/etfs/{symbol}/tracking-error`：以 0050 的含息日報酬為代理基準，
+回傳近一年相同起訖區間的報酬差年化樣本標準差（252 個交易日）與配對區間累積報酬差。
+至少 120 組樣本才計算；不足為 `null`。`benchmark_kind=etf_proxy`，並非相對實際追蹤指數的誤差。
+每日 ETF 績效排程更新結果；部署前先套用 `etc/sql/etf_tracking_error.sql`，既有資料不會自動回補。
+
+回補管理另提供 SSE：`/api/manual-backfill/jobs/events` 推播 `jobs` 清單；
+`/api/manual-backfill/jobs/{id}/events` 推播 `progress`、`complete`，完成即關閉，已移除的工作送 `expired`。
+重連先送最新快照，15 秒心跳；`progress_percent` 表示已完成階段，僅成功達 100%，失敗保留最後進度。
+ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快取，寫入後失效；個人持股與市值仍每次重讀。
+
 + `cargo build --release`：release build。
 + `cargo fmt --all -- --check`：檢查格式（CI gate）。
 + `cargo clippy --all-targets --all-features --locked -- -D warnings`：檢查 lint（CI gate）。

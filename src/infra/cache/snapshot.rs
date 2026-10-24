@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 use chrono::{Local, NaiveDate, Utc};
 use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
 use super::realtime::{PriceLimit, RealtimeSnapshot};
-use crate::core::{declare::StockExchangeMarket, util::daily_seen::DailySeen};
+use crate::core::{declare::StockExchangeMarket, util::daily_seen::ConcurrentDailySeen};
 
 /// 上市櫃的異常價格閾值：漲跌幅上限 10% 再加 0.5% 容差。
 const PRICE_LIMIT_TOLERANCE: Decimal = Decimal::from_parts(105, 0, 0, false, 3);
@@ -21,18 +20,15 @@ const UNLIMITED_BAND_FACTOR: Decimal = Decimal::from_parts(3, 0, 0, false, 0);
 use super::share::Share;
 
 /// 今天已用 warn 記過異常價格的「股票＋站點」。
-static ABNORMAL_PRICE_WARNED: Lazy<Mutex<DailySeen>> =
-    Lazy::new(|| Mutex::new(DailySeen::default()));
+static ABNORMAL_PRICE_WARNED: Lazy<ConcurrentDailySeen> = Lazy::new(ConcurrentDailySeen::default);
 
 /// 記錄一筆被過濾的異常價格；同一檔同一站每天只記第一筆 warn，其餘記 debug。
 ///
 /// 站點出錯通常會持續一段時間（10-06 開盤 HiStock 同一檔 68 次），
 /// 第一筆已足以定位，重複的只會淹沒其他警告。
 pub fn report_abnormal_price(symbol: &str, price: Decimal, last_close: Decimal, site: &str) {
-    let first = ABNORMAL_PRICE_WARNED
-        .lock()
-        .map(|mut seen| seen.first_today(&format!("{symbol}|{site}"), Local::now().date_naive()))
-        .unwrap_or(true);
+    let first =
+        ABNORMAL_PRICE_WARNED.first_today(&format!("{symbol}|{site}"), Local::now().date_naive());
     if first {
         tracing::warn!(
             "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}（同檔同站今天不再重複記錄）",
@@ -205,23 +201,22 @@ impl Share {
         for snapshot in snapshots.values_mut() {
             snapshot.updated_at = now;
         }
-        if let Ok(mut cache) = self.stock_snapshots.write() {
-            // 檢查每一檔股票的新報價是否異常，若是，則將其價格標記為 0 準備過濾/恢復
-            for (symbol, new_snap) in &mut snapshots {
-                if !self.is_valid_price(symbol, new_snap.price, new_snap.last_close) {
-                    // 價格 0 是尚未成交，不是異常，只過濾不記錄，避免開盤前後洗版
-                    if new_snap.price > Decimal::ZERO {
-                        report_abnormal_price(
-                            symbol,
-                            new_snap.price,
-                            new_snap.last_close,
-                            &new_snap.source_site,
-                        );
-                    }
-                    new_snap.price = Decimal::ZERO;
+        // 驗價與日誌不持有快照寫鎖，讓讀取端與其他來源能持續取得快照。
+        for (symbol, new_snap) in &mut snapshots {
+            if !self.is_valid_price(symbol, new_snap.price, new_snap.last_close) {
+                // 價格 0 是尚未成交，不是異常，只過濾不記錄，避免開盤前後洗版
+                if new_snap.price > Decimal::ZERO {
+                    report_abnormal_price(
+                        symbol,
+                        new_snap.price,
+                        new_snap.last_close,
+                        &new_snap.source_site,
+                    );
                 }
+                new_snap.price = Decimal::ZERO;
             }
-
+        }
+        if let Ok(mut cache) = self.stock_snapshots.write() {
             // 如果新報價異常且原本快取中有舊資料，則從舊快取還原，避免直接抹除該股票
             for (symbol, old_snap) in cache.iter() {
                 if let Some(new_snap) = snapshots.get_mut(symbol)
@@ -243,13 +238,25 @@ impl Share {
     /// 若快取內已存在該股票，僅更新 `price`，保留其他欄位。
     /// 若快取內尚無，建立最小快照。
     pub fn set_stock_snapshot_price(&self, symbol: String, price: Decimal) {
+        let last_close = self
+            .stock_snapshots
+            .read()
+            .ok()
+            .and_then(|cache| cache.get(&symbol).map(|snapshot| snapshot.last_close))
+            .unwrap_or(Decimal::ZERO);
+        if !self.is_valid_price(&symbol, price, last_close) {
+            report_abnormal_price(&symbol, price, last_close, "");
+            return;
+        }
         if let Ok(mut cache) = self.stock_snapshots.write() {
-            let last_close = cache
+            // 昨收若在讀鎖釋放後換日更新，必須對最新參考價重新驗證。
+            let current_close = cache
                 .get(&symbol)
                 .map(|s| s.last_close)
                 .unwrap_or(Decimal::ZERO);
-            if !self.is_valid_price(&symbol, price, last_close) {
-                report_abnormal_price(&symbol, price, last_close, "");
+            if current_close != last_close && !self.is_valid_price(&symbol, price, current_close) {
+                drop(cache);
+                report_abnormal_price(&symbol, price, current_close, "");
                 return;
             }
             if let Some(snapshot) = cache.get_mut(&symbol) {
@@ -269,14 +276,24 @@ impl Share {
         source_site: impl Into<String>,
     ) {
         let source_site = source_site.into();
-
+        let last_close = self
+            .stock_snapshots
+            .read()
+            .ok()
+            .and_then(|cache| cache.get(&symbol).map(|snapshot| snapshot.last_close))
+            .unwrap_or(Decimal::ZERO);
+        if !self.is_valid_price(&symbol, price, last_close) {
+            report_abnormal_price(&symbol, price, last_close, &source_site);
+            return;
+        }
         if let Ok(mut cache) = self.stock_snapshots.write() {
-            let last_close = cache
+            let current_close = cache
                 .get(&symbol)
                 .map(|s| s.last_close)
                 .unwrap_or(Decimal::ZERO);
-            if !self.is_valid_price(&symbol, price, last_close) {
-                report_abnormal_price(&symbol, price, last_close, &source_site);
+            if current_close != last_close && !self.is_valid_price(&symbol, price, current_close) {
+                drop(cache);
+                report_abnormal_price(&symbol, price, current_close, &source_site);
                 return;
             }
             if let Some(snapshot) = cache.get_mut(&symbol) {

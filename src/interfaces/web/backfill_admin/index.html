@@ -338,7 +338,7 @@
           <td>${escapeHtml(job.id)}</td>
           <td>${escapeHtml(job.kind)}</td>
           <td>${escapeHtml(job.input)}</td>
-          <td><span class="status ${job.status}">${escapeHtml(job.status)}</span></td>
+          <td><span class="status ${job.status}">${escapeHtml(job.status)}</span> ${escapeHtml(job.progress_percent ?? 0)}%<progress max="100" value="${Number(job.progress_percent) || 0}" aria-label="Job progress"></progress></td>
           <td>${escapeHtml(job.message)}</td>
         `;
         return row;
@@ -356,7 +356,14 @@
     }
 
     refreshJobs();
-    setInterval(refreshJobs, 3000);
+    const jobEvents = new EventSource("/api/manual-backfill/jobs/events");
+    jobEvents.addEventListener("jobs", (event) => {
+      const jobs = JSON.parse(event.data);
+      renderJobs(jobs);
+      summary.textContent = `${jobs.length} jobs, ${jobs.filter((job) => job.status === "running").length} running`;
+    });
+    jobEvents.onerror = () => { summary.textContent = "Connection interrupted; reconnecting…"; };
+    window.addEventListener("pagehide", () => jobEvents.close());
   </script>
 </body>
 </html>

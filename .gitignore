@@ -1,5 +1,7 @@
 # Rust build artifacts
 /target/
+# 跨專案盤查使用的獨立 Git worktree。
+/.audit-work/
 /debug/
 /release/
 

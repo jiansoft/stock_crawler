@@ -11,6 +11,7 @@ const OTHER: &str = "79979EC2";
 
 async fn cleanup(pool: &sqlx::PgPool) {
     for sql in [
+        "DELETE FROM etf_tracking_error WHERE stock_symbol = $1",
         "DELETE FROM etf_snapshot WHERE stock_symbol = $1",
         "DELETE FROM etf_performance WHERE stock_symbol = $1",
         "DELETE FROM etf_daily_nav WHERE stock_symbol = $1",
@@ -20,6 +21,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
             let _ = sqlx::query(sql).bind(symbol).execute(pool).await;
         }
     }
+    crate::infra::cache::etf_analysis::ETF_ANALYSIS.invalidate();
 }
 
 #[tokio::test]
@@ -81,6 +83,48 @@ async fn etf_endpoints_db_semantics() {
     let (status, _) = get("/api/v1/etfs/79979XX").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
+    // 尚未計算時保留 null；儲存後讀到代理基準、資料日與原始指數名稱。
+    let (status, json) = get("/api/v1/etfs/79979ec/tracking-error").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["benchmark_kind"], "etf_proxy");
+    assert_eq!(json["benchmark_symbol"], "0050");
+    assert!(json["data_as_of"].is_null() && json["tracking_error_percent"].is_null());
+    let date = chrono::NaiveDate::from_ymd_opt(1987, 3, 5).unwrap();
+    crate::infra::database::repository::etf::tracking::save(&[(
+        SYMBOL.into(),
+        date,
+        crate::domain::etf::tracking::TrackingStats {
+            samples: 150,
+            tracking_error: Some(4.25),
+            tracking_difference: Some(-1.5),
+        },
+    )])
+    .await
+    .unwrap();
+    let (status, json) = get("/api/v1/etfs/79979ec/tracking-error").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["samples"], 150);
+    assert_eq!(json["data_as_of"], "1987-03-05");
+    assert_eq!(json["tracking_error_percent"], 4.25);
+    assert_eq!(json["tracking_difference_percent"], -1.5);
+    crate::infra::database::repository::etf::tracking::save(&[(
+        SYMBOL.into(),
+        date,
+        crate::domain::etf::tracking::TrackingStats {
+            samples: 30,
+            ..Default::default()
+        },
+    )])
+    .await
+    .unwrap();
+    let (_, json) = get("/api/v1/etfs/79979ec/tracking-error").await;
+    assert_eq!(json["samples"], 30);
+    assert!(
+        json["tracking_error_percent"].is_null() && json["tracking_difference_percent"].is_null()
+    );
+    let (status, _) = get("/api/v1/etfs/79979XX/tracking-error").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
     // 比較：代號不分大小寫；其中一檔不是 ETF 時 404。
     let (status, json) = get("/api/v1/etfs/compare?symbols=79979ec,79979EC2").await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{json}");
@@ -91,6 +135,8 @@ async fn etf_endpoints_db_semantics() {
     .execute(pool)
     .await
     .expect("寫入第二檔快照");
+    // 直接 SQL 種入 fixture，模擬正式 repository 寫入成功後的失效通知。
+    crate::infra::cache::etf_analysis::ETF_ANALYSIS.invalidate();
     let (status, json) = get("/api/v1/etfs/compare?symbols=79979ec,79979EC2").await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["items"].as_array().map(Vec::len), Some(2));

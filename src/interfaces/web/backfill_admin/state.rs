@@ -9,7 +9,7 @@ use std::{
 use chrono::Local;
 use once_cell::sync::Lazy;
 use serde::Serialize;
-use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore, broadcast};
 
 /// 同時執行中的 manual backfill job 數量上限。
 ///
@@ -31,6 +31,8 @@ pub(super) const MAX_FINISHED_JOBS_RETAINED: usize = 100;
 /// 狀態目前保存在記憶體中，適合單一程序內的臨時手動維運用途。
 #[derive(Clone)]
 pub(super) struct BackfillWebState {
+    /// 狀態變更通知；SSE 接收端重新讀取最新快照，落後時不遺失最終狀態。
+    pub(super) events: broadcast::Sender<()>,
     /// 以 job id 為 key 的回補工作表。
     pub(super) jobs: Arc<RwLock<HashMap<String, BackfillJob>>>,
     /// 產生同一秒內多筆 job id 的遞增序號。
@@ -49,6 +51,7 @@ impl BackfillWebState {
     /// 建立空的 job 狀態容器。
     pub(super) fn new() -> Self {
         Self {
+            events: broadcast::channel(64).0,
             jobs: Arc::new(RwLock::new(HashMap::new())),
             next_id: Arc::new(AtomicU64::new(1)),
             job_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_JOBS)),
@@ -139,6 +142,8 @@ pub(super) enum BackfillJobStatus {
 /// 此結構同時供 Web API 回應與 gRPC 轉換使用，因此可見度限制在 crate 內。
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BackfillJob {
+    /// 已完成階段的百分比；不依耗時猜測，成功時才為 100。
+    pub(crate) progress_percent: u8,
     /// Job 唯一識別碼。
     pub(crate) id: String,
     /// Job 類型，例如 `closing_aggregate`。
@@ -160,6 +165,7 @@ impl BackfillJob {
     #[cfg(test)]
     pub(crate) fn for_test(id: &str, finished_at: Option<&str>) -> Self {
         BackfillJob {
+            progress_percent: if finished_at.is_some() { 100 } else { 0 },
             id: id.to_string(),
             kind: "cagr".to_string(),
             input: "date=2026-10-20".to_string(),
@@ -209,6 +215,7 @@ mod tests {
     /// 建立一筆指定狀態的測試 job。
     fn make_job(id: &str, started_at: &str, status: BackfillJobStatus) -> BackfillJob {
         BackfillJob {
+            progress_percent: 0,
             id: id.to_string(),
             kind: "test_kind".to_string(),
             input: "input".to_string(),

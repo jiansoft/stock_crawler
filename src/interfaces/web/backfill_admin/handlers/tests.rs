@@ -7,6 +7,84 @@ use tower::ServiceExt;
 use super::super::dto::INDEX_HTML;
 use super::router;
 
+/// SSE 重連先送最新快照；落後時重讀狀態，完成後送出最後事件並關閉。
+#[tokio::test]
+async fn sse_reports_latest_progress_and_completes_after_lag() {
+    use super::super::state::{BackfillJob, BackfillJobStatus, BackfillWebState};
+    use axum::response::IntoResponse;
+    use futures::StreamExt;
+    let state = BackfillWebState::new();
+    state
+        .jobs
+        .write()
+        .await
+        .insert("sse".into(), BackfillJob::for_test("sse", None));
+    let response = super::stream_jobs(state.clone(), Some("sse".into())).into_response();
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let mut body = response.into_body().into_data_stream();
+    let first = body.next().await.unwrap().unwrap();
+    let first = String::from_utf8_lossy(&first);
+    assert!(first.contains("event: progress") && first.contains("\"progress_percent\":0"));
+    {
+        let mut jobs = state.jobs.write().await;
+        let job = jobs.get_mut("sse").unwrap();
+        job.progress_percent = 50;
+    }
+    state.events.send(()).unwrap();
+    let update = body.next().await.unwrap().unwrap();
+    assert!(String::from_utf8_lossy(&update).contains("\"progress_percent\":50"));
+    {
+        let mut jobs = state.jobs.write().await;
+        let job = jobs.get_mut("sse").unwrap();
+        job.progress_percent = 100;
+        job.status = BackfillJobStatus::Succeeded;
+        job.finished_at = Some("2026-10-24T12:00:00+08:00".into());
+    }
+    // 超過 broadcast 容量後，仍須取得最後結果。
+    for _ in 0..100 {
+        state.events.send(()).unwrap();
+    }
+    let last = body.next().await.unwrap().unwrap();
+    let last = String::from_utf8_lossy(&last);
+    assert!(last.contains("event: complete") && last.contains("\"progress_percent\":100"));
+    assert!(body.next().await.is_none());
+}
+
+#[tokio::test]
+async fn sse_list_snapshot_and_expired_job() {
+    use super::super::state::{BackfillJob, BackfillWebState};
+    use axum::response::IntoResponse;
+    use futures::StreamExt;
+    let state = BackfillWebState::new();
+    let mut list = super::stream_jobs(state.clone(), None)
+        .into_response()
+        .into_body()
+        .into_data_stream();
+    let first = list.next().await.unwrap().unwrap();
+    assert!(String::from_utf8_lossy(&first).contains("data: []"));
+    state
+        .jobs
+        .write()
+        .await
+        .insert("expired".into(), BackfillJob::for_test("expired", None));
+    let mut single = super::stream_jobs(state.clone(), Some("expired".into()))
+        .into_response()
+        .into_body()
+        .into_data_stream();
+    single.next().await.unwrap().unwrap();
+    state.jobs.write().await.remove("expired");
+    state.events.send(()).unwrap();
+    let event = single.next().await.unwrap().unwrap();
+    assert!(String::from_utf8_lossy(&event).contains("event: expired"));
+    assert!(single.next().await.is_none());
+    let response = super::single_job_events(
+        axum::extract::State(state),
+        axum::extract::Path("missing".into()),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
 /// 送出 JSON body 並取回狀態碼。
 async fn post(path: &str, body: &str) -> StatusCode {
     router()

@@ -45,8 +45,18 @@ pub async fn execute() -> Result<u64> {
         .remove(BENCHMARK)
         .unwrap_or_default();
     let mut performances = Vec::with_capacity(symbols.len());
+    let mut tracking = Vec::new();
     for chunk in symbols.chunks(CHUNK) {
         let bars = quotes.fetch_adjusted_bars(chunk, from, today).await?;
+        for symbol in chunk {
+            if let Some(series) = bars.get(symbol).filter(|series| !series.is_empty()) {
+                tracking.push((
+                    symbol.clone(),
+                    series.last().expect("非空").date,
+                    crate::domain::etf::tracking::compute(series, &benchmark),
+                ));
+            }
+        }
         let navs = repo.nav_series(chunk, from).await?;
         let adjustments = quotes.fetch_price_adjustments(chunk).await?;
         let mut computed = compute_all(chunk, &bars, &benchmark);
@@ -54,6 +64,7 @@ pub async fn execute() -> Result<u64> {
         performances.extend(computed);
     }
     let written = repo.save_performances(&performances).await?;
+    crate::infra::database::repository::etf::tracking::save(&tracking).await?;
     tracing::info!(
         "ETF 績效計算完成: etfs={}, computed={}, written={written}",
         symbols.len(),
