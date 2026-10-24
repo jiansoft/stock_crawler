@@ -81,7 +81,14 @@ pub async fn execute() -> Result<()> {
     let units = repo.latest_units(&symbols).await?;
     let today = Local::now().date_naive();
     let mut alerts = detect(&premiums, today);
-    let calendar = repo.recent_trading_dates(today, 4).await?;
+    // 交易日曆只供連續折溢價判斷使用，查詢失敗時其餘通知照常發送。
+    let calendar = repo
+        .recent_trading_dates(today, 4)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("查詢交易日曆失敗，略過連續折溢價判斷: {why:#}");
+            Vec::new()
+        });
     alerts.extend(detect_persistent(&premiums, today, &calendar));
     alerts.extend(detect_flows(&units, today));
     tracing::info!(

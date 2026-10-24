@@ -48,7 +48,8 @@ pub async fn execute() -> Result<u64> {
     let mut tracking = Vec::new();
     for chunk in symbols.chunks(CHUNK) {
         let bars = quotes.fetch_adjusted_bars(chunk, from, today).await?;
-        for symbol in chunk {
+        // 基準缺資料時不計算追蹤誤差，避免以空結果覆蓋前一次的有效值。
+        for symbol in chunk.iter().filter(|_| !benchmark.is_empty()) {
             if let Some(series) = bars.get(symbol).filter(|series| !series.is_empty()) {
                 tracking.push((
                     symbol.clone(),
@@ -64,7 +65,14 @@ pub async fn execute() -> Result<u64> {
         performances.extend(computed);
     }
     let written = repo.save_performances(&performances).await?;
-    crate::infra::database::repository::etf::tracking::save(&tracking).await?;
+    // 追蹤誤差是附加指標，寫入失敗不可中斷後續的快照刷新。
+    if benchmark.is_empty() {
+        tracing::warn!("基準 {BENCHMARK} 無還原日線，略過追蹤誤差寫入");
+    } else if let Err(why) =
+        crate::infra::database::repository::etf::tracking::save(&tracking).await
+    {
+        tracing::warn!("ETF 追蹤誤差寫入失敗，略過: {why:#}");
+    }
     tracing::info!(
         "ETF 績效計算完成: etfs={}, computed={}, written={written}",
         symbols.len(),
