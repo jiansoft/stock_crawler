@@ -315,10 +315,15 @@
       });
     });
 
+    // 最近一次 SSE 快照的時間；比它早發出的 fetch 回應已過期，不可覆蓋較新的進度。
+    let lastStreamAt = 0;
+
     async function refreshJobs() {
+      const startedAt = performance.now();
       try {
         const response = await fetch("/api/manual-backfill/jobs");
         const jobs = await response.json();
+        if (lastStreamAt > startedAt) return;
         renderJobs(jobs);
         const running = jobs.filter((job) => job.status === "running").length;
         summary.textContent = `${jobs.length} jobs, ${running} running`;
@@ -338,7 +343,7 @@
           <td>${escapeHtml(job.id)}</td>
           <td>${escapeHtml(job.kind)}</td>
           <td>${escapeHtml(job.input)}</td>
-          <td><span class="status ${job.status}">${escapeHtml(job.status)}</span></td>
+          <td><span class="status ${job.status}">${escapeHtml(job.status)}</span> ${escapeHtml(job.progress_percent ?? 0)}%<progress max="100" value="${Number(job.progress_percent) || 0}" aria-label="Job progress"></progress></td>
           <td>${escapeHtml(job.message)}</td>
         `;
         return row;
@@ -356,7 +361,26 @@
     }
 
     refreshJobs();
-    setInterval(refreshJobs, 3000);
+    let jobEvents = null;
+    function connectJobEvents() {
+      if (jobEvents) jobEvents.close();
+      jobEvents = new EventSource("/api/manual-backfill/jobs/events");
+      jobEvents.addEventListener("jobs", (event) => {
+        lastStreamAt = performance.now();
+        const jobs = JSON.parse(event.data);
+        renderJobs(jobs);
+        summary.textContent = `${jobs.length} jobs, ${jobs.filter((job) => job.status === "running").length} running`;
+      });
+      jobEvents.onerror = () => { summary.textContent = "Connection interrupted; reconnecting…"; };
+    }
+    connectJobEvents();
+    window.addEventListener("pagehide", () => jobEvents && jobEvents.close());
+    // 從 back/forward cache 還原的頁面連線已關閉，需要重新抓一次並重連。
+    window.addEventListener("pageshow", (event) => {
+      if (!event.persisted) return;
+      refreshJobs();
+      connectJobEvents();
+    });
   </script>
 </body>
 </html>

@@ -14,6 +14,8 @@ mod chip;
 mod dividend_fill;
 mod dividend_forecast;
 mod etf;
+mod etf_tracking;
+pub(super) use etf_tracking::{__path_etf_tracking, EtfTrackingResponse, etf_tracking};
 mod etf_holding_history;
 mod financial_health;
 mod financial_reports;

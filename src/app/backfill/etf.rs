@@ -39,10 +39,15 @@ pub async fn execute() -> Result<()> {
 /// 批次更新股票資訊到資料庫。
 async fn update_stocks(items: Vec<EtfInfo>) -> Result<()> {
     for item in items {
-        let market_id = SHARE
-            .get_exchange_market(item.market.serial())
-            .unwrap()
-            .stock_exchange_market_id;
+        let Some(market) = SHARE.get_exchange_market(item.market.serial()) else {
+            tracing::error!(
+                symbol = %item.stock_symbol,
+                market = item.market.serial(),
+                "略過 ETF：交易市場對照資料不存在"
+            );
+            continue;
+        };
+        let market_id = market.stock_exchange_market_id;
 
         let is_new_or_changed = backfill::is_stock_identity_new_or_changed(
             &item.stock_symbol,

@@ -29,10 +29,18 @@ pub const DISCOUNT_THRESHOLD: f64 = -1.0;
 pub const DISCOUNT_DAYS: usize = 5;
 /// 大額申贖門檻：單日受益單位增減佔前一營業日單位數（%）。
 pub const FLOW_THRESHOLD: f64 = 3.0;
+/// 連續三個交易日同向折溢價異常的絕對門檻（%）。
+pub const PERSISTENT_THRESHOLD: f64 = 1.5;
 
 /// 一則折溢價通知。
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PremiumAlert {
+    /// 連續三個交易日同向超過門檻，僅在剛滿三日時通知。
+    Persistent {
+        symbol: String,
+        rate: f64,
+        average: f64,
+    },
     /// 剛轉為高溢價。
     Premium { symbol: String, rate: f64 },
     /// 剛好連續折價滿 [`DISCOUNT_DAYS`] 天。
@@ -73,6 +81,15 @@ pub async fn execute() -> Result<()> {
     let units = repo.latest_units(&symbols).await?;
     let today = Local::now().date_naive();
     let mut alerts = detect(&premiums, today);
+    // 交易日曆只供連續折溢價判斷使用，查詢失敗時其餘通知照常發送。
+    let calendar = repo
+        .recent_trading_dates(today, 4)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("查詢交易日曆失敗，略過連續折溢價判斷: {why:#}");
+            Vec::new()
+        });
+    merge_persistent(&mut alerts, detect_persistent(&premiums, today, &calendar));
     alerts.extend(detect_flows(&units, today));
     tracing::info!(
         "持有 ETF 折溢價通知: etfs={}, alerts={}",
@@ -146,6 +163,70 @@ pub(crate) fn detect_flows(
         .collect()
 }
 
+/// 以交易日曆驗證連續性；缺任一天資料、方向反轉或舊資料不發送。
+fn detect_persistent(
+    premiums: &HashMap<String, Vec<PremiumPoint>>,
+    today: NaiveDate,
+    calendar: &[NaiveDate],
+) -> Vec<PremiumAlert> {
+    if calendar.len() < 3 || calendar[0] != today {
+        return Vec::new();
+    }
+    let mut alerts = Vec::new();
+    for (symbol, points) in premiums {
+        let Some(streak) = points.get(..3) else {
+            continue;
+        };
+        let direction = streak[0].premium_rate.signum();
+        let qualifies = |p: &PremiumPoint| {
+            p.premium_rate.is_finite() && p.premium_rate * direction > PERSISTENT_THRESHOLD
+        };
+        if !streak
+            .iter()
+            .zip(calendar)
+            .all(|(p, date)| p.date == *date && qualifies(p))
+        {
+            continue;
+        }
+        if points
+            .get(3)
+            .zip(calendar.get(3))
+            .is_some_and(|(p, date)| p.date == *date && qualifies(p))
+        {
+            continue;
+        }
+        alerts.push(PremiumAlert::Persistent {
+            symbol: symbol.clone(),
+            rate: streak[0].premium_rate,
+            average: streak.iter().map(|p| p.premium_rate).sum::<f64>() / 3.0,
+        });
+    }
+    alerts.sort_by(|a, b| match (a, b) {
+        (
+            PremiumAlert::Persistent { symbol: a, .. },
+            PremiumAlert::Persistent { symbol: b, .. },
+        ) => a.cmp(b),
+        _ => std::cmp::Ordering::Equal,
+    });
+    alerts
+}
+
+/// 併入連續折溢價通知；同一檔今天已有溢價或折價通知時略過，避免同一檔出現兩行重疊的訊息。
+fn merge_persistent(alerts: &mut Vec<PremiumAlert>, persistent: Vec<PremiumAlert>) {
+    let alerted: Vec<String> = alerts
+        .iter()
+        .filter_map(|alert| match alert {
+            PremiumAlert::Premium { symbol, .. } | PremiumAlert::Discount { symbol, .. } => {
+                Some(symbol.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    alerts.extend(persistent.into_iter().filter(|alert| {
+        !matches!(alert, PremiumAlert::Persistent { symbol, .. } if alerted.contains(symbol))
+    }));
+}
+
 /// 組出通知訊息（Telegram MarkdownV2）；沒有通知時回 `None`。
 pub(crate) fn build_message(
     date: NaiveDate,
@@ -163,6 +244,15 @@ pub(crate) fn build_message(
     );
     for alert in alerts {
         let line = match alert {
+            PremiumAlert::Persistent {
+                symbol,
+                rate,
+                average,
+            } => format!(
+                "{symbol} {} 連續 3 個交易日{}超過 {PERSISTENT_THRESHOLD}%，今日 {rate:+.2}%、平均 {average:+.2}%",
+                stock_name(symbol),
+                if *rate > 0.0 { "溢價" } else { "折價" }
+            ),
             PremiumAlert::Premium { symbol, rate } => format!(
                 "{symbol} {} 溢價 {rate:+.2}%（≥ {PREMIUM_THRESHOLD}%），市價明顯高於淨值，加碼前留意",
                 stock_name(symbol)
@@ -198,6 +288,58 @@ pub(crate) fn build_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persistent_premium_requires_three_consecutive_trading_days_and_no_repeat() {
+        let calendar = [day(23), day(22), day(21), day(20)];
+        for rates in [[1.6, 1.7, 1.8, 0.0], [-1.6, -1.7, -1.8, 0.0]] {
+            assert_eq!(
+                detect_persistent(&one("0050", points(23, &rates)), day(23), &calendar).len(),
+                1
+            );
+        }
+        for rates in [
+            [1.6, 1.7, 1.5, 0.0],
+            [1.6, -1.7, 1.8, 0.0],
+            [1.6, 1.7, 1.8, 1.9],
+        ] {
+            assert!(
+                detect_persistent(&one("0050", points(23, &rates)), day(23), &calendar).is_empty()
+            );
+        }
+        assert!(
+            detect_persistent(
+                &one("0050", points(22, &[1.8, 1.8, 1.8])),
+                day(23),
+                &calendar
+            )
+            .is_empty()
+        );
+        assert!(
+            detect_persistent(
+                &one("0050", points(23, &[1.8, 1.8, 1.8])),
+                day(23),
+                &[day(23), day(21), day(20)]
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn persistent_alert_is_dropped_when_symbol_already_has_premium_alert() {
+        let persistent = |symbol: &str| PremiumAlert::Persistent {
+            symbol: symbol.into(),
+            rate: 2.1,
+            average: 1.8,
+        };
+        let mut alerts = vec![PremiumAlert::Premium {
+            symbol: "0050".into(),
+            rate: 2.1,
+        }];
+        merge_persistent(&mut alerts, vec![persistent("0050"), persistent("0056")]);
+        assert_eq!(alerts.len(), 2);
+        assert_eq!(alerts[1], persistent("0056"));
+    }
 
     fn day(d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 10, d).expect("日期合法")

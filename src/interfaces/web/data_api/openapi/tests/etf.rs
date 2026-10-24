@@ -5,6 +5,27 @@ use utoipa::OpenApi;
 use super::super::ApiDoc;
 use super::{assert_endpoint_responses, enum_values, get_operation, query_schema};
 
+#[test]
+fn openapi_proxy_tracking_documents_benchmark_and_missing_data() {
+    let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let operation = get_operation(&document, "/api/v1/etfs/{symbol}/tracking-error");
+    super::assert_response(operation, "200", "EtfTrackingResponse");
+    assert!(operation["responses"]["422"].is_object());
+    let fields = &document["components"]["schemas"]["EtfTrackingResponse"]["properties"];
+    for name in [
+        "benchmark_symbol",
+        "benchmark_kind",
+        "target_benchmark",
+        "data_as_of",
+        "samples",
+        "tracking_error_percent",
+        "tracking_difference_percent",
+        "note",
+    ] {
+        assert!(fields[name].is_object(), "missing {name}");
+    }
+}
+
 /// ETF 清單 path 的契約：排序鍵與配息頻率列舉、limit 範圍與預設、可為 null 的欄位。
 #[test]
 fn openapi_etf_list_schema_pins_field_names() {

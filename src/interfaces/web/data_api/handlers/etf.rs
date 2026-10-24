@@ -111,7 +111,10 @@ pub(crate) async fn compare_etfs(Query(params): Query<EtfCompareParams>) -> Resp
     let repo = PgEtfQueryRepository::new();
     let mut details = Vec::with_capacity(symbols.len());
     for symbol in &symbols {
-        match repo.etf_detail(symbol, 1).await {
+        match crate::infra::cache::etf_analysis::ETF_ANALYSIS
+            .detail(symbol, 1, repo.etf_detail(symbol, 1))
+            .await
+        {
             Ok(Some(detail)) => details.push(detail),
             Ok(None) => {
                 return error_response(StatusCode::NOT_FOUND, &format!("查無這檔 ETF：{symbol}"));

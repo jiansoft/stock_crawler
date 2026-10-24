@@ -61,22 +61,29 @@ impl EtfExposureQuery for PgPortfolioRepository {
     }
 
     async fn fetch_etf_constituents(&self, etf_symbols: &[String]) -> Result<Vec<EtfConstituent>> {
-        let rows: Vec<(String, NaiveDate, String, String, f64)> = sqlx::query_as(CONSTITUENTS_SQL)
-            .bind(etf_symbols)
-            .fetch_all(database::get_connection())
+        crate::infra::cache::etf_analysis::ETF_ANALYSIS
+            .constituents(etf_symbols, async {
+                let rows: Vec<(String, NaiveDate, String, String, f64)> =
+                    sqlx::query_as(CONSTITUENTS_SQL)
+                        .bind(etf_symbols)
+                        .fetch_all(database::get_connection())
+                        .await
+                        .context("Failed to fetch ETF constituents")?;
+                Ok(rows
+                    .into_iter()
+                    .map(
+                        |(etf_symbol, as_of, holding_symbol, holding_name, weight)| {
+                            EtfConstituent {
+                                etf_symbol,
+                                as_of,
+                                holding_symbol,
+                                holding_name,
+                                weight,
+                            }
+                        },
+                    )
+                    .collect())
+            })
             .await
-            .context("Failed to fetch ETF constituents")?;
-        Ok(rows
-            .into_iter()
-            .map(
-                |(etf_symbol, as_of, holding_symbol, holding_name, weight)| EtfConstituent {
-                    etf_symbol,
-                    as_of,
-                    holding_symbol,
-                    holding_name,
-                    weight,
-                },
-            )
-            .collect())
     }
 }

@@ -14,6 +14,10 @@ use super::{auth, handlers};
 pub(crate) fn router() -> Router {
     let protected = Router::new()
         .route(
+            "/etfs/{symbol}/tracking-error",
+            axum::routing::get(handlers::etf_tracking),
+        )
+        .route(
             "/stocks/search",
             axum::routing::get(handlers::search_stocks),
         )

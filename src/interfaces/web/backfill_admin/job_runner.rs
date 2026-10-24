@@ -82,9 +82,11 @@ pub(crate) async fn start_daily_quotes_job(date: NaiveDate) -> Result<BackfillJo
             // 任一步失敗都會 rollback。因此這裡不需要（也不可以）先手動刪除
             // 當日資料——那正是舊版「刪除後抓取失敗，行情永久遺失」的缺陷來源。
             let quote_count = quote::execute(date).await?;
+            report_progress(50, "行情已寫入，重新計算均線").await;
             // 替換過去某天的行情會改變之後最多 240 個交易日的均線，從當天起一併重算。
             let recalculated =
                 daily_quotes::recalculate_moving_averages_since(date, None).await?;
+            report_progress(90, "均線計算完成，整理結果").await;
             Ok(format!(
                 "daily quotes backfill completed: quote_count={quote_count}, recalculated={recalculated}"
             ))
@@ -395,6 +397,7 @@ where
 
     // 通過兩道防護後才建立 running 狀態的 job，讓呼叫端能立即取得 id。
     let job = BackfillJob {
+        progress_percent: 0,
         id: state.next_job_id(),
         kind: kind.to_string(),
         input,
@@ -415,6 +418,7 @@ where
     BackfillWebState::prune_finished_jobs(&mut jobs_guard);
     // 登記完成，儘早釋放寫鎖；背景 task 的實際回補不應在持鎖狀態下執行。
     drop(jobs_guard);
+    let _ = state.events.send(());
 
     // 背景執行實際回補工作，HTTP/gRPC 呼叫端只負責後續輪詢。
     let jobs = Arc::clone(&state.jobs);
@@ -438,7 +442,13 @@ where
         // 防護 4：逾時保護。tokio::time::timeout 在時限內回傳 Ok(內層結果)；
         // 超時則直接 drop 掉還在執行的 future（正在進行的資料庫 transaction
         // 會因連線歸還而自動 rollback，不會留下半套資料）並回傳 Err。
-        let result = match tokio::time::timeout(timeout, run()).await {
+        let result = match JOB_PROGRESS
+            .scope(
+                (state.clone(), job_id.clone()),
+                tokio::time::timeout(timeout, run()),
+            )
+            .await
+        {
             Ok(result) => result,
             Err(_elapsed) => Err(anyhow!("job timed out after {} seconds", timeout.as_secs())),
         };
@@ -451,6 +461,7 @@ where
                 Ok(message) => {
                     // 成功時標記 succeeded，並把回補摘要提供給 UI/API 顯示。
                     job.status = BackfillJobStatus::Succeeded;
+                    job.progress_percent = 100;
                     job.message = message;
                     tracing::info!(
                         "manual backfill job succeeded: id={}, kind={}, input={}, message={}",
@@ -474,6 +485,8 @@ where
                 }
             }
         }
+        drop(jobs);
+        let _ = state.events.send(());
     });
 
     Ok(job)
@@ -481,3 +494,19 @@ where
 
 #[cfg(test)]
 mod tests;
+
+tokio::task_local! {
+    static JOB_PROGRESS: (BackfillWebState, String);
+}
+
+/// 回報實際完成的階段；只在目前回補 task 的作用域內更新，不影響一般排程。
+async fn report_progress(percent: u8, message: &str) {
+    let Ok((state, id)) = JOB_PROGRESS.try_with(Clone::clone) else {
+        return;
+    };
+    if let Some(job) = state.jobs.write().await.get_mut(&id) {
+        job.progress_percent = job.progress_percent.max(percent.min(99));
+        job.message = message.to_string();
+    }
+    let _ = state.events.send(());
+}

@@ -35,7 +35,7 @@ pub(super) fn apply_category_snapshots(
     let new_symbols: HashSet<String> = category_snapshots.keys().cloned().collect();
     // `insert` 會回傳舊集合；這正好拿來得知上一輪這個類股有哪些股票。
     let previous_symbols = category_symbols
-        .insert(category_key, new_symbols)
+        .insert(category_key, new_symbols.clone())
         .unwrap_or_default();
 
     // 驗證前先記下本輪的漲跌停價：Yahoo 類股報價自帶當日漲跌幅限制，比固定的 10.5% 門檻準確，
@@ -47,39 +47,42 @@ pub(super) fn apply_category_snapshots(
             .map(|(symbol, snapshot)| (symbol.clone(), snapshot.price_limit)),
     );
 
+    // 驗價會讀其他快取並可能寫日誌，在取得共享快照寫鎖前完成。
+    let valid_snapshots: Vec<_> = category_snapshots
+        .into_iter()
+        .filter(|(symbol, snapshot)| {
+            let valid = if category.exchange == YahooClassExchange::Emerging {
+                SHARE.is_valid_price_for_market(symbol, snapshot.price, snapshot.last_close, true)
+            } else {
+                SHARE.is_valid_price(symbol, snapshot.price, snapshot.last_close)
+            };
+            if !valid && snapshot.price > Decimal::ZERO {
+                report_abnormal_price(
+                    symbol,
+                    snapshot.price,
+                    snapshot.last_close,
+                    &snapshot.source_site,
+                );
+            }
+            valid
+        })
+        .collect();
+
     match SHARE.stock_snapshots.write() {
         Ok(mut cache) => {
             let mut changed_event_count = 0usize;
             // 先刪除這個類股上一輪有、這一輪沒有的股票，
             // 避免共享快取殘留已不在該類股結果中的舊資料。
             for symbol in previous_symbols {
-                if !category_snapshots.contains_key(&symbol) {
+                if !new_symbols.contains(&symbol) {
                     cache.remove(&symbol);
                 }
             }
 
             // 再把本輪抓到的快照逐筆寫回共享快取。
             // 若 symbol 已存在，就用最新 snapshot 覆蓋。
-            for (symbol, snapshot) in category_snapshots {
+            for (symbol, snapshot) in valid_snapshots {
                 let price = snapshot.price;
-                // Yahoo 興櫃類股的股票不一定已在主檔，改用類股本身的市場別決定閾值。
-                let is_valid = if category.exchange == YahooClassExchange::Emerging {
-                    SHARE.is_valid_price_for_market(&symbol, price, snapshot.last_close, true)
-                } else {
-                    SHARE.is_valid_price(&symbol, price, snapshot.last_close)
-                };
-                if !is_valid {
-                    // 價格 0 是尚未成交（冷門股、特別股開盤後常見），不是異常，只略過不記錄
-                    if price > Decimal::ZERO {
-                        report_abnormal_price(
-                            &symbol,
-                            price,
-                            snapshot.last_close,
-                            &snapshot.source_site,
-                        );
-                    }
-                    continue;
-                }
                 let has_changed = snapshot.price != Decimal::ZERO
                     && cache
                         .get(&symbol)

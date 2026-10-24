@@ -26,3 +26,4 @@ pub use entity::{
 };
 pub use performance::{EtfNavReturns, EtfPerformance, compute_nav_returns, compute_performance};
 pub use repository::EtfRepository;
+pub mod tracking;

@@ -279,6 +279,7 @@ pub(super) async fn save_performances(performances: &[EtfPerformance]) -> Result
     .context("Failed to delete stale ETF performances")?
     .rows_affected();
     tx.commit().await?;
+    crate::infra::cache::etf_analysis::ETF_ANALYSIS.invalidate();
     Ok(written)
 }
 
@@ -294,5 +295,6 @@ pub(super) async fn refresh_snapshot() -> Result<u64> {
         .await
         .context("Failed to delete stale ETF snapshot rows")?;
     tx.commit().await?;
+    crate::infra::cache::etf_analysis::ETF_ANALYSIS.invalidate();
     Ok(written)
 }

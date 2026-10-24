@@ -1,0 +1,2 @@
+# Proto 產碼固定使用 LF，避免 Windows 編譯後只有換行差異。
+src/interfaces/rpc/*.rs text eol=lf
