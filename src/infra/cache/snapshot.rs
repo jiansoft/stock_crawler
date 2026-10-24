@@ -249,7 +249,8 @@ impl Share {
             return;
         }
         if let Ok(mut cache) = self.stock_snapshots.write() {
-            // 昨收若在讀鎖釋放後換日更新，必須對最新參考價重新驗證。
+            // 昨收若在讀鎖釋放後換日更新，必須對最新參考價重新驗證（僅此情況，且在寫鎖內進行）；
+            // 漲跌停區間在驗價後才更新的極小視窗不重驗，下一筆報價會套用新區間。
             let current_close = cache
                 .get(&symbol)
                 .map(|s| s.last_close)

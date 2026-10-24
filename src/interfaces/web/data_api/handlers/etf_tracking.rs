@@ -1,5 +1,6 @@
 //! ETF 相對代理基準的追蹤誤差；明確區分追蹤指數名稱及實際比較基準。
-use super::{error_response, repository_error};
+use super::{error_response, etf::valid_symbol, repository_error};
+use crate::interfaces::web::data_api::dto::ErrorBody;
 use axum::{
     Json,
     extract::Path,
@@ -37,10 +38,9 @@ mod tests {
 }
 
 /// 讀取每日績效排程的近一年結果；資料不足時回 null，不以折溢價當作追蹤誤差。
-#[utoipa::path(get,path="/api/v1/etfs/{symbol}/tracking-error",tag="data-api",params(("symbol"=String,Path)),responses((status=200,body=EtfTrackingResponse),(status=404),(status=422),(status=500)),security(("bearer_auth"=[])))]
+#[utoipa::path(get,path="/api/v1/etfs/{symbol}/tracking-error",tag="data-api",params(("symbol"=String,Path)),responses((status=200,body=EtfTrackingResponse),(status=401,body=ErrorBody),(status=404,body=ErrorBody),(status=422,body=ErrorBody),(status=500,body=ErrorBody)),security(("bearer_auth"=[])))]
 pub(crate) async fn etf_tracking(Path(symbol): Path<String>) -> Response {
-    if symbol.is_empty() || symbol.len() > 12 || !symbol.bytes().all(|b| b.is_ascii_alphanumeric())
-    {
+    if !valid_symbol(&symbol) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "ETF 代號格式不正確");
     }
     let symbol = symbol.to_ascii_uppercase();

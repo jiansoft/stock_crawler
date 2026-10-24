@@ -14,13 +14,13 @@ use std::{
     time::Duration,
 };
 
-type DetailKey = (chrono::NaiveDate, u64, String);
+type DetailKey = (chrono::NaiveDate, u64, String, i64);
 type HoldingKey = (chrono::NaiveDate, u64, Vec<String>);
 
 /// 有容量與五分鐘 TTL 的共用 ETF 資料快取；同鍵未命中只執行一次查詢。
 pub struct EtfAnalysisCache {
     generation: AtomicU64,
-    details: Cache<DetailKey, Option<EtfDetail>>,
+    details: Cache<DetailKey, EtfDetail>,
     holdings: Cache<HoldingKey, Vec<EtfConstituent>>,
 }
 
@@ -51,21 +51,31 @@ impl EtfAnalysisCache {
         self.holdings.invalidate_all();
     }
 
-    /// 比較用明細（固定一筆淨值）；錯誤不快取。
+    /// ETF 明細；快取鍵含 `nav_days`，不同淨值筆數不會互相取代。錯誤與「查無這檔」都不快取，
+    /// 剛上市的 ETF 在資料補齊後可立即查到。
     pub async fn detail(
         &self,
         symbol: &str,
+        nav_days: i64,
         load: impl Future<Output = Result<Option<EtfDetail>>>,
     ) -> Result<Option<EtfDetail>> {
         let key = (
             Local::now().date_naive(),
             self.generation.load(Ordering::SeqCst),
             symbol.to_owned(),
+            nav_days,
         );
-        self.details
-            .try_get_with(key, load)
-            .await
-            .map_err(|error: Arc<anyhow::Error>| anyhow::anyhow!("{error:#}"))
+        let loaded = self
+            .details
+            .try_get_with(key, async {
+                load.await?.ok_or_else(|| anyhow::Error::new(NotFound))
+            })
+            .await;
+        match loaded {
+            Ok(detail) => Ok(Some(detail)),
+            Err(error) if error.is::<NotFound>() => Ok(None),
+            Err(error) => Err(shared_error(error)),
+        }
     }
 
     /// 成分股快取依正規化代號組合分隔，不保存會員資料。
@@ -85,8 +95,40 @@ impl EtfAnalysisCache {
         self.holdings
             .try_get_with(key, load)
             .await
-            .map_err(|error: Arc<anyhow::Error>| anyhow::anyhow!("{error:#}"))
+            .map_err(shared_error)
     }
+}
+
+/// 載入器回傳「查無資料」的標記；不寫入快取，也不當成錯誤。
+#[derive(Debug)]
+struct NotFound;
+
+impl std::fmt::Display for NotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("not found")
+    }
+}
+
+impl std::error::Error for NotFound {}
+
+/// 多個等待者共用同一個載入錯誤；顯示與 `source()` 都沿用原始錯誤，保留完整的原因鏈。
+#[derive(Debug)]
+struct SharedError(Arc<anyhow::Error>);
+
+impl std::fmt::Display for SharedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&*self.0, f)
+    }
+}
+
+impl std::error::Error for SharedError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        (**self.0).source()
+    }
+}
+
+fn shared_error(error: Arc<anyhow::Error>) -> anyhow::Error {
+    anyhow::Error::new(SharedError(error))
 }
 
 #[cfg(test)]
@@ -102,17 +144,56 @@ mod tests {
             tokio::task::yield_now().await;
             Ok(None)
         };
-        let (a, b) = tokio::join!(cache.detail("0050", load()), cache.detail("0050", load()));
+        let (a, b) = tokio::join!(
+            cache.detail("0050", 1, load()),
+            cache.detail("0050", 1, load())
+        );
         assert!(a.unwrap().is_none() && b.unwrap().is_none());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         cache.invalidate();
         assert!(
             cache
-                .detail("0050", async { Err(anyhow::anyhow!("失敗")) })
+                .detail("0050", 1, async { Err(anyhow::anyhow!("失敗")) })
                 .await
                 .is_err()
         );
-        cache.detail("0050", load()).await.unwrap();
+        cache.detail("0050", 1, load()).await.unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn does_not_cache_missing_etf_and_separates_nav_days() {
+        use std::sync::atomic::AtomicUsize;
+        let cache = EtfAnalysisCache::default();
+        let calls = AtomicUsize::new(0);
+        let missing = || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(None)
+        };
+        assert!(cache.detail("00999", 1, missing()).await.unwrap().is_none());
+        assert!(cache.detail("00999", 1, missing()).await.unwrap().is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "查無資料不可快取");
+
+        let found = || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(EtfDetail::default()))
+        };
+        cache.detail("0050", 1, found()).await.unwrap();
+        cache.detail("0050", 1, found()).await.unwrap();
+        cache.detail("0050", 20, found()).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 4, "nav_days 不同要各自載入");
+    }
+
+    #[tokio::test]
+    async fn shared_error_keeps_the_cause_chain() {
+        let cache = EtfAnalysisCache::default();
+        let error = cache
+            .detail("0050", 1, async {
+                Err(anyhow::anyhow!("底層錯誤").context("查詢失敗"))
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "查詢失敗");
+        assert_eq!(format!("{error:#}"), "查詢失敗: 底層錯誤");
     }
 }

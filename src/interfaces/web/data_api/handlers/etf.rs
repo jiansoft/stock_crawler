@@ -112,7 +112,7 @@ pub(crate) async fn compare_etfs(Query(params): Query<EtfCompareParams>) -> Resp
     let mut details = Vec::with_capacity(symbols.len());
     for symbol in &symbols {
         match crate::infra::cache::etf_analysis::ETF_ANALYSIS
-            .detail(symbol, repo.etf_detail(symbol, 1))
+            .detail(symbol, 1, repo.etf_detail(symbol, 1))
             .await
         {
             Ok(Some(detail)) => details.push(detail),

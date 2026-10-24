@@ -89,7 +89,7 @@ pub async fn execute() -> Result<()> {
             tracing::warn!("查詢交易日曆失敗，略過連續折溢價判斷: {why:#}");
             Vec::new()
         });
-    alerts.extend(detect_persistent(&premiums, today, &calendar));
+    merge_persistent(&mut alerts, detect_persistent(&premiums, today, &calendar));
     alerts.extend(detect_flows(&units, today));
     tracing::info!(
         "持有 ETF 折溢價通知: etfs={}, alerts={}",
@@ -211,6 +211,22 @@ fn detect_persistent(
     alerts
 }
 
+/// 併入連續折溢價通知；同一檔今天已有溢價或折價通知時略過，避免同一檔出現兩行重疊的訊息。
+fn merge_persistent(alerts: &mut Vec<PremiumAlert>, persistent: Vec<PremiumAlert>) {
+    let alerted: Vec<String> = alerts
+        .iter()
+        .filter_map(|alert| match alert {
+            PremiumAlert::Premium { symbol, .. } | PremiumAlert::Discount { symbol, .. } => {
+                Some(symbol.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    alerts.extend(persistent.into_iter().filter(|alert| {
+        !matches!(alert, PremiumAlert::Persistent { symbol, .. } if alerted.contains(symbol))
+    }));
+}
+
 /// 組出通知訊息（Telegram MarkdownV2）；沒有通知時回 `None`。
 pub(crate) fn build_message(
     date: NaiveDate,
@@ -307,6 +323,22 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn persistent_alert_is_dropped_when_symbol_already_has_premium_alert() {
+        let persistent = |symbol: &str| PremiumAlert::Persistent {
+            symbol: symbol.into(),
+            rate: 2.1,
+            average: 1.8,
+        };
+        let mut alerts = vec![PremiumAlert::Premium {
+            symbol: "0050".into(),
+            rate: 2.1,
+        }];
+        merge_persistent(&mut alerts, vec![persistent("0050"), persistent("0056")]);
+        assert_eq!(alerts.len(), 2);
+        assert_eq!(alerts[1], persistent("0056"));
     }
 
     fn day(d: u32) -> NaiveDate {
