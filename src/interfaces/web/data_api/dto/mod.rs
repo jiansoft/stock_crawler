@@ -131,7 +131,7 @@ pub(super) use portfolio_rebalance::{
     EtfLookThroughRebalanceItemDto, IndustryRebalanceItemDto, PortfolioRebalanceQueryParams,
     PortfolioRebalanceResponse, PortfolioTargetItemDto, PortfolioTargetsQueryParams,
     PortfolioTargetsResponse, PutPortfolioTargetsRequest, RebalanceCashSummaryDto,
-    StockRebalanceItemDto,
+    RebalanceEtfCoverageDto, StockRebalanceItemDto,
 };
 pub(super) use relative_strength::{
     IndustryLeader, IndustryStrengthItem, IndustryStrengthParams, IndustryStrengthResponse,

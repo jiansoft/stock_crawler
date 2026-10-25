@@ -20,6 +20,7 @@ pub struct PortfolioRebalanceQueryParams {
     pub tolerance_percent: Option<f64>,
     /// 目前帳戶可用現金（元），預設 0.0。
     #[param(default = 0.0, minimum = 0.0)]
+    #[serde(alias = "cash")]
     pub available_cash: Option<f64>,
     /// 券商手續費折讓（例如 0.28 代表 28 折，1.0 為無折讓），預設 1.0。
     #[param(default = 1.0, minimum = 0.0, maximum = 1.0)]
@@ -39,6 +40,9 @@ pub struct PortfolioTargetsQueryParams {
 /// 目標配置項目。
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 pub struct PortfolioTargetItemDto {
+    /// 回應列所屬維度；設定單一維度的 request 可省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dimension: Option<String>,
     /// 配置標的鍵值：股票代號（個股或穿透維度）或產業名稱（產業維度）。
     pub target_key: String,
     /// 目標配置權重百分比（0.0 ~ 100.0）。
@@ -67,7 +71,9 @@ pub struct PortfolioTargetsResponse {
     /// 目前設定之目標配置清單。
     pub targets: Vec<PortfolioTargetItemDto>,
     /// 目標現金或未指定比例（100% − 各標的目標權重總和）。
-    pub target_cash_percent: f64,
+    pub target_cash_percent: Option<f64>,
+    /// 各已設定維度的現金比例；全維度查詢不能混加不同維度權重。
+    pub cash_percent_by_dimension: std::collections::BTreeMap<String, f64>,
     /// 免責聲明文字。
     pub disclaimer: &'static str,
 }
@@ -161,6 +167,12 @@ pub struct RebalanceCashSummaryDto {
 /// 投資組合持股再平衡建議完整回應。
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 pub struct PortfolioRebalanceResponse {
+    /// ETF 穿透資料涵蓋範圍；個股、產業維度亦保留此資訊。
+    pub etf_coverage: Vec<RebalanceEtfCoverageDto>,
+    /// ETF 未揭露成分的合計市值（元）。
+    pub uncovered_value: f64,
+    /// 資料限制提示，不能將前十大成分當成完整投資組合。
+    pub warnings: Vec<String>,
     /// 會員編號。
     pub member_id: i64,
     /// 試算維度。
@@ -185,4 +197,17 @@ pub struct PortfolioRebalanceResponse {
     pub cash_summary: RebalanceCashSummaryDto,
     /// 免責聲明文字。
     pub disclaimer: &'static str,
+}
+
+/// ETF 前十大成分的資料日、涵蓋率與未涵蓋市值。
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+pub struct RebalanceEtfCoverageDto {
+    /// ETF 代號。
+    pub symbol: String,
+    /// 已揭露成分股權重百分比。
+    pub covered_weight_percent: f64,
+    /// 未涵蓋市值（元）。
+    pub uncovered_value: f64,
+    /// 成分股資料日；沒有成分資料時為 null。
+    pub as_of: Option<String>,
 }

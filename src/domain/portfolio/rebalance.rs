@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{Result, bail};
+use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 
 pub use super::target::TargetDimension;
@@ -26,6 +26,8 @@ pub struct CurrentPosition {
     pub current_price: f64,
     /// 產業名稱。
     pub industry: String,
+    /// 是否為 ETF；由股票主檔／ETF 資料判定，不猜代號前綴。
+    pub is_etf: bool,
 }
 
 /// ETF 穿透成分股。
@@ -39,6 +41,8 @@ pub struct EtfLookThroughComponent {
     pub weight_percent: f64,
     /// 所屬 ETF 代號。
     pub etf_symbol: String,
+    /// 成分股的產業，用於產業維度穿透。
+    pub industry: String,
 }
 
 /// 再平衡試算參數。
@@ -64,8 +68,8 @@ impl Default for RebalanceParams {
             lot_size: 1000,
             tolerance_percent: 2.0,
             available_cash: 0.0,
-            fee_rate: 0.001425,
-            tax_rate: 0.003,
+            fee_rate: super::costs::FEE_RATE,
+            tax_rate: super::costs::STOCK_TAX_RATE,
             fee_discount: 1.0,
         }
     }
@@ -184,6 +188,7 @@ pub struct PortfolioRebalanceResult {
     pub disclaimer: &'static str,
 }
 
+/// 金額與百分比統一四捨五入至兩位小數。
 fn round2(val: f64) -> f64 {
     (val * 100.0).round() / 100.0
 }
@@ -207,21 +212,48 @@ pub fn calculate_rebalance(
     etf_components: &[EtfLookThroughComponent],
     params: &RebalanceParams,
 ) -> Result<PortfolioRebalanceResult> {
+    super::target::validate_targets(targets)?;
     let target_sum: f64 = targets.iter().map(|(_, pct)| pct).sum();
-    if target_sum > 100.0001 {
-        bail!("同一維度的目標權重總和 ({target_sum:.2}%) 不得超過 100%");
+    ensure!(
+        matches!(params.lot_size, 1 | 1000),
+        "交易單位須為 1 或 1000"
+    );
+    ensure!(
+        params.tolerance_percent.is_finite() && (0.0..=100.0).contains(&params.tolerance_percent),
+        "容忍帶須為 0 至 100 的有限數值"
+    );
+    ensure!(
+        params.available_cash.is_finite() && params.available_cash >= 0.0,
+        "現金須為非負有限數值"
+    );
+    ensure!(
+        [params.fee_rate, params.tax_rate, params.fee_discount]
+            .iter()
+            .all(|v| v.is_finite() && (0.0..=1.0).contains(v)),
+        "費率須為 0 至 1 的有限數值"
+    );
+    for position in positions {
+        ensure!(
+            position.shares >= 0
+                && position.current_price.is_finite()
+                && position.current_price > 0.0,
+            "{} 缺少有效收盤價或股數不合法",
+            position.symbol
+        );
     }
-    for (key, pct) in targets {
-        if *pct < 0.0 || *pct > 100.0 {
-            bail!("目標權重 ({key}: {pct}%) 必須介於 0% 至 100%");
-        }
+    let mut coverage = HashMap::<&str, f64>::new();
+    for comp in etf_components {
+        ensure!(
+            comp.weight_percent.is_finite() && (0.0..=100.0).contains(&comp.weight_percent),
+            "ETF 成分權重不合法"
+        );
+        *coverage.entry(&comp.etf_symbol).or_default() += comp.weight_percent;
     }
-
-    let lot_size = if params.lot_size == 0 {
-        1
-    } else {
-        params.lot_size
-    };
+    ensure!(
+        coverage.values().all(|v| *v <= 100.000001),
+        "ETF 成分權重合計超過 100%"
+    );
+    let lot_size = params.lot_size;
     let total_equity: f64 = positions
         .iter()
         .map(|p| p.shares as f64 * p.current_price)
@@ -328,7 +360,12 @@ pub fn calculate_rebalance(
                             suggested_amount = suggested_shares as f64 * price;
                             let fee = (suggested_amount * params.fee_rate * params.fee_discount)
                                 .max(20.0);
-                            let tax = suggested_amount * params.tax_rate;
+                            let tax_rate = if pos_opt.is_some_and(|p| p.is_etf) {
+                                super::costs::ETF_TAX_RATE
+                            } else {
+                                params.tax_rate
+                            };
+                            let tax = suggested_amount * tax_rate;
                             estimated_cost = round2(fee + tax);
                             net_amount = round2((suggested_amount - estimated_cost).max(0.0));
                             total_sell_net += net_amount;
@@ -393,7 +430,7 @@ pub fn calculate_rebalance(
             let mut ind_values: HashMap<String, f64> = HashMap::new();
             let mut ind_stocks: HashMap<String, Vec<String>> = HashMap::new();
 
-            for pos in positions {
+            for pos in positions.iter().filter(|pos| !pos.is_etf) {
                 let ind = if pos.industry.is_empty() {
                     "其他".to_string()
                 } else {
@@ -404,6 +441,21 @@ pub fn calculate_rebalance(
                 ind_stocks.entry(ind).or_default().push(pos.symbol.clone());
             }
 
+            // ETF 市值依成分股產業拆分；未揭露部分保留在涵蓋率資訊，不假裝已知產業。
+            for comp in etf_components {
+                let etf_value: f64 = positions
+                    .iter()
+                    .filter(|p| p.is_etf && p.symbol == comp.etf_symbol)
+                    .map(|p| p.shares as f64 * p.current_price)
+                    .sum();
+                let industry = if comp.industry.is_empty() {
+                    "其他"
+                } else {
+                    &comp.industry
+                };
+                *ind_values.entry(industry.to_owned()).or_default() +=
+                    etf_value * comp.weight_percent / 100.0;
+            }
             let mut all_inds: Vec<String> = targets.iter().map(|(k, _)| k.clone()).collect();
             for ind in ind_values.keys() {
                 if !all_inds.contains(ind) {
@@ -461,7 +513,7 @@ pub fn calculate_rebalance(
 
             for pos in positions {
                 let val = pos.shares as f64 * pos.current_price;
-                if pos.symbol.starts_with("00") || pos.industry == "ETF" {
+                if pos.is_etf {
                     etf_positions.insert(pos.symbol.as_str(), val);
                 } else {
                     direct_values.insert(pos.symbol.clone(), (pos.name.clone(), val));
@@ -556,6 +608,7 @@ mod tests {
                 shares: 10_000,
                 current_price: 1000.0,
                 industry: "半導體業".to_string(),
+                is_etf: false,
             },
             CurrentPosition {
                 symbol: "2317".to_string(),
@@ -563,6 +616,7 @@ mod tests {
                 shares: 20_000,
                 current_price: 200.0,
                 industry: "其他電子業".to_string(),
+                is_etf: false,
             },
         ]
     }
@@ -669,6 +723,7 @@ mod tests {
             shares: 0,
             current_price: 1000.0,
             industry: "半導體業".to_string(),
+            is_etf: false,
         }];
         let params = RebalanceParams {
             available_cash: 500_000.0, // 總資產 50 萬，目標 100% 買 1 張台積電需約 100 萬
@@ -743,6 +798,7 @@ mod tests {
                 shares: 1_000,
                 current_price: 1000.0, // 直接持股 1,000,000
                 industry: "半導體業".to_string(),
+                is_etf: false,
             },
             CurrentPosition {
                 symbol: "0050".to_string(),
@@ -750,6 +806,7 @@ mod tests {
                 shares: 10_000,
                 current_price: 200.0, // ETF 持股 2,000,000
                 industry: "ETF".to_string(),
+                is_etf: true,
             },
         ];
 
@@ -758,6 +815,7 @@ mod tests {
             name: "台積電".to_string(),
             weight_percent: 55.0, // 0050 內台積電占 55% -> 間接持有 2,000,000 * 55% = 1,100,000
             etf_symbol: "0050".to_string(),
+            industry: "半導體業".to_string(),
         }];
 
         let targets = vec![("2330".to_string(), 60.0)];
@@ -779,5 +837,116 @@ mod tests {
         assert_eq!(tsmc.direct_value, 1_000_000.0);
         assert_eq!(tsmc.indirect_value, 1_100_000.0);
         assert_eq!(tsmc.total_value, 2_100_000.0);
+    }
+}
+
+/// 再平衡資料不變條件與 ETF 穿透的回歸測試。
+#[cfg(test)]
+mod regression {
+    use super::*;
+    /// 產生一筆有效且可交易的測試部位。
+    fn position(symbol: &str, is_etf: bool) -> CurrentPosition {
+        CurrentPosition {
+            symbol: symbol.into(),
+            name: symbol.into(),
+            shares: 10_000,
+            current_price: 100.0,
+            industry: if is_etf { "ETF" } else { "半導體業" }.into(),
+            is_etf,
+        }
+    }
+    /// ETF 市值必須依成分股產業穿透，不能將 ETF 本身當成產業。
+    #[test]
+    fn industry_looks_through_etf_and_uses_master_classification() {
+        let components = [EtfLookThroughComponent {
+            stock_symbol: "2330".into(),
+            name: "台積電".into(),
+            weight_percent: 60.0,
+            etf_symbol: "FUND".into(),
+            industry: "半導體業".into(),
+        }];
+        let result = calculate_rebalance(
+            TargetDimension::Industry,
+            &[("半導體業".into(), 60.0)],
+            &[position("FUND", true)],
+            &components,
+            &RebalanceParams::default(),
+        )
+        .unwrap();
+        assert_eq!(result.industry_items[0].current_value, 600_000.0);
+        assert_eq!(result.industry_items[0].current_weight, 60.0);
+        let exposure = calculate_rebalance(
+            TargetDimension::EtfLookThrough,
+            &[],
+            &[position("FUND", true)],
+            &components,
+            &RebalanceParams::default(),
+        )
+        .unwrap();
+        assert_eq!(exposure.etf_items[0].indirect_value, 600_000.0);
+    }
+    /// ETF 賣出沿用回測費率，零目標也可提出全數賣出的建議。
+    #[test]
+    fn cash_target_sells_etf_with_etf_tax() {
+        let result = calculate_rebalance(
+            TargetDimension::Stock,
+            &[("FUND".into(), 0.0)],
+            &[position("FUND", true)],
+            &[],
+            &RebalanceParams::default(),
+        )
+        .unwrap();
+        assert_eq!(result.target_cash_percent, 100.0);
+        assert_eq!(result.stock_items[0].suggested_shares, 10_000);
+        assert_eq!(result.stock_items[0].estimated_cost, 2425.0);
+    }
+    /// 非有限值、重複 key 與超出儲存精度皆不可進入計算。
+    #[test]
+    fn rejects_invalid_weights_and_unpriced_positions() {
+        for targets in [
+            vec![("A".into(), f64::NAN)],
+            vec![("A".into(), 33.335)],
+            vec![("A".into(), 10.0), ("A".into(), 10.0)],
+            vec![(" ".into(), 0.0)],
+        ] {
+            assert!(
+                calculate_rebalance(
+                    TargetDimension::Stock,
+                    &targets,
+                    &[],
+                    &[],
+                    &RebalanceParams::default()
+                )
+                .is_err()
+            );
+        }
+        let mut p = position("A", false);
+        p.current_price = 0.0;
+        assert!(
+            calculate_rebalance(
+                TargetDimension::Stock,
+                &[],
+                &[p],
+                &[],
+                &RebalanceParams::default()
+            )
+            .is_err()
+        );
+        for params in [
+            RebalanceParams {
+                available_cash: f64::INFINITY,
+                ..Default::default()
+            },
+            RebalanceParams {
+                tolerance_percent: f64::NAN,
+                ..Default::default()
+            },
+            RebalanceParams {
+                lot_size: 10,
+                ..Default::default()
+            },
+        ] {
+            assert!(calculate_rebalance(TargetDimension::Stock, &[], &[], &[], &params).is_err());
+        }
     }
 }

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS portfolio_target
     member_id      VARCHAR(64)                                        NOT NULL, -- 使用者帳號或會員 ID
     dimension      VARCHAR(32)                                        NOT NULL, -- 配置維度：stock, industry, etf_look_through
     key            VARCHAR(64)                                        NOT NULL, -- 維度鍵值：股票代號或產業名稱
-    target_percent NUMERIC(5, 2)                                      NOT NULL, -- 目標百分比（0.00 ~ 100.00）
+    target_percent NUMERIC(5, 2) CHECK (target_percent BETWEEN 0 AND 100) NOT NULL, -- 目標百分比（0.00 ~ 100.00）
     updated_time   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (member_id, dimension, key)
 );
@@ -18,3 +18,13 @@ COMMENT ON COLUMN portfolio_target.dimension IS '配置維度：stock（個股�
 COMMENT ON COLUMN portfolio_target.key IS '維度鍵值：股票代號或產業名稱';
 COMMENT ON COLUMN portfolio_target.target_percent IS '目標配置百分比（0.00 至 100.00）';
 COMMENT ON COLUMN portfolio_target.updated_time IS '最後更新時間';
+
+-- 設定存在性獨立記錄，使空清單也能表示明確的 100% 現金目標。
+CREATE TABLE IF NOT EXISTS portfolio_target_dimension (
+    member_id VARCHAR(64) NOT NULL,
+    dimension VARCHAR(32) NOT NULL CHECK (dimension IN ('stock', 'industry', 'etf_look_through')),
+    updated_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (member_id, dimension)
+);
+INSERT INTO portfolio_target_dimension(member_id, dimension)
+SELECT DISTINCT member_id, dimension FROM portfolio_target ON CONFLICT DO NOTHING;

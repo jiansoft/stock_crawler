@@ -7,13 +7,13 @@ use super::{CandidateRow, PeriodRow, round2, round4};
 use crate::interfaces::web::data_api::dto::BacktestPeriod;
 
 /// 手續費率（%），買賣各付一次；未打折。
-pub(super) const FEE_RATE: f64 = 0.1425;
+pub(super) const FEE_RATE: f64 = crate::domain::portfolio::costs::FEE_RATE * 100.0;
 
 /// 股票證交稅率（%），賣出時付。
-pub(super) const TAX_RATE: f64 = 0.3;
+pub(super) const TAX_RATE: f64 = crate::domain::portfolio::costs::STOCK_TAX_RATE * 100.0;
 
 /// ETF 證交稅率（%），賣出 0050 時付。
-pub(super) const ETF_TAX_RATE: f64 = 0.1;
+pub(super) const ETF_TAX_RATE: f64 = crate::domain::portfolio::costs::ETF_TAX_RATE * 100.0;
 
 /// 輸出每期前幾檔代號。
 pub(super) const LISTED_SYMBOLS: usize = 10;

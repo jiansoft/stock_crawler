@@ -65,6 +65,9 @@ pub trait PortfolioTargetRepository: Send + Sync {
         dimension: Option<TargetDimension>,
     ) -> Result<Vec<PortfolioTargetRecord>>;
 
+    /// 區分尚未設定與明確設定為全現金（空清單）。
+    async fn has_configuration(&self, member_id: &str, dimension: TargetDimension) -> Result<bool>;
+
     /// 設定指定使用者在指定維度的目標配置列表（批次覆蓋該維度的舊設定）。
     ///
     /// 同一維度的 target_percent 總和若超過 100.0 應拒絕（回傳 Err）。
@@ -74,4 +77,32 @@ pub trait PortfolioTargetRepository: Send + Sync {
         dimension: TargetDimension,
         targets: &[(String, f64)],
     ) -> Result<()>;
+}
+
+/// 驗證輸入與儲存精度一致：只接受兩位小數、有限值與不重複的非空 key。
+/// 以整數基點加總，避免資料庫逐項四捨五入後超過 100%。
+pub fn validate_targets(targets: &[(String, f64)]) -> Result<()> {
+    let mut keys = std::collections::HashSet::new();
+    let mut basis_points = 0_i64;
+    for (key, percent) in targets {
+        anyhow::ensure!(
+            !key.trim().is_empty() && key.chars().count() <= 64 && keys.insert(key),
+            "目標 key 不可空白、重複或超過 64 字元"
+        );
+        anyhow::ensure!(
+            percent.is_finite() && (0.0..=100.0).contains(percent),
+            "目標比例須為 0 至 100 的有限數值"
+        );
+        let scaled = percent * 100.0;
+        anyhow::ensure!(
+            (scaled - scaled.round()).abs() < 1e-7,
+            "目標比例最多兩位小數"
+        );
+        basis_points += scaled.round() as i64;
+    }
+    anyhow::ensure!(
+        basis_points <= 10_000,
+        "同一維度的目標權重總和不得超過 100%"
+    );
+    Ok(())
 }

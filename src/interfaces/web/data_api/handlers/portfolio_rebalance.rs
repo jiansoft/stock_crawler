@@ -21,7 +21,7 @@ use crate::interfaces::web::data_api::dto::{
     ErrorBody, EtfLookThroughRebalanceItemDto, IndustryRebalanceItemDto,
     PortfolioRebalanceQueryParams, PortfolioRebalanceResponse, PortfolioTargetItemDto,
     PortfolioTargetsQueryParams, PortfolioTargetsResponse, PutPortfolioTargetsRequest,
-    RebalanceCashSummaryDto, StockRebalanceItemDto,
+    RebalanceCashSummaryDto, RebalanceEtfCoverageDto, StockRebalanceItemDto,
 };
 
 /// 依代號合併之持股部位。
@@ -42,6 +42,8 @@ struct EtfConstituentRow {
     holding_symbol: String,
     holding_name: String,
     weight: f64,
+    industry_name: String,
+    as_of: chrono::NaiveDate,
 }
 
 /// 查詢持股再平衡建議。
@@ -90,18 +92,18 @@ pub(crate) async fn portfolio_rebalance(
     }
 
     let tolerance = params.tolerance_percent.unwrap_or(2.0);
-    if tolerance < 0.0 {
+    if !tolerance.is_finite() || !(0.0..=100.0).contains(&tolerance) {
         return error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "tolerance_percent 不可為負數",
+            "tolerance_percent 須為 0 至 100 的有限數值",
         );
     }
 
     let cash = params.available_cash.unwrap_or(0.0);
-    if cash < 0.0 {
+    if !cash.is_finite() || cash < 0.0 {
         return error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "available_cash 不可為負數",
+            "available_cash 須為非負有限數值",
         );
     }
 
@@ -123,7 +125,14 @@ pub(crate) async fn portfolio_rebalance(
         Err(err) => return repository_error(err),
     };
 
-    if target_records.is_empty() {
+    let configured = match target_repo
+        .has_configuration(&member_id.to_string(), dimension)
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => return repository_error(error),
+    };
+    if target_records.is_empty() && !configured {
         return error_response(
             StatusCode::NOT_FOUND,
             "尚未設定此維度的目標配置比例，請先使用 PUT /api/v1/portfolio/targets 設定目標",
@@ -150,7 +159,7 @@ pub(crate) async fn portfolio_rebalance(
             COALESCE(e.name, s."Name", held.stock_symbol::text) AS name,
             COALESCE(si.name, '') AS industry_name,
             CASE WHEN q.closing_price > 0 THEN q.closing_price::float8 END AS closing_price,
-            e.stock_symbol IS NOT NULL AS is_etf
+            (e.stock_symbol IS NOT NULL OR s.stock_industry_id = 9001) AS is_etf
         FROM held
         LEFT JOIN stocks s ON s.stock_symbol = held.stock_symbol
         LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
@@ -178,6 +187,7 @@ pub(crate) async fn portfolio_rebalance(
             shares: r.shares,
             current_price: r.closing_price.unwrap_or(0.0),
             industry: r.industry_name.clone(),
+            is_etf: r.is_etf,
         })
         .collect();
 
@@ -199,7 +209,7 @@ pub(crate) async fn portfolio_rebalance(
                 COALESCE(e.name, s."Name", s.stock_symbol::text) AS name,
                 COALESCE(si.name, '') AS industry_name,
                 CASE WHEN q.closing_price > 0 THEN q.closing_price::float8 END AS closing_price,
-                e.stock_symbol IS NOT NULL AS is_etf
+                (e.stock_symbol IS NOT NULL OR s.stock_industry_id = 9001) AS is_etf
             FROM stocks s
             LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
             LEFT JOIN last_daily_quotes q ON q.stock_symbol = s.stock_symbol
@@ -223,28 +233,33 @@ pub(crate) async fn portfolio_rebalance(
                 shares: 0,
                 current_price: r.closing_price.unwrap_or(0.0),
                 industry: r.industry_name,
+                is_etf: r.is_etf,
             });
         }
     }
 
     // 4. 若為 ETF 穿透維度，取得持有 ETF 之成分股權重
     let mut etf_components: Vec<EtfLookThroughComponent> = Vec::new();
-    if dimension == TargetDimension::EtfLookThrough {
+    let mut component_dates = std::collections::HashMap::new();
+    {
         let etf_symbols: Vec<String> = held_rows
             .iter()
-            .filter(|r| r.is_etf || r.stock_symbol.starts_with("00"))
+            .filter(|r| r.is_etf)
             .map(|r| r.stock_symbol.clone())
             .collect();
 
         if !etf_symbols.is_empty() {
             let constituents_sql = r#"
-                SELECT stock_symbol::text AS etf_symbol,
-                       holding_symbol::text AS holding_symbol,
-                       COALESCE(holding_name, holding_symbol::text) AS holding_name,
-                       weight::float8 AS weight
-                FROM etf_holding
-                WHERE stock_symbol = ANY($1)
-                ORDER BY stock_symbol, rank
+                SELECT h.stock_symbol::text AS etf_symbol,
+                       h.holding_symbol::text AS holding_symbol,
+                       COALESCE(h.holding_name, h.holding_symbol::text) AS holding_name,
+                       h.weight::float8 AS weight, h.as_of,
+                       COALESCE(si.name, '') AS industry_name
+                FROM etf_holding h
+                LEFT JOIN stocks s ON s.stock_symbol = h.holding_symbol
+                LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
+                WHERE h.stock_symbol = ANY($1) AND h.rank <= 10
+                ORDER BY h.stock_symbol, h.rank
             "#;
 
             let constituent_rows: Vec<EtfConstituentRow> = match sqlx::query_as(constituents_sql)
@@ -256,6 +271,10 @@ pub(crate) async fn portfolio_rebalance(
                 Err(err) => return database_error(err),
             };
 
+            component_dates = constituent_rows
+                .iter()
+                .map(|r| (r.etf_symbol.clone(), r.as_of.to_string()))
+                .collect();
             etf_components = constituent_rows
                 .into_iter()
                 .map(|r| EtfLookThroughComponent {
@@ -263,18 +282,56 @@ pub(crate) async fn portfolio_rebalance(
                     name: r.holding_name,
                     weight_percent: r.weight,
                     etf_symbol: r.etf_symbol,
+                    industry: r.industry_name,
                 })
                 .collect();
         }
     }
 
+    // 缺價或不存在的目標不可默默當成零市值，否則會扭曲其他持股權重。
+    let unpriced: Vec<_> = positions
+        .iter()
+        .filter(|p| !p.current_price.is_finite() || p.current_price <= 0.0)
+        .map(|p| p.symbol.as_str())
+        .collect();
+    let unknown_target = dimension != TargetDimension::Industry
+        && targets
+            .iter()
+            .any(|(key, _)| !positions.iter().any(|p| &p.symbol == key));
+    if !unpriced.is_empty() || unknown_target {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "持股或目標缺少有效收盤價／股票主檔，無法可靠試算",
+        );
+    }
+    let etf_coverage: Vec<_> = held_rows
+        .iter()
+        .filter(|r| r.is_etf)
+        .map(|r| {
+            let covered: f64 = etf_components
+                .iter()
+                .filter(|c| c.etf_symbol == r.stock_symbol)
+                .map(|c| c.weight_percent)
+                .sum();
+            RebalanceEtfCoverageDto {
+                symbol: r.stock_symbol.clone(),
+                covered_weight_percent: covered,
+                uncovered_value: (r.shares as f64
+                    * r.closing_price.unwrap_or(0.0)
+                    * (1.0 - covered / 100.0))
+                    .max(0.0),
+                as_of: component_dates.get(&r.stock_symbol).cloned(),
+            }
+        })
+        .collect();
+    let uncovered_value: f64 = etf_coverage.iter().map(|e| e.uncovered_value).sum();
     // 5. 執行再平衡純運算
     let rebalance_params = RebalanceParams {
         lot_size,
         tolerance_percent: tolerance,
         available_cash: cash,
-        fee_rate: 0.001425,
-        tax_rate: 0.003,
+        fee_rate: crate::domain::portfolio::costs::FEE_RATE,
+        tax_rate: crate::domain::portfolio::costs::STOCK_TAX_RATE,
         fee_discount,
     };
 
@@ -286,11 +343,18 @@ pub(crate) async fn portfolio_rebalance(
         &rebalance_params,
     ) {
         Ok(res) => res,
-        Err(err) => return error_response(StatusCode::BAD_REQUEST, &err.to_string()),
+        Err(err) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, &err.to_string()),
     };
 
     // 6. 封裝 API 回應
     let response = PortfolioRebalanceResponse {
+        etf_coverage,
+        uncovered_value,
+        warnings: if uncovered_value > 0.0 {
+            vec!["ETF 僅穿透前十大成分，未涵蓋部分不代表零曝險。".to_owned()]
+        } else {
+            Vec::new()
+        },
         member_id,
         dimension: dimension.as_str().to_string(),
         total_equity_value: result.total_equity_value,
@@ -398,8 +462,29 @@ pub(crate) async fn get_portfolio_targets(
         Err(e) => return repository_error(e),
     };
 
-    let sum: f64 = records.iter().map(|r| r.target_percent).sum();
-    let target_cash_percent = (100.0 - sum).max(0.0);
+    let dimensions = match repo.configured_dimensions(&member_id.to_string()).await {
+        Ok(value) => value,
+        Err(error) => return repository_error(error),
+    };
+    let mut cash_percent_by_dimension: std::collections::BTreeMap<_, _> = dimensions
+        .into_iter()
+        .filter(|d| dim_opt.is_none_or(|selected| selected == *d))
+        .map(|d| (d.as_str().to_owned(), 100.0))
+        .collect();
+    for record in &records {
+        *cash_percent_by_dimension
+            .entry(record.dimension.as_str().to_owned())
+            .or_insert(100.0) -= record.target_percent;
+    }
+    for cash in cash_percent_by_dimension.values_mut() {
+        *cash = (*cash * 100.0).round() / 100.0;
+    }
+    let target_cash_percent = dim_opt.map(|dim| {
+        cash_percent_by_dimension
+            .get(dim.as_str())
+            .copied()
+            .unwrap_or(100.0)
+    });
 
     let response = PortfolioTargetsResponse {
         member_id,
@@ -409,11 +494,13 @@ pub(crate) async fn get_portfolio_targets(
         targets: records
             .into_iter()
             .map(|r| PortfolioTargetItemDto {
+                dimension: Some(r.dimension.as_str().to_owned()),
                 target_key: r.key,
                 target_percent: r.target_percent,
             })
             .collect(),
         target_cash_percent,
+        cash_percent_by_dimension,
         disclaimer: "目標配置比例僅為個人偏好試算基準，非自動交易委託。",
     };
 
@@ -452,31 +539,15 @@ pub(crate) async fn put_portfolio_targets(
         }
     };
 
-    let sum: f64 = body.targets.iter().map(|t| t.target_percent).sum();
-    if sum > 100.0001 {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            &format!("同一維度的目標權重總和 ({sum:.2}%) 不得超過 100%"),
-        );
-    }
-    for t in &body.targets {
-        if t.target_percent < 0.0 || t.target_percent > 100.0 {
-            return error_response(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                &format!(
-                    "目標權重 ({}: {}%) 必須介於 0% 至 100%",
-                    t.target_key, t.target_percent
-                ),
-            );
-        }
-    }
-
     let targets: Vec<(String, f64)> = body
         .targets
         .iter()
         .map(|t| (t.target_key.clone(), t.target_percent))
         .collect();
 
+    if let Err(error) = crate::domain::portfolio::target::validate_targets(&targets) {
+        return error_response(StatusCode::UNPROCESSABLE_ENTITY, &error.to_string());
+    }
     let repo = PgPortfolioTargetRepository::new();
     if let Err(e) = repo
         .save_targets(&member_id.to_string(), dimension, &targets)
@@ -500,11 +571,16 @@ pub(crate) async fn put_portfolio_targets(
         targets: saved
             .into_iter()
             .map(|r| PortfolioTargetItemDto {
+                dimension: Some(r.dimension.as_str().to_owned()),
                 target_key: r.key,
                 target_percent: r.target_percent,
             })
             .collect(),
-        target_cash_percent: (100.0 - saved_sum).max(0.0),
+        target_cash_percent: Some(((100.0 - saved_sum).max(0.0) * 100.0).round() / 100.0),
+        cash_percent_by_dimension: std::collections::BTreeMap::from([(
+            dimension.as_str().to_owned(),
+            ((100.0 - saved_sum).max(0.0) * 100.0).round() / 100.0,
+        )]),
         disclaimer: "目標配置比例僅為個人偏好試算基準，非自動交易委託。",
     };
 

@@ -1,6 +1,6 @@
 //! PostgreSQL 實作 [`PortfolioTargetRepository`]。
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -29,6 +29,17 @@ impl PgPortfolioTargetRepository {
         Self { pool: Some(pool) }
     }
 
+    /// 列出明確設定過的維度，包含目標清單為空的全現金設定。
+    pub async fn configured_dimensions(&self, member_id: &str) -> Result<Vec<TargetDimension>> {
+        let values: Vec<String> = sqlx::query_scalar("SELECT dimension FROM portfolio_target_dimension WHERE member_id=$1 ORDER BY dimension")
+            .bind(member_id).fetch_all(self.pool()).await?;
+        values
+            .into_iter()
+            .map(|v| TargetDimension::parse(&v).context("未知的配置維度"))
+            .collect()
+    }
+
+    /// 取注入的隔離連線池，正式執行時使用全域連線池。
     fn pool(&self) -> &PgPool {
         self.pool
             .as_ref()
@@ -36,6 +47,7 @@ impl PgPortfolioTargetRepository {
     }
 }
 
+/// SQLx 載入的目標配置資料列。
 #[derive(FromRow)]
 struct TargetRow {
     member_id: String,
@@ -99,24 +111,29 @@ impl PortfolioTargetRepository for PgPortfolioTargetRepository {
             .collect()
     }
 
+    async fn has_configuration(&self, member_id: &str, dimension: TargetDimension) -> Result<bool> {
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portfolio_target_dimension WHERE member_id=$1 AND dimension=$2)")
+            .bind(member_id).bind(dimension.as_str()).fetch_one(self.pool()).await?)
+    }
+
     async fn save_targets(
         &self,
         member_id: &str,
         dimension: TargetDimension,
         targets: &[(String, f64)],
     ) -> Result<()> {
-        let sum: f64 = targets.iter().map(|(_, pct)| pct).sum();
-        if sum > 100.0001 {
-            bail!("同一維度的目標權重總和 ({sum:.2}%) 不得超過 100%");
-        }
-        for (key, pct) in targets {
-            if *pct < 0.0 || *pct > 100.0 {
-                bail!("目標權重 ({key}: {pct}%) 必須介於 0% 至 100%");
-            }
-        }
-
+        crate::domain::portfolio::target::validate_targets(targets)?;
         let mut tx = self.pool().begin().await?;
-
+        // 即使配置目前為空，也必須序列化同一會員／維度的整份覆蓋更新。
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(format!(
+                "portfolio-target:{member_id}:{}",
+                dimension.as_str()
+            ))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("INSERT INTO portfolio_target_dimension(member_id, dimension) VALUES ($1,$2) ON CONFLICT(member_id,dimension) DO UPDATE SET updated_time=CURRENT_TIMESTAMP")
+            .bind(member_id).bind(dimension.as_str()).execute(&mut *tx).await?;
         // 刪除該使用者在該維度的現有設定
         sqlx::query("DELETE FROM portfolio_target WHERE member_id = $1 AND dimension = $2")
             .bind(member_id)
@@ -126,7 +143,7 @@ impl PortfolioTargetRepository for PgPortfolioTargetRepository {
 
         // 插入新設定
         for (key, pct) in targets {
-            if *pct > 0.0 {
+            {
                 sqlx::query(
                     r#"INSERT INTO portfolio_target (member_id, dimension, key, target_percent, updated_time)
                        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)"#,
@@ -142,5 +159,106 @@ impl PortfolioTargetRepository for PgPortfolioTargetRepository {
 
         tx.commit().await?;
         Ok(())
+    }
+}
+
+/// 使用隔離資料庫驗證整份設定的交易語意。
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// 並行覆蓋不得合併成 120%，驗證失敗也不得清掉已存設定。
+    #[tokio::test]
+    #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+    async fn targets_replace_atomically_and_preserve_cash_configuration() {
+        let repo = PgPortfolioTargetRepository::with_pool(database::get_connection().clone());
+        let member = "79979-target-regression";
+        for sql in [
+            "DELETE FROM portfolio_target WHERE member_id=$1",
+            "DELETE FROM portfolio_target_dimension WHERE member_id=$1",
+        ] {
+            sqlx::query(sql)
+                .bind(member)
+                .execute(repo.pool())
+                .await
+                .unwrap();
+        }
+        assert!(
+            !repo
+                .has_configuration(member, TargetDimension::Stock)
+                .await
+                .unwrap()
+        );
+        let a = vec![("A".to_owned(), 60.0)];
+        let b = vec![("B".to_owned(), 60.0)];
+        let (a, b) = tokio::join!(
+            repo.save_targets(member, TargetDimension::Stock, &a),
+            repo.save_targets(member, TargetDimension::Stock, &b)
+        );
+        a.unwrap();
+        b.unwrap();
+        let stored = repo
+            .list_targets(member, Some(TargetDimension::Stock))
+            .await
+            .unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].target_percent, 60.0);
+        assert!(
+            repo.save_targets(
+                member,
+                TargetDimension::Stock,
+                &[
+                    ("A".into(), 33.335),
+                    ("B".into(), 33.335),
+                    ("C".into(), 33.33)
+                ]
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            repo.list_targets(member, Some(TargetDimension::Stock))
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        repo.save_targets(member, TargetDimension::Stock, &[("A".into(), 0.0)])
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.list_targets(member, Some(TargetDimension::Stock))
+                .await
+                .unwrap()[0]
+                .target_percent,
+            0.0
+        );
+        repo.save_targets(member, TargetDimension::Stock, &[])
+            .await
+            .unwrap();
+        assert!(
+            repo.has_configuration(member, TargetDimension::Stock)
+                .await
+                .unwrap()
+        );
+        assert!(
+            repo.list_targets(member, Some(TargetDimension::Stock))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            repo.configured_dimensions(member).await.unwrap(),
+            [TargetDimension::Stock]
+        );
+        for sql in [
+            "DELETE FROM portfolio_target WHERE member_id=$1",
+            "DELETE FROM portfolio_target_dimension WHERE member_id=$1",
+        ] {
+            sqlx::query(sql)
+                .bind(member)
+                .execute(repo.pool())
+                .await
+                .unwrap();
+        }
     }
 }
