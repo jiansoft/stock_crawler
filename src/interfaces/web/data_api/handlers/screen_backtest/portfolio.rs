@@ -413,6 +413,7 @@ pub(super) fn select_holdings(
             previous = symbols.iter().cloned().collect();
             PeriodRow {
                 date: row.date,
+                exit_date: row.exit_date,
                 pending: row.pending,
                 market_filtered: !row.market_ok,
                 holdings: symbols.len() as i64,
@@ -426,6 +427,7 @@ pub(super) fn select_holdings(
                 weights: Vec::new(),
                 cash: 0.0,
                 stopped: Vec::new(),
+                daily_returns: Vec::new(),
                 industries: picked.iter().map(|&index| pool[index].3).collect(),
             }
         })
@@ -438,6 +440,7 @@ pub(super) fn period((mut row, cost): (PeriodRow, PeriodCost)) -> BacktestPeriod
     BacktestPeriod {
         stopped: super::summary::stop_count(&row),
         date: row.date.to_string(),
+        exit_date: row.exit_date.map(|date| date.to_string()),
         holdings: row.holdings,
         market_filtered: row.market_filtered,
         avg_return: row.avg_return.map(round2),

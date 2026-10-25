@@ -20,6 +20,7 @@ fn day(y: i32, m: u32, d: u32) -> NaiveDate {
 fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
     PeriodRow {
         date: day(2024, 1, d),
+        exit_date: None,
         pending: false,
         market_filtered: false,
         holdings,
@@ -32,6 +33,7 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
         weights: Vec::new(),
         cash: 0.0,
         stopped: Vec::new(),
+        daily_returns: Vec::new(),
         industries: Vec::new(),
     }
 }
@@ -142,7 +144,12 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("h.below * 100 < $34::int * h.samples"));
     assert!(BACKTEST_SQL.contains("p.date < cur.date AND p.date >= cur.date - INTERVAL '5 years'"));
     assert!(!BACKTEST_SQL.contains("$35"));
-    assert!(BACKTEST_SQL.contains("b.samples = 0 AS pending"));
+    assert!(
+        BACKTEST_SQL
+            .contains("(b.exit_date IS NULL OR b.exit_date > $2 OR b.samples = 0) AS pending")
+    );
+    assert!(BACKTEST_SQL.contains("LEAD(date, $4::int) OVER (ORDER BY date) AS exit_date"));
+    assert!(BACKTEST_SQL.contains("WHEN rb.exit_date IS NOT NULL AND rb.exit_date <= $2 THEN"));
     assert!(BACKTEST_SQL.contains("OR b.date = (SELECT MAX(date) FROM rebal)"));
     assert!(
         BACKTEST_WITH_CHIP_SQL
@@ -155,15 +162,105 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(!BACKTEST_WITH_CHIP_SQL.contains("$37"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
+    assert!(BACKTEST_SQL.contains("rs_score DESC, rs_rank ASC, stock_symbol"));
+    assert!(BACKTEST_SQL.contains(
+        "array_agg(stock_symbol::text ORDER BY rs_score DESC, rs_rank ASC, stock_symbol)"
+    ));
     for rank_by in RANK_BY {
         assert!(rank_by == "rs_score" || BACKTEST_SQL.contains(&format!("WHEN '{rank_by}' THEN")));
     }
+}
+
+/// 驗證 B04：當多檔股票 rs_score 相同（例如全體前幾檔 rs_score 均為 99）時，
+/// 回測候選池排序（rs_score DESC, rs_rank ASC, stock_symbol）與 score_universe 排行榜名次順序一致，
+/// 不會因為股票代號字母順序把後段排到前面。
+#[test]
+fn rs_rank_tie_break_aligns_with_rankings() {
+    use crate::domain::quote::relative_strength::{UniverseRow, score_universe};
+
+    let rows = vec![
+        UniverseRow {
+            stock_symbol: "3441".to_string(),
+            name: "聯德".to_string(),
+            market_id: 2,
+            industry: "電子零組件業".to_string(),
+            return_20d: Some(15.0),
+            return_60d: 50.0,
+            return_120d: 40.0,
+            return_240d: 30.0,
+            closing_price: Some(100.0),
+        },
+        UniverseRow {
+            stock_symbol: "6225".to_string(),
+            name: "天瀚".to_string(),
+            market_id: 2,
+            industry: "光電業".to_string(),
+            return_20d: Some(12.0),
+            return_60d: 48.0,
+            return_120d: 38.0,
+            return_240d: 28.0,
+            closing_price: Some(50.0),
+        },
+        UniverseRow {
+            stock_symbol: "6213".to_string(),
+            name: "聯茂".to_string(),
+            market_id: 2,
+            industry: "電子零組件業".to_string(),
+            return_20d: Some(10.0),
+            return_60d: 45.0,
+            return_120d: 35.0,
+            return_240d: 25.0,
+            closing_price: Some(80.0),
+        },
+        UniverseRow {
+            stock_symbol: "6672".to_string(),
+            name: "騰雲".to_string(),
+            market_id: 2,
+            industry: "資訊服務業".to_string(),
+            return_20d: Some(8.0),
+            return_60d: 40.0,
+            return_120d: 30.0,
+            return_240d: 20.0,
+            closing_price: Some(120.0),
+        },
+        UniverseRow {
+            stock_symbol: "1303".to_string(),
+            name: "南亞".to_string(),
+            market_id: 2,
+            industry: "塑膠工業".to_string(),
+            return_20d: Some(5.0),
+            return_60d: 35.0,
+            return_120d: 25.0,
+            return_240d: 15.0,
+            closing_price: Some(60.0),
+        },
+    ];
+
+    let scored = score_universe(rows);
+    let ranked_symbols: Vec<&str> = scored.iter().map(|s| s.row.stock_symbol.as_str()).collect();
+    assert_eq!(ranked_symbols, ["3441", "6225", "6213", "6672", "1303"]);
+
+    // 模擬 backtest picks 的排序：(rs_score DESC, rs_rank ASC, stock_symbol)
+    let mut picks: Vec<_> = scored
+        .iter()
+        .map(|s| (s.rs_score, s.rank, s.row.stock_symbol.clone()))
+        .collect();
+    picks.reverse();
+    picks.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+    let pick_symbols: Vec<&str> = picks.iter().map(|p| p.2.as_str()).collect();
+    // 必須與 score_universe 排行榜完全一致，而非依 stock_symbol ASC 排成 ["1303", "3441", "6213", "6225", "6672"]
+    assert_eq!(pick_symbols, ranked_symbols);
 }
 
 /// 一期候選：代號依相對強度由高到低，報酬一一對應。
 fn candidates(d: u32, list: &[(&str, Option<f64>)]) -> CandidateRow {
     CandidateRow {
         date: day(2024, 1, d),
+        exit_date: None,
         pending: false,
         elapsed_days: 0,
         market_ok: true,

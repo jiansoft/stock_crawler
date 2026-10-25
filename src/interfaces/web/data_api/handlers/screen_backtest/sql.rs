@@ -22,14 +22,16 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// 淨值比上限（倍，`NULL` 為不篩）、`$33` 大盤估值濾網（市場本益比中位數上限，`NULL` 為不濾）、`$34` 相對
 /// 估值濾網（市場本益比中位數在近 5 年的百分位上限，`NULL` 為不濾）；籌碼版另有 `$35`／`$36`。
 ///
-/// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號）。
+/// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號；往後多讀 400 個日曆天，
+///   計算最後幾期是否在迄日（`$2`）前完成出場）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
 ///   含當天往前第 `$4` 個交易日，訊號條件看 `window_start`～換股日；`liquidity_start` 是含當天往前
 ///   第 20 個交易日（之前不足 20 個交易日時取最早一天），流動性看 `liquidity_start`～換股日的平均
-///   成交金額。
-/// - `bench`：同一天同市場全部母體股票的平均報酬；`samples` 為 0 代表還沒滿持有天數，不列入，
-///   只有最後一個換股日例外：以 `pending` 標記列出，當作策略目前的持股（`elapsed_days` 為換股日之後
-///   到迄日經過的交易日數）。
+///   成交金額；`exit_date` 為換股日收盤買進後持有 `$4` 個交易日的出場日（期末收盤賣出）。
+/// - `bench`：同一天同市場全部母體股票的平均報酬；`exit_date > $2` 或不足持有天數時視為未完成
+///   （`pending = true`），報酬欄位與 0050 皆為 `NULL`，不偷看迄日之後的行情；`samples` 為 0 代表
+///   還沒滿持有天數，不列入完整期數，只有最後一個換股日例外：以 `pending` 標記列出，當作策略目前的
+///   持股（`elapsed_days` 為換股日之後到迄日經過的交易日數）。
 /// - `rebal` 另算 `revenue_ord`：換股日當天已公布的最新營收月份（年 × 12 + 月）。每月營收最晚次月 10 日
 ///   公布，次月 11 日起才使用，即換股日往前 10 天所在月份的前一個月。
 /// - `filtered` 的 `rv`：已公布的最近 12 個月營收，算最新一月營收與年增率、連續年增月數與近 3 月年增率（算法同
@@ -48,7 +50,7 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// - `filtered`／`valued`：符合流動性以外條件的股票；有設流動性門檻、依成交金額排序或依成交金額
 ///   加權時，才對這些股票逐檔查 `liquidity_start`～換股日的平均成交金額（`trade_value`）。
 /// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
-///   成交金額或法人連續買超天數，本益比與股價淨值比由低到高，同值再依相對強度）的前 `$5` 檔與各自的報酬、產業編號、平均成交
+///   成交金額或法人連續買超天數，本益比與股價淨值比由低到高，同值再依相對強度分數與名次 `rs_rank`）的前 `$5` 檔與各自的報酬、產業編號、平均成交
 ///   金額；實際持股由 [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）；
 ///   依成交金額加權時同樣逐檔查平均成交金額。
@@ -67,24 +69,25 @@ macro_rules! backtest_sql {
             r#"
 days AS (
     SELECT date FROM daily_relative_strength
-    WHERE date BETWEEN $1::date - 400 AND $2
+    WHERE date BETWEEN $1::date - 400 AND ($2::date + 400)
     GROUP BY date
 ),
 windowed AS (
     SELECT date,
            LAG(date, $4::int - 1, date) OVER (ORDER BY date) AS window_start,
            COALESCE(LAG(date, 19) OVER (ORDER BY date), MIN(date) OVER (ORDER BY date))
-               AS liquidity_start
+               AS liquidity_start,
+           LEAD(date, $4::int) OVER (ORDER BY date) AS exit_date
     FROM days
 ),
 rebal AS (
-    SELECT date, window_start, liquidity_start,
+    SELECT date, window_start, liquidity_start, exit_date,
            EXTRACT(YEAR FROM date - 10)::int * 12 + EXTRACT(MONTH FROM date - 10)::int - 1
                AS revenue_ord
     FROM (
-        SELECT date, window_start, liquidity_start, ROW_NUMBER() OVER (ORDER BY date) - 1 AS i
+        SELECT date, window_start, liquidity_start, exit_date, ROW_NUMBER() OVER (ORDER BY date) - 1 AS i
         FROM windowed
-        WHERE date >= $1
+        WHERE date >= $1 AND date <= $2
     ) AS numbered
     WHERE i >= $14::int AND (i - $14::int) % $4::int = 0
 ),
@@ -98,14 +101,19 @@ revenue_records AS (
     )
 ),
 universe AS (
-    SELECT rb.date, rb.window_start, rb.liquidity_start, rb.revenue_ord, rs.stock_symbol, rs.rs_score,
+    SELECT rb.date, rb.window_start, rb.liquidity_start, rb.revenue_ord, rb.exit_date, rs.stock_symbol, rs.rs_score,
+           rs.rank AS rs_rank,
            s.stock_industry_id,
-           CASE $4::int
-               WHEN 5 THEN f.return_5d
-               WHEN 20 THEN f.return_20d
-               WHEN 60 THEN f.return_60d
-               WHEN 120 THEN f.return_120d
-               ELSE f.return_240d
+           CASE
+               WHEN rb.exit_date IS NOT NULL AND rb.exit_date <= $2 THEN
+                   CASE $4::int
+                       WHEN 5 THEN f.return_5d
+                       WHEN 20 THEN f.return_20d
+                       WHEN 60 THEN f.return_60d
+                       WHEN 120 THEN f.return_120d
+                       ELSE f.return_240d
+                   END
+               ELSE NULL
            END AS ret
     FROM rebal rb
     JOIN daily_relative_strength rs ON rs.date = rb.date
@@ -114,12 +122,12 @@ universe AS (
     WHERE ($3 = 0 OR s.stock_exchange_market_id = $3)
 ),
 bench AS (
-    SELECT date, AVG(ret)::float8 AS avg_ret, COUNT(ret) AS samples
+    SELECT date, exit_date, AVG(ret)::float8 AS avg_ret, COUNT(ret) AS samples
     FROM universe
-    GROUP BY date
+    GROUP BY date, exit_date
 ),
 filtered AS (
-    SELECT u.date, u.liquidity_start, u.stock_symbol, u.rs_score, u.ret, u.stock_industry_id,
+    SELECT u.date, u.liquidity_start, u.stock_symbol, u.rs_score, u.rs_rank, u.ret, u.stock_industry_id,
            rv.revenue_yoy::float8 AS revenue_yoy, ym.operating_margin, qv.pe, qv.pb,"#,
             $chip_columns,
             r#"
@@ -327,7 +335,7 @@ picks AS (
                             WHEN 'pe_ratio' THEN -pe
                             WHEN 'pb_ratio' THEN -pb
                         END DESC NULLS LAST,
-                        rs_score DESC, stock_symbol
+                        rs_score DESC, rs_rank ASC, stock_symbol
            ) AS pick_rank
     FROM valued
     WHERE $15::int8 IS NULL OR trade_value >= $15
@@ -344,12 +352,12 @@ candidates AS (
 ),
 holdable AS (
     SELECT date,
-           array_agg(stock_symbol::text ORDER BY rs_score DESC, stock_symbol) AS symbols,
-           array_agg(ret::float8 ORDER BY rs_score DESC, stock_symbol) AS returns,
-           array_agg(stock_industry_id::int4 ORDER BY rs_score DESC, stock_symbol) AS industries,
-           array_agg(trade_value ORDER BY rs_score DESC, stock_symbol) AS trade_values
+           array_agg(stock_symbol::text ORDER BY rs_score DESC, rs_rank ASC, stock_symbol) AS symbols,
+           array_agg(ret::float8 ORDER BY rs_score DESC, rs_rank ASC, stock_symbol) AS returns,
+           array_agg(stock_industry_id::int4 ORDER BY rs_score DESC, rs_rank ASC, stock_symbol) AS industries,
+           array_agg(trade_value ORDER BY rs_score DESC, rs_rank ASC, stock_symbol) AS trade_values
     FROM (
-        SELECT u.date, u.stock_symbol, u.rs_score, u.ret, u.stock_industry_id,
+        SELECT u.date, u.stock_symbol, u.rs_score, u.rs_rank, u.ret, u.stock_industry_id,
                CASE WHEN $17::text <> 'equal' THEN (
                    SELECT AVG(q."TradeValue")::float8 FROM "DailyQuotes" q
                    WHERE q.stock_symbol = u.stock_symbol
@@ -392,19 +400,24 @@ valuation_level AS (
       AND cur.stock_exchange_market_id = $3 AND cur.date IN (SELECT date FROM rebal)
 )
 SELECT b.date,
-       b.samples = 0 AS pending,
-       (SELECT COUNT(*) FROM days d WHERE d.date > b.date)::int8 AS elapsed_days,
+       b.exit_date,
+       (b.exit_date IS NULL OR b.exit_date > $2 OR b.samples = 0) AS pending,
+       (SELECT COUNT(*) FROM days d WHERE d.date > b.date AND d.date <= $2)::int8 AS elapsed_days,
        ($11::int IS NULL OR t.above IS NOT FALSE)
            AND ($13::int IS NULL OR br.above IS NOT FALSE)
            AND (($33::float8 IS NULL AND $34::int IS NULL) OR vl.cheap IS NOT FALSE) AS market_ok,
        b.avg_ret AS benchmark_return,
-       (CASE $4::int
-            WHEN 5 THEN e.return_5d
-            WHEN 20 THEN e.return_20d
-            WHEN 60 THEN e.return_60d
-            WHEN 120 THEN e.return_120d
-            ELSE e.return_240d
-        END)::float8 AS etf_return,
+       CASE
+           WHEN b.exit_date IS NOT NULL AND b.exit_date <= $2 THEN
+               (CASE $4::int
+                    WHEN 5 THEN e.return_5d
+                    WHEN 20 THEN e.return_20d
+                    WHEN 60 THEN e.return_60d
+                    WHEN 120 THEN e.return_120d
+                    ELSE e.return_240d
+                END)::float8
+           ELSE NULL
+       END AS etf_return,
        COALESCE(c.symbols, ARRAY[]::text[]) AS candidates,
        COALESCE(c.returns, ARRAY[]::float8[]) AS candidate_returns,
        COALESCE(c.industries, ARRAY[]::int4[]) AS candidate_industries,
@@ -420,7 +433,7 @@ LEFT JOIN daily_forward_return e ON e.date = b.date AND e.stock_symbol = '0050'
 LEFT JOIN taiex t ON t."date" = b.date
 LEFT JOIN breadth br ON br.date = b.date
 LEFT JOIN valuation_level vl ON vl.date = b.date
-WHERE b.samples > 0 OR b.date = (SELECT MAX(date) FROM rebal)
+WHERE (b.exit_date IS NOT NULL AND b.exit_date <= $2 AND b.samples > 0) OR b.date = (SELECT MAX(date) FROM rebal)
 ORDER BY b.date
 "#
         )

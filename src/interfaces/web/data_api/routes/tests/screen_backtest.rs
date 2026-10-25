@@ -89,20 +89,30 @@ async fn seed(pool: &sqlx::PgPool) {
         .await
         .expect("種入 stocks");
     }
-    // 每個交易日都有三檔的分數（預設 50），換股日用 SCORES 的分數。
+    // 每個交易日都有三檔的分數（預設 50），換股日用 SCORES 的分數與名次。
     for d in DAYS {
         for (symbol, _, _) in STOCKS {
             let score = SCORES
                 .iter()
                 .find(|row| row.0 == d && row.1 == symbol)
                 .map_or(50, |row| row.2);
+            let rank: i32 = match (d, symbol) {
+                (1, "79979BA") => 1,
+                (1, "79979BC") => 2,
+                (1, "79979BB") => 3,
+                (8, "79979BB") => 1,
+                (8, "79979BC") => 2,
+                (8, "79979BA") => 3,
+                _ => 1,
+            };
             sqlx::query(
                 "INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
-                 VALUES ($1, $2, 0, $3, 1, 3)",
+                 VALUES ($1, $2, 0, $3, $4, 3)",
             )
             .bind(day(d))
             .bind(symbol)
             .bind(score)
+            .bind(rank)
             .execute(pool)
             .await
             .expect("種入相對強度");
@@ -241,6 +251,8 @@ async fn screen_backtest_periods_costs_and_current() {
             ("1993-03-08".to_owned(), 2, Some(8.0)),
         ]
     );
+    assert_eq!(json["periods"][0]["exit_date"], "1993-03-08");
+    assert_eq!(json["periods"][1]["exit_date"], "1993-03-15");
     assert_eq!(
         json["periods"][0]["symbols"],
         serde_json::json!(["79979BA", "79979BC"])
@@ -401,6 +413,38 @@ async fn screen_backtest_periods_costs_and_current() {
     assert_eq!(json["rebalance_offset"], 0);
     let (status, _) = query("rebalance_offset=5").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    cleanup(pool).await;
+}
+
+/// 回測截止日不洩漏未來報酬（B02）：單日回測或換股日在迄日前不足持有天數時，不計入完整期數，
+/// 不偷看迄日之後的價格，0050 與策略共用同一終點。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn screen_backtest_cutoff_does_not_leak_future_returns() {
+    let Some(pool) = seeded("screen_backtest_cutoff_does_not_leak_future_returns").await else {
+        return;
+    };
+    // 03-01 當天有相對強度與 5 日報酬（BA 10、BC 2、0050 4），但迄日只查 03-01 單日：
+    // 出場日 03-08 超過迄日，完整期數必須為 0，不可計入 03-08 的報酬，0050 與策略共用同一終點。
+    let (status, json) =
+        get("/api/v1/stocks/screen/backtest?from=1993-03-01&to=1993-03-01&hold_days=5&limit=2")
+            .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["summary"]["periods"], 0);
+    assert!(json["summary"]["total_return"].is_null());
+    assert!(json["summary"]["total_return_after_costs"].is_null());
+    assert!(json["summary"]["etf_total_return"].is_null());
+    assert_eq!(periods(&json), []);
+    // 目前持股列出 03-01 換股名單，但經過天數為 0，不使用 03-01 之後的價格。
+    let current = &json["current"];
+    assert!(!current.is_null());
+    assert_eq!(current["date"], "1993-03-01");
+    assert_eq!(current["days_elapsed"], 0);
+    assert_eq!(current["days_to_next_rebalance"], 5);
 
     cleanup(pool).await;
 }

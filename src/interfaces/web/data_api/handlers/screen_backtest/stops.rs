@@ -120,6 +120,64 @@ pub(super) fn apply_stops(
         }
     }
 }
+/// 計算各期持股的持有期內每日投資組合累積報酬率（%）。
+pub(super) fn populate_daily_returns(
+    rows: &mut [PeriodRow],
+    bars: &HashMap<String, Arc<Vec<PriceBar>>>,
+    hold_days: u16,
+) {
+    if bars.is_empty() {
+        return;
+    }
+    let ends: Vec<Option<NaiveDate>> = (0..rows.len())
+        .map(|index| rows.get(index + 1).map(|next| next.date))
+        .collect();
+    for (row, end) in rows.iter_mut().zip(ends) {
+        if row.pending || row.symbols.is_empty() || row.market_filtered {
+            continue;
+        }
+        let paths: Vec<Option<Vec<f64>>> = row
+            .symbols
+            .iter()
+            .map(|symbol| {
+                bars.get(symbol)
+                    .map(|series| holding_path(series, row.date, end, hold_days))
+            })
+            .collect();
+
+        let max_len = paths.iter().flatten().map(|p| p.len()).max().unwrap_or(0);
+
+        if max_len <= 1 {
+            continue;
+        }
+
+        let mut daily = Vec::with_capacity(max_len - 1);
+        for t in 1..max_len {
+            let mut weighted_sum = 0.0_f64;
+            let mut valid_weights = 0.0_f64;
+
+            for (idx, path_opt) in paths.iter().enumerate() {
+                if let Some(path) = path_opt
+                    && path.len() > 1
+                    && path[0] > 0.0
+                {
+                    let entry = path[0];
+                    let curr_idx = t.min(path.len() - 1);
+                    let ret = (path[curr_idx] / entry - 1.0) * 100.0;
+                    let w = super::portfolio::weight_at(row, idx);
+                    weighted_sum += w * ret;
+                    valid_weights += w;
+                }
+            }
+
+            if valid_weights > 0.0 {
+                let day_ret = (weighted_sum / valid_weights) * (1.0 - row.cash);
+                daily.push(super::round2(day_ret));
+            }
+        }
+        row.daily_returns = daily;
+    }
+}
 
 /// 期間停損用的日線快取：同一次請求的各個換股日偏移共用，只查還沒讀過的股票。
 #[derive(Default)]

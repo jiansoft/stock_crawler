@@ -87,8 +87,17 @@ pub(super) struct Track {
 }
 
 impl Track {
+    /// 訓練期數範圍：只取換股日不早於 `start` 且出場日早於 `end` 的期數（排除跨越年度邊界的期數）。
+    pub(super) fn train_range(&self, start: NaiveDate, end: NaiveDate) -> Range<usize> {
+        let from = self.rows.partition_point(|row| row.date < start);
+        let to = self
+            .rows
+            .partition_point(|row| row.exit_date.map_or(row.date < end, |exit| exit < end));
+        from..to.max(from)
+    }
+
     /// 換股日落在 `[start, end)` 的期數範圍（`rows` 依換股日由舊到新）。
-    fn range(&self, start: NaiveDate, end: NaiveDate) -> Range<usize> {
+    pub(super) fn range(&self, start: NaiveDate, end: NaiveDate) -> Range<usize> {
         let from = self.rows.partition_point(|row| row.date < start);
         let to = self.rows.partition_point(|row| row.date < end);
         from..to
@@ -150,7 +159,7 @@ pub(super) fn walk_forward(
             .iter()
             .zip(tracks)
             .filter_map(|(candidate, track)| {
-                let sharpe = track.sharpe(track.range(train_start, test_start), hold_days)?;
+                let sharpe = track.sharpe(track.train_range(train_start, test_start), hold_days)?;
                 Some((candidate, track, sharpe))
             })
             .fold(

@@ -113,8 +113,9 @@ struct OffsetRun {
     halves: Option<(BacktestOffsetResult, BacktestOffsetResult)>,
 }
 
-/// 依分割日把各期分成換股日早於 `split` 的樣本內與其餘的樣本外，各自彙總；沒有分割日回 `None`。
-/// `rows` 依換股日由舊到新，`costs` 與之一一對應。
+/// 依分割日把各期分成換股日與出場日皆早於 `split` 的樣本內與換股日不早於 `split` 的樣本外，各自彙總；
+/// 跨越分割日的期數（換股日早於 `split` 但出場日在 `split`（含）之後）不計入樣本內。
+/// 沒有分割日回 `None`。`rows` 依換股日由舊到新，`costs` 與之一一對應。
 pub(super) fn split_results(
     offset: u16,
     rows: &[PeriodRow],
@@ -123,12 +124,23 @@ pub(super) fn split_results(
     split: Option<NaiveDate>,
 ) -> Option<(BacktestOffsetResult, BacktestOffsetResult)> {
     let split = split?;
-    let at = rows.partition_point(|row| row.date < split);
+    let in_sample_end =
+        rows.partition_point(|row| row.exit_date.map_or(row.date < split, |exit| exit < split));
+    let out_sample_start = rows.partition_point(|row| row.date < split);
+    let cross_boundary_count = out_sample_start.saturating_sub(in_sample_end);
+    if cross_boundary_count > 0 {
+        tracing::info!(
+            "換股日偏移 {offset}：排除 {cross_boundary_count} 期跨越分割日 {split} 的期數"
+        );
+    }
     let result = |range: std::ops::Range<usize>| BacktestOffsetResult {
         rebalance_offset: offset,
         summary: summarize(&rows[range.clone()], &costs[range], hold_days),
     };
-    Some((result(0..at), result(at..rows.len())))
+    Some((
+        result(0..in_sample_end),
+        result(out_sample_start..rows.len()),
+    ))
 }
 
 /// 各偏移樣本內、樣本外彙總的分布；沒有分割日（`halves` 為空）時都是 `None`。
