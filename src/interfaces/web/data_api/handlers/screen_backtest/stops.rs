@@ -130,20 +130,42 @@ pub(super) fn populate_daily_returns(
     costs: &[super::portfolio::PeriodCost],
 ) {
     use super::portfolio::{FEE_RATE, TAX_RATE, shares, stopped_value};
+    // 0050 作為共用交易日曆；只建一次，避免每一期重掃所有標的多年日線。
+    let calendar: std::collections::BTreeSet<_> = match bars
+        .get(super::ETF_BENCHMARK)
+        .filter(|series| !series.is_empty())
+    {
+        Some(series) => series.iter().map(|bar| bar.date).collect(),
+        None => bars
+            .values()
+            .flat_map(|series| series.iter().map(|bar| bar.date))
+            .collect(),
+    };
     for (row, cost) in rows.iter_mut().zip(costs) {
         let Some(exit) = row.exit_date.filter(|_| !row.pending) else {
             continue;
         };
         // 日期以所有已載入日線聯集對齊，停牌標的沿用最近成交價，不以向量索引代替日期。
-        let dates: std::collections::BTreeSet<_> = std::iter::once(row.date)
-            .chain(
-                bars.values()
-                    .flat_map(|series| series.iter())
-                    .filter(|bar| bar.date > row.date && bar.date <= exit)
-                    .map(|bar| bar.date),
-            )
+        let mut dates: std::collections::BTreeSet<_> = std::iter::once(row.date)
+            .chain(calendar.range(row.date..=exit).copied())
             .chain(std::iter::once(exit))
             .collect();
+        // 核心部位若有停牌或缺日，仍納入衛星持股在該期間的實際成交日。
+        for symbol in &row.symbols {
+            if let Some(series) = bars.get(symbol) {
+                let from = series.partition_point(|bar| bar.date <= row.date);
+                dates.extend(
+                    series[from..]
+                        .iter()
+                        .take_while(|bar| bar.date <= exit)
+                        .map(|bar| bar.date),
+                );
+            }
+        }
+        row.daily_returns.clear();
+        row.daily_net_returns.clear();
+        row.etf_daily_returns.clear();
+        row.etf_daily_complete = false;
         let weights = shares(row);
         let mut paths = Vec::new();
         row.daily_complete = true;

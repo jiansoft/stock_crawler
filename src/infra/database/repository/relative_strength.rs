@@ -308,18 +308,32 @@ impl PgQuoteRepository {
         let Some(bases) = base_dates(&dates) else {
             return Ok(None);
         };
-        let sql = format!(
-            "WITH details AS ({UNIVERSE_SQL}) SELECT d.*, r.rank AS rs_rank, r.rs_score, r.weighted_return::float8 AS stored_weighted FROM daily_relative_strength r JOIN details d USING(stock_symbol) WHERE r.date=$1 ORDER BY {}",
+        // 每日 RS 是唯一母體；只補歷史報酬，不重新套用今天的產業／活躍資格。
+        const STORED_SQL: &str = concat!(
+            r#"
+SELECT r.stock_symbol, s."Name" AS name, s.stock_exchange_market_id AS market_id,
+       COALESCE(si.name, '') AS industry, f20.return_20d::float8 AS return_20d,
+       f60.return_60d::float8 AS return_60d, f120.return_120d::float8 AS return_120d,
+       f240.return_240d::float8 AS return_240d, q."ClosingPrice"::float8 AS closing_price,
+       r.rank AS rs_rank, r.rs_score, r.weighted_return::float8 AS stored_weighted
+FROM daily_relative_strength r
+JOIN stocks s ON s.stock_symbol=r.stock_symbol
+LEFT JOIN stock_industry si ON si.stock_industry_id=s.stock_industry_id
+LEFT JOIN daily_forward_return f20 ON f20.stock_symbol=r.stock_symbol AND f20.date=$2
+LEFT JOIN daily_forward_return f60 ON f60.stock_symbol=r.stock_symbol AND f60.date=$3
+LEFT JOIN daily_forward_return f120 ON f120.stock_symbol=r.stock_symbol AND f120.date=$4
+LEFT JOIN daily_forward_return f240 ON f240.stock_symbol=r.stock_symbol AND f240.date=$5
+LEFT JOIN "DailyQuotes" q ON q.stock_symbol=r.stock_symbol AND q."Date"=$1 AND q."ClosingPrice">0
+WHERE r.date=$1 AND f60.return_60d IS NOT NULL AND f120.return_120d IS NOT NULL AND f240.return_240d IS NOT NULL
+ORDER BY "#,
             rs_rank_order!()
         );
-        // SQL 僅由靜態查詢與共用排序組合；所有外部值仍以 bind 傳入。
-        let records: Vec<StoredUniverseRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+        let records: Vec<StoredUniverseRow> = sqlx::query_as(STORED_SQL)
             .bind(date)
             .bind(bases.d20)
             .bind(bases.d60)
             .bind(bases.d120)
             .bind(bases.d240)
-            .bind(bases.active_since)
             .fetch_all(database::get_connection())
             .await?;
         // 不重算或捏造缺少歷史明細的排名；資料不完整時回查無資料。

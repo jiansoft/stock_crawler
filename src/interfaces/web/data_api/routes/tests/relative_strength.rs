@@ -160,6 +160,11 @@ async fn relative_strength_ranks_market_universe() {
     ] {
         errors.push(get(path).await.0);
     }
+    // 主檔分類後續改變，不得重新改寫已留存日期的 RS 母體。
+    sqlx::query("UPDATE stocks SET stock_industry_id=9001 WHERE stock_symbol='79979RA'")
+        .execute(pool)
+        .await
+        .unwrap();
     let (rank_status, ranked) = get(&format!(
         "/api/v1/market/relative-strength?date={end}&limit=2"
     ))
@@ -440,6 +445,7 @@ async fn relative_strength_universe_uses_recent_quotes() {
     let symbols = ["79979RG", "79979RH", "79979RI"];
     let cleanup = || async {
         for sql in [
+            "DELETE FROM daily_relative_strength WHERE stock_symbol = ANY($1)",
             "DELETE FROM daily_forward_return WHERE stock_symbol = ANY($1)",
             r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
             "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
