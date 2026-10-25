@@ -129,3 +129,39 @@ async fn chip_endpoint_db_semantics() {
     assert_eq!(json["broker_flow"]["main_net"], 40);
     assert_eq!(json["broker_flow"]["buyers"][0]["share"], 6.98);
 }
+
+/// 真實 DB 的完整連續天數須大於五日視窗，且不受明細 days 截短。
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+async fn chip_full_streak_survives_five_day_detail_window() {
+    use super::support::{get, pool_or_skip};
+    let pool = pool_or_skip("chip_full_streak_survives_five_day_detail_window")
+        .await
+        .expect("隔離 DB 必須可用");
+    let symbol = "79979CS";
+    for sql in [
+        "DELETE FROM chip_daily WHERE stock_symbol=$1",
+        "DELETE FROM stocks WHERE stock_symbol=$1",
+    ] {
+        sqlx::query(sql).bind(symbol).execute(pool).await.unwrap();
+    }
+    sqlx::query("INSERT INTO stocks (\"SecurityCode\",\"Name\",stock_symbol,stock_exchange_market_id) VALUES ($1,'連續天數測試',$1,2)").bind(symbol).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO chip_daily(date,stock_symbol,foreign_net,trust_net,dealer_net) SELECT d::date,$1,100,-100,0 FROM generate_series('1991-01-01'::date,'1991-02-28'::date,'1 day') d WHERE EXTRACT(ISODOW FROM d)<=5 ORDER BY d LIMIT 20").bind(symbol).execute(pool).await.unwrap();
+    crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
+    let (status, short) = get(&format!("/api/v1/stocks/{symbol}/chip?days=5")).await;
+    assert_eq!(status, StatusCode::OK, "{short}");
+    let (status, long) = get(&format!("/api/v1/stocks/{symbol}/chip?days=60")).await;
+    assert_eq!(status, StatusCode::OK, "{long}");
+    assert_eq!(short["daily"].as_array().unwrap().len(), 5);
+    assert_eq!(long["daily"].as_array().unwrap().len(), 20);
+    assert_eq!(short["streak"], long["streak"]);
+    assert_eq!(short["streak"]["foreign_days"], 20);
+    assert_eq!(short["streak"]["trust_days"], -20);
+    for sql in [
+        "DELETE FROM chip_daily WHERE stock_symbol=$1",
+        "DELETE FROM stocks WHERE stock_symbol=$1",
+    ] {
+        sqlx::query(sql).bind(symbol).execute(pool).await.unwrap();
+    }
+    crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
+}

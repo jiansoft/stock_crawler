@@ -62,6 +62,13 @@ async fn cleanup(pool: &sqlx::PgPool) {
             .bind(day(31))
             .execute(pool)
             .await;
+    let _ = sqlx::query(
+        r#"DELETE FROM "DailyQuotes" WHERE stock_symbol='0050' AND "Date" BETWEEN $1 AND $2"#,
+    )
+    .bind(day(1))
+    .bind(day(31))
+    .execute(pool)
+    .await;
     let _ = sqlx::query("DELETE FROM daily_stock_price_stats WHERE date BETWEEN $1 AND $2")
         .bind(day(1))
         .bind(day(31))
@@ -446,5 +453,53 @@ async fn screen_backtest_cutoff_does_not_leak_future_returns() {
     assert_eq!(current["days_elapsed"], 0);
     assert_eq!(current["days_to_next_rebalance"], 5);
 
+    cleanup(pool).await;
+}
+
+/// 經真實 engine、權重、核心混合與彙總流程驗證日頻風險，避免僅測 helper 而漏掉呼叫順序。
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+async fn daily_risk_matches_actual_weighted_and_core_portfolio() {
+    let pool = seeded("daily_risk_matches_actual_weighted_and_core_portfolio")
+        .await
+        .expect("隔離 DB 必須可用");
+    for d in DAYS {
+        for (symbol, value) in [
+            ("79979BA", 30_000_000_i64),
+            ("79979BC", 200_000_000),
+            ("0050", 0),
+        ] {
+            let close = if symbol == "79979BA" && d == 2 {
+                50
+            } else {
+                100
+            };
+            sqlx::query(r#"INSERT INTO "DailyQuotes"("Date",stock_symbol,"ClosingPrice","TradeValue") VALUES ($1,$2,$3,$4) ON CONFLICT("Date",stock_symbol) DO UPDATE SET "ClosingPrice"=EXCLUDED."ClosingPrice""#)
+                .bind(day(d)).bind(symbol).bind(close).bind(value).execute(pool).await.unwrap();
+        }
+    }
+    sqlx::query("UPDATE daily_forward_return SET return_5d=0 WHERE date=$1 AND stock_symbol IN ('79979BA','79979BC','0050')").bind(day(1)).execute(pool).await.unwrap();
+    let path = "/api/v1/stocks/screen/backtest?from=1993-03-01&to=1993-03-08&hold_days=5&limit=2&weighting=trade_value&fee_discount=0";
+    let (status, weighted) = get(path).await;
+    assert_eq!(status, StatusCode::OK, "{weighted}");
+    assert_eq!(weighted["summary"]["total_return"], 0.0);
+    assert_eq!(weighted["summary"]["daily_max_drawdown"], -6.52);
+    let (status, core) = get(&format!("{path}&etf_weight=100")).await;
+    assert_eq!(status, StatusCode::OK, "{core}");
+    assert_eq!(core["summary"]["daily_max_drawdown"], 0.0);
+    let (status, stopped) = get(&format!("{path}&stop_loss=10")).await;
+    assert_eq!(status, StatusCode::OK, "{stopped}");
+    assert_eq!(stopped["summary"]["total_return"], -6.52);
+    assert_eq!(stopped["summary"]["daily_max_drawdown"], -6.52);
+    assert_eq!(stopped["summary"]["daily_max_drawdown_after_costs"], -6.54);
+    sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE stock_symbol='79979BC'"#)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (_, missing) = get(path).await;
+    assert!(
+        missing["summary"]["daily_max_drawdown"].is_null(),
+        "{missing}"
+    );
     cleanup(pool).await;
 }
