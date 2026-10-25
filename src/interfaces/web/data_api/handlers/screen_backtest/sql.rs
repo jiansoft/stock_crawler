@@ -1,6 +1,7 @@
 //! 條件選股回測的 SQL：最新相對強度日與回測主體（有、無籌碼條件兩版）。
 
 use super::super::signal_history::chip_streak_ctes;
+use crate::infra::database::repository::relative_strength::rs_rank_order;
 
 #[cfg(doc)]
 use super::{ETF_BENCHMARK, portfolio::select_holdings};
@@ -335,7 +336,7 @@ picks AS (
                             WHEN 'pe_ratio' THEN -pe
                             WHEN 'pb_ratio' THEN -pb
                         END DESC NULLS LAST,
-                        rs_score DESC, rs_rank ASC, stock_symbol
+                        "#, rs_rank_order!(), r#"
            ) AS pick_rank
     FROM valued
     WHERE $15::int8 IS NULL OR trade_value >= $15
@@ -352,10 +353,10 @@ candidates AS (
 ),
 holdable AS (
     SELECT date,
-           array_agg(stock_symbol::text ORDER BY rs_score DESC, rs_rank ASC, stock_symbol) AS symbols,
-           array_agg(ret::float8 ORDER BY rs_score DESC, rs_rank ASC, stock_symbol) AS returns,
-           array_agg(stock_industry_id::int4 ORDER BY rs_score DESC, rs_rank ASC, stock_symbol) AS industries,
-           array_agg(trade_value ORDER BY rs_score DESC, rs_rank ASC, stock_symbol) AS trade_values
+           array_agg(stock_symbol::text ORDER BY "#, rs_rank_order!(), r#") AS symbols,
+           array_agg(ret::float8 ORDER BY "#, rs_rank_order!(), r#") AS returns,
+           array_agg(stock_industry_id::int4 ORDER BY "#, rs_rank_order!(), r#") AS industries,
+           array_agg(trade_value ORDER BY "#, rs_rank_order!(), r#") AS trade_values
     FROM (
         SELECT u.date, u.stock_symbol, u.rs_score, u.rs_rank, u.ret, u.stock_industry_id,
                CASE WHEN $17::text <> 'equal' THEN (

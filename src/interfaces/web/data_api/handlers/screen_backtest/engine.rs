@@ -390,19 +390,15 @@ impl<'a> Backtest<'a> {
             usize::from(keep_rank),
             params.max_per_industry.map(usize::from),
         );
-        if self.stops.is_active() {
-            let bars = self.bars.load(&rows, self.from, self.to).await?;
-            apply_stops(&mut rows, &bars, self.stops, self.hold_days);
-            populate_daily_returns(&mut rows, &bars, self.hold_days);
-        } else if let Ok(bars) = self.bars.load(&rows, self.from, self.to).await {
-            populate_daily_returns(&mut rows, &bars, self.hold_days);
-        }
+        let bars = self.bars.load(&rows, self.from, self.to).await?;
+        apply_stops(&mut rows, &bars, self.stops, self.hold_days);
         weigh(
             &mut rows,
             self.weighting,
             max_weight.map(|percent| f64::from(percent) / 100.0),
         );
         let costs = trading_costs(&rows, self.fee_discount);
+        populate_daily_returns(&mut rows, &bars, self.stops, self.fee_discount, &costs);
         Ok(Raw {
             rows,
             costs,

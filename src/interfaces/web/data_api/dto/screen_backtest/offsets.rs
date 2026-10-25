@@ -19,6 +19,8 @@ pub(crate) struct BacktestStat {
 /// 一個換股日偏移的回測彙總。
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub(crate) struct BacktestOffsetResult {
+    /// 因持有期跨過分割日而排除的期數；未分割時為 0。
+    pub(crate) excluded_cross_boundary_periods: usize,
     /// 換股日偏移（起日之後先跳過的交易日數）。
     pub(crate) rebalance_offset: u16,
     /// 與 `/stocks/screen/backtest` 相同的整段彙總。

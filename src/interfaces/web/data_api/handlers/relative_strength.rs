@@ -18,7 +18,6 @@ use super::{
     repository_error, round2,
 };
 pub(super) use crate::domain::quote::relative_strength::ScoredStock;
-use crate::domain::quote::relative_strength::ScoredUniverseQuery;
 #[cfg(test)]
 pub(super) use crate::domain::quote::relative_strength::UniverseRow;
 use crate::infra::database::repository::quote::PgQuoteRepository;
@@ -74,15 +73,15 @@ pub(crate) async fn relative_strength(Query(params): Query<RelativeStrengthParam
     }
 }
 
-/// 載入 `until`（含）之前最近一個已算好報酬的交易日的計分母體，並對全體計分排名。
+/// 載入 `until`（含）之前最近一個已留存的每日 RS 母體；與回測共用分數及名次。
 ///
-/// 最新一個交易日的報酬可能還沒回填（例如收盤匯總尚未跑完），最多往前退一天；兩天都沒有
+/// 最新一個交易日尚未完成 RS 計算時，使用之前最近的已留存交易日；沒有完整
 /// 資料回 `Ok(None)`。查詢失敗時回已組好的安全 500 回應，呼叫端直接回傳即可。
 pub(super) async fn load_scores(
     until: NaiveDate,
 ) -> Result<Option<(NaiveDate, Vec<ScoredStock>)>, Box<Response>> {
     PgQuoteRepository::new()
-        .fetch_scored_universe(until)
+        .fetch_stored_scored_universe(until)
         .await
         .map_err(|error| Box::new(repository_error(error)))
 }

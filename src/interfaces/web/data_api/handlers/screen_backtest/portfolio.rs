@@ -7,13 +7,13 @@ use super::{CandidateRow, PeriodRow, round2, round4};
 use crate::interfaces::web::data_api::dto::BacktestPeriod;
 
 /// 手續費率（%），買賣各付一次；未打折。
-pub(super) const FEE_RATE: f64 = 0.1425;
+pub(super) const FEE_RATE: f64 = crate::domain::portfolio::costs::FEE_RATE * 100.0;
 
 /// 股票證交稅率（%），賣出時付。
-pub(super) const TAX_RATE: f64 = 0.3;
+pub(super) const TAX_RATE: f64 = crate::domain::portfolio::costs::STOCK_TAX_RATE * 100.0;
 
 /// ETF 證交稅率（%），賣出 0050 時付。
-pub(super) const ETF_TAX_RATE: f64 = 0.1;
+pub(super) const ETF_TAX_RATE: f64 = crate::domain::portfolio::costs::ETF_TAX_RATE * 100.0;
 
 /// 輸出每期前幾檔代號。
 pub(super) const LISTED_SYMBOLS: usize = 10;
@@ -319,6 +319,37 @@ pub(super) fn blend_etf(
             None => (0.0, 0.0),
         };
         previous = Some((etf, strategy, invested));
+        // 核心與衛星必須混合同日淨值；100% 核心不依賴任何策略日線。
+        if row.etf_daily_complete && (weight >= 1.0 || row.daily_complete) {
+            let len = row.etf_daily_returns.len();
+            row.daily_returns = (0..len)
+                .map(|i| {
+                    mix(
+                        row.etf_daily_returns[i],
+                        if weight >= 1.0 {
+                            0.0
+                        } else {
+                            row.daily_returns[i]
+                        },
+                    )
+                })
+                .collect();
+            row.daily_net_returns = (0..len)
+                .map(|i| {
+                    mix(
+                        row.etf_daily_returns[i],
+                        if weight >= 1.0 {
+                            0.0
+                        } else {
+                            row.daily_net_returns[i]
+                        },
+                    ) - rebalance_cost
+                })
+                .collect();
+            row.daily_complete = true;
+        } else {
+            row.daily_complete = false;
+        }
         row.avg_return = Some(mix(etf, strategy));
         cost.net_return = mix(etf, cost.net_return) - rebalance_cost;
         cost.turnover = cost.turnover * (1.0 - weight) + rebalance;
@@ -428,6 +459,10 @@ pub(super) fn select_holdings(
                 cash: 0.0,
                 stopped: Vec::new(),
                 daily_returns: Vec::new(),
+                daily_net_returns: Vec::new(),
+                etf_daily_returns: Vec::new(),
+                daily_complete: false,
+                etf_daily_complete: false,
                 industries: picked.iter().map(|&index| pool[index].3).collect(),
             }
         })

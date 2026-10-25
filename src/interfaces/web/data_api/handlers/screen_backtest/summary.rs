@@ -126,22 +126,26 @@ pub(super) fn summarize(
     let (etf_equity, etf_drawdown) = compound(etf.iter().copied());
     let period_end_dd = round2(drawdown * 100.0);
     let period_end_net_dd = round2(net_drawdown * 100.0);
-    let daily_dd = round2(
-        compound_daily(
-            returns
-                .iter()
-                .copied()
-                .zip(rows.iter().map(|r| r.daily_returns.as_slice())),
-        ) * 100.0,
-    );
-    let daily_net_dd = round2(
-        compound_daily(
-            costs
-                .iter()
-                .map(|cost| cost.net_return)
-                .zip(rows.iter().map(|r| r.daily_returns.as_slice())),
-        ) * 100.0,
-    );
+    let daily_dd = rows.iter().all(|row| row.daily_complete).then(|| {
+        round2(
+            compound_daily(
+                returns
+                    .iter()
+                    .copied()
+                    .zip(rows.iter().map(|r| r.daily_returns.as_slice())),
+            ) * 100.0,
+        )
+    });
+    let daily_net_dd = rows.iter().all(|row| row.daily_complete).then(|| {
+        round2(
+            compound_daily(
+                costs
+                    .iter()
+                    .map(|cost| cost.net_return)
+                    .zip(rows.iter().map(|r| r.daily_net_returns.as_slice())),
+            ) * 100.0,
+        )
+    });
     let invested_turnover: Vec<f64> = rows
         .iter()
         .zip(costs)
@@ -172,8 +176,8 @@ pub(super) fn summarize(
         max_drawdown_after_costs: Some(period_end_net_dd),
         period_end_max_drawdown: Some(period_end_dd),
         period_end_max_drawdown_after_costs: Some(period_end_net_dd),
-        daily_max_drawdown: Some(daily_dd),
-        daily_max_drawdown_after_costs: Some(daily_net_dd),
+        daily_max_drawdown: daily_dd,
+        daily_max_drawdown_after_costs: daily_net_dd,
         benchmark_max_drawdown: Some(round2(benchmark_drawdown * 100.0)),
         win_rate: Some(ratio(returns.iter().filter(|r| **r > 0.0).count())),
         beat_market_rate: Some(ratio(

@@ -34,6 +34,10 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
         cash: 0.0,
         stopped: Vec::new(),
         daily_returns: Vec::new(),
+        daily_net_returns: Vec::new(),
+        etf_daily_returns: Vec::new(),
+        daily_complete: false,
+        etf_daily_complete: false,
         industries: Vec::new(),
     }
 }

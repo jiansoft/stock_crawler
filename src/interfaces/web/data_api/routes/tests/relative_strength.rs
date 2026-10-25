@@ -110,6 +110,10 @@ async fn seed(pool: &sqlx::PgPool, dates: &[NaiveDate]) {
         .await
         .expect("種入報酬");
     }
+    // API 與回測都只讀每日留存的 RS，fixture 也必須先完成每日計算。
+    crate::app::calculation::relative_strength::calculate_relative_strength(dates[dates.len() - 2])
+        .await
+        .expect("儲存每日排名");
 }
 
 /// 以全體計分；篩選只影響輸出；資料日還沒回填時退回前一個交易日；參數錯誤 422、查無 404。
@@ -128,6 +132,9 @@ async fn relative_strength_ranks_market_universe() {
     let latest = dates[dates.len() - 1];
     cleanup(pool).await;
     seed(pool, &dates).await;
+    crate::app::calculation::relative_strength::calculate_relative_strength(end)
+        .await
+        .expect("儲存每日排名");
 
     let (status, json) = get(&format!("/api/v1/market/relative-strength?date={latest}")).await;
     let (_, rb_only) = get(&format!(
@@ -153,6 +160,32 @@ async fn relative_strength_ranks_market_universe() {
     ] {
         errors.push(get(path).await.0);
     }
+    let (rank_status, ranked) = get(&format!(
+        "/api/v1/market/relative-strength?date={end}&limit=2"
+    ))
+    .await;
+    assert_eq!(rank_status, StatusCode::OK, "{ranked}");
+    let (backtest_status, backtest) = get(&format!(
+        "/api/v1/stocks/screen/backtest?from={end}&to={end}&hold_days=20&limit=2"
+    ))
+    .await;
+    assert_eq!(backtest_status, StatusCode::OK, "{backtest}");
+    let ranked_symbols: Vec<_> = ranked["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["stock_symbol"].clone())
+        .collect();
+    let picked_symbols: Vec<_> = backtest["current"]["holdings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["symbol"].clone())
+        .collect();
+    assert_eq!(
+        picked_symbols, ranked_symbols,
+        "回測第一期必須與每日排行榜相同"
+    );
     cleanup(pool).await;
 
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -460,6 +493,9 @@ async fn relative_strength_universe_uses_recent_quotes() {
         }
     }
 
+    crate::app::calculation::relative_strength::calculate_relative_strength(end)
+        .await
+        .expect("儲存每日排名");
     let (status, json) = get(&format!("/api/v1/market/relative-strength?date={end}")).await;
     cleanup().await;
 

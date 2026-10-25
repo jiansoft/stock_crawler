@@ -392,13 +392,13 @@ async fn screen_backtest_periods_costs_and_current() {
             "exited": [{"symbol": "79979BC", "name": "79979BC", "weight": 50.0}],
         })
     );
-    // 迄日 03-12：最後換股日 03-08 已有報酬，沒有目前持股。
+    // 迄日 03-12：03-08 的出場日為 03-15，尚未完成，不能使用已回填的未來報酬。
     let (status, json) =
         get("/api/v1/stocks/screen/backtest?from=1993-03-01&to=1993-03-12&hold_days=5&limit=2")
             .await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(json["periods"].as_array().map(Vec::len), Some(2));
-    assert!(json["current"].is_null());
+    assert_eq!(json["periods"].as_array().map(Vec::len), Some(1));
+    assert_eq!(json["current"]["date"], "1993-03-08");
 
     // 換股日偏移 1：換股日變成 03-02、03-09，都沒有種入報酬；03-02 不列入，03-09 是目前持股，
     // 之後經過 03-10、11、12、15 四個交易日，再 1 天換股。

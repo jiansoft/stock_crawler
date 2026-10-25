@@ -8,6 +8,8 @@ use super::{BacktestOffsetDistribution, BacktestSummary};
 /// 滾動前推的一年：用前幾年挑出的參數與這一年的結果。
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub(crate) struct BacktestWalkForwardYear {
+    /// 訓練窗口內因持有期跨過測試年起點而排除的期數。
+    pub(crate) excluded_training_periods: usize,
     /// 套用的年度（換股日所屬年度）。
     pub(crate) year: i32,
     /// 挑出的 0050 核心部位（%）。

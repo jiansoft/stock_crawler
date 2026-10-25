@@ -180,6 +180,10 @@ pub(super) fn walk_forward(
         let (return_after_costs, etf_return) = period_returns(track, test.clone());
         let (baseline_return, _) = period_returns(baseline, base.clone());
         result.years.push(BacktestWalkForwardYear {
+            excluded_training_periods: track
+                .range(train_start, test_start)
+                .len()
+                .saturating_sub(track.train_range(train_start, test_start).len()),
             year,
             etf_weight: candidate.etf_weight,
             max_weight: candidate.max_weight,
@@ -312,6 +316,7 @@ pub(crate) async fn screen_backtest_walk_forward(BacktestQuery(params): Backtest
     let results = |pick: fn(&WalkForward) -> &Track| -> Vec<BacktestOffsetResult> {
         runs.iter()
             .map(|(offset, run)| BacktestOffsetResult {
+                excluded_cross_boundary_periods: 0,
                 rebalance_offset: *offset,
                 summary: summary_of(pick(run)),
             })

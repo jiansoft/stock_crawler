@@ -211,6 +211,10 @@ fn daily_max_drawdown_captures_intra_period_dip() {
     let mut r2 = dated(day(2024, 2, 1), Some(5.0), 0.0, None);
     r2.daily_returns = vec![2.0, 3.0, 5.0];
 
+    r1.daily_complete = true;
+    r2.daily_complete = true;
+    r1.daily_net_returns = r1.daily_returns.clone();
+    r2.daily_net_returns = r2.daily_returns.clone();
     let rows = [r1, r2];
     let summary = summarize(&rows, &free(&rows), 20);
 

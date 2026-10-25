@@ -52,6 +52,7 @@ fn distribution_counts_offsets_beating_etf() {
         summary.volatility = sharpe.map(|value| value * 10.0);
         summary.etf_volatility = Some(15.0);
         BacktestOffsetResult {
+            excluded_cross_boundary_periods: 0,
             rebalance_offset: offset,
             summary,
         }
@@ -306,6 +307,7 @@ fn split_results_excludes_cross_boundary_periods() {
         split_results(0, &rows, &costs, 20, Some(day(2024, 1, 1))).expect("有分割日");
     // 樣本內只含 11-01 該期，12-15 跨界期數被排除，不計入樣本內。
     assert_eq!(before.summary.periods, 1);
+    assert_eq!(before.excluded_cross_boundary_periods, 1);
     assert_eq!(before.summary, summarize(&rows[..1], &costs[..1], 20));
     // 樣本外從 01-15 開始。
     assert_eq!(after.summary.periods, 1);

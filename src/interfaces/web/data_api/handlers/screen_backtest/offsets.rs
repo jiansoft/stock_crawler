@@ -57,6 +57,7 @@ pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery
                 .await
                 .map(|Simulation { rows, costs, .. }| OffsetRun {
                     result: BacktestOffsetResult {
+                        excluded_cross_boundary_periods: 0,
                         rebalance_offset: offset,
                         summary: summarize(&rows, &costs, hold_days),
                     },
@@ -134,6 +135,7 @@ pub(super) fn split_results(
         );
     }
     let result = |range: std::ops::Range<usize>| BacktestOffsetResult {
+        excluded_cross_boundary_periods: cross_boundary_count,
         rebalance_offset: offset,
         summary: summarize(&rows[range.clone()], &costs[range], hold_days),
     };

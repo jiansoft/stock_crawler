@@ -98,7 +98,7 @@ async fn screen_backtest_offsets_and_frontier() {
     assert!(frontier["best_sharpe_weight_before_split"].is_null());
     assert!(weights[0]["after_split"].is_null());
 
-    // 樣本內外：分割日 03-08，偏移 0 的 03-01 為樣本內、03-08 為樣本外；其他偏移沒有已滿的期數。
+    // 分割日 03-08：03-01 那期在分割日才出場，須排除，03-08 為樣本外。
     let (status, halves) = get(
         "/api/v1/stocks/screen/backtest/offsets?from=1993-03-01&to=1993-03-15&hold_days=5&limit=2&split=1993-03-08",
     )
@@ -106,14 +106,11 @@ async fn screen_backtest_offsets_and_frontier() {
     assert_eq!(status, StatusCode::OK, "{halves}");
     assert_eq!(halves["split"], "1993-03-08");
     assert_eq!(halves["distribution"], json["distribution"]);
-    // 03-01 那期 6%、03-08 那期 8%（扣成本前），兩段各自年化。
+    // 跨界期數排除後樣本內為空，樣本外仍有完整期數。
     let before = &halves["before_split"]["annualized_return_after_costs"];
     let after = &halves["after_split"]["annualized_return_after_costs"];
-    assert!(
-        before["median"].is_number() && after["median"].is_number(),
-        "{halves}"
-    );
-    assert_ne!(before["median"], after["median"], "{halves}");
+    assert!(before.is_null(), "{halves}");
+    assert!(after["median"].is_number(), "{halves}");
     let (status, frontier) = get(
         "/api/v1/stocks/screen/backtest/frontier?from=1993-03-01&to=1993-03-15&hold_days=5&limit=2&split=1993-03-08",
     )
