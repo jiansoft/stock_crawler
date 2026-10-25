@@ -28,6 +28,7 @@ mod portfolio_chip;
 mod portfolio_dividend_fill;
 mod portfolio_etf_exposure;
 mod portfolio_history;
+mod portfolio_rebalance;
 mod relative_strength;
 mod screen_backtest;
 mod screening;
@@ -125,6 +126,12 @@ pub(super) use portfolio_etf_exposure::{
 };
 pub(super) use portfolio_history::{
     PortfolioHistoryParams, PortfolioHistoryResponse, PortfolioMonth,
+};
+pub(super) use portfolio_rebalance::{
+    EtfLookThroughRebalanceItemDto, IndustryRebalanceItemDto, PortfolioRebalanceQueryParams,
+    PortfolioRebalanceResponse, PortfolioTargetItemDto, PortfolioTargetsQueryParams,
+    PortfolioTargetsResponse, PutPortfolioTargetsRequest, RebalanceCashSummaryDto,
+    StockRebalanceItemDto,
 };
 pub(super) use relative_strength::{
     IndustryLeader, IndustryStrengthItem, IndustryStrengthParams, IndustryStrengthResponse,
