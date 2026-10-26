@@ -22,7 +22,7 @@ async fn seed_next_open(pool: &sqlx::PgPool) {
 }
 
 /// 次日開盤成交：03-01 收盤後才確定選股（RS 看 03-01），03-02 開盤買進、03-09 開盤賣出，報酬以
-/// 開盤到開盤計；03-08 換股的出場日落在 03-15 之後，視為未完成。不支援停損；日頻回撤不小於期末口徑；
+/// 開盤到開盤計；03-08 換股的出場日落在 03-15 之後，視為未完成。支援收盤觸發次日開盤停損；日頻回撤不小於期末口徑；
 /// 參數超出範圍回 422。
 #[tokio::test]
 #[cfg_attr(
@@ -68,12 +68,7 @@ async fn screen_backtest_next_open_trades_at_following_open() {
         assert!(daily <= period_end + 1e-9, "{daily} vs {period_end}");
     }
 
-    for extra in [
-        "execution_price=vwap",
-        "execution_price=next_open&stop_loss=10",
-        "execution_price=next_open&trailing_stop=10",
-        "slippage_bps=201",
-    ] {
+    for extra in ["execution_price=vwap", "slippage_bps=201"] {
         let (status, body) = query(extra).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{extra}: {body}");
     }

@@ -1,16 +1,21 @@
 //! 條件選股回測的期間停損：持有期間每天以還原收盤檢查，跌破停損（相對買進價）或移動停利（相對
-//! 持有期間最高收盤）就在當天收盤賣出，該檔到下次換股前都放現金。
+//! 持有期間最高收盤）便觸發。close 當天收盤賣出；next_open 下一個有有效開盤的交易日賣出，
+//! 若已到原定出場日則沿用期末出場。賣出後到下次換股前放現金。
 //!
-//! 只檢查已滿持有天數的期數：換股日收盤買進，檢查之後到下一次換股日前一天的收盤（換股日當天本來
+//! 只檢查已滿持有天數的期數：close 換股日收盤買進，檢查之後到下一次換股日前一天的收盤（換股日當天本來
 //! 就會調整持股，不另外觸發）；最後一期（目前持股）不檢查。觸發後該檔這期的報酬改為買進到出場的
 //! 還原報酬，賣出的手續費與證交稅在 [`super::portfolio::trading_costs`] 扣除；下次換股若仍入選，視為
-//! 重新買進。
+//! 重新買進。next_open 包含進場當日收盤，且停牌順延不得跨期。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::NaiveDate;
 use tokio::sync::Mutex;
+
+mod next_open;
+
+pub(super) use next_open::{apply_next_open_stops, load_stop_open_ratios};
 
 use super::PeriodRow;
 use crate::domain::quote::technical::{PriceAdjustment, PriceBar, adjust_bars};
@@ -19,9 +24,9 @@ use crate::infra::database::repository::quote::PgQuoteRepository;
 /// 停損與移動停利門檻（%，正值）；都沒設時不檢查。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct StopRule {
-    /// 收盤相對買進價跌幅達這個比例就賣出。
+    /// 收盤相對買進價跌幅達這個比例就觸發停損。
     pub(super) stop_loss: Option<f64>,
-    /// 收盤相對持有期間最高收盤（含買進價）跌幅達這個比例就賣出。
+    /// 收盤相對持有期間最高收盤（含買進價）跌幅達這個比例就觸發停損。
     pub(super) trailing_stop: Option<f64>,
 }
 
@@ -121,7 +126,7 @@ pub(super) fn apply_stops(
     }
 }
 /// 以已決定的權重建立同日對齊的策略與 0050 路徑；停損後固定現金價值。
-/// 換股成本在期初扣除，停損賣出成本在觸發日扣除，缺日線時標為不完整。
+/// 換股成本在期初扣除，停損賣出成本在實際賣出日扣除，缺日線時標為不完整。
 ///
 /// `open_ratios` 為次日開盤成交（`next_open`）時各持股在進場日、出場日的開盤價／收盤價比（見
 /// [`load_open_ratios`]）：路徑從換股日的次一交易日開盤買進起算，出場日以開盤價結算，與該期報酬一致；
@@ -214,6 +219,9 @@ pub(super) fn populate_daily_returns(
                 break;
             }
             let entry_price = entry_at(symbol, series[entry - 1].close);
+            let open_exit = open_ratios
+                .filter(|_| row.stopped.get(index).copied().unwrap_or(false))
+                .and_then(|ratios| next_open::stop_exit(series, symbol, start, exit, rule, ratios));
             let mut peak = entry_price;
             let mut sold = None;
             let mut path = Vec::new();
@@ -222,7 +230,11 @@ pub(super) fn populate_daily_returns(
                 let close = price(symbol, date, series[at - 1].close);
                 peak = peak.max(close);
                 let ret = (close / entry_price - 1.0) * 100.0;
-                if sold.is_none()
+                if let Some(sale) = open_exit.filter(|sale| date >= sale.date) {
+                    sold = Some(sale.ret);
+                }
+                if open_ratios.is_none()
+                    && sold.is_none()
                     && date > start
                     && date < exit
                     && row.stopped.get(index).copied().unwrap_or(false)

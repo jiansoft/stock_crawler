@@ -11,7 +11,8 @@ use super::sql::{
     LATEST_RS_DATE_SQL,
 };
 use super::stops::{
-    BarCache, StopRule, apply_stops, load_holding_windows, load_open_ratios, populate_daily_returns,
+    BarCache, StopRule, apply_next_open_stops, apply_stops, load_holding_windows, load_open_ratios,
+    load_stop_open_ratios, populate_daily_returns,
 };
 use super::validate::{parse_excluded_industries, resolve_backtest_period, validate_fundamentals};
 use super::{
@@ -260,13 +261,6 @@ impl<'a> Backtest<'a> {
         let Some(execution) = ExecutionPrice::parse(params.execution_price.as_deref()) else {
             return Err(unprocessable("execution_price 必須為 close 或 next_open"));
         };
-        if execution == ExecutionPrice::NextOpen
-            && (params.stop_loss.is_some() || params.trailing_stop.is_some())
-        {
-            return Err(unprocessable(
-                "execution_price=next_open 不可與 stop_loss／trailing_stop 併用",
-            ));
-        }
         let slippage_bps = params.slippage_bps.unwrap_or(0);
         if slippage_bps > MAX_SLIPPAGE_BPS {
             return Err(unprocessable("slippage_bps 必須介於 0 至 200"));
@@ -473,13 +467,16 @@ impl<'a> Backtest<'a> {
             params.max_per_industry.map(usize::from),
         );
         let fee_discount = self.cost_fee_discount();
-        // 停損要整段日線且各偏移共用快取；只算日頻路徑時只讀各持股的持有期間。次日開盤成交不支援
-        // 停損（驗證已擋下），日線只用來算以開盤為端點的日頻路徑。
+        // 收盤停損沿用各偏移共用快取；次日開盤只讀持有窗口，避免為少數持有日載入多年個股日線。
         let mut bars = match self.execution {
-            ExecutionPrice::Close if self.stops.is_active() => {
-                Some(self.bars.load(&rows, self.from, self.to).await?)
+            ExecutionPrice::Close if self.stops.is_active() => Some(
+                self.bars
+                    .load(&rows, self.from - chrono::Duration::days(30), self.to)
+                    .await?,
+            ),
+            _ if self.daily_path || self.stops.is_active() => {
+                Some(load_holding_windows(&rows).await?)
             }
-            _ if self.daily_path => Some(load_holding_windows(&rows).await?),
             _ => None,
         };
         // 缺基準報酬時補載一檔 0050；期末回測仍不載入所有個股日線。
@@ -493,12 +490,20 @@ impl<'a> Backtest<'a> {
             }
             bars = Some(load_holding_windows(&benchmark_rows).await?);
         }
-        let ratios = match (&bars, self.execution) {
-            (Some(bars), ExecutionPrice::NextOpen) if self.daily_path || missing_etf => {
+        let mut ratios = match (&bars, self.execution) {
+            (Some(bars), ExecutionPrice::NextOpen)
+                if self.daily_path || missing_etf || self.stops.is_active() =>
+            {
                 Some(load_open_ratios(&rows, bars).await?)
             }
             _ => None,
         };
+        if let (Some(bars), Some(ratios)) = (&bars, &mut ratios)
+            && self.stops.is_active()
+        {
+            ratios.extend(load_stop_open_ratios(&rows, bars).await?);
+            apply_next_open_stops(&mut rows, bars, self.stops, ratios);
+        }
         if let Some(bars) = &bars {
             super::etf::fill_missing_returns(&mut rows, bars, ratios.as_ref());
         }
