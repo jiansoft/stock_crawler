@@ -116,7 +116,7 @@ pub async fn execute() -> Result<()> {
             None
         });
     let target_repo = PgPortfolioTargetRepository::new();
-    let allocation = allocation_sections(&target_repo, &target_repo).await;
+    let allocation = allocation_sections(&target_repo, &target_repo, date).await;
     let message = run(
         &PgQuoteRepository::new(),
         &PgChipRepository::new(),

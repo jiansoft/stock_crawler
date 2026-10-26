@@ -205,6 +205,22 @@ pub trait PortfolioPositionQuery: Send + Sync {
         member_id: i64,
         extra_symbols: &[String],
     ) -> Result<Vec<CurrentPosition>>;
+
+    /// `etf_symbols` 的前十大成分股與各自的資料日期，供 ETF 穿透維度試算。
+    /// 預設回空清單（不支援穿透的實作視為沒有成分資料）。
+    async fn fetch_etf_components(&self, etf_symbols: &[String]) -> Result<Vec<DatedEtfComponent>> {
+        let _ = etf_symbols;
+        Ok(Vec::new())
+    }
+}
+
+/// 附資料日期（`etf_holding.as_of`）的 ETF 成分股。
+#[derive(Debug, Clone, PartialEq)]
+pub struct DatedEtfComponent {
+    /// 成分股與權重。
+    pub component: EtfLookThroughComponent,
+    /// 成分資料的日期。
+    pub as_of: chrono::NaiveDate,
 }
 
 /// 計算持股再平衡建議之純函式。

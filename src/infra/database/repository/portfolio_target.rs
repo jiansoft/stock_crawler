@@ -7,7 +7,9 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use sqlx::{FromRow, PgPool};
 
-use crate::domain::portfolio::rebalance::{CurrentPosition, PortfolioPositionQuery};
+use crate::domain::portfolio::rebalance::{
+    CurrentPosition, DatedEtfComponent, EtfLookThroughComponent, PortfolioPositionQuery,
+};
 use crate::domain::portfolio::target::{
     PortfolioTargetRecord, PortfolioTargetRepository, TargetDimension,
 };
@@ -128,6 +130,54 @@ impl PortfolioPositionQuery for PgPortfolioTargetRepository {
             })
             .collect())
     }
+
+    async fn fetch_etf_components(&self, etf_symbols: &[String]) -> Result<Vec<DatedEtfComponent>> {
+        if etf_symbols.is_empty() {
+            return Ok(Vec::new());
+        }
+        // 與再平衡頁（data_api handlers::portfolio_rebalance）相同的成分來源：前十大持股。
+        let rows: Vec<EtfComponentRow> = sqlx::query_as(
+            r#"
+            SELECT h.stock_symbol::text AS etf_symbol,
+                   h.holding_symbol::text AS holding_symbol,
+                   COALESCE(h.holding_name, h.holding_symbol::text) AS holding_name,
+                   h.weight::float8 AS weight, h.as_of,
+                   COALESCE(si.name, '') AS industry_name
+            FROM etf_holding h
+            LEFT JOIN stocks s ON s.stock_symbol = h.holding_symbol
+            LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
+            WHERE h.stock_symbol = ANY($1) AND h.rank <= 10
+            ORDER BY h.stock_symbol, h.rank
+            "#,
+        )
+        .bind(etf_symbols)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| DatedEtfComponent {
+                component: EtfLookThroughComponent {
+                    stock_symbol: row.holding_symbol,
+                    name: row.holding_name,
+                    weight_percent: row.weight,
+                    etf_symbol: row.etf_symbol,
+                    industry: row.industry_name,
+                },
+                as_of: row.as_of,
+            })
+            .collect())
+    }
+}
+
+/// ETF 前十大成分股資料列。
+#[derive(FromRow)]
+struct EtfComponentRow {
+    etf_symbol: String,
+    holding_symbol: String,
+    holding_name: String,
+    weight: f64,
+    industry_name: String,
+    as_of: chrono::NaiveDate,
 }
 
 /// SQLx 載入的目標配置資料列。
@@ -288,6 +338,56 @@ mod tests {
         assert_eq!((c.shares, c.current_price), (0, 50.0));
         // 已持有的目標不重複補列。
         assert_eq!(positions.iter().filter(|p| p.symbol == "79978A").count(), 1);
+
+        for sql in cleanup {
+            sqlx::query(sql).execute(pool).await.unwrap();
+        }
+    }
+
+    /// ETF 成分：只取前十大、帶出名稱／權重／資料日期，查無主檔的成分產業為空字串；沒有 ETF 時不查詢。
+    #[tokio::test]
+    #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+    async fn fetch_etf_components_returns_top_ten_with_dates() {
+        let pool = database::get_connection();
+        let repo = PgPortfolioTargetRepository::with_pool(pool.clone());
+        let cleanup = [
+            "DELETE FROM etf_holding WHERE stock_symbol='79978EF'",
+            "DELETE FROM stocks WHERE stock_symbol='79978A'",
+        ];
+        for sql in cleanup {
+            sqlx::query(sql).execute(pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO stocks (\"SecurityCode\",\"Name\",stock_symbol,stock_exchange_market_id,stock_industry_id) VALUES ('79978A','甲股','79978A',2,24)")
+            .execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO etf_holding(stock_symbol,rank,holding_symbol,holding_name,weight,as_of) VALUES ('79978EF',1,'79978A','甲股',40,'2026-04-30'),('79978EF',2,'79978Z','乙成分',12.5,'2026-04-30'),('79978EF',11,'79978Y','十一名',1,'2026-04-30')")
+            .execute(pool).await.unwrap();
+
+        assert!(repo.fetch_etf_components(&[]).await.unwrap().is_empty());
+        let components = repo
+            .fetch_etf_components(&["79978EF".to_owned()])
+            .await
+            .unwrap();
+        let as_of = chrono::NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+        let summary: Vec<_> = components
+            .iter()
+            .map(|dated| {
+                (
+                    dated.component.stock_symbol.as_str(),
+                    dated.component.name.as_str(),
+                    dated.component.weight_percent,
+                    dated.component.etf_symbol.as_str(),
+                    dated.as_of,
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("79978A", "甲股", 40.0, "79978EF", as_of),
+                ("79978Z", "乙成分", 12.5, "79978EF", as_of),
+            ]
+        );
+        assert!(components[1].component.industry.is_empty());
 
         for sql in cleanup {
             sqlx::query(sql).execute(pool).await.unwrap();
