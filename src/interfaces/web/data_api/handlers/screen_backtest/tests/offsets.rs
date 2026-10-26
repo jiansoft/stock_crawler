@@ -52,6 +52,7 @@ fn distribution_counts_offsets_beating_etf() {
         summary.volatility = sharpe.map(|value| value * 10.0);
         summary.etf_volatility = Some(15.0);
         BacktestOffsetResult {
+            excluded_cross_boundary_periods: 0,
             rebalance_offset: offset,
             summary,
         }
@@ -285,4 +286,30 @@ fn best_weight_prefers_lower_on_tie() {
     assert_eq!(best_weight(&points, sharpe), Some(20));
     assert_eq!(best_weight(&[point(0, None)], sharpe), None);
     assert_eq!(best_weight(&[], sharpe), None);
+}
+
+/// 樣本內外分割時排除跨越分割日的期數（B03）：換股日在分割日前但出場日跨越分割日的期數不計入樣本內。
+#[test]
+fn split_results_excludes_cross_boundary_periods() {
+    use super::super::offsets::split_results;
+    use super::super::summary::summarize;
+    let mut rows = vec![
+        dated(day(2023, 11, 1), Some(5.0), 0.0, Some(1.0)),
+        dated(day(2023, 12, 15), Some(12.0), 0.0, Some(2.0)),
+        dated(day(2024, 1, 15), Some(3.0), 0.0, Some(1.0)),
+    ];
+    rows[0].exit_date = Some(day(2023, 11, 29));
+    // 跨年跨界期：換股日 2023-12-15 早於分割日 2024-01-01，但出場日 2024-01-15 跨入隔年。
+    rows[1].exit_date = Some(day(2024, 1, 15));
+    rows[2].exit_date = Some(day(2024, 2, 15));
+    let costs = free(&rows);
+    let (before, after) =
+        split_results(0, &rows, &costs, 20, Some(day(2024, 1, 1))).expect("有分割日");
+    // 樣本內只含 11-01 該期，12-15 跨界期數被排除，不計入樣本內。
+    assert_eq!(before.summary.periods, 1);
+    assert_eq!(before.excluded_cross_boundary_periods, 1);
+    assert_eq!(before.summary, summarize(&rows[..1], &costs[..1], 20));
+    // 樣本外從 01-15 開始。
+    assert_eq!(after.summary.periods, 1);
+    assert_eq!(after.summary, summarize(&rows[2..], &costs[2..], 20));
 }

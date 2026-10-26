@@ -161,9 +161,16 @@ fn period_rounds_returns() {
         turnover: 1.0 / 3.0,
         net_return: 1.091_23,
     };
-    let output = period((first, cost));
+    let output = period((first.clone(), cost));
     assert_eq!(output.date, "2024-01-02");
+    assert_eq!(output.exit_date, None);
     assert_eq!(output.avg_return, Some(1.23));
+    let mut with_exit = first;
+    with_exit.exit_date = Some(day(2024, 1, 30));
+    assert_eq!(
+        period((with_exit, cost)).exit_date,
+        Some("2024-01-30".to_owned())
+    );
     assert_eq!(output.return_after_costs, 1.09);
     assert_eq!(output.turnover, 0.3333);
     assert_eq!(output.benchmark_return, Some(-0.56));

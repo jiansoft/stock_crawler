@@ -273,3 +273,100 @@ impl ScoredUniverseQuery for PgQuoteRepository {
         Ok(None)
     }
 }
+
+/// 排行榜與回測共用的 SQL 排序：分數、全母體名次、代號。
+macro_rules! rs_rank_order {
+    () => {
+        "rs_score DESC, rs_rank ASC, stock_symbol"
+    };
+}
+pub(crate) use rs_rank_order;
+
+/// 每日留存的排名加上同日歷史報酬明細，避免 API 即時計分與回測母體分歧。
+#[derive(sqlx::FromRow)]
+struct StoredUniverseRow {
+    #[sqlx(flatten)]
+    detail: UniverseSqlRow,
+    rs_rank: i32,
+    rs_score: i16,
+    stored_weighted: f64,
+}
+
+impl PgQuoteRepository {
+    /// 查詢已留存的每日 RS 母體，排序與回測完全共用；未計算的日期向前找。
+    pub(crate) async fn fetch_stored_scored_universe(
+        &self,
+        until: NaiveDate,
+    ) -> Result<Option<(NaiveDate, Vec<ScoredStock>)>> {
+        let date: Option<NaiveDate> =
+            sqlx::query_scalar("SELECT MAX(date) FROM daily_relative_strength WHERE date <= $1")
+                .bind(until)
+                .fetch_one(database::get_connection())
+                .await?;
+        let Some(date) = date else { return Ok(None) };
+        let dates = self.fetch_trading_dates(date, LONGEST + 2).await?;
+        let Some(bases) = base_dates(&dates) else {
+            return Ok(None);
+        };
+        // 每日 RS 是唯一母體；只補歷史報酬，不重新套用今天的產業／活躍資格。
+        const STORED_SQL: &str = concat!(
+            r#"
+SELECT r.stock_symbol, s."Name" AS name, s.stock_exchange_market_id AS market_id,
+       COALESCE(si.name, '') AS industry, f20.return_20d::float8 AS return_20d,
+       f60.return_60d::float8 AS return_60d, f120.return_120d::float8 AS return_120d,
+       f240.return_240d::float8 AS return_240d, q."ClosingPrice"::float8 AS closing_price,
+       r.rank AS rs_rank, r.rs_score, r.weighted_return::float8 AS stored_weighted
+FROM daily_relative_strength r
+JOIN stocks s ON s.stock_symbol=r.stock_symbol
+LEFT JOIN stock_industry si ON si.stock_industry_id=s.stock_industry_id
+LEFT JOIN daily_forward_return f20 ON f20.stock_symbol=r.stock_symbol AND f20.date=$2
+LEFT JOIN daily_forward_return f60 ON f60.stock_symbol=r.stock_symbol AND f60.date=$3
+LEFT JOIN daily_forward_return f120 ON f120.stock_symbol=r.stock_symbol AND f120.date=$4
+LEFT JOIN daily_forward_return f240 ON f240.stock_symbol=r.stock_symbol AND f240.date=$5
+LEFT JOIN "DailyQuotes" q ON q.stock_symbol=r.stock_symbol AND q."Date"=$1 AND q."ClosingPrice">0
+WHERE r.date=$1 AND f60.return_60d IS NOT NULL AND f120.return_120d IS NOT NULL AND f240.return_240d IS NOT NULL
+ORDER BY "#,
+            rs_rank_order!()
+        );
+        let records: Vec<StoredUniverseRow> = sqlx::query_as(STORED_SQL)
+            .bind(date)
+            .bind(bases.d20)
+            .bind(bases.d60)
+            .bind(bases.d120)
+            .bind(bases.d240)
+            .fetch_all(database::get_connection())
+            .await?;
+        // 不重算或捏造缺少歷史明細的排名；資料不完整時回查無資料。
+        let expected: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM daily_relative_strength WHERE date=$1")
+                .bind(date)
+                .fetch_one(database::get_connection())
+                .await?;
+        if records.len() as i64 != expected || records.is_empty() {
+            return Ok(None);
+        }
+        let scored = records
+            .into_iter()
+            .map(|record| {
+                let row = record.detail;
+                ScoredStock {
+                    rank: record.rs_rank as usize,
+                    rs_score: record.rs_score as u8,
+                    weighted: record.stored_weighted,
+                    row: UniverseRow {
+                        stock_symbol: row.stock_symbol,
+                        name: row.name,
+                        market_id: row.market_id,
+                        industry: row.industry,
+                        return_20d: row.return_20d,
+                        return_60d: row.return_60d,
+                        return_120d: row.return_120d,
+                        return_240d: row.return_240d,
+                        closing_price: row.closing_price,
+                    },
+                }
+            })
+            .collect();
+        Ok(Some((date, scored)))
+    }
+}

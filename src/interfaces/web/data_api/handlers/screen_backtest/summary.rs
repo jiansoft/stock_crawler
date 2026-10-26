@@ -21,6 +21,36 @@ pub(super) fn compound(returns: impl IntoIterator<Item = f64>) -> (f64, f64) {
     (equity, drawdown)
 }
 
+/// 以各期期末報酬與各期期內日頻報酬序列，計算持有期內日頻最大回撤（負值或 0）。
+///
+/// 若某期有 `daily_returns`，則在該期內逐日走訪日累積淨值：
+/// `day_equity = period_start_equity * (1.0 + day_ret / 100.0)`，
+/// 更新歷史最高峰 `peak` 與期間最大回撤。
+/// 期末時淨值結算為 `period_start_equity * (1.0 + period_end_return / 100.0)`。
+/// 若某期無 `daily_returns`，則直接走訪期末淨值。
+/// 因此，日頻最大回撤之幅度保證大於或等於期末最大回撤（|daily_dd| >= |period_end_dd|）。
+pub(super) fn compound_daily<'a>(periods: impl IntoIterator<Item = (f64, &'a [f64])>) -> f64 {
+    let mut equity = 1.0_f64;
+    let mut peak = 1.0_f64;
+    let mut max_dd = 0.0_f64;
+    for (period_end_return, daily_returns) in periods {
+        let period_start_equity = equity;
+        for &day_ret in daily_returns {
+            let day_equity = period_start_equity * (1.0 + day_ret / 100.0);
+            peak = peak.max(day_equity);
+            if peak > 0.0 {
+                max_dd = max_dd.min(day_equity / peak - 1.0);
+            }
+        }
+        equity = period_start_equity * (1.0 + period_end_return / 100.0);
+        peak = peak.max(equity);
+        if peak > 0.0 {
+            max_dd = max_dd.min(equity / peak - 1.0);
+        }
+    }
+    max_dd
+}
+
 /// 這期在期間停損賣出的檔數。
 pub(super) fn stop_count(row: &PeriodRow) -> i64 {
     row.stopped.iter().filter(|stopped| **stopped).count() as i64
@@ -64,6 +94,10 @@ pub(super) fn summarize(
             benchmark_annualized_return: None,
             max_drawdown: None,
             max_drawdown_after_costs: None,
+            period_end_max_drawdown: None,
+            period_end_max_drawdown_after_costs: None,
+            daily_max_drawdown: None,
+            daily_max_drawdown_after_costs: None,
             benchmark_max_drawdown: None,
             win_rate: None,
             beat_market_rate: None,
@@ -90,6 +124,28 @@ pub(super) fn summarize(
     let (benchmark_equity, benchmark_drawdown) = compound(benchmarks.iter().copied());
     let (net_equity, net_drawdown) = compound(costs.iter().map(|cost| cost.net_return));
     let (etf_equity, etf_drawdown) = compound(etf.iter().copied());
+    let period_end_dd = round2(drawdown * 100.0);
+    let period_end_net_dd = round2(net_drawdown * 100.0);
+    let daily_dd = rows.iter().all(|row| row.daily_complete).then(|| {
+        round2(
+            compound_daily(
+                returns
+                    .iter()
+                    .copied()
+                    .zip(rows.iter().map(|r| r.daily_returns.as_slice())),
+            ) * 100.0,
+        )
+    });
+    let daily_net_dd = rows.iter().all(|row| row.daily_complete).then(|| {
+        round2(
+            compound_daily(
+                costs
+                    .iter()
+                    .map(|cost| cost.net_return)
+                    .zip(rows.iter().map(|r| r.daily_net_returns.as_slice())),
+            ) * 100.0,
+        )
+    });
     let invested_turnover: Vec<f64> = rows
         .iter()
         .zip(costs)
@@ -116,8 +172,12 @@ pub(super) fn summarize(
         annualized_return: Some(round2(annualize(equity))),
         annualized_return_after_costs: Some(round2(annualize(net_equity))),
         benchmark_annualized_return: Some(round2(annualize(benchmark_equity))),
-        max_drawdown: Some(round2(drawdown * 100.0)),
-        max_drawdown_after_costs: Some(round2(net_drawdown * 100.0)),
+        max_drawdown: Some(period_end_dd),
+        max_drawdown_after_costs: Some(period_end_net_dd),
+        period_end_max_drawdown: Some(period_end_dd),
+        period_end_max_drawdown_after_costs: Some(period_end_net_dd),
+        daily_max_drawdown: daily_dd,
+        daily_max_drawdown_after_costs: daily_net_dd,
         benchmark_max_drawdown: Some(round2(benchmark_drawdown * 100.0)),
         win_rate: Some(ratio(returns.iter().filter(|r| **r > 0.0).count())),
         beat_market_rate: Some(ratio(

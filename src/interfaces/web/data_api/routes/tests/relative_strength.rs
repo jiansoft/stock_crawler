@@ -110,6 +110,10 @@ async fn seed(pool: &sqlx::PgPool, dates: &[NaiveDate]) {
         .await
         .expect("種入報酬");
     }
+    // API 與回測都只讀每日留存的 RS，fixture 也必須先完成每日計算。
+    crate::app::calculation::relative_strength::calculate_relative_strength(dates[dates.len() - 2])
+        .await
+        .expect("儲存每日排名");
 }
 
 /// 以全體計分；篩選只影響輸出；資料日還沒回填時退回前一個交易日；參數錯誤 422、查無 404。
@@ -128,6 +132,9 @@ async fn relative_strength_ranks_market_universe() {
     let latest = dates[dates.len() - 1];
     cleanup(pool).await;
     seed(pool, &dates).await;
+    crate::app::calculation::relative_strength::calculate_relative_strength(end)
+        .await
+        .expect("儲存每日排名");
 
     let (status, json) = get(&format!("/api/v1/market/relative-strength?date={latest}")).await;
     let (_, rb_only) = get(&format!(
@@ -153,6 +160,37 @@ async fn relative_strength_ranks_market_universe() {
     ] {
         errors.push(get(path).await.0);
     }
+    // 主檔分類後續改變，不得重新改寫已留存日期的 RS 母體。
+    sqlx::query("UPDATE stocks SET stock_industry_id=9001 WHERE stock_symbol='79979RA'")
+        .execute(pool)
+        .await
+        .unwrap();
+    let (rank_status, ranked) = get(&format!(
+        "/api/v1/market/relative-strength?date={end}&limit=2"
+    ))
+    .await;
+    assert_eq!(rank_status, StatusCode::OK, "{ranked}");
+    let (backtest_status, backtest) = get(&format!(
+        "/api/v1/stocks/screen/backtest?from={end}&to={end}&hold_days=20&limit=2"
+    ))
+    .await;
+    assert_eq!(backtest_status, StatusCode::OK, "{backtest}");
+    let ranked_symbols: Vec<_> = ranked["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["stock_symbol"].clone())
+        .collect();
+    let picked_symbols: Vec<_> = backtest["current"]["holdings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["symbol"].clone())
+        .collect();
+    assert_eq!(
+        picked_symbols, ranked_symbols,
+        "回測第一期必須與每日排行榜相同"
+    );
     cleanup(pool).await;
 
     assert_eq!(status, StatusCode::OK, "{json}");
@@ -407,6 +445,7 @@ async fn relative_strength_universe_uses_recent_quotes() {
     let symbols = ["79979RG", "79979RH", "79979RI"];
     let cleanup = || async {
         for sql in [
+            "DELETE FROM daily_relative_strength WHERE stock_symbol = ANY($1)",
             "DELETE FROM daily_forward_return WHERE stock_symbol = ANY($1)",
             r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = ANY($1)"#,
             "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
@@ -460,6 +499,9 @@ async fn relative_strength_universe_uses_recent_quotes() {
         }
     }
 
+    crate::app::calculation::relative_strength::calculate_relative_strength(end)
+        .await
+        .expect("儲存每日排名");
     let (status, json) = get(&format!("/api/v1/market/relative-strength?date={end}")).await;
     cleanup().await;
 

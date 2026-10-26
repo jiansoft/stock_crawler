@@ -121,3 +121,59 @@ fn walk_forward_picks_best_training_sharpe_per_year() {
     assert!(result.years.is_empty());
     assert!(result.chosen.rows.is_empty());
 }
+
+/// 滾動前推訓練期間排除跨越年度邊界的期數（B03）：12 月換股跨入 1 月的價格不洩漏給當期訓練。
+#[test]
+fn walk_forward_train_range_excludes_cross_boundary_december_period() {
+    let rows = vec![
+        PeriodRow {
+            date: day(2023, 11, 1),
+            exit_date: Some(day(2023, 11, 29)),
+            holdings: 1,
+            avg_return: Some(5.0),
+            ..PeriodRow::default()
+        },
+        PeriodRow {
+            date: day(2023, 12, 15),
+            exit_date: Some(day(2024, 1, 15)),
+            holdings: 1,
+            avg_return: Some(20.0),
+            ..PeriodRow::default()
+        },
+    ];
+    let costs = vec![
+        PeriodCost {
+            turnover: 0.0,
+            net_return: 5.0,
+        },
+        PeriodCost {
+            turnover: 0.0,
+            net_return: 20.0,
+        },
+    ];
+    let track = Track {
+        rows: rows.clone(),
+        costs: costs.clone(),
+    };
+    // 訓練期間為 2023 全年（2023-01-01 至 2024-01-01）：
+    // 12-15 換股日雖然在 2023 年，但出場日為 2024-01-15，含有 2024 年價格，必須排除在 2023 訓練之外。
+    let train_range = track.train_range(day(2023, 1, 1), day(2024, 1, 1));
+    assert_eq!(train_range, 0..1);
+
+    // 修改跨年期數的報酬（模擬 1 月暴跌），不影響訓練期的夏普值。
+    let mut modified_rows = rows;
+    modified_rows[1].avg_return = Some(-50.0);
+    let mut modified_costs = costs;
+    modified_costs[1].net_return = -50.0;
+    let modified_track = Track {
+        rows: modified_rows,
+        costs: modified_costs,
+    };
+    assert_eq!(
+        track.sharpe(train_range.clone(), 20),
+        modified_track.sharpe(
+            modified_track.train_range(day(2023, 1, 1), day(2024, 1, 1)),
+            20
+        )
+    );
+}

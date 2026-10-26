@@ -8,6 +8,8 @@ use utoipa::ToSchema;
 pub(crate) struct BacktestPeriod {
     /// 換股日（收盤買進）。
     pub(crate) date: String,
+    /// 換股結束日（持有期滿收盤賣出）；未滿或尚未結束為 `null`。
+    pub(crate) exit_date: Option<String>,
     /// 這期持有的檔數；0 代表沒有符合條件的股票或大盤濾網沒過，這期空手（報酬 0）。
     pub(crate) holdings: i64,
     /// 換股日加權指數低於濾網均線或市場廣度低於門檻而空手。
@@ -56,10 +58,18 @@ pub(crate) struct BacktestSummary {
     pub(crate) annualized_return_after_costs: Option<f64>,
     /// 大盤基準的年化報酬（%）。
     pub(crate) benchmark_annualized_return: Option<f64>,
-    /// 最大回撤（%，負值）：以每期期末的累積淨值計算，看不到期中的波動。
+    /// 最大回撤（%，負值）：以每期期末的累積淨值計算，看不到期中的波動（相容欄位，同 period_end_max_drawdown）。
     pub(crate) max_drawdown: Option<f64>,
-    /// 扣除交易成本後的最大回撤（%）。
+    /// 扣除交易成本後的最大回撤（%）（相容欄位，同 period_end_max_drawdown_after_costs）。
     pub(crate) max_drawdown_after_costs: Option<f64>,
+    /// 期末最大回撤（%，負值）：以每期期末的累積淨值計算。
+    pub(crate) period_end_max_drawdown: Option<f64>,
+    /// 扣除交易成本後的期末最大回撤（%）。
+    pub(crate) period_end_max_drawdown_after_costs: Option<f64>,
+    /// 持有期內日頻最大回撤（%，負值）：反映期間內每日淨值波動的最大跌幅。
+    pub(crate) daily_max_drawdown: Option<f64>,
+    /// 扣除交易成本後的持有期內日頻最大回撤（%）。
+    pub(crate) daily_max_drawdown_after_costs: Option<f64>,
     /// 大盤基準的最大回撤（%）。
     pub(crate) benchmark_max_drawdown: Option<f64>,
     /// 報酬大於 0 的期數比例（0–1），未扣交易成本。

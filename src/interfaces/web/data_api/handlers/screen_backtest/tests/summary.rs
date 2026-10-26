@@ -200,3 +200,32 @@ fn risk_annualizes_volatility_and_sharpe() {
     assert_eq!(risk(&[3.0], 4.0), None);
     assert_eq!(risk(&[1.0, 1.0, 1.0], 4.0), Some((0.0, None)));
 }
+
+/// 驗證 B06：日頻最大回撤能反映持有期間的下跌，且幅度大於等於期末最大回撤。
+#[test]
+fn daily_max_drawdown_captures_intra_period_dip() {
+    let mut r1 = dated(day(2024, 1, 2), Some(10.0), 0.0, None);
+    // 第一期內日累積淨值曾暴跌至 -40%，但期末回到 +10%
+    r1.daily_returns = vec![-10.0, -40.0, -20.0, 5.0];
+
+    let mut r2 = dated(day(2024, 2, 1), Some(5.0), 0.0, None);
+    r2.daily_returns = vec![2.0, 3.0, 5.0];
+
+    r1.daily_complete = true;
+    r2.daily_complete = true;
+    r1.daily_net_returns = r1.daily_returns.clone();
+    r2.daily_net_returns = r2.daily_returns.clone();
+    let rows = [r1, r2];
+    let summary = summarize(&rows, &free(&rows), 20);
+
+    // 期末口徑：1.10 -> 1.155，回撤為 0.0%
+    assert_eq!(summary.period_end_max_drawdown, Some(0.0));
+    assert_eq!(summary.max_drawdown, Some(0.0));
+
+    // 日頻口徑：期內曾跌至 -40%，日頻最大回撤應為 -40.0%
+    assert_eq!(summary.daily_max_drawdown, Some(-40.0));
+    assert_eq!(summary.daily_max_drawdown_after_costs, Some(-40.0));
+
+    // 驗證幅度：日頻回撤幅度 >= 期末回撤幅度 (即 daily <= period_end)
+    assert!(summary.daily_max_drawdown.unwrap() <= summary.period_end_max_drawdown.unwrap());
+}

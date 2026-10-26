@@ -35,12 +35,12 @@ async fn strategy_gateway_reports_latest_rebalance() {
     assert_eq!(rebalance.kept, [holding("79979BB")]);
     assert_eq!(rebalance.exited, [holding("79979BC")]);
 
-    // 03-12 時最後換股日 03-08 已有報酬，沒有目前持股。
+    // 03-12 時 03-08 期數仍未到 03-15 出場日，必須保留目前持股。
     let none = gateway
         .latest_rebalance("from=1993-03-01&to=1993-03-12&hold_days=5&limit=2")
         .await
         .expect("回測成功");
-    assert!(none.is_none());
+    assert_eq!(none.expect("持有期未完成").date, day(8));
 
     for (query, expected) in [
         ("to=1993-03-15&hold_days=5", "必須指定 from"),

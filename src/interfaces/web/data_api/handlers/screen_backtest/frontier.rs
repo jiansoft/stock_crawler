@@ -115,6 +115,7 @@ pub(super) fn frontier(
                     let (rows, costs) = (&simulation.rows, &simulation.costs);
                     (
                         BacktestOffsetResult {
+                            excluded_cross_boundary_periods: 0,
                             rebalance_offset: *offset,
                             summary: summarize(rows, costs, hold_days),
                         },

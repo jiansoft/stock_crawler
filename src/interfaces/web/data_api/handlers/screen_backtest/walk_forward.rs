@@ -87,8 +87,17 @@ pub(super) struct Track {
 }
 
 impl Track {
+    /// 訓練期數範圍：只取換股日不早於 `start` 且出場日早於 `end` 的期數（排除跨越年度邊界的期數）。
+    pub(super) fn train_range(&self, start: NaiveDate, end: NaiveDate) -> Range<usize> {
+        let from = self.rows.partition_point(|row| row.date < start);
+        let to = self
+            .rows
+            .partition_point(|row| row.exit_date.map_or(row.date < end, |exit| exit < end));
+        from..to.max(from)
+    }
+
     /// 換股日落在 `[start, end)` 的期數範圍（`rows` 依換股日由舊到新）。
-    fn range(&self, start: NaiveDate, end: NaiveDate) -> Range<usize> {
+    pub(super) fn range(&self, start: NaiveDate, end: NaiveDate) -> Range<usize> {
         let from = self.rows.partition_point(|row| row.date < start);
         let to = self.rows.partition_point(|row| row.date < end);
         from..to
@@ -150,7 +159,7 @@ pub(super) fn walk_forward(
             .iter()
             .zip(tracks)
             .filter_map(|(candidate, track)| {
-                let sharpe = track.sharpe(track.range(train_start, test_start), hold_days)?;
+                let sharpe = track.sharpe(track.train_range(train_start, test_start), hold_days)?;
                 Some((candidate, track, sharpe))
             })
             .fold(
@@ -171,6 +180,10 @@ pub(super) fn walk_forward(
         let (return_after_costs, etf_return) = period_returns(track, test.clone());
         let (baseline_return, _) = period_returns(baseline, base.clone());
         result.years.push(BacktestWalkForwardYear {
+            excluded_training_periods: track
+                .range(train_start, test_start)
+                .len()
+                .saturating_sub(track.train_range(train_start, test_start).len()),
             year,
             etf_weight: candidate.etf_weight,
             max_weight: candidate.max_weight,
@@ -303,6 +316,7 @@ pub(crate) async fn screen_backtest_walk_forward(BacktestQuery(params): Backtest
     let results = |pick: fn(&WalkForward) -> &Track| -> Vec<BacktestOffsetResult> {
         runs.iter()
             .map(|(offset, run)| BacktestOffsetResult {
+                excluded_cross_boundary_periods: 0,
                 rebalance_offset: *offset,
                 summary: summary_of(pick(run)),
             })

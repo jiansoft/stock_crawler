@@ -120,6 +120,121 @@ pub(super) fn apply_stops(
         }
     }
 }
+/// 以已決定的權重建立同日對齊的策略與 0050 路徑；停損後固定現金價值。
+/// 換股成本在期初扣除，停損賣出成本在觸發日扣除，缺日線時標為不完整。
+pub(super) fn populate_daily_returns(
+    rows: &mut [PeriodRow],
+    bars: &HashMap<String, Arc<Vec<PriceBar>>>,
+    rule: StopRule,
+    fee_discount: f64,
+    costs: &[super::portfolio::PeriodCost],
+) {
+    use super::portfolio::{FEE_RATE, TAX_RATE, shares, stopped_value};
+    // 0050 作為共用交易日曆；只建一次，避免每一期重掃所有標的多年日線。
+    let calendar: std::collections::BTreeSet<_> = match bars
+        .get(super::ETF_BENCHMARK)
+        .filter(|series| !series.is_empty())
+    {
+        Some(series) => series.iter().map(|bar| bar.date).collect(),
+        None => bars
+            .values()
+            .flat_map(|series| series.iter().map(|bar| bar.date))
+            .collect(),
+    };
+    for (row, cost) in rows.iter_mut().zip(costs) {
+        let Some(exit) = row.exit_date.filter(|_| !row.pending) else {
+            continue;
+        };
+        // 日期以所有已載入日線聯集對齊，停牌標的沿用最近成交價，不以向量索引代替日期。
+        let mut dates: std::collections::BTreeSet<_> = std::iter::once(row.date)
+            .chain(calendar.range(row.date..=exit).copied())
+            .chain(std::iter::once(exit))
+            .collect();
+        // 核心部位若有停牌或缺日，仍納入衛星持股在該期間的實際成交日。
+        for symbol in &row.symbols {
+            if let Some(series) = bars.get(symbol) {
+                let from = series.partition_point(|bar| bar.date <= row.date);
+                dates.extend(
+                    series[from..]
+                        .iter()
+                        .take_while(|bar| bar.date <= exit)
+                        .map(|bar| bar.date),
+                );
+            }
+        }
+        row.daily_returns.clear();
+        row.daily_net_returns.clear();
+        row.etf_daily_returns.clear();
+        row.etf_daily_complete = false;
+        let weights = shares(row);
+        let mut paths = Vec::new();
+        row.daily_complete = true;
+        let sell_rate = FEE_RATE * fee_discount + TAX_RATE;
+        let entry_cost =
+            (row.avg_return.unwrap_or(0.0) - cost.net_return - stopped_value(row) * sell_rate)
+                .max(0.0);
+        for (index, symbol) in row.symbols.iter().enumerate() {
+            let Some(series) = bars.get(symbol) else {
+                row.daily_complete = false;
+                break;
+            };
+            let entry = series.partition_point(|bar| bar.date <= row.date);
+            if entry == 0 || series[entry - 1].close <= 0.0 {
+                row.daily_complete = false;
+                break;
+            }
+            let entry_price = series[entry - 1].close;
+            let mut peak = entry_price;
+            let mut sold = None;
+            let mut path = Vec::new();
+            for &date in &dates {
+                let at = series.partition_point(|bar| bar.date <= date);
+                let close = series[at - 1].close;
+                peak = peak.max(close);
+                let ret = (close / entry_price - 1.0) * 100.0;
+                if sold.is_none()
+                    && date > row.date
+                    && date < exit
+                    && row.stopped.get(index).copied().unwrap_or(false)
+                    && (rule.stop_loss.is_some_and(|limit| ret <= -limit)
+                        || rule
+                            .trailing_stop
+                            .is_some_and(|limit| (close / peak - 1.0) * 100.0 <= -limit))
+                {
+                    sold = Some(ret);
+                }
+                let value = sold.unwrap_or(ret);
+                let fee = sold.map_or(0.0, |ret| {
+                    weights[index] * (1.0 + ret / 100.0).max(0.0) * sell_rate
+                });
+                path.push((weights[index] * value, fee));
+            }
+            paths.push(path);
+        }
+        if row.daily_complete {
+            for t in 0..dates.len() {
+                let gross: f64 = paths.iter().map(|path| path[t].0).sum();
+                let fees: f64 = paths.iter().map(|path| path[t].1).sum();
+                row.daily_returns.push(gross);
+                row.daily_net_returns.push(gross - entry_cost - fees);
+            }
+        }
+        if let Some(series) = bars.get(super::ETF_BENCHMARK) {
+            let at = series.partition_point(|bar| bar.date <= row.date);
+            if at > 0 && series[at - 1].close > 0.0 && row.etf_return.is_some() {
+                let entry = series[at - 1].close;
+                row.etf_daily_complete = true;
+                row.etf_daily_returns = dates
+                    .iter()
+                    .map(|date| {
+                        let at = series.partition_point(|bar| bar.date <= *date);
+                        (series[at - 1].close / entry - 1.0) * 100.0
+                    })
+                    .collect();
+            }
+        }
+    }
+}
 
 /// 期間停損用的日線快取：同一次請求的各個換股日偏移共用，只查還沒讀過的股票。
 #[derive(Default)]
@@ -136,11 +251,12 @@ impl BarCache {
         from: NaiveDate,
         to: NaiveDate,
     ) -> Result<HashMap<String, Arc<Vec<PriceBar>>>, sqlx::Error> {
-        let wanted: HashSet<&str> = rows
+        let mut wanted: HashSet<&str> = rows
             .iter()
             .filter(|row| !row.pending)
             .flat_map(|row| row.symbols.iter().map(String::as_str))
             .collect();
+        wanted.insert(super::ETF_BENCHMARK);
         // 持鎖查詢：同時跑的偏移等前一個查完再看缺哪些，避免重複讀同一批日線。
         let mut cache = self.bars.lock().await;
         let missing: Vec<String> = wanted
@@ -283,5 +399,128 @@ mod tests {
         let avg = rows[0].avg_return.expect("平均報酬");
         assert!((avg + 3.5).abs() < 1e-9, "{avg}");
         assert_eq!(rows[1], original[1]);
+    }
+}
+
+/// 日頻風險必須使用實際權重、停損現金與同日核心部位的回歸測試。
+#[cfg(test)]
+mod daily_tests {
+    use super::super::{
+        portfolio::{PeriodCost, blend_etf},
+        summary::summarize,
+    };
+    use super::*;
+    /// 建立相鄰日期上的還原收盤。
+    fn series(values: &[f64]) -> Arc<Vec<PriceBar>> {
+        Arc::new(
+            values
+                .iter()
+                .enumerate()
+                .map(|(i, close)| PriceBar {
+                    date: NaiveDate::from_ymd_opt(2024, 1, 2 + i as u32).unwrap(),
+                    close: *close,
+                    high: *close,
+                    low: *close,
+                })
+                .collect(),
+        )
+    }
+    /// 建立持有兩天的完整期數。
+    fn period(symbols: &[&str]) -> PeriodRow {
+        PeriodRow {
+            date: NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+            exit_date: Some(NaiveDate::from_ymd_opt(2024, 1, 4).unwrap()),
+            symbols: symbols.iter().map(|s| s.to_string()).collect(),
+            holdings: symbols.len() as i64,
+            ..PeriodRow::default()
+        }
+    }
+    /// 成交金額加權與上限後現金不能退回等權。
+    #[test]
+    fn daily_paths_use_weights_and_cash() {
+        let mut row = period(&["A", "B"]);
+        row.weights = vec![0.9, 0.1];
+        let bars = HashMap::from([
+            ("A".into(), series(&[100.0, 50.0, 100.0])),
+            ("B".into(), series(&[100.0, 100.0, 100.0])),
+        ]);
+        let costs = [PeriodCost {
+            net_return: 0.0,
+            turnover: 0.0,
+        }];
+        populate_daily_returns(
+            std::slice::from_mut(&mut row),
+            &bars,
+            StopRule::default(),
+            1.0,
+            &costs,
+        );
+        assert_eq!(row.daily_returns, [0.0, -45.0, 0.0]);
+        row.daily_returns.clear();
+        row.daily_net_returns.clear();
+        row.weights = vec![0.1, 0.1];
+        row.cash = 0.8;
+        populate_daily_returns(
+            std::slice::from_mut(&mut row),
+            &bars,
+            StopRule::default(),
+            1.0,
+            &costs,
+        );
+        assert!((row.daily_returns[1] + 5.0).abs() < 1e-9);
+    }
+    /// 停損日扣賣出成本，之後價跌不再影響現金。
+    #[test]
+    fn stopped_paths_freeze_and_charge_on_exit() {
+        let mut row = period(&["A"]);
+        row.returns = vec![Some(-90.0)];
+        let bars = HashMap::from([("A".into(), series(&[100.0, 80.0, 10.0]))]);
+        let rule = StopRule {
+            stop_loss: Some(10.0),
+            trailing_stop: None,
+        };
+        apply_stops(std::slice::from_mut(&mut row), &bars, rule, 20);
+        let costs = super::super::portfolio::trading_costs(std::slice::from_ref(&row), 1.0);
+        populate_daily_returns(std::slice::from_mut(&mut row), &bars, rule, 1.0, &costs);
+        assert!(
+            row.daily_returns
+                .iter()
+                .zip([0.0, -20.0, -20.0])
+                .all(|(a, b)| (a - b).abs() < 1e-9)
+        );
+        assert!((row.daily_net_returns[0] + 0.1425).abs() < 1e-9);
+        assert!((row.daily_net_returns[2] - costs[0].net_return).abs() < 1e-9);
+        let summary = summarize(&[row], &costs, 20);
+        assert_eq!(summary.daily_max_drawdown, Some(-20.0));
+        assert_eq!(summary.daily_max_drawdown_after_costs, Some(-20.5));
+    }
+    /// 只持有 0050 時不能帶入衛星策略的回撤。
+    #[test]
+    fn core_only_ignores_strategy_path_and_missing_strategy_prices() {
+        let mut rows = [period(&["A"])];
+        rows[0].avg_return = Some(-50.0);
+        rows[0].etf_return = Some(0.0);
+        let bars = HashMap::from([("0050".into(), series(&[100.0, 100.0, 100.0]))]);
+        let mut costs = [PeriodCost {
+            net_return: -50.0,
+            turnover: 1.0,
+        }];
+        populate_daily_returns(&mut rows, &bars, StopRule::default(), 1.0, &costs);
+        assert!(!rows[0].daily_complete);
+        blend_etf(&mut rows, &mut costs, 1.0, 1.0);
+        assert_eq!(summarize(&rows, &costs, 20).daily_max_drawdown, Some(0.0));
+    }
+    /// 缺少日線時明確保留 null，不以期末值冒充每日風險。
+    #[test]
+    fn missing_daily_prices_are_not_period_end_risk() {
+        let mut rows = [period(&["A"])];
+        let costs = [PeriodCost {
+            net_return: 0.0,
+            turnover: 0.0,
+        }];
+        populate_daily_returns(&mut rows, &HashMap::new(), StopRule::default(), 1.0, &costs);
+        let summary = summarize(&rows, &costs, 20);
+        assert!(summary.daily_max_drawdown.is_none());
+        assert_eq!(summary.period_end_max_drawdown, Some(0.0));
     }
 }

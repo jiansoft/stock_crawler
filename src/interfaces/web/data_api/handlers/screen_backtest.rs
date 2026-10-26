@@ -114,6 +114,8 @@ const RANK_BY: [&str; 8] = [
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 struct CandidateRow {
     date: NaiveDate,
+    /// 換股結束日（持有期滿收盤賣出）；未滿或尚未結束為 `None`。
+    exit_date: Option<NaiveDate>,
     /// 最後一個換股日、還沒滿持有天數（沒有報酬）；代表策略目前的持股。
     pending: bool,
     /// 換股日之後到迄日經過的交易日數。
@@ -140,6 +142,8 @@ struct CandidateRow {
 #[derive(Debug, Clone, Default, PartialEq)]
 struct PeriodRow {
     date: NaiveDate,
+    /// 換股結束日（持有期滿收盤賣出）；未滿或尚未結束為 `None`。
+    exit_date: Option<NaiveDate>,
     /// 還沒滿持有天數的最後一期（見 [`CandidateRow::pending`]）。
     pending: bool,
     /// 大盤濾網沒過、這期被迫空手。
@@ -161,6 +165,16 @@ struct PeriodRow {
     cash: f64,
     /// 各持股這期是否在持有期間停損賣出，與 `symbols` 一一對應；空的代表都沒有（見 [`stops`]）。
     stopped: Vec<bool>,
+    /// 持有期間各交易日相對於換股日的投資組合累積報酬率（%）；若無日線則為空。
+    daily_returns: Vec<f64>,
+    /// 與日頻毛報酬對齊的淨報酬；期初扣換股成本，停損日才扣賣出成本。
+    daily_net_returns: Vec<f64>,
+    /// 同一組交易日期上的 0050 累積報酬。
+    etf_daily_returns: Vec<f64>,
+    /// 策略日線完整時才可宣告日頻風險，缺價不得冒充期末口徑。
+    daily_complete: bool,
+    /// 0050 日線是否足以涵蓋完整持有期。
+    etf_daily_complete: bool,
     /// 各持股的產業編號（`stocks.stock_industry_id`），與 `symbols` 一一對應。
     industries: Vec<i32>,
 }

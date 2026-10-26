@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use super::current::split_current;
 use super::portfolio::{PeriodCost, Weighting, blend_etf, select_holdings, trading_costs, weigh};
 use super::sql::{BACKTEST_SQL, BACKTEST_WITH_CHIP_SQL, LATEST_RS_DATE_SQL};
-use super::stops::{BarCache, StopRule, apply_stops};
+use super::stops::{BarCache, StopRule, apply_stops, populate_daily_returns};
 use super::validate::{parse_excluded_industries, resolve_backtest_period, validate_fundamentals};
 use super::{
     CandidateRow, HOLD_DAYS, MARKET_FILTER_DAYS, MAX_KEEP_RANK, MAX_TRADE_VALUE_MILLION, PeriodRow,
@@ -390,16 +390,15 @@ impl<'a> Backtest<'a> {
             usize::from(keep_rank),
             params.max_per_industry.map(usize::from),
         );
-        if self.stops.is_active() {
-            let bars = self.bars.load(&rows, self.from, self.to).await?;
-            apply_stops(&mut rows, &bars, self.stops, self.hold_days);
-        }
+        let bars = self.bars.load(&rows, self.from, self.to).await?;
+        apply_stops(&mut rows, &bars, self.stops, self.hold_days);
         weigh(
             &mut rows,
             self.weighting,
             max_weight.map(|percent| f64::from(percent) / 100.0),
         );
         let costs = trading_costs(&rows, self.fee_discount);
+        populate_daily_returns(&mut rows, &bars, self.stops, self.fee_discount, &costs);
         Ok(Raw {
             rows,
             costs,
