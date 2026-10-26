@@ -204,6 +204,39 @@ pub async fn get_json_with_limit<RES: DeserializeOwned>(
     })
 }
 
+/// 以單次逾時 `timeout`（取代用戶端預設的 15 秒）GET `url`，回傳不超過 `max_body_bytes` 的 2xx body。
+///
+/// 給一次下載數 MiB 開放資料的來源使用：15 秒內讀不完整個 body 時，預設逾時會在讀到一半中斷。
+///
+/// # Errors
+///
+/// 請求失敗、逾時、body 超過上限或狀態碼不是 2xx 時回傳錯誤（訊息中的網址已遮罩）。
+pub async fn get_bytes_with_limit(
+    url: &str,
+    max_body_bytes: usize,
+    timeout: Duration,
+) -> Result<Vec<u8>> {
+    let res = send(
+        Method::GET,
+        url,
+        None,
+        Some(move |rb: RequestBuilder| rb.timeout(timeout)),
+        None,
+    )
+    .await?;
+    let status = res.status();
+    let body = read_limited_body(res, url, max_body_bytes).await?;
+    if !status.is_success() {
+        return Err(anyhow!(
+            "HTTP request failed with status {} for {}. Body: {}",
+            status,
+            redact_url(url),
+            util::text::log_snippet(&String::from_utf8_lossy(&body), 200)
+        ));
+    }
+    Ok(body)
+}
+
 /// 執行 HTTP GET 並回傳原始 `Response`。
 ///
 /// 這個 helper 保留呼叫端自行處理 status code、header 與 body 的彈性，
