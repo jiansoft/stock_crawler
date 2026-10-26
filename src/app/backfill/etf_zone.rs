@@ -132,8 +132,7 @@ pub async fn backfill_nav_history(years: u32) -> Result<()> {
 ///
 /// 起日不早於今天、資料庫操作失敗，或超過一半的 ETF 抓取失敗時回傳錯誤。
 pub async fn backfill_nav_history_since(from: NaiveDate) -> Result<()> {
-    let (from, to) =
-        nav_history_since_range(Local::now().date_naive(), from).context("回補起日必須早於今天")?;
+    let (from, to) = nav_history_since_range(Local::now().date_naive(), from)?;
     backfill_nav_range(from, to).await
 }
 
@@ -260,10 +259,13 @@ fn nav_history_range(today: NaiveDate, years: u32) -> Option<(NaiveDate, NaiveDa
     Some((from, today.pred_opt()?))
 }
 
-/// 回補區間：`from` 到昨天；`from` 不早於今天時沒有區間。
-fn nav_history_since_range(today: NaiveDate, from: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
-    let to = today.pred_opt()?;
-    (from <= to).then_some((from, to))
+/// 回補區間：`from` 到昨天；`from` 不早於今天時沒有區間，回傳錯誤。
+fn nav_history_since_range(today: NaiveDate, from: NaiveDate) -> Result<(NaiveDate, NaiveDate)> {
+    let to = today.pred_opt().context("今天沒有前一天")?;
+    if from > to {
+        bail!("回補起日 {from} 必須早於今天 {today}");
+    }
+    Ok((from, to))
 }
 
 /// 只重建快照。
@@ -442,19 +444,18 @@ mod tests {
     fn nav_history_since_range_runs_to_yesterday() {
         let today = NaiveDate::from_ymd_opt(2026, 10, 26).expect("日期應合法");
         let from = NaiveDate::from_ymd_opt(2019, 1, 1).expect("日期應合法");
-        assert_eq!(
-            nav_history_since_range(today, from),
-            Some((
-                from,
-                NaiveDate::from_ymd_opt(2026, 10, 25).expect("日期應合法")
-            ))
-        );
         let yesterday = NaiveDate::from_ymd_opt(2026, 10, 25).expect("日期應合法");
         assert_eq!(
-            nav_history_since_range(today, yesterday),
-            Some((yesterday, yesterday))
+            nav_history_since_range(today, from).expect("起日早於今天應有區間"),
+            (from, yesterday)
         );
-        assert_eq!(nav_history_since_range(today, today), None);
+        assert_eq!(
+            nav_history_since_range(today, yesterday).expect("起日等於昨天應有區間"),
+            (yesterday, yesterday)
+        );
+        let err = nav_history_since_range(today, today).expect_err("起日不早於今天應回傳錯誤");
+        assert!(err.to_string().contains("必須早於今天"), "{err}");
+        assert!(nav_history_since_range(NaiveDate::MIN, from).is_err());
     }
 
     #[test]
