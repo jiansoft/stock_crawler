@@ -15,14 +15,26 @@ LIMIT $3
 "#;
 
 /// 多檔股票在 `$2`～`$3`（含）有成交的日線，依代號、日期由舊到新；走
-/// `(stock_symbol, "Date" DESC)` 覆蓋索引。
+/// `(stock_symbol, "Date" DESC)` 覆蓋索引。價格在資料庫端轉成 `float8`：七年、數百檔的日線有數十萬列，
+/// 在 pi 上逐列解析 `NUMERIC` 比查詢本身慢一個數量級。
 const RANGE_BARS_SQL: &str = r#"
-SELECT stock_symbol::text, "Date", "ClosingPrice", "HighestPrice", "LowestPrice"
+SELECT stock_symbol::text, "Date", "ClosingPrice"::float8, "HighestPrice"::float8, "LowestPrice"::float8
 FROM "DailyQuotes"
 WHERE stock_symbol = ANY($1)
   AND "Date" BETWEEN $2 AND $3
   AND "ClosingPrice" > 0
 ORDER BY stock_symbol, "Date"
+"#;
+
+/// 多檔股票各自在一段或多段 `[start, end]`（含）期間有成交的日線，依代號、日期由舊到新；`$1`～`$3`
+/// 為等長的代號、起日、迄日陣列，同一檔的各段不重疊。價格同樣轉成 `float8`。
+const WINDOW_BARS_SQL: &str = r#"
+SELECT q.stock_symbol::text, q."Date", q."ClosingPrice"::float8, q."HighestPrice"::float8,
+       q."LowestPrice"::float8
+FROM UNNEST($1::text[], $2::date[], $3::date[]) AS w(stock_symbol, start_date, end_date)
+JOIN "DailyQuotes" q ON q.stock_symbol = w.stock_symbol AND q."Date" BETWEEN w.start_date AND w.end_date
+WHERE q."ClosingPrice" > 0
+ORDER BY q.stock_symbol, q."Date"
 "#;
 
 /// 除息（`ex-dividend_date1` 配現金）、除權（`ex-dividend_date2` 配股）與
@@ -122,22 +134,13 @@ impl PgQuoteRepository {
         from: NaiveDate,
         to: NaiveDate,
     ) -> Result<HashMap<String, Vec<PriceBar>>, sqlx::Error> {
-        let rows: Vec<(String, NaiveDate, Decimal, Decimal, Decimal)> =
-            sqlx::query_as(RANGE_BARS_SQL)
-                .bind(stock_symbols)
-                .bind(from)
-                .bind(to)
-                .fetch_all(database::get_batch_connection())
-                .await?;
-        let mut bars: HashMap<String, Vec<PriceBar>> = HashMap::new();
-        for (symbol, date, close, high, low) in rows {
-            bars.entry(symbol).or_default().push(PriceBar {
-                date,
-                close: close.to_f64().unwrap_or_default(),
-                high: high.to_f64().unwrap_or_default(),
-                low: low.to_f64().unwrap_or_default(),
-            });
-        }
+        let rows: Vec<(String, NaiveDate, f64, f64, f64)> = sqlx::query_as(RANGE_BARS_SQL)
+            .bind(stock_symbols)
+            .bind(from)
+            .bind(to)
+            .fetch_all(database::get_batch_connection())
+            .await?;
+        let bars = group_bars(rows);
         let adjustments = self.price_adjustments(stock_symbols).await?;
         Ok(bars
             .into_iter()
@@ -148,4 +151,39 @@ impl PgQuoteRepository {
             })
             .collect())
     }
+
+    /// 各檔在指定期間（`(代號, 起日, 迄日)`，同一檔的各段不重疊）有成交的**未還原**日線，依代號分組、
+    /// 由舊到新。呼叫端依各段分別還原（見 `screen_backtest::stops::load_holding_windows`）。
+    pub(crate) async fn fetch_bar_windows(
+        &self,
+        windows: &[(String, NaiveDate, NaiveDate)],
+    ) -> Result<HashMap<String, Vec<PriceBar>>, sqlx::Error> {
+        let symbols: Vec<&str> = windows
+            .iter()
+            .map(|(symbol, _, _)| symbol.as_str())
+            .collect();
+        let starts: Vec<NaiveDate> = windows.iter().map(|(_, start, _)| *start).collect();
+        let ends: Vec<NaiveDate> = windows.iter().map(|(_, _, end)| *end).collect();
+        let rows: Vec<(String, NaiveDate, f64, f64, f64)> = sqlx::query_as(WINDOW_BARS_SQL)
+            .bind(&symbols)
+            .bind(&starts)
+            .bind(&ends)
+            .fetch_all(database::get_batch_connection())
+            .await?;
+        Ok(group_bars(rows))
+    }
+}
+
+/// 依代號分組日線列（SQL 已依代號、日期排序）。
+fn group_bars(rows: Vec<(String, NaiveDate, f64, f64, f64)>) -> HashMap<String, Vec<PriceBar>> {
+    let mut bars: HashMap<String, Vec<PriceBar>> = HashMap::new();
+    for (symbol, date, close, high, low) in rows {
+        bars.entry(symbol).or_default().push(PriceBar {
+            date,
+            close,
+            high,
+            low,
+        });
+    }
+    bars
 }

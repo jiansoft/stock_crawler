@@ -10,7 +10,7 @@ use super::sql::{
     BACKTEST_NEXT_OPEN_SQL, BACKTEST_SQL, BACKTEST_WITH_CHIP_NEXT_OPEN_SQL, BACKTEST_WITH_CHIP_SQL,
     LATEST_RS_DATE_SQL,
 };
-use super::stops::{BarCache, StopRule, apply_stops, populate_daily_returns};
+use super::stops::{BarCache, StopRule, apply_stops, load_holding_windows, populate_daily_returns};
 use super::validate::{parse_excluded_industries, resolve_backtest_period, validate_fundamentals};
 use super::{
     CandidateRow, HOLD_DAYS, MARKET_FILTER_DAYS, MAX_KEEP_RANK, MAX_TRADE_VALUE_MILLION, PeriodRow,
@@ -98,6 +98,9 @@ pub(super) struct Backtest<'a> {
     pub(super) stops: StopRule,
     /// 期間停損用的日線，各換股日偏移共用。
     pub(super) bars: BarCache,
+    /// 是否載入日線算日頻淨值路徑（日頻最大回撤）；多組回測的端點只用期末口徑，見
+    /// [`Self::period_end_only`]。
+    pub(super) daily_path: bool,
 }
 
 /// 一次回測混合 0050 之前的各期結果（含還沒滿持有天數的最後一期）；同一組候選股可依不同的
@@ -345,7 +348,15 @@ impl<'a> Backtest<'a> {
                 trailing_stop: params.trailing_stop.map(f64::from),
             },
             bars: BarCache::default(),
+            daily_path: true,
         })
+    }
+
+    /// 偏移、前緣、滾動前推、歸因與策略通知一次跑多組回測，只用期末口徑的分布或持股：不載入日線
+    /// 算日頻路徑（日線只在有停損時載入），避免每組都讀數十萬列日線。
+    pub(super) fn period_end_only(mut self) -> Self {
+        self.daily_path = false;
+        self
     }
 
     /// 實際扣成本用的手續費折數（含滑價，見 [`cost_fee_discount`]）。
@@ -462,9 +473,14 @@ impl<'a> Backtest<'a> {
         let fee_discount = self.cost_fee_discount();
         // 次日開盤成交不支援停損（已在驗證擋下），日線路徑也以收盤為端點，對不上開盤成交，
         // 因此不載入日線、不算日頻回撤（`daily_complete` 維持 false）。
+        // 停損要整段日線且各偏移共用快取；只算日頻路徑時只讀各持股的持有期間。
         let bars = match self.execution {
-            ExecutionPrice::Close => Some(self.bars.load(&rows, self.from, self.to).await?),
             ExecutionPrice::NextOpen => None,
+            ExecutionPrice::Close if self.stops.is_active() => {
+                Some(self.bars.load(&rows, self.from, self.to).await?)
+            }
+            ExecutionPrice::Close if self.daily_path => Some(load_holding_windows(&rows).await?),
+            ExecutionPrice::Close => None,
         };
         if let Some(bars) = &bars {
             apply_stops(&mut rows, bars, self.stops, self.hold_days);
@@ -475,7 +491,7 @@ impl<'a> Backtest<'a> {
             max_weight.map(|percent| f64::from(percent) / 100.0),
         );
         let costs = trading_costs(&rows, fee_discount);
-        if let Some(bars) = &bars {
+        if let Some(bars) = bars.as_ref().filter(|_| self.daily_path) {
             populate_daily_returns(&mut rows, bars, self.stops, fee_discount, &costs);
         }
         Ok(Raw {

@@ -278,7 +278,7 @@ pub(crate) async fn screen_backtest_walk_forward(BacktestQuery(params): Backtest
         return unprocessable("train_years 必須介於 1 至 5");
     }
     let backtest = match Backtest::prepare(&params).await {
-        Ok(backtest) => backtest,
+        Ok(backtest) => backtest.period_end_only(),
         Err(response) => return *response,
     };
     if backtest.to.year() < backtest.from.year() + i32::from(train_years) {
@@ -340,6 +340,7 @@ pub(crate) async fn screen_backtest_walk_forward(BacktestQuery(params): Backtest
         fee_discount: backtest.fee_discount,
         execution_model: backtest.execution.as_str().to_owned(),
         slippage_bps: backtest.slippage_bps,
+        drawdown_basis: "period_end".to_owned(),
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         train_years,
         candidates: grid.len() as i64,

@@ -40,7 +40,7 @@ pub(super) const WEIGHTS: [u8; 11] = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest/frontier", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestFrontierResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn screen_backtest_frontier(BacktestQuery(params): BacktestQuery) -> Response {
     let backtest = match Backtest::prepare(&params).await {
-        Ok(backtest) => backtest,
+        Ok(backtest) => backtest.period_end_only(),
         Err(response) => return *response,
     };
     let backtest = &backtest;
@@ -83,6 +83,7 @@ pub(crate) async fn screen_backtest_frontier(BacktestQuery(params): BacktestQuer
         fee_discount: backtest.fee_discount,
         execution_model: backtest.execution.as_str().to_owned(),
         slippage_bps: backtest.slippage_bps,
+        drawdown_basis: "period_end".to_owned(),
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         offsets: raws.len() as i64,
         best_sharpe_weight: best_weight(&points, sharpe),

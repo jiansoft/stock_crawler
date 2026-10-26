@@ -44,7 +44,7 @@ pub(super) const CONCURRENCY: usize = 4;
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest/offsets", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestOffsetsResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery) -> Response {
     let backtest = match Backtest::prepare(&params).await {
-        Ok(backtest) => backtest,
+        Ok(backtest) => backtest.period_end_only(),
         Err(response) => return *response,
     };
     let backtest = &backtest;
@@ -96,6 +96,7 @@ pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery
         fee_discount: backtest.fee_discount,
         execution_model: backtest.execution.as_str().to_owned(),
         slippage_bps: backtest.slippage_bps,
+        drawdown_basis: "period_end".to_owned(),
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         distribution: distribution(&results),
         years: offset_years(&years),
