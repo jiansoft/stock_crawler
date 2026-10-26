@@ -53,7 +53,12 @@ impl EtfRepository for PgEtfRepository {
     }
 
     async fn save_navs(&self, records: &[EtfNavRecord]) -> Result<u64> {
-        nav::save_navs(records).await
+        let written = nav::save_navs(records).await?;
+        // 寫入成功立即推進快取世代，不依賴稍後的快照重建是否成功。
+        if written > 0 {
+            crate::infra::cache::etf_analysis::ETF_ANALYSIS.invalidate();
+        }
+        Ok(written)
     }
 
     async fn insert_nav_history(
@@ -61,15 +66,30 @@ impl EtfRepository for PgEtfRepository {
         stock_symbol: &str,
         points: &[EtfNavHistoryPoint],
     ) -> Result<u64> {
-        nav::insert_nav_history(stock_symbol, points).await
+        let written = nav::insert_nav_history(stock_symbol, points).await?;
+        // 寫入成功立即推進快取世代，不依賴稍後的快照重建是否成功。
+        if written > 0 {
+            crate::infra::cache::etf_analysis::ETF_ANALYSIS.invalidate();
+        }
+        Ok(written)
     }
 
     async fn save_profiles(&self, profiles: &[EtfProfileRecord]) -> Result<u64> {
-        profile::save_profiles(profiles).await
+        let written = profile::save_profiles(profiles).await?;
+        // 寫入成功立即推進快取世代，不依賴稍後的快照重建是否成功。
+        if written > 0 {
+            crate::infra::cache::etf_analysis::ETF_ANALYSIS.invalidate();
+        }
+        Ok(written)
     }
 
     async fn insert_missing_profiles(&self, profiles: &[EtfProfileRecord]) -> Result<u64> {
-        profile::insert_missing_profiles(profiles).await
+        let written = profile::insert_missing_profiles(profiles).await?;
+        // 寫入成功立即推進快取世代，不依賴稍後的快照重建是否成功。
+        if written > 0 {
+            crate::infra::cache::etf_analysis::ETF_ANALYSIS.invalidate();
+        }
+        Ok(written)
     }
 
     async fn replace_portfolio(&self, portfolio: &EtfPortfolio) -> Result<u64> {
