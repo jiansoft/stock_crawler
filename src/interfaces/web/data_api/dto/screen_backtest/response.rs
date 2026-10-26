@@ -25,7 +25,8 @@ pub(crate) struct BacktestPeriod {
     pub(crate) turnover: f64,
     /// 同一天同市場全部母體股票的平均報酬（%）。
     pub(crate) benchmark_return: Option<f64>,
-    /// 同一天買進 0050 持有同樣天數的還原報酬（%）；缺資料為 `null`。
+    /// 同期 0050 還原報酬（%）；停牌時沿用進場日前最多 30 天的收盤，開收比缺值取 1，
+    /// 維持原定出場日。此為回測估算，並非停牌當日可成交；仍缺資料為 `null`。
     pub(crate) etf_return: Option<f64>,
     /// 依相對強度分數由高到低的前 10 檔代號（換手率以全部持股計算）。
     pub(crate) symbols: Vec<String>,
@@ -42,6 +43,8 @@ pub(crate) struct BacktestSummary {
     pub(crate) market_filtered_periods: i64,
     /// 各期觸發停損或移動停利、提前賣出的總檔次；沒設停損為 0。
     pub(crate) stop_exits: i64,
+    /// 已完成期數中 0050 仍缺報酬的期數；缺值部位以零報酬估算。
+    pub(crate) etf_missing_periods: i64,
     /// 有持股的期平均持有檔數。
     pub(crate) avg_holdings: Option<f64>,
     /// 有持股的期平均換手率（0–1）。

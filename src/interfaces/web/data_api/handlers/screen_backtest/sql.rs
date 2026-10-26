@@ -411,7 +411,7 @@ valuation_level AS (
     WHERE ($33::float8 IS NOT NULL OR $34::int IS NOT NULL)
       AND cur.stock_exchange_market_id = $3 AND cur.date IN (SELECT date FROM rebal)
 )
-SELECT b.date,
+SELECT b.date, b.entry_date,
        b.exit_date,
        (b.exit_date IS NULL OR b.exit_date > $2 OR b.samples = 0) AS pending,
        (SELECT COUNT(*) FROM days d WHERE d.date > b.date AND d.date <= $2)::int8 AS elapsed_days,

@@ -153,7 +153,7 @@ pub(super) fn populate_daily_returns(
         // 收盤成交從換股日收盤起算；次日開盤成交從次一交易日開盤起算。
         let start = match open_ratios {
             None => row.date,
-            Some(_) => match entry_date(&calendar, row.date) {
+            Some(_) => match row.entry_date.or_else(|| entry_date(&calendar, row.date)) {
                 Some(date) if date <= exit => date,
                 _ => {
                     row.daily_complete = false;
@@ -295,7 +295,10 @@ pub(super) async fn load_open_ratios(
         .unwrap_or_default();
     let mut points: HashSet<(String, NaiveDate)> = HashSet::new();
     for row in rows.iter().filter(|row| !row.pending) {
-        let (Some(exit), Some(entry)) = (row.exit_date, entry_date(&calendar, row.date)) else {
+        let (Some(exit), Some(entry)) = (
+            row.exit_date,
+            row.entry_date.or_else(|| entry_date(&calendar, row.date)),
+        ) else {
             continue;
         };
         for symbol in row
