@@ -416,3 +416,17 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 自身投資目標及個人、財務狀況，確定任何投資、證券或任何其他投資產品服務是否適合自身的需要。
 本網站所載或本網站上、通過本網站提供的任何服務、內容、資訊及/或資料在任何情況下均不得被解釋為提供投資、
 法律意見或提供投資服務。特請訪問此類網頁的人士就有關任何本網資料是否適合其投資需求徵詢適當獨立專業意見。
+
+
+### 持股再平衡 API（僅試算）
+
+使用前先執行冪等的 `etc/sql/portfolio_target.sql`；此檔同時建立目標明細與維度設定表，
+可區分未設定與明確設定為 100% 現金。部署新版 API 前必須先套用 SQL。
+
+- `PUT /api/v1/portfolio/targets` 依會員與維度完整覆蓋配置；空清單表示全現金，0% 目標亦保留。
+- 比例最多兩位小數，同維度合計不得超過 100%；重複 key、非有限數值與無效價格會拒絕。
+- `GET /api/v1/portfolio/targets` 不帶維度時，每列保留 dimension，現金比例放在
+  `cash_percent_by_dimension`；單一 `target_cash_percent` 為 null，避免混加不同維度。
+- `GET /api/v1/portfolio/rebalance` 支援個股、產業與 ETF 穿透；`cash` 是 `available_cash` 的別名。
+  ETF 前十大成分的資料日、涵蓋率與未涵蓋市值會一併回傳；缺少收盤價時回 422，避免錯算權重。
+- 結果僅提示，不下單、不寫入交易。API、目標設定與 MCP 部署須另外取得使用者同意。

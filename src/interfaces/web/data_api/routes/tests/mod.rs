@@ -27,6 +27,7 @@ mod phase1;
 mod phase2_3;
 mod phase4;
 mod portfolio;
+mod portfolio_rebalance;
 mod rankings;
 mod relative_strength;
 mod screen_backtest;

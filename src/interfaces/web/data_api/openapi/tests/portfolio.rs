@@ -165,3 +165,42 @@ fn openapi_portfolio_etf_exposure_schema_pins_field_names() {
         "#/components/schemas/ExposureSourceItem"
     );
 }
+
+/// 持股再平衡與目標配置 path 的 OpenAPI 契約。
+#[test]
+fn openapi_portfolio_rebalance_and_targets_pins_schema() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+
+    // 1. /api/v1/portfolio/rebalance
+    let rebalance_op = get_operation(&document, "/api/v1/portfolio/rebalance");
+    assert_endpoint_responses(rebalance_op, "PortfolioRebalanceResponse", false);
+
+    let schemas = &document["components"]["schemas"];
+    let rebalance_props = &schemas["PortfolioRebalanceResponse"]["properties"];
+    assert_eq!(
+        rebalance_props["stock_items"]["items"]["$ref"],
+        "#/components/schemas/StockRebalanceItemDto"
+    );
+    assert_eq!(
+        rebalance_props["industry_items"]["items"]["$ref"],
+        "#/components/schemas/IndustryRebalanceItemDto"
+    );
+    assert_eq!(
+        rebalance_props["etf_items"]["items"]["$ref"],
+        "#/components/schemas/EtfLookThroughRebalanceItemDto"
+    );
+    assert_eq!(
+        rebalance_props["cash_summary"]["$ref"],
+        "#/components/schemas/RebalanceCashSummaryDto"
+    );
+
+    // 2. /api/v1/portfolio/targets
+    let targets_get_op = get_operation(&document, "/api/v1/portfolio/targets");
+    assert_endpoint_responses(targets_get_op, "PortfolioTargetsResponse", false);
+
+    let targets_props = &schemas["PortfolioTargetsResponse"]["properties"];
+    assert_eq!(
+        targets_props["targets"]["items"]["$ref"],
+        "#/components/schemas/PortfolioTargetItemDto"
+    );
+}
