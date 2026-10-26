@@ -348,7 +348,7 @@ pub(super) fn attribution_years(
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest/attribution", tag = "data-api", params(ScreenBacktestParams), responses((status = 200, body = ScreenBacktestAttributionResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn screen_backtest_attribution(BacktestQuery(params): BacktestQuery) -> Response {
     let backtest = match Backtest::prepare(&params).await {
-        Ok(backtest) => backtest,
+        Ok(backtest) => backtest.period_end_only(),
         Err(response) => return *response,
     };
     let rebalance_offset = params.rebalance_offset.unwrap_or(0);

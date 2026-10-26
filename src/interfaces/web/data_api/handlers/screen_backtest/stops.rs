@@ -13,7 +13,7 @@ use chrono::NaiveDate;
 use tokio::sync::Mutex;
 
 use super::PeriodRow;
-use crate::domain::quote::technical::PriceBar;
+use crate::domain::quote::technical::{PriceAdjustment, PriceBar, adjust_bars};
 use crate::infra::database::repository::quote::PgQuoteRepository;
 
 /// 停損與移動停利門檻（%，正值）；都沒設時不檢查。
@@ -234,6 +234,92 @@ pub(super) fn populate_daily_returns(
             }
         }
     }
+}
+
+/// 持有期間往前多讀的日曆天：換股日當天停牌時，沿用之前最近的收盤當買進價。
+const WINDOW_LOOKBACK_DAYS: i64 = 30;
+
+/// 只算日頻路徑（沒有停損）時的日線：各持股只讀「換股日前 [`WINDOW_LOOKBACK_DAYS`] 天～出場日」，
+/// [`super::ETF_BENCHMARK`] 讀整段當交易日曆；同一檔重疊或相鄰的期間先合併成一段。
+///
+/// 每段各自還原：日頻路徑只比較同一期內的收盤，段內的相對報酬與整段還原相同。
+pub(super) async fn load_holding_windows(
+    rows: &[PeriodRow],
+) -> Result<HashMap<String, Arc<Vec<PriceBar>>>, sqlx::Error> {
+    let windows = holding_windows(rows);
+    if windows.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let repository = PgQuoteRepository::new();
+    let raw = repository.fetch_bar_windows(&windows).await?;
+    let symbols: Vec<String> = raw.keys().cloned().collect();
+    let adjustments = repository.price_adjustments(&symbols).await?;
+    Ok(raw
+        .into_iter()
+        .map(|(symbol, series)| {
+            let events = adjustments.get(&symbol).map_or(&[][..], Vec::as_slice);
+            let adjusted = adjust_windows(&series, &windows, &symbol, events);
+            (symbol, Arc::new(adjusted))
+        })
+        .collect())
+}
+
+/// 已滿持有天數的各期持股要讀的日線期間 `(代號, 起日, 迄日)`，同一檔合併成不重疊的段、依代號排序。
+pub(super) fn holding_windows(rows: &[PeriodRow]) -> Vec<(String, NaiveDate, NaiveDate)> {
+    let lookback = chrono::Duration::days(WINDOW_LOOKBACK_DAYS);
+    let mut spans: HashMap<&str, Vec<(NaiveDate, NaiveDate)>> = HashMap::new();
+    let mut calendar: Option<(NaiveDate, NaiveDate)> = None;
+    for row in rows.iter().filter(|row| !row.pending) {
+        let Some(exit) = row.exit_date else {
+            continue;
+        };
+        let start = row.date - lookback;
+        calendar = Some(calendar.map_or((start, exit), |(s, e)| (s.min(start), e.max(exit))));
+        for symbol in &row.symbols {
+            spans.entry(symbol).or_default().push((start, exit));
+        }
+    }
+    if let Some(span) = calendar {
+        spans.entry(super::ETF_BENCHMARK).or_default().push(span);
+    }
+    let mut out = Vec::new();
+    for (symbol, mut list) in spans {
+        list.sort_unstable();
+        let mut merged: Vec<(NaiveDate, NaiveDate)> = Vec::new();
+        for (start, end) in list {
+            match merged.last_mut() {
+                Some(last) if start <= last.1 + chrono::Duration::days(1) => {
+                    last.1 = last.1.max(end)
+                }
+                _ => merged.push((start, end)),
+            }
+        }
+        out.extend(
+            merged
+                .into_iter()
+                .map(|(start, end)| (symbol.to_owned(), start, end)),
+        );
+    }
+    out.sort_unstable();
+    out
+}
+
+/// 依 `symbol` 在 `windows` 的各段分別還原 `series`（由舊到新、只含這些段內的日線）。
+fn adjust_windows(
+    series: &[PriceBar],
+    windows: &[(String, NaiveDate, NaiveDate)],
+    symbol: &str,
+    events: &[PriceAdjustment],
+) -> Vec<PriceBar> {
+    let mut out = Vec::with_capacity(series.len());
+    for (_, start, end) in windows.iter().filter(|(s, _, _)| s == symbol) {
+        let from = series.partition_point(|bar| bar.date < *start);
+        let to = series.partition_point(|bar| bar.date <= *end);
+        if from < to {
+            out.extend(adjust_bars(&series[from..to], events));
+        }
+    }
+    out
 }
 
 /// 期間停損用的日線快取：同一次請求的各個換股日偏移共用，只查還沒讀過的股票。
@@ -522,5 +608,87 @@ mod daily_tests {
         let summary = summarize(&rows, &costs, 20);
         assert!(summary.daily_max_drawdown.is_none());
         assert_eq!(summary.period_end_max_drawdown, Some(0.0));
+    }
+
+    fn wday(m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2024, m, d).expect("有效日期")
+    }
+
+    fn wbar(m: u32, d: u32, close: f64) -> PriceBar {
+        PriceBar {
+            date: wday(m, d),
+            close,
+            high: close,
+            low: close,
+        }
+    }
+
+    /// 持有期間：換股日前 30 天到出場日；同一檔重疊或相鄰的期合併，未完成的期不讀；0050 涵蓋全部期間。
+    #[test]
+    fn holding_windows_merge_per_symbol() {
+        let mk =
+            |date: NaiveDate, exit: Option<NaiveDate>, symbols: &[&str], pending: bool| PeriodRow {
+                date,
+                exit_date: exit,
+                pending,
+                symbols: symbols.iter().map(|s| s.to_string()).collect(),
+                ..PeriodRow::default()
+            };
+        let rows = [
+            mk(wday(3, 1), Some(wday(3, 29)), &["A", "B"], false),
+            mk(wday(3, 29), Some(wday(4, 26)), &["A"], false),
+            mk(wday(6, 3), Some(wday(6, 28)), &["B"], false),
+            mk(wday(7, 1), None, &["C"], true),
+        ];
+        let windows = holding_windows(&rows);
+        let lookback = chrono::Duration::days(WINDOW_LOOKBACK_DAYS);
+        assert_eq!(
+            windows,
+            vec![
+                (
+                    super::super::ETF_BENCHMARK.to_owned(),
+                    wday(3, 1) - lookback,
+                    wday(6, 28)
+                ),
+                ("A".to_owned(), wday(3, 1) - lookback, wday(4, 26)),
+                ("B".to_owned(), wday(3, 1) - lookback, wday(3, 29)),
+                ("B".to_owned(), wday(6, 3) - lookback, wday(6, 28)),
+            ]
+        );
+        assert!(holding_windows(&rows[3..]).is_empty());
+    }
+
+    /// 分段還原：段內的相對報酬與整段還原相同；段外的日線不會出現。
+    #[test]
+    fn adjust_windows_keeps_in_window_returns() {
+        let series = [
+            wbar(1, 2, 100.0),
+            wbar(1, 3, 90.0),
+            wbar(2, 1, 50.0),
+            wbar(2, 2, 45.0),
+            wbar(2, 5, 50.0),
+        ];
+        let events = [PriceAdjustment {
+            date: wday(2, 2),
+            cash_dividend: 5.0,
+            stock_dividend: 0.0,
+            share_ratio: 1.0,
+        }];
+        let windows = vec![
+            ("A".to_owned(), wday(1, 1), wday(1, 3)),
+            ("A".to_owned(), wday(2, 1), wday(2, 5)),
+            ("Z".to_owned(), wday(1, 1), wday(12, 31)),
+        ];
+        let adjusted = adjust_windows(&series, &windows, "A", &events);
+        assert_eq!(adjusted.len(), 5);
+        let full = adjust_bars(&series, &events);
+        let ratio = |bars: &[PriceBar], a: usize, b: usize| bars[b].close / bars[a].close;
+        for (a, b) in [(0, 1), (2, 3), (2, 4), (3, 4)] {
+            assert!(
+                (ratio(&adjusted, a, b) - ratio(&full, a, b)).abs() < 1e-12,
+                "{a}->{b}"
+            );
+        }
+        assert!(adjust_windows(&series, &windows[..1], "A", &events).len() == 2);
     }
 }

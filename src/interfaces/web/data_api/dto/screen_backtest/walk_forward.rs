@@ -54,6 +54,8 @@ pub(crate) struct ScreenBacktestWalkForwardResponse {
     pub(crate) execution_model: String,
     /// 每次買進、賣出各計的滑價（基點）。
     pub(crate) slippage_bps: u16,
+    /// 最大回撤的口徑：多組回測一律為 `period_end`（換股期末），日頻回撤只在單次回測提供。
+    pub(crate) drawdown_basis: String,
     /// 可投資的大盤基準代號（固定為 `0050`）。
     pub(crate) etf_benchmark: String,
     /// 訓練年數。

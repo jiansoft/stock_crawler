@@ -35,7 +35,7 @@ impl StrategyGateway for BacktestStrategyGateway {
             bail!("策略條件必須指定 from（換股日從起日起算，省略時每天都會變）");
         }
         let backtest = match Backtest::prepare(&params).await {
-            Ok(backtest) => backtest,
+            Ok(backtest) => backtest.period_end_only(),
             Err(response) => bail!("策略條件不正確：{}", rejection(*response).await),
         };
         let offset = params.rebalance_offset.unwrap_or(0);
