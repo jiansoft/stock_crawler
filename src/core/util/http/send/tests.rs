@@ -143,3 +143,49 @@ fn test_format_form_params_log_empty_map() {
     let result = format_form_params_log(&params);
     assert_eq!(result, "params=[]");
 }
+
+/// 只有快速失敗模式的 5xx 降為 INFO；4xx 與一般模式的 5xx 仍記 WARN。
+#[test]
+fn downgrade_error_status_only_for_fail_fast_server_errors() {
+    use reqwest::StatusCode;
+    assert!(downgrade_error_status(StatusCode::BAD_GATEWAY, true));
+    assert!(downgrade_error_status(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        true
+    ));
+    assert!(!downgrade_error_status(StatusCode::BAD_GATEWAY, false));
+    assert!(!downgrade_error_status(StatusCode::NOT_FOUND, true));
+    assert!(!downgrade_error_status(StatusCode::FORBIDDEN, false));
+}
+
+/// 降級只影響日誌層級：快速失敗模式下 5xx 回應仍原樣交給呼叫端判斷。
+#[tokio::test]
+async fn fail_fast_server_error_still_returns_response() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf).await;
+            let _ = stream
+                .write_all(
+                    b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                )
+                .await;
+        }
+    });
+    let url = format!("http://{addr}/quote");
+    let client = test_client();
+    let response = fail_fast(send_with_client(
+        &client,
+        Method::GET,
+        &url,
+        None,
+        None::<fn(RequestBuilder) -> RequestBuilder>,
+        None,
+    ))
+    .await
+    .expect("5xx 不是傳輸錯誤");
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_GATEWAY);
+}
