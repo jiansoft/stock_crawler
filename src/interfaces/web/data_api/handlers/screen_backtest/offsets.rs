@@ -55,14 +55,17 @@ pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery
             backtest
                 .simulate(offset)
                 .await
-                .map(|Simulation { rows, costs, .. }| OffsetRun {
-                    result: BacktestOffsetResult {
-                        excluded_cross_boundary_periods: 0,
-                        rebalance_offset: offset,
-                        summary: summarize(&rows, &costs, hold_days),
-                    },
-                    years: yearly(&rows, &costs),
-                    halves: split_results(offset, &rows, &costs, hold_days, split),
+                .map(|Simulation { rows, costs, .. }| {
+                    let halves = split_results(offset, &rows, &costs, hold_days, split);
+                    OffsetRun {
+                        result: BacktestOffsetResult {
+                            excluded_cross_boundary_periods: excluded_periods(halves.as_ref()),
+                            rebalance_offset: offset,
+                            summary: summarize(&rows, &costs, hold_days),
+                        },
+                        years: yearly(&rows, &costs),
+                        halves,
+                    }
                 })
         })
         .await
@@ -144,6 +147,13 @@ pub(super) fn split_results(
         result(0..in_sample_end),
         result(out_sample_start..rows.len()),
     ))
+}
+
+/// 跨越分割日、不計入樣本內外的期數；沒有分割日為 0。
+pub(super) fn excluded_periods(
+    halves: Option<&(BacktestOffsetResult, BacktestOffsetResult)>,
+) -> usize {
+    halves.map_or(0, |(before, _)| before.excluded_cross_boundary_periods)
 }
 
 /// 各偏移樣本內、樣本外彙總的分布；沒有分割日（`halves` 為空）時都是 `None`。

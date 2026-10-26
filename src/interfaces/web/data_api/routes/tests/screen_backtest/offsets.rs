@@ -111,6 +111,21 @@ async fn screen_backtest_offsets_and_frontier() {
     let after = &halves["after_split"]["annualized_return_after_costs"];
     assert!(before.is_null(), "{halves}");
     assert!(after["median"].is_number(), "{halves}");
+    // 每個偏移揭露排除的跨界期數；沒有分割日時為 0。
+    let excluded = |json: &serde_json::Value| -> Vec<u64> {
+        json["offsets"]
+            .as_array()
+            .expect("offsets array")
+            .iter()
+            .map(|run| {
+                run["excluded_cross_boundary_periods"]
+                    .as_u64()
+                    .unwrap_or(99)
+            })
+            .collect()
+    };
+    assert!(excluded(&halves).contains(&1), "{halves}");
+    assert!(excluded(&json).iter().all(|&count| count == 0), "{json}");
     let (status, frontier) = get(
         "/api/v1/stocks/screen/backtest/frontier?from=1993-03-01&to=1993-03-15&hold_days=5&limit=2&split=1993-03-08",
     )
