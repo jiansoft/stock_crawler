@@ -84,12 +84,24 @@ async fn test_request() {
     println!("bytes: {:#?}", bytes);
 }
 
+/// `get` 對本機伺服器回傳 body 全文；它不檢查狀態碼，非 2xx 的 body 照樣回傳（由呼叫端判斷）。
 #[tokio::test]
 async fn test_get() {
-    match get("https://jiansoft.mooo.com/stock/revenues", None).await {
-        Ok(_) => {}
-        Err(why) => {
-            tracing::error!("Failed to get because {:?}", why);
-        }
-    }
+    let url = spawn_fixed_server("200 OK", "hello revenues").await;
+    let body = get(&url, None).await.expect("200 應回傳 body");
+    assert_eq!(body, "hello revenues");
+
+    let url = spawn_fixed_server("503 Service Unavailable", "down").await;
+    let body = get(&url, None).await.expect("get 不檢查狀態碼");
+    assert_eq!(body, "down");
+}
+
+/// 手動驗證正式站可連線；失敗必須讓測試失敗，而不是只記錄日誌。
+#[tokio::test]
+#[ignore = "需要外部網路"]
+async fn test_get_live_site() {
+    let body = get("https://jiansoft.mooo.com/stock/revenues", None)
+        .await
+        .expect("正式站應可連線");
+    assert!(!body.is_empty());
 }
