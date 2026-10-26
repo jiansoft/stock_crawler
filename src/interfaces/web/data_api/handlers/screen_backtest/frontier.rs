@@ -15,7 +15,9 @@ use axum::{
 
 use chrono::NaiveDate;
 
-use super::offsets::{distribution, sample_offsets, split_distributions, split_results};
+use super::offsets::{
+    distribution, excluded_periods, sample_offsets, split_distributions, split_results,
+};
 use super::preset::BacktestQuery;
 use super::summary::summarize;
 use super::{Backtest, ETF_BENCHMARK, Raw};
@@ -114,13 +116,14 @@ pub(super) fn frontier(
                 .map(|(offset, raw)| {
                     let simulation = raw.clone().finish(etf_weight);
                     let (rows, costs) = (&simulation.rows, &simulation.costs);
+                    let halves = split_results(*offset, rows, costs, hold_days, split);
                     (
                         BacktestOffsetResult {
-                            excluded_cross_boundary_periods: 0,
+                            excluded_cross_boundary_periods: excluded_periods(halves.as_ref()),
                             rebalance_offset: *offset,
                             summary: summarize(rows, costs, hold_days),
                         },
-                        split_results(*offset, rows, costs, hold_days, split),
+                        halves,
                     )
                 })
                 .unzip();
