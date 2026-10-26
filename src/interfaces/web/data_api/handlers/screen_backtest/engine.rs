@@ -467,14 +467,16 @@ impl<'a> Backtest<'a> {
             params.max_per_industry.map(usize::from),
         );
         let fee_discount = self.cost_fee_discount();
-        // 停損要整段日線且各偏移共用快取；往前多讀 30 天以支援停牌基準補值。
+        // 收盤停損沿用各偏移共用快取；次日開盤只讀持有窗口，避免為少數持有日載入多年個股日線。
         let mut bars = match self.execution {
-            _ if self.stops.is_active() => Some(
+            ExecutionPrice::Close if self.stops.is_active() => Some(
                 self.bars
                     .load(&rows, self.from - chrono::Duration::days(30), self.to)
                     .await?,
             ),
-            _ if self.daily_path => Some(load_holding_windows(&rows).await?),
+            _ if self.daily_path || self.stops.is_active() => {
+                Some(load_holding_windows(&rows).await?)
+            }
             _ => None,
         };
         // 缺基準報酬時補載一檔 0050；期末回測仍不載入所有個股日線。
