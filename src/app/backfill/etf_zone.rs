@@ -132,8 +132,34 @@ pub async fn backfill_nav_history(years: u32) -> Result<()> {
 ///
 /// 起日不早於今天、資料庫操作失敗，或超過一半的 ETF 抓取失敗時回傳錯誤。
 pub async fn backfill_nav_history_since(from: NaiveDate) -> Result<()> {
-    let (from, to) = nav_history_since_range(Local::now().date_naive(), from)?;
-    backfill_nav_range(from, to).await
+    backfill_nav_since_with(
+        &PgEtfRepository::new(),
+        Local::now().date_naive(),
+        from,
+        |from, to| move |symbol| async move { moneydj::etf_nav::visit(&symbol, from, to).await },
+        request_interval,
+    )
+    .await
+}
+
+/// [`backfill_nav_history_since`] 的可注入版本：先算 `from` 到昨天的區間，再交給 `make_fetch` 產生逐檔抓取。
+async fn backfill_nav_since_with<R, Make, Fetch, FetchFut, Pause, PauseFut>(
+    repo: &R,
+    today: NaiveDate,
+    from: NaiveDate,
+    make_fetch: Make,
+    pause: Pause,
+) -> Result<()>
+where
+    R: EtfRepository,
+    Make: FnOnce(NaiveDate, NaiveDate) -> Fetch,
+    Fetch: FnMut(String) -> FetchFut,
+    FetchFut: Future<Output = Result<Vec<EtfNavHistoryPoint>>>,
+    Pause: FnMut() -> PauseFut,
+    PauseFut: Future<Output = ()>,
+{
+    let (from, to) = nav_history_since_range(today, from)?;
+    backfill_nav_range_with(repo, from, to, make_fetch(from, to), pause).await
 }
 
 /// 每週：以 MoneyDJ 近 30 天的淨值補上缺日（MIS 排程失敗的日子）與空欄（正式淨值還沒回填的列）。
@@ -438,6 +464,58 @@ mod tests {
         .await;
         assert!(result.is_err(), "超過一半失敗要告警");
         assert_eq!(failing.snapshots(), 1, "失敗也照樣重建快照");
+    }
+
+    #[tokio::test]
+    async fn backfill_since_passes_range_to_fetch_and_rejects_future_start() {
+        use crate::domain::etf::test_double::RecordingEtfRepository;
+        use std::sync::{Arc, Mutex};
+
+        let today = NaiveDate::from_ymd_opt(2026, 10, 26).expect("日期應合法");
+        let from = NaiveDate::from_ymd_opt(2019, 1, 1).expect("日期應合法");
+        let point = EtfNavHistoryPoint {
+            date: from,
+            nav: rust_decimal::Decimal::ONE,
+            market_price: None,
+        };
+        let seen = Arc::new(Mutex::new(None));
+        let repo = RecordingEtfRepository::with_listed(&["0050"]);
+        let recorder = Arc::clone(&seen);
+        backfill_nav_since_with(
+            &repo,
+            today,
+            from,
+            move |from, to| {
+                *recorder.lock().expect("鎖不應中毒") = Some((from, to));
+                move |_| {
+                    let points = vec![point.clone()];
+                    async move { Ok(points) }
+                }
+            },
+            || async {},
+        )
+        .await
+        .expect("起日早於今天應成功");
+        assert_eq!(
+            *seen.lock().expect("鎖不應中毒"),
+            Some((
+                from,
+                NaiveDate::from_ymd_opt(2026, 10, 25).expect("日期應合法")
+            ))
+        );
+        assert_eq!(repo.inserted(), vec![("0050".to_string(), 1)]);
+
+        let untouched = RecordingEtfRepository::with_listed(&["0050"]);
+        let result = backfill_nav_since_with(
+            &untouched,
+            today,
+            today,
+            |_, _| |_| async { Ok(Vec::new()) },
+            || async {},
+        )
+        .await;
+        assert!(result.is_err(), "起日不早於今天要回傳錯誤");
+        assert_eq!(untouched.snapshots(), 0, "起日不合法時不抓也不重建快照");
     }
 
     #[test]
