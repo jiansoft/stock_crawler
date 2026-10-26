@@ -27,6 +27,7 @@
 //! [`strategy`]，這裡只負責排程、
 //! 查詢順序與組訊息。
 
+mod allocation;
 mod crossing;
 mod dividend;
 mod etf;
@@ -45,6 +46,7 @@ use anyhow::{Context, Result};
 use chrono::{Local, NaiveDate};
 
 use self::{
+    allocation::{AllocationSection, allocation_sections},
     crossing::{CrossingSection, crossing_section},
     dividend::{HoldingFill, holding_fills},
     etf::{EtfWeekSection, etf_section},
@@ -74,7 +76,8 @@ use crate::{
     infra::database::repository::{
         chip::PgChipRepository, dividend_fill::PgDividendFillRepository, etf::PgEtfRepository,
         market_index::PgMarketIndexRepository, market_valuation::PgMarketValuationRepository,
-        portfolio::PgPortfolioRepository, quote::PgQuoteRepository,
+        portfolio::PgPortfolioRepository, portfolio_target::PgPortfolioTargetRepository,
+        quote::PgQuoteRepository,
     },
 };
 
@@ -112,6 +115,8 @@ pub async fn execute() -> Result<()> {
             tracing::warn!("每週市場摘要：讀取 ETF 資金流向失敗: {why:#}");
             None
         });
+    let target_repo = PgPortfolioTargetRepository::new();
+    let allocation = allocation_sections(&target_repo, &target_repo).await;
     let message = run(
         &PgQuoteRepository::new(),
         &PgChipRepository::new(),
@@ -123,6 +128,7 @@ pub async fn execute() -> Result<()> {
         strategy.as_ref(),
         &fills,
         etfs.as_ref(),
+        &allocation,
     )
     .await;
     if let Some(message) = message {
@@ -151,6 +157,7 @@ async fn run(
     strategy: Option<&StrategySection>,
     fills: &[HoldingFill],
     etfs: Option<&EtfWeekSection>,
+    allocation: &[AllocationSection],
 ) -> Option<String> {
     let mut market = regime_section(index, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取加權指數失敗: {why:#}");
@@ -241,6 +248,7 @@ async fn run(
             fills,
             fundamentals: &fundamentals,
             etfs,
+            allocation,
         },
         strategy,
         holdings::stock_name,
@@ -308,6 +316,7 @@ fn build_message(
         data_date.get_or_insert(section.to);
         lines.extend(etf::lines(section));
     }
+    lines.extend(allocation::lines(holdings.allocation));
     if let Some(section) = strategy {
         lines.extend(strategy::lines(section));
     }
