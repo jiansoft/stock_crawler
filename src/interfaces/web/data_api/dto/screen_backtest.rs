@@ -259,4 +259,13 @@ pub(crate) struct ScreenBacktestParams {
     /// 乘上折扣、賣出另加證交稅 0.3% 計算。
     #[param(minimum = 0.0, maximum = 1.0, default = 1.0)]
     pub(crate) fee_discount: Option<f64>,
+    /// 成交價模型：`close`（預設，換股日收盤買賣）或 `next_open`（換股日收盤後才知道選股結果，
+    /// 改以次一交易日還原開盤價買進、持有期滿的次一交易日開盤賣出；開盤價缺漏時沿用收盤）。
+    /// `next_open` 不可與 `stop_loss`／`trailing_stop` 併用，且不提供日頻最大回撤。
+    #[param(value_type = Option<String>, example = "next_open")]
+    pub(crate) execution_price: Option<String>,
+    /// 滑價（基點，0–200，預設 0）：每次買進、賣出各再扣成交金額的 `slippage_bps` / 10000，
+    /// 與手續費一起計入扣成本後報酬（含 0050 核心部位的再平衡）。
+    #[param(minimum = 0, maximum = 200, default = 0)]
+    pub(crate) slippage_bps: Option<u16>,
 }

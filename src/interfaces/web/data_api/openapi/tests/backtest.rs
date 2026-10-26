@@ -19,6 +19,12 @@ fn openapi_screen_backtest_schema_pins_field_names() {
     assert_eq!(fee_discount["default"], 1.0);
     assert_eq!(fee_discount["minimum"], 0.0);
     assert_eq!(fee_discount["maximum"], 1.0);
+    let slippage = query_schema(operation, "slippage_bps");
+    assert_eq!(
+        (slippage["minimum"].as_u64(), slippage["maximum"].as_u64()),
+        (Some(0), Some(200))
+    );
+    assert_eq!(query_schema(operation, "execution_price")["type"], "string");
     let offset = query_schema(operation, "rebalance_offset");
     assert_eq!(
         (offset["minimum"].as_u64(), offset["maximum"].as_u64()),

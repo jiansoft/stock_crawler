@@ -4,8 +4,12 @@ use axum::{http::StatusCode, response::Response};
 use chrono::NaiveDate;
 
 use super::current::split_current;
+use super::portfolio::FEE_RATE;
 use super::portfolio::{PeriodCost, Weighting, blend_etf, select_holdings, trading_costs, weigh};
-use super::sql::{BACKTEST_SQL, BACKTEST_WITH_CHIP_SQL, LATEST_RS_DATE_SQL};
+use super::sql::{
+    BACKTEST_NEXT_OPEN_SQL, BACKTEST_SQL, BACKTEST_WITH_CHIP_NEXT_OPEN_SQL, BACKTEST_WITH_CHIP_SQL,
+    LATEST_RS_DATE_SQL,
+};
 use super::stops::{BarCache, StopRule, apply_stops, populate_daily_returns};
 use super::validate::{parse_excluded_industries, resolve_backtest_period, validate_fundamentals};
 use super::{
@@ -22,6 +26,44 @@ use crate::interfaces::web::data_api::handlers::{
     signal_filter_error,
 };
 
+/// 滑價上限（基點）。
+pub(super) const MAX_SLIPPAGE_BPS: u16 = 200;
+
+/// 成交價模型（`execution_price`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum ExecutionPrice {
+    /// 換股日收盤買賣（理想模型，預設）。
+    #[default]
+    Close,
+    /// 次一交易日開盤買進、持有期滿的次一交易日開盤賣出。
+    NextOpen,
+}
+
+impl ExecutionPrice {
+    /// 解析查詢參數；未提供為 [`Self::Close`]。
+    pub(super) fn parse(value: Option<&str>) -> Option<Self> {
+        match value.map(str::trim) {
+            None | Some("") | Some("close") => Some(Self::Close),
+            Some("next_open") => Some(Self::NextOpen),
+            Some(_) => None,
+        }
+    }
+
+    /// 回應中揭露的成交價模型名稱。
+    pub(super) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Close => "close",
+            Self::NextOpen => "next_open",
+        }
+    }
+}
+
+/// 把滑價換算成等效的手續費折數：成本以 `FEE_RATE × 折數` 單邊計，滑價同樣按成交金額單邊計，
+/// 所以 `折數 + 滑價(%) / FEE_RATE` 讓所有扣成本的地方一併計入滑價。
+pub(super) fn cost_fee_discount(fee_discount: f64, slippage_bps: u16) -> f64 {
+    fee_discount + f64::from(slippage_bps) / 100.0 / FEE_RATE
+}
+
 /// 驗證過的回測條件（換股日偏移除外，由呼叫端決定）；`/stocks/screen/backtest` 與
 /// `/stocks/screen/backtest/offsets` 共用。
 pub(super) struct Backtest<'a> {
@@ -34,7 +76,12 @@ pub(super) struct Backtest<'a> {
     pub(super) hold_days: u16,
     pub(super) limit: u8,
     pub(super) keep_rank: u8,
+    /// 使用者指定的手續費折扣（回應原樣揭露）；實際扣成本用 [`Self::cost_fee_discount`]。
     pub(super) fee_discount: f64,
+    /// 成交價模型。
+    pub(super) execution: ExecutionPrice,
+    /// 單邊滑價（基點）。
+    pub(super) slippage_bps: u16,
     /// 候選股排序方式（[`RANK_BY`] 其中之一）。
     pub(super) rank_by: &'a str,
     /// 0050 核心部位的比例（%，0 為純策略）。
@@ -205,6 +252,20 @@ impl<'a> Backtest<'a> {
         if !(0.0..=1.0).contains(&fee_discount) {
             return Err(unprocessable("fee_discount 必須介於 0 至 1"));
         }
+        let Some(execution) = ExecutionPrice::parse(params.execution_price.as_deref()) else {
+            return Err(unprocessable("execution_price 必須為 close 或 next_open"));
+        };
+        if execution == ExecutionPrice::NextOpen
+            && (params.stop_loss.is_some() || params.trailing_stop.is_some())
+        {
+            return Err(unprocessable(
+                "execution_price=next_open 不可與 stop_loss／trailing_stop 併用",
+            ));
+        }
+        let slippage_bps = params.slippage_bps.unwrap_or(0);
+        if slippage_bps > MAX_SLIPPAGE_BPS {
+            return Err(unprocessable("slippage_bps 必須介於 0 至 200"));
+        }
         let market = params.market.as_deref().unwrap_or("all");
         let Some(market_id) = market_id_for_stocks(market) else {
             return Err(unprocessable("market 必須為 all、twse 或 tpex"));
@@ -271,6 +332,8 @@ impl<'a> Backtest<'a> {
             limit,
             keep_rank,
             fee_discount,
+            execution,
+            slippage_bps,
             rank_by,
             etf_weight,
             weighting,
@@ -283,6 +346,11 @@ impl<'a> Backtest<'a> {
             },
             bars: BarCache::default(),
         })
+    }
+
+    /// 實際扣成本用的手續費折數（含滑價，見 [`cost_fee_discount`]）。
+    pub(super) fn cost_fee_discount(&self) -> f64 {
+        cost_fee_discount(self.fee_discount, self.slippage_bps)
     }
 
     /// 條件或排序用到外資／投信連續買超（要查籌碼）。
@@ -314,10 +382,11 @@ impl<'a> Backtest<'a> {
     ) -> Result<Vec<CandidateRow>, sqlx::Error> {
         let params = self.params;
         let with_chip = self.with_chip();
-        let mut query = sqlx::query_as(if with_chip {
-            BACKTEST_WITH_CHIP_SQL
-        } else {
-            BACKTEST_SQL
+        let mut query = sqlx::query_as(match (with_chip, self.execution) {
+            (true, ExecutionPrice::Close) => BACKTEST_WITH_CHIP_SQL,
+            (true, ExecutionPrice::NextOpen) => BACKTEST_WITH_CHIP_NEXT_OPEN_SQL,
+            (false, ExecutionPrice::Close) => BACKTEST_SQL,
+            (false, ExecutionPrice::NextOpen) => BACKTEST_NEXT_OPEN_SQL,
         })
         .bind(self.from)
         .bind(self.to)
@@ -390,20 +459,30 @@ impl<'a> Backtest<'a> {
             usize::from(keep_rank),
             params.max_per_industry.map(usize::from),
         );
-        let bars = self.bars.load(&rows, self.from, self.to).await?;
-        apply_stops(&mut rows, &bars, self.stops, self.hold_days);
+        let fee_discount = self.cost_fee_discount();
+        // 次日開盤成交不支援停損（已在驗證擋下），日線路徑也以收盤為端點，對不上開盤成交，
+        // 因此不載入日線、不算日頻回撤（`daily_complete` 維持 false）。
+        let bars = match self.execution {
+            ExecutionPrice::Close => Some(self.bars.load(&rows, self.from, self.to).await?),
+            ExecutionPrice::NextOpen => None,
+        };
+        if let Some(bars) = &bars {
+            apply_stops(&mut rows, bars, self.stops, self.hold_days);
+        }
         weigh(
             &mut rows,
             self.weighting,
             max_weight.map(|percent| f64::from(percent) / 100.0),
         );
-        let costs = trading_costs(&rows, self.fee_discount);
-        populate_daily_returns(&mut rows, &bars, self.stops, self.fee_discount, &costs);
+        let costs = trading_costs(&rows, fee_discount);
+        if let Some(bars) = &bars {
+            populate_daily_returns(&mut rows, bars, self.stops, fee_discount, &costs);
+        }
         Ok(Raw {
             rows,
             costs,
             elapsed_days,
-            fee_discount: self.fee_discount,
+            fee_discount,
         })
     }
 }

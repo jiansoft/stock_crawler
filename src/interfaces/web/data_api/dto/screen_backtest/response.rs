@@ -293,6 +293,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) kind: Option<String>,
     /// 計算交易成本用的手續費折扣（0–1）。
     pub(crate) fee_discount: f64,
+    /// 成交價模型：`close`（換股日收盤）或 `next_open`（次一交易日開盤）。
+    pub(crate) execution_model: String,
+    /// 每次買進、賣出各計的滑價（基點）。
+    pub(crate) slippage_bps: u16,
     /// 報酬是否還原權值；固定為 `true`。
     pub(crate) adjusted: bool,
     /// 可投資的大盤基準代號（固定為 `0050`）。

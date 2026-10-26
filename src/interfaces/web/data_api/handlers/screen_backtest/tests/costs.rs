@@ -208,3 +208,45 @@ fn trading_costs_charge_stop_exits() {
         "{costs:?}"
     );
 }
+
+/// 成交價模型只接受 close／next_open，未提供時為收盤。
+#[test]
+fn execution_price_parses_known_models() {
+    use super::super::engine::ExecutionPrice;
+    assert_eq!(ExecutionPrice::parse(None), Some(ExecutionPrice::Close));
+    assert_eq!(
+        ExecutionPrice::parse(Some(" ")),
+        Some(ExecutionPrice::Close)
+    );
+    assert_eq!(
+        ExecutionPrice::parse(Some("close")),
+        Some(ExecutionPrice::Close)
+    );
+    assert_eq!(
+        ExecutionPrice::parse(Some("next_open")),
+        Some(ExecutionPrice::NextOpen)
+    );
+    assert_eq!(ExecutionPrice::parse(Some("vwap")), None);
+    assert_eq!(ExecutionPrice::NextOpen.as_str(), "next_open");
+    assert_eq!(ExecutionPrice::Close.as_str(), "close");
+}
+
+/// 滑價換算成等效折數後，單邊費率恰好是「手續費 × 折數 + 滑價」，且扣成本後報酬隨滑價單調遞減。
+#[test]
+fn slippage_adds_to_one_side_cost_and_lowers_net_return() {
+    use super::super::engine::cost_fee_discount;
+    use super::super::portfolio::FEE_RATE;
+    assert_eq!(cost_fee_discount(0.6, 0), 0.6);
+    let effective = cost_fee_discount(0.6, 20);
+    assert!((FEE_RATE * effective - (FEE_RATE * 0.6 + 0.20)).abs() < 1e-12);
+    let rows = [holding(&["A", "B"], 10.0), holding(&["B", "C"], 5.0)];
+    let nets: Vec<f64> = [0, 20, 50, 200]
+        .into_iter()
+        .map(|bps| trading_costs(&rows, cost_fee_discount(1.0, bps))[0].net_return)
+        .collect();
+    assert!(nets.windows(2).all(|pair| pair[1] < pair[0]), "{nets:?}");
+    // 第一期全額買進：20 bps 滑價多扣 0.20%。
+    let base = trading_costs(&rows, 1.0)[0].net_return;
+    let slipped = trading_costs(&rows, cost_fee_discount(1.0, 20))[0].net_return;
+    assert!(near(base - slipped, 0.20), "{base} {slipped}");
+}
