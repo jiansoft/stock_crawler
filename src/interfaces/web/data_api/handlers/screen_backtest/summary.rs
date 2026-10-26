@@ -84,6 +84,7 @@ pub(super) fn summarize(
             invested_periods: 0,
             market_filtered_periods: 0,
             stop_exits: 0,
+            etf_missing_periods: 0,
             avg_holdings: None,
             avg_turnover: None,
             total_return: None,
@@ -158,6 +159,7 @@ pub(super) fn summarize(
         invested_periods: invested.len() as i64,
         market_filtered_periods: rows.iter().filter(|row| row.market_filtered).count() as i64,
         stop_exits: rows.iter().map(stop_count).sum(),
+        etf_missing_periods: rows.iter().filter(|row| row.etf_return.is_none()).count() as i64,
         avg_holdings: (!invested.is_empty()).then(|| {
             round2(
                 invested.iter().map(|row| row.holdings as f64).sum::<f64>() / invested.len() as f64,

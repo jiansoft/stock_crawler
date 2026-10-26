@@ -19,6 +19,7 @@ fn day(y: i32, m: u32, d: u32) -> NaiveDate {
 
 fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
     PeriodRow {
+        entry_date: None,
         date: day(2024, 1, d),
         exit_date: None,
         pending: false,
@@ -45,6 +46,7 @@ fn row(d: u32, holdings: i64, avg: Option<f64>, benchmark: f64) -> PeriodRow {
 /// 指定年月日與 0050 報酬的一期。
 fn dated(date: NaiveDate, avg: Option<f64>, benchmark: f64, etf: Option<f64>) -> PeriodRow {
     PeriodRow {
+        entry_date: None,
         date,
         holdings: i64::from(avg.is_some()),
         etf_return: etf,
@@ -54,6 +56,7 @@ fn dated(date: NaiveDate, avg: Option<f64>, benchmark: f64, etf: Option<f64>) ->
 
 fn holding(symbols: &[&str], avg: f64) -> PeriodRow {
     PeriodRow {
+        entry_date: None,
         holdings: symbols.len() as i64,
         symbols: symbols.iter().map(|symbol| (*symbol).to_owned()).collect(),
         ..row(2, 0, Some(avg), 0.0)
@@ -263,6 +266,7 @@ fn rs_rank_tie_break_aligns_with_rankings() {
 /// 一期候選：代號依相對強度由高到低，報酬一一對應。
 fn candidates(d: u32, list: &[(&str, Option<f64>)]) -> CandidateRow {
     CandidateRow {
+        entry_date: None,
         date: day(2024, 1, d),
         exit_date: None,
         pending: false,

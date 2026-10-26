@@ -475,13 +475,33 @@ impl<'a> Backtest<'a> {
         let fee_discount = self.cost_fee_discount();
         // 停損要整段日線且各偏移共用快取；只算日頻路徑時只讀各持股的持有期間。次日開盤成交不支援
         // 停損（驗證已擋下），日線只用來算以開盤為端點的日頻路徑。
-        let bars = match self.execution {
+        let mut bars = match self.execution {
             ExecutionPrice::Close if self.stops.is_active() => {
                 Some(self.bars.load(&rows, self.from, self.to).await?)
             }
             _ if self.daily_path => Some(load_holding_windows(&rows).await?),
             _ => None,
         };
+        // 缺基準報酬時補載一檔 0050；期末回測仍不載入所有個股日線。
+        let missing_etf = rows
+            .iter()
+            .any(|row| !row.pending && row.etf_return.is_none());
+        if missing_etf && bars.is_none() {
+            let mut benchmark_rows = rows.clone();
+            for row in &mut benchmark_rows {
+                row.symbols.clear();
+            }
+            bars = Some(load_holding_windows(&benchmark_rows).await?);
+        }
+        let ratios = match (&bars, self.execution) {
+            (Some(bars), ExecutionPrice::NextOpen) if self.daily_path || missing_etf => {
+                Some(load_open_ratios(&rows, bars).await?)
+            }
+            _ => None,
+        };
+        if let Some(bars) = &bars {
+            super::etf::fill_missing_returns(&mut rows, bars, ratios.as_ref());
+        }
         if let Some(bars) = bars
             .as_ref()
             .filter(|_| self.execution == ExecutionPrice::Close)
@@ -495,10 +515,6 @@ impl<'a> Backtest<'a> {
         );
         let costs = trading_costs(&rows, fee_discount);
         if let Some(bars) = bars.as_ref().filter(|_| self.daily_path) {
-            let ratios = match self.execution {
-                ExecutionPrice::NextOpen => Some(load_open_ratios(&rows, bars).await?),
-                ExecutionPrice::Close => None,
-            };
             populate_daily_returns(
                 &mut rows,
                 bars,

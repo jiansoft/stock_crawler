@@ -444,6 +444,7 @@ pub(super) fn select_holdings(
             previous = symbols.iter().cloned().collect();
             PeriodRow {
                 date: row.date,
+                entry_date: row.entry_date,
                 exit_date: row.exit_date,
                 pending: row.pending,
                 market_filtered: !row.market_ok,

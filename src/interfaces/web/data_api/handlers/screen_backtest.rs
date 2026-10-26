@@ -30,6 +30,7 @@ mod compare;
 mod contributors;
 mod current;
 mod engine;
+mod etf;
 mod frontier;
 mod gateway;
 mod limit;
@@ -117,6 +118,8 @@ const RANK_BY: [&str; 8] = [
 #[derive(Debug, Clone, Default, PartialEq, sqlx::FromRow)]
 struct CandidateRow {
     date: NaiveDate,
+    /// SQL 市場交易日曆決定的進場日，避免以停牌中的 0050 推算。
+    entry_date: Option<NaiveDate>,
     /// 換股結束日（持有期滿收盤賣出）；未滿或尚未結束為 `None`。
     exit_date: Option<NaiveDate>,
     /// 最後一個換股日、還沒滿持有天數（沒有報酬）；代表策略目前的持股。
@@ -145,6 +148,8 @@ struct CandidateRow {
 #[derive(Debug, Clone, Default, PartialEq)]
 struct PeriodRow {
     date: NaiveDate,
+    /// SQL 市場交易日曆決定的進場日，避免以停牌中的 0050 推算。
+    entry_date: Option<NaiveDate>,
     /// 換股結束日（持有期滿收盤賣出）；未滿或尚未結束為 `None`。
     exit_date: Option<NaiveDate>,
     /// 還沒滿持有天數的最後一期（見 [`CandidateRow::pending`]）。

@@ -2,6 +2,7 @@
 
 mod attribution;
 mod compare;
+mod etf_gap;
 mod execution;
 mod filters;
 mod fundamentals;
