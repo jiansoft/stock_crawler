@@ -7,6 +7,7 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use sqlx::{FromRow, PgPool};
 
+use crate::domain::portfolio::rebalance::{CurrentPosition, PortfolioPositionQuery};
 use crate::domain::portfolio::target::{
     PortfolioTargetRecord, PortfolioTargetRepository, TargetDimension,
 };
@@ -44,6 +45,88 @@ impl PgPortfolioTargetRepository {
         self.pool
             .as_ref()
             .unwrap_or_else(|| database::get_connection())
+    }
+}
+
+/// 持股與主檔 JOIN 後的資料列。
+#[derive(FromRow)]
+struct PositionRow {
+    stock_symbol: String,
+    shares: i64,
+    name: String,
+    industry_name: String,
+    closing_price: Option<f64>,
+    is_etf: bool,
+}
+
+#[async_trait]
+impl PortfolioPositionQuery for PgPortfolioTargetRepository {
+    async fn fetch_positions(
+        &self,
+        member_id: i64,
+        extra_symbols: &[String],
+    ) -> Result<Vec<CurrentPosition>> {
+        let mut rows: Vec<PositionRow> = sqlx::query_as(
+            r#"
+            WITH held AS (
+                SELECT security_code AS stock_symbol, SUM(share_quantity)::bigint AS shares
+                FROM stock_ownership_details
+                WHERE NOT is_sold AND ($1::bigint = 0 OR member_id = $1)
+                GROUP BY security_code
+                HAVING SUM(share_quantity) > 0
+            )
+            SELECT held.stock_symbol::text AS stock_symbol, held.shares,
+                COALESCE(e.name, s."Name", held.stock_symbol::text) AS name,
+                COALESCE(si.name, '') AS industry_name,
+                CASE WHEN q.closing_price > 0 THEN q.closing_price::float8 END AS closing_price,
+                (e.stock_symbol IS NOT NULL OR s.stock_industry_id = 9001) AS is_etf
+            FROM held
+            LEFT JOIN stocks s ON s.stock_symbol = held.stock_symbol
+            LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
+            LEFT JOIN last_daily_quotes q ON q.stock_symbol = held.stock_symbol
+            LEFT JOIN etf_snapshot e ON e.stock_symbol = held.stock_symbol
+            ORDER BY held.stock_symbol
+            "#,
+        )
+        .bind(member_id)
+        .fetch_all(self.pool())
+        .await?;
+        let missing: Vec<String> = extra_symbols
+            .iter()
+            .filter(|symbol| !rows.iter().any(|row| &row.stock_symbol == *symbol))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            let extra: Vec<PositionRow> = sqlx::query_as(
+                r#"
+                SELECT s.stock_symbol::text AS stock_symbol, 0::bigint AS shares,
+                    COALESCE(e.name, s."Name", s.stock_symbol::text) AS name,
+                    COALESCE(si.name, '') AS industry_name,
+                    CASE WHEN q.closing_price > 0 THEN q.closing_price::float8 END AS closing_price,
+                    (e.stock_symbol IS NOT NULL OR s.stock_industry_id = 9001) AS is_etf
+                FROM stocks s
+                LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
+                LEFT JOIN last_daily_quotes q ON q.stock_symbol = s.stock_symbol
+                LEFT JOIN etf_snapshot e ON e.stock_symbol = s.stock_symbol
+                WHERE s.stock_symbol = ANY($1)
+                "#,
+            )
+            .bind(&missing)
+            .fetch_all(self.pool())
+            .await?;
+            rows.extend(extra);
+        }
+        Ok(rows
+            .into_iter()
+            .map(|row| CurrentPosition {
+                symbol: row.stock_symbol,
+                name: row.name,
+                shares: row.shares,
+                current_price: row.closing_price.unwrap_or(0.0),
+                industry: row.industry_name,
+                is_etf: row.is_etf,
+            })
+            .collect())
     }
 }
 
@@ -166,6 +249,51 @@ impl PortfolioTargetRepository for PgPortfolioTargetRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 持股載入：加總未售出股數、帶出收盤價／產業／ETF 旗標，並為目標中未持有的代號補零股列。
+    #[tokio::test]
+    #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+    async fn fetch_positions_joins_prices_and_pads_missing_targets() {
+        let pool = database::get_connection();
+        let repo = PgPortfolioTargetRepository::with_pool(pool.clone());
+        let cleanup = [
+            "DELETE FROM stock_ownership_details WHERE member_id=79978",
+            "DELETE FROM last_daily_quotes WHERE stock_symbol IN ('79978A','79978B','79978C')",
+            "DELETE FROM stocks WHERE stock_symbol IN ('79978A','79978B','79978C')",
+        ];
+        for sql in cleanup {
+            sqlx::query(sql).execute(pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO stocks (\"SecurityCode\",\"Name\",stock_symbol,stock_exchange_market_id,stock_industry_id) VALUES ('79978A','甲股','79978A',2,24),('79978B','乙股','79978B',2,24),('79978C','丙股','79978C',2,24)")
+            .execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO last_daily_quotes(stock_symbol,date,closing_price) VALUES ('79978A','2026-10-23',100),('79978C','2026-10-23',50)")
+            .execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO stock_ownership_details(member_id,security_code,share_quantity,is_sold) VALUES (79978,'79978A',1000,false),(79978,'79978A',500,false),(79978,'79978B',2000,false),(79978,'79978B',9000,true)")
+            .execute(pool).await.unwrap();
+
+        let positions = repo
+            .fetch_positions(79978, &["79978A".to_owned(), "79978C".to_owned()])
+            .await
+            .unwrap();
+        let by = |symbol: &str| positions.iter().find(|p| p.symbol == symbol);
+        let a = by("79978A").expect("持有 A");
+        assert_eq!((a.shares, a.current_price), (1500, 100.0));
+        assert_eq!(a.name, "甲股");
+        assert!(!a.is_etf);
+        // 已售出的不計；B 沒有收盤價時價格為 0，由呼叫端的試算拒絕。
+        let b = by("79978B").expect("持有 B");
+        assert_eq!((b.shares, b.current_price), (2000, 0.0));
+        // 目標中未持有的 C 補上零股列並帶價格。
+        let c = by("79978C").expect("補上 C");
+        assert_eq!((c.shares, c.current_price), (0, 50.0));
+        // 已持有的目標不重複補列。
+        assert_eq!(positions.iter().filter(|p| p.symbol == "79978A").count(), 1);
+
+        for sql in cleanup {
+            sqlx::query(sql).execute(pool).await.unwrap();
+        }
+    }
+
     /// 並行覆蓋不得合併成 120%，驗證失敗也不得清掉已存設定。
     #[tokio::test]
     #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]

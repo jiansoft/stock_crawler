@@ -1,7 +1,8 @@
 //! 每週市場摘要的持股相對強度一段：持股 RS 與一週前相比上升、下降最多的幾檔。
 
 use super::{
-    TOP, WEEK_DAYS, dividend::HoldingFill, etf::EtfWeekSection, holding_flow::HoldingFlowSection,
+    TOP, WEEK_DAYS, allocation::AllocationSection, dividend::HoldingFill, etf::EtfWeekSection,
+    holding_flow::HoldingFlowSection,
 };
 use crate::domain::{
     portfolio::health::HoldingFundamentals, quote::relative_strength::RelativeStrengthDay,
@@ -20,6 +21,8 @@ pub(super) struct HoldingSection<'a> {
     pub(super) fundamentals: &'a [HoldingFundamentals],
     /// 全市場與持有 ETF 的一週淨申購與折溢價。
     pub(super) etfs: Option<&'a EtfWeekSection>,
+    /// 超出容忍帶的目標配置偏離（沒有設定目標或都在容忍帶內時為空）。
+    pub(super) allocation: &'a [AllocationSection],
 }
 
 /// 一檔持股的 RS 一週變化。

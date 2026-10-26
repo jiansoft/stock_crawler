@@ -193,6 +193,18 @@ fn round2(val: f64) -> f64 {
     (val * 100.0).round() / 100.0
 }
 
+/// 載入目前持股（含收盤價與產業）的查詢介面，供週報等非 HTTP 呼叫端重用。
+#[async_trait::async_trait]
+pub trait PortfolioPositionQuery: Send + Sync {
+    /// 回傳 `member_id` 的未售出持股（`0` 為全部會員）；`extra_symbols` 內未持有的代號
+    /// 以零股數補上，供目標中尚未持有的標的試算加碼。收盤價缺漏時 `current_price` 為 0。
+    async fn fetch_positions(
+        &self,
+        member_id: i64,
+        extra_symbols: &[String],
+    ) -> Result<Vec<CurrentPosition>>;
+}
+
 /// 計算持股再平衡建議之純函式。
 ///
 /// # 參數
