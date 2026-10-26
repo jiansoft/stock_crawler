@@ -7,17 +7,15 @@
 //! 各比例的扣成本後報酬含每期調回固定比例的買賣成本；比例 100% 不用調整，就是只持有 0050（同樣的
 //! 換股日進出、不計成本）。
 
+use super::limit::run_limited;
 use axum::{
     Json,
     response::{IntoResponse, Response},
 };
-use futures::{StreamExt, TryStreamExt, stream};
 
 use chrono::NaiveDate;
 
-use super::offsets::{
-    CONCURRENCY, distribution, sample_offsets, split_distributions, split_results,
-};
+use super::offsets::{distribution, sample_offsets, split_distributions, split_results};
 use super::preset::BacktestQuery;
 use super::summary::summarize;
 use super::{Backtest, ETF_BENCHMARK, Raw};
@@ -46,15 +44,15 @@ pub(crate) async fn screen_backtest_frontier(BacktestQuery(params): BacktestQuer
         Err(response) => return *response,
     };
     let backtest = &backtest;
-    let raws: Vec<(u16, Raw)> = match stream::iter(sample_offsets(backtest.hold_days))
-        .map(|offset| async move { backtest.run(offset).await.map(|raw| (offset, raw)) })
-        .buffered(CONCURRENCY)
-        .try_collect()
+    let raws: Vec<(u16, Raw)> =
+        match run_limited(sample_offsets(backtest.hold_days), |offset| async move {
+            backtest.run(offset).await.map(|raw| (offset, raw))
+        })
         .await
-    {
-        Ok(raws) => raws,
-        Err(error) => return database_error(error),
-    };
+        {
+            Ok(raws) => raws,
+            Err(error) => return database_error(error),
+        };
     let points = frontier(&raws, backtest.hold_days, backtest.split);
     let sharpe =
         |spread: &BacktestOffsetDistribution| spread.sharpe_ratio.as_ref().map(|stat| stat.median);

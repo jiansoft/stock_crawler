@@ -10,11 +10,11 @@ use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
 
+use super::limit::run_limited;
 use axum::{
     Json,
     response::{IntoResponse, Response},
 };
-use futures::{StreamExt, TryStreamExt, stream};
 
 use super::portfolio::PeriodCost;
 use super::preset::BacktestQuery;
@@ -50,8 +50,8 @@ pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery
     let backtest = &backtest;
     let hold_days = backtest.hold_days;
     let split = backtest.split;
-    let simulated: Vec<OffsetRun> = match stream::iter(sample_offsets(hold_days))
-        .map(|offset| async move {
+    let simulated: Vec<OffsetRun> =
+        match run_limited(sample_offsets(hold_days), |offset| async move {
             backtest
                 .simulate(offset)
                 .await
@@ -65,13 +65,11 @@ pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery
                     halves: split_results(offset, &rows, &costs, hold_days, split),
                 })
         })
-        .buffered(CONCURRENCY)
-        .try_collect()
         .await
-    {
-        Ok(simulated) => simulated,
-        Err(error) => return database_error(error),
-    };
+        {
+            Ok(simulated) => simulated,
+            Err(error) => return database_error(error),
+        };
     let (before_split, after_split) = split_distributions(
         simulated
             .iter()
