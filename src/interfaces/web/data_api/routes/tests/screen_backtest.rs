@@ -1,6 +1,7 @@
 //! 條件選股回測 endpoint 的資料庫語意整合測試。
 
 mod attribution;
+mod compare;
 mod execution;
 mod filters;
 mod fundamentals;

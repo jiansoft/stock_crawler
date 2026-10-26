@@ -11,6 +11,7 @@
 //! 回測本身的回應在 [`response`]。
 
 mod attribution;
+mod compare;
 mod frontier;
 mod offsets;
 mod preset;
@@ -26,6 +27,9 @@ use super::{MarketParamValue, SignalIndicatorValue, SignalKindValue};
 pub(crate) use self::attribution::{
     BacktestAttributionTotals, BacktestAttributionYear, BacktestIndustryEffect,
     ScreenBacktestAttributionResponse,
+};
+pub(crate) use self::compare::{
+    BacktestScenarioResult, ScreenBacktestCompareParams, ScreenBacktestCompareResponse,
 };
 pub(crate) use self::frontier::{BacktestFrontierPoint, ScreenBacktestFrontierResponse};
 pub(crate) use self::offsets::{

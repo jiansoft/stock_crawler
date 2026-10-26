@@ -142,11 +142,11 @@ pub(super) use screen_backtest::{
     BacktestAttributionTotals, BacktestAttributionYear, BacktestContributor, BacktestContributors,
     BacktestCurrent, BacktestExit, BacktestFrontierPoint, BacktestHolding, BacktestIndustryEffect,
     BacktestOffsetDistribution, BacktestOffsetResult, BacktestOffsetYear, BacktestPeriod,
-    BacktestStat, BacktestSummary, BacktestWalkForwardYear, BacktestYear,
-    ScreenBacktestAttributionResponse, ScreenBacktestFrontierResponse,
-    ScreenBacktestOffsetsResponse, ScreenBacktestParams, ScreenBacktestResponse,
-    ScreenBacktestWalkForwardResponse, StrategyPresetItem, StrategyPresetsResponse,
-    StrategyTrackHolding, StrategyTrackPeriod, StrategyTrackResponse,
+    BacktestScenarioResult, BacktestStat, BacktestSummary, BacktestWalkForwardYear, BacktestYear,
+    ScreenBacktestAttributionResponse, ScreenBacktestCompareParams, ScreenBacktestCompareResponse,
+    ScreenBacktestFrontierResponse, ScreenBacktestOffsetsResponse, ScreenBacktestParams,
+    ScreenBacktestResponse, ScreenBacktestWalkForwardResponse, StrategyPresetItem,
+    StrategyPresetsResponse, StrategyTrackHolding, StrategyTrackPeriod, StrategyTrackResponse,
 };
 pub(super) use screening::{
     ScreenedStock, SortOrderParamValue, StockScreenSortValue, StockScreeningParams,

@@ -31,34 +31,41 @@ impl<S: Send + Sync> FromRequestParts<S> for BacktestQuery {
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let raw = parts.uri.query().unwrap_or_default();
-        let name = preset_name(raw);
-        let query = match &name {
-            Some(name) => {
-                let preset = match PgStrategyPresetRepository::new().find(name).await {
-                    Ok(Some(preset)) => preset,
-                    Ok(None) => {
-                        return Err(error_response(
-                            StatusCode::NOT_FOUND,
-                            &format!("查無策略「{name}」"),
-                        ));
-                    }
-                    Err(error) => {
-                        tracing::error!(?error, "讀取具名策略失敗");
-                        return Err(error_response(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "伺服器內部發生未預期錯誤",
-                        ));
-                    }
-                };
-                merge_query(&preset.query, raw)
-            }
-            None => raw.to_owned(),
-        };
+        let (query, name) = resolve_query(raw).await.map_err(|response| *response)?;
         let mut params = parse_params(&query)
             .map_err(|message| error_response(StatusCode::BAD_REQUEST, &message))?;
         params.preset = name;
         Ok(BacktestQuery(params))
     }
+}
+
+/// 請求的 query string 有 `preset` 時讀出具名策略並以請求參數覆蓋，回傳合併後的 query string 與策略名稱；
+/// 查無策略回 404、讀取失敗回 500。
+pub(crate) async fn resolve_query(raw: &str) -> Result<(String, Option<String>), Box<Response>> {
+    let name = preset_name(raw);
+    let query = match &name {
+        Some(name) => {
+            let preset = match PgStrategyPresetRepository::new().find(name).await {
+                Ok(Some(preset)) => preset,
+                Ok(None) => {
+                    return Err(Box::new(error_response(
+                        StatusCode::NOT_FOUND,
+                        &format!("查無策略「{name}」"),
+                    )));
+                }
+                Err(error) => {
+                    tracing::error!(?error, "讀取具名策略失敗");
+                    return Err(Box::new(error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "伺服器內部發生未預期錯誤",
+                    )));
+                }
+            };
+            merge_query(&preset.query, raw)
+        }
+        None => raw.to_owned(),
+    };
+    Ok((query, name))
 }
 
 /// 把 query string 解析成回測參數；格式錯誤回錯誤訊息。
