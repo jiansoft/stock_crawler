@@ -124,6 +124,111 @@ fn unscheduled_closure_requires_both_markets_and_index_missing() {
     assert!(!is_unscheduled_closure(&[], 0));
 }
 
+/// 執行 [`check_quotes`]：`counts` 依序是重跑前、重跑後的成交檔數，回傳結果、是否重跑、是否查了指數。
+async fn run_check_quotes(
+    counts: [Vec<MarketTradedCount>; 2],
+    rerun: Result<()>,
+    index: i64,
+) -> (QuoteCheck, bool, bool) {
+    use std::cell::Cell;
+
+    let calls = Cell::new(0usize);
+    let reran = Cell::new(false);
+    let index_queried = Cell::new(false);
+    let check = check_quotes(
+        day(17),
+        || {
+            let current = counts[calls.get().min(1)].clone();
+            calls.set(calls.get() + 1);
+            async move { Ok(current) }
+        },
+        || {
+            reran.set(true);
+            async move { rerun }
+        },
+        || {
+            index_queried.set(true);
+            async move { Ok(index) }
+        },
+    )
+    .await
+    .expect("檢查不應失敗");
+    (check, reran.get(), index_queried.get())
+}
+
+/// 近期兩個市場都有成交，當天沒有任何成交。
+fn closed_day_counts() -> Vec<MarketTradedCount> {
+    vec![count(day(16), 2, 1_000), count(day(16), 4, 880)]
+}
+
+/// 當天兩個市場都正常成交。
+fn full_day_counts() -> Vec<MarketTradedCount> {
+    let mut counts = closed_day_counts();
+    counts.extend([count(day(17), 2, 1_000), count(day(17), 4, 880)]);
+    counts
+}
+
+#[tokio::test]
+async fn check_quotes_complete_skips_rerun() {
+    let (check, reran, index_queried) =
+        run_check_quotes([full_day_counts(), full_day_counts()], Ok(()), 1).await;
+    assert_eq!(check, QuoteCheck::Complete);
+    assert!(!reran);
+    assert!(!index_queried);
+}
+
+/// 2026-10-23：兩個市場與指數都沒有資料，重跑成功但仍是 0 筆 → 臨時停市，不告警。
+#[tokio::test]
+async fn check_quotes_detects_unscheduled_closure() {
+    let (check, reran, index_queried) =
+        run_check_quotes([closed_day_counts(), closed_day_counts()], Ok(()), 0).await;
+    assert_eq!(check, QuoteCheck::UnscheduledClosure);
+    assert!(reran);
+    assert!(index_queried);
+}
+
+/// 指數已寫入（交易日），行情卻兩邊都 0 筆：照舊告警。
+#[tokio::test]
+async fn check_quotes_alerts_when_index_exists() {
+    let (check, _, _) =
+        run_check_quotes([closed_day_counts(), closed_day_counts()], Ok(()), 1).await;
+    let QuoteCheck::Rerun(title, body) = check else {
+        panic!("指數已寫入時不可判定停市");
+    };
+    assert_eq!(title, "收盤資料仍不完整");
+    assert!(body.contains("重跑後仍不完整"), "{body}");
+}
+
+/// TWSE 晚發布：重跑後補齊，告警「已重抓補齊」。
+#[tokio::test]
+async fn check_quotes_reports_late_data_filled() {
+    let (check, reran, _) =
+        run_check_quotes([closed_day_counts(), full_day_counts()], Ok(()), 0).await;
+    assert!(reran);
+    let QuoteCheck::Rerun(title, body) = check else {
+        panic!("重跑補齊後要告警");
+    };
+    assert_eq!(title, "收盤資料已重抓補齊");
+    assert!(body.contains("重跑後兩個市場都已完整"), "{body}");
+}
+
+/// 重跑失敗時不判定停市，也不用查指數，告警附上錯誤原因。
+#[tokio::test]
+async fn check_quotes_rerun_failure_is_never_closure() {
+    let (check, _, index_queried) = run_check_quotes(
+        [closed_day_counts(), closed_day_counts()],
+        Err(anyhow::anyhow!("來源逾時")),
+        0,
+    )
+    .await;
+    assert!(!index_queried);
+    let QuoteCheck::Rerun(title, body) = check else {
+        panic!("重跑失敗要告警");
+    };
+    assert_eq!(title, "收盤資料仍不完整");
+    assert!(body.contains("重跑收盤匯總失敗：來源逾時"), "{body}");
+}
+
 /// 依序回傳筆數、記錄重算項目的假倉儲。
 struct DerivedRepo {
     dates: Vec<NaiveDate>,

@@ -101,12 +101,14 @@ pub async fn ensure_complete() -> Result<()> {
     after_hours::ensure(date, &after_hours::WITH_CLOSING).await
 }
 
-/// [`ensure_quotes`] 的結果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QuoteCheck {
-    /// 已檢查（完整，或已重跑並告警）。
-    Checked,
-    /// 判定為假日表未列的臨時停市，後續檢查都不用做。
+/// [`check_quotes`] 的結果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum QuoteCheck {
+    /// 收盤資料完整，不用重跑。
+    Complete,
+    /// 已重跑收盤匯總，要發的告警（標題、內容）。
+    Rerun(&'static str, String),
+    /// 判定為假日表未列的臨時停市，不告警，後續檢查都不用做。
     UnscheduledClosure,
 }
 
@@ -114,30 +116,56 @@ enum QuoteCheck {
 async fn ensure_quotes(date: NaiveDate) -> Result<QuoteCheck> {
     let repo = PgQuoteRepository::new();
     let from = date - chrono::Duration::days(COVERAGE_LOOKBACK_DAYS);
-    let before = shortfalls(date, &repo.fetch_market_traded_counts(from, date).await?);
+    let check = check_quotes(
+        date,
+        || repo.fetch_market_traded_counts(from, date),
+        || aggregate(date),
+        || async {
+            let counts = repo.count_after_hours(&[date]).await?;
+            Ok(counts.first().map_or(0, |counts| counts.index))
+        },
+    )
+    .await?;
+    if let QuoteCheck::Rerun(title, body) = &check {
+        alert::send_alert(title, body).await;
+    }
+    Ok(check)
+}
+
+/// [`ensure_quotes`] 的本體：以 `traded_counts` 查各市場有成交的檔數，不完整就以 `rerun` 重跑收盤
+/// 匯總，重跑後兩個市場都沒有資料且 `index_count`（當天加權指數筆數）為 0 時判定臨時停市。
+/// 查詢與重跑可替換以便測試。
+pub(crate) async fn check_quotes<Counts, CountsFut, Rerun, RerunFut, Index, IndexFut>(
+    date: NaiveDate,
+    traded_counts: Counts,
+    rerun: Rerun,
+    index_count: Index,
+) -> Result<QuoteCheck>
+where
+    Counts: Fn() -> CountsFut,
+    CountsFut: std::future::Future<Output = Result<Vec<MarketTradedCount>>>,
+    Rerun: FnOnce() -> RerunFut,
+    RerunFut: std::future::Future<Output = Result<()>>,
+    Index: FnOnce() -> IndexFut,
+    IndexFut: std::future::Future<Output = Result<i64>>,
+{
+    let before = shortfalls(date, &traded_counts().await?);
     if before.is_empty() {
         tracing::info!("{date} 收盤資料完整");
-        return Ok(QuoteCheck::Checked);
+        return Ok(QuoteCheck::Complete);
     }
 
     tracing::warn!("{date} 收盤資料不完整，重跑收盤匯總: {before:?}");
-    let rerun = aggregate(date).await;
+    let rerun = rerun().await;
     if let Err(why) = &rerun {
         tracing::error!("{date} 重跑收盤匯總失敗: {why:#}");
     }
-    let after = shortfalls(date, &repo.fetch_market_traded_counts(from, date).await?);
-    if rerun.is_ok() {
-        let index = repo
-            .count_after_hours(&[date])
-            .await?
-            .first()
-            .map_or(0, |counts| counts.index);
-        if is_unscheduled_closure(&after, index) {
-            tracing::info!(
-                "{date} 上市、上櫃與大盤指數重跑後仍都沒有資料，判定為臨時停市（交易所假日表未列），不告警"
-            );
-            return Ok(QuoteCheck::UnscheduledClosure);
-        }
+    let after = shortfalls(date, &traded_counts().await?);
+    if rerun.is_ok() && is_unscheduled_closure(&after, index_count().await?) {
+        tracing::info!(
+            "{date} 上市、上櫃與大盤指數重跑後仍都沒有資料，判定為臨時停市（交易所假日表未列），不告警"
+        );
+        return Ok(QuoteCheck::UnscheduledClosure);
     }
 
     let title = if after.is_empty() {
@@ -146,8 +174,10 @@ async fn ensure_quotes(date: NaiveDate) -> Result<QuoteCheck> {
         "收盤資料仍不完整"
     };
     let error = rerun.err().map(|why| format!("{why:#}"));
-    alert::send_alert(title, &report(date, &before, error.as_deref(), &after)).await;
-    Ok(QuoteCheck::Checked)
+    Ok(QuoteCheck::Rerun(
+        title,
+        report(date, &before, error.as_deref(), &after),
+    ))
 }
 
 /// 假日表沒列、但交易所實際沒有開市（颱風等臨時停市，例如 2026-10-23）。
