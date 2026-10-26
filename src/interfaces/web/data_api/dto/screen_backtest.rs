@@ -158,8 +158,8 @@ pub(crate) struct ScreenBacktestParams {
     /// 少數大型股。
     #[param(minimum = 1, maximum = 100)]
     pub(crate) max_weight: Option<u8>,
-    /// 停損（%，1–50，選填）：持有期間收盤相對買進價跌幅達這個比例，當天收盤賣出、該檔到下次換股前
-    /// 放現金（賣出付手續費與證交稅，下次仍入選視為重新買進）。以每天的還原收盤檢查，只用於已滿持有
+    /// 停損（%，1–50，選填）：持有期間收盤相對買進價跌幅達這個比例便觸發；close 當天收盤賣出，
+    /// next_open 下一個有有效開盤的交易日賣出（到達原定出場日則沿用期末出場，不跨期停損），之後放現金（賣出付手續費與證交稅，下次仍入選視為重新買進）。以每天的還原收盤檢查，只用於已滿持有
     /// 天數的期數，目前持股不檢查。
     #[param(minimum = 1, maximum = 50)]
     pub(crate) stop_loss: Option<u8>,
@@ -265,7 +265,7 @@ pub(crate) struct ScreenBacktestParams {
     pub(crate) fee_discount: Option<f64>,
     /// 成交價模型：`close`（預設，換股日收盤買賣）或 `next_open`（換股日收盤後才知道選股結果，
     /// 改以次一交易日還原開盤價買進、持有期滿的次一交易日開盤賣出；開盤價缺漏時沿用收盤）。
-    /// `next_open` 不可與 `stop_loss`／`trailing_stop` 併用；日頻最大回撤以進場日開盤為起點、出場日開盤結算。
+    /// `next_open` 停損以收盤觸發、下一個有開盤的交易日賣出；到達原定出場日則沿用期末出場，不跨期停損。日頻最大回撤以進場日開盤為起點、出場日開盤結算。
     #[param(value_type = Option<String>, example = "next_open")]
     pub(crate) execution_price: Option<String>,
     /// 滑價（基點，0–200，預設 0）：每次買進、賣出各再扣成交金額的 `slippage_bps` / 10000，
