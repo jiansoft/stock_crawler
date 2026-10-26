@@ -8,7 +8,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use super::openapi::ApiDoc;
-use super::{auth, handlers};
+use super::{auth, budget, handlers};
 
 /// 建立 `/api/v1` 路由與不受驗證保護的 Swagger/OpenAPI 文件入口。
 pub(crate) fn router() -> Router {
@@ -241,6 +241,8 @@ pub(crate) fn router() -> Router {
             "/market/cagr-ranking/{stock_symbol}",
             axum::routing::get(handlers::cagr_by_symbol),
         )
+        // 先驗證金鑰再計時：未授權請求不佔用 Data API 連線池。
+        .layer(middleware::from_fn(budget::enforce))
         .layer(middleware::from_fn(auth::require_bearer_key));
     Router::new()
         .nest(
