@@ -6,15 +6,6 @@ version = 2
 db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "workspace"
 yanked = "warn"
-# zip 8.x 的解壓漏洞（2026-10-17 公告，修正版為 9.0.0）：zip 只是 utoipa-swagger-ui 10.0.1（目前最新）的
-# build-dependency，且版本需求寫死 "8.6"，無法單獨升級。它的 build.rs 只在編譯時解壓寫死版本的官方
-# Swagger UI 封包，逐檔以 by_index + enclosed_name() 寫出，沒有呼叫公告中有問題的
-# ZipArchive::extract／ZipStreamReader::extract；執行期不含 zip。utoipa-swagger-ui 改用 zip 9 後移除。
-ignore = [
-    { id = "RUSTSEC-2026-0367", reason = "zip 只是 utoipa-swagger-ui 的 build-dependency，解壓固定版本的 Swagger UI 封包，不用 extract()" },
-    { id = "RUSTSEC-2026-0368", reason = "同上：build.rs 不呼叫 ZipArchive::extract" },
-    { id = "RUSTSEC-2026-0369", reason = "同上：build.rs 不呼叫 ZipArchive::extract／ZipStreamReader::extract" },
-]
 
 [licenses]
 version = 2
