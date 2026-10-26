@@ -8,6 +8,7 @@
 //! `auth` 是 Bearer token 驗證 middleware。
 
 mod auth;
+mod budget;
 mod dto;
 mod handlers;
 mod openapi;

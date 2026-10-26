@@ -39,6 +39,52 @@ const BATCH_SLOW_STATEMENT_THRESHOLD: Duration = Duration::from_secs(5);
 /// 同時跑 4 個偏移。
 const BATCH_MAX_CONNECTIONS: u32 = 8;
 
+/// Data API 請求使用的查詢預算：決定連線池與 PostgreSQL `statement_timeout`。
+///
+/// 由 Data API middleware 以 [`with_query_budget`] 設定成 task-local；作用範圍內
+/// [`get_connection`]、[`get_batch_connection`] 與 [`get_tx`] 改用對應的 Data API 連線池，
+/// 讓異常 SQL 不會無限期佔住資料庫，而爬蟲與排程（不在作用範圍內）不受此上限影響。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryBudget {
+    /// 一般行情／個股／持股查詢。
+    General,
+    /// 聚合分析、回測與穿透曝險。
+    Heavy,
+}
+
+impl QueryBudget {
+    /// 這類查詢在資料庫端的單一 statement 上限。
+    pub const fn statement_timeout(self) -> Duration {
+        match self {
+            Self::General => Duration::from_secs(6),
+            Self::Heavy => Duration::from_secs(25),
+        }
+    }
+}
+
+tokio::task_local! {
+    static QUERY_BUDGET: QueryBudget;
+}
+
+static API_GENERAL_POSTGRES: OnceLock<PostgresSQL> = OnceLock::new();
+static API_HEAVY_POSTGRES: OnceLock<PostgresSQL> = OnceLock::new();
+static API_BATCH_POSTGRES: OnceLock<PostgresSQL> = OnceLock::new();
+
+/// 在 `budget` 的作用範圍內執行 `future`；其中的資料庫查詢改用 Data API 連線池。
+///
+/// 只對同一個 task 有效：`tokio::spawn` 出去的工作不會繼承，仍使用全域連線池。
+pub async fn with_query_budget<F: std::future::Future>(
+    budget: QueryBudget,
+    future: F,
+) -> F::Output {
+    QUERY_BUDGET.scope(budget, future).await
+}
+
+/// 目前 task 的查詢預算；不在 Data API 請求內時為 `None`。
+pub fn current_query_budget() -> Option<QueryBudget> {
+    QUERY_BUDGET.try_with(|budget| *budget).ok()
+}
+
 /// PostgreSQL 連線池封裝。
 ///
 /// 負責建立連線池並提供 transaction 入口，供 `database::table::*` 共享使用。
@@ -135,7 +181,24 @@ impl PostgresSQL {
             .max_connections(20) // 個人專案降低連接數
             .min_connections(2)
             .acquire_timeout(Duration::from_secs(5));
-        Self::build(pool_options, SLOW_STATEMENT_THRESHOLD)
+        Self::build(pool_options, SLOW_STATEMENT_THRESHOLD, None)
+    }
+
+    /// 建立 Data API 專用連線池：平時不保留連線，每條連線的 session 預設帶 `statement_timeout`。
+    ///
+    /// `batch` 為回測等平行分桶查詢用的連線池，與一般查詢分開，避免同一請求持有批次連線時
+    /// 又等待同一個連線池而互相卡住。
+    fn new_api(budget: QueryBudget, batch: bool) -> PostgresSQL {
+        let (max, acquire, slow) = match (budget, batch) {
+            (_, true) => (BATCH_MAX_CONNECTIONS, 30, BATCH_SLOW_STATEMENT_THRESHOLD),
+            (QueryBudget::General, false) => (6, 5, SLOW_STATEMENT_THRESHOLD),
+            (QueryBudget::Heavy, false) => (8, 15, BATCH_SLOW_STATEMENT_THRESHOLD),
+        };
+        let pool_options = PgPoolOptions::new()
+            .max_connections(max)
+            .min_connections(0)
+            .acquire_timeout(Duration::from_secs(acquire));
+        Self::build(pool_options, slow, Some(budget.statement_timeout()))
     }
 
     /// 建立全市場批次查詢專用的連線池，見 [`get_batch_connection`]。
@@ -147,11 +210,15 @@ impl PostgresSQL {
             .max_connections(BATCH_MAX_CONNECTIONS)
             .min_connections(0)
             .acquire_timeout(Duration::from_secs(60));
-        Self::build(pool_options, BATCH_SLOW_STATEMENT_THRESHOLD)
+        Self::build(pool_options, BATCH_SLOW_STATEMENT_THRESHOLD, None)
     }
 
     /// 依連線數設定與慢查詢門檻建立連線池；兩個連線池共用連線參數與測試防護。
-    fn build(pool_options: PgPoolOptions, slow_statement_threshold: Duration) -> PostgresSQL {
+    fn build(
+        pool_options: PgPoolOptions,
+        slow_statement_threshold: Duration,
+        statement_timeout: Option<Duration>,
+    ) -> PostgresSQL {
         // 逐欄設定連線參數；application_name 方便在 pg_stat_activity 識別本程式的連線。
         let options = PgConnectOptions::new()
             .host(&config::SETTINGS.postgresql.host)
@@ -161,6 +228,13 @@ impl PostgresSQL {
             .database(&config::SETTINGS.postgresql.db)
             .application_name("stock_crawler_rust")
             .log_slow_statements(log::LevelFilter::Warn, slow_statement_threshold);
+        // statement_timeout 以 startup 參數設定成 session 預設值（毫秒），不需額外往返。
+        let options = match statement_timeout {
+            Some(timeout) => {
+                options.options([("statement_timeout", timeout.as_millis().to_string())])
+            }
+            None => options,
+        };
 
         #[allow(unused_mut)] // 測試組建（cfg(test)）會再覆寫 pool 選項
         let mut pool_options = pool_options
@@ -253,9 +327,26 @@ fn get_postgresql() -> &'static PostgresSQL {
     POSTGRES.get_or_init(PostgresSQL::new)
 }
 
-/// 取得全域 PostgreSQL 連線池。
+/// 目前 task 在 Data API 請求內時回傳對應的 Data API 連線池。
+fn scoped_pool(batch: bool) -> Option<&'static PgPool> {
+    let budget = current_query_budget()?;
+    let cell = match (budget, batch) {
+        (_, true) => &API_BATCH_POSTGRES,
+        (QueryBudget::General, false) => &API_GENERAL_POSTGRES,
+        (QueryBudget::Heavy, false) => &API_HEAVY_POSTGRES,
+    };
+    // 批次池一律用較寬的上限：同一池同時服務兩類請求，取寬者避免誤殺回測。
+    let pool_budget = if batch { QueryBudget::Heavy } else { budget };
+    Some(
+        cell.get_or_init(|| PostgresSQL::new_api(pool_budget, batch))
+            .pool(),
+    )
+}
+
+/// 取得全域 PostgreSQL 連線池；在 Data API 請求內（見 [`with_query_budget`]）改用帶
+/// `statement_timeout` 的 Data API 連線池。
 pub fn get_connection() -> &'static PgPool {
-    get_postgresql().pool()
+    scoped_pool(false).unwrap_or_else(|| get_postgresql().pool())
 }
 
 /// 取得全市場批次查詢專用的連線池。
@@ -263,8 +354,10 @@ pub fn get_connection() -> &'static PgPool {
 /// 只給已分桶平行、單桶就要數秒的全市場查詢使用（估價重建、CAGR 異常掃描），以及每次要 1～2 秒、
 /// 一次請求就跑 20 個換股日偏移的條件選股回測主查詢；慢查詢警告門檻為
 /// [`BATCH_SLOW_STATEMENT_THRESHOLD`]。其他查詢一律用 [`get_connection`]。
+///
+/// 在 Data API 請求內（見 [`with_query_budget`]）改用帶 `statement_timeout` 的 Data API 批次連線池。
 pub fn get_batch_connection() -> &'static PgPool {
-    BATCH_POSTGRES.get_or_init(PostgresSQL::new_batch).pool()
+    scoped_pool(true).unwrap_or_else(|| BATCH_POSTGRES.get_or_init(PostgresSQL::new_batch).pool())
 }
 
 /// 從全域 PostgreSQL 連線池建立 transaction。
@@ -272,7 +365,7 @@ pub fn get_batch_connection() -> &'static PgPool {
 /// # Errors
 /// 當無法成功建立 transaction 時回傳錯誤。
 pub async fn get_tx() -> Result<Transaction<'static, Postgres>> {
-    get_postgresql().tx().await
+    Ok(get_connection().begin().await?)
 }
 
 /// 檢查資料庫連線是否健康（Ping）。
@@ -361,5 +454,44 @@ mod test_pool_guard {
             .unwrap_or(Duration::ZERO);
 
         age > epoch_elapsed
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    /// 不在 Data API 請求內時沿用全域連線池；作用範圍內改用帶 statement_timeout 的連線池。
+    #[tokio::test]
+    #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+    async fn query_budget_routes_to_pools_with_statement_timeout() {
+        dotenvy::dotenv().ok();
+        let show = || async {
+            let timeout: String = sqlx::query_scalar("SHOW statement_timeout")
+                .fetch_one(get_connection())
+                .await
+                .unwrap();
+            let batch: String = sqlx::query_scalar("SHOW statement_timeout")
+                .fetch_one(get_batch_connection())
+                .await
+                .unwrap();
+            (timeout, batch)
+        };
+        assert_eq!(current_query_budget(), None);
+        let (global, _) = show().await;
+        assert_ne!(global, "6s");
+        let (general, batch) = with_query_budget(QueryBudget::General, show()).await;
+        assert_eq!((general.as_str(), batch.as_str()), ("6s", "25s"));
+        let (heavy, batch) = with_query_budget(QueryBudget::Heavy, show()).await;
+        assert_eq!((heavy.as_str(), batch.as_str()), ("25s", "25s"));
+        // 超過上限的 statement 被資料庫取消。
+        let err = with_query_budget(QueryBudget::General, async {
+            sqlx::query("SELECT pg_sleep(7)")
+                .execute(get_connection())
+                .await
+        })
+        .await
+        .expect_err("6 秒上限應取消查詢");
+        assert!(err.to_string().contains("statement timeout"), "{err}");
     }
 }
