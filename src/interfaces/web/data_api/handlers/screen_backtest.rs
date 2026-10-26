@@ -301,6 +301,8 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
         fee_discount: backtest.fee_discount,
+        execution_model: backtest.execution.as_str().to_owned(),
+        slippage_bps: backtest.slippage_bps,
         adjusted: true,
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         summary: summarize(&rows, &costs, hold_days),

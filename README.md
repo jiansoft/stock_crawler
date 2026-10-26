@@ -364,6 +364,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 + 排序與持股：`rank_by`（相對強度、平均成交金額、法人連續買超、營收年增率、營業利益率、本益比、股價淨值比）、`keep_rank`（換股緩衝）、`hold_min_rs_score`（續抱條件）、`max_per_industry`、`min_avg_trade_value`（流動性門檻）
 + 權重：`weighting`（等權、成交金額或其平方根加權）、`max_weight`（單檔上限）、`etf_weight`（0050 核心部位）
 + 大盤濾網（換股日不符就空手）：`market_filter_ma`（加權指數均線）、`market_filter_breadth`（站上 60 日均線比例）、`market_filter_max_pe`（市場本益比中位數）、`market_filter_pe_percentile`（市場本益比中位數在換股日前近 5 年的百分位，只用當天以前的資料）
++ 成交假設：`execution_price`（`close` 換股日收盤、`next_open` 次一交易日開盤買賣；後者不可搭配停損、不提供日頻回撤）、`slippage_bps`（0～200 基點，買賣各計，一併扣在扣成本後報酬）；回應以 `execution_model`、`slippage_bps` 揭露
 + 風控與檢驗：`stop_loss`、`trailing_stop`（期間停損／移動停利）、`rebalance_offset`（換股日偏移）、`split`（樣本內外分割日）
 
 **持股組合**（屬個人持股資料，只有持有 `DATA_API_KEY` 者能查詢；`member_id=0`（預設）為全部會員合計）

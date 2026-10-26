@@ -93,6 +93,10 @@ pub(crate) struct ScreenBacktestOffsetsResponse {
     pub(crate) trailing_stop: Option<u8>,
     /// 計算交易成本用的手續費折扣（0–1）。
     pub(crate) fee_discount: f64,
+    /// 成交價模型：`close`（換股日收盤）或 `next_open`（次一交易日開盤）。
+    pub(crate) execution_model: String,
+    /// 每次買進、賣出各計的滑價（基點）。
+    pub(crate) slippage_bps: u16,
     /// 可投資的大盤基準代號（固定為 `0050`）。
     pub(crate) etf_benchmark: String,
     /// 各偏移績效的分布。

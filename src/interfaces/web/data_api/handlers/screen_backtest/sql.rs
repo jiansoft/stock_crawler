@@ -63,8 +63,16 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 ///   且在換股日之前近 5 年（不含當天）的每日中位數中，低於當天值的比例未達 `$34`%；任一不符時同樣空手。
 ///   百分位只用換股日以前的資料，不會偷看之後的行情；換股日沒有估值列、或之前不足 250 個交易日時視為通過。
 /// - `etf_return`：同一天買進 [`ETF_BENCHMARK`] 持有同樣天數的還原報酬，作為實際買得到的大盤基準。
+///
+/// 成交價模型（`$entry`／`$exit`／`$ret`／`$price_joins`／`$etf_ret`／`$etf_joins`）：收盤版
+/// `entry_date` 就是換股日，報酬取換股日的同天期還原報酬；次日開盤版 `entry_date` 為次一交易日、
+/// `exit_date` 再晚一天，報酬取 `entry_date` 起的同天期收盤報酬，再乘上出場日與進場日各自的
+/// 開盤價／收盤價比（同一天的還原因子相消，不需另查還原價），把收盤到收盤換成開盤到開盤；
+/// 開盤或收盤價缺漏時比值取 1（沿用收盤）。選股條件仍只看換股日當天與之前的資料。
 macro_rules! backtest_sql {
-    ($with:literal, $chip_join:literal, $chip_filter:literal, $chip_columns:literal) => {
+    ($with:literal, $chip_join:literal, $chip_filter:literal, $chip_columns:literal,
+     $entry:expr, $exit:expr, $ret:expr, $price_joins:expr, $etf_ret:expr,
+     $etf_joins:expr) => {
         concat!(
             $with,
             r#"
@@ -78,15 +86,20 @@ windowed AS (
            LAG(date, $4::int - 1, date) OVER (ORDER BY date) AS window_start,
            COALESCE(LAG(date, 19) OVER (ORDER BY date), MIN(date) OVER (ORDER BY date))
                AS liquidity_start,
-           LEAD(date, $4::int) OVER (ORDER BY date) AS exit_date
+           "#,
+            $entry,
+            r#" AS entry_date,
+           "#,
+            $exit,
+            r#" AS exit_date
     FROM days
 ),
 rebal AS (
-    SELECT date, window_start, liquidity_start, exit_date,
+    SELECT date, window_start, liquidity_start, entry_date, exit_date,
            EXTRACT(YEAR FROM date - 10)::int * 12 + EXTRACT(MONTH FROM date - 10)::int - 1
                AS revenue_ord
     FROM (
-        SELECT date, window_start, liquidity_start, exit_date, ROW_NUMBER() OVER (ORDER BY date) - 1 AS i
+        SELECT date, window_start, liquidity_start, entry_date, exit_date, ROW_NUMBER() OVER (ORDER BY date) - 1 AS i
         FROM windowed
         WHERE date >= $1 AND date <= $2
     ) AS numbered
@@ -102,30 +115,28 @@ revenue_records AS (
     )
 ),
 universe AS (
-    SELECT rb.date, rb.window_start, rb.liquidity_start, rb.revenue_ord, rb.exit_date, rs.stock_symbol, rs.rs_score,
+    SELECT rb.date, rb.window_start, rb.liquidity_start, rb.revenue_ord, rb.entry_date, rb.exit_date, rs.stock_symbol, rs.rs_score,
            rs.rank AS rs_rank,
            s.stock_industry_id,
            CASE
                WHEN rb.exit_date IS NOT NULL AND rb.exit_date <= $2 THEN
-                   CASE $4::int
-                       WHEN 5 THEN f.return_5d
-                       WHEN 20 THEN f.return_20d
-                       WHEN 60 THEN f.return_60d
-                       WHEN 120 THEN f.return_120d
-                       ELSE f.return_240d
-                   END
+                   "#,
+            $ret,
+            r#"
                ELSE NULL
            END AS ret
     FROM rebal rb
     JOIN daily_relative_strength rs ON rs.date = rb.date
     JOIN stocks s ON s.stock_symbol = rs.stock_symbol
-    LEFT JOIN daily_forward_return f ON f.date = rb.date AND f.stock_symbol = rs.stock_symbol
+    LEFT JOIN daily_forward_return f ON f.date = rb.entry_date AND f.stock_symbol = rs.stock_symbol"#,
+            $price_joins,
+            r#"
     WHERE ($3 = 0 OR s.stock_exchange_market_id = $3)
 ),
 bench AS (
-    SELECT date, exit_date, AVG(ret)::float8 AS avg_ret, COUNT(ret) AS samples
+    SELECT date, entry_date, exit_date, AVG(ret)::float8 AS avg_ret, COUNT(ret) AS samples
     FROM universe
-    GROUP BY date, exit_date
+    GROUP BY date, entry_date, exit_date
 ),
 filtered AS (
     SELECT u.date, u.liquidity_start, u.stock_symbol, u.rs_score, u.rs_rank, u.ret, u.stock_industry_id,
@@ -410,13 +421,9 @@ SELECT b.date,
        b.avg_ret AS benchmark_return,
        CASE
            WHEN b.exit_date IS NOT NULL AND b.exit_date <= $2 THEN
-               (CASE $4::int
-                    WHEN 5 THEN e.return_5d
-                    WHEN 20 THEN e.return_20d
-                    WHEN 60 THEN e.return_60d
-                    WHEN 120 THEN e.return_120d
-                    ELSE e.return_240d
-                END)::float8
+               ("#,
+            $etf_ret,
+            r#")::float8
            ELSE NULL
        END AS etf_return,
        COALESCE(c.symbols, ARRAY[]::text[]) AS candidates,
@@ -430,7 +437,9 @@ SELECT b.date,
 FROM bench b
 LEFT JOIN candidates c ON c.date = b.date
 LEFT JOIN holdable h ON h.date = b.date
-LEFT JOIN daily_forward_return e ON e.date = b.date AND e.stock_symbol = '0050'
+LEFT JOIN daily_forward_return e ON e.date = b.entry_date AND e.stock_symbol = '0050'"#,
+            $etf_joins,
+            r#"
 LEFT JOIN taiex t ON t."date" = b.date
 LEFT JOIN breadth br ON br.date = b.date
 LEFT JOIN valuation_level vl ON vl.date = b.date
@@ -441,8 +450,114 @@ ORDER BY b.date
     };
 }
 
+/// 同天期報酬（`f` 為個股、`e` 為 0050 的 `daily_forward_return`）。
+macro_rules! horizon_return {
+    ($alias:literal) => {
+        concat!(
+            "CASE $4::int WHEN 5 THEN ",
+            $alias,
+            ".return_5d WHEN 20 THEN ",
+            $alias,
+            ".return_20d WHEN 60 THEN ",
+            $alias,
+            ".return_60d WHEN 120 THEN ",
+            $alias,
+            ".return_120d ELSE ",
+            $alias,
+            ".return_240d END"
+        )
+    };
+}
+
+/// 次日開盤版：收盤報酬乘上出場日、進場日的開盤價／收盤價比（`$exit`／`$entry` 為該日日線的別名）。
+macro_rules! open_to_open {
+    ($alias:literal, $entry:literal, $exit:literal) => {
+        concat!(
+            "((1 + (",
+            horizon_return!($alias),
+            ") / 100.0) * (CASE WHEN ",
+            $exit,
+            ".\"OpeningPrice\" > 0 AND ",
+            $exit,
+            ".\"ClosingPrice\" > 0 THEN ",
+            $exit,
+            ".\"OpeningPrice\" / ",
+            $exit,
+            ".\"ClosingPrice\" ELSE 1 END) / (CASE WHEN ",
+            $entry,
+            ".\"OpeningPrice\" > 0 AND ",
+            $entry,
+            ".\"ClosingPrice\" > 0 THEN ",
+            $entry,
+            ".\"OpeningPrice\" / ",
+            $entry,
+            ".\"ClosingPrice\" ELSE 1 END) - 1) * 100"
+        )
+    };
+}
+
+/// 依成交價模型（`close` 或 `next_open`）展開 [`backtest_sql!`]。
+macro_rules! backtest_sql_for {
+    (close, $with:literal, $chip_join:literal, $chip_filter:literal, $chip_columns:literal) => {
+        backtest_sql!(
+            $with,
+            $chip_join,
+            $chip_filter,
+            $chip_columns,
+            "date",
+            "LEAD(date, $4::int) OVER (ORDER BY date)",
+            horizon_return!("f"),
+            "",
+            horizon_return!("e"),
+            ""
+        )
+    };
+    (next_open, $with:literal, $chip_join:literal, $chip_filter:literal, $chip_columns:literal) => {
+        backtest_sql!(
+            $with,
+            $chip_join,
+            $chip_filter,
+            $chip_columns,
+            "LEAD(date, 1) OVER (ORDER BY date)",
+            "LEAD(date, $4::int + 1) OVER (ORDER BY date)",
+            open_to_open!("f", "qe", "qx"),
+            "\n    LEFT JOIN \"DailyQuotes\" qe ON qe.stock_symbol = rs.stock_symbol AND qe.\"Date\" = rb.entry_date\n    LEFT JOIN \"DailyQuotes\" qx ON qx.stock_symbol = rs.stock_symbol AND qx.\"Date\" = rb.exit_date",
+            open_to_open!("e", "ee", "ex"),
+            "\nLEFT JOIN \"DailyQuotes\" ee ON ee.stock_symbol = '0050' AND ee.\"Date\" = b.entry_date\nLEFT JOIN \"DailyQuotes\" ex ON ex.stock_symbol = '0050' AND ex.\"Date\" = b.exit_date"
+        )
+    };
+}
+
+/// 籌碼版的 CTE 與條件（外資 `$35`、投信 `$36`）。
+macro_rules! backtest_with_chip_sql_for {
+    ($model:ident) => {
+        concat!(
+            "\nWITH",
+            chip_streak_ctes!(),
+            ",",
+            backtest_sql_for!(
+                $model,
+                "",
+                "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
+                "\n      AND ($35::bigint IS NULL OR c.foreign_buy >= $35)\n      AND ($36::bigint IS NULL OR c.trust_buy >= $36)",
+                "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
+            )
+        )
+    };
+}
+
 /// 沒有籌碼條件的回測。
-pub(super) const BACKTEST_SQL: &str = backtest_sql!(
+pub(super) const BACKTEST_SQL: &str = backtest_sql_for!(
+    close,
+    "\nWITH",
+    "",
+    "",
+    "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
+);
+
+/// [`BACKTEST_SQL`] 的次日開盤成交版。
+pub(super) const BACKTEST_NEXT_OPEN_SQL: &str = backtest_sql_for!(
+    next_open,
     "\nWITH",
     "",
     "",
@@ -451,14 +566,7 @@ pub(super) const BACKTEST_SQL: &str = backtest_sql!(
 
 /// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$35`）／投信（`$36`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
-pub(super) const BACKTEST_WITH_CHIP_SQL: &str = concat!(
-    "\nWITH",
-    chip_streak_ctes!(),
-    ",",
-    backtest_sql!(
-        "",
-        "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-        "\n      AND ($35::bigint IS NULL OR c.foreign_buy >= $35)\n      AND ($36::bigint IS NULL OR c.trust_buy >= $36)",
-        "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
-    )
-);
+pub(super) const BACKTEST_WITH_CHIP_SQL: &str = backtest_with_chip_sql_for!(close);
+
+/// [`BACKTEST_WITH_CHIP_SQL`] 的次日開盤成交版。
+pub(super) const BACKTEST_WITH_CHIP_NEXT_OPEN_SQL: &str = backtest_with_chip_sql_for!(next_open);

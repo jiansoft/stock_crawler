@@ -94,6 +94,8 @@ pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery
         stop_loss: backtest.params.stop_loss,
         trailing_stop: backtest.params.trailing_stop,
         fee_discount: backtest.fee_discount,
+        execution_model: backtest.execution.as_str().to_owned(),
+        slippage_bps: backtest.slippage_bps,
         etf_benchmark: ETF_BENCHMARK.to_owned(),
         distribution: distribution(&results),
         years: offset_years(&years),
