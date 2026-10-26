@@ -34,6 +34,13 @@ const FORBIDDEN_ALERT_COOLDOWN: Duration = Duration::from_secs(60 * 60 * 12);
 /// 正式機平常 p99 約 0.4 秒、最慢約 2.4 秒，請求逾時為 15 秒；5 秒代表來源站明顯變慢。
 const SLOW_REQUEST_WARN_MS: u64 = 5_000;
 
+/// 錯誤狀態碼是否降為 INFO：只有快速失敗模式（呼叫端會換來源）下的 5xx。
+///
+/// 4xx 多半是網址或參數錯誤、一般模式的 5xx 沒有備援，兩者仍記 WARN。
+fn downgrade_error_status(status: reqwest::StatusCode, fail_fast: bool) -> bool {
+    fail_fast && status.is_server_error()
+}
+
 /// 快速失敗模式下單次請求的逾時。
 ///
 /// 一般請求沿用用戶端的 15 秒逾時；即時報價有其他站可以換，等太久反而拖慢整輪輪詢。
@@ -179,7 +186,14 @@ pub(super) async fn send_with_client(
                     && !url.contains("api.telegram.org");
 
                 if status.is_client_error() || status.is_server_error() {
-                    if !rate_limited {
+                    if rate_limited {
+                        // 由下方的重試流程記錄。
+                    } else if downgrade_error_status(status, fail_fast) {
+                        // 快速失敗模式下的 5xx 由呼叫端立即換下一個來源（並計入站點熔斷），
+                        // 盤中備援來源偶發 502 一天上百筆，記 INFO 避免淹沒真正的警告。
+                        // 欄位寫在同一行：tracing 的欄位只在有訂閱者時求值，分行會讓涵蓋率誤判為未執行。
+                        tracing::info!(url = %safe_url, method = method.as_str(), status = status.as_u16(), elapsed_ms, "http.done.fail_fast{request_detail_suffix}");
+                    } else {
                         tracing::warn!(
                             url = %safe_url,
                             method = method.as_str(),
