@@ -3,6 +3,7 @@ use crate::{
     app::calculation,
     core::{alert, util::datetime::Weekend},
     domain::quote::{
+        after_hours::AfterHoursDataQuery,
         entity::MarketTradedCount,
         forward_return::{self, DerivedCounts, DerivedDataQuery, ForwardReturnRepository},
         repository::QuoteRepository,
@@ -93,19 +94,30 @@ pub async fn ensure_complete() -> Result<()> {
         return Ok(());
     }
 
-    ensure_quotes(date).await?;
+    if ensure_quotes(date).await? == QuoteCheck::UnscheduledClosure {
+        return Ok(());
+    }
     ensure_derived(date).await?;
     after_hours::ensure(date, &after_hours::WITH_CLOSING).await
 }
 
+/// [`ensure_quotes`] 的結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuoteCheck {
+    /// 已檢查（完整，或已重跑並告警）。
+    Checked,
+    /// 判定為假日表未列的臨時停市，後續檢查都不用做。
+    UnscheduledClosure,
+}
+
 /// 上市或上櫃有成交的檔數偏少就重跑收盤匯總並告警。
-async fn ensure_quotes(date: NaiveDate) -> Result<()> {
+async fn ensure_quotes(date: NaiveDate) -> Result<QuoteCheck> {
     let repo = PgQuoteRepository::new();
     let from = date - chrono::Duration::days(COVERAGE_LOOKBACK_DAYS);
     let before = shortfalls(date, &repo.fetch_market_traded_counts(from, date).await?);
     if before.is_empty() {
         tracing::info!("{date} 收盤資料完整");
-        return Ok(());
+        return Ok(QuoteCheck::Checked);
     }
 
     tracing::warn!("{date} 收盤資料不完整，重跑收盤匯總: {before:?}");
@@ -114,6 +126,19 @@ async fn ensure_quotes(date: NaiveDate) -> Result<()> {
         tracing::error!("{date} 重跑收盤匯總失敗: {why:#}");
     }
     let after = shortfalls(date, &repo.fetch_market_traded_counts(from, date).await?);
+    if rerun.is_ok() {
+        let index = repo
+            .count_after_hours(&[date])
+            .await?
+            .first()
+            .map_or(0, |counts| counts.index);
+        if is_unscheduled_closure(&after, index) {
+            tracing::info!(
+                "{date} 上市、上櫃與大盤指數重跑後仍都沒有資料，判定為臨時停市（交易所假日表未列），不告警"
+            );
+            return Ok(QuoteCheck::UnscheduledClosure);
+        }
+    }
 
     let title = if after.is_empty() {
         "收盤資料已重抓補齊"
@@ -122,7 +147,21 @@ async fn ensure_quotes(date: NaiveDate) -> Result<()> {
     };
     let error = rerun.err().map(|why| format!("{why:#}"));
     alert::send_alert(title, &report(date, &before, error.as_deref(), &after)).await;
-    Ok(())
+    Ok(QuoteCheck::Checked)
+}
+
+/// 假日表沒列、但交易所實際沒有開市（颱風等臨時停市，例如 2026-10-23）。
+///
+/// 只有上市、上櫃**都**沒有任何成交，且當天也沒有加權指數才成立。兩個交易所各自發布，
+/// 同時晚到 17:00／19:00 還沒有資料的機會極低；只要有一邊有資料（例如 TWSE 晚發布），
+/// 仍照原本流程重跑並告警，不放寬晚發布的保護。
+pub(crate) fn is_unscheduled_closure(after: &[Shortfall], index_count: i64) -> bool {
+    index_count == 0
+        && ["上市", "上櫃"].iter().all(|market| {
+            after
+                .iter()
+                .any(|shortfall| shortfall.market == *market && shortfall.traded == 0)
+        })
 }
 
 /// 收盤匯總最後幾步產生的衍生資料（依計算順序：相對強度要用到未來報酬）。

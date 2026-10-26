@@ -92,6 +92,38 @@ fn shortfalls_without_baseline() {
     assert_eq!(shortfalls(day(17), &[]).len(), 2);
 }
 
+/// 臨時停市：上市、上櫃都 0 檔且沒有加權指數才成立；任一邊有成交或指數已寫入都不算。
+#[test]
+fn unscheduled_closure_requires_both_markets_and_index_missing() {
+    let closed = shortfalls(day(17), &[count(day(16), 2, 1_000), count(day(16), 4, 880)]);
+    assert!(is_unscheduled_closure(&closed, 0));
+    assert!(!is_unscheduled_closure(&closed, 1));
+
+    let listed_only = shortfalls(
+        day(17),
+        &[
+            count(day(16), 2, 1_000),
+            count(day(16), 4, 880),
+            count(day(17), 4, 870),
+        ],
+    );
+    assert_eq!(listed_only.len(), 1);
+    assert!(!is_unscheduled_closure(&listed_only, 0));
+
+    let partial = shortfalls(
+        day(17),
+        &[
+            count(day(16), 2, 1_000),
+            count(day(16), 4, 880),
+            count(day(17), 2, 300),
+            count(day(17), 4, 200),
+        ],
+    );
+    assert_eq!(partial.len(), 2);
+    assert!(!is_unscheduled_closure(&partial, 0));
+    assert!(!is_unscheduled_closure(&[], 0));
+}
+
 /// 依序回傳筆數、記錄重算項目的假倉儲。
 struct DerivedRepo {
     dates: Vec<NaiveDate>,
