@@ -142,7 +142,7 @@ pub(super) fn parse_scenarios(
 /// 驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。
 #[utoipa::path(get, path = "/api/v1/stocks/screen/backtest/compare", tag = "data-api", params(ScreenBacktestParams, ScreenBacktestCompareParams), responses((status = 200, body = ScreenBacktestCompareResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn screen_backtest_compare(CompareQuery(scenarios): CompareQuery) -> Response {
-    let mut prepared = Vec::with_capacity(scenarios.len());
+    let mut prepared = Vec::new();
     for (index, scenario) in scenarios.iter().enumerate() {
         let backtest = match Backtest::prepare(&scenario.params).await {
             Ok(backtest) => backtest,
