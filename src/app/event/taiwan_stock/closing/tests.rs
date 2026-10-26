@@ -124,6 +124,64 @@ fn unscheduled_closure_requires_both_markets_and_index_missing() {
     assert!(!is_unscheduled_closure(&[], 0));
 }
 
+/// 以正式倉儲重現 2026-10-23：前一天兩個市場都有成交，當天沒有行情也沒有加權指數，
+/// 重跑（替身）成功後仍是 0 筆 → 判定臨時停市，不告警。假代號與歷史日期，結束時刪除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn ensure_quotes_detects_unscheduled_closure_with_database() {
+    dotenvy::dotenv().ok();
+    let pool = crate::infra::database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 ensure_quotes_detects_unscheduled_closure_with_database：無資料庫連接");
+        return;
+    }
+    let cleanup = || async {
+        for sql in [
+            r#"DELETE FROM "DailyQuotes" WHERE stock_symbol IN ('79974', '79975')"#,
+            r#"DELETE FROM stocks WHERE stock_symbol IN ('79974', '79975')"#,
+        ] {
+            let _ = sqlx::query(sql).execute(pool).await;
+        }
+    };
+    cleanup().await;
+    let previous = NaiveDate::from_ymd_opt(1999, 3, 16).unwrap();
+    let closed = NaiveDate::from_ymd_opt(1999, 3, 17).unwrap();
+    for (symbol, market_id) in [("79974", 2), ("79975", 4)] {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id)
+               VALUES ($1, $1, $1, $2)"#,
+        )
+        .bind(symbol)
+        .bind(market_id)
+        .execute(pool)
+        .await
+        .expect("插入股票母檔");
+        sqlx::query(
+            r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume")
+               VALUES ($1, $2, 10, 1000)"#,
+        )
+        .bind(previous)
+        .bind(symbol)
+        .execute(pool)
+        .await
+        .expect("插入前一天報價");
+    }
+
+    let reran = std::cell::Cell::new(false);
+    let check = ensure_quotes(closed, || {
+        reran.set(true);
+        async { Ok(()) }
+    })
+    .await;
+    cleanup().await;
+
+    assert_eq!(check.expect("檢查不應失敗"), QuoteCheck::UnscheduledClosure);
+    assert!(reran.get(), "判定停市前要先重跑一次");
+}
+
 /// 執行 [`check_quotes`]：`counts` 依序是重跑前、重跑後的成交檔數，回傳結果、是否重跑、是否查了指數。
 async fn run_check_quotes(
     counts: [Vec<MarketTradedCount>; 2],

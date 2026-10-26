@@ -94,7 +94,7 @@ pub async fn ensure_complete() -> Result<()> {
         return Ok(());
     }
 
-    if ensure_quotes(date).await? == QuoteCheck::UnscheduledClosure {
+    if ensure_quotes(date, || aggregate(date)).await? == QuoteCheck::UnscheduledClosure {
         return Ok(());
     }
     ensure_derived(date).await?;
@@ -112,14 +112,18 @@ pub(crate) enum QuoteCheck {
     UnscheduledClosure,
 }
 
-/// 上市或上櫃有成交的檔數偏少就重跑收盤匯總並告警。
-async fn ensure_quotes(date: NaiveDate) -> Result<QuoteCheck> {
+/// 上市或上櫃有成交的檔數偏少就以 `rerun`（正式為 [`aggregate`]）重跑收盤匯總並告警。
+async fn ensure_quotes<Rerun, RerunFut>(date: NaiveDate, rerun: Rerun) -> Result<QuoteCheck>
+where
+    Rerun: FnOnce() -> RerunFut,
+    RerunFut: std::future::Future<Output = Result<()>>,
+{
     let repo = PgQuoteRepository::new();
     let from = date - chrono::Duration::days(COVERAGE_LOOKBACK_DAYS);
     let check = check_quotes(
         date,
         || repo.fetch_market_traded_counts(from, date),
-        || aggregate(date),
+        rerun,
         || async {
             let counts = repo.count_after_hours(&[date]).await?;
             Ok(counts.first().map_or(0, |counts| counts.index))
