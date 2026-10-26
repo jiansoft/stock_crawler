@@ -191,13 +191,8 @@ pub(super) async fn send_with_client(
                     } else if downgrade_error_status(status, fail_fast) {
                         // 快速失敗模式下的 5xx 由呼叫端立即換下一個來源（並計入站點熔斷），
                         // 盤中備援來源偶發 502 一天上百筆，記 INFO 避免淹沒真正的警告。
-                        tracing::info!(
-                            url = %safe_url,
-                            method = method.as_str(),
-                            status = status.as_u16(),
-                            elapsed_ms,
-                            "http.done.fail_fast{request_detail_suffix}"
-                        );
+                        // 欄位寫在同一行：tracing 的欄位只在有訂閱者時求值，分行會讓涵蓋率誤判為未執行。
+                        tracing::info!(url = %safe_url, method = method.as_str(), status = status.as_u16(), elapsed_ms, "http.done.fail_fast{request_detail_suffix}");
                     } else {
                         tracing::warn!(
                             url = %safe_url,
