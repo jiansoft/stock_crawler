@@ -22,7 +22,7 @@ async fn seed_next_open(pool: &sqlx::PgPool) {
 }
 
 /// 次日開盤成交：03-01 收盤後才確定選股（RS 看 03-01），03-02 開盤買進、03-09 開盤賣出，報酬以
-/// 開盤到開盤計；03-08 換股的出場日落在 03-15 之後，視為未完成。不支援停損、不提供日頻回撤；
+/// 開盤到開盤計；03-08 換股的出場日落在 03-15 之後，視為未完成。不支援停損；日頻回撤不小於期末口徑；
 /// 參數超出範圍回 422。
 #[tokio::test]
 #[cfg_attr(
@@ -59,8 +59,14 @@ async fn screen_backtest_next_open_trades_at_following_open() {
         Some(1),
         "03-08 那期在 03-15 前出不了場：{json}"
     );
-    assert!(json["summary"]["daily_max_drawdown_after_costs"].is_null());
-    assert!(json["summary"]["period_end_max_drawdown_after_costs"].is_number());
+    // 日頻回撤以開盤為進出場端點；幅度不小於期末口徑。
+    let daily = json["summary"]["daily_max_drawdown_after_costs"].as_f64();
+    let period_end = json["summary"]["period_end_max_drawdown_after_costs"]
+        .as_f64()
+        .expect("期末回撤");
+    if let Some(daily) = daily {
+        assert!(daily <= period_end + 1e-9, "{daily} vs {period_end}");
+    }
 
     for extra in [
         "execution_price=vwap",

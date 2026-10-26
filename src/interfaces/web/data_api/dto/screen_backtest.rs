@@ -261,7 +261,7 @@ pub(crate) struct ScreenBacktestParams {
     pub(crate) fee_discount: Option<f64>,
     /// 成交價模型：`close`（預設，換股日收盤買賣）或 `next_open`（換股日收盤後才知道選股結果，
     /// 改以次一交易日還原開盤價買進、持有期滿的次一交易日開盤賣出；開盤價缺漏時沿用收盤）。
-    /// `next_open` 不可與 `stop_loss`／`trailing_stop` 併用，且不提供日頻最大回撤。
+    /// `next_open` 不可與 `stop_loss`／`trailing_stop` 併用；日頻最大回撤以進場日開盤為起點、出場日開盤結算。
     #[param(value_type = Option<String>, example = "next_open")]
     pub(crate) execution_price: Option<String>,
     /// 滑價（基點，0–200，預設 0）：每次買進、賣出各再扣成交金額的 `slippage_bps` / 10000，

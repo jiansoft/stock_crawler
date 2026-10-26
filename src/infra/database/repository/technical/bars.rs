@@ -174,6 +174,37 @@ impl PgQuoteRepository {
     }
 }
 
+/// 各 `(代號, 日期)` 當天的開盤價／收盤價比；開盤或收盤不為正的不回傳（呼叫端視為 1）。
+const OPEN_RATIOS_SQL: &str = r#"
+SELECT q.stock_symbol::text, q."Date", q."OpeningPrice"::float8 / q."ClosingPrice"::float8
+FROM UNNEST($1::text[], $2::date[]) AS w(stock_symbol, date)
+JOIN "DailyQuotes" q ON q.stock_symbol = w.stock_symbol AND q."Date" = w.date
+WHERE q."OpeningPrice" > 0 AND q."ClosingPrice" > 0
+"#;
+
+impl PgQuoteRepository {
+    /// 各 `(代號, 日期)` 當天的開盤價／收盤價比（同一天的還原因子相消，可直接乘在還原收盤上得到還原開盤）。
+    pub(crate) async fn fetch_open_ratios(
+        &self,
+        points: &[(String, NaiveDate)],
+    ) -> Result<HashMap<(String, NaiveDate), f64>, sqlx::Error> {
+        if points.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let symbols: Vec<&str> = points.iter().map(|(symbol, _)| symbol.as_str()).collect();
+        let dates: Vec<NaiveDate> = points.iter().map(|(_, date)| *date).collect();
+        let rows: Vec<(String, NaiveDate, f64)> = sqlx::query_as(OPEN_RATIOS_SQL)
+            .bind(&symbols)
+            .bind(&dates)
+            .fetch_all(database::get_batch_connection())
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(symbol, date, ratio)| ((symbol, date), ratio))
+            .collect())
+    }
+}
+
 /// 依代號分組日線列（SQL 已依代號、日期排序）。
 fn group_bars(rows: Vec<(String, NaiveDate, f64, f64, f64)>) -> HashMap<String, Vec<PriceBar>> {
     let mut bars: HashMap<String, Vec<PriceBar>> = HashMap::new();
