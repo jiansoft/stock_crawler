@@ -96,6 +96,21 @@ async fn test_get() {
     assert_eq!(body, "down");
 }
 
+/// `get_bytes_with_limit` 回傳 2xx body；非 2xx 回錯誤且帶狀態碼。
+#[tokio::test]
+async fn get_bytes_with_limit_returns_body_or_status_error() {
+    let url = spawn_fixed_server("200 OK", "a,b\n1,2").await;
+    let body = get_bytes_with_limit(&url, 1024, std::time::Duration::from_secs(5))
+        .await
+        .expect("200 回 body");
+    assert_eq!(body, b"a,b\n1,2");
+    let url = spawn_fixed_server("502 Bad Gateway", "oops").await;
+    let err = get_bytes_with_limit(&url, 1024, std::time::Duration::from_secs(5))
+        .await
+        .expect_err("502 回錯誤");
+    assert!(err.to_string().contains("502"), "{err}");
+}
+
 /// 手動驗證正式站可連線；失敗必須讓測試失敗，而不是只記錄日誌。
 #[tokio::test]
 #[ignore = "需要外部網路"]
