@@ -354,6 +354,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 | `/stocks/screen/backtest/offsets` | 換股日偏移穩健度：同一組條件把換股日偏移 0 到 `hold_days` − 1 都跑一遍，回傳各指標的分布與勝過 0050 的比例；`split` 分樣本內外 |
 | `/stocks/screen/backtest/frontier` | 0050 核心部位前緣：0%～100%（每 10%）各比例的偏移分布，標出夏普值、年化報酬中位數最高的比例 |
 | `/stocks/screen/backtest/walk-forward` | 滾動前推最佳化：每年只用之前 `train_years` 年挑參數（36 組），串起樣本外年份並與不調參數及 0050 比較 |
+| `/stocks/screen/backtest/compare` | 情境比較：共用參數加上 2～4 個 `scenario`（URL 編碼的覆蓋片段，可帶 `label`），例如收盤 vs 次日開盤、0／20 bps 滑價，並排回傳各情境的彙總與依年度彙總 |
 | `/stocks/screen/backtest/attribution` | 報酬歸因（Brinson-Fachler）：相對類 0050 基準拆成產業配置、選股與交互效果 |
 | `/strategy-presets`、`/strategy-presets/{name}/track` | 具名策略清單；依 `strategy_rebalance` 逐期追蹤實際表現並與 0050 比較 |
 

@@ -26,6 +26,7 @@
 //! 比例前緣端點）、[`gateway`]（策略換股通知的 adapter）、[`preset`]（具名策略 `preset=名稱` 與清單端點）、[`stops`]（期間停損）、[`track`]（具名策略實盤追蹤端點）、[`walk_forward`]（滾動前推最佳化端點）。
 
 mod attribution;
+mod compare;
 mod contributors;
 mod current;
 mod engine;
@@ -52,6 +53,7 @@ use chrono::NaiveDate;
 pub(crate) use self::attribution::{
     __path_screen_backtest_attribution, screen_backtest_attribution,
 };
+pub(crate) use self::compare::{__path_screen_backtest_compare, screen_backtest_compare};
 pub(crate) use self::frontier::{__path_screen_backtest_frontier, screen_backtest_frontier};
 pub use self::gateway::BacktestStrategyGateway;
 pub(crate) use self::offsets::{__path_screen_backtest_offsets, screen_backtest_offsets};
