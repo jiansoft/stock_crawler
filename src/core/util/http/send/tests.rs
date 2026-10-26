@@ -161,6 +161,12 @@ fn downgrade_error_status_only_for_fail_fast_server_errors() {
 /// 降級只影響日誌層級：快速失敗模式下 5xx 回應仍原樣交給呼叫端判斷。
 #[tokio::test]
 async fn fail_fast_server_error_still_returns_response() {
+    // 開啟 INFO 層級的訂閱者，讓降級後的日誌欄位實際被求值（也確認它不會 panic）。
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
