@@ -11,15 +11,15 @@
 
 use std::ops::Range;
 
+use super::limit::run_limited;
 use axum::{
     Json,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use chrono::{Datelike, NaiveDate};
-use futures::{StreamExt, TryStreamExt, stream};
 
-use super::offsets::{CONCURRENCY, distribution, sample_offsets};
+use super::offsets::{distribution, sample_offsets};
 use super::portfolio::PeriodCost;
 use super::preset::BacktestQuery;
 use super::summary::{compound, summarize};
@@ -297,16 +297,13 @@ pub(crate) async fn screen_backtest_walk_forward(BacktestQuery(params): Backtest
     }
     let backtest = &backtest;
     let grid = &grid;
-    let runs: Vec<(u16, WalkForward)> = match stream::iter(offsets)
-        .map(|offset| async move {
-            backtest
-                .walk_forward(offset, grid, train_years)
-                .await
-                .map(|result| (offset, result))
-        })
-        .buffered(CONCURRENCY)
-        .try_collect()
-        .await
+    let runs: Vec<(u16, WalkForward)> = match run_limited(offsets, |offset| async move {
+        backtest
+            .walk_forward(offset, grid, train_years)
+            .await
+            .map(|result| (offset, result))
+    })
+    .await
     {
         Ok(runs) => runs,
         Err(error) => return database_error(error),
