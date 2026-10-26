@@ -59,8 +59,9 @@ pub async fn visit(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
     };
 
     if stat != "OK" {
-        // 休市日也會走到這裡（stat 為「查詢日期大於可查詢最大日期」），不是錯誤。
-        tracing::warn!(
+        // 休市日（含假日表未列的臨時停市）也會走到這裡（stat 為「查詢日期大於可查詢最大日期」），
+        // 不是錯誤，只記 info；交易日真的漏抓由 23:00 盤後資料檢查（after_hours）重跑並告警。
+        tracing::info!(
             "取得外資及陸資投資持股統計 {} 無資料，略過：{}",
             date_time.format("%Y-%m-%d"),
             stat

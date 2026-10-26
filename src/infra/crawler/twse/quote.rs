@@ -25,8 +25,8 @@ struct ListedResponse {
 pub struct ListedResponse {
     /// API 回應狀態。
     pub stat: Option<String>,
-    #[serde(rename = "tables")]
-    /// 回應中的資料表清單。
+    /// 回應中的資料表清單。查無資料時（休市日、臨時停市）回應沒有這個欄位，視為空清單。
+    #[serde(rename = "tables", default)]
     pub tables: Vec<Table>,
 }
 
@@ -72,6 +72,16 @@ where
             .map(|row| row.into_iter().map(Option::unwrap_or_default).collect())
             .collect()
     }))
+}
+
+/// TWSE `MI_INDEX` 表示「這天沒有資料」的 stat。
+///
+/// 臨時停市（例如 2026-10-23，不在交易所假日表上）回「很抱歉，沒有符合條件的資料!」且沒有
+/// `tables`；舊版只認得「查無資料」，把它當成 API 錯誤，收盤匯總因此報錯並告警。
+fn is_no_data_stat(stat: &str) -> bool {
+    stat == "很抱歉，查無資料"
+        || stat.contains("沒有符合條件的資料")
+        || stat.contains("查詢日期大於當前日期")
 }
 
 /// 判斷是否為 TWSE 上市每日收盤行情表格。
@@ -132,7 +142,7 @@ pub async fn parse_listed_response(
 ) -> Result<Vec<DailyQuoteDto>> {
     // 檢查 API 回應狀態，如查無資料則直接返回空陣列
     if let Some(stat) = &data.stat {
-        if stat == "很抱歉，查無資料" || stat.contains("查詢日期大於當前日期") {
+        if is_no_data_stat(stat) {
             return Ok(vec![]);
         }
         if stat != "OK" {
@@ -330,6 +340,29 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].symbol, "0050");
         assert_eq!(result[0].closing_price, dec!(79.05));
+    }
+
+    /// 2026-10-23 臨時停市（不在假日表上）的實際回應：沒有 `tables`，stat 是
+    /// 「沒有符合條件的資料」。要解析成 0 筆，而不是反序列化失敗或 API 錯誤。
+    #[tokio::test]
+    async fn test_parse_listed_response_no_data_without_tables() {
+        let raw = include_str!("testdata/mi_index_no_data_20261023.json");
+        let response: ListedResponse =
+            serde_json::from_str(raw).expect("沒有 tables 的回應仍應反序列化成功");
+        assert!(response.tables.is_empty());
+
+        let date = NaiveDate::from_ymd_opt(2026, 10, 23).unwrap();
+        let result = parse_listed_response(response, date).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_is_no_data_stat() {
+        assert!(is_no_data_stat("很抱歉，沒有符合條件的資料!"));
+        assert!(is_no_data_stat("很抱歉，查無資料"));
+        assert!(is_no_data_stat("查詢日期大於當前日期，請重新查詢!"));
+        assert!(!is_no_data_stat("OK"));
+        assert!(!is_no_data_stat("系統忙碌中"));
     }
 
     /// 產生一筆指定代號的有效 TWSE 資料列，供批次解析測試使用。
