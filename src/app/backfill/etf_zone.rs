@@ -9,6 +9,7 @@
 //! | [`refresh_snapshot`] | 只重建快照（21:50 籌碼入庫後帶進外資買賣超） | 週一～五 22:05 |
 //! | [`fill_recent_nav_gaps`] | MoneyDJ 近 30 天淨值 → 補缺日與空欄 → 重建快照 | 週六 13:05 |
 //! | [`backfill_nav_history`] | MoneyDJ 歷史淨值與市價 → 重建快照（補 MIS 上線前的日子） | 手動 |
+//! | [`backfill_nav_history_since`] | 同上，起日改為指定日期（例如 2019-01-01） | 手動 |
 
 use std::time::Duration;
 
@@ -122,6 +123,17 @@ pub async fn execute_weekly_profiles() -> Result<()> {
 pub async fn backfill_nav_history(years: u32) -> Result<()> {
     let (from, to) =
         nav_history_range(Local::now().date_naive(), years).context("回補起日超出範圍")?;
+    backfill_nav_range(from, to).await
+}
+
+/// 同 [`backfill_nav_history`]，起日改為指定日期（含）到昨天；起日晚於昨天時回傳錯誤。
+///
+/// # Errors
+///
+/// 起日不早於今天、資料庫操作失敗，或超過一半的 ETF 抓取失敗時回傳錯誤。
+pub async fn backfill_nav_history_since(from: NaiveDate) -> Result<()> {
+    let (from, to) =
+        nav_history_since_range(Local::now().date_naive(), from).context("回補起日必須早於今天")?;
     backfill_nav_range(from, to).await
 }
 
@@ -246,6 +258,12 @@ fn recent_range(today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
 fn nav_history_range(today: NaiveDate, years: u32) -> Option<(NaiveDate, NaiveDate)> {
     let from = today.checked_sub_months(Months::new(years.checked_mul(12)?))?;
     Some((from, today.pred_opt()?))
+}
+
+/// 回補區間：`from` 到昨天；`from` 不早於今天時沒有區間。
+fn nav_history_since_range(today: NaiveDate, from: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
+    let to = today.pred_opt()?;
+    (from <= to).then_some((from, to))
 }
 
 /// 只重建快照。
@@ -418,6 +436,25 @@ mod tests {
         .await;
         assert!(result.is_err(), "超過一半失敗要告警");
         assert_eq!(failing.snapshots(), 1, "失敗也照樣重建快照");
+    }
+
+    #[test]
+    fn nav_history_since_range_runs_to_yesterday() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 26).expect("日期應合法");
+        let from = NaiveDate::from_ymd_opt(2019, 1, 1).expect("日期應合法");
+        assert_eq!(
+            nav_history_since_range(today, from),
+            Some((
+                from,
+                NaiveDate::from_ymd_opt(2026, 10, 25).expect("日期應合法")
+            ))
+        );
+        let yesterday = NaiveDate::from_ymd_opt(2026, 10, 25).expect("日期應合法");
+        assert_eq!(
+            nav_history_since_range(today, yesterday),
+            Some((yesterday, yesterday))
+        );
+        assert_eq!(nav_history_since_range(today, today), None);
     }
 
     #[test]
