@@ -186,7 +186,9 @@ if (-not [string]::IsNullOrWhiteSpace($IdentityFile))
 function Invoke-Remote
 {
     param([Parameter(Mandatory = $true)][string]$Script)
-    & ssh @SshArgs $Target $Script
+    # 工作目錄的本檔在 core.autocrlf=true 的 worktree 會是 CRLF，here-string 會帶著 `r 送到遠端 bash
+    # （`do`r` 語法錯誤、pid 檔路徑多一個 CR）；與 stock_go、stock-mcp-go 的部署腳本相同，送出前移除。
+    & ssh @SshArgs $Target ($Script -replace "`r", '')
 }
 
 # --- 0. 建置（-Build）--------------------------------------------------------
