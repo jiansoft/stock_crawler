@@ -122,12 +122,17 @@ pub(super) fn apply_stops(
 }
 /// 以已決定的權重建立同日對齊的策略與 0050 路徑；停損後固定現金價值。
 /// 換股成本在期初扣除，停損賣出成本在觸發日扣除，缺日線時標為不完整。
+///
+/// `open_ratios` 為次日開盤成交（`next_open`）時各持股在進場日、出場日的開盤價／收盤價比（見
+/// [`load_open_ratios`]）：路徑從換股日的次一交易日開盤買進起算，出場日以開盤價結算，與該期報酬一致；
+/// 缺比值時取 1（沿用收盤），與回測 SQL 相同。收盤成交時為 `None`。
 pub(super) fn populate_daily_returns(
     rows: &mut [PeriodRow],
     bars: &HashMap<String, Arc<Vec<PriceBar>>>,
     rule: StopRule,
     fee_discount: f64,
     costs: &[super::portfolio::PeriodCost],
+    open_ratios: Option<&OpenRatios>,
 ) {
     use super::portfolio::{FEE_RATE, TAX_RATE, shares, stopped_value};
     // 0050 作為共用交易日曆；只建一次，避免每一期重掃所有標的多年日線。
@@ -145,15 +150,40 @@ pub(super) fn populate_daily_returns(
         let Some(exit) = row.exit_date.filter(|_| !row.pending) else {
             continue;
         };
+        // 收盤成交從換股日收盤起算；次日開盤成交從次一交易日開盤起算。
+        let start = match open_ratios {
+            None => row.date,
+            Some(_) => match entry_date(&calendar, row.date) {
+                Some(date) if date <= exit => date,
+                _ => {
+                    row.daily_complete = false;
+                    continue;
+                }
+            },
+        };
+        // 次日開盤成交：買進價用進場日開盤，出場日的路徑值用開盤；其餘（含進場日當天）用收盤。
+        let ratio = |symbol: &str, date: NaiveDate| {
+            open_ratios
+                .and_then(|ratios| ratios.get(&(symbol.to_owned(), date)).copied())
+                .unwrap_or(1.0)
+        };
+        let entry_at = |symbol: &str, close: f64| match open_ratios {
+            Some(_) => close * ratio(symbol, start),
+            None => close,
+        };
+        let price = |symbol: &str, date: NaiveDate, close: f64| match open_ratios {
+            Some(_) if date == exit => close * ratio(symbol, date),
+            _ => close,
+        };
         // 日期以所有已載入日線聯集對齊，停牌標的沿用最近成交價，不以向量索引代替日期。
-        let mut dates: std::collections::BTreeSet<_> = std::iter::once(row.date)
-            .chain(calendar.range(row.date..=exit).copied())
+        let mut dates: std::collections::BTreeSet<_> = std::iter::once(start)
+            .chain(calendar.range(start..=exit).copied())
             .chain(std::iter::once(exit))
             .collect();
         // 核心部位若有停牌或缺日，仍納入衛星持股在該期間的實際成交日。
         for symbol in &row.symbols {
             if let Some(series) = bars.get(symbol) {
-                let from = series.partition_point(|bar| bar.date <= row.date);
+                let from = series.partition_point(|bar| bar.date <= start);
                 dates.extend(
                     series[from..]
                         .iter()
@@ -178,22 +208,22 @@ pub(super) fn populate_daily_returns(
                 row.daily_complete = false;
                 break;
             };
-            let entry = series.partition_point(|bar| bar.date <= row.date);
+            let entry = series.partition_point(|bar| bar.date <= start);
             if entry == 0 || series[entry - 1].close <= 0.0 {
                 row.daily_complete = false;
                 break;
             }
-            let entry_price = series[entry - 1].close;
+            let entry_price = entry_at(symbol, series[entry - 1].close);
             let mut peak = entry_price;
             let mut sold = None;
             let mut path = Vec::new();
             for &date in &dates {
                 let at = series.partition_point(|bar| bar.date <= date);
-                let close = series[at - 1].close;
+                let close = price(symbol, date, series[at - 1].close);
                 peak = peak.max(close);
                 let ret = (close / entry_price - 1.0) * 100.0;
                 if sold.is_none()
-                    && date > row.date
+                    && date > start
                     && date < exit
                     && row.stopped.get(index).copied().unwrap_or(false)
                     && (rule.stop_loss.is_some_and(|limit| ret <= -limit)
@@ -220,20 +250,66 @@ pub(super) fn populate_daily_returns(
             }
         }
         if let Some(series) = bars.get(super::ETF_BENCHMARK) {
-            let at = series.partition_point(|bar| bar.date <= row.date);
+            let at = series.partition_point(|bar| bar.date <= start);
             if at > 0 && series[at - 1].close > 0.0 && row.etf_return.is_some() {
-                let entry = series[at - 1].close;
+                let entry = entry_at(super::ETF_BENCHMARK, series[at - 1].close);
                 row.etf_daily_complete = true;
                 row.etf_daily_returns = dates
                     .iter()
                     .map(|date| {
                         let at = series.partition_point(|bar| bar.date <= *date);
-                        (series[at - 1].close / entry - 1.0) * 100.0
+                        let value = price(super::ETF_BENCHMARK, *date, series[at - 1].close);
+                        (value / entry - 1.0) * 100.0
                     })
                     .collect();
             }
         }
     }
+}
+
+/// 各股在指定交易日的開盤價／收盤價比，鍵為 `(代號, 日期)`；次日開盤成交的日頻路徑用。
+pub(super) type OpenRatios = HashMap<(String, NaiveDate), f64>;
+
+/// 換股日之後的第一個交易日（`calendar` 為 0050 或全部日線的交易日）。
+pub(super) fn entry_date(
+    calendar: &std::collections::BTreeSet<NaiveDate>,
+    rebalance: NaiveDate,
+) -> Option<NaiveDate> {
+    calendar
+        .range((
+            std::ops::Bound::Excluded(rebalance),
+            std::ops::Bound::Unbounded,
+        ))
+        .next()
+        .copied()
+}
+
+/// 次日開盤成交時，各期持股與 0050 在進場日（次一交易日）與出場日的開盤價／收盤價比。
+pub(super) async fn load_open_ratios(
+    rows: &[PeriodRow],
+    bars: &HashMap<String, Arc<Vec<PriceBar>>>,
+) -> Result<OpenRatios, sqlx::Error> {
+    let calendar: std::collections::BTreeSet<NaiveDate> = bars
+        .get(super::ETF_BENCHMARK)
+        .map(|series| series.iter().map(|bar| bar.date).collect())
+        .unwrap_or_default();
+    let mut points: HashSet<(String, NaiveDate)> = HashSet::new();
+    for row in rows.iter().filter(|row| !row.pending) {
+        let (Some(exit), Some(entry)) = (row.exit_date, entry_date(&calendar, row.date)) else {
+            continue;
+        };
+        for symbol in row
+            .symbols
+            .iter()
+            .map(String::as_str)
+            .chain([super::ETF_BENCHMARK])
+        {
+            points.insert((symbol.to_owned(), entry));
+            points.insert((symbol.to_owned(), exit));
+        }
+    }
+    let points: Vec<(String, NaiveDate)> = points.into_iter().collect();
+    PgQuoteRepository::new().fetch_open_ratios(&points).await
 }
 
 /// 持有期間往前多讀的日曆天：換股日當天停牌時，沿用之前最近的收盤當買進價。
@@ -521,6 +597,82 @@ mod daily_tests {
             ..PeriodRow::default()
         }
     }
+    /// 次日開盤成交：路徑從次一交易日開盤起算，出場日以開盤結算，終值等於開盤到開盤的報酬；
+    /// 缺比值時沿用收盤；0050 同樣處理；找不到次一交易日時標為不完整。
+    #[test]
+    fn next_open_daily_path_uses_open_endpoints() {
+        let d = |n: u32| NaiveDate::from_ymd_opt(2024, 1, 2 + n).unwrap();
+        // 01-02 換股；01-03 開 100 收 110；01-04 收 121；01-05 出場，開 133.1 收 110。
+        let mut row = PeriodRow {
+            date: d(0),
+            exit_date: Some(d(3)),
+            symbols: vec!["A".into()],
+            holdings: 1,
+            etf_return: Some(0.0),
+            ..PeriodRow::default()
+        };
+        let bars = HashMap::from([
+            ("A".into(), series(&[90.0, 110.0, 121.0, 110.0])),
+            (
+                super::super::ETF_BENCHMARK.into(),
+                series(&[50.0, 50.0, 55.0, 50.0]),
+            ),
+        ]);
+        let ratios: OpenRatios = HashMap::from([
+            (("A".to_owned(), d(1)), 100.0 / 110.0),
+            (("A".to_owned(), d(3)), 133.1 / 110.0),
+            ((super::super::ETF_BENCHMARK.to_owned(), d(3)), 1.1),
+        ]);
+        let costs = [PeriodCost {
+            net_return: 33.1,
+            turnover: 0.0,
+        }];
+        populate_daily_returns(
+            std::slice::from_mut(&mut row),
+            &bars,
+            StopRule::default(),
+            1.0,
+            &costs,
+            Some(&ratios),
+        );
+        assert!(row.daily_complete);
+        let expected = [10.0, 21.0, 33.1];
+        assert_eq!(
+            row.daily_returns.len(),
+            expected.len(),
+            "{:?}",
+            row.daily_returns
+        );
+        for (got, want) in row.daily_returns.iter().zip(expected) {
+            assert!((got - want).abs() < 1e-9, "{:?}", row.daily_returns);
+        }
+        // 0050 進場日沒有比值（沿用收盤 50），出場日開盤 55。
+        assert!(
+            (row.etf_daily_returns[2] - 10.0).abs() < 1e-9,
+            "{:?}",
+            row.etf_daily_returns
+        );
+
+        let calendar: std::collections::BTreeSet<_> = [d(0), d(1)].into_iter().collect();
+        assert_eq!(entry_date(&calendar, d(0)), Some(d(1)));
+        assert_eq!(entry_date(&calendar, d(1)), None);
+        let mut last = PeriodRow {
+            date: d(3),
+            exit_date: Some(d(3)),
+            symbols: vec!["A".into()],
+            ..PeriodRow::default()
+        };
+        populate_daily_returns(
+            std::slice::from_mut(&mut last),
+            &bars,
+            StopRule::default(),
+            1.0,
+            &costs,
+            Some(&ratios),
+        );
+        assert!(!last.daily_complete, "沒有次一交易日的期數不算日頻路徑");
+    }
+
     /// 成交金額加權與上限後現金不能退回等權。
     #[test]
     fn daily_paths_use_weights_and_cash() {
@@ -540,6 +692,7 @@ mod daily_tests {
             StopRule::default(),
             1.0,
             &costs,
+            None,
         );
         assert_eq!(row.daily_returns, [0.0, -45.0, 0.0]);
         row.daily_returns.clear();
@@ -552,6 +705,7 @@ mod daily_tests {
             StopRule::default(),
             1.0,
             &costs,
+            None,
         );
         assert!((row.daily_returns[1] + 5.0).abs() < 1e-9);
     }
@@ -567,7 +721,14 @@ mod daily_tests {
         };
         apply_stops(std::slice::from_mut(&mut row), &bars, rule, 20);
         let costs = super::super::portfolio::trading_costs(std::slice::from_ref(&row), 1.0);
-        populate_daily_returns(std::slice::from_mut(&mut row), &bars, rule, 1.0, &costs);
+        populate_daily_returns(
+            std::slice::from_mut(&mut row),
+            &bars,
+            rule,
+            1.0,
+            &costs,
+            None,
+        );
         assert!(
             row.daily_returns
                 .iter()
@@ -591,7 +752,7 @@ mod daily_tests {
             net_return: -50.0,
             turnover: 1.0,
         }];
-        populate_daily_returns(&mut rows, &bars, StopRule::default(), 1.0, &costs);
+        populate_daily_returns(&mut rows, &bars, StopRule::default(), 1.0, &costs, None);
         assert!(!rows[0].daily_complete);
         blend_etf(&mut rows, &mut costs, 1.0, 1.0);
         assert_eq!(summarize(&rows, &costs, 20).daily_max_drawdown, Some(0.0));
@@ -604,7 +765,14 @@ mod daily_tests {
             net_return: 0.0,
             turnover: 0.0,
         }];
-        populate_daily_returns(&mut rows, &HashMap::new(), StopRule::default(), 1.0, &costs);
+        populate_daily_returns(
+            &mut rows,
+            &HashMap::new(),
+            StopRule::default(),
+            1.0,
+            &costs,
+            None,
+        );
         let summary = summarize(&rows, &costs, 20);
         assert!(summary.daily_max_drawdown.is_none());
         assert_eq!(summary.period_end_max_drawdown, Some(0.0));

@@ -10,7 +10,9 @@ use super::sql::{
     BACKTEST_NEXT_OPEN_SQL, BACKTEST_SQL, BACKTEST_WITH_CHIP_NEXT_OPEN_SQL, BACKTEST_WITH_CHIP_SQL,
     LATEST_RS_DATE_SQL,
 };
-use super::stops::{BarCache, StopRule, apply_stops, load_holding_windows, populate_daily_returns};
+use super::stops::{
+    BarCache, StopRule, apply_stops, load_holding_windows, load_open_ratios, populate_daily_returns,
+};
 use super::validate::{parse_excluded_industries, resolve_backtest_period, validate_fundamentals};
 use super::{
     CandidateRow, HOLD_DAYS, MARKET_FILTER_DAYS, MAX_KEEP_RANK, MAX_TRADE_VALUE_MILLION, PeriodRow,
@@ -471,18 +473,19 @@ impl<'a> Backtest<'a> {
             params.max_per_industry.map(usize::from),
         );
         let fee_discount = self.cost_fee_discount();
-        // 次日開盤成交不支援停損（已在驗證擋下），日線路徑也以收盤為端點，對不上開盤成交，
-        // 因此不載入日線、不算日頻回撤（`daily_complete` 維持 false）。
-        // 停損要整段日線且各偏移共用快取；只算日頻路徑時只讀各持股的持有期間。
+        // 停損要整段日線且各偏移共用快取；只算日頻路徑時只讀各持股的持有期間。次日開盤成交不支援
+        // 停損（驗證已擋下），日線只用來算以開盤為端點的日頻路徑。
         let bars = match self.execution {
-            ExecutionPrice::NextOpen => None,
             ExecutionPrice::Close if self.stops.is_active() => {
                 Some(self.bars.load(&rows, self.from, self.to).await?)
             }
-            ExecutionPrice::Close if self.daily_path => Some(load_holding_windows(&rows).await?),
-            ExecutionPrice::Close => None,
+            _ if self.daily_path => Some(load_holding_windows(&rows).await?),
+            _ => None,
         };
-        if let Some(bars) = &bars {
+        if let Some(bars) = bars
+            .as_ref()
+            .filter(|_| self.execution == ExecutionPrice::Close)
+        {
             apply_stops(&mut rows, bars, self.stops, self.hold_days);
         }
         weigh(
@@ -492,7 +495,18 @@ impl<'a> Backtest<'a> {
         );
         let costs = trading_costs(&rows, fee_discount);
         if let Some(bars) = bars.as_ref().filter(|_| self.daily_path) {
-            populate_daily_returns(&mut rows, bars, self.stops, fee_discount, &costs);
+            let ratios = match self.execution {
+                ExecutionPrice::NextOpen => Some(load_open_ratios(&rows, bars).await?),
+                ExecutionPrice::Close => None,
+            };
+            populate_daily_returns(
+                &mut rows,
+                bars,
+                self.stops,
+                fee_discount,
+                &costs,
+                ratios.as_ref(),
+            );
         }
         Ok(Raw {
             rows,
