@@ -6,7 +6,10 @@
 //!   （與週一～五 17:30 排程相同）；週末不執行。
 //! - `test_backfill_etf_nav_history`：抓 MoneyDJ 近 3 年到昨天的淨值與市價，補進 `etf_daily_nav`
 //!   還沒有的日期並重建快照（約 15 分鐘）；MIS 寫入的列不動，重跑安全。
+//! - `test_backfill_etf_nav_history_since_2019`：同上，起日改為 2019-01-01（約 15～20 分鐘）；重跑安全。
 //! - `test_refresh_etf_snapshot`：只重建清單頁快照。
+
+use chrono::NaiveDate;
 
 use crate::app::backfill::etf_zone;
 
@@ -34,6 +37,17 @@ async fn test_backfill_etf_daily() {
 async fn test_backfill_etf_nav_history() {
     dotenvy::dotenv().ok();
     etf_zone::backfill_nav_history(3)
+        .await
+        .expect("ETF 歷史淨值回補失敗");
+}
+
+/// MoneyDJ 歷史淨值（2019-01-01 起）。
+#[tokio::test]
+#[ignore]
+async fn test_backfill_etf_nav_history_since_2019() {
+    dotenvy::dotenv().ok();
+    let from = NaiveDate::from_ymd_opt(2019, 1, 1).expect("日期應合法");
+    etf_zone::backfill_nav_history_since(from)
         .await
         .expect("ETF 歷史淨值回補失敗");
 }
