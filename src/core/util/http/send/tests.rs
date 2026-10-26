@@ -195,3 +195,40 @@ async fn fail_fast_server_error_still_returns_response() {
     .expect("5xx 不是傳輸錯誤");
     assert_eq!(response.status(), reqwest::StatusCode::BAD_GATEWAY);
 }
+
+/// 一般模式的 5xx 沒有備援，仍走 WARN 分支，回應同樣原樣交給呼叫端。
+#[tokio::test]
+async fn normal_mode_server_error_still_warns_and_returns_response() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf).await;
+            let _ = stream
+                .write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                )
+                .await;
+        }
+    });
+    let url = format!("http://{addr}/quote");
+    let client = test_client();
+    let response = send_with_client(
+        &client,
+        Method::GET,
+        &url,
+        None,
+        None::<fn(RequestBuilder) -> RequestBuilder>,
+        None,
+    )
+    .await
+    .expect("5xx 不是傳輸錯誤");
+    assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+}
