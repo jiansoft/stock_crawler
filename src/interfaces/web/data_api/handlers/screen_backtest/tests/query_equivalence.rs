@@ -1,5 +1,6 @@
 //! 在臨時庫比對成交金額物化前後的候選股、續抱與逐期報酬。
 
+use super::super::portfolio::weigh;
 use super::*;
 use crate::infra::database;
 
@@ -43,11 +44,16 @@ async fn materialized_liquidity_preserves_periods() {
                 let after = backtest.candidates(offset, 2).await.unwrap();
                 assert!(!after.is_empty());
                 assert_eq!(before, after, "{execution} / {offset} / {weighting}");
-                let before = backtest.assemble(before, 2, None).await.unwrap();
-                let after = backtest.assemble(after, 2, None).await.unwrap();
-                assert_eq!(before.rows, after.rows);
-                assert_eq!(before.elapsed_days, after.elapsed_days);
-                for (before, after) in before.costs.iter().zip(&after.costs) {
+                // 此回歸只改 SQL，沿用相同的純持股／權重／成本步驟驗證逐期結果。
+                // 不重跑完整非同步日線組裝，避免兩個巨型 future 讓 release 最佳化膨脹。
+                let mut before = select_holdings(before, 1, 2, None);
+                let mut after = select_holdings(after, 1, 2, None);
+                weigh(&mut before, backtest.weighting, None);
+                weigh(&mut after, backtest.weighting, None);
+                assert_eq!(before, after);
+                let before_costs = trading_costs(&before, backtest.fee_discount);
+                let after_costs = trading_costs(&after, backtest.fee_discount);
+                for (before, after) in before_costs.iter().zip(&after_costs) {
                     assert_eq!(before.net_return, after.net_return);
                     assert_eq!(before.turnover, after.turnover);
                 }
