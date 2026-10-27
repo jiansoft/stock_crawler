@@ -482,3 +482,5 @@ fn weighted_return_uses_shares_and_cash() {
         None
     );
 }
+
+mod query_equivalence;
