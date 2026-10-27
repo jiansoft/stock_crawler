@@ -182,13 +182,11 @@ async fn record_cycle_updates_cache_and_counters() {
 #[test]
 fn failure_level_escalates_after_consecutive_failures() {
     use tracing::Level;
-    for failures in [1, 2, 11] {
-        assert_eq!(failure_level(failures), Level::WARN, "{failures}");
-    }
+    assert_eq!(failure_level(3), Level::WARN);
     for failures in [12, 132, 252] {
         assert_eq!(failure_level(failures), Level::ERROR, "{failures}");
     }
-    for failures in [13, 131, 133] {
+    for failures in [1, 2, 11, 13, 131, 133] {
         assert_eq!(failure_level(failures), Level::DEBUG, "{failures}");
     }
 }

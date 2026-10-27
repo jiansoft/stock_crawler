@@ -23,7 +23,7 @@ mod send;
 pub mod user_agent;
 
 pub use redact::{redact_secrets, redact_url};
-pub use send::fail_fast;
+pub use send::{fail_fast, summarized};
 use send::{format_form_params_log, send, send_with_client};
 
 /// A singleton instance of the reqwest client.

@@ -107,6 +107,7 @@ pub(super) fn screen_inconsistent_rows(
         })
         .collect();
 
+    super::stats::record_inconsistent(inconsistent.iter().map(|(symbol, _)| symbol.as_str()));
     let total = result.snapshots.len();
     let limit = DIRTY_BATCH_MIN_ROWS.max(total / DIRTY_BATCH_RATIO_DIVISOR);
     if inconsistent.len() > limit {
@@ -117,27 +118,9 @@ pub(super) fn screen_inconsistent_rows(
         .into());
     }
 
-    let today = chrono::Local::now().date_naive();
     for (symbol, reason) in &inconsistent {
         if let Some(snapshot) = result.snapshots.get_mut(symbol) {
-            let first = INCONSISTENT_ROW_WARNED
-                .lock()
-                .map(|mut seen| seen.first_today(symbol, today))
-                .unwrap_or(true);
-            if first {
-                tracing::warn!(
-                    "HiStock 列資料前後矛盾，略過: 股票 {} {}（成交 {}、漲跌 {}、昨收 {}、高 {}、低 {}；同檔今天不再重複記錄）",
-                    symbol,
-                    reason,
-                    snapshot.price,
-                    snapshot.change,
-                    snapshot.last_close,
-                    snapshot.high,
-                    snapshot.low
-                );
-            } else {
-                tracing::debug!("HiStock 列資料前後矛盾，略過: 股票 {} {}", symbol, reason);
-            }
+            tracing::debug!("HiStock 列資料前後矛盾，略過: 股票 {} {}", symbol, reason);
             snapshot.price = Decimal::ZERO;
         }
     }

@@ -144,9 +144,13 @@ pub fn start_caching_task() {
             // 背景任務也受 FETCH_LOCK 控制，但優先讓外部請求先行
             let result = {
                 let _lock = FETCH_LOCK.lock().await;
-                fetch_all_from_rank().await
+                crate::core::util::http::summarized(fetch_all_from_rank()).await
             };
 
+            super::stats::record_cycle(
+                result.is_ok(),
+                start_time.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            );
             match result {
                 Ok(fetch_result) => record_cycle(fetch_result, start_time, memory_before),
                 Err(e) => report_cycle_error(&e),
@@ -229,14 +233,15 @@ pub(super) fn record_cycle(
     */
 }
 
-/// 連續失敗第 `failures` 輪（從 1 起算）該用的日誌等級：未滿 [`ERROR_AFTER_FAILURES`] 輪為 warn
-/// （多半是單次逾時或連線重置，下一輪就好），到達時與之後每 [`ERROR_REPEAT_FAILURES`] 輪為 error，
-/// 其餘為 debug。
+/// 連續第 3 輪為警告門檻；長時間故障沿用第 12 輪起每 120 輪的 error。
+/// 當天首次失敗與第 3 輪的 WARN 由 report_cycle_error 再做每日節流。
 pub(super) fn failure_level(failures: u32) -> tracing::Level {
-    if failures < ERROR_AFTER_FAILURES {
-        tracing::Level::WARN
-    } else if (failures - ERROR_AFTER_FAILURES).is_multiple_of(ERROR_REPEAT_FAILURES) {
+    if failures >= ERROR_AFTER_FAILURES
+        && (failures - ERROR_AFTER_FAILURES).is_multiple_of(ERROR_REPEAT_FAILURES)
+    {
         tracing::Level::ERROR
+    } else if failures == 3 {
+        tracing::Level::WARN
     } else {
         tracing::Level::DEBUG
     }
@@ -258,7 +263,24 @@ pub(super) fn report_cycle_error(e: &anyhow::Error) {
         }
     } else {
         let failures = CONSECUTIVE_FAILURES.fetch_add(1, Ordering::SeqCst) + 1;
-        match failure_level(failures) {
+        let today = chrono::Local::now().date_naive();
+        let (first, threshold) = INCONSISTENT_ROW_WARNED
+            .lock()
+            .map(|mut seen| {
+                (
+                    seen.first_today("*failed-cycle*", today),
+                    failures == 3 && seen.first_today("*failed-threshold*", today),
+                )
+            })
+            .unwrap_or((false, false));
+        let level = if first || threshold {
+            tracing::Level::WARN
+        } else if failure_level(failures) == tracing::Level::WARN {
+            tracing::Level::DEBUG
+        } else {
+            failure_level(failures)
+        };
+        match level {
             tracing::Level::ERROR => {
                 tracing::error!("HiStock 快取已連續 {failures} 輪更新失敗: {:?}", e);
             }
@@ -293,6 +315,7 @@ pub async fn stop_caching_task() {
         tracing::error!("HiStock 快取任務停止等待失敗: {:?}", why);
     }
 
+    super::stats::summarize();
     SHARE.clear_stock_snapshots();
 }
 

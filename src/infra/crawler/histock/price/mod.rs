@@ -37,6 +37,7 @@ use crate::{
 
 mod parse;
 mod screen;
+mod stats;
 mod task;
 
 pub(crate) use task::{diagnostics_snapshot, runtime_diagnostics_snapshot};
