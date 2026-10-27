@@ -12,6 +12,9 @@ struct Gateway;
 #[async_trait]
 impl StrategyGateway for Gateway {
     async fn latest_rebalance(&self, query: &str) -> Result<Option<StrategyRebalance>> {
+        if query == "none" {
+            return Ok(None);
+        }
         if query == "bad" {
             bail!("backtest down");
         }
@@ -40,6 +43,122 @@ impl StrategyGateway for Gateway {
             etf_cumulative_return: Some(1.25),
         }))
     }
+}
+
+/// 回傳固定策略或模擬讀取失敗的倉儲，其他操作不參與週報。
+struct Repository {
+    fail: bool,
+    presets: Vec<StrategyPreset>,
+}
+
+#[async_trait]
+impl crate::domain::strategy::StrategyPresetRepository for Repository {
+    async fn list(&self) -> Result<Vec<StrategyPreset>> {
+        if self.fail {
+            bail!("repository unavailable");
+        }
+        Ok(self.presets.clone())
+    }
+    async fn find(&self, _: &str) -> Result<Option<StrategyPreset>> {
+        unreachable!()
+    }
+    async fn save(&self, _: &StrategyPreset) -> Result<()> {
+        unreachable!()
+    }
+    async fn delete(&self, _: &str) -> Result<bool> {
+        unreachable!()
+    }
+}
+
+/// 倉儲與 gateway 失敗時保留策略優勢；沒有資料時回 None，環境策略仍可單獨執行。
+#[tokio::test]
+async fn section_sources_degrade_independently() {
+    let _guard = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_test_writer()
+            .finish(),
+    );
+    let today = NaiveDate::from_ymd_opt(2026, 10, 17).unwrap();
+    let empty = Repository {
+        fail: false,
+        presets: Vec::new(),
+    };
+    assert!(
+        load_section(
+            &empty,
+            Err(anyhow::anyhow!("missing gateway")),
+            None,
+            None,
+            Vec::new(),
+            today
+        )
+        .await
+        .is_none()
+    );
+    let failed = Repository {
+        fail: true,
+        presets: Vec::new(),
+    };
+    let section = load_section(
+        &failed,
+        Ok(std::sync::Arc::new(Gateway)),
+        Some("good".to_owned()),
+        Some("環境策略".to_owned()),
+        Vec::new(),
+        today,
+    )
+    .await
+    .unwrap();
+    assert_eq!(section.positions[0].name, "環境策略");
+    assert!(
+        load_section(
+            &empty,
+            Ok(std::sync::Arc::new(Gateway)),
+            Some("none".to_owned()),
+            None,
+            Vec::new(),
+            today
+        )
+        .await
+        .is_none()
+    );
+    let window = strategy_edge::EdgeWindow {
+        from: today,
+        to: today,
+        offsets: 20,
+        median_return: None,
+        etf_median_return: None,
+        beat_rate: None,
+    };
+    let edges = vec![EdgeRecord {
+        name: "最佳組合".to_owned(),
+        checked: today,
+        recent: window,
+        full: None,
+    }];
+    let section = load_section(
+        &empty,
+        Err(anyhow::anyhow!("missing gateway")),
+        Some("good".to_owned()),
+        None,
+        edges.clone(),
+        today,
+    )
+    .await
+    .unwrap();
+    assert!(section.positions.is_empty());
+    assert_eq!(lines(&section), strategy_edge::weekly_lines(&edges));
+}
+
+/// 整合驗證真正的倉儲及 Redis 膠水；只在隔離服務環境執行。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要隔離 PostgreSQL 與 Redis"
+)]
+async fn section_entry_reads_real_sources() {
+    let _ = strategy_section().await;
 }
 
 /// 具名與環境變數的條件相同只跑一次，回測與結算失敗各自降級。

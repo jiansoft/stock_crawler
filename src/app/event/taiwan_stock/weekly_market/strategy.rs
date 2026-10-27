@@ -28,33 +28,37 @@ pub(super) struct StrategyPosition {
 
 /// 讀取具名策略與環境變數條件；資料來源失敗只略過持股段，仍保留優勢段。
 pub(super) async fn strategy_section() -> Option<StrategySection> {
-    use crate::domain::strategy::StrategyPresetRepository;
     use crate::infra::database::repository::strategy_preset::PgStrategyPresetRepository;
-    let edges = strategy_edge::load_latest().await;
-    let presets = PgStrategyPresetRepository::new()
-        .list()
-        .await
-        .unwrap_or_else(|error| {
-            tracing::warn!("每週市場摘要：讀取具名策略失敗：{error:#}");
-            Vec::new()
-        });
-    let strategies = alert_strategies(
-        presets,
+    load_section(
+        &PgStrategyPresetRepository::new(),
+        ports::strategy_gateway(),
         std::env::var(QUERY_ENV).ok(),
         std::env::var(NAME_ENV).ok(),
-    );
+        strategy_edge::load_latest().await,
+        chrono::Local::now().date_naive(),
+    )
+    .await
+}
+
+/// 注入既有策略倉儲與閘道，驗證查詢失敗、沒有閘道與優勢段的獨立降級。
+async fn load_section(
+    repository: &dyn crate::domain::strategy::StrategyPresetRepository,
+    gateway: anyhow::Result<std::sync::Arc<dyn StrategyGateway>>,
+    env_query: Option<String>,
+    env_name: Option<String>,
+    edges: Vec<EdgeRecord>,
+    today: chrono::NaiveDate,
+) -> Option<StrategySection> {
+    let presets = repository.list().await.unwrap_or_else(|error| {
+        tracing::warn!("每週市場摘要：讀取具名策略失敗：{error:#}");
+        Vec::new()
+    });
+    let strategies = alert_strategies(presets, env_query, env_name);
     let positions = if strategies.is_empty() {
         Vec::new()
     } else {
-        match ports::strategy_gateway() {
-            Ok(gateway) => {
-                load_positions(
-                    gateway.as_ref(),
-                    &strategies,
-                    chrono::Local::now().date_naive(),
-                )
-                .await
-            }
+        match gateway {
+            Ok(gateway) => load_positions(gateway.as_ref(), &strategies, today).await,
             Err(error) => {
                 tracing::warn!("每週市場摘要：策略 gateway 無法使用：{error:#}");
                 Vec::new()
