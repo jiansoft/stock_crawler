@@ -76,8 +76,15 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
 
     let mut job_count = 0usize;
     for definition in jobs::definitions() {
-        let job = (definition.create)()
-            .with_context(|| format!("建立排程失敗：{} ({})", definition.name, definition.cron))?;
+        // 沿用拆檔前 Result::into_iter().flatten() 的行為：無效定義略過，其餘照常註冊。
+        let Ok(job) = (definition.create)() else {
+            tracing::debug!(
+                name = definition.name,
+                cron = definition.cron,
+                "略過無效排程定義"
+            );
+            continue;
+        };
         sched
             .add(job)
             .await
