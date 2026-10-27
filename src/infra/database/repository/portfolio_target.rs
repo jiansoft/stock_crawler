@@ -135,7 +135,7 @@ impl PortfolioPositionQuery for PgPortfolioTargetRepository {
         if etf_symbols.is_empty() {
             return Ok(Vec::new());
         }
-        // 與再平衡頁（data_api handlers::portfolio_rebalance）相同的成分來源：前十大持股。
+        // 再平衡頁（data_api handlers::portfolio_rebalance）與週報共用的成分來源：前十大持股。
         let rows: Vec<EtfComponentRow> = sqlx::query_as(
             r#"
             SELECT h.stock_symbol::text AS etf_symbol,
