@@ -5,57 +5,109 @@
 use super::TOP;
 use crate::app::{
     event::taiwan_stock::{
-        strategy_alert::{NAME_ENV, QUERY_ENV},
+        strategy_alert::{AlertStrategy, NAME_ENV, QUERY_ENV, alert_strategies},
         strategy_edge::{self, EdgeRecord},
     },
-    ports::{self, StrategyHolding, StrategyRebalance},
+    ports::{self, StrategyGateway, StrategyHolding, StrategyRebalance, StrategySettlement},
 };
 
-/// 策略一段的資料：通知標題用的名稱、最後一次換股與最近一次策略優勢檢查。
+/// 所有策略的持股段落與最近一次優勢檢查；個別失敗不影響其餘段落。
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct StrategySection {
-    pub(super) name: String,
-    /// `.env` 那一組策略的最後一次換股；沒有設定或最後一期已滿為 `None`。
-    pub(super) rebalance: Option<StrategyRebalance>,
-    /// 最近一次策略優勢檢查的結果；沒有（或已過期）為空。
+    pub(super) positions: Vec<StrategyPosition>,
     pub(super) edges: Vec<EdgeRecord>,
 }
 
-/// 依 `.env` 的策略條件跑一次回測，並讀取最近一次策略優勢檢查；兩者都沒有時回 `None`
-/// （gateway 未註冊或回測失敗只記警告）。
-pub(super) async fn strategy_section() -> Option<StrategySection> {
-    let edges = strategy_edge::load_latest().await;
-    let rebalance = env_rebalance().await;
-    (rebalance.is_some() || !edges.is_empty()).then(|| StrategySection {
-        name: std::env::var(NAME_ENV)
-            .unwrap_or_default()
-            .trim()
-            .to_owned(),
-        rebalance,
-        edges,
-    })
+/// 單一策略的當期回測與依換股紀錄計算的實盤累積。
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct StrategyPosition {
+    pub(super) name: String,
+    pub(super) rebalance: StrategyRebalance,
+    pub(super) settlement: Option<StrategySettlement>,
 }
 
-/// `.env` 那一組策略的最後一次換股；沒有設定、gateway 未註冊、回測失敗或最後一期已滿時回 `None`。
-async fn env_rebalance() -> Option<StrategyRebalance> {
-    let query = std::env::var(QUERY_ENV).unwrap_or_default();
-    if query.trim().is_empty() {
-        return None;
-    }
-    let gateway = match ports::strategy_gateway() {
-        Ok(gateway) => gateway,
-        Err(why) => {
-            tracing::warn!("每週市場摘要：策略 gateway 無法使用: {why:#}");
-            return None;
+/// 讀取具名策略與環境變數條件；資料來源失敗只略過持股段，仍保留優勢段。
+pub(super) async fn strategy_section() -> Option<StrategySection> {
+    use crate::infra::database::repository::strategy_preset::PgStrategyPresetRepository;
+    load_section(
+        &PgStrategyPresetRepository::new(),
+        ports::strategy_gateway(),
+        std::env::var(QUERY_ENV).ok(),
+        std::env::var(NAME_ENV).ok(),
+        strategy_edge::load_latest().await,
+        chrono::Local::now().date_naive(),
+    )
+    .await
+}
+
+/// 注入既有策略倉儲與閘道，驗證查詢失敗、沒有閘道與優勢段的獨立降級。
+async fn load_section(
+    repository: &dyn crate::domain::strategy::StrategyPresetRepository,
+    gateway: anyhow::Result<std::sync::Arc<dyn StrategyGateway>>,
+    env_query: Option<String>,
+    env_name: Option<String>,
+    edges: Vec<EdgeRecord>,
+    today: chrono::NaiveDate,
+) -> Option<StrategySection> {
+    let presets = repository.list().await.unwrap_or_else(|error| {
+        tracing::warn!("每週市場摘要：讀取具名策略失敗：{error:#}");
+        Vec::new()
+    });
+    let strategies = alert_strategies(presets, env_query, env_name);
+    let positions = if strategies.is_empty() {
+        Vec::new()
+    } else {
+        match gateway {
+            Ok(gateway) => load_positions(gateway.as_ref(), &strategies, today).await,
+            Err(error) => {
+                tracing::warn!("每週市場摘要：策略 gateway 無法使用：{error:#}");
+                Vec::new()
+            }
         }
     };
-    gateway
-        .latest_rebalance(query.trim())
-        .await
-        .unwrap_or_else(|why| {
-            tracing::warn!("每週市場摘要：策略回測失敗: {why:#}");
-            None
-        })
+    (!positions.is_empty() || !edges.is_empty()).then_some(StrategySection { positions, edges })
+}
+
+/// 逐一取得策略持股與截至報告日的實盤；回測失敗略過該段，結算失敗僅略過累積行。
+async fn load_positions(
+    gateway: &dyn StrategyGateway,
+    strategies: &[AlertStrategy],
+    today: chrono::NaiveDate,
+) -> Vec<StrategyPosition> {
+    let mut positions = Vec::new();
+    for strategy in strategies {
+        let rebalance = match gateway.latest_rebalance(&strategy.query).await {
+            Ok(Some(rebalance)) => rebalance,
+            Ok(None) => continue,
+            Err(error) => {
+                tracing::warn!("每週市場摘要：{} 回測失敗：{error:#}", strategy.name);
+                continue;
+            }
+        };
+        // settlement 只讀取 date 之前的紀錄；加一天納入報告日當天的換股，行情仍封頂於今天。
+        // 未命名環境策略的換股紀錄以 QUERY_ENV 為鍵，沿用換股通知的命名規則。
+        let record_name = if strategy.name.is_empty() {
+            QUERY_ENV
+        } else {
+            &strategy.name
+        };
+        let settlement = match gateway
+            .settlement(record_name, today.succ_opt().unwrap_or(today))
+            .await
+        {
+            Ok(settlement) => settlement,
+            Err(error) => {
+                tracing::warn!("每週市場摘要：{} 實盤結算失敗：{error:#}", strategy.name);
+                None
+            }
+        };
+        positions.push(StrategyPosition {
+            name: strategy.name.clone(),
+            rebalance,
+            settlement,
+        });
+    }
+    positions
 }
 
 /// 報酬文字（帶正負號、兩位小數）；沒有為「—」。
@@ -80,11 +132,20 @@ fn holding_text(holding: &StrategyHolding) -> String {
 
 /// 策略一段的各行（開頭為空行）：換股一段，接著策略優勢檢查一段。
 pub(super) fn lines(section: &StrategySection) -> Vec<String> {
-    let mut lines = section
-        .rebalance
-        .as_ref()
-        .map(|rebalance| rebalance_lines(&section.name, rebalance))
-        .unwrap_or_default();
+    let mut lines = Vec::new();
+    for position in &section.positions {
+        lines.extend(rebalance_lines(&position.name, &position.rebalance));
+        if let Some(settlement) = &position.settlement {
+            lines.push(format!(
+                "• 實盤追蹤 {}～{}（{} 期，未扣成本）：累積 {}，0050 {}",
+                settlement.tracked_from,
+                settlement.end,
+                settlement.periods,
+                percent(settlement.cumulative_return),
+                percent(settlement.etf_cumulative_return)
+            ));
+        }
+    }
     lines.extend(strategy_edge::weekly_lines(&section.edges));
     lines
 }
@@ -146,3 +207,6 @@ fn rebalance_lines(name: &str, rebalance: &StrategyRebalance) -> Vec<String> {
     }
     lines
 }
+
+#[cfg(test)]
+mod tests;
