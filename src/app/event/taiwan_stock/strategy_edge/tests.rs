@@ -272,3 +272,66 @@ async fn default_offset_edge_is_unsupported() {
     let error = Minimal.offset_edge("from=2019-01-02").await.unwrap_err();
     assert!(error.to_string().contains("does not support"), "{error}");
 }
+
+/// 檢查結果存進 Redis 後讀得回來；近期回測失敗的策略回錯誤，其餘照常儲存；內容無法解析或 key 不存在時回空。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（Redis），請加 --features integration-tests 執行"
+)]
+async fn report_stores_records_and_reports_failures() {
+    dotenvy::dotenv().ok();
+    if redis::CLIENT.ping().await.is_err() {
+        println!("跳過 report_stores_records_and_reports_failures：無 Redis 連線");
+        return;
+    }
+    let key = "strategy_edge:test:79979";
+    let strategies = vec![
+        AlertStrategy {
+            name: "最佳組合".to_owned(),
+            query: "preset=best".to_owned(),
+        },
+        AlertStrategy {
+            name: "壞掉".to_owned(),
+            query: "preset=fail".to_owned(),
+        },
+    ];
+    let error = report(&FakeGateway, &strategies, date(2026, 11, 2), key)
+        .await
+        .expect_err("有策略失敗要回錯誤");
+    assert!(error.to_string().contains("壞掉：回測失敗"), "{error:#}");
+    let stored = load_from(key).await;
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].name, "最佳組合");
+    assert_eq!(stored[0].recent.median_return, Some(28.0));
+
+    report(&FakeGateway, &strategies[..1], date(2026, 11, 2), key)
+        .await
+        .expect("全部成功");
+
+    redis::CLIENT.set(key, "not json", 60).await.unwrap();
+    assert!(load_from(key).await.is_empty());
+    redis::CLIENT.delete(key).await.unwrap();
+    assert!(load_from(key).await.is_empty());
+}
+
+/// 沒有要通知的具名策略、也沒有設定 `.env` 的策略時直接結束，不需要 gateway。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn run_without_alert_strategies_is_noop() {
+    dotenvy::dotenv().ok();
+    if crate::infra::database::ping().await.is_err() {
+        println!("跳過 run_without_alert_strategies_is_noop：無資料庫連接");
+        return;
+    }
+    let presets = PgStrategyPresetRepository::new().list().await.unwrap();
+    let env_query = std::env::var(QUERY_ENV).unwrap_or_default();
+    if presets.iter().any(|preset| preset.alert) || !env_query.trim().is_empty() {
+        println!("跳過 run_without_alert_strategies_is_noop：已有要通知的策略");
+        return;
+    }
+    run(date(2026, 11, 2)).await.unwrap();
+}

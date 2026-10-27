@@ -343,7 +343,12 @@ fn log_records(records: &[EdgeRecord]) {
 
 /// 最近一次存入 Redis 的檢查結果；沒有、過期或讀取失敗回空（失敗記警告）。
 pub async fn load_latest() -> Vec<EdgeRecord> {
-    match redis::CLIENT.get_string(REDIS_KEY).await {
+    load_from(REDIS_KEY).await
+}
+
+/// 讀取 `key` 的檢查結果；沒有、過期或讀取失敗回空。
+async fn load_from(key: &str) -> Vec<EdgeRecord> {
+    match redis::CLIENT.get_string(key).await {
         Ok(json) => serde_json::from_str(&json).unwrap_or_else(|error| {
             tracing::warn!("策略優勢檢查：Redis 內容無法解析：{error}");
             Vec::new()
@@ -355,8 +360,8 @@ pub async fn load_latest() -> Vec<EdgeRecord> {
     }
 }
 
-/// 存入 Redis 供每週市場摘要讀取；失敗只記警告。
-async fn store(records: &[EdgeRecord]) {
+/// 存入 Redis 的 `key` 供每週市場摘要讀取；失敗只記警告。
+async fn store(key: &str, records: &[EdgeRecord]) {
     let json = match serde_json::to_string(records) {
         Ok(json) => json,
         Err(error) => {
@@ -365,7 +370,7 @@ async fn store(records: &[EdgeRecord]) {
         }
     };
     if let Err(error) = redis::CLIENT
-        .set(REDIS_KEY, json, REDIS_TTL_DAYS * 24 * 60 * 60)
+        .set(key, json, REDIS_TTL_DAYS * 24 * 60 * 60)
         .await
     {
         tracing::warn!("策略優勢檢查：寫入 Redis 失敗：{error}");
@@ -413,13 +418,27 @@ pub async fn run(today: NaiveDate) -> Result<()> {
         return Ok(());
     }
     let gateway = ports::strategy_gateway()?;
-    let (records, failures) = check(gateway.as_ref(), &strategies, today).await;
+    report(gateway.as_ref(), &strategies, today, REDIS_KEY).await
+}
+
+/// 檢查每個策略、記日誌、轉弱時告警，結果存進 Redis 的 `key`。
+///
+/// # Errors
+///
+/// 有策略的近期回測失敗時回傳錯誤（其餘策略照常檢查與儲存）。
+async fn report(
+    gateway: &dyn StrategyGateway,
+    strategies: &[AlertStrategy],
+    today: NaiveDate,
+    key: &str,
+) -> Result<()> {
+    let (records, failures) = check(gateway, strategies, today).await;
     log_records(&records);
     for (title, message) in alerts(&records) {
         alert::send_alert(&title, &message).await;
     }
     if !records.is_empty() {
-        store(&records).await;
+        store(key, &records).await;
     }
     if !failures.is_empty() {
         bail!("策略優勢檢查失敗：{}", failures.join("；"));
