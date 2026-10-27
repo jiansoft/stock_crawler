@@ -57,17 +57,25 @@ async fn summarized_preserves_normal_retry_policy() {
         assert!(!is_fail_fast());
         assert!(SUMMARIZED.try_with(|_| ()).is_ok());
         let _guard = debug_subscriber();
-        let client = test_client();
+        crate::core::util::ensure_rustls_crypto_provider();
+        let client = Client::builder()
+            .connect_timeout(Duration::from_millis(100))
+            .build()
+            .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let url = format!("http://{addr}/quote");
         let error = send_with_client(
             &client,
             Method::GET,
-            "http://[",
+            &url,
             None,
             None::<fn(RequestBuilder) -> RequestBuilder>,
             None,
         )
         .await
-        .expect_err("無效 URL 應回錯誤");
+        .expect_err("已關閉的本機埠應耗盡重試");
         assert!(error.to_string().contains("after 3 network retries"));
     })
     .await;
