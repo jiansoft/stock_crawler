@@ -50,29 +50,10 @@ pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery
     let backtest = &backtest;
     let hold_days = backtest.hold_days;
     let split = backtest.split;
-    let simulated: Vec<OffsetRun> =
-        match run_limited(sample_offsets(hold_days), |offset| async move {
-            backtest
-                .simulate(offset)
-                .await
-                .map(|Simulation { rows, costs, .. }| {
-                    let halves = split_results(offset, &rows, &costs, hold_days, split);
-                    OffsetRun {
-                        result: BacktestOffsetResult {
-                            excluded_cross_boundary_periods: excluded_periods(halves.as_ref()),
-                            rebalance_offset: offset,
-                            summary: summarize(&rows, &costs, hold_days),
-                        },
-                        years: yearly(&rows, &costs),
-                        halves,
-                    }
-                })
-        })
-        .await
-        {
-            Ok(simulated) => simulated,
-            Err(error) => return database_error(error),
-        };
+    let simulated = match simulate_offsets(backtest).await {
+        Ok(simulated) => simulated,
+        Err(error) => return database_error(error),
+    };
     let (before_split, after_split) = split_distributions(
         simulated
             .iter()
@@ -112,10 +93,37 @@ pub(crate) async fn screen_backtest_offsets(BacktestQuery(params): BacktestQuery
 }
 
 /// 一個偏移的回測結果：整段彙總、依年度彙總與樣本內外的彙總。
-struct OffsetRun {
-    result: BacktestOffsetResult,
+pub(super) struct OffsetRun {
+    pub(super) result: BacktestOffsetResult,
     years: Vec<BacktestYear>,
     halves: Option<(BacktestOffsetResult, BacktestOffsetResult)>,
+}
+
+/// 對 [`sample_offsets`] 的每個換股日偏移各跑一次回測，依偏移由小到大回傳；偏移端點與策略優勢
+/// 滾動檢查（[`super::gateway`]）共用。
+pub(super) async fn simulate_offsets(
+    backtest: &Backtest<'_>,
+) -> Result<Vec<OffsetRun>, sqlx::Error> {
+    let hold_days = backtest.hold_days;
+    let split = backtest.split;
+    run_limited(sample_offsets(hold_days), |offset| async move {
+        backtest
+            .simulate(offset)
+            .await
+            .map(|Simulation { rows, costs, .. }| {
+                let halves = split_results(offset, &rows, &costs, hold_days, split);
+                OffsetRun {
+                    result: BacktestOffsetResult {
+                        excluded_cross_boundary_periods: excluded_periods(halves.as_ref()),
+                        rebalance_offset: offset,
+                        summary: summarize(&rows, &costs, hold_days),
+                    },
+                    years: yearly(&rows, &costs),
+                    halves,
+                }
+            })
+    })
+    .await
 }
 
 /// 依分割日把各期分成換股日與出場日皆早於 `split` 的樣本內與換股日不早於 `split` 的樣本外，各自彙總；

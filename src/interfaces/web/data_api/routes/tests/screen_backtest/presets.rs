@@ -70,6 +70,59 @@ async fn strategy_gateway_reports_latest_rebalance() {
     cleanup(pool).await;
 }
 
+/// 策略優勢滾動檢查的 adapter：偏移分布與 `/stocks/screen/backtest/offsets` 相同；條件錯誤或缺
+/// `from` 時回錯誤。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn strategy_gateway_reports_offset_edge() {
+    let Some(pool) = seeded("strategy_gateway_reports_offset_edge").await else {
+        return;
+    };
+    use crate::app::ports::StrategyGateway;
+    use crate::interfaces::web::data_api::BacktestStrategyGateway;
+
+    let query = "from=1993-03-01&to=1993-03-15&hold_days=5&limit=2&execution_price=next_open&slippage_bps=20";
+    let edge = BacktestStrategyGateway
+        .offset_edge(query)
+        .await
+        .expect("偏移回測成功");
+    let (status, body) = get(&format!("/api/v1/stocks/screen/backtest/offsets?{query}")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let distribution = &body["distribution"];
+    assert_eq!(edge.offsets, 5);
+    assert_eq!(edge.from.to_string(), body["from"]);
+    assert_eq!(edge.to.to_string(), body["to"]);
+    assert_eq!(
+        edge.median_return,
+        distribution["annualized_return_after_costs"]["median"].as_f64()
+    );
+    assert_eq!(
+        edge.etf_median_return,
+        distribution["etf_annualized_return"]["median"].as_f64()
+    );
+    assert_eq!(
+        edge.beat_rate,
+        distribution["beat_etf_return_rate"].as_f64()
+    );
+
+    for (query, expected) in [
+        ("to=1993-03-15&hold_days=5", "必須指定 from"),
+        ("from=1993-03-01&to=1993-03-15&hold_days=7", "HTTP 422"),
+    ] {
+        let error = BacktestStrategyGateway
+            .offset_edge(query)
+            .await
+            .expect_err(query)
+            .to_string();
+        assert!(error.contains(expected), "{query}: {error}");
+    }
+
+    cleanup(pool).await;
+}
+
 /// 管理介面的具名策略 API；`name` 為空時打清單路徑。
 async fn admin(method: &str, name: &str, body: &str) -> (StatusCode, serde_json::Value) {
     use axum::body::Body;

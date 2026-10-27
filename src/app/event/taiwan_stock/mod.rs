@@ -33,6 +33,8 @@ pub mod public;
 pub mod quarter_eps;
 // 策略換股通知（依設定的條件選股回測，換股日通知新買進、續抱與賣出）
 pub mod strategy_alert;
+// 策略優勢滾動檢查（每月第一個交易日，換股日偏移掃描對照 0050）
+pub mod strategy_edge;
 // 持股技術訊號通知（52 週新高新低、站上或跌破季線年線、中期均線交叉）
 pub mod technical_alert;
 // 持股估值週報（本益比／股價淨值比位於近 5 年高檔或低檔）

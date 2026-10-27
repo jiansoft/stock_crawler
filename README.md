@@ -173,6 +173,10 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
 + 22:10 策略換股通知：對每個 `alert` 為 true 的具名策略（`strategy_preset`）各跑一次回測，最後一次換股是今天時通知新買進、續抱、賣出的股票與權重、換手與 0050 核心部位，並對照目前實際持股；換股日另把持股寫進 `strategy_rebalance`，通知附上上一期實盤報酬與追蹤以來的累積及超額報酬；策略持股有基本面警示時另列。`.env` 的 `STRATEGY_ALERT_QUERY` 仍可另設一組
 + 23:00 檢查盤後資料：大盤指數、`chip_daily`、`qfii_history` 當天筆數為 0 或低於近期交易日的一半時重跑對應排程並告警；另重跑一次官方本益比補寫，有補到資料才告警
 
+### 每月第一個交易日
+
++ 07:30 策略優勢滾動檢查：對每個 `alert` 為 true 的具名策略（與 22:10 策略換股通知相同的清單）跑兩段換股日偏移掃描（近 24 個月、2019 起；成交假設一律次日開盤＋20 bps），近 24 個月的扣成本年化中位數低於 0050，或勝 0050 報酬的偏移比例不到 50% 時告警並建議停用該策略的換股通知（不會自動停用）；結果存 Redis 供每週市場摘要附上。排程掛在每月 1–10 日，當天不是當月第一個交易日就略過；手動執行用 `test_strategy_edge_check`
+
 ### 每月 10–28 日
 
 + 20:45 通知持股董監質押變動：與前一期比較設質、關係人設質增減與持股大幅增減（交易所董監事持股開放資料，約每月 18 日出表；第一次執行列出目前有設質的人作為基準）
@@ -187,7 +191,7 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
   - 外資與投信近 5 個交易日在各產業的估計淨買賣金額（流入、流出最多）
   - 持股 RS 一週上升、下降最多的幾檔；外資、投信與主力近 5 個交易日在持股的累計買賣超（張數、佔成交量，法人附連續天數、主力附買超與賣超天數，買超、賣超各列最多 3 檔）；持股（含 ETF）近 7 天填息的除權息與尚未填息、離填息價最遠的 3 檔；持股基本面警示（營收連續 3 個月以上年減、三率三降、營業虧損、近四季自由現金流為負，最多列 10 檔）
   - ETF 資金流向：近 5 個交易日淨申購（受益單位增減 × 淨值）流入、流出最多的各 5 檔，持有 ETF 的淨申購與折溢價週平均、最新值；持有 ETF 這週收到新一期前十大持股時，列出與前一期相比的新進、剔除與權重變化最大的 3 檔
-  - 有啟用通知的策略：這一期的換股日、本期至今報酬與 0050 對照、表現最好與最差的持股
+  - 有啟用通知的策略：這一期的換股日、本期至今報酬與 0050 對照、表現最好與最差的持股；最近一次策略優勢滾動檢查的近 24 個月與 2019 起數字（輸 0050 或勝率不到一半時標 ⚠️）
   - 持股配置偏離提醒：預設組合（會員 0）有設定目標權重（個股、產業、ETF 穿透）時，列出偏離超過容忍帶 ±2% 的前 5 項與減碼／加碼方向；ETF 穿透以持有 ETF 的前十大成分併入直接持股計算，只列有設目標的個股，成分資料超過 45 天的 ETF 不計入並註明；沒有設定目標或都在容忍帶內不輸出，僅供參考、不會下單
 + 10:30 持股千張大戶週報：每檔持股的千張大戶持股比例、大戶人數與股東人數及週變化（集保戶股權分散表，第一次只列現況）
 + 10:40 全市場集保股權分散週摘要（千張大戶人數、比例、股東總數）寫入 `holder_distribution`（開放資料只有最新一週，無法回補）
@@ -246,7 +250,7 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
 | capital_reduction（減資） | `test_backfill_listed_capital_reductions`、`test_backfill_otc_capital_reductions`、`test_scan_otc_capital_reduction_gaps` |
 | financial（財報） | `test_backfill_financial_reports_for_symbols`、`test_backfill_financial_reports_from_biggo_for_symbols`、`test_backfill_financial_reports_all`、`test_rebuild_financial_health` |
 | chip（籌碼） | `test_backfill_chip_daily`、`test_backfill_chip_streaks`、`test_backfill_foreign_holding_history`、`test_save_holder_distributions`、`test_save_insider_holdings` |
-| derived（衍生資料） | `test_backfill_technical_signals`、`test_backfill_forward_returns`、`test_backfill_relative_strength`、`test_backfill_market_breadth`、`test_backfill_market_valuation`、`test_record_strategy_rebalance` |
+| derived（衍生資料） | `test_backfill_technical_signals`、`test_backfill_forward_returns`、`test_backfill_relative_strength`、`test_backfill_market_breadth`、`test_backfill_market_valuation`、`test_record_strategy_rebalance`、`test_strategy_edge_check` |
 
 本機 `.env` 指向哪個資料庫，回補就寫到哪個資料庫；跑之前先確認。
 

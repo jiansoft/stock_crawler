@@ -142,6 +142,24 @@ pub struct StrategySettlement {
     pub etf_cumulative_return: Option<f64>,
 }
 
+/// 同一組條件把換股日偏移 0～`hold_days` − 1 都跑一遍後，扣成本年化報酬的分布摘要（與
+/// `/stocks/screen/backtest/offsets` 的 `distribution` 相同口徑）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrategyOffsetEdge {
+    /// 實際起日。
+    pub from: NaiveDate,
+    /// 實際迄日（最近一個有相對強度的交易日）。
+    pub to: NaiveDate,
+    /// 跑了幾個偏移。
+    pub offsets: usize,
+    /// 各偏移扣成本年化報酬（%）的中位數；沒有任何一期為 `None`。
+    pub median_return: Option<f64>,
+    /// 0050 同期年化報酬（%）的中位數。
+    pub etf_median_return: Option<f64>,
+    /// 扣成本年化報酬勝過 0050 的偏移比例（0–1）。
+    pub beat_rate: Option<f64>,
+}
+
 /// 依條件選股回測的條件取得策略最後一次換股的 gateway（port）。
 #[async_trait]
 pub trait StrategyGateway: Send + Sync {
@@ -156,6 +174,13 @@ pub trait StrategyGateway: Send + Sync {
         preset_name: &str,
         date: NaiveDate,
     ) -> Result<Option<StrategySettlement>>;
+
+    /// 以 `query`（必須指定 `from`）把換股日偏移都跑一遍，回傳扣成本年化報酬的分布摘要。
+    /// 預設回錯誤（不支援偏移掃描的實作）。
+    async fn offset_edge(&self, query: &str) -> Result<StrategyOffsetEdge> {
+        let _ = query;
+        Err(anyhow!("strategy gateway does not support offset scans"))
+    }
 }
 
 /// 全域策略 gateway。

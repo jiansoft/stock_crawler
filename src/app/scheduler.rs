@@ -178,6 +178,14 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "重算財務體質評分",
             calculation::financial_health::execute,
         ),
+        // 07:30（每月 1–10 日）當月第一個交易日才跑：策略優勢滾動檢查，對要通知的策略跑近 24 個月與
+        // 2019 起的換股日偏移掃描（次日開盤＋20 bps），輸 0050 或勝率不到一半就告警（不自動停用通知）；
+        // 排在 07:10 財務體質重算之後、08:00 提醒之前。
+        create_job(
+            "0 30 7 1-10 * *",
+            "策略優勢滾動檢查",
+            event::taiwan_stock::strategy_edge::execute,
+        ),
         // 08:00 提醒本日除權息與明日預計除權息的股票
         create_job(
             "0 0 8 * * *",

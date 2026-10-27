@@ -1,22 +1,43 @@
 //! 每週市場摘要的策略一段：有設定策略換股通知的條件（見 [`super::super::strategy_alert`]）時，列出
-//! 這一期換股日、本期至今的報酬與 0050 對照，以及表現最好、最差的幾檔持股。
+//! 這一期換股日、本期至今的報酬與 0050 對照，以及表現最好、最差的幾檔持股；另附最近一次策略優勢滾動
+//! 檢查（見 [`super::super::strategy_edge`]）的近期與全期數字。
 
 use super::TOP;
 use crate::app::{
-    event::taiwan_stock::strategy_alert::{NAME_ENV, QUERY_ENV},
+    event::taiwan_stock::{
+        strategy_alert::{NAME_ENV, QUERY_ENV},
+        strategy_edge::{self, EdgeRecord},
+    },
     ports::{self, StrategyHolding, StrategyRebalance},
 };
 
-/// 策略一段的資料：通知標題用的名稱與最後一次換股。
+/// 策略一段的資料：通知標題用的名稱、最後一次換股與最近一次策略優勢檢查。
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct StrategySection {
     pub(super) name: String,
-    pub(super) rebalance: StrategyRebalance,
+    /// `.env` 那一組策略的最後一次換股；沒有設定或最後一期已滿為 `None`。
+    pub(super) rebalance: Option<StrategyRebalance>,
+    /// 最近一次策略優勢檢查的結果；沒有（或已過期）為空。
+    pub(super) edges: Vec<EdgeRecord>,
 }
 
-/// 依 `.env` 的策略條件跑一次回測；沒有設定、gateway 未註冊、回測失敗或最後一期已滿時回 `None`
-/// （失敗只記警告）。
+/// 依 `.env` 的策略條件跑一次回測，並讀取最近一次策略優勢檢查；兩者都沒有時回 `None`
+/// （gateway 未註冊或回測失敗只記警告）。
 pub(super) async fn strategy_section() -> Option<StrategySection> {
+    let edges = strategy_edge::load_latest().await;
+    let rebalance = env_rebalance().await;
+    (rebalance.is_some() || !edges.is_empty()).then(|| StrategySection {
+        name: std::env::var(NAME_ENV)
+            .unwrap_or_default()
+            .trim()
+            .to_owned(),
+        rebalance,
+        edges,
+    })
+}
+
+/// `.env` 那一組策略的最後一次換股；沒有設定、gateway 未註冊、回測失敗或最後一期已滿時回 `None`。
+async fn env_rebalance() -> Option<StrategyRebalance> {
     let query = std::env::var(QUERY_ENV).unwrap_or_default();
     if query.trim().is_empty() {
         return None;
@@ -28,19 +49,13 @@ pub(super) async fn strategy_section() -> Option<StrategySection> {
             return None;
         }
     };
-    match gateway.latest_rebalance(query.trim()).await {
-        Ok(rebalance) => rebalance.map(|rebalance| StrategySection {
-            name: std::env::var(NAME_ENV)
-                .unwrap_or_default()
-                .trim()
-                .to_owned(),
-            rebalance,
-        }),
-        Err(why) => {
+    gateway
+        .latest_rebalance(query.trim())
+        .await
+        .unwrap_or_else(|why| {
             tracing::warn!("每週市場摘要：策略回測失敗: {why:#}");
             None
-        }
-    }
+        })
 }
 
 /// 報酬文字（帶正負號、兩位小數）；沒有為「—」。
@@ -63,13 +78,23 @@ fn holding_text(holding: &StrategyHolding) -> String {
     )
 }
 
-/// 策略一段的各行（開頭為空行）。
+/// 策略一段的各行（開頭為空行）：換股一段，接著策略優勢檢查一段。
 pub(super) fn lines(section: &StrategySection) -> Vec<String> {
-    let rebalance = &section.rebalance;
-    let title = if section.name.is_empty() {
+    let mut lines = section
+        .rebalance
+        .as_ref()
+        .map(|rebalance| rebalance_lines(&section.name, rebalance))
+        .unwrap_or_default();
+    lines.extend(strategy_edge::weekly_lines(&section.edges));
+    lines
+}
+
+/// 換股一段的各行（開頭為空行）。
+fn rebalance_lines(name: &str, rebalance: &StrategyRebalance) -> Vec<String> {
+    let title = if name.is_empty() {
         "策略持股".to_owned()
     } else {
-        format!("策略持股（{}）", section.name)
+        format!("策略持股（{name}）")
     };
     let remaining = (i64::from(rebalance.hold_days) - rebalance.days_elapsed).max(0);
     let mut lines = vec![

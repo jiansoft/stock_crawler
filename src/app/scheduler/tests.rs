@@ -130,6 +130,25 @@ async fn run_job_completes_for_every_outcome() {
     assert!(started.elapsed() < Duration::from_secs(5));
 }
 
+/// 策略優勢滾動檢查掛在每月 1–10 日的台北時間 07:30（是否為第一個交易日由任務自己判斷）。
+#[tokio::test]
+async fn strategy_edge_cron_fires_in_first_ten_days() {
+    use chrono::{Datelike, Timelike};
+
+    let taipei = FixedOffset::east_opt(8 * 3600).unwrap();
+    let mut sched = JobScheduler::new().await.expect("建立排程器");
+    let job = create_job("0 30 7 1-10 * *", "test", || async { Ok(()) }).expect("1-10");
+    let job_id = sched.add(job).await.expect("加入排程");
+    let next = sched
+        .next_tick_for_job(job_id)
+        .await
+        .expect("取得下次觸發時間")
+        .expect("應有下次觸發時間")
+        .with_timezone(&taipei);
+    assert_eq!((next.hour(), next.minute()), (7, 30), "{next}");
+    assert!((1..=10).contains(&next.day()), "{next}");
+}
+
 /// 卡住的任務必須在上限到時被中止，而不是無限期等下去。
 #[tokio::test]
 async fn run_with_timeout_aborts_hung_task() {
