@@ -371,6 +371,19 @@ async fn run_cron(sched: &JobScheduler) -> Result<()> {
             "檢查盤後籌碼與外資資料完整性",
             event::taiwan_stock::closing::ensure_after_hours,
         ),
+        // 每 10 分鐘檢查 pi 的供電／降頻、可用記憶體與 swap、SD 卡寫入耗時，異常時告警（同類 6 小時一次）；
+        // 一天 144 輪，task.begin／task.done 記 DEBUG。非 pi 讀不到的項目略過。
+        create_quiet_job(
+            "0 */10 * * * *",
+            "主機健康檢查",
+            event::host_health::execute,
+        ),
+        // 23:30 記一行當日主機健康彙總（fsync 最大耗時、最低可用記憶體、swap 最高使用率、是否降頻）
+        create_job(
+            "0 30 23 * * *",
+            "主機健康彙總",
+            event::host_health::summarize,
+        ),
     ];
     let mut job_count = 0usize;
     for job in jobs.into_iter().flatten() {
@@ -411,55 +424,96 @@ pub trait Scheduler {
 fn create_job<F, Fut>(cron_expr: &'static str, name: &'static str, task: F) -> Result<Job>
 where
     F: Fn() -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = Result<(), Error>> + Send,
+    Fut: Future<Output = Result<(), Error>> + Send + 'static,
+{
+    register_job(cron_expr, name, false, task)
+}
+
+/// 同 [`create_job`]，但 `task.begin`／`task.done` 記為 DEBUG。
+///
+/// 給每幾分鐘就跑一次的任務：一天上百輪的開始／結束紀錄會淹沒 info 日誌。失敗與逾時照常記 ERROR 並告警。
+fn create_quiet_job<F, Fut>(cron_expr: &'static str, name: &'static str, task: F) -> Result<Job>
+where
+    F: Fn() -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), Error>> + Send + 'static,
+{
+    register_job(cron_expr, name, true, task)
+}
+
+/// [`create_job`]／[`create_quiet_job`] 的共同實作。
+fn register_job<F, Fut>(
+    cron_expr: &'static str,
+    name: &'static str,
+    quiet: bool,
+    task: F,
+) -> Result<Job>
+where
+    F: Fn() -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), Error>> + Send + 'static,
 {
     tracing::info!("註冊排程任務: [{}] 運作週期: '{}'", name, cron_expr);
     let tz = FixedOffset::east_opt(8 * 3600).unwrap();
     Ok(Job::new_async_tz(cron_expr, tz, move |_uuid, _l| {
         let task = task.clone();
-        Box::pin(async move {
-            // 排程一旦「真正開始執行」才登記為 active，主程式關機時會等待此 use case 離開。
-            // guard 必須放在 async block 內，不能放在 create_job 階段；後者只是在啟動時
-            // 註冊排程，若那時就 +1，counter 會在整個服務生命週期永遠無法歸零。
-            let _operation_guard = crate::core::shutdown::BACKGROUND_OPERATIONS.begin();
-            tracing::info!(task = cron_expr, name = name, "task.begin");
-            let t = Instant::now();
-            match run_with_timeout(task(), JOB_TIMEOUT).await {
-                TaskOutcome::Done => {
-                    tracing::info!(
-                        task = cron_expr,
-                        name = name,
-                        elapsed_ms = t.elapsed().as_millis() as u64,
-                        "task.done"
-                    );
-                }
-                TaskOutcome::Failed(why) => {
-                    let err_msg = format!("{:?}", why);
-                    tracing::error!(
-                        task = cron_expr,
-                        name = name,
-                        elapsed_ms = t.elapsed().as_millis() as u64,
-                        error = %err_msg,
-                        "task.failed"
-                    );
-                    alert::send_alert(&format!("排程任務 [{}] 執行失敗", name), &err_msg).await;
-                }
-                TaskOutcome::TimedOut => {
-                    let err_msg = format!(
-                        "執行超過 {} 分鐘仍未結束，已中止本輪；請查看日誌中該任務最後的紀錄",
-                        JOB_TIMEOUT.as_secs() / 60
-                    );
-                    tracing::error!(
-                        task = cron_expr,
-                        name = name,
-                        elapsed_ms = t.elapsed().as_millis() as u64,
-                        "task.timeout"
-                    );
-                    alert::send_alert(&format!("排程任務 [{}] 逾時", name), &err_msg).await;
-                }
-            }
-        })
+        Box::pin(run_job(cron_expr, name, quiet, JOB_TIMEOUT, task))
     })?)
+}
+
+/// 執行一輪排程任務：登記為進行中、計時、記錄結果，失敗或逾時時告警。
+async fn run_job<F, Fut>(
+    cron_expr: &'static str,
+    name: &'static str,
+    quiet: bool,
+    limit: Duration,
+    task: F,
+) where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<(), Error>>,
+{
+    // 排程一旦「真正開始執行」才登記為 active，主程式關機時會等待此 use case 離開。
+    // guard 必須在這裡取得，不能放在 create_job 階段；後者只是在啟動時
+    // 註冊排程，若那時就 +1，counter 會在整個服務生命週期永遠無法歸零。
+    let _operation_guard = crate::core::shutdown::BACKGROUND_OPERATIONS.begin();
+    if quiet {
+        tracing::debug!(task = cron_expr, name = name, "task.begin");
+    } else {
+        tracing::info!(task = cron_expr, name = name, "task.begin");
+    }
+    let t = Instant::now();
+    match run_with_timeout(task(), limit).await {
+        TaskOutcome::Done => {
+            let elapsed_ms = t.elapsed().as_millis() as u64;
+            if quiet {
+                tracing::debug!(task = cron_expr, name = name, elapsed_ms, "task.done");
+            } else {
+                tracing::info!(task = cron_expr, name = name, elapsed_ms, "task.done");
+            }
+        }
+        TaskOutcome::Failed(why) => {
+            let err_msg = format!("{:?}", why);
+            tracing::error!(
+                task = cron_expr,
+                name = name,
+                elapsed_ms = t.elapsed().as_millis() as u64,
+                error = %err_msg,
+                "task.failed"
+            );
+            alert::send_alert(&format!("排程任務 [{}] 執行失敗", name), &err_msg).await;
+        }
+        TaskOutcome::TimedOut => {
+            let err_msg = format!(
+                "執行超過 {} 分鐘仍未結束，已中止本輪；請查看日誌中該任務最後的紀錄",
+                limit.as_secs() / 60
+            );
+            tracing::error!(
+                task = cron_expr,
+                name = name,
+                elapsed_ms = t.elapsed().as_millis() as u64,
+                "task.timeout"
+            );
+            alert::send_alert(&format!("排程任務 [{}] 逾時", name), &err_msg).await;
+        }
+    }
 }
 
 /// 單輪排程任務的執行時間上限。
