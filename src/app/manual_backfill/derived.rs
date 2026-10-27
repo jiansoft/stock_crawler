@@ -249,3 +249,23 @@ async fn test_record_strategy_rebalance() {
         None => println!("{preset} 最後一期剛好滿持有天數，沒有目前持股可記錄"),
     }
 }
+
+/// 立即跑一次策略優勢滾動檢查（不看今天是不是當月第一個交易日）：對要通知的策略跑近 24 個月與
+/// 2019 起的換股日偏移掃描，轉弱時發告警，結果寫進 Redis 供每週市場摘要讀取。不寫資料庫。
+///
+/// 執行範例：
+/// `cargo test app::manual_backfill::derived::test_strategy_edge_check -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_strategy_edge_check() {
+    dotenvy::dotenv().ok();
+    crate::app::ports::register_strategy_gateway(std::sync::Arc::new(
+        crate::interfaces::web::data_api::BacktestStrategyGateway,
+    ));
+    crate::app::event::taiwan_stock::strategy_edge::run(chrono::Local::now().date_naive())
+        .await
+        .expect("策略優勢檢查失敗");
+    for record in crate::app::event::taiwan_stock::strategy_edge::load_latest().await {
+        println!("{record:?}");
+    }
+}

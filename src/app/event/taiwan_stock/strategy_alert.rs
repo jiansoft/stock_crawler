@@ -48,14 +48,14 @@ pub const NAME_ENV: &str = "STRATEGY_ALERT_NAME";
 
 /// 要通知的一個策略：名稱（通知標題用，可為空）與條件。
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AlertStrategy {
-    name: String,
-    query: String,
+pub(super) struct AlertStrategy {
+    pub(super) name: String,
+    pub(super) query: String,
 }
 
 /// 要通知的策略：`alert` 為 true 的具名策略（依名稱），再加上環境變數的那一組（條件空白或與某個
 /// 具名策略相同時不加）。
-fn alert_strategies(
+pub(super) fn alert_strategies(
     presets: Vec<StrategyPreset>,
     env_query: Option<String>,
     env_name: Option<String>,

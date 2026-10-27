@@ -6,13 +6,16 @@ use async_trait::async_trait;
 use axum::{extract::Query, http::Uri, response::Response};
 use chrono::NaiveDate;
 
+use super::offsets::{distribution, simulate_offsets};
 use super::track::{settlement, track_records};
 use super::{Backtest, Simulation, current_holdings, exited, returns_to_date, stock_names};
-use crate::app::ports::{StrategyGateway, StrategyHolding, StrategyRebalance, StrategySettlement};
+use crate::app::ports::{
+    StrategyGateway, StrategyHolding, StrategyOffsetEdge, StrategyRebalance, StrategySettlement,
+};
 use crate::domain::strategy::rebalance::StrategyRebalanceRepository;
 use crate::infra::database;
 use crate::infra::database::repository::strategy_rebalance::PgStrategyRebalanceRepository;
-use crate::interfaces::web::data_api::dto::ScreenBacktestParams;
+use crate::interfaces::web::data_api::dto::{BacktestOffsetResult, ScreenBacktestParams};
 
 /// 讀取錯誤回應內容的上限（位元組）。
 const ERROR_BODY_LIMIT: usize = 64 * 1024;
@@ -26,14 +29,7 @@ pub struct BacktestStrategyGateway;
 #[async_trait]
 impl StrategyGateway for BacktestStrategyGateway {
     async fn latest_rebalance(&self, query: &str) -> Result<Option<StrategyRebalance>> {
-        let uri: Uri = format!("/?{query}")
-            .parse()
-            .context("策略條件不是有效的 query string")?;
-        let Query(params) = Query::<ScreenBacktestParams>::try_from_uri(&uri)
-            .map_err(|error| anyhow!("策略條件無法解析：{error}"))?;
-        if params.from.is_none() {
-            bail!("策略條件必須指定 from（換股日從起日起算，省略時每天都會變）");
-        }
+        let params = parse_query(query)?;
         let backtest = match Backtest::prepare(&params).await {
             Ok(backtest) => backtest.period_end_only(),
             Err(response) => bail!("策略條件不正確：{}", rejection(*response).await),
@@ -137,6 +133,44 @@ impl StrategyGateway for BacktestStrategyGateway {
             .context("計算實盤表現失敗")?;
         Ok(settlement(&response))
     }
+
+    async fn offset_edge(&self, query: &str) -> Result<StrategyOffsetEdge> {
+        let params = parse_query(query)?;
+        let backtest = match Backtest::prepare(&params).await {
+            Ok(backtest) => backtest.period_end_only(),
+            Err(response) => bail!("策略條件不正確：{}", rejection(*response).await),
+        };
+        let results: Vec<BacktestOffsetResult> = simulate_offsets(&backtest)
+            .await
+            .context("偏移回測查詢失敗")?
+            .into_iter()
+            .map(|run| run.result)
+            .collect();
+        let summary = distribution(&results);
+        Ok(StrategyOffsetEdge {
+            from: backtest.from,
+            to: backtest.to,
+            offsets: results.len(),
+            median_return: summary
+                .annualized_return_after_costs
+                .map(|stat| stat.median),
+            etf_median_return: summary.etf_annualized_return.map(|stat| stat.median),
+            beat_rate: summary.beat_etf_return_rate,
+        })
+    }
+}
+
+/// 把策略條件（條件選股回測的 query string）解析成回測參數；必須指定 `from`。
+fn parse_query(query: &str) -> Result<ScreenBacktestParams> {
+    let uri: Uri = format!("/?{query}")
+        .parse()
+        .context("策略條件不是有效的 query string")?;
+    let Query(params) = Query::<ScreenBacktestParams>::try_from_uri(&uri)
+        .map_err(|error| anyhow!("策略條件無法解析：{error}"))?;
+    if params.from.is_none() {
+        bail!("策略條件必須指定 from（換股日從起日起算，省略時每天都會變）");
+    }
+    Ok(params)
 }
 
 /// `date` 的籌碼是否已入庫。

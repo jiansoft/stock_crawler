@@ -215,7 +215,7 @@ fn strategy_lines_rank_holdings_by_return() {
     };
     let mut section = StrategySection {
         name: "動能".to_owned(),
-        rebalance: crate::app::ports::StrategyRebalance {
+        rebalance: Some(crate::app::ports::StrategyRebalance {
             days_elapsed: 7,
             return_to_date: Some(3.456),
             etf_return_to_date: Some(-1.0),
@@ -234,7 +234,8 @@ fn strategy_lines_rank_holdings_by_return() {
                 },
             ],
             ..rebalance()
-        },
+        }),
+        edges: Vec::new(),
     };
     assert_eq!(
         lines(&section),
@@ -248,11 +249,11 @@ fn strategy_lines_rank_holdings_by_return() {
     );
 
     // 有報酬的持股不多於 3 檔時只列最好；只有 1 檔多出來時最差只列 1 檔。
-    section.rebalance.kept.truncate(2);
+    rebalance_of(&mut section).kept.truncate(2);
     let few = lines(&section);
     assert_eq!(few.len(), 5, "{few:?}");
     assert_eq!(few[4], "• 最差：B -5.00%");
-    section.rebalance.added.truncate(1);
+    rebalance_of(&mut section).added.truncate(1);
     let one = lines(&section);
     assert_eq!(
         one.last().map(String::as_str),
@@ -261,21 +262,21 @@ fn strategy_lines_rank_holdings_by_return() {
 
     // 大盤濾網空手、沒有符合條件的股票；沒有名稱時標題只寫「策略持股」。
     section.name.clear();
-    section.rebalance.market_filtered = true;
-    section.rebalance.etf_return_to_date = None;
+    rebalance_of(&mut section).market_filtered = true;
+    rebalance_of(&mut section).etf_return_to_date = None;
     let filtered = lines(&section);
     assert_eq!(
         filtered[1],
         "策略持股：2026-10-16 換股、已過 7 個交易日，再 13 個交易日換股"
     );
     assert_eq!(filtered[2], "• 大盤濾網沒過，策略部位空手；0050 同期 —");
-    section.rebalance.market_filtered = false;
-    section.rebalance.added.clear();
-    section.rebalance.kept.clear();
+    rebalance_of(&mut section).market_filtered = false;
+    rebalance_of(&mut section).added.clear();
+    rebalance_of(&mut section).kept.clear();
     assert!(lines(&section)[2].starts_with("• 沒有符合條件的股票"));
 
     // 有報酬但都查不到個股報酬時只列持有檔數。
-    section.rebalance.kept = vec![with_return("G", None)];
+    rebalance_of(&mut section).kept = vec![with_return("G", None)];
     assert_eq!(lines(&section).len(), 3);
 
     // 組進訊息：放在最後一段。
@@ -295,12 +296,63 @@ fn strategy_lines_rank_holdings_by_return() {
     );
 }
 
-/// 沒有設定策略條件時不跑回測。
+/// 測試用：策略段的換股（一定有）。
+fn rebalance_of(
+    section: &mut super::strategy::StrategySection,
+) -> &mut crate::app::ports::StrategyRebalance {
+    section.rebalance.as_mut().expect("測試的策略段有換股")
+}
+
+/// 只有策略優勢檢查、沒有換股時只列優勢一段；有換股時接在換股段之後。
+#[test]
+fn strategy_lines_append_edge_check() {
+    use super::strategy::{StrategySection, lines};
+    use crate::app::event::taiwan_stock::strategy_alert::tests::rebalance;
+    use crate::app::event::taiwan_stock::strategy_edge::{EdgeRecord, EdgeWindow, weekly_lines};
+    let day = |d| NaiveDate::from_ymd_opt(2026, 11, d).unwrap();
+    let edges = vec![EdgeRecord {
+        name: "最佳組合".to_owned(),
+        checked: day(2),
+        recent: EdgeWindow {
+            from: day(2),
+            to: day(2),
+            offsets: 20,
+            median_return: Some(31.0),
+            etf_median_return: Some(30.0),
+            beat_rate: Some(0.6),
+        },
+        full: None,
+    }];
+    let mut section = StrategySection {
+        name: String::new(),
+        rebalance: None,
+        edges: edges.clone(),
+    };
+    assert_eq!(lines(&section), weekly_lines(&edges));
+    assert_eq!(
+        lines(&section)[1],
+        "策略優勢（2026-11-02 檢查，次日開盤＋20 bps，換股日偏移中位數）"
+    );
+
+    section.rebalance = Some(rebalance());
+    let both = lines(&section);
+    assert!(both[1].starts_with("策略持股："), "{both:?}");
+    assert!(both.ends_with(&weekly_lines(&edges)), "{both:?}");
+}
+
+/// 沒有設定策略條件、也沒有策略優勢檢查紀錄時不輸出策略段。
 #[tokio::test]
 async fn strategy_section_without_query_is_none() {
     use crate::app::event::taiwan_stock::strategy_alert::QUERY_ENV;
     if std::env::var(QUERY_ENV).is_ok_and(|query| !query.trim().is_empty()) {
         println!("跳過 strategy_section_without_query_is_none：環境已設定 {QUERY_ENV}");
+        return;
+    }
+    if !crate::app::event::taiwan_stock::strategy_edge::load_latest()
+        .await
+        .is_empty()
+    {
+        println!("跳過 strategy_section_without_query_is_none：Redis 已有策略優勢檢查紀錄");
         return;
     }
     assert!(super::strategy::strategy_section().await.is_none());
