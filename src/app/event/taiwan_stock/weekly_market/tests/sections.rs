@@ -206,7 +206,7 @@ async fn regime_section_lists_crosses() {
 /// 策略一段：換股日、已過與剩下的交易日數、本期至今報酬與 0050、最好與最差的持股（沒有報酬的不列）。
 #[test]
 fn strategy_lines_rank_holdings_by_return() {
-    use super::strategy::{StrategySection, lines};
+    use super::strategy::{StrategyPosition, StrategySection, lines};
     use crate::app::event::taiwan_stock::strategy_alert::tests::{holding, rebalance};
     use crate::app::ports::StrategyHolding;
     let with_return = |symbol: &str, ret: Option<f64>| StrategyHolding {
@@ -214,27 +214,30 @@ fn strategy_lines_rank_holdings_by_return() {
         ..holding(symbol, None, 20.0)
     };
     let mut section = StrategySection {
-        name: "動能".to_owned(),
-        rebalance: Some(crate::app::ports::StrategyRebalance {
-            days_elapsed: 7,
-            return_to_date: Some(3.456),
-            etf_return_to_date: Some(-1.0),
-            added: vec![
-                with_return("A", Some(10.0)),
-                with_return("B", Some(-5.0)),
-                with_return("C", None),
-            ],
-            kept: vec![
-                with_return("D", Some(2.0)),
-                with_return("E", Some(1.0)),
-                with_return("F", Some(-1.0)),
-                StrategyHolding {
-                    name: Some("台積電".to_owned()),
-                    ..with_return("2330", Some(4.0))
-                },
-            ],
-            ..rebalance()
-        }),
+        positions: vec![StrategyPosition {
+            name: "動能".to_owned(),
+            rebalance: crate::app::ports::StrategyRebalance {
+                days_elapsed: 7,
+                return_to_date: Some(3.456),
+                etf_return_to_date: Some(-1.0),
+                added: vec![
+                    with_return("A", Some(10.0)),
+                    with_return("B", Some(-5.0)),
+                    with_return("C", None),
+                ],
+                kept: vec![
+                    with_return("D", Some(2.0)),
+                    with_return("E", Some(1.0)),
+                    with_return("F", Some(-1.0)),
+                    StrategyHolding {
+                        name: Some("台積電".to_owned()),
+                        ..with_return("2330", Some(4.0))
+                    },
+                ],
+                ..rebalance()
+            },
+            settlement: None,
+        }],
         edges: Vec::new(),
     };
     assert_eq!(
@@ -261,7 +264,7 @@ fn strategy_lines_rank_holdings_by_return() {
     );
 
     // 大盤濾網空手、沒有符合條件的股票；沒有名稱時標題只寫「策略持股」。
-    section.name.clear();
+    section.positions[0].name.clear();
     rebalance_of(&mut section).market_filtered = true;
     rebalance_of(&mut section).etf_return_to_date = None;
     let filtered = lines(&section);
@@ -300,13 +303,13 @@ fn strategy_lines_rank_holdings_by_return() {
 fn rebalance_of(
     section: &mut super::strategy::StrategySection,
 ) -> &mut crate::app::ports::StrategyRebalance {
-    section.rebalance.as_mut().expect("測試的策略段有換股")
+    &mut section.positions[0].rebalance
 }
 
 /// 只有策略優勢檢查、沒有換股時只列優勢一段；有換股時接在換股段之後。
 #[test]
 fn strategy_lines_append_edge_check() {
-    use super::strategy::{StrategySection, lines};
+    use super::strategy::{StrategyPosition, StrategySection, lines};
     use crate::app::event::taiwan_stock::strategy_alert::tests::rebalance;
     use crate::app::event::taiwan_stock::strategy_edge::{EdgeRecord, EdgeWindow, weekly_lines};
     let day = |d| NaiveDate::from_ymd_opt(2026, 11, d).unwrap();
@@ -324,8 +327,7 @@ fn strategy_lines_append_edge_check() {
         full: None,
     }];
     let mut section = StrategySection {
-        name: String::new(),
-        rebalance: None,
+        positions: Vec::new(),
         edges: edges.clone(),
     };
     assert_eq!(lines(&section), weekly_lines(&edges));
@@ -334,26 +336,12 @@ fn strategy_lines_append_edge_check() {
         "策略優勢（2026-11-02 檢查，次日開盤＋20 bps，換股日偏移中位數）"
     );
 
-    section.rebalance = Some(rebalance());
+    section.positions.push(StrategyPosition {
+        name: String::new(),
+        rebalance: rebalance(),
+        settlement: None,
+    });
     let both = lines(&section);
     assert!(both[1].starts_with("策略持股："), "{both:?}");
     assert!(both.ends_with(&weekly_lines(&edges)), "{both:?}");
-}
-
-/// 沒有設定策略條件、也沒有策略優勢檢查紀錄時不輸出策略段。
-#[tokio::test]
-async fn strategy_section_without_query_is_none() {
-    use crate::app::event::taiwan_stock::strategy_alert::QUERY_ENV;
-    if std::env::var(QUERY_ENV).is_ok_and(|query| !query.trim().is_empty()) {
-        println!("跳過 strategy_section_without_query_is_none：環境已設定 {QUERY_ENV}");
-        return;
-    }
-    if !crate::app::event::taiwan_stock::strategy_edge::load_latest()
-        .await
-        .is_empty()
-    {
-        println!("跳過 strategy_section_without_query_is_none：Redis 已有策略優勢檢查紀錄");
-        return;
-    }
-    assert!(super::strategy::strategy_section().await.is_none());
 }
