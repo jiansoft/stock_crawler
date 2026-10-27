@@ -34,13 +34,6 @@ const FORBIDDEN_ALERT_COOLDOWN: Duration = Duration::from_secs(60 * 60 * 12);
 /// 正式機平常 p99 約 0.4 秒、最慢約 2.4 秒，請求逾時為 15 秒；5 秒代表來源站明顯變慢。
 const SLOW_REQUEST_WARN_MS: u64 = 5_000;
 
-/// 錯誤狀態碼是否降為 INFO：只有快速失敗模式（呼叫端會換來源）下的 5xx。
-///
-/// 4xx 多半是網址或參數錯誤、一般模式的 5xx 沒有備援，兩者仍記 WARN。
-fn downgrade_error_status(status: reqwest::StatusCode, fail_fast: bool) -> bool {
-    fail_fast && status.is_server_error()
-}
-
 /// 快速失敗模式下單次請求的逾時。
 ///
 /// 一般請求沿用用戶端的 15 秒逾時；即時報價有其他站可以換，等太久反而拖慢整輪輪詢。
@@ -53,11 +46,15 @@ tokio::task_local! {
 }
 
 /// 在快速失敗模式下執行 `fut`：其中的 HTTP 請求不做網路重試與 429 重試，
-/// 單次逾時縮短為 [`FAIL_FAST_TIMEOUT`]，失敗只記 WARN。
+/// 單次逾時縮短為 [`FAIL_FAST_TIMEOUT`]，逐筆的錯誤、逾時與慢回應只記 DEBUG。
 ///
 /// 給「有其他來源可以換」的呼叫端使用（即時報價站點池）。一般批次請求的重試是為了
 /// 撐過來源站的短暫異常，但站點池換下一站就好；網路重試的 2/4/8 秒 backoff 會讓
 /// 單一請求拖到 15 秒以上，2026-10-07 PcHome p99 9.6 秒、`http.failed` 12 筆即為此。
+///
+/// 站點池會累計每站的失敗數與熔斷次數，收盤時在「站點整體耗時統計」列出，失敗率過高或當天
+/// 第一次熔斷才記 WARN（見 `crawler::site_pool`）；逐筆 WARN 在 2026-10-27 一天就有 PcHome 逾時
+/// 70 筆、BigGo 403 44 筆、慢回應 35 筆，淹沒真正需要看的警告。403 仍照常告警。
 pub async fn fail_fast<F: Future>(fut: F) -> F::Output {
     FAIL_FAST.scope((), fut).await
 }
@@ -119,6 +116,7 @@ pub(super) async fn send(
 
 /// 使用指定用戶端發送請求，供共用 HTTP 入口與測試使用，並處理重試及 403 告警。
 /// 一般回應記為 DEBUG；慢回應、HTTP 錯誤與待重試的網路錯誤／429 記為 WARN，重試耗盡記為 ERROR。
+/// 快速失敗模式（見 [`fail_fast`]）下逐筆一律記 DEBUG，由呼叫端彙總。
 /// 回傳尚未讀取內容的回應；HTTP 狀態碼仍交由呼叫端判斷，網路或限流重試耗盡則回傳錯誤。
 pub(super) async fn send_with_client(
     client: &Client,
@@ -188,11 +186,10 @@ pub(super) async fn send_with_client(
                 if status.is_client_error() || status.is_server_error() {
                     if rate_limited {
                         // 由下方的重試流程記錄。
-                    } else if downgrade_error_status(status, fail_fast) {
-                        // 快速失敗模式下的 5xx 由呼叫端立即換下一個來源（並計入站點熔斷），
-                        // 盤中備援來源偶發 502 一天上百筆，記 INFO 避免淹沒真正的警告。
+                    } else if fail_fast {
+                        // 快速失敗模式下的錯誤由呼叫端立即換下一個來源，並計入站點失敗數與熔斷（見 [`fail_fast`]）。
                         // 欄位寫在同一行：tracing 的欄位只在有訂閱者時求值，分行會讓涵蓋率誤判為未執行。
-                        tracing::info!(url = %safe_url, method = method.as_str(), status = status.as_u16(), elapsed_ms, "http.done.fail_fast{request_detail_suffix}");
+                        tracing::debug!(url = %safe_url, method = method.as_str(), status = status.as_u16(), elapsed_ms, "http.done.fail_fast{request_detail_suffix}");
                     } else {
                         tracing::warn!(
                             url = %safe_url,
@@ -202,8 +199,9 @@ pub(super) async fn send_with_client(
                             "http.done{request_detail_suffix}"
                         );
                     }
-                } else if elapsed_ms >= SLOW_REQUEST_WARN_MS {
+                } else if elapsed_ms >= SLOW_REQUEST_WARN_MS && !fail_fast {
                     // 成功回應平常只記 DEBUG；來源站明顯變慢時仍要在檔案日誌留下痕跡。
+                    // 快速失敗模式的慢回應由站點池的耗時統計（p99）與慢站降級處理。
                     tracing::warn!(
                         url = %safe_url,
                         method = method.as_str(),
@@ -225,13 +223,7 @@ pub(super) async fn send_with_client(
                 if rate_limited {
                     if fail_fast {
                         // 快速失敗模式由呼叫端換下一個來源，不在這裡等 backoff。
-                        tracing::warn!(
-                            url = %safe_url,
-                            method = method.as_str(),
-                            status = status.as_u16(),
-                            elapsed_ms,
-                            "http.rate_limited.fail_fast{request_detail_suffix}"
-                        );
+                        tracing::debug!(url = %safe_url, method = method.as_str(), status = status.as_u16(), elapsed_ms, "http.rate_limited.fail_fast{request_detail_suffix}");
                         return Err(anyhow!("Rate limited (429) at {}", safe_url));
                     }
                     rate_limit_attempt += 1;
@@ -288,15 +280,9 @@ pub(super) async fn send_with_client(
                 // 因此必須在這裡就先遮蔽。
                 let err_str = redact_secrets(&format!("{why:?}"));
                 let safe_url = redact_url(url);
-                // 快速失敗模式不重試；呼叫端會改用其他來源，所以只記 WARN。
+                // 快速失敗模式不重試；呼叫端會改用其他來源並計入站點失敗數，所以只記 DEBUG。
                 if fail_fast {
-                    tracing::warn!(
-                        url = %safe_url,
-                        attempt = network_attempt,
-                        error = %err_str,
-                        elapsed_ms,
-                        "http.failed.fail_fast{request_detail_suffix}"
-                    );
+                    tracing::debug!(url = %safe_url, attempt = network_attempt, error = %err_str, elapsed_ms, "http.failed.fail_fast{request_detail_suffix}");
                     return Err(anyhow!("Failed to send {}: {err_str}", safe_url));
                 }
 

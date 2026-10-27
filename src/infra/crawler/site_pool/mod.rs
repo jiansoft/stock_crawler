@@ -1,11 +1,11 @@
 //! # 站點池與股價聚合 (Site Pool)
 //!
 //! 此子模組集中管理多來源即時股價／完整報價的輪詢 (round-robin) 與備援機制，
-//! 並記錄各站點延遲統計供收盤後輸出。對外公開的 `fetch_*` 函式由 `crawler` 模組
+//! 並記錄各站點延遲、失敗數與熔斷次數供收盤後輸出。對外公開的 `fetch_*` 函式由 `crawler` 模組
 //! 重新匯出，呼叫端路徑維持不變。
 //!
 //! 內容依職責拆成四個檔案：本檔負責輪詢與備援流程及對外 API，
-//! [`registry`] 收納站點清單與函式指標包裝，[`latency`] 負責延遲統計，
+//! [`registry`] 收納站點清單與函式指標包裝，[`latency`] 負責延遲與失敗統計，
 //! [`health`] 依各站近期成敗與耗時決定嘗試順序（熔斷與慢站降級）。
 
 mod health;
@@ -22,7 +22,7 @@ use rust_decimal::Decimal;
 
 use self::health::{plan_attempt_order, record_site_outcome};
 pub use self::latency::flush_site_latency_stats;
-use self::latency::record_site_latency;
+use self::latency::record_site_result;
 use self::registry::{
     ALL_PRICE_SITES, ALL_QUOTE_SITES, BACKUP_PRICE_SITES, PriceSite, QuoteSite, Site,
 };
@@ -84,8 +84,8 @@ async fn fetch_from_site_pool<T>(
         let started_at = Instant::now();
         // 即時抓價失敗就換下一站，不在單一站上做網路重試與 429 backoff。
         let result = http::fail_fast((site.fetch)(stock_symbol)).await;
-        record_site_latency(site.name, started_at);
-        record_site_outcome(site.name, result.is_ok(), started_at);
+        let tripped = record_site_outcome(site.name, result.is_ok(), started_at);
+        record_site_result(site.name, started_at, result.is_ok(), tripped);
         match result {
             Ok(value) => return Ok((value, site.name)),
             Err(why) => errors.push(format!("{}: {why}", site.name)),
