@@ -10,6 +10,15 @@ fn test_client() -> Client {
     Client::new()
 }
 
+/// 開啟 DEBUG 層級的訂閱者，讓快速失敗模式降級後的日誌欄位實際被求值（也確認它不會 panic）。
+fn debug_subscriber() -> tracing::subscriber::DefaultGuard {
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_test_writer()
+        .finish();
+    tracing::subscriber::set_default(subscriber)
+}
+
 /// 只回一次 429 的本機 HTTP 伺服器，回傳網址。
 async fn spawn_rate_limited_server() -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -43,6 +52,7 @@ async fn fail_fast_flag_is_scoped() {
 /// 快速失敗模式遇到 429 直接回錯誤，不等 5 秒以上的 backoff。
 #[tokio::test]
 async fn fail_fast_returns_on_rate_limit_without_backoff() {
+    let _guard = debug_subscriber();
     let url = spawn_rate_limited_server().await;
     let client = test_client();
 
@@ -68,6 +78,7 @@ async fn fail_fast_returns_on_rate_limit_without_backoff() {
 /// 快速失敗模式連線失敗時不重試，不會出現 2/4/8 秒的 backoff。
 #[tokio::test]
 async fn fail_fast_does_not_retry_network_errors() {
+    let _guard = debug_subscriber();
     // 先綁再放掉，取得一個目前沒有人監聽的本機埠。
     let addr = std::net::TcpListener::bind("127.0.0.1:0")
         .and_then(|listener| listener.local_addr())
@@ -144,29 +155,10 @@ fn test_format_form_params_log_empty_map() {
     assert_eq!(result, "params=[]");
 }
 
-/// 只有快速失敗模式的 5xx 降為 INFO；4xx 與一般模式的 5xx 仍記 WARN。
-#[test]
-fn downgrade_error_status_only_for_fail_fast_server_errors() {
-    use reqwest::StatusCode;
-    assert!(downgrade_error_status(StatusCode::BAD_GATEWAY, true));
-    assert!(downgrade_error_status(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        true
-    ));
-    assert!(!downgrade_error_status(StatusCode::BAD_GATEWAY, false));
-    assert!(!downgrade_error_status(StatusCode::NOT_FOUND, true));
-    assert!(!downgrade_error_status(StatusCode::FORBIDDEN, false));
-}
-
 /// 降級只影響日誌層級：快速失敗模式下 5xx 回應仍原樣交給呼叫端判斷。
 #[tokio::test]
 async fn fail_fast_server_error_still_returns_response() {
-    // 開啟 INFO 層級的訂閱者，讓降級後的日誌欄位實際被求值（也確認它不會 panic）。
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_test_writer()
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let _guard = debug_subscriber();
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

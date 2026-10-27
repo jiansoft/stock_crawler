@@ -1,11 +1,20 @@
 //! # 站點延遲統計 (Latency)
 //!
-//! 此子模組負責累積各報價站點的單次請求耗時，並在收盤後輸出
-//! 取樣次數、平均耗時與 `p50`、`p70`、`p99` 百分位延遲的人類可讀摘要。
+//! 此子模組負責累積各報價站點的單次請求耗時、失敗數與熔斷次數，並在收盤後輸出
+//! 取樣次數、失敗數與失敗率、熔斷次數、平均耗時與 `p50`、`p70`、`p99` 百分位延遲的人類可讀摘要。
+//!
+//! 站點池的請求以快速失敗模式送出，逐筆的 5xx、403、逾時只記 DEBUG（見 `core::util::http::fail_fast`），
+//! 由這裡彙總：失敗率超過 [`FAILURE_WARN_RATE`]（樣本至少 [`FAILURE_WARN_MIN_SAMPLES`] 筆）的站點，
+//! 收盤那一行改記 WARN。
 
 use std::{collections::HashMap, sync::Mutex, time::Instant};
 
 use once_cell::sync::Lazy;
+
+/// 失敗率超過此值（0–1）時，收盤統計行改記 WARN。
+const FAILURE_WARN_RATE: f64 = 0.10;
+/// 樣本少於此數時不依失敗率升級，避免冷門時段幾筆失敗就記 WARN。
+const FAILURE_WARN_MIN_SAMPLES: usize = 20;
 
 /// 各報價站點的延遲統計（供收盤後輸出人類可讀的追蹤資訊）。
 static SITE_LATENCY_STATS: Lazy<Mutex<HashMap<&'static str, SiteLatencyStats>>> =
@@ -16,6 +25,10 @@ static SITE_LATENCY_STATS: Lazy<Mutex<HashMap<&'static str, SiteLatencyStats>>> 
 struct SiteLatencyStats {
     /// 每次請求的耗時，單位為毫秒。
     durations_ms: Vec<u64>,
+    /// 失敗的請求數。
+    failures: usize,
+    /// 熔斷次數。
+    trips: usize,
 }
 
 /// 單一站點延遲統計的彙總快照。
@@ -26,6 +39,10 @@ struct SiteLatencySnapshot {
     site_name: &'static str,
     /// 取樣次數。
     count: usize,
+    /// 失敗數。
+    failures: usize,
+    /// 熔斷次數。
+    trips: usize,
     /// 平均延遲，單位為毫秒。
     avg_ms: u64,
     /// 第 50 百分位延遲，單位為毫秒。
@@ -40,6 +57,13 @@ impl SiteLatencyStats {
     /// 新增一筆站點延遲樣本。
     fn record(&mut self, elapsed_ms: u64) {
         self.durations_ms.push(elapsed_ms);
+    }
+
+    /// 新增一筆樣本並記錄成敗與是否因此熔斷。
+    fn record_result(&mut self, elapsed_ms: u64, ok: bool, tripped: bool) {
+        self.record(elapsed_ms);
+        self.failures += usize::from(!ok);
+        self.trips += usize::from(tripped);
     }
 
     /// 取得目前累積的樣本數。
@@ -96,12 +120,46 @@ impl SiteLatencyStats {
     }
 }
 
-/// 記錄單一站點本次請求耗時。
-pub(super) fn record_site_latency(site_name: &'static str, started_at: Instant) {
+/// 記錄單一站點本次請求的耗時、成敗，以及這次失敗是否讓站點熔斷。
+pub(super) fn record_site_result(
+    site_name: &'static str,
+    started_at: Instant,
+    ok: bool,
+    tripped: bool,
+) {
     let elapsed_ms = started_at.elapsed().as_millis() as u64;
     if let Ok(mut stats) = SITE_LATENCY_STATS.lock() {
-        stats.entry(site_name).or_default().record(elapsed_ms);
+        stats
+            .entry(site_name)
+            .or_default()
+            .record_result(elapsed_ms, ok, tripped);
     }
+}
+
+/// 失敗率是否高到收盤統計行要記 WARN。
+fn failure_needs_attention(count: usize, failures: usize) -> bool {
+    count >= FAILURE_WARN_MIN_SAMPLES && failures as f64 > count as f64 * FAILURE_WARN_RATE
+}
+
+/// 收盤統計的一行文字。
+fn summary_line(entry: &SiteLatencySnapshot) -> String {
+    let failure_rate = if entry.count == 0 {
+        0.0
+    } else {
+        entry.failures as f64 * 100.0 / entry.count as f64
+    };
+    format!(
+        "站點整體耗時統計 {}: count={}, failed={}({:.1}%), trips={}, avg={}ms, p50={}ms, p70={}ms, p99={}ms",
+        entry.site_name,
+        entry.count,
+        entry.failures,
+        failure_rate,
+        entry.trips,
+        entry.avg_ms,
+        entry.p50_ms,
+        entry.p70_ms,
+        entry.p99_ms
+    )
 }
 
 /// 輸出站點耗時統計並清空當前累積資料。
@@ -128,6 +186,8 @@ pub fn flush_site_latency_stats() {
         .map(|(site_name, site_stats)| SiteLatencySnapshot {
             site_name,
             count: site_stats.sample_count(),
+            failures: site_stats.failures,
+            trips: site_stats.trips,
             avg_ms: site_stats.average_ms(),
             p50_ms: site_stats.p50_ms(),
             p70_ms: site_stats.p70_ms(),
@@ -142,15 +202,12 @@ pub fn flush_site_latency_stats() {
     });
 
     for entry in entries {
-        tracing::info!(
-            "站點整體耗時統計 {}: count={}, avg={}ms, p50={}ms, p70={}ms, p99={}ms",
-            entry.site_name,
-            entry.count,
-            entry.avg_ms,
-            entry.p50_ms,
-            entry.p70_ms,
-            entry.p99_ms
-        );
+        let line = summary_line(&entry);
+        if failure_needs_attention(entry.count, entry.failures) {
+            tracing::warn!("{line}（失敗率超過 {:.0}%）", FAILURE_WARN_RATE * 100.0);
+        } else {
+            tracing::info!("{line}");
+        }
     }
 
     stats.clear();
@@ -176,6 +233,52 @@ mod tests {
         assert_eq!(stats.p99_ms(), 50);
     }
 
+    /// 成敗與熔斷次數各自累計；失敗率超過 10% 且樣本至少 20 筆才記 WARN。
+    #[test]
+    fn site_results_count_failures_and_trips() {
+        let mut stats = SiteLatencyStats::default();
+        stats.record_result(10, true, false);
+        stats.record_result(30, false, false);
+        stats.record_result(20, false, true);
+        assert_eq!(
+            (stats.sample_count(), stats.failures, stats.trips),
+            (3, 2, 1)
+        );
+        assert_eq!(stats.average_ms(), 20);
+
+        assert!(!failure_needs_attention(19, 19));
+        assert!(!failure_needs_attention(20, 2));
+        assert!(failure_needs_attention(20, 3));
+        assert!(failure_needs_attention(1_000, 101));
+        assert!(!failure_needs_attention(1_000, 100));
+
+        let line = summary_line(&SiteLatencySnapshot {
+            site_name: "PcHome",
+            count: 800,
+            failures: 70,
+            trips: 3,
+            avg_ms: 1_200,
+            p50_ms: 900,
+            p70_ms: 1_100,
+            p99_ms: 6_000,
+        });
+        assert_eq!(
+            line,
+            "站點整體耗時統計 PcHome: count=800, failed=70(8.8%), trips=3, avg=1200ms, p50=900ms, p70=1100ms, p99=6000ms"
+        );
+        let empty = summary_line(&SiteLatencySnapshot {
+            site_name: "Empty",
+            count: 0,
+            failures: 0,
+            trips: 0,
+            avg_ms: 0,
+            p50_ms: 0,
+            p70_ms: 0,
+            p99_ms: 0,
+        });
+        assert!(empty.contains("failed=0(0.0%)"), "{empty}");
+    }
+
     /// 驗證站點延遲統計在單一樣本時仍能正確回傳平均值與各主要百分位。
     #[test]
     fn test_site_latency_stats_percentiles_with_single_sample() {
@@ -192,11 +295,22 @@ mod tests {
     /// 驗證輸出延遲統計後，累積中的站點資料會被清空。
     #[test]
     fn test_flush_site_latency_stats_clears_data() {
+        // 開訂閱者讓統計行的格式化實際被求值。
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_test_writer()
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
         {
             let mut all_stats = SITE_LATENCY_STATS.lock().expect("lock site latency stats");
             all_stats.clear();
             all_stats.entry("Yahoo").or_default().record(12);
             all_stats.entry("Fugle").or_default().record(34);
+            // 失敗率 20%：收盤那一行走 WARN 分支。
+            let flaky = all_stats.entry("TestFlaky").or_default();
+            for idx in 0..25 {
+                flaky.record_result(10, idx % 5 != 0, idx == 0);
+            }
         }
 
         flush_site_latency_stats();
@@ -205,5 +319,6 @@ mod tests {
         let all_stats = SITE_LATENCY_STATS.lock().expect("lock site latency stats");
         assert!(!all_stats.contains_key("Yahoo"));
         assert!(!all_stats.contains_key("Fugle"));
+        assert!(!all_stats.contains_key("TestFlaky"));
     }
 }

@@ -28,7 +28,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use chrono::Local;
 use once_cell::sync::Lazy;
+
+use crate::core::util::daily_seen::ConcurrentDailySeen;
 
 /// 連續失敗幾次就熔斷。
 const FAILURE_THRESHOLD: u32 = 5;
@@ -49,6 +52,8 @@ const PROBE_EVERY: usize = 20;
 static HEALTH: Lazy<Mutex<HealthBook>> = Lazy::new(|| Mutex::new(HealthBook::default()));
 /// 輪詢序號，用來決定哪一次要略過降級（探測）。
 static PLAN_SEQ: AtomicUsize = AtomicUsize::new(0);
+/// 今天已熔斷過的站點：每站每天第一次熔斷記 WARN，之後記 INFO（一天可能熔斷上百次）。
+static TRIPPED_TODAY: Lazy<ConcurrentDailySeen> = Lazy::new(ConcurrentDailySeen::default);
 
 /// 單一站點的健康狀態。
 #[derive(Debug, Default)]
@@ -218,25 +223,38 @@ pub(super) fn plan_attempt_order(names: &[&'static str], start: usize) -> Vec<us
     }
 }
 
-/// 記錄站點本次請求的成敗與耗時，熔斷或恢復時寫 info 日誌。
-pub(super) fn record_site_outcome(name: &'static str, ok: bool, started_at: Instant) {
+/// 記錄站點本次請求的成敗與耗時，回傳這次是否讓站點熔斷。
+///
+/// 熔斷時寫日誌：每站每天第一次記 WARN，之後記 INFO（熔斷次數另計入收盤的站點統計）；恢復記 INFO。
+pub(super) fn record_site_outcome(name: &'static str, ok: bool, started_at: Instant) -> bool {
     let transition = match HEALTH.lock() {
         Ok(mut book) => book.record(name, ok, started_at, Instant::now()),
-        Err(_) => return,
+        Err(_) => return false,
     };
 
     match transition {
-        Some(Transition::Tripped(cooldown)) => tracing::info!(
-            site = name,
-            cooldown_secs = cooldown.as_secs(),
-            "報價站點連續失敗，暫停 {} 秒：{}",
-            cooldown.as_secs(),
-            name
-        ),
-        Some(Transition::Recovered) => {
-            tracing::info!(site = name, "報價站點恢復：{}", name)
+        Some(Transition::Tripped(cooldown)) => {
+            let secs = cooldown.as_secs();
+            if TRIPPED_TODAY.first_today(name, Local::now().date_naive()) {
+                tracing::warn!(
+                    site = name,
+                    cooldown_secs = secs,
+                    "報價站點今天第一次連續失敗熔斷，暫停 {secs} 秒：{name}（之後的熔斷記 INFO，次數見收盤站點統計）"
+                );
+            } else {
+                tracing::info!(
+                    site = name,
+                    cooldown_secs = secs,
+                    "報價站點連續失敗，暫停 {secs} 秒：{name}"
+                );
+            }
+            true
         }
-        None => {}
+        Some(Transition::Recovered) => {
+            tracing::info!(site = name, "報價站點恢復：{}", name);
+            false
+        }
+        None => false,
     }
 }
 
@@ -271,6 +289,31 @@ mod tests {
     fn plan_without_history_is_plain_rotation() {
         let book = HealthBook::default();
         assert_eq!(book.plan(&NAMES, 2, Instant::now(), true), vec![2, 3, 0, 1]);
+    }
+
+    /// 全域紀錄：連續失敗達門檻那一次回報熔斷；每站每天第一次熔斷記 WARN，之後記 INFO。
+    ///
+    /// 站點名稱只給這個測試用，避免與其他測試共用全域健康狀態；第二個站點預先登記為今天已熔斷過，
+    /// 走 INFO 分支（同一站再次熔斷要等冷卻結束）。
+    #[test]
+    fn record_site_outcome_reports_trips() {
+        // 開訂閱者讓日誌欄位實際被求值。
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_test_writer()
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let started_at = Instant::now();
+        for name in ["TestOutcomeFirstTrip", "TestOutcomeSecondTrip"] {
+            if name == "TestOutcomeSecondTrip" {
+                assert!(TRIPPED_TODAY.first_today(name, Local::now().date_naive()));
+            }
+            assert!(!record_site_outcome(name, true, started_at));
+            for _ in 1..FAILURE_THRESHOLD {
+                assert!(!record_site_outcome(name, false, started_at));
+            }
+            assert!(record_site_outcome(name, false, Instant::now()), "{name}");
+        }
     }
 
     /// 連續失敗達門檻才熔斷；中間有一次成功就重新計算。
