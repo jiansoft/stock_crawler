@@ -151,6 +151,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::screen_backtest_frontier),
         )
         .route(
+            "/strategy-presets/edge",
+            axum::routing::get(handlers::strategy_edge),
+        )
+        .route(
             "/strategy-presets",
             axum::routing::get(handlers::strategy_presets),
         )

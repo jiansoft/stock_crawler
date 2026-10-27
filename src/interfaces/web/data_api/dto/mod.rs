@@ -202,3 +202,8 @@ pub(crate) struct HealthResponse {
     /// 服務狀態。
     pub(crate) status: &'static str,
 }
+
+mod strategy_edge;
+pub(super) use strategy_edge::{
+    StrategyEdgeItem, StrategyEdgeResponse, StrategyEdgeVerdict, StrategyEdgeWindow,
+};

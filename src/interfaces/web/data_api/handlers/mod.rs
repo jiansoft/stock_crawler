@@ -401,3 +401,6 @@ fn repository_error(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests;
+
+mod strategy_edge;
+pub(super) use strategy_edge::{__path_strategy_edge, strategy_edge};
