@@ -16,7 +16,7 @@ use axum::{
 
 /// 讀取每月第一個交易日更新的快取；不觸發回測、不寫入 Redis。
 #[utoipa::path(get, path = "/api/v1/strategy-presets/edge", tag = "data-api", responses((status = 200, body = StrategyEdgeResponse), (status = 401, body = ErrorBody), (status = 404, body = ErrorBody), (status = 500, body = ErrorBody), (status = 503, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(super) async fn strategy_edge() -> Response {
+pub(crate) async fn strategy_edge() -> Response {
     load_response(strategy_edge::REDIS_KEY).await
 }
 
