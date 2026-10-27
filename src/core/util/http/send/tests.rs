@@ -94,7 +94,13 @@ async fn sequence_server(
         for (status, delay) in statuses {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut bytes = [0u8; 2048];
-            stream.read(&mut bytes).await.unwrap();
+            let mut received = Vec::new();
+            while !received.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = stream.read(&mut bytes).await.unwrap();
+                assert!(count > 0, "HTTP 請求不應在標頭完成前結束");
+                received.extend_from_slice(&bytes[..count]);
+                assert!(received.len() <= 8192, "測試標頭應小於 8 KiB");
+            }
             tokio::time::sleep(delay).await;
             stream.write_all(format!("HTTP/1.1 {status} Response\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").as_bytes()).await.unwrap();
             count += 1;
