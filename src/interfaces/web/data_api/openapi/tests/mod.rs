@@ -183,3 +183,5 @@ fn openapi_contains_all_data_api_paths() {
     }
     assert!(json.contains("bearer_auth"));
 }
+
+mod strategy_edge;
