@@ -118,4 +118,17 @@ mod tests {
         assert_eq!(stats.rounds, 0);
         assert!(stats.symbols.is_empty());
     }
+
+    /// 真正的統計入口會累計資料，收盤只輸出及清空一次。
+    #[test]
+    fn shared_stats_are_flushed_once() {
+        let _guard =
+            tracing::subscriber::set_default(tracing_subscriber::fmt().with_test_writer().finish());
+        record_cycle(true, 500);
+        record_inconsistent(["79979O2"].into_iter());
+        assert!(DAILY.lock().unwrap().rounds > 0);
+        summarize();
+        assert_eq!(DAILY.lock().unwrap().rounds, 0);
+        summarize();
+    }
 }
