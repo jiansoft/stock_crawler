@@ -325,7 +325,8 @@ filtered AS (
             $chip_filter,
             r#"
 ),
-valued AS (
+-- 成交金額同時用於排序與權重；明確物化，避免內聯後相同的 20 日查詢被執行兩次。
+valued AS MATERIALIZED (
     SELECT f.*,
            CASE WHEN $15::int8 IS NOT NULL OR $16::text = 'trade_value' OR $17::text <> 'equal' THEN (
                SELECT AVG(q."TradeValue")::float8 FROM "DailyQuotes" q

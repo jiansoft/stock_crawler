@@ -387,56 +387,69 @@ impl<'a> Backtest<'a> {
         rebalance_offset: u16,
         keep_rank: u8,
     ) -> Result<Vec<CandidateRow>, sqlx::Error> {
-        let params = self.params;
-        let with_chip = self.with_chip();
-        let mut query = sqlx::query_as(match (with_chip, self.execution) {
+        let sql = match (self.with_chip(), self.execution) {
             (true, ExecutionPrice::Close) => BACKTEST_WITH_CHIP_SQL,
             (true, ExecutionPrice::NextOpen) => BACKTEST_WITH_CHIP_NEXT_OPEN_SQL,
             (false, ExecutionPrice::Close) => BACKTEST_SQL,
             (false, ExecutionPrice::NextOpen) => BACKTEST_NEXT_OPEN_SQL,
-        })
-        .bind(self.from)
-        .bind(self.to)
-        .bind(self.market_id)
-        .bind(i32::from(self.hold_days))
-        .bind(i64::from(if params.max_per_industry.is_some() {
-            MAX_KEEP_RANK
-        } else {
-            keep_rank
-        }))
-        .bind(params.industry.as_deref())
-        .bind(params.min_rs_score.map(i16::from))
-        .bind(params.max_rs_score.map(i16::from))
-        .bind(params.indicator.as_deref())
-        .bind(params.kind.as_deref())
-        .bind(params.market_filter_ma.map(i32::from))
-        .bind(params.hold_min_rs_score.map(i16::from))
-        .bind(params.market_filter_breadth.map(i32::from))
-        .bind(i32::from(rebalance_offset))
-        .bind(
-            params
-                .min_avg_trade_value
-                .map(|value| i64::from(value) * 1_000_000),
-        )
-        .bind(self.rank_by)
-        .bind(self.weighting.as_str())
-        .bind((!self.excluded_industries.is_empty()).then_some(&self.excluded_industries))
-        .bind(params.min_revenue_yoy_percent)
-        .bind(params.min_revenue_yoy_streak.map(i16::from))
-        .bind(params.min_revenue_yoy_3m_percent)
-        .bind(params.min_eps)
-        .bind(params.min_roe_percent)
-        .bind(params.min_gross_margin_percent)
-        .bind(params.min_operating_margin_percent)
-        .bind(params.margins_yoy_up.unwrap_or(false))
-        .bind(params.max_debt_ratio_percent)
-        .bind(params.revenue_record.unwrap_or(false))
-        .bind(params.min_monthly_revenue)
-        .bind(params.positive_free_cash_flow.unwrap_or(false))
-        .bind(params.max_pe)
-        .bind(params.max_pb)
-        .bind(params.market_filter_max_pe)
-        .bind(params.market_filter_pe_percentile.map(i32::from));
+        };
+        self.candidates_using_sql(rebalance_offset, keep_rank, sql)
+            .await
+    }
+
+    /// 以相同綁定執行候選股 SQL，供語意比對測試替換改寫前的查詢。
+    pub(super) async fn candidates_using_sql(
+        &self,
+        rebalance_offset: u16,
+        keep_rank: u8,
+        sql: &str,
+    ) -> Result<Vec<CandidateRow>, sqlx::Error> {
+        let params = self.params;
+        let with_chip = self.with_chip();
+        // SQL 只由本模組常數或測試中的等價改寫傳入；使用者條件仍全部綁定。
+        let mut query = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+            .bind(self.from)
+            .bind(self.to)
+            .bind(self.market_id)
+            .bind(i32::from(self.hold_days))
+            .bind(i64::from(if params.max_per_industry.is_some() {
+                MAX_KEEP_RANK
+            } else {
+                keep_rank
+            }))
+            .bind(params.industry.as_deref())
+            .bind(params.min_rs_score.map(i16::from))
+            .bind(params.max_rs_score.map(i16::from))
+            .bind(params.indicator.as_deref())
+            .bind(params.kind.as_deref())
+            .bind(params.market_filter_ma.map(i32::from))
+            .bind(params.hold_min_rs_score.map(i16::from))
+            .bind(params.market_filter_breadth.map(i32::from))
+            .bind(i32::from(rebalance_offset))
+            .bind(
+                params
+                    .min_avg_trade_value
+                    .map(|value| i64::from(value) * 1_000_000),
+            )
+            .bind(self.rank_by)
+            .bind(self.weighting.as_str())
+            .bind((!self.excluded_industries.is_empty()).then_some(&self.excluded_industries))
+            .bind(params.min_revenue_yoy_percent)
+            .bind(params.min_revenue_yoy_streak.map(i16::from))
+            .bind(params.min_revenue_yoy_3m_percent)
+            .bind(params.min_eps)
+            .bind(params.min_roe_percent)
+            .bind(params.min_gross_margin_percent)
+            .bind(params.min_operating_margin_percent)
+            .bind(params.margins_yoy_up.unwrap_or(false))
+            .bind(params.max_debt_ratio_percent)
+            .bind(params.revenue_record.unwrap_or(false))
+            .bind(params.min_monthly_revenue)
+            .bind(params.positive_free_cash_flow.unwrap_or(false))
+            .bind(params.max_pe)
+            .bind(params.max_pb)
+            .bind(params.market_filter_max_pe)
+            .bind(params.market_filter_pe_percentile.map(i32::from));
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))
