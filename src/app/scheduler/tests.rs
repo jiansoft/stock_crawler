@@ -63,6 +63,73 @@ async fn range_cron_expressions_parse_and_fire_in_taipei_time() {
     assert!(create_job("0 40 20 * * Xyz", "test", || async { Ok(()) }).is_err());
 }
 
+/// 每 10 分鐘的主機健康檢查落在整十分，23:30 的彙總落在台北時間 23:30。
+#[tokio::test]
+async fn host_health_cron_expressions_fire_on_expected_minutes() {
+    use chrono::Timelike;
+
+    let taipei = FixedOffset::east_opt(8 * 3600).unwrap();
+    let mut sched = JobScheduler::new().await.expect("建立排程器");
+    let quiet = create_quiet_job("0 */10 * * * *", "test", || async { Ok(()) }).expect("*/10");
+    let summary = create_job("0 30 23 * * *", "test", || async { Ok(()) }).expect("23:30");
+    let quiet_id = sched.add(quiet).await.expect("加入排程");
+    let summary_id = sched.add(summary).await.expect("加入排程");
+    let quiet_next = sched
+        .next_tick_for_job(quiet_id)
+        .await
+        .expect("取得下次觸發時間")
+        .expect("應有下次觸發時間")
+        .with_timezone(&taipei);
+    assert_eq!(
+        (quiet_next.minute() % 10, quiet_next.second()),
+        (0, 0),
+        "{quiet_next}"
+    );
+    let summary_next = sched
+        .next_tick_for_job(summary_id)
+        .await
+        .expect("取得下次觸發時間")
+        .expect("應有下次觸發時間")
+        .with_timezone(&taipei);
+    assert_eq!((summary_next.hour(), summary_next.minute()), (23, 30));
+}
+
+/// 一輪排程的成功、失敗與逾時都能走完（失敗與逾時的告警在未註冊 sink 時降為 warning log）。
+#[tokio::test]
+async fn run_job_completes_for_every_outcome() {
+    for quiet in [false, true] {
+        run_job(
+            "0 0 0 * * *",
+            "test",
+            quiet,
+            Duration::from_secs(1),
+            || async { Ok(()) },
+        )
+        .await;
+    }
+    run_job(
+        "0 0 0 * * *",
+        "test",
+        true,
+        Duration::from_secs(1),
+        || async { Err(anyhow::anyhow!("boom")) },
+    )
+    .await;
+    let started = Instant::now();
+    run_job(
+        "0 0 0 * * *",
+        "test",
+        false,
+        Duration::from_millis(20),
+        || async {
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+            Ok(())
+        },
+    )
+    .await;
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
 /// 卡住的任務必須在上限到時被中止，而不是無限期等下去。
 #[tokio::test]
 async fn run_with_timeout_aborts_hung_task() {
