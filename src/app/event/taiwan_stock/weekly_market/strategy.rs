@@ -81,8 +81,14 @@ async fn load_positions(
             }
         };
         // settlement 只讀取 date 之前的紀錄；加一天納入報告日當天的換股，行情仍封頂於今天。
+        // 未命名環境策略的換股紀錄以 QUERY_ENV 為鍵，沿用換股通知的命名規則。
+        let record_name = if strategy.name.is_empty() {
+            QUERY_ENV
+        } else {
+            &strategy.name
+        };
         let settlement = match gateway
-            .settlement(&strategy.name, today.succ_opt().unwrap_or(today))
+            .settlement(record_name, today.succ_opt().unwrap_or(today))
             .await
         {
             Ok(settlement) => settlement,

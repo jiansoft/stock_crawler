@@ -22,6 +22,7 @@ impl StrategyGateway for Gateway {
 
     async fn settlement(&self, name: &str, date: NaiveDate) -> Result<Option<StrategySettlement>> {
         assert_eq!(date.to_string(), "2026-10-18");
+        assert!(!name.is_empty(), "未命名策略也應使用換股紀錄的鍵");
         if name == "無結算" {
             bail!("settlement down");
         }
@@ -93,4 +94,19 @@ async fn no_strategies_load_no_positions() {
         .await
         .is_empty()
     );
+}
+
+/// 未命名環境策略仍能讀取以 STRATEGY_ALERT_QUERY 為鍵的實盤紀錄。
+#[tokio::test]
+async fn unnamed_env_strategy_uses_record_key() {
+    let strategies = alert_strategies(Vec::new(), Some("good".to_owned()), None);
+    let positions = load_positions(
+        &Gateway,
+        &strategies,
+        NaiveDate::from_ymd_opt(2026, 10, 17).unwrap(),
+    )
+    .await;
+    assert_eq!(positions.len(), 1);
+    assert!(positions[0].name.is_empty());
+    assert!(positions[0].settlement.is_some());
 }
