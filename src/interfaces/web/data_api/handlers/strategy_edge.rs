@@ -22,7 +22,17 @@ pub(crate) async fn strategy_edge() -> Response {
 
 /// 以指定快取鍵組成 HTTP 回應；測試使用獨立鍵，避免動到最近一次正式檢查。
 async fn load_response(key: &str) -> Response {
-    cached_response(redis::CLIENT.get_string(key).await)
+    cached_response(read_cache(key).await)
+}
+
+/// 以 Option 讀取 GET，讓不存在的鍵與 Redis 型別／連線錯誤明確分開。
+async fn read_cache(key: &str) -> Result<String, RedisError> {
+    let mut connection = redis::CLIENT.pool.get().await?;
+    let value: Option<String> = deadpool_redis::redis::cmd("GET")
+        .arg(key)
+        .query_async(&mut connection)
+        .await?;
+    value.ok_or(RedisError::NotFound)
 }
 
 /// 將讀取結果轉成 HTTP 狀態，讓斷線與未命中可各自驗證。
