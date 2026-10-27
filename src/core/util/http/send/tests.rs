@@ -49,6 +49,31 @@ async fn fail_fast_flag_is_scoped() {
     assert!(!is_fail_fast());
 }
 
+/// 彙總模式只改逐筆日誌，不會開啟快速失敗或影響外層 scope。
+#[tokio::test]
+async fn summarized_preserves_normal_retry_policy() {
+    assert!(SUMMARIZED.try_with(|_| ()).is_err());
+    summarized(async {
+        assert!(!is_fail_fast());
+        assert!(SUMMARIZED.try_with(|_| ()).is_ok());
+        let _guard = debug_subscriber();
+        let client = test_client();
+        let error = send_with_client(
+            &client,
+            Method::GET,
+            "http://[",
+            None,
+            None::<fn(RequestBuilder) -> RequestBuilder>,
+            None,
+        )
+        .await
+        .expect_err("無效 URL 應回錯誤");
+        assert!(error.to_string().contains("after 3 network retries"));
+    })
+    .await;
+    assert!(SUMMARIZED.try_with(|_| ()).is_err());
+}
+
 /// 快速失敗模式遇到 429 直接回錯誤，不等 5 秒以上的 backoff。
 #[tokio::test]
 async fn fail_fast_returns_on_rate_limit_without_backoff() {

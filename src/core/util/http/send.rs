@@ -43,6 +43,8 @@ const FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(6);
 tokio::task_local! {
     /// 存在時代表目前的請求處於快速失敗模式，見 [`fail_fast`]。
     static FAIL_FAST: ();
+    /// 逐筆 HTTP 日誌由呼叫端統計彙總，但保留一般逾時與重試。
+    static SUMMARIZED: ();
 }
 
 /// 在快速失敗模式下執行 `fut`：其中的 HTTP 請求不做網路重試與 429 重試，
@@ -57,6 +59,11 @@ tokio::task_local! {
 /// 70 筆、BigGo 403 44 筆、慢回應 35 筆，淹沒真正需要看的警告。403 仍照常告警。
 pub async fn fail_fast<F: Future>(fut: F) -> F::Output {
     FAIL_FAST.scope((), fut).await
+}
+
+/// 由背景採集者自行彙總錯誤與延遲；只降低逐筆日誌，正常重試與 403 告警照常。
+pub async fn summarized<F: Future>(fut: F) -> F::Output {
+    SUMMARIZED.scope((), fut).await
 }
 
 /// 目前是否處於快速失敗模式。
@@ -150,6 +157,7 @@ pub(super) async fn send_with_client(
     let mut network_attempt = 0u32;
     let mut rate_limit_attempt = 0u32;
     let fail_fast = is_fail_fast();
+    let summarized = SUMMARIZED.try_with(|_| ()).is_ok();
     let (max_network_attempts, max_rate_limit_retries) = if fail_fast {
         (1, 0)
     } else {
@@ -191,24 +199,44 @@ pub(super) async fn send_with_client(
                         // 欄位寫在同一行：tracing 的欄位只在有訂閱者時求值，分行會讓涵蓋率誤判為未執行。
                         tracing::debug!(url = %safe_url, method = method.as_str(), status = status.as_u16(), elapsed_ms, "http.done.fail_fast{request_detail_suffix}");
                     } else {
+                        if summarized {
+                            tracing::debug!(
+                                url = %safe_url,
+                                method = method.as_str(),
+                                status = status.as_u16(),
+                                elapsed_ms,
+                                "http.done{request_detail_suffix}"
+                            );
+                        } else {
+                            tracing::warn!(
+                                url = %safe_url,
+                                method = method.as_str(),
+                                status = status.as_u16(),
+                                elapsed_ms,
+                                "http.done{request_detail_suffix}"
+                            );
+                        }
+                    }
+                } else if elapsed_ms >= SLOW_REQUEST_WARN_MS && !fail_fast {
+                    // 成功回應平常只記 DEBUG；來源站明顯變慢時仍要在檔案日誌留下痕跡。
+                    // 快速失敗模式的慢回應由站點池的耗時統計（p99）與慢站降級處理。
+                    if summarized {
+                        tracing::debug!(
+                            url = %safe_url,
+                            method = method.as_str(),
+                            status = status.as_u16(),
+                            elapsed_ms,
+                            "http.slow{request_detail_suffix}"
+                        );
+                    } else {
                         tracing::warn!(
                             url = %safe_url,
                             method = method.as_str(),
                             status = status.as_u16(),
                             elapsed_ms,
-                            "http.done{request_detail_suffix}"
+                            "http.slow{request_detail_suffix}"
                         );
                     }
-                } else if elapsed_ms >= SLOW_REQUEST_WARN_MS && !fail_fast {
-                    // 成功回應平常只記 DEBUG；來源站明顯變慢時仍要在檔案日誌留下痕跡。
-                    // 快速失敗模式的慢回應由站點池的耗時統計（p99）與慢站降級處理。
-                    tracing::warn!(
-                        url = %safe_url,
-                        method = method.as_str(),
-                        status = status.as_u16(),
-                        elapsed_ms,
-                        "http.slow{request_detail_suffix}"
-                    );
                 } else {
                     tracing::debug!(
                         url = %safe_url,
@@ -229,23 +257,43 @@ pub(super) async fn send_with_client(
                     rate_limit_attempt += 1;
                     if rate_limit_attempt <= max_rate_limit_retries {
                         let delay = rate_limit_backoff(rate_limit_attempt);
-                        tracing::warn!(
-                            url = %safe_url,
-                            attempt = rate_limit_attempt,
-                            delay_ms = delay.as_millis() as u64,
-                            "http.rate_limited"
-                        );
+                        if summarized {
+                            tracing::debug!(
+                                url = %safe_url,
+                                attempt = rate_limit_attempt,
+                                delay_ms = delay.as_millis() as u64,
+                                "http.rate_limited"
+                            );
+                        } else {
+                            tracing::warn!(
+                                url = %safe_url,
+                                attempt = rate_limit_attempt,
+                                delay_ms = delay.as_millis() as u64,
+                                "http.rate_limited"
+                            );
+                        }
                         tokio::time::sleep(delay).await;
                         continue;
                     }
-                    tracing::error!(
-                        url = %safe_url,
-                        method = method.as_str(),
-                        status = status.as_u16(),
-                        attempt = rate_limit_attempt,
-                        elapsed_ms,
-                        "http.rate_limit_exhausted{request_detail_suffix}"
-                    );
+                    if summarized {
+                        tracing::debug!(
+                            url = %safe_url,
+                            method = method.as_str(),
+                            status = status.as_u16(),
+                            attempt = rate_limit_attempt,
+                            elapsed_ms,
+                            "http.rate_limit_exhausted{request_detail_suffix}"
+                        );
+                    } else {
+                        tracing::error!(
+                            url = %safe_url,
+                            method = method.as_str(),
+                            status = status.as_u16(),
+                            attempt = rate_limit_attempt,
+                            elapsed_ms,
+                            "http.rate_limit_exhausted{request_detail_suffix}"
+                        );
+                    }
                     return Err(anyhow!(
                         "Rate limited (429) at {} after {rate_limit_attempt} retries",
                         safe_url
@@ -288,13 +336,23 @@ pub(super) async fn send_with_client(
 
                 // 尚可重試的暫時錯誤使用 WARN，只有耗盡次數才以 ERROR 標示請求最終失敗。
                 if network_attempt >= max_network_attempts {
-                    tracing::error!(
-                        url = %safe_url,
-                        attempt = network_attempt,
-                        error = %err_str,
-                        elapsed_ms,
-                        "http.failed{request_detail_suffix}"
-                    );
+                    if summarized {
+                        tracing::debug!(
+                            url = %safe_url,
+                            attempt = network_attempt,
+                            error = %err_str,
+                            elapsed_ms,
+                            "http.failed{request_detail_suffix}"
+                        );
+                    } else {
+                        tracing::error!(
+                            url = %safe_url,
+                            attempt = network_attempt,
+                            error = %err_str,
+                            elapsed_ms,
+                            "http.failed{request_detail_suffix}"
+                        );
+                    }
                     return Err(anyhow!(
                         "Failed to send {} after {network_attempt} network retries; \
                          last error: {err_str}",
@@ -302,13 +360,23 @@ pub(super) async fn send_with_client(
                     ));
                 }
 
-                tracing::warn!(
-                    url = %safe_url,
-                    attempt = network_attempt,
-                    error = %err_str,
-                    elapsed_ms,
-                    "http.failed{request_detail_suffix}"
-                );
+                if summarized {
+                    tracing::debug!(
+                        url = %safe_url,
+                        attempt = network_attempt,
+                        error = %err_str,
+                        elapsed_ms,
+                        "http.failed{request_detail_suffix}"
+                    );
+                } else {
+                    tracing::warn!(
+                        url = %safe_url,
+                        attempt = network_attempt,
+                        error = %err_str,
+                        elapsed_ms,
+                        "http.failed{request_detail_suffix}"
+                    );
+                }
 
                 // 2^n 秒 backoff：1→2s、2→4s、3→8s
                 tokio::time::sleep(Duration::from_secs(2u64.pow(network_attempt))).await;
