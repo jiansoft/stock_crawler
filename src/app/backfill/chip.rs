@@ -219,6 +219,9 @@ async fn save_holder_distributions(
             major_holders: d.major_holders,
             major_percent: d.major_percent,
             total_holders: d.total_holders,
+            holders_400: Some(d.holders_400),
+            shares_400: Some(d.shares_400),
+            percent_400: d.percent_400,
         })
         .collect();
     let written = repository.save_holder_distributions(&records).await?;

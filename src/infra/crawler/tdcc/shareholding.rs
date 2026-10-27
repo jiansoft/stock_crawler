@@ -22,6 +22,8 @@ use crate::core::util::{self, text};
 /// 開放資料網址。
 const URL: &str = "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5";
 
+/// 400 張以上的第一個持股分級（第 12 級為 400,001～600,000 股；12～15 級合計即 400 張以上）。
+const LEVEL_400: i16 = 12;
 /// 千張大戶（1,000,001 股以上）的持股分級。
 const LEVEL_MAJOR: i16 = 15;
 /// 合計的持股分級。
@@ -38,6 +40,12 @@ pub struct HolderDistribution {
     pub major_percent: Decimal,
     /// 集保股東總人數。
     pub total_holders: i64,
+    /// 400 張以上（第 12～15 級）人數。
+    pub holders_400: i64,
+    /// 400 張以上（第 12～15 級）股數。
+    pub shares_400: i64,
+    /// 400 張以上股數佔集保庫存比例（%，由股數重算到小數 4 位）；合計股數為 0 時為 `None`。
+    pub percent_400: Option<Decimal>,
 }
 
 /// CSV 的一列：單一證券一週、單一持股分級。
@@ -82,22 +90,31 @@ pub async fn visit_levels() -> Result<Vec<HolderLevel>> {
     Ok(levels)
 }
 
-/// 從全部分級取出每檔證券的千張大戶與合計列；兩列缺一的證券不列入。
+/// 從全部分級取出每檔證券的千張大戶與合計列，並加總第 12～15 級為 400 張以上；
+/// 千張或合計列缺一的證券不列入。
+///
+/// 400 張以上的比例用股數除以合計股數重算，不加總各級比例（各級比例已四捨五入到小數 2 位）。
 pub fn summarize(levels: &[HolderLevel]) -> HashMap<String, HolderDistribution> {
     #[derive(Default)]
     struct Partial {
         date: Option<NaiveDate>,
         major: Option<(i64, Decimal)>,
-        total: Option<i64>,
+        total: Option<(i64, i64)>,
+        holders_400: i64,
+        shares_400: i64,
     }
 
     let mut partials: HashMap<&str, Partial> = HashMap::new();
     for level in levels {
         let partial = partials.entry(level.stock_symbol.as_str()).or_default();
         partial.date = Some(level.date);
+        if (LEVEL_400..=LEVEL_MAJOR).contains(&level.level) {
+            partial.holders_400 += level.holders;
+            partial.shares_400 += level.shares;
+        }
         match level.level {
             LEVEL_MAJOR => partial.major = Some((level.holders, level.percent)),
-            LEVEL_TOTAL => partial.total = Some(level.holders),
+            LEVEL_TOTAL => partial.total = Some((level.holders, level.shares)),
             _ => {}
         }
     }
@@ -106,17 +123,27 @@ pub fn summarize(levels: &[HolderLevel]) -> HashMap<String, HolderDistribution> 
         .into_iter()
         .filter_map(|(symbol, partial)| {
             let (major_holders, major_percent) = partial.major?;
+            let (total_holders, total_shares) = partial.total?;
             Some((
                 symbol.to_string(),
                 HolderDistribution {
                     date: partial.date?,
                     major_holders,
                     major_percent,
-                    total_holders: partial.total?,
+                    total_holders,
+                    holders_400: partial.holders_400,
+                    shares_400: partial.shares_400,
+                    percent_400: share_percent(partial.shares_400, total_shares),
                 },
             ))
         })
         .collect()
+}
+
+/// `shares` 佔 `total` 的百分比，四捨五入到小數 4 位；`total` 不為正數時為 `None`。
+fn share_percent(shares: i64, total: i64) -> Option<Decimal> {
+    (total > 0)
+        .then(|| (Decimal::from(shares) * Decimal::ONE_HUNDRED / Decimal::from(total)).round_dp(4))
 }
 
 /// 解析整份 CSV；欄位不足、數字無法解析或分級不在 1～17 的列略過。
@@ -170,9 +197,20 @@ mod tests {
                 major_holders: 1_485,
                 major_percent: dec!(84.77),
                 total_holders: 3_010_913,
+                holders_400: 582 + 339 + 224 + 1_485,
+                shares_400: 283_883_740 + 235_281_628 + 200_128_136 + 21_984_287_365,
+                percent_400: Some(dec!(87.5492)),
             }
         );
         assert!(distributions.contains_key("2884"));
+    }
+
+    /// 合計股數為 0（或負數）時沒有比例。
+    #[test]
+    fn share_percent_needs_positive_total() {
+        assert_eq!(share_percent(1, 3), Some(dec!(33.3333)));
+        assert_eq!(share_percent(0, 0), None);
+        assert_eq!(share_percent(5, -1), None);
     }
 
     /// 每檔 17 列全部保留；第 12 級（400,001～600,000 股）與合計列的數值原樣取出。

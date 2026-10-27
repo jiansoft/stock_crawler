@@ -21,17 +21,27 @@ pub(super) async fn save_holder_distributions(records: &[HolderDistributionRecor
     let major_holders: Vec<i64> = records.iter().map(|r| r.major_holders).collect();
     let major_percent: Vec<Decimal> = records.iter().map(|r| r.major_percent).collect();
     let total_holders: Vec<i64> = records.iter().map(|r| r.total_holders).collect();
+    let holders_400: Vec<Option<i64>> = records.iter().map(|r| r.holders_400).collect();
+    let shares_400: Vec<Option<i64>> = records.iter().map(|r| r.shares_400).collect();
+    let percent_400: Vec<Option<Decimal>> = records.iter().map(|r| r.percent_400).collect();
 
     let sql = r#"
-INSERT INTO holder_distribution ("date", stock_symbol, major_holders, major_percent, total_holders)
-SELECT * FROM UNNEST($1::date[], $2::varchar[], $3::bigint[], $4::numeric[], $5::bigint[])
+INSERT INTO holder_distribution ("date", stock_symbol, major_holders, major_percent, total_holders,
+    holders_400, shares_400, percent_400)
+SELECT * FROM UNNEST($1::date[], $2::varchar[], $3::bigint[], $4::numeric[], $5::bigint[],
+    $6::bigint[], $7::bigint[], $8::numeric[])
 ON CONFLICT ("date", stock_symbol) DO UPDATE SET
 major_holders = EXCLUDED.major_holders,
 major_percent = EXCLUDED.major_percent,
 total_holders = EXCLUDED.total_holders,
+holders_400 = EXCLUDED.holders_400,
+shares_400 = EXCLUDED.shares_400,
+percent_400 = EXCLUDED.percent_400,
 updated_time = now()
-WHERE (holder_distribution.major_holders, holder_distribution.major_percent, holder_distribution.total_holders)
-  IS DISTINCT FROM (EXCLUDED.major_holders, EXCLUDED.major_percent, EXCLUDED.total_holders)
+WHERE (holder_distribution.major_holders, holder_distribution.major_percent, holder_distribution.total_holders,
+       holder_distribution.holders_400, holder_distribution.shares_400, holder_distribution.percent_400)
+  IS DISTINCT FROM (EXCLUDED.major_holders, EXCLUDED.major_percent, EXCLUDED.total_holders,
+       EXCLUDED.holders_400, EXCLUDED.shares_400, EXCLUDED.percent_400)
 "#;
     let result = sqlx::query(sql)
         .bind(&dates)
@@ -39,6 +49,9 @@ WHERE (holder_distribution.major_holders, holder_distribution.major_percent, hol
         .bind(&major_holders)
         .bind(&major_percent)
         .bind(&total_holders)
+        .bind(&holders_400)
+        .bind(&shares_400)
+        .bind(&percent_400)
         .execute(database::get_connection())
         .await
         .context("Failed to save holder distributions")?;

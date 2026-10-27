@@ -45,6 +45,12 @@ pub struct HolderDistributionRecord {
     pub major_percent: Decimal,
     /// 集保股東總人數。
     pub total_holders: i64,
+    /// 400 張以上人數；沒有分級資料的週為 `None`。
+    pub holders_400: Option<i64>,
+    /// 400 張以上股數；沒有分級資料的週為 `None`。
+    pub shares_400: Option<i64>,
+    /// 400 張以上持股佔集保庫存比例（%）；沒有分級資料的週為 `None`。
+    pub percent_400: Option<Decimal>,
 }
 
 /// 單一證券一週、單一持股分級的股權分散。
