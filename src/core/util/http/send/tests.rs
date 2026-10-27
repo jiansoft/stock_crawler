@@ -82,6 +82,70 @@ async fn summarized_preserves_normal_retry_policy() {
     assert!(SUMMARIZED.try_with(|_| ()).is_err());
 }
 
+/// 有限次回應的本機伺服器，回傳測試網址與可等待結束的 task，避免留下背景工作。
+async fn sequence_server(
+    statuses: Vec<(u16, Duration)>,
+) -> (String, tokio::task::JoinHandle<usize>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let mut count = 0;
+        for (status, delay) in statuses {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = [0u8; 2048];
+            stream.read(&mut bytes).await.unwrap();
+            tokio::time::sleep(delay).await;
+            stream.write_all(format!("HTTP/1.1 {status} Response\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            count += 1;
+        }
+        count
+    });
+    (format!("http://{addr}/quote"), task)
+}
+
+/// 彙總模式仍回傳 HTTP 錯誤狀態，慢回應也不被快速失敗的六秒上限或改變重試影響。
+#[tokio::test]
+async fn summarized_handles_server_errors_and_slow_success() {
+    let _guard = debug_subscriber();
+    let client = test_client();
+    for (status, delay) in [(502, Duration::ZERO), (200, Duration::from_millis(5_100))] {
+        let (url, server) = sequence_server(vec![(status, delay)]).await;
+        let response = summarized(send_with_client(
+            &client,
+            Method::GET,
+            &url,
+            None,
+            None::<fn(RequestBuilder) -> RequestBuilder>,
+            None,
+        ))
+        .await
+        .unwrap();
+        assert_eq!(response.status().as_u16(), status);
+        assert_eq!(server.await.unwrap(), 1);
+    }
+}
+
+/// 429 在彙總模式仍保留原本的三次 backoff，耗盡後回錯誤，不能被日誌降級吞掉。
+#[tokio::test]
+async fn summarized_preserves_rate_limit_backoff_and_exhaustion() {
+    let _guard = debug_subscriber();
+    let client = test_client();
+    let (url, server) = sequence_server(vec![(429, Duration::ZERO); 4]).await;
+    let error = summarized(send_with_client(
+        &client,
+        Method::GET,
+        &url,
+        None,
+        None::<fn(RequestBuilder) -> RequestBuilder>,
+        None,
+    ))
+    .await
+    .expect_err("四次 429 應耗盡三次重試");
+    assert!(error.to_string().contains("after 4 retries"), "{error:#}");
+    assert_eq!(server.await.unwrap(), 4);
+}
+
 /// 快速失敗模式遇到 429 直接回錯誤，不等 5 秒以上的 backoff。
 #[tokio::test]
 async fn fail_fast_returns_on_rate_limit_without_backoff() {
