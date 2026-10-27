@@ -272,6 +272,9 @@ async fn save_holder_distributions_writes_summary_then_every_level() {
             major_holders: 1_485,
             major_percent: dec!(84.77),
             total_holders: 3_010_913,
+            holders_400: Some(582 + 1_485),
+            shares_400: Some(283_883_740 + 21_984_287_365),
+            percent_400: Some(dec!(85.8702)),
         }]
     );
     let saved = repo.levels.lock().expect("測試鎖");

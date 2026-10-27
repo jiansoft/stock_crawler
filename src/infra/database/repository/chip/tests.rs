@@ -98,6 +98,9 @@ async fn saves_every_kind_of_chip_data() {
         major_holders: 50,
         major_percent: dec!(75.12),
         total_holders: 30_000,
+        holders_400: None,
+        shares_400: None,
+        percent_400: None,
     };
     assert_eq!(
         repo.save_holder_distributions(std::slice::from_ref(&holder))
@@ -105,7 +108,32 @@ async fn saves_every_kind_of_chip_data() {
             .unwrap(),
         1
     );
-    assert_eq!(repo.save_holder_distributions(&[holder]).await.unwrap(), 0);
+    assert_eq!(
+        repo.save_holder_distributions(std::slice::from_ref(&holder))
+            .await
+            .unwrap(),
+        0
+    );
+    // 補上 400 張欄位算是更正。
+    let with_400 = HolderDistributionRecord {
+        holders_400: Some(80),
+        shares_400: Some(90_000_000),
+        percent_400: Some(dec!(81.5)),
+        ..holder
+    };
+    assert_eq!(
+        repo.save_holder_distributions(&[with_400]).await.unwrap(),
+        1
+    );
+    let saved: (Option<i64>, Option<i64>, Option<rust_decimal::Decimal>) = sqlx::query_as(
+        r#"SELECT holders_400, shares_400, percent_400 FROM holder_distribution WHERE "date" = $1 AND stock_symbol = $2"#,
+    )
+    .bind(day())
+    .bind(FAKE)
+    .fetch_one(database::get_connection())
+    .await
+    .unwrap();
+    assert_eq!(saved, (Some(80), Some(90_000_000), Some(dec!(81.5))));
 
     let level = |level, holders| HolderLevelRecord {
         date: day(),
