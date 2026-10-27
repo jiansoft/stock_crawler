@@ -339,6 +339,12 @@ fn build_message(
         "\n{}",
         text::escape_markdown_v2("＊金額為每日淨股數×當日收盤價的估計值，過去表現不代表未來結果")
     );
+    // 策略段也屬投資參考輸出，與 Data API／MCP 使用相同的完整聲明。
+    let _ = writeln!(
+        &mut message,
+        "{}",
+        text::escape_markdown_v2("僅供參考，不構成投資建議，亦不會自動下單")
+    );
     Some(message)
 }
 
