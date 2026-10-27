@@ -1,6 +1,7 @@
 //! 籌碼資料的 PostgreSQL 倉儲實作。
 //!
-//! 對應 `chip_daily`、`holder_distribution`、`insider_holding`、`broker_flow` 四張表。
+//! 對應 `chip_daily`、`holder_distribution`、`holder_distribution_level`、`insider_holding`、
+//! `broker_flow` 五張表。
 //! 每次寫入都把整批資料展開成陣列參數，以單一 `INSERT ... SELECT FROM UNNEST` 完成；
 //! 衝突時只在內容有變才更新（`IS DISTINCT FROM`），重跑不會產生多餘寫入。
 
@@ -11,8 +12,8 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::domain::chip::{
-    BrokerFlowRecord, ChipRepository, HolderDistributionRecord, InsiderHoldingRecord,
-    InstitutionalNet, MarginRecord,
+    BrokerFlowRecord, ChipRepository, HolderDistributionRecord, HolderLevelRecord,
+    InsiderHoldingRecord, InstitutionalNet, MarginRecord,
 };
 
 /// 基於 PostgreSQL 的籌碼資料倉儲。
@@ -60,6 +61,10 @@ impl ChipRepository for PgChipRepository {
 
     async fn save_holder_distributions(&self, records: &[HolderDistributionRecord]) -> Result<u64> {
         ownership::save_holder_distributions(records).await
+    }
+
+    async fn save_holder_levels(&self, records: &[HolderLevelRecord]) -> Result<u64> {
+        ownership::save_holder_levels(records).await
     }
 
     async fn replace_insider_holdings(&self, records: &[InsiderHoldingRecord]) -> Result<u64> {

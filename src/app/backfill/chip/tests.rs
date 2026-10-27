@@ -161,6 +161,10 @@ impl ChipRepository for StreakRecorder {
         unreachable!("不應寫入集保")
     }
 
+    async fn save_holder_levels(&self, _: &[HolderLevelRecord]) -> Result<u64> {
+        unreachable!("不應寫入集保分級")
+    }
+
     async fn replace_insider_holdings(&self, _: &[InsiderHoldingRecord]) -> Result<u64> {
         unreachable!("不應寫入董監持股")
     }
@@ -185,4 +189,103 @@ async fn refresh_streaks_since_runs_each_year_in_order() {
             (ymd(2026, 1, 1), ymd(2026, 10, 15)),
         ]
     );
+}
+
+/// 記錄集保寫入順序與內容的倉儲。
+#[derive(Default)]
+struct HolderRecorder {
+    calls: std::sync::Mutex<Vec<&'static str>>,
+    summaries: std::sync::Mutex<Vec<HolderDistributionRecord>>,
+    levels: std::sync::Mutex<Vec<HolderLevelRecord>>,
+}
+
+#[async_trait::async_trait]
+impl ChipRepository for HolderRecorder {
+    async fn save_institutional(&self, _: NaiveDate, _: &[InstitutionalNet]) -> Result<u64> {
+        unreachable!("不應寫入三大法人")
+    }
+
+    async fn save_margin(&self, _: NaiveDate, _: &[MarginRecord]) -> Result<u64> {
+        unreachable!("不應寫入融資融券")
+    }
+
+    async fn refresh_streaks(&self, _: NaiveDate, _: NaiveDate) -> Result<u64> {
+        unreachable!("不應重算連續天數")
+    }
+
+    async fn save_holder_distributions(&self, records: &[HolderDistributionRecord]) -> Result<u64> {
+        self.calls.lock().expect("測試鎖").push("summary");
+        self.summaries
+            .lock()
+            .expect("測試鎖")
+            .extend_from_slice(records);
+        Ok(records.len() as u64)
+    }
+
+    async fn save_holder_levels(&self, records: &[HolderLevelRecord]) -> Result<u64> {
+        self.calls.lock().expect("測試鎖").push("levels");
+        self.levels
+            .lock()
+            .expect("測試鎖")
+            .extend_from_slice(records);
+        Ok(records.len() as u64)
+    }
+
+    async fn replace_insider_holdings(&self, _: &[InsiderHoldingRecord]) -> Result<u64> {
+        unreachable!("不應寫入董監持股")
+    }
+
+    async fn save_broker_flows(&self, _: &[BrokerFlowRecord]) -> Result<u64> {
+        unreachable!("不應寫入分點")
+    }
+}
+
+/// 先寫由分級算出的週摘要，再原樣寫入全部分級（含沒有千張列、不進摘要的證券）。
+#[tokio::test]
+async fn save_holder_distributions_writes_summary_then_every_level() {
+    let level = |symbol: &str, level, holders, shares, percent| HolderLevel {
+        date: ymd(2026, 10, 2),
+        stock_symbol: symbol.to_string(),
+        level,
+        holders,
+        shares,
+        percent,
+    };
+    let levels = [
+        level("2330", 12, 582, 283_883_740, dec!(1.09)),
+        level("2330", 15, 1_485, 21_984_287_365, dec!(84.77)),
+        level("2330", 17, 3_010_913, 25_932_370_067, dec!(100.00)),
+        level("9999", 1, 10, 500, dec!(0.01)),
+    ];
+    let repo = HolderRecorder::default();
+
+    save_holder_distributions(&repo, &levels)
+        .await
+        .expect("成功");
+
+    assert_eq!(*repo.calls.lock().expect("測試鎖"), ["summary", "levels"]);
+    assert_eq!(
+        *repo.summaries.lock().expect("測試鎖"),
+        [HolderDistributionRecord {
+            date: ymd(2026, 10, 2),
+            stock_symbol: "2330".to_string(),
+            major_holders: 1_485,
+            major_percent: dec!(84.77),
+            total_holders: 3_010_913,
+        }]
+    );
+    let saved = repo.levels.lock().expect("測試鎖");
+    assert_eq!(saved.len(), 4);
+    assert_eq!(
+        saved[0],
+        HolderLevelRecord {
+            date: ymd(2026, 10, 2),
+            stock_symbol: "2330".to_string(),
+            level: 12,
+            holders: 582,
+            shares: 283_883_740,
+            percent: dec!(1.09),
+        }
+    );
+    assert_eq!(saved[3].stock_symbol, "9999");
 }

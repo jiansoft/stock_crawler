@@ -6,7 +6,7 @@ pub mod flow;
 pub mod repository;
 
 pub use entity::{
-    BrokerFlowRecord, BrokerNetRecord, HolderDistributionRecord, InsiderHoldingRecord,
-    InstitutionalNet, MarginRecord,
+    BrokerFlowRecord, BrokerNetRecord, HolderDistributionRecord, HolderLevelRecord,
+    InsiderHoldingRecord, InstitutionalNet, MarginRecord,
 };
 pub use repository::ChipRepository;

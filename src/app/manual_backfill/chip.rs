@@ -8,7 +8,7 @@
 //! - `test_backfill_chip_streaks`：
 //!   重算 `chip_daily` 的連續買賣超天數（只讀寫資料庫，不呼叫外部網站）。
 //! - `test_save_holder_distributions`：
-//!   立即把最新一週的集保股權分散寫入 `holder_distribution`（排程是週六 10:40）。
+//!   立即把最新一週的集保股權分散寫入 `holder_distribution` 與 `holder_distribution_level`（排程是週六 10:40）。
 //! - `test_save_insider_holdings`：
 //!   立即把最新月份的董監事持股與設質寫入 `insider_holding`（排程是每月 10–28 日 20:50）。
 
@@ -113,7 +113,8 @@ const MANUAL_CHIP_FROM: &str = "2025-10-01";
 
 const MANUAL_CHIP_TO: &str = "2026-10-06";
 
-/// 立即把最新一週的集保股權分散寫入 `holder_distribution`（排程是週六 10:40）。
+/// 立即把最新一週的集保股權分散寫入 `holder_distribution`（週摘要）與
+/// `holder_distribution_level`（全部持股分級），排程是週六 10:40。
 ///
 /// 執行範例：
 /// `cargo test app::manual_backfill::chip::test_save_holder_distributions -- --ignored --nocapture`
