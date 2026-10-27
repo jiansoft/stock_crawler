@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use super::entity::{
-    BrokerFlowRecord, HolderDistributionRecord, InsiderHoldingRecord, InstitutionalNet,
-    MarginRecord,
+    BrokerFlowRecord, HolderDistributionRecord, HolderLevelRecord, InsiderHoldingRecord,
+    InstitutionalNet, MarginRecord,
 };
 
 /// 籌碼資料的倉儲合約。各方法回傳實際新增或變更的列數，內容相同的重送不算。
@@ -24,6 +24,9 @@ pub trait ChipRepository: Send + Sync {
 
     /// 寫入（或更正）集保股權分散週摘要。
     async fn save_holder_distributions(&self, records: &[HolderDistributionRecord]) -> Result<u64>;
+
+    /// 寫入（或更正）集保股權分散的全部持股分級。
+    async fn save_holder_levels(&self, records: &[HolderLevelRecord]) -> Result<u64>;
 
     /// 以這批資料取代同月份、同股票的董監持股（內部人異動時舊名單整批換掉）。
     async fn replace_insider_holdings(&self, records: &[InsiderHoldingRecord]) -> Result<u64>;

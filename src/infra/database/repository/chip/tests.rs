@@ -17,6 +17,7 @@ async fn cleanup() {
     for sql in [
         "DELETE FROM chip_daily WHERE stock_symbol = $1",
         "DELETE FROM holder_distribution WHERE stock_symbol = $1",
+        "DELETE FROM holder_distribution_level WHERE stock_symbol = $1",
         "DELETE FROM insider_holding WHERE stock_symbol = $1",
         "DELETE FROM broker_flow WHERE stock_symbol = $1",
     ] {
@@ -105,6 +106,34 @@ async fn saves_every_kind_of_chip_data() {
         1
     );
     assert_eq!(repo.save_holder_distributions(&[holder]).await.unwrap(), 0);
+
+    let level = |level, holders| HolderLevelRecord {
+        date: day(),
+        stock_symbol: FAKE.to_string(),
+        level,
+        holders,
+        shares: holders * 500_000,
+        percent: dec!(1.25),
+    };
+    // 同批重複的分級只留最後一筆。
+    assert_eq!(
+        repo.save_holder_levels(&[level(12, 3), level(15, 50), level(12, 4)])
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(repo.save_holder_levels(&[level(12, 4)]).await.unwrap(), 0);
+    assert_eq!(repo.save_holder_levels(&[level(12, 5)]).await.unwrap(), 1);
+    assert_eq!(repo.save_holder_levels(&[]).await.unwrap(), 0);
+    let saved: Vec<(i16, i64, i64)> = sqlx::query_as(
+        r#"SELECT level, holders, shares FROM holder_distribution_level WHERE "date" = $1 AND stock_symbol = $2 ORDER BY level"#,
+    )
+    .bind(day())
+    .bind(FAKE)
+    .fetch_all(database::get_connection())
+    .await
+    .unwrap();
+    assert_eq!(saved, [(12, 5, 2_500_000), (15, 50, 25_000_000)]);
 
     let month = NaiveDate::from_ymd_opt(2026, 4, 1).unwrap();
     let insider = |name: &str, pledged| InsiderHoldingRecord {

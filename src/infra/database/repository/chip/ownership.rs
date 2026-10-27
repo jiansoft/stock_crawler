@@ -1,4 +1,5 @@
-//! `holder_distribution`（集保股權分散）與 `insider_holding`（董監持股與設質）。
+//! `holder_distribution`（集保股權分散週摘要）、`holder_distribution_level`（全部持股分級）
+//! 與 `insider_holding`（董監持股與設質）。
 
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
@@ -6,7 +7,7 @@ use rust_decimal::Decimal;
 
 use super::dedup_by_key;
 use crate::{
-    domain::chip::{HolderDistributionRecord, InsiderHoldingRecord},
+    domain::chip::{HolderDistributionRecord, HolderLevelRecord, InsiderHoldingRecord},
     infra::database,
 };
 
@@ -41,6 +42,42 @@ WHERE (holder_distribution.major_holders, holder_distribution.major_percent, hol
         .execute(database::get_connection())
         .await
         .context("Failed to save holder distributions")?;
+    Ok(result.rows_affected())
+}
+
+pub(super) async fn save_holder_levels(records: &[HolderLevelRecord]) -> Result<u64> {
+    let records = dedup_by_key(records, |r| (r.date, r.stock_symbol.clone(), r.level));
+    if records.is_empty() {
+        return Ok(0);
+    }
+    let dates: Vec<NaiveDate> = records.iter().map(|r| r.date).collect();
+    let symbols: Vec<&str> = records.iter().map(|r| r.stock_symbol.as_str()).collect();
+    let levels: Vec<i16> = records.iter().map(|r| r.level).collect();
+    let holders: Vec<i64> = records.iter().map(|r| r.holders).collect();
+    let shares: Vec<i64> = records.iter().map(|r| r.shares).collect();
+    let percent: Vec<Decimal> = records.iter().map(|r| r.percent).collect();
+
+    let sql = r#"
+INSERT INTO holder_distribution_level ("date", stock_symbol, level, holders, shares, percent)
+SELECT * FROM UNNEST($1::date[], $2::varchar[], $3::smallint[], $4::bigint[], $5::bigint[], $6::numeric[])
+ON CONFLICT ("date", stock_symbol, level) DO UPDATE SET
+holders = EXCLUDED.holders,
+shares = EXCLUDED.shares,
+percent = EXCLUDED.percent,
+updated_time = now()
+WHERE (holder_distribution_level.holders, holder_distribution_level.shares, holder_distribution_level.percent)
+  IS DISTINCT FROM (EXCLUDED.holders, EXCLUDED.shares, EXCLUDED.percent)
+"#;
+    let result = sqlx::query(sql)
+        .bind(&dates)
+        .bind(&symbols)
+        .bind(&levels)
+        .bind(&holders)
+        .bind(&shares)
+        .bind(&percent)
+        .execute(database::get_connection())
+        .await
+        .context("Failed to save holder distribution levels")?;
     Ok(result.rows_affected())
 }
 

@@ -6,7 +6,7 @@
 //! | 函式 | 資料 | 排程 | 能否回補 |
 //! |------|------|------|----------|
 //! | [`execute_daily`] | 三大法人買賣超＋融資融券餘額（上市、上櫃），接著更新當天的連續買賣超天數 | 週一至週五 21:30 | 可（[`backfill_daily`]） |
-//! | [`execute_holder_distributions`] | 集保股權分散週摘要 | 週六 10:20 | 否，只有最新一週 |
+//! | [`execute_holder_distributions`] | 集保股權分散週摘要與全部持股分級 | 週六 10:40 | 否，只有最新一週 |
 //! | [`execute_insider_holdings`] | 董監事持股與設質 | 每月 10–28 日 20:35 | 否，只有最新月份 |
 //! | [`broker_flow_records`] | 券商分點主力進出（只有持股） | 由 20:40 的主力進出通知順便寫入 | 否，只有最近一天 |
 
@@ -20,7 +20,7 @@ use crate::{
     domain::{
         chip::{
             BrokerFlowRecord, BrokerNetRecord, ChipRepository, HolderDistributionRecord,
-            InsiderHoldingRecord, InstitutionalNet, MarginRecord,
+            HolderLevelRecord, InsiderHoldingRecord, InstitutionalNet, MarginRecord,
         },
         quote::repository::QuoteRepository,
     },
@@ -29,7 +29,7 @@ use crate::{
             fbs::broker_flow::{BrokerFlow, BrokerNet},
             mops::insider_holding::{self, InsiderHolding},
             share::{InstitutionalFlow, MarginBalance},
-            tdcc::shareholding,
+            tdcc::shareholding::{self, HolderLevel},
             tpex, twse,
         },
         database::repository::{chip::PgChipRepository, quote::PgQuoteRepository},
@@ -200,10 +200,18 @@ pub async fn backfill_daily(from: NaiveDate, to: NaiveDate) -> Result<u64> {
     Ok(written)
 }
 
-/// 排程入口：最新一週的集保股權分散入庫。
+/// 排程入口：最新一週的集保股權分散入庫（週摘要與全部持股分級）。
 pub async fn execute_holder_distributions() -> Result<()> {
-    let distributions = shareholding::visit().await?;
-    let records: Vec<HolderDistributionRecord> = distributions
+    let levels = shareholding::visit_levels().await?;
+    save_holder_distributions(&PgChipRepository::new(), &levels).await
+}
+
+/// 由全部持股分級算出週摘要，先寫週摘要（週報與健康檢查依賴它），再寫全部分級。
+async fn save_holder_distributions(
+    repository: &impl ChipRepository,
+    levels: &[HolderLevel],
+) -> Result<()> {
+    let records: Vec<HolderDistributionRecord> = shareholding::summarize(levels)
         .into_iter()
         .map(|(stock_symbol, d)| HolderDistributionRecord {
             date: d.date,
@@ -213,12 +221,23 @@ pub async fn execute_holder_distributions() -> Result<()> {
             total_holders: d.total_holders,
         })
         .collect();
-    let written = PgChipRepository::new()
-        .save_holder_distributions(&records)
-        .await?;
+    let written = repository.save_holder_distributions(&records).await?;
+    let level_records: Vec<HolderLevelRecord> = levels
+        .iter()
+        .map(|l| HolderLevelRecord {
+            date: l.date,
+            stock_symbol: l.stock_symbol.clone(),
+            level: l.level,
+            holders: l.holders,
+            shares: l.shares,
+            percent: l.percent,
+        })
+        .collect();
+    let levels_written = repository.save_holder_levels(&level_records).await?;
     tracing::info!(
-        "集保股權分散入庫結束: records={}, rows_written={written}",
-        records.len()
+        "集保股權分散入庫結束: records={}, rows_written={written}, levels={}, levels_written={levels_written}",
+        records.len(),
+        level_records.len()
     );
     Ok(())
 }

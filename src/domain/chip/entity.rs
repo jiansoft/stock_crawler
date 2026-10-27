@@ -47,6 +47,23 @@ pub struct HolderDistributionRecord {
     pub total_holders: i64,
 }
 
+/// 單一證券一週、單一持股分級的股權分散。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HolderLevelRecord {
+    /// 資料日期。
+    pub date: NaiveDate,
+    /// 證券代號。
+    pub stock_symbol: String,
+    /// 持股分級（1～15 依持股數由小到大，16 差異數調整，17 合計）。
+    pub level: i16,
+    /// 人數。
+    pub holders: i64,
+    /// 股數。
+    pub shares: i64,
+    /// 占集保庫存數比例（%）。
+    pub percent: Decimal,
+}
+
 /// 單一內部人在單一職稱下的月持股與設質。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InsiderHoldingRecord {
