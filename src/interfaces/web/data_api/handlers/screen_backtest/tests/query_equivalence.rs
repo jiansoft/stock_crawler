@@ -65,7 +65,7 @@ async fn materialized_liquidity_preserves_periods() {
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM {table} WHERE stock_symbol = ANY($1)"
         )))
-        .bind(&symbols)
+        .bind(symbols)
         .execute(pool)
         .await
         .unwrap();
