@@ -1,8 +1,20 @@
 //! 在臨時庫比對成交金額物化前後的候選股、續抱與逐期報酬。
 
+use std::future::Future;
+use std::pin::Pin;
+
 use super::super::portfolio::weigh;
 use super::*;
 use crate::infra::database;
+
+/// 把 future 裝箱成 `dyn Future`，poll 改走間接呼叫。
+///
+/// 回測的 SQL future 很大；直接 `.await` 時 release 最佳化會把它的 poll 內聯進比對矩陣的每一層，
+/// 單一 crate 的 release 測試編譯從約 2.5 分鐘暴增到 20 分鐘（CI 整合測試因此超過 30 分鐘被取消）。
+/// `#[inline(never)]` 只擋得住回傳 future 的外層函式，擋不住 poll，所以改以型別抹除隔開。
+fn boxed<'a, T>(future: impl Future<Output = T> + 'a) -> Pin<Box<dyn Future<Output = T> + 'a>> {
+    Box::pin(future)
+}
 
 /// 籌碼門檻、排序、權重與換股日偏移，在兩種成交價模型下均保持一致。
 #[tokio::test]
@@ -20,7 +32,7 @@ async fn materialized_liquidity_preserves_periods() {
     for execution in ["close", "next_open"] {
         for offset in [0, 1] {
             for weighting in ["equal", "trade_value", "sqrt_trade_value"] {
-                compare_case(execution, offset, weighting).await;
+                boxed(compare_case(execution, offset, weighting)).await;
             }
         }
     }
@@ -42,8 +54,7 @@ async fn materialized_liquidity_preserves_periods() {
     }
 }
 
-/// 以獨立 poll 邊界比對一組條件，避免 MSRV release 最佳化把大型 SQL future 內聯進三層矩陣迴圈。
-#[inline(never)]
+/// 比對一組條件；每個 SQL future 都經 [`boxed`] 隔開，避免 release 最佳化把它們內聯進三層矩陣迴圈。
 async fn compare_case(execution: &str, offset: u16, weighting: &str) {
     let params = serde_json::from_value(serde_json::json!({
         "from":"1992-02-01", "to":"1992-02-12", "hold_days":5,
@@ -52,7 +63,7 @@ async fn compare_case(execution: &str, offset: u16, weighting: &str) {
         "weighting":weighting,"execution_price":execution
     }))
     .unwrap();
-    let backtest = Backtest::prepare(&params)
+    let backtest = boxed(Backtest::prepare(&params))
         .await
         .unwrap_or_else(|_| panic!("條件應合法"))
         .period_end_only();
@@ -62,11 +73,10 @@ async fn compare_case(execution: &str, offset: u16, weighting: &str) {
         super::super::sql::BACKTEST_WITH_CHIP_NEXT_OPEN_SQL
     };
     let original = optimized.replace("valued AS MATERIALIZED (", "valued AS (");
-    let before = backtest
-        .candidates_using_sql(offset, 2, &original)
+    let before = boxed(backtest.candidates_using_sql(offset, 2, &original))
         .await
         .unwrap();
-    let after = backtest.candidates(offset, 2).await.unwrap();
+    let after = boxed(backtest.candidates(offset, 2)).await.unwrap();
     assert!(!after.is_empty());
     assert_eq!(before, after, "{execution} / {offset} / {weighting}");
     // 此回歸只改 SQL，沿用相同的純持股／權重／成本步驟驗證逐期結果。
