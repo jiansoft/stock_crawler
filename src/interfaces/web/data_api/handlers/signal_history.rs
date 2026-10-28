@@ -19,6 +19,7 @@ const MAX_PERIOD_DAYS: i64 = 3653;
 const MAX_ALL_SIGNALS_PERIOD_DAYS: i64 = 1096;
 
 mod benchmark;
+mod fetch;
 mod performance;
 mod rows;
 mod sql;

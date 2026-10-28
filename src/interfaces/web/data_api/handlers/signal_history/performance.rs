@@ -10,6 +10,7 @@ use chrono::NaiveDate;
 
 use super::HORIZONS;
 use super::benchmark::{Benchmark, benchmark_output, fetch_benchmark};
+use super::fetch::{PerformanceFilter, fetch_performance_rows};
 use super::rows::PerformanceRow;
 use super::sql::{
     LATEST_SIGNAL_DATE_SQL, PERFORMANCE_BY_YEAR_SQL, PERFORMANCE_SQL,
@@ -103,30 +104,30 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
         (false, true) => PERFORMANCE_BY_YEAR_SQL,
         (false, false) => PERFORMANCE_SQL,
     };
-    let mut query = sqlx::query_as(sql)
-        .bind(from)
-        .bind(to)
-        .bind(market_id)
-        .bind(params.indicator.as_deref())
-        .bind(params.kind.as_deref())
-        .bind(params.industry.as_deref())
-        .bind(params.min_rs_score.map(i16::from))
-        .bind(params.max_rs_score.map(i16::from));
-    if with_chip {
-        query = query
-            .bind(params.min_foreign_streak.map(i64::from))
-            .bind(params.min_trust_streak.map(i64::from));
-    }
-    // 不快取成具名 prepared statement：同一連線執行約 5 次後 PostgreSQL 會改用 generic plan，
-    // 來源、種類、產業與相對強度的可選條件剪不掉（2026-10-28 正式庫實測近一年全市場 custom 3.4 秒、
-    // generic 56 秒；只看 rsi 三年 56 ms → 0.7 秒）。每次重新規劃只多幾毫秒。
-    let rows: Vec<PerformanceRow> = match query.persistent(false).fetch_all(pool).await {
-        Ok(rows) => rows,
-        Err(error) => return database_error(error),
+    let filter = PerformanceFilter {
+        from,
+        to,
+        market_id,
+        indicator: params.indicator.as_deref(),
+        kind: params.kind.as_deref(),
+        industry: params.industry.as_deref(),
+        min_rs_score: params.min_rs_score.map(i16::from),
+        max_rs_score: params.max_rs_score.map(i16::from),
+        streaks: with_chip.then(|| {
+            (
+                params.min_foreign_streak.map(i64::from),
+                params.min_trust_streak.map(i64::from),
+            )
+        }),
     };
-    let benchmark = match fetch_benchmark(from, to, market_id, by_year).await {
-        Ok(benchmark) => benchmark,
-        Err(error) => return database_error(error),
+    // 依來源×種類分組平行查詢（見 [`fetch_performance_rows`]），大盤基準同時查。
+    let (rows, benchmark) = tokio::join!(
+        fetch_performance_rows(sql, filter),
+        fetch_benchmark(from, to, market_id, by_year)
+    );
+    let (rows, benchmark): (Vec<PerformanceRow>, Benchmark) = match (rows, benchmark) {
+        (Ok(rows), Ok(benchmark)) => (rows, benchmark),
+        (Err(error), _) | (_, Err(error)) => return database_error(error),
     };
 
     Json(build_performance(
