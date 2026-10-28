@@ -3,10 +3,11 @@
 //! 提供個股（Stock）、產業（Industry）與 ETF 穿透（EtfLookThrough）三種維度的資產配置偏離試算
 //! 與具體股數／金額調整建議。本模組為純函式與無狀態計算，易於單元測試。
 
-use std::collections::{HashMap, HashSet};
-
 use anyhow::Result;
 
+mod industry;
+mod look_through;
+mod stock;
 mod validate;
 use serde::{Deserialize, Serialize};
 
@@ -278,314 +279,43 @@ pub fn calculate_rebalance(
         });
     }
 
-    match dimension {
+    let (stock_items, industry_items, etf_items, cash_summary) = match dimension {
         TargetDimension::Stock => {
-            let mut pos_map: HashMap<&str, &CurrentPosition> = HashMap::new();
-            for pos in positions {
-                pos_map.insert(pos.symbol.as_str(), pos);
-            }
-
-            let mut all_keys: Vec<String> = targets.iter().map(|(k, _)| k.clone()).collect();
-            for pos in positions {
-                if !all_keys.contains(&pos.symbol) {
-                    all_keys.push(pos.symbol.clone());
-                }
-            }
-
-            let target_map: HashMap<&str, f64> =
-                targets.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-
-            let mut stock_items = Vec::new();
-            let mut total_sell_net = 0.0_f64;
-            let mut total_buy_cost = 0.0_f64;
-
-            for key in all_keys {
-                let target_pct = target_map.get(key.as_str()).copied().unwrap_or(0.0);
-                let pos_opt = pos_map.get(key.as_str()).copied();
-
-                let (name, shares, price) = match pos_opt {
-                    Some(p) => (p.name.clone(), p.shares, p.current_price),
-                    None => (key.clone(), 0, 0.0),
-                };
-
-                let current_val = shares as f64 * price;
-                let current_pct = (current_val / total_portfolio) * 100.0;
-                let deviation = target_pct - current_pct;
-
-                let mut action = "hold";
-                let mut suggested_shares = 0_i64;
-                let mut suggested_amount = 0.0_f64;
-                let mut estimated_cost = 0.0_f64;
-                let mut net_amount = 0.0_f64;
-
-                if price > 0.0 && deviation.abs() >= params.tolerance_percent {
-                    let lot = f64::from(lot_size);
-                    if deviation > 0.0 {
-                        // 買入
-                        action = "buy";
-                        let target_val_diff = (deviation / 100.0) * total_portfolio;
-                        let raw_shares = (target_val_diff / price / lot).round() * lot;
-                        suggested_shares = raw_shares.max(0.0) as i64;
-                        suggested_amount = suggested_shares as f64 * price;
-
-                        if suggested_shares > 0 {
-                            let fee = (suggested_amount * params.fee_rate * params.fee_discount)
-                                .max(20.0);
-                            estimated_cost = round2(fee);
-                            net_amount = round2(suggested_amount + estimated_cost);
-                            total_buy_cost += net_amount;
-                        }
-                    } else {
-                        // 賣出（不得超過持有股數）
-                        action = "sell";
-                        let target_val_diff = (-deviation / 100.0) * total_portfolio;
-                        let raw_shares = (target_val_diff / price / lot).round() * lot;
-                        let capped_shares = (raw_shares.max(0.0) as i64).min(shares);
-
-                        suggested_shares = if lot_size > 1 {
-                            (capped_shares / lot_size as i64) * lot_size as i64
-                        } else {
-                            capped_shares
-                        };
-
-                        if suggested_shares > 0 {
-                            suggested_amount = suggested_shares as f64 * price;
-                            let fee = (suggested_amount * params.fee_rate * params.fee_discount)
-                                .max(20.0);
-                            let tax_rate = if pos_opt.is_some_and(|p| p.is_etf) {
-                                super::costs::ETF_TAX_RATE
-                            } else {
-                                params.tax_rate
-                            };
-                            let tax = suggested_amount * tax_rate;
-                            estimated_cost = round2(fee + tax);
-                            net_amount = round2((suggested_amount - estimated_cost).max(0.0));
-                            total_sell_net += net_amount;
-                        } else {
-                            action = "hold";
-                        }
-                    }
-                }
-
-                stock_items.push(StockRebalanceItem {
-                    symbol: key,
-                    name,
-                    current_shares: shares,
-                    current_price: round2(price),
-                    current_value: round2(current_val),
-                    current_weight: round2(current_pct),
-                    target_weight: round2(target_pct),
-                    deviation_percent: round2(deviation),
-                    action,
-                    suggested_shares,
-                    suggested_amount: round2(suggested_amount),
-                    estimated_cost,
-                    net_amount,
-                });
-            }
-
-            stock_items.sort_by(|a, b| {
-                b.target_weight
-                    .partial_cmp(&a.target_weight)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| a.symbol.cmp(&b.symbol))
-            });
-
-            let available_capital = params.available_cash + total_sell_net;
-            let required_additional_cash = (total_buy_cost - available_capital).max(0.0);
-            let remaining_cash = (available_capital - total_buy_cost).max(0.0);
-
-            let cash_summary = RebalanceCashSummary {
-                initial_cash: round2(params.available_cash),
-                estimated_sell_net: round2(total_sell_net),
-                estimated_buy_total: round2(total_buy_cost),
-                available_capital: round2(available_capital),
-                required_additional_cash: round2(required_additional_cash),
-                remaining_cash: round2(remaining_cash),
-            };
-
-            Ok(PortfolioRebalanceResult {
-                dimension,
-                total_equity_value: round2(total_equity),
-                total_portfolio_value: round2(total_portfolio),
-                target_cash_percent: round2(target_cash_percent),
-                tolerance_percent: params.tolerance_percent,
-                lot_size,
-                stock_items,
-                industry_items: Vec::new(),
-                etf_items: Vec::new(),
-                cash_summary,
-                disclaimer: REBALANCE_DISCLAIMER,
-            })
+            let (items, cash) =
+                stock::rebalance_stocks(targets, positions, total_portfolio, params);
+            (items, Vec::new(), Vec::new(), cash)
         }
-        TargetDimension::Industry => {
-            let mut ind_values: HashMap<String, f64> = HashMap::new();
-            let mut ind_stocks: HashMap<String, Vec<String>> = HashMap::new();
-
-            for pos in positions.iter().filter(|pos| !pos.is_etf) {
-                let ind = if pos.industry.is_empty() {
-                    "其他".to_string()
-                } else {
-                    pos.industry.clone()
-                };
-                let val = pos.shares as f64 * pos.current_price;
-                *ind_values.entry(ind.clone()).or_default() += val;
-                ind_stocks.entry(ind).or_default().push(pos.symbol.clone());
-            }
-
-            // ETF 市值依成分股產業拆分；未揭露部分保留在涵蓋率資訊，不假裝已知產業。
-            for comp in etf_components {
-                let etf_value: f64 = positions
-                    .iter()
-                    .filter(|p| p.is_etf && p.symbol == comp.etf_symbol)
-                    .map(|p| p.shares as f64 * p.current_price)
-                    .sum();
-                let industry = if comp.industry.is_empty() {
-                    "其他"
-                } else {
-                    &comp.industry
-                };
-                *ind_values.entry(industry.to_owned()).or_default() +=
-                    etf_value * comp.weight_percent / 100.0;
-            }
-            let mut all_inds: Vec<String> = targets.iter().map(|(k, _)| k.clone()).collect();
-            for ind in ind_values.keys() {
-                if !all_inds.contains(ind) {
-                    all_inds.push(ind.clone());
-                }
-            }
-
-            let target_map: HashMap<&str, f64> =
-                targets.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-
-            let mut industry_items = Vec::new();
-            for ind in all_inds {
-                let target_pct = target_map.get(ind.as_str()).copied().unwrap_or(0.0);
-                let current_val = ind_values.get(&ind).copied().unwrap_or(0.0);
-                let current_pct = (current_val / total_portfolio) * 100.0;
-                let deviation = target_pct - current_pct;
-                let mut candidate_stocks = ind_stocks.get(&ind).cloned().unwrap_or_default();
-                candidate_stocks.sort();
-
-                industry_items.push(IndustryRebalanceItem {
-                    industry: ind,
-                    current_value: round2(current_val),
-                    current_weight: round2(current_pct),
-                    target_weight: round2(target_pct),
-                    deviation_percent: round2(deviation),
-                    candidate_stocks,
-                });
-            }
-
-            industry_items.sort_by(|a, b| {
-                b.target_weight
-                    .partial_cmp(&a.target_weight)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| a.industry.cmp(&b.industry))
-            });
-
-            Ok(PortfolioRebalanceResult {
-                dimension,
-                total_equity_value: round2(total_equity),
-                total_portfolio_value: round2(total_portfolio),
-                target_cash_percent: round2(target_cash_percent),
-                tolerance_percent: params.tolerance_percent,
-                lot_size,
-                stock_items: Vec::new(),
-                industry_items,
-                etf_items: Vec::new(),
-                cash_summary: empty_cash_summary,
-                disclaimer: REBALANCE_DISCLAIMER,
-            })
-        }
-        TargetDimension::EtfLookThrough => {
-            // 直接持股市值
-            let mut direct_values: HashMap<String, (String, f64)> = HashMap::new();
-            let mut etf_positions: HashMap<&str, f64> = HashMap::new();
-
-            for pos in positions {
-                let val = pos.shares as f64 * pos.current_price;
-                if pos.is_etf {
-                    etf_positions.insert(pos.symbol.as_str(), val);
-                } else {
-                    direct_values.insert(pos.symbol.clone(), (pos.name.clone(), val));
-                }
-            }
-
-            // 間接持股市值（依成分股權重穿透）
-            let mut indirect_values: HashMap<String, (String, f64)> = HashMap::new();
-            for comp in etf_components {
-                if let Some(&etf_val) = etf_positions.get(comp.etf_symbol.as_str()) {
-                    let comp_val = etf_val * (comp.weight_percent / 100.0);
-                    let entry = indirect_values
-                        .entry(comp.stock_symbol.clone())
-                        .or_insert_with(|| (comp.name.clone(), 0.0));
-                    entry.1 += comp_val;
-                }
-            }
-
-            let mut all_stocks: HashSet<String> = targets.iter().map(|(k, _)| k.clone()).collect();
-            all_stocks.extend(direct_values.keys().cloned());
-            all_stocks.extend(indirect_values.keys().cloned());
-
-            let target_map: HashMap<&str, f64> =
-                targets.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-
-            let mut etf_items = Vec::new();
-            for sym in all_stocks {
-                let target_pct = target_map.get(sym.as_str()).copied().unwrap_or(0.0);
-                let (direct_name, direct_val) = direct_values
-                    .get(&sym)
-                    .cloned()
-                    .unwrap_or((sym.clone(), 0.0));
-                let (indirect_name, indirect_val) = indirect_values
-                    .get(&sym)
-                    .cloned()
-                    .unwrap_or((sym.clone(), 0.0));
-                let name = if !direct_name.is_empty() && direct_name != sym {
-                    direct_name
-                } else {
-                    indirect_name
-                };
-
-                let total_val = direct_val + indirect_val;
-                let current_pct = (total_val / total_portfolio) * 100.0;
-                let deviation = target_pct - current_pct;
-
-                etf_items.push(EtfLookThroughRebalanceItem {
-                    stock_symbol: sym,
-                    name,
-                    direct_value: round2(direct_val),
-                    indirect_value: round2(indirect_val),
-                    total_value: round2(total_val),
-                    current_weight: round2(current_pct),
-                    target_weight: round2(target_pct),
-                    deviation_percent: round2(deviation),
-                });
-            }
-
-            etf_items.sort_by(|a, b| {
-                b.target_weight
-                    .partial_cmp(&a.target_weight)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| a.stock_symbol.cmp(&b.stock_symbol))
-            });
-
-            Ok(PortfolioRebalanceResult {
-                dimension,
-                total_equity_value: round2(total_equity),
-                total_portfolio_value: round2(total_portfolio),
-                target_cash_percent: round2(target_cash_percent),
-                tolerance_percent: params.tolerance_percent,
-                lot_size,
-                stock_items: Vec::new(),
-                industry_items: Vec::new(),
-                etf_items,
-                cash_summary: empty_cash_summary,
-                disclaimer: REBALANCE_DISCLAIMER,
-            })
-        }
-    }
+        TargetDimension::Industry => (
+            Vec::new(),
+            industry::rebalance_industries(targets, positions, etf_components, total_portfolio),
+            Vec::new(),
+            empty_cash_summary,
+        ),
+        TargetDimension::EtfLookThrough => (
+            Vec::new(),
+            Vec::new(),
+            look_through::rebalance_look_through(
+                targets,
+                positions,
+                etf_components,
+                total_portfolio,
+            ),
+            empty_cash_summary,
+        ),
+    };
+    Ok(PortfolioRebalanceResult {
+        dimension,
+        total_equity_value: round2(total_equity),
+        total_portfolio_value: round2(total_portfolio),
+        target_cash_percent: round2(target_cash_percent),
+        tolerance_percent: params.tolerance_percent,
+        lot_size,
+        stock_items,
+        industry_items,
+        etf_items,
+        cash_summary,
+        disclaimer: REBALANCE_DISCLAIMER,
+    })
 }
 
 #[cfg(test)]
