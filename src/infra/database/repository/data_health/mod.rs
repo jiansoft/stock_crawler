@@ -46,6 +46,16 @@ async fn count_between(
         .with_context(|| format!("Failed to count {label} {from}~{to}"))
 }
 
+/// 集保級距最新週、該週列數與千張大戶最新週 400 張空值檔數（[`HOLDER_LEVEL_HEALTH_SQL`]）。
+async fn fetch_holder_level_health<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+) -> Result<(Option<NaiveDate>, i64, i64)> {
+    sqlx::query_as(HOLDER_LEVEL_HEALTH_SQL)
+        .fetch_one(executor)
+        .await
+        .context("Failed to fetch holder level health")
+}
+
 #[async_trait]
 impl DataHealthRepository for PgDataHealthRepository {
     async fn fetch_snapshot(
@@ -153,6 +163,8 @@ impl DataHealthRepository for PgDataHealthRepository {
                 .fetch_one(pool)
                 .await
                 .context("Failed to fetch latest holder distribution week")?;
+        let (latest_holder_level_week, holder_level_rows, holders_400_missing) =
+            fetch_holder_level_health(pool).await?;
         let latest_insider_month =
             sqlx::query_scalar(r#"SELECT max("month") FROM insider_holding"#)
                 .fetch_one(pool)
@@ -189,6 +201,9 @@ impl DataHealthRepository for PgDataHealthRepository {
             dividend_total_mismatches,
             latest_revenue_month,
             latest_holder_week,
+            latest_holder_level_week,
+            holder_level_rows,
+            holders_400_missing,
             latest_insider_month,
             valuation_ratio_zeros,
             forward_return_gaps,
@@ -368,5 +383,75 @@ SELECT $1::date, $4 || n, $2, 1.0, 1.0 FROM generate_series(1, $3) AS n
         tx.rollback().await.expect("rollback 應成功");
 
         assert_eq!(gaps, [(day(3), 120), (day(8), 60)]);
+    }
+
+    /// 集保級距只量最新一週的列數；400 張空值只看千張大戶最新一週，舊週的空值不算。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn holder_level_health_counts_the_latest_week_only() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 holder_level_health_counts_the_latest_week_only：無資料庫連接");
+            return;
+        }
+        let pool = database::get_connection();
+        let mut tx = pool.begin().await.expect("開交易應成功");
+        // 交易內清空，測完 rollback，不影響其他測試的資料。
+        for sql in [
+            "DELETE FROM holder_distribution_level",
+            "DELETE FROM holder_distribution",
+        ] {
+            sqlx::query(sql)
+                .execute(&mut *tx)
+                .await
+                .expect("清空應成功");
+        }
+        let empty = fetch_holder_level_health(&mut *tx)
+            .await
+            .expect("空表查詢應成功");
+        assert_eq!(empty, (None, 0, 0));
+
+        let week = |d| NaiveDate::from_ymd_opt(2021, 3, d).expect("日期應合法");
+        // 舊週 2 檔、最新週 3 檔各 17 列。
+        for (date, symbols) in [(week(5), 2), (week(12), 3)] {
+            sqlx::query(
+                r#"
+INSERT INTO holder_distribution_level ("date", stock_symbol, level)
+SELECT $1, 'L' || s, l FROM generate_series(1, $2) AS s, generate_series(1, 17) AS l
+"#,
+            )
+            .bind(date)
+            .bind(symbols)
+            .execute(&mut *tx)
+            .await
+            .expect("寫入級距應成功");
+        }
+        // 舊週全部空值；最新週 1 檔空值、1 檔有值。
+        for (date, symbol, holders_400) in [
+            (week(5), "H1", None),
+            (week(5), "H2", None),
+            (week(12), "H1", Some(12_i64)),
+            (week(12), "H2", None),
+        ] {
+            sqlx::query(
+                r#"INSERT INTO holder_distribution ("date", stock_symbol, holders_400) VALUES ($1, $2, $3)"#,
+            )
+            .bind(date)
+            .bind(symbol)
+            .bind(holders_400)
+            .execute(&mut *tx)
+            .await
+            .expect("寫入千張大戶應成功");
+        }
+
+        let health = fetch_holder_level_health(&mut *tx)
+            .await
+            .expect("查詢應成功");
+        tx.rollback().await.expect("rollback 應成功");
+
+        assert_eq!(health, (Some(week(12)), 51, 1));
     }
 }

@@ -25,7 +25,9 @@
 //!     損益表還沒有那一季（季報期優先採集也沒追上，選股、回測與持股健檢會用到舊一季）。
 //! 12. 週／月資料：千張大戶（`holder_distribution`）超過 [`HOLDER_MAX_AGE_DAYS`] 天沒更新、董監持股
 //!     （`insider_holding`）的最新月份早於 [`INSIDER_MAX_AGE_DAYS`] 天前那個月。兩者來源都只有最新
-//!     一期，停更幾期就永遠補不回來。
+//!     一期，停更幾期就永遠補不回來。同一個排程寫入的集保全部持股分級（`holder_distribution_level`）
+//!     最新週要跟上千張大戶、列數不少於 [`HOLDER_LEVEL_MIN_ROWS`]，千張大戶最新週的 400 張欄位不能是空值；
+//!     這一項正常時也附上級距的最新週與列數。
 //! 13. ETF 資料：交易日的 ETF 淨值（`etf_daily_nav`）比近期少一成以上；最新交易日以前的正式淨值
 //!     有一成以上沒回填；基本資料（`etf_profile`）超過 [`ETF_PROFILE_MAX_AGE_DAYS`] 天沒更新。
 //!     MIS 只給當天，漏抓那天要靠週六的 MoneyDJ 補缺日，太久沒發現就超出補的範圍。
@@ -71,6 +73,10 @@ const REVENUE_DUE_DAY: u32 = 15;
 /// 寬限到 9 天才算漏了一週。
 const HOLDER_MAX_AGE_DAYS: u64 = 9;
 
+/// 集保全部持股分級最新一週至少要有幾列：每檔 17 列，上市櫃與興櫃約 4,100 檔、69,700 列，
+/// 少了一成多代表只寫進一部分。
+const HOLDER_LEVEL_MIN_ROWS: i64 = 60_000;
+
 /// 董監持股的最新月份不能早於這麼多天前那個月：每月 10～28 日抓上個月的資料，月中前還沒公布
 /// 時最新只到前兩個月，55 天涵蓋這段空窗。
 const INSIDER_MAX_AGE_DAYS: u64 = 55;
@@ -113,11 +119,22 @@ struct Check {
     name: &'static str,
     /// 發現的問題，空的代表正常。
     problems: Vec<String>,
+    /// 附在項目名稱後的量測數字（例如集保級距的最新週），正常時也顯示。
+    detail: Option<String>,
 }
 
 impl Check {
     fn new(name: &'static str, problems: Vec<String>) -> Self {
-        Self { name, problems }
+        Self {
+            name,
+            problems,
+            detail: None,
+        }
+    }
+
+    fn with_detail(mut self, detail: Option<String>) -> Self {
+        self.detail = detail;
+        self
     }
 
     /// 單一數字超過 0 就算異常的項目。
@@ -208,7 +225,8 @@ fn evaluate(
             revenue_problems(snapshot.latest_revenue_month, today),
         ),
         Check::new("股利", dividend_problems(snapshot)),
-        Check::new("週／月資料", periodic_table_problems(snapshot, today)),
+        Check::new("週／月資料", periodic_table_problems(snapshot, today))
+            .with_detail(holder_level_detail(snapshot)),
         Check::new(
             "本益比／淨值比",
             valuation_ratio_problems(&snapshot.valuation_ratio_zeros, today),
@@ -237,13 +255,21 @@ fn report(from: NaiveDate, to: NaiveDate, checks: &[Check]) -> String {
         let _ = writeln!(&mut message, "{problems} 項需要處理");
     }
     for check in checks {
-        if check.problems.is_empty() {
-            let _ = writeln!(&mut message, "✅ {}", check.name);
+        let mark = if check.problems.is_empty() {
+            "✅"
         } else {
-            let _ = writeln!(&mut message, "⚠️ {}", check.name);
-            for problem in &check.problems {
-                let _ = writeln!(&mut message, "  • {problem}");
+            "⚠️"
+        };
+        match &check.detail {
+            Some(detail) => {
+                let _ = writeln!(&mut message, "{mark} {}（{detail}）", check.name);
             }
+            None => {
+                let _ = writeln!(&mut message, "{mark} {}", check.name);
+            }
+        }
+        for problem in &check.problems {
+            let _ = writeln!(&mut message, "  • {problem}");
         }
     }
     text::escape_markdown_v2(message.trim_end())

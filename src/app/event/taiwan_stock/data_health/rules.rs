@@ -101,7 +101,8 @@ pub(super) fn revenue_problems(latest_month: Option<i64>, today: NaiveDate) -> V
     }
 }
 
-/// 千張大戶與董監持股是否停更；沒有任何資料也列出。
+/// 千張大戶與董監持股是否停更；沒有任何資料也列出。千張大戶有資料時再看集保級距與 400 張欄位
+/// （[`holder_level_problems`]）。
 pub(super) fn periodic_table_problems(
     snapshot: &DataHealthSnapshot,
     today: NaiveDate,
@@ -114,6 +115,9 @@ pub(super) fn periodic_table_problems(
             "holder_distribution 最新 {latest}，已超過 {HOLDER_MAX_AGE_DAYS} 天沒更新"
         )),
         _ => {}
+    }
+    if let Some(holder_week) = snapshot.latest_holder_week {
+        problems.extend(holder_level_problems(snapshot, holder_week));
     }
     let insider_due = today
         .checked_sub_days(Days::new(INSIDER_MAX_AGE_DAYS))
@@ -128,6 +132,47 @@ pub(super) fn periodic_table_problems(
         _ => {}
     }
     problems
+}
+
+/// 集保全部持股分級與 400 張欄位：兩者和千張大戶由同一個週六排程寫入，千張大戶照常更新時
+/// 這兩項沒寫進去也不會報錯。級距最新週落後千張大戶、最新週列數少於 [`HOLDER_LEVEL_MIN_ROWS`]、
+/// 千張大戶最新週有 400 張空值（集保來源每檔都有第 12～15 級），都列出。
+fn holder_level_problems(snapshot: &DataHealthSnapshot, holder_week: NaiveDate) -> Vec<String> {
+    let mut problems = Vec::new();
+    match snapshot.latest_holder_level_week {
+        None => problems.push("holder_distribution_level 沒有任何資料".to_string()),
+        Some(level_week) => {
+            if level_week < holder_week {
+                problems.push(format!(
+                    "holder_distribution_level 最新 {level_week}，落後 holder_distribution（{holder_week}）"
+                ));
+            }
+            if snapshot.holder_level_rows < HOLDER_LEVEL_MIN_ROWS {
+                problems.push(format!(
+                    "holder_distribution_level {level_week} 只有 {} 列，應至少 {HOLDER_LEVEL_MIN_ROWS} 列",
+                    snapshot.holder_level_rows
+                ));
+            }
+        }
+    }
+    if snapshot.holders_400_missing > 0 {
+        problems.push(format!(
+            "holder_distribution {holder_week} 有 {} 檔 holders_400 是空值",
+            snapshot.holders_400_missing
+        ));
+    }
+    problems
+}
+
+/// 週／月資料項目在週報上附的集保級距數字（最新週、列數與 400 張空值檔數），讓正常時也看得到
+/// 這週有沒有寫入；沒有級距資料時不附。
+pub(super) fn holder_level_detail(snapshot: &DataHealthSnapshot) -> Option<String> {
+    snapshot.latest_holder_level_week.map(|week| {
+        format!(
+            "集保級距 {week} {} 列、400 張空值 {} 檔",
+            snapshot.holder_level_rows, snapshot.holders_400_missing
+        )
+    })
 }
 
 /// 過期的「尚未公布」佔位列與年度合計不符。
