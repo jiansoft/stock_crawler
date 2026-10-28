@@ -283,14 +283,6 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "每週市場摘要",
             event::taiwan_stock::weekly_market::execute,
         ),
-        // 10:30（週六）持股千張大戶比例週報：集保股權分散表每週六公布上週五的資料，
-        // 與 Redis 中上週的快照比較；同一份資料只通知一次。
-        job!(
-            normal,
-            "0 30 10 * * Sat",
-            "通知持股千張大戶週報",
-            event::taiwan_stock::holder_distribution::execute,
-        ),
         // 10:50（週六）持股估值週報：本益比、股價淨值比位於自己近 5 年 ≥ 第 90 或 ≤ 第 10 百分位的持股；
         // 沒有就不發。
         job!(
@@ -353,12 +345,13 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "籌碼資料入庫",
             chip::execute_daily
         ),
-        // 10:40（週六）集保股權分散週摘要入庫（holder_distribution）；開放資料只有最新一週
+        // 10:40（週六）集保股權分散入庫（holder_distribution 與全部持股分級；開放資料只有最新一週），
+        // 成功後送持股大戶週報：從資料庫讀上週與 4 週前比較；同一資料週只通知一次，入庫失敗就不送。
         job!(
             normal,
             "0 40 10 * * Sat",
-            "集保股權分散入庫",
-            chip::execute_holder_distributions,
+            "集保股權分散入庫與持股大戶週報",
+            event::taiwan_stock::holder_distribution::execute,
         ),
         // 17:30、20:30（週一至週五）以證交所、櫃買中心官方值補最近 7 天日線的本益比與股價淨值比
         // （櫃買當天資料 17:30 常未公布，20:30 再跑一次）

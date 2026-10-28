@@ -7,9 +7,88 @@ use rust_decimal::Decimal;
 
 use super::dedup_by_key;
 use crate::{
-    domain::chip::{HolderDistributionRecord, HolderLevelRecord, InsiderHoldingRecord},
+    domain::chip::{
+        HolderDistributionRecord, HolderLevelRecord, InsiderHoldingRecord, RecentHolderWeeks,
+    },
     infra::database,
 };
+
+/// `as_of`（含）以前最近的幾個資料週；主鍵以日期開頭，倒序掃索引取到足夠的週數就停。
+const RECENT_WEEKS_SQL: &str = r#"
+SELECT DISTINCT "date" FROM holder_distribution
+WHERE "date" <= $1
+ORDER BY "date" DESC
+LIMIT $2
+"#;
+
+const RECENT_RECORDS_SQL: &str = r#"
+SELECT "date", stock_symbol, major_holders, major_percent, total_holders,
+       holders_400, shares_400, percent_400
+FROM holder_distribution
+WHERE stock_symbol = ANY($1) AND "date" = ANY($2)
+ORDER BY stock_symbol, "date" DESC
+"#;
+
+type HolderRow = (
+    NaiveDate,
+    String,
+    i64,
+    Decimal,
+    i64,
+    Option<i64>,
+    Option<i64>,
+    Option<Decimal>,
+);
+
+pub(super) async fn recent_holder_weeks(
+    symbols: &[String],
+    as_of: NaiveDate,
+    weeks: i64,
+) -> Result<RecentHolderWeeks> {
+    let dates: Vec<NaiveDate> = sqlx::query_scalar(RECENT_WEEKS_SQL)
+        .bind(as_of)
+        .bind(weeks)
+        .fetch_all(database::get_connection())
+        .await
+        .context("Failed to fetch recent holder distribution weeks")?;
+    if dates.is_empty() || symbols.is_empty() {
+        return Ok(RecentHolderWeeks {
+            dates,
+            records: Vec::new(),
+        });
+    }
+    let rows: Vec<HolderRow> = sqlx::query_as(RECENT_RECORDS_SQL)
+        .bind(symbols)
+        .bind(&dates)
+        .fetch_all(database::get_connection())
+        .await
+        .context("Failed to fetch recent holder distributions")?;
+    let records = rows
+        .into_iter()
+        .map(
+            |(
+                date,
+                stock_symbol,
+                major_holders,
+                major_percent,
+                total_holders,
+                holders_400,
+                shares_400,
+                percent_400,
+            )| HolderDistributionRecord {
+                date,
+                stock_symbol,
+                major_holders,
+                major_percent,
+                total_holders,
+                holders_400,
+                shares_400,
+                percent_400,
+            },
+        )
+        .collect();
+    Ok(RecentHolderWeeks { dates, records })
+}
 
 pub(super) async fn save_holder_distributions(records: &[HolderDistributionRecord]) -> Result<u64> {
     let records = dedup_by_key(records, |r| (r.date, r.stock_symbol.clone()));
