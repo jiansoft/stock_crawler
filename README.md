@@ -94,10 +94,10 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
 + `cargo fmt --all -- --check`：檢查格式（CI gate）。
 + `cargo clippy --all-targets --all-features --locked -- -D warnings`：檢查 lint（CI gate）。
 + `RUSTDOCFLAGS="-D warnings -A rustdoc::private_intra_doc_links" cargo doc --no-deps --locked --document-private-items`：檢查文件連結（CI gate）；子模組的說明寫在模組檔的 `//!`，`mod x;` 上方不要再加 `///`（rustdoc 會把兩段合併並改用上層範圍解析連結）。
-+ `cargo deny check advisories licenses bans`：檢查相依套件的安全通報、授權與禁用套件（CI gate）。
++ `cargo deny check advisories licenses bans`：檢查相依套件的安全通報、授權與禁用套件（CI gate）；`Security Audit` workflow 另外每天台北 07:00 掃一次安全通報，新公布的通報不必等到下一個 PR 才發現。
 + `cargo test --locked -- --test-threads=1`：只跑單元測試；需要 PostgreSQL／Redis 的測試會自動略過，不需外部服務。
 + `cargo test --locked --features integration-tests -- --test-threads=1`：連同整合測試一起跑。**請先在 `.env` 設定 `TEST_POSTGRESQL_*` 指向獨立的測試資料庫，不要對正式庫執行**；寫入資料的測試使用固定歷史日期與假代號並會自行清除。
-+ CI 以 `cargo nextest run --release --locked --features integration-tests --test-threads=1 --profile ci` 對 PostgreSQL／Redis service container 執行整合測試，並以 `cargo llvm-cov` 產出覆蓋率（PR 需通過 codecov/patch）。
++ CI 以 `cargo nextest run --locked --features integration-tests --test-threads=1 --profile ci` 對 PostgreSQL／Redis service container 執行整合測試，並以 `cargo llvm-cov` 產出覆蓋率（PR 需通過 codecov/patch）。
 + `cargo test --locked <測試名稱> -- --ignored --nocapture`：執行手動回補入口（見「手動回補入口」）。
 + `cargo bench`：執行 criterion 效能基準。
 

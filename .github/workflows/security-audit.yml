@@ -1,0 +1,23 @@
+name: Security Audit
+
+# 每天掃一次相依套件的安全通報：RustSec 新公布的通報不必等到下一個 PR 才發現
+# （2026-10-28 RUSTSEC-2026-0414 一公布，所有 PR 的 Cargo Deny 同時被擋）。
+# 排程失敗時 GitHub 會寄信給 repo 擁有者；也可手動觸發。
+on:
+  schedule:
+    # UTC 23:00 = 台北 07:00
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: Cargo Deny advisories
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: EmbarkStudios/cargo-deny-action@v2
+      with:
+        command: check advisories
