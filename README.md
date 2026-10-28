@@ -439,9 +439,14 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 ### 持股再平衡 API（僅試算）
 
 使用前先執行冪等的 `etc/sql/portfolio_target.sql`；此檔同時建立目標明細與維度設定表，
-可區分未設定與明確設定為 100% 現金。部署新版 API 前必須先套用 SQL。
+可區分未設定與明確設定為 100% 現金。歷史版本另需 `etc/sql/portfolio_target_revision.sql`。
+部署新版 API 前必須先套用 SQL。
 
 - `PUT /api/v1/portfolio/targets` 依會員與維度完整覆蓋配置；空清單表示全現金，0% 目標亦保留。
+  該維度原本已設定且內容有變時，覆蓋前的整組會記成一版（每個維度保留最近 20 版）。
+- `GET /api/v1/portfolio/targets/revisions?dimension=` 列出歷史版本（由新到舊）；
+  `POST /api/v1/portfolio/targets/revisions/{id}/restore` 以該版內容再儲存一次，還原前的設定也會留成一版，
+  版本不屬於該會員時回 404。
 - 比例最多兩位小數，同維度合計不得超過 100%；重複 key、非有限數值與無效價格會拒絕。
 - `GET /api/v1/portfolio/targets` 不帶維度時，每列保留 dimension，現金比例放在
   `cash_percent_by_dimension`；單一 `target_cash_percent` 為 null，避免混加不同維度。

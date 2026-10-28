@@ -40,6 +40,7 @@ mod portfolio_dividend_fill;
 mod portfolio_etf_exposure;
 mod portfolio_history;
 mod portfolio_rebalance;
+mod portfolio_target_revisions;
 mod portfolio_targets;
 mod relative_strength;
 mod relative_strength_history;
@@ -105,6 +106,10 @@ pub(super) use portfolio_dividend_fill::{__path_portfolio_dividend_fill, portfol
 pub(super) use portfolio_etf_exposure::{__path_portfolio_etf_exposure, portfolio_etf_exposure};
 pub(super) use portfolio_history::{__path_portfolio_history, portfolio_history};
 pub(super) use portfolio_rebalance::{__path_portfolio_rebalance, portfolio_rebalance};
+pub(super) use portfolio_target_revisions::{
+    __path_list_portfolio_target_revisions, __path_restore_portfolio_target_revision,
+    list_portfolio_target_revisions, restore_portfolio_target_revision,
+};
 pub(super) use portfolio_targets::{
     __path_get_portfolio_targets, __path_put_portfolio_targets, get_portfolio_targets,
     put_portfolio_targets,

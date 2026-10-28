@@ -55,6 +55,22 @@ pub struct PortfolioTargetRecord {
     pub updated_time: DateTime<Utc>,
 }
 
+/// 目標配置的一個歷史版本：某次儲存前的整組配置。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PortfolioTargetRevision {
+    /// 版本編號。
+    pub id: i64,
+    /// 配置維度。
+    pub dimension: TargetDimension,
+    /// 那一組配置被取代（記成這一版）的時間。
+    pub saved_time: DateTime<Utc>,
+    /// 那一組配置的 `(key, 目標百分比)`，依百分比由高到低；空的代表全現金。
+    pub targets: Vec<(String, f64)>,
+}
+
+/// 每個會員每個維度保留的歷史版本數。
+pub const MAX_TARGET_REVISIONS: i64 = 20;
+
 /// 投資組合目標配置倉儲介面。
 #[async_trait]
 pub trait PortfolioTargetRepository: Send + Sync {
@@ -70,7 +86,8 @@ pub trait PortfolioTargetRepository: Send + Sync {
 
     /// 設定指定使用者在指定維度的目標配置列表（批次覆蓋該維度的舊設定）。
     ///
-    /// 同一維度的 target_percent 總和若超過 100.0 應拒絕（回傳 Err）。
+    /// 同一維度的 target_percent 總和若超過 100.0 應拒絕（回傳 Err）。該維度原本已設定且內容有變時，
+    /// 實作應把覆蓋前的整組記成一版（[`PortfolioTargetRevision`]），供查詢與還原。
     async fn save_targets(
         &self,
         member_id: &str,
