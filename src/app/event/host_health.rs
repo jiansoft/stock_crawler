@@ -5,9 +5,15 @@
 //! 供電不足並降頻。這些狀況不會讓任何排程報錯，只會讓部署、日誌寫入與資料庫連線莫名變慢，因此每 10 分鐘
 //! 讀一次：
 //!
-//! - **供電與降頻**：`get_throttled` 的「目前」位元（bit 0 供電不足、bit 2 降頻）。
+//! - **供電與降頻**：sysfs `get_throttled` 的「目前」位元（bit 0 供電不足、bit 2 降頻）告警；
+//!   `vcgencmd get_throttled` 的「開機以來曾經發生」位元（bit 16 起）新出現時記 warn。sysfs 只給目前位元，
+//!   欠壓常只有幾秒（10-28 09:52 那次 4 秒），10 分鐘一次的檢查幾乎看不到，開機以來位元才留得下證據。
 //! - **記憶體**：`/proc/meminfo` 的 `MemAvailable` 與 swap 使用率。
 //! - **SD 卡**：在 `log/` 寫 4 KB 並 `fsync` 的耗時；I/O 卡住時第一個受害的就是日誌與部署。
+//!
+//! 部署本身會讓 swap 用滿、fsync 變慢（10-28 08:10 部署 stock_go web 時 fsync 22.6 秒）。部署腳本在
+//! `/dev/shm/stock-deploying/` 為每個單元寫一個標記檔，最後異動後 [`DEPLOY_GRACE`] 內視為部署期間：
+//! 記憶體與 SD 卡的超標只記 info、不發告警（供電照常告警）；標記沒寫入結束又超過時間視為殘留，照常告警。
 //!
 //! 異常時發 Telegram，同一類異常 [`ALERT_COOLDOWN_HOURS`] 小時內只發一次；每天 23:30 記一行當日彙總
 //! （[`summarize`]），供日後比對。只讀取與告警，不調整系統設定。檔案不存在（本機開發、CI）的項目略過。
@@ -20,7 +26,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::Result;
@@ -29,14 +35,24 @@ use once_cell::sync::Lazy;
 
 use crate::core::alert;
 
-/// 樹莓派韌體回報供電與降頻狀態的 sysfs 檔案（十六進位，不帶 `0x`）。
+/// 樹莓派韌體回報供電與降頻狀態的 sysfs 檔案（十六進位，不帶 `0x`）；只有「目前」位元。
 const THROTTLED_PATH: &str = "/sys/devices/platform/soc/soc:firmware/get_throttled";
+/// 韌體指令；`get_throttled` 輸出 `throttled=0x…`，含「開機以來曾經發生」的位元。
+const VCGENCMD_PATH: &str = "/usr/bin/vcgencmd";
+/// `vcgencmd` 最多等多久。
+const VCGENCMD_TIMEOUT: Duration = Duration::from_secs(5);
 /// 系統記憶體資訊。
 const MEMINFO_PATH: &str = "/proc/meminfo";
 /// SD 卡探針寫入的檔案；與日誌同一個目錄，量到的就是日誌實際寫入的延遲。
 const PROBE_PATH: &str = "log/.host_health_probe";
 /// 探針每次寫入的位元組數。
 const PROBE_BYTES: usize = 4096;
+/// 部署腳本寫標記的目錄（tmpfs，不受 SD 卡卡住影響，重開機清空）。
+///
+/// 每個部署單元一個檔案：開始時寫 `unit=`／`started=`，結束時補一行 `finished=`。
+const DEPLOY_MARKER_DIR: &str = "/dev/shm/stock-deploying";
+/// 標記最後異動後多久內視為部署期間；涵蓋部署結束後 swap 換回與 I/O 回穩的時間。
+const DEPLOY_GRACE: Duration = Duration::from_secs(30 * 60);
 
 /// `get_throttled` bit 0：目前供電不足。
 const UNDER_VOLTAGE_NOW: u32 = 1 << 0;
@@ -48,6 +64,8 @@ const THROTTLED_NOW: u32 = 1 << 2;
 const SOFT_TEMP_LIMIT_NOW: u32 = 1 << 3;
 /// 會觸發告警的「目前」位元；bit 16 起是「開機以來曾經發生」，重開機前不會清除，不能拿來告警。
 const ALERT_FLAGS: u32 = UNDER_VOLTAGE_NOW | THROTTLED_NOW;
+/// 「開機以來曾經發生」位元的位移：bit 16～19 依序對應 bit 0～3。
+const SINCE_BOOT_SHIFT: u32 = 16;
 
 /// `MemAvailable` 低於此值（KiB）告警。
 ///
@@ -110,12 +128,40 @@ pub(crate) enum Probe {
     Failed(String),
 }
 
+/// 最近一次異動的部署標記。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeployMarker {
+    /// 部署單元（標記內容的 `unit=`，沒有就用檔名）。
+    pub(crate) unit: String,
+    /// 距標記最後異動多久。
+    pub(crate) age: Duration,
+    /// 部署腳本是否已寫入結束。
+    pub(crate) finished: bool,
+}
+
+impl DeployMarker {
+    /// 是否仍在部署期間（含結束後的緩衝）。
+    fn active(&self) -> bool {
+        self.age <= DEPLOY_GRACE
+    }
+
+    /// 沒寫入結束又超過時間：部署腳本中途被砍掉留下的殘留標記。
+    fn stale(&self) -> bool {
+        !self.finished && !self.active()
+    }
+}
+
 /// 一次檢查讀到的資料；讀不到的項目為 `None`。
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Sample {
+    /// sysfs `get_throttled`（只有目前位元）。
     pub(crate) throttled: Option<u32>,
+    /// `vcgencmd get_throttled`（含開機以來位元）。
+    pub(crate) since_boot: Option<u32>,
     pub(crate) memory: Option<MemInfo>,
     pub(crate) probe: Probe,
+    /// 最近一次異動的部署標記；沒有標記為 `None`。
+    pub(crate) deploy: Option<DeployMarker>,
 }
 
 /// 一次檢查的判斷結果。
@@ -125,6 +171,8 @@ pub(crate) struct Findings {
     pub(crate) alerts: Vec<(Kind, String)>,
     /// 只記 warn 的異常。
     pub(crate) warnings: Vec<String>,
+    /// 部署期間略過告警、只記 info 的異常。
+    pub(crate) suppressed: Vec<String>,
 }
 
 /// 解析 `get_throttled`（十六進位，可帶 `0x`）；格式不符回 `None`。
@@ -135,6 +183,11 @@ pub(crate) fn parse_throttled(text: &str) -> Option<u32> {
         .or_else(|| text.strip_prefix("0X"))
         .unwrap_or(text);
     u32::from_str_radix(digits, 16).ok()
+}
+
+/// 解析 `vcgencmd get_throttled` 的輸出（`throttled=0x70000`）；格式不符回 `None`。
+pub(crate) fn parse_vcgencmd_throttled(text: &str) -> Option<u32> {
+    parse_throttled(text.trim().strip_prefix("throttled=")?)
 }
 
 /// 解析 `/proc/meminfo`；缺 `MemAvailable` 回 `None`，沒有 swap 欄位視為沒有 swap。
@@ -152,6 +205,23 @@ pub(crate) fn parse_meminfo(text: &str) -> Option<MemInfo> {
     })
 }
 
+/// 解析部署標記內容；`unit=` 缺少時用 `fallback_unit`（檔名）。
+pub(crate) fn parse_deploy_marker(text: &str, fallback_unit: &str, age: Duration) -> DeployMarker {
+    let unit = text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("unit="))
+        .filter(|unit| !unit.is_empty())
+        .unwrap_or(fallback_unit)
+        .to_owned();
+    DeployMarker {
+        unit,
+        age,
+        finished: text
+            .lines()
+            .any(|line| line.trim().starts_with("finished=")),
+    }
+}
+
 /// `get_throttled` 目前位元的中文說明，依位元順序。
 fn throttled_labels(flags: u32) -> Vec<&'static str> {
     [
@@ -166,6 +236,23 @@ fn throttled_labels(flags: u32) -> Vec<&'static str> {
     .collect()
 }
 
+/// 開機以來位元（已右移到 bit 0～3）的中文說明，例如「曾供電不足、曾降頻」；沒有任何位元時為「無」。
+fn since_boot_text(flags: u32) -> String {
+    if flags == 0 {
+        return "無".to_owned();
+    }
+    throttled_labels(flags)
+        .into_iter()
+        .map(|label| format!("曾{label}"))
+        .collect::<Vec<_>>()
+        .join("、")
+}
+
+/// 取出 `vcgencmd` 值中的開機以來位元，右移到 bit 0～3。
+fn since_boot_flags(value: u32) -> u32 {
+    (value >> SINCE_BOOT_SHIFT) & 0xF
+}
+
 /// KiB 換成 MB（取整）。
 fn mb(kib: u64) -> u64 {
     kib / 1024
@@ -176,7 +263,7 @@ fn seconds(duration: Duration) -> String {
     format!("{:.1}", duration.as_secs_f64())
 }
 
-/// 判斷一次檢查的結果：哪些要告警、哪些只記 warn。
+/// 判斷一次檢查的結果：哪些要告警、哪些只記 warn、哪些因部署期間略過。
 pub(crate) fn evaluate(sample: &Sample) -> Findings {
     let mut findings = Findings::default();
 
@@ -245,13 +332,39 @@ pub(crate) fn evaluate(sample: &Sample) -> Findings {
         ))),
     }
 
+    match &sample.deploy {
+        // 部署期間：記憶體與 SD 卡的超標是部署本身造成的，改記 info；供電與部署無關，照常告警。
+        Some(marker) if marker.active() => {
+            let (power, deploy_related): (Vec<_>, Vec<_>) = std::mem::take(&mut findings.alerts)
+                .into_iter()
+                .partition(|(kind, _)| *kind == Kind::Power);
+            findings.alerts = power;
+            findings.suppressed = deploy_related
+                .into_iter()
+                .map(|(_, message)| message)
+                .chain(std::mem::take(&mut findings.warnings))
+                .collect();
+        }
+        Some(marker)
+            if marker.stale() && !(findings.alerts.is_empty() && findings.warnings.is_empty()) =>
+        {
+            findings.warnings.push(format!(
+                "部署標記 {} 已 {} 分鐘沒有寫入結束，視為殘留，照常告警",
+                marker.unit,
+                marker.age.as_secs() / 60
+            ));
+        }
+        _ => {}
+    }
+
     findings
 }
 
-/// 各類異常最近一次發告警的時間。
+/// 跨檢查保留的狀態：各類異常最近一次發告警的時間，以及上次讀到的開機以來位元。
 #[derive(Debug, Default)]
 pub(crate) struct AlertGate {
     last_sent: HashMap<Kind, NaiveDateTime>,
+    since_boot: Option<u32>,
 }
 
 impl AlertGate {
@@ -265,6 +378,13 @@ impl AlertGate {
         self.last_sent.insert(kind, now);
         true
     }
+
+    /// 記下這次的開機以來位元，回傳上次之後新出現的位元；行程啟動後第一次讀到時回傳 `None`。
+    pub(crate) fn new_since_boot(&mut self, flags: u32) -> Option<u32> {
+        self.since_boot
+            .replace(flags)
+            .map(|previous| flags & !previous)
+    }
 }
 
 /// 當日的檢查彙總。
@@ -277,11 +397,14 @@ pub(crate) struct DailyStats {
     min_available_kib: Option<u64>,
     max_swap_percent: Option<f64>,
     throttled_flags: u32,
+    since_boot_flags: Option<u32>,
+    deploy_checks: u32,
+    suppressed: u32,
 }
 
 impl DailyStats {
-    /// 記錄一次檢查；換日時先清空。
-    pub(crate) fn record(&mut self, day: NaiveDate, sample: &Sample) {
+    /// 記錄一次檢查與這次因部署略過的異常數；換日時先清空。
+    pub(crate) fn record(&mut self, day: NaiveDate, sample: &Sample, suppressed: usize) {
         if self.day != Some(day) {
             *self = Self {
                 day: Some(day),
@@ -291,6 +414,10 @@ impl DailyStats {
         self.checks += 1;
         if let Some(flags) = sample.throttled {
             self.throttled_flags |= flags & 0xF;
+        }
+        if let Some(value) = sample.since_boot {
+            self.since_boot_flags =
+                Some(self.since_boot_flags.unwrap_or(0) | since_boot_flags(value));
         }
         if let Some(memory) = sample.memory {
             self.min_available_kib = Some(
@@ -311,6 +438,10 @@ impl DailyStats {
             Probe::TimedOut | Probe::StillRunning | Probe::Failed(_) => self.stuck_probes += 1,
             Probe::Skipped => {}
         }
+        if sample.deploy.as_ref().is_some_and(DeployMarker::active) {
+            self.deploy_checks += 1;
+        }
+        self.suppressed += u32::try_from(suppressed).unwrap_or(u32::MAX);
     }
 
     /// 當日彙總的一行文字；當天沒有檢查紀錄回 `None`。
@@ -337,8 +468,19 @@ impl DailyStats {
         } else {
             throttled_labels(self.throttled_flags).join("、")
         };
+        let since_boot = self
+            .since_boot_flags
+            .map_or_else(|| "—".to_owned(), since_boot_text);
+        let deploy = if self.deploy_checks == 0 {
+            String::new()
+        } else {
+            format!(
+                "｜部署期間 {} 次（略過告警 {} 項）",
+                self.deploy_checks, self.suppressed
+            )
+        };
         Some(format!(
-            "主機健康彙總 {today}：檢查 {} 次｜fsync {fsync}｜MemAvailable 最低 {available}｜swap 最高 {swap}｜供電／降頻 {throttled}",
+            "主機健康彙總 {today}：檢查 {} 次｜fsync {fsync}｜MemAvailable 最低 {available}｜swap 最高 {swap}｜供電／降頻 目前 {throttled}；開機以來 {since_boot}{deploy}",
             self.checks
         ))
     }
@@ -348,21 +490,25 @@ impl DailyStats {
 #[derive(Debug, Clone)]
 pub(crate) struct Paths {
     pub(crate) throttled: PathBuf,
+    pub(crate) vcgencmd: PathBuf,
     pub(crate) meminfo: PathBuf,
     pub(crate) probe: PathBuf,
+    pub(crate) deploy_markers: PathBuf,
 }
 
 impl Default for Paths {
     fn default() -> Self {
         Self {
             throttled: PathBuf::from(THROTTLED_PATH),
+            vcgencmd: PathBuf::from(VCGENCMD_PATH),
             meminfo: PathBuf::from(MEMINFO_PATH),
             probe: PathBuf::from(PROBE_PATH),
+            deploy_markers: PathBuf::from(DEPLOY_MARKER_DIR),
         }
     }
 }
 
-/// 告警去重狀態。只存在行程記憶體：重啟後同一個異常再告警一次是可接受的。
+/// 告警去重與開機以來位元的狀態。只存在行程記憶體：重啟後同一個異常再告警一次是可接受的。
 static GATE: Lazy<Mutex<AlertGate>> = Lazy::new(|| Mutex::new(AlertGate::default()));
 /// 當日彙總。
 static STATS: Lazy<Mutex<DailyStats>> = Lazy::new(|| Mutex::new(DailyStats::default()));
@@ -408,31 +554,118 @@ pub(crate) async fn probe_storage(
     }
 }
 
-/// 讀取一個小檔案（`/proc`、`/sys` 都在記憶體中，不受 SD 卡卡住影響）；不存在或讀不到回 `None`。
+/// 讀取一個小檔案（`/proc`、`/sys`、`/dev/shm` 都在記憶體中，不受 SD 卡卡住影響）；不存在或讀不到回 `None`。
 fn read_small(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
+}
+
+/// 執行 `vcgencmd get_throttled`，最多等 `timeout`；指令不存在（非 pi）、失敗或逾時回 `None`。
+pub(crate) async fn read_since_boot(vcgencmd: &Path, timeout: Duration) -> Option<u32> {
+    if !vcgencmd.is_file() {
+        return None;
+    }
+    let output = tokio::process::Command::new(vcgencmd)
+        .arg("get_throttled")
+        .kill_on_drop(true)
+        .output();
+    match tokio::time::timeout(timeout, output).await {
+        Ok(Ok(output)) if output.status.success() => {
+            parse_vcgencmd_throttled(&String::from_utf8_lossy(&output.stdout))
+        }
+        Ok(Ok(output)) => {
+            tracing::debug!("vcgencmd get_throttled 結束碼 {:?}", output.status.code());
+            None
+        }
+        Ok(Err(error)) => {
+            tracing::debug!("vcgencmd get_throttled 執行失敗: {error}");
+            None
+        }
+        Err(_) => {
+            tracing::debug!("vcgencmd get_throttled 超過 {} 秒", timeout.as_secs());
+            None
+        }
+    }
+}
+
+/// 讀取部署標記目錄，回傳最近異動的一個；目錄不存在或沒有標記回 `None`。
+pub(crate) fn read_deploy_marker(dir: &Path, now: SystemTime) -> Option<DeployMarker> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            let age = now
+                .duration_since(metadata.modified().ok()?)
+                .unwrap_or_default();
+            let text = read_small(&entry.path()).unwrap_or_default();
+            Some(parse_deploy_marker(
+                &text,
+                &entry.file_name().to_string_lossy(),
+                age,
+            ))
+        })
+        .min_by_key(|marker| marker.age)
 }
 
 /// 讀取一次檢查的資料。
 pub(crate) async fn collect(paths: &Paths, probing: &Arc<AtomicBool>, timeout: Duration) -> Sample {
     Sample {
         throttled: read_small(&paths.throttled).and_then(|text| parse_throttled(&text)),
+        since_boot: read_since_boot(&paths.vcgencmd, VCGENCMD_TIMEOUT).await,
         memory: read_small(&paths.meminfo).and_then(|text| parse_meminfo(&text)),
         probe: probe_storage(&paths.probe, probing, timeout).await,
+        deploy: read_deploy_marker(&paths.deploy_markers, SystemTime::now()),
     }
 }
 
-/// 記錄彙總並判斷這次的結果，回傳要送出的告警內容（已依冷卻時間去重）；warn 直接寫日誌。
+/// 比對開機以來位元：行程啟動後第一次讀到記 info，之後新出現的位元記 warn。回傳記下的訊息，供測試比對。
+fn note_since_boot(sample: &Sample, gate: &mut AlertGate) -> Option<String> {
+    let value = sample.since_boot?;
+    let flags = since_boot_flags(value);
+    match gate.new_since_boot(flags) {
+        Some(new) if new != 0 => {
+            let message = format!(
+                "開機以來新出現{}（vcgencmd get_throttled=0x{value:x}）；發生在上次檢查之後，確切時間請查 `dmesg`",
+                since_boot_text(new)
+            );
+            tracing::warn!("主機健康檢查：{message}");
+            Some(message)
+        }
+        None if flags != 0 => {
+            let message = format!(
+                "開機以來{}（vcgencmd get_throttled=0x{value:x}）",
+                since_boot_text(flags)
+            );
+            tracing::info!("主機健康檢查：{message}");
+            Some(message)
+        }
+        _ => None,
+    }
+}
+
+/// 記錄彙總並判斷這次的結果，回傳要送出的告警內容（已依冷卻時間去重）；warn 與部署期間略過的項目直接寫日誌。
 pub(crate) fn plan_alerts(
     sample: &Sample,
     now: NaiveDateTime,
     gate: &mut AlertGate,
     stats: &mut DailyStats,
 ) -> Vec<String> {
-    stats.record(now.date(), sample);
     let findings = evaluate(sample);
+    stats.record(now.date(), sample, findings.suppressed.len());
+    note_since_boot(sample, gate);
     for warning in &findings.warnings {
         tracing::warn!("主機健康檢查：{warning}");
+    }
+    if let Some(marker) = &sample.deploy {
+        for message in &findings.suppressed {
+            tracing::info!(
+                "主機健康檢查（{} 部署期間，略過告警）：{message}",
+                marker.unit
+            );
+        }
     }
     findings
         .alerts

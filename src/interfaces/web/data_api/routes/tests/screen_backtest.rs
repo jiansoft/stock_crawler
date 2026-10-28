@@ -6,6 +6,7 @@ mod etf_gap;
 mod execution;
 mod filters;
 mod fundamentals;
+mod major;
 mod margins;
 mod offsets;
 mod presets;
@@ -56,6 +57,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
         "DELETE FROM income_statement WHERE stock_symbol = ANY($1)",
         "DELETE FROM balance_sheet WHERE stock_symbol = ANY($1)",
         "DELETE FROM cash_flow_statement WHERE stock_symbol = ANY($1)",
+        "DELETE FROM holder_distribution WHERE stock_symbol = ANY($1)",
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;

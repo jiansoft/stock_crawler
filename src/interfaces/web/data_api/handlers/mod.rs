@@ -64,6 +64,9 @@ use crate::domain::quote::technical::{SIGNAL_INDICATORS, SignalKind};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{ErrorBody, HealthResponse};
 
+/// `min_major_change` 預設回看幾個集保資料週（選股與回測共用）。
+pub(super) const DEFAULT_MAJOR_CHANGE_WEEKS: u8 = 4;
+
 pub(super) use cagr::{__path_cagr_by_symbol, __path_cagr_ranking, cagr_by_symbol, cagr_ranking};
 pub(super) use chip::{__path_stock_chip, stock_chip};
 pub(super) use dividend_fill::{__path_dividend_fill, dividend_fill};

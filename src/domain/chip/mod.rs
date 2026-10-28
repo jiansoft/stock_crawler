@@ -9,4 +9,4 @@ pub use entity::{
     BrokerFlowRecord, BrokerNetRecord, HolderDistributionRecord, HolderLevelRecord,
     InsiderHoldingRecord, InstitutionalNet, MarginRecord,
 };
-pub use repository::ChipRepository;
+pub use repository::{ChipRepository, HolderHistoryRepository, RecentHolderWeeks};

@@ -154,8 +154,10 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
 + 20:30 通知持股近 7 天內法說會的摘要、展望與 Q&A 重點（BigGo 財經整理；摘要尚未產生的場次之後再通知，每場只通知一次）
 + 21:00 更新尚無年度配息資料的股票
 + 22:00 更新外資持股比例與狀態（`qfii_history`）
-+ 23:30 主機健康彙總：一行 info 記錄當天 fsync 最大耗時、最低可用記憶體、swap 最高使用率與是否出現供電不足／降頻
++ 23:30 主機健康彙總：一行 info 記錄當天 fsync 最大耗時、最低可用記憶體、swap 最高使用率、目前與開機以來是否出現供電不足／降頻，以及部署期間的檢查次數與略過的告警項數
 + 每 10 分鐘 主機健康檢查（pi）：`get_throttled` 目前供電不足（bit 0）或降頻（bit 2）、`MemAvailable` 低於 100 MB 或 swap 使用率超過 95%、在 `log/` 寫 4 KB 並 `fsync` 超過 20 秒（5 秒記 warn）、超過 60 秒未完成或寫入失敗時告警，同一類異常 6 小時內只發一次；只讀取與告警，不調整系統設定，讀不到的項目（非 pi）略過；`task.begin`／`task.done` 記 DEBUG
+  + `vcgencmd get_throttled` 的開機以來位元（bit 16～19，sysfs 讀不到）新出現時記 warn（欠壓常只有幾秒，10 分鐘一次的檢查看不到目前位元）
+  + 部署腳本在 `/dev/shm/stock-deploying/<單元>` 寫標記（開始寫 `unit=`／`started=`，結束補 `finished=`）；標記最後異動 30 分鐘內，記憶體與 SD 卡超標只記 info、不告警（供電照常告警）；沒寫入結束又超過 30 分鐘視為殘留，照常告警並記 warn
 
 ### 週一至週五
 
@@ -193,8 +195,8 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
   - ETF 資金流向：近 5 個交易日淨申購（受益單位增減 × 淨值）流入、流出最多的各 5 檔，持有 ETF 的淨申購與折溢價週平均、最新值；持有 ETF 這週收到新一期前十大持股時，列出與前一期相比的新進、剔除與權重變化最大的 3 檔
   - 有啟用通知的策略：這一期的換股日、本期至今報酬與 0050 對照、表現最好與最差的持股；最近一次策略優勢滾動檢查的近 24 個月與 2019 起數字（輸 0050 或勝率不到一半時標 ⚠️）
   - 持股配置偏離提醒：預設組合（會員 0）有設定目標權重（個股、產業、ETF 穿透）時，列出偏離超過容忍帶 ±2% 的前 5 項與減碼／加碼方向；ETF 穿透以持有 ETF 的前十大成分併入直接持股計算，只列有設目標的個股，成分資料超過 45 天的 ETF 不計入並註明；沒有設定目標或都在容忍帶內不輸出，僅供參考、不會下單
-+ 10:30 持股千張大戶週報：每檔持股的千張大戶持股比例、大戶人數與股東人數及週變化（集保戶股權分散表，第一次只列現況）
-+ 10:40 全市場集保股權分散週摘要（千張大戶人數、比例、股東總數，以及 400 張以上的人數、股數、比例）寫入 `holder_distribution`，全部 15 個持股分級（另含差異數調整與合計）的人數、股數與比例寫入 `holder_distribution_level`（開放資料只有最新一週，無法回補）
++ 10:40 全市場集保股權分散週摘要（千張大戶人數、比例、股東總數，以及 400 張以上的人數、股數、比例）寫入 `holder_distribution`，全部 15 個持股分級（另含差異數調整與合計）的人數、股數與比例寫入 `holder_distribution_level`（開放資料只有最新一週，無法回補）；
+  入庫成功後送持股大戶週報：每檔持股的千張與 400 張以上大戶持股比例、人數及週變化，千張另附 4 週變化，以及股東人數週變化（從資料庫讀上週與 4 週前比較；入庫失敗不送，同一資料週只送一次）
 + 10:50 持股估值週報：本益比或股價淨值比位於自己近 5 年 ≥ 第 90 百分位（偏高）或 ≤ 第 10 百分位（偏低）的持股，附目前值與中位數（有效樣本不足 250 天或報價過期的不列入；沒有就不發）
 + 11:00 資料健康週報：檢查近 7 天的
   - 交易日完整性（整天缺漏、單一市場成交檔數偏少）、均線是否漏算、漲跌幅是否與參考價一致、年月日欄位
@@ -357,7 +359,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 
 | 端點 | 內容 |
 |---|---|
-| `/stocks/screen` | 條件選股：F 分數、毛利率、負債比、自由現金流、營業利益率、三率三升、營收創新高、營收連續年增、相對強度、外資／投信連續買超、平均成交金額、本益比／股價淨值比上限，可排除產業 |
+| `/stocks/screen` | 條件選股：F 分數、毛利率、負債比、自由現金流、營業利益率、三率三升、營收創新高、營收連續年增、相對強度、外資／投信連續買超、平均成交金額、本益比／股價淨值比上限、千張大戶持股比例 N 週變化（`min_major_change`／`major_change_weeks`），可排除產業 |
 | `/stocks/screen/backtest` | 條件選股回測（見下方說明） |
 | `/stocks/screen/backtest/offsets` | 換股日偏移穩健度：同一組條件把換股日偏移 0 到 `hold_days` − 1 都跑一遍，回傳各指標的分布與勝過 0050 的比例；`split` 分樣本內外 |
 | `/stocks/screen/backtest/frontier` | 0050 核心部位前緣：0%～100%（每 10%）各比例的偏移分布，標出夏普值、年化報酬中位數最高的比例 |
@@ -370,6 +372,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 
 + 選股條件：`market`、`industry`、`exclude_industry`、`min_rs_score`／`max_rs_score`、`min_foreign_streak`、`min_trust_streak`、`indicator`／`kind`（近期技術訊號）
 + 基本面門檻（只用於新買進）：`min_revenue_yoy_percent`、`min_revenue_yoy_streak`、`min_revenue_yoy_3m_percent`、`min_monthly_revenue`、`revenue_record`、`min_eps`、`min_roe_percent`、`min_gross_margin_percent`、`min_operating_margin_percent`、`margins_yoy_up`、`max_debt_ratio_percent`、`positive_free_cash_flow`、`max_pe`、`max_pb`
++ 集保大戶（只用於新買進）：`min_major_change`（千張大戶持股比例最近一週相對 `major_change_weeks` 週前的變化下限，百分點，可為負；回看 1～12 週，預設 4）。集保週五的資料週六才公布，換股日只用日期早於換股日的週；大戶資料自 2023-07-14 起，設此條件時 `from` 須晚於第一週加回看週數，否則回 422
 + 排序與持股：`rank_by`（相對強度、平均成交金額、法人連續買超、營收年增率、營業利益率、本益比、股價淨值比）、`keep_rank`（換股緩衝）、`hold_min_rs_score`（續抱條件）、`max_per_industry`、`min_avg_trade_value`（流動性門檻）
 + 權重：`weighting`（等權、成交金額或其平方根加權）、`max_weight`（單檔上限）、`etf_weight`（0050 核心部位）
 + 大盤濾網（換股日不符就空手）：`market_filter_ma`（加權指數均線）、`market_filter_breadth`（站上 60 日均線比例）、`market_filter_max_pe`（市場本益比中位數）、`market_filter_pe_percentile`（市場本益比中位數在換股日前近 5 年的百分位，只用當天以前的資料）
