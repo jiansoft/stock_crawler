@@ -30,6 +30,7 @@ mod layer;
 pub mod rotate;
 // Seq 日誌轉送。
 mod seq;
+pub mod slow_query;
 
 pub use layer::{FileLogLayer, file_log_env_filter};
 use seq::SeqLogLevel;

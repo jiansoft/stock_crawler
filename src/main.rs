@@ -227,6 +227,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // 避免 prod 將大量 DEBUG/TRACE 寫入磁碟導致日誌檔暴增。
             .with(core::logging::FileLogLayer.with_filter(core::logging::file_log_env_filter()))
             .init();
+        // 慢查詢當日統計的起點定在啟動時間（23:30 主機健康彙總會註明「自 HH:MM 起」）。
+        core::logging::slow_query::init();
     }
 
     // ── 2.5 輪轉日誌檔參數 ──────────────────────────────────────────────────

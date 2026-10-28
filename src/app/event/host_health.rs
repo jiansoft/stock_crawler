@@ -33,7 +33,7 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate, NaiveDateTime};
 use once_cell::sync::Lazy;
 
-use crate::core::alert;
+use crate::core::{alert, logging};
 
 mod deploy;
 mod gate;
@@ -285,7 +285,8 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-/// 排程入口（23:30）：記一行當日彙總；當天沒有檢查紀錄（非 pi）時不記。
+/// 排程入口（23:30）：記一行當日彙總，後面附當日慢查詢（[`logging::slow_query::daily_summary`]）；
+/// 當天沒有主機檢查紀錄（非 pi）時只記慢查詢。
 ///
 /// # Errors
 ///
@@ -293,8 +294,10 @@ pub async fn execute() -> Result<()> {
 pub async fn summarize() -> Result<()> {
     let today = Local::now().date_naive();
     let summary = STATS.lock().ok().and_then(|stats| stats.summary(today));
-    if let Some(summary) = summary {
-        tracing::info!("{summary}");
+    let slow = logging::slow_query::daily_summary(today);
+    match summary {
+        Some(summary) => tracing::info!("{summary}｜{slow}"),
+        None => tracing::info!("慢查詢彙總 {today}：{slow}"),
     }
     Ok(())
 }
