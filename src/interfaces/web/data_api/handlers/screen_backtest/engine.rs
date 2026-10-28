@@ -475,7 +475,15 @@ impl<'a> Backtest<'a> {
         }
         // 回測主查詢依條件要 1～2 秒，偏移穩健度與前緣一次就跑 20 個偏移；用批次連線池（慢查詢門檻
         // 5 秒），避免每次回測都留下一串慢查詢警告，蓋過真正的退化。
-        query.fetch_all(database::get_batch_connection()).await
+        //
+        // 不快取成具名 prepared statement：同一條連線重複執行約 5 次後 PostgreSQL 會改用不看參數值的
+        // generic plan，`$35 IS NULL OR …` 這類可選條件在 generic plan 下無法剪掉。正式庫實測最佳組合加
+        // `min_major_change=1`：custom plan 1.6 秒、generic plan 18.7 秒，偏移掃描因此逾時。未命名
+        // statement 每次依實際參數規劃，只多十幾毫秒規劃時間。
+        query
+            .persistent(false)
+            .fetch_all(database::get_batch_connection())
+            .await
     }
 
     /// 依候選股決定每期持股（續抱緩衝 `keep_rank`）、期間停損、持股權重（單檔上限 `max_weight`）並扣
