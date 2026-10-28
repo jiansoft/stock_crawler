@@ -105,7 +105,8 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
 
 + `scripts\deploy-armv7.ps1` 會把 ARMv7 執行檔一次部署到 Raspberry Pi 3：本機 ELF 預檢（32-bit ARM
   hard-float、靜態連結）→ scp 到 `/tmp` 並比對 sha256 → ssh 執行 `control.sh update` → 驗證 `9001`／`9002`
-  是否監聽與 `/api/v1/healthz` 是否 200。加 `-Build` 會先建 armv7；加 `-StageOnly` 只上傳不重啟服務；
+  是否監聽與 `/api/v1/healthz` 是否 200，再以 pi 上 MCP 設定檔（`/opt/stock_mcp/.env`）的金鑰唯讀呼叫幾個
+  會查資料庫的端點（最新報價、選股、目標配置與版本），任一不是 200 就視為驗證失敗。加 `-Build` 會先建 armv7；加 `-StageOnly` 只上傳不重啟服務；
   驗證失敗時會印出回滾指令。不會同步 `.env` 與 `app.json`（裝置上那兩份是手動維護的）。建議在收盤後部署，並避開 15:00 收盤排程。
 + 新增資料表時，部署前先在正式庫執行 `etc/sql/` 對應的建表 SQL，必要時再跑對應的手動回補入口。
 + `build.ps1` / `build.bat` 會以 `cargo zigbuild --release` 建置 `aarch64-unknown-linux-musl` 與 `armv7-unknown-linux-musleabihf` 兩個靜態連結 binary，輸出為 `stock_crawler_arm64`、`stock_crawler_armv7`。

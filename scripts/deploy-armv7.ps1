@@ -16,7 +16,8 @@
       4. ssh 執行 control.sh update（stop → move → start）。
       5. 驗證：9001（gRPC）／9002（Data API）是否監聽、/api/v1/healthz 是否 200、
          今日 error log 與 nohup.out 的尾巴。healthz 會重試——Pi 3 剛啟動時
-         第一個請求特別慢，單發逾時會誤判成失敗。
+         第一個請求特別慢，單發逾時會誤判成失敗。healthz 通過後再以 MCP 的金鑰
+         唯讀呼叫幾個實際查詢資料庫的端點（$SmokePaths），任一不是 200 視為失敗。
 
     這支腳本預設不建置。要連建置一起做，加 -Build（只建 armv7，不會順便建
     arm64 與 Windows；三個 target 都要請直接跑 build.ps1）。
@@ -84,6 +85,14 @@ $BinaryName = 'stock_crawler_armv7'
 # app.json 的 system.grpc_use_port 與 .env 的 MANUAL_BACKFILL_WEB_ADDR。
 $GrpcPort = 9001
 $WebPort = 9002
+# 部署後冒煙測試：金鑰取自 pi 上 MCP 的設定檔（STOCK_RUST_API_KEY），只打唯讀端點。
+$SmokeKeyFile = '/opt/stock_mcp/.env'
+$SmokePaths = @(
+    '/api/v1/stocks/2330/latest-quote'
+    '/api/v1/stocks/screen?min_rs_score=80'
+    '/api/v1/portfolio/targets'
+    '/api/v1/portfolio/targets/revisions?dimension=stock'
+)
 
 function Invoke-Checked
 {
@@ -348,6 +357,19 @@ for i in 1 2 3 4 5 6; do
   if [ "`$code" = "200" ]; then break; fi
   sleep 10
 done
+echo "--- smoke ---"
+# healthz 不碰資料庫；唯讀打幾個實際查詢的端點，抓出缺表、SQL 錯誤這類只有呼叫才會發現的問題。
+# 金鑰取自 MCP 的設定檔，只在這台機器上用，不印出。
+keyfile="$SmokeKeyFile"
+if [ -r "`$keyfile" ]; then
+  key="`$(grep -E '^STOCK_RUST_API_KEY=' "`$keyfile" | head -1 | cut -d= -f2- | tr -d '\r"')"
+  for path in $(($SmokePaths | ForEach-Object { "'$_'" }) -join ' '); do
+    out="`$(curl -s -m 30 -o /dev/null -w '%{http_code} %{time_total}s' -H "Authorization: Bearer `$key" "http://127.0.0.1:$WebPort`$path" 2>/dev/null || echo '000 -')"
+    echo "smoke `$out `$path"
+  done
+else
+  echo "smoke skipped（找不到 `$keyfile）"
+fi
 echo "--- error log ---"
 tail -n 5 "$RemoteBase/log/`$(date +%Y-%m-%d)_default_error.log" 2>/dev/null || echo NONE
 echo "--- stdout ---"
@@ -373,6 +395,17 @@ tail -n 5 "$RemoteBase/bin/nohup.out" 2>/dev/null || echo NONE
     if ($text -notmatch 'http=200')
     {
         $problems += '/api/v1/healthz 沒有回 200'
+    }
+    foreach ($smoke in [regex]::Matches($text, '(?m)^smoke (\d{3}) \S+ (\S+)$'))
+    {
+        if ($smoke.Groups[1].Value -ne '200')
+        {
+            $problems += "冒煙測試 $( $smoke.Groups[2].Value ) 回 $( $smoke.Groups[1].Value )"
+        }
+    }
+    if ($text -match '(?m)^smoke skipped')
+    {
+        Write-Host "  （冒煙測試略過：pi 上沒有 $SmokeKeyFile）" -ForegroundColor Yellow
     }
 
     Write-Host ''
