@@ -191,6 +191,22 @@ function Invoke-Remote
     & ssh @SshArgs $Target ($Script -replace "`r", '')
 }
 
+# 部署標記：pi 上 stock_crawler 的主機健康檢查讀到最後異動 30 分鐘內的標記時，記憶體與 SD 卡超標只記 info、
+# 不發告警（部署本身會讓 swap 用滿、fsync 變慢）。每個單元一個檔案，放在 tmpfs，SD 卡卡住時也寫得進去；
+# 寫入失敗不影響部署，只是這次的超標會照常告警。
+$DeployMarkerDir = '/dev/shm/stock-deploying'
+$DeployUnit = 'stock_crawler'
+
+function Start-DeployMarker
+{
+    Invoke-Remote "mkdir -p $DeployMarkerDir && printf 'unit=%s\nstarted=%s\n' $DeployUnit `"`$(date -Iseconds)`" > $DeployMarkerDir/$DeployUnit" | Out-Null
+}
+
+function Complete-DeployMarker
+{
+    Invoke-Remote "printf 'finished=%s\n' `"`$(date -Iseconds)`" >> $DeployMarkerDir/$DeployUnit" | Out-Null
+}
+
 # --- 0. 建置（-Build）--------------------------------------------------------
 if ($Build)
 {
@@ -274,47 +290,50 @@ if ($remoteInfo -notcontains 'CONTROL_OK')
 Write-Host "  REMOTE   $Target ($arch, $RemoteBase)"
 Write-Host ''
 
-# --- 3. 上傳 ----------------------------------------------------------------
-# 固定送到 /tmp，不直接覆蓋執行中的檔案，否則會得到 Text file busy(ETXTBSY)。
-Write-Host '上傳執行檔...' -ForegroundColor Cyan
-Invoke-Checked scp @ScpArgs $Binary "${Target}:/tmp/$BinaryName"
-
-$remoteHash = (Invoke-Remote "sha256sum /tmp/$BinaryName | cut -d' ' -f1" | Select-Object -First 1).Trim()
-if ($remoteHash -ne $localHash)
+Start-DeployMarker
+try
 {
-    throw "上傳後 sha256 不符（遠端 $remoteHash），檔案可能在傳輸中損壞，未執行 update"
-}
-Write-Host "  已上傳並通過 sha256 比對：${Target}:/tmp/$BinaryName"
-Write-Host ''
+    # --- 3. 上傳 ----------------------------------------------------------------
+    # 固定送到 /tmp，不直接覆蓋執行中的檔案，否則會得到 Text file busy(ETXTBSY)。
+    Write-Host '上傳執行檔...' -ForegroundColor Cyan
+    Invoke-Checked scp @ScpArgs $Binary "${Target}:/tmp/$BinaryName"
 
-if ($StageOnly)
-{
-    Write-Host '已上傳但未部署（-StageOnly）。要上線請執行：' -ForegroundColor Yellow
-    Write-Host "  ssh $Target `"cd $RemoteBase && ./control.sh update`"" -ForegroundColor Yellow
-    return
-}
+    $remoteHash = (Invoke-Remote "sha256sum /tmp/$BinaryName | cut -d' ' -f1" | Select-Object -First 1).Trim()
+    if ($remoteHash -ne $localHash)
+    {
+        throw "上傳後 sha256 不符（遠端 $remoteHash），檔案可能在傳輸中損壞，未執行 update"
+    }
+    Write-Host "  已上傳並通過 sha256 比對：${Target}:/tmp/$BinaryName"
+    Write-Host ''
 
-# --- 4. 部署 ----------------------------------------------------------------
-Write-Host 'control.sh update...' -ForegroundColor Cyan
-Invoke-Remote "cd $RemoteBase && ./control.sh update"
-if ($LASTEXITCODE -ne 0)
-{
-    throw 'control.sh update 失敗'
-}
-Write-Host ''
+    if ($StageOnly)
+    {
+        Write-Host '已上傳但未部署（-StageOnly）。要上線請執行：' -ForegroundColor Yellow
+        Write-Host "  ssh $Target `"cd $RemoteBase && ./control.sh update`"" -ForegroundColor Yellow
+        return
+    }
 
-if ($SkipVerify)
-{
-    Write-Host '已略過驗證（-SkipVerify）。' -ForegroundColor Yellow
-    return
-}
+    # --- 4. 部署 ----------------------------------------------------------------
+    Write-Host 'control.sh update...' -ForegroundColor Cyan
+    Invoke-Remote "cd $RemoteBase && ./control.sh update"
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw 'control.sh update 失敗'
+    }
+    Write-Host ''
 
-# --- 5. 驗證 ----------------------------------------------------------------
-Write-Host '驗證中（等待服務起來）...' -ForegroundColor Cyan
-Start-Sleep -Seconds 8
+    if ($SkipVerify)
+    {
+        Write-Host '已略過驗證（-SkipVerify）。' -ForegroundColor Yellow
+        return
+    }
 
-# healthz 重試：Pi 3 上第一個請求特別慢，control.sh start 只保證程序被拉起來。
-$verify = @"
+    # --- 5. 驗證 ----------------------------------------------------------------
+    Write-Host '驗證中（等待服務起來）...' -ForegroundColor Cyan
+    Start-Sleep -Seconds 8
+
+    # healthz 重試：Pi 3 上第一個請求特別慢，control.sh start 只保證程序被拉起來。
+    $verify = @"
 echo "--- proc ---"
 # 用 control.sh 寫的 pid file 對照，而不是 pgrep：pgrep -f 會連這段 ssh 指令本身
 # 一起匹配到，永遠都「找得到程序」。etimes 是啟動至今的秒數，可看出真的重啟過。
@@ -334,37 +353,42 @@ tail -n 5 "$RemoteBase/log/`$(date +%Y-%m-%d)_default_error.log" 2>/dev/null || 
 echo "--- stdout ---"
 tail -n 5 "$RemoteBase/bin/nohup.out" 2>/dev/null || echo NONE
 "@
-$result = Invoke-Remote $verify
-$result | ForEach-Object { Write-Host "  $_" }
+    $result = Invoke-Remote $verify
+    $result | ForEach-Object { Write-Host "  $_" }
 
-$text = $result -join "`n"
-$problems = @()
-if ($text -notmatch [regex]::Escape("$RemoteBase/$BinaryName"))
-{
-    $problems += '找不到執行中的程序'
-}
-if ($text -notmatch ":$GrpcPort")
-{
-    $problems += "gRPC $GrpcPort 沒有監聽"
-}
-if ($text -notmatch ":$WebPort")
-{
-    $problems += "Data API $WebPort 沒有監聽"
-}
-if ($text -notmatch 'http=200')
-{
-    $problems += '/api/v1/healthz 沒有回 200'
-}
+    $text = $result -join "`n"
+    $problems = @()
+    if ($text -notmatch [regex]::Escape("$RemoteBase/$BinaryName"))
+    {
+        $problems += '找不到執行中的程序'
+    }
+    if ($text -notmatch ":$GrpcPort")
+    {
+        $problems += "gRPC $GrpcPort 沒有監聽"
+    }
+    if ($text -notmatch ":$WebPort")
+    {
+        $problems += "Data API $WebPort 沒有監聽"
+    }
+    if ($text -notmatch 'http=200')
+    {
+        $problems += '/api/v1/healthz 沒有回 200'
+    }
 
-Write-Host ''
-if ($problems.Count -gt 0)
-{
-    Write-Host '部署完成但驗證有問題：' -ForegroundColor Red
-    $problems | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
-    Write-Host '回滾指令：' -ForegroundColor Yellow
-    Write-Host "  ssh $Target `"cd $RemoteBase && ls -t $BinaryName.* | head -1`"" -ForegroundColor Yellow
-    Write-Host "  ssh $Target `"cd $RemoteBase && ./control.sh stop && mv <上一行的備份檔> $BinaryName && chmod +x $BinaryName && ./control.sh start`"" -ForegroundColor Yellow
-    exit 1
-}
+    Write-Host ''
+    if ($problems.Count -gt 0)
+    {
+        Write-Host '部署完成但驗證有問題：' -ForegroundColor Red
+        $problems | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+        Write-Host '回滾指令：' -ForegroundColor Yellow
+        Write-Host "  ssh $Target `"cd $RemoteBase && ls -t $BinaryName.* | head -1`"" -ForegroundColor Yellow
+        Write-Host "  ssh $Target `"cd $RemoteBase && ./control.sh stop && mv <上一行的備份檔> $BinaryName && chmod +x $BinaryName && ./control.sh start`"" -ForegroundColor Yellow
+        exit 1
+    }
 
-Write-Host "部署成功：$Target`:$RemoteBase/$BinaryName" -ForegroundColor Green
+    Write-Host "部署成功：$Target`:$RemoteBase/$BinaryName" -ForegroundColor Green
+}
+finally
+{
+    Complete-DeployMarker
+}
