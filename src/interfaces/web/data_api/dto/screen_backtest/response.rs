@@ -290,6 +290,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_pe: Option<f64>,
     /// 換股當天股價淨值比上限（倍）；未篩選為 `null`。
     pub(crate) max_pb: Option<f64>,
+    /// 千張大戶持股比例 N 週變化下限（百分點）；未篩選為 `null`。
+    pub(crate) min_major_change: Option<f64>,
+    /// `min_major_change` 的回看週數；未篩選為 `null`。
+    pub(crate) major_change_weeks: Option<u8>,
     /// 訊號來源；未篩選為 `null`。
     pub(crate) indicator: Option<String>,
     /// 訊號種類；未篩選為 `null`。

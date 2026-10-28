@@ -17,6 +17,8 @@
 /// `$28` 是否只選創新高；`$29` 排除的產業 id（`NULL` 為不排除）。
 /// 本益比、股價淨值比取查詢日（含）之前 10 天內最新一筆日線的官方值（0 代表虧損或沒有資料，轉成
 /// NULL）；`$30`／`$31` 為上限（`NULL` 為不限）。
+/// 千張大戶持股比例變化由 handler 以 [`MAJOR_CHANGES_SQL`] 先算好，以 `$32` 代號、`$33` 變化（百分點）兩個平行
+/// 陣列左接，`$34` 為下限（`NULL` 為不限；沒有資料的股票不會通過）。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -294,6 +296,8 @@ LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
 LEFT JOIN UNNEST($19::text[], $20::smallint[], $21::smallint[])
        AS chip(symbol, foreign_streak, trust_streak)
        ON chip.symbol = normalized.stock_symbol
+LEFT JOIN UNNEST($32::text[], $33::numeric[]) AS major(symbol, major_change)
+       ON major.symbol = normalized.stock_symbol
 WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($5::numeric IS NULL OR earnings_per_share >= $5)
   AND ($6::numeric IS NULL OR return_on_equity >= $6)
@@ -315,4 +319,26 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND (NOT $28::bool OR revenue_record IS TRUE)
   AND ($30::numeric IS NULL OR pe_ratio <= $30)
   AND ($31::numeric IS NULL OR pb_ratio <= $31)
+  AND ($34::numeric IS NULL OR major.major_change >= $34)
+"#;
+
+/// 查詢日（`$1`，不含）以前最近一個集保資料週，相對往前第 `$2` 週的千張大戶持股比例變化（百分點），
+/// 每檔一列；最近一週距查詢日超過 14 天時沒有資料。集保週五的資料週六才公布，只用早於查詢日的週，
+/// 與回測（`holder_rebal`）同一規則。
+pub(super) const MAJOR_CHANGES_SQL: &str = r#"
+WITH weeks AS (
+    SELECT "date", ROW_NUMBER() OVER (ORDER BY "date" DESC) - 1 AS back
+    FROM (
+        SELECT DISTINCT "date" FROM holder_distribution
+        WHERE "date" < $1
+        ORDER BY "date" DESC
+        LIMIT $2::int + 1
+    ) recent
+)
+SELECT cur.stock_symbol::text AS stock_symbol, cur.major_percent - base.major_percent AS major_change
+FROM weeks cw
+JOIN weeks bw ON bw.back = $2::int
+JOIN holder_distribution cur ON cur."date" = cw."date"
+JOIN holder_distribution base ON base."date" = bw."date" AND base.stock_symbol = cur.stock_symbol
+WHERE cw.back = 0 AND cw."date" >= $1::date - 14
 "#;

@@ -20,7 +20,7 @@ use chrono::{Local, NaiveDate};
 use self::{
     params::{ValidatedScreeningParams, validate_screening_params},
     row::ScreenedStockRow,
-    sql::SCREEN_STOCKS_SQL,
+    sql::{MAJOR_CHANGES_SQL, SCREEN_STOCKS_SQL},
 };
 use super::institutional_flow::{StreakRow, load_streaks};
 use super::relative_strength::{ScoredStock, load_scores};
@@ -65,7 +65,11 @@ async fn screen_at(
 ) -> Response {
     // 相對強度要以上市櫃普通股（不含 ETF、特別股）排名、連續天數要回看多日籌碼，都無法在單股 LATERAL 內算，
     // 兩者同時先算好再以陣列傳入。
-    let (scores, streaks) = tokio::join!(load_scores(query_date), load_streaks(query_date));
+    let (scores, streaks, majors) = tokio::join!(
+        load_scores(query_date),
+        load_streaks(query_date),
+        load_major_changes(&validated, query_date)
+    );
     let (rs_as_of, rs_symbols, rs_scores) = match scores {
         Ok(scores) => rs_columns(scores),
         Err(response) => return *response,
@@ -73,6 +77,10 @@ async fn screen_at(
     let (chip_as_of, chip_symbols, foreign_streaks, trust_streaks) = match streaks {
         Ok(streaks) => streak_columns(streaks),
         Err(response) => return *response,
+    };
+    let (major_symbols, major_changes): (Vec<String>, Vec<rust_decimal::Decimal>) = match majors {
+        Ok(rows) => rows.into_iter().unzip(),
+        Err(error) => return database_error(error),
     };
     // ORDER BY 字串只可能來自下方三十二個 &'static str 分支，絕不插入呼叫端
     // 原始文字；其他條件仍全部使用 bind parameter。
@@ -111,6 +119,9 @@ async fn screen_at(
         .bind(validated.exclude_industry_ids.as_deref())
         .bind(validated.max_pe)
         .bind(validated.max_pb)
+        .bind(&major_symbols)
+        .bind(&major_changes)
+        .bind(validated.min_major_change)
         .fetch_all(database::get_connection())
         .await;
 
@@ -125,6 +136,21 @@ async fn screen_at(
         .into_response(),
         Err(error) => database_error(error),
     }
+}
+
+/// 有設 `min_major_change` 時讀各股的千張大戶持股比例變化；沒有設時不查資料庫，回空清單。
+async fn load_major_changes(
+    validated: &ValidatedScreeningParams,
+    query_date: NaiveDate,
+) -> Result<Vec<(String, rust_decimal::Decimal)>, sqlx::Error> {
+    if validated.min_major_change.is_none() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_as(MAJOR_CHANGES_SQL)
+        .bind(query_date)
+        .bind(i32::from(validated.major_change_weeks))
+        .fetch_all(database::get_connection())
+        .await
 }
 
 /// 把全體計分結果拆成資料日與代號、分數兩個平行陣列；查無資料時兩個陣列皆空。
