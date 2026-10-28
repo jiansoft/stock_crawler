@@ -117,7 +117,10 @@ pub(crate) async fn signal_performance(Query(params): Query<SignalPerformancePar
             .bind(params.min_foreign_streak.map(i64::from))
             .bind(params.min_trust_streak.map(i64::from));
     }
-    let rows: Vec<PerformanceRow> = match query.fetch_all(pool).await {
+    // 不快取成具名 prepared statement：同一連線執行約 5 次後 PostgreSQL 會改用 generic plan，
+    // 來源、種類、產業與相對強度的可選條件剪不掉（2026-10-28 正式庫實測近一年全市場 custom 3.4 秒、
+    // generic 56 秒；只看 rsi 三年 56 ms → 0.7 秒）。每次重新規劃只多幾毫秒。
+    let rows: Vec<PerformanceRow> = match query.persistent(false).fetch_all(pool).await {
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
