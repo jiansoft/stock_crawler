@@ -237,3 +237,14 @@ WHERE t.stock_symbol = $1
 ORDER BY t.date DESC, t.indicator, t.kind
 LIMIT $6
 "#;
+
+/// `$1`～`$2` 期間內出現過的訊號來源與種類（`$3`／`$4` 為請求指定的來源與種類，`NULL` 為不限）；
+/// 訊號績效依這個清單分組平行查詢（見 `fetch` 模組）。走主鍵的 index only scan，三年約 0.2 秒。
+pub(super) const SIGNAL_COMBOS_SQL: &str = r#"
+SELECT DISTINCT indicator, kind
+FROM daily_technical_signal
+WHERE date BETWEEN $1 AND $2
+  AND ($3::text IS NULL OR indicator = $3)
+  AND ($4::text IS NULL OR kind = $4)
+ORDER BY indicator, kind
+"#;
