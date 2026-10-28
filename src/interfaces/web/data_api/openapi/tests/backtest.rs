@@ -420,3 +420,26 @@ fn openapi_strategy_presets_schema_pins_field_names() {
             .contains("null")
     );
 }
+
+/// 選股、回測與偏移掃描都接受千張大戶變化條件：下限 -100～100、回看週數 1～12（預設 4）；回測回應回顯兩個參數。
+#[test]
+fn openapi_major_change_params_pin_ranges() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    for path in [
+        "/api/v1/stocks/screen",
+        "/api/v1/stocks/screen/backtest",
+        "/api/v1/stocks/screen/backtest/offsets",
+    ] {
+        let operation = get_operation(&document, path);
+        let minimum = query_schema(operation, "min_major_change");
+        assert_eq!(minimum["minimum"], -100.0, "{path}");
+        assert_eq!(minimum["maximum"], 100.0, "{path}");
+        let weeks = query_schema(operation, "major_change_weeks");
+        assert_eq!(weeks["minimum"], 1, "{path}");
+        assert_eq!(weeks["maximum"], 12, "{path}");
+        assert_eq!(weeks["default"], 4, "{path}");
+    }
+    let response = &document["components"]["schemas"]["ScreenBacktestResponse"]["properties"];
+    assert!(response["min_major_change"].to_string().contains("null"));
+    assert!(response["major_change_weeks"].to_string().contains("null"));
+}

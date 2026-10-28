@@ -253,6 +253,15 @@ pub(crate) struct ScreenBacktestParams {
     /// `max_pe`。
     #[param(minimum = 0.0, maximum = 1000.0)]
     pub(crate) max_pb: Option<f64>,
+    /// 換股前已公布的集保千張大戶持股比例，最近一週相對 `major_change_weeks` 週前的變化至少這麼多
+    /// （百分點，-100–100，可為負）。集保每週五的資料週六才公布，換股日只用日期早於換股日的週；最近
+    /// 一週距換股日超過 14 天、或兩週任一週沒有該股資料的不會通過。大戶資料自 2023-07-14 起，設此條件時
+    /// `from` 須晚於 2023-07-14 加 `major_change_weeks` 週。只用於新買進，續抱不看。
+    #[param(minimum = -100.0, maximum = 100.0)]
+    pub(crate) min_major_change: Option<f64>,
+    /// `min_major_change` 的回看週數（集保資料週，1–12，預設 4）；沒有設 `min_major_change` 時不影響結果。
+    #[param(minimum = 1, maximum = 12, default = 4)]
+    pub(crate) major_change_weeks: Option<u8>,
     /// 只選換股前 `hold_days` 個交易日內（含換股當天）出現過這個來源訊號的股票。
     #[param(value_type = Option<SignalIndicatorValue>)]
     pub(crate) indicator: Option<String>,
