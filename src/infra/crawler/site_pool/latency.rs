@@ -13,6 +13,8 @@ use once_cell::sync::Lazy;
 
 /// 失敗率超過此值（0–1）時，收盤統計行改記 WARN。
 const FAILURE_WARN_RATE: f64 = 0.10;
+/// 失敗率超過此值（0–1）時，WARN 另註明建議移出站點池（2026-10-28 PcHome 78% 即屬此類）。
+const FAILURE_REMOVE_RATE: f64 = 0.50;
 /// 樣本少於此數時不依失敗率升級，避免冷門時段幾筆失敗就記 WARN。
 const FAILURE_WARN_MIN_SAMPLES: usize = 20;
 
@@ -141,6 +143,18 @@ fn failure_needs_attention(count: usize, failures: usize) -> bool {
     count >= FAILURE_WARN_MIN_SAMPLES && failures as f64 > count as f64 * FAILURE_WARN_RATE
 }
 
+/// 收盤統計 WARN 行尾的說明：失敗率過半時建議移出站點池，否則只標示超過 10%。
+fn failure_note(count: usize, failures: usize) -> String {
+    if failures as f64 > count as f64 * FAILURE_REMOVE_RATE {
+        format!(
+            "（失敗率超過 {:.0}%，建議移出站點池）",
+            FAILURE_REMOVE_RATE * 100.0
+        )
+    } else {
+        format!("（失敗率超過 {:.0}%）", FAILURE_WARN_RATE * 100.0)
+    }
+}
+
 /// 收盤統計的一行文字。
 fn summary_line(entry: &SiteLatencySnapshot) -> String {
     let failure_rate = if entry.count == 0 {
@@ -204,7 +218,7 @@ pub fn flush_site_latency_stats() {
     for entry in entries {
         let line = summary_line(&entry);
         if failure_needs_attention(entry.count, entry.failures) {
-            tracing::warn!("{line}（失敗率超過 {:.0}%）", FAILURE_WARN_RATE * 100.0);
+            tracing::warn!("{line}{}", failure_note(entry.count, entry.failures));
         } else {
             tracing::info!("{line}");
         }
@@ -277,6 +291,14 @@ mod tests {
             p99_ms: 0,
         });
         assert!(empty.contains("failed=0(0.0%)"), "{empty}");
+    }
+
+    /// 失敗率過半時註明建議移出站點池（10-28 PcHome 275 次失敗 215 次），10%～50% 只標示超過 10%。
+    #[test]
+    fn failure_note_suggests_removal_above_half() {
+        assert_eq!(failure_note(275, 215), "（失敗率超過 50%，建議移出站點池）");
+        assert_eq!(failure_note(100, 50), "（失敗率超過 10%）");
+        assert_eq!(failure_note(100, 11), "（失敗率超過 10%）");
     }
 
     /// 驗證站點延遲統計在單一樣本時仍能正確回傳平均值與各主要百分位。

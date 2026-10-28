@@ -23,13 +23,34 @@ const DIRTY_BATCH_MIN_ROWS: usize = 20;
 /// 前後矛盾的列超過總列數的 1/N 就整批捨棄（N = 50，即 2%）。
 const DIRTY_BATCH_RATIO_DIVISOR: usize = 50;
 
+/// 列上的昨收與快取昨收差距超過這個比例，視為別檔的列（25%）。
+///
+/// 單日漲跌幅上限 10%，收盤排程漏跑一天、快取昨收舊兩天也只差約 21%，不會誤判；
+/// 10-28 09:21 整頁錯位的 8 檔差距都在 40% 以上。
+const MISALIGNED_LAST_CLOSE_RATIO: Decimal = Decimal::from_parts(25, 0, 0, false, 2);
+
+/// 同一批有這麼多列是別檔的列，就代表整頁錯位，整批捨棄：錯位時其他列也可能錯在漲跌停範圍內，
+/// 逐列比對抓不到。
+const MISALIGNED_BATCH_MIN_ROWS: usize = 3;
+
+/// 單一列比對用的基準：快取的資料庫昨收（興櫃不比）與當日除權息參考價。
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct RowBaseline {
+    /// 資料庫最後交易日收盤價；沒有資料或興櫃為 `None`（不做別檔列檢查）。
+    pub(super) last_close: Option<Decimal>,
+    /// 當日除權息或恢復買賣參考價。
+    pub(super) reference_price: Option<Decimal>,
+}
+
 /// 排行頁太多列前後矛盾，整批不採用。
 ///
 /// 背景迴圈遇到這個錯誤只記 warn：這是站點資料錯亂，不是程式或網路故障。
 #[derive(Debug)]
 pub(super) struct DirtyBatch {
-    /// 前後矛盾的列數。
+    /// 前後矛盾的列數（含別檔的列）。
     pub(super) inconsistent: usize,
+    /// 其中昨收與快取昨收差距過大、疑似別檔的列數。
+    pub(super) misaligned: usize,
     /// 有效快照總數。
     pub(super) total: usize,
 }
@@ -38,8 +59,8 @@ impl fmt::Display for DirtyBatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "HiStock 排行頁 {}/{} 列前後矛盾，整批捨棄",
-            self.inconsistent, self.total
+            "HiStock 排行頁 {}/{} 列前後矛盾（其中 {} 列疑似別檔），整批捨棄",
+            self.inconsistent, self.total, self.misaligned
         )
     }
 }
@@ -86,23 +107,48 @@ pub(super) fn row_inconsistency(
     None
 }
 
-/// 剔除前後矛盾的列；矛盾的列太多時整批捨棄。
+/// 這一列是否疑似別檔的資料：列上的昨收與快取昨收差距超過 [`MISALIGNED_LAST_CLOSE_RATIO`]，
+/// 且也不等於當日參考價。
+///
+/// 整列換成別檔時成交價、漲跌、昨收、最高最低彼此吻合，[`row_inconsistency`] 抓不到；
+/// 價格又可能落在本檔的漲跌停範圍內而通過 [`Share::is_valid_price`](crate::infra::cache::Share::is_valid_price)。
+/// 尚未成交、列上沒有昨收或沒有快取昨收時不檢查。
+pub(super) fn misaligned_row(snapshot: &RealtimeSnapshot, baseline: RowBaseline) -> bool {
+    let (Some(last_close), site_close) = (baseline.last_close, snapshot.last_close) else {
+        return false;
+    };
+    if snapshot.price <= Decimal::ZERO || site_close <= Decimal::ZERO || last_close <= Decimal::ZERO
+    {
+        return false;
+    }
+    let far = |base: Decimal| (site_close - base).abs() > base * MISALIGNED_LAST_CLOSE_RATIO;
+    far(last_close) && baseline.reference_price.is_none_or(far)
+}
+
+/// 剔除前後矛盾的列；矛盾的列太多、或有 [`MISALIGNED_BATCH_MIN_ROWS`] 列以上疑似別檔時整批捨棄。
 ///
 /// 剔除的列把價格設為 0，[`Share::set_stock_snapshots`](crate::infra::cache::Share::set_stock_snapshots)
 /// 會改用快取裡的舊值，不會讓這檔股票從快取消失。
 ///
 /// # 回傳
 /// - `Ok(n)`：剔除了 `n` 列，其餘照常使用。
-/// - `Err(DirtyBatch)`：矛盾的列超過 `max(20, 總數 2%)`，代表整頁錯亂，這一輪不更新快取。
+/// - `Err(DirtyBatch)`：矛盾的列超過 `max(20, 總數 2%)`，或疑似別檔的列達 [`MISALIGNED_BATCH_MIN_ROWS`]，
+///   代表整頁錯亂，這一輪不更新快取。
 pub(super) fn screen_inconsistent_rows(
     result: &mut HiStockFetchResult,
-    reference_price: impl Fn(&str) -> Option<Decimal>,
+    baseline: impl Fn(&str) -> RowBaseline,
 ) -> Result<usize> {
+    let mut misaligned = 0;
     let inconsistent: Vec<(String, &'static str)> = result
         .snapshots
         .iter()
         .filter_map(|(symbol, snapshot)| {
-            row_inconsistency(snapshot, reference_price(symbol))
+            let baseline = baseline(symbol);
+            if misaligned_row(snapshot, baseline) {
+                misaligned += 1;
+                return Some((symbol.clone(), "昨收與快取昨收差距過大，疑似別檔的列"));
+            }
+            row_inconsistency(snapshot, baseline.reference_price)
                 .map(|reason| (symbol.clone(), reason))
         })
         .collect();
@@ -110,9 +156,10 @@ pub(super) fn screen_inconsistent_rows(
     super::stats::record_inconsistent(inconsistent.iter().map(|(symbol, _)| symbol.as_str()));
     let total = result.snapshots.len();
     let limit = DIRTY_BATCH_MIN_ROWS.max(total / DIRTY_BATCH_RATIO_DIVISOR);
-    if inconsistent.len() > limit {
+    if inconsistent.len() > limit || misaligned >= MISALIGNED_BATCH_MIN_ROWS {
         return Err(DirtyBatch {
             inconsistent: inconsistent.len(),
+            misaligned,
             total,
         }
         .into());

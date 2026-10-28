@@ -78,6 +78,14 @@ impl Share {
         }
     }
 
+    /// 資料庫最後交易日的收盤價，興櫃回傳 `None`；給站點資料做「是不是這一檔」的比對用。
+    pub(crate) fn get_comparable_last_close(&self, symbol: &str) -> Option<Decimal> {
+        if self.is_emerging_stock(symbol) {
+            return None;
+        }
+        self.get_db_last_close(symbol)
+    }
+
     fn get_db_last_close(&self, symbol: &str) -> Option<Decimal> {
         self.last_trading_day_quotes
             .read()
