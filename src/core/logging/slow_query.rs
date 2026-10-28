@@ -28,6 +28,79 @@ struct KindStats {
     max_secs: f64,
 }
 
+/// 依 sqlx `summary`（SQL 前 4 個字）歸類的慢查詢筆數與最長耗時；當日彙總與健康週報共用。
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct SlowQueryTally {
+    kinds: HashMap<String, KindStats>,
+}
+
+impl SlowQueryTally {
+    /// 記一筆；`summary` 截斷時結尾帶「 …」，歸類時去掉。
+    pub fn add(&mut self, summary: &str, secs: f64) {
+        let kind = summary.trim_end_matches('…').trim_end();
+        let stats = self.kinds.entry(kind.to_string()).or_default();
+        stats.count += 1;
+        stats.max_secs = stats.max_secs.max(secs);
+    }
+
+    /// 總筆數。
+    pub fn total(&self) -> u32 {
+        self.kinds.values().map(|stats| stats.count).sum()
+    }
+
+    /// 筆數最多的前 `listed` 類與各自最長耗時（依筆數、最長耗時、名稱排序），更多類別時附「等 N 類」；
+    /// 沒有任何一筆回 `None`。
+    pub fn top_kinds(&self, listed: usize) -> Option<String> {
+        if self.kinds.is_empty() {
+            return None;
+        }
+        let mut kinds: Vec<(&String, &KindStats)> = self.kinds.iter().collect();
+        kinds.sort_by(|(a_kind, a), (b_kind, b)| {
+            b.count
+                .cmp(&a.count)
+                .then(b.max_secs.total_cmp(&a.max_secs))
+                .then(a_kind.cmp(b_kind))
+        });
+        let shown: Vec<String> = kinds
+            .iter()
+            .take(listed)
+            .map(|(kind, stats)| format!("{kind} {}（最長 {:.1} 秒）", stats.count, stats.max_secs))
+            .collect();
+        let others = if kinds.len() > listed {
+            format!(" 等 {} 類", kinds.len())
+        } else {
+            String::new()
+        };
+        Some(format!("{}{others}", shown.join("、")))
+    }
+
+    fn clear(&mut self) {
+        self.kinds.clear();
+    }
+}
+
+/// 從檔案日誌的一行取出慢查詢的 `summary` 與 `elapsed_secs`；不是慢查詢回 `None`。
+///
+/// [`super::FileLogLayer`] 寫出的格式是 `時間 訊息 key=val …`，字串值帶雙引號（`summary="WITH chip AS ( …"`）。
+pub fn parse_log_line(line: &str) -> Option<(String, f64)> {
+    if !line.contains("slow statement:") || !line.contains(" slow_threshold=") {
+        return None;
+    }
+    let summary = line
+        .split(" summary=\"")
+        .nth(1)?
+        .split('"')
+        .next()?
+        .to_string();
+    let secs = line
+        .split(" elapsed_secs=")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_default();
+    Some((summary, secs))
+}
+
 /// 當日各類慢查詢的筆數與最長耗時。
 #[derive(Debug)]
 pub(crate) struct SlowQueryStats {
@@ -35,8 +108,7 @@ pub(crate) struct SlowQueryStats {
     started: NaiveDateTime,
     /// 目前累計的日期；跨日第一筆時歸零。
     day: Option<NaiveDate>,
-    /// 依 sqlx `summary`（SQL 前 4 個字）歸類。
-    kinds: HashMap<String, KindStats>,
+    tally: SlowQueryTally,
 }
 
 impl SlowQueryStats {
@@ -44,7 +116,7 @@ impl SlowQueryStats {
         Self {
             started,
             day: None,
-            kinds: HashMap::new(),
+            tally: SlowQueryTally::default(),
         }
     }
 
@@ -53,12 +125,9 @@ impl SlowQueryStats {
         let day = now.date();
         if self.day != Some(day) {
             self.day = Some(day);
-            self.kinds.clear();
+            self.tally.clear();
         }
-        let kind = summary.trim_end_matches('…').trim_end();
-        let stats = self.kinds.entry(kind.to_string()).or_default();
-        stats.count += 1;
-        stats.max_secs = stats.max_secs.max(secs);
+        self.tally.add(summary, secs);
     }
 
     /// `today` 的彙總文字：總筆數、統計起點（當天啟動時），以及筆數最多的前幾類與各自最長耗時。
@@ -68,32 +137,11 @@ impl SlowQueryStats {
         } else {
             String::new()
         };
-        let mut kinds: Vec<(&String, &KindStats)> = if self.day == Some(today) {
-            self.kinds.iter().collect()
-        } else {
-            Vec::new()
-        };
-        let total: u32 = kinds.iter().map(|(_, stats)| stats.count).sum();
-        if total == 0 {
-            return format!("慢查詢 0 筆{since}");
+        let today_tally = (self.day == Some(today)).then_some(&self.tally);
+        match today_tally.and_then(|tally| tally.top_kinds(LISTED_KINDS)) {
+            Some(kinds) => format!("慢查詢 {} 筆{since}：{kinds}", self.tally.total()),
+            None => format!("慢查詢 0 筆{since}"),
         }
-        kinds.sort_by(|(a_kind, a), (b_kind, b)| {
-            b.count
-                .cmp(&a.count)
-                .then(b.max_secs.total_cmp(&a.max_secs))
-                .then(a_kind.cmp(b_kind))
-        });
-        let listed: Vec<String> = kinds
-            .iter()
-            .take(LISTED_KINDS)
-            .map(|(kind, stats)| format!("{kind} {}（最長 {:.1} 秒）", stats.count, stats.max_secs))
-            .collect();
-        let others = if kinds.len() > LISTED_KINDS {
-            format!(" 等 {} 類", kinds.len())
-        } else {
-            String::new()
-        };
-        format!("慢查詢 {total} 筆{since}：{}{others}", listed.join("、"))
     }
 }
 

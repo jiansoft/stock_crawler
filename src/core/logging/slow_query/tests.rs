@@ -108,3 +108,33 @@ fn observe_records_sqlx_warnings_only() {
         daily_summary(date)
     );
 }
+
+/// 檔案日誌行：只認帶 `slow_threshold` 的慢查詢，取出 summary 與 elapsed_secs。
+#[test]
+fn parse_log_line_reads_summary_and_elapsed() {
+    let line = r#"2026-10-29 04:00:10.97 slow statement: execution time exceeded alert threshold summary="INSERT INTO estimate ( …" db.statement="INSERT INTO estimate (a) VALUES (1)" rows_affected=225 elapsed="5.2s" elapsed_secs=5.209944118 slow_threshold="5s""#;
+    assert_eq!(
+        parse_log_line(line),
+        Some(("INSERT INTO estimate ( …".to_string(), 5.209944118))
+    );
+    assert_eq!(parse_log_line("2026-10-29 04:00:10 http.slow url=x"), None);
+    assert_eq!(
+        parse_log_line(r#"slow statement: x summary="SELECT 1" slow_threshold="5s""#),
+        Some(("SELECT 1".to_string(), 0.0))
+    );
+}
+
+/// 沒有資料時沒有前幾類；超過列出數時附「等 N 類」。
+#[test]
+fn tally_lists_top_kinds() {
+    let mut tally = SlowQueryTally::default();
+    assert_eq!(tally.top_kinds(2), None);
+    for (summary, secs) in [("A …", 1.0), ("B", 2.0), ("A", 3.0), ("C", 4.0)] {
+        tally.add(summary, secs);
+    }
+    assert_eq!(tally.total(), 4);
+    assert_eq!(
+        tally.top_kinds(2).as_deref(),
+        Some("A 2（最長 3.0 秒）、C 1（最長 4.0 秒） 等 3 類")
+    );
+}
