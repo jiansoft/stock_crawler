@@ -113,6 +113,82 @@ SET return_5d = COALESCE(EXCLUDED.return_5d, t.return_5d),
     updated_at = CURRENT_TIMESTAMP
 "#;
 
+/// 重算基準日 `$1`（陣列）的大盤未來報酬彙總（`daily_market_forward_return`）：上市櫃全部（0）與各市場
+/// 的筆數、報酬總和與上漲檔數，口徑與訊號績效原本逐列 `AVG` 的大盤基準相同（只算 `stocks` 有的代號）。
+/// 該日已沒有任何未來報酬時，刪掉舊的彙總列。
+pub(super) const REFRESH_MARKET_SQL: &str = r#"
+WITH fresh AS (
+    SELECT r.date, m.market_id,
+           COUNT(r.return_5d) AS n5, SUM(r.return_5d) AS sum5,
+           SUM(CASE WHEN r.return_5d > 0 THEN 1.0 WHEN r.return_5d IS NOT NULL THEN 0.0 END) AS win5,
+           COUNT(r.return_20d) AS n20, SUM(r.return_20d) AS sum20,
+           SUM(CASE WHEN r.return_20d > 0 THEN 1.0 WHEN r.return_20d IS NOT NULL THEN 0.0 END) AS win20,
+           COUNT(r.return_60d) AS n60, SUM(r.return_60d) AS sum60,
+           SUM(CASE WHEN r.return_60d > 0 THEN 1.0 WHEN r.return_60d IS NOT NULL THEN 0.0 END) AS win60,
+           COUNT(r.return_120d) AS n120, SUM(r.return_120d) AS sum120,
+           SUM(CASE WHEN r.return_120d > 0 THEN 1.0 WHEN r.return_120d IS NOT NULL THEN 0.0 END) AS win120,
+           COUNT(r.return_240d) AS n240, SUM(r.return_240d) AS sum240,
+           SUM(CASE WHEN r.return_240d > 0 THEN 1.0 WHEN r.return_240d IS NOT NULL THEN 0.0 END) AS win240
+    FROM daily_forward_return r
+    JOIN stocks s ON s.stock_symbol = r.stock_symbol
+    CROSS JOIN LATERAL (VALUES (0::smallint), (s.stock_exchange_market_id::smallint)) AS m(market_id)
+    WHERE r.date = ANY($1) AND m.market_id IS NOT NULL
+    GROUP BY r.date, m.market_id
+),
+removed AS (
+    DELETE FROM daily_market_forward_return t
+    WHERE t.date = ANY($1)
+      AND NOT EXISTS (SELECT 1 FROM fresh f WHERE f.date = t.date AND f.market_id = t.market_id)
+)
+INSERT INTO daily_market_forward_return AS t
+    (date, market_id, n5, sum5, win5, n20, sum20, win20, n60, sum60, win60,
+     n120, sum120, win120, n240, sum240, win240)
+SELECT date, market_id, n5, sum5, win5, n20, sum20, win20, n60, sum60, win60,
+       n120, sum120, win120, n240, sum240, win240
+FROM fresh
+ON CONFLICT (date, market_id) DO UPDATE
+SET n5 = EXCLUDED.n5, sum5 = EXCLUDED.sum5, win5 = EXCLUDED.win5,
+    n20 = EXCLUDED.n20, sum20 = EXCLUDED.sum20, win20 = EXCLUDED.win20,
+    n60 = EXCLUDED.n60, sum60 = EXCLUDED.sum60, win60 = EXCLUDED.win60,
+    n120 = EXCLUDED.n120, sum120 = EXCLUDED.sum120, win120 = EXCLUDED.win120,
+    n240 = EXCLUDED.n240, sum240 = EXCLUDED.sum240, win240 = EXCLUDED.win240,
+    updated_at = CURRENT_TIMESTAMP
+"#;
+
+/// 重算一批基準日的大盤未來報酬彙總（見 [`REFRESH_MARKET_SQL`]），回傳寫入的列數。
+pub async fn refresh_market_forward_returns(dates: &[NaiveDate]) -> Result<u64> {
+    let result = sqlx::query(REFRESH_MARKET_SQL)
+        .bind(dates)
+        .execute(database::get_connection())
+        .await?;
+    Ok(result.rows_affected())
+}
+
+/// 重算 `from`～`to` 期間內出現在未來報酬或彙總表的每個基準日（彙總表多出來的日期會被刪掉），
+/// 一次 [`MARKET_REFRESH_CHUNK`] 天；回傳處理的天數。歷史回補與測試種完資料後使用。
+pub async fn refresh_market_forward_returns_between(
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Result<usize> {
+    let dates: Vec<NaiveDate> = sqlx::query_scalar(
+        r#"SELECT date FROM daily_forward_return WHERE date BETWEEN $1 AND $2
+           UNION
+           SELECT date FROM daily_market_forward_return WHERE date BETWEEN $1 AND $2
+           ORDER BY 1"#,
+    )
+    .bind(from)
+    .bind(to)
+    .fetch_all(database::get_connection())
+    .await?;
+    for chunk in dates.chunks(MARKET_REFRESH_CHUNK) {
+        refresh_market_forward_returns(chunk).await?;
+    }
+    Ok(dates.len())
+}
+
+/// 歷史回補每次重算的天數（一天約 2,000 列，100 天約 20 萬列）。
+const MARKET_REFRESH_CHUNK: usize = 100;
+
 /// `$1` 的技術訊號筆數（不含相對強度穿越訊號 `$3`，那些隨每日相對強度寫入），以及基準日 `$2`
 /// 已寫入 5 日報酬的筆數與 `$1` 的相對強度筆數（都走主鍵前綴）。
 const DERIVED_COUNTS_SQL: &str = r#"
@@ -162,6 +238,8 @@ impl ForwardReturnRepository for PgQuoteRepository {
             .bind(i32::try_from(horizon).unwrap_or(i32::MAX))
             .execute(database::get_connection())
             .await?;
+        // 大盤基準讀彙總表，該基準日的報酬一變就跟著重算（約 2,000 列，成本很低）。
+        refresh_market_forward_returns(&[base]).await?;
         Ok(result.rows_affected())
     }
 }
@@ -340,5 +418,126 @@ mod tests {
                 ),
             ]
         );
+    }
+    /// 每日大盤彙總與逐列 `AVG`（原本訊號績效的 bench 與 benchmark）完全相同：每天的平均、
+    /// 整段的筆數、平均與上漲比例，三個市場口徑都比到 numeric 的文字；報酬清掉後彙總列也跟著刪掉。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn market_forward_returns_match_row_averages() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() {
+            println!("跳過 market_forward_returns_match_row_averages：無資料庫連接");
+            return;
+        }
+        let pool = database::get_connection();
+        let day = |d| NaiveDate::from_ymd_opt(1981, 3, d).expect("日期合法");
+        let symbols = ["79976A", "79976B", "79976C", "79976D"];
+        let cleanup = || async {
+            for sql in [
+                "DELETE FROM daily_forward_return WHERE stock_symbol = ANY($1)",
+                "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
+            ] {
+                sqlx::query(sql)
+                    .bind(&symbols[..])
+                    .execute(pool)
+                    .await
+                    .unwrap();
+            }
+            refresh_market_forward_returns_between(day(1), day(31))
+                .await
+                .unwrap();
+        };
+        cleanup().await;
+        for (symbol, market) in [("79976A", 2), ("79976B", 2), ("79976C", 4), ("79976D", 4)] {
+            sqlx::query(r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id) VALUES ($1, $1, $1, $2, 24)"#)
+                .bind(symbol).bind(market).execute(pool).await.unwrap();
+        }
+        // 小數位、負值、NULL 混在一起；03-04 全部 5 日報酬都是 NULL。
+        let returns: [(u32, &str, Option<Decimal>, Option<Decimal>); 9] = [
+            (2, "79976A", Some(dec!(1.2345)), Some(dec!(-3.3333))),
+            (2, "79976B", Some(dec!(-0.5)), None),
+            (2, "79976C", Some(dec!(2.0001)), Some(dec!(7.1))),
+            (2, "79976D", None, Some(dec!(0))),
+            (3, "79976A", Some(dec!(0)), Some(dec!(1.1111))),
+            (3, "79976C", Some(dec!(-9.8765)), Some(dec!(2.2222))),
+            (3, "79976D", Some(dec!(4.4444)), None),
+            (4, "79976A", None, Some(dec!(5.5))),
+            (4, "79976B", None, Some(dec!(-1.25))),
+        ];
+        for (d, symbol, r5, r20) in returns {
+            sqlx::query("INSERT INTO daily_forward_return (date, stock_symbol, return_5d, return_20d, return_240d) VALUES ($1, $2, $3, $4, $3)")
+                .bind(day(d)).bind(symbol).bind(r5).bind(r20).execute(pool).await.unwrap();
+        }
+        assert_eq!(
+            refresh_market_forward_returns_between(day(1), day(31))
+                .await
+                .unwrap(),
+            3
+        );
+
+        type Daily = Vec<(NaiveDate, Option<String>, Option<String>, Option<String>)>;
+        type Period = (
+            i64,
+            Option<String>,
+            Option<String>,
+            i64,
+            Option<String>,
+            Option<String>,
+        );
+        for market in [0, 2, 4] {
+            let old_daily: Daily = sqlx::query_as(
+                r#"SELECT r.date, AVG(r.return_5d)::text, AVG(r.return_20d)::text, AVG(r.return_240d)::text
+                   FROM daily_forward_return r JOIN stocks s ON s.stock_symbol = r.stock_symbol
+                   WHERE r.date BETWEEN $1 AND $2 AND ($3 = 0 OR s.stock_exchange_market_id = $3)
+                   GROUP BY r.date ORDER BY 1"#,
+            )
+            .bind(day(1)).bind(day(31)).bind(market).fetch_all(pool).await.unwrap();
+            let new_daily: Daily = sqlx::query_as(
+                r#"SELECT date, (sum5 / NULLIF(n5, 0))::text, (sum20 / NULLIF(n20, 0))::text, (sum240 / NULLIF(n240, 0))::text
+                   FROM daily_market_forward_return
+                   WHERE date BETWEEN $1 AND $2 AND market_id = $3 ORDER BY 1"#,
+            )
+            .bind(day(1)).bind(day(31)).bind(market).fetch_all(pool).await.unwrap();
+            assert_eq!(new_daily, old_daily, "每日平均 market={market}");
+
+            let old_period: Period = sqlx::query_as(
+                r#"SELECT COUNT(r.return_5d), AVG(r.return_5d)::text,
+                          AVG(CASE WHEN r.return_5d > 0 THEN 1.0 WHEN r.return_5d IS NOT NULL THEN 0.0 END)::text,
+                          COUNT(r.return_20d), AVG(r.return_20d)::text,
+                          AVG(CASE WHEN r.return_20d > 0 THEN 1.0 WHEN r.return_20d IS NOT NULL THEN 0.0 END)::text
+                   FROM daily_forward_return r JOIN stocks s ON s.stock_symbol = r.stock_symbol
+                   WHERE r.date BETWEEN $1 AND $2 AND ($3 = 0 OR s.stock_exchange_market_id = $3)"#,
+            )
+            .bind(day(1)).bind(day(31)).bind(market).fetch_one(pool).await.unwrap();
+            let new_period: Period = sqlx::query_as(
+                r#"SELECT COALESCE(SUM(n5), 0)::bigint, (SUM(sum5) / NULLIF(SUM(n5), 0))::text,
+                          (SUM(win5) / NULLIF(SUM(n5), 0))::text,
+                          COALESCE(SUM(n20), 0)::bigint, (SUM(sum20) / NULLIF(SUM(n20), 0))::text,
+                          (SUM(win20) / NULLIF(SUM(n20), 0))::text
+                   FROM daily_market_forward_return
+                   WHERE date BETWEEN $1 AND $2 AND market_id = $3"#,
+            )
+            .bind(day(1))
+            .bind(day(31))
+            .bind(market)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            assert_eq!(new_period, old_period, "整段統計 market={market}");
+        }
+
+        cleanup().await;
+        let left: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM daily_market_forward_return WHERE date BETWEEN $1 AND $2",
+        )
+        .bind(day(1))
+        .bind(day(31))
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(left, 0, "報酬清掉後彙總列應跟著刪除");
     }
 }

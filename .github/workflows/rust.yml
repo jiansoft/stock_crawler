@@ -244,6 +244,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_stock_price_stats.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_technical_signal.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_forward_return.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_market_forward_return.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_relative_strength.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_market_valuation.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend.sql
@@ -367,6 +368,7 @@ jobs:
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_stock_price_stats.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_technical_signal.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_forward_return.sql
+        psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_market_forward_return.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_relative_strength.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/daily_market_valuation.sql
         psql -X -v ON_ERROR_STOP=1 -h localhost -U user -d db -a -f etc/sql/dividend.sql

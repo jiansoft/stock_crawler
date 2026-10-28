@@ -49,6 +49,12 @@ async fn cleanup(pool: &sqlx::PgPool) {
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
     }
+    crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
+        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
+        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+    )
+    .await
+    .expect("重算大盤彙總");
 }
 
 async fn seed(pool: &sqlx::PgPool) {
@@ -91,6 +97,13 @@ async fn seed(pool: &sqlx::PgPool) {
         .await
         .expect("種入報酬");
     }
+    // 大盤基準讀每日彙總表，種完未來報酬要重算。
+    crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
+        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
+        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+    )
+    .await
+    .expect("重算大盤彙總");
 }
 
 /// 呼叫 endpoint（固定 06-02～06-08），回傳狀態與 JSON。

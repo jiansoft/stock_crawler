@@ -7,7 +7,8 @@ SELECT MAX(date) FROM daily_technical_signal WHERE $1::date IS NULL OR date <= $
 "#;
 
 /// 訊號績效 SQL 的共用尾段：大盤基準（`bench`）與依 `sig(date, stock_symbol, indicator, kind)`
-/// 彙總的各天期統計。`$1`～`$3` 為起日、迄日與市場 id（0 為上市櫃全部）。
+/// 彙總的各天期統計。`$1`～`$3` 為起日、迄日與市場 id（0 為上市櫃全部）。大盤基準讀每日彙總表
+/// `daily_market_forward_return`（`sum / n` 與逐列 `AVG` 完全相同），不再每次掃三年的逐檔報酬。
 ///
 /// `by_year` 版本以 `GROUPING SETS` 在同一次掃描算出整段期間（`year` 為 `NULL`）與各年度的統計；
 /// 中位數無法由各年度合併，所以不另外跑兩次查詢。
@@ -24,14 +25,12 @@ macro_rules! performance_aggregate_sql {
     (@ $year:literal, $group:literal) => {
         concat!(
             r#"bench AS (
-    SELECT r.date,
-           AVG(r.return_5d) AS b5, AVG(r.return_20d) AS b20, AVG(r.return_60d) AS b60,
-           AVG(r.return_120d) AS b120, AVG(r.return_240d) AS b240
-    FROM daily_forward_return r
-    JOIN stocks s ON s.stock_symbol = r.stock_symbol
-    WHERE r.date BETWEEN $1 AND $2
-      AND ($3 = 0 OR s.stock_exchange_market_id = $3)
-    GROUP BY r.date
+    SELECT date,
+           sum5 / NULLIF(n5, 0) AS b5, sum20 / NULLIF(n20, 0) AS b20, sum60 / NULLIF(n60, 0) AS b60,
+           sum120 / NULLIF(n120, 0) AS b120, sum240 / NULLIF(n240, 0) AS b240
+    FROM daily_market_forward_return
+    WHERE date BETWEEN $1 AND $2
+      AND market_id = $3
 )
 SELECT
     sig.indicator,
@@ -174,29 +173,29 @@ pub(super) const PERFORMANCE_WITH_CHIP_SQL: &str =
 pub(super) const PERFORMANCE_WITH_CHIP_BY_YEAR_SQL: &str =
     concat!(chip_signal_cte!(), performance_aggregate_sql!(by_year));
 
-/// 大盤基準的欄位：同市場全部股票各天期的樣本數、平均報酬與上漲比例。
+/// 大盤基準的欄位：同市場全部股票各天期的樣本數、平均報酬與上漲比例，由每日彙總表
+/// `daily_market_forward_return` 加總（區間平均 = Σsum ÷ Σn，與逐列 `AVG` 完全相同）。
 macro_rules! benchmark_columns {
     () => {
         r#"
-    COUNT(r.return_5d) AS n5,
-    AVG(r.return_5d)::float8 AS avg5,
-    AVG(CASE WHEN r.return_5d > 0 THEN 1.0 WHEN r.return_5d IS NOT NULL THEN 0.0 END)::float8 AS win5,
-    COUNT(r.return_20d) AS n20,
-    AVG(r.return_20d)::float8 AS avg20,
-    AVG(CASE WHEN r.return_20d > 0 THEN 1.0 WHEN r.return_20d IS NOT NULL THEN 0.0 END)::float8 AS win20,
-    COUNT(r.return_60d) AS n60,
-    AVG(r.return_60d)::float8 AS avg60,
-    AVG(CASE WHEN r.return_60d > 0 THEN 1.0 WHEN r.return_60d IS NOT NULL THEN 0.0 END)::float8 AS win60,
-    COUNT(r.return_120d) AS n120,
-    AVG(r.return_120d)::float8 AS avg120,
-    AVG(CASE WHEN r.return_120d > 0 THEN 1.0 WHEN r.return_120d IS NOT NULL THEN 0.0 END)::float8 AS win120,
-    COUNT(r.return_240d) AS n240,
-    AVG(r.return_240d)::float8 AS avg240,
-    AVG(CASE WHEN r.return_240d > 0 THEN 1.0 WHEN r.return_240d IS NOT NULL THEN 0.0 END)::float8 AS win240
-FROM daily_forward_return r
-JOIN stocks s ON s.stock_symbol = r.stock_symbol
+    COALESCE(SUM(r.n5), 0)::bigint AS n5,
+    (SUM(r.sum5) / NULLIF(SUM(r.n5), 0))::float8 AS avg5,
+    (SUM(r.win5) / NULLIF(SUM(r.n5), 0))::float8 AS win5,
+    COALESCE(SUM(r.n20), 0)::bigint AS n20,
+    (SUM(r.sum20) / NULLIF(SUM(r.n20), 0))::float8 AS avg20,
+    (SUM(r.win20) / NULLIF(SUM(r.n20), 0))::float8 AS win20,
+    COALESCE(SUM(r.n60), 0)::bigint AS n60,
+    (SUM(r.sum60) / NULLIF(SUM(r.n60), 0))::float8 AS avg60,
+    (SUM(r.win60) / NULLIF(SUM(r.n60), 0))::float8 AS win60,
+    COALESCE(SUM(r.n120), 0)::bigint AS n120,
+    (SUM(r.sum120) / NULLIF(SUM(r.n120), 0))::float8 AS avg120,
+    (SUM(r.win120) / NULLIF(SUM(r.n120), 0))::float8 AS win120,
+    COALESCE(SUM(r.n240), 0)::bigint AS n240,
+    (SUM(r.sum240) / NULLIF(SUM(r.n240), 0))::float8 AS avg240,
+    (SUM(r.win240) / NULLIF(SUM(r.n240), 0))::float8 AS win240
+FROM daily_market_forward_return r
 WHERE r.date BETWEEN $1 AND $2
-  AND ($3 = 0 OR s.stock_exchange_market_id = $3)
+  AND r.market_id = $3
 "#
     };
 }

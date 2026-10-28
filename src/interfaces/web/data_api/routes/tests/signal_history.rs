@@ -45,6 +45,12 @@ async fn cleanup(pool: &sqlx::PgPool) {
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;
     }
+    crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
+        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
+        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+    )
+    .await
+    .expect("重算大盤彙總");
 }
 
 async fn seed(pool: &sqlx::PgPool) {
@@ -101,6 +107,13 @@ async fn seed(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("種入 240 日報酬");
+    // 大盤基準讀每日彙總表，種完未來報酬要重算。
+    crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
+        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
+        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+    )
+    .await
+    .expect("重算大盤彙總");
     // 訊號當天的相對強度：10-01 PA 90、PB 40，10-02 PA 70；PC 沒有分數。
     sqlx::query(
         "INSERT INTO daily_relative_strength (date, stock_symbol, weighted_return, rs_score, rank, universe)
@@ -282,6 +295,12 @@ async fn signal_performance_endpoint_db_semantics() {
     .execute(pool)
     .await
     .expect("種入跨年報酬");
+    crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
+        NaiveDate::from_ymd_opt(1980, 1, 1).expect("日期合法"),
+        NaiveDate::from_ymd_opt(1999, 12, 31).expect("日期合法"),
+    )
+    .await
+    .expect("重算大盤彙總");
     let (status, json) = get(
         "/api/v1/market/signals/performance?from=1990-12-01&to=1991-10-02&kind=golden_cross&group_by=year",
     )
