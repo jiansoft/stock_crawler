@@ -66,6 +66,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::stock_chip),
         )
         .route(
+            "/stocks/{symbol}/holder-levels",
+            axum::routing::get(handlers::holder_levels),
+        )
+        .route(
             "/stocks/{symbol}/valuation",
             axum::routing::get(handlers::stock_valuation),
         )

@@ -156,6 +156,7 @@ fn openapi_contains_all_data_api_paths() {
         "/api/v1/stocks/{symbol}/dividend-fill",
         "/api/v1/stocks/{symbol}/valuation",
         "/api/v1/stocks/{symbol}/chip",
+        "/api/v1/stocks/{symbol}/holder-levels",
         "/api/v1/market/breadth",
         "/api/v1/market/dividend-yield-ranking",
         "/api/v1/stocks/screen",

@@ -165,3 +165,98 @@ async fn chip_full_streak_survives_five_day_detail_window() {
     }
     crate::infra::database::repository::chip::refresh_streaks_for_tests().await;
 }
+
+/// 持股分級 endpoint 沒帶金鑰時回 401。
+#[tokio::test]
+async fn holder_levels_endpoint_rejects_missing_bearer_key() {
+    let response = router()
+        .oneshot(
+            Request::get("/api/v1/stocks/2330/holder-levels")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should serve request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// 持股分級：預設最新一週、`date` 取該日以前最近一週、沒有資料 404；籌碼的週摘要帶 400 張欄位（缺值為 null）。
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+async fn holder_levels_and_chip_400_columns() {
+    use super::support::{get, pool_or_skip};
+    let pool = pool_or_skip("holder_levels_and_chip_400_columns")
+        .await
+        .expect("隔離 DB 必須可用");
+    let symbol = "79979HL";
+    let cleanup = || async {
+        for sql in [
+            "DELETE FROM holder_distribution_level WHERE stock_symbol=$1",
+            "DELETE FROM holder_distribution WHERE stock_symbol=$1",
+            "DELETE FROM stocks WHERE stock_symbol=$1",
+        ] {
+            sqlx::query(sql).bind(symbol).execute(pool).await.unwrap();
+        }
+    };
+    cleanup().await;
+    for sql in [
+        "INSERT INTO stocks (\"SecurityCode\",\"Name\",stock_symbol,stock_exchange_market_id) VALUES ($1,'分級測試',$1,2)",
+        r#"INSERT INTO holder_distribution ("date", stock_symbol, major_holders, major_percent, total_holders, holders_400, shares_400, percent_400)
+           VALUES ('2019-03-15', $1, 50, 70.5, 3000, NULL, NULL, NULL), ('2019-03-22', $1, 51, 70.75, 3010, 80, 900000, 75.5)"#,
+        r#"INSERT INTO holder_distribution_level ("date", stock_symbol, level, holders, shares, percent)
+           VALUES ('2019-03-15', $1, 1, 2000, 500000, 5.0), ('2019-03-15', $1, 15, 50, 7050000, 70.5), ('2019-03-15', $1, 17, 3000, 10000000, 100),
+                  ('2019-03-22', $1, 1, 2010, 490000, 4.9), ('2019-03-22', $1, 12, 29, 150000, 1.5), ('2019-03-22', $1, 15, 51, 7075000, 70.75),
+                  ('2019-03-22', $1, 16, 1, 0, 0), ('2019-03-22', $1, 17, 3010, 10000000, 100)"#,
+    ] {
+        sqlx::query(sql).bind(symbol).execute(pool).await.unwrap();
+    }
+
+    let (bad_status, _) = get(&format!(
+        "/api/v1/stocks/{symbol}/holder-levels?date=2019-3"
+    ))
+    .await;
+    let (unknown_status, _) = get("/api/v1/stocks/79979ZZ/holder-levels").await;
+    let (latest_status, latest) = get(&format!("/api/v1/stocks/{symbol}/holder-levels")).await;
+    let (earlier_status, earlier) = get(&format!(
+        "/api/v1/stocks/{symbol}/holder-levels?date=2019-03-21"
+    ))
+    .await;
+    let (none_status, none) = get(&format!(
+        "/api/v1/stocks/{symbol}/holder-levels?date=2019-03-01"
+    ))
+    .await;
+    let (chip_status, chip) = get(&format!("/api/v1/stocks/{symbol}/chip?days=1")).await;
+    cleanup().await;
+
+    assert_eq!(bad_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(unknown_status, StatusCode::NOT_FOUND);
+
+    assert_eq!(latest_status, StatusCode::OK, "{latest}");
+    assert_eq!(latest["date"], "2019-03-22");
+    let levels = latest["levels"].as_array().expect("levels array");
+    assert_eq!(
+        levels
+            .iter()
+            .map(|item| item["level"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        vec![1, 12, 15]
+    );
+    assert_eq!(levels[1]["label"], "400,001～600,000 股");
+    assert_eq!(levels[2]["percent"], 70.75);
+    assert_eq!(latest["adjustment"]["holders"], 1);
+    assert_eq!(latest["total"]["holders"], 3010);
+
+    assert_eq!(earlier_status, StatusCode::OK, "{earlier}");
+    assert_eq!(earlier["date"], "2019-03-15");
+    assert!(earlier["adjustment"].is_null());
+    assert_eq!(earlier["total"]["holders"], 3000);
+
+    assert_eq!(none_status, StatusCode::NOT_FOUND, "{none}");
+
+    assert_eq!(chip_status, StatusCode::OK, "{chip}");
+    let weeks = chip["holder_distribution"].as_array().expect("weeks array");
+    assert_eq!(weeks[0]["holders_400"], 80);
+    assert_eq!(weeks[0]["percent_400"], 75.5);
+    assert!(weeks[1]["holders_400"].is_null());
+    assert!(weeks[1]["percent_400"].is_null());
+}
