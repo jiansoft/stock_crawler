@@ -15,6 +15,8 @@ use crate::domain::portfolio::target::{
 };
 use crate::infra::database;
 
+mod revision;
+
 /// PostgreSQL 投資組合目標配置倉儲。
 #[derive(Debug, Default, Clone)]
 pub struct PgPortfolioTargetRepository {
@@ -265,6 +267,8 @@ impl PortfolioTargetRepository for PgPortfolioTargetRepository {
             ))
             .execute(&mut *tx)
             .await?;
+        // 覆蓋前先留存目前的整組（原本已設定且內容有變才記），改錯可以還原。
+        revision::record_before_save(&mut tx, member_id, dimension, targets).await?;
         sqlx::query("INSERT INTO portfolio_target_dimension(member_id, dimension) VALUES ($1,$2) ON CONFLICT(member_id,dimension) DO UPDATE SET updated_time=CURRENT_TIMESTAMP")
             .bind(member_id).bind(dimension.as_str()).execute(&mut *tx).await?;
         // 刪除該使用者在該維度的現有設定

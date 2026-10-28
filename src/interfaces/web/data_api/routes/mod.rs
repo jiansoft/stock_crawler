@@ -103,6 +103,14 @@ pub(crate) fn router() -> Router {
                 .put(handlers::put_portfolio_targets),
         )
         .route(
+            "/portfolio/targets/revisions",
+            axum::routing::get(handlers::list_portfolio_target_revisions),
+        )
+        .route(
+            "/portfolio/targets/revisions/{id}/restore",
+            axum::routing::post(handlers::restore_portfolio_target_revision),
+        )
+        .route(
             "/portfolio/dividend-forecast",
             axum::routing::get(handlers::dividend_forecast),
         )

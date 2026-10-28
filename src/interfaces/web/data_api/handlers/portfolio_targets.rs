@@ -151,7 +151,15 @@ pub(crate) async fn put_portfolio_targets(
     {
         return repository_error(e);
     }
+    saved_targets_response(&repo, member_id, dimension).await
+}
 
+/// 儲存（或還原）後回傳該維度目前的目標配置與現金比例，PUT 與還原共用。
+pub(super) async fn saved_targets_response(
+    repo: &PgPortfolioTargetRepository,
+    member_id: i64,
+    dimension: TargetDimension,
+) -> Response {
     let saved = match repo
         .list_targets(&member_id.to_string(), Some(dimension))
         .await
