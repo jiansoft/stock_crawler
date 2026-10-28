@@ -16,8 +16,8 @@ use rust_decimal::Decimal;
 use crate::{
     core::declare,
     infra::crawler::{
-        StockInfo, biggo::BigGo, cmoney::CMoney, cnyes::CnYes, fugle::Fugle, megatime::PcHome,
-        nstock::NStock, yahoo::Yahoo,
+        StockInfo, biggo::BigGo, cmoney::CMoney, cnyes::CnYes, fugle::Fugle, nstock::NStock,
+        yahoo::Yahoo,
     },
 };
 
@@ -125,11 +125,6 @@ define_stock_price_fetcher!(
     CnYes
 );
 define_stock_price_fetcher!(
-    "將 PcHome 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
-    fetch_pchome_price,
-    PcHome
-);
-define_stock_price_fetcher!(
     "將 BigGo 的 `StockInfo::get_stock_price` 包裝成可放入最新成交價站點池的函式指標。",
     fetch_biggo_price,
     BigGo
@@ -156,11 +151,6 @@ define_stock_quotes_fetcher!(
     CnYes
 );
 define_stock_quotes_fetcher!(
-    "將 PcHome 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
-    fetch_pchome_quotes,
-    PcHome
-);
-define_stock_quotes_fetcher!(
     "將 BigGo 的 `StockInfo::get_stock_quotes` 包裝成可放入完整報價站點池的函式指標。",
     fetch_biggo_quotes,
     BigGo
@@ -177,7 +167,6 @@ define_stock_quotes_fetcher!(
 /// - `NStock`
 /// - `CMoney`
 /// - `CnYes`
-/// - `PcHome`
 /// - `BigGo`
 ///
 /// `BigGo` 於 2026-10-05 加入：盤中 09:48～09:58 每 30 秒比對 12 檔（上市、上櫃、ETF）共 220 筆，
@@ -190,7 +179,11 @@ define_stock_quotes_fetcher!(
 /// `Winvest` 也已移除：2026-09 改版後只剩 `QueryRecentDailyPrice`（盤後日 K，官方註明未取得
 /// 盤中資訊授權）。2026-09-30 盤中 09:17／11:03／13:12 三次實測 10 檔，`KlineDatetime` 全是
 /// 前一交易日、價格停在昨收；爬蟲的「非今日 K 線」防呆雖會擋下，但每天仍白打上萬次請求。
-pub(super) const ALL_PRICE_SITES: [PriceSite; 7] = [
+///
+/// `PcHome` 於 2026-10-28 移除：10-27 起盤中大量回 500／502／503 與連線錯誤（收盤後又正常），
+/// 10-28 收盤統計 275 次失敗 215 次（78.2%）、熔斷 80 次、p50 6.1 秒，其餘站點失敗率 0～3%。
+/// 爬蟲（`megatime::PcHome`）保留，站點恢復穩定後可再加回。
+pub(super) const ALL_PRICE_SITES: [PriceSite; 6] = [
     PriceSite {
         name: "Yahoo",
         fetch: fetch_yahoo_price,
@@ -210,10 +203,6 @@ pub(super) const ALL_PRICE_SITES: [PriceSite; 7] = [
     PriceSite {
         name: "CnYes",
         fetch: fetch_cnyes_price,
-    },
-    PriceSite {
-        name: "PcHome",
-        fetch: fetch_pchome_price,
     },
     PriceSite {
         name: "BigGo",
@@ -243,12 +232,11 @@ pub(super) static BACKUP_PRICE_SITES: Lazy<Vec<PriceSite>> = Lazy::new(|| {
 /// - `NStock`
 /// - `CMoney`
 /// - `CnYes`
-/// - `PcHome`
 /// - `BigGo`（加入原因同 [`ALL_PRICE_SITES`]）
 ///
 /// `Yuanta` 已從此站點池移除，因為其資料目前觀察到為前一交易日資料，
-/// 不適合用作即時完整報價來源。`Winvest` 移除原因同 [`ALL_PRICE_SITES`]。
-pub(super) const ALL_QUOTE_SITES: [QuoteSite; 6] = [
+/// 不適合用作即時完整報價來源。`Winvest`、`PcHome` 移除原因同 [`ALL_PRICE_SITES`]。
+pub(super) const ALL_QUOTE_SITES: [QuoteSite; 5] = [
     QuoteSite {
         name: "Fugle",
         fetch: fetch_fugle_quotes,
@@ -264,10 +252,6 @@ pub(super) const ALL_QUOTE_SITES: [QuoteSite; 6] = [
     QuoteSite {
         name: "CnYes",
         fetch: fetch_cnyes_quotes,
-    },
-    QuoteSite {
-        name: "PcHome",
-        fetch: fetch_pchome_quotes,
     },
     QuoteSite {
         name: "BigGo",
@@ -286,9 +270,6 @@ mod tests {
             .iter()
             .map(|site| site.name)
             .collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            ["Fugle", "NStock", "CMoney", "CnYes", "PcHome", "BigGo"]
-        );
+        assert_eq!(names, ["Fugle", "NStock", "CMoney", "CnYes", "BigGo"]);
     }
 }

@@ -74,7 +74,7 @@ fn screen_inconsistent_rows_zeroes_only_bad_rows() {
         consistent_snapshot("79972"),
     ]);
 
-    let removed = screen_inconsistent_rows(&mut result, |_| None).unwrap();
+    let removed = screen_inconsistent_rows(&mut result, |_| RowBaseline::default()).unwrap();
 
     assert_eq!(removed, 1);
     assert_eq!(result.snapshots.len(), 3);
@@ -97,7 +97,7 @@ fn screen_inconsistent_rows_rejects_dirty_batch() {
         .collect();
     let mut result = fetch_result_with(snapshots);
 
-    let error = screen_inconsistent_rows(&mut result, |_| None).unwrap_err();
+    let error = screen_inconsistent_rows(&mut result, |_| RowBaseline::default()).unwrap_err();
 
     let dirty = error.downcast_ref::<DirtyBatch>().expect("DirtyBatch 錯誤");
     assert_eq!(dirty.inconsistent, 21);
@@ -119,7 +119,10 @@ fn screen_inconsistent_rows_tolerates_up_to_limit() {
         .collect();
     let mut result = fetch_result_with(snapshots);
 
-    assert_eq!(screen_inconsistent_rows(&mut result, |_| None).unwrap(), 20);
+    assert_eq!(
+        screen_inconsistent_rows(&mut result, |_| RowBaseline::default()).unwrap(),
+        20
+    );
 }
 
 /// 真實頁面形狀的 fixture 不應有任何列被判為矛盾。
@@ -128,7 +131,10 @@ fn screen_inconsistent_rows_keeps_fixture_page_intact() {
     const FIXTURE: &str = include_str!("../../testdata/rank_page.html");
     let mut result = parse_rank_html(FIXTURE).unwrap();
 
-    assert_eq!(screen_inconsistent_rows(&mut result, |_| None).unwrap(), 0);
+    assert_eq!(
+        screen_inconsistent_rows(&mut result, |_| RowBaseline::default()).unwrap(),
+        0
+    );
     assert!(result.snapshots.values().all(|s| s.price > Decimal::ZERO));
 }
 
@@ -140,7 +146,7 @@ fn screen_inconsistent_rows_zeroes_repeated_bad_row() {
         bad.price = dec!(33);
         let mut result = fetch_result_with(vec![bad, consistent_snapshot("79976")]);
 
-        let removed = screen_inconsistent_rows(&mut result, |_| None).unwrap();
+        let removed = screen_inconsistent_rows(&mut result, |_| RowBaseline::default()).unwrap();
 
         assert_eq!(removed, 1);
         assert_eq!(result.snapshots["79975"].price, Decimal::ZERO);
@@ -157,4 +163,80 @@ fn screen_rank_page_keeps_fixture_rows() {
 
     assert!(!result.snapshots.is_empty());
     assert!(result.snapshots.values().all(|s| s.price > Decimal::ZERO));
+}
+
+/// 以快取昨收建立比對基準。
+fn baseline(last_close: Decimal) -> RowBaseline {
+    RowBaseline {
+        last_close: Some(last_close),
+        reference_price: None,
+    }
+}
+
+/// 整列換成別檔（10-28 09:21 實例：4979 列上的昨收約 89，快取昨收 467.5）：欄位彼此吻合，
+/// 只有和快取昨收比對才抓得到；差距在 25% 以內（例如快取昨收舊了兩天）不算。
+#[test]
+fn misaligned_row_detects_rows_from_another_stock() {
+    let row = consistent_snapshot("4979");
+    assert_eq!(row_inconsistency(&row, None), None);
+    assert!(misaligned_row(&row, baseline(dec!(467.5))));
+    assert!(misaligned_row(&row, baseline(dec!(45))));
+
+    // 昨收一致或差距在 25% 以內：不是別檔。
+    assert!(!misaligned_row(&row, baseline(dec!(75.4))));
+    assert!(!misaligned_row(&row, baseline(dec!(62))));
+    assert!(!misaligned_row(&row, baseline(dec!(93))));
+
+    // 除權息當天列上的昨收是參考價，等於參考價就不算。
+    let ex_rights = RowBaseline {
+        last_close: Some(dec!(120)),
+        reference_price: Some(dec!(75.4)),
+    };
+    assert!(!misaligned_row(&row, ex_rights));
+
+    // 沒有快取昨收（新股、興櫃）、列上沒有昨收或尚未成交時不檢查。
+    assert!(!misaligned_row(&row, RowBaseline::default()));
+    let mut no_close = consistent_snapshot("4979");
+    no_close.last_close = Decimal::ZERO;
+    assert!(!misaligned_row(&no_close, baseline(dec!(467.5))));
+    let mut untraded = consistent_snapshot("4979");
+    untraded.price = Decimal::ZERO;
+    assert!(!misaligned_row(&untraded, baseline(dec!(467.5))));
+}
+
+/// 一兩列別檔只剔除那幾列；3 列以上代表整頁錯位，整批捨棄（即使遠低於 max(20, 2%)）。
+#[test]
+fn screen_inconsistent_rows_rejects_misaligned_batch() {
+    let snapshots = || {
+        (0..30)
+            .map(|i| consistent_snapshot(&format!("7990{i:02}")))
+            .collect()
+    };
+    let shifted = |count: usize| {
+        move |symbol: &str| {
+            let index: usize = symbol[4..].parse().unwrap();
+            baseline(if index < count { dec!(300) } else { dec!(75.4) })
+        }
+    };
+
+    let mut result = fetch_result_with(snapshots());
+    assert_eq!(
+        screen_inconsistent_rows(&mut result, shifted(2)).unwrap(),
+        2
+    );
+    assert_eq!(result.snapshots["799000"].price, Decimal::ZERO);
+    assert_eq!(result.snapshots["799002"].price, dec!(78.5));
+
+    let mut result = fetch_result_with(snapshots());
+    let error = screen_inconsistent_rows(&mut result, shifted(3)).unwrap_err();
+    let dirty = error.downcast_ref::<DirtyBatch>().expect("DirtyBatch 錯誤");
+    assert_eq!(
+        (dirty.inconsistent, dirty.misaligned, dirty.total),
+        (3, 3, 30)
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("3/30 列前後矛盾（其中 3 列疑似別檔）")
+    );
 }

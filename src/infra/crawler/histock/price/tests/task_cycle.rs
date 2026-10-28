@@ -196,6 +196,7 @@ fn failure_level_escalates_after_consecutive_failures() {
 fn report_cycle_error_marks_dirty_batch_as_seen_today() {
     let dirty = anyhow::Error::from(DirtyBatch {
         inconsistent: 30,
+        misaligned: 0,
         total: 100,
     });
 

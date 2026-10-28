@@ -207,6 +207,24 @@ fn is_valid_price_relaxes_tolerance_for_emerging_stocks() {
     assert!(!share.is_valid_price("4925", dec!(1.2), dec!(117.09)));
 }
 
+/// 比對「是不是這一檔」用的昨收：上市櫃回資料庫收盤價，興櫃（昨收是前一日加權均價）與沒有資料的回 None。
+#[test]
+fn comparable_last_close_skips_emerging_and_missing() {
+    use crate::domain::registry::entity::Stock;
+
+    let share = Share::new();
+    seed_db_last_close(&share, "2330", dec!(1450));
+    seed_db_last_close(&share, "2733", dec!(8.61));
+    share.stocks.write().unwrap().insert(
+        "2733".to_string(),
+        Stock::register("2733".to_string(), "維格".to_string(), 5, 1),
+    );
+
+    assert_eq!(share.get_comparable_last_close("2330"), Some(dec!(1450)));
+    assert_eq!(share.get_comparable_last_close("2733"), None);
+    assert_eq!(share.get_comparable_last_close("79967"), None);
+}
+
 /// 2733 維格 2026-10-05：參考價 8.61、成交 14～16，是真實行情不是錯價；
 /// 區間邊界（剛好 3 倍、1/3）算有效，超出才擋。
 #[test]

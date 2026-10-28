@@ -66,11 +66,13 @@ async fn fetch_all_from_rank() -> Result<HiStockFetchResult> {
     screen_rank_page(&body)
 }
 
-/// 解析排行頁並剔除前後矛盾的列；除權息參考價取自全域快取。
+/// 解析排行頁並剔除前後矛盾的列；資料庫昨收與除權息參考價取自全域快取（興櫃不比昨收，
+/// 它的昨收是前一日加權均價，與收盤價常差很多）。
 fn screen_rank_page(body: &str) -> Result<HiStockFetchResult> {
     let mut result = parse::parse_rank_html(body)?;
-    screen::screen_inconsistent_rows(&mut result, |symbol| {
-        SHARE.get_ex_rights_reference_price(symbol)
+    screen::screen_inconsistent_rows(&mut result, |symbol| screen::RowBaseline {
+        last_close: SHARE.get_comparable_last_close(symbol),
+        reference_price: SHARE.get_ex_rights_reference_price(symbol),
     })?;
     Ok(result)
 }

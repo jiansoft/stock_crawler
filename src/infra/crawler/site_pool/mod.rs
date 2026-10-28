@@ -126,7 +126,7 @@ async fn fetch_stock_quotes_from_site_pool(
 /// 從多個遠端站點中輪詢獲取股票的最新成交價。
 ///
 /// 此函數會嘗試預設的站點清單，如果某個站點失敗，會自動嘗試下一個，直到成功或所有站點都失敗為止。
-/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, PcHome, BigGo。
+/// 支援的站點包括：Yahoo, Fugle, NStock, CMoney, CnYes, BigGo。
 /// 實際站點定義集中在 [`ALL_PRICE_SITES`]。
 /// 此函式不再經過 `HiStock`。
 ///
@@ -146,7 +146,7 @@ pub async fn fetch_stock_price_from_remote_site(stock_symbol: &str) -> Result<De
 /// 此函數主要用於 HiStock 已有獨立背景排程時的備援抓價情境，
 /// 避免同一支股票同時由兩套流程對 HiStock 重複請求。
 ///
-/// 支援的站點包括：Fugle, NStock, CMoney, CnYes, PcHome, BigGo。
+/// 支援的站點包括：Fugle, NStock, CMoney, CnYes, BigGo。
 /// 實際站點定義在 [`BACKUP_PRICE_SITES`]：比一般路徑少了 Yahoo，原因見該清單說明。
 ///
 /// # 參數
@@ -173,7 +173,7 @@ pub async fn fetch_stock_price_from_backup_sites_with_source(
 ///
 /// 此函數包含漲跌、漲幅、開盤、最高、最低等詳細資料。
 /// 實作機制與 `fetch_stock_price_from_remote_site` 相同，採用自動備援輪詢。
-/// 支援的站點包括：Fugle, NStock, CMoney, CnYes, PcHome。
+/// 支援的站點包括：Fugle, NStock, CMoney, CnYes, BigGo。
 /// 實際站點定義集中在 [`ALL_QUOTE_SITES`]。
 ///
 /// # 參數
