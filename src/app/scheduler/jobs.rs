@@ -413,7 +413,7 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "主機健康檢查",
             event::host_health::execute,
         ),
-        // 23:30 記一行當日主機健康彙總（fsync 最大耗時、最低可用記憶體、swap 最高使用率、是否降頻）
+        // 23:30 記一行當日主機健康彙總（fsync 最大耗時、最低可用記憶體、swap 最高使用率、目前與開機以來是否降頻、部署期間次數）
         job!(
             normal,
             "0 30 23 * * *",
