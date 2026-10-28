@@ -23,11 +23,14 @@ pub(in crate::interfaces::web::data_api::handlers) async fn fetch_benchmark(
     by_year: bool,
 ) -> Result<Benchmark, sqlx::Error> {
     let pool = database::get_connection();
+    // 不快取成具名 prepared statement：重複執行後 PostgreSQL 改用 generic plan 時，`$3 = 0 OR` 的
+    // 市場條件剪不掉（2026-10-28 正式庫實測三年依年度 custom 2.1 秒、generic 5.7 秒）。
     if !by_year {
         let total = sqlx::query_as(BENCHMARK_SQL)
             .bind(from)
             .bind(to)
             .bind(market_id)
+            .persistent(false)
             .fetch_one(pool)
             .await?;
         return Ok(Benchmark { total, years: None });
@@ -36,6 +39,7 @@ pub(in crate::interfaces::web::data_api::handlers) async fn fetch_benchmark(
         .bind(from)
         .bind(to)
         .bind(market_id)
+        .persistent(false)
         .fetch_all(pool)
         .await?;
     Ok(split_benchmark(rows))

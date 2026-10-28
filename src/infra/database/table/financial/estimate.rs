@@ -216,6 +216,10 @@ async fn run_estimate_upsert(
         .bind(security_code)
         .bind(bucket_count)
         .bind(bucket)
+        // 不快取成具名 prepared statement：同一連線執行約 5 次後 PostgreSQL 會改用 generic plan，
+        // 代號與分桶條件剪不掉（2026-10-28 正式庫實測一桶 custom 1.5 秒、generic 90 秒）。每天兩次
+        // 的排程之間連線早已回收，但回補多個日期時同一連線會連續執行。每次重新規劃只多約 10 ms。
+        .persistent(false)
         .execute(pool)
         .await
 }
