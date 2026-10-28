@@ -241,3 +241,46 @@ fn openapi_dividend_forecast_schema_pins_field_names() {
         serde_json::json!(["announced", "amount_announced", "estimated"])
     );
 }
+
+/// 持股分級 path 的契約：`date` 參數、分級項目欄位，以及籌碼週摘要的 400 張欄位可為 null。
+#[test]
+fn openapi_holder_levels_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/stocks/{symbol}/holder-levels");
+    assert_endpoint_responses(operation, "HolderLevelsResponse", true);
+    assert!(
+        query_schema(operation, "date")
+            .to_string()
+            .contains("string")
+    );
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["HolderLevelsResponse"]["properties"];
+    for field in ["stock_symbol", "date"] {
+        assert_eq!(response[field]["type"], "string", "{field}");
+    }
+    assert_eq!(response["levels"]["type"], "array");
+    assert_eq!(
+        response["levels"]["items"]["$ref"],
+        "#/components/schemas/HolderLevelItem"
+    );
+    for field in ["adjustment", "total"] {
+        let schema = response[field].to_string();
+        assert!(
+            schema.contains("HolderLevelItem") && schema.contains("null"),
+            "{field}: {schema}"
+        );
+    }
+    let item = &schemas["HolderLevelItem"]["properties"];
+    for field in ["level", "holders", "shares"] {
+        assert_eq!(item[field]["type"], "integer", "{field}");
+    }
+    assert_eq!(item["label"]["type"], "string");
+    assert!(item["percent"].to_string().contains("null"));
+
+    let week = &schemas["HolderWeek"]["properties"];
+    let holders_400 = week["holders_400"].to_string();
+    assert!(holders_400.contains("integer") && holders_400.contains("null"));
+    let percent_400 = week["percent_400"].to_string();
+    assert!(percent_400.contains("number") && percent_400.contains("null"));
+}

@@ -19,7 +19,7 @@ use crate::interfaces::web::data_api::dto::{
     InsiderSummary,
 };
 
-/// 千張大戶回傳的週數。
+/// 千張大戶與 400 張以上回傳的週數。
 const HOLDER_WEEKS: i64 = 8;
 
 /// `chip_daily` 的一列，附當天 `broker_flow` 的主力買賣超（沒有為 `None`）。
@@ -72,6 +72,8 @@ struct HolderRow {
     major_holders: i64,
     major_percent: Decimal,
     total_holders: i64,
+    holders_400: Option<i64>,
+    percent_400: Option<Decimal>,
 }
 
 /// `insider_holding` 最新月份的合計。
@@ -145,7 +147,7 @@ pub(crate) async fn stock_chip(
     };
 
     let holders: Vec<HolderRow> = match sqlx::query_as(
-        r#"SELECT "date", major_holders, major_percent, total_holders FROM holder_distribution WHERE stock_symbol = $1 ORDER BY "date" DESC LIMIT $2"#,
+        r#"SELECT "date", major_holders, major_percent, total_holders, holders_400, percent_400 FROM holder_distribution WHERE stock_symbol = $1 ORDER BY "date" DESC LIMIT $2"#,
     )
     .bind(&symbol)
     .bind(HOLDER_WEEKS)
@@ -200,6 +202,8 @@ pub(crate) async fn stock_chip(
                 major_holders: row.major_holders,
                 major_percent: decimal_to_f64(Some(row.major_percent)),
                 total_holders: row.total_holders,
+                holders_400: row.holders_400,
+                percent_400: decimal_to_f64(row.percent_400),
             })
             .collect(),
         insider: insider.map(insider_summary),

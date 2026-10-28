@@ -64,6 +64,47 @@ pub(crate) struct HolderWeek {
     pub(crate) major_percent: Option<f64>,
     /// 集保股東總人數。
     pub(crate) total_holders: i64,
+    /// 400 張以上（400,001 股以上）人數；沒有分級資料的週為 `null`。
+    pub(crate) holders_400: Option<i64>,
+    /// 400 張以上持股佔集保庫存比例（%）；沒有分級資料的週為 `null`。
+    pub(crate) percent_400: Option<f64>,
+}
+
+/// 集保股權分散級距 endpoint 的 query string。
+#[derive(Debug, Deserialize, IntoParams)]
+pub(crate) struct HolderLevelsParams {
+    /// 資料日期，格式 `YYYY-MM-DD`；取這天（含）以前最近的一週。未提供時取最新一週。
+    pub(crate) date: Option<String>,
+}
+
+/// 單一持股分級的人數、股數與比例。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct HolderLevelItem {
+    /// 集保分級代碼：1～15 依持股數由小到大，16 差異數調整，17 合計。
+    pub(crate) level: i16,
+    /// 分級名稱，例如 `1～999 股`、`1,000,001 股以上`。
+    pub(crate) label: String,
+    /// 人數。
+    pub(crate) holders: i64,
+    /// 股數。
+    pub(crate) shares: i64,
+    /// 占集保庫存數比例（%）。
+    pub(crate) percent: Option<f64>,
+}
+
+/// 單一股票單週的集保股權分散全部持股分級。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct HolderLevelsResponse {
+    /// 股票代號。
+    pub(crate) stock_symbol: String,
+    /// 資料日期（集保的週資料日），格式 `YYYY-MM-DD`。
+    pub(crate) date: String,
+    /// 1～15 級，依持股數由小到大。
+    pub(crate) levels: Vec<HolderLevelItem>,
+    /// 差異數調整（16）；該週沒有時為 `null`。
+    pub(crate) adjustment: Option<HolderLevelItem>,
+    /// 合計（17）；該週沒有時為 `null`。
+    pub(crate) total: Option<HolderLevelItem>,
 }
 
 /// 最新月份的董監事持股與設質合計。
@@ -124,7 +165,7 @@ pub(crate) struct ChipResponse {
     pub(crate) daily: Vec<ChipDay>,
     /// 外資、投信連續買賣超天數（只在回傳的交易日內計算）。
     pub(crate) streak: ChipStreak,
-    /// 最近 8 週的千張大戶資料，由新到舊。
+    /// 最近 8 週的千張大戶與 400 張以上資料，由新到舊。
     pub(crate) holder_distribution: Vec<HolderWeek>,
     /// 最新月份的董監持股與設質；沒有資料時為 `null`。
     pub(crate) insider: Option<InsiderSummary>,

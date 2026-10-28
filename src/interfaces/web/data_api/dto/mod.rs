@@ -47,8 +47,8 @@ pub(super) use cagr::{
     CagrRankingParams, CagrRankingResponse, CagrSummary, CagrSymbolParams, CagrSymbolResponse,
 };
 pub(super) use chip::{
-    BrokerFlowDay, BrokerNet, ChipDay, ChipParams, ChipResponse, ChipStreak, HolderWeek,
-    InsiderSummary,
+    BrokerFlowDay, BrokerNet, ChipDay, ChipParams, ChipResponse, ChipStreak, HolderLevelItem,
+    HolderLevelsParams, HolderLevelsResponse, HolderWeek, InsiderSummary,
 };
 pub(super) use dividend_fill::{
     DividendFillEvent, DividendFillParams, DividendFillResponse, DividendFillSummary,

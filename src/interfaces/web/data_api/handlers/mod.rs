@@ -19,6 +19,7 @@ pub(super) use etf_tracking::{__path_etf_tracking, EtfTrackingResponse, etf_trac
 mod etf_holding_history;
 mod financial_health;
 mod financial_reports;
+mod holder_levels;
 mod industries;
 mod industry_flow;
 mod industry_strength;
@@ -76,6 +77,7 @@ pub(super) use etf::{
 pub(super) use etf_holding_history::{__path_etf_holding_history, etf_holding_history};
 pub(super) use financial_health::{__path_financial_health, financial_health};
 pub(super) use financial_reports::{__path_financial_reports, financial_reports};
+pub(super) use holder_levels::{__path_holder_levels, holder_levels};
 pub(super) use industries::{__path_industry_performance, industry_performance};
 pub(super) use industry_flow::{__path_industry_flow, industry_flow};
 pub(super) use industry_strength::{__path_industry_strength, industry_strength};
