@@ -42,13 +42,17 @@ struct EpsDataQuarter {
     pub cumulative_eps: String,
 }
 
+/// 單檔的季度與年度 EPS。
+///
+/// 沒有資料的股票（例如 2026-10-29 的 3718）API 回 `{"data":[{}]}`，兩個欄位都缺；
+/// 視為沒有資料（空清單），不當成格式錯誤。
 #[derive(Serialize, Deserialize, Debug)]
 struct EpsData {
     /*#[serde(rename = "股票代號")]
     pub stock_symbol: String,*/
-    #[serde(rename = "季度EPS")]
+    #[serde(rename = "季度EPS", default)]
     pub quarters: Vec<EpsDataQuarter>,
-    #[serde(rename = "年度EPS")]
+    #[serde(rename = "年度EPS", default)]
     pub years: Vec<EpsDataYear>,
 }
 
@@ -289,6 +293,18 @@ mod tests {
 
         // Keyable 的鍵格式順帶驗證（快取層以此當 Redis/記憶體鍵）。
         assert_eq!(eps.quarters[0].key(), "2330-2023-Q1");
+    }
+
+    /// 沒有資料的股票回 `{"data":[{}]}`（2026-10-29 的 3718）：視為沒有季度與年度資料，不是格式錯誤。
+    #[test]
+    fn empty_data_object_means_no_eps() {
+        for body in [r#"{"data":[{}]}"#, r#"{"data":[]}"#] {
+            let res: EpsResponse = serde_json::from_str(body).expect("空資料應可反序列化");
+            let eps = parse_eps_response(res, "3718");
+            assert!(eps.quarters.is_empty() && eps.years.is_empty(), "{body}");
+        }
+        // 欄位型別不符仍是錯誤（站方改版時要看得到）。
+        assert!(serde_json::from_str::<EpsResponse>(r#"{"data":[{"季度EPS":"x"}]}"#).is_err());
     }
 
     #[tokio::test]
