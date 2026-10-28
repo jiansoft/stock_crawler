@@ -181,7 +181,7 @@ impl PostgresSQL {
             .max_connections(20) // 個人專案降低連接數
             .min_connections(2)
             .acquire_timeout(Duration::from_secs(5));
-        Self::build(pool_options, SLOW_STATEMENT_THRESHOLD, None)
+        Self::build(pool_options, SLOW_STATEMENT_THRESHOLD, None, false)
     }
 
     /// 建立 Data API 專用連線池：平時不保留連線，每條連線的 session 預設帶 `statement_timeout`。
@@ -198,7 +198,7 @@ impl PostgresSQL {
             .max_connections(max)
             .min_connections(0)
             .acquire_timeout(Duration::from_secs(acquire));
-        Self::build(pool_options, slow, Some(budget.statement_timeout()))
+        Self::build(pool_options, slow, Some(budget.statement_timeout()), true)
     }
 
     /// 建立全市場批次查詢專用的連線池，見 [`get_batch_connection`]。
@@ -210,14 +210,22 @@ impl PostgresSQL {
             .max_connections(BATCH_MAX_CONNECTIONS)
             .min_connections(0)
             .acquire_timeout(Duration::from_secs(60));
-        Self::build(pool_options, BATCH_SLOW_STATEMENT_THRESHOLD, None)
+        Self::build(pool_options, BATCH_SLOW_STATEMENT_THRESHOLD, None, true)
     }
 
     /// 依連線數設定與慢查詢門檻建立連線池；兩個連線池共用連線參數與測試防護。
+    ///
+    /// `force_custom_plans` 為 `true` 時 session 預設 `plan_cache_mode = force_custom_plan`：
+    /// sqlx 把查詢快取成具名 prepared statement，同一連線執行約 5 次後 PostgreSQL 可能改用
+    /// generic plan，`$N IS NULL OR …` 的可選條件剪不掉（2026-10-28 正式庫實測估價一桶
+    /// 1.5 秒 → 90 秒、訊號績效 3.4 秒 → 56 秒）。Data API 與批次池跑的都是數十毫秒到數秒的
+    /// 分析查詢，每次重新規劃的成本可以忽略；一般連線池以爬蟲的小查詢為主，臨時庫 pgbench
+    /// 量到 upsert 少 16%、單筆 SELECT 少 46% 的 tps，所以維持預設（`auto`）。
     fn build(
         pool_options: PgPoolOptions,
         slow_statement_threshold: Duration,
         statement_timeout: Option<Duration>,
+        force_custom_plans: bool,
     ) -> PostgresSQL {
         // 逐欄設定連線參數；application_name 方便在 pg_stat_activity 識別本程式的連線。
         let options = PgConnectOptions::new()
@@ -234,6 +242,11 @@ impl PostgresSQL {
                 options.options([("statement_timeout", timeout.as_millis().to_string())])
             }
             None => options,
+        };
+        let options = if force_custom_plans {
+            options.options([("plan_cache_mode", "force_custom_plan")])
+        } else {
+            options
         };
 
         #[allow(unused_mut)] // 測試組建（cfg(test)）會再覆寫 pool 選項
@@ -458,40 +471,4 @@ mod test_pool_guard {
 }
 
 #[cfg(test)]
-mod budget_tests {
-    use super::*;
-
-    /// 不在 Data API 請求內時沿用全域連線池；作用範圍內改用帶 statement_timeout 的連線池。
-    #[tokio::test]
-    #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
-    async fn query_budget_routes_to_pools_with_statement_timeout() {
-        dotenvy::dotenv().ok();
-        let show = || async {
-            let timeout: String = sqlx::query_scalar("SHOW statement_timeout")
-                .fetch_one(get_connection())
-                .await
-                .unwrap();
-            let batch: String = sqlx::query_scalar("SHOW statement_timeout")
-                .fetch_one(get_batch_connection())
-                .await
-                .unwrap();
-            (timeout, batch)
-        };
-        assert_eq!(current_query_budget(), None);
-        let (global, _) = show().await;
-        assert_ne!(global, "6s");
-        let (general, batch) = with_query_budget(QueryBudget::General, show()).await;
-        assert_eq!((general.as_str(), batch.as_str()), ("6s", "25s"));
-        let (heavy, batch) = with_query_budget(QueryBudget::Heavy, show()).await;
-        assert_eq!((heavy.as_str(), batch.as_str()), ("25s", "25s"));
-        // 超過上限的 statement 被資料庫取消。
-        let err = with_query_budget(QueryBudget::General, async {
-            sqlx::query("SELECT pg_sleep(7)")
-                .execute(get_connection())
-                .await
-        })
-        .await
-        .expect_err("6 秒上限應取消查詢");
-        assert!(err.to_string().contains("statement timeout"), "{err}");
-    }
-}
+mod budget_tests;
