@@ -11,6 +11,11 @@ pub(super) const LATEST_RS_DATE_SQL: &str = r#"
 SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= $1
 "#;
 
+/// 集保股權分散最早的資料週；設 `min_major_change` 時用來檢查起日。
+pub(super) const FIRST_HOLDER_WEEK_SQL: &str = r#"
+SELECT MIN("date") FROM holder_distribution
+"#;
+
 /// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期候選檔數、
 /// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類、`$11` 大盤濾網均線天數
 /// （`NULL` 為不濾）、`$12` 續抱的相對強度門檻（`NULL` 為不設）、`$13` 市場廣度門檻（%，`NULL` 為不濾）、
@@ -21,7 +26,8 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 /// 利益率下限、是否只選三率三升、負債比上限）、`$28` 是否只選最新月營收創歷史新高、`$29` 最新月營收
 /// 下限（千元，`NULL` 為不篩）、`$30` 是否只選近四季自由現金流為正、`$31`／`$32` 換股當天本益比與股價
 /// 淨值比上限（倍，`NULL` 為不篩）、`$33` 大盤估值濾網（市場本益比中位數上限，`NULL` 為不濾）、`$34` 相對
-/// 估值濾網（市場本益比中位數在近 5 年的百分位上限，`NULL` 為不濾）；籌碼版另有 `$35`／`$36`。
+/// 估值濾網（市場本益比中位數在近 5 年的百分位上限，`NULL` 為不濾）、`$35` 千張大戶持股比例變化下限
+/// （百分點，`NULL` 為不篩）、`$36` 變化的回看週數；籌碼版另有 `$37`／`$38`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號；往後多讀 400 個日曆天，
 ///   計算最後幾期是否在迄日（`$2`）前完成出場）。
@@ -39,6 +45,10 @@ SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= 
 ///   `/stocks/screen`）；最新一筆早於 `revenue_ord` 超過 2 個月視為沒有資料。`fs`：已公布的最近一季財報，
 ///   以法定期限的隔天起才使用（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1），距換股日超過 3 季不用。兩者都
 ///   只在有設對應門檻時才查。
+/// - `holder_weeks`／`holder_rebal`：只在設 `$35` 時才算。`holder_weeks` 是 `holder_distribution` 的全部資料週
+///   依日期編號；`holder_rebal` 為每個換股日取日期早於換股日的最近一週（集保週五的資料週六才公布，換股
+///   當天還看不到），以及它往前第 `$36` 週。最近一週距換股日超過 14 天時該期沒有大戶資料。`filtered` 以
+///   兩週的 `holder_distribution` 千張比例相減，任一週沒有該股資料就不會通過。
 /// - `revenue_records`：每檔每個月的營收是否高於之前所有月份（之前至少 12 個月），以視窗函式一次算完全表，
 ///   `filtered` 以 `rv` 的最新一月（已公布）對上；只在 `$28` 時才算（逐期逐檔掃歷史要多 5 秒以上）。
 /// - `filtered` 的 `ym`：已公布的最近一季 Yahoo 單季損益表（公布日規則同 `fs`）的毛利率、營業利益率，
@@ -104,6 +114,19 @@ rebal AS (
         WHERE date >= $1 AND date <= $2
     ) AS numbered
     WHERE i >= $14::int AND (i - $14::int) % $4::int = 0
+),
+holder_weeks AS (
+    SELECT "date", ROW_NUMBER() OVER (ORDER BY "date") AS wk
+    FROM (SELECT DISTINCT "date" FROM holder_distribution WHERE $35::float8 IS NOT NULL) AS weeks
+),
+holder_rebal AS (
+    SELECT rb.date, cw."date" AS cur_week, bw."date" AS base_week
+    FROM rebal rb
+    CROSS JOIN LATERAL (
+        SELECT "date", wk FROM holder_weeks WHERE "date" < rb.date ORDER BY "date" DESC LIMIT 1
+    ) cw
+    JOIN holder_weeks bw ON bw.wk = cw.wk - $36::int
+    WHERE cw."date" >= rb.date - 14
 ),
 revenue_records AS (
     SELECT "SecurityCode" AS stock_symbol, "Date" AS month,
@@ -294,7 +317,10 @@ filtered AS (
         WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL OR $16::text IN ('pe_ratio', 'pb_ratio'))
           AND q.stock_symbol = u.stock_symbol
           AND q."Date" = u.date
-    ) qv ON TRUE"#,
+    ) qv ON TRUE
+    LEFT JOIN holder_rebal hr ON hr.date = u.date
+    LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
+    LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
             $chip_join,
             r#"
     WHERE ($6::text IS NULL OR si.name = $6)
@@ -321,7 +347,8 @@ filtered AS (
       AND ($29::float8 IS NULL OR rv.monthly_revenue >= $29)
       AND (NOT $30::bool OR cf.free_cash_flow_ttm > 0)
       AND ($31::float8 IS NULL OR qv.pe <= $31)
-      AND ($32::float8 IS NULL OR qv.pb <= $32)"#,
+      AND ($32::float8 IS NULL OR qv.pb <= $32)
+      AND ($35::float8 IS NULL OR (hc.major_percent - hb.major_percent)::float8 >= $35)"#,
             $chip_filter,
             r#"
 ),
@@ -529,7 +556,7 @@ macro_rules! backtest_sql_for {
     };
 }
 
-/// 籌碼版的 CTE 與條件（外資 `$35`、投信 `$36`）。
+/// 籌碼版的 CTE 與條件（外資 `$37`、投信 `$38`）。
 macro_rules! backtest_with_chip_sql_for {
     ($model:ident) => {
         concat!(
@@ -540,7 +567,7 @@ macro_rules! backtest_with_chip_sql_for {
                 $model,
                 "",
                 "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-                "\n      AND ($35::bigint IS NULL OR c.foreign_buy >= $35)\n      AND ($36::bigint IS NULL OR c.trust_buy >= $36)",
+                "\n      AND ($37::bigint IS NULL OR c.foreign_buy >= $37)\n      AND ($38::bigint IS NULL OR c.trust_buy >= $38)",
                 "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
             )
         )
@@ -565,7 +592,7 @@ pub(super) const BACKTEST_NEXT_OPEN_SQL: &str = backtest_sql_for!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$35`）／投信（`$36`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$37`）／投信（`$38`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = backtest_with_chip_sql_for!(close);
 

@@ -305,6 +305,12 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         positive_free_cash_flow: params.positive_free_cash_flow.unwrap_or(false),
         max_pe: params.max_pe,
         max_pb: params.max_pb,
+        min_major_change: params.min_major_change,
+        major_change_weeks: params.min_major_change.map(|_| {
+            params
+                .major_change_weeks
+                .unwrap_or(super::DEFAULT_MAJOR_CHANGE_WEEKS)
+        }),
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
         fee_discount: backtest.fee_discount,

@@ -43,6 +43,40 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     if !within(params.max_pb, 0.0, 1_000.0) {
         return Err("max_pb 必須介於 0 至 1000");
     }
+    if !within(params.min_major_change, -100.0, 100.0) {
+        return Err("min_major_change 必須介於 -100 至 100");
+    }
+    if params
+        .major_change_weeks
+        .is_some_and(|weeks| !(1..=12).contains(&weeks))
+    {
+        return Err("major_change_weeks 必須介於 1 至 12");
+    }
+    Ok(())
+}
+
+/// 設 `min_major_change` 時，起日要晚於大戶資料第一週（`first_week`，正式庫為 2023-07-14）加回看週數，
+/// 第一期才有兩週可比；不足或沒有任何大戶資料時回錯誤訊息，不靜默略過條件。
+pub(super) fn validate_major_change_period(
+    params: &ScreenBacktestParams,
+    from: NaiveDate,
+    first_week: Option<NaiveDate>,
+) -> Result<(), String> {
+    if params.min_major_change.is_none() {
+        return Ok(());
+    }
+    let Some(first_week) = first_week else {
+        return Err("設定 min_major_change 時需要集保大戶資料，但資料庫沒有任何一週".to_owned());
+    };
+    let weeks = params
+        .major_change_weeks
+        .unwrap_or(super::super::DEFAULT_MAJOR_CHANGE_WEEKS);
+    let earliest = first_week + chrono::Duration::weeks(i64::from(weeks));
+    if from <= earliest {
+        return Err(format!(
+            "設定 min_major_change 時 from 必須晚於 {earliest}（集保大戶資料自 {first_week} 起，往後 {weeks} 週才有可比的兩週）"
+        ));
+    }
     Ok(())
 }
 

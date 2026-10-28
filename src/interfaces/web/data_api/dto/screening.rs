@@ -251,6 +251,14 @@ pub(crate) struct StockScreeningParams {
     /// 股價淨值比上限（倍，0–1000），資料規則同 `max_pe`。
     #[param(minimum = 0, maximum = 1000)]
     pub(crate) max_pb: Option<f64>,
+    /// 集保千張大戶持股比例最近一週相對 `major_change_weeks` 週前的變化下限（百分點，-100–100，可為負）。
+    /// 只用日期早於查詢日的週（與回測相同：集保週五的資料週六才公布）；最近一週距查詢日超過 14 天、或兩週
+    /// 任一週沒有該股資料的股票不列入。
+    #[param(minimum = -100, maximum = 100)]
+    pub(crate) min_major_change: Option<f64>,
+    /// `min_major_change` 的回看週數（集保資料週，1–12，預設 4）。
+    #[param(minimum = 1, maximum = 12, default = 4)]
+    pub(crate) major_change_weeks: Option<u8>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,

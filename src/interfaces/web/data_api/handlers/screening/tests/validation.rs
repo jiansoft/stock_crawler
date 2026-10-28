@@ -463,3 +463,34 @@ fn validate_exclude_industry_ids() {
         Some("exclude_industry_ids 不可包含 industry_id 指定的產業")
     );
 }
+
+/// 千張大戶變化：下限 -100～100（可為負）、回看週數 1～12（預設 4），單獨即可成立篩選。
+#[test]
+fn screening_major_change_boundaries() {
+    for (minimum, weeks, ok) in [
+        (Some(-100.0), None, true),
+        (Some(100.0), Some(12), true),
+        (Some(0.5), Some(1), true),
+        (Some(100.1), None, false),
+        (Some(f64::NAN), None, false),
+        (Some(0.0), Some(0), false),
+        (Some(0.0), Some(13), false),
+    ] {
+        let mut params = screening_params();
+        params.min_major_change = minimum;
+        params.major_change_weeks = weeks;
+        let validated = validate_screening_params(&params);
+        assert_eq!(validated.is_ok(), ok, "{minimum:?} {weeks:?}");
+        if let Ok(validated) = validated {
+            assert!(validated.min_major_change.is_some());
+            assert_eq!(validated.major_change_weeks, weeks.unwrap_or(4));
+        }
+    }
+    // 只給回看週數不算篩選條件。
+    let mut weeks_only = screening_params();
+    weeks_only.major_change_weeks = Some(2);
+    assert_eq!(
+        validate_screening_params(&weeks_only).err(),
+        Some("至少需要一個篩選條件")
+    );
+}

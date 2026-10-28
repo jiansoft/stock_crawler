@@ -8,13 +8,16 @@ use super::portfolio::FEE_RATE;
 use super::portfolio::{PeriodCost, Weighting, blend_etf, select_holdings, trading_costs, weigh};
 use super::sql::{
     BACKTEST_NEXT_OPEN_SQL, BACKTEST_SQL, BACKTEST_WITH_CHIP_NEXT_OPEN_SQL, BACKTEST_WITH_CHIP_SQL,
-    LATEST_RS_DATE_SQL,
+    FIRST_HOLDER_WEEK_SQL, LATEST_RS_DATE_SQL,
 };
 use super::stops::{
     BarCache, StopRule, apply_next_open_stops, apply_stops, load_holding_windows, load_open_ratios,
     load_stop_open_ratios, populate_daily_returns,
 };
-use super::validate::{parse_excluded_industries, resolve_backtest_period, validate_fundamentals};
+use super::validate::{
+    parse_excluded_industries, resolve_backtest_period, validate_fundamentals,
+    validate_major_change_period,
+};
 use super::{
     CandidateRow, HOLD_DAYS, MARKET_FILTER_DAYS, MAX_KEEP_RANK, MAX_TRADE_VALUE_MILLION, PeriodRow,
     RANK_BY,
@@ -317,6 +320,15 @@ impl<'a> Backtest<'a> {
             )));
         };
         let from = resolve_backtest_period(from, to).map_err(unprocessable)?;
+        let first_week: Option<NaiveDate> = match params.min_major_change {
+            Some(_) => sqlx::query_scalar(FIRST_HOLDER_WEEK_SQL)
+                .fetch_one(database::get_connection())
+                .await
+                .map_err(|error| Box::new(database_error(error)))?,
+            None => None,
+        };
+        validate_major_change_period(params, from, first_week)
+            .map_err(|message| unprocessable(&message))?;
         let split = parse_optional_date(params.split.as_deref()).map_err(unprocessable)?;
         if split.is_some_and(|split| split <= from || split > to) {
             return Err(unprocessable("split 必須晚於起日、不晚於迄日"));
@@ -449,7 +461,13 @@ impl<'a> Backtest<'a> {
             .bind(params.max_pe)
             .bind(params.max_pb)
             .bind(params.market_filter_max_pe)
-            .bind(params.market_filter_pe_percentile.map(i32::from));
+            .bind(params.market_filter_pe_percentile.map(i32::from))
+            .bind(params.min_major_change)
+            .bind(i32::from(
+                params
+                    .major_change_weeks
+                    .unwrap_or(super::super::DEFAULT_MAJOR_CHANGE_WEEKS),
+            ));
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

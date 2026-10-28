@@ -3,6 +3,7 @@
 //! [`valuation_margins`]（估值上限、三率）、[`revenue_industry`]（營收新高、排除產業）；這裡放共用的參數建構函式。
 
 mod chip_liquidity;
+mod major;
 mod query_plans;
 mod revenue_industry;
 mod validation;
@@ -49,6 +50,8 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_avg_trade_value: None,
         max_pe: None,
         max_pb: None,
+        min_major_change: None,
+        major_change_weeks: None,
         sort_by: None,
         sort_order: None,
         limit: None,
