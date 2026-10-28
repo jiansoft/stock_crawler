@@ -6,6 +6,7 @@ mod derived;
 mod etf;
 mod lagging;
 mod periodic;
+mod slow_queries;
 mod trading;
 
 /// 對 `.env` 的資料庫量一次並印出週報，不發送（唯讀）。

@@ -57,9 +57,11 @@ use crate::{
 };
 
 mod rules;
+mod slow_queries;
 
 // 規則檢核搬到子模組；週報組裝與排程入口留在這裡。
 use self::rules::*;
+use self::slow_queries::{LOG_DIR, slow_query_line, weekly_slow_queries};
 /// 檢查最近幾個日曆日（含今天）。
 const CHECK_DAYS: u64 = 7;
 
@@ -176,7 +178,19 @@ pub async fn build_report(today: NaiveDate) -> Result<String> {
         "資料健康檢查結束: checks={}, problems={problems}",
         checks.len()
     );
-    Ok(report(from, today, &checks))
+    let slow = weekly_slow_queries(std::path::Path::new(LOG_DIR), from, today);
+    Ok(with_slow_queries(report(from, today, &checks), &slow))
+}
+
+/// 週報最後附上本週慢查詢（不算檢查項目，只供參考）。
+fn with_slow_queries(
+    message: String,
+    slow: &crate::core::logging::slow_query::SlowQueryTally,
+) -> String {
+    format!(
+        "{message}\n{}",
+        text::escape_markdown_v2(slow_query_line(slow))
+    )
 }
 
 /// 取得期間內的休市日；任一年度抓取失敗回傳 `None`，交易日完整性改為只看成交檔數。
