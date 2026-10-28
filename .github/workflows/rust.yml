@@ -195,7 +195,7 @@ jobs:
     name: Integration Test
     runs-on: ubuntu-latest
     needs: [build]
-    # 保險絲：正常執行約 10 分鐘（含編譯與 DB 種子）。若測試卡死，
+    # 保險絲：正常執行約 10 分鐘（debug 編譯＋DB 種子＋測試）。若測試卡死，
     # 30 分鐘就讓 job 失敗，不要吃滿 GitHub 預設的 6 小時上限。
     timeout-minutes: 30
 
@@ -290,7 +290,10 @@ jobs:
       # --features integration-tests：明確開啟整合測試（DB/Redis 測試不再 ignored），
       # 搭配上方 service container 提供的 PostgreSQL/Redis 執行完整驗證。
       # 使用 --profile ci 產生整合測試的 JUnit XML 報告至 target/nextest/ci/junit.xml。
-      run: cargo nextest run --release --locked --features integration-tests --test-threads=1 --profile ci
+      # 不加 --release：release 編譯整個 crate（含測試）在 runner 上要 20～26 分鐘，
+      # 會撞到上方 30 分鐘保險絲；debug 編譯只要幾分鐘，Coverage job 也是用 debug
+      # 跑同一批整合測試。release 產物由部署腳本（deploy-armv7.ps1 -Build）編譯。
+      run: cargo nextest run --locked --features integration-tests --test-threads=1 --profile ci
       env:
         RUST_BACKTRACE: 1
         DATABASE_URL: postgres://user:password@localhost:5432/db
