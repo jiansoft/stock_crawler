@@ -126,6 +126,20 @@ WHERE "date" BETWEEN $1 AND $2
   AND (foreign_streak IS NULL OR trust_streak IS NULL OR dealer_streak IS NULL OR total_streak IS NULL)
 "#;
 
+/// 集保全部持股分級的最新資料日與該週列數，以及千張大戶週摘要最新一週 `holders_400` 是空值的檔數。
+///
+/// 兩張表由同一個週六排程寫入；只看各自最新一週，歷史週的 400 張欄位本來就有空值（分級資料
+/// 2023-07 起才有）。兩張表的主鍵都以日期開頭，`max("date")` 走索引。
+pub(super) const HOLDER_LEVEL_HEALTH_SQL: &str = r#"
+WITH latest_level AS (SELECT max("date") AS date FROM holder_distribution_level),
+     latest_holder AS (SELECT max("date") AS date FROM holder_distribution)
+SELECT
+    (SELECT date FROM latest_level),
+    (SELECT count(*) FROM holder_distribution_level l JOIN latest_level m ON l."date" = m.date),
+    (SELECT count(*) FROM holder_distribution h JOIN latest_holder m ON h."date" = m.date
+     WHERE h.holders_400 IS NULL)
+"#;
+
 /// 近五年（不含今年）發放、除權息日仍是「尚未公布」的股利列數。
 ///
 /// 更早的佔位列（1990 年代的配股）交易所已查不到實際日期，列出來也無從處理。

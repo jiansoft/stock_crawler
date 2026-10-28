@@ -79,6 +79,12 @@ pub struct DataHealthSnapshot {
     pub latest_revenue_month: Option<i64>,
     /// 集保千張大戶週摘要（`holder_distribution`）的最新資料日；沒有資料時為 `None`。
     pub latest_holder_week: Option<NaiveDate>,
+    /// 集保全部持股分級（`holder_distribution_level`）的最新資料日；沒有資料時為 `None`。
+    pub latest_holder_level_week: Option<NaiveDate>,
+    /// `holder_distribution_level` 最新一週的列數（每檔 17 列：15 級、差異數調整與合計）。
+    pub holder_level_rows: i64,
+    /// `holder_distribution` 最新一週 400 張以上人數（`holders_400`）是空值的檔數。
+    pub holders_400_missing: i64,
     /// 董監持股與設質（`insider_holding`）的最新月份（該月 1 日）；沒有資料時為 `None`。
     pub latest_insider_month: Option<NaiveDate>,
     /// 檢查期間內每個交易日、每個市場的本益比與股價淨值比為 0 的列數。
