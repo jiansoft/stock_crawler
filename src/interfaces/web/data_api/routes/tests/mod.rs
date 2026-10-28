@@ -27,6 +27,7 @@ mod phase1;
 mod phase2_3;
 mod phase4;
 mod portfolio;
+mod portfolio_holdings;
 mod portfolio_rebalance;
 mod portfolio_target_revisions;
 mod rankings;
