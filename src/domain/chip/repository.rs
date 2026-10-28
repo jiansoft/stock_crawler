@@ -7,6 +7,27 @@ use super::entity::{
     InstitutionalNet, MarginRecord,
 };
 
+/// 最近幾個集保資料週的週摘要。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecentHolderWeeks {
+    /// 全表的資料日期，由新到舊；`dates[0]` 是最新一週。
+    pub dates: Vec<NaiveDate>,
+    /// 指定代號在這些日期的週摘要，依代號、日期由新到舊排列；某週沒有資料的代號就沒有那一列。
+    pub records: Vec<HolderDistributionRecord>,
+}
+
+/// 集保股權分散歷史的讀取合約。
+#[async_trait]
+pub trait HolderHistoryRepository: Send + Sync {
+    /// 讀取 `as_of`（含）以前最近 `weeks` 個資料週，以及 `symbols` 在這幾週的週摘要。
+    async fn recent_holder_weeks(
+        &self,
+        symbols: &[String],
+        as_of: NaiveDate,
+        weeks: i64,
+    ) -> Result<RecentHolderWeeks>;
+}
+
 /// 籌碼資料的倉儲合約。各方法回傳實際新增或變更的列數，內容相同的重送不算。
 #[async_trait]
 pub trait ChipRepository: Send + Sync {

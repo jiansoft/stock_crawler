@@ -303,3 +303,63 @@ async fn refresh_streaks_counts_runs_and_resumes_from_previous_row() {
 
     cleanup().await;
 }
+
+/// 最近幾個資料週只看 `as_of`（含）以前，依代號、日期由新到舊；沒有代號時只回資料週。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn reads_recent_holder_weeks() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 reads_recent_holder_weeks：無資料庫連接");
+        return;
+    }
+    cleanup().await;
+    let repo = PgChipRepository::new();
+    let friday = |month, day| NaiveDate::from_ymd_opt(2019, month, day).expect("日期應合法");
+    let records: Vec<HolderDistributionRecord> = [
+        (friday(3, 8), 10),
+        (friday(3, 15), 11),
+        (friday(3, 22), 12),
+        (friday(3, 29), 13),
+        (friday(4, 5), 14),
+    ]
+    .into_iter()
+    .map(|(date, major_holders)| HolderDistributionRecord {
+        date,
+        stock_symbol: FAKE.to_string(),
+        major_holders,
+        major_percent: dec!(70.5),
+        total_holders: 3_000,
+        holders_400: (major_holders != 12).then_some(major_holders * 2),
+        shares_400: (major_holders != 12).then_some(major_holders * 1_000),
+        percent_400: (major_holders != 12).then_some(dec!(75.25)),
+    })
+    .collect();
+    repo.save_holder_distributions(&records).await.unwrap();
+
+    let weeks = repo
+        .recent_holder_weeks(&[FAKE.to_string(), "79979XX".to_string()], friday(4, 4), 3)
+        .await
+        .unwrap();
+    assert_eq!(
+        weeks.dates,
+        vec![friday(3, 29), friday(3, 22), friday(3, 15)]
+    );
+    assert_eq!(
+        weeks.records,
+        vec![records[3].clone(), records[2].clone(), records[1].clone()]
+    );
+    assert_eq!(weeks.records[1].percent_400, None);
+
+    let only_dates = repo
+        .recent_holder_weeks(&[], friday(4, 4), 2)
+        .await
+        .unwrap();
+    assert_eq!(only_dates.dates, vec![friday(3, 29), friday(3, 22)]);
+    assert!(only_dates.records.is_empty());
+
+    cleanup().await;
+}

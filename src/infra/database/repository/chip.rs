@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use crate::domain::chip::{
-    BrokerFlowRecord, ChipRepository, HolderDistributionRecord, HolderLevelRecord,
-    InsiderHoldingRecord, InstitutionalNet, MarginRecord,
+    BrokerFlowRecord, ChipRepository, HolderDistributionRecord, HolderHistoryRepository,
+    HolderLevelRecord, InsiderHoldingRecord, InstitutionalNet, MarginRecord, RecentHolderWeeks,
 };
 
 /// 基於 PostgreSQL 的籌碼資料倉儲。
@@ -73,6 +73,18 @@ impl ChipRepository for PgChipRepository {
 
     async fn save_broker_flows(&self, records: &[BrokerFlowRecord]) -> Result<u64> {
         broker::save_broker_flows(records).await
+    }
+}
+
+#[async_trait]
+impl HolderHistoryRepository for PgChipRepository {
+    async fn recent_holder_weeks(
+        &self,
+        symbols: &[String],
+        as_of: NaiveDate,
+        weeks: i64,
+    ) -> Result<RecentHolderWeeks> {
+        ownership::recent_holder_weeks(symbols, as_of, weeks).await
     }
 }
 
