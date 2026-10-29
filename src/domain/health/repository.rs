@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 
-use super::entity::DataHealthSnapshot;
+use super::entity::{DataHealthSnapshot, StatementStats};
 
 /// 資料健康檢查的倉儲合約。
 #[async_trait]
@@ -20,4 +20,7 @@ pub trait DataHealthRepository: Send + Sync {
         current_year: i32,
         profile_due: NaiveDate,
     ) -> Result<DataHealthSnapshot>;
+
+    /// 讀資料庫端各語句的累計耗時（`pg_stat_statements`）；沒有安裝這個擴充時回 `None`。
+    async fn fetch_statement_stats(&self) -> Result<Option<StatementStats>>;
 }

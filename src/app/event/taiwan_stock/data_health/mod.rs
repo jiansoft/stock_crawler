@@ -33,6 +33,7 @@
 //!     MIS 只給當天，漏抓那天要靠週六的 MoneyDJ 補缺日，太久沒發現就超出補的範圍。
 //!
 //! 全部正常時也會發一則簡短的週報，用來確認檢查本身有在跑。
+//! 最後附兩行參考資訊（不算檢查項目）：本週慢查詢（檔案日誌）與資料庫端耗時（`pg_stat_statements`）。
 
 use std::fmt::Write;
 
@@ -45,7 +46,8 @@ use crate::{
     domain::{
         financial::{repository::FinancialReportRepository, statement::LaggingStatement},
         health::{
-            DataHealthRepository, DataHealthSnapshot, ForwardReturnGap, ValuationRatioZeroCount,
+            DataHealthRepository, DataHealthSnapshot, ForwardReturnGap, StatementStats,
+            ValuationRatioZeroCount,
         },
     },
     infra::{
@@ -56,6 +58,7 @@ use crate::{
     },
 };
 
+mod db_statements;
 mod rules;
 mod slow_queries;
 
@@ -152,19 +155,29 @@ impl Check {
 
 /// 排程入口：量測近 7 天的資料狀況並發送週報。
 pub async fn execute() -> Result<()> {
-    let message = build_report(Local::now().date_naive()).await?;
+    let (message, statements) = build(Local::now().date_naive()).await?;
     alert::send_message(&message).await;
+    // 發送後才存資料庫端累計值，下週的「資料庫端耗時」從這裡算差額。
+    if let Some(statements) = statements {
+        db_statements::save(db_statements::SNAPSHOT_KEY, &statements).await;
+    }
     Ok(())
 }
 
-/// 量測截至 `today` 的近 7 天資料狀況，回傳週報內容（不發送）。
+/// 量測截至 `today` 的近 7 天資料狀況，回傳週報內容（不發送，也不更新資料庫端耗時的起點）。
 pub async fn build_report(today: NaiveDate) -> Result<String> {
+    build(today).await.map(|(message, _)| message)
+}
+
+/// 週報內容與這次讀到的資料庫端累計值。
+async fn build(today: NaiveDate) -> Result<(String, Option<StatementStats>)> {
+    let repo = PgDataHealthRepository::new();
     let from = today - Days::new(CHECK_DAYS - 1);
     let baseline_from = from - Days::new(BASELINE_DAYS);
 
     let holidays = fetch_holidays(from, today).await;
     let profile_due = today - Days::new(ETF_PROFILE_MAX_AGE_DAYS);
-    let snapshot = PgDataHealthRepository::new()
+    let snapshot = repo
         .fetch_snapshot(baseline_from, from, today, today.year(), profile_due)
         .await?;
 
@@ -179,7 +192,14 @@ pub async fn build_report(today: NaiveDate) -> Result<String> {
         checks.len()
     );
     let slow = weekly_slow_queries(std::path::Path::new(LOG_DIR), from, today);
-    Ok(with_slow_queries(report(from, today, &checks), &slow))
+    let (statement_line, statements) = db_statements::weekly_statements(&repo).await;
+    let message = format!(
+        "{}
+{}",
+        with_slow_queries(report(from, today, &checks), &slow),
+        text::escape_markdown_v2(&statement_line)
+    );
+    Ok((message, statements))
 }
 
 /// 週報最後附上本週慢查詢（不算檢查項目，只供參考）。
