@@ -301,7 +301,9 @@ impl CagrSourceRepository for PgCagrSourceRepository {
         let rows = sqlx::query(sql)
             .bind(&symbols)
             .bind(&dates)
-            .fetch_all(database::get_connection())
+            // 全市場近萬組除息日查價，計畫是 nested loop + index-only scan 已無可改；
+            // 05:40 冷資料要約 1.8 秒，走批次連線池以免每次觸發 1 秒慢查詢警告。
+            .fetch_all(database::get_batch_connection())
             .await
             .context("Failed to fetch closing prices for the given symbol/date pairs")?;
 

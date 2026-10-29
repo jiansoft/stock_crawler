@@ -365,7 +365,7 @@ pub fn get_connection() -> &'static PgPool {
 /// 取得全市場批次查詢專用的連線池。
 ///
 /// 只給已分桶平行、單桶就要數秒的全市場查詢使用（估價重建、CAGR 異常掃描），以及每次要 1～2 秒、
-/// 一次請求就跑 20 個換股日偏移的條件選股回測主查詢；慢查詢警告門檻為
+/// 一次請求就跑 20 個換股日偏移的條件選股回測主查詢、CAGR 全市場除息日查價；慢查詢警告門檻為
 /// [`BATCH_SLOW_STATEMENT_THRESHOLD`]。其他查詢一律用 [`get_connection`]。
 ///
 /// 在 Data API 請求內（見 [`with_query_budget`]）改用帶 `statement_timeout` 的 Data API 批次連線池。
