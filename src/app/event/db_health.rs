@@ -28,9 +28,6 @@ const PROBE_TIMEOUT: StdDuration = StdDuration::from_secs(5);
 const DOWN_ALERT_AFTER: u32 = 2;
 /// 持續連不上時，告警的最短間隔（分鐘）。
 const DOWN_ALERT_COOLDOWN_MINUTES: i64 = 60;
-/// 統計重置時間與啟動時間相差在這個範圍內，視為啟動時重置（實測差 20 ms）。
-const RESET_AT_START_TOLERANCE_SECONDS: i64 = 60;
-
 /// 要發出的通知。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Notice {
@@ -161,14 +158,11 @@ impl Watch {
 
 /// 重啟通知內容：新舊啟動時間與統計是否在啟動時重置。
 fn restart_message(previous: DateTime<Local>, status: &ServerStatus) -> String {
-    let stats = match status.stats_reset {
-        Some(reset)
-            if (reset - status.started_at).num_seconds().abs()
-                <= RESET_AT_START_TOLERANCE_SECONDS =>
-        {
+    let stats = match status.stats_reset_at_start() {
+        Some(true) => {
             "pg_stat_statements 統計在啟動時重置，上次多半是非正常關機（當機或 immediate stop）；慢查詢彙總與週報的資料庫端耗時從這次啟動起算"
         }
-        Some(_) => "pg_stat_statements 統計有保留，上次是正常關機",
+        Some(false) => "pg_stat_statements 統計有保留，上次是正常關機",
         None => "讀不到 pg_stat_statements，無法判斷是否正常關機",
     };
     format!(

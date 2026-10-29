@@ -23,6 +23,19 @@ pub struct ServerStatus {
     pub stats_reset: Option<DateTime<Local>>,
 }
 
+/// 統計重置時間與啟動時間相差在這個範圍內，視為啟動時重置（2026-10-29 實測差 20 ms）。
+const RESET_AT_START_TOLERANCE_SECONDS: i64 = 60;
+
+impl ServerStatus {
+    /// `pg_stat_statements` 統計是否在這次啟動時重置：正常關機會保存統計，重置代表上次是當機或
+    /// immediate stop。讀不到統計時為 `None`。
+    pub fn stats_reset_at_start(&self) -> Option<bool> {
+        self.stats_reset.map(|reset| {
+            (reset - self.started_at).num_seconds().abs() <= RESET_AT_START_TOLERANCE_SECONDS
+        })
+    }
+}
+
 /// 以正式設定的連線參數探測伺服器狀態。
 ///
 /// # Errors
