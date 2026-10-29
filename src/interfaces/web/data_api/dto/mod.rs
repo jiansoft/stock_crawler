@@ -176,7 +176,8 @@ pub(super) use stocks::{
     SearchResponse, Stock, StockProfile,
 };
 pub(super) use technicals::{
-    TechnicalIndicatorsParams, TechnicalIndicatorsResponse, TechnicalPoint, TechnicalSignalItem,
+    RangeBreakoutItem, TechnicalIndicatorsParams, TechnicalIndicatorsResponse, TechnicalPoint,
+    TechnicalSignalItem,
 };
 pub(super) use timeline::{
     StockTimelineParams, StockTimelineResponse, TimelineEvent, TimelineKindCount, TimelineKindValue,

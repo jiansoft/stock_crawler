@@ -13,12 +13,13 @@ use axum::{
 
 use super::{ensure_stock_exists, error_response, parse_optional_date, repository_error, round2};
 use crate::domain::quote::technical::{
-    self, IndicatorPoint, PriceAdjustment, PriceBar, PriceBarRepository,
+    self, IndicatorPoint, PriceAdjustment, PriceBar, PriceBarRepository, RangeBreakoutState,
+    VolumeBar, breakout::RANGE_BREAKOUT_VOLUME_BARS,
 };
 use crate::infra::database::repository::quote::PgQuoteRepository;
 use crate::interfaces::web::data_api::dto::{
-    ErrorBody, TechnicalIndicatorsParams, TechnicalIndicatorsResponse, TechnicalPoint,
-    TechnicalSignalItem,
+    ErrorBody, RangeBreakoutItem, TechnicalIndicatorsParams, TechnicalIndicatorsResponse,
+    TechnicalPoint, TechnicalSignalItem,
 };
 
 /// 查詢單一股票截止日之前最近幾個交易日的技術指標與最新一日的訊號。
@@ -60,15 +61,24 @@ pub(crate) async fn stock_technicals(
         Ok(mut map) => map.remove(&symbol).unwrap_or_default(),
         Err(error) => return repository_error(error),
     };
+    let volumes = match repo
+        .fetch_volumes(&symbol, date, RANGE_BREAKOUT_VOLUME_BARS as i64)
+        .await
+    {
+        Ok(volumes) => volumes,
+        Err(error) => return repository_error(error),
+    };
 
-    Json(build_response(symbol, days, &bars, &adjustments)).into_response()
+    Json(build_response(symbol, days, &bars, &volumes, &adjustments)).into_response()
 }
 
-/// 由舊到新的日線還原權值後計算指標，只回傳最後 `days` 筆與最新一日的訊號（含 52 週新高新低）。
+/// 由舊到新的日線還原權值後計算指標，只回傳最後 `days` 筆與最新一日的訊號（含 52 週新高新低、
+/// 區間突破）與區間突破狀態；`volumes` 是同一批交易日最近幾日的成交量。
 fn build_response(
     symbol: String,
     days: u8,
     bars: &[PriceBar],
+    volumes: &[VolumeBar],
     adjustments: &[PriceAdjustment],
 ) -> TechnicalIndicatorsResponse {
     let bars = technical::adjust_bars(bars, adjustments);
@@ -78,6 +88,7 @@ fn build_response(
         Some((last, rest)) => technical::signals(rest.last(), last)
             .into_iter()
             .chain(technical::fifty_two_week_signals(bars))
+            .chain(technical::range_breakout_signal(bars, volumes))
             .map(|signal| TechnicalSignalItem {
                 indicator: signal.indicator.to_owned(),
                 kind: signal.kind.as_str().to_owned(),
@@ -94,6 +105,20 @@ fn build_response(
         days,
         adjusted: true,
         signals,
+        range_breakout: technical::range_breakout_state(bars, volumes).map(to_breakout),
+    }
+}
+
+/// 轉成對外的區間突破狀態，數值四捨五入到小數兩位。
+fn to_breakout(state: RangeBreakoutState) -> RangeBreakoutItem {
+    RangeBreakoutItem {
+        pivot_price: round2(state.pivot),
+        base_low: round2(state.floor),
+        base_width_percent: round2(state.base_width_percent),
+        average_volume: state.average_volume.round(),
+        volume_ratio: round2(state.volume_ratio),
+        distance_percent: round2(state.distance_percent),
+        breaks_out: state.breaks_out,
     }
 }
 
@@ -146,10 +171,52 @@ mod tests {
             .collect()
     }
 
+    /// 有成交量時回傳區間突破狀態：整理幅度超過 20% 時即使帶量突破也不成立、不出訊號；
+    /// 沒有成交量時狀態為 null。
+    #[test]
+    fn build_response_reports_range_breakout_state() {
+        let mut prices = bars(31);
+        if let Some(last) = prices.last_mut() {
+            last.close = 131.5;
+            last.high = 132.0;
+        }
+        let volumes: Vec<VolumeBar> = prices
+            .iter()
+            .enumerate()
+            .map(|(i, bar)| VolumeBar {
+                date: bar.date,
+                volume: if i == 30 { 2000.0 } else { 1000.0 },
+            })
+            .collect();
+
+        let response = build_response("2330".to_owned(), 1, &prices, &volumes, &[]);
+
+        assert_eq!(
+            response.range_breakout,
+            Some(RangeBreakoutItem {
+                pivot_price: 130.0,
+                base_low: 99.0,
+                base_width_percent: 31.31,
+                average_volume: 1000.0,
+                volume_ratio: 2.0,
+                distance_percent: 1.15,
+                breaks_out: false,
+            })
+        );
+        assert!(
+            response
+                .signals
+                .iter()
+                .all(|signal| signal.indicator != "range_breakout")
+        );
+        let without_volumes = build_response("2330".to_owned(), 1, &prices, &[], &[]);
+        assert_eq!(without_volumes.range_breakout, None);
+    }
+
     /// 只回傳最後 days 筆，資料日為最新一筆；持續上漲時 K 值進入超買。
     #[test]
     fn build_response_keeps_last_days_and_latest_signals() {
-        let response = build_response("2330".to_owned(), 3, &bars(30), &[]);
+        let response = build_response("2330".to_owned(), 3, &bars(30), &[], &[]);
         assert_eq!(response.points.len(), 3);
         assert_eq!(response.data_as_of.as_deref(), Some("2026-01-30"));
         assert_eq!(response.points[0].date, "2026-01-28");
@@ -172,7 +239,7 @@ mod tests {
     /// 持續上漲滿 200 個交易日後，最新一日的最高價也是 52 週新高。
     #[test]
     fn build_response_includes_fifty_two_week_signals() {
-        let response = build_response("2330".to_owned(), 1, &bars(250), &[]);
+        let response = build_response("2330".to_owned(), 1, &bars(250), &[], &[]);
         assert!(
             response
                 .signals
@@ -194,7 +261,7 @@ mod tests {
             stock_dividend: 0.0,
             share_ratio: 1.0,
         };
-        let response = build_response("2330".to_owned(), 3, &raw, &[dividend]);
+        let response = build_response("2330".to_owned(), 3, &raw, &[], &[dividend]);
         let closes: Vec<f64> = response.points.iter().map(|point| point.close).collect();
         // 前收 127、除息 12.7 → 因子 0.9：127 → 114.3；除息日 128 與最新一日 129 不變。
         assert_eq!(closes, [114.3, 128.0, 129.0]);
@@ -204,12 +271,12 @@ mod tests {
     #[test]
     fn build_response_handles_short_and_empty_history() {
         assert_eq!(
-            build_response("2330".to_owned(), 20, &bars(2), &[])
+            build_response("2330".to_owned(), 20, &bars(2), &[], &[])
                 .points
                 .len(),
             2
         );
-        let empty = build_response("2330".to_owned(), 20, &[], &[]);
+        let empty = build_response("2330".to_owned(), 20, &[], &[], &[]);
         assert!(empty.data_as_of.is_none());
         assert!(empty.points.is_empty() && empty.signals.is_empty());
     }

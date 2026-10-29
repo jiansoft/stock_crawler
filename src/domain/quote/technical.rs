@@ -46,7 +46,9 @@ mod signal;
 pub use self::bars::{
     PriceAdjustment, PriceBar, PriceBarRepository, adjust_bars, adjustment_factors,
 };
-pub use self::breakout::{VolumeBar, range_breakout_signal};
+pub use self::breakout::{
+    RangeBreakoutState, VolumeBar, range_breakout_signal, range_breakout_state,
+};
 pub use self::detection::{fifty_two_week_signals, signals};
 pub use self::indicators::{IndicatorPoint, compute};
 pub use self::signal::{

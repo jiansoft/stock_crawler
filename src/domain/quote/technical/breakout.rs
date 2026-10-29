@@ -47,12 +47,34 @@ pub struct VolumeBar {
     pub volume: f64,
 }
 
-/// 最新一日（`bars` 最後一根）是否出現區間突破。
+/// 最新一日（`bars` 最後一根）相對整理區間的狀態；`breaks_out` 為四個條件是否同時成立。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RangeBreakoutState {
+    /// 突破價：前 [`BASE_DAYS`] 個交易日（不含當天）的最高價。
+    pub pivot: f64,
+    /// 區間底：前 [`BASE_DAYS`] 個交易日（不含當天）的最低價。
+    pub floor: f64,
+    /// 整理幅度（%）：突破價相對區間底的漲幅。
+    pub base_width_percent: f64,
+    /// 基準均量：前 [`VOLUME_DAYS`] 個交易日（不含當天）的平均成交量。
+    pub average_volume: f64,
+    /// 量比：當天成交量 ÷ 基準均量。
+    pub volume_ratio: f64,
+    /// 收盤距突破價（%）；負數代表還在突破價之下。
+    pub distance_percent: f64,
+    /// 整理幅度、收盤突破、帶量、不追高是否同時成立。
+    pub breaks_out: bool,
+}
+
+/// 最新一日（`bars` 最後一根）相對整理區間的狀態。
 ///
 /// `volumes` 由舊到新，最後 [`RANGE_BREAKOUT_VOLUME_BARS`] 根的日期必須與 `bars` 最後同樣根數的日期
-/// 一一相同，否則（缺資料、沒對齊）不判斷。日線不足 [`RANGE_BREAKOUT_BARS`] 根、區間底或基準均量
-/// 不是正數時也不判斷。
-pub fn range_breakout_signal(bars: &[PriceBar], volumes: &[VolumeBar]) -> Option<TechnicalSignal> {
+/// 一一相同，否則（缺資料、沒對齊）回 `None`。日線不足 [`RANGE_BREAKOUT_BARS`] 根、區間底或基準均量
+/// 不是正數時也回 `None`。
+pub fn range_breakout_state(
+    bars: &[PriceBar],
+    volumes: &[VolumeBar],
+) -> Option<RangeBreakoutState> {
     let base_start = bars.len().checked_sub(RANGE_BREAKOUT_BARS)?;
     let volume_start = volumes.len().checked_sub(RANGE_BREAKOUT_VOLUME_BARS)?;
     let bar_tail = &bars[bars.len() - RANGE_BREAKOUT_VOLUME_BARS..];
@@ -80,19 +102,34 @@ pub fn range_breakout_signal(bars: &[PriceBar], volumes: &[VolumeBar]) -> Option
         && close > pivot
         && today_volume.volume >= average_volume * MIN_VOLUME_RATIO
         && close <= pivot * (1.0 + MAX_CHASE_PERCENT / 100.0);
-    if !breaks_out {
+    Some(RangeBreakoutState {
+        pivot,
+        floor,
+        base_width_percent: (pivot / floor - 1.0) * 100.0,
+        average_volume,
+        volume_ratio: today_volume.volume / average_volume,
+        distance_percent: (close / pivot - 1.0) * 100.0,
+        breaks_out,
+    })
+}
+
+/// 最新一日（`bars` 最後一根）是否出現區間突破；判斷見 [`range_breakout_state`]。
+pub fn range_breakout_signal(bars: &[PriceBar], volumes: &[VolumeBar]) -> Option<TechnicalSignal> {
+    let state = range_breakout_state(bars, volumes)?;
+    if !state.breaks_out {
         return None;
     }
+    let close = bars.last()?.close;
     Some(TechnicalSignal {
         indicator: RANGE_BREAKOUT_INDICATOR,
         kind: SignalKind::Breakout,
         description: format!(
             "收盤 {} 帶量突破 {BASE_DAYS} 日整理區間高點 {}（整理幅度 {:.2}%，量比 {:.2} 倍，距突破價 {:.2}%）",
             price_text(close),
-            price_text(pivot),
-            (pivot / floor - 1.0) * 100.0,
-            today_volume.volume / average_volume,
-            (close / pivot - 1.0) * 100.0,
+            price_text(state.pivot),
+            state.base_width_percent,
+            state.volume_ratio,
+            state.distance_percent,
         ),
     })
 }

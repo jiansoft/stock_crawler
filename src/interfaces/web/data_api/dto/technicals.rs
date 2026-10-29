@@ -87,6 +87,28 @@ pub(crate) struct TechnicalIndicatorsResponse {
     pub(crate) adjusted: bool,
     /// 由舊到新的每日指標，最多 `days` 筆。
     pub(crate) points: Vec<TechnicalPoint>,
-    /// 最新一日出現的交叉與超買超賣訊號。
+    /// 最新一日出現的交叉、超買超賣、52 週新高新低與區間突破訊號。
     pub(crate) signals: Vec<TechnicalSignalItem>,
+    /// 最新一日相對前 30 日整理區間的狀態；日線不足 31 根或成交量缺漏時為 `null`。
+    pub(crate) range_breakout: Option<RangeBreakoutItem>,
+}
+
+/// 區間突破狀態（還原價，成交量不還原）：前 30 日整理區間、前 20 日均量與當日量比。四個條件
+/// （整理幅度 ≤ 20%、收盤 > 突破價、量比 ≥ 1.5、距突破價 ≤ 5%）同時成立時 `breaks_out` 為 `true`。
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub(crate) struct RangeBreakoutItem {
+    /// 突破價：前 30 個交易日（不含當天）的最高價。
+    pub(crate) pivot_price: f64,
+    /// 區間底：前 30 個交易日（不含當天）的最低價。
+    pub(crate) base_low: f64,
+    /// 整理幅度（%）。
+    pub(crate) base_width_percent: f64,
+    /// 前 20 個交易日（不含當天）的平均成交量（股）。
+    pub(crate) average_volume: f64,
+    /// 量比：當天成交量 ÷ 平均成交量。
+    pub(crate) volume_ratio: f64,
+    /// 收盤距突破價（%）；負數代表還在突破價之下。
+    pub(crate) distance_percent: f64,
+    /// 今天是否出現區間突破。
+    pub(crate) breaks_out: bool,
 }
