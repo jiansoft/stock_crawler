@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{Days, NaiveDate};
 
 use crate::{
     domain::{
@@ -15,6 +15,8 @@ use crate::{
     infra::database::{self, table::daily_quote},
 };
 
+#[cfg(test)]
+mod market_return_tests;
 mod sql;
 
 // 檢查用 SQL 搬到子模組；倉儲實作留在這裡。
@@ -135,6 +137,15 @@ impl DataHealthRepository for PgDataHealthRepository {
             .map(|(date, rows)| ForwardReturnGap { date, rows })
             .collect();
 
+        let drift_from = to - Days::new(MARKET_FORWARD_RETURN_DRIFT_DAYS);
+        let market_forward_return_drift = sqlx::query_scalar(MARKET_FORWARD_RETURN_DRIFT_SQL)
+            .bind(drift_from)
+            .fetch_all(pool)
+            .await
+            .with_context(|| {
+                format!("Failed to compare market forward returns since {drift_from}")
+            })?;
+
         let etf_nav_counts = sqlx::query_as::<_, (NaiveDate, i64, i64)>(ETF_NAV_COUNTS_SQL)
             .bind(baseline_from)
             .bind(to)
@@ -207,6 +218,7 @@ impl DataHealthRepository for PgDataHealthRepository {
             latest_insider_month,
             valuation_ratio_zeros,
             forward_return_gaps,
+            market_forward_return_drift,
             etf_nav_counts,
             stale_etf_profiles,
         })

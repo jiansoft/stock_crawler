@@ -3,7 +3,7 @@
 /// 每日收盤後會更新的衍生資料表，與各自的日期欄位。
 ///
 /// 表名與欄位名無法用參數綁定，只能寫死在這裡；新增衍生表時同步加入。
-pub(super) const DERIVED_TABLES: [(&str, &str); 14] = [
+pub(super) const DERIVED_TABLES: [(&str, &str); 15] = [
     ("estimate", "SELECT max(date) FROM estimate"),
     ("yield_rank", "SELECT max(date) FROM yield_rank"),
     (
@@ -42,7 +42,41 @@ pub(super) const DERIVED_TABLES: [(&str, &str); 14] = [
         "daily_forward_return",
         "SELECT max(date) FROM daily_forward_return WHERE return_5d IS NOT NULL",
     ),
+    // 寫入未來報酬時同步重算的大盤彙總，口徑同上。
+    (
+        "daily_market_forward_return",
+        "SELECT max(date) FROM daily_market_forward_return WHERE market_id = 0 AND n5 > 0",
+    ),
 ];
+
+/// 大盤未來報酬彙總與明細比對往回看幾天：涵蓋最長的 240 個交易日天期（約 350 天）。
+pub(super) const MARKET_FORWARD_RETURN_DRIFT_DAYS: u64 = 400;
+
+/// `$1` 起每個基準日，明細（`daily_forward_return` 連到 `stocks` 的列，與彙總同口徑）各天期的筆數
+/// 和彙總表全市場那一列對不上的日期；任一邊沒有那一天也算。
+///
+/// 正常情況下寫入未來報酬時就會重算該日彙總；對不上代表有人直接改了明細、或重算失敗。
+pub(super) const MARKET_FORWARD_RETURN_DRIFT_SQL: &str = r#"
+WITH detail AS (
+    SELECT r.date,
+           count(r.return_5d) AS n5, count(r.return_20d) AS n20, count(r.return_60d) AS n60,
+           count(r.return_120d) AS n120, count(r.return_240d) AS n240
+    FROM daily_forward_return r
+    JOIN stocks s ON s.stock_symbol = r.stock_symbol
+    WHERE r.date >= $1
+    GROUP BY r.date
+),
+summary AS (
+    SELECT date, n5, n20, n60, n120, n240
+    FROM daily_market_forward_return
+    WHERE market_id = 0 AND date >= $1
+)
+SELECT coalesce(d.date, m.date) AS date
+FROM detail d
+FULL JOIN summary m ON m.date = d.date
+WHERE (d.n5, d.n20, d.n60, d.n120, d.n240) IS DISTINCT FROM (m.n5, m.n20, m.n60, m.n120, m.n240)
+ORDER BY 1
+"#;
 
 /// 短天期缺漏的列數占該基準日全部列數至少這個百分比才列出。
 ///
