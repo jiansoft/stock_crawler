@@ -238,3 +238,20 @@ async fn fetch_ranked_signals_orders_by_trade_value() {
     assert_eq!(signals[0].trade_value, 300.0);
     cleanup().await;
 }
+
+/// 排程入口連資料庫走完：讀持股、查當天訊號；當天沒有訊號時不發送也不失敗。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn execute_runs_against_database() {
+    dotenvy::dotenv().ok();
+    let pool = crate::infra::database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 execute_runs_against_database：無資料庫連接");
+        return;
+    }
+
+    execute().await.expect("沒有訊號時照常結束");
+}
