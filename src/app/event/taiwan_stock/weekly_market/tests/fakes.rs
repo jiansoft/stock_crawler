@@ -5,6 +5,9 @@ use crate::domain::portfolio::{
     chip::{BrokerPeriodNet, HoldingBrokerQuery},
     health::HoldingFundamentals,
 };
+use crate::domain::quote::technical::{
+    RankedSignal, RankedSignalQuery, SignalOutcome, StockTechnicalSignal, TechnicalSignalQuery,
+};
 
 /// 回傳固定加權指數收盤與市場廣度的假倉儲；`fail` 時指數查詢失敗，`breadth_fail` 時廣度查詢失敗。
 #[derive(Default)]
@@ -82,6 +85,10 @@ pub(super) struct FakeQuote {
     pub(super) crossings: Vec<PeriodCrossing>,
     /// 本月季節性；`None` 時查詢失敗。
     pub(super) seasonality: Option<MonthSeasonality>,
+    /// 每個交易日的區間突破（依成交值排序前）與當天總檔數；沒有的日子回空。
+    pub(super) breakouts: HashMap<NaiveDate, (Vec<RankedSignal>, i64)>,
+    /// 區間突破的歷史表現。
+    pub(super) outcomes: Vec<SignalOutcome>,
     pub(super) fail: bool,
 }
 
@@ -233,6 +240,7 @@ pub(super) fn quote() -> FakeQuote {
         ],
         seasonality: None,
         fail: false,
+        ..FakeQuote::default()
     }
 }
 
@@ -375,5 +383,41 @@ pub(super) fn portfolio() -> FakePortfolio {
     FakePortfolio {
         fundamentals: vec![item("2317", 3.0), item("2330", -2.5)],
         ..FakePortfolio::default()
+    }
+}
+
+#[async_trait]
+impl RankedSignalQuery for FakeQuote {
+    async fn fetch_ranked_signals(
+        &self,
+        date: NaiveDate,
+        indicator: &str,
+        limit: i64,
+    ) -> Result<(Vec<RankedSignal>, i64)> {
+        assert_eq!((indicator, limit), ("range_breakout", TOP as i64));
+        if self.fail {
+            return Err(anyhow!("down"));
+        }
+        Ok(self.breakouts.get(&date).cloned().unwrap_or_default())
+    }
+}
+
+#[async_trait]
+impl TechnicalSignalQuery for FakeQuote {
+    async fn fetch_signals(
+        &self,
+        _date: NaiveDate,
+        _stock_symbols: &[String],
+    ) -> Result<Vec<StockTechnicalSignal>> {
+        Ok(Vec::new())
+    }
+
+    async fn fetch_signal_outcomes(
+        &self,
+        _from: NaiveDate,
+        _to: NaiveDate,
+        _indicators: &[&str],
+    ) -> Result<Vec<SignalOutcome>> {
+        Ok(self.outcomes.clone())
     }
 }

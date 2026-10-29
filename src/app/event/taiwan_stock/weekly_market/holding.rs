@@ -1,8 +1,8 @@
 //! 每週市場摘要的持股相對強度一段：持股 RS 與一週前相比上升、下降最多的幾檔。
 
 use super::{
-    TOP, WEEK_DAYS, allocation::AllocationSection, dividend::HoldingFill, etf::EtfWeekSection,
-    holding_flow::HoldingFlowSection,
+    TOP, WEEK_DAYS, allocation::AllocationSection, breakout::BreakoutSection,
+    dividend::HoldingFill, etf::EtfWeekSection, holding_flow::HoldingFlowSection,
 };
 use crate::domain::{
     portfolio::health::HoldingFundamentals, quote::relative_strength::RelativeStrengthDay,
@@ -23,6 +23,8 @@ pub(super) struct HoldingSection<'a> {
     pub(super) etfs: Option<&'a EtfWeekSection>,
     /// 超出容忍帶的目標配置偏離（沒有設定目標或都在容忍帶內時為空）。
     pub(super) allocation: &'a [AllocationSection],
+    /// 全市場區間突破一段（不是持股資料；放在這裡讓各段測試沿用 `..Default::default()` 建構）。
+    pub(super) breakouts: Option<&'a BreakoutSection>,
 }
 
 /// 一檔持股的 RS 一週變化。

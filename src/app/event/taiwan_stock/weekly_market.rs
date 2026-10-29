@@ -13,6 +13,7 @@
 //!   [`industry::MIN_INDUSTRY_STOCKS`] 檔的產業不列。
 //! - 近 [`WEEK_DAYS`] 個交易日相對強度站上、跌破 80 與 50 分的家數（每檔每個門檻只取最後一次
 //!   穿越），各附分數最高（站上）或最低（跌破）的幾檔。
+//! - 近 [`WEEK_DAYS`] 個交易日的區間突破檔次合計、成交值最大的幾檔與近一年同訊號表現（見 [`breakout`]）。
 //! - 外資、投信近 [`WEEK_DAYS`] 個交易日在各產業的估計淨買賣金額（見 [`crate::domain::chip::flow`]），
 //!   淨流入與淨流出最多的產業。
 //! - 持股（普通股）的 RS 與 [`WEEK_DAYS`] 個交易日前相比上升、下降最多的幾檔。
@@ -30,6 +31,7 @@
 //! 查詢順序與組訊息。
 
 mod allocation;
+mod breakout;
 mod crossing;
 mod dividend;
 mod etf;
@@ -49,6 +51,7 @@ use chrono::{Local, NaiveDate};
 
 use self::{
     allocation::{AllocationSection, allocation_sections},
+    breakout::breakout_section,
     crossing::{CrossingSection, crossing_section},
     dividend::{HoldingFill, holding_fills},
     etf::{EtfWeekSection, etf_section},
@@ -73,6 +76,7 @@ use crate::{
             relative_strength::{
                 RelativeStrengthCrossingQuery, RelativeStrengthQuery, ScoredUniverseQuery,
             },
+            technical::{RankedSignalQuery, TechnicalSignalQuery},
         },
     },
     infra::database::repository::{
@@ -150,6 +154,8 @@ async fn run(
          + RelativeStrengthCrossingQuery
          + ForwardReturnRepository
          + MarketSeasonalityQuery
+         + RankedSignalQuery
+         + TechnicalSignalQuery
      ),
     chip: &impl ChipFlowQuery,
     index: &(impl IndexCloseQuery + BreadthQuery),
@@ -183,6 +189,10 @@ async fn run(
     }
     let industries = industry_section(quote, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取產業相對強度失敗: {why:#}");
+        None
+    });
+    let breakouts = breakout_section(quote, date).await.unwrap_or_else(|why| {
+        tracing::warn!("每週市場摘要：讀取區間突破失敗: {why:#}");
         None
     });
     let crossings = crossing_section(quote, date).await.unwrap_or_else(|why| {
@@ -259,6 +269,7 @@ async fn run(
             fundamentals: &fundamentals,
             etfs,
             allocation,
+            breakouts: breakouts.as_ref(),
         },
         strategy,
         holdings::stock_name,
@@ -304,6 +315,10 @@ fn build_message(
             data_date.get_or_insert(section.to);
             lines.extend(rows);
         }
+    }
+
+    if let Some(section) = holdings.breakouts {
+        lines.extend(breakout::lines(section));
     }
 
     for section in flows
