@@ -27,6 +27,7 @@ mod institutional_flow;
 mod institutional_streak;
 mod margin_ranking;
 mod market_calendar;
+mod market_forward_returns;
 mod market_movers;
 mod market_rankings;
 mod market_regime;
@@ -88,6 +89,7 @@ pub(super) use institutional_streak::{
 };
 pub(super) use margin_ranking::{__path_margin_ranking, margin_ranking};
 pub(super) use market_calendar::{__path_dividend_calendar, dividend_calendar};
+pub(super) use market_forward_returns::{__path_market_forward_returns, market_forward_returns};
 pub(super) use market_movers::{__path_market_movers, market_movers};
 pub(super) use market_rankings::{
     __path_dividend_yield_ranking, __path_qfii_holding_ranking, dividend_yield_ranking,

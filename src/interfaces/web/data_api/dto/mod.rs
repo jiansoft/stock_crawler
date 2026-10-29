@@ -20,6 +20,7 @@ mod industries;
 mod institutional_flow;
 mod margin;
 mod market;
+mod market_forward_returns;
 mod market_regime;
 mod market_valuation;
 mod peers;
@@ -101,6 +102,7 @@ pub(super) use market::{
     MarketMoversParams, MarketMoversResponse, MoversRankByValue, QfiiHolding,
     QfiiHoldingRankingParams, QfiiHoldingRankingResponse, QfiiSortValue,
 };
+pub(super) use market_forward_returns::{MarketForwardReturnsParams, MarketForwardReturnsResponse};
 pub(super) use market_regime::{
     MarketRegimeBreadth, MarketRegimeParams, MarketRegimeResponse, MarketRegimeValuation,
     MovingAverageCrossItem, MovingAverageStatus,
