@@ -150,7 +150,7 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
 + 09:02 啟動股票追蹤高低標提醒任務（服務在開盤期間重啟時會先補啟動一次）
 + 15:00 收盤：取得台股收盤報價（除權息股當天的漲跌以交易所開盤競價基準重算）並計算預估價格，接著依序：
   - 為上市櫃有成交的股票計算當日技術訊號（均線／KD／MACD 交叉、站上或跌破均線、超買超賣、52 週新高新低）
-  - 回填 5／20／60／120／240 個交易日前的還原報酬（`daily_forward_return`）
+  - 回填 5／20／60／120／240 個交易日前的還原報酬（`daily_forward_return`），並重算該基準日的大盤彙總（`daily_market_forward_return`）
   - 寫入當天上市櫃普通股（不含 ETF、特別股）的相對強度分數與名次（`daily_relative_strength`），分數向上或向下穿越 80、50 分的股票另寫成技術訊號（來源 `rs80`、`rs50`）
 + 20:30 通知持股近 7 天內法說會的摘要、展望與 Q&A 重點（BigGo 財經整理；摘要尚未產生的場次之後再通知，每場只通知一次）
 + 21:00 更新尚無年度配息資料的股票
@@ -224,6 +224,7 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
 |---|---|---|---|
 | `daily_technical_signal` | 每日技術訊號（含相對強度穿越 `rs80`／`rs50`） | 15:00 收盤後 | `test_backfill_technical_signals` |
 | `daily_forward_return` | 訊號基準日之後 5～240 個交易日的還原報酬 | 15:00 收盤後 | `test_backfill_forward_returns` |
+| `daily_market_forward_return` | 每個基準日、每個市場（0 為上市櫃全部）的未來報酬筆數、總和與上漲檔數，供訊號與法人連買績效的大盤基準 | 寫入未來報酬時重算該日 | `test_backfill_market_forward_returns` |
 | `daily_relative_strength` | 上市櫃普通股相對強度分數（1–99）與名次 | 15:00 收盤後 | `test_backfill_relative_strength` |
 | `daily_stock_price_stats` | 市場廣度（漲跌家數、均線上下、52 週新高／新低） | 15:00 收盤後 | `test_backfill_market_breadth` |
 | `daily_market_valuation` | 上市、上櫃與合計的本益比、股價淨值比中位數 | 17:30、20:30 | `test_backfill_market_valuation`（2012 起） |
@@ -256,7 +257,7 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
 | capital_reduction（減資） | `test_backfill_listed_capital_reductions`、`test_backfill_otc_capital_reductions`、`test_scan_otc_capital_reduction_gaps` |
 | financial（財報） | `test_backfill_financial_reports_for_symbols`、`test_backfill_financial_reports_from_biggo_for_symbols`、`test_backfill_financial_reports_all`、`test_rebuild_financial_health` |
 | chip（籌碼） | `test_backfill_chip_daily`、`test_backfill_chip_streaks`、`test_backfill_foreign_holding_history`、`test_save_holder_distributions`、`test_save_insider_holdings` |
-| derived（衍生資料） | `test_backfill_technical_signals`、`test_backfill_forward_returns`、`test_backfill_relative_strength`、`test_backfill_market_breadth`、`test_backfill_market_valuation`、`test_record_strategy_rebalance`、`test_strategy_edge_check` |
+| derived（衍生資料） | `test_backfill_technical_signals`、`test_backfill_forward_returns`、`test_backfill_market_forward_returns`、`test_backfill_relative_strength`、`test_backfill_market_breadth`、`test_backfill_market_valuation`、`test_record_strategy_rebalance`、`test_strategy_edge_check` |
 
 本機 `.env` 指向哪個資料庫，回補就寫到哪個資料庫；跑之前先確認。
 

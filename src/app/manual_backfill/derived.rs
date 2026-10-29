@@ -78,6 +78,36 @@ async fn test_backfill_forward_returns() {
     println!("未來報酬回填 {from}～{to}：共 {total} 列");
 }
 
+/// 重算每日大盤未來報酬彙總（`daily_market_forward_return`）。
+///
+/// 依基準日彙總 `daily_forward_return` 的筆數、報酬總和與上漲檔數（上市櫃全部與各市場），供訊號績效與
+/// 法人連買績效的大盤基準讀取。每天的未來報酬寫入時會自動重算當天；建表後第一次、或直接改過
+/// `daily_forward_return` 時才需要手動跑。只讀寫資料庫。起訖日可用 `MANUAL_MARKET_RETURN_FROM`／
+/// `MANUAL_MARKET_RETURN_TO` 覆寫，預設 1990-01-01～今天。
+///
+/// 執行範例：
+/// `cargo test app::manual_backfill::derived::test_backfill_market_forward_returns -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_market_forward_returns() {
+    dotenvy::dotenv().ok();
+    let today = chrono::Local::now().date_naive().to_string();
+    let date = |name: &str, default: &str| {
+        let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
+        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+    };
+    let from = date("MANUAL_MARKET_RETURN_FROM", "1990-01-01");
+    let to = date("MANUAL_MARKET_RETURN_TO", &today);
+    let days =
+        crate::infra::database::repository::forward_return::refresh_market_forward_returns_between(
+            from, to,
+        )
+        .await
+        .unwrap_or_else(|why| panic!("大盤彙總重算失敗：{why:#}"));
+    println!("大盤未來報酬彙總 {from}～{to}：共 {days} 個基準日");
+}
+
 /// 逐日寫入每日相對強度（`daily_relative_strength`）。
 ///
 /// 每個交易日以當天的近 60／120／240 日報酬（`daily_forward_return`）對上市櫃普通股（不含 ETF、特別股）計分，
