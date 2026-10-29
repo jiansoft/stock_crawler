@@ -146,3 +146,20 @@ fn misaligned_volumes_are_skipped() {
 
     assert_eq!(range_breakout_signal(&bars, &volumes), None);
 }
+
+/// 沒有突破時也回傳整理區間的中間值，供個股技術頁顯示。
+#[test]
+fn state_reports_values_without_breakout() {
+    let (bars, volumes) = setup(9.8, 9.9, 800.0);
+
+    let state = range_breakout_state(&bars, &volumes).expect("資料足夠");
+
+    assert!(!state.breaks_out);
+    assert_eq!((state.pivot, state.floor), (10.0, 9.0));
+    assert!((state.volume_ratio - 0.8).abs() < 1e-9, "{state:?}");
+    assert!((state.distance_percent + 2.0).abs() < 1e-9, "{state:?}");
+    assert!(
+        (state.base_width_percent - 100.0 / 9.0).abs() < 1e-9,
+        "{state:?}"
+    );
+}
