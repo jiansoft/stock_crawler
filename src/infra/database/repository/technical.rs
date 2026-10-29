@@ -19,7 +19,8 @@ use crate::{
         relative_strength::CROSSING_INDICATORS,
         technical::{
             PriceAdjustment, PriceBar, PriceBarRepository, SignalOutcome, StockTechnicalSignal,
-            TechnicalSignal, TechnicalSignalQuery, TechnicalSignalRepository, adjust_bars,
+            TechnicalSignal, TechnicalSignalQuery, TechnicalSignalRepository, VolumeBar,
+            adjust_bars,
         },
     },
     infra::database::{self, repository::quote::PgQuoteRepository},

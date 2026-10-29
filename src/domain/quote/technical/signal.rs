@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 
-use super::{FIFTY_TWO_WEEK_INDICATOR, RS50_INDICATOR, RS80_INDICATOR};
+use super::{FIFTY_TWO_WEEK_INDICATOR, RANGE_BREAKOUT_INDICATOR, RS50_INDICATOR, RS80_INDICATOR};
 
 /// 某股票某交易日的技術訊號（收盤後預先計算，供全市場訊號選股查詢）。
 #[derive(Debug, Clone, PartialEq)]
@@ -22,6 +22,19 @@ pub struct StockTechnicalSignal {
 pub trait TechnicalSignalRepository: Send + Sync {
     /// 指定交易日有成交、未暫停交易的上市櫃股票代號。
     async fn fetch_signal_symbols(&self, date: NaiveDate) -> Result<Vec<String>>;
+
+    /// `from`～`to`（含）期間有成交的上市櫃股票代號，含之後下市的（歷史回補不能有存活者偏差）。
+    async fn fetch_traded_symbols(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<String>>;
+
+    /// 以 `signals` 覆蓋 `indicator` 來源在 `from`～`to`（含）的全部訊號（同一交易內先刪後寫），
+    /// 其他來源不動；`signals` 須全部是該來源、日期在期間內。
+    async fn replace_indicator_signals(
+        &self,
+        indicator: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+        signals: &[StockTechnicalSignal],
+    ) -> Result<()>;
 
     /// 以 `signals` 覆蓋指定交易日的全部訊號（同一交易內先刪後寫）。
     async fn replace_signals(
@@ -88,6 +101,8 @@ pub enum SignalKind {
     NewHigh,
     /// 當日最低價創前 52 週新低。
     NewLow,
+    /// 整理區間後收盤帶量突破區間高點。
+    Breakout,
 }
 
 impl SignalKind {
@@ -102,6 +117,7 @@ impl SignalKind {
             Self::Oversold => "oversold",
             Self::NewHigh => "new_high",
             Self::NewLow => "new_low",
+            Self::Breakout => "breakout",
         }
     }
 
@@ -112,7 +128,7 @@ impl SignalKind {
 }
 
 /// 全部訊號種類，依對外說明的順序。
-pub const SIGNAL_KINDS: [SignalKind; 8] = [
+pub const SIGNAL_KINDS: [SignalKind; 9] = [
     SignalKind::GoldenCross,
     SignalKind::DeathCross,
     SignalKind::CrossAbove,
@@ -121,10 +137,11 @@ pub const SIGNAL_KINDS: [SignalKind; 8] = [
     SignalKind::Oversold,
     SignalKind::NewHigh,
     SignalKind::NewLow,
+    SignalKind::Breakout,
 ];
 
 /// 全部訊號來源（[`TechnicalSignal::indicator`]），依對外說明的順序。
-pub const SIGNAL_INDICATORS: [&str; 11] = [
+pub const SIGNAL_INDICATORS: [&str; 12] = [
     "ma5_ma20",
     "ma20_ma60",
     "kd",
@@ -136,6 +153,7 @@ pub const SIGNAL_INDICATORS: [&str; 11] = [
     FIFTY_TWO_WEEK_INDICATOR,
     RS80_INDICATOR,
     RS50_INDICATOR,
+    RANGE_BREAKOUT_INDICATOR,
 ];
 
 /// 最新一日出現的技術訊號。

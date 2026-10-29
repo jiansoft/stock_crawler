@@ -141,6 +141,22 @@ fn notable_keeps_long_term_signals_in_order() {
 }
 
 /// 同一檔的多個訊號列在同一段，文字經 MarkdownV2 跳脫。
+/// 區間突破也通知，排在 52 週新高之後、均線之前，與同一檔的其他訊號併在同一段。
+#[test]
+fn range_breakout_is_notified_with_other_signals() {
+    let picked = notable(vec![
+        signal("2330", "close_ma60", SignalKind::CrossAbove, "站上季線"),
+        signal("2330", "range_breakout", SignalKind::Breakout, "帶量突破"),
+        signal("2330", "52_week", SignalKind::NewHigh, "52 週新高"),
+    ]);
+    let order: Vec<&str> = picked.iter().map(|s| s.signal.indicator).collect();
+    assert_eq!(order, ["52_week", "range_breakout", "close_ma60"]);
+
+    let message = build_message(date(), &picked, &[], |_| "台積電".to_owned()).expect("有訊號");
+    assert_eq!(message.matches("台積電").count(), 1, "{message}");
+    assert!(message.contains("帶量突破"), "{message}");
+}
+
 #[test]
 fn build_message_groups_by_stock() {
     let signals = [

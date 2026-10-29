@@ -138,7 +138,7 @@ async fn screen_backtest_filters_and_validation() {
         ("fee_discount=1.5", StatusCode::UNPROCESSABLE_ENTITY),
         ("fee_discount=-0.1", StatusCode::UNPROCESSABLE_ENTITY),
         ("market=otc", StatusCode::UNPROCESSABLE_ENTITY),
-        ("kind=breakout", StatusCode::UNPROCESSABLE_ENTITY),
+        ("kind=breakdown", StatusCode::UNPROCESSABLE_ENTITY),
         ("indicator=ma10", StatusCode::UNPROCESSABLE_ENTITY),
         ("min_rs_score=0", StatusCode::UNPROCESSABLE_ENTITY),
         (

@@ -47,7 +47,73 @@ impl TechnicalSignalRepository for PgQuoteRepository {
         tx.commit().await?;
         Ok(())
     }
+
+    async fn fetch_traded_symbols(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(TRADED_SYMBOLS_SQL)
+            .bind(from)
+            .bind(to)
+            .fetch_all(database::get_batch_connection())
+            .await?;
+        Ok(rows.into_iter().map(|(symbol,)| symbol).collect())
+    }
+
+    async fn replace_indicator_signals(
+        &self,
+        indicator: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+        signals: &[StockTechnicalSignal],
+    ) -> Result<()> {
+        let mut tx = database::get_tx().await?;
+        sqlx::query(
+            "DELETE FROM daily_technical_signal WHERE indicator = $1 AND date BETWEEN $2 AND $3",
+        )
+        .bind(indicator)
+        .bind(from)
+        .bind(to)
+        .execute(&mut *tx)
+        .await?;
+        if !signals.is_empty() {
+            let dates: Vec<NaiveDate> = signals.iter().map(|s| s.date).collect();
+            let symbols: Vec<&str> = signals.iter().map(|s| s.stock_symbol.as_str()).collect();
+            let indicators: Vec<&str> = signals.iter().map(|s| s.signal.indicator).collect();
+            let kinds: Vec<&str> = signals.iter().map(|s| s.signal.kind.as_str()).collect();
+            let descriptions: Vec<&str> = signals
+                .iter()
+                .map(|s| s.signal.description.as_str())
+                .collect();
+            sqlx::query(INSERT_DATED_SIGNALS_SQL)
+                .bind(dates)
+                .bind(symbols)
+                .bind(indicators)
+                .bind(kinds)
+                .bind(descriptions)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
 }
+
+/// `$1`～`$2`（含）期間有成交的上市櫃股票，含之後下市的。
+const TRADED_SYMBOLS_SQL: &str = r#"
+SELECT DISTINCT q.stock_symbol::text
+FROM "DailyQuotes" q
+JOIN stocks s ON s.stock_symbol = q.stock_symbol
+WHERE q."Date" BETWEEN $1 AND $2
+  AND q."ClosingPrice" > 0
+  AND s.stock_exchange_market_id IN (2, 4)
+ORDER BY 1
+"#;
+
+/// 一次寫入跨多個交易日的訊號（歷史回補用）。
+const INSERT_DATED_SIGNALS_SQL: &str = r#"
+INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
+SELECT s.date, s.stock_symbol, s.indicator, s.kind, s.description
+FROM UNNEST($1::date[], $2::varchar[], $3::varchar[], $4::varchar[], $5::text[])
+         AS s(date, stock_symbol, indicator, kind, description)
+"#;
 
 /// 在呼叫端的交易內寫入 `date` 的訊號；空清單不送查詢。
 pub(in crate::infra::database::repository) async fn insert_signals(

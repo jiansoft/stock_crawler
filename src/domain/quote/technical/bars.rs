@@ -62,6 +62,15 @@ pub trait PriceBarRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<PriceBar>>;
 
+    /// 與 [`Self::fetch_price_bars`] 同一批交易日（`until` 之前最近 `limit` 個有成交的交易日）的
+    /// 成交量，依日期由舊到新；成交量不還原。
+    async fn fetch_volumes(
+        &self,
+        stock_symbol: &str,
+        until: Option<NaiveDate>,
+        limit: i64,
+    ) -> Result<Vec<super::VolumeBar>>;
+
     /// 多檔股票的除權息與股數變動事件，依代號分組；沒有事件的股票不在結果中。
     async fn fetch_price_adjustments(
         &self,
