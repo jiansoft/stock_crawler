@@ -64,6 +64,27 @@ fn forward_return_gaps_list_the_first_dates() {
     assert!(single[0].contains("：2022-10-01 2001 列；"), "{single:?}");
 }
 
+/// 彙總與明細不符的基準日列出最早 5 天與重算期間；沒有不符時不列。
+#[test]
+fn market_forward_return_drift_lists_dates_and_the_rerun_range() {
+    assert!(market_forward_return_drift_problems(&[]).is_empty());
+    let dates: Vec<NaiveDate> = (1..=6)
+        .map(|d| NaiveDate::from_ymd_opt(2026, 9, d).expect("日期應合法"))
+        .collect();
+    let problems = market_forward_return_drift_problems(&dates);
+    assert_eq!(
+        problems,
+        [
+            "大盤未來報酬彙總有 6 個基準日與明細筆數不符：2026-09-01、2026-09-02、2026-09-03、2026-09-04、2026-09-05…；請以 MANUAL_MARKET_RETURN_FROM=2026-09-01、MANUAL_MARKET_RETURN_TO=2026-09-06 重跑 test_backfill_market_forward_returns"
+        ]
+    );
+    let single = market_forward_return_drift_problems(&dates[..1]);
+    assert!(
+        single[0].contains("1 個基準日與明細筆數不符：2026-09-01；"),
+        "{single:?}"
+    );
+}
+
 /// 15 日之前不要求上個月的營收；之後就要有。
 #[test]
 fn revenue_is_due_after_the_fifteenth() {

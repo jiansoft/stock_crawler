@@ -247,7 +247,11 @@ fn evaluate(
         ),
         Check::new(
             "未來報酬",
-            forward_return_gap_problems(&snapshot.forward_return_gaps),
+            [
+                forward_return_gap_problems(&snapshot.forward_return_gaps),
+                market_forward_return_drift_problems(&snapshot.market_forward_return_drift),
+            ]
+            .concat(),
         ),
         Check::new(
             "ETF 資料",

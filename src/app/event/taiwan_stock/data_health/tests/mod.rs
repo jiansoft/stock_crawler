@@ -63,6 +63,7 @@ fn healthy() -> DataHealthSnapshot {
             ("etf_performance", day(9)),
             ("etf_snapshot", day(9)),
             ("daily_forward_return", day(2)),
+            ("daily_market_forward_return", day(2)),
         ]
         .into_iter()
         .map(|(table, latest)| DerivedTableLatest {

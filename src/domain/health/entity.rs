@@ -91,6 +91,9 @@ pub struct DataHealthSnapshot {
     pub valuation_ratio_zeros: Vec<ValuationRatioZeroCount>,
     /// 未來報酬表（整張表，從最早有 5 日報酬的基準日起）短天期缺漏的基準日，由舊到新。
     pub forward_return_gaps: Vec<ForwardReturnGap>,
+    /// 近 400 天內大盤未來報酬彙總（`daily_market_forward_return` 全市場那一列）的各天期筆數與明細
+    /// （`daily_forward_return`）對不上的基準日，由舊到新。
+    pub market_forward_return_drift: Vec<NaiveDate>,
     /// 期間內（含基準期）每天的 ETF 淨值列數，由舊到新。
     pub etf_nav_counts: Vec<EtfNavDayCount>,
     /// 基本資料（`etf_profile`）在期限前就沒再更新、或上市已久仍沒有基本資料的 ETF 代號。

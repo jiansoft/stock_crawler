@@ -53,7 +53,7 @@ pub(super) fn allowed_lag(table: &str) -> usize {
         // 20:40 才抓當天的主力進出。
         "stock_cagr" | "qfii_history" | "chip_daily" | "broker_flow" => 1,
         // 基準日之後要再過 5 個交易日才算得出 5 日報酬。
-        "daily_forward_return" => 5,
+        "daily_forward_return" | "daily_market_forward_return" => 5,
         _ => 0,
     }
 }
@@ -221,6 +221,28 @@ pub(super) fn valuation_ratio_problems(
         }
     }
     problems
+}
+
+/// 大盤未來報酬彙總與明細對不上的基準日：列出最早的幾天與總天數，並提示重算的期間。
+pub(super) fn market_forward_return_drift_problems(dates: &[NaiveDate]) -> Vec<String> {
+    let (Some(first), Some(last)) = (dates.first(), dates.last()) else {
+        return Vec::new();
+    };
+    let listed = dates
+        .iter()
+        .take(FORWARD_RETURN_GAP_LISTED)
+        .map(NaiveDate::to_string)
+        .collect::<Vec<_>>()
+        .join("、");
+    let more = if dates.len() > FORWARD_RETURN_GAP_LISTED {
+        "…"
+    } else {
+        ""
+    };
+    vec![format!(
+        "大盤未來報酬彙總有 {} 個基準日與明細筆數不符：{listed}{more}；請以 MANUAL_MARKET_RETURN_FROM={first}、MANUAL_MARKET_RETURN_TO={last} 重跑 test_backfill_market_forward_returns",
+        dates.len()
+    )]
 }
 
 /// 未來報酬短天期缺漏的基準日：列出最早的幾天與總天數，並提示重跑的起日。
