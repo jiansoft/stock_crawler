@@ -3,7 +3,8 @@
 //! 對當日有成交的上市櫃股票逐檔讀取日線、還原權值後計算技術指標，把最新一日的交叉、站上或跌破均線、
 //! 超買超賣、52 週新高新低與區間突破寫入 `daily_technical_signal`，供 `/market/signals` 查詢與
 //! 持股訊號通知使用。規則都在 [`crate::domain::quote::technical`]，與 `/stocks/{symbol}/technicals`
-//! 同一套計算，結果一致。區間突破的歷史回補見 [`backfill_range_breakout`]。
+//! 同一套計算，結果一致。區間突破的歷史回補見
+//! [`backfill_range_breakout`](crate::app::calculation::technical_signal::backfill_range_breakout)。
 
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
