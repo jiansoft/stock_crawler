@@ -8,7 +8,7 @@ use crate::{
     domain::{
         health::{
             DataHealthRepository, DataHealthSnapshot, DerivedTableLatest, EtfNavDayCount,
-            ForwardReturnGap, ValuationRatioZeroCount,
+            ForwardReturnGap, StatementStats, ValuationRatioZeroCount,
         },
         quote::entity::MarketTradedCount,
     },
@@ -18,6 +18,9 @@ use crate::{
 #[cfg(test)]
 mod market_return_tests;
 mod sql;
+mod statements;
+#[cfg(test)]
+mod statements_tests;
 
 // 檢查用 SQL 搬到子模組；倉儲實作留在這裡。
 use self::sql::*;
@@ -60,6 +63,10 @@ async fn fetch_holder_level_health<'e>(
 
 #[async_trait]
 impl DataHealthRepository for PgDataHealthRepository {
+    async fn fetch_statement_stats(&self) -> Result<Option<StatementStats>> {
+        statements::fetch_statement_stats().await
+    }
+
     async fn fetch_snapshot(
         &self,
         baseline_from: NaiveDate,

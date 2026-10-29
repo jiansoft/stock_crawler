@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod db_statements;
 mod derived;
 mod etf;
 mod lagging;

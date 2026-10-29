@@ -3,9 +3,32 @@
 //! 只放「從資料庫量到的數字」，判斷是否異常的門檻在 app 層
 //! （`app::event::taiwan_stock::data_health`），方便單元測試。
 
-use chrono::NaiveDate;
+use chrono::{DateTime, Local, NaiveDate};
 
 use crate::domain::quote::entity::MarketTradedCount;
+
+/// `pg_stat_statements` 裡同一語句（`queryid`）的累計值：只算目前資料庫的最上層語句，
+/// 不同使用者的同一語句合併。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatementStat {
+    /// 語句指紋。
+    pub queryid: i64,
+    /// 累計執行次數。
+    pub calls: i64,
+    /// 累計執行時間（毫秒，不含規劃時間）。
+    pub total_ms: f64,
+    /// 語句內容（參數以 `$n` 代替）；沒有權限讀別人的語句時是 `<insufficient privilege>`。
+    pub query: String,
+}
+
+/// `pg_stat_statements` 的累計值與統計起算時間。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatementStats {
+    /// 統計上次重置的時間（`pg_stat_statements_info.stats_reset`）。
+    pub stats_reset: DateTime<Local>,
+    /// 各語句的累計值。
+    pub rows: Vec<StatementStat>,
+}
 
 /// 衍生資料表的最新日期。
 #[derive(Debug, Clone, PartialEq, Eq)]

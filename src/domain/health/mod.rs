@@ -4,7 +4,7 @@ pub mod entity;
 pub mod repository;
 
 pub use entity::{
-    DataHealthSnapshot, DerivedTableLatest, EtfNavDayCount, ForwardReturnGap,
-    ValuationRatioZeroCount,
+    DataHealthSnapshot, DerivedTableLatest, EtfNavDayCount, ForwardReturnGap, StatementStat,
+    StatementStats, ValuationRatioZeroCount,
 };
 pub use repository::DataHealthRepository;
