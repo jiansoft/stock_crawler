@@ -41,6 +41,10 @@ ON CONFLICT (stock_symbol) DO UPDATE SET
 /// - 除息日欄位是文字，以 CASE 擋掉 `-` 等非日期值再轉型；同一天多列股利取最大值
 ///   （債券 ETF 有月配與季配兩列記同一筆的情形，與還原日線的規則相同）。
 /// - 「近 12 個月」以每檔 ETF 自己的最新行情日為基準（沒有行情時用今天）。
+/// - 最新淨值、近 20 日溢價、受益人數、外資買賣超都以 LATERAL 逐檔走 `(stock_symbol, date)` 索引
+///   只讀最新幾列：原本 JOIN 全歷史再 DISTINCT ON／ROW_NUMBER，淨值回補到 2019 後要讀
+///   43 萬列淨值與 43 萬列籌碼（2026-10-29 正式庫 SELECT 615 ms，17:30 與本益比回補同跑時
+///   INSERT 1.2～1.5 秒，天天觸發 1 秒慢查詢警告）。
 const REFRESH_SNAPSHOT_SQL: &str = r#"
 WITH etf AS (
     SELECT s.stock_symbol, replace(s."Name", '&amp;', '&') AS name, s.stock_exchange_market_id AS market_id,
@@ -50,19 +54,20 @@ WITH etf AS (
     WHERE s.stock_industry_id = 9001 AND NOT s."SuspendListing"
 ),
 nav AS (
-    SELECT DISTINCT ON (n.stock_symbol) n.stock_symbol, n.date, n.source_time, n.estimated_nav, n.nav,
+    SELECT etf.stock_symbol, n.date, n.source_time, n.estimated_nav, n.nav,
            n.premium_rate, n.outstanding_units, n.units_change
-    FROM etf_daily_nav AS n JOIN etf USING (stock_symbol)
-    ORDER BY n.stock_symbol, n.date DESC
+    FROM etf
+    CROSS JOIN LATERAL (SELECT * FROM etf_daily_nav AS n
+                        WHERE n.stock_symbol = etf.stock_symbol
+                        ORDER BY n.date DESC LIMIT 1) AS n
 ),
 prem AS (
-    SELECT stock_symbol, AVG(premium_rate) AS avg20
-    FROM (SELECT n.stock_symbol, n.premium_rate,
-                 ROW_NUMBER() OVER (PARTITION BY n.stock_symbol ORDER BY n.date DESC) AS rn
-          FROM etf_daily_nav AS n JOIN etf USING (stock_symbol)
-          WHERE n.premium_rate IS NOT NULL) AS t
-    WHERE rn <= 20
-    GROUP BY stock_symbol
+    SELECT etf.stock_symbol, t.avg20
+    FROM etf
+    CROSS JOIN LATERAL (SELECT AVG(r.premium_rate) AS avg20
+                        FROM (SELECT n.premium_rate FROM etf_daily_nav AS n
+                              WHERE n.stock_symbol = etf.stock_symbol AND n.premium_rate IS NOT NULL
+                              ORDER BY n.date DESC LIMIT 20) AS r) AS t
 ),
 div_events AS (
     SELECT stock_symbol, ref_date, ex_date, MAX(cash) AS cash
@@ -94,15 +99,18 @@ next_div AS (
     ORDER BY stock_symbol, ex_date
 ),
 holders AS (
-    SELECT DISTINCT ON (h.stock_symbol) h.stock_symbol, h.total_holders, h.date
-    FROM holder_distribution AS h JOIN etf USING (stock_symbol)
-    ORDER BY h.stock_symbol, h.date DESC
+    SELECT etf.stock_symbol, h.total_holders, h.date
+    FROM etf
+    CROSS JOIN LATERAL (SELECT h.total_holders, h.date FROM holder_distribution AS h
+                        WHERE h.stock_symbol = etf.stock_symbol
+                        ORDER BY h.date DESC LIMIT 1) AS h
 ),
 chip AS (
-    SELECT DISTINCT ON (c.stock_symbol) c.stock_symbol, c.foreign_net, c.date
-    FROM chip_daily AS c JOIN etf USING (stock_symbol)
-    WHERE c.foreign_net IS NOT NULL
-    ORDER BY c.stock_symbol, c.date DESC
+    SELECT etf.stock_symbol, c.foreign_net, c.date
+    FROM etf
+    CROSS JOIN LATERAL (SELECT c.foreign_net, c.date FROM chip_daily AS c
+                        WHERE c.stock_symbol = etf.stock_symbol AND c.foreign_net IS NOT NULL
+                        ORDER BY c.date DESC LIMIT 1) AS c
 ),
 rows AS (
     SELECT etf.stock_symbol,

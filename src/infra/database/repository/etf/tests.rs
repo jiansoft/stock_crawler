@@ -29,6 +29,8 @@ async fn cleanup() {
         "DELETE FROM etf_performance WHERE stock_symbol = $1",
         "DELETE FROM etf_snapshot WHERE stock_symbol = $1",
         "DELETE FROM last_daily_quotes WHERE stock_symbol = $1",
+        "DELETE FROM holder_distribution WHERE stock_symbol = $1",
+        "DELETE FROM chip_daily WHERE stock_symbol = $1",
         "DELETE FROM dividend WHERE security_code = $1",
         "DELETE FROM stocks WHERE stock_symbol = $1",
     ] {
