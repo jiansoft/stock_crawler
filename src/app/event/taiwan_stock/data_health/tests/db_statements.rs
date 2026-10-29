@@ -3,7 +3,7 @@
 use chrono::{DateTime, Local, TimeZone};
 
 use super::super::db_statements::{
-    SavedStatements, TopStatement, load, save, statement_line, top_statements,
+    SavedStatements, TopStatement, load, save, statement_line, top_statements, weekly_statements,
 };
 use super::*;
 use crate::{domain::health::StatementStat, infra::nosql::redis::CLIENT};
@@ -166,4 +166,51 @@ async fn saved_statements_round_trip_through_redis() {
         loaded.totals,
         SavedStatements::new(&current, at(1, 0)).totals
     );
+}
+
+/// `fetch_statement_stats` 回固定結果的假倉儲；週報這一行不讀資料快照。
+struct FakeRepo(fn() -> Result<Option<StatementStats>>);
+
+#[async_trait::async_trait]
+impl DataHealthRepository for FakeRepo {
+    async fn fetch_snapshot(
+        &self,
+        _: NaiveDate,
+        _: NaiveDate,
+        _: NaiveDate,
+        _: i32,
+        _: NaiveDate,
+    ) -> Result<DataHealthSnapshot> {
+        unreachable!("資料庫端耗時不讀資料快照")
+    }
+
+    async fn fetch_statement_stats(&self) -> Result<Option<StatementStats>> {
+        (self.0)()
+    }
+}
+
+/// 沒裝擴充、讀取失敗都不回累計值（下次週報不存快照）；讀到時回傳給發送後存起來。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn weekly_statements_reports_each_outcome_and_returns_stats_to_save() {
+    dotenvy::dotenv().ok();
+    let (line, stats) = weekly_statements(&FakeRepo(|| Ok(None))).await;
+    assert_eq!(
+        (line.as_str(), stats),
+        ("資料庫端耗時：沒有安裝 pg_stat_statements", None)
+    );
+
+    let (line, stats) = weekly_statements(&FakeRepo(|| Err(anyhow::anyhow!("boom")))).await;
+    assert_eq!(
+        (line.as_str(), stats),
+        ("資料庫端耗時：讀取 pg_stat_statements 失敗（見日誌）", None)
+    );
+
+    // 有沒有上次的快照取決於 Redis，只確認列出了語句並回傳這次的累計值。
+    let (line, stats) = weekly_statements(&FakeRepo(|| Ok(Some(now())))).await;
+    assert!(line.starts_with("資料庫端耗時前 "), "{line}");
+    assert_eq!(stats, Some(now()));
 }

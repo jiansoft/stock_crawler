@@ -5,7 +5,7 @@
 
 use chrono::DateTime;
 
-use super::statements::{fetch_statement_stats, read_statements};
+use super::statements::read_statements;
 use super::*;
 use crate::domain::health::StatementStat;
 
@@ -97,5 +97,6 @@ async fn fetch_statement_stats_is_none_without_the_extension() {
         return;
     }
 
-    assert_eq!(fetch_statement_stats().await.expect("查詢應成功"), None);
+    let stats = PgDataHealthRepository::new().fetch_statement_stats().await;
+    assert_eq!(stats.expect("查詢應成功"), None);
 }
