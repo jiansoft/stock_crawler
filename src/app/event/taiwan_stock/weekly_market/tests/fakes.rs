@@ -80,6 +80,8 @@ pub(super) struct FakeQuote {
     pub(super) dates: Vec<NaiveDate>,
     pub(super) rs: Vec<RelativeStrengthDay>,
     pub(super) crossings: Vec<PeriodCrossing>,
+    /// 本月季節性；`None` 時查詢失敗。
+    pub(super) seasonality: Option<MonthSeasonality>,
     pub(super) fail: bool,
 }
 
@@ -156,6 +158,24 @@ impl ForwardReturnRepository for FakeQuote {
     }
 }
 
+#[async_trait]
+impl MarketSeasonalityQuery for FakeQuote {
+    async fn fetch_month_seasonality(
+        &self,
+        month: u32,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<MonthSeasonality> {
+        let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("合法日期");
+        assert_eq!(
+            (month, from, to),
+            (10, date(2018, 10, 1), date(2026, 9, 30)),
+            "資料日 2026-10-16 取 2018～2025 年的 10 月"
+        );
+        self.seasonality.ok_or_else(|| anyhow!("seasonality down"))
+    }
+}
+
 /// 依法人別回傳淨買賣的假籌碼查詢。
 #[derive(Default)]
 pub(super) struct FakeChip {
@@ -211,6 +231,7 @@ pub(super) fn quote() -> FakeQuote {
             crossing("1101", 50, false, Some(30)),
             crossing("2603", 50, false, Some(45)),
         ],
+        seasonality: None,
         fail: false,
     }
 }

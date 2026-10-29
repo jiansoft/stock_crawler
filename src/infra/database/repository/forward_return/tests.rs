@@ -294,3 +294,77 @@ async fn market_forward_returns_match_row_averages() {
     .unwrap();
     assert_eq!(left, 0, "報酬清掉後彙總列應跟著刪除");
 }
+
+/// 本月季節性只算上市櫃全部（`market_id = 0`）、期間內且月份相符的基準日，跨年度合併成
+/// Σsum20 / Σn20 與 Σwin20 / Σn20；沒有樣本的月份筆數為 0、平均與比例為 `None`。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn month_seasonality_merges_the_same_month_across_years() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 month_seasonality_merges_the_same_month_across_years：無資料庫連接");
+        return;
+    }
+    let pool = database::get_connection();
+    let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("日期合法");
+    let cleanup = || async {
+        sqlx::query("DELETE FROM daily_market_forward_return WHERE date BETWEEN $1 AND $2")
+            .bind(date(1972, 1, 1))
+            .bind(date(1974, 12, 31))
+            .execute(pool)
+            .await
+            .expect("清理測試資料");
+    };
+    cleanup().await;
+
+    // 計入：1972-03 兩天、1973-03 一天（上市櫃全部）。
+    // 不計入：1973-03 上市（market 2）、1973-04（別的月份）、1974-03（期間外）。
+    let rows: [(NaiveDate, i16, i64, Decimal, Decimal); 6] = [
+        (date(1972, 3, 2), 0, 10, dec!(20), dec!(6)),
+        (date(1972, 3, 20), 0, 10, dec!(-5), dec!(4)),
+        (date(1973, 3, 5), 0, 20, dec!(45), dec!(12)),
+        (date(1973, 3, 5), 2, 100, dec!(999), dec!(100)),
+        (date(1973, 4, 2), 0, 50, dec!(500), dec!(50)),
+        (date(1974, 3, 4), 0, 50, dec!(500), dec!(50)),
+    ];
+    for (day, market, n20, sum20, win20) in rows {
+        sqlx::query(
+            "INSERT INTO daily_market_forward_return (date, market_id, n5, n20, sum20, win20, n60, n120, n240)
+             VALUES ($1, $2, 0, $3, $4, $5, 0, 0, 0)",
+        )
+        .bind(day)
+        .bind(market)
+        .bind(n20)
+        .bind(sum20)
+        .bind(win20)
+        .execute(pool)
+        .await
+        .expect("寫入彙總列");
+    }
+
+    let repo = PgQuoteRepository::new();
+    let march = repo
+        .fetch_month_seasonality(3, date(1972, 1, 1), date(1973, 12, 31))
+        .await
+        .expect("查詢應成功");
+    let july = repo
+        .fetch_month_seasonality(7, date(1972, 1, 1), date(1973, 12, 31))
+        .await
+        .expect("查詢應成功");
+    cleanup().await;
+
+    // 平均 (20 - 5 + 45) / 40 = 1.5%；上漲比例 (6 + 4 + 12) / 40 = 0.55。
+    assert_eq!(
+        march,
+        MonthSeasonality {
+            years: 2,
+            samples: 40,
+            avg_return: Some(1.5),
+            win_rate: Some(0.55),
+        }
+    );
+    assert_eq!(july, MonthSeasonality::default());
+}

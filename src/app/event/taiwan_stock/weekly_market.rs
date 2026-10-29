@@ -6,7 +6,8 @@
 //!   （見 [`crate::domain::market_index::regime`]）、這週穿越 20／60／240 日均線的日子，以及市場廣度
 //!   （站上 20／60／240 日均線的股票比例、與一週前比較，與這週創 52 週新高／新低的家次，見
 //!   [`crate::domain::market_index::breadth`]），以及上市櫃本益比、股價淨值比中位數在近 5 年的位置（見
-//!   [`crate::domain::market_index::valuation`]）。
+//!   [`crate::domain::market_index::valuation`]），以及資料日所在月份在前 8 年同月的大盤等權 20 日平均報酬
+//!   與上漲比例（見 [`market::month_seasonality`]）。
 //! - 產業相對強度：成分股 RS 中位數（見 [`crate::domain::quote::relative_strength`]）最強、最弱，
 //!   以及與 [`WEEK_DAYS`] 個交易日前相比轉強、轉弱最多的產業；成分股少於
 //!   [`industry::MIN_INDUSTRY_STOCKS`] 檔的產業不列。
@@ -55,7 +56,7 @@ use self::{
     holding::{HoldingSection, holding_moves},
     holding_flow::{broker_flow_section, holding_flow_section},
     industry::{IndustrySection, industry_section},
-    market::{RegimeSection, regime_section, valuation_level},
+    market::{RegimeSection, month_seasonality, regime_section, valuation_level},
     strategy::{StrategySection, strategy_section},
 };
 use super::holdings;
@@ -68,7 +69,7 @@ use crate::{
         },
         portfolio::{chip::HoldingBrokerQuery, health::HoldingFundamentalsQuery},
         quote::{
-            forward_return::ForwardReturnRepository,
+            forward_return::{ForwardReturnRepository, MarketSeasonalityQuery},
             relative_strength::{
                 RelativeStrengthCrossingQuery, RelativeStrengthQuery, ScoredUniverseQuery,
             },
@@ -148,6 +149,7 @@ async fn run(
          + RelativeStrengthQuery
          + RelativeStrengthCrossingQuery
          + ForwardReturnRepository
+         + MarketSeasonalityQuery
      ),
     chip: &impl ChipFlowQuery,
     index: &(impl IndexCloseQuery + BreadthQuery),
@@ -171,6 +173,13 @@ async fn run(
                 tracing::warn!("每週市場摘要：讀取估值水位失敗: {why:#}");
                 None
             });
+        section.seasonality = match month_seasonality(quote, section.state.date).await {
+            Ok(seasonality) => Some(seasonality),
+            Err(why) => {
+                tracing::warn!("每週市場摘要：讀取本月季節性失敗: {why:#}");
+                None
+            }
+        };
     }
     let industries = industry_section(quote, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取產業相對強度失敗: {why:#}");

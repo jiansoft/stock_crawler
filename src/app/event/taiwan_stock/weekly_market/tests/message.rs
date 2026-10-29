@@ -217,6 +217,76 @@ async fn run_appends_valuation_level_to_regime() {
     assert!(!message.contains("估值水位"), "{message}");
 }
 
+/// 本月季節性接在大盤趨勢之後；讀取失敗（預設的假倉儲）只少這一行。
+#[tokio::test]
+async fn run_appends_month_seasonality_to_regime() {
+    let seasonal_quote = FakeQuote {
+        seasonality: Some(MonthSeasonality {
+            years: 8,
+            samples: 120_000,
+            avg_return: Some(1.234),
+            win_rate: Some(0.5612),
+        }),
+        ..quote()
+    };
+    for (repo, expected) in [(&seasonal_quote, true), (&quote(), false)] {
+        let message = run(
+            repo,
+            &chip(),
+            &index(),
+            &FakeValuation::default(),
+            &portfolio(),
+            day(17),
+            &holdings(),
+            None,
+            &[],
+            None,
+            &[],
+        )
+        .await
+        .expect("有內容");
+        let line = "• 10 月季節性（近 8 年同月）：大盤等權 20 日平均報酬 +1.23%、上漲比例 56.1%";
+        assert_eq!(message.contains(&esc(line)), expected, "{message}");
+    }
+}
+
+/// 季節性期間：前 8 年同月 1 日到今年同月 1 日的前一天；1 月跨年、閏日也正確。
+#[test]
+fn seasonality_range_covers_the_previous_eight_years() {
+    let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("合法日期");
+    assert_eq!(
+        market::seasonality_range(date(2026, 10, 16)),
+        (date(2018, 10, 1), date(2026, 9, 30))
+    );
+    assert_eq!(
+        market::seasonality_range(date(2027, 1, 9)),
+        (date(2019, 1, 1), date(2026, 12, 31))
+    );
+    assert_eq!(
+        market::seasonality_range(date(2028, 2, 29)),
+        (date(2020, 2, 1), date(2028, 1, 31))
+    );
+}
+
+/// 沒有樣本時不列；負報酬帶負號。
+#[test]
+fn seasonality_line_formats_sign_and_skips_empty() {
+    assert_eq!(
+        market::seasonality_line(3, &MonthSeasonality::default()),
+        None
+    );
+    let seasonality = MonthSeasonality {
+        years: 5,
+        samples: 10,
+        avg_return: Some(-0.5),
+        win_rate: Some(0.4),
+    };
+    assert_eq!(
+        market::seasonality_line(3, &seasonality).as_deref(),
+        Some("• 3 月季節性（近 5 年同月）：大盤等權 20 日平均報酬 -0.50%、上漲比例 40.0%")
+    );
+}
+
 /// 數字格式：分數變化與億元都帶正負號、一位小數。
 #[test]
 fn number_formats() {
