@@ -1,3 +1,5 @@
+// 正式庫停機與重啟監控
+pub mod db_health;
 // 領域事件處理器與派發器
 pub mod handlers;
 // 正式站主機（pi）的供電、記憶體與 SD 卡健康檢查

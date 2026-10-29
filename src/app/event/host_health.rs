@@ -285,7 +285,8 @@ pub async fn execute() -> Result<()> {
     Ok(())
 }
 
-/// 排程入口（23:30）：記一行當日彙總，後面附當日慢查詢（[`logging::slow_query::daily_summary`]）；
+/// 排程入口（23:30）：記一行當日彙總，後面附當日資料庫可用性（[`super::db_health::daily_summary`]）
+/// 與慢查詢（[`logging::slow_query::daily_summary`]）；
 /// 當天沒有主機檢查紀錄（非 pi）時只記慢查詢。
 ///
 /// # Errors
@@ -295,6 +296,10 @@ pub async fn summarize() -> Result<()> {
     let today = Local::now().date_naive();
     let summary = STATS.lock().ok().and_then(|stats| stats.summary(today));
     let slow = logging::slow_query::daily_summary(today);
+    let slow = match super::db_health::daily_summary(today) {
+        Some(database) => format!("{database}｜{slow}"),
+        None => slow,
+    };
     match summary {
         Some(summary) => tracing::info!("{summary}｜{slow}"),
         None => tracing::info!("慢查詢彙總 {today}：{slow}"),

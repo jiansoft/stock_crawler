@@ -16,6 +16,9 @@ pub mod table;
 /// 領域倉儲實現。
 pub mod repository;
 
+/// 資料庫伺服器的啟動時間與統計重置時間（停機／重啟監控用）。
+pub mod server_status;
+
 /// 全程式共用的 PostgreSQL 連線池單例（singleton）。
 ///
 /// - `Lazy`：第一次被使用時才建立，避免程式啟動就付出成本。
@@ -161,6 +164,19 @@ pub(crate) fn redacted_postgresql_summary() -> String {
     )
 }
 
+/// 連線池與單次連線共用的連線參數。
+///
+/// 逐欄設定（見 [`PostgresSQL::new`]）；application_name 方便在 pg_stat_activity 識別本程式的連線。
+fn connect_options() -> PgConnectOptions {
+    PgConnectOptions::new()
+        .host(&config::SETTINGS.postgresql.host)
+        .port(config::SETTINGS.postgresql.port as u16)
+        .username(&config::SETTINGS.postgresql.user)
+        .password(&config::SETTINGS.postgresql.password)
+        .database(&config::SETTINGS.postgresql.db)
+        .application_name("stock_crawler_rust")
+}
+
 impl PostgresSQL {
     /// 建立 PostgreSQL 連線池。
     ///
@@ -227,15 +243,8 @@ impl PostgresSQL {
         statement_timeout: Option<Duration>,
         force_custom_plans: bool,
     ) -> PostgresSQL {
-        // 逐欄設定連線參數；application_name 方便在 pg_stat_activity 識別本程式的連線。
-        let options = PgConnectOptions::new()
-            .host(&config::SETTINGS.postgresql.host)
-            .port(config::SETTINGS.postgresql.port as u16)
-            .username(&config::SETTINGS.postgresql.user)
-            .password(&config::SETTINGS.postgresql.password)
-            .database(&config::SETTINGS.postgresql.db)
-            .application_name("stock_crawler_rust")
-            .log_slow_statements(log::LevelFilter::Warn, slow_statement_threshold);
+        let options =
+            connect_options().log_slow_statements(log::LevelFilter::Warn, slow_statement_threshold);
         // statement_timeout 以 startup 參數設定成 session 預設值（毫秒），不需額外往返。
         let options = match statement_timeout {
             Some(timeout) => {
