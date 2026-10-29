@@ -159,3 +159,95 @@ async fn snapshot_combines_quote_nav_dividends_and_performance() {
     assert_eq!(left, 0);
     cleanup().await;
 }
+
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn snapshot_reads_only_the_latest_nav_holders_and_chip_rows() {
+    dotenvy::dotenv().ok();
+    cleanup().await;
+    let pool = database::get_connection();
+    let repo = PgEtfRepository::new();
+
+    sqlx::query(
+        r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id, "SuspendListing")
+           VALUES ($1, '測試市值型', $1, 2, 9001, false)"#,
+    )
+    .bind(FAKE)
+    .execute(pool)
+    .await
+    .expect("建立假 ETF");
+    // 4/1～4/24 每天一列淨值，溢價率等於日；最新一天（4/24）沒有溢價率。
+    // 近 20 筆有溢價率的是 4/4～4/23，平均 13.5（全歷史平均是 12）。
+    sqlx::query(
+        "INSERT INTO etf_daily_nav (date, stock_symbol, estimated_nav, premium_rate)
+         SELECT d::date, $1, EXTRACT(DAY FROM d),
+                CASE WHEN d::date < $3 THEN EXTRACT(DAY FROM d) END
+         FROM generate_series($2::date, $3::date, INTERVAL '1 day') AS d",
+    )
+    .bind(FAKE)
+    .bind(day(1))
+    .bind(day(24))
+    .execute(pool)
+    .await
+    .expect("寫入淨值");
+    for (date, holders) in [(day(10), 100_i64), (day(17), 200)] {
+        sqlx::query(
+            "INSERT INTO holder_distribution (date, stock_symbol, total_holders) VALUES ($1, $2, $3)",
+        )
+        .bind(date)
+        .bind(FAKE)
+        .bind(holders)
+        .execute(pool)
+        .await
+        .expect("寫入受益人數");
+    }
+    // 最新一天外資買賣超還沒出來（NULL），要取前一筆有值的。
+    for (date, foreign_net) in [(day(20), Some(5_i64)), (day(23), None)] {
+        sqlx::query("INSERT INTO chip_daily (date, stock_symbol, foreign_net) VALUES ($1, $2, $3)")
+            .bind(date)
+            .bind(FAKE)
+            .bind(foreign_net)
+            .execute(pool)
+            .await
+            .expect("寫入籌碼");
+    }
+
+    assert!(repo.refresh_snapshot().await.expect("重建快照") >= 1);
+
+    type Row = (
+        Option<NaiveDate>,
+        Option<Decimal>,
+        Option<Decimal>,
+        Option<Decimal>,
+        Option<i64>,
+        Option<NaiveDate>,
+        Option<i64>,
+        Option<NaiveDate>,
+    );
+    let row: Row = sqlx::query_as(
+        "SELECT nav_date, nav, premium_rate, premium_avg_20d, holders, holders_date,
+                foreign_net, chip_date
+         FROM etf_snapshot WHERE stock_symbol = $1",
+    )
+    .bind(FAKE)
+    .fetch_one(pool)
+    .await
+    .expect("讀回快照");
+    assert_eq!(
+        row,
+        (
+            Some(day(24)),
+            Some(dec!(24)),
+            None,
+            Some(dec!(13.5)),
+            Some(200),
+            Some(day(17)),
+            Some(5),
+            Some(day(20)),
+        )
+    );
+    cleanup().await;
+}
