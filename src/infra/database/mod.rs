@@ -37,7 +37,7 @@ const SLOW_STATEMENT_THRESHOLD: Duration = Duration::from_secs(1);
 const BATCH_SLOW_STATEMENT_THRESHOLD: Duration = Duration::from_secs(5);
 /// 批次連線池的連線上限：兩支批次查詢各 4 桶，同時跑也不必排隊；條件選股回測的偏移穩健度一次
 /// 同時跑 4 個偏移。
-const BATCH_MAX_CONNECTIONS: u32 = 8;
+pub(crate) const BATCH_MAX_CONNECTIONS: u32 = 8;
 
 /// Data API 請求使用的查詢預算：決定連線池與 PostgreSQL `statement_timeout`。
 ///
