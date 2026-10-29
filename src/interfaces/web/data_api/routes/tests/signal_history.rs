@@ -366,7 +366,7 @@ async fn signal_performance_endpoint_db_semantics() {
         ("to=1991-1-02", StatusCode::UNPROCESSABLE_ENTITY),
         ("from=bad", StatusCode::UNPROCESSABLE_ENTITY),
         ("market=otc", StatusCode::UNPROCESSABLE_ENTITY),
-        ("kind=breakout", StatusCode::UNPROCESSABLE_ENTITY),
+        ("kind=breakdown", StatusCode::UNPROCESSABLE_ENTITY),
         ("indicator=ma10", StatusCode::UNPROCESSABLE_ENTITY),
         (
             "industry=%E4%B8%8D%E5%AD%98%E5%9C%A8",
