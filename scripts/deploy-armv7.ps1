@@ -92,6 +92,9 @@ $SmokePaths = @(
     '/api/v1/stocks/screen?min_rs_score=80'
     '/api/v1/portfolio/targets'
     '/api/v1/portfolio/targets/revisions?dimension=stock'
+    # 技術頁含區間突破狀態（多讀成交量覆蓋索引）、全市場訊號依來源篩選。
+    '/api/v1/stocks/2330/technicals'
+    '/api/v1/market/signals?indicator=range_breakout'
 )
 
 function Invoke-Checked
