@@ -29,6 +29,32 @@ pub trait ForwardReturnRepository: Send + Sync {
     ) -> Result<u64>;
 }
 
+/// 大盤（上市櫃全部股票等權）在某個月份的 20 日未來報酬，跨年度合併；讀預先彙總的
+/// `daily_market_forward_return`，口徑與 `/market/forward-returns` 的 `by_month` 相同。
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct MonthSeasonality {
+    /// 涵蓋的年度數。
+    pub years: i64,
+    /// 已滿 20 日、有報酬的樣本數。
+    pub samples: i64,
+    /// 平均 20 日報酬（%）；沒有樣本為 `None`。
+    pub avg_return: Option<f64>,
+    /// 20 日報酬大於 0 的比例（0–1）；沒有樣本為 `None`。
+    pub win_rate: Option<f64>,
+}
+
+/// 大盤季節性的查詢。
+#[async_trait]
+pub trait MarketSeasonalityQuery: Send + Sync {
+    /// 基準日在 `from`～`to`（含）之間、且落在 `month` 月（1–12）的大盤 20 日未來報酬。
+    async fn fetch_month_seasonality(
+        &self,
+        month: u32,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<MonthSeasonality>;
+}
+
 /// 收盤後衍生資料的筆數，供收盤完整性檢查判斷技術訊號與未來報酬是否寫入。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DerivedCounts {

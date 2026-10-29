@@ -26,6 +26,7 @@ use crate::domain::market_index::{
     regime,
     valuation::{MarketValuationDay, MarketValuationRepository},
 };
+use crate::domain::quote::forward_return::MonthSeasonality;
 use crate::domain::quote::relative_strength::{
     CrossDirection, PeriodCrossing, RelativeStrengthDay, ScoredStock, UniverseRow,
 };

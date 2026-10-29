@@ -1,17 +1,24 @@
-//! 每週市場摘要的大盤趨勢一段：加權指數收盤、近一週漲跌、均線排列與位置、這週穿越均線的日子、市場廣度
-//! 與估值水位（上市櫃本益比、股價淨值比中位數在近 [`valuation::LEVEL_YEARS`] 年的位置）。
+//! 每週市場摘要的大盤趨勢一段：加權指數收盤、近一週漲跌、均線排列與位置、這週穿越均線的日子、市場廣度、
+//! 估值水位（上市櫃本益比、股價淨值比中位數在近 [`valuation::LEVEL_YEARS`] 年的位置）與本月季節性
+//! （前 [`SEASONALITY_YEARS`] 年同月的大盤等權 20 日報酬）。
 
 use std::fmt::Write;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use chrono::{Datelike, Days, NaiveDate};
 
 use super::WEEK_DAYS;
-use crate::domain::market_index::{
-    breadth::{self, BreadthQuery, MarketBreadth},
-    regime::{self, IndexCloseQuery, MarketRegime, MovingAverageCross},
-    valuation::{self, MarketValuationRepository, ValuationLevel},
+use crate::domain::{
+    market_index::{
+        breadth::{self, BreadthQuery, MarketBreadth},
+        regime::{self, IndexCloseQuery, MarketRegime, MovingAverageCross},
+        valuation::{self, MarketValuationRepository, ValuationLevel},
+    },
+    quote::forward_return::{MarketSeasonalityQuery, MonthSeasonality},
 };
+
+/// 本月季節性回看的年數（不含今年：今年這個月的 20 日報酬大多還沒滿期）。
+pub(super) const SEASONALITY_YEARS: i32 = 8;
 
 /// 大盤趨勢一段要列出位置的均線天數。
 pub(super) const REGIME_MA_DAYS: [u16; 2] = [60, 240];
@@ -28,6 +35,41 @@ pub(super) struct RegimeSection {
     pub(super) breadth: Option<MarketBreadth>,
     /// 估值水位；由 [`valuation_level`] 另外查詢後填入，沒有資料或讀取失敗為 `None`。
     pub(super) valuation: Option<ValuationLevel>,
+    /// 本月季節性；由 [`month_seasonality`] 另外查詢後填入，讀取失敗為 `None`。
+    pub(super) seasonality: Option<MonthSeasonality>,
+}
+
+/// 資料日所在月份在前 [`SEASONALITY_YEARS`] 年同月（例如 2026-10 取 2018～2025 年的 10 月）的大盤等權
+/// 20 日未來報酬。
+pub(super) async fn month_seasonality(
+    repo: &impl MarketSeasonalityQuery,
+    date: NaiveDate,
+) -> Result<MonthSeasonality> {
+    let (from, to) = seasonality_range(date);
+    repo.fetch_month_seasonality(date.month(), from, to).await
+}
+
+/// [`month_seasonality`] 的查詢期間：`SEASONALITY_YEARS` 年前同月 1 日到今年同月 1 日的前一天。
+pub(super) fn seasonality_range(date: NaiveDate) -> (NaiveDate, NaiveDate) {
+    let first = date.with_day(1).unwrap_or(date);
+    let from = first
+        .with_year(first.year() - SEASONALITY_YEARS)
+        .unwrap_or(NaiveDate::MIN);
+    let to = first.checked_sub_days(Days::new(1)).unwrap_or(first);
+    (from, to)
+}
+
+/// 本月季節性一行，例如「• 10 月季節性（近 8 年同月）：大盤等權 20 日平均報酬 +1.23%、上漲比例 56.0%」；
+/// 沒有樣本（平均報酬為 `None`）時回 `None`。
+pub(super) fn seasonality_line(month: u32, seasonality: &MonthSeasonality) -> Option<String> {
+    let (Some(avg), Some(win)) = (seasonality.avg_return, seasonality.win_rate) else {
+        return None;
+    };
+    Some(format!(
+        "• {month} 月季節性（近 {} 年同月）：大盤等權 20 日平均報酬 {avg:+.2}%、上漲比例 {:.1}%",
+        seasonality.years,
+        win * 100.0
+    ))
 }
 
 /// `date`（含）之前近 [`valuation::LEVEL_YEARS`] 年的上市櫃估值水位，附 [`WEEK_DAYS`] 個交易日前的本益比
@@ -75,6 +117,7 @@ pub(super) async fn regime_section(
         crosses,
         breadth,
         valuation: None,
+        seasonality: None,
     }))
 }
 
@@ -161,6 +204,13 @@ pub(super) fn lines(section: &RegimeSection) -> Vec<String> {
         lines.push(breadth_line(breadth));
     }
     if let Some(line) = section.valuation.as_ref().and_then(valuation_line) {
+        lines.push(line);
+    }
+    if let Some(line) = section
+        .seasonality
+        .as_ref()
+        .and_then(|seasonality| seasonality_line(state.date.month(), seasonality))
+    {
         lines.push(line);
     }
     lines

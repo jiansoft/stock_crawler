@@ -1,4 +1,4 @@
-//! 未來報酬（[`ForwardReturnRepository`]）的 PostgreSQL 實作。
+//! 未來報酬（[`ForwardReturnRepository`]）與大盤季節性（[`MarketSeasonalityQuery`]）的 PostgreSQL 實作。
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -6,7 +6,10 @@ use chrono::NaiveDate;
 
 use crate::{
     domain::quote::{
-        forward_return::{DerivedCounts, DerivedDataQuery, ForwardReturnRepository},
+        forward_return::{
+            DerivedCounts, DerivedDataQuery, ForwardReturnRepository, MarketSeasonalityQuery,
+            MonthSeasonality,
+        },
         relative_strength::CROSSING_INDICATORS,
     },
     infra::database::{self, repository::quote::PgQuoteRepository},
@@ -188,6 +191,43 @@ pub async fn refresh_market_forward_returns_between(
 
 /// 歷史回補每次重算的天數（一天約 2,000 列，100 天約 20 萬列）。
 const MARKET_REFRESH_CHUNK: usize = 100;
+
+/// 上市櫃全部（`market_id = 0`）基準日在 `$1`～`$2`、月份為 `$3` 的 20 日未來報酬；彙總口徑與
+/// `/market/forward-returns` 的 `by_month` 相同。
+const MONTH_SEASONALITY_SQL: &str = r#"
+SELECT count(DISTINCT EXTRACT(YEAR FROM date))::bigint AS years,
+       COALESCE(SUM(n20), 0)::bigint AS samples,
+       (SUM(sum20) / NULLIF(SUM(n20), 0))::float8 AS avg_return,
+       (SUM(win20) / NULLIF(SUM(n20), 0))::float8 AS win_rate
+FROM daily_market_forward_return
+WHERE market_id = 0
+  AND date BETWEEN $1 AND $2
+  AND EXTRACT(MONTH FROM date)::int = $3
+"#;
+
+#[async_trait]
+impl MarketSeasonalityQuery for PgQuoteRepository {
+    async fn fetch_month_seasonality(
+        &self,
+        month: u32,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<MonthSeasonality> {
+        let (years, samples, avg_return, win_rate): (i64, i64, Option<f64>, Option<f64>) =
+            sqlx::query_as(MONTH_SEASONALITY_SQL)
+                .bind(from)
+                .bind(to)
+                .bind(i32::try_from(month).unwrap_or(i32::MAX))
+                .fetch_one(database::get_connection())
+                .await?;
+        Ok(MonthSeasonality {
+            years,
+            samples,
+            avg_return,
+            win_rate,
+        })
+    }
+}
 
 /// `$1` 的技術訊號筆數（不含相對強度穿越訊號 `$3`，那些隨每日相對強度寫入），以及基準日 `$2`
 /// 已寫入 5 日報酬的筆數與 `$1` 的相對強度筆數（都走主鍵前綴）。
