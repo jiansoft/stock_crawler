@@ -7,6 +7,7 @@ mod major;
 mod query_plans;
 mod revenue_industry;
 mod validation;
+mod validation_chip;
 mod valuation_margins;
 
 use chrono::NaiveDate;
