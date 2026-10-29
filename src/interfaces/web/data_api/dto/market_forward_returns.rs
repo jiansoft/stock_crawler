@@ -5,6 +5,17 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::{BenchmarkStat, BenchmarkYear, MarketParamValue};
 
+/// 某個月份（基準日所在月份，跨年度合併）的大盤基準。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct BenchmarkMonth {
+    /// 月份（1～12）。
+    pub(crate) month: i32,
+    /// 這個月份涵蓋幾個年度；年度少時（例如回看 3 年）只有 3 個樣本年，季節性參考價值有限。
+    pub(crate) years: i64,
+    /// 各天期的平均報酬與上漲比例（所有年度該月份的基準日合併計算，股票多的年度權重較大）。
+    pub(crate) benchmark: Vec<BenchmarkStat>,
+}
+
 /// 大盤未來報酬的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct MarketForwardReturnsParams {
@@ -36,4 +47,6 @@ pub(crate) struct MarketForwardReturnsResponse {
     pub(crate) benchmark: Vec<BenchmarkStat>,
     /// 各年度（基準日所在年度），由舊到新；年底的基準日之後的報酬可能落在下一年，仍算在基準日的年度。
     pub(crate) by_year: Vec<BenchmarkYear>,
+    /// 依基準日月份（1～12 月，跨年度合併），只列有資料的月份；報酬區間可能跨到下個月，仍算在基準日的月份。
+    pub(crate) by_month: Vec<BenchmarkMonth>,
 }

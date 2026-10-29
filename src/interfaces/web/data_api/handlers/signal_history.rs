@@ -26,7 +26,7 @@ mod sql;
 mod stock_signals;
 mod validation;
 
-pub(super) use self::benchmark::{benchmark_output, fetch_benchmark};
+pub(super) use self::benchmark::{benchmark_output, fetch_benchmark, fetch_benchmark_by_month};
 pub(crate) use self::performance::{__path_signal_performance, signal_performance};
 pub(super) use self::performance::{horizon_stats, performance_years, total_row};
 pub(super) use self::rows::PerformanceRow;

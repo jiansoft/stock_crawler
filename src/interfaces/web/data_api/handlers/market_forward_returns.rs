@@ -1,5 +1,5 @@
 //! `/market/forward-returns` handler：大盤（同市場全部股票等權）各天期未來報酬的平均與上漲比例，
-//! 整段期間與依年度。
+//! 整段期間、依年度與依月份（季節性）。
 //!
 //! 讀預先彙總的 `daily_market_forward_return`，與訊號績效、法人連買績效的大盤基準共用
 //! [`fetch_benchmark`]；基準日落在期間內才計入。
@@ -12,7 +12,7 @@ use axum::{
 };
 use chrono::{Local, Months, NaiveDate};
 
-use super::signal_history::{benchmark_output, fetch_benchmark};
+use super::signal_history::{benchmark_output, fetch_benchmark, fetch_benchmark_by_month};
 use super::{database_error, error_response, market_id_for_stats, parse_optional_date};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
@@ -72,6 +72,10 @@ pub(crate) async fn market_forward_returns(
         Ok(benchmark) => benchmark,
         Err(error) => return database_error(error),
     };
+    let by_month = match fetch_benchmark_by_month(from, to, market_id).await {
+        Ok(by_month) => by_month,
+        Err(error) => return database_error(error),
+    };
     let (benchmark, by_year) = benchmark_output(&benchmark);
     Json(MarketForwardReturnsResponse {
         from: from.to_string(),
@@ -81,6 +85,7 @@ pub(crate) async fn market_forward_returns(
         data_as_of: data_as_of.to_string(),
         benchmark,
         by_year: by_year.unwrap_or_default(),
+        by_month,
     })
     .into_response()
 }

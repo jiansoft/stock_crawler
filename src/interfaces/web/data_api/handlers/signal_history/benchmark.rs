@@ -3,10 +3,10 @@
 use chrono::NaiveDate;
 
 use super::HORIZONS;
-use super::rows::BenchmarkRow;
-use super::sql::{BENCHMARK_BY_YEAR_SQL, BENCHMARK_SQL};
+use super::rows::{BenchmarkMonthRow, BenchmarkRow};
+use super::sql::{BENCHMARK_BY_MONTH_SQL, BENCHMARK_BY_YEAR_SQL, BENCHMARK_SQL};
 use crate::infra::database;
-use crate::interfaces::web::data_api::dto::{BenchmarkStat, BenchmarkYear};
+use crate::interfaces::web::data_api::dto::{BenchmarkMonth, BenchmarkStat, BenchmarkYear};
 use crate::interfaces::web::data_api::handlers::{round2, round4};
 
 /// 期間內的大盤基準；`by_year` 時一併取各年度的基準。
@@ -43,6 +43,30 @@ pub(in crate::interfaces::web::data_api::handlers) async fn fetch_benchmark(
         .fetch_all(pool)
         .await?;
     Ok(split_benchmark(rows))
+}
+
+/// 期間內依基準日月份（跨年度合併）的大盤基準，由 1 月到 12 月；沒有資料的月份不列。
+pub(in crate::interfaces::web::data_api::handlers) async fn fetch_benchmark_by_month(
+    from: NaiveDate,
+    to: NaiveDate,
+    market_id: i32,
+) -> Result<Vec<BenchmarkMonth>, sqlx::Error> {
+    // 與 fetch_benchmark 相同，不快取 prepared statement，避免 generic plan 剪不掉市場條件。
+    let rows: Vec<BenchmarkMonthRow> = sqlx::query_as(BENCHMARK_BY_MONTH_SQL)
+        .bind(from)
+        .bind(to)
+        .bind(market_id)
+        .persistent(false)
+        .fetch_all(database::get_connection())
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| BenchmarkMonth {
+            month: row.month,
+            years: row.years,
+            benchmark: benchmark_stats(&row.stats),
+        })
+        .collect())
 }
 
 /// 把 [`BENCHMARK_BY_YEAR_SQL`] 的結果分成整段期間與各年度（由舊到新）。

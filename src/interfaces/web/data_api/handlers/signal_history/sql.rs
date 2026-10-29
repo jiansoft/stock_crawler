@@ -211,6 +211,17 @@ pub(super) const BENCHMARK_BY_YEAR_SQL: &str = concat!(
     "GROUP BY GROUPING SETS ((), (date_part('year', r.date)::int))\n"
 );
 
+/// [`BENCHMARK_SQL`] 依基準日的月份（1～12，跨年度合併）分組，附各月份涵蓋的年度數，由 1 月到 12 月。
+pub(in crate::interfaces::web::data_api::handlers) const BENCHMARK_BY_MONTH_SQL: &str = concat!(
+    "SELECT date_part('month', r.date)::int AS month,
+",
+    "    count(DISTINCT date_part('year', r.date))::bigint AS years,",
+    benchmark_columns!(),
+    "GROUP BY 1
+ORDER BY 1
+"
+);
+
 /// 個股在期間內的訊號，附當日報價與之後的報酬，由新到舊；`total` 為未套用 limit 的筆數。
 pub(super) const STOCK_SIGNALS_SQL: &str = r#"
 SELECT

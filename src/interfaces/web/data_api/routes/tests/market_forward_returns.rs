@@ -10,8 +10,9 @@ use crate::infra::database::repository::forward_return::refresh_market_forward_r
 /// 測試用假代號：FA 上市、FB 上櫃。
 const STOCKS: [(&str, i32); 2] = [("79979FA", 2), ("79979FB", 4)];
 
-/// `(基準日, 代號, 5 日, 20 日)` 報酬（%）：跨 1987、1988 兩個年度。
-const RETURNS: [(&str, &str, i64, Option<i64>); 4] = [
+/// `(基準日, 代號, 5 日, 20 日)` 報酬（%）：跨 1987、1988 兩個年度；1986-01 只在回看 3 年時算到。
+const RETURNS: [(&str, &str, i64, Option<i64>); 5] = [
+    ("1986-01-06", "79979FA", 10, None),
     ("1987-12-30", "79979FA", 4, Some(10)),
     ("1987-12-30", "79979FB", -2, None),
     ("1988-01-04", "79979FA", 2, None),
@@ -70,7 +71,23 @@ async fn seed(pool: &sqlx::PgPool) {
         .expect("重算大盤彙總");
 }
 
-/// 等權平均與上漲比例、依年度拆分與市場篩選；參數錯誤回 422，期間沒有資料回 404。
+/// `by_month` 的 `(月份, 年度數, 5 日平均報酬)`。
+fn months(json: &serde_json::Value) -> Vec<(i64, i64, f64)> {
+    json["by_month"]
+        .as_array()
+        .expect("by_month")
+        .iter()
+        .map(|month| {
+            (
+                month["month"].as_i64().expect("month"),
+                month["years"].as_i64().expect("years"),
+                month["benchmark"][0]["avg_return"].as_f64().expect("avg"),
+            )
+        })
+        .collect()
+}
+
+/// 等權平均與上漲比例、依年度與月份拆分、市場篩選；參數錯誤回 422，期間沒有資料回 404。
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
@@ -124,6 +141,13 @@ async fn market_forward_returns_endpoint_db_semantics() {
         })
         .collect();
     assert_eq!(years, [(1987, 1.0), (1988, 4.0)]);
+    // 依月份：12 月只有 1987-12-30（4、−2），1 月只有 1988-01-04（2、6）。
+    assert_eq!(months(&json), [(1, 1, 4.0), (12, 1, 1.0)]);
+
+    // 回看 3 年：1 月合併 1986、1988 兩個年度（10、2、6 → 6）。
+    let (status, json) = get("/api/v1/market/forward-returns?date=1988-01-10&years=3").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(months(&json), [(1, 2, 6.0), (12, 1, 1.0)]);
 
     // 只看上櫃：FB 兩天 −2、6。
     let (status, json) =

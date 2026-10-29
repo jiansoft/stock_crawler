@@ -131,6 +131,17 @@ pub(in crate::interfaces::web::data_api::handlers) struct BenchmarkRow {
     pub(super) win240: Option<f64>,
 }
 
+/// [`super::sql::BENCHMARK_BY_MONTH_SQL`] 的一列。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub(in crate::interfaces::web::data_api::handlers) struct BenchmarkMonthRow {
+    /// 月份（1～12）。
+    pub(super) month: i32,
+    /// 這個月份涵蓋幾個年度。
+    pub(super) years: i64,
+    #[sqlx(flatten)]
+    pub(super) stats: BenchmarkRow,
+}
+
 /// [`STOCK_SIGNALS_SQL`] 的一列。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub(super) struct StockSignalRow {
