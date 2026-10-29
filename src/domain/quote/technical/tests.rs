@@ -248,7 +248,8 @@ fn signal_kind_names_are_stable() {
             "overbought",
             "oversold",
             "new_high",
-            "new_low"
+            "new_low",
+            "breakout"
         ]
     );
     for kind in SIGNAL_KINDS {
@@ -266,7 +267,7 @@ fn technical_signal_from_names() {
     assert_eq!(signal.kind, SignalKind::NewHigh);
     assert_eq!(signal.description, "說明");
     assert!(TechnicalSignal::from_names("ma1", "new_high", String::new()).is_none());
-    assert!(TechnicalSignal::from_names("kd", "breakout", String::new()).is_none());
+    assert!(TechnicalSignal::from_names("kd", "breakdown", String::new()).is_none());
 }
 
 /// 前 52 週的日線：每 7 天 5 個交易日、共 `days` 根，最高 10、最低 5，最後加上當日。

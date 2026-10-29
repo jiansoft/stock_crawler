@@ -30,6 +30,8 @@ pub(crate) enum SignalKindValue {
     NewHigh,
     /// 當日最低價創 52 週新低。
     NewLow,
+    /// 整理 30 日（幅度 20% 內）後收盤帶量（1.5 倍）突破整理高點，且離突破價不超過 5%。
+    Breakout,
 }
 
 /// OpenAPI 文件使用的訊號來源。
@@ -69,6 +71,9 @@ pub(crate) enum SignalIndicatorValue {
     /// 相對強度分數穿越 50 分。
     #[schema(rename = "rs50")]
     Rs50,
+    /// 區間整理後帶量突破（種類 `breakout`）。
+    #[schema(rename = "range_breakout")]
+    RangeBreakout,
 }
 
 /// 技術訊號選股的 query string。

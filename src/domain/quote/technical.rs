@@ -34,7 +34,11 @@ pub const RS80_INDICATOR: &str = "rs80";
 /// 相對強度分數穿越 50 分的訊號來源名稱。
 pub const RS50_INDICATOR: &str = "rs50";
 
+/// 區間整理後帶量突破的訊號來源名稱（見 [`breakout`]）。
+pub const RANGE_BREAKOUT_INDICATOR: &str = "range_breakout";
+
 mod bars;
+pub mod breakout;
 mod detection;
 mod indicators;
 mod signal;
@@ -42,6 +46,7 @@ mod signal;
 pub use self::bars::{
     PriceAdjustment, PriceBar, PriceBarRepository, adjust_bars, adjustment_factors,
 };
+pub use self::breakout::{VolumeBar, range_breakout_signal};
 pub use self::detection::{fifty_two_week_signals, signals};
 pub use self::indicators::{IndicatorPoint, compute};
 pub use self::signal::{

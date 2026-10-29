@@ -7,6 +7,7 @@
 //! - 只通知中長期、出現頻率低的訊號（[`NOTIFY_INDICATORS`]）：52 週新高新低、收盤站上或跌破
 //!   季線與年線、20 日與 60 日均線交叉，以及相對強度（RS，見
 //!   [`crate::domain::quote::relative_strength`]）比前一個交易日站上或跌破 80、50 分。
+//!   區間整理後帶量突破（[`crate::domain::quote::technical::breakout`]，附突破價與量比）也通知。
 //!   KD、RSI 超買超賣與短天期均線幾乎天天有，不通知。
 //! - 每個訊號附上近一年全市場同一訊號出現後 20 個交易日的勝率與平均還原報酬（樣本至少
 //!   [`MIN_OUTCOME_SAMPLES`] 次才顯示）；統計查詢失敗只記錄警告，照常通知。
@@ -25,16 +26,17 @@ use crate::{
     domain::{
         portfolio::repository::PortfolioRepository,
         quote::technical::{
-            FIFTY_TWO_WEEK_INDICATOR, OUTCOME_HORIZON, RS50_INDICATOR, RS80_INDICATOR,
-            SignalOutcome, StockTechnicalSignal, TechnicalSignalQuery,
+            FIFTY_TWO_WEEK_INDICATOR, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RS50_INDICATOR,
+            RS80_INDICATOR, SignalOutcome, StockTechnicalSignal, TechnicalSignalQuery,
         },
     },
     infra::database::repository::{portfolio::PgPortfolioRepository, quote::PgQuoteRepository},
 };
 
 /// 要通知的訊號來源，也是同一檔股票內訊號的排列順序。
-pub const NOTIFY_INDICATORS: [&str; 6] = [
+pub const NOTIFY_INDICATORS: [&str; 7] = [
     FIFTY_TWO_WEEK_INDICATOR,
+    RANGE_BREAKOUT_INDICATOR,
     "close_ma240",
     "close_ma60",
     "ma20_ma60",

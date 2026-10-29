@@ -14,6 +14,18 @@ ORDER BY "Date" DESC
 LIMIT $3
 "#;
 
+/// 與 [`PRICE_BARS_SQL`] 同一批交易日的成交量；走 `(stock_symbol, "Date" DESC) INCLUDE ("ClosingPrice",
+/// "TradingVolume")` 覆蓋索引（index-only scan）。
+const VOLUMES_SQL: &str = r#"
+SELECT "Date", "TradingVolume"::float8
+FROM "DailyQuotes"
+WHERE stock_symbol = $1
+  AND "ClosingPrice" > 0
+  AND ($2::date IS NULL OR "Date" <= $2)
+ORDER BY "Date" DESC
+LIMIT $3
+"#;
+
 /// 多檔股票在 `$2`～`$3`（含）有成交的日線，依代號、日期由舊到新；走
 /// `(stock_symbol, "Date" DESC)` 覆蓋索引。價格在資料庫端轉成 `float8`：七年、數百檔的日線有數十萬列，
 /// 在 pi 上逐列解析 `NUMERIC` 比查詢本身慢一個數量級。
@@ -91,6 +103,25 @@ impl PriceBarRepository for PgQuoteRepository {
                 high: high.to_f64().unwrap_or_default(),
                 low: low.to_f64().unwrap_or_default(),
             })
+            .collect())
+    }
+
+    async fn fetch_volumes(
+        &self,
+        stock_symbol: &str,
+        until: Option<NaiveDate>,
+        limit: i64,
+    ) -> Result<Vec<VolumeBar>> {
+        let rows: Vec<(NaiveDate, f64)> = sqlx::query_as(VOLUMES_SQL)
+            .bind(stock_symbol)
+            .bind(until)
+            .bind(limit)
+            .fetch_all(database::get_connection())
+            .await?;
+        Ok(rows
+            .into_iter()
+            .rev()
+            .map(|(date, volume)| VolumeBar { date, volume })
             .collect())
     }
 

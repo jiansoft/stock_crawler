@@ -295,13 +295,13 @@ fn signal_filter_error(kind: Option<&str>, indicator: Option<&str>) -> Option<Re
     if kind.is_some_and(|kind| SignalKind::parse(kind).is_none()) {
         return Some(error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "kind 必須為 golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high 或 new_low",
+            "kind 必須為 golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high、new_low 或 breakout",
         ));
     }
     if indicator.is_some_and(|indicator| !SIGNAL_INDICATORS.contains(&indicator)) {
         return Some(error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "indicator 必須為 ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14、52_week、rs80 或 rs50",
+            "indicator 必須為 ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14、52_week、rs80、rs50 或 range_breakout",
         ));
     }
     None

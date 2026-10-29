@@ -188,6 +188,36 @@ async fn test_backfill_market_valuation() {
     println!("市場估值水位回補 {from}～{to}：共 {total} 列");
 }
 
+/// 只回補區間突破訊號（`daily_technical_signal` 的 `range_breakout` 來源），其他來源不動。
+///
+/// **會覆蓋指定期間的區間突破訊號**；每檔只讀一次整段日線與成交量，2019 年起全市場約數分鐘。
+/// 只讀資料庫既有日線，不呼叫外部網站。起訖日用環境變數 `MANUAL_RANGE_BREAKOUT_FROM`/
+/// `MANUAL_RANGE_BREAKOUT_TO` 指定（預設 2019-01-02 到今天）。
+///
+/// 執行範例：
+/// `MANUAL_RANGE_BREAKOUT_FROM=2019-01-02 cargo test app::manual_backfill::derived::test_backfill_range_breakout -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_range_breakout() {
+    dotenvy::dotenv().ok();
+    let today = chrono::Local::now().date_naive();
+    let date = |name: &str, default: NaiveDate| match std::env::var(name) {
+        Ok(raw) => NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}")),
+        Err(_) => default,
+    };
+    let from = date(
+        "MANUAL_RANGE_BREAKOUT_FROM",
+        NaiveDate::from_ymd_opt(2019, 1, 2).expect("合法日期"),
+    );
+    let to = date("MANUAL_RANGE_BREAKOUT_TO", today);
+
+    let count = crate::app::calculation::technical_signal::backfill_range_breakout(from, to)
+        .await
+        .unwrap_or_else(|why| panic!("區間突破回補失敗：{why:#}"));
+    println!("區間突破回補 {from}～{to}：共 {count} 筆");
+}
+
 /// 逐日重算全市場技術訊號（`daily_technical_signal`）。
 ///
 /// **會覆蓋指定期間每個交易日的訊號**；只讀資料庫既有日線，不呼叫外部網站。非交易日沒有

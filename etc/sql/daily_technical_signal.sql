@@ -9,8 +9,8 @@ CREATE TABLE IF NOT EXISTS daily_technical_signal
 (
     date         DATE                                   NOT NULL, -- 交易日
     stock_symbol VARCHAR(24)                            NOT NULL, -- 股票代號
-    indicator    VARCHAR(16)                            NOT NULL, -- 訊號來源，例如 ma5_ma20、kd、macd、close_ma60、rsi14、52_week、rs80
-    kind         VARCHAR(16)                            NOT NULL, -- 訊號種類：golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high、new_low
+    indicator    VARCHAR(16)                            NOT NULL, -- 訊號來源，例如 ma5_ma20、kd、macd、close_ma60、rsi14、52_week、rs80、range_breakout
+    kind         VARCHAR(16)                            NOT NULL, -- 訊號種類：golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high、new_low、breakout
     description  TEXT                                   NOT NULL, -- 中文說明
     created_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     PRIMARY KEY (date, stock_symbol, indicator, kind)
@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS daily_technical_signal_symbol_date_idx
 COMMENT ON TABLE daily_technical_signal IS '每日技術訊號（收盤後全市場預先計算；日線依股利與公司行動還原權值後計算）';
 COMMENT ON COLUMN daily_technical_signal.date IS '交易日';
 COMMENT ON COLUMN daily_technical_signal.stock_symbol IS '股票代號';
-COMMENT ON COLUMN daily_technical_signal.indicator IS '訊號來源：ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14、52_week、rs80、rs50（相對強度穿越 80／50 分）';
-COMMENT ON COLUMN daily_technical_signal.kind IS '訊號種類：golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high、new_low';
+COMMENT ON COLUMN daily_technical_signal.indicator IS '訊號來源：ma5_ma20、ma20_ma60、kd、macd、close_ma20、close_ma60、close_ma240、rsi14、52_week、rs80、rs50（相對強度穿越 80／50 分）、range_breakout（區間整理後帶量突破）';
+COMMENT ON COLUMN daily_technical_signal.kind IS '訊號種類：golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high、new_low、breakout';
 COMMENT ON COLUMN daily_technical_signal.description IS '中文說明';
 COMMENT ON COLUMN daily_technical_signal.created_at IS '寫入時間';
