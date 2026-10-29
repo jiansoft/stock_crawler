@@ -143,21 +143,35 @@ where
             let target_report: ReportQuarter = target_report;
             let quarter = quarter.clone();
             async move {
-                let cache_key = format!("FinancialStatement:{}-{}-{}", fs.security_code, fs.year, fs.quarter);
-                let profile_skip_cache_key = yahoo::profile::no_valid_data_cache_key(&fs.security_code);
+                let cache_key = format!(
+                    "FinancialStatement:{}-{}-{}",
+                    fs.security_code, fs.year, fs.quarter
+                );
+                let profile_skip_cache_key =
+                    yahoo::profile::no_valid_data_cache_key(&fs.security_code);
 
                 // 檢查 Redis 狀態，決定是否跳過（例如先前已處理過，或是已知無有效資料的股票）
-                let is_jump = match crate::infra::nosql::redis::CLIENT.get_bool(&cache_key).await {
+                let is_jump = match crate::infra::nosql::redis::CLIENT
+                    .get_bool(&cache_key)
+                    .await
+                {
                     Ok(val) => val,
                     Err(why) => {
                         tracing::error!("Redis error getting {}: {:?}", cache_key, why);
                         false
                     }
                 };
-                let is_profile_skip = match crate::infra::nosql::redis::CLIENT.get_bool(&profile_skip_cache_key).await {
+                let is_profile_skip = match crate::infra::nosql::redis::CLIENT
+                    .get_bool(&profile_skip_cache_key)
+                    .await
+                {
                     Ok(val) => val,
                     Err(why) => {
-                        tracing::error!("Redis error getting {}: {:?}", profile_skip_cache_key, why);
+                        tracing::error!(
+                            "Redis error getting {}: {:?}",
+                            profile_skip_cache_key,
+                            why
+                        );
                         false
                     }
                 };
@@ -176,23 +190,41 @@ where
                                 .set(&profile_skip_cache_key, true, ttl)
                                 .await
                             {
-                                tracing::error!("Failed to cache yahoo::profile skip for {} because {:?}",
-                                    fs.security_code, cache_err);
+                                tracing::error!(
+                                    "Failed to cache yahoo::profile skip for {} because {:?}",
+                                    fs.security_code,
+                                    cache_err
+                                );
                             }
-                            tracing::warn!("Skip yahoo::profile::visit for {} for {} seconds because {}",
-                                fs.security_code, ttl, why);
+                            tracing::warn!(
+                                "Skip yahoo::profile::visit for {} for {} seconds because {}",
+                                fs.security_code,
+                                ttl,
+                                why
+                            );
                         } else {
-                            tracing::error!("Failed to yahoo::profile::visit for {} because {}",
-                                fs.security_code, why);
+                            tracing::error!(
+                                "Failed to yahoo::profile::visit for {} because {}",
+                                fs.security_code,
+                                why
+                            );
                         }
                         return None;
                     }
                 };
 
-                // 比對資料年份與季度是否與目標相符，若不符則記錄警告但依原邏輯仍繼續處理
+                // Yahoo 還沒換到目標季（回的是上一季）時不寫入、也不設目標季的完成旗標，下次排程再試；
+                // 以前照寫上一季並把目標季標成完成 7 天，目標季的 ROE／ROA 一週內都不會再補。
                 if target_report.year != profile.year || quarter != profile.quarter {
-                    tracing::warn!("the year or quarter retrieved from Yahoo is inconsistent with the current one. current year:{} ,quarter:{} {:#?}",
-                        target_report.year, quarter, profile);
+                    tracing::info!(
+                        "Yahoo profile 期別還沒更新，略過: 股票 {} 目標 {}-{} Yahoo {}-{}",
+                        fs.security_code,
+                        target_report.year,
+                        quarter,
+                        profile.year,
+                        profile.quarter
+                    );
+                    return None;
                 }
 
                 // 建立新的領域財報結構體
@@ -413,6 +445,73 @@ mod tests {
             *calls.lock().expect("calls lock"),
             vec![SYMBOL_E.to_owned()]
         );
+
+        cleanup().await;
+    }
+
+    /// Yahoo 回的是上一季：不寫入、不設目標季的完成旗標，下一輪照樣再查。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn fill_from_yahoo_profile_skips_profiles_of_another_quarter() {
+        dotenvy::dotenv().ok();
+        if database::ping().await.is_err() || CLIENT.ping().await.is_err() {
+            println!(
+                "跳過 fill_from_yahoo_profile_skips_profiles_of_another_quarter：無資料庫或 Redis 連接"
+            );
+            return;
+        }
+        cleanup().await;
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, "SuspendListing") VALUES ($1, 'profile 期別測試', $1, 2, false)"#,
+        )
+        .bind(SYMBOL_C)
+        .execute(database::get_connection())
+        .await
+        .expect("種入股票主檔");
+        let repo = PgFinancialRepository::new();
+        repo.batch_save_financial_statements(&[zero_statement(SYMBOL_C)])
+            .await
+            .expect("種入假代號財報");
+
+        let calls = Mutex::new(0);
+        let fetch = |symbol: String| {
+            *calls.lock().expect("calls lock") += 1;
+            async move {
+                Ok(yahoo::profile::Profile {
+                    quarter: "Q4".to_owned(),
+                    stock_symbol: symbol,
+                    return_on_equity: dec!(6),
+                    return_on_assets: dec!(4),
+                    year: 2019,
+                    ..yahoo::profile::Profile::default()
+                })
+            }
+        };
+
+        for _ in 0..2 {
+            let saved = fill_from_yahoo_profile(&repo, REPORT, pending_rows(&repo).await, &fetch)
+                .await
+                .expect("fill_from_yahoo_profile");
+            assert_eq!(saved, 0);
+        }
+        assert_eq!(*calls.lock().expect("calls lock"), 2);
+        assert!(
+            !CLIENT
+                .get_bool(&success_cache_key(SYMBOL_C))
+                .await
+                .unwrap_or(false)
+        );
+        let other: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM financial_statement WHERE security_code = $1 AND year = 2019",
+        )
+        .bind(SYMBOL_C)
+        .fetch_one(database::get_connection())
+        .await
+        .expect("查上一季");
+        assert_eq!(other, 0);
 
         cleanup().await;
     }
