@@ -54,3 +54,42 @@ async fn test_upsert_all() {
 
     tracing::debug!("結束 Estimate::upsert_all");
 }
+
+#[tokio::test]
+async fn run_buckets_never_runs_more_than_the_limit_at_once() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    let running = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let done = run_buckets(16, 8, |bucket| {
+        let running = Arc::clone(&running);
+        let peak = Arc::clone(&peak);
+        async move {
+            let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(now, Ordering::SeqCst);
+            tokio::task::yield_now().await;
+            running.fetch_sub(1, Ordering::SeqCst);
+            Ok::<_, ()>(bucket)
+        }
+    })
+    .await
+    .unwrap();
+
+    let mut done = done;
+    done.sort_unstable();
+    assert_eq!(done, (0..16).collect::<Vec<_>>());
+    assert_eq!(peak.load(Ordering::SeqCst), 8);
+}
+
+#[tokio::test]
+async fn run_buckets_reports_the_first_failure() {
+    let result = run_buckets(4, 0, |bucket| async move {
+        if bucket == 2 { Err(bucket) } else { Ok(bucket) }
+    })
+    .await;
+
+    assert_eq!(result, Err(2));
+}

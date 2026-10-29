@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use chrono::NaiveDate;
+use futures::{StreamExt, TryStreamExt};
 use sqlx::postgres::PgQueryResult;
 
 use self::sql::ESTIMATE_UPSERT_SQL;
@@ -142,28 +143,30 @@ impl Estimate {
     /// # Errors
     /// 當 SQL 執行失敗時回傳錯誤。
     pub async fn upsert_all(date: NaiveDate, years: String) -> Result<PgQueryResult> {
-        // 依股票代號雜湊分成 ESTIMATE_BUCKETS 桶（最多同時 8 桶，受批次池上限）：瓶頸是 297 萬筆日K 的 5 組
+        // 依股票代號雜湊分成 ESTIMATE_BUCKETS 桶（最多同時 8 桶，等於批次池上限）：瓶頸是 297 萬筆日K 的 5 組
         // 百分位數排序，ordered-set aggregate 無法平行化，單一語句只用得到一顆 CPU
         // （2026-10-08 正式庫實測 7.6～8.2 秒 → 4 桶 2.8～3.0 秒，結果逐筆相同）。
         // 各桶寫入的股票互不重疊，不會互相鎖住；任一桶失敗整體回報失敗，
         // 已完成的桶照常保留（與單檔重算相同的 upsert 語意，沒有先刪後寫）。
-        let buckets = (0..ESTIMATE_BUCKETS)
-            .map(|bucket| run_estimate_upsert(date, &years, None, (ESTIMATE_BUCKETS, bucket)));
-        futures::future::try_join_all(buckets)
-            .await
-            .map(|results| {
-                let mut total = PgQueryResult::default();
-                total.extend(results);
-                total
-            })
-            .map_err(|why| {
-                anyhow!(
-                    "Failed to upsert_all() from database for date: {} with years: {}. Error: {:?}",
-                    date,
-                    years,
-                    why,
-                )
-            })
+        run_buckets(
+            ESTIMATE_BUCKETS,
+            database::BATCH_MAX_CONNECTIONS as usize,
+            |bucket| run_estimate_upsert(date, &years, None, (ESTIMATE_BUCKETS, bucket)),
+        )
+        .await
+        .map(|results| {
+            let mut total = PgQueryResult::default();
+            total.extend(results);
+            total
+        })
+        .map_err(|why| {
+            anyhow!(
+                "Failed to upsert_all() from database for date: {} with years: {}. Error: {:?}",
+                date,
+                years,
+                why,
+            )
+        })
     }
 
     /// 只重算單一股票的估值資料。
@@ -196,6 +199,26 @@ impl Estimate {
 /// 改成 16 桶、仍只佔 8 條連線：總時間不變，每條語句只處理一半的股票，耗時約減半，
 /// 讓 5 秒的慢查詢警告留給真正的回歸。
 const ESTIMATE_BUCKETS: i32 = 16;
+
+/// 依序啟動 `0..bucket_count` 桶，同時最多 `limit` 桶；任一桶失敗就回報該錯誤。
+///
+/// 一次建好全部 future 交給 `try_join_all` 時，超過連線池上限的桶會卡在取連線：
+/// 2026-10-29 15:00 第二波 8 桶等了 4.2 秒，sqlx 每桶記一筆「取得連線超過 2 秒」警告。
+/// 限制同時數等於連線池上限後，每桶開始時就拿得到連線，總時間不變。
+async fn run_buckets<F, Fut, T, E>(
+    bucket_count: i32,
+    limit: usize,
+    run: F,
+) -> std::result::Result<Vec<T>, E>
+where
+    F: FnMut(i32) -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<T, E>>,
+{
+    futures::stream::iter((0..bucket_count).map(run))
+        .buffer_unordered(limit.max(1))
+        .try_collect()
+        .await
+}
 
 /// 執行估值重建 SQL；`security_code` 為 `None` 時重建全市場。
 ///
