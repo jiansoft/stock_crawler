@@ -64,6 +64,34 @@ pub trait TechnicalSignalQuery: Send + Sync {
     ) -> Result<Vec<SignalOutcome>>;
 }
 
+/// 某交易日某來源訊號的一檔，附名稱、產業與成交值（全市場依成交值排行用）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RankedSignal {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 股票名稱。
+    pub name: String,
+    /// 產業名稱；沒有產業為空字串。
+    pub industry: String,
+    /// 當日成交值（元）。
+    pub trade_value: f64,
+    /// 訊號說明。
+    pub description: String,
+}
+
+/// 全市場某來源訊號依成交值排行。
+#[async_trait]
+pub trait RankedSignalQuery: Send + Sync {
+    /// `date` 出現 `indicator` 來源訊號的股票，依當日成交值由大到小取前 `limit` 檔；第二個值是當天
+    /// 該來源的訊號總檔數。
+    async fn fetch_ranked_signals(
+        &self,
+        date: NaiveDate,
+        indicator: &str,
+        limit: i64,
+    ) -> Result<(Vec<RankedSignal>, i64)>;
+}
+
 /// [`SignalOutcome`] 統計的天期（交易日數）。
 pub const OUTCOME_HORIZON: usize = 20;
 

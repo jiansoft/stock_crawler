@@ -18,9 +18,9 @@ use crate::{
     domain::quote::{
         relative_strength::CROSSING_INDICATORS,
         technical::{
-            PriceAdjustment, PriceBar, PriceBarRepository, SignalOutcome, StockTechnicalSignal,
-            TechnicalSignal, TechnicalSignalQuery, TechnicalSignalRepository, VolumeBar,
-            adjust_bars,
+            PriceAdjustment, PriceBar, PriceBarRepository, RankedSignal, RankedSignalQuery,
+            SignalOutcome, StockTechnicalSignal, TechnicalSignal, TechnicalSignalQuery,
+            TechnicalSignalRepository, VolumeBar, adjust_bars,
         },
     },
     infra::database::{self, repository::quote::PgQuoteRepository},
