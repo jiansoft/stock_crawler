@@ -246,6 +246,10 @@ pub(crate) fn router() -> Router {
             "/market/valuation",
             axum::routing::get(handlers::market_valuation),
         )
+        .route(
+            "/market/forward-returns",
+            axum::routing::get(handlers::market_forward_returns),
+        )
         .route("/etfs", axum::routing::get(handlers::list_etfs))
         .route("/etfs/compare", axum::routing::get(handlers::compare_etfs))
         .route("/etfs/{symbol}", axum::routing::get(handlers::etf_detail))
