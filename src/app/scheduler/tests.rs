@@ -249,6 +249,7 @@ fn registered_jobs_preserve_names_and_cron() {
         ("0 0 22 * * *", "更新外資持股比例與狀態"),
         ("0 0 23 * * Mon-Fri", "檢查盤後籌碼與外資資料完整性"),
         ("0 */10 * * * *", "主機健康檢查"),
+        ("30 */5 * * * *", "資料庫健康檢查"),
         ("0 30 23 * * *", "主機健康彙總"),
     ];
     let definitions = jobs::definitions();
