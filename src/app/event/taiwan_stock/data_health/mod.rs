@@ -59,6 +59,7 @@ use crate::{
 };
 
 mod db_statements;
+mod db_uptime;
 mod rules;
 mod slow_queries;
 
@@ -193,10 +194,13 @@ async fn build(today: NaiveDate) -> Result<(String, Option<StatementStats>)> {
     );
     let slow = weekly_slow_queries(std::path::Path::new(LOG_DIR), from, today);
     let (statement_line, statements) = db_statements::weekly_statements(&repo).await;
+    let uptime_line = db_uptime::weekly_uptime_line(from).await;
     let message = format!(
         "{}
+{}
 {}",
         with_slow_queries(report(from, today, &checks), &slow),
+        text::escape_markdown_v2(&uptime_line),
         text::escape_markdown_v2(&statement_line)
     );
     Ok((message, statements))
