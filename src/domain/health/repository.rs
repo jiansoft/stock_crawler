@@ -22,7 +22,5 @@ pub trait DataHealthRepository: Send + Sync {
     ) -> Result<DataHealthSnapshot>;
 
     /// 讀資料庫端各語句的累計耗時（`pg_stat_statements`）；沒有安裝這個擴充時回 `None`。
-    async fn fetch_statement_stats(&self) -> Result<Option<StatementStats>> {
-        Ok(None)
-    }
+    async fn fetch_statement_stats(&self) -> Result<Option<StatementStats>>;
 }
