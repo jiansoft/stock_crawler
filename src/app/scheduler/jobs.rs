@@ -406,6 +406,14 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "主機健康檢查",
             event::host_health::execute,
         ),
+        // 每 5 分鐘（第 30 秒，避開整分的排程）用獨立短連線探測正式庫；連續 2 次連不上、恢復、
+        // 重啟（附統計是否重置）時告警。一天 288 輪，task.begin／task.done 記 DEBUG。
+        job!(
+            quiet,
+            "30 */5 * * * *",
+            "資料庫健康檢查",
+            event::db_health::execute,
+        ),
         // 23:30 記一行當日主機健康彙總（fsync 最大耗時、最低可用記憶體、swap 最高使用率、目前與開機以來是否降頻、部署期間次數）
         job!(
             normal,

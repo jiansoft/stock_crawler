@@ -94,6 +94,25 @@ async fn host_health_cron_expressions_fire_on_expected_minutes() {
     assert_eq!((summary_next.hour(), summary_next.minute()), (23, 30));
 }
 
+/// 每 5 分鐘的資料庫健康檢查落在 5 的倍數分的第 30 秒，避開整分啟動的排程。
+#[tokio::test]
+async fn db_health_cron_expression_fires_at_half_minute() {
+    use chrono::Timelike;
+
+    let taipei = FixedOffset::east_opt(8 * 3600).unwrap();
+    let mut sched = JobScheduler::new().await.expect("建立排程器");
+    let job = create_quiet_job("30 */5 * * * *", "test", || async { Ok(()) }).expect("*/5");
+    let job_id = sched.add(job).await.expect("加入排程");
+    let next = sched
+        .next_tick_for_job(job_id)
+        .await
+        .expect("取得下次觸發時間")
+        .expect("應有下次觸發時間")
+        .with_timezone(&taipei);
+
+    assert_eq!((next.minute() % 5, next.second()), (0, 30), "{next}");
+}
+
 /// 一輪排程的成功、失敗與逾時都能走完（失敗與逾時的告警在未註冊 sink 時降為 warning log）。
 #[tokio::test]
 async fn run_job_completes_for_every_outcome() {
@@ -230,6 +249,7 @@ fn registered_jobs_preserve_names_and_cron() {
         ("0 0 22 * * *", "更新外資持股比例與狀態"),
         ("0 0 23 * * Mon-Fri", "檢查盤後籌碼與外資資料完整性"),
         ("0 */10 * * * *", "主機健康檢查"),
+        ("30 */5 * * * *", "資料庫健康檢查"),
         ("0 30 23 * * *", "主機健康彙總"),
     ];
     let definitions = jobs::definitions();
