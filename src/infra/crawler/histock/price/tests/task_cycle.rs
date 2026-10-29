@@ -191,13 +191,14 @@ fn failure_level_escalates_after_consecutive_failures() {
     }
 }
 
-/// 整批錯亂只在當天第一次記 warn（之後記 debug）；其他錯誤依連續失敗輪數記錄，都不會中斷迴圈。
+/// 整批錯亂在當天、當下時段只記第一筆（之後記 debug）；其他錯誤依連續失敗輪數記錄，都不會中斷迴圈。
 #[test]
 fn report_cycle_error_marks_dirty_batch_as_seen_today() {
     let dirty = anyhow::Error::from(DirtyBatch {
         inconsistent: 30,
-        misaligned: 0,
+        change_mismatch: 30,
         total: 100,
+        ..DirtyBatch::default()
     });
 
     let _guard = TEST_STATE_LOCK.blocking_lock();
@@ -215,11 +216,26 @@ fn report_cycle_error_marks_dirty_batch_as_seen_today() {
     assert_eq!(CONSECUTIVE_FAILURES.load(Ordering::SeqCst), 22);
     CONSECUTIVE_FAILURES.store(0, Ordering::SeqCst);
 
-    let first_again = INCONSISTENT_ROW_WARNED
-        .lock()
-        .unwrap()
-        .first_today("*dirty-batch*", chrono::Local::now().date_naive());
-    assert!(!first_again);
+    // 當下時段（開盤或盤中）的那一筆已經記過，再來只記 debug。
+    assert_eq!(
+        dirty_batch_level(chrono::Local::now().naive_local()),
+        tracing::Level::DEBUG
+    );
+}
+
+/// 09:15 前的整批錯亂記 info、之後記 warn，兩段各自每天只記第一筆，其餘 debug。
+#[test]
+fn dirty_batch_level_is_info_during_the_opening_window() {
+    use tracing::Level;
+    let _guard = TEST_STATE_LOCK.blocking_lock();
+    let day = chrono::NaiveDate::from_ymd_opt(2020, 3, 2).unwrap();
+    let at = |h, m| day.and_hms_opt(h, m, 0).unwrap();
+    assert_eq!(dirty_batch_level(at(9, 2)), Level::INFO);
+    assert_eq!(dirty_batch_level(at(9, 10)), Level::DEBUG);
+    assert_eq!(dirty_batch_level(at(9, 15)), Level::WARN);
+    assert_eq!(dirty_batch_level(at(11, 0)), Level::DEBUG);
+    let next = day.succ_opt().unwrap().and_hms_opt(10, 0, 0).unwrap();
+    assert_eq!(dirty_batch_level(next), Level::WARN);
 }
 
 /// 全量重抓後取出指定股票，並以新資料覆蓋快取。

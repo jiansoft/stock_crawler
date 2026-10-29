@@ -42,27 +42,76 @@ pub(super) struct RowBaseline {
     pub(super) reference_price: Option<Decimal>,
 }
 
+/// 整批捨棄的訊息最多附幾列樣本。
+const DIRTY_BATCH_SAMPLES: usize = 3;
+
+/// 一列前後矛盾的原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Inconsistency {
+    /// 成交價不在最高最低之間。
+    OutOfRange,
+    /// 成交價減漲跌不等於昨收（也不等於當日參考價）。
+    ChangeMismatch,
+    /// 列上的昨收與快取昨收差距過大，疑似別檔的列。
+    Misaligned,
+}
+
+impl Inconsistency {
+    /// 記錄與統計用的簡短說明。
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::OutOfRange => "成交價不在最高最低之間",
+            Self::ChangeMismatch => "成交價減漲跌不等於昨收",
+            Self::Misaligned => "昨收與快取昨收差距過大，疑似別檔的列",
+        }
+    }
+}
+
 /// 排行頁太多列前後矛盾，整批不採用。
 ///
-/// 背景迴圈遇到這個錯誤只記 warn：這是站點資料錯亂，不是程式或網路故障。
-#[derive(Debug)]
+/// 背景迴圈遇到這個錯誤只記 warn（開盤時段記 info，見 `report_cycle_error`）：這是站點資料錯亂，
+/// 不是程式或網路故障。
+#[derive(Debug, Default)]
 pub(super) struct DirtyBatch {
     /// 前後矛盾的列數（含別檔的列）。
     pub(super) inconsistent: usize,
+    /// 其中成交價不在最高最低之間的列數。
+    pub(super) out_of_range: usize,
+    /// 其中成交價減漲跌不等於昨收的列數。
+    pub(super) change_mismatch: usize,
     /// 其中昨收與快取昨收差距過大、疑似別檔的列數。
     pub(super) misaligned: usize,
     /// 有效快照總數。
     pub(super) total: usize,
+    /// 前幾列矛盾列的代號與欄位值（依代號排序），供事後判斷是哪種錯亂。
+    pub(super) samples: Vec<String>,
 }
 
 impl fmt::Display for DirtyBatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "HiStock 排行頁 {}/{} 列前後矛盾（其中 {} 列疑似別檔），整批捨棄",
-            self.inconsistent, self.total, self.misaligned
-        )
+            "HiStock 排行頁 {}/{} 列前後矛盾（高低 {}、漲跌 {}、別檔 {}），整批捨棄",
+            self.inconsistent, self.total, self.out_of_range, self.change_mismatch, self.misaligned
+        )?;
+        if !self.samples.is_empty() {
+            write!(f, "；例：{}", self.samples.join("；"))?;
+        }
+        Ok(())
     }
+}
+
+/// 矛盾列的樣本文字：代號、原因與比對用到的欄位。
+fn sample(symbol: &str, snapshot: &RealtimeSnapshot, reason: Inconsistency) -> String {
+    format!(
+        "{symbol} {} 價 {} 漲跌 {} 高 {} 低 {} 昨收 {}",
+        reason.label(),
+        snapshot.price,
+        snapshot.change,
+        snapshot.high,
+        snapshot.low,
+        snapshot.last_close
+    )
 }
 
 impl std::error::Error for DirtyBatch {}
@@ -83,7 +132,7 @@ impl std::error::Error for DirtyBatch {}
 pub(super) fn row_inconsistency(
     snapshot: &RealtimeSnapshot,
     reference_price: Option<Decimal>,
-) -> Option<&'static str> {
+) -> Option<Inconsistency> {
     let price = snapshot.price;
     if price <= Decimal::ZERO {
         return None;
@@ -93,14 +142,14 @@ pub(super) fn row_inconsistency(
         && snapshot.low > Decimal::ZERO
         && (price < snapshot.low || price > snapshot.high)
     {
-        return Some("成交價不在最高最低之間");
+        return Some(Inconsistency::OutOfRange);
     }
 
     if snapshot.last_close > Decimal::ZERO {
         let implied_close = price - snapshot.change;
         let matches = |base: Decimal| (implied_close - base).abs() <= CHANGE_TOLERANCE;
         if !matches(snapshot.last_close) && !reference_price.is_some_and(matches) {
-            return Some("成交價減漲跌不等於昨收");
+            return Some(Inconsistency::ChangeMismatch);
         }
     }
 
@@ -138,36 +187,58 @@ pub(super) fn screen_inconsistent_rows(
     result: &mut HiStockFetchResult,
     baseline: impl Fn(&str) -> RowBaseline,
 ) -> Result<usize> {
-    let mut misaligned = 0;
-    let inconsistent: Vec<(String, &'static str)> = result
+    let mut inconsistent: Vec<(String, Inconsistency)> = result
         .snapshots
         .iter()
         .filter_map(|(symbol, snapshot)| {
             let baseline = baseline(symbol);
             if misaligned_row(snapshot, baseline) {
-                misaligned += 1;
-                return Some((symbol.clone(), "昨收與快取昨收差距過大，疑似別檔的列"));
+                return Some((symbol.clone(), Inconsistency::Misaligned));
             }
             row_inconsistency(snapshot, baseline.reference_price)
                 .map(|reason| (symbol.clone(), reason))
         })
         .collect();
+    inconsistent.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-    super::stats::record_inconsistent(inconsistent.iter().map(|(symbol, _)| symbol.as_str()));
+    super::stats::record_inconsistent(
+        inconsistent
+            .iter()
+            .map(|(symbol, reason)| (symbol.as_str(), *reason)),
+    );
+    let count = |kind: Inconsistency| inconsistent.iter().filter(|(_, r)| *r == kind).count();
+    let misaligned = count(Inconsistency::Misaligned);
     let total = result.snapshots.len();
     let limit = DIRTY_BATCH_MIN_ROWS.max(total / DIRTY_BATCH_RATIO_DIVISOR);
     if inconsistent.len() > limit || misaligned >= MISALIGNED_BATCH_MIN_ROWS {
+        let samples = inconsistent
+            .iter()
+            .take(DIRTY_BATCH_SAMPLES)
+            .filter_map(|(symbol, reason)| {
+                result
+                    .snapshots
+                    .get(symbol)
+                    .map(|snapshot| sample(symbol, snapshot, *reason))
+            })
+            .collect();
         return Err(DirtyBatch {
             inconsistent: inconsistent.len(),
+            out_of_range: count(Inconsistency::OutOfRange),
+            change_mismatch: count(Inconsistency::ChangeMismatch),
             misaligned,
             total,
+            samples,
         }
         .into());
     }
 
     for (symbol, reason) in &inconsistent {
         if let Some(snapshot) = result.snapshots.get_mut(symbol) {
-            tracing::debug!("HiStock 列資料前後矛盾，略過: 股票 {} {}", symbol, reason);
+            tracing::debug!(
+                "HiStock 列資料前後矛盾，略過: 股票 {} {}",
+                symbol,
+                reason.label()
+            );
             snapshot.price = Decimal::ZERO;
         }
     }

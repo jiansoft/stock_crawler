@@ -31,7 +31,7 @@ fn row_inconsistency_rejects_price_outside_high_low() {
     snapshot.price = dec!(33);
     assert_eq!(
         row_inconsistency(&snapshot, None),
-        Some("成交價不在最高最低之間")
+        Some(Inconsistency::OutOfRange)
     );
 }
 
@@ -42,7 +42,7 @@ fn row_inconsistency_rejects_price_that_disagrees_with_change() {
     snapshot.price = dec!(77);
     assert_eq!(
         row_inconsistency(&snapshot, None),
-        Some("成交價減漲跌不等於昨收")
+        Some(Inconsistency::ChangeMismatch)
     );
 }
 
@@ -58,7 +58,7 @@ fn row_inconsistency_accepts_change_against_reference_price() {
 
     assert_eq!(
         row_inconsistency(&snapshot, None),
-        Some("成交價減漲跌不等於昨收")
+        Some(Inconsistency::ChangeMismatch)
     );
     assert_eq!(row_inconsistency(&snapshot, Some(dec!(39.5))), None);
 }
@@ -234,9 +234,12 @@ fn screen_inconsistent_rows_rejects_misaligned_batch() {
         (dirty.inconsistent, dirty.misaligned, dirty.total),
         (3, 3, 30)
     );
+    assert_eq!(dirty.samples.len(), 3);
+    let message = error.to_string();
     assert!(
-        error
-            .to_string()
-            .contains("3/30 列前後矛盾（其中 3 列疑似別檔）")
+        message.contains(
+            "3/30 列前後矛盾（高低 0、漲跌 0、別檔 3），整批捨棄；例：799000 昨收與快取昨收差距過大"
+        ),
+        "{message}"
     );
 }

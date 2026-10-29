@@ -247,19 +247,42 @@ pub(super) fn failure_level(failures: u32) -> tracing::Level {
     }
 }
 
-/// 記錄一輪失敗的抓取：整批錯亂每天只記第一筆 warn；其他錯誤依連續失敗輪數決定等級（見
-/// [`failure_level`]）。
+/// 開盤後這個時間之前的整批捨棄是已知現象，記 info。
+///
+/// 10-22、10-27、10-28、10-29 每天 09:02 第一輪都有約 500／2285 列前後矛盾；10-28 收盤統計失敗 111 輪、
+/// 矛盾 45,547 列次，與每輪約 410 列吻合，10-29 11:37 實抓則 0 列矛盾。收盤統計的 `dirty_batches`
+/// 會記下整批捨棄的首末時間，用來確認這段時間窗。
+const OPENING_DIRTY_UNTIL: chrono::NaiveTime = match chrono::NaiveTime::from_hms_opt(9, 15, 0) {
+    Some(time) => time,
+    None => panic!("09:15 是合法時間"),
+};
+
+/// 整批錯亂這一筆要記的等級：開盤時段 info、之後 warn，各自每天只記第一筆，其餘 debug
+/// （錯亂通常連續好幾輪，每 5 秒一輪）。
+pub(super) fn dirty_batch_level(at: chrono::NaiveDateTime) -> tracing::Level {
+    let (key, level) = if at.time() < OPENING_DIRTY_UNTIL {
+        ("*dirty-batch-opening*", tracing::Level::INFO)
+    } else {
+        ("*dirty-batch*", tracing::Level::WARN)
+    };
+    let first = INCONSISTENT_ROW_WARNED
+        .lock()
+        .map(|mut seen| seen.first_today(key, at.date()))
+        .unwrap_or(true);
+    if first { level } else { tracing::Level::DEBUG }
+}
+
+/// 記錄一輪失敗的抓取：整批錯亂見 [`dirty_batch_level`]，並計入收盤統計；其他錯誤依連續失敗輪數
+/// 決定等級（見 [`failure_level`]）。
 pub(super) fn report_cycle_error(e: &anyhow::Error) {
     if e.downcast_ref::<DirtyBatch>().is_some() {
-        // 錯亂通常會連續好幾輪（每 5 秒一輪），每天只記第一筆 warn。
-        let first = INCONSISTENT_ROW_WARNED
-            .lock()
-            .map(|mut seen| seen.first_today("*dirty-batch*", chrono::Local::now().date_naive()))
-            .unwrap_or(true);
-        if first {
-            tracing::warn!("{}（今天不再重複記錄）", e);
-        } else {
-            tracing::debug!("{}", e);
+        super::stats::record_dirty_batch();
+        match dirty_batch_level(chrono::Local::now().naive_local()) {
+            tracing::Level::WARN => tracing::warn!("{}（今天不再重複記錄）", e),
+            tracing::Level::INFO => {
+                tracing::info!("{}（開盤時段的已知現象，今天不再重複記錄）", e);
+            }
+            _ => tracing::debug!("{}", e),
         }
     } else {
         let failures = CONSECUTIVE_FAILURES.fetch_add(1, Ordering::SeqCst) + 1;
