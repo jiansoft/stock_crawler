@@ -323,6 +323,13 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "通知持股技術訊號",
             event::taiwan_stock::technical_alert::execute,
         ),
+        // 19:20（週一至週五）全市場區間突破通知：依成交值列前 15 檔，持股另外標示；排在持股訊號通知之後。
+        job!(
+            normal,
+            "0 20 19 * * Mon-Fri",
+            "全市場區間突破通知",
+            event::taiwan_stock::breakout_alert::execute,
+        ),
         // 21:00 資料庫內尚未有年度配息數據的股票取出後向第三方查詢後更新回資料庫
         job!(
             normal,

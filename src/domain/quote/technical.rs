@@ -50,8 +50,9 @@ pub use self::breakout::{VolumeBar, range_breakout_signal};
 pub use self::detection::{fifty_two_week_signals, signals};
 pub use self::indicators::{IndicatorPoint, compute};
 pub use self::signal::{
-    OUTCOME_HORIZON, SIGNAL_INDICATORS, SIGNAL_KINDS, SignalKind, SignalOutcome,
-    StockTechnicalSignal, TechnicalSignal, TechnicalSignalQuery, TechnicalSignalRepository,
+    OUTCOME_HORIZON, RankedSignal, RankedSignalQuery, SIGNAL_INDICATORS, SIGNAL_KINDS, SignalKind,
+    SignalOutcome, StockTechnicalSignal, TechnicalSignal, TechnicalSignalQuery,
+    TechnicalSignalRepository,
 };
 
 #[cfg(test)]

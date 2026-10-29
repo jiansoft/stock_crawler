@@ -1,5 +1,7 @@
 /// 財務年報
 pub mod annual_eps;
+// 全市場區間突破通知（依成交值列前 15 檔）
+pub mod breakout_alert;
 // 持股主力進出通知（買超、賣超前幾名券商分點）
 pub mod broker_flow;
 // 持股三大法人與融資融券通知

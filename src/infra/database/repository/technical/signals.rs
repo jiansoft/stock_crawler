@@ -217,3 +217,52 @@ impl TechnicalSignalQuery for PgQuoteRepository {
             .collect())
     }
 }
+
+/// `$1` 交易日 `$2` 來源的訊號，依當日成交值由大到小取前 `$3` 檔，附當天該來源的總檔數。
+const RANKED_SIGNALS_SQL: &str = r#"
+SELECT t.stock_symbol::text,
+       COALESCE(s."Name", '')::text AS name,
+       COALESCE(si.name, '')::text AS industry,
+       COALESCE(q."TradeValue", 0)::float8 AS trade_value,
+       t.description,
+       COUNT(*) OVER () AS total
+FROM daily_technical_signal t
+LEFT JOIN stocks s ON s.stock_symbol = t.stock_symbol
+LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
+LEFT JOIN "DailyQuotes" q ON q.stock_symbol = t.stock_symbol AND q."Date" = t.date
+WHERE t.date = $1 AND t.indicator = $2
+ORDER BY trade_value DESC, t.stock_symbol
+LIMIT $3
+"#;
+
+#[async_trait]
+impl RankedSignalQuery for PgQuoteRepository {
+    async fn fetch_ranked_signals(
+        &self,
+        date: NaiveDate,
+        indicator: &str,
+        limit: i64,
+    ) -> Result<(Vec<RankedSignal>, i64)> {
+        let rows: Vec<(String, String, String, f64, String, i64)> =
+            sqlx::query_as(RANKED_SIGNALS_SQL)
+                .bind(date)
+                .bind(indicator)
+                .bind(limit)
+                .fetch_all(database::get_connection())
+                .await?;
+        let total = rows.first().map_or(0, |row| row.5);
+        let signals = rows
+            .into_iter()
+            .map(
+                |(stock_symbol, name, industry, trade_value, description, _)| RankedSignal {
+                    stock_symbol,
+                    name,
+                    industry,
+                    trade_value,
+                    description,
+                },
+            )
+            .collect();
+        Ok((signals, total))
+    }
+}
