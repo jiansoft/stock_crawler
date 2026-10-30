@@ -25,6 +25,8 @@ pub(crate) struct PortfolioDividendFillItem {
     /// 填息結果，欄位與 `/stocks/{symbol}/dividend-fill` 的 `events` 相同。
     #[serde(flatten)]
     pub(crate) fill: DividendFillEvent,
+    /// 該股近 5 年（含本次）除權息的填息統計，供對照這次填息快慢；同一檔的每一列相同。
+    pub(crate) history: DividendFillSummary,
 }
 
 /// 持股填息狀態。

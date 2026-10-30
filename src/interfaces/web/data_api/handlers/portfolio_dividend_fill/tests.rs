@@ -9,7 +9,8 @@ fn day(m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, m, d).expect("日期應合法")
 }
 
-/// 2330：7 月除息已填息、10 月除息仍差 5%；0056：9 月除息仍差 10%；1101：去年除息（超過期間）。
+/// 2330：7 月除息已填息、10 月除息仍差 5%；0056：9 月除息仍差 10%；
+/// 1101：去年除息（超過回看期間，只計入近 5 年的歷年統計），第 2 個交易日填息。
 struct FakeFills;
 
 #[async_trait]
@@ -50,6 +51,14 @@ impl DividendFillQuery for FakeFills {
                 (day(9, 15), dec!(36)),
                 (day(10, 20), dec!(36)),
             ],
+            "1101" => {
+                let y2025 = |m, d| NaiveDate::from_ymd_opt(2025, m, d).expect("日期應合法");
+                vec![
+                    (y2025(6, 30), dec!(20)),
+                    (y2025(7, 1), dec!(19)),
+                    (y2025(7, 2), dec!(20.5)),
+                ]
+            }
             _ => panic!("不應查 {symbol} 的日線"),
         };
         Ok(closes
@@ -87,6 +96,40 @@ async fn response_lists_unfilled_first() {
     assert!(body.items[2].fill.filled);
     assert_eq!((body.summary.events, body.summary.filled), (3, 1));
     assert_eq!(body.days, 365);
+    // 歷年統計：同一檔每列相同；超過回看期間的 1101 不列入清單。
+    let history = |symbol: &str| {
+        let item = body
+            .items
+            .iter()
+            .find(|item| item.stock_symbol == symbol)
+            .unwrap_or_else(|| panic!("清單應有 {symbol}"));
+        (
+            item.history.events,
+            item.history.filled,
+            item.history.average_trading_days_to_fill,
+        )
+    };
+    assert_eq!(history("2330"), (2, 1, Some(2.0)));
+    assert_eq!(history("0056"), (1, 0, None));
+    assert!(body.items.iter().all(|item| item.stock_symbol != "1101"));
+}
+
+/// 回看期間外、近 5 年內的除權息只計入歷年統計；超過 5 年的不計。
+#[tokio::test]
+async fn collect_counts_history_beyond_window() {
+    let holdings = vec![("1101".to_owned(), "台泥".to_owned())];
+    let within = collect(&FakeFills, &holdings, day(10, 20), 30)
+        .await
+        .expect("假倉儲不會失敗");
+    assert!(within[0].recent.is_empty());
+    assert_eq!((within[0].history.events, within[0].history.filled), (1, 1));
+    assert_eq!(within[0].history.average_trading_days, Some(2.0));
+
+    let far = NaiveDate::from_ymd_opt(2031, 7, 2).expect("日期應合法");
+    let beyond = collect(&FakeFills, &holdings, far, 30)
+        .await
+        .expect("假倉儲不會失敗");
+    assert_eq!(beyond[0].history.events, 0, "超過 5 年不計入");
 }
 
 /// 連資料庫：指定會員只取該會員未售出的持股，0 為全部會員合計；已售出的不列入。
