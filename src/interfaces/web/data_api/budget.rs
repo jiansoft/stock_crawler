@@ -15,7 +15,10 @@ use std::time::Duration;
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
 
 use super::handlers::error_response;
-use crate::infra::database::{self, QueryBudget};
+use crate::{
+    core::logging::slow_query,
+    infra::database::{self, QueryBudget},
+};
 
 /// 一般查詢的 Rust 端請求上限。
 pub(crate) const GENERAL_TIMEOUT: Duration = Duration::from_secs(8);
@@ -70,7 +73,10 @@ pub(crate) async fn enforce_with(
     let query = request.uri().query().unwrap_or_default().to_owned();
     match tokio::time::timeout(
         timeout,
-        database::with_query_budget(budget, next.run(request)),
+        slow_query::in_api(
+            &path,
+            database::with_query_budget(budget, next.run(request)),
+        ),
     )
     .await
     {

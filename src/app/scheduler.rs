@@ -178,7 +178,8 @@ async fn run_job<F, Fut>(
         tracing::info!(task = cron_expr, name = name, "task.begin");
     }
     let t = Instant::now();
-    match run_with_timeout(task(), limit).await {
+    let task = crate::core::logging::slow_query::in_job(name, task());
+    match run_with_timeout(task, limit).await {
         TaskOutcome::Done => {
             let elapsed_ms = t.elapsed().as_millis() as u64;
             if quiet {
