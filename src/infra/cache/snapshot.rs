@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use chrono::{Local, NaiveDate, Utc};
-use once_cell::sync::Lazy;
 use rust_decimal::Decimal;
 
+use super::abnormal_price::report_abnormal_price;
 use super::realtime::{PriceLimit, RealtimeSnapshot};
-use crate::core::{declare::StockExchangeMarket, util::daily_seen::ConcurrentDailySeen};
+use crate::core::declare::StockExchangeMarket;
 
 /// 上市櫃的異常價格閾值：漲跌幅上限 10% 再加 0.5% 容差。
 const PRICE_LIMIT_TOLERANCE: Decimal = Decimal::from_parts(105, 0, 0, false, 3);
@@ -18,35 +18,6 @@ const PRICE_LIMIT_TOLERANCE: Decimal = Decimal::from_parts(105, 0, 0, false, 3);
 /// 倍數區間對上漲與下跌對稱（×3 與 ÷3），不像 ±50% 下跌可到 −50%、上漲卻只到 +50%。
 const UNLIMITED_BAND_FACTOR: Decimal = Decimal::from_parts(3, 0, 0, false, 0);
 use super::share::Share;
-
-/// 今天已用 warn 記過異常價格的「股票＋站點」。
-static ABNORMAL_PRICE_WARNED: Lazy<ConcurrentDailySeen> = Lazy::new(ConcurrentDailySeen::default);
-
-/// 記錄一筆被過濾的異常價格；同一檔同一站每天只記第一筆 warn，其餘記 debug。
-///
-/// 站點出錯通常會持續一段時間（10-06 開盤 HiStock 同一檔 68 次），
-/// 第一筆已足以定位，重複的只會淹沒其他警告。
-pub fn report_abnormal_price(symbol: &str, price: Decimal, last_close: Decimal, site: &str) {
-    let first =
-        ABNORMAL_PRICE_WARNED.first_today(&format!("{symbol}|{site}"), Local::now().date_naive());
-    if first {
-        tracing::warn!(
-            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}（同檔同站今天不再重複記錄）",
-            symbol,
-            price,
-            last_close,
-            site
-        );
-    } else {
-        tracing::debug!(
-            "過濾異常價格！股票: {}, 採集價格: {}, 昨收價: {}, 站點: {}",
-            symbol,
-            price,
-            last_close,
-            site
-        );
-    }
-}
 
 impl Share {
     /// 取得資料庫最後交易日的收盤價；快取沒有或非正數時回傳 `None`。

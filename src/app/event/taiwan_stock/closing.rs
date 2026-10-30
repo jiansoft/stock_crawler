@@ -57,6 +57,7 @@ pub async fn execute() -> Result<()> {
     crate::app::event::trace::price_tasks::stop_price_tasks().await;
 
     crawler::flush_site_latency_stats();
+    crate::infra::cache::flush_abnormal_price_stats();
 
     Ok(())
 }

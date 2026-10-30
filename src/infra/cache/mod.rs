@@ -9,6 +9,7 @@
 //! 若鎖取得失敗，多數 API 會回傳 `None` 或 `false` 以避免 panic，
 //! 並由上層依回傳值決定是否重試或降級處理。
 
+mod abnormal_price;
 pub(crate) mod etf_analysis;
 mod loader;
 mod lookup;
@@ -18,10 +19,10 @@ mod share;
 mod snapshot;
 mod ttl;
 
+pub use abnormal_price::{flush_abnormal_price_stats, report_abnormal_price};
 pub use loader::CacheLoadReport;
 pub use realtime::{PriceLimit, RealtimeSnapshot};
 pub use share::{SHARE, Share};
-pub use snapshot::report_abnormal_price;
 pub use ttl::{TTL, TtlCacheInner};
 
 /// 測試共用的鎖：[`SHARE`] 的即時報價快取與 trace 的追蹤條件快取都是全域狀態。
