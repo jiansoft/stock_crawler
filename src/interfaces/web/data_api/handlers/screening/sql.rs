@@ -19,6 +19,8 @@
 /// NULL）；`$30`／`$31` 為上限（`NULL` 為不限）。
 /// 千張大戶持股比例變化由 handler 以 [`MAJOR_CHANGES_SQL`] 先算好，以 `$32` 代號、`$33` 變化（百分點）兩個平行
 /// 陣列左接，`$34` 為下限（`NULL` 為不限；沒有資料的股票不會通過）。
+/// 近期區間突破由 handler 以 [`RANGE_BREAKOUTS_SQL`] 先算好，以 `$35` 代號、`$36` 突破日、`$37` 說明三個平行
+/// 陣列左接；`$38` 為 true 時只留有突破的股票。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -289,7 +291,8 @@ SELECT
     chip.foreign_streak,
     chip.trust_streak,
     avg_trade_value,
-    pe_ratio, pb_ratio, ratio_date
+    pe_ratio, pb_ratio, ratio_date,
+    brk.breakout_date, brk.breakout_description
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -298,6 +301,9 @@ LEFT JOIN UNNEST($19::text[], $20::smallint[], $21::smallint[])
        ON chip.symbol = normalized.stock_symbol
 LEFT JOIN UNNEST($32::text[], $33::numeric[]) AS major(symbol, major_change)
        ON major.symbol = normalized.stock_symbol
+LEFT JOIN UNNEST($35::text[], $36::date[], $37::text[])
+       AS brk(symbol, breakout_date, breakout_description)
+       ON brk.symbol = normalized.stock_symbol
 WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($5::numeric IS NULL OR earnings_per_share >= $5)
   AND ($6::numeric IS NULL OR return_on_equity >= $6)
@@ -320,6 +326,7 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($30::numeric IS NULL OR pe_ratio <= $30)
   AND ($31::numeric IS NULL OR pb_ratio <= $31)
   AND ($34::numeric IS NULL OR major.major_change >= $34)
+  AND (NOT $38::bool OR brk.symbol IS NOT NULL)
 "#;
 
 /// 查詢日（`$1`，不含）以前最近一個集保資料週，相對往前第 `$2` 週的千張大戶持股比例變化（百分點），
@@ -341,4 +348,26 @@ JOIN weeks bw ON bw.back = $2::int
 JOIN holder_distribution cur ON cur."date" = cw."date"
 JOIN holder_distribution base ON base."date" = bw."date" AND base.stock_symbol = cur.stock_symbol
 WHERE cw.back = 0 AND cw."date" >= $1::date - 14
+"#;
+
+/// 查詢日（`$1`，含）以前最近 `$2` 個交易日（以有技術訊號的日子為交易日、往前最多看 45 個日曆天）出現
+/// 區間突破的股票，同一檔只取最近一次；突破之後到查詢日出現假突破（跌回突破價）的不列入。
+pub(super) const RANGE_BREAKOUTS_SQL: &str = r#"
+SELECT DISTINCT ON (b.stock_symbol) b.stock_symbol::text, b.date, b.description
+FROM daily_technical_signal b
+WHERE b.indicator = 'range_breakout' AND b.kind = 'breakout'
+  AND b.date IN (
+      SELECT date FROM (
+          SELECT DISTINCT date FROM daily_technical_signal
+          WHERE date <= $1 AND date >= $1::date - 45
+      ) AS days
+      ORDER BY date DESC
+      LIMIT $2
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM daily_technical_signal f
+      WHERE f.stock_symbol = b.stock_symbol AND f.indicator = 'range_breakout'
+        AND f.kind = 'failed' AND f.date > b.date AND f.date <= $1
+  )
+ORDER BY b.stock_symbol, b.date DESC
 "#;

@@ -154,6 +154,11 @@ pub(crate) struct ScreenedStock {
     pub(crate) pb_ratio: Option<f64>,
     /// `pe_ratio`、`pb_ratio` 的日線日期，格式 `YYYY-MM-DD`；10 天內沒有日線時為 `null`。
     pub(crate) ratio_date: Option<String>,
+    /// 設 `range_breakout_days` 時：最近一次區間突破的交易日，格式 `YYYY-MM-DD`；沒設時為 `null`。
+    pub(crate) range_breakout_date: Option<String>,
+    /// 設 `range_breakout_days` 時：最近一次區間突破的說明（突破價、整理幅度、量比、距突破價）；
+    /// 沒設時為 `null`。
+    pub(crate) range_breakout_description: Option<String>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -259,6 +264,11 @@ pub(crate) struct StockScreeningParams {
     /// `min_major_change` 的回看週數（集保資料週，1–12，預設 4）。
     #[param(minimum = 1, maximum = 12, default = 4)]
     pub(crate) major_change_weeks: Option<u8>,
+    /// 只留最近 N 個交易日（含查詢日，1–20）出現區間突破（`range_breakout`／`breakout`）、且突破後還沒
+    /// 跌回突破價（沒有 `failed`）的股票；回應附最近一次突破的日期與說明。2019 年起回測單獨依區間突破
+    /// 選股明顯輸 0050，只供參考。
+    #[param(minimum = 1, maximum = 20)]
+    pub(crate) range_breakout_days: Option<u8>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,

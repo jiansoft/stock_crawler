@@ -67,6 +67,10 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(Vec::<String>::new())
         .bind(Vec::<Decimal>::new())
         .bind(Option::<Decimal>::None)
+        .bind(Vec::<String>::new())
+        .bind(Vec::<chrono::NaiveDate>::new())
+        .bind(Vec::<String>::new())
+        .bind(false)
         .fetch_all(pool)
         .await
         .expect("screen EXPLAIN");
