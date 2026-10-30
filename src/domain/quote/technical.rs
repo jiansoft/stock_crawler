@@ -53,9 +53,9 @@ pub use self::breakout::{
 pub use self::detection::{fifty_two_week_signals, signals};
 pub use self::indicators::{IndicatorPoint, compute};
 pub use self::signal::{
-    OUTCOME_HORIZON, RankedSignal, RankedSignalQuery, SIGNAL_INDICATORS, SIGNAL_KINDS, SignalKind,
-    SignalOutcome, StockTechnicalSignal, TechnicalSignal, TechnicalSignalQuery,
-    TechnicalSignalRepository,
+    BreakoutFollowUp, BreakoutFollowUpQuery, OUTCOME_HORIZON, RankedSignal, RankedSignalQuery,
+    SIGNAL_INDICATORS, SIGNAL_KINDS, SignalKind, SignalOutcome, StockTechnicalSignal,
+    TechnicalSignal, TechnicalSignalQuery, TechnicalSignalRepository,
 };
 
 #[cfg(test)]

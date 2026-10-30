@@ -93,6 +93,31 @@ pub trait RankedSignalQuery: Send + Sync {
     ) -> Result<(Vec<RankedSignal>, i64)>;
 }
 
+/// 前幾個交易日區間突破的一檔，與突破之後是否已跌回突破價（假突破）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct BreakoutFollowUp {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 股票名稱。
+    pub name: String,
+    /// 最近一次突破的交易日。
+    pub breakout_date: NaiveDate,
+    /// 突破之後到查詢日（含）是否出現假突破（`range_breakout`／`failed`）。
+    pub failed: bool,
+}
+
+/// 近期區間突破的後續（突破之後站不站得住）。
+#[async_trait]
+pub trait BreakoutFollowUpQuery: Send + Sync {
+    /// `date` 之前 `days` 個交易日（不含 `date`）出現區間突破的股票（同一檔只取最近一次突破），
+    /// 與之後到 `date`（含）是否已跌回突破價；依代號排序。
+    async fn fetch_breakout_follow_ups(
+        &self,
+        date: NaiveDate,
+        days: i64,
+    ) -> Result<Vec<BreakoutFollowUp>>;
+}
+
 /// [`SignalOutcome`] 統計的天期（交易日數）。
 pub const OUTCOME_HORIZON: usize = 20;
 

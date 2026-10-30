@@ -5,6 +5,10 @@
 //! 訊號說明（突破價、整理幅度、量比、距突破價）；持股另外標「持股」。附近一年全市場同一訊號出現後
 //! 20 個交易日的勝率與平均還原報酬（樣本至少 [`MIN_OUTCOME_SAMPLES`] 次才顯示）。
 //!
+//! 結尾附前 [`FOLLOW_UP_DAYS`] 個交易日突破的後續：至今仍站上突破價與已跌回（假突破，見
+//! [`crate::domain::quote::technical::breakout`]）的檔數，持股另外列出；查詢失敗只記錄警告、不附。
+//! 2019 年起約七成的突破在 10 個交易日內跌回突破價（第 19 輪 T12）。
+//!
 //! 排在 19:15 持股訊號通知之後。沒有任何訊號（含休市日）時不發送。只供參考，不構成投資建議。
 
 use std::collections::BTreeSet;
@@ -19,8 +23,8 @@ use crate::{
     domain::{
         portfolio::repository::PortfolioRepository,
         quote::technical::{
-            OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RankedSignal, RankedSignalQuery, SignalKind,
-            SignalOutcome, TechnicalSignalQuery,
+            BreakoutFollowUp, BreakoutFollowUpQuery, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR,
+            RankedSignal, RankedSignalQuery, SignalKind, SignalOutcome, TechnicalSignalQuery,
         },
     },
     infra::database::repository::{portfolio::PgPortfolioRepository, quote::PgQuoteRepository},
@@ -31,6 +35,9 @@ const LISTED: i64 = 15;
 
 /// 歷史表現統計的回看天數（日曆天）。
 const OUTCOME_LOOKBACK_DAYS: u64 = 364;
+
+/// 突破後續看前幾個交易日的突破。
+const FOLLOW_UP_DAYS: i64 = 5;
 
 /// 排程入口：讀今天的區間突破訊號並發送通知。
 ///
@@ -61,7 +68,7 @@ pub async fn execute() -> Result<()> {
 /// 讀取當天的區間突破與歷史表現並組出通知；沒有訊號時回 `None`。
 async fn run<R>(repo: &R, date: NaiveDate, holdings: &BTreeSet<String>) -> Result<Option<String>>
 where
-    R: RankedSignalQuery + TechnicalSignalQuery,
+    R: RankedSignalQuery + TechnicalSignalQuery + BreakoutFollowUpQuery,
 {
     let (signals, total) = repo
         .fetch_ranked_signals(date, RANGE_BREAKOUT_INDICATOR, SignalKind::Breakout, LISTED)
@@ -83,13 +90,55 @@ where
         .find(|outcome| {
             outcome.kind == SignalKind::Breakout.as_str() && outcome.samples >= MIN_OUTCOME_SAMPLES
         });
+    let follow_ups = repo
+        .fetch_breakout_follow_ups(date, FOLLOW_UP_DAYS)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("區間突破通知：讀取前幾日突破的後續失敗，不附: {why:#}");
+            Vec::new()
+        });
     Ok(Some(build_message(
         date,
         &signals,
         total,
         outcome.as_ref(),
+        &follow_up_lines(&follow_ups, holdings),
         holdings,
     )))
+}
+
+/// 前 [`FOLLOW_UP_DAYS`] 個交易日突破的後續：總檔數、仍站上與已跌回的檔數，持股各自的狀態；
+/// 沒有突破時回空陣列。
+fn follow_up_lines(follow_ups: &[BreakoutFollowUp], holdings: &BTreeSet<String>) -> Vec<String> {
+    if follow_ups.is_empty() {
+        return Vec::new();
+    }
+    let failed = follow_ups
+        .iter()
+        .filter(|follow_up| follow_up.failed)
+        .count();
+    let held = follow_ups.len() - failed;
+    let mut lines = vec![format!(
+        "前 {FOLLOW_UP_DAYS} 個交易日突破 {} 檔：仍站上突破價 {held} 檔（{:.0}%）、已跌回 {failed} 檔",
+        follow_ups.len(),
+        held as f64 / follow_ups.len() as f64 * 100.0
+    )];
+    let mine: Vec<String> = follow_ups
+        .iter()
+        .filter(|follow_up| holdings.contains(&follow_up.stock_symbol))
+        .map(|follow_up| {
+            let state = if follow_up.failed {
+                "已跌回"
+            } else {
+                "仍站上"
+            };
+            format!("{} {} {state}", follow_up.stock_symbol, follow_up.name)
+        })
+        .collect();
+    if !mine.is_empty() {
+        lines.push(format!("持股：{}", mine.join("、")));
+    }
+    lines
 }
 
 /// 組出通知內容（MarkdownV2 已跳脫）。
@@ -98,6 +147,7 @@ fn build_message(
     signals: &[RankedSignal],
     total: i64,
     outcome: Option<&SignalOutcome>,
+    follow_ups: &[String],
     holdings: &BTreeSet<String>,
 ) -> String {
     let mut message = String::with_capacity(256 + signals.len() * 128);
@@ -123,6 +173,16 @@ fn build_message(
             text::escape_markdown_v2(title),
             text::escape_markdown_v2(format!("• {}", signal.description))
         );
+    }
+    if !follow_ups.is_empty() {
+        message.push('\n');
+        for line in follow_ups {
+            let _ = writeln!(
+                &mut message,
+                "{}",
+                text::escape_markdown_v2(format!("• {line}"))
+            );
+        }
     }
     let mut footer = String::new();
     if let Some(outcome) = outcome {

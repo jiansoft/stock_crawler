@@ -218,7 +218,7 @@ impl TechnicalSignalQuery for PgQuoteRepository {
     }
 }
 
-/// `$1` 交易日 `$2` 來源的訊號，依當日成交值由大到小取前 `$3` 檔，附當天該來源的總檔數。
+/// `$1` 交易日 `$2` 來源、`$3` 種類的訊號，依當日成交值由大到小取前 `$4` 檔，附當天該來源與種類的總檔數。
 const RANKED_SIGNALS_SQL: &str = r#"
 SELECT t.stock_symbol::text,
        COALESCE(s."Name", '')::text AS name,
@@ -266,5 +266,57 @@ impl RankedSignalQuery for PgQuoteRepository {
             )
             .collect();
         Ok((signals, total))
+    }
+}
+
+/// `$1` 之前 `$2` 個交易日（不含 `$1`，以有訊號的日子為交易日、往前最多看 21 個日曆天）的區間突破，
+/// 同一檔只取最近一次，附之後到 `$1`（含）是否出現假突破。
+const BREAKOUT_FOLLOW_UPS_SQL: &str = r#"
+SELECT DISTINCT ON (b.stock_symbol)
+       b.stock_symbol::text,
+       COALESCE(s."Name", '')::text AS name,
+       b.date,
+       EXISTS (
+           SELECT 1 FROM daily_technical_signal f
+           WHERE f.stock_symbol = b.stock_symbol AND f.indicator = 'range_breakout'
+             AND f.kind = 'failed' AND f.date > b.date AND f.date <= $1
+       ) AS failed
+FROM daily_technical_signal b
+LEFT JOIN stocks s ON s.stock_symbol = b.stock_symbol
+WHERE b.indicator = 'range_breakout' AND b.kind = 'breakout'
+  AND b.date IN (
+      SELECT date FROM (
+          SELECT DISTINCT date FROM daily_technical_signal
+          WHERE date < $1 AND date >= $1::date - 21
+      ) AS days
+      ORDER BY date DESC
+      LIMIT $2
+  )
+ORDER BY b.stock_symbol, b.date DESC
+"#;
+
+#[async_trait]
+impl BreakoutFollowUpQuery for PgQuoteRepository {
+    async fn fetch_breakout_follow_ups(
+        &self,
+        date: NaiveDate,
+        days: i64,
+    ) -> Result<Vec<BreakoutFollowUp>> {
+        let rows: Vec<(String, String, NaiveDate, bool)> = sqlx::query_as(BREAKOUT_FOLLOW_UPS_SQL)
+            .bind(date)
+            .bind(days)
+            .fetch_all(database::get_connection())
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(stock_symbol, name, breakout_date, failed)| BreakoutFollowUp {
+                    stock_symbol,
+                    name,
+                    breakout_date,
+                    failed,
+                },
+            )
+            .collect())
     }
 }
