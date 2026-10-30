@@ -68,7 +68,7 @@ async fn response_lists_unfilled_first() {
     let outcomes = collect(&FakeFills, &holdings, day(10, 20), 365)
         .await
         .expect("假倉儲不會失敗");
-    let body = response(365, outcomes);
+    let body = response(0, 365, outcomes);
     let order: Vec<(&str, &str)> = body
         .items
         .iter()
@@ -87,4 +87,53 @@ async fn response_lists_unfilled_first() {
     assert!(body.items[2].fill.filled);
     assert_eq!((body.summary.events, body.summary.filled), (3, 1));
     assert_eq!(body.days, 365);
+}
+
+/// 連資料庫：指定會員只取該會員未售出的持股，0 為全部會員合計；已售出的不列入。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn fetch_holdings_filters_by_member() {
+    const MEMBER_A: i64 = 979_793;
+    const MEMBER_B: i64 = 979_794;
+    dotenvy::dotenv().ok();
+    let pool = database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 fetch_holdings_filters_by_member：無資料庫連接");
+        return;
+    }
+    let cleanup = || async {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id IN ($1, $2)")
+            .bind(MEMBER_A)
+            .bind(MEMBER_B)
+            .execute(pool)
+            .await
+            .expect("清除測試持股");
+    };
+    cleanup().await;
+    sqlx::query(
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, is_sold) \
+         VALUES ($1, '79979FA', 1000, -1, false), ($1, '79979FS', 500, -1, true), ($2, '79979FB', 2000, -1, false)",
+    )
+    .bind(MEMBER_A)
+    .bind(MEMBER_B)
+    .execute(pool)
+    .await
+    .expect("種入測試持股");
+
+    let symbols = |rows: Vec<(String, String)>| -> Vec<String> {
+        rows.into_iter()
+            .map(|(symbol, _)| symbol)
+            .filter(|symbol| symbol.starts_with("79979F"))
+            .collect()
+    };
+    let only_a = fetch_holdings(pool, MEMBER_A).await.expect("查詢會員 A");
+    let only_b = fetch_holdings(pool, MEMBER_B).await.expect("查詢會員 B");
+    let all = fetch_holdings(pool, 0).await.expect("查詢全部會員");
+    cleanup().await;
+    assert_eq!(symbols(only_a), ["79979FA"]);
+    assert_eq!(symbols(only_b), ["79979FB"]);
+    assert_eq!(symbols(all), ["79979FA", "79979FB"]);
 }
