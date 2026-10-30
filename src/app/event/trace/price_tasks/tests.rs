@@ -1,6 +1,8 @@
 //! trace 即時價格任務協調的測試：追蹤代號、價格更新佇列、背景任務啟停與快取就緒等待。
 
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use tokio::sync::mpsc;
 
 use super::*;
 use crate::domain::trace::entity::PriceTrace;
