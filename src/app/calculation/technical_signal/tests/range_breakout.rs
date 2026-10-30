@@ -32,7 +32,7 @@ fn breakout_series(len: usize, breakout_at: usize) -> (Vec<PriceBar>, Vec<Volume
     (bars, volumes)
 }
 
-/// 每日計算串上區間突破：讀最近 21 根成交量，最後一日帶量突破就寫入 `range_breakout`。
+/// 每日計算串上區間突破：讀最近 31 根成交量（含假突破回看），最後一日帶量突破就寫入 `range_breakout`。
 #[tokio::test]
 async fn compute_and_save_includes_range_breakout() {
     let (bars, volumes) = breakout_series(31, 30);
@@ -54,11 +54,12 @@ async fn compute_and_save_includes_range_breakout() {
     );
 }
 
-/// 回補只寫起訖期間內出現突破的日子，並以來源與起訖覆蓋。
+/// 回補只寫起訖期間內出現突破與假突破的日子，並以來源與起訖覆蓋。
 #[tokio::test]
 async fn backfill_writes_breakouts_within_range_only() {
     let (mut bars, mut volumes) = breakout_series(70, 32);
-    // 第 32 根的突破在起日之前，不寫；第 66 根再突破一次，在期間內。B 沒有成交量，不判斷。
+    // 第 32 根的突破與第 33 根的跌回都在起日之前，不寫；第 66 根再突破一次、第 67 根收 9.5 跌回
+    // 突破價 10 之下，都在期間內。B 沒有成交量，不判斷。
     bars[66].close = 10.3;
     bars[66].high = 10.5;
     volumes[66].volume = 1600.0;
@@ -86,19 +87,25 @@ async fn backfill_writes_breakouts_within_range_only() {
         (indicator.as_str(), from, to),
         ("range_breakout", day(40), day(69))
     );
-    assert_eq!(count, 1);
-    assert_eq!(signals.len(), 1);
+    assert_eq!(count, 2);
+    let written: Vec<(&str, NaiveDate, SignalKind)> = signals
+        .iter()
+        .map(|s| (s.stock_symbol.as_str(), s.date, s.signal.kind))
+        .collect();
     assert_eq!(
-        (signals[0].stock_symbol.as_str(), signals[0].date),
-        ("A", day(66))
+        written,
+        [
+            ("A", day(66), SignalKind::Breakout),
+            ("A", day(67), SignalKind::Failed),
+        ]
     );
     assert!(
         repo.limits
             .lock()
             .expect("測試鎖")
             .iter()
-            .all(|&limit| limit == 30 + 31),
-        "讀取根數要涵蓋起訖天數加 31 根"
+            .all(|&limit| limit == 30 + 41),
+        "讀取根數要涵蓋起訖天數加 41 根（整理區間 31 根＋假突破回看 10 根）"
     );
 }
 
@@ -158,7 +165,7 @@ async fn backfill_range_breakout_writes_table() {
     .execute(pool)
     .await
     .expect("寫入測試股票");
-    // 第 30 根（1990-01-31）帶量突破，其餘整理。
+    // 第 30 根（1990-01-31）帶量突破，隔天收 9.5 跌回突破價 10 之下（假突破），其餘整理。
     sqlx::query(
         r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "HighestPrice", "LowestPrice", "TradingVolume")
            SELECT $2::date + n, $1,
@@ -190,7 +197,7 @@ async fn backfill_range_breakout_writes_table() {
     backfill_range_breakout(from, to).await.expect("回補成功");
 
     let rows: Vec<(NaiveDate, String, String)> = sqlx::query_as(
-        "SELECT date, indicator, kind FROM daily_technical_signal WHERE stock_symbol = $1 ORDER BY indicator",
+        "SELECT date, indicator, kind FROM daily_technical_signal WHERE stock_symbol = $1 ORDER BY date, indicator",
     )
     .bind(symbol)
     .fetch_all(pool)
@@ -204,6 +211,11 @@ async fn backfill_range_breakout_writes_table() {
                 breakout_day,
                 "range_breakout".to_owned(),
                 "breakout".to_owned()
+            ),
+            (
+                breakout_day + chrono::Days::new(1),
+                "range_breakout".to_owned(),
+                "failed".to_owned()
             ),
         ]
     );

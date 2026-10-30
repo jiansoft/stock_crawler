@@ -82,12 +82,13 @@ pub struct RankedSignal {
 /// 全市場某來源訊號依成交值排行。
 #[async_trait]
 pub trait RankedSignalQuery: Send + Sync {
-    /// `date` 出現 `indicator` 來源訊號的股票，依當日成交值由大到小取前 `limit` 檔；第二個值是當天
-    /// 該來源的訊號總檔數。
+    /// `date` 出現 `indicator` 來源、`kind` 種類訊號的股票，依當日成交值由大到小取前 `limit` 檔；
+    /// 第二個值是當天該來源與種類的訊號總檔數。
     async fn fetch_ranked_signals(
         &self,
         date: NaiveDate,
         indicator: &str,
+        kind: SignalKind,
         limit: i64,
     ) -> Result<(Vec<RankedSignal>, i64)>;
 }
@@ -131,6 +132,8 @@ pub enum SignalKind {
     NewLow,
     /// 整理區間後收盤帶量突破區間高點。
     Breakout,
+    /// 區間突破後收盤跌回突破價之下（假突破）。
+    Failed,
 }
 
 impl SignalKind {
@@ -146,6 +149,7 @@ impl SignalKind {
             Self::NewHigh => "new_high",
             Self::NewLow => "new_low",
             Self::Breakout => "breakout",
+            Self::Failed => "failed",
         }
     }
 
@@ -156,7 +160,7 @@ impl SignalKind {
 }
 
 /// 全部訊號種類，依對外說明的順序。
-pub const SIGNAL_KINDS: [SignalKind; 9] = [
+pub const SIGNAL_KINDS: [SignalKind; 10] = [
     SignalKind::GoldenCross,
     SignalKind::DeathCross,
     SignalKind::CrossAbove,
@@ -166,6 +170,7 @@ pub const SIGNAL_KINDS: [SignalKind; 9] = [
     SignalKind::NewHigh,
     SignalKind::NewLow,
     SignalKind::Breakout,
+    SignalKind::Failed,
 ];
 
 /// 全部訊號來源（[`TechnicalSignal::indicator`]），依對外說明的順序。

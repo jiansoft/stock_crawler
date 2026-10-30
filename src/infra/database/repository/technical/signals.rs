@@ -230,9 +230,9 @@ FROM daily_technical_signal t
 LEFT JOIN stocks s ON s.stock_symbol = t.stock_symbol
 LEFT JOIN stock_industry si ON si.stock_industry_id = s.stock_industry_id
 LEFT JOIN "DailyQuotes" q ON q.stock_symbol = t.stock_symbol AND q."Date" = t.date
-WHERE t.date = $1 AND t.indicator = $2
+WHERE t.date = $1 AND t.indicator = $2 AND t.kind = $3
 ORDER BY trade_value DESC, t.stock_symbol
-LIMIT $3
+LIMIT $4
 "#;
 
 #[async_trait]
@@ -241,12 +241,14 @@ impl RankedSignalQuery for PgQuoteRepository {
         &self,
         date: NaiveDate,
         indicator: &str,
+        kind: SignalKind,
         limit: i64,
     ) -> Result<(Vec<RankedSignal>, i64)> {
         let rows: Vec<(String, String, String, f64, String, i64)> =
             sqlx::query_as(RANKED_SIGNALS_SQL)
                 .bind(date)
                 .bind(indicator)
+                .bind(kind.as_str())
                 .bind(limit)
                 .fetch_all(database::get_connection())
                 .await?;

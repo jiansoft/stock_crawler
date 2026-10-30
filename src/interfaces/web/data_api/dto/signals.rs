@@ -32,6 +32,8 @@ pub(crate) enum SignalKindValue {
     NewLow,
     /// 整理 30 日（幅度 20% 內）後收盤帶量（1.5 倍）突破整理高點，且離突破價不超過 5%。
     Breakout,
+    /// 假突破：區間突破後 10 個交易日內，收盤第一次跌回突破價之下（同一次突破只記一次）。
+    Failed,
 }
 
 /// OpenAPI 文件使用的訊號來源。
@@ -71,7 +73,7 @@ pub(crate) enum SignalIndicatorValue {
     /// 相對強度分數穿越 50 分。
     #[schema(rename = "rs50")]
     Rs50,
-    /// 區間整理後帶量突破（種類 `breakout`）。
+    /// 區間整理後帶量突破（種類 `breakout`）與突破後跌回突破價（種類 `failed`）。
     #[schema(rename = "range_breakout")]
     RangeBreakout,
 }

@@ -12,7 +12,7 @@ use futures::{StreamExt, stream};
 
 use crate::domain::quote::technical::{
     self, PriceAdjustment, PriceBar, PriceBarRepository, StockTechnicalSignal,
-    TechnicalSignalRepository, VolumeBar, WARMUP_BARS, breakout::RANGE_BREAKOUT_VOLUME_BARS,
+    TechnicalSignalRepository, VolumeBar, WARMUP_BARS, breakout::FAILED_BREAKOUT_VOLUME_BARS,
 };
 use crate::infra::database::repository::quote::PgQuoteRepository;
 
@@ -50,7 +50,7 @@ where
         .map(|symbol| async move {
             let fetched = futures::join!(
                 repo.fetch_price_bars(&symbol, Some(date), limit),
-                repo.fetch_volumes(&symbol, Some(date), RANGE_BREAKOUT_VOLUME_BARS as i64),
+                repo.fetch_volumes(&symbol, Some(date), FAILED_BREAKOUT_VOLUME_BARS as i64),
             );
             (symbol, fetched)
         })
@@ -75,7 +75,7 @@ where
 }
 
 /// 單一股票在 `date` 的訊號（日線先以 `adjustments` 還原權值）；最後一根日線不是 `date`
-/// （當日沒有成交）時沒有訊號。區間突破另外需要同一批交易日的成交量 `volumes`。
+/// （當日沒有成交）時沒有訊號。區間突破與假突破另外需要同一批交易日的成交量 `volumes`。
 pub(crate) fn signals_for(
     symbol: &str,
     date: NaiveDate,
@@ -95,7 +95,7 @@ pub(crate) fn signals_for(
     technical::signals(rest.last(), last)
         .into_iter()
         .chain(technical::fifty_two_week_signals(bars))
-        .chain(technical::range_breakout_signal(bars, volumes))
+        .chain(technical::range_breakout_signals(bars, volumes))
         .map(|signal| StockTechnicalSignal {
             date,
             stock_symbol: symbol.to_owned(),

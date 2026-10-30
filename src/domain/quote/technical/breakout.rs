@@ -14,6 +14,12 @@
 //! 基準都排除當天，否則當天的高點會墊高突破價，收盤永遠突破不了。價格用呼叫端傳入的日線
 //! （訊號計算時已還原權值，對應腳本的還原日線）；成交量不還原。「整理」只是底部成形的代理，
 //! 不辨識特定型態。
+//!
+//! ## 假突破
+//!
+//! 突破後 [`FAILED_WITHIN_DAYS`] 個交易日內，收盤第一次跌回突破價之下記一筆 `failed`
+//! （[`failed_breakout_signal`]）：只看最近一次突破，突破後到前一天的收盤都要守在突破價以上（含等於），
+//! 所以同一次突破只會記一次。
 
 use chrono::NaiveDate;
 
@@ -37,6 +43,12 @@ pub const MAX_CHASE_PERCENT: f64 = 5.0;
 pub const RANGE_BREAKOUT_BARS: usize = BASE_DAYS + 1;
 /// 判斷需要的成交量根數（含當天）。
 pub const RANGE_BREAKOUT_VOLUME_BARS: usize = VOLUME_DAYS + 1;
+/// 突破後幾個交易日內收盤跌回突破價之下算假突破。
+pub const FAILED_WITHIN_DAYS: usize = 10;
+/// 判斷假突破需要的日線根數（含當天）。
+pub const FAILED_BREAKOUT_BARS: usize = RANGE_BREAKOUT_BARS + FAILED_WITHIN_DAYS;
+/// 判斷假突破需要的成交量根數（含當天）。
+pub const FAILED_BREAKOUT_VOLUME_BARS: usize = RANGE_BREAKOUT_VOLUME_BARS + FAILED_WITHIN_DAYS;
 
 /// 某交易日的成交量（未還原）。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -132,6 +144,53 @@ pub fn range_breakout_signal(bars: &[PriceBar], volumes: &[VolumeBar]) -> Option
             state.distance_percent,
         ),
     })
+}
+
+/// 最新一日（`bars` 最後一根）是否為假突破：前 1～[`FAILED_WITHIN_DAYS`] 個交易日內最近一次區間突破之後，
+/// 收盤一直守在突破價以上（含等於），直到當天第一次收在突破價之下。
+///
+/// `bars` 與 `volumes` 由舊到新、最後一根同一天；往前推的每一天都以同樣根數截斷兩者，交給
+/// [`range_breakout_state`] 判斷當天是否突破（成交量沒對齊時視為沒有突破）。
+pub fn failed_breakout_signal(bars: &[PriceBar], volumes: &[VolumeBar]) -> Option<TechnicalSignal> {
+    let (today, _) = bars.split_last()?;
+    for days_ago in 1..=FAILED_WITHIN_DAYS {
+        let bar_end = bars.len().checked_sub(days_ago)?;
+        let volume_end = volumes.len().checked_sub(days_ago)?;
+        let Some(state) = range_breakout_state(&bars[..bar_end], &volumes[..volume_end]) else {
+            continue;
+        };
+        if !state.breaks_out {
+            continue;
+        }
+        let held = bars[bar_end..bars.len() - 1]
+            .iter()
+            .all(|bar| bar.close >= state.pivot);
+        if !held || today.close >= state.pivot {
+            return None;
+        }
+        return Some(TechnicalSignal {
+            indicator: RANGE_BREAKOUT_INDICATOR,
+            kind: SignalKind::Failed,
+            description: format!(
+                "收盤 {} 跌回 {} 區間突破的突破價 {} 之下（突破後第 {days_ago} 個交易日）",
+                price_text(today.close),
+                bars[bar_end - 1].date,
+                price_text(state.pivot),
+            ),
+        });
+    }
+    None
+}
+
+/// 最新一日的區間突破與假突破訊號（各至多一筆）；判斷見 [`range_breakout_signal`] 與
+/// [`failed_breakout_signal`]。
+pub fn range_breakout_signals(
+    bars: &[PriceBar],
+    volumes: &[VolumeBar],
+) -> impl Iterator<Item = TechnicalSignal> {
+    range_breakout_signal(bars, volumes)
+        .into_iter()
+        .chain(failed_breakout_signal(bars, volumes))
 }
 
 #[cfg(test)]

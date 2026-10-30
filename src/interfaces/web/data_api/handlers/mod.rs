@@ -295,7 +295,7 @@ fn signal_filter_error(kind: Option<&str>, indicator: Option<&str>) -> Option<Re
     if kind.is_some_and(|kind| SignalKind::parse(kind).is_none()) {
         return Some(error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "kind 必須為 golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high、new_low 或 breakout",
+            "kind 必須為 golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high、new_low、breakout 或 failed",
         ));
     }
     if indicator.is_some_and(|indicator| !SIGNAL_INDICATORS.contains(&indicator)) {
