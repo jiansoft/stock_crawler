@@ -17,6 +17,10 @@ ignore:
   # unimplemented!()，計入覆蓋率會讓被測模組的數字失真。
   - "**/test_double.rs"
   - "benches/**"
+  # 執行檔入口與啟動／關機流程（M22 拆出）：只在 bin 啟動時執行，CI 的測試從不啟動服務，
+  # 計入覆蓋率只會是固定的 0%；行為以部署後的啟動通知與 9001／9002 監聽驗證。
+  - "src/main.rs"
+  - "src/bootstrap/**"
 
 coverage:
   status:
