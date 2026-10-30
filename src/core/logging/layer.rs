@@ -61,7 +61,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::layer::Layer<S> for FileLogLaye
 
         let target = event.metadata().target();
         let level = *event.metadata().level();
-        super::slow_query::observe(target, level, &collector.extra);
+        super::slow_query::observe(target, level, &mut collector.extra);
 
         // 建立檔案日誌行：message 後追加所有結構化欄位（key=val）。
         let log_line = {

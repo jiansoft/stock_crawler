@@ -1,12 +1,16 @@
-//! 慢查詢的當日統計：[`super::FileLogLayer`] 收到 sqlx 的 slow statement 事件時依 SQL 開頭歸類記一筆，
-//! 主機健康每日彙總（23:30）以 [`daily_summary`] 附在彙總行後面。
+//! 慢查詢的當日統計：[`super::FileLogLayer`] 收到 sqlx 的 slow statement 事件時依 SQL 開頭與來源
+//! （[`Origin`]：排程、API、其他）歸類記一筆，主機健康每日彙總（23:30）以 [`daily_summary`] 附在彙總行後面。
 //!
 //! 統計只在記憶體裡、跨日歸零；重啟會清掉，所以行程在當天啟動時文字會註明「自 HH:MM 起」。
+
+mod origin;
 
 use std::{collections::HashMap, sync::Mutex};
 
 use chrono::{Local, NaiveDate, NaiveDateTime};
 use once_cell::sync::Lazy;
+
+pub use origin::{Origin, in_api, in_job};
 
 /// 每日彙總最多列出幾類，其餘只計入總筆數。
 const LISTED_KINDS: usize = 3;
@@ -16,6 +20,9 @@ const SQLX_TARGET: &str = "sqlx::query";
 
 /// 只有慢查詢事件才帶的欄位（一般 statement 事件沒有）。
 const SLOW_THRESHOLD_FIELD: &str = "slow_threshold";
+
+/// 慢查詢來源寫進日誌行的欄位名稱。
+const SOURCE_FIELD: &str = "source";
 
 /// 行程內唯一的統計；起點是 [`init`] 被呼叫的時間（程式啟動時）。
 static STATS: Lazy<Mutex<SlowQueryStats>> =
@@ -28,17 +35,17 @@ struct KindStats {
     max_secs: f64,
 }
 
-/// 依 sqlx `summary`（SQL 前 4 個字）歸類的慢查詢筆數與最長耗時；當日彙總與健康週報共用。
+/// 依來源與 sqlx `summary`（SQL 前 4 個字）歸類的慢查詢筆數與最長耗時；當日彙總與健康週報共用。
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct SlowQueryTally {
-    kinds: HashMap<String, KindStats>,
+    kinds: HashMap<(Origin, String), KindStats>,
 }
 
 impl SlowQueryTally {
     /// 記一筆；`summary` 截斷時結尾帶「 …」，歸類時去掉。
-    pub fn add(&mut self, summary: &str, secs: f64) {
+    pub fn add(&mut self, summary: &str, secs: f64, origin: Origin) {
         let kind = summary.trim_end_matches('…').trim_end();
-        let stats = self.kinds.entry(kind.to_string()).or_default();
+        let stats = self.kinds.entry((origin, kind.to_string())).or_default();
         stats.count += 1;
         stats.max_secs = stats.max_secs.max(secs);
     }
@@ -48,23 +55,52 @@ impl SlowQueryTally {
         self.kinds.values().map(|stats| stats.count).sum()
     }
 
+    /// 依來源的筆數，例如「（排程 3、API 15）」；沒有任何一筆回空字串。
+    pub fn origins(&self) -> String {
+        let mut counts: Vec<(Origin, u32)> = Vec::new();
+        for ((origin, _), stats) in &self.kinds {
+            match counts.iter_mut().find(|(seen, _)| seen == origin) {
+                Some((_, count)) => *count += stats.count,
+                None => counts.push((*origin, stats.count)),
+            }
+        }
+        if counts.is_empty() {
+            return String::new();
+        }
+        counts.sort_unstable();
+        let parts: Vec<String> = counts
+            .iter()
+            .map(|(origin, count)| format!("{} {count}", origin.label()))
+            .collect();
+        format!("（{}）", parts.join("、"))
+    }
+
     /// 筆數最多的前 `listed` 類與各自最長耗時（依筆數、最長耗時、名稱排序），更多類別時附「等 N 類」；
-    /// 沒有任何一筆回 `None`。
+    /// 非排程來源在 SQL 開頭後標註［API］或［其他］。沒有任何一筆回 `None`。
     pub fn top_kinds(&self, listed: usize) -> Option<String> {
         if self.kinds.is_empty() {
             return None;
         }
-        let mut kinds: Vec<(&String, &KindStats)> = self.kinds.iter().collect();
-        kinds.sort_by(|(a_kind, a), (b_kind, b)| {
+        let mut kinds: Vec<(&(Origin, String), &KindStats)> = self.kinds.iter().collect();
+        kinds.sort_by(|(a_key, a), (b_key, b)| {
             b.count
                 .cmp(&a.count)
                 .then(b.max_secs.total_cmp(&a.max_secs))
-                .then(a_kind.cmp(b_kind))
+                .then(a_key.cmp(b_key))
         });
         let shown: Vec<String> = kinds
             .iter()
             .take(listed)
-            .map(|(kind, stats)| format!("{kind} {}（最長 {:.1} 秒）", stats.count, stats.max_secs))
+            .map(|((origin, kind), stats)| {
+                let tag = match origin {
+                    Origin::Job => String::new(),
+                    Origin::Api | Origin::Other => format!("［{}］", origin.label()),
+                };
+                format!(
+                    "{kind}{tag} {}（最長 {:.1} 秒）",
+                    stats.count, stats.max_secs
+                )
+            })
             .collect();
         let others = if kinds.len() > listed {
             format!(" 等 {} 類", kinds.len())
@@ -79,26 +115,27 @@ impl SlowQueryTally {
     }
 }
 
-/// 從檔案日誌的一行取出慢查詢的 `summary` 與 `elapsed_secs`；不是慢查詢回 `None`。
+/// 從檔案日誌的一行取出慢查詢的 `summary`、`elapsed_secs` 與來源；不是慢查詢回 `None`。
 ///
 /// [`super::FileLogLayer`] 寫出的格式是 `時間 訊息 key=val …`，字串值帶雙引號（`summary="WITH chip AS ( …"`）。
-pub fn parse_log_line(line: &str) -> Option<(String, f64)> {
+/// 沒有 `source` 欄位（O8 之前的日誌）的來源為 [`Origin::Other`]。
+pub fn parse_log_line(line: &str) -> Option<(String, f64, Origin)> {
     if !line.contains("slow statement:") || !line.contains(" slow_threshold=") {
         return None;
     }
-    let summary = line
-        .split(" summary=\"")
-        .nth(1)?
-        .split('"')
-        .next()?
-        .to_string();
+    let quoted = |key: &str| {
+        line.split(&format!(" {key}=\""))
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+    };
+    let summary = quoted("summary")?.to_string();
     let secs = line
         .split(" elapsed_secs=")
         .nth(1)
         .and_then(|rest| rest.split_whitespace().next())
         .and_then(|value| value.parse().ok())
         .unwrap_or_default();
-    Some((summary, secs))
+    Some((summary, secs, Origin::from_source(quoted(SOURCE_FIELD))))
 }
 
 /// 當日各類慢查詢的筆數與最長耗時。
@@ -121,16 +158,16 @@ impl SlowQueryStats {
     }
 
     /// 記一筆慢查詢；`summary` 是 sqlx 的摘要（截斷時結尾帶「 …」）。
-    pub(crate) fn record(&mut self, now: NaiveDateTime, summary: &str, secs: f64) {
+    pub(crate) fn record(&mut self, now: NaiveDateTime, summary: &str, secs: f64, origin: Origin) {
         let day = now.date();
         if self.day != Some(day) {
             self.day = Some(day);
             self.tally.clear();
         }
-        self.tally.add(summary, secs);
+        self.tally.add(summary, secs, origin);
     }
 
-    /// `today` 的彙總文字：總筆數、統計起點（當天啟動時），以及筆數最多的前幾類與各自最長耗時。
+    /// `today` 的彙總文字：總筆數、統計起點（當天啟動時）、依來源的筆數，以及筆數最多的前幾類與各自最長耗時。
     pub(crate) fn summary(&self, today: NaiveDate) -> String {
         let since = if self.started.date() == today {
             format!("（自 {} 起）", self.started.format("%H:%M"))
@@ -138,8 +175,14 @@ impl SlowQueryStats {
             String::new()
         };
         let today_tally = (self.day == Some(today)).then_some(&self.tally);
-        match today_tally.and_then(|tally| tally.top_kinds(LISTED_KINDS)) {
-            Some(kinds) => format!("慢查詢 {} 筆{since}：{kinds}", self.tally.total()),
+        match today_tally
+            .and_then(|tally| tally.top_kinds(LISTED_KINDS).map(|kinds| (tally, kinds)))
+        {
+            Some((tally, kinds)) => format!(
+                "慢查詢 {} 筆{since}{}：{kinds}",
+                tally.total(),
+                tally.origins()
+            ),
             None => format!("慢查詢 0 筆{since}"),
         }
     }
@@ -150,16 +193,27 @@ pub fn init() {
     Lazy::force(&STATS);
 }
 
-/// 若事件是 sqlx 的慢查詢就記一筆；由 [`super::FileLogLayer`] 對每個事件呼叫。
-pub(super) fn observe(target: &str, level: tracing::Level, extra: &[(String, serde_json::Value)]) {
+/// 若事件是 sqlx 的慢查詢就記一筆，並把目前 task 的來源標記附進 `extra`（寫進日誌行的 `source` 欄位）；
+/// 由 [`super::FileLogLayer`] 對每個事件、在組日誌行之前呼叫。
+pub(super) fn observe(
+    target: &str,
+    level: tracing::Level,
+    extra: &mut Vec<(String, serde_json::Value)>,
+) {
     if target != SQLX_TARGET || level != tracing::Level::WARN {
         return;
     }
+    let source = origin::current();
     let Some((summary, secs)) = slow_statement_fields(extra) else {
         return;
     };
+    let summary = summary.to_owned();
+    let origin = Origin::from_source(source.as_deref());
+    if let Some(source) = source {
+        extra.push((SOURCE_FIELD.to_owned(), serde_json::Value::from(source)));
+    }
     if let Ok(mut stats) = STATS.lock() {
-        stats.record(Local::now().naive_local(), summary, secs);
+        stats.record(Local::now().naive_local(), &summary, secs, origin);
     }
 }
 

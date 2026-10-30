@@ -40,17 +40,22 @@ pub(super) fn weekly_slow_queries(dir: &Path, from: NaiveDate, to: NaiveDate) ->
         let Ok(text) = std::fs::read_to_string(entry.path()) else {
             continue;
         };
-        for (summary, secs) in text.lines().filter_map(logging::slow_query::parse_log_line) {
-            tally.add(&summary, secs);
+        for (summary, secs, origin) in text.lines().filter_map(logging::slow_query::parse_log_line)
+        {
+            tally.add(&summary, secs, origin);
         }
     }
     tally
 }
 
-/// 週報最後附的一行：總筆數與前 [`LISTED_KINDS`] 類。
+/// 週報最後附的一行：總筆數、依來源（排程／API／其他）的筆數與前 [`LISTED_KINDS`] 類。
 pub(super) fn slow_query_line(tally: &SlowQueryTally) -> String {
     match tally.top_kinds(LISTED_KINDS) {
-        Some(kinds) => format!("本週慢查詢 {} 筆：{kinds}", tally.total()),
+        Some(kinds) => format!(
+            "本週慢查詢 {} 筆{}：{kinds}",
+            tally.total(),
+            tally.origins()
+        ),
         None => "本週慢查詢 0 筆".to_string(),
     }
 }
