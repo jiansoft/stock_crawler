@@ -13,7 +13,9 @@ use chrono::{Days, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::{analytical_decimal_to_f64, ensure_stock_exists, error_response, repository_error};
-use crate::domain::dividend::fill::{self, DividendFillQuery, ExRightEvent, FillOutcome};
+use crate::domain::dividend::fill::{
+    self, DividendFillQuery, ExRightEvent, FillOutcome, FillSummary,
+};
 use crate::infra::database::repository::dividend_fill::PgDividendFillRepository;
 use crate::interfaces::web::data_api::dto::{
     DividendFillEvent, DividendFillParams, DividendFillResponse, DividendFillSummary, ErrorBody,
@@ -68,12 +70,7 @@ pub(crate) async fn dividend_fill(
     let summary = fill::summarize(&outcomes);
     Json(DividendFillResponse {
         data_as_of: latest_quote.map(|date| date.to_string()),
-        summary: DividendFillSummary {
-            events: summary.events,
-            filled: summary.filled,
-            average_trading_days_to_fill: summary.average_trading_days,
-            median_trading_days_to_fill: summary.median_trading_days,
-        },
+        summary: summary_dto(&summary),
         events: outcomes
             .iter()
             .map(|outcome| into_dto(outcome, &symbol))
@@ -99,6 +96,16 @@ fn select_events(
     events.sort_by_key(|event| std::cmp::Reverse(event.ex_date));
     events.truncate(limit);
     events
+}
+
+/// 領域的填息統計轉成回應格式。
+pub(super) fn summary_dto(summary: &FillSummary) -> DividendFillSummary {
+    DividendFillSummary {
+        events: summary.events,
+        filled: summary.filled,
+        average_trading_days_to_fill: summary.average_trading_days,
+        median_trading_days_to_fill: summary.median_trading_days,
+    }
 }
 
 pub(super) fn into_dto(outcome: &FillOutcome, symbol: &str) -> DividendFillEvent {
