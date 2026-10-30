@@ -98,12 +98,18 @@ fn resolve_backtest_period_defaults_and_limits() {
     );
 }
 
-/// 兩種 SQL 都以 `WITH` 開頭、含大盤濾網 `$11`、續抱門檻 `$12`、市場廣度門檻 `$13`、換股日偏移 `$14`
+/// 兩種 SQL 都以 `WITH RECURSIVE` 開頭（交易日用 loose index scan）、含大盤濾網 `$11`、續抱門檻 `$12`、市場廣度門檻 `$13`、換股日偏移 `$14`
 /// 、流動性門檻 `$15`、排序方式 `$16`、加權方式 `$17`、排除產業 `$18` 與基本面門檻 `$19`～`$23`，籌碼版另含
 /// 連續買超的 CTE 與 `$24`／`$25`；沒有籌碼的版本排序用的連續買超欄位恆為 `NULL`。
 #[test]
 fn backtest_sql_variants_are_well_formed() {
-    assert!(BACKTEST_SQL.trim_start().starts_with("WITH\ndays AS ("));
+    assert!(
+        BACKTEST_SQL
+            .trim_start()
+            .starts_with("WITH RECURSIVE\nday_scan AS (")
+    );
+    assert!(BACKTEST_SQL.contains("FROM day_scan s\n    WHERE s.date <= $2::date + 400"));
+    assert!(BACKTEST_SQL.contains("lr.liquidity_start,"));
     assert!(BACKTEST_SQL.contains("COALESCE($11::int, 1)"));
     assert!(BACKTEST_SQL.contains("rs_score >= $12"));
     assert!(BACKTEST_SQL.contains("$13::int IS NULL OR br.above"));
@@ -114,9 +120,10 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("ORDER BY CASE $16::text"));
     assert!(BACKTEST_SQL.contains("NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"));
     assert!(BACKTEST_SQL.contains("OR $17::text <> 'equal' THEN ("));
+    // 續抱名單不查成交金額，改在選定持股後補查（`HOLD_TRADE_VALUES_SQL`）。
+    assert!(!BACKTEST_SQL.contains("CASE WHEN $17::text <> 'equal' THEN ("));
     assert!(
-        BACKTEST_SQL
-            .contains("CASE WHEN $17::text <> 'equal' THEN (\n                   SELECT AVG")
+        BACKTEST_SQL.contains("u.stock_industry_id,\n               NULL::float8 AS trade_value")
     );
     assert!(BACKTEST_SQL.contains("AS candidate_trade_values"));
     assert!(BACKTEST_SQL.contains("AS hold_trade_values"));
@@ -163,9 +170,9 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(
         BACKTEST_WITH_CHIP_SQL
             .trim_start()
-            .starts_with("WITH\nchip AS (")
+            .starts_with("WITH RECURSIVE\nchip AS (")
     );
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("),\ndays AS ("));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("),\nday_scan AS ("));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $37"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $38"));
     assert!(!BACKTEST_WITH_CHIP_SQL.contains("$39"));
@@ -270,6 +277,7 @@ fn candidates(d: u32, list: &[(&str, Option<f64>)]) -> CandidateRow {
     CandidateRow {
         entry_date: None,
         date: day(2024, 1, d),
+        liquidity_start: day(2024, 1, d),
         exit_date: None,
         pending: false,
         elapsed_days: 0,

@@ -201,3 +201,55 @@ fn weigh_with_max_weight_holds_cash() {
         "{weighted:?}"
     );
 }
+
+/// 只符合續抱條件的持股沒有成交金額（SQL 不查），列為待補查；補查後填回，候選股原有的值不動，
+/// 查不到的維持 `None`。
+#[test]
+fn hold_only_holdings_get_trade_values_after_selection() {
+    use std::collections::HashMap;
+
+    use super::super::portfolio::{fill_trade_values, missing_trade_values};
+    let rows = select_holdings(
+        vec![
+            CandidateRow {
+                candidate_trade_values: vec![Some(300.0), Some(100.0)],
+                ..candidates(2, &[("A", Some(1.0)), ("B", Some(2.0))])
+            },
+            CandidateRow {
+                candidate_trade_values: vec![Some(500.0)],
+                ..with_hold(
+                    candidates(3, &[("C", Some(3.0))]),
+                    &[("A", Some(4.0)), ("B", Some(5.0))],
+                )
+            },
+        ],
+        3,
+        3,
+        None,
+    );
+    // 第二期：候選股 C 有成交金額；續抱的 A、B 只在續抱名單，沒有。
+    assert_eq!(rows[1].symbols, ["C", "A", "B"]);
+    assert_eq!(rows[1].trade_values, [Some(500.0), None, None]);
+    assert_eq!(
+        missing_trade_values(&rows),
+        [
+            (day(2024, 1, 3), "A".to_owned()),
+            (day(2024, 1, 3), "B".to_owned())
+        ]
+    );
+
+    let mut filled = rows.clone();
+    fill_trade_values(
+        &mut filled,
+        &HashMap::from([
+            ((day(2024, 1, 3), "A".to_owned()), 250.0),
+            ((day(2024, 1, 3), "C".to_owned()), 1.0),
+        ]),
+    );
+    assert_eq!(filled[1].trade_values, [Some(500.0), Some(250.0), None]);
+    assert_eq!(filled[0].trade_values, rows[0].trade_values);
+
+    let mut unknown = rows;
+    fill_trade_values(&mut unknown, &HashMap::new());
+    assert_eq!(unknown[1].trade_values, [Some(500.0), None, None]);
+}
