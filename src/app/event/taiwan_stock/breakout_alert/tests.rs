@@ -40,7 +40,7 @@ struct FakeQuery {
     fail: bool,
     outcomes: Vec<SignalOutcome>,
     outcomes_fail: bool,
-    got: Mutex<Option<(NaiveDate, String, i64)>>,
+    got: Mutex<Option<(NaiveDate, String, SignalKind, i64)>>,
 }
 
 #[async_trait]
@@ -49,9 +49,10 @@ impl RankedSignalQuery for FakeQuery {
         &self,
         date: NaiveDate,
         indicator: &str,
+        kind: SignalKind,
         limit: i64,
     ) -> Result<(Vec<RankedSignal>, i64)> {
-        *self.got.lock().expect("測試鎖") = Some((date, indicator.to_owned(), limit));
+        *self.got.lock().expect("測試鎖") = Some((date, indicator.to_owned(), kind, limit));
         if self.fail {
             return Err(anyhow!("連線中斷"));
         }
@@ -121,13 +122,19 @@ fn build_message_without_outcome() {
     assert!(message.contains("不構成投資建議"), "{message}");
 }
 
-/// 查詢條件：當天、range_breakout、前 15 檔；樣本不足的歷史表現不附。
+/// 查詢條件：當天、range_breakout／breakout、前 15 檔；樣本不足或假突破的歷史表現不附。
 #[tokio::test]
 async fn run_queries_top_signals_and_skips_small_samples() {
     let repo = FakeQuery {
         signals: vec![ranked("2330", "台積電", "半導體業")],
         total: 5,
-        outcomes: vec![outcome(10)],
+        outcomes: vec![
+            outcome(10),
+            SignalOutcome {
+                kind: "failed".to_owned(),
+                ..outcome(500)
+            },
+        ],
         ..Default::default()
     };
 
@@ -138,7 +145,12 @@ async fn run_queries_top_signals_and_skips_small_samples() {
 
     assert_eq!(
         repo.got.lock().expect("測試鎖").take(),
-        Some((date(), "range_breakout".to_owned(), 15))
+        Some((
+            date(),
+            "range_breakout".to_owned(),
+            SignalKind::Breakout,
+            15
+        ))
     );
     assert!(!message.contains("勝率"), "{message}");
 }
@@ -173,7 +185,7 @@ async fn run_handles_empty_failure_and_outcome_failure() {
     assert!(message.contains("2330 台積電"), "{message}");
 }
 
-/// 連資料庫：依成交值排序、取前 N 檔、總檔數為當天全部；其他來源與其他日期不列入。
+/// 連資料庫：依成交值排序、取前 N 檔、總檔數為當天全部；其他來源、其他種類（假突破）與其他日期不列入。
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
@@ -197,7 +209,13 @@ async fn fetch_ranked_signals_orders_by_trade_value() {
         }
     };
     cleanup().await;
-    for (symbol, trade_value) in [("79979BA", 100), ("79979BB", 300), ("79979BC", 200)] {
+    // 79979BD 成交值最大但只有假突破，不列入突破排行。
+    for (symbol, trade_value, kind) in [
+        ("79979BA", 100, "breakout"),
+        ("79979BB", 300, "breakout"),
+        ("79979BC", 200, "breakout"),
+        ("79979BD", 900, "failed"),
+    ] {
         sqlx::query(
             r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
                VALUES ($1, $1, $1, 2, 24)"#,
@@ -217,17 +235,18 @@ async fn fetch_ranked_signals_orders_by_trade_value() {
         .expect("寫入測試日線");
         sqlx::query(
             "INSERT INTO daily_technical_signal (date, stock_symbol, indicator, kind, description)
-             VALUES ($1, $2, 'range_breakout', 'breakout', $2), ($1, $2, 'kd', 'overbought', 'kd')",
+             VALUES ($1, $2, 'range_breakout', $3, $2), ($1, $2, 'kd', 'overbought', 'kd')",
         )
         .bind(day)
         .bind(symbol)
+        .bind(kind)
         .execute(pool)
         .await
         .expect("寫入測試訊號");
     }
 
     let (signals, total) = PgQuoteRepository::new()
-        .fetch_ranked_signals(day, RANGE_BREAKOUT_INDICATOR, 2)
+        .fetch_ranked_signals(day, RANGE_BREAKOUT_INDICATOR, SignalKind::Breakout, 2)
         .await
         .expect("查詢成功");
 

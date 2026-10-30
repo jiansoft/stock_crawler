@@ -14,7 +14,7 @@ use axum::{
 use super::{ensure_stock_exists, error_response, parse_optional_date, repository_error, round2};
 use crate::domain::quote::technical::{
     self, IndicatorPoint, PriceAdjustment, PriceBar, PriceBarRepository, RangeBreakoutState,
-    VolumeBar, breakout::RANGE_BREAKOUT_VOLUME_BARS,
+    VolumeBar, breakout::FAILED_BREAKOUT_VOLUME_BARS,
 };
 use crate::infra::database::repository::quote::PgQuoteRepository;
 use crate::interfaces::web::data_api::dto::{
@@ -62,7 +62,7 @@ pub(crate) async fn stock_technicals(
         Err(error) => return repository_error(error),
     };
     let volumes = match repo
-        .fetch_volumes(&symbol, date, RANGE_BREAKOUT_VOLUME_BARS as i64)
+        .fetch_volumes(&symbol, date, FAILED_BREAKOUT_VOLUME_BARS as i64)
         .await
     {
         Ok(volumes) => volumes,
@@ -73,7 +73,7 @@ pub(crate) async fn stock_technicals(
 }
 
 /// 由舊到新的日線還原權值後計算指標，只回傳最後 `days` 筆與最新一日的訊號（含 52 週新高新低、
-/// 區間突破）與區間突破狀態；`volumes` 是同一批交易日最近幾日的成交量。
+/// 區間突破與假突破）與區間突破狀態；`volumes` 是同一批交易日最近幾日的成交量。
 fn build_response(
     symbol: String,
     days: u8,
@@ -88,7 +88,7 @@ fn build_response(
         Some((last, rest)) => technical::signals(rest.last(), last)
             .into_iter()
             .chain(technical::fifty_two_week_signals(bars))
-            .chain(technical::range_breakout_signal(bars, volumes))
+            .chain(technical::range_breakout_signals(bars, volumes))
             .map(|signal| TechnicalSignalItem {
                 indicator: signal.indicator.to_owned(),
                 kind: signal.kind.as_str().to_owned(),

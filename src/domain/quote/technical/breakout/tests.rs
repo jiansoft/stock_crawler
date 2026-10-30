@@ -163,3 +163,91 @@ fn state_reports_values_without_breakout() {
         "{state:?}"
     );
 }
+
+/// 第 30 根帶量突破（收 10.3、突破價 10），之後依序接上 `after` 的收盤（高低等於收盤、量 1000）。
+fn breakout_then(after: &[f64]) -> (Vec<PriceBar>, Vec<VolumeBar>) {
+    let (mut bars, mut volumes) = setup(10.3, 10.5, 1600.0);
+    for (i, &close) in after.iter().enumerate() {
+        let date = day(BASE_DAYS + 1 + i);
+        bars.push(PriceBar {
+            date,
+            close,
+            high: close,
+            low: close,
+        });
+        volumes.push(VolumeBar {
+            date,
+            volume: 1000.0,
+        });
+    }
+    (bars, volumes)
+}
+
+/// 突破後守住兩天、第三天收在突破價之下：記假突破，說明附突破日、突破價與第幾個交易日。
+#[test]
+fn falling_back_below_pivot_is_failed_breakout() {
+    let (bars, volumes) = breakout_then(&[10.2, 10.0, 9.9]);
+
+    let signal = failed_breakout_signal(&bars, &volumes).expect("應出現假突破");
+
+    assert_eq!(signal.indicator, RANGE_BREAKOUT_INDICATOR);
+    assert_eq!(signal.kind, SignalKind::Failed);
+    assert_eq!(
+        signal.description,
+        "收盤 9.9 跌回 2026-01-31 區間突破的突破價 10 之下（突破後第 3 個交易日）"
+    );
+    let all: Vec<SignalKind> = range_breakout_signals(&bars, &volumes)
+        .map(|signal| signal.kind)
+        .collect();
+    assert_eq!(all, [SignalKind::Failed]);
+}
+
+/// 突破隔天就跌回也算；收在突破價上（含等於）不算。
+#[test]
+fn next_day_fall_back_counts_and_pivot_close_holds() {
+    let (bars, volumes) = breakout_then(&[9.95]);
+    assert!(failed_breakout_signal(&bars, &volumes).is_some());
+
+    let (bars, volumes) = breakout_then(&[10.0]);
+    assert_eq!(failed_breakout_signal(&bars, &volumes), None);
+}
+
+/// 同一次突破只記第一次跌回：之前已跌回過（即使又站回去）就不再記。
+#[test]
+fn only_first_fall_back_is_recorded() {
+    let (bars, volumes) = breakout_then(&[9.9, 9.8]);
+    assert_eq!(failed_breakout_signal(&bars, &volumes), None);
+
+    let (bars, volumes) = breakout_then(&[9.9, 10.2, 9.8]);
+    assert_eq!(failed_breakout_signal(&bars, &volumes), None);
+}
+
+/// 突破後第 10 個交易日跌回還算，第 11 個交易日才跌回不算。
+#[test]
+fn fall_back_window_is_ten_trading_days() {
+    let mut after = vec![10.2; FAILED_WITHIN_DAYS - 1];
+    after.push(9.9);
+    let (bars, volumes) = breakout_then(&after);
+    assert!(failed_breakout_signal(&bars, &volumes).is_some());
+
+    let mut after = vec![10.2; FAILED_WITHIN_DAYS];
+    after.push(9.9);
+    let (bars, volumes) = breakout_then(&after);
+    assert_eq!(failed_breakout_signal(&bars, &volumes), None);
+}
+
+/// 突破當天本身不是假突破；成交量沒對齊時看不出突破，也就沒有假突破。
+#[test]
+fn breakout_day_and_misaligned_volumes_are_not_failed() {
+    let (bars, volumes) = breakout_then(&[]);
+    assert_eq!(failed_breakout_signal(&bars, &volumes), None);
+    let all: Vec<SignalKind> = range_breakout_signals(&bars, &volumes)
+        .map(|signal| signal.kind)
+        .collect();
+    assert_eq!(all, [SignalKind::Breakout]);
+
+    let (bars, mut volumes) = breakout_then(&[10.2, 9.9]);
+    volumes.remove(BASE_DAYS);
+    assert_eq!(failed_breakout_signal(&bars, &volumes), None);
+    assert_eq!(failed_breakout_signal(&[], &[]), None);
+}

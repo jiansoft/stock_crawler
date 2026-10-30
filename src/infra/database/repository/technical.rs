@@ -19,7 +19,7 @@ use crate::{
         relative_strength::CROSSING_INDICATORS,
         technical::{
             PriceAdjustment, PriceBar, PriceBarRepository, RankedSignal, RankedSignalQuery,
-            SignalOutcome, StockTechnicalSignal, TechnicalSignal, TechnicalSignalQuery,
+            SignalKind, SignalOutcome, StockTechnicalSignal, TechnicalSignal, TechnicalSignalQuery,
             TechnicalSignalRepository, VolumeBar, adjust_bars,
         },
     },

@@ -249,7 +249,8 @@ fn signal_kind_names_are_stable() {
             "oversold",
             "new_high",
             "new_low",
-            "breakout"
+            "breakout",
+            "failed"
         ]
     );
     for kind in SIGNAL_KINDS {

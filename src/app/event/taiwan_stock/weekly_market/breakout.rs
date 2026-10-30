@@ -9,8 +9,8 @@ use crate::app::event::taiwan_stock::technical_alert::MIN_OUTCOME_SAMPLES;
 use crate::domain::quote::{
     forward_return::ForwardReturnRepository,
     technical::{
-        OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RankedSignal, RankedSignalQuery, SignalOutcome,
-        TechnicalSignalQuery,
+        OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RankedSignal, RankedSignalQuery, SignalKind,
+        SignalOutcome, TechnicalSignalQuery,
     },
 };
 
@@ -43,7 +43,12 @@ pub(super) async fn breakout_section(
     let mut top: Vec<RankedSignal> = Vec::new();
     for day in &dates {
         let (signals, count) = quote
-            .fetch_ranked_signals(*day, RANGE_BREAKOUT_INDICATOR, TOP as i64)
+            .fetch_ranked_signals(
+                *day,
+                RANGE_BREAKOUT_INDICATOR,
+                SignalKind::Breakout,
+                TOP as i64,
+            )
             .await?;
         total += count;
         top.extend(signals);
@@ -64,9 +69,9 @@ pub(super) async fn breakout_section(
         )
         .await
     {
-        Ok(outcomes) => outcomes
-            .into_iter()
-            .find(|outcome| outcome.samples >= MIN_OUTCOME_SAMPLES),
+        Ok(outcomes) => outcomes.into_iter().find(|outcome| {
+            outcome.kind == SignalKind::Breakout.as_str() && outcome.samples >= MIN_OUTCOME_SAMPLES
+        }),
         Err(why) => {
             tracing::warn!("每週市場摘要：讀取區間突破歷史表現失敗，不附勝率: {why:#}");
             None

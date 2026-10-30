@@ -1,11 +1,11 @@
-//! 區間突破訊號的歷史回補。
+//! 區間突破與假突破訊號的歷史回補。
 //!
 //! 逐日重算全部訊號（`manual_backfill` 的 `test_backfill_technical_signals`）每天要讀全市場 361 根日線，
 //! 回補多年要好幾個小時。區間突破只看最近 31 根，因此改成每檔讀一次整段日線與成交量，在記憶體逐日判斷，
 //! 最後只覆蓋 `range_breakout` 來源，其他訊號不動。
 //!
-//! 還原權值以整段的最後一天為基準；區間突破只比較 31 根之內的價格比例，基準日不同只差一個共同倍數，
-//! 結果與每日計算（以當天為基準）相同。
+//! 還原權值以整段的最後一天為基準；區間突破與假突破只比較 41 根之內的價格比例，基準日不同只差一個
+//! 共同倍數，結果與每日計算（以當天為基準）相同。
 
 use std::collections::HashMap;
 
@@ -16,10 +16,10 @@ use futures::{StreamExt, stream};
 use super::{CONCURRENCY, PgQuoteRepository};
 use crate::domain::quote::technical::{
     self, PriceAdjustment, PriceBarRepository, RANGE_BREAKOUT_INDICATOR, StockTechnicalSignal,
-    TechnicalSignalRepository, breakout::RANGE_BREAKOUT_BARS,
+    TechnicalSignalRepository, breakout::FAILED_BREAKOUT_BARS,
 };
 
-/// 回補 `from`～`to`（含）的區間突破訊號，覆蓋這段期間原有的 `range_breakout` 訊號，回傳寫入筆數。
+/// 回補 `from`～`to`（含）的區間突破與假突破訊號，覆蓋這段期間原有的 `range_breakout` 訊號，回傳寫入筆數。
 ///
 /// # Errors
 ///
@@ -39,8 +39,8 @@ where
         .fetch_price_adjustments(&symbols)
         .await
         .context("讀取除權息事件失敗")?;
-    // 日曆天數一定不少於交易日數；多讀判斷所需的根數，讓 `from` 當天也有完整的整理區間。
-    let limit = (to - from).num_days() + 1 + RANGE_BREAKOUT_BARS as i64;
+    // 日曆天數一定不少於交易日數；多讀判斷所需的根數，讓 `from` 當天也有完整的整理區間與假突破回看。
+    let limit = (to - from).num_days() + 1 + FAILED_BREAKOUT_BARS as i64;
     let results: Vec<_> = stream::iter(symbols)
         .map(|symbol| async move {
             let fetched = futures::join!(
@@ -66,7 +66,7 @@ where
     Ok(signals.len())
 }
 
-/// 單一股票在 `from` 起每個交易日的區間突破訊號。`bars` 與 `volumes` 由舊到新；成交量依日期對齊，
+/// 單一股票在 `from` 起每個交易日的區間突破與假突破訊號。`bars` 與 `volumes` 由舊到新；成交量依日期對齊，
 /// 缺成交量的日子由判斷函式略過。
 fn symbol_signals(
     symbol: &str,
@@ -89,8 +89,8 @@ fn symbol_signals(
         let Some(&volume_end) = volume_index.get(&bar.date) else {
             continue;
         };
-        let signal = technical::range_breakout_signal(&bars[..=index], &volumes[..=volume_end]);
-        if let Some(signal) = signal {
+        let signals = technical::range_breakout_signals(&bars[..=index], &volumes[..=volume_end]);
+        for signal in signals {
             out.push(StockTechnicalSignal {
                 date: bar.date,
                 stock_symbol: symbol.to_owned(),

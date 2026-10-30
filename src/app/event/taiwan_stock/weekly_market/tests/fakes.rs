@@ -6,7 +6,8 @@ use crate::domain::portfolio::{
     health::HoldingFundamentals,
 };
 use crate::domain::quote::technical::{
-    RankedSignal, RankedSignalQuery, SignalOutcome, StockTechnicalSignal, TechnicalSignalQuery,
+    RankedSignal, RankedSignalQuery, SignalKind, SignalOutcome, StockTechnicalSignal,
+    TechnicalSignalQuery,
 };
 
 /// 回傳固定加權指數收盤與市場廣度的假倉儲；`fail` 時指數查詢失敗，`breadth_fail` 時廣度查詢失敗。
@@ -392,9 +393,13 @@ impl RankedSignalQuery for FakeQuote {
         &self,
         date: NaiveDate,
         indicator: &str,
+        kind: SignalKind,
         limit: i64,
     ) -> Result<(Vec<RankedSignal>, i64)> {
-        assert_eq!((indicator, limit), ("range_breakout", TOP as i64));
+        assert_eq!(
+            (indicator, kind, limit),
+            ("range_breakout", SignalKind::Breakout, TOP as i64)
+        );
         if self.fail {
             return Err(anyhow!("down"));
         }

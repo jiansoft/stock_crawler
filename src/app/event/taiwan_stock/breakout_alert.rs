@@ -19,7 +19,7 @@ use crate::{
     domain::{
         portfolio::repository::PortfolioRepository,
         quote::technical::{
-            OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RankedSignal, RankedSignalQuery,
+            OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RankedSignal, RankedSignalQuery, SignalKind,
             SignalOutcome, TechnicalSignalQuery,
         },
     },
@@ -64,7 +64,7 @@ where
     R: RankedSignalQuery + TechnicalSignalQuery,
 {
     let (signals, total) = repo
-        .fetch_ranked_signals(date, RANGE_BREAKOUT_INDICATOR, LISTED)
+        .fetch_ranked_signals(date, RANGE_BREAKOUT_INDICATOR, SignalKind::Breakout, LISTED)
         .await
         .context("fetch range breakout signals failed")?;
     tracing::info!("區間突破通知: total={total} listed={}", signals.len());
@@ -80,7 +80,9 @@ where
             Vec::new()
         })
         .into_iter()
-        .find(|outcome| outcome.samples >= MIN_OUTCOME_SAMPLES);
+        .find(|outcome| {
+            outcome.kind == SignalKind::Breakout.as_str() && outcome.samples >= MIN_OUTCOME_SAMPLES
+        });
     Ok(Some(build_message(
         date,
         &signals,
