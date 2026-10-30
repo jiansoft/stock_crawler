@@ -13,6 +13,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{Days, Local, NaiveDate};
+use sqlx::PgPool;
 
 use super::dividend_fill::into_dto;
 use super::{database_error, error_response, repository_error};
@@ -24,12 +25,12 @@ use crate::interfaces::web::data_api::dto::{
     PortfolioDividendFillResponse,
 };
 
-/// 目前持股（未售出、依代號合併）的代號與名稱。
+/// 目前持股（未售出、依代號合併）的代號與名稱；`$1` 為 0 時是全部會員合計。
 const HOLDINGS_SQL: &str = r#"
 SELECT o.security_code AS stock_symbol, COALESCE(s."Name", '') AS name
 FROM stock_ownership_details o
 LEFT JOIN stocks s ON s.stock_symbol = o.security_code
-WHERE NOT o.is_sold
+WHERE NOT o.is_sold AND ($1::bigint = 0 OR o.member_id = $1)
 GROUP BY o.security_code, s."Name"
 HAVING SUM(o.share_quantity) > 0
 ORDER BY o.security_code
@@ -39,7 +40,8 @@ ORDER BY o.security_code
 ///
 /// # Errors
 ///
-/// `days` 不在 30–730 回 422、驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。
+/// `days` 不在 30–730 或 `member_id` 為負數回 422、驗證失敗回 401；資料庫查詢失敗回不含 SQL
+/// 細節的 500。
 #[utoipa::path(get, path = "/api/v1/portfolio/dividend-fill", tag = "data-api", params(PortfolioDividendFillParams), responses((status = 200, body = PortfolioDividendFillResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn portfolio_dividend_fill(
     Query(params): Query<PortfolioDividendFillParams>,
@@ -48,18 +50,27 @@ pub(crate) async fn portfolio_dividend_fill(
     if !(30..=730).contains(&days) {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "days 必須介於 30 至 730");
     }
-    let holdings: Vec<(String, String)> = match sqlx::query_as(HOLDINGS_SQL)
-        .fetch_all(database::get_connection())
-        .await
-    {
+    let member_id = params.member_id.unwrap_or(0);
+    if member_id < 0 {
+        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
+    }
+    let holdings = match fetch_holdings(database::get_connection(), member_id).await {
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
     let today = Local::now().date_naive();
     match collect(&PgDividendFillRepository::new(), &holdings, today, days).await {
-        Ok(outcomes) => Json(response(days, outcomes)).into_response(),
+        Ok(outcomes) => Json(response(member_id, days, outcomes)).into_response(),
         Err(error) => repository_error(error),
     }
+}
+
+/// 會員目前持股的代號與名稱（`member_id` 為 0 時是全部會員合計）。
+async fn fetch_holdings(pool: &PgPool, member_id: i64) -> sqlx::Result<Vec<(String, String)>> {
+    sqlx::query_as(HOLDINGS_SQL)
+        .bind(member_id)
+        .fetch_all(pool)
+        .await
 }
 
 /// 每檔持股除權息日在 `today` 往前 `days` 天內的填息結果，附代號與名稱。
@@ -84,6 +95,7 @@ async fn collect(
 
 /// 組出回應：未填息的依缺口由大到小在前，已填息的依除權息日由新到舊在後。
 fn response(
+    member_id: i64,
     days: u16,
     mut outcomes: Vec<(String, String, FillOutcome)>,
 ) -> PortfolioDividendFillResponse {
@@ -98,6 +110,7 @@ fn response(
     let all: Vec<FillOutcome> = outcomes.iter().map(|(_, _, outcome)| *outcome).collect();
     let summary = fill::summarize(&all);
     PortfolioDividendFillResponse {
+        member_id,
         days,
         summary: DividendFillSummary {
             events: summary.events,

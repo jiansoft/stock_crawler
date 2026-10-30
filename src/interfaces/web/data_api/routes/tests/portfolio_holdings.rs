@@ -145,7 +145,7 @@ async fn portfolio_chip_endpoint_db_semantics() {
     assert_eq!(json["notable"], 0);
 }
 
-/// 持股填息：天數範圍檢查，回應帶回看天數、統計與清單（填息規則由 handler 與 domain 單元測試驗證）。
+/// 持股填息：天數與會員範圍檢查，回應帶會員、回看天數、統計與清單（填息規則由 handler 與 domain 單元測試驗證）。
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
@@ -162,8 +162,19 @@ async fn portfolio_dividend_fill_endpoint_db_semantics() {
         let (status, _) = get(&format!("/api/v1/portfolio/dividend-fill?days={days}")).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "days={days}");
     }
+    let (status, _) = get("/api/v1/portfolio/dividend-fill?member_id=-1").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "member_id=-1");
+    let (status, json) = get("/api/v1/portfolio/dividend-fill?member_id=979792").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["member_id"], 979_792);
+    assert_eq!(
+        json["items"],
+        serde_json::json!([]),
+        "沒有持股的會員沒有事件"
+    );
     let (status, json) = get("/api/v1/portfolio/dividend-fill").await;
     assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["member_id"], 0);
     assert_eq!(json["days"], 365);
     assert!(json["items"].is_array(), "{json}");
     assert!(json["summary"]["events"].is_number(), "{json}");

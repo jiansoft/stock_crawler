@@ -10,6 +10,9 @@ use super::{DividendFillEvent, DividendFillSummary};
 pub(crate) struct PortfolioDividendFillParams {
     /// 只看除權息日在今天往前幾天內的事件，範圍 30–730；省略為 365。
     pub(crate) days: Option<u16>,
+    /// 會員編號；0（預設）為全部會員合計。
+    #[param(minimum = 0, default = 0)]
+    pub(crate) member_id: Option<i64>,
 }
 
 /// 持股的一次除權息與填息狀態。
@@ -27,6 +30,8 @@ pub(crate) struct PortfolioDividendFillItem {
 /// 持股填息狀態。
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct PortfolioDividendFillResponse {
+    /// 會員編號；0 為全部會員合計。
+    pub(crate) member_id: i64,
     /// 回看天數。
     pub(crate) days: u16,
     /// 所有事件的填息統計。
