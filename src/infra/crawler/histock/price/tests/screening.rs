@@ -243,3 +243,72 @@ fn screen_inconsistent_rows_rejects_misaligned_batch() {
         "{message}"
     );
 }
+
+/// 10-30 開盤實例：0057 尚未成交，列上的成交價、漲跌、高低是前一交易日的，只有昨收換成今天的。
+fn stale_snapshot(symbol: &str) -> RealtimeSnapshot {
+    let mut snapshot = RealtimeSnapshot::new(symbol.to_string(), dec!(318.7));
+    snapshot.change = dec!(-3.15);
+    snapshot.last_close = dec!(318.7);
+    snapshot.high = dec!(321.5);
+    snapshot.low = dec!(318.7);
+    snapshot
+}
+
+/// 成交價等於昨收且漲跌不為 0 才算尚未成交；平盤（漲跌 0）、正常列與價格為 0 的列都不算。
+#[test]
+fn stale_row_detects_untraded_rows_with_previous_day_fields() {
+    assert!(stale_row(&stale_snapshot("0057")));
+    assert_eq!(
+        row_inconsistency(&stale_snapshot("0057"), None),
+        Some(Inconsistency::ChangeMismatch)
+    );
+
+    let mut flat = stale_snapshot("0057");
+    flat.change = Decimal::ZERO;
+    assert!(!stale_row(&flat));
+    assert!(!stale_row(&consistent_snapshot("1301")));
+    let mut untraded = stale_snapshot("0057");
+    untraded.price = Decimal::ZERO;
+    assert!(!stale_row(&untraded));
+}
+
+/// 尚未成交的列再多也不整批捨棄：這些列歸零（沿用快取），不算矛盾列，其餘照常使用。
+#[test]
+fn screen_inconsistent_rows_skips_stale_rows_without_dirty_batch() {
+    let snapshots = (0..30)
+        .map(|i| {
+            let symbol = format!("7990{i:02}");
+            if i < 25 {
+                stale_snapshot(&symbol)
+            } else {
+                consistent_snapshot(&symbol)
+            }
+        })
+        .collect();
+    let mut result = fetch_result_with(snapshots);
+
+    assert_eq!(
+        screen_inconsistent_rows(&mut result, |_| RowBaseline::default()).unwrap(),
+        0
+    );
+    assert_eq!(result.snapshots["799000"].price, Decimal::ZERO);
+    assert_eq!(result.snapshots["799029"].price, dec!(78.5));
+}
+
+/// 疑似別檔優先於尚未成交：整頁錯位時剛好沒成交的別檔列仍算進別檔門檻。
+#[test]
+fn screen_inconsistent_rows_counts_misaligned_before_stale() {
+    let snapshots = (0..30)
+        .map(|i| stale_snapshot(&format!("7990{i:02}")))
+        .collect();
+    let mut result = fetch_result_with(snapshots);
+
+    let error = screen_inconsistent_rows(&mut result, |symbol: &str| {
+        let index: usize = symbol[4..].parse().unwrap();
+        baseline(if index < 3 { dec!(30) } else { dec!(318.7) })
+    })
+    .unwrap_err();
+
+    let dirty = error.downcast_ref::<DirtyBatch>().expect("DirtyBatch 錯誤");
+    assert_eq!((dirty.inconsistent, dirty.misaligned), (3, 3));
+}

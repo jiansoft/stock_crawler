@@ -174,31 +174,46 @@ pub(super) fn misaligned_row(snapshot: &RealtimeSnapshot, baseline: RowBaseline)
     far(last_close) && baseline.reference_price.is_none_or(far)
 }
 
+/// 這一列是否為今天尚未成交、仍掛著前一交易日的資料：成交價等於昨收，漲跌卻不是 0。
+///
+/// 10-30 開盤實例：0057 列上成交 318.7、漲跌 -3.15、高 321.5、低 318.7、昨收 318.7。成交價、漲跌、
+/// 高低都是 10-29 的（10-29 收盤 318.7、10-28 收盤 321.85），只有昨收已換成今天的。開盤後成交冷清的
+/// ETF 有數百列是這樣（09:02 有 400 列、09:15 還有 202 列），以前都被當成「漲跌對不上」而整批捨棄。
+/// 真的成交在昨收、漲跌欄卻不是 0 的列本來就矛盾，一樣不採用，只是不算進整批捨棄的門檻。
+pub(super) fn stale_row(snapshot: &RealtimeSnapshot) -> bool {
+    snapshot.price > Decimal::ZERO
+        && snapshot.price == snapshot.last_close
+        && snapshot.change != Decimal::ZERO
+}
+
 /// 剔除前後矛盾的列；矛盾的列太多、或有 [`MISALIGNED_BATCH_MIN_ROWS`] 列以上疑似別檔時整批捨棄。
+///
+/// 今天尚未成交的列（[`stale_row`]）同樣不採用，但不算矛盾列；疑似別檔的判斷優先，避免整頁錯位時
+/// 剛好沒成交的別檔列被漏算。
 ///
 /// 剔除的列把價格設為 0，[`Share::set_stock_snapshots`](crate::infra::cache::Share::set_stock_snapshots)
 /// 會改用快取裡的舊值，不會讓這檔股票從快取消失。
 ///
 /// # 回傳
-/// - `Ok(n)`：剔除了 `n` 列，其餘照常使用。
+/// - `Ok(n)`：剔除了 `n` 列矛盾列（不含尚未成交的列），其餘照常使用。
 /// - `Err(DirtyBatch)`：矛盾的列超過 `max(20, 總數 2%)`，或疑似別檔的列達 [`MISALIGNED_BATCH_MIN_ROWS`]，
 ///   代表整頁錯亂，這一輪不更新快取。
 pub(super) fn screen_inconsistent_rows(
     result: &mut HiStockFetchResult,
     baseline: impl Fn(&str) -> RowBaseline,
 ) -> Result<usize> {
-    let mut inconsistent: Vec<(String, Inconsistency)> = result
-        .snapshots
-        .iter()
-        .filter_map(|(symbol, snapshot)| {
-            let baseline = baseline(symbol);
-            if misaligned_row(snapshot, baseline) {
-                return Some((symbol.clone(), Inconsistency::Misaligned));
-            }
-            row_inconsistency(snapshot, baseline.reference_price)
-                .map(|reason| (symbol.clone(), reason))
-        })
-        .collect();
+    let mut stale: Vec<String> = Vec::new();
+    let mut inconsistent: Vec<(String, Inconsistency)> = Vec::new();
+    for (symbol, snapshot) in &result.snapshots {
+        let baseline = baseline(symbol);
+        if misaligned_row(snapshot, baseline) {
+            inconsistent.push((symbol.clone(), Inconsistency::Misaligned));
+        } else if stale_row(snapshot) {
+            stale.push(symbol.clone());
+        } else if let Some(reason) = row_inconsistency(snapshot, baseline.reference_price) {
+            inconsistent.push((symbol.clone(), reason));
+        }
+    }
     inconsistent.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
     super::stats::record_inconsistent(
@@ -239,6 +254,11 @@ pub(super) fn screen_inconsistent_rows(
                 symbol,
                 reason.label()
             );
+            snapshot.price = Decimal::ZERO;
+        }
+    }
+    for symbol in &stale {
+        if let Some(snapshot) = result.snapshots.get_mut(symbol) {
             snapshot.price = Decimal::ZERO;
         }
     }
