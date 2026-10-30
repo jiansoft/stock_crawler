@@ -1,7 +1,9 @@
 //! 條件選股的測試：[`validation`]（參數驗證、排序白名單與新鮮度公式的 deterministic tests），以及以真實
 //! PostgreSQL 執行的整合測試——[`query_plans`]（執行計畫）、[`chip_liquidity`]（法人連買、成交金額）、
-//! [`valuation_margins`]（估值上限、三率）、[`revenue_industry`]（營收新高、排除產業）；這裡放共用的參數建構函式。
+//! [`valuation_margins`]（估值上限、三率）、[`revenue_industry`]（營收新高、排除產業）、[`breakout`]（近期區間
+//! 突破）；這裡放共用的參數建構函式。
 
+mod breakout;
 mod chip_liquidity;
 mod major;
 mod query_plans;
@@ -53,6 +55,7 @@ pub(super) fn screening_params() -> StockScreeningParams {
         max_pb: None,
         min_major_change: None,
         major_change_weeks: None,
+        range_breakout_days: None,
         sort_by: None,
         sort_order: None,
         limit: None,

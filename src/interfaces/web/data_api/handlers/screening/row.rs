@@ -90,6 +90,10 @@ pub(super) struct ScreenedStockRow {
     pb_ratio: Option<Decimal>,
     /// 本益比與股價淨值比的日線日期。
     ratio_date: Option<NaiveDate>,
+    /// 最近一次區間突破的交易日（有設 `range_breakout_days` 才有）。
+    breakout_date: Option<NaiveDate>,
+    /// 最近一次區間突破的說明。
+    breakout_description: Option<String>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -200,6 +204,8 @@ impl From<ScreenedStockRow> for ScreenedStock {
             pe_ratio: analytical_decimal_to_f64(row.pe_ratio, &symbol, "pe_ratio"),
             pb_ratio: analytical_decimal_to_f64(row.pb_ratio, &symbol, "pb_ratio"),
             ratio_date: row.ratio_date.map(|date| date.to_string()),
+            range_breakout_date: row.breakout_date.map(|date| date.to_string()),
+            range_breakout_description: row.breakout_description,
         }
     }
 }

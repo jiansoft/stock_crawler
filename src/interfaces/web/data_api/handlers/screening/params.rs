@@ -51,6 +51,8 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_major_change: Option<Decimal>,
     /// `min_major_change` 的回看週數。
     pub(super) major_change_weeks: u8,
+    /// 最近幾個交易日內出現區間突破（且還沒跌回）。
+    pub(super) range_breakout_days: Option<i64>,
     /// 三十二個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
@@ -211,6 +213,12 @@ pub(super) fn validate_screening_params(
     if !(1..=12).contains(&major_change_weeks) {
         return Err("major_change_weeks 必須介於 1 至 12");
     }
+    if params
+        .range_breakout_days
+        .is_some_and(|days| !(1..=20).contains(&days))
+    {
+        return Err("range_breakout_days 必須介於 1 至 20");
+    }
     let order_by = screen_order_by(
         params.sort_by.as_deref().unwrap_or("stock_symbol"),
         params.sort_order.as_deref().unwrap_or("asc"),
@@ -243,7 +251,8 @@ pub(super) fn validate_screening_params(
         || params.min_avg_trade_value.is_some()
         || params.max_pe.is_some()
         || params.max_pb.is_some()
-        || params.min_major_change.is_some();
+        || params.min_major_change.is_some()
+        || params.range_breakout_days.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -269,6 +278,7 @@ pub(super) fn validate_screening_params(
         max_pb,
         min_major_change,
         major_change_weeks,
+        range_breakout_days: params.range_breakout_days.map(i64::from),
         order_by,
         limit,
     })

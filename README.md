@@ -369,7 +369,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 
 | 端點 | 內容 |
 |---|---|
-| `/stocks/screen` | 條件選股：F 分數、毛利率、負債比、自由現金流、營業利益率、三率三升、營收創新高、營收連續年增、相對強度、外資／投信連續買超、平均成交金額、本益比／股價淨值比上限、千張大戶持股比例 N 週變化（`min_major_change`／`major_change_weeks`），可排除產業 |
+| `/stocks/screen` | 條件選股：F 分數、毛利率、負債比、自由現金流、營業利益率、三率三升、營收創新高、營收連續年增、相對強度、外資／投信連續買超、平均成交金額、本益比／股價淨值比上限、千張大戶持股比例 N 週變化（`min_major_change`／`major_change_weeks`）、近 N 日區間突破且還沒跌回（`range_breakout_days`，回應附突破日與說明；回測單獨使用輸 0050，只供參考），可排除產業 |
 | `/stocks/screen/backtest` | 條件選股回測（見下方說明） |
 | `/stocks/screen/backtest/offsets` | 換股日偏移穩健度：同一組條件把換股日偏移 0 到 `hold_days` − 1 都跑一遍，回傳各指標的分布與勝過 0050 的比例；`split` 分樣本內外 |
 | `/stocks/screen/backtest/frontier` | 0050 核心部位前緣：0%～100%（每 10%）各比例的偏移分布，標出夏普值、年化報酬中位數最高的比例 |

@@ -20,7 +20,7 @@ use chrono::{Local, NaiveDate};
 use self::{
     params::{ValidatedScreeningParams, validate_screening_params},
     row::ScreenedStockRow,
-    sql::{MAJOR_CHANGES_SQL, SCREEN_STOCKS_SQL},
+    sql::{MAJOR_CHANGES_SQL, RANGE_BREAKOUTS_SQL, SCREEN_STOCKS_SQL},
 };
 use super::institutional_flow::{StreakRow, load_streaks};
 use super::relative_strength::{ScoredStock, load_scores};
@@ -65,10 +65,11 @@ async fn screen_at(
 ) -> Response {
     // 相對強度要以上市櫃普通股（不含 ETF、特別股）排名、連續天數要回看多日籌碼，都無法在單股 LATERAL 內算，
     // 兩者同時先算好再以陣列傳入。
-    let (scores, streaks, majors) = tokio::join!(
+    let (scores, streaks, majors, breakouts) = tokio::join!(
         load_scores(query_date),
         load_streaks(query_date),
-        load_major_changes(&validated, query_date)
+        load_major_changes(&validated, query_date),
+        load_range_breakouts(&validated, query_date)
     );
     let (rs_as_of, rs_symbols, rs_scores) = match scores {
         Ok(scores) => rs_columns(scores),
@@ -82,6 +83,19 @@ async fn screen_at(
         Ok(rows) => rows.into_iter().unzip(),
         Err(error) => return database_error(error),
     };
+    let mut breakout_symbols = Vec::new();
+    let mut breakout_dates = Vec::new();
+    let mut breakout_descriptions = Vec::new();
+    match breakouts {
+        Ok(rows) => {
+            for (symbol, date, description) in rows {
+                breakout_symbols.push(symbol);
+                breakout_dates.push(date);
+                breakout_descriptions.push(description);
+            }
+        }
+        Err(error) => return database_error(error),
+    }
     // ORDER BY 字串只可能來自下方三十二個 &'static str 分支，絕不插入呼叫端
     // 原始文字；其他條件仍全部使用 bind parameter。
     let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $24", validated.order_by);
@@ -122,6 +136,10 @@ async fn screen_at(
         .bind(&major_symbols)
         .bind(&major_changes)
         .bind(validated.min_major_change)
+        .bind(&breakout_symbols)
+        .bind(&breakout_dates)
+        .bind(&breakout_descriptions)
+        .bind(validated.range_breakout_days.is_some())
         // 不快取成具名 prepared statement：同一連線執行約 5 次後 PostgreSQL 會改用 generic plan，
         // 34 個可選條件都剪不掉（2026-10-28 正式庫實測不設條件 custom 316 ms、generic 1,853 ms，
         // auto 模式第 6 次就換成 generic）。每次重新規劃只多 5 ms。
@@ -153,6 +171,21 @@ async fn load_major_changes(
     sqlx::query_as(MAJOR_CHANGES_SQL)
         .bind(query_date)
         .bind(i32::from(validated.major_change_weeks))
+        .fetch_all(database::get_connection())
+        .await
+}
+
+/// 有設 `range_breakout_days` 時讀近期還沒跌回的區間突破（代號、突破日、說明）；沒有設時不查資料庫。
+async fn load_range_breakouts(
+    validated: &ValidatedScreeningParams,
+    query_date: NaiveDate,
+) -> Result<Vec<(String, NaiveDate, String)>, sqlx::Error> {
+    let Some(days) = validated.range_breakout_days else {
+        return Ok(Vec::new());
+    };
+    sqlx::query_as(RANGE_BREAKOUTS_SQL)
+        .bind(query_date)
+        .bind(days)
         .fetch_all(database::get_connection())
         .await
 }
