@@ -93,3 +93,43 @@ async fn compare_case(execution: &str, offset: u16, weighting: &str) {
         assert_eq!(before.turnover, after.turnover);
     }
 }
+
+/// 續抱持股的平均成交金額補查：`liquidity_start`～換股日的平均（與選股時的算法相同），沒有日線的維持
+/// `None`，已有值的不重查。
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要臨時 PostgreSQL")]
+async fn hold_trade_values_are_filled_from_daily_quotes() {
+    use super::super::engine::fill_hold_trade_values;
+    let pool = database::get_connection();
+    let symbol = "79979P2A";
+    let first = NaiveDate::from_ymd_opt(1992, 3, 2).expect("有效日期");
+    sqlx::query(r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradeValue") SELECT $2::date + n, $1, 10, 100 * (n + 1) FROM generate_series(0, 4) AS n"#)
+        .bind(symbol)
+        .bind(first)
+        .execute(pool)
+        .await
+        .unwrap();
+    let date = first + chrono::Days::new(4);
+    let mut rows = vec![PeriodRow {
+        date,
+        symbols: vec![
+            symbol.to_owned(),
+            "79979P2Z".to_owned(),
+            "79979P2Y".to_owned(),
+        ],
+        trade_values: vec![None, None, Some(1.0)],
+        ..Default::default()
+    }];
+    let starts = std::collections::HashMap::from([(date, first + chrono::Days::new(2))]);
+
+    let filled = fill_hold_trade_values(&mut rows, &starts).await;
+
+    sqlx::query(r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = $1"#)
+        .bind(symbol)
+        .execute(pool)
+        .await
+        .unwrap();
+    filled.unwrap();
+    // 第 3～5 天：300、400、500 的平均。
+    assert_eq!(rows[0].trade_values, [Some(400.0), None, Some(1.0)]);
+}

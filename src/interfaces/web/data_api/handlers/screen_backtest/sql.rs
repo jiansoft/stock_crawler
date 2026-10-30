@@ -36,7 +36,8 @@ SELECT MIN("date") FROM holder_distribution
 /// （百分點，`NULL` 為不篩）、`$36` 變化的回看週數；籌碼版另有 `$37`／`$38`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號；往後多讀 400 個日曆天，
-///   計算最後幾期是否在迄日（`$2`）前完成出場）。
+///   計算最後幾期是否在迄日（`$2`）前完成出場）。由 `day_scan` 沿主鍵 `(date, stock_symbol)` 逐日跳到下一個
+///   日期（loose index scan），不必為了取不重複日期掃過整張 300 多萬列的表（正式庫約 190 → 數 ms）。
 /// - `rebal`：起日之後先跳過 `$14` 個交易日、再每隔 `$4` 個交易日的換股日；`window_start` 是
 ///   含當天往前第 `$4` 個交易日，訊號條件看 `window_start`～換股日；`liquidity_start` 是含當天往前
 ///   第 20 個交易日（之前不足 20 個交易日時取最早一天），流動性看 `liquidity_start`～換股日的平均
@@ -69,8 +70,9 @@ SELECT MIN("date") FROM holder_distribution
 /// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
 ///   成交金額或法人連續買超天數，本益比與股價淨值比由低到高，同值再依相對強度分數與名次 `rs_rank`）的前 `$5` 檔與各自的報酬、產業編號、平均成交
 ///   金額；實際持股由 [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
-/// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）；
-///   依成交金額加權時同樣逐檔查平均成交金額。
+/// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
+///   不查平均成交金額：這份名單動輒數萬列，實際續抱的只有每期幾檔，改由 [`HOLD_TRADE_VALUES_SQL`] 在
+///   選定持股後補查（正式庫最佳組合約省 0.8 秒）。回傳列另附 `liquidity_start` 供補查使用。
 /// - `taiex`：加權指數收盤是否不低於含當天往前 `$11` 個交易日的平均；低於時 `market_ok` 為
 ///   false，這期空手。
 /// - `breadth`：同市場站上 60 日均線的股票比例（`daily_stock_price_stats`）是否不低於 `$13`%；
@@ -92,10 +94,15 @@ macro_rules! backtest_sql {
         concat!(
             $with,
             r#"
+day_scan AS (
+    SELECT MIN(date) AS date FROM daily_relative_strength WHERE date >= $1::date - 400
+    UNION ALL
+    SELECT (SELECT MIN(r.date) FROM daily_relative_strength r WHERE r.date > s.date)
+    FROM day_scan s
+    WHERE s.date <= $2::date + 400
+),
 days AS (
-    SELECT date FROM daily_relative_strength
-    WHERE date BETWEEN $1::date - 400 AND ($2::date + 400)
-    GROUP BY date
+    SELECT date FROM day_scan WHERE date <= $2::date + 400
 ),
 windowed AS (
     SELECT date,
@@ -217,11 +224,7 @@ holdable AS (
            array_agg(trade_value ORDER BY "#, rs_rank_order!(), r#") AS trade_values
     FROM (
         SELECT u.date, u.stock_symbol, u.rs_score, u.rs_rank, u.ret, u.stock_industry_id,
-               CASE WHEN $17::text <> 'equal' THEN (
-                   SELECT AVG(q."TradeValue")::float8 FROM "DailyQuotes" q
-                   WHERE q.stock_symbol = u.stock_symbol
-                     AND q."Date" BETWEEN u.liquidity_start AND u.date
-               ) END AS trade_value
+               NULL::float8 AS trade_value
         FROM universe u
         WHERE $12::smallint IS NOT NULL AND u.rs_score >= $12
     ) AS held
@@ -260,6 +263,7 @@ valuation_level AS (
 )
 SELECT b.date, b.entry_date,
        b.exit_date,
+       lr.liquidity_start,
        (b.exit_date IS NULL OR b.exit_date > $2 OR b.samples = 0) AS pending,
        (SELECT COUNT(*) FROM days d WHERE d.date > b.date AND d.date <= $2)::int8 AS elapsed_days,
        ($11::int IS NULL OR t.above IS NOT FALSE)
@@ -287,6 +291,7 @@ LEFT JOIN holdable h ON h.date = b.date
 LEFT JOIN daily_forward_return e ON e.date = b.entry_date AND e.stock_symbol = '0050'"#,
             $etf_joins,
             r#"
+LEFT JOIN rebal lr ON lr.date = b.date
 LEFT JOIN taiex t ON t."date" = b.date
 LEFT JOIN breadth br ON br.date = b.date
 LEFT JOIN valuation_level vl ON vl.date = b.date
@@ -333,7 +338,7 @@ macro_rules! backtest_sql_for {
 macro_rules! backtest_with_chip_sql_for {
     ($model:ident) => {
         concat!(
-            "\nWITH",
+            "\nWITH RECURSIVE",
             chip_streak_ctes!(),
             ",",
             backtest_sql_for!(
@@ -350,7 +355,7 @@ macro_rules! backtest_with_chip_sql_for {
 /// 沒有籌碼條件的回測。
 pub(super) const BACKTEST_SQL: &str = backtest_sql_for!(
     close,
-    "\nWITH",
+    "\nWITH RECURSIVE",
     "",
     "",
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
@@ -359,7 +364,7 @@ pub(super) const BACKTEST_SQL: &str = backtest_sql_for!(
 /// [`BACKTEST_SQL`] 的次日開盤成交版。
 pub(super) const BACKTEST_NEXT_OPEN_SQL: &str = backtest_sql_for!(
     next_open,
-    "\nWITH",
+    "\nWITH RECURSIVE",
     "",
     "",
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
@@ -371,3 +376,13 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = backtest_with_chip_sql_for!(clos
 
 /// [`BACKTEST_WITH_CHIP_SQL`] 的次日開盤成交版。
 pub(super) const BACKTEST_WITH_CHIP_NEXT_OPEN_SQL: &str = backtest_with_chip_sql_for!(next_open);
+
+/// 續抱持股的平均成交金額：`$1`／`$2`／`$3` 為一一對應的換股日、代號與 `liquidity_start`，回傳
+/// `liquidity_start`～換股日的平均成交金額（與 `valued` 的算法相同；沒有日線為 `NULL`）。
+pub(super) const HOLD_TRADE_VALUES_SQL: &str = r#"
+SELECT k.date, k.stock_symbol, (
+    SELECT AVG(q."TradeValue")::float8 FROM "DailyQuotes" q
+    WHERE q.stock_symbol = k.stock_symbol AND q."Date" BETWEEN k.liquidity_start AND k.date
+) AS trade_value
+FROM UNNEST($1::date[], $2::text[], $3::date[]) AS k(date, stock_symbol, liquidity_start)
+"#;

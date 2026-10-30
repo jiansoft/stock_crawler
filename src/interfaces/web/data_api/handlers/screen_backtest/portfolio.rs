@@ -8,7 +8,7 @@ use crate::interfaces::web::data_api::dto::BacktestPeriod;
 
 mod selection;
 
-pub(super) use self::selection::select_holdings;
+pub(super) use self::selection::{fill_trade_values, missing_trade_values, select_holdings};
 
 /// 手續費率（%），買賣各付一次；未打折。
 pub(super) const FEE_RATE: f64 = crate::domain::portfolio::costs::FEE_RATE * 100.0;

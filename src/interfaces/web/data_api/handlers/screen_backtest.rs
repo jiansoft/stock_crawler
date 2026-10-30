@@ -120,6 +120,8 @@ struct CandidateRow {
     date: NaiveDate,
     /// SQL 市場交易日曆決定的進場日，避免以停牌中的 0050 推算。
     entry_date: Option<NaiveDate>,
+    /// 平均成交金額的起日（含當天往前第 20 個交易日），補查續抱持股的成交金額時使用。
+    liquidity_start: NaiveDate,
     /// 換股結束日（持有期滿收盤賣出）；未滿或尚未結束為 `None`。
     exit_date: Option<NaiveDate>,
     /// 最後一個換股日、還沒滿持有天數（沒有報酬）；代表策略目前的持股。
@@ -140,7 +142,8 @@ struct CandidateRow {
     hold_symbols: Vec<String>,
     hold_returns: Vec<Option<f64>>,
     hold_industries: Vec<i32>,
-    /// 續抱名單的平均成交金額（元）；只有依成交金額加權時才查。
+    /// 續抱名單的平均成交金額（元）；SQL 一律不查（`NULL`），實際續抱的持股在選定後才補查
+    /// （見 [`portfolio::missing_trade_values`]）。
     hold_trade_values: Vec<Option<f64>>,
 }
 

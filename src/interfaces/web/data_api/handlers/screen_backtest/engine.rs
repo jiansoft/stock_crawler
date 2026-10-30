@@ -1,12 +1,18 @@
 //! 回測引擎：驗證條件、查每期候選股、決定持股與扣交易成本；回測與偏移、前緣、滾動前推、歸因各端點共用。
 
+use std::collections::HashMap;
+
 use chrono::NaiveDate;
 
 use super::current::split_current;
 use super::portfolio::FEE_RATE;
-use super::portfolio::{PeriodCost, Weighting, blend_etf, select_holdings, trading_costs, weigh};
+use super::portfolio::{
+    PeriodCost, Weighting, blend_etf, fill_trade_values, missing_trade_values, select_holdings,
+    trading_costs, weigh,
+};
 use super::sql::{
     BACKTEST_NEXT_OPEN_SQL, BACKTEST_SQL, BACKTEST_WITH_CHIP_NEXT_OPEN_SQL, BACKTEST_WITH_CHIP_SQL,
+    HOLD_TRADE_VALUES_SQL,
 };
 use super::stops::{
     BarCache, StopRule, apply_next_open_stops, apply_stops, load_holding_windows, load_open_ratios,
@@ -279,12 +285,19 @@ impl<'a> Backtest<'a> {
             .last()
             .filter(|row| row.pending)
             .map(|row| row.elapsed_days);
+        let liquidity_starts: HashMap<NaiveDate, NaiveDate> = candidates
+            .iter()
+            .map(|row| (row.date, row.liquidity_start))
+            .collect();
         let mut rows = select_holdings(
             candidates,
             usize::from(self.limit),
             usize::from(keep_rank),
             params.max_per_industry.map(usize::from),
         );
+        if self.weighting != Weighting::Equal {
+            fill_hold_trade_values(&mut rows, &liquidity_starts).await?;
+        }
         let fee_discount = self.cost_fee_discount();
         // 收盤停損沿用各偏移共用快取；次日開盤只讀持有窗口，避免為少數持有日載入多年個股日線。
         let mut bars = match self.execution {
@@ -355,4 +368,38 @@ impl<'a> Backtest<'a> {
             fee_discount,
         })
     }
+}
+
+/// 補查續抱持股的平均成交金額（SQL 不替續抱名單查，見 [`HOLD_TRADE_VALUES_SQL`]）；`liquidity_starts` 是
+/// 各換股日的成交金額起日。沒有缺漏時不查資料庫。
+pub(super) async fn fill_hold_trade_values(
+    rows: &mut [PeriodRow],
+    liquidity_starts: &HashMap<NaiveDate, NaiveDate>,
+) -> Result<(), sqlx::Error> {
+    let missing = missing_trade_values(rows);
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut dates = Vec::with_capacity(missing.len());
+    let mut symbols = Vec::with_capacity(missing.len());
+    let mut starts = Vec::with_capacity(missing.len());
+    for (date, symbol) in missing {
+        if let Some(&start) = liquidity_starts.get(&date) {
+            dates.push(date);
+            symbols.push(symbol);
+            starts.push(start);
+        }
+    }
+    let found: Vec<(NaiveDate, String, Option<f64>)> = sqlx::query_as(HOLD_TRADE_VALUES_SQL)
+        .bind(&dates)
+        .bind(&symbols)
+        .bind(&starts)
+        .fetch_all(database::get_batch_connection())
+        .await?;
+    let values: HashMap<(NaiveDate, String), f64> = found
+        .into_iter()
+        .filter_map(|(date, symbol, value)| value.map(|value| ((date, symbol), value)))
+        .collect();
+    fill_trade_values(rows, &values);
+    Ok(())
 }

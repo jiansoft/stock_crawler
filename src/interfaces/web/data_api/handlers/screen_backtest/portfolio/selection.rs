@@ -1,5 +1,7 @@
 //! 每期持股的決定：續抱、補滿、產業上限與大盤濾網。
 
+use chrono::NaiveDate;
+
 use super::*;
 
 /// 股票池的一檔：代號、報酬、可否續抱、產業編號、平均成交金額。
@@ -114,4 +116,36 @@ pub(in super::super) fn select_holdings(
             }
         })
         .collect()
+}
+
+/// 缺平均成交金額的持股（換股日, 代號）：只符合續抱條件、不在本期候選名單的股票，SQL 不查成交金額
+/// （見 [`super::super::sql::HOLD_TRADE_VALUES_SQL`]），選定持股後再補查。
+pub(in super::super) fn missing_trade_values(rows: &[PeriodRow]) -> Vec<(NaiveDate, String)> {
+    let mut missing = Vec::new();
+    for row in rows {
+        for (index, symbol) in row.symbols.iter().enumerate() {
+            if row.trade_values.get(index).copied().flatten().is_none() {
+                missing.push((row.date, symbol.clone()));
+            }
+        }
+    }
+    missing
+}
+
+/// 把補查到的平均成交金額填回持股；查不到（沒有日線）的維持 `None`。
+pub(in super::super) fn fill_trade_values(
+    rows: &mut [PeriodRow],
+    values: &HashMap<(NaiveDate, String), f64>,
+) {
+    for row in rows {
+        let date = row.date;
+        for (index, symbol) in row.symbols.iter().enumerate() {
+            let Some(slot) = row.trade_values.get_mut(index) else {
+                continue;
+            };
+            if slot.is_none() {
+                *slot = values.get(&(date, symbol.clone())).copied();
+            }
+        }
+    }
 }
