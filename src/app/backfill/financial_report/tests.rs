@@ -9,7 +9,7 @@ use crate::{
     domain::financial::statement::{
         BalanceSheet, CashFlowStatement, IncomeStatement, LaggingStatement, StatementPeriod,
     },
-    infra::crawler::yahoo::dividend::YahooPageNotFoundError,
+    infra::{crawler::yahoo::dividend::YahooPageNotFoundError, nosql::redis::CLIENT},
 };
 
 /// 記下寫入列數、回傳實際列數的假倉儲；`lagging` 為 `None` 時查落後名單失敗。
