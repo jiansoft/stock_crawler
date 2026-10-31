@@ -11,6 +11,7 @@ use crate::{
 
 pub(crate) mod extension;
 /// `DailyQuote` 的資料庫寫入／更新操作子模組。
+mod moving_average;
 mod mutation;
 /// `DailyQuote` 的資料庫查詢操作子模組。
 mod query;
