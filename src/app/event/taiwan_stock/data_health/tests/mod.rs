@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod abnormal_prices;
 mod db_statements;
 mod derived;
 mod etf;
