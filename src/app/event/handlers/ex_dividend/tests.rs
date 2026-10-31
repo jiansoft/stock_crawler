@@ -193,6 +193,7 @@ fn test_market_dividend_message_groups_stocks_before_etfs_and_sorts_each_group_b
         today,
         "進行除權息的股票與 ETF 如下︰",
         &stocks,
+        &FillHints::default(),
     );
 
     let stock_section = msg.find("股票︰").unwrap();
@@ -242,6 +243,7 @@ fn market_dividend_message_shows_annualized_yield_for_frequent_payers() {
         NaiveDate::from_ymd_opt(2026, 10, 6).unwrap(),
         "進行除權息的股票與 ETF 如下︰",
         &stocks,
+        &FillHints::default(),
     );
 
     assert!(
