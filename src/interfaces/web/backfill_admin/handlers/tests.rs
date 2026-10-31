@@ -281,3 +281,50 @@ fn every_form_endpoint_in_the_page_has_a_route() {
         );
     }
 }
+
+/// 公司行動登錄成功：寫入後回應帶回該股已登錄的全部事件（假代號、固定歷史日期，測完清除）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn corporate_action_is_saved_and_read_back() {
+    use crate::infra::database;
+
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 corporate_action_is_saved_and_read_back：無資料庫連接");
+        return;
+    }
+    const SYMBOL: &str = "79979";
+    let cleanup = || async {
+        let _ = sqlx::query("DELETE FROM corporate_action WHERE stock_symbol = $1")
+            .bind(SYMBOL)
+            .execute(database::get_connection())
+            .await;
+    };
+    cleanup().await;
+    let response = router()
+        .oneshot(
+            Request::post("/api/manual-backfill/corporate-action")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"stock_symbol":"{SYMBOL}","effective_date":"2001-06-18","share_ratio":"0.25","note":" 1 拆 4 "}}"#
+                )))
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should serve request");
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    cleanup().await;
+    let body: serde_json::Value = serde_json::from_slice(&bytes).expect("回應是 JSON");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["stock_symbol"], SYMBOL);
+    assert_eq!(
+        body["actions"],
+        serde_json::json!([{"effective_date": "2001-06-18", "share_ratio": "0.25", "note": "1 拆 4"}])
+    );
+}
