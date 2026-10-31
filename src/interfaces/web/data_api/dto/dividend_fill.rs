@@ -1,6 +1,6 @@
 //! `/stocks/{symbol}/dividend-fill` 的 request、response 與 OpenAPI schema。
 //!
-//! 每次除權息後，股價第幾個交易日回到除權息前一日收盤價（填息／填權）；
+//! 每次除權息後，股價第幾個交易日回到填息目標價（除權息前一日收盤依配股調整；填息／填權）；
 //! 規則見 [`crate::domain::dividend::fill`]。價格單位為新台幣元。
 
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,11 @@ pub(crate) struct DividendFillEvent {
     pub(crate) stock_dividend: Option<f64>,
     /// 除權息前一個交易日。
     pub(crate) pre_ex_date: String,
-    /// 除權息前一個交易日的收盤價（填息目標價）。
+    /// 除權息前一個交易日的收盤價（未依配股調整）。
     pub(crate) pre_ex_close: Option<f64>,
+    /// 填息目標價：`pre_ex_close ÷ (1 + stock_dividend ÷ 10)`，取到小數第 2 位；
+    /// 沒有股票股利時等於 `pre_ex_close`。現金股利的部分仍要漲回來才算填息。
+    pub(crate) fill_target: Option<f64>,
     /// 是否已填息。
     pub(crate) filled: bool,
     /// 填息日；尚未填息為 `null`。
@@ -37,7 +40,7 @@ pub(crate) struct DividendFillEvent {
     pub(crate) trading_days_since_ex: u32,
     /// 最新一筆收盤價。
     pub(crate) latest_close: Option<f64>,
-    /// 尚未填息時，最新收盤距離填息價還差多少（%）；已填息為 `null`。
+    /// 尚未填息時，最新收盤距離 `fill_target` 還差多少（%）；已填息為 `null`。
     pub(crate) gap_percent: Option<f64>,
 }
 

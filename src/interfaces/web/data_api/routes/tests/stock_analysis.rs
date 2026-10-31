@@ -117,9 +117,9 @@ async fn stock_dividend_fill_endpoint_db_semantics() {
                       ('2020-03-18', $1, 2020, 3, 18, 99, 99, 99, 99),
                       ('2020-03-19', $1, 2020, 3, 19, 100.5, 100.5, 100.5, 100.5),
                       ('2020-06-15', $1, 2020, 6, 15, 110, 110, 110, 110),
-                      ('2020-06-16', $1, 2020, 6, 16, 105, 105, 105, 105),
-                      ('2020-06-17', $1, 2020, 6, 17, 104, 104, 104, 104),
-                      ('2020-06-30', $1, 2020, 6, 30, 106, 106, 106, 106)"#,
+                      ('2020-06-16', $1, 2020, 6, 16, 102, 102, 102, 102),
+                      ('2020-06-17', $1, 2020, 6, 17, 101, 101, 101, 101),
+                      ('2020-06-30', $1, 2020, 6, 30, 103, 103, 103, 103)"#,
         ],
     )
     .await;
@@ -143,11 +143,12 @@ async fn stock_dividend_fill_endpoint_db_semantics() {
     assert_eq!(june["stock_dividend"], 0.5);
     assert_eq!(june["pre_ex_date"], "2020-06-15");
     assert_eq!(june["pre_ex_close"], 110.0);
+    assert_eq!(june["fill_target"], 104.76, "配股 0.5 元：110 ÷ 1.05");
     assert_eq!(june["filled"], false);
     assert!(june["fill_date"].is_null());
     assert_eq!(june["trading_days_since_ex"], 3);
-    assert_eq!(june["latest_close"], 106.0);
-    assert_eq!(june["gap_percent"], 3.64);
+    assert_eq!(june["latest_close"], 103.0);
+    assert_eq!(june["gap_percent"], 1.68, "(104.76 − 103) ÷ 104.76");
 
     let march = &events[1];
     assert_eq!(
@@ -157,6 +158,7 @@ async fn stock_dividend_fill_endpoint_db_semantics() {
     assert_eq!(march["filled"], true);
     assert_eq!(march["fill_date"], "2020-03-19");
     assert_eq!(march["trading_days_to_fill"], 3);
+    assert_eq!(march["fill_target"], 100.0, "沒有配股時就是前一日收盤");
     assert!(march["gap_percent"].is_null());
 
     assert_eq!(json["summary"]["events"], 2);
