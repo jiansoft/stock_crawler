@@ -117,6 +117,7 @@ pub(super) fn into_dto(outcome: &FillOutcome, symbol: &str) -> DividendFillEvent
         stock_dividend: price(outcome.event.stock_dividend, "stock_dividend"),
         pre_ex_date: outcome.pre_ex_date.to_string(),
         pre_ex_close: price(outcome.pre_ex_close, "pre_ex_close"),
+        fill_target: price(outcome.fill_target, "fill_target"),
         filled: outcome.fill_date.is_some(),
         fill_date: outcome.fill_date.map(|date| date.to_string()),
         trading_days_to_fill: outcome.trading_days_to_fill,

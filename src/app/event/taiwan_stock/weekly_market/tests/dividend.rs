@@ -17,6 +17,7 @@ fn outcome(ex_day: u32, fill_day: Option<u32>, pre: Decimal, latest: Decimal) ->
         },
         pre_ex_date: day(ex_day - 1),
         pre_ex_close: pre,
+        fill_target: pre,
         fill_date: fill_day.map(day),
         trading_days_to_fill: fill_day.map(|d| d - ex_day + 1),
         trading_days_since_ex: 6,

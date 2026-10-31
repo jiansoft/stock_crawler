@@ -3,13 +3,17 @@
 //! 純計算、不做 I/O。規則：
 //!
 //! - **除權息前一日收盤**：除權息日之前最後一筆收盤價（大於 0）。
-//! - **填息**：除權息日起第一個收盤價大於等於前一日收盤的交易日；除權息當日就回到算第 1 天。
+//! - **填息目標價**：除權息前一日收盤依配股調整（[`fill_target`](crate::domain::dividend::fill::fill_target)）；沒有股票股利時就是前一日收盤。
+//! - **填息**：除權息日起第一個收盤價大於等於填息目標價的交易日；除權息當日就回到算第 1 天。
 //! - 收盤價為 0（停牌、無成交）的日子不算交易日。
 
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{Days, NaiveDate};
 use rust_decimal::Decimal;
+
+/// 股票面額（元）：股票股利每 10 元配 1 股。
+const PAR_VALUE: Decimal = Decimal::TEN;
 
 /// 往除權息日前多抓幾天日線，確保長假或停牌後仍找得到除權息前一日的收盤。
 pub const PRE_EX_LOOKBACK_DAYS: u64 = 30;
@@ -37,8 +41,10 @@ pub struct FillOutcome {
     pub event: ExRightEvent,
     /// 除權息前一個交易日。
     pub pre_ex_date: NaiveDate,
-    /// 除權息前一個交易日的收盤價，也就是填息的目標價。
+    /// 除權息前一個交易日的收盤價（未依配股調整）。
     pub pre_ex_close: Decimal,
+    /// 填息目標價：`pre_ex_close` 依配股調整，見 [`fill_target()`]。
+    pub fill_target: Decimal,
     /// 填息日；尚未填息為 `None`。
     pub fill_date: Option<NaiveDate>,
     /// 除權息日起算第幾個交易日填息（除權息當日為 1）。
@@ -53,14 +59,28 @@ pub struct FillOutcome {
 impl FillOutcome {
     /// 尚未填息時，最新收盤距離填息價還差多少（%，正數表示仍低於填息價）；已填息為 `None`。
     pub fn gap_percent(&self) -> Option<Decimal> {
-        if self.fill_date.is_some() || self.pre_ex_close.is_zero() {
+        if self.fill_date.is_some() || self.fill_target.is_zero() {
             return None;
         }
         Some(
-            ((self.pre_ex_close - self.latest_close) * Decimal::ONE_HUNDRED / self.pre_ex_close)
+            ((self.fill_target - self.latest_close) * Decimal::ONE_HUNDRED / self.fill_target)
                 .round_dp(2),
         )
     }
+}
+
+/// 依配股調整的填息目標價：`除權息前收盤 ÷ (1 + 股票股利 ÷ 面額 10 元)`，取到小數第 2 位。
+///
+/// 配股讓股數變成 `1 + 股票股利 ÷ 10` 倍，股價回到這個價位時，股票市值已回到除權前；
+/// 現金股利那部分仍要漲回來才算填息。直接比除權前收盤時，配股 2 元的股票要漲 20% 才回得去，
+/// 實際上持股人的資產早已回到除權前。沒有股票股利（或資料為負）時就是除權息前收盤。
+#[must_use]
+pub fn fill_target(pre_ex_close: Decimal, stock_dividend: Decimal) -> Decimal {
+    if stock_dividend <= Decimal::ZERO {
+        return pre_ex_close;
+    }
+    let share_ratio = Decimal::ONE + stock_dividend / PAR_VALUE;
+    (pre_ex_close / share_ratio).round_dp(2)
 }
 
 /// 計算單次除權息的填息結果。
@@ -78,20 +98,19 @@ pub fn fill_outcome(event: ExRightEvent, closes: &[DailyClose]) -> Option<FillOu
         .filter(|c| c.date >= event.ex_date)
         .collect();
     let latest = *after.last()?;
-    let filled = after
-        .iter()
-        .position(|c| c.close >= pre.close)
-        .map(|index| {
-            (
-                after[index].date,
-                u32::try_from(index + 1).unwrap_or(u32::MAX),
-            )
-        });
+    let target = fill_target(pre.close, event.stock_dividend);
+    let filled = after.iter().position(|c| c.close >= target).map(|index| {
+        (
+            after[index].date,
+            u32::try_from(index + 1).unwrap_or(u32::MAX),
+        )
+    });
 
     Some(FillOutcome {
         event,
         pre_ex_date: pre.date,
         pre_ex_close: pre.close,
+        fill_target: target,
         fill_date: filled.map(|(date, _)| date),
         trading_days_to_fill: filled.map(|(_, days)| days),
         trading_days_since_ex: u32::try_from(after.len()).unwrap_or(u32::MAX),
@@ -262,6 +281,65 @@ mod tests {
         );
     }
 
+    fn stock_event(ex_day: u32, cash: Decimal, stock: Decimal) -> ExRightEvent {
+        ExRightEvent {
+            ex_date: day(ex_day),
+            cash_dividend: cash,
+            stock_dividend: stock,
+        }
+    }
+
+    /// 目標價只扣配股稀釋：純現金不變、配股 2 元除以 1.2、負值視為沒有配股。
+    #[test]
+    fn fill_target_adjusts_for_stock_dividend_only() {
+        assert_eq!(fill_target(dec!(100), Decimal::ZERO), dec!(100));
+        assert_eq!(fill_target(dec!(60), dec!(2)), dec!(50));
+        assert_eq!(fill_target(dec!(100), dec!(0.5)), dec!(95.24));
+        assert_eq!(fill_target(dec!(100), dec!(-1)), dec!(100));
+    }
+
+    /// 純配股：回到 100 ÷ 1.2 就填權，差距也以調整後目標價計算。
+    #[test]
+    fn fill_outcome_uses_adjusted_target_for_stock_dividend() {
+        let prices = closes(&[
+            (15, dec!(60)),
+            (16, dec!(48)),
+            (17, dec!(49)),
+            (18, dec!(50)),
+        ]);
+        let outcome =
+            fill_outcome(stock_event(16, Decimal::ZERO, dec!(2)), &prices).expect("應算得出結果");
+        assert_eq!(
+            (outcome.pre_ex_close, outcome.fill_target),
+            (dec!(60), dec!(50))
+        );
+        assert_eq!(outcome.trading_days_to_fill, Some(3));
+
+        let unfilled = &prices[..3];
+        let outcome =
+            fill_outcome(stock_event(16, Decimal::ZERO, dec!(2)), unfilled).expect("應算得出結果");
+        assert_eq!(outcome.fill_date, None);
+        assert_eq!(outcome.gap_percent(), Some(dec!(2)), "(50 − 49) ÷ 50");
+    }
+
+    /// 現金＋配股：目標價扣配股稀釋但不扣現金；配股後當日就站上目標價算第 1 天。
+    #[test]
+    fn fill_outcome_with_cash_and_stock_dividend() {
+        let prices = closes(&[(15, dec!(110)), (16, dec!(97)), (17, dec!(100))]);
+        let event = stock_event(16, dec!(2), dec!(1));
+        let outcome = fill_outcome(event, &prices).expect("應算得出結果");
+        assert_eq!(outcome.fill_target, dec!(100));
+        assert_eq!(
+            outcome.trading_days_to_fill,
+            Some(2),
+            "97 未到 100，第 2 天 100 填息"
+        );
+
+        let same_day = closes(&[(15, dec!(110)), (16, dec!(101))]);
+        let outcome = fill_outcome(event, &same_day).expect("應算得出結果");
+        assert_eq!(outcome.trading_days_to_fill, Some(1));
+    }
+
     /// 平均與中位數只看已填息者；偶數筆取中間兩筆平均；沒有已填息時為 None。
     #[test]
     fn summarize_averages_filled_events_only() {
@@ -269,6 +347,7 @@ mod tests {
             event: event(16),
             pre_ex_date: day(15),
             pre_ex_close: dec!(100),
+            fill_target: dec!(100),
             fill_date: days.map(|_| day(20)),
             trading_days_to_fill: days,
             trading_days_since_ex: 10,

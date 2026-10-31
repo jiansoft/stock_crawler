@@ -19,7 +19,7 @@ fn event(ex_date: NaiveDate, cash: Decimal, stock: Decimal) -> ExRightEvent {
     }
 }
 
-/// 2330 10-14 除息、前一日收 100，10-21 才回到 100（今天填息）；1101 10-15 除息、10-16 就填息；
+/// 2330 10-14 除權息（配股 0.5 元）、前一日收 105，填息目標 105 ÷ 1.05 = 100，10-21 才回到 100（今天填息）；1101 10-15 除息、10-16 就填息；
 /// 0056 去年 9 月除息（超過一年）不看；9999 查詢失敗。
 struct FakeFills;
 
@@ -51,7 +51,7 @@ impl DividendFillQuery for FakeFills {
             "2330" => {
                 assert_eq!(since, day(14) - Days::new(fill::PRE_EX_LOOKBACK_DAYS));
                 &[
-                    (13, dec!(100)),
+                    (13, dec!(105)),
                     (14, dec!(95)),
                     (15, dec!(96)),
                     (16, dec!(99.5)),
@@ -89,7 +89,10 @@ async fn filled_today_keeps_only_todays_fills() {
     assert_eq!(symbol, "2330");
     assert_eq!(outcome.event.ex_date, day(14));
     assert_eq!(outcome.trading_days_to_fill, Some(5));
-    assert_eq!(outcome.pre_ex_close, dec!(100));
+    assert_eq!(
+        (outcome.pre_ex_close, outcome.fill_target),
+        (dec!(105), dec!(100))
+    );
 
     assert!(
         filled_today(&FakeFills, &symbols, day(20)).await.is_empty(),
@@ -97,14 +100,14 @@ async fn filled_today_keeps_only_todays_fills() {
     );
 }
 
-/// 訊息列出除權息日、股利、前一日收盤與今日收盤、第幾個交易日填息；沒有填息時不發送。
+/// 訊息列出除權息日、股利、填息目標（有配股時註明前一日收盤）與今日收盤、第幾個交易日填息；沒有填息時不發送。
 #[tokio::test]
 async fn build_message_lists_each_fill() {
     let symbols = vec!["2330".to_owned()];
     let filled = filled_today(&FakeFills, &symbols, day(21)).await;
     let message = build_message(day(21), &filled, |_| "台積電".to_owned()).expect("有填息");
     assert!(message.starts_with(&text::escape_markdown_v2("持股填息︰2026-10-21\n")));
-    let line = "2330 台積電 除權息 2026-10-14（現金 5 元、股票 0.5 元）：前一日收盤 100，今日收盤 100，第 5 個交易日填息";
+    let line = "2330 台積電 除權息 2026-10-14（現金 5 元、股票 0.5 元）：填息目標 100（前一日收盤 105 依配股調整），今日收盤 100，第 5 個交易日填息";
     assert!(
         message.contains(&text::escape_markdown_v2(line)),
         "{message}"

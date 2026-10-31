@@ -203,6 +203,7 @@ fn openapi_dividend_fill_schema_pins_field_names() {
     let event = &schemas["DividendFillEvent"]["properties"];
     assert_eq!(event["filled"]["type"], "boolean");
     assert_eq!(event["trading_days_since_ex"]["type"], "integer");
+    assert!(event["fill_target"].to_string().contains("number"));
     for field in ["fill_date", "trading_days_to_fill", "gap_percent"] {
         assert!(event[field].to_string().contains("null"), "{field}");
     }

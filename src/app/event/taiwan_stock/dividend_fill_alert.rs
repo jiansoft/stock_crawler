@@ -86,6 +86,21 @@ fn dividend_text(cash: Decimal, stock: Decimal) -> String {
     parts.join("、")
 }
 
+/// 填息目標的說明：沒有配股時就是前一日收盤，有配股時註明由前一日收盤調整而來。
+fn target_text(outcome: &FillOutcome) -> String {
+    if outcome.fill_target == outcome.pre_ex_close {
+        return format!(
+            "前一日收盤 {}",
+            format_decimal_with_commas(outcome.pre_ex_close)
+        );
+    }
+    format!(
+        "填息目標 {}（前一日收盤 {} 依配股調整）",
+        format_decimal_with_commas(outcome.fill_target),
+        format_decimal_with_commas(outcome.pre_ex_close),
+    )
+}
+
 /// 組出通知訊息（Telegram MarkdownV2）；沒有填息的持股時回 `None`。
 fn build_message(
     date: NaiveDate,
@@ -104,11 +119,11 @@ fn build_message(
     for (symbol, outcome) in filled {
         let days = outcome.trading_days_to_fill.unwrap_or_default();
         let line = format!(
-            "{symbol} {} 除權息 {}（{}）：前一日收盤 {}，今日收盤 {}，第 {days} 個交易日填息",
+            "{symbol} {} 除權息 {}（{}）：{}，今日收盤 {}，第 {days} 個交易日填息",
             stock_name(symbol),
             outcome.event.ex_date,
             dividend_text(outcome.event.cash_dividend, outcome.event.stock_dividend),
-            format_decimal_with_commas(outcome.pre_ex_close),
+            target_text(outcome),
             format_decimal_with_commas(outcome.latest_close),
         );
         let _ = writeln!(&mut message, "{}", text::escape_markdown_v2(line));
