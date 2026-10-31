@@ -1,9 +1,10 @@
-//! 市場除權息清單訊息：股票在前、ETF 在後，各群組依殖利率由高到低。
+//! 市場除權息清單訊息：股票在前、ETF 在後，各群組依殖利率由高到低；每檔附歷年填息（[`FillHints`]）。
 
 use std::fmt::Write;
 
 use super::super::EventDispatcher;
 use super::annualized_suffix;
+use super::fill_history::FillHints;
 use crate::core::declare::Industry;
 use crate::core::util::text;
 use crate::domain::dividend::entity::StockDividendInfo;
@@ -38,6 +39,7 @@ impl EventDispatcher {
         msg: &mut String,
         title: &str,
         stocks: impl Iterator<Item = &'a StockDividendInfo>,
+        hints: &FillHints,
     ) {
         let mut has_rows = false;
         for stock in stocks {
@@ -46,9 +48,12 @@ impl EventDispatcher {
                 has_rows = true;
             }
 
+            let hint = hints.text(stock).map_or_else(String::new, |hint| {
+                format!(" {}", text::escape_markdown_v2(hint))
+            });
             let _ = writeln!(
                 msg,
-                "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} 現金︰{2}元\\({6}%\\) 股票 {3}元 合計︰{4}元\\({7}%\\) 昨收價:{5} 現金殖利率:{6}% 殖利率:{7}%{8}",
+                "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} 現金︰{2}元\\({6}%\\) 股票 {3}元 合計︰{4}元\\({7}%\\) 昨收價:{5} 現金殖利率:{6}% 殖利率:{7}%{8}{9}",
                 stock.stock_symbol,
                 text::escape_markdown_v2(&stock.name),
                 text::escape_markdown_v2(stock.cash_dividend.normalize().to_string()),
@@ -60,7 +65,8 @@ impl EventDispatcher {
                 text::escape_markdown_v2(annualized_suffix(
                     stock.payout_frequency(),
                     stock.annualized_yield()
-                ))
+                )),
+                hint
             );
         }
     }
@@ -70,6 +76,7 @@ impl EventDispatcher {
         date: chrono::NaiveDate,
         title: &str,
         stocks_dividend_info: &[StockDividendInfo],
+        hints: &FillHints,
     ) -> String {
         let mut msg = String::with_capacity(2048);
         if writeln!(
@@ -86,6 +93,7 @@ impl EventDispatcher {
                 stocks_dividend_info
                     .iter()
                     .filter(|stock| !Self::is_etf(stock)),
+                hints,
             );
             Self::write_market_dividend_rows(
                 &mut msg,
@@ -93,6 +101,7 @@ impl EventDispatcher {
                 stocks_dividend_info
                     .iter()
                     .filter(|stock| Self::is_etf(stock)),
+                hints,
             );
         }
 

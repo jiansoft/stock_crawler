@@ -1,9 +1,10 @@
 //! `ExDividendReminderTriggered` 事件處理：發送除權息提醒、重新計算持股股利並發送通知。
 //!
-//! 子模組：[`market`]（市場除權息清單訊息）、[`holding`]（持股預估股利訊息）。
+//! 子模組：[`market`]（市場除權息清單訊息）、[`fill_history`]（清單每檔附的歷年填息）、
+//! [`holding`]（持股預估股利訊息）。
 
 use anyhow::Result;
-use chrono::Datelike;
+use chrono::{Datelike, Local};
 use rust_decimal::Decimal;
 
 use crate::app::event::taiwan_stock::format_decimal_with_commas as format_decimal_flexible_commas;
@@ -16,8 +17,10 @@ use crate::domain::portfolio::repository::PortfolioRepository;
 use crate::infra::database::repository::dividend::PgDividendRepository;
 use crate::infra::database::repository::portfolio::PgPortfolioRepository;
 
+use self::fill_history::FillHints;
 use super::EventDispatcher;
 
+mod fill_history;
 mod holding;
 mod market;
 
@@ -107,7 +110,8 @@ impl EventDispatcher {
         Ok(())
     }
 
-    /// 發送指定日期的市場除權息提醒。
+    /// 發送指定日期的市場除權息提醒，每檔附歷年填息；今天與下一交易日的清單都以今天為準查近 5 年，
+    /// 全市場基準因此共用同一份快取。
     async fn send_market_dividend_message(
         date: chrono::NaiveDate,
         title: &str,
@@ -117,7 +121,12 @@ impl EventDispatcher {
             return;
         }
 
-        let msg = Self::build_market_dividend_message(date, title, stocks_dividend_info);
+        let symbols: Vec<String> = stocks_dividend_info
+            .iter()
+            .map(|stock| stock.stock_symbol.clone())
+            .collect();
+        let hints = FillHints::load(&symbols, Local::now().date_naive()).await;
+        let msg = Self::build_market_dividend_message(date, title, stocks_dividend_info, &hints);
         alert::send_message(&msg).await;
     }
 }
