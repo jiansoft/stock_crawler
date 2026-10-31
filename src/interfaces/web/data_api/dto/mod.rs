@@ -21,6 +21,7 @@ mod industries;
 mod institutional_flow;
 mod margin;
 mod market;
+mod market_dividend_fill;
 mod market_forward_returns;
 mod market_movers;
 mod market_regime;
@@ -104,6 +105,9 @@ pub(super) use market::{
     MarketBreadthParams, MarketBreadthResponse, MarketIndexHistoryParams,
     MarketIndexHistoryResponse, MarketIndexPoint, QfiiHolding, QfiiHoldingRankingParams,
     QfiiHoldingRankingResponse, QfiiSortValue,
+};
+pub(super) use market_dividend_fill::{
+    DividendFillBucket, MarketDividendFillStatsParams, MarketDividendFillStatsResponse,
 };
 pub(super) use market_forward_returns::{
     BenchmarkMonth, MarketForwardReturnsParams, MarketForwardReturnsResponse,

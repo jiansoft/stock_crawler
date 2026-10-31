@@ -1,7 +1,8 @@
 //! `/portfolio/dividend-fill` handler：目前持股（含 ETF）近期每次除權息的填息狀態。
 //!
 //! 填息規則與 `/stocks/{symbol}/dividend-fill` 相同（[`fill::fill_outcome`]），資料來源共用
-//! [`PgDividendFillRepository`]。屬個人持股資料。
+//! [`PgDividendFillRepository`]。每列附同殖利率組的全市場基準（與 `/market/dividend-fill-stats`
+//! 共用快取）；基準查詢失敗只記警告、`peer` 為 `null`，不影響持股資料。屬個人持股資料。
 
 use std::cmp::Reverse;
 
@@ -16,8 +17,11 @@ use chrono::{Days, Local, NaiveDate};
 use sqlx::PgPool;
 
 use super::dividend_fill::{into_dto, summary_dto};
+use super::market_dividend_fill::bucket_dto;
 use super::{database_error, error_response, repository_error};
 use crate::domain::dividend::fill::{self, DividendFillQuery, FillOutcome, FillSummary};
+use crate::domain::dividend::fill_stats::{BucketStats, YieldBucket, bucket_stats};
+use crate::infra::cache::dividend_fill_stats;
 use crate::infra::database;
 use crate::infra::database::repository::dividend_fill::PgDividendFillRepository;
 use crate::interfaces::web::data_api::dto::{
@@ -27,6 +31,9 @@ use crate::interfaces::web::data_api::dto::{
 
 /// 歷年填息對照回看的天數（約 5 年）。
 const HISTORY_DAYS: u64 = 5 * 365 + 1;
+
+/// 同組基準的統計年數；與 [`HISTORY_DAYS`] 一致（`stats_window` 同樣是 5 × 365 + 1 天）。
+const PEER_YEARS: u8 = 5;
 
 /// 一檔持股回看期間內的填息結果，附近 5 年的填息統計。
 struct HoldingFill {
@@ -70,10 +77,20 @@ pub(crate) async fn portfolio_dividend_fill(
         Err(error) => return database_error(error),
     };
     let today = Local::now().date_naive();
-    match collect(&PgDividendFillRepository::new(), &holdings, today, days).await {
-        Ok(outcomes) => Json(response(member_id, days, outcomes)).into_response(),
-        Err(error) => repository_error(error),
-    }
+    let repository = PgDividendFillRepository::new();
+    let outcomes = match collect(&repository, &holdings, today, days).await {
+        Ok(outcomes) => outcomes,
+        Err(error) => return repository_error(error),
+    };
+    let peers =
+        match dividend_fill_stats::market_fill_samples_for(&repository, today, PEER_YEARS).await {
+            Ok(samples) => bucket_stats(&samples),
+            Err(error) => {
+                tracing::warn!(?error, "持股填息的同組基準查詢失敗，peer 留空");
+                Vec::new()
+            }
+        };
+    Json(response(member_id, days, outcomes, &peers)).into_response()
 }
 
 /// 會員目前持股的代號與名稱（`member_id` 為 0 時是全部會員合計）。
@@ -113,11 +130,13 @@ async fn collect(
     Ok(collected)
 }
 
-/// 組出回應：未填息的依缺口由大到小在前，已填息的依除權息日由新到舊在後。
+/// 組出回應：未填息的依缺口由大到小在前，已填息的依除權息日由新到舊在後；`peers` 是各殖利率組的
+/// 全市場基準（空的時候每列 `peer` 為 `null`）。
 fn response(
     member_id: i64,
     days: u16,
     holdings: Vec<HoldingFill>,
+    peers: &[BucketStats],
 ) -> PortfolioDividendFillResponse {
     let mut outcomes: Vec<(String, String, FillOutcome, FillSummary)> = Vec::new();
     for holding in holdings {
@@ -151,10 +170,17 @@ fn response(
                     name: name.clone(),
                     fill: into_dto(outcome, symbol),
                     history: summary_dto(history),
+                    peer: peer_of(outcome, peers).map(bucket_dto),
                 },
             )
             .collect(),
     }
+}
+
+/// 這次除權息的現金殖利率所屬組別的基準；沒有現金股利或找不到該組時為 `None`。
+fn peer_of<'a>(outcome: &FillOutcome, peers: &'a [BucketStats]) -> Option<&'a BucketStats> {
+    let bucket = YieldBucket::of(outcome.event.cash_dividend, outcome.pre_ex_close)?;
+    peers.iter().find(|stats| stats.bucket == bucket)
 }
 
 #[cfg(test)]

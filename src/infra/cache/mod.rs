@@ -10,6 +10,7 @@
 //! 並由上層依回傳值決定是否重試或降級處理。
 
 mod abnormal_price;
+pub(crate) mod dividend_fill_stats;
 pub(crate) mod etf_analysis;
 mod loader;
 mod lookup;

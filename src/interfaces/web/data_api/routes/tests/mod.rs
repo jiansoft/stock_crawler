@@ -20,6 +20,7 @@ mod financials;
 mod flows;
 mod industries;
 mod institutional_streak;
+mod market_dividend_fill;
 mod market_forward_returns;
 mod market_regime;
 mod market_valuation;
