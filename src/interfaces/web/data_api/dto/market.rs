@@ -1,34 +1,13 @@
 //! `/market/*` 相關的 request、response 與 OpenAPI schema。
 //!
-//! 涵蓋市場廣度、殖利率排行、大盤指數歷史、股利行事曆、QFII 持股排行與
-//! 當日漲跌幅／成交量排行。
+//! 涵蓋市場廣度、殖利率排行、大盤指數歷史與 QFII 持股排行；股利行事曆在
+//! `dividend_calendar`、當日漲跌幅／成交量排行在 `market_movers`。
 //! 所有缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::MarketParamValue;
-
-/// OpenAPI 文件使用的股利行事曆事件類型（§4.9）。
-///
-/// 台股領域背景：一筆股利公告有四個關鍵日期——「除息日」（買進後不再
-/// 享有現金股利的基準日）、「除權日」（股票股利的基準日）、「現金股利
-/// 發放日」與「股票股利發放日」。行事曆把每個日期各自視為一個事件。
-#[derive(ToSchema)]
-#[schema(rename_all = "snake_case")]
-#[allow(dead_code)] // 此 enum 僅提供 OpenAPI schema；runtime 仍以 String 回傳精確 422。
-pub(crate) enum CalendarEventTypeValue {
-    /// 除息日事件。
-    ExDividend,
-    /// 除權日事件。
-    ExRights,
-    /// 現金股利發放日事件。
-    CashPayable,
-    /// 股票股利發放日事件。
-    StockPayable,
-    /// 四種事件全部回傳。
-    All,
-}
 
 /// OpenAPI 文件使用的 QFII 排行排序欄位（§4.10）。
 #[derive(ToSchema)]
@@ -39,26 +18,6 @@ pub(crate) enum QfiiSortValue {
     Percentage,
     /// 依外資持股股數排序。
     Shares,
-}
-
-/// OpenAPI 文件使用的漲跌幅／成交量排行排序鍵（movers 計畫 §4.1）。
-///
-/// 刻意不提供「成交金額排行」：即時報價快照沒有成交金額欄位，若提供此排序
-/// 鍵，同一個參數在盤中與收盤後會有不同語意（盤中無法計算、收盤後才有），
-/// 對呼叫端（通常是 LLM）而言比「不提供」更危險。
-#[derive(ToSchema)]
-#[schema(rename_all = "snake_case")]
-// 前者：此 enum 僅提供 OpenAPI schema，程式不會建立它的實例。
-// 後者：變體共同的 `Top` 前綴是對外契約的一部分（`top_gainers` 等字面值直接
-// 由變體名稱轉成 snake_case），不可為了消除 clippy 的命名提示而改名。
-#[allow(dead_code, clippy::enum_variant_names)]
-pub(crate) enum MoversRankByValue {
-    /// 漲幅由高到低。
-    TopGainers,
-    /// 跌幅由深到淺（漲跌幅由低到高）。
-    TopLosers,
-    /// 成交量由大到小。
-    TopVolume,
 }
 
 /// 單一交易日的市場廣度統計。
@@ -184,42 +143,6 @@ pub(crate) struct MarketIndexHistoryResponse {
     pub(crate) points: Vec<MarketIndexPoint>,
 }
 
-/// 股利行事曆中的單一事件（§4.9）。
-///
-/// 同一筆股利公告若有多個日期落在查詢區間，會展開成多筆事件（每筆一個
-/// `event_type`）。日期欄位在資料庫是字串且含 `-`、`尚未公布` 等無效標記，
-/// 只有合法 `YYYY-MM-DD` 的日期才會產生事件。
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub(crate) struct DividendCalendarEvent {
-    /// 股票代號。
-    pub(crate) stock_symbol: String,
-    /// 股票名稱。
-    pub(crate) name: String,
-    /// 事件類型：`ex_dividend`、`ex_rights`、`cash_payable` 或 `stock_payable`。
-    pub(crate) event_type: String,
-    /// 事件日期，格式 `YYYY-MM-DD`。
-    pub(crate) event_date: String,
-    /// 股利所屬年度（西元）；DB 欄位 `year_of_dividend`。
-    pub(crate) dividend_year: i32,
-    /// 期間標記：`A`（年度）、`H1`／`H2`（半年度）或 `Q1`–`Q4`（§3.5）。
-    pub(crate) quarter: String,
-    /// 現金股利合計（元）。
-    pub(crate) cash_dividend: Option<f64>,
-    /// 股票股利合計（元）。
-    pub(crate) stock_dividend: Option<f64>,
-    /// 股利合計（元）；DB 欄位 `sum`。
-    pub(crate) total_dividend: Option<f64>,
-}
-
-/// 股利行事曆的成功回應（§3.4 envelope）。
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct DividendCalendarResponse {
-    /// 混合事件沒有單一統計日期，固定為 `null`（各事件日期在每筆事件內）。
-    pub(crate) data_as_of: Option<String>,
-    /// 依 `event_date ASC`、同日 `stock_symbol ASC` 排序的事件。
-    pub(crate) events: Vec<DividendCalendarEvent>,
-}
-
 /// QFII 持股排行中的單一股票（§4.10）。
 ///
 /// 「QFII」指全體外資及陸資；數字來自 `stocks` 表的**當前快照**（每日
@@ -251,84 +174,6 @@ pub(crate) struct QfiiHoldingRankingResponse {
     pub(crate) data_as_of: Option<String>,
     /// 依指定指標由高到低、同值股票代號由小到大排序的股票。
     pub(crate) stocks: Vec<QfiiHolding>,
-}
-
-/// 當日漲跌幅／成交量排行中的單一股票（movers 計畫 §4.4）。
-///
-/// 同一個結構同時服務兩種資料來源，缺的欄位一律是 `null`，**不可用 `0` 代替**：
-///
-/// - 盤中（`source = "realtime"`）：資料來自第三方網站採集的即時報價快照，
-///   有 `last_close`、`volume_lots`（張）與 `source_site`；快照沒有成交金額
-///   與成交筆數，因此 `volume_shares`、`trade_value`、`transaction` 為 `null`。
-/// - 收盤後（`source = "closing"`）：資料來自 `"DailyQuotes"`，有
-///   `volume_shares`（股）、`trade_value`、`transaction`；該表沒有昨收欄位，
-///   因此 `last_close` 為 `null`，`volume_lots` 與 `source_site` 亦為 `null`。
-///
-/// 成交量刻意不做張／股換算：一張雖然通常是 1,000 股，但零股交易會讓換算
-/// 結果失真，寧可用 `null` 誠實表示「這個來源沒有這個單位的數字」。
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub(crate) struct MarketMover {
-    /// 一起始的名次。
-    pub(crate) rank: u32,
-    /// 股票代號。
-    pub(crate) stock_symbol: String,
-    /// 股票名稱。
-    pub(crate) name: String,
-    /// 市場編號（上市 2、上櫃 4）。
-    pub(crate) market_id: i32,
-    /// 產業分類編號。
-    pub(crate) industry_id: i32,
-    /// 成交價：盤中為最新成交價，收盤後為收盤價。
-    pub(crate) price: Option<f64>,
-    /// 漲跌（元）。
-    pub(crate) change: Option<f64>,
-    /// 漲跌幅（%）。
-    pub(crate) change_percent: Option<f64>,
-    /// 開盤價。
-    pub(crate) open: Option<f64>,
-    /// 最高價。
-    pub(crate) high: Option<f64>,
-    /// 最低價。
-    pub(crate) low: Option<f64>,
-    /// 昨收價；收盤來源沒有此欄位，固定 `null`。
-    pub(crate) last_close: Option<f64>,
-    /// 成交量（張）；僅即時來源有值。
-    pub(crate) volume_lots: Option<f64>,
-    /// 成交量（股）；僅收盤來源有值。
-    pub(crate) volume_shares: Option<f64>,
-    /// 成交金額（元）；僅收盤來源有值。
-    pub(crate) trade_value: Option<f64>,
-    /// 成交筆數；僅收盤來源有值。
-    pub(crate) transaction: Option<f64>,
-    /// 即時報價的採集站點（例如 `HiStock`、`Yahoo`）；僅即時來源有值。
-    pub(crate) source_site: Option<String>,
-}
-
-/// 當日漲跌幅／成交量排行的成功回應（movers 計畫 §4.3）。
-///
-/// 回應形狀不隨資料來源改變；呼叫端必須讀 `source` 與 `is_realtime` 才知道
-/// 手上這份資料是盤中即時還是某一日的收盤結果。
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct MarketMoversResponse {
-    /// 資料日期（`YYYY-MM-DD`）：即時來源為台北時區今日；收盤來源為該批
-    /// `"DailyQuotes"` 的實際交易日。
-    ///
-    /// **13:30 收盤到 15:00 收盤排程之間**，即時快取已清空但當日日線尚未
-    /// 寫入，此時這個欄位會是**前一交易日**——呼叫端必須據此提醒使用者，
-    /// 不可宣稱為當日行情。
-    pub(crate) data_as_of: String,
-    /// 資料來源：`realtime`（盤中即時快照）或 `closing`（收盤日線）。
-    pub(crate) source: String,
-    /// 是否為即時資料；等同於 `source == "realtime"`。
-    pub(crate) is_realtime: bool,
-    /// 實際採用的排序鍵：`top_gainers`、`top_losers` 或 `top_volume`。
-    pub(crate) rank_by: String,
-    /// 實際採用的市場條件：`all`、`twse` 或 `tpex`。
-    pub(crate) market: String,
-    /// 即時快照批次中最新的更新時間（UTC ISO 8601）；收盤來源為 `null`。
-    pub(crate) snapshot_updated_at: Option<String>,
-    /// 依 `rank_by` 排序、同值以股票代號由小到大穩定排序的排行。
-    pub(crate) movers: Vec<MarketMover>,
 }
 
 /// 市場廣度 endpoint 的 query string。
@@ -372,23 +217,6 @@ pub(crate) struct MarketIndexHistoryParams {
     pub(crate) limit: Option<u16>,
 }
 
-/// 股利行事曆 endpoint 的 query string（§4.9）。
-#[derive(Debug, Deserialize, IntoParams)]
-pub(crate) struct DividendCalendarParams {
-    /// 起始日期，格式 `YYYY-MM-DD`；未提供時預設查詢當日（台北時區）。
-    pub(crate) from: Option<String>,
-    /// 結束日期，格式 `YYYY-MM-DD`；未提供時預設 `from + 30` 天。
-    /// `to - from` 不可超過 92 天（一季），避免全表匯出。
-    pub(crate) to: Option<String>,
-    /// 事件類型：`all`（預設）、`ex_dividend`、`ex_rights`、`cash_payable`
-    /// 或 `stock_payable`。
-    #[param(value_type = CalendarEventTypeValue, default = "all")]
-    pub(crate) event_type: Option<String>,
-    /// 最多回傳筆數，預設 50，範圍 1–200。
-    #[param(minimum = 1, maximum = 200, default = 50)]
-    pub(crate) limit: Option<u16>,
-}
-
 /// QFII 持股排行 endpoint 的 query string（§4.10）。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct QfiiHoldingRankingParams {
@@ -402,24 +230,6 @@ pub(crate) struct QfiiHoldingRankingParams {
     /// 一律由高到低。
     #[param(value_type = QfiiSortValue, default = "percentage")]
     pub(crate) sort_by: Option<String>,
-    /// 最多回傳筆數，預設 20，範圍 1–50。
-    #[param(minimum = 1, maximum = 50, default = 20)]
-    pub(crate) limit: Option<u8>,
-}
-
-/// 當日漲跌幅／成交量排行 endpoint 的 query string（movers 計畫 §4.1）。
-///
-/// **刻意不提供「指定資料來源」的參數**：現在是不是盤中，由伺服器端依即時
-/// 快取狀態判斷（movers 計畫 §3），呼叫端沒有能力正確判斷，把選擇權交出去
-/// 只會製造「拿前一交易日資料當今日行情」這類錯誤答案。
-#[derive(Debug, Deserialize, IntoParams)]
-pub(crate) struct MarketMoversParams {
-    /// 排序鍵：`top_gainers`（預設）、`top_losers` 或 `top_volume`。
-    #[param(value_type = MoversRankByValue, default = "top_gainers")]
-    pub(crate) rank_by: Option<String>,
-    /// 市場：`all`（預設）、`twse` 或 `tpex`。
-    #[param(value_type = MarketParamValue, default = "all")]
-    pub(crate) market: Option<String>,
     /// 最多回傳筆數，預設 20，範圍 1–50。
     #[param(minimum = 1, maximum = 50, default = 20)]
     pub(crate) limit: Option<u8>,

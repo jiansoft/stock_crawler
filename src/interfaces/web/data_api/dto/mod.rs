@@ -4,11 +4,12 @@
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
 //! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
-//! `financial_health`、`chip`、`institutional_flow`、`margin`、`market_regime`、`market_valuation`、`screening`、`market`、`industries`、`portfolio`、`portfolio_chip`、`portfolio_dividend_fill`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals`、`signal_history` 與 `relative_strength` 等子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! `financial_health`、`chip`、`institutional_flow`、`margin`、`market_regime`、`market_valuation`、`screening`、`market`、`dividend_calendar`、`market_movers`、`industries`、`portfolio`、`portfolio_chip`、`portfolio_dividend_fill`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals`、`signal_history` 與 `relative_strength` 等子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
 mod chip;
+mod dividend_calendar;
 mod dividend_fill;
 mod dividend_forecast;
 mod etf;
@@ -21,6 +22,7 @@ mod institutional_flow;
 mod margin;
 mod market;
 mod market_forward_returns;
+mod market_movers;
 mod market_regime;
 mod market_valuation;
 mod peers;
@@ -51,6 +53,9 @@ pub(super) use cagr::{
 pub(super) use chip::{
     BrokerFlowDay, BrokerNet, ChipDay, ChipParams, ChipResponse, ChipStreak, HolderLevelItem,
     HolderLevelsParams, HolderLevelsResponse, HolderWeek, InsiderSummary,
+};
+pub(super) use dividend_calendar::{
+    CalendarEventTypeValue, DividendCalendarEvent, DividendCalendarParams, DividendCalendarResponse,
 };
 pub(super) use dividend_fill::{
     DividendFillEvent, DividendFillParams, DividendFillResponse, DividendFillSummary,
@@ -95,15 +100,16 @@ pub(super) use margin::{
     MarginRankByValue, MarginRankItem, MarginRankingParams, MarginRankingResponse,
 };
 pub(super) use market::{
-    CalendarEventTypeValue, DividendCalendarEvent, DividendCalendarParams,
-    DividendCalendarResponse, DividendYieldRank, DividendYieldRankingParams,
-    DividendYieldRankingResponse, MarketBreadth, MarketBreadthParams, MarketBreadthResponse,
-    MarketIndexHistoryParams, MarketIndexHistoryResponse, MarketIndexPoint, MarketMover,
-    MarketMoversParams, MarketMoversResponse, MoversRankByValue, QfiiHolding,
-    QfiiHoldingRankingParams, QfiiHoldingRankingResponse, QfiiSortValue,
+    DividendYieldRank, DividendYieldRankingParams, DividendYieldRankingResponse, MarketBreadth,
+    MarketBreadthParams, MarketBreadthResponse, MarketIndexHistoryParams,
+    MarketIndexHistoryResponse, MarketIndexPoint, QfiiHolding, QfiiHoldingRankingParams,
+    QfiiHoldingRankingResponse, QfiiSortValue,
 };
 pub(super) use market_forward_returns::{
     BenchmarkMonth, MarketForwardReturnsParams, MarketForwardReturnsResponse,
+};
+pub(super) use market_movers::{
+    MarketMover, MarketMoversParams, MarketMoversResponse, MoversRankByValue,
 };
 pub(super) use market_regime::{
     MarketRegimeBreadth, MarketRegimeParams, MarketRegimeResponse, MarketRegimeValuation,
