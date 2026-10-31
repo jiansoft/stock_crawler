@@ -58,12 +58,14 @@ use crate::{
     },
 };
 
+mod abnormal_prices;
 mod db_statements;
 mod db_uptime;
 mod rules;
 mod slow_queries;
 
 // 規則檢核搬到子模組；週報組裝與排程入口留在這裡。
+use self::abnormal_prices::{abnormal_price_line, weekly_abnormal_prices};
 use self::rules::*;
 use self::slow_queries::{LOG_DIR, slow_query_line, weekly_slow_queries};
 /// 檢查最近幾個日曆日（含今天）。
@@ -193,13 +195,16 @@ async fn build(today: NaiveDate) -> Result<(String, Option<StatementStats>)> {
         checks.len()
     );
     let slow = weekly_slow_queries(std::path::Path::new(LOG_DIR), from, today);
+    let abnormal = weekly_abnormal_prices(std::path::Path::new(LOG_DIR), from, today);
     let (statement_line, statements) = db_statements::weekly_statements(&repo).await;
     let uptime_line = db_uptime::weekly_uptime_line(from).await;
     let message = format!(
         "{}
 {}
+{}
 {}",
         with_slow_queries(report(from, today, &checks), &slow),
+        text::escape_markdown_v2(abnormal_price_line(&abnormal)),
         text::escape_markdown_v2(&uptime_line),
         text::escape_markdown_v2(&statement_line)
     );
