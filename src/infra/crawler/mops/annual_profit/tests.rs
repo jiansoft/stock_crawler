@@ -1,5 +1,6 @@
 //! MOPS 年度財報採集器的解析與計算測試。
 
+use super::parse::parse_year_from_xaxis;
 use super::*;
 
 #[test]
