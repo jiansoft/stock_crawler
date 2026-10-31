@@ -4,6 +4,7 @@ use rust_decimal_macros::dec;
 
 use super::*;
 use crate::domain::dividend::fill::{DailyClose, ExRightEvent};
+use crate::domain::dividend::fill_stats::FillSample;
 
 fn day(m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(2026, m, d).expect("日期應合法")
@@ -77,7 +78,16 @@ async fn response_lists_unfilled_first() {
     let outcomes = collect(&FakeFills, &holdings, day(10, 20), 365)
         .await
         .expect("假倉儲不會失敗");
-    let body = response(0, 365, outcomes);
+    let sample = |bucket, days| FillSample {
+        bucket,
+        trading_days_to_fill: Some(days),
+        trading_days_observed: 120,
+    };
+    let peers = bucket_stats(&[
+        sample(YieldBucket::Below3, 4),
+        sample(YieldBucket::From5To7, 30),
+    ]);
+    let body = response(0, 365, outcomes, &peers);
     let order: Vec<(&str, &str)> = body
         .items
         .iter()
@@ -112,6 +122,24 @@ async fn response_lists_unfilled_first() {
     assert_eq!(history("2330"), (2, 1, Some(2.0)));
     assert_eq!(history("0056"), (1, 0, None));
     assert!(body.items.iter().all(|item| item.stock_symbol != "1101"));
+    // 同組基準：0056 現金 1 ÷ 40 = 2.5%、2330 07-10 現金 5 ÷ 100 = 5%。
+    let peer = |index: usize| {
+        body.items[index]
+            .peer
+            .as_ref()
+            .map(|peer| (peer.bucket.as_str(), peer.median_trading_days_to_fill))
+    };
+    assert_eq!(peer(0), Some(("below_3", Some(4.0))));
+    assert_eq!(peer(2), Some(("from_5_to_7", Some(30.0))));
+
+    let outcomes = collect(&FakeFills, &holdings, day(10, 20), 365)
+        .await
+        .expect("假倉儲不會失敗");
+    let without_peers = response(0, 365, outcomes, &[]);
+    assert!(
+        without_peers.items.iter().all(|item| item.peer.is_none()),
+        "基準查詢失敗時 peer 留空"
+    );
 }
 
 /// 回看期間外、近 5 年內的除權息只計入歷年統計；超過 5 年的不計。

@@ -127,7 +127,7 @@ impl std::error::Error for SharedError {
     }
 }
 
-fn shared_error(error: Arc<anyhow::Error>) -> anyhow::Error {
+pub(super) fn shared_error(error: Arc<anyhow::Error>) -> anyhow::Error {
     anyhow::Error::new(SharedError(error))
 }
 

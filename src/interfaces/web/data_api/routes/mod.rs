@@ -247,6 +247,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::market_valuation),
         )
         .route(
+            "/market/dividend-fill-stats",
+            axum::routing::get(handlers::market_dividend_fill_stats),
+        )
+        .route(
             "/market/forward-returns",
             axum::routing::get(handlers::market_forward_returns),
         )

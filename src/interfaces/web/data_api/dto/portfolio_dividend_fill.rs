@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use super::{DividendFillEvent, DividendFillSummary};
+use super::{DividendFillBucket, DividendFillEvent, DividendFillSummary};
 
 /// 持股填息狀態的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
@@ -27,6 +27,9 @@ pub(crate) struct PortfolioDividendFillItem {
     pub(crate) fill: DividendFillEvent,
     /// 該股近 5 年（含本次）除權息的填息統計，供對照這次填息快慢；同一檔的每一列相同。
     pub(crate) history: DividendFillSummary,
+    /// 本次現金殖利率同組的全市場近 5 年填息基準（同 `/market/dividend-fill-stats` 的一組），
+    /// 沒有自身歷史時可對照；沒有現金股利或基準查詢失敗時為 `null`。
+    pub(crate) peer: Option<DividendFillBucket>,
 }
 
 /// 持股填息狀態。
