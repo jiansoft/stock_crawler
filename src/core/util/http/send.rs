@@ -281,6 +281,16 @@ pub(super) async fn send_with_client(
                     return Err(anyhow!("Failed to send {}: {err_str}", safe_url));
                 }
 
+                // 第一次就碰到對方已關閉的閒置連線：重試會開新連線，幾乎都會成功，記 DEBUG 並立刻重試。
+                // 2026-11-01、11-02 05:15 MOPS 月營收各留下 1～3 筆 elapsed_ms=0 的 WARN，重試後都成功。
+                if network_attempt == 1
+                    && network_attempt < max_network_attempts
+                    && is_stale_connection(&err_str)
+                {
+                    tracing::debug!(url = %safe_url, attempt = network_attempt, error = %err_str, elapsed_ms, "http.retry_stale_connection{request_detail_suffix}");
+                    continue;
+                }
+
                 // 尚可重試的暫時錯誤使用 WARN，只有耗盡次數才以 ERROR 標示請求最終失敗。
                 if network_attempt >= max_network_attempts {
                     if summarized {
@@ -306,6 +316,15 @@ pub(super) async fn send_with_client(
             }
         }
     }
+}
+
+/// 連線在回應前就被對方關閉：多半是連線池重用了伺服器已逾時關掉的 keep-alive 連線。
+///
+/// 以錯誤文字判斷（hyper 的 `IncompleteMessage`、`connection closed before message completed`），
+/// 不必直接相依 hyper 的錯誤型別。
+fn is_stale_connection(error_text: &str) -> bool {
+    error_text.contains("IncompleteMessage")
+        || error_text.contains("connection closed before message completed")
 }
 
 /// 429 Too Many Requests 的 backoff 策略：5s / 15s / 30s，附加最多 2s jitter。
