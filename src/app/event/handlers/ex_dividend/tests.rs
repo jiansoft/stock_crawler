@@ -300,3 +300,58 @@ fn holding_dividend_message_shows_annualized_yield_for_frequent_payers() {
         "{msg}"
     );
 }
+
+fn fill_stock(symbol: &str, cash: Decimal, closing_price: Decimal) -> StockDividendInfo {
+    StockDividendInfo {
+        stock_symbol: symbol.to_owned(),
+        name: symbol.to_owned(),
+        stock_industry_id: 1,
+        cash_dividend: cash,
+        stock_dividend: Decimal::ZERO,
+        sum: cash,
+        closing_price,
+        dividend_yield: Decimal::ZERO,
+        cash_dividend_yield: Decimal::ZERO,
+        is_cash_ex_dividend_on_date: true,
+        is_stock_ex_dividend_on_date: false,
+        quarter: String::new(),
+    }
+}
+
+/// 清單每一列在殖利率後附上填息文字（MarkdownV2 跳脫）；沒有文字的列不變。
+#[test]
+fn market_message_appends_fill_hint() {
+    let history = std::collections::HashMap::from([(
+        "2330".to_owned(),
+        crate::domain::dividend::fill::FillSummary {
+            events: 4,
+            filled: 3,
+            average_trading_days: Some(12.5),
+            median_trading_days: Some(10.0),
+        },
+    )]);
+    let hints = FillHints::for_test(history, Vec::new());
+    let stocks = [
+        fill_stock(
+            "2330",
+            rust_decimal_macros::dec!(5),
+            rust_decimal_macros::dec!(500),
+        ),
+        fill_stock(
+            "1101",
+            rust_decimal_macros::dec!(1),
+            rust_decimal_macros::dec!(25),
+        ),
+    ];
+    let message = EventDispatcher::build_market_dividend_message(
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 2).expect("日期應合法"),
+        "進行除權息的股票與 ETF 如下︰",
+        &stocks,
+        &hints,
+    );
+    assert!(
+        message.contains("殖利率:0% 近 5 年填息 3／4 次、平均 12\\.5 日\n"),
+        "{message}"
+    );
+    assert!(message.contains("殖利率:0%\n"), "1101 沒有文字：{message}");
+}

@@ -4,7 +4,7 @@ use std::fmt::Write;
 
 use super::super::EventDispatcher;
 use super::annualized_suffix;
-use super::fill_history::FillHints;
+use crate::app::calculation::dividend_fill_hints::FillHints;
 use crate::core::declare::Industry;
 use crate::core::util::text;
 use crate::domain::dividend::entity::StockDividendInfo;

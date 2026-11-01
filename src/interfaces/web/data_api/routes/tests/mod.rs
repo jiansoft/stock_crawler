@@ -15,6 +15,7 @@ use super::router;
 
 mod cagr;
 mod chip;
+mod dividend_calendar;
 mod etf;
 mod financials;
 mod flows;
