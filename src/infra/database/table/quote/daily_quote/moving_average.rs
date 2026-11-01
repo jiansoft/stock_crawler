@@ -248,3 +248,6 @@ WHERE dq."Serial" = k."Serial"
             .context("Failed to batch_update_moving_average in DailyQuotes")
     }
 }
+
+#[cfg(test)]
+mod tests;
