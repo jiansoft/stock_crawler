@@ -138,7 +138,9 @@ fn get_client() -> Result<&'static Client> {
             .http2_keep_alive_while_idle(true)
             // ===== 連接池 =====
             .pool_max_idle_per_host(20)
-            .pool_idle_timeout(Duration::from_secs(90))
+            // 閒置超過 30 秒就不再重用：不少站台的 keep-alive 比 90 秒短，重用到對方已關掉的連線
+            // 會在送出時立刻失敗（IncompleteMessage）。盤中輪詢的間隔遠小於 30 秒，不影響重用。
+            .pool_idle_timeout(Duration::from_secs(30))
             // ===== Cookie 和重定向 =====
             // 大部分 crawler 都是 stateless request；避免把各站點回傳的 cookie
             // 長期保留在全域 client 內，造成盤中輪詢時記憶體工作集持續增長。

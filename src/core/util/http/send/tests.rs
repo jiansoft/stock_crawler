@@ -327,3 +327,64 @@ async fn normal_mode_server_error_still_warns_and_returns_response() {
     .expect("5xx 不是傳輸錯誤");
     assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
 }
+
+/// 錯誤文字分類：連線在回應前被關閉才算 stale，其他網路錯誤不算。
+#[test]
+fn is_stale_connection_matches_closed_connections_only() {
+    assert!(is_stale_connection(
+        "reqwest::Error { kind: Request, source: hyper_util::client::legacy::Error(SendRequest, hyper::Error(IncompleteMessage)) }"
+    ));
+    assert!(is_stale_connection(
+        "connection closed before message completed"
+    ));
+    assert!(!is_stale_connection(
+        "reqwest::Error { kind: Request, source: ConnectError(\"tcp connect error\") }"
+    ));
+    assert!(!is_stale_connection("operation timed out"));
+}
+
+/// 第一次連線讀完請求就被關閉（不回應），重試開新連線成功；不等 2 秒 backoff。
+#[tokio::test]
+async fn stale_connection_is_retried_immediately() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let _guard = debug_subscriber();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        for respond in [false, true] {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = [0u8; 2048];
+            let mut received = Vec::new();
+            while !received.windows(4).any(|part| part == b"\r\n\r\n") {
+                let count = stream.read(&mut bytes).await.unwrap();
+                assert!(count > 0, "HTTP 請求不應在標頭完成前結束");
+                received.extend_from_slice(&bytes[..count]);
+            }
+            if respond {
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+    let client = test_client();
+    let started = Instant::now();
+    let response = send_with_client(
+        &client,
+        Method::GET,
+        &format!("http://{addr}/quote"),
+        None,
+        None::<fn(RequestBuilder) -> RequestBuilder>,
+        None,
+    )
+    .await
+    .expect("重試應成功");
+    assert_eq!(response.status().as_u16(), 200);
+    assert!(
+        started.elapsed() < Duration::from_millis(1_500),
+        "stale 連線不應等 backoff：{:?}",
+        started.elapsed()
+    );
+    server.await.unwrap();
+}
