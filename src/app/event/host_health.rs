@@ -79,10 +79,15 @@ const SINCE_BOOT_SHIFT: u32 = 16;
 ///
 /// pi 共 923 MB，平常 `MemAvailable` 約 700 MB（10-27 實測 705 MB）；剩 100 MB 時 OOM killer 已不遠。
 const MIN_AVAILABLE_KIB: u64 = 100 * 1024;
-/// swap 使用率高於此值（%）告警。
+/// swap 使用率高於此值（%），且 `MemAvailable` 低於 [`SWAP_PRESSURE_AVAILABLE_KIB`] 時告警。
 ///
 /// 10-27 實測已用 79%，主要是閒置的 `mysqld` 被換出，本身不代表記憶體不足；用滿才是警訊。
 const MAX_SWAP_USED_PERCENT: f64 = 95.0;
+/// swap 用滿時，`MemAvailable` 低於此值（KiB）才算記憶體有壓力。
+///
+/// 11-02 05:30 swap 95.3% 告警時 `MemAvailable` 還有 699 MB：換出的是閒置的 mysqld、php-fpm，
+/// 不是記憶體不夠用。可用記憶體平常約 700 MB，掉到 400 MB 以下又同時 swap 用滿才是真的吃緊。
+const SWAP_PRESSURE_AVAILABLE_KIB: u64 = 400 * 1024;
 /// fsync 耗時達此值記 warn。
 const FSYNC_WARN: Duration = Duration::from_secs(5);
 /// fsync 耗時達此值告警。
@@ -185,13 +190,17 @@ pub(crate) fn evaluate(sample: &Sample) -> Findings {
                 mb(MIN_AVAILABLE_KIB)
             ));
         }
+        // swap 用滿但可用記憶體充足時不告警（換出的是閒置程序），23:30 彙總仍列 swap 最高值。
         if let Some(percent) = memory.swap_used_percent()
             && percent > MAX_SWAP_USED_PERCENT
+            && memory.available_kib < SWAP_PRESSURE_AVAILABLE_KIB
         {
             problems.push(format!(
-                "swap 已用 {percent:.1}%（{}／{} MB，門檻 {MAX_SWAP_USED_PERCENT:.0}%）",
+                "swap 已用 {percent:.1}%（{}／{} MB，門檻 {MAX_SWAP_USED_PERCENT:.0}%；可用記憶體 {} MB，低於 {} MB）",
                 mb(memory.swap_total_kib.saturating_sub(memory.swap_free_kib)),
-                mb(memory.swap_total_kib)
+                mb(memory.swap_total_kib),
+                mb(memory.available_kib),
+                mb(SWAP_PRESSURE_AVAILABLE_KIB)
             ));
         }
         if !problems.is_empty() {

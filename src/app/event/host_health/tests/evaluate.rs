@@ -60,7 +60,7 @@ fn power_alerts_only_on_current_under_voltage_or_throttling() {
 }
 
 #[test]
-fn memory_alerts_on_low_available_or_full_swap() {
+fn memory_alerts_on_low_available_or_full_swap_under_pressure() {
     let with = |available_mb: u64, swap_free_mb: u64| Sample {
         memory: Some(MemInfo {
             available_kib: available_mb * 1024,
@@ -78,12 +78,16 @@ fn memory_alerts_on_low_available_or_full_swap() {
         vec![(Kind::Memory, "可用記憶體 99 MB（門檻 100 MB）".to_owned())]
     );
 
-    let swap = evaluate(&with(500, 2));
+    // swap 用滿但可用記憶體充足（11-02 實際 699 MB）：換出的是閒置程序，不告警。
+    assert!(evaluate(&with(699, 2)).alerts.is_empty());
+    assert!(evaluate(&with(400, 2)).alerts.is_empty(), "門檻本身不告警");
+
+    let swap = evaluate(&with(399, 2));
     assert_eq!(
         swap.alerts,
         vec![(
             Kind::Memory,
-            "swap 已用 99.0%（198／200 MB，門檻 95%）".to_owned()
+            "swap 已用 99.0%（198／200 MB，門檻 95%；可用記憶體 399 MB，低於 400 MB）".to_owned()
         )]
     );
 
@@ -92,7 +96,7 @@ fn memory_alerts_on_low_available_or_full_swap() {
     assert_eq!(both.alerts.len(), 1);
     assert_eq!(
         both.alerts[0].1,
-        "可用記憶體 50 MB（門檻 100 MB）；swap 已用 99.0%（198／200 MB，門檻 95%）"
+        "可用記憶體 50 MB（門檻 100 MB）；swap 已用 99.0%（198／200 MB，門檻 95%；可用記憶體 50 MB，低於 400 MB）"
     );
 }
 
