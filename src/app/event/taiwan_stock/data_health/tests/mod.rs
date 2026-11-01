@@ -6,6 +6,7 @@ mod abnormal_prices;
 mod db_statements;
 mod derived;
 mod etf;
+mod host_summary;
 mod lagging;
 mod periodic;
 mod slow_queries;
