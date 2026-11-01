@@ -10,15 +10,22 @@ use axum::{
 use chrono::{Local, NaiveDate};
 use rust_decimal::Decimal;
 
+use super::dividend_fill::summary_dto;
+use super::market_dividend_fill::bucket_dto;
 use super::{
     analytical_decimal_to_f64, database_error, error_response, parse_optional_date, quarter_to_api,
 };
-use crate::infra::database;
+use crate::app::calculation::dividend_fill_hints::FillHints;
+use crate::infra::{cache::SHARE, database};
 use crate::interfaces::web::data_api::dto::{
-    DividendCalendarEvent, DividendCalendarParams, DividendCalendarResponse, ErrorBody,
+    DividendCalendarEvent, DividendCalendarParams, DividendCalendarResponse, DividendFillBucket,
+    DividendFillSummary, ErrorBody,
 };
 
 /// 查詢日期區間內的除權息與股利發放行事曆（§4.9）。
+///
+/// 除息／除權事件附該股近 5 年填息統計；除息事件沒有自身紀錄時附同殖利率組的全市場基準
+/// （共用 [`FillHints`]，與 08:00 除權息清單相同）。
 ///
 /// 資料來源是 `dividend` 表的四個**字串**日期欄位（除息日、除權日、現金
 /// 發放日、股票發放日）；只有可解析為合法 `YYYY-MM-DD` 且落在查詢區間內
@@ -72,16 +79,70 @@ pub(crate) async fn dividend_calendar(Query(params): Query<DividendCalendarParam
         .bind(i64::from(limit))
         .fetch_all(database::get_connection())
         .await;
-    match rows {
-        Ok(rows) => Json(DividendCalendarResponse {
-            // 混合事件沒有單一統計日期（§3.4），固定為 null；各事件日期
-            // 放在每筆事件內。
-            data_as_of: None,
-            events: rows.into_iter().map(Into::into).collect(),
-        })
-        .into_response(),
-        Err(error) => database_error(error),
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(error) => return database_error(error),
+    };
+    let hints = load_fill_hints(&rows).await;
+    let mut events = Vec::with_capacity(rows.len());
+    for row in rows {
+        let (fill_history, fill_peer) = fill_hint(&row, &hints).await;
+        let mut event = DividendCalendarEvent::from(row);
+        event.fill_history = fill_history;
+        event.fill_peer = fill_peer;
+        events.push(event);
     }
+    Json(DividendCalendarResponse {
+        // 混合事件沒有單一統計日期（§3.4），固定為 null；各事件日期
+        // 放在每筆事件內。
+        data_as_of: None,
+        events,
+    })
+    .into_response()
+}
+
+/// 除息／除權事件是否附歷年填息。
+fn is_ex_event(event_type: &str) -> bool {
+    matches!(event_type, "ex_dividend" | "ex_rights")
+}
+
+/// 查詢區間內除息／除權事件股票的歷年填息；沒有這類事件時不查詢。
+async fn load_fill_hints(rows: &[CalendarEventRow]) -> FillHints {
+    let mut symbols: Vec<String> = rows
+        .iter()
+        .filter(|row| is_ex_event(&row.event_type))
+        .map(|row| row.stock_symbol.clone())
+        .collect();
+    symbols.sort();
+    symbols.dedup();
+    if symbols.is_empty() {
+        return FillHints::default();
+    }
+    FillHints::load(&symbols, Local::now().date_naive()).await
+}
+
+/// 一筆事件的歷年填息與同組基準：只有除息／除權事件有；同組基準只在除息事件且沒有自身紀錄時附上，
+/// 殖利率以最新收盤（共用快取）計算。
+async fn fill_hint(
+    row: &CalendarEventRow,
+    hints: &FillHints,
+) -> (Option<DividendFillSummary>, Option<DividendFillBucket>) {
+    if !is_ex_event(&row.event_type) {
+        return (None, None);
+    }
+    if let Some(history) = hints.history(&row.stock_symbol) {
+        return (Some(summary_dto(history)), None);
+    }
+    if row.event_type != "ex_dividend" {
+        return (None, None);
+    }
+    let Some(cash) = row.cash_dividend else {
+        return (None, None);
+    };
+    let Some(last) = SHARE.get_stock_last_price(&row.stock_symbol).await else {
+        return (None, None);
+    };
+    (None, hints.peer(cash, last.closing_price).map(bucket_dto))
 }
 
 /// 股利行事曆的參數化 SQL：四段 UNION ALL，每段一種事件類型。
@@ -216,6 +277,8 @@ impl From<CalendarEventRow> for DividendCalendarEvent {
             stock_dividend: convert(row.stock_dividend, "stock_dividend"),
             total_dividend: convert(row.total_dividend, "total_dividend"),
             stock_symbol: row.stock_symbol,
+            fill_history: None,
+            fill_peer: None,
         }
     }
 }

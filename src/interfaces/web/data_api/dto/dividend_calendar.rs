@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use super::{DividendFillBucket, DividendFillSummary};
+
 /// OpenAPI 文件使用的股利行事曆事件類型（§4.9）。
 ///
 /// 台股領域背景：一筆股利公告有四個關鍵日期——「除息日」（買進後不再
@@ -49,6 +51,12 @@ pub(crate) struct DividendCalendarEvent {
     pub(crate) stock_dividend: Option<f64>,
     /// 股利合計（元）；DB 欄位 `sum`。
     pub(crate) total_dividend: Option<f64>,
+    /// 除息／除權事件：該股近 5 年的填息統計（同 `/stocks/{symbol}/dividend-fill` 的 summary）；
+    /// 發放日事件、期間內沒有除權息或查詢失敗時為 `null`。
+    pub(crate) fill_history: Option<DividendFillSummary>,
+    /// 除息事件且沒有自身填息紀錄時：以現金股利 ÷ 最新收盤算出的殖利率組別的全市場基準
+    /// （同 `/market/dividend-fill-stats` 的一組）；其餘為 `null`。
+    pub(crate) fill_peer: Option<DividendFillBucket>,
 }
 
 /// 股利行事曆的成功回應（§3.4 envelope）。

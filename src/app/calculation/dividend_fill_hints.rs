@@ -1,5 +1,8 @@
-//! 除權息清單每檔附的歷年填息：近 5 年填息次數與平均天數；沒有自身紀錄時改附同現金殖利率組的
-//! 全市場中位數（`/market/dividend-fill-stats`，共用 6 小時快取）。
+//! 每檔股票的歷年填息提示：近 5 年填息次數與平均天數；沒有自身紀錄時改用同現金殖利率組的
+//! 全市場基準（`/market/dividend-fill-stats`，共用 6 小時快取）。
+//!
+//! 08:00 除權息清單（[`FillHints::text`](crate::app::calculation::dividend_fill_hints::FillHints::text)）與 `/market/dividend-calendar`（[`FillHints::history`](crate::app::calculation::dividend_fill_hints::FillHints::history)、
+//! [`FillHints::peer`](crate::app::calculation::dividend_fill_hints::FillHints::peer)）共用。
 //!
 //! 每檔只查一次近 5 年的除權息與日線（與 `/portfolio/dividend-fill` 的 history 相同規則）；
 //! 單檔或全市場基準查詢失敗只記錄警告，那一檔不附文字，不影響提醒本身。
@@ -7,6 +10,7 @@
 use std::collections::HashMap;
 
 use chrono::{Days, NaiveDate};
+use rust_decimal::Decimal;
 
 use crate::domain::dividend::entity::StockDividendInfo;
 use crate::domain::dividend::fill::{self, DividendFillQuery, FillSummary};
@@ -22,14 +26,14 @@ const PEER_YEARS: u8 = 5;
 
 /// 一批股票的歷年填息統計與全市場基準。
 #[derive(Debug, Default)]
-pub(super) struct FillHints {
+pub struct FillHints {
     history: HashMap<String, FillSummary>,
     peers: Vec<BucketStats>,
 }
 
 impl FillHints {
     /// 查詢 `symbols` 近 5 年的填息統計與全市場基準。
-    pub(super) async fn load(symbols: &[String], today: NaiveDate) -> Self {
+    pub async fn load(symbols: &[String], today: NaiveDate) -> Self {
         let repository = PgDividendFillRepository::new();
         let peers = match dividend_fill_stats::market_fill_samples_for(
             &repository,
@@ -50,13 +54,31 @@ impl FillHints {
         }
     }
 
-    /// 這一檔要附的文字；沒有自身紀錄也沒有基準時為 `None`。
-    pub(super) fn text(&self, stock: &StockDividendInfo) -> Option<String> {
-        if let Some(history) = self
-            .history
-            .get(&stock.stock_symbol)
+    /// 測試用：直接帶入填息統計與全市場基準。
+    #[cfg(test)]
+    pub(crate) fn for_test(history: HashMap<String, FillSummary>, peers: Vec<BucketStats>) -> Self {
+        Self { history, peers }
+    }
+
+    /// 該股近 5 年的填息統計；查詢失敗或期間內沒有除權息時為 `None`。
+    #[must_use]
+    pub fn history(&self, symbol: &str) -> Option<&FillSummary> {
+        self.history
+            .get(symbol)
             .filter(|history| history.events > 0)
-        {
+    }
+
+    /// 以現金股利與收盤價算出殖利率組別的全市場基準；沒有現金股利、收盤不大於 0 或基準查詢失敗時為 `None`。
+    #[must_use]
+    pub fn peer(&self, cash_dividend: Decimal, closing_price: Decimal) -> Option<&BucketStats> {
+        let bucket = YieldBucket::of(cash_dividend, closing_price)?;
+        self.peers.iter().find(|stats| stats.bucket == bucket)
+    }
+
+    /// 除權息清單這一檔要附的文字；沒有自身紀錄也沒有基準時為 `None`。
+    #[must_use]
+    pub fn text(&self, stock: &StockDividendInfo) -> Option<String> {
+        if let Some(history) = self.history(&stock.stock_symbol) {
             let average = history
                 .average_trading_days
                 .map_or_else(String::new, |days| format!("、平均 {days} 日"));
@@ -65,15 +87,11 @@ impl FillHints {
                 history.filled, history.events
             ));
         }
-        let bucket = YieldBucket::of(stock.cash_dividend, stock.closing_price)?;
-        let median = self
-            .peers
-            .iter()
-            .find(|stats| stats.bucket == bucket)?
-            .median_trading_days?;
+        let peer = self.peer(stock.cash_dividend, stock.closing_price)?;
+        let median = peer.median_trading_days?;
         Some(format!(
             "同殖利率組（{}）填息中位數 {median} 日",
-            bucket.label()
+            peer.bucket.label()
         ))
     }
 }
@@ -106,7 +124,6 @@ async fn load_history(
 mod tests {
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
-    use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
     use super::*;
@@ -202,38 +219,5 @@ mod tests {
             "10% 組沒有基準"
         );
         assert_eq!(hints.text(&stock("9999", Decimal::ZERO, dec!(10))), None);
-    }
-
-    /// 清單每一列在殖利率後附上填息文字（MarkdownV2 跳脫）；沒有文字的列不變。
-    #[test]
-    fn market_message_appends_fill_hint() {
-        let history = HashMap::from([(
-            "2330".to_owned(),
-            FillSummary {
-                events: 4,
-                filled: 3,
-                average_trading_days: Some(12.5),
-                median_trading_days: Some(10.0),
-            },
-        )]);
-        let hints = FillHints {
-            history,
-            peers: Vec::new(),
-        };
-        let stocks = [
-            stock("2330", dec!(5), dec!(500)),
-            stock("1101", dec!(1), dec!(25)),
-        ];
-        let message = crate::app::event::handlers::EventDispatcher::build_market_dividend_message(
-            day(11, 2),
-            "進行除權息的股票與 ETF 如下︰",
-            &stocks,
-            &hints,
-        );
-        assert!(
-            message.contains("殖利率:0% 近 5 年填息 3／4 次、平均 12\\.5 日\n"),
-            "{message}"
-        );
-        assert!(message.contains("殖利率:0%\n"), "1101 沒有文字：{message}");
     }
 }

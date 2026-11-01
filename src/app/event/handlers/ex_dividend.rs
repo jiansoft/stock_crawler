@@ -1,7 +1,6 @@
 //! `ExDividendReminderTriggered` 事件處理：發送除權息提醒、重新計算持股股利並發送通知。
 //!
-//! 子模組：[`market`]（市場除權息清單訊息）、[`fill_history`]（清單每檔附的歷年填息）、
-//! [`holding`]（持股預估股利訊息）。
+//! 子模組：[`market`]（市場除權息清單訊息，每檔附歷年填息）、[`holding`]（持股預估股利訊息）。
 
 use anyhow::Result;
 use chrono::{Datelike, Local};
@@ -17,10 +16,9 @@ use crate::domain::portfolio::repository::PortfolioRepository;
 use crate::infra::database::repository::dividend::PgDividendRepository;
 use crate::infra::database::repository::portfolio::PgPortfolioRepository;
 
-use self::fill_history::FillHints;
 use super::EventDispatcher;
+use crate::app::calculation::dividend_fill_hints::FillHints;
 
-mod fill_history;
 mod holding;
 mod market;
 
