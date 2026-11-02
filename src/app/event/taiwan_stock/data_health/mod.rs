@@ -33,7 +33,7 @@
 //!     MIS 只給當天，漏抓那天要靠週六的 MoneyDJ 補缺日，太久沒發現就超出補的範圍。
 //!
 //! 全部正常時也會發一則簡短的週報，用來確認檢查本身有在跑。
-//! 最後的「本週附註」區塊是參考資訊（不算檢查項目）：慢查詢、異常價格、主機健康、HTTP 異常
+//! 最後的「本週附註」區塊是參考資訊（不算檢查項目）：慢查詢、異常價格、主機健康、HTTP 異常、取連線過慢
 //! （以上讀檔案日誌）、資料庫啟動時間與資料庫端耗時（`pg_stat_statements`）。
 
 use std::fmt::Write;
@@ -65,6 +65,7 @@ mod db_uptime;
 mod host_summary;
 mod http_errors;
 mod rules;
+mod slow_acquire;
 mod slow_queries;
 
 // 規則檢核搬到子模組；週報組裝與排程入口留在這裡。
@@ -72,6 +73,7 @@ use self::abnormal_prices::{abnormal_price_line, weekly_abnormal_prices};
 use self::host_summary::{host_summary_line, weekly_host_days};
 use self::http_errors::{http_issue_line, weekly_http_issues};
 use self::rules::*;
+use self::slow_acquire::{slow_acquire_line, weekly_slow_acquires};
 use self::slow_queries::{LOG_DIR, slow_query_line, weekly_slow_queries};
 /// 檢查最近幾個日曆日（含今天）。
 const CHECK_DAYS: u64 = 7;
@@ -203,6 +205,7 @@ async fn build(today: NaiveDate) -> Result<(String, Option<StatementStats>)> {
     let abnormal = weekly_abnormal_prices(std::path::Path::new(LOG_DIR), from, today);
     let host_days = weekly_host_days(std::path::Path::new(LOG_DIR), from, today);
     let http_issues = weekly_http_issues(std::path::Path::new(LOG_DIR), from, today);
+    let acquires = weekly_slow_acquires(std::path::Path::new(LOG_DIR), from, today);
     let (statement_line, statements) = db_statements::weekly_statements(&repo).await;
     let uptime_line = db_uptime::weekly_uptime_line(from).await;
     let notes = [
@@ -210,6 +213,7 @@ async fn build(today: NaiveDate) -> Result<(String, Option<StatementStats>)> {
         abnormal_price_line(&abnormal),
         host_summary_line(&host_days),
         http_issue_line(&http_issues),
+        slow_acquire_line(&acquires),
         uptime_line,
         statement_line,
     ];
