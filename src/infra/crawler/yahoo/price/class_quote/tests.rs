@@ -1,3 +1,4 @@
+use reqwest::StatusCode;
 use rust_decimal::Decimal;
 
 use super::*;
