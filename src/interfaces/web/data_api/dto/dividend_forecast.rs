@@ -7,6 +7,7 @@ use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use super::{DividendFillBucket, DividendFillSummary};
 use crate::domain::portfolio::dividend_forecast::{Basis, Forecast, ForecastItem, MonthTotal};
 
 /// 股利現金流預估 endpoint 的 query string。
@@ -53,6 +54,10 @@ pub(crate) struct DividendForecastItem {
     /// 預估依據。
     #[schema(value_type = ForecastBasisValue)]
     pub(crate) basis: String,
+    /// 該股近 5 年的填息統計（同 `/stocks/{symbol}/dividend-fill` 的 summary）；沒有紀錄時為 `null`。
+    pub(crate) fill_history: Option<DividendFillSummary>,
+    /// 沒有自身紀錄時，以每股現金股利 ÷ 最新收盤算出殖利率組別的全市場填息基準；其餘為 `null`。
+    pub(crate) fill_peer: Option<DividendFillBucket>,
 }
 
 impl From<ForecastItem> for DividendForecastItem {
@@ -71,6 +76,8 @@ impl From<ForecastItem> for DividendForecastItem {
                 Basis::Estimated => "estimated",
             }
             .to_owned(),
+            fill_history: None,
+            fill_peer: None,
         }
     }
 }
