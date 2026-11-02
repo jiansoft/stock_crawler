@@ -20,6 +20,7 @@
 //! - 外資、投信近 [`WEEK_DAYS`] 個交易日在持股的累計買賣超，買超、賣超最多的幾檔（沿用產業資金一段
 //!   已載入的個股淨買賣，不另外查詢），以及同期主力（`broker_flow`）的累計買賣超。
 //! - 持股（含 ETF）近 7 天內填息的除權息，與尚未填息、離填息價最遠的幾檔（見 [`crate::domain::dividend::fill`]）。
+//! - 下週持股（含 ETF）的除權息日、每股股利、預估入帳與近 5 年填息（見 [`upcoming_dividend`]）。
 //! - 持股的基本面警示：營收連續年減、三率三降、營業虧損、自由現金流為負（見 [`crate::domain::portfolio::health`]）。
 //! - ETF 資金流向：全市場淨申購流入、流出最多的 ETF，與持有 ETF 的淨申購、折溢價週平均（見 [`etf`]）。
 //! - 有設定策略換股通知的條件時，策略這一期的換股日、本期至今報酬與 0050 對照、最好與最差的持股。
@@ -42,6 +43,7 @@ mod holding_flow;
 mod industry;
 mod market;
 mod strategy;
+mod upcoming_dividend;
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -61,9 +63,11 @@ use self::{
     industry::{IndustrySection, industry_section},
     market::{RegimeSection, month_seasonality, regime_section, valuation_level},
     strategy::{StrategySection, strategy_section},
+    upcoming_dividend::{UpcomingSection, total_shares, upcoming_events, upcoming_section},
 };
 use super::holdings;
 use crate::{
+    app::calculation::dividend_fill_hints::FillHints,
     core::{alert, util::text},
     domain::{
         chip::flow::{self, ChipFlowQuery},
@@ -80,7 +84,8 @@ use crate::{
         },
     },
     infra::database::repository::{
-        chip::PgChipRepository, dividend_fill::PgDividendFillRepository, etf::PgEtfRepository,
+        chip::PgChipRepository, dividend::PgDividendRepository,
+        dividend_fill::PgDividendFillRepository, etf::PgEtfRepository,
         market_index::PgMarketIndexRepository, market_valuation::PgMarketValuationRepository,
         portfolio::PgPortfolioRepository, portfolio_target::PgPortfolioTargetRepository,
         quote::PgQuoteRepository,
@@ -107,14 +112,27 @@ pub async fn execute() -> Result<()> {
         .context("fetch holdings for weekly market summary failed")?;
     let date = Local::now().date_naive();
     let strategy = strategy_section().await;
-    // 填息與 ETF 看全部持股（含 ETF）；查不到持股只少這兩段的持股部分。
-    let all = holdings::active_holding_symbols()
+    // 填息、下週除權息與 ETF 看全部持股（含 ETF）；查不到持股只少這幾段的持股部分。
+    let shares = holdings::active_holding_quantities()
         .await
+        .map(total_shares)
         .unwrap_or_else(|why| {
             tracing::warn!("每週市場摘要：讀取持股（含 ETF）失敗: {why:#}");
-            BTreeSet::new()
+            Default::default()
         });
+    let all: BTreeSet<String> = shares.keys().cloned().collect();
     let fills = holding_fills(&PgDividendFillRepository::new(), &all, date).await;
+    let events = upcoming_events(&PgDividendRepository::new(), &all, date).await;
+    let upcoming = if events.is_empty() {
+        None
+    } else {
+        let symbols: Vec<String> = events
+            .iter()
+            .map(|(_, stock)| stock.stock_symbol.clone())
+            .collect();
+        let hints = FillHints::load(&symbols, date).await;
+        upcoming_section(events, &shares, &hints, date)
+    };
     let etfs = etf_section(&PgEtfRepository::new(), &all, date)
         .await
         .unwrap_or_else(|why| {
@@ -135,6 +153,7 @@ pub async fn execute() -> Result<()> {
         &fills,
         etfs.as_ref(),
         &allocation,
+        upcoming.as_ref(),
     )
     .await;
     if let Some(message) = message {
@@ -167,6 +186,7 @@ async fn run(
     fills: &[HoldingFill],
     etfs: Option<&EtfWeekSection>,
     allocation: &[AllocationSection],
+    upcoming: Option<&UpcomingSection>,
 ) -> Option<String> {
     let mut market = regime_section(index, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取加權指數失敗: {why:#}");
@@ -270,6 +290,7 @@ async fn run(
             etfs,
             allocation,
             breakouts: breakouts.as_ref(),
+            upcoming,
         },
         strategy,
         holdings::stock_name,
@@ -335,6 +356,9 @@ fn build_message(
     }
     if let Some(date) = data_date {
         lines.extend(dividend::lines(holdings.fills, date, &stock_name));
+    }
+    if let Some(section) = holdings.upcoming {
+        lines.extend(upcoming_dividend::lines(section));
     }
     lines.extend(fundamentals::lines(holdings.fundamentals, &stock_name));
     if let Some(section) = holdings.etfs {

@@ -41,6 +41,21 @@ pub(crate) async fn active_holding_symbols() -> Result<BTreeSet<String>> {
         .collect())
 }
 
+/// 目前持股（未售出）每筆的代號（含 ETF）與股數；同一代號分次買進、不同會員會有多筆。
+///
+/// # Errors
+///
+/// 查詢持股失敗時回傳錯誤。
+pub(crate) async fn active_holding_quantities() -> Result<Vec<(String, i64)>> {
+    let holdings = PgPortfolioRepository::new()
+        .fetch_active_holdings(None)
+        .await?;
+    Ok(holdings
+        .into_iter()
+        .map(|holding| (holding.security_code, holding.share_quantity))
+        .collect())
+}
+
 /// 從持股代號中挑出普通股（去重、排序）；持股可能重複（同一檔分次買進）。
 pub(super) fn common_stocks(security_codes: impl IntoIterator<Item = String>) -> BTreeSet<String> {
     security_codes
@@ -113,6 +128,12 @@ mod tests {
             return;
         };
         assert!(common.is_subset(&all), "{common:?} ⊄ {all:?}");
+        // 股數明細涵蓋同一批代號。
+        let quantities = active_holding_quantities()
+            .await
+            .expect("同一個查詢剛才成功過");
+        let symbols: BTreeSet<String> = quantities.into_iter().map(|(symbol, _)| symbol).collect();
+        assert_eq!(symbols, all);
     }
 
     /// 股名取自股票主檔快取；查不到時為空字串。
