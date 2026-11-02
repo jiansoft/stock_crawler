@@ -10,6 +10,7 @@ mod host_summary;
 mod http_errors;
 mod lagging;
 mod periodic;
+mod slow_acquire;
 mod slow_queries;
 mod trading;
 
@@ -26,7 +27,7 @@ async fn print_report() {
     println!("{message}");
 }
 
-/// 對測試庫組一次週報（唯讀、不發送）：檢查項目之後接「本週附註」區塊，6 則各一行；
+/// 對測試庫組一次週報（唯讀、不發送）：檢查項目之後接「本週附註」區塊，7 則各一行；
 /// 連不上資料庫時跳過。
 #[tokio::test]
 #[cfg_attr(
@@ -43,7 +44,7 @@ async fn build_report_appends_notes_section() {
         .split_once("\n\n📎 本週附註")
         .expect("週報要有本週附註區塊");
     assert!(checks.contains("資料健康週報"), "{message}");
-    assert_eq!(notes.matches("\n• ").count(), 6, "{message}");
+    assert_eq!(notes.matches("\n• ").count(), 7, "{message}");
 }
 use crate::domain::{
     health::{DerivedTableLatest, EtfNavDayCount},
