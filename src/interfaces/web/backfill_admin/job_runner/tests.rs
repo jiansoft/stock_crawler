@@ -239,3 +239,142 @@ async fn job_times_out_and_is_marked_failed() {
         finished.message
     );
 }
+
+/// 輪詢全域 [`BACKFILL_STATE`]，等指定 job 離開 running 並回傳最後狀態（最多約 60 秒）。
+async fn wait_for_global_job(job: BackfillJob) -> BackfillJob {
+    for _ in 0..600 {
+        let current = super::super::state::get_backfill_job(&job.id)
+            .await
+            .expect("job 應可查詢");
+        if current.status_label() != "running" {
+            return current;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("job {} ({}) did not finish in time", job.id, job.kind);
+}
+
+/// 只讀寫資料庫、不連外部網站的回補 job：從入口建立後實際跑完，摘要寫進 message。
+/// 用假代號與 1990 年等沒有資料的參數，臨時庫裡不會改到其他測試的資料。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn database_only_jobs_run_to_completion() {
+    dotenvy::dotenv().ok();
+    let pool = crate::infra::database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 database_only_jobs_run_to_completion：無資料庫連接");
+        return;
+    }
+    let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).expect("合法日期");
+
+    let received = start_received_dividend_records_job("79979RJ".to_string())
+        .await
+        .expect("job should start");
+    let received = wait_for_global_job(received).await;
+    assert_eq!(received.status_label(), "succeeded", "{}", received.message);
+    assert_eq!(
+        received.message,
+        "received dividend records backfill completed: holding_count=0, year_count=0, recalculated_count=0"
+    );
+
+    let multiple = start_multiple_dividend_historical_dividends_job(1990)
+        .await
+        .expect("job should start");
+    let multiple = wait_for_global_job(multiple).await;
+    assert_eq!(
+        multiple.message,
+        "multiple dividend historical dividends backfill completed: stock_count=0, detail_count=0",
+        "1990 年沒有多次配息股票，不會對外請求"
+    );
+
+    let quote_history = start_quote_history_job(
+        vec!["79979QH".to_string()],
+        date(2024, 2, 1),
+        date(2024, 1, 1),
+    )
+    .await
+    .expect("job should start");
+    assert_eq!(quote_history.input, "79979QH|2024-02~2024-01");
+    let quote_history = wait_for_global_job(quote_history).await;
+    assert_eq!(quote_history.status_label(), "failed");
+    assert!(
+        quote_history.message.contains("起始月份不得晚於結束月份"),
+        "起訖顛倒在抓取前就失敗：{}",
+        quote_history.message
+    );
+
+    let repair = start_annual_total_repair_job()
+        .await
+        .expect("job should start");
+    assert_eq!(repair.input, "all");
+    let repair = wait_for_global_job(repair).await;
+    assert_eq!(repair.status_label(), "succeeded", "{}", repair.message);
+    assert!(
+        repair
+            .message
+            .starts_with("annual total repair completed: "),
+        "{}",
+        repair.message
+    );
+
+    let cagr = start_cagr_job(Some(date(1990, 1, 2)))
+        .await
+        .expect("job should start");
+    assert_eq!(cagr.input, "1990-01-02");
+    let cagr = wait_for_global_job(cagr).await;
+    assert!(cagr.message.contains("cagr"), "{}", cagr.message);
+
+    let period = start_cagr_period_job(CagrPeriod::Y1)
+        .await
+        .expect("job should start");
+    assert_eq!(period.input, "Y1");
+    let period = wait_for_global_job(period).await;
+    assert!(period.message.contains("Y1"), "{}", period.message);
+}
+
+/// 會連外部網站的回補入口：相同 `(kind, input)` 已有執行中的 job 時，入口在 spawn 之前就拒絕，
+/// 確認各入口組出的 kind 與 input（查重鍵）正確，測試本身不會發出任何請求。
+#[tokio::test]
+async fn network_jobs_reject_duplicate_of_running_job() {
+    let date = NaiveDate::from_ymd_opt(1990, 1, 3).expect("合法日期");
+    let blockers = [
+        ("daily_quotes", "1990-01-03"),
+        ("closing_aggregate", "1990-01-03"),
+        ("taiwan_stock_index", "1990-01-03"),
+        ("historical_dividends", "79979HD"),
+    ];
+    {
+        let mut jobs = BACKFILL_STATE.jobs.write().await;
+        for (kind, input) in blockers {
+            let mut job = BackfillJob::for_test(&format!("blocker-{kind}"), None);
+            job.kind = kind.to_string();
+            job.input = input.to_string();
+            jobs.insert(job.id.clone(), job);
+        }
+    }
+
+    let results = [
+        start_daily_quotes_job(date).await,
+        start_closing_aggregate_job(date).await,
+        start_taiwan_stock_index_job(date).await,
+        start_historical_dividends_job("79979HD".to_string()).await,
+    ];
+
+    {
+        let mut jobs = BACKFILL_STATE.jobs.write().await;
+        for (kind, _) in blockers {
+            jobs.remove(&format!("blocker-{kind}"));
+        }
+    }
+    for ((kind, _), result) in blockers.iter().zip(results) {
+        match result {
+            Err(StartJobError::DuplicateActiveJob { existing_id }) => {
+                assert_eq!(existing_id, format!("blocker-{kind}"));
+            }
+            other => panic!("{kind} 應因重複被拒絕，實際：{other:?}"),
+        }
+    }
+}
