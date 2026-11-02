@@ -1,12 +1,16 @@
 use crate::domain::portfolio::entity::{
     ReceivedDividend, ReceivedDividendItem, StockOwnershipDetail,
 };
+use crate::domain::portfolio::payout::PayoutAllocation;
 use crate::domain::portfolio::repository::PortfolioRepository;
 use crate::infra::database;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use sqlx::{QueryBuilder, Row, postgres::PgRow};
+
+mod payout;
 
 /// 基於 PostgreSQL 的持股倉儲實現 (PgPortfolioRepository)。
 pub struct PgPortfolioRepository;
@@ -312,6 +316,16 @@ impl PortfolioRepository for PgPortfolioRepository {
             .await
             .context("Failed to calculate accumulated dividends")?;
         Ok(row)
+    }
+
+    async fn fetch_payout_allocations(
+        &self,
+        member_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+        today: NaiveDate,
+    ) -> Result<Vec<PayoutAllocation>> {
+        payout::fetch(member_id, from, to, today).await
     }
 }
 

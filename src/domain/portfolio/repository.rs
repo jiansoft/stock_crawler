@@ -1,8 +1,10 @@
 use crate::domain::portfolio::entity::{
     ReceivedDividend, ReceivedDividendItem, StockOwnershipDetail,
 };
+use crate::domain::portfolio::payout::PayoutAllocation;
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 /// 持股領域之倉儲介面 (Repository Trait)。
@@ -44,4 +46,16 @@ pub trait PortfolioRepository: Send + Sync {
         &self,
         holding_serial: i64,
     ) -> Result<(Decimal, Decimal, Decimal, Decimal)>;
+
+    /// 查詢現金或股票股利發放日落在 `from..=to` 的股利，依會員分配（`member_id` 為 0 時查全部會員）。
+    ///
+    /// 已除權息的取已領股利明細；除權息日在 `today` 以後、還沒有明細的以目前未賣出持股推算
+    /// （`estimated`）。年度合計列與分期明細並存時只取分期。
+    async fn fetch_payout_allocations(
+        &self,
+        member_id: i64,
+        from: NaiveDate,
+        to: NaiveDate,
+        today: NaiveDate,
+    ) -> Result<Vec<PayoutAllocation>>;
 }
