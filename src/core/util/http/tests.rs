@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::Local;
 use concat_string::concat_string;
 
@@ -57,6 +59,35 @@ async fn json_errors_flatten_body_to_single_line() {
         );
         assert!(!message.contains('\n'), "{message}");
     }
+}
+
+/// POST：JSON 請求與回應解析成功；表單與無內容兩種寫法都回傳本文；Big5 GET 以 Big5 解讀本文。
+#[tokio::test]
+async fn post_and_big5_helpers_round_trip_with_local_server() {
+    let url = spawn_fixed_server("200 OK", r#"{"ok":true,"count":2}"#).await;
+    let body: serde_json::Value = post_use_json(&url, None, Some(&serde_json::json!({"q": 1})))
+        .await
+        .expect("JSON 回應應可解析");
+    assert_eq!(body, serde_json::json!({"ok": true, "count": 2}));
+
+    let url = spawn_fixed_server("200 OK", "form-ok").await;
+    let params = HashMap::from([("stock_no", "2330"), ("date", "20261102")]);
+    assert_eq!(
+        post(&url, None, Some(params))
+            .await
+            .expect("表單 POST 應成功"),
+        "form-ok"
+    );
+    assert_eq!(
+        post(&url, None, None).await.expect("無內容 POST 應成功"),
+        "form-ok"
+    );
+
+    let url = spawn_fixed_server("200 OK", "big5 ascii body").await;
+    assert_eq!(
+        get_use_big5(&url).await.expect("Big5 GET 應成功"),
+        "big5 ascii body"
+    );
 }
 
 /// 手動驗證外部 HTTP 來源是否可正常請求。
