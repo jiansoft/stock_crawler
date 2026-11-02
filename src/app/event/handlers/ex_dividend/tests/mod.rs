@@ -362,3 +362,5 @@ fn payout_years_cover_next_year_payout() {
     let ex_date = chrono::NaiveDate::from_ymd_opt(2026, 12, 10).expect("合法日期");
     assert_eq!(payout_years(ex_date), [2026, 2027]);
 }
+
+mod flow;
