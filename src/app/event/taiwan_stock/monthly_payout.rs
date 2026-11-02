@@ -1,7 +1,7 @@
 //! 每月 1 日 08:10 上個月持股股利入帳彙總：上月每筆入帳（全部會員合併，現金與配股）、各會員與
 //! 合計現金、與去年同月比較，以及上個月所屬年度的累計現金。
 //!
-//! 入帳取 [`PortfolioRepository::fetch_payout_allocations`]（已領股利明細，除權息後才賣出的也算）；
+//! 入帳取 [`PortfolioRepository::fetch_payout_allocations`](crate::domain::portfolio::repository::PortfolioRepository::fetch_payout_allocations)（已領股利明細，除權息後才賣出的也算）；
 //! 上個月已經過去，不會有以目前持股推算的入帳。上個月沒有入帳就不發。
 
 use std::collections::BTreeMap;
