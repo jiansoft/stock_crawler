@@ -7,6 +7,7 @@ mod db_statements;
 mod derived;
 mod etf;
 mod host_summary;
+mod http_errors;
 mod lagging;
 mod periodic;
 mod slow_queries;
