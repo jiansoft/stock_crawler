@@ -33,7 +33,8 @@
 //!     MIS 只給當天，漏抓那天要靠週六的 MoneyDJ 補缺日，太久沒發現就超出補的範圍。
 //!
 //! 全部正常時也會發一則簡短的週報，用來確認檢查本身有在跑。
-//! 最後附兩行參考資訊（不算檢查項目）：本週慢查詢（檔案日誌）與資料庫端耗時（`pg_stat_statements`）。
+//! 最後的「本週附註」區塊是參考資訊（不算檢查項目）：慢查詢、異常價格、主機健康、HTTP 異常
+//! （以上讀檔案日誌）、資料庫啟動時間與資料庫端耗時（`pg_stat_statements`）。
 
 use std::fmt::Write;
 
@@ -204,32 +205,28 @@ async fn build(today: NaiveDate) -> Result<(String, Option<StatementStats>)> {
     let http_issues = weekly_http_issues(std::path::Path::new(LOG_DIR), from, today);
     let (statement_line, statements) = db_statements::weekly_statements(&repo).await;
     let uptime_line = db_uptime::weekly_uptime_line(from).await;
-    let message = format!(
-        "{}
-{}
-{}
-{}
-{}
-{}",
-        with_slow_queries(report(from, today, &checks), &slow),
-        text::escape_markdown_v2(abnormal_price_line(&abnormal)),
-        text::escape_markdown_v2(host_summary_line(&host_days)),
-        text::escape_markdown_v2(http_issue_line(&http_issues)),
-        text::escape_markdown_v2(&uptime_line),
-        text::escape_markdown_v2(&statement_line)
-    );
+    let notes = [
+        slow_query_line(&slow),
+        abnormal_price_line(&abnormal),
+        host_summary_line(&host_days),
+        http_issue_line(&http_issues),
+        uptime_line,
+        statement_line,
+    ];
+    let message = format!("{}{}", report(from, today, &checks), notes_section(&notes));
     Ok((message, statements))
 }
 
-/// 週報最後附上本週慢查詢（不算檢查項目，只供參考）。
-fn with_slow_queries(
-    message: String,
-    slow: &crate::core::logging::slow_query::SlowQueryTally,
-) -> String {
-    format!(
-        "{message}\n{}",
-        text::escape_markdown_v2(slow_query_line(slow))
-    )
+/// 週報最後的「本週附註」區塊（不算檢查項目，只供參考）：每行一則，空一行與檢查項目分開。
+///
+/// 區塊標題已說明期間，各行開頭的「本週」去掉不重複；回傳值已依 MarkdownV2 跳脫。
+fn notes_section(notes: &[String]) -> String {
+    let mut section = String::from("\n\n📎 本週附註");
+    for note in notes {
+        let note = note.strip_prefix("本週").unwrap_or(note).trim_start();
+        let _ = write!(&mut section, "\n• {}", text::escape_markdown_v2(note));
+    }
+    section
 }
 
 /// 取得期間內的休市日；任一年度抓取失敗回傳 `None`，交易日完整性改為只看成交檔數。

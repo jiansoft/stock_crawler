@@ -58,15 +58,23 @@ fn weekly_slow_queries_reads_warn_files_in_the_period_only() {
 }
 
 #[test]
-fn slow_queries_are_appended_to_the_report() {
+fn notes_are_appended_as_one_section() {
     let mut tally = SlowQueryTally::default();
     tally.add("WITH chip AS ( …", 6.0, Origin::Api);
-    let message = with_slow_queries(report(day(4), day(10), &[]), &tally);
+    let notes = [
+        slow_query_line(&tally),
+        "本週 HTTP 異常 0 次".to_string(),
+        "資料庫：10-19 22:22 啟動".to_string(),
+    ];
+    let message = format!("{}{}", report(day(4), day(10), &[]), notes_section(&notes));
     assert!(
-        // MarkdownV2 的保留字元（括號、小數點）要跳脫。
+        // 空一行接區塊標題；各行去掉重複的「本週」；MarkdownV2 的保留字元（括號、小數點）要跳脫。
         message.ends_with(concat!(
-            "\n",
-            r"本週慢查詢 1 筆（API 1）：WITH chip AS \(［API］ 1（最長 6\.0 秒）"
+            "\n\n📎 本週附註",
+            "\n• ",
+            r"慢查詢 1 筆（API 1）：WITH chip AS \(［API］ 1（最長 6\.0 秒）",
+            "\n• HTTP 異常 0 次",
+            "\n• 資料庫：10\\-19 22:22 啟動"
         )),
         "{message}"
     );
