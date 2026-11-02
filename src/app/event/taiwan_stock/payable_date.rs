@@ -1,6 +1,6 @@
 //! 08:00 股利發放日通知：群內「本日發放股利」清單，以及持股今天入帳的明細與本月至今合計。
 //!
-//! 持股入帳取 [`PortfolioRepository::fetch_payout_allocations`]：已除權息的用除權息當天寫入的
+//! 持股入帳取 [`PortfolioRepository::fetch_payout_allocations`](crate::domain::portfolio::repository::PortfolioRepository::fetch_payout_allocations)：已除權息的用除權息當天寫入的
 //! 已領股利明細，所以除權息後才賣出、今天才發放的也會列入，金額與
 //! `/portfolio/upcoming-payouts` 一致。
 
