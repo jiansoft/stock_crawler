@@ -83,5 +83,6 @@ fn nav(date: NaiveDate, units: i64, previous_nav: Option<Decimal>) -> EtfNavReco
 
 mod holding;
 mod nav;
+mod nav_read;
 mod performance;
 mod snapshot;

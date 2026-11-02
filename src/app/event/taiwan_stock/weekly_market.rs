@@ -28,8 +28,8 @@
 //!
 //! 各段各自查詢，某段失敗只記錄警告並略過；都沒有資料時不發送。各段的查詢與文字在子模組
 //! [`market`]、[`industry`]、[`crossing`]、[`flows`]、[`holding`]、[`holding_flow`]、[`dividend`]、[`fundamentals`]、[`etf`]、
-//! [`strategy`]，這裡只負責排程、
-//! 查詢順序與組訊息。
+//! [`strategy`]，組訊息在 [`message`]，這裡只負責排程與
+//! 查詢順序。
 
 mod allocation;
 mod breakout;
@@ -42,11 +42,11 @@ mod holding;
 mod holding_flow;
 mod industry;
 mod market;
+mod message;
 mod strategy;
 mod upcoming_dividend;
 
 use std::collections::BTreeSet;
-use std::fmt::Write;
 
 use anyhow::{Context, Result};
 use chrono::{Local, NaiveDate};
@@ -62,6 +62,7 @@ use self::{
     holding_flow::{broker_flow_section, holding_flow_section},
     industry::{IndustrySection, industry_section},
     market::{RegimeSection, month_seasonality, regime_section, valuation_level},
+    message::build_message,
     strategy::{StrategySection, strategy_section},
     upcoming_dividend::{UpcomingSection, next_week, upcoming_section},
 };
@@ -71,7 +72,7 @@ use crate::{
         dividend_fill_hints::FillHints,
         upcoming_dividends::{total_shares, upcoming_dividends},
     },
-    core::{alert, util::text},
+    core::alert,
     domain::{
         chip::flow::{self, ChipFlowQuery},
         market_index::{
@@ -310,95 +311,6 @@ pub(super) fn signed(value: f64) -> String {
 /// 億元文字（帶正負號、一位小數）。
 pub(super) fn hundred_million(amount: f64) -> String {
     format!("{:+.1} 億", amount / 1e8)
-}
-
-/// 組出訊息；各段都沒有內容時回 `None`。
-fn build_message(
-    market: Option<&RegimeSection>,
-    industries: Option<&IndustrySection>,
-    crossings: Option<&CrossingSection>,
-    flows: &[FlowSection],
-    holdings: HoldingSection<'_>,
-    strategy: Option<&StrategySection>,
-    stock_name: impl Fn(&str) -> String,
-) -> Option<String> {
-    let mut lines: Vec<String> = Vec::new();
-    let mut data_date = None;
-
-    if let Some(section) = market {
-        data_date = Some(section.state.date);
-        lines.extend(market::lines(section));
-    }
-
-    if let Some(section) = industries.filter(|section| !section.industries.is_empty()) {
-        data_date = Some(section.data_date);
-        lines.extend(industry::lines(section));
-    }
-
-    if let Some(section) = crossings {
-        let rows = crossing::lines(section, &stock_name);
-        if !rows.is_empty() {
-            data_date.get_or_insert(section.to);
-            lines.extend(rows);
-        }
-    }
-
-    if let Some(section) = holdings.breakouts {
-        lines.extend(breakout::lines(section));
-    }
-
-    for section in flows
-        .iter()
-        .filter(|section| !section.industries.is_empty())
-    {
-        data_date.get_or_insert(section.period.data_date);
-        lines.extend(flows::lines(section));
-    }
-
-    lines.extend(holding::lines(holdings.moves, &stock_name));
-    for section in holdings.flows {
-        lines.extend(holding_flow::lines(section));
-    }
-    if let Some(date) = data_date {
-        lines.extend(dividend::lines(holdings.fills, date, &stock_name));
-    }
-    if let Some(section) = holdings.upcoming {
-        lines.extend(upcoming_dividend::lines(section));
-    }
-    lines.extend(fundamentals::lines(holdings.fundamentals, &stock_name));
-    if let Some(section) = holdings.etfs {
-        data_date.get_or_insert(section.to);
-        lines.extend(etf::lines(section));
-    }
-    lines.extend(allocation::lines(holdings.allocation));
-    if let Some(section) = strategy {
-        lines.extend(strategy::lines(section));
-    }
-
-    if lines.is_empty() {
-        return None;
-    }
-    let mut message = String::with_capacity(lines.len() * 96);
-    let title = match data_date {
-        Some(date) => format!("每週市場摘要︰{date}"),
-        None => "每週市場摘要".to_owned(),
-    };
-    let _ = writeln!(&mut message, "{}", text::escape_markdown_v2(title));
-    for line in lines {
-        let _ = writeln!(&mut message, "{}", text::escape_markdown_v2(line));
-    }
-    let _ = writeln!(
-        &mut message,
-        "\n{}",
-        text::escape_markdown_v2("＊金額為每日淨股數×當日收盤價的估計值，過去表現不代表未來結果")
-    );
-    // 策略段也屬投資參考輸出，與 Data API／MCP 使用相同的完整聲明。
-    let _ = writeln!(
-        &mut message,
-        "{}",
-        text::escape_markdown_v2("僅供參考，不構成投資建議，亦不會自動下單")
-    );
-    Some(message)
 }
 
 #[cfg(test)]
