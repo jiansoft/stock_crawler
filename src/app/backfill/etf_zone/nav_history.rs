@@ -7,6 +7,7 @@ use chrono::{Local, Months, NaiveDate};
 
 use super::{request_interval, too_many_failures};
 use crate::{
+    core::shutdown::SHUTDOWN_REQUEST,
     domain::etf::{EtfNavHistoryPoint, EtfRepository},
     infra::{crawler::moneydj, database::repository::etf::PgEtfRepository},
 };
@@ -38,17 +39,19 @@ pub async fn backfill_nav_history_since(from: NaiveDate) -> Result<()> {
         from,
         |from, to| move |symbol| async move { moneydj::etf_nav::visit(&symbol, from, to).await },
         request_interval,
+        || SHUTDOWN_REQUEST.is_requested(),
     )
     .await
 }
 
 /// [`backfill_nav_history_since`] 的可注入版本：先算 `from` 到昨天的區間，再交給 `make_fetch` 產生逐檔抓取。
-async fn backfill_nav_since_with<R, Make, Fetch, FetchFut, Pause, PauseFut>(
+async fn backfill_nav_since_with<R, Make, Fetch, FetchFut, Pause, PauseFut, Stop>(
     repo: &R,
     today: NaiveDate,
     from: NaiveDate,
     make_fetch: Make,
     pause: Pause,
+    stop: Stop,
 ) -> Result<()>
 where
     R: EtfRepository,
@@ -57,9 +60,10 @@ where
     FetchFut: Future<Output = Result<Vec<EtfNavHistoryPoint>>>,
     Pause: FnMut() -> PauseFut,
     PauseFut: Future<Output = ()>,
+    Stop: FnMut() -> bool,
 {
     let (from, to) = nav_history_since_range(today, from)?;
-    backfill_nav_range_with(repo, from, to, make_fetch(from, to), pause).await
+    backfill_nav_range_with(repo, from, to, make_fetch(from, to), pause, stop).await
 }
 
 /// 每週：以 MoneyDJ 近 30 天的淨值補上缺日（MIS 排程失敗的日子）與空欄（正式淨值還沒回填的列）。
@@ -79,17 +83,21 @@ async fn backfill_nav_range(from: NaiveDate, to: NaiveDate) -> Result<()> {
         to,
         |symbol| async move { moneydj::etf_nav::visit(&symbol, from, to).await },
         request_interval,
+        || SHUTDOWN_REQUEST.is_requested(),
     )
     .await
 }
 
-/// 逐檔回補上市 ETF 的淨值，最後重建快照；倉儲、抓取與停頓由呼叫端注入。
-async fn backfill_nav_range_with<R, Fetch, FetchFut, Pause, PauseFut>(
+/// 逐檔回補上市 ETF 的淨值，最後重建快照；倉儲、抓取、停頓與「是否要停」由呼叫端注入。
+///
+/// `stop` 回傳 `true` 時停在兩檔之間，已抓的照樣重建快照；失敗比例只以實際抓過的檔數計算。
+async fn backfill_nav_range_with<R, Fetch, FetchFut, Pause, PauseFut, Stop>(
     repo: &R,
     from: NaiveDate,
     to: NaiveDate,
     fetch: Fetch,
     pause: Pause,
+    stop: Stop,
 ) -> Result<()>
 where
     R: EtfRepository,
@@ -97,6 +105,7 @@ where
     FetchFut: Future<Output = Result<Vec<EtfNavHistoryPoint>>>,
     Pause: FnMut() -> PauseFut,
     PauseFut: Future<Output = ()>,
+    Stop: FnMut() -> bool,
 {
     let listed = repo.listed_etfs().await?;
     let symbols: Vec<&str> = listed.iter().map(|(symbol, _)| symbol.as_str()).collect();
@@ -105,22 +114,21 @@ where
         fetch,
         |symbol, points| async move { repo.insert_nav_history(&symbol, &points).await },
         pause,
+        stop,
     )
     .await?;
     let rows = repo.refresh_snapshot().await?;
     tracing::info!(
-        "ETF 歷史淨值回補: etfs={}, from={from}, to={to}, inserted={}, empty={}, failed={}, snapshot_rows={rows}",
+        "ETF 歷史淨值回補: etfs={}, from={from}, to={to}, inserted={}, empty={}, failed={}, unvisited={}, snapshot_rows={rows}",
         symbols.len(),
         tally.inserted,
         tally.empty,
-        tally.failed
+        tally.failed,
+        tally.unvisited
     );
-    if too_many_failures(tally.failed, symbols.len()) {
-        bail!(
-            "MoneyDJ ETF 淨值抓取失敗 {}／{} 檔",
-            tally.failed,
-            symbols.len()
-        );
+    let visited = symbols.len() - tally.unvisited;
+    if too_many_failures(tally.failed, visited) {
+        bail!("MoneyDJ ETF 淨值抓取失敗 {}／{visited} 檔", tally.failed);
     }
     Ok(())
 }
@@ -134,17 +142,21 @@ struct NavHistoryTally {
     empty: usize,
     /// 抓取失敗的檔數。
     failed: usize,
+    /// 收到關機請求而沒輪到的檔數。
+    unvisited: usize,
 }
 
-/// 逐檔抓取並寫入；檔與檔之間呼叫 `pause`。抓取失敗只記錄並略過，寫入失敗則中止。
+/// 逐檔抓取並寫入；檔與檔之間呼叫 `pause`，`stop` 回傳 `true` 時停在兩檔之間。
+/// 抓取失敗只記錄並略過，寫入失敗則中止。
 ///
 /// 參數都傳擁有權而不是借用：借用參數的 async closure 產生的 future 無法證明是 `Send`，
 /// 排程任務（`create_job`）要求 `Send`。
-async fn backfill_symbols<Fetch, FetchFut, Save, SaveFut, Pause, PauseFut>(
+async fn backfill_symbols<Fetch, FetchFut, Save, SaveFut, Pause, PauseFut, Stop>(
     symbols: &[&str],
     mut fetch: Fetch,
     mut save: Save,
     mut pause: Pause,
+    mut stop: Stop,
 ) -> Result<NavHistoryTally>
 where
     Fetch: FnMut(String) -> FetchFut,
@@ -153,9 +165,14 @@ where
     SaveFut: Future<Output = Result<u64>>,
     Pause: FnMut() -> PauseFut,
     PauseFut: Future<Output = ()>,
+    Stop: FnMut() -> bool,
 {
     let mut tally = NavHistoryTally::default();
     for (index, symbol) in symbols.iter().enumerate() {
+        if stop() {
+            tally.unvisited = symbols.len() - index;
+            break;
+        }
         if index > 0 {
             pause().await;
         }
@@ -225,6 +242,7 @@ mod tests {
                 pauses += 1;
                 async {}
             },
+            || false,
         )
         .await
         .expect("抓取失敗不應中止");
@@ -233,7 +251,8 @@ mod tests {
             NavHistoryTally {
                 inserted: 2,
                 empty: 1,
-                failed: 1
+                failed: 1,
+                unvisited: 0,
             }
         );
         assert_eq!(saved, vec!["0050"]);
@@ -247,6 +266,7 @@ mod tests {
             },
             |_, _| async { Err(anyhow::anyhow!("連線中斷")) },
             || async {},
+            || false,
         )
         .await;
         assert!(result.is_err(), "寫入失敗要中止");
@@ -276,6 +296,7 @@ mod tests {
                 async move { result }
             },
             || async {},
+            || false,
         )
         .await
         .expect("一檔失敗不算整體失敗");
@@ -292,6 +313,7 @@ mod tests {
             day,
             |_| async { Err(anyhow::anyhow!("封鎖")) },
             || async {},
+            || false,
         )
         .await;
         assert!(result.is_err(), "超過一半失敗要告警");
@@ -325,6 +347,7 @@ mod tests {
                 }
             },
             || async {},
+            || false,
         )
         .await
         .expect("起日早於今天應成功");
@@ -344,10 +367,68 @@ mod tests {
             today,
             |_, _| |_| async { Ok(Vec::new()) },
             || async {},
+            || false,
         )
         .await;
         assert!(result.is_err(), "起日不早於今天要回傳錯誤");
         assert_eq!(untouched.snapshots(), 0, "起日不合法時不抓也不重建快照");
+    }
+
+    #[tokio::test]
+    async fn backfill_symbols_stops_between_symbols_when_requested() {
+        let point = EtfNavHistoryPoint {
+            date: NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法"),
+            nav: rust_decimal::Decimal::ONE,
+            market_price: None,
+        };
+        let mut fetched: Vec<String> = Vec::new();
+        let mut checks = 0;
+        let tally = backfill_symbols(
+            &["0050", "0056", "00679B"],
+            |symbol| {
+                fetched.push(symbol);
+                let points = vec![point.clone()];
+                async move { Ok(points) }
+            },
+            |_, points| async move { Ok(points.len() as u64) },
+            || async {},
+            || {
+                checks += 1;
+                checks > 1
+            },
+        )
+        .await
+        .expect("提早停止不算失敗");
+        assert_eq!(fetched, vec!["0050"], "第二檔之前就停");
+        assert_eq!(
+            tally,
+            NavHistoryTally {
+                inserted: 1,
+                empty: 0,
+                failed: 0,
+                unvisited: 2,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn backfill_range_stopped_early_still_rebuilds_snapshot() {
+        use crate::domain::etf::test_double::RecordingEtfRepository;
+
+        let day = NaiveDate::from_ymd_opt(2026, 10, 21).expect("日期應合法");
+        let repo = RecordingEtfRepository::with_listed(&["0050", "0056", "00679B"]);
+        backfill_nav_range_with(
+            &repo,
+            day,
+            day,
+            |_| async { Err(anyhow::anyhow!("不應抓取")) },
+            || async {},
+            || true,
+        )
+        .await
+        .expect("一檔都沒抓不算大量失敗");
+        assert!(repo.inserted().is_empty());
+        assert_eq!(repo.snapshots(), 1, "停止後照樣重建快照");
     }
 
     #[test]

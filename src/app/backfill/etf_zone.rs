@@ -19,10 +19,13 @@ use rand::RngExt;
 
 use crate::{
     app::calculation,
-    core::util::datetime::Weekend,
+    core::{shutdown::SHUTDOWN_REQUEST, util::datetime::Weekend},
     domain::etf::{ClassifyHint, EtfProfileRecord, EtfRepository, classify},
     infra::{
-        crawler::{twse, yahoo},
+        crawler::{
+            twse,
+            yahoo::{self, etf::YahooEtf},
+        },
         database::repository::etf::PgEtfRepository,
     },
 };
@@ -77,16 +80,45 @@ pub async fn execute_daily() -> Result<()> {
 ///
 /// 資料庫操作失敗，或超過一半的 ETF 抓取失敗（多半是 Yahoo 改版或封鎖）時回傳錯誤。
 pub async fn execute_weekly_profiles() -> Result<()> {
-    let repo = PgEtfRepository::new();
+    run_weekly_profiles(
+        &PgEtfRepository::new(),
+        |symbol| async move { yahoo::etf::visit(&symbol).await },
+        request_interval,
+        || SHUTDOWN_REQUEST.is_requested(),
+    )
+    .await
+}
+
+/// [`execute_weekly_profiles`] 的本體；倉儲、抓取、停頓與「是否要停」由呼叫端注入。
+///
+/// `stop` 回傳 `true` 時停在兩檔之間：已抓的照樣寫入並重建快照，失敗比例只以實際抓過的檔數計算。
+async fn run_weekly_profiles<R, Fetch, FetchFut, Pause, PauseFut, Stop>(
+    repo: &R,
+    mut fetch: Fetch,
+    mut pause: Pause,
+    mut stop: Stop,
+) -> Result<()>
+where
+    R: EtfRepository,
+    Fetch: FnMut(String) -> FetchFut,
+    FetchFut: Future<Output = Result<Option<YahooEtf>>>,
+    Pause: FnMut() -> PauseFut,
+    PauseFut: Future<Output = ()>,
+    Stop: FnMut() -> bool,
+{
     let listed = repo.listed_etfs().await?;
-    let (mut saved, mut not_found, mut failed) = (0usize, 0usize, 0usize);
+    let (mut saved, mut not_found, mut failed, mut unvisited) = (0usize, 0usize, 0usize, 0usize);
     let mut batch: Vec<EtfProfileRecord> = Vec::with_capacity(PROFILE_BATCH);
 
     for (index, (symbol, name)) in listed.iter().enumerate() {
-        if index > 0 {
-            request_interval().await;
+        if stop() {
+            unvisited = listed.len() - index;
+            break;
         }
-        match yahoo::etf::visit(symbol).await {
+        if index > 0 {
+            pause().await;
+        }
+        match fetch(symbol.clone()).await {
             Ok(Some(etf)) => {
                 if let Err(why) = repo.replace_portfolio(&etf.portfolio).await {
                     tracing::warn!("ETF 持股寫入失敗: stock_symbol={symbol}, error={why:#}");
@@ -100,17 +132,18 @@ pub async fn execute_weekly_profiles() -> Result<()> {
             }
         }
         if batch.len() >= PROFILE_BATCH {
-            saved += save_batch(&repo, &mut batch).await?;
+            saved += save_batch(repo, &mut batch).await?;
         }
     }
-    saved += save_batch(&repo, &mut batch).await?;
+    saved += save_batch(repo, &mut batch).await?;
     let rows = repo.refresh_snapshot().await?;
     tracing::info!(
-        "ETF 基本資料更新: etfs={}, saved={saved}, not_found={not_found}, failed={failed}, snapshot_rows={rows}",
+        "ETF 基本資料更新: etfs={}, saved={saved}, not_found={not_found}, failed={failed}, unvisited={unvisited}, snapshot_rows={rows}",
         listed.len()
     );
-    if too_many_failures(failed, listed.len()) {
-        bail!("Yahoo ETF 頁抓取失敗 {failed}／{} 檔", listed.len());
+    let visited = listed.len() - unvisited;
+    if too_many_failures(failed, visited) {
+        bail!("Yahoo ETF 頁抓取失敗 {failed}／{visited} 檔");
     }
     Ok(())
 }
@@ -129,7 +162,7 @@ pub async fn refresh_snapshot() -> Result<()> {
     Ok(())
 }
 
-async fn save_batch(repo: &PgEtfRepository, batch: &mut Vec<EtfProfileRecord>) -> Result<usize> {
+async fn save_batch(repo: &impl EtfRepository, batch: &mut Vec<EtfProfileRecord>) -> Result<usize> {
     if batch.is_empty() {
         return Ok(0);
     }
@@ -222,6 +255,108 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(classified(active, "主動統一台股增長").strategy, "active");
+    }
+
+    fn yahoo_etf(symbol: &str) -> YahooEtf {
+        YahooEtf {
+            profile: EtfProfileRecord {
+                stock_symbol: symbol.to_string(),
+                source: "yahoo".to_string(),
+                ..Default::default()
+            },
+            portfolio: crate::domain::etf::EtfPortfolio {
+                stock_symbol: symbol.to_string(),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn weekly_profiles_save_found_etfs_and_rebuild_snapshot() {
+        use crate::domain::etf::test_double::RecordingEtfRepository;
+
+        let repo = RecordingEtfRepository::with_listed(&["0050", "0056", "00679B", "9999"]);
+        let mut pauses = 0;
+        run_weekly_profiles(
+            &repo,
+            |symbol| {
+                let result = match symbol.as_str() {
+                    "9999" => Ok(None),
+                    "00679B" => Err(anyhow::anyhow!("逾時")),
+                    _ => Ok(Some(yahoo_etf(&symbol))),
+                };
+                async move { result }
+            },
+            || {
+                pauses += 1;
+                async {}
+            },
+            || false,
+        )
+        .await
+        .expect("四檔失敗一檔不算整體失敗");
+        assert_eq!(pauses, 3);
+        assert_eq!(repo.portfolios(), vec!["0050", "0056"]);
+        assert_eq!(repo.profile_batches(), vec![vec!["0050", "0056"]]);
+        assert_eq!(repo.snapshots(), 1);
+    }
+
+    #[tokio::test]
+    async fn weekly_profiles_write_in_batches() {
+        use crate::domain::etf::test_double::RecordingEtfRepository;
+
+        let symbols: Vec<String> = (0..=PROFILE_BATCH).map(|i| format!("{:05}", i)).collect();
+        let listed: Vec<&str> = symbols.iter().map(String::as_str).collect();
+        let repo = RecordingEtfRepository::with_listed(&listed);
+        run_weekly_profiles(
+            &repo,
+            |symbol| async move { Ok(Some(yahoo_etf(&symbol))) },
+            || async {},
+            || false,
+        )
+        .await
+        .expect("全部成功");
+        let sizes: Vec<usize> = repo.profile_batches().iter().map(Vec::len).collect();
+        assert_eq!(sizes, vec![PROFILE_BATCH, 1], "滿一批先寫，剩下的最後寫");
+    }
+
+    #[tokio::test]
+    async fn weekly_profiles_stop_between_etfs_and_keep_fetched() {
+        use crate::domain::etf::test_double::RecordingEtfRepository;
+
+        let repo = RecordingEtfRepository::with_listed(&["0050", "0056", "00679B"]);
+        let mut checks = 0;
+        run_weekly_profiles(
+            &repo,
+            |symbol| async move { Ok(Some(yahoo_etf(&symbol))) },
+            || async {},
+            || {
+                checks += 1;
+                checks > 1
+            },
+        )
+        .await
+        .expect("提早停止不算失敗");
+        assert_eq!(repo.profile_batches(), vec![vec!["0050"]], "已抓的照樣寫入");
+        assert_eq!(repo.snapshots(), 1);
+    }
+
+    #[tokio::test]
+    async fn weekly_profiles_alert_when_most_fetches_fail() {
+        use crate::domain::etf::test_double::RecordingEtfRepository;
+
+        let repo = RecordingEtfRepository::with_listed(&["0050", "0056"]);
+        let result = run_weekly_profiles(
+            &repo,
+            |_| async { Err(anyhow::anyhow!("封鎖")) },
+            || async {},
+            || false,
+        )
+        .await;
+        let err = result.expect_err("超過一半失敗要告警");
+        assert!(err.to_string().contains("2／2"), "{err}");
+        assert!(repo.profile_batches().is_empty());
+        assert_eq!(repo.snapshots(), 1, "失敗也照樣重建快照");
     }
 
     #[test]
