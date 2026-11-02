@@ -2,7 +2,7 @@
 //! 除權息日、每股股利、預估入帳與近 5 年填息，以及這幾天發放到帳的持股股利。
 //!
 //! 除權息每檔一行的文字與 08:00 持股除權息預告共用 [`super::super::upcoming_dividend`]；入帳取
-//! [`PortfolioRepository::fetch_payout_allocations`](crate::domain::portfolio::repository::PortfolioRepository::fetch_payout_allocations)（已領明細，沒有時以目前持股推算），與
+//! [`PortfolioRepository::fetch_payout_allocations`]（已領明細，沒有時以目前持股推算），與
 //! `/portfolio/upcoming-payouts` 相同。兩段各自沒有資料就不列。
 
 use std::collections::BTreeMap;
