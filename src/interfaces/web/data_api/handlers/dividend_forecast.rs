@@ -4,6 +4,8 @@
 //! 現金股利列，報價取 `last_daily_quotes`。預估規則在
 //! [`crate::domain::portfolio::dividend_forecast`]。
 
+use std::collections::HashMap;
+
 use axum::{
     Json,
     extract::Query,
@@ -13,11 +15,14 @@ use axum::{
 use chrono::{Datelike, Local, NaiveDate};
 use rust_decimal::Decimal;
 
+use super::dividend_fill::summary_dto;
+use super::market_dividend_fill::bucket_dto;
 use super::{database_error, error_response};
+use crate::app::calculation::dividend_fill_hints::FillHints;
 use crate::domain::portfolio::dividend_forecast::{self, DividendEvent, Holding};
 use crate::infra::database;
 use crate::interfaces::web::data_api::dto::{
-    DividendForecastParams, DividendForecastResponse, ErrorBody,
+    DividendForecastItem, DividendForecastParams, DividendForecastResponse, ErrorBody,
 };
 
 /// 目前持股（依代號合併）與最新收盤價；`$1 = 0` 時為全部會員。
@@ -105,7 +110,33 @@ pub(crate) async fn dividend_forecast(Query(params): Query<DividendForecastParam
         Err(error) => return database_error(error),
     };
 
-    Json(build_response(member_id, holdings, events, today, months)).into_response()
+    let closing_prices: HashMap<String, Decimal> = holdings
+        .iter()
+        .filter_map(|row| Some((row.stock_symbol.clone(), row.closing_price?)))
+        .collect();
+    let mut response = build_response(member_id, holdings, events, today, months);
+    let hints = FillHints::load(&symbols, today).await;
+    attach_fill_hints(&mut response.items, &hints, &closing_prices);
+    Json(response).into_response()
+}
+
+/// 每筆預估附該股近 5 年填息；沒有自身紀錄時以每股現金股利 ÷ 最新收盤附同殖利率組基準。
+fn attach_fill_hints(
+    items: &mut [DividendForecastItem],
+    hints: &FillHints,
+    closing_prices: &HashMap<String, Decimal>,
+) {
+    for item in items {
+        if let Some(history) = hints.history(&item.stock_symbol) {
+            item.fill_history = Some(summary_dto(history));
+            continue;
+        }
+        let cash = Decimal::try_from(item.cash_per_share).unwrap_or_default();
+        item.fill_peer = closing_prices
+            .get(&item.stock_symbol)
+            .and_then(|price| hints.peer(cash, *price))
+            .map(bucket_dto);
+    }
 }
 
 /// 由查詢結果組出回應。
@@ -172,5 +203,59 @@ mod tests {
         assert_eq!(response.items[0].pay_date, "2027-01-07");
         assert_eq!(response.forward_yield_percent, Some(0.7));
         assert_eq!(response.months.len(), 7);
+    }
+
+    /// 有自身紀錄附 fill_history；沒有時以每股現金股利 ÷ 最新收盤附同組基準；沒有收盤價時兩者皆空。
+    #[test]
+    fn attach_fill_hints_prefers_own_history() {
+        use crate::domain::dividend::fill::FillSummary;
+        use crate::domain::dividend::fill_stats::{FillSample, YieldBucket, bucket_stats};
+
+        let item = |symbol: &str, cash: f64| DividendForecastItem {
+            stock_symbol: symbol.to_owned(),
+            name: symbol.to_owned(),
+            shares: 1_000,
+            ex_date: "2026-12-11".to_owned(),
+            pay_date: "2027-01-08".to_owned(),
+            cash_per_share: cash,
+            amount: cash * 1_000.0,
+            basis: "announced".to_owned(),
+            fill_history: None,
+            fill_peer: None,
+        };
+        let mut items = vec![item("2330", 5.0), item("1101", 1.0), item("9999", 1.0)];
+        let hints = FillHints::for_test(
+            HashMap::from([(
+                "2330".to_owned(),
+                FillSummary {
+                    events: 4,
+                    filled: 4,
+                    average_trading_days: Some(2.5),
+                    median_trading_days: Some(2.0),
+                },
+            )]),
+            bucket_stats(&[FillSample {
+                bucket: YieldBucket::From3To5,
+                trading_days_to_fill: Some(13),
+                trading_days_observed: 120,
+            }]),
+        );
+        let prices = HashMap::from([("1101".to_owned(), dec!(25))]);
+        attach_fill_hints(&mut items, &hints, &prices);
+
+        assert_eq!(items[0].fill_history.as_ref().map(|h| h.filled), Some(4));
+        assert!(items[0].fill_peer.is_none());
+        assert_eq!(
+            items[1]
+                .fill_peer
+                .as_ref()
+                .map(|p| (p.bucket.as_str(), p.median_trading_days_to_fill)),
+            Some(("from_3_to_5", Some(13.0))),
+            "1 ÷ 25 = 4%"
+        );
+        assert!(
+            items[2].fill_history.is_none() && items[2].fill_peer.is_none(),
+            "沒有收盤價"
+        );
     }
 }
