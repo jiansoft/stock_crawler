@@ -59,26 +59,31 @@ const NEW_HOLDING_MARK: &str = "🆕 ";
 impl EventDispatcher {
     /// 處理 `MonthlyRevenueUpdated` 事件：推播全部持股的月營收。
     pub(super) async fn handle_monthly_revenue_updated(date: i64) -> Result<()> {
-        let repo = PgFinancialRepository::new();
-        let alerts = repo.fetch_holding_revenue_alerts(date).await?;
+        let alerts = PgFinancialRepository::new()
+            .fetch_holding_revenue_alerts(date)
+            .await?;
+        Self::notify_revenue(date, &alerts).await;
+        Ok(())
+    }
 
+    /// 月營收通知的本體：有尚未通知過的持股才送出，回傳是否有送出。
+    async fn notify_revenue(date: i64, alerts: &[HoldingRevenueAlert]) -> bool {
         if alerts.is_empty() {
             tracing::info!("持股月營收通知：{} 沒有任何持股公布月營收", date);
-            return Ok(());
+            return false;
         }
 
         let sent = Self::send_if_new_holdings(
             &format!("holding_review:revenue:{date}"),
             REVENUE_NOTIFIED_TTL_SECONDS,
             alerts.iter().map(|alert| alert.stock_symbol.as_str()),
-            |new_symbols| Self::build_revenue_message(date, &alerts, new_symbols),
+            |new_symbols| Self::build_revenue_message(date, alerts, new_symbols),
         )
         .await;
         if !sent {
             tracing::info!("持股月營收通知：{} 沒有新公布的持股，略過重複通知", date);
         }
-
-        Ok(())
+        sent
     }
 
     /// 處理 `QuarterlyFinancialsUpdated` 事件：推播持股的最新一季財報。
@@ -86,19 +91,25 @@ impl EventDispatcher {
         year: i32,
         quarter: &str,
     ) -> Result<()> {
-        let repo = PgFinancialRepository::new();
-        let alerts = repo.fetch_holding_financial_alerts(year, quarter).await?;
+        let alerts = PgFinancialRepository::new()
+            .fetch_holding_financial_alerts(year, quarter)
+            .await?;
+        Self::notify_financials(year, quarter, &alerts).await;
+        Ok(())
+    }
 
+    /// 季報通知的本體：有尚未通知過的持股才送出，回傳是否有送出。
+    async fn notify_financials(year: i32, quarter: &str, alerts: &[HoldingFinancialAlert]) -> bool {
         if alerts.is_empty() {
             tracing::info!("持股財報通知：{} {} 沒有持股的財報", year, quarter);
-            return Ok(());
+            return false;
         }
 
         let sent = Self::send_if_new_holdings(
             &format!("holding_review:financial:{year}{quarter}"),
             FINANCIAL_NOTIFIED_TTL_SECONDS,
             alerts.iter().map(|alert| alert.stock_symbol.as_str()),
-            |new_symbols| Self::build_financial_message(year, quarter, &alerts, new_symbols),
+            |new_symbols| Self::build_financial_message(year, quarter, alerts, new_symbols),
         )
         .await;
         if !sent {
@@ -108,8 +119,7 @@ impl EventDispatcher {
                 quarter
             );
         }
-
-        Ok(())
+        sent
     }
 
     /// 處理 `ForeignHoldingsUpdated` 事件：持股中近 20 日外資持股比率變化達門檻者彙總推播。
@@ -117,13 +127,22 @@ impl EventDispatcher {
     /// 每檔、每個方向各用一個會過期的 Redis 鍵去重（20 天），而不是像月營收那樣共用一個集合：
     /// 共用集合每次寫入都會延長 TTL，已通知過的股票就永遠不會再被提醒。
     pub(super) async fn handle_foreign_holdings_updated(date: NaiveDate) -> Result<()> {
-        let repo = PgForeignHoldingRepository::new();
-        let alerts = repo.fetch_holding_alerts().await?;
+        let alerts = PgForeignHoldingRepository::new()
+            .fetch_holding_alerts()
+            .await?;
+        Self::notify_foreign_holdings(date, &alerts).await;
+        Ok(())
+    }
 
+    /// 外資持股通知的本體：挑出達門檻且去重期間內沒通知過的持股送出一則，回傳這次通知的檔數。
+    async fn notify_foreign_holdings(
+        date: NaiveDate,
+        alerts: &[HoldingForeignHoldingAlert],
+    ) -> usize {
         let mut increases = Vec::new();
         let mut decreases = Vec::new();
         let mut keys = Vec::new();
-        for alert in &alerts {
+        for alert in alerts {
             let Some(direction) =
                 alert.significant_direction(SIGNIFICANT_CHANGE_20D_PERCENTAGE_POINTS)
             else {
@@ -142,7 +161,7 @@ impl EventDispatcher {
 
         if keys.is_empty() {
             tracing::info!("持股外資持股通知：{} 沒有新達門檻的持股", date);
-            return Ok(());
+            return 0;
         }
 
         alert::send_message(&Self::build_foreign_holding_message(
@@ -150,6 +169,7 @@ impl EventDispatcher {
         ))
         .await;
 
+        let notified = keys.len();
         for key in keys {
             if let Err(why) = CLIENT
                 .set(&key, date.to_string(), FOREIGN_HOLDING_NOTIFIED_TTL_SECONDS)
@@ -158,8 +178,7 @@ impl EventDispatcher {
                 tracing::warn!("寫入外資持股通知紀錄 {} 失敗，可能重複通知: {:?}", key, why);
             }
         }
-
-        Ok(())
+        notified
     }
 
     /// 外資持股通知的 Redis 去重鍵。
