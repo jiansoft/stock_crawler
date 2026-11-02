@@ -16,6 +16,7 @@ mod dividend_forecast;
 mod etf;
 mod etf_tracking;
 mod upcoming_dividends;
+mod upcoming_payouts;
 pub(super) use etf_tracking::{__path_etf_tracking, EtfTrackingResponse, etf_tracking};
 mod etf_holding_history;
 mod financial_health;
@@ -144,6 +145,7 @@ pub(super) use stock_quotes::{
 pub(super) use technicals::{__path_stock_technicals, stock_technicals};
 pub(super) use timeline::{__path_stock_timeline, stock_timeline};
 pub(super) use upcoming_dividends::{__path_upcoming_dividends, upcoming_dividends};
+pub(super) use upcoming_payouts::{__path_upcoming_payouts, upcoming_payouts};
 pub(super) use valuation_band::{__path_stock_valuation_band, stock_valuation_band};
 
 mod common;

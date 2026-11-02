@@ -309,3 +309,33 @@ fn openapi_upcoming_dividends_schema_pins_field_names() {
     assert!(item["fill_history"].to_string().contains("null"));
     assert!(item["fill_peer"].to_string().contains("null"));
 }
+
+/// 持股近期股利入帳 path 的契約：days 範圍與預設、項目陣列與推算旗標。
+#[test]
+fn openapi_upcoming_payouts_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/portfolio/upcoming-payouts");
+    assert_endpoint_responses(operation, "UpcomingPayoutsResponse", false);
+    let days = query_schema(operation, "days");
+    assert_eq!(days["default"], 30);
+    assert_eq!(days["maximum"], 90);
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["UpcomingPayoutsResponse"]["properties"];
+    assert_eq!(
+        response["items"]["items"]["$ref"],
+        "#/components/schemas/UpcomingPayoutItem"
+    );
+    let item = &schemas["UpcomingPayoutItem"]["properties"];
+    for field in [
+        "payable_date",
+        "quarter",
+        "shares",
+        "cash_amount",
+        "stock_shares",
+        "estimated",
+    ] {
+        assert!(item.get(field).is_some(), "缺 {field}");
+    }
+    assert!(item["ex_date"].to_string().contains("null"));
+}
