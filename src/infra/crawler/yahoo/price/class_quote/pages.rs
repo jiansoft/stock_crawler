@@ -28,7 +28,7 @@ pub(super) struct ClassQuotesPageResult {
 }
 
 /// 分頁迴圈本體：`fetch_page` 抓指定 offset 的單頁、`pause` 是頁與頁之間的停頓，
-/// 測試時換成假資料與不等待。錯誤條件同 [`fetch_category_snapshots`]。
+/// 測試時換成假資料與不等待。錯誤條件同 [`fetch_category_snapshots`](super::fetch_category_snapshots)。
 pub(super) async fn collect_category_pages<F, FF, P, PF>(
     category: &YahooClassCategory,
     fetch_page: F,
