@@ -2,8 +2,9 @@ use anyhow::{Result, anyhow};
 use rand::RngExt;
 
 use crate::{
-    app::backfill::acl::YahooDividendAclMapper, domain::dividend::repository::DividendRepository,
-    infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
+    app::backfill::acl::YahooDividendAclMapper, core::shutdown::SHUTDOWN_REQUEST,
+    domain::dividend::repository::DividendRepository, infra::crawler::yahoo,
+    infra::database::repository::dividend::PgDividendRepository,
 };
 
 use super::yahoo_fetch;
@@ -24,6 +25,11 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
 
     // 依序遍歷每一檔需要回補的股利資料
     for dividend in dividends {
+        if SHUTDOWN_REQUEST.is_requested() {
+            // 停在兩檔之間；沒處理的沒有寫旗標，下一輪會再排到。
+            tracing::info!("收到關機請求，除息日與發放日採集提早結束");
+            break;
+        }
         let stock_symbol = &dividend.security_code;
         // 建立 Yahoo 股利回補用的 Redis 快取 key。
         // 與 missing_or_multiple.rs 的快取 key 格式保持一致，共享 3 天的快取防護，避免短時間內重複對同一檔股票重複爬取

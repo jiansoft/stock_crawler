@@ -53,6 +53,7 @@ use anyhow::{Context, Result, bail};
 use rand::RngExt;
 
 use crate::{
+    core::shutdown::SHUTDOWN_REQUEST,
     domain::{
         financial::repository::FinancialReportRepository,
         registry::{entity::Stock, repository::StockRepository},
@@ -116,6 +117,8 @@ pub struct RunSummary {
     pub failed: usize,
     /// 三張表合計寫入列數。
     pub rows: usize,
+    /// 收到關機請求而提早結束時為 `true`。
+    pub interrupted: bool,
 }
 
 impl RunSummary {
@@ -133,7 +136,7 @@ pub async fn execute() -> Result<()> {
     let summary = run(MAX_STOCKS_PER_RUN).await?;
 
     tracing::info!(
-        "Yahoo 財報採集結束: candidates={}, skipped={}, prioritized={}, succeeded={}, fallback={}, not_found={}, failed={}, rows={}",
+        "Yahoo 財報採集結束: candidates={}, skipped={}, prioritized={}, succeeded={}, fallback={}, not_found={}, failed={}, rows={}, interrupted={}",
         summary.candidates,
         summary.skipped,
         summary.prioritized,
@@ -141,7 +144,8 @@ pub async fn execute() -> Result<()> {
         summary.fallback,
         summary.not_found,
         summary.failed,
-        summary.rows
+        summary.rows,
+        summary.interrupted
     );
 
     if summary.failed > 0 && summary.succeeded == 0 && summary.fallback == 0 {
@@ -178,6 +182,7 @@ async fn run(max_stocks: usize) -> Result<RunSummary> {
         fetch_reports,
         fetch_biggo_reports,
         stock_interval,
+        || SHUTDOWN_REQUEST.is_requested(),
     )
     .await
 }
