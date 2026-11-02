@@ -2,6 +2,10 @@ use chrono::TimeDelta;
 
 use crate::core::logging;
 
+use std::path::PathBuf;
+
+use super::settings::{DEFAULT_MAX_SIZE, MAX_CONFIGURABLE_AGE_DAYS, MAX_CONFIGURABLE_SIZE};
+
 use super::*;
 
 /// 驗證基本寫檔流程。
@@ -307,4 +311,32 @@ fn test_restart_appends_to_active_file() {
 
     drop(second);
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// 舊檔清理：超過保留天數的檔案被刪除；已在清理中時直接返回；目錄不存在時只記錄錯誤。
+#[test]
+fn cleanup_old_files_removes_expired_files() {
+    let dir = temp_log_dir("cleanup");
+    let pattern = dir.join("%Y-%m-%d-app.log").to_string_lossy().to_string();
+    let mut r = Rotate::with_options(pattern, 1024 * 1024, 7);
+    let now = Local::now();
+    r.write_msg(now, b"active line\r\n").unwrap();
+    fs::write(dir.join("2026-01-01-app.log"), b"old").unwrap();
+
+    // 已在清理中：直接返回，不刪任何檔。
+    r.on_rotate.store(true, Ordering::Relaxed);
+    r.cleanup_old_files(now + TimeDelta::days(30));
+    assert_eq!(file_names(&dir).len(), 2);
+    r.on_rotate.store(false, Ordering::Relaxed);
+
+    // 以 30 天後為「現在」：保留 7 天，目錄內檔案都已過期而被刪除，清理旗標復原。
+    r.cleanup_old_files(now + TimeDelta::days(30));
+    assert!(file_names(&dir).is_empty(), "{:?}", file_names(&dir));
+    assert!(!r.on_rotate.load(Ordering::Relaxed));
+
+    // 目錄已不存在：列檔失敗只記錄，不 panic。
+    r.flush_current();
+    let _ = fs::remove_dir_all(&dir);
+    r.cleanup_old_files(now);
+    assert!(Rotate::files_in_directory(dir.join("x.log")).is_err());
 }

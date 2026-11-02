@@ -1,69 +1,23 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, BufWriter, Write},
-    path::{Path, PathBuf},
+    io::{BufWriter, Write},
+    path::Path,
     sync::{
         Arc, RwLock,
-        atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
-    time::UNIX_EPOCH,
 };
 
 use anyhow::Result;
 use chrono::{DateTime, Local, TimeDelta};
-use rayon::prelude::*;
 
 use crate::core::logging;
 
-/// 預設單檔最大大小：10 MB
-const DEFAULT_MAX_SIZE: u64 = 10 * 1024 * 1024;
-/// 預設保留天數：7 天
-const DEFAULT_MAX_AGE_DAYS: i64 = 7;
-/// 同一秒內輪轉檔名的最大序號，避免極端情況下無限探測檔名。
-const MAX_FILENAME_SEQ: u32 = 1_000;
-/// 單檔大小可設定範圍（bytes）：1 MB ～ 1 GB。
-const MIN_CONFIGURABLE_SIZE: u64 = 1024 * 1024;
-const MAX_CONFIGURABLE_SIZE: u64 = 1024 * 1024 * 1024;
-/// 保留天數可設定範圍：1 ～ 365 天。
-const MIN_CONFIGURABLE_AGE_DAYS: i64 = 1;
-const MAX_CONFIGURABLE_AGE_DAYS: i64 = 365;
+mod cleanup;
+mod settings;
 
-/// 全域單檔大小上限（bytes），供未指定固定值的 [`Rotate`] 共用。
-static GLOBAL_MAX_SIZE: AtomicU64 = AtomicU64::new(DEFAULT_MAX_SIZE);
-/// 全域日誌保留天數，供未指定固定值的 [`Rotate`] 共用。
-static GLOBAL_MAX_AGE_DAYS: AtomicI64 = AtomicI64::new(DEFAULT_MAX_AGE_DAYS);
-
-/// 套用外部設定（`app.json` 的 `logging.file` 或 `.env`）到輪轉參數。
-///
-/// 由 `main` 在設定載入後呼叫。logger 的背景 worker 在此之前就已建立
-/// `Rotate`，因此參數以全域 atomic 保存並在每次判斷時讀取，讓設定即時生效，
-/// 而不需重建 writer（也避免 logger 初始化時反向依賴 `SETTINGS` 造成死鎖）。
-///
-/// 兩個參數為 `0` 時代表未設定，維持既有值；非 0 值會收斂到安全範圍內
-/// （大小 1 MB～1 GB、天數 1～365）。
-pub fn configure(max_size_mb: u64, max_age_days: i64) {
-    if max_size_mb > 0 {
-        let bytes = max_size_mb
-            .saturating_mul(1024 * 1024)
-            .clamp(MIN_CONFIGURABLE_SIZE, MAX_CONFIGURABLE_SIZE);
-        GLOBAL_MAX_SIZE.store(bytes, Ordering::Relaxed);
-    }
-
-    if max_age_days > 0 {
-        GLOBAL_MAX_AGE_DAYS.store(
-            max_age_days.clamp(MIN_CONFIGURABLE_AGE_DAYS, MAX_CONFIGURABLE_AGE_DAYS),
-            Ordering::Relaxed,
-        );
-    }
-}
-
-/// 取得目前生效的單檔大小上限（bytes）與保留天數，供啟動時記錄與診斷。
-pub fn effective_settings() -> (u64, i64) {
-    (
-        GLOBAL_MAX_SIZE.load(Ordering::Relaxed),
-        GLOBAL_MAX_AGE_DAYS.load(Ordering::Relaxed),
-    )
-}
+use settings::{DEFAULT_MAX_AGE_DAYS, GLOBAL_MAX_AGE_DAYS, GLOBAL_MAX_SIZE, MAX_FILENAME_SEQ};
+pub use settings::{configure, effective_settings};
 
 /// 依日期與大小自動輪轉的檔案 writer。
 ///
@@ -333,78 +287,6 @@ impl Rotate {
     fn close_current(&mut self) {
         self.flush_current();
         self.out_fh = None;
-    }
-
-    /// 清理舊檔案（超過 max_age 的檔案）
-    fn cleanup_old_files(&self, now: DateTime<Local>) {
-        if self.on_rotate.swap(true, Ordering::Relaxed) {
-            return;
-        }
-
-        match Self::files_in_directory(&self.cur_fn) {
-            Ok(files) => {
-                let cut_off = (now - self.max_age()).timestamp() as u64;
-                let to_unlink: Vec<PathBuf> = files
-                    .into_iter()
-                    .filter_map(|file| {
-                        fs::metadata(&file)
-                            .and_then(|metadata| metadata.modified())
-                            .map(|system_time| system_time.duration_since(UNIX_EPOCH))
-                            .ok()
-                            .filter(|file_duration| match file_duration {
-                                Ok(duration) => duration.as_secs() <= cut_off,
-                                Err(_) => false,
-                            })
-                            .map(|_| file)
-                    })
-                    .collect();
-
-                if !to_unlink.is_empty() {
-                    to_unlink
-                        .par_iter()
-                        .with_min_len(num_cpus::get())
-                        .for_each(|unlink| match fs::remove_file(unlink) {
-                            Err(why) => {
-                                logging::error_console(format!(
-                                    "couldn't remove the file({}). because {:?}",
-                                    unlink.display(),
-                                    why
-                                ));
-                            }
-                            Ok(_) => {
-                                logging::info_file_async(format!(
-                                    "the file has been deleted:{}",
-                                    unlink.display()
-                                ));
-                            }
-                        });
-                }
-            }
-            Err(why) => {
-                logging::error_console(format!(
-                    "Failed to list_files_in_directory because {:?}",
-                    why
-                ));
-            }
-        }
-
-        self.on_rotate.store(false, Ordering::Relaxed);
-    }
-
-    /// 列出指定檔案所在目錄的所有檔案。
-    fn files_in_directory<P: AsRef<Path>>(file_path: P) -> Result<Vec<PathBuf>, io::Error> {
-        let path = file_path.as_ref();
-        let parent_dir = path
-            .parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Parent directory not found"))?;
-
-        let mut files = Vec::new();
-        for entry in fs::read_dir(parent_dir)? {
-            let entry = entry?;
-            files.push(entry.path());
-        }
-
-        Ok(files)
     }
 }
 
