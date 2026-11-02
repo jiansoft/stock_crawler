@@ -2,8 +2,9 @@ use anyhow::{Result, anyhow};
 use rand::RngExt;
 
 use crate::{
-    app::backfill::acl::YahooDividendAclMapper, domain::dividend::repository::DividendRepository,
-    infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
+    app::backfill::acl::YahooDividendAclMapper, core::shutdown::SHUTDOWN_REQUEST,
+    domain::dividend::repository::DividendRepository, infra::crawler::yahoo,
+    infra::database::repository::dividend::PgDividendRepository,
 };
 
 use super::yahoo_fetch;
@@ -14,6 +15,12 @@ use super::yahoo_fetch;
 /// 並透過 Yahoo 財經進行回補。為了避免對 Yahoo 造成負擔而被阻擋，
 /// 引入了 Redis 快取（3天效期）與每檔股票 1 秒的延遲節流。
 pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()> {
+    backfill_until(year, || SHUTDOWN_REQUEST.is_requested()).await
+}
+
+/// [`backfill_unannounced_dividend_dates`] 的本體；`stop` 回傳 `true` 時停在兩檔之間，
+/// 沒處理的沒有寫旗標，下一輪會再排到。
+async fn backfill_until(year: i32, stop: impl Fn() -> bool) -> Result<()> {
     let dividend_repo = PgDividendRepository::new();
     // 從資料庫中取得指定年度內，除息日或發放日尚未公佈的股利資料列表
     let dividends = dividend_repo
@@ -24,6 +31,10 @@ pub(super) async fn backfill_unannounced_dividend_dates(year: i32) -> Result<()>
 
     // 依序遍歷每一檔需要回補的股利資料
     for dividend in dividends {
+        if stop() {
+            tracing::info!("收到關機請求，除息日與發放日採集提早結束");
+            break;
+        }
         let stock_symbol = &dividend.security_code;
         // 建立 Yahoo 股利回補用的 Redis 快取 key。
         // 與 missing_or_multiple.rs 的快取 key 格式保持一致，共享 3 天的快取防護，避免短時間內重複對同一檔股票重複爬取
@@ -266,5 +277,43 @@ mod tests {
         dotenvy::dotenv().ok();
         SHARE.load().await;
         let _ = backfill_unannounced_dividend_dates(2025).await;
+    }
+
+    /// 有待補日期的股利時，收到關機請求就在第一檔之前停下，不查 Yahoo、不寫旗標。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn backfill_until_stops_before_the_first_stock() {
+        dotenvy::dotenv().ok();
+        let pool = crate::infra::database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 backfill_until_stops_before_the_first_stock：無資料庫連接");
+            return;
+        }
+        let symbol = "79979UD";
+        let cleanup = || async {
+            let _ = sqlx::query("DELETE FROM dividend WHERE security_code = $1")
+                .bind(symbol)
+                .execute(pool)
+                .await;
+        };
+        cleanup().await;
+        sqlx::query(r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2) VALUES ($1, 2099, 2098, '', 1, 0, 1, '-', '-', '-', '-')"#)
+            .bind(symbol)
+            .execute(pool)
+            .await
+            .expect("種入待補日期的股利");
+
+        let result = backfill_until(2099, || true).await;
+        let flag = crate::infra::nosql::redis::CLIENT
+            .get_bool(&format!("yahoo:dividend:{symbol}"))
+            .await
+            .unwrap_or(false);
+        cleanup().await;
+
+        result.expect("提早結束不是錯誤");
+        assert!(!flag, "停下時不寫旗標");
     }
 }

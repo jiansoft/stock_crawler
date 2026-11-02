@@ -66,8 +66,10 @@ pub(super) fn prioritize(candidates: Vec<String>, lagging: &[String]) -> (Vec<St
 ///
 /// 前 `priority` 檔是優先股票：只看 [`PRIORITY_TTL_SECONDS`] 的優先旗標、不看每週旗標，
 /// 嘗試時兩個旗標都寫。Yahoo 失敗（404 除外）時改從 BigGo 採集。`yahoo`、`biggo` 是
-/// 單檔報表的抓取函式，`pause` 是股票之間的間隔；測試時換成假資料與不等待。
-pub(super) async fn run_candidates<'a, Y, YF, B, BF, P, PF>(
+/// 單檔報表的抓取函式，`pause` 是股票之間的間隔，`stop` 回傳 `true`（收到關機請求）時停在
+/// 兩檔之間；測試時換成假資料與不等待。
+#[allow(clippy::too_many_arguments)] // 三個抓取／等待函式加關機判斷都要能在測試替換。
+pub(super) async fn run_candidates<'a, Y, YF, B, BF, P, PF, S>(
     candidates: &'a [String],
     priority: usize,
     max_stocks: usize,
@@ -75,6 +77,7 @@ pub(super) async fn run_candidates<'a, Y, YF, B, BF, P, PF>(
     yahoo: Y,
     biggo: B,
     pause: P,
+    stop: S,
 ) -> Result<RunSummary>
 where
     Y: Fn(&'a str) -> YF,
@@ -83,6 +86,7 @@ where
     BF: Future<Output = Result<StockReports>>,
     P: Fn() -> PF,
     PF: Future<Output = ()>,
+    S: Fn() -> bool,
 {
     let mut summary = RunSummary {
         candidates: candidates.len(),
@@ -91,6 +95,10 @@ where
 
     for (index, stock_symbol) in candidates.iter().enumerate() {
         if summary.attempted() >= max_stocks {
+            break;
+        }
+        if stop() {
+            summary.interrupted = true;
             break;
         }
 

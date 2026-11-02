@@ -9,9 +9,10 @@ use rand::RngExt;
 
 use self::plan::plan_stock_dividends;
 use crate::{
-    app::calculation::dividend_record, core::util::map::Keyable,
+    app::calculation::dividend_record, core::shutdown::SHUTDOWN_REQUEST, core::util::map::Keyable,
     domain::dividend::entity::Dividend, domain::dividend::repository::DividendRepository,
     infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
+    infra::nosql::redis::CLIENT,
 };
 use anyhow::{Context, Result};
 
@@ -32,29 +33,35 @@ const MAX_FETCHES_PER_RUN: usize = 900;
 /// 單輪股利補抓的查詢額度與統計。
 ///
 /// 已有跳過旗標的股票不經過這裡；需要查詢的股票逐一呼叫 [`Self::try_fetch`]，
-/// 超過 [`MAX_FETCHES_PER_RUN`] 的記為延後。
+/// 超過額度（正式為 [`MAX_FETCHES_PER_RUN`]）的記為延後。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RefreshRun {
     /// 本輪候選股票數。
     candidates: usize,
+    /// 本輪最多實際查詢的股票數。
+    limit: usize,
     /// 實際查詢 Yahoo 的股票數。
     fetched: usize,
     /// 額度用完而延到下一輪的股票數。
     deferred: usize,
+    /// 收到關機請求時還沒輪到的股票數。
+    unvisited: usize,
 }
 
 impl RefreshRun {
-    fn new(candidates: usize) -> Self {
+    fn new(candidates: usize, limit: usize) -> Self {
         Self {
             candidates,
+            limit,
             fetched: 0,
             deferred: 0,
+            unvisited: 0,
         }
     }
 
     /// 占用一次查詢額度；額度已用完時記為延後並回傳 `false`。
     fn try_fetch(&mut self) -> bool {
-        if self.fetched >= MAX_FETCHES_PER_RUN {
+        if self.fetched >= self.limit {
             self.deferred += 1;
             return false;
         }
@@ -64,7 +71,7 @@ impl RefreshRun {
 
     /// 因跳過旗標未到期而略過的股票數。
     fn skipped(&self) -> usize {
-        self.candidates - self.fetched - self.deferred
+        self.candidates - self.fetched - self.deferred - self.unvisited
     }
 }
 
@@ -72,11 +79,12 @@ impl std::fmt::Display for RefreshRun {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "candidates={} fetched={} skipped={} deferred={}",
+            "candidates={} fetched={} skipped={} deferred={} unvisited={}",
             self.candidates,
             self.fetched,
             self.skipped(),
-            self.deferred
+            self.deferred,
+            self.unvisited
         )
     }
 }
@@ -92,8 +100,14 @@ impl std::fmt::Display for RefreshRun {
 /// 股利所屬年度，並依快取排除已存在的季配/半年配紀錄，再將缺少的資料 upsert 回資料庫。
 ///
 /// Redis 會以股票代碼建立 2～4 天的隨機跳過旗標，避免排程短時間內重複打 Yahoo，
-/// 每輪最多查 [`MAX_FETCHES_PER_RUN`] 檔。單檔股票失敗時只寫 log，不中斷整批採集。
+/// 每輪最多查 [`MAX_FETCHES_PER_RUN`] 檔。單檔股票失敗時只寫 log，不中斷整批採集；
+/// 收到關機請求時停在兩檔之間（見 [`refresh_stocks`]）。
 pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<()> {
+    refresh_year(year, || SHUTDOWN_REQUEST.is_requested()).await
+}
+
+/// [`backfill_missing_or_multiple_dividends`] 的本體；`stop` 回傳 `true` 時停在兩檔之間。
+async fn refresh_year(year: i32, stop: impl Fn() -> bool) -> Result<()> {
     let dividend_repo = PgDividendRepository::new();
     // 年配公司也可能新增半年配，不能用已有年度資料排除；重抓頻率交給 2～4 天的跳過旗標。
     let mut stock_symbols: HashSet<String> = dividend_repo
@@ -115,20 +129,67 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
     }
 
     tracing::info!("本次殖利率的採集需收集 {} 家", stock_symbols.len());
-    let mut run = RefreshRun::new(stock_symbols.len());
-    for stock_symbol in stock_symbols {
+    let stock_symbols: Vec<String> = stock_symbols.into_iter().collect();
+    let cache = &multiple_dividend_cache;
+    let run = refresh_stocks(
+        &stock_symbols,
+        MAX_FETCHES_PER_RUN,
+        |symbol| backfill_recent_dividends_for_stock(year, symbol, cache),
+        || tokio::time::sleep(request_jitter()),
+        stop,
+    )
+    .await
+    .with_context(|| format!("dividend refresh failed: year={year}"))?;
+
+    let outcome = if run.unvisited > 0 {
+        "因關機請求提早結束"
+    } else {
+        "完成"
+    };
+    tracing::info!("殖利率採集{outcome} {run}");
+    Ok(())
+}
+
+/// 兩檔之間隨機等 1.5 到 3.0 秒（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率。
+fn request_jitter() -> Duration {
+    Duration::from_millis(rand::rng().random_range(1500..=3000))
+}
+
+/// 逐檔補抓股利：跳過旗標內的略過、超過 `limit` 的延後，`stop` 回傳 `true` 時停在兩檔之間。
+///
+/// 嘗試前先寫跳過旗標，即使這檔失敗，下一輪也不會立刻重打同一來源；延後與還沒輪到的不寫旗標，
+/// 下一輪會再排到。`backfill` 是單檔補抓、`pause` 是兩檔之間的間隔；測試時換成假資料與不等待。
+///
+/// # Errors
+///
+/// Redis 讀寫旗標失敗時回傳錯誤；單檔補抓失敗只寫 log。
+async fn refresh_stocks<'a, F, FF, P, PF, S>(
+    stock_symbols: &'a [String],
+    limit: usize,
+    backfill: F,
+    pause: P,
+    stop: S,
+) -> Result<RefreshRun>
+where
+    F: Fn(&'a str) -> FF,
+    FF: Future<Output = Result<()>>,
+    P: Fn() -> PF,
+    PF: Future<Output = ()>,
+    S: Fn() -> bool,
+{
+    let mut run = RefreshRun::new(stock_symbols.len(), limit);
+    for (index, stock_symbol) in stock_symbols.iter().enumerate() {
+        if stop() {
+            run.unvisited = stock_symbols.len() - index;
+            break;
+        }
+
         // Yahoo 股利回補使用獨立快取命名空間，避免和 Goodinfo 盈餘分配率快取互相影響。
-        let cache_key = make_cache_key(&stock_symbol);
-        let is_jump = crate::infra::nosql::redis::CLIENT
+        let cache_key = make_cache_key(stock_symbol);
+        let is_jump = CLIENT
             .get_bool(&cache_key)
             .await
-            .with_context(|| {
-                format!(
-                    "redis get_bool failed: year={}, stock_symbol={}, cache_key={}",
-                    year, stock_symbol, cache_key
-                )
-            })?;
-
+            .with_context(|| format!("redis get_bool failed: {cache_key}"))?;
         if is_jump {
             // 近期已處理過同一檔股票就略過，降低外部來源流量與封鎖風險。
             continue;
@@ -139,30 +200,22 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
             continue;
         }
 
-        // 先寫入跳過旗標；即使單檔處理失敗，也避免排程下一輪立刻重試同一來源。
         let ttl_seconds = refresh_skip_ttl_seconds();
-        crate::infra::nosql::redis::CLIENT
-            .set(cache_key, true, ttl_seconds)
+        CLIENT
+            .set(&cache_key, true, ttl_seconds)
             .await
-            .with_context(|| {
-                format!(
-                    "redis set failed: year={}, stock_symbol={}, ttl_seconds={}",
-                    year, stock_symbol, ttl_seconds
-                )
-            })?;
+            .with_context(|| format!("redis set failed: {cache_key}, ttl={ttl_seconds}"))?;
 
         // 單檔股票的抓取、轉換或入庫失敗只記錄錯誤，整批任務繼續處理其他股票。
-        if let Err(why) =
-            backfill_recent_dividends_for_stock(year, &stock_symbol, &multiple_dividend_cache).await
-        {
+        if let Err(why) = backfill(stock_symbol).await {
             if yahoo::dividend::is_page_not_found_error(&why) {
                 // Yahoo 回 404＝整個個股頁不存在，幾乎都是已下市/清算的標的
                 //（資料庫的 SuspendListing 旗標可能還沒更新）。這不是異常，
                 // 降級為 warn 避免淹沒真正的錯誤，並把跳過快取拉長到 30 天，
                 // 不再每 2～4 天重打一次注定 404 的請求。
-                if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
+                if let Err(cache_err) = CLIENT
                     .set(
-                        make_cache_key(&stock_symbol),
+                        &cache_key,
                         true,
                         yahoo::dividend::PAGE_NOT_FOUND_CACHE_TTL_SECONDS,
                     )
@@ -175,29 +228,23 @@ pub(super) async fn backfill_missing_or_multiple_dividends(year: i32) -> Result<
                     );
                 }
                 tracing::warn!(
-                    "skip dividend backfill because yahoo page not found (證券可能已下市): year={}, stock_symbol={}, error={:#}",
-                    year,
+                    "skip dividend backfill because yahoo page not found (證券可能已下市): stock_symbol={}, error={:#}",
                     stock_symbol,
                     why
                 );
             } else {
                 tracing::error!(
-                    "backfill_missing_or_multiple_dividends failed: year={}, stock_symbol={}, stage=backfill_recent_dividends_for_stock, error={:#}",
-                    year,
+                    "backfill_missing_or_multiple_dividends failed: stock_symbol={}, stage=backfill_recent_dividends_for_stock, error={:#}",
                     stock_symbol,
                     why
                 );
             }
         }
 
-        // 每檔股票請求完成後，進行隨機 1.5 到 3.0 秒的延遲（Jitter），降低規律請求被 Yahoo WAF 偵測為爬蟲的機率
-        let jitter_ms = rand::rng().random_range(1500..=3000);
-        tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
+        pause().await;
     }
 
-    tracing::info!("殖利率採集完成 {run}");
-
-    Ok(())
+    Ok(run)
 }
 
 /// 處理單一股票的近期股利抓取、去重、入庫與年度彙總更新。

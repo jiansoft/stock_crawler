@@ -32,7 +32,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -46,6 +46,39 @@ use tokio::sync::{Notify, watch};
 /// memory cache 不必放進來，否則無關緊要的 task 也會拖長正式關機時間。
 pub static BACKGROUND_OPERATIONS: Lazy<BackgroundOperationTracker> =
     Lazy::new(BackgroundOperationTracker::new);
+
+/// 全域關機請求，供逐檔查外站、一跑數十分鐘的排程迴圈在每檔之間檢查。
+///
+/// [`BACKGROUND_OPERATIONS`] 只能等工作自己結束：2026-11-02 21:08 部署時，21:00 股利補抓
+/// （平常跑約 30 分鐘）不理會關機訊號，主程式等滿五分鐘才硬停，當輪補抓也中斷在半途。
+/// 迴圈看到請求就停在兩檔之間，已處理的都已寫入，沒處理的不寫跳過旗標，下一輪自然接續。
+pub static SHUTDOWN_REQUEST: ShutdownRequest = ShutdownRequest::new();
+
+/// 「已要求關機」旗標；只會從 `false` 變成 `true`，不會再變回來。
+#[derive(Debug, Default)]
+pub struct ShutdownRequest {
+    /// 是否已收到關機訊號。
+    requested: AtomicBool,
+}
+
+impl ShutdownRequest {
+    /// 建立尚未要求關機的旗標。
+    pub const fn new() -> Self {
+        Self {
+            requested: AtomicBool::new(false),
+        }
+    }
+
+    /// 標記已收到關機訊號；`bootstrap::shutdown` 在通知 server 之前呼叫。
+    pub fn request(&self) {
+        self.requested.store(true, Ordering::Release);
+    }
+
+    /// 已收到關機訊號時回傳 `true`。
+    pub fn is_requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
+    }
+}
 
 /// 追蹤可能具有資料副作用之背景操作的執行數量。
 ///
@@ -189,6 +222,17 @@ mod tests {
         let _guard = tracker.begin();
 
         assert!(!tracker.wait_for_idle(Duration::from_millis(10)).await);
+    }
+
+    /// 關機請求只會由未要求變成已要求。
+    #[test]
+    fn shutdown_request_flips_once_requested() {
+        let request = ShutdownRequest::default();
+        assert!(!request.is_requested());
+
+        request.request();
+        request.request();
+        assert!(request.is_requested());
     }
 
     /// 驗證已送出的關機訊號不會因接收端較晚開始等待而遺失。

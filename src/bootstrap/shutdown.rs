@@ -97,6 +97,8 @@ pub(crate) async fn wait_and_stop(running: Running) -> Result<(), Box<dyn Error>
     } = running;
     shutdown_signal().await?;
     tracing::info!("graceful shutdown begin");
+    // 先讓逐檔查外站的長迴圈停在兩檔之間，第 4 道閘門才不會等滿五分鐘。
+    core::shutdown::SHUTDOWN_REQUEST.request();
 
     // 第 1 道閘門：watch 的值從 false 改成 true。
     // Axum/Tonic 收到後停止 accept 新連線；已經進入 handler 的 request 不會被硬切斷。

@@ -62,6 +62,7 @@ async fn run_candidates_counts_each_outcome_and_stops_at_the_limit() {
             async move { result }
         },
         || async {},
+        || false,
     )
     .await
     .expect("run_candidates");
@@ -77,6 +78,7 @@ async fn run_candidates_counts_each_outcome_and_stops_at_the_limit() {
             not_found: 1,
             failed: 1,
             rows: 2,
+            interrupted: false,
         }
     );
     assert_eq!(
@@ -151,6 +153,7 @@ async fn run_candidates_prioritizes_lagging_stocks_past_the_weekly_flag() {
         },
         |_symbol: &str| async { Ok(empty_reports()) },
         || async {},
+        || false,
     )
     .await
     .expect("run_candidates");
@@ -205,4 +208,50 @@ async fn order_candidates_puts_lagging_stocks_first() {
             0
         )
     );
+}
+
+/// 收到關機請求就停在兩檔之間，標記 `interrupted`，還沒輪到的不寫旗標。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（Redis），請加 --features integration-tests 執行"
+)]
+async fn run_candidates_stops_between_stocks_when_shutdown_is_requested() {
+    dotenvy::dotenv().ok();
+    if CLIENT.ping().await.is_err() {
+        println!(
+            "跳過 run_candidates_stops_between_stocks_when_shutdown_is_requested：無 Redis 連線"
+        );
+        return;
+    }
+    clear_flags().await;
+
+    let candidates: Vec<String> = SYMBOLS.iter().map(|s| (*s).to_owned()).collect();
+    let shutdown = crate::core::shutdown::ShutdownRequest::new();
+    let summary = run_candidates(
+        &candidates,
+        0,
+        10,
+        &FakeRepository::default(),
+        |symbol: &str| {
+            // 第一檔處理完就收到關機請求。
+            shutdown.request();
+            let result = Ok(reports(symbol));
+            async move { result }
+        },
+        |_symbol: &str| async { Ok(empty_reports()) },
+        || async {},
+        || shutdown.is_requested(),
+    )
+    .await
+    .expect("run_candidates");
+    let second_flag = CLIENT
+        .get_bool(&make_cache_key("79979F2"))
+        .await
+        .unwrap_or(false);
+    clear_flags().await;
+
+    assert!(summary.interrupted);
+    assert_eq!((summary.attempted(), summary.succeeded), (1, 1));
+    assert!(!second_flag, "還沒輪到的股票不寫旗標");
 }
