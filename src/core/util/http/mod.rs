@@ -1,6 +1,6 @@
 //! # 共用 HTTP 客戶端
 //!
-//! 對外的請求函式（[`get`]、[`get_json`]、[`post`]、[`post_use_json`] 等）都在這裡；
+//! 對外的請求函式（[`get`]、[`get_json`]、[`post()`]、[`post_use_json`] 等）都在這裡；
 //! 送出與重試在 `send` 子模組，敏感資訊遮罩在 `redact` 子模組。
 
 use std::time::Duration;
