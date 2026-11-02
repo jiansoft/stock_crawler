@@ -124,6 +124,7 @@ async fn run_includes_dividend_fills() {
         &fills,
         None,
         &[],
+        None,
     )
     .await
     .expect("有內容");

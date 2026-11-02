@@ -18,6 +18,7 @@ async fn run_builds_full_message() {
         &[],
         None,
         &[],
+        None,
     )
     .await
     .expect("有內容");
@@ -117,6 +118,7 @@ async fn run_degrades_per_section() {
         &[],
         None,
         &[],
+        None,
     )
     .await
     .expect("產業與持股仍有內容");
@@ -139,6 +141,7 @@ async fn run_degrades_per_section() {
         &[],
         None,
         &[],
+        None,
     )
     .await
     .expect("法人仍有內容");
@@ -161,6 +164,7 @@ async fn run_degrades_per_section() {
             &[],
             None,
             &[],
+            None,
         )
         .await
         .is_none()
@@ -193,6 +197,7 @@ async fn run_appends_valuation_level_to_regime() {
         &[],
         None,
         &[],
+        None,
     )
     .await
     .expect("有內容");
@@ -211,6 +216,7 @@ async fn run_appends_valuation_level_to_regime() {
         &[],
         None,
         &[],
+        None,
     )
     .await
     .expect("其他段仍有內容");
@@ -242,6 +248,7 @@ async fn run_appends_month_seasonality_to_regime() {
             &[],
             None,
             &[],
+            None,
         )
         .await
         .expect("有內容");

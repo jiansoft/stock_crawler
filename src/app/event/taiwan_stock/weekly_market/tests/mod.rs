@@ -12,6 +12,7 @@ mod fakes;
 mod holding_flow;
 mod message;
 mod sections;
+mod upcoming_dividend;
 
 use std::collections::HashMap;
 

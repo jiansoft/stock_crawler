@@ -3,6 +3,7 @@
 use super::{
     TOP, WEEK_DAYS, allocation::AllocationSection, breakout::BreakoutSection,
     dividend::HoldingFill, etf::EtfWeekSection, holding_flow::HoldingFlowSection,
+    upcoming_dividend::UpcomingSection,
 };
 use crate::domain::{
     portfolio::health::HoldingFundamentals, quote::relative_strength::RelativeStrengthDay,
@@ -25,6 +26,8 @@ pub(super) struct HoldingSection<'a> {
     pub(super) allocation: &'a [AllocationSection],
     /// 全市場區間突破一段（不是持股資料；放在這裡讓各段測試沿用 `..Default::default()` 建構）。
     pub(super) breakouts: Option<&'a BreakoutSection>,
+    /// 下週持股除權息（下週沒有時為 `None`）。
+    pub(super) upcoming: Option<&'a UpcomingSection>,
 }
 
 /// 一檔持股的 RS 一週變化。
