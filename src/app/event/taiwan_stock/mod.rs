@@ -42,6 +42,8 @@ pub mod technical_alert;
 // 持股估值週報（本益比／股價淨值比位於近 5 年高檔或低檔）
 pub mod valuation_alert;
 // 每週市場摘要（產業相對強度、法人產業淨買賣、持股 RS 變化）
+// 持股即將除權息的通知文字（週摘要與 08:00 預告共用）
+mod upcoming_dividend;
 pub mod weekly_market;
 
 use rust_decimal::Decimal;
