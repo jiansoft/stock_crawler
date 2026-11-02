@@ -6,7 +6,8 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use super::super::upcoming_dividend::{
-    UpcomingLine, UpcomingSection, lines, next_week, next_week_payouts, upcoming_section,
+    UpcomingLine, UpcomingSection, lines, load_upcoming, next_week, next_week_payouts,
+    upcoming_section,
 };
 use super::fakes::*;
 use super::*;
@@ -203,10 +204,8 @@ fn lines_show_payouts_with_total() {
     );
 }
 
-/// 查詢下週入帳：倉儲以下週一到週五查詢，結果合併會員。
-#[tokio::test]
-async fn next_week_payouts_queries_next_monday_to_friday() {
-    let allocation = |member_id: i64, shares: i64| PayoutAllocation {
+fn allocation(member_id: i64, shares: i64) -> PayoutAllocation {
+    PayoutAllocation {
         member_id,
         stock_symbol: "0056".to_owned(),
         name: "元大高股息".to_owned(),
@@ -221,7 +220,35 @@ async fn next_week_payouts_queries_next_monday_to_friday() {
         cash_amount: Decimal::from(shares),
         stock_shares: Decimal::ZERO,
         estimated: false,
+    }
+}
+
+/// 沒有持股除權息時只列入帳；入帳查詢失敗、也沒有除權息時整段不列。
+#[tokio::test]
+async fn load_upcoming_lists_payouts_and_degrades_on_failure() {
+    let dividends = crate::infra::database::repository::dividend::PgDividendRepository::new();
+    let no_holdings = std::collections::BTreeMap::new();
+    let repo = FakePayoutRepository::with_allocations(vec![allocation(1, 1000)]);
+    let section = load_upcoming(&dividends, &repo, &no_holdings, day(17))
+        .await
+        .expect("有入帳");
+    assert!(section.items.is_empty());
+    assert_eq!(section.payouts.len(), 1);
+
+    let failing = FakePayoutRepository {
+        fail: true,
+        ..FakePayoutRepository::default()
     };
+    assert!(
+        load_upcoming(&dividends, &failing, &no_holdings, day(17))
+            .await
+            .is_none()
+    );
+}
+
+/// 查詢下週入帳：倉儲以下週一到週五查詢，結果合併會員。
+#[tokio::test]
+async fn next_week_payouts_queries_next_monday_to_friday() {
     let repo =
         FakePayoutRepository::with_allocations(vec![allocation(1, 1000), allocation(2, 2000)]);
     let payouts = next_week_payouts(&repo, day(17)).await.expect("查詢入帳");

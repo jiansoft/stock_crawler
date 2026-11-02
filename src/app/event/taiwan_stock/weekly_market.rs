@@ -65,14 +65,11 @@ use self::{
     market::{RegimeSection, month_seasonality, regime_section, valuation_level},
     message::build_message,
     strategy::{StrategySection, strategy_section},
-    upcoming_dividend::{UpcomingSection, next_week, next_week_payouts, upcoming_section},
+    upcoming_dividend::{UpcomingSection, load_upcoming},
 };
 use super::holdings;
 use crate::{
-    app::calculation::{
-        dividend_fill_hints::FillHints,
-        upcoming_dividends::{total_shares, upcoming_dividends},
-    },
+    app::calculation::upcoming_dividends::total_shares,
     core::alert,
     domain::{
         chip::flow::{self, ChipFlowQuery},
@@ -127,25 +124,13 @@ pub async fn execute() -> Result<()> {
         });
     let all: BTreeSet<String> = shares.keys().cloned().collect();
     let fills = holding_fills(&PgDividendFillRepository::new(), &all, date).await;
-    let (week_from, week_to) = next_week(date);
-    let dividends =
-        upcoming_dividends(&PgDividendRepository::new(), &shares, week_from, week_to).await;
-    let hints = if dividends.is_empty() {
-        FillHints::default()
-    } else {
-        let symbols: Vec<String> = dividends
-            .iter()
-            .map(|dividend| dividend.stock_symbol.clone())
-            .collect();
-        FillHints::load(&symbols, date).await
-    };
-    let payouts = next_week_payouts(&PgPortfolioRepository::new(), date)
-        .await
-        .unwrap_or_else(|why| {
-            tracing::warn!("每週市場摘要：讀取下週持股股利入帳失敗: {why:#}");
-            Vec::new()
-        });
-    let upcoming = upcoming_section(dividends, &hints, date, payouts);
+    let upcoming = load_upcoming(
+        &PgDividendRepository::new(),
+        &PgPortfolioRepository::new(),
+        &shares,
+        date,
+    )
+    .await;
     let etfs = etf_section(&PgEtfRepository::new(), &all, date)
         .await
         .unwrap_or_else(|why| {

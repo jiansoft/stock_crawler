@@ -2,8 +2,10 @@
 //! 除權息日、每股股利、預估入帳與近 5 年填息，以及這幾天發放到帳的持股股利。
 //!
 //! 除權息每檔一行的文字與 08:00 持股除權息預告共用 [`super::super::upcoming_dividend`]；入帳取
-//! [`PortfolioRepository::fetch_payout_allocations`]（已領明細，沒有時以目前持股推算），與
+//! [`PortfolioRepository::fetch_payout_allocations`](crate::domain::portfolio::repository::PortfolioRepository::fetch_payout_allocations)（已領明細，沒有時以目前持股推算），與
 //! `/portfolio/upcoming-payouts` 相同。兩段各自沒有資料就不列。
+
+use std::collections::BTreeMap;
 
 use anyhow::Result;
 use chrono::{Datelike, Days, NaiveDate};
@@ -13,7 +15,8 @@ pub(super) use super::super::upcoming_dividend::UpcomingLine;
 use super::super::upcoming_dividend::{item_lines, with_fill_hints};
 use super::super::{format_decimal_with_commas, format_share_quantity};
 use crate::app::calculation::{
-    dividend_fill_hints::FillHints, upcoming_dividends::UpcomingDividend,
+    dividend_fill_hints::FillHints,
+    upcoming_dividends::{ExDividendDayQuery, UpcomingDividend, upcoming_dividends},
 };
 use crate::domain::portfolio::{
     payout::{self, DividendPayout},
@@ -38,6 +41,33 @@ pub(super) fn next_week(today: NaiveDate) -> (NaiveDate, NaiveDate) {
     let days_to_monday = 7 - u64::from(today.weekday().num_days_from_monday());
     let monday = today + Days::new(days_to_monday);
     (monday, monday + Days::new(4))
+}
+
+/// 載入下週一段：持股除權息（附近 5 年填息）與股利入帳；入帳查詢失敗只少入帳那段。
+pub(super) async fn load_upcoming(
+    dividends_query: &impl ExDividendDayQuery,
+    portfolio: &impl PortfolioRepository,
+    shares: &BTreeMap<String, i64>,
+    today: NaiveDate,
+) -> Option<UpcomingSection> {
+    let (from, to) = next_week(today);
+    let dividends = upcoming_dividends(dividends_query, shares, from, to).await;
+    let hints = if dividends.is_empty() {
+        FillHints::default()
+    } else {
+        let symbols: Vec<String> = dividends
+            .iter()
+            .map(|dividend| dividend.stock_symbol.clone())
+            .collect();
+        FillHints::load(&symbols, today).await
+    };
+    let payouts = next_week_payouts(portfolio, today)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("每週市場摘要：讀取下週持股股利入帳失敗: {why:#}");
+            Vec::new()
+        });
+    upcoming_section(dividends, &hints, today, payouts)
 }
 
 /// 查詢下週發放的持股股利入帳（全部會員合併）。

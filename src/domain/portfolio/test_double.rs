@@ -18,6 +18,8 @@ pub(crate) struct FakePayoutRepository {
     pub(crate) allocations: Vec<PayoutAllocation>,
     /// 每次查詢的 `(member_id, from, to, today)`。
     pub(crate) queries: Mutex<Vec<(i64, NaiveDate, NaiveDate, NaiveDate)>>,
+    /// 為 `true` 時查詢回傳錯誤。
+    pub(crate) fail: bool,
 }
 
 impl FakePayoutRepository {
@@ -25,7 +27,7 @@ impl FakePayoutRepository {
     pub(crate) fn with_allocations(allocations: Vec<PayoutAllocation>) -> Self {
         Self {
             allocations,
-            queries: Mutex::default(),
+            ..Self::default()
         }
     }
 
@@ -82,6 +84,9 @@ impl PortfolioRepository for FakePayoutRepository {
             .lock()
             .expect("queries")
             .push((member_id, from, to, today));
+        if self.fail {
+            anyhow::bail!("入帳查詢測試失敗");
+        }
         Ok(self.allocations.clone())
     }
 }
