@@ -382,3 +382,33 @@ async fn refresh_stocks_stops_between_stocks_when_shutdown_is_requested() {
     );
     assert!(!second_flag, "還沒輪到的股票不寫旗標");
 }
+
+#[test]
+fn request_jitter_stays_within_one_and_a_half_to_three_seconds() {
+    for _ in 0..1_000 {
+        let jitter = request_jitter();
+        assert!((Duration::from_millis(1500)..=Duration::from_millis(3000)).contains(&jitter));
+    }
+}
+
+/// 整輪流程：讀候選與多次配息快取後，收到關機請求就在第一檔之前停下，不查 Yahoo。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn refresh_year_reads_candidates_then_stops_when_shutdown_is_requested() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!(
+            "跳過 refresh_year_reads_candidates_then_stops_when_shutdown_is_requested：無資料庫連接"
+        );
+        return;
+    }
+
+    refresh_year(2099, || true).await.expect("提早結束不是錯誤");
+}
