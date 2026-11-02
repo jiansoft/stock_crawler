@@ -28,6 +28,13 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "提醒本日公開申購股票",
             event::taiwan_stock::public::execute,
         ),
+        // 08:10（每月 1 日）上個月持股股利入帳彙總，避開 08:00～08:04 的提醒
+        job!(
+            normal,
+            "0 10 8 1 * *",
+            "通知上月持股股利入帳",
+            event::taiwan_stock::monthly_payout::execute,
+        ),
         // 09:00 更新股票權值佔比
         job!(
             normal,
