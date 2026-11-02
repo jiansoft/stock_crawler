@@ -355,3 +355,10 @@ fn market_message_appends_fill_hint() {
     );
     assert!(message.contains("殖利率:0%\n"), "1101 沒有文字：{message}");
 }
+
+/// 除權息當天重算已領股利的年度：當年與下一年（12 月除息、隔年發放）。
+#[test]
+fn payout_years_cover_next_year_payout() {
+    let ex_date = chrono::NaiveDate::from_ymd_opt(2026, 12, 10).expect("合法日期");
+    assert_eq!(payout_years(ex_date), [2026, 2027]);
+}

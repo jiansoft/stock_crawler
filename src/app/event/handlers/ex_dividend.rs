@@ -22,6 +22,11 @@ use crate::app::calculation::dividend_fill_hints::FillHints;
 mod holding;
 mod market;
 
+/// 這天除權息的股利可能屬於的發放年度（`dividend.year`）：當年，以及 12 月除息、隔年發放的下一年。
+fn payout_years(ex_date: chrono::NaiveDate) -> [i32; 2] {
+    [ex_date.year(), ex_date.year() + 1]
+}
+
 /// 一年多次配息時附加在殖利率後面的「 年化殖利率:8.47%（月配）」；年配時為空字串。
 fn annualized_suffix(
     frequency: Option<(u32, &'static str)>,
@@ -77,9 +82,11 @@ impl EventDispatcher {
             return Ok(());
         }
 
-        // 更新這批股票對應持股的股利記錄
-        crate::app::calculation::dividend_record::execute(date.year(), Some(stock_symbols.clone()))
-            .await;
+        // 更新這批股票對應持股的股利記錄（12 月除息、隔年發放的股利屬於下一個發放年度）
+        for year in payout_years(date) {
+            crate::app::calculation::dividend_record::execute(year, Some(stock_symbols.clone()))
+                .await;
+        }
 
         // 重新讀取持股後，組「分人分股」的預估股利通知
         let portfolio_repo = PgPortfolioRepository::new();
