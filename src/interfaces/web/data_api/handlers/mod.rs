@@ -158,10 +158,13 @@ use self::common::{
     signal_filter_error, signal_indicator_order, signal_kind_order, timestamp, valuation_band,
 };
 
-/// 回傳不需認證的服務存活狀態。
+/// 回傳不需認證的服務存活狀態與進行中的背景工作數。
 #[utoipa::path(get, path = "/api/v1/healthz", tag = "data-api", responses((status = 200, body = HealthResponse)), security())]
 pub(super) async fn healthz() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
+    Json(HealthResponse {
+        status: "ok",
+        active_operations: crate::core::shutdown::BACKGROUND_OPERATIONS.active_count(),
+    })
 }
 
 #[cfg(test)]

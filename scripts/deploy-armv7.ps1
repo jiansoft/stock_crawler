@@ -55,6 +55,10 @@
 .PARAMETER SkipVerify
     略過部署後的驗證（仍會重啟服務）。
 
+.PARAMETER BackgroundWaitSeconds
+    重啟前等待進行中背景工作（healthz 的 active_operations）歸零的上限秒數，預設 90；
+    逾時照常部署。
+
 .EXAMPLE
     .\scripts\deploy-armv7.ps1
 
@@ -73,7 +77,8 @@ param(
     [string]$RemoteBase = '/opt/stock_crawler',
     [switch]$Build,
     [switch]$StageOnly,
-    [switch]$SkipVerify
+    [switch]$SkipVerify,
+    [int]$BackgroundWaitSeconds = 90
 )
 
 $ErrorActionPreference = 'Stop'
@@ -326,6 +331,21 @@ try
     }
 
     # --- 4. 部署 ----------------------------------------------------------------
+    # 重啟前先看 healthz 的 active_operations（進行中的排程／回補）：有就等一下讓短工作做完。
+    # 逐檔查外站的長迴圈（21:00 股利補抓、06:00 財報）收到關機請求會停在兩檔之間，逾時照常部署。
+    Write-Host '檢查進行中的背景工作...' -ForegroundColor Cyan
+    $waitRounds = [Math]::Max(1, [int][Math]::Ceiling($BackgroundWaitSeconds / 10))
+    $waitScript = @"
+for i in `$(seq 1 $waitRounds); do
+  n="`$(curl -s -m 5 http://127.0.0.1:$WebPort/api/v1/healthz 2>/dev/null | sed -n 's/.*"active_operations":\([0-9]*\).*/\1/p')"
+  if [ -z "`$n" ]; then echo "  healthz 沒有回報 active_operations（舊版或服務未執行），直接部署"; break; fi
+  if [ "`$n" = "0" ]; then echo "  沒有進行中的背景工作"; break; fi
+  if [ "`$i" = "$waitRounds" ]; then echo "  仍有 `$n 個背景工作，已等 $BackgroundWaitSeconds 秒，照常部署（長迴圈會停在兩檔之間）"; break; fi
+  echo "  背景工作 `$n 個進行中，等 10 秒（`$i/$waitRounds）"
+  sleep 10
+done
+"@
+    Invoke-Remote $waitScript
     Write-Host 'control.sh update...' -ForegroundColor Cyan
     Invoke-Remote "cd $RemoteBase && ./control.sh update"
     if ($LASTEXITCODE -ne 0)

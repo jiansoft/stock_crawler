@@ -46,7 +46,7 @@ mod support;
 mod technicals;
 mod timeline;
 
-/// 健康檢查必須免驗證，讓部署系統能在未持有 API key 時偵測存活狀態。
+/// 健康檢查必須免驗證，讓部署系統能在未持有 API key 時偵測存活狀態與進行中的背景工作數。
 #[tokio::test]
 async fn healthz_is_public() {
     let response = router()
@@ -58,6 +58,15 @@ async fn healthz_is_public() {
         .await
         .expect("router should serve request");
     assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let body: serde_json::Value = serde_json::from_slice(&bytes).expect("healthz 回應是 JSON");
+    assert_eq!(body["status"], "ok");
+    assert!(
+        body["active_operations"].is_u64(),
+        "部署腳本靠這個欄位判斷要不要先等：{body}"
+    );
 }
 
 /// OpenAPI JSON 與 Swagger UI 不需驗證；升級 utoipa-swagger-ui 後確認兩個入口仍能服務。
