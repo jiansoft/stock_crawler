@@ -27,6 +27,12 @@ impl TelegramDebouncer {
         }
     }
 
+    /// 測試用：緩衝區內還沒送出的訊息。
+    #[cfg(test)]
+    pub(super) async fn pending_messages(&self) -> Vec<String> {
+        self.buffer.lock().await.clone()
+    }
+
     /// 將單一訊息加入發送緩衝區，並重置定時器。
     /// 在 500 毫秒內若無新訊息加入，則會觸發批次發送。
     pub(super) async fn add_message(&self, msg: String) {

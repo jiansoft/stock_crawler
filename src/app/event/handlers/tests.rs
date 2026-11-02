@@ -217,3 +217,60 @@ async fn test_handler_error_does_not_panic() {
 
     // 若執行到此處，代表錯誤被妥善處理而非 panic
 }
+
+/// 預設處理器：新增股票與股票異動各組一則「新增股票︰」訊息放進防震緩衝區（名稱跳脫 MarkdownV2，
+/// 查不到產業顯示「 - 」）；大盤指數一則；每股淨值更新沒有副作用。
+#[tokio::test]
+async fn default_handler_buffers_messages_by_event_type() {
+    let debouncer = Arc::new(TelegramDebouncer::new());
+    let now = chrono::Local::now();
+    let events = vec![
+        DomainEvent::StockRegistered {
+            symbol: "79979".to_string(),
+            name: "測試-股".to_string(),
+            market_id: 2,
+            industry_id: 979_979,
+            occurred_at: now,
+        },
+        DomainEvent::StockIdentityChanged {
+            symbol: "79979".to_string(),
+            old_name: "測試-股".to_string(),
+            new_name: "改名.股".to_string(),
+            old_market_id: 2,
+            new_market_id: 999,
+            old_industry_id: 979_979,
+            new_industry_id: 979_979,
+            occurred_at: now,
+        },
+        DomainEvent::NetAssetValueUpdated {
+            symbol: "79979".to_string(),
+            old_nav: rust_decimal::Decimal::ONE,
+            new_nav: rust_decimal::Decimal::TWO,
+            occurred_at: now,
+        },
+        DomainEvent::StockIndexUpdated {
+            date: chrono::NaiveDate::from_ymd_opt(2024, 12, 10).expect("合法日期"),
+            index: rust_decimal_macros::dec!(23000.5),
+            change: rust_decimal_macros::dec!(-12.3),
+            occurred_at: now,
+        },
+    ];
+    for event in events {
+        EventDispatcher::default_handle_event(event, debouncer.clone())
+            .await
+            .expect("這些事件不連資料庫，不會失敗");
+    }
+
+    let pending = debouncer.pending_messages().await;
+    assert_eq!(pending.len(), 3, "淨值更新不發訊息：{pending:?}");
+    assert!(
+        pending[0].starts_with(r"新增股票︰ 79979 測試\-股 ") && pending[0].ends_with(" - "),
+        "{}",
+        pending[0]
+    );
+    assert_eq!(
+        pending[1], r"新增股票︰ 79979 改名\.股  -   - ",
+        "未知市場與產業都顯示 - "
+    );
+    assert_eq!(pending[2], r"2024\-12\-10 大盤指數︰23000\.5 漲跌︰\-12\.3");
+}
