@@ -3,7 +3,7 @@
 //! 已除權息的取除權息當天寫入的已領股利明細（除權息後才賣出、尚未發放的也算）；還沒除權息的以
 //! 目前未賣出持股推算並標 `estimated`。Data API `/portfolio/upcoming-payouts` 與入帳通知共用。
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
@@ -132,6 +132,54 @@ pub fn merge_members(payouts: Vec<DividendPayout>) -> Vec<DividendPayout> {
 /// 入帳現金合計。
 pub fn total_cash(payouts: &[DividendPayout]) -> Decimal {
     payouts.iter().map(|payout| payout.cash_amount).sum()
+}
+
+/// 一個月的入帳彙總。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MonthlyIncome {
+    /// 月份（1～12）。
+    pub month: u32,
+    /// 現金入帳合計。
+    pub cash_amount: Decimal,
+    /// 其中發放日不晚於基準日（已入帳）的現金。
+    pub received_cash_amount: Decimal,
+    /// 其中尚未除權息、以目前持股推算的現金。
+    pub estimated_cash_amount: Decimal,
+    /// 配股合計（整股）。
+    pub stock_shares: i64,
+    /// 入帳筆數。
+    pub payouts: usize,
+}
+
+/// 把 `year` 年的入帳依發放月份加總成 1～12 月（沒有入帳的月份為 0）；發放日不晚於 `as_of` 的算已入帳，
+/// 其他年份的入帳不計。
+pub fn monthly_income(
+    payouts: &[DividendPayout],
+    year: i32,
+    as_of: NaiveDate,
+) -> Vec<MonthlyIncome> {
+    let mut months: Vec<MonthlyIncome> = (1..=12)
+        .map(|month| MonthlyIncome {
+            month,
+            ..MonthlyIncome::default()
+        })
+        .collect();
+    for payout in payouts
+        .iter()
+        .filter(|payout| payout.payable_date.year() == year)
+    {
+        let month = &mut months[payout.payable_date.month0() as usize];
+        month.cash_amount += payout.cash_amount;
+        if payout.payable_date <= as_of {
+            month.received_cash_amount += payout.cash_amount;
+        }
+        if payout.estimated {
+            month.estimated_cash_amount += payout.cash_amount;
+        }
+        month.stock_shares += payout.stock_shares;
+        month.payouts += 1;
+    }
+    months
 }
 
 /// 金額與股利都是 0 的入帳骨架，呼叫端再填這天入帳的部分。
