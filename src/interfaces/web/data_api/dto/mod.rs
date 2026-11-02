@@ -229,6 +229,8 @@ pub(crate) struct ErrorBody {
 pub(crate) struct HealthResponse {
     /// 服務狀態。
     pub(crate) status: &'static str,
+    /// 進行中的排程與回補工作數；部署腳本重啟前看到大於 0 會先等一下。
+    pub(crate) active_operations: usize,
 }
 
 mod strategy_edge;
