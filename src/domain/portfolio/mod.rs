@@ -9,6 +9,8 @@ pub mod entity;
 pub mod exposure;
 // 持股健檢的基本面警示（營收連續年減、三率三降、營業虧損、自由現金流為負）。
 pub mod health;
+/// 持股股利入帳（已領明細或目前持股推算，依發放日拆開）。
+pub mod payout;
 // 持股績效（時間加權報酬、月報酬、最大回撤、與大盤比較）。
 pub mod performance;
 /// 持股再平衡純計算。
