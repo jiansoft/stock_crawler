@@ -110,3 +110,47 @@ async fn test_load() {
         }
     }
 }
+
+/// 有股票主檔時整輪載入成功：必要快取帶回筆數，非必要快取（空表）不降級；已有 IP 時不連外查詢。
+/// 用全新的 `Share`，不動全域快取；假代號結束時刪除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn load_required_fills_caches_when_stocks_exist() {
+    dotenvy::dotenv().ok();
+    let pool = crate::infra::database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 load_required_fills_caches_when_stocks_exist：無資料庫連接");
+        return;
+    }
+    let cleanup = || async {
+        let _ = sqlx::query("DELETE FROM stocks WHERE stock_symbol = '79979CL'")
+            .execute(pool)
+            .await;
+    };
+    cleanup().await;
+    sqlx::query(r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id, "SuspendListing", last_one_eps, last_four_eps, net_asset_value_per_share, return_on_equity, weight, issued_share) VALUES ('79979CL', '快取測試股', '79979CL', 2, 1, false, 1, 1, 10, 1, 0, 1000)"#)
+        .execute(pool)
+        .await
+        .expect("種入股票");
+
+    let share = Share::new();
+    share.set_current_ip("127.0.0.1".to_owned());
+    let report = share.load_required().await;
+    share.reload_quote_history_records().await;
+    let cached_name = share
+        .stocks
+        .read()
+        .expect("stocks")
+        .get("79979CL")
+        .map(|stock| stock.name().to_owned());
+    cleanup().await;
+
+    let report = report.expect("有股票主檔時載入成功");
+    assert!(report.stock_count >= 1);
+    assert!(report.degraded.is_empty(), "{:?}", report.degraded);
+    assert_eq!(cached_name.as_deref(), Some("快取測試股"));
+    assert_eq!(share.get_current_ip().as_deref(), Some("127.0.0.1"));
+}
