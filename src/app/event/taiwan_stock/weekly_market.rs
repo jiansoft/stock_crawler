@@ -20,7 +20,8 @@
 //! - 外資、投信近 [`WEEK_DAYS`] 個交易日在持股的累計買賣超，買超、賣超最多的幾檔（沿用產業資金一段
 //!   已載入的個股淨買賣，不另外查詢），以及同期主力（`broker_flow`）的累計買賣超。
 //! - 持股（含 ETF）近 7 天內填息的除權息，與尚未填息、離填息價最遠的幾檔（見 [`crate::domain::dividend::fill`]）。
-//! - 下週持股（含 ETF）的除權息日、每股股利、預估入帳與近 5 年填息（見 [`upcoming_dividend`]）。
+//! - 下週持股（含 ETF）的除權息日、每股股利、預估入帳與近 5 年填息，以及下週發放的持股股利入帳
+//!   （見 [`upcoming_dividend`]）。
 //! - 持股的基本面警示：營收連續年減、三率三降、營業虧損、自由現金流為負（見 [`crate::domain::portfolio::health`]）。
 //! - ETF 資金流向：全市場淨申購流入、流出最多的 ETF，與持有 ETF 的淨申購、折溢價週平均（見 [`etf`]）。
 //! - 有設定策略換股通知的條件時，策略這一期的換股日、本期至今報酬與 0050 對照、最好與最差的持股。
@@ -64,7 +65,7 @@ use self::{
     market::{RegimeSection, month_seasonality, regime_section, valuation_level},
     message::build_message,
     strategy::{StrategySection, strategy_section},
-    upcoming_dividend::{UpcomingSection, next_week, upcoming_section},
+    upcoming_dividend::{UpcomingSection, next_week, next_week_payouts, upcoming_section},
 };
 use super::holdings;
 use crate::{
@@ -129,16 +130,22 @@ pub async fn execute() -> Result<()> {
     let (week_from, week_to) = next_week(date);
     let dividends =
         upcoming_dividends(&PgDividendRepository::new(), &shares, week_from, week_to).await;
-    let upcoming = if dividends.is_empty() {
-        None
+    let hints = if dividends.is_empty() {
+        FillHints::default()
     } else {
         let symbols: Vec<String> = dividends
             .iter()
             .map(|dividend| dividend.stock_symbol.clone())
             .collect();
-        let hints = FillHints::load(&symbols, date).await;
-        upcoming_section(dividends, &hints, date)
+        FillHints::load(&symbols, date).await
     };
+    let payouts = next_week_payouts(&PgPortfolioRepository::new(), date)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("每週市場摘要：讀取下週持股股利入帳失敗: {why:#}");
+            Vec::new()
+        });
+    let upcoming = upcoming_section(dividends, &hints, date, payouts);
     let etfs = etf_section(&PgEtfRepository::new(), &all, date)
         .await
         .unwrap_or_else(|why| {

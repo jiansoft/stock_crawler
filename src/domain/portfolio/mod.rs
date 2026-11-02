@@ -20,3 +20,5 @@ pub mod repository;
 pub mod summary;
 /// 目標配置與驗證。
 pub mod target;
+#[cfg(test)]
+pub(crate) mod test_double;
