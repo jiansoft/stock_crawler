@@ -170,3 +170,142 @@ async fn test_execute() {
 
     tracing::debug!("結束 execute");
 }
+
+/// 假代號：QA 上市、QB 上櫃（快照寫入），QF 股票主檔更新，QZ 不在主檔。
+const SNAPSHOT_SYMBOLS: [&str; 2] = ["79979QA", "79979QB"];
+
+async fn cleanup_snapshots() {
+    let pool = crate::infra::database::get_connection();
+    let symbols = SNAPSHOT_SYMBOLS.map(str::to_owned).to_vec();
+    let _ = sqlx::query("DELETE FROM qfii_history WHERE stock_symbol = ANY($1)")
+        .bind(&symbols)
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM qfii_trend WHERE stock_symbol = ANY($1)")
+        .bind(&symbols)
+        .execute(pool)
+        .await;
+}
+
+/// 當天快照寫入後重算趨勢並回傳基準日；同一天重跑沒有變更，不重算、回 `None`。
+///
+/// 日期用 1989 年：`rebuild_trends_as_of` 會刪除基準日之前的所有趨勢列，不能碰到其他測試的資料。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn save_snapshots_writes_history_then_rebuilds_trend_once() {
+    dotenvy::dotenv().ok();
+    if crate::infra::database::ping().await.is_err() {
+        println!("跳過 save_snapshots_writes_history_then_rebuilds_trend_once：無資料庫連接");
+        return;
+    }
+    cleanup_snapshots().await;
+    let repo = PgForeignHoldingRepository::new();
+    let today = NaiveDate::from_ymd_opt(1989, 3, 6).expect("日期應合法");
+    let otc_date = NaiveDate::from_ymd_opt(1989, 3, 3).expect("日期應合法");
+    let listed = [dto("79979QA")];
+    let otc = twse::qualified_foreign_institutional_investor::over_the_counter::OtcQfiiSnapshot {
+        date: otc_date,
+        rows: vec![dto("79979QB")],
+    };
+
+    let first = save_snapshots(&repo, &listed, &otc, today).await;
+    let second = save_snapshots(&repo, &listed, &otc, today).await;
+    let history: Vec<(String, NaiveDate)> = sqlx::query_as(
+        r#"SELECT stock_symbol, "date" FROM qfii_history WHERE stock_symbol = ANY($1) ORDER BY stock_symbol"#,
+    )
+    .bind(SNAPSHOT_SYMBOLS.map(str::to_owned).to_vec())
+    .fetch_all(crate::infra::database::get_connection())
+    .await
+    .expect("讀取快照");
+    let trends: Vec<String> = sqlx::query_scalar(
+        "SELECT stock_symbol FROM qfii_trend WHERE stock_symbol = ANY($1) ORDER BY stock_symbol",
+    )
+    .bind(SNAPSHOT_SYMBOLS.map(str::to_owned).to_vec())
+    .fetch_all(crate::infra::database::get_connection())
+    .await
+    .expect("讀取趨勢");
+    cleanup_snapshots().await;
+
+    assert_eq!(first.expect("第一次寫入"), Some(today));
+    assert_eq!(second.expect("同一天重跑"), None, "沒有變更不重算");
+    assert_eq!(
+        history,
+        [
+            ("79979QA".to_string(), today),
+            ("79979QB".to_string(), otc_date)
+        ],
+        "上市用查詢日、上櫃用櫃買回應的日期"
+    );
+    assert_eq!(trends, ["79979QA"], "趨勢只算基準日當天有快照的股票");
+}
+
+/// 主檔有的股票欄位不同才更新（資料庫與快取一起），主檔沒有的略過。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn update_saves_changed_stocks_and_skips_unknown() {
+    dotenvy::dotenv().ok();
+    if crate::infra::database::ping().await.is_err() {
+        println!("跳過 update_saves_changed_stocks_and_skips_unknown：無資料庫連接");
+        return;
+    }
+    let pool = crate::infra::database::get_connection();
+    let cleanup = || async {
+        let _ = sqlx::query("DELETE FROM stocks WHERE stock_symbol = ANY($1)")
+            .bind(vec!["79979QF".to_string(), "79979QZ".to_string()])
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM company_index WHERE security_code = '79979QF'")
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM company_word WHERE word = '79979QF'")
+            .execute(pool)
+            .await;
+        if let Ok(mut cache) = SHARE.stocks.write() {
+            cache.remove("79979QF");
+        }
+    };
+    cleanup().await;
+    sqlx::query(
+        r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, "SuspendListing", issued_share, qfii_shares_held, qfii_share_holding_percentage)
+           VALUES ('79979QF', 'Q', '79979QF', 2, false, 1000, 100, 10)"#,
+    )
+    .execute(pool)
+    .await
+    .expect("種入股票主檔");
+
+    let cmd = |symbol: &str| UpdateQfiiCommand {
+        symbol: symbol.to_string(),
+        shares_held: 500,
+        share_holding_percentage: dec!(25),
+        issued_share: 2000,
+    };
+    let result = update(vec![cmd("79979QF"), cmd("79979QZ")]).await;
+    let saved: (i64, i64, rust_decimal::Decimal) = sqlx::query_as(
+        "SELECT issued_share, qfii_shares_held, qfii_share_holding_percentage FROM stocks WHERE stock_symbol = '79979QF'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("讀取主檔");
+    let cached = SHARE
+        .stocks
+        .read()
+        .ok()
+        .and_then(|cache| cache.get("79979QF").map(|stock| stock.qfii_shares_held()));
+    let unknown: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM stocks WHERE stock_symbol = '79979QZ'")
+            .fetch_one(pool)
+            .await
+            .expect("計數");
+    cleanup().await;
+
+    result.expect("更新成功");
+    assert_eq!(saved, (2000, 500, dec!(25)));
+    assert_eq!(cached, Some(500), "快取跟著更新");
+    assert_eq!(unknown, 0, "主檔沒有的股票不新增");
+}
