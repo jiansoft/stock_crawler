@@ -2,6 +2,10 @@ use chrono::TimeDelta;
 
 use crate::core::logging;
 
+use std::path::PathBuf;
+
+use super::settings::{DEFAULT_MAX_SIZE, MAX_CONFIGURABLE_AGE_DAYS, MAX_CONFIGURABLE_SIZE};
+
 use super::*;
 
 /// 驗證基本寫檔流程。
