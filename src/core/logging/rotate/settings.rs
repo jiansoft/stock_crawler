@@ -15,9 +15,9 @@ pub(super) const MAX_CONFIGURABLE_SIZE: u64 = 1024 * 1024 * 1024;
 pub(super) const MIN_CONFIGURABLE_AGE_DAYS: i64 = 1;
 pub(super) const MAX_CONFIGURABLE_AGE_DAYS: i64 = 365;
 
-/// 全域單檔大小上限（bytes），供未指定固定值的 [`Rotate`] 共用。
+/// 全域單檔大小上限（bytes），供未指定固定值的 [`Rotate`](super::Rotate) 共用。
 pub(super) static GLOBAL_MAX_SIZE: AtomicU64 = AtomicU64::new(DEFAULT_MAX_SIZE);
-/// 全域日誌保留天數，供未指定固定值的 [`Rotate`] 共用。
+/// 全域日誌保留天數，供未指定固定值的 [`Rotate`](super::Rotate) 共用。
 pub(super) static GLOBAL_MAX_AGE_DAYS: AtomicI64 = AtomicI64::new(DEFAULT_MAX_AGE_DAYS);
 
 /// 套用外部設定（`app.json` 的 `logging.file` 或 `.env`）到輪轉參數。
