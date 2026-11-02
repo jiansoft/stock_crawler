@@ -63,11 +63,14 @@ use self::{
     industry::{IndustrySection, industry_section},
     market::{RegimeSection, month_seasonality, regime_section, valuation_level},
     strategy::{StrategySection, strategy_section},
-    upcoming_dividend::{UpcomingSection, total_shares, upcoming_events, upcoming_section},
+    upcoming_dividend::{UpcomingSection, next_week, upcoming_section},
 };
 use super::holdings;
 use crate::{
-    app::calculation::dividend_fill_hints::FillHints,
+    app::calculation::{
+        dividend_fill_hints::FillHints,
+        upcoming_dividends::{total_shares, upcoming_dividends},
+    },
     core::{alert, util::text},
     domain::{
         chip::flow::{self, ChipFlowQuery},
@@ -122,16 +125,18 @@ pub async fn execute() -> Result<()> {
         });
     let all: BTreeSet<String> = shares.keys().cloned().collect();
     let fills = holding_fills(&PgDividendFillRepository::new(), &all, date).await;
-    let events = upcoming_events(&PgDividendRepository::new(), &all, date).await;
-    let upcoming = if events.is_empty() {
+    let (week_from, week_to) = next_week(date);
+    let dividends =
+        upcoming_dividends(&PgDividendRepository::new(), &shares, week_from, week_to).await;
+    let upcoming = if dividends.is_empty() {
         None
     } else {
-        let symbols: Vec<String> = events
+        let symbols: Vec<String> = dividends
             .iter()
-            .map(|(_, stock)| stock.stock_symbol.clone())
+            .map(|dividend| dividend.stock_symbol.clone())
             .collect();
         let hints = FillHints::load(&symbols, date).await;
-        upcoming_section(events, &shares, &hints, date)
+        upcoming_section(dividends, &hints, date)
     };
     let etfs = etf_section(&PgEtfRepository::new(), &all, date)
         .await

@@ -18,3 +18,5 @@ pub mod money_history;
 pub mod relative_strength;
 /// 收盤後全市場技術訊號
 pub mod technical_signal;
+/// 持股未來已公告的除權息與預估入帳
+pub mod upcoming_dividends;

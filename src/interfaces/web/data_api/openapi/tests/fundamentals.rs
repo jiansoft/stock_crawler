@@ -285,3 +285,27 @@ fn openapi_holder_levels_schema_pins_field_names() {
     let percent_400 = week["percent_400"].to_string();
     assert!(percent_400.contains("number") && percent_400.contains("null"));
 }
+
+/// 持股近期除權息 path 的契約：days 範圍與預設、項目陣列與填息欄位可為 null。
+#[test]
+fn openapi_upcoming_dividends_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/portfolio/upcoming-dividends");
+    assert_endpoint_responses(operation, "UpcomingDividendsResponse", false);
+    let days = query_schema(operation, "days");
+    assert_eq!(days["default"], 14);
+    assert_eq!(days["maximum"], 60);
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["UpcomingDividendsResponse"]["properties"];
+    assert_eq!(
+        response["items"]["items"]["$ref"],
+        "#/components/schemas/UpcomingDividendItem"
+    );
+    let item = &schemas["UpcomingDividendItem"]["properties"];
+    for field in ["ex_date", "shares", "cash_amount", "stock_shares"] {
+        assert!(item.get(field).is_some(), "缺 {field}");
+    }
+    assert!(item["fill_history"].to_string().contains("null"));
+    assert!(item["fill_peer"].to_string().contains("null"));
+}
