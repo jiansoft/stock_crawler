@@ -26,7 +26,7 @@ use crate::interfaces::web::data_api::dto::{
 };
 
 /// 目前持股（依代號合併）與最新收盤價；`$1 = 0` 時為全部會員。
-const HOLDINGS_SQL: &str = r#"
+pub(super) const HOLDINGS_SQL: &str = r#"
 SELECT o.security_code AS stock_symbol, COALESCE(s."Name", '') AS name,
     SUM(o.share_quantity)::bigint AS shares,
     MAX(CASE WHEN q.closing_price > 0 THEN q.closing_price END) AS closing_price
@@ -48,11 +48,12 @@ FROM dividend
 WHERE security_code = ANY($1) AND cash_dividend > 0 AND year >= $2
 "#;
 
+/// [`HOLDINGS_SQL`] 的一列；`/portfolio/upcoming-dividends` 也用同一個查詢取持股股數。
 #[derive(sqlx::FromRow)]
-struct HoldingRow {
-    stock_symbol: String,
+pub(super) struct HoldingRow {
+    pub(super) stock_symbol: String,
     name: String,
-    shares: i64,
+    pub(super) shares: i64,
     closing_price: Option<Decimal>,
 }
 

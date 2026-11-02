@@ -4,7 +4,7 @@
 //! 缺值欄位皆保留 `Option`，讓 serde 輸出 JSON `null` 而非猜測成零值。
 //!
 //! 型別依 endpoint 分組放在 `stocks`、`fundamentals`、`dividend_fill`、`financial_reports`、
-//! `financial_health`、`chip`、`institutional_flow`、`margin`、`market_regime`、`market_valuation`、`screening`、`market`、`dividend_calendar`、`market_movers`、`industries`、`portfolio`、`portfolio_chip`、`portfolio_dividend_fill`、`portfolio_history`、`dividend_forecast`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals`、`signal_history` 與 `relative_strength` 等子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
+//! `financial_health`、`chip`、`institutional_flow`、`margin`、`market_regime`、`market_valuation`、`screening`、`market`、`dividend_calendar`、`market_movers`、`industries`、`portfolio`、`portfolio_chip`、`portfolio_dividend_fill`、`portfolio_history`、`dividend_forecast`、`upcoming_dividends`、`cagr`、`valuation_band`、`peers`、`technicals`、`signals`、`signal_history` 與 `relative_strength` 等子模組，並在此重新導出；跨組共用的市場參數列舉與通用回應
 //! 留在本檔。
 
 mod cagr;
@@ -42,6 +42,7 @@ mod signals;
 mod stocks;
 mod technicals;
 mod timeline;
+mod upcoming_dividends;
 mod valuation_band;
 
 use serde::Serialize;
@@ -191,6 +192,9 @@ pub(super) use technicals::{
 };
 pub(super) use timeline::{
     StockTimelineParams, StockTimelineResponse, TimelineEvent, TimelineKindCount, TimelineKindValue,
+};
+pub(super) use upcoming_dividends::{
+    UpcomingDividendItem, UpcomingDividendsParams, UpcomingDividendsResponse,
 };
 pub(super) use valuation_band::{
     ImpliedPriceBand, RatioBandItem, ValuationBandParams, ValuationBandResponse,

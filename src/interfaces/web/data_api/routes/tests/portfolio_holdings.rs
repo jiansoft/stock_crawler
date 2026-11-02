@@ -259,3 +259,82 @@ async fn portfolio_etf_exposure_endpoint_db_semantics() {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad} {json}");
     }
 }
+
+/// 持股近期除權息：只列期間內已公告的持股除權息，依持股股數算入帳與配股；沒有持股回空清單；
+/// 參數超出範圍回 422。配息日期只能由今天推算；列屬於假代號與不存在的會員，結束時清除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn portfolio_upcoming_dividends_endpoint_db_semantics() {
+    use chrono::{Datelike, Days};
+
+    const MEMBER: i64 = 979_791;
+    let Some(pool) = pool_or_skip("portfolio_upcoming_dividends_endpoint_db_semantics").await
+    else {
+        return;
+    };
+    let cleanup_upcoming = || async {
+        let _ = sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(pool)
+            .await;
+        cleanup(pool).await;
+    };
+    cleanup_upcoming().await;
+
+    let path = format!("/api/v1/portfolio/upcoming-dividends?member_id={MEMBER}&days=10");
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["items"], serde_json::json!([]), "沒有持股");
+    assert_eq!(json["total_cash_amount"], 0.0);
+
+    seed(pool, &[SEED_STOCK]).await;
+    sqlx::query(
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost) VALUES ($1, $2, 1000, -50000)",
+    )
+    .bind(MEMBER)
+    .bind(SYMBOL)
+    .execute(pool)
+    .await
+    .expect("種入持股");
+    sqlx::query("INSERT INTO last_daily_quotes (date, stock_symbol, closing_price) VALUES ('2026-04-30', $1, 100)")
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("種入報價");
+    let today = chrono::Local::now().date_naive();
+    let soon = today + Days::new(3);
+    let later = today + Days::new(30);
+    for (ex, cash, stock) in [(soon, 2, 1), (later, 3, 0)] {
+        sqlx::query(r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2) VALUES ($1, $2, $2, $3, $4, $5, $4 + $5, $6, $6, '-', '-')"#)
+            .bind(SYMBOL)
+            .bind(ex.year())
+            .bind(if ex == soon { "Q3" } else { "Q4" })
+            .bind(Decimal::from(cash))
+            .bind(Decimal::from(stock))
+            .bind(ex.format("%Y-%m-%d").to_string())
+            .execute(pool)
+            .await
+            .expect("種入 dividend");
+    }
+
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let items = json["items"].as_array().expect("items 陣列");
+    assert_eq!(items.len(), 1, "30 天後那筆在 10 天以外：{json}");
+    assert_eq!(items[0]["ex_date"], soon.format("%Y-%m-%d").to_string());
+    assert_eq!(items[0]["shares"], 1000);
+    assert_eq!(items[0]["cash_amount"], 2000.0);
+    assert_eq!(items[0]["stock_shares"], 100, "1000 股 × 1 元 ÷ 面額 10 元");
+    assert_eq!(json["total_cash_amount"], 2000.0);
+    assert_eq!(json["from"], today.format("%Y-%m-%d").to_string());
+
+    for query in ["member_id=-1", "days=0", "days=61"] {
+        let (status, _) = get(&format!("/api/v1/portfolio/upcoming-dividends?{query}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+
+    cleanup_upcoming().await;
+}

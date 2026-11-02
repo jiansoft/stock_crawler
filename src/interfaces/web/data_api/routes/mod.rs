@@ -115,6 +115,10 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::dividend_forecast),
         )
         .route(
+            "/portfolio/upcoming-dividends",
+            axum::routing::get(handlers::upcoming_dividends),
+        )
+        .route(
             "/stocks/{symbol}/valuation-band",
             axum::routing::get(handlers::stock_valuation_band),
         )

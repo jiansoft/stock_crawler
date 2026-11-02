@@ -78,7 +78,23 @@ impl FillHints {
     /// 除權息清單這一檔要附的文字；沒有自身紀錄也沒有基準時為 `None`。
     #[must_use]
     pub fn text(&self, stock: &StockDividendInfo) -> Option<String> {
-        if let Some(history) = self.history(&stock.stock_symbol) {
+        self.text_for(
+            &stock.stock_symbol,
+            stock.cash_dividend,
+            stock.closing_price,
+        )
+    }
+
+    /// 一檔股票要附的填息文字：有自身紀錄寫次數與平均天數，沒有時以現金股利 ÷ 收盤寫同殖利率組中位數；
+    /// 都沒有時為 `None`。
+    #[must_use]
+    pub fn text_for(
+        &self,
+        symbol: &str,
+        cash_dividend: Decimal,
+        closing_price: Decimal,
+    ) -> Option<String> {
+        if let Some(history) = self.history(symbol) {
             let average = history
                 .average_trading_days
                 .map_or_else(String::new, |days| format!("、平均 {days} 日"));
@@ -87,7 +103,7 @@ impl FillHints {
                 history.filled, history.events
             ));
         }
-        let peer = self.peer(stock.cash_dividend, stock.closing_price)?;
+        let peer = self.peer(cash_dividend, closing_price)?;
         let median = peer.median_trading_days?;
         Some(format!(
             "同殖利率組（{}）填息中位數 {median} 日",
