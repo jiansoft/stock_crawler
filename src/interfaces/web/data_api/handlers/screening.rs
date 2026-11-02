@@ -3,6 +3,7 @@
 //! 依職責拆成四個子模組：[`sql`] 參數化 SQL 主體、[`params`] 參數驗證與排序白名單、
 //! [`row`] 資料庫列型別與 API 契約轉換，`tests` 為對應測試。
 
+mod order;
 mod params;
 mod row;
 mod sql;

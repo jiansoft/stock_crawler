@@ -3,10 +3,9 @@
 //! 對外的請求函式（[`get`]、[`get_json`]、[`post`]、[`post_use_json`] 等）都在這裡；
 //! 送出與重試在 `send` 子模組，敏感資訊遮罩在 `redact` 子模組。
 
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use async_trait::async_trait;
 use once_cell::sync::OnceCell;
 use reqwest::{Client, Method, RequestBuilder, Response, header, header::SET_COOKIE};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -14,7 +13,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::core::util;
 
 /// HTML 解析輔助工具。
+mod big5;
 pub mod element;
+mod post;
 /// 日誌與錯誤訊息的敏感資訊遮罩。
 mod redact;
 /// 請求的送出與重試。
@@ -22,9 +23,11 @@ mod send;
 // 隨機 User-Agent 產生器。
 pub mod user_agent;
 
+pub use big5::{TextForceBig5, get_use_big5};
+pub use post::{post, post_use_json};
 pub use redact::{redact_secrets, redact_url};
 pub use send::{fail_fast, summarized};
-use send::{format_form_params_log, send, send_with_client};
+use send::{send, send_with_client};
 
 /// A singleton instance of the reqwest client.
 static CLIENT: OnceCell<Client> = OnceCell::new();
@@ -82,30 +85,6 @@ async fn read_limited_body(mut res: Response, url: &str, max_bytes: usize) -> Re
 #[derive(Serialize, Deserialize)]
 /// An empty struct to represent an empty request or response.
 pub struct Empty {}
-
-/// An asynchronous trait that provides a method to force convert a reqwest::Response body
-/// from Big5 encoding to UTF-8 encoding.
-#[async_trait]
-pub trait TextForceBig5 {
-    /// Converts the body of a reqwest::Response from Big5 encoding to UTF-8 encoding.
-    ///
-    /// This method awaits the bytes of the response, converts them to a `Vec<u8>`,
-    /// and then calls `big5_2_utf8` function to perform the encoding conversion.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<String>`: A UTF-8 encoded string if the conversion is successful,
-    /// or an error if the conversion fails.
-    async fn text_force_big5(self) -> Result<String>;
-}
-
-/// Implements the TextForceBig5 trait for reqwest::Response.
-#[async_trait]
-impl TextForceBig5 for Response {
-    async fn text_force_big5(mut self) -> Result<String> {
-        util::text::big5_2_utf8(self.bytes().await?.as_ref())
-    }
-}
 
 /// Returns the reqwest client singleton instance or creates one if it doesn't exist.
 ///
@@ -296,115 +275,6 @@ pub fn extract_cookies(response: &Response) -> Option<String> {
     } else {
         Some(cookies.join("; "))
     }
-}
-
-/// Performs an HTTP GET request and returns the response as Big5 encoded text.
-///
-/// # Arguments
-///
-/// * `url`: The URL to send the GET request to.
-///
-/// # Returns
-///
-/// * `Result<String>`: The Big5 encoded response text, or an error if the request fails or the response cannot be parsed.
-pub async fn get_use_big5(url: &str) -> Result<String> {
-    // context 保留底層錯誤在 source chain。
-    send(Method::GET, url, None, None::<fn(_) -> _>, None)
-        .await?
-        .text_force_big5()
-        .await
-        .context("Error parsing response text use BIG5")
-}
-
-/// Performs an HTTP POST request with JSON request and response, and specified headers.
-///
-/// # Type Parameters
-///
-/// * `REQ`: The request type to serialize as JSON. It must implement `Serialize`.
-/// * `RES`: The response type to deserialize from JSON. It must implement `DeserializeOwned`.
-///
-/// # Arguments
-///
-/// * `url`: The URL to send the POST request to.
-/// * `headers`: An optional set of headers to include with the request.
-/// * `req`: An optional reference to the request object to be serialized as JSON.
-///
-/// # Returns
-///
-/// * `Result<RES>`: The deserialized response, or an error if the request fails or the response cannot be deserialized.
-pub async fn post_use_json<REQ, RES>(
-    url: &str,
-    headers: Option<header::HeaderMap>,
-    req: Option<&REQ>,
-) -> Result<RES>
-where
-    REQ: Serialize,
-    RES: DeserializeOwned,
-{
-    let res = send(
-        Method::POST,
-        url,
-        headers,
-        Some(
-            |rb: RequestBuilder| {
-                if let Some(r) = req { rb.json(r) } else { rb }
-            },
-        ),
-        None,
-    )
-    .await?;
-
-    // 以「串流 + 大小上限」讀取 body，取代無上限的 res.text()。
-    let res_body = read_limited_body(res, url, MAX_RESPONSE_BODY_BYTES).await?;
-    let res_body_preview = String::from_utf8_lossy(res_body.as_ref());
-
-    // with_context 保留 serde 原始錯誤在 source chain。
-    // 錯誤訊息中的 body 改為固定長度片段（舊版會把「整份 body」塞進錯誤，
-    // 造成大型 log，回應含敏感內容時也可能整段被寫進日誌）。
-    serde_json::from_slice(res_body.as_ref()).with_context(|| {
-        format!(
-            "Error parsing response JSON from {}. Body: {}",
-            redact_url(url),
-            util::text::log_snippet(&res_body_preview, 200)
-        )
-    })
-}
-
-/// Performs an HTTP POST request with form data and specified headers, and returns the response as text.
-///
-/// # Arguments
-///
-/// * `url`: The URL to send the POST request to.
-/// * `headers`: An optional set of headers to include with the request.
-/// * `params`: An optional map of form data key-value pairs.
-///
-/// # Returns
-///
-/// * `Result<String>`: The response text, or an error if the request fails
-///   or the response cannot be parsed.
-pub async fn post(
-    url: &str,
-    headers: Option<header::HeaderMap>,
-    params: Option<HashMap<&str, &str>>,
-) -> Result<String> {
-    let body_fn: Option<fn(RequestBuilder) -> RequestBuilder> = None;
-    let response = match params {
-        Some(p) => {
-            let request_detail = format_form_params_log(&p);
-            send(
-                Method::POST,
-                url,
-                headers,
-                Some(move |rb: RequestBuilder| rb.form(&p)),
-                Some(request_detail),
-            )
-            .await?
-        }
-        None => send(Method::POST, url, headers, body_fn, None).await?,
-    };
-
-    // context 保留 reqwest 原始錯誤在 source chain。
-    response.text().await.context("Error parsing response text")
 }
 
 /// HTTP 層已改用 `tracing::*!()` 輸出，不再有獨立的 channel queue。

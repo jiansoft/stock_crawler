@@ -15,9 +15,10 @@ mod valuation_margins;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
+use super::order::screen_order_by;
 use super::params::{
     analytical_date_is_fresh, f_score_year_is_fresh, financial_period_is_fresh,
-    parse_exclude_industry_ids, revenue_month_is_fresh, screen_order_by, validate_screening_params,
+    parse_exclude_industry_ids, revenue_month_is_fresh, validate_screening_params,
 };
 use super::sql::SCREEN_STOCKS_SQL;
 use super::{rs_columns, screen_at, streak_columns};
