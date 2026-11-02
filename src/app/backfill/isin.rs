@@ -8,6 +8,7 @@
 use crate::{
     app::backfill, core::declare::StockExchangeMarket, core::util::datetime::Weekend,
     infra::crawler::twse,
+    infra::crawler::twse::international_securities_identification_number::InternationalSecuritiesIdentificationNumber,
 };
 
 use anyhow::{Result, anyhow};
@@ -75,9 +76,18 @@ fn registry_markets() -> impl Iterator<Item = StockExchangeMarket> {
 async fn process_market(mode: StockExchangeMarket) -> Result<()> {
     // 透過 twse crawler 模組爬取指定市場的 ISIN 證券識別碼網頁並解析
     let result = twse::international_securities_identification_number::visit(mode).await?;
-    for item in result {
+    save_changed(&result).await;
+    Ok(())
+}
+
+/// 逐筆轉成註冊指令，新股票或產業、市場、名稱有變動的寫入資料庫並派發事件；回傳寫入的檔數。
+///
+/// 轉不出指令的（未分類產業、ETF／ETN、公開發行）略過；單檔寫入失敗只記錄錯誤、繼續下一檔。
+async fn save_changed(items: &[InternationalSecuritiesIdentificationNumber]) -> usize {
+    let mut saved = 0;
+    for item in items {
         // 透過防腐層 (ACL) Mapper 將外部爬蟲 DTO 轉換為內部指令
-        let cmd = match backfill::acl::IsinAclMapper::from_isin(&item) {
+        let cmd = match backfill::acl::IsinAclMapper::from_isin(item) {
             Some(c) => c,
             None => continue, // 過濾無效或未分類的資料 (如 industry_id == 0)
         };
@@ -91,18 +101,22 @@ async fn process_market(mode: StockExchangeMarket) -> Result<()> {
         )
         .await;
 
+        if !new_stock {
+            continue;
+        }
         // 若確認是新股票或資料有變動，則進行寫入與同步處理
-        if new_stock && let Err(why) = update_stock_info(&cmd).await {
+        match update_stock_info(&cmd).await {
+            Ok(()) => saved += 1,
             // 若更新單一股票基本資料失敗，記錄錯誤後繼續處理下一檔，避免單一錯誤導致整個市場回補中斷
-            tracing::error!(
+            Err(why) => tracing::error!(
                 "Failed to update stock info for {} because {:?}",
                 cmd.symbol,
                 why
-            );
+            ),
         }
     }
 
-    Ok(())
+    saved
 }
 
 /// 更新單一證券的詳細基本資訊至資料庫、記憶體快取，並派發領域事件以非同步處理副作用。
@@ -169,6 +183,57 @@ mod tests {
                 StockExchangeMarket::Emerging,
             ]
         );
+    }
+
+    fn isin(name: &str, industry: &str) -> InternationalSecuritiesIdentificationNumber {
+        InternationalSecuritiesIdentificationNumber {
+            stock_symbol: "79979IS".to_string(),
+            name: name.to_string(),
+            isin_code: String::new(),
+            listing_date: String::new(),
+            industry: industry.to_string(),
+            cfi_code: String::new(),
+            market: StockExchangeMarket::Listed,
+        }
+    }
+
+    /// 新股票寫入、資料相同不重寫、改名再寫入；公開發行（市場別對照表沒有）不寫。假代號結束時刪除。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn save_changed_writes_new_and_changed_stocks_only() {
+        dotenvy::dotenv().ok();
+        let pool = crate::infra::database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 save_changed_writes_new_and_changed_stocks_only：無資料庫連接");
+            return;
+        }
+        SHARE.load().await;
+        let cleanup = || async {
+            let _ = sqlx::query("DELETE FROM stocks WHERE stock_symbol = '79979IS'")
+                .execute(pool)
+                .await;
+        };
+        cleanup().await;
+
+        let public = InternationalSecuritiesIdentificationNumber {
+            market: StockExchangeMarket::Public,
+            ..isin("公開發行", "水泥工業")
+        };
+        let first = save_changed(&[isin("測試新股", "水泥工業"), public]).await;
+        let unchanged = save_changed(&[isin("測試新股", "水泥工業")]).await;
+        let renamed = save_changed(&[isin("測試改名", "水泥工業")]).await;
+        let name: Option<String> =
+            sqlx::query_scalar(r#"SELECT "Name" FROM stocks WHERE stock_symbol = '79979IS'"#)
+                .fetch_optional(pool)
+                .await
+                .expect("查詢股票");
+        cleanup().await;
+
+        assert_eq!((first, unchanged, renamed), (1, 0, 1));
+        assert_eq!(name.as_deref(), Some("測試改名"));
     }
 
     #[tokio::test]
