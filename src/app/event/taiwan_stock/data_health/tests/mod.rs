@@ -25,6 +25,26 @@ async fn print_report() {
         .expect("量測應成功");
     println!("{message}");
 }
+
+/// 對測試庫組一次週報（唯讀、不發送）：檢查項目之後接「本週附註」區塊，6 則各一行；
+/// 連不上資料庫時跳過。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn build_report_appends_notes_section() {
+    dotenvy::dotenv().ok();
+    let Ok(message) = build_report(day(10)).await else {
+        println!("跳過 build_report_appends_notes_section：無資料庫連接");
+        return;
+    };
+    let (checks, notes) = message
+        .split_once("\n\n📎 本週附註")
+        .expect("週報要有本週附註區塊");
+    assert!(checks.contains("資料健康週報"), "{message}");
+    assert_eq!(notes.matches("\n• ").count(), 6, "{message}");
+}
 use crate::domain::{
     health::{DerivedTableLatest, EtfNavDayCount},
     quote::entity::MarketTradedCount,
