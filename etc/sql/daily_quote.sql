@@ -89,3 +89,18 @@ CREATE INDEX DailyQuotes_year_date_price_idx
     INCLUDE ("LowestPrice", "ClosingPrice", "HighestPrice",
         "price-to-book_ratio", "PriceEarningRatio")
     WHERE "ClosingPrice" > 0;
+
+-- 預設 autovacuum 門檻是表的 20%（約 146 萬列），每天只新增約 1,700 列永遠達不到，
+-- visibility map 不更新，index-only scan 會一直回讀 heap（2026-11-03 正式庫 10 月起 9,001／50,536 列）。
+-- 改成每 2 萬列變動就 vacuum／analyze（約每 1～2 週一次）；死資料頁低於 2% 時 VACUUM 預設會略過索引清理，
+-- 那些頁就無法標成全可見，所以強制 vacuum_index_cleanup = on（每次多掃索引約 7 秒）。
+-- 正式庫 2026-11-03 已套用。
+alter table public."DailyQuotes" set (
+    autovacuum_vacuum_insert_threshold = 20000,
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_threshold = 20000,
+    autovacuum_vacuum_scale_factor = 0,
+    autovacuum_analyze_threshold = 20000,
+    autovacuum_analyze_scale_factor = 0,
+    vacuum_index_cleanup = on
+);
