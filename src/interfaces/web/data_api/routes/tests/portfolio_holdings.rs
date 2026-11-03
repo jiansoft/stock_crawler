@@ -95,21 +95,21 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
 
     let (status, json) = get(&path).await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    // 已公告 2 元 × 1,000 股＋去年同期 1 元 × 1,000 股；全年彙總列不計。
+    // 已公告 2 元 × 1,000 股＋去年同期那期依最近一期 2 元 × 1,000 股（季配）；全年彙總列不計。
     assert_eq!(
         (
             json["announced_total"].clone(),
             json["estimated_total"].clone(),
             json["total"].clone()
         ),
-        (2000.0.into(), 1000.0.into(), 3000.0.into())
+        (2000.0.into(), 2000.0.into(), 4000.0.into())
     );
-    assert_eq!(json["forward_yield_percent"], 3.0);
+    assert_eq!(json["forward_yield_percent"], 4.0);
     let items = json["items"].as_array().expect("items 陣列");
     assert_eq!(items.len(), 2);
     assert_eq!(items[0]["basis"], "announced");
     assert_eq!(items[0]["ex_date"], fmt(announced_ex));
-    assert_eq!(items[1]["basis"], "estimated");
+    assert_eq!(items[1]["basis"], "latest_amount");
 
     let (_, json) = get(&format!("{path}&months=1")).await;
     assert_eq!(json["estimated_total"], 0.0, "一個月內只有已公告的那筆");

@@ -239,7 +239,13 @@ fn openapi_dividend_forecast_schema_pins_field_names() {
     let item = &schemas["DividendForecastItem"]["properties"];
     assert_eq!(
         enum_values(&document, &item["basis"]),
-        serde_json::json!(["announced", "amount_announced", "estimated"])
+        serde_json::json!([
+            "announced",
+            "amount_announced",
+            "estimated",
+            "latest_amount",
+            "cadence"
+        ])
     );
 }
 
