@@ -35,11 +35,36 @@ pub async fn execute() -> Result<()> {
 
     let today = now.date_naive();
     let (listed_rows, otc) = tokio::try_join!(listed(now.fixed_offset()), otc())?;
+    publish(&listed_rows, &otc, today).await
+}
+
+/// 把當天的快照寫進 `qfii_history`；有變更才重算 `qfii_trend` 並派發
+/// [`DomainEvent::ForeignHoldingsUpdated`]。
+async fn publish(
+    listed_rows: &[QfiiDto],
+    otc: &twse::qualified_foreign_institutional_investor::over_the_counter::OtcQfiiSnapshot,
+    today: NaiveDate,
+) -> Result<()> {
+    // 上市以查詢日為資料日；休市日沒有資料（空清單）。上櫃以櫃買回應的日期為準，
+    // 休市日會回最近一個交易日的資料，重寫一次不會有變更。
+    let mut history = to_history(listed_rows, today);
+    history.extend(to_history(&otc.rows, otc.date));
+
     let repo = PgForeignHoldingRepository::new();
-    let Some(as_of) = save_snapshots(&repo, &listed_rows, &otc, today).await? else {
+    let changed = repo.save_daily(&history).await?;
+    tracing::info!(
+        "外資持股歷史寫入 {} 筆（變更 {} 筆）",
+        history.len(),
+        changed
+    );
+    if changed == 0 {
         // 沒有新資料（休市日、同一天重跑）時不重算也不通知，避免重複推播。
         return Ok(());
-    };
+    }
+
+    let as_of = trend_as_of(listed_rows.is_empty(), today, otc.date);
+    let trends = repo.rebuild_trends_as_of(as_of).await?;
+    tracing::info!("外資持股趨勢重算 {} 檔（基準日 {}）", trends, as_of);
 
     crate::app::event::get_global_dispatcher()
         .dispatch_async(vec![DomainEvent::ForeignHoldingsUpdated {
@@ -49,34 +74,6 @@ pub async fn execute() -> Result<()> {
         .await;
 
     Ok(())
-}
-
-/// 把上市、上櫃當天的快照寫進 `qfii_history`；有變更時重算 `qfii_trend`，回傳趨勢基準日，沒有變更回 `None`。
-///
-/// 上市以查詢日為資料日；休市日沒有資料（空清單）。上櫃以櫃買回應的日期為準，
-/// 休市日會回最近一個交易日的資料，重寫一次不會有變更。
-async fn save_snapshots(
-    repo: &PgForeignHoldingRepository,
-    listed_rows: &[QfiiDto],
-    otc: &twse::qualified_foreign_institutional_investor::over_the_counter::OtcQfiiSnapshot,
-    today: NaiveDate,
-) -> Result<Option<NaiveDate>> {
-    let mut history = to_history(listed_rows, today);
-    history.extend(to_history(&otc.rows, otc.date));
-    let changed = repo.save_daily(&history).await?;
-    tracing::info!(
-        "外資持股歷史寫入 {} 筆（變更 {} 筆）",
-        history.len(),
-        changed
-    );
-    if changed == 0 {
-        return Ok(None);
-    }
-
-    let as_of = trend_as_of(listed_rows.is_empty(), today, otc.date);
-    let trends = repo.rebuild_trends_as_of(as_of).await?;
-    tracing::info!("外資持股趨勢重算 {} 檔（基準日 {}）", trends, as_of);
-    Ok(Some(as_of))
 }
 
 async fn listed(date_time: DateTime<FixedOffset>) -> Result<Vec<QfiiDto>> {
