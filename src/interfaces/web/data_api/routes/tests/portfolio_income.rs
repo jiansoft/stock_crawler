@@ -125,6 +125,7 @@ async fn portfolio_dividend_income_endpoint_db_semantics() {
     seed_recorded(pool, 300, last_year, 900).await;
 
     let (status, json) = get(&path).await;
+    let (detailed_status, detailed) = get(&format!("{path}&include_items=true")).await;
     let (bad_member, _) = get("/api/v1/portfolio/dividend-income?member_id=-1").await;
     let (bad_year, _) = get("/api/v1/portfolio/dividend-income?year=1999").await;
     cleanup_income(pool).await;
@@ -147,6 +148,21 @@ async fn portfolio_dividend_income_endpoint_db_semantics() {
     assert_eq!(month["month"], today.month());
     assert_eq!(month["received_cash_amount"], 1000.0, "{json}");
     assert_eq!(month["last_year_cash_amount"], 900.0, "{json}");
+    assert!(
+        json.get("items").is_none(),
+        "沒帶 include_items 不回明細：{json}"
+    );
+    assert_eq!(detailed_status, StatusCode::OK, "{detailed}");
+    let items = detailed["items"].as_array().expect("items 陣列");
+    let expected_items = if tomorrow.year() == today.year() {
+        2
+    } else {
+        1
+    };
+    assert_eq!(items.len(), expected_items, "{detailed}");
+    assert_eq!(items[0]["payable_date"], today.to_string());
+    assert_eq!(items[0]["cash_amount"], 1000.0);
+    assert_eq!(items[0]["estimated"], false);
     assert_eq!(bad_member, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(bad_year, StatusCode::UNPROCESSABLE_ENTITY);
 }

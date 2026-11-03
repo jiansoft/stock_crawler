@@ -213,9 +213,15 @@ fn openapi_dividend_income_schema_pins_field_names() {
     assert_endpoint_responses(operation, "DividendIncomeResponse", false);
     assert_eq!(query_schema(operation, "year")["minimum"], 2000);
     assert_eq!(query_schema(operation, "member_id")["default"], 0);
+    assert_eq!(query_schema(operation, "include_items")["default"], false);
 
     let schemas = &document["components"]["schemas"];
     let response = &schemas["DividendIncomeResponse"]["properties"];
+    assert!(
+        response["items"].to_string().contains("UpcomingPayoutItem"),
+        "items 沿用 UpcomingPayoutItem：{}",
+        response["items"]
+    );
     for field in [
         "as_of",
         "total_cash_amount",
