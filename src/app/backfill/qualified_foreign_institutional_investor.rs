@@ -239,39 +239,44 @@ fn qfii_changed(current: (i64, i64, rust_decimal::Decimal), cmd: &UpdateQfiiComm
         )
 }
 
-/// 更新股票的外資持股狀況，資料庫更新後會更新 SHARE.stocks
-async fn update(cmds: Vec<UpdateQfiiCommand>) -> Result<()> {
-    let repo = PgStockRepository::new();
-
+/// 比對來源與主檔，只把有變更的股票以單一批次寫回（資料庫與快取一起）。
+///
+/// 舊版每檔有變更就呼叫 `save`：除了 upsert 還會刪掉重建搜尋索引，每天約 2,000 檔、
+/// 上萬次往返花掉約 3 分鐘（M42）。外資持股不會改股名，批次只寫三個欄位。
+/// 寫回失敗只記錄，不中斷後續的持股歷史寫入。
+async fn update_with<R: StockRepository>(repo: &R, cmds: Vec<UpdateQfiiCommand>) -> Result<()> {
+    let compared = cmds.len();
+    let mut changed = Vec::new();
     for cmd in cmds {
-        // 嘗試讀取 Stock 聚合根
-        let stock_opt = repo.find_by_symbol(&cmd.symbol).await?;
-        if let Some(mut stock) = stock_opt {
-            let current = (
-                stock.issued_share(),
-                stock.qfii_shares_held(),
-                stock.qfii_share_holding_percentage(),
-            );
-            if !qfii_changed(current, &cmd) {
-                continue;
-            }
-
-            // 使用領域模型更新狀態
-            stock.update_qfii(cmd.shares_held, cmd.share_holding_percentage);
-            stock.update_issued_shares(cmd.issued_share);
-
-            // 儲存 Stock 聚合根，同時更新 DB 與快取
-            if let Err(why) = repo.save(&stock).await {
-                tracing::error!(
-                    "Failed to save stock QFII updates for {} because {:?}",
-                    cmd.symbol,
-                    why
-                );
-            }
+        // 主檔讀取優先走全域快取，不會每檔一次往返。
+        let Some(mut stock) = repo.find_by_symbol(&cmd.symbol).await? else {
+            continue;
+        };
+        let current = (
+            stock.issued_share(),
+            stock.qfii_shares_held(),
+            stock.qfii_share_holding_percentage(),
+        );
+        if !qfii_changed(current, &cmd) {
+            continue;
         }
+
+        stock.update_qfii(cmd.shares_held, cmd.share_holding_percentage);
+        stock.update_issued_shares(cmd.issued_share);
+        changed.push(stock);
+    }
+
+    match repo.save_qfii_batch(&changed).await {
+        Ok(saved) => tracing::info!("外資持股寫回主檔 {saved} 檔（比對 {compared} 檔）"),
+        Err(why) => tracing::error!("Failed to save stock QFII updates because {why:?}"),
     }
 
     Ok(())
+}
+
+/// 更新股票的外資持股狀況，資料庫更新後會更新 SHARE.stocks
+async fn update(cmds: Vec<UpdateQfiiCommand>) -> Result<()> {
+    update_with(&PgStockRepository::new(), cmds).await
 }
 
 #[cfg(test)]

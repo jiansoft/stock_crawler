@@ -131,6 +131,53 @@ impl StockRepository for PgStockRepository {
     }
 
     /// <summary>
+    /// 以 `UPDATE … FROM UNNEST` 一次寫回已發行股數與外資持股，成功後同步全域快取。
+    /// </summary>
+    async fn save_qfii_batch(&self, stocks: &[Stock]) -> Result<u64> {
+        if stocks.is_empty() {
+            return Ok(0);
+        }
+
+        let mut symbols = Vec::with_capacity(stocks.len());
+        let mut issued_shares = Vec::with_capacity(stocks.len());
+        let mut shares_held = Vec::with_capacity(stocks.len());
+        let mut percentages = Vec::with_capacity(stocks.len());
+        for stock in stocks {
+            symbols.push(stock.symbol().0.clone());
+            issued_shares.push(stock.issued_share());
+            shares_held.push(stock.qfii_shares_held());
+            percentages.push(stock.qfii_share_holding_percentage());
+        }
+
+        let sql = r#"
+            UPDATE stocks AS s
+            SET issued_share = u.issued_share,
+                qfii_shares_held = u.qfii_shares_held,
+                qfii_share_holding_percentage = u.qfii_share_holding_percentage
+            FROM UNNEST($1::text[], $2::bigint[], $3::bigint[], $4::numeric[])
+                AS u(stock_symbol, issued_share, qfii_shares_held, qfii_share_holding_percentage)
+            WHERE s.stock_symbol = u.stock_symbol;
+        "#;
+        let updated = sqlx::query(sql)
+            .bind(symbols)
+            .bind(issued_shares)
+            .bind(shares_held)
+            .bind(percentages)
+            .execute(database::get_connection())
+            .await
+            .context("Failed to save_qfii_batch in PgStockRepository")?
+            .rows_affected();
+
+        if let Ok(mut cache) = SHARE.stocks.write() {
+            for stock in stocks {
+                cache.insert(stock.symbol().0.clone(), stock.clone());
+            }
+        }
+
+        Ok(updated)
+    }
+
+    /// <summary>
     /// 獲取所有目前非下市 (有效交易中) 的證券主檔。
     /// </summary>
     async fn fetch_all_active(&self) -> Result<Vec<Stock>> {

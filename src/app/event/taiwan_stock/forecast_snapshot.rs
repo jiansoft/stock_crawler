@@ -1,6 +1,6 @@
 //! 每月 1 日 08:15 股利預估快照：把各會員未來 12 個月的逐筆預估（與 `/portfolio/dividend-forecast`
-//! 同一套規則）寫進 `dividend_forecast_snapshot`，事後與已領股利明細比對預估誤差（比對 SQL 見
-//! `etc/sql/dividend_forecast_snapshot.sql`）。
+//! 同一套規則）寫進 `dividend_forecast_snapshot`，事後由 `/portfolio/dividend-forecast/accuracy`
+//! 與實際入帳比對預估誤差。
 //!
 //! 同一天重跑時整批替換；沒有持股的會員不記錄。
 

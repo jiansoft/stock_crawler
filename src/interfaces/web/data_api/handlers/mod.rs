@@ -13,6 +13,7 @@ mod cagr;
 mod chip;
 mod dividend_fill;
 mod dividend_forecast;
+mod dividend_forecast_accuracy;
 mod dividend_income;
 mod etf;
 mod etf_tracking;
@@ -69,6 +70,9 @@ pub(super) use cagr::{__path_cagr_by_symbol, __path_cagr_ranking, cagr_by_symbol
 pub(super) use chip::{__path_stock_chip, stock_chip};
 pub(super) use dividend_fill::{__path_dividend_fill, dividend_fill};
 pub(super) use dividend_forecast::{__path_dividend_forecast, dividend_forecast};
+pub(super) use dividend_forecast_accuracy::{
+    __path_dividend_forecast_accuracy, dividend_forecast_accuracy,
+};
 pub(super) use dividend_income::{__path_dividend_income, dividend_income};
 pub(super) use etf::{
     __path_compare_etfs, __path_etf_detail, __path_list_etfs, compare_etfs, etf_detail, list_etfs,

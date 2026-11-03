@@ -44,6 +44,9 @@ pub(super) async fn fetch_dividend_refresh_candidates() -> Result<Vec<String>> {
 }
 
 /// 取得指定年度與多次配息相關的股利資料。
+///
+/// 已下市（`"SuspendListing"`）的股票排除：這份清單會把股票加進 21:00 的 Yahoo 股利補抓，
+/// 下市股的個股頁已經不存在，只會換來 404（2026-11-03 00847B 中信美國市政債）。
 pub(super) async fn fetch_multiple_dividends_for_year(year: i32) -> Result<Vec<Dividend>> {
     let sql = r#"
         SELECT 
@@ -53,8 +56,14 @@ pub(super) async fn fetch_multiple_dividends_for_year(year: i32) -> Result<Vec<D
             capital_reserve_cash_dividend, earnings_cash_dividend,
             capital_reserve_stock_dividend, earnings_stock_dividend,
             payout_ratio_cash, payout_ratio_stock, payout_ratio
-        FROM dividend
-        WHERE (year = $1 OR year_of_dividend = $1) AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2');
+        FROM dividend AS d
+        WHERE (year = $1 OR year_of_dividend = $1) AND quarter IN ('Q1','Q2','Q3','Q4','H1','H2')
+            AND NOT EXISTS (
+                SELECT 1
+                FROM stocks AS s
+                WHERE s.stock_symbol = d.security_code
+                    AND s."SuspendListing"
+            );
     "#;
     let rows = sqlx::query(sql)
         .bind(year)
