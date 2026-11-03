@@ -92,7 +92,22 @@ pub(super) async fn fetch_anomaly_bucket(
 /// 參數：`$1`～`$2` 掃描期間、`$3` 跳動門檻、`$4` 上市初期豁免筆數、
 /// `$5` 桶數、`$6` 桶號（`$5 = 1` 為不分桶）。
 const ANOMALY_EVENTS_SQL: &str = r#"
-    WITH px AS (
+    WITH RECURSIVE symbols AS (
+        -- 逐檔跳著走 (stock_symbol, Date) 索引取出日K 的所有代號（loose index scan，約兩千多次探索）。
+        -- 分桶條件放在代號清單上，px 只掃本桶股票；條件若放在日K 上，每一桶都會把十年全市場
+        -- 日K 掃一遍再丟掉 3/4（2026-11-03 正式庫實測一桶 178 萬頁 → 49 萬頁、6.5 s → 2.1 s，
+        -- 結果相同）。不用 stocks 當清單：日K 有 127 檔已不在股票主檔的代號。
+        (SELECT stock_symbol FROM "DailyQuotes" ORDER BY stock_symbol LIMIT 1)
+        UNION ALL
+        SELECT (
+            SELECT q.stock_symbol FROM "DailyQuotes" q
+            WHERE q.stock_symbol > s.stock_symbol
+            ORDER BY q.stock_symbol LIMIT 1
+        )
+        FROM symbols s
+        WHERE s.stock_symbol IS NOT NULL
+    ),
+    px AS (
         SELECT stock_symbol,
                "Date",
                "ClosingPrice",
@@ -102,8 +117,12 @@ const ANOMALY_EVENTS_SQL: &str = r#"
                LEAD("Date") OVER w AS prev_date
         FROM "DailyQuotes"
         WHERE "Date" BETWEEN $1 AND $2 AND "ClosingPrice" > 0 AND "TradingVolume" > 0
-          -- 分桶：轉 bigint 再取絕對值，避免 hashtext 回傳 int 最小值時 abs() 溢位。
-          AND ($5::int = 1 OR abs(hashtext(stock_symbol)::bigint) % $5::int = $6::int)
+          AND stock_symbol IN (
+              SELECT stock_symbol FROM symbols
+              WHERE stock_symbol IS NOT NULL
+                -- 分桶：轉 bigint 再取絕對值，避免 hashtext 回傳 int 最小值時 abs() 溢位。
+                AND ($5::int = 1 OR abs(hashtext(stock_symbol)::bigint) % $5::int = $6::int)
+          )
         WINDOW w AS (PARTITION BY stock_symbol ORDER BY "Date" DESC)
     ),
     jumps AS (
