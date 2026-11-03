@@ -6,6 +6,8 @@ use crate::{
     infra::crawler::{share::EtfInfo, tpex, twse},
 };
 
+use std::future::Future;
+
 use anyhow::Result;
 use chrono::Local;
 use scopeguard::defer;
@@ -15,20 +17,31 @@ pub async fn execute() -> Result<()> {
     if Local::now().is_weekend() {
         return Ok(());
     }
+    sync(twse::etf::visit(), tpex::etf::visit()).await
+}
 
+/// 依序以上市、上櫃 ETF 清單更新證券主檔；任一市場抓取失敗只記錄，另一市場照常更新。
+///
+/// # Errors
+///
+/// 只有更新主檔的流程本身回傳錯誤時才回傳（單檔寫入失敗只記錄）。
+async fn sync(
+    listed: impl Future<Output = Result<Vec<EtfInfo>>>,
+    otc: impl Future<Output = Result<Vec<EtfInfo>>>,
+) -> Result<()> {
     tracing::info!("更新台股 ETF 資訊開始");
     defer! {
        tracing::info!("更新台股 ETF 資訊結束");
     }
 
     // 1. 抓取上市 ETF 資料
-    match twse::etf::visit().await {
+    match listed.await {
         Ok(items) => update_stocks(items).await?,
         Err(why) => tracing::error!("處理上市 ETF 市場失敗: {:?}", why),
     }
 
     // 2. 抓取上櫃 ETF 資料
-    match tpex::etf::visit().await {
+    match otc.await {
         Ok(items) => update_stocks(items).await?,
         Err(why) => tracing::error!("處理上櫃 ETF 市場失敗: {:?}", why),
     }
@@ -103,24 +116,4 @@ async fn update_stock_info(cmd: &backfill::acl::RegisterStockCommand) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::infra::cache::SHARE;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_execute_etf() {
-        dotenvy::dotenv().ok();
-        SHARE.load().await;
-        tracing::debug!("開始 execute_etf");
-
-        match execute().await {
-            Ok(_) => {
-                tracing::debug!("完成 execute_etf");
-            }
-            Err(why) => {
-                tracing::debug!("執行失敗: {:?}", why);
-            }
-        }
-    }
-}
+mod tests;
