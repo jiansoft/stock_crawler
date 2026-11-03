@@ -2,11 +2,6 @@
 
 use super::*;
 
-/// 在這個執行緒裝上 tracing subscriber，讓 `tracing::info!` 真的格式化參數（沒有 subscriber 時參數不會求值）。
-fn log_to_test_output() -> tracing::subscriber::DefaultGuard {
-    tracing::subscriber::set_default(tracing_subscriber::fmt().with_test_writer().finish())
-}
-
 fn one_flow(symbol: &str) -> Result<HashMap<String, InstitutionalFlow>> {
     Ok(HashMap::from([(
         symbol.to_string(),
@@ -78,7 +73,6 @@ async fn write_daily_saves_both_then_refreshes_that_day() {
 /// 逐日回補：單日失敗只略過，每天之後都停頓，最後從第一天重算連續天數到今天。
 #[tokio::test]
 async fn backfill_dates_skips_failed_days_and_refreshes_from_first_day() {
-    let _log = log_to_test_output();
     use crate::domain::chip::test_double::RecordingChipRepository;
 
     let repo = RecordingChipRepository::default();
@@ -129,7 +123,6 @@ async fn backfill_dates_skips_failed_days_and_refreshes_from_first_day() {
 /// 董監持股：一邊失敗只寫另一邊，兩邊都失敗回錯誤且不寫入。
 #[tokio::test]
 async fn save_insider_holdings_writes_what_was_fetched() {
-    let _log = log_to_test_output();
     use crate::domain::chip::test_double::RecordingChipRepository;
 
     let holding = |symbol: &str| InsiderHolding {
@@ -167,7 +160,6 @@ async fn save_insider_holdings_writes_what_was_fetched() {
 /// 主力進出入庫：寫入失敗只記錄，不往外拋。
 #[tokio::test]
 async fn save_broker_flows_to_writes_and_swallows_failures() {
-    let _log = log_to_test_output();
     use crate::domain::chip::test_double::RecordingChipRepository;
 
     let flow = BrokerFlow {
