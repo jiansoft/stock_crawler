@@ -40,29 +40,33 @@ pub async fn execute() -> Result<()> {
 
     // 取得鎖定以讀取收集好的個股權重
     let weights = stock_weights.lock().await;
+    save_weights(&PgStockRepository::new(), &weights).await
+}
 
-    if !weights.is_empty() {
-        let stock_repo = PgStockRepository::new();
-
-        // 為了避免舊權重殘留，更新前先將所有個股的權重比重置歸零
-        stock_repo
-            .zeroed_out_weights()
-            .await
-            .context("Failed to zero out stock weights in registry repository")?;
-
-        // 使用並行串流，限制最大並行度更新每檔個股的權值
-        stream::iter(weights.clone())
-            .for_each_concurrent(util::concurrent_limit_16(), |sw| {
-                let repo = PgStockRepository::new();
-                async move {
-                    // 呼叫領域倉儲更新個股權重
-                    if let Err(why) = repo.update_weight(&sw.symbol, sw.weight).await {
-                        tracing::error!("Failed to update stock weight: {:#?}", why);
-                    }
-                }
-            })
-            .await;
+/// 先把所有個股權重歸零（避免舊權重殘留），再並行寫入 `weights`；`weights` 為空時不動資料庫。
+///
+/// # Errors
+///
+/// 歸零失敗時回傳錯誤；單檔寫入失敗只記錄。
+async fn save_weights(
+    repo: &impl StockRepository,
+    weights: &[SaveStockWeightCommand],
+) -> Result<()> {
+    if weights.is_empty() {
+        return Ok(());
     }
+    repo.zeroed_out_weights()
+        .await
+        .context("Failed to zero out stock weights in registry repository")?;
+
+    // 使用並行串流，限制最大並行度更新每檔個股的權值
+    stream::iter(weights)
+        .for_each_concurrent(util::concurrent_limit_16(), |sw| async move {
+            if let Err(why) = repo.update_weight(&sw.symbol, sw.weight).await {
+                tracing::error!("Failed to update stock weight: {:#?}", why);
+            }
+        })
+        .await;
 
     Ok(())
 }
@@ -95,27 +99,4 @@ async fn handle_stock_exchange(
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::infra::cache::SHARE;
-
-    use super::*;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_execute() {
-        dotenvy::dotenv().ok();
-        SHARE.load().await;
-        tracing::debug!("開始 execute");
-
-        match execute().await {
-            Ok(_) => {
-                tracing::debug!("成功執行 execute");
-            }
-            Err(why) => {
-                tracing::debug!("Failed to execute because {:?}", why);
-            }
-        }
-
-        tracing::debug!("結束 execute");
-    }
-}
+mod tests;
