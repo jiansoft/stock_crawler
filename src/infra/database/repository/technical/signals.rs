@@ -97,13 +97,19 @@ impl TechnicalSignalRepository for PgQuoteRepository {
 }
 
 /// `$1`～`$2`（含）期間有成交的上市櫃股票，含之後下市的。
+///
+/// 從 `stocks` 逐檔以 `(stock_symbol, "Date")` 索引找第一筆成交即停；不要改回掃日線再 `DISTINCT`，
+/// 2019 年起的回補要讀過七年全市場日線（正式庫冷快取 9.1 秒、暖快取 0.7 秒 → 0.15 秒）。
 const TRADED_SYMBOLS_SQL: &str = r#"
-SELECT DISTINCT q.stock_symbol::text
-FROM "DailyQuotes" q
-JOIN stocks s ON s.stock_symbol = q.stock_symbol
-WHERE q."Date" BETWEEN $1 AND $2
-  AND q."ClosingPrice" > 0
-  AND s.stock_exchange_market_id IN (2, 4)
+SELECT s.stock_symbol::text
+FROM stocks s
+WHERE s.stock_exchange_market_id IN (2, 4)
+  AND EXISTS (
+      SELECT 1 FROM "DailyQuotes" q
+      WHERE q.stock_symbol = s.stock_symbol
+        AND q."Date" BETWEEN $1 AND $2
+        AND q."ClosingPrice" > 0
+  )
 ORDER BY 1
 "#;
 
