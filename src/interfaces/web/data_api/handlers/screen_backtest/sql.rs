@@ -82,14 +82,18 @@ SELECT MIN("date") FROM holder_distribution
 ///   百分位只用換股日以前的資料，不會偷看之後的行情；換股日沒有估值列、或之前不足 250 個交易日時視為通過。
 /// - `etf_return`：同一天買進 [`ETF_BENCHMARK`] 持有同樣天數的還原報酬，作為實際買得到的大盤基準。
 ///
-/// 成交價模型（`$entry`／`$exit`／`$ret`／`$price_joins`／`$etf_ret`／`$etf_joins`）：收盤版
-/// `entry_date` 就是換股日，報酬取換股日的同天期還原報酬；次日開盤版 `entry_date` 為次一交易日、
+/// 成交價模型（`$entry`／`$exit`／`$ret`／`$price_ctes`／`$price_joins`／`$etf_ret`／`$etf_joins`）：
+/// 收盤版 `entry_date` 就是換股日，報酬取換股日的同天期還原報酬；次日開盤版 `entry_date` 為次一交易日、
 /// `exit_date` 再晚一天，報酬取 `entry_date` 起的同天期收盤報酬，再乘上出場日與進場日各自的
 /// 開盤價／收盤價比（同一天的還原因子相消，不需另查還原價），把收盤到收盤換成開盤到開盤；
 /// 開盤或收盤價缺漏時比值取 1（沿用收盤）。選股條件仍只看換股日當天與之前的資料。
+///
+/// 次日開盤版的開盤價由 `rebal_quotes` 依日期一次讀出全部進出場日的日線（`"Date"` 索引），
+/// `universe` 再以 hash join 對上；不要改回逐檔 `JOIN "DailyQuotes"`：CTE 的列數估計只有 1，規劃器會
+/// 對每期全市場逐檔查兩次索引（最佳組合 2019 起 32 萬次、約 160 萬個 buffer），正式庫 2.5 → 1.8 秒。
 macro_rules! backtest_sql {
     ($with:literal, $chip_join:literal, $chip_filter:literal, $chip_columns:literal,
-     $entry:expr, $exit:expr, $ret:expr, $price_joins:expr, $etf_ret:expr,
+     $entry:expr, $exit:expr, $ret:expr, $price_ctes:expr, $price_joins:expr, $etf_ret:expr,
      $etf_joins:expr) => {
         concat!(
             $with,
@@ -149,7 +153,9 @@ revenue_records AS (
     WINDOW prior AS (
         PARTITION BY "SecurityCode" ORDER BY "Date" ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
     )
-),
+),"#,
+            $price_ctes,
+            r#"
 universe AS (
     SELECT rb.date, rb.window_start, rb.liquidity_start, rb.revenue_ord, rb.entry_date, rb.exit_date, rs.stock_symbol, rs.rs_score,
            rs.rank AS rs_rank,
@@ -314,6 +320,7 @@ macro_rules! backtest_sql_for {
             "LEAD(date, $4::int) OVER (ORDER BY date)",
             horizon_return!("f"),
             "",
+            "",
             horizon_return!("e"),
             ""
         )
@@ -327,7 +334,13 @@ macro_rules! backtest_sql_for {
             "LEAD(date, 1) OVER (ORDER BY date)",
             "LEAD(date, $4::int + 1) OVER (ORDER BY date)",
             open_to_open!("f", "qe", "qx"),
-            "\n    LEFT JOIN \"DailyQuotes\" qe ON qe.stock_symbol = rs.stock_symbol AND qe.\"Date\" = rb.entry_date\n    LEFT JOIN \"DailyQuotes\" qx ON qx.stock_symbol = rs.stock_symbol AND qx.\"Date\" = rb.exit_date",
+            r#"
+rebal_quotes AS MATERIALIZED (
+    SELECT q.stock_symbol, q."Date", q."OpeningPrice", q."ClosingPrice"
+    FROM "DailyQuotes" q
+    WHERE q."Date" IN (SELECT entry_date FROM rebal UNION SELECT exit_date FROM rebal)
+),"#,
+            "\n    LEFT JOIN rebal_quotes qe ON qe.stock_symbol = rs.stock_symbol AND qe.\"Date\" = rb.entry_date\n    LEFT JOIN rebal_quotes qx ON qx.stock_symbol = rs.stock_symbol AND qx.\"Date\" = rb.exit_date",
             open_to_open!("e", "ee", "ex"),
             "\nLEFT JOIN \"DailyQuotes\" ee ON ee.stock_symbol = '0050' AND ee.\"Date\" = b.entry_date\nLEFT JOIN \"DailyQuotes\" ex ON ex.stock_symbol = '0050' AND ex.\"Date\" = b.exit_date"
         )
