@@ -5,6 +5,7 @@ use super::*;
 mod financial;
 mod foreign;
 mod notified;
+mod notify;
 mod revenue;
 
 fn revenue_alert(symbol: &str, name: &str, yoy: Decimal, mom: Decimal) -> HoldingRevenueAlert {
