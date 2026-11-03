@@ -5,7 +5,7 @@ use crate::{
     core::declare::StockExchangeMarket,
     core::util::datetime::Weekend,
     domain::registry::{entity::Stock, repository::StockRepository},
-    infra::crawler::twse,
+    infra::crawler::twse::{self, suspend_listing::SuspendListing},
     infra::database::repository::stock::PgStockRepository,
 };
 use anyhow::{Context, Result};
@@ -42,25 +42,7 @@ pub async fn execute() -> Result<()> {
        tracing::info!("更新下市的股票結束");
     }
     let delisted = twse::suspend_listing::visit().await?;
-    let repo = PgStockRepository::new();
-
-    for company in delisted {
-        // 透過防腐層轉譯為內部命令，內含格式與民國年分過濾邏輯
-        if let Some(cmd) = DelistedCompanyAclMapper::from_suspend_listing(&company)
-            && let Some(stock) = repo.find_by_symbol(&cmd.symbol).await?
-        {
-            if !should_mark_twse_delisted(&stock) {
-                continue;
-            }
-
-            let mut another = stock.clone();
-            another.update_suspension(true);
-
-            if let Err(why) = repo.save(&another).await {
-                tracing::error!("Failed to update_suspend_listing because {:?}", why);
-            }
-        }
-    }
+    mark_twse_delisted(&PgStockRepository::new(), &delisted).await?;
 
     // 第二階段獨立執行、失敗不影響第一階段的成果——
     // TWSE 名單已寫入的下市標記不因 ISIN 來源異常而回滾。
@@ -85,6 +67,37 @@ pub async fn execute() -> Result<()> {
 /// 終止上市後轉到上櫃的公司代號不變，名單會一直列著它，只看代號會把仍在交易的股票誤標下市。
 fn should_mark_twse_delisted(stock: &Stock) -> bool {
     !stock.suspend_listing() && stock.market_id() == StockExchangeMarket::Listed.serial()
+}
+
+/// 第一階段：把證交所終止上市名單上、仍屬上市市場的股票標記下市，回傳標記檔數。
+///
+/// # Errors
+///
+/// 查詢股票主檔失敗時回傳錯誤；單檔寫入失敗只記錄日誌、繼續處理下一檔。
+async fn mark_twse_delisted(
+    repo: &impl StockRepository,
+    delisted: &[SuspendListing],
+) -> Result<usize> {
+    let mut marked = 0;
+    for company in delisted {
+        // 透過防腐層轉譯為內部命令，內含格式與民國年分過濾邏輯
+        if let Some(cmd) = DelistedCompanyAclMapper::from_suspend_listing(company)
+            && let Some(stock) = repo.find_by_symbol(&cmd.symbol).await?
+        {
+            if !should_mark_twse_delisted(&stock) {
+                continue;
+            }
+
+            let mut another = stock.clone();
+            another.update_suspension(true);
+
+            match repo.save(&another).await {
+                Ok(()) => marked += 1,
+                Err(why) => tracing::error!("Failed to update_suspend_listing because {:?}", why),
+            }
+        }
+    }
+    Ok(marked)
 }
 
 fn roster_markets() -> impl Iterator<Item = StockExchangeMarket> {
@@ -115,6 +128,24 @@ fn roster_markets() -> impl Iterator<Item = StockExchangeMarket> {
 /// # 回傳
 /// 成功時回傳本輪實際標記下市的檔數。
 pub async fn mark_stocks_missing_from_isin_roster(max_delist: usize) -> Result<usize> {
+    mark_missing_from_rosters(
+        &PgStockRepository::new(),
+        twse::international_securities_identification_number::visit_all_listed_symbols,
+        max_delist,
+    )
+    .await
+}
+
+/// [`mark_stocks_missing_from_isin_roster`] 的流程本體；名冊來源與倉儲由呼叫端注入。
+async fn mark_missing_from_rosters<Fetch, FetchFut>(
+    repo: &impl StockRepository,
+    mut fetch_roster: Fetch,
+    max_delist: usize,
+) -> Result<usize>
+where
+    Fetch: FnMut(StockExchangeMarket) -> FetchFut,
+    FetchFut: Future<Output = Result<HashSet<String>>>,
+{
     // 逐市場收集現行名冊；用 HashSet 讓後面的差集查找是 O(1)。
     let mut roster: HashSet<String> = HashSet::with_capacity(4096);
     // 記下名冊實際涵蓋的市場編號——資料庫中其他市場（若未來新增）的
@@ -125,17 +156,15 @@ pub async fn mark_stocks_missing_from_isin_roster(max_delist: usize) -> Result<u
         // 注意：一定要用「全類別」名冊（visit_all_listed_symbols）而不是
         // 股票主檔用的 visit()——後者只保留股票/特別股/TDR 類別，
         // ETF 不在其中，直接拿來差集會把所有 ETF 誤判為已下市。
-        let symbols =
-            twse::international_securities_identification_number::visit_all_listed_symbols(market)
-                .await
-                .with_context(|| format!("fetch isin roster failed: market={:?}", market))?;
+        let symbols = fetch_roster(market)
+            .await
+            .with_context(|| format!("fetch isin roster failed: market={:?}", market))?;
 
         ensure_roster_size(market, symbols.len())?;
         covered_market_ids.insert(market.serial());
         roster.extend(symbols);
     }
 
-    let repo = PgStockRepository::new();
     let active = repo
         .fetch_all_active()
         .await
@@ -147,23 +176,19 @@ pub async fn mark_stocks_missing_from_isin_roster(max_delist: usize) -> Result<u
         let mut another = stock.clone();
         another.update_suspension(true);
 
+        let symbol = &stock.symbol().0;
         match repo.save(&another).await {
             Ok(_) => {
                 marked += 1;
                 // 標記下市屬於低頻但重要的狀態變更，用 info 留下可追查的紀錄。
+                let name = stock.name();
+                let market_id = stock.market_id();
                 tracing::info!(
-                    "已標記下市（ISIN 名冊差集）: {} {}（market_id={}）",
-                    stock.symbol().0,
-                    stock.name(),
-                    stock.market_id()
+                    "已標記下市（ISIN 名冊差集）: {symbol} {name}（market_id={market_id}）"
                 );
             }
             Err(why) => {
-                tracing::error!(
-                    "Failed to mark stock as delisted: {} because {:#}",
-                    stock.symbol().0,
-                    why
-                );
+                tracing::error!("Failed to mark stock as delisted: {symbol} because {why:#}");
             }
         }
     }
@@ -213,129 +238,4 @@ fn missing_from_roster(
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::infra::cache::SHARE;
-
-    // 注意這個慣用法：在 tests 模組中，從外部範疇匯入所有名字。
-    use super::*;
-
-    fn stock(symbol: &str, market_id: i32) -> Stock {
-        Stock::reconstitute(
-            symbol.to_string(),
-            format!("{symbol} 名稱"),
-            false,
-            rust_decimal::Decimal::ZERO,
-            rust_decimal::Decimal::ZERO,
-            rust_decimal::Decimal::ZERO,
-            Local::now(),
-            market_id,
-            1,
-            0,
-            0,
-            rust_decimal::Decimal::ZERO,
-        )
-    }
-
-    /// 終止上市名單只標記目前仍在上市市場、尚未標記的股票；已轉上櫃或興櫃的不標記。
-    #[test]
-    fn twse_delisting_only_marks_listed_stocks() {
-        assert!(should_mark_twse_delisted(&stock("1101", 2)));
-        assert!(!should_mark_twse_delisted(&stock("6423", 4)));
-        assert!(!should_mark_twse_delisted(&stock("6423", 5)));
-        let mut marked = stock("1101", 2);
-        marked.update_suspension(true);
-        assert!(!should_mark_twse_delisted(&marked));
-    }
-
-    /// 名冊筆數低於安全下限就放棄比對。
-    #[test]
-    fn ensure_roster_size_rejects_tiny_rosters() {
-        assert!(
-            ensure_roster_size(StockExchangeMarket::Listed, MIN_ROSTER_SIZE_PER_MARKET).is_ok()
-        );
-        let err = ensure_roster_size(StockExchangeMarket::OverTheCounter, 3).expect_err("太少");
-        assert!(err.to_string().contains("size=3"), "{err}");
-    }
-
-    /// 只挑涵蓋市場內、不在名冊上的證券；超過上限整批放棄。
-    #[test]
-    fn missing_from_roster_filters_and_caps() {
-        let roster: HashSet<String> = ["2330", "6488"].iter().map(|s| s.to_string()).collect();
-        let covered: HashSet<i32> = [2, 4].into_iter().collect();
-        let active = || {
-            vec![
-                stock("2330", 2),
-                stock("4712", 4),
-                stock("1234", 5),
-                stock("6488", 4),
-            ]
-        };
-
-        let missing = missing_from_roster(active(), &roster, &covered, 10).expect("未超過上限");
-        assert_eq!(
-            missing
-                .iter()
-                .map(|stock| stock.symbol().0.as_str())
-                .collect::<Vec<_>>(),
-            ["4712"]
-        );
-        assert!(
-            missing_from_roster(Vec::new(), &roster, &covered, 0)
-                .expect("空集合")
-                .is_empty()
-        );
-        let err =
-            missing_from_roster(active(), &HashSet::new(), &covered, 1).expect_err("超過上限");
-        assert!(err.to_string().contains("差集達 3 檔（上限 1）"), "{err}");
-    }
-
-    /// 公開發行不是交易市場，不可併入差集比對的名冊。
-    #[test]
-    fn roster_markets_excludes_public_offering() {
-        let markets: Vec<_> = roster_markets().collect();
-        assert_eq!(
-            markets,
-            vec![
-                StockExchangeMarket::Listed,
-                StockExchangeMarket::OverTheCounter,
-                StockExchangeMarket::Emerging,
-            ]
-        );
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_execute() {
-        dotenvy::dotenv().ok();
-        SHARE.load().await;
-        tracing::debug!("開始 execute");
-
-        match execute().await {
-            Ok(_) => {
-                tracing::debug!("execute executed successfully.");
-            }
-            Err(why) => {
-                tracing::debug!("Failed to execute because {:?}", why);
-            }
-        }
-
-        tracing::debug!("結束 execute");
-    }
-
-    /// 手動入口：以 ISIN 名冊差集清理歷史積欠的未標記下市證券。
-    ///
-    /// 首次執行時，多年未被標記的終止上櫃與 ETF 清算標的可能超過排程的
-    /// 單輪上限（[`MAX_DELIST_PER_RUN`]），此測試以放寬的上限一次清完。
-    /// 執行前建議先跑一次並檢查 log 中列出的標的是否合理。
-    #[tokio::test]
-    #[ignore = "live test：連線真實外部網站並寫入資料庫，需要時手動執行"]
-    async fn test_mark_stocks_missing_from_isin_roster_manual_cleanup() {
-        dotenvy::dotenv().ok();
-        SHARE.load().await;
-
-        match mark_stocks_missing_from_isin_roster(1000).await {
-            Ok(marked) => println!("已標記 {marked} 檔下市證券"),
-            Err(why) => println!("差集清理失敗: {why:#}"),
-        }
-    }
-}
+mod tests;
