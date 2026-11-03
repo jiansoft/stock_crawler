@@ -58,6 +58,8 @@ pub(crate) struct DividendForecastItem {
     /// 預估依據。
     #[schema(value_type = ForecastBasisValue)]
     pub(crate) basis: String,
+    /// 已除息：股數與金額取已領股利明細（除息日當時的持股），不是目前持股。
+    pub(crate) entitled: bool,
     /// 該股近 5 年的填息統計（同 `/stocks/{symbol}/dividend-fill` 的 summary）；沒有紀錄時為 `null`。
     pub(crate) fill_history: Option<DividendFillSummary>,
     /// 沒有自身紀錄時，以每股現金股利 ÷ 最新收盤算出殖利率組別的全市場填息基準；其餘為 `null`。
@@ -82,6 +84,7 @@ impl From<ForecastItem> for DividendForecastItem {
                 Basis::Cadence => "cadence",
             }
             .to_owned(),
+            entitled: item.entitled,
             fill_history: None,
             fill_peer: None,
         }
