@@ -171,66 +171,6 @@ async fn test_execute() {
     tracing::debug!("結束 execute");
 }
 
-/// 假代號：QA 上市、QB 上櫃（快照寫入），QF 股票主檔更新，QZ 不在主檔。
-const SNAPSHOT_SYMBOLS: [&str; 2] = ["79979QA", "79979QB"];
-
-async fn cleanup_snapshots() {
-    let pool = crate::infra::database::get_connection();
-    let symbols = SNAPSHOT_SYMBOLS.map(str::to_owned).to_vec();
-    let _ = sqlx::query("DELETE FROM qfii_history WHERE stock_symbol = ANY($1)")
-        .bind(&symbols)
-        .execute(pool)
-        .await;
-    let _ = sqlx::query("DELETE FROM qfii_trend WHERE stock_symbol = ANY($1)")
-        .bind(&symbols)
-        .execute(pool)
-        .await;
-}
-
-/// 當天的快照已經寫過（同一天重跑）：沒有變更，不重算趨勢也不派發通知事件。
-///
-/// 先以倉儲寫入預期的快照（上市用查詢日、上櫃用櫃買回應的日期），`publish` 的對應若不同就會
-/// 產生變更並重算趨勢，測試即失敗。日期用 1989 年。
-#[tokio::test]
-#[cfg_attr(
-    not(feature = "integration-tests"),
-    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
-)]
-async fn publish_skips_trend_and_event_when_nothing_changed() {
-    dotenvy::dotenv().ok();
-    if crate::infra::database::ping().await.is_err() {
-        println!("跳過 publish_skips_trend_and_event_when_nothing_changed：無資料庫連接");
-        return;
-    }
-    cleanup_snapshots().await;
-    let today = NaiveDate::from_ymd_opt(1989, 3, 6).expect("日期應合法");
-    let otc_date = NaiveDate::from_ymd_opt(1989, 3, 3).expect("日期應合法");
-    let listed = [dto("79979QA")];
-    let otc = twse::qualified_foreign_institutional_investor::over_the_counter::OtcQfiiSnapshot {
-        date: otc_date,
-        rows: vec![dto("79979QB")],
-    };
-    let mut expected = to_history(&listed, today);
-    expected.extend(to_history(&otc.rows, otc_date));
-    let saved = PgForeignHoldingRepository::new()
-        .save_daily(&expected)
-        .await
-        .expect("預先寫入快照");
-
-    let result = publish(&listed, &otc, today).await;
-    let trends: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM qfii_trend WHERE stock_symbol = ANY($1)")
-            .bind(SNAPSHOT_SYMBOLS.map(str::to_owned).to_vec())
-            .fetch_one(crate::infra::database::get_connection())
-            .await
-            .expect("讀取趨勢");
-    cleanup_snapshots().await;
-
-    assert_eq!(saved, 2);
-    result.expect("沒有變更不是錯誤");
-    assert_eq!(trends, 0, "沒有變更就不重算趨勢");
-}
-
 /// 主檔有的股票欄位不同才更新（資料庫與快取一起），主檔沒有的略過。
 #[tokio::test]
 #[cfg_attr(

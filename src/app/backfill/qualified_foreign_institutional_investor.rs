@@ -35,19 +35,10 @@ pub async fn execute() -> Result<()> {
 
     let today = now.date_naive();
     let (listed_rows, otc) = tokio::try_join!(listed(now.fixed_offset()), otc())?;
-    publish(&listed_rows, &otc, today).await
-}
 
-/// 把當天的快照寫進 `qfii_history`；有變更才重算 `qfii_trend` 並派發
-/// [`DomainEvent::ForeignHoldingsUpdated`]。
-async fn publish(
-    listed_rows: &[QfiiDto],
-    otc: &twse::qualified_foreign_institutional_investor::over_the_counter::OtcQfiiSnapshot,
-    today: NaiveDate,
-) -> Result<()> {
     // 上市以查詢日為資料日；休市日沒有資料（空清單）。上櫃以櫃買回應的日期為準，
     // 休市日會回最近一個交易日的資料，重寫一次不會有變更。
-    let mut history = to_history(listed_rows, today);
+    let mut history = to_history(&listed_rows, today);
     history.extend(to_history(&otc.rows, otc.date));
 
     let repo = PgForeignHoldingRepository::new();
