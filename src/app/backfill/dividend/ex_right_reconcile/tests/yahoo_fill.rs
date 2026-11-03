@@ -297,5 +297,12 @@ async fn fill_missing_with_saves_yahoo_rows_and_stock_amounts() {
     );
     assert!(!reloaded.contains_key(BROKEN), "抓不到 Yahoo 的股票不寫入");
 
+    // 正式入口：沒有缺漏事件時不抓 Yahoo、不寫入。
+    let empty = fill_missing_from_yahoo(&repo, &ReconcilePlan::default(), &HashMap::new())
+        .await
+        .expect("空計畫不應失敗");
+    assert_eq!((empty.filled, empty.stock_filled), (0, 0));
+    assert!(empty.unresolved.is_empty());
+
     delete_test_dividends(SYMBOL).await;
 }
