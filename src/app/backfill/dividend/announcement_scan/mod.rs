@@ -89,6 +89,9 @@ mod yahoo_fallback;
 /// 測試共用的夾具。
 #[cfg(test)]
 mod fixtures;
+/// 以本機 mock server 取代外部來源的完整流程測試。
+#[cfg(test)]
+mod mock_sources;
 
 use apply::apply_plan;
 use plan::build_scan_plan;

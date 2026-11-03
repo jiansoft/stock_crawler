@@ -137,6 +137,11 @@ pub(super) async fn send_with_client(
         .as_deref()
         .map(|d| format!(" {d}"))
         .unwrap_or_default();
+    // 測試時可把正式站來源改送到本機 mock server（見 `mock_origin`）。
+    #[cfg(test)]
+    let rewritten = super::mock_origin::rewrite(url);
+    #[cfg(test)]
+    let url: &str = &rewritten;
 
     // ── G2: per-request User-Agent 輪轉 ────────────────────────────────────
     // 每次請求重新產生 UA，避免長時間使用固定 UA 被目標站辨識封鎖。
