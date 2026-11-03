@@ -73,6 +73,20 @@ async fn signal_symbols_and_replace_round_trip() {
     let symbols = repo.fetch_signal_symbols(date).await.expect("查詢代號");
     let ours: Vec<&String> = symbols.iter().filter(|s| s.starts_with("79979S")).collect();
     assert_eq!(ours, ["79979SA"]);
+    // 期間有成交（收盤價 > 0）的上市櫃股票，暫停交易的也算；期間外沒有成交就不列。
+    let next_day = date.succ_opt().expect("有效日期");
+    for (from, expected) in [(date, vec!["79979SA", "79979SC"]), (next_day, vec![])] {
+        let symbols = repo
+            .fetch_traded_symbols(from, next_day)
+            .await
+            .expect("查詢有成交的代號");
+        let ours: Vec<&str> = symbols
+            .iter()
+            .map(String::as_str)
+            .filter(|s| s.starts_with("79979S"))
+            .collect();
+        assert_eq!(ours, expected, "起日 {from}");
+    }
 
     let first = [
         signal("79979SA", SignalKind::GoldenCross),
