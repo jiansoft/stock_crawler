@@ -136,6 +136,10 @@ impl StockRepository for FakeStocks {
         Ok(())
     }
 
+    async fn save_qfii_batch(&self, _stocks: &[Stock]) -> Result<u64> {
+        unreachable!("下市回填不寫外資持股")
+    }
+
     async fn fetch_all_active(&self) -> Result<Vec<Stock>> {
         Ok(self
             .stocks

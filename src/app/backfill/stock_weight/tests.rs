@@ -35,6 +35,10 @@ impl StockRepository for FakeWeights {
         unreachable!("權值回填不寫主檔")
     }
 
+    async fn save_qfii_batch(&self, _stocks: &[Stock]) -> Result<u64> {
+        unreachable!("權值回填不寫外資持股")
+    }
+
     async fn fetch_all_active(&self) -> Result<Vec<Stock>> {
         unreachable!("權值回填不查主檔")
     }

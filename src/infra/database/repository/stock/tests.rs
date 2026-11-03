@@ -53,3 +53,13 @@ async fn test_pg_stock_repository_contract() {
         .await
         .unwrap();
 }
+
+/// 沒有要寫回的股票時不碰資料庫，直接回報 0 檔。
+#[tokio::test]
+async fn save_qfii_batch_skips_empty_input() {
+    let updated = PgStockRepository::new()
+        .save_qfii_batch(&[])
+        .await
+        .expect("空清單不需要資料庫");
+    assert_eq!(updated, 0);
+}
