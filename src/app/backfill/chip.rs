@@ -211,14 +211,13 @@ where
     PauseFut: Future<Output = ()>,
 {
     let mut written = 0;
-    for (index, date) in dates.iter().enumerate() {
+    let total = dates.len();
+    for (done, date) in (1..).zip(dates) {
         match save_day(*date).await {
             Ok(summary) => {
                 written += summary.rows_written;
                 tracing::info!(
-                    "籌碼回補 {date} ({}/{}): institutional={}, margin={}, failed_sources={}, rows_written={}",
-                    index + 1,
-                    dates.len(),
+                    "籌碼回補 {date} ({done}/{total}): institutional={}, margin={}, failed_sources={}, rows_written={}",
                     summary.institutional,
                     summary.margin,
                     summary.failed_sources,
@@ -310,10 +309,8 @@ async fn save_insider_holdings(
         bail!("上市、上櫃董監持股都抓取失敗");
     }
     let written = repository.replace_insider_holdings(&records).await?;
-    tracing::info!(
-        "董監持股入庫結束: records={}, rows_written={written}",
-        records.len()
-    );
+    let count = records.len();
+    tracing::info!("董監持股入庫結束: records={count}, rows_written={written}");
     Ok(())
 }
 
@@ -347,14 +344,12 @@ pub async fn save_broker_flows(flows: &[BrokerFlow]) {
 
 /// [`save_broker_flows`] 的本體，倉儲由呼叫端注入。
 async fn save_broker_flows_to(repository: &impl ChipRepository, flows: &[BrokerFlow]) {
+    let count = flows.len();
     match repository
         .save_broker_flows(&broker_flow_records(flows))
         .await
     {
-        Ok(written) => tracing::info!(
-            "主力進出入庫結束: records={}, rows_written={written}",
-            flows.len()
-        ),
+        Ok(written) => tracing::info!("主力進出入庫結束: records={count}, rows_written={written}"),
         Err(why) => tracing::error!("主力進出入庫失敗: {why:#}"),
     }
 }
