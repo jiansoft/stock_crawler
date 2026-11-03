@@ -319,3 +319,16 @@ async fn resolve_with_skips_when_nothing_pending() {
     resolve_with_yahoo(&mut plan, &HashMap::new(), &HashMap::new()).await;
     assert!(plan.unresolved.is_empty() && plan.inserts.is_empty());
 }
+
+/// 兩次查詢之間的等待落在 1.5～3.0 秒（虛擬時鐘，不實際等待）。
+#[tokio::test(start_paused = true)]
+async fn random_pause_waits_between_one_and_a_half_and_three_seconds() {
+    let started = tokio::time::Instant::now();
+    random_pause().await;
+    let waited = started.elapsed();
+    assert!(
+        (std::time::Duration::from_millis(1500)..=std::time::Duration::from_millis(3000))
+            .contains(&waited),
+        "等待 {waited:?}"
+    );
+}

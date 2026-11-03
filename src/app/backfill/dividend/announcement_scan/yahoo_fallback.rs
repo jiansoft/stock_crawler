@@ -45,14 +45,22 @@ pub(super) async fn resolve_with_yahoo(
     existing: &HashMap<String, Vec<Dividend>>,
 ) {
     let sources = YahooSources {
-        fetch: |symbol: String| async move { fetch_yahoo_dividend(&symbol).await },
-        pause: || {
-            let jitter_ms = rand::rng().random_range(1500..=3000);
-            tokio::time::sleep(std::time::Duration::from_millis(jitter_ms))
-        },
+        fetch: fetch_owned,
+        pause: random_pause,
         limit: YAHOO_LOOKUP_LIMIT,
     };
     resolve_with(plan, schedules, existing, sources).await;
+}
+
+/// 抓一檔 Yahoo 股利政策；收擁有權的代號，才能當 [`YahooSources::fetch`]。
+async fn fetch_owned(symbol: String) -> Option<YahooDividend> {
+    fetch_yahoo_dividend(&symbol).await
+}
+
+/// 兩次 Yahoo 查詢之間隨機等 1.5～3.0 秒。
+async fn random_pause() {
+    let jitter_ms = rand::rng().random_range(1500..=3000);
+    tokio::time::sleep(std::time::Duration::from_millis(jitter_ms)).await;
 }
 
 /// 第二階段的外部依賴：逐檔抓 Yahoo、兩次查詢之間的間隔，與單次掃描的查詢上限。
