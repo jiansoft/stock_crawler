@@ -302,3 +302,65 @@ async fn unpublished_dates_skip_delisted_stocks() {
 
     cleanup().await;
 }
+
+/// 多次配息清單要排除已下市股票，否則 21:00 的 Yahoo 股利補抓會打到 404（00847B）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn multiple_dividends_skip_delisted_stocks() {
+    dotenvy::dotenv().ok();
+    const DELISTED: &str = "79987";
+    const LISTED: &str = "79988";
+    let pool = database::get_connection();
+    let symbols = vec![DELISTED.to_string(), LISTED.to_string()];
+    let cleanup = || async {
+        sqlx::query("DELETE FROM dividend WHERE security_code = ANY($1)")
+            .bind(&symbols)
+            .execute(pool)
+            .await
+            .expect("清除股利");
+        sqlx::query("DELETE FROM stocks WHERE stock_symbol = ANY($1)")
+            .bind(&symbols)
+            .execute(pool)
+            .await
+            .expect("清除股票主檔");
+    };
+    cleanup().await;
+
+    let repo = PgDividendRepository::new();
+    for (symbol, suspend_listing) in [(DELISTED, true), (LISTED, false)] {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, "SuspendListing")
+               VALUES ($1, $1, $1, $2)"#,
+        )
+        .bind(symbol)
+        .bind(suspend_listing)
+        .execute(pool)
+        .await
+        .expect("插入股票主檔");
+        repo.save(&build_dividend(
+            symbol,
+            TEST_PAYOUT_YEAR,
+            "Q3",
+            dec!(0.5),
+            "2020-09-15",
+            "2020-10-15",
+        ))
+        .await
+        .expect("測試資料寫入失敗");
+    }
+
+    let found: Vec<String> = repo
+        .fetch_multiple_dividends_for_year(TEST_PAYOUT_YEAR)
+        .await
+        .expect("查詢多次配息失敗")
+        .into_iter()
+        .map(|dividend| dividend.security_code)
+        .filter(|symbol| symbols.contains(symbol))
+        .collect();
+    cleanup().await;
+
+    assert_eq!(found, vec![LISTED.to_string()], "已下市股票不該再排進補抓");
+}
