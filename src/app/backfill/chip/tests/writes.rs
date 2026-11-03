@@ -25,21 +25,22 @@ fn one_margin() -> Result<HashMap<String, MarginBalance>> {
     )]))
 }
 
-/// 單日入庫：先寫三大法人、再寫融資融券，最後只重算當天的連續天數。
+/// 單日入庫：先寫三大法人、再寫融資融券，最後只重算當天的連續天數；寫入失敗回錯誤。
 #[tokio::test]
 async fn write_daily_saves_both_then_refreshes_that_day() {
     use crate::domain::chip::test_double::RecordingChipRepository;
 
     let date = ymd(2026, 10, 12);
-    let repo = RecordingChipRepository::default();
-    let summary = write_daily(
-        &repo,
+    let (summary, flows, margins) = collect_daily(
         date,
         [one_flow("2330"), one_flow("6488")],
         [one_margin(), Err(anyhow::anyhow!("逾時"))],
     )
-    .await
-    .expect("部分來源失敗仍寫入");
+    .expect("部分來源失敗仍可整理");
+    let repo = RecordingChipRepository::default();
+    let summary = write_daily(&repo, date, summary, &flows, &margins)
+        .await
+        .expect("寫入成功");
     assert_eq!(
         repo.calls(),
         [
@@ -59,27 +60,11 @@ async fn write_daily_saves_both_then_refreshes_that_day() {
         }
     );
 
-    let untouched = RecordingChipRepository::default();
-    fn failed<T>() -> Result<T> {
-        Err(anyhow::anyhow!("封鎖"))
-    }
-    assert!(
-        write_daily(&untouched, date, [failed(), failed()], [failed(), failed()])
-            .await
-            .is_err()
-    );
-    assert!(untouched.calls().is_empty(), "四個來源都失敗時不寫入");
-
     let broken = RecordingChipRepository::failing();
     assert!(
-        write_daily(
-            &broken,
-            date,
-            [one_flow("2330"), one_flow("6488")],
-            [one_margin(), one_margin()]
-        )
-        .await
-        .is_err(),
+        write_daily(&broken, date, DailySummary::default(), &flows, &margins)
+            .await
+            .is_err(),
         "寫入失敗要回錯誤"
     );
     assert_eq!(broken.calls(), ["institutional 2026-10-12 2"]);
@@ -192,4 +177,37 @@ async fn save_broker_flows_to_writes_and_swallows_failures() {
     let broken = RecordingChipRepository::failing();
     save_broker_flows_to(&broken, &[flow]).await;
     assert_eq!(broken.calls(), ["broker_flows 1"]);
+}
+
+/// 回補區間內沒有交易日：不抓、不重算，回 0（臨時庫）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn backfill_daily_without_trading_days_writes_nothing() {
+    dotenvy::dotenv().ok();
+    if crate::infra::database::ping().await.is_err() {
+        println!("跳過 backfill_daily_without_trading_days_writes_nothing：無資料庫連接");
+        return;
+    }
+    let written = backfill_daily(ymd(1980, 1, 1), ymd(1980, 1, 31))
+        .await
+        .expect("沒有交易日不是錯誤");
+    assert_eq!(written, 0);
+}
+
+/// 沒有主力進出資料時照常結束（臨時庫）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn save_broker_flows_accepts_empty_input() {
+    dotenvy::dotenv().ok();
+    if crate::infra::database::ping().await.is_err() {
+        println!("跳過 save_broker_flows_accepts_empty_input：無資料庫連接");
+        return;
+    }
+    save_broker_flows(&[]).await;
 }

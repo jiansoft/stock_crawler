@@ -79,25 +79,24 @@ pub async fn save_daily(repository: &dyn ChipRepository, date: NaiveDate) -> Res
         twse::chip::visit_margin(date),
         tpex::chip::visit_margin(date),
     );
-    write_daily(
-        repository,
+    let (summary, flows, margins) = collect_daily(
         date,
         [listed_flows, otc_flows],
         [listed_margins, otc_margins],
-    )
-    .await
+    )?;
+    write_daily(repository, date, summary, &flows, &margins).await
 }
 
-/// [`save_daily`] 抓完四個來源之後的部分：整理成入庫記錄、寫入，再更新當天的連續買賣超天數。
+/// 寫入 [`collect_daily`] 整理好的三大法人與融資融券，再更新當天的連續買賣超天數；`summary` 補上寫入列數。
 async fn write_daily(
     repository: &dyn ChipRepository,
     date: NaiveDate,
-    flows: [Result<HashMap<String, InstitutionalFlow>>; 2],
-    margins: [Result<HashMap<String, MarginBalance>>; 2],
+    mut summary: DailySummary,
+    flows: &[InstitutionalNet],
+    margins: &[MarginRecord],
 ) -> Result<DailySummary> {
-    let (mut summary, flows, margins) = collect_daily(date, flows, margins)?;
-    summary.rows_written += repository.save_institutional(date, &flows).await?;
-    summary.rows_written += repository.save_margin(date, &margins).await?;
+    summary.rows_written += repository.save_institutional(date, flows).await?;
+    summary.rows_written += repository.save_margin(date, margins).await?;
     summary.streaks_updated = repository.refresh_streaks(date, date).await?;
     Ok(summary)
 }
