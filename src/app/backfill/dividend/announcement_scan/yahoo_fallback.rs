@@ -44,6 +44,44 @@ pub(super) async fn resolve_with_yahoo(
     schedules: &HashMap<(String, NaiveDate), DividendSchedule>,
     existing: &HashMap<String, Vec<Dividend>>,
 ) {
+    let sources = YahooSources {
+        fetch: fetch_owned,
+        pause: random_pause,
+        limit: YAHOO_LOOKUP_LIMIT,
+    };
+    resolve_with(plan, schedules, existing, sources).await;
+}
+
+/// 抓一檔 Yahoo 股利政策；收擁有權的代號，才能當 [`YahooSources::fetch`]。
+async fn fetch_owned(symbol: String) -> Option<YahooDividend> {
+    fetch_yahoo_dividend(&symbol).await
+}
+
+/// 兩次 Yahoo 查詢之間隨機等 1.5～3.0 秒。
+async fn random_pause() {
+    let jitter_ms = rand::rng().random_range(1500..=3000);
+    tokio::time::sleep(std::time::Duration::from_millis(jitter_ms)).await;
+}
+
+/// 第二階段的外部依賴：逐檔抓 Yahoo、兩次查詢之間的間隔，與單次掃描的查詢上限。
+struct YahooSources<Fetch, Pause> {
+    fetch: Fetch,
+    pause: Pause,
+    limit: usize,
+}
+
+/// [`resolve_with_yahoo`] 的流程本體；Yahoo 來源與間隔由呼叫端注入。
+async fn resolve_with<Fetch, FetchFut, Pause, PauseFut>(
+    plan: &mut ScanPlan,
+    schedules: &HashMap<(String, NaiveDate), DividendSchedule>,
+    existing: &HashMap<String, Vec<Dividend>>,
+    mut sources: YahooSources<Fetch, Pause>,
+) where
+    Fetch: FnMut(String) -> FetchFut,
+    FetchFut: Future<Output = Option<YahooDividend>>,
+    Pause: FnMut() -> PauseFut,
+    PauseFut: Future<Output = ()>,
+{
     let pending: Vec<UnresolvedEvent> = std::mem::take(&mut plan.unresolved);
     if pending.is_empty() {
         return;
@@ -62,7 +100,7 @@ pub(super) async fn resolve_with_yahoo(
         }
 
         if !fetched.contains_key(&symbol) {
-            if lookups >= YAHOO_LOOKUP_LIMIT {
+            if lookups >= sources.limit {
                 plan.unresolved.push(UnresolvedEvent {
                     reason: UnresolvedReason::YahooLookupSkipped,
                     ..event
@@ -72,11 +110,11 @@ pub(super) async fn resolve_with_yahoo(
 
             // 第二筆以後才需要間隔；第一筆直接查，不必平白等待。
             if lookups > 0 {
-                let jitter_ms = rand::rng().random_range(1500..=3000);
-                tokio::time::sleep(std::time::Duration::from_millis(jitter_ms)).await;
+                (sources.pause)().await;
             }
             lookups += 1;
-            fetched.insert(symbol.clone(), fetch_yahoo_dividend(&symbol).await);
+            let yahoo = (sources.fetch)(symbol.clone()).await;
+            fetched.insert(symbol.clone(), yahoo);
         }
 
         let Some(Some(yahoo)) = fetched.get(&symbol) else {
@@ -133,169 +171,4 @@ fn resolve_from_yahoo(
 }
 
 #[cfg(test)]
-mod tests {
-    use rust_decimal::Decimal;
-    use rust_decimal_macros::dec;
-
-    use super::super::UNANNOUNCED_DATE;
-    use super::super::fixtures::{announcement, yahoo_detail};
-    use super::*;
-    use crate::infra::crawler::tpex;
-
-    /// Yahoo 補救：以除權息日相符找出對應配息，取它的所屬年度、季別與發放年度。
-    #[test]
-    fn test_resolve_from_yahoo_matches_by_ex_date() {
-        let ann = announcement("6488", (2026, 8, 26), true, false, Some(dec!(10.0)), None);
-        let yahoo = YahooDividend {
-            stock_symbol: "6488".to_string(),
-            dividend: vec![(
-                2026,
-                vec![
-                    yahoo_detail(
-                        2026,
-                        2025,
-                        "H1",
-                        dec!(5.0),
-                        Decimal::ZERO,
-                        "2026-03-10",
-                        UNANNOUNCED_DATE,
-                    ),
-                    yahoo_detail(
-                        2026,
-                        2025,
-                        "H2",
-                        dec!(10.0),
-                        Decimal::ZERO,
-                        "2026-08-26",
-                        UNANNOUNCED_DATE,
-                    ),
-                ],
-            )],
-        };
-
-        let item = resolve_from_yahoo(&ann, &yahoo).expect("ex-date should match");
-
-        assert_eq!(item.quarter, "H2");
-        assert_eq!(item.year_of_dividend, 2025);
-        assert_eq!(item.paid_year, Some(2026));
-        assert_eq!(item.cash_dividend, dec!(10.0));
-        // Yahoo 沒有拆分資料，盈餘／公積欄位必須留 0，避免高估盈餘分配率。
-        assert_eq!(item.earnings_cash, Decimal::ZERO);
-        assert_eq!(item.capital_reserve_cash, Decimal::ZERO);
-    }
-
-    /// 跨年發放的事件被 Yahoo 歸在隔年，只查除權息日那一年會整個漏掉。
-    #[test]
-    fn test_resolve_from_yahoo_searches_every_paid_year() {
-        let ann = announcement("2882", (2025, 12, 20), true, false, Some(dec!(3.0)), None);
-        let yahoo = YahooDividend {
-            stock_symbol: "2882".to_string(),
-            dividend: vec![(
-                2026,
-                vec![yahoo_detail(
-                    2026,
-                    2025,
-                    "Q4",
-                    dec!(3.0),
-                    Decimal::ZERO,
-                    "2025-12-20",
-                    UNANNOUNCED_DATE,
-                )],
-            )],
-        };
-
-        let item = resolve_from_yahoo(&ann, &yahoo).expect("cross-year event should match");
-        assert_eq!(item.paid_year, Some(2026));
-    }
-
-    /// 同一年沒有除權息日相符的紀錄時不可硬湊。
-    #[test]
-    fn test_resolve_from_yahoo_returns_none_without_match() {
-        let ann = announcement("6488", (2026, 8, 26), true, false, Some(dec!(10.0)), None);
-        let yahoo = YahooDividend {
-            stock_symbol: "6488".to_string(),
-            dividend: vec![(
-                2026,
-                vec![yahoo_detail(
-                    2026,
-                    2025,
-                    "H1",
-                    dec!(5.0),
-                    Decimal::ZERO,
-                    "2026-03-10",
-                    UNANNOUNCED_DATE,
-                )],
-            )],
-        };
-
-        assert!(resolve_from_yahoo(&ann, &yahoo).is_none());
-    }
-
-    /// 純除權事件要用除權日比對，不能只看除息日。
-    #[test]
-    fn test_resolve_from_yahoo_matches_stock_ex_date() {
-        let ann = announcement("3234", (2026, 8, 26), false, true, None, Some(dec!(0.1)));
-        let yahoo = YahooDividend {
-            stock_symbol: "3234".to_string(),
-            dividend: vec![(
-                2026,
-                vec![yahoo_detail(
-                    2026,
-                    2025,
-                    "",
-                    Decimal::ZERO,
-                    dec!(1.0),
-                    UNANNOUNCED_DATE,
-                    "2026-08-26",
-                )],
-            )],
-        };
-
-        let item = resolve_from_yahoo(&ann, &yahoo).expect("stock ex-date should match");
-        assert_eq!(item.stock_dividend, dec!(1.0));
-    }
-
-    /// 對真實的上櫃／ETF 事件實跑第二階段，確認 Yahoo 能補出期別。
-    ///
-    /// 只查前幾檔以免測試時間過長；同樣不寫入資料庫。
-    #[tokio::test]
-    #[ignore]
-    async fn test_yahoo_fallback_against_live_site() {
-        dotenvy::dotenv().ok();
-
-        let otc = tpex::ex_dividend_announcement::visit()
-            .await
-            .expect("上櫃預告表應可取得");
-        let sample: Vec<ExDividendAnnouncement> = otc.into_iter().take(3).collect();
-
-        for announcement in sample {
-            let Some(yahoo) = fetch_yahoo_dividend(&announcement.stock_symbol).await else {
-                println!("{} 抓取失敗", announcement.stock_symbol);
-                continue;
-            };
-
-            match resolve_from_yahoo(&announcement, &yahoo) {
-                Some(item) => println!(
-                    "{} {} → 發放年度 {:?} {}{} 現金 {} 股票 {}",
-                    announcement.stock_symbol,
-                    announcement.ex_date,
-                    item.paid_year,
-                    item.year_of_dividend,
-                    if item.quarter.is_empty() {
-                        "年度".to_string()
-                    } else {
-                        item.quarter.clone()
-                    },
-                    item.cash_dividend,
-                    item.stock_dividend
-                ),
-                None => println!(
-                    "{} {} 找不到除權息日相符的 Yahoo 紀錄",
-                    announcement.stock_symbol, announcement.ex_date
-                ),
-            }
-
-            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-        }
-    }
-}
+mod tests;
