@@ -250,6 +250,38 @@ fn openapi_dividend_forecast_schema_pins_field_names() {
     );
 }
 
+/// 股利預估誤差 path 的契約：快照日與會員參數、比對結果列舉、依據彙總與可為 null 的實際金額。
+#[test]
+fn openapi_dividend_forecast_accuracy_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/portfolio/dividend-forecast/accuracy");
+    assert_endpoint_responses(operation, "DividendForecastAccuracyResponse", false);
+    assert_eq!(query_schema(operation, "member_id")["default"], 0);
+    assert!(
+        query_schema(operation, "snapshot_date")
+            .to_string()
+            .contains("string")
+    );
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["DividendForecastAccuracyResponse"]["properties"];
+    assert_eq!(
+        response["items"]["items"]["$ref"],
+        "#/components/schemas/DividendForecastAccuracyItem"
+    );
+    assert_eq!(
+        response["by_basis"]["items"]["$ref"],
+        "#/components/schemas/DividendForecastBasisAccuracy"
+    );
+    assert!(response["snapshot_date"].to_string().contains("null"));
+    let item = &schemas["DividendForecastAccuracyItem"]["properties"];
+    assert!(item["actual"].to_string().contains("null"));
+    assert_eq!(
+        enum_values(&document, &item["status"]),
+        serde_json::json!(["matched", "pending", "missed", "unforecast"])
+    );
+}
+
 /// 持股分級 path 的契約：`date` 參數、分級項目欄位，以及籌碼週摘要的 400 張欄位可為 null。
 #[test]
 fn openapi_holder_levels_schema_pins_field_names() {
