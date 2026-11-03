@@ -56,16 +56,20 @@ daily_stats_raw AS (
         PERCENTILE_CONT(ARRAY[0.1, 0.5, 0.8]) WITHIN GROUP (ORDER BY dq."PriceEarningRatio") FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_pct,
         COUNT(*) FILTER (WHERE dq."PriceEarningRatio" > 0 AND dq."PriceEarningRatio" <= 100) AS pe_days
     -- 只統計 stocks CTE 內的股票：ETF、下市股的日K 最後也不會輸出，先排除少排序約 8%。
-    FROM "DailyQuotes" dq
-    JOIN stocks s ON s.stock_symbol = dq.stock_symbol
+    -- 單檔與分桶條件放在股票清單上、再逐檔走 (stock_symbol, Date) 索引：後續 CTE 都以 daily_stats
+    -- 為主表，這裡篩掉的股票不會輸出。條件若放在日K 上，每一桶都會把全部股票的日K 掃一遍再丟掉
+    -- 15/16（2026-11-03 正式庫實測一桶 97 萬頁 → 9.6 萬頁、1.07 s → 0.72 s，結果相同）。
+    -- 轉 bigint 再取絕對值，避免 hashtext 回傳 int 最小值時 abs() 溢位。
+    FROM (
+        SELECT stock_symbol FROM stocks
+        WHERE ($4::varchar IS NULL OR stock_symbol = $4)
+          AND ($5::int = 1 OR abs(hashtext(stock_symbol)::bigint) % $5::int = $6::int)
+    ) s
+    JOIN "DailyQuotes" dq ON dq.stock_symbol = s.stock_symbol
     CROSS JOIN filtered_years fy
     LEFT JOIN action_ranges ar ON ar.stock_symbol = dq.stock_symbol
         AND dq."Date" < ar.to_date AND (ar.from_date IS NULL OR dq."Date" >= ar.from_date)
     WHERE dq."Date" >= fy.from_date AND dq."Date" <= $1 AND dq."year" = ANY(fy.years)
-      AND ($4::varchar IS NULL OR dq.stock_symbol = $4)
-      -- 分桶：後續 CTE 都以 daily_stats 為主表，這裡篩掉的股票不會輸出；
-      -- 轉 bigint 再取絕對值，避免 hashtext 回傳 int 最小值時 abs() 溢位。
-      AND ($5::int = 1 OR abs(hashtext(dq.stock_symbol)::bigint) % $5::int = $6::int)
     GROUP BY dq."stock_symbol"
 ),
 daily_stats AS (
