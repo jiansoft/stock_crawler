@@ -2,6 +2,8 @@
 pub mod costs;
 // 持股股利現金流預估（已公告與依去年同期推估）。
 pub mod dividend_forecast;
+/// 股利預估誤差（快照預估與實際入帳依代號、發放月份比對）。
+pub mod forecast_accuracy;
 // 持股籌碼日報（當日持股的法人、信用交易與主力進出，與通知共用門檻）。
 pub mod chip;
 pub mod entity;

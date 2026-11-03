@@ -20,6 +20,12 @@ pub trait StockRepository: Send + Sync {
     async fn save(&self, stock: &Stock) -> Result<()>;
 
     /// <summary>
+    /// 以單一批次寫回多檔股票的已發行股數與外資持股，回傳實際更新的檔數。
+    /// 只寫這三個欄位，不重建搜尋索引（股名沒有變）。
+    /// </summary>
+    async fn save_qfii_batch(&self, stocks: &[Stock]) -> Result<u64>;
+
+    /// <summary>
     /// 獲取所有目前非下市 (有效交易中) 的證券主檔。
     /// </summary>
     async fn fetch_all_active(&self) -> Result<Vec<Stock>>;

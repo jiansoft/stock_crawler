@@ -12,6 +12,7 @@ mod chip;
 mod dividend_calendar;
 mod dividend_fill;
 mod dividend_forecast;
+mod dividend_forecast_accuracy;
 mod dividend_income;
 mod etf;
 mod etf_holding_history;
@@ -67,6 +68,10 @@ pub(super) use dividend_fill::{
 pub(super) use dividend_forecast::{
     DividendForecastItem, DividendForecastMonth, DividendForecastParams, DividendForecastResponse,
     ForecastBasisValue,
+};
+pub(super) use dividend_forecast_accuracy::{
+    DividendForecastAccuracyItem, DividendForecastAccuracyParams, DividendForecastAccuracyResponse,
+    DividendForecastBasisAccuracy, ForecastAccuracyStatusValue,
 };
 pub(super) use dividend_income::{
     DividendIncomeMonth, DividendIncomeParams, DividendIncomeResponse,
