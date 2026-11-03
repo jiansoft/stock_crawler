@@ -15,6 +15,9 @@ use crate::core::util;
 /// HTML 解析輔助工具。
 mod big5;
 pub mod element;
+/// 測試專用：把正式站來源改送到本機 mock server。
+#[cfg(test)]
+pub(crate) mod mock_origin;
 mod post;
 /// 日誌與錯誤訊息的敏感資訊遮罩。
 mod redact;

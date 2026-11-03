@@ -5,6 +5,7 @@ use crate::infra::cache::SHARE;
 use std::time::Duration;
 
 mod derived_check;
+mod mock_sources;
 mod quote_check;
 
 /// 每日收盤事件主要匯總流程的整合測試。

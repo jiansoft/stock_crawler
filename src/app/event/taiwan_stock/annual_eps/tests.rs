@@ -105,3 +105,84 @@ async fn execute_skips_symbols_flagged_in_redis() {
     assert!(result.is_ok(), "{result:?}");
     assert_eq!(annual, 0, "有略過旗標時不應抓取或寫入");
 }
+
+/// 以本機 mock server 取代富邦、MoneyDJ 與 MOPS（G15），驗證來源的備援順序。
+mod mock_sources {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+
+    const FIXTURE: &str = include_str!("../../../../infra/crawler/testdata/annual_profit.html");
+    const FBS_PATH: &str = "/z/zc/zcdj_2330.djhtm";
+
+    /// 三個來源都改送到 `server`。
+    async fn fetch(server: &MockServer) -> Result<Vec<AnnualProfit>> {
+        let uri = server.uri();
+        with_origins(
+            &[
+                ("https://fubon-ebrokerdj.fbs.com.tw", &uri),
+                ("https://justdata.moneydj.com", &uri),
+                ("https://mopsfin.twse.com.tw", &uri),
+            ],
+            fetch_annual_profit("2330"),
+        )
+        .await
+    }
+
+    fn html(body: &str) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_raw(body.to_owned(), "text/html; charset=utf-8")
+    }
+
+    /// 第一個來源（富邦）有資料就直接回傳，不再問其他來源。
+    #[tokio::test]
+    async fn fetch_annual_profit_returns_first_source_with_rows() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(FBS_PATH))
+            .respond_with(html(FIXTURE))
+            .mount(&server)
+            .await;
+
+        let profits = fetch(&server).await.expect("富邦有資料");
+
+        assert_eq!(profits.len(), 2);
+        assert_eq!((profits[0].year, profits[1].year), (2023, 2022));
+        let requests = server.received_requests().await.unwrap_or_default();
+        assert_eq!(requests.len(), 1, "只問富邦");
+    }
+
+    /// 富邦（同一個頁面路徑）沒有表格時改問下一個來源；MoneyDJ 也回空頁時再問 MOPS，
+    /// 全部落空回錯誤。
+    #[tokio::test]
+    async fn fetch_annual_profit_falls_back_and_fails_when_all_sources_are_empty() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(FBS_PATH))
+            .respond_with(html("<html><body>查無資料</body></html>"))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/compare/data"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let error = fetch(&server).await.expect_err("三個來源都沒有資料");
+
+        assert!(error.to_string().contains("from all sites"), "{error:#}");
+        let paths: Vec<String> = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|request| request.url.path().to_owned())
+            .collect();
+        assert_eq!(
+            paths,
+            [FBS_PATH, FBS_PATH, "/compare/data"],
+            "富邦、MoneyDJ、MOPS 依序"
+        );
+    }
+}
