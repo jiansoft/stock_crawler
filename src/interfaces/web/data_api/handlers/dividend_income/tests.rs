@@ -36,7 +36,7 @@ fn build_response_sums_months_and_compares_last_year() {
         payout(ymd(2025, 1, 15), dec!(800), 0, false),
         payout(ymd(2025, 11, 20), dec!(400), 0, false),
     ];
-    let response = build_response(7, 2026, as_of, &this_year, &last_year);
+    let response = build_response(7, 2026, as_of, &this_year, &last_year, false);
 
     assert_eq!((response.member_id, response.year), (7, 2026));
     assert_eq!(response.as_of, "2026-11-03");
@@ -64,16 +64,48 @@ fn build_response_sums_months_and_compares_last_year() {
     );
     assert_eq!(response.months[11].estimated_cash_amount, 200.0);
     assert_eq!(response.months[5].cash_amount, 0.0);
+    assert_eq!(response.items, None, "沒帶 include_items 不回明細");
+
+    let detailed = build_response(7, 2026, as_of, &this_year, &last_year, true);
+    let items = detailed.items.expect("帶 include_items 要回明細");
+    let summary: Vec<(&str, f64, i64, bool)> = items
+        .iter()
+        .map(|item| {
+            (
+                item.payable_date.as_str(),
+                item.cash_amount,
+                item.stock_shares,
+                item.estimated,
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("2026-01-15", 1000.01, 0, false),
+            ("2026-11-20", 500.0, 30, false),
+            ("2026-12-10", 200.0, 0, true),
+        ]
+    );
+    assert_eq!(
+        (items[0].stock_symbol.as_str(), items[0].quarter.as_str()),
+        ("0056", "Q3")
+    );
 }
 
 /// 已過完的年度：去年同期就是去年全年。
 #[test]
 fn build_response_for_past_year_compares_whole_last_year() {
     let last_year = [payout(ymd(2024, 12, 20), dec!(300), 0, false)];
-    let response = build_response(0, 2025, ymd(2026, 11, 3), &[], &last_year);
+    let response = build_response(0, 2025, ymd(2026, 11, 3), &[], &last_year, true);
     assert_eq!(response.total_cash_amount, 0.0);
     assert_eq!(response.last_year_cash_amount, 300.0);
     assert_eq!(response.last_year_same_period_cash_amount, 300.0);
+    assert_eq!(
+        response.items,
+        Some(Vec::new()),
+        "今年沒有入帳時明細為空清單"
+    );
 }
 
 #[test]

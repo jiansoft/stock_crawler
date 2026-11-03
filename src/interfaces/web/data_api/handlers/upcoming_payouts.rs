@@ -70,7 +70,8 @@ pub(super) fn build_response(
     }
 }
 
-fn payout_item(payout: &DividendPayout) -> UpcomingPayoutItem {
+/// 一筆入帳轉成 JSON 項目；`/portfolio/dividend-income` 的 `items` 共用。
+pub(super) fn payout_item(payout: &DividendPayout) -> UpcomingPayoutItem {
     UpcomingPayoutItem {
         payable_date: payout.payable_date.to_string(),
         stock_symbol: payout.stock_symbol.clone(),

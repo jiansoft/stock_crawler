@@ -13,6 +13,7 @@ use chrono::{Datelike, Local, Months, NaiveDate};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
+use super::upcoming_payouts::payout_item;
 use super::{error_response, repository_error};
 use crate::domain::portfolio::payout::{self, DividendPayout, MonthlyIncome};
 use crate::domain::portfolio::repository::PortfolioRepository;
@@ -25,6 +26,7 @@ use crate::interfaces::web::data_api::dto::{
 ///
 /// 已除權息的金額取已領股利明細（除權息後才賣出的也算），尚未除權息的以目前持股推算
 /// （`estimated_cash_amount`）；未來月份只含已公告發放日的股利。金額未扣二代健保補充保費與稅。
+/// 帶 `include_items=true` 時另回今年每一筆入帳（`items`），供月曆點月份看明細。
 ///
 /// # Errors
 ///
@@ -54,8 +56,14 @@ pub(crate) async fn dividend_income(Query(params): Query<DividendIncomeParams>) 
         Ok(payouts) => payouts,
         Err(error) => return repository_error(error),
     };
+    let include_items = params.include_items.unwrap_or(false);
     Json(build_response(
-        member_id, year, today, &this_year, &last_year,
+        member_id,
+        year,
+        today,
+        &this_year,
+        &last_year,
+        include_items,
     ))
     .into_response()
 }
@@ -88,13 +96,15 @@ async fn payouts_between(
     )))
 }
 
-/// 組出回應：今年與去年的入帳各自依月份加總，去年同期取到去年的 `as_of` 同日（年度已過完時為全年）。
+/// 組出回應：今年與去年的入帳各自依月份加總，去年同期取到去年的 `as_of` 同日（年度已過完時為全年）；
+/// `include_items` 時附上今年每一筆入帳。
 pub(super) fn build_response(
     member_id: i64,
     year: i32,
     as_of: NaiveDate,
     this_year: &[DividendPayout],
     last_year: &[DividendPayout],
+    include_items: bool,
 ) -> DividendIncomeResponse {
     let months = payout::monthly_income(this_year, year, as_of);
     let last_months = payout::monthly_income(last_year, year - 1, as_of);
@@ -129,6 +139,7 @@ pub(super) fn build_response(
                 last_year_cash_amount: to_f64(last.cash_amount),
             })
             .collect(),
+        items: include_items.then(|| this_year.iter().map(payout_item).collect()),
     }
 }
 

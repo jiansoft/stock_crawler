@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use super::UpcomingPayoutItem;
+
 /// 持股年度股利入帳 endpoint 的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct DividendIncomeParams {
@@ -14,6 +16,9 @@ pub(crate) struct DividendIncomeParams {
     /// 會員編號；0（預設）為全部會員合計。
     #[param(minimum = 0, default = 0)]
     pub(crate) member_id: Option<i64>,
+    /// `true` 時另回 `items`：今年每一筆入帳（同 `/portfolio/upcoming-payouts` 的項目）。
+    #[param(default = false)]
+    pub(crate) include_items: Option<bool>,
 }
 
 /// 一個月的股利入帳。
@@ -58,4 +63,7 @@ pub(crate) struct DividendIncomeResponse {
     pub(crate) last_year_same_period_cash_amount: f64,
     /// 1～12 月，沒有入帳的月份為 0；未來月份只含已公告發放日的股利。
     pub(crate) months: Vec<DividendIncomeMonth>,
+    /// 今年每一筆入帳，依發放日、代號排序；只有查詢帶 `include_items=true` 時才有此欄位。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) items: Option<Vec<UpcomingPayoutItem>>,
 }
