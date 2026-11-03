@@ -101,3 +101,30 @@ async fn notify_foreign_holdings_dedups_each_direction_and_symbol() {
     assert_eq!(repeated, 0, "去重期間內不再通知");
     assert_eq!(flags, [true, true, false, false]);
 }
+
+/// 三個事件 handler 經由資料庫查詢後交給 `notify_*`；2099 年的期別沒有任何持股資料，不送出（臨時庫）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn handlers_query_then_notify_nothing_for_future_periods() {
+    if !redis_available("handlers_query_then_notify_nothing_for_future_periods").await {
+        return;
+    }
+    if crate::infra::database::ping().await.is_err() {
+        println!("跳過 handlers_query_then_notify_nothing_for_future_periods：無資料庫連接");
+        return;
+    }
+    EventDispatcher::handle_monthly_revenue_updated(209901)
+        .await
+        .expect("月營收查詢");
+    EventDispatcher::handle_quarterly_financials_updated(2099, "Q1")
+        .await
+        .expect("季報查詢");
+    EventDispatcher::handle_foreign_holdings_updated(
+        NaiveDate::from_ymd_opt(2099, 1, 5).expect("日期應合法"),
+    )
+    .await
+    .expect("外資持股查詢");
+}
