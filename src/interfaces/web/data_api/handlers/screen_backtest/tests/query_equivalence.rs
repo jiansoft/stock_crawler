@@ -1,4 +1,4 @@
-//! 在臨時庫比對成交金額物化前後的候選股、續抱與逐期報酬。
+//! 在臨時庫比對成交金額物化、次日開盤價依日期物化前後的候選股、續抱與逐期報酬。
 
 use std::future::Future;
 use std::pin::Pin;
@@ -72,7 +72,15 @@ async fn compare_case(execution: &str, offset: u16, weighting: &str) {
     } else {
         super::super::sql::BACKTEST_WITH_CHIP_NEXT_OPEN_SQL
     };
-    let original = optimized.replace("valued AS MATERIALIZED (", "valued AS (");
+    // 改寫前：成交金額不物化、次日開盤價逐檔查 `DailyQuotes`（`rebal_quotes` 留著但沒人引用，不會執行）。
+    let original = optimized
+        .replace("valued AS MATERIALIZED (", "valued AS (")
+        .replace("LEFT JOIN rebal_quotes", "LEFT JOIN \"DailyQuotes\"");
+    assert_eq!(
+        original.contains("LEFT JOIN \"DailyQuotes\" qe"),
+        execution == "next_open",
+        "只有次日開盤版有進出場日線"
+    );
     let before = boxed(backtest.candidates_using_sql(offset, 2, &original))
         .await
         .unwrap();
