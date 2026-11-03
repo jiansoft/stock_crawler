@@ -71,6 +71,19 @@ async fn sync_registers_new_and_renamed_etfs() {
         .await
         .expect("同步成功");
     let second = names().await;
+
+    // 上市抓取失敗：上櫃照常改名。
+    let otc_renamed = vec![etf(
+        OTC,
+        "測試上櫃改名",
+        StockExchangeMarket::OverTheCounter,
+    )];
+    sync(async { Err(anyhow!("上市抓取失敗")) }, async {
+        Ok(otc_renamed)
+    })
+    .await
+    .expect("上市失敗只記錄");
+    let third = names().await;
     cleanup().await;
 
     assert_eq!(first, [(LISTED.to_owned(), "測試上市ETF".to_owned(), 2)]);
@@ -81,6 +94,7 @@ async fn sync_registers_new_and_renamed_etfs() {
             (OTC.to_owned(), "測試上櫃ETF".to_owned(), 4),
         ]
     );
+    assert_eq!(third[1], (OTC.to_owned(), "測試上櫃改名".to_owned(), 4));
 }
 
 /// 手動執行：抓官方 ETF 清單並更新正式資料（需要網路）。
