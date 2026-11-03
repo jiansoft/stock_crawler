@@ -48,10 +48,11 @@ pub async fn execute() -> Result<()> {
 /// 以 `today` 為今天彙整並發送；上個月沒有入帳時不發。
 async fn notify(repo: &impl PortfolioRepository, today: NaiveDate) -> Result<()> {
     let summary = load_summary(repo, today).await?;
+    let payout_count = summary.payouts.len();
     tracing::info!(
         "上月持股股利入帳彙總: from={}, payouts={}",
         summary.from,
-        summary.payouts.len()
+        payout_count
     );
     if let Some(message) = build_message(&summary) {
         alert::send_message(&message).await;

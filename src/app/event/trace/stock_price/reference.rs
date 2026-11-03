@@ -40,9 +40,10 @@ pub(super) async fn load_reference_prices(date: NaiveDate) {
         ),
     }
 
+    let symbol_count = prices.len();
     tracing::info!(
         "載入當日參考價（除權息／減資）: date={date}, symbols={}, detail={:?}",
-        prices.len(),
+        symbol_count,
         prices
     );
     SHARE.set_ex_rights_reference_prices(prices);

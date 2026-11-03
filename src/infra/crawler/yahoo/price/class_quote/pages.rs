@@ -189,9 +189,10 @@ pub(super) fn parse_class_quotes_page(
     // 就算首頁沒有直接回錯，也先把「整頁空資料」寫到日誌，
     // 方便後續人工從 log 追查是 Yahoo schema 變更、類股失效還是被擋流量。
     if raw_item_count == 0 {
+        let exchange_label = category.exchange.label();
         tracing::error!(
             "Yahoo 類股 API 回空資料: {} {}({}) offset={} resultsTotal={} url={}",
-            category.exchange.label(),
+            exchange_label,
             category.name,
             category.sector_id,
             offset,

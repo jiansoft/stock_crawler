@@ -256,10 +256,7 @@ fn maybe_trim_allocator(
     *previous_trimmed_at = Instant::now();
 
     if trim_allocator_memory() {
-        tracing::info!(
-            "{}",
-            "Trace diagnostics | allocator trim requested after idle snapshot".to_string(),
-        );
+        tracing::info!("Trace diagnostics | allocator trim requested after idle snapshot");
     }
 }
 

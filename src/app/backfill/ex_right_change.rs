@@ -139,10 +139,8 @@ where
                 Ok(references) => references,
                 Err(why) => {
                     summary.failed += 1;
-                    tracing::warn!(
-                        "抓取{}除權息基準價失敗 {from}~{to}: {why:#}",
-                        market.label()
-                    );
+                    let market_label = market.label();
+                    tracing::warn!("抓取{}除權息基準價失敗 {from}~{to}: {why:#}", market_label);
                     continue;
                 }
             };
@@ -151,10 +149,12 @@ where
                 .apply_ex_right_references(&references, with_stats)
                 .await?;
             summary.updated += updated;
+            let market_label = market.label();
+            let reference_count = references.len();
             tracing::info!(
                 "{}除權息日漲跌修正 {from}~{to}: 基準價 {} 筆、更新日線 {updated} 列",
-                market.label(),
-                references.len()
+                market_label,
+                reference_count
             );
         }
     }

@@ -234,7 +234,7 @@ impl App {
                     tracing::error!(
                         "Failed to serde_json because: {:?} \r\n {}",
                         why,
-                        &tg_allowed
+                        tg_allowed
                     );
                 }
             }

@@ -249,35 +249,31 @@ impl Share {
 
     /// 把各快取目前的載入數量寫進 log，方便啟動時檢視。
     fn log_cache_summary(&self) {
-        tracing::info!(
-            "CacheShare.indices 初始化 {}",
-            self.indices
-                .read()
-                .map(|cache| cache.len())
-                .unwrap_or_default()
-        );
+        let index_count = self
+            .indices
+            .read()
+            .map(|cache| cache.len())
+            .unwrap_or_default();
+        tracing::info!("CacheShare.indices 初始化 {}", index_count);
+        let stock_count = self
+            .stocks
+            .read()
+            .map(|cache| cache.len())
+            .unwrap_or_default();
         tracing::info!("CacheShare.industries 初始化 {:?}", self.industries);
-        tracing::info!(
-            "CacheShare.stocks 初始化 {}",
-            self.stocks
-                .read()
-                .map(|cache| cache.len())
-                .unwrap_or_default()
-        );
-        tracing::info!(
-            "CacheShare.last_trading_day_quotes 初始化 {}",
-            self.last_trading_day_quotes
-                .read()
-                .map(|cache| cache.len())
-                .unwrap_or_default()
-        );
-        tracing::info!(
-            "CacheShare.quote_history_records 初始化 {}",
-            self.quote_history_records
-                .read()
-                .map(|cache| cache.len())
-                .unwrap_or_default()
-        );
+        tracing::info!("CacheShare.stocks 初始化 {}", stock_count);
+        let quote_count = self
+            .last_trading_day_quotes
+            .read()
+            .map(|cache| cache.len())
+            .unwrap_or_default();
+        tracing::info!("CacheShare.last_trading_day_quotes 初始化 {}", quote_count);
+        let record_count = self
+            .quote_history_records
+            .read()
+            .map(|cache| cache.len())
+            .unwrap_or_default();
+        tracing::info!("CacheShare.quote_history_records 初始化 {}", record_count);
 
         if let Ok(revenues) = self.last_revenues.read() {
             for revenue in revenues.iter() {

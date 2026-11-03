@@ -72,15 +72,16 @@ pub(super) async fn apply_plan(
                     // 分期事件會改變年度合計列，記下來稍後統一重算。
                     annual_total_targets.insert((dividend.security_code.clone(), dividend.year));
                 }
+                let quarter = if dividend.quarter.is_empty() {
+                    "年度"
+                } else {
+                    dividend.quarter.as_str()
+                };
                 tracing::info!(
                     "新增漏抓的股利事件 {} {}{} 除權息日 {}",
                     dividend.security_code,
                     dividend.year_of_dividend,
-                    if dividend.quarter.is_empty() {
-                        "年度".to_string()
-                    } else {
-                        dividend.quarter.clone()
-                    },
+                    quarter,
                     dividend.ex_dividend_date_cash
                 );
             }
@@ -140,10 +141,13 @@ fn log_unresolved(events: &[UnresolvedEvent], today: NaiveDate) {
         .iter()
         .partition(|event| is_awaiting_amount(event, today));
 
+    let event_total = events.len();
+    let awaiting_total = awaiting.len();
+    let detail = summary.join("、");
     tracing::info!(
-        total = events.len(),
-        awaiting_amount = awaiting.len(),
-        detail = summary.join("、"),
+        total = event_total,
+        awaiting_amount = awaiting_total,
+        detail,
         "除權息事件無法判定期別，未寫入資料庫"
     );
 
@@ -157,18 +161,17 @@ fn log_unresolved(events: &[UnresolvedEvent], today: NaiveDate) {
                 )
             })
             .collect();
-        tracing::info!(
-            "金額待公告、Yahoo 尚未列出，等公告後再補：{}",
-            symbols.join("、")
-        );
+        let pending = symbols.join("、");
+        tracing::info!("金額待公告、Yahoo 尚未列出，等公告後再補：{}", pending);
     }
 
     for event in attention.iter().take(UNRESOLVED_SAMPLE_LIMIT) {
+        let reason = event.reason.as_str();
         tracing::warn!(
             "{} {} 無法判定期別：{}",
             event.announcement.stock_symbol,
             event.announcement.ex_date,
-            event.reason.as_str()
+            reason
         );
     }
 }

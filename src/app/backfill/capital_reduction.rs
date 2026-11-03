@@ -176,11 +176,12 @@ async fn save_all(actions: Vec<CorporateAction>, market: &str) -> Result<u64> {
         match repository.save(&action).await {
             Ok(rows) => {
                 saved += rows;
+                let ratio = action.share_ratio.round_dp(6);
                 tracing::debug!(
                     "{market}已登錄: {} {} 比率 {} {}",
                     action.stock_symbol,
                     action.effective_date,
-                    action.share_ratio.round_dp(6),
+                    ratio,
                     action.note
                 );
             }

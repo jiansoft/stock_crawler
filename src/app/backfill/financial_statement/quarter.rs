@@ -253,9 +253,10 @@ where
         financial_repo
             .batch_save_financial_statements(&scraped_statements)
             .await?;
+        let record_count = scraped_statements.len();
         tracing::debug!(
             "financial_statement batch_upsert executed successfully for {} records.",
-            scraped_statements.len()
+            record_count
         );
 
         // 逐一更新 Redis 成功狀態快取

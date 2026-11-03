@@ -113,10 +113,8 @@ pub(super) fn log_records(records: &[EdgeRecord]) {
                 tracing::warn!("策略優勢檢查 {}（轉弱）：{text}", record.display_name())
             }
             Verdict::Unknown => {
-                tracing::warn!(
-                    "策略優勢檢查 {}（缺數字無法判斷）：{text}",
-                    record.display_name()
-                )
+                let name = record.display_name();
+                tracing::warn!("策略優勢檢查 {}（缺數字無法判斷）：{text}", name)
             }
         }
     }

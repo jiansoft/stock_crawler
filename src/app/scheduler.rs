@@ -189,11 +189,12 @@ async fn run_job<F, Fut>(
             }
         }
         TaskOutcome::Failed(why) => {
+            let elapsed_ms = t.elapsed().as_millis() as u64;
             let err_msg = format!("{:?}", why);
             tracing::error!(
                 task = cron_expr,
                 name = name,
-                elapsed_ms = t.elapsed().as_millis() as u64,
+                elapsed_ms,
                 error = %err_msg,
                 "task.failed"
             );
@@ -204,12 +205,8 @@ async fn run_job<F, Fut>(
                 "執行超過 {} 分鐘仍未結束，已中止本輪；請查看日誌中該任務最後的紀錄",
                 limit.as_secs() / 60
             );
-            tracing::error!(
-                task = cron_expr,
-                name = name,
-                elapsed_ms = t.elapsed().as_millis() as u64,
-                "task.timeout"
-            );
+            let elapsed_ms = t.elapsed().as_millis() as u64;
+            tracing::error!(task = cron_expr, name = name, elapsed_ms, "task.timeout");
             alert::send_alert(&format!("排程任務 [{}] 逾時", name), &err_msg).await;
         }
     }

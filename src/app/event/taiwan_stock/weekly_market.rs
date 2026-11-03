@@ -266,14 +266,18 @@ async fn run(
             tracing::warn!("每週市場摘要：讀取持股基本面失敗: {why:#}");
             Vec::new()
         });
+    let industry_count = industries
+        .as_ref()
+        .map_or(0, |section| section.industries.len());
+    let flow_count = flows.len();
+    let holding_count = symbols.len();
+    let move_count = moves.len();
     tracing::info!(
         "每週市場摘要: industries={} flows={} holdings={} moves={}",
-        industries
-            .as_ref()
-            .map_or(0, |section| section.industries.len()),
-        flows.len(),
-        symbols.len(),
-        moves.len()
+        industry_count,
+        flow_count,
+        holding_count,
+        move_count
     );
     build_message(
         market.as_ref(),

@@ -118,10 +118,8 @@ async fn visit_with(url: &str, retry_delay: Duration) -> Result<Vec<InsiderHoldi
     let body = match util::http::get_bytes_with_limit(url, MAX_BODY_BYTES, DOWNLOAD_TIMEOUT).await {
         Ok(body) => body,
         Err(why) => {
-            tracing::warn!(
-                "董監持股下載失敗，{} 秒後重試一次: {why:#}",
-                retry_delay.as_secs()
-            );
+            let delay_secs = retry_delay.as_secs();
+            tracing::warn!("董監持股下載失敗，{} 秒後重試一次: {why:#}", delay_secs);
             tokio::time::sleep(retry_delay).await;
             util::http::get_bytes_with_limit(url, MAX_BODY_BYTES, DOWNLOAD_TIMEOUT).await?
         }
