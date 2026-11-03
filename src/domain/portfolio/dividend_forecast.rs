@@ -14,14 +14,18 @@
 //!   （[`Basis::Cadence`]），補上去年同期沒有配息的月份（例如新上市的月配 ETF）；與已公告或
 //!   已推估的配息相差 [`CADENCE_WINDOW_DAYS`] 天內的不重複。
 //! - 同一除息日有多列（季配股的全年彙總列、月配 ETF 的季別與月別）只算一次，優先取各期列。
+//! - **已除息、未發放**：已有已領股利明細（[`Entitlement`]）時，股數與金額取明細（除息日
+//!   當時的持股），不用目前持股；除息後才買進或已賣出的部位因此不會算錯。
 //!
-//! 只算現金股利，不含股票股利，也不扣二代健保補充保費與所得稅；假設目前持股會一路
-//! 持有到各次除息日。
+//! 只算現金股利，不含股票股利，也不扣二代健保補充保費與所得稅；尚未除息的配息假設目前
+//! 持股會一路持有到除息日。
 
 use std::collections::HashMap;
 
 use chrono::{Datelike, Days, Months, NaiveDate};
 use rust_decimal::{Decimal, prelude::ToPrimitive};
+
+use super::payout::PayoutAllocation;
 
 /// 沒有發放日時，以除息日後幾天推估發放日（台股多在除息後 3～5 週發放）。
 pub const PAYABLE_LAG_DAYS: u64 = 30;
@@ -58,6 +62,83 @@ pub struct DividendEvent {
     pub ex_date: Option<NaiveDate>,
     /// 發放日；尚未公布為 `None`。
     pub payable_date: Option<NaiveDate>,
+}
+
+/// 已除息、已有已領股利明細的一筆現金股利（各會員合計）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Entitlement {
+    /// 股票代號。
+    pub stock_symbol: String,
+    /// 股票名稱。
+    pub name: String,
+    /// 除息日。
+    pub ex_date: NaiveDate,
+    /// 發放日。
+    pub pay_date: NaiveDate,
+    /// 每股現金股利。
+    pub cash_per_share: Decimal,
+    /// 除息日參與分配的股數。
+    pub shares: i64,
+    /// 已領股利明細的現金金額。
+    pub amount: Decimal,
+}
+
+impl Entitlement {
+    fn to_item(&self) -> ForecastItem {
+        ForecastItem {
+            stock_symbol: self.stock_symbol.clone(),
+            name: self.name.clone(),
+            shares: self.shares,
+            ex_date: self.ex_date,
+            pay_date: self.pay_date,
+            cash_per_share: self.cash_per_share,
+            amount: self.amount,
+            basis: Basis::Announced,
+            entitled: true,
+        }
+    }
+}
+
+/// 由股利入帳分配取出已除息、有已領明細的現金股利，依（代號, 除息日）合併各會員。
+///
+/// 以目前持股推算（`estimated`）、沒有現金、缺除息日或發放日的列不取；同一除息日有多列
+/// （例如月配 ETF 的季別與月別）時取金額大者，與 [`forecast`] 對股利列的去重一致。
+pub fn entitlements(allocations: &[PayoutAllocation]) -> Vec<Entitlement> {
+    let mut by_row: HashMap<(&str, NaiveDate, &str), Entitlement> = HashMap::new();
+    for allocation in allocations {
+        if allocation.estimated || allocation.cash_amount <= Decimal::ZERO {
+            continue;
+        }
+        let (Some(ex_date), Some(pay_date)) = (allocation.cash_ex, allocation.cash_payable) else {
+            continue;
+        };
+        let key = (
+            allocation.stock_symbol.as_str(),
+            ex_date,
+            allocation.quarter.as_str(),
+        );
+        let entry = by_row.entry(key).or_insert_with(|| Entitlement {
+            stock_symbol: allocation.stock_symbol.clone(),
+            name: allocation.name.clone(),
+            ex_date,
+            pay_date,
+            cash_per_share: allocation.cash_dividend,
+            shares: 0,
+            amount: Decimal::ZERO,
+        });
+        entry.shares += allocation.shares;
+        entry.amount += allocation.cash_amount;
+    }
+    let mut rows: Vec<Entitlement> = by_row.into_values().collect();
+    rows.sort_by(|a, b| {
+        (&a.stock_symbol, a.ex_date)
+            .cmp(&(&b.stock_symbol, b.ex_date))
+            .then_with(|| b.amount.cmp(&a.amount))
+    });
+    rows.dedup_by(|later, kept| {
+        later.stock_symbol == kept.stock_symbol && later.ex_date == kept.ex_date
+    });
+    rows
 }
 
 /// 預估依據。
@@ -102,6 +183,8 @@ pub struct ForecastItem {
     pub amount: Decimal,
     /// 預估依據。
     pub basis: Basis,
+    /// 已除息，股數與金額取已領股利明細（除息日持股）。
+    pub entitled: bool,
 }
 
 /// 單月合計。
@@ -137,9 +220,13 @@ pub struct Forecast {
 }
 
 /// 預估 `today` 之後 `months` 個月內的股利現金流。
+///
+/// `entitlements` 為已除息、有已領明細的配息（[`entitlements`]）；同代號同除息日的已公告
+/// 配息改用明細，不再以目前持股計算。
 pub fn forecast(
     holdings: &[Holding],
     events: &[DividendEvent],
+    entitlements: &[Entitlement],
     today: NaiveDate,
     months: u32,
 ) -> Forecast {
@@ -171,11 +258,15 @@ pub fn forecast(
             cash_per_share,
             amount: cash_per_share * Decimal::from(holding.shares),
             basis,
+            entitled: false,
         };
 
         for event in &dated {
             let (ex_date, pay_date) = (event.ex_date.unwrap_or(today), pay_date(event));
-            if in_window(pay_date) {
+            let recorded = entitlements.iter().any(|entitlement| {
+                entitlement.stock_symbol == holding.stock_symbol && entitlement.ex_date == ex_date
+            });
+            if in_window(pay_date) && !recorded {
                 items.push(item(
                     ex_date,
                     pay_date,
@@ -245,6 +336,10 @@ pub fn forecast(
             }
         }
     }
+    let recorded = entitlements
+        .iter()
+        .filter(|entitlement| in_window(entitlement.pay_date));
+    items.extend(recorded.map(Entitlement::to_item));
     items.sort_by(|a, b| {
         a.pay_date
             .cmp(&b.pay_date)

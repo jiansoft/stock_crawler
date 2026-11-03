@@ -237,6 +237,7 @@ fn openapi_dividend_forecast_schema_pins_field_names() {
             .contains("null")
     );
     let item = &schemas["DividendForecastItem"]["properties"];
+    assert_eq!(item["entitled"]["type"], "boolean");
     assert_eq!(
         enum_values(&document, &item["basis"]),
         serde_json::json!([

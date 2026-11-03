@@ -21,10 +21,12 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
         return;
     };
     let cleanup_forecast = || async {
-        let _ = sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
-            .bind(MEMBER)
-            .execute(pool)
-            .await;
+        for sql in [
+            "DELETE FROM dividend_record_detail_more WHERE stock_ownership_details_serial IN (SELECT serial FROM stock_ownership_details WHERE member_id = $1)",
+            "DELETE FROM stock_ownership_details WHERE member_id = $1",
+        ] {
+            let _ = sqlx::query(sql).bind(MEMBER).execute(pool).await;
+        }
         cleanup(pool).await;
     };
     cleanup_forecast().await;
@@ -41,14 +43,21 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
     let fmt = |date: chrono::NaiveDate| date.format("%Y-%m-%d").to_string();
     let announced_ex = today + Days::new(20);
     let past_ex = today - Days::new(100);
-    sqlx::query(
-        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost) VALUES ($1, $2, 1000, -50000)",
-    )
-    .bind(MEMBER)
-    .bind(SYMBOL)
-    .execute(pool)
-    .await
-    .expect("種入持股");
+    let recorded_ex = today - Days::new(5);
+    // 除息前持有 600 股（有已領明細）、除息後再買 400 股；目前合計 1,000 股。
+    let mut lots = Vec::new();
+    for shares in [600_i64, 400] {
+        let serial: i64 = sqlx::query_scalar(
+            "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost) VALUES ($1, $2, $3, -50000) RETURNING serial",
+        )
+        .bind(MEMBER)
+        .bind(SYMBOL)
+        .bind(shares)
+        .fetch_one(pool)
+        .await
+        .expect("種入持股");
+        lots.push(serial);
+    }
     sqlx::query("INSERT INTO last_daily_quotes (date, stock_symbol, closing_price) VALUES ('2026-04-30', $1, 100)")
         .bind(SYMBOL)
         .execute(pool)
@@ -79,6 +88,14 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
             "-".to_owned(),
             "-".to_owned(),
         ),
+        (
+            today.year(),
+            today.year(),
+            "Q3",
+            1,
+            fmt(recorded_ex),
+            fmt(recorded_ex + Days::new(15)),
+        ),
     ] {
         sqlx::query(r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2) VALUES ($1, $2, $3, $4, $5, 0, $5, $6, '-', $7, '-')"#)
             .bind(SYMBOL)
@@ -92,27 +109,45 @@ async fn portfolio_dividend_forecast_endpoint_db_semantics() {
             .await
             .expect("種入 dividend");
     }
+    sqlx::query(
+        "INSERT INTO dividend_record_detail_more (stock_ownership_details_serial, dividend_record_detail_serial, dividend_serial, cash, total) SELECT $1, 0, serial, 600, 600 FROM dividend WHERE security_code = $2 AND quarter = 'Q3'",
+    )
+    .bind(lots[0])
+    .bind(SYMBOL)
+    .execute(pool)
+    .await
+    .expect("種入已領明細");
 
     let (status, json) = get(&path).await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    // 已公告 2 元 × 1,000 股＋去年同期那期依最近一期 2 元 × 1,000 股（季配）；全年彙總列不計。
+    // 已公告 2 元 × 1,000 股＋已除息 1 元依除息日 600 股（已領明細）＋去年同期那期依最近一期
+    // 2 元 × 1,000 股（季配）；全年彙總列不計。
     assert_eq!(
         (
             json["announced_total"].clone(),
             json["estimated_total"].clone(),
             json["total"].clone()
         ),
-        (2000.0.into(), 2000.0.into(), 4000.0.into())
+        (2600.0.into(), 2000.0.into(), 4600.0.into())
     );
-    assert_eq!(json["forward_yield_percent"], 4.0);
+    assert_eq!(json["forward_yield_percent"], 4.6);
     let items = json["items"].as_array().expect("items 陣列");
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0]["basis"], "announced");
-    assert_eq!(items[0]["ex_date"], fmt(announced_ex));
-    assert_eq!(items[1]["basis"], "latest_amount");
+    assert_eq!(items.len(), 3, "{items:?}");
+    assert_eq!(
+        (
+            &items[0]["shares"],
+            &items[0]["entitled"],
+            &items[0]["ex_date"]
+        ),
+        (&600.into(), &true.into(), &fmt(recorded_ex).into())
+    );
+    assert_eq!(items[1]["basis"], "announced");
+    assert_eq!(items[1]["entitled"], false);
+    assert_eq!(items[1]["ex_date"], fmt(announced_ex));
+    assert_eq!(items[2]["basis"], "latest_amount");
 
     let (_, json) = get(&format!("{path}&months=1")).await;
-    assert_eq!(json["estimated_total"], 0.0, "一個月內只有已公告的那筆");
+    assert_eq!(json["estimated_total"], 0.0, "一個月內只有已公告的那兩筆");
 
     for query in ["member_id=-1", "months=0", "months=25"] {
         let (status, _) = get(&format!("/api/v1/portfolio/dividend-forecast?{query}")).await;

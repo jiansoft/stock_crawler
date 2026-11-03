@@ -1,7 +1,8 @@
 //! `/portfolio/dividend-forecast` handler：以目前持股預估未來幾個月的現金股利入帳。
 //!
 //! 持股取 `stock_ownership_details`（未賣出，依代號合併），配息取 `dividend` 近兩年的
-//! 現金股利列，報價取 `last_daily_quotes`。預估規則在
+//! 現金股利列，報價取 `last_daily_quotes`；已除息未發放的取已領股利明細（與
+//! `/portfolio/dividend-income` 同源）。預估規則在
 //! [`crate::domain::portfolio::dividend_forecast`]。
 
 use std::collections::HashMap;
@@ -12,15 +13,17 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{Datelike, Days, Local, Months, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::dividend_fill::summary_dto;
 use super::market_dividend_fill::bucket_dto;
-use super::{database_error, error_response};
+use super::{database_error, error_response, repository_error};
 use crate::app::calculation::dividend_fill_hints::FillHints;
-use crate::domain::portfolio::dividend_forecast::{self, DividendEvent, Holding};
+use crate::domain::portfolio::dividend_forecast::{self, DividendEvent, Entitlement, Holding};
+use crate::domain::portfolio::repository::PortfolioRepository;
 use crate::infra::database;
+use crate::infra::database::repository::portfolio::PgPortfolioRepository;
 use crate::interfaces::web::data_api::dto::{
     DividendForecastItem, DividendForecastParams, DividendForecastResponse, ErrorBody,
 };
@@ -71,7 +74,7 @@ struct EventRow {
 ///
 /// 已公告的配息直接列入；過去 12 個月的配息往後推一年估算（季配、月配金額用最近一期，
 /// 月配另依配息間隔補上去年同期沒有的月份）。只含現金股利，
-/// 不扣二代健保補充保費與稅，並假設目前持股持有到各次除息日。
+/// 不扣二代健保補充保費與稅；已除息未發放的用除息日持股，其餘假設目前持股持有到除息日。
 ///
 /// # Errors
 ///
@@ -111,12 +114,20 @@ pub(crate) async fn dividend_forecast(Query(params): Query<DividendForecastParam
         Ok(rows) => rows,
         Err(error) => return database_error(error),
     };
+    let end = today.checked_add_months(Months::new(u32::from(months)));
+    let allocations = PgPortfolioRepository::new()
+        .fetch_payout_allocations(member_id, today + Days::new(1), end.unwrap_or(today), today)
+        .await;
+    let entitlements = match allocations {
+        Ok(rows) => dividend_forecast::entitlements(&rows),
+        Err(error) => return repository_error(error),
+    };
 
     let closing_prices: HashMap<String, Decimal> = holdings
         .iter()
         .filter_map(|row| Some((row.stock_symbol.clone(), row.closing_price?)))
         .collect();
-    let mut response = build_response(member_id, holdings, events, today, months);
+    let mut response = build_response(member_id, holdings, events, &entitlements, today, months);
     let hints = FillHints::load(&symbols, today).await;
     attach_fill_hints(&mut response.items, &hints, &closing_prices);
     Json(response).into_response()
@@ -146,6 +157,7 @@ fn build_response(
     member_id: i64,
     holdings: Vec<HoldingRow>,
     events: Vec<EventRow>,
+    entitlements: &[Entitlement],
     today: NaiveDate,
     months: u8,
 ) -> DividendForecastResponse {
@@ -171,7 +183,7 @@ fn build_response(
         .collect();
     DividendForecastResponse::new(
         member_id,
-        dividend_forecast::forecast(&holdings, &events, today, u32::from(months)),
+        dividend_forecast::forecast(&holdings, &events, entitlements, today, u32::from(months)),
     )
 }
 
@@ -199,7 +211,7 @@ mod tests {
             ex_date: NaiveDate::from_ymd_opt(2026, 12, 10),
             payable_date: NaiveDate::from_ymd_opt(2027, 1, 7),
         }];
-        let response = build_response(1, holdings, events, today, 6);
+        let response = build_response(1, holdings, events, &[], today, 6);
         assert_eq!((response.member_id, response.total), (1, 700.0));
         assert_eq!(response.items[0].basis, "announced");
         assert_eq!(response.items[0].pay_date, "2027-01-07");
@@ -222,6 +234,7 @@ mod tests {
             cash_per_share: cash,
             amount: cash * 1_000.0,
             basis: "announced".to_owned(),
+            entitled: false,
             fill_history: None,
             fill_peer: None,
         };
