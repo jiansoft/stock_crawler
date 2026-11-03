@@ -35,6 +35,13 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "通知上月持股股利入帳",
             event::taiwan_stock::monthly_payout::execute,
         ),
+        // 08:15（每月 1 日）記錄股利預估快照，供事後比對預估誤差
+        job!(
+            normal,
+            "0 15 8 1 * *",
+            "記錄股利預估快照",
+            event::taiwan_stock::forecast_snapshot::execute,
+        ),
         // 09:00 更新股票權值佔比
         job!(
             normal,

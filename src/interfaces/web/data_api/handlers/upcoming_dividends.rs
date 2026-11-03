@@ -13,7 +13,6 @@ use chrono::{Days, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::dividend_fill::summary_dto;
-use super::dividend_forecast::{HOLDINGS_SQL, HoldingRow};
 use super::market_dividend_fill::bucket_dto;
 use super::{database_error, error_response};
 use crate::app::calculation::dividend_fill_hints::FillHints;
@@ -22,6 +21,7 @@ use crate::app::calculation::upcoming_dividends::{
 };
 use crate::infra::database;
 use crate::infra::database::repository::dividend::PgDividendRepository;
+use crate::infra::database::repository::portfolio::forecast::{HOLDINGS_SQL, HoldingRow};
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, UpcomingDividendItem, UpcomingDividendsParams, UpcomingDividendsResponse,
 };

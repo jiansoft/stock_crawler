@@ -26,8 +26,9 @@ pub(crate) mod holdings;
 // 持股董監質押變動通知
 pub mod insider_pledge;
 // 大盤趨勢變化通知（加權指數站上或跌破 60／240 日均線、均線排列改變）
-pub mod market_regime_alert;
 /// 每月 1 日上個月持股股利入帳彙總
+pub mod forecast_snapshot;
+pub mod market_regime_alert;
 pub mod monthly_payout;
 /// 股利發放日的事件
 pub mod payable_date;

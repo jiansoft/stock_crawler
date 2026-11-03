@@ -10,6 +10,7 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use sqlx::{QueryBuilder, Row, postgres::PgRow};
 
+pub(crate) mod forecast;
 mod payout;
 
 /// 基於 PostgreSQL 的持股倉儲實現 (PgPortfolioRepository)。
