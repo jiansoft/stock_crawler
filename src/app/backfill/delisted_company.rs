@@ -128,12 +128,8 @@ fn roster_markets() -> impl Iterator<Item = StockExchangeMarket> {
 /// # 回傳
 /// 成功時回傳本輪實際標記下市的檔數。
 pub async fn mark_stocks_missing_from_isin_roster(max_delist: usize) -> Result<usize> {
-    mark_missing_from_rosters(
-        &PgStockRepository::new(),
-        twse::international_securities_identification_number::visit_all_listed_symbols,
-        max_delist,
-    )
-    .await
+    let roster = twse::international_securities_identification_number::visit_all_listed_symbols;
+    mark_missing_from_rosters(&PgStockRepository::new(), roster, max_delist).await
 }
 
 /// [`mark_stocks_missing_from_isin_roster`] 的流程本體；名冊來源與倉儲由呼叫端注入。
