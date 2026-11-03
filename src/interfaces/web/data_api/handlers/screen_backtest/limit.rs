@@ -57,9 +57,10 @@ where
                 .expect("回測併發 semaphore 不會關閉");
             let waited = started.elapsed();
             if waited >= SLOW_WAIT {
+                let waited_ms = waited.as_millis();
                 tracing::info!(
                     "重型回測等待併發許可 {} ms（全程序上限 {GLOBAL_PERMITS}）",
-                    waited.as_millis()
+                    waited_ms
                 );
             }
             run(item).await

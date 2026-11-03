@@ -137,9 +137,10 @@ where
     }
     saved += save_batch(repo, &mut batch).await?;
     let rows = repo.refresh_snapshot().await?;
+    let etf_count = listed.len();
     tracing::info!(
         "ETF 基本資料更新: etfs={}, saved={saved}, not_found={not_found}, failed={failed}, unvisited={unvisited}, snapshot_rows={rows}",
-        listed.len()
+        etf_count
     );
     let visited = listed.len() - unvisited;
     if too_many_failures(failed, visited) {

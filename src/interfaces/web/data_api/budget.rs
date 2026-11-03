@@ -86,9 +86,10 @@ pub(crate) async fn enforce_with(
     {
         Ok(response) => response,
         Err(_) => {
+            let timeout_secs = timeout.as_secs_f32();
             tracing::warn!(
                 "Data API 請求逾時（{}s）: path={path} query={query}",
-                timeout.as_secs_f32()
+                timeout_secs
             );
             error_response(
                 StatusCode::GATEWAY_TIMEOUT,

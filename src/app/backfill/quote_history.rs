@@ -125,9 +125,10 @@ pub async fn execute_with(
                 Ok(value) => value,
                 Err(why) => {
                     summary.months_failed += 1;
+                    let month_text = month.format("%Y-%m");
                     tracing::warn!(
                         stock_symbol = stock_symbol,
-                        month = %month.format("%Y-%m"),
+                        month = %month_text,
                         error = %why,
                         "個股月行情抓取失敗，略過此月份"
                     );
@@ -164,10 +165,12 @@ pub async fn execute_with(
                 touched.push(stock_symbol.clone());
             }
 
+            let month_text = month.format("%Y-%m");
+            let fetched = dtos.len();
             tracing::info!(
                 stock_symbol = stock_symbol,
-                month = %month.format("%Y-%m"),
-                fetched = dtos.len(),
+                month = %month_text,
+                fetched,
                 inserted = inserted,
                 "個股月行情回補完成"
             );
@@ -195,8 +198,9 @@ pub async fn execute_with(
         }
     }
 
+    let symbol_count = stock_symbols.len();
     tracing::info!(
-        symbols = stock_symbols.len(),
+        symbols = symbol_count,
         months_requested = summary.months_requested,
         months_with_data = summary.months_with_data,
         months_failed = summary.months_failed,

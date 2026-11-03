@@ -197,9 +197,10 @@ async fn build(today: NaiveDate) -> Result<(String, Option<StatementStats>)> {
         .iter()
         .filter(|check| !check.problems.is_empty())
         .count();
+    let check_count = checks.len();
     tracing::info!(
         "資料健康檢查結束: checks={}, problems={problems}",
-        checks.len()
+        check_count
     );
     let slow = weekly_slow_queries(std::path::Path::new(LOG_DIR), from, today);
     let abnormal = weekly_abnormal_prices(std::path::Path::new(LOG_DIR), from, today);

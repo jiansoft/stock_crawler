@@ -94,9 +94,11 @@ pub async fn recalculate_moving_averages(
         extremes += repository
             .rebuild_quote_history_price_extremes(batch)
             .await?;
+        let batch_no = index + 1;
+        let symbol_count = batch.len();
         tracing::info!(
-            batch = index + 1,
-            symbols = batch.len(),
+            batch = batch_no,
+            symbols = symbol_count,
             rows,
             from = %from,
             "重算均線"

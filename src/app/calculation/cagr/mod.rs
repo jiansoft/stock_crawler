@@ -130,8 +130,9 @@ pub async fn backfill_period_with(
         summary.rows_written += result.rows_written;
     }
 
+    let period_code = period.code();
     tracing::info!(
-        period = period.code(),
+        period = period_code,
         dates_pending = summary.dates_pending,
         dates_processed = summary.dates_processed,
         dates_skipped = summary.dates_skipped,
@@ -226,8 +227,9 @@ pub async fn calculate_periods(
             None => {
                 // 資料庫的歷史深度不足以涵蓋此期間，整個期間跳過而非寫入
                 // 兩萬多列全 NULL 的資料。
+                let period_code = period.code();
                 tracing::warn!(
-                    period = period.code(),
+                    period = period_code,
                     target = %target,
                     "報價歷史不足以涵蓋此期間，整個跳過"
                 );
@@ -360,10 +362,12 @@ pub async fn calculate_periods(
                 .with_context(|| format!("Failed to save CAGR batch for {}", period.code()))?;
         }
 
+        let period_code = period.code();
+        let row_count = records.len();
         tracing::info!(
-            period = period.code(),
+            period = period_code,
             base_date = %base_date,
-            rows = records.len(),
+            rows = row_count,
             "CAGR 期間計算完成"
         );
     }

@@ -314,10 +314,7 @@ mod tests {
 
     async fn test_fetch_unpublished_dividend_date_or_payable_date_for_specified_year() {
         dotenvy::dotenv().ok();
-        tracing::debug!(
-            "{}",
-            "開始 fetch_unpublished_dividend_date_or_payable_date_for_specified_year".to_string(),
-        );
+        tracing::debug!("開始 fetch_unpublished_dividend_date_or_payable_date_for_specified_year");
         let r = Dividend::fetch_unpublished_dividend_date_or_payable_date_for_specified_year(2023)
             .await;
         if let Ok(result) = r {

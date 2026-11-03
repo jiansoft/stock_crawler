@@ -119,9 +119,10 @@ fn map_public_items(data: Vec<Vec<String>>) -> Vec<Public> {
         // 防禦：下面直接以索引取值到 item[11]，來源若某列欄位不足，
         // 直接索引會讓整個爬蟲 panic——寧可略過該列並留下紀錄。
         if item.len() < 12 {
+            let field_count = item.len();
             tracing::warn!(
                 "publicForm 資料列欄位不足（{} < 12），略過: {:?}",
-                item.len(),
+                field_count,
                 item
             );
             continue;

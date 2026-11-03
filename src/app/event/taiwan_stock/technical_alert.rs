@@ -84,10 +84,12 @@ async fn run(
         .await
         .context("fetch technical signals of holdings failed")?;
     let notable = notable(signals);
+    let holding_count = symbols.len();
+    let signal_count = notable.len();
     tracing::info!(
         "持股技術訊號通知: holdings={} signals={}",
-        symbols.len(),
-        notable.len()
+        holding_count,
+        signal_count
     );
     if notable.is_empty() {
         return Ok(None);

@@ -177,17 +177,19 @@ where
                 // 避免單一 sector 出問題就拖垮整個 Yahoo 報價快取。
                 // 5xx 是 Yahoo 端的暫時性錯誤，下一輪即恢復，只記 warn。
                 if errors::is_transient_server_error(&err_msg) {
+                    let exchange_label = category.exchange.label();
                     tracing::warn!(
                         "Yahoo 類股快取更新失敗（暫時性）: {} {}({}) {:#}",
-                        category.exchange.label(),
+                        exchange_label,
                         category.name,
                         category.sector_id,
                         why
                     );
                 } else {
+                    let exchange_label = category.exchange.label();
                     tracing::error!(
                         "Yahoo 類股快取更新失敗: {} {}({}) {:?}",
-                        category.exchange.label(),
+                        exchange_label,
                         category.name,
                         category.sector_id,
                         why
@@ -210,9 +212,10 @@ where
         // 繼續往下跑只會對每個剩餘類股各再被擋一次。
         // 冷卻改由輪尾統一等一次（DENIED_COOLDOWN），不在這裡等。
         if stats.denied {
+            let exchange_label = category.exchange.label();
             tracing::warn!(
                 "Yahoo 採集遭遇 Request denied，中止本輪剩餘類股並進入冷卻。類股: {} {}({})",
-                category.exchange.label(),
+                exchange_label,
                 category.name,
                 category.sector_id
             );
@@ -241,21 +244,23 @@ fn finish_cycle(
     // 若整輪結束後共享快取仍然是空的，代表本輪 Yahoo 採集沒有成功落地任何資料，
     // 這是一種需要人回頭檢查程式或來源格式的明確異常。
     if total_count == 0 {
+        let cycle_elapsed = cycle_started.elapsed();
         tracing::error!(
             "Yahoo 類股快取輪詢完成但沒有任何資料落地: success_count={} failure_count={} 耗時 {:?}",
             stats.success,
             stats.failure,
-            cycle_started.elapsed()
+            cycle_elapsed
         );
     }
 
+    let cycle_elapsed = cycle_started.elapsed();
     tracing::debug!(
         "Yahoo 類股快取輪詢完成，共 {} 檔股票，成功類股 {}，失敗類股 {}，candidate_events={}，耗時 {:?}",
         total_count,
         stats.success,
         stats.failure,
         stats.candidate_events,
-        cycle_started.elapsed()
+        cycle_elapsed
     );
 
     trim_allocator_memory();

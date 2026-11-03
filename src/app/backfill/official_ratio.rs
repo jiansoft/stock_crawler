@@ -154,10 +154,12 @@ where
         let dates = repo
             .fetch_dates_to_update(market.market_id(), from, to, market.pe_policy())
             .await?;
+        let market_label = market.label();
+        let date_count = dates.len();
         tracing::info!(
             "官方本益比淨值比回補開始: market={} dates={} from={from} to={to}",
-            market.label(),
-            dates.len()
+            market_label,
+            date_count
         );
         for (done, date) in dates.iter().enumerate() {
             if summary.requests > 0 {
@@ -173,9 +175,10 @@ where
                 }
                 Err(why) => {
                     summary.failed += 1;
+                    let market_label = market.label();
                     tracing::warn!(
                         "官方本益比淨值比抓取失敗: market={} date={date} error={why:#}",
-                        market.label()
+                        market_label
                     );
                 }
             }

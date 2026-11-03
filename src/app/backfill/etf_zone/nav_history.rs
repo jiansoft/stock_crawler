@@ -118,9 +118,10 @@ where
     )
     .await?;
     let rows = repo.refresh_snapshot().await?;
+    let etf_count = symbols.len();
     tracing::info!(
         "ETF 歷史淨值回補: etfs={}, from={from}, to={to}, inserted={}, empty={}, failed={}, unvisited={}, snapshot_rows={rows}",
-        symbols.len(),
+        etf_count,
         tally.inserted,
         tally.empty,
         tally.failed,

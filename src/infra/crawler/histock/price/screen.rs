@@ -249,10 +249,11 @@ pub(super) fn screen_inconsistent_rows(
 
     for (symbol, reason) in &inconsistent {
         if let Some(snapshot) = result.snapshots.get_mut(symbol) {
+            let reason_label = reason.label();
             tracing::debug!(
                 "HiStock 列資料前後矛盾，略過: 股票 {} {}",
                 symbol,
-                reason.label()
+                reason_label
             );
             snapshot.price = Decimal::ZERO;
         }

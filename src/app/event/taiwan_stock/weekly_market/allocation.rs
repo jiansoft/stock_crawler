@@ -245,10 +245,13 @@ pub(super) async fn allocation_sections(
         }
         match calculate_rebalance(dimension, &targets, &held, &[], &params) {
             Ok(result) => sections.extend(section_from_result(&result)),
-            Err(why) => tracing::warn!(
-                "每週市場摘要：{}維度再平衡試算失敗: {why:#}",
-                dimension.as_str()
-            ),
+            Err(why) => {
+                let dimension_label = dimension.as_str();
+                tracing::warn!(
+                    "每週市場摘要：{}維度再平衡試算失敗: {why:#}",
+                    dimension_label
+                );
+            }
         }
     }
     sections

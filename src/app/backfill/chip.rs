@@ -272,10 +272,12 @@ async fn save_holder_distributions(
         })
         .collect();
     let levels_written = repository.save_holder_levels(&level_records).await?;
+    let record_count = records.len();
+    let level_count = level_records.len();
     tracing::info!(
         "集保股權分散入庫結束: records={}, rows_written={written}, levels={}, levels_written={levels_written}",
-        records.len(),
-        level_records.len()
+        record_count,
+        level_count
     );
     Ok(())
 }

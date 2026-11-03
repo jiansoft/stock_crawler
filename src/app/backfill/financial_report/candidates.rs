@@ -42,9 +42,10 @@ pub(super) async fn order_candidates(
             Vec::new()
         });
     let (candidates, priority) = prioritize(candidates, &lagging);
+    let candidate_count = candidates.len();
     tracing::info!(
         "Yahoo 財報採集開始: candidates={}, priority={priority}",
-        candidates.len()
+        candidate_count
     );
     (candidates, priority)
 }
@@ -168,9 +169,10 @@ where
                     Ok(counts) => {
                         summary.fallback += 1;
                         summary.rows += counts.total();
+                        let row_count = counts.total();
                         tracing::warn!(
                             "financial report fell back to BigGo: stock_symbol={stock_symbol}, rows={}, yahoo_error={why:#}",
-                            counts.total()
+                            row_count
                         );
                     }
                     Err(fallback_err) => {
