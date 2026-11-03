@@ -103,24 +103,4 @@ async fn update_stock_info(cmd: &backfill::acl::RegisterStockCommand) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::infra::cache::SHARE;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_execute_etf() {
-        dotenvy::dotenv().ok();
-        SHARE.load().await;
-        tracing::debug!("開始 execute_etf");
-
-        match execute().await {
-            Ok(_) => {
-                tracing::debug!("完成 execute_etf");
-            }
-            Err(why) => {
-                tracing::debug!("執行失敗: {:?}", why);
-            }
-        }
-    }
-}
+mod tests;
