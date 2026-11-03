@@ -11,7 +11,10 @@ use crate::{
     app::calculation::dividend_record,
     domain::dividend::{entity::Dividend, repository::DividendRepository},
     infra::{
-        crawler::{share::ExDividendAnnouncement, yahoo},
+        crawler::{
+            share::ExDividendAnnouncement,
+            yahoo::{self, dividend::YahooDividend},
+        },
         database::repository::dividend::PgDividendRepository,
     },
 };
@@ -39,6 +42,30 @@ pub(super) async fn fill_missing_from_yahoo(
     plan: &ReconcilePlan,
     existing: &HashMap<String, Vec<Dividend>>,
 ) -> Result<YahooFill> {
+    fill_missing_with(
+        repo,
+        plan,
+        existing,
+        |symbol: String| async move { yahoo::dividend::visit(&symbol).await },
+        || tokio::time::sleep(YAHOO_INTERVAL),
+    )
+    .await
+}
+
+/// [`fill_missing_from_yahoo`] 的流程本體；Yahoo 來源與兩檔之間的間隔由呼叫端注入。
+pub(super) async fn fill_missing_with<Fetch, FetchFut, Pause, PauseFut>(
+    repo: &PgDividendRepository,
+    plan: &ReconcilePlan,
+    existing: &HashMap<String, Vec<Dividend>>,
+    mut fetch: Fetch,
+    mut pause: Pause,
+) -> Result<YahooFill>
+where
+    Fetch: FnMut(String) -> FetchFut,
+    FetchFut: Future<Output = Result<YahooDividend>>,
+    Pause: FnMut() -> PauseFut,
+    PauseFut: Future<Output = ()>,
+{
     let mut by_symbol: BTreeMap<&str, Vec<&ExDividendAnnouncement>> = BTreeMap::new();
     for event in &plan.missing {
         by_symbol
@@ -62,13 +89,13 @@ pub(super) async fn fill_missing_from_yahoo(
 
     let mut fill = YahooFill::default();
     for (symbol, events) in by_symbol {
-        let yahoo = match yahoo::dividend::visit(symbol).await {
+        let yahoo = match fetch(symbol.to_string()).await {
             Ok(value) => value,
             Err(why) => {
                 tracing::warn!("Yahoo 股利頁抓取失敗，略過補缺漏：{symbol} {why:#}");
                 fill.unresolved
                     .extend(events.iter().map(|event| (*event).clone()));
-                tokio::time::sleep(YAHOO_INTERVAL).await;
+                pause().await;
                 continue;
             }
         };
@@ -135,7 +162,7 @@ pub(super) async fn fill_missing_from_yahoo(
                 .await
                 .with_context(|| format!("Failed to rebuild dividend records for {symbol}"))?;
         }
-        tokio::time::sleep(YAHOO_INTERVAL).await;
+        pause().await;
     }
     Ok(fill)
 }
