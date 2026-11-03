@@ -373,3 +373,148 @@ async fn portfolio_upcoming_dividends_endpoint_db_semantics() {
 
     cleanup_upcoming().await;
 }
+
+/// 股利預估誤差：指定快照日依（代號, 發放月份）比對已領明細；同月入帳為 matched、
+/// 月份已過沒入帳為 missed、發放日未到為 pending。快照日固定用歷史日期，列屬於假代號與
+/// 不存在的會員，結束時清除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn portfolio_dividend_forecast_accuracy_endpoint_db_semantics() {
+    use chrono::Days;
+
+    const MEMBER: i64 = 979_791;
+    const SNAPSHOT: &str = "2026-04-30";
+    let Some(pool) =
+        pool_or_skip("portfolio_dividend_forecast_accuracy_endpoint_db_semantics").await
+    else {
+        return;
+    };
+    let cleanup_accuracy = || async {
+        for sql in [
+            "DELETE FROM dividend_forecast_snapshot WHERE member_id = $1",
+            "DELETE FROM dividend_record_detail_more WHERE stock_ownership_details_serial IN (SELECT serial FROM stock_ownership_details WHERE member_id = $1)",
+            "DELETE FROM stock_ownership_details WHERE member_id = $1",
+        ] {
+            let _ = sqlx::query(sql).bind(MEMBER).execute(pool).await;
+        }
+        cleanup(pool).await;
+    };
+    cleanup_accuracy().await;
+
+    let path = format!("/api/v1/portfolio/dividend-forecast/accuracy?member_id={MEMBER}");
+    let (status, json) = get(&format!("{path}&snapshot_date=1900-01-01")).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["snapshot_date"], "1900-01-01");
+    assert_eq!(json["items"], serde_json::json!([]));
+
+    seed(pool, &[SEED_STOCK]).await;
+    let lot: i64 = sqlx::query_scalar(
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost) VALUES ($1, $2, 1000, -50000) RETURNING serial",
+    )
+    .bind(MEMBER)
+    .bind(SYMBOL)
+    .fetch_one(pool)
+    .await
+    .expect("種入持股");
+    sqlx::query(r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2) VALUES ($1, 2026, 2026, 'Q1', 0.6, 0, 0.6, '2026-05-02', '-', '2026-05-22', '-')"#)
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("種入 dividend");
+    sqlx::query(
+        "INSERT INTO dividend_record_detail_more (stock_ownership_details_serial, dividend_record_detail_serial, dividend_serial, cash, total) SELECT $1, 0, serial, 600, 600 FROM dividend WHERE security_code = $2 AND quarter = 'Q1'",
+    )
+    .bind(lot)
+    .bind(SYMBOL)
+    .execute(pool)
+    .await
+    .expect("種入已領明細");
+    let pending_pay = chrono::Local::now().date_naive() + Days::new(30);
+    for (ex, pay, amount, basis) in [
+        ("2026-05-01", "2026-05-20".to_owned(), 500, "announced"),
+        ("2026-06-01", "2026-06-15".to_owned(), 300, "estimated"),
+        ("2026-12-20", pending_pay.to_string(), 700, "latest_amount"),
+    ] {
+        sqlx::query(
+            "INSERT INTO dividend_forecast_snapshot (snapshot_date, member_id, stock_symbol, ex_date, pay_date, shares, cash_per_share, amount, basis) VALUES ($1::date, $2, $3, $4::date, $5::date, 1000, 0.5, $6, $7)",
+        )
+        .bind(SNAPSHOT)
+        .bind(MEMBER)
+        .bind(SYMBOL)
+        .bind(ex)
+        .bind(pay)
+        .bind(Decimal::from(amount))
+        .bind(basis)
+        .execute(pool)
+        .await
+        .expect("種入快照");
+    }
+
+    let (status, json) = get(&format!("{path}&snapshot_date={SNAPSHOT}")).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let items = json["items"].as_array().expect("items 陣列");
+    let rows: Vec<(String, String, String)> = items
+        .iter()
+        .map(|item| {
+            (
+                item["month"].as_str().unwrap_or_default().to_owned(),
+                item["basis"].as_str().unwrap_or_default().to_owned(),
+                item["status"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows[..2],
+        [
+            (
+                "2026-05".to_owned(),
+                "announced".to_owned(),
+                "matched".to_owned()
+            ),
+            (
+                "2026-06".to_owned(),
+                "estimated".to_owned(),
+                "missed".to_owned()
+            ),
+        ],
+        "{json}"
+    );
+    assert_eq!(rows[2].2, "pending");
+    assert_eq!(items[0]["name"], "端點測試股");
+    assert_eq!(
+        (
+            &items[0]["actual"],
+            &items[0]["difference"],
+            &items[0]["error_percent"]
+        ),
+        (&600.0.into(), &100.0.into(), &16.67.into())
+    );
+    assert_eq!(items[2]["actual"], serde_json::Value::Null);
+    assert_eq!(
+        (
+            &json["settled_forecast"],
+            &json["settled_actual"],
+            &json["pending_count"]
+        ),
+        (&800.0.into(), &600.0.into(), &1.into())
+    );
+    assert_eq!(json["by_basis"][0]["basis"], "announced");
+    assert_eq!(json["by_basis"][0]["median_error_percent"], 16.67);
+
+    let (status, json) = get(&path).await;
+    assert_eq!(status, StatusCode::OK, "未指定快照日時取最近一次：{json}");
+    assert!(json["snapshot_date"].is_string(), "{json}");
+
+    for query in ["member_id=-1", "snapshot_date=2026-13-01"] {
+        let (status, _) = get(&format!(
+            "/api/v1/portfolio/dividend-forecast/accuracy?{query}"
+        ))
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+    }
+
+    cleanup_accuracy().await;
+}

@@ -1,4 +1,5 @@
-//! 持股股利預估的輸入查詢與每月快照（`/portfolio/dividend-forecast` 與 08:15 快照排程共用）。
+//! 持股股利預估的輸入查詢與每月快照（`/portfolio/dividend-forecast` 與 08:15 快照排程共用），
+//! 以及快照與實際入帳的誤差比對輸入（`/portfolio/dividend-forecast/accuracy`）。
 //!
 //! 持股取 `stock_ownership_details`（未賣出，依代號合併），配息取 `dividend` 近兩年的現金股利列，
 //! 報價取 `last_daily_quotes`；已除息未發放的取已領股利明細（[`super::payout`]）。
@@ -11,6 +12,7 @@ use sqlx::QueryBuilder;
 use crate::domain::portfolio::dividend_forecast::{
     self, DividendEvent, Entitlement, ForecastItem, Holding,
 };
+use crate::domain::portfolio::forecast_accuracy::{self, ActualPayout, ForecastedPayout};
 use crate::infra::database;
 
 /// 目前持股（依代號合併）與最新收盤價；`$1 = 0` 時為全部會員。
@@ -184,4 +186,85 @@ pub(crate) async fn replace_snapshot(
         .await
         .with_context(|| format!("提交股利預估快照失敗: {snapshot_date}"))?;
     Ok(inserted)
+}
+
+/// 快照中的逐筆預估；`$2 = 0` 時為全部會員。
+const SNAPSHOT_SQL: &str = r#"
+SELECT f.stock_symbol, COALESCE(s."Name", '') AS name, f.pay_date, f.amount, f.basis
+FROM dividend_forecast_snapshot AS f
+LEFT JOIN stocks AS s ON s.stock_symbol = f.stock_symbol
+WHERE f.snapshot_date = $1 AND ($2::bigint = 0 OR f.member_id = $2)
+"#;
+
+/// [`SNAPSHOT_SQL`] 的一列。
+#[derive(sqlx::FromRow)]
+struct SnapshotRow {
+    stock_symbol: String,
+    name: String,
+    pay_date: NaiveDate,
+    amount: Decimal,
+    basis: String,
+}
+
+impl From<SnapshotRow> for ForecastedPayout {
+    fn from(row: SnapshotRow) -> Self {
+        Self {
+            stock_symbol: row.stock_symbol,
+            name: row.name,
+            pay_date: row.pay_date,
+            amount: row.amount,
+            basis: row.basis,
+        }
+    }
+}
+
+/// 預估誤差比對的輸入：快照的逐筆預估與快照後已入帳的現金股利。
+#[derive(Debug, Default)]
+pub(crate) struct AccuracyInputs {
+    pub(crate) forecasts: Vec<ForecastedPayout>,
+    pub(crate) actuals: Vec<ActualPayout>,
+}
+
+/// 最近一次快照日；還沒有任何快照時為 `None`。
+///
+/// # Errors
+///
+/// 查詢失敗時回傳錯誤。
+pub(crate) async fn latest_snapshot_date() -> Result<Option<NaiveDate>> {
+    sqlx::query_scalar("SELECT max(snapshot_date) FROM dividend_forecast_snapshot")
+        .fetch_one(database::get_connection())
+        .await
+        .context("查詢最近一次股利預估快照日失敗")
+}
+
+/// 讀取 `snapshot_date` 快照的預估，與快照隔天起到 `today`（最多快照涵蓋的 12 個月）已入帳的現金股利。
+///
+/// # Errors
+///
+/// 任一查詢失敗時回傳錯誤。
+pub(crate) async fn load_accuracy_inputs(
+    snapshot_date: NaiveDate,
+    member_id: i64,
+    today: NaiveDate,
+) -> Result<AccuracyInputs> {
+    let rows: Vec<SnapshotRow> = sqlx::query_as(SNAPSHOT_SQL)
+        .bind(snapshot_date)
+        .bind(member_id)
+        .fetch_all(database::get_connection())
+        .await
+        .with_context(|| format!("查詢股利預估快照失敗: {snapshot_date}"))?;
+    let from = snapshot_date + Days::new(1);
+    let to = snapshot_date
+        .checked_add_months(Months::new(12))
+        .unwrap_or(snapshot_date)
+        .min(today);
+    let allocations = if from <= to {
+        super::payout::fetch(member_id, from, to, today).await?
+    } else {
+        Vec::new()
+    };
+    Ok(AccuracyInputs {
+        forecasts: rows.into_iter().map(ForecastedPayout::from).collect(),
+        actuals: forecast_accuracy::actual_payouts(&allocations),
+    })
 }
