@@ -186,4 +186,64 @@ mod tests {
 
         tracing::debug!("結束 fetch_data");
     }
+
+    /// 以本機 mock server 取代鉅亨（C18，沿用 G15 的 mock_origin）：正常報價、成交價為 null
+    /// 與沒有資料列三種回應。
+    #[tokio::test]
+    async fn quotes_from_mock_server() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::core::util::http::mock_origin::with_origins;
+
+        let server = MockServer::start().await;
+        let respond = |symbol: &str, body: serde_json::Value| {
+            Mock::given(method("GET"))
+                .and(path(format!("/ws/api/v1/quote/quotes/TWS:{symbol}:STOCK")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        };
+        respond(
+            "2330",
+            serde_json::json!({"statusCode": 200, "message": "OK", "data": [{"6": 1435.0, "56": -1.03}]}),
+        )
+        .mount(&server)
+        .await;
+        respond(
+            "5306",
+            serde_json::json!({"statusCode": 200, "message": "OK", "data": [{"6": null}]}),
+        )
+        .mount(&server)
+        .await;
+        respond(
+            "9999",
+            serde_json::json!({"statusCode": 200, "message": "OK", "data": []}),
+        )
+        .mount(&server)
+        .await;
+
+        let (price, quotes, null_price, empty) =
+            with_origins(&[("https://ws.api.cnyes.com", &server.uri())], async {
+                (
+                    CnYes::get_stock_price("2330").await,
+                    CnYes::get_stock_quotes("2330").await,
+                    CnYes::get_stock_quotes("5306").await,
+                    CnYes::get_stock_price("9999").await,
+                )
+            })
+            .await;
+
+        assert_eq!(
+            price.expect("有成交價"),
+            Decimal::try_from(1435.0).expect("有效數值")
+        );
+        let quotes = quotes.expect("有報價");
+        assert_eq!(
+            (quotes.price, quotes.change, quotes.change_range),
+            (1435.0, 0.0, -1.03),
+            "漲跌缺值時退回 0"
+        );
+        assert!(null_price.is_err(), "成交價為 null");
+        let empty = empty.expect_err("沒有資料列");
+        assert!(empty.to_string().contains("data is empty"), "{empty:#}");
+    }
 }

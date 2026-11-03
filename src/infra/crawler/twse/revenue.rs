@@ -176,4 +176,40 @@ mod tests {
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+
+    /// 以本機 mock server 取代公開資訊觀測站（C18，沿用 G15 的 mock_origin）：四個頁面
+    /// （上市、上櫃各兩頁）逐一下載，失敗的頁面略過、其餘照常合併。
+    #[tokio::test]
+    async fn visit_merges_pages_and_skips_failed_ones() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::core::util::http::mock_origin::with_origins;
+
+        let server = MockServer::start().await;
+        let (big5, _, _) = encoding_rs::BIG5.encode(FIXTURE_HTML);
+        Mock::given(method("GET"))
+            .and(path("/nas/t21/sii/t21sc03_115_5_0.html"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(big5.into_owned(), "text/html"))
+            .mount(&server)
+            .await;
+        let date_time = FixedOffset::east_opt(8 * 3600)
+            .and_then(|offset| offset.with_ymd_and_hms(2026, 5, 10, 12, 0, 0).single())
+            .expect("有效時間");
+
+        let revenues = with_origins(
+            &[("https://mopsov.twse.com.tw", &server.uri())],
+            visit(date_time),
+        )
+        .await
+        .expect("單頁失敗不影響整體");
+
+        let symbols: Vec<&str> = revenues
+            .iter()
+            .map(|dto| dto.stock_symbol.as_str())
+            .collect();
+        assert_eq!(symbols, ["2330", "2317"]);
+        let requests = server.received_requests().await.unwrap_or_default();
+        assert_eq!(requests.len(), 4, "上市、上櫃各兩頁");
+    }
 }
