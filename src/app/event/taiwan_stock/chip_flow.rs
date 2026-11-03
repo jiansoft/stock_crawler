@@ -16,7 +16,7 @@
 //!    - 融資餘額增減達 [`MARGIN_MIN_PERCENT`]% 且 [`MARGIN_MIN_LOTS`] 張以上
 //!    - 融券餘額增減達 [`SHORT_MIN_PERCENT`]% 且 [`SHORT_MIN_LOTS`] 張以上
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
@@ -77,6 +77,46 @@ pub struct RunSummary {
     pub reported: usize,
 }
 
+/// 依當天籌碼更新每檔持股的連續天數（Redis），挑出符合任一通知條件的持股。
+async fn collect_reports(
+    date: NaiveDate,
+    symbols: &BTreeSet<String>,
+    flows: &HashMap<String, InstitutionalFlow>,
+    margins: &HashMap<String, MarginBalance>,
+    volumes: &HashMap<String, i64>,
+) -> (RunSummary, Vec<ChipReport>) {
+    let mut summary = RunSummary {
+        holdings: symbols.len(),
+        ..Default::default()
+    };
+    let mut reports = Vec::new();
+    for symbol in symbols {
+        let flow = flows.get(symbol).copied();
+        let margin = margins.get(symbol).copied();
+        summary.with_flow += usize::from(flow.is_some());
+        summary.with_margin += usize::from(margin.is_some());
+
+        let previous = load_streak(symbol).await;
+        let streak = next_streak(previous, date, flow);
+        if previous != Some(streak) {
+            save_streak(symbol, &streak).await;
+        }
+        let report = ChipReport {
+            stock_symbol: symbol.clone(),
+            flow,
+            margin,
+            volume: volumes.get(symbol).copied(),
+            streak,
+        };
+        if !reasons(&report).is_empty() {
+            reports.push(report);
+        }
+    }
+
+    summary.reported = reports.len();
+    (summary, reports)
+}
+
 /// 排程入口：通知持股中三大法人或融資融券有明顯動作的股票。
 ///
 /// 來源或單檔失敗只記錄、不中斷；只有查不到持股時回傳錯誤。
@@ -114,35 +154,7 @@ pub async fn execute() -> Result<()> {
             }
         };
 
-    let mut summary = RunSummary {
-        holdings: symbols.len(),
-        ..Default::default()
-    };
-    let mut reports = Vec::new();
-    for symbol in &symbols {
-        let flow = flows.get(symbol).copied();
-        let margin = margins.get(symbol).copied();
-        summary.with_flow += usize::from(flow.is_some());
-        summary.with_margin += usize::from(margin.is_some());
-
-        let previous = load_streak(symbol).await;
-        let streak = next_streak(previous, date, flow);
-        if previous != Some(streak) {
-            save_streak(symbol, &streak).await;
-        }
-        let report = ChipReport {
-            stock_symbol: symbol.clone(),
-            flow,
-            margin,
-            volume: volumes.get(symbol).copied(),
-            streak,
-        };
-        if !reasons(&report).is_empty() {
-            reports.push(report);
-        }
-    }
-
-    summary.reported = reports.len();
+    let (summary, reports) = collect_reports(date, &symbols, &flows, &margins, &volumes).await;
     if !reports.is_empty() {
         alert::send_message(&build_message(date, &reports, holdings::stock_name)).await;
     }

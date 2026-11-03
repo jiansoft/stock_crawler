@@ -1,4 +1,4 @@
-//! 下週持股除權息一段：期間計算、附填息文字、沒有事件不列、文字與合計、run 整合。
+//! 下週持股除權息一段：期間計算、附填息文字、沒有事件不列、文字與合計、本月入帳對照、run 整合。
 //!
 //! 逐日查詢、只留持股與金額換算由 `app::calculation::upcoming_dividends` 的測試驗證。
 
@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 use super::super::upcoming_dividend::{
-    UpcomingLine, UpcomingSection, lines, load_upcoming, next_week, next_week_payouts,
-    upcoming_section,
+    MonthIncome, UpcomingLine, UpcomingSection, lines, load_upcoming, month_income, next_week,
+    next_week_payouts, upcoming_section,
 };
 use super::fakes::*;
 use super::*;
@@ -60,6 +60,7 @@ fn upcoming_section_attaches_fill_hints() {
         &hints,
         day(17),
         Vec::new(),
+        None,
     )
     .expect("有持股除權息");
     assert_eq!((section.from, section.to), (day(19), day(23)));
@@ -71,10 +72,14 @@ fn upcoming_section_attaches_fill_hints() {
             .collect::<Vec<_>>(),
         vec![Some("近 5 年填息 4／5 次、平均 3 日"), None]
     );
-    assert!(upcoming_section(Vec::new(), &hints, day(17), Vec::new()).is_none());
-    let only_payouts = upcoming_section(Vec::new(), &hints, day(17), vec![payout("0056", 20)])
-        .expect("只有入帳也要列");
+    assert!(upcoming_section(Vec::new(), &hints, day(17), Vec::new(), None).is_none());
+    let only_payouts =
+        upcoming_section(Vec::new(), &hints, day(17), vec![payout("0056", 20)], None)
+            .expect("只有入帳也要列");
     assert!(only_payouts.items.is_empty());
+    let only_month = upcoming_section(Vec::new(), &hints, day(17), Vec::new(), Some(october()))
+        .expect("只有本月入帳也要列");
+    assert_eq!(only_month.month, Some(october()));
 }
 
 /// 每檔一行：日期、代號、股數、除息與除權、填息；兩檔以上才附現金合計。
@@ -95,6 +100,7 @@ fn lines_show_amounts_and_total() {
             line(dividend("2412", 20, dec!(1.5), dec!(0.5)), None),
         ],
         payouts: Vec::new(),
+        month: None,
     };
     assert_eq!(
         lines(&section),
@@ -129,6 +135,7 @@ async fn run_includes_upcoming_dividends() {
             fill: None,
         }],
         payouts: vec![payout("0056", 21)],
+        month: None,
     };
     let message = run(
         &quote(),
@@ -190,6 +197,7 @@ fn lines_show_payouts_with_total() {
         to: day(23),
         items: Vec::new(),
         payouts: vec![payout("0056", 20), with_stock, stock_only],
+        month: None,
     };
     assert_eq!(
         lines(&section),
@@ -259,4 +267,90 @@ async fn next_week_payouts_queries_next_monday_to_friday() {
         (payouts[0].shares, payouts[0].cash_amount),
         (3000, dec!(3000))
     );
+}
+
+fn october() -> MonthIncome {
+    MonthIncome {
+        month: 10,
+        received: dec!(1000),
+        pending: dec!(2500.5),
+        last_year: dec!(3000),
+    }
+}
+
+/// 本月入帳一段：已入帳、待入帳與去年同月；接在下週入帳之後。
+#[test]
+fn lines_show_month_income() {
+    let section = UpcomingSection {
+        from: day(19),
+        to: day(23),
+        items: Vec::new(),
+        payouts: Vec::new(),
+        month: Some(october()),
+    };
+    assert_eq!(
+        lines(&section),
+        vec![
+            String::new(),
+            "本月持股股利入帳（10 月）".to_owned(),
+            "• 已入帳 1,000 元、待入帳 2,500.5 元；去年同月 3,000 元".to_owned(),
+        ]
+    );
+}
+
+/// 指定發放日的入帳明細。
+fn paid_on(date: NaiveDate, shares: i64) -> PayoutAllocation {
+    PayoutAllocation {
+        cash_payable: Some(date),
+        ..allocation(1, shares)
+    }
+}
+
+/// 本月入帳：發放日不晚於今天算已入帳、之後算待入帳；去年同月另查一次；其他月份不計。
+#[tokio::test]
+async fn month_income_splits_received_pending_and_last_year() {
+    let last_year = NaiveDate::from_ymd_opt(2025, 10, 15).expect("有效日期");
+    let next_month = NaiveDate::from_ymd_opt(2026, 11, 2).expect("有效日期");
+    let repo = FakePayoutRepository::with_allocations(vec![
+        paid_on(day(5), 1000),
+        paid_on(day(17), 500),
+        paid_on(day(21), 2000),
+        paid_on(last_year, 3000),
+        paid_on(next_month, 9000),
+    ]);
+
+    let income = month_income(&repo, day(17)).await.expect("查詢入帳");
+
+    assert_eq!(
+        income,
+        Some(MonthIncome {
+            month: 10,
+            received: dec!(1500),
+            pending: dec!(2000),
+            last_year: dec!(3000),
+        })
+    );
+    let october_2025 = NaiveDate::from_ymd_opt(2025, 10, 1).expect("有效日期");
+    let end_2025 = NaiveDate::from_ymd_opt(2025, 10, 31).expect("有效日期");
+    assert_eq!(
+        repo.queries(),
+        [
+            (0, day(1), day(31), day(17)),
+            (0, october_2025, end_2025, day(17))
+        ]
+    );
+}
+
+/// 兩個月都沒有現金入帳時不列；查詢失敗回傳錯誤。
+#[tokio::test]
+async fn month_income_is_none_without_cash_and_errors_on_failure() {
+    let next_month = NaiveDate::from_ymd_opt(2026, 11, 2).expect("有效日期");
+    let repo = FakePayoutRepository::with_allocations(vec![paid_on(next_month, 1000)]);
+    assert_eq!(month_income(&repo, day(17)).await.expect("查詢入帳"), None);
+
+    let failing = FakePayoutRepository {
+        fail: true,
+        ..FakePayoutRepository::default()
+    };
+    assert!(month_income(&failing, day(17)).await.is_err());
 }
