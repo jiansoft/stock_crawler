@@ -157,6 +157,18 @@ pub enum Basis {
 }
 
 impl Basis {
+    /// API 與快照表使用的 snake_case 名稱。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Announced => "announced",
+            Self::AmountAnnounced => "amount_announced",
+            Self::Estimated => "estimated",
+            Self::LatestAmount => "latest_amount",
+            Self::Cadence => "cadence",
+        }
+    }
+
     /// 是否為推估（日期與金額至少有一項未公告）。
     #[must_use]
     pub fn is_estimated(self) -> bool {

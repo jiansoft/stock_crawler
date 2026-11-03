@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::{DividendFillBucket, DividendFillSummary};
-use crate::domain::portfolio::dividend_forecast::{Basis, Forecast, ForecastItem, MonthTotal};
+use crate::domain::portfolio::dividend_forecast::{Forecast, ForecastItem, MonthTotal};
 
 /// 股利現金流預估 endpoint 的 query string。
 #[derive(Debug, Deserialize, IntoParams)]
@@ -76,14 +76,7 @@ impl From<ForecastItem> for DividendForecastItem {
             pay_date: item.pay_date.to_string(),
             cash_per_share: item.cash_per_share.round_dp(4).to_f64().unwrap_or_default(),
             amount: item.amount.round_dp(2).to_f64().unwrap_or_default(),
-            basis: match item.basis {
-                Basis::Announced => "announced",
-                Basis::AmountAnnounced => "amount_announced",
-                Basis::Estimated => "estimated",
-                Basis::LatestAmount => "latest_amount",
-                Basis::Cadence => "cadence",
-            }
-            .to_owned(),
+            basis: item.basis.as_str().to_owned(),
             entitled: item.entitled,
             fill_history: None,
             fill_peer: None,
