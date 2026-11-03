@@ -121,22 +121,4 @@ async fn fetch_annual_profit(ss: &str) -> Result<Vec<AnnualProfit>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_execute() {
-        dotenvy::dotenv().ok();
-        tracing::debug!("開始 execute");
-
-        match execute().await {
-            Ok(_) => {}
-            Err(why) => {
-                tracing::debug!("err:{:#?} ", why);
-            }
-        }
-
-        tracing::debug!("結束 execute");
-    }
-}
+mod tests;

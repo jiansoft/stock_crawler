@@ -37,6 +37,20 @@ async fn test_aggregate() {
     tokio::time::sleep(Duration::from_secs(1)).await;
 }
 
+/// 週六、週日直接視為休市，不查交易所休市日清單（不連外）。
+#[tokio::test]
+async fn weekend_is_market_closed_without_holiday_lookup() {
+    use chrono::TimeZone;
+
+    for day in [7, 8] {
+        let weekend = Local
+            .with_ymd_and_hms(2026, 11, day, 15, 0, 0)
+            .single()
+            .expect("有效時間");
+        assert!(is_market_closed(weekend).await, "2026-11-{day:02} 是週末");
+    }
+}
+
 fn count(date: NaiveDate, market_id: i32, traded: i64) -> MarketTradedCount {
     MarketTradedCount {
         date,
