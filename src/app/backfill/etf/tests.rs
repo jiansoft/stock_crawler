@@ -1,7 +1,5 @@
 //! 台股 ETF 資訊同步的測試。
 
-use anyhow::anyhow;
-
 use super::*;
 use crate::core::declare::StockExchangeMarket;
 
@@ -20,18 +18,18 @@ fn etf(symbol: &str, name: &str, market: StockExchangeMarket) -> EtfInfo {
     }
 }
 
-/// 上市、上櫃各自寫入；一邊抓取失敗另一邊照常；市場別對照表沒有的（公開發行）略過；改名再寫入。
+/// 上市、上櫃各自寫入；市場別對照表沒有的（公開發行）略過；資料相同不重寫、改名再寫入。
 /// 假代號結束時刪除。
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
     ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
 )]
-async fn sync_registers_new_and_renamed_etfs() {
+async fn update_stocks_registers_new_and_renamed_etfs() {
     dotenvy::dotenv().ok();
     let pool = crate::infra::database::get_connection();
     if sqlx::query("SELECT 1").execute(pool).await.is_err() {
-        println!("跳過 sync_registers_new_and_renamed_etfs：無資料庫連接");
+        println!("跳過 update_stocks_registers_new_and_renamed_etfs：無資料庫連接");
         return;
     }
     SHARE.load().await;
@@ -54,39 +52,32 @@ async fn sync_registers_new_and_renamed_etfs() {
         .expect("查詢測試股票")
     };
 
-    let listed = vec![
+    update_stocks(vec![
         etf(LISTED, "測試上市ETF", StockExchangeMarket::Listed),
         etf(PUBLIC, "測試公開發行", StockExchangeMarket::Public),
-    ];
-    sync(async { Ok(listed) }, async {
-        Err(anyhow!("上櫃抓取失敗"))
-    })
+        etf(OTC, "測試上櫃ETF", StockExchangeMarket::OverTheCounter),
+    ])
     .await
-    .expect("上櫃失敗只記錄");
+    .expect("寫入 ETF");
     let first = names().await;
 
-    let otc = vec![etf(OTC, "測試上櫃ETF", StockExchangeMarket::OverTheCounter)];
-    let renamed = vec![etf(LISTED, "測試改名ETF", StockExchangeMarket::Listed)];
-    sync(async { Ok(renamed) }, async { Ok(otc) })
-        .await
-        .expect("同步成功");
-    let second = names().await;
-
-    // 上市抓取失敗：上櫃照常改名。
-    let otc_renamed = vec![etf(
-        OTC,
-        "測試上櫃改名",
-        StockExchangeMarket::OverTheCounter,
-    )];
-    sync(async { Err(anyhow!("上市抓取失敗")) }, async {
-        Ok(otc_renamed)
-    })
+    // 資料相同的略過、改名的再寫入。
+    update_stocks(vec![
+        etf(LISTED, "測試改名ETF", StockExchangeMarket::Listed),
+        etf(OTC, "測試上櫃ETF", StockExchangeMarket::OverTheCounter),
+    ])
     .await
-    .expect("上市失敗只記錄");
-    let third = names().await;
+    .expect("更新 ETF");
+    let second = names().await;
     cleanup().await;
 
-    assert_eq!(first, [(LISTED.to_owned(), "測試上市ETF".to_owned(), 2)]);
+    assert_eq!(
+        first,
+        [
+            (LISTED.to_owned(), "測試上市ETF".to_owned(), 2),
+            (OTC.to_owned(), "測試上櫃ETF".to_owned(), 4),
+        ]
+    );
     assert_eq!(
         second,
         [
@@ -94,7 +85,6 @@ async fn sync_registers_new_and_renamed_etfs() {
             (OTC.to_owned(), "測試上櫃ETF".to_owned(), 4),
         ]
     );
-    assert_eq!(third[1], (OTC.to_owned(), "測試上櫃改名".to_owned(), 4));
 }
 
 /// 手動執行：抓官方 ETF 清單並更新正式資料（需要網路）。
