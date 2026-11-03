@@ -4,9 +4,15 @@
 //!
 //! - **已公告**：除息日已公布、發放日落在預估期間內的配息；沒有發放日時以除息日後
 //!   [`PAYABLE_LAG_DAYS`] 天推估。
-//! - **推估**：過去 12 個月的每次配息，往後推一年（同月、同金額）。同一檔在推估除息日
-//!   前後 [`MATCH_WINDOW_DAYS`] 天內已有公告的配息時不重複計算；下一期金額已公告、只差
-//!   日期時改用公告金額（[`Basis::AmountAnnounced`]）。
+//! - **推估**：過去 12 個月的每次配息，往後推一年（同月）。同一檔在推估除息日
+//!   前後 [`MATCH_WINDOW_DAYS`] 天內已有公告的配息時不重複計算。金額依序取：
+//!   1. 下一期金額已公告、只差日期 → 公告金額（[`Basis::AmountAnnounced`]）。
+//!   2. 季配、月配 → 最近一期已公告的金額（[`Basis::LatestAmount`]）：每期金額跟著近期
+//!      盈餘與配息政策走，回測 2023～2025 年誤差中位數季配 13.3% → 6.0%、月配 23.8% → 1.5%。
+//!   3. 年配、半年配 → 去年同期金額（[`Basis::Estimated`]）。
+//! - **月配依間隔補上**：月配股票從最近一期除息日依最近兩期的間隔往後排到預估期末
+//!   （[`Basis::Cadence`]），補上去年同期沒有配息的月份（例如新上市的月配 ETF）；與已公告或
+//!   已推估的配息相差 [`CADENCE_WINDOW_DAYS`] 天內的不重複。
 //! - 同一除息日有多列（季配股的全年彙總列、月配 ETF 的季別與月別）只算一次，優先取各期列。
 //!
 //! 只算現金股利，不含股票股利，也不扣二代健保補充保費與所得稅；假設目前持股會一路
@@ -21,6 +27,8 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 pub const PAYABLE_LAG_DAYS: u64 = 30;
 /// 推估的除息日與已公告配息相差幾天內視為同一期。
 pub const MATCH_WINDOW_DAYS: i64 = 60;
+/// 月配依間隔排出的除息日與既有配息相差幾天內視為同一期。
+pub const CADENCE_WINDOW_DAYS: i64 = 20;
 
 /// 目前持有的股票。
 #[derive(Debug, Clone, PartialEq)]
@@ -59,8 +67,20 @@ pub enum Basis {
     Announced,
     /// 金額已公告、日期依去年同期推估。
     AmountAnnounced,
-    /// 依去年同期推估。
+    /// 依去年同期推估（年配、半年配）。
     Estimated,
+    /// 金額依最近一期已公告的配息、日期依去年同期推估（季配、月配）。
+    LatestAmount,
+    /// 月配依最近兩期的間隔排出日期、金額依最近一期推估。
+    Cadence,
+}
+
+impl Basis {
+    /// 是否為推估（日期與金額至少有一項未公告）。
+    #[must_use]
+    pub fn is_estimated(self) -> bool {
+        matches!(self, Self::Estimated | Self::LatestAmount | Self::Cadence)
+    }
 }
 
 /// 單筆預估配息。
@@ -91,7 +111,7 @@ pub struct MonthTotal {
     pub month: String,
     /// 已公告（含金額已公告）的金額。
     pub announced: f64,
-    /// 依去年同期推估的金額。
+    /// 推估的金額（[`Basis::is_estimated`]）。
     pub estimated: f64,
 }
 
@@ -106,7 +126,7 @@ pub struct Forecast {
     pub total: f64,
     /// 其中已公告（含金額已公告）的金額。
     pub announced_total: f64,
-    /// 其中依去年同期推估的金額。
+    /// 其中推估的金額（[`Basis::is_estimated`]）。
     pub estimated_total: f64,
     /// 預估股利 ÷ 目前市值（%）；沒有市值時為 `None`。
     pub forward_yield_percent: Option<f64>,
@@ -136,6 +156,12 @@ pub fn forecast(
             .filter(|event| event.stock_symbol == holding.stock_symbol)
             .collect();
         let dated = dedupe_dated(&own);
+        let periodic: Vec<&DividendEvent> = dated
+            .iter()
+            .copied()
+            .filter(|event| is_periodic(&event.quarter))
+            .collect();
+        let latest = periodic.last().copied();
         let item = |ex_date, pay_date, cash_per_share: Decimal, basis| ForecastItem {
             stock_symbol: holding.stock_symbol.clone(),
             name: holding.name.clone(),
@@ -184,11 +210,39 @@ pub fn forecast(
                     && event.quarter == past.quarter
                     && event.year_of_dividend == past.year_of_dividend + 1
             });
-            let (cash, basis) = match announced_amount {
-                Some(event) => (event.cash_per_share, Basis::AmountAnnounced),
-                None => (past.cash_per_share, Basis::Estimated),
+            let newer = latest
+                .filter(|latest| is_periodic(&past.quarter) && latest.ex_date != past.ex_date);
+            let (cash, basis) = match (announced_amount, newer) {
+                (Some(event), _) => (event.cash_per_share, Basis::AmountAnnounced),
+                (None, Some(latest)) => (latest.cash_per_share, Basis::LatestAmount),
+                (None, None) => (past.cash_per_share, Basis::Estimated),
             };
             items.push(item(ex_date, pay_date, cash, basis));
+        }
+
+        let pays_monthly = own.iter().any(|event| {
+            event.quarter.starts_with('M') && event.ex_date.is_some_and(|ex| ex > lookback)
+        });
+        if !pays_monthly {
+            continue;
+        }
+        let Some(latest) = latest else {
+            continue;
+        };
+        for (ex_date, pay_date) in cadence_schedule(&periodic, today, end) {
+            let near = |other: NaiveDate| (other - ex_date).num_days().abs() <= CADENCE_WINDOW_DAYS;
+            let covered = dated.iter().any(|event| event.ex_date.is_some_and(near))
+                || items
+                    .iter()
+                    .any(|item| item.stock_symbol == holding.stock_symbol && near(item.ex_date));
+            if !covered {
+                items.push(item(
+                    ex_date,
+                    pay_date,
+                    latest.cash_per_share,
+                    Basis::Cadence,
+                ));
+            }
         }
     }
     items.sort_by(|a, b| {
@@ -200,9 +254,10 @@ pub fn forecast(
     let mut by_month: HashMap<String, (Decimal, Decimal)> = HashMap::new();
     for item in &items {
         let entry = by_month.entry(month_key(item.pay_date)).or_default();
-        match item.basis {
-            Basis::Estimated => entry.1 += item.amount,
-            Basis::Announced | Basis::AmountAnnounced => entry.0 += item.amount,
+        if item.basis.is_estimated() {
+            entry.1 += item.amount;
+        } else {
+            entry.0 += item.amount;
         }
     }
     let month_list = month_range(today, end)
@@ -219,12 +274,12 @@ pub fn forecast(
 
     let announced_total: Decimal = items
         .iter()
-        .filter(|item| item.basis != Basis::Estimated)
+        .filter(|item| !item.basis.is_estimated())
         .map(|item| item.amount)
         .sum();
     let estimated_total: Decimal = items
         .iter()
-        .filter(|item| item.basis == Basis::Estimated)
+        .filter(|item| item.basis.is_estimated())
         .map(|item| item.amount)
         .sum();
     let total = announced_total + estimated_total;
@@ -271,6 +326,62 @@ fn dedupe_dated<'a>(events: &[&'a DividendEvent]) -> Vec<&'a DividendEvent> {
     let mut dated: Vec<&DividendEvent> = best.into_values().collect();
     dated.sort_by_key(|event| event.ex_date);
     dated
+}
+
+/// 季配（`Q`）與月配（`M`）的期別；年配（空白）與半年配（`H`）不算。
+fn is_periodic(quarter: &str) -> bool {
+    quarter.starts_with('Q') || quarter.starts_with('M')
+}
+
+/// 月配依間隔往後排的（除息日, 發放日），只取發放日落在 `today` 之後、`end` 以前者。
+///
+/// 間隔取最近兩期除息日相差的月數（至少 1 個月；只有一期時當作 1 個月），發放日沿用
+/// 最近一期「除息到發放」的天數。最近一期已超過兩個間隔沒有配息時視為停配，不排。
+fn cadence_schedule(
+    periodic: &[&DividendEvent],
+    today: NaiveDate,
+    end: NaiveDate,
+) -> Vec<(NaiveDate, NaiveDate)> {
+    let Some((latest, earlier)) = periodic.split_last() else {
+        return Vec::new();
+    };
+    let Some(latest_ex) = latest.ex_date else {
+        return Vec::new();
+    };
+    let step = earlier
+        .last()
+        .and_then(|previous| previous.ex_date)
+        .map_or(1, |previous_ex| {
+            months_between(previous_ex, latest_ex).max(1)
+        });
+    let stale = latest_ex
+        .checked_add_months(Months::new(step * 2))
+        .is_none_or(|limit| limit < today);
+    if stale {
+        return Vec::new();
+    }
+    let pay_gap = pay_date(latest) - latest_ex;
+
+    let mut schedule = Vec::new();
+    for count in 1.. {
+        let Some(ex_date) = latest_ex.checked_add_months(Months::new(step * count)) else {
+            break;
+        };
+        let pay_date = ex_date + pay_gap;
+        if pay_date > end {
+            break;
+        }
+        if pay_date > today {
+            schedule.push((ex_date, pay_date));
+        }
+    }
+    schedule
+}
+
+/// `from` 到 `to` 相差的月數（只看年月）。
+fn months_between(from: NaiveDate, to: NaiveDate) -> u32 {
+    let months = (to.year() - from.year()) * 12 + to.month() as i32 - from.month() as i32;
+    u32::try_from(months).unwrap_or_default()
 }
 
 /// 發放日：已公告用公告日，否則除息日後 [`PAYABLE_LAG_DAYS`] 天。

@@ -30,8 +30,12 @@ pub(crate) enum ForecastBasisValue {
     Announced,
     /// 金額已公告、日期依去年同期推估。
     AmountAnnounced,
-    /// 依去年同期推估。
+    /// 依去年同期推估（年配、半年配）。
     Estimated,
+    /// 金額依最近一期已公告的配息、日期依去年同期推估（季配、月配）。
+    LatestAmount,
+    /// 月配依最近兩期的間隔排出日期、金額依最近一期推估。
+    Cadence,
 }
 
 /// 單筆預估配息。
@@ -74,6 +78,8 @@ impl From<ForecastItem> for DividendForecastItem {
                 Basis::Announced => "announced",
                 Basis::AmountAnnounced => "amount_announced",
                 Basis::Estimated => "estimated",
+                Basis::LatestAmount => "latest_amount",
+                Basis::Cadence => "cadence",
             }
             .to_owned(),
             fill_history: None,
@@ -89,7 +95,7 @@ pub(crate) struct DividendForecastMonth {
     pub(crate) month: String,
     /// 已公告（含金額已公告）的金額。
     pub(crate) announced: f64,
-    /// 依去年同期推估的金額。
+    /// 推估的金額（`estimated`、`latest_amount`、`cadence`）。
     pub(crate) estimated: f64,
 }
 
@@ -116,7 +122,7 @@ pub(crate) struct DividendForecastResponse {
     pub(crate) total: f64,
     /// 其中已公告（含金額已公告）的金額。
     pub(crate) announced_total: f64,
-    /// 其中依去年同期推估的金額。
+    /// 其中推估的金額（`estimated`、`latest_amount`、`cadence`）。
     pub(crate) estimated_total: f64,
     /// 預估股利 ÷ 目前市值（%）；沒有市值時為 `null`。
     pub(crate) forward_yield_percent: Option<f64>,

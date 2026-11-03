@@ -33,7 +33,8 @@ fn event(
     }
 }
 
-/// 已公告的配息直接列入；去年同期推一年；已公告的同期不重複；全年彙總列不計。
+/// 已公告的配息直接列入；去年同期推一年、季配金額改用最近一期；已公告的同期不重複；
+/// 全年彙總列不計。
 #[test]
 fn announced_and_estimated_without_double_counting() {
     let today = date(2026, 10, 12);
@@ -56,7 +57,7 @@ fn announced_and_estimated_without_double_counting() {
             Some(date(2025, 10, 23)),
             Some(date(2025, 11, 14)),
         ),
-        // 去年 Q4（2026-01-22）推到 2027-01-22、發放 2027-02-11。
+        // 去年 Q4（2026-01-22）推到 2027-01-22、發放 2027-02-11，金額用最近一期 1.72。
         event(
             "0056",
             2025,
@@ -88,18 +89,18 @@ fn announced_and_estimated_without_double_counting() {
         summary,
         vec![
             (date(2026, 11, 11), dec!(1720), Basis::Announced),
-            (date(2027, 2, 11), dec!(866), Basis::Estimated),
+            (date(2027, 2, 11), dec!(1720), Basis::LatestAmount),
             // 去年 Q2（2026-07-21）推到 2027-07-21、發放 2027-08-10。
-            (date(2027, 8, 10), dec!(1350), Basis::Estimated),
+            (date(2027, 8, 10), dec!(1720), Basis::LatestAmount),
         ]
     );
-    assert_eq!(forecast.total, 3936.0);
+    assert_eq!(forecast.total, 5160.0);
     assert_eq!(
         (forecast.announced_total, forecast.estimated_total),
-        (1720.0, 2216.0)
+        (1720.0, 3440.0)
     );
-    // 市值 40,000 → 9.84%。
-    assert_eq!(forecast.forward_yield_percent, Some(9.84));
+    // 市值 40,000 → 12.9%。
+    assert_eq!(forecast.forward_yield_percent, Some(12.9));
     assert_eq!(forecast.months.len(), 13);
     assert_eq!(forecast.months[0].month, "2026-10");
     let november = forecast
@@ -131,7 +132,7 @@ fn amount_announced_and_missing_payable_date() {
     assert_eq!(forecast.forward_yield_percent, None);
 }
 
-/// 同一除息日的季別與月別兩列只算一次；股數 0、沒有配息紀錄的持股不產生項目。
+/// 同一除息日的季別與月別兩列只算一次（月配另依間隔排下一期）；股數 0、沒有配息紀錄的持股不產生項目。
 #[test]
 fn duplicate_rows_and_empty_holdings() {
     let today = date(2026, 10, 1);
@@ -147,8 +148,25 @@ fn duplicate_rows_and_empty_holdings() {
         holding("1101", 0, Some(dec!(30))),
     ];
     let forecast = forecast(&holdings, &events, today, 3);
-    assert_eq!(forecast.items.len(), 1);
-    assert_eq!(forecast.total, 400.0);
+    // 已公告的兩列只算一次；月配另依間隔（只有一期時當作 1 個月）排出 11-16 除息那期。
+    assert_eq!(
+        summary(&forecast),
+        [
+            (
+                date(2026, 10, 16),
+                date(2026, 11, 13),
+                dec!(400),
+                Basis::Announced
+            ),
+            (
+                date(2026, 11, 16),
+                date(2026, 12, 14),
+                dec!(400),
+                Basis::Cadence
+            ),
+        ]
+    );
+    assert_eq!(forecast.announced_total, 400.0);
     assert_eq!(forecast.months.len(), 4);
 
     let empty = super::forecast(&[], &[], today, 1);
@@ -157,4 +175,234 @@ fn duplicate_rows_and_empty_holdings() {
         (0.0, 0, 2)
     );
     assert_eq!(empty.forward_yield_percent, None);
+}
+
+fn summary(forecast: &Forecast) -> Vec<(NaiveDate, NaiveDate, Decimal, Basis)> {
+    forecast
+        .items
+        .iter()
+        .map(|item| (item.ex_date, item.pay_date, item.amount, item.basis))
+        .collect()
+}
+
+/// 年配與半年配維持去年同期的金額，不套用最近一期。
+#[test]
+fn annual_and_half_yearly_keep_last_year_amount() {
+    let today = date(2026, 3, 1);
+    let events = [
+        event(
+            "2330",
+            2025,
+            "H1",
+            dec!(4.0),
+            Some(date(2025, 6, 12)),
+            Some(date(2025, 7, 10)),
+        ),
+        event(
+            "2330",
+            2025,
+            "H2",
+            dec!(5.0),
+            Some(date(2025, 12, 11)),
+            Some(date(2026, 1, 8)),
+        ),
+        event(
+            "1101",
+            2024,
+            "",
+            dec!(1.0),
+            Some(date(2025, 7, 1)),
+            Some(date(2025, 8, 1)),
+        ),
+    ];
+    let holdings = [holding("2330", 1000, None), holding("1101", 1000, None)];
+    let forecast = forecast(&holdings, &events, today, 12);
+
+    let amounts: Vec<(&str, Decimal, Basis)> = forecast
+        .items
+        .iter()
+        .map(|item| (item.stock_symbol.as_str(), item.amount, item.basis))
+        .collect();
+    assert_eq!(
+        amounts,
+        [
+            ("2330", dec!(4000), Basis::Estimated),
+            ("1101", dec!(1000), Basis::Estimated),
+            ("2330", dec!(5000), Basis::Estimated),
+        ]
+    );
+}
+
+/// 新上市的月配 ETF 沒有去年同期：從最近一期依一個月的間隔往後排，發放日沿用最近一期
+/// 「除息到發放」的 25 天，金額用最近一期。
+#[test]
+fn new_monthly_etf_follows_payout_cadence() {
+    let today = date(2026, 11, 3);
+    let events = [
+        event(
+            "00999",
+            2026,
+            "M8",
+            dec!(0.1),
+            Some(date(2026, 8, 18)),
+            Some(date(2026, 9, 10)),
+        ),
+        event(
+            "00999",
+            2026,
+            "M9",
+            dec!(0.1),
+            Some(date(2026, 9, 17)),
+            Some(date(2026, 10, 14)),
+        ),
+        event(
+            "00999",
+            2026,
+            "M10",
+            dec!(0.12),
+            Some(date(2026, 10, 20)),
+            Some(date(2026, 11, 14)),
+        ),
+    ];
+    let forecast = forecast(&[holding("00999", 1000, Some(dec!(10)))], &events, today, 3);
+
+    assert_eq!(
+        summary(&forecast),
+        [
+            (
+                date(2026, 10, 20),
+                date(2026, 11, 14),
+                dec!(120),
+                Basis::Announced
+            ),
+            (
+                date(2026, 11, 20),
+                date(2026, 12, 15),
+                dec!(120),
+                Basis::Cadence
+            ),
+            (
+                date(2026, 12, 20),
+                date(2027, 1, 14),
+                dec!(120),
+                Basis::Cadence
+            ),
+        ]
+    );
+    assert_eq!(
+        (forecast.announced_total, forecast.estimated_total),
+        (120.0, 240.0)
+    );
+    let december = forecast
+        .months
+        .iter()
+        .find(|month| month.month == "2026-12")
+        .expect("12 月");
+    assert_eq!((december.announced, december.estimated), (0.0, 120.0));
+}
+
+/// 月配有去年同期時：已推估的月份不再依間隔重複排；被已公告配息擋掉的相鄰月份由間隔補上。
+#[test]
+fn monthly_cadence_skips_months_already_forecast() {
+    let today = date(2026, 3, 1);
+    let events = [
+        event(
+            "00878",
+            2025,
+            "M3",
+            dec!(0.1),
+            Some(date(2025, 3, 18)),
+            Some(date(2025, 4, 10)),
+        ),
+        event(
+            "00878",
+            2025,
+            "M4",
+            dec!(0.1),
+            Some(date(2025, 4, 17)),
+            Some(date(2025, 5, 12)),
+        ),
+        event(
+            "00878",
+            2025,
+            "M5",
+            dec!(0.1),
+            Some(date(2025, 5, 19)),
+            Some(date(2025, 6, 10)),
+        ),
+        event(
+            "00878",
+            2026,
+            "M1",
+            dec!(0.08),
+            Some(date(2026, 1, 19)),
+            Some(date(2026, 2, 10)),
+        ),
+        event(
+            "00878",
+            2026,
+            "M2",
+            dec!(0.09),
+            Some(date(2026, 2, 17)),
+            Some(date(2026, 3, 12)),
+        ),
+    ];
+    let forecast = forecast(&[holding("00878", 1000, None)], &events, today, 4);
+
+    assert_eq!(
+        summary(&forecast),
+        [
+            (
+                date(2026, 2, 17),
+                date(2026, 3, 12),
+                dec!(90),
+                Basis::Announced
+            ),
+            (
+                date(2026, 3, 17),
+                date(2026, 4, 9),
+                dec!(90),
+                Basis::Cadence
+            ),
+            (
+                date(2026, 4, 17),
+                date(2026, 5, 10),
+                dec!(90),
+                Basis::Cadence
+            ),
+            (
+                date(2026, 5, 19),
+                date(2026, 6, 10),
+                dec!(90),
+                Basis::LatestAmount
+            ),
+        ]
+    );
+}
+
+/// 月配最近一期已超過兩個間隔沒有配息時視為停配，不再依間隔排。
+#[test]
+fn stale_monthly_payer_is_not_projected() {
+    let today = date(2026, 3, 1);
+    let events = [
+        event(
+            "00998",
+            2025,
+            "M10",
+            dec!(0.1),
+            Some(date(2025, 11, 3)),
+            Some(date(2025, 11, 28)),
+        ),
+        event(
+            "00998",
+            2025,
+            "M11",
+            dec!(0.1),
+            Some(date(2025, 12, 1)),
+            Some(date(2025, 12, 26)),
+        ),
+    ];
+    let forecast = forecast(&[holding("00998", 1000, None)], &events, today, 3);
+
+    assert!(forecast.items.is_empty(), "{:?}", forecast.items);
 }
