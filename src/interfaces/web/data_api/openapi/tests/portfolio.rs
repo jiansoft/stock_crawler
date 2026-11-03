@@ -204,3 +204,33 @@ fn openapi_portfolio_rebalance_and_targets_pins_schema() {
         "#/components/schemas/PortfolioTargetItemDto"
     );
 }
+
+/// 持股年度股利入帳 path 的契約：年度與會員參數、12 個月的欄位。
+#[test]
+fn openapi_dividend_income_schema_pins_field_names() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI 可序列化");
+    let operation = get_operation(&document, "/api/v1/portfolio/dividend-income");
+    assert_endpoint_responses(operation, "DividendIncomeResponse", false);
+    assert_eq!(query_schema(operation, "year")["minimum"], 2000);
+    assert_eq!(query_schema(operation, "member_id")["default"], 0);
+
+    let schemas = &document["components"]["schemas"];
+    let response = &schemas["DividendIncomeResponse"]["properties"];
+    for field in [
+        "as_of",
+        "total_cash_amount",
+        "received_cash_amount",
+        "estimated_cash_amount",
+        "last_year_same_period_cash_amount",
+    ] {
+        assert!(response.get(field).is_some(), "缺 {field}");
+    }
+    assert_eq!(
+        response["months"]["items"]["$ref"],
+        "#/components/schemas/DividendIncomeMonth"
+    );
+    let month = &schemas["DividendIncomeMonth"]["properties"];
+    for field in ["month", "cash_amount", "payouts", "last_year_cash_amount"] {
+        assert!(month.get(field).is_some(), "缺 {field}");
+    }
+}

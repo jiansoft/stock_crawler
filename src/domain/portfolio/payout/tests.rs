@@ -131,3 +131,73 @@ fn merge_members_sums_the_same_payout() {
         ]
     );
 }
+
+fn payout(payable: NaiveDate, cash: Decimal, stock_shares: i64, estimated: bool) -> DividendPayout {
+    DividendPayout {
+        member_id: 0,
+        payable_date: payable,
+        stock_symbol: "2330".to_owned(),
+        name: "台積電".to_owned(),
+        quarter: "Q1".to_owned(),
+        ex_date: None,
+        shares: 1000,
+        cash_dividend: Decimal::ONE,
+        stock_dividend: Decimal::ZERO,
+        cash_amount: cash,
+        stock_shares,
+        estimated,
+    }
+}
+
+/// 依發放月份加總：基準日以前算已入帳、推算的另計，其他年份不計，沒有入帳的月份也列出。
+#[test]
+fn monthly_income_buckets_by_payable_month() {
+    let payouts = [
+        payout(date(1, 10), dec!(100), 0, false),
+        payout(date(1, 20), dec!(50), 10, false),
+        payout(date(11, 5), dec!(300), 0, false),
+        payout(date(11, 25), dec!(200), 0, true),
+        payout(
+            NaiveDate::from_ymd_opt(2025, 1, 10).expect("合法日期"),
+            dec!(999),
+            0,
+            false,
+        ),
+    ];
+    let months = monthly_income(&payouts, 2026, date(11, 10));
+
+    assert_eq!(months.len(), 12);
+    assert_eq!(
+        months.iter().map(|m| m.month).collect::<Vec<_>>(),
+        (1..=12).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        months[0],
+        MonthlyIncome {
+            month: 1,
+            cash_amount: dec!(150),
+            received_cash_amount: dec!(150),
+            estimated_cash_amount: Decimal::ZERO,
+            stock_shares: 10,
+            payouts: 2,
+        }
+    );
+    assert_eq!(
+        months[10],
+        MonthlyIncome {
+            month: 11,
+            cash_amount: dec!(500),
+            received_cash_amount: dec!(300),
+            estimated_cash_amount: dec!(200),
+            stock_shares: 0,
+            payouts: 2,
+        }
+    );
+    assert_eq!(
+        months[5],
+        MonthlyIncome {
+            month: 6,
+            ..MonthlyIncome::default()
+        }
+    );
+}
