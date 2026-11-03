@@ -79,13 +79,24 @@ pub async fn save_daily(repository: &dyn ChipRepository, date: NaiveDate) -> Res
         twse::chip::visit_margin(date),
         tpex::chip::visit_margin(date),
     );
-    let (mut summary, flows, margins) = collect_daily(
+    let (summary, flows, margins) = collect_daily(
         date,
         [listed_flows, otc_flows],
         [listed_margins, otc_margins],
     )?;
-    summary.rows_written += repository.save_institutional(date, &flows).await?;
-    summary.rows_written += repository.save_margin(date, &margins).await?;
+    write_daily(repository, date, summary, &flows, &margins).await
+}
+
+/// 寫入 [`collect_daily`] 整理好的三大法人與融資融券，再更新當天的連續買賣超天數；`summary` 補上寫入列數。
+async fn write_daily(
+    repository: &dyn ChipRepository,
+    date: NaiveDate,
+    mut summary: DailySummary,
+    flows: &[InstitutionalNet],
+    margins: &[MarginRecord],
+) -> Result<DailySummary> {
+    summary.rows_written += repository.save_institutional(date, flows).await?;
+    summary.rows_written += repository.save_margin(date, margins).await?;
     summary.streaks_updated = repository.refresh_streaks(date, date).await?;
     Ok(summary)
 }
@@ -174,9 +185,34 @@ pub async fn backfill_daily(from: NaiveDate, to: NaiveDate) -> Result<u64> {
     dates.dedup();
 
     let repository = PgChipRepository::new();
+    let repo = &repository;
+    backfill_dates(
+        repo,
+        &dates,
+        Local::now().date_naive(),
+        move |date| save_daily(repo, date),
+        || tokio::time::sleep(BACKFILL_INTERVAL),
+    )
+    .await
+}
+
+/// [`backfill_daily`] 的逐日迴圈：每天呼叫 `save_day`、之後呼叫 `pause`，最後從第一天重算連續天數到 `today`。
+async fn backfill_dates<Save, SaveFut, Pause, PauseFut>(
+    repository: &dyn ChipRepository,
+    dates: &[NaiveDate],
+    today: NaiveDate,
+    mut save_day: Save,
+    mut pause: Pause,
+) -> Result<u64>
+where
+    Save: FnMut(NaiveDate) -> SaveFut,
+    SaveFut: Future<Output = Result<DailySummary>>,
+    Pause: FnMut() -> PauseFut,
+    PauseFut: Future<Output = ()>,
+{
     let mut written = 0;
     for (index, date) in dates.iter().enumerate() {
-        match save_daily(&repository, *date).await {
+        match save_day(*date).await {
             Ok(summary) => {
                 written += summary.rows_written;
                 tracing::info!(
@@ -191,11 +227,11 @@ pub async fn backfill_daily(from: NaiveDate, to: NaiveDate) -> Result<u64> {
             }
             Err(why) => tracing::warn!("籌碼回補 {date} 失敗，略過: {why:#}"),
         }
-        tokio::time::sleep(BACKFILL_INTERVAL).await;
+        pause().await;
     }
     // 補寫的日子已逐日更新連續天數；之後的日子要接續新的天數，從起日重算到今天。
     if let Some(&first) = dates.first() {
-        written += refresh_streaks_since(&repository, first, Local::now().date_naive()).await?;
+        written += refresh_streaks_since(repository, first, today).await?;
     }
     Ok(written)
 }
@@ -251,6 +287,14 @@ pub async fn execute_insider_holdings() -> Result<()> {
         insider_holding::visit_listed(),
         insider_holding::visit_otc()
     );
+    save_insider_holdings(&PgChipRepository::new(), [listed, otc]).await
+}
+
+/// 上市、上櫃董監持股的抓取結果整理後整批取代；一邊失敗只記錄，兩邊都失敗回錯誤且不寫入。
+async fn save_insider_holdings(
+    repository: &impl ChipRepository,
+    [listed, otc]: [Result<Vec<InsiderHolding>>; 2],
+) -> Result<()> {
     let mut records = Vec::new();
     let mut failed = 0;
     for (market, result) in [("上市", listed), ("上櫃", otc)] {
@@ -265,9 +309,7 @@ pub async fn execute_insider_holdings() -> Result<()> {
     if failed == 2 {
         bail!("上市、上櫃董監持股都抓取失敗");
     }
-    let written = PgChipRepository::new()
-        .replace_insider_holdings(&records)
-        .await?;
+    let written = repository.replace_insider_holdings(&records).await?;
     tracing::info!(
         "董監持股入庫結束: records={}, rows_written={written}",
         records.len()
@@ -300,7 +342,12 @@ pub fn broker_flow_records(flows: &[BrokerFlow]) -> Vec<BrokerFlowRecord> {
 
 /// 寫入主力進出；失敗只記錄，不影響通知。
 pub async fn save_broker_flows(flows: &[BrokerFlow]) {
-    match PgChipRepository::new()
+    save_broker_flows_to(&PgChipRepository::new(), flows).await;
+}
+
+/// [`save_broker_flows`] 的本體，倉儲由呼叫端注入。
+async fn save_broker_flows_to(repository: &impl ChipRepository, flows: &[BrokerFlow]) {
+    match repository
         .save_broker_flows(&broker_flow_records(flows))
         .await
     {

@@ -4,6 +4,8 @@ pub mod entity;
 pub mod flow;
 /// 籌碼資料倉儲合約。
 pub mod repository;
+#[cfg(test)]
+pub(crate) mod test_double;
 
 pub use entity::{
     BrokerFlowRecord, BrokerNetRecord, HolderDistributionRecord, HolderLevelRecord,

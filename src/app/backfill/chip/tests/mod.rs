@@ -1,3 +1,7 @@
+//! 籌碼資料入庫的測試；寫入流程（單日、逐日回補、董監持股、主力進出）在 `writes`。
+
+mod writes;
+
 use rust_decimal_macros::dec;
 
 use super::*;
