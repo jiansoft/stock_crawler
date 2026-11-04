@@ -137,3 +137,21 @@ async fn rebuild_reads_lookback_years_and_replaces_all_snapshots() {
     assert_eq!(written.len(), 2);
     assert_eq!(written[1].f_score, None, "B 沒有年度損益表，不算 F 分數");
 }
+
+/// 年報、季報都讀不到時回錯誤，不呼叫整批取代，上一次的結果原封不動。
+#[tokio::test]
+async fn rebuild_keeps_previous_snapshots_when_nothing_is_read() {
+    let previous = build_snapshots(
+        vec![("A".to_owned(), 2025, annual(true, 150))],
+        vec![("A".to_owned(), quarter(2026, 2))],
+    );
+    let repo = FakeRepository {
+        written: Mutex::new(previous.clone()),
+        ..FakeRepository::default()
+    };
+
+    let err = rebuild(&repo, 2026).await.expect_err("0 檔要回錯誤");
+    assert!(err.to_string().contains("不清空"), "{err:#}");
+    let written = repo.fetch_financial_health().await.expect("fetch");
+    assert_eq!(written, previous, "沒有讀到任何財報時不能清掉舊結果");
+}
