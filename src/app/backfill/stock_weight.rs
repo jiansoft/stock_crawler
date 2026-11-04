@@ -85,6 +85,12 @@ async fn handle_stock_exchange(
         .await
         .with_context(|| format!("Failed to visit taifex for exchange {:?}", exchange))?;
 
+    // 權值頁一定有成分股；抓到 0 檔代表來源異常（維護頁、改版、錯誤頁）。
+    // 此時回錯讓整個任務中止，否則 `save_weights` 會先把全部權重歸零、只寫回另一個交易所（H38）。
+    if res.is_empty() {
+        anyhow::bail!("期交所 {exchange:?} 權值頁沒有任何資料，不更新權值以免清空");
+    }
+
     // 將 DTO 轉譯為應用層的儲存權重命令 (SaveStockWeightCommand)
     let new_weights: Vec<SaveStockWeightCommand> = res
         .into_iter()
