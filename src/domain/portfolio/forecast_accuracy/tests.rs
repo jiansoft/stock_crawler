@@ -216,3 +216,61 @@ fn actual_named(symbol: &str, pay_date: NaiveDate, amount: Decimal) -> ActualPay
         amount,
     }
 }
+
+/// 月份彙總只算該月的已配對與漏領；待定與快照沒預估的入帳不算，其他月份也不算。
+#[test]
+fn month_accuracy_sums_matched_and_missed_of_the_month() {
+    let result = compare(
+        &[
+            forecast("0056", date(11, 11), dec!(2800), "announced"),
+            forecast("2330", date(11, 14), dec!(3600), "estimated"),
+            forecast("2884", date(11, 20), dec!(500), "cadence"),
+            forecast("00878", date(12, 18), dec!(900), "announced"),
+        ],
+        &[
+            actual("0056", date(11, 20), dec!(2872.4)),
+            actual("2330", date(11, 14), dec!(3900)),
+            actual("9999", date(11, 25), dec!(100)),
+            actual("0050", date(10, 22), dec!(700)),
+        ],
+        date(11, 30),
+    );
+
+    let november = month_accuracy(&result, date(11, 30)).expect("11 月有預估");
+
+    assert_eq!(
+        november,
+        MonthAccuracy {
+            matched_count: 2,
+            matched_forecast: dec!(6400),
+            matched_actual: dec!(6772.4),
+            missed_count: 1,
+            missed_forecast: dec!(500),
+        }
+    );
+    assert_eq!(november.matched_difference(), dec!(372.4));
+    assert_eq!(november.matched_difference_percent(), Some(dec!(5.5)));
+    assert_eq!(
+        month_accuracy(&result, date(12, 1)),
+        None,
+        "12 月只有待定，不算誤差"
+    );
+    assert_eq!(
+        month_accuracy(&result, date(10, 1)),
+        None,
+        "10 月只有快照沒預估的入帳"
+    );
+}
+
+/// 只有漏領時沒有可算的誤差百分比。
+#[test]
+fn month_accuracy_percent_is_none_without_matched_actual() {
+    let summary = MonthAccuracy {
+        missed_count: 1,
+        missed_forecast: dec!(500),
+        ..MonthAccuracy::default()
+    };
+
+    assert_eq!(summary.matched_difference(), Decimal::ZERO);
+    assert_eq!(summary.matched_difference_percent(), None);
+}

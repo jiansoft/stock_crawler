@@ -3,6 +3,9 @@
 //!
 //! 入帳取 [`PortfolioRepository::fetch_payout_allocations`]（已領股利明細，除權息後才賣出的也算）；
 //! 上個月已經過去，不會有以目前持股推算的入帳。上個月沒有入帳就不發。
+//!
+//! 上個月底以前有股利預估快照（`dividend_forecast_snapshot`）時，另附該快照對上個月的預估誤差：
+//! 已配對的預估與實際合計、漏領筆數（N59）；比對規則同 `/portfolio/dividend-forecast/accuracy`。
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -15,10 +18,11 @@ use super::{format_decimal_with_commas, format_share_quantity, member_label};
 use crate::{
     core::{alert, util::text},
     domain::portfolio::{
+        forecast_accuracy::{self, MonthAccuracy},
         payout::{self, DividendPayout},
         repository::PortfolioRepository,
     },
-    infra::database::repository::portfolio::PgPortfolioRepository,
+    infra::database::repository::portfolio::{PgPortfolioRepository, forecast},
 };
 
 /// 上個月的入帳與對照數字。
@@ -34,6 +38,17 @@ struct MonthlySummary {
     last_year_cash: Decimal,
     /// 上個月所屬年度 1 月 1 日到上個月底的現金入帳合計。
     year_to_date_cash: Decimal,
+    /// 上個月底以前最近一次快照對上個月的預估誤差；沒有快照或快照沒有上個月的預估時為 `None`。
+    forecast: Option<SnapshotAccuracy>,
+}
+
+/// 某次快照對上個月的預估誤差。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SnapshotAccuracy {
+    /// 快照日。
+    snapshot_date: NaiveDate,
+    /// 上個月的已配對與漏領彙總。
+    month: MonthAccuracy,
 }
 
 /// 排程入口：彙整上個月的持股股利入帳並發送。
@@ -42,12 +57,46 @@ struct MonthlySummary {
 ///
 /// 查詢入帳失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    notify(&PgPortfolioRepository::new(), Local::now().date_naive()).await
+    let today = Local::now().date_naive();
+    // 預估誤差只是附加資訊：讀不到時記錄後照常發入帳彙總。
+    let accuracy = match load_snapshot_accuracy(today).await {
+        Ok(accuracy) => accuracy,
+        Err(why) => {
+            tracing::warn!("讀取上月股利預估誤差失敗，入帳通知不附誤差: {why:#}");
+            None
+        }
+    };
+    notify(&PgPortfolioRepository::new(), accuracy, today).await
+}
+
+/// 上個月底以前最近一次快照（全部會員）對上個月的預估誤差。
+///
+/// # Errors
+///
+/// 查詢快照或入帳失敗時回傳錯誤。
+async fn load_snapshot_accuracy(today: NaiveDate) -> Result<Option<SnapshotAccuracy>> {
+    let (from, to) = previous_month(today);
+    let Some(snapshot_date) = forecast::latest_snapshot_on_or_before(to).await? else {
+        return Ok(None);
+    };
+    let inputs = forecast::load_accuracy_inputs(snapshot_date, 0, today).await?;
+    let accuracy = forecast_accuracy::compare(&inputs.forecasts, &inputs.actuals, today);
+    Ok(
+        forecast_accuracy::month_accuracy(&accuracy, from).map(|month| SnapshotAccuracy {
+            snapshot_date,
+            month,
+        }),
+    )
 }
 
 /// 以 `today` 為今天彙整並發送；上個月沒有入帳時不發。
-async fn notify(repo: &impl PortfolioRepository, today: NaiveDate) -> Result<()> {
-    let summary = load_summary(repo, today).await?;
+async fn notify(
+    repo: &impl PortfolioRepository,
+    forecast: Option<SnapshotAccuracy>,
+    today: NaiveDate,
+) -> Result<()> {
+    let mut summary = load_summary(repo, today).await?;
+    summary.forecast = forecast;
     let payout_count = summary.payouts.len();
     tracing::info!(
         "上月持股股利入帳彙總: from={}, payouts={}",
@@ -84,6 +133,7 @@ async fn load_summary(repo: &impl PortfolioRepository, today: NaiveDate) -> Resu
         payouts,
         last_year_cash: payout::total_cash(&last_year),
         year_to_date_cash: payout::total_cash(&year_to_date),
+        forecast: None,
     })
 }
 
@@ -135,6 +185,9 @@ fn build_message(summary: &MonthlySummary) -> Option<String> {
         format_decimal_with_commas(summary.year_to_date_cash),
         summary.to.format("%m-%d")
     ));
+    if let Some(forecast) = &summary.forecast {
+        lines.push(forecast_text(forecast));
+    }
     lines.push("金額未扣二代健保補充保費與匯費".to_owned());
 
     let mut message = String::with_capacity(lines.len() * 64);
@@ -165,6 +218,39 @@ fn payout_line(item: &DividendPayout) -> String {
         item.stock_symbol,
         item.name,
         parts.join("、")
+    )
+}
+
+/// 快照預估誤差的文字：已配對的預估、實際與差額，再加漏領筆數。
+fn forecast_text(forecast: &SnapshotAccuracy) -> String {
+    let month = &forecast.month;
+    let mut parts = Vec::with_capacity(2);
+    if month.matched_count > 0 {
+        let difference = month.matched_difference();
+        let sign = if difference > Decimal::ZERO { "+" } else { "" };
+        let percent = month
+            .matched_difference_percent()
+            .map(|percent| format!("，{sign}{}%", percent.normalize()))
+            .unwrap_or_default();
+        parts.push(format!(
+            "比對 {} 筆，預估 {} 元、實際 {} 元（{sign}{} 元{percent}）",
+            month.matched_count,
+            format_decimal_with_commas(month.matched_forecast),
+            format_decimal_with_commas(month.matched_actual),
+            format_decimal_with_commas(difference),
+        ));
+    }
+    if month.missed_count > 0 {
+        parts.push(format!(
+            "預估有入帳但沒領到 {} 筆（預估 {} 元）",
+            month.missed_count,
+            format_decimal_with_commas(month.missed_forecast)
+        ));
+    }
+    format!(
+        "{} 快照預估誤差：{}",
+        forecast.snapshot_date.format("%m-%d"),
+        parts.join("；")
     )
 }
 

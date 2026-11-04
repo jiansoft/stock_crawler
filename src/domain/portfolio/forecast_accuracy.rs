@@ -252,5 +252,60 @@ pub fn compare(
     }
 }
 
+/// 單一發放月份的預估誤差彙總，供每月入帳通知附上（N59）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MonthAccuracy {
+    /// 有預估也有入帳的（代號, 月份）筆數。
+    pub matched_count: usize,
+    /// 已配對項目的預估合計。
+    pub matched_forecast: Decimal,
+    /// 已配對項目的實際入帳合計。
+    pub matched_actual: Decimal,
+    /// 有預估但月份已過仍沒有入帳的筆數。
+    pub missed_count: usize,
+    /// 漏領項目的預估合計。
+    pub missed_forecast: Decimal,
+}
+
+impl MonthAccuracy {
+    /// 已配對項目的誤差（實際 − 預估）。
+    #[must_use]
+    pub fn matched_difference(&self) -> Decimal {
+        self.matched_actual - self.matched_forecast
+    }
+
+    /// 已配對項目的誤差百分比（實際 − 預估）÷ 實際 × 100，四捨五入到小數 1 位；實際為 0 時為 `None`。
+    #[must_use]
+    pub fn matched_difference_percent(&self) -> Option<Decimal> {
+        (self.matched_actual > Decimal::ZERO).then(|| {
+            (self.matched_difference() / self.matched_actual * Decimal::ONE_HUNDRED).round_dp(1)
+        })
+    }
+}
+
+/// 取出發放月份為 `month`（任一天皆可）的已配對與漏領彙總；該月份兩者皆無時回 `None`。
+///
+/// 待定與快照沒有預估的入帳不計入：前者尚未結算，後者不是預估誤差。
+#[must_use]
+pub fn month_accuracy(accuracy: &ForecastAccuracy, month: NaiveDate) -> Option<MonthAccuracy> {
+    let month = month_start(month);
+    let mut summary = MonthAccuracy::default();
+    for item in accuracy.items.iter().filter(|item| item.month == month) {
+        match item.status {
+            AccuracyStatus::Matched => {
+                summary.matched_count += 1;
+                summary.matched_forecast += item.forecast;
+                summary.matched_actual += item.actual.unwrap_or_default();
+            }
+            AccuracyStatus::Missed => {
+                summary.missed_count += 1;
+                summary.missed_forecast += item.forecast;
+            }
+            AccuracyStatus::Pending | AccuracyStatus::Unforecast => {}
+        }
+    }
+    (summary.matched_count + summary.missed_count > 0).then_some(summary)
+}
+
 #[cfg(test)]
 mod tests;
