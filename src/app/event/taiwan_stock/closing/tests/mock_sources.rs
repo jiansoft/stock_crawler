@@ -113,3 +113,160 @@ async fn aggregate_skips_when_both_markets_have_no_quotes() {
     let requests = server.received_requests().await.unwrap_or_default();
     assert_eq!(requests.len(), 3, "上市行情、上櫃本益比與上櫃行情各一次");
 }
+
+/// 收盤匯總測試日（1991-03-05，週二）；所有以日期為鍵的衍生表都只清這一天。
+const AGGREGATE_DATE: (i32, u32, u32) = (1991, 3, 5);
+/// 測試用的上市、上櫃假代號。
+const LISTED: &str = "79979CA";
+const OTC: &str = "79979CB";
+
+/// TWSE MI_INDEX：只有一檔上市股的收盤行情表。
+fn listed_quotes() -> serde_json::Value {
+    serde_json::json!({
+        "stat": "OK",
+        "tables": [{
+            "title": "每日收盤行情(全部(不含權證、牛熊證))",
+            "fields": [
+                "證券代號", "證券名稱", "成交股數", "成交筆數", "成交金額", "開盤價", "最高價",
+                "最低價", "收盤價", "漲跌(+/-)", "漲跌價差", "最後揭示買價", "最後揭示買量",
+                "最後揭示賣價", "最後揭示賣量", "本益比"
+            ],
+            "data": [[
+                LISTED, "測試上市", "10,000", "100", "5,000,000", "500.00", "505.00", "499.00",
+                "502.00", "+", "2.00", "502.00", "10", "503.00", "20", "15.5"
+            ]]
+        }]
+    })
+}
+
+/// TPEx 上櫃行情：只有一檔上櫃股。
+fn otc_quotes() -> serde_json::Value {
+    serde_json::json!({
+        "tables": [{
+            "data": [[
+                OTC, "測試上櫃", "100.00", "1.50", "98.50", "101.00", "98.00", "10,000",
+                "1,000,000", "500", "100.00", "10", "100.50", "20"
+            ]]
+        }]
+    })
+}
+
+/// 清掉收盤匯總在測試日寫入的所有資料；`last-closing-day` 還原成測試前的值。
+async fn cleanup_aggregate(date: NaiveDate, last_closing_day: Option<&str>) {
+    let pool = crate::infra::database::get_connection();
+    for sql in [
+        r#"DELETE FROM "DailyQuotes" WHERE "Date" = $1"#,
+        "DELETE FROM estimate WHERE date = $1",
+        "DELETE FROM yield_rank WHERE date = $1",
+        "DELETE FROM daily_technical_signal WHERE date = $1",
+        "DELETE FROM daily_forward_return WHERE date = $1",
+        "DELETE FROM daily_market_forward_return WHERE date = $1",
+        "DELETE FROM daily_relative_strength WHERE date = $1",
+        "DELETE FROM daily_money_history_detail_more WHERE date = $1",
+        "DELETE FROM daily_money_history_detail WHERE date = $1",
+        "DELETE FROM daily_money_history_member WHERE date = $1",
+        "DELETE FROM daily_money_history WHERE date = $1",
+        "DELETE FROM daily_stock_price_stats WHERE date = $1",
+    ] {
+        sqlx::query(sql)
+            .bind(date)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|why| panic!("{sql}: {why}"));
+    }
+    sqlx::query("DELETE FROM quote_history_record WHERE security_code = ANY($1)")
+        .bind([LISTED, OTC])
+        .execute(pool)
+        .await
+        .expect("清除測試股價歷史紀錄");
+    match last_closing_day {
+        Some(val) => sqlx::query("UPDATE config SET val = $2 WHERE key = $1").bind(val),
+        None => sqlx::query("DELETE FROM config WHERE key = $1"),
+    }
+    .bind("last-closing-day")
+    .execute(pool)
+    .await
+    .expect("還原最後收盤日設定");
+}
+
+/// 上市、上櫃都有行情時跑完整收盤匯總：當日報價原子寫入兩市場，後續計算都不中斷。
+///
+/// 除權息基準價來源沒有 mock（404）：只記錯誤，不影響匯總。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn aggregate_writes_both_markets_and_runs_calculations() {
+    dotenvy::dotenv().ok();
+    if crate::infra::database::ping().await.is_err() {
+        println!("跳過 aggregate_writes_both_markets_and_runs_calculations：無資料庫連接");
+        return;
+    }
+    let pool = crate::infra::database::get_connection();
+    let (year, month, day) = AGGREGATE_DATE;
+    let date = NaiveDate::from_ymd_opt(year, month, day).expect("有效日期");
+    let last_closing_day: Option<String> =
+        sqlx::query_scalar("SELECT val FROM config WHERE key = 'last-closing-day'")
+            .fetch_optional(pool)
+            .await
+            .expect("讀取最後收盤日設定");
+    cleanup_aggregate(date, last_closing_day.as_deref()).await;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/exchangeReport/MI_INDEX"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(listed_quotes()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/openapi/v1/tpex_mainboard_peratio_analysis"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/web/stock/aftertrading/otc_quotes_no1430/stk_wn1430_result.php",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(otc_quotes()))
+        .mount(&server)
+        .await;
+
+    let result = with_origins(
+        &[(TWSE, &server.uri()), (TPEX, &server.uri())],
+        aggregate(date),
+    )
+    .await;
+
+    let quotes: Vec<(String, rust_decimal::Decimal)> = sqlx::query_as(
+        r#"SELECT stock_symbol, "ClosingPrice" FROM "DailyQuotes"
+           WHERE "Date" = $1 AND stock_symbol = ANY($2) ORDER BY stock_symbol"#,
+    )
+    .bind(date)
+    .bind([LISTED, OTC])
+    .fetch_all(pool)
+    .await
+    .expect("讀回測試日報價");
+    cleanup_aggregate(date, last_closing_day.as_deref()).await;
+
+    result.expect("收盤匯總完成");
+    assert_eq!(
+        quotes,
+        vec![
+            (LISTED.to_string(), rust_decimal::Decimal::new(502, 0)),
+            (OTC.to_string(), rust_decimal::Decimal::new(100, 0)),
+        ],
+        "上市、上櫃當日報價都要寫入"
+    );
+    let paths: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .map(|request| request.url.path().to_string())
+        .collect();
+    assert!(
+        paths.iter().any(|path| path.ends_with("TWT49U")),
+        "有行情才查除權息基準價：{paths:?}"
+    );
+}
