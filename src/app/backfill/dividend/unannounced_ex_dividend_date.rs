@@ -2,12 +2,15 @@ use anyhow::{Result, anyhow};
 use rand::RngExt;
 
 use crate::{
-    app::backfill::acl::YahooDividendAclMapper, core::shutdown::SHUTDOWN_REQUEST,
-    domain::dividend::repository::DividendRepository, infra::crawler::yahoo,
-    infra::database::repository::dividend::PgDividendRepository,
+    app::backfill::acl::YahooDividendAclMapper, app::backfill::yahoo_not_found,
+    core::shutdown::SHUTDOWN_REQUEST, domain::dividend::repository::DividendRepository,
+    infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
 };
 
 use super::yahoo_fetch;
+
+/// 一般的略過秒數（3 天）：抓過的股票 3 天內不再請求 Yahoo。
+const SKIP_TTL_SECONDS: usize = 60 * 60 * 24 * 3;
 
 /// 回補除息/發放日期尚未公布的股利資料。
 ///
@@ -65,7 +68,7 @@ async fn backfill_until(year: i32, stop: impl Fn() -> bool) -> Result<()> {
         // 先寫入 3 天的快取旗標至 Redis，TTL 設為 3 天 (60秒 * 60分 * 24小時 * 3天 = 259200秒)
         // 這樣做即使單次採集失敗，也能避免下一次排程運行時立刻重複請求
         if let Err(why) = crate::infra::nosql::redis::CLIENT
-            .set(&cache_key, true, 60 * 60 * 24 * 3)
+            .set(&cache_key, true, SKIP_TTL_SECONDS)
             .await
         {
             tracing::error!(
@@ -76,29 +79,18 @@ async fn backfill_until(year: i32, stop: impl Fn() -> bool) -> Result<()> {
         }
 
         // 呼叫 Yahoo 採集器抓取並解析網頁，進而更新資料庫中該股的除息與發放日期
-        if let Err(why) = backfill_unannounced_dividend_dates_from_yahoo(dividend, year).await {
-            if yahoo::dividend::is_page_not_found_error(&why) {
-                // Yahoo 404＝整個個股頁不存在，幾乎都是已下市／清算的標的（4987 2026-10-02），
-                // 與歷年股利回補一致降為 warn，並把略過快取拉長，不再每 3 天重打注定 404 的請求。
-                if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
-                    .set(
-                        &cache_key,
-                        true,
-                        yahoo::dividend::PAGE_NOT_FOUND_CACHE_TTL_SECONDS,
-                    )
-                    .await
-                {
-                    tracing::error!(
-                        "Failed to extend yahoo dividend 404 skip cache {} because {:?}",
-                        cache_key,
-                        cache_err
-                    );
-                }
+        match backfill_unannounced_dividend_dates_from_yahoo(dividend, year).await {
+            Ok(()) => yahoo_not_found::on_success(&cache_key).await,
+            Err(why) if yahoo::dividend::is_page_not_found_error(&why) => {
+                // Yahoo 404＝個股頁不存在，多半是已下市／清算的標的（4987 2026-10-02），但也會對正常股票
+                // 暫時回 404（H37）：與歷年股利回補共用標記，60 天內再次 404 才把略過快取拉長到 30 天。
+                let note = yahoo_not_found::handle_not_found(&[&cache_key], SKIP_TTL_SECONDS).await;
                 tracing::warn!(
-                    "skip unannounced dividend dates because yahoo page not found (證券可能已下市): {:#}",
+                    "skip unannounced dividend dates because yahoo page not found ({note}): {:#}",
                     why
                 );
-            } else {
+            }
+            Err(why) => {
                 tracing::error!(
                     "Failed to backfill_unannounced_dividend_dates_from_yahoo because {:?}",
                     why
@@ -315,5 +307,72 @@ mod tests {
 
         result.expect("提早結束不是錯誤");
         assert!(!flag, "停下時不寫旗標");
+    }
+
+    /// Yahoo 404 第一次只沿用 3 天略過（可能是暫時性，H37），60 天內再次 404 才拉長到 30 天。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL、Redis），請加 --features integration-tests 執行"
+    )]
+    async fn backfill_until_extends_skip_only_on_repeated_not_found() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::core::util::http::mock_origin::with_origins;
+        use crate::infra::nosql::redis::CLIENT;
+
+        dotenvy::dotenv().ok();
+        let pool = crate::infra::database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() || CLIENT.ping().await.is_err() {
+            println!(
+                "跳過 backfill_until_extends_skip_only_on_repeated_not_found：無資料庫或 Redis 連接"
+            );
+            return;
+        }
+        let symbol = "79979UN";
+        let cache_key = format!("yahoo:dividend:{symbol}");
+        let cleanup = || async {
+            let _ = sqlx::query("DELETE FROM dividend WHERE security_code = $1")
+                .bind(symbol)
+                .execute(pool)
+                .await;
+            let _ = CLIENT.delete(&cache_key).await;
+            let _ = CLIENT.delete(&format!("{cache_key}:not_found")).await;
+        };
+        cleanup().await;
+        sqlx::query(r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2) VALUES ($1, 2098, 2097, '', 1, 0, 1, '尚未公布', '-', '尚未公布', '-')"#)
+            .bind(symbol)
+            .execute(pool)
+            .await
+            .expect("種入待補日期的股利");
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/quote/{symbol}/dividend")))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let uri = server.uri();
+        let origins = [("https://tw.stock.yahoo.com", uri.as_str())];
+        let first = with_origins(&origins, backfill_until(2098, || false)).await;
+        let first_ttl = CLIENT.ttl(&cache_key).await.expect("ttl");
+        // 模擬 3 天略過到期，下一輪又排到這檔。
+        let _ = CLIENT.delete(&cache_key).await;
+        let second = with_origins(&origins, backfill_until(2098, || false)).await;
+        let second_ttl = CLIENT.ttl(&cache_key).await.expect("ttl");
+        cleanup().await;
+
+        first.expect("404 只記錄，不是錯誤");
+        second.expect("404 只記錄，不是錯誤");
+        assert!(
+            (1..=SKIP_TTL_SECONDS as i64).contains(&first_ttl),
+            "第一次 404 只用 3 天略過：{first_ttl}"
+        );
+        assert!(
+            second_ttl > SKIP_TTL_SECONDS as i64,
+            "再次 404 拉長到 30 天：{second_ttl}"
+        );
     }
 }

@@ -344,6 +344,13 @@ impl Redis {
         let keys = self.get_key(pattern.to_string()).await?;
         Ok(!keys.is_empty())
     }
+
+    /// 指定 key 剩餘的存活秒數（Redis `TTL`）：`-1` 表示沒有設定過期、`-2` 表示 key 不存在。
+    pub async fn ttl(&self, key: &str) -> Result<i64, RedisError> {
+        let mut conn = self.pool.get().await?;
+        let seconds: i64 = conn.ttl(key).await?;
+        Ok(seconds)
+    }
 }
 
 #[cfg(test)]
