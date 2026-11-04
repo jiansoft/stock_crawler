@@ -1,12 +1,13 @@
 //! 驗證 Yahoo 股利解析的期間、日期與分組行為，無須連線外部服務（`live` 除外）。
 //!
 //! 子模組：`annual_merge`（真實頁面的年度合併）、`parsing`（HTML 解析）、`repeated_periods`（重複期別）、
-//! `live`（連線正式站）；這裡放共用的股利列建構函式。
+//! `live`（連線正式站）、`visit`（mock 站的 404 與正常回應）；這裡放共用的股利列建構函式。
 
 mod annual_merge;
 mod live;
 mod parsing;
 mod repeated_periods;
+mod visit;
 
 use anyhow::anyhow;
 
