@@ -74,7 +74,14 @@ pub async fn visit(exchange: StockExchange) -> Result<Vec<StockWeight>> {
     headers.insert("Referer", url.parse()?);
     headers.insert("User-Agent", ua.parse()?);
 
-    let text = util::http::get(url, Some(headers)).await?;
+    // `util::http::get` 不檢查狀態碼：5xx 的錯誤頁會被當成「沒有權重」，
+    // 讓回填流程把全部權重歸零（H38），所以這裡自己檢查。
+    let response = util::http::get_response(url, Some(headers)).await?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(anyhow!("期交所權值頁回應 HTTP {status}: {url}"));
+    }
+    let text = response.text().await?;
 
     if text.is_empty() {
         return Ok(Vec::new());
@@ -218,5 +225,34 @@ mod tests {
         }
 
         tracing::debug!("結束 visit");
+    }
+
+    /// 期交所回非 2xx 時回錯誤（H38）：錯誤頁不能被當成「沒有權重」。
+    #[tokio::test]
+    async fn visit_rejects_non_success_status() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::core::util::http::mock_origin::with_origins;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/cht/9/futuresQADetail"))
+            .respond_with(
+                ResponseTemplate::new(503).set_body_raw("<html>維護中</html>", "text/html"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let uri = server.uri();
+        let error = with_origins(
+            &[("https://www.taifex.com.tw", &uri)],
+            visit(StockExchange::TWSE),
+        )
+        .await
+        .expect_err("503 應回錯誤");
+
+        assert!(error.to_string().contains("HTTP 503"), "{error:#}");
     }
 }

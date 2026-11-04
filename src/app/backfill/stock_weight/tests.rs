@@ -227,4 +227,28 @@ mod mock_sources {
             "上櫃尾列右半空白要略過"
         );
     }
+
+    /// 來源回 5xx 或權值頁沒有任何資料時回錯（H38），`execute` 因此中止、不會進入全部歸零。
+    #[tokio::test]
+    async fn handle_stock_exchange_rejects_error_status_and_empty_page() {
+        let server = MockServer::start().await;
+        mount(&server, TWSE_PATH, ResponseTemplate::new(500)).await;
+        mount(&server, TPEX_PATH, html(weight_page(false, ""))).await;
+
+        let collected = Arc::new(Mutex::new(Vec::new()));
+        let uri = server.uri();
+        let (listed, otc) = with_origins(&[("https://www.taifex.com.tw", &uri)], async {
+            (
+                handle_stock_exchange(StockExchange::TWSE, Arc::clone(&collected)).await,
+                handle_stock_exchange(StockExchange::TPEx, Arc::clone(&collected)).await,
+            )
+        })
+        .await;
+
+        let listed = format!("{:#}", listed.expect_err("上市回 500 應回錯誤"));
+        assert!(listed.contains("500"), "{listed}");
+        let otc = format!("{:#}", otc.expect_err("上櫃沒有資料應回錯誤"));
+        assert!(otc.contains("沒有任何資料"), "{otc}");
+        assert!(collected.lock().await.is_empty(), "失敗時不收任何權重");
+    }
 }
