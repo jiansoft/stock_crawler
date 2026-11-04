@@ -213,17 +213,7 @@ where
                 // Yahoo 回 404＝個股頁不存在，多半是已下市/清算的標的（資料庫的 SuspendListing
                 // 旗標可能還沒更新），但 Yahoo 偶爾也會對正常股票暫時回 404（H37）：
                 // 第一次只沿用一般略過時間，60 天內再次 404 才拉長到 30 天。
-                let skip = yahoo_not_found::on_not_found(&cache_key, ttl_seconds).await;
-                if skip.repeated
-                    && let Err(cache_err) = CLIENT.set(&cache_key, true, skip.ttl_seconds).await
-                {
-                    tracing::error!(
-                        "Failed to extend yahoo dividend 404 skip cache: stock_symbol={}, error={:#}",
-                        stock_symbol,
-                        cache_err
-                    );
-                }
-                let note = yahoo_not_found::not_found_note(skip.repeated);
+                let note = yahoo_not_found::handle_not_found(&[&cache_key], ttl_seconds).await;
                 tracing::warn!(
                     "skip dividend backfill because yahoo page not found ({note}): stock_symbol={}, error={:#}",
                     stock_symbol,

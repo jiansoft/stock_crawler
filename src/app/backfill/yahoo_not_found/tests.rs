@@ -53,3 +53,52 @@ async fn on_not_found_counts_repeats_until_success() {
     );
     assert!(!after_success.repeated, "成功後重新計算：{after_success:?}");
 }
+
+/// 再次 404 時所有略過 key 都拉長；沒有 key 時不動 Redis。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（Redis），請加 --features integration-tests 執行"
+)]
+async fn handle_not_found_extends_every_key_on_repeat() {
+    dotenvy::dotenv().ok();
+    if CLIENT.ping().await.is_err() {
+        println!("跳過 handle_not_found_extends_every_key_on_repeat：無 Redis 連接");
+        return;
+    }
+    let keys = ["yahoo:test:79979Z", "yahoo:test:79979Z:priority"];
+    let clear = || async {
+        for key in keys {
+            let _ = CLIENT.delete(key).await;
+        }
+        let _ = CLIENT.delete(&marker_key(keys[0])).await;
+    };
+    clear().await;
+    for key in keys {
+        CLIENT.set(key, true, 100).await.expect("寫入一般略過旗標");
+    }
+
+    let first = handle_not_found(&keys, 100).await;
+    let first_ttls = [
+        CLIENT.ttl(keys[0]).await.expect("ttl"),
+        CLIENT.ttl(keys[1]).await.expect("ttl"),
+    ];
+    let second = handle_not_found(&keys, 100).await;
+    let second_ttls = [
+        CLIENT.ttl(keys[0]).await.expect("ttl"),
+        CLIENT.ttl(keys[1]).await.expect("ttl"),
+    ];
+    clear().await;
+
+    assert_eq!(first, not_found_note(false));
+    assert!(
+        first_ttls.iter().all(|ttl| (1..=100).contains(ttl)),
+        "{first_ttls:?}"
+    );
+    assert_eq!(second, not_found_note(true));
+    assert!(
+        second_ttls.iter().all(|ttl| *ttl > 100),
+        "再次 404 兩個 key 都拉長：{second_ttls:?}"
+    );
+    assert_eq!(handle_not_found(&[], 100).await, not_found_note(false));
+}

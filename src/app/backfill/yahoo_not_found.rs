@@ -69,6 +69,28 @@ pub(crate) async fn on_not_found(cache_key: &str, normal_ttl_seconds: usize) -> 
     decide(first, normal_ttl_seconds)
 }
 
+/// 處理一次 Yahoo 404：記錄標記；標記期間內再次 404 時把 `skip_keys` 全部拉長到 30 天。
+///
+/// 標記以 `skip_keys` 的第一個 key 為準（呼叫端的主要略過旗標）；呼叫前已用一般略過時間寫過旗標，
+/// 所以第一次 404 不必再寫。回傳日誌用的說明（見 [`not_found_note`]）。
+pub(crate) async fn handle_not_found(
+    skip_keys: &[&str],
+    normal_ttl_seconds: usize,
+) -> &'static str {
+    let Some(primary) = skip_keys.first() else {
+        return not_found_note(false);
+    };
+    let skip = on_not_found(primary, normal_ttl_seconds).await;
+    if skip.repeated {
+        for key in skip_keys {
+            if let Err(why) = CLIENT.set(*key, true, skip.ttl_seconds).await {
+                tracing::error!("拉長 Yahoo 404 略過時間失敗: key={key}, error={why:#}");
+            }
+        }
+    }
+    not_found_note(skip.repeated)
+}
+
 /// 抓取成功時清掉「曾經 404」標記；失敗只記錄。
 pub(crate) async fn on_success(cache_key: &str) {
     let marker = marker_key(cache_key);

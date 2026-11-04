@@ -147,18 +147,14 @@ where
                 summary.not_found += 1;
                 // 404 多半是已下市、主檔旗標還沒更新的代號，但 Yahoo 也會對正常股票暫時回 404（H37）：
                 // 60 天內再次 404 才拉長略過時間（優先旗標也一樣），第一次沿用一般略過時間。
-                let skip = yahoo_not_found::on_not_found(&cache_key, REFRESH_TTL_SECONDS).await;
-                if skip.repeated {
-                    let keys = [Some(&cache_key), prioritized.then_some(&skip_key)];
-                    for key in keys.into_iter().flatten() {
-                        if let Err(cache_err) = CLIENT.set(key, true, skip.ttl_seconds).await {
-                            tracing::error!(
-                                "Failed to extend yahoo financial report 404 skip cache: stock_symbol={stock_symbol}, error={cache_err:#}"
-                            );
-                        }
-                    }
-                }
-                let note = yahoo_not_found::not_found_note(skip.repeated);
+                let keys: Vec<&str> = [
+                    Some(cache_key.as_str()),
+                    prioritized.then_some(skip_key.as_str()),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                let note = yahoo_not_found::handle_not_found(&keys, REFRESH_TTL_SECONDS).await;
                 tracing::warn!(
                     "skip financial report backfill because yahoo page not found ({note}): stock_symbol={stock_symbol}, error={why:#}"
                 );
