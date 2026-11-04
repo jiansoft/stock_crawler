@@ -59,6 +59,7 @@ fn build_message_lists_payouts_and_comparisons() {
         ],
         last_year_cash: dec!(5000),
         year_to_date_cash: dec!(30123.4),
+        forecast: None,
     };
 
     let message = build_message(&summary).expect("上月有入帳");
@@ -86,6 +87,7 @@ fn build_message_handles_empty_month_and_last_year_text() {
         payouts: Vec::new(),
         last_year_cash: dec!(5000),
         year_to_date_cash: Decimal::ZERO,
+        forecast: None,
     };
     assert!(build_message(&summary).is_none());
     assert_eq!(last_year_text(dec!(100), Decimal::ZERO), "去年同月沒有入帳");
@@ -117,7 +119,7 @@ async fn notify_queries_previous_month_last_year_and_year_to_date() {
     let today = date(2026, 12, 1);
 
     let summary = load_summary(&repo, today).await.expect("彙總");
-    notify(&repo, today).await.expect("通知");
+    notify(&repo, None, today).await.expect("通知");
 
     assert_eq!(
         repo.queries()[..3],
@@ -132,5 +134,118 @@ async fn notify_queries_previous_month_last_year_and_year_to_date() {
         (summary.last_year_cash, summary.year_to_date_cash),
         (Decimal::ZERO, dec!(2000)),
         "替身每次都回同一筆，去年同月的期間外不算"
+    );
+}
+
+/// 有快照誤差時在年累計之後附一行：已配對的預估、實際與差額，以及漏領筆數。
+#[test]
+fn build_message_appends_snapshot_accuracy() {
+    let summary = MonthlySummary {
+        from: date(2026, 12, 1),
+        to: date(2026, 12, 31),
+        payouts: vec![payout(1, "0056", 11, dec!(2872.4))],
+        last_year_cash: Decimal::ZERO,
+        year_to_date_cash: dec!(2872.4),
+        forecast: Some(SnapshotAccuracy {
+            snapshot_date: date(2026, 12, 1),
+            month: MonthAccuracy {
+                matched_count: 2,
+                matched_forecast: dec!(6400),
+                matched_actual: dec!(6772.4),
+                missed_count: 1,
+                missed_forecast: dec!(500),
+            },
+        }),
+    };
+
+    let message = build_message(&summary).expect("上月有入帳");
+
+    let line = r"12\-01 快照預估誤差：比對 2 筆，預估 6,400 元、實際 6,772\.4 元（\+372\.4 元，\+5\.5%）；預估有入帳但沒領到 1 筆（預估 500 元）";
+    assert!(message.contains(line), "缺少 {line}：\n{message}");
+    let accuracy_at = message.find("快照預估誤差").expect("有誤差行");
+    let note_at = message.find("金額未扣").expect("有備註");
+    assert!(accuracy_at < note_at, "誤差行放在備註之前：\n{message}");
+}
+
+/// 只有漏領、或實際比預估少時的文字（負號不重複加 +）。
+#[test]
+fn forecast_text_handles_missed_only_and_shortfall() {
+    let snapshot_date = date(2026, 11, 1);
+    let missed_only = SnapshotAccuracy {
+        snapshot_date,
+        month: MonthAccuracy {
+            missed_count: 2,
+            missed_forecast: dec!(1200),
+            ..MonthAccuracy::default()
+        },
+    };
+    assert_eq!(
+        forecast_text(&missed_only),
+        "11-01 快照預估誤差：預估有入帳但沒領到 2 筆（預估 1,200 元）"
+    );
+
+    let shortfall = SnapshotAccuracy {
+        snapshot_date,
+        month: MonthAccuracy {
+            matched_count: 1,
+            matched_forecast: dec!(1000),
+            matched_actual: dec!(800),
+            ..MonthAccuracy::default()
+        },
+    };
+    assert_eq!(
+        forecast_text(&shortfall),
+        "11-01 快照預估誤差：比對 1 筆，預估 1,000 元、實際 800 元（-200 元，-25%）"
+    );
+}
+
+/// 讀取上個月底以前最近一次快照：12-01 的通知用 11-01 快照，不用 12-01 當天的新快照；
+/// 快照的 11 月預估沒有入帳時算漏領（臨時庫，固定 2019 年、假代號自我清理）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn load_snapshot_accuracy_uses_latest_snapshot_before_month_end() {
+    dotenvy::dotenv().ok();
+    if crate::infra::database::ping().await.is_err() {
+        println!("跳過 load_snapshot_accuracy_uses_latest_snapshot_before_month_end：無資料庫連接");
+        return;
+    }
+    let pool = crate::infra::database::get_connection();
+    let cleanup = || async {
+        let _ = sqlx::query("DELETE FROM dividend_forecast_snapshot WHERE stock_symbol = '79979N'")
+            .execute(pool)
+            .await;
+    };
+    cleanup().await;
+    // 11-01 快照：11-20 預估 500 元；12-01 快照：12-20 預估 900 元（不該被拿來比對 11 月）。
+    sqlx::query(
+        r"INSERT INTO dividend_forecast_snapshot
+              (snapshot_date, member_id, stock_symbol, ex_date, pay_date, shares, cash_per_share, amount, basis)
+          VALUES ('2019-11-01', 79979, '79979N', '2019-11-05', '2019-11-20', 1000, 0.5, 500, 'announced'),
+                 ('2019-12-01', 79979, '79979N', '2019-12-05', '2019-12-20', 1000, 0.9, 900, 'announced')",
+    )
+    .execute(pool)
+    .await
+    .expect("種入快照");
+
+    let result = load_snapshot_accuracy(date(2019, 12, 1)).await;
+    let before_any = load_snapshot_accuracy(date(2019, 11, 1)).await;
+    cleanup().await;
+
+    let accuracy = result.expect("讀取快照誤差").expect("11 月有預估");
+    assert_eq!(accuracy.snapshot_date, date(2019, 11, 1));
+    assert_eq!(
+        accuracy.month,
+        MonthAccuracy {
+            missed_count: 1,
+            missed_forecast: dec!(500),
+            ..MonthAccuracy::default()
+        }
+    );
+    assert!(
+        matches!(before_any, Ok(None)),
+        "10 月底以前沒有快照時不附誤差：{before_any:?}"
     );
 }

@@ -237,6 +237,24 @@ pub(crate) async fn latest_snapshot_date() -> Result<Option<NaiveDate>> {
         .context("查詢最近一次股利預估快照日失敗")
 }
 
+/// 不晚於 `date` 的最近一次快照日；沒有時為 `None`。
+///
+/// 每月 1 日 08:10 的上月入帳通知用它找「上個月底前」的快照：當天 08:15 的新快照
+/// 涵蓋的是快照隔天起的預估，不含上個月，不能拿來比對（N59）。
+///
+/// # Errors
+///
+/// 查詢失敗時回傳錯誤。
+pub(crate) async fn latest_snapshot_on_or_before(date: NaiveDate) -> Result<Option<NaiveDate>> {
+    sqlx::query_scalar(
+        "SELECT max(snapshot_date) FROM dividend_forecast_snapshot WHERE snapshot_date <= $1",
+    )
+    .bind(date)
+    .fetch_one(database::get_connection())
+    .await
+    .with_context(|| format!("查詢 {date} 以前最近一次股利預估快照日失敗"))
+}
+
 /// 讀取 `snapshot_date` 快照的預估，與快照隔天起到 `today`（最多快照涵蓋的 12 個月）已入帳的現金股利。
 ///
 /// # Errors
