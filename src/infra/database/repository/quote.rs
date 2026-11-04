@@ -292,22 +292,14 @@ impl QuoteRepository for PgQuoteRepository {
         year: i32,
         month: i32,
     ) -> Result<Option<(Decimal, Decimal, Decimal)>> {
-        // 呼叫 Table 實作查詢指定股票於指定年月的最高、最低、平均收盤價
-        let sql = r#"
-            SELECT
-                MIN("LowestPrice") as lowest_price,
-                AVG("ClosingPrice") as avg_price,
-                MAX("HighestPrice") as highest_price
-            FROM "DailyQuotes"
-            WHERE "stock_symbol" = $1 AND "year" = $2 AND "month" = $3
-            GROUP BY "stock_symbol", "year", "month";
-        "#;
-        let row_opt: Option<daily_quote::extension::MonthlyStockPriceSummary> = sqlx::query_as(sql)
-            .bind(security_code)
-            .bind(year)
-            .bind(month)
-            .fetch_optional(database::get_connection())
-            .await?;
+        // 與 Table 實作共用同一段 SQL（走日期區間索引）；這裡沒有資料時回 None。
+        let row_opt: Option<daily_quote::extension::MonthlyStockPriceSummary> =
+            sqlx::query_as(daily_quote::MONTHLY_PRICE_SUMMARY_SQL)
+                .bind(security_code)
+                .bind(year)
+                .bind(month)
+                .fetch_optional(database::get_connection())
+                .await?;
 
         Ok(row_opt.map(|r| (r.lowest_price, r.avg_price, r.highest_price)))
     }

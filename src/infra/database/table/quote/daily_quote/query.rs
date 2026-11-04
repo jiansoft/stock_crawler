@@ -98,27 +98,38 @@ WHERE "Serial" IN
         ))
 }
 
+/// 指定股票（`$1`）在指定年（`$2`）月（`$3`）的最低價、平均收盤價與最高價。
+///
+/// 以「當月第一天～下個月第一天」的 `"Date"` 區間走 `(stock_symbol, "Date")` 索引；
+/// 只用 `year`、`month` 欄位過濾時要讀出該股全部日線再篩（正式庫每檔約 1,200 個區塊、
+/// 冷快取約 0.1 秒，05:15 月營收逐檔查詢時曾超過 1 秒慢查詢門檻）。
+pub(crate) const MONTHLY_PRICE_SUMMARY_SQL: &str = r#"
+SELECT
+    MIN("LowestPrice") as lowest_price,
+    AVG("ClosingPrice") as avg_price,
+    MAX("HighestPrice") as highest_price
+FROM "DailyQuotes"
+WHERE "stock_symbol" = $1
+  AND "Date" >= make_date($2, $3, 1)
+  AND "Date" < (make_date($2, $3, 1) + interval '1 month')::date
+  AND "year" = $2 AND "month" = $3
+GROUP BY "stock_symbol", "year", "month";
+"#;
+
 /// 取得指定股票在指定年月的最低、平均、最高收盤價統計。
 pub async fn fetch_monthly_stock_price_summary(
     stock_symbol: &str,
     year: i32,
     month: i32,
 ) -> Result<MonthlyStockPriceSummary> {
-    let sql = r#"
-SELECT
-    MIN("LowestPrice") as lowest_price,
-    AVG("ClosingPrice") as avg_price,
-    MAX("HighestPrice") as highest_price
-FROM "DailyQuotes"
-WHERE "stock_symbol" = $1 AND "year" = $2 AND "month" = $3
-GROUP BY "stock_symbol", "year", "month";
-"#;
-    Ok(sqlx::query_as::<_, MonthlyStockPriceSummary>(sql)
-        .bind(stock_symbol)
-        .bind(year)
-        .bind(month)
-        .fetch_one(database::get_connection())
-        .await?)
+    Ok(
+        sqlx::query_as::<_, MonthlyStockPriceSummary>(MONTHLY_PRICE_SUMMARY_SQL)
+            .bind(stock_symbol)
+            .bind(year)
+            .bind(month)
+            .fetch_one(database::get_connection())
+            .await?,
+    )
 }
 
 /// 取得指定日期在 `DailyQuotes` 的資料筆數。
