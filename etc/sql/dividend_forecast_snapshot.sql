@@ -28,15 +28,24 @@ comment on column public.dividend_forecast_snapshot.amount is '預估入帳金�
 comment on column public.dividend_forecast_snapshot.basis is '預估依據：announced、amount_announced、estimated、latest_amount、cadence';
 comment on column public.dividend_forecast_snapshot.entitled is '已除息，股數與金額取已領股利明細';
 
--- 比對範例：某次快照中發放日已過的預估 vs 已領股利明細（依會員、代號、除息日）。
+-- 比對範例：某次快照中發放日已過的預估 vs 同一會員的已領股利明細（依代號、除息日）。
+-- 已領金額必須在子查詢內以 `o.member_id = f.member_id` 過濾後再加總；若把持股明細放在外層 LEFT JOIN，
+-- 過濾條件只會讓 o 變成 NULL，其他會員的 m.cash 仍會被算進來。
+-- 正式的誤差計算以 `/portfolio/dividend-forecast/accuracy` 為準：它依（代號, 發放月份）比對該會員的
+-- 實際入帳（`domain::portfolio::forecast_accuracy::compare`），推估日期與實際日期不同時也對得上，
+-- 結果可能與此依除息日比對的範例不同。
 -- SELECT f.snapshot_date, f.member_id, f.stock_symbol, f.ex_date, f.pay_date, f.basis,
---        f.amount AS forecast, COALESCE(sum(m.cash), 0) AS actual,
---        COALESCE(sum(m.cash), 0) - f.amount AS diff
+--        f.amount AS forecast, COALESCE(a.actual, 0) AS actual,
+--        COALESCE(a.actual, 0) - f.amount AS diff
 -- FROM dividend_forecast_snapshot f
--- LEFT JOIN dividend d ON d.security_code = f.stock_symbol AND d.quarter <> ''
---      AND d."ex-dividend_date1" = to_char(f.ex_date, 'YYYY-MM-DD')
--- LEFT JOIN dividend_record_detail_more m ON m.dividend_serial = d.serial
--- LEFT JOIN stock_ownership_details o ON o.serial = m.stock_ownership_details_serial AND o.member_id = f.member_id
+-- LEFT JOIN LATERAL (
+--     SELECT sum(m.cash) AS actual
+--     FROM dividend d
+--     JOIN dividend_record_detail_more m ON m.dividend_serial = d.serial
+--     JOIN stock_ownership_details o ON o.serial = m.stock_ownership_details_serial
+--     WHERE d.security_code = f.stock_symbol AND d.quarter <> ''
+--       AND d."ex-dividend_date1" = to_char(f.ex_date, 'YYYY-MM-DD')
+--       AND o.member_id = f.member_id
+-- ) a ON true
 -- WHERE f.snapshot_date = '2026-12-01' AND f.pay_date < current_date
--- GROUP BY f.snapshot_date, f.member_id, f.stock_symbol, f.ex_date, f.pay_date, f.basis, f.amount
--- ORDER BY f.pay_date, f.stock_symbol;
+-- ORDER BY f.member_id, f.pay_date, f.stock_symbol;
