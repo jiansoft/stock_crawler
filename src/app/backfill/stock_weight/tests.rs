@@ -141,3 +141,90 @@ async fn test_execute() {
 
     tracing::debug!("結束 execute");
 }
+
+/// 以本機 mock server 取代期交所權值頁（G15），驗證上市、上櫃兩種版面的抓取（C19）。
+mod mock_sources {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+
+    const TWSE_PATH: &str = "/cht/9/futuresQADetail";
+    const TPEX_PATH: &str = "/cht/2/tPEXPropertion";
+
+    /// 一列兩檔的權值表；`nested` 為上市頁多一層 `div` 的版面。
+    fn weight_page(nested: bool, cells: &str) -> String {
+        let table = format!("<table><tbody><tr>{cells}</tr></tbody></table>");
+        let body = if nested {
+            format!("<div><div>{table}</div></div>")
+        } else {
+            format!("<div>{table}</div>")
+        };
+        format!(r#"<html><body><div id="printhere">{body}</div></body></html>"#)
+    }
+
+    fn html(body: String) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_raw(body, "text/html; charset=utf-8")
+    }
+
+    async fn mount(server: &MockServer, route: &str, response: ResponseTemplate) {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(response)
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    /// 上市、上櫃各自依版面解析，結果收進同一個容器。
+    #[tokio::test]
+    async fn handle_stock_exchange_collects_both_layouts() {
+        let server = MockServer::start().await;
+        mount(
+            &server,
+            TWSE_PATH,
+            html(weight_page(
+                true,
+                "<td>1</td><td>2330</td><td>台積電</td><td>34.61%</td>\
+                 <td>2</td><td>2317</td><td>鴻海</td><td>3.50%</td>",
+            )),
+        )
+        .await;
+        mount(
+            &server,
+            TPEX_PATH,
+            html(weight_page(
+                false,
+                "<td>1</td><td>6488</td><td>環球晶</td><td>5.25%</td>\
+                 <td></td><td></td><td></td><td></td>",
+            )),
+        )
+        .await;
+
+        let collected = Arc::new(Mutex::new(Vec::new()));
+        let uri = server.uri();
+        let result = with_origins(&[("https://www.taifex.com.tw", &uri)], async {
+            handle_stock_exchange(StockExchange::TWSE, Arc::clone(&collected)).await?;
+            handle_stock_exchange(StockExchange::TPEx, Arc::clone(&collected)).await
+        })
+        .await;
+
+        assert!(result.is_ok(), "{result:?}");
+        let weights: Vec<(String, Decimal)> = collected
+            .lock()
+            .await
+            .iter()
+            .map(|command| (command.symbol.clone(), command.weight))
+            .collect();
+        assert_eq!(
+            weights,
+            [
+                ("2330".to_owned(), dec!(34.61)),
+                ("2317".to_owned(), dec!(3.50)),
+                ("6488".to_owned(), dec!(5.25)),
+            ],
+            "上櫃尾列右半空白要略過"
+        );
+    }
+}
