@@ -10,7 +10,7 @@ use std::{
     fmt,
 };
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::{Datelike, Local};
 
 use crate::{
@@ -52,6 +52,7 @@ impl fmt::Display for RebuildSummary {
 }
 
 /// 一輪重算的統計與寫入的快照。
+#[derive(Debug)]
 pub(crate) struct Rebuilt {
     pub(crate) summary: RebuildSummary,
     pub(crate) snapshots: Vec<FinancialHealthSnapshot>,
@@ -86,6 +87,10 @@ pub async fn execute() -> Result<()> {
 }
 
 /// 讀取年報與季報數值、逐檔算出財務體質，整批取代 `financial_health`。
+///
+/// # Errors
+///
+/// 讀取或寫入失敗，或一檔都算不出來（此時不清空舊結果）時回傳錯誤。
 pub(crate) async fn rebuild(
     repo: &impl FinancialHealthRepository,
     current_year: i32,
@@ -97,6 +102,10 @@ pub(crate) async fn rebuild(
         .fetch_quarter_figures(current_year - QUARTER_LOOKBACK_YEARS)
         .await?;
     let snapshots = build_snapshots(annual, quarters);
+    // 整批取代會先清空整張表；讀到 0 檔多半是上游財報表異常，保留上一次結果。
+    if snapshots.is_empty() {
+        bail!("財務體質重算 0 檔（年報、季報都讀不到），不清空 financial_health");
+    }
     let written = repo.replace_financial_health(&snapshots).await?;
 
     Ok(Rebuilt {
