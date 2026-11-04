@@ -40,6 +40,8 @@ pub mod revenue;
 pub mod stock_weight;
 /// 調用 twse API 取得並更新台股加權指數
 pub mod taiwan_stock_index;
+// Yahoo 個股頁 404 的略過時間：連續兩次才視為下市（H37）
+pub(crate) mod yahoo_not_found;
 
 use crate::infra::cache::SHARE;
 

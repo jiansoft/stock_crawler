@@ -89,6 +89,73 @@ async fn refresh_stocks_skips_flagged_and_defers_past_the_limit() {
     );
 }
 
+/// Yahoo 404 第一次沿用一般略過時間（可能是暫時性，H37），60 天內再次 404 才拉長到 30 天；
+/// 補抓成功會清掉「曾經 404」標記。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（Redis），請加 --features integration-tests 執行"
+)]
+async fn refresh_stocks_extends_skip_only_on_repeated_not_found() {
+    dotenvy::dotenv().ok();
+    if CLIENT.ping().await.is_err() {
+        println!("跳過 refresh_stocks_extends_skip_only_on_repeated_not_found：無 Redis 連線");
+        return;
+    }
+    let not_found = "79979DV3".to_owned();
+    let ok = "79979DV2".to_owned();
+    let marker = |symbol: &str| format!("{}:not_found", make_cache_key(symbol));
+    let clear = || async {
+        for symbol in [&not_found, &ok] {
+            let _ = CLIENT.delete(&make_cache_key(symbol)).await;
+            let _ = CLIENT.delete(&marker(symbol)).await;
+        }
+    };
+    clear().await;
+    CLIENT
+        .set(marker(&ok), true, 60)
+        .await
+        .expect("預先寫入曾經 404 的標記");
+
+    let symbols = vec![ok.clone(), not_found.clone()];
+    let backfill = |symbol: &str| {
+        let result = if symbol == "79979DV3" {
+            Err(anyhow::Error::new(
+                yahoo::dividend::YahooPageNotFoundError {
+                    stock_symbol: symbol.to_owned(),
+                    url: "https://example.invalid".to_owned(),
+                },
+            ))
+        } else {
+            Ok(())
+        };
+        async move { result }
+    };
+    refresh_stocks(&symbols, 2, backfill, || async {}, || false)
+        .await
+        .expect("第一輪");
+    let first_ttl = CLIENT.ttl(&make_cache_key(&not_found)).await.expect("ttl");
+    let ok_marker_after_success = CLIENT.ttl(&marker(&ok)).await.expect("ttl");
+    // 模擬一般略過時間到期，下一輪又排到這檔。
+    let _ = CLIENT.delete(&make_cache_key(&not_found)).await;
+    refresh_stocks(&symbols[1..], 1, backfill, || async {}, || false)
+        .await
+        .expect("第二輪");
+    let second_ttl = CLIENT.ttl(&make_cache_key(&not_found)).await.expect("ttl");
+    clear().await;
+
+    let normal_max = REFRESH_SKIP_TTL_MAX_SECONDS as i64;
+    assert!(
+        (1..=normal_max).contains(&first_ttl),
+        "第一次 404 只用一般略過時間：{first_ttl}"
+    );
+    assert!(
+        second_ttl > normal_max,
+        "再次 404 拉長到 30 天：{second_ttl}"
+    );
+    assert_eq!(ok_marker_after_success, -2, "補抓成功要清掉標記");
+}
+
 /// 收到關機請求就停在兩檔之間，還沒輪到的不查、不寫旗標。
 #[tokio::test]
 #[cfg_attr(

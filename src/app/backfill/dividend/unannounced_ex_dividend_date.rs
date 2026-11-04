@@ -2,12 +2,15 @@ use anyhow::{Result, anyhow};
 use rand::RngExt;
 
 use crate::{
-    app::backfill::acl::YahooDividendAclMapper, core::shutdown::SHUTDOWN_REQUEST,
-    domain::dividend::repository::DividendRepository, infra::crawler::yahoo,
-    infra::database::repository::dividend::PgDividendRepository,
+    app::backfill::acl::YahooDividendAclMapper, app::backfill::yahoo_not_found,
+    core::shutdown::SHUTDOWN_REQUEST, domain::dividend::repository::DividendRepository,
+    infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
 };
 
 use super::yahoo_fetch;
+
+/// 一般的略過秒數（3 天）：抓過的股票 3 天內不再請求 Yahoo。
+const SKIP_TTL_SECONDS: usize = 60 * 60 * 24 * 3;
 
 /// 回補除息/發放日期尚未公布的股利資料。
 ///
@@ -65,7 +68,7 @@ async fn backfill_until(year: i32, stop: impl Fn() -> bool) -> Result<()> {
         // 先寫入 3 天的快取旗標至 Redis，TTL 設為 3 天 (60秒 * 60分 * 24小時 * 3天 = 259200秒)
         // 這樣做即使單次採集失敗，也能避免下一次排程運行時立刻重複請求
         if let Err(why) = crate::infra::nosql::redis::CLIENT
-            .set(&cache_key, true, 60 * 60 * 24 * 3)
+            .set(&cache_key, true, SKIP_TTL_SECONDS)
             .await
         {
             tracing::error!(
@@ -76,17 +79,16 @@ async fn backfill_until(year: i32, stop: impl Fn() -> bool) -> Result<()> {
         }
 
         // 呼叫 Yahoo 採集器抓取並解析網頁，進而更新資料庫中該股的除息與發放日期
-        if let Err(why) = backfill_unannounced_dividend_dates_from_yahoo(dividend, year).await {
-            if yahoo::dividend::is_page_not_found_error(&why) {
-                // Yahoo 404＝整個個股頁不存在，幾乎都是已下市／清算的標的（4987 2026-10-02），
-                // 與歷年股利回補一致降為 warn，並把略過快取拉長，不再每 3 天重打注定 404 的請求。
-                if let Err(cache_err) = crate::infra::nosql::redis::CLIENT
-                    .set(
-                        &cache_key,
-                        true,
-                        yahoo::dividend::PAGE_NOT_FOUND_CACHE_TTL_SECONDS,
-                    )
-                    .await
+        match backfill_unannounced_dividend_dates_from_yahoo(dividend, year).await {
+            Ok(()) => yahoo_not_found::on_success(&cache_key).await,
+            Err(why) if yahoo::dividend::is_page_not_found_error(&why) => {
+                // Yahoo 404＝個股頁不存在，多半是已下市／清算的標的（4987 2026-10-02），但也會對正常股票
+                // 暫時回 404（H37）：與歷年股利回補共用標記，60 天內再次 404 才把略過快取拉長到 30 天。
+                let skip = yahoo_not_found::on_not_found(&cache_key, SKIP_TTL_SECONDS).await;
+                if skip.repeated
+                    && let Err(cache_err) = crate::infra::nosql::redis::CLIENT
+                        .set(&cache_key, true, skip.ttl_seconds)
+                        .await
                 {
                     tracing::error!(
                         "Failed to extend yahoo dividend 404 skip cache {} because {:?}",
@@ -94,11 +96,13 @@ async fn backfill_until(year: i32, stop: impl Fn() -> bool) -> Result<()> {
                         cache_err
                     );
                 }
+                let note = yahoo_not_found::not_found_note(skip.repeated);
                 tracing::warn!(
-                    "skip unannounced dividend dates because yahoo page not found (證券可能已下市): {:#}",
+                    "skip unannounced dividend dates because yahoo page not found ({note}): {:#}",
                     why
                 );
-            } else {
+            }
+            Err(why) => {
                 tracing::error!(
                     "Failed to backfill_unannounced_dividend_dates_from_yahoo because {:?}",
                     why

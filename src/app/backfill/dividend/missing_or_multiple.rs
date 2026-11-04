@@ -9,10 +9,10 @@ use rand::RngExt;
 
 use self::plan::plan_stock_dividends;
 use crate::{
-    app::calculation::dividend_record, core::shutdown::SHUTDOWN_REQUEST, core::util::map::Keyable,
-    domain::dividend::entity::Dividend, domain::dividend::repository::DividendRepository,
-    infra::crawler::yahoo, infra::database::repository::dividend::PgDividendRepository,
-    infra::nosql::redis::CLIENT,
+    app::backfill::yahoo_not_found, app::calculation::dividend_record,
+    core::shutdown::SHUTDOWN_REQUEST, core::util::map::Keyable, domain::dividend::entity::Dividend,
+    domain::dividend::repository::DividendRepository, infra::crawler::yahoo,
+    infra::database::repository::dividend::PgDividendRepository, infra::nosql::redis::CLIENT,
 };
 use anyhow::{Context, Result};
 
@@ -207,19 +207,15 @@ where
             .with_context(|| format!("redis set failed: {cache_key}, ttl={ttl_seconds}"))?;
 
         // 單檔股票的抓取、轉換或入庫失敗只記錄錯誤，整批任務繼續處理其他股票。
-        if let Err(why) = backfill(stock_symbol).await {
-            if yahoo::dividend::is_page_not_found_error(&why) {
-                // Yahoo 回 404＝整個個股頁不存在，幾乎都是已下市/清算的標的
-                //（資料庫的 SuspendListing 旗標可能還沒更新）。這不是異常，
-                // 降級為 warn 避免淹沒真正的錯誤，並把跳過快取拉長到 30 天，
-                // 不再每 2～4 天重打一次注定 404 的請求。
-                if let Err(cache_err) = CLIENT
-                    .set(
-                        &cache_key,
-                        true,
-                        yahoo::dividend::PAGE_NOT_FOUND_CACHE_TTL_SECONDS,
-                    )
-                    .await
+        match backfill(stock_symbol).await {
+            Ok(()) => yahoo_not_found::on_success(&cache_key).await,
+            Err(why) if yahoo::dividend::is_page_not_found_error(&why) => {
+                // Yahoo 回 404＝個股頁不存在，多半是已下市/清算的標的（資料庫的 SuspendListing
+                // 旗標可能還沒更新），但 Yahoo 偶爾也會對正常股票暫時回 404（H37）：
+                // 第一次只沿用一般略過時間，60 天內再次 404 才拉長到 30 天。
+                let skip = yahoo_not_found::on_not_found(&cache_key, ttl_seconds).await;
+                if skip.repeated
+                    && let Err(cache_err) = CLIENT.set(&cache_key, true, skip.ttl_seconds).await
                 {
                     tracing::error!(
                         "Failed to extend yahoo dividend 404 skip cache: stock_symbol={}, error={:#}",
@@ -227,12 +223,14 @@ where
                         cache_err
                     );
                 }
+                let note = yahoo_not_found::not_found_note(skip.repeated);
                 tracing::warn!(
-                    "skip dividend backfill because yahoo page not found (證券可能已下市): stock_symbol={}, error={:#}",
+                    "skip dividend backfill because yahoo page not found ({note}): stock_symbol={}, error={:#}",
                     stock_symbol,
                     why
                 );
-            } else {
+            }
+            Err(why) => {
                 tracing::error!(
                     "backfill_missing_or_multiple_dividends failed: stock_symbol={}, stage=backfill_recent_dividends_for_stock, error={:#}",
                     stock_symbol,
