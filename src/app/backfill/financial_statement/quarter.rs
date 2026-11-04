@@ -10,7 +10,7 @@
 use std::future::Future;
 
 use anyhow::Result;
-use chrono::Local;
+use chrono::{DateTime, Local};
 use futures::StreamExt;
 
 use crate::{
@@ -29,6 +29,11 @@ use crate::{
 /// 抓取對應資料，回寫 `financial_statement` 後，重新同步 `stocks` 表上的
 /// 最新一季/近四季數據，並觸發估值重算。
 pub async fn execute() -> Result<()> {
+    execute_at(Local::now()).await
+}
+
+/// 以 `now` 決定目標季度的 [`execute`]；測試以固定的歷史日期執行。
+async fn execute_at(now: DateTime<Local>) -> Result<()> {
     let mut success_count = 0usize;
     // 記錄實際處理過的季度，流程結束後才派發通知事件。
     // 這個排程（04:00）跑在季 EPS 主流程（03:00）之後，補完 ROE/ROA 的資料才算完整，
@@ -36,7 +41,7 @@ pub async fn execute() -> Result<()> {
     let mut processed_quarters: Vec<ReportQuarter> = Vec::new();
 
     for target_report in
-        crate::core::util::datetime::backfill_report_quarter_targets_for_listed_and_otc(Local::now())
+        crate::core::util::datetime::backfill_report_quarter_targets_for_listed_and_otc(now)
     {
         success_count += process_target_report(target_report).await?;
         processed_quarters.push(target_report);
