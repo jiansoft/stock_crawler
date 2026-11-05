@@ -23,8 +23,11 @@ const HISTORY_BACKFILL_INTERVAL: Duration = Duration::from_secs(3);
 /// 更新股票主檔的最新持股後，再把當天快照寫進 `qfii_history`、重算 `qfii_trend`，
 /// 最後派發 [`DomainEvent::ForeignHoldingsUpdated`] 讓持股通知檢查外資明顯增減持的股票。
 pub async fn execute() -> Result<()> {
-    let now = Local::now();
+    execute_at(Local::now()).await
+}
 
+/// [`execute`] 的本體；`now` 可注入，讓測試以固定的歷史日期跑完整流程。
+pub(crate) async fn execute_at(now: DateTime<Local>) -> Result<()> {
     if now.is_weekend() {
         return Ok(());
     }
