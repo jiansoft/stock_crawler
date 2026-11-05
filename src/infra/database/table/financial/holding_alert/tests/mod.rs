@@ -13,11 +13,12 @@ use crate::domain::financial::entity::EpsEstimateBasis;
 use super::*;
 
 /// 測試用假代號；正式資料不會用到 7997x 這段號碼。
-/// A：有完整錨點；B：什麼都沒有；C：只有淨利率可備援；D：季別不連續。
+/// A：有完整錨點；B：什麼都沒有；C：只有淨利率可備援；D：季別不連續；E：錨點期間業外偏高。
 pub(super) const FAKE_SYMBOL_A: &str = "79979";
 pub(super) const FAKE_SYMBOL_B: &str = "79978";
 pub(super) const FAKE_SYMBOL_C: &str = "79977";
 pub(super) const FAKE_SYMBOL_D: &str = "79976";
+pub(super) const FAKE_SYMBOL_E: &str = "79975";
 
 /// 測試用營收月份，固定歷史月份而非 `Local::now()`，避免與真實資料撞期。
 pub(super) const TEST_DATE: i64 = 202608;
@@ -28,10 +29,16 @@ pub(super) const ANCHOR_DATE: i64 = 202606;
 pub(super) const TEST_INDUSTRY: i32 = 1;
 
 pub(super) fn fake_symbols() -> Vec<String> {
-    [FAKE_SYMBOL_A, FAKE_SYMBOL_B, FAKE_SYMBOL_C, FAKE_SYMBOL_D]
-        .iter()
-        .map(|symbol| symbol.to_string())
-        .collect()
+    [
+        FAKE_SYMBOL_A,
+        FAKE_SYMBOL_B,
+        FAKE_SYMBOL_C,
+        FAKE_SYMBOL_D,
+        FAKE_SYMBOL_E,
+    ]
+    .iter()
+    .map(|symbol| symbol.to_string())
+    .collect()
 }
 
 /// 移除測試寫入的所有資料列；測試前後都要呼叫，避免污染資料庫。
@@ -42,6 +49,7 @@ pub(super) async fn cleanup() {
     for sql in [
         r#"DELETE FROM "Revenue" WHERE stock_symbol = ANY($1)"#,
         "DELETE FROM financial_statement WHERE security_code = ANY($1)",
+        "DELETE FROM income_statement WHERE stock_symbol = ANY($1)",
         "DELETE FROM stock_ownership_details WHERE security_code = ANY($1)",
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
     ] {

@@ -47,6 +47,12 @@ pub struct HoldingRevenueAlert {
     pub reg_r2: Option<Decimal>,
     /// 上述迴歸的樣本季數
     pub reg_quarters: Option<i64>,
+    /// 錨點期間（今年 Q1～錨點季）的營業利益占營收比 (%)，取自單季損益表；只在錨點獲利時才有值
+    pub anchor_operating_margin: Option<Decimal>,
+    /// 錨點期間的業外損益占營收比 (%)；只在錨點獲利時才有值
+    pub anchor_non_operating_margin: Option<Decimal>,
+    /// 今年以前兩個年度（8 季）單季業外損益占營收比的中位數 (%)；不滿 4 季時為 None
+    pub typical_non_operating_margin: Option<Decimal>,
     /// 之前所有月份的最高營收 (千元)；之前不滿 12 個月時為 None（不判斷是否創新高）
     pub previous_high: Option<Decimal>,
     /// 到當月為止連續年減（月份相連）的月數，最多看 12 個月；當月沒有年減為 0
@@ -85,6 +91,11 @@ const MIN_REGRESSION_R2: Decimal = dec!(0.5);
 /// 一季的月數，用於把迴歸截距（每季固定損益）折算成新增月份。
 const MONTHS_PER_QUARTER: Decimal = dec!(3);
 
+/// 排除超額業外後，未公布月份的獲利率至少要比錨點期間低這麼多（比值 ≤ 0.9）才調整。
+///
+/// 差距不到一成時兩種算法幾乎一樣，調整只會讓通知多一個警示；與 stock_go `basis_pick` 一致。
+const MAX_NORMAL_NON_OPERATING_RATIO: Decimal = dec!(0.9);
+
 /// 推估 EPS 的計算依據。
 ///
 /// 兩種方法的可信度差很多，通知必須讓人一眼分得出來用的是哪一種。
@@ -98,6 +109,9 @@ pub enum EpsEstimateBasis {
     /// 今年已公布的季報為虧損時，已實現部分沿用實際 EPS，
     /// 新增營收改用近四季淨利率（近四季 EPS ÷ 近四季營收）推估。
     ReportedQuartersWithTrailingMargin,
+    /// 今年已公布的季報獲利、但業外占營收比明顯高於過去 8 季的中位數（例如處分利益、匯兌或評價利益）：
+    /// 已實現部分沿用實際 EPS，未公布的月份只假設業外回到中位數，本業照錨點期間的營業利益率。
+    ReportedQuartersWithNormalNonOperating,
     /// 以近四季平均稅後淨利率套用在累計營收上；今年還沒有任何季報可錨定時的退路。
     NetIncomeMargin,
 }
@@ -107,7 +121,8 @@ pub enum EpsEstimateBasis {
 pub struct EpsEstimate {
     /// 今年累計推估 EPS (元)
     pub accumulated: Decimal,
-    /// 依已公布月數線性年化後的全年推估 EPS (元)
+    /// 全年推估 EPS (元)：營收線性年化後套用同一套推估法；
+    /// 只有 [`EpsEstimateBasis::ReportedQuartersWithNormalNonOperating`] 與「累計 × 12 ÷ 月數」不同
     pub annual: Decimal,
     /// 計算依據
     pub basis: EpsEstimateBasis,
@@ -125,8 +140,7 @@ impl HoldingRevenueAlert {
 
     /// 由目前累計營收推估今年的 EPS。
     ///
-    /// 有錨點就走錨定法（[`EpsEstimateBasis::ReportedQuarters`] 或
-    /// [`EpsEstimateBasis::ReportedQuartersWithTrailingMargin`]），查不到錨點才退回
+    /// 有錨點就走錨定法（[`EpsEstimateBasis::ReportedQuarters`] 等四種），查不到錨點才退回
     /// [`EpsEstimateBasis::NetIncomeMargin`]。錨定法判定不可靠時直接回傳 `None`，
     /// 不退回淨利率法——那會把已公布的實際 EPS 整個丟掉。
     /// 寧可不顯示，也不要把「查無資料」畫成 0。
@@ -138,17 +152,33 @@ impl HoldingRevenueAlert {
             return None;
         }
 
-        let (accumulated, basis) = match self.anchor() {
+        let anchor = self.anchor();
+        let (accumulated, basis) = match anchor {
             Some(anchor) => self.anchored_accumulated_eps(anchor)?,
             None => (
                 self.margin_accumulated_eps()?,
                 EpsEstimateBasis::NetIncomeMargin,
             ),
         };
+        let annualized_revenue = self.monthly_accumulated * MONTHS_PER_YEAR / Decimal::from(months);
+        let annual = match (basis, anchor, self.normal_non_operating_ratio()) {
+            // 已實現的超額業外只算一次：年化的是營收，不是含業外的累計 EPS。
+            (
+                EpsEstimateBasis::ReportedQuartersWithNormalNonOperating,
+                Some((anchor_eps, anchor_revenue, _)),
+                Some(ratio),
+            ) => Self::normal_non_operating_eps(
+                anchor_eps,
+                anchor_revenue,
+                annualized_revenue,
+                ratio,
+            ),
+            _ => accumulated * MONTHS_PER_YEAR / Decimal::from(months),
+        };
 
         Some(EpsEstimate {
             accumulated,
-            annual: accumulated * MONTHS_PER_YEAR / Decimal::from(months),
+            annual,
             basis,
             volatile: self
                 .revenue_pace()
@@ -190,6 +220,8 @@ impl HoldingRevenueAlert {
     ///
     /// 已實現的部分直接採用財報數字，只有尚未公布的月份需要推估，新增營收套用的淨利率：
     ///
+    /// 0. 錨點獲利、但業外占營收比明顯高於過去 8 季中位數：新增營收的獲利率按
+    ///    [`Self::normal_non_operating_ratio`] 打折——超額業外已經實現，不能再外推到之後的月份。
     /// 1. 錨點獲利或沒有新增營收：沿用錨點期間自身的淨利率，
     ///    等同 `錨點 EPS × (本期累計營收 ÷ 錨點季底累計營收)`。比率的分子分母都是同一檔股票的
     ///    營收，金控、保險這類「營收」與淨利率基準對不起來的產業也能算對。
@@ -209,6 +241,20 @@ impl HoldingRevenueAlert {
                 EpsEstimateBasis::ReportedQuarters,
             )
         };
+
+        if anchor_eps > Decimal::ZERO
+            && let Some(ratio) = self.normal_non_operating_ratio()
+        {
+            return Some((
+                Self::normal_non_operating_eps(
+                    anchor_eps,
+                    anchor_revenue,
+                    self.monthly_accumulated,
+                    ratio,
+                ),
+                EpsEstimateBasis::ReportedQuartersWithNormalNonOperating,
+            ));
+        }
 
         let extra_revenue = self.monthly_accumulated - anchor_revenue;
         if anchor_eps > Decimal::ZERO || extra_revenue <= Decimal::ZERO {
@@ -237,6 +283,36 @@ impl HoldingRevenueAlert {
             Some(pace) if pace >= VOLATILE_REVENUE_PACE => None,
             _ => Some(proportional()),
         }
+    }
+
+    /// 錨點 EPS 加上「超過錨點的營收 × 錨點期間每千元營收 EPS × `ratio`」。
+    fn normal_non_operating_eps(
+        anchor_eps: Decimal,
+        anchor_revenue: Decimal,
+        revenue: Decimal,
+        ratio: Decimal,
+    ) -> Decimal {
+        anchor_eps + (revenue - anchor_revenue) * anchor_eps / anchor_revenue * ratio
+    }
+
+    /// 業外回到常態時的獲利率是錨點期間的幾倍：
+    /// `(營業利益率 + min(錨點業外占比, 過去 8 季中位數)) ÷ (營業利益率 + 錨點業外占比)`。
+    ///
+    /// 用比值打折錨點期間的「每千元營收 EPS」，稅率與加權股數都沿用公司自己的數字。
+    /// 只往下修：業外低於常態（例如一次性減損）時不拉高推估。錨點期間稅前虧損、
+    /// 業外沒有高於中位數、資料不齊，或打折不到一成（[`MAX_NORMAL_NON_OPERATING_RATIO`]）時回傳 `None`。
+    /// 本業虧損、獲利全靠業外的公司，比值可能小於 0——之後月份照本業推估就是虧損。
+    pub fn normal_non_operating_ratio(&self) -> Option<Decimal> {
+        let operating = self.anchor_operating_margin?;
+        let non_operating = self.anchor_non_operating_margin?;
+        let typical = self.typical_non_operating_margin?;
+        let pretax = operating + non_operating;
+        if pretax <= Decimal::ZERO || non_operating <= typical {
+            return None;
+        }
+
+        let ratio = (operating + typical) / pretax;
+        (ratio <= MAX_NORMAL_NON_OPERATING_RATIO).then_some(ratio)
     }
 
     /// 近 12 季迴歸符合門檻（季數、斜率為正、R²）時回傳 `(斜率, 截距)`。

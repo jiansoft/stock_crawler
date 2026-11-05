@@ -83,6 +83,23 @@ fn revenue_message_omits_estimated_eps_when_data_is_missing() {
     assert!(!msg.contains("估EPS"), "{msg}");
 }
 
+// 業外偏高被打折時：營業利益率 10%、業外 30%、過去中位數 5% ⇒ 比值 15 ÷ 40 ＝ 0.375；
+// 累計 3 ＋ 400,000 × (3 ÷ 600,000) × 0.375 ＝ 3.75，年估以年化營收 1,500,000 算出 4.69。
+#[test]
+fn revenue_message_flags_excluded_excess_non_operating_income() {
+    let mut alert = revenue_alert("4735", "豪展", dec!(61.47), dec!(4.29));
+    alert.anchor_operating_margin = Some(dec!(10));
+    alert.anchor_non_operating_margin = Some(dec!(30));
+    alert.typical_non_operating_margin = Some(dec!(5));
+
+    let msg = EventDispatcher::build_revenue_message(202608, &[alert], None);
+
+    assert!(
+        msg.contains(r"推估EPS︰3\.75（年估 4\.69） ⚠️業外偏高已排除"),
+        "{msg}"
+    );
+}
+
 // 營收劇變時在推估值後面標註只供參考。
 #[test]
 fn revenue_message_flags_volatile_estimate() {

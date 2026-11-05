@@ -29,6 +29,8 @@ use crate::infra::database;
 ///    錨點虧損時用來推估新增營收的淨利率；四季或十二個月不齊時為 NULL。
 ///    錨點虧損且有新增營收時，再帶出近 12 季「季 EPS 對季營收」的迴歸（`reg_*`），
 ///    營收一次入帳的公司（建設、生技）靠它才看得到「入帳一次賺多少」。
+///    錨點獲利時再帶出錨點期間的營業利益率、業外占營收比與過去 8 季業外占比中位數（`nonop`），
+///    業外異常偏高時，未公布月份只假設業外回到中位數，不把一次性的業外收益外推。
 /// 2. **近四季平均稅後淨利率**（備援）：今年還沒有任何季報可錨定時才用得到。台股季報的
 ///    公布期限比月營收晚（Q1 約 5 月中、Q2 約 8 月中），所以 1~4 月的營收通知通常只有備援可用。
 ///    只取 Q1~Q4，排除年度列以免同一段期間被重複計入；排除 `net_income = 0`，
@@ -70,6 +72,9 @@ SELECT
     reg.reg_intercept,
     reg.reg_r2,
     reg.reg_quarters,
+    nonop.anchor_operating_margin,
+    nonop.anchor_non_operating_margin,
+    nonop.typical_non_operating_margin,
     record.previous_high,
     decline.yoy_decline_months
 FROM "Revenue" AS r
@@ -158,6 +163,52 @@ LEFT JOIN LATERAL (
     WHERE anchor.anchor_eps <= 0 AND r."MonthlyAccumulated" > anchor.anchor_accumulated_revenue
 ) AS reg ON TRUE
 LEFT JOIN LATERAL (
+    -- 業外是否異常偏高：錨點期間（今年 Q1～錨點季）的營業利益率、業外占營收比，與今年以前兩個年度
+    -- 單季業外占營收比的中位數。取自單季損益表（Yahoo 優先、BigGo 備援），口徑跨年一致；
+    -- financial_statement 的營益率在不同年度來源不同，不能拿來比歷史。
+    -- 錨點季要每季都有損益表，歷史至少 4 季才算中位數；不成立時 HAVING 濾掉整列，三欄皆為 NULL。
+    -- 只在錨點獲利時才算，外層條件不成立時以 one-time filter 略過。
+    SELECT cur.operating_margin AS anchor_operating_margin,
+        cur.non_operating_margin AS anchor_non_operating_margin,
+        hist.typical_margin AS typical_non_operating_margin
+    FROM (
+        SELECT SUM(q.operating_profit)::numeric * 100 / SUM(q.revenue) AS operating_margin,
+            SUM(q.non_operating_income)::numeric * 100 / SUM(q.revenue) AS non_operating_margin
+        FROM (
+            SELECT DISTINCT ON (i.quarter) i.revenue, i.operating_profit, i.non_operating_income
+            FROM income_statement AS i
+            WHERE i.stock_symbol = r."stock_symbol"
+                AND i.period_type = 'single'
+                AND i.fiscal_year = r."Date" / 100
+                AND CASE i.quarter
+                        WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2
+                        WHEN 'Q3' THEN 3 WHEN 'Q4' THEN 4
+                    END <= anchor.anchor_quarter_no
+                AND i.revenue > 0
+                AND i.operating_profit IS NOT NULL
+                AND i.non_operating_income IS NOT NULL
+            ORDER BY i.quarter, (i.source = 'yahoo') DESC
+        ) AS q
+        HAVING COUNT(*) = anchor.anchor_quarter_no
+    ) AS cur
+    CROSS JOIN (
+        SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY h.margin)::numeric AS typical_margin
+        FROM (
+            SELECT DISTINCT ON (i.fiscal_year, i.quarter)
+                i.non_operating_income::numeric * 100 / i.revenue AS margin
+            FROM income_statement AS i
+            WHERE i.stock_symbol = r."stock_symbol"
+                AND i.period_type = 'single'
+                AND i.fiscal_year BETWEEN r."Date" / 100 - 2 AND r."Date" / 100 - 1
+                AND i.revenue > 0
+                AND i.non_operating_income IS NOT NULL
+            ORDER BY i.fiscal_year, i.quarter, (i.source = 'yahoo') DESC
+        ) AS h
+        HAVING COUNT(*) >= 4
+    ) AS hist
+    WHERE anchor.anchor_eps > 0
+) AS nonop ON TRUE
+LEFT JOIN LATERAL (
     SELECT AVG(recent.net_income) AS net_income_margin
     FROM (
         SELECT fs.net_income
@@ -225,6 +276,9 @@ ORDER BY r."ComparedWithLastYearSameMonth" DESC, r."stock_symbol"
             reg_intercept: row.try_get("reg_intercept")?,
             reg_r2: row.try_get("reg_r2")?,
             reg_quarters: row.try_get("reg_quarters")?,
+            anchor_operating_margin: row.try_get("anchor_operating_margin")?,
+            anchor_non_operating_margin: row.try_get("anchor_non_operating_margin")?,
+            typical_non_operating_margin: row.try_get("typical_non_operating_margin")?,
             previous_high: row.try_get("previous_high")?,
             yoy_decline_months: row.try_get("yoy_decline_months")?,
         })
