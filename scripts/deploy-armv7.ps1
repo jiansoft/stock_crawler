@@ -208,6 +208,84 @@ function Invoke-Remote
     & ssh @SshArgs $Target ($Script -replace "`r", '')
 }
 
+# 在 pi 上脫離 SSH 執行指令（目前用於 control.sh update），本機只輪詢結果。
+# 2026-11-05 web 部署在本機中斷時，pi 端跟著 SSH 斷線停在「舊版已停、新版未起」（全站 502 約 2 分鐘）；
+# 直接 ssh 執行 control.sh update 有同樣的風險（stop 之後、start 之前被中斷）。改由 setsid＋nohup 執行，
+# 本機 Ctrl+C、斷線或逾時都不會中斷 pi 端。flock 防止同一單元同時跑兩個 update（回 75）；
+# 鎖的 fd 不讓被啟動的服務繼承。執行紀錄放 /dev/shm/stock-deploy-run/<單元>.{log,exit,lock}——
+# 不能放部署標記目錄 /dev/shm/stock-deploying：那裡每個檔案都會被主機健康檢查當成部署標記。
+function Invoke-RemoteDetached
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$Unit,
+        [Parameter(Mandatory = $true)][string]$Directory,
+        [Parameter(Mandatory = $true)][string]$Command,
+        [int]$TimeoutSeconds = 600
+    )
+    $run = "/dev/shm/stock-deploy-run/$Unit"
+    $launcher = @'
+set -eu
+run="$1"; dir="$2"; cmd="$3"
+mkdir -p "$(dirname "$run")"
+rm -f "$run.exit" "$run.log"
+setsid nohup bash -c '
+  exec 9>"$1.lock"
+  if ! flock -n 9; then
+    echo "另一個部署正在進行（$1.lock 被鎖住），本次未執行" > "$1.log"
+    echo 75 > "$1.exit"
+    exit 75
+  fi
+  cd "$2" && bash -c "$3" > "$1.log" 2>&1 9>&-
+  echo $? > "$1.exit"
+' _ "$run" "$dir" "$cmd" </dev/null >/dev/null 2>&1 &
+echo LAUNCHED
+'@
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($launcher -replace "`r", '')))
+    $launched = & ssh @SshArgs $Target "echo $b64 | base64 -d | bash -s -- '$run' '$Directory' '$Command'"
+    if ($LASTEXITCODE -ne 0 -or (($launched -join "`n") -notmatch 'LAUNCHED'))
+    {
+        throw "pi 端沒有啟動 $Command：$($launched -join ' ')"
+    }
+
+    $finished = $false
+    try
+    {
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ($true)
+        {
+            Start-Sleep -Seconds 2
+            # 連線暫時失敗就下一輪再查；pi 端不受影響。
+            $state = & ssh @SshArgs $Target "if [ -s '$run.exit' ]; then echo EXIT `$(cat '$run.exit'); fi"
+            if ($LASTEXITCODE -eq 0 -and (($state -join "`n") -match 'EXIT\s+(\d+)'))
+            {
+                $code = [int]$Matches[1]
+                break
+            }
+            if ((Get-Date) -gt $deadline)
+            {
+                throw "$Command 等候 $TimeoutSeconds 秒仍未結束；pi 端仍在執行，請查看 ${Target}:$run.log"
+            }
+        }
+        $finished = $true
+    }
+    finally
+    {
+        if (-not $finished)
+        {
+            Write-Host "本機已停止等候，pi 上的 $Command 仍在背景執行，不會停在半途。" -ForegroundColor Yellow
+            Write-Host "  查看： ssh $Target 'cat $run.log; cat $run.exit'（exit 0＝成功）" -ForegroundColor Yellow
+        }
+    }
+
+    $log = & ssh @SshArgs $Target "cat '$run.log' 2>/dev/null"
+    $log | ForEach-Object { Write-Host $_ }
+    if ($code -eq 75)
+    {
+        throw "pi 上同一單元的另一個部署正在進行，本次未執行 $Command；完成後再部署"
+    }
+    return $code
+}
+
 # 部署標記：pi 上 stock_crawler 的主機健康檢查讀到最後異動 30 分鐘內的標記時，記憶體與 SD 卡超標只記 info、
 # 不發告警（部署本身會讓 swap 用滿、fsync 變慢）。每個單元一個檔案，放在 tmpfs，SD 卡卡住時也寫得進去；
 # 寫入失敗不影響部署，只是這次的超標會照常告警。
@@ -347,10 +425,10 @@ done
 "@
     Invoke-Remote $waitScript
     Write-Host 'control.sh update...' -ForegroundColor Cyan
-    Invoke-Remote "cd $RemoteBase && ./control.sh update"
-    if ($LASTEXITCODE -ne 0)
+    $updateCode = Invoke-RemoteDetached -Unit $DeployUnit -Directory $RemoteBase -Command './control.sh update'
+    if ($updateCode -ne 0)
     {
-        throw 'control.sh update 失敗'
+        throw "control.sh update 失敗（exit $updateCode）"
     }
     Write-Host ''
 
