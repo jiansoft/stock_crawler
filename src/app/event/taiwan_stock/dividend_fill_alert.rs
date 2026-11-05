@@ -7,8 +7,9 @@
 //!   （[`fill::fill_outcome`]）。
 //! - **填息落後**：尚未填息、且已過交易日數今天**第一次**超過基準：該股近 5 年的平均填息天數；
 //!   沒有自身紀錄時改用同現金殖利率組的全市場中位數（`/market/dividend-fill-stats`）。
+//!   基準不足 [`MIN_BASELINE_DAYS`] 個交易日時以下限計，避免平均幾天就填息的股票晚一兩天就被列出。
 //!
-//! 兩段都以「今天剛好發生」判斷（填息日是今天、已過天數剛好等於基準取整數加 1），同一次除權息
+//! 兩段都以「今天剛好發生」判斷（填息日是今天、已過天數剛好等於基準取整數（套用下限後）加 1），同一次除權息
 //! 各只會出現一次，不需另外記錄已通知。今天休市（最新收盤不是今天）時不會有任何一筆成立。
 //! 單檔查詢失敗只記錄警告、略過該檔；全市場基準查詢失敗時只用自身紀錄。
 //!
@@ -41,9 +42,12 @@ const HISTORY_DAYS: u64 = 5 * 365 + 1;
 /// 全市場基準的統計年數；與 [`HISTORY_DAYS`] 一致。
 const PEER_YEARS: u8 = 5;
 
-/// 落後段的附註（T14：2019 年起上市櫃普通股純現金除息）。
-const LAG_FOOTNOTE: &str =
-    "註：2019 年起統計，除息 60 個交易日仍未填息者，之後 120 個交易日平均落後大盤約 7%，僅供參考。";
+/// 落後判斷的基準下限（交易日）：自身平均或同組中位數低於此值時以此值計（N33）。
+const MIN_BASELINE_DAYS: u32 = 10;
+
+/// 落後段的附註（T17：2019 年起上市櫃普通股純現金除息，對照同日上市櫃等權平均；
+/// T18：自身平均填息天數對單次填息的預測力有限）。
+const LAG_FOOTNOTE: &str = "註：2019 年起統計，超過自身平均天數仍未填息者，之後 120 個交易日平均落後上市櫃等權平均約 2%（已填息者領先約 1.5%），仍有約 55% 會在 120 個交易日內填息；自身平均天數對單次填息的預測力有限，僅供參考。";
 
 /// 判斷填息落後的基準天數。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,12 +65,23 @@ impl Baseline {
         }
     }
 
+    /// 已過交易日數超過這個值才算落後：基準取整數，不足 [`MIN_BASELINE_DAYS`] 時以下限計。
+    fn threshold(self) -> u32 {
+        // 基準是 1～120 的交易日數，轉成 u32 不會截斷。
+        (self.days().floor() as u32).max(MIN_BASELINE_DAYS)
+    }
+
     fn text(self) -> String {
-        match self {
+        let base = match self {
             Self::Own(days) => format!("近 5 年平均 {days} 日"),
             Self::Peer { bucket, median } => {
                 format!("同殖利率組（{}）全市場中位數 {median} 日", bucket.label())
             }
+        };
+        if self.days() < f64::from(MIN_BASELINE_DAYS) {
+            format!("{base}（不足 {MIN_BASELINE_DAYS} 日以 {MIN_BASELINE_DAYS} 日計）")
+        } else {
+            base
         }
     }
 }
@@ -158,7 +173,7 @@ async fn review(
 
 /// 今天（最新收盤是 `today`）仍未填息、且已過交易日數第一次超過基準時回傳該基準。
 ///
-/// 已過交易日數每個交易日加 1，「第一次超過」就是剛好等於 `floor(基準) + 1` 的那一天。
+/// 已過交易日數每個交易日加 1，「第一次超過」就是剛好等於 `max(floor(基準), 下限) + 1` 的那一天。
 /// 基準先用自身近 5 年的平均填息天數（`history`），沒有已填息紀錄時用同殖利率組的全市場中位數；
 /// 兩者都沒有（例如只有股票股利、或基準查詢失敗）時不判斷。
 fn lag_baseline(
@@ -181,9 +196,7 @@ fn lag_baseline(
             Baseline::Peer { bucket, median }
         }
     };
-    // 基準是 1～120 的交易日數，轉成 u32 不會截斷。
-    let first_exceeding = baseline.days().floor() as u32 + 1;
-    (outcome.trading_days_since_ex == first_exceeding).then_some(baseline)
+    (outcome.trading_days_since_ex == baseline.threshold() + 1).then_some(baseline)
 }
 
 /// 股利文字：現金與股票股利（元），沒有的那一種不列。
