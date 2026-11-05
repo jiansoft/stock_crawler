@@ -5,6 +5,7 @@
 //! 日期切段與缺漏日誌，以及寫入資料庫的整合測試。
 
 mod exchange_fill;
+mod mock_sources;
 mod plan;
 mod yahoo_fill;
 
