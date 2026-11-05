@@ -16,6 +16,7 @@ mod mutation;
 /// `DailyQuote` 的資料庫查詢操作子模組。
 mod query;
 
+pub(crate) use query::MONTHLY_PRICE_SUMMARY_SQL;
 pub use query::{
     fetch_count_by_date, fetch_daily_quotes_by_date, fetch_market_traded_counts,
     fetch_monthly_stock_price_summary, fetch_symbols_quoted_since,
