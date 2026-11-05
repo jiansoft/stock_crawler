@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Local, NaiveDate};
 use futures::future;
 use rust_decimal::Decimal;
 use tokio::{task, time};
@@ -81,8 +81,11 @@ enum EvaluationSource {
 ///
 /// 如果在檢查假期時發生資料庫或網路錯誤，將會回傳 `Err`。
 pub async fn execute() -> Result<()> {
-    let now = Local::now();
+    execute_at(Local::now()).await
+}
 
+/// [`execute`] 的本體；`now` 可注入，讓測試以固定日期驗證週末與休市日直接結束。
+async fn execute_at(now: DateTime<Local>) -> Result<()> {
     // 週末不處理
     if now.is_weekend() {
         return Ok(());
@@ -345,6 +348,112 @@ mod tests {
         assert!(get_cached_snapshot("2317").is_none());
 
         SHARE.clear_stock_snapshots();
+    }
+
+    /// 以本機 mock server 取代證交所休市日表（G15）：週末與休市日直接結束、不啟動追蹤，
+    /// 休市日表讀不到時回錯誤（排程會告警），而不是當成交易日照常啟動。
+    mod schedule {
+        use chrono::TimeZone;
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use super::*;
+        use crate::core::util::http::mock_origin::with_origins;
+
+        const TWSE: &str = "https://www.twse.com.tw";
+        const HOLIDAY_PATH: &str = "/rwd/zh/holidaySchedule/holidaySchedule";
+
+        fn at(year: i32, month: u32, day: u32) -> DateTime<Local> {
+            Local
+                .with_ymd_and_hms(year, month, day, 9, 30, 0)
+                .single()
+                .expect("本地時間沒有歧義")
+        }
+
+        /// 1991 年的休市日表：只有 1991-10-10 國慶日。
+        async fn holiday_server(year: &str, body: ResponseTemplate) -> MockServer {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path(HOLIDAY_PATH))
+                .and(query_param("date", year))
+                .respond_with(body)
+                .mount(&server)
+                .await;
+            server
+        }
+
+        fn holidays_1991() -> ResponseTemplate {
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "stat": "ok", "date": "19910101", "queryYear": 1991, "total": 2,
+                "data": [
+                    ["1991-10-10", "國慶日", "依規定放假1日。"],
+                    ["1991-01-04", "國曆新年開始交易日", "國曆新年開始交易。"]
+                ]
+            }))
+        }
+
+        /// 週末直接結束，連休市日表都不查。
+        #[tokio::test]
+        async fn execute_at_skips_weekend_without_any_request() {
+            let server = MockServer::start().await;
+            let uri = server.uri();
+            let result = with_origins(&[(TWSE, uri.as_str())], execute_at(at(1991, 10, 12))).await;
+            result.expect("週末直接結束");
+            let requests = server
+                .received_requests()
+                .await
+                .map_or(0, |requests| requests.len());
+            assert_eq!(requests, 0, "週末不查休市日表");
+        }
+
+        /// 平日但是休市日：查完休市日表就結束，不設執行中旗標、不啟動背景任務。
+        #[tokio::test]
+        async fn execute_at_skips_market_holiday() {
+            let server = holiday_server("1991", holidays_1991()).await;
+            let uri = server.uri();
+            let result = with_origins(&[(TWSE, uri.as_str())], execute_at(at(1991, 10, 10))).await;
+            result.expect("休市日直接結束");
+            assert!(!IS_RUNNING.load(Ordering::SeqCst), "休市日不應啟動追蹤");
+        }
+
+        /// 休市日表的判斷：國慶日是休市日、「開始交易」列與其他日子不是。
+        #[tokio::test]
+        async fn is_holiday_matches_closed_dates_only() {
+            let server = holiday_server("1991", holidays_1991()).await;
+            let uri = server.uri();
+            let day = |month, day| NaiveDate::from_ymd_opt(1991, month, day).expect("有效日期");
+            let results = with_origins(&[(TWSE, uri.as_str())], async {
+                (
+                    is_holiday(day(10, 10)).await.expect("查詢成功"),
+                    is_holiday(day(1, 4)).await.expect("查詢成功"),
+                    is_holiday(day(10, 11)).await.expect("查詢成功"),
+                )
+            })
+            .await;
+            assert_eq!(results, (true, false, false));
+        }
+
+        /// 休市日表回應無法解析時回錯誤，不能當成交易日照常啟動追蹤。
+        #[tokio::test]
+        async fn execute_at_fails_when_holiday_schedule_is_unreadable() {
+            let server = holiday_server(
+                "1991",
+                ResponseTemplate::new(200).set_body_string("not json"),
+            )
+            .await;
+            let uri = server.uri();
+            let error = with_origins(&[(TWSE, uri.as_str())], execute_at(at(1991, 10, 11)))
+                .await
+                .expect_err("休市日表讀不到應回錯誤");
+            assert!(
+                error.to_string().contains("holiday schedule"),
+                "錯誤要指出是休市日表：{error:#}"
+            );
+            assert!(
+                !IS_RUNNING.load(Ordering::SeqCst),
+                "讀不到休市日表時不應啟動追蹤"
+            );
+        }
     }
 
     #[tokio::test]
