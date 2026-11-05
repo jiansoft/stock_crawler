@@ -30,3 +30,15 @@ COMMENT ON COLUMN daily_forward_return.return_60d IS '基準日收盤到之後�
 COMMENT ON COLUMN daily_forward_return.return_120d IS '基準日收盤到之後第 120 個交易日收盤的還原報酬（%）；未滿為 NULL';
 COMMENT ON COLUMN daily_forward_return.return_240d IS '基準日收盤到之後第 240 個交易日收盤的還原報酬（%）；未滿為 NULL';
 COMMENT ON COLUMN daily_forward_return.updated_at IS '最後回填時間';
+
+-- 預設 autovacuum 門檻是表的 20%（數十萬列），每天的更新／刪除與新增永遠達不到，死資料與
+-- visibility map 都不更新、統計值逐漸過時（2026-11-04 M43 盤點）。改成每 2 萬列變動就 vacuum／analyze。
+-- 正式庫 2026-11-05 已套用（M44）。
+alter table public.daily_forward_return set (
+    autovacuum_vacuum_insert_threshold = 20000,
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_threshold = 20000,
+    autovacuum_vacuum_scale_factor = 0,
+    autovacuum_analyze_threshold = 20000,
+    autovacuum_analyze_scale_factor = 0
+);

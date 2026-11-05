@@ -27,3 +27,15 @@ COMMENT ON COLUMN daily_technical_signal.indicator IS '訊號來源：ma5_ma20�
 COMMENT ON COLUMN daily_technical_signal.kind IS '訊號種類：golden_cross、death_cross、cross_above、cross_below、overbought、oversold、new_high、new_low、breakout、failed（區間突破後跌回突破價）';
 COMMENT ON COLUMN daily_technical_signal.description IS '中文說明';
 COMMENT ON COLUMN daily_technical_signal.created_at IS '寫入時間';
+
+-- 預設 autovacuum 門檻是表的 20%（數十萬列），每天的更新／刪除與新增永遠達不到，死資料與
+-- visibility map 都不更新、統計值逐漸過時（2026-11-04 M43 盤點）。改成每 2 萬列變動就 vacuum／analyze。
+-- 正式庫 2026-11-05 已套用（M44）。
+alter table public.daily_technical_signal set (
+    autovacuum_vacuum_insert_threshold = 20000,
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_threshold = 20000,
+    autovacuum_vacuum_scale_factor = 0,
+    autovacuum_analyze_threshold = 20000,
+    autovacuum_analyze_scale_factor = 0
+);

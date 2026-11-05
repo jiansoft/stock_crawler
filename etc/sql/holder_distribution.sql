@@ -26,3 +26,13 @@ comment on column public.holder_distribution.percent_400 is '400 張以上持股
 
 create index if not exists "holder_distribution-stock_symbol-date-idx"
     on public.holder_distribution (stock_symbol, "date" desc);
+
+-- 只有每天新增（約 1～1.5 千列），預設 insert 門檻 20% 要數月才 vacuum 一次，新頁面沒有 visibility map；
+-- analyze 門檻 10% 也讓統計值逐漸過時（2026-11-04 M43 盤點）。改成每新增／變動 2 萬列就 vacuum／analyze。
+-- 正式庫 2026-11-05 已套用（M44）。
+alter table public.holder_distribution set (
+    autovacuum_vacuum_insert_threshold = 20000,
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_analyze_threshold = 20000,
+    autovacuum_analyze_scale_factor = 0
+);

@@ -92,3 +92,15 @@ create index if not exists "stock_cagr-rank-reinv-idx"
 -- 個股歷史索引：查詢單一個股某期間的時間序列（含資料不足者），故不加 partial 條件。
 create index if not exists "stock_cagr-symbol-period-date-idx"
     on public.stock_cagr (stock_symbol, period, date desc);
+
+-- 預設 autovacuum 門檻是表的 20%（數十萬列），每天的更新／刪除與新增永遠達不到，死資料與
+-- visibility map 都不更新、統計值逐漸過時（2026-11-04 M43 盤點）。改成每 2 萬列變動就 vacuum／analyze。
+-- 正式庫 2026-11-05 已套用（M44）。
+alter table public.stock_cagr set (
+    autovacuum_vacuum_insert_threshold = 20000,
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_threshold = 20000,
+    autovacuum_vacuum_scale_factor = 0,
+    autovacuum_analyze_threshold = 20000,
+    autovacuum_analyze_scale_factor = 0
+);
