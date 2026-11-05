@@ -211,6 +211,8 @@ fn full_backfill_start() -> NaiveDate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod mock_sources;
     use crate::domain::performance::CorporateActionType;
     use rust_decimal_macros::dec;
 
