@@ -26,9 +26,9 @@ fn y2025(m: u32, d: u32) -> NaiveDate {
 
 /// 2330 10-14 除權息（配股 0.5 元）、前一日收 105，填息目標 105 ÷ 1.05 = 100，10-21 才回到 100（今天填息）；
 /// 1101 10-15 除息、10-16 就填息；9999 查詢失敗。
-/// 0056 去年 9 月除息第 2 天填息（超過一年不通知，但算進近 5 年平均 2 日），10-15 再除息後一直沒填息，
-/// 10-20 已過 3 個交易日＝第一次超過平均；2884 10-15 除息（殖利率 5%）沒有自身紀錄，
-/// 10-21 已過 4 個交易日＝第一次超過同組中位數 3 日。
+/// 0056 去年 9 月除息第 2 天填息（超過一年不通知，但算進近 5 年平均 2 日），10-10 再除息後一直沒填息，
+/// 10-20 已過 11 個交易日＝第一次超過下限 10 日；2884 10-11 除息（殖利率 5%）沒有自身紀錄，
+/// 10-21 已過 11 個交易日＝第一次超過同組中位數 3 日的下限 10 日。
 struct FakeFills;
 
 #[async_trait]
@@ -45,10 +45,10 @@ impl DividendFillQuery for FakeFills {
             ]),
             "1101" => Ok(vec![event(day(15), dec!(1), Decimal::ZERO)]),
             "0056" => Ok(vec![
-                event(day(15), dec!(1), Decimal::ZERO),
+                event(day(10), dec!(1), Decimal::ZERO),
                 event(y2025(9, 1), dec!(1), Decimal::ZERO),
             ]),
-            "2884" => Ok(vec![event(day(15), dec!(1), Decimal::ZERO)]),
+            "2884" => Ok(vec![event(day(11), dec!(1), Decimal::ZERO)]),
             "9999" => Err(anyhow!("db down")),
             _ => Ok(Vec::new()),
         }
@@ -57,17 +57,25 @@ impl DividendFillQuery for FakeFills {
     async fn fetch_daily_closes(&self, symbol: &str, since: NaiveDate) -> Result<Vec<DailyClose>> {
         if symbol == "0056" {
             assert_eq!(since, y2025(9, 1) - Days::new(fill::PRE_EX_LOOKBACK_DAYS));
-            let closes = [
+            let last_year = [
                 (y2025(8, 29), dec!(40)),
                 (y2025(9, 1), dec!(38)),
                 (y2025(9, 2), dec!(40.5)),
-                (day(14), dec!(36)),
-                (day(15), dec!(35)),
-                (day(16), dec!(35)),
-                (day(20), dec!(35)),
+                (day(9), dec!(36)),
             ];
-            return Ok(closes
+            // 10-10～10-20 每天都收 35：除息當天算第 1 天，10-20 是第 11 天。
+            let lagging = (10..=20).map(|d| (day(d), dec!(35)));
+            return Ok(last_year
                 .into_iter()
+                .chain(lagging)
+                .map(|(date, close)| DailyClose { date, close })
+                .collect());
+        }
+        if symbol == "2884" {
+            // 10-10 收 20，10-11～10-21 每天都收 19：10-21 是第 11 天。
+            let lagging = (11..=21).map(|d| (day(d), dec!(19)));
+            return Ok(std::iter::once((day(10), dec!(20)))
+                .chain(lagging)
                 .map(|(date, close)| DailyClose { date, close })
                 .collect());
         }
@@ -88,13 +96,6 @@ impl DividendFillQuery for FakeFills {
                 (15, dec!(29)),
                 (16, dec!(30)),
                 (21, dec!(31)),
-            ],
-            "2884" => &[
-                (14, dec!(20)),
-                (15, dec!(19)),
-                (16, dec!(19)),
-                (20, dec!(19)),
-                (21, dec!(19)),
             ],
             _ => panic!("不應查 {symbol} 的日線"),
         };
@@ -124,7 +125,8 @@ fn peers() -> Vec<BucketStats> {
 }
 
 /// 今天填息的只留填息日是今天的；未來的除息日、超過一年的與查詢失敗的略過。
-/// 落後只在已過天數第一次超過基準那天出現：0056 10-20（自身平均 2 日）、2884 10-21（同組中位數 3 日）。
+/// 落後只在已過天數第一次超過基準那天出現；兩檔基準都不足 10 日，以下限 10 日計：
+/// 0056 10-20（自身平均 2 日）、2884 10-21（同組中位數 3 日）。
 #[tokio::test]
 async fn review_finds_todays_fills_and_first_lags() {
     let today = review(&FakeFills, &symbols(), &peers(), day(21)).await;
@@ -152,7 +154,7 @@ async fn review_finds_todays_fills_and_first_lags() {
         lagging,
         [(
             "2884",
-            4,
+            11,
             Baseline::Peer {
                 bucket: YieldBucket::From5To7,
                 median: 3.0
@@ -174,7 +176,7 @@ async fn review_finds_todays_fills_and_first_lags() {
     assert_eq!(
         lagging,
         [("0056", Baseline::Own(2.0))],
-        "2884 才過 3 天、沒超過 3 日"
+        "2884 才過 10 天、沒超過下限 10 日"
     );
 
     let no_peers = review(&FakeFills, &symbols(), &[], day(21)).await;
@@ -224,17 +226,38 @@ fn lag_baseline_fires_only_on_the_first_exceeding_day() {
         None
     );
     assert_eq!(
-        lag_baseline(&outcome(4, false, 21), &none, &peers(), today),
+        lag_baseline(&outcome(11, false, 21), &none, &peers(), today),
         Some(Baseline::Peer {
             bucket: YieldBucket::From5To7,
             median: 3.0
         }),
-        "現金 1 元 ÷ 20 = 5%"
+        "現金 1 元 ÷ 20 = 5%；中位數 3 日不足下限，以 10 日計"
     );
+    for since_ex in [4, 10, 12] {
+        assert_eq!(
+            lag_baseline(&outcome(since_ex, false, 21), &none, &peers(), today),
+            None,
+            "基準 3 日套用下限後只在第 11 天成立"
+        );
+    }
     assert_eq!(
-        lag_baseline(&outcome(4, false, 21), &none, &[], today),
+        lag_baseline(&outcome(11, false, 21), &none, &[], today),
         None
     );
+}
+
+/// 基準不足下限時以下限計並在說明註明；達到下限的照原值。
+#[test]
+fn baseline_threshold_applies_the_floor() {
+    assert_eq!(Baseline::Own(2.0).threshold(), MIN_BASELINE_DAYS);
+    assert_eq!(Baseline::Own(9.9).threshold(), MIN_BASELINE_DAYS);
+    assert_eq!(Baseline::Own(10.0).threshold(), 10);
+    assert_eq!(Baseline::Own(12.5).threshold(), 12);
+    assert_eq!(
+        Baseline::Own(2.5).text(),
+        "近 5 年平均 2.5 日（不足 10 日以 10 日計）"
+    );
+    assert_eq!(Baseline::Own(12.5).text(), "近 5 年平均 12.5 日");
 }
 
 /// 訊息列出今天填息的（有配股時註明前一日收盤）與今天第一次落後的（附基準與附註）；兩者都沒有時不發送。
@@ -250,7 +273,7 @@ async fn build_message_lists_fills_and_lags() {
     for line in [
         "2330 台積電 除權息 2026-10-14（現金 5 元、股票 0.5 元）：填息目標 100（前一日收盤 105 依配股調整），今日收盤 100，第 5 個交易日填息",
         "填息落後（今天第一次超過基準）：",
-        "2884 兆豐金 除權息 2026-10-15（現金 1 元）：已 4 個交易日未填息，超過同殖利率組（5～7%）全市場中位數 3 日；最新收盤 19，距填息價 20 還差 5%",
+        "2884 兆豐金 除權息 2026-10-11（現金 1 元）：已 11 個交易日未填息，超過同殖利率組（5～7%）全市場中位數 3 日（不足 10 日以 10 日計）；最新收盤 19，距填息價 20 還差 5%",
         LAG_FOOTNOTE,
     ] {
         assert!(
@@ -262,7 +285,9 @@ async fn build_message_lists_fills_and_lags() {
     let yesterday = review(&FakeFills, &symbols(), &peers(), day(20)).await;
     let message = build_message(day(20), &yesterday, |_| "元大高股息".to_owned()).expect("有落後");
     assert!(
-        message.contains(&text::escape_markdown_v2("超過近 5 年平均 2 日")),
+        message.contains(&text::escape_markdown_v2(
+            "已 11 個交易日未填息，超過近 5 年平均 2 日（不足 10 日以 10 日計）"
+        )),
         "{message}"
     );
 
