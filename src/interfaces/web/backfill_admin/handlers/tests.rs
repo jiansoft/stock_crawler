@@ -165,6 +165,122 @@ async fn invalid_input_is_rejected_before_any_job_is_created() {
     );
 }
 
+/// 每個建立 job 的端點：輸入有效、但同一 (kind, input) 已有執行中的 job 時回 409，不會再建立 job。
+///
+/// 用預先放入的「執行中」job 擋住，請求走完輸入解析與 `start_*_job` 卻不會真的啟動回補
+/// （不打外站、不寫資料庫）。輸入刻意避開 job_runner 測試用的值（1990、79979RJ、79979QH、Y1），
+/// 平行執行時才不會互相擋住；`annual_total_repair` 的 input 固定是 `all`，避不開，所以不在此測。
+#[tokio::test]
+async fn valid_requests_conflict_with_running_job_of_same_input() {
+    use super::super::state::{BACKFILL_STATE, BackfillJob};
+
+    let cases = [
+        (
+            "/api/manual-backfill/daily-quotes",
+            r#"{"date":"1989-02-01"}"#,
+            "daily_quotes",
+            "1989-02-01",
+        ),
+        (
+            "/api/manual-backfill/closing-aggregate",
+            r#"{"date":"1989-02-01"}"#,
+            "closing_aggregate",
+            "1989-02-01",
+        ),
+        (
+            "/api/manual-backfill/taiwan-stock-index",
+            r#"{"date":"1989-02-01"}"#,
+            "taiwan_stock_index",
+            "1989-02-01",
+        ),
+        (
+            "/api/manual-backfill/received-dividend-records",
+            r#"{"security_code":"79979HE"}"#,
+            "received_dividend_records",
+            "79979HE",
+        ),
+        (
+            "/api/manual-backfill/historical-dividends",
+            r#"{"security_code":"79979HE"}"#,
+            "historical_dividends",
+            "79979HE",
+        ),
+        (
+            "/api/manual-backfill/multiple-dividend-historical-dividends",
+            r#"{"year":1989}"#,
+            "multiple_dividend_historical_dividends",
+            "1989",
+        ),
+        (
+            "/api/manual-backfill/quote-history",
+            r#"{"stock_symbols":"79979HE 79979HF","from":"1989-01","to":"1989-02"}"#,
+            "quote_history",
+            "79979HE,79979HF|1989-01~1989-02",
+        ),
+        (
+            "/api/manual-backfill/cagr",
+            r#"{"date":"1989-02-01"}"#,
+            "cagr",
+            "1989-02-01",
+        ),
+        (
+            "/api/manual-backfill/cagr",
+            r#"{"date":" "}"#,
+            "cagr",
+            "latest",
+        ),
+        (
+            "/api/manual-backfill/cagr-period",
+            r#"{"period":"Y10"}"#,
+            "cagr_period",
+            "Y10",
+        ),
+    ];
+    {
+        let mut jobs = BACKFILL_STATE.jobs.write().await;
+        for (index, (_, _, kind, input)) in cases.iter().enumerate() {
+            let mut job = BackfillJob::for_test(&format!("conflict-{index}"), None);
+            job.kind = (*kind).to_string();
+            job.input = (*input).to_string();
+            jobs.insert(job.id.clone(), job);
+        }
+    }
+
+    let mut statuses = Vec::with_capacity(cases.len());
+    for (path, body, _, _) in cases {
+        statuses.push(post(path, body).await);
+    }
+    let same_input_jobs: Vec<usize> = {
+        let jobs = BACKFILL_STATE.jobs.read().await;
+        cases
+            .iter()
+            .map(|(_, _, kind, input)| {
+                jobs.values()
+                    .filter(|job| job.kind == *kind && job.input == *input)
+                    .count()
+            })
+            .collect()
+    };
+    {
+        let mut jobs = BACKFILL_STATE.jobs.write().await;
+        for index in 0..cases.len() {
+            jobs.remove(&format!("conflict-{index}"));
+        }
+    }
+
+    for ((path, body, _, _), status) in cases.iter().zip(&statuses) {
+        assert_eq!(
+            *status,
+            StatusCode::CONFLICT,
+            "{path} {body} 應因同輸入的 job 執行中而回 409"
+        );
+    }
+    assert!(
+        same_input_jobs.iter().all(|&count| count == 1),
+        "被擋下的請求不應另建 job：{same_input_jobs:?}"
+    );
+}
+
 /// 根路徑導向操作頁，操作頁回傳內建 HTML。
 #[tokio::test]
 async fn root_redirects_to_the_admin_page() {

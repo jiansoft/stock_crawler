@@ -271,3 +271,123 @@ async fn snapshot_round_trips_through_redis() {
         .await
         .expect("清除測試紀錄");
 }
+
+/// 以本機 mock server 取代證交所與櫃買開放資料（G15）：持股三檔分別走「基準且有設質 → 通知並存檔」、
+/// 「與前一期同月 → 略過」、「前一期讀取失敗 → 整檔略過、不覆寫」；上櫃資料壞掉只記警告。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn execute_compares_holdings_with_previous_snapshots() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use crate::core::util::http::mock_origin::with_origins;
+    use crate::infra::database;
+
+    /// 沒有前一期、董事有設質：建立基準並列入通知。
+    const BASELINE: &str = "79943";
+    /// 前一期也是 2026-08：略過。
+    const UNCHANGED: &str = "79944";
+    /// 前一期是壞掉的 JSON：讀取失敗，整檔略過。
+    const BROKEN: &str = "79945";
+    const SYMBOLS: [&str; 3] = [BASELINE, UNCHANGED, BROKEN];
+    const MEMBER: i64 = 979_743;
+
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() || CLIENT.ping().await.is_err() {
+        println!("跳過 execute_compares_holdings_with_previous_snapshots：無資料庫或 Redis 連接");
+        return;
+    }
+    let pool = database::get_connection();
+    let cleanup = || async {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(pool)
+            .await
+            .expect("清除測試持股");
+        for symbol in SYMBOLS {
+            let _ = CLIENT.delete(&snapshot_key(symbol)).await;
+        }
+    };
+    cleanup().await;
+    for symbol in SYMBOLS {
+        sqlx::query(
+            "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, is_sold) VALUES ($1, $2, 1000, -1, false)",
+        )
+        .bind(MEMBER)
+        .bind(symbol)
+        .execute(pool)
+        .await
+        .unwrap_or_else(|why| panic!("種入持股 {symbol}: {why}"));
+    }
+    let unchanged = snapshot(8, vec![insider("乙", 2_000_000, 0, 0)]);
+    save_snapshot(UNCHANGED, &unchanged).await;
+    CLIENT
+        .set(snapshot_key(BROKEN), "not-json", 600)
+        .await
+        .expect("寫入壞掉的前一期");
+
+    let listed = serde_json::json!([
+        {"資料年月": "11508", "公司代號": BASELINE, "職稱": "董事本人", "姓名": "甲",
+         "目前持股": "1000000", "設質股數": "500000", "內部人關係人設質股數": "0"},
+        {"資料年月": "11508", "公司代號": UNCHANGED, "職稱": "董事本人", "姓名": "乙",
+         "目前持股": "2000000", "設質股數": "100000", "內部人關係人設質股數": "0"},
+        {"資料年月": "11508", "公司代號": BROKEN, "職稱": "董事本人", "姓名": "丙",
+         "目前持股": "3000000", "設質股數": "0", "內部人關係人設質股數": "0"},
+        {"資料年月": "11508", "公司代號": "79946", "職稱": "董事本人", "姓名": "丁",
+         "目前持股": "4000000", "設質股數": "0", "內部人關係人設質股數": "0"}
+    ]);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/opendata/t187ap11_L"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(listed))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/openapi/v1/mopsfin_t187ap11_O"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("上櫃資料壞掉了"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let uri = server.uri();
+
+    let result = with_origins(
+        &[
+            ("https://openapi.twse.com.tw", uri.as_str()),
+            ("https://www.tpex.org.tw", uri.as_str()),
+        ],
+        execute(),
+    )
+    .await;
+    let baseline = load_snapshot(BASELINE).await;
+    let unchanged_after = load_snapshot(UNCHANGED).await;
+    let broken_raw = CLIENT.get_bytes(&snapshot_key(BROKEN)).await;
+    cleanup().await;
+
+    result.expect("董監質押通知排程完成");
+    let baseline = baseline
+        .expect("讀取基準")
+        .expect("沒有前一期的持股要存成基準");
+    assert_eq!(
+        (
+            baseline.month,
+            baseline.insiders.len(),
+            baseline.insiders[0].pledged
+        ),
+        (month(8), 1, 500_000),
+        "基準記下 2026-08 的董事設質"
+    );
+    assert_eq!(
+        unchanged_after.expect("讀取前一期"),
+        Some(unchanged),
+        "同月不覆寫前一期"
+    );
+    assert_eq!(
+        broken_raw.expect("讀取壞掉的前一期"),
+        b"not-json".to_vec(),
+        "讀不到前一期就整檔略過，不覆寫"
+    );
+}
