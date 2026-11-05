@@ -37,3 +37,15 @@ comment on column public.chip_daily.total_streak is '三大法人合計連續買
 -- 依股票查歷史（近 N 日買賣超、連續天數）。
 create index if not exists "chip_daily-stock_symbol-date-idx"
     on public.chip_daily (stock_symbol, "date" desc);
+
+-- 預設 autovacuum 門檻是表的 20%（數十萬列），每天的更新／刪除與新增永遠達不到，死資料與
+-- visibility map 都不更新、統計值逐漸過時（2026-11-04 M43 盤點）。改成每 2 萬列變動就 vacuum／analyze。
+-- 正式庫 2026-11-05 已套用（M44）。
+alter table public.chip_daily set (
+    autovacuum_vacuum_insert_threshold = 20000,
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_threshold = 20000,
+    autovacuum_vacuum_scale_factor = 0,
+    autovacuum_analyze_threshold = 20000,
+    autovacuum_analyze_scale_factor = 0
+);

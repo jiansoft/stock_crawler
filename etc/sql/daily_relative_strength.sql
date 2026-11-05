@@ -27,3 +27,13 @@ COMMENT ON COLUMN daily_relative_strength.rs_score IS '相對強度分數 1–99
 COMMENT ON COLUMN daily_relative_strength.rank IS '名次：比它強的家數 + 1，同分同名次';
 COMMENT ON COLUMN daily_relative_strength.universe IS '當天計分的股票總數';
 COMMENT ON COLUMN daily_relative_strength.created_at IS '寫入時間';
+
+-- 只有每天新增（約 1～1.5 千列），預設 insert 門檻 20% 要數月才 vacuum 一次，新頁面沒有 visibility map；
+-- analyze 門檻 10% 也讓統計值逐漸過時（2026-11-04 M43 盤點）。改成每新增／變動 2 萬列就 vacuum／analyze。
+-- 正式庫 2026-11-05 已套用（M44）。
+alter table public.daily_relative_strength set (
+    autovacuum_vacuum_insert_threshold = 20000,
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_analyze_threshold = 20000,
+    autovacuum_analyze_scale_factor = 0
+);
