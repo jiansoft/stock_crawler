@@ -1,5 +1,5 @@
-//! 固定間隔的主機與資料庫健康檢查。
-use crate::app::event;
+//! 固定間隔的主機與資料庫健康檢查，以及共用快取的定期刷新。
+use crate::app::{calculation, event};
 
 use super::JobDefinition;
 
@@ -21,6 +21,14 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "30 */5 * * * *",
             "資料庫健康檢查",
             event::db_health::execute,
+        ),
+        // 每 6 小時（00:05、06:05、12:05、18:05）重新查詢全市場填息基準並覆蓋快取（TTL 7 小時），
+        // 股利預估、持股填息與除權息提醒都直接命中；00:05 是換日後快取鍵改變的第一次。
+        job!(
+            quiet,
+            "0 5 */6 * * *",
+            "更新全市場填息基準快取",
+            calculation::dividend_fill_hints::refresh_market_peers,
         ),
     ]
 }

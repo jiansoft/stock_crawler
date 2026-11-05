@@ -26,7 +26,7 @@ use crate::{
     core::{alert, util::text},
     domain::dividend::{
         fill::{self, DividendFillQuery, FillOutcome, FillSummary},
-        fill_stats::{BucketStats, YieldBucket, bucket_stats},
+        fill_stats::{self, BucketStats, YieldBucket, bucket_stats},
     },
     infra::{
         cache::dividend_fill_stats, database::repository::dividend_fill::PgDividendFillRepository,
@@ -40,7 +40,7 @@ const LOOKBACK_DAYS: u64 = 365;
 const HISTORY_DAYS: u64 = 5 * 365 + 1;
 
 /// 全市場基準的統計年數；與 [`HISTORY_DAYS`] 一致。
-const PEER_YEARS: u8 = 5;
+const PEER_YEARS: u8 = fill_stats::MARKET_PEER_YEARS;
 
 /// 落後判斷的基準下限（交易日）：自身平均或同組中位數低於此值時以此值計（N33）。
 const MIN_BASELINE_DAYS: u32 = 10;

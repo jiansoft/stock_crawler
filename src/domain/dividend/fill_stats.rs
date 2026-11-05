@@ -14,6 +14,10 @@ use rust_decimal::Decimal;
 /// 統計填息需要的觀察期（交易日）；未滿的事件不列入填息率與中位數。
 pub const MATURE_TRADING_DAYS: u32 = 120;
 
+/// 持股填息、除權息提醒與股利預估共用的全市場基準統計年數；排程預熱的也是這個期間，
+/// 三者與預熱必須一致才會命中同一筆快取。
+pub const MARKET_PEER_YEARS: u8 = 5;
+
 /// 現金殖利率分組（現金股利 ÷ 除權息前一日收盤）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum YieldBucket {
