@@ -85,22 +85,4 @@ pub async fn execute() -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_execute() {
-        dotenvy::dotenv().ok();
-        tracing::debug!("開始 execute");
-
-        match execute().await {
-            Ok(_) => {}
-            Err(why) => {
-                tracing::debug!("Failed to execute because {:?}", why);
-            }
-        }
-
-        tracing::debug!("結束 execute");
-    }
-}
+mod tests;
