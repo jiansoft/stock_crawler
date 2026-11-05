@@ -95,6 +95,9 @@ fn parse_stock_price_html(stock_symbol: &str, url: &str, html: &str) -> Result<D
 ///
 /// 與 [`parse_stock_price_html`] 一樣是純函式。三個欄位分開取值，
 /// 讓錯誤訊息能明確指出是哪一個欄位的 selector 失效。
+///
+/// 2026-11 改版後漲跌欄不再帶正負號（下跌也只寫「20」，方向改用 CSS class 表示），
+/// 漲跌幅「(-0.88%)」仍帶號，所以漲跌的方向一律跟漲跌幅走；舊版帶號的頁面結果不變。
 fn parse_stock_quotes_html(
     stock_symbol: &str,
     url: &str,
@@ -137,6 +140,11 @@ fn parse_stock_quotes_html(
         ));
     } else {
         text::parse_f64(change_range_raw, Some(['(', ')'].to_vec()))?
+    };
+    let change = if change_range < 0.0 {
+        -change.abs()
+    } else {
+        change.abs()
     };
 
     Ok(declare::StockQuotes {
@@ -202,6 +210,31 @@ mod tests {
         assert_eq!(quotes.change, -2.5);
         // 漲跌幅原文是「(-1.42%)」，括號與 % 都要被去除。
         assert_eq!(quotes.change_range, -1.42);
+    }
+
+    /// 2026-11 改版後的頁面：成交價包在 span 裡、漲跌不帶正負號，下跌要依漲跌幅轉成負數。
+    #[test]
+    fn parse_current_stock_page_takes_change_sign_from_change_range() {
+        const FIXTURE: &str = include_str!("testdata/stock_page_2026_11.html");
+        let url = "https://www.cmoney.tw/forum/stock/2330";
+
+        let price = parse_stock_price_html("2330", url, FIXTURE).expect("成交價應解析成功");
+        assert_eq!(price, rust_decimal_macros::dec!(2240));
+
+        let quotes = parse_stock_quotes_html("2330", url, FIXTURE).expect("報價應解析成功");
+        assert_eq!(
+            (quotes.price, quotes.change, quotes.change_range),
+            (2240.0, -20.0, -0.88),
+            "頁面寫「20」「(-0.88%)」，漲跌應依漲跌幅轉成負數"
+        );
+
+        let rising = FIXTURE.replace("(-0.88%)", "(0.88%)");
+        let quotes = parse_stock_quotes_html("2330", url, &rising).expect("上漲報價應解析成功");
+        assert_eq!(
+            (quotes.change, quotes.change_range),
+            (20.0, 0.88),
+            "上漲時漲跌維持正數"
+        );
     }
 
     /// 頁面缺少報價容器（改版或載到錯誤頁）時必須明確報錯。

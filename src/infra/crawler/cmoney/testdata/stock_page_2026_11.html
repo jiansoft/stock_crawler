@@ -1,0 +1,15 @@
+<!--
+  依 2026-11-06 抓取的 CMoney 個股頁「/forum/stock/2330」精簡而成的測試 fixture（下跌情境）。
+
+  與 stock_page.html（2026-07 版）的差異：
+  - 成交價包在 div.stockData__info 第一個 div 底下的 span.stockData__price。
+  - 漲跌（div.stockData__quotePrice）不帶正負號，方向只用 class（text-functional-fall／rise）表示；
+    漲跌幅（div.stockData__quote）仍是「(-0.88%)」帶號格式。
+-->
+<main>
+  <section>
+    <div class="stockData">
+      <div class="stockData__info"><div class="text-functional-fall bg-light"><span class="stockData__price"> 2240 </span> </div> <div class="stockData__value flex items-center gap-2"><div class="stockData__img" style="display:;"><img alt="" width="16" height="16"></div> <div class="stockData__quotePrice text-functional-fall"> 20 </div> <div class="stockData__quote text-functional-fall"> (-0.88%) </div></div></div>
+    </div>
+  </section>
+</main>
