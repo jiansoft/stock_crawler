@@ -10,6 +10,9 @@ use anyhow::Result;
 use chrono::Local;
 use scopeguard::defer;
 
+/// 一週只抓一次 wespai 年報的 Redis 旗標。
+const ANNUAL_SKIP_KEY: &str = "financial_statement:annual";
+
 /// <summary>
 /// 更新台股年度財務報告。
 /// 下載年度財報資料，過濾已存在與特別股資料後，寫入領域倉儲。
@@ -24,7 +27,13 @@ pub async fn execute() -> Result<()> {
        tracing::info!("更新台股年度財報結束");
     }
 
-    let cache_key = "financial_statement:annual";
+    run().await
+}
+
+/// 排程入口去掉週末判斷後的流程：一週一次的略過旗標 → 抓 wespai 年報 →
+/// 只寫入資料庫還沒有的普通股 → 補 ROE／ROA 為 0 的列 → 設旗標。
+async fn run() -> Result<()> {
+    let cache_key = ANNUAL_SKIP_KEY;
     let is_jump = crate::infra::nosql::redis::CLIENT
         .get_bool(cache_key)
         .await?;
@@ -96,6 +105,8 @@ mod tests {
     use crate::infra::cache::SHARE;
 
     use super::*;
+
+    mod mock_sources;
 
     #[tokio::test]
     #[ignore]

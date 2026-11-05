@@ -16,6 +16,8 @@ use crate::{
 
 use super::*;
 
+mod mock_sources;
+
 /// 假代號：C 補得到、D 的個股頁 404、E 是一般錯誤。
 const SYMBOL_C: &str = "79979RC";
 const SYMBOL_D: &str = "79979RD";
