@@ -180,3 +180,28 @@ async fn run_stops_on_empty_or_changed_page() {
     cleanup().await;
     assert!(err.to_string().contains("select"), "{err:#}");
 }
+
+/// 排程入口：平日交給 `run()`（旗標還在，所以不抓 wespai）；週末直接結束。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn execute_defers_to_run_on_weekdays() {
+    if services_unavailable("execute_defers_to_run_on_weekdays").await {
+        return;
+    }
+    CLIENT
+        .set(ANNUAL_SKIP_KEY, true, 60)
+        .await
+        .expect("設定略過旗標");
+    let server = wespai_server(200, profit_page(&[(NEW, "2.50")])).await;
+    let uri = server.uri();
+
+    let result = with_origins(&[(WESPAI, &uri), (NSTOCK, &uri)], execute()).await;
+    cleanup().await;
+
+    result.expect("排程入口不回錯誤");
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert!(requests.is_empty(), "旗標還在時不抓 wespai");
+}

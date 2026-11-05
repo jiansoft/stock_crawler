@@ -166,3 +166,23 @@ async fn execute_at_without_candidates_skips_recalculation() {
         .count();
     assert_eq!(yahoo_requests, 0, "沒有待補的列不查 Yahoo");
 }
+
+/// 排程入口以今天決定目標季度；外部來源都換成 mock（Yahoo、nstock 一律 404），不會寫入任何財報。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn execute_uses_today_targets() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() || CLIENT.ping().await.is_err() {
+        println!("跳過 execute_uses_today_targets：無資料庫或 Redis 連接");
+        return;
+    }
+    let server = MockServer::start().await;
+    let uri = server.uri();
+
+    with_origins(&[(YAHOO, &uri), (NSTOCK, &uri)], execute())
+        .await
+        .expect("排程入口完成");
+}
