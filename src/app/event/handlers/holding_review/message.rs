@@ -97,7 +97,8 @@ impl EventDispatcher {
         let label = match estimate.basis {
             EpsEstimateBasis::ReportedQuarters
             | EpsEstimateBasis::ReportedQuartersWithRegression
-            | EpsEstimateBasis::ReportedQuartersWithTrailingMargin => "推估EPS",
+            | EpsEstimateBasis::ReportedQuartersWithTrailingMargin
+            | EpsEstimateBasis::ReportedQuartersWithNormalNonOperating => "推估EPS",
             EpsEstimateBasis::NetIncomeMargin => "概估EPS",
         };
         let annual = if alert.accumulated_months() < 12 {
@@ -111,9 +112,16 @@ impl EventDispatcher {
         } else {
             ""
         };
+        // 業外偏高被打折時要講出來，否則看起來像推估法突然變保守。
+        let non_operating =
+            if estimate.basis == EpsEstimateBasis::ReportedQuartersWithNormalNonOperating {
+                " ⚠️業外偏高已排除"
+            } else {
+                ""
+            };
 
         text::escape_markdown_v2(format!(
-            " {label}︰{}{annual}{caution}",
+            " {label}︰{}{annual}{non_operating}{caution}",
             format_decimal_with_commas(estimate.accumulated)
         ))
     }

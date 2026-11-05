@@ -135,3 +135,141 @@ async fn test_fetch_holding_revenue_alerts_marks_record_and_decline() {
 
     cleanup().await;
 }
+
+/// 單季損益表一列：營收、營業利益、業外損益（千元）。
+async fn seed_income(
+    symbol: &str,
+    (year, period_type, quarter, source): (i32, &str, &str, &str),
+    (revenue, operating, non_operating): (i64, i64, i64),
+) {
+    sqlx::query(
+        "INSERT INTO income_statement
+         (stock_symbol, fiscal_year, period_type, quarter, revenue, operating_profit,
+          non_operating_income, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(symbol)
+    .bind(year)
+    .bind(period_type)
+    .bind(quarter)
+    .bind(revenue)
+    .bind(operating)
+    .bind(non_operating)
+    .bind(source)
+    .execute(database::get_connection())
+    .await
+    .unwrap_or_else(|why| panic!("種入損益表 {year} {quarter} {source}: {why}"));
+}
+
+/// E：今年 Q1、Q2 獲利，Q2 業外暴增 ⇒ 帶出錨點期間營業利益率 10%、業外占營收 30%，
+/// 以及 2024～2025 共 8 季業外占比的中位數 5%。
+///
+/// 同季有 Yahoo 與 BigGo 兩列時以 Yahoo 為準；累計列（cumulative）、2023 與今年錨點季以外的季別都不採計。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn test_fetch_holding_revenue_alerts_reads_non_operating_margins() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!(
+            "跳過 test_fetch_holding_revenue_alerts_reads_non_operating_margins：無資料庫連接"
+        );
+        return;
+    }
+    cleanup().await;
+    seed_stock(FAKE_SYMBOL_E, "測試戊", TEST_INDUSTRY, 100_000_000).await;
+    seed_revenue(FAKE_SYMBOL_E, ANCHOR_DATE, dec!(600000), dec!(8)).await;
+    seed_revenue(FAKE_SYMBOL_E, TEST_DATE, dec!(1000000), dec!(10)).await;
+    seed_financial(FAKE_SYMBOL_E, 2026, "Q1", dec!(20), dec!(1.2)).await;
+    seed_financial(FAKE_SYMBOL_E, 2026, "Q2", dec!(60), dec!(1.8)).await;
+
+    // 今年：Q1 業外 10%、Q2 業外 50% ⇒ 合計 180,000 ÷ 600,000 ＝ 30%；營業利益 60,000 ⇒ 10%。
+    seed_income(
+        FAKE_SYMBOL_E,
+        (2026, "single", "Q1", "yahoo"),
+        (300_000, 30_000, 30_000),
+    )
+    .await;
+    seed_income(
+        FAKE_SYMBOL_E,
+        (2026, "single", "Q2", "yahoo"),
+        (300_000, 30_000, 150_000),
+    )
+    .await;
+    // BigGo 的同季數字不同，有 Yahoo 時不能採用。
+    seed_income(
+        FAKE_SYMBOL_E,
+        (2026, "single", "Q2", "biggo"),
+        (300_000, 0, 0),
+    )
+    .await;
+    // Q3 季底晚於本期、累計列：都不能算進錨點期間。
+    seed_income(
+        FAKE_SYMBOL_E,
+        (2026, "single", "Q3", "yahoo"),
+        (300_000, 0, 300_000),
+    )
+    .await;
+    seed_income(
+        FAKE_SYMBOL_E,
+        (2026, "cumulative", "Q2", "yahoo"),
+        (600_000, 0, 600_000),
+    )
+    .await;
+
+    // 2024～2025：業外占營收 3、4、4、5、5、6、6、20(%) ⇒ 中位數 5%。2025 Q4 只有 BigGo，當備援採用。
+    let history = [
+        (2024, "Q1", "yahoo", 3_000),
+        (2024, "Q2", "yahoo", 4_000),
+        (2024, "Q3", "yahoo", 4_000),
+        (2024, "Q4", "yahoo", 5_000),
+        (2025, "Q1", "yahoo", 5_000),
+        (2025, "Q2", "yahoo", 6_000),
+        (2025, "Q3", "yahoo", 6_000),
+        (2025, "Q4", "biggo", 20_000),
+    ];
+    for (year, quarter, source, non_operating) in history {
+        seed_income(
+            FAKE_SYMBOL_E,
+            (year, "single", quarter, source),
+            (100_000, 10_000, non_operating),
+        )
+        .await;
+    }
+    // 2023 不在「今年以前兩個年度」內。
+    seed_income(
+        FAKE_SYMBOL_E,
+        (2023, "single", "Q4", "yahoo"),
+        (100_000, 0, 90_000),
+    )
+    .await;
+
+    let alerts = fetch_holding_revenue_alerts(TEST_DATE)
+        .await
+        .expect("fetch_holding_revenue_alerts");
+    cleanup().await;
+
+    let e = alerts
+        .iter()
+        .find(|alert| alert.stock_symbol == FAKE_SYMBOL_E)
+        .expect("E 要出現在持股月營收");
+    assert_eq!(
+        (
+            e.anchor_operating_margin.map(|margin| margin.round_dp(4)),
+            e.anchor_non_operating_margin
+                .map(|margin| margin.round_dp(4)),
+            e.typical_non_operating_margin
+                .map(|margin| margin.round_dp(4)),
+        ),
+        (Some(dec!(10)), Some(dec!(30)), Some(dec!(5)))
+    );
+    // 比值 (10 ＋ 5) ÷ 40 ＝ 0.375：3 ＋ 400,000 × 0.000005 × 0.375 ＝ 3.75。
+    let estimate = e.estimate_eps().expect("E 應該推估得出來");
+    assert_eq!(
+        estimate.basis,
+        EpsEstimateBasis::ReportedQuartersWithNormalNonOperating
+    );
+    assert_eq!(estimate.accumulated.round_dp(4), dec!(3.75));
+}
