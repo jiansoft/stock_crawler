@@ -13,7 +13,7 @@ use chrono::FixedOffset;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 use crate::{
-    app::event,
+    app::{calculation, event},
     // 通知一律走 core::alert 抽象介面（port）：app 層不 import
     // interfaces::bot（傳輸層細節），實際的 Telegram adapter 由 main 啟動時註冊。
     // 這樣 use case 可以在單元測試中注入假的 sink 驗證，也能日後替換通知管道。
@@ -30,6 +30,10 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
         "scheduler start done: run_cron elapsed={:?}",
         run_cron_timer.elapsed()
     );
+
+    // 重啟後全市場填息基準快取是空的；背景先查好，不延誤啟動。
+    // 2026-11-05 22:52 重啟後第一次股利預估遇上部署中的高負載，現查超過 Go 端逾時而回 504。
+    drop(spawn_market_peer_warmup());
 
     //若在開盤埘間重啟服務定時任務會無法觸發，所以在啟動時要先執行股價追踪的任務，執行完後再設定一次定時任務
     if declare::StockExchange::TWSE.is_open() {
@@ -63,6 +67,24 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
     tracing::info!("scheduler start done: total elapsed={:?}", timer.elapsed());
 
     Ok(())
+}
+
+/// 在背景預熱全市場填息基準；失敗只記警告（請求會自行現查），每 6 小時的排程會再刷新。
+///
+/// 背景作業登記在 `spawn` 之前取得，關機時會等它結束。
+fn spawn_market_peer_warmup() -> tokio::task::JoinHandle<()> {
+    let operation_guard = crate::core::shutdown::BACKGROUND_OPERATIONS.begin();
+    tokio::spawn(async move {
+        let _operation_guard = operation_guard;
+        let timer = Instant::now();
+        match calculation::dividend_fill_hints::refresh_market_peers().await {
+            Ok(()) => tracing::info!(
+                "scheduler start done: market fill peers warmup elapsed={:?}",
+                timer.elapsed()
+            ),
+            Err(why) => tracing::warn!("啟動時預熱全市場填息基準失敗: {why:#}"),
+        }
+    })
 }
 
 /// 註冊所有 cron 任務並啟動排程器。

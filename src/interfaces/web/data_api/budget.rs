@@ -27,11 +27,12 @@ pub(crate) const GENERAL_TIMEOUT: Duration = Duration::from_secs(8);
 pub(crate) const HEAVY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 屬於重型查詢的路徑片段：回測各端點、訊號／法人連買績效、條件選股、穿透曝險、再平衡、
-/// ETF 比較、持股績效與持股填息。
+/// ETF 比較、持股績效、持股填息與股利預估。
 ///
 /// 持股填息要讀每檔持股近 5 年的除權息與日線，熱快取約 1 秒，但行程剛重啟時第一次超過 8 秒
-/// （2026-10-30 23:17 days=729 被一般上限切斷）。
-const HEAVY_PATHS: [&str; 8] = [
+/// （2026-10-30 23:17 days=729 被一般上限切斷）。股利預估同樣逐檔讀近 5 年填息，平常 1～2 秒，
+/// 2026-11-05 23:2x pi 部署中高負載時超過 10 秒。
+const HEAVY_PATHS: [&str; 9] = [
     "/backtest",
     "/performance",
     "/stocks/screen",
@@ -40,6 +41,7 @@ const HEAVY_PATHS: [&str; 8] = [
     "/portfolio/history",
     "/etfs/compare",
     "/portfolio/dividend-fill",
+    "/portfolio/dividend-forecast",
 ];
 
 /// 依路徑判斷查詢預算。
@@ -116,6 +118,8 @@ mod tests {
             "/portfolio/rebalance",
             "/etfs/compare",
             "/api/v1/portfolio/dividend-fill",
+            "/api/v1/portfolio/dividend-forecast",
+            "/api/v1/portfolio/dividend-forecast/accuracy",
         ] {
             assert_eq!(classify(path), QueryBudget::Heavy, "{path}");
         }

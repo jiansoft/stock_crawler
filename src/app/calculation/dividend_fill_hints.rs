@@ -9,12 +9,13 @@
 
 use std::collections::HashMap;
 
-use chrono::{Days, NaiveDate};
+use anyhow::{Context, Result};
+use chrono::{Days, Local, NaiveDate};
 use rust_decimal::Decimal;
 
 use crate::domain::dividend::entity::StockDividendInfo;
 use crate::domain::dividend::fill::{self, DividendFillQuery, FillSummary};
-use crate::domain::dividend::fill_stats::{BucketStats, YieldBucket, bucket_stats};
+use crate::domain::dividend::fill_stats::{self, BucketStats, YieldBucket, bucket_stats};
 use crate::infra::cache::dividend_fill_stats;
 use crate::infra::database::repository::dividend_fill::PgDividendFillRepository;
 
@@ -22,7 +23,7 @@ use crate::infra::database::repository::dividend_fill::PgDividendFillRepository;
 const HISTORY_DAYS: u64 = 5 * 365 + 1;
 
 /// 全市場基準的統計年數；與 [`HISTORY_DAYS`] 一致。
-const PEER_YEARS: u8 = 5;
+const PEER_YEARS: u8 = fill_stats::MARKET_PEER_YEARS;
 
 /// 一批股票的歷年填息統計與全市場基準。
 #[derive(Debug, Default)]
@@ -134,6 +135,28 @@ async fn load_history(
         }
     }
     history
+}
+
+/// 重新查詢今天的全市場填息基準（[`PEER_YEARS`] 年）並覆蓋共用快取。
+///
+/// 啟動時與每 6 小時由排程呼叫，讓股利預估、持股填息與除權息提醒直接命中快取，
+/// 不必在請求中現查（現查遇上 pi 高負載時會超過 Go 端逾時）。換日後快取鍵跟著換，
+/// 所以排程的第一次在 00:05。
+///
+/// # Errors
+///
+/// 查詢失敗時回傳錯誤；原有快取保留，請求仍可讀舊值或自行現查。
+pub async fn refresh_market_peers() -> Result<()> {
+    let today = Local::now().date_naive();
+    let samples = dividend_fill_stats::refresh_market_fill_samples_for(
+        &PgDividendFillRepository::new(),
+        today,
+        PEER_YEARS,
+    )
+    .await
+    .context("Failed to refresh market dividend fill peers")?;
+    tracing::info!("全市場填息基準已更新: today={today}, samples={samples}");
+    Ok(())
 }
 
 #[cfg(test)]

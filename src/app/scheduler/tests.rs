@@ -254,6 +254,7 @@ fn registered_jobs_preserve_names_and_cron() {
         ("0 5 13 * * Sat", "補 ETF 淨值缺日"),
         ("0 */10 * * * *", "主機健康檢查"),
         ("30 */5 * * * *", "資料庫健康檢查"),
+        ("0 5 */6 * * *", "更新全市場填息基準快取"),
     ];
     let definitions = jobs::definitions();
     let actual: Vec<_> = definitions.iter().map(|job| (job.cron, job.name)).collect();
@@ -261,4 +262,25 @@ fn registered_jobs_preserve_names_and_cron() {
     for definition in definitions {
         assert!((definition.create)().is_ok(), "{}", definition.name);
     }
+}
+
+/// 啟動預熱：背景查好今天的全市場填息基準，之後的讀取直接命中快取、不再查詢。
+/// 只讀不寫；`TEST_POSTGRESQL_*` 指向隔離測試庫。
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+async fn market_peer_warmup_fills_shared_cache() {
+    use crate::domain::dividend::fill_stats::{MARKET_PEER_YEARS, stats_window};
+    use crate::infra::cache::dividend_fill_stats;
+
+    dotenvy::dotenv().ok();
+    spawn_market_peer_warmup()
+        .await
+        .expect("預熱 task 不應 panic");
+
+    let (since, until) = stats_window(chrono::Local::now().date_naive(), MARKET_PEER_YEARS);
+    dividend_fill_stats::market_fill_samples(since, until, async {
+        panic!("預熱後應直接命中快取，不應再查詢")
+    })
+    .await
+    .expect("預熱後命中快取");
 }

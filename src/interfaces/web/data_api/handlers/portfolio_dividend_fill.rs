@@ -20,7 +20,7 @@ use super::dividend_fill::{into_dto, summary_dto};
 use super::market_dividend_fill::bucket_dto;
 use super::{database_error, error_response, repository_error};
 use crate::domain::dividend::fill::{self, DividendFillQuery, FillOutcome, FillSummary};
-use crate::domain::dividend::fill_stats::{BucketStats, YieldBucket, bucket_stats};
+use crate::domain::dividend::fill_stats::{self, BucketStats, YieldBucket, bucket_stats};
 use crate::infra::cache::dividend_fill_stats;
 use crate::infra::database;
 use crate::infra::database::repository::dividend_fill::PgDividendFillRepository;
@@ -33,7 +33,7 @@ use crate::interfaces::web::data_api::dto::{
 const HISTORY_DAYS: u64 = 5 * 365 + 1;
 
 /// 同組基準的統計年數；與 [`HISTORY_DAYS`] 一致（`stats_window` 同樣是 5 × 365 + 1 天）。
-const PEER_YEARS: u8 = 5;
+const PEER_YEARS: u8 = fill_stats::MARKET_PEER_YEARS;
 
 /// 一檔持股回看期間內的填息結果，附近 5 年的填息統計。
 struct HoldingFill {
