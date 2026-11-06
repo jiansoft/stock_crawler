@@ -276,17 +276,24 @@ fn estimate_eps_excludes_excess_non_operating_income_at_quarter_end() {
     assert_eq!(estimate.annual, dec!(4.125));
 }
 
-// 本業虧損、獲利全靠業外：業外回到常態後之後的月份是虧的，比值 (−5 ＋ 2) ÷ 15 ＝ −0.2。
+// 本業虧損、獲利全靠業外：比值 (−5 ＋ 2) ÷ 15 ＝ −0.2，以 0 為下限，
+// 未公布月份不加不減，累計與年估都停在已實現的 3 元，不會推出比已實現還低的 EPS。
 #[test]
-fn estimate_eps_can_turn_unreported_months_negative_when_profit_is_all_non_operating() {
+fn estimate_eps_floors_ratio_at_zero_when_profit_is_all_non_operating() {
     let mut alert = excess_non_operating_alert(202608);
     alert.anchor_operating_margin = Some(dec!(-5));
     alert.anchor_non_operating_margin = Some(dec!(20));
     alert.typical_non_operating_margin = Some(dec!(2));
 
+    assert_eq!(alert.normal_non_operating_ratio(), Some(Decimal::ZERO));
     let estimate = alert.estimate_eps().expect("estimate");
 
-    assert_eq!(estimate.accumulated, dec!(2.6));
+    assert_eq!(
+        estimate.basis,
+        EpsEstimateBasis::ReportedQuartersWithNormalNonOperating
+    );
+    assert_eq!(estimate.accumulated, dec!(3));
+    assert_eq!(estimate.annual, dec!(3));
 }
 
 // 不調整的情況：業外不高於中位數、打折不到一成、稅前虧損、資料不齊、錨點虧損——都維持原本的推估法。

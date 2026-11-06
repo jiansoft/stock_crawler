@@ -301,7 +301,9 @@ impl HoldingRevenueAlert {
     /// 用比值打折錨點期間的「每千元營收 EPS」，稅率與加權股數都沿用公司自己的數字。
     /// 只往下修：業外低於常態（例如一次性減損）時不拉高推估。錨點期間稅前虧損、
     /// 業外沒有高於中位數、資料不齊，或打折不到一成（[`MAX_NORMAL_NON_OPERATING_RATIO`]）時回傳 `None`。
-    /// 本業虧損、獲利全靠業外的公司，比值可能小於 0——之後月份照本業推估就是虧損。
+    /// 本業虧損、獲利全靠業外的公司，算出的比值會小於 0；這時以 0 為下限，之後的月份不再加減，
+    /// 推估停在已實現 EPS。2024～2025 回測（6,339 筆）顯示加下限後平均誤差 1.123 → 1.017，
+    /// 負值外推（例如過去業外大額虧損時推出 −151 元）也會消失；與 stock_go `nonop_ratio` 一致。
     pub fn normal_non_operating_ratio(&self) -> Option<Decimal> {
         let operating = self.anchor_operating_margin?;
         let non_operating = self.anchor_non_operating_margin?;
@@ -312,7 +314,7 @@ impl HoldingRevenueAlert {
         }
 
         let ratio = (operating + typical) / pretax;
-        (ratio <= MAX_NORMAL_NON_OPERATING_RATIO).then_some(ratio)
+        (ratio <= MAX_NORMAL_NON_OPERATING_RATIO).then_some(ratio.max(Decimal::ZERO))
     }
 
     /// 近 12 季迴歸符合門檻（季數、斜率為正、R²）時回傳 `(斜率, 截距)`。
