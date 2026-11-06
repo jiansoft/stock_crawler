@@ -294,6 +294,12 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) min_major_change: Option<f64>,
     /// `min_major_change` 的回看週數；未篩選為 `null`。
     pub(crate) major_change_weeks: Option<u8>,
+    /// 單季 EPS 年增率下限（%）；未篩選為 `null`。
+    pub(crate) min_eps_yoy_percent: Option<f64>,
+    /// 近 3 年每年 EPS 年增率下限（%）；未篩選為 `null`。
+    pub(crate) min_annual_eps_growth_percent: Option<f64>,
+    /// 創 52 週新高的回看日曆天數；未篩選為 `null`。
+    pub(crate) new_high_days: Option<u16>,
     /// 訊號來源；未篩選為 `null`。
     pub(crate) indicator: Option<String>,
     /// 訊號種類；未篩選為 `null`。

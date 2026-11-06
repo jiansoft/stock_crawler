@@ -252,7 +252,10 @@ impl<'a> Backtest<'a> {
                 params
                     .major_change_weeks
                     .unwrap_or(super::super::DEFAULT_MAJOR_CHANGE_WEEKS),
-            ));
+            ))
+            .bind(params.min_eps_yoy_percent)
+            .bind(params.min_annual_eps_growth_percent)
+            .bind(params.new_high_days.map(i32::from));
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

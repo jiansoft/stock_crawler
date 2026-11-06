@@ -262,6 +262,18 @@ pub(crate) struct ScreenBacktestParams {
     /// `min_major_change` 的回看週數（集保資料週，1–12，預設 4）；沒有設 `min_major_change` 時不影響結果。
     #[param(minimum = 1, maximum = 12, default = 4)]
     pub(crate) major_change_weeks: Option<u8>,
+    /// 換股當天已公布的最近一季單季 EPS 對去年同季的成長率至少這麼高（%，-100–10000；CANSLIM 的 C）。
+    /// 公布日規則同 `min_eps`；去年同季 EPS ≤ 0 無法計算成長率，這類股票不會通過。
+    #[param(minimum = -100.0, maximum = 10000.0)]
+    pub(crate) min_eps_yoy_percent: Option<f64>,
+    /// 換股當天已公布的最近 4 個年度 EPS 算出的 3 個年增率，最低的一年至少這麼高（%，-100–10000；CANSLIM
+    /// 的 A）。年度 EPS 隔年 4/1 起才使用；年度不連續、任一基期 ≤ 0，或最新年度落後換股年超過 2 年的不會通過。
+    #[param(minimum = -100.0, maximum = 10000.0)]
+    pub(crate) min_annual_eps_growth_percent: Option<f64>,
+    /// 只選換股日（含）往前 N 個日曆天內（1–365）創過 52 週新高的股票（`52_week`／`new_high` 訊號，2019 年起；
+    /// CANSLIM 的 N）。
+    #[param(minimum = 1, maximum = 365)]
+    pub(crate) new_high_days: Option<u16>,
     /// 只選換股前 `hold_days` 個交易日內（含換股當天）出現過這個來源訊號的股票。
     #[param(value_type = Option<SignalIndicatorValue>)]
     pub(crate) indicator: Option<String>,
