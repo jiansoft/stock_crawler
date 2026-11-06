@@ -314,6 +314,9 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
                 .major_change_weeks
                 .unwrap_or(super::DEFAULT_MAJOR_CHANGE_WEEKS)
         }),
+        min_eps_yoy_percent: params.min_eps_yoy_percent,
+        min_annual_eps_growth_percent: params.min_annual_eps_growth_percent,
+        new_high_days: params.new_high_days,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
         fee_discount: backtest.fee_discount,

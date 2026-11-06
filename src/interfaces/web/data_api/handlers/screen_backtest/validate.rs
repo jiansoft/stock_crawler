@@ -52,6 +52,18 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     {
         return Err("major_change_weeks 必須介於 1 至 12");
     }
+    if !within(params.min_eps_yoy_percent, -100.0, 10_000.0) {
+        return Err("min_eps_yoy_percent 必須介於 -100 至 10000");
+    }
+    if !within(params.min_annual_eps_growth_percent, -100.0, 10_000.0) {
+        return Err("min_annual_eps_growth_percent 必須介於 -100 至 10000");
+    }
+    if params
+        .new_high_days
+        .is_some_and(|days| !(1..=365).contains(&days))
+    {
+        return Err("new_high_days 必須介於 1 至 365");
+    }
     Ok(())
 }
 

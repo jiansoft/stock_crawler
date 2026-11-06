@@ -49,9 +49,9 @@ macro_rules! filtered_cte {
     ) rv ON TRUE
     LEFT JOIN revenue_records rr ON rr.stock_symbol = u.stock_symbol AND rr.month = rv.latest_month
     LEFT JOIN LATERAL (
-        SELECT fs.earnings_per_share, fs.return_on_equity
+        SELECT fs.year, fs.quarter, fs.earnings_per_share, fs.return_on_equity
         FROM financial_statement fs
-        WHERE ($22::float8 IS NOT NULL OR $23::float8 IS NOT NULL)
+        WHERE ($22::float8 IS NOT NULL OR $23::float8 IS NOT NULL OR $37::float8 IS NOT NULL)
           AND fs.security_code = u.stock_symbol
           AND fs.quarter IN ('Q1', 'Q2', 'Q3', 'Q4')
           AND fs.year BETWEEN EXTRACT(YEAR FROM u.date)::int - 1 AND EXTRACT(YEAR FROM u.date)::int
@@ -66,6 +66,39 @@ macro_rules! filtered_cte {
         ORDER BY fs.year DESC, fs.quarter DESC
         LIMIT 1
     ) fs ON TRUE
+    LEFT JOIN LATERAL (
+        -- CANSLIM 的 C：上面那一季對去年同一季的 EPS 成長率；去年同季 ≤ 0 為 NULL。
+        SELECT CASE WHEN p.earnings_per_share > 0
+            THEN ((fs.earnings_per_share - p.earnings_per_share) / p.earnings_per_share * 100)::float8
+        END AS eps_yoy
+        FROM financial_statement p
+        WHERE $37::float8 IS NOT NULL
+          AND p.security_code = u.stock_symbol
+          AND p.year = fs.year - 1
+          AND p.quarter = fs.quarter
+    ) fy ON TRUE
+    LEFT JOIN LATERAL (
+        -- CANSLIM 的 A：換股當天已公布（隔年 4/1 起）的最近 4 個年度 EPS，3 個年增率取最低者；年度須連續、
+        -- 基期都 > 0、最新年度落後換股年 1～2 年，否則為 NULL。
+        SELECT CASE WHEN COUNT(*) = 4 AND MAX(year) - MIN(year) = 3
+                     AND COUNT(*) FILTER (WHERE prev_eps > 0) = 3
+                     AND EXTRACT(YEAR FROM u.date)::int - MAX(year) BETWEEN 1 AND 2
+                THEN MIN((eps - prev_eps) / NULLIF(prev_eps, 0) * 100)::float8
+            END AS annual_growth
+        FROM (
+            SELECT year, eps, LEAD(eps) OVER (ORDER BY year DESC) AS prev_eps
+            FROM (
+                SELECT a.year, a.earnings_per_share AS eps
+                FROM financial_statement a
+                WHERE $38::float8 IS NOT NULL
+                  AND a.security_code = u.stock_symbol
+                  AND a.quarter = ''
+                  AND make_date(a.year::int + 1, 4, 1) <= u.date
+                ORDER BY a.year DESC
+                LIMIT 4
+            ) recent
+        ) annual
+    ) ae ON TRUE
     LEFT JOIN LATERAL (
         SELECT cur.gross_margin, cur.operating_margin,
                cur.gross_margin > prev.gross_margin
@@ -192,7 +225,16 @@ macro_rules! filtered_cte {
       AND (NOT $30::bool OR cf.free_cash_flow_ttm > 0)
       AND ($31::float8 IS NULL OR qv.pe <= $31)
       AND ($32::float8 IS NULL OR qv.pb <= $32)
-      AND ($35::float8 IS NULL OR (hc.major_percent - hb.major_percent)::float8 >= $35)"#,
+      AND ($35::float8 IS NULL OR (hc.major_percent - hb.major_percent)::float8 >= $35)
+      AND ($37::float8 IS NULL OR fy.eps_yoy >= $37)
+      AND ($38::float8 IS NULL OR ae.annual_growth >= $38)
+      AND ($39::int IS NULL OR EXISTS (
+          SELECT 1 FROM daily_technical_signal n
+          WHERE n.stock_symbol = u.stock_symbol
+            AND n.indicator = '52_week'
+            AND n.kind = 'new_high'
+            AND n.date BETWEEN u.date - $39::int AND u.date
+      ))"#,
             $chip_filter,
             "\n)"
         )
