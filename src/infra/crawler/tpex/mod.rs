@@ -10,6 +10,8 @@ pub mod ex_dividend_announcement;
 pub mod ex_right_result;
 /// 興櫃每股淨值
 pub mod net_asset_value_per_share;
+/// 上櫃次日漲跌停價（每日收盤行情）。
+pub mod price_limit;
 /// 台股收盤報價-上櫃
 pub(crate) mod quote;
 /// 上櫃個股日成交資訊（單一證券的整月日報價）
