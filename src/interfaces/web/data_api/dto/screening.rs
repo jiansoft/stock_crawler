@@ -58,6 +58,10 @@ pub(crate) enum StockScreenSortValue {
     PeRatio,
     /// 股價淨值比。
     PbRatio,
+    /// 最新一季單季 EPS 對去年同季的成長率。
+    EpsYoy,
+    /// 近 3 個年度 EPS 年增率中最低的一年。
+    AnnualEpsGrowth,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -159,6 +163,15 @@ pub(crate) struct ScreenedStock {
     /// 設 `range_breakout_days` 時：最近一次區間突破的說明（突破價、整理幅度、量比、距突破價）；
     /// 沒設時為 `null`。
     pub(crate) range_breakout_description: Option<String>,
+    /// 最新一季單季 EPS 對去年同季的成長率百分比（CANSLIM 的 C）；去年同季 EPS ≤ 0、缺值或財報過期時為 `null`。
+    pub(crate) eps_yoy_percent: Option<f64>,
+    /// 近 3 個年度 EPS 年增率中最低的一年（CANSLIM 的 A，「每年都至少成長多少」）；年度不滿 4 年、不連續、
+    /// 任一基期 EPS ≤ 0，或最新年度落後查詢年超過 2 年時為 `null`。
+    pub(crate) annual_eps_growth_percent: Option<f64>,
+    /// `annual_eps_growth_percent` 比較的最新年度（西元）；沒有年度 EPS 時為 `null`。
+    pub(crate) annual_eps_year: Option<i32>,
+    /// 設 `new_high_days` 時：查詢日（含）以前一年內最近一次創 52 週新高的交易日，格式 `YYYY-MM-DD`；沒設時為 `null`。
+    pub(crate) new_high_date: Option<String>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -178,7 +191,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的三十二個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的三十六個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -269,6 +282,18 @@ pub(crate) struct StockScreeningParams {
     /// 選股明顯輸 0050，只供參考。
     #[param(minimum = 1, maximum = 20)]
     pub(crate) range_breakout_days: Option<u8>,
+    /// 最新一季單季 EPS 對去年同季的成長率下限（%，-100–10000；CANSLIM 的 C 建議 25）。去年同季 EPS ≤ 0
+    /// 無法計算成長率，這類股票不符合；財報新鮮度同 `min_eps`（兩季內）。
+    #[param(minimum = -100, maximum = 10000)]
+    pub(crate) min_eps_yoy_percent: Option<f64>,
+    /// 近 3 個年度 EPS「每年」年增率的下限（%，-100–10000；CANSLIM 的 A 建議 25）：取最近 4 個年度 EPS 算出
+    /// 3 個年增率，以最低者比較。年度不滿 4 年、不連續、任一基期 ≤ 0，或最新年度落後查詢年超過 2 年都不符合。
+    #[param(minimum = -100, maximum = 10000)]
+    pub(crate) min_annual_eps_growth_percent: Option<f64>,
+    /// 只留最近 N 個日曆天（含查詢日，1–365）內創過 52 週新高（`52_week`／`new_high` 訊號）的股票
+    /// （CANSLIM 的 N）；回應附最近一次新高日。
+    #[param(minimum = 1, maximum = 365)]
+    pub(crate) new_high_days: Option<u16>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,

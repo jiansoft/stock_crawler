@@ -1,6 +1,6 @@
 //! 選股結果的排序：`sort_by`／`sort_order` 白名單對應到固定的 `ORDER BY` 子句。
 
-/// 將排序 enum 映射成三十二個固定 SQL 分支。
+/// 將排序 enum 映射成三十六個固定 SQL 分支。
 ///
 /// 指標欄位一律加 `NULLS LAST`，否則 PostgreSQL 的降冪預設會把過期或缺值的
 /// NULL 排在最前面；同值再以股票代號升冪，讓分頁外的重複查詢仍穩定。
@@ -75,6 +75,14 @@ pub(super) fn screen_order_by(
         }
         ("rs_score", "asc") => Ok("ORDER BY rs_score ASC NULLS LAST, stock_symbol ASC"),
         ("rs_score", "desc") => Ok("ORDER BY rs_score DESC NULLS LAST, stock_symbol ASC"),
+        ("eps_yoy", "asc") => Ok("ORDER BY eps_yoy_percent ASC NULLS LAST, stock_symbol ASC"),
+        ("eps_yoy", "desc") => Ok("ORDER BY eps_yoy_percent DESC NULLS LAST, stock_symbol ASC"),
+        ("annual_eps_growth", "asc") => {
+            Ok("ORDER BY annual_eps_growth_percent ASC NULLS LAST, stock_symbol ASC")
+        }
+        ("annual_eps_growth", "desc") => {
+            Ok("ORDER BY annual_eps_growth_percent DESC NULLS LAST, stock_symbol ASC")
+        }
         (_, "asc" | "desc") => Err("sort_by 不在允許範圍"),
         _ => Err("sort_order 必須為 asc 或 desc"),
     }

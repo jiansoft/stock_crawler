@@ -94,6 +94,14 @@ pub(super) struct ScreenedStockRow {
     breakout_date: Option<NaiveDate>,
     /// 最近一次區間突破的說明。
     breakout_description: Option<String>,
+    /// 新鮮的單季 EPS 年增率。
+    eps_yoy_percent: Option<Decimal>,
+    /// 新鮮的近 3 年最低年度 EPS 年增率。
+    annual_eps_growth_percent: Option<Decimal>,
+    /// 年度 EPS 比較的最新年度。
+    annual_eps_year: Option<i32>,
+    /// 一年內最近一次 52 週新高（有設 `new_high_days` 才有）。
+    new_high_date: Option<NaiveDate>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -206,6 +214,18 @@ impl From<ScreenedStockRow> for ScreenedStock {
             ratio_date: row.ratio_date.map(|date| date.to_string()),
             range_breakout_date: row.breakout_date.map(|date| date.to_string()),
             range_breakout_description: row.breakout_description,
+            eps_yoy_percent: analytical_decimal_to_f64(
+                row.eps_yoy_percent,
+                &symbol,
+                "eps_yoy_percent",
+            ),
+            annual_eps_growth_percent: analytical_decimal_to_f64(
+                row.annual_eps_growth_percent,
+                &symbol,
+                "annual_eps_growth_percent",
+            ),
+            annual_eps_year: row.annual_eps_year,
+            new_high_date: row.new_high_date.map(|date| date.to_string()),
         }
     }
 }
