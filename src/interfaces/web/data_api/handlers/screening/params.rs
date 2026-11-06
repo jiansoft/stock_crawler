@@ -54,7 +54,13 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) major_change_weeks: u8,
     /// 最近幾個交易日內出現區間突破（且還沒跌回）。
     pub(super) range_breakout_days: Option<i64>,
-    /// 三十二個固定排序分支之一。
+    /// 最低單季 EPS 年增率。
+    pub(super) min_eps_yoy_percent: Option<Decimal>,
+    /// 近 3 個年度 EPS 年增率（取最低者）的下限。
+    pub(super) min_annual_eps_growth_percent: Option<Decimal>,
+    /// 最近幾個日曆天內創過 52 週新高。
+    pub(super) new_high_days: Option<i32>,
+    /// 三十六個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,
@@ -220,6 +226,24 @@ pub(super) fn validate_screening_params(
     {
         return Err("range_breakout_days 必須介於 1 至 20");
     }
+    let min_eps_yoy_percent = decimal_in_range(
+        params.min_eps_yoy_percent,
+        -100.0,
+        10_000.0,
+        "min_eps_yoy_percent 必須介於 -100 至 10000",
+    )?;
+    let min_annual_eps_growth_percent = decimal_in_range(
+        params.min_annual_eps_growth_percent,
+        -100.0,
+        10_000.0,
+        "min_annual_eps_growth_percent 必須介於 -100 至 10000",
+    )?;
+    if params
+        .new_high_days
+        .is_some_and(|days| !(1..=365).contains(&days))
+    {
+        return Err("new_high_days 必須介於 1 至 365");
+    }
     let order_by = screen_order_by(
         params.sort_by.as_deref().unwrap_or("stock_symbol"),
         params.sort_order.as_deref().unwrap_or("asc"),
@@ -253,7 +277,10 @@ pub(super) fn validate_screening_params(
         || params.max_pe.is_some()
         || params.max_pb.is_some()
         || params.min_major_change.is_some()
-        || params.range_breakout_days.is_some();
+        || params.range_breakout_days.is_some()
+        || params.min_eps_yoy_percent.is_some()
+        || params.min_annual_eps_growth_percent.is_some()
+        || params.new_high_days.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -280,6 +307,9 @@ pub(super) fn validate_screening_params(
         min_major_change,
         major_change_weeks,
         range_breakout_days: params.range_breakout_days.map(i64::from),
+        min_eps_yoy_percent,
+        min_annual_eps_growth_percent,
+        new_high_days: params.new_high_days.map(i32::from),
         order_by,
         limit,
     })

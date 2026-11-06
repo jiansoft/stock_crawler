@@ -199,7 +199,7 @@ fn screening_health_boundaries_are_deterministic() {
 /// 十六個排序欄位乘上兩種方向必須完整映射，指標降冪也要明確
 /// `NULLS LAST`；不在白名單的文字必須在接觸 SQL 前遭拒。
 #[test]
-fn screening_sort_has_thirty_two_static_branches() {
+fn screening_sort_has_thirty_six_static_branches() {
     let fields = [
         "stock_symbol",
         "revenue_yoy",
@@ -217,6 +217,8 @@ fn screening_sort_has_thirty_two_static_branches() {
         "rs_score",
         "pe_ratio",
         "pb_ratio",
+        "eps_yoy",
+        "annual_eps_growth",
     ];
     for field in fields {
         for order in ["asc", "desc"] {

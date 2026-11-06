@@ -21,6 +21,10 @@
 /// 陣列左接，`$34` 為下限（`NULL` 為不限；沒有資料的股票不會通過）。
 /// 近期區間突破由 handler 以 [`RANGE_BREAKOUTS_SQL`] 先算好，以 `$35` 代號、`$36` 突破日、`$37` 說明三個平行
 /// 陣列左接；`$38` 為 true 時只留有突破的股票。
+/// CANSLIM 的 C／A／N：單季 EPS 年增率比較最新一季與去年同一季（去年同季 ≤ 0 為 NULL），新鮮度同 EPS，`$39` 為
+/// 下限；年度 EPS 成長取最近 4 個年度（`quarter = ''`）算出的 3 個年增率中最低者，年度須連續、基期皆 > 0，
+/// 最新年度落後查詢年 1～2 年才算新鮮，`$40` 為下限；`$41` 有值時才查 52 週新高訊號（一年內最近一次），
+/// 只留 `$41` 個日曆天內創新高的股票。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -38,6 +42,10 @@ WITH latest AS (
         f.quarter AS financial_quarter,
         f.earnings_per_share AS eps_raw,
         f.return_on_equity AS roe_raw,
+        fy.eps_yoy_raw,
+        ae.annual_eps_year,
+        ae.annual_eps_growth_raw,
+        nh.new_high_date,
         e.date AS valuation_raw_date,
         e.percentage AS valuation_raw_percentage,
         e.closing_price,
@@ -117,6 +125,45 @@ WITH latest AS (
             END DESC
         LIMIT 1
     ) f ON TRUE
+    LEFT JOIN LATERAL (
+        -- 最新一季單季 EPS 對去年同一季的成長率；去年同季 EPS ≤ 0 時成長率沒有意義，為 NULL。
+        SELECT CASE WHEN p.earnings_per_share > 0
+            THEN ROUND((f.earnings_per_share - p.earnings_per_share) / p.earnings_per_share * 100, 2)
+        END AS eps_yoy_raw
+        FROM financial_statement p
+        WHERE p.security_code = s.stock_symbol
+          AND p.year = f.year - 1
+          AND p.quarter = f.quarter
+    ) fy ON TRUE
+    LEFT JOIN LATERAL (
+        -- 最近 4 個年度 EPS 的 3 個年增率取最低者：年度須連續、3 個基期都 > 0，否則為 NULL。
+        SELECT MAX(year)::int AS annual_eps_year,
+            CASE WHEN COUNT(*) = 4 AND MAX(year) - MIN(year) = 3
+                  AND COUNT(*) FILTER (WHERE prev_eps > 0) = 3
+              THEN ROUND(MIN((eps - prev_eps) / NULLIF(prev_eps, 0) * 100), 2)
+            END AS annual_eps_growth_raw
+        FROM (
+            SELECT year, eps, LEAD(eps) OVER (ORDER BY year DESC) AS prev_eps
+            FROM (
+                SELECT year, earnings_per_share AS eps
+                FROM financial_statement
+                WHERE security_code = s.stock_symbol
+                  AND quarter = ''
+                ORDER BY year DESC
+                LIMIT 4
+            ) recent
+        ) annual
+    ) ae ON TRUE
+    LEFT JOIN LATERAL (
+        -- 查詢日（含）以前一年內最近一次 52 週新高；只有設 `new_high_days`（$41）時才查。
+        SELECT MAX(date) AS new_high_date
+        FROM daily_technical_signal
+        WHERE $41::int IS NOT NULL
+          AND stock_symbol = s.stock_symbol
+          AND indicator = '52_week'
+          AND kind = 'new_high'
+          AND date BETWEEN $3::date - 365 AND $3::date
+    ) nh ON TRUE
     LEFT JOIN LATERAL (
         SELECT date, percentage, closing_price, cheap, fair, expensive
         FROM estimate
@@ -233,6 +280,14 @@ WITH latest AS (
               - (financial_year::int * 4
                 + SUBSTRING(financial_quarter FROM 2)::int)) BETWEEN 0 AND 2
           THEN roe_raw END AS return_on_equity,
+        CASE WHEN financial_year IS NOT NULL
+          AND ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (financial_year::int * 4
+                + SUBSTRING(financial_quarter FROM 2)::int)) BETWEEN 0 AND 2
+          THEN eps_yoy_raw END AS eps_yoy_percent,
+        CASE WHEN EXTRACT(YEAR FROM $3::date)::int - annual_eps_year BETWEEN 1 AND 2
+          THEN annual_eps_growth_raw END AS annual_eps_growth_percent,
         CASE WHEN valuation_raw_date BETWEEN $3::date - 30 AND $3::date
           THEN valuation_raw_percentage END AS valuation_percentage,
         CASE WHEN valuation_raw_date BETWEEN $3::date - 30 AND $3::date THEN
@@ -292,7 +347,8 @@ SELECT
     chip.trust_streak,
     avg_trade_value,
     pe_ratio, pb_ratio, ratio_date,
-    brk.breakout_date, brk.breakout_description
+    brk.breakout_date, brk.breakout_description,
+    eps_yoy_percent, annual_eps_growth_percent, annual_eps_year, new_high_date
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -327,6 +383,9 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($31::numeric IS NULL OR pb_ratio <= $31)
   AND ($34::numeric IS NULL OR major.major_change >= $34)
   AND (NOT $38::bool OR brk.symbol IS NOT NULL)
+  AND ($39::numeric IS NULL OR eps_yoy_percent >= $39)
+  AND ($40::numeric IS NULL OR annual_eps_growth_percent >= $40)
+  AND ($41::int IS NULL OR new_high_date >= $3::date - $41)
 "#;
 
 /// 查詢日（`$1`，不含）以前最近一個集保資料週，相對往前第 `$2` 週的千張大戶持股比例變化（百分點），
