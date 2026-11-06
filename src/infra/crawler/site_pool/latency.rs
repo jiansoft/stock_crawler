@@ -5,7 +5,8 @@
 //!
 //! 站點池的請求以快速失敗模式送出，逐筆的 5xx、403、逾時只記 DEBUG（見 `core::util::http::fail_fast`），
 //! 由這裡彙總：失敗率超過 [`FAILURE_WARN_RATE`]（樣本至少 [`FAILURE_WARN_MIN_SAMPLES`] 筆）的站點，
-//! 收盤那一行改記 WARN。
+//! 收盤那一行改記 WARN。站點主動略過（`SiteSkipped`，例如 Fugle 本地限流）不算請求，
+//! 只累計 `skipped`，不影響取樣數、失敗率與耗時。
 
 use std::{collections::HashMap, sync::Mutex, time::Instant};
 
@@ -31,6 +32,8 @@ struct SiteLatencyStats {
     failures: usize,
     /// 熔斷次數。
     trips: usize,
+    /// 站點主動略過（沒有送出請求）的次數。
+    skipped: usize,
 }
 
 /// 單一站點延遲統計的彙總快照。
@@ -45,6 +48,8 @@ struct SiteLatencySnapshot {
     failures: usize,
     /// 熔斷次數。
     trips: usize,
+    /// 站點主動略過的次數。
+    skipped: usize,
     /// 平均延遲，單位為毫秒。
     avg_ms: u64,
     /// 第 50 百分位延遲，單位為毫秒。
@@ -138,6 +143,13 @@ pub(super) fn record_site_result(
     }
 }
 
+/// 記錄站點這次主動略過（沒有送出請求）；不計入取樣數與失敗數。
+pub(super) fn record_site_skipped(site_name: &'static str) {
+    if let Ok(mut stats) = SITE_LATENCY_STATS.lock() {
+        stats.entry(site_name).or_default().skipped += 1;
+    }
+}
+
 /// 失敗率是否高到收盤統計行要記 WARN。
 fn failure_needs_attention(count: usize, failures: usize) -> bool {
     count >= FAILURE_WARN_MIN_SAMPLES && failures as f64 > count as f64 * FAILURE_WARN_RATE
@@ -162,8 +174,14 @@ fn summary_line(entry: &SiteLatencySnapshot) -> String {
     } else {
         entry.failures as f64 * 100.0 / entry.count as f64
     };
+    // 沒有略過的站點不印 skipped，維持既有的統計行格式。
+    let skipped = if entry.skipped == 0 {
+        String::new()
+    } else {
+        format!(", skipped={}", entry.skipped)
+    };
     format!(
-        "站點整體耗時統計 {}: count={}, failed={}({:.1}%), trips={}, avg={}ms, p50={}ms, p70={}ms, p99={}ms",
+        "站點整體耗時統計 {}: count={}, failed={}({:.1}%), trips={}{skipped}, avg={}ms, p50={}ms, p70={}ms, p99={}ms",
         entry.site_name,
         entry.count,
         entry.failures,
@@ -202,6 +220,7 @@ pub fn flush_site_latency_stats() {
             count: site_stats.sample_count(),
             failures: site_stats.failures,
             trips: site_stats.trips,
+            skipped: site_stats.skipped,
             avg_ms: site_stats.average_ms(),
             p50_ms: site_stats.p50_ms(),
             p70_ms: site_stats.p70_ms(),
@@ -271,6 +290,7 @@ mod tests {
             count: 800,
             failures: 70,
             trips: 3,
+            skipped: 0,
             avg_ms: 1_200,
             p50_ms: 900,
             p70_ms: 1_100,
@@ -285,12 +305,48 @@ mod tests {
             count: 0,
             failures: 0,
             trips: 0,
+            skipped: 0,
             avg_ms: 0,
             p50_ms: 0,
             p70_ms: 0,
             p99_ms: 0,
         });
         assert!(empty.contains("failed=0(0.0%)"), "{empty}");
+    }
+
+    /// 略過次數另計：不算取樣、不算失敗；統計行只在有略過時多印 skipped。
+    #[test]
+    fn skipped_requests_are_counted_separately() {
+        record_site_skipped("TestSkippedOnly");
+        record_site_skipped("TestSkippedOnly");
+        {
+            let all_stats = SITE_LATENCY_STATS.lock().expect("lock site latency stats");
+            let stats = all_stats.get("TestSkippedOnly").expect("略過要建立統計");
+            assert_eq!(
+                (stats.sample_count(), stats.failures, stats.skipped),
+                (0, 0, 2)
+            );
+        }
+        SITE_LATENCY_STATS
+            .lock()
+            .expect("lock site latency stats")
+            .remove("TestSkippedOnly");
+
+        let line = summary_line(&SiteLatencySnapshot {
+            site_name: "Fugle",
+            count: 15_215,
+            failures: 20,
+            trips: 0,
+            skipped: 1_033,
+            avg_ms: 270,
+            p50_ms: 234,
+            p70_ms: 343,
+            p99_ms: 1_096,
+        });
+        assert_eq!(
+            line,
+            "站點整體耗時統計 Fugle: count=15215, failed=20(0.1%), trips=0, skipped=1033, avg=270ms, p50=234ms, p70=343ms, p99=1096ms"
+        );
     }
 
     /// 失敗率過半時註明建議移出站點池（10-28 PcHome 275 次失敗 215 次），10%～50% 只標示超過 10%。

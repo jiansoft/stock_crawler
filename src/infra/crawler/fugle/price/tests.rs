@@ -57,6 +57,9 @@ fn rate_limiter_blocks_after_reaching_limit() {
         .try_acquire(start + Duration::from_millis(1_000))
         .expect_err("超過上限必須回錯，讓外層切換備援站點");
     assert!(err.to_string().contains("local rate limit reached"));
+    // 轉成 anyhow 後站點池要能辨識為「略過」，不算 Fugle 失敗。
+    let err: anyhow::Error = err.into();
+    assert!(err.downcast_ref::<SiteSkipped>().is_some());
 
     // 冷卻截止時間應是「最早那筆請求 + 視窗長度」。
     assert_eq!(limiter.blocked_until, Some(start + RATE_LIMIT_WINDOW));

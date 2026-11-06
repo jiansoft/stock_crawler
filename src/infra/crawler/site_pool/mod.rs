@@ -13,6 +13,7 @@ mod latency;
 mod registry;
 
 use std::{
+    fmt,
     sync::atomic::{AtomicUsize, Ordering},
     time::Instant,
 };
@@ -22,7 +23,7 @@ use rust_decimal::Decimal;
 
 use self::health::{plan_attempt_order, record_site_outcome};
 pub use self::latency::flush_site_latency_stats;
-use self::latency::record_site_result;
+use self::latency::{record_site_result, record_site_skipped};
 use self::registry::{
     ALL_PRICE_SITES, ALL_QUOTE_SITES, BACKUP_PRICE_SITES, PriceSite, QuoteSite, Site,
 };
@@ -43,6 +44,38 @@ pub struct FetchedStockPrice {
     pub price: Decimal,
     /// 實際成功回應的採集站點名稱。
     pub site_name: &'static str,
+}
+
+/// 站點自己決定這次不送出請求（例如 Fugle 本地限流或遠端 429 後的冷卻期）。
+///
+/// 站點池遇到這個錯誤直接換下一站，不算站點失敗：不累積連續失敗（不會因此熔斷）、
+/// 不更新平均耗時，只在收盤站點統計另計 `skipped`。
+/// 2026-11-06 Fugle 一天 1,053 次「失敗」幾乎都是本地限流（16,268 次／270 分鐘 ≈ 每分鐘 60 次上限），
+/// 0 ms 的失敗樣本讓它熔斷 3 次，還把平均耗時拉低、讓它更常被排在前面。
+#[derive(Debug)]
+pub(crate) struct SiteSkipped {
+    /// 略過的原因，會出現在全部站點都失敗時的錯誤訊息。
+    reason: String,
+}
+
+impl SiteSkipped {
+    /// 建立略過錯誤。
+    pub(crate) fn new(reason: String) -> Self {
+        Self { reason }
+    }
+}
+
+impl fmt::Display for SiteSkipped {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.reason)
+    }
+}
+
+impl std::error::Error for SiteSkipped {}
+
+/// 錯誤是否為站點主動略過（見 [`SiteSkipped`]）。
+fn is_skipped(why: &anyhow::Error) -> bool {
+    why.downcast_ref::<SiteSkipped>().is_some()
 }
 
 /// 獲取當前遊標索引並遞增。
@@ -67,6 +100,7 @@ fn get_and_increment_index(max: usize) -> usize {
 /// - 依 [`get_and_increment_index`] 取得本輪起始站點，避免所有請求都從同一站開始。
 /// - 依 [`plan_attempt_order`] 略過熔斷中的站點、把慢站排到最後，每站最多試一次。
 /// - 每站的請求以 [`http::fail_fast`] 執行：不重試、單次逾時 6 秒。
+/// - 站點回 [`SiteSkipped`] 時直接換下一站，只計入略過次數，不影響熔斷與耗時。
 /// - 成功時立即回傳資料與命中的站點名稱。
 /// - 失敗時累積各站點錯誤，全部失敗後再整體回傳。
 async fn fetch_from_site_pool<T>(
@@ -84,6 +118,13 @@ async fn fetch_from_site_pool<T>(
         let started_at = Instant::now();
         // 即時抓價失敗就換下一站，不在單一站上做網路重試與 429 backoff。
         let result = http::fail_fast((site.fetch)(stock_symbol)).await;
+        if let Err(why) = &result
+            && is_skipped(why)
+        {
+            record_site_skipped(site.name);
+            errors.push(format!("{}: {why}", site.name));
+            continue;
+        }
         let tripped = record_site_outcome(site.name, result.is_ok(), started_at);
         record_site_result(site.name, started_at, result.is_ok(), tripped);
         match result {
@@ -212,6 +253,10 @@ mod tests {
         Box::pin(async move { Err(anyhow!("{stock_symbol} 查無報價")) })
     }
 
+    fn skip_price<'a>(_: &'a str) -> registry::SiteFuture<'a, Decimal> {
+        Box::pin(async { Err(SiteSkipped::new("local rate limit".to_owned()).into()) })
+    }
+
     fn ok_quotes<'a>(stock_symbol: &'a str) -> registry::SiteFuture<'a, declare::StockQuotes> {
         Box::pin(async move {
             Ok(declare::StockQuotes {
@@ -250,6 +295,136 @@ mod tests {
             assert_eq!(fetched.site_name, "TestPriceUp");
             assert_eq!(fetched.price.to_string(), "123.4");
         }
+    }
+
+    /// 站點主動略過（本地限流）不算失敗：連續略過遠超過熔斷門檻也不會被熔斷，
+    /// 對照組連續失敗同樣次數就會熔斷、不再出現在嘗試順序裡。
+    #[tokio::test]
+    async fn skipped_site_never_trips_while_failing_site_does() {
+        let skipping = [
+            PriceSite {
+                name: "TestPriceSkip",
+                fetch: skip_price,
+            },
+            PriceSite {
+                name: "TestPriceSkipFallback",
+                fetch: ok_price,
+            },
+        ];
+        let failing = [
+            PriceSite {
+                name: "TestPriceSkipControl",
+                fetch: fail_price,
+            },
+            PriceSite {
+                name: "TestPriceSkipControlFallback",
+                fetch: ok_price,
+            },
+        ];
+        // 每次都從第 0 站開始，確保每輪都會先試到略過／失敗的那一站。
+        for _ in 0..12 {
+            INDEX.store(0, Ordering::SeqCst);
+            let fetched = fetch_stock_price_from_site_pool("2330", &skipping, "test pool")
+                .await
+                .expect("略過後要換下一站");
+            assert_eq!(fetched.site_name, "TestPriceSkipFallback");
+            INDEX.store(0, Ordering::SeqCst);
+            fetch_stock_price_from_site_pool("2330", &failing, "test pool")
+                .await
+                .expect("失敗後要換下一站");
+        }
+
+        let skip_names = skipping.map(|site| site.name);
+        assert!(
+            plan_attempt_order(&skip_names, 0).contains(&0),
+            "略過不累積連續失敗，不能被熔斷"
+        );
+        let fail_names = failing.map(|site| site.name);
+        assert!(
+            !plan_attempt_order(&fail_names, 0).contains(&0),
+            "對照組連續失敗 12 次必須熔斷"
+        );
+    }
+
+    /// 全部站點都略過或失敗時，錯誤訊息照樣列出略過的原因。
+    #[tokio::test]
+    async fn price_pool_reports_skip_reason_when_nothing_succeeds() {
+        let sites = [PriceSite {
+            name: "TestPriceSkipOnly",
+            fetch: skip_price,
+        }];
+        let message = fetch_stock_price_from_site_pool("2330", &sites, "test pool")
+            .await
+            .expect_err("沒有站點成功要回錯誤")
+            .to_string();
+        assert_eq!(
+            message,
+            "Failed to fetch stock price(2330) from test pool: TestPriceSkipOnly: local rate limit"
+        );
+        assert!(is_skipped(&SiteSkipped::new("x".to_owned()).into()));
+        assert!(!is_skipped(&anyhow!("x")));
+    }
+
+    /// 對外四個入口各自走正式站點清單：所有站點都被導到沒有設定任何回應的 mock（一律 404）時，
+    /// 錯誤訊息要列出該清單的每一站，證明每站都試過一次、沒有連到外網。
+    #[tokio::test]
+    async fn public_entries_try_every_registered_site() {
+        let server = wiremock::MockServer::start().await;
+        let base = server.uri();
+        let origins = [
+            "https://tw.stock.yahoo.com",
+            "https://api.fugle.tw",
+            "https://www.nstock.tw",
+            "https://ws.api.cnyes.com",
+            "https://api.biggo.com",
+        ]
+        .map(|origin| (origin, base.as_str()));
+
+        let (all, backup, backup_with_source, quotes) =
+            http::mock_origin::with_origins(&origins, async {
+                (
+                    fetch_stock_price_from_remote_site("79981").await,
+                    fetch_stock_price_from_backup_sites("79981").await,
+                    fetch_stock_price_from_backup_sites_with_source("79981").await,
+                    fetch_stock_quotes_from_remote_site("79981").await,
+                )
+            })
+            .await;
+
+        let expect_every_site = |message: String, scope: &str, names: Vec<&str>| {
+            assert!(message.contains(scope), "{message}");
+            for name in names {
+                assert!(
+                    message.contains(&format!("{name}: ")),
+                    "缺 {name}：{message}"
+                );
+            }
+        };
+        let all_names = ALL_PRICE_SITES.iter().map(|site| site.name).collect();
+        let backup_names = || BACKUP_PRICE_SITES.iter().map(|site| site.name).collect();
+        let quote_names = ALL_QUOTE_SITES.iter().map(|site| site.name).collect();
+        expect_every_site(
+            all.expect_err("全部 404 要回錯誤").to_string(),
+            "stock price(79981) from all sites",
+            all_names,
+        );
+        expect_every_site(
+            backup.expect_err("全部 404 要回錯誤").to_string(),
+            "stock price(79981) from backup sites",
+            backup_names(),
+        );
+        expect_every_site(
+            backup_with_source
+                .expect_err("全部 404 要回錯誤")
+                .to_string(),
+            "stock price(79981) from backup sites",
+            backup_names(),
+        );
+        expect_every_site(
+            quotes.expect_err("全部 404 要回錯誤").to_string(),
+            "stock quotes(79981) from",
+            quote_names,
+        );
     }
 
     /// 全部站點失敗時，錯誤訊息列出每一站的原因。

@@ -75,6 +75,7 @@ pub mod yahoo;
 /// 元大證券 (提供技術面與基本面資料)
 pub mod yuanta;
 
+pub(crate) use site_pool::SiteSkipped;
 pub use site_pool::{
     FetchedStockPrice, fetch_stock_price_from_backup_sites,
     fetch_stock_price_from_backup_sites_with_source, fetch_stock_price_from_remote_site,
