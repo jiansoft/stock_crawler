@@ -278,6 +278,64 @@ fn finish_cycle(
     }
 }
 
+/// 背景任務本體：停止旗標關閉前反覆輪詢全部類股，每輪結束依結果冷卻。
+///
+/// 抓取函式由參數傳入，測試可以不連外直接跑完整的輪詢與停止流程。
+async fn caching_loop<'a, F, Fut>(generation: u64, categories: &[&'a YahooClassCategory], fetch: F)
+where
+    F: Fn(&'a YahooClassCategory) -> Fut,
+    Fut: Future<Output = anyhow::Result<CategoryFetchResult>>,
+{
+    // 這份 map 用來記住「每個類股上一輪有哪些股票」，
+    // 這樣同一類股下一輪更新時，才能知道哪些舊股票應該從快取中移除。
+    let mut category_symbols: HashMap<String, HashSet<String>> =
+        HashMap::with_capacity(categories.len());
+
+    let active_tasks = ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
+    tracing::info!(
+        "Yahoo 類股快取任務啟動 generation={} active_tasks={}",
+        generation,
+        active_tasks
+    );
+
+    // 只要旗標還是 true，就持續一輪又一輪地輪詢所有類股。
+    while IS_CACHING.load(Ordering::SeqCst) {
+        // 記錄整輪開始時間與記憶體，讓診斷數據能看到一輪全部跑完花多久。
+        let cycle_started = Instant::now();
+        let cycle_memory_before = read_process_memory_stats();
+        let stats = run_cycle(
+            categories,
+            &mut category_symbols,
+            cycle_started,
+            cycle_memory_before,
+            &fetch,
+        )
+        .await;
+
+        // 如果是在整輪尾端才收到 stop，就不要再進入 cooldown。
+        if !IS_CACHING.load(Ordering::SeqCst) {
+            break;
+        }
+
+        // 一輪全部類股跑完後稍作休息，避免無間斷全市場輪詢造成壓力過大。
+        let cooldown = finish_cycle(&stats, cycle_started, cycle_memory_before);
+        if stats.denied {
+            sleep_while_caching(cooldown).await;
+        } else {
+            sleep(cooldown).await;
+        }
+    }
+
+    // 跳出 while 代表旗標已關閉，這裡補一筆停止 log 方便對照啟停時間。
+    IS_CACHING.store(false, Ordering::SeqCst);
+    let active_tasks = decrement_atomic_usize(&ACTIVE_TASKS);
+    tracing::info!(
+        "Yahoo 類股快取任務已停止 generation={} active_tasks={}",
+        generation,
+        active_tasks
+    );
+}
+
 /// 啟動 Yahoo 類股快取背景任務。
 ///
 /// 啟動後會：
@@ -313,54 +371,12 @@ pub fn start_caching_task() {
         // 類股清單在任務啟動時就先攤平成固定順序，
         // 讓每一輪巡檢的走訪順序穩定、可預期，也方便對照 log。
         let categories = class_quote::all_class_categories();
-        // 這份 map 用來記住「每個類股上一輪有哪些股票」，
-        // 這樣同一類股下一輪更新時，才能知道哪些舊股票應該從快取中移除。
-        let mut category_symbols: HashMap<String, HashSet<String>> =
-            HashMap::with_capacity(categories.len());
-
-        let active_tasks = ACTIVE_TASKS.fetch_add(1, Ordering::SeqCst) + 1;
-        tracing::info!(
-            "Yahoo 類股快取任務啟動 generation={} active_tasks={}",
+        caching_loop(
             generation,
-            active_tasks
-        );
-
-        // 只要旗標還是 true，就持續一輪又一輪地輪詢所有類股。
-        while IS_CACHING.load(Ordering::SeqCst) {
-            // 記錄整輪開始時間與記憶體，讓診斷數據能看到一輪全部跑完花多久。
-            let cycle_started = Instant::now();
-            let cycle_memory_before = read_process_memory_stats();
-            let stats = run_cycle(
-                &categories,
-                &mut category_symbols,
-                cycle_started,
-                cycle_memory_before,
-                class_quote::fetch_category_snapshots,
-            )
-            .await;
-
-            // 如果是在整輪尾端才收到 stop，就不要再進入 cooldown。
-            if !IS_CACHING.load(Ordering::SeqCst) {
-                break;
-            }
-
-            // 一輪全部類股跑完後稍作休息，避免無間斷全市場輪詢造成壓力過大。
-            let cooldown = finish_cycle(&stats, cycle_started, cycle_memory_before);
-            if stats.denied {
-                sleep_while_caching(cooldown).await;
-            } else {
-                sleep(cooldown).await;
-            }
-        }
-
-        // 跳出 while 代表旗標已關閉，這裡補一筆停止 log 方便對照啟停時間。
-        IS_CACHING.store(false, Ordering::SeqCst);
-        let active_tasks = decrement_atomic_usize(&ACTIVE_TASKS);
-        tracing::info!(
-            "Yahoo 類股快取任務已停止 generation={} active_tasks={}",
-            generation,
-            active_tasks
-        );
+            &categories,
+            class_quote::fetch_category_snapshots,
+        )
+        .await;
     });
 
     if let Ok(mut task) = CACHING_TASK.lock() {

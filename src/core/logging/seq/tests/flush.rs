@@ -122,3 +122,37 @@ async fn process_events_flushes_full_batches_and_remainder() {
             .all(|(_, body)| body.lines().count() <= SEQ_BATCH_EVENT_LIMIT)
     );
 }
+
+/// 專屬 thread 的背景 worker：自己建 runtime 與 HTTP client，sender 關閉後送出剩餘事件並結束。
+#[tokio::test]
+async fn spawned_worker_sends_events_on_its_own_runtime() {
+    let seq = fake_seq(201).await;
+    let (tx, rx) = mpsc::channel(4);
+    tx.send(event("worker 事件 1")).await.expect("送入佇列");
+    tx.send(event("worker 事件 2")).await.expect("送入佇列");
+    drop(tx);
+
+    spawn_seq_worker(rx, seq.endpoint.clone(), Some("secret".to_string()));
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let lines = loop {
+        let lines: usize = seq
+            .requests
+            .lock()
+            .expect("測試鎖")
+            .iter()
+            .map(|(_, body)| body.lines().count())
+            .sum();
+        if lines >= 2 || std::time::Instant::now() >= deadline {
+            break lines;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(lines, 2, "worker 要把佇列裡的事件全部送出");
+    let requests = seq.requests.lock().expect("測試鎖").clone();
+    assert!(
+        requests
+            .iter()
+            .all(|(key, _)| key.as_deref() == Some("secret"))
+    );
+}

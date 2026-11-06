@@ -206,6 +206,87 @@ async fn run_cycle_honours_the_stop_flag() {
     assert_eq!((stats, *calls.lock().unwrap()), (CycleStats::default(), 0));
 }
 
+/// 背景任務本體：跑完第一輪、冷卻後第二輪收到停止就結束，停止旗標與執行中任務數都歸位。
+#[tokio::test(start_paused = true)]
+async fn caching_loop_runs_cycles_until_stopped() {
+    let _lock = TEST_STATE_LOCK.lock().await;
+    reset_shared_state();
+    let only = category(9301);
+    let categories = [&only];
+    let calls = Mutex::new(0);
+    let active_before = ACTIVE_TASKS.load(Ordering::SeqCst);
+    let completed_before = COMPLETED_CYCLES.load(Ordering::SeqCst);
+
+    caching_loop(7, &categories, |_: &YahooClassCategory| {
+        let mut calls = calls.lock().unwrap();
+        *calls += 1;
+        if *calls == 2 {
+            IS_CACHING.store(false, Ordering::SeqCst);
+        }
+        async { Ok(fetched(&[("79979Y6", 10)])) }
+    })
+    .await;
+
+    assert_eq!(*calls.lock().unwrap(), 2);
+    assert!(!IS_CACHING.load(Ordering::SeqCst));
+    assert_eq!(ACTIVE_TASKS.load(Ordering::SeqCst), active_before);
+    assert_eq!(
+        COMPLETED_CYCLES.load(Ordering::SeqCst),
+        completed_before + 1
+    );
+    SHARE.clear_stock_snapshots();
+}
+
+/// 遭遇 WAF 阻擋的那一輪改用可中斷的長冷卻：冷卻中收到停止就結束，不必等滿 10 分鐘。
+#[tokio::test(start_paused = true)]
+async fn caching_loop_denied_cooldown_is_interruptible() {
+    let _lock = TEST_STATE_LOCK.lock().await;
+    reset_shared_state();
+    let only = category(9302);
+    let categories = [&only];
+    let stopper = tokio::spawn(async {
+        sleep(Duration::from_secs(30)).await;
+        IS_CACHING.store(false, Ordering::SeqCst);
+    });
+    let started = tokio::time::Instant::now();
+
+    caching_loop(8, &categories, |_: &YahooClassCategory| async {
+        Err(anyhow!("Request denied"))
+    })
+    .await;
+
+    stopper.await.expect("stopper task");
+    assert!(started.elapsed() < DENIED_COOLDOWN, "冷卻要能被停止中斷");
+    assert!(!IS_CACHING.load(Ordering::SeqCst));
+}
+
+/// 非暫時性錯誤（例如 404）記 error 並繼續；整輪沒有任何資料落地時 finish_cycle 仍回一般冷卻。
+#[tokio::test(start_paused = true)]
+async fn run_cycle_logs_non_transient_errors_and_empty_cycles() {
+    let _lock = TEST_STATE_LOCK.lock().await;
+    reset_shared_state();
+    let (first, second) = (category(9401), category(9402));
+    let categories = [&first, &second];
+    let calls = Mutex::new(0);
+
+    let stats = run_cycle(
+        &categories,
+        &mut HashMap::new(),
+        Instant::now(),
+        None,
+        |_: &YahooClassCategory| {
+            *calls.lock().unwrap() += 1;
+            async { Err(anyhow!("Yahoo class quote request failed with status 404")) }
+        },
+    )
+    .await;
+
+    assert_eq!(*calls.lock().unwrap(), 2, "非阻擋錯誤要繼續抓下一個類股");
+    assert_eq!((stats.success, stats.failure, stats.denied), (0, 2, false));
+    assert_eq!(finish_cycle(&stats, Instant::now(), None), CYCLE_COOLDOWN);
+    IS_CACHING.store(false, Ordering::SeqCst);
+}
+
 /// Live 測試：驗證啟動背景任務後快取會落地，停止後會被清空。
 #[tokio::test]
 #[ignore]

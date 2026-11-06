@@ -331,4 +331,205 @@ mod tests {
         assert_eq!(reports.cash_flow_statements.len(), 1);
         assert_eq!(reports.balance_sheets.len(), 1);
     }
+
+    mod mock_fetch {
+        use wiremock::matchers::{method, path, path_regex, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use super::super::*;
+        use crate::core::util::http::mock_origin::with_origins;
+
+        const YAHOO: &str = "https://tw.stock.yahoo.com";
+        const BIGGO: &str = "https://api.biggo.com";
+
+        async fn yahoo_mock(server: &MockServer, service: &str, period: &str, body: &str) {
+            Mock::given(method("GET"))
+                .and(path_regex(format!(
+                    r"^/_td-stock/api/resource/StockServices\.{service};.*period={period};"
+                )))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_raw(body.to_owned(), "application/json"),
+                )
+                .expect(1)
+                .mount(server)
+                .await;
+        }
+
+        /// Yahoo 5 支 endpoint（損益與現金流量各季／年、資產負債表單季）全部成功：三張表都有資料。
+        #[tokio::test]
+        async fn fetch_reports_collects_five_yahoo_endpoints() {
+            let server = MockServer::start().await;
+            let fixtures = [
+                (
+                    "incomeStatements-growthAnalyses",
+                    "quarter",
+                    include_str!(
+                        "../../../infra/crawler/yahoo/testdata/financial_income_statement_quarter_sum_8042.json"
+                    ),
+                ),
+                (
+                    "incomeStatements-growthAnalyses",
+                    "year",
+                    include_str!(
+                        "../../../infra/crawler/yahoo/testdata/financial_income_statement_year_8042.json"
+                    ),
+                ),
+                (
+                    "cashFlowStatements",
+                    "quarter",
+                    include_str!(
+                        "../../../infra/crawler/yahoo/testdata/financial_cash_flow_quarter_8042.json"
+                    ),
+                ),
+                (
+                    "cashFlowStatements",
+                    "year",
+                    include_str!(
+                        "../../../infra/crawler/yahoo/testdata/financial_cash_flow_year_8042.json"
+                    ),
+                ),
+                (
+                    "balanceSheets",
+                    "quarter",
+                    include_str!(
+                        "../../../infra/crawler/yahoo/testdata/financial_balance_sheet_quarter_8042.json"
+                    ),
+                ),
+            ];
+            for (service, period, body) in fixtures {
+                yahoo_mock(&server, service, period, body).await;
+            }
+
+            let reports = with_origins(&[(YAHOO, &server.uri())], fetch_reports("8042.TWO"))
+                .await
+                .expect("五支 endpoint 都成功");
+
+            assert!(!reports.is_empty());
+            assert!(!reports.income_statements.is_empty());
+            assert!(!reports.cash_flow_statements.is_empty());
+            assert!(!reports.balance_sheets.is_empty());
+        }
+
+        /// 第一支（單季損益表）就失敗：回錯誤並標明是哪一步，不再發後面的請求。
+        #[tokio::test]
+        async fn fetch_reports_stops_at_first_failed_endpoint() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(400).set_body_string("bad"))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let message = with_origins(&[(YAHOO, &server.uri())], fetch_reports("8042.TWO"))
+                .await
+                .err()
+                .expect("第一步失敗要回錯誤")
+                .to_string();
+            assert!(
+                message.contains("fetch income statements failed: 8042.TWO Quarter"),
+                "{message}"
+            );
+        }
+
+        async fn biggo_mock(server: &MockServer, route: &str, kind: Option<&str>, body: &str) {
+            let mut mock = Mock::given(method("GET")).and(path(format!("/api/v1/finance{route}")));
+            if let Some(kind) = kind {
+                mock = mock.and(query_param("type", kind));
+            }
+            mock.respond_with(
+                ResponseTemplate::new(200).set_body_raw(body.to_owned(), "application/json"),
+            )
+            .expect(1)
+            .mount(server)
+            .await;
+        }
+
+        /// BigGo 9 支 endpoint 全部成功：損益、現金流量、資產負債表都轉譯出資料。
+        #[tokio::test]
+        async fn fetch_biggo_reports_collects_nine_endpoints() {
+            let server = MockServer::start().await;
+            let fixtures = [
+                (
+                    "/stock/statements/profit",
+                    Some("single"),
+                    include_str!("../../../infra/crawler/biggo/testdata/profit_single_2330.json"),
+                ),
+                (
+                    "/stock/statements/eps",
+                    Some("single"),
+                    include_str!("../../../infra/crawler/biggo/testdata/eps_single_2330.json"),
+                ),
+                (
+                    "/stock/statements/profit",
+                    Some("annual"),
+                    include_str!("../../../infra/crawler/biggo/testdata/profit_annual_2330.json"),
+                ),
+                (
+                    "/stock/statements/eps",
+                    Some("annual"),
+                    include_str!("../../../infra/crawler/biggo/testdata/eps_annual_2330.json"),
+                ),
+                (
+                    "/stock/statements/cash-flow",
+                    Some("single"),
+                    include_str!(
+                        "../../../infra/crawler/biggo/testdata/cash_flow_single_2330.json"
+                    ),
+                ),
+                (
+                    "/stock/statements/cash-flow",
+                    Some("annual"),
+                    include_str!(
+                        "../../../infra/crawler/biggo/testdata/cash_flow_annual_2330.json"
+                    ),
+                ),
+                (
+                    "/stock/statements/total-assets",
+                    None,
+                    include_str!("../../../infra/crawler/biggo/testdata/total_assets_2330.json"),
+                ),
+                (
+                    "/stock/statements/liabilities",
+                    None,
+                    include_str!("../../../infra/crawler/biggo/testdata/liabilities_2330.json"),
+                ),
+                (
+                    "/stock/statements/equity",
+                    None,
+                    include_str!("../../../infra/crawler/biggo/testdata/equity_2330.json"),
+                ),
+            ];
+            for (route, kind, body) in fixtures {
+                biggo_mock(&server, route, kind, body).await;
+            }
+
+            let reports = with_origins(&[(BIGGO, &server.uri())], fetch_biggo_reports("2330"))
+                .await
+                .expect("九支 endpoint 都成功");
+
+            assert!(!reports.income_statements.is_empty());
+            assert!(!reports.cash_flow_statements.is_empty());
+            assert!(!reports.balance_sheets.is_empty());
+        }
+
+        /// BigGo 第一支就失敗：錯誤標明是單季損益表。
+        #[tokio::test]
+        async fn fetch_biggo_reports_reports_failed_step() {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(400).set_body_string("bad"))
+                .mount(&server)
+                .await;
+
+            let message = with_origins(&[(BIGGO, &server.uri())], fetch_biggo_reports("2330"))
+                .await
+                .err()
+                .expect("第一步失敗要回錯誤")
+                .to_string();
+            assert!(
+                message.contains("fetch BigGo single income statements failed: 2330"),
+                "{message}"
+            );
+        }
+    }
 }

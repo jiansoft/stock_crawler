@@ -325,6 +325,92 @@ mod tests {
         ));
     }
 
+    /// 單場處理的四種結果：已通知、內容抓取失敗、摘要尚未產生、送出並記錄（mock BigGo＋Redis）。
+    /// 用 1970 年的假場次，結束時刪除 Redis 紀錄。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn notify_covers_every_outcome() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        dotenvy::dotenv().ok();
+        if CLIENT.ping().await.is_err() {
+            println!("跳過 notify_covers_every_outcome：無 Redis 連線");
+            return;
+        }
+        let ids = [
+            "TEST_79989.TW_1970-01-01",
+            "TEST_79989.TW_1970-01-02",
+            "TEST_79989.TW_1970-01-03",
+            "TEST_79989.TW_1970-01-04",
+        ];
+        for id in ids {
+            let _ = CLIENT.delete(&notified_key(id)).await;
+        }
+        let [already, failed, pending, ready] = ids;
+
+        let server = MockServer::start().await;
+        let detail = |call_id: &str, summary: &str| {
+            serde_json::json!({
+                "result": true,
+                "data": { "call_id": call_id, "date": "1970-01-04", "title": "測試法說會", "summary": summary }
+            })
+        };
+        let route = "/api/v1/finance/stock/earnings-calls/detail";
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param("call_id", failed))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param("call_id", pending))
+            .respond_with(ResponseTemplate::new(200).set_body_json(detail(pending, " ")))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param("call_id", ready))
+            .respond_with(ResponseTemplate::new(200).set_body_json(detail(ready, "營收成長")))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        mark_notified(already).await;
+        let outcomes = crate::core::util::http::mock_origin::with_origins(
+            &[("https://api.biggo.com", &server.uri())],
+            async {
+                let mut outcomes = Vec::new();
+                for id in ids {
+                    outcomes.push(notify("79989", &call(id, day(1, 4))).await);
+                }
+                outcomes
+            },
+        )
+        .await;
+        let ready_marked = is_notified(ready).await;
+        let pending_marked = is_notified(pending).await;
+        for id in ids {
+            let _ = CLIENT.delete(&notified_key(id)).await;
+        }
+
+        assert!(matches!(
+            outcomes.as_slice(),
+            [
+                Outcome::AlreadyNotified,
+                Outcome::Failed,
+                Outcome::Pending,
+                Outcome::Notified
+            ]
+        ));
+        assert!(ready_marked, "送出後要記錄已通知");
+        assert!(!pending_marked, "摘要未產生不能記錄，下次還要再試");
+    }
+
     #[test]
     fn notified_key_uses_the_call_id() {
         assert_eq!(
