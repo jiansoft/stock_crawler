@@ -16,6 +16,8 @@ pub mod ex_right_result;
 pub mod holiday_schedule;
 /// 國際證券辨識
 pub mod international_securities_identification_number;
+/// 上市每日漲跌停價（TWT84U）。
+pub mod price_limit;
 /// 公開申購公告-抽籤日程表
 pub mod public;
 /// 外資及陸資投資持股

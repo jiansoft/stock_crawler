@@ -42,6 +42,14 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "記錄股利預估快照",
             event::taiwan_stock::forecast_snapshot::execute,
         ),
+        // 08:40、08:55 載入交易所當日漲跌停價，讓盤中驗價認得無漲跌幅限制的 ETF；
+        // 上市當天的資料何時出現未確認，08:55 再讀一次
+        job!(
+            normal,
+            "0 40,55 8 * * Mon-Fri",
+            "載入交易所當日漲跌停價",
+            event::trace::price_limits::execute,
+        ),
         // 09:00 更新股票權值佔比
         job!(
             normal,

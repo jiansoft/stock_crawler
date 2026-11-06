@@ -37,6 +37,10 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
 
     //若在開盤埘間重啟服務定時任務會無法觸發，所以在啟動時要先執行股價追踪的任務，執行完後再設定一次定時任務
     if declare::StockExchange::TWSE.is_open() {
+        // 開盤中重啟：先載入交易所漲跌停價，追蹤任務的驗價才認得無漲跌幅限制的 ETF。
+        if let Err(why) = event::trace::price_limits::execute().await {
+            tracing::warn!("開盤中重啟，載入交易所漲跌停價失敗: {why:#}");
+        }
         tracing::info!("scheduler start begin: opening trace::stock_price");
         let opening_trace_timer = Instant::now();
         if let Err(why) = event::trace::stock_price::execute().await {

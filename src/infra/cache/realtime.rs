@@ -10,8 +10,8 @@ use rust_decimal::prelude::ToPrimitive;
 
 use crate::core::declare;
 
-/// 即時報價快照。
-/// 當日漲跌幅限制，來自 Yahoo 類股報價的 `limitUpPrice`／`limitDownPrice`。
+/// 當日漲跌幅限制，來自 Yahoo 類股報價的 `limitUpPrice`／`limitDownPrice`，
+/// 以及開盤前載入的交易所漲跌停價（`app::event::trace::price_limits`）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PriceLimit {
     /// 來源沒有提供，沿用固定門檻判斷。
@@ -26,6 +26,26 @@ pub enum PriceLimit {
         /// 漲停價。
         up: Decimal,
     },
+}
+
+impl PriceLimit {
+    /// 交易所表示「無漲跌幅限制」的跌停價（漲停價同時是 9,999.95）。
+    const EXCHANGE_UNLIMITED_DOWN: Decimal = Decimal::from_parts(1, 0, 0, false, 2);
+    /// 漲停價至少這麼高才視為交易所的「無漲跌幅限制」寫法。
+    const EXCHANGE_UNLIMITED_UP: Decimal = Decimal::from_parts(9_999, 0, 0, false, 0);
+
+    /// 由交易所公告的跌停價與漲停價建立限制：跌停 0.01 且漲停 9,999.95 是「無漲跌幅限制」，
+    /// 兩者皆為正且跌停不高於漲停是區間，其餘視為未知。
+    pub fn from_exchange_prices(down: Decimal, up: Decimal) -> Self {
+        if down <= Self::EXCHANGE_UNLIMITED_DOWN && up >= Self::EXCHANGE_UNLIMITED_UP {
+            return Self::Unlimited;
+        }
+        if down > Decimal::ZERO && down <= up {
+            Self::Range { down, up }
+        } else {
+            Self::Unknown
+        }
+    }
 }
 
 #[non_exhaustive]
