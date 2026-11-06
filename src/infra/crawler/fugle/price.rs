@@ -16,7 +16,7 @@ use crate::{
     core::declare::StockQuotes,
     core::util,
     infra::crawler::{
-        StockInfo,
+        SiteSkipped, StockInfo,
         fugle::{Fugle, HOST},
     },
 };
@@ -99,8 +99,9 @@ impl RateLimiter {
     ///
     /// # 回傳
     /// * `Ok(())` - 取得配額，呼叫端可以送出請求。
-    /// * `Err` - 仍在冷卻期或視窗內已達上限，呼叫端應改用下一個備援來源。
-    fn try_acquire(&mut self, now: Instant) -> Result<()> {
+    /// * `Err(SiteSkipped)` - 仍在冷卻期或視窗內已達上限；這次沒有送出請求，
+    ///   站點池會直接換下一站，不算 Fugle 失敗（不熔斷、不影響耗時統計）。
+    fn try_acquire(&mut self, now: Instant) -> Result<(), SiteSkipped> {
         // 每次進來都先清理：
         // 1. 移除視窗外（超過 60 秒）的舊請求
         // 2. 若封鎖時間已過，解除封鎖
@@ -109,10 +110,10 @@ impl RateLimiter {
         // 若目前仍在冷卻期，直接拒絕本次 Fugle 呼叫，
         // 讓外層備援邏輯立即切到下一個網站。
         if let Some(until) = self.blocked_until {
-            return Err(anyhow!(
+            return Err(SiteSkipped::new(format!(
                 "Fugle local rate limit active, retry after {:?}",
                 until.saturating_duration_since(now)
-            ));
+            )));
         }
 
         // 滑動視窗內的請求數已達上限時：
@@ -128,9 +129,9 @@ impl RateLimiter {
                 .unwrap_or(now + RATE_LIMIT_WINDOW);
             self.blocked_until = Some(next_reset);
 
-            return Err(anyhow!(
+            return Err(SiteSkipped::new(format!(
                 "Fugle local rate limit reached ({LOCAL_RATE_LIMIT_PER_MINUTE}/min)"
-            ));
+            )));
         }
 
         // 尚未達上限時，記錄本次請求時間，
@@ -147,13 +148,14 @@ impl RateLimiter {
 
 /// 嘗試為 Fugle 取得一個本地限流配額。
 ///
-/// 若已達本地上限，直接回傳錯誤，讓外層備援鏈切到下一個網站。
+/// 若已達本地上限，回傳包著 [`SiteSkipped`] 的錯誤，讓外層備援鏈切到下一個網站且不算 Fugle 失敗。
 fn acquire_rate_limit_slot() -> Result<()> {
     // 先取得全域限流器鎖，確保多執行緒下的計數與封鎖狀態一致。
-    RATE_LIMITER
+    let mut limiter = RATE_LIMITER
         .lock()
-        .map_err(|_| anyhow!("Failed to lock Fugle rate limiter"))?
-        .try_acquire(Instant::now())
+        .map_err(|_| anyhow!("Failed to lock Fugle rate limiter"))?;
+    limiter.try_acquire(Instant::now())?;
+    Ok(())
 }
 
 /// 當上游已回報限流（例如 HTTP 429）時，強制進入冷卻期。
