@@ -18,8 +18,6 @@ use rust_decimal::Decimal;
 
 use crate::{core::declare, core::util};
 
-/// 臺灣銀行 (提供匯率、財務報表等資料)
-pub mod bank_of_taiwan;
 /// IP 資訊服務 (BigDataCloud)
 pub mod bigdatacloud;
 // BigGo 財經 (三大財報，作為 Yahoo 財報的備援)
