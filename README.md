@@ -289,7 +289,7 @@ ETF 比較明細與曝險成分股共用容量 512、TTL 五分鐘的查詢快�
 15. BigGo 財經 https://finance.biggo.com.tw（三大財務報表與即時報價的備援來源、持股法說會摘要）
 16. 臺灣集中保管結算所 https://www.tdcc.com.tw（集保戶股權分散表開放資料）
 
-+ `winvest`、`yuanta`、`bank_of_taiwan`（臺灣銀行）crawler module 仍在程式碼中，但目前沒有排程或介面使用；前兩者移出即時報價備援池的原因見「盤中即時報價與追蹤」。
++ `winvest`、`yuanta` crawler module 仍在程式碼中，但目前沒有排程或介面使用；兩者移出即時報價備援池的原因見「盤中即時報價與追蹤」。
 + `ipify`、`ipinfo`、`ipconfig`、`myip`、`seeip`、`bigdatacloud` 只用於啟動時查詢本機對外 IP。
 
 ## 主要設定
