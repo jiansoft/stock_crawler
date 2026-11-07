@@ -6,6 +6,7 @@
 
 mod allocation;
 mod breakout;
+mod database;
 mod dividend;
 mod etf;
 mod fakes;
