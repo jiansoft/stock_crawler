@@ -180,16 +180,4 @@ fn is_exchange_traded_note(symbol: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_exchange_traded_note() {
-        assert!(is_exchange_traded_note("020035"));
-        assert!(is_exchange_traded_note("020001"));
-        assert!(!is_exchange_traded_note("0050"));
-        assert!(!is_exchange_traded_note("00400A"));
-        assert!(!is_exchange_traded_note("2890"));
-        assert!(!is_exchange_traded_note("02003B"));
-    }
-}
+mod tests;
