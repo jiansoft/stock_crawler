@@ -234,11 +234,12 @@ fn notes_section(notes: &[String]) -> String {
     section
 }
 
-/// 取得期間內的休市日；任一年度抓取失敗回傳 `None`，交易日完整性改為只看成交檔數。
+/// 取得期間內的休市日（證交所讀不到時用 Redis 備份）；任一年度都取不到時回傳 `None`，
+/// 交易日完整性改為只看成交檔數。
 async fn fetch_holidays(from: NaiveDate, to: NaiveDate) -> Option<Vec<NaiveDate>> {
     let mut holidays = Vec::new();
     for year in from.year()..=to.year() {
-        match twse::holiday_schedule::visit(year).await {
+        match twse::holiday_schedule::visit_or_backup(year).await {
             Ok(schedule) => holidays.extend(schedule.into_iter().map(|holiday| holiday.date)),
             Err(why) => {
                 tracing::warn!("取得 {year} 年休市日失敗，略過缺漏交易日檢查: {why:?}");
