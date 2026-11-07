@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 
 use tokio::time::sleep;
 
+use super::cycle::CycleStats;
+use super::state::COMPLETED_CYCLES;
 use super::*;
 
 /// 沒有背景任務時停止也要清空共用快取，避免收盤後仍讀到盤中報價。
