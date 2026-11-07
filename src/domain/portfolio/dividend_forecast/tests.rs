@@ -1,6 +1,7 @@
 use rust_decimal_macros::dec;
 
 use super::*;
+use crate::domain::portfolio::payout::PayoutAllocation;
 
 fn date(y: i32, m: u32, d: u32) -> NaiveDate {
     NaiveDate::from_ymd_opt(y, m, d).expect("有效日期")
