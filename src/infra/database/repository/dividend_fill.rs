@@ -153,7 +153,9 @@ impl MarketFillQuery for PgDividendFillRepository {
                 .bind(since)
                 .bind(until)
                 .bind(i64::from(MATURE_TRADING_DAYS))
-                .fetch_all(database::get_connection())
+                // 近 5 年約 7,400 次除權息、每次讀 120 個交易日，正式庫固定要 1.0～1.1 s（11-07
+                // EXPLAIN：八成花在之後 120 日的索引掃描），走批次連線池以免每次快取更新都觸發 1 秒慢查詢警告。
+                .fetch_all(database::get_batch_connection())
                 .await
                 .context("Failed to fetch market dividend fill samples")?;
         Ok(rows
