@@ -184,3 +184,72 @@ async fn load_history_spans_recent_broker_days() {
     };
     assert!(load_history(&failing, day(20), &symbols).await.is_none());
 }
+
+/// 以本機 mock server 取代富邦（MoneyDJ）主力進出頁，測逐檔抓取的三種分類。
+mod collect {
+    use std::collections::BTreeSet;
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+
+    /// 2884 玉山金 2026-10-05 的頁面（UTF-8；送出前轉回 Big5）。
+    const FIXTURE_2884: &str = include_str!("../../../../infra/crawler/fbs/testdata/zco_2884.html");
+
+    async fn serve_big5(server: &MockServer, symbol: &str, html: &str) {
+        let (big5, _, _) = encoding_rs::BIG5.encode(html);
+        Mock::given(method("GET"))
+            .and(path(format!("/z/zc/zco/zco_{symbol}.djhtm")))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(big5.into_owned(), "text/html"))
+            .mount(server)
+            .await;
+    }
+
+    /// 頁面日期是今天的留下、舊日期的算過期、頁面解析不了的算失敗，計數各自累加。
+    #[tokio::test]
+    async fn collect_flows_classifies_today_stale_and_failed() {
+        let server = MockServer::start().await;
+        serve_big5(&server, "2884", FIXTURE_2884).await;
+        // 同一份頁面換成前一個交易日，模擬休市或尚未更新。
+        serve_big5(
+            &server,
+            "2885",
+            &FIXTURE_2884.replace("2026/10/05", "2026/10/02"),
+        )
+        .await;
+        // 79979 沒有掛路由：mock server 回 404 空頁，解析失敗。
+        let uri = server.uri();
+        let symbols: BTreeSet<String> = ["2884", "2885", "79979"].map(String::from).into();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 5).expect("合法日期");
+        let mut summary = RunSummary {
+            holdings: symbols.len(),
+            ..Default::default()
+        };
+
+        let flows = with_origins(
+            &[("https://fubon-ebrokerdj.fbs.com.tw", &uri)],
+            collect_flows(&symbols, today, &mut summary),
+        )
+        .await;
+
+        assert_eq!(
+            flows
+                .iter()
+                .map(|flow| flow.stock_symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["2884"]
+        );
+        assert_eq!(
+            summary,
+            RunSummary {
+                holdings: 3,
+                fetched: 1,
+                stale: 1,
+                failed: 1,
+                notable: 0,
+            }
+        );
+    }
+}
