@@ -131,20 +131,9 @@ mod database {
         }
     }
 
-    /// 上市 ETF（產業 9001）以 `today` 為期末算出績效並寫入；期末是最後一個有成交的日子。
-    #[tokio::test]
-    #[cfg_attr(
-        not(feature = "integration-tests"),
-        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
-    )]
-    async fn run_writes_performance_for_listed_etf() {
-        dotenvy::dotenv().ok();
+    /// 插入上市假 ETF 與 1999-03-01（一）起 10 個交易日的日線（收盤 20.0、20.1…20.9），回傳最後成交日。
+    async fn seed() -> NaiveDate {
         let pool = database::get_connection();
-        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
-            println!("跳過 run_writes_performance_for_listed_etf：無資料庫連接");
-            return;
-        }
-        cleanup().await;
         sqlx::query(
             r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
                VALUES ($1, '測試 ETF', $1, 2, 9001)"#,
@@ -153,7 +142,6 @@ mod database {
         .execute(pool)
         .await
         .expect("插入假 ETF");
-        // 1999-03-01（一）起 10 個交易日，收盤 20.0、20.1…20.9。
         let days = [1, 2, 3, 4, 5, 8, 9, 10, 11, 12];
         for (i, day) in days.into_iter().enumerate() {
             let close = Decimal::new(200 + i64::try_from(i).expect("小數字"), 1);
@@ -168,17 +156,65 @@ mod database {
             .await
             .expect("插入日線");
         }
+        date(3, 12)
+    }
+
+    async fn performance_date() -> Option<NaiveDate> {
+        sqlx::query_scalar("SELECT calc_date FROM etf_performance WHERE stock_symbol = $1")
+            .bind(SYMBOL)
+            .fetch_optional(database::get_connection())
+            .await
+            .expect("讀回績效")
+    }
+
+    /// 排程入口以今天為期末：假 ETF 的日線遠在 10 年前，不會算出績效，也就不寫入。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn execute_uses_today_as_period_end() {
+        dotenvy::dotenv().ok();
+        if sqlx::query("SELECT 1")
+            .execute(database::get_connection())
+            .await
+            .is_err()
+        {
+            println!("跳過 execute_uses_today_as_period_end：無資料庫連接");
+            return;
+        }
+        cleanup().await;
+        seed().await;
+
+        let result = execute().await;
+        let calc_date = performance_date().await;
+        cleanup().await;
+
+        result.expect("重算成功");
+        assert_eq!(calc_date, None, "10 年前的日線不在計算區間");
+    }
+
+    /// 上市 ETF（產業 9001）以 `today` 為期末算出績效並寫入；期末是最後一個有成交的日子。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn run_writes_performance_for_listed_etf() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 run_writes_performance_for_listed_etf：無資料庫連接");
+            return;
+        }
+        cleanup().await;
+        let last_trading_day = seed().await;
 
         let written = run(date(3, 15)).await;
-        let calc_date: Option<NaiveDate> =
-            sqlx::query_scalar("SELECT calc_date FROM etf_performance WHERE stock_symbol = $1")
-                .bind(SYMBOL)
-                .fetch_optional(pool)
-                .await
-                .expect("讀回績效");
+        let calc_date = performance_date().await;
         cleanup().await;
 
         assert!(written.expect("重算成功") >= 1);
-        assert_eq!(calc_date, Some(date(3, 12)));
+        assert_eq!(calc_date, Some(last_trading_day));
     }
 }
