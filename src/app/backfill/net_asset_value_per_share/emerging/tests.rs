@@ -112,8 +112,14 @@ async fn run_fetches_emerging_list_on_weekdays_only() {
         .await;
     let uri = server.uri();
     // 1999-03-10 是星期三、03-13 是星期六；只有平日那次會打到 mock（expect(1)）。
-    let weekday = Local.with_ymd_and_hms(1999, 3, 10, 5, 0, 0).single().expect("固定時間合法");
-    let saturday = Local.with_ymd_and_hms(1999, 3, 13, 5, 0, 0).single().expect("固定時間合法");
+    let weekday = Local
+        .with_ymd_and_hms(1999, 3, 10, 5, 0, 0)
+        .single()
+        .expect("固定時間合法");
+    let saturday = Local
+        .with_ymd_and_hms(1999, 3, 13, 5, 0, 0)
+        .single()
+        .expect("固定時間合法");
 
     let results = with_origins(&[("https://www.tpex.org.tw", &uri)], async {
         (run(weekday).await, run(saturday).await)
