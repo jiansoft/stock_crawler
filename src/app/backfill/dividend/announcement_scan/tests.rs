@@ -38,20 +38,4 @@ async fn test_dry_run_without_database() {
         .filter(|item| item.payable_date_cash != UNANNOUNCED_DATE)
         .count();
     println!("可新增的資料中已帶現金發放日 {} 筆", with_payable_date);
-    for item in plan.inserts.values().take(5) {
-        println!(
-            "  + {} {}{} 除息 {} 發放 {} 現金 {} 股票 {}",
-            item.security_code,
-            item.year_of_dividend,
-            if item.quarter.is_empty() {
-                "年度"
-            } else {
-                &item.quarter
-            },
-            item.ex_dividend_date_cash,
-            item.payable_date_cash,
-            item.cash_dividend,
-            item.stock_dividend
-        );
-    }
 }
