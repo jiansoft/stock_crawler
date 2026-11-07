@@ -154,3 +154,63 @@ async fn scan_fails_when_both_announcement_tables_are_unavailable() {
 
     assert!(error.to_string().contains("都無法取得"), "{error:#}");
 }
+
+/// MOPS 股利分派與 MoneyDJ 政策表都抓不到時只降級：期別全部改問 Yahoo（這裡都查無頁面），
+/// 不新增任何列、兩檔都計為無法判定，掃描本身仍成功。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn scan_degrades_when_mops_and_moneydj_are_unavailable() {
+    dotenvy::dotenv().ok();
+    let pool = crate::infra::database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 scan_degrades_when_mops_and_moneydj_are_unavailable：無資料庫連接");
+        return;
+    }
+    let symbols = vec![MATCHED.to_string(), UNRESOLVED.to_string()];
+    sqlx::query("DELETE FROM dividend WHERE security_code = ANY($1)")
+        .bind(&symbols)
+        .execute(pool)
+        .await
+        .expect("清除測試股利");
+
+    // 只掛兩張預告表；MOPS、MoneyDJ 與 Yahoo 都是 mock server 預設的 404。
+    let server = MockServer::start().await;
+    let json = |body: serde_json::Value| ResponseTemplate::new(200).set_body_json(body);
+    Mock::given(method("GET"))
+        .and(path("/v1/exchangeReport/TWT48U_ALL"))
+        .respond_with(json(twt48u()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/openapi/v1/tpex_exright_prepost"))
+        .respond_with(json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+    let uri = server.uri();
+    let outcome = with_origins(
+        &[
+            ("https://openapi.twse.com.tw", &uri),
+            ("https://www.tpex.org.tw", &uri),
+            ("https://www.moneydj.com", &uri),
+            ("https://tw.stock.yahoo.com", &uri),
+        ],
+        scan_ex_dividend_announcements(),
+    )
+    .await
+    .expect("補強來源失敗只降級");
+    let inserted: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM dividend WHERE security_code = ANY($1)")
+            .bind(&symbols)
+            .fetch_one(pool)
+            .await
+            .expect("讀回股利");
+
+    assert_eq!(
+        (outcome.inserted, outcome.updated, outcome.unresolved),
+        (0, 0, 2)
+    );
+    assert_eq!(inserted, 0, "判不出期別絕不寫入");
+}
