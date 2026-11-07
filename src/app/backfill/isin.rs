@@ -12,7 +12,7 @@ use crate::{
 };
 
 use anyhow::{Result, anyhow};
-use chrono::Local;
+use chrono::{DateTime, Local};
 use scopeguard::defer;
 
 /// 執行台股國際證券識別碼 (ISIN) 的回補與更新流程。
@@ -26,8 +26,13 @@ use scopeguard::defer;
 /// - `Ok(())`：執行成功。
 /// - `Err(anyhow::Error)`：在執行或記錄錯誤時發生異常。
 pub async fn execute() -> Result<()> {
+    run(Local::now()).await
+}
+
+/// [`execute`] 的本體：`now` 決定是否為週末，並傳給各市場的抓取。
+async fn run(now: DateTime<Local>) -> Result<()> {
     // 週末台股不開市且資料不會更新，因此直接跳過不執行以節省資源
-    if Local::now().is_weekend() {
+    if now.is_weekend() {
         return Ok(());
     }
     tracing::info!("更新台股國際證券識別碼開始");
@@ -36,7 +41,9 @@ pub async fn execute() -> Result<()> {
        tracing::info!("更新台股國際證券識別碼結束");
     }
     // 遍歷要寫入股票主檔的市場（上市、上櫃、興櫃），併發執行 process_market
-    let tasks: Vec<_> = registry_markets().map(process_market).collect();
+    let tasks: Vec<_> = registry_markets()
+        .map(|mode| process_market(now, mode))
+        .collect();
 
     // 等待所有市場的非同步任務全部執行完畢
     let results = futures::future::join_all(tasks).await;
@@ -62,10 +69,11 @@ fn registry_markets() -> impl Iterator<Item = StockExchangeMarket> {
 /// 針對特定的交易所市場爬取 ISIN 代碼資訊，並檢查是否有新增或修改的股票。
 ///
 /// # 參數
+/// - `now`: 現在時間；週末時來源不更新、抓取直接回空。
 /// - `mode`: [`StockExchangeMarket`] 交易所市場類型，決定要爬取哪個市場的證券識別碼。
 ///
 /// # 運作流程
-/// 1. 呼叫 `twse::international_securities_identification_number::visit` 取得該市場的最新證券識別碼資料。
+/// 1. 呼叫 `twse::international_securities_identification_number::visit_on` 取得該市場的最新證券識別碼資料。
 /// 2. 遍歷爬取到的每檔證券，利用 [`backfill::is_stock_identity_new_or_changed`] 比對資料庫，
 ///    判斷是否為新股票或關鍵基本資料（產業、市場、名稱）有變動。
 /// 3. 若資料為全新或有變動，呼叫 [`update_stock_info`] 進行資料庫 Upsert 及快取同步。
@@ -73,9 +81,9 @@ fn registry_markets() -> impl Iterator<Item = StockExchangeMarket> {
 /// # 回傳值
 /// - `Ok(())`：該市場處理完成。
 /// - `Err(anyhow::Error)`：爬取或處理過程中發生錯誤。
-async fn process_market(mode: StockExchangeMarket) -> Result<()> {
+async fn process_market(now: DateTime<Local>, mode: StockExchangeMarket) -> Result<()> {
     // 透過 twse crawler 模組爬取指定市場的 ISIN 證券識別碼網頁並解析
-    let result = twse::international_securities_identification_number::visit(mode).await?;
+    let result = twse::international_securities_identification_number::visit_on(now, mode).await?;
     save_changed(&result).await;
     Ok(())
 }
@@ -167,91 +175,4 @@ async fn update_stock_info(cmd: &backfill::acl::RegisterStockCommand) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::infra::cache::SHARE;
-
-    use super::*;
-
-    #[test]
-    fn registry_markets_excludes_public_offering() {
-        let markets: Vec<_> = registry_markets().collect();
-        assert_eq!(
-            markets,
-            vec![
-                StockExchangeMarket::Listed,
-                StockExchangeMarket::OverTheCounter,
-                StockExchangeMarket::Emerging,
-            ]
-        );
-    }
-
-    fn isin(name: &str, industry: &str) -> InternationalSecuritiesIdentificationNumber {
-        InternationalSecuritiesIdentificationNumber {
-            stock_symbol: "79979IS".to_string(),
-            name: name.to_string(),
-            isin_code: String::new(),
-            listing_date: String::new(),
-            industry: industry.to_string(),
-            cfi_code: String::new(),
-            market: StockExchangeMarket::Listed,
-        }
-    }
-
-    /// 新股票寫入、資料相同不重寫、改名再寫入；公開發行（市場別對照表沒有）不寫。假代號結束時刪除。
-    #[tokio::test]
-    #[cfg_attr(
-        not(feature = "integration-tests"),
-        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
-    )]
-    async fn save_changed_writes_new_and_changed_stocks_only() {
-        dotenvy::dotenv().ok();
-        let pool = crate::infra::database::get_connection();
-        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
-            println!("跳過 save_changed_writes_new_and_changed_stocks_only：無資料庫連接");
-            return;
-        }
-        SHARE.load().await;
-        let cleanup = || async {
-            let _ = sqlx::query("DELETE FROM stocks WHERE stock_symbol = '79979IS'")
-                .execute(pool)
-                .await;
-        };
-        cleanup().await;
-
-        let public = InternationalSecuritiesIdentificationNumber {
-            market: StockExchangeMarket::Public,
-            ..isin("公開發行", "水泥工業")
-        };
-        let first = save_changed(&[isin("測試新股", "水泥工業"), public]).await;
-        let unchanged = save_changed(&[isin("測試新股", "水泥工業")]).await;
-        let renamed = save_changed(&[isin("測試改名", "水泥工業")]).await;
-        let name: Option<String> =
-            sqlx::query_scalar(r#"SELECT "Name" FROM stocks WHERE stock_symbol = '79979IS'"#)
-                .fetch_optional(pool)
-                .await
-                .expect("查詢股票");
-        cleanup().await;
-
-        assert_eq!((first, unchanged, renamed), (1, 0, 1));
-        assert_eq!(name.as_deref(), Some("測試改名"));
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_execute() {
-        dotenvy::dotenv().ok();
-        SHARE.load().await;
-        tracing::debug!("開始 execute");
-
-        match execute().await {
-            Ok(_) => {
-                tracing::debug!("完成 execute");
-            }
-            Err(why) => {
-                tracing::debug!("Failed to execute because {:?}", why);
-            }
-        }
-
-        tracing::debug!("結束 execute");
-    }
-}
+mod tests;

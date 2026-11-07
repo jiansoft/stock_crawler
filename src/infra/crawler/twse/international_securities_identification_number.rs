@@ -41,7 +41,9 @@ pub async fn visit(
 }
 
 /// [`visit`] 的本體：`now` 落在週末時直接回空（來源不更新）。
-async fn visit_on(
+///
+/// 排程入口自己帶入現在時間時用這個，週末判斷才能以固定日期測試。
+pub(crate) async fn visit_on(
     now: DateTime<Local>,
     mode: StockExchangeMarket,
 ) -> Result<Vec<InternationalSecuritiesIdentificationNumber>> {
