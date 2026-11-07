@@ -22,10 +22,16 @@
 
 use std::collections::HashMap;
 
-use chrono::{Datelike, Days, Months, NaiveDate};
-use rust_decimal::{Decimal, prelude::ToPrimitive};
+use chrono::{Months, NaiveDate};
+use rust_decimal::Decimal;
 
-use super::payout::PayoutAllocation;
+mod entitlement;
+mod schedule;
+
+pub use self::entitlement::{Entitlement, entitlements};
+use self::schedule::{
+    cadence_schedule, dedupe_dated, is_periodic, money, month_key, month_range, next_year, pay_date,
+};
 
 /// 沒有發放日時，以除息日後幾天推估發放日（台股多在除息後 3～5 週發放）。
 pub const PAYABLE_LAG_DAYS: u64 = 30;
@@ -62,83 +68,6 @@ pub struct DividendEvent {
     pub ex_date: Option<NaiveDate>,
     /// 發放日；尚未公布為 `None`。
     pub payable_date: Option<NaiveDate>,
-}
-
-/// 已除息、已有已領股利明細的一筆現金股利（各會員合計）。
-#[derive(Debug, Clone, PartialEq)]
-pub struct Entitlement {
-    /// 股票代號。
-    pub stock_symbol: String,
-    /// 股票名稱。
-    pub name: String,
-    /// 除息日。
-    pub ex_date: NaiveDate,
-    /// 發放日。
-    pub pay_date: NaiveDate,
-    /// 每股現金股利。
-    pub cash_per_share: Decimal,
-    /// 除息日參與分配的股數。
-    pub shares: i64,
-    /// 已領股利明細的現金金額。
-    pub amount: Decimal,
-}
-
-impl Entitlement {
-    fn to_item(&self) -> ForecastItem {
-        ForecastItem {
-            stock_symbol: self.stock_symbol.clone(),
-            name: self.name.clone(),
-            shares: self.shares,
-            ex_date: self.ex_date,
-            pay_date: self.pay_date,
-            cash_per_share: self.cash_per_share,
-            amount: self.amount,
-            basis: Basis::Announced,
-            entitled: true,
-        }
-    }
-}
-
-/// 由股利入帳分配取出已除息、有已領明細的現金股利，依（代號, 除息日）合併各會員。
-///
-/// 以目前持股推算（`estimated`）、沒有現金、缺除息日或發放日的列不取；同一除息日有多列
-/// （例如月配 ETF 的季別與月別）時取金額大者，與 [`forecast`] 對股利列的去重一致。
-pub fn entitlements(allocations: &[PayoutAllocation]) -> Vec<Entitlement> {
-    let mut by_row: HashMap<(&str, NaiveDate, &str), Entitlement> = HashMap::new();
-    for allocation in allocations {
-        if allocation.estimated || allocation.cash_amount <= Decimal::ZERO {
-            continue;
-        }
-        let (Some(ex_date), Some(pay_date)) = (allocation.cash_ex, allocation.cash_payable) else {
-            continue;
-        };
-        let key = (
-            allocation.stock_symbol.as_str(),
-            ex_date,
-            allocation.quarter.as_str(),
-        );
-        let entry = by_row.entry(key).or_insert_with(|| Entitlement {
-            stock_symbol: allocation.stock_symbol.clone(),
-            name: allocation.name.clone(),
-            ex_date,
-            pay_date,
-            cash_per_share: allocation.cash_dividend,
-            shares: 0,
-            amount: Decimal::ZERO,
-        });
-        entry.shares += allocation.shares;
-        entry.amount += allocation.cash_amount;
-    }
-    let mut rows: Vec<Entitlement> = by_row.into_values().collect();
-    rows.sort_by(|a, b| {
-        (&a.stock_symbol, a.ex_date)
-            .cmp(&(&b.stock_symbol, b.ex_date))
-            .then_with(|| b.amount.cmp(&a.amount))
-    });
-    rows.dedup_by(|later, kept| {
-        later.stock_symbol == kept.stock_symbol && later.ex_date == kept.ex_date
-    });
-    rows
 }
 
 /// 預估依據。
@@ -411,118 +340,6 @@ pub fn forecast(
         months: month_list,
         items,
     }
-}
-
-/// 有除息日的列，同一除息日只留一列：優先各期列（期別非空），再取金額大者。
-fn dedupe_dated<'a>(events: &[&'a DividendEvent]) -> Vec<&'a DividendEvent> {
-    let mut best: HashMap<NaiveDate, &DividendEvent> = HashMap::new();
-    for event in events {
-        let Some(ex_date) = event.ex_date else {
-            continue;
-        };
-        let rank =
-            |candidate: &DividendEvent| (!candidate.quarter.is_empty(), candidate.cash_per_share);
-        best.entry(ex_date)
-            .and_modify(|current| {
-                if rank(event) > rank(current) {
-                    *current = event;
-                }
-            })
-            .or_insert(event);
-    }
-    let mut dated: Vec<&DividendEvent> = best.into_values().collect();
-    dated.sort_by_key(|event| event.ex_date);
-    dated
-}
-
-/// 季配（`Q`）與月配（`M`）的期別；年配（空白）與半年配（`H`）不算。
-fn is_periodic(quarter: &str) -> bool {
-    quarter.starts_with('Q') || quarter.starts_with('M')
-}
-
-/// 月配依間隔往後排的（除息日, 發放日），只取發放日落在 `today` 之後、`end` 以前者。
-///
-/// 間隔取最近兩期除息日相差的月數（至少 1 個月；只有一期時當作 1 個月），發放日沿用
-/// 最近一期「除息到發放」的天數。最近一期已超過兩個間隔沒有配息時視為停配，不排。
-fn cadence_schedule(
-    periodic: &[&DividendEvent],
-    today: NaiveDate,
-    end: NaiveDate,
-) -> Vec<(NaiveDate, NaiveDate)> {
-    let Some((latest, earlier)) = periodic.split_last() else {
-        return Vec::new();
-    };
-    let Some(latest_ex) = latest.ex_date else {
-        return Vec::new();
-    };
-    let step = earlier
-        .last()
-        .and_then(|previous| previous.ex_date)
-        .map_or(1, |previous_ex| {
-            months_between(previous_ex, latest_ex).max(1)
-        });
-    let stale = latest_ex
-        .checked_add_months(Months::new(step * 2))
-        .is_none_or(|limit| limit < today);
-    if stale {
-        return Vec::new();
-    }
-    let pay_gap = pay_date(latest) - latest_ex;
-
-    let mut schedule = Vec::new();
-    for count in 1.. {
-        let Some(ex_date) = latest_ex.checked_add_months(Months::new(step * count)) else {
-            break;
-        };
-        let pay_date = ex_date + pay_gap;
-        if pay_date > end {
-            break;
-        }
-        if pay_date > today {
-            schedule.push((ex_date, pay_date));
-        }
-    }
-    schedule
-}
-
-/// `from` 到 `to` 相差的月數（只看年月）。
-fn months_between(from: NaiveDate, to: NaiveDate) -> u32 {
-    let months = (to.year() - from.year()) * 12 + to.month() as i32 - from.month() as i32;
-    u32::try_from(months).unwrap_or_default()
-}
-
-/// 發放日：已公告用公告日，否則除息日後 [`PAYABLE_LAG_DAYS`] 天。
-fn pay_date(event: &DividendEvent) -> NaiveDate {
-    event.payable_date.unwrap_or_else(|| {
-        let ex_date = event.ex_date.unwrap_or_default();
-        ex_date + Days::new(PAYABLE_LAG_DAYS)
-    })
-}
-
-fn next_year(date: NaiveDate) -> Option<NaiveDate> {
-    date.checked_add_months(Months::new(12))
-}
-
-fn month_key(date: NaiveDate) -> String {
-    format!("{:04}-{:02}", date.year(), date.month())
-}
-
-/// `today` 所在月份到 `end` 所在月份（含）的每個月。
-fn month_range(today: NaiveDate, end: NaiveDate) -> Vec<String> {
-    let mut months = Vec::new();
-    let mut cursor = today.with_day(1).unwrap_or(today);
-    while cursor <= end {
-        months.push(month_key(cursor));
-        match cursor.checked_add_months(Months::new(1)) {
-            Some(next) => cursor = next,
-            None => break,
-        }
-    }
-    months
-}
-
-fn money(value: Decimal) -> f64 {
-    value.round_dp(2).to_f64().unwrap_or_default()
 }
 
 #[cfg(test)]
