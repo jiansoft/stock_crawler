@@ -63,3 +63,53 @@ async fn save_qfii_batch_skips_empty_input() {
         .expect("空清單不需要資料庫");
     assert_eq!(updated, 0);
 }
+
+/// 逐檔更新權值後全部歸零；假代號結束時刪除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn update_weight_then_zeroed_out_weights() {
+    dotenvy::dotenv().ok();
+    let pool = database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 update_weight_then_zeroed_out_weights：無資料庫連接");
+        return;
+    }
+    let symbol = "79979WT";
+    let cleanup = || async {
+        sqlx::query("DELETE FROM stocks WHERE stock_symbol = $1")
+            .bind(symbol)
+            .execute(pool)
+            .await
+            .expect("清除測試股票");
+    };
+    cleanup().await;
+    sqlx::query(
+        r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol) VALUES ($1, '測試權值', $1)"#,
+    )
+    .bind(symbol)
+    .execute(pool)
+    .await
+    .expect("插入測試股票");
+    let weight = || async {
+        sqlx::query_scalar::<_, Decimal>("SELECT weight FROM stocks WHERE stock_symbol = $1")
+            .bind(symbol)
+            .fetch_one(pool)
+            .await
+            .expect("讀回權值")
+    };
+
+    let repo = PgStockRepository::new();
+    let updated = repo.update_weight(symbol, dec!(1.2345)).await;
+    let after_update = weight().await;
+    let zeroed = repo.zeroed_out_weights().await;
+    let after_zero = weight().await;
+    cleanup().await;
+
+    updated.expect("更新權值");
+    zeroed.expect("權值歸零");
+    assert_eq!(after_update, dec!(1.2345));
+    assert_eq!(after_zero, Decimal::ZERO);
+}

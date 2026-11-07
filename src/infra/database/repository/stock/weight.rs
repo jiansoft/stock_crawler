@@ -9,16 +9,11 @@ use crate::infra::database;
 pub(super) async fn zeroed_out_weights() -> Result<()> {
     let sql = "UPDATE stocks SET weight = 0";
     let mut tx = database::get_tx().await?;
-    let _ = match sqlx::query(sql).execute(&mut *tx).await {
-        Ok(result) => result,
-        Err(why) => {
-            tx.rollback().await?;
-            return Err(anyhow::anyhow!(
-                "Failed to zeroed_out_weights in PgStockRepository because {:?}",
-                why
-            ));
-        }
-    };
+    // 失敗時 `tx` 隨 `?` 提前返回被丟棄，sqlx 會自動 rollback。
+    sqlx::query(sql)
+        .execute(&mut *tx)
+        .await
+        .context("Failed to zeroed_out_weights in PgStockRepository")?;
     tx.commit().await?;
     Ok(())
 }
