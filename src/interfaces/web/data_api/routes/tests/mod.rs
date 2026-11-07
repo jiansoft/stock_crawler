@@ -30,6 +30,7 @@ mod phase1;
 mod phase2_3;
 mod phase4;
 mod portfolio;
+mod portfolio_exposure;
 mod portfolio_holdings;
 mod portfolio_income;
 mod portfolio_payouts;
