@@ -3,7 +3,10 @@ use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 // 通知改走 core::alert 抽象介面，infra 層不直接依賴 interfaces::bot（反向耦合）。
-use crate::{core::alert, core::util, infra::crawler::twse};
+use crate::{core::alert, core::util, infra::crawler::twse, infra::nosql::redis::CLIENT};
+
+/// 最近一次成功取得的休市日表在 Redis 的保存時間（秒）：400 天，跨年查前一年也還在。
+const BACKUP_TTL_SECONDS: usize = 400 * 24 * 60 * 60;
 
 #[derive(Serialize, Deserialize)]
 struct HolidayScheduleResponse {
@@ -56,6 +59,54 @@ pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
     }
 
     Ok(parse_holiday_data(&res.data))
+}
+
+/// 取得指定年度的休市日清單；證交所讀不到或回空清單時，改用 Redis 裡最近一次成功的結果。
+///
+/// 11-07 健康週報（週六 11:00）證交所連續逾時三次，缺漏交易日檢查因此整段略過；休市日表一年只公布
+/// 一次、很少變動，用前一次的結果比略過檢查可靠。成功取得時順手更新備份（寫入失敗只記 DEBUG）。
+/// 需要「讀不到就停下」的呼叫端（盤中追蹤判斷今天是否開市）仍用 [`visit`]。
+///
+/// # 錯誤
+///
+/// 證交所讀不到且 Redis 沒有該年度的備份時，回傳證交所的錯誤。
+pub async fn visit_or_backup(year: i32) -> Result<Vec<HolidaySchedule>> {
+    let fetched = visit(year).await;
+    if let Ok(schedule) = &fetched
+        && !schedule.is_empty()
+    {
+        save_backup(year, schedule).await;
+        return fetched;
+    }
+    match load_backup(year).await {
+        Some(schedule) => {
+            let days = schedule.len();
+            tracing::warn!("{year} 年休市日表讀不到或是空的，改用 Redis 備份（{days} 天）");
+            Ok(schedule)
+        }
+        None => fetched,
+    }
+}
+
+/// 休市日表備份的 Redis key。
+fn backup_key(year: i32) -> String {
+    format!("twse:holiday_schedule:{year}")
+}
+
+/// 把成功取得的休市日表寫進 Redis；失敗只記 DEBUG，不影響本次結果。
+async fn save_backup(year: i32, schedule: &[HolidaySchedule]) {
+    let Ok(json) = serde_json::to_string(schedule) else {
+        return;
+    };
+    if let Err(why) = CLIENT.set(backup_key(year), json, BACKUP_TTL_SECONDS).await {
+        tracing::debug!("寫入 {year} 年休市日表備份失敗: {why:?}");
+    }
+}
+
+/// 讀 Redis 裡該年度的休市日表備份；沒有、讀不到或格式不符時為 `None`。
+async fn load_backup(year: i32) -> Option<Vec<HolidaySchedule>> {
+    let json = CLIENT.get_string(&backup_key(year)).await.ok()?;
+    serde_json::from_str(&json).ok()
 }
 
 /// 將 API 回應的原始資料列轉換為 `HolidaySchedule`。
@@ -137,6 +188,92 @@ mod tests {
     fn test_parse_holiday_data_empty() {
         let result = parse_holiday_data(&[]);
         assert!(result.is_empty());
+    }
+
+    /// 以本機 mock server 取代證交所休市日表。
+    mod backup {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use super::*;
+        use crate::core::util::http::mock_origin::with_origins;
+
+        const TWSE: &str = "https://www.twse.com.tw";
+
+        async fn server(year: &str, body: ResponseTemplate) -> MockServer {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/rwd/zh/holidaySchedule/holidaySchedule"))
+                .and(query_param("date", year))
+                .respond_with(body)
+                .mount(&server)
+                .await;
+            server
+        }
+
+        fn holiday(year: i32) -> HolidaySchedule {
+            HolidaySchedule {
+                date: NaiveDate::from_ymd_opt(year, 10, 10).expect("有效日期"),
+                why: "國慶日".to_string(),
+            }
+        }
+
+        fn ok_body(year: i32) -> ResponseTemplate {
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "stat": "ok", "date": format!("{year}0101"), "queryYear": year, "total": 1,
+                "data": [[format!("{year}-10-10"), "國慶日", "依規定放假1日。"]]
+            }))
+        }
+
+        fn broken_body() -> ResponseTemplate {
+            ResponseTemplate::new(200).set_body_string("not json")
+        }
+
+        /// 證交所讀不到、Redis 也沒有備份時回傳證交所的錯誤（1985 年從不寫備份）。
+        #[tokio::test]
+        async fn visit_or_backup_fails_without_backup() {
+            let server = server("1985", broken_body()).await;
+            let uri = server.uri();
+            let result = with_origins(&[(TWSE, uri.as_str())], visit_or_backup(1985)).await;
+            assert!(result.is_err(), "沒有備份時不能當成沒有休市日");
+        }
+
+        /// 連 Redis：成功時寫備份；之後證交所讀不到就讀備份。
+        #[tokio::test]
+        #[cfg_attr(
+            not(feature = "integration-tests"),
+            ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+        )]
+        async fn visit_or_backup_falls_back_to_last_success() {
+            dotenvy::dotenv().ok();
+            if CLIENT.ping().await.is_err() {
+                println!("跳過 visit_or_backup_falls_back_to_last_success：無 Redis 連接");
+                return;
+            }
+            const YEAR: i32 = 1986;
+            CLIENT.delete(&backup_key(YEAR)).await.expect("清掉舊備份");
+
+            let ok = server("1986", ok_body(YEAR)).await;
+            let uri = ok.uri();
+            let fetched = with_origins(&[(TWSE, uri.as_str())], visit_or_backup(YEAR))
+                .await
+                .expect("證交所可讀");
+            assert_eq!(fetched, vec![holiday(YEAR)]);
+            assert_eq!(
+                load_backup(YEAR).await,
+                Some(vec![holiday(YEAR)]),
+                "成功時寫備份"
+            );
+
+            let broken = server("1986", broken_body()).await;
+            let uri = broken.uri();
+            let fallback = with_origins(&[(TWSE, uri.as_str())], visit_or_backup(YEAR))
+                .await
+                .expect("讀不到時改用備份");
+            assert_eq!(fallback, vec![holiday(YEAR)]);
+
+            CLIENT.delete(&backup_key(YEAR)).await.expect("清理備份");
+        }
     }
 
     #[tokio::test]
