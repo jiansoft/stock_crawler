@@ -32,6 +32,7 @@ impl Drop for LogDir {
 }
 
 /// 同一天多行（收盤重跑）次數相加、天數算一次；期間外、非 info 檔不算；其他行略過。
+/// 被擋天數最多的股票排前面（同天數依代號），附最近一天的採集價；舊格式只有代號、省略號不算代號。
 /// 11-07 起每檔附採集價與昨收（`3189 452.96／昨收 900`），新舊格式都要讀得到。
 #[test]
 fn weekly_abnormal_prices_sums_sites_by_day() {
@@ -49,7 +50,7 @@ fn weekly_abnormal_prices_sums_sites_by_day() {
     );
     dir.write(
         "2026-10-09_default_info.log",
-        &["今日過濾異常價格：HiStock 50 次（12 檔：1101、1102…）"],
+        &["今日過濾異常價格：HiStock 50 次（12 檔：1101、3189 452.96／昨收 900…）"],
     );
     dir.write(
         "2026-10-03_default_info.log",
@@ -63,8 +64,28 @@ fn weekly_abnormal_prices_sums_sites_by_day() {
     let weekly = weekly_abnormal_prices(&dir.0, day(4), day(10));
     assert_eq!(
         abnormal_price_line(&weekly),
-        "本週異常價格：CnYes 1 次（1 天）、HiStock 55 次（2 天）、Yahoo 1 次（1 天）；⚠️ HiStock 一週超過 50 次，檢查來源"
+        concat!(
+            "本週異常價格：CnYes 1 次（1 天）、HiStock 55 次（2 天）、Yahoo 1 次（1 天）；",
+            "⚠️ HiStock 一週超過 50 次，檢查來源；",
+            "最常被擋：3189 2 天（452.96／昨收 900）、1101 1 天、2330 1 天（0／昨收 1000）"
+        )
     );
     let missing = weekly_abnormal_prices(&dir.0.join("missing"), day(4), day(10));
     assert_eq!(abnormal_price_line(&missing), "本週異常價格 0 次");
+}
+
+/// 統計行沒有列出代號時只列站點，不附「最常被擋」。
+#[test]
+fn weekly_abnormal_prices_without_symbols_lists_sites_only() {
+    let dir = LogDir::new("weekly_abnormal_prices_no_symbols");
+    dir.write(
+        "2026-10-08_default_info.log",
+        &["今日過濾異常價格：HiStock 1 次（1 檔：）"],
+    );
+
+    let weekly = weekly_abnormal_prices(&dir.0, day(4), day(10));
+    assert_eq!(
+        abnormal_price_line(&weekly),
+        "本週異常價格：HiStock 1 次（1 天）"
+    );
 }
