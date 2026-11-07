@@ -87,14 +87,16 @@ async fn update_changed_writes_only_different_values() {
     assert_eq!(values, (dec!(12.34), dec!(15)));
 }
 
-/// 排程入口：週末直接結束；平日抓 mock 的興櫃名冊（沒有資料列）後不寫任何資料。
+/// 排程本體：週末直接結束；平日抓 mock 的興櫃名冊（沒有資料列）後不寫任何資料。排程入口也跑一次。
 #[tokio::test]
 #[cfg_attr(
     not(feature = "integration-tests"),
     ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
 )]
-async fn execute_fetches_emerging_list_on_weekdays() {
-    if database_unavailable("execute_fetches_emerging_list_on_weekdays").await {
+async fn run_fetches_emerging_list_on_weekdays_only() {
+    use chrono::TimeZone;
+
+    if database_unavailable("run_fetches_emerging_list_on_weekdays_only").await {
         return;
     }
     let server = MockServer::start().await;
@@ -105,11 +107,51 @@ async fn execute_fetches_emerging_list_on_weekdays() {
         .respond_with(ResponseTemplate::new(200).set_body_string(
             r#"<html><body><table id="company_list"><tbody></tbody></table></body></html>"#,
         ))
+        .expect(1)
         .mount(&server)
         .await;
+    let uri = server.uri();
+    // 1999-03-10 是星期三、03-13 是星期六；只有平日那次會打到 mock（expect(1)）。
+    let weekday = Local.with_ymd_and_hms(1999, 3, 10, 5, 0, 0).single().expect("固定時間合法");
+    let saturday = Local.with_ymd_and_hms(1999, 3, 13, 5, 0, 0).single().expect("固定時間合法");
+
+    let results = with_origins(&[("https://www.tpex.org.tw", &uri)], async {
+        (run(weekday).await, run(saturday).await)
+    })
+    .await;
+
+    assert!(results.0.is_ok() && results.1.is_ok(), "{results:?}");
+}
+
+/// 排程入口以現在時間執行：週末直接結束，平日抓 mock 的空名冊，都不寫資料。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn execute_uses_current_time() {
+    if database_unavailable("execute_uses_current_time").await {
+        return;
+    }
+    let server = empty_emerging_list().await;
     let uri = server.uri();
 
     let result = with_origins(&[("https://www.tpex.org.tw", &uri)], execute()).await;
 
     assert!(result.is_ok(), "{result:?}");
+}
+
+/// 興櫃名冊頁（沒有資料列）的 mock server。
+async fn empty_emerging_list() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/web/regular_emerging/corporateInfo/emerging/emerging_stock.php",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"<html><body><table id="company_list"><tbody></tbody></table></body></html>"#,
+        ))
+        .mount(&server)
+        .await;
+    server
 }
