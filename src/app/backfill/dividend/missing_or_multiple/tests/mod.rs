@@ -1,7 +1,8 @@
 //! 股利補抓（季配／半年配與缺漏）的單元與整合測試。
 //!
-//! 子模組：`refresh`（逐檔迴圈 `refresh_stocks`／`refresh_year`：跳過旗標、額度、關機提早結束）。
+//! 子模組：`fetch`（連資料庫的整輪與單檔補抓）、`refresh`（逐檔迴圈 `refresh_stocks`／`refresh_year`：跳過旗標、額度、關機提早結束）。
 
+mod fetch;
 mod refresh;
 
 use chrono::Local;
