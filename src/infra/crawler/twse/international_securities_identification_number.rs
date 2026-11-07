@@ -41,14 +41,17 @@ pub async fn visit(
         return Ok(Vec::new());
     }
 
+    Ok(parse_isin_html(&fetch_page(mode).await?, mode))
+}
+
+/// 取得指定市場的 ISIN 名冊頁（Big5 編碼）。
+async fn fetch_page(mode: StockExchangeMarket) -> Result<String> {
     let url = format!(
         "https://isin.{}/isin/C_public.jsp?strMode={}",
         twse::HOST,
         mode.serial()
     );
-
-    let response = util::http::get_use_big5(&url).await?;
-    Ok(parse_isin_html(&response, mode))
+    util::http::get_use_big5(&url).await
 }
 
 /// 調用 twse API 取得指定市場「全部類別」的現行掛牌證券代號名冊。
@@ -67,14 +70,7 @@ pub async fn visit_all_listed_symbols(
         return Ok(std::collections::HashSet::new());
     }
 
-    let url = format!(
-        "https://isin.{}/isin/C_public.jsp?strMode={}",
-        twse::HOST,
-        mode.serial()
-    );
-
-    let response = util::http::get_use_big5(&url).await?;
-    Ok(parse_all_symbols_html(&response))
+    Ok(parse_all_symbols_html(&fetch_page(mode).await?))
 }
 
 /// 解析 TWSE ISIN 頁面，取出「全部類別」的證券代號集合。
@@ -169,119 +165,4 @@ fn parse_isin_html(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 最小 HTML fixture：含一個類別標頭列與兩筆資料列（6 欄、5 欄各一）。
-    const FIXTURE_HTML: &str = r#"<html><body>
-<table class="h4"><tbody>
-<tr><th>證券名稱及代號</th><th>國際證券辨識號碼(ISIN Code)</th><th>上市日</th><th>市場別</th><th>產業別</th><th>CFI Code</th></tr>
-<tr><td>股票</td><td>類別</td></tr>
-<tr><td>2330　台積電</td><td>TW0002330008</td><td>1994/09/05</td><td>上市</td><td>半導體業</td><td>ESVUFR</td></tr>
-<tr><td>2317　鴻海</td><td>TW0002317006</td><td>1991/06/11</td><td>上市</td><td>電腦及週邊設備業</td><td>ESVUFR</td></tr>
-<tr><td>特別股</td><td>類別</td></tr>
-<tr><td>2330A　台積電甲特</td><td>TW0002330016</td><td>2022/01/01</td><td>上市</td><td>ESVPFR</td></tr>
-<tr><td>臺灣存託憑證(TDR)</td><td>類別</td></tr>
-<tr><td>9103　美德醫療-DR</td><td>TW0009103002</td><td>2002/12/13</td><td>上市</td><td>EDSDDR</td></tr>
-</tbody></table>
-</body></html>"#;
-
-    /// 全類別名冊解析：不過濾類別，ETF 等也要納入；類別標頭列跳過。
-    #[test]
-    fn parse_all_symbols_html_includes_every_category() {
-        let html = r#"<html><body>
-<table class="h4"><tbody>
-<tr><th>證券名稱及代號</th><th>ISIN</th><th>上市日</th><th>市場別</th><th>產業別</th><th>CFI Code</th></tr>
-<tr><td>股票</td><td>類別</td></tr>
-<tr><td>2330　台積電</td><td>TW0002330008</td><td>1994/09/05</td><td>上市</td><td>半導體業</td><td>ESVUFR</td></tr>
-<tr><td>ETF</td><td>類別</td></tr>
-<tr><td>0050　元大台灣50</td><td>TW0000050004</td><td>2003/06/30</td><td>上市</td><td>CEOGEU</td></tr>
-<tr><td>00699R　元大美債7-10反1</td><td>TW00000699R5</td><td>2017/06/08</td><td>上市</td><td>CEOMRU</td></tr>
-<tr><td>受益證券</td><td>類別</td></tr>
-<tr><td>01001T　土銀富邦R1</td><td>TW00001001T8</td><td>2005/03/10</td><td>上市</td><td>CBCIXU</td></tr>
-</tbody></table>
-</body></html>"#;
-
-        let symbols = parse_all_symbols_html(html);
-
-        // 股票、ETF（含反向）、受益證券全部都要在名冊內。
-        assert_eq!(symbols.len(), 4);
-        assert!(symbols.contains("2330"));
-        assert!(symbols.contains("0050"));
-        assert!(symbols.contains("00699R"));
-        assert!(symbols.contains("01001T"));
-    }
-
-    /// 與目標結構無關的頁面回傳空集合，交由呼叫端的名冊大小安全閥攔下。
-    #[test]
-    fn parse_all_symbols_html_returns_empty_for_unrelated_page() {
-        assert!(parse_all_symbols_html("<html><body><p>維護中</p></body></html>").is_empty());
-    }
-
-    #[test]
-    fn test_parse_isin_html_basic() {
-        let result = parse_isin_html(FIXTURE_HTML, StockExchangeMarket::Listed);
-        // 2 股票 + 1 特別股（5 欄，industry = 未分類）+ 1 TDR（5 欄，industry = 存託憑證）
-        assert_eq!(result.len(), 4);
-
-        let tsmc = &result[0];
-        assert_eq!(tsmc.stock_symbol, "2330");
-        assert_eq!(tsmc.name, "台積電");
-        assert_eq!(tsmc.isin_code, "TW0002330008");
-        assert_eq!(tsmc.listing_date, "1994/09/05");
-        assert_eq!(tsmc.industry, "半導體業");
-        assert_eq!(tsmc.cfi_code, "ESVUFR");
-
-        // 5 欄版本：industry 應填 "未分類"
-        let preferred = &result[2];
-        assert_eq!(preferred.stock_symbol, "2330A");
-        assert_eq!(preferred.industry, "未分類");
-        assert_eq!(preferred.cfi_code, "ESVPFR");
-
-        let tdr = &result[3];
-        assert_eq!(tdr.stock_symbol, "9103");
-        assert_eq!(tdr.industry, "存託憑證");
-        assert_eq!(tdr.cfi_code, "EDSDDR");
-    }
-
-    #[test]
-    fn test_parse_isin_html_skips_non_required_category() {
-        let html = r#"<html><body><table class="h4"><tbody>
-<tr><th>header</th></tr>
-<tr><td>認購權證</td><td>類別</td></tr>
-<tr><td>9999　某權證</td><td>TW1234567890</td><td>2020/01/01</td><td>上市</td><td>其他</td><td>RWXXXX</td></tr>
-</tbody></table></body></html>"#;
-        let result = parse_isin_html(html, StockExchangeMarket::Listed);
-        assert!(
-            result.is_empty(),
-            "認購權證不在 REQUIRED_CATEGORIES 中，應被過濾"
-        );
-    }
-
-    #[test]
-    fn test_parse_isin_html_empty_table() {
-        let html = r#"<html><body><table class="h4"><tbody></tbody></table></body></html>"#;
-        let result = parse_isin_html(html, StockExchangeMarket::Listed);
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_visit() {
-        dotenvy::dotenv().ok();
-        tracing::debug!("開始 visit");
-        for mode in StockExchangeMarket::iterator() {
-            match visit(mode).await {
-                Err(why) => {
-                    tracing::error!("Failed to visit because {:?}", why);
-                }
-                Ok(result) => {
-                    for item in result.iter() {
-                        tracing::debug!("item:{:#?}", item);
-                    }
-                }
-            }
-        }
-        tracing::debug!("結束 visit");
-    }
-}
+mod tests;
