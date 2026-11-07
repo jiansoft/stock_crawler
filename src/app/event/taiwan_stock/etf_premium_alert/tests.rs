@@ -192,3 +192,92 @@ fn message_lists_alerts_in_order() {
     assert!(message.contains("00679B 名稱00679B 連續 5 日折價，今日 \\-1\\.20%、平均 \\-1\\.25%"));
     assert!(build_message(day(21), &[], |_| String::new()).is_none());
 }
+
+/// 排程本體接資料庫：種入假會員持有的假 ETF 與固定日期的淨值，剛轉高溢價與大額申購各發一則。
+mod database {
+    use chrono::NaiveDate;
+
+    use super::*;
+
+    const MEMBER: i64 = 979_794;
+    const ETF: &str = "0079979PA";
+
+    fn date(day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(1999, 3, day).expect("固定日期合法")
+    }
+
+    async fn cleanup(pool: &sqlx::PgPool) {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(pool)
+            .await
+            .expect("清除測試持股");
+        sqlx::query("DELETE FROM etf_daily_nav WHERE stock_symbol = $1")
+            .bind(ETF)
+            .execute(pool)
+            .await
+            .expect("清除測試淨值");
+    }
+
+    async fn seed(pool: &sqlx::PgPool) {
+        sqlx::query(
+            "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, holding_cost, is_sold) VALUES ($1, $2, 1000, -1, false)",
+        )
+        .bind(MEMBER)
+        .bind(ETF)
+        .execute(pool)
+        .await
+        .expect("種入測試持股");
+        // 前一天溢價 0.5%、今天 2.5%（剛轉高溢價）；今天受益單位增加 10%（大額申購）。
+        sqlx::query(
+            r#"INSERT INTO etf_daily_nav (date, stock_symbol, outstanding_units, units_change, estimated_nav, premium_rate)
+               VALUES ($1, $3, 1000000, 0, 20, 0.5), ($2, $3, 1100000, 100000, 20, 2.5)"#,
+        )
+        .bind(date(9))
+        .bind(date(10))
+        .bind(ETF)
+        .execute(pool)
+        .await
+        .expect("種入測試淨值");
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn run_alerts_new_premium_and_large_creation() {
+        dotenvy::dotenv().ok();
+        let pool = crate::infra::database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 run_alerts_new_premium_and_large_creation：無資料庫連接");
+            return;
+        }
+        cleanup(pool).await;
+        seed(pool).await;
+
+        let alerts = run(date(10)).await;
+        let next_day = run(date(11)).await;
+        cleanup(pool).await;
+
+        assert_eq!(alerts.expect("檢查完成"), 2, "高溢價＋大額申購");
+        assert_eq!(next_day.expect("檢查完成"), 0, "最新一筆不是今天時不判斷");
+    }
+
+    /// 排程入口以今天為基準；假持股的淨值是 1999 年的舊資料，不會發出通知。
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn execute_runs_against_today() {
+        dotenvy::dotenv().ok();
+        let pool = crate::infra::database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 execute_runs_against_today：無資料庫連接");
+            return;
+        }
+
+        assert!(execute().await.is_ok());
+    }
+}
