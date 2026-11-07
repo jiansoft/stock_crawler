@@ -16,7 +16,7 @@
 //!
 //! 每天只跑一次，不另外記錄已通知；服務在 20:40 之後才重啟也不會補發。
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write;
 use std::time::Duration;
 
@@ -75,20 +75,7 @@ pub async fn execute() -> Result<()> {
         holdings: symbols.len(),
         ..Default::default()
     };
-    let mut flows = Vec::with_capacity(symbols.len());
-    for symbol in &symbols {
-        match broker_flow::visit(symbol).await {
-            Ok(flow) if flow.date == today => flows.push(flow),
-            Ok(_) => summary.stale += 1,
-            Err(why) => {
-                summary.failed += 1;
-                tracing::warn!("主力進出抓取失敗: stock_symbol={symbol}, error={why:#}");
-            }
-        }
-        tokio::time::sleep(STOCK_INTERVAL).await;
-    }
-
-    summary.fetched = flows.len();
+    let flows = collect_flows(&symbols, today, &mut summary).await;
     backfill::chip::save_broker_flows(&flows).await;
     let notable = notable_flows(flows);
     summary.notable = notable.len();
@@ -117,6 +104,29 @@ pub async fn execute() -> Result<()> {
         summary.notable
     );
     Ok(())
+}
+
+/// 逐檔抓主力進出，只留下頁面日期是 `today` 的資料；
+/// 在 `summary` 記錄取得、過期（休市或尚未更新）與失敗的檔數。單檔失敗只記錄警告。
+async fn collect_flows(
+    symbols: &BTreeSet<String>,
+    today: NaiveDate,
+    summary: &mut RunSummary,
+) -> Vec<BrokerFlow> {
+    let mut flows = Vec::with_capacity(symbols.len());
+    for symbol in symbols {
+        match broker_flow::visit(symbol).await {
+            Ok(flow) if flow.date == today => flows.push(flow),
+            Ok(_) => summary.stale += 1,
+            Err(why) => {
+                summary.failed += 1;
+                tracing::warn!("主力進出抓取失敗: stock_symbol={symbol}, error={why:#}");
+            }
+        }
+        tokio::time::sleep(STOCK_INTERVAL).await;
+    }
+    summary.fetched = flows.len();
+    flows
 }
 
 /// 近幾個交易日的主力累計：實際涵蓋的交易日數與各股合計。
