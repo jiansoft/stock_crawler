@@ -128,13 +128,8 @@ impl RunSummary {
     }
 }
 
-/// 排程入口：採集尚未在 [`REFRESH_TTL_SECONDS`] 內處理過的上市櫃股票。
-///
-/// 單檔失敗只記錄錯誤、不中斷整批。只有「有嘗試、卻全部失敗」時回傳錯誤，
-/// 那通常代表 Yahoo 改版或被封鎖，需要人工介入。
-pub async fn execute() -> Result<()> {
-    let summary = run(MAX_STOCKS_PER_RUN).await?;
-
+/// 記錄一輪的結果；有嘗試、卻全部失敗時回傳錯誤（見 [`execute`]）。
+fn finish(summary: RunSummary) -> Result<()> {
     tracing::info!(
         "Yahoo 財報採集結束: candidates={}, skipped={}, prioritized={}, succeeded={}, fallback={}, not_found={}, failed={}, rows={}, interrupted={}",
         summary.candidates,
@@ -156,6 +151,14 @@ pub async fn execute() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// 排程入口：採集尚未在 [`REFRESH_TTL_SECONDS`] 內處理過的上市櫃股票。
+///
+/// 單檔失敗只記錄錯誤、不中斷整批。只有「有嘗試、卻全部失敗」時回傳錯誤，
+/// 那通常代表 Yahoo 改版或被封鎖，需要人工介入。
+pub async fn execute() -> Result<()> {
+    finish(run(MAX_STOCKS_PER_RUN).await?)
 }
 
 /// 一次採集全部尚未處理過的候選股票（不受 [`MAX_STOCKS_PER_RUN`] 限制）。

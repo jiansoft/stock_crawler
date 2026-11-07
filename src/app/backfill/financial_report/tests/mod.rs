@@ -209,4 +209,5 @@ fn test_summary_counts() {
     assert_eq!(counts.total(), 9);
 }
 
+mod entry;
 mod run_candidates;
