@@ -35,36 +35,6 @@ pub struct StockOwnershipDetail {
 }
 
 impl StockOwnershipDetail {
-    /// 建立全新的持股明細實體。
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        serial: i64,
-        security_code: String,
-        member_id: i64,
-        share_quantity: i64,
-        share_price_average: Decimal,
-        current_cost_per_share: Decimal,
-        holding_cost: Decimal,
-        is_sold: bool,
-        created_time: DateTime<Local>,
-    ) -> Self {
-        Self {
-            serial,
-            security_code,
-            member_id,
-            share_quantity,
-            share_price_average,
-            current_cost_per_share,
-            holding_cost,
-            is_sold,
-            cumulate_dividends_cash: Decimal::ZERO,
-            cumulate_dividends_stock: Decimal::ZERO,
-            cumulate_dividends_stock_money: Decimal::ZERO,
-            cumulate_dividends_total: Decimal::ZERO,
-            created_time,
-        }
-    }
-
     /// 從持久化儲存還原持股明細實體 (Reconstitution)。
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
@@ -97,26 +67,6 @@ impl StockOwnershipDetail {
             cumulate_dividends_total,
             created_time,
         }
-    }
-}
-
-impl Default for StockOwnershipDetail {
-    fn default() -> Self {
-        Self::reconstitute(
-            0,
-            "".to_string(),
-            0,
-            0,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            false,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            Local::now(),
-        )
     }
 }
 

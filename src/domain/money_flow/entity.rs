@@ -20,21 +20,6 @@ pub struct MoneyFlow {
     pub sum: Decimal,
 }
 
-impl Default for MoneyFlow {
-    fn default() -> Self {
-        // 設定預設交易日為 epoch
-        let ep = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-        MoneyFlow {
-            date: ep,
-            created_at: Local::now(),
-            updated_at: Local::now(),
-            unice: Decimal::ZERO,
-            eddie: Decimal::ZERO,
-            sum: Decimal::ZERO,
-        }
-    }
-}
-
 /// 每日持股層級市值明細領域實體。
 ///
 /// 紀錄特定交易日、特定會員持有的單一股票之股數、成本、收盤市值與損益比率等明細數據。
@@ -178,19 +163,6 @@ pub struct MoneyFlowMember {
     pub updated_at: DateTime<Local>,
 }
 
-impl Default for MoneyFlowMember {
-    fn default() -> Self {
-        let ep = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-        MoneyFlowMember {
-            date: ep,
-            member_id: 0,
-            market_value: Decimal::ZERO,
-            created_at: Local::now(),
-            updated_at: Local::now(),
-        }
-    }
-}
-
 /// 會員當日與前一交易日市值對照領域實體。
 ///
 /// 封裝會員在當前交易日與前一交易日的市值，以便發送通知時快速比較市值增減幅度。
@@ -206,19 +178,6 @@ pub struct MoneyFlowMemberWithPreviousDay {
     pub market_value: Decimal,
     /// 前一交易日收盤市值總額
     pub previous_market_value: Decimal,
-}
-
-impl Default for MoneyFlowMemberWithPreviousDay {
-    fn default() -> Self {
-        let ep = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-        MoneyFlowMemberWithPreviousDay {
-            date: ep,
-            previous_date: None,
-            member_id: 0,
-            market_value: Decimal::ZERO,
-            previous_market_value: Decimal::ZERO,
-        }
-    }
 }
 
 impl MoneyFlowDetail {

@@ -129,16 +129,6 @@ pub struct LastDailyQuote {
     pub closing_price: Decimal,
 }
 
-impl Default for LastDailyQuote {
-    fn default() -> Self {
-        LastDailyQuote {
-            date: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
-            stock_symbol: String::new(),
-            closing_price: Decimal::ZERO,
-        }
-    }
-}
-
 /// 每日全市場估值與技術面分布統計領域實體。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DailyStockPriceStats {
@@ -172,36 +162,6 @@ pub struct DailyStockPriceStats {
     /// 建立與更新時間
     pub created_at: DateTime<Local>,
     pub updated_at: DateTime<Local>,
-}
-
-impl Default for DailyStockPriceStats {
-    fn default() -> Self {
-        DailyStockPriceStats {
-            date: NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
-            stock_exchange_market_id: 0,
-            undervalued: 0,
-            fair_valued: 0,
-            overvalued: 0,
-            highly_overvalued: 0,
-            below_5_day_moving_average: 0,
-            above_5_day_moving_average: 0,
-            below_20_day_moving_average: 0,
-            above_20_day_moving_average: 0,
-            below_60_day_moving_average: 0,
-            above_60_day_moving_average: 0,
-            below_120_day_moving_average: 0,
-            above_120_day_moving_average: 0,
-            below_240_day_moving_average: 0,
-            above_240_day_moving_average: 0,
-            stocks_up: 0,
-            stocks_down: 0,
-            stocks_unchanged: 0,
-            new_52_week_high: 0,
-            new_52_week_low: 0,
-            created_at: Local::now(),
-            updated_at: Local::now(),
-        }
-    }
 }
 
 impl DailyQuote {
