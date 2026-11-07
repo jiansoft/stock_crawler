@@ -7,7 +7,7 @@ use crate::infra::database::{self, table::dividend_record_detail::extension::Cum
 
 pub(crate) mod extension;
 
-#[derive(sqlx::Type, sqlx::FromRow, Debug, Copy)]
+#[derive(sqlx::Type, sqlx::FromRow, Debug, Clone, Copy)]
 /// 持股股息發放記錄表 原表名 dividend_record_detail
 pub struct DividendRecordDetail {
     /// 主鍵序號。
@@ -77,10 +77,7 @@ impl DividendRecordDetail {
             None => query.fetch_one(database::get_connection()).await?,
             Some(t) => query.fetch_one(&mut **t).await?,
         };
-        //dbg!(row);
         self.serial = row.0;
-
-        //dbg!(*self);
 
         Ok(self.serial)
     }
@@ -94,66 +91,5 @@ impl DividendRecordDetail {
     }
 }
 
-impl Default for DividendRecordDetail {
-    fn default() -> Self {
-        Self::new(
-            0,
-            0,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            Decimal::ZERO,
-        )
-    }
-}
-
-impl Clone for DividendRecordDetail {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[cfg_attr(
-        not(feature = "integration-tests"),
-        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
-    )]
-    async fn test_calculate_cumulate_dividend() {
-        dotenvy::dotenv().ok();
-        // 與其他 DB 測試一致：資料庫不可用時明確跳過，而不是在
-        // begin().unwrap() 上 panic（舊版在無資料庫的環境會直接紅燈）。
-        if database::ping().await.is_err() {
-            println!("跳過 test_calculate_cumulate_dividend：無資料庫連接");
-            return;
-        }
-        tracing::debug!("開始 calculate_cumulate_dividend");
-        let drd = DividendRecordDetail::new(
-            27,
-            2022,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            Decimal::ZERO,
-            Decimal::ZERO,
-        );
-        let mut tx_option: Option<Transaction<Postgres>> =
-            Some(database::get_connection().begin().await.unwrap());
-        match drd.fetch_cumulate_dividend(&mut tx_option).await {
-            Ok(cd) => {
-                tracing::debug!("cd: {:?}", cd);
-            }
-            Err(why) => {
-                tracing::debug!("Failed to execute because {:?}", why);
-            }
-        }
-
-        if let Some(tx) = tx_option {
-            tx.commit().await.unwrap();
-        }
-
-        tracing::debug!("結束 calculate_cumulate_dividend");
-    }
-}
+mod tests;
