@@ -174,18 +174,7 @@ where
     }
 
     let endpoint = server_url.trim_end_matches('/').to_string();
-    let api_key = match (!api_key.is_empty()).then(|| api_key.to_string()) {
-        // 明文端點一律不附帶金鑰：寧可 Seq 拒收（會在送出端記錄狀態碼），
-        // 也不要把金鑰攤在網路上。
-        Some(_) if !seq_endpoint_protects_api_key(&endpoint) => {
-            error_console(format!(
-                "Seq endpoint {endpoint} is not HTTPS and not loopback; \
-                 X-Seq-ApiKey will NOT be sent to avoid transmitting it in cleartext"
-            ));
-            None
-        }
-        other => other,
-    };
+    let api_key = seq_api_key(&endpoint, api_key);
     let (tx, rx) = mpsc::channel::<SeqEvent>(SEQ_CHANNEL_CAPACITY);
 
     match SEQ_SENDER.set(tx) {
@@ -198,6 +187,24 @@ where
             SEQ_LOGGING_ENABLED.store(true, Ordering::Relaxed);
         }
     }
+}
+
+/// 送往 `endpoint` 的事件要附帶的 API key（`api_key` 已去頭尾空白）；空白或要捨棄時為 `None`。
+///
+/// 明文端點一律不附帶金鑰並在 console 警告：寧可 Seq 拒收（會在送出端記錄狀態碼），
+/// 也不要把金鑰攤在網路上。
+fn seq_api_key(endpoint: &str, api_key: &str) -> Option<String> {
+    if api_key.is_empty() {
+        return None;
+    }
+    if !seq_endpoint_protects_api_key(endpoint) {
+        error_console(format!(
+            "Seq endpoint {endpoint} is not HTTPS and not loopback; \
+             X-Seq-ApiKey will NOT be sent to avoid transmitting it in cleartext"
+        ));
+        return None;
+    }
+    Some(api_key.to_string())
 }
 
 /// 啟動 Seq 背景發送 worker。
