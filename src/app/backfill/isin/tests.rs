@@ -152,6 +152,25 @@ mod mock_source {
         // MockServer 結束時驗證各路由的呼叫次數。
     }
 
+    /// 排程入口以現在時間執行；平日抓到的是空名冊、週末直接略過，都不連外也不寫資料庫。
+    #[tokio::test]
+    async fn execute_runs_with_current_time() {
+        let server = MockServer::start().await;
+        for serial in ["2", "4", "5"] {
+            Mock::given(method("GET"))
+                .and(path("/isin/C_public.jsp"))
+                .and(query_param("strMode", serial))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(page("")))
+                .mount(&server)
+                .await;
+        }
+        let uri = server.uri();
+
+        with_origins(&[(ISIN, &uri)], execute())
+            .await
+            .expect("排程入口完成");
+    }
+
     /// 名冊裡的新股票寫進股票主檔；假代號結束時刪除。
     #[tokio::test]
     #[cfg_attr(
