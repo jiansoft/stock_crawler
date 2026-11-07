@@ -65,6 +65,12 @@ pub(crate) enum PremiumAlert {
 ///
 /// 查詢持股或折溢價失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
+    run(Local::now().date_naive()).await?;
+    Ok(())
+}
+
+/// 以 `today` 為基準檢查持有的 ETF 並發送通知，回傳通知則數。
+async fn run(today: NaiveDate) -> Result<usize> {
     let symbols: Vec<String> = holdings::active_holding_symbols()
         .await
         .context("fetch active holdings for ETF premium notification failed")?
@@ -72,14 +78,13 @@ pub async fn execute() -> Result<()> {
         .filter(|symbol| symbol.starts_with("00"))
         .collect();
     if symbols.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let repo = PgEtfRepository::new();
     let premiums = repo
         .recent_premiums(&symbols, DISCOUNT_DAYS as i64 + 1)
         .await?;
     let units = repo.latest_units(&symbols).await?;
-    let today = Local::now().date_naive();
     let mut alerts = detect(&premiums, today);
     // 交易日曆只供連續折溢價判斷使用，查詢失敗時其餘通知照常發送。
     let calendar = repo
@@ -99,7 +104,7 @@ pub async fn execute() -> Result<()> {
     if let Some(message) = build_message(today, &alerts, holdings::stock_name) {
         alert::send_message(&message).await;
     }
-    Ok(())
+    Ok(alerts.len())
 }
 
 /// 依代號排序找出今天剛發生的溢價或連續折價；`premiums` 每檔由新到舊。
