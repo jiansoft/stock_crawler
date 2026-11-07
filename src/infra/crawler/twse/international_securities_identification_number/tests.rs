@@ -157,6 +157,43 @@ mod mock_source {
         assert_eq!((items.len(), symbols.len()), (expected, expected));
     }
 
+    /// 兩個入口的本體：平日抓 mock 頁面解析，週末不打來源直接回空。
+    #[tokio::test]
+    async fn entries_parse_on_weekdays_and_skip_weekends() {
+        use chrono::TimeZone;
+
+        let server = listed_page().await;
+        let uri = server.uri();
+        // 1999-03-10 是星期三、03-13 是星期六。
+        let weekday = Local
+            .with_ymd_and_hms(1999, 3, 10, 5, 0, 0)
+            .single()
+            .expect("固定時間合法");
+        let saturday = Local
+            .with_ymd_and_hms(1999, 3, 13, 5, 0, 0)
+            .single()
+            .expect("固定時間合法");
+        let listed = StockExchangeMarket::Listed;
+
+        let counts = with_origins(&[(ISIN, &uri)], async {
+            (
+                visit_on(weekday, listed).await.expect("visit_on").len(),
+                visit_on(saturday, listed).await.expect("visit_on").len(),
+                all_listed_symbols_on(weekday, listed)
+                    .await
+                    .expect("all_listed")
+                    .len(),
+                all_listed_symbols_on(saturday, listed)
+                    .await
+                    .expect("all_listed")
+                    .len(),
+            )
+        })
+        .await;
+
+        assert_eq!(counts, (4, 0, 4, 0));
+    }
+
     /// 來源回 500 時不會拋錯，錯誤頁解析成空名冊；由呼叫端的名冊大小安全閥擋下，不會拿去做下市比對。
     #[tokio::test]
     async fn server_error_page_parses_to_empty_roster() {
