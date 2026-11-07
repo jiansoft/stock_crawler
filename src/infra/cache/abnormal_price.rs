@@ -2,16 +2,14 @@
 //!
 //! 採集到的成交價超出漲跌幅（興櫃為倍數區間）時，驗價會把它擋下並呼叫
 //! [`report_abnormal_price`]。這裡只負責記錄：每個站點每天第一筆記 WARN 當範例，
-//! 其餘記 DEBUG；收盤時由 [`flush_abnormal_price_stats`] 依站點輸出當天被擋次數與檔數。
+//! 其餘記 DEBUG；收盤時由 [`flush_abnormal_price_stats`] 依站點輸出當天被擋次數與檔數，每檔附第一次
+//! 被擋的採集價與昨收，事後不用翻 DEBUG 也看得出錯成什麼價。
 //!
 //! 2026-10-27～30 共 12 筆全是 HiStock 排行頁個別股票的錯價，例如 3189 採到 452.96
 //! （不合 0.5 元跳動單位，當天實際成交 886～946）、3481 採到 1.59（實際 41.5～43.6），
 //! 屬來源本身的錯，驗價已擋下；價格追蹤讀的是驗證後的快取，不會因此誤發通知。
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Mutex,
-};
+use std::{collections::BTreeMap, sync::Mutex};
 
 use chrono::{Local, NaiveDate};
 use once_cell::sync::Lazy;
@@ -26,11 +24,18 @@ const UNKNOWN_SITE: &str = "未標示來源";
 /// 當天各站點被擋下的異常價格。
 static STATS: Lazy<Mutex<AbnormalPriceStats>> = Lazy::new(Mutex::default);
 
-/// 單一站點當天的被擋次數與股票。
+/// 一檔股票當天第一次被擋時的採集價與昨收。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BlockedPrice {
+    price: Decimal,
+    last_close: Decimal,
+}
+
+/// 單一站點當天的被擋次數與股票（代號對應第一次被擋的價格）。
 #[derive(Debug, Default)]
 struct SiteCount {
     count: usize,
-    symbols: BTreeSet<String>,
+    symbols: BTreeMap<String, BlockedPrice>,
 }
 
 /// 依站點累計的異常價格；換日時自動清空。
@@ -41,19 +46,28 @@ struct AbnormalPriceStats {
 }
 
 impl AbnormalPriceStats {
-    /// 記一筆被擋的價格，回傳是否為該站當天第一筆。
-    fn record(&mut self, today: NaiveDate, site: &str, symbol: &str) -> bool {
+    /// 記一筆被擋的價格，回傳是否為該站當天第一筆；同一檔只留第一次被擋的價格。
+    fn record(
+        &mut self,
+        today: NaiveDate,
+        site: &str,
+        symbol: &str,
+        blocked: BlockedPrice,
+    ) -> bool {
         if self.day != Some(today) {
             self.day = Some(today);
             self.sites.clear();
         }
         let entry = self.sites.entry(site.to_string()).or_default();
         entry.count += 1;
-        entry.symbols.insert(symbol.to_string());
+        entry.symbols.entry(symbol.to_string()).or_insert(blocked);
         entry.count == 1
     }
 
     /// 收盤統計行；當天沒有被擋的價格時為 `None`。
+    ///
+    /// 格式例如 `今日過濾異常價格：HiStock 4 次（3 檔：3189 452.96／昨收 900、…）`；週報
+    /// （`data_health::abnormal_prices`）以 `；` 分站、以 ` 次（` 取次數，代號後的價格不能含這兩個字串。
     fn summary(&self) -> Option<String> {
         if self.sites.is_empty() {
             return None;
@@ -62,11 +76,17 @@ impl AbnormalPriceStats {
             .sites
             .iter()
             .map(|(site, count)| {
-                let listed: Vec<&str> = count
+                let listed: Vec<String> = count
                     .symbols
                     .iter()
                     .take(MAX_LISTED_SYMBOLS)
-                    .map(String::as_str)
+                    .map(|(symbol, blocked)| {
+                        format!(
+                            "{symbol} {}／昨收 {}",
+                            blocked.price.normalize(),
+                            blocked.last_close.normalize()
+                        )
+                    })
                     .collect();
                 let more = if count.symbols.len() > MAX_LISTED_SYMBOLS {
                     "…"
@@ -94,7 +114,10 @@ pub fn report_abnormal_price(symbol: &str, price: Decimal, last_close: Decimal, 
     // 鎖中毒時不讀舊狀態，照常記 WARN，寧可多記也不漏記。
     let first = STATS
         .lock()
-        .map(|mut stats| stats.record(Local::now().date_naive(), site, symbol))
+        .map(|mut stats| {
+            let blocked = BlockedPrice { price, last_close };
+            stats.record(Local::now().date_naive(), site, symbol, blocked)
+        })
         .unwrap_or(true);
     if first {
         tracing::warn!(
@@ -132,50 +155,70 @@ pub fn flush_abnormal_price_stats() {
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal_macros::dec;
+
     use super::*;
 
     fn day(d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 10, d).expect("日期合法")
     }
 
+    fn blocked(price: Decimal, last_close: Decimal) -> BlockedPrice {
+        BlockedPrice { price, last_close }
+    }
+
+    /// 測試不在意價格時用的固定值。
+    fn any_price() -> BlockedPrice {
+        blocked(Decimal::ONE, Decimal::TEN)
+    }
+
     /// 每站當天只有第一筆算「第一筆」；不同站各自計；換日重新計。
     #[test]
     fn record_flags_first_per_site_per_day() {
         let mut stats = AbnormalPriceStats::default();
-        assert!(stats.record(day(30), "HiStock", "3189"));
-        assert!(!stats.record(day(30), "HiStock", "3481"));
-        assert!(!stats.record(day(30), "HiStock", "3189"));
-        assert!(stats.record(day(30), "CnYes", "2330"));
+        assert!(stats.record(day(30), "HiStock", "3189", any_price()));
+        assert!(!stats.record(day(30), "HiStock", "3481", any_price()));
+        assert!(!stats.record(day(30), "HiStock", "3189", any_price()));
+        assert!(stats.record(day(30), "CnYes", "2330", any_price()));
         assert!(
-            stats.record(day(31), "HiStock", "6134"),
+            stats.record(day(31), "HiStock", "6134", any_price()),
             "換日要重新算第一筆"
         );
         assert_eq!(stats.sites.len(), 1, "換日清掉前一天的統計");
     }
 
-    /// 收盤行依站點列次數、檔數與代號；同檔重複只算一檔；超過上限的代號以省略號帶過。
+    /// 收盤行依站點列次數、檔數與代號，每檔附第一次被擋的採集價與昨收（去掉尾端的 0）；
+    /// 同檔重複只算一檔；超過上限的代號以省略號帶過。
     #[test]
     fn summary_lists_counts_per_site() {
         let mut stats = AbnormalPriceStats::default();
         assert_eq!(stats.summary(), None);
-        for symbol in ["3189", "3481", "3189", "6134"] {
-            stats.record(day(30), "HiStock", symbol);
-        }
-        stats.record(day(30), UNKNOWN_SITE, "2330");
+        stats.record(
+            day(30),
+            "HiStock",
+            "3189",
+            blocked(dec!(452.96), dec!(900.00)),
+        );
+        stats.record(day(30), "HiStock", "3481", blocked(dec!(1.59), dec!(42.5)));
+        stats.record(day(30), "HiStock", "3189", blocked(dec!(1.00), dec!(900)));
+        stats.record(day(30), "HiStock", "6134", blocked(dec!(30), dec!(20.10)));
+        stats.record(day(30), UNKNOWN_SITE, "2330", blocked(dec!(0), dec!(1000)));
         assert_eq!(
             stats.summary().as_deref(),
-            Some(
-                "今日過濾異常價格：HiStock 4 次（3 檔：3189、3481、6134）；未標示來源 1 次（1 檔：2330）"
-            )
+            Some(concat!(
+                "今日過濾異常價格：HiStock 4 次（3 檔：3189 452.96／昨收 900、3481 1.59／昨收 42.5、",
+                "6134 30／昨收 20.1）；未標示來源 1 次（1 檔：2330 0／昨收 1000）"
+            )),
+            "3189 第二次被擋的 1.00 不覆蓋第一次的 452.96"
         );
 
         let mut many = AbnormalPriceStats::default();
         for n in 0..12 {
-            many.record(day(30), "HiStock", &format!("10{n:02}"));
+            many.record(day(30), "HiStock", &format!("10{n:02}"), any_price());
         }
         let line = many.summary().expect("有資料");
-        assert!(line.contains("12 次（12 檔：1000、"), "{line}");
-        assert!(line.ends_with("1009…）"), "{line}");
+        assert!(line.contains("12 次（12 檔：1000 1／昨收 10、"), "{line}");
+        assert!(line.ends_with("1009 1／昨收 10…）"), "{line}");
     }
 
     /// 對外入口：記錄後收盤輸出並清空，再輸出一次不會重複。

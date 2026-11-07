@@ -32,6 +32,7 @@ impl Drop for LogDir {
 }
 
 /// 同一天多行（收盤重跑）次數相加、天數算一次；期間外、非 info 檔不算；其他行略過。
+/// 11-07 起每檔附採集價與昨收（`3189 452.96／昨收 900`），新舊格式都要讀得到。
 #[test]
 fn weekly_abnormal_prices_sums_sites_by_day() {
     let dir = LogDir::new("weekly_abnormal_prices");
@@ -44,7 +45,7 @@ fn weekly_abnormal_prices_sums_sites_by_day() {
     );
     dir.write(
         "2026-10-08_default_info.15-30-00.log",
-        &["今日過濾異常價格：HiStock 2 次（1 檔：6134）"],
+        &["今日過濾異常價格：HiStock 2 次（1 檔：6134 30／昨收 20.1）；Yahoo 1 次（1 檔：2330 0／昨收 1000）"],
     );
     dir.write(
         "2026-10-09_default_info.log",
@@ -62,7 +63,7 @@ fn weekly_abnormal_prices_sums_sites_by_day() {
     let weekly = weekly_abnormal_prices(&dir.0, day(4), day(10));
     assert_eq!(
         abnormal_price_line(&weekly),
-        "本週異常價格：CnYes 1 次（1 天）、HiStock 55 次（2 天）；⚠️ HiStock 一週超過 50 次，檢查來源"
+        "本週異常價格：CnYes 1 次（1 天）、HiStock 55 次（2 天）、Yahoo 1 次（1 天）；⚠️ HiStock 一週超過 50 次，檢查來源"
     );
     let missing = weekly_abnormal_prices(&dir.0.join("missing"), day(4), day(10));
     assert_eq!(abnormal_price_line(&missing), "本週異常價格 0 次");
