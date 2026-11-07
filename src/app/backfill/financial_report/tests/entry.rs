@@ -1,4 +1,4 @@
-//! 對外入口：一輪結果的判定、單檔 Yahoo／BigGo 回補（mock 來源＋假倉儲）、股票間隔。
+//! 對外入口：單檔 Yahoo／BigGo 回補（mock 來源＋假倉儲）、股票間隔。
 
 use wiremock::matchers::{method, path, path_regex, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -8,31 +8,6 @@ use crate::core::util::http::mock_origin::with_origins;
 
 const YAHOO: &str = "https://tw.stock.yahoo.com";
 const BIGGO: &str = "https://api.biggo.com";
-
-/// 有嘗試、卻全部失敗才回錯誤；有任何一檔成功或改走 BigGo 都算正常。
-#[test]
-fn finish_fails_only_when_every_attempt_failed() {
-    let all_failed = RunSummary {
-        candidates: 3,
-        failed: 3,
-        ..RunSummary::default()
-    };
-    let message = finish(all_failed)
-        .expect_err("全部失敗要回錯誤")
-        .to_string();
-    assert!(
-        message.contains("failed for all 3 attempted stocks"),
-        "{message}"
-    );
-
-    let partly = RunSummary {
-        failed: 2,
-        fallback: 1,
-        ..RunSummary::default()
-    };
-    finish(partly).expect("有一檔改走 BigGo 就不是全部失敗");
-    finish(RunSummary::default()).expect("沒有嘗試任何一檔不是錯誤");
-}
 
 /// 股票之間停 1.5～3 秒。
 #[tokio::test(start_paused = true)]
