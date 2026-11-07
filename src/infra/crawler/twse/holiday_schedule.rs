@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{Local, NaiveDate};
+use chrono::{Datelike, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 // 通知改走 core::alert 抽象介面，infra 層不直接依賴 interfaces::bot（反向耦合）。
@@ -27,7 +27,10 @@ pub struct HolidaySchedule {
     pub why: String,
 }
 
-/// 取得指定年度的休市日清單。
+/// 取得指定年度的休市日清單；取得非空清單時順手更新 Redis 備份（見 [`visit_or_backup`]）。
+///
+/// 收盤（15:00）、盤中追蹤（09:00）、除權息等每個交易日都會呼叫，備份因此天天更新；只有健康週報
+/// 寫備份時，第一次就讀不到的那週仍會略過檢查（第 39 輪 H48 的限制）。
 ///
 /// # 參數
 ///
@@ -37,6 +40,28 @@ pub struct HolidaySchedule {
 ///
 /// 當 HTTP 請求或 JSON 解析失敗時回傳錯誤。
 pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
+    let schedule = fetch(year).await?;
+    if should_back_up(year, &schedule) {
+        save_backup(year, &schedule).await;
+    }
+    Ok(schedule)
+}
+
+/// 是否把這次取得的休市日表寫進備份：非空清單、去年以後的年度（較早的年度沒有人會再查）。
+///
+/// 測試程式一律不寫：各模組的測試以 mock 回應當年度的休市日表，本機 `.env` 指向正式 Redis，
+/// 寫進去會在證交所真的讀不到時被當成備份讀出來。備份讀取的測試直接呼叫 [`save_backup`]。
+fn should_back_up(year: i32, schedule: &[HolidaySchedule]) -> bool {
+    !cfg!(test) && !schedule.is_empty() && is_backed_up_year(year)
+}
+
+/// 去年以後的年度。
+fn is_backed_up_year(year: i32) -> bool {
+    year >= Local::now().year() - 1
+}
+
+/// 向證交所取得指定年度的休市日清單；`stat` 不是 OK 時發通知並回空清單。
+async fn fetch(year: i32) -> Result<Vec<HolidaySchedule>> {
     let now = Local::now();
     let url = format!(
         "https://www.{host}/rwd/zh/holidaySchedule/holidaySchedule?date={year}&response=json&_={time}",
@@ -64,7 +89,7 @@ pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
 /// 取得指定年度的休市日清單；證交所讀不到或回空清單時，改用 Redis 裡最近一次成功的結果。
 ///
 /// 11-07 健康週報（週六 11:00）證交所連續逾時三次，缺漏交易日檢查因此整段略過；休市日表一年只公布
-/// 一次、很少變動，用前一次的結果比略過檢查可靠。成功取得時順手更新備份（寫入失敗只記 DEBUG）。
+/// 一次、很少變動，用前一次的結果比略過檢查可靠。備份由 [`visit`] 成功時寫入（寫入失敗只記 DEBUG）。
 /// 需要「讀不到就停下」的呼叫端（盤中追蹤判斷今天是否開市）仍用 [`visit`]。
 ///
 /// # 錯誤
@@ -72,10 +97,7 @@ pub async fn visit(year: i32) -> Result<Vec<HolidaySchedule>> {
 /// 證交所讀不到且 Redis 沒有該年度的備份時，回傳證交所的錯誤。
 pub async fn visit_or_backup(year: i32) -> Result<Vec<HolidaySchedule>> {
     let fetched = visit(year).await;
-    if let Ok(schedule) = &fetched
-        && !schedule.is_empty()
-    {
-        save_backup(year, schedule).await;
+    if fetched.as_ref().is_ok_and(|schedule| !schedule.is_empty()) {
         return fetched;
     }
     match load_backup(year).await {
@@ -229,6 +251,19 @@ mod tests {
             ResponseTemplate::new(200).set_body_string("not json")
         }
 
+        /// 只備份去年以後的年度；測試程式一律不寫。
+        #[test]
+        fn only_recent_years_are_backed_up() {
+            let year = Local::now().year();
+            assert!(is_backed_up_year(year));
+            assert!(is_backed_up_year(year - 1));
+            assert!(!is_backed_up_year(year - 2));
+            assert!(
+                !should_back_up(year, &[holiday(year)]),
+                "測試的 mock 休市日表不能寫進 Redis"
+            );
+        }
+
         /// 證交所讀不到、Redis 也沒有備份時回傳證交所的錯誤（1985 年從不寫備份）。
         #[tokio::test]
         async fn visit_or_backup_fails_without_backup() {
@@ -238,7 +273,7 @@ mod tests {
             assert!(result.is_err(), "沒有備份時不能當成沒有休市日");
         }
 
-        /// 連 Redis：成功時寫備份；之後證交所讀不到就讀備份。
+        /// 連 Redis：證交所可讀時照常回傳；讀不到就讀先前寫入的備份。
         #[tokio::test]
         #[cfg_attr(
             not(feature = "integration-tests"),
@@ -250,22 +285,21 @@ mod tests {
                 println!("跳過 visit_or_backup_falls_back_to_last_success：無 Redis 連接");
                 return;
             }
-            const YEAR: i32 = 1986;
+            // 備份只寫去年以後的年度，用遠未來的年份避開真實資料。
+            const YEAR: i32 = 2999;
             CLIENT.delete(&backup_key(YEAR)).await.expect("清掉舊備份");
 
-            let ok = server("1986", ok_body(YEAR)).await;
+            let ok = server("2999", ok_body(YEAR)).await;
             let uri = ok.uri();
             let fetched = with_origins(&[(TWSE, uri.as_str())], visit_or_backup(YEAR))
                 .await
                 .expect("證交所可讀");
             assert_eq!(fetched, vec![holiday(YEAR)]);
-            assert_eq!(
-                load_backup(YEAR).await,
-                Some(vec![holiday(YEAR)]),
-                "成功時寫備份"
-            );
+            assert_eq!(load_backup(YEAR).await, None, "測試程式不寫備份");
+            save_backup(YEAR, &fetched).await;
+            assert_eq!(load_backup(YEAR).await, Some(vec![holiday(YEAR)]));
 
-            let broken = server("1986", broken_body()).await;
+            let broken = server("2999", broken_body()).await;
             let uri = broken.uri();
             let fallback = with_origins(&[(TWSE, uri.as_str())], visit_or_backup(YEAR))
                 .await

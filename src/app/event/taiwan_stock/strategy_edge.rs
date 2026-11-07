@@ -29,8 +29,8 @@ use crate::{
     core::alert,
     domain::strategy::StrategyPresetRepository,
     infra::{
-        crawler::twse, database::repository::strategy_preset::PgStrategyPresetRepository,
-        nosql::redis,
+        crawler::twse::holiday_schedule,
+        database::repository::strategy_preset::PgStrategyPresetRepository, nosql::redis,
     },
 };
 
@@ -269,7 +269,7 @@ async fn store(key: &str, records: &[EdgeRecord]) {
 /// 見 [`run`]。
 pub async fn execute() -> Result<()> {
     let today = Local::now().date_naive();
-    let holidays: HashSet<NaiveDate> = match twse::holiday_schedule::visit(today.year()).await {
+    let holidays: HashSet<NaiveDate> = match holiday_schedule::visit_or_backup(today.year()).await {
         Ok(holidays) => holidays.into_iter().map(|holiday| holiday.date).collect(),
         Err(error) => {
             tracing::warn!("策略優勢檢查：讀取休市日失敗，只以週末判斷：{error:?}");
