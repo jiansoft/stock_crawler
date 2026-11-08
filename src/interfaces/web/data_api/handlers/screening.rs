@@ -6,6 +6,7 @@
 mod order;
 mod params;
 mod row;
+mod signal_sql;
 mod sql;
 #[cfg(test)]
 mod tests;
@@ -21,7 +22,8 @@ use chrono::{Local, NaiveDate};
 use self::{
     params::{ValidatedScreeningParams, validate_screening_params},
     row::ScreenedStockRow,
-    sql::{MAJOR_CHANGES_SQL, RANGE_BREAKOUTS_SQL, SCREEN_STOCKS_SQL},
+    signal_sql::{MAJOR_CHANGES_SQL, RANGE_BREAKOUTS_SQL},
+    sql::SCREEN_STOCKS_SQL,
 };
 use super::institutional_flow::{StreakRow, load_streaks};
 use super::relative_strength::{ScoredStock, load_scores};
