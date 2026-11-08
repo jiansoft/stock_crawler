@@ -1,4 +1,4 @@
-//! ex_dividend的測試；連外的測試標 #[ignore]。
+//! 除權息提醒排程的測試；連外的測試標 #[ignore]。
 
 use std::time::Duration;
 
@@ -142,5 +142,84 @@ mod mock_sources {
             .await;
 
         assert!(holidays(&server).await.is_empty());
+    }
+}
+
+/// 以本機 mock server 取代證交所休市日表，以固定日期跑排程本體的非交易日路徑。
+mod mock_holidays {
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+
+    const TWSE: &str = "https://www.twse.com.tw";
+    const ROUTE: &str = "/rwd/zh/holidaySchedule/holidaySchedule";
+
+    fn date(year: i32, month: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(year, month, day).expect("合法日期")
+    }
+
+    /// 回傳 `year` 年的休市日表，休市日為 `holidays`。
+    async fn mount_year(server: &MockServer, year: i32, holidays: &[NaiveDate], expected: u64) {
+        let data: Vec<serde_json::Value> = holidays
+            .iter()
+            .map(|day| serde_json::json!([day.format("%Y-%m-%d").to_string(), "測試休市", ""]))
+            .collect();
+        Mock::given(method("GET"))
+            .and(path(ROUTE))
+            .and(query_param("date", year.to_string()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "stat": "ok", "queryYear": year, "total": data.len(), "data": data
+            })))
+            .expect(expected)
+            .mount(server)
+            .await;
+    }
+
+    /// 週末與交易所公告的休市日都直接略過（只讀休市日表，不派發提醒）。
+    #[tokio::test]
+    async fn run_skips_weekends_and_holidays() {
+        let server = MockServer::start().await;
+        // 1999-03-10（三）是休市日；03-13 是週六。兩次執行各讀一次當年度的休市日表。
+        mount_year(&server, 1999, &[date(1999, 3, 10)], 2).await;
+        let uri = server.uri();
+
+        with_origins(&[(TWSE, &uri)], async {
+            run(date(1999, 3, 13)).await.expect("週六略過");
+            run(date(1999, 3, 10)).await.expect("休市日略過");
+        })
+        .await;
+    }
+
+    /// 12 月底往後 14 天會跨年：同時讀今年與明年的休市日表。
+    #[tokio::test]
+    async fn run_loads_next_year_when_horizon_crosses_new_year() {
+        let server = MockServer::start().await;
+        // 1999-12-27（一）設為休市日，讓本體在讀完兩年的表後直接略過。
+        mount_year(&server, 1999, &[date(1999, 12, 27)], 1).await;
+        mount_year(&server, 2000, &[], 1).await;
+        let uri = server.uri();
+
+        with_origins(&[(TWSE, &uri)], run(date(1999, 12, 27)))
+            .await
+            .expect("跨年略過");
+    }
+
+    /// 排程入口以今天執行：把今天（與 14 天後所在年度）設為休市日，不論哪天跑都只讀休市日表就結束。
+    #[tokio::test]
+    async fn execute_uses_today() {
+        let today = Local::now().date_naive();
+        let horizon = today + Days::new(HOLIDAY_HORIZON_DAYS);
+        let server = MockServer::start().await;
+        mount_year(&server, today.year(), &[today], 1).await;
+        if horizon.year() != today.year() {
+            mount_year(&server, horizon.year(), &[], 1).await;
+        }
+        let uri = server.uri();
+
+        with_origins(&[(TWSE, &uri)], execute())
+            .await
+            .expect("今天休市略過");
     }
 }
