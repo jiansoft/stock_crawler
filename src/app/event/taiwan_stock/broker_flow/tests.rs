@@ -253,3 +253,79 @@ mod collect {
         );
     }
 }
+
+/// 以臨時資料庫的假持股跑排程入口：mock 富邦頁還是舊日期（休市或尚未更新），不寫入、不通知。
+/// 假持股 799799（會員 979799），Telegram 導向 mock，結束時刪除。
+mod execute_flow {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+    use crate::infra::database;
+
+    const SYMBOL: &str = "799799";
+    const MEMBER: i64 = 979_799;
+    const FIXTURE_2884: &str = include_str!("../../../../infra/crawler/fbs/testdata/zco_2884.html");
+
+    async fn cleanup() {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(database::get_connection())
+            .await
+            .expect("清除測試持股");
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn execute_skips_stale_pages() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 execute_skips_stale_pages：無資料庫連接");
+            return;
+        }
+        cleanup().await;
+        sqlx::query(
+            "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, created_time, date) \
+             VALUES ($1, $2, 1000, '1999-03-10 00:00:00+08', '1999-03-10')",
+        )
+        .bind(MEMBER)
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("插入測試持股");
+        let html = FIXTURE_2884.replace("2884", SYMBOL);
+        let (big5, _, _) = encoding_rs::BIG5.encode(&html);
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/z/zc/zco/zco_{SYMBOL}.djhtm")))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(big5.into_owned(), "text/html"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let uri = server.uri();
+
+        let result = with_origins(
+            &[
+                ("https://fubon-ebrokerdj.fbs.com.tw", &uri),
+                ("https://api.telegram.org", &uri),
+            ],
+            execute(),
+        )
+        .await;
+        let saved: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM broker_flow WHERE stock_symbol = $1")
+                .bind(SYMBOL)
+                .fetch_one(pool)
+                .await
+                .expect("讀回主力進出");
+        cleanup().await;
+
+        result.expect("排程入口完成");
+        assert_eq!(saved, 0, "頁面是舊日期時不寫入");
+    }
+}
