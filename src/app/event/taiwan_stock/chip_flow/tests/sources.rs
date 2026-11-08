@@ -95,3 +95,43 @@ async fn load_volumes_reads_trading_volume_of_the_day() {
     assert_eq!(volumes.get(symbol), Some(&123_456));
     assert!(!next_day.contains_key(symbol));
 }
+
+/// 排程入口：四個來源都有資料時讀當天成交量、挑出要通知的持股；Telegram 也導向 mock server，
+/// 不論資料庫裡有沒有持股都不會真的送出訊息。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn execute_runs_against_mocked_sources() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_runs_against_mocked_sources：無資料庫連接");
+        return;
+    }
+    let server = MockServer::start().await;
+    serve(&server, "/rwd/zh/fund/T86", T86_FIXTURE).await;
+    serve(&server, "/rwd/zh/marginTrading/MI_MARGN", MI_MARGN_FIXTURE).await;
+    serve(
+        &server,
+        "/web/stock/3insti/daily_trade/3itrade_hedge_result.php",
+        TPEX_INSTITUTIONAL_FIXTURE,
+    )
+    .await;
+    let uri = server.uri();
+
+    with_origins(
+        &[
+            ("https://www.twse.com.tw", &uri),
+            ("https://www.tpex.org.tw", &uri),
+            ("https://api.telegram.org", &uri),
+        ],
+        execute(),
+    )
+    .await
+    .expect("持股籌碼通知完成");
+}
