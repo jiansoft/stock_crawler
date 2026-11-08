@@ -126,33 +126,13 @@ pub async fn execute() -> Result<()> {
         .context("fetch active holdings for chip flow notification failed")?;
     let date = Local::now().date_naive();
 
-    let (listed_flows, otc_flows, listed_margins, otc_margins) = tokio::join!(
-        twse::chip::visit_institutional(date),
-        tpex::chip::visit_institutional(date),
-        twse::chip::visit_margin(date),
-        tpex::chip::visit_margin(date),
-    );
-    let flows = merge("三大法人", [("上市", listed_flows), ("上櫃", otc_flows)]);
-    let margins = merge(
-        "融資融券",
-        [("上市", listed_margins), ("上櫃", otc_margins)],
-    );
+    let (flows, margins) = fetch_sources(date).await;
     if flows.is_empty() && margins.is_empty() {
         tracing::info!("{date} 尚無三大法人與融資融券資料（休市或尚未公布），略過持股籌碼通知");
         return Ok(());
     }
 
-    let volumes: HashMap<String, i64> =
-        match PgQuoteRepository::new().fetch_quotes_by_date(date).await {
-            Ok(quotes) => quotes
-                .into_iter()
-                .filter_map(|quote| Some((quote.stock_symbol, quote.trading_volume.to_i64()?)))
-                .collect(),
-            Err(why) => {
-                tracing::warn!("讀取 {date} 成交量失敗，比例條件改為不成立: {why:#}");
-                HashMap::new()
-            }
-        };
+    let volumes = load_volumes(date).await;
 
     let (summary, reports) = collect_reports(date, &symbols, &flows, &margins, &volumes).await;
     if !reports.is_empty() {
@@ -166,6 +146,41 @@ pub async fn execute() -> Result<()> {
         summary.reported
     );
     Ok(())
+}
+
+/// 併抓上市、上櫃 `date` 的三大法人買賣超與融資融券餘額，各自合併成一張表；失敗的來源只記錄。
+async fn fetch_sources(
+    date: NaiveDate,
+) -> (
+    HashMap<String, InstitutionalFlow>,
+    HashMap<String, MarginBalance>,
+) {
+    let (listed_flows, otc_flows, listed_margins, otc_margins) = tokio::join!(
+        twse::chip::visit_institutional(date),
+        tpex::chip::visit_institutional(date),
+        twse::chip::visit_margin(date),
+        tpex::chip::visit_margin(date),
+    );
+    let flows = merge("三大法人", [("上市", listed_flows), ("上櫃", otc_flows)]);
+    let margins = merge(
+        "融資融券",
+        [("上市", listed_margins), ("上櫃", otc_margins)],
+    );
+    (flows, margins)
+}
+
+/// `date` 各股的成交量（股）；讀取失敗只記錄並回空表，比例條件改為不成立。
+async fn load_volumes(date: NaiveDate) -> HashMap<String, i64> {
+    match PgQuoteRepository::new().fetch_quotes_by_date(date).await {
+        Ok(quotes) => quotes
+            .into_iter()
+            .filter_map(|quote| Some((quote.stock_symbol, quote.trading_volume.to_i64()?)))
+            .collect(),
+        Err(why) => {
+            tracing::warn!("讀取 {date} 成交量失敗，比例條件改為不成立: {why:#}");
+            HashMap::new()
+        }
+    }
 }
 
 /// 合併上市、上櫃的結果；失敗的來源只記錄。
