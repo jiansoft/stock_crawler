@@ -255,3 +255,88 @@ fn nav_history_range_ends_yesterday() {
         ))
     );
 }
+
+/// 三個入口（N 年、指定起日、近 30 天補缺日）以臨時資料庫的假 ETF 與 mock MoneyDJ 跑完整流程：
+/// 抓到的淨值寫進 `etf_daily_nav`、重建快照。假 ETF 0079979NH，結束時刪除。
+mod entries {
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+    use crate::infra::database;
+
+    const SYMBOL: &str = "0079979NH";
+    /// 2026-10-01～10-21 的淨值與市價（MoneyDJ 走勢圖格式）。
+    const FIXTURE: &str =
+        include_str!("../../../../infra/crawler/moneydj/testdata/etf_nav_0050.txt");
+
+    async fn cleanup() {
+        let pool = database::get_connection();
+        for sql in [
+            "DELETE FROM etf_daily_nav WHERE stock_symbol = $1",
+            "DELETE FROM etf_snapshot WHERE stock_symbol = $1",
+            "DELETE FROM stocks WHERE stock_symbol = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(SYMBOL)
+                .execute(pool)
+                .await
+                .expect("清除測試資料");
+        }
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn entries_backfill_listed_etf_from_moneydj() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 entries_backfill_listed_etf_from_moneydj：無資料庫連接");
+            return;
+        }
+        cleanup().await;
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
+               VALUES ($1, '測試 ETF', $1, 2, 9001)"#,
+        )
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("插入假 ETF");
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ETF/X/xdjbcd/Basic0003BCD.xdjbcd"))
+            .and(query_param("etfid", format!("{SYMBOL}.TW")))
+            .respond_with(ResponseTemplate::new(200).set_body_string(FIXTURE))
+            .expect(3)
+            .mount(&server)
+            .await;
+        let uri = server.uri();
+
+        let (years, since, gaps) = with_origins(&[("https://www.moneydj.com", &uri)], async {
+            (
+                backfill_nav_history(1).await,
+                backfill_nav_history_since(NaiveDate::from_ymd_opt(2026, 10, 1).expect("合法日期"))
+                    .await,
+                fill_recent_nav_gaps().await,
+            )
+        })
+        .await;
+        let rows: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM etf_daily_nav WHERE stock_symbol = $1")
+                .bind(SYMBOL)
+                .fetch_one(pool)
+                .await
+                .expect("讀回淨值");
+        cleanup().await;
+
+        years.expect("近 1 年回補");
+        since.expect("指定起日回補");
+        gaps.expect("近 30 天補缺日");
+        assert_eq!(rows, 14, "fixture 的 14 個交易日");
+    }
+}
