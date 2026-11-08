@@ -237,3 +237,74 @@ SELECT $1, 'L' || s, l FROM generate_series(1, $2) AS s, generate_series(1, 17) 
 
     assert_eq!(health, (Some(week(12)), 51, 1));
 }
+
+/// 有日線的日子：各市場有成交檔數、有日線的日期，以及本益比／淨值比為 0 的筆數都會量到。
+/// 假上市股票 79979DH（1999-03-10 本益比 0、淨值比 1.2），結束時刪除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn fetch_snapshot_counts_quotes_and_zero_valuation_ratios() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 fetch_snapshot_counts_quotes_and_zero_valuation_ratios：無資料庫連接");
+        return;
+    }
+    let pool = database::get_connection();
+    let symbol = "79979DH";
+    let day = |d| NaiveDate::from_ymd_opt(1999, 3, d).expect("日期應合法");
+    let cleanup = || async {
+        for sql in [
+            r#"DELETE FROM "DailyQuotes" WHERE stock_symbol = $1"#,
+            "DELETE FROM stocks WHERE stock_symbol = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(symbol)
+                .execute(pool)
+                .await
+                .expect("清除測試資料");
+        }
+    };
+    cleanup().await;
+    sqlx::query(
+        r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id) VALUES ($1, $1, $1, 2)"#,
+    )
+    .bind(symbol)
+    .execute(pool)
+    .await
+    .expect("插入股票");
+    sqlx::query(
+        r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice", "TradingVolume", "PriceEarningRatio", "price-to-book_ratio")
+           VALUES ($1, $2, 50, 1000, 0, 1.2)"#,
+    )
+    .bind(day(10))
+    .bind(symbol)
+    .execute(pool)
+    .await
+    .expect("插入日線");
+
+    let snapshot = PgDataHealthRepository::new()
+        .fetch_snapshot(day(1), day(5), day(12), 1999, day(1))
+        .await;
+    cleanup().await;
+
+    let snapshot = snapshot.expect("量測應成功");
+    assert!(
+        snapshot
+            .market_counts
+            .iter()
+            .any(|count| count.date == day(10) && count.market_id == 2 && count.traded >= 1),
+        "{:?}",
+        snapshot.market_counts
+    );
+    assert!(snapshot.quoted_dates.contains(&day(10)));
+    assert!(
+        snapshot
+            .valuation_ratio_zeros
+            .iter()
+            .any(|zero| zero.date == day(10) && zero.market_id == 2 && zero.pe_zero >= 1),
+        "{:?}",
+        snapshot.valuation_ratio_zeros
+    );
+}
