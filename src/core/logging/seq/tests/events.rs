@@ -52,11 +52,15 @@ fn forward_to_seq_is_a_noop_when_disabled() {
     SEQ_LOGGING_ENABLED.store(was_enabled, Ordering::Relaxed);
 }
 
-/// 空的 server_url 代表停用 Seq，不得建立 sender。
+/// 空的 server_url 代表停用 Seq：不建立 sender，也不改變啟用旗標。
+///
+/// sender 是行程內只能設定一次的全域值，其他測試（`flush::init_seq_enables_forwarding_to_the_worker`）
+/// 可能已經設定過，因此比對呼叫前後是否不變。
 #[tokio::test]
 async fn init_seq_ignores_a_blank_server_url() {
     let was_enabled = SEQ_LOGGING_ENABLED.load(Ordering::Relaxed);
+    let had_sender = SEQ_SENDER.get().is_some();
     init_seq("   ", "key").await;
     assert_eq!(SEQ_LOGGING_ENABLED.load(Ordering::Relaxed), was_enabled);
-    assert!(SEQ_SENDER.get().is_none() || was_enabled);
+    assert_eq!(SEQ_SENDER.get().is_some(), had_sender);
 }
