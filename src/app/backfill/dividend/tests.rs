@@ -83,3 +83,37 @@ async fn reconcile_ex_right_results_completes_with_empty_exchange_results() {
 
     assert!(result.is_ok(), "{result:?}");
 }
+
+/// 股利回補排程入口：兩條流程併跑、各自記錄結果。臨時資料庫沒有待回補的股票時不會連外；
+/// 外部來源一律導向 mock server（沒有掛路由，萬一有請求也只會是 404）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+)]
+async fn execute_runs_both_backfills_for_the_year() {
+    dotenvy::dotenv().ok();
+    if sqlx::query("SELECT 1")
+        .execute(crate::infra::database::get_connection())
+        .await
+        .is_err()
+    {
+        println!("跳過 execute_runs_both_backfills_for_the_year：無資料庫連接");
+        return;
+    }
+    let server = wiremock::MockServer::start().await;
+    let uri = server.uri();
+
+    let (fixed, now) = crate::core::util::http::mock_origin::with_origins(
+        &[
+            ("https://tw.stock.yahoo.com", &uri),
+            ("https://www.twse.com.tw", &uri),
+            ("https://www.tpex.org.tw", &uri),
+        ],
+        async { (run(1999).await, execute().await) },
+    )
+    .await;
+
+    fixed.expect("1999 年度回補完成");
+    now.expect("今年度回補完成");
+}

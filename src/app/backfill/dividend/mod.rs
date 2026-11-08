@@ -65,9 +65,11 @@ pub async fn execute() -> Result<()> {
     }
 
     // 以本地時間的「今年」當作回補目標年度。
-    let now = Local::now();
-    let year = now.year();
+    run(Local::now().year()).await
+}
 
+/// [`execute`] 的本體：併跑 `year` 年度的兩條回補流程，各自記錄結果。
+async fn run(year: i32) -> Result<()> {
     // 兩條流程都依賴同一年度參數，但互相獨立，適合併行縮短整體耗時。
     let backfill_missing_or_multiple_dividends_task = backfill_missing_or_multiple_dividends(year);
     let backfill_unannounced_dividend_dates_task = backfill_unannounced_dividend_dates(year);
