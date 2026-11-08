@@ -133,41 +133,11 @@ pub trait StockInfo {
     async fn get_stock_quotes(stock_symbol: &str) -> Result<declare::StockQuotes>;
 }
 
+/// 連外 #[ignore] 測試共用的輔助函式（實作在 `tests.rs`，不計入覆蓋率）。
 #[cfg(test)]
-pub(crate) async fn log_stock_price_test<S>(stock_symbol: &str)
-where
-    S: StockInfo,
-{
-    tracing::debug!("開始 get_stock_price");
-
-    match S::get_stock_price(stock_symbol).await {
-        Ok(price) => {
-            dbg!(&price);
-            tracing::debug!("price : {:#?}", price);
-        }
-        Err(why) => {
-            tracing::debug!("Failed to get_stock_price because {:?}", why);
-        }
-    }
-
-    tracing::debug!("結束 get_stock_price");
-}
-
+mod tests;
 #[cfg(test)]
-pub(crate) async fn log_public_ip_visit_test<F, Fut>(visit: F)
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<String>>,
-{
-    match visit().await {
-        Ok(ip) => {
-            dbg!(ip);
-        }
-        Err(why) => {
-            tracing::error!("Failed to get because {:?}", why);
-        }
-    }
-}
+pub(crate) use tests::{log_public_ip_visit_test, log_stock_price_test};
 
 /// 讀取回傳純文字 IP 的 public IP endpoint。
 pub(crate) async fn get_public_ip_text(
