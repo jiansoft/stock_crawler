@@ -302,6 +302,14 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) new_high_days: Option<u16>,
     /// F 分數下限；未篩選為 `null`。
     pub(crate) min_f_score: Option<u8>,
+    /// 現金殖利率下限（%）；未篩選為 `null`。
+    pub(crate) min_dividend_yield_percent: Option<f64>,
+    /// 近 5 年填息率下限（%）；未篩選為 `null`。
+    pub(crate) min_fill_rate_percent: Option<f64>,
+    /// 近 5 年平均填息天數上限（交易日）；未篩選為 `null`。
+    pub(crate) max_avg_fill_days: Option<f64>,
+    /// 連續配息年數下限；未篩選為 `null`。
+    pub(crate) min_dividend_years: Option<u8>,
     /// 訊號來源；未篩選為 `null`。
     pub(crate) indicator: Option<String>,
     /// 訊號種類；未篩選為 `null`。

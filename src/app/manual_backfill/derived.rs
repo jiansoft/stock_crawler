@@ -18,6 +18,8 @@
 //! - `test_record_strategy_rebalance`：
 //!   把具名策略（`MANUAL_STRATEGY_PRESET`，預設「最佳組合」）目前這一期的持股寫進換股紀錄
 //!   （`strategy_rebalance`），供實盤追蹤；同一天已有紀錄不覆蓋，重跑安全。
+//! - `test_rebuild_dividend_fill_events`：
+//!   整批重算除權息填息事件（`dividend_fill_event`），新建表或要立即反映股利修正時用；重跑安全。
 
 use chrono::NaiveDate;
 
@@ -328,4 +330,18 @@ async fn test_strategy_edge_check() {
     for record in crate::app::event::taiwan_stock::strategy_edge::load_latest().await {
         println!("{record:?}");
     }
+}
+
+/// 立即整批重算除權息填息事件（`dividend_fill_event`，平常由 05:45 排程執行）。**會寫入資料庫**；
+/// 同一個交易內先清空再重算，失敗時保留舊資料，重跑安全。
+///
+/// 執行範例：
+/// `cargo test app::manual_backfill::derived::test_rebuild_dividend_fill_events -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_rebuild_dividend_fill_events() {
+    dotenvy::dotenv().ok();
+    crate::app::calculation::dividend_fill_event::execute()
+        .await
+        .expect("重算除權息填息事件失敗");
 }

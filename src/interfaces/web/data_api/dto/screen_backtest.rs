@@ -278,6 +278,22 @@ pub(crate) struct ScreenBacktestParams {
     /// 換股年超過 2 年或沒有年報的不會通過；分數來自 `financial_f_score_history`（每個年度與前一年度比較）。
     #[param(minimum = 0, maximum = 9)]
     pub(crate) min_f_score: Option<u8>,
+    /// 換股當天的現金殖利率下限（%，0–100）：最近一次除息往回 350 天內（含）的現金股利合計 ÷ 換股日收盤；
+    /// 最近一次除息早於換股日 400 天以上（已停止配息）或換股日沒有收盤的不會通過。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) min_dividend_yield_percent: Option<f64>,
+    /// 近 5 年填息率下限（%，0–100）：除息日在換股日前 5 年內、且換股日前已觀察滿 120 個交易日的現金除息中，
+    /// 120 個交易日內收盤回到填息價的比例；沒有觀察期已滿的除息不會通過。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) min_fill_rate_percent: Option<f64>,
+    /// 近 5 年平均填息天數上限（交易日，1–120）：同 `min_fill_rate_percent` 的事件中已填息者的平均天數；
+    /// 都沒有填息的不會通過。
+    #[param(minimum = 1, maximum = 120)]
+    pub(crate) max_avg_fill_days: Option<f64>,
+    /// 連續配發現金股利的年數下限（1–30）：以除息日的年度計，從換股日（含）以前最近一次除息的年度往回數
+    /// 連續有現金除息的年數；最近一次除息的年度早於換股年前一年的不會通過。
+    #[param(minimum = 1, maximum = 30)]
+    pub(crate) min_dividend_years: Option<u8>,
     /// 只選換股前 `hold_days` 個交易日內（含換股當天）出現過這個來源訊號的股票。
     #[param(value_type = Option<SignalIndicatorValue>)]
     pub(crate) indicator: Option<String>,

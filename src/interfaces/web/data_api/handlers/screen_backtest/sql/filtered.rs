@@ -195,6 +195,48 @@ macro_rules! filtered_cte {
           AND q.stock_symbol = u.stock_symbol
           AND q."Date" = u.date
     ) qv ON TRUE
+    LEFT JOIN LATERAL (
+        -- 現金股利（dividend_fill_event）只用換股當天（含）以前的除息。殖利率：最近一次除息往回 350 天的現金股利
+        -- ÷ 換股日收盤（最近一次除息須在 400 天內）；填息率與平均填息天數：除息日在近 5 年內、觀察期 120 個交易日
+        -- 在換股日以前已滿的事件；連續配息年數：以除息日年度計，最近一次除息的年度不早於換股年前一年。
+        SELECT
+            CASE WHEN $41::float8 IS NOT NULL AND latest.ex_date > u.date - 400 THEN (
+                SELECT SUM(y.cash_dividend) FROM dividend_fill_event y
+                WHERE y.stock_symbol = u.stock_symbol
+                  AND y.ex_date > latest.ex_date - 350 AND y.ex_date <= latest.ex_date
+            )::float8 * 100 / NULLIF((
+                SELECT q."ClosingPrice" FROM "DailyQuotes" q
+                WHERE q.stock_symbol = u.stock_symbol AND q."Date" = u.date
+            ), 0)::float8 END AS dividend_yield,
+            fill.fill_rate, fill.avg_fill_days, streak.dividend_years
+        FROM (
+            SELECT MAX(l.ex_date) AS ex_date FROM dividend_fill_event l
+            WHERE l.stock_symbol = u.stock_symbol AND l.ex_date <= u.date
+        ) latest
+        CROSS JOIN LATERAL (
+            SELECT COUNT(*) FILTER (WHERE f.days_to_fill IS NOT NULL)::float8 * 100 / NULLIF(COUNT(*), 0) AS fill_rate,
+                   AVG(f.days_to_fill)::float8 AS avg_fill_days
+            FROM dividend_fill_event f
+            WHERE ($42::float8 IS NOT NULL OR $43::float8 IS NOT NULL)
+              AND f.stock_symbol = u.stock_symbol
+              AND f.ex_date > u.date - 1826
+              AND f.mature_date <= u.date
+        ) fill
+        CROSS JOIN LATERAL (
+            SELECT (COUNT(*) FILTER (WHERE yr = top - rn + 1
+                    AND top >= EXTRACT(YEAR FROM u.date)::int - 1))::int AS dividend_years
+            FROM (
+                SELECT yr, ROW_NUMBER() OVER (ORDER BY yr DESC) AS rn, MAX(yr) OVER () AS top
+                FROM (
+                    SELECT DISTINCT EXTRACT(YEAR FROM s.ex_date)::int AS yr
+                    FROM dividend_fill_event s
+                    WHERE $44::int IS NOT NULL AND s.stock_symbol = u.stock_symbol AND s.ex_date <= u.date
+                ) years
+            ) ranked
+        ) streak
+        WHERE $41::float8 IS NOT NULL OR $42::float8 IS NOT NULL OR $43::float8 IS NOT NULL
+           OR $44::int IS NOT NULL
+    ) dv ON TRUE
     LEFT JOIN holder_rebal hr ON hr.date = u.date
     LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
     LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
@@ -243,7 +285,11 @@ macro_rules! filtered_cte {
             AND fh.fiscal_year >= EXTRACT(YEAR FROM u.date)::int - 2
           ORDER BY fh.fiscal_year DESC
           LIMIT 1
-      ) >= $40)"#,
+      ) >= $40)
+      AND ($41::float8 IS NULL OR dv.dividend_yield >= $41)
+      AND ($42::float8 IS NULL OR dv.fill_rate >= $42)
+      AND ($43::float8 IS NULL OR dv.avg_fill_days <= $43)
+      AND ($44::int IS NULL OR dv.dividend_years >= $44)"#,
             $chip_filter,
             "\n)"
         )

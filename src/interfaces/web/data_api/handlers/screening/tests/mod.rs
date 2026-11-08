@@ -6,6 +6,7 @@
 mod breakout;
 mod canslim;
 mod chip_liquidity;
+mod dividend;
 mod major;
 mod query_plans;
 mod revenue_industry;
@@ -61,6 +62,9 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_eps_yoy_percent: None,
         min_annual_eps_growth_percent: None,
         new_high_days: None,
+        min_fill_rate_percent: None,
+        max_avg_fill_days: None,
+        min_dividend_years: None,
         sort_by: None,
         sort_order: None,
         limit: None,

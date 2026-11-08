@@ -67,6 +67,30 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     if params.min_f_score.is_some_and(|score| score > 9) {
         return Err("min_f_score 必須介於 0 至 9");
     }
+    if params
+        .min_dividend_yield_percent
+        .is_some_and(|percent| !(0.0..=100.0).contains(&percent))
+    {
+        return Err("min_dividend_yield_percent 必須介於 0 至 100");
+    }
+    if params
+        .min_fill_rate_percent
+        .is_some_and(|percent| !(0.0..=100.0).contains(&percent))
+    {
+        return Err("min_fill_rate_percent 必須介於 0 至 100");
+    }
+    if params
+        .max_avg_fill_days
+        .is_some_and(|days| !(1.0..=120.0).contains(&days))
+    {
+        return Err("max_avg_fill_days 必須介於 1 至 120");
+    }
+    if params
+        .min_dividend_years
+        .is_some_and(|years| !(1..=30).contains(&years))
+    {
+        return Err("min_dividend_years 必須介於 1 至 30");
+    }
     Ok(())
 }
 

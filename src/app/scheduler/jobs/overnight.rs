@@ -113,6 +113,14 @@ pub(super) fn definitions() -> Vec<JobDefinition> {
             "計算各期間年化報酬率(CAGR)",
             calculation::cagr::execute_scheduled,
         ),
+        // 05:45 重算除權息填息事件（dividend_fill_event）：條件選股與回測的殖利率、填息率、連續配息年數條件用；
+        // 排在 05:35 除權息公告掃描與 05:37 交易所核對之後，約 5 秒。
+        job!(
+            normal,
+            "0 45 5 * * *",
+            "重算除權息填息事件",
+            calculation::dividend_fill_event::execute,
+        ),
         // 06:00 採集 Yahoo 三大財務報表（損益表、資產負債表、現金流量表）
         // 每輪最多 400 檔、約 45 分鐘；7 天 Redis 旗標讓每檔約每週重抓一次。
         // Yahoo 失敗（404 除外）的股票改從 BigGo 財經備援。

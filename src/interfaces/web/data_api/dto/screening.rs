@@ -172,6 +172,13 @@ pub(crate) struct ScreenedStock {
     pub(crate) annual_eps_year: Option<i32>,
     /// 設 `new_high_days` 時：查詢日（含）以前一年內最近一次創 52 週新高的交易日，格式 `YYYY-MM-DD`；沒設時為 `null`。
     pub(crate) new_high_date: Option<String>,
+    /// 近 5 年填息率（%）：除息日在查詢日前 5 年內、已觀察滿 120 個交易日的現金除息中，120 個交易日內收盤回到
+    /// 填息價的比例；沒有觀察期已滿的除息時為 `null`。
+    pub(crate) fill_rate_percent: Option<f64>,
+    /// 同一批事件中已填息者的平均填息交易日數；都沒有填息時為 `null`。
+    pub(crate) avg_fill_days: Option<f64>,
+    /// 連續配發現金股利的年數（以除息日年度計，從最近一次除息往回數）；最近一次除息早於查詢年前一年時為 0。
+    pub(crate) dividend_years: Option<i32>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -294,6 +301,16 @@ pub(crate) struct StockScreeningParams {
     /// （CANSLIM 的 N）；回應附最近一次新高日。
     #[param(minimum = 1, maximum = 365)]
     pub(crate) new_high_days: Option<u16>,
+    /// 近 5 年填息率下限（%，0–100）：除息日在查詢日前 5 年內、已觀察滿 120 個交易日的現金除息中，120 個交易日內
+    /// 收盤回到填息價的比例；沒有觀察期已滿的除息不符合。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) min_fill_rate_percent: Option<f64>,
+    /// 近 5 年已填息者的平均填息交易日數上限（1–120）；都沒有填息的不符合。
+    #[param(minimum = 1, maximum = 120)]
+    pub(crate) max_avg_fill_days: Option<f64>,
+    /// 連續配發現金股利的年數下限（1–30），以除息日年度計；最近一次除息早於查詢年前一年的不符合。
+    #[param(minimum = 1, maximum = 30)]
+    pub(crate) min_dividend_years: Option<u8>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,
