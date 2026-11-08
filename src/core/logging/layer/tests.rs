@@ -1,4 +1,4 @@
-//! tracing 與輪轉檔案日誌的橋接：[`FileLogLayer`] 把事件寫進 [`super::LOGGER`] 並轉送 Seq的測試。
+//! tracing 與輪轉檔案日誌的橋接：[`FileLogLayer`] 把事件寫進 [`super::LOGGER`] 並轉送 Seq 的測試。
 
 use std::sync::{Arc, Mutex};
 
@@ -11,8 +11,8 @@ type CapturedEvent = (String, Vec<(String, serde_json::Value)>);
 
 /// 測試用的擷取層：把每筆事件交給 [`FieldCollector`] 解析後留存。
 ///
-/// 刻意不直接安裝 [`FileLogLayer`]：那會喚醒全域 `LOGGER` 並真的寫檔，
-/// 測試只想驗證「事件 → 訊息 + 結構化欄位」這段轉換。
+/// 不直接安裝 [`FileLogLayer`]：那會喚醒全域 `LOGGER` 並真的寫檔；欄位轉換的測試只驗證
+/// 「事件 → 訊息 + 結構化欄位」這段（真的安裝的只有 `file_log_layer_routes_every_level_to_the_logger`）。
 struct CaptureLayer {
     events: Arc<Mutex<Vec<CapturedEvent>>>,
 }
@@ -146,4 +146,32 @@ fn file_log_env_filter_falls_back_to_the_default_directives() {
         filter.contains("tokio_cron_scheduler=warn"),
         "實際過濾器：{filter}"
     );
+}
+
+/// 實際安裝 [`FileLogLayer`]：每個等級都交給全域 `LOGGER`（寫進 `log/`，與執行時相同），
+/// 沒有 message 的事件不寫。以 `LOGGER` 的佇列統計確認收到的筆數。
+#[test]
+fn file_log_layer_routes_every_level_to_the_logger() {
+    let accepted = || {
+        let status = LOGGER.diagnostics_snapshot();
+        status.processed_messages + status.queued_messages as u64 + status.dropped_messages
+    };
+    let before = accepted();
+    let subscriber = tracing_subscriber::registry().with(FileLogLayer);
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::error!(stock_symbol = "79979LG", "日誌層測試 error");
+        tracing::warn!(elapsed_ms = 12_u64, "日誌層測試 warn");
+        tracing::info!(
+            ratio = 1.5,
+            delta = -3_i64,
+            ok = true,
+            "日誌層測試 info {}",
+            1
+        );
+        tracing::debug!(detail = ?[1, 2], "日誌層測試 debug");
+        tracing::info!(stock_symbol = "79979LG");
+    });
+
+    // 其他測試也可能同時寫日誌，只檢查至少收到這 4 筆有 message 的事件。
+    assert!(accepted() - before >= 4, "四個等級都應送進 LOGGER");
 }
