@@ -187,3 +187,104 @@ fn notified_key_uses_the_call_id() {
         "biggo:earnings_call:notified:TW_2330.TW_2026-07-16"
     );
 }
+
+/// 以臨時資料庫的假持股、mock BigGo 跑排程入口：回看期間內、摘要已產生的場次只通知一次。
+///
+/// 假持股代號 799797（全數字才算普通股）、會員 979797；Telegram 導向 mock server，測試也沒有
+/// 註冊告警管道，不會真的送出訊息。結束時刪除持股與 Redis 已通知紀錄。
+mod execute_flow {
+    use chrono::Days;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+    use crate::infra::database;
+
+    const SYMBOL: &str = "799797";
+    const MEMBER: i64 = 979_797;
+
+    fn call_id(date: NaiveDate) -> String {
+        format!("TW_{SYMBOL}.TW_{date}")
+    }
+
+    async fn cleanup(recent: &str) {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(database::get_connection())
+            .await
+            .expect("清除測試持股");
+        let _ = CLIENT.delete(&notified_key(recent)).await;
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn execute_notifies_recent_ready_call_once() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 execute_notifies_recent_ready_call_once：無資料庫連接");
+            return;
+        }
+        let today = Local::now().date_naive();
+        let recent = call_id(today);
+        let stale = call_id(today - Days::new(30));
+        cleanup(&recent).await;
+        sqlx::query(
+            "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, created_time, date) \
+             VALUES ($1, $2, 1000, '1999-03-10 00:00:00+08', '1999-03-10')",
+        )
+        .bind(MEMBER)
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("插入測試持股");
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/finance/stock/{SYMBOL}.TW/earnings-calls/list")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "data": {"list": [
+                    {"call_id": recent, "date": today.to_string(), "title": "測試法說會", "has_transcript": true},
+                    {"call_id": stale, "date": (today - Days::new(30)).to_string(), "title": "舊場次", "has_transcript": true}
+                ]}
+            })))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/finance/stock/earnings-calls/detail"))
+            .and(query_param("call_id", recent.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": true,
+                "data": {"call_id": recent, "date": today.to_string(), "title": "測試法說會",
+                         "summary": "營收創新高", "outlook": "審慎樂觀", "qa_highlights": ""}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let uri = server.uri();
+
+        let (first, second) = with_origins(
+            &[
+                ("https://api.biggo.com", &uri),
+                ("https://api.telegram.org", &uri),
+            ],
+            async { (execute().await, execute().await) },
+        )
+        .await;
+        let notified = is_notified(&recent).await;
+        let stale_notified = is_notified(&stale).await;
+        cleanup(&recent).await;
+
+        first.expect("第一次通知");
+        second.expect("第二次略過已通知");
+        assert!(notified, "送出後記錄已通知");
+        assert!(!stale_notified, "回看期間外的場次不處理");
+        // 內容只抓一次：第二次執行時已通知，不再抓內容（MockServer 結束時驗證次數）。
+    }
+}
