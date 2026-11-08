@@ -147,3 +147,115 @@ fn too_many_failures_means_more_than_half() {
     assert!(!too_many_failures(180, 360));
     assert!(too_many_failures(181, 360));
 }
+
+/// 三個排程入口：週末直接結束；平日以臨時資料庫的假 ETF 跑完整流程（MIS 淨值、Yahoo 頁都導向
+/// mock server：淨值抓不到時其餘步驟照做並回錯誤、Yahoo 查無頁面算查無）。假 ETF 0079979EZ，結束時刪除。
+mod entries {
+    use chrono::TimeZone;
+    use wiremock::MockServer;
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+    use crate::infra::database;
+
+    const SYMBOL: &str = "0079979EZ";
+
+    /// 1999-03-10 是星期三、03-13 是星期六。
+    fn at(day: u32) -> DateTime<Local> {
+        Local
+            .with_ymd_and_hms(1999, 3, day, 17, 30, 0)
+            .single()
+            .expect("合法時間")
+    }
+
+    async fn cleanup() {
+        let pool = database::get_connection();
+        for sql in [
+            "DELETE FROM etf_profile WHERE stock_symbol = $1",
+            "DELETE FROM etf_snapshot WHERE stock_symbol = $1",
+            "DELETE FROM etf_performance WHERE stock_symbol = $1",
+            "DELETE FROM stocks WHERE stock_symbol = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(SYMBOL)
+                .execute(pool)
+                .await
+                .expect("清除測試資料");
+        }
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn entries_skip_weekends_and_run_on_weekdays() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 entries_skip_weekends_and_run_on_weekdays：無資料庫連接");
+            return;
+        }
+        cleanup().await;
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
+               VALUES ($1, '測試 ETF', $1, 2, 9001)"#,
+        )
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("插入假 ETF");
+        // 沒有掛任何路由：MIS 淨值與 Yahoo ETF 頁都回 404。
+        let server = MockServer::start().await;
+        let uri = server.uri();
+        let origins = [
+            ("https://mis.twse.com.tw", uri.as_str()),
+            ("https://tw.stock.yahoo.com", uri.as_str()),
+        ];
+
+        let (weekend_daily, weekend_snapshot, weekday_daily, weekday_snapshot, weekly) =
+            with_origins(&origins, async {
+                (
+                    run_daily(at(13)).await,
+                    refresh_snapshot_on(at(13)).await,
+                    run_daily(at(10)).await,
+                    refresh_snapshot_on(at(10)).await,
+                    execute_weekly_profiles().await,
+                )
+            })
+            .await;
+        let requests = server.received_requests().await.unwrap_or_default().len();
+        let (daily_now, snapshot_now) = with_origins(&origins, async {
+            (execute_daily().await, refresh_snapshot().await)
+        })
+        .await;
+        let profile_source: Option<String> =
+            sqlx::query_scalar("SELECT source FROM etf_profile WHERE stock_symbol = $1")
+                .bind(SYMBOL)
+                .fetch_optional(pool)
+                .await
+                .expect("讀回基本資料");
+        cleanup().await;
+
+        weekend_daily.expect("週末直接結束");
+        weekend_snapshot.expect("週末直接結束");
+        let error = weekday_daily.expect_err("淨值抓不到時回錯誤");
+        assert!(error.to_string().contains("預估淨值"), "{error:#}");
+        weekday_snapshot.expect("平日重建快照");
+        weekly.expect("Yahoo 查無頁面只算查無");
+        assert!(requests >= 2, "平日才抓 MIS 淨值與 Yahoo 頁");
+        // 今天可能是週末（直接結束）或平日（淨值抓不到而回錯誤），兩種都只能是這兩個結果。
+        assert!(
+            daily_now
+                .as_ref()
+                .map_or_else(|why| why.to_string().contains("預估淨值"), |()| true),
+            "{daily_now:?}"
+        );
+        snapshot_now.expect("重建快照");
+        assert_eq!(
+            profile_source.as_deref(),
+            Some("heuristic"),
+            "平日補上推斷的基本資料"
+        );
+    }
+}

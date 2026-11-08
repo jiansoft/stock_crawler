@@ -14,7 +14,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use chrono::Local;
+use chrono::{DateTime, Local};
 use rand::RngExt;
 
 use crate::{
@@ -43,7 +43,12 @@ const PROFILE_BATCH: usize = 50;
 ///
 /// 淨值抓取或任一步驟的資料庫操作失敗時回傳錯誤。
 pub async fn execute_daily() -> Result<()> {
-    if Local::now().is_weekend() {
+    run_daily(Local::now()).await
+}
+
+/// [`execute_daily`] 的本體：`now` 落在週末時直接結束。
+async fn run_daily(now: DateTime<Local>) -> Result<()> {
+    if now.is_weekend() {
         return Ok(());
     }
     let repo = PgEtfRepository::new();
@@ -155,7 +160,12 @@ where
 ///
 /// 資料庫操作失敗時回傳錯誤。
 pub async fn refresh_snapshot() -> Result<()> {
-    if Local::now().is_weekend() {
+    refresh_snapshot_on(Local::now()).await
+}
+
+/// [`refresh_snapshot`] 的本體：`now` 落在週末時直接結束。
+async fn refresh_snapshot_on(now: DateTime<Local>) -> Result<()> {
+    if now.is_weekend() {
         return Ok(());
     }
     let rows = PgEtfRepository::new().refresh_snapshot().await?;
