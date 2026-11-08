@@ -155,3 +155,76 @@ async fn rebuild_keeps_previous_snapshots_when_nothing_is_read() {
     let written = repo.fetch_financial_health().await.expect("fetch");
     assert_eq!(written, previous, "沒有讀到任何財報時不能清掉舊結果");
 }
+
+/// 以臨時資料庫跑排程本體：假股票 79979FH 1998、1999 年報（營收、毛利、淨利），以 2000 年為基準
+/// 重算後寫入財務體質；結束時刪除財報與財務體質。今天的年度沒有財報時入口回「0 檔」錯誤、不清空舊結果。
+mod database {
+    use super::*;
+    use crate::infra::database;
+
+    const SYMBOL: &str = "79979FH";
+
+    async fn cleanup() {
+        let pool = database::get_connection();
+        for sql in [
+            "DELETE FROM income_statement WHERE stock_symbol = $1",
+            "DELETE FROM financial_health WHERE stock_symbol = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(SYMBOL)
+                .execute(pool)
+                .await
+                .expect("清除測試資料");
+        }
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn run_rebuilds_from_annual_statements() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 run_rebuilds_from_annual_statements：無資料庫連接");
+            return;
+        }
+        cleanup().await;
+        for (year, revenue, gross, net) in
+            [(1998, 1_000_i64, 300_i64, 100_i64), (1999, 1_200, 400, 150)]
+        {
+            sqlx::query(
+                "INSERT INTO income_statement (stock_symbol, fiscal_year, period_type, quarter, revenue, gross_profit, net_income) \
+                 VALUES ($1, $2, 'annual', 'A', $3, $4, $5)",
+            )
+            .bind(SYMBOL)
+            .bind(year)
+            .bind(revenue)
+            .bind(gross)
+            .bind(net)
+            .execute(pool)
+            .await
+            .expect("插入年報");
+        }
+
+        let fixed = run(2000).await;
+        let rows: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM financial_health WHERE stock_symbol = $1")
+                .bind(SYMBOL)
+                .fetch_one(pool)
+                .await
+                .expect("讀回財務體質");
+        cleanup().await;
+        let today = execute().await;
+
+        fixed.expect("以 2000 年為基準重算");
+        assert_eq!(rows, 1, "寫入假股票的財務體質");
+        assert!(
+            today
+                .as_ref()
+                .map_or_else(|why| why.to_string().contains("0 檔"), |()| true),
+            "今天的年度沒有財報時只能是 0 檔錯誤：{today:?}"
+        );
+    }
+}

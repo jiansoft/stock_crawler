@@ -62,12 +62,17 @@ pub(crate) struct Rebuilt {
 ///
 /// 讀不到上一次結果時照常重算、只是不通知；通知失敗不影響重算結果。
 pub async fn execute() -> Result<()> {
+    run(Local::now().year()).await
+}
+
+/// [`execute`] 的本體：以 `current_year` 為評分基準年度重算並通知。
+async fn run(current_year: i32) -> Result<()> {
     let repo = PgFinancialHealthRepository::new();
     let previous = repo.fetch_financial_health().await.unwrap_or_else(|why| {
         tracing::warn!("讀取上一次財務體質失敗，本次不發持股通知: {why:#}");
         Vec::new()
     });
-    let rebuilt = rebuild(&repo, Local::now().year()).await?;
+    let rebuilt = rebuild(&repo, current_year).await?;
     tracing::info!("財務體質重算結束: {}", rebuilt.summary);
 
     match holdings::common_stock_holdings().await {
