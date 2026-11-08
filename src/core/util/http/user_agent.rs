@@ -1,11 +1,13 @@
 //! 隨機產生瀏覽器 User-Agent，降低規律請求被來源站判定為爬蟲的機率。
 //!
-//! 各瀏覽器的版本號與作業系統字串在 [`versions`]。
+//! 各瀏覽器的版本號在 [`versions`]，作業系統字串在 [`os_strings`]。
 
+mod os_strings;
 mod versions;
 
 use rand::RngExt;
 
+use self::os_strings::OS_STRINGS;
 use self::versions::*;
 
 fn gen_firefox_ua() -> String {
