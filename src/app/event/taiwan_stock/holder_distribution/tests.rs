@@ -275,3 +275,115 @@ async fn mark_reported_only_once_per_week() {
         .await
         .expect("清除測試紀錄");
 }
+
+/// 以臨時資料庫跑排程入口：mock 集保開放資料（假代號 799797 的一週全部分級），假持股 799797；
+/// 第一次入庫並送出週報、記下去重鍵，第二次同一資料週不再送。Telegram 導向 mock，測試也沒有
+/// 註冊告警管道。結束時刪除持股、週摘要、分級與去重鍵。
+mod execute_flow {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+    use crate::infra::database;
+
+    const SYMBOL: &str = "799797";
+    const MEMBER: i64 = 979_797;
+    const FIXTURE: &str =
+        include_str!("../../../../infra/crawler/tdcc/testdata/shareholding_distribution.csv");
+
+    /// fixture 裡 2330 的 17 級，換成假代號與 1999-03-12（五）。
+    fn csv() -> String {
+        let mut lines = vec!["資料日期,證券代號,持股分級,人數,股數,占集保庫存數比例%".to_string()];
+        lines.extend(
+            FIXTURE
+                .lines()
+                .filter(|line| line.starts_with("20261002,2330 "))
+                .map(|line| line.replacen("20261002,2330  ", &format!("19990312,{SYMBOL}"), 1)),
+        );
+        lines.join("\n")
+    }
+
+    fn week() -> NaiveDate {
+        NaiveDate::from_ymd_opt(1999, 3, 12).expect("合法日期")
+    }
+
+    async fn cleanup() {
+        let pool = database::get_connection();
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(pool)
+            .await
+            .expect("清除測試持股");
+        for sql in [
+            "DELETE FROM holder_distribution WHERE stock_symbol = $1",
+            "DELETE FROM holder_distribution_level WHERE stock_symbol = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(SYMBOL)
+                .execute(pool)
+                .await
+                .expect("清除集保資料");
+        }
+        let _ = CLIENT.delete(&reported_key(week())).await;
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn execute_reports_holdings_once_per_week() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 execute_reports_holdings_once_per_week：無資料庫連接");
+            return;
+        }
+        cleanup().await;
+        sqlx::query(
+            "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, created_time, date) \
+             VALUES ($1, $2, 1000, '1999-03-10 00:00:00+08', '1999-03-10')",
+        )
+        .bind(MEMBER)
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("插入測試持股");
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/getOD.ashx"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(csv()))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let uri = server.uri();
+
+        let (first, second) = with_origins(
+            &[
+                ("https://opendata.tdcc.com.tw", &uri),
+                ("https://api.telegram.org", &uri),
+            ],
+            async { (execute().await, execute().await) },
+        )
+        .await;
+        let saved: i64 = sqlx::query_scalar(
+            r#"SELECT count(*) FROM holder_distribution WHERE stock_symbol = $1 AND "date" = $2"#,
+        )
+        .bind(SYMBOL)
+        .bind(week())
+        .fetch_one(pool)
+        .await
+        .expect("讀回週摘要");
+        let reported = CLIENT
+            .get_string(&reported_key(week()))
+            .await
+            .unwrap_or_default();
+        cleanup().await;
+
+        first.expect("第一次入庫並送出");
+        second.expect("第二次同一資料週略過");
+        assert_eq!(saved, 1, "週摘要入庫");
+        assert_eq!(reported, "1", "送出後記下去重鍵");
+    }
+}
