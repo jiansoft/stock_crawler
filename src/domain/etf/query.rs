@@ -280,24 +280,4 @@ pub trait EtfQueryRepository: Send + Sync {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sort_whitelist_round_trips() {
-        for key in [
-            "trade_value",
-            "total_assets",
-            "premium_rate",
-            "yield_12m",
-            "net_flow",
-            "ret_1m",
-            "ret_ytd",
-            "ret_1y",
-            "holders",
-        ] {
-            assert_eq!(EtfSort::parse(key).map(EtfSort::column), Some(key));
-        }
-        assert_eq!(EtfSort::parse("name; DROP TABLE"), None);
-    }
-}
+mod tests;
