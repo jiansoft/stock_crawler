@@ -23,20 +23,6 @@ pub(crate) struct EtfTrackingResponse {
     note: String,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[tokio::test]
-    async fn rejects_invalid_symbol_before_database_access() {
-        for symbol in ["", "0050;DROP", "xxxxxxxxxxxxx", "台積電"] {
-            assert_eq!(
-                etf_tracking(Path(symbol.into())).await.status(),
-                StatusCode::UNPROCESSABLE_ENTITY
-            );
-        }
-    }
-}
-
 /// 讀取每日績效排程的近一年結果；資料不足時回 null，不以折溢價當作追蹤誤差。
 #[utoipa::path(get,path="/api/v1/etfs/{symbol}/tracking-error",tag="data-api",params(("symbol"=String,Path)),responses((status=200,body=EtfTrackingResponse),(status=401,body=ErrorBody),(status=404,body=ErrorBody),(status=422,body=ErrorBody),(status=500,body=ErrorBody)),security(("bearer_auth"=[])))]
 pub(crate) async fn etf_tracking(Path(symbol): Path<String>) -> Response {
@@ -51,3 +37,6 @@ pub(crate) async fn etf_tracking(Path(symbol): Path<String>) -> Response {
         Err(error)=>repository_error(error),
     }
 }
+
+#[cfg(test)]
+mod tests;
