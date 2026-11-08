@@ -294,3 +294,50 @@ async fn build_message_lists_fills_and_lags() {
     assert!(build_message(day(21), &Review::default(), |_| String::new()).is_none());
     assert_eq!(dividend_text(dec!(1.50), Decimal::ZERO), "現金 1.5 元");
 }
+
+/// 以臨時資料庫跑排程入口：假持股 799798（會員 979798）沒有除權息紀錄，不會有通知；
+/// 固定日期與今天各跑一次都成功。結束時刪除持股。
+mod entries {
+    use super::*;
+    use crate::infra::database;
+
+    const MEMBER: i64 = 979_798;
+
+    async fn cleanup() {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE member_id = $1")
+            .bind(MEMBER)
+            .execute(database::get_connection())
+            .await
+            .expect("清除測試持股");
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn run_and_execute_review_active_holdings() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 run_and_execute_review_active_holdings：無資料庫連接");
+            return;
+        }
+        cleanup().await;
+        sqlx::query(
+            "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, created_time, date) \
+             VALUES ($1, '799798', 1000, '1999-03-10 00:00:00+08', '1999-03-10')",
+        )
+        .bind(MEMBER)
+        .execute(pool)
+        .await
+        .expect("插入測試持股");
+
+        let fixed = run(NaiveDate::from_ymd_opt(1999, 6, 20).expect("合法日期")).await;
+        let today = execute().await;
+        cleanup().await;
+
+        fixed.expect("固定日期檢查完成");
+        today.expect("今天檢查完成");
+    }
+}

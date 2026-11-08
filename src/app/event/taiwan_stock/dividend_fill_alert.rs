@@ -107,10 +107,14 @@ struct Review {
 ///
 /// 查詢持股失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
+    run(Local::now().date_naive()).await
+}
+
+/// [`execute`] 的本體：以 `today` 判斷今天填息與今天第一次落後。
+async fn run(today: NaiveDate) -> Result<()> {
     let symbols = holdings::active_holding_symbols()
         .await
         .context("fetch active holdings for dividend fill notification failed")?;
-    let today = Local::now().date_naive();
     let repository = PgDividendFillRepository::new();
     let peers =
         match dividend_fill_stats::market_fill_samples_for(&repository, today, PEER_YEARS).await {
