@@ -113,3 +113,52 @@ async fn update_weight_then_zeroed_out_weights() {
     assert_eq!(after_update, dec!(1.2345));
     assert_eq!(after_zero, Decimal::ZERO);
 }
+
+/// 只取未下市的證券並還原成聚合根（市場、產業、外資持股欄位）；下市的不列。假代號結束時刪除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn fetch_all_active_skips_suspended_stocks() {
+    dotenvy::dotenv().ok();
+    let pool = database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 fetch_all_active_skips_suspended_stocks：無資料庫連接");
+        return;
+    }
+    let (active, suspended) = ("79979SA", "79979SB");
+    let cleanup = || async {
+        sqlx::query("DELETE FROM stocks WHERE stock_symbol = ANY($1)")
+            .bind(vec![active.to_string(), suspended.to_string()])
+            .execute(pool)
+            .await
+            .expect("清除測試股票");
+    };
+    cleanup().await;
+    for (symbol, suspend) in [(active, false), (suspended, true)] {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, "SuspendListing",
+                   stock_exchange_market_id, stock_industry_id, issued_share, qfii_shares_held)
+               VALUES ($1, '測試主檔', $1, $2, 2, 24, 1000000, 250000)"#,
+        )
+        .bind(symbol)
+        .bind(suspend)
+        .execute(pool)
+        .await
+        .expect("插入測試股票");
+    }
+
+    let stocks = PgStockRepository::default().fetch_all_active().await;
+    cleanup().await;
+
+    let stocks = stocks.expect("查詢有效證券");
+    let found: Vec<&Stock> = stocks
+        .iter()
+        .filter(|stock| [active, suspended].contains(&stock.symbol().0.as_str()))
+        .collect();
+    assert_eq!(found.len(), 1, "下市的不列");
+    assert_eq!(found[0].symbol().0, active);
+    assert_eq!(found[0].name(), "測試主檔");
+    assert_eq!((found[0].market_id(), found[0].industry_id()), (2, 24));
+}
