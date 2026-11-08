@@ -60,6 +60,12 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_annual_eps_growth_percent: Option<Decimal>,
     /// 最近幾個日曆天內創過 52 週新高。
     pub(super) new_high_days: Option<i32>,
+    /// 近 5 年填息率下限（%）。
+    pub(super) min_fill_rate_percent: Option<Decimal>,
+    /// 近 5 年平均填息交易日數上限。
+    pub(super) max_avg_fill_days: Option<Decimal>,
+    /// 連續配息年數下限。
+    pub(super) min_dividend_years: Option<i32>,
     /// 三十六個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
@@ -244,6 +250,24 @@ pub(super) fn validate_screening_params(
     {
         return Err("new_high_days 必須介於 1 至 365");
     }
+    let min_fill_rate_percent = decimal_in_range(
+        params.min_fill_rate_percent,
+        0.0,
+        100.0,
+        "min_fill_rate_percent 必須介於 0 至 100",
+    )?;
+    let max_avg_fill_days = decimal_in_range(
+        params.max_avg_fill_days,
+        1.0,
+        120.0,
+        "max_avg_fill_days 必須介於 1 至 120",
+    )?;
+    if params
+        .min_dividend_years
+        .is_some_and(|years| !(1..=30).contains(&years))
+    {
+        return Err("min_dividend_years 必須介於 1 至 30");
+    }
     let order_by = screen_order_by(
         params.sort_by.as_deref().unwrap_or("stock_symbol"),
         params.sort_order.as_deref().unwrap_or("asc"),
@@ -280,7 +304,10 @@ pub(super) fn validate_screening_params(
         || params.range_breakout_days.is_some()
         || params.min_eps_yoy_percent.is_some()
         || params.min_annual_eps_growth_percent.is_some()
-        || params.new_high_days.is_some();
+        || params.new_high_days.is_some()
+        || params.min_fill_rate_percent.is_some()
+        || params.max_avg_fill_days.is_some()
+        || params.min_dividend_years.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -310,6 +337,9 @@ pub(super) fn validate_screening_params(
         min_eps_yoy_percent,
         min_annual_eps_growth_percent,
         new_high_days: params.new_high_days.map(i32::from),
+        min_fill_rate_percent,
+        max_avg_fill_days,
+        min_dividend_years: params.min_dividend_years.map(i32::from),
         order_by,
         limit,
     })

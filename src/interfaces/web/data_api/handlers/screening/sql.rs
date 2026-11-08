@@ -25,6 +25,8 @@
 /// 下限；年度 EPS 成長取最近 4 個年度（`quarter = ''`）算出的 3 個年增率中最低者，年度須連續、基期皆 > 0，
 /// 最新年度落後查詢年 1～2 年才算新鮮，`$40` 為下限；`$41` 有值時才查 52 週新高訊號（一年內最近一次），
 /// 只留 `$41` 個日曆天內創新高的股票。
+/// 存股條件讀 `dividend_fill_event`：近 5 年（除息日在查詢日前 5 年內、120 個交易日觀察期已滿）填息率下限 `$42`、
+/// 已填息者平均填息交易日數上限 `$43`、連續配息年數下限 `$44`；三個欄位每檔都會回傳。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -70,7 +72,10 @@ WITH latest AS (
         q.avg_trade_value,
         pv.ratio_date,
         pv.pe_ratio,
-        pv.pb_ratio
+        pv.pb_ratio,
+        dv.fill_rate_percent,
+        dv.avg_fill_days,
+        dv.dividend_years
     FROM stocks s
     LEFT JOIN LATERAL (
         -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
@@ -230,6 +235,32 @@ WITH latest AS (
               AND prev.fiscal_year = cur.fiscal_year - 1
               AND prev.quarter = cur.quarter
     ) m ON TRUE
+    LEFT JOIN LATERAL (
+        -- 近 5 年填息（dividend_fill_event）：除息日在查詢日前 5 年內、觀察期 120 個交易日已滿的現金除息；
+        -- 連續配息年數以除息日年度計，最近一次除息的年度早於查詢年前一年時為 0。
+        SELECT fill.fill_rate_percent, fill.avg_fill_days, streak.dividend_years
+        FROM (
+            SELECT ROUND(COUNT(*) FILTER (WHERE f.days_to_fill IS NOT NULL) * 100.0
+                       / NULLIF(COUNT(*), 0), 1) AS fill_rate_percent,
+                   ROUND(AVG(f.days_to_fill), 1) AS avg_fill_days
+            FROM dividend_fill_event f
+            WHERE f.stock_symbol = s.stock_symbol
+              AND f.ex_date > $3::date - 1826
+              AND f.mature_date <= $3::date
+        ) fill
+        CROSS JOIN (
+            SELECT (COUNT(*) FILTER (WHERE yr = top - rn + 1
+                    AND top >= EXTRACT(YEAR FROM $3::date)::int - 1))::int AS dividend_years
+            FROM (
+                SELECT yr, ROW_NUMBER() OVER (ORDER BY yr DESC) AS rn, MAX(yr) OVER () AS top
+                FROM (
+                    SELECT DISTINCT EXTRACT(YEAR FROM d.ex_date)::int AS yr
+                    FROM dividend_fill_event d
+                    WHERE d.stock_symbol = s.stock_symbol AND d.ex_date <= $3::date
+                ) years
+            ) ranked
+        ) streak
+    ) dv ON TRUE
     LEFT JOIN financial_health h ON h.stock_symbol = s.stock_symbol
     WHERE (($1::int = 0 AND s.stock_exchange_market_id IN (2, 4))
         OR ($1::int <> 0 AND s.stock_exchange_market_id = $1))
@@ -348,7 +379,8 @@ SELECT
     avg_trade_value,
     pe_ratio, pb_ratio, ratio_date,
     brk.breakout_date, brk.breakout_description,
-    eps_yoy_percent, annual_eps_growth_percent, annual_eps_year, new_high_date
+    eps_yoy_percent, annual_eps_growth_percent, annual_eps_year, new_high_date,
+    fill_rate_percent, avg_fill_days, dividend_years
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -386,4 +418,7 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($39::numeric IS NULL OR eps_yoy_percent >= $39)
   AND ($40::numeric IS NULL OR annual_eps_growth_percent >= $40)
   AND ($41::int IS NULL OR new_high_date >= $3::date - $41)
+  AND ($42::numeric IS NULL OR fill_rate_percent >= $42)
+  AND ($43::numeric IS NULL OR avg_fill_days <= $43)
+  AND ($44::int IS NULL OR dividend_years >= $44)
 "#;

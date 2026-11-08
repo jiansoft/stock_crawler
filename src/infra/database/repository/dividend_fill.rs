@@ -2,6 +2,8 @@
 //!
 //! - [`DividendFillQuery`]：單一股票，`/stocks/{symbol}/dividend-fill` 與持股填息通知共用。
 //! - [`MarketFillQuery`]：全市場填息樣本，`/market/dividend-fill-stats` 與持股的同組基準用。
+//! - [`PgDividendFillRepository::replace_fill_events`]：每天整批重算 `dividend_fill_event`（條件選股與回測的
+//!   殖利率、填息率、連續配息年數條件用）。
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -86,6 +88,58 @@ CROSS JOIN LATERAL (
 WHERE after.observed > 0
 "#;
 
+/// 整批重算 `dividend_fill_event`：所有代號（含 ETF）每個有現金股利的除息日一列，事件規則與
+/// [`MARKET_FILL_SAMPLES_SQL`] 相同，但不限期間、不限普通股，也保留沒有日線的事件（填息欄位為 NULL）。
+///
+/// `$1` 為觀察期交易日數：`days_to_fill`／`fill_date` 只看除息日起的前 `$1` 個交易日，`mature_date` 是
+/// 第 `$1` 個交易日（不足時為 NULL）。換股日只用 `mature_date` 不晚於當天的事件算填息率，才不會用到未來的收盤。
+const REBUILD_FILL_EVENTS_SQL: &str = r#"
+INSERT INTO dividend_fill_event
+    (stock_symbol, ex_date, cash_dividend, stock_dividend, pre_ex_close, days_to_fill, fill_date, mature_date)
+WITH cash AS (
+    SELECT DISTINCT ON (security_code, "ex-dividend_date1")
+        security_code, "ex-dividend_date1"::date AS ex_date, cash_dividend
+    FROM dividend
+    WHERE cash_dividend > 0
+        AND "ex-dividend_date1" ~ '^\d{4}-\d{2}-\d{2}$' AND pg_input_is_valid("ex-dividend_date1", 'date')
+    ORDER BY security_code, "ex-dividend_date1", (quarter = ''), cash_dividend DESC
+), stock AS (
+    SELECT DISTINCT ON (security_code, "ex-dividend_date2")
+        security_code, "ex-dividend_date2"::date AS ex_date, stock_dividend
+    FROM dividend
+    WHERE stock_dividend > 0
+        AND "ex-dividend_date2" ~ '^\d{4}-\d{2}-\d{2}$' AND pg_input_is_valid("ex-dividend_date2", 'date')
+    ORDER BY security_code, "ex-dividend_date2", (quarter = ''), stock_dividend DESC
+), events AS (
+    SELECT security_code AS symbol, ex_date, cash.cash_dividend AS cash,
+        COALESCE(stock.stock_dividend, 0) AS stock
+    FROM cash LEFT JOIN stock USING (security_code, ex_date)
+)
+SELECT e.symbol, e.ex_date, e.cash, e.stock, pre.close, after.days_to_fill, after.fill_date, after.mature_date
+FROM events e
+LEFT JOIN LATERAL (
+    SELECT "ClosingPrice" AS close FROM "DailyQuotes"
+    WHERE stock_symbol = e.symbol AND "Date" < e.ex_date AND "Date" >= e.ex_date - 30
+        AND "ClosingPrice" > 0
+    ORDER BY "Date" DESC LIMIT 1
+) pre ON TRUE
+LEFT JOIN LATERAL (
+    SELECT (min(n) FILTER (WHERE close >= target))::smallint AS days_to_fill,
+        min("Date") FILTER (WHERE close >= target) AS fill_date,
+        max("Date") FILTER (WHERE n = $1) AS mature_date
+    FROM (
+        SELECT row_number() OVER (ORDER BY "Date") AS n, "Date", "ClosingPrice" AS close,
+            round(pre.close / (1 + e.stock / 10), 2) AS target
+        FROM (
+            SELECT "Date", "ClosingPrice" FROM "DailyQuotes"
+            WHERE pre.close IS NOT NULL AND stock_symbol = e.symbol AND "Date" >= e.ex_date
+                AND "ClosingPrice" > 0
+            ORDER BY "Date" LIMIT $1
+        ) window_rows
+    ) numbered
+) after ON TRUE
+"#;
+
 /// 填息分析資料來源之 PostgreSQL 實作。
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PgDividendFillRepository;
@@ -94,6 +148,26 @@ impl PgDividendFillRepository {
     /// 建立倉儲。
     pub fn new() -> Self {
         Self
+    }
+
+    /// 在同一個交易內清空並重算 `dividend_fill_event`，回傳寫入列數；查詢失敗時交易回滾、保留舊資料。
+    ///
+    /// # Errors
+    /// 資料庫連線、清除或寫入失敗時回傳錯誤。
+    pub async fn replace_fill_events(&self) -> Result<u64> {
+        let mut tx = database::get_batch_connection().begin().await?;
+        sqlx::query("DELETE FROM dividend_fill_event")
+            .execute(&mut *tx)
+            .await
+            .context("清除 dividend_fill_event 失敗")?;
+        let inserted = sqlx::query(REBUILD_FILL_EVENTS_SQL)
+            .bind(i64::from(MATURE_TRADING_DAYS))
+            .execute(&mut *tx)
+            .await
+            .context("重算 dividend_fill_event 失敗")?
+            .rows_affected();
+        tx.commit().await?;
+        Ok(inserted)
     }
 }
 

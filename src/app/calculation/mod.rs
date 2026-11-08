@@ -2,6 +2,8 @@
 pub mod cagr;
 /// 股票每日行情
 pub mod daily_quotes;
+/// 每日重算除權息填息事件（條件選股與回測的股利條件用）
+pub mod dividend_fill_event;
 /// 計算股票股息收入
 pub mod dividend_fill_hints;
 pub mod dividend_record;

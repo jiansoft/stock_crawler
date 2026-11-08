@@ -102,6 +102,12 @@ pub(super) struct ScreenedStockRow {
     annual_eps_year: Option<i32>,
     /// 一年內最近一次 52 週新高（有設 `new_high_days` 才有）。
     new_high_date: Option<NaiveDate>,
+    /// 近 5 年填息率（%）。
+    fill_rate_percent: Option<Decimal>,
+    /// 近 5 年已填息者的平均填息交易日數。
+    avg_fill_days: Option<Decimal>,
+    /// 連續配息年數。
+    dividend_years: Option<i32>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -226,6 +232,13 @@ impl From<ScreenedStockRow> for ScreenedStock {
             ),
             annual_eps_year: row.annual_eps_year,
             new_high_date: row.new_high_date.map(|date| date.to_string()),
+            fill_rate_percent: analytical_decimal_to_f64(
+                row.fill_rate_percent,
+                &symbol,
+                "fill_rate_percent",
+            ),
+            avg_fill_days: analytical_decimal_to_f64(row.avg_fill_days, &symbol, "avg_fill_days"),
+            dividend_years: row.dividend_years,
         }
     }
 }
