@@ -75,3 +75,94 @@ async fn save_historical_dividends_writes_details_and_annual_total() {
     assert_eq!(annual_cash, dec!(2.5));
     assert!(symbols.contains(TEST_SYMBOL));
 }
+
+/// 以本機 mock server 取代 Yahoo 股利頁：單檔回補寫入頁面上的全部明細；指定年度的批次回補只跑
+/// 有季配／半年配的股票；查無頁面回錯誤。假代號 79968，結束時刪除。
+mod mock_yahoo {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+
+    const SYMBOL: &str = "79968";
+    const YAHOO: &str = "https://tw.stock.yahoo.com";
+    /// 2753 八方雲集的 Yahoo 股利頁（UTF-8）。
+    const FIXTURE: &str =
+        include_str!("../../../../infra/crawler/yahoo/testdata/dividend_2753.html");
+
+    async fn cleanup_symbol() {
+        sqlx::query("DELETE FROM dividend WHERE security_code = $1")
+            .bind(SYMBOL)
+            .execute(database::get_connection())
+            .await
+            .expect("清除測試股利");
+    }
+
+    async fn yahoo() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/quote/{SYMBOL}/dividend")))
+            .respond_with(ResponseTemplate::new(200).set_body_string(FIXTURE))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
+    )]
+    async fn backfill_entries_fetch_yahoo_and_write_details() {
+        dotenvy::dotenv().ok();
+        let pool = database::get_connection();
+        if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+            println!("跳過 backfill_entries_fetch_yahoo_and_write_details：無資料庫連接");
+            return;
+        }
+        cleanup_symbol().await;
+        let server = yahoo().await;
+        let uri = server.uri();
+
+        let single = with_origins(
+            &[(YAHOO, &uri)],
+            backfill_historical_dividends_for_stock(SYMBOL),
+        )
+        .await;
+        let written: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM dividend WHERE security_code = $1")
+                .bind(SYMBOL)
+                .fetch_one(pool)
+                .await
+                .expect("讀回股利");
+        cleanup_symbol().await;
+        // 指定年度批次：先種一筆 1999 年 Q1 季配，讓這檔進入季配／半年配清單。
+        sqlx::query(
+            r#"INSERT INTO dividend (security_code, year, year_of_dividend, quarter, cash_dividend, stock_dividend, "sum", "ex-dividend_date1", "ex-dividend_date2", payable_date1, payable_date2)
+               VALUES ($1, 1999, 1998, 'Q1', 1, 0, 1, '1999-04-01', '-', '1999-05-01', '-')"#,
+        )
+        .bind(SYMBOL)
+        .execute(pool)
+        .await
+        .expect("插入季配");
+        let batch = with_origins(
+            &[(YAHOO, &uri)],
+            backfill_historical_dividends_for_multiple_dividend_stocks(1999),
+        )
+        .await;
+        let missing = with_origins(
+            &[(YAHOO, &uri)],
+            backfill_historical_dividends_for_stock("79967"),
+        )
+        .await;
+        cleanup_symbol().await;
+
+        let single = single.expect("單檔回補");
+        assert!(single > 0, "Yahoo 頁面上有股利明細");
+        assert!(written >= single as i64, "明細（與年度彙總列）寫入資料庫");
+        let batch = batch.expect("批次回補");
+        assert!(batch.stock_count >= 1, "{batch:?}");
+        assert!(missing.is_err(), "查無頁面回錯誤");
+    }
+}
