@@ -103,3 +103,65 @@ async fn test_rebuild_revenue_last_date() {
         }
     }
 }
+
+/// 以臨時資料庫測「前兩個月」的查詢與資料列轉換：1999-03 查到 199902、199901，不含 199812。
+/// 假代號 79979RV，結束時刪除。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn fetch_last_two_months_before_reads_previous_two_months() {
+    use crate::infra::database;
+    use crate::infra::database::table::revenue::fetch_last_two_months_before;
+
+    dotenvy::dotenv().ok();
+    let pool = database::get_connection();
+    if sqlx::query("SELECT 1").execute(pool).await.is_err() {
+        println!("跳過 fetch_last_two_months_before_reads_previous_two_months：無資料庫連接");
+        return;
+    }
+    let symbol = "79979RV";
+    let cleanup = || async {
+        sqlx::query(r#"DELETE FROM "Revenue" WHERE stock_symbol = $1"#)
+            .bind(symbol)
+            .execute(pool)
+            .await
+            .expect("清除測試營收");
+    };
+    cleanup().await;
+    for (date, monthly) in [(199_812_i64, 100), (199_901, 200), (199_902, 300)] {
+        sqlx::query(
+            r#"INSERT INTO "Revenue" (stock_symbol, "Date", "Monthly", "LastMonth", "LastYearThisMonth",
+                   "MonthlyAccumulated", "LastYearMonthlyAccumulated", "ComparedWithLastMonth",
+                   "ComparedWithLastYearSameMonth", "AccumulatedComparedWithLastYear",
+                   avg_price, lowest_price, highest_price)
+               VALUES ($1, $2, $3, 0, 0, $3, 0, 0, 0, 0, 10, 9, 11)"#,
+        )
+        .bind(symbol)
+        .bind(date)
+        .bind(Decimal::from(monthly))
+        .execute(pool)
+        .await
+        .expect("插入測試營收");
+    }
+    let now = Local
+        .with_ymd_and_hms(1999, 3, 15, 9, 0, 0)
+        .single()
+        .expect("合法時間");
+
+    let revenues = fetch_last_two_months_before(now).await;
+    cleanup().await;
+
+    let mut ours: Vec<(i64, Decimal)> = revenues
+        .expect("查詢成功")
+        .into_iter()
+        .filter(|revenue| revenue.stock_symbol == symbol)
+        .map(|revenue| (revenue.date, revenue.monthly))
+        .collect();
+    ours.sort();
+    assert_eq!(
+        ours,
+        vec![(199_901, Decimal::from(200)), (199_902, Decimal::from(300))]
+    );
+}

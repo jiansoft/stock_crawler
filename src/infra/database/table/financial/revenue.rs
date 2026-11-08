@@ -9,7 +9,7 @@ use sqlx::{
 use crate::infra::database;
 
 /// 月營收資料列（對應 `"Revenue"`）。
-#[derive(sqlx::Type, sqlx::FromRow, Debug)]
+#[derive(sqlx::Type, sqlx::FromRow, Debug, Clone)]
 pub struct Revenue {
     /// 股票代號。
     pub stock_symbol: String,
@@ -131,33 +131,19 @@ impl Default for Revenue {
     }
 }
 
-impl Clone for Revenue {
-    fn clone(&self) -> Self {
-        Revenue {
-            stock_symbol: self.stock_symbol.to_string(),
-            monthly: self.monthly,
-            last_month: self.last_month,
-            last_year_this_month: self.last_year_this_month,
-            monthly_accumulated: self.monthly_accumulated,
-            last_year_monthly_accumulated: self.last_year_monthly_accumulated,
-            compared_with_last_month: self.compared_with_last_month,
-            compared_with_last_year_same_month: self.compared_with_last_year_same_month,
-            accumulated_compared_with_last_year: self.accumulated_compared_with_last_year,
-            avg_price: self.avg_price,
-            lowest_price: self.lowest_price,
-            highest_price: self.highest_price,
-            date: self.date,
-            create_time: self.create_time,
-        }
-    }
-}
-
 /// 讀取最近兩個月的營收資料。
 ///
 /// # Errors
 /// 當查詢失敗時回傳錯誤。
 pub async fn fetch_last_two_month() -> Result<Vec<Revenue>> {
-    let now = Local::now();
+    fetch_last_two_months_before(Local::now()).await
+}
+
+/// [`fetch_last_two_month`] 的本體：`now` 所在月份的前兩個月（`yyyyMM`）。
+///
+/// # Errors
+/// 當查詢失敗時回傳錯誤。
+pub(crate) async fn fetch_last_two_months_before(now: DateTime<Local>) -> Result<Vec<Revenue>> {
     let now_first_day = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
         .unwrap()
         .and_hms_opt(0, 0, 0)
