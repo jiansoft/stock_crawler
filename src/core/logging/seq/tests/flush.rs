@@ -156,3 +156,39 @@ async fn spawned_worker_sends_events_on_its_own_runtime() {
             .all(|(key, _)| key.as_deref() == Some("secret"))
     );
 }
+
+/// `init_seq` 啟用後，`forward_to_seq` 的事件由背景 worker 送到 Seq；sender 已存在時再呼叫只重新開啟旗標。
+///
+/// sender 是全域只能設定一次的值，測試結束時把啟用旗標關回去，其他測試的日誌不會再轉送。
+#[tokio::test]
+async fn init_seq_enables_forwarding_to_the_worker() {
+    let seq = fake_seq(201).await;
+    init_seq(&seq.endpoint, "").await;
+    let enabled = SEQ_LOGGING_ENABLED.load(Ordering::Relaxed);
+    forward_to_seq(
+        SeqLogLevel::Warn,
+        "Seq 啟用測試",
+        HashMap::from([("stock_symbol".to_string(), serde_json::json!("79979SQ"))]),
+        "test",
+    );
+    let mut received = false;
+    for _ in 0..50 {
+        received = seq
+            .requests
+            .lock()
+            .expect("測試鎖")
+            .iter()
+            .any(|(_, body)| body.contains("Seq 啟用測試") && body.contains("79979SQ"));
+        if received {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    SEQ_LOGGING_ENABLED.store(false, Ordering::Relaxed);
+    init_seq(&seq.endpoint, "").await;
+    let re_enabled = SEQ_LOGGING_ENABLED.swap(false, Ordering::Relaxed);
+
+    assert!(enabled, "非空的 server_url 會啟用 Seq");
+    assert!(received, "事件應在批次間隔內送到 Seq");
+    assert!(re_enabled, "sender 已存在時再呼叫只重新開啟旗標");
+}
