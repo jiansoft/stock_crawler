@@ -201,3 +201,77 @@ async fn ensure_skips_day_without_quotes() {
         .await
         .expect("不是交易日，不檢查");
 }
+
+/// 23:00 排程入口（mock 證交所休市日表、臨時資料庫）：週末直接結束；平日但當天沒有日線時
+/// 不檢查盤後資料，只重跑一次官方本益比補寫（沒有缺值就不告警）；入口以今天為休市日執行。
+mod entries {
+    use chrono::TimeZone;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::core::util::http::mock_origin::with_origins;
+
+    const TWSE: &str = "https://www.twse.com.tw";
+    const TPEX: &str = "https://www.tpex.org.tw";
+    const HOLIDAY_PATH: &str = "/rwd/zh/holidaySchedule/holidaySchedule";
+
+    fn at(year: i32, month: u32, day: u32) -> DateTime<Local> {
+        Local
+            .with_ymd_and_hms(year, month, day, 23, 0, 0)
+            .single()
+            .expect("合法時間")
+    }
+
+    async fn holiday_server(holidays: &[NaiveDate]) -> MockServer {
+        let data: Vec<serde_json::Value> = holidays
+            .iter()
+            .map(|day| serde_json::json!([day.format("%Y-%m-%d").to_string(), "測試休市", ""]))
+            .collect();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(HOLIDAY_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "stat": "OK", "total": data.len(), "data": data
+            })))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    #[cfg_attr(
+        not(feature = "integration-tests"),
+        ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+    )]
+    async fn ensure_after_hours_skips_closed_days_and_checks_trading_days() {
+        dotenvy::dotenv().ok();
+        if sqlx::query("SELECT 1")
+            .execute(crate::infra::database::get_connection())
+            .await
+            .is_err()
+        {
+            println!(
+                "跳過 ensure_after_hours_skips_closed_days_and_checks_trading_days：無資料庫連接"
+            );
+            return;
+        }
+        let today = Local::now().date_naive();
+        let server = holiday_server(&[today]).await;
+        let uri = server.uri();
+
+        let (weekend, weekday, entry) = with_origins(&[(TWSE, &uri), (TPEX, &uri)], async {
+            (
+                // 1999-03-13 是週六；03-10 是週三，臨時資料庫沒有那天的日線。
+                ensure_after_hours_on(at(1999, 3, 13)).await,
+                ensure_after_hours_on(at(1999, 3, 10)).await,
+                ensure_after_hours().await,
+            )
+        })
+        .await;
+
+        weekend.expect("週末直接結束");
+        weekday.expect("當天沒有日線時不檢查，官方本益比也不需補寫");
+        entry.expect("今天休市直接結束");
+    }
+}

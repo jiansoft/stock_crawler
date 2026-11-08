@@ -7,7 +7,7 @@
 //! 筆數也看不出有沒有漏補，所以直接重跑，有補到才告警。
 
 use anyhow::Result;
-use chrono::{Local, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate};
 
 use super::{COVERAGE_MIN_PERCENT, is_market_closed};
 use crate::{
@@ -69,7 +69,11 @@ pub(crate) const LATE_EVENING: [AfterHours; 3] = [
 ///
 /// 查詢交易日或筆數失敗時回傳錯誤；重跑失敗只告警，不回傳錯誤。
 pub async fn ensure_after_hours() -> Result<()> {
-    let now = Local::now();
+    ensure_after_hours_on(Local::now()).await
+}
+
+/// [`ensure_after_hours`] 的本體：`now` 決定檢查的日期與是否休市。
+async fn ensure_after_hours_on(now: DateTime<Local>) -> Result<()> {
     if is_market_closed(now).await {
         return Ok(());
     }
