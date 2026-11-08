@@ -92,37 +92,4 @@ ON CONFLICT (date) DO UPDATE SET
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[cfg_attr(
-        not(feature = "integration-tests"),
-        ignore = "需要外部服務（PostgreSQL/Redis），請加 --features integration-tests 執行"
-    )]
-    async fn test_upsert() {
-        dotenvy::dotenv().ok();
-        if database::ping().await.is_err() {
-            println!("跳過 test_upsert：無資料庫連接");
-            return;
-        }
-        tracing::debug!("開始 DailyMoneyHistory::upsert");
-        let current_date = NaiveDate::parse_from_str("2023-08-30", "%Y-%m-%d").unwrap();
-        let mut tx = database::get_tx().await.ok();
-        match DailyMoneyHistory::upsert(current_date, &mut tx).await {
-            Ok(r) => {
-                tracing::debug!("DailyMoneyHistory::upsert:{:#?}", r);
-                if let Some(tx) = tx {
-                    tx.commit().await.expect("commit is failed");
-                }
-            }
-            Err(why) => {
-                tracing::debug!("Failed to DailyMoneyHistory::upsert because {:?}", why);
-                if let Some(tx) = tx {
-                    tx.rollback().await.expect("rollback is failed");
-                }
-            }
-        }
-        tracing::debug!("結束 DailyMoneyHistory::upsert");
-    }
-}
+mod tests;
