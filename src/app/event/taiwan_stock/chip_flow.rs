@@ -132,7 +132,17 @@ pub async fn execute() -> Result<()> {
         return Ok(());
     }
 
-    let volumes = load_volumes(date).await;
+    let volumes: HashMap<String, i64> =
+        match PgQuoteRepository::new().fetch_quotes_by_date(date).await {
+            Ok(quotes) => quotes
+                .into_iter()
+                .filter_map(|quote| Some((quote.stock_symbol, quote.trading_volume.to_i64()?)))
+                .collect(),
+            Err(why) => {
+                tracing::warn!("讀取 {date} 成交量失敗，比例條件改為不成立: {why:#}");
+                HashMap::new()
+            }
+        };
 
     let (summary, reports) = collect_reports(date, &symbols, &flows, &margins, &volumes).await;
     if !reports.is_empty() {
@@ -167,20 +177,6 @@ async fn fetch_sources(
         [("上市", listed_margins), ("上櫃", otc_margins)],
     );
     (flows, margins)
-}
-
-/// `date` 各股的成交量（股）；讀取失敗只記錄並回空表，比例條件改為不成立。
-async fn load_volumes(date: NaiveDate) -> HashMap<String, i64> {
-    match PgQuoteRepository::new().fetch_quotes_by_date(date).await {
-        Ok(quotes) => quotes
-            .into_iter()
-            .filter_map(|quote| Some((quote.stock_symbol, quote.trading_volume.to_i64()?)))
-            .collect(),
-        Err(why) => {
-            tracing::warn!("讀取 {date} 成交量失敗，比例條件改為不成立: {why:#}");
-            HashMap::new()
-        }
-    }
 }
 
 /// 合併上市、上櫃的結果；失敗的來源只記錄。
