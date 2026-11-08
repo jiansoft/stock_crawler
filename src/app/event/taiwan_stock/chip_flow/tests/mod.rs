@@ -1,11 +1,12 @@
 //! 持股三大法人與融資融券通知的測試。
 //!
 //! 子模組：`reasons`（通知理由判斷）、`message`（訊息格式）、`report`（挑出要通知的持股）、
-//! `streak_store`（Redis 存取）；這裡放共用的日期、法人買賣與報告建構函式。
+//! `streak_store`（Redis 存取）、`sources`（來源抓取與排程入口）；這裡放共用的日期、法人買賣與報告建構函式。
 
 mod message;
 mod reasons;
 mod report;
+mod sources;
 mod streak_store;
 
 use super::*;
