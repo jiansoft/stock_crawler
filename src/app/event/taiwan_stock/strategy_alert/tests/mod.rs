@@ -1,8 +1,9 @@
 //! 策略換股通知的測試：策略清單、換股紀錄、通知流程與訊息內容。
 //!
-//! 子模組：`message`（訊息內容）、`notify`（通知流程與換股紀錄）、`presets`（要通知的策略）；這裡放共用的
+//! 子模組：`entries`（排程與補記入口）、`message`（訊息內容）、`notify`（通知流程與換股紀錄）、`presets`（要通知的策略）；這裡放共用的
 //! 日期、假倉儲、假回測閘道與結算建構函式。
 
+mod entries;
 mod message;
 mod notify;
 mod presets;
