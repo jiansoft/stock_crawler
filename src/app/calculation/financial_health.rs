@@ -28,6 +28,9 @@ const ANNUAL_LOOKBACK_YEARS: i32 = 3;
 /// 季報往回讀幾年：最新一季往前推四季可能跨年，再加一年緩衝。
 const QUARTER_LOOKBACK_YEARS: i32 = 2;
 
+/// 每年度 F 分數歷史從這一年起算（前一年度只當比較基準）；Yahoo 年報大約從這時開始齊全。
+const HISTORY_SINCE_YEAR: i32 = 2012;
+
 /// 一輪重算的統計。
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RebuildSummary {
@@ -74,6 +77,11 @@ async fn run(current_year: i32) -> Result<()> {
     });
     let rebuilt = rebuild(&repo, current_year).await?;
     tracing::info!("財務體質重算結束: {}", rebuilt.summary);
+    // 歷史分數只給回測用，失敗不影響今天的財務體質與通知。
+    match rebuild_f_score_history(&repo, HISTORY_SINCE_YEAR).await {
+        Ok(written) => tracing::info!("F 分數歷史重算結束: rows={written}"),
+        Err(why) => tracing::warn!("F 分數歷史重算失敗: {why:#}"),
+    }
 
     match holdings::common_stock_holdings().await {
         Ok(held) => {
@@ -122,6 +130,35 @@ pub(crate) async fn rebuild(
         },
         snapshots,
     })
+}
+
+/// 讀取 `since_year` 前一年起的年報，逐檔逐年算出 F 分數，整批取代 `financial_f_score_history`；
+/// 回傳寫入列數。
+///
+/// # Errors
+///
+/// 讀取或寫入失敗，或一年都算不出來（此時不清空舊結果）時回傳錯誤。
+pub(crate) async fn rebuild_f_score_history(
+    repo: &impl FinancialHealthRepository,
+    since_year: i32,
+) -> Result<u64> {
+    let mut by_stock: BTreeMap<String, BTreeMap<i32, AnnualFigures>> = BTreeMap::new();
+    for (symbol, year, figures) in repo.fetch_annual_figures(since_year - 1).await? {
+        by_stock.entry(symbol).or_default().insert(year, figures);
+    }
+    let scores: Vec<(String, health::YearlyFScore)> = by_stock
+        .into_iter()
+        .flat_map(|(symbol, annual)| {
+            health::yearly_f_scores(&annual)
+                .into_iter()
+                .filter(|score| score.fiscal_year >= since_year)
+                .map(move |score| (symbol.clone(), score))
+        })
+        .collect();
+    if scores.is_empty() {
+        bail!("F 分數歷史重算 0 列（讀不到年報），不清空 financial_f_score_history");
+    }
+    repo.replace_f_score_history(&scores).await
 }
 
 /// 依股票分組後逐檔算出財務體質，依股票代號排序。

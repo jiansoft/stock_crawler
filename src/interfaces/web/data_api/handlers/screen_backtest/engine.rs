@@ -255,7 +255,8 @@ impl<'a> Backtest<'a> {
             ))
             .bind(params.min_eps_yoy_percent)
             .bind(params.min_annual_eps_growth_percent)
-            .bind(params.new_high_days.map(i32::from));
+            .bind(params.new_high_days.map(i32::from))
+            .bind(params.min_f_score.map(i16::from));
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

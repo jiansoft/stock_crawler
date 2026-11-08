@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use rust_decimal::Decimal;
 
 use crate::domain::financial::{
-    health::{AnnualFigures, FinancialHealthSnapshot, QuarterFigures, YearFigures},
+    health::{AnnualFigures, FinancialHealthSnapshot, QuarterFigures, YearFigures, YearlyFScore},
     repository::FinancialHealthRepository,
 };
 use crate::infra::database;
@@ -273,6 +273,40 @@ SELECT * FROM UNNEST($1::varchar[], $2::int[], $3::smallint[], $4::smallint[], $
         .execute(&mut *tx)
         .await
         .context("寫入 financial_health 失敗")?
+        .rows_affected();
+        tx.commit().await?;
+
+        Ok(inserted)
+    }
+
+    async fn replace_f_score_history(&self, scores: &[(String, YearlyFScore)]) -> Result<u64> {
+        let symbols: Vec<&str> = scores.iter().map(|(symbol, _)| symbol.as_str()).collect();
+        let years: Vec<i32> = scores.iter().map(|(_, score)| score.fiscal_year).collect();
+        let f_scores: Vec<i16> = scores
+            .iter()
+            .map(|(_, score)| i16::from(score.f_score))
+            .collect();
+        let evaluated: Vec<i16> = scores
+            .iter()
+            .map(|(_, score)| i16::from(score.f_score_evaluated))
+            .collect();
+
+        let mut tx = database::get_tx().await?;
+        sqlx::query("DELETE FROM financial_f_score_history")
+            .execute(&mut *tx)
+            .await
+            .context("清除 financial_f_score_history 失敗")?;
+        let inserted = sqlx::query(
+            r#"INSERT INTO financial_f_score_history (stock_symbol, fiscal_year, f_score, f_score_evaluated)
+SELECT * FROM UNNEST($1::varchar[], $2::int[], $3::smallint[], $4::smallint[])"#,
+        )
+        .bind(&symbols)
+        .bind(&years)
+        .bind(&f_scores)
+        .bind(&evaluated)
+        .execute(&mut *tx)
+        .await
+        .context("寫入 financial_f_score_history 失敗")?
         .rows_affected();
         tx.commit().await?;
 

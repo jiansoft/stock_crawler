@@ -276,6 +276,37 @@ pub struct AnnualFigures {
     pub figures: YearFigures,
 }
 
+/// 一檔股票某一年度的 F 分數（與前一年度比較）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct YearlyFScore {
+    /// 評分年度（有年度損益表的年度）。
+    pub fiscal_year: i32,
+    /// F 分數（0–9）。
+    pub f_score: u8,
+    /// 可判定的指標數（0–9）。
+    pub f_score_evaluated: u8,
+}
+
+/// 每個有年度損益表的年度各算一次 F 分數（與前一年度比較），依年度由舊到新。
+///
+/// 回測要依換股日當時已公布的年報取分數，不能只用最新一年；評分方式與 [`snapshot`] 的 F 分數相同。
+pub fn yearly_f_scores(annual: &BTreeMap<i32, AnnualFigures>) -> Vec<YearlyFScore> {
+    let figures = |year: i32| annual.get(&year).map(|a| a.figures).unwrap_or_default();
+    annual
+        .iter()
+        .filter(|(_, figures)| figures.has_income)
+        .map(|(&year, _)| {
+            let (f_score, f_score_evaluated) =
+                tally(&piotroski(&figures(year), &figures(year - 1)));
+            YearlyFScore {
+                fiscal_year: year,
+                f_score,
+                f_score_evaluated,
+            }
+        })
+        .collect()
+}
+
 /// 每日全市場重算後，一檔股票的財務體質。
 #[derive(Debug, Clone, PartialEq)]
 pub struct FinancialHealthSnapshot {

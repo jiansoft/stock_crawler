@@ -64,6 +64,9 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     {
         return Err("new_high_days 必須介於 1 至 365");
     }
+    if params.min_f_score.is_some_and(|score| score > 9) {
+        return Err("min_f_score 必須介於 0 至 9");
+    }
     Ok(())
 }
 

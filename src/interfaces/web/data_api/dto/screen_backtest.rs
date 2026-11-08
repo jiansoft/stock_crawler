@@ -274,6 +274,10 @@ pub(crate) struct ScreenBacktestParams {
     /// CANSLIM 的 N）。
     #[param(minimum = 1, maximum = 365)]
     pub(crate) new_high_days: Option<u16>,
+    /// 換股當天已公布的最近一個年度 Piotroski F 分數至少這麼高（0–9）。年報隔年 4/1 起才使用，評分年度落後
+    /// 換股年超過 2 年或沒有年報的不會通過；分數來自 `financial_f_score_history`（每個年度與前一年度比較）。
+    #[param(minimum = 0, maximum = 9)]
+    pub(crate) min_f_score: Option<u8>,
     /// 只選換股前 `hold_days` 個交易日內（含換股當天）出現過這個來源訊號的股票。
     #[param(value_type = Option<SignalIndicatorValue>)]
     pub(crate) indicator: Option<String>,

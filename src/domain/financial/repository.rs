@@ -2,7 +2,7 @@ use crate::{
     core::declare::Quarter,
     domain::financial::{
         entity::{FinancialStatement, HoldingFinancialAlert, HoldingRevenueAlert, MonthlyRevenue},
-        health::{AnnualFigures, FinancialHealthSnapshot, QuarterFigures},
+        health::{AnnualFigures, FinancialHealthSnapshot, QuarterFigures, YearlyFScore},
         statement::{BalanceSheet, CashFlowStatement, IncomeStatement, LaggingStatement},
     },
 };
@@ -137,4 +137,9 @@ pub trait FinancialHealthRepository: Send + Sync {
     ///
     /// 刪除與寫入在同一筆交易內，寫入失敗時舊資料完整保留。
     async fn replace_financial_health(&self, snapshots: &[FinancialHealthSnapshot]) -> Result<u64>;
+
+    /// 以這次重算結果整批取代每年度 F 分數歷史（`financial_f_score_history`），回傳寫入列數。
+    ///
+    /// 刪除與寫入在同一筆交易內，寫入失敗時舊資料完整保留。
+    async fn replace_f_score_history(&self, scores: &[(String, YearlyFScore)]) -> Result<u64>;
 }
