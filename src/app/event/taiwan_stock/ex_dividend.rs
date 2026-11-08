@@ -83,8 +83,11 @@ fn find_next_trading_day(mut date: NaiveDate, holidays: &HashSet<NaiveDate>) -> 
 /// 2. 若今天為交易日，則除原本今日提醒與持股計算外，會預報「下一個交易日」而非「曆法明天」的除權息名單。
 /// 3. 持股在今天之後 3 個交易日內除權息的，另發一則預告（見 [`preview`]），每檔只預告一次。
 pub async fn execute() -> Result<()> {
-    let today: NaiveDate = Local::now().date_naive();
+    run(Local::now().date_naive()).await
+}
 
+/// [`execute`] 的本體：`today` 決定要載入的休市日年度與是否為交易日。
+async fn run(today: NaiveDate) -> Result<()> {
     // 載入今年度的休市日清單
     let current_year = today.year();
     let mut holidays = get_holidays_set(current_year).await;
