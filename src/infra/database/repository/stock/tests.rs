@@ -149,7 +149,7 @@ async fn fetch_all_active_skips_suspended_stocks() {
         .expect("插入測試股票");
     }
 
-    let stocks = PgStockRepository::default().fetch_all_active().await;
+    let stocks = PgStockRepository::new().fetch_all_active().await;
     cleanup().await;
 
     let stocks = stocks.expect("查詢有效證券");
