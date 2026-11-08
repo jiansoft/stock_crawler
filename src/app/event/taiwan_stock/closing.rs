@@ -33,8 +33,11 @@ pub async fn execute() -> Result<()> {
     defer! {
        tracing::info!("台股收盤事件結束");
     }
+    run(Local::now()).await
+}
 
-    let now = Local::now();
+/// [`execute`] 的本體：`now` 決定收盤匯總的日期與是否休市。
+async fn run(now: DateTime<Local>) -> Result<()> {
     let current_date: NaiveDate = now.date_naive();
     if is_market_closed(now).await {
         tracing::info!("{current_date} 休市，略過收盤匯總");
@@ -76,7 +79,11 @@ pub async fn execute() -> Result<()> {
 ///
 /// 查詢有成交檔數或衍生資料筆數失敗時回傳錯誤；重跑失敗只告警，不回傳錯誤。
 pub async fn ensure_complete() -> Result<()> {
-    let now = Local::now();
+    ensure_complete_on(Local::now()).await
+}
+
+/// [`ensure_complete`] 的本體：`now` 決定要檢查的日期與是否休市。
+async fn ensure_complete_on(now: DateTime<Local>) -> Result<()> {
     let date = now.date_naive();
     if is_market_closed(now).await {
         return Ok(());

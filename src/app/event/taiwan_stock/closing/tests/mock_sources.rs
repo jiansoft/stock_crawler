@@ -270,3 +270,58 @@ async fn aggregate_writes_both_markets_and_runs_calculations() {
         "有行情才查除權息基準價：{paths:?}"
     );
 }
+
+/// 收盤匯總與盤後完整性檢查的本體：週末不查休市日清單、休市日查完清單就結束，都不碰行情來源與資料庫。
+#[tokio::test]
+async fn run_and_ensure_complete_skip_closed_days() {
+    let server = holiday_server().await;
+    let uri = server.uri();
+
+    with_origins(&[(TWSE, &uri)], async {
+        run(noon(10, 10)).await.expect("週六略過");
+        run(noon(10, 9)).await.expect("休市日略過");
+        ensure_complete_on(noon(10, 10)).await.expect("週六略過");
+        ensure_complete_on(noon(10, 9)).await.expect("休市日略過");
+    })
+    .await;
+
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.url.path() == HOLIDAY_PATH),
+        "休市時只會查休市日清單"
+    );
+}
+
+/// 兩個排程入口以現在時間執行：把今天設為休市日，不論哪天跑都只查休市日清單就結束。
+#[tokio::test]
+async fn entries_use_current_time() {
+    let today = Local::now().date_naive();
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(HOLIDAY_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "stat": "OK",
+            "data": [[today.format("%Y-%m-%d").to_string(), "測試休市", ""]],
+            "queryYear": today.year(),
+            "total": 1
+        })))
+        .mount(&server)
+        .await;
+    let uri = server.uri();
+
+    with_origins(&[(TWSE, &uri), (TPEX, &uri)], async {
+        execute().await.expect("收盤匯總略過");
+        ensure_complete().await.expect("完整性檢查略過");
+    })
+    .await;
+
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.url.path() == HOLIDAY_PATH),
+        "休市時只會查休市日清單"
+    );
+}
