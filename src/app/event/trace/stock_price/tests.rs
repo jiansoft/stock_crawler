@@ -167,6 +167,39 @@ mod schedule {
         assert_eq!(results, (true, false, false));
     }
 
+    /// 已在追蹤中（執行中旗標已設）時，交易日再次觸發直接結束，不重複載入參考價、不再啟動背景任務。
+    #[tokio::test]
+    async fn execute_at_skips_when_tracking_is_already_running() {
+        let server = holiday_server("1991", holidays_1991()).await;
+        let uri = server.uri();
+        let was_running = IS_RUNNING.swap(true, Ordering::SeqCst);
+        let result = with_origins(&[(TWSE, uri.as_str())], execute_at(at(1991, 10, 11))).await;
+        let still_running = IS_RUNNING.load(Ordering::SeqCst);
+        IS_RUNNING.store(was_running, Ordering::SeqCst);
+
+        result.expect("重複觸發直接結束");
+        assert!(still_running, "旗標維持由原本的追蹤任務釋放");
+    }
+
+    /// 排程入口以現在時間執行：把今天設為休市日，不論哪天跑都不啟動追蹤。
+    #[tokio::test]
+    async fn execute_uses_current_time() {
+        let today = Local::now().date_naive();
+        let server = holiday_server(
+            &today.year().to_string(),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "stat": "ok", "queryYear": today.year(), "total": 1,
+                "data": [[today.format("%Y-%m-%d").to_string(), "測試休市", ""]]
+            })),
+        )
+        .await;
+        let uri = server.uri();
+        let result = with_origins(&[(TWSE, uri.as_str())], execute()).await;
+
+        result.expect("今天休市直接結束");
+        assert!(!IS_RUNNING.load(Ordering::SeqCst), "休市日不應啟動追蹤");
+    }
+
     /// 休市日表回應無法解析時回錯誤，不能當成交易日照常啟動追蹤。
     #[tokio::test]
     async fn execute_at_fails_when_holiday_schedule_is_unreadable() {
