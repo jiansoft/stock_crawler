@@ -144,3 +144,121 @@ fn from_with_exchange_tpex_rejects_short_row() {
 
     assert!(matches!(err, QuoteParseError::MissingField { .. }));
 }
+
+/// 一筆有效的 TWSE 位置式資料列（16 欄）；`sign` 為第 9 欄的漲跌方向 HTML。
+fn twse_row(sign: &str, change: &str) -> Vec<String> {
+    [
+        "2330",           // 0: 代號
+        "台積電",         // 1: 名稱
+        "25,000,000",     // 2: 成交股數
+        "30,000",         // 3: 成交筆數
+        "25,000,000,000", // 4: 成交金額
+        "1,000.00",       // 5: 開盤價
+        "1,010.00",       // 6: 最高價
+        "995.00",         // 7: 最低價
+        "1,005.00",       // 8: 收盤價
+        sign,             // 9: 漲跌(+/-)
+        change,           // 10: 漲跌價差
+        "1,000.00",       // 11: 最後揭示買價
+        "100",            // 12: 最後揭示買量
+        "1,005.00",       // 13: 最後揭示賣價
+        "200",            // 14: 最後揭示賣量
+        "22.50",          // 15: 本益比
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+/// TWSE 位置式解析：漲跌方向放在第 9 欄，含 `-` 時把無號的漲跌價差轉負。
+#[test]
+fn from_with_exchange_twse_applies_sign_column() {
+    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+
+    let down = DailyQuoteDto::from_with_exchange(
+        StockExchange::TWSE,
+        &twse_row("<p style= color:green>-</p>", "5.00"),
+        date,
+    )
+    .unwrap();
+    let up = DailyQuoteDto::from_with_exchange(
+        StockExchange::TWSE,
+        &twse_row("<p style= color:red>+</p>", "5.00"),
+        date,
+    )
+    .unwrap();
+
+    assert_eq!(down.symbol, "2330");
+    assert_eq!(down.trading_volume, dec!(25000000));
+    assert_eq!(down.closing_price, dec!(1005.00));
+    assert_eq!(down.price_earning_ratio, dec!(22.50));
+    assert_eq!(down.change, dec!(-5.00));
+    assert_eq!(up.change, dec!(5.00));
+}
+
+/// 除權息日漲跌價差可能是非數字標記：補 0，不拒絕整列。
+#[test]
+fn from_with_exchange_twse_soft_change_falls_back_to_zero() {
+    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+
+    let dto = DailyQuoteDto::from_with_exchange(StockExchange::TWSE, &twse_row("", "除息"), date)
+        .unwrap();
+
+    assert_eq!(dto.change, dec!(0));
+    assert_eq!(dto.closing_price, dec!(1005.00));
+}
+
+/// TWSE 資料列缺欄或價格欄位是垃圾字串時整列被拒絕，錯誤指出欄位名稱。
+#[test]
+fn from_with_exchange_twse_rejects_short_row_and_garbage() {
+    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let mut short = twse_row("+", "1.00");
+    short.truncate(15);
+    let mut garbage = twse_row("+", "1.00");
+    garbage[8] = "abc".to_string();
+
+    let missing = DailyQuoteDto::from_with_exchange(StockExchange::TWSE, &short, date).unwrap_err();
+    let invalid =
+        DailyQuoteDto::from_with_exchange(StockExchange::TWSE, &garbage, date).unwrap_err();
+
+    assert!(
+        matches!(missing, QuoteParseError::MissingField { field: "本益比" }),
+        "{missing}"
+    );
+    assert!(
+        matches!(
+            invalid,
+            QuoteParseError::InvalidDecimal {
+                field: "收盤價",
+                ..
+            }
+        ),
+        "{invalid}"
+    );
+}
+
+/// 沒有對應解析規則的交易所只留下代號與日期，其餘欄位維持預設值。
+#[test]
+fn from_with_exchange_other_exchange_keeps_defaults() {
+    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+    let row = vec!["2330".to_string()];
+
+    let dto = DailyQuoteDto::from_with_exchange(StockExchange::None, &row, date).unwrap();
+
+    assert_eq!(dto.symbol, "2330");
+    assert_eq!(dto.closing_price, dec!(0));
+}
+
+/// 整列為空時連代號都沒有，視為缺欄位。
+#[test]
+fn from_with_exchange_rejects_empty_row() {
+    let date = NaiveDate::from_ymd_opt(2026, 6, 13).unwrap();
+
+    let err = DailyQuoteDto::from_with_exchange(StockExchange::TWSE, &[], date).unwrap_err();
+
+    assert!(matches!(
+        err,
+        QuoteParseError::MissingField {
+            field: "證券代號"
+        }
+    ));
+}
