@@ -1,26 +1,18 @@
-//! 條件選股回測的 SQL：最新相對強度日與回測主體（有、無籌碼條件兩版）。
+//! 條件選股回測的 SQL：回測主體（有、無籌碼條件兩版）；最新相對強度日等查詢在 [`lookup`]。
 
 use super::super::signal_history::chip_streak_ctes;
 use crate::infra::database::repository::relative_strength::rs_rank_order;
 
 mod filtered;
+mod lookup;
 mod price;
 
 use filtered::filtered_cte;
+pub(super) use lookup::{FIRST_HOLDER_WEEK_SQL, HOLD_TRADE_VALUES_SQL, LATEST_RS_DATE_SQL};
 use price::{horizon_return, open_to_open};
 
 #[cfg(doc)]
 use super::{ETF_BENCHMARK, portfolio::select_holdings};
-
-/// `$1`（含）之前最近一個有相對強度的交易日；`$1` 為 `NULL` 時取最新。
-pub(super) const LATEST_RS_DATE_SQL: &str = r#"
-SELECT MAX(date) FROM daily_relative_strength WHERE $1::date IS NULL OR date <= $1
-"#;
-
-/// 集保股權分散最早的資料週；設 `min_major_change` 時用來檢查起日。
-pub(super) const FIRST_HOLDER_WEEK_SQL: &str = r#"
-SELECT MIN("date") FROM holder_distribution
-"#;
 
 /// 回測 SQL 的主體。`$1`／`$2` 起訖、`$3` 市場 id（0 為上市櫃全部）、`$4` 持有天數、`$5` 每期候選檔數、
 /// `$6` 產業、`$7`／`$8` 相對強度上下限、`$9`／`$10` 訊號來源與種類、`$11` 大盤濾網均線天數
@@ -390,13 +382,3 @@ pub(super) const BACKTEST_WITH_CHIP_SQL: &str = backtest_with_chip_sql_for!(clos
 
 /// [`BACKTEST_WITH_CHIP_SQL`] 的次日開盤成交版。
 pub(super) const BACKTEST_WITH_CHIP_NEXT_OPEN_SQL: &str = backtest_with_chip_sql_for!(next_open);
-
-/// 續抱持股的平均成交金額：`$1`／`$2`／`$3` 為一一對應的換股日、代號與 `liquidity_start`，回傳
-/// `liquidity_start`～換股日的平均成交金額（與 `valued` 的算法相同；沒有日線為 `NULL`）。
-pub(super) const HOLD_TRADE_VALUES_SQL: &str = r#"
-SELECT k.date, k.stock_symbol, (
-    SELECT AVG(q."TradeValue")::float8 FROM "DailyQuotes" q
-    WHERE q.stock_symbol = k.stock_symbol AND q."Date" BETWEEN k.liquidity_start AND k.date
-) AS trade_value
-FROM UNNEST($1::date[], $2::text[], $3::date[]) AS k(date, stock_symbol, liquidity_start)
-"#;
