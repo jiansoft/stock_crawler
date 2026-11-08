@@ -317,6 +317,7 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         min_eps_yoy_percent: params.min_eps_yoy_percent,
         min_annual_eps_growth_percent: params.min_annual_eps_growth_percent,
         new_high_days: params.new_high_days,
+        min_f_score: params.min_f_score,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
         fee_discount: backtest.fee_discount,

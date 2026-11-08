@@ -300,6 +300,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) min_annual_eps_growth_percent: Option<f64>,
     /// 創 52 週新高的回看日曆天數；未篩選為 `null`。
     pub(crate) new_high_days: Option<u16>,
+    /// F 分數下限；未篩選為 `null`。
+    pub(crate) min_f_score: Option<u8>,
     /// 訊號來源；未篩選為 `null`。
     pub(crate) indicator: Option<String>,
     /// 訊號種類；未篩選為 `null`。

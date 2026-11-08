@@ -234,7 +234,16 @@ macro_rules! filtered_cte {
             AND n.indicator = '52_week'
             AND n.kind = 'new_high'
             AND n.date BETWEEN u.date - $39::int AND u.date
-      ))"#,
+      ))
+      -- Piotroski F 分數：換股當天已公布（隔年 4/1 起）的最近一個評分年度，落後換股年 1～2 年才算數。
+      AND ($40::smallint IS NULL OR (
+          SELECT fh.f_score FROM financial_f_score_history fh
+          WHERE fh.stock_symbol = u.stock_symbol
+            AND make_date(fh.fiscal_year + 1, 4, 1) <= u.date
+            AND fh.fiscal_year >= EXTRACT(YEAR FROM u.date)::int - 2
+          ORDER BY fh.fiscal_year DESC
+          LIMIT 1
+      ) >= $40)"#,
             $chip_filter,
             "\n)"
         )

@@ -9,8 +9,8 @@
 //! - `test_backfill_financial_reports_all`：
 //!   一次採集全部上市櫃股票的三大財務報表（首次建檔用，約 3～4 小時）。
 //! - `test_rebuild_financial_health`：
-//!   立即以三大財務報表重算全市場財務體質，整批取代 `financial_health`
-//!   （等同 07:10 排程；首次建表或補抓財報後不想等排程時使用）。
+//!   立即以三大財務報表重算全市場財務體質，整批取代 `financial_health` 與每年度 F 分數歷史
+//!   `financial_f_score_history`（等同 07:10 排程；首次建表或補抓財報後不想等排程時使用）。
 
 use crate::app::backfill::financial_report;
 
@@ -94,7 +94,7 @@ async fn test_backfill_financial_reports_all() {
     println!("結束 test_backfill_financial_reports_all {summary:?}");
 }
 
-/// 立即重算全市場財務體質，整批取代 `financial_health`。
+/// 立即重算全市場財務體質，整批取代 `financial_health` 與 `financial_f_score_history`。
 ///
 /// 等同 07:10 排程 `calculation::financial_health::execute`，只讀三大財務報表、
 /// 不呼叫外部來源。

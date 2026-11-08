@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 
 use super::*;
-use crate::domain::financial::health::YearFigures;
+use crate::domain::financial::health::{YearFigures, YearlyFScore};
 
 /// 回傳固定數值、記下讀取年度與寫入內容的假倉儲。
 #[derive(Default)]
@@ -14,6 +14,7 @@ struct FakeRepository {
     quarters: Vec<(String, QuarterFigures)>,
     since_years: Mutex<Vec<i32>>,
     written: Mutex<Vec<FinancialHealthSnapshot>>,
+    history: Mutex<Vec<(String, YearlyFScore)>>,
 }
 
 #[async_trait]
@@ -41,6 +42,11 @@ impl FinancialHealthRepository for FakeRepository {
     async fn replace_financial_health(&self, snapshots: &[FinancialHealthSnapshot]) -> Result<u64> {
         *self.written.lock().expect("lock") = snapshots.to_vec();
         Ok(snapshots.len() as u64)
+    }
+
+    async fn replace_f_score_history(&self, scores: &[(String, YearlyFScore)]) -> Result<u64> {
+        *self.history.lock().expect("lock") = scores.to_vec();
+        Ok(scores.len() as u64)
     }
 }
 
@@ -104,6 +110,53 @@ fn build_snapshots_groups_by_stock() {
     assert_eq!((c.f_score, c.quarter_year), (None, Some(2026)));
 }
 
+/// 每年度 F 分數歷史：從起算年的前一年讀年報（只當比較基準），每個有年度損益表、且不早於起算年的
+/// 年度各一列；與當年快照的 F 分數一致。
+#[tokio::test]
+async fn rebuild_f_score_history_scores_each_year_since_the_start() {
+    let repo = FakeRepository {
+        annual: vec![
+            ("A".to_owned(), 2018, annual(true, 80)),
+            ("A".to_owned(), 2019, annual(true, 100)),
+            ("A".to_owned(), 2020, annual(true, 150)),
+            ("A".to_owned(), 2021, annual(false, 0)),
+            ("B".to_owned(), 2020, annual(true, 50)),
+        ],
+        ..FakeRepository::default()
+    };
+
+    let written = rebuild_f_score_history(&repo, 2019)
+        .await
+        .expect("重算歷史");
+    let history = repo.history.lock().expect("lock").clone();
+    let years: Vec<(&str, i32)> = history
+        .iter()
+        .map(|(symbol, score)| (symbol.as_str(), score.fiscal_year))
+        .collect();
+
+    assert_eq!(written, 3);
+    assert_eq!(*repo.since_years.lock().expect("lock"), vec![2018]);
+    assert_eq!(years, [("A", 2019), ("A", 2020), ("B", 2020)]);
+    let latest = build_snapshots(repo.annual.clone(), Vec::new());
+    let a_2020 = history
+        .iter()
+        .find(|(s, score)| s == "A" && score.fiscal_year == 2020);
+    assert_eq!(a_2020.map(|(_, score)| score.f_score), latest[0].f_score);
+}
+
+/// 讀不到任何年報時回錯誤，不清空舊的歷史。
+#[tokio::test]
+async fn rebuild_f_score_history_keeps_previous_rows_when_nothing_is_read() {
+    let repo = FakeRepository::default();
+
+    let error = rebuild_f_score_history(&repo, 2019)
+        .await
+        .expect_err("沒有年報");
+
+    assert!(error.to_string().contains("0 列"), "{error:#}");
+    assert!(repo.history.lock().expect("lock").is_empty());
+}
+
 /// 年報往回讀 3 年、季報 2 年；寫入全部快照並回傳統計。
 #[tokio::test]
 async fn rebuild_reads_lookback_years_and_replaces_all_snapshots() {
@@ -157,7 +210,7 @@ async fn rebuild_keeps_previous_snapshots_when_nothing_is_read() {
 }
 
 /// 以臨時資料庫跑排程本體：假股票 79979FH 1998、1999 年報（營收、毛利、淨利），以 2000 年為基準
-/// 重算後寫入財務體質；結束時刪除財報與財務體質。今天的年度沒有財報時入口回「0 檔」錯誤、不清空舊結果。
+/// 重算後寫入財務體質，並從 1999 年起重算每年度 F 分數歷史；結束時刪除財報、財務體質與歷史。今天的年度沒有財報時入口回「0 檔」錯誤、不清空舊結果。
 mod database {
     use super::*;
     use crate::infra::database;
@@ -169,6 +222,7 @@ mod database {
         for sql in [
             "DELETE FROM income_statement WHERE stock_symbol = $1",
             "DELETE FROM financial_health WHERE stock_symbol = $1",
+            "DELETE FROM financial_f_score_history WHERE stock_symbol = $1",
         ] {
             sqlx::query(sql)
                 .bind(SYMBOL)
@@ -215,11 +269,22 @@ mod database {
                 .fetch_one(pool)
                 .await
                 .expect("讀回財務體質");
+        // 歷史從 2012 年起算，1998、1999 年的年報不在範圍內；直接以 1999 年起重算驗證寫入。
+        let history = rebuild_f_score_history(&PgFinancialHealthRepository::new(), 1999).await;
+        let history_years: Vec<i32> = sqlx::query_scalar(
+            "SELECT fiscal_year FROM financial_f_score_history WHERE stock_symbol = $1 ORDER BY fiscal_year",
+        )
+        .bind(SYMBOL)
+        .fetch_all(pool)
+        .await
+        .expect("讀回 F 分數歷史");
         cleanup().await;
         let today = execute().await;
 
         fixed.expect("以 2000 年為基準重算");
         assert_eq!(rows, 1, "寫入假股票的財務體質");
+        assert!(history.expect("重算歷史") >= 1);
+        assert_eq!(history_years, [1999], "1998 只當比較基準");
         assert!(
             today
                 .as_ref()
