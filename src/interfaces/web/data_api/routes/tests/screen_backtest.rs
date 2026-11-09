@@ -19,6 +19,7 @@ mod ranking;
 mod stops;
 mod stops_next_open;
 mod track;
+mod trend;
 mod valuation;
 mod walk_forward;
 

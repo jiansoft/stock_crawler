@@ -205,6 +205,22 @@ macro_rules! filtered_cte {
           AND q."Date" = u.date
     ) qv ON TRUE
     LEFT JOIN LATERAL (
+        -- Minervini 趨勢模板：換股當天收盤後的日線（與收盤買進同一時點）MA20 > MA60 > MA120 > MA240、收盤站上 MA240、收盤不低於 52 週（240 個交易日）最高價的 75%、且至少比 52 週最低價高 30%；
+        -- 年線或 52 週最低價為 0（資料不足）時沒有資料、不會通過。只在設 `$47` 時才查。
+        SELECT q."MovingAverage20" > q."MovingAverage60"
+               AND q."MovingAverage60" > q."MovingAverage120"
+               AND q."MovingAverage120" > q."MovingAverage240"
+               AND q."ClosingPrice" > q."MovingAverage240"
+               AND q."ClosingPrice" >= q.maximum_price_in_year * 0.75
+               AND q."ClosingPrice" >= q.minimum_price_in_year * 1.3 AS passed
+        FROM "DailyQuotes" q
+        WHERE $47::bool
+          AND q.stock_symbol = u.stock_symbol
+          AND q."Date" = u.date
+          AND q."MovingAverage240" > 0
+          AND q.minimum_price_in_year > 0
+    ) tt ON TRUE
+    LEFT JOIN LATERAL (
         -- 現金股利（dividend_fill_event）只用換股當天（含）以前的除息。殖利率：最近一次除息往回 350 天的現金股利
         -- ÷ 換股日收盤（最近一次除息須在 400 天內）；填息率與平均填息天數：除息日在近 5 年內、觀察期 120 個交易日
         -- 在換股日以前已滿的事件；連續配息年數：以除息日年度計，最近一次除息的年度不早於換股年前一年。
@@ -303,7 +319,8 @@ macro_rules! filtered_cte {
       AND ($43::float8 IS NULL OR dv.avg_fill_days <= $43)
       AND ($44::int IS NULL OR dv.dividend_years >= $44)
       AND ($45::smallint IS NULL OR rv.revenue_accel_months >= $45)
-      AND ($46::int IS NULL OR dg.growth_years >= $46)"#,
+      AND ($46::int IS NULL OR dg.growth_years >= $46)
+      AND (NOT $47::bool OR tt.passed IS TRUE)"#,
             $chip_filter,
             "\n)"
         )

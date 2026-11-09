@@ -299,6 +299,9 @@ pub(crate) struct ScreenBacktestParams {
     /// 沒有配息的不會通過。
     #[param(minimum = 1, maximum = 30)]
     pub(crate) min_dividend_growth_years: Option<u8>,
+    /// `true` 時只選符合 Minervini 趨勢模板的股票（只用於新買進）：換股當天收盤後的日線MA20 > MA60 > MA120 > MA240、收盤站上 MA240、收盤不低於 52 週（240 個交易日）最高價的 75%、且至少比 52 週最低價高 30%。
+    /// 年線或 52 週最低價為 0（上市未滿一年或資料不足）的不會通過；`false` 或省略不篩選。
+    pub(crate) trend_template: Option<bool>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

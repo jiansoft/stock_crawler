@@ -323,6 +323,7 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         max_avg_fill_days: params.max_avg_fill_days,
         min_dividend_years: params.min_dividend_years,
         min_dividend_growth_years: params.min_dividend_growth_years,
+        trend_template: params.trend_template.unwrap_or(false),
         min_revenue_acceleration_months: params.min_revenue_acceleration_months,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),

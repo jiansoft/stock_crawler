@@ -185,6 +185,9 @@ pub(crate) struct ScreenedStock {
     /// 股利成長年數：以除息日年度加總現金股利，只看查詢年以前的完整年度；從查詢年前一年往回，每年都不低於
     /// 前一年（年度相連）的年數。查詢年前一年沒有配息時為 0。
     pub(crate) dividend_growth_years: Option<i32>,
+    /// 是否符合 Minervini 趨勢模板（查詢日前 10 天內最新一筆日線）：MA20 > MA60 > MA120 > MA240、收盤站上 MA240、收盤不低於 52 週（240 個交易日）最高價的 75%、且至少比 52 週最低價高 30%。
+    /// 年線或 52 週最低價為 0（資料不足）或沒有日線時為 `null`。
+    pub(crate) trend_template: Option<bool>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -321,6 +324,9 @@ pub(crate) struct StockScreeningParams {
     /// （年度相連）的年數；例如 5 代表連續 6 年配息且 5 次都沒減少。
     #[param(minimum = 1, maximum = 30)]
     pub(crate) min_dividend_growth_years: Option<u8>,
+    /// `true` 時只留符合 Minervini 趨勢模板的股票：MA20 > MA60 > MA120 > MA240、收盤站上 MA240、收盤不低於 52 週（240 個交易日）最高價的 75%、且至少比 52 週最低價高 30%；可搭配 `min_rs_score` 找相對強勢股。
+    /// `false` 或省略不篩選。
+    pub(crate) trend_template: Option<bool>,
     /// 營收加速月數下限（1–11）：從最新一個月往回，年增率逐月高於前一個月（月份相連）的月數；例如 3 代表最近
     /// 3 個月的年增率一個比一個高。可搭配 `min_revenue_yoy_percent` 排除年增率仍為負的股票。
     #[param(minimum = 1, maximum = 11)]
