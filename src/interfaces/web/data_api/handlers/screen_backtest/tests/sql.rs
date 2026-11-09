@@ -64,10 +64,9 @@ fn backtest_sql_variants_are_well_formed() {
     );
     assert!(BACKTEST_SQL.contains("eg.ord = pq.ord"));
     assert!(BACKTEST_SQL.contains("mi.ord = pq.ord"));
-    assert!(
-        BACKTEST_SQL
-            .contains("COALESCE(qv.pe > 0 AND eg.growth > 0 AND qv.pe / eg.growth <= $50, FALSE)")
-    );
+    assert!(BACKTEST_SQL.contains(
+        "qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 AND qv.pe / eg.growth <= $50, FALSE)"
+    ));
     assert!(BACKTEST_SQL.contains("WHEN 'peg' THEN -peg"));
     // 神奇公式：只算起日前兩年以後、四季相連的營業利益；換股日對上已過法定期限的同一季。
     assert!(BACKTEST_SQL.contains("magic_inputs AS MATERIALIZED ("));

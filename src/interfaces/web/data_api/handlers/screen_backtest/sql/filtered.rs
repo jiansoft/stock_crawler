@@ -11,7 +11,8 @@ macro_rules! filtered_cte {
            CASE WHEN qv.close > 0 AND qv.close * mi.shares + mi.net_debt > 0
                THEN mi.ebit_ttm / (qv.close * mi.shares + mi.net_debt) END AS earnings_yield,
            CASE WHEN mi.capital > 0 THEN mi.ebit_ttm / mi.capital END AS return_on_capital,
-           CASE WHEN qv.pe > 0 AND eg.growth > 0 THEN qv.pe / eg.growth END AS peg,"#,
+           -- 成長率超過 100%（多為低基期轉盈）時 PEG 失真，不計算。
+           CASE WHEN qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 THEN qv.pe / eg.growth END AS peg,"#,
             $chip_columns,
             r#"
     FROM universe u
@@ -367,7 +368,7 @@ macro_rules! filtered_cte {
       AND (NOT $47::bool OR tt.passed IS TRUE)
       AND ($49::float8 IS NULL OR mg.margin_change <= $49)
       -- 包 COALESCE：嚴格比較會讓 eps_growth 的 LEFT JOIN 降成 INNER JOIN、改變連接順序。
-      AND ($50::float8 IS NULL OR COALESCE(qv.pe > 0 AND eg.growth > 0 AND qv.pe / eg.growth <= $50, FALSE))"#,
+      AND ($50::float8 IS NULL OR COALESCE(qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 AND qv.pe / eg.growth <= $50, FALSE))"#,
             $chip_filter,
             "\n)"
         )

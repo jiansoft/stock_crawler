@@ -40,7 +40,7 @@
 /// （越小越好），`magic_formula_ranked_count` 是排名的母體檔數，供 `sort_by=magic_formula`；另附算式的分子分母
 /// （近四季營業利益、投入資本、企業價值，千元）。
 /// PEG：Yahoo 最近 8 季單季 EPS（須相連）的近四季合計對前四季合計成長率（%，新鮮度同三率、前四季合計須 > 0），
-/// `peg_ratio` = `pv` 本益比 ÷ 成長率（虧損或成長率 ≤ 0 時為 NULL），`$51` 為上限；供 `sort_by=peg`。
+/// `peg_ratio` = `pv` 本益比 ÷ 成長率（虧損或成長率不在 0～100% 時為 NULL），`$51` 為上限；供 `sort_by=peg`。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -565,7 +565,7 @@ SELECT
     fill_rate_percent, avg_fill_days, dividend_years, revenue_acceleration_months, dividend_growth_years,
     trend_template, margin_change_percent,
     earnings_yield_percent, return_on_capital_percent, eps_ttm_growth_percent,
-    CASE WHEN pe_ratio > 0 AND eps_ttm_growth_percent > 0
+    CASE WHEN pe_ratio > 0 AND eps_ttm_growth_percent > 0 AND eps_ttm_growth_percent <= 100
         THEN ROUND(pe_ratio / eps_ttm_growth_percent, 2) END AS peg_ratio,
     -- 視窗函式在 WHERE 之後計算：只在篩選後、兩個比率都有資料的股票之間排名。
     CASE WHEN earnings_yield_percent IS NOT NULL AND return_on_capital_percent IS NOT NULL THEN
@@ -623,6 +623,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND (NOT $47::bool OR trend_template IS TRUE)
   AND ($49::numeric IS NULL OR major.holder_400_change >= $49)
   AND ($50::numeric IS NULL OR margin_change_percent <= $50)
-  AND ($51::numeric IS NULL OR (pe_ratio > 0 AND eps_ttm_growth_percent > 0
+  AND ($51::numeric IS NULL OR (pe_ratio > 0 AND eps_ttm_growth_percent > 0 AND eps_ttm_growth_percent <= 100
       AND ROUND(pe_ratio / eps_ttm_growth_percent, 2) <= $51))
 "#;

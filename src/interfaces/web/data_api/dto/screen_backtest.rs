@@ -67,7 +67,7 @@ enum BacktestRankByValue {
     PbRatio,
     /// 神奇公式（Greenblatt）：盈餘殖利率名次 + 資本報酬率名次由小到大（沒有資料的排最後）。
     MagicFormula,
-    /// PEG（本益比 ÷ 近四季 EPS 成長率）由低到高（虧損或成長率 ≤ 0 的排最後）。
+    /// PEG（本益比 ÷ 近四季 EPS 成長率）由低到高（虧損或成長率不在 0～100% 的排最後）。
     Peg,
 }
 
@@ -318,7 +318,7 @@ pub(crate) struct ScreenBacktestParams {
     #[param(minimum = -100.0, maximum = 1000.0)]
     pub(crate) max_margin_change_percent: Option<f64>,
     /// PEG 上限（0.01–10；只用於新買進）：換股當天官方本益比 ÷ 換股日已公布最近一季的近四季 EPS 成長率（%，近四季
-    /// Yahoo 單季 EPS 合計對前四季合計，須 8 季相連、前四季合計 > 0）。虧損或成長率 ≤ 0 的不會通過；例如 1 代表
+    /// Yahoo 單季 EPS 合計對前四季合計，須 8 季相連、前四季合計 > 0）。虧損或成長率不在 0～100%（超過 100% 多為低基期轉盈，PEG 失真）的不會通過；例如 1 代表
     /// 本益比不高於成長率。
     #[param(minimum = 0.01, maximum = 10.0)]
     pub(crate) max_peg: Option<f64>,
