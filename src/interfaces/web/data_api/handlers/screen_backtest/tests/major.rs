@@ -79,7 +79,7 @@ fn major_change_period_needs_enough_history() {
     );
 }
 
-/// 四種回測 SQL 都只看日期早於換股日的資料週，並以往前第 `$36` 週相減；籌碼條件改用 `$45`／`$46`。
+/// 四種回測 SQL 都只看日期早於換股日的資料週，並以往前第 `$36` 週相減；籌碼條件改用 `$46`／`$47`。
 #[test]
 fn backtest_sql_uses_only_published_holder_weeks() {
     for sql in [
@@ -93,5 +93,5 @@ fn backtest_sql_uses_only_published_holder_weeks() {
         assert!(sql.contains(r#"cw."date" >= rb.date - 14"#));
         assert!(sql.contains("(hc.major_percent - hb.major_percent)::float8 >= $35"));
     }
-    assert!(!BACKTEST_SQL.contains("$45"));
+    assert!(!BACKTEST_SQL.contains("$46"));
 }

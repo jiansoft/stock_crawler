@@ -24,6 +24,8 @@ pub(super) struct ScreenedStockRow {
     revenue_yoy_percent: Option<Decimal>,
     /// 新鮮的連續營收年增月數。
     revenue_yoy_streak: Option<i16>,
+    /// 新鮮的營收年增率逐月提高月數。
+    revenue_acceleration_months: Option<i16>,
     /// 新鮮的近 3 個月累計營收年增率。
     revenue_yoy_3m_percent: Option<Decimal>,
     /// 新鮮的最新月營收（千元）。
@@ -140,6 +142,9 @@ impl From<ScreenedStockRow> for ScreenedStock {
             ),
             revenue_yoy_streak: row
                 .revenue_yoy_streak
+                .and_then(|months| u8::try_from(months).ok()),
+            revenue_acceleration_months: row
+                .revenue_acceleration_months
                 .and_then(|months| u8::try_from(months).ok()),
             revenue_yoy_3m_percent: analytical_decimal_to_f64(
                 row.revenue_yoy_3m_percent,

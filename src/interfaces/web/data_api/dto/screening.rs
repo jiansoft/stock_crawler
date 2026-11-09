@@ -94,6 +94,9 @@ pub(crate) struct ScreenedStock {
     /// 從最新月份往回連續年增（年增率 > 0 且月份相連）的月數，最多算 12 個月；
     /// 最新營收過期時為 `null`。
     pub(crate) revenue_yoy_streak: Option<u8>,
+    /// 營收加速：從最新月份往回，年增率逐月高於前一個月（月份相連）的月數，最多 11 個月；
+    /// 最新營收過期時為 `null`。
+    pub(crate) revenue_acceleration_months: Option<u8>,
     /// 近 3 個月合計營收對去年同期的年增率百分比；三個月不相連、去年同期為 0
     /// 或最新營收過期時為 `null`。
     pub(crate) revenue_yoy_3m_percent: Option<f64>,
@@ -311,6 +314,10 @@ pub(crate) struct StockScreeningParams {
     /// 連續配發現金股利的年數下限（1–30），以除息日年度計；最近一次除息早於查詢年前一年的不符合。
     #[param(minimum = 1, maximum = 30)]
     pub(crate) min_dividend_years: Option<u8>,
+    /// 營收加速月數下限（1–11）：從最新一個月往回，年增率逐月高於前一個月（月份相連）的月數；例如 3 代表最近
+    /// 3 個月的年增率一個比一個高。可搭配 `min_revenue_yoy_percent` 排除年增率仍為負的股票。
+    #[param(minimum = 1, maximum = 11)]
+    pub(crate) min_revenue_acceleration_months: Option<u8>,
     /// 排序欄位固定 enum；預設 `stock_symbol`。
     #[param(value_type = StockScreenSortValue, default = "stock_symbol")]
     pub(crate) sort_by: Option<String>,

@@ -322,6 +322,7 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         min_fill_rate_percent: params.min_fill_rate_percent,
         max_avg_fill_days: params.max_avg_fill_days,
         min_dividend_years: params.min_dividend_years,
+        min_revenue_acceleration_months: params.min_revenue_acceleration_months,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
         fee_discount: backtest.fee_discount,

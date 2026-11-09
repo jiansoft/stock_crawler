@@ -27,6 +27,7 @@
 /// 只留 `$41` 個日曆天內創新高的股票。
 /// 存股條件讀 `dividend_fill_event`：近 5 年（除息日在查詢日前 5 年內、120 個交易日觀察期已滿）填息率下限 `$42`、
 /// 已填息者平均填息交易日數上限 `$43`、連續配息年數下限 `$44`；三個欄位每檔都會回傳。
+/// 營收加速：從最新月往回年增率逐月提高（高於前一個月、月份相連）的月數，新鮮度同月營收，`$45` 為下限。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -38,6 +39,7 @@ WITH latest AS (
         r.revenue_raw_yoy,
         r.revenue_raw_monthly,
         r.revenue_yoy_streak_raw,
+        r.revenue_accel_raw,
         r.revenue_yoy_3m_raw,
         rh.revenue_record_raw,
         f.year AS financial_year,
@@ -79,7 +81,8 @@ WITH latest AS (
     FROM stocks s
     LEFT JOIN LATERAL (
         -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
-        -- 的月數，以及近 3 個月（須相連）合計營收對去年同期的年增率。
+        -- 的月數、從最新月往回年增率逐月提高（高於前一個月且月份相連）的月數（營收加速），
+        -- 以及近 3 個月（須相連）合計營收對去年同期的年增率。
         SELECT
             MAX(month) FILTER (WHERE rn = 1) AS revenue_raw_month,
             MAX(yoy) FILTER (WHERE rn = 1) AS revenue_raw_yoy,
@@ -88,6 +91,11 @@ WITH latest AS (
                 MIN(rn) FILTER (WHERE NOT (yoy > 0 AND ord = first_ord - rn + 1)) - 1,
                 COUNT(*)
             )::smallint AS revenue_yoy_streak_raw,
+            COALESCE(
+                MIN(rn) FILTER (WHERE NOT COALESCE(
+                    yoy > prev_yoy AND prev_ord = ord - 1 AND ord = first_ord - rn + 1, FALSE)) - 1,
+                COUNT(*)
+            )::smallint AS revenue_accel_raw,
             CASE WHEN COUNT(*) FILTER (WHERE rn <= 3 AND ord = first_ord - rn + 1) = 3
                   AND SUM(last_year) FILTER (WHERE rn <= 3) > 0
               THEN ROUND((SUM(monthly) FILTER (WHERE rn <= 3)
@@ -96,7 +104,9 @@ WITH latest AS (
         FROM (
             SELECT month, yoy, monthly, last_year, ord,
                 ROW_NUMBER() OVER (ORDER BY month DESC) AS rn,
-                FIRST_VALUE(ord) OVER (ORDER BY month DESC) AS first_ord
+                FIRST_VALUE(ord) OVER (ORDER BY month DESC) AS first_ord,
+                LEAD(yoy) OVER (ORDER BY month DESC) AS prev_yoy,
+                LEAD(ord) OVER (ORDER BY month DESC) AS prev_ord
             FROM (
                 SELECT "Date" AS month,
                     "ComparedWithLastYearSameMonth" AS yoy,
@@ -286,6 +296,12 @@ WITH latest AS (
                 + EXTRACT(MONTH FROM $3::date)::int)
               - ((revenue_raw_month / 100)::int * 12
                 + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
+          THEN revenue_accel_raw END AS revenue_acceleration_months,
+        CASE WHEN revenue_raw_month IS NOT NULL
+          AND ((EXTRACT(YEAR FROM $3::date)::int * 12
+                + EXTRACT(MONTH FROM $3::date)::int)
+              - ((revenue_raw_month / 100)::int * 12
+                + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
           THEN revenue_yoy_3m_raw END AS revenue_yoy_3m_percent,
         CASE WHEN revenue_raw_month IS NOT NULL
           AND ((EXTRACT(YEAR FROM $3::date)::int * 12
@@ -380,7 +396,7 @@ SELECT
     pe_ratio, pb_ratio, ratio_date,
     brk.breakout_date, brk.breakout_description,
     eps_yoy_percent, annual_eps_growth_percent, annual_eps_year, new_high_date,
-    fill_rate_percent, avg_fill_days, dividend_years
+    fill_rate_percent, avg_fill_days, dividend_years, revenue_acceleration_months
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -421,4 +437,5 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($42::numeric IS NULL OR fill_rate_percent >= $42)
   AND ($43::numeric IS NULL OR avg_fill_days <= $43)
   AND ($44::int IS NULL OR dividend_years >= $44)
+  AND ($45::smallint IS NULL OR revenue_acceleration_months >= $45)
 "#;
