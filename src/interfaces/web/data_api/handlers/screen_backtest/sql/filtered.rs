@@ -221,6 +221,30 @@ macro_rules! filtered_cte {
           AND q.minimum_price_in_year > 0
     ) tt ON TRUE
     LEFT JOIN LATERAL (
+        -- 融資餘額變化（%）：融資資料收盤後才公布，換股日只用前一個交易日（含）以前 10 天內最近一筆，
+        -- 對同一檔往前第 20 筆；基期為 0（不能融資或沒有資料）時沒有資料。只在設 `$49` 時才查。
+        SELECT (cur.margin_balance - base.margin_balance)::float8 * 100
+                   / NULLIF(base.margin_balance, 0)::float8 AS margin_change
+        FROM (
+            SELECT m."date", m.margin_balance
+            FROM chip_daily m
+            WHERE $49::float8 IS NOT NULL
+              AND m.stock_symbol = u.stock_symbol
+              AND m."date" < u.date
+              AND m."date" >= u.date - 10
+            ORDER BY m."date" DESC
+            LIMIT 1
+        ) cur
+        CROSS JOIN LATERAL (
+            SELECT b.margin_balance
+            FROM chip_daily b
+            WHERE b.stock_symbol = u.stock_symbol AND b."date" < cur."date"
+            ORDER BY b."date" DESC
+            OFFSET 19
+            LIMIT 1
+        ) base
+    ) mg ON TRUE
+    LEFT JOIN LATERAL (
         -- 現金股利（dividend_fill_event）只用換股當天（含）以前的除息。殖利率：最近一次除息往回 350 天的現金股利
         -- ÷ 換股日收盤（最近一次除息須在 400 天內）；填息率與平均填息天數：除息日在近 5 年內、觀察期 120 個交易日
         -- 在換股日以前已滿的事件；連續配息年數：以除息日年度計，最近一次除息的年度不早於換股年前一年。
@@ -296,6 +320,7 @@ macro_rules! filtered_cte {
       AND ($31::float8 IS NULL OR qv.pe <= $31)
       AND ($32::float8 IS NULL OR qv.pb <= $32)
       AND ($35::float8 IS NULL OR (hc.major_percent - hb.major_percent)::float8 >= $35)
+      AND ($48::float8 IS NULL OR (hc.percent_400 - hb.percent_400)::float8 >= $48)
       AND ($37::float8 IS NULL OR fy.eps_yoy >= $37)
       AND ($38::float8 IS NULL OR ae.annual_growth >= $38)
       AND ($39::int IS NULL OR EXISTS (
@@ -320,7 +345,8 @@ macro_rules! filtered_cte {
       AND ($44::int IS NULL OR dv.dividend_years >= $44)
       AND ($45::smallint IS NULL OR rv.revenue_accel_months >= $45)
       AND ($46::int IS NULL OR dg.growth_years >= $46)
-      AND (NOT $47::bool OR tt.passed IS TRUE)"#,
+      AND (NOT $47::bool OR tt.passed IS TRUE)
+      AND ($49::float8 IS NULL OR mg.margin_change <= $49)"#,
             $chip_filter,
             "\n)"
         )

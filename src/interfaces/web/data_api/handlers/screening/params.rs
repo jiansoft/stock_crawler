@@ -50,8 +50,12 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) max_pb: Option<Decimal>,
     /// 千張大戶持股比例 N 週變化下限（百分點）。
     pub(super) min_major_change: Option<Decimal>,
-    /// `min_major_change` 的回看週數。
+    /// `min_major_change` 與 `min_holder_400_change` 的回看週數。
     pub(super) major_change_weeks: u8,
+    /// 400 張以上大戶持股比例 N 週變化下限（百分點）。
+    pub(super) min_holder_400_change: Option<Decimal>,
+    /// 融資餘額變化上限（%）。
+    pub(super) max_margin_change_percent: Option<Decimal>,
     /// 最近幾個交易日內出現區間突破（且還沒跌回）。
     pub(super) range_breakout_days: Option<i64>,
     /// 最低單季 EPS 年增率。
@@ -220,6 +224,18 @@ pub(super) fn validate_screening_params(
         100.0,
         "min_major_change 必須介於 -100 至 100",
     )?;
+    let min_holder_400_change = decimal_in_range(
+        params.min_holder_400_change,
+        -100.0,
+        100.0,
+        "min_holder_400_change 必須介於 -100 至 100",
+    )?;
+    let max_margin_change_percent = decimal_in_range(
+        params.max_margin_change_percent,
+        -100.0,
+        1000.0,
+        "max_margin_change_percent 必須介於 -100 至 1000",
+    )?;
     let major_change_weeks = params
         .major_change_weeks
         .unwrap_or(super::super::DEFAULT_MAJOR_CHANGE_WEEKS);
@@ -322,7 +338,9 @@ pub(super) fn validate_screening_params(
         || params.min_dividend_years.is_some()
         || params.min_revenue_acceleration_months.is_some()
         || params.min_dividend_growth_years.is_some()
-        || params.trend_template == Some(true);
+        || params.trend_template == Some(true)
+        || params.min_holder_400_change.is_some()
+        || params.max_margin_change_percent.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -348,6 +366,8 @@ pub(super) fn validate_screening_params(
         max_pb,
         min_major_change,
         major_change_weeks,
+        min_holder_400_change,
+        max_margin_change_percent,
         range_breakout_days: params.range_breakout_days.map(i64::from),
         min_eps_yoy_percent,
         min_annual_eps_growth_percent,

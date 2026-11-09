@@ -114,6 +114,8 @@ pub(super) struct ScreenedStockRow {
     dividend_growth_years: Option<i32>,
     /// 是否符合 Minervini 趨勢模板。
     trend_template: Option<bool>,
+    /// 融資餘額近 20 筆變化率（%）。
+    margin_change_percent: Option<Decimal>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -250,6 +252,11 @@ impl From<ScreenedStockRow> for ScreenedStock {
             dividend_years: row.dividend_years,
             dividend_growth_years: row.dividend_growth_years,
             trend_template: row.trend_template,
+            margin_change_percent: analytical_decimal_to_f64(
+                row.margin_change_percent,
+                &symbol,
+                "margin_change_percent",
+            ),
         }
     }
 }

@@ -2,6 +2,7 @@
 
 mod attribution;
 mod canslim;
+mod chip_concentration;
 mod compare;
 mod cutoff;
 mod dividend;

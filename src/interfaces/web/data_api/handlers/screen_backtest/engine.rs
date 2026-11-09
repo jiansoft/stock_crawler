@@ -263,7 +263,9 @@ impl<'a> Backtest<'a> {
             .bind(params.min_dividend_years.map(i32::from))
             .bind(params.min_revenue_acceleration_months.map(i16::from))
             .bind(params.min_dividend_growth_years.map(i32::from))
-            .bind(params.trend_template.unwrap_or(false));
+            .bind(params.trend_template.unwrap_or(false))
+            .bind(params.min_holder_400_change)
+            .bind(params.max_margin_change_percent);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

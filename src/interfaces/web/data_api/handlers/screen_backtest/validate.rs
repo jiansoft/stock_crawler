@@ -46,6 +46,12 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     if !within(params.min_major_change, -100.0, 100.0) {
         return Err("min_major_change 必須介於 -100 至 100");
     }
+    if !within(params.min_holder_400_change, -100.0, 100.0) {
+        return Err("min_holder_400_change 必須介於 -100 至 100");
+    }
+    if !within(params.max_margin_change_percent, -100.0, 1000.0) {
+        return Err("max_margin_change_percent 必須介於 -100 至 1000");
+    }
     if params
         .major_change_weeks
         .is_some_and(|weeks| !(1..=12).contains(&weeks))
@@ -106,18 +112,22 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     Ok(())
 }
 
-/// 設 `min_major_change` 時，起日要晚於大戶資料第一週（`first_week`，正式庫為 2023-07-14）加回看週數，
+/// 設 `min_major_change` 或 `min_holder_400_change` 時，起日要晚於大戶資料第一週（`first_week`，正式庫為 2023-07-14）加回看週數，
 /// 第一期才有兩週可比；不足或沒有任何大戶資料時回錯誤訊息，不靜默略過條件。
 pub(super) fn validate_major_change_period(
     params: &ScreenBacktestParams,
     from: NaiveDate,
     first_week: Option<NaiveDate>,
 ) -> Result<(), String> {
-    if params.min_major_change.is_none() {
-        return Ok(());
-    }
+    let field = match (params.min_major_change, params.min_holder_400_change) {
+        (Some(_), _) => "min_major_change",
+        (None, Some(_)) => "min_holder_400_change",
+        (None, None) => return Ok(()),
+    };
     let Some(first_week) = first_week else {
-        return Err("設定 min_major_change 時需要集保大戶資料，但資料庫沒有任何一週".to_owned());
+        return Err(format!(
+            "設定 {field} 時需要集保大戶資料，但資料庫沒有任何一週"
+        ));
     };
     let weeks = params
         .major_change_weeks
@@ -125,7 +135,7 @@ pub(super) fn validate_major_change_period(
     let earliest = first_week + chrono::Duration::weeks(i64::from(weeks));
     if from <= earliest {
         return Err(format!(
-            "設定 min_major_change 時 from 必須晚於 {earliest}（集保大戶資料自 {first_week} 起，往後 {weeks} 週才有可比的兩週）"
+            "設定 {field} 時 from 必須晚於 {earliest}（集保大戶資料自 {first_week} 起，往後 {weeks} 週才有可比的兩週）"
         ));
     }
     Ok(())

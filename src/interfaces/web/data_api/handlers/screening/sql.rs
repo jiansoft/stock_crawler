@@ -32,6 +32,8 @@
 /// 的年數，`$46` 為下限；每檔都會回傳。
 /// Minervini 趨勢模板：查詢日前 10 天內最新一筆日線MA20 > MA60 > MA120 > MA240、收盤站上 MA240、收盤不低於 52 週（240 個交易日）最高價的 75%、且至少比 52 週最低價高 30%；年線或 52 週最低價為 0 時為
 /// `NULL`。每檔都會回傳，`$47` 為 true 時只留符合的股票。
+/// 400 張以上大戶持股比例變化與千張變化一起由 handler 先算好，以 `$48` 平行陣列左接，`$49` 為下限；
+/// 融資餘額變化：查詢日前 10 天內最新一筆一筆對往前第 20 筆（約一個月）的變化率（%），負值代表融資減少；基期融資餘額為 0 （不能融資或沒有資料）的不會通過，只在設 `$50`（上限）時才查。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -80,6 +82,7 @@ WITH latest AS (
         pv.pe_ratio,
         pv.pb_ratio,
         pv.trend_template,
+        mg.margin_change_percent,
         dv.fill_rate_percent,
         dv.avg_fill_days,
         dv.dividend_years,
@@ -231,6 +234,28 @@ WITH latest AS (
         ORDER BY "Date" DESC
         LIMIT 1
     ) pv ON TRUE
+    LEFT JOIN LATERAL (
+        -- 融資餘額：查詢日前 10 天內最新一筆對同一檔往前第 20 筆的變化率（%）；基期為 0 時為 NULL。
+        SELECT ROUND((cur.margin_balance - base.margin_balance) * 100.0
+                     / NULLIF(base.margin_balance, 0), 2) AS margin_change_percent
+        FROM (
+            SELECT m."date", m.margin_balance
+            FROM chip_daily m
+            WHERE $50::numeric IS NOT NULL
+              AND m.stock_symbol = s.stock_symbol
+              AND m."date" BETWEEN $3::date - 10 AND $3::date
+            ORDER BY m."date" DESC
+            LIMIT 1
+        ) cur
+        CROSS JOIN LATERAL (
+            SELECT b.margin_balance
+            FROM chip_daily b
+            WHERE b.stock_symbol = s.stock_symbol AND b."date" < cur."date"
+            ORDER BY b."date" DESC
+            OFFSET 19
+            LIMIT 1
+        ) base
+    ) mg ON TRUE
     LEFT JOIN LATERAL (
         -- Yahoo 最新一季單季損益表：營業利益率、稅後淨利率，以及毛利率、營業利益率、稅後淨利率
         -- 是否都高於去年同一季（三率三升；去年同季沒有資料或營收為 0 時為 NULL）。
@@ -428,14 +453,14 @@ SELECT
     brk.breakout_date, brk.breakout_description,
     eps_yoy_percent, annual_eps_growth_percent, annual_eps_year, new_high_date,
     fill_rate_percent, avg_fill_days, dividend_years, revenue_acceleration_months, dividend_growth_years,
-    trend_template
+    trend_template, margin_change_percent
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
 LEFT JOIN UNNEST($19::text[], $20::smallint[], $21::smallint[])
        AS chip(symbol, foreign_streak, trust_streak)
        ON chip.symbol = normalized.stock_symbol
-LEFT JOIN UNNEST($32::text[], $33::numeric[]) AS major(symbol, major_change)
+LEFT JOIN UNNEST($32::text[], $33::numeric[], $48::numeric[]) AS major(symbol, major_change, holder_400_change)
        ON major.symbol = normalized.stock_symbol
 LEFT JOIN UNNEST($35::text[], $36::date[], $37::text[])
        AS brk(symbol, breakout_date, breakout_description)
@@ -472,4 +497,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($45::smallint IS NULL OR revenue_acceleration_months >= $45)
   AND ($46::int IS NULL OR dividend_growth_years >= $46)
   AND (NOT $47::bool OR trend_template IS TRUE)
+  AND ($49::numeric IS NULL OR major.holder_400_change >= $49)
+  AND ($50::numeric IS NULL OR margin_change_percent <= $50)
 "#;

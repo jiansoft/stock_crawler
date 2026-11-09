@@ -309,11 +309,14 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         max_pe: params.max_pe,
         max_pb: params.max_pb,
         min_major_change: params.min_major_change,
-        major_change_weeks: params.min_major_change.map(|_| {
-            params
-                .major_change_weeks
-                .unwrap_or(super::DEFAULT_MAJOR_CHANGE_WEEKS)
-        }),
+        major_change_weeks: params
+            .min_major_change
+            .or(params.min_holder_400_change)
+            .map(|_| {
+                params
+                    .major_change_weeks
+                    .unwrap_or(super::DEFAULT_MAJOR_CHANGE_WEEKS)
+            }),
         min_eps_yoy_percent: params.min_eps_yoy_percent,
         min_annual_eps_growth_percent: params.min_annual_eps_growth_percent,
         new_high_days: params.new_high_days,
@@ -324,6 +327,8 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         min_dividend_years: params.min_dividend_years,
         min_dividend_growth_years: params.min_dividend_growth_years,
         trend_template: params.trend_template.unwrap_or(false),
+        min_holder_400_change: params.min_holder_400_change,
+        max_margin_change_percent: params.max_margin_change_percent,
         min_revenue_acceleration_months: params.min_revenue_acceleration_months,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
