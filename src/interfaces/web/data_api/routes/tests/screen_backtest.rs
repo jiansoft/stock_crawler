@@ -11,6 +11,7 @@ mod execution;
 mod f_score;
 mod filters;
 mod fundamentals;
+mod low_volatility;
 mod magic_formula;
 mod major;
 mod margins;

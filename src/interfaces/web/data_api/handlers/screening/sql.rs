@@ -41,6 +41,8 @@
 /// （近四季營業利益、投入資本、企業價值，千元）。
 /// PEG：Yahoo 最近 8 季單季 EPS（須相連）的近四季合計對前四季合計成長率（%，新鮮度同三率、前四季合計須 > 0），
 /// `peg_ratio` = `pv` 本益比 ÷ 成長率（虧損或成長率不在 0～100% 時為 NULL），`$51` 為上限；供 `sort_by=peg`。
+/// 低波動：查詢日前 10 天內最新一筆 `daily_risk_metric`（近 240 筆日線的年化波動度與 beta），`$52`／`$53` 為上限；
+/// 供 `sort_by=volatility`／`beta`。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -100,6 +102,8 @@ WITH latest AS (
         eg.eps_ord,
         eg.ttm_eps,
         eg.prev_ttm_eps,
+        rk.volatility_percent,
+        rk.beta,
         dv.fill_rate_percent,
         dv.avg_fill_days,
         dv.dividend_years,
@@ -336,6 +340,15 @@ WITH latest AS (
         ) recent
         HAVING COUNT(eps) = 8 AND MAX(ord) - MIN(ord) = 7
     ) eg ON TRUE
+    LEFT JOIN LATERAL (
+        -- 低波動：查詢日前 10 天內最新一筆風險指標。
+        SELECT volatility_percent, beta
+        FROM daily_risk_metric
+        WHERE stock_symbol = s.stock_symbol
+          AND date BETWEEN $3::date - 10 AND $3::date
+        ORDER BY date DESC
+        LIMIT 1
+    ) rk ON TRUE
     LEFT JOIN LATERAL (
         -- Yahoo 最新一季單季損益表：營業利益率、稅後淨利率，以及毛利率、營業利益率、稅後淨利率
         -- 是否都高於去年同一季（三率三升；去年同季沒有資料或營收為 0 時為 NULL）。
@@ -577,7 +590,7 @@ SELECT
     CASE WHEN earnings_yield_percent IS NOT NULL AND return_on_capital_percent IS NOT NULL THEN
         COUNT(*) OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL)
     END AS magic_formula_ranked_count,
-    operating_income_ttm, invested_capital, enterprise_value
+    operating_income_ttm, invested_capital, enterprise_value, volatility_percent, beta
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -625,4 +638,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($50::numeric IS NULL OR margin_change_percent <= $50)
   AND ($51::numeric IS NULL OR (pe_ratio > 0 AND eps_ttm_growth_percent > 0 AND eps_ttm_growth_percent <= 100
       AND ROUND(pe_ratio / eps_ttm_growth_percent, 2) <= $51))
+  AND ($52::numeric IS NULL OR volatility_percent <= $52)
+  AND ($53::numeric IS NULL OR beta <= $53)
 "#;

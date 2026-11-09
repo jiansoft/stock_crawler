@@ -69,6 +69,8 @@ enum BacktestRankByValue {
     MagicFormula,
     /// PEG（本益比 ÷ 近四季 EPS 成長率）由低到高（虧損或成長率不在 0～100% 的排最後）。
     Peg,
+    /// 換股當天近 240 筆日線的年化波動度由低到高（資料不足的排最後）。
+    LowVolatility,
 }
 
 /// OpenAPI 文件使用的持股加權方式。
@@ -146,7 +148,7 @@ pub(crate) struct ScreenBacktestParams {
     /// 最近一季營業利益率）、`pe_ratio`／`pb_ratio`（換股當天官方本益比／股價淨值比由低到高，虧損或沒有
     /// 資料的排最後）、`magic_formula`（神奇公式：換股日已公布最近一季的近四季營業利益 ÷ 企業價值的盈餘殖利率名次，
     /// 加上 ÷（淨營運資金 + 不動產廠房設備）的資本報酬率名次，合計由小到大；金融業與資料不足的排最後）、`peg`
-    /// （PEG 由低到高，算法同 `max_peg`）；
+    /// （PEG 由低到高，算法同 `max_peg`）、`low_volatility`（年化波動度由低到高，算法同 `max_volatility_percent`）；
     /// 同值或查不到時再依相對強度分數（查不到的排最後）。`keep_rank` 的名次也依此排序。
     #[param(value_type = BacktestRankByValue, inline)]
     pub(crate) rank_by: Option<String>,
@@ -322,6 +324,13 @@ pub(crate) struct ScreenBacktestParams {
     /// 本益比不高於成長率。
     #[param(minimum = 0.01, maximum = 10.0)]
     pub(crate) max_peg: Option<f64>,
+    /// 年化波動度上限（%，1–200；只用於新買進）：換股當天收盤後、近 240 筆日線漲跌幅的樣本標準差 × √240；資料
+    /// 不足 200 筆的不會通過。例如 25 只選比大盤（0050 約 20～30%）不更波動的股票。
+    #[param(minimum = 1.0, maximum = 200.0)]
+    pub(crate) max_volatility_percent: Option<f64>,
+    /// beta 上限（-5–5；只用於新買進）：同一段日漲跌幅對加權指數日報酬的迴歸斜率；資料不足的不會通過。
+    #[param(minimum = -5.0, maximum = 5.0)]
+    pub(crate) max_beta: Option<f64>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

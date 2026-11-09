@@ -189,6 +189,11 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
         Ok(count) => tracing::info!("寫入相對強度結束:{count}"),
         Err(why) => tracing::error!("寫入相對強度失敗: {why:#}"),
     }
+    // 風險指標只供低波動選股與回測使用，失敗只記錄，可用手動回補補算
+    match calculation::risk_metric::calculate_risk_metrics(date).await {
+        Ok(count) => tracing::info!("寫入風險指標結束:{count}"),
+        Err(why) => tracing::error!("寫入風險指標失敗: {why:#}"),
+    }
 
     // 清除記憶與Redis內所有的快取
     TTL.clear();

@@ -18,6 +18,9 @@
 //! - `test_record_strategy_rebalance`：
 //!   把具名策略（`MANUAL_STRATEGY_PRESET`，預設「最佳組合」）目前這一期的持股寫進換股紀錄
 //!   （`strategy_rebalance`），供實盤追蹤；同一天已有紀錄不覆蓋，重跑安全。
+//! - `test_backfill_risk_metrics`：
+//!   逐年重算 `MANUAL_RISK_METRIC_FROM`～`MANUAL_RISK_METRIC_TO`（預設 [`MANUAL_RISK_METRIC_FROM`] 至今天）每個
+//!   交易日的風險指標（`daily_risk_metric`）；只讀日線與加權指數，同一段日期整段替換，重跑安全。
 //! - `test_rebuild_dividend_fill_events`：
 //!   整批重算除權息填息事件（`dividend_fill_event`），新建表或要立即反映股利修正時用；重跑安全。
 
@@ -26,6 +29,9 @@ use chrono::NaiveDate;
 /// 未來報酬回填的預設起日（結束日）：技術訊號從 2019 年起，以 2019 年初為結束日，5 日報酬的基準日
 /// 從 2018 年底齊、240 日報酬的基準日從 2018 年初齊。
 const MANUAL_FORWARD_RETURN_FROM: &str = "2019-01-02";
+
+/// 風險指標回填的預設起日：回測從 2019 年起，第一個換股日就要有近 240 筆日線的指標。
+const MANUAL_RISK_METRIC_FROM: &str = "2019-01-02";
 
 /// 每日相對強度回填的預設起日：240 日報酬的基準日從 2018 年初齊，相對強度從 2019 年初起算。
 const MANUAL_RELATIVE_STRENGTH_FROM: &str = "2019-01-02";
@@ -330,6 +336,40 @@ async fn test_strategy_edge_check() {
     for record in crate::app::event::taiwan_stock::strategy_edge::load_latest().await {
         println!("{record:?}");
     }
+}
+
+/// 逐年重算風險指標（`daily_risk_metric`，平常由收盤匯總算當天）。**會寫入資料庫**；每年一個交易，
+/// 失敗時那一年保留舊資料，重跑安全。
+///
+/// 執行範例：
+/// `MANUAL_RISK_METRIC_FROM=2024-01-01 cargo test app::manual_backfill::derived::test_backfill_risk_metrics -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_risk_metrics() {
+    dotenvy::dotenv().ok();
+    let today = chrono::Local::now().date_naive().to_string();
+    let date = |name: &str, default: &str| {
+        let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
+        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+    };
+    let from = date("MANUAL_RISK_METRIC_FROM", MANUAL_RISK_METRIC_FROM);
+    let to = date("MANUAL_RISK_METRIC_TO", &today);
+    let mut start = from;
+    let mut total = 0;
+    while start <= to {
+        let year_end =
+            NaiveDate::from_ymd_opt(chrono::Datelike::year(&start), 12, 31).expect("年底日期合法");
+        let end = year_end.min(to);
+        let count =
+            crate::app::calculation::risk_metric::calculate_risk_metrics_between(start, end)
+                .await
+                .unwrap_or_else(|why| panic!("{start}～{end} 風險指標寫入失敗：{why:#}"));
+        total += count;
+        println!("{start}～{end}：{count} 列");
+        start = end.succ_opt().expect("日期合法");
+    }
+    println!("風險指標回填 {from}～{to}：共 {total} 列");
 }
 
 /// 立即整批重算除權息填息事件（`dividend_fill_event`，平常由 05:45 排程執行）。**會寫入資料庫**；

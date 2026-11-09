@@ -17,6 +17,7 @@ mod trend;
 mod validation;
 mod validation_chip;
 mod valuation_margins;
+mod volatility;
 
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -75,6 +76,8 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_holder_400_change: None,
         max_margin_change_percent: None,
         max_peg: None,
+        max_volatility_percent: None,
+        max_beta: None,
         sort_by: None,
         sort_order: None,
         limit: None,

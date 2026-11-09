@@ -32,6 +32,7 @@ pub mod portfolio_exposure;
 pub mod portfolio_target;
 pub mod quote;
 pub mod relative_strength;
+pub mod risk_metric;
 pub mod stock;
 pub mod strategy_preset;
 pub mod strategy_rebalance;

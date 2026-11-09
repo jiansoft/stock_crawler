@@ -55,6 +55,12 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     if !within(params.max_peg, 0.01, 10.0) {
         return Err("max_peg 必須介於 0.01 至 10");
     }
+    if !within(params.max_volatility_percent, 1.0, 200.0) {
+        return Err("max_volatility_percent 必須介於 1 至 200");
+    }
+    if !within(params.max_beta, -5.0, 5.0) {
+        return Err("max_beta 必須介於 -5 至 5");
+    }
     if params
         .major_change_weeks
         .is_some_and(|weeks| !(1..=12).contains(&weeks))
