@@ -65,6 +65,7 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_fill_rate_percent: None,
         max_avg_fill_days: None,
         min_dividend_years: None,
+        min_revenue_acceleration_months: None,
         sort_by: None,
         sort_order: None,
         limit: None,

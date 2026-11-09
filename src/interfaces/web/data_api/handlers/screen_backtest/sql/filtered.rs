@@ -21,6 +21,12 @@ macro_rules! filtered_cte {
                 MIN(rn) FILTER (WHERE NOT (yoy > 0 AND ord = first_ord - rn + 1)) - 1,
                 COUNT(*)
             ) AS revenue_yoy_streak,
+            -- 營收加速：從最新月往回，年增率高於前一個月且月份相連的月數。
+            COALESCE(
+                MIN(rn) FILTER (WHERE NOT COALESCE(
+                    yoy > prev_yoy AND prev_ord = ord - 1 AND ord = first_ord - rn + 1, FALSE)) - 1,
+                COUNT(*)
+            ) AS revenue_accel_months,
             CASE WHEN COUNT(*) FILTER (WHERE rn <= 3 AND ord = first_ord - rn + 1) = 3
                   AND SUM(last_year) FILTER (WHERE rn <= 3) > 0
               THEN (SUM(monthly) FILTER (WHERE rn <= 3)
@@ -29,7 +35,9 @@ macro_rules! filtered_cte {
         FROM (
             SELECT month, yoy, monthly, last_year, ord,
                    ROW_NUMBER() OVER (ORDER BY ord DESC) AS rn,
-                   FIRST_VALUE(ord) OVER (ORDER BY ord DESC) AS first_ord
+                   FIRST_VALUE(ord) OVER (ORDER BY ord DESC) AS first_ord,
+                   LEAD(yoy) OVER (ORDER BY ord DESC) AS prev_yoy,
+                   LEAD(ord) OVER (ORDER BY ord DESC) AS prev_ord
             FROM (
                 SELECT "Date" AS month,
                        "ComparedWithLastYearSameMonth" AS yoy,
@@ -38,7 +46,8 @@ macro_rules! filtered_cte {
                        ("Date" / 100)::int * 12 + ("Date" % 100)::int AS ord
                 FROM "Revenue"
                 WHERE ($19::float8 IS NOT NULL OR $20::smallint IS NOT NULL OR $21::float8 IS NOT NULL
-                       OR $16::text = 'revenue_yoy' OR $28::bool OR $29::float8 IS NOT NULL)
+                       OR $16::text = 'revenue_yoy' OR $28::bool OR $29::float8 IS NOT NULL
+                       OR $45::smallint IS NOT NULL)
                   AND "SecurityCode" = u.stock_symbol
                   AND "Date" <= ((u.revenue_ord - 1) / 12) * 100 + (u.revenue_ord - 1) % 12 + 1
                 ORDER BY "Date" DESC
@@ -289,7 +298,8 @@ macro_rules! filtered_cte {
       AND ($41::float8 IS NULL OR dv.dividend_yield >= $41)
       AND ($42::float8 IS NULL OR dv.fill_rate >= $42)
       AND ($43::float8 IS NULL OR dv.avg_fill_days <= $43)
-      AND ($44::int IS NULL OR dv.dividend_years >= $44)"#,
+      AND ($44::int IS NULL OR dv.dividend_years >= $44)
+      AND ($45::smallint IS NULL OR rv.revenue_accel_months >= $45)"#,
             $chip_filter,
             "\n)"
         )

@@ -188,7 +188,7 @@ mod schedule {
         let server = holiday_server(
             &today.year().to_string(),
             ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "stat": "ok", "queryYear": today.year(), "total": 1,
+                "stat": "ok", "date": format!("{}0101", today.year()), "queryYear": today.year(), "total": 1,
                 "data": [[today.format("%Y-%m-%d").to_string(), "測試休市", ""]]
             })),
         )

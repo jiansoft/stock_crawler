@@ -197,3 +197,42 @@ async fn screen_backtest_revenue_record_uses_published_months_only() {
 
     cleanup(pool).await;
 }
+
+/// 營收加速月數：3 月換股看得到的最新月是 1 月；BB 年增 5 → 10 → 30%（2 個月），BA 20 → −5%（0 個月，尚未
+/// 公布的 2 月 +50% 不會提前讓它變成 1 個月），BC 營收過期。回應回填參數，超出範圍回 422。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn screen_backtest_revenue_acceleration_uses_published_months_only() {
+    let Some(pool) =
+        seeded("screen_backtest_revenue_acceleration_uses_published_months_only").await
+    else {
+        return;
+    };
+    seed_fundamentals(pool).await;
+
+    let bb_only = [
+        ("1993-03-01".to_owned(), 1, Some(-4.0)),
+        ("1993-03-08".to_owned(), 1, Some(8.0)),
+    ];
+    let (status, json) = query("limit=2&min_revenue_acceleration_months=1").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["min_revenue_acceleration_months"], 1);
+    assert_eq!(periods(&json)[..2], bb_only);
+    let (_, json) = query("limit=2&min_revenue_acceleration_months=2").await;
+    assert_eq!(periods(&json)[..2], bb_only);
+    let (_, json) = query("limit=2&min_revenue_acceleration_months=3").await;
+    assert!(periods(&json).iter().all(|period| period.1 == 0), "{json}");
+    let (_, json) = query("limit=2").await;
+    assert!(json["min_revenue_acceleration_months"].is_null(), "{json}");
+    for extra in [
+        "min_revenue_acceleration_months=0",
+        "min_revenue_acceleration_months=12",
+    ] {
+        let (status, json) = query(extra).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{extra}: {json}");
+    }
+    cleanup(pool).await;
+}

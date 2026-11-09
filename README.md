@@ -374,7 +374,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 
 | 端點 | 內容 |
 |---|---|
-| `/stocks/screen` | 條件選股：F 分數、毛利率、負債比、自由現金流、營業利益率、三率三升、營收創新高、營收連續年增、相對強度、外資／投信連續買超、平均成交金額、本益比／股價淨值比上限、千張大戶持股比例 N 週變化（`min_major_change`／`major_change_weeks`）、近 N 日區間突破且還沒跌回（`range_breakout_days`，回應附突破日與說明；回測單獨使用輸 0050，只供參考）、CANSLIM 的單季 EPS 年增（`min_eps_yoy_percent`）、近 3 年每年 EPS 成長（`min_annual_eps_growth_percent`）與 N 天內創 52 週新高（`new_high_days`）、存股條件（近 5 年填息率 `min_fill_rate_percent`、平均填息天數 `max_avg_fill_days`、連續配息年數 `min_dividend_years`，三個欄位每檔都回傳），可排除產業 |
+| `/stocks/screen` | 條件選股：F 分數、毛利率、負債比、自由現金流、營業利益率、三率三升、營收創新高、營收連續年增、相對強度、外資／投信連續買超、平均成交金額、本益比／股價淨值比上限、千張大戶持股比例 N 週變化（`min_major_change`／`major_change_weeks`）、近 N 日區間突破且還沒跌回（`range_breakout_days`，回應附突破日與說明；回測單獨使用輸 0050，只供參考）、CANSLIM 的單季 EPS 年增（`min_eps_yoy_percent`）、近 3 年每年 EPS 成長（`min_annual_eps_growth_percent`）與 N 天內創 52 週新高（`new_high_days`）、存股條件（近 5 年填息率 `min_fill_rate_percent`、平均填息天數 `max_avg_fill_days`、連續配息年數 `min_dividend_years`，三個欄位每檔都回傳）、營收加速（`min_revenue_acceleration_months`：從最新月往回年增率逐月提高的月數，回應附 `revenue_acceleration_months`），可排除產業 |
 | `/stocks/screen/backtest` | 條件選股回測（見下方說明） |
 | `/stocks/screen/backtest/offsets` | 換股日偏移穩健度：同一組條件把換股日偏移 0 到 `hold_days` − 1 都跑一遍，回傳各指標的分布與勝過 0050 的比例；`split` 分樣本內外 |
 | `/stocks/screen/backtest/frontier` | 0050 核心部位前緣：0%～100%（每 10%）各比例的偏移分布，標出夏普值、年化報酬中位數最高的比例 |
@@ -386,7 +386,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 回測每 5／20／60／120／240 個交易日（`hold_days`）從上市櫃普通股挑出前 `limit` 檔持有，只用換股當天已知的資料（月營收、季報依法定公布期限），並依換手率扣除手續費（`fee_discount` 折扣）與證交稅。回傳每期報酬與持股、累積與年化報酬、最大回撤、勝率、年化波動率與夏普值、同期母體平均與 0050 比較、依年度彙總、個股貢獻與目前持股。回測、偏移、前緣、歸因與滾動前推都可用 `preset=名稱` 引用具名策略，另帶的參數覆蓋存的值。主要參數：
 
 + 選股條件：`market`、`industry`、`exclude_industry`、`min_rs_score`／`max_rs_score`、`min_foreign_streak`、`min_trust_streak`、`indicator`／`kind`（近期技術訊號）
-+ 基本面門檻（只用於新買進）：`min_revenue_yoy_percent`、`min_revenue_yoy_streak`、`min_revenue_yoy_3m_percent`、`min_monthly_revenue`、`revenue_record`、`min_eps`、`min_roe_percent`、`min_gross_margin_percent`、`min_operating_margin_percent`、`margins_yoy_up`、`max_debt_ratio_percent`、`positive_free_cash_flow`、`max_pe`、`max_pb`
++ 基本面門檻（只用於新買進）：`min_revenue_yoy_percent`、`min_revenue_yoy_streak`、`min_revenue_acceleration_months`（年增率逐月提高的月數）、`min_revenue_yoy_3m_percent`、`min_monthly_revenue`、`revenue_record`、`min_eps`、`min_roe_percent`、`min_gross_margin_percent`、`min_operating_margin_percent`、`margins_yoy_up`、`max_debt_ratio_percent`、`positive_free_cash_flow`、`max_pe`、`max_pb`
 + 集保大戶（只用於新買進）：`min_major_change`（千張大戶持股比例最近一週相對 `major_change_weeks` 週前的變化下限，百分點，可為負；回看 1～12 週，預設 4）。集保週五的資料週六才公布，換股日只用日期早於換股日的週；大戶資料自 2023-07-14 起，設此條件時 `from` 須晚於第一週加回看週數，否則回 422
 + CANSLIM（只用於新買進）：`min_eps_yoy_percent`（換股當天已公布的最近一季單季 EPS 對去年同季成長率，去年同季 ≤ 0 不通過）、`min_annual_eps_growth_percent`（已公布的最近 4 個年度 EPS、3 個年增率取最低者；年度 EPS 隔年 4/1 起才用）、`new_high_days`（換股日往前 N 個日曆天內創過 52 週新高）；L、I、M 用 `min_rs_score`、法人連續買超與 `market_filter_ma`
 + Piotroski F 分數：`min_f_score`（0–9；換股當天已公布的最近一個評分年度，年報隔年 4/1 起才用、落後超過 2 年不算；分數來自每日重算的 `financial_f_score_history`）

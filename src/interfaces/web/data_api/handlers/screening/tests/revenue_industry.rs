@@ -192,3 +192,132 @@ async fn screen_at_excludes_industries() {
 
     cleanup().await;
 }
+
+/// 營收加速月數的範圍邊界，且單獨即可成立篩選。
+#[test]
+fn screening_revenue_acceleration_boundaries() {
+    for (months, ok) in [(1, true), (11, true), (0, false), (12, false)] {
+        let mut params = screening_params();
+        params.min_revenue_acceleration_months = Some(months);
+        assert_eq!(
+            validate_screening_params(&params).is_ok(),
+            ok,
+            "min_revenue_acceleration_months {months}"
+        );
+    }
+}
+
+/// 以固定查詢日 1988-03-05（最新月營收 1988-01）計算營收加速月數：
+/// - RA：1987-10～1988-01 年增 5、10、20、30%，連續 3 個月提高。
+/// - RB：10、30、20、25%：1 月高於 12 月，但 12 月低於 11 月，只有 1 個月。
+/// - RC：1987-11 為 10%、1988-01 為 30%，中間缺 12 月，月份不相連為 0。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部 PostgreSQL，請加 --features integration-tests 執行"
+)]
+async fn screen_at_counts_revenue_acceleration_months() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 screen_at_counts_revenue_acceleration_months：無資料庫連接");
+        return;
+    }
+    const SYMBOLS: [&str; 3] = ["79979RA", "79979RB", "79979RC"];
+    let pool = database::get_connection();
+    let cleanup = || async {
+        for sql in [
+            r#"DELETE FROM "Revenue" WHERE "SecurityCode" = ANY($1)"#,
+            "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
+        ] {
+            let _ = sqlx::query(sql).bind(&SYMBOLS[..]).execute(pool).await;
+        }
+    };
+    cleanup().await;
+    let months: [(&str, &[(i64, i32)]); 3] = [
+        (
+            "79979RA",
+            &[(198710, 5), (198711, 10), (198712, 20), (198801, 30)],
+        ),
+        (
+            "79979RB",
+            &[(198710, 10), (198711, 30), (198712, 20), (198801, 25)],
+        ),
+        ("79979RC", &[(198711, 10), (198801, 30)]),
+    ];
+    for (symbol, rows) in months {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
+               VALUES ($1, '營收加速', $1, 2, 1)"#,
+        )
+        .bind(symbol)
+        .execute(pool)
+        .await
+        .expect("種入股票");
+        for (month, yoy) in rows {
+            sqlx::query(
+                r#"INSERT INTO "Revenue" ("SecurityCode", stock_symbol, "Date", "Monthly", "ComparedWithLastYearSameMonth")
+                   VALUES ($1, $1, $2, 979790, $3)"#,
+            )
+            .bind(symbol)
+            .bind(month)
+            .bind(yoy)
+            .execute(pool)
+            .await
+            .expect("種入月營收");
+        }
+    }
+
+    let query_date = NaiveDate::from_ymd_opt(1988, 3, 5).expect("固定日期合法");
+    let run = |min_months: Option<u8>| async move {
+        let mut params = screening_params();
+        params.min_monthly_revenue = Some(979_790.0);
+        params.min_revenue_acceleration_months = min_months;
+        params.limit = Some(50);
+        let validated = validate_screening_params(&params).expect("參數合法");
+        let response = screen_at(&params, validated, query_date).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body 可讀");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON 回應");
+        let mut rows: Vec<(String, serde_json::Value)> = json["stocks"]
+            .as_array()
+            .expect("stocks")
+            .iter()
+            .filter(|stock| {
+                stock["stock_symbol"]
+                    .as_str()
+                    .is_some_and(|symbol| SYMBOLS.contains(&symbol))
+            })
+            .map(|stock| {
+                (
+                    stock["stock_symbol"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                    stock["revenue_acceleration_months"].clone(),
+                )
+            })
+            .collect();
+        rows.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        rows
+    };
+    let all = run(None).await;
+    let one = run(Some(1)).await;
+    let three = run(Some(3)).await;
+    cleanup().await;
+
+    assert_eq!(
+        all,
+        [
+            ("79979RA".to_owned(), serde_json::json!(3)),
+            ("79979RB".to_owned(), serde_json::json!(1)),
+            ("79979RC".to_owned(), serde_json::json!(0)),
+        ]
+    );
+    let symbols = |rows: &[(String, serde_json::Value)]| {
+        rows.iter().map(|row| row.0.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(symbols(&one), ["79979RA", "79979RB"]);
+    assert_eq!(symbols(&three), ["79979RA"]);
+}
