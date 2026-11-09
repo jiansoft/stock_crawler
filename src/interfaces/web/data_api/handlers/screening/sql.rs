@@ -43,6 +43,7 @@
 /// `peg_ratio` = `pv` 本益比 ÷ 成長率（虧損或成長率不在 0～100% 時為 NULL），`$51` 為上限；供 `sort_by=peg`。
 /// 低波動：查詢日前 10 天內最新一筆 `daily_risk_metric`（近 240 筆日線的年化波動度與 beta），`$52`／`$53` 為上限；
 /// 供 `sort_by=volatility`／`beta`。
+/// 年線乖離率：`pv` 同一筆日線收盤相對 240 日均線（%，年線為 0 時為 NULL），`$54` 為上限；供 `sort_by=bias240`。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -93,6 +94,7 @@ WITH latest AS (
         pv.trend_template,
         mg.margin_change_percent,
         pv.close_price,
+        pv.bias240_percent,
         mf.magic_year,
         mf.magic_quarter,
         mf.ebit_ttm,
@@ -239,6 +241,8 @@ WITH latest AS (
         -- 查詢日（含）之前 10 天內最新一筆日線的官方本益比、股價淨值比；0（虧損或沒有資料）轉成 NULL。
         SELECT "Date" AS ratio_date,
             "ClosingPrice" AS close_price,
+            CASE WHEN "MovingAverage240" > 0
+                THEN ROUND(("ClosingPrice" / "MovingAverage240" - 1) * 100, 2) END AS bias240_percent,
             CASE WHEN "PriceEarningRatio" > 0 THEN "PriceEarningRatio" END AS pe_ratio,
             CASE WHEN "price-to-book_ratio" > 0 THEN "price-to-book_ratio" END AS pb_ratio,
             -- Minervini 趨勢模板（同一筆日線）；年線或 52 週最低價為 0（資料不足）時為 NULL。
@@ -590,7 +594,7 @@ SELECT
     CASE WHEN earnings_yield_percent IS NOT NULL AND return_on_capital_percent IS NOT NULL THEN
         COUNT(*) OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL)
     END AS magic_formula_ranked_count,
-    operating_income_ttm, invested_capital, enterprise_value, volatility_percent, beta
+    operating_income_ttm, invested_capital, enterprise_value, volatility_percent, beta, bias240_percent
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -640,4 +644,5 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
       AND ROUND(pe_ratio / eps_ttm_growth_percent, 2) <= $51))
   AND ($52::numeric IS NULL OR volatility_percent <= $52)
   AND ($53::numeric IS NULL OR beta <= $53)
+  AND ($54::numeric IS NULL OR bias240_percent <= $54)
 "#;

@@ -3,6 +3,7 @@
 //! [`valuation_margins`]（估值上限、三率）、[`revenue_industry`]（營收新高、排除產業）、[`breakout`]（近期區間
 //! 突破）、[`canslim`]（單季／年度 EPS 成長、52 週新高）；這裡放共用的參數建構函式。
 
+mod bias;
 mod breakout;
 mod canslim;
 mod chip_concentration;
@@ -78,6 +79,7 @@ pub(super) fn screening_params() -> StockScreeningParams {
         max_peg: None,
         max_volatility_percent: None,
         max_beta: None,
+        max_bias240: None,
         sort_by: None,
         sort_order: None,
         limit: None,

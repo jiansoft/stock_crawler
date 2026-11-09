@@ -15,6 +15,7 @@ mod low_volatility;
 mod magic_formula;
 mod major;
 mod margins;
+mod mean_reversion;
 mod offsets;
 mod peg;
 mod periods;
@@ -236,6 +237,25 @@ fn periods(json: &serde_json::Value) -> Vec<(String, i64, Option<f64>)> {
                 period["holdings"].as_i64().unwrap_or_default(),
                 period["avg_return"].as_f64(),
             )
+        })
+        .collect()
+}
+
+/// 回傳每期持股代號（排序後），比較不受相對強度名次影響。
+fn holdings(json: &serde_json::Value) -> Vec<Vec<String>> {
+    json["periods"]
+        .as_array()
+        .expect("periods")
+        .iter()
+        .map(|period| {
+            let mut symbols: Vec<String> = period["symbols"]
+                .as_array()
+                .expect("symbols")
+                .iter()
+                .filter_map(|symbol| symbol.as_str().map(str::to_owned))
+                .collect();
+            symbols.sort();
+            symbols
         })
         .collect()
 }

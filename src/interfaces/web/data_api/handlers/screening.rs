@@ -108,11 +108,11 @@ async fn screen_at(
         }
         Err(error) => return database_error(error),
     }
-    // ORDER BY 字串只可能來自下方四十四個 &'static str 分支，絕不插入呼叫端
+    // ORDER BY 字串只可能來自下方四十六個 &'static str 分支，絕不插入呼叫端
     // 原始文字；其他條件仍全部使用 bind parameter。
     let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $24", validated.order_by);
     // SQLx 0.9 要求動態字串顯式稽核；此處唯一動態部分已由
-    // `screen_order_by` 限制為四十四個靜態常數，因此可安全標記。
+    // `screen_order_by` 限制為四十六個靜態常數，因此可安全標記。
     let rows: Result<Vec<ScreenedStockRow>, _> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(validated.market_id)
         .bind(params.industry_id)
@@ -167,6 +167,7 @@ async fn screen_at(
         .bind(validated.max_peg)
         .bind(validated.max_volatility_percent)
         .bind(validated.max_beta)
+        .bind(validated.max_bias240)
         // 不快取成具名 prepared statement：同一連線執行約 5 次後 PostgreSQL 會改用 generic plan，
         // 34 個可選條件都剪不掉（2026-10-28 正式庫實測不設條件 custom 316 ms、generic 1,853 ms，
         // auto 模式第 6 次就換成 generic）。每次重新規劃只多 5 ms。

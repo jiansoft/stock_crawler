@@ -61,6 +61,9 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     if !within(params.max_beta, -5.0, 5.0) {
         return Err("max_beta 必須介於 -5 至 5");
     }
+    if !within(params.max_bias240, -90.0, 100.0) {
+        return Err("max_bias240 必須介於 -90 至 100");
+    }
     if params
         .major_change_weeks
         .is_some_and(|weeks| !(1..=12).contains(&weeks))

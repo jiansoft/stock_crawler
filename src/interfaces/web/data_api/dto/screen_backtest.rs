@@ -71,6 +71,8 @@ enum BacktestRankByValue {
     Peg,
     /// 換股當天近 240 筆日線的年化波動度由低到高（資料不足的排最後）。
     LowVolatility,
+    /// 換股當天年線乖離率（收盤 ÷ 240 日均線 − 1）由低到高，跌得最深的排前面（沒有年線的排最後）。
+    Bias240,
 }
 
 /// OpenAPI 文件使用的持股加權方式。
@@ -148,7 +150,8 @@ pub(crate) struct ScreenBacktestParams {
     /// 最近一季營業利益率）、`pe_ratio`／`pb_ratio`（換股當天官方本益比／股價淨值比由低到高，虧損或沒有
     /// 資料的排最後）、`magic_formula`（神奇公式：換股日已公布最近一季的近四季營業利益 ÷ 企業價值的盈餘殖利率名次，
     /// 加上 ÷（淨營運資金 + 不動產廠房設備）的資本報酬率名次，合計由小到大；金融業與資料不足的排最後）、`peg`
-    /// （PEG 由低到高，算法同 `max_peg`）、`low_volatility`（年化波動度由低到高，算法同 `max_volatility_percent`）；
+    /// （PEG 由低到高，算法同 `max_peg`）、`low_volatility`（年化波動度由低到高，算法同 `max_volatility_percent`）、
+    /// `bias240`（年線乖離率由低到高，算法同 `max_bias240`）；
     /// 同值或查不到時再依相對強度分數（查不到的排最後）。`keep_rank` 的名次也依此排序。
     #[param(value_type = BacktestRankByValue, inline)]
     pub(crate) rank_by: Option<String>,
@@ -331,6 +334,11 @@ pub(crate) struct ScreenBacktestParams {
     /// beta 上限（-5–5；只用於新買進）：同一段日漲跌幅對加權指數日報酬的迴歸斜率；資料不足的不會通過。
     #[param(minimum = -5.0, maximum = 5.0)]
     pub(crate) max_beta: Option<f64>,
+    /// 年線乖離率上限（%，-90–100；只用於新買進）：換股當天收盤相對 240 日均線的乖離（收盤 ÷ 年線 − 1），
+    /// 例如 -15 只選跌破年線 15% 以上的股票（均值回歸，建議搭配 `min_f_score` 或 `min_roe_percent` 避開體質變差的）；
+    /// 年線用未還原收盤計算，除權息後乖離會偏低；上市未滿一年沒有年線、不會通過。
+    #[param(minimum = -90.0, maximum = 100.0)]
+    pub(crate) max_bias240: Option<f64>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

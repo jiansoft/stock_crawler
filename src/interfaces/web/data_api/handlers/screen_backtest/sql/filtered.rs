@@ -7,7 +7,7 @@ macro_rules! filtered_cte {
         concat!(
             r#"filtered AS (
     SELECT u.date, u.liquidity_start, u.stock_symbol, u.rs_score, u.rs_rank, u.ret, u.stock_industry_id,
-           rv.revenue_yoy::float8 AS revenue_yoy, ym.operating_margin, qv.pe, qv.pb,
+           rv.revenue_yoy::float8 AS revenue_yoy, ym.operating_margin, qv.pe, qv.pb, qv.bias240,
            CASE WHEN qv.close > 0 AND qv.close * mi.shares + mi.net_debt > 0
                THEN mi.ebit_ttm / (qv.close * mi.shares + mi.net_debt) END AS earnings_yield,
            CASE WHEN mi.capital > 0 THEN mi.ebit_ttm / mi.capital END AS return_on_capital,
@@ -205,10 +205,14 @@ macro_rules! filtered_cte {
     LEFT JOIN LATERAL (
         SELECT CASE WHEN q."PriceEarningRatio" > 0 THEN q."PriceEarningRatio"::float8 END AS pe,
                CASE WHEN q."price-to-book_ratio" > 0 THEN q."price-to-book_ratio"::float8 END AS pb,
-               q."ClosingPrice"::float8 AS close
+               q."ClosingPrice"::float8 AS close,
+               -- 年線乖離率（%）：收盤相對 240 日均線；年線為 0（上市未滿一年）時沒有資料。
+               CASE WHEN q."MovingAverage240" > 0
+                   THEN (q."ClosingPrice" / q."MovingAverage240" - 1)::float8 * 100 END AS bias240
         FROM "DailyQuotes" q
         WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL OR $50::float8 IS NOT NULL
-               OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg'))
+               OR $53::float8 IS NOT NULL
+               OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg', 'bias240'))
           AND q.stock_symbol = u.stock_symbol
           AND q."Date" = u.date
     ) qv ON TRUE
@@ -380,7 +384,8 @@ macro_rules! filtered_cte {
       -- 包 COALESCE：嚴格比較會讓 eps_growth 的 LEFT JOIN 降成 INNER JOIN、改變連接順序。
       AND ($50::float8 IS NULL OR COALESCE(qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 AND qv.pe / eg.growth <= $50, FALSE))
       AND ($51::float8 IS NULL OR COALESCE(rk.volatility <= $51, FALSE))
-      AND ($52::float8 IS NULL OR COALESCE(rk.beta <= $52, FALSE))"#,
+      AND ($52::float8 IS NULL OR COALESCE(rk.beta <= $52, FALSE))
+      AND ($53::float8 IS NULL OR COALESCE(qv.bias240 <= $53, FALSE))"#,
             $chip_filter,
             "\n)"
         )
