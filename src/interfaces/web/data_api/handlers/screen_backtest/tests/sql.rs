@@ -65,8 +65,9 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("p.date < cur.date AND p.date >= cur.date - INTERVAL '5 years'"));
     assert!(!BACKTEST_SQL.contains("$47"));
     assert!(BACKTEST_SQL.contains("rv.revenue_accel_months >= $45"));
-    assert!(BACKTEST_SQL.contains("dv.dividend_growth_years >= $46"));
-    assert!(BACKTEST_SQL.contains("g.ex_date < make_date(EXTRACT(YEAR FROM u.date)::int, 1, 1)"));
+    assert!(BACKTEST_SQL.contains("dg.growth_years >= $46"));
+    assert!(BACKTEST_SQL.contains("),\ndividend_growth AS MATERIALIZED ("));
+    assert!(BACKTEST_SQL.contains("dg.yr = EXTRACT(YEAR FROM u.date)::int - 1"));
     assert!(BACKTEST_SQL.contains("LEAD(yoy) OVER (ORDER BY ord DESC) AS prev_yoy"));
     assert!(BACKTEST_SQL.contains(") >= $40)"));
     assert!(BACKTEST_SQL.contains("dv.dividend_yield >= $41"));

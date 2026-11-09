@@ -53,6 +53,9 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 ///   兩週的 `holder_distribution` 千張比例相減，任一週沒有該股資料就不會通過。
 /// - `revenue_records`：每檔每個月的營收是否高於之前所有月份（之前至少 12 個月），以視窗函式一次算完全表，
 ///   `filtered` 以 `rv` 的最新一月（已公布）對上；只在 `$28` 時才算（逐期逐檔掃歷史要多 5 秒以上）。
+/// - `dividend_growth`：每檔每個除息年度的股利成長年數（年度現金股利合計不低於前一年、年度相連，往回數到最近
+///   一次減少或中斷為止），以視窗函式一次算完全表；`filtered` 以換股年的前一年對上（換股年本身還沒過完，不算），
+///   前一年沒有配息就沒有資料、不會通過。只在設 `$46` 時才算（逐期逐檔重算會讓偏移掃描超過 30 秒上限）。
 /// - `filtered` 的 `ym`：已公布的最近一季 Yahoo 單季損益表（公布日規則同 `fs`）的毛利率、營業利益率，
 ///   以及毛利率、營業利益率、稅後淨利率是否都高於去年同一季（三率三升）；`bs`：同樣規則的最近一季
 ///   資產負債表負債比；`cf`：同樣規則的最近一季 Yahoo 單季現金流量表，連同之前 3 季（須四季都有自由
@@ -148,6 +151,21 @@ revenue_records AS (
     WINDOW prior AS (
         PARTITION BY "SecurityCode" ORDER BY "Date" ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
     )
+),
+dividend_growth AS MATERIALIZED (
+    SELECT stock_symbol, yr,
+           yr - MAX(yr) FILTER (WHERE NOT grew) OVER (PARTITION BY stock_symbol ORDER BY yr) AS growth_years
+    FROM (
+        SELECT stock_symbol, yr,
+               COALESCE(LAG(yr) OVER w = yr - 1 AND cash >= LAG(cash) OVER w, FALSE) AS grew
+        FROM (
+            SELECT stock_symbol, EXTRACT(YEAR FROM ex_date)::int AS yr, SUM(cash_dividend) AS cash
+            FROM dividend_fill_event
+            WHERE $46::int IS NOT NULL
+            GROUP BY 1, 2
+        ) AS yearly
+        WINDOW w AS (PARTITION BY stock_symbol ORDER BY yr)
+    ) AS flagged
 ),"#,
             $price_ctes,
             r#"

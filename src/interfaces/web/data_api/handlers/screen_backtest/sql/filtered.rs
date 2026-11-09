@@ -207,9 +207,7 @@ macro_rules! filtered_cte {
     LEFT JOIN LATERAL (
         -- 現金股利（dividend_fill_event）只用換股當天（含）以前的除息。殖利率：最近一次除息往回 350 天的現金股利
         -- ÷ 換股日收盤（最近一次除息須在 400 天內）；填息率與平均填息天數：除息日在近 5 年內、觀察期 120 個交易日
-        -- 在換股日以前已滿的事件；連續配息年數：以除息日年度計，最近一次除息的年度不早於換股年前一年；
-        -- 股利成長年數：只看換股年以前的完整年度（年度現金股利合計），從換股年前一年往回、每年不低於前一年
-        -- （年度相連）的年數。
+        -- 在換股日以前已滿的事件；連續配息年數：以除息日年度計，最近一次除息的年度不早於換股年前一年。
         SELECT
             CASE WHEN $41::float8 IS NOT NULL AND latest.ex_date > u.date - 400 THEN (
                 SELECT SUM(y.cash_dividend) FROM dividend_fill_event y
@@ -219,7 +217,7 @@ macro_rules! filtered_cte {
                 SELECT q."ClosingPrice" FROM "DailyQuotes" q
                 WHERE q.stock_symbol = u.stock_symbol AND q."Date" = u.date
             ), 0)::float8 END AS dividend_yield,
-            fill.fill_rate, fill.avg_fill_days, streak.dividend_years, growth.dividend_growth_years
+            fill.fill_rate, fill.avg_fill_days, streak.dividend_years
         FROM (
             SELECT MAX(l.ex_date) AS ex_date FROM dividend_fill_event l
             WHERE l.stock_symbol = u.stock_symbol AND l.ex_date <= u.date
@@ -245,25 +243,12 @@ macro_rules! filtered_cte {
                 ) years
             ) ranked
         ) streak
-        CROSS JOIN LATERAL (
-            SELECT CASE WHEN MAX(yr) >= EXTRACT(YEAR FROM u.date)::int - 1
-                        THEN (MIN(rn) FILTER (WHERE NOT grew) - 1)::int ELSE 0 END AS dividend_growth_years
-            FROM (
-                SELECT yr, ROW_NUMBER() OVER (ORDER BY yr DESC) AS rn,
-                       COALESCE(LEAD(yr) OVER (ORDER BY yr DESC) = yr - 1
-                                AND cash >= LEAD(cash) OVER (ORDER BY yr DESC), FALSE) AS grew
-                FROM (
-                    SELECT EXTRACT(YEAR FROM g.ex_date)::int AS yr, SUM(g.cash_dividend) AS cash
-                    FROM dividend_fill_event g
-                    WHERE $46::int IS NOT NULL AND g.stock_symbol = u.stock_symbol
-                      AND g.ex_date < make_date(EXTRACT(YEAR FROM u.date)::int, 1, 1)
-                    GROUP BY 1
-                ) years
-            ) ranked
-        ) growth
         WHERE $41::float8 IS NOT NULL OR $42::float8 IS NOT NULL OR $43::float8 IS NOT NULL
-           OR $44::int IS NOT NULL OR $46::int IS NOT NULL
+           OR $44::int IS NOT NULL
     ) dv ON TRUE
+    -- 股利成長年數：換股年本身還沒過完，以前一年（已完整）的成長年數判斷。
+    LEFT JOIN dividend_growth dg
+           ON dg.stock_symbol = u.stock_symbol AND dg.yr = EXTRACT(YEAR FROM u.date)::int - 1
     LEFT JOIN holder_rebal hr ON hr.date = u.date
     LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
     LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
@@ -318,7 +303,7 @@ macro_rules! filtered_cte {
       AND ($43::float8 IS NULL OR dv.avg_fill_days <= $43)
       AND ($44::int IS NULL OR dv.dividend_years >= $44)
       AND ($45::smallint IS NULL OR rv.revenue_accel_months >= $45)
-      AND ($46::int IS NULL OR dv.dividend_growth_years >= $46)"#,
+      AND ($46::int IS NULL OR dg.growth_years >= $46)"#,
             $chip_filter,
             "\n)"
         )
