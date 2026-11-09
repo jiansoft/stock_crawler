@@ -58,6 +58,10 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) max_margin_change_percent: Option<Decimal>,
     /// PEG 上限。
     pub(super) max_peg: Option<Decimal>,
+    /// 年化波動度上限（%）。
+    pub(super) max_volatility_percent: Option<Decimal>,
+    /// beta 上限。
+    pub(super) max_beta: Option<Decimal>,
     /// 最近幾個交易日內出現區間突破（且還沒跌回）。
     pub(super) range_breakout_days: Option<i64>,
     /// 最低單季 EPS 年增率。
@@ -72,7 +76,7 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) max_avg_fill_days: Option<Decimal>,
     /// 連續配息年數下限。
     pub(super) min_dividend_years: Option<i32>,
-    /// 四十個固定排序分支之一。
+    /// 四十四個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,
@@ -239,6 +243,13 @@ pub(super) fn validate_screening_params(
         "max_margin_change_percent 必須介於 -100 至 1000",
     )?;
     let max_peg = decimal_in_range(params.max_peg, 0.01, 10.0, "max_peg 必須介於 0.01 至 10")?;
+    let max_volatility_percent = decimal_in_range(
+        params.max_volatility_percent,
+        1.0,
+        200.0,
+        "max_volatility_percent 必須介於 1 至 200",
+    )?;
+    let max_beta = decimal_in_range(params.max_beta, -5.0, 5.0, "max_beta 必須介於 -5 至 5")?;
     let major_change_weeks = params
         .major_change_weeks
         .unwrap_or(super::super::DEFAULT_MAJOR_CHANGE_WEEKS);
@@ -345,6 +356,8 @@ pub(super) fn validate_screening_params(
         || params.min_holder_400_change.is_some()
         || params.max_margin_change_percent.is_some()
         || params.max_peg.is_some()
+        || params.max_volatility_percent.is_some()
+        || params.max_beta.is_some()
         // 依神奇公式或 PEG 排序本身就是全市場排行（沒有資料的排最後），不必另設條件。
         || matches!(params.sort_by.as_deref(), Some("magic_formula" | "peg"));
     if !has_filter {
@@ -375,6 +388,8 @@ pub(super) fn validate_screening_params(
         min_holder_400_change,
         max_margin_change_percent,
         max_peg,
+        max_volatility_percent,
+        max_beta,
         range_breakout_days: params.range_breakout_days.map(i64::from),
         min_eps_yoy_percent,
         min_annual_eps_growth_percent,

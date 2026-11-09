@@ -134,6 +134,10 @@ pub(super) struct ScreenedStockRow {
     invested_capital: Option<Decimal>,
     /// 企業價值（千元）。
     enterprise_value: Option<Decimal>,
+    /// 年化波動度（%）。
+    volatility_percent: Option<Decimal>,
+    /// beta。
+    beta: Option<Decimal>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -308,6 +312,12 @@ impl From<ScreenedStockRow> for ScreenedStock {
                 &symbol,
                 "enterprise_value",
             ),
+            volatility_percent: analytical_decimal_to_f64(
+                row.volatility_percent,
+                &symbol,
+                "volatility_percent",
+            ),
+            beta: analytical_decimal_to_f64(row.beta, &symbol, "beta"),
         }
     }
 }

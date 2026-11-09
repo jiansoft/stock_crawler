@@ -12,7 +12,8 @@ macro_rules! filtered_cte {
                THEN mi.ebit_ttm / (qv.close * mi.shares + mi.net_debt) END AS earnings_yield,
            CASE WHEN mi.capital > 0 THEN mi.ebit_ttm / mi.capital END AS return_on_capital,
            -- 成長率超過 100%（多為低基期轉盈）時 PEG 失真，不計算。
-           CASE WHEN qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 THEN qv.pe / eg.growth END AS peg,"#,
+           CASE WHEN qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 THEN qv.pe / eg.growth END AS peg,
+           rk.volatility,"#,
             $chip_columns,
             r#"
     FROM universe u
@@ -309,6 +310,15 @@ macro_rules! filtered_cte {
     ) pq
     LEFT JOIN magic_inputs mi ON mi.stock_symbol = u.stock_symbol AND mi.ord = pq.ord
     LEFT JOIN eps_growth eg ON eg.stock_symbol = u.stock_symbol AND eg.ord = pq.ord
+    LEFT JOIN LATERAL (
+        -- 低波動：換股當天收盤後的風險指標（近 240 筆日線，與收盤買進同一時點）；只在設 `$51`／`$52` 或依低波動
+        -- 排序時才查（主鍵查詢）。
+        SELECT r.volatility_percent::float8 AS volatility, r.beta::float8 AS beta
+        FROM daily_risk_metric r
+        WHERE ($51::float8 IS NOT NULL OR $52::float8 IS NOT NULL OR $16::text = 'low_volatility')
+          AND r.date = u.date
+          AND r.stock_symbol = u.stock_symbol
+    ) rk ON TRUE
     LEFT JOIN holder_rebal hr ON hr.date = u.date
     LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
     LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
@@ -368,7 +378,9 @@ macro_rules! filtered_cte {
       AND (NOT $47::bool OR tt.passed IS TRUE)
       AND ($49::float8 IS NULL OR mg.margin_change <= $49)
       -- 包 COALESCE：嚴格比較會讓 eps_growth 的 LEFT JOIN 降成 INNER JOIN、改變連接順序。
-      AND ($50::float8 IS NULL OR COALESCE(qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 AND qv.pe / eg.growth <= $50, FALSE))"#,
+      AND ($50::float8 IS NULL OR COALESCE(qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 AND qv.pe / eg.growth <= $50, FALSE))
+      AND ($51::float8 IS NULL OR COALESCE(rk.volatility <= $51, FALSE))
+      AND ($52::float8 IS NULL OR COALESCE(rk.beta <= $52, FALSE))"#,
             $chip_filter,
             "\n)"
         )

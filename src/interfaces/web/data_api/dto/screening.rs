@@ -66,6 +66,10 @@ pub(crate) enum StockScreenSortValue {
     MagicFormula,
     /// PEG（本益比 ÷ 近四季 EPS 成長率）。
     Peg,
+    /// 近 240 筆日線的年化波動度。
+    Volatility,
+    /// 對加權指數的 beta。
+    Beta,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -220,6 +224,10 @@ pub(crate) struct ScreenedStock {
     pub(crate) invested_capital: Option<f64>,
     /// 盈餘殖利率的分母：企業價值 = 收盤 × 發行股數 + 有息負債 − 現金（千元）。
     pub(crate) enterprise_value: Option<f64>,
+    /// 年化波動度（%）：查詢日前 10 天內最新一筆、近 240 筆日線漲跌幅的樣本標準差 × √240；資料不足 200 筆時為 `null`。
+    pub(crate) volatility_percent: Option<f64>,
+    /// 對加權指數的 beta（同一段日漲跌幅對加權指數日報酬的迴歸斜率）；資料不足時為 `null`。
+    pub(crate) beta: Option<f64>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -239,7 +247,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的四十個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的四十四個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -337,6 +345,12 @@ pub(crate) struct StockScreeningParams {
     /// `eps_ttm_growth_percent`。
     #[param(minimum = 0.01, maximum = 10.0)]
     pub(crate) max_peg: Option<f64>,
+    /// 年化波動度上限（%，1–200）：近 240 筆日線漲跌幅的樣本標準差 × √240；每檔附 `volatility_percent`。
+    #[param(minimum = 1, maximum = 200)]
+    pub(crate) max_volatility_percent: Option<f64>,
+    /// beta 上限（-5–5）：近 240 筆日線對加權指數的 beta；每檔附 `beta`。
+    #[param(minimum = -5, maximum = 5)]
+    pub(crate) max_beta: Option<f64>,
     /// 只留最近 N 個交易日（含查詢日，1–20）出現區間突破（`range_breakout`／`breakout`）、且突破後還沒
     /// 跌回突破價（沒有 `failed`）的股票；回應附最近一次突破的日期與說明。2019 年起回測單獨依區間突破
     /// 選股明顯輸 0050，只供參考。

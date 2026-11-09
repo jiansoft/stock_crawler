@@ -320,6 +320,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_margin_change_percent: Option<f64>,
     /// PEG 上限；未篩選為 `null`。
     pub(crate) max_peg: Option<f64>,
+    /// 年化波動度上限（%）；未篩選為 `null`。
+    pub(crate) max_volatility_percent: Option<f64>,
+    /// beta 上限；未篩選為 `null`。
+    pub(crate) max_beta: Option<f64>,
     /// 營收加速月數下限；未篩選為 `null`。
     pub(crate) min_revenue_acceleration_months: Option<u8>,
     /// 訊號來源；未篩選為 `null`。
