@@ -106,6 +106,7 @@ fn major_change_period_needs_enough_history() {
 }
 
 /// 四種回測 SQL 都只看日期早於換股日的資料週，並以往前第 `$36` 週相減；籌碼條件改用 `$50`／`$51`。
+/// `holder_rebal` 要 `MATERIALIZED`、比較要包 `COALESCE`，避免 LEFT JOIN 被降級後整條管線依換股期數重跑。
 #[test]
 fn backtest_sql_uses_only_published_holder_weeks() {
     for sql in [
@@ -117,7 +118,11 @@ fn backtest_sql_uses_only_published_holder_weeks() {
         assert!(sql.contains(r#"WHERE "date" < rb.date"#));
         assert!(sql.contains("bw.wk = cw.wk - $36::int"));
         assert!(sql.contains(r#"cw."date" >= rb.date - 14"#));
-        assert!(sql.contains("(hc.major_percent - hb.major_percent)::float8 >= $35"));
+        assert!(sql.contains("holder_rebal AS MATERIALIZED ("));
+        assert!(
+            sql.contains("COALESCE((hc.major_percent - hb.major_percent)::float8 >= $35, FALSE)")
+        );
+        assert!(sql.contains("COALESCE((hc.percent_400 - hb.percent_400)::float8 >= $48, FALSE)"));
     }
     assert!(!BACKTEST_SQL.contains("$50"));
 }

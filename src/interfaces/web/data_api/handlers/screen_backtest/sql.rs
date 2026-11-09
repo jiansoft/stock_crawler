@@ -52,7 +52,10 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// - `holder_weeks`／`holder_rebal`：只在設 `$35` 或 `$48` 時才算。`holder_weeks` 是 `holder_distribution` 的全部資料週
 ///   依日期編號；`holder_rebal` 為每個換股日取日期早於換股日的最近一週（集保週五的資料週六才公布，換股
 ///   當天還看不到），以及它往前第 `$36` 週。最近一週距換股日超過 14 天時該期沒有大戶資料。`filtered` 以
-///   兩週的 `holder_distribution` 千張比例相減，任一週沒有該股資料就不會通過。
+///   兩週的 `holder_distribution` 千張比例相減，任一週沒有該股資料就不會通過。`holder_rebal` 固定
+///   `MATERIALIZED`、`filtered` 的比較包 `COALESCE(…, FALSE)`：否則嚴格比較會讓 LEFT JOIN 降成 INNER
+///   JOIN，planner 把估成 1 列的 `holder_rebal` 放外層，整條 universe 管線依換股期數重跑（正式庫單次
+///   8 秒、偏移掃描逾時）。
 /// - `revenue_records`：每檔每個月的營收是否高於之前所有月份（之前至少 12 個月），以視窗函式一次算完全表，
 ///   `filtered` 以 `rv` 的最新一月（已公布）對上；只在 `$28` 時才算（逐期逐檔掃歷史要多 5 秒以上）。
 /// - `dividend_growth`：每檔每個除息年度的股利成長年數（年度現金股利合計不低於前一年、年度相連，往回數到最近
@@ -139,7 +142,7 @@ holder_weeks AS (
         WHERE $35::float8 IS NOT NULL OR $48::float8 IS NOT NULL
     ) AS weeks
 ),
-holder_rebal AS (
+holder_rebal AS MATERIALIZED (
     SELECT rb.date, cw."date" AS cur_week, bw."date" AS base_week
     FROM rebal rb
     CROSS JOIN LATERAL (
