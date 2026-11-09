@@ -18,6 +18,8 @@ pub mod forward_return;
 pub mod money_history;
 /// 收盤後寫入每日相對強度（`daily_relative_strength`）。
 pub mod relative_strength;
+/// 收盤後寫入每日風險指標（`daily_risk_metric`：年化波動度與 beta）。
+pub mod risk_metric;
 /// 收盤後全市場技術訊號
 pub mod technical_signal;
 /// 持股未來已公告的除權息與預估入帳
