@@ -95,7 +95,7 @@ impl<'a> Backtest<'a> {
         let rank_by = params.rank_by.as_deref().unwrap_or(RANK_BY[0]);
         if !RANK_BY.contains(&rank_by) {
             return Err(unprocessable(
-                "rank_by 必須為 rs_score、trade_value、foreign_streak、trust_streak、revenue_yoy、operating_margin、pe_ratio、pb_ratio、magic_formula、peg 或 low_volatility",
+                "rank_by 必須為 rs_score、trade_value、foreign_streak、trust_streak、revenue_yoy、operating_margin、pe_ratio、pb_ratio、magic_formula、peg、low_volatility 或 bias240",
             ));
         }
         let Some(weighting) = Weighting::parse(params.weighting.as_deref().unwrap_or("equal"))

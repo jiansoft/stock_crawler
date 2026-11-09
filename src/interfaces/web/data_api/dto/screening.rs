@@ -70,6 +70,8 @@ pub(crate) enum StockScreenSortValue {
     Volatility,
     /// 對加權指數的 beta。
     Beta,
+    /// 年線乖離率（`asc` 為跌得最深的排前面）。
+    Bias240,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -228,6 +230,8 @@ pub(crate) struct ScreenedStock {
     pub(crate) volatility_percent: Option<f64>,
     /// 對加權指數的 beta（同一段日漲跌幅對加權指數日報酬的迴歸斜率）；資料不足時為 `null`。
     pub(crate) beta: Option<f64>,
+    /// 年線乖離率（%）：同一筆日線收盤 ÷ 240 日均線 − 1；年線用未還原收盤計算，上市未滿一年時為 `null`。
+    pub(crate) bias240_percent: Option<f64>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -247,7 +251,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的四十四個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的四十六個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -351,6 +355,10 @@ pub(crate) struct StockScreeningParams {
     /// beta 上限（-5–5）：近 240 筆日線對加權指數的 beta；每檔附 `beta`。
     #[param(minimum = -5, maximum = 5)]
     pub(crate) max_beta: Option<f64>,
+    /// 年線乖離率上限（%，-90–100）：收盤相對 240 日均線，例如 -15 只留跌破年線 15% 以上的股票（均值回歸）；
+    /// 每檔附 `bias240_percent`。單獨使用或 `sort_by=bias240` 皆算篩選條件。
+    #[param(minimum = -90, maximum = 100)]
+    pub(crate) max_bias240: Option<f64>,
     /// 只留最近 N 個交易日（含查詢日，1–20）出現區間突破（`range_breakout`／`breakout`）、且突破後還沒
     /// 跌回突破價（沒有 `failed`）的股票；回應附最近一次突破的日期與說明。2019 年起回測單獨依區間突破
     /// 選股明顯輸 0050，只供參考。

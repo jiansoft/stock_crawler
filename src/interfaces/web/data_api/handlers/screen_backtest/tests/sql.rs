@@ -54,7 +54,9 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("$32::float8 IS NULL OR qv.pb <= $32"));
     assert!(BACKTEST_SQL.contains("CASE WHEN q.\"PriceEarningRatio\" > 0 THEN"));
     assert!(
-        BACKTEST_SQL.contains("OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg')")
+        BACKTEST_SQL.contains(
+            "OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg', 'bias240')"
+        )
     );
     // PEG：8 季相連、前四季合計 > 0；條件包 COALESCE，與神奇公式對上同一個已公布的季。
     assert!(BACKTEST_SQL.contains("eps_growth AS MATERIALIZED ("));
@@ -74,6 +76,12 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("COALESCE(rk.volatility <= $51, FALSE)"));
     assert!(BACKTEST_SQL.contains("COALESCE(rk.beta <= $52, FALSE)"));
     assert!(BACKTEST_SQL.contains("WHEN 'low_volatility' THEN -volatility"));
+    // 均值回歸：年線乖離率與換股當天本益比同一筆日線，條件包 COALESCE。
+    assert!(BACKTEST_SQL.contains(
+        "(q.\"ClosingPrice\" / q.\"MovingAverage240\" - 1)::float8 * 100 END AS bias240"
+    ));
+    assert!(BACKTEST_SQL.contains("COALESCE(qv.bias240 <= $53, FALSE)"));
+    assert!(BACKTEST_SQL.contains("WHEN 'bias240' THEN -bias240"));
     // 神奇公式：只算起日前兩年以後、四季相連的營業利益；換股日對上已過法定期限的同一季。
     assert!(BACKTEST_SQL.contains("magic_inputs AS MATERIALIZED ("));
     assert!(BACKTEST_SQL.contains("RANGE BETWEEN 3 PRECEDING AND CURRENT ROW"));
@@ -93,7 +101,7 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("LEFT JOIN valuation_level vl ON vl.date = b.date"));
     assert!(BACKTEST_SQL.contains("h.below * 100 < $34::int * h.samples"));
     assert!(BACKTEST_SQL.contains("p.date < cur.date AND p.date >= cur.date - INTERVAL '5 years'"));
-    assert!(!BACKTEST_SQL.contains("$53"));
+    assert!(!BACKTEST_SQL.contains("$54"));
     assert!(BACKTEST_SQL.contains("(hc.percent_400 - hb.percent_400)::float8 >= $48"));
     assert!(BACKTEST_SQL.contains("mg.margin_change <= $49"));
     assert!(BACKTEST_SQL.contains("OFFSET 19"));
@@ -130,9 +138,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH RECURSIVE\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\nday_scan AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $53"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $54"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$55"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $54"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $55"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$56"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     assert!(BACKTEST_SQL.contains("rs_score DESC, rs_rank ASC, stock_symbol"));

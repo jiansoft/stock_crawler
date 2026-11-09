@@ -138,6 +138,8 @@ pub(super) struct ScreenedStockRow {
     volatility_percent: Option<Decimal>,
     /// beta。
     beta: Option<Decimal>,
+    /// 年線乖離率（%）。
+    bias240_percent: Option<Decimal>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -318,6 +320,11 @@ impl From<ScreenedStockRow> for ScreenedStock {
                 "volatility_percent",
             ),
             beta: analytical_decimal_to_f64(row.beta, &symbol, "beta"),
+            bias240_percent: analytical_decimal_to_f64(
+                row.bias240_percent,
+                &symbol,
+                "bias240_percent",
+            ),
         }
     }
 }

@@ -27,25 +27,6 @@ async fn seed_risks(pool: &sqlx::PgPool) {
     }
 }
 
-/// 回傳每期持股代號（排序後），比較不受相對強度名次影響。
-fn holdings(json: &serde_json::Value) -> Vec<Vec<String>> {
-    json["periods"]
-        .as_array()
-        .expect("periods")
-        .iter()
-        .map(|period| {
-            let mut symbols: Vec<String> = period["symbols"]
-                .as_array()
-                .expect("symbols")
-                .iter()
-                .filter_map(|symbol| symbol.as_str().map(str::to_owned))
-                .collect();
-            symbols.sort();
-            symbols
-        })
-        .collect()
-}
-
 /// 年化波動度 ≤ 25 只留 BA；beta ≤ 1 留 BA、BC；依低波動排序兩期都是 BA、BC、BB（與預設依相對強度不同）；
 /// 超出範圍回 422。
 #[tokio::test]
