@@ -15,6 +15,7 @@ mod magic_formula;
 mod major;
 mod margins;
 mod offsets;
+mod peg;
 mod periods;
 mod presets;
 mod ranking;

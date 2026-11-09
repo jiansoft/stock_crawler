@@ -10,7 +10,8 @@ macro_rules! filtered_cte {
            rv.revenue_yoy::float8 AS revenue_yoy, ym.operating_margin, qv.pe, qv.pb,
            CASE WHEN qv.close > 0 AND qv.close * mi.shares + mi.net_debt > 0
                THEN mi.ebit_ttm / (qv.close * mi.shares + mi.net_debt) END AS earnings_yield,
-           CASE WHEN mi.capital > 0 THEN mi.ebit_ttm / mi.capital END AS return_on_capital,"#,
+           CASE WHEN mi.capital > 0 THEN mi.ebit_ttm / mi.capital END AS return_on_capital,
+           CASE WHEN qv.pe > 0 AND eg.growth > 0 THEN qv.pe / eg.growth END AS peg,"#,
             $chip_columns,
             r#"
     FROM universe u
@@ -204,8 +205,8 @@ macro_rules! filtered_cte {
                CASE WHEN q."price-to-book_ratio" > 0 THEN q."price-to-book_ratio"::float8 END AS pb,
                q."ClosingPrice"::float8 AS close
         FROM "DailyQuotes" q
-        WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL
-               OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula'))
+        WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL OR $50::float8 IS NOT NULL
+               OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg'))
           AND q.stock_symbol = u.stock_symbol
           AND q."Date" = u.date
     ) qv ON TRUE
@@ -294,16 +295,19 @@ macro_rules! filtered_cte {
     -- 股利成長年數：換股年本身還沒過完，以前一年（已完整）的成長年數判斷。
     LEFT JOIN dividend_growth dg
            ON dg.stock_symbol = u.stock_symbol AND dg.yr = EXTRACT(YEAR FROM u.date)::int - 1
-    -- 神奇公式：換股日已過法定期限的最近一季（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1；所有股票同一季）。
-    LEFT JOIN magic_inputs mi
-           ON mi.stock_symbol = u.stock_symbol
-          AND mi.ord = EXTRACT(YEAR FROM u.date)::int * 4 + CASE
-                  WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 11, 15) THEN 3
-                  WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 8, 15) THEN 2
-                  WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 5, 16) THEN 1
-                  WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 4, 1) THEN 0
-                  ELSE -1
-              END
+    -- 換股日已過法定期限的最近一季（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1；所有股票同一季），`ord` = 年 × 4 + 季；
+    -- 神奇公式與 PEG 都對上這一季。
+    CROSS JOIN LATERAL (
+        SELECT EXTRACT(YEAR FROM u.date)::int * 4 + CASE
+                   WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 11, 15) THEN 3
+                   WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 8, 15) THEN 2
+                   WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 5, 16) THEN 1
+                   WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 4, 1) THEN 0
+                   ELSE -1
+               END AS ord
+    ) pq
+    LEFT JOIN magic_inputs mi ON mi.stock_symbol = u.stock_symbol AND mi.ord = pq.ord
+    LEFT JOIN eps_growth eg ON eg.stock_symbol = u.stock_symbol AND eg.ord = pq.ord
     LEFT JOIN holder_rebal hr ON hr.date = u.date
     LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
     LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
@@ -361,7 +365,9 @@ macro_rules! filtered_cte {
       AND ($45::smallint IS NULL OR rv.revenue_accel_months >= $45)
       AND ($46::int IS NULL OR dg.growth_years >= $46)
       AND (NOT $47::bool OR tt.passed IS TRUE)
-      AND ($49::float8 IS NULL OR mg.margin_change <= $49)"#,
+      AND ($49::float8 IS NULL OR mg.margin_change <= $49)
+      -- 包 COALESCE：嚴格比較會讓 eps_growth 的 LEFT JOIN 降成 INNER JOIN、改變連接順序。
+      AND ($50::float8 IS NULL OR COALESCE(qv.pe > 0 AND eg.growth > 0 AND qv.pe / eg.growth <= $50, FALSE))"#,
             $chip_filter,
             "\n)"
         )

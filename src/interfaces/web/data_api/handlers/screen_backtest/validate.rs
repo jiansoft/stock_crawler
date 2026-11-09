@@ -52,6 +52,9 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     if !within(params.max_margin_change_percent, -100.0, 1000.0) {
         return Err("max_margin_change_percent 必須介於 -100 至 1000");
     }
+    if !within(params.max_peg, 0.01, 10.0) {
+        return Err("max_peg 必須介於 0.01 至 10");
+    }
     if params
         .major_change_weeks
         .is_some_and(|weeks| !(1..=12).contains(&weeks))

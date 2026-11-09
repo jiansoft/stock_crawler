@@ -29,8 +29,8 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// 下限、`$39` 創 52 週新高的回看日曆天數、`$40` F 分數下限、`$41` 現金殖利率下限、`$42` 近 5 年填息率下限、
 /// `$43` 平均填息天數上限、`$44` 連續配息年數下限、
 /// `$45` 營收加速月數下限、`$46` 股利成長年數下限（皆 `NULL` 為不篩）、`$47` 是否只選符合 Minervini 趨勢模板、
-/// `$48` 400 張以上大戶持股比例變化下限（回看週數同 `$36`）、`$49` 融資餘額變化上限（皆 `NULL` 為不篩）；
-/// 籌碼版另有 `$50`／`$51`。
+/// `$48` 400 張以上大戶持股比例變化下限（回看週數同 `$36`）、`$49` 融資餘額變化上限、`$50` PEG 上限（皆 `NULL`
+/// 為不篩）；籌碼版另有 `$51`／`$52`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號；往後多讀 400 個日曆天，
 ///   計算最後幾期是否在迄日（`$2`）前完成出場）。由 `day_scan` 沿主鍵 `(date, stock_symbol)` 逐日跳到下一個
@@ -69,6 +69,9 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 ///   `magic_formula` 時才算（只算起日前兩年以後的季度）；`filtered` 以換股日已過法定期限的最近一季（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年
 ///   4/1，所有股票同一季）對上，算出盈餘殖利率（EBIT ÷（換股日收盤 × 股數 + 淨負債））與資本報酬率
 ///   （EBIT ÷ 資本），企業價值或資本 ≤ 0 時為 NULL。
+/// - `eps_growth`：每檔每季（`ord` 同上）截至該季的近四季 Yahoo 單季 EPS 合計對前四季合計的成長率（%），須 8 季
+///   相連、前四季合計 > 0。只在設 `$50` 或依 `peg` 排序時才算（起日前三年以後的季度）；`filtered` 以同一個已公布
+///   的季（`pq`）對上，PEG = 換股當天官方本益比 ÷ 成長率，虧損（本益比為 0）或成長率 ≤ 0 時為 NULL。
 /// - `filtered` 的 `ym`：已公布的最近一季 Yahoo 單季損益表（公布日規則同 `fs`）的毛利率、營業利益率，
 ///   以及毛利率、營業利益率、稅後淨利率是否都高於去年同一季（三率三升）；`bs`：同樣規則的最近一季
 ///   資產負債表負債比；`cf`：同樣規則的最近一季 Yahoo 單季現金流量表，連同之前 3 季（須四季都有自由
@@ -80,7 +83,7 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 ///   加權時，才對這些股票逐檔查 `liquidity_start`～換股日的平均成交金額（`trade_value`）。
 /// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
 ///   成交金額或法人連續買超天數，本益比與股價淨值比由低到高；`magic_formula` 為同一換股日兩者都有資料的股票
-///   中盈餘殖利率名次 + 資本報酬率名次由小到大，沒有資料的排最後；同值再依相對強度分數與名次 `rs_rank`）的前 `$5` 檔與各自的報酬、產業編號、平均成交
+///   中盈餘殖利率名次 + 資本報酬率名次由小到大，`peg` 為 PEG 由低到高，沒有資料的排最後；同值再依相對強度分數與名次 `rs_rank`）的前 `$5` 檔與各自的報酬、產業編號、平均成交
 ///   金額；實際持股由 [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
 ///   不查平均成交金額：這份名單動輒數萬列，實際續抱的只有每期幾檔，改由 [`HOLD_TRADE_VALUES_SQL`] 在
@@ -228,6 +231,27 @@ magic_inputs AS MATERIALIZED (
       AND b.current_liabilities > 0
       AND b.property_plant_equipment IS NOT NULL
       AND b.share_capital > 0
+),
+eps_growth AS MATERIALIZED (
+    SELECT stock_symbol, ord,
+           CASE WHEN quarters = 8 AND prev_ttm > 0 THEN ((ttm / prev_ttm - 1) * 100)::float8 END AS growth
+    FROM (
+        SELECT stock_symbol, fiscal_year * 4 + SUBSTRING(quarter FROM 2)::int AS ord,
+               SUM(eps) OVER recent AS ttm,
+               SUM(eps) OVER previous AS prev_ttm,
+               COUNT(eps) OVER eight AS quarters
+        FROM income_statement
+        WHERE ($50::float8 IS NOT NULL OR $16::text = 'peg')
+          AND source = 'yahoo'
+          AND period_type = 'single'
+          AND fiscal_year >= EXTRACT(YEAR FROM $1::date)::int - 3
+        WINDOW by_quarter AS (
+                   PARTITION BY stock_symbol ORDER BY fiscal_year * 4 + SUBSTRING(quarter FROM 2)::int
+               ),
+               recent AS (by_quarter RANGE BETWEEN 3 PRECEDING AND CURRENT ROW),
+               previous AS (by_quarter RANGE BETWEEN 7 PRECEDING AND 4 PRECEDING),
+               eight AS (by_quarter RANGE BETWEEN 7 PRECEDING AND CURRENT ROW)
+    ) AS rolling
 ),"#,
             $price_ctes,
             r#"
@@ -282,6 +306,7 @@ picks AS (
                             WHEN 'pe_ratio' THEN -pe
                             WHEN 'pb_ratio' THEN -pb
                             WHEN 'magic_formula' THEN -magic_rank::float8
+                            WHEN 'peg' THEN -peg
                         END DESC NULLS LAST,
                         "#, rs_rank_order!(), r#"
            ) AS pick_rank
@@ -434,7 +459,7 @@ rebal_quotes AS MATERIALIZED (
     };
 }
 
-/// 籌碼版的 CTE 與條件（外資 `$50`、投信 `$51`）。
+/// 籌碼版的 CTE 與條件（外資 `$51`、投信 `$52`）。
 macro_rules! backtest_with_chip_sql_for {
     ($model:ident) => {
         concat!(
@@ -445,7 +470,7 @@ macro_rules! backtest_with_chip_sql_for {
                 $model,
                 "",
                 "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-                "\n      AND ($50::bigint IS NULL OR c.foreign_buy >= $50)\n      AND ($51::bigint IS NULL OR c.trust_buy >= $51)",
+                "\n      AND ($51::bigint IS NULL OR c.foreign_buy >= $51)\n      AND ($52::bigint IS NULL OR c.trust_buy >= $52)",
                 "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
             )
         )
@@ -470,7 +495,7 @@ pub(super) const BACKTEST_NEXT_OPEN_SQL: &str = backtest_sql_for!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$50`）／投信（`$51`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$51`）／投信（`$52`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = backtest_with_chip_sql_for!(close);
 

@@ -64,6 +64,8 @@ pub(crate) enum StockScreenSortValue {
     AnnualEpsGrowth,
     /// 神奇公式名次合計（`asc` 為最好的排前面）。
     MagicFormula,
+    /// PEG（本益比 ÷ 近四季 EPS 成長率）。
+    Peg,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -202,6 +204,11 @@ pub(crate) struct ScreenedStock {
     /// 神奇公式名次合計：本次篩選結果中兩個比率都有資料的股票，盈餘殖利率名次 + 資本報酬率名次（越小越好；
     /// `sort_by=magic_formula&sort_order=asc` 依此排序）。任一比率為 `null` 時為 `null`。
     pub(crate) magic_formula_rank: Option<i64>,
+    /// 近四季 EPS 成長率（%）：Yahoo 最近 8 季單季 EPS（須相連、最新一季在兩季內）的近四季合計對前四季合計；
+    /// 前四季合計 ≤ 0 時為 `null`。
+    pub(crate) eps_ttm_growth_percent: Option<f64>,
+    /// PEG = `pe_ratio` ÷ `eps_ttm_growth_percent`；虧損或成長率 ≤ 0 時為 `null`。
+    pub(crate) peg_ratio: Option<f64>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -221,7 +228,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的三十八個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的四十個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -315,6 +322,10 @@ pub(crate) struct StockScreeningParams {
     /// 融資至少減少 5%；每檔附 `margin_change_percent`。
     #[param(minimum = -100, maximum = 1000)]
     pub(crate) max_margin_change_percent: Option<f64>,
+    /// PEG 上限（0.01–10）：本益比 ÷ 近四季 EPS 成長率（%），虧損或成長率 ≤ 0 的不會通過；每檔附 `peg_ratio`、
+    /// `eps_ttm_growth_percent`。
+    #[param(minimum = 0.01, maximum = 10.0)]
+    pub(crate) max_peg: Option<f64>,
     /// 只留最近 N 個交易日（含查詢日，1–20）出現區間突破（`range_breakout`／`breakout`）、且突破後還沒
     /// 跌回突破價（沒有 `failed`）的股票；回應附最近一次突破的日期與說明。2019 年起回測單獨依區間突破
     /// 選股明顯輸 0050，只供參考。

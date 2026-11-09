@@ -56,6 +56,8 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_holder_400_change: Option<Decimal>,
     /// 融資餘額變化上限（%）。
     pub(super) max_margin_change_percent: Option<Decimal>,
+    /// PEG 上限。
+    pub(super) max_peg: Option<Decimal>,
     /// 最近幾個交易日內出現區間突破（且還沒跌回）。
     pub(super) range_breakout_days: Option<i64>,
     /// 最低單季 EPS 年增率。
@@ -70,7 +72,7 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) max_avg_fill_days: Option<Decimal>,
     /// 連續配息年數下限。
     pub(super) min_dividend_years: Option<i32>,
-    /// 三十八個固定排序分支之一。
+    /// 四十個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,
@@ -236,6 +238,7 @@ pub(super) fn validate_screening_params(
         1000.0,
         "max_margin_change_percent 必須介於 -100 至 1000",
     )?;
+    let max_peg = decimal_in_range(params.max_peg, 0.01, 10.0, "max_peg 必須介於 0.01 至 10")?;
     let major_change_weeks = params
         .major_change_weeks
         .unwrap_or(super::super::DEFAULT_MAJOR_CHANGE_WEEKS);
@@ -340,7 +343,8 @@ pub(super) fn validate_screening_params(
         || params.min_dividend_growth_years.is_some()
         || params.trend_template == Some(true)
         || params.min_holder_400_change.is_some()
-        || params.max_margin_change_percent.is_some();
+        || params.max_margin_change_percent.is_some()
+        || params.max_peg.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }
@@ -368,6 +372,7 @@ pub(super) fn validate_screening_params(
         major_change_weeks,
         min_holder_400_change,
         max_margin_change_percent,
+        max_peg,
         range_breakout_days: params.range_breakout_days.map(i64::from),
         min_eps_yoy_percent,
         min_annual_eps_growth_percent,
