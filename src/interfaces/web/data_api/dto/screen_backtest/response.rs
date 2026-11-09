@@ -310,6 +310,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_avg_fill_days: Option<f64>,
     /// 連續配息年數下限；未篩選為 `null`。
     pub(crate) min_dividend_years: Option<u8>,
+    /// 股利成長（現金股利不減少）年數下限；未篩選為 `null`。
+    pub(crate) min_dividend_growth_years: Option<u8>,
     /// 營收加速月數下限；未篩選為 `null`。
     pub(crate) min_revenue_acceleration_months: Option<u8>,
     /// 訊號來源；未篩選為 `null`。

@@ -92,6 +92,12 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
         return Err("min_dividend_years 必須介於 1 至 30");
     }
     if params
+        .min_dividend_growth_years
+        .is_some_and(|years| !(1..=30).contains(&years))
+    {
+        return Err("min_dividend_growth_years 必須介於 1 至 30");
+    }
+    if params
         .min_revenue_acceleration_months
         .is_some_and(|months| !(1..=11).contains(&months))
     {

@@ -1,4 +1,4 @@
-//! 條件選股：存股條件（近 5 年填息率、平均填息天數、連續配息年數）。
+//! 條件選股：存股條件（近 5 年填息率、平均填息天數、連續配息年數、股利成長年數）。
 
 use serde_json::json;
 
@@ -33,6 +33,20 @@ fn screening_dividend_fill_boundaries() {
         if let Ok(validated) = validated {
             assert_eq!(validated.min_dividend_years, Some(i32::from(years)));
         }
+    }
+}
+
+/// 股利成長年數的範圍邊界，且單獨即可成立篩選。
+#[test]
+fn screening_dividend_growth_boundaries() {
+    for (years, ok) in [(1, true), (30, true), (0, false), (31, false)] {
+        let mut params = screening_params();
+        params.min_dividend_growth_years = Some(years);
+        assert_eq!(
+            validate_screening_params(&params).is_ok(),
+            ok,
+            "min_dividend_growth_years {years}"
+        );
     }
 }
 
@@ -184,4 +198,135 @@ async fn screen_at_filters_dividend_fill_history() {
     assert_eq!(symbols(&fast), ["79979DA"]);
     assert_eq!(symbols(&years_2), ["79979DA", "79979DB"]);
     assert_eq!(symbols(&years_3), ["79979DA"]);
+}
+
+/// 以固定查詢日 1988-06-10 執行（只看 1987 年以前的完整年度，1988 年的除息不算）：
+/// - GA：1983 1 元、1984 1 元、1985 1.5 元、1986 兩次合計 1.5 元、1987 2 元，1988-05 0.1 元不算；4 年。
+/// - GB：1984 2 元、1985 1 元（減少）、1986 1.2 元、1987 1.5 元；2 年。
+/// - GC：1984、1985 各 1 元、1986 沒配、1987 2 元；年度不相連，0 年。
+/// - GD：1985、1986 各 1 元後停止配息（1987 年沒有）；0 年。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部 PostgreSQL，請加 --features integration-tests 執行"
+)]
+async fn screen_at_computes_dividend_growth_years() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 screen_at_computes_dividend_growth_years：無資料庫連接");
+        return;
+    }
+    let pool = database::get_connection();
+    let cleanup = || async {
+        for sql in [
+            "DELETE FROM dividend_fill_event WHERE stock_symbol LIKE '79979G_'",
+            "DELETE FROM stocks WHERE stock_symbol IN ('79979GA', '79979GB', '79979GC', '79979GD')",
+        ] {
+            let _ = sqlx::query(sql).execute(pool).await;
+        }
+    };
+    cleanup().await;
+    let events: [(&str, &[(&str, &str)]); 4] = [
+        (
+            "79979GA",
+            &[
+                ("1983-07-01", "1"),
+                ("1984-07-01", "1"),
+                ("1985-07-01", "1.5"),
+                ("1986-03-01", "0.5"),
+                ("1986-09-01", "1"),
+                ("1987-07-01", "2"),
+                ("1988-05-01", "0.1"),
+            ],
+        ),
+        (
+            "79979GB",
+            &[
+                ("1984-07-01", "2"),
+                ("1985-07-01", "1"),
+                ("1986-07-01", "1.2"),
+                ("1987-07-01", "1.5"),
+            ],
+        ),
+        (
+            "79979GC",
+            &[
+                ("1984-07-01", "1"),
+                ("1985-07-01", "1"),
+                ("1987-07-01", "2"),
+            ],
+        ),
+        ("79979GD", &[("1985-07-01", "1"), ("1986-07-01", "1")]),
+    ];
+    for (symbol, rows) in events {
+        sqlx::query(
+            r#"INSERT INTO stocks ("SecurityCode", "Name", stock_symbol, stock_exchange_market_id, stock_industry_id)
+               VALUES ($1, '股利成長', $1, 2, 1)"#,
+        )
+        .bind(symbol)
+        .execute(pool)
+        .await
+        .expect("種入股票");
+        for (ex_date, cash) in rows {
+            sqlx::query(
+                "INSERT INTO dividend_fill_event (stock_symbol, ex_date, cash_dividend)
+                 VALUES ($1, $2::date, $3::numeric)",
+            )
+            .bind(symbol)
+            .bind(ex_date)
+            .bind(cash)
+            .execute(pool)
+            .await
+            .expect("種入現金除息");
+        }
+    }
+
+    let query_date = NaiveDate::from_ymd_opt(1988, 6, 10).expect("固定日期合法");
+    let screen = |min_years: Option<u8>| async move {
+        let mut params = screening_params();
+        params.industry_id = Some(1);
+        params.limit = Some(50);
+        params.min_dividend_growth_years = min_years;
+        let validated = validate_screening_params(&params).expect("參數合法");
+        let response = screen_at(&params, validated, query_date).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body 可讀");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON 回應");
+        json["stocks"]
+            .as_array()
+            .expect("stocks 陣列")
+            .iter()
+            .filter_map(|stock| {
+                let symbol = stock["stock_symbol"].as_str()?;
+                symbol
+                    .starts_with("79979G")
+                    .then(|| (symbol.to_owned(), stock["dividend_growth_years"].clone()))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let all = screen(None).await;
+    let growth_2 = screen(Some(2)).await;
+    let growth_3 = screen(Some(3)).await;
+    cleanup().await;
+
+    assert_eq!(
+        all,
+        [
+            ("79979GA".to_owned(), json!(4)),
+            ("79979GB".to_owned(), json!(2)),
+            ("79979GC".to_owned(), json!(0)),
+            ("79979GD".to_owned(), json!(0)),
+        ]
+    );
+    assert_eq!(
+        growth_2,
+        [
+            ("79979GA".to_owned(), json!(4)),
+            ("79979GB".to_owned(), json!(2)),
+        ]
+    );
+    assert_eq!(growth_3, [("79979GA".to_owned(), json!(4))]);
 }

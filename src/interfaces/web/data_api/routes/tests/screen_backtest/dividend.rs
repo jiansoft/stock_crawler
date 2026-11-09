@@ -1,5 +1,5 @@
-//! 條件選股回測 endpoint 整合測試：存股條件（殖利率、填息率、平均填息天數、連續配息年數）只用換股當天
-//! 已經知道的除息事件。
+//! 條件選股回測 endpoint 整合測試：存股條件（殖利率、填息率、平均填息天數、連續配息年數、股利成長年數）
+//! 只用換股當天已經知道的除息事件。
 
 use super::*;
 
@@ -119,12 +119,27 @@ async fn screen_backtest_dividend_filters_use_known_events_only() {
         ]
     );
 
+    // 股利成長年數：只看 1992 年以前的完整年度。BA 1990～1992 每年 2 元為 2 年（1993-03-05 那次不算，
+    // 所以不會因為 1993 只有 1 元而歸零）、BB 只有 1992 年為 0、BC 1992 年沒配息為 0。
+    let (_, json) = query("limit=2&min_dividend_growth_years=2").await;
+    assert_eq!(json["min_dividend_growth_years"], 2);
+    assert_eq!(
+        held(&json),
+        [
+            ("1993-03-01".to_owned(), 1, Some(10.0)),
+            ("1993-03-08".to_owned(), 1, Some(3.0)),
+        ]
+    );
+    let (_, json) = query("limit=2&min_dividend_growth_years=3").await;
+    assert!(held(&json).is_empty(), "{json}");
+
     let (_, json) = query("limit=2").await;
     for field in [
         "min_dividend_yield_percent",
         "min_fill_rate_percent",
         "max_avg_fill_days",
         "min_dividend_years",
+        "min_dividend_growth_years",
     ] {
         assert!(json[field].is_null(), "{field}: {json}");
     }
@@ -133,6 +148,8 @@ async fn screen_backtest_dividend_filters_use_known_events_only() {
         "min_fill_rate_percent=-1",
         "max_avg_fill_days=0",
         "min_dividend_years=31",
+        "min_dividend_growth_years=0",
+        "min_dividend_growth_years=31",
     ] {
         let (status, json) = query(extra).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{extra}: {json}");
