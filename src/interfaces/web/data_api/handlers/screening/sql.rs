@@ -37,7 +37,8 @@
 /// 神奇公式（Greenblatt）：Yahoo 最新一季資產負債表與截至該季的近四季單季營業利益（EBIT，四季須相連），新鮮度同
 /// 三率（兩季內）。盈餘殖利率 = EBIT ÷（`pv` 收盤 × 股數 + 淨負債），資本報酬率 = EBIT ÷（max(淨營運資金, 0) +
 /// 不動產廠房設備），算法同回測 `magic_inputs`；`magic_formula_rank` 是篩選後兩者都有資料的股票中兩個名次相加
-/// （越小越好），供 `sort_by=magic_formula`。
+/// （越小越好），`magic_formula_ranked_count` 是排名的母體檔數，供 `sort_by=magic_formula`；另附算式的分子分母
+/// （近四季營業利益、投入資本、企業價值，千元）。
 /// PEG：Yahoo 最近 8 季單季 EPS（須相連）的近四季合計對前四季合計成長率（%，新鮮度同三率、前四季合計須 > 0），
 /// `peg_ratio` = `pv` 本益比 ÷ 成長率（虧損或成長率 ≤ 0 時為 NULL），`$51` 為上限；供 `sort_by=peg`。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
@@ -523,6 +524,19 @@ WITH latest AS (
           THEN ROUND(ebit_ttm * 100 / magic_capital, 2)
         END AS return_on_capital_percent,
         CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (magic_year * 4 + magic_quarter)) BETWEEN 0 AND 2
+          THEN ebit_ttm::numeric END AS operating_income_ttm,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (magic_year * 4 + magic_quarter)) BETWEEN 0 AND 2
+          THEN magic_capital::numeric END AS invested_capital,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (magic_year * 4 + magic_quarter)) BETWEEN 0 AND 2
+          AND close_price > 0
+          THEN ROUND(close_price * magic_shares + magic_net_debt) END AS enterprise_value,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
                 + EXTRACT(QUARTER FROM $3::date)::int) - eps_ord) BETWEEN 0 AND 2
           AND prev_ttm_eps > 0
           THEN ROUND((ttm_eps / prev_ttm_eps - 1) * 100, 2)
@@ -559,7 +573,11 @@ SELECT
                      ORDER BY earnings_yield_percent DESC)
         + RANK() OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL
                        ORDER BY return_on_capital_percent DESC)
-    END AS magic_formula_rank
+    END AS magic_formula_rank,
+    CASE WHEN earnings_yield_percent IS NOT NULL AND return_on_capital_percent IS NOT NULL THEN
+        COUNT(*) OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL)
+    END AS magic_formula_ranked_count,
+    operating_income_ttm, invested_capital, enterprise_value
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol

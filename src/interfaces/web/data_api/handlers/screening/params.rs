@@ -344,7 +344,9 @@ pub(super) fn validate_screening_params(
         || params.trend_template == Some(true)
         || params.min_holder_400_change.is_some()
         || params.max_margin_change_percent.is_some()
-        || params.max_peg.is_some();
+        || params.max_peg.is_some()
+        // 依神奇公式或 PEG 排序本身就是全市場排行（沒有資料的排最後），不必另設條件。
+        || matches!(params.sort_by.as_deref(), Some("magic_formula" | "peg"));
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }

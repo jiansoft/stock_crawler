@@ -126,6 +126,14 @@ pub(super) struct ScreenedStockRow {
     eps_ttm_growth_percent: Option<Decimal>,
     /// PEG。
     peg_ratio: Option<Decimal>,
+    /// 神奇公式排名母體檔數。
+    magic_formula_ranked_count: Option<i64>,
+    /// 近四季營業利益（千元）。
+    operating_income_ttm: Option<Decimal>,
+    /// 投入資本（千元）。
+    invested_capital: Option<Decimal>,
+    /// 企業價值（千元）。
+    enterprise_value: Option<Decimal>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -284,6 +292,22 @@ impl From<ScreenedStockRow> for ScreenedStock {
                 "eps_ttm_growth_percent",
             ),
             peg_ratio: analytical_decimal_to_f64(row.peg_ratio, &symbol, "peg_ratio"),
+            magic_formula_ranked_count: row.magic_formula_ranked_count,
+            operating_income_ttm: analytical_decimal_to_f64(
+                row.operating_income_ttm,
+                &symbol,
+                "operating_income_ttm",
+            ),
+            invested_capital: analytical_decimal_to_f64(
+                row.invested_capital,
+                &symbol,
+                "invested_capital",
+            ),
+            enterprise_value: analytical_decimal_to_f64(
+                row.enterprise_value,
+                &symbol,
+                "enterprise_value",
+            ),
         }
     }
 }

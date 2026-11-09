@@ -202,13 +202,23 @@ pub(crate) struct ScreenedStock {
     /// 有息短期負債。資料不足或資本 ≤ 0 時為 `null`。
     pub(crate) return_on_capital_percent: Option<f64>,
     /// 神奇公式名次合計：本次篩選結果中兩個比率都有資料的股票，盈餘殖利率名次 + 資本報酬率名次（越小越好；
-    /// `sort_by=magic_formula&sort_order=asc` 依此排序）。任一比率為 `null` 時為 `null`。
+    /// `sort_by=magic_formula&sort_order=asc` 依此排序）。任一比率為 `null` 時為 `null`。名次只在本次篩選範圍內
+    /// 比較：放寬或收緊其他條件，同一檔的名次會改變，兩個比率不變。
     pub(crate) magic_formula_rank: Option<i64>,
     /// 近四季 EPS 成長率（%）：Yahoo 最近 8 季單季 EPS（須相連、最新一季在兩季內）的近四季合計對前四季合計；
     /// 前四季合計 ≤ 0 時為 `null`。
     pub(crate) eps_ttm_growth_percent: Option<f64>,
     /// PEG = `pe_ratio` ÷ `eps_ttm_growth_percent`；虧損或成長率 ≤ 0 時為 `null`。
     pub(crate) peg_ratio: Option<f64>,
+    /// `magic_formula_rank` 的排名母體：本次篩選結果中兩個比率都有資料的檔數（不受 `limit` 影響）。
+    pub(crate) magic_formula_ranked_count: Option<i64>,
+    /// 神奇公式的分子：近四季營業利益（千元）。
+    pub(crate) operating_income_ttm: Option<f64>,
+    /// 資本報酬率的分母：投入資本 = max(淨營運資金, 0) + 不動產廠房設備（千元）；很小時資本報酬率會極端偏高
+    /// （例如工程、通路業設備少、預收款多）。
+    pub(crate) invested_capital: Option<f64>,
+    /// 盈餘殖利率的分母：企業價值 = 收盤 × 發行股數 + 有息負債 − 現金（千元）。
+    pub(crate) enterprise_value: Option<f64>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。

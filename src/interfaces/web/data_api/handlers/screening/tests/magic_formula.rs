@@ -23,17 +23,25 @@ const STOCKS: [(&str, i64, i32, [i64; 6], i64); 5] = [
 /// 1987 Q3～1988 Q2（舊到新）。
 const QUARTERS: [(i32, &str); 4] = [(1987, "Q3"), (1987, "Q4"), (1988, "Q1"), (1988, "Q2")];
 
-/// `sort_by=magic_formula` 是白名單內的排序，兩個方向都能通過驗證。
+/// `sort_by=magic_formula`／`peg` 是白名單內的排序，兩個方向都能通過驗證，且單獨就能查（全市場排行）；
+/// 其他排序單獨使用仍需篩選條件。
 #[test]
 fn screening_accepts_magic_formula_sort() {
     for order in ["asc", "desc"] {
         let mut params = screening_params();
-        params.min_avg_trade_value = Some(1);
         params.sort_by = Some("magic_formula".to_owned());
         params.sort_order = Some(order.to_owned());
         let validated = validate_screening_params(&params).expect("參數合法");
         assert!(validated.order_by.contains("magic_formula_rank"), "{order}");
     }
+    let mut params = screening_params();
+    params.sort_by = Some("peg".to_owned());
+    assert!(validate_screening_params(&params).is_ok());
+    params.sort_by = Some("eps".to_owned());
+    assert_eq!(
+        validate_screening_params(&params).err(),
+        Some("至少需要一個篩選條件")
+    );
 }
 
 /// 每檔回傳盈餘殖利率、資本報酬率與名次合計；依名次合計由小到大排序，同名次再依代號，沒有資料的排最後。
@@ -127,6 +135,28 @@ async fn screen_at_ranks_by_magic_formula() {
         .expect("body 可讀");
     cleanup().await;
     let json: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON 回應");
+    // MA 的分子分母：營業利益 40、投入資本 200、企業價值 18 × 10 + 20 = 200；名次在 3 檔有資料的股票中排。
+    let first = &json["stocks"][0];
+    assert_eq!(
+        (
+            &first["stock_symbol"],
+            &first["operating_income_ttm"],
+            &first["invested_capital"],
+            &first["enterprise_value"],
+            &first["magic_formula_ranked_count"],
+        ),
+        (
+            &json!("79979MA"),
+            &json!(40.0),
+            &json!(200.0),
+            &json!(200.0),
+            &json!(3)
+        )
+    );
+    assert_eq!(
+        json["stocks"][3]["magic_formula_ranked_count"],
+        serde_json::Value::Null
+    );
     let stocks: Vec<_> = json["stocks"]
         .as_array()
         .expect("stocks 陣列")
