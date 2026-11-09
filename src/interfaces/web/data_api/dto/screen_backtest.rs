@@ -67,6 +67,8 @@ enum BacktestRankByValue {
     PbRatio,
     /// 神奇公式（Greenblatt）：盈餘殖利率名次 + 資本報酬率名次由小到大（沒有資料的排最後）。
     MagicFormula,
+    /// PEG（本益比 ÷ 近四季 EPS 成長率）由低到高（虧損或成長率 ≤ 0 的排最後）。
+    Peg,
 }
 
 /// OpenAPI 文件使用的持股加權方式。
@@ -143,7 +145,8 @@ pub(crate) struct ScreenBacktestParams {
     /// 買超天數）、`revenue_yoy`（換股日已公布的最新月營收年增率）、`operating_margin`（換股日已公布的
     /// 最近一季營業利益率）、`pe_ratio`／`pb_ratio`（換股當天官方本益比／股價淨值比由低到高，虧損或沒有
     /// 資料的排最後）、`magic_formula`（神奇公式：換股日已公布最近一季的近四季營業利益 ÷ 企業價值的盈餘殖利率名次，
-    /// 加上 ÷（淨營運資金 + 不動產廠房設備）的資本報酬率名次，合計由小到大；金融業與資料不足的排最後）；
+    /// 加上 ÷（淨營運資金 + 不動產廠房設備）的資本報酬率名次，合計由小到大；金融業與資料不足的排最後）、`peg`
+    /// （PEG 由低到高，算法同 `max_peg`）；
     /// 同值或查不到時再依相對強度分數（查不到的排最後）。`keep_rank` 的名次也依此排序。
     #[param(value_type = BacktestRankByValue, inline)]
     pub(crate) rank_by: Option<String>,
@@ -314,6 +317,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 前一個交易日（含）以前 10 天內最近一筆。例如 -5 代表近一個月融資至少減少 5%。
     #[param(minimum = -100.0, maximum = 1000.0)]
     pub(crate) max_margin_change_percent: Option<f64>,
+    /// PEG 上限（0.01–10；只用於新買進）：換股當天官方本益比 ÷ 換股日已公布最近一季的近四季 EPS 成長率（%，近四季
+    /// Yahoo 單季 EPS 合計對前四季合計，須 8 季相連、前四季合計 > 0）。虧損或成長率 ≤ 0 的不會通過；例如 1 代表
+    /// 本益比不高於成長率。
+    #[param(minimum = 0.01, maximum = 10.0)]
+    pub(crate) max_peg: Option<f64>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

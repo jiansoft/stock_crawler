@@ -53,7 +53,22 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("$31::float8 IS NULL OR qv.pe <= $31"));
     assert!(BACKTEST_SQL.contains("$32::float8 IS NULL OR qv.pb <= $32"));
     assert!(BACKTEST_SQL.contains("CASE WHEN q.\"PriceEarningRatio\" > 0 THEN"));
-    assert!(BACKTEST_SQL.contains("OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula')"));
+    assert!(
+        BACKTEST_SQL.contains("OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg')")
+    );
+    // PEG：8 季相連、前四季合計 > 0；條件包 COALESCE，與神奇公式對上同一個已公布的季。
+    assert!(BACKTEST_SQL.contains("eps_growth AS MATERIALIZED ("));
+    assert!(BACKTEST_SQL.contains("CASE WHEN quarters = 8 AND prev_ttm > 0"));
+    assert!(
+        BACKTEST_SQL.contains("previous AS (by_quarter RANGE BETWEEN 7 PRECEDING AND 4 PRECEDING)")
+    );
+    assert!(BACKTEST_SQL.contains("eg.ord = pq.ord"));
+    assert!(BACKTEST_SQL.contains("mi.ord = pq.ord"));
+    assert!(
+        BACKTEST_SQL
+            .contains("COALESCE(qv.pe > 0 AND eg.growth > 0 AND qv.pe / eg.growth <= $50, FALSE)")
+    );
+    assert!(BACKTEST_SQL.contains("WHEN 'peg' THEN -peg"));
     // 神奇公式：只算起日前兩年以後、四季相連的營業利益；換股日對上已過法定期限的同一季。
     assert!(BACKTEST_SQL.contains("magic_inputs AS MATERIALIZED ("));
     assert!(BACKTEST_SQL.contains("RANGE BETWEEN 3 PRECEDING AND CURRENT ROW"));
@@ -73,7 +88,7 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("LEFT JOIN valuation_level vl ON vl.date = b.date"));
     assert!(BACKTEST_SQL.contains("h.below * 100 < $34::int * h.samples"));
     assert!(BACKTEST_SQL.contains("p.date < cur.date AND p.date >= cur.date - INTERVAL '5 years'"));
-    assert!(!BACKTEST_SQL.contains("$50"));
+    assert!(!BACKTEST_SQL.contains("$51"));
     assert!(BACKTEST_SQL.contains("(hc.percent_400 - hb.percent_400)::float8 >= $48"));
     assert!(BACKTEST_SQL.contains("mg.margin_change <= $49"));
     assert!(BACKTEST_SQL.contains("OFFSET 19"));
@@ -110,9 +125,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH RECURSIVE\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\nday_scan AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $50"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $51"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$52"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $51"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $52"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$53"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     assert!(BACKTEST_SQL.contains("rs_score DESC, rs_rank ASC, stock_symbol"));

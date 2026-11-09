@@ -103,7 +103,7 @@ const MAX_TRADE_VALUE_MILLION: u32 = 100_000;
 const MAX_EXCLUDED_INDUSTRIES: usize = 10;
 
 /// 候選股可用的排序方式（`rank_by`），第一個為預設；字面值與 [`sql`] 回測 SQL 的 `$16` 對應。
-const RANK_BY: [&str; 9] = [
+const RANK_BY: [&str; 10] = [
     "rs_score",
     "trade_value",
     "foreign_streak",
@@ -113,6 +113,7 @@ const RANK_BY: [&str; 9] = [
     "pe_ratio",
     "pb_ratio",
     "magic_formula",
+    "peg",
 ];
 
 /// [`BACKTEST_SQL`](sql::BACKTEST_SQL) 的一列：換股日、基準與依相對強度由高到低的候選股（與報酬一一對應）。
@@ -330,6 +331,7 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         trend_template: params.trend_template.unwrap_or(false),
         min_holder_400_change: params.min_holder_400_change,
         max_margin_change_percent: params.max_margin_change_percent,
+        max_peg: params.max_peg,
         min_revenue_acceleration_months: params.min_revenue_acceleration_months,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),

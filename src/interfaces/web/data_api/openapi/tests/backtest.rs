@@ -63,7 +63,8 @@ fn openapi_screen_backtest_schema_pins_field_names() {
             "operating_margin",
             "pe_ratio",
             "pb_ratio",
-            "magic_formula"
+            "magic_formula",
+            "peg"
         ])
     );
     for (name, schema) in [

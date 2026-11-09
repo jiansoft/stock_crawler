@@ -10,6 +10,7 @@ mod chip_liquidity;
 mod dividend;
 mod magic_formula;
 mod major;
+mod peg;
 mod query_plans;
 mod revenue_industry;
 mod trend;
@@ -73,6 +74,7 @@ pub(super) fn screening_params() -> StockScreeningParams {
         trend_template: None,
         min_holder_400_change: None,
         max_margin_change_percent: None,
+        max_peg: None,
         sort_by: None,
         sort_order: None,
         limit: None,
