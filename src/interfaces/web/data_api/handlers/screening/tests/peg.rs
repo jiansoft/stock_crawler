@@ -19,12 +19,14 @@ const QUARTERS: [(i32, &str); 8] = [
 /// `(代號, 前四季每季 EPS, 近四季每季 EPS, 季數, 本益比)`：
 /// - PA：1 → 2，成長 100%、本益比 20 → PEG 0.2。
 /// - PB：2 → 3，成長 50%、本益比 30 → PEG 0.6。
-/// - PC：2 → 1，成長 −50%，沒有 PEG。
+/// - PC：1 → 3，成長 200%（超過 100% 上限），沒有 PEG。
+/// - PE：2 → 1，成長 −50%，沒有 PEG。
 /// - PD：只有 7 季，成長率與 PEG 皆為 `null`。
-const STOCKS: [(&str, i32, i32, usize, i32); 4] = [
+const STOCKS: [(&str, i32, i32, usize, i32); 5] = [
     ("79979PA", 1, 2, 8, 20),
     ("79979PB", 2, 3, 8, 30),
-    ("79979PC", 2, 1, 8, 10),
+    ("79979PC", 1, 3, 8, 10),
+    ("79979PE", 2, 1, 8, 10),
     ("79979PD", 1, 2, 7, 20),
 ];
 
@@ -145,8 +147,9 @@ async fn screen_at_filters_and_sorts_by_peg() {
         [
             (json!("79979PA"), json!(100.0), json!(0.2)),
             (json!("79979PB"), json!(50.0), json!(0.6)),
-            (json!("79979PC"), json!(-50.0), null.clone()),
-            (json!("79979PD"), null.clone(), null),
+            (json!("79979PC"), json!(200.0), null.clone()),
+            (json!("79979PD"), null.clone(), null.clone()),
+            (json!("79979PE"), json!(-50.0), null),
         ]
     );
     assert_eq!(filtered, [(json!("79979PA"), json!(100.0), json!(0.2))]);

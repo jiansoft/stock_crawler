@@ -7,12 +7,13 @@ use super::*;
 /// - BA：近四季每季 2（8）、前四季每季 1（4）→ 成長 100%；本益比 20 → PEG 0.2。尚未公布的 1992 Q4 EPS −100，
 ///   若提前用到成長率會變負、不會通過。
 /// - BB：近四季每季 3（12）、前四季每季 2（8）→ 成長 50%；本益比 30 → PEG 0.6。
-/// - BC：近四季每季 1（4）、前四季每季 2（8）→ 成長 −50%，沒有 PEG。
+/// - BC：近四季每季 5（20）、前四季每季 2（8）→ 成長 150%（超過 100% 上限）；本益比 10，若不設上限 PEG 0.07 會排
+///   第一，實際沒有 PEG。
 async fn seed_peg(pool: &sqlx::PgPool) {
     sqlx::query(
         "INSERT INTO income_statement (stock_symbol, fiscal_year, period_type, quarter, source, eps)
          SELECT s, y, 'single', q, 'yahoo', CASE WHEN y * 4 + SUBSTRING(q FROM 2)::int >= 1991 * 4 + 4 THEN recent ELSE prev END
-         FROM (VALUES ('79979BA', 2, 1), ('79979BB', 3, 2), ('79979BC', 1, 2)) AS e(s, recent, prev)
+         FROM (VALUES ('79979BA', 2, 1), ('79979BB', 3, 2), ('79979BC', 5, 2)) AS e(s, recent, prev)
          CROSS JOIN (VALUES (1990, 'Q4'), (1991, 'Q1'), (1991, 'Q2'), (1991, 'Q3'),
                             (1991, 'Q4'), (1992, 'Q1'), (1992, 'Q2'), (1992, 'Q3')) AS p(y, q)
          UNION ALL SELECT '79979BA', 1992, 'single', 'Q4', 'yahoo', -100",

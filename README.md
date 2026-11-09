@@ -389,7 +389,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 + 基本面門檻（只用於新買進）：`min_revenue_yoy_percent`、`min_revenue_yoy_streak`、`min_revenue_acceleration_months`（年增率逐月提高的月數）、`min_revenue_yoy_3m_percent`、`min_monthly_revenue`、`revenue_record`、`min_eps`、`min_roe_percent`、`min_gross_margin_percent`、`min_operating_margin_percent`、`margins_yoy_up`、`max_debt_ratio_percent`、`positive_free_cash_flow`、`max_pe`、`max_pb`
 + 集保大戶（只用於新買進）：`min_major_change`（千張大戶持股比例最近一週相對 `major_change_weeks` 週前的變化下限，百分點，可為負；回看 1～12 週，預設 4）、`min_holder_400_change`（400 張以上大戶，規則相同）。集保週五的資料週六才公布，換股日只用日期早於換股日的週；大戶資料自 2023-07-14 起，設此條件時 `from` 須晚於第一週加回看週數，否則回 422
 + CANSLIM（只用於新買進）：`min_eps_yoy_percent`（換股當天已公布的最近一季單季 EPS 對去年同季成長率，去年同季 ≤ 0 不通過）、`min_annual_eps_growth_percent`（已公布的最近 4 個年度 EPS、3 個年增率取最低者；年度 EPS 隔年 4/1 起才用）、`new_high_days`（換股日往前 N 個日曆天內創過 52 週新高）；L、I、M 用 `min_rs_score`、法人連續買超與 `market_filter_ma`
-+ PEG（只用於新買進）：`max_peg`（換股當天官方本益比 ÷ 換股日已公布最近一季的近四季 EPS 成長率，%；8 季相連、前四季合計 > 0，虧損或成長率 ≤ 0 不通過）
++ PEG（只用於新買進）：`max_peg`（換股當天官方本益比 ÷ 換股日已公布最近一季的近四季 EPS 成長率，%；8 季相連、前四季合計 > 0，虧損或成長率不在 0～100% 不通過）
 + 融資（只用於新買進）：`max_margin_change_percent`（融資餘額最近一筆對往前第 20 筆的變化率上限，%；融資收盤後才公布，換股日只用前一個交易日以前的資料，基期為 0 的不通過）
 + Minervini 趨勢模板（只用於新買進）：`trend_template=true`，換股當天收盤後的日線 MA20 > MA60 > MA120 > MA240、收盤站上 MA240、不低於 52 週最高價的 75% 且比 52 週最低價高 30% 以上；年線或 52 週最低價為 0（資料不足）的不通過，可搭配 `min_rs_score`
 + Piotroski F 分數：`min_f_score`（0–9；換股當天已公布的最近一個評分年度，年報隔年 4/1 起才用、落後超過 2 年不算；分數來自每日重算的 `financial_f_score_history`）

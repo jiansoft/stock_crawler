@@ -208,7 +208,8 @@ pub(crate) struct ScreenedStock {
     /// 近四季 EPS 成長率（%）：Yahoo 最近 8 季單季 EPS（須相連、最新一季在兩季內）的近四季合計對前四季合計；
     /// 前四季合計 ≤ 0 時為 `null`。
     pub(crate) eps_ttm_growth_percent: Option<f64>,
-    /// PEG = `pe_ratio` ÷ `eps_ttm_growth_percent`；虧損或成長率 ≤ 0 時為 `null`。
+    /// PEG = `pe_ratio` ÷ `eps_ttm_growth_percent`；虧損或成長率不在 0～100% 時為 `null`（超過 100% 多為低基期
+    /// 轉盈，PEG 失真）。
     pub(crate) peg_ratio: Option<f64>,
     /// `magic_formula_rank` 的排名母體：本次篩選結果中兩個比率都有資料的檔數（不受 `limit` 影響）。
     pub(crate) magic_formula_ranked_count: Option<i64>,
@@ -332,7 +333,7 @@ pub(crate) struct StockScreeningParams {
     /// 融資至少減少 5%；每檔附 `margin_change_percent`。
     #[param(minimum = -100, maximum = 1000)]
     pub(crate) max_margin_change_percent: Option<f64>,
-    /// PEG 上限（0.01–10）：本益比 ÷ 近四季 EPS 成長率（%），虧損或成長率 ≤ 0 的不會通過；每檔附 `peg_ratio`、
+    /// PEG 上限（0.01–10）：本益比 ÷ 近四季 EPS 成長率（%），虧損或成長率不在 0～100% 的不會通過；每檔附 `peg_ratio`、
     /// `eps_ttm_growth_percent`。
     #[param(minimum = 0.01, maximum = 10.0)]
     pub(crate) max_peg: Option<f64>,
