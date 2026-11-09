@@ -30,6 +30,8 @@
 /// 營收加速：從最新月往回年增率逐月提高（高於前一個月、月份相連）的月數，新鮮度同月營收，`$45` 為下限。
 /// 股利成長年數：只看查詢年以前的完整年度（年度現金股利合計），從查詢年前一年往回每年不低於前一年（年度相連）
 /// 的年數，`$46` 為下限；每檔都會回傳。
+/// Minervini 趨勢模板：查詢日前 10 天內最新一筆日線MA20 > MA60 > MA120 > MA240、收盤站上 MA240、收盤不低於 52 週（240 個交易日）最高價的 75%、且至少比 52 週最低價高 30%；年線或 52 週最低價為 0 時為
+/// `NULL`。每檔都會回傳，`$47` 為 true 時只留符合的股票。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -77,6 +79,7 @@ WITH latest AS (
         pv.ratio_date,
         pv.pe_ratio,
         pv.pb_ratio,
+        pv.trend_template,
         dv.fill_rate_percent,
         dv.avg_fill_days,
         dv.dividend_years,
@@ -212,7 +215,16 @@ WITH latest AS (
         -- 查詢日（含）之前 10 天內最新一筆日線的官方本益比、股價淨值比；0（虧損或沒有資料）轉成 NULL。
         SELECT "Date" AS ratio_date,
             CASE WHEN "PriceEarningRatio" > 0 THEN "PriceEarningRatio" END AS pe_ratio,
-            CASE WHEN "price-to-book_ratio" > 0 THEN "price-to-book_ratio" END AS pb_ratio
+            CASE WHEN "price-to-book_ratio" > 0 THEN "price-to-book_ratio" END AS pb_ratio,
+            -- Minervini 趨勢模板（同一筆日線）；年線或 52 週最低價為 0（資料不足）時為 NULL。
+            CASE WHEN "MovingAverage240" > 0 AND minimum_price_in_year > 0 THEN
+                "MovingAverage20" > "MovingAverage60"
+                AND "MovingAverage60" > "MovingAverage120"
+                AND "MovingAverage120" > "MovingAverage240"
+                AND "ClosingPrice" > "MovingAverage240"
+                AND "ClosingPrice" >= maximum_price_in_year * 0.75
+                AND "ClosingPrice" >= minimum_price_in_year * 1.3
+            END AS trend_template
         FROM "DailyQuotes"
         WHERE stock_symbol = s.stock_symbol
           AND "Date" BETWEEN $3::date - 10 AND $3::date
@@ -415,7 +427,8 @@ SELECT
     pe_ratio, pb_ratio, ratio_date,
     brk.breakout_date, brk.breakout_description,
     eps_yoy_percent, annual_eps_growth_percent, annual_eps_year, new_high_date,
-    fill_rate_percent, avg_fill_days, dividend_years, revenue_acceleration_months, dividend_growth_years
+    fill_rate_percent, avg_fill_days, dividend_years, revenue_acceleration_months, dividend_growth_years,
+    trend_template
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -458,4 +471,5 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($44::int IS NULL OR dividend_years >= $44)
   AND ($45::smallint IS NULL OR revenue_acceleration_months >= $45)
   AND ($46::int IS NULL OR dividend_growth_years >= $46)
+  AND (NOT $47::bool OR trend_template IS TRUE)
 "#;

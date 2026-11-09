@@ -321,7 +321,8 @@ pub(super) fn validate_screening_params(
         || params.max_avg_fill_days.is_some()
         || params.min_dividend_years.is_some()
         || params.min_revenue_acceleration_months.is_some()
-        || params.min_dividend_growth_years.is_some();
+        || params.min_dividend_growth_years.is_some()
+        || params.trend_template == Some(true);
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }

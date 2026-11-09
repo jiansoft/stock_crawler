@@ -79,6 +79,7 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(Option::<i32>::None)
         .bind(Option::<i16>::None)
         .bind(Option::<i32>::None)
+        .bind(false)
         .fetch_all(pool)
         .await
         .expect("screen EXPLAIN");

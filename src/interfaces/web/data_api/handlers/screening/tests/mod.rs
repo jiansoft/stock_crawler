@@ -10,6 +10,7 @@ mod dividend;
 mod major;
 mod query_plans;
 mod revenue_industry;
+mod trend;
 mod validation;
 mod validation_chip;
 mod valuation_margins;
@@ -67,6 +68,7 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_dividend_years: None,
         min_revenue_acceleration_months: None,
         min_dividend_growth_years: None,
+        trend_template: None,
         sort_by: None,
         sort_order: None,
         limit: None,
