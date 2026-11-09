@@ -62,7 +62,8 @@ fn openapi_screen_backtest_schema_pins_field_names() {
             "revenue_yoy",
             "operating_margin",
             "pe_ratio",
-            "pb_ratio"
+            "pb_ratio",
+            "magic_formula"
         ])
     );
     for (name, schema) in [

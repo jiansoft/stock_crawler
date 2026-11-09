@@ -53,7 +53,17 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("$31::float8 IS NULL OR qv.pe <= $31"));
     assert!(BACKTEST_SQL.contains("$32::float8 IS NULL OR qv.pb <= $32"));
     assert!(BACKTEST_SQL.contains("CASE WHEN q.\"PriceEarningRatio\" > 0 THEN"));
-    assert!(BACKTEST_SQL.contains("OR $16::text IN ('pe_ratio', 'pb_ratio')"));
+    assert!(BACKTEST_SQL.contains("OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula')"));
+    // 神奇公式：只算起日前兩年以後、四季相連的營業利益；換股日對上已過法定期限的同一季。
+    assert!(BACKTEST_SQL.contains("magic_inputs AS MATERIALIZED ("));
+    assert!(BACKTEST_SQL.contains("RANGE BETWEEN 3 PRECEDING AND CURRENT ROW"));
+    assert!(BACKTEST_SQL.contains("WHERE e.quarters = 4"));
+    assert!(BACKTEST_SQL.contains("AND fiscal_year >= EXTRACT(YEAR FROM $1::date)::int - 2"));
+    assert!(
+        BACKTEST_SQL
+            .contains("WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 4, 1) THEN 0")
+    );
+    assert!(BACKTEST_SQL.contains("WHEN 'magic_formula' THEN -magic_rank::float8"));
     assert!(BACKTEST_SQL.contains("WHEN 'pe_ratio' THEN -pe"));
     assert!(BACKTEST_SQL.contains("AND q.\"Date\" = u.date"));
     assert!(

@@ -61,6 +61,14 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// - `dividend_growth`：每檔每個除息年度的股利成長年數（年度現金股利合計不低於前一年、年度相連，往回數到最近
 ///   一次減少或中斷為止），以視窗函式一次算完全表；`filtered` 以換股年的前一年對上（換股年本身還沒過完，不算），
 ///   前一年沒有配息就沒有資料、不會通過。只在設 `$46` 時才算（逐期逐檔重算會讓偏移掃描超過 30 秒上限）。
+/// - `magic_inputs`：神奇公式（Greenblatt）的輸入，每檔每季一列（`ord` = 年 × 4 + 季）：截至該季的近四季
+///   Yahoo 單季營業利益合計（EBIT，四季須相連）、資本（max(流動資產 − 現金 −（流動負債 − 短期借款 − 應付短期
+///   票券 − 一年內到期長期負債）, 0) + 不動產廠房設備）、淨負債（上述有息負債 + 長期負債 − 現金）與股數（股本
+///   ÷ 10 × 面額倍數；面額倍數 = 目前發行股數 ÷（最新一季股本 × 100），≥ 1.9 才四捨五入採用（面額 5、2.5、1
+///   元等），否則視為 1，假設面額不變）。流動資產或流動負債為 0（金融業不分流動與非流動）的季沒有資料。只在 `$16` 為
+///   `magic_formula` 時才算（只算起日前兩年以後的季度）；`filtered` 以換股日已過法定期限的最近一季（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年
+///   4/1，所有股票同一季）對上，算出盈餘殖利率（EBIT ÷（換股日收盤 × 股數 + 淨負債））與資本報酬率
+///   （EBIT ÷ 資本），企業價值或資本 ≤ 0 時為 NULL。
 /// - `filtered` 的 `ym`：已公布的最近一季 Yahoo 單季損益表（公布日規則同 `fs`）的毛利率、營業利益率，
 ///   以及毛利率、營業利益率、稅後淨利率是否都高於去年同一季（三率三升）；`bs`：同樣規則的最近一季
 ///   資產負債表負債比；`cf`：同樣規則的最近一季 Yahoo 單季現金流量表，連同之前 3 季（須四季都有自由
@@ -71,7 +79,8 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// - `filtered`／`valued`：符合流動性以外條件的股票；有設流動性門檻、依成交金額排序或依成交金額
 ///   加權時，才對這些股票逐檔查 `liquidity_start`～換股日的平均成交金額（`trade_value`）。
 /// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
-///   成交金額或法人連續買超天數，本益比與股價淨值比由低到高，同值再依相對強度分數與名次 `rs_rank`）的前 `$5` 檔與各自的報酬、產業編號、平均成交
+///   成交金額或法人連續買超天數，本益比與股價淨值比由低到高；`magic_formula` 為同一換股日兩者都有資料的股票
+///   中盈餘殖利率名次 + 資本報酬率名次由小到大，沒有資料的排最後；同值再依相對強度分數與名次 `rs_rank`）的前 `$5` 檔與各自的報酬、產業編號、平均成交
 ///   金額；實際持股由 [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
 ///   不查平均成交金額：這份名單動輒數萬列，實際續抱的只有每期幾檔，改由 [`HOLD_TRADE_VALUES_SQL`] 在
@@ -174,6 +183,51 @@ dividend_growth AS MATERIALIZED (
         ) AS yearly
         WINDOW w AS (PARTITION BY stock_symbol ORDER BY yr)
     ) AS flagged
+),
+magic_inputs AS MATERIALIZED (
+    SELECT e.stock_symbol, e.ord, e.ebit_ttm::float8 AS ebit_ttm,
+           (GREATEST(
+                (b.current_assets - COALESCE(b.cash_and_equivalents, 0))
+                - (b.current_liabilities - COALESCE(b.short_term_debt, 0)
+                   - COALESCE(b.short_term_bills_payable, 0)
+                   - COALESCE(b.current_portion_of_long_term_liabilities, 0)),
+                0) + b.property_plant_equipment)::float8 AS capital,
+           (COALESCE(b.short_term_debt, 0) + COALESCE(b.short_term_bills_payable, 0)
+            + COALESCE(b.current_portion_of_long_term_liabilities, 0) + COALESCE(b.long_term_liabilities, 0)
+            - COALESCE(b.cash_and_equivalents, 0))::float8 AS net_debt,
+           b.share_capital::float8 / 10
+               * CASE WHEN pf.par_ratio >= 1.9 THEN ROUND(pf.par_ratio)::float8 ELSE 1 END AS shares
+    FROM (
+        SELECT stock_symbol, fiscal_year, quarter, fiscal_year * 4 + SUBSTRING(quarter FROM 2)::int AS ord,
+               SUM(operating_profit) OVER w AS ebit_ttm, COUNT(operating_profit) OVER w AS quarters
+        FROM income_statement
+        WHERE $16::text = 'magic_formula' AND source = 'yahoo' AND period_type = 'single'
+          AND fiscal_year >= EXTRACT(YEAR FROM $1::date)::int - 2
+        WINDOW w AS (
+            PARTITION BY stock_symbol ORDER BY fiscal_year * 4 + SUBSTRING(quarter FROM 2)::int
+            RANGE BETWEEN 3 PRECEDING AND CURRENT ROW
+        )
+    ) e
+    JOIN balance_sheet b
+      ON b.source = 'yahoo'
+     AND b.stock_symbol = e.stock_symbol
+     AND b.period_type = 'single'
+     AND b.fiscal_year = e.fiscal_year
+     AND b.quarter = e.quarter
+    LEFT JOIN (
+        SELECT DISTINCT ON (l.stock_symbol) l.stock_symbol,
+               s.issued_share / (l.share_capital * 100.0) AS par_ratio
+        FROM stocks s
+        JOIN balance_sheet l
+          ON l.source = 'yahoo' AND l.stock_symbol = s.stock_symbol AND l.period_type = 'single'
+        WHERE $16::text = 'magic_formula' AND s.issued_share > 0 AND l.share_capital > 0
+        ORDER BY l.stock_symbol, l.fiscal_year DESC, l.quarter DESC
+    ) pf ON pf.stock_symbol = e.stock_symbol
+    WHERE e.quarters = 4
+      AND b.current_assets > 0
+      AND b.current_liabilities > 0
+      AND b.property_plant_equipment IS NOT NULL
+      AND b.share_capital > 0
 ),"#,
             $price_ctes,
             r#"
@@ -227,11 +281,23 @@ picks AS (
                             WHEN 'operating_margin' THEN operating_margin
                             WHEN 'pe_ratio' THEN -pe
                             WHEN 'pb_ratio' THEN -pb
+                            WHEN 'magic_formula' THEN -magic_rank::float8
                         END DESC NULLS LAST,
                         "#, rs_rank_order!(), r#"
            ) AS pick_rank
-    FROM valued
-    WHERE $15::int8 IS NULL OR trade_value >= $15
+    FROM (
+        -- 神奇公式名次只在依它排序時才算，並且只在通過流動性門檻、兩個比率都有資料的股票之間排。
+        SELECT v.*,
+               CASE WHEN $16::text = 'magic_formula'
+                     AND v.earnings_yield IS NOT NULL AND v.return_on_capital IS NOT NULL THEN
+                   RANK() OVER (PARTITION BY v.date, v.earnings_yield IS NULL OR v.return_on_capital IS NULL
+                                ORDER BY v.earnings_yield DESC)
+                   + RANK() OVER (PARTITION BY v.date, v.earnings_yield IS NULL OR v.return_on_capital IS NULL
+                                  ORDER BY v.return_on_capital DESC)
+               END AS magic_rank
+        FROM valued v
+        WHERE $15::int8 IS NULL OR v.trade_value >= $15
+    ) ranked
 ),
 candidates AS (
     SELECT date,
