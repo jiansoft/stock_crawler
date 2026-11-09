@@ -110,6 +110,8 @@ pub(super) struct ScreenedStockRow {
     avg_fill_days: Option<Decimal>,
     /// 連續配息年數。
     dividend_years: Option<i32>,
+    /// 股利成長（現金股利不減少）年數。
+    dividend_growth_years: Option<i32>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -244,6 +246,7 @@ impl From<ScreenedStockRow> for ScreenedStock {
             ),
             avg_fill_days: analytical_decimal_to_f64(row.avg_fill_days, &symbol, "avg_fill_days"),
             dividend_years: row.dividend_years,
+            dividend_growth_years: row.dividend_growth_years,
         }
     }
 }

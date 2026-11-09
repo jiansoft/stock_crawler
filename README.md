@@ -374,7 +374,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 
 | 端點 | 內容 |
 |---|---|
-| `/stocks/screen` | 條件選股：F 分數、毛利率、負債比、自由現金流、營業利益率、三率三升、營收創新高、營收連續年增、相對強度、外資／投信連續買超、平均成交金額、本益比／股價淨值比上限、千張大戶持股比例 N 週變化（`min_major_change`／`major_change_weeks`）、近 N 日區間突破且還沒跌回（`range_breakout_days`，回應附突破日與說明；回測單獨使用輸 0050，只供參考）、CANSLIM 的單季 EPS 年增（`min_eps_yoy_percent`）、近 3 年每年 EPS 成長（`min_annual_eps_growth_percent`）與 N 天內創 52 週新高（`new_high_days`）、存股條件（近 5 年填息率 `min_fill_rate_percent`、平均填息天數 `max_avg_fill_days`、連續配息年數 `min_dividend_years`，三個欄位每檔都回傳）、營收加速（`min_revenue_acceleration_months`：從最新月往回年增率逐月提高的月數，回應附 `revenue_acceleration_months`），可排除產業 |
+| `/stocks/screen` | 條件選股：F 分數、毛利率、負債比、自由現金流、營業利益率、三率三升、營收創新高、營收連續年增、相對強度、外資／投信連續買超、平均成交金額、本益比／股價淨值比上限、千張大戶持股比例 N 週變化（`min_major_change`／`major_change_weeks`）、近 N 日區間突破且還沒跌回（`range_breakout_days`，回應附突破日與說明；回測單獨使用輸 0050，只供參考）、CANSLIM 的單季 EPS 年增（`min_eps_yoy_percent`）、近 3 年每年 EPS 成長（`min_annual_eps_growth_percent`）與 N 天內創 52 週新高（`new_high_days`）、存股條件（近 5 年填息率 `min_fill_rate_percent`、平均填息天數 `max_avg_fill_days`、連續配息年數 `min_dividend_years`，三個欄位每檔都回傳）、營收加速（`min_revenue_acceleration_months`：從最新月往回年增率逐月提高的月數，回應附 `revenue_acceleration_months`）、股利成長（`min_dividend_growth_years`：查詢年以前的完整年度現金股利連續不減少的年數，回應附 `dividend_growth_years`），可排除產業 |
 | `/stocks/screen/backtest` | 條件選股回測（見下方說明） |
 | `/stocks/screen/backtest/offsets` | 換股日偏移穩健度：同一組條件把換股日偏移 0 到 `hold_days` − 1 都跑一遍，回傳各指標的分布與勝過 0050 的比例；`split` 分樣本內外 |
 | `/stocks/screen/backtest/frontier` | 0050 核心部位前緣：0%～100%（每 10%）各比例的偏移分布，標出夏普值、年化報酬中位數最高的比例 |
@@ -390,7 +390,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 + 集保大戶（只用於新買進）：`min_major_change`（千張大戶持股比例最近一週相對 `major_change_weeks` 週前的變化下限，百分點，可為負；回看 1～12 週，預設 4）。集保週五的資料週六才公布，換股日只用日期早於換股日的週；大戶資料自 2023-07-14 起，設此條件時 `from` 須晚於第一週加回看週數，否則回 422
 + CANSLIM（只用於新買進）：`min_eps_yoy_percent`（換股當天已公布的最近一季單季 EPS 對去年同季成長率，去年同季 ≤ 0 不通過）、`min_annual_eps_growth_percent`（已公布的最近 4 個年度 EPS、3 個年增率取最低者；年度 EPS 隔年 4/1 起才用）、`new_high_days`（換股日往前 N 個日曆天內創過 52 週新高）；L、I、M 用 `min_rs_score`、法人連續買超與 `market_filter_ma`
 + Piotroski F 分數：`min_f_score`（0–9；換股當天已公布的最近一個評分年度，年報隔年 4/1 起才用、落後超過 2 年不算；分數來自每日重算的 `financial_f_score_history`）
-+ 存股：`min_dividend_yield_percent`（最近一次除息往回 350 天的現金股利 ÷ 換股日收盤，最近一次除息須在 400 天內）、`min_fill_rate_percent`／`max_avg_fill_days`（近 5 年、換股日前已觀察滿 120 個交易日的除息才算）、`min_dividend_years`（以除息日年度計的連續配息年數）；都讀 `dividend_fill_event`，只用換股當天已經發生的除息
++ 存股：`min_dividend_yield_percent`（最近一次除息往回 350 天的現金股利 ÷ 換股日收盤，最近一次除息須在 400 天內）、`min_fill_rate_percent`／`max_avg_fill_days`（近 5 年、換股日前已觀察滿 120 個交易日的除息才算）、`min_dividend_years`（以除息日年度計的連續配息年數）、`min_dividend_growth_years`（股利成長：換股年以前的完整年度現金股利合計，從換股年前一年往回連續不低於前一年的年數）；都讀 `dividend_fill_event`，只用換股當天已經發生的除息
 + 排序與持股：`rank_by`（相對強度、平均成交金額、法人連續買超、營收年增率、營業利益率、本益比、股價淨值比）、`keep_rank`（換股緩衝）、`hold_min_rs_score`（續抱條件）、`max_per_industry`、`min_avg_trade_value`（流動性門檻）
 + 權重：`weighting`（等權、成交金額或其平方根加權）、`max_weight`（單檔上限）、`etf_weight`（0050 核心部位）
 + 大盤濾網（換股日不符就空手）：`market_filter_ma`（加權指數均線）、`market_filter_breadth`（站上 60 日均線比例）、`market_filter_max_pe`（市場本益比中位數）、`market_filter_pe_percentile`（市場本益比中位數在換股日前近 5 年的百分位，只用當天以前的資料）

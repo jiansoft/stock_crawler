@@ -274,6 +274,12 @@ pub(super) fn validate_screening_params(
     {
         return Err("min_revenue_acceleration_months 必須介於 1 至 11");
     }
+    if params
+        .min_dividend_growth_years
+        .is_some_and(|years| !(1..=30).contains(&years))
+    {
+        return Err("min_dividend_growth_years 必須介於 1 至 30");
+    }
     let order_by = screen_order_by(
         params.sort_by.as_deref().unwrap_or("stock_symbol"),
         params.sort_order.as_deref().unwrap_or("asc"),
@@ -314,7 +320,8 @@ pub(super) fn validate_screening_params(
         || params.min_fill_rate_percent.is_some()
         || params.max_avg_fill_days.is_some()
         || params.min_dividend_years.is_some()
-        || params.min_revenue_acceleration_months.is_some();
+        || params.min_revenue_acceleration_months.is_some()
+        || params.min_dividend_growth_years.is_some();
     if !has_filter {
         return Err("至少需要一個篩選條件");
     }

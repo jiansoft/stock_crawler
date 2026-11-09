@@ -294,6 +294,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 連續有現金除息的年數；最近一次除息的年度早於換股年前一年的不會通過。
     #[param(minimum = 1, maximum = 30)]
     pub(crate) min_dividend_years: Option<u8>,
+    /// 股利成長年數下限（1–30）：以除息日年度加總現金股利，只看換股年以前的完整年度；從換股年前一年往回，
+    /// 每年現金股利都不低於前一年（年度相連）的年數。例如 5 代表連續 6 年配息且 5 次都沒減少；換股年前一年
+    /// 沒有配息的不會通過。
+    #[param(minimum = 1, maximum = 30)]
+    pub(crate) min_dividend_growth_years: Option<u8>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

@@ -182,6 +182,9 @@ pub(crate) struct ScreenedStock {
     pub(crate) avg_fill_days: Option<f64>,
     /// 連續配發現金股利的年數（以除息日年度計，從最近一次除息往回數）；最近一次除息早於查詢年前一年時為 0。
     pub(crate) dividend_years: Option<i32>,
+    /// 股利成長年數：以除息日年度加總現金股利，只看查詢年以前的完整年度；從查詢年前一年往回，每年都不低於
+    /// 前一年（年度相連）的年數。查詢年前一年沒有配息時為 0。
+    pub(crate) dividend_growth_years: Option<i32>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -314,6 +317,10 @@ pub(crate) struct StockScreeningParams {
     /// 連續配發現金股利的年數下限（1–30），以除息日年度計；最近一次除息早於查詢年前一年的不符合。
     #[param(minimum = 1, maximum = 30)]
     pub(crate) min_dividend_years: Option<u8>,
+    /// 股利成長年數下限（1–30）：只看查詢年以前的完整年度，從查詢年前一年往回、年度現金股利都不低於前一年
+    /// （年度相連）的年數；例如 5 代表連續 6 年配息且 5 次都沒減少。
+    #[param(minimum = 1, maximum = 30)]
+    pub(crate) min_dividend_growth_years: Option<u8>,
     /// 營收加速月數下限（1–11）：從最新一個月往回，年增率逐月高於前一個月（月份相連）的月數；例如 3 代表最近
     /// 3 個月的年增率一個比一個高。可搭配 `min_revenue_yoy_percent` 排除年增率仍為負的股票。
     #[param(minimum = 1, maximum = 11)]
