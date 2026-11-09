@@ -5,6 +5,7 @@
 
 mod breakout;
 mod canslim;
+mod chip_concentration;
 mod chip_liquidity;
 mod dividend;
 mod major;
@@ -69,6 +70,8 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_revenue_acceleration_months: None,
         min_dividend_growth_years: None,
         trend_template: None,
+        min_holder_400_change: None,
+        max_margin_change_percent: None,
         sort_by: None,
         sort_order: None,
         limit: None,

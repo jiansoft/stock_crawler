@@ -262,6 +262,10 @@ pub(crate) struct ScreenBacktestParams {
     /// `min_major_change` 的回看週數（集保資料週，1–12，預設 4）；沒有設 `min_major_change` 時不影響結果。
     #[param(minimum = 1, maximum = 12, default = 4)]
     pub(crate) major_change_weeks: Option<u8>,
+    /// 換股前已公布的集保 400 張以上大戶持股比例，最近一週相對 `major_change_weeks` 週前的變化至少這麼多
+    /// （百分點，-100–100，可為負）；公布日、資料起日與 `from` 的限制同 `min_major_change`。只用於新買進。
+    #[param(minimum = -100.0, maximum = 100.0)]
+    pub(crate) min_holder_400_change: Option<f64>,
     /// 換股當天已公布的最近一季單季 EPS 對去年同季的成長率至少這麼高（%，-100–10000；CANSLIM 的 C）。
     /// 公布日規則同 `min_eps`；去年同季 EPS ≤ 0 無法計算成長率，這類股票不會通過。
     #[param(minimum = -100.0, maximum = 10000.0)]
@@ -302,6 +306,10 @@ pub(crate) struct ScreenBacktestParams {
     /// `true` 時只選符合 Minervini 趨勢模板的股票（只用於新買進）：換股當天收盤後的日線MA20 > MA60 > MA120 > MA240、收盤站上 MA240、收盤不低於 52 週（240 個交易日）最高價的 75%、且至少比 52 週最低價高 30%。
     /// 年線或 52 週最低價為 0（上市未滿一年或資料不足）的不會通過；`false` 或省略不篩選。
     pub(crate) trend_template: Option<bool>,
+    /// 融資餘額變化上限（%，-100–1000；只用於新買進）：融資餘額最近一筆對往前第 20 筆（約一個月）的變化率（%），負值代表融資減少；基期融資餘額為 0 （不能融資或沒有資料）的不會通過。融資資料收盤後才公布，換股日只用
+    /// 前一個交易日（含）以前 10 天內最近一筆。例如 -5 代表近一個月融資至少減少 5%。
+    #[param(minimum = -100.0, maximum = 1000.0)]
+    pub(crate) max_margin_change_percent: Option<f64>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

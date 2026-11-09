@@ -13,7 +13,8 @@ WITH weeks AS (
         LIMIT $2::int + 1
     ) recent
 )
-SELECT cur.stock_symbol::text AS stock_symbol, cur.major_percent - base.major_percent AS major_change
+SELECT cur.stock_symbol::text AS stock_symbol, cur.major_percent - base.major_percent AS major_change,
+       cur.percent_400 - base.percent_400 AS holder_400_change
 FROM weeks cw
 JOIN weeks bw ON bw.back = $2::int
 JOIN holder_distribution cur ON cur."date" = cw."date"

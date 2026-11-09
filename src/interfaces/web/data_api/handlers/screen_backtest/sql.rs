@@ -28,8 +28,9 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// （百分點，`NULL` 為不篩）、`$36` 變化的回看週數、`$37` 單季 EPS 年增率下限、`$38` 近 3 年每年 EPS 年增率
 /// 下限、`$39` 創 52 週新高的回看日曆天數、`$40` F 分數下限、`$41` 現金殖利率下限、`$42` 近 5 年填息率下限、
 /// `$43` 平均填息天數上限、`$44` 連續配息年數下限、
-/// `$45` 營收加速月數下限、`$46` 股利成長年數下限（皆 `NULL` 為不篩）、`$47` 是否只選符合 Minervini 趨勢模板；
-/// 籌碼版另有 `$48`／`$49`。
+/// `$45` 營收加速月數下限、`$46` 股利成長年數下限（皆 `NULL` 為不篩）、`$47` 是否只選符合 Minervini 趨勢模板、
+/// `$48` 400 張以上大戶持股比例變化下限（回看週數同 `$36`）、`$49` 融資餘額變化上限（皆 `NULL` 為不篩）；
+/// 籌碼版另有 `$50`／`$51`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號；往後多讀 400 個日曆天，
 ///   計算最後幾期是否在迄日（`$2`）前完成出場）。由 `day_scan` 沿主鍵 `(date, stock_symbol)` 逐日跳到下一個
@@ -48,7 +49,7 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 ///   `/stocks/screen`）；最新一筆早於 `revenue_ord` 超過 2 個月視為沒有資料。`fs`：已公布的最近一季財報，
 ///   以法定期限的隔天起才使用（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1），距換股日超過 3 季不用。兩者都
 ///   只在有設對應門檻時才查。
-/// - `holder_weeks`／`holder_rebal`：只在設 `$35` 時才算。`holder_weeks` 是 `holder_distribution` 的全部資料週
+/// - `holder_weeks`／`holder_rebal`：只在設 `$35` 或 `$48` 時才算。`holder_weeks` 是 `holder_distribution` 的全部資料週
 ///   依日期編號；`holder_rebal` 為每個換股日取日期早於換股日的最近一週（集保週五的資料週六才公布，換股
 ///   當天還看不到），以及它往前第 `$36` 週。最近一週距換股日超過 14 天時該期沒有大戶資料。`filtered` 以
 ///   兩週的 `holder_distribution` 千張比例相減，任一週沒有該股資料就不會通過。
@@ -133,7 +134,10 @@ rebal AS (
 ),
 holder_weeks AS (
     SELECT "date", ROW_NUMBER() OVER (ORDER BY "date") AS wk
-    FROM (SELECT DISTINCT "date" FROM holder_distribution WHERE $35::float8 IS NOT NULL) AS weeks
+    FROM (
+        SELECT DISTINCT "date" FROM holder_distribution
+        WHERE $35::float8 IS NOT NULL OR $48::float8 IS NOT NULL
+    ) AS weeks
 ),
 holder_rebal AS (
     SELECT rb.date, cw."date" AS cur_week, bw."date" AS base_week
@@ -361,7 +365,7 @@ rebal_quotes AS MATERIALIZED (
     };
 }
 
-/// 籌碼版的 CTE 與條件（外資 `$48`、投信 `$49`）。
+/// 籌碼版的 CTE 與條件（外資 `$50`、投信 `$51`）。
 macro_rules! backtest_with_chip_sql_for {
     ($model:ident) => {
         concat!(
@@ -372,7 +376,7 @@ macro_rules! backtest_with_chip_sql_for {
                 $model,
                 "",
                 "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-                "\n      AND ($48::bigint IS NULL OR c.foreign_buy >= $48)\n      AND ($49::bigint IS NULL OR c.trust_buy >= $49)",
+                "\n      AND ($50::bigint IS NULL OR c.foreign_buy >= $50)\n      AND ($51::bigint IS NULL OR c.trust_buy >= $51)",
                 "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
             )
         )
@@ -397,7 +401,7 @@ pub(super) const BACKTEST_NEXT_OPEN_SQL: &str = backtest_sql_for!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$48`）／投信（`$49`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$50`）／投信（`$51`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = backtest_with_chip_sql_for!(close);
 

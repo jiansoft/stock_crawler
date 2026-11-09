@@ -193,13 +193,14 @@ impl<'a> Backtest<'a> {
             )));
         };
         let from = resolve_backtest_period(from, to).map_err(unprocessable)?;
-        let first_week: Option<NaiveDate> = match params.min_major_change {
-            Some(_) => sqlx::query_scalar(FIRST_HOLDER_WEEK_SQL)
-                .fetch_one(database::get_connection())
-                .await
-                .map_err(|error| Box::new(database_error(error)))?,
-            None => None,
-        };
+        let first_week: Option<NaiveDate> =
+            match params.min_major_change.or(params.min_holder_400_change) {
+                Some(_) => sqlx::query_scalar(FIRST_HOLDER_WEEK_SQL)
+                    .fetch_one(database::get_connection())
+                    .await
+                    .map_err(|error| Box::new(database_error(error)))?,
+                None => None,
+            };
         validate_major_change_period(params, from, first_week)
             .map_err(|message| unprocessable(&message))?;
         let split = parse_optional_date(params.split.as_deref()).map_err(unprocessable)?;

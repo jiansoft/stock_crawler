@@ -292,8 +292,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_pb: Option<f64>,
     /// 千張大戶持股比例 N 週變化下限（百分點）；未篩選為 `null`。
     pub(crate) min_major_change: Option<f64>,
-    /// `min_major_change` 的回看週數；未篩選為 `null`。
+    /// `min_major_change` 與 `min_holder_400_change` 的回看週數；兩者都未篩選為 `null`。
     pub(crate) major_change_weeks: Option<u8>,
+    /// 400 張以上大戶持股比例 N 週變化下限（百分點）；未篩選為 `null`。
+    pub(crate) min_holder_400_change: Option<f64>,
     /// 單季 EPS 年增率下限（%）；未篩選為 `null`。
     pub(crate) min_eps_yoy_percent: Option<f64>,
     /// 近 3 年每年 EPS 年增率下限（%）；未篩選為 `null`。
@@ -314,6 +316,8 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) min_dividend_growth_years: Option<u8>,
     /// 只選符合 Minervini 趨勢模板的股票；未篩選為 `false`。
     pub(crate) trend_template: bool,
+    /// 融資餘額變化上限（%）；未篩選為 `null`。
+    pub(crate) max_margin_change_percent: Option<f64>,
     /// 營收加速月數下限；未篩選為 `null`。
     pub(crate) min_revenue_acceleration_months: Option<u8>,
     /// 訊號來源；未篩選為 `null`。

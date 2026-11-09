@@ -23,6 +23,18 @@ fn validate_major_change_ranges() {
     );
     for (query, message) in [
         (
+            "min_holder_400_change=-100.5",
+            "min_holder_400_change 必須介於 -100 至 100",
+        ),
+        (
+            "max_margin_change_percent=-101",
+            "max_margin_change_percent 必須介於 -100 至 1000",
+        ),
+        (
+            "max_margin_change_percent=1000.5",
+            "max_margin_change_percent 必須介於 -100 至 1000",
+        ),
+        (
             "min_major_change=100.5",
             "min_major_change 必須介於 -100 至 100",
         ),
@@ -77,9 +89,23 @@ fn major_change_period_needs_enough_history() {
             .expect_err("沒有大戶資料")
             .contains("沒有任何一週")
     );
+    // 400 張大戶變化同樣受起日限制，訊息指出是哪個參數。
+    let holder_400 = params("min_holder_400_change=0");
+    let early_400 =
+        validate_major_change_period(&holder_400, day(2023, 8, 11), first).expect_err("起日太早");
+    assert!(early_400.contains("min_holder_400_change"), "{early_400}");
+    assert_eq!(
+        validate_major_change_period(&holder_400, day(2023, 8, 12), first),
+        Ok(())
+    );
+    assert!(
+        validate_major_change_period(&holder_400, day(2024, 1, 2), None)
+            .expect_err("沒有大戶資料")
+            .contains("min_holder_400_change")
+    );
 }
 
-/// 四種回測 SQL 都只看日期早於換股日的資料週，並以往前第 `$36` 週相減；籌碼條件改用 `$48`／`$49`。
+/// 四種回測 SQL 都只看日期早於換股日的資料週，並以往前第 `$36` 週相減；籌碼條件改用 `$50`／`$51`。
 #[test]
 fn backtest_sql_uses_only_published_holder_weeks() {
     for sql in [
@@ -93,5 +119,5 @@ fn backtest_sql_uses_only_published_holder_weeks() {
         assert!(sql.contains(r#"cw."date" >= rb.date - 14"#));
         assert!(sql.contains("(hc.major_percent - hb.major_percent)::float8 >= $35"));
     }
-    assert!(!BACKTEST_SQL.contains("$48"));
+    assert!(!BACKTEST_SQL.contains("$50"));
 }

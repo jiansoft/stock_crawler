@@ -82,10 +82,19 @@ async fn screen_at(
         Ok(streaks) => streak_columns(streaks),
         Err(response) => return *response,
     };
-    let (major_symbols, major_changes): (Vec<String>, Vec<rust_decimal::Decimal>) = match majors {
-        Ok(rows) => rows.into_iter().unzip(),
+    let mut major_symbols = Vec::new();
+    let mut major_changes = Vec::new();
+    let mut holder_400_changes = Vec::new();
+    match majors {
+        Ok(rows) => {
+            for (symbol, major_change, holder_400_change) in rows {
+                major_symbols.push(symbol);
+                major_changes.push(major_change);
+                holder_400_changes.push(holder_400_change);
+            }
+        }
         Err(error) => return database_error(error),
-    };
+    }
     let mut breakout_symbols = Vec::new();
     let mut breakout_dates = Vec::new();
     let mut breakout_descriptions = Vec::new();
@@ -152,6 +161,9 @@ async fn screen_at(
         .bind(params.min_revenue_acceleration_months.map(i16::from))
         .bind(params.min_dividend_growth_years.map(i32::from))
         .bind(params.trend_template.unwrap_or(false))
+        .bind(&holder_400_changes)
+        .bind(validated.min_holder_400_change)
+        .bind(validated.max_margin_change_percent)
         // 不快取成具名 prepared statement：同一連線執行約 5 次後 PostgreSQL 會改用 generic plan，
         // 34 個可選條件都剪不掉（2026-10-28 正式庫實測不設條件 custom 316 ms、generic 1,853 ms，
         // auto 模式第 6 次就換成 generic）。每次重新規劃只多 5 ms。
@@ -172,12 +184,13 @@ async fn screen_at(
     }
 }
 
-/// 有設 `min_major_change` 時讀各股的千張大戶持股比例變化；沒有設時不查資料庫，回空清單。
+/// 有設 `min_major_change` 或 `min_holder_400_change` 時讀各股的千張、400 張大戶持股比例變化（400 張沒有資料時
+/// 為 `None`）；都沒有設時不查資料庫，回空清單。
 async fn load_major_changes(
     validated: &ValidatedScreeningParams,
     query_date: NaiveDate,
-) -> Result<Vec<(String, rust_decimal::Decimal)>, sqlx::Error> {
-    if validated.min_major_change.is_none() {
+) -> Result<Vec<(String, rust_decimal::Decimal, Option<rust_decimal::Decimal>)>, sqlx::Error> {
+    if validated.min_major_change.is_none() && validated.min_holder_400_change.is_none() {
         return Ok(Vec::new());
     }
     sqlx::query_as(MAJOR_CHANGES_SQL)
