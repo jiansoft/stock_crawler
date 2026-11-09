@@ -319,8 +319,8 @@ macro_rules! filtered_cte {
       AND (NOT $30::bool OR cf.free_cash_flow_ttm > 0)
       AND ($31::float8 IS NULL OR qv.pe <= $31)
       AND ($32::float8 IS NULL OR qv.pb <= $32)
-      AND ($35::float8 IS NULL OR (hc.major_percent - hb.major_percent)::float8 >= $35)
-      AND ($48::float8 IS NULL OR (hc.percent_400 - hb.percent_400)::float8 >= $48)
+      AND ($35::float8 IS NULL OR COALESCE((hc.major_percent - hb.major_percent)::float8 >= $35, FALSE))
+      AND ($48::float8 IS NULL OR COALESCE((hc.percent_400 - hb.percent_400)::float8 >= $48, FALSE))
       AND ($37::float8 IS NULL OR fy.eps_yoy >= $37)
       AND ($38::float8 IS NULL OR ae.annual_growth >= $38)
       AND ($39::int IS NULL OR EXISTS (
