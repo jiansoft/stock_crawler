@@ -303,6 +303,7 @@ async fn entries_use_current_time() {
         .and(path(HOLIDAY_PATH))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "stat": "OK",
+            "date": format!("{}0101", today.year()),
             "data": [[today.format("%Y-%m-%d").to_string(), "測試休市", ""]],
             "queryYear": today.year(),
             "total": 1

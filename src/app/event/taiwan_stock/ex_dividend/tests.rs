@@ -170,7 +170,7 @@ mod mock_holidays {
             .and(path(ROUTE))
             .and(query_param("date", year.to_string()))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "stat": "ok", "queryYear": year, "total": data.len(), "data": data
+                "stat": "ok", "date": format!("{year}0101"), "queryYear": year, "total": data.len(), "data": data
             })))
             .expect(expected)
             .mount(server)
