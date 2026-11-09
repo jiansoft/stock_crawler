@@ -70,7 +70,7 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) max_avg_fill_days: Option<Decimal>,
     /// 連續配息年數下限。
     pub(super) min_dividend_years: Option<i32>,
-    /// 三十六個固定排序分支之一。
+    /// 三十八個固定排序分支之一。
     pub(super) order_by: &'static str,
     /// 查詢筆數上限。
     pub(super) limit: u8,

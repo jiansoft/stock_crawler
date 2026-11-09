@@ -62,6 +62,8 @@ pub(crate) enum StockScreenSortValue {
     EpsYoy,
     /// 近 3 個年度 EPS 年增率中最低的一年。
     AnnualEpsGrowth,
+    /// 神奇公式名次合計（`asc` 為最好的排前面）。
+    MagicFormula,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -191,6 +193,15 @@ pub(crate) struct ScreenedStock {
     /// 融資餘額最近一筆（查詢日前 10 天內）對往前第 20 筆的變化率（%）；有設 `max_margin_change_percent` 才計算，
     /// 否則或基期為 0 時為 `null`。
     pub(crate) margin_change_percent: Option<f64>,
+    /// 神奇公式（Greenblatt）盈餘殖利率（%）：Yahoo 最新一季（兩季內）往回四季的營業利益合計 ÷ 企業價值
+    /// （收盤 × 目前發行股數 + 有息負債 − 現金）。金融業、不足四季或企業價值 ≤ 0 時為 `null`。
+    pub(crate) earnings_yield_percent: Option<f64>,
+    /// 神奇公式資本報酬率（%）：同一營業利益 ÷（max(淨營運資金, 0) + 不動產廠房設備）；淨營運資金不含現金與
+    /// 有息短期負債。資料不足或資本 ≤ 0 時為 `null`。
+    pub(crate) return_on_capital_percent: Option<f64>,
+    /// 神奇公式名次合計：本次篩選結果中兩個比率都有資料的股票，盈餘殖利率名次 + 資本報酬率名次（越小越好；
+    /// `sort_by=magic_formula&sort_order=asc` 依此排序）。任一比率為 `null` 時為 `null`。
+    pub(crate) magic_formula_rank: Option<i64>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -210,7 +221,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的三十六個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的三十八個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。

@@ -65,6 +65,8 @@ enum BacktestRankByValue {
     PeRatio,
     /// 換股當天官方股價淨值比由低到高（沒有資料的排最後）。
     PbRatio,
+    /// 神奇公式（Greenblatt）：盈餘殖利率名次 + 資本報酬率名次由小到大（沒有資料的排最後）。
+    MagicFormula,
 }
 
 /// OpenAPI 文件使用的持股加權方式。
@@ -140,7 +142,9 @@ pub(crate) struct ScreenBacktestParams {
     /// （近 20 個交易日平均成交金額，偏向大型股）、`foreign_streak`／`trust_streak`（外資／投信連續
     /// 買超天數）、`revenue_yoy`（換股日已公布的最新月營收年增率）、`operating_margin`（換股日已公布的
     /// 最近一季營業利益率）、`pe_ratio`／`pb_ratio`（換股當天官方本益比／股價淨值比由低到高，虧損或沒有
-    /// 資料的排最後）；同值或查不到時再依相對強度分數（查不到的排最後）。`keep_rank` 的名次也依此排序。
+    /// 資料的排最後）、`magic_formula`（神奇公式：換股日已公布最近一季的近四季營業利益 ÷ 企業價值的盈餘殖利率名次，
+    /// 加上 ÷（淨營運資金 + 不動產廠房設備）的資本報酬率名次，合計由小到大；金融業與資料不足的排最後）；
+    /// 同值或查不到時再依相對強度分數（查不到的排最後）。`keep_rank` 的名次也依此排序。
     #[param(value_type = BacktestRankByValue, inline)]
     pub(crate) rank_by: Option<String>,
     /// 0050 核心部位（%，0–100，預設 0）：組合固定以這個比例持有 0050、其餘才依條件選股，

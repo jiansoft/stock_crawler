@@ -116,6 +116,12 @@ pub(super) struct ScreenedStockRow {
     trend_template: Option<bool>,
     /// 融資餘額近 20 筆變化率（%）。
     margin_change_percent: Option<Decimal>,
+    /// 神奇公式盈餘殖利率（%）。
+    earnings_yield_percent: Option<Decimal>,
+    /// 神奇公式資本報酬率（%）。
+    return_on_capital_percent: Option<Decimal>,
+    /// 神奇公式名次合計。
+    magic_formula_rank: Option<i64>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -257,6 +263,17 @@ impl From<ScreenedStockRow> for ScreenedStock {
                 &symbol,
                 "margin_change_percent",
             ),
+            earnings_yield_percent: analytical_decimal_to_f64(
+                row.earnings_yield_percent,
+                &symbol,
+                "earnings_yield_percent",
+            ),
+            return_on_capital_percent: analytical_decimal_to_f64(
+                row.return_on_capital_percent,
+                &symbol,
+                "return_on_capital_percent",
+            ),
+            magic_formula_rank: row.magic_formula_rank,
         }
     }
 }

@@ -34,6 +34,10 @@
 /// `NULL`。每檔都會回傳，`$47` 為 true 時只留符合的股票。
 /// 400 張以上大戶持股比例變化與千張變化一起由 handler 先算好，以 `$48` 平行陣列左接，`$49` 為下限；
 /// 融資餘額變化：查詢日前 10 天內最新一筆一筆對往前第 20 筆（約一個月）的變化率（%），負值代表融資減少；基期融資餘額為 0 （不能融資或沒有資料）的不會通過，只在設 `$50`（上限）時才查。
+/// 神奇公式（Greenblatt）：Yahoo 最新一季資產負債表與截至該季的近四季單季營業利益（EBIT，四季須相連），新鮮度同
+/// 三率（兩季內）。盈餘殖利率 = EBIT ÷（`pv` 收盤 × 股數 + 淨負債），資本報酬率 = EBIT ÷（max(淨營運資金, 0) +
+/// 不動產廠房設備），算法同回測 `magic_inputs`；`magic_formula_rank` 是篩選後兩者都有資料的股票中兩個名次相加
+/// （越小越好），供 `sort_by=magic_formula`。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -83,6 +87,13 @@ WITH latest AS (
         pv.pb_ratio,
         pv.trend_template,
         mg.margin_change_percent,
+        pv.close_price,
+        mf.magic_year,
+        mf.magic_quarter,
+        mf.ebit_ttm,
+        mf.magic_capital,
+        mf.magic_net_debt,
+        mf.magic_shares,
         dv.fill_rate_percent,
         dv.avg_fill_days,
         dv.dividend_years,
@@ -217,6 +228,7 @@ WITH latest AS (
     LEFT JOIN LATERAL (
         -- 查詢日（含）之前 10 天內最新一筆日線的官方本益比、股價淨值比；0（虧損或沒有資料）轉成 NULL。
         SELECT "Date" AS ratio_date,
+            "ClosingPrice" AS close_price,
             CASE WHEN "PriceEarningRatio" > 0 THEN "PriceEarningRatio" END AS pe_ratio,
             CASE WHEN "price-to-book_ratio" > 0 THEN "price-to-book_ratio" END AS pb_ratio,
             -- Minervini 趨勢模板（同一筆日線）；年線或 52 週最低價為 0（資料不足）時為 NULL。
@@ -256,6 +268,51 @@ WITH latest AS (
             LIMIT 1
         ) base
     ) mg ON TRUE
+    LEFT JOIN LATERAL (
+        -- 神奇公式：Yahoo 最新一季資產負債表與截至該季的近四季單季營業利益（四季須相連）。資本 = max(流動資產 − 現金
+        -- −（流動負債 − 短期借款 − 應付短期票券 − 一年內到期長期負債）, 0) + 不動產廠房設備；淨負債 = 上述有息負債 +
+        -- 長期負債 − 現金；股數用目前發行股數（沒有時以股本 ÷ 10 推算）。流動資產或流動負債為 0（金融業）時沒有資料。
+        SELECT b.fiscal_year AS magic_year,
+            SUBSTRING(b.quarter FROM 2)::smallint AS magic_quarter,
+            e.ebit_ttm,
+            GREATEST(
+                (b.current_assets - COALESCE(b.cash_and_equivalents, 0))
+                - (b.current_liabilities - COALESCE(b.short_term_debt, 0)
+                   - COALESCE(b.short_term_bills_payable, 0)
+                   - COALESCE(b.current_portion_of_long_term_liabilities, 0)),
+                0) + b.property_plant_equipment AS magic_capital,
+            COALESCE(b.short_term_debt, 0) + COALESCE(b.short_term_bills_payable, 0)
+                + COALESCE(b.current_portion_of_long_term_liabilities, 0) + COALESCE(b.long_term_liabilities, 0)
+                - COALESCE(b.cash_and_equivalents, 0) AS magic_net_debt,
+            COALESCE(NULLIF(s.issued_share, 0) / 1000.0, b.share_capital / 10.0) AS magic_shares
+        FROM (
+            SELECT fiscal_year, quarter, cash_and_equivalents, current_assets, current_liabilities,
+                short_term_debt, short_term_bills_payable, current_portion_of_long_term_liabilities,
+                long_term_liabilities, property_plant_equipment, share_capital
+            FROM balance_sheet
+            WHERE source = 'yahoo'
+              AND stock_symbol = s.stock_symbol
+              AND period_type = 'single'
+            ORDER BY fiscal_year DESC, quarter DESC
+            LIMIT 1
+        ) b
+        CROSS JOIN LATERAL (
+            SELECT SUM(i.operating_profit) AS ebit_ttm, COUNT(i.operating_profit) AS quarters
+            FROM income_statement i
+            WHERE i.source = 'yahoo'
+              AND i.stock_symbol = s.stock_symbol
+              AND i.period_type = 'single'
+              AND i.fiscal_year BETWEEN b.fiscal_year - 1 AND b.fiscal_year
+              AND i.fiscal_year * 4 + SUBSTRING(i.quarter FROM 2)::int
+                  BETWEEN b.fiscal_year * 4 + SUBSTRING(b.quarter FROM 2)::int - 3
+                      AND b.fiscal_year * 4 + SUBSTRING(b.quarter FROM 2)::int
+        ) e
+        WHERE e.quarters = 4
+          AND b.current_assets > 0
+          AND b.current_liabilities > 0
+          AND b.property_plant_equipment IS NOT NULL
+          AND b.share_capital > 0
+    ) mf ON TRUE
     LEFT JOIN LATERAL (
         -- Yahoo 最新一季單季損益表：營業利益率、稅後淨利率，以及毛利率、營業利益率、稅後淨利率
         -- 是否都高於去年同一季（三率三升；去年同季沒有資料或營收為 0 時為 NULL）。
@@ -430,7 +487,19 @@ WITH latest AS (
         CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
                 + EXTRACT(QUARTER FROM $3::date)::int)
               - (margin_year * 4 + margin_quarter)) BETWEEN 0 AND 2
-          THEN margins_up_raw END AS margins_yoy_up
+          THEN margins_up_raw END AS margins_yoy_up,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (magic_year * 4 + magic_quarter)) BETWEEN 0 AND 2
+          AND close_price > 0 AND close_price * magic_shares + magic_net_debt > 0
+          THEN ROUND(ebit_ttm * 100 / (close_price * magic_shares + magic_net_debt), 2)
+        END AS earnings_yield_percent,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int)
+              - (magic_year * 4 + magic_quarter)) BETWEEN 0 AND 2
+          AND magic_capital > 0
+          THEN ROUND(ebit_ttm * 100 / magic_capital, 2)
+        END AS return_on_capital_percent
     FROM latest
 )
 SELECT
@@ -453,7 +522,15 @@ SELECT
     brk.breakout_date, brk.breakout_description,
     eps_yoy_percent, annual_eps_growth_percent, annual_eps_year, new_high_date,
     fill_rate_percent, avg_fill_days, dividend_years, revenue_acceleration_months, dividend_growth_years,
-    trend_template, margin_change_percent
+    trend_template, margin_change_percent,
+    earnings_yield_percent, return_on_capital_percent,
+    -- 視窗函式在 WHERE 之後計算：只在篩選後、兩個比率都有資料的股票之間排名。
+    CASE WHEN earnings_yield_percent IS NOT NULL AND return_on_capital_percent IS NOT NULL THEN
+        RANK() OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL
+                     ORDER BY earnings_yield_percent DESC)
+        + RANK() OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL
+                       ORDER BY return_on_capital_percent DESC)
+    END AS magic_formula_rank
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol

@@ -108,11 +108,11 @@ async fn screen_at(
         }
         Err(error) => return database_error(error),
     }
-    // ORDER BY 字串只可能來自下方三十六個 &'static str 分支，絕不插入呼叫端
+    // ORDER BY 字串只可能來自下方三十八個 &'static str 分支，絕不插入呼叫端
     // 原始文字；其他條件仍全部使用 bind parameter。
     let sql = format!("{SCREEN_STOCKS_SQL}\n{}\nLIMIT $24", validated.order_by);
     // SQLx 0.9 要求動態字串顯式稽核；此處唯一動態部分已由
-    // `screen_order_by` 限制為三十六個靜態常數，因此可安全標記。
+    // `screen_order_by` 限制為三十八個靜態常數，因此可安全標記。
     let rows: Result<Vec<ScreenedStockRow>, _> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(validated.market_id)
         .bind(params.industry_id)

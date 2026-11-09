@@ -8,6 +8,7 @@ mod canslim;
 mod chip_concentration;
 mod chip_liquidity;
 mod dividend;
+mod magic_formula;
 mod major;
 mod query_plans;
 mod revenue_industry;

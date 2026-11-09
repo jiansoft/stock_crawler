@@ -7,7 +7,10 @@ macro_rules! filtered_cte {
         concat!(
             r#"filtered AS (
     SELECT u.date, u.liquidity_start, u.stock_symbol, u.rs_score, u.rs_rank, u.ret, u.stock_industry_id,
-           rv.revenue_yoy::float8 AS revenue_yoy, ym.operating_margin, qv.pe, qv.pb,"#,
+           rv.revenue_yoy::float8 AS revenue_yoy, ym.operating_margin, qv.pe, qv.pb,
+           CASE WHEN qv.close > 0 AND qv.close * mi.shares + mi.net_debt > 0
+               THEN mi.ebit_ttm / (qv.close * mi.shares + mi.net_debt) END AS earnings_yield,
+           CASE WHEN mi.capital > 0 THEN mi.ebit_ttm / mi.capital END AS return_on_capital,"#,
             $chip_columns,
             r#"
     FROM universe u
@@ -198,9 +201,11 @@ macro_rules! filtered_cte {
     ) cf ON TRUE
     LEFT JOIN LATERAL (
         SELECT CASE WHEN q."PriceEarningRatio" > 0 THEN q."PriceEarningRatio"::float8 END AS pe,
-               CASE WHEN q."price-to-book_ratio" > 0 THEN q."price-to-book_ratio"::float8 END AS pb
+               CASE WHEN q."price-to-book_ratio" > 0 THEN q."price-to-book_ratio"::float8 END AS pb,
+               q."ClosingPrice"::float8 AS close
         FROM "DailyQuotes" q
-        WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL OR $16::text IN ('pe_ratio', 'pb_ratio'))
+        WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL
+               OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula'))
           AND q.stock_symbol = u.stock_symbol
           AND q."Date" = u.date
     ) qv ON TRUE
@@ -289,6 +294,16 @@ macro_rules! filtered_cte {
     -- 股利成長年數：換股年本身還沒過完，以前一年（已完整）的成長年數判斷。
     LEFT JOIN dividend_growth dg
            ON dg.stock_symbol = u.stock_symbol AND dg.yr = EXTRACT(YEAR FROM u.date)::int - 1
+    -- 神奇公式：換股日已過法定期限的最近一季（Q1 5/16、Q2 8/15、Q3 11/15、Q4 隔年 4/1；所有股票同一季）。
+    LEFT JOIN magic_inputs mi
+           ON mi.stock_symbol = u.stock_symbol
+          AND mi.ord = EXTRACT(YEAR FROM u.date)::int * 4 + CASE
+                  WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 11, 15) THEN 3
+                  WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 8, 15) THEN 2
+                  WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 5, 16) THEN 1
+                  WHEN u.date >= make_date(EXTRACT(YEAR FROM u.date)::int, 4, 1) THEN 0
+                  ELSE -1
+              END
     LEFT JOIN holder_rebal hr ON hr.date = u.date
     LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
     LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
