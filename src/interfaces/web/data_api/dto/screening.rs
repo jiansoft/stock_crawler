@@ -116,7 +116,8 @@ pub(crate) struct ScreenedStock {
     pub(crate) earnings_per_share: Option<f64>,
     /// 最新且仍在兩季內的季度 ROE；缺值或過期時為 `null`。
     pub(crate) return_on_equity: Option<f64>,
-    /// 最新且仍在 31 天內的殖利率百分比；缺值或過期時為 `null`。
+    /// 最新且仍在 31 天內的殖利率百分比（同殖利率排行：年度現金加股票股利 ÷ 收盤，除權後依配股攤薄）；
+    /// 缺值或過期時為 `null`。
     pub(crate) dividend_yield_percent: Option<f64>,
     /// 最新且仍在 31 天內的估值區間；缺值或過期時為 `null`。
     pub(crate) valuation_band: Option<String>,

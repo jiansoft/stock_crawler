@@ -367,7 +367,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 | `/market/margin-ranking` | 融資融券排行（增減最多、券資比最高） |
 | `/market/movers` | 當日漲跌幅／成交量排行 |
 | `/market/qfii-holding-ranking` | 外資持股排行 |
-| `/market/dividend-calendar`、`/dividend-yield-ranking` | 股利行事曆；殖利率排行 |
+| `/market/dividend-calendar`、`/dividend-yield-ranking` | 股利行事曆；殖利率排行（年度股利 ÷ 收盤，除權日以後依配股攤薄每股股利） |
 | `/market/cagr-ranking`、`/cagr-ranking/{stock_symbol}` | CAGR 排行與個股 CAGR |
 
 **選股與回測**
@@ -396,7 +396,7 @@ OpenAPI 文件在 `/api-docs/openapi.json`，Swagger UI 在 `/swagger-ui`（不�
 + 融資（只用於新買進）：`max_margin_change_percent`（融資餘額最近一筆對往前第 20 筆的變化率上限，%；融資收盤後才公布，換股日只用前一個交易日以前的資料，基期為 0 的不通過）
 + Minervini 趨勢模板（只用於新買進）：`trend_template=true`，換股當天收盤後的日線 MA20 > MA60 > MA120 > MA240、收盤站上 MA240、不低於 52 週最高價的 75% 且比 52 週最低價高 30% 以上；年線或 52 週最低價為 0（資料不足）的不通過，可搭配 `min_rs_score`
 + Piotroski F 分數：`min_f_score`（0–9；換股當天已公布的最近一個評分年度，年報隔年 4/1 起才用、落後超過 2 年不算；分數來自每日重算的 `financial_f_score_history`）
-+ 存股：`min_dividend_yield_percent`（最近一次除息往回 350 天的現金股利 ÷ 換股日收盤，最近一次除息須在 400 天內）、`min_fill_rate_percent`／`max_avg_fill_days`（近 5 年、換股日前已觀察滿 120 個交易日的除息才算）、`min_dividend_years`（以除息日年度計的連續配息年數）、`min_dividend_growth_years`（股利成長：換股年以前的完整年度現金股利合計，從換股年前一年往回連續不低於前一年的年數）；都讀 `dividend_fill_event`，只用換股當天已經發生的除息
++ 存股：`min_dividend_yield_percent`（最近一次除息往回 350 天的現金股利 ÷ 換股日收盤，最近一次除息須在 400 天內；之後到換股日之間有配股除權時，每股股利依股數倍數攤薄）、`min_fill_rate_percent`／`max_avg_fill_days`（近 5 年、換股日前已觀察滿 120 個交易日的除息才算）、`min_dividend_years`（以除息日年度計的連續配息年數）、`min_dividend_growth_years`（股利成長：換股年以前的完整年度現金股利合計，從換股年前一年往回連續不低於前一年的年數）；都讀 `dividend_fill_event`，只用換股當天已經發生的除息
 + 排序與持股：`rank_by`（相對強度、平均成交金額、法人連續買超、營收年增率、營業利益率、本益比、股價淨值比、`magic_formula` 神奇公式：換股日已公布最近一季的近四季營業利益 ÷ 企業價值與 ÷（淨營運資金 + 不動產廠房設備）兩個名次相加、`peg` PEG 由低到高、`low_volatility` 年化波動度由低到高、`bias240` 年線乖離率由低到高）、`keep_rank`（換股緩衝）、`hold_min_rs_score`（續抱條件）、`max_per_industry`、`min_avg_trade_value`（流動性門檻）
 + 權重：`weighting`（等權、成交金額或其平方根加權）、`max_weight`（單檔上限）、`etf_weight`（0050 核心部位）
 + 大盤濾網（換股日不符就空手）：`market_filter_ma`（加權指數均線）、`market_filter_breadth`（站上 60 日均線比例）、`market_filter_max_pe`（市場本益比中位數）、`market_filter_pe_percentile`（市場本益比中位數在換股日前近 5 年的百分位，只用當天以前的資料）
