@@ -73,6 +73,8 @@ enum BacktestRankByValue {
     LowVolatility,
     /// 換股當天年線乖離率（收盤 ÷ 240 日均線 − 1）由低到高，跌得最深的排前面（沒有年線的排最後）。
     Bias240,
+    /// 換股當天股價淨值比在自身近 5 年的百分位由低到高（相對自己歷史最便宜的排前面，沒有資料的排最後）。
+    PbPercentile,
 }
 
 /// OpenAPI 文件使用的持股加權方式。
@@ -151,7 +153,8 @@ pub(crate) struct ScreenBacktestParams {
     /// 資料的排最後）、`magic_formula`（神奇公式：換股日已公布最近一季的近四季營業利益 ÷ 企業價值的盈餘殖利率名次，
     /// 加上 ÷（淨營運資金 + 不動產廠房設備）的資本報酬率名次，合計由小到大；金融業與資料不足的排最後）、`peg`
     /// （PEG 由低到高，算法同 `max_peg`）、`low_volatility`（年化波動度由低到高，算法同 `max_volatility_percent`）、
-    /// `bias240`（年線乖離率由低到高，算法同 `max_bias240`）；
+    /// `bias240`（年線乖離率由低到高，算法同 `max_bias240`）、`pb_percentile`（股價淨值比近 5 年百分位由低到高，
+    /// 算法同 `max_pb_percentile`）；
     /// 同值或查不到時再依相對強度分數（查不到的排最後）。`keep_rank` 的名次也依此排序。
     #[param(value_type = BacktestRankByValue, inline)]
     pub(crate) rank_by: Option<String>,
@@ -349,6 +352,12 @@ pub(crate) struct ScreenBacktestParams {
     /// 只數得到 3～4 年。
     #[param(minimum = 1, maximum = 30)]
     pub(crate) min_profit_years: Option<u8>,
+    /// 股價淨值比歷史分位上限（0–100；只用於新買進）：換股當天官方股價淨值比在自身近 5 年（日曆年）每日股價
+    /// 淨值比中的百分位（比當天低的天數 ÷ (樣本數 − 1) × 100，0 為 5 年最低），例如 20 只選位在自己 5 年河流圖
+    /// 低檔的股票；近 5 年樣本不足 480 筆（約 2 年）的沒有資料、不會通過。配股除權後官方淨值比的每股淨值要到下次
+    /// 財報才更新，期間百分位會偏低。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) max_pb_percentile: Option<f64>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

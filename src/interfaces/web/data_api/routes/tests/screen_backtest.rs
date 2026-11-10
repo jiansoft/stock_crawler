@@ -17,6 +17,7 @@ mod major;
 mod margins;
 mod mean_reversion;
 mod offsets;
+mod pb_percentile;
 mod peg;
 mod periods;
 mod presets;
@@ -73,6 +74,7 @@ async fn cleanup(pool: &sqlx::PgPool) {
         "DELETE FROM financial_f_score_history WHERE stock_symbol = ANY($1)",
         "DELETE FROM dividend_fill_event WHERE stock_symbol = ANY($1)",
         "DELETE FROM dividend WHERE security_code = ANY($1)",
+        "DELETE FROM daily_pb_percentile WHERE stock_symbol = ANY($1)",
         "DELETE FROM stocks WHERE stock_symbol = ANY($1)",
     ] {
         let _ = sqlx::query(sql).bind(&symbols).execute(pool).await;

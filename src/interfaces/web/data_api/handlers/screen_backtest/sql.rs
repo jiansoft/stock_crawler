@@ -30,8 +30,8 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// `$43` 平均填息天數上限、`$44` 連續配息年數下限、
 /// `$45` 營收加速月數下限、`$46` 股利成長年數下限（皆 `NULL` 為不篩）、`$47` 是否只選符合 Minervini 趨勢模板、
 /// `$48` 400 張以上大戶持股比例變化下限（回看週數同 `$36`）、`$49` 融資餘額變化上限、`$50` PEG 上限、`$51` 年化
-/// 波動度上限、`$52` beta 上限、`$53` 年線乖離率上限、`$54` 市值下限（億元）、`$55` 連續獲利年數下限（皆 `NULL`
-/// 為不篩）；籌碼版另有 `$56`／`$57`。
+/// 波動度上限、`$52` beta 上限、`$53` 年線乖離率上限、`$54` 市值下限（億元）、`$55` 連續獲利年數下限、`$56` 股價淨值比
+/// 近 5 年百分位上限（皆 `NULL` 為不篩）；籌碼版另有 `$57`／`$58`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號；往後多讀 400 個日曆天，
 ///   計算最後幾期是否在迄日（`$2`）前完成出場）。由 `day_scan` 沿主鍵 `(date, stock_symbol)` 逐日跳到下一個
@@ -92,7 +92,7 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// - `picks`／`candidates`：再通過流動性門檻的股票依 `$16` 排序（`rs_score` 為相對強度，其餘為
 ///   成交金額或法人連續買超天數，本益比與股價淨值比由低到高；`magic_formula` 為同一換股日兩者都有資料的股票
 ///   中盈餘殖利率名次 + 資本報酬率名次由小到大，`peg` 為 PEG 由低到高，`low_volatility` 為年化波動度由低到高，
-///   `bias240` 為年線乖離率由低到高（跌得最深的排前面），
+///   `bias240` 為年線乖離率由低到高（跌得最深的排前面），`pb_percentile` 為股價淨值比近 5 年百分位由低到高，
 ///   沒有資料的排最後；同值再依相對強度分數與名次 `rs_rank`）的前 `$5` 檔與各自的報酬、產業編號、平均成交
 ///   金額；實際持股由 [`select_holdings`] 依上一期持股、`keep_rank` 與 `max_per_industry` 決定。
 /// - `holdable`：相對強度不低於 `$12` 的母體股票，供上一期持股判斷能否續抱（不看其他選股條件）。
@@ -367,6 +367,7 @@ picks AS (
                             WHEN 'peg' THEN -peg
                             WHEN 'low_volatility' THEN -volatility
                             WHEN 'bias240' THEN -bias240
+                            WHEN 'pb_percentile' THEN -pb_percentile
                         END DESC NULLS LAST,
                         "#, rs_rank_order!(), r#"
            ) AS pick_rank
@@ -519,7 +520,7 @@ rebal_quotes AS MATERIALIZED (
     };
 }
 
-/// 籌碼版的 CTE 與條件（外資 `$56`、投信 `$57`）。
+/// 籌碼版的 CTE 與條件（外資 `$57`、投信 `$58`）。
 macro_rules! backtest_with_chip_sql_for {
     ($model:ident) => {
         concat!(
@@ -530,7 +531,7 @@ macro_rules! backtest_with_chip_sql_for {
                 $model,
                 "",
                 "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-                "\n      AND ($56::bigint IS NULL OR c.foreign_buy >= $56)\n      AND ($57::bigint IS NULL OR c.trust_buy >= $57)",
+                "\n      AND ($57::bigint IS NULL OR c.foreign_buy >= $57)\n      AND ($58::bigint IS NULL OR c.trust_buy >= $58)",
                 "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
             )
         )
@@ -555,7 +556,7 @@ pub(super) const BACKTEST_NEXT_OPEN_SQL: &str = backtest_sql_for!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$56`）／投信（`$57`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$57`）／投信（`$58`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = backtest_with_chip_sql_for!(close);
 
