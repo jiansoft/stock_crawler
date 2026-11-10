@@ -148,6 +148,10 @@ pub(super) struct ScreenedStockRow {
     pb_percentile: Option<Decimal>,
     /// 近四季研發費用率（%）。
     rd_ratio_percent: Option<Decimal>,
+    /// 本益比 × 股價淨值比。
+    pe_pb_product: Option<Decimal>,
+    /// 流動比率（倍）。
+    current_ratio: Option<Decimal>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -341,6 +345,8 @@ impl From<ScreenedStockRow> for ScreenedStock {
                 &symbol,
                 "rd_ratio_percent",
             ),
+            pe_pb_product: analytical_decimal_to_f64(row.pe_pb_product, &symbol, "pe_pb_product"),
+            current_ratio: analytical_decimal_to_f64(row.current_ratio, &symbol, "current_ratio"),
         }
     }
 }

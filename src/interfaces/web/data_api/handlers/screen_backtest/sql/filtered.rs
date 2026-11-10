@@ -13,7 +13,9 @@ macro_rules! filtered_cte {
            CASE WHEN mi.capital > 0 THEN mi.ebit_ttm / mi.capital END AS return_on_capital,
            -- 成長率超過 100%（多為低基期轉盈）時 PEG 失真，不計算。
            CASE WHEN qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 THEN qv.pe / eg.growth END AS peg,
-           rk.volatility, pp.pb_percentile, rdr.rd_ratio,"#,
+           rk.volatility, pp.pb_percentile, rdr.rd_ratio,
+           -- 葛拉漢乘積：本益比 × 股價淨值比（`qv` 已把 0 以下轉成 NULL，虧損股沒有資料）。
+           qv.pe * qv.pb AS pe_pb_product,"#,
             $chip_columns,
             r#"
     FROM universe u
@@ -211,8 +213,8 @@ macro_rules! filtered_cte {
                    THEN (q."ClosingPrice" / q."MovingAverage240" - 1)::float8 * 100 END AS bias240
         FROM "DailyQuotes" q
         WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL OR $50::float8 IS NOT NULL
-               OR $53::float8 IS NOT NULL OR $54::float8 IS NOT NULL
-               OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg', 'bias240'))
+               OR $53::float8 IS NOT NULL OR $54::float8 IS NOT NULL OR $58::float8 IS NOT NULL
+               OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg', 'bias240', 'pe_pb_product'))
           AND q.stock_symbol = u.stock_symbol
           AND q."Date" = u.date
     ) qv ON TRUE
@@ -365,6 +367,28 @@ macro_rules! filtered_cte {
         HAVING COUNT(r.rd_expenses) = 4 AND COUNT(r.revenue) = 4 AND MAX(r.ord) - MIN(r.ord) = 3
            AND (EXTRACT(YEAR FROM u.date)::int * 4 + EXTRACT(QUARTER FROM u.date)::int) - MAX(r.ord) <= 3
     ) rdr ON TRUE
+    LEFT JOIN LATERAL (
+        -- 流動比率（倍）：換股日已公布最新一季（3 季內）Yahoo 資產負債表的流動資產 ÷ 流動負債；公布時點同三率，
+        -- 流動負債不大於 0 時沒有資料。只在設 `$59` 時才查。
+        SELECT CASE WHEN b.current_liabilities > 0
+                   THEN b.current_assets::float8 / b.current_liabilities::float8 END AS current_ratio
+        FROM balance_sheet b
+        WHERE $59::float8 IS NOT NULL
+          AND b.source = 'yahoo'
+          AND b.stock_symbol = u.stock_symbol
+          AND b.period_type = 'single'
+          AND b.fiscal_year BETWEEN EXTRACT(YEAR FROM u.date)::int - 1 AND EXTRACT(YEAR FROM u.date)::int
+          AND CASE b.quarter
+                      WHEN 'Q1' THEN make_date(b.fiscal_year, 5, 16)
+                      WHEN 'Q2' THEN make_date(b.fiscal_year, 8, 15)
+                      WHEN 'Q3' THEN make_date(b.fiscal_year, 11, 15)
+                      ELSE make_date(b.fiscal_year + 1, 4, 1)
+                  END <= u.date
+          AND (EXTRACT(YEAR FROM u.date)::int * 4 + EXTRACT(QUARTER FROM u.date)::int)
+              - (b.fiscal_year * 4 + SUBSTRING(b.quarter FROM 2)::int) <= 3
+        ORDER BY b.fiscal_year DESC, b.quarter DESC
+        LIMIT 1
+    ) bsr ON TRUE
     LEFT JOIN holder_rebal hr ON hr.date = u.date
     LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
     LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
@@ -434,7 +458,9 @@ macro_rules! filtered_cte {
       )) >= $54 * 100000, FALSE))
       AND ($55::int IS NULL OR COALESCE(ps.profit_years >= $55, FALSE))
       AND ($56::float8 IS NULL OR COALESCE(pp.pb_percentile <= $56, FALSE))
-      AND ($57::float8 IS NULL OR COALESCE(rdr.rd_ratio >= $57, FALSE))"#,
+      AND ($57::float8 IS NULL OR COALESCE(rdr.rd_ratio >= $57, FALSE))
+      AND ($58::float8 IS NULL OR COALESCE(qv.pe * qv.pb <= $58, FALSE))
+      AND ($59::float8 IS NULL OR COALESCE(bsr.current_ratio >= $59, FALSE))"#,
             $chip_filter,
             "\n)"
         )

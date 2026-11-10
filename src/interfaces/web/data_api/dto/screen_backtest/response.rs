@@ -334,6 +334,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_pb_percentile: Option<f64>,
     /// 近四季研發費用率下限（%）；未篩選為 `null`。
     pub(crate) min_rd_ratio_percent: Option<f64>,
+    /// 本益比 × 股價淨值比上限；未篩選為 `null`。
+    pub(crate) max_pe_pb_product: Option<f64>,
+    /// 流動比率下限（倍）；未篩選為 `null`。
+    pub(crate) min_current_ratio: Option<f64>,
     /// 營收加速月數下限；未篩選為 `null`。
     pub(crate) min_revenue_acceleration_months: Option<u8>,
     /// 訊號來源；未篩選為 `null`。

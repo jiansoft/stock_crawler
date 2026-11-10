@@ -91,6 +91,8 @@ async fn phase2_phase3_query_plans_use_existing_indexes() {
         .bind(Option::<i32>::None)
         .bind(Option::<Decimal>::None)
         .bind(Option::<Decimal>::None)
+        .bind(Option::<Decimal>::None)
+        .bind(Option::<Decimal>::None)
         .fetch_all(pool)
         .await
         .expect("screen EXPLAIN");

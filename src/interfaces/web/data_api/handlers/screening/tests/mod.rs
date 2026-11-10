@@ -9,6 +9,7 @@ mod canslim;
 mod chip_concentration;
 mod chip_liquidity;
 mod dividend;
+mod graham;
 mod magic_formula;
 mod major;
 mod pb_percentile;
@@ -87,6 +88,8 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_profit_years: None,
         max_pb_percentile: None,
         min_rd_ratio_percent: None,
+        max_pe_pb_product: None,
+        min_current_ratio: None,
         sort_by: None,
         sort_order: None,
         limit: None,
