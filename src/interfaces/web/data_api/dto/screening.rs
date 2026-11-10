@@ -74,6 +74,8 @@ pub(crate) enum StockScreenSortValue {
     Bias240,
     /// 股價淨值比近 5 年百分位（`asc` 為相對自己歷史最便宜的排前面）。
     PbPercentile,
+    /// 近四季研發費用率（`desc` 為研發投入比重最高的排前面）。
+    RdRatio,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -242,6 +244,9 @@ pub(crate) struct ScreenedStock {
     pub(crate) profit_years: Option<i32>,
     /// 股價淨值比近 5 年百分位（0–100，0 為 5 年最低）：查詢日前 10 天內最新一筆；近 5 年樣本不足 480 筆時為 `null`。
     pub(crate) pb_percentile: Option<f64>,
+    /// 近四季研發費用率（%）：Yahoo 最近 4 季單季損益表（須相連、最新一季在兩季內）研發費用合計 ÷ 營收合計；
+    /// 資料不足時為 `null`。
+    pub(crate) rd_ratio_percent: Option<f64>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -261,7 +266,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的四十八個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的五十個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -381,6 +386,10 @@ pub(crate) struct StockScreeningParams {
     /// 皆算篩選條件。配股除權後官方淨值比的每股淨值要到下次財報才更新，期間百分位會偏低。
     #[param(minimum = 0, maximum = 100)]
     pub(crate) max_pb_percentile: Option<f64>,
+    /// 研發費用率下限（%，0–100）：最近 4 季研發費用合計 ÷ 營收合計，例如 5 只留研發投入至少營收 5% 的股票；
+    /// 每檔附 `rd_ratio_percent`。建議搭配 EPS 或營收成長條件找研發成長股。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) min_rd_ratio_percent: Option<f64>,
     /// 只留最近 N 個交易日（含查詢日，1–20）出現區間突破（`range_breakout`／`breakout`）、且突破後還沒
     /// 跌回突破價（沒有 `failed`）的股票；回應附最近一次突破的日期與說明。2019 年起回測單獨依區間突破
     /// 選股明顯輸 0050，只供參考。

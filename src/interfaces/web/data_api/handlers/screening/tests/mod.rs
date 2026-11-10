@@ -14,6 +14,7 @@ mod major;
 mod pb_percentile;
 mod peg;
 mod query_plans;
+mod rd_ratio;
 mod revenue_industry;
 mod steady;
 mod trend;
@@ -85,6 +86,7 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_market_cap: None,
         min_profit_years: None,
         max_pb_percentile: None,
+        min_rd_ratio_percent: None,
         sort_by: None,
         sort_order: None,
         limit: None,

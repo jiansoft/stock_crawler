@@ -13,7 +13,7 @@ macro_rules! filtered_cte {
            CASE WHEN mi.capital > 0 THEN mi.ebit_ttm / mi.capital END AS return_on_capital,
            -- 成長率超過 100%（多為低基期轉盈）時 PEG 失真，不計算。
            CASE WHEN qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 THEN qv.pe / eg.growth END AS peg,
-           rk.volatility, pp.pb_percentile,"#,
+           rk.volatility, pp.pb_percentile, rdr.rd_ratio,"#,
             $chip_columns,
             r#"
     FROM universe u
@@ -341,6 +341,30 @@ macro_rules! filtered_cte {
           AND p.date = u.date
           AND p.stock_symbol = u.stock_symbol
     ) pp ON TRUE
+    LEFT JOIN LATERAL (
+        -- 研發費用率（%）：換股日已公布最近一季往回四季（季別須相連、最新一季在 3 季內）的研發費用合計 ÷ 營收合計；
+        -- 公布時點同三率（`ym`）。只在設 `$57` 或依研發費用率排序時才查。
+        SELECT SUM(r.rd_expenses)::float8 * 100 / NULLIF(SUM(r.revenue), 0)::float8 AS rd_ratio
+        FROM (
+            SELECT i.rd_expenses, i.revenue, i.fiscal_year * 4 + SUBSTRING(i.quarter FROM 2)::int AS ord
+            FROM income_statement i
+            WHERE ($57::float8 IS NOT NULL OR $16::text = 'rd_ratio')
+              AND i.source = 'yahoo'
+              AND i.stock_symbol = u.stock_symbol
+              AND i.period_type = 'single'
+              AND i.fiscal_year BETWEEN EXTRACT(YEAR FROM u.date)::int - 2 AND EXTRACT(YEAR FROM u.date)::int
+              AND CASE i.quarter
+                          WHEN 'Q1' THEN make_date(i.fiscal_year, 5, 16)
+                          WHEN 'Q2' THEN make_date(i.fiscal_year, 8, 15)
+                          WHEN 'Q3' THEN make_date(i.fiscal_year, 11, 15)
+                          ELSE make_date(i.fiscal_year + 1, 4, 1)
+                      END <= u.date
+            ORDER BY i.fiscal_year DESC, i.quarter DESC
+            LIMIT 4
+        ) r
+        HAVING COUNT(r.rd_expenses) = 4 AND COUNT(r.revenue) = 4 AND MAX(r.ord) - MIN(r.ord) = 3
+           AND (EXTRACT(YEAR FROM u.date)::int * 4 + EXTRACT(QUARTER FROM u.date)::int) - MAX(r.ord) <= 3
+    ) rdr ON TRUE
     LEFT JOIN holder_rebal hr ON hr.date = u.date
     LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
     LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
@@ -409,7 +433,8 @@ macro_rules! filtered_cte {
           SELECT NULLIF(st.issued_share, 0)::float8 / 1000 FROM stocks st WHERE st.stock_symbol = u.stock_symbol
       )) >= $54 * 100000, FALSE))
       AND ($55::int IS NULL OR COALESCE(ps.profit_years >= $55, FALSE))
-      AND ($56::float8 IS NULL OR COALESCE(pp.pb_percentile <= $56, FALSE))"#,
+      AND ($56::float8 IS NULL OR COALESCE(pp.pb_percentile <= $56, FALSE))
+      AND ($57::float8 IS NULL OR COALESCE(rdr.rd_ratio >= $57, FALSE))"#,
             $chip_filter,
             "\n)"
         )

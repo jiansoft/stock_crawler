@@ -76,6 +76,9 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     if !within(params.max_pb_percentile, 0.0, 100.0) {
         return Err("max_pb_percentile 必須介於 0 至 100");
     }
+    if !within(params.min_rd_ratio_percent, 0.0, 100.0) {
+        return Err("min_rd_ratio_percent 必須介於 0 至 100");
+    }
     if params
         .major_change_weeks
         .is_some_and(|weeks| !(1..=12).contains(&weeks))
