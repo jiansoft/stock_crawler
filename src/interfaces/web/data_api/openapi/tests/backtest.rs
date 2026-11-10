@@ -66,7 +66,8 @@ fn openapi_screen_backtest_schema_pins_field_names() {
             "magic_formula",
             "peg",
             "low_volatility",
-            "bias240"
+            "bias240",
+            "pb_percentile"
         ])
     );
     for (name, schema) in [

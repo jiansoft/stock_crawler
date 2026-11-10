@@ -47,6 +47,8 @@
 /// 市值（億元）：`pv` 收盤 × 目前發行股數（`stocks.issued_share`，為 0 時為 NULL），`$55` 為下限。連續獲利年數：已公布
 /// （隔年 4/1 起）的年度 EPS（`quarter = ''`）從最新年度往回連續 > 0（年度相連）的年數，最新年度落後查詢年超過 2 年
 /// 為 0，`$56` 為下限；兩者每檔都會回傳。
+/// 便宜價：查詢日前 10 天內最新一筆 `daily_pb_percentile`（股價淨值比在自身近 5 年的百分位），`$57` 為上限；
+/// 供 `sort_by=pb_percentile`。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -114,7 +116,8 @@ WITH latest AS (
         dv.dividend_years,
         dv.dividend_growth_years,
         ROUND(pv.close_price * NULLIF(s.issued_share, 0) / 100000000.0, 2) AS market_cap,
-        pf.profit_years
+        pf.profit_years,
+        pp.pb_percentile
     FROM stocks s
     LEFT JOIN LATERAL (
         -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
@@ -358,6 +361,15 @@ WITH latest AS (
         ORDER BY date DESC
         LIMIT 1
     ) rk ON TRUE
+    LEFT JOIN LATERAL (
+        -- 便宜價：查詢日前 10 天內最新一筆股價淨值比分位。
+        SELECT pb_percentile
+        FROM daily_pb_percentile
+        WHERE stock_symbol = s.stock_symbol
+          AND date BETWEEN $3::date - 10 AND $3::date
+        ORDER BY date DESC
+        LIMIT 1
+    ) pp ON TRUE
     LEFT JOIN LATERAL (
         -- Yahoo 最新一季單季損益表：營業利益率、稅後淨利率，以及毛利率、營業利益率、稅後淨利率
         -- 是否都高於去年同一季（三率三升；去年同季沒有資料或營收為 0 時為 NULL）。
@@ -615,7 +627,7 @@ SELECT
         COUNT(*) OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL)
     END AS magic_formula_ranked_count,
     operating_income_ttm, invested_capital, enterprise_value, volatility_percent, beta, bias240_percent,
-    market_cap, profit_years
+    market_cap, profit_years, pb_percentile
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -668,4 +680,5 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($54::numeric IS NULL OR bias240_percent <= $54)
   AND ($55::numeric IS NULL OR market_cap >= $55)
   AND ($56::int IS NULL OR profit_years >= $56)
+  AND ($57::numeric IS NULL OR pb_percentile <= $57)
 "#;

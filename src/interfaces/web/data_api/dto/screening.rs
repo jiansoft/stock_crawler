@@ -72,6 +72,8 @@ pub(crate) enum StockScreenSortValue {
     Beta,
     /// 年線乖離率（`asc` 為跌得最深的排前面）。
     Bias240,
+    /// 股價淨值比近 5 年百分位（`asc` 為相對自己歷史最便宜的排前面）。
+    PbPercentile,
 }
 
 /// OpenAPI 文件使用的排序方向。
@@ -238,6 +240,8 @@ pub(crate) struct ScreenedStock {
     /// 連續獲利年數：已公布（隔年 4/1 起）的年度 EPS 從最新年度往回連續大於 0（年度相連）的年數；最新年度落後
     /// 查詢年超過 2 年或沒有年度 EPS 時為 0。
     pub(crate) profit_years: Option<i32>,
+    /// 股價淨值比近 5 年百分位（0–100，0 為 5 年最低）：查詢日前 10 天內最新一筆；近 5 年樣本不足 480 筆時為 `null`。
+    pub(crate) pb_percentile: Option<f64>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -257,7 +261,7 @@ pub(crate) struct StockScreeningResponse {
 /// 條件選股 endpoint 的固定白名單 query string。
 ///
 /// 所有數值欄位先在 handler 驗證範圍，再轉成 PostgreSQL `NUMERIC` 綁定值；
-/// `sort_by` 與 `sort_order` 只會映射到程式內建的四十六個排序分支。
+/// `sort_by` 與 `sort_order` 只會映射到程式內建的四十八個排序分支。
 #[derive(Debug, Deserialize, IntoParams)]
 pub(crate) struct StockScreeningParams {
     /// 市場：`all`（預設）、`twse` 或 `tpex`。
@@ -372,6 +376,11 @@ pub(crate) struct StockScreeningParams {
     /// 可搭配 `min_market_cap`、`min_dividend_yield_percent`、`min_dividend_years` 找安心存股。
     #[param(minimum = 1, maximum = 30)]
     pub(crate) min_profit_years: Option<u8>,
+    /// 股價淨值比歷史分位上限（0–100）：最新官方股價淨值比在自身近 5 年每日股價淨值比中的百分位（0 為 5 年最低），
+    /// 例如 20 只留位在自己 5 年河流圖低檔的股票；每檔附 `pb_percentile`。單獨使用或 `sort_by=pb_percentile`
+    /// 皆算篩選條件。配股除權後官方淨值比的每股淨值要到下次財報才更新，期間百分位會偏低。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) max_pb_percentile: Option<f64>,
     /// 只留最近 N 個交易日（含查詢日，1–20）出現區間突破（`range_breakout`／`breakout`）、且突破後還沒
     /// 跌回突破價（沒有 `failed`）的股票；回應附最近一次突破的日期與說明。2019 年起回測單獨依區間突破
     /// 選股明顯輸 0050，只供參考。

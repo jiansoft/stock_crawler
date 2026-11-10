@@ -73,6 +73,9 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     {
         return Err("min_profit_years 必須介於 1 至 30");
     }
+    if !within(params.max_pb_percentile, 0.0, 100.0) {
+        return Err("max_pb_percentile 必須介於 0 至 100");
+    }
     if params
         .major_change_weeks
         .is_some_and(|weeks| !(1..=12).contains(&weeks))

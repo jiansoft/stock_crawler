@@ -144,6 +144,8 @@ pub(super) struct ScreenedStockRow {
     market_cap: Option<Decimal>,
     /// 連續獲利年數。
     profit_years: Option<i32>,
+    /// 股價淨值比近 5 年百分位。
+    pb_percentile: Option<Decimal>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -331,6 +333,7 @@ impl From<ScreenedStockRow> for ScreenedStock {
             ),
             market_cap: analytical_decimal_to_f64(row.market_cap, &symbol, "market_cap"),
             profit_years: row.profit_years,
+            pb_percentile: analytical_decimal_to_f64(row.pb_percentile, &symbol, "pb_percentile"),
         }
     }
 }

@@ -16,6 +16,8 @@ pub mod financial_health;
 pub mod forward_return;
 /// 計算每日市值
 pub mod money_history;
+/// 收盤後寫入每日股價淨值比歷史分位（`daily_pb_percentile`：近 5 年百分位）。
+pub mod pb_percentile;
 /// 收盤後寫入每日相對強度（`daily_relative_strength`）。
 pub mod relative_strength;
 /// 收盤後寫入每日風險指標（`daily_risk_metric`：年化波動度與 beta）。

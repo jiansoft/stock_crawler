@@ -11,6 +11,7 @@ mod chip_liquidity;
 mod dividend;
 mod magic_formula;
 mod major;
+mod pb_percentile;
 mod peg;
 mod query_plans;
 mod revenue_industry;
@@ -83,6 +84,7 @@ pub(super) fn screening_params() -> StockScreeningParams {
         max_bias240: None,
         min_market_cap: None,
         min_profit_years: None,
+        max_pb_percentile: None,
         sort_by: None,
         sort_order: None,
         limit: None,

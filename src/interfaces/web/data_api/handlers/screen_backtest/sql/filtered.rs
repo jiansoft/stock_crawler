@@ -13,7 +13,7 @@ macro_rules! filtered_cte {
            CASE WHEN mi.capital > 0 THEN mi.ebit_ttm / mi.capital END AS return_on_capital,
            -- 成長率超過 100%（多為低基期轉盈）時 PEG 失真，不計算。
            CASE WHEN qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 THEN qv.pe / eg.growth END AS peg,
-           rk.volatility,"#,
+           rk.volatility, pp.pb_percentile,"#,
             $chip_columns,
             r#"
     FROM universe u
@@ -332,6 +332,15 @@ macro_rules! filtered_cte {
           AND r.date = u.date
           AND r.stock_symbol = u.stock_symbol
     ) rk ON TRUE
+    LEFT JOIN LATERAL (
+        -- 便宜價：換股當天收盤後的股價淨值比近 5 年百分位（與收盤買進同一時點）；只在設 `$56` 或依淨值比分位
+        -- 排序時才查（主鍵查詢）。
+        SELECT p.pb_percentile::float8 AS pb_percentile
+        FROM daily_pb_percentile p
+        WHERE ($56::float8 IS NOT NULL OR $16::text = 'pb_percentile')
+          AND p.date = u.date
+          AND p.stock_symbol = u.stock_symbol
+    ) pp ON TRUE
     LEFT JOIN holder_rebal hr ON hr.date = u.date
     LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
     LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
@@ -399,7 +408,8 @@ macro_rules! filtered_cte {
       AND ($54::float8 IS NULL OR COALESCE(qv.close * COALESCE(sc.shares, (
           SELECT NULLIF(st.issued_share, 0)::float8 / 1000 FROM stocks st WHERE st.stock_symbol = u.stock_symbol
       )) >= $54 * 100000, FALSE))
-      AND ($55::int IS NULL OR COALESCE(ps.profit_years >= $55, FALSE))"#,
+      AND ($55::int IS NULL OR COALESCE(ps.profit_years >= $55, FALSE))
+      AND ($56::float8 IS NULL OR COALESCE(pp.pb_percentile <= $56, FALSE))"#,
             $chip_filter,
             "\n)"
         )
