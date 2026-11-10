@@ -194,6 +194,11 @@ pub(crate) async fn aggregate(date: NaiveDate) -> Result<()> {
         Ok(count) => tracing::info!("寫入風險指標結束:{count}"),
         Err(why) => tracing::error!("寫入風險指標失敗: {why:#}"),
     }
+    // 股價淨值比分位只供選股與回測的便宜價條件使用，失敗只記錄，可用手動回補補算
+    match calculation::pb_percentile::calculate_pb_percentiles(date).await {
+        Ok(count) => tracing::info!("寫入股價淨值比分位結束:{count}"),
+        Err(why) => tracing::error!("寫入股價淨值比分位失敗: {why:#}"),
+    }
 
     // 清除記憶與Redis內所有的快取
     TTL.clear();

@@ -21,6 +21,9 @@
 //! - `test_backfill_risk_metrics`：
 //!   逐年重算 `MANUAL_RISK_METRIC_FROM`～`MANUAL_RISK_METRIC_TO`（預設 [`MANUAL_RISK_METRIC_FROM`] 至今天）每個
 //!   交易日的風險指標（`daily_risk_metric`）；只讀日線與加權指數，同一段日期整段替換，重跑安全。
+//! - `test_backfill_pb_percentiles`：
+//!   逐月重算 `MANUAL_PB_PERCENTILE_FROM`～`MANUAL_PB_PERCENTILE_TO`（預設 [`MANUAL_PB_PERCENTILE_FROM`] 至今天）
+//!   每個交易日的股價淨值比分位（`daily_pb_percentile`）；只讀日線，同一段日期整段替換，重跑安全。
 //! - `test_rebuild_dividend_fill_events`：
 //!   整批重算除權息填息事件（`dividend_fill_event`），新建表或要立即反映股利修正時用；重跑安全。
 
@@ -32,6 +35,9 @@ const MANUAL_FORWARD_RETURN_FROM: &str = "2019-01-02";
 
 /// 風險指標回填的預設起日：回測從 2019 年起，第一個換股日就要有近 240 筆日線的指標。
 const MANUAL_RISK_METRIC_FROM: &str = "2019-01-02";
+
+/// 股價淨值比分位回填的預設起日：與風險指標一致，回測從 2019 年起；官方淨值比從 2012 年起，2019 年已有近 5 年樣本。
+const MANUAL_PB_PERCENTILE_FROM: &str = "2019-01-02";
 
 /// 每日相對強度回填的預設起日：240 日報酬的基準日從 2018 年初齊，相對強度從 2019 年初起算。
 const MANUAL_RELATIVE_STRENGTH_FROM: &str = "2019-01-02";
@@ -370,6 +376,44 @@ async fn test_backfill_risk_metrics() {
         start = end.succ_opt().expect("日期合法");
     }
     println!("風險指標回填 {from}～{to}：共 {total} 列");
+}
+
+/// 逐月重算股價淨值比分位（`daily_pb_percentile`，平常由收盤匯總算當天）。**會寫入資料庫**；每月一個交易，
+/// 失敗時那個月保留舊資料，重跑安全（正式庫一個月約 13 秒）。
+///
+/// 執行範例：
+/// `MANUAL_PB_PERCENTILE_FROM=2024-01-01 cargo test app::manual_backfill::derived::test_backfill_pb_percentiles -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn test_backfill_pb_percentiles() {
+    dotenvy::dotenv().ok();
+    use chrono::Datelike;
+
+    let today = chrono::Local::now().date_naive().to_string();
+    let date = |name: &str, default: &str| {
+        let raw = std::env::var(name).unwrap_or_else(|_| default.to_owned());
+        NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| panic!("{name} 格式錯誤：{raw}"))
+    };
+    let from = date("MANUAL_PB_PERCENTILE_FROM", MANUAL_PB_PERCENTILE_FROM);
+    let to = date("MANUAL_PB_PERCENTILE_TO", &today);
+    let mut start = from;
+    let mut total = 0;
+    while start <= to {
+        let next_month = start
+            .with_day(1)
+            .and_then(|first| first.checked_add_months(chrono::Months::new(1)))
+            .expect("下個月日期合法");
+        let end = next_month.pred_opt().expect("月底日期合法").min(to);
+        let count =
+            crate::app::calculation::pb_percentile::calculate_pb_percentiles_between(start, end)
+                .await
+                .unwrap_or_else(|why| panic!("{start}～{end} 股價淨值比分位寫入失敗：{why:#}"));
+        total += count;
+        println!("{start}～{end}：{count} 列");
+        start = next_month;
+    }
+    println!("股價淨值比分位回填 {from}～{to}：共 {total} 列");
 }
 
 /// 立即整批重算除權息填息事件（`dividend_fill_event`，平常由 05:45 排程執行）。**會寫入資料庫**；

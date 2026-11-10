@@ -25,6 +25,7 @@ pub mod market_index;
 pub mod market_valuation;
 pub mod money_flow;
 pub mod official_ratio;
+pub mod pb_percentile;
 pub mod performance;
 pub mod portfolio;
 /// 持股穿透曝險的查詢（持有部位市值、持有 ETF 的前十大持股）。
