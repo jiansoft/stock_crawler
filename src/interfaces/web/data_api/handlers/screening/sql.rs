@@ -44,6 +44,9 @@
 /// 低波動：查詢日前 10 天內最新一筆 `daily_risk_metric`（近 240 筆日線的年化波動度與 beta），`$52`／`$53` 為上限；
 /// 供 `sort_by=volatility`／`beta`。
 /// 年線乖離率：`pv` 同一筆日線收盤相對 240 日均線（%，年線為 0 時為 NULL），`$54` 為上限；供 `sort_by=bias240`。
+/// 市值（億元）：`pv` 收盤 × 目前發行股數（`stocks.issued_share`，為 0 時為 NULL），`$55` 為下限。連續獲利年數：已公布
+/// （隔年 4/1 起）的年度 EPS（`quarter = ''`）從最新年度往回連續 > 0（年度相連）的年數，最新年度落後查詢年超過 2 年
+/// 為 0，`$56` 為下限；兩者每檔都會回傳。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -109,7 +112,9 @@ WITH latest AS (
         dv.fill_rate_percent,
         dv.avg_fill_days,
         dv.dividend_years,
-        dv.dividend_growth_years
+        dv.dividend_growth_years,
+        ROUND(pv.close_price * NULLIF(s.issued_share, 0) / 100000000.0, 2) AS market_cap,
+        pf.profit_years
     FROM stocks s
     LEFT JOIN LATERAL (
         -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
@@ -424,6 +429,21 @@ WITH latest AS (
             ) ranked
         ) growth
     ) dv ON TRUE
+    LEFT JOIN LATERAL (
+        -- 連續獲利年數：已公布（隔年 4/1 起）的年度 EPS 從最新年度往回連續 > 0、年度相連的年數。
+        SELECT CASE WHEN MAX(yr) >= EXTRACT(YEAR FROM $3::date)::int - 2
+                    THEN COALESCE(MIN(rn) FILTER (WHERE NOT (eps > 0 AND yr = top - rn + 1)) - 1, COUNT(*))
+                    ELSE 0 END::int AS profit_years
+        FROM (
+            SELECT a.year::int AS yr, a.earnings_per_share AS eps,
+                   ROW_NUMBER() OVER (ORDER BY a.year DESC) AS rn, MAX(a.year::int) OVER () AS top
+            FROM financial_statement a
+            WHERE a.security_code = s.stock_symbol
+              AND a.quarter = ''
+              AND a.year > 0
+              AND make_date(a.year::int + 1, 4, 1) <= $3::date
+        ) annual
+    ) pf ON TRUE
     LEFT JOIN financial_health h ON h.stock_symbol = s.stock_symbol
     WHERE (($1::int = 0 AND s.stock_exchange_market_id IN (2, 4))
         OR ($1::int <> 0 AND s.stock_exchange_market_id = $1))
@@ -594,7 +614,8 @@ SELECT
     CASE WHEN earnings_yield_percent IS NOT NULL AND return_on_capital_percent IS NOT NULL THEN
         COUNT(*) OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL)
     END AS magic_formula_ranked_count,
-    operating_income_ttm, invested_capital, enterprise_value, volatility_percent, beta, bias240_percent
+    operating_income_ttm, invested_capital, enterprise_value, volatility_percent, beta, bias240_percent,
+    market_cap, profit_years
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -645,4 +666,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($52::numeric IS NULL OR volatility_percent <= $52)
   AND ($53::numeric IS NULL OR beta <= $53)
   AND ($54::numeric IS NULL OR bias240_percent <= $54)
+  AND ($55::numeric IS NULL OR market_cap >= $55)
+  AND ($56::int IS NULL OR profit_years >= $56)
 "#;

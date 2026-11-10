@@ -211,7 +211,7 @@ macro_rules! filtered_cte {
                    THEN (q."ClosingPrice" / q."MovingAverage240" - 1)::float8 * 100 END AS bias240
         FROM "DailyQuotes" q
         WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL OR $50::float8 IS NOT NULL
-               OR $53::float8 IS NOT NULL
+               OR $53::float8 IS NOT NULL OR $54::float8 IS NOT NULL
                OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg', 'bias240'))
           AND q.stock_symbol = u.stock_symbol
           AND q."Date" = u.date
@@ -314,6 +314,9 @@ macro_rules! filtered_cte {
     ) pq
     LEFT JOIN magic_inputs mi ON mi.stock_symbol = u.stock_symbol AND mi.ord = pq.ord
     LEFT JOIN eps_growth eg ON eg.stock_symbol = u.stock_symbol AND eg.ord = pq.ord
+    LEFT JOIN share_counts sc ON sc.stock_symbol = u.stock_symbol AND sc.ord = pq.ord
+    -- `pq` 是 Q4 以前的季時，最新年度報告是前一年；尚未過 4/1（`pq` 為前一年 Q3）時是前兩年。
+    LEFT JOIN profit_streak ps ON ps.stock_symbol = u.stock_symbol AND ps.yr = pq.ord / 4 - 1
     LEFT JOIN LATERAL (
         -- 低波動：換股當天收盤後的風險指標（近 240 筆日線，與收盤買進同一時點）；只在設 `$51`／`$52` 或依低波動
         -- 排序時才查（主鍵查詢）。
@@ -385,7 +388,12 @@ macro_rules! filtered_cte {
       AND ($50::float8 IS NULL OR COALESCE(qv.pe > 0 AND eg.growth > 0 AND eg.growth <= 100 AND qv.pe / eg.growth <= $50, FALSE))
       AND ($51::float8 IS NULL OR COALESCE(rk.volatility <= $51, FALSE))
       AND ($52::float8 IS NULL OR COALESCE(rk.beta <= $52, FALSE))
-      AND ($53::float8 IS NULL OR COALESCE(qv.bias240 <= $53, FALSE))"#,
+      AND ($53::float8 IS NULL OR COALESCE(qv.bias240 <= $53, FALSE))
+      -- 市值（億元）= 收盤 × 千股 × 1000 ÷ 1 億；沒有該季股本時改用目前發行股數（股）。
+      AND ($54::float8 IS NULL OR COALESCE(qv.close * COALESCE(sc.shares, (
+          SELECT NULLIF(st.issued_share, 0)::float8 / 1000 FROM stocks st WHERE st.stock_symbol = u.stock_symbol
+      )) >= $54 * 100000, FALSE))
+      AND ($55::int IS NULL OR COALESCE(ps.profit_years >= $55, FALSE))"#,
             $chip_filter,
             "\n)"
         )

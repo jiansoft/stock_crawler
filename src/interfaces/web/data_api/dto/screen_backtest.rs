@@ -339,6 +339,15 @@ pub(crate) struct ScreenBacktestParams {
     /// 年線用未還原收盤計算，除權息後乖離會偏低；上市未滿一年沒有年線、不會通過。
     #[param(minimum = -90.0, maximum = 100.0)]
     pub(crate) max_bias240: Option<f64>,
+    /// 市值下限（億元，1–1,000,000；只用於新買進）：換股當天收盤 × 股數；股數用換股日已公布（法定期限隔天起）最近一季的
+    /// Yahoo 股本 ÷ 10（面額非 10 元的依目前發行股數推算面額倍數），沒有該季資料時改用目前發行股數。
+    #[param(minimum = 1, maximum = 1_000_000)]
+    pub(crate) min_market_cap: Option<f64>,
+    /// 連續獲利年數下限（1–30；只用於新買進）：換股當天已公布（隔年 4/1 起）的年度 EPS 從最新年度往回連續大於 0
+    /// （年度相連）的年數；最新年度須是換股日看得到的那一年。年度 EPS 自 2015 年起才完整，2019 年的換股日最多
+    /// 只數得到 3～4 年。
+    #[param(minimum = 1, maximum = 30)]
+    pub(crate) min_profit_years: Option<u8>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

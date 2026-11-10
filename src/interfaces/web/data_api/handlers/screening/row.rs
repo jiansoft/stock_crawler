@@ -140,6 +140,10 @@ pub(super) struct ScreenedStockRow {
     beta: Option<Decimal>,
     /// 年線乖離率（%）。
     bias240_percent: Option<Decimal>,
+    /// 市值（億元）。
+    market_cap: Option<Decimal>,
+    /// 連續獲利年數。
+    profit_years: Option<i32>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -325,6 +329,8 @@ impl From<ScreenedStockRow> for ScreenedStock {
                 &symbol,
                 "bias240_percent",
             ),
+            market_cap: analytical_decimal_to_f64(row.market_cap, &symbol, "market_cap"),
+            profit_years: row.profit_years,
         }
     }
 }

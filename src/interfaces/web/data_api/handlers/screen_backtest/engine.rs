@@ -269,7 +269,9 @@ impl<'a> Backtest<'a> {
             .bind(params.max_peg)
             .bind(params.max_volatility_percent)
             .bind(params.max_beta)
-            .bind(params.max_bias240);
+            .bind(params.max_bias240)
+            .bind(params.min_market_cap)
+            .bind(params.min_profit_years.map(i32::from));
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

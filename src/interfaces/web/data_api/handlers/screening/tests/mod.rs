@@ -14,6 +14,7 @@ mod major;
 mod peg;
 mod query_plans;
 mod revenue_industry;
+mod steady;
 mod trend;
 mod validation;
 mod validation_chip;
@@ -80,6 +81,8 @@ pub(super) fn screening_params() -> StockScreeningParams {
         max_volatility_percent: None,
         max_beta: None,
         max_bias240: None,
+        min_market_cap: None,
+        min_profit_years: None,
         sort_by: None,
         sort_order: None,
         limit: None,

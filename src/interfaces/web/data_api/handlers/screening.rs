@@ -168,6 +168,8 @@ async fn screen_at(
         .bind(validated.max_volatility_percent)
         .bind(validated.max_beta)
         .bind(validated.max_bias240)
+        .bind(validated.min_market_cap)
+        .bind(params.min_profit_years.map(i32::from))
         // 不快取成具名 prepared statement：同一連線執行約 5 次後 PostgreSQL 會改用 generic plan，
         // 34 個可選條件都剪不掉（2026-10-28 正式庫實測不設條件 custom 316 ms、generic 1,853 ms，
         // auto 模式第 6 次就換成 generic）。每次重新規劃只多 5 ms。

@@ -64,6 +64,8 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) max_beta: Option<Decimal>,
     /// 年線乖離率上限（%）。
     pub(super) max_bias240: Option<Decimal>,
+    /// 市值下限（億元）。
+    pub(super) min_market_cap: Option<Decimal>,
     /// 最近幾個交易日內出現區間突破（且還沒跌回）。
     pub(super) range_breakout_days: Option<i64>,
     /// 最低單季 EPS 年增率。
@@ -258,6 +260,18 @@ pub(super) fn validate_screening_params(
         100.0,
         "max_bias240 必須介於 -90 至 100",
     )?;
+    let min_market_cap = decimal_in_range(
+        params.min_market_cap,
+        1.0,
+        1_000_000.0,
+        "min_market_cap 必須介於 1 至 1000000",
+    )?;
+    if params
+        .min_profit_years
+        .is_some_and(|years| !(1..=30).contains(&years))
+    {
+        return Err("min_profit_years 必須介於 1 至 30");
+    }
     let major_change_weeks = params
         .major_change_weeks
         .unwrap_or(super::super::DEFAULT_MAJOR_CHANGE_WEEKS);
@@ -367,6 +381,8 @@ pub(super) fn validate_screening_params(
         || params.max_volatility_percent.is_some()
         || params.max_beta.is_some()
         || params.max_bias240.is_some()
+        || params.min_market_cap.is_some()
+        || params.min_profit_years.is_some()
         // 依神奇公式、PEG 或年線乖離排序本身就是全市場排行（沒有資料的排最後），不必另設條件。
         || matches!(
             params.sort_by.as_deref(),
@@ -403,6 +419,7 @@ pub(super) fn validate_screening_params(
         max_volatility_percent,
         max_beta,
         max_bias240,
+        min_market_cap,
         range_breakout_days: params.range_breakout_days.map(i64::from),
         min_eps_yoy_percent,
         min_annual_eps_growth_percent,
