@@ -64,6 +64,15 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
     if !within(params.max_bias240, -90.0, 100.0) {
         return Err("max_bias240 必須介於 -90 至 100");
     }
+    if !within(params.min_market_cap, 1.0, 1_000_000.0) {
+        return Err("min_market_cap 必須介於 1 至 1000000");
+    }
+    if params
+        .min_profit_years
+        .is_some_and(|years| !(1..=30).contains(&years))
+    {
+        return Err("min_profit_years 必須介於 1 至 30");
+    }
     if params
         .major_change_weeks
         .is_some_and(|weeks| !(1..=12).contains(&weeks))

@@ -337,6 +337,8 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         max_volatility_percent: params.max_volatility_percent,
         max_beta: params.max_beta,
         max_bias240: params.max_bias240,
+        min_market_cap: params.min_market_cap,
+        min_profit_years: params.min_profit_years,
         min_revenue_acceleration_months: params.min_revenue_acceleration_months,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),

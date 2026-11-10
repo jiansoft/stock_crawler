@@ -326,6 +326,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_beta: Option<f64>,
     /// 年線乖離率上限（%）；未篩選為 `null`。
     pub(crate) max_bias240: Option<f64>,
+    /// 市值下限（億元）；未篩選為 `null`。
+    pub(crate) min_market_cap: Option<f64>,
+    /// 連續獲利年數下限；未篩選為 `null`。
+    pub(crate) min_profit_years: Option<u8>,
     /// 營收加速月數下限；未篩選為 `null`。
     pub(crate) min_revenue_acceleration_months: Option<u8>,
     /// 訊號來源；未篩選為 `null`。

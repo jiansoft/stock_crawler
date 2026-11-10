@@ -21,6 +21,7 @@ mod peg;
 mod periods;
 mod presets;
 mod ranking;
+mod steady;
 mod stops;
 mod stops_next_open;
 mod track;

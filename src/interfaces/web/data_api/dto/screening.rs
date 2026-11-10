@@ -232,6 +232,11 @@ pub(crate) struct ScreenedStock {
     pub(crate) beta: Option<f64>,
     /// 年線乖離率（%）：同一筆日線收盤 ÷ 240 日均線 − 1；年線用未還原收盤計算，上市未滿一年時為 `null`。
     pub(crate) bias240_percent: Option<f64>,
+    /// 市值（億元）：同一筆日線收盤 × 目前發行股數；沒有日線或發行股數時為 `null`。
+    pub(crate) market_cap: Option<f64>,
+    /// 連續獲利年數：已公布（隔年 4/1 起）的年度 EPS 從最新年度往回連續大於 0（年度相連）的年數；最新年度落後
+    /// 查詢年超過 2 年或沒有年度 EPS 時為 0。
+    pub(crate) profit_years: Option<i32>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -359,6 +364,13 @@ pub(crate) struct StockScreeningParams {
     /// 每檔附 `bias240_percent`。單獨使用或 `sort_by=bias240` 皆算篩選條件。
     #[param(minimum = -90, maximum = 100)]
     pub(crate) max_bias240: Option<f64>,
+    /// 市值下限（億元，1–1,000,000）：最新收盤 × 目前發行股數；每檔附 `market_cap`。
+    #[param(minimum = 1, maximum = 1_000_000)]
+    pub(crate) min_market_cap: Option<f64>,
+    /// 連續獲利年數下限（1–30）：已公布的年度 EPS 從最新年度往回連續大於 0 的年數；每檔附 `profit_years`。
+    /// 可搭配 `min_market_cap`、`min_dividend_yield_percent`、`min_dividend_years` 找安心存股。
+    #[param(minimum = 1, maximum = 30)]
+    pub(crate) min_profit_years: Option<u8>,
     /// 只留最近 N 個交易日（含查詢日，1–20）出現區間突破（`range_breakout`／`breakout`）、且突破後還沒
     /// 跌回突破價（沒有 `failed`）的股票；回應附最近一次突破的日期與說明。2019 年起回測單獨依區間突破
     /// 選股明顯輸 0050，只供參考。
