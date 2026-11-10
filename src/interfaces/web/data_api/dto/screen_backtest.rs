@@ -75,6 +75,8 @@ enum BacktestRankByValue {
     Bias240,
     /// 換股當天股價淨值比在自身近 5 年的百分位由低到高（相對自己歷史最便宜的排前面，沒有資料的排最後）。
     PbPercentile,
+    /// 換股日已公布的近四季研發費用率由高到低（沒有資料的排最後）。
+    RdRatio,
 }
 
 /// OpenAPI 文件使用的持股加權方式。
@@ -154,7 +156,7 @@ pub(crate) struct ScreenBacktestParams {
     /// 加上 ÷（淨營運資金 + 不動產廠房設備）的資本報酬率名次，合計由小到大；金融業與資料不足的排最後）、`peg`
     /// （PEG 由低到高，算法同 `max_peg`）、`low_volatility`（年化波動度由低到高，算法同 `max_volatility_percent`）、
     /// `bias240`（年線乖離率由低到高，算法同 `max_bias240`）、`pb_percentile`（股價淨值比近 5 年百分位由低到高，
-    /// 算法同 `max_pb_percentile`）；
+    /// 算法同 `max_pb_percentile`）、`rd_ratio`（近四季研發費用率由高到低，算法同 `min_rd_ratio_percent`）；
     /// 同值或查不到時再依相對強度分數（查不到的排最後）。`keep_rank` 的名次也依此排序。
     #[param(value_type = BacktestRankByValue, inline)]
     pub(crate) rank_by: Option<String>,
@@ -358,6 +360,11 @@ pub(crate) struct ScreenBacktestParams {
     /// 財報才更新，期間百分位會偏低。
     #[param(minimum = 0, maximum = 100)]
     pub(crate) max_pb_percentile: Option<f64>,
+    /// 研發費用率下限（%，0–100；只用於新買進）：換股日已公布最近一季往回四季（季別須相連、最新一季在 3 季內）的
+    /// Yahoo 單季損益表研發費用合計 ÷ 營收合計；公布時點同三率（Q1～Q3 為季後 45 天、Q4 為隔年 4/1）。例如 5 只選
+    /// 研發投入至少營收 5% 的股票（研發成長股，建議搭配 EPS 或營收成長條件）；資料不足的不會通過。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) min_rd_ratio_percent: Option<f64>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]
