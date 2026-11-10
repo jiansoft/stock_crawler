@@ -51,6 +51,9 @@
 /// 供 `sort_by=pb_percentile`。
 /// 研發費用率：Yahoo 最近 4 季單季損益表（須相連）的研發費用合計 ÷ 營收合計（%），新鮮度同三率（兩季內），
 /// `$58` 為下限；每檔都會回傳，供 `sort_by=rd_ratio`。
+/// 葛拉漢：`pe_pb_product` = `pv` 本益比 × 股價淨值比（虧損時為 NULL），`$59` 為上限，供 `sort_by=pe_pb_product`；
+/// `current_ratio` = Yahoo 最新一季資產負債表的流動資產 ÷ 流動負債（倍，新鮮度同三率兩季內），`$60` 為下限；
+/// 兩者每檔都會回傳。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -121,7 +124,9 @@ WITH latest AS (
         pf.profit_years,
         pp.pb_percentile,
         rd.rd_ord,
-        rd.rd_ratio_raw
+        rd.rd_ratio_raw,
+        bs.bs_ord,
+        bs.current_ratio_raw
     FROM stocks s
     LEFT JOIN LATERAL (
         -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
@@ -372,6 +377,18 @@ WITH latest AS (
         HAVING COUNT(rd_expenses) = 4 AND COUNT(revenue) = 4 AND MAX(ord) - MIN(ord) = 3
     ) rd ON TRUE
     LEFT JOIN LATERAL (
+        -- 流動比率：Yahoo 最新一季資產負債表的流動資產 ÷ 流動負債（倍）；流動負債不大於 0 時為 NULL。
+        SELECT fiscal_year * 4 + SUBSTRING(quarter FROM 2)::int AS bs_ord,
+            CASE WHEN current_liabilities > 0
+                THEN ROUND(current_assets::numeric / current_liabilities, 2) END AS current_ratio_raw
+        FROM balance_sheet
+        WHERE source = 'yahoo'
+          AND stock_symbol = s.stock_symbol
+          AND period_type = 'single'
+        ORDER BY fiscal_year DESC, quarter DESC
+        LIMIT 1
+    ) bs ON TRUE
+    LEFT JOIN LATERAL (
         -- 低波動：查詢日前 10 天內最新一筆風險指標。
         SELECT volatility_percent, beta
         FROM daily_risk_metric
@@ -611,7 +628,11 @@ WITH latest AS (
         END AS eps_ttm_growth_percent,
         CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
                 + EXTRACT(QUARTER FROM $3::date)::int) - rd_ord) BETWEEN 0 AND 2
-          THEN rd_ratio_raw END AS rd_ratio_percent
+          THEN rd_ratio_raw END AS rd_ratio_percent,
+        CASE WHEN ((EXTRACT(YEAR FROM $3::date)::int * 4
+                + EXTRACT(QUARTER FROM $3::date)::int) - bs_ord) BETWEEN 0 AND 2
+          THEN current_ratio_raw END AS current_ratio,
+        ROUND(pe_ratio * pb_ratio, 2) AS pe_pb_product
     FROM latest
 )
 SELECT
@@ -649,7 +670,7 @@ SELECT
         COUNT(*) OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL)
     END AS magic_formula_ranked_count,
     operating_income_ttm, invested_capital, enterprise_value, volatility_percent, beta, bias240_percent,
-    market_cap, profit_years, pb_percentile, rd_ratio_percent
+    market_cap, profit_years, pb_percentile, rd_ratio_percent, pe_pb_product, current_ratio
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -704,4 +725,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($56::int IS NULL OR profit_years >= $56)
   AND ($57::numeric IS NULL OR pb_percentile <= $57)
   AND ($58::numeric IS NULL OR rd_ratio_percent >= $58)
+  AND ($59::numeric IS NULL OR pe_pb_product <= $59)
+  AND ($60::numeric IS NULL OR current_ratio >= $60)
 "#;

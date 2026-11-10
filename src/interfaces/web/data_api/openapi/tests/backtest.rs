@@ -68,7 +68,8 @@ fn openapi_screen_backtest_schema_pins_field_names() {
             "low_volatility",
             "bias240",
             "pb_percentile",
-            "rd_ratio"
+            "rd_ratio",
+            "pe_pb_product"
         ])
     );
     for (name, schema) in [

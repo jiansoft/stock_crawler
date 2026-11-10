@@ -273,7 +273,9 @@ impl<'a> Backtest<'a> {
             .bind(params.min_market_cap)
             .bind(params.min_profit_years.map(i32::from))
             .bind(params.max_pb_percentile)
-            .bind(params.min_rd_ratio_percent);
+            .bind(params.min_rd_ratio_percent)
+            .bind(params.max_pe_pb_product)
+            .bind(params.min_current_ratio);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))
