@@ -100,7 +100,8 @@ pub(crate) struct DividendYieldRank {
     pub(crate) closing_price: Option<f64>,
     /// 計算殖利率所用年度股利。
     pub(crate) dividend: Option<f64>,
-    /// 殖利率百分比。
+    /// 殖利率百分比：年度股利 ÷ 收盤價；收盤日已在該年度配股的除權日（含）以後時，年度股利再除以股數倍數
+    /// （1 + 股票股利 ÷ 10），所以可能小於 `dividend ÷ closing_price`。
     pub(crate) dividend_yield_percent: Option<f64>,
 }
 

@@ -256,16 +256,22 @@ macro_rules! filtered_cte {
             LIMIT 1
         ) base
     ) mg ON TRUE
+    LEFT JOIN stock_rights sr ON sr.stock_symbol = u.stock_symbol
     LEFT JOIN LATERAL (
         -- 現金股利（dividend_fill_event）只用換股當天（含）以前的除息。殖利率：最近一次除息往回 350 天的現金股利
-        -- ÷ 換股日收盤（最近一次除息須在 400 天內）；填息率與平均填息天數：除息日在近 5 年內、觀察期 120 個交易日
+        -- ÷ 換股日收盤（最近一次除息須在 400 天內），每筆現金股利再除以除息日到換股日（皆含）之間配股除權的股數
+        -- 倍數 1 + 股票股利 ÷ 10（`stock_rights`），換股日收盤已是除權後的價格；填息率與平均填息天數：除息日在近 5 年內、觀察期 120 個交易日
         -- 在換股日以前已滿的事件；連續配息年數：以除息日年度計，最近一次除息的年度不早於換股年前一年。
         SELECT
             CASE WHEN $41::float8 IS NOT NULL AND latest.ex_date > u.date - 400 THEN (
-                SELECT SUM(y.cash_dividend) FROM dividend_fill_event y
+                SELECT SUM(y.cash_dividend::float8 / COALESCE((
+                    SELECT EXP(SUM(LN(1 + r.stock_dividend / 10)))
+                    FROM unnest(sr.ex_rights, sr.stock_dividends) AS r(ex_rights, stock_dividend)
+                    WHERE r.ex_rights BETWEEN y.ex_date AND u.date
+                ), 1)) FROM dividend_fill_event y
                 WHERE y.stock_symbol = u.stock_symbol
                   AND y.ex_date > latest.ex_date - 350 AND y.ex_date <= latest.ex_date
-            )::float8 * 100 / NULLIF((
+            ) * 100 / NULLIF((
                 SELECT q."ClosingPrice" FROM "DailyQuotes" q
                 WHERE q.stock_symbol = u.stock_symbol AND q."Date" = u.date
             ), 0)::float8 END AS dividend_yield,

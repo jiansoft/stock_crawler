@@ -26,7 +26,7 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// 淨值比上限（倍，`NULL` 為不篩）、`$33` 大盤估值濾網（市場本益比中位數上限，`NULL` 為不濾）、`$34` 相對
 /// 估值濾網（市場本益比中位數在近 5 年的百分位上限，`NULL` 為不濾）、`$35` 千張大戶持股比例變化下限
 /// （百分點，`NULL` 為不篩）、`$36` 變化的回看週數、`$37` 單季 EPS 年增率下限、`$38` 近 3 年每年 EPS 年增率
-/// 下限、`$39` 創 52 週新高的回看日曆天數、`$40` F 分數下限、`$41` 現金殖利率下限、`$42` 近 5 年填息率下限、
+/// 下限、`$39` 創 52 週新高的回看日曆天數、`$40` F 分數下限、`$41` 現金殖利率下限（除權後依配股攤薄每股股利，見 `stock_rights`）、`$42` 近 5 年填息率下限、
 /// `$43` 平均填息天數上限、`$44` 連續配息年數下限、
 /// `$45` 營收加速月數下限、`$46` 股利成長年數下限（皆 `NULL` 為不篩）、`$47` 是否只選符合 Minervini 趨勢模板、
 /// `$48` 400 張以上大戶持股比例變化下限（回看週數同 `$36`）、`$49` 融資餘額變化上限、`$50` PEG 上限、`$51` 年化
@@ -181,6 +181,21 @@ revenue_records AS (
     WINDOW prior AS (
         PARTITION BY "SecurityCode" ORDER BY "Date" ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
     )
+),
+stock_rights AS MATERIALIZED (
+    -- 每檔的配股除權日與股票股利（元，面額 10 元；同一天的年度與季別列重複時取最大值），只有殖利率條件用到：
+    -- 除權日（含）以後股數變成 1 + 股票股利 ÷ 10 倍，之前每股配的現金股利要同比例攤薄。聚成陣列讓主查詢用
+    -- 一般的 join 接上，不必每檔每期每筆除息各查一次。
+    SELECT stock_symbol, array_agg(ex_rights) AS ex_rights, array_agg(stock_dividend) AS stock_dividends
+    FROM (
+        SELECT security_code AS stock_symbol, "ex-dividend_date2"::date AS ex_rights,
+               MAX(stock_dividend)::float8 AS stock_dividend
+        FROM dividend
+        WHERE $41::float8 IS NOT NULL AND stock_dividend > 0
+          AND pg_input_is_valid("ex-dividend_date2", 'date')
+        GROUP BY 1, 2
+    ) r
+    GROUP BY stock_symbol
 ),
 dividend_growth AS MATERIALIZED (
     SELECT stock_symbol, yr,

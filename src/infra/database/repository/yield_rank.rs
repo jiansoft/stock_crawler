@@ -40,15 +40,18 @@ WITH latest_dividend AS (
         security_code,
         serial,
         "sum",
+        stock_dividend,
+        "ex-dividend_date2" AS ex_rights_date,
         ROW_NUMBER() OVER (PARTITION BY security_code ORDER BY "year" DESC) as rn
     FROM dividend
     WHERE "year" >= $1 AND quarter = ''
 ),
 latest_quote AS (
     -- 取得每支股票在指定日期範圍內最新的一筆報價
-    SELECT 
+    SELECT
         "stock_symbol",
         "Serial",
+        "Date",
         "ClosingPrice",
         ROW_NUMBER() OVER (PARTITION BY "stock_symbol" ORDER BY "Date" DESC, "Serial" DESC) as rn
     FROM "DailyQuotes"
@@ -59,8 +62,12 @@ SELECT
     s.stock_symbol,
     dq."Serial" AS daily_quotes_serial,
     d.serial AS dividend_serial,
-    -- 防止除以零並計算殖利率 (%)
-    COALESCE((d."sum" / NULLIF(dq."ClosingPrice", 0)) * 100, 0) AS yield
+    -- 防止除以零並計算殖利率 (%)。股利是除權前每一股配的金額，報價已在除權日（含）以後時股數變成
+    -- 1 + 股票股利 ÷ 10 倍，每股股利要同比例攤薄，否則配股後的殖利率會被高估。
+    COALESCE((d."sum" / NULLIF(dq."ClosingPrice", 0)) * 100, 0)
+        / CASE WHEN d.stock_dividend > 0 AND pg_input_is_valid(d.ex_rights_date, 'date') THEN
+            CASE WHEN d.ex_rights_date::date <= dq."Date" THEN 1 + d.stock_dividend / 10 ELSE 1 END
+          ELSE 1 END AS yield
 FROM stocks AS s
 JOIN latest_dividend d ON d.security_code = s.stock_symbol AND d.rn = 1
 JOIN latest_quote dq ON dq."stock_symbol" = s.stock_symbol AND dq.rn = 1

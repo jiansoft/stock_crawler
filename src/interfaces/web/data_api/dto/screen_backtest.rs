@@ -295,6 +295,7 @@ pub(crate) struct ScreenBacktestParams {
     #[param(minimum = 0, maximum = 9)]
     pub(crate) min_f_score: Option<u8>,
     /// 換股當天的現金殖利率下限（%，0–100）：最近一次除息往回 350 天內（含）的現金股利合計 ÷ 換股日收盤；
+    /// 除息後到換股日（含）之間有配股除權時，每股現金股利依股數倍數（1 + 股票股利 ÷ 10）攤薄；
     /// 最近一次除息早於換股日 400 天以上（已停止配息）或換股日沒有收盤的不會通過。
     #[param(minimum = 0, maximum = 100)]
     pub(crate) min_dividend_yield_percent: Option<f64>,
