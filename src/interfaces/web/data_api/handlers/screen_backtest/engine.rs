@@ -282,7 +282,9 @@ impl<'a> Backtest<'a> {
                     .min_annual_roe_percent
                     .map(|_| i32::from(params.min_roe_years.unwrap_or(1))),
             )
-            .bind(params.min_annual_roe_percent);
+            .bind(params.min_annual_roe_percent)
+            .bind(params.max_psr)
+            .bind(params.min_avg_net_margin_3y);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

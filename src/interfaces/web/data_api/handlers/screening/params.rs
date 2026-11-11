@@ -78,6 +78,10 @@ pub(super) struct ValidatedScreeningParams {
     pub(super) min_roe_years: Option<i32>,
     /// 年度 ROE 門檻（%）。
     pub(super) min_annual_roe_percent: Option<Decimal>,
+    /// PSR 上限（倍）。
+    pub(super) max_psr: Option<Decimal>,
+    /// 近 3 年平均稅後淨利率下限（%）。
+    pub(super) min_avg_net_margin_3y: Option<Decimal>,
     /// 最近幾個交易日內出現區間突破（且還沒跌回）。
     pub(super) range_breakout_days: Option<i64>,
     /// 最低單季 EPS 年增率。
@@ -323,6 +327,13 @@ pub(super) fn validate_screening_params(
     if params.min_roe_years.is_some() && min_annual_roe_percent.is_none() {
         return Err("min_roe_years 需搭配 min_annual_roe_percent");
     }
+    let max_psr = decimal_in_range(params.max_psr, 0.0, 100.0, "max_psr 必須介於 0 至 100")?;
+    let min_avg_net_margin_3y = decimal_in_range(
+        params.min_avg_net_margin_3y,
+        -100.0,
+        100.0,
+        "min_avg_net_margin_3y 必須介於 -100 至 100",
+    )?;
     let major_change_weeks = params
         .major_change_weeks
         .unwrap_or(super::super::DEFAULT_MAJOR_CHANGE_WEEKS);
@@ -439,6 +450,8 @@ pub(super) fn validate_screening_params(
         || params.max_pe_pb_product.is_some()
         || params.min_current_ratio.is_some()
         || min_annual_roe_percent.is_some()
+        || max_psr.is_some()
+        || min_avg_net_margin_3y.is_some()
         // 依神奇公式、PEG、年線乖離、淨值比分位或葛拉漢乘積排序本身就是全市場排行（沒有資料的排最後），不必另設條件。
         || matches!(
             params.sort_by.as_deref(),
@@ -483,6 +496,8 @@ pub(super) fn validate_screening_params(
         // 只設門檻時看最新一個已公布年度（1 年）。
         min_roe_years: min_annual_roe_percent.map(|_| i32::from(params.min_roe_years.unwrap_or(1))),
         min_annual_roe_percent,
+        max_psr,
+        min_avg_net_margin_3y,
         range_breakout_days: params.range_breakout_days.map(i64::from),
         min_eps_yoy_percent,
         min_annual_eps_growth_percent,

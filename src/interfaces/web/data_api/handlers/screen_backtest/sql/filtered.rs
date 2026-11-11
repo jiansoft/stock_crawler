@@ -65,6 +65,7 @@ macro_rules! filtered_cte {
         HAVING MAX(ord) >= u.revenue_ord - 2
     ) rv ON TRUE
     LEFT JOIN revenue_records rr ON rr.stock_symbol = u.stock_symbol AND rr.month = rv.latest_month
+    LEFT JOIN revenue_ttm rt ON rt.stock_symbol = u.stock_symbol AND rt.target = u.revenue_ord
     LEFT JOIN LATERAL (
         SELECT fs.year, fs.quarter, fs.earnings_per_share, fs.return_on_equity
         FROM financial_statement fs
@@ -214,6 +215,7 @@ macro_rules! filtered_cte {
         FROM "DailyQuotes" q
         WHERE ($31::float8 IS NOT NULL OR $32::float8 IS NOT NULL OR $50::float8 IS NOT NULL
                OR $53::float8 IS NOT NULL OR $54::float8 IS NOT NULL OR $58::float8 IS NOT NULL
+               OR $62::float8 IS NOT NULL
                OR $16::text IN ('pe_ratio', 'pb_ratio', 'magic_formula', 'peg', 'bias240', 'pe_pb_product'))
           AND q.stock_symbol = u.stock_symbol
           AND q."Date" = u.date
@@ -323,6 +325,13 @@ macro_rules! filtered_cte {
     LEFT JOIN magic_inputs mi ON mi.stock_symbol = u.stock_symbol AND mi.ord = pq.ord
     LEFT JOIN eps_growth eg ON eg.stock_symbol = u.stock_symbol AND eg.ord = pq.ord
     LEFT JOIN share_counts sc ON sc.stock_symbol = u.stock_symbol AND sc.ord = pq.ord
+    LEFT JOIN LATERAL (
+        -- 市值（千元）= 換股當天收盤 × 千股；沒有該季股本時改用目前發行股數（股 ÷ 1000）。只在設 `$54` 或 `$62` 時才算。
+        SELECT qv.close * COALESCE(sc.shares, (
+            SELECT NULLIF(st.issued_share, 0)::float8 / 1000 FROM stocks st WHERE st.stock_symbol = u.stock_symbol
+        )) AS market_cap
+        WHERE $54::float8 IS NOT NULL OR $62::float8 IS NOT NULL
+    ) mc ON TRUE
     -- `pq` 是 Q4 以前的季時，最新年度報告是前一年；尚未過 4/1（`pq` 為前一年 Q3）時是前兩年。
     LEFT JOIN profit_streak ps ON ps.stock_symbol = u.stock_symbol AND ps.yr = pq.ord / 4 - 1
     LEFT JOIN roe_streak rq ON rq.stock_symbol = u.stock_symbol AND rq.yr = pq.ord / 4 - 1
@@ -390,6 +399,25 @@ macro_rules! filtered_cte {
         ORDER BY b.fiscal_year DESC, b.quarter DESC
         LIMIT 1
     ) bsr ON TRUE
+    LEFT JOIN LATERAL (
+        -- 近 3 年平均稅後淨利率（%）：換股當天已公布（隔年 4/1 起）最近 3 個 Yahoo 年度損益表的稅後淨利 ÷ 營收平均；
+        -- 年度須相連、營收皆 > 0，最新年度落後換股年 1～2 年，否則沒有資料。只在設 `$63` 時才查。
+        SELECT AVG(a.net_income::float8 * 100 / NULLIF(a.revenue, 0)::float8) AS avg_net_margin
+        FROM (
+            SELECT i.fiscal_year, i.net_income, i.revenue
+            FROM income_statement i
+            WHERE $63::float8 IS NOT NULL
+              AND i.source = 'yahoo'
+              AND i.stock_symbol = u.stock_symbol
+              AND i.period_type = 'annual'
+              AND make_date(i.fiscal_year + 1, 4, 1) <= u.date
+            ORDER BY i.fiscal_year DESC
+            LIMIT 3
+        ) a
+        HAVING COUNT(a.net_income) = 3 AND COUNT(a.revenue) = 3 AND MIN(a.revenue) > 0
+           AND MAX(a.fiscal_year) - MIN(a.fiscal_year) = 2
+           AND EXTRACT(YEAR FROM u.date)::int - MAX(a.fiscal_year) BETWEEN 1 AND 2
+    ) nm ON TRUE
     LEFT JOIN holder_rebal hr ON hr.date = u.date
     LEFT JOIN holder_distribution hc ON hc.stock_symbol = u.stock_symbol AND hc."date" = hr.cur_week
     LEFT JOIN holder_distribution hb ON hb.stock_symbol = u.stock_symbol AND hb."date" = hr.base_week"#,
@@ -453,16 +481,16 @@ macro_rules! filtered_cte {
       AND ($51::float8 IS NULL OR COALESCE(rk.volatility <= $51, FALSE))
       AND ($52::float8 IS NULL OR COALESCE(rk.beta <= $52, FALSE))
       AND ($53::float8 IS NULL OR COALESCE(qv.bias240 <= $53, FALSE))
-      -- 市值（億元）= 收盤 × 千股 × 1000 ÷ 1 億；沒有該季股本時改用目前發行股數（股）。
-      AND ($54::float8 IS NULL OR COALESCE(qv.close * COALESCE(sc.shares, (
-          SELECT NULLIF(st.issued_share, 0)::float8 / 1000 FROM stocks st WHERE st.stock_symbol = u.stock_symbol
-      )) >= $54 * 100000, FALSE))
+      -- 市值（千元）÷ 100000 = 億元。
+      AND ($54::float8 IS NULL OR COALESCE(mc.market_cap >= $54 * 100000, FALSE))
       AND ($55::int IS NULL OR COALESCE(ps.profit_years >= $55, FALSE))
       AND ($56::float8 IS NULL OR COALESCE(pp.pb_percentile <= $56, FALSE))
       AND ($57::float8 IS NULL OR COALESCE(rdr.rd_ratio >= $57, FALSE))
       AND ($58::float8 IS NULL OR COALESCE(qv.pe * qv.pb <= $58, FALSE))
       AND ($59::float8 IS NULL OR COALESCE(bsr.current_ratio >= $59, FALSE))
-      AND ($60::int IS NULL OR COALESCE(rq.roe_years >= $60, FALSE))"#,
+      AND ($60::int IS NULL OR COALESCE(rq.roe_years >= $60, FALSE))
+      AND ($62::float8 IS NULL OR COALESCE(mc.market_cap / rt.ttm <= $62, FALSE))
+      AND ($63::float8 IS NULL OR COALESCE(nm.avg_net_margin >= $63, FALSE))"#,
             $chip_filter,
             "\n)"
         )

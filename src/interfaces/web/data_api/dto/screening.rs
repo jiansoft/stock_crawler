@@ -256,6 +256,12 @@ pub(crate) struct ScreenedStock {
     /// 年度 ROE 連續達標年數：已公布（隔年 4/1 起）的年度 ROE 從最新年度往回連續不低於 `min_annual_roe_percent`
     /// （年度相連）的年數；最新年度落後查詢年超過 2 年時為 0，沒設 `min_annual_roe_percent` 時為 `null`。
     pub(crate) roe_years: Option<i32>,
+    /// PSR（倍）：最新收盤 × 目前發行股數 ÷ 最近 12 個月營收合計；營收不足 12 個月、月份不相連、過期或沒有發行股數
+    /// 時為 `null`。
+    pub(crate) psr: Option<f64>,
+    /// 近 3 年平均稅後淨利率（%）：已公布（隔年 4/1 起）最近 3 個 Yahoo 年度損益表的稅後淨利 ÷ 營收平均；年度不相連
+    /// 或最新年度落後查詢年超過 2 年時為 `null`。
+    pub(crate) avg_net_margin_3y_percent: Option<f64>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -415,6 +421,14 @@ pub(crate) struct StockScreeningParams {
     /// 與 `min_roe_percent`（最新一季 ROE）不同。
     #[param(minimum = 0, maximum = 100)]
     pub(crate) min_annual_roe_percent: Option<f64>,
+    /// PSR 上限（倍，0–100）：最新收盤 × 目前發行股數 ÷ 最近 12 個月營收合計（月份須相連）；肯尼斯費雪的低 PSR
+    /// 選股；每檔附 `psr`。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) max_psr: Option<f64>,
+    /// 近 3 年平均稅後淨利率下限（%，-100–100）：已公布的最近 3 個年度（Yahoo 年度損益表）稅後淨利 ÷ 營收平均；
+    /// 每檔附 `avg_net_margin_3y_percent`。
+    #[param(minimum = -100, maximum = 100)]
+    pub(crate) min_avg_net_margin_3y: Option<f64>,
     /// 只留最近 N 個交易日（含查詢日，1–20）出現區間突破（`range_breakout`／`breakout`）、且突破後還沒
     /// 跌回突破價（沒有 `failed`）的股票；回應附最近一次突破的日期與說明。2019 年起回測單獨依區間突破
     /// 選股明顯輸 0050，只供參考。

@@ -384,6 +384,14 @@ pub(crate) struct ScreenBacktestParams {
     /// 年度 ROE 門檻（%，0–100；只用於新買進）：搭配 `min_roe_years`；只設門檻時看最新一個已公布年度。
     #[param(minimum = 0, maximum = 100)]
     pub(crate) min_annual_roe_percent: Option<f64>,
+    /// PSR 上限（倍，0–100；只用於新買進）：換股當天市值（收盤 × 股數，股數同 `min_market_cap`）÷ 換股日已公布的近
+    /// 12 個月營收合計（月份須相連，公布與新鮮度規則同 `min_revenue_yoy_percent`）；肯尼斯費雪的低 PSR 選股。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) max_psr: Option<f64>,
+    /// 近 3 年平均稅後淨利率下限（%，-100–100；只用於新買進）：換股當天已公布（隔年 4/1 起）最近 3 個 Yahoo 年度
+    /// 損益表的稅後淨利 ÷ 營收平均；年度須相連、最新年度落後換股年 1～2 年。Yahoo 年度損益表 2015 年起才有。
+    #[param(minimum = -100, maximum = 100)]
+    pub(crate) min_avg_net_margin_3y: Option<f64>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

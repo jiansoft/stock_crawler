@@ -105,7 +105,7 @@ fn major_change_period_needs_enough_history() {
     );
 }
 
-/// 四種回測 SQL 都只看日期早於換股日的資料週，並以往前第 `$36` 週相減；籌碼條件改用 `$62`／`$63`。
+/// 四種回測 SQL 都只看日期早於換股日的資料週，並以往前第 `$36` 週相減；籌碼條件改用 `$64`／`$65`。
 /// `holder_rebal` 要 `MATERIALIZED`、比較要包 `COALESCE`，避免 LEFT JOIN 被降級後整條管線依換股期數重跑。
 #[test]
 fn backtest_sql_uses_only_published_holder_weeks() {
@@ -124,5 +124,5 @@ fn backtest_sql_uses_only_published_holder_weeks() {
         );
         assert!(sql.contains("COALESCE((hc.percent_400 - hb.percent_400)::float8 >= $48, FALSE)"));
     }
-    assert!(!BACKTEST_SQL.contains("$62"));
+    assert!(!BACKTEST_SQL.contains("$64"));
 }

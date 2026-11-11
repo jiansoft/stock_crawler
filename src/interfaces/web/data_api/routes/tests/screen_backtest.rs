@@ -22,6 +22,7 @@ mod pb_percentile;
 mod peg;
 mod periods;
 mod presets;
+mod psr;
 mod ranking;
 mod rd_ratio;
 mod roe;

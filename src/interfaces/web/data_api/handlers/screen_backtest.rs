@@ -348,6 +348,8 @@ pub(crate) async fn screen_backtest(BacktestQuery(params): BacktestQuery) -> Res
         min_current_ratio: params.min_current_ratio,
         min_roe_years: params.min_roe_years,
         min_annual_roe_percent: params.min_annual_roe_percent,
+        max_psr: params.max_psr,
+        min_avg_net_margin_3y: params.min_avg_net_margin_3y,
         min_revenue_acceleration_months: params.min_revenue_acceleration_months,
         indicator: params.indicator.clone(),
         kind: params.kind.clone(),
