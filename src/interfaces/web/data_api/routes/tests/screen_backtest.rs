@@ -24,6 +24,7 @@ mod periods;
 mod presets;
 mod ranking;
 mod rd_ratio;
+mod roe;
 mod steady;
 mod stops;
 mod stops_next_open;

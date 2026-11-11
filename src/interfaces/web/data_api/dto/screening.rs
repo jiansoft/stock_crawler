@@ -253,6 +253,9 @@ pub(crate) struct ScreenedStock {
     pub(crate) pe_pb_product: Option<f64>,
     /// 流動比率（倍）：Yahoo 最新一季資產負債表（兩季內）流動資產 ÷ 流動負債；金融業或資料不足時為 `null`。
     pub(crate) current_ratio: Option<f64>,
+    /// 年度 ROE 連續達標年數：已公布（隔年 4/1 起）的年度 ROE 從最新年度往回連續不低於 `min_annual_roe_percent`
+    /// （年度相連）的年數；最新年度落後查詢年超過 2 年時為 0，沒設 `min_annual_roe_percent` 時為 `null`。
+    pub(crate) roe_years: Option<i32>,
 }
 
 /// 條件選股成功回應（§3.4 envelope）。
@@ -404,6 +407,14 @@ pub(crate) struct StockScreeningParams {
     /// 金融業沒有流動資產／負債分類，設了就不會通過。
     #[param(minimum = 0, maximum = 100)]
     pub(crate) min_current_ratio: Option<f64>,
+    /// 年度 ROE 連續達標年數下限（1–10，須搭配 `min_annual_roe_percent`）：已公布的年度 ROE 從最新年度往回連續
+    /// 不低於門檻的年數，例如 5 年皆 ≥ 15%（巴菲特長期高 ROE）；每檔附 `roe_years`。
+    #[param(minimum = 1, maximum = 10)]
+    pub(crate) min_roe_years: Option<u8>,
+    /// 年度 ROE 門檻（%，0–100）：搭配 `min_roe_years`，只設門檻時看最新一個已公布年度；單獨即算篩選條件。
+    /// 與 `min_roe_percent`（最新一季 ROE）不同。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) min_annual_roe_percent: Option<f64>,
     /// 只留最近 N 個交易日（含查詢日，1–20）出現區間突破（`range_breakout`／`breakout`）、且突破後還沒
     /// 跌回突破價（沒有 `failed`）的股票；回應附最近一次突破的日期與說明。2019 年起回測單獨依區間突破
     /// 選股明顯輸 0050，只供參考。

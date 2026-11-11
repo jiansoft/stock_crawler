@@ -376,6 +376,14 @@ pub(crate) struct ScreenBacktestParams {
     /// 流動負債，公布時點同三率；葛拉漢的標準是 2。金融業沒有流動資產／負債分類，設了就不會通過。
     #[param(minimum = 0, maximum = 100)]
     pub(crate) min_current_ratio: Option<f64>,
+    /// 年度 ROE 連續達標年數下限（1–10；只用於新買進，須搭配 `min_annual_roe_percent`）：換股當天已公布（隔年 4/1
+    /// 起）的年度 ROE 從最新年度往回連續不低於門檻（年度相連）的年數，例如 5 年皆 ≥ 15%（巴菲特長期高 ROE）；
+    /// 最新年度須是換股日看得到的那一年。年度 ROE 自 2015 年起才完整，2019 年的換股日最多只數得到 3～4 年。
+    #[param(minimum = 1, maximum = 10)]
+    pub(crate) min_roe_years: Option<u8>,
+    /// 年度 ROE 門檻（%，0–100；只用於新買進）：搭配 `min_roe_years`；只設門檻時看最新一個已公布年度。
+    #[param(minimum = 0, maximum = 100)]
+    pub(crate) min_annual_roe_percent: Option<f64>,
     /// 營收加速月數下限（1–11）：換股當天已公布的月營收從最新一個月往回，年增率逐月高於前一個月（月份相連）的
     /// 月數；公布與新鮮度規則同 `min_revenue_yoy_percent`。
     #[param(minimum = 1, maximum = 11)]

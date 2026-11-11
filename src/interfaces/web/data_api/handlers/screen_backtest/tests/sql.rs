@@ -107,7 +107,10 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("LEFT JOIN valuation_level vl ON vl.date = b.date"));
     assert!(BACKTEST_SQL.contains("h.below * 100 < $34::int * h.samples"));
     assert!(BACKTEST_SQL.contains("p.date < cur.date AND p.date >= cur.date - INTERVAL '5 years'"));
-    assert!(!BACKTEST_SQL.contains("$60"));
+    assert!(!BACKTEST_SQL.contains("$62"));
+    assert!(BACKTEST_SQL.contains("roe_streak AS MATERIALIZED ("));
+    assert!(BACKTEST_SQL.contains("COALESCE(rq.roe_years >= $60, FALSE)"));
+    assert!(BACKTEST_SQL.contains("rq.yr = pq.ord / 4 - 1"));
     assert!(BACKTEST_SQL.contains("COALESCE(qv.pe * qv.pb <= $58, FALSE)"));
     assert!(BACKTEST_SQL.contains("COALESCE(bsr.current_ratio >= $59, FALSE)"));
     assert!(BACKTEST_SQL.contains("WHEN 'pe_pb_product' THEN -pe_pb_product"));
@@ -151,9 +154,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH RECURSIVE\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\nday_scan AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $60"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $61"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$62"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $62"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $63"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$64"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     assert!(BACKTEST_SQL.contains("rs_score DESC, rs_rank ASC, stock_symbol"));

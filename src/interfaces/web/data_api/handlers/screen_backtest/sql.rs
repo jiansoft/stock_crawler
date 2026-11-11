@@ -31,8 +31,8 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// `$45` 營收加速月數下限、`$46` 股利成長年數下限（皆 `NULL` 為不篩）、`$47` 是否只選符合 Minervini 趨勢模板、
 /// `$48` 400 張以上大戶持股比例變化下限（回看週數同 `$36`）、`$49` 融資餘額變化上限、`$50` PEG 上限、`$51` 年化
 /// 波動度上限、`$52` beta 上限、`$53` 年線乖離率上限、`$54` 市值下限（億元）、`$55` 連續獲利年數下限、`$56` 股價淨值比
-/// 近 5 年百分位上限、`$57` 近四季研發費用率下限、`$58` 本益比 × 股價淨值比上限、`$59` 流動比率下限（皆 `NULL`
-/// 為不篩）；籌碼版另有 `$60`／`$61`。
+/// 近 5 年百分位上限、`$57` 近四季研發費用率下限、`$58` 本益比 × 股價淨值比上限、`$59` 流動比率下限、`$60` 年度
+/// ROE 連續達標年數下限、`$61` 年度 ROE 門檻（%）（皆 `NULL` 為不篩）；籌碼版另有 `$62`／`$63`。
 ///
 /// - `days`：有相對強度的交易日（往前多讀 400 個日曆天，讓第一期也能回看訊號；往後多讀 400 個日曆天，
 ///   計算最後幾期是否在迄日（`$2`）前完成出場）。由 `day_scan` 沿主鍵 `(date, stock_symbol)` 逐日跳到下一個
@@ -81,6 +81,8 @@ use super::{ETF_BENCHMARK, portfolio::select_holdings};
 /// - `profit_streak`：每檔每個年度的連續獲利年數（年度 EPS > 0、年度相連，往回數到最近一次虧損或中斷為止），以
 ///   視窗函式一次算完全表；`filtered` 以 `pq` 那一季所在的年度報告（換股日 4/1 起為前一年，之前為前兩年）對上，
 ///   該年度沒有資料就不會通過。只在設 `$55` 時才算。
+/// - `roe_streak`：每檔每個年度的年度 ROE 連續達標年數（年度 ROE 不低於 `$61`、年度相連，往回數到最近一次
+///   未達標或中斷為止），算法與對上的年度同 `profit_streak`。只在設 `$61` 時才算。
 /// - `filtered` 的 `ym`：已公布的最近一季 Yahoo 單季損益表（公布日規則同 `fs`）的毛利率、營業利益率，
 ///   以及毛利率、營業利益率、稅後淨利率是否都高於去年同一季（三率三升）；`bs`：同樣規則的最近一季
 ///   資產負債表負債比；`cf`：同樣規則的最近一季 Yahoo 單季現金流量表，連同之前 3 季（須四季都有自由
@@ -244,6 +246,19 @@ profit_streak AS MATERIALIZED (
                END AS break_year
         FROM financial_statement
         WHERE $55::int IS NOT NULL AND quarter = '' AND year > 0
+        WINDOW w AS (PARTITION BY security_code ORDER BY year)
+    ) AS flagged
+),
+roe_streak AS MATERIALIZED (
+    SELECT stock_symbol, yr, yr - MAX(break_year) OVER (PARTITION BY stock_symbol ORDER BY yr) AS roe_years
+    FROM (
+        -- 未達門檻的年度從自己斷開（0 年）；與前一筆年度不相連時從前一年斷開（重新從 1 年起算）。
+        SELECT security_code AS stock_symbol, year::int AS yr,
+               CASE WHEN return_on_equity::float8 < $61::float8 THEN year::int
+                    WHEN COALESCE(LAG(year) OVER w <> year - 1, TRUE) THEN year::int - 1
+               END AS break_year
+        FROM financial_statement
+        WHERE $61::float8 IS NOT NULL AND quarter = '' AND year > 0
         WINDOW w AS (PARTITION BY security_code ORDER BY year)
     ) AS flagged
 ),
@@ -524,7 +539,7 @@ rebal_quotes AS MATERIALIZED (
     };
 }
 
-/// 籌碼版的 CTE 與條件（外資 `$60`、投信 `$61`）。
+/// 籌碼版的 CTE 與條件（外資 `$62`、投信 `$63`）。
 macro_rules! backtest_with_chip_sql_for {
     ($model:ident) => {
         concat!(
@@ -535,7 +550,7 @@ macro_rules! backtest_with_chip_sql_for {
                 $model,
                 "",
                 "\n    LEFT JOIN chip c ON c.\"date\" = u.date AND c.stock_symbol = u.stock_symbol",
-                "\n      AND ($60::bigint IS NULL OR c.foreign_buy >= $60)\n      AND ($61::bigint IS NULL OR c.trust_buy >= $61)",
+                "\n      AND ($62::bigint IS NULL OR c.foreign_buy >= $62)\n      AND ($63::bigint IS NULL OR c.trust_buy >= $63)",
                 "\n           COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy,\n           COALESCE(c.trust_buy, 0)::float8 AS trust_buy"
             )
         )
@@ -560,7 +575,7 @@ pub(super) const BACKTEST_NEXT_OPEN_SQL: &str = backtest_sql_for!(
     "\n           NULL::float8 AS foreign_buy, NULL::float8 AS trust_buy"
 );
 
-/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$60`）／投信（`$61`）已連續買超至少
+/// 有籌碼條件（或依法人連續買超排序）的回測：換股當天外資（`$62`）／投信（`$63`）已連續買超至少
 /// N 天，`NULL` 為不篩選；當天沒有籌碼資料的股票連續天數算 0，有設門檻時不會通過。
 pub(super) const BACKTEST_WITH_CHIP_SQL: &str = backtest_with_chip_sql_for!(close);
 
