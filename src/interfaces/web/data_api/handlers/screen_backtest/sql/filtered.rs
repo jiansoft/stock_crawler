@@ -325,6 +325,7 @@ macro_rules! filtered_cte {
     LEFT JOIN share_counts sc ON sc.stock_symbol = u.stock_symbol AND sc.ord = pq.ord
     -- `pq` 是 Q4 以前的季時，最新年度報告是前一年；尚未過 4/1（`pq` 為前一年 Q3）時是前兩年。
     LEFT JOIN profit_streak ps ON ps.stock_symbol = u.stock_symbol AND ps.yr = pq.ord / 4 - 1
+    LEFT JOIN roe_streak rq ON rq.stock_symbol = u.stock_symbol AND rq.yr = pq.ord / 4 - 1
     LEFT JOIN LATERAL (
         -- 低波動：換股當天收盤後的風險指標（近 240 筆日線，與收盤買進同一時點）；只在設 `$51`／`$52` 或依低波動
         -- 排序時才查（主鍵查詢）。
@@ -460,7 +461,8 @@ macro_rules! filtered_cte {
       AND ($56::float8 IS NULL OR COALESCE(pp.pb_percentile <= $56, FALSE))
       AND ($57::float8 IS NULL OR COALESCE(rdr.rd_ratio >= $57, FALSE))
       AND ($58::float8 IS NULL OR COALESCE(qv.pe * qv.pb <= $58, FALSE))
-      AND ($59::float8 IS NULL OR COALESCE(bsr.current_ratio >= $59, FALSE))"#,
+      AND ($59::float8 IS NULL OR COALESCE(bsr.current_ratio >= $59, FALSE))
+      AND ($60::int IS NULL OR COALESCE(rq.roe_years >= $60, FALSE))"#,
             $chip_filter,
             "\n)"
         )

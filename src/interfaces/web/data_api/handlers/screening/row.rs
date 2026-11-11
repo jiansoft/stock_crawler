@@ -152,6 +152,8 @@ pub(super) struct ScreenedStockRow {
     pe_pb_product: Option<Decimal>,
     /// 流動比率（倍）。
     current_ratio: Option<Decimal>,
+    /// 年度 ROE 連續達標年數。
+    roe_years: Option<i32>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -347,6 +349,7 @@ impl From<ScreenedStockRow> for ScreenedStock {
             ),
             pe_pb_product: analytical_decimal_to_f64(row.pe_pb_product, &symbol, "pe_pb_product"),
             current_ratio: analytical_decimal_to_f64(row.current_ratio, &symbol, "current_ratio"),
+            roe_years: row.roe_years,
         }
     }
 }

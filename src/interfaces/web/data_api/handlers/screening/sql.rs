@@ -54,6 +54,8 @@
 /// 葛拉漢：`pe_pb_product` = `pv` 本益比 × 股價淨值比（虧損時為 NULL），`$59` 為上限，供 `sort_by=pe_pb_product`；
 /// `current_ratio` = Yahoo 最新一季資產負債表的流動資產 ÷ 流動負債（倍，新鮮度同三率兩季內），`$60` 為下限；
 /// 兩者每檔都會回傳。
+/// 長期高 ROE：`roe_years` = 已公布（隔年 4/1 起）的年度 ROE 從最新年度往回連續不低於 `$62`（年度相連）的年數，
+/// 最新年度落後查詢年超過 2 年時為 0；只在設 `$62` 時才查（沒設時為 NULL），`$61` 為年數下限。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -126,7 +128,8 @@ WITH latest AS (
         rd.rd_ord,
         rd.rd_ratio_raw,
         bs.bs_ord,
-        bs.current_ratio_raw
+        bs.current_ratio_raw,
+        ry.roe_years
     FROM stocks s
     LEFT JOIN LATERAL (
         -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
@@ -492,6 +495,24 @@ WITH latest AS (
               AND make_date(a.year::int + 1, 4, 1) <= $3::date
         ) annual
     ) pf ON TRUE
+    LEFT JOIN LATERAL (
+        -- 年度 ROE 連續達標年數：算法同連續獲利年數，條件改為年度 ROE ≥ `$62`；沒設 `$62` 時不回傳列（NULL）。
+        SELECT CASE WHEN MAX(yr) >= EXTRACT(YEAR FROM $3::date)::int - 2
+                    THEN COALESCE(MIN(rn) FILTER (WHERE NOT (roe >= $62::numeric AND yr = top - rn + 1)) - 1,
+                                  COUNT(*))
+                    ELSE 0 END::int AS roe_years
+        FROM (
+            SELECT a.year::int AS yr, a.return_on_equity AS roe,
+                   ROW_NUMBER() OVER (ORDER BY a.year DESC) AS rn, MAX(a.year::int) OVER () AS top
+            FROM financial_statement a
+            WHERE $62::numeric IS NOT NULL
+              AND a.security_code = s.stock_symbol
+              AND a.quarter = ''
+              AND a.year > 0
+              AND make_date(a.year::int + 1, 4, 1) <= $3::date
+        ) annual
+        HAVING $62::numeric IS NOT NULL
+    ) ry ON TRUE
     LEFT JOIN financial_health h ON h.stock_symbol = s.stock_symbol
     WHERE (($1::int = 0 AND s.stock_exchange_market_id IN (2, 4))
         OR ($1::int <> 0 AND s.stock_exchange_market_id = $1))
@@ -670,7 +691,7 @@ SELECT
         COUNT(*) OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL)
     END AS magic_formula_ranked_count,
     operating_income_ttm, invested_capital, enterprise_value, volatility_percent, beta, bias240_percent,
-    market_cap, profit_years, pb_percentile, rd_ratio_percent, pe_pb_product, current_ratio
+    market_cap, profit_years, pb_percentile, rd_ratio_percent, pe_pb_product, current_ratio, roe_years
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -727,4 +748,5 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($58::numeric IS NULL OR rd_ratio_percent >= $58)
   AND ($59::numeric IS NULL OR pe_pb_product <= $59)
   AND ($60::numeric IS NULL OR current_ratio >= $60)
+  AND ($61::int IS NULL OR roe_years >= $61)
 "#;

@@ -275,7 +275,14 @@ impl<'a> Backtest<'a> {
             .bind(params.max_pb_percentile)
             .bind(params.min_rd_ratio_percent)
             .bind(params.max_pe_pb_product)
-            .bind(params.min_current_ratio);
+            .bind(params.min_current_ratio)
+            // 只設門檻時看最新一個已公布年度（1 年）。
+            .bind(
+                params
+                    .min_annual_roe_percent
+                    .map(|_| i32::from(params.min_roe_years.unwrap_or(1))),
+            )
+            .bind(params.min_annual_roe_percent);
         if with_chip {
             query = query
                 .bind(params.min_foreign_streak.map(i64::from))

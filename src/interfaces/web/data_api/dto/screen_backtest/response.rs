@@ -338,6 +338,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) max_pe_pb_product: Option<f64>,
     /// 流動比率下限（倍）；未篩選為 `null`。
     pub(crate) min_current_ratio: Option<f64>,
+    /// 年度 ROE 連續達標年數下限；未指定為 `null`（只設門檻時實際為 1 年）。
+    pub(crate) min_roe_years: Option<u8>,
+    /// 年度 ROE 門檻（%）；未篩選為 `null`。
+    pub(crate) min_annual_roe_percent: Option<f64>,
     /// 營收加速月數下限；未篩選為 `null`。
     pub(crate) min_revenue_acceleration_months: Option<u8>,
     /// 訊號來源；未篩選為 `null`。

@@ -86,6 +86,18 @@ pub(super) fn validate_fundamentals(params: &ScreenBacktestParams) -> Result<(),
         return Err("min_current_ratio 必須介於 0 至 100");
     }
     if params
+        .min_roe_years
+        .is_some_and(|years| !(1..=10).contains(&years))
+    {
+        return Err("min_roe_years 必須介於 1 至 10");
+    }
+    if !within(params.min_annual_roe_percent, 0.0, 100.0) {
+        return Err("min_annual_roe_percent 必須介於 0 至 100");
+    }
+    if params.min_roe_years.is_some() && params.min_annual_roe_percent.is_none() {
+        return Err("min_roe_years 需搭配 min_annual_roe_percent");
+    }
+    if params
         .major_change_weeks
         .is_some_and(|weeks| !(1..=12).contains(&weeks))
     {

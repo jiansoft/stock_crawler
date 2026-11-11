@@ -17,6 +17,7 @@ mod peg;
 mod query_plans;
 mod rd_ratio;
 mod revenue_industry;
+mod roe;
 mod steady;
 mod trend;
 mod validation;
@@ -90,6 +91,8 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_rd_ratio_percent: None,
         max_pe_pb_product: None,
         min_current_ratio: None,
+        min_roe_years: None,
+        min_annual_roe_percent: None,
         sort_by: None,
         sort_order: None,
         limit: None,
