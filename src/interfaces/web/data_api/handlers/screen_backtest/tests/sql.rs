@@ -86,7 +86,12 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("share_counts AS MATERIALIZED ("));
     assert!(BACKTEST_SQL.contains("profit_streak AS MATERIALIZED ("));
     assert!(BACKTEST_SQL.contains("ps.yr = pq.ord / 4 - 1"));
-    assert!(BACKTEST_SQL.contains(")) >= $54 * 100000, FALSE))"));
+    assert!(BACKTEST_SQL.contains("COALESCE(mc.market_cap >= $54 * 100000, FALSE)"));
+    assert!(BACKTEST_SQL.contains("COALESCE(mc.market_cap / rt.ttm <= $62, FALSE)"));
+    assert!(BACKTEST_SQL.contains("COALESCE(nm.avg_net_margin >= $63, FALSE)"));
+    assert!(BACKTEST_SQL.contains("revenue_ttm AS MATERIALIZED ("));
+    assert!(BACKTEST_SQL.contains("rt.target = u.revenue_ord"));
+    assert!(BACKTEST_SQL.contains("AND make_date(i.fiscal_year + 1, 4, 1) <= u.date"));
     assert!(BACKTEST_SQL.contains("COALESCE(ps.profit_years >= $55, FALSE)"));
     // 神奇公式：只算起日前兩年以後、四季相連的營業利益；換股日對上已過法定期限的同一季。
     assert!(BACKTEST_SQL.contains("magic_inputs AS MATERIALIZED ("));
@@ -107,7 +112,7 @@ fn backtest_sql_variants_are_well_formed() {
     assert!(BACKTEST_SQL.contains("LEFT JOIN valuation_level vl ON vl.date = b.date"));
     assert!(BACKTEST_SQL.contains("h.below * 100 < $34::int * h.samples"));
     assert!(BACKTEST_SQL.contains("p.date < cur.date AND p.date >= cur.date - INTERVAL '5 years'"));
-    assert!(!BACKTEST_SQL.contains("$62"));
+    assert!(!BACKTEST_SQL.contains("$64"));
     assert!(BACKTEST_SQL.contains("roe_streak AS MATERIALIZED ("));
     assert!(BACKTEST_SQL.contains("COALESCE(rq.roe_years >= $60, FALSE)"));
     assert!(BACKTEST_SQL.contains("rq.yr = pq.ord / 4 - 1"));
@@ -154,9 +159,9 @@ fn backtest_sql_variants_are_well_formed() {
             .starts_with("WITH RECURSIVE\nchip AS (")
     );
     assert!(BACKTEST_WITH_CHIP_SQL.contains("),\nday_scan AS ("));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $62"));
-    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $63"));
-    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$64"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.foreign_buy >= $64"));
+    assert!(BACKTEST_WITH_CHIP_SQL.contains("c.trust_buy >= $65"));
+    assert!(!BACKTEST_WITH_CHIP_SQL.contains("$66"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("LEFT JOIN chip c ON"));
     assert!(BACKTEST_WITH_CHIP_SQL.contains("COALESCE(c.foreign_buy, 0)::float8 AS foreign_buy"));
     assert!(BACKTEST_SQL.contains("rs_score DESC, rs_rank ASC, stock_symbol"));

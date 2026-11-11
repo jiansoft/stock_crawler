@@ -56,6 +56,9 @@
 /// 兩者每檔都會回傳。
 /// 長期高 ROE：`roe_years` = 已公布（隔年 4/1 起）的年度 ROE 從最新年度往回連續不低於 `$62`（年度相連）的年數，
 /// 最新年度落後查詢年超過 2 年時為 0；只在設 `$62` 時才查（沒設時為 NULL），`$61` 為年數下限。
+/// 肯尼斯費雪：`psr` = `pv` 收盤 × 目前發行股數 ÷ 最近 12 個月（須相連）營收合計（新鮮度同月營收），`$63` 為上限；
+/// `avg_net_margin_3y_percent` = 已公布（隔年 4/1 起）最近 3 個 Yahoo 年度損益表的稅後淨利率平均（年度須相連、最新
+/// 年度落後查詢年 1～2 年），`$64` 為下限；兩者每檔都會回傳。
 pub(super) const SCREEN_STOCKS_SQL: &str = r#"
 WITH latest AS (
     SELECT
@@ -129,7 +132,11 @@ WITH latest AS (
         rd.rd_ratio_raw,
         bs.bs_ord,
         bs.current_ratio_raw,
-        ry.roe_years
+        ry.roe_years,
+        -- PSR：收盤 × 目前發行股數（元）÷ 1000 ÷ 近 12 個月營收（千元）。
+        CASE WHEN r.revenue_ttm_raw > 0
+            THEN ROUND(pv.close_price * NULLIF(s.issued_share, 0) / 1000.0 / r.revenue_ttm_raw, 2) END AS psr_raw,
+        nm.avg_net_margin_3y_percent
     FROM stocks s
     LEFT JOIN LATERAL (
         -- 最近 12 個月營收：最新一月的年增率、從最新月往回連續年增（> 0 且月份相連）
@@ -152,7 +159,10 @@ WITH latest AS (
                   AND SUM(last_year) FILTER (WHERE rn <= 3) > 0
               THEN ROUND((SUM(monthly) FILTER (WHERE rn <= 3)
                   / SUM(last_year) FILTER (WHERE rn <= 3) - 1) * 100, 2)
-            END AS revenue_yoy_3m_raw
+            END AS revenue_yoy_3m_raw,
+            -- PSR 的分母：近 12 個月（月份須相連、合計 > 0）營收合計（千元）。
+            CASE WHEN COUNT(*) = 12 AND MAX(ord) - MIN(ord) = 11 AND SUM(monthly) > 0
+                THEN SUM(monthly) END AS revenue_ttm_raw
         FROM (
             SELECT month, yoy, monthly, last_year, ord,
                 ROW_NUMBER() OVER (ORDER BY month DESC) AS rn,
@@ -513,6 +523,24 @@ WITH latest AS (
         ) annual
         HAVING $62::numeric IS NOT NULL
     ) ry ON TRUE
+    LEFT JOIN LATERAL (
+        -- 近 3 年平均稅後淨利率（%）：已公布（隔年 4/1 起）最近 3 個 Yahoo 年度損益表的稅後淨利 ÷ 營收平均；年度須
+        -- 相連、營收皆 > 0，最新年度落後查詢年 1～2 年才算新鮮，否則沒有資料。
+        SELECT ROUND(AVG(a.net_income::numeric * 100 / NULLIF(a.revenue, 0)), 2) AS avg_net_margin_3y_percent
+        FROM (
+            SELECT i.fiscal_year, i.net_income, i.revenue
+            FROM income_statement i
+            WHERE i.source = 'yahoo'
+              AND i.stock_symbol = s.stock_symbol
+              AND i.period_type = 'annual'
+              AND make_date(i.fiscal_year + 1, 4, 1) <= $3::date
+            ORDER BY i.fiscal_year DESC
+            LIMIT 3
+        ) a
+        HAVING COUNT(a.net_income) = 3 AND COUNT(a.revenue) = 3 AND MIN(a.revenue) > 0
+           AND MAX(a.fiscal_year) - MIN(a.fiscal_year) = 2
+           AND EXTRACT(YEAR FROM $3::date)::int - MAX(a.fiscal_year) BETWEEN 1 AND 2
+    ) nm ON TRUE
     LEFT JOIN financial_health h ON h.stock_symbol = s.stock_symbol
     WHERE (($1::int = 0 AND s.stock_exchange_market_id IN (2, 4))
         OR ($1::int <> 0 AND s.stock_exchange_market_id = $1))
@@ -557,6 +585,12 @@ WITH latest AS (
               - ((revenue_raw_month / 100)::int * 12
                 + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
           THEN revenue_record_raw END AS revenue_record,
+        CASE WHEN revenue_raw_month IS NOT NULL
+          AND ((EXTRACT(YEAR FROM $3::date)::int * 12
+                + EXTRACT(MONTH FROM $3::date)::int)
+              - ((revenue_raw_month / 100)::int * 12
+                + (revenue_raw_month % 100)::int)) BETWEEN 0 AND 3
+          THEN psr_raw END AS psr,
         CASE WHEN financial_year IS NOT NULL
           AND ((EXTRACT(YEAR FROM $3::date)::int * 4
                 + EXTRACT(QUARTER FROM $3::date)::int)
@@ -691,7 +725,8 @@ SELECT
         COUNT(*) OVER (PARTITION BY earnings_yield_percent IS NULL OR return_on_capital_percent IS NULL)
     END AS magic_formula_ranked_count,
     operating_income_ttm, invested_capital, enterprise_value, volatility_percent, beta, bias240_percent,
-    market_cap, profit_years, pb_percentile, rd_ratio_percent, pe_pb_product, current_ratio, roe_years
+    market_cap, profit_years, pb_percentile, rd_ratio_percent, pe_pb_product, current_ratio, roe_years,
+    psr, avg_net_margin_3y_percent
 FROM normalized
 LEFT JOIN UNNEST($16::text[], $17::smallint[]) AS rs(symbol, rs_score)
        ON rs.symbol = normalized.stock_symbol
@@ -749,4 +784,6 @@ WHERE ($4::numeric IS NULL OR revenue_yoy_percent >= $4)
   AND ($59::numeric IS NULL OR pe_pb_product <= $59)
   AND ($60::numeric IS NULL OR current_ratio >= $60)
   AND ($61::int IS NULL OR roe_years >= $61)
+  AND ($63::numeric IS NULL OR psr <= $63)
+  AND ($64::numeric IS NULL OR avg_net_margin_3y_percent >= $64)
 "#;

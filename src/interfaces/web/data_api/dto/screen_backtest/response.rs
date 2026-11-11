@@ -342,6 +342,10 @@ pub(crate) struct ScreenBacktestResponse {
     pub(crate) min_roe_years: Option<u8>,
     /// 年度 ROE 門檻（%）；未篩選為 `null`。
     pub(crate) min_annual_roe_percent: Option<f64>,
+    /// PSR 上限（倍）；未篩選為 `null`。
+    pub(crate) max_psr: Option<f64>,
+    /// 近 3 年平均稅後淨利率下限（%）；未篩選為 `null`。
+    pub(crate) min_avg_net_margin_3y: Option<f64>,
     /// 營收加速月數下限；未篩選為 `null`。
     pub(crate) min_revenue_acceleration_months: Option<u8>,
     /// 訊號來源；未篩選為 `null`。

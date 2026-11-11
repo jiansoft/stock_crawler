@@ -154,6 +154,10 @@ pub(super) struct ScreenedStockRow {
     current_ratio: Option<Decimal>,
     /// 年度 ROE 連續達標年數。
     roe_years: Option<i32>,
+    /// PSR（倍）。
+    psr: Option<Decimal>,
+    /// 近 3 年平均稅後淨利率（%）。
+    avg_net_margin_3y_percent: Option<Decimal>,
 }
 
 impl From<ScreenedStockRow> for ScreenedStock {
@@ -350,6 +354,12 @@ impl From<ScreenedStockRow> for ScreenedStock {
             pe_pb_product: analytical_decimal_to_f64(row.pe_pb_product, &symbol, "pe_pb_product"),
             current_ratio: analytical_decimal_to_f64(row.current_ratio, &symbol, "current_ratio"),
             roe_years: row.roe_years,
+            psr: analytical_decimal_to_f64(row.psr, &symbol, "psr"),
+            avg_net_margin_3y_percent: analytical_decimal_to_f64(
+                row.avg_net_margin_3y_percent,
+                &symbol,
+                "avg_net_margin_3y_percent",
+            ),
         }
     }
 }

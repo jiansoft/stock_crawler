@@ -14,6 +14,7 @@ mod magic_formula;
 mod major;
 mod pb_percentile;
 mod peg;
+mod psr;
 mod query_plans;
 mod rd_ratio;
 mod revenue_industry;
@@ -93,6 +94,8 @@ pub(super) fn screening_params() -> StockScreeningParams {
         min_current_ratio: None,
         min_roe_years: None,
         min_annual_roe_percent: None,
+        max_psr: None,
+        min_avg_net_margin_3y: None,
         sort_by: None,
         sort_order: None,
         limit: None,
