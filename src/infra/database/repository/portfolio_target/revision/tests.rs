@@ -41,7 +41,7 @@ async fn save_records_previous_targets_and_keeps_latest_twenty() {
         return;
     }
     let pool = database::get_connection();
-    let owner = TargetOwner::new(1, "79977");
+    let owner = TargetOwner::new(1, "79977".to_owned());
     let member = &owner;
     let cleanup = || async {
         for sql in [
@@ -114,7 +114,7 @@ async fn save_records_previous_targets_and_keeps_latest_twenty() {
         Some(oldest.clone())
     );
     assert_eq!(
-        repo.get_revision(&TargetOwner::new(1, "79976"), oldest.id)
+        repo.get_revision(&TargetOwner::new(1, "79976".to_owned()), oldest.id)
             .await
             .unwrap(),
         None

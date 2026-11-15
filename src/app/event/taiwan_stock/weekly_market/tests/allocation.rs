@@ -35,7 +35,7 @@ impl PortfolioTargetRepository for FakeTargets {
         _dimension: Option<TargetDimension>,
     ) -> Result<Vec<PortfolioTargetRecord>> {
         // 週報讀的是預設家庭的全家目標
-        assert_eq!(owner, &TargetOwner::new(1, "0"));
+        assert_eq!(owner, &TargetOwner::new(1, "0".to_owned()));
         if self.fail {
             return Err(anyhow!("目標讀取失敗"));
         }

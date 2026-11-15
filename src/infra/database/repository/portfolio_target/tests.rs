@@ -101,7 +101,7 @@ async fn fetch_etf_components_returns_top_ten_with_dates() {
 #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
 async fn targets_replace_atomically_and_preserve_cash_configuration() {
     let repo = PgPortfolioTargetRepository::with_pool(database::get_connection().clone());
-    let owner = TargetOwner::new(1, "79979-target-regression");
+    let owner = TargetOwner::new(1, "79979-target-regression".to_owned());
     let member = &owner;
     for sql in [
         "DELETE FROM portfolio_target WHERE member_id=$1",
@@ -214,8 +214,8 @@ async fn targets_are_scoped_by_household_and_revisions_record_actor() {
     // 假家庭編號，不碰開發庫裡家庭 #1 的全家目標
     let (first, second) = (979_901_i64, 979_902_i64);
     cleanup_households(pool, &[first, second]).await;
-    let a = TargetOwner::new(first, "0");
-    let b = TargetOwner::new(second, "0");
+    let a = TargetOwner::new(first, "0".to_owned());
+    let b = TargetOwner::new(second, "0".to_owned());
     let stock = TargetDimension::Stock;
     let web = TargetActor::parse(Some("web"), Some("1")).unwrap();
     let mcp = TargetActor::parse(Some("mcp"), Some("0193a7b2-token")).unwrap();
@@ -257,8 +257,8 @@ async fn family_targets_of_two_households_do_not_overwrite() {
     let repo = PgPortfolioTargetRepository::with_pool(pool.clone());
     let (first, second) = (979_901_i64, 979_902_i64);
     cleanup_households(pool, &[first, second]).await;
-    let a = TargetOwner::new(first, "0");
-    let b = TargetOwner::new(second, "0");
+    let a = TargetOwner::new(first, "0".to_owned());
+    let b = TargetOwner::new(second, "0".to_owned());
     let stock = TargetDimension::Stock;
     let actor = TargetActor::default();
     repo.save_targets(&a, stock, &[("79979A".into(), 50.0)], &actor)

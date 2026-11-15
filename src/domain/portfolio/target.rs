@@ -53,10 +53,10 @@ pub struct TargetOwner {
 
 impl TargetOwner {
     /// 以家庭與會員編號建立擁有者。
-    pub fn new(household_id: i64, member_id: impl Into<String>) -> Self {
+    pub fn new(household_id: i64, member_id: String) -> Self {
         Self {
             household_id,
-            member_id: member_id.into(),
+            member_id,
         }
     }
 }

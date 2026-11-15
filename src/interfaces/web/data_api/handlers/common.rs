@@ -30,7 +30,11 @@ pub(in crate::interfaces::web::data_api) fn error_response(
 
 /// 解析個人資料端點的 `household_id`：未帶時為預設家庭 #1，帶了必須是正整數。
 ///
-/// 成員是否屬於該家庭的驗證與 `DATA_API_STRICT_SCOPE` 在會員系統 1-09 加上。
+/// 成員是否屬於該家庭的驗證與 `DATA_API_STRICT_SCOPE` 在持股端點的 scope middleware。
+///
+/// # Errors
+///
+/// 帶了 0 或負數時回錯誤訊息，呼叫端回 422。
 pub(super) fn household_param(value: Option<i64>) -> Result<i64, &'static str> {
     match value {
         None => Ok(crate::domain::household::DEFAULT_HOUSEHOLD_ID),
