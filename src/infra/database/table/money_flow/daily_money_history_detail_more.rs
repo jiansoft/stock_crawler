@@ -82,7 +82,7 @@ impl DailyMoneyHistoryDetailMore {
     ) -> Result<PgQueryResult> {
         let sql = r#"
 INSERT INTO daily_money_history_detail_more (
-    member_id, "date", transaction_date, security_code, closing_price, 
+    household_id, member_id, "date", transaction_date, security_code, closing_price, 
     number_of_shares_held, unit_price_per_share, cost, market_value, 
     profit_and_loss, profit_and_loss_percentage
 )
@@ -113,6 +113,8 @@ aggregated_data AS (
     FROM raw_data
 )
 SELECT
+    -- 會員系統 Phase 1：只有家庭 #1，member_id = 0 即該家庭的合計；Phase 7 才依家庭分組結算
+    1::bigint,
     member_id,
     date,
     transaction_date,

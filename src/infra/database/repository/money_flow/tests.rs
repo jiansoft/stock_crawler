@@ -110,3 +110,231 @@ async fn money_flow_repository_pairs_member_values_with_previous_day() {
 
     cleanup().await;
 }
+
+/// 結算輸出快照：三張市值表加上 household_id、改主鍵之後，輸出必須與改動前逐字相同。
+///
+/// 全部在同一個交易內種資料、結算、讀取，最後 ROLLBACK，不留任何資料。
+/// 預期值由改動前的程式產生；`household_id` 欄在改動前來自欄位預設值 1。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn settlement_output_matches_snapshot() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 settlement_output_matches_snapshot：無資料庫連接");
+        return;
+    }
+    const MEMBER_A: i64 = 979_801;
+    const MEMBER_B: i64 = 979_802;
+    let current = NaiveDate::from_ymd_opt(1987, 7, 16).expect("固定日期合法");
+    let mut tx = Some(database::get_tx().await.expect("開啟交易"));
+
+    {
+        let conn = tx.as_mut().expect("交易已開啟");
+        for (date, symbol, price) in [
+            ("1987-07-15", "79979SA", "10"),
+            ("1987-07-16", "79979SA", "12"),
+            ("1987-07-15", "79979SB", "20"),
+            ("1987-07-16", "79979SB", "19"),
+        ] {
+            sqlx::query(
+                r#"INSERT INTO "DailyQuotes" ("Date", stock_symbol, "ClosingPrice")
+                   VALUES ($1::date, $2, $3::numeric)
+                   ON CONFLICT (stock_symbol, "Date") DO UPDATE SET "ClosingPrice" = EXCLUDED."ClosingPrice""#,
+            )
+            .bind(date)
+            .bind(symbol)
+            .bind(price)
+            .execute(&mut **conn)
+            .await
+            .expect("種入收盤價");
+        }
+        // 建立時間取台北中午，transaction_date 在任何連線時區都是同一天
+        for (member, symbol, shares, cost, average, created) in [
+            (
+                MEMBER_A,
+                "79979SA",
+                1000_i64,
+                "-10000",
+                "10",
+                "1987-04-01 12:00+08",
+            ),
+            (
+                MEMBER_A,
+                "79979SB",
+                500,
+                "-9500",
+                "19",
+                "1987-04-02 12:00+08",
+            ),
+            (
+                MEMBER_B,
+                "79979SA",
+                2000,
+                "-22000",
+                "11",
+                "1987-04-03 12:00+08",
+            ),
+        ] {
+            sqlx::query(
+                "INSERT INTO stock_ownership_details
+                     (member_id, security_code, share_quantity, holding_cost, share_price_average, created_time, date)
+                 VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6::timestamptz, ($6::timestamptz AT TIME ZONE 'Asia/Taipei')::date)",
+            )
+            .bind(member)
+            .bind(symbol)
+            .bind(shares)
+            .bind(cost)
+            .bind(average)
+            .bind(created)
+            .execute(&mut **conn)
+            .await
+            .expect("種入庫存");
+        }
+    }
+
+    TableDailyMoneyHistoryMember::upsert(current, &mut tx)
+        .await
+        .expect("會員市值結算");
+    TableDailyMoneyHistoryDetail::delete(current, &mut tx)
+        .await
+        .expect("清除當日明細");
+    TableDailyMoneyHistoryDetail::upsert(current, &mut tx)
+        .await
+        .expect("明細結算");
+    TableDailyMoneyHistoryDetailMore::delete(current, &mut tx)
+        .await
+        .expect("清除當日批次明細");
+    TableDailyMoneyHistoryDetailMore::upsert(current, &mut tx)
+        .await
+        .expect("批次明細結算");
+
+    let conn = tx.as_mut().expect("交易已開啟");
+    let members: Vec<String> = sqlx::query_scalar(
+        "SELECT concat_ws('|', household_id, member_id, market_value)
+         FROM daily_money_history_member
+         WHERE date = $1 AND member_id IN (0, $2, $3)
+         ORDER BY household_id, member_id",
+    )
+    .bind(current)
+    .bind(MEMBER_A)
+    .bind(MEMBER_B)
+    .fetch_all(&mut **conn)
+    .await
+    .expect("讀取會員市值");
+    let details: Vec<String> = sqlx::query_scalar(
+        "SELECT concat_ws('|', household_id, member_id, security_code, closing_price, total_shares, cost,
+                          average_unit_price_per_share, market_value, ratio, transfer_tax, profit_and_loss,
+                          profit_and_loss_percentage, previous_day_market_value,
+                          previous_day_profit_and_loss, previous_day_profit_and_loss_percentage)
+         FROM daily_money_history_detail
+         WHERE date = $1 AND security_code LIKE '79979S%'
+         ORDER BY household_id, member_id, security_code",
+    )
+    .bind(current)
+    .fetch_all(&mut **conn)
+    .await
+    .expect("讀取明細");
+    let lots: Vec<String> = sqlx::query_scalar(
+        "SELECT concat_ws('|', household_id, member_id, transaction_date, security_code, closing_price,
+                          number_of_shares_held, unit_price_per_share, cost, market_value,
+                          profit_and_loss, profit_and_loss_percentage)
+         FROM daily_money_history_detail_more
+         WHERE date = $1 AND security_code LIKE '79979S%'
+         ORDER BY household_id, member_id, security_code, transaction_date",
+    )
+    .bind(current)
+    .fetch_all(&mut **conn)
+    .await
+    .expect("讀取批次明細");
+    tx.take()
+        .expect("交易已開啟")
+        .rollback()
+        .await
+        .expect("回滾測試資料");
+
+    assert_eq!(members, SNAPSHOT_MEMBERS);
+    assert_eq!(details, SNAPSHOT_DETAILS);
+    assert_eq!(lots, SNAPSHOT_LOTS);
+}
+
+/// 欄位：household_id|member_id|market_value
+const SNAPSHOT_MEMBERS: [&str; 3] = [
+    "1|0|45500.0000",
+    "1|979801|21500.0000",
+    "1|979802|24000.0000",
+];
+
+/// 欄位：household_id|member_id|security_code|closing_price|total_shares|cost|
+/// average_unit_price_per_share|market_value|ratio|transfer_tax|profit_and_loss|
+/// profit_and_loss_percentage|previous_day_market_value|previous_day_profit_and_loss|
+/// previous_day_profit_and_loss_percentage
+const SNAPSHOT_DETAILS: [&str; 5] = [
+    "1|0|79979SA|12.0000|3000|-32000.0000|10.6667|36000.0000|79.1209|108.0000|4000.0000|12.5000|30000.0000|6000.0000|20.0000",
+    "1|0|79979SB|19.0000|500|-9500.0000|19.0000|9500.0000|20.8791|28.5000|0.0000|0.0000|10000.0000|-500.0000|-5.0000",
+    "1|979801|79979SA|12.0000|1000|-10000.0000|10.0000|12000.0000|55.8140|36.0000|2000.0000|20.0000|10000.0000|2000.0000|20.0000",
+    "1|979801|79979SB|19.0000|500|-9500.0000|19.0000|9500.0000|44.1860|28.5000|0.0000|0.0000|10000.0000|-500.0000|-5.0000",
+    "1|979802|79979SA|12.0000|2000|-22000.0000|11.0000|24000.0000|100.0000|72.0000|2000.0000|9.0909|20000.0000|4000.0000|20.0000",
+];
+
+/// 欄位：household_id|member_id|transaction_date|security_code|closing_price|
+/// number_of_shares_held|unit_price_per_share|cost|market_value|profit_and_loss|
+/// profit_and_loss_percentage
+const SNAPSHOT_LOTS: [&str; 6] = [
+    "1|0|1987-04-01|79979SA|12.0000|1000|10.0000|-10000.0000|12000.0000|2000.0000|20.0000",
+    "1|0|1987-04-03|79979SA|12.0000|2000|11.0000|-22000.0000|24000.0000|2000.0000|9.0909",
+    "1|0|1987-04-02|79979SB|19.0000|500|19.0000|-9500.0000|9500.0000|0.0000|0.0000",
+    "1|979801|1987-04-01|79979SA|12.0000|1000|10.0000|-10000.0000|12000.0000|2000.0000|20.0000",
+    "1|979801|1987-04-02|79979SB|19.0000|500|19.0000|-9500.0000|9500.0000|0.0000|0.0000",
+    "1|979802|1987-04-03|79979SA|12.0000|2000|11.0000|-22000.0000|24000.0000|2000.0000|9.0909",
+];
+
+/// 過渡唯一索引：舊版程式的 `ON CONFLICT (date, member_id)` 與
+/// `ON CONFLICT (date, security_code, member_id)` 在新主鍵下仍可執行（L1 後可退版）。
+/// Phase 7 移除過渡索引時一併刪除這個測試。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn legacy_on_conflict_targets_still_work() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 legacy_on_conflict_targets_still_work：無資料庫連接");
+        return;
+    }
+    let date = NaiveDate::from_ymd_opt(1987, 7, 17).expect("固定日期合法");
+    let mut tx = database::get_tx().await.expect("開啟交易");
+    for _ in 0..2 {
+        sqlx::query(
+            "INSERT INTO daily_money_history_member (date, member_id, market_value) VALUES ($1, 979801, 1)
+             ON CONFLICT (date, member_id) DO UPDATE SET market_value = EXCLUDED.market_value + 1",
+        )
+        .bind(date)
+        .execute(&mut *tx)
+        .await
+        .expect("舊寫法寫入會員市值");
+        sqlx::query(
+            "INSERT INTO daily_money_history_detail (date, security_code, member_id) VALUES ($1, '79979SA', 979801)
+             ON CONFLICT (date, security_code, member_id) DO UPDATE SET total_shares = daily_money_history_detail.total_shares + 1",
+        )
+        .bind(date)
+        .execute(&mut *tx)
+        .await
+        .expect("舊寫法寫入明細");
+    }
+    let (value, shares): (rust_decimal::Decimal, i64) = sqlx::query_as(
+        "SELECT m.market_value, d.total_shares
+         FROM daily_money_history_member m
+         JOIN daily_money_history_detail d ON d.date = m.date AND d.member_id = m.member_id
+         WHERE m.date = $1 AND m.member_id = 979801 AND m.household_id = 1 AND d.household_id = 1",
+    )
+    .bind(date)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("讀回");
+    tx.rollback().await.expect("回滾測試資料");
+    assert_eq!((value, shares), (rust_decimal::Decimal::from(2), 1));
+}

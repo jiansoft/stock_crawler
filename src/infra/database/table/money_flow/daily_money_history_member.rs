@@ -51,7 +51,7 @@ impl DailyMoneyHistoryMember {
         tx: &mut Option<Transaction<'_, Postgres>>,
     ) -> Result<PgQueryResult> {
         let sql = r#"
-INSERT INTO daily_money_history_member (date, member_id, market_value)
+INSERT INTO daily_money_history_member (date, household_id, member_id, market_value)
 WITH base_calc AS (
     SELECT
         od.member_id,
@@ -92,10 +92,12 @@ final_rows AS (
 )
 SELECT
     $1 AS date,
+    -- 會員系統 Phase 1：只有家庭 #1，member_id = 0 即該家庭的合計；Phase 7 才依家庭分組結算
+    1::bigint AS household_id,
     fr.member_id,
     fr.market_value
 FROM final_rows fr
-ON CONFLICT (date, member_id) DO UPDATE SET
+ON CONFLICT (date, household_id, member_id) DO UPDATE SET
     market_value = EXCLUDED.market_value,
     updated_time = NOW();
 "#;

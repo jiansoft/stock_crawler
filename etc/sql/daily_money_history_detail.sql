@@ -1,6 +1,7 @@
 create table if not exists public.daily_money_history_detail
 (
     serial                                  bigserial,
+    household_id                            bigint                   default 1                                       not null,
     member_id                               bigint                   default 0                                       not null,
     date                                    date                     default CURRENT_DATE                            not null,
     security_code                           varchar(24)              default ''::character varying                   not null,
@@ -18,10 +19,11 @@ create table if not exists public.daily_money_history_detail
     previous_day_market_value               numeric(18, 4)           default 0                                       not null,
     previous_day_profit_and_loss            numeric(18, 4)           default 0                                       not null,
     previous_day_profit_and_loss_percentage numeric(18, 4)           default 0                                       not null,
-    primary key (date, security_code, member_id)
+    primary key (date, security_code, household_id, member_id)
 );
 
-comment on column public.daily_money_history_detail.member_id is '資料屬於那一個會員';
+comment on column public.daily_money_history_detail.household_id is '所屬家庭；Phase 7 前只有家庭 #1（預設值保留到 Phase 7）';
+comment on column public.daily_money_history_detail.member_id is '資料屬於那一個會員；0 代表該家庭的合計';
 comment on column public.daily_money_history_detail.date is '資料屬於那一天';
 comment on column public.daily_money_history_detail.closing_price is '當日收盤價格';
 comment on column public.daily_money_history_detail.total_shares is '總股數';

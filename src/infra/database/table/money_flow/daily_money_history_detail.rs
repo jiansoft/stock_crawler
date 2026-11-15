@@ -80,7 +80,7 @@ impl DailyMoneyHistoryDetail {
     /// 1. 聚合未賣出庫存（個人與全局）  
     /// 2. 取當日與前一日收盤價  
     /// 3. 計算市值、成本、占比、損益與前日對照欄位  
-    /// 4. 以 `(date, security_code, member_id)` 做 upsert
+    /// 4. 以 `(date, security_code, household_id, member_id)` 做 upsert
     ///
     /// # Errors
     /// 當 SQL 執行失敗時回傳錯誤；若呼叫端有提供 transaction，
@@ -143,13 +143,14 @@ member_totals AS (
     FROM calc_base GROUP BY member_id
 )
 INSERT INTO daily_money_history_detail (
-    member_id, date, security_code, closing_price, total_shares, cost,
+    household_id, member_id, date, security_code, closing_price, total_shares, cost,
     average_unit_price_per_share, market_value, ratio, transfer_tax,
     profit_and_loss, profit_and_loss_percentage, created_time, updated_time,
     previous_day_market_value, previous_day_profit_and_loss, previous_day_profit_and_loss_percentage
 )
 SELECT
-    cb.member_id, cb.date, cb.security_code, cb.closing_price, cb.total_share, cb.cost,
+    -- 會員系統 Phase 1：只有家庭 #1，member_id = 0 即該家庭的合計；Phase 7 才依家庭分組結算
+    1::bigint, cb.member_id, cb.date, cb.security_code, cb.closing_price, cb.total_share, cb.cost,
     ROUND(CAST(-cb.cost / cb.total_share AS numeric), 4),
     cb.market_value,
     ROUND(CAST(cb.market_value / NULLIF(mt.total_mkt_val, 0) * 100 AS numeric), 4),
@@ -165,7 +166,7 @@ SELECT
     ROUND(CAST((cb.market_value - cb.prev_market_value) / NULLIF(cb.prev_market_value, 0) * 100 AS numeric), 4)
 FROM calc_base cb
 JOIN member_totals mt ON cb.member_id = mt.member_id
-ON CONFLICT (date, security_code, member_id) DO UPDATE SET
+ON CONFLICT (date, security_code, household_id, member_id) DO UPDATE SET
     closing_price = EXCLUDED.closing_price,
     total_shares = EXCLUDED.total_shares,
     cost = EXCLUDED.cost,
