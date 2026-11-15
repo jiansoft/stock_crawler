@@ -35,6 +35,7 @@ mod portfolio_holdings;
 mod portfolio_income;
 mod portfolio_payouts;
 mod portfolio_rebalance;
+mod portfolio_scope;
 mod portfolio_target_revisions;
 mod rankings;
 mod relative_strength;
