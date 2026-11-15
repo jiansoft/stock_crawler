@@ -11,7 +11,7 @@ use crate::domain::portfolio::rebalance::{
     CurrentPosition, DatedEtfComponent, EtfLookThroughComponent, PortfolioPositionQuery,
 };
 use crate::domain::portfolio::target::{
-    PortfolioTargetRecord, PortfolioTargetRepository, TargetDimension,
+    PortfolioTargetRecord, PortfolioTargetRepository, TargetActor, TargetDimension, TargetOwner,
 };
 use crate::infra::database;
 
@@ -35,9 +35,14 @@ impl PgPortfolioTargetRepository {
     }
 
     /// 列出明確設定過的維度，包含目標清單為空的全現金設定。
-    pub async fn configured_dimensions(&self, member_id: &str) -> Result<Vec<TargetDimension>> {
-        let values: Vec<String> = sqlx::query_scalar("SELECT dimension FROM portfolio_target_dimension WHERE member_id=$1 ORDER BY dimension")
-            .bind(member_id).fetch_all(self.pool()).await?;
+    pub async fn configured_dimensions(&self, owner: &TargetOwner) -> Result<Vec<TargetDimension>> {
+        let values: Vec<String> = sqlx::query_scalar(
+            "SELECT dimension FROM portfolio_target_dimension WHERE household_id=$1 AND member_id=$2 ORDER BY dimension",
+        )
+        .bind(owner.household_id)
+        .bind(&owner.member_id)
+        .fetch_all(self.pool())
+        .await?;
         values
             .into_iter()
             .map(|v| TargetDimension::parse(&v).context("未知的配置維度"))
@@ -212,7 +217,7 @@ impl TryFrom<TargetRow> for PortfolioTargetRecord {
 impl PortfolioTargetRepository for PgPortfolioTargetRepository {
     async fn list_targets(
         &self,
-        member_id: &str,
+        owner: &TargetOwner,
         dimension: Option<TargetDimension>,
     ) -> Result<Vec<PortfolioTargetRecord>> {
         let rows: Vec<TargetRow> = match dimension {
@@ -220,10 +225,11 @@ impl PortfolioTargetRepository for PgPortfolioTargetRepository {
                 sqlx::query_as(
                     r#"SELECT member_id, dimension, key, target_percent, updated_time
                        FROM portfolio_target
-                       WHERE member_id = $1 AND dimension = $2
+                       WHERE household_id = $1 AND member_id = $2 AND dimension = $3
                        ORDER BY target_percent DESC, key ASC"#,
                 )
-                .bind(member_id)
+                .bind(owner.household_id)
+                .bind(&owner.member_id)
                 .bind(dim.as_str())
                 .fetch_all(self.pool())
                 .await?
@@ -232,10 +238,11 @@ impl PortfolioTargetRepository for PgPortfolioTargetRepository {
                 sqlx::query_as(
                     r#"SELECT member_id, dimension, key, target_percent, updated_time
                        FROM portfolio_target
-                       WHERE member_id = $1
+                       WHERE household_id = $1 AND member_id = $2
                        ORDER BY dimension ASC, target_percent DESC, key ASC"#,
                 )
-                .bind(member_id)
+                .bind(owner.household_id)
+                .bind(&owner.member_id)
                 .fetch_all(self.pool())
                 .await?
             }
@@ -246,46 +253,70 @@ impl PortfolioTargetRepository for PgPortfolioTargetRepository {
             .collect()
     }
 
-    async fn has_configuration(&self, member_id: &str, dimension: TargetDimension) -> Result<bool> {
-        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM portfolio_target_dimension WHERE member_id=$1 AND dimension=$2)")
-            .bind(member_id).bind(dimension.as_str()).fetch_one(self.pool()).await?)
+    async fn has_configuration(
+        &self,
+        owner: &TargetOwner,
+        dimension: TargetDimension,
+    ) -> Result<bool> {
+        Ok(sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM portfolio_target_dimension WHERE household_id=$1 AND member_id=$2 AND dimension=$3)",
+        )
+        .bind(owner.household_id)
+        .bind(&owner.member_id)
+        .bind(dimension.as_str())
+        .fetch_one(self.pool())
+        .await?)
     }
 
     async fn save_targets(
         &self,
-        member_id: &str,
+        owner: &TargetOwner,
         dimension: TargetDimension,
         targets: &[(String, f64)],
+        actor: &TargetActor,
     ) -> Result<()> {
         crate::domain::portfolio::target::validate_targets(targets)?;
         let mut tx = self.pool().begin().await?;
-        // 即使配置目前為空，也必須序列化同一會員／維度的整份覆蓋更新。
+        // 即使配置目前為空，也必須序列化同一家庭／會員／維度的整份覆蓋更新。
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
             .bind(format!(
-                "portfolio-target:{member_id}:{}",
+                "portfolio-target:{}:{}:{}",
+                owner.household_id,
+                owner.member_id,
                 dimension.as_str()
             ))
             .execute(&mut *tx)
             .await?;
         // 覆蓋前先留存目前的整組（原本已設定且內容有變才記），改錯可以還原。
-        revision::record_before_save(&mut tx, member_id, dimension, targets).await?;
-        sqlx::query("INSERT INTO portfolio_target_dimension(member_id, dimension) VALUES ($1,$2) ON CONFLICT(member_id,dimension) DO UPDATE SET updated_time=CURRENT_TIMESTAMP")
-            .bind(member_id).bind(dimension.as_str()).execute(&mut *tx).await?;
-        // 刪除該使用者在該維度的現有設定
-        sqlx::query("DELETE FROM portfolio_target WHERE member_id = $1 AND dimension = $2")
-            .bind(member_id)
-            .bind(dimension.as_str())
-            .execute(&mut *tx)
-            .await?;
+        revision::record_before_save(&mut tx, owner, dimension, targets, actor).await?;
+        sqlx::query(
+            "INSERT INTO portfolio_target_dimension(household_id, member_id, dimension) VALUES ($1,$2,$3)
+             ON CONFLICT(household_id, member_id, dimension) DO UPDATE SET updated_time=CURRENT_TIMESTAMP",
+        )
+        .bind(owner.household_id)
+        .bind(&owner.member_id)
+        .bind(dimension.as_str())
+        .execute(&mut *tx)
+        .await?;
+        // 刪除該擁有者在該維度的現有設定
+        sqlx::query(
+            "DELETE FROM portfolio_target WHERE household_id = $1 AND member_id = $2 AND dimension = $3",
+        )
+        .bind(owner.household_id)
+        .bind(&owner.member_id)
+        .bind(dimension.as_str())
+        .execute(&mut *tx)
+        .await?;
 
         // 插入新設定
         for (key, pct) in targets {
             {
                 sqlx::query(
-                    r#"INSERT INTO portfolio_target (member_id, dimension, key, target_percent, updated_time)
-                       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)"#,
+                    r#"INSERT INTO portfolio_target (household_id, member_id, dimension, key, target_percent, updated_time)
+                       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)"#,
                 )
-                .bind(member_id)
+                .bind(owner.household_id)
+                .bind(&owner.member_id)
                 .bind(dimension.as_str())
                 .bind(key)
                 .bind(Decimal::from_f64_retain(*pct).unwrap_or_default())

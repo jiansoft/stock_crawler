@@ -28,6 +28,17 @@ pub(in crate::interfaces::web::data_api) fn error_response(
         .into_response()
 }
 
+/// 解析個人資料端點的 `household_id`：未帶時為預設家庭 #1，帶了必須是正整數。
+///
+/// 成員是否屬於該家庭的驗證與 `DATA_API_STRICT_SCOPE` 在會員系統 1-09 加上。
+pub(super) fn household_param(value: Option<i64>) -> Result<i64, &'static str> {
+    match value {
+        None => Ok(crate::domain::household::DEFAULT_HOUSEHOLD_ID),
+        Some(id) if id > 0 => Ok(id),
+        Some(_) => Err("household_id 必須為正整數"),
+    }
+}
+
 /// 將 PostgreSQL `NUMERIC` 安全轉換成 JSON number；超出 f64 範圍時保持 null。
 pub(super) fn decimal_to_f64(value: Option<Decimal>) -> Option<f64> {
     value.and_then(|number| number.to_string().parse().ok())

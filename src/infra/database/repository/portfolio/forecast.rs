@@ -128,12 +128,14 @@ pub(crate) async fn load_inputs(
 
 /// 有未賣出持股的會員，依編號排序。
 ///
+/// 只取實際會員（`member_id > 0`）：快照是個人列，`0` 在市值表代表家庭合計，不能混進快照。
+///
 /// # Errors
 ///
 /// 查詢失敗時回傳錯誤。
 pub(crate) async fn fetch_member_ids() -> Result<Vec<i64>> {
     sqlx::query_scalar(
-        "SELECT DISTINCT member_id FROM stock_ownership_details WHERE NOT is_sold AND share_quantity > 0 ORDER BY member_id",
+        "SELECT DISTINCT member_id FROM stock_ownership_details WHERE NOT is_sold AND share_quantity > 0 AND member_id > 0 ORDER BY member_id",
     )
     .fetch_all(database::get_connection())
     .await

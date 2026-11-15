@@ -101,13 +101,14 @@ async fn fetch_etf_components_returns_top_ten_with_dates() {
 #[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
 async fn targets_replace_atomically_and_preserve_cash_configuration() {
     let repo = PgPortfolioTargetRepository::with_pool(database::get_connection().clone());
-    let member = "79979-target-regression";
+    let owner = TargetOwner::new(1, "79979-target-regression");
+    let member = &owner;
     for sql in [
         "DELETE FROM portfolio_target WHERE member_id=$1",
         "DELETE FROM portfolio_target_dimension WHERE member_id=$1",
     ] {
         sqlx::query(sql)
-            .bind(member)
+            .bind(&member.member_id)
             .execute(repo.pool())
             .await
             .unwrap();
@@ -120,9 +121,10 @@ async fn targets_replace_atomically_and_preserve_cash_configuration() {
     );
     let a = vec![("A".to_owned(), 60.0)];
     let b = vec![("B".to_owned(), 60.0)];
+    let actor = TargetActor::default();
     let (a, b) = tokio::join!(
-        repo.save_targets(member, TargetDimension::Stock, &a),
-        repo.save_targets(member, TargetDimension::Stock, &b)
+        repo.save_targets(member, TargetDimension::Stock, &a, &actor),
+        repo.save_targets(member, TargetDimension::Stock, &b, &actor)
     );
     a.unwrap();
     b.unwrap();
@@ -140,7 +142,8 @@ async fn targets_replace_atomically_and_preserve_cash_configuration() {
                 ("A".into(), 33.335),
                 ("B".into(), 33.335),
                 ("C".into(), 33.33)
-            ]
+            ],
+            &TargetActor::default()
         )
         .await
         .is_err()
@@ -152,9 +155,14 @@ async fn targets_replace_atomically_and_preserve_cash_configuration() {
             .len(),
         1
     );
-    repo.save_targets(member, TargetDimension::Stock, &[("A".into(), 0.0)])
-        .await
-        .unwrap();
+    repo.save_targets(
+        member,
+        TargetDimension::Stock,
+        &[("A".into(), 0.0)],
+        &TargetActor::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         repo.list_targets(member, Some(TargetDimension::Stock))
             .await
@@ -162,7 +170,7 @@ async fn targets_replace_atomically_and_preserve_cash_configuration() {
             .target_percent,
         0.0
     );
-    repo.save_targets(member, TargetDimension::Stock, &[])
+    repo.save_targets(member, TargetDimension::Stock, &[], &TargetActor::default())
         .await
         .unwrap();
     assert!(
@@ -185,8 +193,104 @@ async fn targets_replace_atomically_and_preserve_cash_configuration() {
         "DELETE FROM portfolio_target_dimension WHERE member_id=$1",
     ] {
         sqlx::query(sql)
-            .bind(member)
+            .bind(&member.member_id)
             .execute(repo.pool())
+            .await
+            .unwrap();
+    }
+}
+
+/// 讀寫依家庭分開：A 家庭的全家目標在 B 家庭讀不到、版本不能跨家庭取用；歷史版本記下寫入來源。
+#[tokio::test]
+#[cfg_attr(not(feature = "integration-tests"), ignore = "需要隔離 PostgreSQL")]
+async fn targets_are_scoped_by_household_and_revisions_record_actor() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 targets_are_scoped_by_household_and_revisions_record_actor：無資料庫連接");
+        return;
+    }
+    let pool = database::get_connection();
+    let repo = PgPortfolioTargetRepository::with_pool(pool.clone());
+    // 假家庭編號，不碰開發庫裡家庭 #1 的全家目標
+    let (first, second) = (979_901_i64, 979_902_i64);
+    cleanup_households(pool, &[first, second]).await;
+    let a = TargetOwner::new(first, "0");
+    let b = TargetOwner::new(second, "0");
+    let stock = TargetDimension::Stock;
+    let web = TargetActor::parse(Some("web"), Some("1")).unwrap();
+    let mcp = TargetActor::parse(Some("mcp"), Some("0193a7b2-token")).unwrap();
+
+    repo.save_targets(&a, stock, &[("79979A".into(), 50.0)], &web)
+        .await
+        .unwrap();
+    assert!(repo.list_targets(&b, Some(stock)).await.unwrap().is_empty());
+    assert!(!repo.has_configuration(&b, stock).await.unwrap());
+    assert!(repo.configured_dimensions(&b).await.unwrap().is_empty());
+
+    // 第二次寫入：覆蓋前的那一組記成一版，帶上這次的來源
+    repo.save_targets(&a, stock, &[("79979C".into(), 20.0)], &mcp)
+        .await
+        .unwrap();
+    let revisions = repo.list_revisions(&a, stock).await.unwrap();
+    assert_eq!(revisions.len(), 1);
+    assert_eq!(revisions[0].targets, [("79979A".to_owned(), 50.0)]);
+    assert_eq!(revisions[0].actor, mcp);
+    assert!(repo.list_revisions(&b, stock).await.unwrap().is_empty());
+    assert_eq!(repo.get_revision(&b, revisions[0].id).await.unwrap(), None);
+
+    cleanup_households(pool, &[first, second]).await;
+}
+
+/// 兩個家庭各有一份 `member_id = '0'` 的全家目標時互不覆蓋。
+///
+/// 過渡唯一索引 `idx_portfolio_target_dimension_legacy_key`（member_id, dimension）讓 L1 之後退回舊版
+/// 仍能儲存，但也擋住第二個家庭的同一會員與維度；Phase 7 移除過渡索引時拿掉 `ignore` 啟用這個測試。
+#[tokio::test]
+#[ignore = "Phase 7 移除過渡唯一索引 idx_portfolio_target_dimension_legacy_key 後啟用"]
+async fn family_targets_of_two_households_do_not_overwrite() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 family_targets_of_two_households_do_not_overwrite：無資料庫連接");
+        return;
+    }
+    let pool = database::get_connection();
+    let repo = PgPortfolioTargetRepository::with_pool(pool.clone());
+    let (first, second) = (979_901_i64, 979_902_i64);
+    cleanup_households(pool, &[first, second]).await;
+    let a = TargetOwner::new(first, "0");
+    let b = TargetOwner::new(second, "0");
+    let stock = TargetDimension::Stock;
+    let actor = TargetActor::default();
+    repo.save_targets(&a, stock, &[("79979A".into(), 50.0)], &actor)
+        .await
+        .unwrap();
+    repo.save_targets(&b, stock, &[("79979B".into(), 30.0)], &actor)
+        .await
+        .unwrap();
+    let keys = |records: Vec<PortfolioTargetRecord>| -> Vec<String> {
+        records.into_iter().map(|record| record.key).collect()
+    };
+    assert_eq!(
+        keys(repo.list_targets(&a, Some(stock)).await.unwrap()),
+        ["79979A"]
+    );
+    assert_eq!(
+        keys(repo.list_targets(&b, Some(stock)).await.unwrap()),
+        ["79979B"]
+    );
+    cleanup_households(pool, &[first, second]).await;
+}
+
+/// 清除假家庭的配置目標、維度與版本。
+async fn cleanup_households(pool: &sqlx::PgPool, households: &[i64]) {
+    for sql in [
+        "DELETE FROM portfolio_target WHERE household_id = ANY($1)",
+        "DELETE FROM portfolio_target_dimension WHERE household_id = ANY($1)",
+        "DELETE FROM portfolio_target_revision WHERE household_id = ANY($1)",
+    ] {
+        sqlx::query(sql)
+            .bind(households)
+            .execute(pool)
             .await
             .unwrap();
     }

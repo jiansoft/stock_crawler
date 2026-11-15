@@ -6,6 +6,7 @@ pub mod events;
 pub mod financial;
 pub mod foreign_holding;
 pub mod health;
+pub mod household;
 pub mod market_index;
 pub mod money_flow;
 pub mod performance;

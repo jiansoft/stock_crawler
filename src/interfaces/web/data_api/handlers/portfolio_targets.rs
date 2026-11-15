@@ -9,8 +9,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{error_response, repository_error};
-use crate::domain::portfolio::target::{PortfolioTargetRepository, TargetDimension};
+use super::{error_response, household_param, repository_error};
+use crate::domain::portfolio::target::{
+    PortfolioTargetRepository, TargetActor, TargetDimension, TargetOwner,
+};
 use crate::infra::database::repository::portfolio_target::PgPortfolioTargetRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, PortfolioTargetItemDto, PortfolioTargetsQueryParams, PortfolioTargetsResponse,
@@ -38,6 +40,11 @@ pub(crate) async fn get_portfolio_targets(
     if member_id < 0 {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
     }
+    let household_id = match household_param(params.household_id) {
+        Ok(id) => id,
+        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let owner = TargetOwner::new(household_id, member_id.to_string());
 
     let dim_opt = match params.dimension.as_deref() {
         Some(s) if !s.is_empty() => match TargetDimension::parse(s) {
@@ -53,12 +60,12 @@ pub(crate) async fn get_portfolio_targets(
     };
 
     let repo = PgPortfolioTargetRepository::new();
-    let records = match repo.list_targets(&member_id.to_string(), dim_opt).await {
+    let records = match repo.list_targets(&owner, dim_opt).await {
         Ok(r) => r,
         Err(e) => return repository_error(e),
     };
 
-    let dimensions = match repo.configured_dimensions(&member_id.to_string()).await {
+    let dimensions = match repo.configured_dimensions(&owner).await {
         Ok(value) => value,
         Err(error) => return repository_error(error),
     };
@@ -83,6 +90,7 @@ pub(crate) async fn get_portfolio_targets(
     });
 
     let response = PortfolioTargetsResponse {
+        household_id,
         member_id,
         dimension: dim_opt
             .map(|d| d.as_str().to_string())
@@ -124,6 +132,15 @@ pub(crate) async fn put_portfolio_targets(
     if member_id < 0 {
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
     }
+    let household_id = match household_param(body.household_id) {
+        Ok(id) => id,
+        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let actor = match TargetActor::parse(body.actor_source.as_deref(), body.actor_ref.as_deref()) {
+        Ok(actor) => actor,
+        Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let owner = TargetOwner::new(household_id, member_id.to_string());
 
     let dimension = match TargetDimension::parse(&body.dimension) {
         Some(d) => d,
@@ -145,31 +162,28 @@ pub(crate) async fn put_portfolio_targets(
         return error_response(StatusCode::UNPROCESSABLE_ENTITY, &error.to_string());
     }
     let repo = PgPortfolioTargetRepository::new();
-    if let Err(e) = repo
-        .save_targets(&member_id.to_string(), dimension, &targets)
-        .await
-    {
+    if let Err(e) = repo.save_targets(&owner, dimension, &targets, &actor).await {
         return repository_error(e);
     }
-    saved_targets_response(&repo, member_id, dimension).await
+    saved_targets_response(&repo, household_id, member_id, dimension).await
 }
 
 /// 儲存（或還原）後回傳該維度目前的目標配置與現金比例，PUT 與還原共用。
 pub(super) async fn saved_targets_response(
     repo: &PgPortfolioTargetRepository,
+    household_id: i64,
     member_id: i64,
     dimension: TargetDimension,
 ) -> Response {
-    let saved = match repo
-        .list_targets(&member_id.to_string(), Some(dimension))
-        .await
-    {
+    let owner = TargetOwner::new(household_id, member_id.to_string());
+    let saved = match repo.list_targets(&owner, Some(dimension)).await {
         Ok(r) => r,
         Err(e) => return repository_error(e),
     };
 
     let saved_sum: f64 = saved.iter().map(|r| r.target_percent).sum();
     let response = PortfolioTargetsResponse {
+        household_id,
         member_id,
         dimension: dimension.as_str().to_string(),
         targets: saved

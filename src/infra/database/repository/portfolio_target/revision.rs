@@ -9,7 +9,8 @@ use sqlx::{FromRow, PgConnection};
 
 use super::PgPortfolioTargetRepository;
 use crate::domain::portfolio::target::{
-    MAX_TARGET_REVISIONS, PortfolioTargetRevision, TargetDimension,
+    ActorSource, MAX_TARGET_REVISIONS, PortfolioTargetRevision, TargetActor, TargetDimension,
+    TargetOwner,
 };
 
 /// 存在 `targets`（jsonb）裡的一個項目。
@@ -26,6 +27,8 @@ struct RevisionRow {
     dimension: String,
     saved_time: DateTime<Utc>,
     targets: String,
+    actor_source: String,
+    actor_ref: String,
 }
 
 impl TryFrom<RevisionRow> for PortfolioTargetRevision {
@@ -43,6 +46,11 @@ impl TryFrom<RevisionRow> for PortfolioTargetRevision {
                 .into_iter()
                 .map(|item| (item.key, item.target_percent))
                 .collect(),
+            // 資料庫沒有限制可寫入的值；不認得的來源當作未標示，不讓整筆讀取失敗
+            actor: TargetActor {
+                source: ActorSource::parse(&row.actor_source).unwrap_or_default(),
+                actor_ref: row.actor_ref,
+            },
         })
     }
 }
@@ -69,14 +77,16 @@ pub(super) fn unchanged(current: &[(String, Decimal)], new: &[(String, f64)]) ->
 /// 把目前的整組記成一版，並只保留最近 [`MAX_TARGET_REVISIONS`] 版。從未設定過的維度不記。
 pub(super) async fn record_before_save(
     conn: &mut PgConnection,
-    member_id: &str,
+    owner: &TargetOwner,
     dimension: TargetDimension,
     new: &[(String, f64)],
+    actor: &TargetActor,
 ) -> Result<()> {
     let configured: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM portfolio_target_dimension WHERE member_id=$1 AND dimension=$2)",
+        "SELECT EXISTS(SELECT 1 FROM portfolio_target_dimension WHERE household_id=$1 AND member_id=$2 AND dimension=$3)",
     )
-    .bind(member_id)
+    .bind(owner.household_id)
+    .bind(&owner.member_id)
     .bind(dimension.as_str())
     .fetch_one(&mut *conn)
     .await?;
@@ -85,10 +95,11 @@ pub(super) async fn record_before_save(
     }
     let current: Vec<(String, Decimal)> = sqlx::query_as(
         r#"SELECT key, target_percent FROM portfolio_target
-           WHERE member_id = $1 AND dimension = $2
+           WHERE household_id = $1 AND member_id = $2 AND dimension = $3
            ORDER BY target_percent DESC, key ASC"#,
     )
-    .bind(member_id)
+    .bind(owner.household_id)
+    .bind(&owner.member_id)
     .bind(dimension.as_str())
     .fetch_all(&mut *conn)
     .await?;
@@ -104,24 +115,30 @@ pub(super) async fn record_before_save(
         })
         .collect();
     sqlx::query(
-        "INSERT INTO portfolio_target_revision (member_id, dimension, targets) VALUES ($1, $2, $3::jsonb)",
+        r#"INSERT INTO portfolio_target_revision
+               (household_id, member_id, dimension, targets, actor_source, actor_ref)
+           VALUES ($1, $2, $3, $4::jsonb, $5, $6)"#,
     )
-    .bind(member_id)
+    .bind(owner.household_id)
+    .bind(&owner.member_id)
     .bind(dimension.as_str())
     .bind(serde_json::to_string(&items)?)
+    .bind(actor.source.as_str())
+    .bind(&actor.actor_ref)
     .execute(&mut *conn)
     .await?;
     sqlx::query(
         r#"DELETE FROM portfolio_target_revision
-           WHERE member_id = $1 AND dimension = $2
+           WHERE household_id = $1 AND member_id = $2 AND dimension = $3
              AND id NOT IN (
                  SELECT id FROM portfolio_target_revision
-                 WHERE member_id = $1 AND dimension = $2
+                 WHERE household_id = $1 AND member_id = $2 AND dimension = $3
                  ORDER BY saved_time DESC, id DESC
-                 LIMIT $3
+                 LIMIT $4
              )"#,
     )
-    .bind(member_id)
+    .bind(owner.household_id)
+    .bind(&owner.member_id)
     .bind(dimension.as_str())
     .bind(MAX_TARGET_REVISIONS)
     .execute(&mut *conn)
@@ -130,19 +147,20 @@ pub(super) async fn record_before_save(
 }
 
 impl PgPortfolioTargetRepository {
-    /// 列出某會員某維度的歷史版本，由新到舊（最多 [`MAX_TARGET_REVISIONS`] 版）。
+    /// 列出某擁有者某維度的歷史版本，由新到舊（最多 [`MAX_TARGET_REVISIONS`] 版）。
     pub async fn list_revisions(
         &self,
-        member_id: &str,
+        owner: &TargetOwner,
         dimension: TargetDimension,
     ) -> Result<Vec<PortfolioTargetRevision>> {
         let rows: Vec<RevisionRow> = sqlx::query_as(
-            r#"SELECT id, dimension, saved_time, targets::text AS targets
+            r#"SELECT id, dimension, saved_time, targets::text AS targets, actor_source, actor_ref
                FROM portfolio_target_revision
-               WHERE member_id = $1 AND dimension = $2
+               WHERE household_id = $1 AND member_id = $2 AND dimension = $3
                ORDER BY saved_time DESC, id DESC"#,
         )
-        .bind(member_id)
+        .bind(owner.household_id)
+        .bind(&owner.member_id)
         .bind(dimension.as_str())
         .fetch_all(self.pool())
         .await?;
@@ -151,18 +169,19 @@ impl PgPortfolioTargetRepository {
             .collect()
     }
 
-    /// 取得某會員的一個歷史版本；不存在或不屬於這個會員時回 `None`。
+    /// 取得某擁有者的一個歷史版本；不存在或不屬於這個家庭與會員時回 `None`。
     pub async fn get_revision(
         &self,
-        member_id: &str,
+        owner: &TargetOwner,
         id: i64,
     ) -> Result<Option<PortfolioTargetRevision>> {
         let row: Option<RevisionRow> = sqlx::query_as(
-            r#"SELECT id, dimension, saved_time, targets::text AS targets
+            r#"SELECT id, dimension, saved_time, targets::text AS targets, actor_source, actor_ref
                FROM portfolio_target_revision
-               WHERE member_id = $1 AND id = $2"#,
+               WHERE household_id = $1 AND member_id = $2 AND id = $3"#,
         )
-        .bind(member_id)
+        .bind(owner.household_id)
+        .bind(&owner.member_id)
         .bind(id)
         .fetch_optional(self.pool())
         .await?;

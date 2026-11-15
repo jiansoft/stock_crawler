@@ -9,6 +9,10 @@ pub struct PortfolioRebalanceQueryParams {
     /// 會員編號；未帶或 0 為所有部位（預設 0）。
     #[param(default = 0, minimum = 0)]
     pub member_id: Option<i64>,
+    /// 家庭編號；未帶時為家庭 #1（會員系統上線前只有這個家庭）。配置目標依家庭分開，
+    /// `member_id = 0` 是該家庭的全家目標。
+    #[param(minimum = 1)]
+    pub household_id: Option<i64>,
     /// 再平衡維度：`stock`（個股）、`industry`（產業）、`etf_look_through`（ETF穿透）。預設為 `stock`。
     #[param(default = "stock")]
     pub dimension: Option<String>,
@@ -33,6 +37,10 @@ pub struct PortfolioTargetsQueryParams {
     /// 會員編號；未帶或 0 為所有部位（預設 0）。
     #[param(default = 0, minimum = 0)]
     pub member_id: Option<i64>,
+    /// 家庭編號；未帶時為家庭 #1（會員系統上線前只有這個家庭）。配置目標依家庭分開，
+    /// `member_id = 0` 是該家庭的全家目標。
+    #[param(minimum = 1)]
+    pub household_id: Option<i64>,
     /// 再平衡維度：`stock`、`industry`、`etf_look_through`。若未指定則回傳所有維度。
     pub dimension: Option<String>,
 }
@@ -55,15 +63,25 @@ pub struct PutPortfolioTargetsRequest {
     /// 會員編號；未帶或 0 為所有部位（預設 0）。
     #[schema(default = 0, minimum = 0)]
     pub member_id: Option<i64>,
+    /// 家庭編號；未帶時為家庭 #1（會員系統上線前只有這個家庭）。配置目標依家庭分開，
+    /// `member_id = 0` 是該家庭的全家目標。
+    #[schema(minimum = 1)]
+    pub household_id: Option<i64>,
     /// 再平衡維度：`stock`、`industry`、`etf_look_through`。
     pub dimension: String,
     /// 目標配置比例清單（各項比例之和不得超過 100%）。
     pub targets: Vec<PortfolioTargetItemDto>,
+    /// 寫入來源：`web`（網站）或 `mcp`（stock-mcp-go）；未帶為未標示。記在被取代的那一版上。
+    pub actor_source: Option<String>,
+    /// 來源內的參照：web 為操作會員編號、mcp 為 Token id（最多 64 字元）。
+    pub actor_ref: Option<String>,
 }
 
 /// 目標配置設定清單回應。
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 pub struct PortfolioTargetsResponse {
+    /// 家庭編號。
+    pub household_id: i64,
     /// 會員編號。
     pub member_id: i64,
     /// 再平衡維度（若查詢全部則為 all）。

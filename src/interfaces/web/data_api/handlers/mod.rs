@@ -159,9 +159,10 @@ mod common;
 pub(super) use self::common::error_response;
 use self::common::{
     analytical_decimal_to_f64, database_error, decimal_to_f64, ensure_stock_exists, format_month,
-    industry_error, market_id_for_stats, market_id_for_stocks, parse_month, parse_optional_date,
-    parse_range, quarter_to_api, repository_error, round2, round4, sanitize_date,
-    signal_filter_error, signal_indicator_order, signal_kind_order, timestamp, valuation_band,
+    household_param, industry_error, market_id_for_stats, market_id_for_stocks, parse_month,
+    parse_optional_date, parse_range, quarter_to_api, repository_error, round2, round4,
+    sanitize_date, signal_filter_error, signal_indicator_order, signal_kind_order, timestamp,
+    valuation_band,
 };
 
 /// 回傳不需認證的服務存活狀態與進行中的背景工作數。

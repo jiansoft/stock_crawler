@@ -17,7 +17,9 @@ use crate::domain::portfolio::{
         CurrentPosition, DatedEtfComponent, EtfLookThroughComponent, PortfolioPositionQuery,
         RebalanceParams, calculate_rebalance,
     },
-    target::{PortfolioTargetRecord, PortfolioTargetRepository, TargetDimension},
+    target::{
+        PortfolioTargetRecord, PortfolioTargetRepository, TargetActor, TargetDimension, TargetOwner,
+    },
 };
 
 struct FakeTargets {
@@ -29,20 +31,28 @@ struct FakeTargets {
 impl PortfolioTargetRepository for FakeTargets {
     async fn list_targets(
         &self,
-        _member_id: &str,
+        owner: &TargetOwner,
         _dimension: Option<TargetDimension>,
     ) -> Result<Vec<PortfolioTargetRecord>> {
+        // 週報讀的是預設家庭的全家目標
+        assert_eq!(owner, &TargetOwner::new(1, "0"));
         if self.fail {
             return Err(anyhow!("目標讀取失敗"));
         }
         Ok(self.records.clone())
     }
 
-    async fn has_configuration(&self, _: &str, _: TargetDimension) -> Result<bool> {
+    async fn has_configuration(&self, _: &TargetOwner, _: TargetDimension) -> Result<bool> {
         Ok(!self.records.is_empty())
     }
 
-    async fn save_targets(&self, _: &str, _: TargetDimension, _: &[(String, f64)]) -> Result<()> {
+    async fn save_targets(
+        &self,
+        _: &TargetOwner,
+        _: TargetDimension,
+        _: &[(String, f64)],
+        _: &TargetActor,
+    ) -> Result<()> {
         Ok(())
     }
 }

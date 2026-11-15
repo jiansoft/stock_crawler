@@ -122,3 +122,44 @@ async fn repository_reads_and_updates_holdings() {
 
     cleanup().await;
 }
+
+/// 股利預估快照只為實際會員產生：持股表即使出現 `member_id = 0` 的列，也不會寫進快照
+/// （0 在市值表代表家庭合計）。
+#[tokio::test]
+#[cfg_attr(
+    not(feature = "integration-tests"),
+    ignore = "需要外部服務（PostgreSQL），請加 --features integration-tests 執行"
+)]
+async fn forecast_snapshot_members_exclude_zero() {
+    dotenvy::dotenv().ok();
+    if database::ping().await.is_err() {
+        println!("跳過 forecast_snapshot_members_exclude_zero：無資料庫連接");
+        return;
+    }
+    const SYMBOL: &str = "79979FZ";
+    const MEMBER: i64 = 979_791;
+    let pool = database::get_connection();
+    let cleanup = || async {
+        sqlx::query("DELETE FROM stock_ownership_details WHERE security_code = $1")
+            .bind(SYMBOL)
+            .execute(pool)
+            .await
+            .expect("清除測試持股");
+    };
+    cleanup().await;
+    sqlx::query(
+        "INSERT INTO stock_ownership_details (member_id, security_code, share_quantity, is_sold)
+         VALUES (0, $1, 1000, false), ($2, $1, 1000, false)",
+    )
+    .bind(SYMBOL)
+    .bind(MEMBER)
+    .execute(pool)
+    .await
+    .expect("種入測試持股");
+
+    let members = forecast::fetch_member_ids().await;
+    cleanup().await;
+    let members = members.expect("查詢有持股的會員");
+    assert!(members.contains(&MEMBER));
+    assert!(!members.contains(&0));
+}

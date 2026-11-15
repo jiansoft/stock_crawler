@@ -9,12 +9,14 @@ use std::collections::HashSet;
 
 use chrono::NaiveDate;
 
+use crate::domain::household::DEFAULT_HOUSEHOLD_ID;
+
 use crate::domain::portfolio::{
     rebalance::{
         CurrentPosition, EtfLookThroughComponent, PortfolioPositionQuery, PortfolioRebalanceResult,
         RebalanceParams, calculate_rebalance,
     },
-    target::{PortfolioTargetRepository, TargetDimension},
+    target::{PortfolioTargetRepository, TargetDimension, TargetOwner},
 };
 
 /// ETF 成分資料超過這麼多天（日曆天）未更新就視為過舊，不計入穿透。
@@ -26,7 +28,7 @@ pub(super) const TOLERANCE_PERCENT: f64 = 2.0;
 /// 每個維度最多列出的偏離項目數。
 const MAX_ITEMS: usize = 5;
 
-/// 週報提醒的預設組合。
+/// 週報提醒的預設組合：預設家庭（#1）的全家合計。
 const MEMBER_ID: i64 = 0;
 
 /// 偏離方向：目前權重高於目標建議減碼，低於目標建議加碼。
@@ -198,7 +200,8 @@ pub(super) async fn allocation_sections(
     positions: &impl PortfolioPositionQuery,
     today: NaiveDate,
 ) -> Vec<AllocationSection> {
-    let records = match targets.list_targets(&MEMBER_ID.to_string(), None).await {
+    let owner = TargetOwner::new(DEFAULT_HOUSEHOLD_ID, MEMBER_ID.to_string());
+    let records = match targets.list_targets(&owner, None).await {
         Ok(records) => records,
         Err(why) => {
             tracing::warn!("每週市場摘要：讀取目標配置失敗: {why:#}");
