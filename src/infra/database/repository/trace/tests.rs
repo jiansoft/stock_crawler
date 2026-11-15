@@ -18,22 +18,38 @@ async fn test_pg_trace_repository_contract() {
 
     let repo = PgTraceRepository::new();
     let test_symbol = "__TEST_TRACE__";
+    let test_account = "__test_trace__";
 
-    // 1. 清理潛在的殘留測試數據
+    // 1. 清理潛在的殘留測試數據（刪除測試會員時，trace 依外來鍵一併刪除）
     sqlx::query("DELETE FROM \"trace\" WHERE stock_symbol = $1")
         .bind(test_symbol)
         .execute(database::get_connection())
         .await
         .ok();
-
-    // 2. 寫入一筆測試資料
-    sqlx::query("INSERT INTO \"trace\" (stock_symbol, floor, ceiling) VALUES ($1, $2, $3)")
-        .bind(test_symbol)
-        .bind(dec!(100.5))
-        .bind(dec!(200.5))
+    sqlx::query("DELETE FROM \"Member\" WHERE \"Account\" = $1")
+        .bind(test_account)
         .execute(database::get_connection())
         .await
-        .unwrap();
+        .ok();
+
+    // 2. trace.member_id 有指向 "Member" 的外來鍵，先建立測試會員再寫入
+    let member_id: i64 = sqlx::query_scalar(
+        "INSERT INTO \"Member\" (\"Account\", \"Name\", household_id) VALUES ($1, $1, 1) RETURNING \"Id\"",
+    )
+    .bind(test_account)
+    .fetch_one(database::get_connection())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO \"trace\" (member_id, stock_symbol, floor, ceiling) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(member_id)
+    .bind(test_symbol)
+    .bind(dec!(100.5))
+    .bind(dec!(200.5))
+    .execute(database::get_connection())
+    .await
+    .unwrap();
 
     // 3. 呼叫倉儲的 fetch_all 驗證是否能載入該測試資料
     let traces = repo.fetch_all().await.unwrap();
@@ -46,6 +62,11 @@ async fn test_pg_trace_repository_contract() {
     // 4. 清理測試數據
     sqlx::query("DELETE FROM \"trace\" WHERE stock_symbol = $1")
         .bind(test_symbol)
+        .execute(database::get_connection())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM \"Member\" WHERE \"Id\" = $1")
+        .bind(member_id)
         .execute(database::get_connection())
         .await
         .unwrap();
