@@ -1,7 +1,8 @@
 //! Data API 的路由註冊。
 //!
 //! `/api/v1` 下除健康檢查外一律需要金鑰：市場類端點用 `DATA_API_KEY`（auth.rs），
-//! 持股類端點 `/portfolio/*` 用 `DATA_API_PERSONAL_KEY` 並檢查資料範圍（scope.rs）。
+//! 持股類端點 `/portfolio/*` 用 `DATA_API_PERSONAL_KEY` 並檢查資料範圍（scope.rs）；
+//! 路徑含 `/backtest` 的重運算端點另外要求重運算租約（lease.rs）。
 //! Swagger UI 與 OpenAPI JSON 不受驗證保護，方便內網服務直接產生 client。
 
 use axum::{Router, middleware};
@@ -9,7 +10,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use super::openapi::ApiDoc;
-use super::{auth, budget, handlers, scope};
+use super::{auth, budget, handlers, lease, scope};
 
 /// 建立 `/api/v1` 路由與不受驗證保護的 Swagger/OpenAPI 文件入口。
 pub(crate) fn router() -> Router {
@@ -107,22 +108,6 @@ pub(crate) fn router() -> Router {
             axum::routing::get(handlers::dividend_yield_ranking),
         )
         .route(
-            "/stocks/screen/backtest",
-            axum::routing::get(handlers::screen_backtest),
-        )
-        .route(
-            "/stocks/screen/backtest/offsets",
-            axum::routing::get(handlers::screen_backtest_offsets),
-        )
-        .route(
-            "/stocks/screen/backtest/compare",
-            axum::routing::get(handlers::screen_backtest_compare),
-        )
-        .route(
-            "/stocks/screen/backtest/frontier",
-            axum::routing::get(handlers::screen_backtest_frontier),
-        )
-        .route(
             "/strategy-presets/edge",
             axum::routing::get(handlers::strategy_edge),
         )
@@ -133,14 +118,6 @@ pub(crate) fn router() -> Router {
         .route(
             "/strategy-presets/{name}/track",
             axum::routing::get(handlers::strategy_track),
-        )
-        .route(
-            "/stocks/screen/backtest/walk-forward",
-            axum::routing::get(handlers::screen_backtest_walk_forward),
-        )
-        .route(
-            "/stocks/screen/backtest/attribution",
-            axum::routing::get(handlers::screen_backtest_attribution),
         )
         .route(
             "/stocks/screen",
@@ -293,11 +270,44 @@ pub(crate) fn router() -> Router {
         )
         .layer(middleware::from_fn(budget::enforce))
         .layer(middleware::from_fn(scope::require_personal_scope));
+    // 重運算（路徑含 /backtest）：市場金鑰＋重運算租約；租約 middleware 自己套用請求上限與查詢預算，
+    // 回測在獨立 task 執行（lease.rs），所以不再掛 budget::enforce。
+    let backtest = Router::new()
+        .route(
+            "/stocks/screen/backtest",
+            axum::routing::get(handlers::screen_backtest),
+        )
+        .route(
+            "/stocks/screen/backtest/offsets",
+            axum::routing::get(handlers::screen_backtest_offsets),
+        )
+        .route(
+            "/stocks/screen/backtest/compare",
+            axum::routing::get(handlers::screen_backtest_compare),
+        )
+        .route(
+            "/stocks/screen/backtest/frontier",
+            axum::routing::get(handlers::screen_backtest_frontier),
+        )
+        .route(
+            "/stocks/screen/backtest/walk-forward",
+            axum::routing::get(handlers::screen_backtest_walk_forward),
+        )
+        .route(
+            "/stocks/screen/backtest/attribution",
+            axum::routing::get(handlers::screen_backtest_attribution),
+        )
+        .layer(middleware::from_fn_with_state(
+            lease::LeaseState::global(),
+            lease::require_lease,
+        ))
+        .layer(middleware::from_fn(auth::require_bearer_key));
     Router::new()
         .nest(
             "/api/v1",
             protected
                 .merge(personal)
+                .merge(backtest)
                 .route("/healthz", axum::routing::get(handlers::healthz)),
         )
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))

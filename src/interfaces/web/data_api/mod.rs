@@ -6,12 +6,15 @@
 //! 檔案分工：`routes` 負責路由註冊與 Bearer 保護範圍、`openapi` 負責 OpenAPI
 //! 文件定義、`handlers` 是各 endpoint 的實作、`dto` 是 HTTP 契約型別、
 //! `auth` 是市場類端點的 Bearer token 驗證 middleware、`scope` 是持股類端點
-//! （`/portfolio/*`）的金鑰與資料範圍 middleware。
+//! （`/portfolio/*`）的金鑰與資料範圍 middleware、`lease` 是回測端點的重運算租約 middleware、
+//! `analysis_gate` 是外部請求與內部排程共用的重運算並行號誌。
 
+mod analysis_gate;
 mod auth;
 mod budget;
 mod dto;
 mod handlers;
+mod lease;
 mod openapi;
 mod routes;
 mod scope;

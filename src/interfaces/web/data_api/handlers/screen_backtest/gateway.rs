@@ -29,6 +29,10 @@ pub struct BacktestStrategyGateway;
 #[async_trait]
 impl StrategyGateway for BacktestStrategyGateway {
     async fn latest_rebalance(&self, query: &str) -> Result<Option<StrategyRebalance>> {
+        // 與外部回測請求共用全域重運算名額；內部排程一律等候、不被拒絕
+        let _slot = crate::interfaces::web::data_api::analysis_gate::GATE
+            .acquire_internal()
+            .await?;
         let params = parse_query(query)?;
         let backtest = match Backtest::prepare(&params).await {
             Ok(backtest) => backtest.period_end_only(),
@@ -135,6 +139,10 @@ impl StrategyGateway for BacktestStrategyGateway {
     }
 
     async fn offset_edge(&self, query: &str) -> Result<StrategyOffsetEdge> {
+        // 與外部回測請求共用全域重運算名額；內部排程一律等候、不被拒絕
+        let _slot = crate::interfaces::web::data_api::analysis_gate::GATE
+            .acquire_internal()
+            .await?;
         let params = parse_query(query)?;
         let backtest = match Backtest::prepare(&params).await {
             Ok(backtest) => backtest.period_end_only(),
