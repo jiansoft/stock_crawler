@@ -178,6 +178,13 @@ async fn portfolio_chip_endpoint_db_semantics() {
     assert!(json["date"].is_null(), "{json}");
     assert_eq!(json["items"], serde_json::json!([]));
     assert_eq!(json["notable"], 0);
+    // 會員範圍：未帶為 0（所有會員），指定時回應帶回該會員，負數回 422
+    assert_eq!(json["member_id"], 0);
+    let (status, json) = get("/api/v1/portfolio/chip?date=1900-01-01&member_id=2").await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["member_id"], 2);
+    let (status, _) = get("/api/v1/portfolio/chip?member_id=-1").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 /// 持股填息：天數與會員範圍檢查，回應帶會員、回看天數、統計與清單（填息規則由 handler 與 domain 單元測試驗證）。

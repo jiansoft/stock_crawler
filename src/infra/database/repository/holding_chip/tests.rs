@@ -131,10 +131,26 @@ async fn holding_chips_follow_holdings_on_each_day() {
     };
 
     let chips = fake(
-        repo.fetch_holding_chips(day(9))
+        repo.fetch_holding_chips(day(9), 0)
             .await
             .expect("查詢持股籌碼"),
     );
+    // 指定會員：持股都屬於會員 9，只看會員 9 結果相同；別的會員看不到這幾檔。
+    let of_member = |chips: &[HoldingChip]| -> Vec<String> {
+        chips.iter().map(|chip| chip.stock_symbol.clone()).collect()
+    };
+    let own = fake(
+        repo.fetch_holding_chips(day(9), 9)
+            .await
+            .expect("查詢會員 9 的持股籌碼"),
+    );
+    assert_eq!(of_member(&own), of_member(&chips));
+    let others = fake(
+        repo.fetch_holding_chips(day(9), 979_799)
+            .await
+            .expect("查詢其他會員的持股籌碼"),
+    );
+    assert!(others.is_empty());
     let symbols: Vec<&str> = chips
         .iter()
         .map(|chip| chip.stock_symbol.as_str())
@@ -163,7 +179,7 @@ async fn holding_chips_follow_holdings_on_each_day() {
 
     // 04-10：79972 已賣出、79973 當天買進。
     let chips = fake(
-        repo.fetch_holding_chips(day(10))
+        repo.fetch_holding_chips(day(10), 0)
             .await
             .expect("查詢持股籌碼"),
     );

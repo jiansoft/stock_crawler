@@ -230,7 +230,12 @@ pub trait HoldingChipQuery: Send + Sync {
     ///
     /// 持股批次的買進日不晚於當天，且未賣出、或賣出日（同會員同代號買進日之後最早一筆未撤銷的
     /// 賣出紀錄）晚於當天；找不到賣出紀錄的已賣出批次視為買進當天就不再持有。
-    async fn fetch_holding_chips(&self, date: NaiveDate) -> Result<Vec<HoldingChip>>;
+    /// `member_id` 為 0 時是所有會員的持股，否則只看該會員。
+    async fn fetch_holding_chips(
+        &self,
+        date: NaiveDate,
+        member_id: i64,
+    ) -> Result<Vec<HoldingChip>>;
 }
 
 /// 一檔股票在一段期間內的主力（買賣超前幾名分點）買賣超合計。

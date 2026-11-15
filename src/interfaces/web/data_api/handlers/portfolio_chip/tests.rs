@@ -69,7 +69,7 @@ fn response_converts_lots_and_reasons() {
         buy_days: 1,
         sell_days: 4,
     }];
-    let body = response(Some(day), vec![chip(), empty], (5, recent));
+    let body = response(0, Some(day), vec![chip(), empty], (5, recent));
     assert_eq!(body.broker_recent_days, 5);
     assert_eq!(body.date.as_deref(), Some("2026-10-20"));
     assert_eq!(body.previous_date.as_deref(), Some("2026-10-19"));
@@ -117,7 +117,8 @@ fn response_converts_lots_and_reasons() {
     assert!(quiet.foreign_share.is_none() && quiet.margin_change.is_none());
     assert_eq!(quiet.foreign_streak, 0);
 
-    let none = response(None, Vec::new(), (0, Vec::new()));
+    let none = response(2, None, Vec::new(), (0, Vec::new()));
+    assert_eq!(none.member_id, 2);
     assert!(none.date.is_none() && none.items.is_empty() && none.notable == 0);
     assert_eq!(none.broker_recent_days, 0);
 }

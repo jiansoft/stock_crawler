@@ -41,6 +41,10 @@ type BrokerRecent = (usize, Vec<BrokerPeriodNet>);
 /// 資料時回 200 與空清單（`date` 為 `null`）。
 #[utoipa::path(get, path = "/api/v1/portfolio/chip", tag = "data-api", params(PortfolioChipParams), responses((status = 200, body = PortfolioChipResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
 pub(crate) async fn portfolio_chip(Query(params): Query<PortfolioChipParams>) -> Response {
+    let member_id = params.member_id.unwrap_or(0);
+    if member_id < 0 {
+        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
+    }
     let date = match parse_optional_date(params.date.as_deref()) {
         Ok(value) => value,
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
@@ -51,7 +55,7 @@ pub(crate) async fn portfolio_chip(Query(params): Query<PortfolioChipParams>) ->
         Err(error) => return repository_error(error),
     };
     let chips = match day {
-        Some(day) => match repository.fetch_holding_chips(day.date).await {
+        Some(day) => match repository.fetch_holding_chips(day.date, member_id).await {
             Ok(chips) => chips,
             Err(error) => return repository_error(error),
         },
@@ -64,7 +68,7 @@ pub(crate) async fn portfolio_chip(Query(params): Query<PortfolioChipParams>) ->
         },
         None => (0, Vec::new()),
     };
-    Json(response(day, chips, recent)).into_response()
+    Json(response(member_id, day, chips, recent)).into_response()
 }
 
 /// `date`（含）之前最近 [`BROKER_RECENT_DAYS`] 個有主力資料的交易日裡各持股的主力合計；
@@ -87,6 +91,7 @@ async fn broker_recent(
 
 /// 組出回應：股換算成張、佔量取兩位小數、達標原因用代碼、附主力近日累計。
 fn response(
+    member_id: i64,
     day: Option<ChipTradingDay>,
     chips: Vec<HoldingChip>,
     (recent_days, recent): BrokerRecent,
@@ -109,6 +114,7 @@ fn response(
         })
         .collect();
     PortfolioChipResponse {
+        member_id,
         date: day.map(|day| day.date.to_string()),
         previous_date: day
             .and_then(|day| day.previous)

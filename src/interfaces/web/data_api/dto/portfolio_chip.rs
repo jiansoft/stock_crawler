@@ -8,6 +8,9 @@ use utoipa::{IntoParams, ToSchema};
 pub(crate) struct PortfolioChipParams {
     /// 查詢日（YYYY-MM-DD）；取不晚於它的最近交易日，省略為最新交易日。
     pub(crate) date: Option<String>,
+    /// 會員編號；未帶或 0 為所有會員的持股（預設 0）。
+    #[param(default = 0, minimum = 0)]
+    pub(crate) member_id: Option<i64>,
 }
 
 /// 單一分點的買賣超（張）。
@@ -94,6 +97,8 @@ pub(crate) struct PortfolioChipItem {
 /// 持股籌碼日報。
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub(crate) struct PortfolioChipResponse {
+    /// 會員編號；0 為所有會員的持股。
+    pub(crate) member_id: i64,
     /// 交易日（不晚於查詢日、最近一個有籌碼資料的日子）；完全沒有資料為 `null`。
     pub(crate) date: Option<String>,
     /// 前一個有籌碼資料的交易日。
