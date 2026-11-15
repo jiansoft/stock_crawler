@@ -23,9 +23,9 @@ fn collect_traced_symbols(targets: Vec<PriceTrace>) -> Vec<String> {
 #[test]
 fn test_collect_traced_symbols_deduplicates_and_sorts() {
     let symbols = collect_traced_symbols(vec![
-        PriceTrace::new("2330".to_string(), dec!(500), dec!(600)),
-        PriceTrace::new("2317".to_string(), dec!(100), dec!(120)),
-        PriceTrace::new("2330".to_string(), dec!(520), dec!(650)),
+        PriceTrace::new(1, "2330".to_string(), dec!(500), dec!(600)),
+        PriceTrace::new(1, "2317".to_string(), dec!(100), dec!(120)),
+        PriceTrace::new(1, "2330".to_string(), dec!(520), dec!(650)),
     ]);
 
     assert_eq!(symbols, vec!["2317".to_string(), "2330".to_string()]);
@@ -45,7 +45,7 @@ fn trace_targets(symbols: &[&str]) {
     stock_price::set_trace_targets_for_test(
         symbols
             .iter()
-            .map(|symbol| PriceTrace::new((*symbol).to_string(), dec!(10), dec!(20)))
+            .map(|symbol| PriceTrace::new(1, (*symbol).to_string(), dec!(10), dec!(20)))
             .collect(),
     );
 }

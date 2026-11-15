@@ -27,6 +27,7 @@ impl Default for PgTraceRepository {
 /// 資料庫對應的內部資料列結構體。
 #[derive(FromRow)]
 struct TraceDbRow {
+    member_id: i64,
     stock_symbol: String,
     floor: Decimal,
     ceiling: Decimal,
@@ -34,15 +35,15 @@ struct TraceDbRow {
 
 impl From<TraceDbRow> for PriceTrace {
     fn from(row: TraceDbRow) -> Self {
-        PriceTrace::new(row.stock_symbol, row.floor, row.ceiling)
+        PriceTrace::new(row.member_id, row.stock_symbol, row.floor, row.ceiling)
     }
 }
 
 #[async_trait]
 impl TraceRepository for PgTraceRepository {
-    /// 取得所有進行監控的價格追蹤設定清單。
+    /// 取得所有會員進行監控的價格追蹤設定清單（同一檔可能有多位會員各一筆）。
     async fn fetch_all(&self) -> Result<Vec<PriceTrace>> {
-        let sql = r#"SELECT "stock_symbol", "floor", "ceiling" FROM "trace";"#;
+        let sql = r#"SELECT "member_id", "stock_symbol", "floor", "ceiling" FROM "trace" ORDER BY "member_id", "stock_symbol";"#;
 
         let rows = sqlx::query_as::<_, TraceDbRow>(sql)
             .fetch_all(database::get_connection())

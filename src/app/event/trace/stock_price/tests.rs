@@ -8,6 +8,7 @@ use super::*;
 
 fn trace(symbol: &str, floor: Decimal, ceiling: Decimal) -> PriceTrace {
     PriceTrace {
+        member_id: 1,
         stock_symbol: symbol.to_string(),
         floor,
         ceiling,

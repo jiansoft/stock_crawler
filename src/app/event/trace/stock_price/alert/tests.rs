@@ -9,6 +9,7 @@ use super::*;
 fn test_is_within_boundary() {
     // 設定高低標 (500 ~ 600)
     let mut trace = PriceTrace {
+        member_id: 1,
         stock_symbol: "2330".to_string(),
         floor: dec!(500),
         ceiling: dec!(600),
@@ -43,6 +44,7 @@ fn test_is_within_boundary() {
 #[tokio::test]
 async fn alert_on_price_boundary_ignores_prices_within_range() {
     let target = PriceTrace {
+        member_id: 1,
         stock_symbol: "79984".to_string(),
         floor: dec!(10),
         ceiling: dec!(20),
@@ -68,6 +70,7 @@ async fn alert_on_price_boundary_notifies_only_on_new_lows() {
         return;
     }
     let target = PriceTrace {
+        member_id: 1,
         stock_symbol: "79984".to_string(),
         floor: dec!(10),
         ceiling: Decimal::ZERO,
@@ -94,6 +97,7 @@ async fn alert_on_price_boundary_notifies_only_on_new_lows() {
 #[test]
 fn test_build_trace_notification_key_includes_boundary() {
     let trace = PriceTrace {
+        member_id: 1,
         stock_symbol: "2330".to_string(),
         floor: dec!(25),
         ceiling: dec!(30),
@@ -102,17 +106,29 @@ fn test_build_trace_notification_key_includes_boundary() {
     // Key 僅含股票與邊界方向，不含價格（價格改以快取的值保存為極端值基準）。
     assert_eq!(
         build_trace_notification_key(&trace, "floor"),
-        "Trace:2330-25-30:floor"
+        "Trace:1-2330-25-30:floor"
     );
     assert_eq!(
         build_trace_notification_key(&trace, "ceiling"),
-        "Trace:2330-25-30:ceiling"
+        "Trace:1-2330-25-30:ceiling"
+    );
+}
+
+/// 甲、乙以相同上下限追蹤同一檔時，去重鍵不同：甲的通知不會擋掉乙的通知。
+#[test]
+fn test_build_trace_notification_key_distinguishes_member() {
+    let first = PriceTrace::new(1, "2330".to_string(), dec!(25), dec!(30));
+    let second = PriceTrace::new(2, "2330".to_string(), dec!(25), dec!(30));
+    assert_ne!(
+        build_trace_notification_key(&first, "floor"),
+        build_trace_notification_key(&second, "floor")
     );
 }
 
 #[test]
 fn test_build_trace_notification_key_distinguishes_boundary() {
     let trace = PriceTrace {
+        member_id: 1,
         stock_symbol: "2330".to_string(),
         floor: dec!(25),
         ceiling: dec!(30),
@@ -128,6 +144,7 @@ fn test_build_trace_notification_key_distinguishes_boundary() {
 #[tokio::test]
 async fn test_format_alert_message_includes_source_site() {
     let trace = PriceTrace {
+        member_id: 1,
         stock_symbol: "0050".to_string(),
         floor: dec!(0),
         ceiling: dec!(200),
@@ -150,6 +167,7 @@ async fn test_format_alert_message() {
     SHARE.load().await;
 
     let trace = PriceTrace {
+        member_id: 1,
         stock_symbol: "2330".to_string(),
         floor: dec!(500),
         ceiling: dec!(600),
@@ -179,6 +197,7 @@ async fn test_handle_price() {
     SHARE.load().await;
 
     let trace = PriceTrace {
+        member_id: 1,
         stock_symbol: "1303".to_string(),
         floor: dec!(70),
         ceiling: dec!(60),
