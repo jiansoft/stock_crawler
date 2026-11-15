@@ -44,8 +44,8 @@ impl DailyMoneyHistoryMember {
     /// 設計目標：
     /// 1. 保持舊 `daily_money_history` 扁平表不變。
     /// 2. 新增可擴充的新表，避免新增會員時必須再加欄位。
-    /// 3. 同一日同時寫入全體 (`member_id = 0`) 與所有已出現過的會員，
-    ///    即使某會員當日無持股，也會保留 0 值資料列。
+    /// 3. 同一日同時寫入家庭合計 (`member_id = 0`) 與所有未刪除的會員（含已停用，
+    ///    自建立當天起），以及當日前出現過持股的會員；當日無持股也保留 0 值資料列。
     pub async fn upsert(
         date: NaiveDate,
         tx: &mut Option<Transaction<'_, Postgres>>,
@@ -63,12 +63,21 @@ WITH base_calc AS (
       AND dq."Date" = $1
 ),
 member_scope AS (
-    -- 只要會員曾在當日前出現過，就為該日保留一筆 summary 列；
-    -- 這樣未持倉的會員也能落成 0，而不需要靠 schema 固定欄位。
-    SELECT DISTINCT od.member_id
+    -- 結算對象：所有未刪除的會員（含已停用；is_active 只管登入與通知，不管資產算不算），
+    -- 從建立當天起每天都有一筆 summary 列，沒有持股也落成 0。
+    SELECT m."Id" AS member_id
+    FROM "Member" m
+    WHERE m.deleted_at IS NULL
+      AND (m."CreateTime" AT TIME ZONE 'Asia/Taipei')::date <= $1
+    UNION
+    -- 當日前出現過持股的會員也保留（會員列建立前就有的持股、沒有會員列的資料）；已刪除的會員除外
+    SELECT od.member_id
     FROM stock_ownership_details od
     WHERE od.date <= $1
       AND od.member_id > 0
+      AND NOT EXISTS (
+          SELECT 1 FROM "Member" dm WHERE dm."Id" = od.member_id AND dm.deleted_at IS NOT NULL
+      )
 ),
 member_agg AS (
     SELECT
