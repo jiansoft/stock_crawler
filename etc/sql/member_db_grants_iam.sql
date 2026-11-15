@@ -62,7 +62,8 @@ REVOKE ALL ON SEQUENCE public."Member_Id_seq" FROM stock_rust_app, stock_go_app,
 -- =============================================================================
 -- 3. stock_rust_app：只讀分送所需的欄位；不碰密碼雜湊、Email、MFA、Session、Token、群組、稽核與訂閱
 -- =============================================================================
-GRANT SELECT ("Id", "Name", household_id, is_active, deleted_at, must_change_password)
+-- "CreateTime"：每日結算只為建立日不晚於結算日的會員產生市值列（daily_money_history_member.rs）
+GRANT SELECT ("Id", "Name", "CreateTime", household_id, is_active, deleted_at, must_change_password)
     ON public."Member" TO stock_rust_app;
 GRANT SELECT ON public.member_household TO stock_rust_app;
 -- 視圖以擁有者權限讀底層表，不必開放 member_notify_subscription／member_notify_channel 的讀取
