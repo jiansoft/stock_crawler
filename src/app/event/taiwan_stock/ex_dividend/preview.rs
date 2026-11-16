@@ -101,7 +101,7 @@ pub(super) async fn send(today: NaiveDate, holidays: &HashSet<NaiveDate>) -> Res
         .collect();
     let hints = FillHints::load(&symbols, today).await;
     if let Some(message) = preview_message(from, to, &with_fill_hints(fresh, &hints)) {
-        alert::send_message(&message).await;
+        alert::notify_holdings_all(alert::Topic::HoldingsExDividendPreview, &message).await;
     }
     Ok(())
 }

@@ -146,7 +146,11 @@ pub async fn execute() -> Result<()> {
 
     let (summary, reports) = collect_reports(date, &symbols, &flows, &margins, &volumes).await;
     if !reports.is_empty() {
-        alert::send_message(&build_message(date, &reports, holdings::stock_name)).await;
+        alert::notify_holdings_all(
+            alert::Topic::HoldingsChipFlow,
+            &build_message(date, &reports, holdings::stock_name),
+        )
+        .await;
     }
     tracing::info!(
         "持股籌碼通知結束: holdings={}, with_flow={}, with_margin={}, reported={}",

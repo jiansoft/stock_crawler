@@ -70,7 +70,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
     if let Err(e) = infra::database::ping().await {
         let err_msg = format!("Failed to connect to database: {:?}", e);
         tracing::error!("{}", &err_msg);
-        interfaces::bot::telegram::send_alert("資料庫連線失敗（主機啟動異常）", &err_msg).await;
+        core::alert::notify_system(
+            core::alert::Topic::SystemCritical,
+            "資料庫連線失敗（主機啟動異常）",
+            &err_msg,
+        )
+        .await;
         return Err(err_msg.into());
     }
     tracing::info!("startup database check: database is online");
@@ -110,10 +115,25 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         Err(why) => {
             let err_msg = format!("Failed to load required caches: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("核心快取載入失敗（主機啟動異常）", &err_msg)
-                .await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "核心快取載入失敗（主機啟動異常）",
+                &err_msg,
+            )
+            .await;
             return Err(err_msg.into());
         }
+    }
+
+    // ── 8.5 通知項目目錄寫入 notify_topic（會員系統計畫 7.3）──────────────
+    // 設定頁依這張表產生開關；寫入失敗只記錄，不影響爬蟲與通知（N1 仍送設定檔的聊天室）。
+    match infra::database::repository::notify_topic::upsert_catalog(
+        infra::database::get_connection(),
+    )
+    .await
+    {
+        Ok(rows) => tracing::info!("startup notify_topic upsert done: rows={rows}"),
+        Err(why) => tracing::warn!("startup notify_topic upsert failed: {why:#}"),
     }
 
     // ── 9. 排程器建立 ───────────────────────────────────────────────────────
@@ -154,7 +174,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         Err(why) => {
             let err_msg = format!("gRPC server failed to start: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("gRPC 伺服器啟動失敗", &err_msg).await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "gRPC 伺服器啟動失敗",
+                &err_msg,
+            )
+            .await;
             return Err(why.into());
         }
     };
@@ -174,7 +199,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         Err(why) => {
             let err_msg = format!("Web server failed to start: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("Web 伺服器啟動失敗", &err_msg).await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "Web 伺服器啟動失敗",
+                &err_msg,
+            )
+            .await;
             return Err(why.into());
         }
     };
@@ -198,7 +228,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         if let Err(why) = interfaces::rpc::client::test_client::run_test().await {
             let err_msg = format!("gRPC 自我測試失敗: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("gRPC 自我測試失敗", &err_msg).await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "gRPC 自我測試失敗",
+                &err_msg,
+            )
+            .await;
         }
     });
 
@@ -216,7 +251,12 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         Err(why) => {
             let err_msg = format!("Redis ping failed at startup: {:?}", why);
             tracing::error!("{}", &err_msg);
-            interfaces::bot::telegram::send_alert("Redis 快取連線失敗", &err_msg).await;
+            core::alert::notify_system(
+                core::alert::Topic::SystemCritical,
+                "Redis 快取連線失敗",
+                &err_msg,
+            )
+            .await;
         }
     }
 

@@ -98,7 +98,7 @@ pub(super) async fn alert_on_price_boundary(
     let to_bot_msg = format_alert_message(&target, current_price, source_site).await;
 
     // 透過 AlertSink port 發送通知（生產環境由 main 註冊 Telegram adapter）。
-    alert::send_message(&to_bot_msg).await;
+    alert::notify_holdings_all(alert::Topic::PersonalPriceTrace, &to_bot_msg).await;
     trace_stats::record_notification_sent();
     if source == EvaluationSource::Reconciliation {
         trace_stats::record_reconciliation_alert_hit();

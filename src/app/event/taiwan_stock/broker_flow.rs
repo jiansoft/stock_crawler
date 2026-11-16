@@ -92,7 +92,7 @@ pub async fn execute() -> Result<()> {
             history.as_ref(),
             holdings::stock_name,
         );
-        alert::send_message(&message).await;
+        alert::notify_holdings_all(alert::Topic::HoldingsBrokerFlow, &message).await;
     }
 
     tracing::info!(

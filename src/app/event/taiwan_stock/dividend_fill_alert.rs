@@ -132,7 +132,7 @@ async fn run(today: NaiveDate) -> Result<()> {
         review.lagging.len()
     );
     if let Some(message) = build_message(today, &review, holdings::stock_name) {
-        alert::send_message(&message).await;
+        alert::notify_holdings_all(alert::Topic::HoldingsPayableFill, &message).await;
     }
     Ok(())
 }

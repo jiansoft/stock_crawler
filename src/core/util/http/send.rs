@@ -262,7 +262,8 @@ pub(super) async fn send_with_client(
                 {
                     let alert_url = url.to_string();
                     tokio::spawn(async move {
-                        crate::core::alert::send_alert(
+                        crate::core::alert::notify_system(
+                            crate::core::alert::Topic::SystemCritical,
                             "爬蟲遭遇 IP 阻擋 (403)",
                             &format!("請求網址: {alert_url}"),
                         )

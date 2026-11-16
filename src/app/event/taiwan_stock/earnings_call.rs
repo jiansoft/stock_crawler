@@ -130,7 +130,11 @@ async fn notify(stock_symbol: &str, call: &EarningsCall) -> Outcome {
     }
 
     let name = holdings::stock_name(stock_symbol);
-    alert::send_message(&build_message(stock_symbol, &name, call, &detail)).await;
+    alert::notify_holdings_all(
+        alert::Topic::HoldingsEarningsCall,
+        &build_message(stock_symbol, &name, call, &detail),
+    )
+    .await;
     mark_notified(&call.call_id).await;
     Outcome::Notified
 }

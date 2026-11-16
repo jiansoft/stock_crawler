@@ -103,7 +103,11 @@ pub async fn execute() -> Result<()> {
         tracing::info!("集保股權分散最新仍是 {date}，這週已通知過");
         return Ok(());
     }
-    alert::send_message(&build_message(date, &rows, holdings::stock_name)).await;
+    alert::notify_holdings_all(
+        alert::Topic::HoldingsHolderDistribution,
+        &build_message(date, &rows, holdings::stock_name),
+    )
+    .await;
     tracing::info!(
         "持股大戶週報結束: date={date}, holdings={}, reported={}",
         symbols.len(),

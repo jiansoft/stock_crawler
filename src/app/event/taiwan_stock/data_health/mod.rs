@@ -166,7 +166,7 @@ impl Check {
 /// 排程入口：量測近 7 天的資料狀況並發送週報。
 pub async fn execute() -> Result<()> {
     let (message, statements) = build(Local::now().date_naive()).await?;
-    alert::send_message(&message).await;
+    alert::notify_system_text(alert::Topic::SystemDataHealth, &message).await;
     // 發送後才存資料庫端累計值，下週的「資料庫端耗時」從這裡算差額。
     if let Some(statements) = statements {
         db_statements::save(db_statements::SNAPSHOT_KEY, &statements).await;

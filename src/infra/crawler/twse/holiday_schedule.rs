@@ -149,7 +149,7 @@ fn parse_holiday_data(data: &[Vec<String>]) -> Vec<HolidaySchedule> {
 }
 
 async fn report_error(message: &str) {
-    alert::send_message(message).await;
+    alert::notify_system_text(alert::Topic::SystemCritical, message).await;
 }
 
 #[cfg(test)]

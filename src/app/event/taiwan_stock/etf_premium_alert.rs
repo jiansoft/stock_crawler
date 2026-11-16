@@ -102,7 +102,7 @@ async fn run(today: NaiveDate) -> Result<usize> {
         alerts.len()
     );
     if let Some(message) = build_message(today, &alerts, holdings::stock_name) {
-        alert::send_message(&message).await;
+        alert::notify_holdings_all(alert::Topic::HoldingsEtfPremium, &message).await;
     }
     Ok(alerts.len())
 }

@@ -167,7 +167,11 @@ pub async fn execute() -> Result<()> {
     }
 
     if !reports.is_empty() {
-        alert::send_message(&build_message(&reports, holdings::stock_name)).await;
+        alert::notify_holdings_all(
+            alert::Topic::HoldingsInsiderPledge,
+            &build_message(&reports, holdings::stock_name),
+        )
+        .await;
     }
     for (symbol, snapshot) in &to_save {
         save_snapshot(symbol, snapshot).await;

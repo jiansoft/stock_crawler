@@ -60,7 +60,7 @@ pub async fn execute() -> Result<()> {
     };
     let date = Local::now().date_naive();
     if let Some(message) = run(&PgQuoteRepository::new(), date, &holdings).await? {
-        alert::send_message(&message).await;
+        alert::notify_holdings_all(alert::Topic::HoldingsBreakout, &message).await;
     }
     Ok(())
 }

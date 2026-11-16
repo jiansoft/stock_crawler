@@ -97,7 +97,7 @@ pub(crate) async fn ensure(date: NaiveDate, items: &[AfterHours]) -> Result<()> 
     })
     .await?;
     if let Some((title, body)) = report {
-        alert::send_alert(title, &body).await;
+        alert::notify_system(alert::Topic::SystemAfterHours, title, &body).await;
     }
     Ok(())
 }
@@ -200,7 +200,8 @@ async fn ensure_official_ratios(date: NaiveDate) {
     match official_ratio::backfill_range(date, date).await {
         Ok(summary) => {
             if let Some(body) = official_ratio_report(date, &summary) {
-                alert::send_alert("官方本益比已補寫", &body).await;
+                alert::notify_system(alert::Topic::SystemAfterHours, "官方本益比已補寫", &body)
+                    .await;
             } else {
                 tracing::info!("{date} 官方本益比不需補寫: {summary:?}");
             }

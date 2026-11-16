@@ -39,20 +39,38 @@ async fn send_if_new_holdings_tracks_notified_symbols_in_redis() {
     let _ = CLIENT.delete(key).await;
 
     let mut highlights = Vec::new();
-    let first = EventDispatcher::send_if_new_holdings(key, 60, ["79979A", "79979B"], |new| {
-        highlights.push(new.cloned());
-        "第一次".to_owned()
-    })
+    let first = EventDispatcher::send_if_new_holdings(
+        crate::core::alert::Topic::HoldingsRevenue,
+        key,
+        60,
+        ["79979A", "79979B"],
+        |new| {
+            highlights.push(new.cloned());
+            "第一次".to_owned()
+        },
+    )
     .await;
-    let repeated = EventDispatcher::send_if_new_holdings(key, 60, ["79979B", "79979A"], |new| {
-        highlights.push(new.cloned());
-        "重複".to_owned()
-    })
+    let repeated = EventDispatcher::send_if_new_holdings(
+        crate::core::alert::Topic::HoldingsRevenue,
+        key,
+        60,
+        ["79979B", "79979A"],
+        |new| {
+            highlights.push(new.cloned());
+            "重複".to_owned()
+        },
+    )
     .await;
-    let added = EventDispatcher::send_if_new_holdings(key, 60, ["79979A", "79979C"], |new| {
-        highlights.push(new.cloned());
-        "補發".to_owned()
-    })
+    let added = EventDispatcher::send_if_new_holdings(
+        crate::core::alert::Topic::HoldingsRevenue,
+        key,
+        60,
+        ["79979A", "79979C"],
+        |new| {
+            highlights.push(new.cloned());
+            "補發".to_owned()
+        },
+    )
     .await;
     let stored = EventDispatcher::load_notified_symbols(key).await;
     let _ = CLIENT.delete(key).await;

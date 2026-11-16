@@ -10,15 +10,18 @@ struct RecordingSink {
 
 #[async_trait]
 impl AlertSink for RecordingSink {
-    async fn send_alert(&self, title: &str, message: &str) {
+    async fn send_alert(&self, topic: Topic, title: &str, message: &str) {
         self.received
             .lock()
             .unwrap()
-            .push(format!("alert:{title}:{message}"));
+            .push(format!("alert:{}:{title}:{message}", topic.code()));
     }
 
-    async fn send_message(&self, message: &str) {
-        self.received.lock().unwrap().push(format!("msg:{message}"));
+    async fn send_message(&self, topic: Topic, message: &str) {
+        self.received
+            .lock()
+            .unwrap()
+            .push(format!("msg:{}:{message}", topic.code()));
     }
 }
 
@@ -33,22 +36,22 @@ async fn registered_sink_receives_messages_and_duplicate_registration_is_ignored
     });
     register_alert_sink(sink.clone());
 
-    send_alert("標題", "內容").await;
-    send_message("一般訊息").await;
+    notify_system(Topic::SystemCritical, "標題", "內容").await;
+    notify_market(Topic::MarketRegime, "一般訊息").await;
 
     // 重複註冊：不 panic、原 sink 仍生效。
     register_alert_sink(Arc::new(RecordingSink {
         received: Mutex::new(Vec::new()),
     }));
-    send_message("第二則").await;
+    notify_holdings_all(Topic::HoldingsPayable, "第二則").await;
 
     let received = sink.received.lock().unwrap();
     assert_eq!(
         *received,
         vec![
-            "alert:標題:內容".to_string(),
-            "msg:一般訊息".to_string(),
-            "msg:第二則".to_string(),
+            "alert:system.critical:標題:內容".to_string(),
+            "msg:market.regime:一般訊息".to_string(),
+            "msg:holdings.payable:第二則".to_string(),
         ]
     );
 }

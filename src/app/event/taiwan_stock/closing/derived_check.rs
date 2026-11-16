@@ -45,7 +45,7 @@ pub(super) async fn ensure_derived(date: NaiveDate) -> Result<()> {
     })
     .await?;
     if let Some((title, body)) = report {
-        alert::send_alert(title, &body).await;
+        alert::notify_system(alert::Topic::SystemClosingCheck, title, &body).await;
     }
     Ok(())
 }

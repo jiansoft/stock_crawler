@@ -97,7 +97,7 @@ impl EventDispatcher {
         if let Some(holding_msg) =
             Self::build_holding_dividend_message(date, &stocks_dividend_info, &holdings)
         {
-            alert::send_message(&holding_msg).await;
+            alert::notify_holdings_all(alert::Topic::HoldingsExDividend, &holding_msg).await;
         }
 
         // 最後發送下一交易日的預訂除權息公告
@@ -132,7 +132,7 @@ impl EventDispatcher {
             .collect();
         let hints = FillHints::load(&symbols, Local::now().date_naive()).await;
         let msg = Self::build_market_dividend_message(date, title, stocks_dividend_info, &hints);
-        alert::send_message(&msg).await;
+        alert::notify_market(alert::Topic::MarketExDividend, &msg).await;
     }
 }
 

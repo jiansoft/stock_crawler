@@ -208,13 +208,16 @@ async fn notify(
                 tracing::warn!("策略換股通知：讀取持股基本面失敗，略過警示：{error:?}");
                 Vec::new()
             });
-        alert::send_message(&build_message(
-            &rebalance,
-            &strategy.name,
-            actual,
-            settlement.as_ref(),
-            &warned,
-        ))
+        alert::notify_market(
+            alert::Topic::MarketStrategyRebalance,
+            &build_message(
+                &rebalance,
+                &strategy.name,
+                actual,
+                settlement.as_ref(),
+                &warned,
+            ),
+        )
         .await;
     }
     if !failures.is_empty() {

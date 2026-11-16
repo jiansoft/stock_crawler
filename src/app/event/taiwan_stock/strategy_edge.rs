@@ -320,7 +320,7 @@ async fn report(
     let (records, failures) = check(gateway, strategies, today).await;
     log_records(&records);
     for (title, message) in alerts(&records) {
-        alert::send_alert(&title, &message).await;
+        alert::notify_system(alert::Topic::MarketStrategyEdge, &title, &message).await;
     }
     if !records.is_empty() {
         store(key, &records).await;

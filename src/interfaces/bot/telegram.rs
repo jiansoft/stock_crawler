@@ -359,16 +359,19 @@ pub async fn send_alert(alert_title: &str, details: &str) {
 /// 依 DDD 分層，core/infra 不應該直接呼叫 interfaces（內層依賴外層的
 /// 反向耦合）。因此 core 只定義抽象的 [`crate::core::alert::AlertSink`]，
 /// 由這個 adapter 提供 Telegram 實作，並在 `main` 啟動時註冊——
-/// core/infra 呼叫 `core::alert::send_alert` 時，訊息才會實際送到 Telegram。
+/// core/infra 呼叫 `core::alert::notify_*` 時，訊息才會實際送到 Telegram。
 pub struct TelegramAlertSink;
 
 #[async_trait::async_trait]
 impl crate::core::alert::AlertSink for TelegramAlertSink {
-    async fn send_alert(&self, title: &str, message: &str) {
+    // N1（會員系統計畫 7.7）：Topic 只用來標示項目，全部仍送設定檔內的聊天室；依訂閱分送在 N4／N5。
+    async fn send_alert(&self, topic: crate::core::alert::Topic, title: &str, message: &str) {
+        tracing::debug!(topic = topic.code(), "telegram alert");
         send_alert(title, message).await;
     }
 
-    async fn send_message(&self, message: &str) {
+    async fn send_message(&self, topic: crate::core::alert::Topic, message: &str) {
+        tracing::debug!(topic = topic.code(), "telegram message");
         send(message).await;
     }
 }

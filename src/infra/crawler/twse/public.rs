@@ -86,7 +86,7 @@ pub async fn visit() -> Result<Vec<Public>> {
     let stat = match res.stat {
         None => {
             let to_bot_msg = "Public\\.res\\.Stat is None";
-            alert::send_message(to_bot_msg).await;
+            alert::notify_system_text(alert::Topic::SystemCritical, to_bot_msg).await;
             return Ok(result);
         }
         Some(stat) => stat.to_uppercase(),
@@ -94,7 +94,7 @@ pub async fn visit() -> Result<Vec<Public>> {
 
     if stat != "OK" {
         let to_bot_msg = "Public\\.res\\.Stat is not ok";
-        alert::send_message(to_bot_msg).await;
+        alert::notify_system_text(alert::Topic::SystemCritical, to_bot_msg).await;
         return Ok(result);
     }
 

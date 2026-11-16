@@ -74,6 +74,7 @@ impl EventDispatcher {
         }
 
         let sent = Self::send_if_new_holdings(
+            alert::Topic::HoldingsRevenue,
             &format!("holding_review:revenue:{date}"),
             REVENUE_NOTIFIED_TTL_SECONDS,
             alerts.iter().map(|alert| alert.stock_symbol.as_str()),
@@ -106,6 +107,7 @@ impl EventDispatcher {
         }
 
         let sent = Self::send_if_new_holdings(
+            alert::Topic::HoldingsFinancialReport,
             &format!("holding_review:financial:{year}{quarter}"),
             FINANCIAL_NOTIFIED_TTL_SECONDS,
             alerts.iter().map(|alert| alert.stock_symbol.as_str()),
@@ -164,9 +166,10 @@ impl EventDispatcher {
             return 0;
         }
 
-        alert::send_message(&Self::build_foreign_holding_message(
-            date, &increases, &decreases,
-        ))
+        alert::notify_holdings_all(
+            alert::Topic::HoldingsForeignHolding,
+            &Self::build_foreign_holding_message(date, &increases, &decreases),
+        )
         .await;
 
         let notified = keys.len();
@@ -268,6 +271,7 @@ impl EventDispatcher {
     /// 之後的補發才傳入新增代號，讓訊息標出這次多了哪幾檔。
     /// 已通知集合只增不減，賣出後再買回的持股不會在同一期被重複通知。
     async fn send_if_new_holdings<'a>(
+        topic: alert::Topic,
         key: &str,
         ttl_in_seconds: usize,
         symbols: impl IntoIterator<Item = &'a str>,
@@ -280,7 +284,7 @@ impl EventDispatcher {
         }
 
         let highlight = (!notified.is_empty()).then_some(&new_symbols);
-        alert::send_message(&build_message(highlight)).await;
+        alert::notify_holdings_all(topic, &build_message(highlight)).await;
 
         notified.extend(new_symbols);
         let value = notified.into_iter().collect::<Vec<_>>().join(",");

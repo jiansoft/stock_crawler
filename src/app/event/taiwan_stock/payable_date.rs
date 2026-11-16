@@ -170,7 +170,7 @@ async fn notify(today: NaiveDate) -> Result<()> {
     let stocks_payable_date_info = dividend_repo.fetch_payable_date_info_on_date(today).await?;
     //群內通知（只列目前仍持有的股票）
     if let Some(msg) = build_payable_summary_message(today, &stocks_payable_date_info) {
-        alert::send_message(&msg).await;
+        alert::notify_holdings_all(alert::Topic::HoldingsPayable, &msg).await;
     }
 
     // 持股入帳不受上面清單限制：除權息後已全部賣出的，今天仍會入帳。
@@ -186,7 +186,7 @@ async fn notify(today: NaiveDate) -> Result<()> {
         .cloned()
         .collect();
     if let Some(batch_msg) = build_batch_dividend_message(today, &today_payouts, &month_payouts) {
-        alert::send_message(&batch_msg).await;
+        alert::notify_holdings_all(alert::Topic::HoldingsPayable, &batch_msg).await;
     }
 
     Ok(())

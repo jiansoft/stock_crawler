@@ -104,7 +104,7 @@ async fn notify(
         payout_count
     );
     if let Some(message) = build_message(&summary) {
-        alert::send_message(&message).await;
+        alert::notify_holdings_all(alert::Topic::HoldingsMonthlyPayout, &message).await;
     }
     Ok(())
 }

@@ -155,7 +155,7 @@ pub async fn execute() -> Result<()> {
     )
     .await;
     if let Some(message) = message {
-        alert::send_message(&message).await;
+        alert::notify_market(alert::Topic::MarketWeekly, &message).await;
     }
     Ok(())
 }

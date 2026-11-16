@@ -92,7 +92,7 @@ pub async fn execute() -> Result<()> {
         flags.len()
     );
     if let Some(message) = build_message(&flags, holdings::stock_name) {
-        alert::send_message(&message).await;
+        alert::notify_holdings_all(alert::Topic::HoldingsValuation, &message).await;
     }
     Ok(())
 }

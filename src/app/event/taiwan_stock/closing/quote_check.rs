@@ -55,7 +55,7 @@ where
     )
     .await?;
     if let QuoteCheck::Rerun(title, body) = &check {
-        alert::send_alert(title, body).await;
+        alert::notify_system(alert::Topic::SystemClosingCheck, title, body).await;
     }
     Ok(check)
 }

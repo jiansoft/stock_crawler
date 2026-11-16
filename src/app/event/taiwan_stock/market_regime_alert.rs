@@ -51,7 +51,7 @@ pub async fn execute() -> Result<()> {
     )
     .await?
     {
-        alert::send_message(&message).await;
+        alert::notify_market(alert::Topic::MarketRegime, &message).await;
     }
     Ok(())
 }

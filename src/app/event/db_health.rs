@@ -197,7 +197,7 @@ pub async fn execute() -> Result<()> {
     };
     if let Some(notice) = notice {
         tracing::warn!("{}：{}", notice.title, notice.message);
-        alert::send_alert(notice.title, &notice.message).await;
+        alert::notify_system(alert::Topic::SystemDbHealth, notice.title, &notice.message).await;
     }
     Ok(())
 }

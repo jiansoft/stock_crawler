@@ -91,7 +91,7 @@ async fn run(current_year: i32) -> Result<()> {
                 &held,
                 holdings::stock_name,
             ) {
-                alert::send_message(&message).await;
+                alert::notify_holdings_all(alert::Topic::HoldingsFinancialHealth, &message).await;
             }
         }
         Err(why) => tracing::warn!("取得持股失敗，略過財務體質變化通知: {why:#}"),

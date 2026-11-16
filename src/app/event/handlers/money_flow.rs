@@ -26,7 +26,7 @@ impl EventDispatcher {
             .await?;
         // 建立通知內容並透過 AlertSink port 發送（生產環境為 Telegram adapter）
         if let Some(msg) = Self::build_money_change_message(&rows) {
-            alert::send_message(&msg).await;
+            alert::notify_holdings_all(alert::Topic::HoldingsMarketValue, &msg).await;
         }
 
         Ok(())

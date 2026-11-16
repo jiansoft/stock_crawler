@@ -83,7 +83,7 @@ pub async fn execute() -> Result<()> {
     if !msg.is_empty() {
         // 整段訊息為動態內容（含日期、價格的小數點），送出前統一做 MarkdownV2 跳脫。
         let to_bot_msg = text::escape_markdown_v2(format!("{now} 可以申購的股票如下︰\n{msg}"));
-        alert::send_message(&to_bot_msg).await;
+        alert::notify_market(alert::Topic::MarketPublicOffering, &to_bot_msg).await;
         return Ok(());
     }
 

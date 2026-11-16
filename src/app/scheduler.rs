@@ -46,7 +46,12 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
         if let Err(why) = event::trace::stock_price::execute().await {
             let err_msg = format!("{:?}", why);
             tracing::error!("{}", &err_msg);
-            alert::send_alert("開盤股價追蹤初始化失敗", &err_msg).await;
+            alert::notify_system(
+                alert::Topic::SystemCritical,
+                "開盤股價追蹤初始化失敗",
+                &err_msg,
+            )
+            .await;
         }
         tracing::info!(
             "scheduler start done: opening trace::stock_price elapsed={:?}",
@@ -63,7 +68,7 @@ pub async fn start(sched: &JobScheduler) -> Result<()> {
 
     tracing::info!("scheduler start begin: telegram notify");
     let telegram_timer = Instant::now();
-    alert::send_message(&msg).await;
+    alert::notify_system_text(alert::Topic::SystemStartup, &msg).await;
     tracing::info!(
         "scheduler start done: telegram notify elapsed={:?}",
         telegram_timer.elapsed()
@@ -224,7 +229,12 @@ async fn run_job<F, Fut>(
                 error = %err_msg,
                 "task.failed"
             );
-            alert::send_alert(&format!("排程任務 [{}] 執行失敗", name), &err_msg).await;
+            alert::notify_system(
+                alert::Topic::SystemCritical,
+                &format!("排程任務 [{}] 執行失敗", name),
+                &err_msg,
+            )
+            .await;
         }
         TaskOutcome::TimedOut => {
             let err_msg = format!(
@@ -233,7 +243,12 @@ async fn run_job<F, Fut>(
             );
             let elapsed_ms = t.elapsed().as_millis() as u64;
             tracing::error!(task = cron_expr, name = name, elapsed_ms, "task.timeout");
-            alert::send_alert(&format!("排程任務 [{}] 逾時", name), &err_msg).await;
+            alert::notify_system(
+                alert::Topic::SystemCritical,
+                &format!("排程任務 [{}] 逾時", name),
+                &err_msg,
+            )
+            .await;
         }
     }
 }

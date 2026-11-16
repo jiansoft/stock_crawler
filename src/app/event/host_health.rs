@@ -289,7 +289,7 @@ pub async fn execute() -> Result<()> {
         }
     };
     for message in alerts {
-        alert::send_alert("pi 主機健康異常", &message).await;
+        alert::notify_system(alert::Topic::SystemHostHealth, "pi 主機健康異常", &message).await;
     }
     Ok(())
 }
