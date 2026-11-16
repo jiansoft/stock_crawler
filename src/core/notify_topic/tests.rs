@@ -37,12 +37,14 @@ fn codes_are_unique_and_match_audience_prefix() {
     assert_eq!(seen.len(), Topic::ALL.len());
 }
 
-/// 受眾與需要的權限對應 7.3：持股看 portfolio.view、市場看 market.view、系統看 ops.view、價格追蹤看 price_trace.view。
+/// 受眾與需要的權限對應 7.3：持股看 portfolio.view（市值變化例外，看 money_history.view）、市場看 market.view、
+/// 系統看 ops.view、價格追蹤看 price_trace.view。
 #[test]
 fn required_permission_follows_audience() {
     for topic in Topic::ALL {
         let spec = topic.spec();
         let expected = match spec.audience {
+            Audience::Holdings if topic == Topic::HoldingsMarketValue => "money_history.view",
             Audience::Holdings => "portfolio.view",
             Audience::Market => "market.view",
             Audience::System => "ops.view",

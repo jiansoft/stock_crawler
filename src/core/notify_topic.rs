@@ -130,6 +130,7 @@ pub enum Topic {
 }
 
 const PORTFOLIO_VIEW: &str = "portfolio.view";
+const MONEY_HISTORY_VIEW: &str = "money_history.view";
 const MARKET_VIEW: &str = "market.view";
 const OPS_VIEW: &str = "ops.view";
 const PRICE_TRACE_VIEW: &str = "price_trace.view";
@@ -259,13 +260,17 @@ impl Topic {
                 Dividend,
                 false,
             ),
-            Self::HoldingsMarketValue => holdings(
-                "holdings.market_value",
-                "市值變化",
-                "交易日收盤後的市值增減",
-                Value,
-                true,
-            ),
+            // 市值變化讀的是每日市值，訂閱看 money_history.view（7.5、6.3），不是 portfolio.view。
+            Self::HoldingsMarketValue => TopicSpec {
+                required_permission: MONEY_HISTORY_VIEW,
+                ..holdings(
+                    "holdings.market_value",
+                    "市值變化",
+                    "交易日收盤後的市值增減",
+                    Value,
+                    true,
+                )
+            },
             Self::HoldingsRevenue => holdings(
                 "holdings.revenue",
                 "持股月營收",
