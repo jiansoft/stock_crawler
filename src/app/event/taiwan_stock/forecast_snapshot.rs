@@ -28,8 +28,9 @@ pub async fn execute() -> Result<()> {
 /// 以 `today` 為快照日，依各會員目前持股預估未來 [`MONTHS`] 個月並整批寫入，回傳寫入筆數。
 async fn record(today: NaiveDate) -> Result<u64> {
     let mut items = Vec::new();
-    for member_id in forecast::fetch_member_ids().await? {
-        let inputs = forecast::load_inputs(member_id, today, MONTHS).await?;
+    for view in forecast::fetch_member_views().await? {
+        let inputs = forecast::load_inputs(&view, today, MONTHS).await?;
+        let member_id = view.member_id_or_total();
         let result = dividend_forecast::forecast(
             &inputs.holdings,
             &inputs.events,

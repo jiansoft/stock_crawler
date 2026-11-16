@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use axum::{
-    Json,
+    Extension, Json,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -21,6 +21,7 @@ use crate::domain::chip::BrokerNetRecord;
 use crate::domain::portfolio::chip::{
     BrokerPeriodNet, ChipTradingDay, HoldingBrokerQuery, HoldingChip, HoldingChipQuery,
 };
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database::repository::portfolio::PgPortfolioRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, PortfolioChipBroker, PortfolioChipBrokerNet, PortfolioChipBrokerRecent,
@@ -40,11 +41,12 @@ type BrokerRecent = (usize, Vec<BrokerPeriodNet>);
 /// 日期格式錯誤回 422、驗證失敗回 401；資料庫查詢失敗回不含 SQL 細節的 500。查詢日之前沒有任何籌碼
 /// 資料時回 200 與空清單（`date` 為 `null`）。
 #[utoipa::path(get, path = "/api/v1/portfolio/chip", tag = "data-api", params(PortfolioChipParams), responses((status = 200, body = PortfolioChipResponse), (status = 401, body = ErrorBody), (status = 422, body = ErrorBody), (status = 500, body = ErrorBody)), security(("bearer_auth" = [])))]
-pub(crate) async fn portfolio_chip(Query(params): Query<PortfolioChipParams>) -> Response {
-    let member_id = params.member_id.unwrap_or(0);
-    if member_id < 0 {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY, "member_id 不可為負數");
-    }
+pub(crate) async fn portfolio_chip(
+    Extension(view): Extension<HoldingView>,
+    Query(params): Query<PortfolioChipParams>,
+) -> Response {
+    // 範圍由 scope middleware 驗證後放進 extension（家庭全體或單一成員，7.6 N2）。
+    let member_id = view.member_id_or_total();
     let date = match parse_optional_date(params.date.as_deref()) {
         Ok(value) => value,
         Err(message) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, message),
@@ -55,7 +57,7 @@ pub(crate) async fn portfolio_chip(Query(params): Query<PortfolioChipParams>) ->
         Err(error) => return repository_error(error),
     };
     let chips = match day {
-        Some(day) => match repository.fetch_holding_chips(day.date, member_id).await {
+        Some(day) => match repository.fetch_holding_chips(day.date, &view).await {
             Ok(chips) => chips,
             Err(error) => return repository_error(error),
         },

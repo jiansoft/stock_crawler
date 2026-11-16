@@ -1,6 +1,7 @@
 //! 持股配置偏離提醒的 ETF 穿透：成分股曝險、過期成分股與失敗降級。
 
 use super::*;
+use crate::domain::portfolio::view::HoldingView;
 
 /// 持股與 ETF 成分股都由測試指定的假查詢。
 struct FakeEtfPositions {
@@ -11,7 +12,7 @@ struct FakeEtfPositions {
 
 #[async_trait]
 impl PortfolioPositionQuery for FakeEtfPositions {
-    async fn fetch_positions(&self, _: i64, _: &[String]) -> Result<Vec<CurrentPosition>> {
+    async fn fetch_positions(&self, _: &HoldingView, _: &[String]) -> Result<Vec<CurrentPosition>> {
         Ok(self.positions.clone())
     }
 

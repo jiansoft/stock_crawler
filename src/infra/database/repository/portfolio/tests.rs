@@ -157,9 +157,13 @@ async fn forecast_snapshot_members_exclude_zero() {
     .await
     .expect("種入測試持股");
 
-    let members = forecast::fetch_member_ids().await;
+    let views = forecast::fetch_member_views().await;
     cleanup().await;
-    let members = members.expect("查詢有持股的會員");
+    let members: Vec<i64> = views
+        .expect("查詢有持股的會員")
+        .iter()
+        .filter_map(|view| view.member_id())
+        .collect();
     assert!(members.contains(&MEMBER));
     assert!(!members.contains(&0));
 }

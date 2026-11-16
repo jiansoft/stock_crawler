@@ -5,6 +5,7 @@
 //! 涵蓋個股、產業與 ETF 穿透三個維度。ETF 穿透以持有 ETF 的前十大成分（與再平衡頁同一份來源）
 //! 試算，只列使用者設了目標的個股；成分資料超過 [`STALE_COMPONENT_DAYS`] 天的 ETF 不計入並註明。
 
+use crate::domain::portfolio::view::HoldingView;
 use std::collections::HashSet;
 
 use chrono::NaiveDate;
@@ -216,7 +217,10 @@ pub(super) async fn allocation_sections(
         .filter(|record| record.dimension == TargetDimension::Stock)
         .map(|record| record.key.clone())
         .collect();
-    let held = match positions.fetch_positions(MEMBER_ID, &extra).await {
+    let held = match positions
+        .fetch_positions(&HoldingView::default_household(), &extra)
+        .await
+    {
         Ok(held) => held,
         Err(why) => {
             tracing::warn!("每週市場摘要：讀取持股部位失敗: {why:#}");

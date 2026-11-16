@@ -6,16 +6,20 @@ use chrono::NaiveDate;
 
 use crate::{
     domain::portfolio::exposure::{EtfConstituent, EtfExposureQuery, ExposurePosition},
-    infra::database::{self, repository::portfolio::PgPortfolioRepository},
+    domain::portfolio::view::HoldingView,
+    infra::database::{
+        self,
+        repository::{holding_view, portfolio::PgPortfolioRepository},
+    },
 };
 
-/// 依代號合併的未賣出部位、名稱與市值（`last_daily_quotes` 收盤價）；`$1 = 0` 時為全部會員。
+/// 依代號合併的未賣出部位、名稱與市值（`last_daily_quotes` 收盤價）；`$1` 為範圍內的會員編號。
 /// 清單頁快照（`etf_snapshot`）上有的才算 ETF。
 const POSITIONS_SQL: &str = r#"
 WITH held AS (
     SELECT security_code AS stock_symbol, SUM(share_quantity)::bigint AS shares
     FROM stock_ownership_details
-    WHERE NOT is_sold AND ($1::bigint = 0 OR member_id = $1)
+    WHERE NOT is_sold AND member_id = ANY($1)
     GROUP BY security_code
 )
 SELECT held.stock_symbol::text AS stock_symbol,
@@ -41,12 +45,13 @@ ORDER BY stock_symbol, rank
 
 #[async_trait]
 impl EtfExposureQuery for PgPortfolioRepository {
-    async fn fetch_exposure_positions(&self, member_id: i64) -> Result<Vec<ExposurePosition>> {
+    async fn fetch_exposure_positions(&self, view: &HoldingView) -> Result<Vec<ExposurePosition>> {
+        let members = holding_view::member_ids(view).await?;
         let rows: Vec<(String, String, Option<f64>, bool)> = sqlx::query_as(POSITIONS_SQL)
-            .bind(member_id)
+            .bind(&members)
             .fetch_all(database::get_connection())
             .await
-            .with_context(|| format!("Failed to fetch exposure positions member_id={member_id}"))?;
+            .with_context(|| format!("Failed to fetch exposure positions view={view:?}"))?;
         Ok(rows
             .into_iter()
             .map(

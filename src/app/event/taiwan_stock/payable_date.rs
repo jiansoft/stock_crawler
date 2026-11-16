@@ -12,6 +12,7 @@ use rust_decimal::Decimal;
 
 // 通知走 core::alert（port），跳脫工具走 core::util::text——
 // app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
+use crate::domain::portfolio::view::HoldingView;
 use crate::{
     core::{alert, util::text},
     domain::dividend::entity::StockDividendPayableDateInfo,
@@ -177,7 +178,7 @@ async fn notify(today: NaiveDate) -> Result<()> {
 
     let month_start = today.with_day(1).unwrap_or(today);
     let allocations = PgPortfolioRepository::new()
-        .fetch_payout_allocations(0, month_start, today, today)
+        .fetch_payout_allocations(&HoldingView::default_household(), month_start, today, today)
         .await?;
     let month_payouts = payout::split_by_payable_date(&allocations, month_start, today);
     let today_payouts: Vec<DividendPayout> = month_payouts

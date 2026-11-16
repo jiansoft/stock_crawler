@@ -21,6 +21,8 @@ pub mod forward_return;
 /// 持股籌碼日報（當日持股與法人、信用交易、主力進出）。
 pub mod holding_chip;
 pub mod holding_fundamentals;
+// HoldingView → 會員編號清單。
+pub mod holding_view;
 pub mod market_index;
 pub mod market_valuation;
 pub mod money_flow;

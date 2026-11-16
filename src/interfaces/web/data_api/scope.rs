@@ -19,6 +19,7 @@ use serde::Deserialize;
 use subtle::ConstantTimeEq;
 
 use super::handlers::error_response;
+use crate::domain::portfolio::view::{DEFAULT_HOUSEHOLD_ID, HoldingView};
 use crate::infra::database;
 
 /// 持股類端點 request body 的上限（目標配置最多數十項，1 MB 綽綽有餘）。
@@ -216,7 +217,20 @@ pub(super) async fn require_personal_scope(request: Request<Body>, next: Next) -
             }
         },
     }
+    // 驗證過的範圍交給 handler：持股查詢一律以 HoldingView 篩選，`member_id = 0` 只到這個家庭為止（7.6 N2）。
+    let mut request = request;
+    request
+        .extensions_mut()
+        .insert(holding_view(household_id, member_id));
     next.run(request).await
+}
+
+/// 依已驗證的參數組出持股範圍；相容模式缺 `household_id` 時為預設家庭。
+pub(crate) fn holding_view(household_id: Option<i64>, member_id: Option<i64>) -> HoldingView {
+    HoldingView::member(
+        household_id.unwrap_or(DEFAULT_HOUSEHOLD_ID),
+        member_id.unwrap_or(0),
+    )
 }
 
 /// 會員是否屬於指定家庭且未刪除。

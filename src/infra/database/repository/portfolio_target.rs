@@ -1,5 +1,7 @@
 //! PostgreSQL 實作 [`PortfolioTargetRepository`]。
 
+use crate::domain::portfolio::view::HoldingView;
+use crate::infra::database::repository::holding_view;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -72,15 +74,16 @@ struct PositionRow {
 impl PortfolioPositionQuery for PgPortfolioTargetRepository {
     async fn fetch_positions(
         &self,
-        member_id: i64,
+        view: &HoldingView,
         extra_symbols: &[String],
     ) -> Result<Vec<CurrentPosition>> {
+        let members = holding_view::member_ids(view).await?;
         let mut rows: Vec<PositionRow> = sqlx::query_as(
             r#"
             WITH held AS (
                 SELECT security_code AS stock_symbol, SUM(share_quantity)::bigint AS shares
                 FROM stock_ownership_details
-                WHERE NOT is_sold AND ($1::bigint = 0 OR member_id = $1)
+                WHERE NOT is_sold AND member_id = ANY($1)
                 GROUP BY security_code
                 HAVING SUM(share_quantity) > 0
             )
@@ -97,7 +100,7 @@ impl PortfolioPositionQuery for PgPortfolioTargetRepository {
             ORDER BY held.stock_symbol
             "#,
         )
-        .bind(member_id)
+        .bind(&members)
         .fetch_all(self.pool())
         .await?;
         let missing: Vec<String> = extra_symbols

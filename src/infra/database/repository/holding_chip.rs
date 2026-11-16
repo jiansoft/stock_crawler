@@ -4,6 +4,8 @@
 //! 介面與持股推算規則見 [`crate::domain::portfolio::chip::HoldingChipQuery`]；stock_go 的持股籌碼頁用的是
 //! 同一段 SQL。
 
+use crate::domain::portfolio::view::HoldingView;
+use crate::infra::database::repository::holding_view;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -46,7 +48,7 @@ SELECT d.d,
 FROM d
 "#;
 
-/// `$1` 交易日、`$2` 會員（0 為所有會員）：當天收盤時仍持有的普通股（只有數字、不是 00 開頭）與當天籌碼。
+/// `$1` 交易日、`$2` 範圍內的會員編號：當天收盤時仍持有的普通股（只有數字、不是 00 開頭）與當天籌碼。
 ///
 /// 已賣出批次的 `sell_history_serial` 多半沒有回填，賣出日取同會員、同代號、買進日之後最早一筆
 /// 未撤銷的賣出紀錄；找不到時視為買進當天就不再持有。
@@ -55,7 +57,7 @@ WITH held AS (
     SELECT DISTINCT s.security_code AS stock_symbol
     FROM stock_ownership_details s
     WHERE s.date <= $1::date
-      AND ($2::bigint = 0 OR s.member_id = $2)
+      AND s.member_id = ANY($2)
       AND s.security_code ~ '^[0-9]+$' AND s.security_code NOT LIKE '00%'
       AND (NOT s.is_sold OR COALESCE((
             SELECT MIN(h.date) FROM sell_history h
@@ -150,11 +152,12 @@ impl HoldingChipQuery for PgPortfolioRepository {
     async fn fetch_holding_chips(
         &self,
         date: NaiveDate,
-        member_id: i64,
+        view: &HoldingView,
     ) -> Result<Vec<HoldingChip>> {
+        let members = holding_view::member_ids(view).await?;
         let rows: Vec<HoldingChipRow> = sqlx::query_as(HOLDING_CHIP_SQL)
             .bind(date)
-            .bind(member_id)
+            .bind(&members)
             .fetch_all(database::get_connection())
             .await
             .context("Failed to fetch holding chips")?;

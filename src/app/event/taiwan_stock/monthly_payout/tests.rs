@@ -1,5 +1,6 @@
 //! 上月持股股利入帳彙總：月份推算、查詢期間、訊息組裝與去年同月比較。
 
+use crate::domain::portfolio::view::HoldingView;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -124,9 +125,24 @@ async fn notify_queries_previous_month_last_year_and_year_to_date() {
     assert_eq!(
         repo.queries()[..3],
         [
-            (0, date(2026, 11, 1), date(2026, 11, 30), today),
-            (0, date(2025, 11, 1), date(2025, 11, 30), today),
-            (0, date(2026, 1, 1), date(2026, 11, 30), today),
+            (
+                HoldingView::default_household(),
+                date(2026, 11, 1),
+                date(2026, 11, 30),
+                today
+            ),
+            (
+                HoldingView::default_household(),
+                date(2025, 11, 1),
+                date(2025, 11, 30),
+                today
+            ),
+            (
+                HoldingView::default_household(),
+                date(2026, 1, 1),
+                date(2026, 11, 30),
+                today
+            ),
         ]
     );
     assert_eq!(summary.payouts.len(), 1);
@@ -217,8 +233,21 @@ async fn load_snapshot_accuracy_uses_latest_snapshot_before_month_end() {
         let _ = sqlx::query("DELETE FROM dividend_forecast_snapshot WHERE stock_symbol = '79979N'")
             .execute(pool)
             .await;
+        let _ = sqlx::query(
+            r#"DELETE FROM "Member" WHERE "Id" = 79979 AND "Account" = '__iam_test_79979'"#,
+        )
+        .execute(pool)
+        .await;
     };
     cleanup().await;
+    // 通知讀的是預設家庭的全體成員（7.6 N2）：測試會員登記在家庭 #1。
+    sqlx::query(
+        r#"INSERT INTO "Member" ("Id", "Account", "Name", household_id)
+           VALUES (79979, '__iam_test_79979', 'IAM 測試', 1) ON CONFLICT ("Id") DO NOTHING"#,
+    )
+    .execute(pool)
+    .await
+    .expect("種入測試會員");
     // 11-01 快照：11-20 預估 500 元；12-01 快照：12-20 預估 900 元（不該被拿來比對 11 月）。
     sqlx::query(
         r"INSERT INTO dividend_forecast_snapshot

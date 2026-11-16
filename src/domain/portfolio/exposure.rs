@@ -4,6 +4,7 @@
 //! 反向、期貨、部分債券 ETF 沒有前十大持股，整檔都無法拆解。台股成分股以代號比對，
 //! 債券等沒有代號的持股以名稱比對。
 
+use super::view::HoldingView;
 use std::collections::HashMap;
 
 use anyhow::Result;
@@ -202,8 +203,8 @@ pub fn look_through(
 /// 持股穿透需要的讀取合約。
 #[async_trait]
 pub trait EtfExposureQuery: Send + Sync {
-    /// 未賣出的持有部位（同代號合併）與市值；`member_id` 為 0 時為全部會員合計。
-    async fn fetch_exposure_positions(&self, member_id: i64) -> Result<Vec<ExposurePosition>>;
+    /// 未賣出的持有部位（同代號合併）與市值；範圍由 `view` 決定（家庭全體或單一成員）。
+    async fn fetch_exposure_positions(&self, view: &HoldingView) -> Result<Vec<ExposurePosition>>;
 
     /// 指定 ETF 最新一期的前十大持股。
     async fn fetch_etf_constituents(&self, etf_symbols: &[String]) -> Result<Vec<EtfConstituent>>;
@@ -214,8 +215,11 @@ pub trait EtfExposureQuery: Send + Sync {
 /// # Errors
 ///
 /// 倉儲讀取失敗時回傳錯誤。
-pub async fn build_report(repo: &impl EtfExposureQuery, member_id: i64) -> Result<ExposureReport> {
-    let positions = repo.fetch_exposure_positions(member_id).await?;
+pub async fn build_report(
+    repo: &impl EtfExposureQuery,
+    view: &HoldingView,
+) -> Result<ExposureReport> {
+    let positions = repo.fetch_exposure_positions(view).await?;
     let etfs: Vec<String> = positions
         .iter()
         .filter(|position| position.is_etf && position.market_value.is_some())

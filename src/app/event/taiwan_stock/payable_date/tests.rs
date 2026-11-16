@@ -1,5 +1,6 @@
 //! 08:00 股利發放日通知的訊息組裝與資料庫整合測試。
 
+use crate::domain::portfolio::view::HoldingView;
 use rust_decimal_macros::dec;
 
 use super::*;
@@ -220,7 +221,7 @@ async fn notify_lists_recorded_payouts_including_sold_holdings() {
     let result = notify(today).await;
     let month_start = NaiveDate::from_ymd_opt(2099, 1, 1).expect("合法日期");
     let allocations = PgPortfolioRepository::new()
-        .fetch_payout_allocations(MEMBER, month_start, today, today)
+        .fetch_payout_allocations(&HoldingView::member(1, MEMBER), month_start, today, today)
         .await;
     cleanup(pool).await;
 

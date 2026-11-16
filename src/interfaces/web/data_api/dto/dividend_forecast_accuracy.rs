@@ -16,6 +16,10 @@ pub(crate) struct DividendForecastAccuracyParams {
     pub(crate) snapshot_date: Option<String>,
     /// 會員編號；0（預設）為全部會員合計。
     #[param(minimum = 0, default = 0)]
+    #[allow(
+        dead_code,
+        reason = "由 scope middleware 讀取並驗證後轉成 HoldingView；這裡保留給 OpenAPI 文件"
+    )]
     pub(crate) member_id: Option<i64>,
 }
 

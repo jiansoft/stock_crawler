@@ -7,11 +7,13 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 use crate::domain::portfolio::payout::PayoutAllocation;
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database;
+use crate::infra::database::repository::holding_view;
 
 /// 發放日落在期間內的股利，依會員附已領明細或目前持股推算的股數與金額。
 ///
-/// `$1` 會員（0 為全部）、`$2` 起日、`$3` 迄日、`$4` 今天（除權息日在今天以後才推算）。
+/// `$1` 範圍內的會員編號、`$2` 起日、`$3` 迄日、`$4` 今天（除權息日在今天以後才推算）。
 /// 只要有任何會員的已領明細，就代表已除權息並重算過，其他會員不再推算。
 const PAYOUTS_SQL: &str = r#"
 WITH due AS (
@@ -43,14 +45,14 @@ WITH due AS (
     FROM dividend_record_detail_more AS m
     JOIN stock_ownership_details AS sod ON sod.serial = m.stock_ownership_details_serial
     WHERE m.dividend_serial IN (SELECT serial FROM due)
-        AND ($1 = 0 OR sod.member_id = $1)
+        AND sod.member_id = ANY($1)
     GROUP BY m.dividend_serial, sod.member_id
 ), estimated AS (
     SELECT due.serial, sod.member_id, sum(sod.share_quantity)::int8 AS shares
     FROM due
     JOIN stock_ownership_details AS sod ON sod.security_code = due.security_code
     WHERE sod.is_sold = false
-        AND ($1 = 0 OR sod.member_id = $1)
+        AND sod.member_id = ANY($1)
         AND NOT EXISTS (
             SELECT 1 FROM dividend_record_detail_more AS m WHERE m.dividend_serial = due.serial
         )
@@ -130,20 +132,19 @@ impl From<PayoutRow> for PayoutAllocation {
 ///
 /// [`PortfolioRepository::fetch_payout_allocations`]: crate::domain::portfolio::repository::PortfolioRepository::fetch_payout_allocations
 pub(super) async fn fetch(
-    member_id: i64,
+    view: &HoldingView,
     from: NaiveDate,
     to: NaiveDate,
     today: NaiveDate,
 ) -> Result<Vec<PayoutAllocation>> {
+    let members = holding_view::member_ids(view).await?;
     let rows: Vec<PayoutRow> = sqlx::query_as(PAYOUTS_SQL)
-        .bind(member_id)
+        .bind(&members)
         .bind(from)
         .bind(to)
         .bind(today)
         .fetch_all(database::get_connection())
         .await
-        .with_context(|| {
-            format!("查詢股利入帳失敗: member_id={member_id}, from={from}, to={to}")
-        })?;
+        .with_context(|| format!("查詢股利入帳失敗: view={view:?}, from={from}, to={to}"))?;
     Ok(rows.into_iter().map(PayoutAllocation::from).collect())
 }

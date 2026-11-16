@@ -2,6 +2,7 @@
 //!
 //! 逐日查詢、只留持股與金額換算由 `app::calculation::upcoming_dividends` 的測試驗證。
 
+use crate::domain::portfolio::view::HoldingView;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -261,7 +262,10 @@ async fn next_week_payouts_queries_next_monday_to_friday() {
         FakePayoutRepository::with_allocations(vec![allocation(1, 1000), allocation(2, 2000)]);
     let payouts = next_week_payouts(&repo, day(17)).await.expect("查詢入帳");
 
-    assert_eq!(repo.queries(), [(0, day(19), day(23), day(17))]);
+    assert_eq!(
+        repo.queries(),
+        [(HoldingView::default_household(), day(19), day(23), day(17))]
+    );
     assert_eq!(payouts.len(), 1, "兩位會員同一筆合併");
     assert_eq!(
         (payouts[0].shares, payouts[0].cash_amount),
@@ -335,8 +339,13 @@ async fn month_income_splits_received_pending_and_last_year() {
     assert_eq!(
         repo.queries(),
         [
-            (0, day(1), day(31), day(17)),
-            (0, october_2025, end_2025, day(17))
+            (HoldingView::default_household(), day(1), day(31), day(17)),
+            (
+                HoldingView::default_household(),
+                october_2025,
+                end_2025,
+                day(17)
+            )
         ]
     );
 }

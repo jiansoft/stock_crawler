@@ -18,6 +18,7 @@ use crate::domain::portfolio::rebalance::{
     PortfolioRebalanceResult, RebalanceParams, calculate_rebalance,
 };
 use crate::domain::portfolio::target::{PortfolioTargetRepository, TargetDimension, TargetOwner};
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database::repository::portfolio_target::PgPortfolioTargetRepository;
 use crate::interfaces::web::data_api::dto::{
     ErrorBody, EtfLookThroughRebalanceItemDto, IndustryRebalanceItemDto,
@@ -135,7 +136,13 @@ pub(crate) async fn portfolio_rebalance(
         }
         TargetDimension::Industry => Vec::new(),
     };
-    let positions = match repo.fetch_positions(member_id, &extra_symbols).await {
+    let positions = match repo
+        .fetch_positions(
+            &HoldingView::member(household_id, member_id),
+            &extra_symbols,
+        )
+        .await
+    {
         Ok(positions) => positions,
         Err(error) => return repository_error(error),
     };

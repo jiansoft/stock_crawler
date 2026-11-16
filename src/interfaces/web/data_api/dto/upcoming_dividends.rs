@@ -15,6 +15,10 @@ use crate::app::calculation::upcoming_dividends::UpcomingDividend;
 pub(crate) struct UpcomingDividendsParams {
     /// 會員編號；0（預設）為全部會員合計。
     #[param(minimum = 0, default = 0)]
+    #[allow(
+        dead_code,
+        reason = "由 scope middleware 讀取並驗證後轉成 HoldingView；這裡保留給 OpenAPI 文件"
+    )]
     pub(crate) member_id: Option<i64>,
     /// 從今天起往後幾天（含今天），預設 14，範圍 1–60。
     #[param(minimum = 1, maximum = 60, default = 14)]

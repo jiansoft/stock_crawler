@@ -19,6 +19,7 @@ use crate::app::calculation::{
     dividend_fill_hints::FillHints,
     upcoming_dividends::{ExDividendDayQuery, UpcomingDividend, upcoming_dividends},
 };
+use crate::domain::portfolio::view::HoldingView;
 use crate::domain::portfolio::{
     payout::{self, DividendPayout},
     repository::PortfolioRepository,
@@ -122,7 +123,9 @@ async fn payouts_between(
     today: NaiveDate,
 ) -> Result<Vec<DividendPayout>> {
     let last = first + Months::new(1) - Days::new(1);
-    let allocations = repo.fetch_payout_allocations(0, first, last, today).await?;
+    let allocations = repo
+        .fetch_payout_allocations(&HoldingView::default_household(), first, last, today)
+        .await?;
     Ok(payout::merge_members(payout::split_by_payable_date(
         &allocations,
         first,
@@ -140,7 +143,9 @@ pub(super) async fn next_week_payouts(
     today: NaiveDate,
 ) -> Result<Vec<DividendPayout>> {
     let (from, to) = next_week(today);
-    let allocations = repo.fetch_payout_allocations(0, from, to, today).await?;
+    let allocations = repo
+        .fetch_payout_allocations(&HoldingView::default_household(), from, to, today)
+        .await?;
     Ok(payout::merge_members(payout::split_by_payable_date(
         &allocations,
         from,

@@ -1,6 +1,7 @@
 //! 使用隔離資料庫驗證整份設定的交易語意。
 
 use super::*;
+use crate::domain::portfolio::view::HoldingView;
 
 /// 持股載入：加總未售出股數、帶出收盤價／產業／ETF 旗標，並為目標中未持有的代號補零股列。
 #[tokio::test]
@@ -24,7 +25,10 @@ async fn fetch_positions_joins_prices_and_pads_missing_targets() {
         .execute(pool).await.unwrap();
 
     let positions = repo
-        .fetch_positions(79978, &["79978A".to_owned(), "79978C".to_owned()])
+        .fetch_positions(
+            &HoldingView::member(1, 79978),
+            &["79978A".to_owned(), "79978C".to_owned()],
+        )
         .await
         .unwrap();
     let by = |symbol: &str| positions.iter().find(|p| p.symbol == symbol);

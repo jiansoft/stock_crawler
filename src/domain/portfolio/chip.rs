@@ -4,6 +4,7 @@
 //! 門檻集中在這裡，`/portfolio/chip` 與兩則通知共用；stock_go 的持股籌碼頁也照抄同一組數字，
 //! 調整時要一起改。
 
+use super::view::HoldingView;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -230,11 +231,11 @@ pub trait HoldingChipQuery: Send + Sync {
     ///
     /// 持股批次的買進日不晚於當天，且未賣出、或賣出日（同會員同代號買進日之後最早一筆未撤銷的
     /// 賣出紀錄）晚於當天；找不到賣出紀錄的已賣出批次視為買進當天就不再持有。
-    /// `member_id` 為 0 時是所有會員的持股，否則只看該會員。
+    /// 範圍由 `view` 決定（家庭全體或單一成員）。
     async fn fetch_holding_chips(
         &self,
         date: NaiveDate,
-        member_id: i64,
+        view: &HoldingView,
     ) -> Result<Vec<HoldingChip>>;
 }
 

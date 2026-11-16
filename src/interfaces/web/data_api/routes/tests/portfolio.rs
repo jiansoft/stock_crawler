@@ -205,11 +205,22 @@ async fn portfolio_history_endpoint_db_semantics() {
             "DELETE FROM stock_ownership_details WHERE member_id = $1",
             "DELETE FROM sell_history WHERE member_id = $1",
             "DELETE FROM index WHERE category = 'TAIEX' AND transaction = $1",
+            r#"DELETE FROM "Member" WHERE "Id" IN ($1, $1 + 1) AND "Account" LIKE '__iam_test_%'"#,
         ] {
             let _ = sqlx::query(sql).bind(MEMBER).execute(pool).await;
         }
     };
     cleanup_history().await;
+    // 「全部會員」是預設家庭的全體成員（7.6 N2）：兩位測試會員都登記在家庭 #1。
+    sqlx::query(
+        r#"INSERT INTO "Member" ("Id", "Account", "Name", household_id)
+           VALUES ($1, '__iam_test_' || $1, 'IAM 測試', 1), ($1 + 1, '__iam_test_' || ($1 + 1), 'IAM 測試', 1)
+           ON CONFLICT ("Id") DO NOTHING"#,
+    )
+    .bind(MEMBER)
+    .execute(pool)
+    .await
+    .expect("種入測試會員");
 
     let path = format!("/api/v1/portfolio/history?member_id={MEMBER}");
     let (status, json) = get(&path).await;

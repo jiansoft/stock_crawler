@@ -10,6 +10,10 @@ pub(crate) struct PortfolioChipParams {
     pub(crate) date: Option<String>,
     /// 會員編號；未帶或 0 為所有會員的持股（預設 0）。
     #[param(default = 0, minimum = 0)]
+    #[allow(
+        dead_code,
+        reason = "由 scope middleware 讀取並驗證後轉成 HoldingView；這裡保留給 OpenAPI 文件"
+    )]
     pub(crate) member_id: Option<i64>,
 }
 

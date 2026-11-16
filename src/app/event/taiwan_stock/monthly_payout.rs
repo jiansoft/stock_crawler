@@ -15,6 +15,7 @@ use chrono::{Datelike, Local, Months, NaiveDate};
 use rust_decimal::Decimal;
 
 use super::{format_decimal_with_commas, format_share_quantity, member_label};
+use crate::domain::portfolio::view::HoldingView;
 use crate::{
     core::{alert, util::text},
     domain::portfolio::{
@@ -79,7 +80,9 @@ async fn load_snapshot_accuracy(today: NaiveDate) -> Result<Option<SnapshotAccur
     let Some(snapshot_date) = forecast::latest_snapshot_on_or_before(to).await? else {
         return Ok(None);
     };
-    let inputs = forecast::load_accuracy_inputs(snapshot_date, 0, today).await?;
+    let inputs =
+        forecast::load_accuracy_inputs(snapshot_date, &HoldingView::default_household(), today)
+            .await?;
     let accuracy = forecast_accuracy::compare(&inputs.forecasts, &inputs.actuals, today);
     Ok(
         forecast_accuracy::month_accuracy(&accuracy, from).map(|month| SnapshotAccuracy {
@@ -143,7 +146,9 @@ async fn payouts_between(
     to: NaiveDate,
     today: NaiveDate,
 ) -> Result<Vec<DividendPayout>> {
-    let allocations = repo.fetch_payout_allocations(0, from, to, today).await?;
+    let allocations = repo
+        .fetch_payout_allocations(&HoldingView::default_household(), from, to, today)
+        .await?;
     Ok(payout::split_by_payable_date(&allocations, from, to))
 }
 

@@ -88,3 +88,13 @@ fn startup_requires_strict_when_registration_is_open() {
     assert!(validate_startup(Some("invite"), true).is_ok());
     assert!(validate_startup(Some("open"), true).is_ok());
 }
+
+/// 驗證過的參數轉成持股範圍：沒帶家庭（相容模式）為預設家庭；member_id 0 或沒帶為家庭全體。
+#[test]
+fn holding_view_follows_validated_scope() {
+    use crate::domain::portfolio::view::HoldingView;
+    assert_eq!(holding_view(None, None), HoldingView::default_household());
+    assert_eq!(holding_view(Some(3), Some(0)), HoldingView::household(3));
+    assert_eq!(holding_view(Some(3), Some(7)), HoldingView::member(3, 7));
+    assert_eq!(holding_view(None, Some(2)), HoldingView::member(1, 2));
+}

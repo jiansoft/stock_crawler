@@ -13,9 +13,11 @@ use crate::domain::portfolio::dividend_forecast::{
     self, DividendEvent, Entitlement, ForecastItem, Holding,
 };
 use crate::domain::portfolio::forecast_accuracy::{self, ActualPayout, ForecastedPayout};
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database;
+use crate::infra::database::repository::holding_view;
 
-/// 目前持股（依代號合併）與最新收盤價；`$1 = 0` 時為全部會員。
+/// 目前持股（依代號合併）與最新收盤價；`$1` 為範圍內的會員編號（[`holding_view::member_ids`]）。
 pub(crate) const HOLDINGS_SQL: &str = r#"
 SELECT o.security_code AS stock_symbol, COALESCE(s."Name", '') AS name,
     SUM(o.share_quantity)::bigint AS shares,
@@ -23,7 +25,7 @@ SELECT o.security_code AS stock_symbol, COALESCE(s."Name", '') AS name,
 FROM stock_ownership_details o
 LEFT JOIN stocks s ON s.stock_symbol = o.security_code
 LEFT JOIN last_daily_quotes q ON q.stock_symbol = o.security_code
-WHERE NOT o.is_sold AND ($1::bigint = 0 OR o.member_id = $1)
+WHERE NOT o.is_sold AND o.member_id = ANY($1)
 GROUP BY o.security_code, s."Name"
 HAVING SUM(o.share_quantity) > 0
 ORDER BY o.security_code
@@ -95,16 +97,17 @@ pub(crate) struct ForecastInputs {
 ///
 /// 任一查詢失敗時回傳錯誤。
 pub(crate) async fn load_inputs(
-    member_id: i64,
+    view: &HoldingView,
     today: NaiveDate,
     months: u32,
 ) -> Result<ForecastInputs> {
     let pool = database::get_connection();
+    let members = holding_view::member_ids(view).await?;
     let holdings: Vec<HoldingRow> = sqlx::query_as(HOLDINGS_SQL)
-        .bind(member_id)
+        .bind(&members)
         .fetch_all(pool)
         .await
-        .with_context(|| format!("查詢預估用持股失敗: member_id={member_id}"))?;
+        .with_context(|| format!("查詢預估用持股失敗: view={view:?}"))?;
     let symbols: Vec<&str> = holdings
         .iter()
         .map(|row| row.stock_symbol.as_str())
@@ -114,11 +117,11 @@ pub(crate) async fn load_inputs(
         .bind(today.year() - 2)
         .fetch_all(pool)
         .await
-        .with_context(|| format!("查詢預估用股利失敗: member_id={member_id}"))?;
+        .with_context(|| format!("查詢預估用股利失敗: view={view:?}"))?;
     let end = today
         .checked_add_months(Months::new(months))
         .unwrap_or(today);
-    let allocations = super::payout::fetch(member_id, today + Days::new(1), end, today).await?;
+    let allocations = super::payout::fetch(view, today + Days::new(1), end, today).await?;
     Ok(ForecastInputs {
         holdings: holdings.into_iter().map(Holding::from).collect(),
         events: events.into_iter().map(DividendEvent::from).collect(),
@@ -126,20 +129,30 @@ pub(crate) async fn load_inputs(
     })
 }
 
-/// 有未賣出持股的會員，依編號排序。
+/// 有未賣出持股的會員（各自的單一成員範圍），依編號排序。
 ///
 /// 只取實際會員（`member_id > 0`）：快照是個人列，`0` 在市值表代表家庭合計，不能混進快照。
+/// 會員資料查不到家庭時歸預設家庭，與搬遷前的「全部會員」相同。
 ///
 /// # Errors
 ///
 /// 查詢失敗時回傳錯誤。
-pub(crate) async fn fetch_member_ids() -> Result<Vec<i64>> {
-    sqlx::query_scalar(
-        "SELECT DISTINCT member_id FROM stock_ownership_details WHERE NOT is_sold AND share_quantity > 0 AND member_id > 0 ORDER BY member_id",
+pub(crate) async fn fetch_member_views() -> Result<Vec<HoldingView>> {
+    let rows: Vec<(i64, i64)> = sqlx::query_as(
+        r#"SELECT DISTINCT o.member_id, COALESCE(m.household_id, $1) AS household_id
+FROM stock_ownership_details AS o
+LEFT JOIN "Member" AS m ON m."Id" = o.member_id
+WHERE NOT o.is_sold AND o.share_quantity > 0 AND o.member_id > 0
+ORDER BY o.member_id"#,
     )
+    .bind(crate::domain::portfolio::view::DEFAULT_HOUSEHOLD_ID)
     .fetch_all(database::get_connection())
     .await
-    .context("查詢有持股的會員失敗")
+    .context("查詢有持股的會員失敗")?;
+    Ok(rows
+        .into_iter()
+        .map(|(member_id, household_id)| HoldingView::member(household_id, member_id))
+        .collect())
 }
 
 /// 以 `items`（會員, 預估）整批替換 `snapshot_date` 的快照，回傳寫入筆數。
@@ -190,12 +203,12 @@ pub(crate) async fn replace_snapshot(
     Ok(inserted)
 }
 
-/// 快照中的逐筆預估；`$2 = 0` 時為全部會員。
+/// 快照中的逐筆預估；`$2` 為範圍內的會員編號。
 const SNAPSHOT_SQL: &str = r#"
 SELECT f.stock_symbol, COALESCE(s."Name", '') AS name, f.pay_date, f.amount, f.basis
 FROM dividend_forecast_snapshot AS f
 LEFT JOIN stocks AS s ON s.stock_symbol = f.stock_symbol
-WHERE f.snapshot_date = $1 AND ($2::bigint = 0 OR f.member_id = $2)
+WHERE f.snapshot_date = $1 AND f.member_id = ANY($2)
 "#;
 
 /// [`SNAPSHOT_SQL`] 的一列。
@@ -264,12 +277,13 @@ pub(crate) async fn latest_snapshot_on_or_before(date: NaiveDate) -> Result<Opti
 /// 任一查詢失敗時回傳錯誤。
 pub(crate) async fn load_accuracy_inputs(
     snapshot_date: NaiveDate,
-    member_id: i64,
+    view: &HoldingView,
     today: NaiveDate,
 ) -> Result<AccuracyInputs> {
+    let members = holding_view::member_ids(view).await?;
     let rows: Vec<SnapshotRow> = sqlx::query_as(SNAPSHOT_SQL)
         .bind(snapshot_date)
-        .bind(member_id)
+        .bind(&members)
         .fetch_all(database::get_connection())
         .await
         .with_context(|| format!("查詢股利預估快照失敗: {snapshot_date}"))?;
@@ -279,7 +293,7 @@ pub(crate) async fn load_accuracy_inputs(
         .unwrap_or(snapshot_date)
         .min(today);
     let allocations = if from <= to {
-        super::payout::fetch(member_id, from, to, today).await?
+        super::payout::fetch(view, from, to, today).await?
     } else {
         Vec::new()
     };

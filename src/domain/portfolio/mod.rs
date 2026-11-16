@@ -22,5 +22,7 @@ pub mod repository;
 pub mod summary;
 /// 目標配置與驗證。
 pub mod target;
+// 持股查詢的可見範圍（家庭全體或單一成員）。
 #[cfg(test)]
 pub(crate) mod test_double;
+pub mod view;

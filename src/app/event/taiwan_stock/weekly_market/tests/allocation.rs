@@ -3,6 +3,7 @@
 
 mod etf_look_through;
 
+use crate::domain::portfolio::view::HoldingView;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::{NaiveDate, Utc};
@@ -64,7 +65,7 @@ struct FakePositions {
 
 #[async_trait]
 impl PortfolioPositionQuery for FakePositions {
-    async fn fetch_positions(&self, _: i64, _: &[String]) -> Result<Vec<CurrentPosition>> {
+    async fn fetch_positions(&self, _: &HoldingView, _: &[String]) -> Result<Vec<CurrentPosition>> {
         if self.fail {
             return Err(anyhow!("持股讀取失敗"));
         }

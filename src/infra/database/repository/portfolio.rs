@@ -3,6 +3,7 @@ use crate::domain::portfolio::entity::{
 };
 use crate::domain::portfolio::payout::PayoutAllocation;
 use crate::domain::portfolio::repository::PortfolioRepository;
+use crate::domain::portfolio::view::HoldingView;
 use crate::infra::database;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -321,12 +322,12 @@ impl PortfolioRepository for PgPortfolioRepository {
 
     async fn fetch_payout_allocations(
         &self,
-        member_id: i64,
+        view: &HoldingView,
         from: NaiveDate,
         to: NaiveDate,
         today: NaiveDate,
     ) -> Result<Vec<PayoutAllocation>> {
-        payout::fetch(member_id, from, to, today).await
+        payout::fetch(view, from, to, today).await
     }
 }
 

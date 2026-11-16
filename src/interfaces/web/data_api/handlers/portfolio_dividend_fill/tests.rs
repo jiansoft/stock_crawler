@@ -200,9 +200,11 @@ async fn fetch_holdings_filters_by_member() {
             .filter(|symbol| symbol.starts_with("79979F"))
             .collect()
     };
-    let only_a = fetch_holdings(pool, MEMBER_A).await.expect("查詢會員 A");
-    let only_b = fetch_holdings(pool, MEMBER_B).await.expect("查詢會員 B");
-    let all = fetch_holdings(pool, 0).await.expect("查詢全部會員");
+    let only_a = fetch_holdings(pool, &[MEMBER_A]).await.expect("查詢會員 A");
+    let only_b = fetch_holdings(pool, &[MEMBER_B]).await.expect("查詢會員 B");
+    let all = fetch_holdings(pool, &[MEMBER_A, MEMBER_B])
+        .await
+        .expect("查詢兩位會員");
     cleanup().await;
     assert_eq!(symbols(only_a), ["79979FA"]);
     assert_eq!(symbols(only_b), ["79979FB"]);
