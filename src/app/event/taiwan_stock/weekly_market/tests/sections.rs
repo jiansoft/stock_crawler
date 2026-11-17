@@ -62,7 +62,7 @@ fn crossing_lines_rank_by_latest_score() {
         None,
         Some(&section),
         &[],
-        HoldingSection::default(),
+        MarketExtras::default(),
         None,
         name,
     )
@@ -87,7 +87,7 @@ fn crossing_lines_rank_by_latest_score() {
             None,
             Some(&empty),
             &[],
-            HoldingSection::default(),
+            MarketExtras::default(),
             None,
             name
         )
@@ -179,7 +179,7 @@ async fn regime_section_lists_crosses() {
         None,
         None,
         &[],
-        HoldingSection::default(),
+        MarketExtras::default(),
         None,
         name,
     )
@@ -288,7 +288,7 @@ fn strategy_lines_rank_holdings_by_return() {
         None,
         None,
         &[],
-        HoldingSection::default(),
+        MarketExtras::default(),
         Some(&section),
         |_| String::new(),
     )

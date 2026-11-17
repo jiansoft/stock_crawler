@@ -50,7 +50,7 @@ impl ValuationHistoryRepository for FakeRepo {
 async fn print_message() {
     dotenvy::dotenv().ok();
     crate::infra::cache::SHARE.load().await;
-    let symbols = holdings::common_stock_holdings().await.expect("取得持股");
+    let symbols = holdings::crawl_common_stocks().await.expect("取得持股");
     let flags = collect_flags(
         &PgQuoteRepository::new(),
         symbols.iter().map(String::as_str),

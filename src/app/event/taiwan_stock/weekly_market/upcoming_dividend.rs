@@ -64,6 +64,7 @@ pub(super) fn next_week(today: NaiveDate) -> (NaiveDate, NaiveDate) {
 pub(super) async fn load_upcoming(
     dividends_query: &impl ExDividendDayQuery,
     portfolio: &impl PortfolioRepository,
+    view: &HoldingView,
     shares: &BTreeMap<String, i64>,
     today: NaiveDate,
 ) -> Option<UpcomingSection> {
@@ -78,16 +79,18 @@ pub(super) async fn load_upcoming(
             .collect();
         FillHints::load(&symbols, today).await
     };
-    let payouts = next_week_payouts(portfolio, today)
+    let payouts = next_week_payouts(portfolio, view, today)
         .await
         .unwrap_or_else(|why| {
             tracing::warn!("每週市場摘要：讀取下週持股股利入帳失敗: {why:#}");
             Vec::new()
         });
-    let month = month_income(portfolio, today).await.unwrap_or_else(|why| {
-        tracing::warn!("每週市場摘要：讀取本月持股股利入帳失敗: {why:#}");
-        None
-    });
+    let month = month_income(portfolio, view, today)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("每週市場摘要：讀取本月持股股利入帳失敗: {why:#}");
+            None
+        });
     upcoming_section(dividends, &hints, today, payouts, month)
 }
 
@@ -98,11 +101,12 @@ pub(super) async fn load_upcoming(
 /// 任一查詢失敗時回傳錯誤。
 pub(super) async fn month_income(
     repo: &impl PortfolioRepository,
+    view: &HoldingView,
     today: NaiveDate,
 ) -> Result<Option<MonthIncome>> {
     let first = today - Days::new(u64::from(today.day0()));
-    let this_month = payouts_between(repo, first, today).await?;
-    let last_year = payouts_between(repo, first - Months::new(12), today).await?;
+    let this_month = payouts_between(repo, view, first, today).await?;
+    let last_year = payouts_between(repo, view, first - Months::new(12), today).await?;
     let (received, pending): (Vec<_>, Vec<_>) = this_month
         .into_iter()
         .partition(|payout| payout.payable_date <= today);
@@ -119,12 +123,13 @@ pub(super) async fn month_income(
 /// `first`（某月 1 日）整個月的入帳，全部會員合併。
 async fn payouts_between(
     repo: &impl PortfolioRepository,
+    view: &HoldingView,
     first: NaiveDate,
     today: NaiveDate,
 ) -> Result<Vec<DividendPayout>> {
     let last = first + Months::new(1) - Days::new(1);
     let allocations = repo
-        .fetch_payout_allocations(&HoldingView::default_household(), first, last, today)
+        .fetch_payout_allocations(view, first, last, today)
         .await?;
     Ok(payout::merge_members(payout::split_by_payable_date(
         &allocations,
@@ -140,12 +145,11 @@ async fn payouts_between(
 /// 查詢失敗時回傳錯誤。
 pub(super) async fn next_week_payouts(
     repo: &impl PortfolioRepository,
+    view: &HoldingView,
     today: NaiveDate,
 ) -> Result<Vec<DividendPayout>> {
     let (from, to) = next_week(today);
-    let allocations = repo
-        .fetch_payout_allocations(&HoldingView::default_household(), from, to, today)
-        .await?;
+    let allocations = repo.fetch_payout_allocations(view, from, to, today).await?;
     Ok(payout::merge_members(payout::split_by_payable_date(
         &allocations,
         from,

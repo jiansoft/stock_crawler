@@ -5,8 +5,8 @@
 //!
 //! ## 流程（每天 20:30 排程）
 //!
-//! 1. 取目前持股（未售出）的普通股代號（[`holdings::common_stock_holdings`]）——
-//!    ETF 與特別股沒有法說會。
+//! 1. 取所有會員目前持股（未售出）的普通股代號作為檢查範圍（[`holdings::crawl_common_stocks`]）——
+//!    ETF 與特別股沒有法說會。通知只送給範圍內持有該股的收件者（會員系統計畫 7.6）。
 //! 2. 逐檔向 BigGo 取法說會清單，只看 [`LOOKBACK_DAYS`] 天內舉行的場次。
 //! 3. 已通知過的場次（Redis `biggo:earnings_call:notified:{call_id}`）略過；AI 摘要還沒產生的
 //!    場次這次不通知也不記錄，之後的排程再看，直到超過回看天數。
@@ -22,7 +22,8 @@ use chrono::{Local, NaiveDate};
 
 use super::holdings;
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     infra::{
         crawler::biggo::earnings_call::{self, EarningsCall, EarningsCallDetail},
         nosql::redis::CLIENT,
@@ -68,7 +69,7 @@ enum Outcome {
 ///
 /// 單檔失敗只記錄、不中斷；只有查不到持股時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let symbols = holdings::common_stock_holdings()
+    let symbols = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for earnings call notification failed")?;
 
@@ -130,10 +131,15 @@ async fn notify(stock_symbol: &str, call: &EarningsCall) -> Outcome {
     }
 
     let name = holdings::stock_name(stock_symbol);
-    alert::notify_holdings_all(
-        alert::Topic::HoldingsEarningsCall,
-        &build_message(stock_symbol, &name, call, &detail),
-    )
+    let message = build_message(stock_symbol, &name, call, &detail);
+    let dedup_key = format!("{}:{}", Topic::HoldingsEarningsCall.code(), call.call_id);
+    notify::notify_holdings(Topic::HoldingsEarningsCall, &dedup_key, |view| {
+        let message = &message;
+        async move {
+            let held = holdings::common_stock_holdings(&view).await?;
+            Ok(held.contains(stock_symbol).then(|| message.clone()))
+        }
+    })
     .await;
     mark_notified(&call.call_id).await;
     Outcome::Notified

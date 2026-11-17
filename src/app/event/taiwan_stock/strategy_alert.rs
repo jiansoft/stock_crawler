@@ -15,16 +15,18 @@
 //!
 //! 回測引擎在 `interfaces::web::data_api`，這裡只透過 [`ports::StrategyGateway`] 取得換股結果。
 
-use std::collections::BTreeSet;
-
 use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
 use chrono::{Local, NaiveDate};
 
-use self::message::build_message;
+use self::message::{build_message, overlap_message};
 use super::holdings;
 use crate::{
-    app::ports::{self, StrategyGateway, StrategyRebalance},
-    core::alert,
+    app::{
+        notify,
+        ports::{self, StrategyGateway, StrategyRebalance},
+    },
+    core::{alert, notify_topic::Topic},
     domain::{
         portfolio::health::HoldingFundamentalsQuery,
         strategy::{
@@ -103,10 +105,42 @@ pub async fn execute() -> Result<()> {
         gateway.as_ref(),
         &PgStrategyRebalanceRepository::new(),
         &PgPortfolioRepository::new(),
+        &RoutedOverlap,
         &strategies,
         Local::now().date_naive(),
     )
     .await
+}
+
+/// 換股通知的持股段（`holdings.strategy_overlap`）：所有持股查詢都在這裡，市場段的產生過程不經過它
+/// （會員系統計畫 7.3 防漏）。測試以替身確認。
+#[async_trait]
+trait OverlapNotifier: Send + Sync {
+    /// 依收件者範圍送出策略持股與實際持股的對照。
+    async fn notify_overlap(&self, rebalance: &StrategyRebalance, name: &str);
+}
+
+/// 正式環境：經 [`notify::notify_holdings`] 依收件者範圍產生並分送。
+struct RoutedOverlap;
+
+#[async_trait]
+impl OverlapNotifier for RoutedOverlap {
+    async fn notify_overlap(&self, rebalance: &StrategyRebalance, name: &str) {
+        let dedup_key = format!(
+            "{}:{name}:{}",
+            Topic::HoldingsStrategyOverlap.code(),
+            rebalance.date
+        );
+        notify::notify_holdings(
+            Topic::HoldingsStrategyOverlap,
+            &dedup_key,
+            |view| async move {
+                let held = holdings::active_holding_symbols(&view).await?;
+                Ok(overlap_message(rebalance, name, &held))
+            },
+        )
+        .await;
+    }
 }
 
 /// 手動回補用：以具名策略目前的條件跑一次回測，把最後一次換股（還沒滿持有天數的那一期）寫進換股
@@ -138,15 +172,16 @@ pub async fn record_current_rebalance(preset_name: &str) -> Result<Option<(Naive
     Ok(Some((record.date, inserted)))
 }
 
-/// 逐一跑策略回測，今天換股的寫入換股紀錄並發通知；實際持股只在第一次需要時讀一次。
+/// 逐一跑策略回測，今天換股的寫入換股紀錄並發通知：市場段（`market.strategy_rebalance`）內容相同，
+/// 持股段（`holdings.strategy_overlap`）經 `overlap` 依收件者範圍產生。
 async fn notify(
     gateway: &dyn StrategyGateway,
     recorder: &dyn StrategyRebalanceRepository,
     fundamentals: &dyn HoldingFundamentalsQuery,
+    overlap: &dyn OverlapNotifier,
     strategies: &[AlertStrategy],
     today: NaiveDate,
 ) -> Result<()> {
-    let mut held: Option<Option<BTreeSet<String>>> = None;
     let mut failures: Vec<String> = Vec::new();
     for strategy in strategies {
         let rebalance = match rebalance_today(gateway, &strategy.query, today).await {
@@ -185,16 +220,6 @@ async fn notify(
                 None
             }
         };
-        if held.is_none() {
-            held = Some(match holdings::active_holding_symbols().await {
-                Ok(held) => Some(held),
-                Err(error) => {
-                    tracing::warn!("策略換股通知：讀取實際持股失敗，略過對照：{error:?}");
-                    None
-                }
-            });
-        }
-        let actual = held.as_ref().and_then(Option::as_ref);
         let symbols: Vec<String> = rebalance
             .added
             .iter()
@@ -210,15 +235,10 @@ async fn notify(
             });
         alert::notify_market(
             alert::Topic::MarketStrategyRebalance,
-            &build_message(
-                &rebalance,
-                &strategy.name,
-                actual,
-                settlement.as_ref(),
-                &warned,
-            ),
+            &build_message(&rebalance, &strategy.name, settlement.as_ref(), &warned),
         )
         .await;
+        overlap.notify_overlap(&rebalance, &strategy.name).await;
     }
     if !failures.is_empty() {
         bail!("策略換股通知失敗：{}", failures.join("；"));

@@ -16,7 +16,8 @@ use chrono::{Local, NaiveDate};
 
 use super::holdings;
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::etf::{EtfRepository, PremiumPoint, UnitsChangePoint},
     infra::database::repository::etf::PgEtfRepository,
 };
@@ -59,6 +60,18 @@ pub(crate) enum PremiumAlert {
     },
 }
 
+impl PremiumAlert {
+    /// 通知的 ETF 代號。
+    pub(crate) fn symbol(&self) -> &str {
+        match self {
+            Self::Persistent { symbol, .. }
+            | Self::Premium { symbol, .. }
+            | Self::Discount { symbol, .. }
+            | Self::Flow { symbol, .. } => symbol,
+        }
+    }
+}
+
 /// 排程入口。
 ///
 /// # Errors
@@ -71,7 +84,7 @@ pub async fn execute() -> Result<()> {
 
 /// 以 `today` 為基準檢查持有的 ETF 並發送通知，回傳通知則數。
 async fn run(today: NaiveDate) -> Result<usize> {
-    let symbols: Vec<String> = holdings::active_holding_symbols()
+    let symbols: Vec<String> = holdings::crawl_holding_symbols()
         .await
         .context("fetch active holdings for ETF premium notification failed")?
         .into_iter()
@@ -101,8 +114,22 @@ async fn run(today: NaiveDate) -> Result<usize> {
         symbols.len(),
         alerts.len()
     );
-    if let Some(message) = build_message(today, &alerts, holdings::stock_name) {
-        alert::notify_holdings_all(alert::Topic::HoldingsEtfPremium, &message).await;
+    if !alerts.is_empty() {
+        // 依收件者範圍只列範圍內持有的 ETF（會員系統計畫 7.6）。
+        let dedup_key = format!("{}:{today}", Topic::HoldingsEtfPremium.code());
+        notify::notify_holdings(Topic::HoldingsEtfPremium, &dedup_key, |view| {
+            let alerts = &alerts;
+            async move {
+                let held = holdings::active_holding_symbols(&view).await?;
+                let mine: Vec<PremiumAlert> = alerts
+                    .iter()
+                    .filter(|alert| held.contains(alert.symbol()))
+                    .cloned()
+                    .collect();
+                Ok(build_message(today, &mine, holdings::stock_name))
+            }
+        })
+        .await;
     }
     Ok(alerts.len())
 }

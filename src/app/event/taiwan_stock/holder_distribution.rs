@@ -6,7 +6,8 @@
 //! ## 流程（每週六 10:40 排程）
 //!
 //! 1. 集保股權分散入庫（[`chip::execute_holder_distributions`]）；失敗就不送週報，錯誤交給排程告警。
-//! 2. 取目前持股的普通股代號（[`holdings::common_stock_holdings`]）。
+//! 2. 取所有會員目前持股的普通股代號作為讀取範圍（[`holdings::crawl_common_stocks`]）；
+//!    週報依收件者範圍只列範圍內的持股（會員系統計畫 7.6）。
 //! 3. 從 `holder_distribution` 讀最近 5 個資料週：最新一週是本週，每檔在本週之前最近的一筆是上週，
 //!    全表往前第 4 個資料週是 4 週前；缺哪一週就不顯示那一項變化。
 //! 4. 依千張大戶比例的週變化由增到減排列，一則訊息列出全部持股；沒有上週資料時只列現況。
@@ -22,7 +23,8 @@ use rust_decimal::Decimal;
 use super::{add_thousand_separators, format_decimal_with_commas, holdings};
 use crate::{
     app::backfill::chip,
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::chip::{HolderDistributionRecord, HolderHistoryRepository, RecentHolderWeeks},
     infra::{database::repository::chip::PgChipRepository, nosql::redis::CLIENT},
 };
@@ -84,7 +86,7 @@ pub async fn execute() -> Result<()> {
     chip::execute_holder_distributions()
         .await
         .context("集保股權分散入庫失敗，本週持股大戶週報不送")?;
-    let symbols: Vec<String> = holdings::common_stock_holdings()
+    let symbols: Vec<String> = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for holder distribution report failed")?
         .into_iter()
@@ -103,10 +105,19 @@ pub async fn execute() -> Result<()> {
         tracing::info!("集保股權分散最新仍是 {date}，這週已通知過");
         return Ok(());
     }
-    alert::notify_holdings_all(
-        alert::Topic::HoldingsHolderDistribution,
-        &build_message(date, &rows, holdings::stock_name),
-    )
+    let dedup_key = format!("{}:{date}", Topic::HoldingsHolderDistribution.code());
+    notify::notify_holdings(Topic::HoldingsHolderDistribution, &dedup_key, |view| {
+        let rows = &rows;
+        async move {
+            let held = holdings::common_stock_holdings(&view).await?;
+            let mine: Vec<Row> = rows
+                .iter()
+                .filter(|row| held.contains(&row.stock_symbol))
+                .cloned()
+                .collect();
+            Ok((!mine.is_empty()).then(|| build_message(date, &mine, holdings::stock_name)))
+        }
+    })
     .await;
     tracing::info!(
         "持股大戶週報結束: date={date}, holdings={}, reported={}",

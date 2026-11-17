@@ -18,9 +18,9 @@
 //! ## 通知項目（會員系統計畫 7.3、7.6）
 //!
 //! 每一種推送都必須帶 [`Topic`]，依受眾分三個入口：[`notify_system`]（系統類，以警報格式送出）、
-//! [`notify_market`]（市場類，所有訂閱者內容相同）、[`notify_holdings_all`]（持股與個人類，搬遷期的
-//! 「全體內容」版本）。目前（N1）全部仍送設定檔內的聊天室，Topic 只是先標上；之後依訂閱分送時，
-//! 呼叫點不必再改。
+//! [`notify_market`]（市場類，所有訂閱者內容相同）、持股與個人類的 `app::notify::notify_holdings`
+//! （依收件者範圍各自產生內容，經 [`send_to_chat`] 送到各收件者的聊天室）。
+//! [`notify_holdings_all`] 是搬遷期的「全體內容」版本，只剩價格追蹤使用（5-07 移除）。
 
 use std::sync::{Arc, OnceLock};
 
@@ -37,8 +37,11 @@ pub trait AlertSink: Send + Sync {
     /// 以警報格式發送（標題＋詳情）。
     async fn send_alert(&self, topic: Topic, title: &str, message: &str);
 
-    /// 發送已組好的訊息。
+    /// 發送已組好的訊息（設定檔內的聊天室）。
     async fn send_message(&self, topic: Topic, message: &str);
+
+    /// 發送已組好的訊息到指定聊天室（依訂閱分送的收件者，7.6）。
+    async fn send_to_chat(&self, topic: Topic, chat_id: i64, message: &str);
 }
 
 /// 全域告警管道。`OnceLock` 保證只會被成功註冊一次。
@@ -90,6 +93,26 @@ pub async fn notify_market(topic: Topic, message: &str) {
 /// 依收件者範圍各自產生內容的 `notify_holdings` 在 N4（7.7）取代它；在那之前，持股類的發送點
 /// 先以這個入口標上 Topic。
 pub async fn notify_holdings_all(topic: Topic, message: &str) {
+    send_message(topic, message).await;
+}
+
+/// 依訂閱分送時送到某位收件者的聊天室（`app::notify` 使用）。
+///
+/// 尚未註冊 sink 時降級為 warning log（不記錄訊息內容：持股內容只屬於收件者）。
+pub async fn send_to_chat(topic: Topic, chat_id: i64, message: &str) {
+    match ALERT_SINK.get() {
+        Some(sink) => sink.send_to_chat(topic, chat_id, message).await,
+        None => {
+            tracing::warn!(
+                "alert sink not registered; routed message dropped: [{}] chat {chat_id}",
+                topic.code()
+            );
+        }
+    }
+}
+
+/// 送到設定檔內的聊天室（尚未依訂閱分送的主題，`app::notify` 使用）。
+pub async fn send_legacy(topic: Topic, message: &str) {
     send_message(topic, message).await;
 }
 

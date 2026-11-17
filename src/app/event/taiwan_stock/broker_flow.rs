@@ -5,7 +5,7 @@
 //!
 //! ## 流程（週一至週五 20:40 排程）
 //!
-//! 1. 取目前持股的普通股代號（[`holdings::common_stock_holdings`]）。
+//! 1. 取所有會員目前持股的普通股代號作為抓取範圍（[`holdings::crawl_common_stocks`]）。
 //! 2. 逐檔抓富邦證券（MoneyDJ）主力進出頁；頁面日期不是今天（休市或尚未更新）的股票略過。
 //! 3. 主力買賣超佔成交量達 [`MAIN_SHARE_THRESHOLD`]%、且張數達 [`MIN_MAIN_NET_LOTS`] 張的股票
 //!    才放進通知，依佔成交量比重由買超到賣超排列；沒有任何一檔達標就不發訊息。
@@ -15,6 +15,8 @@
 //! 抓到的今天資料（不論是否達門檻）都寫入 `broker_flow` 表。
 //!
 //! 每天只跑一次，不另外記錄已通知；服務在 20:40 之後才重啟也不會補發。
+//!
+//! 通知依收件者範圍各自產生（會員系統計畫 7.6）：只列範圍內持股的達標股票，範圍內沒有就不發。
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write;
@@ -22,9 +24,12 @@ use std::time::Duration;
 
 use super::{add_thousand_separators, format_decimal_with_commas, holdings};
 use crate::{
-    app::backfill,
-    core::{alert, util::text},
-    domain::portfolio::chip::{self, BrokerPeriodNet, HoldingBrokerQuery},
+    app::{backfill, notify},
+    core::{notify_topic::Topic, util::text},
+    domain::portfolio::{
+        chip::{self, BrokerPeriodNet, HoldingBrokerQuery},
+        view::HoldingView,
+    },
     infra::{
         crawler::fbs::broker_flow::{self, BrokerFlow, BrokerNet},
         database::repository::portfolio::PgPortfolioRepository,
@@ -66,7 +71,7 @@ pub struct RunSummary {
 ///
 /// 單檔失敗只記錄、不中斷；只有查不到持股時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let symbols = holdings::common_stock_holdings()
+    let symbols = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for broker flow notification failed")?;
 
@@ -77,22 +82,16 @@ pub async fn execute() -> Result<()> {
     };
     let flows = collect_flows(&symbols, today, &mut summary).await;
     backfill::chip::save_broker_flows(&flows).await;
+    let fetched: BTreeSet<String> = flows.iter().map(|flow| flow.stock_symbol.clone()).collect();
     let notable = notable_flows(flows);
     summary.notable = notable.len();
     if !notable.is_empty() {
-        let symbols: Vec<String> = notable
-            .iter()
-            .map(|flow| flow.stock_symbol.clone())
-            .collect();
-        let history = load_history(&PgPortfolioRepository::new(), today, &symbols).await;
-        let message = build_message(
-            today,
-            &notable,
-            summary.fetched,
-            history.as_ref(),
-            holdings::stock_name,
-        );
-        alert::notify_holdings_all(alert::Topic::HoldingsBrokerFlow, &message).await;
+        let dedup_key = format!("{}:{today}", Topic::HoldingsBrokerFlow.code());
+        notify::notify_holdings(Topic::HoldingsBrokerFlow, &dedup_key, |view| {
+            let (notable, fetched) = (&notable, &fetched);
+            async move { view_message(&view, today, notable, fetched).await }
+        })
+        .await;
     }
 
     tracing::info!(
@@ -104,6 +103,34 @@ pub async fn execute() -> Result<()> {
         summary.notable
     );
     Ok(())
+}
+
+/// 依收件者範圍組訊息：只列範圍內持股的達標股票，「今日資料」檔數也只算範圍內的；範圍內沒有就回 `None`。
+async fn view_message(
+    view: &HoldingView,
+    today: NaiveDate,
+    notable: &[BrokerFlow],
+    fetched: &BTreeSet<String>,
+) -> Result<Option<String>> {
+    let held = holdings::common_stock_holdings(view).await?;
+    let mine: Vec<BrokerFlow> = notable
+        .iter()
+        .filter(|flow| held.contains(&flow.stock_symbol))
+        .cloned()
+        .collect();
+    if mine.is_empty() {
+        return Ok(None);
+    }
+    let checked = fetched.intersection(&held).count();
+    let symbols: Vec<String> = mine.iter().map(|flow| flow.stock_symbol.clone()).collect();
+    let history = load_history(&PgPortfolioRepository::new(), today, &symbols).await;
+    Ok(Some(build_message(
+        today,
+        &mine,
+        checked,
+        history.as_ref(),
+        holdings::stock_name,
+    )))
 }
 
 /// 逐檔抓主力進出，只留下頁面日期是 `today` 的資料；

@@ -9,6 +9,7 @@ pub mod health;
 pub mod household;
 pub mod market_index;
 pub mod money_flow;
+pub mod notify;
 pub mod performance;
 pub mod personal_data;
 pub mod portfolio;

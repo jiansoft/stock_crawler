@@ -23,6 +23,13 @@ impl AlertSink for RecordingSink {
             .unwrap()
             .push(format!("msg:{}:{message}", topic.code()));
     }
+
+    async fn send_to_chat(&self, topic: Topic, chat_id: i64, message: &str) {
+        self.received
+            .lock()
+            .unwrap()
+            .push(format!("chat:{chat_id}:{}:{message}", topic.code()));
+    }
 }
 
 /// 驗證註冊後訊息會送達 sink，且重複註冊不會 panic（第一個註冊者獲勝）。

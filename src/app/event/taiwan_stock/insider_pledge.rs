@@ -5,7 +5,8 @@
 //!
 //! ## 流程（每月 10–28 日 20:45 排程）
 //!
-//! 1. 取目前持股的普通股代號（[`holdings::common_stock_holdings`]）。
+//! 1. 取所有會員目前持股的普通股代號作為比對範圍（[`holdings::crawl_common_stocks`]）；
+//!    通知依收件者範圍只列範圍內的持股（會員系統計畫 7.6）。
 //! 2. 抓上市、上櫃最新月份的董監事持股明細；一個市場失敗不影響另一個市場。
 //! 3. 同一人多個職稱合併成一筆（職稱以「、」串接，股數取最大）。
 //! 4. 與 Redis 保存的前一期（`insider_pledge:snapshot:{代號}`）比較；月份相同代表已處理過，略過。
@@ -26,7 +27,8 @@ use serde::{Deserialize, Serialize};
 
 use super::holdings;
 use crate::{
-    core::alert,
+    app::notify,
+    core::notify_topic::Topic,
     infra::{
         crawler::mops::insider_holding::{self, InsiderHolding},
         nosql::redis::{CLIENT, RedisError},
@@ -114,7 +116,7 @@ pub struct RunSummary {
 ///
 /// 開放資料或單檔處理失敗只記錄、不中斷；只有查不到持股時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let symbols = holdings::common_stock_holdings()
+    let symbols = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for insider pledge notification failed")?;
 
@@ -167,10 +169,24 @@ pub async fn execute() -> Result<()> {
     }
 
     if !reports.is_empty() {
-        alert::notify_holdings_all(
-            alert::Topic::HoldingsInsiderPledge,
-            &build_message(&reports, holdings::stock_name),
-        )
+        let month = reports.iter().map(|report| report.month).max();
+        let dedup_key = format!(
+            "{}:{}",
+            Topic::HoldingsInsiderPledge.code(),
+            month.map(|month| month.to_string()).unwrap_or_default()
+        );
+        notify::notify_holdings(Topic::HoldingsInsiderPledge, &dedup_key, |view| {
+            let reports = &reports;
+            async move {
+                let held = holdings::common_stock_holdings(&view).await?;
+                let mine: Vec<Report> = reports
+                    .iter()
+                    .filter(|report| held.contains(&report.stock_symbol))
+                    .cloned()
+                    .collect();
+                Ok((!mine.is_empty()).then(|| build_message(&mine, holdings::stock_name)))
+            }
+        })
         .await;
     }
     for (symbol, snapshot) in &to_save {

@@ -9,6 +9,7 @@ use rust_decimal::Decimal;
 use crate::app::event::taiwan_stock::format_decimal_with_commas as format_decimal_flexible_commas;
 // 通知走 core::alert（port）——app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向；
 // 訊息內容的 MarkdownV2 跳脫在子模組用 core::util::text。
+use crate::app::notify;
 use crate::core::alert;
 use crate::domain::dividend::entity::StockDividendInfo;
 use crate::domain::dividend::repository::DividendRepository;
@@ -88,17 +89,22 @@ impl EventDispatcher {
                 .await;
         }
 
-        // 重新讀取持股後，組「分人分股」的預估股利通知
-        let portfolio_repo = PgPortfolioRepository::new();
-        let holdings = portfolio_repo
-            .fetch_active_holdings(Some(stock_symbols))
-            .await?;
-
-        if let Some(holding_msg) =
-            Self::build_holding_dividend_message(date, &stocks_dividend_info, &holdings)
-        {
-            alert::notify_holdings_all(alert::Topic::HoldingsExDividend, &holding_msg).await;
-        }
+        // 重新讀取持股後，依收件者範圍組「分人分股」的預估股利通知（會員系統計畫 7.6）
+        let dedup_key = format!("{}:{date}", alert::Topic::HoldingsExDividend.code());
+        notify::notify_holdings(alert::Topic::HoldingsExDividend, &dedup_key, |view| {
+            let (stock_symbols, stocks_dividend_info) = (&stock_symbols, &stocks_dividend_info);
+            async move {
+                let holdings = PgPortfolioRepository::new()
+                    .fetch_active_holdings_in(&view, Some(stock_symbols.clone()))
+                    .await?;
+                Ok(Self::build_holding_dividend_message(
+                    date,
+                    stocks_dividend_info,
+                    &holdings,
+                ))
+            }
+        })
+        .await;
 
         // 最後發送下一交易日的預訂除權息公告
         let mut next_stocks = dividend_repo

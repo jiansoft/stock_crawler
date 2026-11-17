@@ -152,20 +152,15 @@ fn percent(value: Option<f64>) -> String {
     value.map_or_else(|| "無".to_owned(), |v| format!("{v:+.2}%"))
 }
 
-/// ETF 一段的各行（開頭為空行）；沒有任何淨申購與持有 ETF 時回空陣列。
-pub(super) fn lines(section: &EtfWeekSection) -> Vec<String> {
+/// 全市場 ETF 資金流向的各行（開頭為空行，市場段）；沒有任何淨申購時回空陣列。不含任何持有資訊。
+pub(super) fn market_lines(section: &EtfWeekSection) -> Vec<String> {
     let mut inflows: Vec<&EtfWeeklyFlow> =
         section.flows.iter().filter(|f| f.net_flow > 0.0).collect();
     inflows.sort_by(|a, b| b.net_flow.total_cmp(&a.net_flow));
     let mut outflows: Vec<&EtfWeeklyFlow> =
         section.flows.iter().filter(|f| f.net_flow < 0.0).collect();
     outflows.sort_by(|a, b| a.net_flow.total_cmp(&b.net_flow));
-    let held: Vec<&EtfWeeklyFlow> = section
-        .held
-        .iter()
-        .filter_map(|symbol| section.flows.iter().find(|f| &f.stock_symbol == symbol))
-        .collect();
-    if inflows.is_empty() && outflows.is_empty() && held.is_empty() && section.changes.is_empty() {
+    if inflows.is_empty() && outflows.is_empty() {
         return Vec::new();
     }
     let mut lines = vec![
@@ -182,6 +177,27 @@ pub(super) fn lines(section: &EtfWeekSection) -> Vec<String> {
             lines.push(format!("{label}：{}", text.join("、")));
         }
     }
+    lines
+}
+
+/// 持有 ETF 的各行（開頭為空行，持股段）：淨申購、折溢價週平均與前十大持股換期；沒有時回空陣列。
+pub(super) fn held_lines(section: &EtfWeekSection) -> Vec<String> {
+    let held: Vec<&EtfWeeklyFlow> = section
+        .held
+        .iter()
+        .filter_map(|symbol| section.flows.iter().find(|f| &f.stock_symbol == symbol))
+        .collect();
+    if held.is_empty() && section.changes.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![
+        String::new(),
+        format!(
+            "持有 ETF（{}～{}，受益單位增減 × 淨值）",
+            section.from.format("%m-%d"),
+            section.to.format("%m-%d")
+        ),
+    ];
     for flow in held {
         lines.push(format!(
             "持有 {} {}：淨申購 {}，折溢價週平均 {}（最新 {}）",

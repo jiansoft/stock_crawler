@@ -70,6 +70,24 @@ pub fn total_shares(holdings: impl IntoIterator<Item = (String, i64)>) -> BTreeM
     shares
 }
 
+/// 把以所有會員持股算出的除權息改成某個範圍的股數：只留 `shares` 裡的持股，股數換成範圍內的合計
+/// （持股類通知依收件者範圍產生內容，會員系統計畫 7.6）。
+pub fn rescope(
+    items: &[UpcomingDividend],
+    shares: &BTreeMap<String, i64>,
+) -> Vec<UpcomingDividend> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let held = *shares.get(&item.stock_symbol)?;
+            Some(UpcomingDividend {
+                shares: held,
+                ..item.clone()
+            })
+        })
+        .collect()
+}
+
 /// `from` 到 `to`（含）每天的除權息，只留 `shares` 裡的持股，依除權息日、代號排序。
 ///
 /// 沒有持股時不查詢；單日查詢失敗只記錄警告、少那一天。

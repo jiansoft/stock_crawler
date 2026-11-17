@@ -14,8 +14,11 @@ use anyhow::{Result, bail};
 use chrono::{Datelike, Local};
 
 use crate::{
-    app::event::taiwan_stock::{health_alert, holdings},
-    core::alert,
+    app::{
+        event::taiwan_stock::{health_alert, holdings},
+        notify,
+    },
+    core::notify_topic::Topic,
     domain::financial::{
         health::{self, AnnualFigures, FinancialHealthSnapshot, QuarterFigures},
         repository::FinancialHealthRepository,
@@ -83,19 +86,25 @@ async fn run(current_year: i32) -> Result<()> {
         Err(why) => tracing::warn!("F 分數歷史重算失敗: {why:#}"),
     }
 
-    match holdings::common_stock_holdings().await {
-        Ok(held) => {
-            if let Some(message) = health_alert::build_notification(
-                &previous,
-                &rebuilt.snapshots,
+    // 依收件者範圍只列範圍內持股的分數變化（會員系統計畫 7.6）；取得持股失敗只記錄。
+    let dedup_key = format!(
+        "{}:{}",
+        Topic::HoldingsFinancialHealth.code(),
+        Local::now().date_naive()
+    );
+    notify::notify_holdings(Topic::HoldingsFinancialHealth, &dedup_key, |view| {
+        let (previous, snapshots) = (&previous, &rebuilt.snapshots);
+        async move {
+            let held = holdings::common_stock_holdings(&view).await?;
+            Ok(health_alert::build_notification(
+                previous,
+                snapshots,
                 &held,
                 holdings::stock_name,
-            ) {
-                alert::notify_holdings_all(alert::Topic::HoldingsFinancialHealth, &message).await;
-            }
+            ))
         }
-        Err(why) => tracing::warn!("取得持股失敗，略過財務體質變化通知: {why:#}"),
-    }
+    })
+    .await;
     Ok(())
 }
 

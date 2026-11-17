@@ -3,6 +3,7 @@
 use chrono::Local;
 
 use super::*;
+use crate::domain::portfolio::view::HoldingView;
 
 /// 持股可能重複（同一檔分次買進），挑出來的代號去重並排序。
 #[test]
@@ -36,15 +37,15 @@ fn is_common_stock_skips_etfs_and_preferred_shares() {
 async fn active_holding_symbols_cover_common_stocks() {
     dotenvy::dotenv().ok();
     let (Ok(all), Ok(common)) = (
-        active_holding_symbols().await,
-        common_stock_holdings().await,
+        active_holding_symbols(&HoldingView::default_household()).await,
+        common_stock_holdings(&HoldingView::default_household()).await,
     ) else {
         println!("跳過 active_holding_symbols_cover_common_stocks：無資料庫連接");
         return;
     };
     assert!(common.is_subset(&all), "{common:?} ⊄ {all:?}");
     // 股數明細涵蓋同一批代號。
-    let quantities = active_holding_quantities()
+    let quantities = active_holding_quantities(&HoldingView::default_household())
         .await
         .expect("同一個查詢剛才成功過");
     let symbols: BTreeSet<String> = quantities.into_iter().map(|(symbol, _)| symbol).collect();

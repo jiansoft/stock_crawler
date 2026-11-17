@@ -17,7 +17,8 @@ use rust_decimal::Decimal;
 use super::{format_decimal_with_commas, format_share_quantity, member_label};
 use crate::domain::portfolio::view::HoldingView;
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::portfolio::{
         forecast_accuracy::{self, MonthAccuracy},
         payout::{self, DividendPayout},
@@ -58,31 +59,23 @@ struct SnapshotAccuracy {
 ///
 /// 查詢入帳失敗時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let today = Local::now().date_naive();
-    // 預估誤差只是附加資訊：讀不到時記錄後照常發入帳彙總。
-    let accuracy = match load_snapshot_accuracy(today).await {
-        Ok(accuracy) => accuracy,
-        Err(why) => {
-            tracing::warn!("讀取上月股利預估誤差失敗，入帳通知不附誤差: {why:#}");
-            None
-        }
-    };
-    notify(&PgPortfolioRepository::new(), accuracy, today).await
+    notify(&PgPortfolioRepository::new(), Local::now().date_naive()).await
 }
 
-/// 上個月底以前最近一次快照（全部會員）對上個月的預估誤差。
+/// 上個月底以前最近一次快照（範圍內的會員）對上個月的預估誤差。
 ///
 /// # Errors
 ///
 /// 查詢快照或入帳失敗時回傳錯誤。
-async fn load_snapshot_accuracy(today: NaiveDate) -> Result<Option<SnapshotAccuracy>> {
+async fn load_snapshot_accuracy(
+    view: &HoldingView,
+    today: NaiveDate,
+) -> Result<Option<SnapshotAccuracy>> {
     let (from, to) = previous_month(today);
     let Some(snapshot_date) = forecast::latest_snapshot_on_or_before(to).await? else {
         return Ok(None);
     };
-    let inputs =
-        forecast::load_accuracy_inputs(snapshot_date, &HoldingView::default_household(), today)
-            .await?;
+    let inputs = forecast::load_accuracy_inputs(snapshot_date, view, today).await?;
     let accuracy = forecast_accuracy::compare(&inputs.forecasts, &inputs.actuals, today);
     Ok(
         forecast_accuracy::month_accuracy(&accuracy, from).map(|month| SnapshotAccuracy {
@@ -92,23 +85,39 @@ async fn load_snapshot_accuracy(today: NaiveDate) -> Result<Option<SnapshotAccur
     )
 }
 
-/// 以 `today` 為今天彙整並發送；上個月沒有入帳時不發。
-async fn notify(
-    repo: &impl PortfolioRepository,
-    forecast: Option<SnapshotAccuracy>,
-    today: NaiveDate,
-) -> Result<()> {
-    let mut summary = load_summary(repo, today).await?;
-    summary.forecast = forecast;
-    let payout_count = summary.payouts.len();
-    tracing::info!(
-        "上月持股股利入帳彙總: from={}, payouts={}",
-        summary.from,
-        payout_count
+/// 以 `today` 為今天，依收件者範圍彙整並發送（會員系統計畫 7.6）；範圍內上個月沒有入帳時不發。
+///
+/// # Errors
+///
+/// 目前不會回傳錯誤：查詢入帳失敗只記錄，這個範圍不發。
+async fn notify(repo: &impl PortfolioRepository, today: NaiveDate) -> Result<()> {
+    let dedup_key = format!(
+        "{}:{}",
+        Topic::HoldingsMonthlyPayout.code(),
+        previous_month(today).0
     );
-    if let Some(message) = build_message(&summary) {
-        alert::notify_holdings_all(alert::Topic::HoldingsMonthlyPayout, &message).await;
-    }
+    notify::notify_holdings(
+        Topic::HoldingsMonthlyPayout,
+        &dedup_key,
+        |view| async move {
+            let mut summary = load_summary(repo, &view, today).await?;
+            // 預估誤差只是附加資訊：讀不到時記錄後照常發入帳彙總。
+            summary.forecast = match load_snapshot_accuracy(&view, today).await {
+                Ok(accuracy) => accuracy,
+                Err(why) => {
+                    tracing::warn!("讀取上月股利預估誤差失敗，入帳通知不附誤差: {why:#}");
+                    None
+                }
+            };
+            tracing::info!(
+                "上月持股股利入帳彙總: from={}, payouts={}",
+                summary.from,
+                summary.payouts.len()
+            );
+            Ok(build_message(&summary))
+        },
+    )
+    .await;
     Ok(())
 }
 
@@ -120,16 +129,20 @@ fn previous_month(today: NaiveDate) -> (NaiveDate, NaiveDate) {
 }
 
 /// 查詢上個月、去年同月與今年累計的入帳。
-async fn load_summary(repo: &impl PortfolioRepository, today: NaiveDate) -> Result<MonthlySummary> {
+async fn load_summary(
+    repo: &impl PortfolioRepository,
+    view: &HoldingView,
+    today: NaiveDate,
+) -> Result<MonthlySummary> {
     let (from, to) = previous_month(today);
-    let payouts = payouts_between(repo, from, to, today).await?;
+    let payouts = payouts_between(repo, view, from, to, today).await?;
     let last_year_from = from - Months::new(12);
     let last_year_to = (last_year_from + Months::new(1))
         .pred_opt()
         .unwrap_or(last_year_from);
-    let last_year = payouts_between(repo, last_year_from, last_year_to, today).await?;
+    let last_year = payouts_between(repo, view, last_year_from, last_year_to, today).await?;
     let year_start = NaiveDate::from_ymd_opt(from.year(), 1, 1).unwrap_or(from);
-    let year_to_date = payouts_between(repo, year_start, to, today).await?;
+    let year_to_date = payouts_between(repo, view, year_start, to, today).await?;
     Ok(MonthlySummary {
         from,
         to,
@@ -142,13 +155,12 @@ async fn load_summary(repo: &impl PortfolioRepository, today: NaiveDate) -> Resu
 
 async fn payouts_between(
     repo: &impl PortfolioRepository,
+    view: &HoldingView,
     from: NaiveDate,
     to: NaiveDate,
     today: NaiveDate,
 ) -> Result<Vec<DividendPayout>> {
-    let allocations = repo
-        .fetch_payout_allocations(&HoldingView::default_household(), from, to, today)
-        .await?;
+    let allocations = repo.fetch_payout_allocations(view, from, to, today).await?;
     Ok(payout::split_by_payable_date(&allocations, from, to))
 }
 

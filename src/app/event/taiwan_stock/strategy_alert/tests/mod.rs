@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use anyhow::bail;
 use async_trait::async_trait;
 
-use super::message::build_message;
+use super::message::{build_message, overlap_message};
 use super::*;
 use crate::app::ports::{StrategyHolding, StrategySettlement};
 use crate::domain::portfolio::health::{FundamentalSignals, HoldingFundamentals};
@@ -78,6 +78,22 @@ impl HoldingFundamentalsQuery for FakeFundamentals {
             bail!("db down");
         }
         Ok(self.fundamentals.clone())
+    }
+}
+
+/// 持股段的替身：記錄被要求產生對照的策略與換股日，不查任何持股。
+#[derive(Default)]
+pub(super) struct FakeOverlap {
+    pub(super) calls: Mutex<Vec<(String, NaiveDate)>>,
+}
+
+#[async_trait]
+impl OverlapNotifier for FakeOverlap {
+    async fn notify_overlap(&self, rebalance: &StrategyRebalance, name: &str) {
+        self.calls
+            .lock()
+            .expect("鎖未中毒")
+            .push((name.to_owned(), rebalance.date));
     }
 }
 

@@ -1,4 +1,6 @@
-//! 換股通知的訊息內容：新買進／續抱／賣出、現金與 0050 核心部位、上一期實盤結算，以及對照實際持股。
+//! 換股通知的訊息內容：新買進／續抱／賣出、現金與 0050 核心部位、上一期實盤結算（市場段，
+//! `market.strategy_rebalance`），以及對照實際持股（持股段，`holdings.strategy_overlap`，依收件者範圍產生）。
+//! 兩段分開組，市場段沒有任何持股參數（會員系統計畫 7.3 混合型通知拆段）。
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -128,8 +130,6 @@ fn settlement_lines(settlement: &StrategySettlement) -> Vec<String> {
     vec![period, cumulative]
 }
 
-/// 組出換股通知（MarkdownV2 已跳脫）；`actual` 為目前的實際持股代號，`None` 時不對照；`settlement`
-/// 為上一期實盤結算，`None` 時不附。
 /// 策略持股（新買進在前、再來續抱）中有基本面警示的股票，一行列出；沒有時回 `None`。
 fn warning_line(
     rebalance: &StrategyRebalance,
@@ -154,10 +154,11 @@ fn warning_line(
     (!warned.is_empty()).then(|| format!("• 基本面警示：{}", warned.join("、")))
 }
 
+/// 組出換股通知的市場段（MarkdownV2 已跳脫）：所有訂閱者內容相同，不含任何人的持股；`settlement`
+/// 為上一期實盤結算，`None` 時不附。
 pub(super) fn build_message(
     rebalance: &StrategyRebalance,
     name: &str,
-    actual: Option<&BTreeSet<String>>,
     settlement: Option<&StrategySettlement>,
     fundamentals: &[HoldingFundamentals],
 ) -> String {
@@ -197,9 +198,6 @@ pub(super) fn build_message(
     if let Some(settlement) = settlement {
         lines.extend(settlement_lines(settlement));
     }
-    if let Some(actual) = actual {
-        lines.extend(holdings_lines(rebalance, actual));
-    }
 
     let mut message = String::with_capacity(512);
     let _ = writeln!(&mut message, "{}", text::escape_markdown_v2(title));
@@ -214,4 +212,28 @@ pub(super) fn build_message(
         )
     );
     message
+}
+
+/// 組出換股通知的持股段（MarkdownV2 已跳脫）：策略持股對照 `held`（收件者範圍內的實際持股）；
+/// 沒有可對照的內容時回 `None`。
+pub(super) fn overlap_message(
+    rebalance: &StrategyRebalance,
+    name: &str,
+    held: &BTreeSet<String>,
+) -> Option<String> {
+    let lines = holdings_lines(rebalance, held);
+    if lines.is_empty() {
+        return None;
+    }
+    let title = if name.is_empty() {
+        format!("策略換股的持股對照︰{}", rebalance.date)
+    } else {
+        format!("策略換股的持股對照（{name}）︰{}", rebalance.date)
+    };
+    let mut message = String::with_capacity(256);
+    let _ = writeln!(&mut message, "{}", text::escape_markdown_v2(title));
+    for line in lines {
+        let _ = writeln!(&mut message, "{}", text::escape_markdown_v2(line));
+    }
+    Some(message)
 }

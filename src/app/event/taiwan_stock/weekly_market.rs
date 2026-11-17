@@ -54,7 +54,7 @@ use chrono::{Local, NaiveDate};
 
 use self::{
     allocation::{AllocationSection, allocation_sections},
-    breakout::breakout_section,
+    breakout::{BreakoutSection, breakout_section},
     crossing::{CrossingSection, crossing_section},
     dividend::{HoldingFill, holding_fills},
     etf::{EtfWeekSection, etf_section},
@@ -63,20 +63,22 @@ use self::{
     holding_flow::{broker_flow_section, holding_flow_section},
     industry::{IndustrySection, industry_section},
     market::{RegimeSection, month_seasonality, regime_section, valuation_level},
-    message::build_message,
+    message::{MarketExtras, build_holdings_message, build_message, week_data_date},
     strategy::{StrategySection, strategy_section},
     upcoming_dividend::{UpcomingSection, load_upcoming},
 };
 use super::holdings;
 use crate::{
-    app::calculation::upcoming_dividends::total_shares,
-    core::alert,
+    app::{calculation::upcoming_dividends::total_shares, notify},
+    core::{alert, notify_topic::Topic},
     domain::{
-        chip::flow::{self, ChipFlowQuery},
+        chip::flow::{self, ChipFlowQuery, FlowPeriod, StockFlow},
         market_index::{
             breadth::BreadthQuery, regime::IndexCloseQuery, valuation::MarketValuationRepository,
         },
-        portfolio::{chip::HoldingBrokerQuery, health::HoldingFundamentalsQuery},
+        portfolio::{
+            chip::HoldingBrokerQuery, health::HoldingFundamentalsQuery, view::HoldingView,
+        },
         quote::{
             forward_return::{ForwardReturnRepository, MarketSeasonalityQuery},
             relative_strength::{
@@ -103,30 +105,106 @@ const TOP: usize = 3;
 /// 要統計的法人別與名稱。
 const FLOW_INVESTORS: [(&str, &str); 2] = [("foreign", "外資"), ("trust", "投信")];
 
-/// 排程入口：彙整本週市場與持股 RS 變化並發送。
+/// 市場段的資料（所有訂閱者共用）；法人個股淨買賣也留給持股段篩出範圍內的股票，不另外查詢。
+#[derive(Debug, Default)]
+struct MarketWeek {
+    market: Option<RegimeSection>,
+    industries: Option<IndustrySection>,
+    breakouts: Option<BreakoutSection>,
+    crossings: Option<CrossingSection>,
+    flows: Vec<FlowSection>,
+    /// 各法人的期間與個股淨買賣（依 [`FLOW_INVESTORS`] 順序）。
+    investor_rows: Vec<(&'static str, FlowPeriod, Vec<StockFlow>)>,
+}
+
+impl MarketWeek {
+    fn data_date(&self, etfs: Option<&EtfWeekSection>) -> Option<NaiveDate> {
+        week_data_date(
+            self.market.as_ref(),
+            self.industries.as_ref(),
+            self.crossings.as_ref(),
+            &self.flows,
+            etfs,
+        )
+    }
+}
+
+/// 持股段的資料來源（依收件者範圍查詢）。
+struct HoldingSources<'a, Q, P> {
+    quote: &'a Q,
+    portfolio: &'a P,
+}
+
+/// 排程入口：市場段（`market.weekly`）送給所有訂閱者；持股段（`holdings.weekly`）依收件者範圍各自產生
+/// （會員系統計畫 7.3 混合型通知拆段）。
 ///
 /// # Errors
 ///
-/// 查詢持股失敗時回傳錯誤。
+/// 目前不會回傳錯誤；各段失敗只記錄警告並略過。
 pub async fn execute() -> Result<()> {
-    let symbols = holdings::common_stock_holdings()
-        .await
-        .context("fetch holdings for weekly market summary failed")?;
     let date = Local::now().date_naive();
     let strategy = strategy_section().await;
-    // 填息、下週除權息與 ETF 看全部持股（含 ETF）；查不到持股只少這幾段的持股部分。
-    let shares = holdings::active_holding_quantities()
+    // 市場段的 ETF 只用全市場淨申購：不帶任何持有代號。
+    let market_etfs = etf_section(&PgEtfRepository::new(), &BTreeSet::new(), date)
         .await
-        .map(total_shares)
         .unwrap_or_else(|why| {
-            tracing::warn!("每週市場摘要：讀取持股（含 ETF）失敗: {why:#}");
-            Default::default()
+            tracing::warn!("每週市場摘要：讀取 ETF 資金流向失敗: {why:#}");
+            None
         });
+    let week = market_week(
+        &PgQuoteRepository::new(),
+        &PgChipRepository::new(),
+        &PgMarketIndexRepository::new(),
+        &PgMarketValuationRepository::new(),
+        date,
+    )
+    .await;
+    if let Some(message) = market_message(&week, market_etfs.as_ref(), strategy.as_ref()) {
+        alert::notify_market(alert::Topic::MarketWeekly, &message).await;
+    }
+
+    let data_date = week.data_date(market_etfs.as_ref());
+    let dedup_key = format!("{}:{date}", Topic::HoldingsWeekly.code());
+    notify::notify_holdings(Topic::HoldingsWeekly, &dedup_key, |view| {
+        let week = &week;
+        async move {
+            let quote = PgQuoteRepository::new();
+            let portfolio = PgPortfolioRepository::new();
+            let sources = HoldingSources {
+                quote: &quote,
+                portfolio: &portfolio,
+            };
+            let data = load_holding_data(&view, date).await?;
+            Ok(holdings_message(&sources, week, data_date, date, &data).await)
+        }
+    })
+    .await;
+    Ok(())
+}
+
+/// 一個範圍的持股資料：普通股代號與依範圍查出的填息、下週除權息、持有 ETF 與配置偏離。
+#[derive(Debug, Default)]
+struct HoldingData {
+    symbols: BTreeSet<String>,
+    fills: Vec<HoldingFill>,
+    etfs: Option<EtfWeekSection>,
+    allocation: Vec<AllocationSection>,
+    upcoming: Option<UpcomingSection>,
+}
+
+/// 依收件者範圍查持股資料；查不到持股時回錯誤（這個範圍不發），其餘各段失敗只少那一段。
+async fn load_holding_data(view: &HoldingView, date: NaiveDate) -> Result<HoldingData> {
+    let symbols = holdings::common_stock_holdings(view)
+        .await
+        .context("fetch holdings for weekly holdings summary failed")?;
+    // 填息、下週除權息與 ETF 看全部持股（含 ETF）。
+    let shares = total_shares(holdings::active_holding_quantities(view).await?);
     let all: BTreeSet<String> = shares.keys().cloned().collect();
     let fills = holding_fills(&PgDividendFillRepository::new(), &all, date).await;
     let upcoming = load_upcoming(
         &PgDividendRepository::new(),
         &PgPortfolioRepository::new(),
+        view,
         &shares,
         date,
     )
@@ -134,40 +212,24 @@ pub async fn execute() -> Result<()> {
     let etfs = etf_section(&PgEtfRepository::new(), &all, date)
         .await
         .unwrap_or_else(|why| {
-            tracing::warn!("每週市場摘要：讀取 ETF 資金流向失敗: {why:#}");
+            tracing::warn!("每週持股摘要：讀取持有 ETF 失敗: {why:#}");
             None
         });
     let target_repo = PgPortfolioTargetRepository::new();
-    let allocation = allocation_sections(&target_repo, &target_repo, date).await;
-    let message = run(
-        &PgQuoteRepository::new(),
-        &PgChipRepository::new(),
-        &PgMarketIndexRepository::new(),
-        &PgMarketValuationRepository::new(),
-        &PgPortfolioRepository::new(),
-        date,
-        &symbols,
-        strategy.as_ref(),
-        &fills,
-        etfs.as_ref(),
-        &allocation,
-        upcoming.as_ref(),
-    )
-    .await;
-    if let Some(message) = message {
-        alert::notify_market(alert::Topic::MarketWeekly, &message).await;
-    }
-    Ok(())
+    let allocation = allocation_sections(&target_repo, &target_repo, view, date).await;
+    Ok(HoldingData {
+        symbols,
+        fills,
+        etfs,
+        allocation,
+        upcoming,
+    })
 }
 
-/// 查詢各段資料並組出訊息；某段失敗只記錄警告；都沒有資料時回 `None`。
-///
-/// 每個資料來源各自傳入，測試才能逐一替換成假倉儲、驗證各段降級。
-#[allow(clippy::too_many_arguments)]
-async fn run(
+/// 查詢市場段各段；某段失敗只記錄警告。這裡不接受任何持股來源，市場段因此無法讀到持股（7.3 防漏）。
+async fn market_week(
     quote: &(
          impl ScoredUniverseQuery
-         + RelativeStrengthQuery
          + RelativeStrengthCrossingQuery
          + ForwardReturnRepository
          + MarketSeasonalityQuery
@@ -177,15 +239,8 @@ async fn run(
     chip: &impl ChipFlowQuery,
     index: &(impl IndexCloseQuery + BreadthQuery),
     valuation: &impl MarketValuationRepository,
-    portfolio: &(impl HoldingFundamentalsQuery + HoldingBrokerQuery),
     date: NaiveDate,
-    symbols: &BTreeSet<String>,
-    strategy: Option<&StrategySection>,
-    fills: &[HoldingFill],
-    etfs: Option<&EtfWeekSection>,
-    allocation: &[AllocationSection],
-    upcoming: Option<&UpcomingSection>,
-) -> Option<String> {
+) -> MarketWeek {
     let mut market = regime_section(index, date).await.unwrap_or_else(|why| {
         tracing::warn!("每週市場摘要：讀取加權指數失敗: {why:#}");
         None
@@ -218,85 +273,166 @@ async fn run(
         None
     });
     let mut flows = Vec::new();
-    let mut holding_flows = Vec::new();
-    // 主力一段沿用第一個法人的期間，並借它的成交量與收盤價算佔量、排序。
-    let mut broker_basis = None;
+    let mut investor_rows = Vec::new();
     for (investor, label) in FLOW_INVESTORS {
         match flow::load_flows(chip, date, WEEK_DAYS, investor).await {
             Ok(Some((period, rows))) => {
-                holding_flows.push(holding_flow_section(label, period, &rows, symbols));
-                if broker_basis.is_none() {
-                    let held: Vec<_> = rows
-                        .iter()
-                        .filter(|row| symbols.contains(&row.stock_symbol))
-                        .cloned()
-                        .collect();
-                    broker_basis = Some((period, held));
-                }
+                investor_rows.push((label, period, rows.clone()));
                 flows.push(flow_section(label, period, rows));
             }
             Ok(None) => {}
             Err(why) => tracing::warn!("每週市場摘要：讀取{label}產業買賣超失敗: {why:#}"),
         }
     }
-    let symbols: Vec<String> = symbols.iter().cloned().collect();
-    if let Some((period, rows)) = &broker_basis {
-        match portfolio
-            .fetch_broker_period(period.from, period.data_date, &symbols)
-            .await
-        {
-            Ok(nets) => holding_flows.push(broker_flow_section(*period, &nets, rows)),
-            Err(why) => tracing::warn!("每週市場摘要：讀取持股主力進出失敗: {why:#}"),
-        }
-    }
-    let moves = match quote
-        .fetch_relative_strength(date, WEEK_DAYS as u16 + 1, &symbols)
-        .await
-    {
-        Ok(days) => holding_moves(&days),
-        Err(why) => {
-            tracing::warn!("每週市場摘要：讀取持股相對強度失敗: {why:#}");
-            Vec::new()
-        }
-    };
-    let fundamentals = portfolio
-        .fetch_holding_fundamentals(&symbols)
-        .await
-        .unwrap_or_else(|why| {
-            tracing::warn!("每週市場摘要：讀取持股基本面失敗: {why:#}");
-            Vec::new()
-        });
-    let industry_count = industries
-        .as_ref()
-        .map_or(0, |section| section.industries.len());
-    let flow_count = flows.len();
-    let holding_count = symbols.len();
-    let move_count = moves.len();
     tracing::info!(
-        "每週市場摘要: industries={} flows={} holdings={} moves={}",
-        industry_count,
-        flow_count,
-        holding_count,
-        move_count
+        "每週市場摘要: industries={} flows={}",
+        industries
+            .as_ref()
+            .map_or(0, |section| section.industries.len()),
+        flows.len()
     );
+    MarketWeek {
+        market,
+        industries,
+        breakouts,
+        crossings,
+        flows,
+        investor_rows,
+    }
+}
+
+/// 組出市場段；都沒有資料時回 `None`。
+fn market_message(
+    week: &MarketWeek,
+    etfs: Option<&EtfWeekSection>,
+    strategy: Option<&StrategySection>,
+) -> Option<String> {
     build_message(
-        market.as_ref(),
-        industries.as_ref(),
-        crossings.as_ref(),
-        &flows,
-        HoldingSection {
-            moves: &moves,
-            flows: &holding_flows,
-            fills,
-            fundamentals: &fundamentals,
+        week.market.as_ref(),
+        week.industries.as_ref(),
+        week.crossings.as_ref(),
+        &week.flows,
+        MarketExtras {
+            breakouts: week.breakouts.as_ref(),
             etfs,
-            allocation,
-            breakouts: breakouts.as_ref(),
-            upcoming,
         },
         strategy,
         holdings::stock_name,
     )
+}
+
+/// 依一個範圍的持股組出持股段；範圍內沒有任何持股內容時回 `None`。
+async fn holdings_message<Q, P>(
+    sources: &HoldingSources<'_, Q, P>,
+    week: &MarketWeek,
+    data_date: Option<NaiveDate>,
+    date: NaiveDate,
+    data: &HoldingData,
+) -> Option<String>
+where
+    Q: RelativeStrengthQuery,
+    P: HoldingFundamentalsQuery + HoldingBrokerQuery,
+{
+    let symbols = &data.symbols;
+    let mut holding_flows = Vec::new();
+    // 主力一段沿用第一個法人的期間，並借它的成交量與收盤價算佔量、排序。
+    let mut broker_basis = None;
+    for (label, period, rows) in &week.investor_rows {
+        holding_flows.push(holding_flow_section(label, *period, rows, symbols));
+        if broker_basis.is_none() {
+            let held: Vec<StockFlow> = rows
+                .iter()
+                .filter(|row| symbols.contains(&row.stock_symbol))
+                .cloned()
+                .collect();
+            broker_basis = Some((*period, held));
+        }
+    }
+    let symbol_list: Vec<String> = symbols.iter().cloned().collect();
+    if let Some((period, rows)) = &broker_basis {
+        match sources
+            .portfolio
+            .fetch_broker_period(period.from, period.data_date, &symbol_list)
+            .await
+        {
+            Ok(nets) => holding_flows.push(broker_flow_section(*period, &nets, rows)),
+            Err(why) => tracing::warn!("每週持股摘要：讀取持股主力進出失敗: {why:#}"),
+        }
+    }
+    let moves = match sources
+        .quote
+        .fetch_relative_strength(date, WEEK_DAYS as u16 + 1, &symbol_list)
+        .await
+    {
+        Ok(days) => holding_moves(&days),
+        Err(why) => {
+            tracing::warn!("每週持股摘要：讀取持股相對強度失敗: {why:#}");
+            Vec::new()
+        }
+    };
+    let fundamentals = sources
+        .portfolio
+        .fetch_holding_fundamentals(&symbol_list)
+        .await
+        .unwrap_or_else(|why| {
+            tracing::warn!("每週持股摘要：讀取持股基本面失敗: {why:#}");
+            Vec::new()
+        });
+    build_holdings_message(
+        data_date,
+        HoldingSection {
+            moves: &moves,
+            flows: &holding_flows,
+            fills: &data.fills,
+            fundamentals: &fundamentals,
+            etfs: data.etfs.as_ref(),
+            allocation: &data.allocation,
+            upcoming: data.upcoming.as_ref(),
+        },
+        holdings::stock_name,
+    )
+}
+
+/// 測試用：市場段與持股段依序接成一則（舊版單一訊息的內容），各段測試沿用同一組替身。
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+async fn run(
+    quote: &(
+         impl ScoredUniverseQuery
+         + RelativeStrengthQuery
+         + RelativeStrengthCrossingQuery
+         + ForwardReturnRepository
+         + MarketSeasonalityQuery
+         + RankedSignalQuery
+         + TechnicalSignalQuery
+     ),
+    chip: &impl ChipFlowQuery,
+    index: &(impl IndexCloseQuery + BreadthQuery),
+    valuation: &impl MarketValuationRepository,
+    portfolio: &(impl HoldingFundamentalsQuery + HoldingBrokerQuery),
+    date: NaiveDate,
+    symbols: &BTreeSet<String>,
+    strategy: Option<&StrategySection>,
+    fills: &[HoldingFill],
+    etfs: Option<&EtfWeekSection>,
+    allocation: &[AllocationSection],
+    upcoming: Option<&UpcomingSection>,
+) -> Option<String> {
+    let week = market_week(quote, chip, index, valuation, date).await;
+    let market = market_message(&week, etfs, strategy);
+    let data = HoldingData {
+        symbols: symbols.clone(),
+        fills: fills.to_vec(),
+        etfs: etfs.cloned(),
+        allocation: allocation.to_vec(),
+        upcoming: upcoming.cloned(),
+    };
+    let sources = HoldingSources { quote, portfolio };
+    let held = holdings_message(&sources, &week, week.data_date(etfs), date, &data).await;
+    match (market, held) {
+        (Some(market), Some(held)) => Some(format!("{market}{held}")),
+        (market, held) => market.or(held),
+    }
 }
 
 /// 帶正負號的分數變化文字。

@@ -95,6 +95,8 @@ pub(super) struct FakeQuote {
     /// 區間突破的歷史表現。
     pub(super) outcomes: Vec<SignalOutcome>,
     pub(super) fail: bool,
+    /// 持股相對強度（持股段專用的查詢）被呼叫的次數；防漏測試確認市場段不呼叫。
+    pub(super) holding_queries: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait]
@@ -144,13 +146,21 @@ impl RelativeStrengthQuery for FakeQuote {
         &self,
         _until: NaiveDate,
         days: u16,
-        _stock_symbols: &[String],
+        stock_symbols: &[String],
     ) -> Result<Vec<RelativeStrengthDay>> {
         assert_eq!(usize::from(days), WEEK_DAYS + 1);
+        self.holding_queries
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if self.fail {
             return Err(anyhow!("連線中斷"));
         }
-        Ok(self.rs.clone())
+        // 只回查詢範圍內的股票（不同範圍的持股段內容不同）。
+        Ok(self
+            .rs
+            .iter()
+            .filter(|day| stock_symbols.contains(&day.stock_symbol))
+            .cloned()
+            .collect())
     }
 }
 

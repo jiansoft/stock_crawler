@@ -238,9 +238,15 @@ async fn load_upcoming_lists_payouts_and_degrades_on_failure() {
     let dividends = crate::infra::database::repository::dividend::PgDividendRepository::new();
     let no_holdings = std::collections::BTreeMap::new();
     let repo = FakePayoutRepository::with_allocations(vec![allocation(1, 1000)]);
-    let section = load_upcoming(&dividends, &repo, &no_holdings, day(17))
-        .await
-        .expect("有入帳");
+    let section = load_upcoming(
+        &dividends,
+        &repo,
+        &HoldingView::default_household(),
+        &no_holdings,
+        day(17),
+    )
+    .await
+    .expect("有入帳");
     assert!(section.items.is_empty());
     assert_eq!(section.payouts.len(), 1);
 
@@ -249,9 +255,15 @@ async fn load_upcoming_lists_payouts_and_degrades_on_failure() {
         ..FakePayoutRepository::default()
     };
     assert!(
-        load_upcoming(&dividends, &failing, &no_holdings, day(17))
-            .await
-            .is_none()
+        load_upcoming(
+            &dividends,
+            &failing,
+            &HoldingView::default_household(),
+            &no_holdings,
+            day(17)
+        )
+        .await
+        .is_none()
     );
 }
 
@@ -260,7 +272,9 @@ async fn load_upcoming_lists_payouts_and_degrades_on_failure() {
 async fn next_week_payouts_queries_next_monday_to_friday() {
     let repo =
         FakePayoutRepository::with_allocations(vec![allocation(1, 1000), allocation(2, 2000)]);
-    let payouts = next_week_payouts(&repo, day(17)).await.expect("查詢入帳");
+    let payouts = next_week_payouts(&repo, &HoldingView::default_household(), day(17))
+        .await
+        .expect("查詢入帳");
 
     assert_eq!(
         repo.queries(),
@@ -323,7 +337,9 @@ async fn month_income_splits_received_pending_and_last_year() {
         paid_on(next_month, 9000),
     ]);
 
-    let income = month_income(&repo, day(17)).await.expect("查詢入帳");
+    let income = month_income(&repo, &HoldingView::default_household(), day(17))
+        .await
+        .expect("查詢入帳");
 
     assert_eq!(
         income,
@@ -355,11 +371,20 @@ async fn month_income_splits_received_pending_and_last_year() {
 async fn month_income_is_none_without_cash_and_errors_on_failure() {
     let next_month = NaiveDate::from_ymd_opt(2026, 11, 2).expect("有效日期");
     let repo = FakePayoutRepository::with_allocations(vec![paid_on(next_month, 1000)]);
-    assert_eq!(month_income(&repo, day(17)).await.expect("查詢入帳"), None);
+    assert_eq!(
+        month_income(&repo, &HoldingView::default_household(), day(17))
+            .await
+            .expect("查詢入帳"),
+        None
+    );
 
     let failing = FakePayoutRepository {
         fail: true,
         ..FakePayoutRepository::default()
     };
-    assert!(month_income(&failing, day(17)).await.is_err());
+    assert!(
+        month_income(&failing, &HoldingView::default_household(), day(17))
+            .await
+            .is_err()
+    );
 }

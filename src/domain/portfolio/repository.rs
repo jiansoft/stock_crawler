@@ -20,6 +20,15 @@ pub trait PortfolioRepository: Send + Sync {
         security_codes: Option<Vec<String>>,
     ) -> Result<Vec<StockOwnershipDetail>>;
 
+    /// 某個可見範圍內「未售出」的持股明細（持股類通知依收件者範圍查詢，7.6）。
+    ///
+    /// `security_codes` 為 `None` 或空清單時不限代號。
+    async fn fetch_active_holdings_in(
+        &self,
+        view: &HoldingView,
+        security_codes: Option<Vec<String>>,
+    ) -> Result<Vec<StockOwnershipDetail>>;
+
     /// 依序號尋找單筆持股明細。
     async fn find_holding_by_serial(&self, serial: i64) -> Result<Option<StockOwnershipDetail>>;
 

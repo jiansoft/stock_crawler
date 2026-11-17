@@ -27,6 +27,7 @@ pub mod market_index;
 pub mod market_valuation;
 pub mod money_flow;
 // 通知項目目錄（notify_topic）的啟動寫入。
+pub mod notify_route;
 pub mod notify_topic;
 pub mod official_ratio;
 pub mod pb_percentile;

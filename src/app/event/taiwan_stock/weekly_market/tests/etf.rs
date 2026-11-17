@@ -4,8 +4,15 @@ use std::collections::BTreeSet;
 
 use rust_decimal_macros::dec;
 
-use super::super::etf::{EtfWeekSection, etf_section, lines};
+use super::super::etf::{EtfWeekSection, etf_section, held_lines, market_lines};
 use super::*;
+
+/// 全市場與持有兩部分依序接起來（市場段在前、持股段在後）。
+fn lines(section: &EtfWeekSection) -> Vec<String> {
+    let mut lines = market_lines(section);
+    lines.extend(held_lines(section));
+    lines
+}
 use crate::domain::etf::{
     EtfHoldingPeriod, EtfHoldingPeriods, EtfHoldingRecord, EtfWeeklyFlow,
     test_double::RecordingEtfRepository,
@@ -53,11 +60,14 @@ async fn section_keeps_held_etfs_with_data_and_lists_top_flows() {
         "淨流入：007 名稱007 +7.0 億、006 名稱006 +6.0 億、005 名稱005 +5.0 億、004 名稱004 +4.0 億、003 名稱003 +3.0 億"
     );
     assert_eq!(text[3], "淨流出：0056 名稱0056 -3.2 億");
+    // 持有的部分屬持股段，另起一段（7.3 拆段）。
+    assert_eq!(text[4], "");
+    assert_eq!(text[5], "持有 ETF（10-19～10-23，受益單位增減 × 淨值）");
     assert_eq!(
-        text[4],
+        text[6],
         "持有 0056 名稱0056：淨申購 -3.2 億，折溢價週平均 +0.21%（最新 無）"
     );
-    assert_eq!(text.len(), 6, "淨申購為 0 的持有 ETF 仍列出");
+    assert_eq!(text.len(), 8, "淨申購為 0 的持有 ETF 仍列出");
 
     let empty = RecordingEtfRepository::default();
     assert!(
@@ -93,7 +103,7 @@ fn etf_section_alone_makes_a_message_dated_by_its_last_day() {
         None,
         None,
         &[],
-        HoldingSection {
+        MarketExtras {
             etfs: Some(&section),
             ..Default::default()
         },

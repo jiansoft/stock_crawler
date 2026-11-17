@@ -135,7 +135,12 @@ impl Telegram {
     ///
     /// 兩種補救各自最多重試一次，避免在通知管道上做無界重試。
     pub async fn send(&self, message: &str) -> Result<SendMessageResponse> {
-        match self.broadcast(message, MARKDOWN_V2).await {
+        self.send_to(&self.recipients, message).await
+    }
+
+    /// 與 [`Self::send`] 相同的補救流程，但送給指定的聊天室（依訂閱分送的收件者，7.6）。
+    pub async fn send_to(&self, recipients: &[i64], message: &str) -> Result<SendMessageResponse> {
+        match self.broadcast(recipients, message, MARKDOWN_V2).await {
             Ok(resp) => return Ok(resp),
             Err(Some(retry_after)) => {
                 // 多等一秒：retry_after 是「還要等幾秒」的下限而非精確值。
@@ -143,7 +148,7 @@ impl Telegram {
                 tracing::warn!("Telegram 觸發頻率限制，{wait:?} 後重送");
                 tokio::time::sleep(wait).await;
 
-                if let Ok(resp) = self.broadcast(message, MARKDOWN_V2).await {
+                if let Ok(resp) = self.broadcast(recipients, message, MARKDOWN_V2).await {
                     return Ok(resp);
                 }
             }
@@ -156,9 +161,11 @@ impl Telegram {
 
         // 移除所有 Markdown 跳脫字元，以便於以純文字模式清晰顯示。
         let clean_msg = message.replace('\\', "");
-        self.broadcast(&clean_msg, PLAIN_TEXT).await.map_err(|_| {
-            anyhow!("Failed to send message to any recipient even after plain-text fallback")
-        })
+        self.broadcast(recipients, &clean_msg, PLAIN_TEXT)
+            .await
+            .map_err(|_| {
+                anyhow!("Failed to send message to any recipient even after plain-text fallback")
+            })
     }
 
     /// 以指定的 `parse_mode` 把訊息送給所有允許的接收者，回傳第一則成功的回應。
@@ -175,13 +182,14 @@ impl Telegram {
     /// * `Err(None)` —— 全部失敗且與頻率限制無關。
     async fn broadcast(
         &self,
+        recipients: &[i64],
         message: &str,
         parse_mode: &str,
     ) -> std::result::Result<SendMessageResponse, Option<u64>> {
         let mut first_ok: Option<SendMessageResponse> = None;
         let mut retry_after: Option<u64> = None;
 
-        for &id in &self.recipients {
+        for &id in recipients {
             let mut req = SendMessageRequest::new(id, message);
             req.parse_mode = parse_mode;
 
@@ -337,6 +345,20 @@ async fn send_single(msg: &str) {
     }
 }
 
+/// 發送到指定聊天室（依訂閱分送的收件者，7.6）；長訊息與 [`send`] 一樣切段。
+pub async fn send_to_chat(chat_id: i64, msg: &str) {
+    if msg.trim().is_empty() {
+        return;
+    }
+    let client = get_client();
+    for chunk in split_message_into_chunks(msg, MAX_MESSAGE_LEN) {
+        // 不記錄訊息內容：持股內容只屬於收件者。
+        if let Err(error) = client.send_to(&[chat_id], &chunk).await {
+            tracing::error!("Failed to send a routed message to chat {chat_id}: {error:}");
+        }
+    }
+}
+
 /// 發送關鍵警報訊息至 Telegram。
 ///
 /// 此函數主要用於背景任務、資料庫異常或關鍵流程失敗時，向 Telegram 發送顯眼的警報。
@@ -373,6 +395,11 @@ impl crate::core::alert::AlertSink for TelegramAlertSink {
     async fn send_message(&self, topic: crate::core::alert::Topic, message: &str) {
         tracing::debug!(topic = topic.code(), "telegram message");
         send(message).await;
+    }
+
+    async fn send_to_chat(&self, topic: crate::core::alert::Topic, chat_id: i64, message: &str) {
+        tracing::debug!(topic = topic.code(), chat_id, "telegram routed message");
+        send_to_chat(chat_id, message).await;
     }
 }
 

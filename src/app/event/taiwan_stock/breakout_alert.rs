@@ -10,6 +10,8 @@
 //! 2019 年起約七成的突破在 10 個交易日內跌回突破價（第 19 輪 T12）。
 //!
 //! 排在 19:15 持股訊號通知之後。沒有任何訊號（含休市日）時不發送。只供參考，不構成投資建議。
+//!
+//! 「持股」標記依收件者範圍（會員系統計畫 7.6）：每個範圍各自產生一份，只標範圍內的持股。
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -19,15 +21,13 @@ use chrono::{Days, Local, NaiveDate};
 
 use super::technical_alert::MIN_OUTCOME_SAMPLES;
 use crate::{
-    core::{alert, util::text},
-    domain::{
-        portfolio::repository::PortfolioRepository,
-        quote::technical::{
-            BreakoutFollowUp, BreakoutFollowUpQuery, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR,
-            RankedSignal, RankedSignalQuery, SignalKind, SignalOutcome, TechnicalSignalQuery,
-        },
+    app::{event::taiwan_stock::holdings, notify},
+    core::{notify_topic::Topic, util::text},
+    domain::quote::technical::{
+        BreakoutFollowUp, BreakoutFollowUpQuery, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR,
+        RankedSignal, RankedSignalQuery, SignalKind, SignalOutcome, TechnicalSignalQuery,
     },
-    infra::database::repository::{portfolio::PgPortfolioRepository, quote::PgQuoteRepository},
+    infra::database::repository::quote::PgQuoteRepository,
 };
 
 /// 最多列出幾檔。
@@ -43,25 +43,21 @@ const FOLLOW_UP_DAYS: i64 = 5;
 ///
 /// # Errors
 ///
-/// 查詢訊號失敗時回傳錯誤；持股或歷史表現讀取失敗只記錄警告，照常通知。
+/// 查詢訊號失敗只記錄（不發）；持股或歷史表現讀取失敗只記錄警告，照常通知。
 pub async fn execute() -> Result<()> {
-    let holdings: BTreeSet<String> = match PgPortfolioRepository::new()
-        .fetch_active_holdings(None)
-        .await
-    {
-        Ok(holdings) => holdings
-            .into_iter()
-            .map(|holding| holding.security_code)
-            .collect(),
-        Err(why) => {
-            tracing::warn!("區間突破通知：讀取持股失敗，不標持股: {why:#}");
-            BTreeSet::new()
-        }
-    };
     let date = Local::now().date_naive();
-    if let Some(message) = run(&PgQuoteRepository::new(), date, &holdings).await? {
-        alert::notify_holdings_all(alert::Topic::HoldingsBreakout, &message).await;
-    }
+    let dedup_key = format!("{}:{date}", Topic::HoldingsBreakout.code());
+    notify::notify_holdings(Topic::HoldingsBreakout, &dedup_key, |view| async move {
+        let held: BTreeSet<String> = match holdings::active_holding_symbols(&view).await {
+            Ok(held) => held,
+            Err(why) => {
+                tracing::warn!("區間突破通知：讀取持股失敗，不標持股: {why:#}");
+                BTreeSet::new()
+            }
+        };
+        run(&PgQuoteRepository::new(), date, &held).await
+    })
+    .await;
     Ok(())
 }
 

@@ -10,8 +10,6 @@ use std::collections::HashSet;
 
 use chrono::NaiveDate;
 
-use crate::domain::household::DEFAULT_HOUSEHOLD_ID;
-
 use crate::domain::portfolio::{
     rebalance::{
         CurrentPosition, EtfLookThroughComponent, PortfolioPositionQuery, PortfolioRebalanceResult,
@@ -28,9 +26,6 @@ pub(super) const TOLERANCE_PERCENT: f64 = 2.0;
 
 /// 每個維度最多列出的偏離項目數。
 const MAX_ITEMS: usize = 5;
-
-/// 週報提醒的預設組合：預設家庭（#1）的全家合計。
-const MEMBER_ID: i64 = 0;
 
 /// 偏離方向：目前權重高於目標建議減碼，低於目標建議加碼。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,12 +191,16 @@ async fn etf_look_through_section(
 
 /// 載入預設組合的目標與持股，試算個股、產業與 ETF 穿透維度的偏離；任何一步失敗只記警告並略過該維度。
 /// `today` 用來判斷 ETF 成分資料是否過舊。
+///
+/// 目標與持股都依收件者範圍（會員系統計畫 7.6）：含家庭成員時為該家庭的全家目標與全家持股，
+/// 只含本人時為本人的目標與本人的持股。
 pub(super) async fn allocation_sections(
     targets: &impl PortfolioTargetRepository,
     positions: &impl PortfolioPositionQuery,
+    view: &HoldingView,
     today: NaiveDate,
 ) -> Vec<AllocationSection> {
-    let owner = TargetOwner::new(DEFAULT_HOUSEHOLD_ID, MEMBER_ID.to_string());
+    let owner = TargetOwner::new(view.household_id(), view.member_id_or_total().to_string());
     let records = match targets.list_targets(&owner, None).await {
         Ok(records) => records,
         Err(why) => {
@@ -217,10 +216,7 @@ pub(super) async fn allocation_sections(
         .filter(|record| record.dimension == TargetDimension::Stock)
         .map(|record| record.key.clone())
         .collect();
-    let held = match positions
-        .fetch_positions(&HoldingView::default_household(), &extra)
-        .await
-    {
+    let held = match positions.fetch_positions(view, &extra).await {
         Ok(held) => held,
         Err(why) => {
             tracing::warn!("每週市場摘要：讀取持股部位失敗: {why:#}");

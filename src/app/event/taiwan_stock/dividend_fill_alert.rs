@@ -15,6 +15,7 @@
 //!
 //! 落後只是陳述事實：2026-10 研究（T14）顯示遲遲未填息的股票之後多半落後大盤，不是加碼理由。
 
+use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
@@ -23,7 +24,8 @@ use rust_decimal::Decimal;
 
 use super::{format_decimal_with_commas, holdings};
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::dividend::{
         fill::{self, DividendFillQuery, FillOutcome, FillSummary},
         fill_stats::{self, BucketStats, YieldBucket, bucket_stats},
@@ -101,6 +103,26 @@ struct Review {
     lagging: Vec<Lagging>,
 }
 
+impl Review {
+    /// 只留下範圍內持股的事件（依收件者範圍產生內容，會員系統計畫 7.6）。
+    fn within(&self, held: &BTreeSet<String>) -> Self {
+        Self {
+            filled: self
+                .filled
+                .iter()
+                .filter(|(symbol, _)| held.contains(symbol))
+                .cloned()
+                .collect(),
+            lagging: self
+                .lagging
+                .iter()
+                .filter(|lagging| held.contains(&lagging.symbol))
+                .cloned()
+                .collect(),
+        }
+    }
+}
+
 /// 排程入口：通知今天填息與今天第一次落後基準的持股。
 ///
 /// # Errors
@@ -112,7 +134,7 @@ pub async fn execute() -> Result<()> {
 
 /// [`execute`] 的本體：以 `today` 判斷今天填息與今天第一次落後。
 async fn run(today: NaiveDate) -> Result<()> {
-    let symbols = holdings::active_holding_symbols()
+    let symbols = holdings::crawl_holding_symbols()
         .await
         .context("fetch active holdings for dividend fill notification failed")?;
     let repository = PgDividendFillRepository::new();
@@ -131,8 +153,20 @@ async fn run(today: NaiveDate) -> Result<()> {
         review.filled.len(),
         review.lagging.len()
     );
-    if let Some(message) = build_message(today, &review, holdings::stock_name) {
-        alert::notify_holdings_all(alert::Topic::HoldingsPayableFill, &message).await;
+    if !review.filled.is_empty() || !review.lagging.is_empty() {
+        let dedup_key = format!("{}:{today}", Topic::HoldingsPayableFill.code());
+        notify::notify_holdings(Topic::HoldingsPayableFill, &dedup_key, |view| {
+            let review = &review;
+            async move {
+                let held = holdings::active_holding_symbols(&view).await?;
+                Ok(build_message(
+                    today,
+                    &review.within(&held),
+                    holdings::stock_name,
+                ))
+            }
+        })
+        .await;
     }
     Ok(())
 }

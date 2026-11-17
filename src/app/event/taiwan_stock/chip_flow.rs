@@ -5,7 +5,8 @@
 //!
 //! ## 流程（週一至週五 21:40 排程）
 //!
-//! 1. 取目前持股的普通股代號（[`holdings::common_stock_holdings`]）。
+//! 1. 取所有會員目前持股的普通股代號作為檢查範圍（[`holdings::crawl_common_stocks`]）；
+//!    通知依收件者範圍只列範圍內的股票（會員系統計畫 7.6）。
 //! 2. 抓上市、上櫃的三大法人買賣超與融資融券餘額（官方全市場資料，各一次請求）；
 //!    任一來源失敗只記錄，其餘照常。全部都沒有資料（休市或尚未公布）就結束。
 //! 3. 更新 Redis 中每檔外資、投信的連續買賣超天數（`chip:streak:{代號}`），同一天重跑不重複累加。
@@ -26,7 +27,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{add_thousand_separators, holdings};
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::quote::repository::QuoteRepository,
     infra::{
         crawler::{
@@ -121,7 +123,7 @@ async fn collect_reports(
 ///
 /// 來源或單檔失敗只記錄、不中斷；只有查不到持股時回傳錯誤。
 pub async fn execute() -> Result<()> {
-    let symbols = holdings::common_stock_holdings()
+    let symbols = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for chip flow notification failed")?;
     let date = Local::now().date_naive();
@@ -146,10 +148,19 @@ pub async fn execute() -> Result<()> {
 
     let (summary, reports) = collect_reports(date, &symbols, &flows, &margins, &volumes).await;
     if !reports.is_empty() {
-        alert::notify_holdings_all(
-            alert::Topic::HoldingsChipFlow,
-            &build_message(date, &reports, holdings::stock_name),
-        )
+        let dedup_key = format!("{}:{date}", Topic::HoldingsChipFlow.code());
+        notify::notify_holdings(Topic::HoldingsChipFlow, &dedup_key, |view| {
+            let reports = &reports;
+            async move {
+                let held = holdings::common_stock_holdings(&view).await?;
+                let mine: Vec<ChipReport> = reports
+                    .iter()
+                    .filter(|report| held.contains(&report.stock_symbol))
+                    .cloned()
+                    .collect();
+                Ok((!mine.is_empty()).then(|| build_message(date, &mine, holdings::stock_name)))
+            }
+        })
         .await;
     }
     tracing::info!(

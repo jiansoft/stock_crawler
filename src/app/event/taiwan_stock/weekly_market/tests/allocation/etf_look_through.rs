@@ -68,7 +68,13 @@ fn etf_targets() -> FakeTargets {
 #[tokio::test]
 async fn etf_look_through_reports_exposure_including_etf_components() {
     let positions = etf_positions(today(), false);
-    let sections = allocation_sections(&etf_targets(), &positions, today()).await;
+    let sections = allocation_sections(
+        &etf_targets(),
+        &positions,
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert_eq!(
         sections,
         vec![AllocationSection {
@@ -118,7 +124,13 @@ async fn etf_look_through_reports_exposure_including_etf_components() {
 #[tokio::test]
 async fn etf_look_through_skips_stale_components_and_notes_them() {
     let stale = today() - chrono::Duration::days(46);
-    let sections = allocation_sections(&etf_targets(), &etf_positions(stale, false), today()).await;
+    let sections = allocation_sections(
+        &etf_targets(),
+        &etf_positions(stale, false),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert_eq!(sections.len(), 1);
     assert_eq!(sections[0].uncovered_etfs, vec!["0050".to_owned()]);
     assert_eq!(sections[0].drifts[0].deviation_percent, -10.0);
@@ -134,7 +146,13 @@ async fn etf_look_through_skips_stale_components_and_notes_them() {
 
     // 第 45 天仍算新鮮。
     let edge = today() - chrono::Duration::days(45);
-    let sections = allocation_sections(&etf_targets(), &etf_positions(edge, false), today()).await;
+    let sections = allocation_sections(
+        &etf_targets(),
+        &etf_positions(edge, false),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert!(sections[0].uncovered_etfs.is_empty());
 }
 
@@ -148,7 +166,13 @@ async fn etf_look_through_degrades_on_failure_and_stays_silent_within_tolerance(
         ],
         fail: false,
     };
-    let sections = allocation_sections(&targets, &etf_positions(today(), true), today()).await;
+    let sections = allocation_sections(
+        &targets,
+        &etf_positions(today(), true),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert_eq!(sections.len(), 1);
     assert_eq!(sections[0].dimension, TargetDimension::Stock);
 
@@ -157,9 +181,14 @@ async fn etf_look_through_degrades_on_failure_and_stays_silent_within_tolerance(
         fail: false,
     };
     assert!(
-        allocation_sections(&within, &etf_positions(today(), false), today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &within,
+            &etf_positions(today(), false),
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
 }
 

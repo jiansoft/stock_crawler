@@ -10,9 +10,14 @@ use crate::app::event::taiwan_stock::{
 };
 // 通知走 core::alert（port），跳脫工具走 core::util::text——
 // app 層不 import interfaces::bot，維持「外層依賴內層」的合法方向。
+use crate::app::notify;
 use crate::core::{alert, util::text};
-use crate::domain::money_flow::repository::MoneyFlowRepository;
-use crate::infra::database::repository::money_flow::PgMoneyFlowRepository;
+use crate::domain::household::DEFAULT_HOUSEHOLD_ID;
+use crate::domain::money_flow::{
+    entity::MoneyFlowMemberWithPreviousDay, repository::MoneyFlowRepository,
+};
+use crate::domain::portfolio::view::HoldingView;
+use crate::infra::database::repository::{holding_view, money_flow::PgMoneyFlowRepository};
 
 use super::EventDispatcher;
 
@@ -24,10 +29,18 @@ impl EventDispatcher {
         let rows = money_flow_repo
             .fetch_member_money_history_with_previous_day(date)
             .await?;
-        // 建立通知內容並透過 AlertSink port 發送（生產環境為 Telegram adapter）
-        if let Some(msg) = Self::build_money_change_message(&rows) {
-            alert::notify_holdings_all(alert::Topic::HoldingsMarketValue, &msg).await;
-        }
+        // 依收件者範圍只列範圍內成員的市值（會員系統計畫 7.6）
+        let dedup_key = format!("{}:{date}", alert::Topic::HoldingsMarketValue.code());
+        notify::notify_holdings(alert::Topic::HoldingsMarketValue, &dedup_key, |view| {
+            let rows = &rows;
+            async move {
+                let members = holding_view::member_ids(&view).await?;
+                Ok(Self::build_money_change_message(&rows_in_view(
+                    rows, &view, &members,
+                )))
+            }
+        })
+        .await;
 
         Ok(())
     }
@@ -98,5 +111,22 @@ impl EventDispatcher {
     }
 }
 
-#[cfg(test)]
-mod tests;
+/// 範圍內的市值列：只含本人時只有本人那一列；含家庭成員時為家庭成員與家庭合計（`member_id = 0`）。
+///
+/// 合計列目前只有預設家庭（結算依家庭分組在 Phase 7，2.7），其他家庭的範圍不列合計。
+fn rows_in_view(
+    rows: &[MoneyFlowMemberWithPreviousDay],
+    view: &HoldingView,
+    members: &[i64],
+) -> Vec<MoneyFlowMemberWithPreviousDay> {
+    rows.iter()
+        .filter(|row| match view.member_id() {
+            Some(member_id) => row.member_id == member_id,
+            None => {
+                members.contains(&row.member_id)
+                    || (row.member_id == 0 && view.household_id() == DEFAULT_HOUSEHOLD_ID)
+            }
+        })
+        .cloned()
+        .collect()
+}

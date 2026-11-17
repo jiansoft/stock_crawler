@@ -119,8 +119,10 @@ async fn notify_queries_previous_month_last_year_and_year_to_date() {
     }]);
     let today = date(2026, 12, 1);
 
-    let summary = load_summary(&repo, today).await.expect("彙總");
-    notify(&repo, None, today).await.expect("通知");
+    let summary = load_summary(&repo, &HoldingView::default_household(), today)
+        .await
+        .expect("彙總");
+    notify(&repo, today).await.expect("通知");
 
     assert_eq!(
         repo.queries()[..3],
@@ -259,8 +261,9 @@ async fn load_snapshot_accuracy_uses_latest_snapshot_before_month_end() {
     .await
     .expect("種入快照");
 
-    let result = load_snapshot_accuracy(date(2019, 12, 1)).await;
-    let before_any = load_snapshot_accuracy(date(2019, 11, 1)).await;
+    let result = load_snapshot_accuracy(&HoldingView::default_household(), date(2019, 12, 1)).await;
+    let before_any =
+        load_snapshot_accuracy(&HoldingView::default_household(), date(2019, 11, 1)).await;
     cleanup().await;
 
     let accuracy = result.expect("讀取快照誤差").expect("11 月有預估");

@@ -22,15 +22,13 @@ use chrono::{Days, Local, NaiveDate};
 
 use super::holdings;
 use crate::{
-    core::{alert, util::text},
-    domain::{
-        portfolio::repository::PortfolioRepository,
-        quote::technical::{
-            FIFTY_TWO_WEEK_INDICATOR, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RS50_INDICATOR,
-            RS80_INDICATOR, SignalOutcome, StockTechnicalSignal, TechnicalSignalQuery,
-        },
+    app::notify,
+    core::{notify_topic::Topic, util::text},
+    domain::quote::technical::{
+        FIFTY_TWO_WEEK_INDICATOR, OUTCOME_HORIZON, RANGE_BREAKOUT_INDICATOR, RS50_INDICATOR,
+        RS80_INDICATOR, SignalOutcome, StockTechnicalSignal, TechnicalSignalQuery,
     },
-    infra::database::repository::{portfolio::PgPortfolioRepository, quote::PgQuoteRepository},
+    infra::database::repository::quote::PgQuoteRepository,
 };
 
 /// 要通知的訊號來源，也是同一檔股票內訊號的排列順序。
@@ -54,21 +52,17 @@ pub const MIN_OUTCOME_SAMPLES: i64 = 30;
 ///
 /// # Errors
 ///
-/// 查詢持股或訊號失敗時回傳錯誤。
+/// 目前不會回傳錯誤：查詢持股或訊號失敗只記錄，這個範圍不發。內容依收件者範圍產生（會員系統計畫 7.6）。
 pub async fn execute() -> Result<()> {
-    let holdings = PgPortfolioRepository::new()
-        .fetch_active_holdings(None)
-        .await
-        .context("fetch active holdings for technical alert failed")?;
-    let symbols: BTreeSet<String> = holdings
-        .into_iter()
-        .map(|holding| holding.security_code)
-        .collect();
     let date = Local::now().date_naive();
-    let message = run(&PgQuoteRepository::new(), date, &symbols).await?;
-    if let Some(message) = message {
-        alert::notify_holdings_all(alert::Topic::HoldingsTechnical, &message).await;
-    }
+    let dedup_key = format!("{}:{date}", Topic::HoldingsTechnical.code());
+    notify::notify_holdings(Topic::HoldingsTechnical, &dedup_key, |view| async move {
+        let symbols = holdings::active_holding_symbols(&view)
+            .await
+            .context("fetch active holdings for technical alert failed")?;
+        run(&PgQuoteRepository::new(), date, &symbols).await
+    })
+    .await;
     Ok(())
 }
 

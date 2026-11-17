@@ -15,9 +15,10 @@ use super::find_next_trading_day;
 use crate::{
     app::calculation::{
         dividend_fill_hints::FillHints,
-        upcoming_dividends::{UpcomingDividend, total_shares, upcoming_dividends},
+        upcoming_dividends::{UpcomingDividend, rescope, total_shares, upcoming_dividends},
     },
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     infra::{database::repository::dividend::PgDividendRepository, nosql::redis::CLIENT},
 };
 
@@ -75,7 +76,8 @@ pub(super) fn preview_message(
 /// 查詢持股失敗時回傳錯誤；個別日期查詢失敗只記警告（見 [`upcoming_dividends`]）。
 pub(super) async fn send(today: NaiveDate, holidays: &HashSet<NaiveDate>) -> Result<()> {
     let (from, to) = preview_window(today, holidays);
-    let shares = total_shares(holdings::active_holding_quantities().await?);
+    // 所有會員的持股只用來找出要預告的除權息；預估金額依收件者範圍的股數計算（會員系統計畫 7.6）。
+    let shares = total_shares(holdings::crawl_holding_quantities().await?);
     let dividends = upcoming_dividends(&PgDividendRepository::new(), &shares, from, to).await;
 
     let mut fresh = Vec::with_capacity(dividends.len());
@@ -100,9 +102,19 @@ pub(super) async fn send(today: NaiveDate, holidays: &HashSet<NaiveDate>) -> Res
         .map(|dividend| dividend.stock_symbol.clone())
         .collect();
     let hints = FillHints::load(&symbols, today).await;
-    if let Some(message) = preview_message(from, to, &with_fill_hints(fresh, &hints)) {
-        alert::notify_holdings_all(alert::Topic::HoldingsExDividendPreview, &message).await;
-    }
+    let dedup_key = format!("{}:{today}", Topic::HoldingsExDividendPreview.code());
+    notify::notify_holdings(Topic::HoldingsExDividendPreview, &dedup_key, |view| {
+        let (fresh, hints) = (&fresh, &hints);
+        async move {
+            let shares = total_shares(holdings::active_holding_quantities(&view).await?);
+            Ok(preview_message(
+                from,
+                to,
+                &with_fill_hints(rescope(fresh, &shares), hints),
+            ))
+        }
+    })
+    .await;
     Ok(())
 }
 

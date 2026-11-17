@@ -47,6 +47,14 @@ impl PortfolioRepository for FakePayoutRepository {
         unimplemented!("入帳測試不查持股明細")
     }
 
+    async fn fetch_active_holdings_in(
+        &self,
+        _view: &HoldingView,
+        _security_codes: Option<Vec<String>>,
+    ) -> Result<Vec<StockOwnershipDetail>> {
+        unimplemented!("入帳測試不查持股明細")
+    }
+
     async fn find_holding_by_serial(&self, _serial: i64) -> Result<Option<StockOwnershipDetail>> {
         unimplemented!("入帳測試不查持股明細")
     }

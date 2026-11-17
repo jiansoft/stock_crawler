@@ -112,9 +112,14 @@ async fn no_targets_is_silent() {
         fail: false,
     };
     assert!(
-        allocation_sections(&targets, &even_positions(), today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &targets,
+            &even_positions(),
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
     assert!(lines(&[]).is_empty());
 }
@@ -129,9 +134,14 @@ async fn deviations_inside_tolerance_are_silent() {
         fail: false,
     };
     assert!(
-        allocation_sections(&targets, &even_positions(), today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &targets,
+            &even_positions(),
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
 }
 
@@ -146,7 +156,13 @@ async fn deviations_beyond_tolerance_are_listed_largest_first() {
         ],
         fail: false,
     };
-    let sections = allocation_sections(&targets, &even_positions(), today()).await;
+    let sections = allocation_sections(
+        &targets,
+        &even_positions(),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     // 個股：2330 50→30（+20 減碼）、2317 50→40（+10 減碼）；產業在容忍帶內不列。
     assert_eq!(sections.len(), 1, "{sections:?}");
     assert_eq!(sections[0].dimension, TargetDimension::Stock);
@@ -174,7 +190,13 @@ async fn industry_dimension_and_underweight_direction() {
         records: vec![target(TargetDimension::Industry, "半導體業", 80.0)],
         fail: false,
     };
-    let sections = allocation_sections(&targets, &even_positions(), today()).await;
+    let sections = allocation_sections(
+        &targets,
+        &even_positions(),
+        &HoldingView::default_household(),
+        today(),
+    )
+    .await;
     assert_eq!(sections.len(), 1, "{sections:?}");
     assert_eq!(sections[0].dimension, TargetDimension::Industry);
     // 半導體業 50%→80% 低配 30 點；其他電子業沒有目標（0%）超配 50 點，排在前面。
@@ -232,18 +254,28 @@ async fn source_failures_and_unpriced_positions_degrade_silently() {
         fail: true,
     };
     assert!(
-        allocation_sections(&failing_targets, &even_positions(), today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &failing_targets,
+            &even_positions(),
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
     let failing_positions = FakePositions {
         positions: Vec::new(),
         fail: true,
     };
     assert!(
-        allocation_sections(&ok_targets(), &failing_positions, today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &ok_targets(),
+            &failing_positions,
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
     // 缺收盤價（價格 0）時試算被拒絕，不能憑空算出偏離。
     let unpriced = FakePositions {
@@ -251,9 +283,14 @@ async fn source_failures_and_unpriced_positions_degrade_silently() {
         fail: false,
     };
     assert!(
-        allocation_sections(&ok_targets(), &unpriced, today())
-            .await
-            .is_empty()
+        allocation_sections(
+            &ok_targets(),
+            &unpriced,
+            &HoldingView::default_household(),
+            today()
+        )
+        .await
+        .is_empty()
     );
 }
 
@@ -269,16 +306,12 @@ fn message_includes_allocation_only_when_drifting() {
         uncovered_etfs: Vec::new(),
     };
     let sections = [section];
-    let message = build_message(
+    let message = build_holdings_message(
         None,
-        None,
-        None,
-        &[],
         HoldingSection {
             allocation: &sections,
             ..Default::default()
         },
-        None,
         name,
     )
     .expect("有偏離提醒");
@@ -290,23 +323,19 @@ fn message_includes_allocation_only_when_drifting() {
         message.contains(&esc("• 個股：2330 台積電 +12.3%（可考慮減碼）")),
         "{message}"
     );
-    assert!(build_message(None, None, None, &[], HoldingSection::default(), None, name).is_none());
+    assert!(build_message(None, None, None, &[], MarketExtras::default(), None, name).is_none());
     let empty = [AllocationSection {
         dimension: TargetDimension::Stock,
         drifts: Vec::new(),
         uncovered_etfs: Vec::new(),
     }];
     assert!(
-        build_message(
+        build_holdings_message(
             None,
-            None,
-            None,
-            &[],
             HoldingSection {
                 allocation: &empty,
                 ..Default::default()
             },
-            None,
             name,
         )
         .is_none()

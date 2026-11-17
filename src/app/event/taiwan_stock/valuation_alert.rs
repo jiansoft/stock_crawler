@@ -4,7 +4,8 @@
 //! （≥ 第 90 百分位）或低檔（≤ 第 10 百分位）的持股。統計規則與 Data API 的
 //! `/stocks/{symbol}/valuation-band` 相同（[`valuation_band::summarize`]）。
 //!
-//! - 只看持股中的普通股（[`holdings::common_stock_holdings`]）。
+//! - 只看持股中的普通股：計算範圍為所有會員的持股（[`holdings::crawl_common_stocks`]），
+//!   通知依收件者範圍只列範圍內的持股（[`holdings::common_stock_holdings`]，會員系統計畫 7.6）。
 //! - 有效樣本不足 [`MIN_SAMPLES`] 天（新上市、長期虧損）或最新報價超過
 //!   [`MAX_STALE_DAYS`] 天（停牌）的股票不列入，避免樣本太少的百分位誤導。
 //! - 沒有任何持股落在高檔或低檔時不發送。
@@ -17,7 +18,8 @@ use rust_decimal::Decimal;
 
 use super::holdings;
 use crate::{
-    core::{alert, util::text},
+    app::notify,
+    core::{notify_topic::Topic, util::text},
     domain::quote::valuation_band::{self, DailyRatio, ValuationHistoryRepository},
     infra::database::repository::quote::PgQuoteRepository,
 };
@@ -77,13 +79,14 @@ struct Flag {
 ///
 /// 查詢持股失敗時回傳錯誤（交給排程告警）；單檔查詢失敗只記錄、不中斷。
 pub async fn execute() -> Result<()> {
-    let symbols = holdings::common_stock_holdings()
+    let symbols = holdings::crawl_common_stocks()
         .await
         .context("fetch active holdings for valuation alert failed")?;
+    let today = Local::now().date_naive();
     let flags = collect_flags(
         &PgQuoteRepository::new(),
         symbols.iter().map(String::as_str),
-        Local::now().date_naive(),
+        today,
     )
     .await;
     tracing::info!(
@@ -91,8 +94,21 @@ pub async fn execute() -> Result<()> {
         symbols.len(),
         flags.len()
     );
-    if let Some(message) = build_message(&flags, holdings::stock_name) {
-        alert::notify_holdings_all(alert::Topic::HoldingsValuation, &message).await;
+    if !flags.is_empty() {
+        let dedup_key = format!("{}:{today}", Topic::HoldingsValuation.code());
+        notify::notify_holdings(Topic::HoldingsValuation, &dedup_key, |view| {
+            let flags = &flags;
+            async move {
+                let held = holdings::common_stock_holdings(&view).await?;
+                let mine: Vec<Flag> = flags
+                    .iter()
+                    .filter(|flag| held.contains(&flag.stock_symbol))
+                    .cloned()
+                    .collect();
+                Ok(build_message(&mine, holdings::stock_name))
+            }
+        })
+        .await;
     }
     Ok(())
 }

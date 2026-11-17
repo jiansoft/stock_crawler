@@ -51,3 +51,25 @@ fn test_build_money_change_message_includes_hugo() {
     assert!(msg.contains("577,792\\.10"));
     assert!(msg.contains("\\-12,412\\.60"));
 }
+
+/// 只含本人時只有本人一列（沒有合計）；含家庭成員時為家庭成員與合計；其他家庭不列預設家庭的合計。
+#[test]
+fn rows_in_view_follows_recipient_scope() {
+    let row = |member_id: i64| MoneyFlowMemberWithPreviousDay {
+        date: chrono::NaiveDate::from_ymd_opt(2026, 11, 17).expect("合法日期"),
+        previous_date: None,
+        member_id,
+        market_value: rust_decimal::Decimal::ONE,
+        previous_market_value: rust_decimal::Decimal::ONE,
+    };
+    let rows = vec![row(0), row(1), row(2), row(9)];
+    let ids = |rows: Vec<MoneyFlowMemberWithPreviousDay>| -> Vec<i64> {
+        rows.into_iter().map(|row| row.member_id).collect()
+    };
+    assert_eq!(ids(rows_in_view(&rows, &HoldingView::member(1, 2), &[2])), [2]);
+    assert_eq!(
+        ids(rows_in_view(&rows, &HoldingView::household(1), &[1, 2])),
+        [0, 1, 2]
+    );
+    assert_eq!(ids(rows_in_view(&rows, &HoldingView::household(2), &[9])), [9]);
+}
