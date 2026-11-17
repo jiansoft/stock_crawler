@@ -22,9 +22,10 @@ COMMENT ON TABLE public.member_household IS '家庭：合計與跨成員檢視�
 INSERT INTO public.member_household (id, name)
 VALUES (1, 'Eddie 家')
 ON CONFLICT (id) DO NOTHING;
--- 序列對齊到目前最大值；重複執行不會倒退（寫死 1 會在已有第 2 個家庭時倒退而撞號）
+-- 保留序列已發出的號碼；刪除最新家庭後重跑結構檔也不能重用其識別碼。
 SELECT setval(pg_get_serial_sequence('public.member_household', 'id'),
-              (SELECT MAX(id) FROM public.member_household), true);
+              GREATEST((SELECT MAX(id) FROM public.member_household),
+                       pg_sequence_last_value(pg_get_serial_sequence('public.member_household', 'id')::regclass)), true);
 
 -- =============================================================================
 -- 1. 擴充既有 public."Member"（相容升級）
@@ -62,11 +63,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_member_email_unique
     ON public."Member" (lower(email))
     WHERE email IS NOT NULL;
 
--- 對齊序列：空表時讓下一個號碼是 1（is_called = false），有資料時從 MAX("Id")+1 取號。
--- 不用 COALESCE(MAX, 1) + true：在空表會讓第一位會員拿到 2。
-SELECT setval('public."Member_Id_seq"',
-              COALESCE((SELECT MAX("Id") FROM public."Member"), 1),
-              (SELECT MAX("Id") FROM public."Member") IS NOT NULL);
+-- 保留已發出的號碼，避免會員刪除後重跑 DDL，將新會員與舊稽核 target_id 混在一起。
+-- 從未取號的空庫仍保持 is_called=false，第一位會員取得 1。
+DO $$
+DECLARE maximum_id bigint; sequence_value bigint; sequence_called boolean;
+BEGIN
+    SELECT MAX("Id") INTO maximum_id FROM public."Member";
+    SELECT last_value, is_called INTO sequence_value, sequence_called FROM public."Member_Id_seq";
+    PERFORM setval('public."Member_Id_seq"', GREATEST(COALESCE(maximum_id, 1), sequence_value),
+                   sequence_called OR maximum_id IS NOT NULL);
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_member_account_unique
     ON public."Member" (lower("Account"))
