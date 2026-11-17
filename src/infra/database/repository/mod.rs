@@ -27,6 +27,8 @@ pub mod market_index;
 pub mod market_valuation;
 pub mod money_flow;
 // 通知項目目錄（notify_topic）的啟動寫入。
+/// 通知送達紀錄的原子佔位與逾時對帳。
+pub mod notify_delivery;
 pub mod notify_route;
 pub mod notify_topic;
 pub mod official_ratio;

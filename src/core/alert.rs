@@ -27,6 +27,16 @@ use async_trait::async_trait;
 
 pub use crate::core::notify_topic::Topic;
 
+/// 發送失敗的最小資訊，不攜帶 Telegram URL、Token 或通知內容。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("通知發送失敗（代碼 {error_code:?}）")]
+pub struct SendFailure {
+    /// Telegram 錯誤碼；連線失敗時為空。
+    pub error_code: Option<i32>,
+    /// 管道已失效的原因；其餘錯誤只累計失敗次數。
+    pub disabled_reason: Option<&'static str>,
+}
+
 /// 告警發送介面（port）。
 ///
 /// 由外層（interfaces）提供實作並於啟動時註冊；core/infra 透過 [`notify_system`]、[`notify_system_text`]、
@@ -41,6 +51,22 @@ pub trait AlertSink: Send + Sync {
 
     /// 發送已組好的訊息到指定聊天室（依訂閱分送的收件者，7.6）。
     async fn send_to_chat(&self, topic: Topic, chat_id: i64, message: &str);
+
+    /// 回報聊天室的實際送達結果；Telegram adapter 覆寫以保留錯誤碼。
+    async fn send_to_chat_checked(
+        &self,
+        topic: Topic,
+        chat_id: i64,
+        message: &str,
+    ) -> Result<(), SendFailure> {
+        self.send_to_chat(topic, chat_id, message).await;
+        Ok(())
+    }
+
+    /// 直接送設定檔的聊天室，避免再次解析路由而形成遞迴。
+    async fn send_legacy(&self, topic: Topic, message: &str) {
+        self.send_message(topic, message).await;
+    }
 }
 
 /// 全域告警管道。`OnceLock` 保證只會被成功註冊一次。
@@ -104,7 +130,29 @@ pub async fn send_to_chat(topic: Topic, chat_id: i64, message: &str) {
 
 /// 送到設定檔內的聊天室（尚未依訂閱分送的主題，`app::notify` 使用）。
 pub async fn send_legacy(topic: Topic, message: &str) {
-    send_message(topic, message).await;
+    if let Some(sink) = ALERT_SINK.get() {
+        sink.send_legacy(topic, message).await;
+    } else {
+        tracing::warn!(
+            "alert sink not registered; legacy message dropped: [{}]",
+            topic.code()
+        );
+    }
+}
+
+/// 發送並取得結果；沒有 adapter 時回失敗，不能記為已送達。
+pub async fn send_to_chat_checked(
+    topic: Topic,
+    chat_id: i64,
+    message: &str,
+) -> Result<(), SendFailure> {
+    match ALERT_SINK.get() {
+        Some(sink) => sink.send_to_chat_checked(topic, chat_id, message).await,
+        None => Err(SendFailure {
+            error_code: None,
+            disabled_reason: None,
+        }),
+    }
 }
 
 async fn send_message(topic: Topic, message: &str) {

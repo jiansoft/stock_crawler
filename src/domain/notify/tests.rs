@@ -4,6 +4,8 @@ fn route(holdings_view: &str) -> NotifyRoute {
     NotifyRoute {
         member_id: 2,
         household_id: 1,
+        channel_id: 1,
+        announce_new_topic: false,
         holdings_view: holdings_view.to_string(),
         chat_id: 900,
     }

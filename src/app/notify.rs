@@ -9,8 +9,8 @@
 //!   極端價格狀態；只合併同一收件會員的聊天室。
 //! - 尚未切換：以「預設家庭、全體成員」呼叫一次 `build`，照舊送設定檔內的聊天室（N3 之前的行為）。
 //!
-//! `dedup_key` 是這一次事件的識別（例如 `holdings.payable:2026-11-10`）；送達紀錄的先佔位與重跑去重
-//! 在 N5（5-08）接上，這一步只用於記錄。
+//! `dedup_key` 是這一次事件的識別（例如 `holdings.payable:2026-11-10`），由送達紀錄先佔位再發送；
+//! 個人類不使用這個鍵，保留極端價格快取的語意。
 
 use std::future::Future;
 
@@ -29,14 +29,11 @@ use crate::{
     infra::database::repository::notify_route::PgNotifyRouteRepository,
 };
 
-/// 已切換為依訂閱分送的主題：逗號分隔的項目代碼，`all` 代表全部持股與個人類項目；未設定時全部維持舊行為。
+/// 已切換為依訂閱分送的主題：逗號分隔的項目代碼，`all` 代表全部項目；未設定時維持舊行為。
 pub const ROUTED_TOPICS_ENV: &str = "NOTIFY_ROUTED_TOPICS";
 
-/// 主題是否已切換為依訂閱分送（只有持股與個人類項目會切換；市場與系統類在 N5）。
+/// 主題是否已切換為依訂閱分送，包含市場與系統類。
 pub fn is_routed(topic: Topic, setting: &str) -> bool {
-    if !matches!(topic.audience(), Audience::Holdings | Audience::Personal) {
-        return false;
-    }
     setting
         .split(',')
         .map(str::trim)
@@ -51,6 +48,18 @@ pub trait HoldingsSender: Send + Sync {
 
     /// 送到一位收件者的聊天室。
     async fn send_to_chat(&self, topic: Topic, chat_id: i64, message: &str);
+
+    /// 完整路由的送達入口；正式實作先佔位，成功送出才回 true。
+    async fn send_to_route(
+        &self,
+        topic: Topic,
+        route: &NotifyRoute,
+        _key: &str,
+        message: &str,
+    ) -> bool {
+        self.send_to_chat(topic, route.chat_id, message).await;
+        true
+    }
 }
 
 /// 經 [`alert`] 送出（main 註冊的 Telegram adapter）。
@@ -65,6 +74,16 @@ impl HoldingsSender for AlertSender {
 
     async fn send_to_chat(&self, topic: Topic, chat_id: i64, message: &str) {
         alert::send_to_chat(topic, chat_id, message).await;
+    }
+
+    async fn send_to_route(
+        &self,
+        topic: Topic,
+        route: &NotifyRoute,
+        key: &str,
+        message: &str,
+    ) -> bool {
+        super::notify_delivery::deliver(topic, route, key, message).await
     }
 }
 
@@ -184,10 +203,19 @@ where
                 continue;
             }
         };
-        for chat_id in chats {
-            sender.send_to_chat(topic, chat_id, &message).await;
-            summary.sent += 1;
-        }
+        let key = if topic.audience() == Audience::Personal {
+            ""
+        } else {
+            dedup_key
+        };
+        let sends = chats
+            .iter()
+            .map(|route| sender.send_to_route(topic, route, key, &message));
+        summary.sent += futures::future::join_all(sends)
+            .await
+            .into_iter()
+            .filter(|sent| *sent)
+            .count();
     }
     tracing::info!(
         "{dedup_key}：{} 依 {} 個範圍分送 {} 則",
@@ -202,8 +230,8 @@ where
 fn group_by_recipient(
     routes: &[NotifyRoute],
     per_recipient: bool,
-) -> Vec<(HoldingView, Option<i64>, Vec<i64>)> {
-    let mut groups: Vec<(HoldingView, Option<i64>, Vec<i64>)> = Vec::new();
+) -> Vec<(HoldingView, Option<i64>, Vec<NotifyRoute>)> {
+    let mut groups: Vec<(HoldingView, Option<i64>, Vec<NotifyRoute>)> = Vec::new();
     for route in routes {
         let view = route.view();
         let recipient = per_recipient.then_some(route.member_id);
@@ -212,11 +240,14 @@ fn group_by_recipient(
             .find(|(existing, member, _)| *existing == view && *member == recipient)
         {
             Some((_, _, chats)) => {
-                if !chats.contains(&route.chat_id) {
-                    chats.push(route.chat_id);
+                if !chats
+                    .iter()
+                    .any(|existing| existing.chat_id == route.chat_id)
+                {
+                    chats.push(route.clone());
                 }
             }
-            None => groups.push((view, recipient, vec![route.chat_id])),
+            None => groups.push((view, recipient, vec![route.clone()])),
         }
     }
     groups

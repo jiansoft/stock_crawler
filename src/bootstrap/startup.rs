@@ -136,6 +136,10 @@ pub(crate) async fn start() -> Result<Running, Box<dyn Error>> {
         Err(why) => tracing::warn!("startup notify_topic upsert failed: {why:#}"),
     }
 
+    // 送達對帳與系統路由刷新不依賴每日排程；資料庫暫時故障只記錄，沿用最後快照。
+    app::notify_delivery::spawn_reconciliation();
+    app::notify_common::spawn_refresh();
+
     // ── 9. 排程器建立 ───────────────────────────────────────────────────────
     // `JobScheduler::new()` 建立 tokio-cron-scheduler 實例，但尚未啟動任何 job。
     // 內部會建立 Tokio channel 與背景輪詢 task，因此需要 .await。

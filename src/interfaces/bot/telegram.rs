@@ -3,10 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use chrono::Local;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
-use tokio::time::Instant;
 
 // MarkdownV2 跳脫工具（text::escape_markdown_v2）住在 core 層：
 // app 層組訊息與這裡的 adapter 都需要同一套跳脫規則，
@@ -76,41 +73,10 @@ const MARKDOWN_V2: &str = "MarkdownV2";
 /// 純文字模式：`parse_mode` 留空時 Telegram 不解析任何標記。
 const PLAIN_TEXT: &str = "";
 
-/// 兩則訊息之間的最小間隔。
-///
-/// Telegram 對同一個 chat 的限制約為 1 msg/s，對整個 bot token 約為 30 msg/s。
-/// 由於所有出站訊息都會經過 [`acquire_send_slot`] 排成一列，這個間隔同時滿足
-/// 兩條限制。多留 100ms 安全邊際，因為官方門檻是浮動且未文件化的。
-const MIN_SEND_INTERVAL: Duration = Duration::from_millis(1_100);
-
-/// 上一則訊息實際送出的時間點；`None` 代表本次程序啟動後尚未送過。
-///
-/// 用 `tokio::sync::Mutex` 而非 `std::sync::Mutex`：持有期間必須跨越
-/// `sleep().await`，同步鎖會擋住整個 executor 執行緒。
-///
-/// 時間戳用 `tokio::time::Instant` 而非 `std::time::Instant`，
-/// 這樣測試才能以 `start_paused` 的虛擬時鐘驗證節流，不必真的等上一秒。
-static LAST_SENT_AT: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
-
-/// 取得一個發送許可：等到距離上一則訊息已滿 [`MIN_SEND_INTERVAL`] 為止。
-///
-/// 鎖會一路持有到等待結束，因此並行的呼叫端會被排成一列依序取得許可，
-/// 不會出現多個 task 同時醒來一起打 API 的情況。
-///
-/// 這是原本缺少的一環：先前每個呼叫點各自 `join_all` 併發打 Telegram API，
-/// 一份被切成多段的長報表會在一秒內把整批送出，必然撞上 429。
-async fn acquire_send_slot() {
-    let mut last_sent_at = LAST_SENT_AT.lock().await;
-
-    if let Some(previous) = *last_sent_at {
-        let elapsed = previous.elapsed();
-        if elapsed < MIN_SEND_INTERVAL {
-            tokio::time::sleep(MIN_SEND_INTERVAL - elapsed).await;
-        }
-    }
-
-    *last_sent_at = Some(Instant::now());
-}
+/// 各聊天室與全域共用的行程內發送佇列。
+mod send_queue;
+use send_queue::SendQueue;
+static SEND_QUEUE: std::sync::LazyLock<SendQueue> = std::sync::LazyLock::new(SendQueue::default);
 
 impl Telegram {
     /// 建立 Telegram API 客戶端。
@@ -172,7 +138,7 @@ impl Telegram {
     ///
     /// 一律送完全部接收者才回傳，不會因為前一位成功就略過其餘的人。
     ///
-    /// 送出是序列的而非 `join_all` 併發：每則都要先取得 [`acquire_send_slot`]
+    /// 送出是序列的而非 `join_all` 併發：每則都要先取得行程內佇列
     /// 的許可，併發也只是全部塞在鎖上排隊，徒增同時打 API 的機會。
     ///
     /// # 回傳
@@ -226,6 +192,51 @@ impl Telegram {
         first_ok.ok_or(retry_after)
     }
 
+    /// 單一聊天室的可追蹤發送，保留 API 錯誤碼，失效管道不再嘗試純文字重送。
+    async fn send_checked(
+        &self,
+        chat_id: i64,
+        message: &str,
+    ) -> Result<(), crate::core::alert::SendFailure> {
+        let mut response = self
+            .send_message(SendMessageRequest::new(chat_id, message))
+            .await
+            .ok();
+        if response.as_ref().is_some_and(|r| r.ok) {
+            return Ok(());
+        }
+        if response.as_ref().is_some_and(|r| r.error_code == Some(429)) {
+            let seconds = response
+                .as_ref()
+                .and_then(|r| r.parameters.as_ref())
+                .and_then(|p| p.retry_after)
+                .unwrap_or(1)
+                .saturating_add(1);
+            tokio::time::sleep(Duration::from_secs(seconds)).await;
+            response = self
+                .send_message(SendMessageRequest::new(chat_id, message))
+                .await
+                .ok();
+            if response.as_ref().is_some_and(|r| r.ok) {
+                return Ok(());
+            }
+        }
+        let failure = send_failure(response.as_ref());
+        if failure.disabled_reason.is_some() {
+            return Err(failure);
+        }
+        let clean = message.replace('\\', "");
+        let mut request = SendMessageRequest::new(chat_id, &clean);
+        request.parse_mode = PLAIN_TEXT;
+        let response = self.send_message(request).await.ok();
+        if response.as_ref().is_some_and(|r| r.ok) {
+            Ok(())
+        } else {
+            Err(send_failure(response.as_ref()))
+        }
+    }
+
+    /// 所有初次發送、重送與純文字降級共用同一條出站佇列。
     fn send_message<'a>(
         &'a self,
         payload: SendMessageRequest<'a>,
@@ -234,7 +245,7 @@ impl Telegram {
         Box::pin(async move {
             // 節流放在最底層：不論來自 broadcast 的哪一輪（首次、429 重送、
             // 純文字降級），每一次實際的 API 呼叫都會被排進同一條佇列。
-            acquire_send_slot().await;
+            SEND_QUEUE.acquire(payload.chat_id).await;
 
             http::post_use_json::<SendMessageRequest, SendMessageResponse>(
                 &self.send_message_url,
@@ -244,6 +255,28 @@ impl Telegram {
             .await
             .map_err(|err| anyhow!("Failed to send_message because: {:?}", err))
         })
+    }
+}
+
+/// 只擷取可安全保存的錯誤碼與停用原因，不把 HTTP URL 或通知本文帶到送達紀錄。
+fn send_failure(response: Option<&SendMessageResponse>) -> crate::core::alert::SendFailure {
+    let code = response.and_then(|r| r.error_code);
+    let disabled_reason = match code {
+        Some(403) => Some("blocked_by_user"),
+        Some(400)
+            if response
+                .and_then(|r| r.description.as_deref())
+                .is_some_and(|description| {
+                    description.to_ascii_lowercase().contains("chat not found")
+                }) =>
+        {
+            Some("chat_not_found")
+        }
+        _ => None,
+    };
+    crate::core::alert::SendFailure {
+        error_code: code,
+        disabled_reason,
     }
 }
 
@@ -325,7 +358,7 @@ fn split_message_into_chunks(msg: &str, limit: usize) -> Vec<String> {
 /// # Arguments
 ///
 /// * `msg` - 要發送的消息內容
-pub async fn send(msg: &str) {
+async fn send(msg: &str) {
     if msg.trim().is_empty() {
         return;
     }
@@ -346,7 +379,7 @@ async fn send_single(msg: &str) {
 }
 
 /// 發送到指定聊天室（依訂閱分送的收件者，7.6）；長訊息與 [`send`] 一樣切段。
-pub async fn send_to_chat(chat_id: i64, msg: &str) {
+async fn send_to_chat(chat_id: i64, msg: &str) {
     if msg.trim().is_empty() {
         return;
     }
@@ -359,21 +392,28 @@ pub async fn send_to_chat(chat_id: i64, msg: &str) {
     }
 }
 
-/// 發送關鍵警報訊息至 Telegram。
-///
-/// 此函數主要用於背景任務、資料庫異常或關鍵流程失敗時，向 Telegram 發送顯眼的警報。
-///
-/// # 參數
-/// * `alert_title` - 警報的標題
-/// * `details` - 警報的詳細內容或錯誤堆疊
-pub async fn send_alert(alert_title: &str, details: &str) {
-    let msg = format!(
+/// 發送完整訊息並回報結果；任一切段失敗即停止，避免繼續送出不完整內容。
+async fn send_to_chat_checked(
+    chat_id: i64,
+    message: &str,
+) -> Result<(), crate::core::alert::SendFailure> {
+    if message.trim().is_empty() {
+        return Ok(());
+    }
+    for chunk in split_message_into_chunks(message, MAX_MESSAGE_LEN) {
+        get_client().send_checked(chat_id, &chunk).await?;
+    }
+    Ok(())
+}
+
+/// 警報格式集中組裝，尚未切換主題時與既有訊息文字一致。
+fn format_alert_message(alert_title: &str, details: &str) -> String {
+    format!(
         "⚠️ *【系統關鍵警報】*\n*標題*︰{}\n*時間*︰{}\n*詳情*︰\n```\n{}\n```",
         text::escape_markdown_v2(alert_title),
         text::escape_markdown_v2(Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
         text::escape_markdown_v2(details)
-    );
-    send(&msg).await;
+    )
 }
 
 /// 把 Telegram 通知接上 `core::alert::AlertSink` port 的 adapter。
@@ -386,20 +426,33 @@ pub struct TelegramAlertSink;
 
 #[async_trait::async_trait]
 impl crate::core::alert::AlertSink for TelegramAlertSink {
-    // N1（會員系統計畫 7.7）：Topic 只用來標示項目，全部仍送設定檔內的聊天室；依訂閱分送在 N4／N5。
     async fn send_alert(&self, topic: crate::core::alert::Topic, title: &str, message: &str) {
         tracing::debug!(topic = topic.code(), "telegram alert");
-        send_alert(title, message).await;
+        let message = format_alert_message(title, message);
+        crate::app::notify_common::notify_common(topic, &message).await;
     }
 
     async fn send_message(&self, topic: crate::core::alert::Topic, message: &str) {
         tracing::debug!(topic = topic.code(), "telegram message");
-        send(message).await;
+        crate::app::notify_common::notify_common(topic, message).await;
     }
 
     async fn send_to_chat(&self, topic: crate::core::alert::Topic, chat_id: i64, message: &str) {
         tracing::debug!(topic = topic.code(), chat_id, "telegram routed message");
         send_to_chat(chat_id, message).await;
+    }
+
+    async fn send_to_chat_checked(
+        &self,
+        _topic: crate::core::alert::Topic,
+        chat_id: i64,
+        message: &str,
+    ) -> Result<(), crate::core::alert::SendFailure> {
+        send_to_chat_checked(chat_id, message).await
+    }
+
+    async fn send_legacy(&self, _topic: crate::core::alert::Topic, message: &str) {
+        send(message).await;
     }
 }
 

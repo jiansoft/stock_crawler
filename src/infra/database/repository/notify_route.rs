@@ -15,8 +15,8 @@ pub struct PgNotifyRouteRepository;
 #[async_trait]
 impl NotifyRouteRepository for PgNotifyRouteRepository {
     async fn fetch_routes(&self, topic: &str) -> Result<Vec<NotifyRoute>> {
-        let rows: Vec<(i64, i64, String, String)> = sqlx::query_as(
-            r#"SELECT member_id, household_id, holdings_view, address
+        let rows: Vec<(i64, i64, i64, String, String, bool)> = sqlx::query_as(
+            r#"SELECT member_id, household_id, channel_id, holdings_view, address, announce_new_topic
                FROM member_notify_route
                WHERE topic = $1 AND kind = 'telegram'
                ORDER BY member_id, channel_id"#,
@@ -26,12 +26,16 @@ impl NotifyRouteRepository for PgNotifyRouteRepository {
         .await
         .with_context(|| format!("查詢通知路由 {topic} 失敗"))?;
         let mut routes = Vec::with_capacity(rows.len());
-        for (member_id, household_id, holdings_view, address) in rows {
+        for (member_id, household_id, channel_id, holdings_view, address, announce_new_topic) in
+            rows
+        {
             // address 由 stock_go 寫入 Telegram chat_id；無法解析的列略過並記錄，不影響其他收件者。
             match address.parse::<i64>() {
                 Ok(chat_id) => routes.push(NotifyRoute {
                     member_id,
                     household_id,
+                    channel_id,
+                    announce_new_topic,
                     holdings_view,
                     chat_id,
                 }),

@@ -150,6 +150,8 @@ impl crate::domain::notify::NotifyRouteRepository for TraceRoutes {
             .map(|id| crate::domain::notify::NotifyRoute {
                 member_id: id,
                 household_id: 1,
+                channel_id: id,
+                announce_new_topic: false,
                 holdings_view: "own".into(),
                 chat_id: id + 100,
             })

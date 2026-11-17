@@ -358,8 +358,13 @@ CREATE TABLE IF NOT EXISTS public.member_notify_subscription (
     updated_at    timestamp with time zone NOT NULL DEFAULT now(),
     -- false = 會員明確關閉。保留這一列，對帳排程才不會把「預設開」的主題又補訂回來（7.5）
     enabled       boolean NOT NULL DEFAULT true,
+    -- 背景對帳補訂的新項目首次送達時提示；初次綁定、既有路由與手動訂閱維持 false。
+    announce_new_topic boolean NOT NULL DEFAULT false,
     PRIMARY KEY (member_id, topic)
 );
+
+ALTER TABLE public.member_notify_subscription
+    ADD COLUMN IF NOT EXISTS announce_new_topic boolean NOT NULL DEFAULT false;
 
 -- 送達紀錄：不存訊息內容（內容含持股與金額），只記錄送給誰、哪個主題、結果；保留 90 天（清理排程見 4.4）
 -- 採「先佔位、再發送、後更新」：若「送出後才寫 sent」，在送出與寫入之間當機，
@@ -381,6 +386,11 @@ CREATE TABLE IF NOT EXISTS public.member_notify_delivery (
 
 CREATE INDEX IF NOT EXISTS idx_member_notify_delivery_member
     ON public.member_notify_delivery (member_id, created_at DESC);
+-- 首次送達提示及五分鐘的 pending 對帳不必掃描整份送達歷史。
+CREATE INDEX IF NOT EXISTS idx_member_notify_delivery_first
+    ON public.member_notify_delivery (member_id, topic) WHERE status IN ('sent', 'unknown');
+CREATE INDEX IF NOT EXISTS idx_member_notify_delivery_pending
+    ON public.member_notify_delivery (created_at) WHERE status = 'pending';
 -- 同一聊天室、同一主題、同一去重鍵只能有一筆「進行中或已送達」；failed 不佔位，所以可以重試
 CREATE UNIQUE INDEX IF NOT EXISTS idx_member_notify_delivery_dedup
     ON public.member_notify_delivery (channel_id, topic, dedup_key)
@@ -389,7 +399,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_member_notify_delivery_dedup
 -- stock_rust 分送時讀取的路由：啟用中、未刪除、已完成首次改密的會員 × 有效管道 × 訂閱
 CREATE OR REPLACE VIEW public.member_notify_route AS
 SELECT s.topic, s.holdings_view, m."Id" AS member_id, m.household_id,
-       c.id AS channel_id, c.kind, c.address, c.chat_type
+       c.id AS channel_id, c.kind, c.address, c.chat_type, s.announce_new_topic
 FROM public.member_notify_subscription AS s
 JOIN public."Member" AS m
   ON m."Id" = s.member_id AND m.is_active AND m.deleted_at IS NULL AND NOT m.must_change_password

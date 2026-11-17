@@ -48,6 +48,8 @@ fn route(member_id: i64, household_id: i64, holdings_view: &str, chat_id: i64) -
     NotifyRoute {
         member_id,
         household_id,
+        channel_id: chat_id,
+        announce_new_topic: false,
         holdings_view: holdings_view.to_string(),
         chat_id,
     }
@@ -64,7 +66,7 @@ async fn build(view: HoldingView) -> Result<Option<String>> {
 }
 
 #[test]
-fn routed_setting_accepts_codes_and_all_but_only_for_holdings_and_personal() {
+fn routed_setting_accepts_codes_and_all_for_every_audience() {
     assert!(is_routed(Topic::HoldingsPayable, "holdings.payable"));
     assert!(is_routed(
         Topic::HoldingsPayable,
@@ -74,8 +76,8 @@ fn routed_setting_accepts_codes_and_all_but_only_for_holdings_and_personal() {
     assert!(is_routed(Topic::PersonalPriceTrace, "all"));
     assert!(!is_routed(Topic::HoldingsRevenue, "holdings.payable"));
     assert!(!is_routed(Topic::HoldingsPayable, ""));
-    assert!(!is_routed(Topic::MarketWeekly, "all"));
-    assert!(!is_routed(Topic::SystemCritical, "system.critical"));
+    assert!(is_routed(Topic::MarketWeekly, "all"));
+    assert!(is_routed(Topic::SystemCritical, "system.critical"));
 }
 
 /// 尚未切換：以預設家庭全體產生一次，送設定檔聊天室（Eddie 的內容不變）。
