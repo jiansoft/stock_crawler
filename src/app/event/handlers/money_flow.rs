@@ -17,7 +17,7 @@ use crate::domain::money_flow::{
     entity::MoneyFlowMemberWithPreviousDay, repository::MoneyFlowRepository,
 };
 use crate::domain::portfolio::view::HoldingView;
-use crate::infra::database::repository::{holding_view, money_flow::PgMoneyFlowRepository};
+use crate::infra::database::repository::money_flow::PgMoneyFlowRepository;
 
 use super::EventDispatcher;
 
@@ -34,10 +34,12 @@ impl EventDispatcher {
         notify::notify_holdings(alert::Topic::HoldingsMarketValue, &dedup_key, |view| {
             let rows = &rows;
             async move {
-                let members = holding_view::member_ids(&view).await?;
-                Ok(Self::build_money_change_message(&rows_in_view(
-                    rows, &view, &members,
-                )))
+                let names = crate::infra::database::repository::member::fetch_names(&view).await?;
+                let members: Vec<i64> = names.keys().copied().collect();
+                Ok(Self::build_money_change_message(
+                    &rows_in_view(rows, &view, &members),
+                    &names,
+                ))
             }
         })
         .await;
@@ -72,6 +74,7 @@ impl EventDispatcher {
     /// 組裝市值變化 Telegram 訊息。
     fn build_money_change_message(
         rows: &[crate::domain::money_flow::entity::MoneyFlowMemberWithPreviousDay],
+        names: &std::collections::BTreeMap<i64, String>,
     ) -> Option<String> {
         let date = rows.first()?.date;
         let mut msg = String::with_capacity(256);
@@ -100,7 +103,7 @@ impl EventDispatcher {
                 &mut msg,
                 "{}",
                 Self::format_money_change_line(
-                    &member_label(row.member_id),
+                    &member_label(names, row.member_id),
                     row.market_value,
                     row.previous_market_value,
                 )

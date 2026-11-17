@@ -41,7 +41,7 @@ fn test_build_money_change_message_includes_hugo() {
         },
     ];
 
-    let msg = EventDispatcher::build_money_change_message(&rows).expect("message should be built");
+    let msg = EventDispatcher::build_money_change_message(&rows, &crate::app::event::taiwan_stock::test_member_names()).expect("message should be built");
 
     assert!(msg.contains("合計"));
     assert!(msg.contains("Eddie"));

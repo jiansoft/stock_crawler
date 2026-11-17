@@ -97,10 +97,12 @@ impl EventDispatcher {
                 let holdings = PgPortfolioRepository::new()
                     .fetch_active_holdings_in(&view, Some(stock_symbols.clone()))
                     .await?;
+                let names = crate::infra::database::repository::member::fetch_names(&view).await?;
                 Ok(Self::build_holding_dividend_message(
                     date,
                     stocks_dividend_info,
                     &holdings,
+                    &names,
                 ))
             }
         })

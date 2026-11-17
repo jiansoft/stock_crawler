@@ -103,7 +103,13 @@ fn test_build_holding_dividend_message_groups_by_stock_and_member() {
         },
     ];
 
-    let msg = EventDispatcher::build_holding_dividend_message(today, &stocks, &holdings).unwrap();
+    let msg = EventDispatcher::build_holding_dividend_message(
+        today,
+        &stocks,
+        &holdings,
+        &crate::app::event::taiwan_stock::test_member_names(),
+    )
+    .unwrap();
 
     assert!(msg.contains("2330"));
     assert!(msg.contains("Eddie"));
@@ -293,7 +299,13 @@ fn holding_dividend_message_shows_annualized_yield_for_frequent_payers() {
         created_time: Local.with_ymd_and_hms(2026, 9, 1, 9, 0, 0).unwrap(),
     }];
 
-    let msg = EventDispatcher::build_holding_dividend_message(today, &stocks, &holdings).unwrap();
+    let msg = EventDispatcher::build_holding_dividend_message(
+        today,
+        &stocks,
+        &holdings,
+        &crate::app::event::taiwan_stock::test_member_names(),
+    )
+    .unwrap();
     assert!(msg.contains("現金股利:670元"), "{msg}");
     assert!(
         msg.contains("殖利率:0\\.67% 年化殖利率:8\\.04%（月配）\n"),

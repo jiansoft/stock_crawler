@@ -33,6 +33,7 @@ fn build_batch_dividend_message(
     today: NaiveDate,
     today_payouts: &[DividendPayout],
     month_payouts: &[DividendPayout],
+    names: &BTreeMap<i64, String>,
 ) -> Option<String> {
     if today_payouts.is_empty() {
         return None;
@@ -48,7 +49,7 @@ fn build_batch_dividend_message(
         let mut line = format!(
             "{} {} 持股:{}股 現金:{}元",
             item.name,
-            member_label(item.member_id),
+            member_label(names, item.member_id),
             format_share_quantity(item.shares),
             format_decimal_with_commas(item.cash_amount)
         );
@@ -75,7 +76,7 @@ fn build_batch_dividend_message(
         .map(|(member_id, cash)| {
             format!(
                 "{} {}元",
-                member_label(*member_id),
+                member_label(names, *member_id),
                 format_decimal_with_commas(*cash)
             )
         })
@@ -208,10 +209,12 @@ async fn payout_message(view: &HoldingView, today: NaiveDate) -> Result<Option<S
         .filter(|item| item.payable_date == today)
         .cloned()
         .collect();
+    let names = crate::infra::database::repository::member::fetch_names(view).await?;
     Ok(build_batch_dividend_message(
         today,
         &today_payouts,
         &month_payouts,
+        &names,
     ))
 }
 

@@ -63,7 +63,11 @@ fn build_message_lists_payouts_and_comparisons() {
         forecast: None,
     };
 
-    let message = build_message(&summary).expect("上月有入帳");
+    let message = build_message(
+        &summary,
+        &crate::app::event::taiwan_stock::test_member_names(),
+    )
+    .expect("上月有入帳");
 
     for line in [
         r"2026\-11 持股股利入帳彙總",
@@ -90,7 +94,13 @@ fn build_message_handles_empty_month_and_last_year_text() {
         year_to_date_cash: Decimal::ZERO,
         forecast: None,
     };
-    assert!(build_message(&summary).is_none());
+    assert!(
+        build_message(
+            &summary,
+            &crate::app::event::taiwan_stock::test_member_names()
+        )
+        .is_none()
+    );
     assert_eq!(last_year_text(dec!(100), Decimal::ZERO), "去年同月沒有入帳");
     assert_eq!(
         last_year_text(dec!(4000), dec!(5000)),
@@ -176,7 +186,11 @@ fn build_message_appends_snapshot_accuracy() {
         }),
     };
 
-    let message = build_message(&summary).expect("上月有入帳");
+    let message = build_message(
+        &summary,
+        &crate::app::event::taiwan_stock::test_member_names(),
+    )
+    .expect("上月有入帳");
 
     let line = r"12\-01 快照預估誤差：比對 2 筆，預估 6,400 元、實際 6,772\.4 元（\+372\.4 元，\+5\.5%）；預估有入帳但沒領到 1 筆（預估 500 元）";
     assert!(message.contains(line), "缺少 {line}：\n{message}");

@@ -21,6 +21,7 @@ impl EventDispatcher {
         today: chrono::NaiveDate,
         stocks_dividend_info: &[StockDividendInfo],
         holdings: &[StockOwnershipDetail],
+        names: &BTreeMap<i64, String>,
     ) -> Option<String> {
         let stock_info_map = stocks_dividend_info
             .iter()
@@ -120,7 +121,7 @@ impl EventDispatcher {
                 "    [{0}](https://tw\\.stock\\.yahoo\\.com/quote/{0}) {1} {2} 持股:{3}股 成本:{4}元\\({5}元\\) 現金股利:{6}元 股票股利:{7}元 現金殖利率:{8}% 殖利率:{9}%{10}",
                 stock_symbol,
                 text::escape_markdown_v2(name),
-                text::escape_markdown_v2(member_label(member_id)),
+                text::escape_markdown_v2(member_label(names, member_id)),
                 text::escape_markdown_v2(format_share_quantity(share_quantity)),
                 text::escape_markdown_v2(format_decimal_flexible_commas(holding_cost)),
                 text::escape_markdown_v2(format_decimal_flexible_commas(current_cost_per_share)),

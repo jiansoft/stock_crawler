@@ -114,7 +114,8 @@ async fn notify(repo: &impl PortfolioRepository, today: NaiveDate) -> Result<()>
                 summary.from,
                 summary.payouts.len()
             );
-            Ok(build_message(&summary))
+            let names = crate::infra::database::repository::member::fetch_names(&view).await?;
+            Ok(build_message(&summary, &names))
         },
     )
     .await;
@@ -165,7 +166,7 @@ async fn payouts_between(
 }
 
 /// 組出 MarkdownV2 訊息；上個月沒有入帳時回 `None`。
-fn build_message(summary: &MonthlySummary) -> Option<String> {
+fn build_message(summary: &MonthlySummary, names: &BTreeMap<i64, String>) -> Option<String> {
     if summary.payouts.is_empty() {
         return None;
     }
@@ -180,7 +181,7 @@ fn build_message(summary: &MonthlySummary) -> Option<String> {
         .map(|(member_id, cash)| {
             format!(
                 "{} {} 元",
-                member_label(*member_id),
+                member_label(names, *member_id),
                 format_decimal_with_commas(*cash)
             )
         })

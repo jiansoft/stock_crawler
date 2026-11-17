@@ -33,7 +33,13 @@ fn build_batch_dividend_message_lists_today_and_month_to_date() {
     let mut month = today_payouts.clone();
     month.push(payout(1, "0056", 11, dec!(2872.4)));
 
-    let msg = build_batch_dividend_message(today, &today_payouts, &month).expect("今天有入帳");
+    let msg = build_batch_dividend_message(
+        today,
+        &today_payouts,
+        &month,
+        &crate::app::event::taiwan_stock::test_member_names(),
+    )
+    .expect("今天有入帳");
 
     assert!(msg.starts_with(r"2026\-11\-20 持股股利入帳如下︰"), "{msg}");
     assert!(
@@ -56,7 +62,40 @@ fn build_batch_dividend_message_returns_none_without_payouts_today() {
     let today = NaiveDate::from_ymd_opt(2026, 11, 20).expect("合法日期");
     let month = [payout(1, "0056", 11, dec!(2872.4))];
 
-    assert!(build_batch_dividend_message(today, &[], &month).is_none());
+    assert!(
+        build_batch_dividend_message(
+            today,
+            &[],
+            &month,
+            &crate::app::event::taiwan_stock::test_member_names()
+        )
+        .is_none()
+    );
+}
+
+/// 第五、六位與改名後的名稱由查詢結果帶入，Markdown 只跳脫一次。
+#[test]
+fn payout_message_uses_loaded_names_and_escapes_them() {
+    let today = NaiveDate::from_ymd_opt(2026, 11, 20).expect("合法日期");
+    let payouts = [
+        payout(1, "2330", 20, dec!(10)),
+        payout(5, "2330", 20, dec!(20)),
+        payout(6, "2330", 20, dec!(30)),
+    ];
+    let names = BTreeMap::from([
+        (1, "改名_[甲]".to_owned()),
+        (5, "第五`乙`".to_owned()),
+        (6, "第六*丙*".to_owned()),
+    ]);
+    let message = build_batch_dividend_message(today, &payouts, &payouts, &names).expect("有入帳");
+    for name in [r"改名\_\[甲\]", r"第五\`乙\`", r"第六\*丙\*"] {
+        assert!(
+            message.contains(name),
+            "缺少跳脫後的會員名稱 {name}：{message}"
+        );
+    }
+    assert!(!message.contains("Eddie"));
+    assert_eq!(member_label(&names, 999), "Member 999");
 }
 
 #[test]

@@ -65,17 +65,10 @@ async fn fetch_visible_owners_from<'e>(
     executor: impl sqlx::PgExecutor<'e>,
     view: HoldingView,
 ) -> Result<Vec<(i64, String)>> {
-    sqlx::query_as(
-        r#"SELECT "Id", "Name" FROM "Member"
-           WHERE household_id = $1 AND deleted_at IS NULL
-             AND ($2::bigint IS NULL OR "Id" = $2)
-           ORDER BY "Id""#,
-    )
-    .bind(view.household_id())
-    .bind(view.member_id())
-    .fetch_all(executor)
-    .await
-    .context("讀取價格追蹤擁有者失敗")
+    Ok(super::member::fetch_names_from(executor, &view)
+        .await?
+        .into_iter()
+        .collect())
 }
 
 #[cfg(test)]

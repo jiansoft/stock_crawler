@@ -25,6 +25,8 @@ pub mod holding_fundamentals;
 pub mod holding_view;
 pub mod market_index;
 pub mod market_valuation;
+/// 通知可見範圍內的會員名稱。
+pub mod member;
 pub mod money_flow;
 // 通知項目目錄（notify_topic）的啟動寫入。
 /// 通知送達紀錄的原子佔位與逾時對帳。
